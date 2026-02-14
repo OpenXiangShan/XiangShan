@@ -220,6 +220,7 @@ object Bundles {
     val isFoldTo1_2   = Bool()
     val isFoldTo1_4   = Bool()
     val isFoldTo1_8   = Bool()
+    val isFoldTo1_16  = Bool()
   }
   object Fpu {
     def apply() = new Fpu

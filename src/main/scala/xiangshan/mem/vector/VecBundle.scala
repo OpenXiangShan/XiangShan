@@ -77,7 +77,7 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val alignedType         = UInt(alignTypeBits.W)
   val indexVlMaxInVd      = UInt(elemIdxBits.W)
 
-  val usLowBitsAddr       = UInt((log2Up(maxMemByteNum)).W)
+  val usLowBitsAddr       = UInt(log2Up(maxMemByteNum).W)
   val usAligned128        = Bool()
   val usMask              = UInt((MLENB * VecMemUnitStrideMaxFlowNum).W) // for unit-stride split
 }

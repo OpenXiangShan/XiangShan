@@ -254,20 +254,21 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   private val vlDiffRead: Option[(Vec[UInt], Vec[UInt])] =
     OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, (Wire(Vec(1, UInt(log2Up(VlPhyRegs).W))), Wire(Vec(1, UInt(VlData().dataWidth.W)))))
 
-  private val vecDiffNumPregs = 2 * (V0PhyRegs + vecSchdParams.numPregs)
+  private val vecDiffNumPregs = (VLEN / XLEN) * (V0PhyRegs + vecSchdParams.numPregs)
   private val vecDiffReadData: Option[Vec[UInt]] =
     OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, Wire(Vec(vecDiffNumPregs, UInt(64.W)))) // v0 = Cat(Vec(1), Vec(0))
   private val vlDiffReadData: Option[UInt] =
     OptionWrapper(backendParams.basicDebugEn && param.isVecSchd, Wire(UInt(VlData().dataWidth.W)))
 
-  vecDiffReadData.foreach(_ :=
-    v0DiffReadData
-    .get
-    .map(x => Seq(x(63, 0), x(127, 64))).flatten ++
-    vfDiffReadData
-    .get
-    .map(x => Seq(x(63, 0), x(127, 64))).flatten
-  )
+  vecDiffReadData.foreach { out =>
+    def splitTo64(data: UInt): Seq[UInt] = {
+      val pieces = VLEN / 64
+      (0 until pieces).map(i => data(64 * (i + 1) - 1, 64 * i))
+    }
+
+    out := v0DiffReadData.get.map(splitTo64).flatten ++
+      vfDiffReadData.get.map(splitTo64).flatten
+  }
   vlDiffReadData.foreach(_ := vlDiffRead
     .get._2(0)
   )

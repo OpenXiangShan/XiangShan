@@ -272,6 +272,8 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(3).lsrc(0) := 0.U
       csBundle(3).lsrc(1) := Mux(dest === 0.U, 0.U, dest + 1.U)
       csBundle(3).ldest := Mux(dest === 0.U, 0.U, dest + 1.U)
+      // When dest+1 wraps beyond IntLogicRegs (e.g. dest=31 → ldest=32), suppress int RF write
+      csBundle(3).rfWen := dest =/= 0.U && dest(4, 0) =/= 31.U
       csBundle(3).waitForward := false.B
       csBundle(3).blockBackward := true.B
     }
@@ -985,10 +987,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(9).ldest := (VECTOR_TMP_REG_LMUL + 9).U
           csBundle(9).vpu.fpu.isFoldTo1_8 := true.B
           csBundle(9).uopIdx := 9.U
-          csBundle(10).lsrc(0) := src1
+          csBundle(10).lsrc(0) := (VECTOR_TMP_REG_LMUL + 9).U
           csBundle(10).lsrc(1) := (VECTOR_TMP_REG_LMUL + 9).U
-          csBundle(10).ldest := dest
+          csBundle(10).ldest := (VECTOR_TMP_REG_LMUL + 10).U
+          csBundle(10).vpu.fpu.isFoldTo1_16 := true.B
           csBundle(10).uopIdx := 10.U
+          csBundle(11).lsrc(0) := src1
+          csBundle(11).lsrc(1) := (VECTOR_TMP_REG_LMUL + 10).U
+          csBundle(11).ldest := dest
+          csBundle(11).uopIdx := 11.U
         }
       }
       when(vlmul === VLmul.m4) {
@@ -1045,10 +1052,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(5).ldest := (VECTOR_TMP_REG_LMUL + 5).U
           csBundle(5).vpu.fpu.isFoldTo1_8 := true.B
           csBundle(5).uopIdx := 5.U
-          csBundle(6).lsrc(0) := src1
+          csBundle(6).lsrc(0) := (VECTOR_TMP_REG_LMUL + 5).U
           csBundle(6).lsrc(1) := (VECTOR_TMP_REG_LMUL + 5).U
-          csBundle(6).ldest := dest
+          csBundle(6).ldest := (VECTOR_TMP_REG_LMUL + 6).U
+          csBundle(6).vpu.fpu.isFoldTo1_16 := true.B
           csBundle(6).uopIdx := 6.U
+          csBundle(7).lsrc(0) := src1
+          csBundle(7).lsrc(1) := (VECTOR_TMP_REG_LMUL + 6).U
+          csBundle(7).ldest := dest
+          csBundle(7).uopIdx := 7.U
         }
       }
       when(vlmul === VLmul.m2) {
@@ -1099,10 +1111,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(3).ldest := (VECTOR_TMP_REG_LMUL + 3).U
           csBundle(3).vpu.fpu.isFoldTo1_8 := true.B
           csBundle(3).uopIdx := 3.U
-          csBundle(4).lsrc(0) := src1
+          csBundle(4).lsrc(0) := (VECTOR_TMP_REG_LMUL + 3).U
           csBundle(4).lsrc(1) := (VECTOR_TMP_REG_LMUL + 3).U
-          csBundle(4).ldest := dest
+          csBundle(4).ldest := (VECTOR_TMP_REG_LMUL + 4).U
+          csBundle(4).vpu.fpu.isFoldTo1_16 := true.B
           csBundle(4).uopIdx := 4.U
+          csBundle(5).lsrc(0) := src1
+          csBundle(5).lsrc(1) := (VECTOR_TMP_REG_LMUL + 4).U
+          csBundle(5).ldest := dest
+          csBundle(5).uopIdx := 5.U
         }
       }
       when(vlmul === VLmul.m1) {
@@ -1149,10 +1166,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(2).ldest := (VECTOR_TMP_REG_LMUL + 2).U
           csBundle(2).vpu.fpu.isFoldTo1_8 := true.B
           csBundle(2).uopIdx := 2.U
-          csBundle(3).lsrc(0) := src1
+          csBundle(3).lsrc(0) := (VECTOR_TMP_REG_LMUL + 2).U
           csBundle(3).lsrc(1) := (VECTOR_TMP_REG_LMUL + 2).U
-          csBundle(3).ldest := dest
+          csBundle(3).ldest := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(3).vpu.fpu.isFoldTo1_16 := true.B
           csBundle(3).uopIdx := 3.U
+          csBundle(4).lsrc(0) := src1
+          csBundle(4).lsrc(1) := (VECTOR_TMP_REG_LMUL + 3).U
+          csBundle(4).ldest := dest
+          csBundle(4).uopIdx := 4.U
         }
       }
       when(vlmul === VLmul.mf2) {
@@ -1178,10 +1200,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(1).ldest := (VECTOR_TMP_REG_LMUL + 1).U
           csBundle(1).vpu.fpu.isFoldTo1_8 := true.B
           csBundle(1).uopIdx := 1.U
-          csBundle(2).lsrc(0) := src1
+          csBundle(2).lsrc(0) := (VECTOR_TMP_REG_LMUL + 1).U
           csBundle(2).lsrc(1) := (VECTOR_TMP_REG_LMUL + 1).U
-          csBundle(2).ldest := dest
+          csBundle(2).ldest := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(2).vpu.fpu.isFoldTo1_16 := true.B
           csBundle(2).uopIdx := 2.U
+          csBundle(3).lsrc(0) := src1
+          csBundle(3).lsrc(1) := (VECTOR_TMP_REG_LMUL + 2).U
+          csBundle(3).ldest := dest
+          csBundle(3).uopIdx := 3.U
         }
       }
       when(vlmul === VLmul.mf4) {
@@ -1191,10 +1218,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           csBundle(0).ldest := (VECTOR_TMP_REG_LMUL + 0).U
           csBundle(0).vpu.fpu.isFoldTo1_8 := true.B
           csBundle(0).uopIdx := 0.U
-          csBundle(1).lsrc(0) := src1
+          csBundle(1).lsrc(0) := (VECTOR_TMP_REG_LMUL + 0).U
           csBundle(1).lsrc(1) := (VECTOR_TMP_REG_LMUL + 0).U
-          csBundle(1).ldest := dest
+          csBundle(1).ldest := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(1).vpu.fpu.isFoldTo1_16 := true.B
           csBundle(1).uopIdx := 1.U
+          csBundle(2).lsrc(0) := src1
+          csBundle(2).lsrc(1) := (VECTOR_TMP_REG_LMUL + 1).U
+          csBundle(2).ldest := dest
+          csBundle(2).uopIdx := 2.U
         }
       }
     }
@@ -1206,13 +1238,50 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       val isWiden = latchedInst.fuOpType === VfaluType.vfwredosum
       when(vlmul === VLmul.m8) {
         when(vsew === VSew.e64) {
+          val vlmax = 32
+          for (i <- 0 until vlmax) {
+            csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 4 == 0) src2 + (i/4).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 4 == 0) src2 + (i/4).U else if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).vpu.fpu.isFoldTo1_2 := (if (i % 4 == 0) false.B else true.B)
+            csBundle(i).uopIdx := i.U
+          }
+        }
+        when(vsew === VSew.e32) {
+          val vlmax = 64
+          for (i <- 0 until vlmax) {
+            csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 8 == 0) src2 + (i/8).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 8 == 0) src2 + (i/8).U else if (i == vlmax - 1) dest else if (i % 8 == 1) Mux(isWiden, src2 + (i/8).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).vpu.fpu.isFoldTo1_2 := isWiden && (if (i % 8 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_4 := !isWiden && (if (i % 8 == 0) false.B else true.B)
+            csBundle(i).uopIdx := i.U
+          }
+        }
+        when(vsew === VSew.e16) {
+          val vlmax = 128
+          for (i <- 0 until vlmax) {
+            csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 16 == 0) src2 + (i/16).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 16 == 0) src2 + (i/16).U else if (i == vlmax - 1) dest else if (i % 16 == 1) Mux(isWiden, src2 + (i/16).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 16 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_16 := !isWiden && (if (i % 16 == 0) false.B else true.B)
+            csBundle(i).uopIdx := i.U
+          }
+        }
+      }
+      when(vlmul === VLmul.m4) {
+        when(vsew === VSew.e64) {
           val vlmax = 16
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 2 == 0) src2 + (i/2).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 2 == 0) src2 + (i/2).U else if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 4 == 0) src2 + (i/4).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 4 == 0) src2 + (i/4).U else if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_2 := (if (i % 2 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_2 := (if (i % 4 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }
@@ -1220,11 +1289,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           val vlmax = 32
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 4 == 0) src2 + (i/4).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 4 == 0) src2 + (i/4).U else if (i == vlmax - 1) dest else if (i % 4 == 1) Mux(isWiden, src2 + (i/4).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 8 == 0) src2 + (i/8).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 8 == 0) src2 + (i/8).U else if (i == vlmax - 1) dest else if (i % 8 == 1) Mux(isWiden, src2 + (i/8).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_2 := isWiden && (if (i % 4 == 0) false.B else true.B)
-            csBundle(i).vpu.fpu.isFoldTo1_4 := !isWiden && (if (i % 4 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_2 := isWiden && (if (i % 8 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_4 := !isWiden && (if (i % 8 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }
@@ -1232,24 +1301,24 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           val vlmax = 64
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 8 == 0) src2 + (i/8).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 8 == 0) src2 + (i/8).U else if (i == vlmax - 1) dest else if (i % 8 == 1) Mux(isWiden, src2 + (i/8).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 16 == 0) src2 + (i/16).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 16 == 0) src2 + (i/16).U else if (i == vlmax - 1) dest else if (i % 16 == 1) Mux(isWiden, src2 + (i/16).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 8 == 0) false.B else true.B)
-            csBundle(i).vpu.fpu.isFoldTo1_8 := !isWiden && (if (i % 8 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 16 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_16 := !isWiden && (if (i % 16 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }
       }
-      when(vlmul === VLmul.m4) {
+      when(vlmul === VLmul.m2) {
         when(vsew === VSew.e64) {
           val vlmax = 8
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 2 == 0) src2 + (i/2).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 2 == 0) src2 + (i/2).U else if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 4 == 0) src2 + (i/4).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 4 == 0) src2 + (i/4).U else if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_2 := (if (i % 2 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_2 := (if (i % 4 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }
@@ -1257,11 +1326,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           val vlmax = 16
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 4 == 0) src2 + (i/4).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 4 == 0) src2 + (i/4).U else if (i == vlmax - 1) dest else if (i % 4 == 1) Mux(isWiden, src2 + (i/4).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 8 == 0) src2 + (i/8).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 8 == 0) src2 + (i/8).U else if (i == vlmax - 1) dest else if (i % 8 == 1) Mux(isWiden, src2 + (i/8).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_2 := isWiden && (if (i % 4 == 0) false.B else true.B)
-            csBundle(i).vpu.fpu.isFoldTo1_4 := !isWiden && (if (i % 4 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_2 := isWiden && (if (i % 8 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_4 := !isWiden && (if (i % 8 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }
@@ -1269,24 +1338,24 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           val vlmax = 32
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 8 == 0) src2 + (i/8).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 8 == 0) src2 + (i/8).U else if (i == vlmax - 1) dest else if (i % 8 == 1) Mux(isWiden, src2 + (i/8).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 16 == 0) src2 + (i/16).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 16 == 0) src2 + (i/16).U else if (i == vlmax - 1) dest else if (i % 16 == 1) Mux(isWiden, src2 + (i/16).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 8 == 0) false.B else true.B)
-            csBundle(i).vpu.fpu.isFoldTo1_8 := !isWiden && (if (i % 8 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 16 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_16 := !isWiden && (if (i % 16 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }
       }
-      when(vlmul === VLmul.m2) {
+      when(vlmul === VLmul.m1) {
         when(vsew === VSew.e64) {
           val vlmax = 4
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 2 == 0) src2 + (i/2).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 2 == 0) src2 + (i/2).U else if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 4 == 0) src2 + (i/4).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 4 == 0) src2 + (i/4).U else if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_2 := (if (i % 2 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_2 := (if (i % 4 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }
@@ -1294,11 +1363,11 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           val vlmax = 8
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 4 == 0) src2 + (i/4).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 4 == 0) src2 + (i/4).U else if (i == vlmax - 1) dest else if (i % 4 == 1) Mux(isWiden, src2 + (i/4).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 8 == 0) src2 + (i/8).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 8 == 0) src2 + (i/8).U else if (i == vlmax - 1) dest else if (i % 8 == 1) Mux(isWiden, src2 + (i/8).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_2 := isWiden && (if (i % 4 == 0) false.B else true.B)
-            csBundle(i).vpu.fpu.isFoldTo1_4 := !isWiden && (if (i % 4 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_2 := isWiden && (if (i % 8 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_4 := !isWiden && (if (i % 8 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }
@@ -1306,36 +1375,25 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           val vlmax = 16
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 8 == 0) src2 + (i/8).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 8 == 0) src2 + (i/8).U else if (i == vlmax - 1) dest else if (i % 8 == 1) Mux(isWiden, src2 + (i/8).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 16 == 0) src2 + (i/16).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 16 == 0) src2 + (i/16).U else if (i == vlmax - 1) dest else if (i % 16 == 1) Mux(isWiden, src2 + (i/16).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 8 == 0) false.B else true.B)
-            csBundle(i).vpu.fpu.isFoldTo1_8 := !isWiden && (if (i % 8 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 16 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_16 := !isWiden && (if (i % 16 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }
       }
-      when(vlmul === VLmul.m1) {
-        when(vsew === VSew.e64) {
-          val vlmax = 2
-          for (i <- 0 until vlmax) {
-            csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 2 == 0) src2 + (i/2).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 2 == 0) src2 + (i/2).U else if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_2 := (if (i % 2 == 0) false.B else true.B)
-            csBundle(i).uopIdx := i.U
-          }
-        }
+      when(vlmul === VLmul.mf2) {
         when(vsew === VSew.e32) {
           val vlmax = 4
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 4 == 0) src2 + (i/4).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 4 == 0) src2 + (i/4).U else if (i == vlmax - 1) dest else if (i % 4 == 1) Mux(isWiden, src2 + (i/4).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 8 == 0) src2 + (i/8).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 8 == 0) src2 + (i/8).U else if (i == vlmax - 1) dest else if (i % 8 == 1) Mux(isWiden, src2 + (i/8).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_2 := isWiden && (if (i % 4 == 0) false.B else true.B)
-            csBundle(i).vpu.fpu.isFoldTo1_4 := !isWiden && (if (i % 4 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_2 := isWiden && (if (i % 8 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_4 := !isWiden && (if (i % 8 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }
@@ -1343,51 +1401,25 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
           val vlmax = 8
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 8 == 0) src2 + (i/8).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 8 == 0) src2 + (i/8).U else if (i == vlmax - 1) dest else if (i % 8 == 1) Mux(isWiden, src2 + (i/8).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 16 == 0) src2 + (i/16).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 16 == 0) src2 + (i/16).U else if (i == vlmax - 1) dest else if (i % 16 == 1) Mux(isWiden, src2 + (i/16).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 8 == 0) false.B else true.B)
-            csBundle(i).vpu.fpu.isFoldTo1_8 := !isWiden && (if (i % 8 == 0) false.B else true.B)
-            csBundle(i).uopIdx := i.U
-          }
-        }
-      }
-      when(vlmul === VLmul.mf2) {
-        when(vsew === VSew.e32) {
-          val vlmax = 2
-          for (i <- 0 until vlmax) {
-            csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 4 == 0) src2 + (i/4).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 4 == 0) src2 + (i/4).U else if (i == vlmax - 1) dest else if (i % 4 == 1) Mux(isWiden, src2 + (i/4).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_2 := isWiden && (if (i % 4 == 0) false.B else true.B)
-            csBundle(i).vpu.fpu.isFoldTo1_4 := !isWiden && (if (i % 4 == 0) false.B else true.B)
-            csBundle(i).uopIdx := i.U
-          }
-        }
-        when(vsew === VSew.e16) {
-          val vlmax = 4
-          for (i <- 0 until vlmax) {
-            csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 8 == 0) src2 + (i/8).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 8 == 0) src2 + (i/8).U else if (i == vlmax - 1) dest else if (i % 8 == 1) Mux(isWiden, src2 + (i/8).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 8 == 0) false.B else true.B)
-            csBundle(i).vpu.fpu.isFoldTo1_8 := !isWiden && (if (i % 8 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 16 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_16 := !isWiden && (if (i % 16 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }
       }
       when(vlmul === VLmul.mf4) {
         when(vsew === VSew.e16) {
-          val vlmax = 2
+          val vlmax = 4
           for (i <- 0 until vlmax) {
             csBundle(i).lsrc(0) := (if (i == 0) src1 else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(1) := (if (i % 8 == 0) src2 + (i/8).U else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).lsrc(2) := (if (i % 8 == 0) src2 + (i/8).U else if (i == vlmax - 1) dest else if (i % 8 == 1) Mux(isWiden, src2 + (i/8).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(1) := (if (i % 16 == 0) src2 + (i/16).U else VECTOR_TMP_REG_LMUL.U)
+            csBundle(i).lsrc(2) := (if (i % 16 == 0) src2 + (i/16).U else if (i == vlmax - 1) dest else if (i % 16 == 1) Mux(isWiden, src2 + (i/16).U, VECTOR_TMP_REG_LMUL.U) else VECTOR_TMP_REG_LMUL.U)
             csBundle(i).ldest := (if (i == vlmax - 1) dest else VECTOR_TMP_REG_LMUL.U)
-            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 8 == 0) false.B else true.B)
-            csBundle(i).vpu.fpu.isFoldTo1_8 := !isWiden && (if (i % 8 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_4 := isWiden && (if (i % 16 == 0) false.B else true.B)
+            csBundle(i).vpu.fpu.isFoldTo1_16 := !isWiden && (if (i % 16 == 0) false.B else true.B)
             csBundle(i).uopIdx := i.U
           }
         }

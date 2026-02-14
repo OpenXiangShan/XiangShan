@@ -86,7 +86,7 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
   io.in.ready  := vfdivs.map(_.io.start_ready_o).reduce(_&_)
   io.out.valid := vfdivs.map(_.io.finish_valid_o).reduce(_&_)
   val outEew = outVecCtrl.vsew
-  val outVuopidx = outVecCtrl.vuopIdx(2, 0)
+  val outVuopidx = outVecCtrl.vuopIdx
   val vlMax = ((VLEN / 8).U >> outEew).asUInt
   val lmulAbs = Mux(outVecCtrl.vlmul(2), (~outVecCtrl.vlmul(1, 0)).asUInt + 1.U, outVecCtrl.vlmul(1, 0))
   val outVlFix = Mux(outVecCtrl.fpu.isFpToVecInst, 1.U, outVl)
@@ -94,7 +94,8 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
   vlMaxAllUop := Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax << lmulAbs).asUInt
   val vlMaxThisUop = Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax).asUInt
   val vlSetThisUop = Mux(outVlFix > outVuopidx * vlMaxThisUop, outVlFix - outVuopidx * vlMaxThisUop, 0.U)
-  val vlThisUop = Wire(UInt(4.W))
+  private val vlThisUopWidth = log2Ceil(4 * numVecModule + 1)
+  val vlThisUop = Wire(UInt(vlThisUopWidth.W))
   vlThisUop := Mux(vlSetThisUop < vlMaxThisUop, vlSetThisUop, vlMaxThisUop)
   val vlMaskRShift = Wire(UInt((4 * numVecModule).W))
   vlMaskRShift := Fill(4 * numVecModule, 1.U(1.W)) >> ((4 * numVecModule).U - vlThisUop)
@@ -103,7 +104,7 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
   val maskToMgu = Mux(needNoMask, allMaskTrue, outSrcMask)
   val allFFlagsEn = Wire(Vec(4 * numVecModule, Bool()))
   val outSrcMaskRShift = Wire(UInt((4 * numVecModule).W))
-  outSrcMaskRShift := (maskToMgu >> (outVecCtrl.vuopIdx(2, 0) * vlMax))(4 * numVecModule - 1, 0)
+  outSrcMaskRShift := (maskToMgu >> (outVecCtrl.vuopIdx * vlMax))(4 * numVecModule - 1, 0)
   val f16FFlagsEn = outSrcMaskRShift
   val f32FFlagsEn = Wire(Vec(numVecModule, UInt(4.W)))
   val f64FFlagsEn = Wire(Vec(numVecModule, UInt(4.W)))

@@ -295,7 +295,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val rdPtr = rdataPtrExt(0).value
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtrExt(0))
-  val allowEnqueue = validCount <= (StoreQueueSize - LSQStEnqWidth).U
 
   val deqMask = UIntToMask(deqPtr, StoreQueueSize)
   val enqMask = UIntToMask(enqPtr, StoreQueueSize)
@@ -371,11 +370,13 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     * Currently, StoreQueue only allows enqueue when #emptyEntries > EnqWidth
     * Dynamic enq based on numLsElem number
     */
-  io.enq.canAccept := allowEnqueue
   val canEnqueue = io.enq.req.map(_.valid)
   val enqCancel = io.enq.req.map(_.bits.robIdx.needFlush(io.brqRedirect))
   val vStoreFlow = io.enq.req.map(_.bits.numLsElem.asTypeOf(UInt(elemIdxBits.W)))
   val validVStoreFlow = vStoreFlow.zipWithIndex.map{case (vStoreFlowNumItem, index) => Mux(!RegNext(io.brqRedirect.valid) && canEnqueue(index), vStoreFlowNumItem, 0.U)}
+  val enqNumber = validVStoreFlow.reduce(_ + _)
+  val allowEnqueue = validCount + enqNumber <= StoreQueueSize.U
+  io.enq.canAccept := allowEnqueue
   val validVStoreOffset = vStoreFlow.zip(io.enq.needAlloc).map{case (flow, needAllocItem) => Mux(needAllocItem, flow, 0.U)}
   val validVStoreOffsetRShift = 0.U +: validVStoreOffset.take(vStoreFlow.length - 1)
 
@@ -422,7 +423,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until io.enq.req.length) {
     val sqIdx = enqPtrExt(0) + validVStoreOffsetRShift.take(i + 1).reduce(_ + _)
     val index = io.enq.req(i).bits.sqIdx
-    XSError(canEnqueue(i) && !enqCancel(i) && (!io.enq.canAccept || !io.enq.lqCanAccept), s"must accept $i\n")
+    XSError(canEnqueue(i) && !enqCancel(i) && !io.enq.canAccept, s"must accept $i\n")
     XSError(canEnqueue(i) && !enqCancel(i) && index.value =/= sqIdx.value, s"must be the same entry $i\n")
     io.enq.resp(i) := sqIdx
   }
@@ -612,7 +613,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         0.U,
         Mux(isVec,
           io.storeDataIn(i).bits.data,
-          genVWdata(io.storeDataIn(i).bits.data, LSUOpType.size(io.storeDataIn(i).bits.fuOpType)))
+          genVWdata(io.storeDataIn(i).bits.data, LSUOpType.size(io.storeDataIn(i).bits.fuOpType), maxMemByteNum))
       )
       dataModule.io.data.wen(i) := true.B
 
@@ -1490,8 +1491,6 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   val lastCycleCancelCount = PopCount(RegEnable(needCancel, io.brqRedirect.valid)) // 1 cycle after redirect
   val lastCycleRedirect = RegNext(io.brqRedirect.valid) // 1 cycle after redirect
-  val enqNumber = validVStoreFlow.reduce(_ + _)
-
   val lastlastCycleRedirect=RegNext(lastCycleRedirect)// 2 cycle after redirect
   val redirectCancelCount = RegEnable(lastCycleCancelCount + lastEnqCancel, 0.U, lastCycleRedirect) // 2 cycle after redirect
 

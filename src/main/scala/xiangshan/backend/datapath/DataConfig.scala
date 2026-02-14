@@ -5,7 +5,7 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 
 object DataConfig {
-  private var vlen: Int = 128
+  private var vlen: Int = 256
   private var vlWidth: Int = log2Up(vlen) + 1
 
   def setVLen(newVLen: Int): Unit = {

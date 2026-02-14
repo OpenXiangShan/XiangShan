@@ -89,8 +89,12 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   //   Cat(vs2(95,64),  vs2(31,0)),
   //   Cat(vs2(127,96), vs2(63,32)),
   // )
-  private val vs2GroupedVec: Vec[UInt] = VecInit(vs2Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
-  private val vs1GroupedVec: Vec[UInt] = VecInit(vs1Split.io.outVec32b.zipWithIndex.groupBy(_._2 % 2).map(x => x._1 -> x._2.map(_._1)).values.map(x => Cat(x.reverse)).toSeq)
+  private val vs2GroupedVec: Vec[UInt] = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
+  private val vs1GroupedVec: Vec[UInt] = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
+  for (i <- 0 until numVecModule) {
+    vs2GroupedVec(i) := Cat(vs2Split.io.outVec32b(i + numVecModule), vs2Split.io.outVec32b(i))
+    vs1GroupedVec(i) := Cat(vs1Split.io.outVec32b(i + numVecModule), vs1Split.io.outVec32b(i))
+  }
 
   private val vs2VecUsed: Vec[UInt] = Mux(widen, vs2GroupedVec, vs2Split.io.outVec64b)
   private val vs1VecUsed: Vec[UInt] = Mux(widen, vs1GroupedVec, vs1Split.io.outVec64b)

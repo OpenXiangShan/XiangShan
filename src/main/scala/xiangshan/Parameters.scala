@@ -52,7 +52,7 @@ case class XSCoreParameters
   HasPrefetch: Boolean = false,
   HartId: Int = 0,
   XLEN: Int = 64,
-  VLEN: Int = 128,
+  VLEN: Int = 256,
   MLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
@@ -85,7 +85,7 @@ case class XSCoreParameters
   CommitWidth: Int = 8,
   RobCommitWidth: Int = 8,
   RabCommitWidth: Int = 8,
-  MaxUopSize: Int = 65,
+  MaxUopSize: Int = 129,
   EnableRenameSnapshot: Boolean = true,
   RenameSnapshotNum: Int = 4,
   // TODO: New frontend parameters system below. Replace the old parameters above during development.
@@ -160,8 +160,8 @@ case class XSCoreParameters
   VecMemInstWbWidth: Int = 1,
   VecMemDispatchWidth: Int = 1,
   VecMemDispatchMaxNumber: Int = 16,
-  VecMemUnitStrideMaxFlowNum: Int = ((VLEN + MLEN - 1) / MLEN) + 1,
-  VecMemLSQEnqIteratorNumberSeq: Seq[Int] = Seq(16, 16, 16, 16, 16, 16),
+  VecMemUnitStrideMaxFlowNum: Int = 3,
+  VecMemLSQEnqIteratorNumberSeq: Seq[Int] = Seq(32, 32, 32, 32, 32, 32),
   StoreBufferSize: Int = 16,
   StoreBufferThreshold: Int = 7,
   EnsbufferWidth: Int = 2,
@@ -305,7 +305,7 @@ case class XSCoreParameters
     "zbb", "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
     "zicbom", "zicbop", "zicboz", "ziccamoa", "ziccif", "zicclsm", "ziccrse", "zicntr", "zicond",
     "zicsr", "zifencei", "zihintntl", "zihintpause", "zihpm", "zimop", "zkn", "zknd", "zkne", "zknh",
-    "zksed", "zksh", "zkt", "zvbb", "zvfh", "zvfhmin", "zvkt", "zvl128b", "zvl32b", "zvl64b"
+    "zksed", "zksh", "zkt", "zvbb", "zvfh", "zvfhmin", "zvkt", "zvl128b", "zvl256b", "zvl32b", "zvl64b"
   )
 
   def vlWidth = log2Up(VLEN) + 1

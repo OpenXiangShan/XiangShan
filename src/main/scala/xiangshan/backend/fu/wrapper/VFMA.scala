@@ -92,7 +92,7 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val outFuOpType = outCtrl.fuOpType
   val outWiden = outCtrl.fuOpType(4)
   val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
-  val outVuopidx = outVecCtrl.vuopIdx(2, 0)
+  val outVuopidx = outVecCtrl.vuopIdx
   val vlMax = ((VLEN / 8).U >> outEew).asUInt
   val outVlmulFix = Mux(outWiden, outVecCtrl.vlmul + 1.U, outVecCtrl.vlmul)
   val lmulAbs = Mux(outVlmulFix(2), (~outVlmulFix(1, 0)).asUInt + 1.U, outVlmulFix(1, 0))
@@ -101,7 +101,8 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   vlMaxAllUop := Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax << lmulAbs).asUInt
   val vlMaxThisUop = Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax).asUInt
   val vlSetThisUop = Mux(outVlFix > outVuopidx * vlMaxThisUop, outVlFix - outVuopidx * vlMaxThisUop, 0.U)
-  val vlThisUop = Wire(UInt(4.W))
+  private val vlThisUopWidth = log2Ceil(4 * numVecModule + 1)
+  val vlThisUop = Wire(UInt(vlThisUopWidth.W))
   vlThisUop := Mux(vlSetThisUop < vlMaxThisUop, vlSetThisUop, vlMaxThisUop)
   val vlMaskRShift = Wire(UInt((4 * numVecModule).W))
   vlMaskRShift := Fill(4 * numVecModule, 1.U(1.W)) >> ((4 * numVecModule).U - vlThisUop)
@@ -110,7 +111,7 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val maskToMgu = Mux(needNoMask, allMaskTrue, outSrcMask)
   val allFFlagsEn = Wire(Vec(4 * numVecModule, Bool()))
   val outSrcMaskRShift = Wire(UInt((4 * numVecModule).W))
-  outSrcMaskRShift := (maskToMgu >> (outVecCtrl.vuopIdx(2, 0) * vlMax))(4 * numVecModule - 1, 0)
+  outSrcMaskRShift := (maskToMgu >> (outVecCtrl.vuopIdx * vlMax))(4 * numVecModule - 1, 0)
   val f16FFlagsEn = outSrcMaskRShift
   val f32FFlagsEn = Wire(Vec(numVecModule, UInt(4.W)))
   val f64FFlagsEn = Wire(Vec(numVecModule, UInt(4.W)))

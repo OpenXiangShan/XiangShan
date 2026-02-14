@@ -90,7 +90,6 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val lastLastCycleRedirect = RegNext(lastCycleRedirect)
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtr)
-  val allowEnqueue = validCount <= (VirtualLoadQueueSize - LSQLdEnqWidth).U
   val canEnqueue = io.enq.req.map(_.valid)
   val vLoadFlow = io.enq.req.map(_.bits.numLsElem.asTypeOf(UInt(elemIdxBits.W)))
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
@@ -113,6 +112,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val validVLoadOffsetRShift = 0.U +: validVLoadOffset.take(validVLoadFlow.length - 1)
 
   val enqNumber = validVLoadFlow.reduce(_ + _)
+  val allowEnqueue = validCount + enqNumber <= VirtualLoadQueueSize.U
   val enqPtrExtNextVec = Wire(Vec(io.enq.req.length, new LqPtr))
   val enqPtrExtNext = Wire(Vec(io.enq.req.length, new LqPtr))
   when (lastLastCycleRedirect.valid) {
@@ -191,7 +191,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   for (i <- 0 until io.enq.req.length) {
     val lqIdx = enqPtrExt(0) + validVLoadOffsetRShift.take(i + 1).reduce(_ + _)
     val index = io.enq.req(i).bits.lqIdx
-    XSError(canEnqueue(i) && !enqCancel(i) && (!io.enq.canAccept || !io.enq.sqCanAccept), s"must accept $i\n")
+    XSError(canEnqueue(i) && !enqCancel(i) && !io.enq.canAccept, s"must accept $i\n")
     XSError(canEnqueue(i) && !enqCancel(i) && index.value =/= lqIdx.value, s"must be the same entry $i\n")
     io.enq.resp(i) := lqIdx
   }

@@ -323,6 +323,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     x.io.fromVlWb := 0.U.asTypeOf(x.io.fromVlWb)
   }
   intRegion.io.fromIntWb := intRegion.io.toIntPreg
+  fpRegion.io.fromFpWb := fpRegion.io.toFpPreg
   vecRegion.io.fromVfWb := vecRegion.io.toVfPreg
   vecRegion.io.fromV0Wb := vecRegion.io.toV0Preg
   vecRegion.io.fromVlWb := vecRegion.io.toVlPreg

@@ -57,14 +57,20 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val vs1WidenVec: Vec[UInt] = Wire(Vec(numVecModule, UInt(XLEN.W)))
 
   // mask
-  private val maskVec = Wire(Vec(2, UInt(8.W)))
+  private val maskVec = Wire(Vec(numVecModule, UInt(8.W)))
   maskVec := maskVecGen.asTypeOf(maskVec)
 
-  for (i <- 0 until 2) {
+  for (i <- 0 until numVecModule) {
     vs2Vec(i) := vs2Split.io.outVec64b(i)
     vs1Vec(i) := vs1Split.io.outVec64b(i)
-    vs2WidenVec(i) := Mux(vuopIdx(0), vs2Split.io.outVec32b(i + 2), vs2Split.io.outVec32b(i))
-    vs1WidenVec(i) := Mux(vuopIdx(0), vs1Split.io.outVec32b(i + 2), vs1Split.io.outVec32b(i))
+    when (isVf4) {
+      vs2WidenVec(i) := vs2Split.io.outVec16b(Cat(vuopIdx(1, 0), i.U(log2Ceil(numVecModule).W)))
+    }.elsewhen (isVf8) {
+      vs2WidenVec(i) := vs2Split.io.outVec8b(Cat(vuopIdx(2, 0), i.U(log2Ceil(numVecModule).W)))
+    }.otherwise {
+      vs2WidenVec(i) := Mux(vuopIdx(0), vs2Split.io.outVec32b(i + numVecModule), vs2Split.io.outVec32b(i))
+    }
+    vs1WidenVec(i) := Mux(vuopIdx(0), vs1Split.io.outVec32b(i + numVecModule), vs1Split.io.outVec32b(i))
   }
 
   vIAluFixPoints.zipWithIndex.foreach {
@@ -170,7 +176,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val outOpMask = outVecCtrl.isOpMask
 
   private val outVxsat = Mux1H(Seq(
-    (outNarrow & outVuopIdx0) -> Cat(Cat(vIAluFixPoints.map(_.io.out.vxsat(3, 0)).reverse), 0.U(8.W)),
+    (outNarrow & outVuopIdx0) -> Cat(Cat(vIAluFixPoints.map(_.io.out.vxsat(3, 0)).reverse), 0.U((numBytes / 2).W)),
     (outNarrow & !outVuopIdx0) -> Cat(vIAluFixPoints.map(_.io.out.vxsat(3, 0)).reverse),
     !outNarrow -> Cat(vIAluFixPoints.map(_.io.out.vxsat).reverse),
   ))

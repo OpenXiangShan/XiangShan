@@ -26,7 +26,7 @@ import xiangshan.backend.decode.isa.CSRs
 import scala.collection.immutable.SeqMap
 
 object CSRConfig {
-  private var vlen: Int = 128
+  private var vlen: Int = 256
   private var vlWidth: Int = log2Up(vlen) + 1
 
   def setVLen(newVLen: Int): Unit = {

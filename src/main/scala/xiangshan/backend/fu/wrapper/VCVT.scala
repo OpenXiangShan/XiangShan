@@ -89,7 +89,8 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   /**
    * [[vfcvt]]'s in connection
    */
-  vfcvt.uopIdx := vuopIdx(0)
+  private val uopIdxWidth = log2Ceil(numVecModule)
+  vfcvt.uopIdx := vuopIdx(uopIdxWidth - 1, 0)
   vfcvt.src := vs2Vec
   vfcvt.opType := opcode(7,0)
   vfcvt.sew := sew
@@ -118,22 +119,24 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
     )
   )
   val eNum1HEffect = Mux(isWidenCvt || isNarrowCvt, eNum1H << 1, eNum1H)
-  val eNumMax1H = Mux(lmul.head(1).asBool, eNum1HEffect >> ((~lmul.tail(1)).asUInt +1.U), eNum1HEffect << lmul.tail(1)).asUInt(6, 0)
-  val eNumMax = Mux1H(eNumMax1H, Seq(1,2,4,8,16,32,64).map(i => i.U)) //only for cvt intr, don't exist 128 in cvt
+  val eNumBase = Mux1H(eNum1HEffect, Seq(1, 2, 4, 8).map(_.U))
+  private val eNumScale = (numVecModule / 2).U
+  val eNumMax = Mux(lmul.head(1).asBool, eNumBase * eNumScale >> ((~lmul.tail(1)).asUInt + 1.U), eNumBase * eNumScale << lmul.tail(1)).asUInt
   val vlForFflags = Mux(vecCtrl.fpu.isFpToVecInst, 1.U, vl)
   val eNumEffectIdx = Mux(vlForFflags > eNumMax, eNumMax, vlForFflags)
 
-  val eNum = Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num =>num.U))
+  val eNum = Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num => (num.U * eNumScale)))
   val eStart = vuopIdx * eNum
   val maskForFflags = Mux(vecCtrl.fpu.isFpToVecInst, allMaskTrue, srcMask)
   val maskPart = maskForFflags >> eStart
-  val mask =  Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num => maskPart(num-1, 0)))
   val fflagsEn = Wire(Vec(4 * numVecModule, Bool()))
-
-  fflagsEn := mask.asBools.zipWithIndex.map{case(mask, i) => mask & (eNumEffectIdx > eStart + i.U) }
+  for (i <- 0 until 4 * numVecModule) {
+    val maskBit = if (i < maskPart.getWidth) maskPart(i) else false.B
+    fflagsEn(i) := maskBit && (eNumEffectIdx > (eStart + i.U))
+  }
 
   val fflagsEnCycle2 = RegEnable(RegEnable(fflagsEn, fire), fireReg)
-  val fflagsAll = Wire(Vec(8, UInt(5.W)))
+  val fflagsAll = Wire(Vec(4 * numVecModule, UInt(5.W)))
   fflagsAll := vfcvtFflags.asTypeOf(fflagsAll)
   val fflags = fflagsEnCycle2.zip(fflagsAll).map{case(en, fflag) => Mux(en, fflag, 0.U(5.W))}.reduce(_ | _)
   io.out.bits.res.fflags.get := Mux(outIsMvInst, 0.U, fflags)
@@ -181,7 +184,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
 class VectorCvtTopIO(vlen: Int, xlen: Int) extends Bundle{
   val fire = Input(Bool())
-  val uopIdx = Input(Bool())
+  val uopIdx = Input(UInt(log2Ceil(vlen / xlen).W))
   val src = Input(Vec(vlen / xlen, UInt(xlen.W)))
   val opType = Input(UInt(8.W))
   val sew = Input(UInt(2.W))
@@ -206,14 +209,25 @@ class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
   )
   val fireReg = GatedValidRegNext(fire)
 
-  val in0 = Mux(isWiden && !isFpToVecInst,
-    Mux(uopIdx, src(1).tail(32), src(0).tail(32)),
-    src(0)
+  private val numVecModule = vlen / xlen
+  require(numVecModule % 2 == 0, "VectorCvtTop expects vlen/xlen to be even")
+  private val groupIdxRaw = Mux(isWiden && !isFpToVecInst, uopIdx >> 1, uopIdx)
+  private val pairIdxWidth = if (numVecModule > 2) log2Ceil(numVecModule / 2) else 1
+  private val pairIdx = if (numVecModule > 2) groupIdxRaw(pairIdxWidth - 1, 0) else 0.U(1.W)
+  private val isVecWiden = isWiden && !isFpToVecInst
+  private val widenSel = Mux(isVecWiden, uopIdx(0), false.B)
+  private val baseIdx = pairIdx << 1
+  private val src0 = src(baseIdx)
+  private val src1 = src(baseIdx + 1.U)
+
+  val in0 = Mux(isVecWiden,
+    Mux(widenSel, src1.tail(32), src0.tail(32)),
+    src0
   )
 
   val in1 = Mux(isWiden,
-    Mux(uopIdx, src(1).head(32), src(0).head(32)),
-    src(1)
+    Mux(widenSel, src1.head(32), src0.head(32)),
+    src1
   )
 
   val vectorCvt0 = Module(new VectorCvt(xlen))
@@ -238,18 +252,80 @@ class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
 
   val isNarrowCycle2 = RegEnable(RegEnable(isNarrow, fire), fireReg)
   val outputWidth1HCycle2 = RegEnable(RegEnable(outputWidth1H, fire), fireReg)
+  val useFullCycle2 = RegEnable(RegEnable(!isWiden && !isNarrow, fire), fireReg)
+  val isVecWidenCycle2 = RegEnable(RegEnable(isVecWiden, fire), fireReg)
 
   //cycle2
-  io.result := Mux(isNarrowCycle2,
+  private val resultPair = Mux(isNarrowCycle2,
     vectorCvt1.io.result.tail(32) ## vectorCvt0.io.result.tail(32),
     vectorCvt1.io.result ## vectorCvt0.io.result)
 
-  io.fflags := Mux1H(outputWidth1HCycle2, Seq(
+  private val resultPairVec = resultPair.asTypeOf(Vec(2, UInt(xlen.W)))
+  private val resultVec = Wire(Vec(numVecModule, UInt(xlen.W)))
+  resultVec.foreach(_ := 0.U)
+  resultVec(baseIdx) := resultPairVec(0)
+  resultVec(baseIdx + 1.U) := resultPairVec(1)
+  val vectorCvtsFull = Seq.fill(numVecModule)(Module(new VectorCvt(xlen)))
+  // For widening: select source half based on uopIdx(0), distribute 32-bit chunks
+  private val widenSrcHalf = Wire(Vec(numVecModule / 2, UInt(xlen.W)))
+  for (i <- 0 until numVecModule / 2) {
+    widenSrcHalf(i) := Mux(uopIdx(0), src(numVecModule / 2 + i), src(i))
+  }
+  vectorCvtsFull.zipWithIndex.foreach { case (mod, i) =>
+    mod.fire := fire
+    val widenChunk = if (i % 2 == 0) widenSrcHalf(i / 2)(31, 0) else widenSrcHalf(i / 2)(63, 32)
+    mod.src := Mux(isVecWiden, Cat(0.U(32.W), widenChunk), src(i))
+    mod.opType := opType
+    mod.sew := sew
+    mod.rm := rm
+    mod.isFpToVecInst := isFpToVecInst
+    mod.isFround := 0.U
+    mod.isFcvtmod := false.B
+  }
+  private val resultVecFull = VecInit(vectorCvtsFull.map(_.io.result))
+  // For narrow ops at VLEN>128, all converters must contribute.
+  // Each converter's narrow result is in its lower 32 bits; concatenate them.
+  private val resultNarrowFull = Cat(vectorCvtsFull.map(_.io.result(xlen / 2 - 1, 0)).reverse)
+  io.result := Mux(isNarrowCycle2, resultNarrowFull,
+               Mux(useFullCycle2 || isVecWidenCycle2, resultVecFull.asUInt, resultVec.asUInt))
+
+  private val fflagsPair = Mux1H(outputWidth1HCycle2, Seq(
     vectorCvt1.io.fflags ## vectorCvt0.io.fflags,
     Mux(isNarrowCycle2, vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10), vectorCvt1.io.fflags ## vectorCvt0.io.fflags),
     Mux(isNarrowCycle2, vectorCvt1.io.fflags(4,0) ## vectorCvt0.io.fflags(4,0), vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10)),
     vectorCvt1.io.fflags(4,0) ## vectorCvt0.io.fflags(4,0)
   ))
+  private val fflagsPairWidth = Mux1H(outputWidth1HCycle2, Seq(
+    (xlen / 16 * 5 * 2).U, // 8 or 16
+    (xlen / 16 * 5 * 2).U, // 8 or 16
+    (xlen / 32 * 5 * 2).U, // 32
+    (xlen / 64 * 5 * 2).U  // 64
+  ))
+  private val fflagsAll = Wire(UInt((vlen / 16 * 5).W))
+  fflagsAll := (fflagsPair.asUInt << (pairIdx * fflagsPairWidth)).asUInt
+  private val fullPairNum = numVecModule / 2
+  private val fflagsPairsFull = Wire(Vec(fullPairNum, UInt((xlen / 16 * 5 * 2).W)))
+  for (p <- 0 until fullPairNum) {
+    val lo = vectorCvtsFull(2 * p).io.fflags
+    val hi = vectorCvtsFull(2 * p + 1).io.fflags
+    fflagsPairsFull(p) := Mux1H(outputWidth1HCycle2, Seq(
+      hi ## lo,
+      Mux(isNarrowCycle2, hi.tail(10) ## lo.tail(10), hi ## lo),
+      Mux(isNarrowCycle2, hi(4,0) ## lo(4,0), hi.tail(10) ## lo.tail(10)),
+      hi(4,0) ## lo(4,0)
+    ))
+  }
+  private val fflagsFull = fflagsPairsFull.zipWithIndex.map { case (pair, i) =>
+    // For narrow, each pair produces half the fflags (narrowed elements),
+    // so the shift must use the actual narrow fflags width, not the full width.
+    val narrowFflagsPairWidth = Mux1H(outputWidth1HCycle2, Seq(
+      (xlen / 8 * 5).U,  // 8-bit output: 4 elements per converter, 8 per pair
+      (xlen / 16 * 5).U, // 16-bit output: 2 elements per converter, 4 per pair
+      (xlen / 32 * 5).U, // 32-bit output: 1 element per converter, 2 per pair
+      (xlen / 64 * 5).U  // 64-bit output
+    ))
+    val shiftWidth = Mux(isNarrowCycle2, narrowFflagsPairWidth, fflagsPairWidth)
+    (pair.asUInt << (i.U * shiftWidth)).asUInt
+  }.reduce(_ | _)
+  io.fflags := Mux(useFullCycle2 || isNarrowCycle2 || isVecWidenCycle2, fflagsFull, fflagsAll)
 }
-
-

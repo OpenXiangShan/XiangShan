@@ -58,13 +58,13 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val isFirstGroupUop = vuopIdx === 0.U ||
     (vuopIdx === 1.U && (vlmul === VLmul.m4 || vlmul === VLmul.m8)) ||
     ((vuopIdx === 2.U || vuopIdx === 3.U) && vlmul === VLmul.m8)
-  val maskRshiftWidthForReduction = Wire(UInt(6.W))
+  val maskRshiftWidthForReduction = Wire(UInt(log2Ceil(VLEN + 1).W))
   maskRshiftWidthForReduction := Mux(fuOpType === VfaluType.vfredosum || fuOpType === VfaluType.vfwredosum,
     vuopIdx,
     Mux1H(Seq(
-      (vsew === VSew.e16) -> (vuopIdx(1, 0) << 4),
-      (vsew === VSew.e32) -> (vuopIdx(1, 0) << 3),
-      (vsew === VSew.e64) -> (vuopIdx(1, 0) << 2),
+      (vsew === VSew.e16) -> (vuopIdx << 4),
+      (vsew === VSew.e32) -> (vuopIdx << 3),
+      (vsew === VSew.e64) -> (vuopIdx << 2),
     ))
   )
   val vlMaskForReduction = (~(Fill(VLEN, 1.U) << vl)).asUInt
@@ -80,63 +80,91 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     val f64Mask = inmask(f64MaskNum - 1, 0)
     val f32Mask = inmask(f32MaskNum - 1, 0)
     val f16Mask = inmask(f16MaskNum - 1, 0)
+
+    // Number of elements in the lower half (VLEN/2) for each SEW
+    val halfElems64 = VLEN / 128  // f64 elements in VLEN/2 bits
+    val halfElems32 = VLEN / 64   // f32 elements in VLEN/2 bits
+    val halfElems16 = VLEN / 32   // f16 elements in VLEN/2 bits
+
+    // fold_1/2 uses adders 0..(VLEN/128-1); deeper folds use adder 0 only
+    val fold12Active = i < VLEN / 128
+    val fold14Active = i == 0
+    val fold18Active = i == 0
+    val fold116Active = i == 0
+
     // vs2 reordered, so mask use high bits
-    val f64FirstFoldMaskUnorder = Mux1H(
+    // Per-adder first-fold masks for fold_1/2: each adder i handles a different element slice
+    val f64FirstFoldMaskUnorder = if (fold12Active) Mux1H(
       Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> Cat(0.U(3.W), f64Mask(0), 0.U(3.W), f64Mask(1)),
+        vecCtrl.fpu.isFoldTo1_2 -> Cat(0.U(3.W), f64Mask(i), 0.U(3.W), f64Mask(halfElems64 + i)),
       )
-    )
-    val f64FirstFoldMaskOrder = Mux1H(
+    ) else 0.U(8.W)
+    val f64FirstFoldMaskOrder = if (fold12Active) Mux1H(
       Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> Cat(0.U(3.W), f64Mask(1), 0.U(3.W), f64Mask(0))
+        vecCtrl.fpu.isFoldTo1_2 -> Cat(0.U(3.W), f64Mask(halfElems64 + i), 0.U(3.W), f64Mask(i))
       )
-    )
-    val f32FirstFoldMaskUnorder = Mux1H(
-      Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> Cat(0.U(2.W), f32Mask(1), f32Mask(0), 0.U(2.W), f32Mask(3), f32Mask(2)),
+    ) else 0.U(8.W)
+    val f32FirstFoldMaskUnorder = if (fold12Active) {
+      val fold12 = Cat(0.U(2.W), f32Mask(i * 2 + 1, i * 2), 0.U(2.W), f32Mask(halfElems32 + i * 2 + 1, halfElems32 + i * 2))
+      if (fold14Active) Mux1H(Seq(
+        vecCtrl.fpu.isFoldTo1_2 -> fold12,
         vecCtrl.fpu.isFoldTo1_4 -> Cat(0.U(3.W), f32Mask(0), 0.U(3.W), f32Mask(1)),
-      )
-    )
-    val f32FirstFoldMaskOrder = Mux1H(
-      Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> Cat(0.U(2.W), f32Mask(3), f32Mask(2), 0.U(2.W), f32Mask(1), f32Mask(0)),
+      ))
+      else Mux(vecCtrl.fpu.isFoldTo1_2, fold12, 0.U(8.W))
+    } else 0.U(8.W)
+    val f32FirstFoldMaskOrder = if (fold12Active) {
+      val fold12 = Cat(0.U(2.W), f32Mask(halfElems32 + i * 2 + 1, halfElems32 + i * 2), 0.U(2.W), f32Mask(i * 2 + 1, i * 2))
+      if (fold14Active) Mux1H(Seq(
+        vecCtrl.fpu.isFoldTo1_2 -> fold12,
         vecCtrl.fpu.isFoldTo1_4 -> Cat(0.U(3.W), f32Mask(1), 0.U(3.W), f32Mask(0)),
-      )
-    )
-    val f16FirstFoldMaskUnorder = Mux1H(
-      Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> Cat(f16Mask(3,0), f16Mask(7,4)),
+      ))
+      else Mux(vecCtrl.fpu.isFoldTo1_2, fold12, 0.U(8.W))
+    } else 0.U(8.W)
+    val f16FirstFoldMaskUnorder = if (fold12Active) {
+      val fold12 = Cat(f16Mask(i * 4 + 3, i * 4), f16Mask(halfElems16 + i * 4 + 3, halfElems16 + i * 4))
+      if (fold14Active) Mux1H(Seq(
+        vecCtrl.fpu.isFoldTo1_2 -> fold12,
         vecCtrl.fpu.isFoldTo1_4 -> Cat(0.U(2.W), f16Mask(1), f16Mask(0), 0.U(2.W), f16Mask(3), f16Mask(2)),
         vecCtrl.fpu.isFoldTo1_8 -> Cat(0.U(3.W), f16Mask(0), 0.U(3.W), f16Mask(1)),
-      )
-    )
-    val f16FirstFoldMaskOrder = Mux1H(
-      Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> Cat(f16Mask(7,4), f16Mask(3,0)),
+        vecCtrl.fpu.isFoldTo1_16 -> Cat(0.U(3.W), f16Mask(0), 0.U(4.W)),
+      ))
+      else Mux(vecCtrl.fpu.isFoldTo1_2, fold12, 0.U(8.W))
+    } else 0.U(8.W)
+    val f16FirstFoldMaskOrder = if (fold12Active) {
+      val fold12 = Cat(f16Mask(halfElems16 + i * 4 + 3, halfElems16 + i * 4), f16Mask(i * 4 + 3, i * 4))
+      if (fold14Active) Mux1H(Seq(
+        vecCtrl.fpu.isFoldTo1_2 -> fold12,
         vecCtrl.fpu.isFoldTo1_4 -> Cat(0.U(2.W), f16Mask(3), f16Mask(2), 0.U(2.W), f16Mask(1), f16Mask(0)),
         vecCtrl.fpu.isFoldTo1_8 -> Cat(0.U(3.W), f16Mask(1), 0.U(3.W), f16Mask(0)),
-      )
-    )
-    val f64FoldMask = Mux1H(
+        vecCtrl.fpu.isFoldTo1_16 -> Cat(0.U(4.W), 0.U(3.W), f16Mask(0)),
+      ))
+      else Mux(vecCtrl.fpu.isFoldTo1_2, fold12, 0.U(8.W))
+    } else 0.U(8.W)
+    val f64FoldMask = if (fold12Active) Mux1H(
       Seq(
         vecCtrl.fpu.isFoldTo1_2 -> "b00010001".U,
       )
-    )
-    val f32FoldMask = Mux1H(
-      Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> "b00110011".U,
+    ) else 0.U(8.W)
+    val f32FoldMask = if (fold12Active) {
+      val fold12 = "b00110011".U(8.W)
+      if (fold14Active) Mux1H(Seq(
+        vecCtrl.fpu.isFoldTo1_2 -> fold12,
         vecCtrl.fpu.isFoldTo1_4 -> "b00010001".U,
-      )
-    )
-    val f16FoldMask = Mux1H(
-      Seq(
-        vecCtrl.fpu.isFoldTo1_2 -> "b11111111".U,
+      ))
+      else Mux(vecCtrl.fpu.isFoldTo1_2, fold12, 0.U(8.W))
+    } else 0.U(8.W)
+    val f16FoldMask = if (fold12Active) {
+      val fold12 = "b11111111".U(8.W)
+      if (fold14Active) Mux1H(Seq(
+        vecCtrl.fpu.isFoldTo1_2 -> fold12,
         vecCtrl.fpu.isFoldTo1_4 -> "b00110011".U,
         vecCtrl.fpu.isFoldTo1_8 -> "b00010001".U,
-      )
-    )
+        vecCtrl.fpu.isFoldTo1_16 -> "b00000001".U,
+      ))
+      else Mux(vecCtrl.fpu.isFoldTo1_2, fold12, 0.U(8.W))
+    } else 0.U(8.W)
     // low 4 bits for vs2(fp_a), high 4 bits for vs1(fp_b),
-    val isFold = vecCtrl.fpu.isFoldTo1_2 || vecCtrl.fpu.isFoldTo1_4 || vecCtrl.fpu.isFoldTo1_8
+    val isFold = vecCtrl.fpu.isFoldTo1_2 || vecCtrl.fpu.isFoldTo1_4 || vecCtrl.fpu.isFoldTo1_8 || vecCtrl.fpu.isFoldTo1_16
     val f64FirstNotFoldMask = Cat(0.U(3.W), f64Mask(i + 2), 0.U(3.W), f64Mask(i))
     val f32FirstNotFoldMask = Cat(0.U(2.W), f32Mask(i * 2 + 5, i * 2 + 4), 0.U(2.W), Cat(f32Mask(i * 2 + 1, i * 2)))
     val f16FirstNotFoldMask = Cat(f16Mask(i * 4 + 11, i * 4 + 8), f16Mask(i * 4 + 3, i * 4))
@@ -183,22 +211,46 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     )
     outMask
   }
+  // Returns a full 4*numVecModule-bit mask for reduction fflags
   def genMaskForRedFFlag(sew:UInt): UInt = {
-    val default = "b11111111".U
-    val f64FoldMask = Mux(outVecCtrl.fpu.isFoldTo1_2, "b00000001".U, default)
+    val fullWidth = 4 * numVecModule
+    val default = Fill(fullWidth, 1.U(1.W))
+
+    def padToFull(mask: UInt, width: Int): UInt = {
+      if (width >= fullWidth) mask
+      else Cat(0.U((fullWidth - width).W), mask)
+    }
+
+    // fold_1/2 active adders = VLEN/128; deeper folds = 1 adder only
+    // Each adder contributes 4 sub-fflags bits
+    val numFold12Adders = VLEN / 128  // 2 for VLEN=256, 1 for VLEN=128
+
+    // f64: fold_1/2 has 1 lane per active adder → per-adder mask = 0001
+    val f64FoldMask = Mux(outVecCtrl.fpu.isFoldTo1_2,
+      padToFull(Fill(numFold12Adders, "b0001".U(4.W)), 4 * numFold12Adders),
+      default)
+
+    // f32: fold_1/2 has 2 lanes per active adder → per-adder mask = 0011
+    //      fold_1/4 has 1 lane in adder 0 → 0001
     val f32Fold = outVecCtrl.fpu.isFoldTo1_2 || outVecCtrl.fpu.isFoldTo1_4
     val f32FoldMask = Mux1H(
       Seq(
-        outVecCtrl.fpu.isFoldTo1_2 -> "b00000011".U,
-        outVecCtrl.fpu.isFoldTo1_4 -> "b00000001".U,
+        outVecCtrl.fpu.isFoldTo1_2 -> padToFull(Fill(numFold12Adders, "b0011".U(4.W)), 4 * numFold12Adders),
+        outVecCtrl.fpu.isFoldTo1_4 -> padToFull("b00000001".U, 8),
       )
     )
-    val f16Fold = outVecCtrl.fpu.isFoldTo1_2 || outVecCtrl.fpu.isFoldTo1_4 || outVecCtrl.fpu.isFoldTo1_8
+
+    // f16: fold_1/2 has 4 lanes per active adder → per-adder mask = 1111
+    //      fold_1/4 has 2 lanes in adder 0 → 0011
+    //      fold_1/8 has 1 lane in adder 0 → 0001
+    //      fold_1/16 has 1 lane (self) in adder 0 → 0001
+    val f16Fold = outVecCtrl.fpu.isFoldTo1_2 || outVecCtrl.fpu.isFoldTo1_4 || outVecCtrl.fpu.isFoldTo1_8 || outVecCtrl.fpu.isFoldTo1_16
     val f16FoldMask = Mux1H(
       Seq(
-        outVecCtrl.fpu.isFoldTo1_2 -> "b00001111".U,
-        outVecCtrl.fpu.isFoldTo1_4 -> "b00000011".U,
-        outVecCtrl.fpu.isFoldTo1_8 -> "b00000001".U,
+        outVecCtrl.fpu.isFoldTo1_2 -> padToFull(Fill(numFold12Adders, "b1111".U(4.W)), 4 * numFold12Adders),
+        outVecCtrl.fpu.isFoldTo1_4 -> padToFull("b00000011".U, 8),
+        outVecCtrl.fpu.isFoldTo1_8 -> padToFull("b00000001".U, 8),
+        outVecCtrl.fpu.isFoldTo1_16 -> padToFull("b00000001".U, 8),
       )
     )
     Mux1H(
@@ -211,19 +263,19 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   }
   val isScalarMove = (fuOpType === VfaluType.vfmv_f_s) || (fuOpType === VfaluType.vfmv_s_f)
   val srcMaskRShift = Wire(UInt((4 * numVecModule).W))
-  val maskRshiftWidth = Wire(UInt(6.W))
+  val maskRshiftWidth = Wire(UInt(log2Ceil(VLEN + 1).W))
   maskRshiftWidth := Mux1H(
     Seq(
-      (vsew === VSew.e16) -> (vuopIdx(2,0) << 3),
-      (vsew === VSew.e32) -> (vuopIdx(2,0) << 2),
-      (vsew === VSew.e64) -> (vuopIdx(2,0) << 1),
+      (vsew === VSew.e16) -> (vuopIdx << 3),
+      (vsew === VSew.e32) -> (vuopIdx << 2),
+      (vsew === VSew.e64) -> (vuopIdx << 1),
     )
   )
   srcMaskRShift := (srcMask >> maskRshiftWidth)(4 * numVecModule - 1, 0)
   val fp_aIsFpCanonicalNAN = Wire(Vec(numVecModule,Bool()))
   val fp_bIsFpCanonicalNAN = Wire(Vec(numVecModule,Bool()))
-  val inIsFold = Wire(UInt(3.W))
-  inIsFold := Cat(vecCtrl.fpu.isFoldTo1_8, vecCtrl.fpu.isFoldTo1_4, vecCtrl.fpu.isFoldTo1_2)
+  val inIsFold = Wire(UInt(4.W))
+  inIsFold := Cat(vecCtrl.fpu.isFoldTo1_16, vecCtrl.fpu.isFoldTo1_8, vecCtrl.fpu.isFoldTo1_4, vecCtrl.fpu.isFoldTo1_2)
   vfalus.zipWithIndex.foreach {
     case (mod, i) =>
       mod.io.fire             := io.in.valid
@@ -244,7 +296,14 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       mod.io.op_code          := opcode
       mod.io.is_vfwredosum    := fuOpType === VfaluType.vfwredosum
       mod.io.is_fold          := inIsFold
-      mod.io.vs2_fold         := vs2      // for better timing
+      // Per-adder vs2_fold: upper 64 bits come from the fold_1/2 pair region,
+      // lower 64 bits come from the adder's own 64-bit window (used for fold_1/4, 1/8, 1/16).
+      // For adder i: hi = vs2[VLEN/2 + i*64 +: 64], lo = vs2[i*64 +: 64]
+      mod.io.vs2_fold         := {
+        val lo = vs2(i * 64 + 63, i * 64)
+        val hi = if (VLEN / 2 + i * 64 + 63 < VLEN) vs2(VLEN / 2 + i * 64 + 63, VLEN / 2 + i * 64) else 0.U(64.W)
+        Cat(hi, lo)
+      }
       resultData(i)           := mod.io.fp_result
       fflagsData(i)           := mod.io.fflags
       fp_aIsFpCanonicalNAN(i) := vecCtrl.fpu.isFpToVecInst & (
@@ -258,7 +317,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       mod.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN(i)
       mod.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN(i)
   }
-  val outVuopidx = outVecCtrl.vuopIdx(2, 0) // for vfadd max vuopidx=7
+  val outVuopidx = outVecCtrl.vuopIdx
   val numOfUopVFRED = Wire(UInt(4.W))
   val numofUopVFREDReg = RegEnable(numOfUopVFRED, io.in.fire)
   val vs1Reg = RegEnable(vs1, io.in.fire)
@@ -319,7 +378,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
       VLmul.m8 -> 8.U,
     ))
     val foldLastVlmul = MuxLookup(outVecCtrl_s0.vsew, "b000".U)(Seq(
-      VSew.e16 -> VLmul.mf8,
+      VSew.e16 -> "b100".U, // mf16 equivalent for VLEN=256: need 4 fold stages (16->8->4->2->1)
       VSew.e32 -> VLmul.mf4,
       VSew.e64 -> VLmul.mf2,
     ))
@@ -355,12 +414,13 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   vlMaxAllUop := Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax << lmulAbs).asUInt
   val vlMaxThisUop = Mux(outVecCtrl.vlmul(2), vlMax >> lmulAbs, vlMax).asUInt
   val vlSetThisUop = Mux(outVlFix > outVuopidx*vlMaxThisUop, outVlFix - outVuopidx*vlMaxThisUop, 0.U)
-  val vlThisUop = Wire(UInt(4.W))
+  private val vlThisUopWidth = log2Ceil(4 * numVecModule + 1)
+  val vlThisUop = Wire(UInt(vlThisUopWidth.W))
   vlThisUop := Mux(vlSetThisUop < vlMaxThisUop, vlSetThisUop, vlMaxThisUop)
   val vlMaskRShift = Wire(UInt((4 * numVecModule).W))
   vlMaskRShift := Fill(4 * numVecModule, 1.U(1.W)) >> ((4 * numVecModule).U - vlThisUop)
 
-  val outVuopidxForRed = outVecCtrl.vuopIdx(3, 0) // lmul=8 sew=16, (4+2+1)(vector)+(1+1+1)(fold)+(1)(scala) max vuopIdx=10
+  val outVuopidxForRed = outVecCtrl.vuopIdx
   val outIsFisrtGroup = outVuopidxForRed === 0.U ||
     (outVuopidxForRed === 1.U && (outVlmul === VLmul.m4 || outVlmul === VLmul.m8)) ||
     ((outVuopidxForRed === 2.U || outVuopidxForRed === 3.U) && outVlmul === VLmul.m8)
@@ -373,7 +433,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val maskToMgu = Mux(needNoMask, allMaskTrue, outSrcMask)
   val allFFlagsEn = Wire(Vec(4*numVecModule,Bool()))
   val outSrcMaskRShift = Wire(UInt((4*numVecModule).W))
-  outSrcMaskRShift := (maskToMgu >> (outVecCtrl.vuopIdx(2,0) * vlMax))(4*numVecModule-1,0)
+  outSrcMaskRShift := (maskToMgu >> (outVecCtrl.vuopIdx * vlMax))(4*numVecModule-1,0)
   val f16FFlagsEn = outSrcMaskRShift
   val f32FFlagsEn = Wire(Vec(numVecModule,UInt(4.W)))
   val f64FFlagsEn = Wire(Vec(numVecModule, UInt(4.W)))
@@ -423,22 +483,23 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
 
 
   val cmpResultOldVd = Wire(UInt(cmpResultWidth.W))
-  val cmpResultOldVdRshiftWidth = Wire(UInt(6.W))
+  val cmpResultOldVdRshiftWidth = Wire(UInt(log2Ceil(VLEN + 1).W))
   cmpResultOldVdRshiftWidth := Mux1H(
     Seq(
-      (outVecCtrl.vsew === VSew.e16) -> (outVecCtrl.vuopIdx(2, 0) << 3),
-      (outVecCtrl.vsew === VSew.e32) -> (outVecCtrl.vuopIdx(2, 0) << 2),
-      (outVecCtrl.vsew === VSew.e64) -> (outVecCtrl.vuopIdx(2, 0) << 1),
+      (outVecCtrl.vsew === VSew.e16) -> (outVecCtrl.vuopIdx << 3),
+      (outVecCtrl.vsew === VSew.e32) -> (outVecCtrl.vuopIdx << 2),
+      (outVecCtrl.vsew === VSew.e64) -> (outVecCtrl.vuopIdx << 1),
     )
   )
   cmpResultOldVd := (outOldVd >> cmpResultOldVdRshiftWidth)(4*numVecModule-1,0)
   val cmpResultForMgu = Wire(Vec(cmpResultWidth, Bool()))
   private val maxVdIdx = 8
+  private val elementsInOneUopWidth = log2Ceil(cmpResultWidth + 1)
   private val elementsInOneUop = Mux1H(
     Seq(
-      (outEew === 1.U) -> (cmpResultWidth).U(4.W),
-      (outEew === 2.U) -> (cmpResultWidth / 2).U(4.W),
-      (outEew === 3.U) -> (cmpResultWidth / 4).U(4.W),
+      (outEew === 1.U) -> cmpResultWidth.U(elementsInOneUopWidth.W),
+      (outEew === 2.U) -> (cmpResultWidth / 2).U(elementsInOneUopWidth.W),
+      (outEew === 3.U) -> (cmpResultWidth / 4).U(elementsInOneUopWidth.W),
     )
   )
   private val vdIdx = outVecCtrl.vuopIdx(2, 0)
@@ -447,7 +508,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
     val cmpResultWithVmask = Mux(outSrcMaskRShift(i), cmpResult(i), Mux(outVecCtrl.vma, true.B, cmpResultOldVd(i)))
     cmpResultForMgu(i) := Mux(elementsComputed +& i.U >= outVl, true.B, cmpResultWithVmask)
   }
-  val outIsFold = outVecCtrl.fpu.isFoldTo1_2 || outVecCtrl.fpu.isFoldTo1_4 || outVecCtrl.fpu.isFoldTo1_8
+  val outIsFold = outVecCtrl.fpu.isFoldTo1_2 || outVecCtrl.fpu.isFoldTo1_4 || outVecCtrl.fpu.isFoldTo1_8 || outVecCtrl.fpu.isFoldTo1_16
   val outOldVdForREDO = Mux1H(Seq(
     (outVecCtrl.vsew === VSew.e16) -> (outOldVd >> 16),
     (outVecCtrl.vsew === VSew.e32) -> (outOldVd >> 32),
@@ -466,9 +527,9 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   val outOldVdForRED = Mux(outCtrl.fuOpType === VfaluType.vfredosum, outOldVdForREDO, outOldVdForWREDO)
   val numOfUopVFREDOSUM = {
     val uvlMax = MuxLookup(outVecCtrl.vsew, 0.U)(Seq(
-      VSew.e16 -> 8.U,
-      VSew.e32 -> 4.U,
-      VSew.e64 -> 2.U,
+      VSew.e16 -> (VLEN / 16).U,
+      VSew.e32 -> (VLEN / 32).U,
+      VSew.e64 -> (VLEN / 64).U,
     ))
     val vlMax = Mux(outVecCtrl.vlmul(2), uvlMax >> (-outVecCtrl.vlmul)(1, 0), uvlMax << outVecCtrl.vlmul(1, 0)).asUInt
     vlMax

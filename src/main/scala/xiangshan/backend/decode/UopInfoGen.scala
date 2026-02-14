@@ -151,7 +151,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
        VLmul.m8 -> 8.U,
      ))
     val foldLastVlmul = MuxLookup(vsew, "b000".U)(Seq(
-      VSew.e16 -> VLmul.mf8,
+      VSew.e16 -> "b100".U, // mf16 equivalent for VLEN=256: need 4 fold stages (16->8->4->2->1)
       VSew.e32 -> VLmul.mf4,
       VSew.e64 -> VLmul.mf2,
     ))
@@ -162,11 +162,11 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
   }
   val numOfUopVFREDOSUM = {
     val uvlMax = MuxLookup(vsew, 1.U)(Seq(
-      VSew.e16 -> 8.U,
-      VSew.e32 -> 4.U,
-      VSew.e64 -> 2.U,
+      VSew.e16 -> (VLEN / 16).U,
+      VSew.e32 -> (VLEN / 32).U,
+      VSew.e64 -> (VLEN / 64).U,
     ))
-    val vlMax = Wire(UInt(7.W))
+    val vlMax = Wire(UInt(8.W))
     vlMax := Mux(vlmul(2), uvlMax >> (-vlmul)(1,0), uvlMax << vlmul(1,0)).asUInt
     Mux(vlMax.orR, vlMax, 1.U)
   }

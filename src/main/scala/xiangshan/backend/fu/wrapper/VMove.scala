@@ -8,6 +8,7 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 import yunsuan.vector.VectorMove.VectorMove
+import yunsuan.vector.alu.VSew
 import yunsuan.VmoveType
 
 class VMove(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
@@ -55,6 +56,26 @@ class VMove(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
 
   private val vd = vMove.io.out.bits.vd
 
+  private val isVfmvFs = fuOpType === VmoveType.vfmv_f_s
+  private val isVfmvSf = fuOpType === VmoveType.vfmv_s_f
+  private val vfmvFsBoxed = Mux1H(Seq(
+    (vsew === VSew.e8)  -> (Fill(56, 1.U) ## vs2(7, 0)),
+    (vsew === VSew.e16) -> (Fill(48, 1.U) ## vs2(15, 0)),
+    (vsew === VSew.e32) -> (Fill(32, 1.U) ## vs2(31, 0)),
+    (vsew === VSew.e64) -> vs2(63, 0)
+  ))
+  private val vfmvFsData = Cat(0.U((VLEN - 64).W), vfmvFsBoxed)
+
+  // Inline vs1 slices to avoid Mux1H width-padding: each Cat branch must be exactly dataWidth bits.
+  private val vfmvSfUpdated = Mux1H(Seq(
+    (vsew === VSew.e8)  -> Cat(oldVd(dataWidth - 1, 8), vs1(7, 0)),
+    (vsew === VSew.e16) -> Cat(oldVd(dataWidth - 1, 16), vs1(15, 0)),
+    (vsew === VSew.e32) -> Cat(oldVd(dataWidth - 1, 32), vs1(31, 0)),
+    (vsew === VSew.e64) -> Cat(oldVd(dataWidth - 1, 64), vs1(63, 0))
+  ))
+  private val vfmvSfElemMask = Mux(vm, true.B, srcMask(0))
+  private val vfmvSfData = Mux(vstartGeVl, oldVd, Mux(vfmvSfElemMask, vfmvSfUpdated, oldVd))
+
   mgu.io.in.vd := vd
   mgu.io.in.oldVd := oldVd
   mgu.io.in.mask := maskToMgu
@@ -71,6 +92,5 @@ class VMove(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   mgu.io.in.info.dstMask := false.B
   mgu.io.in.isIndexedVls := false.B
 
-  io.out.bits.res.data := Mux(vstartGeVl, oldVd, mgu.io.out.vd)
+  io.out.bits.res.data := Mux(isVfmvFs, vfmvFsData, Mux(isVfmvSf, vfmvSfData, Mux(vstartGeVl, oldVd, mgu.io.out.vd)))
 }
-

@@ -657,14 +657,15 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   private val numLsElem = VecInit(uop.map(_.numLsElem))
 
   // The maximum 'numLsElem' number that can be emitted per port is:
-  //    16 2 2 2 2 2.
+  //    maxFlowNum VecMemUnitStrideMaxFlowNum VecMemUnitStrideMaxFlowNum VecMemUnitStrideMaxFlowNum VecMemUnitStrideMaxFlowNum VecMemUnitStrideMaxFlowNum.
   // The 'allowDispatch' calculations are done conservatively for timing purposes:
   //   The Flow of scalar instructions is considered 1,
-  //   The flow of vector 'unit-stride' instructions is considered 2, and the flow of other vector instructions is considered 16.
+  //   The flow of vector 'unit-stride' instructions is considered VecMemUnitStrideMaxFlowNum,
+  //   and the flow of other vector instructions is considered maxFlowNum.
   private val conserveFlows = VecInit(isVlsType.zip(isLSType).zipWithIndex.map { case ((isVlsTyepItem, isLSTypeItem), index) =>
     Mux(
       isVlsTyepItem,
-      Mux(isUnitStride(index), VecMemUnitStrideMaxFlowNum.U, 16.U),
+      Mux(isUnitStride(index), VecMemUnitStrideMaxFlowNum.U, maxFlowNum.U),
       Mux(isLSTypeItem, 1.U, 0.U)
     )
   })
@@ -672,7 +673,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   private val conserveFlowsIs16 = VecInit(isVlsType.zipWithIndex.map { case (isVlsTyepItem, index) =>
     isVlsTyepItem && !isUnitStride(index)
   })
-  private val conserveFlowsIs2 = VecInit(isVlsType.zipWithIndex.map { case (isVlsTyepItem, index) =>
+  private val conserveFlowsIsUnitStride = VecInit(isVlsType.zipWithIndex.map { case (isVlsTyepItem, index) =>
     isVlsTyepItem && isUnitStride(index)
   })
   private val conserveFlowsIs1 = VecInit(isLSType.zipWithIndex.map { case (isLSTyepItem, index) =>
@@ -680,12 +681,11 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   })
   private val flowTotalWidth = (VecMemLSQEnqIteratorNumberSeq.max * RenameWidth).U.getWidth
   private val conserveFlowTotalDispatch = Wire(Vec(RenameWidth, UInt(flowTotalWidth.W)))
-  private val lowCountMaxWidth = (2 * RenameWidth).U.getWidth
   conserveFlowTotalDispatch.zipWithIndex.map{ case (flowTotal, idx) =>
     val highCount = PopCount(conserveFlowsIs16.take(idx + 1))
-    val conserveFlowsIs2Or1 = VecInit(conserveFlowsIs2.zip(conserveFlowsIs1).map(x => Cat(x._1, x._2)))
-    val lowCount = conserveFlowsIs2Or1.take(idx + 1).reduce(_ +& _).asTypeOf(0.U(lowCountMaxWidth.W))
-    flowTotal := (if (RenameWidth == 6) Cat(highCount, lowCount) else ((highCount << 4).asUInt + lowCount))
+    val unitStrideCount = PopCount(conserveFlowsIsUnitStride.take(idx + 1))
+    val scalarCount = PopCount(conserveFlowsIs1.take(idx + 1))
+    flowTotal := (highCount * maxFlowNum.U) + (unitStrideCount * VecMemUnitStrideMaxFlowNum.U) + scalarCount
   }
   // renameIn
   private val isVlsTypeRename = io.renameIn.map(x => x.valid && FuType.isVls(x.bits.fuType))
@@ -694,7 +694,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   private val conserveFlowsIs16Rename = VecInit(isVlsTypeRename.zipWithIndex.map { case (isVlsTyepItem, index) =>
     isVlsTyepItem && !isUnitStrideRename(index)
   })
-  private val conserveFlowsIs2Rename = VecInit(isVlsTypeRename.zipWithIndex.map { case (isVlsTyepItem, index) =>
+  private val conserveFlowsIsUnitStrideRename = VecInit(isVlsTypeRename.zipWithIndex.map { case (isVlsTyepItem, index) =>
     isVlsTyepItem && isUnitStrideRename(index)
   })
   private val conserveFlowsIs1Rename = VecInit(isLSTypeRename.zipWithIndex.map { case (isLSTyepItem, index) =>
@@ -703,9 +703,9 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   private val conserveFlowTotalRename = Wire(Vec(RenameWidth, UInt(flowTotalWidth.W)))
   conserveFlowTotalRename.zipWithIndex.map { case (flowTotal, idx) =>
     val highCount = PopCount(conserveFlowsIs16Rename.take(idx + 1))
-    val conserveFlowsIs2Or1 = VecInit(conserveFlowsIs2Rename.zip(conserveFlowsIs1Rename).map(x => Cat(x._1, x._2)))
-    val lowCount = conserveFlowsIs2Or1.take(idx + 1).reduce(_ +& _).asTypeOf(0.U(lowCountMaxWidth.W))
-    flowTotal := (if (RenameWidth == 6) Cat(highCount, lowCount) else ((highCount << 4).asUInt + lowCount))
+    val unitStrideCount = PopCount(conserveFlowsIsUnitStrideRename.take(idx + 1))
+    val scalarCount = PopCount(conserveFlowsIs1Rename.take(idx + 1))
+    flowTotal := (highCount * maxFlowNum.U) + (unitStrideCount * VecMemUnitStrideMaxFlowNum.U) + scalarCount
   }
 
 

@@ -420,6 +420,10 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
   val pipewbValidReg    = Wire(Vec(pipeWidth, Bool()))
   val wbIndexReg        = Wire(Vec(pipeWidth, UInt(vlmBindexBits.W)))
   val mergeDataReg      = Wire(Vec(pipeWidth, UInt(VLEN.W)))
+  val regOffsetRegVec   = Wire(Vec(pipeWidth, UInt(vOffsetBits.W)))
+  val flowElemIdxRegVec = Wire(Vec(pipeWidth, UInt(elemIdxBits.W)))
+  val dataNarrowRegVec  = Wire(Vec(pipeWidth, UInt(MLEN.W)))
+  val maskNarrowRegVec  = Wire(Vec(pipeWidth, UInt(MLENB.W)))
 
   val maskWithexceptionMask = io.fromPipeline.map{ x=>
     Mux(
@@ -427,6 +431,22 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
       ~x.bits.vecTriggerMask,
       Fill(x.bits.mask.getWidth, !ExceptionNO.selectByFuAndUnSelect(x.bits.exceptionVec, fuCfg, Seq(breakPoint)).asUInt.orR)
     ).asUInt & x.bits.mask
+  }
+  val vecdataAligned = io.fromPipeline.map { x =>
+    if (VLEN == MLEN) {
+      x.bits.vecdata.get
+    } else {
+      val regOffsetInFlow = x.bits.reg_offset.get(log2Up(MLENB) - 1, 0)
+      val shifted = (x.bits.vecdata.get >> (regOffsetInFlow << 3)).asUInt
+      Mux(x.bits.alignedType(2), shifted, x.bits.vecdata.get)
+    }
+  }
+  val mergeMask = maskWithexceptionMask.map { mask =>
+    if (VLENB == MLENB) {
+      mask
+    } else {
+      Cat(0.U((VLENB - MLENB).W), mask)
+    }
   }
 
   for((pipewb, i) <- io.fromPipeline.zipWithIndex){
@@ -445,7 +465,7 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     ))
     val mergedData = mergeDataWithElemIdx(
       oldData = oldData,
-      newData = io.fromPipeline.map(_.bits.vecdata.get),
+      newData = vecdataAligned,
       alignedType = alignedType(1,0),
       elemIdx = flowWbElemIdxInVd,
       valids = mergePortMatrix(i)
@@ -456,7 +476,7 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
      */
     val (brodenMergeData, brodenMergeMask)     = mergeDataByIndex(
       data    = io.fromPipeline.map(_.bits.vecdata.get).drop(i),
-      mask    = maskWithexceptionMask.drop(i),
+      mask    = mergeMask.drop(i),
       index   = io.fromPipeline(i).bits.elemIdxInsideVd.get,
       valids  = mergePortMatrix(i).drop(i)
     )
@@ -468,11 +488,72 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     val brodenMergeMaskReg  = RegEnable(brodenMergeMask, pipewb.valid)
     val mergedByPrevPortReg = RegEnable(mergedByPrevPortVec(i), pipewb.valid)
     val regOffsetReg        = RegEnable(pipewb.bits.reg_offset.get, pipewb.valid) // only for Unit-stride
+    val flowElemIdxReg      = RegEnable(flowWbElemIdxInVd(i), pipewb.valid)
+    regOffsetRegVec(i)      := regOffsetReg
+    flowElemIdxRegVec(i)    := flowElemIdxReg
+    dataNarrowRegVec(i)     := RegEnable(io.fromPipeline(i).bits.vecdata.get(MLEN - 1, 0), pipewb.valid)
+    maskNarrowRegVec(i)     := RegEnable(maskWithexceptionMask(i)(MLENB - 1, 0), pipewb.valid)
     val isusMerge           = RegEnable(alignedType(2), pipewb.valid)
 
-    val usSelData           = Mux1H(UIntToOH(regOffsetReg), (0 until VLENB).map{case i => getNoAlignedSlice(brodenMergeDataReg, i, 128)})
-    val usSelMask           = Mux1H(UIntToOH(regOffsetReg), (0 until VLENB).map{case i => brodenMergeMaskReg(16 + i - 1, i)})
-    val usMergeData         = mergeDataByByte(entries(wbIndexReg(i)).data, usSelData, usSelMask)
+    val usSelDataWide       = Wire(UInt(VLEN.W))
+    val usSelMaskWide       = Wire(UInt(VLENB.W))
+    if (VLEN == MLEN) {
+      val usSelData = Mux1H(UIntToOH(regOffsetReg), (0 until VLENB).map { case i =>
+        getNoAlignedSlice(brodenMergeDataReg, i, MLEN)
+      })
+      val usSelMask = Mux1H(UIntToOH(regOffsetReg), (0 until VLENB).map { case i =>
+        brodenMergeMaskReg(MLENB + i - 1, i)
+      })
+      usSelDataWide := usSelData
+      usSelMaskWide := usSelMask
+    } else {
+      val wideDataBits = VecMemUnitStrideMaxFlowNum * MLEN
+      val wideMaskBits = VecMemUnitStrideMaxFlowNum * MLENB
+
+      def placeFlowData(data: UInt, flowIdx: UInt): UInt = {
+        val flowSel = UIntToOH(flowIdx, VecMemUnitStrideMaxFlowNum)
+        val slots = (0 until VecMemUnitStrideMaxFlowNum).map { f =>
+          val highPad = wideDataBits - (f + 1) * MLEN
+          val lowPad = f * MLEN
+          Cat(0.U(highPad.W), data, 0.U(lowPad.W))
+        }
+        Mux1H(flowSel, slots)
+      }
+
+      def placeFlowMask(mask: UInt, flowIdx: UInt): UInt = {
+        val flowSel = UIntToOH(flowIdx, VecMemUnitStrideMaxFlowNum)
+        val slots = (0 until VecMemUnitStrideMaxFlowNum).map { f =>
+          val highPad = wideMaskBits - (f + 1) * MLENB
+          val lowPad = f * MLENB
+          Cat(0.U(highPad.W), mask, 0.U(lowPad.W))
+        }
+        Mux1H(flowSel, slots)
+      }
+
+      val dataPlacedVec = VecInit((0 until pipeWidth).map { j =>
+        placeFlowData(dataNarrowRegVec(j), flowElemIdxRegVec(j))
+      })
+      val maskPlacedVec = VecInit((0 until pipeWidth).map { j =>
+        placeFlowMask(maskNarrowRegVec(j), flowElemIdxRegVec(j))
+      })
+      val dataCombined = dataPlacedVec.zip(mergePortMatrixWrap(i)).map { case (d, v) =>
+        Mux(v, d, 0.U(wideDataBits.W))
+      }.reduce(_ | _)
+      val maskCombined = maskPlacedVec.zip(mergePortMatrixWrap(i)).map { case (m, v) =>
+        Mux(v, m, 0.U(wideMaskBits.W))
+      }.reduce(_ | _)
+
+      val regOffsetOh = UIntToOH(regOffsetReg, MLENB)
+      val usSelData = Mux1H(regOffsetOh, (0 until MLENB).map { case k =>
+        getNoAlignedSlice(dataCombined, k, VLEN)
+      })
+      val usSelMask = Mux1H(regOffsetOh, (0 until MLENB).map { case k =>
+        maskCombined(VLENB + k - 1, k)
+      })
+      usSelDataWide := usSelData
+      usSelMaskWide := usSelMask
+    }
+    val usMergeData         = mergeDataByByte(entries(wbIndexReg(i)).data, usSelDataWide, usSelMaskWide)
     when(pipewbValidReg(i) && !mergedByPrevPortReg){
       entries(wbIndexReg(i)).data := Mux(isusMerge, usMergeData, mergeDataReg(i)) // if aligned(2) == 1, is Unit-Stride inst
     }

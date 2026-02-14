@@ -139,7 +139,7 @@ class VIPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
       subIO.in.bits.srcType(1)  := srcTypeVs1
       subIO.in.bits.vdType      := vdType
       subIO.in.bits.vs1         := Mux1H(Seq(needClearVs1 -> 0.U,
-        needShiftVs1 -> ZeroExt(vs1(127,64), 128),
+        needShiftVs1 -> ZeroExt(vs1(dataWidth - 1, dataWidthOfDataModule), dataWidth),
         ((!needClearVs1) && (!needShiftVs1)) -> vs1))
       subIO.in.bits.vs2         := vs2
       subIO.in.bits.old_vd      := oldVd

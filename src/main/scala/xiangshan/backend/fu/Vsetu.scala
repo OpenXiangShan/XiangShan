@@ -75,7 +75,7 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   println(s"[VsetModule] log2Vlen: $log2Vlen")
   println(s"[VsetModule] vlWidth: $vlWidth")
 
-  private val log2Vlmul = vlmul
+  private val log2VlmulS = vlmul.asSInt
   // use 2 bits vsew to store vsew
   private val log2Vsew = vsew(VSew.width - 1, 0) +& "b011".U
 
@@ -83,7 +83,8 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   // vlmul = b011, vsew = 0, 7 + 3 - (0 + 3) = 7
   // vlen = 128, lmul = 2, sew = 16
   // vlmul = b001, vsew = 1, 7 + 1 - (1 + 3) = 4
-  private val log2Vlmax: UInt = log2Vlen.U(vlWidth.W) + log2Vlmul - log2Vsew
+  private val log2VlmaxS = log2Vlen.S(vlWidth.W) + log2VlmulS - log2Vsew.zext
+  private val log2Vlmax = Mux(log2VlmaxS < 0.S, 0.U, log2VlmaxS.asUInt)
   private val vlmax = (1.U(vlWidth.W) << log2Vlmax).asUInt
 
   private val normalVL = Mux(avl > vlmax, vlmax, avl)
@@ -91,7 +92,8 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   vl := Mux(isVsetivli, normalVL, Mux(isSetVlmax, vlmax, normalVL))
 
   private val log2Elen = log2Up(ELEN)
-  private val log2VsewMax = Mux(log2Vlmul(2), log2Elen.U + log2Vlmul, log2Elen.U)
+  private val log2VsewMaxS = log2Elen.S + log2VlmulS
+  private val log2VsewMax = Mux(log2VlmulS < 0.S, log2VsewMaxS.asUInt, log2Elen.U)
 
   private val sewIllegal = VSew.isReserved(vsew) || (log2Vsew > log2VsewMax)
   private val lmulIllegal = VLmul.isReserved(vlmul)

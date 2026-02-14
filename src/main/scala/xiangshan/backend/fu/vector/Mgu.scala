@@ -92,7 +92,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
     ))
   }
 
-  // mask vd is at most 16 bits
+  // mask vd is at most numBytes bits
   private val maskOldVdBits = splitVdMask(oldVd, SewOH(info.eew))(vdIdx)
   private val maskBits = splitVdMask(in.mask, SewOH(info.eew))(vdIdx)
   private val maskVecByte = Wire(Vec(numBytes, UInt(1.W)))
@@ -103,7 +103,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
 
   // the result of mask-generating inst
   private val maxVdIdx = 8
-  private val meaningfulBitsSeq = Seq(16, 8, 4, 2)
+  private val meaningfulBitsSeq = Seq(numBytes, numBytes / 2, numBytes / 4, numBytes / 8)
   private val allPossibleResBit = Wire(Vec(4, Vec(maxVdIdx, UInt(vlen.W))))
 
   for (sew <- 0 to 3) {
@@ -161,7 +161,7 @@ class Mgu(vlen: Int)(implicit p: Parameters) extends  Module {
 }
 
 class VldMgu(vlen: Int)(implicit p: Parameters) extends Mgu(vlen) {
-  override lazy val maskUsed = in.mask(15, 0)
+  override lazy val maskUsed = in.mask(vlen / 8 - 1, 0)
 }
 
 class MguIO(vlen: Int)(implicit p: Parameters) extends Bundle {
