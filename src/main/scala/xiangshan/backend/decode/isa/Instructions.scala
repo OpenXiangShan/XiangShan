@@ -2962,40 +2962,40 @@ object Instructions {
   }
 
   object ZVBBType extends InstType {
-    def VANDN_VV           = outer.VANDN_VV
-    def VANDN_VX           = outer.VANDN_VX
-    def VBREV8_V           = outer.VBREV8_V
-    def VBREV_V            = outer.VBREV_V
-    def VCLZ_V             = outer.VCLZ_V
-    def VCPOP_V            = outer.VCPOP_V
-    def VCTZ_V             = outer.VCTZ_V
+//    def VANDN_VV           = outer.VANDN_VV
+//    def VANDN_VX           = outer.VANDN_VX
+//    def VBREV8_V           = outer.VBREV8_V
+//    def VBREV_V            = outer.VBREV_V
+//    def VCLZ_V             = outer.VCLZ_V
+//    def VCPOP_V            = outer.VCPOP_V
+//    def VCTZ_V             = outer.VCTZ_V
     def VREV8_V            = outer.VREV8_V
-    def VROL_VV            = outer.VROL_VV
-    def VROL_VX            = outer.VROL_VX
-    def VROR_VI            = outer.VROR_VI
-    def VROR_VV            = outer.VROR_VV
-    def VROR_VX            = outer.VROR_VX
-    def VWSLL_VI           = outer.VWSLL_VI
-    def VWSLL_VV           = outer.VWSLL_VV
-    def VWSLL_VX           = outer.VWSLL_VX
+//    def VROL_VV            = outer.VROL_VV
+//    def VROL_VX            = outer.VROL_VX
+//    def VROR_VI            = outer.VROR_VI
+//    def VROR_VV            = outer.VROR_VV
+//    def VROR_VX            = outer.VROR_VX
+//    def VWSLL_VI           = outer.VWSLL_VI
+//    def VWSLL_VV           = outer.VWSLL_VV
+//    def VWSLL_VX           = outer.VWSLL_VX
 
     val allWithNames = withNameSeq(
-      VANDN_VV,
-      VANDN_VX,
-      VBREV8_V,
-      VBREV_V,
-      VCLZ_V,
-      VCPOP_V,
-      VCTZ_V,
+//      VANDN_VV,
+//      VANDN_VX,
+//      VBREV8_V,
+//      VBREV_V,
+//      VCLZ_V,
+//      VCPOP_V,
+//      VCTZ_V,
       VREV8_V,
-      VROL_VV,
-      VROL_VX,
-      VROR_VI,
-      VROR_VV,
-      VROR_VX,
-      VWSLL_VI,
-      VWSLL_VV,
-      VWSLL_VX,
+//      VROL_VV,
+//      VROL_VX,
+//      VROR_VI,
+//      VROR_VV,
+//      VROR_VX,
+//      VWSLL_VI,
+//      VWSLL_VV,
+//      VWSLL_VX,
     )
   }
 

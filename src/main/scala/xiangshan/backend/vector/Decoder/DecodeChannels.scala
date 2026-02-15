@@ -49,11 +49,11 @@ class DecodeChannels(
     s"_MOP${mopWidth}_UOP${uopWidth}" +
     s"_M2x${MaxM2UopIdx}_M4x${MaxM4UopIdx}_M8x${MaxM8UopIdx}"
 
-  val simpleExts: Seq[ExtBase] = extensions.filterNot(Seq(V).contains)
+  val simpleExts: Seq[ExtBase] = extensions.filterNot(Seq(V, Zvbb).contains)
   val simpleInsts = InstPattern.extensionInsts(simpleExts: _*)
   val simpleTable = simpleExts.map(_.table).reduce(_ ++ _)
 
-  val vectorExts = extensions.filter(Seq(V).contains)
+  val vectorExts = extensions.filter(Seq(V, Zvbb).contains)
   val vectorInsts = InstPattern.extensionInsts(vectorExts: _*).map(_.asInstanceOf[VecInstPattern])
 
   val uopBufferSize = maxSplitUopNum - 1
@@ -620,6 +620,7 @@ object DecodeChannelsMain extends App {
     Za64rs, /*Zacas,*/ Zawrs,
     Zba, Zbb, Zbc, Zbs, Zbkb, Zbkc, Zbkx,
     V,
+    Zvbb,
     XSTrap,
     // Zcb, Zcmop,
     // Zfa, Zfh, ZfaZfh, ZfaF, ZfaD, Zfhmin,
