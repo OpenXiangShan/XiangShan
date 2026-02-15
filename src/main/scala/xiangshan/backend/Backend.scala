@@ -191,8 +191,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   private val topDownMod = Module(new TopDownGen)
 
 
-  private val vlFromIntIsZero = intRegion.io.vlWriteBackInfoOut.vlFromIntIsZero
-  private val vlFromIntIsVlmax = intRegion.io.vlWriteBackInfoOut.vlFromIntIsVlmax
+  private val vlFromIntIsZero = false.B // Todo: enable this when vs3 dependency elimination is ready
+  private val vlFromIntIsVlmax = false.B
 
   private val backendCriticalError = Wire(Bool())
 
