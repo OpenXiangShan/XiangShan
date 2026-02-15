@@ -759,7 +759,10 @@ object VecUopDefines {
   def vclz    = VecIntUopS2V_DV()
   def vctz    = VecIntUopS2V_DV()
   def vcpop_v = VecIntUopS2V_DV()
-  def vrev8   = VecIntUopS2V_DV()
+  def vrev8_e8  = VecIntUopS2V_DV().setOpcode(VIAluOpcodes.vrev8_e8 )
+  def vrev8_e16 = VecIntUopS2V_DV().setOpcode(VIAluOpcodes.vrev8_e16)
+  def vrev8_e32 = VecIntUopS2V_DV().setOpcode(VIAluOpcodes.vrev8_e32)
+  def vrev8_e64 = VecIntUopS2V_DV().setOpcode(VIAluOpcodes.vrev8_e64)
 
   def vandn = new VecIntUopVV_DV
   def vclmulh = new VecIntUopVV_DV
