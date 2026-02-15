@@ -35,7 +35,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
 
   private val opcode = fuOpType
   private val isSigned = VIAluOpcodes.isSigned(fuOpType)
-  private val isMisc = false.B // Todo
+  private val isMisc = VIAluOpcodes.isMisc(fuOpType)
   private val widenVs2 = inCtrl.vialuCtrl.get.widenVs2
   private val widen = inCtrl.vialuCtrl.get.widen
   private val isVf2 = inCtrl.vialuCtrl.get.isVf2

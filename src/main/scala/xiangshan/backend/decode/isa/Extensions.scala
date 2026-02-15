@@ -36,6 +36,8 @@ object Extensions {
 
   case object V extends UnprivExt(Seq(VType)) // Todo
 
+  case object Zvbb extends UnprivExt(Seq(ZVBBType))
+
   case object Za64rs extends UnprivExt()
 
   case object Zabha extends UnprivExt(Seq(ZABHAType))

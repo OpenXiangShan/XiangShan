@@ -677,6 +677,8 @@ object SplitTable {
       ),
 
       // Todo: vbrev8, vrev8, vbrev, vclz, vctz, vcpop
+      VREV8_V     -> dup(vrev8_e8, vrev8_e16, vrev8_e32, vrev8_e64),
+
       // VMUNARY0
       VMSBF_M     -> same(Seq(vmsbf)),
       VMSOF_M     -> same(Seq(vmsof)),
