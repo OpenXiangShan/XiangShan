@@ -9,6 +9,7 @@ import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.Extensions._
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
@@ -162,6 +163,16 @@ class DecodeStageImp(
         bits.blockBackward := uopInfo.blockBack
         bits.flushPipe := uopInfo.flushPipe
         bits.canRobCompress := uopInfo.canRobCompress
+        bits.simple :=
+          bits.canRobCompress &&
+          in.fromCSR.custom.high_density_rob_compression_enable &&
+          !FuType.isLoadStore(bits.fuType) &&
+          !FuType.isBJU(bits.fuType) &&
+          !FuType.isAMO(bits.fuType) &&
+          !FuType.isFence(bits.fuType) &&
+          !FuType.isCsr(bits.fuType) &&
+          !FuType.isVset(bits.fuType) &&
+          !FuType.isVArithMem(bits.fuType)
         bits.selImm := Mux(uopInfo.selImm.valid, DecodeSelImm.toSelImm(uopInfo.selImm.bits), DecodeSelImm.NO)
         bits.imm := uopInfo.imm
         bits.frm := uopInfo.frm

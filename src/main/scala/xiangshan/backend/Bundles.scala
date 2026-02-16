@@ -171,6 +171,7 @@ object Bundles {
     val blockBackward = Bool()
     val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress = Bool()
+    val simple = Bool()
     val selImm = SelImm()
     val imm = UInt(32.W)
     val frm = Frm()
@@ -249,6 +250,9 @@ object Bundles {
     val noCompressSource = UInt(2.W)
     val needFlush = UInt(2.W)
     val interrupt_safe = Bool()
+    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
+    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
+    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
     val commitType = CommitType()
 
     val srcType = Vec(numSrc, SrcType())
@@ -279,7 +283,8 @@ object Bundles {
     val oldVType = VType()
     val firstUop = Bool()
     val lastUop = Bool()
-    val numWB = NumWB() // rob need this
+    val formerNumWB = UInt(log2Up(MaxUopSize * 2 + 1).W) // rob need this
+    val latterNumWB = UInt(log2Up(MaxUopSize * 2 + 1).W) // rob need this
     val latency = Latency()
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
@@ -323,7 +328,7 @@ object Bundles {
     val pc = UInt(VAddrBits.W)
     val debug_seqNum = InstSeqNum()
     val instr = UInt(32.W)
-    val fusionNum = UInt(2.W)
+    val fusionNum = UInt(log2Ceil(RenameWidth + 1).W)
     val perfDebugInfo = new PerfDebugInfo
     val debug_sim_trig = Bool()
   }
@@ -342,7 +347,8 @@ object Bundles {
     def connectEnqRobUop(source: RenameOutUop): Unit = {
       connectSamePort(this, source)
       this.hasException := source.hasException || source.singleStep
-      this.numWB        := Mux(source.singleStep, 0.U, source.numWB)
+      this.formerNumWB  := Mux(source.singleStep, 0.U, source.formerNumWB)
+      this.latterNumWB  := Mux(source.singleStep, 0.U, source.latterNumWB)
       this.stdwriteNeed := FuType.isStore(source.fuType)
       this.isXSTrap     := FuType.isAlu(source.fuType) && (source.fuOpType === ALUOpType.xstrap)
       this.replayInst   := false.B
@@ -649,7 +655,10 @@ object Bundles {
     val noCompressSource = UInt(2.W)
     val needFlush = UInt(2.W)
     val interrupt_safe = Bool()
-    val fusionNum       = UInt(2.W)
+    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
+    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
+    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
+    val fusionNum       = UInt(log2Ceil(RenameWidth + 1).W)
     val selImm          = SelImm()
     val imm             = UInt(32.W)
     val frm             = Frm()
@@ -664,7 +673,8 @@ object Bundles {
     val firstUop        = Bool()
     val lastUop         = Bool()
     val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
-    val numWB           = NumWB() // rob need this
+    val formerNumWB     = UInt(log2Up(MaxUopSize * 2 + 1).W) // rob need this
+    val latterNumWB     = UInt(log2Up(MaxUopSize * 2 + 1).W) // rob need this
     val latency         = Latency()
     val commitType      = CommitType()
     // rename

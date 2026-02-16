@@ -216,7 +216,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
     // forward stage 0
     val s0Req = io.mdpQuery(i)
     val s0MdpHitVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
-      s0Req.bits.loadWaitBit && dataEntries(j).robIdx === s0Req.bits.waitForRobIdx && ctrlEntries(j).allocated)))
+      s0Req.bits.loadWaitBit && dataEntries(j).robIdx.isSameSlot(s0Req.bits.waitForRobIdx) && ctrlEntries(j).allocated)))
 
     // forward stage 1
     val s1ReqValid  = RegNext(s0Req.valid && s0Req.bits.loadWaitBit)
