@@ -592,6 +592,7 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
   val custom = new Bundle {
     // Rename
     val fusion_enable = Bool()
+    val high_density_rob_compression_enable = Bool()
     val wfi_enable = Bool()
   }
 
