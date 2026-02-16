@@ -973,6 +973,24 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       }
     }
   }
+
+  // vector load, all replay entries of same robidx and uopidx
+  // should be released when vlmergebuffer commit or flush
+  val vecLdCanceltmp = Wire(Vec(LoadQueueReplaySize, Vec(VecLoadPipelineWidth, Bool())))
+  val vecLdCancel = Wire(Vec(LoadQueueReplaySize, Bool()))
+  val vecLdCommittmp = Wire(Vec(LoadQueueReplaySize, Vec(VecLoadPipelineWidth, Bool())))
+  val vecLdCommit = Wire(Vec(LoadQueueReplaySize, Bool()))
+  for (i <- 0 until LoadQueueReplaySize) {
+    val fbk = io.vecFeedback
+    for (j <- 0 until VecLoadPipelineWidth) {
+      vecLdCanceltmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isFlush && uop(i).robIdx.isSameSlot(fbk(j).bits.robidx) && uop(i).uopIdx === fbk(j).bits.uopidx
+      vecLdCommittmp(i)(j) := allocated(i) && fbk(j).valid && fbk(j).bits.isCommit && uop(i).robIdx.isSameSlot(fbk(j).bits.robidx) && uop(i).uopIdx === fbk(j).bits.uopidx
+    }
+    vecLdCancel(i) := vecLdCanceltmp(i).reduce(_ || _)
+    vecLdCommit(i) := vecLdCommittmp(i).reduce(_ || _)
+    XSError(((vecLdCancel(i) || vecLdCommit(i)) && allocated(i)), s"vector load, should not have replay entry $i when commit or flush.\n")
+  }
+
   // misprediction recovery / exception redirect
   for (i <- 0 until LoadQueueReplaySize) {
     needCancel(i) := uop(i).robIdx.needFlush(io.redirect) && allocated(i)

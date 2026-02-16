@@ -571,9 +571,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   println("  Enable unaligned store: " + EnableHardwareStoreMisalign)
   println("  Enable unaligned load: " + EnableHardwareLoadMisalign)
 
-  val srnctl = RegInit(UInt(XLEN.W), "h7".U)
+  val srnctl = RegInit(UInt(XLEN.W), "h17".U)
   csrio.customCtrl.fusion_enable := srnctl(0)
   csrio.customCtrl.wfi_enable := srnctl(2)
+  csrio.customCtrl.high_density_rob_compression_enable := srnctl(4)
 
   // Hypervisor CSRs
   val hstatusWMask = "h7003c0".U(XLEN.W)

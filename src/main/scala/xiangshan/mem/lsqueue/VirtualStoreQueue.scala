@@ -188,12 +188,52 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
       snapshotQueue(i / SnapshotInterval).entryEndSqIdx := enqBits.reqEndPtr.sqIdx
     }
 
+    // TODO: vecMbCommit will be remove in the future.
+    val fbk = io.fromVMergeBuffer
+    for (j <- 0 until VecStorePipelineWidth) {
+      vecCommittmp(i)(j) := fbk(j).valid && (fbk(j).bits.isCommit || fbk(j).bits.isFlush) &&
+        dataEntries(i).robIdx.isSameSlot(fbk(j).bits.robidx) && dataEntries(i).uopIdx === fbk(j).bits.uopidx
+    }
+    // vector feedback may occur with deqCancel/needCancel at the same time
+    vecCommit(i) := vecCommittmp(i).reduce(_ || _) && !needCancel(i) && !deqCancel && ctrlEntries(i).allocated
+
+    when (vecCommit(i)) {
+      ctrlEntries(i).vecMbCommit := true.B
+    }.elsewhen(deqCancel || needCancel(i)) {
+      ctrlEntries(i).vecMbCommit := false.B
+    }
+
     // debug info
     if(debugEn){
       when(enqSet) {
         dataEntries(i).debugUop.get := enqBits.debugUop.get
       }
     }
+  }
+
+  // query whether mdp hit when load query forward.
+  //TODO: maybe we need the distance-base mdp.
+  for(i <- 0 until LoadPipelineWidth) {
+    // forward stage 0
+    val s0Req = io.mdpQuery(i)
+    val s0MdpHitVec = WireInit(VecInit((0 until StoreQueueSize).map(j =>
+      s0Req.bits.loadWaitBit && dataEntries(j).robIdx.isSameSlot(s0Req.bits.waitForRobIdx) && ctrlEntries(j).allocated)))
+
+    // forward stage 1
+    val s1ReqValid  = RegNext(s0Req.valid && s0Req.bits.loadWaitBit)
+    val s1MdpHitVec = RegEnable(s0MdpHitVec, s0Req.valid)
+    //TODO: vector store maybe hit multiple entry, but we only care the first one, need to verify it in the future.
+    val s1MdpHitIdx = ParallelPriorityEncoder(s1MdpHitVec.asUInt)
+
+    val s1VirtualQueueHit = s1MdpHitVec.reduce(_ || _) && s1ReqValid
+
+    val s2HitEntryPtr = RegEnable(makeEntryPtrFromValue(s1MdpHitIdx), s1ReqValid)
+
+    val s2VirtualQueueSqIdx = WireDefault(0.U.asTypeOf(PhysicalQueuePtr.cloneType))
+    s2VirtualQueueSqIdx := getEntryStartSqIdx(s2HitEntryPtr)
+
+    io.toPhysicalQueue.mdpHitPtr(i).valid := RegNext(s1VirtualQueueHit)
+    io.toPhysicalQueue.mdpHitPtr(i).bits  := s2VirtualQueueSqIdx
   }
 
   /**
