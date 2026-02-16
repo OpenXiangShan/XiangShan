@@ -54,6 +54,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val complexHasDest = UInt(1.W)
     val hasStore = Bool()
+    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
+    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
 
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W) // TODO: it could change to 'instrEndOffset'
@@ -119,6 +121,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val mmio = Bool()
     val commitType = CommitType()
     val hasStore = Bool()
+    val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
+    val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val hasLastInFtqEntry = UInt(2.W)
@@ -154,6 +158,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
 //    robEntry.realDestSize
     robEntry.complexHasDest := robEnq.complexHasDest
     robEntry.hasStore := robEnq.hasStore
+    robEntry.formerInstrCnt := robEnq.formerInstrCnt
+    robEntry.latterInstrCnt := robEnq.latterInstrCnt
 
     robEntry.ftqIdx := robEnq.ftqPtr
     robEntry.ftqOffset := robEnq.ftqOffset
@@ -219,6 +225,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.hasLastInFtqEntry := robEntry.hasLastInFtqEntry
     robCommitEntry.commitType := robEntry.commitType
     robCommitEntry.hasStore := robEntry.hasStore
+    robCommitEntry.formerInstrCnt := robEntry.formerInstrCnt
+    robCommitEntry.latterInstrCnt := robEntry.latterInstrCnt
     robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush

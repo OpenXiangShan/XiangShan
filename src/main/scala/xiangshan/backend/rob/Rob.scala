@@ -336,6 +336,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val debug_lsTopdownInfo = RegInit(VecInit(Seq.fill(RobSize)(LsTopdownInfo.init)))
   val debug_lqIdxValid = RegInit(VecInit.fill(RobSize)(false.B))
   val debug_lsIssued = RegInit(VecInit.fill(RobSize)(false.B))
+  val enqHalfWritten = RegInit(VecInit(Seq.fill(RobSize)(VecInit(Seq.fill(2)(false.B)))))
 
   val isEmpty = enqPtr.isSameEntry(deqPtr)
   val snptEnq = io.enq.canAccept && io.enq.req.map(x => x.valid && x.bits.snapshot).reduce(_ || _)
@@ -484,23 +485,52 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   for (i <- 0 until RenameWidth) {
     // we don't check whether io.redirect is valid here since redirect has higher priority
+    val hasEarlierSameHalf =
+      if (i == 0) {
+        false.B
+      } else {
+        VecInit((0 until i).map { j =>
+          io.enq.canAccept &&
+          io.enq.req(j).valid &&
+          io.enq.req(j).bits.robIdx === io.enq.req(i).bits.robIdx
+        }).asUInt.orR
+      }
+    val hasEarlierEntryReset =
+      if (i == 0) {
+        false.B
+      } else {
+        VecInit((0 until i).map { j =>
+          io.enq.canAccept &&
+          io.enq.req(j).valid &&
+          io.enq.req(j).bits.firstUop &&
+          io.enq.req(j).bits.robIdx.isSameEntry(io.enq.req(i).bits.robIdx)
+        }).asUInt.orR
+      }
     when(io.enq.canAccept && io.enq.req(i).valid) {
       val enqUop = io.enq.req(i).bits
       val enqIndex = io.enq.req(i).bits.robIdx.value
       val subIndex = !io.enq.req(i).bits.robIdx.isFormer
-      // store uop in data module and debug_microOp Vec
-      debug_microOp(enqIndex)(subIndex) := enqUop
-      debug_microOp(enqIndex)(subIndex).debugInfo.dispatchTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.enqRsTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.selectTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.issueTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.writebackTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.tlbFirstReqTime := timer
-      debug_microOp(enqIndex)(subIndex).debugInfo.tlbRespTime := timer
-      debug_lsInfo(enqIndex) := DebugLsInfo.init
-      debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
-      debug_lqIdxValid(enqIndex) := false.B
-      debug_lsIssued(enqIndex) := false.B
+      val slotWritten = Mux(enqUop.firstUop || hasEarlierEntryReset, false.B, enqHalfWritten(enqIndex)(subIndex))
+      when(enqUop.firstUop && !hasEarlierEntryReset) {
+        enqHalfWritten(enqIndex)(0) := false.B
+        enqHalfWritten(enqIndex)(1) := false.B
+      }
+      when(!hasEarlierSameHalf && !slotWritten) {
+        // Keep the first instruction metadata in each rob-half for difftest/debug.
+        debug_microOp(enqIndex)(subIndex) := enqUop
+        debug_microOp(enqIndex)(subIndex).debugInfo.dispatchTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.enqRsTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.selectTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.issueTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.writebackTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.tlbFirstReqTime := timer
+        debug_microOp(enqIndex)(subIndex).debugInfo.tlbRespTime := timer
+        debug_lsInfo(enqIndex) := DebugLsInfo.init
+        debug_lsTopdownInfo(enqIndex) := LsTopdownInfo.init
+        debug_lqIdxValid(enqIndex) := false.B
+        debug_lsIssued(enqIndex) := false.B
+        enqHalfWritten(enqIndex)(subIndex) := true.B
+      }
       when(enqUop.waitForward) {
         hasWaitForward := true.B
       }
@@ -1126,6 +1156,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       io.commits.info(i).debug_ldest.getOrElse(0.U),
       debug_exuData(walkPtrVec(i).value)
     )
+  }
+
+  val noCommitCycleCnt = RegInit(0.U(20.W))
+  when(io.commits.isCommit && io.commits.commitValid(0)) {
+    noCommitCycleCnt := 0.U
+  }.otherwise {
+    noCommitCycleCnt := noCommitCycleCnt + 1.U
+  }
+  when(noCommitCycleCnt === 14999.U) {
+    printf(p"[CROB-STUCK] deq=${Hexadecimal(deqPtr.value)} valid=${deqPtrEntry.commit_v} " +
+      p"uopNum=${deqPtrEntry.uopNum} realDest=${deqPtrEntry.realDestSize} " +
+      p"ctype=${Binary(deqPtrEntry.compressType)} needFlush=${Binary(deqPtrEntry.needFlush)} " +
+      p"formerCnt=${deqPtrEntry.formerInstrCnt} latterCnt=${deqPtrEntry.latterInstrCnt} " +
+      p"pendingFormer=${pendingPtrIsFormer} headPC=${Hexadecimal(debug_microOp(deqPtr.value).head.pc)} " +
+      p"tailPC=${Hexadecimal(debug_microOp(deqPtr.value)(1).pc)}\n")
   }
 
   // sync fflags/dirty_fs/vxsat to csr
@@ -2092,12 +2137,36 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val dt_exuDebug = Reg(Vec(RobSize, Vec(2, new DebugBundle)))
 
     for (i <- 0 until RenameWidth) {
+      val hasEarlierSameHalf =
+        if (i == 0) {
+          false.B
+        } else {
+          VecInit((0 until i).map { j =>
+            io.enq.canAccept &&
+            io.enq.req(j).valid &&
+            io.enq.req(j).bits.robIdx === io.enq.req(i).bits.robIdx
+          }).asUInt.orR
+        }
+      val hasEarlierEntryReset =
+        if (i == 0) {
+          false.B
+        } else {
+          VecInit((0 until i).map { j =>
+            io.enq.canAccept &&
+            io.enq.req(j).valid &&
+            io.enq.req(j).bits.firstUop &&
+            io.enq.req(j).bits.robIdx.isSameEntry(io.enq.req(i).bits.robIdx)
+          }).asUInt.orR
+        }
       when(io.enq.canAccept && io.enq.req(i).valid) {
         val robIdx = io.enq.req(i).bits.robIdx.value
         val idxInEntry = !io.enq.req(i).bits.robIdx.isFormer
-        dt_eliminatedMove(robIdx)(idxInEntry)       := io.enq.req(i).bits.isMove
-        dt_isRVC(robIdx)(idxInEntry)                := io.enq.req(i).bits.isRVC
-        dt_pcTransType.foreach(_(robIdx)(idxInEntry):= io.debugInstrAddrTransType)
+        val slotWritten = Mux(io.enq.req(i).bits.firstUop || hasEarlierEntryReset, false.B, enqHalfWritten(robIdx)(idxInEntry))
+        when(!hasEarlierSameHalf && !slotWritten) {
+          dt_eliminatedMove(robIdx)(idxInEntry)       := io.enq.req(i).bits.isMove
+          dt_isRVC(robIdx)(idxInEntry)                := io.enq.req(i).bits.isRVC
+          dt_pcTransType.foreach(_(robIdx)(idxInEntry):= io.debugInstrAddrTransType)
+        }
       }
     }
     for (wb <- exuWBs) {
@@ -2155,7 +2224,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
           val splitDest = (vecDest << 1).asUInt
           Seq(splitDest, splitDest + 1.U)
         }
-        difftest.nFused := 0.U  // TODO: recover fusion
+        val halfInstrCnt = Mux(j.U === 0.U, io.commits.info(i).formerInstrCnt, io.commits.info(i).latterInstrCnt)
+        difftest.nFused := Mux(halfInstrCnt > 0.U, halfInstrCnt - 1.U, 0.U)
         when(difftest.valid) { // TODO
           assert(instrSize >= 1.U)
         }

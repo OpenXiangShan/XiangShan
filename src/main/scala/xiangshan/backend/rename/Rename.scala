@@ -341,6 +341,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).complexHasDest := complexHasDest(i)
     uops(i).hasStore := hasStore(i)
     uops(i).noCompressSource := noCompressSource(i)
+    uops(i).formerInstrCnt := PopCount(compressMasksVec(i) & Cat(isFormer.reverse))
+    uops(i).latterInstrCnt := PopCount(compressMasksVec(i) & Cat(isFormer.map(x => !x).reverse))
     uops(i).lastIsRVC := io.in(i).bits.isRVC
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
@@ -375,6 +377,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).chanelIdx := i.U
     instrSize(i) := instrSizesVec(i) + io.fusionCross2FtqVec(i)
     uops(i).debug.foreach(_.fusionNum := PopCount(compressMasksVec(i) & Cat(io.isFusionVec.reverse)))
+    val compressedMask = compressMasksVec(i)
+    val summedNumWB = VecInit((0 until RenameWidth).map { k =>
+      Mux(compressedMask(k), io.in(k).bits.numWB, 0.U(log2Up(MaxUopSize).W))
+    }).reduce(_ +& _)
+    val droppedNumWB = PopCount(compressedMask & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
+    val entryNumWB = Mux(summedNumWB >= droppedNumWB, summedNumWB - droppedNumWB, 0.U)
+    val entryNumWBCapped = entryNumWB(log2Up(MaxUopSize) - 1, 0)
     val hasExceptionExceptFlushPipe = Cat(selectFrontend(uops(i).exceptionVec) :+ uops(i).exceptionVec(illegalInstr) :+ uops(i).exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(uops(i).trigger)
     when(isMove(i) || hasExceptionExceptFlushPipe) {
       uops(i).numWB := 0.U
@@ -391,12 +400,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 //        uops(i).ftqOffset := uops(i - 1).ftqOffset
         // rob need first uop isrvc, as it may attach interrupt to first uop(calculate pc)
         // branch need last uop isrvc, it will change in dispatch
-        uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse))) + PopCount(compressMasksVec(i) & Cat(isJmp.reverse)) + PopCount(compressMasksVec(i) & Cat(isStore.reverse))
+        uops(i).numWB := entryNumWBCapped
       }
     }
     when(!needRobFlags(i)) {
       uops(i).lastUop := false.B
-      uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse))) + PopCount(compressMasksVec(i) & Cat(isJmp.reverse)) + PopCount(compressMasksVec(i) & Cat(isStore.reverse))
+      uops(i).numWB := entryNumWBCapped
       if (i < RenameWidth - 1) {
         uops(i).crossFtqCommit := uops(i + 1).crossFtqCommit
         uops(i).crossFtq := uops(i + 1).crossFtq
@@ -458,6 +467,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
     io.out(i).bits := uops(i)
+    XSInfo(io.out(i).fire && (uops(i).formerInstrCnt > 1.U || uops(i).latterInstrCnt > 1.U),
+      p"[ROB-HD] lane=$i rob=${uops(i).robIdx.value} former=${uops(i).formerInstrCnt} latter=${uops(i).latterInstrCnt} mask=0x${Hexadecimal(compressMasksVec(i))}\n")
     // dirty code
     if (i == 0) {
       io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrc(0))

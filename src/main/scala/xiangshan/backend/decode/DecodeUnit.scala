@@ -849,6 +849,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.lastUop := true.B
   val numWBIs2 = FuType.isStore(decodedInst.fuType) || FuType.isJump(decodedInst.fuType) && (decodedInst.ldest =/= 0.U)
   decodedInst.numWB   := Mux(numWBIs2, 2.U, 1.U)
+  decodedInst.simple := false.B
 
   val isZimop = (BitPat("b1?00??0111??_?????_100_?????_1110011") === ctrl_flow.instr) ||
                 (BitPat("b1?00??1?????_?????_100_?????_1110011") === ctrl_flow.instr)
@@ -1196,6 +1197,16 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   ))
 
   io.deq.decodedInst.canRobCompress := decodedInst.canRobCompress
+  // TODO: simplify it!!!
+  io.deq.decodedInst.simple :=
+    io.deq.decodedInst.canRobCompress &&
+    !FuType.isLoadStore(io.deq.decodedInst.fuType) &&
+    !FuType.isBJU(io.deq.decodedInst.fuType) &&
+    !FuType.isAMO(io.deq.decodedInst.fuType) &&
+    !FuType.isFence(io.deq.decodedInst.fuType) &&
+    !FuType.isCsr(io.deq.decodedInst.fuType) &&
+    !FuType.isVset(io.deq.decodedInst.fuType) &&
+    !FuType.isVArithMem(io.deq.decodedInst.fuType)
 
   //-------------------------------------------------------------
   // Debug Info
