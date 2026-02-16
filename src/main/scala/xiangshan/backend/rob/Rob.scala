@@ -1343,13 +1343,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     val hasFormerLdWb = ldWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.robIdx.isFormer).reduce(_ || _)
 
-    val canWbExceptionSeq = exceptionWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val needFlush = robEntries(i).needFlush
-    val needFlushWriteBack = Wire(Bool())
-    needFlushWriteBack := Mux1H(canWbExceptionSeq, io.writebackNeedFlush)
-    val isFormer = Mux1H(canWbExceptionSeq, exceptionWBs.map(_.bits.robIdx.isFormer))
+    val canWbExceptionNeedFlushSeq = exceptionWBs.zip(io.writebackNeedFlush).map { case (writeback, needFlushWb) =>
+      writeback.valid && needFlushWb && writeback.bits.robIdx.value === i.U
+    }
+    val canWbFormerExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
+      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && writeback.bits.robIdx.isFormer
+    }
+    val canWbLaterExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
+      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && !writeback.bits.robIdx.isFormer
+    }
+    val needFlushWriteBack = Cat(canWbExceptionNeedFlushSeq).orR
+    val needFlushWriteBackFormer = Cat(canWbFormerExceptionNeedFlushSeq).orR
+    val needFlushWriteBackLater = Cat(canWbLaterExceptionNeedFlushSeq).orR
     when(robEntries(i).valid && needFlushWriteBack){
-      needFlush := needFlush | Cat(!isFormer, isFormer)
+      needFlush := needFlush | Cat(needFlushWriteBackLater, needFlushWriteBackFormer)
 //      needFlush(0) := needFlush(0) || (needFlushWriteBack && isFormer)
 //      needFlush(1) := needFlush(1) || (needFlushWriteBack && !isFormer)
 //      when(isFormer) {
@@ -1427,13 +1435,21 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     val hasFormerLdWb = ldWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.robIdx.isFormer).reduce(_ || _)
 
-    val canWbExceptionSeq = exceptionWBs.map(writeback => writeback.valid && (writeback.bits.robIdx.value === needUpdateRobIdx(i)))
     val needFlush = robBanksRdata(i).needFlush
-    val needFlushWriteBack = Wire(Bool())
-    needFlushWriteBack := Mux1H(canWbExceptionSeq, io.writebackNeedFlush)
-    val isFormer = Mux1H(canWbExceptionSeq, exceptionWBs.map(_.bits.robIdx.isFormer))
+    val canWbExceptionNeedFlushSeq = exceptionWBs.zip(io.writebackNeedFlush).map { case (writeback, needFlushWb) =>
+      writeback.valid && needFlushWb && (writeback.bits.robIdx.value === needUpdateRobIdx(i))
+    }
+    val canWbFormerExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
+      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && writeback.bits.robIdx.isFormer
+    }
+    val canWbLaterExceptionNeedFlushSeq = canWbExceptionNeedFlushSeq.zip(exceptionWBs).map {
+      case (canWbExceptionNeedFlush, writeback) => canWbExceptionNeedFlush && !writeback.bits.robIdx.isFormer
+    }
+    val needFlushWriteBack = Cat(canWbExceptionNeedFlushSeq).orR
+    val needFlushWriteBackFormer = Cat(canWbFormerExceptionNeedFlushSeq).orR
+    val needFlushWriteBackLater = Cat(canWbLaterExceptionNeedFlushSeq).orR
     when(needUpdate(i).valid && needFlushWriteBack) {
-      needUpdate(i).needFlush := needFlush | Cat(!isFormer, isFormer)
+      needUpdate(i).needFlush := needFlush | Cat(needFlushWriteBackLater, needFlushWriteBackFormer)
 //      needUpdate(i).needFlush(0) := needUpdate(i).needFlush(0) || (needFlushWriteBack && isFormer)
 //      needUpdate(i).needFlush(1) := needUpdate(i).needFlush(1) || (needFlushWriteBack && !isFormer)
     }
