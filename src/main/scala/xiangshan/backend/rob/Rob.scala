@@ -1356,6 +1356,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val needFlushWriteBack = Cat(canWbExceptionNeedFlushSeq).orR
     val needFlushWriteBackFormer = Cat(canWbFormerExceptionNeedFlushSeq).orR
     val needFlushWriteBackLater = Cat(canWbLaterExceptionNeedFlushSeq).orR
+    val needFlushFormer = needFlush(0) || needFlushWriteBackFormer
+    val needFlushLatter = (needFlush(1) && CompressType.isNotNORMAL(robEntries(i).compressType)) || needFlushWriteBackLater
+    val clearUopNumForFormerFlush = needFlushWriteBackFormer && CompressType.isNotNORMAL(robEntries(i).compressType)
     when(robEntries(i).valid && needFlushWriteBack){
       needFlush := needFlush | Cat(needFlushWriteBackLater, needFlushWriteBackFormer)
 //      needFlush(0) := needFlush(0) || (needFlushWriteBack && isFormer)
@@ -1373,9 +1376,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }.otherwise{
         robEntries(i).uopNum := 0.U
       }
-    }.elsewhen(robEntries(i).valid && robEntries(i).uopNum.orR && ((needFlush(0) || needFlush(1) && CompressType.isNotNORMAL(robEntries(i).compressType)) || needFlushWriteBack)) {
+    }.elsewhen(robEntries(i).valid && robEntries(i).uopNum.orR && (needFlushFormer || needFlushLatter)) {
       // exception flush
-      robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
+      when(clearUopNumForFormerFlush) {
+        // former slot needs flush: do not wait later slot writeback
+        robEntries(i).uopNum := 0.U
+      }.otherwise {
+        robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
+      }
     }.elsewhen(!robEntries(i).valid && instCanEnqFlag) {
       // enq set num of uops
       robEntries(i).uopNum := enqWBNum
@@ -1448,6 +1456,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val needFlushWriteBack = Cat(canWbExceptionNeedFlushSeq).orR
     val needFlushWriteBackFormer = Cat(canWbFormerExceptionNeedFlushSeq).orR
     val needFlushWriteBackLater = Cat(canWbLaterExceptionNeedFlushSeq).orR
+    val needFlushFormer = needFlush(0) || needFlushWriteBackFormer
+    val needFlushLatter = (needFlush(1) && CompressType.isNotNORMAL(robBanksRdata(i).compressType)) || needFlushWriteBackLater
+    val clearUopNumForFormerFlush = needFlushWriteBackFormer && CompressType.isNotNORMAL(robBanksRdata(i).compressType)
     when(needUpdate(i).valid && needFlushWriteBack) {
       needUpdate(i).needFlush := needFlush | Cat(needFlushWriteBackLater, needFlushWriteBackFormer)
 //      needUpdate(i).needFlush(0) := needUpdate(i).needFlush(0) || (needFlushWriteBack && isFormer)
@@ -1461,9 +1472,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       }.otherwise{
         needUpdate(i).uopNum := 0.U
       }
-    }.elsewhen(needUpdate(i).valid && robBanksRdata(i).uopNum.orR && ((needFlush(0) || needFlush(1) && CompressType.isNotNORMAL(robBanksRdata(i).compressType)) || needFlushWriteBack)) {
+    }.elsewhen(needUpdate(i).valid && robBanksRdata(i).uopNum.orR && (needFlushFormer || needFlushLatter)) {
       // exception flush
-      needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
+      when(clearUopNumForFormerFlush) {
+        // former slot needs flush: do not wait later slot writeback
+        needUpdate(i).uopNum := 0.U
+      }.otherwise {
+        needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
+      }
     }.elsewhen(!needUpdate(i).valid && instCanEnqFlag) {
       // enq set num of uops
       needUpdate(i).uopNum := enqWBNum
