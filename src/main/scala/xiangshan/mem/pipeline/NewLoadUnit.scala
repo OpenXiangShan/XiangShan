@@ -697,7 +697,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   }).orR && paddrEffective
   // if nuke is storeSetHit store, let load fast replay
   val fastReplayNukeFirst = isStoreSetHit && nukeQueryReqs.zip(nukeQueryValids).map{case (req, v) =>
-    req.robIdx === waitRobIdx && v}.reduce(_ || _)
+    req.robIdx.isSameSlot(waitRobIdx) && v}.reduce(_ || _)
 
   /**
     * Pipeline connect
@@ -1021,7 +1021,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   // if nuke is storeSetHit store, let load fast replay
   val prevStageFastReplayNukeFirst = in.fastReplayNukeFirst.get
   val fastReplayNukeFirst = isStoreSetHit && nukeQueryReqs.zip(nukeQueryValids).map{case (req, v) =>
-    req.robIdx === waitRobIdx && v}.reduce(_ || _) || prevStageFastReplayNukeFirst
+    req.robIdx.isSameSlot(waitRobIdx) && v}.reduce(_ || _) || prevStageFastReplayNukeFirst
 
   /**
     * Preliminary assessment of the load exit
