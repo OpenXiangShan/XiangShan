@@ -166,7 +166,7 @@ class CtrlBlockImp(
   val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.hasVLoadFu)
   private val delayedNotFlushedWriteBackNums = wbData.map(x => {
     val valid = x.valid
-    val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
+    val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
     val delayed = Wire(Valid(UInt(io.fromWB.wbData.size.U.getWidth.W)))
     // delayed.valid := GatedValidRegNext(valid)
     delayed.valid := GatedValidRegNext(valid && !killedByOlder)
@@ -195,7 +195,7 @@ class CtrlBlockImp(
       Seq(x)
     }
     val sameRobidxBools = VecInit(canSameRobidxWbData.map( wb => {
-      val killedByOlderThat = wb.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect, s3_s5_redirect))
+      val killedByOlderThat = wb.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
       wb.bits.robIdx.isSameEntry(x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
 //      (wb.bits.robIdx === x.bits.robIdx) && wb.valid && x.valid && !killedByOlderThat && !killedByOlder
     }).toSeq)
