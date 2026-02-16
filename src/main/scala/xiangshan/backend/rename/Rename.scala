@@ -313,14 +313,23 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   dontTouch(oddFtqVec)
   val isFusionPair = ((isFusionVec.asUInt << 1).asUInt | isFusionVec.asUInt)(RenameWidth-1, 0).asBools
   compressUnit.io.in.zip(io.in).zip(io.validVec.zip(isFusionPair)).foreach{ case((sink, source), (valid, isFusion)) =>
-    sink.valid := valid && !io.singleStep
+    sink.valid := valid
     sink.bits := source.bits
-    sink.bits.canRobCompress := source.bits.canRobCompress && (backendParams.robCompressEn.B || isFusion)
+    sink.bits.canRobCompress := source.bits.canRobCompress && backendParams.robCompressEn.B || isFusion
+    // When HD compression is disabled, decode may not classify fusion pairs as simple.
+    // Mark them as simple here to reuse the same tokenization path.
+    sink.bits.simple := source.bits.simple || isFusion
   }
+  compressUnit.io.actualValid := VecInit(io.in.map(_.valid))
+  compressUnit.io.forceNoCompress := io.singleStep
+  compressUnit.io.standaloneFusionStart := io.fusionCross2FtqVec
 //  compressUnit.io.oddFtqVec := oddFtqVec
   val needRobFlags = compressUnit.io.out.needRobFlags
+  val firstRobFlags = compressUnit.io.out.firstRobFlags
   val instrSizesVec = compressUnit.io.out.instrSizes
   val compressMasksVec = compressUnit.io.out.masks
+  val formerMasksVec = compressUnit.io.out.formerMasks
+  val latterMasksVec = compressUnit.io.out.latterMasks
   val hasLastInFtqEntry = compressUnit.io.out.hasLastInFtqEntry
   val compressType = compressUnit.io.out.compressType
   val isFormer = compressUnit.io.out.isFormer
@@ -332,7 +341,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val noCompressSource = compressUnit.io.out.noCompressSource
 
   // speculatively assign the instruction with an robIdx
-  val validCount = PopCount(io.in.zip(needRobFlags).zip(io.validVec).map{ case((in, needRobFlag), valid) => valid && in.bits.lastUop && needRobFlag}) // number of instructions waiting to enter rob (from decode)
+  val validCount = PopCount(io.in.zip(needRobFlags).map { case (in, needRobFlag) =>
+    in.valid && in.bits.lastUop && needRobFlag
+  }) // number of physical ROB entries allocated by the emitted uops
   val robIdxHead = RegInit(RobPtr(false.B, 0.U))
   val robIdxHeadNext = Mux(io.redirect.valid,
       Mux(io.redirect.bits.robIdx.isFormer && io.redirect.bits.flushItself(), io.redirect.bits.robIdx.asFormer, io.redirect.bits.robIdx.addEntries(1.U).asFormer), // redirect: move ptr to given rob index
@@ -431,6 +442,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val walkPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
   val instrSize = Wire(Vec(RenameWidth, UInt((log2Ceil(RenameWidth + 1)).W)))
+  val formerLenWidth = log2Ceil(RenameWidth * 4 + 1)
 
   // Cross-cycle psrc(0) forwarding for JALR/JAL:
   // When link uop is at RenameWidth-1, capture its lsrc(0) RAT value.
@@ -467,7 +479,15 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).complexHasDest := complexHasDest(i)
     uops(i).hasStore := hasStore(i)
     uops(i).noCompressSource := noCompressSource(i)
-    uops(i).lastIsRVC := io.in(i).bits.isRVC
+    uops(i).formerInstrCnt := PopCount(formerMasksVec(i))
+    uops(i).latterInstrCnt := PopCount(latterMasksVec(i))
+    val formerLenSum = formerMasksVec(i).asBools
+      .zip(io.in.map(_.bits.isRVC))
+      .map { case (mask, isRVC) =>
+        Mux(mask, Mux(isRVC, 2.U(formerLenWidth.W), 4.U(formerLenWidth.W)), 0.U(formerLenWidth.W))
+      }
+      .reduce(_ +& _)
+    uops(i).formerLen := formerLenSum(formerLenWidth - 1, 0)
     // alloc a new phy reg
     needVlDest(i) := io.in(i).valid && needDestReg(Reg_Vl, io.in(i).bits)
     needVecDest(i) := io.in(i).valid && needDestReg(Reg_V, io.in(i).bits)
@@ -496,33 +516,25 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).zip(io.validVec).take(i).map{ case((in, needRobFlag), valid) => valid && in.bits.lastUop && needRobFlag})
     instrSize(i) := instrSizesVec(i) + io.fusionCross2FtqVec(i)
     val hasExceptionExceptFlushPipe = uops(i).exceptionVec.orR || TriggerAction.isDmode(uops(i).trigger)
-    when(isMove(i) || hasExceptionExceptFlushPipe) {
-      uops(i).numWB := 0.U
-    }
-    if (i > 0) {
-      when(!needRobFlags(i - 1)) {
-        val numFusion = PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
-        val numuops = instrSizesVec(i) - numFusion
-        val numJmp = PopCount(compressMasksVec(i) & Cat(isJmp.reverse))
-        dontTouch(numFusion)
-        dontTouch(numuops)
-        uops(i).firstUop := false.B
-//        uops(i).ftqPtr := uops(i - 1).ftqPtr
-//        uops(i).ftqOffset := uops(i - 1).ftqOffset
-        // rob need first uop isrvc, as it may attach interrupt to first uop(calculate pc)
-        // branch need last uop isrvc, it will change in dispatch
-        uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse))) + PopCount(compressMasksVec(i) & Cat(isJmp.reverse)) + PopCount(compressMasksVec(i) & Cat(isStore.reverse))
-      }
+    when(hasExceptionExceptFlushPipe) {
+      uops(i).formerNumWB := 0.U
+      uops(i).latterNumWB := 0.U
     }
     when(!needRobFlags(i)) {
       uops(i).lastUop := false.B
-      uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse))) + PopCount(compressMasksVec(i) & Cat(isJmp.reverse)) + PopCount(compressMasksVec(i) & Cat(isStore.reverse))
       if (i < RenameWidth - 1) {
         uops(i).crossFtqCommit := uops(i + 1).crossFtqCommit
         uops(i).crossFtq := uops(i + 1).crossFtq
       }
     }.elsewhen(needRobFlags(i)) {
-      uops(i).crossFtqCommit := PopCount(compressMasksVec(i) & Cat(isLastFtqVec.reverse))
+      // CtrlBlock folds the first visible FTQ end into the second member for a
+      // fusion crossing two FTQ entries. Add that hidden boundary back here so
+      // the ROB can advance the frontend commit pointer by the exact count.
+      val visibleFtqEnds = PopCount(compressMasksVec(i) & Cat(isLastFtqVec.reverse))
+      val hiddenCross2FusionEnds = PopCount(compressMasksVec(i) & Cat(io.fusionCross2FtqVec.reverse))
+      val ftqCommitCount = visibleFtqEnds +& hiddenCross2FusionEnds
+      assert(ftqCommitCount < 4.U)
+      uops(i).crossFtqCommit := ftqCommitCount
       uops(i).crossFtq := uops(i).crossFtqCommit(1) || (uops(i).crossFtqCommit(0) && !isLastFtqVec(i))
     }
     if (i < RenameWidth - 1){
@@ -638,6 +650,23 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val instrSizeTable = (1 to RenameWidth).map{ instrNum =>
     (0 to instrNum).map( nonRVCNum => (instrNum, nonRVCNum) )
   }.flatten
+
+  val traceItypeVec = VecInit((0 until RenameWidth).map { i =>
+    // CSR systemop instruction excluding ebreak & ecall
+    val csrAddr = Imm_Z().getCSRAddr(uops(i).imm(Imm_Z().len - 1, 0))
+    val isXret = FuType.isCsr(uops(i).fuType) &&
+      CSROpType.isSystemOp(uops(i).fuOpType) && csrAddr(11, 1).orR
+    Mux(
+      isXret,
+      Itype.ExpIntReturn,
+      Itype.jumpTypeGen(
+        inVec(i).fuType,
+        inVec(i).fuOpType,
+        inVec(i).ldest.asTypeOf(new OpRegType),
+        inVec(i).lsrc(0).asTypeOf(new OpRegType)
+      )
+    )
+  })
 
   for (i <- 0 until RenameWidth) {
     // iretire
