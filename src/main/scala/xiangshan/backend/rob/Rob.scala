@@ -694,7 +694,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       firstVInstrFtqPtr,
       Mux(deqPtrEntry.needFlush(0),
         deqPtrEntry.ftqIdx,
-        Mux(deqPtrEntry.predTaken,
+        Mux(deqPtrEntry.hasLastInFtqEntry(0),
           deqPtrEntry.ftqIdx + 1.U,
           deqPtrEntry.ftqIdx
         )
@@ -705,7 +705,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       firstVInstrFtqOffset,
       Mux(deqPtrEntry.needFlush(0),
         deqPtrEntry.ftqOffset,
-        Mux(deqPtrEntry.predTaken,
+        Mux(deqPtrEntry.hasLastInFtqEntry(0),
           Mux(deqPtrEntry.RVC(1),
             0.U.asTypeOf(deqPtrEntry.ftqOffset),
             1.U.asTypeOf(deqPtrEntry.ftqOffset)
