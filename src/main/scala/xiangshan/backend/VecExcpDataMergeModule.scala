@@ -562,7 +562,7 @@ class NfMappedElemIdx(vlen: Int) extends Module {
     Mux1H(
       (0 until 4).map(i =>
         in.eewOH(i) -> VecInit(rangeVec.map(
-          x => HWRange(idxWidth)(x.from >> i, x.until >> i)
+          x => HWRange(idxWidth)(x.from >> i, x.to >> i)
         ))
       )
     )
@@ -640,20 +640,20 @@ class VecE64Vec(vlen: Int) extends Bundle {
 
 class HWRange(w: Int) extends Bundle {
   val from  = UInt(w.W)
-  val until = UInt(w.W)
+  val to = UInt(w.W)
 
   def inRange(uint: UInt) = {
-    uint >= this.from && uint < this.until
+    uint >= this.from && uint < this.to
   }
 
-  def apply(_from: Bits, _until: Bits): this.type = {
+  def apply(_from: Bits, _to: Bits): this.type = {
     this.from := _from
-    this.until := _until
+    this.to := _to
     this
   }
 }
 
 object HWRange {
-  def apply(w: Int)(_from: Bits, _until: Bits): HWRange = Wire(new HWRange(w)).apply(_from, _until)
+  def apply(w: Int)(_from: Bits, _to: Bits): HWRange = Wire(new HWRange(w)).apply(_from, _to)
 }
 
