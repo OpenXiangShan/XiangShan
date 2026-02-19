@@ -922,6 +922,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val vxsat = Wire(Valid(Bool()))
   val updateVxsat = RegInit(false.B)
   val oldestRobidxUpdateVxsat = RegInit(0.U.asTypeOf(new RobPtr))
+  val deqPtrCmp = Wire(new RobPtr)
+  val enqPtrCmp = Wire(new RobPtr)
+  deqPtrCmp := deqPtr
+  enqPtrCmp := enqPtr
+  deqPtrCmp.isFormer := true.B
+  enqPtrCmp.isFormer := true.B
 
   vxsat.valid := io.commits.isCommit && vxsat.bits && updateVxsat
   vxsat.bits := io.commits.commitValid.zip(io.commits.robIdx).map {
@@ -930,7 +936,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val wbUpdateVxsat = vxsatWBs.map(wb => 
     {
-      val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtr) && isBefore(wb.bits.robIdx, enqPtr)
+      val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
       wb.valid && wbEntryValid && wb.bits.vxsat.get
     }
   ).reduce(_ | _)
@@ -942,7 +948,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val wbUpdateVxsatSeq = vxsatWBs.map(wb =>
     {
       val s = Wire(new WbSel())
-      s.validvxsat := wb.valid && wb.bits.vxsat.get
+      val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
+      s.validvxsat := wb.valid && wbEntryValid && wb.bits.vxsat.get
       s.robIdx := wb.bits.robIdx
       s
     }
@@ -996,7 +1003,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     val wbUpdateFflags = fflagsWBs.map(wb => 
       { 
-        val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtr) && isBefore(wb.bits.robIdx, enqPtr)
+        val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
         wb.valid && wbEntryValid && wb.bits.wflags.get && wb.bits.fflags.get(i)
       }
     ).reduce(_ | _)
@@ -1004,7 +1011,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val wbUpdateFflagsSeq = fflagsWBs.map(wb =>
       {
         val s = Wire(new WbFflags)
-        s.set := wb.valid && wb.bits.wflags.get && wb.bits.fflags.get(i)
+        val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
+        s.set := wb.valid && wbEntryValid && wb.bits.wflags.get && wb.bits.fflags.get(i)
         s.robIdx := wb.bits.robIdx
         s
       }
