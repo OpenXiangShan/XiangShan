@@ -192,6 +192,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.enq.canAccept := allowEnqueue && !hasBlockBackward && rab.io.canEnq && vtypeBuffer.io.canEnq && !io.fromVecExcpMod.busy
   io.enq.canAcceptForDispatch := allowEnqueueForDispatch && !hasBlockBackward && rab.io.canEnqForDispatch && vtypeBuffer.io.canEnqForDispatch && !io.fromVecExcpMod.busy
   io.enq.resp := allocatePtrVec
+  val uopCanEnqueue = VecInit(io.enq.req.map(req => req.valid && io.enq.canAccept))
   val canEnqueue = VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop && io.enq.canAccept))
   val timer = GTimer()
   // robEntries enqueue
@@ -809,11 +810,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     case (valid, idx) => valid & idx.isSameEntry(oldestRobidxupdateDirtyFs)
   }.reduce(_ | _)
 
-  val enqUpdateDirtyFsSeq = io.enq.req.map(req => req.valid && (req.bits.fpWen || req.bits.wfflags)).zip(canEnqueue).map(x => x._1 && x._2)
+  val enqUpdateDirtyFsSeq = io.enq.req.map(req => req.valid && (req.bits.dirtyFs || req.bits.wfflags)).zip(uopCanEnqueue).map {
+    case (validDirtyFs, canEnq) => validDirtyFs && canEnq
+  }
 
   val enqUpdateDirtyFs = enqUpdateDirtyFsSeq.reduce(_ | _)
 
-  val oldestRobidxEnqUpdateDirtyFs = PriorityMuxDefault(enqUpdateDirtyFsSeq.zip(allocatePtrVec), 0.U.asTypeOf(new RobPtr))
+  val oldestRobidxEnqUpdateDirtyFs = PriorityMuxDefault(enqUpdateDirtyFsSeq.zip(io.enq.req.map(_.bits.robIdx)), 0.U.asTypeOf(new RobPtr))
 
   val pendingDirtyFsNeedFlush = oldestRobidxupdateDirtyFs.needFlush(io.redirect)
   val enqDirtyFsNeedFlush     = oldestRobidxEnqUpdateDirtyFs.needFlush(io.redirect)
@@ -845,7 +848,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     case (valid, idx) => valid & idx.isSameEntry(oldestRobidxupdateDirtyVs)
   }.reduce(_ | _)
 
-  val enqUpdateDirtyVsSeq = io.enq.req.map(req => req.valid && req.bits.dirtyVs).zip(canEnqueue).map {
+  val enqUpdateDirtyVsSeq = io.enq.req.map(req => req.valid && req.bits.dirtyVs).zip(uopCanEnqueue).map {
     case (validDirtyVs, canEnq) => validDirtyVs && canEnq
   }
 
@@ -866,7 +869,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 //  }
 
   // Because enqRobidx is sequential, it is sufficient to find the first dirtyVs RobIdx.
-  val oldestRobidxEnqUpdateDirtyVs = PriorityMuxDefault(enqUpdateDirtyVsSeq.zip(allocatePtrVec), 0.U.asTypeOf(new RobPtr))
+  val oldestRobidxEnqUpdateDirtyVs = PriorityMuxDefault(enqUpdateDirtyVsSeq.zip(io.enq.req.map(_.bits.robIdx)), 0.U.asTypeOf(new RobPtr))
 //  val oldestEnqUpdateDirtyVs = enqUpdateDirtySeq.reduce{
 //    (enq1, enq2) => Mux(
 //      enq1.validDirtyVs && enq2.validDirtyVs,
