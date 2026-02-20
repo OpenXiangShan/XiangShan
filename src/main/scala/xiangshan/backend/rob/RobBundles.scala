@@ -405,3 +405,8 @@ class RobFlushInfo(implicit p: Parameters) extends XSBundle {
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   val replayInst = Bool()
 }
+
+class RobFlushPcInfo(implicit p: Parameters) extends XSBundle {
+  val formerLen = UInt(3.W)
+  val flushIsRVC = Bool()
+}

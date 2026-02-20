@@ -107,9 +107,12 @@ class CtrlBlockImp(
   private val disableFusion = decode.io.csrCtrl.singlestep || !decode.io.csrCtrl.fusion_enable
 
   private val s0_robFlushRedirect = rob.io.flushOut
+  private val s0_robFlushPcInfo = rob.io.flushPcInfo
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
+  private val s1_robFlushPcInfo = Wire(chiselTypeOf(rob.io.flushPcInfo))
   s1_robFlushRedirect.valid := GatedValidRegNext(s0_robFlushRedirect.valid, false.B)
   s1_robFlushRedirect.bits := RegEnable(s0_robFlushRedirect.bits, s0_robFlushRedirect.valid)
+  s1_robFlushPcInfo := RegEnable(s0_robFlushPcInfo, s0_robFlushRedirect.valid)
 
   pcMem.io.ren.get(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.valid
   pcMem.io.raddr(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.bits.ftqIdx.value
@@ -118,6 +121,7 @@ class CtrlBlockImp(
     robFlushPCOffset := s0_robFlushRedirect.bits.getPcOffset()
   }
   private val s1_robFlushPc = pcMem.io.rdata(pcMemRdIndexes("robFlush").head).toUInt + robFlushPCOffset
+  private val s1_robFlushPcAdjusted = s1_robFlushPc + s1_robFlushPcInfo.formerLen
   private val s3_redirectGen = redirectGen.io.stage2Redirect
   private val s1_s3_redirect = Mux(s1_robFlushRedirect.valid, s1_robFlushRedirect, s3_redirectGen)
   private val s2_s4_pendingRedirectValid = RegInit(false.B)
@@ -402,8 +406,8 @@ class CtrlBlockImp(
   // T5: ctrlBlock.trapTarget
   // T6: io.frontend.toFtq.stage2Redirect.valid
   val s2_robFlushPc = RegEnable(Mux(s1_robFlushRedirect.bits.flushItself(),
-    s1_robFlushPc, // replay inst
-    s1_robFlushPc + Mux(s1_robFlushRedirect.bits.isRVC, 2.U, 4.U) // flush pipe
+    s1_robFlushPcAdjusted, // replay inst
+    s1_robFlushPcAdjusted + Mux(s1_robFlushPcInfo.flushIsRVC, 2.U, 4.U) // flush pipe
   ), s1_robFlushRedirect.valid)
   private val s5_csrIsTrap = DelayN(rob.io.exception.valid, 4)
   private val s5_trapTargetFromCsr = io.robio.csr.trapTarget
@@ -814,7 +818,7 @@ class CtrlBlockImp(
 
   io.robio.csr.perfinfo.retiredInstr <> RegNext(rob.io.csr.perfinfo.retiredInstr)
   io.robio.exception := rob.io.exception
-  io.robio.exception.bits.pc := s1_robFlushPc
+  io.robio.exception.bits.pc := s1_robFlushPcAdjusted
   // bju resolve
   io.frontend.toFtq.resolve := io.fromBJUResolve
   // wfi

@@ -67,6 +67,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val redirect = Input(Valid(new Redirect))
     val enq = new RobEnqIO
     val flushOut = ValidIO(new Redirect)
+    val flushPcInfo = Output(new RobFlushPcInfo)
     val exception = ValidIO(new ExceptionInfo)
     // exu + brq
     val writeback: MixedVec[ValidIO[ExuOutput]] = Flipped(params.genWrite2CtrlBundles)
@@ -686,15 +687,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException && (!deqIsVlsException || deqVlsCanCommit) || isFlushPipe) && !lastCycleFlush
   io.flushOut.bits := DontCare
-  io.flushOut.bits.isRVC := deqPtrEntry.RVC(!deqPtrEntry.needFlush(0))
+  val flushIsFormer = deqPtrEntry.needFlush(0)
+  val flushBaseIsRVC = Mux(flushIsFormer, deqPtrEntry.RVC(0), Mux(deqPtrEntry.predTaken, deqPtrEntry.RVC(1), deqPtrEntry.RVC(0)))
+  io.flushOut.bits.isRVC := flushBaseIsRVC
   io.flushOut.bits.robIdx := Mux(needModifyFtqIdxOffset, firstVInstrRobIdx, deqPtr)
-  io.flushOut.bits.robIdx.isFormer := Mux(needModifyFtqIdxOffset, true.B, deqPtrEntry.needFlush(0))
+  io.flushOut.bits.robIdx.isFormer := Mux(needModifyFtqIdxOffset, true.B, flushIsFormer)
   io.flushOut.bits.ftqIdx := 
     Mux(needModifyFtqIdxOffset, 
       firstVInstrFtqPtr,
-      Mux(deqPtrEntry.needFlush(0),
+      Mux(flushIsFormer,
         deqPtrEntry.ftqIdx,
-        Mux(deqPtrEntry.hasLastInFtqEntry(0),
+        Mux(deqPtrEntry.predTaken,
           deqPtrEntry.ftqIdx + 1.U,
           deqPtrEntry.ftqIdx
         )
@@ -703,20 +706,27 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.flushOut.bits.ftqOffset :=
     Mux(needModifyFtqIdxOffset,
       firstVInstrFtqOffset,
-      Mux(deqPtrEntry.needFlush(0),
+      Mux(flushIsFormer,
         deqPtrEntry.ftqOffset,
-        Mux(deqPtrEntry.hasLastInFtqEntry(0),
+        Mux(deqPtrEntry.predTaken,
           Mux(deqPtrEntry.RVC(1),
             0.U.asTypeOf(deqPtrEntry.ftqOffset),
             1.U.asTypeOf(deqPtrEntry.ftqOffset)
           ),
-          Mux(deqPtrEntry.RVC(1),
-            deqPtrEntry.ftqOffset + 1.U,
-            deqPtrEntry.ftqOffset + 2.U
-          )
+          deqPtrEntry.ftqOffset
         )
       )
     )
+  io.flushPcInfo.formerLen := Mux(
+    needModifyFtqIdxOffset,
+    0.U(3.W),
+    Mux(flushIsFormer || deqPtrEntry.predTaken, 0.U(3.W), Mux(deqPtrEntry.RVC(0), 2.U(3.W), 4.U(3.W)))
+  )
+  io.flushPcInfo.flushIsRVC := Mux(
+    needModifyFtqIdxOffset,
+    io.flushOut.bits.isRVC,
+    Mux(flushIsFormer, deqPtrEntry.RVC(0), deqPtrEntry.RVC(1))
+  )
   // TODO: it could use the former instr's ftqIdx and ftqOffset to calculate the latter instr's PC
   // rather than calculate the latter instr's ftqIdx and ftqOffset which could be wrong!!!
 
@@ -1532,7 +1542,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   exceptionGen.io.redirect <> io.redirect
   exceptionGen.io.flush := io.flushOut.valid
 
-  val canEnqueueEG = VecInit(io.enq.req.map(req => req.valid && io.enq.canAccept))
+  val canEnqueueEG = uopCanEnqueue
   for (i <- 0 until RenameWidth) {
     exceptionGen.io.enq(i).valid := canEnqueueEG(i)
     exceptionGen.io.enq(i).bits.robIdx := io.enq.req(i).bits.robIdx
