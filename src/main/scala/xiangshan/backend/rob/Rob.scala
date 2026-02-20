@@ -639,10 +639,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   deqPtrLatter := deqPtr
   deqPtrFormer.isFormer := true.B
   deqPtrLatter.isFormer := false.B
+  // Select the exact slot (former/latter) that should provide exception state for the head entry.
+  val deqExceptionRobIdx = Mux(deqPtrEntry.needFlush(0), deqPtrFormer, deqPtrLatter)
   val formerNotFlush = !deqPtrFormer.needFlush(io.redirect)
   val latterNotFlush = !deqPtrLatter.needFlush(io.redirect)
   val deqNeedFlush = (deqPtrEntry.needFlush(0) && formerNotFlush || deqPtrEntry.needFlush(1) && CompressType.isNotNORMAL(deqPtrEntry.compressType) && latterNotFlush) && deqPtrEntry.commit_v && deqPtrEntry.commit_w
-  val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx.isSameEntry(deqPtr)
+  val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqExceptionRobIdx
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
   val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.asUInt.orR || exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
   val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException && RegNext(RegNext(deqPtrEntry.commit_w))
