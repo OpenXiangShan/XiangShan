@@ -1806,7 +1806,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val isCommitReg = GatedValidRegNext(io.commits.isCommit)
   val instrCntReg = RegInit(0.U(64.W))
   val fuseCommitCnt = RegEnable(io.commits.commitValid.zip(io.commits.info).map { case (v, i) => Mux(v, i.debug_fusionNum.getOrElse(0.U), 0.U) }.reduce(_ +& _), isCommit)
-  val trueCommitCnt = RegEnable(io.commits.commitValid.zip(instrSizeCommit).map { case (v, instrSize) => Mux(v, instrSize, 0.U) }.reduce(_ +& _), isCommit)
+  val commitInstrCntByEntry = io.commits.info.map { info =>
+    val latterInstrCnt = Mux(CompressType.isNotNORMAL(info.compressType), info.latterInstrCnt, 0.U)
+    info.formerInstrCnt +& latterInstrCnt
+  }
+  val trueCommitCnt = RegEnable(io.commits.commitValid.zip(commitInstrCntByEntry).map { case (v, instrCnt) => Mux(v, instrCnt, 0.U) }.reduce(_ +& _), isCommit)
   val retireCounter = Mux(isCommitReg, trueCommitCnt, 0.U)
   val instrCnt = instrCntReg + retireCounter
   when(isCommitReg){
@@ -1944,11 +1948,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     RegEnable(io.commits.info(0).debug_pc.getOrElse(0.U),
               0.U,
               io.commits.isCommit && io.commits.commitValid(0)))
-  XSPerfAccumulate("commitCompressCntAll", PopCount(io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => io.commits.isCommit && valid && instrSize > 1.U }))
+  XSPerfAccumulate("commitCompressCntAll", PopCount(io.commits.commitValid.zip(commitInstrCntByEntry).map { case (valid, instrCnt) => io.commits.isCommit && valid && instrCnt > 1.U }))
   (1 to RenameWidth).foreach(i =>
-    XSPerfAccumulate(s"commitCompressCnt${i}", PopCount(io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => io.commits.isCommit && valid && instrSize === i.U }))
+    XSPerfAccumulate(s"commitCompressCnt${i}", PopCount(io.commits.commitValid.zip(commitInstrCntByEntry).map { case (valid, instrCnt) => io.commits.isCommit && valid && instrCnt === i.U }))
   )
-  XSPerfAccumulate("compressSize", io.commits.commitValid.zip(instrSizeCommit).map { case (valid, instrSize) => Mux(io.commits.isCommit && valid && instrSize > 1.U, instrSize, 0.U) }.reduce(_ +& _))
+  XSPerfAccumulate("compressSize", io.commits.commitValid.zip(commitInstrCntByEntry).map { case (valid, instrCnt) => Mux(io.commits.isCommit && valid && instrCnt > 1.U, instrCnt, 0.U) }.reduce(_ +& _))
 
   val compressTypeIsNORMAL = io.commits.commitValid.zip(io.commits.info).map(x => x._1 && CompressType.isNORMAL(x._2.compressType))
   val compressTypeIsCC = io.commits.commitValid.zip(io.commits.info).map(x => x._1 && CompressType.isCC(x._2.compressType))
