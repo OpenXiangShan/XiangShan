@@ -59,6 +59,7 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
   // cnt can be optimized
   val cnt = UInt((log2Up(BIT_VEC_WITDH) + 1).W)
   val decr_mode = Bool()
+  val hysteresis = Bool()
 
   // debug usage
   val trigger_full_va = UInt(VAddrBits.W)
@@ -69,6 +70,7 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
     active := false.B
     cnt := 0.U
     decr_mode := INIT_DEC_MODE.B
+    hysteresis := false.B
     trigger_full_va := 0xdeadbeefL.U
   }
 
@@ -81,6 +83,7 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
     bit_vec := alloc_bit_vec
     active := alloc_active
     cnt := 1.U
+    hysteresis := false.B
     trigger_full_va := alloc_full_vaddr
     if(ENABLE_DECR_MODE) {
       decr_mode := alloc_decr_mode
@@ -99,6 +102,7 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
 
     bit_vec := bit_vec | update_bit_vec
     cnt := cnt_next
+    hysteresis := true.B
     when(cnt_next >= ACTIVE_THRESHOLD.U) {
       active := true.B
     }
@@ -209,6 +213,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s0_minus_one_hit = Cat(s0_region_tag_minus_one_match_vec).orR
   val s0_hit_vec = VecInit(s0_region_tag_match_vec).asUInt
   val s0_index = Mux(s0_hit, OHToUInt(s0_hit_vec), replacement.way)
+  val s0_replace_hysteresis_block = !s0_hit && valids(s0_index) && array(s0_index).hysteresis
   val s0_plus_one_index = OHToUInt(VecInit(s0_region_tag_plus_one_match_vec).asUInt)
   val s0_minus_one_index = OHToUInt(VecInit(s0_region_tag_minus_one_match_vec).asUInt)
   io.train_req.ready := s0_can_accept
@@ -302,7 +307,9 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
                             RegEnable(s0_minus_one_hit, s0_valid) && array(s1_minus_one_index).active
   val s1_region_tag = RegEnable(s0_region_tag, s0_valid)
   val s1_region_bits = RegEnable(s0_region_bits, s0_valid)
-  val s1_alloc = s1_valid && !s1_hit
+  val s1_replace_hysteresis_block = RegEnable(s0_replace_hysteresis_block, s0_valid)
+  val s1_alloc = s1_valid && !s1_hit && !s1_replace_hysteresis_block
+  val s1_clear_hysteresis = s1_valid && !s1_hit && s1_replace_hysteresis_block
   val s1_update = s1_valid && s1_hit
   val s1_pf_l1_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + l1_depth, 0.U(BLOCK_OFFSET.W))
   val s1_pf_l1_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - l1_depth, 0.U(BLOCK_OFFSET.W))
@@ -329,6 +336,10 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
       alloc_full_vaddr = RegEnable(s0_vaddr, s0_valid)
       )
 
+  }.elsewhen(s1_clear_hysteresis) {
+    // replacement candidate has hysteresis protection, clear and skip replacement this time
+    array(s1_index).hysteresis := false.B
+
   }.elsewhen(s1_update) {
     // update a existing entry
     assert(array(s1_index).cnt =/= 0.U || valids(s1_index), "entry should have been allocated before")
@@ -338,6 +349,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   }
 
   XSPerfAccumulate("s1_alloc", s1_alloc)
+  XSPerfAccumulate("s1_replace_hysteresis_block", s1_clear_hysteresis)
   XSPerfAccumulate("s1_update", s1_update)
   XSPerfAccumulate("s1_active_plus_one_hit", s1_valid && s1_plus_one_hit)
   XSPerfAccumulate("s1_active_minus_one_hit", s1_valid && s1_minus_one_hit)
