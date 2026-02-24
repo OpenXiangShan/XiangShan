@@ -146,7 +146,7 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
     xbarNode.node
   }
   val cpus_l4LM = LazyModule(new AXI4Xbar())
-  val cpus_l4 = cpus_l4LM.suggestName("cpus_l4")
+  val cpus_l4 = cpus_l4LM.suggestName("cpus_l4").node
 
 //  val cpus_l1 = Seq.fill(params.NumHarts / 2)(AXI4Xbar())
 //  val cpus_l2 = Seq.fill(params.NumHarts / 4)(AXI4Xbar())
