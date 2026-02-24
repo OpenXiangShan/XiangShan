@@ -201,6 +201,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val needRobFlags = compressUnit.io.out.needRobFlags
   val instrSizesVec = compressUnit.io.out.instrSizes
   val compressMasksVec = compressUnit.io.out.masks
+  val formerMasksVec = compressUnit.io.out.formerMasks
+  val latterMasksVec = compressUnit.io.out.latterMasks
   val hasLastInFtqEntry = compressUnit.io.out.hasLastInFtqEntry
   val compressType = compressUnit.io.out.compressType
   val isFormer = compressUnit.io.out.isFormer
@@ -342,13 +344,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).complexHasDest := complexHasDest(i)
     uops(i).hasStore := hasStore(i)
     uops(i).noCompressSource := noCompressSource(i)
-    uops(i).formerInstrCnt := PopCount(compressMasksVec(i) & Cat(isFormer.reverse))
-    uops(i).latterInstrCnt := PopCount(compressMasksVec(i) & Cat(isFormer.map(x => !x).reverse))
-    val formerLenSum = compressMasksVec(i).asBools
-      .zip(isFormer)
+    uops(i).formerInstrCnt := PopCount(formerMasksVec(i))
+    uops(i).latterInstrCnt := PopCount(latterMasksVec(i))
+    val formerLenSum = formerMasksVec(i).asBools
       .zip(io.in.map(_.bits.isRVC))
-      .map { case ((mask, former), isRVC) =>
-        Mux(mask && former, Mux(isRVC, 2.U(formerLenWidth.W), 4.U(formerLenWidth.W)), 0.U(formerLenWidth.W))
+      .map { case (mask, isRVC) =>
+        Mux(mask, Mux(isRVC, 2.U(formerLenWidth.W), 4.U(formerLenWidth.W)), 0.U(formerLenWidth.W))
       }
       .reduce(_ +& _)
     uops(i).formerLen := formerLenSum(formerLenWidth - 1, 0)
@@ -386,16 +387,27 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).chanelIdx := i.U
     instrSize(i) := instrSizesVec(i) + io.fusionCross2FtqVec(i)
     uops(i).debug.foreach(_.fusionNum := PopCount(compressMasksVec(i) & Cat(io.isFusionVec.reverse)))
-    val compressedMask = compressMasksVec(i)
-    val summedNumWB = VecInit((0 until RenameWidth).map { k =>
-      Mux(compressedMask(k), io.in(k).bits.numWB, 0.U(log2Up(MaxUopSize).W))
+    val formerMask = formerMasksVec(i)
+    val latterMask = latterMasksVec(i)
+    val dropMask = Cat(isMove.reverse) | Cat(fusionValidVec.reverse)
+    val summedFormerNumWB = VecInit((0 until RenameWidth).map { k =>
+      Mux(formerMask(k), io.in(k).bits.numWB, 0.U(log2Up(MaxUopSize).W))
     }).reduce(_ +& _)
-    val droppedNumWB = PopCount(compressedMask & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
-    val entryNumWB = Mux(summedNumWB >= droppedNumWB, summedNumWB - droppedNumWB, 0.U)
-    val entryNumWBCapped = entryNumWB(log2Up(MaxUopSize) - 1, 0)
+    val summedLatterNumWB = VecInit((0 until RenameWidth).map { k =>
+      Mux(latterMask(k), io.in(k).bits.numWB, 0.U(log2Up(MaxUopSize).W))
+    }).reduce(_ +& _)
+    val droppedFormerNumWB = PopCount(formerMask & dropMask)
+    val droppedLatterNumWB = PopCount(latterMask & dropMask)
+    val entryFormerNumWB = Mux(summedFormerNumWB >= droppedFormerNumWB, summedFormerNumWB - droppedFormerNumWB, 0.U)
+    val entryLatterNumWB = Mux(summedLatterNumWB >= droppedLatterNumWB, summedLatterNumWB - droppedLatterNumWB, 0.U)
+    val entryFormerNumWBCapped = entryFormerNumWB(log2Ceil(RenameWidth + 1) - 1, 0)
+    val entryLatterNumWBCapped = entryLatterNumWB(log2Ceil(RenameWidth) - 1, 0)
+    uops(i).formerNumWB := entryFormerNumWBCapped
+    uops(i).latterNumWB := entryLatterNumWBCapped
     val hasExceptionExceptFlushPipe = Cat(selectFrontend(uops(i).exceptionVec) :+ uops(i).exceptionVec(illegalInstr) :+ uops(i).exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(uops(i).trigger)
     when(isMove(i) || hasExceptionExceptFlushPipe) {
-      uops(i).numWB := 0.U
+      uops(i).formerNumWB := 0.U
+      uops(i).latterNumWB := 0.U
     }
     if (i > 0) {
       when(!needRobFlags(i - 1)) {
@@ -409,12 +421,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 //        uops(i).ftqOffset := uops(i - 1).ftqOffset
         // rob need first uop isrvc, as it may attach interrupt to first uop(calculate pc)
         // branch need last uop isrvc, it will change in dispatch
-        uops(i).numWB := entryNumWBCapped
+        uops(i).formerNumWB := entryFormerNumWBCapped
+        uops(i).latterNumWB := entryLatterNumWBCapped
       }
     }
     when(!needRobFlags(i)) {
       uops(i).lastUop := false.B
-      uops(i).numWB := entryNumWBCapped
+      uops(i).formerNumWB := entryFormerNumWBCapped
+      uops(i).latterNumWB := entryLatterNumWBCapped
       if (i < RenameWidth - 1) {
         uops(i).crossFtqCommit := uops(i + 1).crossFtqCommit
         uops(i).crossFtq := uops(i + 1).crossFtq

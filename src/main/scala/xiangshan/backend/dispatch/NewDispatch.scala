@@ -862,7 +862,8 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     io.enqRob.req(i).valid := fromRename(i).fire
     io.enqRob.req(i).bits := updatedUop(i)
     io.enqRob.req(i).bits.hasException := updatedUop(i).hasException || updatedUop(i).singleStep
-    io.enqRob.req(i).bits.numWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).numWB)
+    io.enqRob.req(i).bits.formerNumWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).formerNumWB)
+    io.enqRob.req(i).bits.latterNumWB := Mux(updatedUop(i).singleStep, 0.U, updatedUop(i).latterNumWB)
     io.enqRob.req(i).bits.isXSTrap := FuType.isAlu(updatedUop(i).fuType) && (updatedUop(i).fuOpType === ALUOpType.xstrap)
     io.enqRob.req(i).bits.stdwriteNeed := FuType.isStore(updatedUop(i).fuType)
   }

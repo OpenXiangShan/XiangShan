@@ -226,7 +226,8 @@ object Bundles {
     val isVset = Bool()
     val firstUop = Bool()
     val lastUop = Bool()
-    val numWB = UInt(log2Up(MaxUopSize).W) // rob need this
+    val formerNumWB = UInt(log2Ceil(RenameWidth + 1).W) // rob need this
+    val latterNumWB = UInt(log2Ceil(RenameWidth).W) // rob need this
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val pdest = UInt(PhyRegIdxWidth.W)
@@ -494,7 +495,8 @@ object Bundles {
     val firstUop        = Bool()
     val lastUop         = Bool()
     val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
-    val numWB           = UInt(log2Up(MaxUopSize).W) // rob need this
+    val formerNumWB     = UInt(log2Ceil(RenameWidth + 1).W) // rob need this
+    val latterNumWB     = UInt(log2Ceil(RenameWidth).W) // rob need this
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numSrc, SrcState())

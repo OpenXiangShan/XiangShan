@@ -75,6 +75,8 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
       val needRobFlags = Vec(RenameWidth, Output(Bool()))
       val instrSizes = Vec(RenameWidth, Output(UInt(log2Ceil(RenameWidth + 1).W)))
       val masks = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
+      val formerMasks = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
+      val latterMasks = Vec(RenameWidth, Output(UInt(RenameWidth.W)))
       val hasLastInFtqEntry = Vec(RenameWidth, Output(UInt(2.W)))
       val compressType = Vec(RenameWidth, CompressType())
       val isFormer = Vec(RenameWidth, Output(Bool()))
@@ -103,6 +105,8 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
     io.out.needRobFlags(i)      := false.B
     io.out.instrSizes(i)        := 0.U
     io.out.masks(i)             := 0.U
+    io.out.formerMasks(i)       := 0.U
+    io.out.latterMasks(i)       := 0.U
     io.out.hasLastInFtqEntry(i) := 0.U
     io.out.compressType(i)      := CompressType.NORMAL
     io.out.isFormer(i)          := false.B
@@ -314,6 +318,8 @@ class NewCompressUnit(implicit p: Parameters) extends XSModule{
       io.out.needRobFlags(i)      := !hasLaterInEntry // needRobFlags is true for the lastUop
       io.out.instrSizes(i)        := entryInstrCnt(entryId)
       io.out.masks(i)             := eMask
+      io.out.formerMasks(i)       := entryFormerMask(entryId)
+      io.out.latterMasks(i)       := entryLatterMask(entryId)
       io.out.hasLastInFtqEntry(i) := entryHasLastFtq(entryId)
       io.out.compressType(i)      := entryCompressType(entryId)
       io.out.isFormer(i)          := !tokenIsSecond(tokenId)
