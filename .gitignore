@@ -218,6 +218,12 @@ Session.vim
 # IntelliJ
 /out/
 
+### Local workspace files
+/AGENTS.md
+/TODO.md
+/output.txt
+/emu-backups/
+
 # mpeltonen/sbt-idea plugin
 .idea_modules/
 
