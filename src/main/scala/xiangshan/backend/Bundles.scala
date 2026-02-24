@@ -200,6 +200,7 @@ object Bundles {
     val interrupt_safe = Bool()
     val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
     val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
+    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
     val commitType = CommitType()
 
     val srcType = Vec(numSrc, SrcType())
@@ -478,6 +479,7 @@ object Bundles {
     val interrupt_safe = Bool()
     val formerInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
     val latterInstrCnt = UInt(log2Ceil(RenameWidth + 1).W)
+    val formerLen = UInt(log2Ceil(RenameWidth * 4 + 1).W)
     val fusionNum       = UInt(2.W)
     val selImm          = SelImm()
     val imm             = UInt(32.W)

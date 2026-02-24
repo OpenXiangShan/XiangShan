@@ -751,9 +751,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       )
     )
   io.flushPcInfo.formerLen := Mux(
-    needModifyFtqIdxOffset,
-    0.U(3.W),
-    Mux(flushIsFormer || deqPtrEntry.predTaken, 0.U(3.W), Mux(deqPtrEntry.RVC(0), 2.U(3.W), 4.U(3.W)))
+    needModifyFtqIdxOffset || flushIsFormer || deqPtrEntry.predTaken,
+    0.U.asTypeOf(io.flushPcInfo.formerLen),
+    deqPtrEntry.formerLen
   )
   io.flushPcInfo.flushIsRVC := Mux(
     needModifyFtqIdxOffset,

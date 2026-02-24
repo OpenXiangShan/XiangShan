@@ -315,6 +315,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val walkPdest = Wire(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
 
   val instrSize = Wire(Vec(RenameWidth, UInt((log2Ceil(RenameWidth + 1)).W)))
+  val formerLenWidth = log2Ceil(RenameWidth * 4 + 1)
 
   // uop calculation
   for (i <- 0 until RenameWidth) {
@@ -343,6 +344,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).noCompressSource := noCompressSource(i)
     uops(i).formerInstrCnt := PopCount(compressMasksVec(i) & Cat(isFormer.reverse))
     uops(i).latterInstrCnt := PopCount(compressMasksVec(i) & Cat(isFormer.map(x => !x).reverse))
+    val formerLenSum = compressMasksVec(i).asBools
+      .zip(isFormer)
+      .zip(io.in.map(_.bits.isRVC))
+      .map { case ((mask, former), isRVC) =>
+        Mux(mask && former, Mux(isRVC, 2.U(formerLenWidth.W), 4.U(formerLenWidth.W)), 0.U(formerLenWidth.W))
+      }
+      .reduce(_ +& _)
+    uops(i).formerLen := formerLenSum(formerLenWidth - 1, 0)
     uops(i).lastIsRVC := io.in(i).bits.isRVC
     // alloc a new phy reg
     needV0Dest(i) := io.in(i).valid && needDestReg(Reg_V0, io.in(i).bits)
