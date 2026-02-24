@@ -1200,6 +1200,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // TODO: simplify it!!!
   io.deq.decodedInst.simple :=
     io.deq.decodedInst.canRobCompress &&
+    io.csrCtrl.high_density_rob_compression_enable &&
     !FuType.isLoadStore(io.deq.decodedInst.fuType) &&
     !FuType.isBJU(io.deq.decodedInst.fuType) &&
     !FuType.isAMO(io.deq.decodedInst.fuType) &&

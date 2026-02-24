@@ -368,6 +368,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.flush_l2_enable                  := csrMod.io.status.custom.flush_l2_enable
       // Rename
       custom.fusion_enable            := csrMod.io.status.custom.fusion_enable
+      custom.high_density_rob_compression_enable := csrMod.io.status.custom.high_density_rob_compression_enable
       custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
       // distribute csr write signal
       // write to frontend and memory

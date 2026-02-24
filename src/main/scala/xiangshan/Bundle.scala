@@ -566,6 +566,7 @@ class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   val flush_l2_enable = Output(Bool())
   // Rename
   val fusion_enable = Output(Bool())
+  val high_density_rob_compression_enable = Output(Bool())
   val wfi_enable = Output(Bool())
 
   // distribute csr write signal
