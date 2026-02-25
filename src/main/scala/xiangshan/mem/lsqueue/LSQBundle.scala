@@ -82,7 +82,7 @@ class StaUopInfo(implicit p: Parameters) extends MemBlockBundle {
 
   // used in RAW check, for MDP train
   val ftqPtr          = new FtqPtr
-  val ftqOffset       = UInt(log2Up(FetchBlockInstOffsetWidth).W)
+  val ftqOffset       = UInt(FetchBlockInstOffsetWidth.W)
 
   // mdp
   val isFirstIssue    = Bool()
