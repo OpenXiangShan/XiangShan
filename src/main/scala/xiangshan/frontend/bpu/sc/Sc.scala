@@ -332,7 +332,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       conf            := false.B
       s2_useScPred(i) := false.B
     }
-    s2_sumAboveThres(i) := aboveThreshold(sum, thres)
+    s2_sumAboveThres(i) := aboveThreshold(sum, (thres >> 1) + 2.U)
     dontTouch(tageConfHigh)
     dontTouch(tageConfMid)
     dontTouch(tageConfLow)
