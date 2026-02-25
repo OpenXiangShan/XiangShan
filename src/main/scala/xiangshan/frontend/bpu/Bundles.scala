@@ -312,13 +312,15 @@ class TargetCarry extends Bundle {
   def isFit:       Bool = value === TargetCarry.Value.Fit
   def isOverflow:  Bool = value === TargetCarry.Value.Overflow
   def isUnderflow: Bool = value === TargetCarry.Value.Underflow
+  def isInvalid:   Bool = value === TargetCarry.Value.Invalid
 }
 
 object TargetCarry {
-  private object Value extends EnumUInt(3) {
+  private object Value extends EnumUInt(4) {
     def Fit:       UInt = 0.U(width.W)
     def Overflow:  UInt = 1.U(width.W)
     def Underflow: UInt = 2.U(width.W)
+    def Invalid:   UInt = 3.U(width.W)
   }
 
   def apply(value: UInt): TargetCarry = {
@@ -331,6 +333,7 @@ object TargetCarry {
   def Fit:       TargetCarry = apply(Value.Fit)
   def Overflow:  TargetCarry = apply(Value.Overflow)
   def Underflow: TargetCarry = apply(Value.Underflow)
+  def Invalid:   TargetCarry = apply(Value.Invalid)
 }
 
 /* *** internal *** */
