@@ -124,47 +124,98 @@ case class Pbus2Params(
  */
 class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
   // cpu master: cpus--> cpu_xbarNto1-->cpu2imsic_s/cpu2dm_s
-//  val cpus_l0 = Seq.fill(params.NumHarts / 1)(AXI4Xbar())
   val cpus_l0 = (0 until params.NumHarts / 1).map {i =>
     val xbarNode = LazyModule(new AXI4Xbar())
     xbarNode.suggestName(s"cpus_l0_$i")
     xbarNode.node
   }
-  val cpus_l1 = (0 until params.NumHarts / 2).map {i =>
-    val xbarNode = LazyModule(new AXI4Xbar())
-    xbarNode.suggestName(s"cpus_l1_$i")
-    xbarNode.node
-  }
-  val cpus_l2 = (0 until params.NumHarts / 4).map {i =>
-    val xbarNode = LazyModule(new AXI4Xbar())
-    xbarNode.suggestName(s"cpus_l2_$i")
-    xbarNode.node
-  }
-  val cpus_l3 = (0 until params.NumHarts / 8).map {i =>
-    val xbarNode = LazyModule(new AXI4Xbar())
-    xbarNode.suggestName(s"cpus_l3_$i")
-    xbarNode.node
-  }
-  val cpus_l4LM = LazyModule(new AXI4Xbar())
-  val cpus_l4 = cpus_l4LM.suggestName("cpus_l4").node
+//  val cpus_l1 = (0 until params.NumHarts / 2).map {i =>
+//    val xbarNode = LazyModule(new AXI4Xbar())
+//    xbarNode.suggestName(s"cpus_l1_$i")
+//    xbarNode.node
+//  }
+//  val cpus_l2 = (0 until params.NumHarts / 4).map {i =>
+//    val xbarNode = LazyModule(new AXI4Xbar())
+//    xbarNode.suggestName(s"cpus_l2_$i")
+//    xbarNode.node
+//  }
+//  val cpus_l3 = (0 until params.NumHarts / 8).map {i =>
+//    val xbarNode = LazyModule(new AXI4Xbar())
+//    xbarNode.suggestName(s"cpus_l3_$i")
+//    xbarNode.node
+//  }
+//  val cpus_l4LM = LazyModule(new AXI4Xbar())
+//  val cpus_l4 = cpus_l4LM.suggestName("cpus_l4").node
 
 //  val cpus_l1 = Seq.fill(params.NumHarts / 2)(AXI4Xbar())
 //  val cpus_l2 = Seq.fill(params.NumHarts / 4)(AXI4Xbar())
 //  val cpus_l3 = Seq.fill(params.NumHarts / 8)(AXI4Xbar())
 //  val cpus_l4 = AXI4Xbar()
   // one xbar2to1 every two cpu modes
-  for (i <- 0 until params.NumHarts) {
-    cpus_l1(i / 2) :=* cpus_l0(i)
+//  for (i <- 0 until params.NumHarts) {
+//    cpus_l1(i / 2) :=* cpus_l0(i)
+//  }
+//  for (i <- 0 until params.NumHarts / 2) {
+//    cpus_l2(i / 2) := AXI4Buffer() :=* cpus_l1(i)
+//  }
+//  for (i <- 0 until params.NumHarts / 4) {
+//    cpus_l3(i / 2) :=* cpus_l2(i)
+//  }
+//  for (i <- 0 until params.NumHarts / 8) {
+//    cpus_l4 := AXI4Buffer() :=* cpus_l3(i)
+//  }
+  println("Cbus: start enter Cbus define")
+  val NumCX = 11
+  val NumCX_l1 = 4
+  val xbar2to1 = (0 until NumCX).map {i =>
+    val xbarNode = LazyModule(new AXI4Xbar())
+    xbarNode.suggestName(s"cx2to1_$i")
+    xbarNode.node
   }
-  for (i <- 0 until params.NumHarts / 2) {
-    cpus_l2(i / 2) := AXI4Buffer() :=* cpus_l1(i)
+  val l1xbar2to1 = (0 until NumCX_l1).map {i =>
+    val xbarNode = LazyModule(new AXI4Xbar())
+    xbarNode.suggestName(s"L1cx2to1_$i")
+    xbarNode.node
   }
-  for (i <- 0 until params.NumHarts / 4) {
-    cpus_l3(i / 2) :=* cpus_l2(i)
+
+  val cpus_l4LM = LazyModule(new AXI4Xbar())
+  val cpus_l4 = cpus_l4LM.suggestName("cpus_l4").node
+  println("Cbus: test 00 ===")
+  for (i <- 0 until 2) {
+    xbar2to1(0) :=* cpus_l0(i)
   }
-  for (i <- 0 until params.NumHarts / 8) {
-    cpus_l4 := AXI4Buffer() :=* cpus_l3(i)
+  xbar2to1(1) := cpus_l0(2)
+  xbar2to1(1) := xbar2to1(0)
+  xbar2to1(2) := cpus_l0(3)
+  xbar2to1(2) := xbar2to1(1)
+  for (i <- 4 until 6) {
+    xbar2to1(3) :=* cpus_l0(i)
+    xbar2to1(5) :=* cpus_l0(i+3)
+    xbar2to1(7) :=* cpus_l0(i+3*2)
+    xbar2to1(9) :=* cpus_l0(i+3*3)
   }
+  println("Cbus: test 01 ===")
+//  xbar2to10->xbar2to11->xbar2to12   xbar2to13->xbar2to14,xbar2to15->xbar2to16,xbar2to17->xbar2to18, xbar2to19->xbar2to110
+
+  xbar2to1(4) :=* xbar2to1(3)
+  xbar2to1(4) :=* cpus_l0(6)
+  xbar2to1(6) :=* xbar2to1(5)
+  xbar2to1(6) :=* cpus_l0(9)
+  xbar2to1(8) :=* xbar2to1(7)
+  xbar2to1(8) :=* cpus_l0(12)
+  xbar2to1(10) :=* xbar2to1(9)
+  xbar2to1(10) :=* cpus_l0(15)
+  println("Cbus: test 02 ===")
+
+  l1xbar2to1(0) := xbar2to1(2)
+  l1xbar2to1(3) :=* l1xbar2to1(2)
+  l1xbar2to1(2) := AXI4Buffer() :=* l1xbar2to1(1)
+  l1xbar2to1(1) :=* l1xbar2to1(0)
+  for (i <- 0 until NumCX_l1) {
+    l1xbar2to1(i) :=* xbar2to1(4 + i *2)
+  }
+  println("Cbus: test 03 ===")
+  cpus_l4 := AXI4Buffer() := l1xbar2to1(NumCX_l1-1)
   lazy val module = new Imp
   class Imp extends LazyModuleImp(this)
 }
@@ -207,24 +258,77 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   pbus_xbar := Cbus.cpus_l4
   pbus_xbar := pcie_xbar1to2
   // start to decoder for imsic below
-  val imsic_l1 = Seq.fill(params.NumHarts / 8 ) (AXI4Xbar())
-  val imsic_l2 = Seq.fill(params.NumHarts / 4 ) (AXI4Xbar())
-  val imsic_l3 = Seq.fill(params.NumHarts / 2 ) (AXI4Xbar())
-  val imsic_l4 = Seq.fill(params.NumHarts / 1 ) (AXI4Xbar())
-  // one xbar1to2 every two cpu xbar
-  for (i <- 0 until params.NumHarts/8) {
-    imsic_l1(i) :*= AXI4Buffer() := pbus_xbar
-  }
-  for (i <- 0 until params.NumHarts/4) {
-    imsic_l2(i) :*= imsic_l1(i/2)
-  }
-  for (i <- 0 until params.NumHarts/2) {
-    imsic_l3(i) :*= AXI4Buffer() :=  imsic_l2(i/2)
-  }
-  for (i <- 0 until params.NumHarts/1) {
-    imsic_l4(i) :*= imsic_l3(i/2)
-  }
-  for (i <- 0 until params.NumHarts) {
+//  val imsic_l1 = Seq.fill(params.NumHarts / 8 ) (AXI4Xbar())
+//  val imsic_l2 = Seq.fill(params.NumHarts / 4 ) (AXI4Xbar())
+//  val imsic_l3 = Seq.fill(params.NumHarts / 2 ) (AXI4Xbar())
+    val imsic_l4 = Seq.fill(params.NumHarts / 1 ) (AXI4Xbar())
+//  // one xbar1to2 every two cpu xbar
+//  for (i <- 0 until params.NumHarts/8) {
+//    imsic_l1(i) :*= AXI4Buffer() := pbus_xbar
+//  }
+//  for (i <- 0 until params.NumHarts/4) {
+//    imsic_l2(i) :*= imsic_l1(i/2)
+//  }
+//  for (i <- 0 until params.NumHarts/2) {
+//    imsic_l3(i) :*= AXI4Buffer() :=  imsic_l2(i/2)
+//  }
+//  for (i <- 0 until params.NumHarts/1) {
+//    imsic_l4(i) :*= imsic_l3(i/2)
+//  }
+//  for (i <- 0 until params.NumHarts) {
+  val NumCX = 11
+  val NumCX_l1 = 4
+  // inveter bus from xbar to harts
+
+    val xbar1to2 = (0 until NumCX).map {i =>
+      val xbarNode = LazyModule(new AXI4Xbar())
+      xbarNode.suggestName(s"cx1to2_$i")
+      xbarNode.node
+    }
+    val l1xbar1to2 = (0 until NumCX_l1).map {i =>
+      val xbarNode = LazyModule(new AXI4Xbar())
+      xbarNode.suggestName(s"L1cx1to2_$i")
+      xbarNode.node
+    }
+  
+  // l0 <- l1 <- l2 <- l3
+    l1xbar1to2(3) := AXI4Buffer() := pbus_xbar
+    l1xbar1to2(2) := l1xbar1to2(3)
+    l1xbar1to2(1) := AXI4Buffer() := l1xbar1to2(2)
+    l1xbar1to2(0) := l1xbar1to2(1)
+    // icx4 <- icxl1_0, icx6 <- icxl1_1, icx8 <- icxl1_2, icx10 <- icxl1_3
+    for (i <- 0 until NumCX_l1) {
+      xbar1to2(4 + i*2) := l1xbar1to2(i)
+    }
+    println("imsicPbusTop: test 00 ===")
+    xbar1to2(2) := l1xbar1to2(0)
+  // icx xbar 1to2 design
+    for (i <- 0 until 2) {
+      imsic_l4(i) :*= xbar1to2(0)
+    }
+    println("imsicPbusTop: test 01 ===")
+    imsic_l4(2) := xbar1to2(1)
+    xbar1to2(0) := xbar1to2(1)
+    imsic_l4(3) := xbar1to2(2)
+    xbar1to2(1) := xbar1to2(2)
+    for (i <- 4 until 6) {
+      imsic_l4(i) :*= xbar1to2(3)
+      imsic_l4(i + 3) :*= xbar1to2(5)
+      imsic_l4(i + 3 * 2) :*= xbar1to2(7)
+      imsic_l4(i + 3 * 3) :*= xbar1to2(9)
+    }
+    println("imsicPbusTop: test 01 ===")
+    //  icx0->cx1->cx2   cx3->cx4,cx5->cx6,cx7->cx8, cx9->cx10
+    xbar1to2(3) := xbar1to2(4)
+    imsic_l4(6) := xbar1to2(4)
+    xbar1to2(5) := xbar1to2(6)
+    imsic_l4(9) := xbar1to2(6)
+    xbar1to2(7) := xbar1to2(8)
+    imsic_l4(12) := xbar1to2(8)
+    xbar1to2(9) := xbar1to2(10)
+    imsic_l4(15) := xbar1to2(10)
+  println("imsicPbusTop: test 02 ===")
+  for(i <- 0 until params.NumHarts) {
     sNodes(i) := AXI4Buffer() := imsic_l4(i)
   }
 
