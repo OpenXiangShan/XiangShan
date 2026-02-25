@@ -1415,6 +1415,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       (redirectIsFormer && !redirectFlushItself) ||
       (!redirectIsFormer && redirectFlushItself)
     )
+    val clearBothByFormerExceptionFlush = needFlushWriteBackFormer && CompressType.isNotNORMAL(entryCompressType)
 
     nextFormerUopNum := entryFormerUopNum
     nextLatterUopNum := entryLatterUopNum
@@ -1422,10 +1423,15 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       nextFormerUopNum := enqFormerWBNum
       nextLatterUopNum := enqLatterWBNum
     }.elsewhen(entryValid) {
-      nextFormerUopNum := Mux(needFlushWriteBackFormer, 0.U, formerAfterWb)
-      nextLatterUopNum := Mux(needFlushWriteBackLater, 0.U, latterAfterWb)
-      when(clearLatterByRedirect) {
+      when(clearBothByFormerExceptionFlush) {
+        nextFormerUopNum := 0.U
         nextLatterUopNum := 0.U
+      }.otherwise {
+        nextFormerUopNum := Mux(needFlushWriteBackFormer, 0.U, formerAfterWb)
+        nextLatterUopNum := Mux(needFlushWriteBackLater, 0.U, latterAfterWb)
+        when(clearLatterByRedirect) {
+          nextLatterUopNum := 0.U
+        }
       }
     }
 
