@@ -196,6 +196,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     sink.valid := valid && !io.singleStep
     sink.bits := source.bits
     sink.bits.canRobCompress := source.bits.canRobCompress && (backendParams.robCompressEn.B || isFusion)
+    // When HD compression is disabled, decode may not classify fusion pairs as simple.
+    // Mark them as simple here to reuse the same tokenization path.
+    sink.bits.simple := source.bits.simple || (isFusion && source.bits.canRobCompress)
   }
 //  compressUnit.io.oddFtqVec := oddFtqVec
   val needRobFlags = compressUnit.io.out.needRobFlags
