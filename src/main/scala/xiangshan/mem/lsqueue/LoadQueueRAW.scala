@@ -394,15 +394,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   })
   io.rollback := allRedirect
 
-  val mdpTrainFilter = (0 until StorePipelineWidth).map(i => {
-    val redirect = Wire(Valid(new Redirect))
-    redirect.bits  := allRedirect(i).bits
-    redirect.valid := allRedirect(i).valid && stIsFirstIssue(i)
-    redirect
-  })
-
-  val oldestOH = Redirect.selectOldestRedirect(mdpTrainFilter)
-  io.mdpTrain := Mux1H(oldestOH, mdpTrainFilter)
+  val oldestOH = Redirect.selectOldestRedirect(allRedirect)
+  io.mdpTrain := Mux1H(oldestOH, allRedirect)
 
   // perf cnt
   val canEnqCount = PopCount(io.query.map(_.req.fire))
