@@ -20,7 +20,7 @@ import device.SYSCNTConsts
 import device.SYSCNTParams
 import device.standalone.StandAloneDebugModule
 import device.standalone.StandAloneSYSCNT
-import freechips.rocketchip.amba.axi4._
+import freechips.rocketchip.amba.axi4.{AXI4Deinterleaver, _}
 import freechips.rocketchip.devices.debug.APB
 import freechips.rocketchip.devices.debug.CJTAG
 import freechips.rocketchip.devices.debug.DebugAttachParams
@@ -33,6 +33,7 @@ import freechips.rocketchip.devices.debug.ExportDebug
 import freechips.rocketchip.devices.debug.JTAG
 import freechips.rocketchip.devices.debug.JtagDTMKey
 import freechips.rocketchip.devices.debug.ResetCtrlIO
+import freechips.rocketchip.devices.tilelink.{DevNullParams, TLError}
 import freechips.rocketchip.diplomacy
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.diplomacy.ValName
@@ -122,6 +123,49 @@ case class Pbus2Params(
 /**
  * A configurable hierarchical AXI4 bus interconnect with heterogeneous input widths.
  */
+class AXIDataBridge(DataWidth: Int)(implicit p: Parameters) extends LazyModule {
+  val axi_xbar_i = AXI4Xbar()
+  val axi_xbar_o = AXI4Xbar()
+  //  private val tmp_xbar = TLXbar()
+  val error_xbar = TLXbar()
+  val error = LazyModule(new TLError(
+    params = DevNullParams(
+      address = Seq(AddressSet(0x1000000000000L, 0xffffffffffffL)),
+      maxAtomic = 1,
+      maxTransfer = DataWidth),
+    beatBytes = DataWidth/8
+  ))
+  error.node := error_xbar
+  axi_xbar_o :=
+    AXI4Buffer() :=
+    AXI4Buffer() :=
+//    AXI4IdIndexer(idBits = 12) :=
+//    AXI4UserYanker() :=
+    AXI4Deinterleaver(DataWidth/8) :=
+    TLToAXI4() :=
+    error_xbar :=
+    TLBuffer.chainNode(2) :=
+    TLFIFOFixer() :=
+    TLWidthWidget(DataWidth / 8) :=
+    AXI4ToTL() :=
+    AXI4UserYanker() :=
+    AXI4Buffer() :=
+    axi_xbar_i
+  lazy val module = new Imp
+  class Imp extends LazyModuleImp(this)
+}
+//  axi_xbar_o :=
+//  AXI4Buffer() :=
+//  AXI4Buffer() :=
+//  AXI4Buffer() :=
+//  AXI4IdIndexer(idBits =) :=
+//  AXI4UserYanker() :=
+//  AXI4Deinterleaver(L3BlockSize) :=
+//  TLToAXI4() :=
+//  TLSourceShrinker(64) :=
+//  TLWidthWidget(L3OuterBusWidth / 8) :=
+//  TLBuffer.chainNode(2) :=
+//  mem_xbar
 class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
   // cpu master: cpus--> cpu_xbarNto1-->cpu2imsic_s/cpu2dm_s
   val cpus = (0 until params.NumHarts / 1).map {i =>
@@ -220,7 +264,30 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
 
   pcie_xbar1to2 := aplic_mNode
   pcie_xbar1to2 := AXI4Buffer() := hni_s_xbar
-  pbus_xbar := Cbus.cpum
+  // instance data width switch bridge
+  val u_DataBridge = LazyModule(new AXIDataBridge(DataWidth = params.MSIOutDataWidth))
+  u_DataBridge.axi_xbar_i := Cbus.cpum
+  pbus_xbar := u_DataBridge.axi_xbar_o
+//  val DataWidth = 32
+//  val error_xbar = TLXbar()
+//  val error = LazyModule(new TLError(
+//    params = DevNullParams(
+//      address = Seq(AddressSet(0x1000000000000L, 0xffffffffffffL)),
+//      maxAtomic = 1,
+//      maxTransfer = DataWidth),
+//    beatBytes = DataWidth/8
+//  ))
+//  error.node := error_xbar
+//pbus_xbar :=
+////  AXI4Deinterleaver(DataWidth/8) :=
+//  TLToAXI4() :=
+////  error_xbar :=
+//  TLBuffer.chainNode(2) :=
+//  TLFIFOFixer() :=
+//  TLWidthWidget(DataWidth / 8) :=
+//  AXI4ToTL() :=
+//  AXI4UserYanker() :=
+//  Cbus.cpum
   pbus_xbar := pcie_xbar1to2
   // start to decoder for imsic below
 
