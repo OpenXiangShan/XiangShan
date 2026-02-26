@@ -21,12 +21,17 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu._
+import xiangshan.frontend.bpu.WriteReqBundle
 import xiangshan.frontend.bpu.mbtb.MainBtbMetaEntry
+import xiangshan.frontend.bpu.mbtb.TakenCounter
 
 class PrefetchBtbEntry(implicit p: Parameters) extends PrefetchBtbBundle {
   val valid:    Bool                 = Bool()
   val victim:   Bool                 = Bool()
+  val used:     Bool                 = Bool()
+  val counter:  SaturateCounter      = TakenCounter()
   val sramData: PrefetchBtbSramEntry = new PrefetchBtbSramEntry
+
 }
 class PrefetchBtbSramEntry(implicit p: Parameters) extends PrefetchBtbBundle {
   val tag: UInt = UInt(TagWidth.W)
@@ -64,11 +69,15 @@ class PredReadReq(implicit p: Parameters) extends PrefetchBtbBundle {
 class PredReadResp(implicit p: Parameters) extends PrefetchBtbBundle {
   val entries: Vec[PrefetchBtbEntry] = Vec(NumWay, new PrefetchBtbEntry())
 }
-class TrainWriteReq(implicit p: Parameters) extends PrefetchBtbBundle {
+class InvalidReq(implicit p: Parameters) extends PrefetchBtbBundle {
   val setIdx:      UInt      = UInt(SetIdxLen.W)
   val needInvalid: Vec[Bool] = Vec(NumWay, Bool())
 }
-
+class UsedReq(implicit p: Parameters) extends PrefetchBtbBundle {
+  val setIdx:  UInt      = UInt(SetIdxLen.W)
+  val wayMask: UInt      = UInt(NumWay.W)
+  val used:    Vec[Bool] = Vec(NumWay, Bool())
+}
 class BankReadReq(implicit p: Parameters) extends PrefetchBtbBundle {
   val setIdx: UInt = UInt(SetIdxLen.W)
 }
@@ -77,16 +86,26 @@ class BankReadResp(implicit p: Parameters) extends PrefetchBtbBundle {
   val entries: Vec[PrefetchBtbEntry] = Vec(NumWay, new PrefetchBtbEntry)
 }
 
-class BankWriteReq(implicit p: Parameters) extends WriteReqBundle with HasPrefetchBtbParameters {
+class BankWriteEntryReq(implicit p: Parameters) extends WriteReqBundle with HasPrefetchBtbParameters {
   val setIdx:  UInt                  = UInt(SetIdxLen.W)
   val wayMask: UInt                  = UInt(NumWay.W)
   val entry:   Vec[PrefetchBtbEntry] = Vec(NumWay, new PrefetchBtbEntry())
 }
-class WbufWriteReq(implicit p: Parameters) extends WriteReqBundle with HasPrefetchBtbParameters {
+class BankWriteCounterReq(implicit p: Parameters) extends WriteReqBundle with HasPrefetchBtbParameters {
+  val setIdx:   UInt                 = UInt(SetIdxLen.W)
+  val wayMask:  UInt                 = UInt(NumWay.W)
+  val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
+}
+class EntryBufWriteReq(implicit p: Parameters) extends WriteReqBundle with HasPrefetchBtbParameters {
   val setIdx:  UInt             = UInt(SetIdxLen.W)
   val wayMask: UInt             = UInt(NumWay.W)
   val entry:   PrefetchBtbEntry = new PrefetchBtbEntry()
   // used for write buf
   override def tag: Option[UInt] =
     Some(Cat(entry.sramData.tag, entry.sramData.position, entry.sramData.target, entry.sramData.attribute.asUInt))
+}
+class CounterBufWriteReq(implicit p: Parameters) extends WriteReqBundle with HasPrefetchBtbParameters {
+  val setIdx:   UInt                 = UInt(SetIdxLen.W)
+  val wayMask:  UInt                 = UInt(NumWay.W)
+  val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
 }

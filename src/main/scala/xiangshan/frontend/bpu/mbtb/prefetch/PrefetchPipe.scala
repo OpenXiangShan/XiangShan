@@ -8,6 +8,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.mbtb.TakenCounter
 import xiangshan.frontend.bpu.mbtb.prefetch.PrefetchBtbModule
 import xiangshan.frontend.ftq.FtqEntry
 import xiangshan.frontend.ftq.FtqPtr
@@ -114,7 +115,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   private val s1_branchInfo = preDecoder.io.resp.pd
   private val s1_jumpOffset = preDecoder.io.resp.jumpOffset
 
-  /* S2:Find first 4 valid branch and Build entry
+  /* S2:Find first n valid branch and Build entry
    * */
   private val s2_finalInstrValid = RegEnable(s1_finalInstValid, s1_valid)
   private val s2_branchInfo      = RegEnable(s1_branchInfo, s1_valid)
@@ -122,7 +123,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   private val s2_startPc         = RegEnable(s1_startPc, s1_valid)
 
   private val s2_shadowBranchMask = (s2_branchInfo zip s2_finalInstrValid).map { case (info, valid) =>
-    info.valid && info.brAttribute.isDirect && valid // only use direct branch
+    info.valid && (info.brAttribute.isDirect || info.brAttribute.isConditional) && valid // only use direct branch
   }
   private val s2_revBranchInfo = s2_branchInfo.reverse
 
@@ -148,10 +149,13 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
     prefetchWrite.bits.entries(i - 1).valid                   := s2_revBranchInfo(idx).valid && buildValid
     prefetchWrite.bits.entries(i - 1).bits.victim             := false.B
     prefetchWrite.bits.entries(i - 1).bits.valid              := s2_revBranchInfo(idx).valid && buildValid
+    prefetchWrite.bits.entries(i - 1).bits.used               := false.B
+    prefetchWrite.bits.entries(i - 1).bits.counter            := TakenCounter.WeakPositive
     prefetchWrite.bits.entries(i - 1).bits.sramData.position  := ~idx
     prefetchWrite.bits.entries(i - 1).bits.sramData.attribute := s2_revBranchInfo(idx).brAttribute
     prefetchWrite.bits.entries(i - 1).bits.sramData.target    := s2_jumpOffset.reverse(idx).asUInt
     prefetchWrite.bits.entries(i - 1).bits.sramData.tag       := getTag(s2_startPc)
+
     debug_s2_writeCfiPc(i - 1) := s2_jumpOffset.reverse(idx) + getCfiPc(getBlockPc(s2_startPc), ~idx)
   }
 

@@ -83,7 +83,7 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     result.bits.cfiPosition := entry.sramData.position
     meta.rawHit             := hit
     meta.position           := entry.sramData.position
-    meta.counter            := TakenCounter.WeakPositive
+    meta.counter            := Mux(entry.used, entry.counter, TakenCounter.WeakPositive)
     meta.attribute          := entry.sramData.attribute
   }
 
@@ -106,37 +106,70 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     entry.rawHit && entry.position === i0_position
   }
   banks.zipWithIndex.foreach { case (bank, idx) =>
-    bank.io.IfuWriteReq.valid            := i0_fire && i0_bankMask(idx).asBool
-    bank.io.IfuWriteReq.bits.setIdx      := i0_setIdx
-    bank.io.IfuWriteReq.bits.needInvalid := i0_needValid
+    bank.io.ifuInvalidReq.valid            := i0_fire && i0_bankMask(idx).asBool
+    bank.io.ifuInvalidReq.bits.setIdx      := i0_setIdx
+    bank.io.ifuInvalidReq.bits.needInvalid := i0_needValid
   }
 
   // Train pipe :aim to avoid multi hit TODO: invalid earlier
   private val t0_fire  = io.stageCtrl.t0_fire && io.enable
   private val t0_train = io.train
 
-  private val t1_fire     = RegNext(t0_fire, init = false.B) && io.enable
-  private val t1_train    = RegEnable(t0_train, t0_fire)
-  private val t1_startPc  = t1_train.startPc
-  private val t1_setIdx   = getSetIndex(t1_startPc)
-  private val t1_bankMask = UIntToOH(getBankIndex(t1_startPc))
-  private val needInvalid = t1_train.meta.prefetchBtb.entries.map { pbtb =>
+  private val t1_fire           = RegNext(t0_fire, init = false.B) && io.enable
+  private val t1_train          = RegEnable(t0_train, t0_fire)
+  private val t1_meta           = t1_train.meta.prefetchBtb.entries
+  private val t1_branches       = t1_train.branches
+  private val t1_startPc        = t1_train.startPc
+  private val t1_setIdx         = getSetIndex(t1_startPc)
+  private val t1_bankMask       = UIntToOH(getBankIndex(t1_startPc))
+  private val t1_newCounters    = Wire(Vec(NumWay, TakenCounter()))
+  private val t1_counterWayMask = Wire(Vec(NumWay, Bool()))
+  private val t1_usedWayMask    = Wire(Vec(NumWay, Bool()))
+  private val t1_used           = Wire(Vec(NumWay, Bool()))
+  private val t1_needInvalid = t1_train.meta.prefetchBtb.entries.map { pbtb =>
     val isHit = t1_train.meta.mbtb.entries.flatten.map { mbtb =>
       mbtb.rawHit && pbtb.rawHit && mbtb.position === pbtb.position
     }.reduce(_ || _)
     isHit
   }
+
+  t1_meta.zipWithIndex.foreach { case (meta, i) =>
+    val hitMask = t1_branches.map { branch =>
+      branch.valid && branch.bits.attribute.isConditional && meta.position === branch.bits.cfiPosition &&
+      meta.rawHit && !t1_needInvalid(i)
+    }
+    val usedMask = t1_branches.map { branch =>
+      branch.valid && meta.position === branch.bits.cfiPosition &&
+      meta.rawHit && !t1_needInvalid(i)
+    }
+    val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
+
+    t1_counterWayMask(i) := hitMask.reduce(_ || _)
+    t1_usedWayMask(i)    := usedMask.reduce(_ || _)
+    t1_newCounters(i)    := meta.counter.getUpdate(actualTaken)
+    t1_used(i)           := usedMask(i)
+  }
   // train write to invalid entry
+  // TODO: remove used signals
   banks.zipWithIndex.foreach { case (bank, idx) =>
-    bank.io.TrainWriteReq.valid            := t1_fire && t1_bankMask(idx).asBool
-    bank.io.TrainWriteReq.bits.setIdx      := t1_setIdx
-    bank.io.TrainWriteReq.bits.needInvalid := needInvalid
+    bank.io.trainInvalidReq.valid            := t1_fire && t1_bankMask(idx).asBool
+    bank.io.trainInvalidReq.bits.setIdx      := t1_setIdx
+    bank.io.trainInvalidReq.bits.needInvalid := t1_needInvalid
+    bank.io.trainCounterReq.valid            := t1_fire && t1_bankMask(idx).asBool && t1_counterWayMask.reduce(_ || _)
+    bank.io.trainCounterReq.bits.setIdx      := t1_setIdx
+    bank.io.trainCounterReq.bits.wayMask     := t1_counterWayMask.asUInt
+    bank.io.trainCounterReq.bits.counters    := t1_newCounters
+    bank.io.trainUsedReq.valid               := t1_fire && t1_bankMask(idx).asBool && t1_usedWayMask.reduce(_ || _)
+    bank.io.trainUsedReq.bits.setIdx         := t1_setIdx
+    bank.io.trainUsedReq.bits.wayMask        := t1_usedWayMask.asUInt
+    bank.io.trainUsedReq.bits.used           := t1_used
   }
   // Prefetch pipe
   prefetchPipe.io.flush := io.redirect.valid
   prefetchPipe.io.prefetchBtbFtqPtr <> io.prefetchBtbFtqPtr
   prefetchPipe.io.prefetchData <> io.prefetchData
   prefetchPipe.io.ftqEntry <> io.ftqEntry
+
 //  prefetchPipe.io.ifuPtr := io.ifuPtr
   private val w0_prefetchWrite    = prefetchPipe.io.prefetchWrite
   private val w0_prefetchBankMask = UIntToOH(w0_prefetchWrite.bits.bankIdx)
@@ -161,10 +194,10 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     w1_writeEntries(i) := w1_prefetchEntries(writeIdx)
   }
   banks.zipWithIndex.foreach { case (bank, idx) =>
-    bank.io.writeReq.valid        := w1_prefetchWrite.valid && w1_prefetchBankMask(idx).asBool
-    bank.io.writeReq.bits.setIdx  := w1_prefetchWrite.bits.setIdx
-    bank.io.writeReq.bits.wayMask := w1_victimWayMask.asUInt
-    bank.io.writeReq.bits.entry   := w1_writeEntries
+    bank.io.writeEntryReq.valid        := w1_prefetchWrite.valid && w1_prefetchBankMask(idx).asBool
+    bank.io.writeEntryReq.bits.setIdx  := w1_prefetchWrite.bits.setIdx
+    bank.io.writeEntryReq.bits.wayMask := w1_victimWayMask.asUInt
+    bank.io.writeEntryReq.bits.entry   := w1_writeEntries
   }
 
   replacer.io.writeTouch.valid        := w1_prefetchWrite.valid
@@ -180,7 +213,11 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }.reduce(_ || _)
   XSPerfAccumulate(
     "prefetch_hit_mbtb",
-    PopCount(needInvalid.map(_ && t1_fire))
+    PopCount(t1_needInvalid.map(_ && t1_fire))
+  )
+  XSPerfAccumulate(
+    "prefetch_invalid",
+    PopCount(i0_needValid.map(_ && i0_fire))
   )
   XSPerfAccumulate(
     "mispredReasonPrefetchBtb",

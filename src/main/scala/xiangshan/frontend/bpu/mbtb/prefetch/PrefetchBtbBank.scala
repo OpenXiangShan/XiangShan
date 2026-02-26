@@ -22,15 +22,19 @@ import utility.XSPerfAccumulate
 import utility.sram.SplittedSRAMTemplate
 import utility.sram.SRAMTemplate
 import xiangshan.frontend.bpu.WriteBuffer
+import xiangshan.frontend.bpu.mbtb.MainBtbCounterSramWriteReq
+import xiangshan.frontend.bpu.mbtb.TakenCounter
 
 class PrefetchBtbBank(bandIdx: Int)(implicit p: Parameters) extends PrefetchBtbModule {
   class BankIO(implicit p: Parameters) extends PrefetchBtbBundle {
-    val readReq:       ValidIO[BankReadReq]   = Flipped(Valid(new BankReadReq))
-    val readResp:      BankReadResp           = Output(new BankReadResp)
-    val writeReq:      ValidIO[BankWriteReq]  = Flipped(Valid(new BankWriteReq))
-    val TrainWriteReq: ValidIO[TrainWriteReq] = Flipped(Valid(new TrainWriteReq))
-    val IfuWriteReq:   ValidIO[TrainWriteReq] = Flipped(Valid(new TrainWriteReq))
-    val resetDone:     Bool                   = Output(Bool())
+    val readReq:         ValidIO[BankReadReq]         = Flipped(Valid(new BankReadReq))
+    val readResp:        BankReadResp                 = Output(new BankReadResp)
+    val writeEntryReq:   ValidIO[BankWriteEntryReq]   = Flipped(Valid(new BankWriteEntryReq))
+    val trainCounterReq: ValidIO[BankWriteCounterReq] = Flipped(Valid(new BankWriteCounterReq))
+    val trainInvalidReq: ValidIO[InvalidReq]          = Flipped(Valid(new InvalidReq))
+    val ifuInvalidReq:   ValidIO[InvalidReq]          = Flipped(Valid(new InvalidReq))
+    val trainUsedReq:    ValidIO[UsedReq]             = Flipped(Valid(new UsedReq()))
+    val resetDone:       Bool                         = Output(Bool())
   }
   val io: BankIO = IO(new BankIO)
 
@@ -50,11 +54,26 @@ class PrefetchBtbBank(bandIdx: Int)(implicit p: Parameters) extends PrefetchBtbM
       )
     ).suggestName(s"prefetchbtb_sram_entry_bank${bandIdx}_way${wayIdx}")
   }
+
+  private val counterSram = Module(new SRAMTemplate(
+    TakenCounter(),
+    set = NumSets,
+    way = NumWay,
+    singlePort = true,
+    shouldReset = true,
+    holdRead = true,
+    withClockGate = true,
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl,
+    suffix = Option("bpu_prefetch_counter")
+  )).suggestName(s"prefetch_sram_counter${bandIdx}")
+
   private val valid  = RegInit(VecInit(Seq.fill(NumSets)(VecInit(Seq.fill(NumWay)(false.B)))))
   private val victim = RegInit(VecInit(Seq.fill(NumSets)(VecInit(Seq.fill(NumWay)(false.B)))))
+  private val used   = RegInit(VecInit(Seq.fill(NumSets)(VecInit(Seq.fill(NumWay)(false.B)))))
 
   private val resetDone = RegInit(false.B)
-  when(entrySrams.map(_.io.r.req.ready).reduce(_ && _)) {
+  when(entrySrams.map(_.io.r.req.ready).reduce(_ && _) && counterSram.io.r.req.ready) {
     resetDone := true.B
   }
   io.resetDone := resetDone
@@ -63,67 +82,102 @@ class PrefetchBtbBank(bandIdx: Int)(implicit p: Parameters) extends PrefetchBtbM
      -------------------------------------------------------------------------------------------------------------- */
   private val entryValid  = valid(io.readReq.bits.setIdx)
   private val victimValid = victim(io.readReq.bits.setIdx)
+  private val usedValid   = used(io.readReq.bits.setIdx)
   entrySrams.foreach { sram =>
     sram.io.r.req.valid       := io.readReq.valid
     sram.io.r.req.bits.setIdx := io.readReq.bits.setIdx
   }
-
+  counterSram.io.r.req.valid       := io.readReq.valid
+  counterSram.io.r.req.bits.setIdx := io.readReq.bits.setIdx
   for (i <- 0 until NumWay) {
     io.readResp.entries(i).sramData := entrySrams(i).io.r.resp.data.head
     io.readResp.entries(i).valid    := RegEnable(entryValid(i), io.readReq.fire)
     io.readResp.entries(i).victim   := RegEnable(victimValid(i), io.readReq.fire)
+    io.readResp.entries(i).used     := RegEnable(usedValid(i), io.readReq.fire)
+    io.readResp.entries(i).counter  := counterSram.io.r.resp.data(i)
   }
 
   /* --------------------------------------------------------------------------------------------------------------
      write
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val writeBuffer = Module(new WriteBuffer(
-    new WbufWriteReq,
+  private val entryWriteBuffer = Module(new WriteBuffer(
+    new EntryBufWriteReq,
     WriteBufferSize,
     numPorts = NumWay,
-    nameSuffix = s"prefetchbtbBank$bandIdx"
+    nameSuffix = s"prefetchbtbBankEntry$bandIdx"
   ))
 
+  private val counterWriteBuffer = Module(new Queue(
+    new CounterBufWriteReq,
+    WriteBufferSize,
+    pipe = true,
+    flow = true
+  ))
   // writeReq is a ValidIO, it means that the new request will be dropped if the buffer is full
 
-  writeBuffer.io.write.zipWithIndex.foreach { case (buf, idx) =>
-    val wvalid = io.writeReq.valid && io.writeReq.bits.wayMask(idx)
+  entryWriteBuffer.io.write.zipWithIndex.foreach { case (buf, idx) =>
+    val wvalid = io.writeEntryReq.valid && io.writeEntryReq.bits.wayMask(idx)
     buf.valid        := wvalid
-    buf.bits.setIdx  := io.writeReq.bits.setIdx
-    buf.bits.entry   := io.writeReq.bits.entry(idx)
-    buf.bits.wayMask := io.writeReq.bits.wayMask
+    buf.bits.setIdx  := io.writeEntryReq.bits.setIdx
+    buf.bits.entry   := io.writeEntryReq.bits.entry(idx)
+    buf.bits.wayMask := io.writeEntryReq.bits.wayMask
   }
 
-  private val writeValid   = writeBuffer.io.read.head.valid && !io.readReq.valid
-  private val writeEntry   = writeBuffer.io.read.head.bits.entry
-  private val writeSetIdx  = writeBuffer.io.read.head.bits.setIdx
-  private val writeWayMask = writeBuffer.io.read.head.bits.wayMask
+  private val entryWriteValid   = entryWriteBuffer.io.read.head.valid && !io.readReq.valid
+  private val entryWriteEntry   = entryWriteBuffer.io.read.head.bits.entry
+  private val entryWriteSetIdx  = entryWriteBuffer.io.read.head.bits.setIdx
+  private val entryWriteWayMask = entryWriteBuffer.io.read.head.bits.wayMask
 
-  private val invalidSetIdx = io.TrainWriteReq.bits.setIdx
-  (entrySrams zip writeBuffer.io.read).foreach { case (way, bufRead) =>
+  private val trainInvalidSetIdx = io.trainInvalidReq.bits.setIdx
+  private val ifuInvalidSetIdx   = io.ifuInvalidReq.bits.setIdx
+  (entrySrams zip entryWriteBuffer.io.read).foreach { case (way, bufRead) =>
     way.io.w.req.valid        := bufRead.valid && !way.io.r.req.valid
     way.io.w.req.bits.data(0) := bufRead.bits.entry.sramData
     way.io.w.req.bits.setIdx  := bufRead.bits.setIdx
     bufRead.ready             := way.io.w.req.ready && !way.io.r.req.valid
   }
   for (i <- 0 until NumWay) {
-    val needWrite = writeValid && writeWayMask(i).asBool
-    val needInvalid = io.TrainWriteReq.valid && io.TrainWriteReq.bits.needInvalid(i) ||
-      io.IfuWriteReq.valid && io.IfuWriteReq.bits.needInvalid(i)
-    when(needInvalid) {
-      valid(invalidSetIdx)(i) := false.B
+    val needWrite        = entryWriteValid && entryWriteWayMask(i).asBool
+    val trainNeedInvalid = io.trainInvalidReq.valid && io.trainInvalidReq.bits.needInvalid(i)
+    val ifuNeedInvalid   = io.ifuInvalidReq.valid && io.ifuInvalidReq.bits.needInvalid(i)
+    val usedNeedValid    = io.trainUsedReq.valid && io.trainUsedReq.bits.wayMask(i)
+    when(trainNeedInvalid) {
+      valid(trainInvalidSetIdx)(i) := false.B
+      used(trainInvalidSetIdx)(i)  := false.B
+    }
+    when(ifuNeedInvalid) {
+      valid(ifuInvalidSetIdx)(i) := false.B
+      used(ifuInvalidSetIdx)(i)  := false.B
+    }
+    when(usedNeedValid) {
+      used(io.trainUsedReq.bits.setIdx)(i) := true.B
     }
     when(needWrite) {
-      valid(writeSetIdx)(i)  := writeEntry.valid
-      victim(writeSetIdx)(i) := writeEntry.victim
+      valid(entryWriteSetIdx)(i)  := entryWriteEntry.valid
+      victim(entryWriteSetIdx)(i) := entryWriteEntry.victim
+      used(entryWriteSetIdx)(i)   := entryWriteEntry.used
     }
   }
+
+  counterWriteBuffer.io.enq.valid         := io.trainCounterReq.valid
+  counterWriteBuffer.io.enq.bits.setIdx   := io.trainCounterReq.bits.setIdx
+  counterWriteBuffer.io.enq.bits.wayMask  := io.trainCounterReq.bits.wayMask
+  counterWriteBuffer.io.enq.bits.counters := io.trainCounterReq.bits.counters
+
+  counterSram.io.w.req.valid            := counterWriteBuffer.io.deq.valid && !counterSram.io.r.req.valid
+  counterSram.io.w.req.bits.data        := counterWriteBuffer.io.deq.bits.counters
+  counterSram.io.w.req.bits.setIdx      := counterWriteBuffer.io.deq.bits.setIdx
+  counterSram.io.w.req.bits.waymask.get := counterWriteBuffer.io.deq.bits.wayMask
+  counterWriteBuffer.io.deq.ready       := counterSram.io.w.req.ready && !counterSram.io.r.req.valid
 //  io.writeReq.ready := writeBuffer.io.write.head.ready
 
   XSPerfAccumulate("read", PopCount(entrySrams.map(_.io.r.req.fire)))
   XSPerfAccumulate("write", PopCount(entrySrams.map(_.io.w.req.fire)))
-  XSPerfAccumulate("write_buffer_full", !writeBuffer.io.write.head.ready)
-  XSPerfAccumulate("write_buffer_full_drop_write", !writeBuffer.io.write.head.ready && io.writeReq.valid)
+  XSPerfAccumulate("entry_write_buffer_full", !entryWriteBuffer.io.write.head.ready)
+  XSPerfAccumulate(
+    "entry_write_buffer_full_drop_write",
+    !entryWriteBuffer.io.write.head.ready && io.writeEntryReq.valid
+  )
 
 }
