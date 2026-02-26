@@ -19,7 +19,6 @@ import chisel3._
 import chisel3.util._
 import utils.AddrField
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.TageTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
@@ -30,8 +29,9 @@ trait TopHelper extends HasTageParameters {
         allFoldedPathHist.getHistWithInfo(histInfo).foldedHist
       }
       val foldedHist = Wire(new TageFoldedHist)
-      foldedHist.forIdx := tageFoldedHist.head
-      foldedHist.forTag := tageFoldedHist(1) ^ Cat(tageFoldedHist(2), 0.U(1.W))
+      foldedHist.forIdx    := tageFoldedHist.head
+      foldedHist.forTag(0) := tageFoldedHist(1)
+      foldedHist.forTag(1) := Cat(tageFoldedHist(2), 0.U(1.W))
       foldedHist
     })
 
@@ -64,6 +64,9 @@ trait TableHelper extends TopHelper { // extends TopHelper for getBankIndex
   def getSetIndex(pc: PrunedAddr, hist: UInt): UInt =
     addrFields.extract("setIdx", pc) ^ hist
 
-  def getRawTag(pc: PrunedAddr, hist: UInt): UInt =
-    addrFields.extract("tag", pc) ^ hist
+  def getRawTag(pc: PrunedAddr, hist: Vec[UInt]): UInt =
+    addrFields.extract("tag", pc) ^ hist(0) ^ hist(1)
+
+  def getTag(pc: PrunedAddr, hist: Vec[UInt], position: UInt): UInt =
+    addrFields.extract("tag", pc) ^ hist(0) ^ hist(1) ^ position
 }
