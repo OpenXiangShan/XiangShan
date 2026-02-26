@@ -10,8 +10,33 @@ on:
       benchmark_type:
         required: false
         type: string
-        description: 'Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c'
+        description: 'Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c, spec17-0.3c'
         default: spec06-1.0c
+      RobSize:
+        description: Optional ROB size override, leave empty to keep default in source
+        required: false
+        type: string
+        default: ''
+      RabSize:
+        description: Optional RAB size override, leave empty to keep default in source
+        required: false
+        type: string
+        default: ''
+      allow_neighbor_emu_reuse:
+        description: Allow reusing emu from sibling benchmark_type directories with same branch/ROB/RAB prefix (true/false)
+        required: false
+        type: string
+        default: 'false'
+      force_recompile:
+        description: Force rebuild emu and disable all emu reuse (true/false)
+        required: false
+        type: string
+        default: 'false'
+      force_clean_spec_dir:
+        description: Force recreate SPEC_DIR by deleting existing directory first (true/false)
+        required: false
+        type: string
+        default: 'false'
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
@@ -33,22 +58,33 @@ jobs:
     continue-on-error: false
     #At most 2 days to finish
     timeout-minutes: 2880
-    name: Checkpoints
+    name: ${{ format('{0}-{1}-{2}-{3}-coverage', inputs.test_branch, inputs.RobSize != '' && inputs.RobSize || 'default', inputs.RabSize != '' && inputs.RabSize || 'default', inputs.benchmark_type) }}
     steps:
       - name: Set benchmark configuration
         run: |
           case "${{ inputs.benchmark_type }}" in
             "spec06-0.3c")
               echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.3.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+              echo "SPEC_VERSION=2006" >> $GITHUB_ENV
               ;;
             "spec06-0.8c")
               echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.8.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+              echo "SPEC_VERSION=2006" >> $GITHUB_ENV
               ;;
             "spec06-1.0c")
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+              echo "SPEC_VERSION=2006" >> $GITHUB_ENV
+              ;;
+            "spec17-0.3c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/linzhida/json/spec17_rv64gcb_O3_20m_gcc12.2.0_0.3c.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/liyanqin/spec17-rv64gcb-O3-20m-gcc12.2.0-mix-with-special_wrf/checkpoint-0-0-0" >> $GITHUB_ENV
+              echo "SPEC_VERSION=2017" >> $GITHUB_ENV
               ;;
             *)
-              echo "Error: Invalid benchmark_type '${{ inputs.benchmark_type }}'. Must be one of: spec06-0.3c, spec06-0.8c, spec06-1.0c"
+              echo "Error: Invalid benchmark_type '${{ inputs.benchmark_type }}'. Must be one of: spec06-0.3c, spec06-0.8c, spec06-1.0c, spec17-0.3c"
               exit 1
               ;;
           esac
@@ -66,17 +102,76 @@ jobs:
           fetch-depth: 0
           submodules: true
 
+      - name: Apply ROB/RAB size
+        run: |
+          PARAM_FILE="$GITHUB_WORKSPACE/src/main/scala/xiangshan/Parameters.scala"
+          ROB_SIZE="${{ inputs.RobSize }}"
+          RAB_SIZE="${{ inputs.RabSize }}"
+
+          if [ -n "$ROB_SIZE" ]; then
+            if ! [[ "$ROB_SIZE" =~ ^[1-9][0-9]*$ ]]; then
+              echo "Error: RobSize must be a positive integer, got '$ROB_SIZE'"
+              exit 1
+            fi
+            sed -E -i "s/(^[[:space:]]*RobSize:[[:space:]]*Int[[:space:]]*=[[:space:]]*)[0-9]+,/\1${ROB_SIZE},/" "$PARAM_FILE"
+            echo "Applied RobSize=$ROB_SIZE"
+          else
+            echo "RobSize not provided, skip RobSize replacement"
+          fi
+
+          if [ -n "$RAB_SIZE" ]; then
+            if ! [[ "$RAB_SIZE" =~ ^[1-9][0-9]*$ ]]; then
+              echo "Error: RabSize must be a positive integer, got '$RAB_SIZE'"
+              exit 1
+            fi
+            sed -E -i "s/(^[[:space:]]*RabSize:[[:space:]]*Int[[:space:]]*=[[:space:]]*)[0-9]+,/\1${RAB_SIZE},/" "$PARAM_FILE"
+            echo "Applied RabSize=$RAB_SIZE"
+          else
+            echo "RabSize not provided, skip RabSize replacement"
+          fi
+
+          grep -nE "^[[:space:]]*RobSize:[[:space:]]*Int[[:space:]]*=|^[[:space:]]*RabSize:[[:space:]]*Int[[:space:]]*=" "$PARAM_FILE"
+
       - name: Set env
         run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
-          DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
+          TEST_BRANCH_RAW="${{ inputs.test_branch }}"
+          TEST_BRANCH_SAFE=$(echo "$TEST_BRANCH_RAW" | sed -E 's/[^A-Za-z0-9._-]+/-/g; s/^-+//; s/-+$//')
+          if [ -z "$TEST_BRANCH_SAFE" ]; then
+            TEST_BRANCH_SAFE="default-branch"
+          fi
+
+          ROB_LABEL="${{ inputs.RobSize }}"
+          if [ -z "$ROB_LABEL" ]; then
+            ROB_LABEL="default"
+          fi
+
+          RAB_LABEL="${{ inputs.RabSize }}"
+          if [ -z "$RAB_LABEL" ]; then
+            RAB_LABEL="default"
+          fi
+
           echo "NODE_SERVER_LIST=${{ inputs.servers }}" >> $GITHUB_ENV
           echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
           echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
           echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/nfs/home/share/ci-workloads/env-scripts/perf" >> $GITHUB_ENV
-          echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}" >> $GITHUB_ENV
-          echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+          echo "PERF_HOME=/nfs/home/share/linzhida/perf" >> $GITHUB_ENV
+          echo "EMU_CACHE_PREFIX=${TEST_BRANCH_SAFE}-${ROB_LABEL}-${RAB_LABEL}" >> $GITHUB_ENV
+          echo "SPEC_DIR=${{ inputs.perf_report_dir }}/${TEST_BRANCH_SAFE}-${ROB_LABEL}-${RAB_LABEL}-${{ inputs.benchmark_type }}-coverage" >> $GITHUB_ENV
+
+      - name: Validate boolean inputs
+        run: |
+          validate_bool() {
+            local key="$1"
+            local value="$2"
+            if [ "$value" != "true" ] && [ "$value" != "false" ]; then
+              echo "Error: ${key} must be 'true' or 'false', got '${value}'"
+              exit 1
+            fi
+          }
+
+          validate_bool "allow_neighbor_emu_reuse" "${{ inputs.allow_neighbor_emu_reuse }}"
+          validate_bool "force_recompile" "${{ inputs.force_recompile }}"
+          validate_bool "force_clean_spec_dir" "${{ inputs.force_clean_spec_dir }}"
 
       - name: Initialize submodules
         run: make init-force
@@ -85,38 +180,113 @@ jobs:
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
 
-      - name: Build EMU with DRAMsim3
+      - name: Force clean SPEC directory
         run: |
-          if [ -e "$SPEC_DIR/emu" ]; then
-            mkdir -p $NOOP_HOME/build
-            cp $SPEC_DIR/emu $NOOP_HOME/build/emu
+          if [ "${{ inputs.force_clean_spec_dir }}" = "true" ]; then
+            PERF_REPORT_DIR="${{ inputs.perf_report_dir }}"
+            PERF_REPORT_DIR="${PERF_REPORT_DIR%/}"
+
+            if [ -z "$SPEC_DIR" ]; then
+              echo "Error: SPEC_DIR is empty, refuse to clean"
+              exit 1
+            fi
+            if [ -z "$PERF_REPORT_DIR" ]; then
+              echo "Error: perf_report_dir is empty after normalization, refuse to clean"
+              exit 1
+            fi
+            case "$SPEC_DIR" in
+              "$PERF_REPORT_DIR"/*) ;;
+              *)
+                echo "Error: SPEC_DIR '$SPEC_DIR' is outside perf_report_dir '$PERF_REPORT_DIR'"
+                exit 1
+                ;;
+            esac
+
+            if [ -d "$SPEC_DIR" ]; then
+              echo "force_clean_spec_dir=true, removing existing SPEC_DIR: $SPEC_DIR"
+              rm -rf "$SPEC_DIR"
+            else
+              echo "force_clean_spec_dir=true, SPEC_DIR does not exist: $SPEC_DIR"
+            fi
+            mkdir -p "$SPEC_DIR"
+            echo "Recreated SPEC_DIR: $SPEC_DIR"
           else
-            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build          \
-              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3              \
-              --with-dramsim3 --threads 8                                   \
-              --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
-              --llvm-profdata llvm-profdata --trace-fst
-            mkdir -p $SPEC_DIR
-            cp $NOOP_HOME/build/emu $SPEC_DIR/emu
+            echo "force_clean_spec_dir=false, keep existing SPEC_DIR behavior"
           fi
 
-      - name: Run SPEC CPU2006 checkpoints
+      - name: Build EMU with DRAMsim3
+        run: |
+          build_emu() {
+            python3 "$GITHUB_WORKSPACE/scripts/xiangshan.py" --build          \
+              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3                \
+              --with-dramsim3 --threads 8                                     \
+              --pgo "$GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin" \
+              --llvm-profdata llvm-profdata --trace-fst
+            mkdir -p "$SPEC_DIR"
+            cp "$NOOP_HOME/build/emu" "$SPEC_DIR/emu"
+          }
+
+          if [ "${{ inputs.force_recompile }}" = "true" ]; then
+            if [ "${{ inputs.allow_neighbor_emu_reuse }}" = "true" ]; then
+              echo "force_recompile=true, ignore allow_neighbor_emu_reuse and rebuild emu"
+            else
+              echo "force_recompile=true, rebuild emu"
+            fi
+            build_emu
+          elif [ -e "$SPEC_DIR/emu" ]; then
+            echo "Found emu in current SPEC_DIR: $SPEC_DIR/emu"
+            mkdir -p "$NOOP_HOME/build"
+            cp "$SPEC_DIR/emu" "$NOOP_HOME/build/emu"
+          else
+            REUSE_EMU_PATH=""
+            if [ "${{ inputs.allow_neighbor_emu_reuse }}" = "true" ]; then
+              shopt -s nullglob
+              for candidate in "${{ inputs.perf_report_dir }}"/"${EMU_CACHE_PREFIX}"-*-coverage/emu; do
+                if [ "$candidate" = "$SPEC_DIR/emu" ]; then
+                  continue
+                fi
+                if [ -f "$candidate" ]; then
+                  REUSE_EMU_PATH="$candidate"
+                  break
+                fi
+              done
+              shopt -u nullglob
+            fi
+
+            if [ -n "$REUSE_EMU_PATH" ]; then
+              echo "Reusing emu from sibling SPEC_DIR: $REUSE_EMU_PATH"
+              mkdir -p "$NOOP_HOME/build"
+              cp "$REUSE_EMU_PATH" "$NOOP_HOME/build/emu"
+              mkdir -p "$SPEC_DIR"
+              cp "$REUSE_EMU_PATH" "$SPEC_DIR/emu"
+            else
+              if [ "${{ inputs.allow_neighbor_emu_reuse }}" = "true" ]; then
+                echo "No reusable sibling emu found under prefix ${EMU_CACHE_PREFIX}, building emu"
+              else
+                echo "allow_neighbor_emu_reuse=false, building emu"
+              fi
+
+              build_emu
+            fi
+          fi
+
+      - name: Run SPEC checkpoints
         run: |
           cd $PERF_HOME
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --benchmarks "${{ inputs.benchmarks }}"\
-            --xs $NOOP_HOME --threads 8 --dir $SPEC_DIR --resume \
+            --xs $NOOP_HOME --threads 8 --dir $SPEC_DIR --resume --version $SPEC_VERSION \
             -L "$NODE_SERVER_LIST"
           find $NOOP_HOME/build/ -maxdepth 1 -name "*.vcd" -exec mv {} $SPEC_DIR \;
           find $NOOP_HOME/build/ -maxdepth 1 -name "*.fst" -exec mv {} $SPEC_DIR \;
 
-      - name: Report SPEC CPU2006 score
+      - name: Report SPEC score
         if: always()
         run: |
           cd $PERF_HOME
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --benchmarks "${{ inputs.benchmarks }}"\
-            --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report \
+            --xs $NOOP_HOME --threads 16 --dir $SPEC_DIR --report --version $SPEC_VERSION \
             > $SPEC_DIR/score.txt
           # mkdir $GITHUB_WORKSPACE/result
           # cp $SPEC_DIR/err_ckps.json $GITHUB_WORKSPACE/result/err_ckps.json
@@ -133,10 +303,10 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           
           echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
-          echo "Estimated SPEC CPU2006 Score per GHz: " >> $GITHUB_STEP_SUMMARY
-          TOTAL_SCORE=$(grep "SPEC2006/GHz:" $SPEC_DIR/score.txt | awk '{print $NF}')
-          INT_SCORE=$(grep "SPECint2006/GHz" $SPEC_DIR/score.txt | awk '{print $(NF-1)}')
-          FP_SCORE=$(grep "SPECfp2006/GHz" $SPEC_DIR/score.txt | awk '{print $(NF-1)}')
+          echo "Estimated SPEC CPU${SPEC_VERSION} Score per GHz: " >> $GITHUB_STEP_SUMMARY
+          TOTAL_SCORE=$(grep "SPEC${SPEC_VERSION}/GHz:" $SPEC_DIR/score.txt | awk '{print $NF}')
+          INT_SCORE=$(grep "SPECint${SPEC_VERSION}/GHz" $SPEC_DIR/score.txt | awk '{print $(NF-1)}')
+          FP_SCORE=$(grep "SPECfp${SPEC_VERSION}/GHz" $SPEC_DIR/score.txt | awk '{print $(NF-1)}')
           echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY

@@ -1,4 +1,5 @@
 name: Performance Regression Trigger
+run-name: ${{ format('{0}-{1}-{2}-{3}-coverage', github.event.inputs.test_branch, github.event.inputs.RobSize != '' && github.event.inputs.RobSize || 'default', github.event.inputs.RabSize != '' && github.event.inputs.RabSize || 'default', github.event.inputs.benchmark_type) }}
 
 on:
   workflow_dispatch:
@@ -9,10 +10,35 @@ on:
         type: string
         default: kunminghu-v3
       benchmark_type:
-        description: 'Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c'
+        description: 'Benchmark type: spec06-0.3c, spec06-0.8c, spec06-1.0c, spec17-0.3c'
         required: false
         type: string
         default: spec06-1.0c
+      RobSize:
+        description: Optional ROB size override, leave empty to keep default in source
+        required: false
+        type: string
+        default: ''
+      RabSize:
+        description: Optional RAB size override, leave empty to keep default in source
+        required: false
+        type: string
+        default: ''
+      allow_neighbor_emu_reuse:
+        description: Allow reusing emu from sibling benchmark_type directories with same branch/ROB/RAB prefix (true/false)
+        required: false
+        type: string
+        default: 'false'
+      force_recompile:
+        description: Force rebuild emu and disable all emu reuse (true/false)
+        required: false
+        type: string
+        default: 'false'
+      force_clean_spec_dir:
+        description: Force recreate SPEC_DIR by deleting existing directory first (true/false)
+        required: false
+        type: string
+        default: 'false'
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
@@ -30,6 +56,11 @@ jobs:
     with:
         test_branch: ${{ github.event.inputs.test_branch }}
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
+        RobSize: ${{ github.event.inputs.RobSize }}
+        RabSize: ${{ github.event.inputs.RabSize }}
+        allow_neighbor_emu_reuse: ${{ github.event.inputs.allow_neighbor_emu_reuse }}
+        force_recompile: ${{ github.event.inputs.force_recompile }}
+        force_clean_spec_dir: ${{ github.event.inputs.force_clean_spec_dir }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
         servers: ${{ github.event.inputs.servers }}
         perf_report_dir: /nfs/home/cirunner/perf-report-custom
