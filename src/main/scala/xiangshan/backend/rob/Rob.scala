@@ -295,20 +295,32 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val instrSizeTable = (1 to RenameWidth).map( instrNum =>
     (instrNum to (2 * instrNum)).map(iretireNum => (instrNum, iretireNum))
   ).flatten
+  def decodeIretire(iretireEncoded: UInt): UInt = {
+    chisel3.util.experimental.decode.decoder(
+      iretireEncoded,
+      TruthTable(
+        instrSizeTable.zipWithIndex.map { case (table, encode) =>
+          (BitPat((encode + 1).U(IretireWidthEncoded.W)), BitPat(table._2.U(IretireWidthCommited.W)))
+        },
+        BitPat.N(IretireWidthCommited)
+      )
+    )
+  }
+  def decodeInstrSize(iretireEncoded: UInt): UInt = {
+    chisel3.util.experimental.decode.decoder(
+      iretireEncoded,
+      TruthTable(
+        instrSizeTable.zipWithIndex.map { case (table, encode) =>
+          (BitPat((encode + 1).U(IretireWidthEncoded.W)), BitPat(table._1.U((log2Ceil(RenameWidth + 1)).W)))
+        },
+        BitPat.N(log2Ceil(RenameWidth + 1))
+      )
+    )
+  }
 
   rawInfo.zip(instrSizeCommit).zip(iretireCommit).map { case((raw, instr), iretire) =>
-    iretire := chisel3.util.experimental.decode.decoder(
-      raw.traceBlockInPipe.iretire,
-      TruthTable(
-        instrSizeTable.zipWithIndex.map{case(table, encode) => (BitPat((encode + 1).U(IretireWidthEncoded.W)), BitPat(table._2.U(IretireWidthCommited.W)))},
-        BitPat.N(IretireWidthCommited))
-    )
-    instr := chisel3.util.experimental.decode.decoder(
-      raw.traceBlockInPipe.iretire,
-      TruthTable(
-        instrSizeTable.zipWithIndex.map{case(table, encode) => (BitPat((encode + 1).U(IretireWidthEncoded.W)), BitPat(table._1.U((log2Ceil(RenameWidth + 1)).W)))},
-        BitPat.N((log2Ceil(RenameWidth + 1))))
-    )
+    iretire := decodeIretire(raw.traceBlockInPipe.iretire)
+    instr := decodeInstrSize(raw.traceBlockInPipe.iretire)
   }
   for (i <- 0 until CommitWidth) {
     commitInfo(i).ftqOffset := 0.U
@@ -721,6 +733,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException && (!deqIsVlsException || deqVlsCanCommit) || isFlushPipe) && !lastCycleFlush
   io.flushOut.bits := DontCare
   val flushIsFormer = deqPtrEntry.needFlush(0)
+  val deqIretireDecoded = decodeIretire(deqPtrEntry.traceBlockInPipe.iretire)
+  val deqFormerLenFromRVC = Mux(deqPtrEntry.RVC(0), 2.U, 4.U).asTypeOf(io.flushPcInfo.formerLen)
+  val deqFormerLenFromIretire = (deqIretireDecoded << 1)(io.flushPcInfo.formerLen.getWidth - 1, 0).asTypeOf(io.flushPcInfo.formerLen)
+  val deqFormerLenByTrace = Mux(
+    CompressType.isCC(deqPtrEntry.compressType) || CompressType.isCS(deqPtrEntry.compressType),
+    deqFormerLenFromRVC,
+    deqFormerLenFromIretire
+  )
   val flushBaseIsRVC = Mux(flushIsFormer, deqPtrEntry.RVC(0), Mux(deqPtrEntry.predTaken, deqPtrEntry.RVC(1), deqPtrEntry.RVC(0)))
   io.flushOut.bits.isRVC := flushBaseIsRVC
   io.flushOut.bits.robIdx := Mux(needModifyFtqIdxOffset, firstVInstrRobIdx, deqPtr)
@@ -753,7 +773,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.flushPcInfo.formerLen := Mux(
     needModifyFtqIdxOffset || flushIsFormer || deqPtrEntry.predTaken,
     0.U.asTypeOf(io.flushPcInfo.formerLen),
-    deqPtrEntry.formerLen
+    deqFormerLenByTrace
   )
   io.flushPcInfo.flushIsRVC := Mux(
     needModifyFtqIdxOffset,
@@ -1537,11 +1557,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
 
     // trace
-    val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.redirect.get.bits.taken).reduce(_ || _)
-    when(robEntries(i).valid && Itype.isBranchType(robEntries(i).traceBlockInPipe.itype) && taken){
-      // BranchType code(notaken itype = 4) must be correctly replaced!
-      // TODO: In the future, there are two itype in trace
-      robEntries(i).traceBlockInPipe.itype := Itype.Taken
+    val formerTaken = branchWBs.map(writeback =>
+      writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.robIdx.isFormer && writeback.bits.redirect.get.bits.taken
+    ).reduce(_ || _)
+    val latterTaken = branchWBs.map(writeback =>
+      writeback.valid && writeback.bits.robIdx.value === i.U && !writeback.bits.robIdx.isFormer && writeback.bits.redirect.get.bits.taken
+    ).reduce(_ || _)
+    when(robEntries(i).valid && Itype.isBranchType(robEntries(i).traceBlockInPipe.itype(0)) && formerTaken){
+      robEntries(i).traceBlockInPipe.itype(0) := Itype.Taken
+    }
+    when(robEntries(i).valid && Itype.isBranchType(robEntries(i).traceBlockInPipe.itype(1)) && latterTaken){
+      robEntries(i).traceBlockInPipe.itype(1) := Itype.Taken
     }
   }
 
@@ -1615,10 +1641,17 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     needUpdate(i).vxsat := Mux(!robBanksRdata(i).valid && instCanEnqFlag, 0.U, robBanksRdata(i).vxsat | vxsatRes)
 
     // trace
-    val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.redirect.get.bits.taken).reduce(_ || _)
-    when(robBanksRdata(i).valid && Itype.isBranchType(robBanksRdata(i).traceBlockInPipe.itype) && taken){
-      // BranchType code(notaken itype = 4) must be correctly replaced!
-      needUpdate(i).traceBlockInPipe.itype := Itype.Taken
+    val formerTaken = branchWBs.map(writeback =>
+      writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.robIdx.isFormer && writeback.bits.redirect.get.bits.taken
+    ).reduce(_ || _)
+    val latterTaken = branchWBs.map(writeback =>
+      writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && !writeback.bits.robIdx.isFormer && writeback.bits.redirect.get.bits.taken
+    ).reduce(_ || _)
+    when(robBanksRdata(i).valid && Itype.isBranchType(robBanksRdata(i).traceBlockInPipe.itype(0)) && formerTaken){
+      needUpdate(i).traceBlockInPipe.itype(0) := Itype.Taken
+    }
+    when(robBanksRdata(i).valid && Itype.isBranchType(robBanksRdata(i).traceBlockInPipe.itype(1)) && latterTaken){
+      needUpdate(i).traceBlockInPipe.itype(1) := Itype.Taken
     }
   }
   robBanksRdataThisLineUpdate := VecInit(needUpdate.take(8))
@@ -1760,10 +1793,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // exception only occur in block(0).
     if(i == 0) {
       when(io.exception.valid){ // trace exception
-        traceBlocks(i).bits.tracePipe.itype := Mux(io.exception.bits.isInterrupt,
-          Itype.Interrupt,
-          Itype.Exception
-        )
+        traceBlocks(i).bits.tracePipe.itype(0) := Mux(io.exception.bits.isInterrupt, Itype.Interrupt, Itype.Exception)
+        traceBlocks(i).bits.tracePipe.itype(1) := Itype.None
         traceValids(i) := true.B
         traceBlockInPipe(i).iretire := 0.U
       }
@@ -2103,8 +2134,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     for (i <- 0 until CommitWidth) {
 
       val ptr = deqPtrVec(i).value
-      val instrSize = instrSizeCommit(i)
       val compressType = io.commits.info(i).compressType
+      val diffInstrCnt = io.commits.info(i).formerInstrCnt + Mux(
+        CompressType.isNORMAL(compressType),
+        0.U,
+        io.commits.info(i).latterInstrCnt
+      )
       val groupCommitValid = io.commits.isCommit && io.commits.commitValid(i)
 
       for (j <- 0 until 2) {
@@ -2149,7 +2184,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         val halfInstrCnt = Mux(j.U === 0.U, io.commits.info(i).formerInstrCnt, io.commits.info(i).latterInstrCnt)
         difftest.nFused := Mux(halfInstrCnt > 0.U, halfInstrCnt - 1.U, 0.U)
         when(difftest.valid) { // TODO
-          assert(instrSize >= 1.U)
+          assert(diffInstrCnt >= 1.U)
         }
         if (env.EnableDifftest) {
           difftest.pc := Mux(pcTransType.shouldBeSext, SignExt(uop.pc, XLEN), uop.pc)

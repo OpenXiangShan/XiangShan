@@ -178,8 +178,13 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
     fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr
     fromRenameUpdate(i).bits.isRVC := fromRename(i).bits.lastIsRVC
-    fromRenameUpdate(i).bits.rasAction := 
-      Itype.isPush(fromRename(i).bits.traceBlockInPipe.itype) ## Itype.isPop(fromRename(i).bits.traceBlockInPipe.itype)
+    val traceItype = Mux(
+      fromRename(i).bits.robIdx.isFormer,
+      fromRename(i).bits.traceBlockInPipe.itype(0),
+      fromRename(i).bits.traceBlockInPipe.itype(1)
+    )
+    fromRenameUpdate(i).bits.rasAction :=
+      Itype.isPush(traceItype) ## Itype.isPop(traceItype)
   }
 
   val renameWidth = io.fromRename.size

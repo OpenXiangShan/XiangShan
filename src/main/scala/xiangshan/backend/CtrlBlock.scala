@@ -307,7 +307,8 @@ class CtrlBlockImp(
   }
 
   // Trap/Xret only occur in block(0).
-  val tracePriv = Mux(Itype.isTrapOrXret(trace.toEncoder.blocks(0).bits.tracePipe.itype),
+  val traceGrp0HasTrapOrXret = trace.toEncoder.blocks(0).bits.tracePipe.itype.map(Itype.isTrapOrXret).reduce(_ || _)
+  val tracePriv = Mux(traceGrp0HasTrapOrXret,
     io.fromCSR.traceCSR.lastPriv,
     io.fromCSR.traceCSR.currentPriv
   )
@@ -393,9 +394,11 @@ class CtrlBlockImp(
     val crc = io.frontend.toFtq.callRetCommit(i)
     val blk = rob.io.trace.traceCommitInfo.blocks(i)
     val vld = rob.io.commits.isCommit && rob.io.commits.commitValid(i)
+    val blkHasPop = blk.bits.tracePipe.itype.map(Itype.isPop).reduce(_ || _)
+    val blkHasPush = blk.bits.tracePipe.itype.map(Itype.isPush).reduce(_ || _)
     crc.valid := GatedValidRegNext(vld)
     crc.bits.ftqPtr := RegEnable(blk.bits.ftqIdx.get, vld)
-    crc.bits.rasAction := RegEnable(Itype.isPop(blk.bits.tracePipe.itype) ## Itype.isPush(blk.bits.tracePipe.itype), vld)
+    crc.bits.rasAction := RegEnable(blkHasPop ## blkHasPush, vld)
   }
   // Be careful here:
   // T0: rob.io.flushOut, s0_robFlushRedirect

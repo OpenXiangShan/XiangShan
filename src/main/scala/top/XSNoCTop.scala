@@ -418,9 +418,11 @@ trait HasTraceIO { this: BaseXSSoc with HasXSTile =>
           val mstatus   = UInt(TraceStatusWidth.W)
           val valid     = UInt(TraceGrpNum.W)
           val iaddr     = UInt((TraceGrpNum * TraceIaddrWidth).W)
-          val itype     = UInt((TraceGrpNum * TraceItypeWidth).W)
+          val itypeFormer = UInt((TraceGrpNum * TraceItypeWidth).W)
+          val itypeLatter = UInt((TraceGrpNum * TraceItypeWidth).W)
           val iretire   = UInt((TraceGrpNum * TraceIretireWidthCompressed).W)
-          val ilastsize = UInt((TraceGrpNum * TraceIlastsizeWidth).W)
+          val ilastsizeFormer = UInt((TraceGrpNum * TraceIlastsizeWidth).W)
+          val ilastsizeLatter = UInt((TraceGrpNum * TraceIlastsizeWidth).W)
         })
       })
     }
@@ -434,9 +436,11 @@ trait HasTraceIO { this: BaseXSSoc with HasXSTile =>
     io.traceCoreInterface.toEncoder.mstatus := traceInterface.toEncoder.mstatus
     io.traceCoreInterface.toEncoder.valid := VecInit(traceInterface.toEncoder.groups.map(_.valid)).asUInt
     io.traceCoreInterface.toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(_.bits.iaddr)).asUInt
-    io.traceCoreInterface.toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
+    io.traceCoreInterface.toEncoder.itypeFormer := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype(0))).asUInt
+    io.traceCoreInterface.toEncoder.itypeLatter := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype(1))).asUInt
     io.traceCoreInterface.toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
-    io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
+    io.traceCoreInterface.toEncoder.ilastsizeFormer := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize(0))).asUInt
+    io.traceCoreInterface.toEncoder.ilastsizeLatter := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize(1))).asUInt
   }
 }
 

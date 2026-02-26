@@ -256,10 +256,11 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     // trace interface
     val traceToTile = io.traceCoreInterface.toTile
     val traceFromCore = io.traceCoreInterface.fromCore
+    val traceGrp0HasTrap = traceFromCore.toEncoder.groups(0).bits.itype.map(Itype.isTrap).reduce(_ || _)
     traceFromCore.fromEncoder := RegNext(traceToTile.fromEncoder)
     traceToTile.toEncoder.trap := RegEnable(
       traceFromCore.toEncoder.trap,
-      traceFromCore.toEncoder.groups(0).valid && Itype.isTrap(traceFromCore.toEncoder.groups(0).bits.itype)
+      traceFromCore.toEncoder.groups(0).valid && traceGrp0HasTrap
     )
     traceToTile.toEncoder.priv := RegEnable(
       traceFromCore.toEncoder.priv,

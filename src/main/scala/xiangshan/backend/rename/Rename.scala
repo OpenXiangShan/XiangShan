@@ -546,11 +546,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
    */
   val inVec = io.in.map(_.bits)
   val isRVCVec = inVec.map(_.isRVC)
-  val nonRVCNumVec = (0 until RenameWidth).map{
-    i => compressMasksVec(i).asBools.zip(isRVCVec).map{
-      case (mask, isRVC) => (mask && !isRVC).asUInt
-    }
-  }
+  val rvcMaskBits = Cat(isRVCVec.reverse)
 
   /*
   encode: instrNum, nonRVCNum => commitinfo.iretire
@@ -569,12 +565,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     (0 to instrNum).map( nonRVCNum => (instrNum, nonRVCNum) )
   }.flatten
 
-  for (i <- 0 until RenameWidth) {
-    // iretire
-    val nonRVCNum = Wire(UInt((log2Ceil(RenameWidth + 1).W)))
-    nonRVCNum := nonRVCNumVec(i).reduce(_ +& _)
-    uops(i).traceBlockInPipe.iretire := chisel3.util.experimental.decode.decoder(
-      (instrSize(i) ## nonRVCNum),
+  def encodeIretire(instrNum: UInt, nonRVCNum: UInt): UInt = {
+    chisel3.util.experimental.decode.decoder(
+      (instrNum ## nonRVCNum),
       TruthTable(
         instrSizeTable.zipWithIndex.map { case (table, encode) =>
           (BitPat(((table._1 << log2Ceil(RenameWidth + 1)) + table._2).U((2 * log2Ceil(RenameWidth + 1)).W)),
@@ -583,23 +576,68 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         BitPat.N(IretireWidthEncoded)
       )
     )
-    // ilastsize
-    val lastIsRVC = isRVCVec(i)
-    when (!needRobFlags(i)) {
-      if (i + 1 < RenameWidth) {
-        uops(i).traceBlockInPipe.ilastsize := uops(i + 1).traceBlockInPipe.ilastsize
-        uops(i).traceBlockInPipe.itype := uops(i + 1).traceBlockInPipe.itype
-      }
-    }.elsewhen(needRobFlags(i)) {
-      uops(i).traceBlockInPipe.ilastsize := Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word)
-      
+  }
+
+  for (i <- 0 until RenameWidth) {
+    val entryMask = compressMasksVec(i)
+    val formerMask = formerMasksVec(i)
+    val latterMask = latterMasksVec(i)
+
+    val entryInstrCnt = instrSize(i)
+    val formerInstrCnt = PopCount(formerMask)
+    val latterInstrCnt = PopCount(latterMask)
+    val entryNonRVCNum = VecInit(entryMask.asBools.zip(isRVCVec).map { case (mask, isRVC) => (mask && !isRVC).asUInt }).reduce(_ +& _)
+    val formerNonRVCNum = VecInit(formerMask.asBools.zip(isRVCVec).map { case (mask, isRVC) => (mask && !isRVC).asUInt }).reduce(_ +& _)
+    val latterNonRVCNum = VecInit(latterMask.asBools.zip(isRVCVec).map { case (mask, isRVC) => (mask && !isRVC).asUInt }).reduce(_ +& _)
+    val entryIretire = encodeIretire(entryInstrCnt, entryNonRVCNum)
+    val formerIretire = encodeIretire(formerInstrCnt, formerNonRVCNum)
+    val latterIretire = encodeIretire(latterInstrCnt, latterNonRVCNum)
+
+    uops(i).traceBlockInPipe.iretire := Mux(
+      CompressType.isCC(compressType(i)),
+      0.U,
+      Mux(
+        CompressType.isSC(compressType(i)),
+        formerIretire,
+        Mux(
+          CompressType.isCS(compressType(i)),
+          latterIretire,
+          entryIretire
+        )
+      )
+    )
+
+    val slotMasks = Seq(formerMask, latterMask)
+    slotMasks.zipWithIndex.foreach { case (slotMask, slotIdx) =>
+      val slotHasInstr = slotMask.orR
+      val slotFirstMask = PriorityEncoderOH(slotMask)
+      val slotLastMask = Reverse(PriorityEncoderOH(Reverse(slotMask)))
+      val slotFirstFuType = Mux1H(slotFirstMask.asBools, inVec.map(_.fuType))
+      val slotFirstFuOpType = Mux1H(slotFirstMask.asBools, inVec.map(_.fuOpType))
+      val slotFirstLdest = Mux1H(slotFirstMask.asBools, inVec.map(_.ldest))
+      val slotFirstLsrc0 = Mux1H(slotFirstMask.asBools, inVec.map(_.lsrc(0)))
+      val slotFirstImm = Mux1H(slotFirstMask.asBools, inVec.map(_.imm))
+      val slotLastIsRVC = (slotLastMask & rvcMaskBits).orR
+
       // CSR systemop instruction excluding ebreak & ecall
-      val csrAddr = Imm_Z().getCSRAddr(uops(i).imm(Imm_Z().len - 1, 0))
-      val isXret = FuType.isCsr(uops(i).fuType) && CSROpType.isSystemOp(uops(i).fuOpType) && (csrAddr(11, 1).orR)
-      uops(i).traceBlockInPipe.itype := Mux(
-        isXret,
+      val slotCsrAddr = Imm_Z().getCSRAddr(slotFirstImm(Imm_Z().len - 1, 0))
+      val slotIsXret = FuType.isCsr(slotFirstFuType) && CSROpType.isSystemOp(slotFirstFuOpType) && slotCsrAddr(11, 1).orR
+      val slotItype = Mux(
+        slotIsXret,
         Itype.ExpIntReturn,
-        Itype.jumpTypeGen(inVec(i).fuType, inVec(i).fuOpType, inVec(i).ldest.asTypeOf(new OpRegType), inVec(i).lsrc(0).asTypeOf(new OpRegType))
+        Itype.jumpTypeGen(
+          slotFirstFuType,
+          slotFirstFuOpType,
+          slotFirstLdest.asTypeOf(new OpRegType),
+          slotFirstLsrc0.asTypeOf(new OpRegType)
+        )
+      )
+
+      uops(i).traceBlockInPipe.itype(slotIdx) := Mux(slotHasInstr, slotItype, Itype.None)
+      uops(i).traceBlockInPipe.ilastsize(slotIdx) := Mux(
+        slotHasInstr,
+        Mux(slotLastIsRVC, Ilastsize.HalfWord, Ilastsize.Word),
+        Ilastsize.HalfWord
       )
     }
   }

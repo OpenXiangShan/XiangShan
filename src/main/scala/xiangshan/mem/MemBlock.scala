@@ -1755,10 +1755,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // trace interface
   val traceToL2Top = io.traceCoreInterfaceBypass.toL2Top
   val traceFromBackend = io.traceCoreInterfaceBypass.fromBackend
+  val traceGrp0HasTrap = traceFromBackend.toEncoder.groups(0).bits.itype.map(Itype.isTrap).reduce(_ || _)
   traceFromBackend.fromEncoder := RegNext(traceToL2Top.fromEncoder)
   traceToL2Top.toEncoder.trap  := RegEnable(
     traceFromBackend.toEncoder.trap,
-    traceFromBackend.toEncoder.groups(0).valid && Itype.isTrap(traceFromBackend.toEncoder.groups(0).bits.itype)
+    traceFromBackend.toEncoder.groups(0).valid && traceGrp0HasTrap
   )
   traceToL2Top.toEncoder.priv := RegEnable(
     traceFromBackend.toEncoder.priv,

@@ -289,9 +289,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
           val mstatus   = UInt(TraceStatusWidth.W)
           val valid     = UInt(TraceGrpNum.W)
           val iaddr     = UInt((TraceGrpNum * TraceIaddrWidth).W)
-          val itype     = UInt((TraceGrpNum * TraceItypeWidth).W)
+          val itypeFormer = UInt((TraceGrpNum * TraceItypeWidth).W)
+          val itypeLatter = UInt((TraceGrpNum * TraceItypeWidth).W)
           val iretire   = UInt((TraceGrpNum * TraceIretireWidthCompressed).W)
-          val ilastsize = UInt((TraceGrpNum * TraceIlastsizeWidth).W)
+          val ilastsizeFormer = UInt((TraceGrpNum * TraceIlastsizeWidth).W)
+          val ilastsizeLatter = UInt((TraceGrpNum * TraceIlastsizeWidth).W)
         })
       })
     })
@@ -353,9 +355,11 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       io.traceCoreInterface(i).toEncoder.mstatus := traceInterface.toEncoder.mstatus
       io.traceCoreInterface(i).toEncoder.valid := VecInit(traceInterface.toEncoder.groups.map(_.valid)).asUInt
       io.traceCoreInterface(i).toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(_.bits.iaddr)).asUInt
-      io.traceCoreInterface(i).toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
+      io.traceCoreInterface(i).toEncoder.itypeFormer := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype(0))).asUInt
+      io.traceCoreInterface(i).toEncoder.itypeLatter := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype(1))).asUInt
       io.traceCoreInterface(i).toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
-      io.traceCoreInterface(i).toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
+      io.traceCoreInterface(i).toEncoder.ilastsizeFormer := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize(0))).asUInt
+      io.traceCoreInterface(i).toEncoder.ilastsizeLatter := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize(1))).asUInt
 
       core.module.io.dft.foreach(dontTouch(_) := DontCare)
       core.module.io.dft_reset.foreach(dontTouch(_) := DontCare)

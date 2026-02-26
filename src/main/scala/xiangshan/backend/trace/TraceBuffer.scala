@@ -29,7 +29,9 @@ class TraceBuffer(implicit val p: Parameters) extends Module
    * compress, update blocks
    */
   val inValidVec = VecInit(io.in.fromRob.blocks.map(_.valid))
-  val inTypeIsNotNoneVec = VecInit(io.in.fromRob.blocks.map(block => Itype.isNotNone(block.bits.tracePipe.itype)))
+  val inTypeIsNotNoneVec = VecInit(io.in.fromRob.blocks.map(block =>
+    block.bits.tracePipe.itype.map(Itype.isNotNone).reduce(_ || _)
+  ))
   val needPcVec = Wire(Vec(CommitWidth, Bool()))
   for(i <- 0 until CommitWidth) {
     val rightHasValid = if(i == CommitWidth - 1) false.B  else (inValidVec.asUInt(CommitWidth-1, i+1).orR)
