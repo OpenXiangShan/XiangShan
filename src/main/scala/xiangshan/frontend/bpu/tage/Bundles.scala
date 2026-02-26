@@ -70,7 +70,8 @@ class PhrToTageIO(implicit p: Parameters) extends TageBundle {
 }
 
 class MainBtbToTageIO(implicit p: Parameters) extends TageBundle {
-  val result: Vec[Valid[Prediction]] = Input(Vec(NumBtbResultEntries, Valid(new Prediction)))
+  val result:       Vec[Valid[Prediction]] = Input(Vec(NumBtbResultEntries, Valid(new Prediction)))
+  val s1_positions: Vec[UInt]              = Input(Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)))
 }
 
 class TageToScIO(implicit p: Parameters) extends TageBundle {
@@ -119,8 +120,8 @@ class TageMeta(implicit p: Parameters) extends TageBundle {
 }
 
 class TageFoldedHist(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
-  val forIdx: UInt = UInt(SetIdxWidth.W)
-  val forTag: UInt = UInt(TagWidth.W)
+  val forIdx: UInt      = UInt(SetIdxWidth.W)
+  val forTag: Vec[UInt] = Vec(2, UInt(TagWidth.W))
 }
 
 class PredictTagMatchResult(implicit p: Parameters) extends TageBundle {

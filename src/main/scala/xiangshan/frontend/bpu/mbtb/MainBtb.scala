@@ -32,6 +32,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     val result: Vec[Valid[Prediction]] = Output(Vec(NumBtbResultEntries, Valid(new Prediction)))
     val meta:   MainBtbMeta            = Output(new MainBtbMeta)
 
+    // timing optimization: send positions earlier to TAGE
+    val s1_positions: Vec[UInt] = Output(Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)))
+
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
     val s3_takenMask: Vec[Bool] = Input(Vec(NumBtbResultEntries, Bool()))
   }
@@ -94,6 +97,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
    * just wait alignBanks
    */
   s1_fire := io.stageCtrl.s1_fire && io.enable
+
+  io.s1_positions := VecInit(alignBanks.flatMap(_.io.read.s1_positions))
 
   /* *** s2 ***
    * receive read response from alignBanks
