@@ -45,7 +45,7 @@ case class ScParameters(
     NumBanks:            Int = 2,
     WriteBufferSize:     Int = 4,
     TagWidth:            Int = 12,
-    EnableScTrace:       Boolean = true
+    EnableScTrace:       Boolean = false
 ) {}
 
 trait HasScParameters extends HasBpuParameters {

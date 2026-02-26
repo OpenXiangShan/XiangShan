@@ -25,10 +25,11 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.Prediction
 
 class CommonHREntry(implicit p: Parameters) extends CommonHRBundle {
-  val valid:       Bool       = Bool()
-  val ghr:         UInt       = UInt(GhrHistoryLength.W)
-  val predStartPc: PrunedAddr = PrunedAddr(VAddrBits) // for debug
-  val bw:          UInt       = UInt(BWHistoryLength.W)
+  val valid: Bool = Bool()
+  val ghr:   UInt = UInt(GhrHistoryLength.W)
+  val bw:    UInt = UInt(BWHistoryLength.W)
+
+  val predStartPc: Option[PrunedAddr] = Some(PrunedAddr(VAddrBits)) // for debug
 }
 class CommonHRUpdate(implicit p: Parameters) extends CommonHRBundle {
   val taken:            Bool              = Bool()
