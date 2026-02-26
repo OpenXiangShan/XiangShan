@@ -115,7 +115,7 @@ class SmblockctlBundle extends CSRBundle {
 }
 
 class SrnctlBundle extends CSRBundle {
-  val HIGH_DENSITY_ROB_COMPRESSION_ENABLE = RW(4).withReset(false.B)
+  val HIGH_DENSITY_ROB_COMPRESSION_ENABLE = RW(4).withReset(true.B)
   val WFI_ENABLE     = RW(2).withReset(true.B)
   val FUSION_ENABLE  = RW(0).withReset(true.B)
 }
