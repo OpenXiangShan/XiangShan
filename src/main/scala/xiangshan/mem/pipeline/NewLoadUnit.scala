@@ -1635,7 +1635,6 @@ class LoadUnitS3(param: ExeUnitParams)(
   XSPerfAccumulate("nc_rar_violation", pipeIn.valid && in.isNCReplay() && rarViolation)
 
   // source occupy others but fail perf counter
-    // unalignTail
   val executeFail = lqWriteValid && lqWriteCause.asUInt.orR || pipeIn.valid && shouldFastReplay
   for (i <- 0 until LoadEntrance.num) {
     val highPrioNume = LoadEntrance.findNameById(i)
@@ -1645,6 +1644,22 @@ class LoadUnitS3(param: ExeUnitParams)(
       val enable = pipeIn.bits.occupySource(j.U) && pipeIn.bits.entrance(i.U)
       XSPerfAccumulate(s"${highPrioNume}_occupy_${lowPrioNume}", executeFail && enable)
     }
+  }
+
+  // source execute success perfEvent
+  for (i <- 0 until LoadEntrance.num) {
+    val sourceNum = LoadEntrance.findNameById(i)
+    println(s"[${param.name}] Add execute successed PerfEvents of ${sourceNum}, index: ${i}")
+    val enable = pipeIn.bits.entrance(i.U) && ldoutValid // success writeback
+    XSPerfAccumulate(s"${sourceNum}_execute_success", enable)
+  }
+
+  // source execute failed perfEvent
+  for (i <- 0 until LoadEntrance.num) {
+    val sourceNum = LoadEntrance.findNameById(i)
+    println(s"[${param.name}] Add execute failed PerfEvents of ${sourceNum}, index: ${i}")
+    val enable = pipeIn.bits.entrance(i.U) && executeFail
+    XSPerfAccumulate(s"${sourceNum}_execute_fail", enable)
   }
 
   /**
