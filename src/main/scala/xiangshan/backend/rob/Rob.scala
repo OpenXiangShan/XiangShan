@@ -958,6 +958,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   enqPtrCmp := enqPtr
   deqPtrCmp.isFormer := true.B
   enqPtrCmp.isFormer := true.B
+  private def wbSlotStillValid(robIdx: RobPtr): Bool = {
+    val wbEntry = robEntries(robIdx.value) // TODO: this may cause timing issue
+    wbEntry.valid && (robIdx.isFormer || CompressType.isNotNORMAL(wbEntry.compressType))
+  }
 
   vxsat.valid := io.commits.isCommit && vxsat.bits && updateVxsat
   vxsat.bits := io.commits.commitValid.zip(io.commits.robIdx).map {
@@ -966,7 +970,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val wbUpdateVxsat = vxsatWBs.map(wb => 
     {
-      val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
+      val wbInRobWindow = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
+      val wbEntryValid = wbInRobWindow && wbSlotStillValid(wb.bits.robIdx)
       wb.valid && wbEntryValid && wb.bits.vxsat.get
     }
   ).reduce(_ | _)
@@ -978,7 +983,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val wbUpdateVxsatSeq = vxsatWBs.map(wb =>
     {
       val s = Wire(new WbSel())
-      val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
+      val wbInRobWindow = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
+      val wbEntryValid = wbInRobWindow && wbSlotStillValid(wb.bits.robIdx)
       s.validvxsat := wb.valid && wbEntryValid && wb.bits.vxsat.get
       s.robIdx := wb.bits.robIdx
       s
@@ -1033,7 +1039,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
     val wbUpdateFflags = fflagsWBs.map(wb => 
       { 
-        val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
+        val wbInRobWindow = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
+        val wbEntryValid = wbInRobWindow && wbSlotStillValid(wb.bits.robIdx)
         wb.valid && wbEntryValid && wb.bits.wflags.get && wb.bits.fflags.get(i)
       }
     ).reduce(_ | _)
@@ -1041,7 +1048,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val wbUpdateFflagsSeq = fflagsWBs.map(wb =>
       {
         val s = Wire(new WbFflags)
-        val wbEntryValid = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
+        val wbInRobWindow = isNotBefore(wb.bits.robIdx, deqPtrCmp) && isBefore(wb.bits.robIdx, enqPtrCmp)
+        val wbEntryValid = wbInRobWindow && wbSlotStillValid(wb.bits.robIdx)
         s.set := wb.valid && wbEntryValid && wb.bits.wflags.get && wb.bits.fflags.get(i)
         s.robIdx := wb.bits.robIdx
         s
