@@ -542,6 +542,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   }
 
   mhartid.hartid := this.io.fromTop.hartId
+  mhartid.dmode  := debugMode
 
   pmpcfgs.zipWithIndex.foreach { case (mod, i) =>
     mod.w.wen   := wenLegalReg && (addr === (CSRs.pmpcfg0 + i / 8 * 2).U)

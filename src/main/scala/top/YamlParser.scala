@@ -40,6 +40,7 @@ case class YamlConfig(
   L2CacheConfig: Option[L2CacheConfig],
   L3CacheConfig: Option[L3CacheConfig],
   HartIDBits: Option[Int],
+  HartIDDmodeWidth: Option[Int],
   DebugAttachProtocals: Option[List[String]],
   DebugModuleParams: Option[DebugModuleParams],
   WFIResume: Option[Boolean],
@@ -116,6 +117,11 @@ object YamlParser {
     yamlConfig.HartIDBits.foreach { bits =>
       newConfig = newConfig.alter((site, here, up) => {
         case MaxHartIdBits => bits
+      })
+    }
+    yamlConfig.HartIDDmodeWidth.foreach { width =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(hartIDDmodeWidth = width))
       })
     }
     yamlConfig.DebugModuleParams.foreach { params =>

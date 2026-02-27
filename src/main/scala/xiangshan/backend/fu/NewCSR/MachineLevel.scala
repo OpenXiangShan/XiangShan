@@ -384,7 +384,8 @@ trait MachineLevel { self: NewCSR =>
     val ALL = RO(hartIdLen - 1, 0)
   }) {
     val hartid = IO(Input(UInt(hartIdLen.W)))
-    this.regOut.ALL := hartid
+    val dmode  = IO(Input(Bool()))
+    this.regOut.ALL := (if(hartIDDmodeWidth > 0) Mux(dmode, hartid(hartIDDmodeWidth - 1, 0), hartid) else hartid)
   })
     .setAddr(CSRs.mhartid)
 
