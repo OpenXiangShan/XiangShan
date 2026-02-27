@@ -843,7 +843,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val replayDCacheReplayCount = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_DR)))
   val replayForwardFailCount  = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_FF)))
   val replayDCacheMissCount   = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_DM)))
-  val replayMultiMatchCount   = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_MF)))
+  val replayMultiMatchCount   = PopCount(io.enq.map(enq => enq.fire && !enq.bits.isLoadReplay && enq.bits.rep_info.cause(LoadReplayCauses.C_SMF)))
   XSPerfAccumulate("enq", enqNumber)
   XSPerfAccumulate("deq", deqNumber)
   XSPerfAccumulate("deq_block", deqBlockCount)
@@ -881,6 +881,29 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val replayCounter = LookupTree(schedIndex, perfReplayCounter.zipWithIndex.map{case (d, v) => (v.U, d)})
     XSPerfHistogram(s"load_replay_count_${i}", replayCounter, enable, 1, 16, 1)
   }
+
+  // count the number of each cause replay over 4 times.
+  val replayTlbMissOver4Count      = PopCount(io.enq.map(enq => enq.valid && enq.bits.isLoadReplay && !enq.bits.rep_info.need_rep && (perfReplayCounter(enq.bits.schedIndex) > 4.U) && cause(enq.bits.schedIndex)(LoadReplayCauses.C_TM)))
+  val replayMemAmbOver4Count       = PopCount(io.enq.map(enq => enq.valid && enq.bits.isLoadReplay && !enq.bits.rep_info.need_rep && (perfReplayCounter(enq.bits.schedIndex) > 4.U) && cause(enq.bits.schedIndex)(LoadReplayCauses.C_MA)))
+  val replayNukeOver4Count         = PopCount(io.enq.map(enq => enq.valid && enq.bits.isLoadReplay && !enq.bits.rep_info.need_rep && (perfReplayCounter(enq.bits.schedIndex) > 4.U) && cause(enq.bits.schedIndex)(LoadReplayCauses.C_NK)))
+  val replayRARRejectOver4Count    = PopCount(io.enq.map(enq => enq.valid && enq.bits.isLoadReplay && !enq.bits.rep_info.need_rep && (perfReplayCounter(enq.bits.schedIndex) > 4.U) && cause(enq.bits.schedIndex)(LoadReplayCauses.C_RAR)))
+  val replayRAWRejectOver4Count    = PopCount(io.enq.map(enq => enq.valid && enq.bits.isLoadReplay && !enq.bits.rep_info.need_rep && (perfReplayCounter(enq.bits.schedIndex) > 4.U) && cause(enq.bits.schedIndex)(LoadReplayCauses.C_RAW)))
+  val replayBankConflictOver4Count = PopCount(io.enq.map(enq => enq.valid && enq.bits.isLoadReplay && !enq.bits.rep_info.need_rep && (perfReplayCounter(enq.bits.schedIndex) > 4.U) && cause(enq.bits.schedIndex)(LoadReplayCauses.C_BC)))
+  val replayDCacheReplayOver4Count = PopCount(io.enq.map(enq => enq.valid && enq.bits.isLoadReplay && !enq.bits.rep_info.need_rep && (perfReplayCounter(enq.bits.schedIndex) > 4.U) && cause(enq.bits.schedIndex)(LoadReplayCauses.C_DR)))
+  val replayForwardFailOver4Count  = PopCount(io.enq.map(enq => enq.valid && enq.bits.isLoadReplay && !enq.bits.rep_info.need_rep && (perfReplayCounter(enq.bits.schedIndex) > 4.U) && cause(enq.bits.schedIndex)(LoadReplayCauses.C_FF)))
+  val replayDCacheMissOver4Count   = PopCount(io.enq.map(enq => enq.valid && enq.bits.isLoadReplay && !enq.bits.rep_info.need_rep && (perfReplayCounter(enq.bits.schedIndex) > 4.U) && cause(enq.bits.schedIndex)(LoadReplayCauses.C_DM)))
+  val replayMultiMatchOver4Count   = PopCount(io.enq.map(enq => enq.valid && enq.bits.isLoadReplay && !enq.bits.rep_info.need_rep && (perfReplayCounter(enq.bits.schedIndex) > 4.U) && cause(enq.bits.schedIndex)(LoadReplayCauses.C_SMF)))
+
+  XSPerfAccumulate("replay_rar_nack_over4_times", replayRARRejectOver4Count)
+  XSPerfAccumulate("replay_raw_nack_over4_times", replayRAWRejectOver4Count)
+  XSPerfAccumulate("replay_nuke_over4_times", replayNukeOver4Count)
+  XSPerfAccumulate("replay_mem_amb_over4_times", replayMemAmbOver4Count)
+  XSPerfAccumulate("replay_tlb_miss_over4_times", replayTlbMissOver4Count)
+  XSPerfAccumulate("replay_bank_conflict_over4_times", replayBankConflictOver4Count)
+  XSPerfAccumulate("replay_dcache_replay_over4_times", replayDCacheReplayOver4Count)
+  XSPerfAccumulate("replay_forward_fail_over4_times", replayForwardFailOver4Count)
+  XSPerfAccumulate("replay_dcache_miss_over4_times", replayDCacheMissOver4Count)
+  XSPerfAccumulate("replay_storeQueue_multi_match_over4_times", replayMultiMatchOver4Count)
 
 
   val perfEvents: Seq[(String, UInt)] = Seq(
