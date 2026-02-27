@@ -944,6 +944,7 @@ object Bundles {
     val ftqOffset      = Option.when(exuParams.needFtqPtrOffset)(UInt(FetchBlockInstOffsetWidth.W))
     // psrc are used in datapath to generate regfile's bank Ren
     val psrc           = Vec(exuParams.numRegSrc, UInt(exuParams.rdPregIdxWidth.W))
+    val psrcVl         = Option.when(exuParams.readVlRf)(UInt(VlPhyRegIdxWidth.W))
     // dataSources are used in issueQueue to generate regfile Ren
     val dataSources    = Vec(exuParams.numRegSrc, DataSource())
     val exuSources     = Option.when(exuParams.isIQWakeUpSink)(Vec(exuParams.numRegSrc, ExuSource(exuParams)))
