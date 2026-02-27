@@ -480,16 +480,20 @@ class InterruptFilter extends Module {
     0.U
   )
 
-  val mIRNotZero  = mIRVecTmp.orR
-  val hsIRNotZero = hsIRVecTmp.orR
-  val vsIRNotZero = vsIRVecTmp.orR
+  val mIRVecReg  = RegNext(mIRVecTmp,  0.U.asTypeOf(mIRVecTmp))
+  val hsIRVecReg = RegNext(hsIRVecTmp, 0.U.asTypeOf(hsIRVecTmp))
+  val vsIRVecReg = RegNext(vsIRVecTmp, 0.U.asTypeOf(vsIRVecTmp))
+
+  val mIRNotZero  = mIRVecReg.orR
+  val hsIRNotZero = hsIRVecReg.orR
+  val vsIRNotZero = vsIRVecReg.orR
 
   val irToHS = !mIRNotZero && hsIRNotZero
   val irToVS = !mIRNotZero && !hsIRNotZero && vsIRNotZero
 
-  val mIRVec  = mIRVecTmp
-  val hsIRVec = Mux(irToHS, hsIRVecTmp, 0.U)
-  val vsIRVec = Mux(irToVS, UIntToOH(vsIRVecTmp, 64), 0.U)
+  val mIRVec  = mIRVecReg
+  val hsIRVec = Mux(irToHS, hsIRVecReg, 0.U)
+  val vsIRVec = Mux(irToVS, UIntToOH(vsIRVecReg, 64), 0.U)
 
   val vsMapHostIRVecTmp = Cat((0 until vsIRVec.getWidth).map { num =>
     // 2,6,10
@@ -530,10 +534,10 @@ class InterruptFilter extends Module {
   val disableDebugIntr = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool)
   val enableDebugIntr = io.in.debugIntr && !disableDebugIntr
 
-  val disableAllIntr = disableDebugIntr || !io.in.mnstatusNMIE
+  val disableAllIntr = RegNext(disableDebugIntr || !io.in.mnstatusNMIE, false.B)
 
   val normalIntrVec = mIRVec | hsIRVec | vsMapHostIRVec
-  val intrVec = Mux(disableAllIntr, 0.U, Mux(io.in.nmi, nmiVec, normalIntrVec))
+  val intrVec = Mux(disableAllIntr, 0.U, Mux(RegNext(io.in.nmi, false.B), RegNext(nmiVec, 0.U.asTypeOf(nmiVec)), normalIntrVec))
 
   // virtual interrupt with hvictl injection
   val vsIRModeCond = privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS
@@ -553,7 +557,7 @@ class InterruptFilter extends Module {
   viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5 && io.in.mnstatusNMIE
   irToHSReg := irToHS
   irToVSReg := irToVS
-  val delayedIntrVec = DelayN(intrVecReg, 5)
+  val delayedIntrVec = DelayN(intrVecReg, 4)
   val delayedDebugIntr = DelayN(debugIntrReg, 5)
   val delayedNMI = DelayN(nmiReg, 5)
   val delayedVIIsHvictlInjectReg = DelayN(viIsHvictlInjectReg, 5)
