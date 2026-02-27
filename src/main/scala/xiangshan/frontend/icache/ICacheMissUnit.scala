@@ -135,9 +135,11 @@ class ICacheMissUnit(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheModu
 
   // if this req hit nextline or not
   private val hitNextLineOH = allMshr.map { mshr =>
-    !io.prefetchReq.bits.isNextLine && (mshr.io.lookUps(1).resp.hit || mshr.io.lookUps(
-      0
-    ).resp.hit && prefetchHitFetchReq) && mshr.io.info.bits.isNextLine
+    !io.prefetchReq.bits.isNextLine &&
+    (mshr.io.lookUps(1).resp.hit ||
+      mshr.io.lookUps(0).resp.hit &&
+      prefetchHitFetchReq) &&
+    mshr.io.info.bits.isNextLine
   }
   (allMshr zip hitNextLineOH).foreach { case (mshr, valid) =>
     mshr.io.ftqIdx.valid := valid

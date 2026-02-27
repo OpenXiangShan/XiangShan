@@ -141,6 +141,7 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   }
 
   // prefetch real ftq idx and invalid isNextLine
+  // TODO：refactor this
   when(io.ftqIdx.valid) {
     ftqIdx     := io.ftqIdx.bits
     isNextLine := false.B

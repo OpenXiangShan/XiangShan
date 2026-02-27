@@ -4,6 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
+import utility.XSPerfHistogram
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
@@ -77,11 +78,11 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   (io.result zip s2_entries zip io.meta.entries).foreach { case ((result, entry), meta) =>
     val hit = entry.sramData.tag === s2_tag
     result.valid            := entry.valid && s2_fire && hit && entry.sramData.position >= s2_InstOffset
-    result.bits.taken       := false.B
+    result.bits.taken       := meta.counter.isPositive
     result.bits.target      := getFullTarget(s2_startPc, entry.sramData.target, None)
     result.bits.attribute   := entry.sramData.attribute
     result.bits.cfiPosition := entry.sramData.position
-    meta.rawHit             := hit
+    meta.rawHit             := hit && entry.valid
     meta.position           := entry.sramData.position
     meta.counter            := Mux(entry.used, entry.counter, TakenCounter.WeakPositive)
     meta.attribute          := entry.sramData.attribute
@@ -218,6 +219,13 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   XSPerfAccumulate(
     "prefetch_invalid",
     PopCount(i0_needValid.map(_ && i0_fire))
+  )
+  XSPerfHistogram(
+    "predict_valid",
+    PopCount(io.result.map(_.valid)),
+    io.result.map(_.valid).reduce(_ || _),
+    0,
+    NumWay
   )
   XSPerfAccumulate(
     "mispredReasonPrefetchBtb",
