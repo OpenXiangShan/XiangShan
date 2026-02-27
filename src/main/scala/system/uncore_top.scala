@@ -92,7 +92,7 @@ case class PeriParams(
 
 case class Pbus2Params(
     NumHarts:       Int = 2, // number of cpus +1(aplic)+1(pcie msi)
-    idBits:         Int = 8,
+    idBits:         Int = 4,
     cpuAddrWidth:   Int = 32,
     cpuDataWidth:   Int = 64,
     dmHasBusMaster: Boolean = true,
@@ -139,9 +139,9 @@ class AXIDataBridge(DataWidth: Int)(implicit p: Parameters) extends LazyModule {
   error.node := error_xbar
   axi_xbar_o :=
 //    AXI4Buffer() :=
-//    AXI4Buffer() :=
+    AXI4Buffer() :=
 //    AXI4IdIndexer(idBits = 10) :=
-//    AXI4UserYanker() :=
+    AXI4UserYanker() :=
     AXI4Deinterleaver(DataWidth/8) :=
     TLToAXI4() :=
     error_xbar :=
@@ -395,10 +395,10 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(params.DebugAddrMap),
-        supportsWrite = TransferSizes(1, params.cpuAddrWidth / 8),
-        supportsRead = TransferSizes(1, params.cpuAddrWidth / 8)
+        supportsWrite = TransferSizes(1, params.cpuDataWidth / 8),
+        supportsRead = TransferSizes(1, params.cpuDataWidth / 8)
       )),
-      beatBytes = params.cpuAddrWidth / 8
+      beatBytes = params.cpuDataWidth / 8
     )))
   cpu2dm_s := Cbus.cpum
   // define dm_s_self
@@ -406,8 +406,8 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(params.DebugAddrMap),
-        supportsWrite = TransferSizes(1, params.cpuAddrWidth / 8),
-        supportsRead = TransferSizes(1, params.cpuAddrWidth / 8)
+        supportsWrite = TransferSizes(1, params.cpuDataWidth / 8),
+        supportsRead = TransferSizes(1, params.cpuDataWidth / 8)
       )),
       beatBytes = params.cpuAddrWidth / 8
     )))
@@ -484,6 +484,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       masters = Seq(AXI4MasterParameters(
         name = "cpu-Mnode",
         maxFlight = Some(1),
+        aligned = true,
         id = IdRange(0, 1 << params.idBits)
       ))
     )))
