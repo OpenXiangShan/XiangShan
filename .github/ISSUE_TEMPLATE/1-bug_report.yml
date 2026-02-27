@@ -36,6 +36,21 @@ body:
           required: true
         - label: I have reproduced the incorrect behaviors using the latest commit on the master branch. 我已经使用 master 分支最新的 commit 复现了不正确的行为。
           required: true
+  - type: dropdown
+    id: branch
+    attributes:
+      label: Branch
+      description: |
+        Please select the branch you are using.
+        请选择您使用的分支。
+      options:
+        - master (kunminghu-v2)
+        - kunminghu-v3
+        - nanhu
+        - yanqihu
+        - Other (please specify in "Additional context" section)
+    validations:
+      required: true
   - type: textarea
     id: describe
     attributes:
@@ -44,7 +59,7 @@ body:
         A clear and concise description of what the bug is.
         请清晰、准确地描述这一缺陷。
 
-        If applicable, add screenshots / logs to help explain your problem.
+        If applicable, add screenshots / logs to help explain the bug.
         如果可能，请提供有助于您描述问题的屏幕截图和日志。
 
         Please upload logs as attachments, do not paste them directly into the text box.
@@ -63,16 +78,6 @@ body:
     validations:
       required: true
   - type: textarea
-    id: reproduce
-    attributes:
-      label: To Reproduce
-      description: |
-        Steps to reproduce the bug. Also a corresponding minimal workload (source code and bin) along with a description.
-        复现这一缺陷的步骤，以及相关的最小测试用例（包含源码、二进制文件和说明）。
-      placeholder:
-    validations:
-      required: true
-  - type: textarea
     id: environment
     attributes:
       label: Environment
@@ -80,15 +85,41 @@ body:
         Please provide your environment information.
         请提供您的环境信息。
 
-        XiangShan config specifies the XiangShan compilation options specified by `CONFIG=` when compiling XiangShan. If no option is specified, the default is `TLConfig`.
-        XiangShan config 为您编译香山时由 `CONFIG=` 指定的香山编译选项，如果没有显示指定，则默认为 `TLConfig`。
+        You can use `./scripts/bug-report.sh` to collect the environment information and generate a report file, and then upload the report file as an attachment.
+        您可以使用 `./scripts/bug-report.sh` 来收集环境信息并生成报告文件，然后将报告文件作为附件上传。
+
+        If you cannot upload the report file, please fill in the form as much as possible.
+        如果不便上传报告文件，请尽可能填写此表单。
       placeholder:
       value: |
-        - XiangShan branch:
-        - XiangShan commit id:
-        - XiangShan config:
-        - NEMU commit id:
-        - SPIKE commit id:
+        - Hardware
+          - CPU:
+          - Memory (GB):
+          - Storage (GB):
+        - Software
+          - Operating system:
+          - gcc version: <!-- run `gcc --version 2>&1 | head -n 1` to get the version -->
+          - clang version: <!-- run `clang --version 2>&1 | head -n 1` to get the version, only needed when you use clang -->
+          - java version: <!-- run `java -version 2>&1 | head -n 1` to get the version -->
+          - mill version: <!-- run `mill -i --version 2>&1 | head -n 1` to get the version -->
+        - Repo
+          - XiangShan commit id: ``
+          - NEMU commit id (if difftest failed with NEMU): ``
+          - SPIKE commit id (if difftest failed with SPIKE): ``
+        - Build & Run
+          - Build command: ``
+          - Run command (if applicable): ``
+          - Also upload workload (binary and source code) in "To Reproduce" section if applicable.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: To Reproduce
+      description: |
+        Steps to reproduce the bug. Also a corresponding minimal workload (source code and bin) along with a description.
+        复现这一缺陷的步骤，以及相关的最小测试用例（包含源码、二进制文件和说明）。
+      placeholder:
     validations:
       required: true
   - type: textarea

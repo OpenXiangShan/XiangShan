@@ -33,6 +33,21 @@ body:
           required: true
         - label: I have reproduced the problem using the latest commit on the master branch. 我已经使用 master 分支最新的 commit 复现了问题。
           required: true
+  - type: dropdown
+    id: branch
+    attributes:
+      label: Branch
+      description: |
+        Please select the branch you are using.
+        请选择您使用的分支。
+      options:
+        - master (kunminghu-v2)
+        - kunminghu-v3
+        - nanhu
+        - yanqihu
+        - Other (please specify in "Additional context" section)
+    validations:
+      required: true
   - type: textarea
     id: describe
     attributes:
@@ -41,8 +56,11 @@ body:
         A clear and concise description of what the problem is.
         请清晰、准确地描述您遇到的问题。
 
-        If applicable, add screenshots to help explain your problem.
-        建议您附上遇到问题时的屏幕截图。
+        If applicable, add screenshots / logs to help explain your problem.
+        如果可能，请提供有助于您描述问题的屏幕截图和日志。
+
+        Please upload logs as attachments, do not paste them directly into the text box.
+        请使用附件的形式上传日志，不要直接粘贴到文本框中。
       placeholder:
     validations:
       required: true
@@ -67,24 +85,31 @@ body:
         Please provide your environment information.
         请提供您的环境信息。
 
-        XiangShan config specifies the XiangShan compilation options specified by `CONFIG=` when compiling XiangShan. If no option is specified, the default is `TLConfig`.
-        XiangShan config 为您编译香山时由 `CONFIG=` 指定的香山编译选项，如果没有显示指定，则默认为 `TLConfig`。
+        You can use `./scripts/bug-report.sh` to collect the environment information and generate a report file, and then upload the report file as an attachment.
+        您可以使用 `./scripts/bug-report.sh` 来收集环境信息并生成报告文件，然后将报告文件作为附件上传。
 
-        Tips:
-         - gcc version: **run `gcc --version` and paste first line of the output**
-         - mill version: **run `mill -i --version` and paste first line of the output**
-         - java version: **run `java --version` and paste first line of the output**
+        If you cannot upload the report file, please fill in the form as much as possible.
+        如果不便上传报告文件，请尽可能填写此表单。
       placeholder:
       value: |
-        - XiangShan branch:
-        - XiangShan commit id:
-        - XiangShan config:
-        - NEMU commit id:
-        - SPIKE commit id:
-        - Operating System:
-        - gcc version:
-        - mill version:
-        - java version:
+        - Hardware
+          - CPU:
+          - Memory (GB):
+          - Storage (GB):
+        - Software
+          - Operating system:
+          - gcc version: <!-- run `gcc --version 2>&1 | head -n 1` to get the version -->
+          - clang version: <!-- run `clang --version 2>&1 | head -n 1` to get the version, only needed when you use clang -->
+          - java version: <!-- run `java -version 2>&1 | head -n 1` to get the version -->
+          - mill version: <!-- run `mill -i --version 2>&1 | head -n 1` to get the version -->
+        - Repo
+          - XiangShan commit id: ``
+          - NEMU commit id (if difftest failed with NEMU): ``
+          - SPIKE commit id (if difftest failed with SPIKE): ``
+        - Build & Run
+          - Build command: ``
+          - Run command (if applicable): ``
+          - Also upload workload (binary and source code) if applicable.
     validations:
       required: true
   - type: textarea
