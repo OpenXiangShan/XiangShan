@@ -124,6 +124,7 @@ case class Pbus2Params(
  * A configurable hierarchical AXI4 bus interconnect with heterogeneous input widths.
  */
 class AXIDataBridge(DataWidth: Int)(implicit p: Parameters) extends LazyModule {
+  println("=====AXIDataBridge: start define=====")
   val axi_xbar_i = AXI4Xbar()
   val axi_xbar_o = AXI4Xbar()
   //  private val tmp_xbar = TLXbar()
@@ -137,9 +138,9 @@ class AXIDataBridge(DataWidth: Int)(implicit p: Parameters) extends LazyModule {
   ))
   error.node := error_xbar
   axi_xbar_o :=
-    AXI4Buffer() :=
-    AXI4Buffer() :=
-//    AXI4IdIndexer(idBits = 12) :=
+//    AXI4Buffer() :=
+//    AXI4Buffer() :=
+//    AXI4IdIndexer(idBits = 10) :=
 //    AXI4UserYanker() :=
     AXI4Deinterleaver(DataWidth/8) :=
     TLToAXI4() :=
@@ -151,8 +152,10 @@ class AXIDataBridge(DataWidth: Int)(implicit p: Parameters) extends LazyModule {
     AXI4UserYanker() :=
     AXI4Buffer() :=
     axi_xbar_i
+  println("=====AXIDataBridge: end define=====")
   lazy val module = new Imp
   class Imp extends LazyModuleImp(this)
+  println("=====AXIDataBridge: exit ======")
 }
 //  axi_xbar_o :=
 //  AXI4Buffer() :=
@@ -236,7 +239,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   val aplic_mNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     masters = Seq(AXI4MasterParameters(
       name = "master-node",
-      maxFlight = Some(0),
+      maxFlight = Some(1),
       id = IdRange(0, 1 << params.idBits)
     ))
   )))
@@ -480,7 +483,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     AXI4MasterNode(Seq(AXI4MasterPortParameters(
       masters = Seq(AXI4MasterParameters(
         name = "cpu-Mnode",
-        maxFlight = Some(0),
+        maxFlight = Some(1),
         id = IdRange(0, 1 << params.idBits)
       ))
     )))
@@ -492,7 +495,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   val hni_mNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     masters = Seq(AXI4MasterParameters(
       name = "master-node",
-      maxFlight = Some(0),
+      maxFlight = Some(1),
       id = IdRange(0, 1 << params.idBits)
     ))
   )))
@@ -519,7 +522,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   val peri_mNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     masters = Seq(AXI4MasterParameters(
       name = "master-node",
-      maxFlight = Some(0),
+      maxFlight = Some(1),
       id = IdRange(0, 1 << params.idBits)
     ))
   )))
