@@ -117,8 +117,20 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     }
   }
 
+  // Prioritize early position comparison at the cost of ABTB SRAM timing margin,
+  // ensuring glitch-free valid signals for the next stage.
+  private val a1_posHitVec = Wire(Vec(NumAheadBtbPredictionEntries, Vec(NumTables, Vec(NumWays, Bool()))))
+  for (i <- 0 until NumAheadBtbPredictionEntries) {
+    for (j <- 0 until NumTables) {
+      for (k <- 0 until NumWays) {
+        a1_posHitVec(i)(j)(k) := (a1_predEntries(j)(k).cfiPosition === io.abtbPosVec(i))
+      }
+    }
+  }
+
   private val a3_readIndex     = RegInit(0.U.asTypeOf(a1_readIndex))
   private val a3_predRead      = RegInit(0.U.asTypeOf(a1_predRead))
+  private val a3_posHitVec     = RegInit(0.U.asTypeOf(a1_posHitVec))
   private val overridePredRead = Wire(Vec(NumTables, Vec(NumWays, new MicroTageTablePred)))
   for (i <- 0 until NumTables) {
     val predTag = computeHashTag(a1_startPc, a1_foldedPathHist, TableInfos, i)
@@ -136,6 +148,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val a2_readIndex = RegEnable(Mux(overrideValid, a3_readIndex, a1_readIndex), a1_fire)
   private val a2_predRead =
     RegEnable(Mux(overrideValid, overridePredRead, a1_predRead), 0.U.asTypeOf(a1_predRead), a1_fire)
+  private val a2_posHitVec =
+    RegEnable(Mux(overrideValid, a3_posHitVec, a1_posHitVec), 0.U.asTypeOf(a1_posHitVec), a1_fire)
   private val a2_fromAbtbPos     = RegEnable(io.abtbPosVec, a1_fire)
   private val a2_abtbHitVec      = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val a2_abtbTakenVec    = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
@@ -153,8 +167,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     for (j <- 0 until NumTables) {
       val wayHitVec = Wire(Vec(NumWays, Bool()))
       for (k <- 0 until NumWays) {
-        wayHitVec(k) := (a2_predRead(j)(k).valid && a2_predRead(j)(k).tagHit) &&
-          a2_predRead(j)(k).cfiPosition === a2_fromAbtbPos(i) // io.abtbPrediction(i).bits.cfiPosition
+        wayHitVec(k) := a2_predRead(j)(k).tagHit && a2_posHitVec(i)(j)(k)
       }
       tableHitVec(j) := wayHitVec.asUInt.orR
       val priorityWayHitVec = PriorityEncoderOH(wayHitVec)
@@ -201,6 +214,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   when(a2_fire) {
     a3_predRead  := a2_predRead
     a3_readIndex := a2_readIndex
+    a3_posHitVec := a2_posHitVec
   }
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
