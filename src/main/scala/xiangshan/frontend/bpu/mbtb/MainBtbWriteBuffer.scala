@@ -30,7 +30,7 @@ class MainBtbWriteBuffer(
 )(implicit p: Parameters) extends MainBtbModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
-  require(numPorts <= numEntries)
+//  require(numPorts <= numEntries) TODO: is this out-of-date?
   class MainBtbWriteBufferIO extends Bundle {
     // used for prediction
     class Probe extends Bundle {

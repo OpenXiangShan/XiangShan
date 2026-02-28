@@ -31,7 +31,11 @@ trait Helpers extends HasScParameters with PhrHelper {
   def getBankMask(pc: PrunedAddr): UInt =
     UIntToOH((pc >> (instOffsetBits + log2Ceil(NumWays)))(BankWidth - 1, 0))
 
-  def getWayIdx(cfiPosition: UInt): UInt = cfiPosition(log2Ceil(NumWays) - 1, 0)
+//  def getWayIdx(cfiPosition: UInt): UInt = cfiPosition(log2Ceil(NumWays) - 1, 0)
+  def getWayOH(cfiPosition: UInt): UInt =
+    // hash from cfiPosition bits to NumWays bits
+    // NumWays may not be 2^n
+    VecInit((0 until (1 << CfiPositionWidth)).map(i => UIntToOH((i % NumWays).U, NumWays)))(cfiPosition)
 
   // get pc ^ foldedHist for index
   def getPathTableIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories, numSets: Int): UInt =
@@ -68,21 +72,26 @@ trait Helpers extends HasScParameters with PhrHelper {
       oldEntries:    Vec[ScEntry],
       writeValidVec: Vec[Bool],
       takenMask:     Vec[Bool],
-      wayIdxVec:     Vec[UInt],
-      branchIdxVec:  Vec[UInt],
-      metaData:      ScMeta
+//      wayIdxVec:     Vec[UInt],
+      wayOHVec: Vec[UInt],
+//      branchIdxVec: Vec[UInt],
+      branchOHVec: Vec[UInt],
+      metaData:    ScMeta
   ): Vec[ScEntry] = {
     require(
       writeValidVec.length == takenMask.length &&
-        writeValidVec.length == wayIdxVec.length,
-      "Length of writeValidVec, takenMask and wayIdxVec should be the same"
+        writeValidVec.length == wayOHVec.length,
+      "Length of writeValidVec, takenMask and wayOHVec should be the same"
     )
     val newEntries = Wire(Vec(oldEntries.length, new ScEntry()))
     oldEntries.zip(newEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), wayIdx) =>
-      val newCtr = writeValidVec.zip(takenMask).zip(wayIdxVec).zip(branchIdxVec).foldLeft(oldEntry.ctr) {
-        case (prevCtr, (((writeValid, writeTaken), writeWayIdx), branchIdx)) =>
-          val needUpdate = writeValid && writeWayIdx === wayIdx.U && metaData.tagePredValid(branchIdx) &&
-            (metaData.scPred(branchIdx) =/= writeTaken || !metaData.sumAboveThres(branchIdx))
+      val newCtr = writeValidVec.zip(takenMask).zip(wayOHVec).zip(branchOHVec).foldLeft(oldEntry.ctr) {
+        case (prevCtr, (((writeValid, writeTaken), writeWayOH), branchOH)) =>
+          val tagePredValid = Mux1H(branchOH, metaData.tagePredValid)
+          val scPred        = Mux1H(branchOH, metaData.scPred)
+          val sumAboveThres = Mux1H(branchOH, metaData.sumAboveThres)
+          val needUpdate = writeValid && writeWayOH === UIntToOH(wayIdx.U, NumWays) && tagePredValid &&
+            (scPred =/= writeTaken || !sumAboveThres)
           prevCtr.getUpdate(
             writeTaken,
             needUpdate
@@ -97,17 +106,23 @@ trait Helpers extends HasScParameters with PhrHelper {
       oldEntries:    Vec[ScEntry],
       newEntries:    Vec[ScEntry],
       writeValidVec: Vec[Bool],
-      wayIdxVec:     Vec[UInt]
+//      wayIdxVec:     Vec[UInt]
+      wayOHVec: Vec[UInt]
   ): Vec[Bool] = {
     require(
-      writeValidVec.length == wayIdxVec.length,
+      writeValidVec.length == wayOHVec.length,
       "Length of writeValidVec and wayIdxVec should be the same"
     )
     val updateWayMask = WireInit(VecInit.fill(NumWays)(false.B))
-    writeValidVec.zip(wayIdxVec).foreach {
-      case (writeValid, wayIdx) =>
-        when(writeValid && (oldEntries(wayIdx).ctr.value =/= newEntries(wayIdx).ctr.value)) {
-          updateWayMask(wayIdx) := true.B
+    writeValidVec.zip(wayOHVec).foreach {
+      case (writeValid, wayOH) =>
+//        when(writeValid && (Mux1H(wayOH, oldEntries).ctr.value =/= Mux1H(wayOH, newEntries).ctr.value)) {
+//          updateWayMask(wayIdx) := true.B
+//        }
+        updateWayMask.zipWithIndex.foreach { case (bit, wayIdx) =>
+          when(wayOH(wayIdx) && writeValid && (oldEntries(wayIdx).ctr.value =/= newEntries(wayIdx).ctr.value)) {
+            bit := true.B
+          }
         }
     }
     updateWayMask
