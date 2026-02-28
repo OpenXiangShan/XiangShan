@@ -104,23 +104,27 @@ class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with Has
   private def ScEntryWidth = (new ScEntry).getWidth
   val startPc: PrunedAddr = PrunedAddr(VAddrBits)
   val cfiPc:   UInt       = UInt(VAddrBits.W)
-
+  // tage provider info
   val providerValid: Bool = Bool()
   val providerTaken: Bool = Bool()
   val providerCtr:   UInt = UInt(TageTakenCtrWidth.W)
-
-  val pathResp: Vec[UInt] = Vec(NumPathTables, UInt(ScEntryWidth.W))
-
+  // sc resp
+  val pathResp:   Vec[UInt] = Vec(NumPathTables, UInt(ScEntryWidth.W))
   val globalResp: Vec[UInt] = Vec(NumGlobalTables, UInt(ScEntryWidth.W))
-
-  val biasResp: UInt = UInt(ScEntryWidth.W)
-
+  val biasResp:   UInt      = UInt(ScEntryWidth.W)
+  // sc pred
   val sumAboveThres: Bool = Bool()
   val scPred:        Bool = Bool()
   val useSc:         Bool = Bool()
+
+  // actual
+  val actualTaken: Bool = Bool()
+  val mispredict:  Bool = Bool()
 
   val scCorrectTageWrong:   Bool = Bool()
   val scWrongTageCorrect:   Bool = Bool()
   val scCorrectTageCorrect: Bool = Bool()
   val scWrongTageWrong:     Bool = Bool()
+  val scWrong:              Bool = Bool()
+  val scCorrect:            Bool = Bool()
 }
