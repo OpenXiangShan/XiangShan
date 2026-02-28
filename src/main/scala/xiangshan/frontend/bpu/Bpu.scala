@@ -310,11 +310,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val abtbUseRet = s1_abtbResult.attribute.isReturn && uras.io.specOut.isCanUse
   private val ubtbUseRet = s1_ubtbResult.attribute.isReturn && uras.io.specOut.isCanUse
   s1_prediction.target :=
-    Mux(s1_abtbValid && s1_abtbResult.taken && !abtbUseRet,
+    Mux(
+      s1_abtbValid && s1_abtbResult.taken && !abtbUseRet,
       s1_abtbResult.target,
-      Mux(!s1_abtbValid && s1_ubtbResult.taken && !ubtbUseRet,
+      Mux(
+        !s1_abtbValid && s1_ubtbResult.taken && !ubtbUseRet,
         s1_ubtbResult.target,
-        Mux((s1_abtbValid && !s1_abtbResult.taken) || (!s1_abtbValid && !s1_ubtbResult.taken),
+        Mux(
+          (s1_abtbValid && !s1_abtbResult.taken) || (!s1_abtbValid && !s1_ubtbResult.taken),
           fallThrough.io.prediction.target,
           uras.io.specOut.retTarget
         )
