@@ -122,8 +122,9 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   private val s2_jumpOffset      = RegEnable(s1_jumpOffset, s1_valid)
   private val s2_startPc         = RegEnable(s1_startPc, s1_valid)
 
+  // TODO: add more branch type
   private val s2_shadowBranchMask = (s2_branchInfo zip s2_finalInstrValid).map { case (info, valid) =>
-    info.valid && (info.brAttribute.isDirect || info.brAttribute.isConditional) && valid // only use direct branch
+    info.valid && (info.brAttribute.isDirect || info.brAttribute.isConditional) && valid
   }
   private val s2_revBranchInfo = s2_branchInfo.reverse
 

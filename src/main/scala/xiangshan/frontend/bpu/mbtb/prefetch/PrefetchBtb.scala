@@ -3,6 +3,7 @@ package xiangshan.frontend.bpu.mbtb.prefetch
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import xiangshan.frontend.PrunedAddr
@@ -11,6 +12,7 @@ import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.bpu.mbtb.TakenCounter
 import xiangshan.frontend.bpu.mbtb.prefetch._
 import xiangshan.frontend.ftq.FtqEntry
@@ -24,12 +26,15 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val redirectPrefetchBtbMeta: PrefetchBtbMeta        = Input(new PrefetchBtbMeta)
     val result:                  Vec[Valid[Prediction]] = Output(Vec(NumWay, Valid(new Prediction)))
     val meta:                    PrefetchBtbMeta        = Output(new PrefetchBtbMeta)
+
     // prefetch data
     val prefetchData: Valid[BtbPrefetchBundle] = Flipped(Valid(new BtbPrefetchBundle))
     // get pc from ftq
     val prefetchBtbFtqPtr: ValidIO[FtqPtr] = Valid(new FtqPtr)
     val ftqEntry:          FtqEntry        = Input(new FtqEntry())
-    val s3_takenMask:      Vec[Bool]       = Input(Vec(NumBtbResultEntries, Bool()))
+
+    val s3_inValid:   Vec[Bool] = Input(Vec(NumWay, Bool()))
+    val s3_takenMask: Vec[Bool] = Input(Vec(NumBtbResultEntries, Bool()))
   }
 
   val io: PrefetchBtbIO = IO(new PrefetchBtbIO)
@@ -74,6 +79,8 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s2_tag        = getTag(s2_startPc)
   private val s2_entries    = RegEnable(s1_entries, s1_fire)
   private val s2_InstOffset = getPosition(s2_startPc)
+  private val s2_setIdx     = getSetIndex(s2_startPc)
+  private val s2_bankMask   = UIntToOH(getBankIndex(s2_startPc))
   s2_fire := io.stageCtrl.s2_fire && io.enable
   (io.result zip s2_entries zip io.meta.entries).foreach { case ((result, entry), meta) =>
     val hit = entry.sramData.tag === s2_tag
@@ -91,6 +98,8 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s3_takenMask      = VecInit(io.s3_takenMask.slice(NumMBtbResultEntries, NumBtbResultEntries))
   private val s3_fire           = io.stageCtrl.s3_fire
   private val s3_replacerSetIdx = RegEnable(getReplacerSetIndex(s2_startPc), s2_fire)
+  private val s3_setIdx         = RegEnable(s2_setIdx, s2_fire)
+  private val s3_bankMask       = RegEnable(s2_bankMask, s2_fire)
 
   // touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
   replacer.io.predictTouch.valid        := s3_fire && s3_takenMask.reduce(_ || _)
@@ -131,17 +140,20 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val isHit = t1_train.meta.mbtb.entries.flatten.map { mbtb =>
       mbtb.rawHit && pbtb.rawHit && mbtb.position === pbtb.position
     }.reduce(_ || _)
-    isHit
+    isHit && t1_fire
   }
-
+  XSError(
+    PopCount(t1_needInvalid) >= 1.U,
+    "train stage pbtb meta error,maybe s3 stage do not correct meta"
+  )
   t1_meta.zipWithIndex.foreach { case (meta, i) =>
     val hitMask = t1_branches.map { branch =>
       branch.valid && branch.bits.attribute.isConditional && meta.position === branch.bits.cfiPosition &&
-      meta.rawHit && !t1_needInvalid(i)
+      meta.rawHit
     }
     val usedMask = t1_branches.map { branch =>
       branch.valid && meta.position === branch.bits.cfiPosition &&
-      meta.rawHit && !t1_needInvalid(i)
+      meta.rawHit
     }
     val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
 
@@ -153,17 +165,19 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   // train write to invalid entry
   // TODO: remove used signals
   banks.zipWithIndex.foreach { case (bank, idx) =>
-    bank.io.trainInvalidReq.valid            := t1_fire && t1_bankMask(idx).asBool
-    bank.io.trainInvalidReq.bits.setIdx      := t1_setIdx
-    bank.io.trainInvalidReq.bits.needInvalid := t1_needInvalid
-    bank.io.trainCounterReq.valid            := t1_fire && t1_bankMask(idx).asBool && t1_counterWayMask.reduce(_ || _)
-    bank.io.trainCounterReq.bits.setIdx      := t1_setIdx
-    bank.io.trainCounterReq.bits.wayMask     := t1_counterWayMask.asUInt
-    bank.io.trainCounterReq.bits.counters    := t1_newCounters
-    bank.io.trainUsedReq.valid               := t1_fire && t1_bankMask(idx).asBool && t1_usedWayMask.reduce(_ || _)
-    bank.io.trainUsedReq.bits.setIdx         := t1_setIdx
-    bank.io.trainUsedReq.bits.wayMask        := t1_usedWayMask.asUInt
-    bank.io.trainUsedReq.bits.used           := t1_used
+    // invalid in s3 stage
+    bank.io.trainInvalidReq.valid            := s3_fire && s3_bankMask(idx).asBool && io.s3_inValid.reduce(_ || _)
+    bank.io.trainInvalidReq.bits.setIdx      := s3_setIdx
+    bank.io.trainInvalidReq.bits.needInvalid := io.s3_inValid
+
+    bank.io.trainCounterReq.valid         := t1_fire && t1_bankMask(idx).asBool && t1_counterWayMask.reduce(_ || _)
+    bank.io.trainCounterReq.bits.setIdx   := t1_setIdx
+    bank.io.trainCounterReq.bits.wayMask  := t1_counterWayMask.asUInt
+    bank.io.trainCounterReq.bits.counters := t1_newCounters
+    bank.io.trainUsedReq.valid            := t1_fire && t1_bankMask(idx).asBool && t1_usedWayMask.reduce(_ || _)
+    bank.io.trainUsedReq.bits.setIdx      := t1_setIdx
+    bank.io.trainUsedReq.bits.wayMask     := t1_usedWayMask.asUInt
+    bank.io.trainUsedReq.bits.used        := t1_used
   }
   // Prefetch pipe
   prefetchPipe.io.flush := io.redirect.valid
@@ -177,7 +191,6 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val w0_prefetchWayMask  = WireInit(VecInit(w0_prefetchWrite.bits.entries.map(_.valid)))
   private val w0_prefetchEntries  = WireInit(VecInit(w0_prefetchWrite.bits.entries.map(_.bits)))
 
-//  private val
   replacer.io.writeMask.valid := w0_prefetchWrite.valid
   replacer.io.writeMask.bits  := w0_prefetchWayMask.asUInt
   private val victimWayMask = replacer.io.victim.wayMask
@@ -233,7 +246,7 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }.reduce(_ || _)
   XSPerfAccumulate(
     "prefetch_hit_mbtb",
-    PopCount(t1_needInvalid.map(_ && t1_fire))
+    PopCount(io.s3_inValid.map(_ && s3_fire))
   )
   XSPerfAccumulate(
     "prefetch_invalid",
@@ -247,7 +260,35 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     NumWay
   )
   XSPerfAccumulate(
+    "predict_branch",
+    io.result.map(_.valid).reduce(_ || _),
+    Seq(
+      ("total", true.B, PopCount(io.result.map(res => res.valid))),
+      ("direct", true.B, PopCount(io.result.map(res => res.valid && res.bits.attribute.isDirect))),
+      (
+        "otherIndirect",
+        true.B,
+        PopCount(io.result.map(res => res.valid && res.bits.attribute.isOtherIndirect))
+      ),
+      ("call", true.B, PopCount(io.result.map(res => res.valid && res.bits.attribute.isCall))),
+      ("return", true.B, PopCount(io.result.map(res => res.valid && res.bits.attribute.isReturn))),
+      (
+        "conditional",
+        true.B,
+        PopCount(io.result.map(res => res.valid && res.bits.attribute.isConditional))
+      )
+    )
+  )
+  XSPerfAccumulate(
     "mispredReasonPrefetchBtb",
-    PopCount(debug_prefetchMispred)
+    debug_prefetchMispred && t1_fire,
+    Seq(
+      ("total", true.B),
+      ("direct", t1_train.mispredictBranch.bits.attribute.isDirect),
+      ("otherIndirect", t1_train.mispredictBranch.bits.attribute.isOtherIndirect),
+      ("call", t1_train.mispredictBranch.bits.attribute.isCall),
+      ("return", t1_train.mispredictBranch.bits.attribute.isReturn),
+      ("conditional", t1_train.mispredictBranch.bits.attribute.isConditional)
+    )
   )
 }

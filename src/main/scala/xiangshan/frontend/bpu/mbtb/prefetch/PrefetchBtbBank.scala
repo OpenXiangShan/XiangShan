@@ -141,6 +141,7 @@ class PrefetchBtbBank(bandIdx: Int)(implicit p: Parameters) extends PrefetchBtbM
     val trainNeedInvalid  = io.trainInvalidReq.valid && io.trainInvalidReq.bits.needInvalid(i)
     val ifuNeedInvalid    = io.ifuInvalidReq.valid && io.ifuInvalidReq.bits.needInvalid(i)
     val usedNeedValid     = io.trainUsedReq.valid && io.trainUsedReq.bits.wayMask(i)
+    // TODO:refactor this logic
     when(needWrite) {
       valid(entryWriteSetIdx)(i)  := entryWriteEntry.valid
       victim(entryWriteSetIdx)(i) := entryWriteEntry.victim

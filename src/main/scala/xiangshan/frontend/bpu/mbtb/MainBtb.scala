@@ -65,6 +65,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val prefetchBtb = Module(new PrefetchBtb)
   private val alignBanks  = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))
 
+  private val finalPrefetchBtbMeta = WireInit(prefetchBtb.io.meta)
   prefetchBtb.io.enable := true.B
   prefetchBtb.io.prefetchData <> io.prefetchData
   prefetchBtb.io.prefetchBtbFtqPtr <> io.prefetchBtbFtqPtr
@@ -77,7 +78,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   prefetchBtb.io.stageCtrl := io.stageCtrl
   prefetchBtb.io.train     := io.train
 
-  io.prefetchBbtMeta := prefetchBtb.io.meta
+  io.prefetchBbtMeta := finalPrefetchBtbMeta
 
   io.resetDone := alignBanks.map(_.io.resetDone).reduce(_ && _)
 
@@ -137,17 +138,31 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   // (as s0_posHigherBitsVec is already computed and concatenated to each entry's posLowerBits)
   // (and we care about the full position when searching for a matching entry, not the bank it comes from)
   // so here we just flatten them, without rotating them back to the original order
+  private val prefetchInvalid     = Wire(Vec(NumPrefetchWay, Bool()))
   private val prefetchFinalResult = WireInit(prefetchBtb.io.result)
+  private val s3_prefetchInvalid  = RegEnable(prefetchInvalid, s2_fire)
   (prefetchFinalResult zip prefetchBtb.io.result).foreach { case (res, ori) =>
-    val hit = alignBanks.flatMap(_.io.read.resp.predictions).map(mbtb =>
+    // attribute compare is unnecessary
+    val invalid = alignBanks.flatMap(_.io.read.resp.predictions).map(mbtb =>
       mbtb.valid &&
-        ori.valid && mbtb.bits.attribute === ori.bits.attribute &&
+        ori.valid &&
         mbtb.bits.cfiPosition === ori.bits.cfiPosition
     ).reduce(_ || _)
-    res.valid := ori.valid && !hit
+    res.valid := ori.valid && !invalid
     res.bits  := ori.bits
   }
-  io.result := VecInit(alignBanks.flatMap(_.io.read.resp.predictions) ++ prefetchFinalResult)
+  (finalPrefetchBtbMeta.entries zip prefetchInvalid zip prefetchBtb.io.meta.entries).foreach {
+    case ((final_meta, inv), ori_meta) =>
+      inv := alignBanks.flatMap(_.io.read.resp.metas).map(mbtb =>
+        mbtb.rawHit &&
+          ori_meta.rawHit &&
+          mbtb.position === ori_meta.position
+      ).reduce(_ || _)
+      final_meta.rawHit := ori_meta.rawHit && !inv
+  }
+
+  prefetchBtb.io.s3_inValid := s3_prefetchInvalid
+  io.result                 := VecInit(alignBanks.flatMap(_.io.read.resp.predictions) ++ prefetchFinalResult)
   // we don't need to flatten meta entries, keep the alignBank structure, anyway we just use them per alignBank
   io.meta.entries := VecInit(alignBanks.map(_.io.read.resp.metas))
 
