@@ -162,6 +162,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s0_twoFetchInstrOffset = VecInit.tabulate(FetchBlockInstNum)(i =>
     Mux(s0_fetchBlockSelect(i), s0_appendedInstrOffset(i), i.U)
   )
+
+  private val s0_loadPredEndVec = getMdpInfo(s0_ftqFetch(0).startVAddr, s0_ftqFetch(0).mdpPrediction)
   /* *****************************************************************************
    * IFU Stage 1
    * ***************************************************************************** */
@@ -178,6 +180,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_fetchBlockSelect    = RegEnable(s0_fetchBlockSelect, s0_fire)
   private val s1_twoFetchPcLower     = RegEnable(s0_twoFetchPcLower, s0_fire)
   private val s1_twoFetchInstrOffset = RegEnable(s0_twoFetchInstrOffset, s0_fire)
+  private val s1_loadPredEndVec      = RegEnable(s0_loadPredEndVec, s0_fire)
 
   s1_flushFromBpu(0) := fromFtq.flushFromBpu.shouldFlushByStage3(s1_fetchBlock(0).ftqIdx, s1_firstValid)
   s1_flushFromBpu(1) := fromFtq.flushFromBpu.shouldFlushByStage3(s1_fetchBlock(1).ftqIdx, s1_secondValid)
@@ -202,6 +205,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   instrBoundary.io.req.endPos                := s1_totalEndPos
   instrBoundary.io.req.firstInstrIsHalfRvi   := s1_prevLastIsHalfRvi
   instrBoundary.io.req.maybeRvc              := VecInit((0 until FetchBlockInstNum).map(i => s1_maybeRvc(i)))
+  instrBoundary.io.req.loadPredEndVec        := s1_loadPredEndVec
 
   private val s1_firstFetchEndIsHalf = instrBoundary.io.resp.firstFetchBlockLastInstrIsHalfRvi
   private val s1_fetchEndIsHalf      = instrBoundary.io.resp.lastInstrIsHalfRvi
@@ -595,6 +599,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   io.toIBuffer.bits.valid          := s3_alignInstrValid.asUInt
   io.toIBuffer.bits.enqEnable      := checkerOutStage1.fixedTwoFetchRange.asUInt & s3_alignInstrValid.asUInt
   io.toIBuffer.bits.isRvc          := s3_alignPds.map(_.isRVC)
+  io.toIBuffer.bits.isLoad         := s3_alignPds.map(_.isLoad)
+  io.toIBuffer.bits.mdpPrediction  := s3_alignCompactInfo.instrLoadPredEnd
   io.toIBuffer.bits.pc             := s3_alignPc
   io.toIBuffer.bits.prevIBufEnqPtr := s3_prevIBufEnqPtr
   io.toIBuffer.bits.ftqPtr.zipWithIndex.foreach { case (ftqPtr, i) =>

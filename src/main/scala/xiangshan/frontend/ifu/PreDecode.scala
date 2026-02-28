@@ -50,8 +50,9 @@ class PreDecode(implicit p: Parameters) extends IfuModule with PreDecodeHelper {
     val jalOffset = getJalOffset(inst, io.req.bits.isRvc(i))
     val brOffset  = getBrOffset(inst, io.req.bits.isRvc(i))
 
-    io.resp.pd(i).valid := io.req.bits.instrValid(i)
-    io.resp.pd(i).isRVC := io.req.bits.isRvc(i)
+    io.resp.pd(i).valid  := io.req.bits.instrValid(i)
+    io.resp.pd(i).isRVC  := io.req.bits.isRvc(i)
+    io.resp.pd(i).isLoad := inst(i)(6, 0) === "b0000011".U
 
     // for diff purpose only
     io.resp.pd(i).brAttribute := BranchAttribute.decode(inst, io.req.valid)

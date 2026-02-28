@@ -40,7 +40,7 @@ trait PreDecodeHelper extends HasIfuParameters {
   }
 }
 
-trait IfuHelper extends HasIfuParameters {
+trait IfuHelper extends HasIfuParameters with HalfAlignHelper {
   private object ShiftType {
     val NoShift     = 0.U(2.W)
     val ShiftRight1 = 1.U(2.W)
@@ -121,5 +121,21 @@ trait IfuHelper extends HasIfuParameters {
     out.instrPcLower   := alignData(indata.instrPcLower, shiftNum, 0.U((PcCutPoint + 1).W))
     out.instrEndOffset := alignData(indata.instrEndOffset, shiftNum, 0.U(log2Ceil(FetchBlockInstNum).W))
     out
+  }
+
+  def getMdpInfo(startPc: PrunedAddr, mdpPrediction: Vec[Valid[MdpPrediction]]): Vec[Valid[MdpPredictInfo]] = {
+    val ftqOffsetVec   = Wire(Vec(NumMdpResultEntries, UInt(CfiPositionWidth.W)))
+    val loadPredEndVec = WireDefault(VecInit(Seq.fill(FetchBlockInstNum)(0.U.asTypeOf(Valid(new MdpPredictInfo)))))
+    for (i <- 0 until NumMdpResultEntries) {
+      ftqOffsetVec(i) := getFtqOffset(startPc, mdpPrediction.bits.cfiPosition)
+    }
+
+    for (i <- 0 until NumMdpResultEntries) {
+      loadPredEndVec(ftqOffset(i)).valid         := mdpPrediction.valid
+      loadPredEndVec(ftqOffset(i)).bits.static   := mdpPrediction.bits.static
+      loadPredEndVec(ftqOffset(i)).bits.loadWait := mdpPrediction.bits.loadWait
+      loadPredEndVec(ftqOffset(i)).bits.distance := mdpPrediction.bits.distance
+    }
+    loadPredEndVec
   }
 }

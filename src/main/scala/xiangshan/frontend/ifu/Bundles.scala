@@ -176,9 +176,10 @@ class IfuRedirectInternal(implicit p: Parameters) extends IfuBundle {
 }
 
 class InstrCompactBundle(width: Int)(implicit p: Parameters) extends IfuBundle {
-  val instrIndex:     Vec[InstrIndexEntry] = Vec(width, new InstrIndexEntry)
-  val instrIsRvc:     Vec[Bool]            = Vec(width, Bool())
-  val selectBlock:    Vec[Bool]            = Vec(width, Bool())
-  val instrPcLower:   Vec[UInt]            = Vec(width, UInt((PcCutPoint + 1).W))
-  val instrEndOffset: Vec[UInt]            = Vec(width, UInt(log2Ceil(FetchBlockInstNum).W))
+  val instrIndex:       Vec[InstrIndexEntry]       = Vec(width, new InstrIndexEntry)
+  val instrIsRvc:       Vec[Bool]                  = Vec(width, Bool())
+  val selectBlock:      Vec[Bool]                  = Vec(width, Bool())
+  val instrPcLower:     Vec[UInt]                  = Vec(width, UInt((PcCutPoint + 1).W))
+  val instrEndOffset:   Vec[UInt]                  = Vec(width, UInt(log2Ceil(FetchBlockInstNum).W))
+  val instrLoadPredEnd: Vec[Valid[MdpPredictInfo]] = Vec(width, Valid(new MdpPredictInfo))
 }

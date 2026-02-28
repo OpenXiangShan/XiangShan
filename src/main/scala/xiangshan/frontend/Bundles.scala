@@ -67,6 +67,16 @@ class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
   val redirectFromIFU: Bool                  = Output(Bool())
 }
 
+class MdpPredictInfo(implicit p: Parameters) extends XSBundle with HasMdpParameters {
+  val static   = Bool()
+  val loadWait = Bool()
+  val distance = UInt(RobDistance.W)
+}
+
+class MdpPrediction(implicit p: Parameters) extends MdpPredictInfo {
+  val cfiPosition = UInt(CfiPositionWidth.W)
+}
+
 // TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)
 class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
 
@@ -78,8 +88,9 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICa
   // slow path
   val ftqIdx:         FtqPtr      = new FtqPtr
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
-
-  def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset.bits)
+  //
+  val mdpPrediction:  Vec[Valid[MdpPrediction]] = Vec(NumMdpResultEntries, Valid(new MdpPrediction))
+  def crossCacheline: Bool                      = super.isCrossLine(this.startVAddr, this.takenCfiOffset.bits)
 
   override def toPrintable: Printable =
     p"[start] ${Hexadecimal(startVAddr.toUInt)} [next] ${Hexadecimal(nextCachelineVAddr.toUInt)}" +
@@ -339,12 +350,15 @@ class FetchToIBuffer(implicit p: Parameters) extends FrontendBundle {
   val triggered:        Vec[UInt] = Vec(IBufferEnqueueWidth, TriggerAction())
   val isLastInFtqEntry: Vec[Bool] = Vec(IBufferEnqueueWidth, Bool())
 
-  val pc:             Vec[PrunedAddr]       = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
-  val prevIBufEnqPtr: IBufPtr               = new IBufPtr
-  val prevInstrCount: UInt                  = UInt(log2Ceil(IBufferEnqueueWidth).W)
-  val debug_seqNum:   Vec[InstSeqNum]       = Vec(IBufferEnqueueWidth, InstSeqNum())
-  val ftqPtr:         Vec[FtqPtr]           = Vec(IBufferEnqueueWidth, new FtqPtr)
-  val topdownInfo:    FrontendTopDownBundle = new FrontendTopDownBundle
+  val pc:             Vec[PrunedAddr] = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
+  val prevIBufEnqPtr: IBufPtr         = new IBufPtr
+  val prevInstrCount: UInt            = UInt(log2Ceil(IBufferEnqueueWidth).W)
+  val debug_seqNum:   Vec[InstSeqNum] = Vec(IBufferEnqueueWidth, InstSeqNum())
+  val ftqPtr:         Vec[FtqPtr]     = Vec(IBufferEnqueueWidth, new FtqPtr)
+  //
+  val mdpPrediction: Vec[Valid[MdpPredictInfo]] = Vec(IBufferEnqueueWidth, Valid(new MdpPredictInfo))
+  val isLoad:        Vec[Bool]                  = Vec(IBufferEnqueueWidth, Bool())
+  val topdownInfo:   FrontendTopDownBundle      = new FrontendTopDownBundle
 }
 
 class IfuToBackendIO(implicit p: Parameters) extends FrontendBundle {
