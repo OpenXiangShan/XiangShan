@@ -623,7 +623,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     XSPerfAccumulate(s"sc_bias_correct${i}", scBiasCorrectVec(i))
     XSPerfAccumulate(s"sc_bias_wrong${i}", scBiasWrongVec(i))
 
-    XSPerfAccumulate(s"s2_sumAbove10_${i}", s2_fire && s2_sumPercsum(i).abs.asUInt >= 15.U)
     XSPerfAccumulate(s"path_table_change${i}", t1_writeValid && pChange)
     XSPerfAccumulate(s"global_table_change${i}", t1_writeValid && gChange)
     // XSPerfAccumulate(s"bias_table_change${i}", t1_writeValid && bChange)
@@ -656,6 +655,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     s"total_sc_wrong_tage_wrong",
     scWrongVec zip tageWrongVec map { case (scW, tageW) => scW && tageW } reduce (_ || _)
   )
+  XSPerfAccumulate(s"total_sc_correct", scCorrectVec.reduce(_ || _))
+  XSPerfAccumulate(s"total_sc_wrong", scWrongVec.reduce(_ || _))
 
   XSPerfAccumulate(s"total_sc_path_correct", scPathCorrectVec.reduce(_ || _))
   XSPerfAccumulate(s"total_sc_path_wrong", scPathWrongVec.reduce(_ || _))
@@ -720,10 +721,16 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     trace.bits.scPred        := t1_meta.scPred(predWayIdx)
     trace.bits.useSc         := t1_meta.useScPred(predWayIdx)
 
+    trace.bits.actualTaken := t1_writeTakenVec(i)
+    trace.bits.mispredict  := t1_branches(i).bits.mispredict
+
     trace.bits.scCorrectTageWrong   := scCorrectVec(predWayIdx) && tageWrongVec(predWayIdx)
     trace.bits.scWrongTageCorrect   := scWrongVec(predWayIdx) && tageCorrectVec(predWayIdx)
     trace.bits.scCorrectTageCorrect := scCorrectVec(predWayIdx) && tageCorrectVec(predWayIdx)
     trace.bits.scWrongTageWrong     := scWrongVec(predWayIdx) && tageWrongVec(predWayIdx)
+    trace.bits.scWrong              := scWrongVec(predWayIdx)
+    trace.bits.scCorrect            := scCorrectVec(predWayIdx)
+
   }
 
   private val scTraceDBTables = (0 until ResolveEntryBranchNumber).map { i =>
