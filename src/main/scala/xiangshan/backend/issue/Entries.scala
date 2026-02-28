@@ -65,6 +65,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val issueTimerVec       = Wire(Vec(params.numEntries, UInt(params.issueTimerWidth.W)))
   val sqIdxVec            = OptionWrapper(params.needFeedBackSqIdx, Wire(Vec(params.numEntries, new SqPtr())))
   val lqIdxVec            = OptionWrapper(params.needFeedBackLqIdx, Wire(Vec(params.numEntries, new LqPtr())))
+  val validVecRegNext     = Wire(Vec(params.numEntries, Bool()))
+  val issuedVecRegNext    = Wire(Vec(params.numEntries, Bool()))  
   //src status
   val dataSourceVec       = Wire(Vec(params.numEntries, Vec(params.numRegSrc, DataSource())))
   val loadDependencyVec   = Wire(Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
@@ -416,6 +418,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.compEntryEnqSelVec.foreach(_   := finalCompTransSelVec.get.zip(compEnqVec.get).map(x => x._1 & Fill(CompEntryNum, x._2.valid)))
   io.othersEntryEnqSelVec.foreach(_ := finalOthersTransSelVec.get.zip(enqEntryTransVec).map(x => x._1 & Fill(OthersEntryNum, x._2.valid)))
   io.robIdx.foreach(_               := robIdxVec)
+  io.validRegNext                   := validVecRegNext.asUInt
+  io.issuedRegNext                  := issuedVecRegNext.asUInt
 
 
   def EntriesConnect(in: CommonInBundle, out: CommonOutBundle, entryIdx: Int) = {
@@ -459,6 +463,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       perfOg0CancelVec.get(entryIdx)  := out.perfOg0Cancel.get
       perfWakeupByIQVec.get(entryIdx) := out.perfWakeupByIQ.get
     }
+    validVecRegNext(entryIdx)   := out.validRegNext
+    issuedVecRegNext(entryIdx)  := out.issuedRegNext
   }
 
   // entries perf counter
@@ -572,6 +578,9 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val dataSources         = Vec(params.numEntries, Vec(params.numRegSrc, Output(DataSource())))
   val loadDependency      = Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   val exuSources          = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(ExuSource()))))
+  // for enq.ready timing
+  val validRegNext        = Output(UInt(params.numEntries.W))
+  val issuedRegNext       = Output(UInt(params.numEntries.W))
   //deq status
   val isFirstIssue        = Vec(params.numDeq, Output(Bool()))
   val deqEntry            = Vec(params.numDeq, ValidIO(new EntryBundle))
