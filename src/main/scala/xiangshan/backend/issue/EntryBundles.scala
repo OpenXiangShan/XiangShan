@@ -156,6 +156,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val fuType                = Output(FuType())
     val robIdx                = Output(new RobPtr)
     val uopIdx                = Option.when(params.isVecMemIQ)(Output(UopIdx()))
+    // for enq.ready
+    val validRegNext          = Output(Bool())
+    val issuedRegNext         = Output(Bool())
     //src
     val dataSources           = Vec(params.numRegSrc, Output(DataSource()))
     val exuSources            = Option.when(params.hasIQWakeUp)(Vec(params.numRegSrc, Output(ExuSource())))
@@ -435,7 +438,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     entryUpdate.payload                               := entryReg.payload
   }
 
-  def CommonOutConnect(commonOut: CommonOutBundle, common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean, isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
+  def CommonOutConnect(commonOut: CommonOutBundle, common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, entryRegNext: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean, isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet                                 = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
     commonOut.valid                                   := validReg
     commonOut.issued                                  := entryReg.status.issued
@@ -530,6 +533,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     if (params.isVecMemIQ) {
       commonOut.uopIdx.get                            := entryReg.payload.og1Payload.uopIdx.get
     }
+    commonOut.validRegNext                            := common.validRegNext
+    commonOut.issuedRegNext                           := entryRegNext.status.issued
   }
 
   def EntryVecMemConnect(commonIn: CommonInBundle, common: CommonWireBundle, validReg: Bool, entryReg: EntryBundle, entryRegNext: EntryBundle, entryUpdate: EntryBundle)(implicit p: Parameters, params: IssueBlockParams) = {

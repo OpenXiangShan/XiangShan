@@ -213,6 +213,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val canIssueVec = VecInit(entries.io.canIssue.asBools)
   val rfWenVec = VecInit(entries.io.rfWen.asBools)
   val srcReadyVec = VecInit(entries.io.srcReady.asBools)
+  val validVecRegNext = VecInit(entries.io.validRegNext.asBools)
+  val issuedVecRegNext = VecInit(entries.io.issuedRegNext.asBools)
   io.validVec := validVec
   io.issuedVec := issuedVec
   io.canIssueVec := canIssueVec
@@ -981,7 +983,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   // Todo: better counter implementation
   private val enqHasValid = validVec.take(params.numEnq).reduce(_ | _)
+  private val enqHasValidRegNext = validVecRegNext.take(params.numEnq).reduce(_ | _)
   private val enqHasIssued = validVec.zip(issuedVec).take(params.numEnq).map(x => x._1 & x._2).reduce(_ | _)
+  private val enqHasIssuedRegNext = validVecRegNext.zip(issuedVecRegNext).take(params.numEnq).map(x => x._1 & x._2).reduce(_ | _)
   private val enqEntryValidCnt = PopCount(validVec.take(params.numEnq))
   private val othersValidCnt = PopCount(validVec.drop(params.numEnq))
   private val enqEntryValidCntDeq0 = PopCount(
@@ -1008,20 +1012,21 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   othersLeftOneCaseVec.zipWithIndex.foreach { case (leftone, i) =>
     leftone := ~(1.U((params.numEntries - params.numEnq).W) << i)
   }
-  private val othersLeftOne = othersLeftOneCaseVec.map(_ === VecInit(validVec.drop(params.numEnq)).asUInt).reduce(_ | _)
+  private val othersLeftOne = othersLeftOneCaseVec.map(_ === VecInit(validVecRegNext.drop(params.numEnq)).asUInt).reduce(_ | _)
   private val othersCanotIn = Wire(Bool())
-  othersCanotIn := othersLeftOne || validVec.drop(params.numEnq).reduce(_ & _)
+  othersCanotIn := othersLeftOne || validVecRegNext.drop(params.numEnq).reduce(_ & _)
   // if has simp Entry, othersCanotIn will be simpCanotIn
   if (params.numSimp > 0) {
     val simpLeftOneCaseVec = Wire(Vec(params.numSimp, UInt((params.numSimp).W)))
     simpLeftOneCaseVec.zipWithIndex.foreach { case (leftone, i) =>
       leftone := ~(1.U((params.numSimp).W) << i)
     }
-    val simpLeftOne = simpLeftOneCaseVec.map(_ === VecInit(validVec.drop(params.numEnq).take(params.numSimp)).asUInt).reduce(_ | _)
-    val simpCanotIn = simpLeftOne || validVec.drop(params.numEnq).take(params.numSimp).reduce(_ & _)
+    val simpLeftOne = simpLeftOneCaseVec.map(_ === VecInit(validVecRegNext.drop(params.numEnq).take(params.numSimp)).asUInt).reduce(_ | _)
+    val simpCanotIn = simpLeftOne || validVecRegNext.drop(params.numEnq).take(params.numSimp).reduce(_ & _)
     othersCanotIn := simpCanotIn
   }
-  io.enq.foreach(_.ready := (!othersCanotIn || !enqHasValid) && !enqHasIssued)
+  val enqReady = GatedValidRegNext((!othersCanotIn || !enqHasValidRegNext) && !enqHasIssuedRegNext, false.B)
+  io.enq.foreach(_.ready := enqReady)
 
   protected def getDeqLat(deqPortIdx: Int, fuType: UInt) : UInt = {
     Mux(FuType.isUncertain(fuType),
