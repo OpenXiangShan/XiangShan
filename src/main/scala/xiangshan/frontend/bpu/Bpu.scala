@@ -290,16 +290,36 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s1_abtbResult = Wire(new Prediction)
   s1_abtbResult       := s1_abtbFirstTakenBr.bits
   s1_abtbResult.taken := s1_abtbFirstTakenBrOH.reduce(_ || _)
+  private val s1_ubtbResult = ubtb.io.prediction.bits
   s1_prediction := Mux(
     s1_abtbValid,
     Mux(s1_abtbResult.taken, s1_abtbResult, fallThrough.io.prediction),
-    Mux(s1_ubtbPrediction.bits.taken, s1_ubtbPrediction.bits, fallThrough.io.prediction)
+    Mux(s1_ubtbResult.taken, s1_ubtbResult, fallThrough.io.prediction)
   )
 
-  private val s1_isRet = s1_prediction.attribute.isReturn
-  when(s1_isRet && uras.io.specOut.isCanUse) {
-    s1_prediction.target := uras.io.specOut.retTarget
-  }
+  // private val s1_isRet = s1_prediction.attribute.isReturn
+  // when(s1_isRet && uras.io.specOut.isCanUse) {
+  //   s1_prediction.target := uras.io.specOut.retTarget
+  // }
+
+// Optimized target selection to meet timing constraints.
+// Key observation: s1_abtbFirstTakenBr.target (aliased as s1_abtbResult.target)
+// has the longest delay among all input signals. By placing it at the top level
+// of the Mux tree, the critical path becomes s1_abtbFirstTakenBr.target + 1-stage Mux,
+// which is the overall latency bound. ---- Based on timing analysis.
+  private val abtbUseRet = s1_abtbResult.attribute.isReturn && uras.io.specOut.isCanUse
+  private val ubtbUseRet = s1_ubtbResult.attribute.isReturn && uras.io.specOut.isCanUse
+  s1_prediction.target :=
+    Mux(s1_abtbValid && s1_abtbResult.taken && !abtbUseRet,
+      s1_abtbResult.target,
+      Mux(!s1_abtbValid && s1_ubtbResult.taken && !ubtbUseRet,
+        s1_ubtbResult.target,
+        Mux((s1_abtbValid && !s1_abtbResult.taken) || (!s1_abtbValid && !s1_ubtbResult.taken),
+          fallThrough.io.prediction.target,
+          uras.io.specOut.retTarget
+        )
+      )
+    )
 
   private val s1_taken             = s1_prediction.taken
   private val useAbtb              = s1_abtbValid && s1_abtbResult.taken
