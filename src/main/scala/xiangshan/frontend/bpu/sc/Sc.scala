@@ -457,9 +457,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
           prevThres.getUpdate(scWrong, en = shouldUpdate)
       }
     t1_thresholdOverflowVec(wayIdx)  := updated.value > MaxThreshold.U
-    t1_thresholdUnderflowVec(wayIdx) := updated.value < MiniThreshold.U
+    t1_thresholdUnderflowVec(wayIdx) := updated.value < MinThreshold.U
     WireInit(Mux(
-      updated.value >= MiniThreshold.U && updated.value <= MaxThreshold.U,
+      updated.value >= MinThreshold.U && updated.value <= MaxThreshold.U,
       updated,
       scThreshold(wayIdx)
     ))
