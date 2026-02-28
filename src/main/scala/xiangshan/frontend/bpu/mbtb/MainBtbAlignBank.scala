@@ -134,12 +134,12 @@ class MainBtbAlignBank(
   private val s1_internalBankMask = UIntToOH(s1_internalBankIdx, NumInternalBanks)
   private val s1_alignBankIdx     = getAlignBankIndex(s1_startPc)
 
-  private val s1_readEntries = Mux1H(
+  private val s1_rawEntries = Mux1H(
     s1_internalBankMask,
     internalBanks.map(_.io.read.resp.entries)
   )
 
-  private val s1_readShareds = Mux1H(
+  private val s1_rawShareds = Mux1H(
     s1_internalBankMask,
     internalBanks.map(_.io.read.resp.shareds)
   )
@@ -151,18 +151,18 @@ class MainBtbAlignBank(
 
   // for those requests in write buffer,
   // it means this newest data is not written yet,
-  // simply override raw data // TODO: is this correct?
-  private val s1_rawEntries = VecInit(s1_readEntries.zipWithIndex.map { case (e, i) =>
-    Mux(
-      s1_writeBuffer(i).valid && s1_writeBuffer(i).bits.status.isWriteAll,
-      s1_writeBuffer(i).bits.entry,
-      e
-    )
-  })
-
-  private val s1_rawShareds = VecInit(s1_readShareds.zipWithIndex.map { case (s, i) =>
-    Mux(s1_writeBuffer(i).valid, s1_writeBuffer(i).bits.shared, s)
-  })
+  // TODO: is this correct? temporary not useful.
+//  private val s1_rawEntries = VecInit(s1_readEntries.zipWithIndex.map { case (e, i) =>
+//    Mux(
+//      s1_writeBuffer(i).valid && s1_writeBuffer(i).bits.status.isWriteAll,
+//      s1_writeBuffer(i).bits.entry,
+//      e
+//    )
+//  })
+//
+//  private val s1_rawShareds = VecInit(s1_readShareds.zipWithIndex.map { case (s, i) =>
+//    Mux(s1_writeBuffer(i).valid, s1_writeBuffer(i).bits.shared, s)
+//  })
 
   internalBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.probe.req.setIdx := s1_setIdx
