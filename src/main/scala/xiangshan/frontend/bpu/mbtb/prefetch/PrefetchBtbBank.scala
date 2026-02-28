@@ -124,11 +124,6 @@ class PrefetchBtbBank(bandIdx: Int)(implicit p: Parameters) extends PrefetchBtbM
     buf.bits.wayMask := io.writeEntryReq.bits.wayMask
   }
 
-  private val entryWriteValid   = entryWriteBuffer.io.read.head.valid && !io.readReq.valid
-  private val entryWriteEntry   = entryWriteBuffer.io.read.head.bits.entry
-  private val entryWriteSetIdx  = entryWriteBuffer.io.read.head.bits.setIdx
-  private val entryWriteWayMask = entryWriteBuffer.io.read.head.bits.wayMask
-
   private val trainInvalidSetIdx = io.trainInvalidReq.bits.setIdx
   private val ifuInvalidSetIdx   = io.ifuInvalidReq.bits.setIdx
   (entrySrams zip entryWriteBuffer.io.read).foreach { case (way, bufRead) =>
@@ -138,10 +133,22 @@ class PrefetchBtbBank(bandIdx: Int)(implicit p: Parameters) extends PrefetchBtbM
     bufRead.ready             := way.io.w.req.ready && !way.io.r.req.valid
   }
   for (i <- 0 until NumWay) {
-    val needWrite        = entryWriteValid && entryWriteWayMask(i).asBool
-    val trainNeedInvalid = io.trainInvalidReq.valid && io.trainInvalidReq.bits.needInvalid(i)
-    val ifuNeedInvalid   = io.ifuInvalidReq.valid && io.ifuInvalidReq.bits.needInvalid(i)
-    val usedNeedValid    = io.trainUsedReq.valid && io.trainUsedReq.bits.wayMask(i)
+    val entryWriteValid   = entryWriteBuffer.io.read(i).valid && !io.readReq.valid
+    val entryWriteEntry   = entryWriteBuffer.io.read(i).bits.entry
+    val entryWriteSetIdx  = entryWriteBuffer.io.read(i).bits.setIdx
+    val entryWriteWayMask = entryWriteBuffer.io.read(i).bits.wayMask
+    val needWrite         = entryWriteValid && entryWriteWayMask(i).asBool
+    val trainNeedInvalid  = io.trainInvalidReq.valid && io.trainInvalidReq.bits.needInvalid(i)
+    val ifuNeedInvalid    = io.ifuInvalidReq.valid && io.ifuInvalidReq.bits.needInvalid(i)
+    val usedNeedValid     = io.trainUsedReq.valid && io.trainUsedReq.bits.wayMask(i)
+    when(needWrite) {
+      valid(entryWriteSetIdx)(i)  := entryWriteEntry.valid
+      victim(entryWriteSetIdx)(i) := entryWriteEntry.victim
+      used(entryWriteSetIdx)(i)   := entryWriteEntry.used
+    }
+    when(usedNeedValid) {
+      used(io.trainUsedReq.bits.setIdx)(i) := true.B
+    }
     when(trainNeedInvalid) {
       valid(trainInvalidSetIdx)(i) := false.B
       used(trainInvalidSetIdx)(i)  := false.B
@@ -150,14 +157,7 @@ class PrefetchBtbBank(bandIdx: Int)(implicit p: Parameters) extends PrefetchBtbM
       valid(ifuInvalidSetIdx)(i) := false.B
       used(ifuInvalidSetIdx)(i)  := false.B
     }
-    when(usedNeedValid) {
-      used(io.trainUsedReq.bits.setIdx)(i) := true.B
-    }
-    when(needWrite) {
-      valid(entryWriteSetIdx)(i)  := entryWriteEntry.valid
-      victim(entryWriteSetIdx)(i) := entryWriteEntry.victim
-      used(entryWriteSetIdx)(i)   := entryWriteEntry.used
-    }
+
   }
 
   counterWriteBuffer.io.enq.valid         := io.trainCounterReq.valid

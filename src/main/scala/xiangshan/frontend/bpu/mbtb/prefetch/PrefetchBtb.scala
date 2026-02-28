@@ -179,7 +179,7 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
 //  private val
   replacer.io.writeMask.valid := w0_prefetchWrite.valid
-  replacer.io.writeMask.bits  := w0_prefetchBankMask
+  replacer.io.writeMask.bits  := w0_prefetchWayMask.asUInt
   private val victimWayMask = replacer.io.victim.wayMask
 
   private val w1_prefetchWrite    = RegNext(w0_prefetchWrite)
@@ -204,6 +204,25 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   replacer.io.writeTouch.valid        := w1_prefetchWrite.valid
   replacer.io.writeTouch.bits.setIdx  := w1_prefetchWrite.bits.replacerSetIdx
   replacer.io.writeTouch.bits.wayMask := w1_victimWayMask
+
+  dontTouch(w1_writeEntries)
+//  dontTouch(w0_prefetchWayMask)
+//  private val prefetchBtbTrace         = Wire(new PrefetchBtbBtbTrace)
+//
+//  prefetchBtbTrace.startPc      :=
+//  prefetchBtbTrace.setIdx       := w1_prefetchWrite.bits.setIdx
+//  prefetchBtbTrace.bankIdx      := OHToUInt(w1_prefetchBankMask)
+//  prefetchBtbTrace.wayIdx       := finalTrace.wayIdx
+//  prefetchBtbTrace.attribute    := finalTrace.entry.attribute
+//  prefetchBtbTrace.cfiPosition  := finalTrace.entry.position
+//
+//  private val mbtbTraceDBTable = ChiselDB.createTable("MBTBTrace", new MainBtbTrace(), EnableMainbtbTrace)
+//  mbtbTraceDBTable.log(
+//    data = mbtbTrace,
+//    en = t1_fire && finalTrace.needWrite,
+//    clock = clock,
+//    reset = reset
+//  )
 
   val debug_prefetchMispred = t1_train.meta.prefetchBtb.entries.map { pbtb =>
     val isprefetchBtb = t1_train.meta.mbtb.entries.flatten.map { mbtb =>

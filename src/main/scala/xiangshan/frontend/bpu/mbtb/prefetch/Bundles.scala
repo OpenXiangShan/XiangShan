@@ -109,3 +109,13 @@ class CounterBufWriteReq(implicit p: Parameters) extends WriteReqBundle with Has
   val wayMask:  UInt                 = UInt(NumWay.W)
   val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
 }
+class PrefetchBtbBtbTrace(implicit p: Parameters) extends PrefetchBtbBundle {
+
+  val startPc:     PrunedAddr      = PrunedAddr(VAddrBits)
+  val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
+  val attribute:   BranchAttribute = new BranchAttribute
+
+  val setIdx:  UInt = UInt(SetIdxLen.W)
+  val bankIdx: UInt = UInt(BankIdxLen.W)
+  val wayIdx:  UInt = UInt(NumWay.W)
+}
