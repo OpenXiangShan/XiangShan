@@ -103,6 +103,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val l1_pf_to_l1 = DecoupledIO(new L1PrefetchReq())
     val l1_pf_to_l2 = Output(new coupledL2.PrefetchRecv())
     val l1_pf_to_l3 = Output(new huancun.PrefetchRecv())
+    val l2_fdbk_pf_ctrl = Input(new coupledL2.L2ToL1PfCtrl)
+    // TODO: l2_pf 内部的 degree 调控
   })
 
   def isLoadAccess(uop: DynInst): Bool = FuType.isLoad(uop.fuType) || FuType.isVLoad(uop.fuType)
@@ -333,7 +335,13 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
   io.fromDCache.sms_agt_evict_req.ready := false.B
 
-  io.l1_pf_to_l2.addr_valid := l2_pf_req.valid
+  val l2SrcAllow = MuxLookup(l2_pf_req.bits.source, false.B)(Seq(
+    MemReqSource.Prefetch2L2Stream.id.U -> io.l2_fdbk_pf_ctrl.streamDegree.orR,
+    MemReqSource.Prefetch2L2Stride.id.U -> io.l2_fdbk_pf_ctrl.strideDegree.orR,
+    MemReqSource.Prefetch2L2Berti.id.U  -> io.l2_fdbk_pf_ctrl.bertiDegree.orR,
+    MemReqSource.Prefetch2L2SMS.id.U    -> io.l2_fdbk_pf_ctrl.smsDegree.orR
+  ))
+  io.l1_pf_to_l2.addr_valid := l2_pf_req.valid && l2SrcAllow
   io.l1_pf_to_l2.addr := l2_pf_req.bits.addr
   io.l1_pf_to_l2.pf_source := l2_pf_req.bits.source
   io.l1_pf_to_l2.l2_pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
@@ -368,5 +376,11 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       XSPerfAccumulate(s"${pf.name}_block_l${level+1}", arb.io.in(idx).valid && !arb.io.in(idx).ready)
     }
   }
+
+  XSPerfAccumulate("l2_pf_req_feedback_control_drop", l2_pf_req.valid && !l2SrcAllow)
+  XSPerfAccumulate("l2_pf_req_feedback_control_drop_stream", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2Stream.id.U)
+  XSPerfAccumulate("l2_pf_req_feedback_control_drop_stride", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2Stride.id.U)
+  XSPerfAccumulate("l2_pf_req_feedback_control_drop_berti", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2Berti.id.U)
+  XSPerfAccumulate("l2_pf_req_feedback_control_drop_sms", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2SMS.id.U)
 
 }

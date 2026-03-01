@@ -165,6 +165,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     if (enableL2) {
       // TODO: add ECC interface of L2
       l2top.module.io.pfCtrlFromCore := core.module.io.l2PfCtrl
+      core.module.io.l2_fdbk_pf_ctrl := l2top.module.io.l2_fdbk_pf_ctrl
 
       l2top.module.io.beu_errors.l2 <> 0.U.asTypeOf(l2top.module.io.beu_errors.l2)
       core.module.io.l2_hint.bits.sourceId := l2top.module.io.l2_hint.bits.sourceId
