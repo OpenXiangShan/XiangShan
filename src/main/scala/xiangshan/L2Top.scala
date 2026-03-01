@@ -25,7 +25,7 @@ import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, MaxHartIdBits}
 import freechips.rocketchip.tilelink._
-import coupledL2.{EnableCHI, L2ParamKey, PrefetchCtrlFromCore}
+import coupledL2.{EnableCHI, L2ParamKey, L2ToL1PfCtrl, PrefetchCtrlFromCore}
 import coupledL2.tl2tl.TL2TLCoupledL2
 import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2, CHIAddrWidthKey, NonSecureKey}
 import huancun.BankBitsKey
@@ -219,6 +219,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val pfCtrlFromCore = Input(new PrefetchCtrlFromCore)
       val l2_tlb_req = new TlbRequestIO(nRespDups = 2)
       val l2_pmp_resp = Flipped(new PMPRespBundle)
+      val l2_fdbk_pf_ctrl = Output(new L2ToL1PfCtrl)
       val l2_hint = ValidIO(new L2ToL1Hint())
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
       val l2_flush_en = Option.when(EnablePowerDown) (Input(Bool()))
@@ -290,6 +291,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       l2.io.pfCtrlFromCore := io.pfCtrlFromCore
       l2.io.dft.zip(io.dft).foreach({ case(a, b) => a := b })
       l2.io.dft_reset.zip(io.dft_reset).foreach({ case(a, b) => a := b })
+      io.l2_fdbk_pf_ctrl := l2.io.l2_fdbk_pf_ctrl
       io.l2_hint := l2.io.l2_hint
       l2.io.debugTopDown.robHeadPaddr := DontCare
       l2.io.hartId := io.hartId.fromTile
@@ -346,6 +348,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       beu.module.io.errors.l2.ecc_error.bits := l2.io.error.address
     } else {
       io.l2_hint := 0.U.asTypeOf(io.l2_hint)
+      io.l2_fdbk_pf_ctrl := L2ToL1PfCtrl.default()
       io.debugTopDown <> DontCare
       io.l2Miss := false.B
 

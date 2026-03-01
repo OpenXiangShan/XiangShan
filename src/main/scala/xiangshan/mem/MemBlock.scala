@@ -18,7 +18,7 @@ package xiangshan.mem
 
 import chisel3._
 import chisel3.util._
-import coupledL2.PrefetchRecv
+import coupledL2.{L2ToL1PfCtrl, PrefetchRecv}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts.{IntSinkNode, IntSinkPortSimple}
 import freechips.rocketchip.tile.HasFPUParameters
@@ -305,6 +305,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     }
     val debug_ls = new DebugLSIO
     val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val l2_fdbk_pf_ctrl = Input(new L2ToL1PfCtrl)
     val l2PfqBusy = Input(Bool())
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
     val l2_pmp_resp = new PMPRespBundle
@@ -649,6 +650,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   val prefetcher = Module(new PrefetcherWrapper)
   prefetcher.io.pfCtrlFromTile.l2PfqBusy := io.l2PfqBusy
+  prefetcher.io.l2_fdbk_pf_ctrl := io.l2_fdbk_pf_ctrl
   prefetcher.io.pfCtrlFromCSR := io.ooo_to_mem.csrCtrl.pf_ctrl
   prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
   prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
