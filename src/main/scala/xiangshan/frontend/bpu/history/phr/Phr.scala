@@ -208,6 +208,9 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   }
 
   when(redirectData.valid) {
+    val redirectHash      = pathHash(redirectData.cfiPc, redirectData.target)
+    val redirectShiftBits = redirectHash(Shamt - 1, 0)
+    val redirectHashHigh  = redirectHash(PathHashWidth - 1, Shamt)
     redirectPhr := getRedirectPhr(redirectData.phrMeta)
     AllFoldedHistoryInfo.foreach { info =>
       redirectData.foldedPhr.getHistWithInfo(info).foldedHist :=
@@ -218,32 +221,38 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
       s0_foldedPhr := redirectData.foldedPhr.update(
         VecInit(redirectPhr.asBools),
         redirectData.phrMeta.phrPtr,
-        hashHigh,
+        redirectHashHigh,
         Shamt,
-        shiftBits
+        redirectShiftBits
       )
     }
   }.elsewhen(s3_override) {
+    val s3Hash      = pathHash(s3_overrideData.cfiPc, s3_overrideData.target)
+    val s3ShiftBits = s3Hash(Shamt - 1, 0)
+    val s3HashHigh  = s3Hash(PathHashWidth - 1, Shamt)
     s0_foldedPhr := s3_foldedPhrReg
     when(s3_overrideData.taken) {
       s0_foldedPhr := s3_foldedPhrReg.update(
         VecInit(getOverridePhr(s3_overrideData.phrMeta).asBools),
         s3_overrideData.phrMeta.phrPtr,
-        hashHigh,
+        s3HashHigh,
         Shamt,
-        shiftBits
+        s3ShiftBits
       )
     }
   }.elsewhen(s1_valid) {
+    val s1Hash      = pathHash(s1_overrideData.cfiPc, s1_overrideData.target)
+    val s1ShiftBits = s1Hash(Shamt - 1, 0)
+    val s1HashHigh  = s1Hash(PathHashWidth - 1, Shamt)
     s0_foldedPhr := s1_foldedPhrReg
     when(s1_overrideData.taken) {
       s0_foldedPhr := s1_foldedPhrReg.update(
         // VecInit(getRedirectPhr(s1_overrideData.phrMeta).asBools),
         VecInit(phrDup(0).asBools),
         s1_overrideData.phrMeta.phrPtr,
-        hashHigh,
+        s1HashHigh,
         Shamt,
-        shiftBits
+        s1ShiftBits
       )
     }
   }.otherwise {
