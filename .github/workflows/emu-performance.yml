@@ -1,0 +1,210 @@
+name: EMU Performance Test
+
+on:
+  push:
+    branches: [ master, kunminghu-v3 ]
+  pull_request:
+    branches: [ master, kunminghu-v3 ]
+
+env:
+  # Set common environment variables for all jobs
+  NEMU_HOME: /nfs/home/share/ci-workloads/NEMU
+  AM_HOME: /nfs/home/share/ci-workloads/nexus-am
+  PERF_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}
+  WAVE_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}/wave
+  GCPT_RESTORE_BIN: /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin
+  # TODO: migrate to gcc15
+  # CKPT_HOME: /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122
+  CKPT_HOME: /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0
+
+jobs:
+  changes:
+    name: Changes Detection
+    permissions:
+      pull-requests: read
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          predicate-quantifier: 'every'
+          filters: .github/filters.yaml
+
+  build:
+    name: Build
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on: bosc
+    timeout-minutes: 120
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Init
+        run: |
+          mkdir -p ${PERF_HOME} ${WAVE_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+      - name: Build EMU
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+            --emulator gsim \
+            --yaml-config ${GITHUB_WORKSPACE}/src/main/resources/config/Default.yml \
+            --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
+            --trace-fst
+            # FIXME: PGO is disabled for the moment because it seems to cause some performance regression in another cluster
+            #--pgo ${GITHUB_WORKSPACE}/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
+      - name: Save artifact
+        # Maybe we can use upload-artifact here
+        # but ~100MB is too large and we don't have good enough internet on self-hosted runner
+        # so we just copy the binary to a shared directory
+        run: |
+          cp -L ${GITHUB_WORKSPACE}/build/emu ${PERF_HOME}/emu
+
+          # Also sync the binary to another cluster
+          function sync_perf() {
+            local target=$1
+            ssh ${target} "mkdir -p ${PERF_HOME}" && scp ${PERF_HOME}/emu ${target}:${PERF_HOME}/emu
+          }
+          if [[ $(hostname) == *.bosccluster.com ]]; then
+            sync_perf open01 || sync_perf open02 || sync_perf open03 # Just in case one of them is down, we can try the others
+          else
+            sync_perf node030 || sync_perf node031 || sync_perf node032 # Same as above
+          fi
+
+  run:
+    name: Run
+    needs: build
+    runs-on: bosc
+    timeout-minutes: 300
+    continue-on-error: false
+    strategy:
+      matrix:
+        include:
+          # TODO: migrate to gcc15
+          - name: perlbench_diffmail
+            ckpt: 18104
+          - name: bzip2_source
+            ckpt: 8439
+          - name: gcc_cpdecl
+            ckpt: 2233
+          - name: mcf
+            ckpt: 12253
+          - name: gobmk_score2
+            ckpt: 13713
+          - name: hmmer_nph3
+            ckpt: 2887
+          - name: sjeng
+            ckpt: 84999
+          - name: libquantum
+            ckpt: 22269
+          - name: h264ref_foreman.baseline
+            ckpt: 793
+          - name: omnetpp
+            ckpt: 20261
+          - name: astar_rivers
+            ckpt: 9999
+          - name: xalancbmk
+            ckpt: 25293
+      fail-fast: false
+      max-parallel: 4 # Just a magic number for absolute no reason, need to be tuned
+    steps:
+      - name: Get artifact
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+          mkdir -p build
+          echo "Getting EMU binary from ${PERF_HOME}/emu"
+          cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
+      - name: Run SPEC06 Test - ${{ matrix.name }}
+        run: |
+          export CKPT=$(find "${CKPT_HOME}/${{ matrix.name }}/${{ matrix.ckpt }}" -type f \( -name "*.gz" -o -name "*.zstd" \) | head -n 1)
+          echo "Running checkpoint: ${CKPT}"
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --numa --threads 1 \
+            --max-instr 5000000 \
+            ${CKPT} \
+            2> stderr.log | tee stdout.log
+      - name: Report
+        if: always()
+        run: |
+          cat stderr.log | sort | tee ${PERF_HOME}/${{ matrix.name }}_${{ matrix.ckpt }}.log
+          grep -oP 'IPC = \K\d+\.\d+' stdout.log > build/ipc-${{ matrix.name }}_${{ matrix.ckpt }}
+          echo "IPC: $(cat build/ipc-${{ matrix.name }}_${{ matrix.ckpt }})"
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: build/ipc-${{ matrix.name }}_${{ matrix.ckpt }}
+
+  summary:
+    name: Summary
+    permissions:
+      actions: read # to download upstream artifact
+      pull-requests: write
+    needs: run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ipc-*
+          path: current
+      - name: Find upstream run_id
+        if: ${{ github.event_name == 'pull_request' }}
+        id: find_upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ github.base_ref }}
+        run: |
+          echo "Finding upstream run_id for branch: ${BRANCH}"
+          # We assume the upstream run is always the latest run on the base branch, which should be true in most cases
+          run_id=$(gh run list --branch ${BRANCH} --workflow emu-performance.yml --json databaseId --limit 1 | jq -r '.[0].databaseId')
+          if [ -z "${run_id}" ] || [ "${run_id}" == "null" ]; then
+            echo "No upstream run found for branch ${BRANCH}"
+            echo "found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          echo "Upstream run_id: ${run_id}"
+          echo "run_id=${run_id}" >> $GITHUB_OUTPUT
+          echo "found=true" >> $GITHUB_OUTPUT
+      - name: Download upstream reports
+        if: ${{ steps.find_upstream.outputs.found == 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ipc-*
+          path: upstream
+          github-token: ${{ secrets.GITHUB_TOKEN }} # we need this to download artifact from another run
+          run_id: ${{ steps.find_upstream.outputs.run_id }}
+      - name: Summary
+        run: |
+          {
+            echo "## Emu - Performance summary"
+            echo "| Testcase | IPC | upstream IPC | diff |"
+            echo "| -------- | --- | ------------ | ---- |"
+            for file in current/ipc-*; do
+              name=$(basename ${file} | cut -d '-' -f 2-)
+              read -r ipc < "${file}"
+              if [ -f "upstream/ipc-${name}" ]; then
+                read -r upstream_ipc < "upstream/ipc-${name}"
+                diff=$(python3 -c "print(f'{(float(${ipc}) - float(${upstream_ipc})) / float(${upstream_ipc}) * 100:.2f}')")
+                echo "| ${name} | ${ipc} | ${upstream_ipc} | ${diff}% |"
+              else
+                echo "| ${name} | ${ipc} | N/A | N/A |"
+              fi
+            done
+          } > report.md
+          cat report.md >> $GITHUB_STEP_SUMMARY
+      - name: Post PR comment
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --body-file report.md --edit-last --create-if-none
