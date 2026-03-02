@@ -14,6 +14,7 @@ import xiangshan.cache.{HasDCacheParameters, LoadPfDbBundle}
 import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 import xiangshan.mem._
 import xiangshan.mem.trace._
+import coupledL2.prefetch.PrefetchQueue
 
 object TLBPlace extends Enumeration{
   /* now only support dtlb_ld and dtlb_st */
@@ -35,6 +36,8 @@ trait PrefetcherParams {
 trait HasPrefetcherParams extends HasXSParameter{
   def LD_TRAIN_WIDTH = backendParams.LdExuCnt
   def ST_TRAIN_WIDTH = backendParams.StaExuCnt
+
+  val PREFETCH_QUEUE_SIZE = 16
 
   // You can set the unified interface to N, and the invalid that you don't need can be set to 0
   val L1_PF_REG_CNT = 1
@@ -306,7 +309,17 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
    * load prefetch to l1 Dcache
    * stride
    */
-  io.l1_pf_to_l1 <> Pipeline(in = l1_pf_arb.io.out, depth = L1_PF_REG_CNT, name = Some("pf_to_ldu_reg"))
+  
+  // io.l1_pf_to_l1 <> Pipeline(in = l1_pf_arb.io.out, depth = L1_PF_REG_CNT, name = Some("pf_to_ldu_reg"))
+  val l1PrefetchQueue = Module(new PrefetchQueue(
+    size = PREFETCH_QUEUE_SIZE,
+    enableFilter = true,
+    enableFlow = false,
+    gen = new L1PrefetchReq,
+    addrOf = ((x: L1PrefetchReq) => x.paddr)
+  ))
+  l1PrefetchQueue.io.enq <> l1_pf_arb.io.out
+  l1PrefetchQueue.io.deq <> io.l1_pf_to_l1
 
   /** load/store prefetch to l2 cache
    *  stride, sms
