@@ -368,7 +368,7 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   val uncacheBypassReqValid = uncacheForwardReqValid
   val uncacheBypassReq = Wire(new UncacheBypassReqS0)
-  uncacheBypassReq.lqIdx := uop.lqIdx
+  uncacheBypassReq.lqIdx := replayHiPrio.bits.uop.lqIdx
   uncacheBypassReq.isNCReplay := replayHiPrio.bits.isNCReplay()
   uncacheBypassReq.isMMIOReplay := replayHiPrio.bits.isMMIOReplay()
 
