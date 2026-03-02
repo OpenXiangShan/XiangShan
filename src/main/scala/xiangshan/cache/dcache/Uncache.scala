@@ -389,13 +389,10 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
    *          because there is no guarantee that mem_aquire will be always ready.
    ******************************************************************/
 
-  val q0_canSentVec = sizeMap(i =>
-    (io.enableOutstanding || uState === s_idle) &&
-    states(i).can2Bus()
-  )
+  val q0_canSentVec = sizeMap(i => states(i).can2Bus())
   val q0_res = PriorityEncoderWithFlag(q0_canSentVec)
   q0_canSentIdx := q0_res._1
-  q0_canSent := q0_res._2
+  q0_canSent := q0_res._2 && (io.enableOutstanding || uState === s_idle)
   q0_entry := entries(q0_canSentIdx)
 
   val size = PopCount(q0_entry.mask)
