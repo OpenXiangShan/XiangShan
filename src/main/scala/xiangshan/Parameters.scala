@@ -106,8 +106,8 @@ case class XSCoreParameters
   StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
   StoreQueueForwardWithMask: Boolean = true,
   VlsQueueSize: Int = 8,
-  RobSize: Int = 352,
-  RabSize: Int = 352,
+  RobSize: Int = 240,
+  RabSize: Int = 240,
   VTypeBufferSize: Int = 64, // used to reorder vtype
   IssueQueueSize: Int = 20,
   IssueQueueCompEntrySize: Int = 12,
