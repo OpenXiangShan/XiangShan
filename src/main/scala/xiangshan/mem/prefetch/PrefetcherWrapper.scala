@@ -377,10 +377,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     }
   }
 
-  XSPerfAccumulate("l2_pf_req_feedback_control_drop", l2_pf_req.valid && !l2SrcAllow)
-  XSPerfAccumulate("l2_pf_req_feedback_control_drop_stream", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2Stream.id.U)
-  XSPerfAccumulate("l2_pf_req_feedback_control_drop_stride", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2Stride.id.U)
-  XSPerfAccumulate("l2_pf_req_feedback_control_drop_berti", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2Berti.id.U)
-  XSPerfAccumulate("l2_pf_req_feedback_control_drop_sms", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2SMS.id.U)
+  XSPerfAccumulate("feedback_control_drop_stream", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2Stream.id.U)
+  XSPerfAccumulate("feedback_control_drop_stride", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2Stride.id.U)
+  XSPerfAccumulate("feedback_control_drop_berti", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2Berti.id.U)
+  XSPerfAccumulate("feedback_control_drop_sms", l2_pf_req.valid && !l2SrcAllow && l2_pf_req.bits.source === MemReqSource.Prefetch2L2SMS.id.U)
 
 }
