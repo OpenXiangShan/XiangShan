@@ -1,6 +1,6 @@
 name: Performance Regression Trigger
 
-run-name: "${{ github.event.inputs.note }} - ${{ github.event.inputs.test_branch }} - ${{ github.event.inputs.benchmark_type }} - ${{ github.event.inputs.xs_config }}"
+run-name: "${{ github.event.inputs.note }} - ${{ github.event.inputs.test_branch }} - ${{ github.event.inputs.benchmark_type }}"
 
 on:
   workflow_dispatch:
@@ -9,37 +9,12 @@ on:
         description: Test note, will be displayed in the title
         required: false
         type: string
-        default: Performance Regression
+        default: new/resume
       test_branch:
         description: Branch or commit to run performance test on
         required: false
         type: string
         default: kunminghu-v3
-      recompile:
-        description: Recompile the emu
-        required: false
-        type: choice
-        options:
-          - false
-          - true
-        default: false
-      emulator:
-        description: emulator to use
-        required: false
-        type: choice
-        options:
-          - gsim
-          - verilator
-        default: gsim
-      xs_config:
-        description: Config for XiangShan core
-        required: false
-        type: choice
-        options:
-          - KunminghuV2Config
-          - DefaultConfig
-          - BackendV2Config
-        default: KunminghuV2Config
       benchmark_type:
         description: Benchmark type
         required: false
@@ -48,7 +23,38 @@ on:
           - spec06-0.3c
           - spec06-0.8c
           - spec06-1.0c
-        default: spec06-1.0c
+          - dry-run-test
+          # - spec17-0.3c # now it is not support
+        default: spec06-0.3c
+      use_simfrontend:
+        description: Whether to use simfrontend for performance test
+        required: false
+        type: choice
+        options:
+          - false
+          - true
+        default: true
+      custom_constantin:
+        description: Custom constantin.txt path, leave empty to use default one
+        required: false
+        type: string
+        default: ''
+      allow_neighbor_emu_reuse:
+        description: Allow reusing emu from sibling performance directories with same commit and config
+        required: false
+        type: choice
+        options:
+          - false
+          - true
+        default: false
+      force_clean_spec_dir:
+        description: Force recreate SPEC_DIR by deleting existing directory first
+        required: false
+        type: choice
+        options:
+          - false
+          - true
+        default: false
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
@@ -58,17 +64,18 @@ on:
         description: Servers to run emulation on, leave empty to let the script select
         required: false
         type: string
-        default: ''
+        default: node029, node033, node034, node036, node037, node038, node039, node040, node041, node042, node003, node004, node005, node006, node007, node008, node009, node020, node021, node022, node023, node024, node025, node026, node027
 
 jobs:
   performance-test:
     uses: ./.github/workflows/perf-template.yml
     with:
         test_branch: ${{ github.event.inputs.test_branch }}
-        recompile: ${{ github.event.inputs.recompile }}
-        emulator: ${{ github.event.inputs.emulator }}
-        xs_config: ${{ github.event.inputs.xs_config }}
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
+        use_simfrontend: ${{ github.event.inputs.use_simfrontend }}
+        custom_constantin: ${{ github.event.inputs.custom_constantin }}
+        allow_neighbor_emu_reuse: ${{ github.event.inputs.allow_neighbor_emu_reuse }}
+        force_clean_spec_dir: ${{ github.event.inputs.force_clean_spec_dir }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
         servers: ${{ github.event.inputs.servers }}
-        perf_report_dir: /nfs/home/cirunner/perf-report-custom
+        perf_report_dir: /nfs/home/cirunner/perf-report-prefetch2026

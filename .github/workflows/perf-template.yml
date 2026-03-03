@@ -7,26 +7,31 @@ on:
         description: Branch or commit to run performance test on
         required: true
         type: string
-      recompile:
-        description: Recompile the emu
+      allow_neighbor_emu_reuse:
+        description: Allow reusing emu from sibling performance directories with same commit and config
         required: false
         type: string
         default: false
-      emulator:
-        description: emulator to use
-        required: false
-        type: string
-        default: gsim
-      xs_config:
-        description: Config for XiangShan core
-        required: false
-        type: string
-        default: KunminghuV2Config
       benchmark_type:
         required: false
         type: string
         description: Benchmark type
         default: spec06-1.0c
+      use_simfrontend:
+        description: Whether to use simfrontend for performance test
+        required: false
+        type: string
+        default: true
+      custom_constantin:
+        description: Custom constantin.txt path, leave empty to use default one
+        required: false
+        type: string
+        default: ''
+      force_clean_spec_dir:
+        description: Force recreate SPEC_DIR by deleting existing directory first
+        required: false
+        type: string
+        default: false
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
@@ -53,14 +58,35 @@ jobs:
       - name: Set benchmark configuration
         run: |
           case "${{ inputs.benchmark_type }}" in
+            "dry-run-test")
+              echo "CKPT_JSON_PATH=/nfs/home/share/liyanqin/json/test.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+              echo "SPEC_VERSION=2006" >> $GITHUB_ENV
+              ;;
             "spec06-0.3c")
               echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.3.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+              echo "SPEC_VERSION=2006" >> $GITHUB_ENV
               ;;
             "spec06-0.8c")
               echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.8.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+              echo "SPEC_VERSION=2006" >> $GITHUB_ENV
               ;;
             "spec06-1.0c")
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+              echo "SPEC_VERSION=2006" >> $GITHUB_ENV
+              ;;
+            ## now it is not support SPEC2017
+            # "spec17-0.3c")
+            #   echo "CKPT_JSON_PATH=/nfs/home/share/liyanqin/json/spec17-rv64gcb-O3-20m-gcc12.2.0-mix-with-special_wrf_0.3.json" >> $GITHUB_ENV
+            #   echo "CKPT_HOME=/nfs/home/share/liyanqin/spec17-rv64gcb-O3-20m-gcc12.2.0-mix-with-special_wrf/checkpoint-0-0-0" >> $GITHUB_ENV
+            #   echo "SPEC_VERSION=2017" >> $GITHUB_ENV
+            #   ;;
+            *)
+              echo "Error: Invalid benchmark_type '${{ inputs.benchmark_type }}'. Must be one of: dry-run-test, spec06-0.3c, spec06-0.8c, spec06-1.0c"
+              exit 1
               ;;
           esac
 
@@ -81,51 +107,120 @@ jobs:
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
+          echo "DRAMSIM3_HOME=/nfs/home/share/ci-workloads/DRAMsim3" >> $GITHUB_ENV
           echo "SERVER_LIST=${{ inputs.servers }}" >> $GITHUB_ENV
-          echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
-          echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}-${{ inputs.xs_config }}" >> $GITHUB_ENV
-          echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+          echo "SCRIPTS_HOME=/nfs/home/share/liyanqin/env-scripts" >> $GITHUB_ENV
+          echo "THREADS=8" >> $GITHUB_ENV
+
+          SPEC_PARENT_DIR=${{ inputs.perf_report_dir }}/$([ "${{ inputs.use_simfrontend }}" = "true" ] && echo "kmhv3-simfrontend" || echo "kmhv3")
+          SPEC_TAG=""
+          if [ -n "${{ inputs.custom_constantin }}" ]; then
+            if [ ! -f "${{ inputs.custom_constantin }}" ]; then
+              echo "Error: custom_constantin not found: ${{ inputs.custom_constantin }}"
+              exit 1
+            fi
+            CONST_BASENAME=$(basename "${{ inputs.custom_constantin }}")
+            CONST_TAG=${CONST_BASENAME%.*}
+            SPEC_TAG="-${CONST_TAG}"
+          fi
+          
+          SPEC_DIR=${SPEC_PARENT_DIR}/cr${DATE}-${SHORT_SHA}${SPEC_TAG}
+          if [ "${{ inputs.benchmark_type }}" = "dry-run-test" ]; then
+            echo "dry-run-testing:"
+            echo "    default SPEC_DIR: ${SPEC_DIR}"
+            SPEC_DIR=${SPEC_PARENT_DIR}/dryrun${SPEC_TAG}
+            echo "    dry-run-test SPEC_DIR: ${SPEC_DIR}"
+          fi
+
+          echo "SPEC_DIR=$SPEC_DIR" >> $GITHUB_ENV
+          if [ "${{ inputs.force_clean_spec_dir }}" = "true" ] && [ -d "$SPEC_DIR" ]; then
+            mv "$SPEC_DIR" "$SPEC_DIR-bak$(date +%m%d%H%M)"
+          fi
+          mkdir -p "$SPEC_DIR"
+
+          if [ -n "${{ inputs.custom_constantin }}" ]; then
+            cp "${{ inputs.custom_constantin }}" "$SPEC_DIR/constantin.txt"
+          fi
+          if [ "${{ inputs.allow_neighbor_emu_reuse }}" = "true" ]; then
+            SPEC_PARENT_DIR=$(dirname "$SPEC_DIR")
+            PREFIX="cr${DATE}-${SHORT_SHA}"
+            for CANDIDATE in "$SPEC_PARENT_DIR"/${PREFIX}*; do
+              [ -d "$CANDIDATE" ] || continue
+              [ "$CANDIDATE" = "$SPEC_DIR" ] && continue
+              if [ -f "$CANDIDATE/emu" ]; then
+                cp "$CANDIDATE/emu" "$SPEC_DIR/emu"
+                if [ -f "$CANDIDATE/constantin.txt.bak" ]; then
+                  cp "$CANDIDATE/constantin.txt.bak" "$SPEC_DIR/constantin.txt.bak"
+                fi
+                if [ -f "$CANDIDATE/riscv64-nemu-interpreter-so" ]; then
+                  cp "$CANDIDATE/riscv64-nemu-interpreter-so" "$SPEC_DIR/riscv64-nemu-interpreter-so"
+                fi
+                echo "Reused emu from neighbor dir: $CANDIDATE, and skip the emu build of $SPEC_DIR"
+                break
+              fi
+            done
+          fi
 
       - name: Initialize submodules
-        run: make init-force
+        if: ${{ inputs.benchmark_type != 'dry-run-test' }}
+        run: make init
 
       - name: Clean Up
+        if: ${{ inputs.benchmark_type != 'dry-run-test' }}
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
 
       - name: Build EMU with DRAMsim3
         run: |
-          if [ ! -e "$SPEC_DIR/emu" ] || [ "${{ inputs.recompile }}" = "true" ]; then
-            python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-              --config "${{ inputs.xs_config }}" \
-              --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
-              --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
-              --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
-              --llvm-profdata llvm-profdata --trace-fst \
-              --emulator ${{ inputs.emulator }}
-            mkdir -p $SPEC_DIR
+          if [ ! -e "$SPEC_DIR/emu" ]; then
+            if [ ${{ inputs.benchmark_type }} = "dry-run-test" ]; then
+              echo "Dry run test, skip building emu and preparing checkpoint files."
+              touch $SPEC_DIR/emu
+              touch $SPEC_DIR/riscv64-nemu-interpreter-so
+              exit 0
+            fi
+            if [ "${{ inputs.use_simfrontend }}" = "true" ]; then
+              make -C $GITHUB_WORKSPACE emu -j$(nproc) SIM_ARGS="" EMU_THREADS=$THREADS EMU_TRACE=fst \
+                ENABLE_SIMFRONTEND=1 WITH_DRAMSIM3=1 WITH_CHISELDB=1 WITH_CONSTANTIN=1 \
+                YAML_CONFIG=$GITHUB_WORKSPACE/src/main/resources/config/Default.yml PGO_MAX_CYCLE=400000 \
+                PGO_EMU_ARGS=--no-diff
+            else
+              make -C $GITHUB_WORKSPACE emu -j$(nproc) SIM_ARGS="" EMU_THREADS=$THREADS EMU_TRACE=fst \
+                WITH_DRAMSIM3=1 WITH_CHISELDB=1 WITH_CONSTANTIN=1 \
+                PGO_WORKLOAD=$GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin PGO_MAX_CYCLE=400000 \
+                PGO_EMU_ARGS=--no-diff LLVM_PROFDATA=llvm-profdata
+            fi
             cp $GITHUB_WORKSPACE/build/emu $SPEC_DIR/emu
-          fi
-          if [ ! -e "$SPEC_DIR/riscv64-nemu-interpreter-so" ]; then
-            cp $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so $SPEC_DIR/riscv64-nemu-interpreter-so
+            if [ -f "$GITHUB_WORKSPACE/build/constantin.txt" ]; then
+              cp "$GITHUB_WORKSPACE/build/constantin.txt" "$SPEC_DIR/constantin.txt.bak"
+            fi
+            if [ -f "$GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so" ]; then
+              cp $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so $SPEC_DIR/riscv64-nemu-interpreter-so
+            fi
           fi
 
-      - name: Run SPEC CPU2006 checkpoints
+      - name: Run SPEC CPU checkpoints
         run: |
           cd $SCRIPTS_HOME/perf_trigger
+          SIM_FRONT_OPT=$([ "${{ inputs.use_simfrontend }}" = "true" ] && echo "--sim-front" || echo "")
+          CONSTANTIN_OPT=$([ "${{ inputs.custom_constantin }}" ] && echo "--custom-constantin ${{ inputs.custom_constantin }}" || echo "")
+          DRYRUN_OPT=$([ "${{ inputs.benchmark_type }}" = "dry-run-test" ] && echo "--dry-run" || echo "")
           python3 main.py --gcpt-path $CKPT_HOME --json-path $CKPT_JSON_PATH \
             --emu-path $SPEC_DIR/emu --result-path $SPEC_DIR \
-            --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
+            --threads $THREADS \
             --benchmarks "${{ inputs.benchmarks }}" \
             --server-list "$SERVER_LIST" \
             --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
-            --run
+            --run $SIM_FRONT_OPT $CONSTANTIN_OPT $DRYRUN_OPT
 
-      - name: Report SPEC CPU2006 score
+      - name: Report SPEC CPU score
         if: always()
         run: |
           cd $SCRIPTS_HOME/perf
+          if [ -f "$SPEC_DIR/score.txt" ]; then
+            cp $SPEC_DIR/score.txt $SPEC_DIR/score-bak$(date +%m%d%H%M).txt
+          fi
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --benchmarks "${{ inputs.benchmarks }}" \
             --xs $GITHUB_WORKSPACE --threads 16 --dir $SPEC_DIR --report \
@@ -142,10 +237,10 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           
           echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
-          echo "Estimated SPEC CPU2006 Score per GHz: " >> $GITHUB_STEP_SUMMARY
-          TOTAL_SCORE=$(grep "SPEC2006/GHz:" $SPEC_DIR/score.txt | awk '{print $NF}')
-          INT_SCORE=$(grep "SPECint2006/GHz" $SPEC_DIR/score.txt | awk '{print $(NF-1)}')
-          FP_SCORE=$(grep "SPECfp2006/GHz" $SPEC_DIR/score.txt | awk '{print $(NF-1)}')
+          echo "Estimated SPEC CPU${SPEC_VERSION} Score per GHz: " >> $GITHUB_STEP_SUMMARY
+          TOTAL_SCORE=$(grep "SPEC${SPEC_VERSION}/GHz:" $SPEC_DIR/score.txt | awk '{print $NF}')
+          INT_SCORE=$(grep "SPECint${SPEC_VERSION}/GHz" $SPEC_DIR/score.txt | awk '{print $(NF-1)}')
+          FP_SCORE=$(grep "SPECfp${SPEC_VERSION}/GHz" $SPEC_DIR/score.txt | awk '{print $(NF-1)}')
           echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY
