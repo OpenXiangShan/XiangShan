@@ -37,7 +37,11 @@ jobs:
     name: Build
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
-    runs-on: bosc
+    runs-on:
+      - bosc
+      - builder
+    outputs:
+      cluster: ${{ steps.save.outputs.cluster }}
     timeout-minutes: 120
     continue-on-error: false
     steps:
@@ -56,31 +60,27 @@ jobs:
             --emulator gsim \
             --yaml-config ${GITHUB_WORKSPACE}/src/main/resources/config/Default.yml \
             --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
+            --pgo ${GITHUB_WORKSPACE}/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
             --trace-fst
-            # FIXME: PGO is disabled for the moment because it seems to cause some performance regression in another cluster
-            #--pgo ${GITHUB_WORKSPACE}/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
       - name: Save artifact
+        id: save
         # Maybe we can use upload-artifact here
         # but ~100MB is too large and we don't have good enough internet on self-hosted runner
         # so we just copy the binary to a shared directory
         run: |
           cp -L ${GITHUB_WORKSPACE}/build/emu ${PERF_HOME}/emu
-
-          # Also sync the binary to another cluster
-          function sync_perf() {
-            local target=$1
-            ssh ${target} "mkdir -p ${PERF_HOME}" && scp ${PERF_HOME}/emu ${target}:${PERF_HOME}/emu
-          }
           if [[ $(hostname) == *.bosccluster.com ]]; then
-            sync_perf open01 || sync_perf open02 || sync_perf open03 # Just in case one of them is down, we can try the others
+            echo "cluster=node" >> ${GITHUB_OUTPUT}
           else
-            sync_perf node030 || sync_perf node031 || sync_perf node032 # Same as above
+            echo "cluster=open" >> ${GITHUB_OUTPUT}
           fi
 
   run:
     name: Run
     needs: build
-    runs-on: bosc
+    runs-on:
+      - ${{ needs.build.outputs.cluster }} # use same cluster as builder to avoid cross-cluster network copy & pgo issue
+      - runner
     timeout-minutes: 300
     continue-on-error: false
     strategy:
@@ -112,8 +112,10 @@ jobs:
           - name: xalancbmk
             ckpt: 25293
       fail-fast: false
-      max-parallel: 4 # Just a magic number for absolute no reason, need to be tuned
     steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
       - name: Get artifact
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
