@@ -136,11 +136,7 @@ jobs:
           if [ "${{ inputs.force_clean_spec_dir }}" = "true" ] && [ -d "$SPEC_DIR" ]; then
             mv "$SPEC_DIR" "$SPEC_DIR-bak$(date +%m%d%H%M)"
           fi
-          mkdir -p "$SPEC_DIR"
 
-          if [ -n "${{ inputs.custom_constantin }}" ]; then
-            cp "${{ inputs.custom_constantin }}" "$SPEC_DIR/constantin.txt"
-          fi
           if [ "${{ inputs.allow_neighbor_emu_reuse }}" = "true" ]; then
             SPEC_PARENT_DIR=$(dirname "$SPEC_DIR")
             PREFIX="cr${DATE}-${SHORT_SHA}"
@@ -148,6 +144,7 @@ jobs:
               [ -d "$CANDIDATE" ] || continue
               [ "$CANDIDATE" = "$SPEC_DIR" ] && continue
               if [ -f "$CANDIDATE/emu" ]; then
+                mkdir -p "$SPEC_DIR"
                 cp "$CANDIDATE/emu" "$SPEC_DIR/emu"
                 if [ -f "$CANDIDATE/constantin.txt.bak" ]; then
                   cp "$CANDIDATE/constantin.txt.bak" "$SPEC_DIR/constantin.txt.bak"
@@ -173,6 +170,7 @@ jobs:
       - name: Build EMU with DRAMsim3
         run: |
           if [ ! -e "$SPEC_DIR/emu" ]; then
+            export NOOP_HOME=$GITHUB_WORKSPACE
             if [ ${{ inputs.benchmark_type }} = "dry-run-test" ]; then
               echo "Dry run test, skip building emu and preparing checkpoint files."
               touch $SPEC_DIR/emu
@@ -190,6 +188,7 @@ jobs:
                 PGO_WORKLOAD=$GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin PGO_MAX_CYCLE=400000 \
                 PGO_EMU_ARGS=--no-diff LLVM_PROFDATA=llvm-profdata
             fi
+            mkdir -p "$SPEC_DIR"
             cp $GITHUB_WORKSPACE/build/emu $SPEC_DIR/emu
             if [ -f "$GITHUB_WORKSPACE/build/constantin.txt" ]; then
               cp "$GITHUB_WORKSPACE/build/constantin.txt" "$SPEC_DIR/constantin.txt.bak"
@@ -197,6 +196,11 @@ jobs:
             if [ -f "$GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so" ]; then
               cp $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so $SPEC_DIR/riscv64-nemu-interpreter-so
             fi
+          fi
+
+          if [ -n "${{ inputs.custom_constantin }}" ]; then
+            mkdir -p "$SPEC_DIR"
+            cp "${{ inputs.custom_constantin }}" "$SPEC_DIR/constantin.txt"
           fi
 
       - name: Run SPEC CPU checkpoints
