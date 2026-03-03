@@ -364,7 +364,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
         io.deqEntry(i)     := deqEntry
         io.cancelDeqVec(i) := cancelDeqVec
         if (params.aluDeqNeedPickJump) {
-          val aluDeqSelectJump = false.B//io.deqEntry(0).valid && io.deqEntry(0).bits.payload.rfWen.get && FuType.isJump(io.deqEntry(0).bits.payload.fuType)
+          val aluDeqSelectJump = io.deqEntry(0).valid && io.deqEntry(0).bits.payload.rfWen.get && FuType.isJump(io.deqEntry(0).bits.payload.fuType)
           io.aluDeqSelectJump.get := aluDeqSelectJump
           if (params.deqFuCfgs(i).contains(AluCfg)) {
             assert(i == 0, "IQ needPickRfWen ALU must in deq 0")
@@ -389,7 +389,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
                            Mux(simpSel.valid, simpEntryOldestDelay.get(i), enqEntryOldestDelay(i))).bits.toDeqOg1Payload(i)
         io.deqOg1Payload(i) := deqOg1Payload
         if (params.aluDeqNeedPickJump) {
-          val aluDeqSelectJump = false.B//RegNext(io.deqEntry(0).valid && io.deqEntry(0).bits.payload.rfWen.get && FuType.isJump(io.deqEntry(0).bits.payload.fuType))
+          val aluDeqSelectJump = RegNext(io.deqEntry(0).valid && io.deqEntry(0).bits.payload.rfWen.get && FuType.isJump(io.deqEntry(0).bits.payload.fuType))
           if (params.deqFuCfgs(i).contains(JmpCfg)) {
             val deqOg1Payload0 = Mux(io.compEntryOldestSelDelay.get(0).valid,
                                 compEntryOldestDelay.get(0),
