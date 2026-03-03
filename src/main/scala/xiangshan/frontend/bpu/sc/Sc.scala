@@ -332,7 +332,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       conf            := false.B
       s2_useScPred(i) := false.B
     }
-    s2_sumAboveThres(i) := aboveThreshold(sum, thres)
+    s2_sumAboveThres(i) := aboveThreshold(sum, thres >> 1)
     dontTouch(tageConfHigh)
     dontTouch(tageConfMid)
     dontTouch(tageConfLow)
@@ -442,6 +442,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     s"t1_branchesWayIdxVec entry width: ${t1_branchesWayIdxVec(0).getWidth} " +
       s"should be the same as log2Ceil(NumWays): ${log2Ceil(NumWays)}"
   )
+  private val t1_thresholdOverflowVec  = WireInit(VecInit.fill(NumWays)(false.B))
+  private val t1_thresholdUnderflowVec = WireInit(VecInit.fill(NumWays)(false.B))
 
   private val t1_writeThresVec = VecInit(scThreshold.indices.map { wayIdx =>
     val updated =
@@ -451,11 +453,16 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
         case (prevThres, (((writeValid, writeWayIdx), taken), branchIdx)) =>
           val scWrong = taken =/= t1_meta.scPred(branchIdx)
           val shouldUpdate = writeValid && writeWayIdx === wayIdx.U && t1_meta.tagePredValid(branchIdx) &&
-            (t1_meta.tagePred(branchIdx) =/= t1_meta.scPred(branchIdx)) &&
             (scWrong || !t1_meta.sumAboveThres(branchIdx))
           prevThres.getUpdate(scWrong, en = shouldUpdate)
       }
-    WireInit(updated)
+    t1_thresholdOverflowVec(wayIdx)  := updated.value > MaxThreshold.U
+    t1_thresholdUnderflowVec(wayIdx) := updated.value < MinThreshold.U
+    WireInit(Mux(
+      updated.value >= MinThreshold.U && updated.value <= MaxThreshold.U,
+      updated,
+      scThreshold(wayIdx)
+    ))
   })
   dontTouch(t1_writeThresVec)
 
@@ -706,6 +713,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   XSPerfAccumulate(s"total_sc_bw_wrong", scBWWrongVec.reduce(_ || _))
   XSPerfAccumulate(s"total_sc_bias_correct", scBiasCorrectVec.reduce(_ || _))
   XSPerfAccumulate(s"total_sc_bias_wrong", scBiasWrongVec.reduce(_ || _))
+
+  XSPerfAccumulate(s"threshold_try_overflow", t1_writeValid && t1_thresholdOverflowVec.reduce(_ || _))
+  XSPerfAccumulate(s"threshold_try_underflow", t1_writeValid && t1_thresholdUnderflowVec.reduce(_ || _))
 
   dontTouch(s2_sumPercsum)
   dontTouch(s2_totalPercsum)
