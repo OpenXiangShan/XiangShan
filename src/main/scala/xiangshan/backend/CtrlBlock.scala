@@ -98,7 +98,6 @@ class CtrlBlockImp(
   val gpaMem = wrapper.gpaMem.module
   val decode = Module(new DecodeStage)
   val fusionDecoder = Module(new FusionDecoder)
-  val rat = Module(new RenameTableWrapper)
   val rename = Module(new Rename)
   val redirectGen = Module(new RedirectGenerator)
   private def hasRen: Boolean = true
@@ -525,11 +524,11 @@ class CtrlBlockImp(
   /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
   io.frontend.canAccept := !decodeBufValid(0) || !decodeFromFrontend(0).valid
   decode.io.csrCtrl := RegNext(io.csrCtrl)
-  decode.io.intRat <> rat.io.intReadPorts
-  decode.io.fpRat <> rat.io.fpReadPorts
-  decode.io.vecRat <> rat.io.vecReadPorts
-  decode.io.v0Rat <> rat.io.v0ReadPorts
-  decode.io.vlRat <> rat.io.vlReadPorts
+  decode.io.intRat <> rename.io.intReadPorts
+  decode.io.fpRat  <> rename.io.fpReadPorts
+  decode.io.vecRat <> rename.io.vecReadPorts
+  decode.io.v0Rat  <> rename.io.v0ReadPorts
+  decode.io.vlRat  <> rename.io.vlReadPorts
   decode.io.fusion := 0.U.asTypeOf(decode.io.fusion) // Todo
   decode.io.stallReason.in <> io.frontend.stallReason
 
@@ -576,11 +575,11 @@ class CtrlBlockImp(
   rob.io.snpt.useSnpt := useSnpt
   rob.io.snpt.snptSelect := snptSelect
   rob.io.snpt.flushVec := flushVecNext
-  rat.io.snpt.snptEnq := genSnapshot
-  rat.io.snpt.snptDeq := snpt.io.deq
-  rat.io.snpt.useSnpt := useSnpt
-  rat.io.snpt.snptSelect := snptSelect
-  rat.io.snpt.flushVec := flushVec
+  rename.io.ratSnpt.snptEnq := genSnapshot
+  rename.io.ratSnpt.snptDeq := snpt.io.deq
+  rename.io.ratSnpt.useSnpt := useSnpt
+  rename.io.ratSnpt.snptSelect := snptSelect
+  rename.io.ratSnpt.flushVec := flushVec
 
   val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec.asUInt.orR || (!TriggerAction.isNone(x.bits.trigger)))
   // fusion decoder
@@ -647,17 +646,9 @@ class CtrlBlockImp(
   memCtrl.io.mdpFlodPcVec := mdpFlodPcVec
   memCtrl.io.dispatchLFSTio <> dispatch.io.lfst
 
-  rat.io.hartId := io.fromTop.hartId
-  rat.io.redirect := s1_s3_redirect.valid
-  rat.io.rabCommits := rob.io.rabCommits
-  rat.io.vlCommits := rob.io.vlCommits
-  rat.io.diffCommits.foreach(_ := rob.io.diffCommits.get)
-  rat.io.diffVlCommits.foreach(_ := rob.io.diffVlCommits.get)
-  rat.io.intRenamePorts := rename.io.intRenamePorts
-  rat.io.fpRenamePorts := rename.io.fpRenamePorts
-  rat.io.vecRenamePorts := rename.io.vecRenamePorts
-  rat.io.v0RenamePorts := rename.io.v0RenamePorts
-  rat.io.vlRenamePorts := rename.io.vlRenamePorts
+  rename.io.hartId := io.fromTop.hartId
+  rename.io.ratDiffCommits.foreach(_ := rob.io.diffCommits.get)
+  rename.io.ratDiffVlCommits.foreach(_ := rob.io.diffVlCommits.get)
 
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
@@ -671,22 +662,6 @@ class CtrlBlockImp(
   // dispatch.io.lfst.resp := 0.U.asTypeOf(dispatch.io.lfst.resp)
   // rename.io.waittable := 0.U.asTypeOf(rename.io.waittable)
   // rename.io.ssit := 0.U.asTypeOf(rename.io.ssit)
-  rename.io.intReadPorts := VecInit(rat.io.intReadPorts.map(x => VecInit(x.map(_.data))))
-  rename.io.fpReadPorts := VecInit(rat.io.fpReadPorts.map(x => VecInit(x.map(_.data))))
-  rename.io.vecReadPorts := VecInit(rat.io.vecReadPorts.map(x => VecInit(x.map(_.data))))
-  rename.io.v0ReadPorts := VecInit(rat.io.v0ReadPorts.map(x => VecInit(x.data)))
-  rename.io.vlReadPorts := VecInit(rat.io.vlReadPorts.map(x => VecInit(x.data)))
-  rename.io.int_need_free := rat.io.int_need_free
-  rename.io.int_old_pdest := rat.io.int_old_pdest
-  rename.io.fp_old_pdest := rat.io.fp_old_pdest
-  rename.io.vec_old_pdest := rat.io.vec_old_pdest
-  rename.io.v0_old_pdest := rat.io.v0_old_pdest
-  rename.io.vl_old_pdest := rat.io.vl_old_pdest
-  rename.io.debug_int_rat.foreach(_ := rat.io.debug_int_rat.get)
-  rename.io.debug_fp_rat.foreach(_ := rat.io.debug_fp_rat.get)
-  rename.io.debug_vec_rat.foreach(_ := rat.io.debug_vec_rat.get)
-  rename.io.debug_v0_rat.foreach(_ := rat.io.debug_v0_rat.get)
-  rename.io.debug_vl_rat.foreach(_ := rat.io.debug_vl_rat.get)
   rename.io.stallReason.in <> decode.io.stallReason.out
   rename.io.snpt.snptEnq := DontCare
   rename.io.snpt.snptDeq := snpt.io.deq
@@ -811,7 +786,7 @@ class CtrlBlockImp(
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
-  io.diff_vl_rat .foreach(_ := rat.io.diff_vl_rat.get)
+  io.diff_vl_rat .foreach(_ := rename.io.diff_vl_rat.get)
 
   rob.io.debug_ls := io.robio.debug_ls
   rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
@@ -837,29 +812,7 @@ class CtrlBlockImp(
 
   io.toVecExcpMod.logicPhyRegMap := rob.io.toVecExcpMod.logicPhyRegMap
   io.toVecExcpMod.excpInfo       := rob.io.toVecExcpMod.excpInfo
-  // T  : rat receive rabCommit
-  // T+1: rat return oldPdest
-  io.toVecExcpMod.ratOldPest match {
-    case fromRat =>
-      (0 until RabCommitWidth).foreach { idx =>
-        val v0Valid = RegNext(
-          rat.io.rabCommits.isCommit &&
-          rat.io.rabCommits.isWalk &&
-          rat.io.rabCommits.commitValid(idx) &&
-          rat.io.rabCommits.info(idx).v0Wen
-        )
-        fromRat.v0OldVdPdest(idx).valid := RegNext(v0Valid)
-        fromRat.v0OldVdPdest(idx).bits := RegEnable(rat.io.v0_old_pdest(idx), v0Valid)
-        val vecValid = RegNext(
-          rat.io.rabCommits.isCommit &&
-          rat.io.rabCommits.isWalk &&
-          rat.io.rabCommits.commitValid(idx) &&
-          rat.io.rabCommits.info(idx).vecWen
-        )
-        fromRat.vecOldVdPdest(idx).valid := RegNext(vecValid)
-        fromRat.vecOldVdPdest(idx).bits := RegEnable(rat.io.vec_old_pdest(idx), vecValid)
-      }
-  }
+  io.toVecExcpMod.ratOldPest := rename.io.ratOldPdest
 
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   dispatch.io.debugTopDown.fromRob := rob.io.debugTopDown.toDispatch
