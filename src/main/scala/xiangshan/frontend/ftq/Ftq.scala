@@ -51,13 +51,20 @@ import xiangshan.frontend.bpu.BpuPredictionSource
 import xiangshan.frontend.bpu.BpuRedirectMeta
 import xiangshan.frontend.bpu.BpuResolveMeta
 import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.icache.ICacheCacheLineHelper
+import xiangshan.frontend.icache.PrefetchReqBundle
+import xiangshan.frontend.icache.PrefetchToFtqBundle
+import xiangshan.frontend.icache.TwoFetchInfo
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HalfAlignHelper
     with HasPerfEvents
     with HasCircularQueuePtrHelper
     with IfuRedirectReceiver
-    with BackendRedirectReceiver {
+    with BackendRedirectReceiver
+    with TwoPrefetchHelper
+    with TwoFetchHelper
+    with ICacheCacheLineHelper {
 
   class FtqIO extends FtqBundle {
     val fromBpu: BpuToFtqIO = Flipped(new BpuToFtqIO)
@@ -66,7 +73,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val fromIfu: IfuToFtqIO = Flipped(new IfuToFtqIO)
     val toIfu:   FtqToIfuIO = new FtqToIfuIO
 
-    val toICache: FtqToICacheIO = new FtqToICacheIO
+    val toICache:     FtqToICacheIO              = new FtqToICacheIO
+    val fromPrefetch: Valid[PrefetchToFtqBundle] = Flipped(Valid(new PrefetchToFtqBundle))
 
     val fromBackend: CtrlToFtqIO = Flipped(new CtrlToFtqIO)
     val toBackend:   FtqToCtrlIO = new FtqToCtrlIO
@@ -180,6 +188,15 @@ class Ftq(implicit p: Parameters) extends FtqModule
     entryQueue(predictionPtr.value).takenCfiOffset := prediction.bits.takenCfiOffset
   }
 
+  when((prediction.fire || bpuS3Redirect) && !redirect.valid) {
+    entryQueue(predictionPtr.value).twoFetchInfo := 0.U.asTypeOf(new TwoFetchInfo)
+  }.elsewhen(io.fromPrefetch.valid) {
+    val ftqIdx = io.fromPrefetch.bits.ftqIdx.value
+    entryQueue(ftqIdx).twoFetchInfo.valid   := true.B
+    entryQueue(ftqIdx).twoFetchInfo.isMmio  := io.fromPrefetch.bits.isMmio
+    entryQueue(ftqIdx).twoFetchInfo.wayMask := io.fromPrefetch.bits.wayMask
+  }
+
   when(io.fromBpu.meta.valid) {
     val s3BpuPtr = io.fromBpu.s3FtqPtr.value
     metaQueueRedirect(s3BpuPtr) := io.fromBpu.meta.bits.redirectMeta
@@ -199,7 +216,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // --------------------------------------------------------------------------------
 
   when(io.toICache.prefetchReq.fire) {
-    pfPtr := pfPtr + 1.U
+    pfPtr := Mux(io.toICache.prefetchReq.bits.secondReqValid, pfPtr + 2.U, pfPtr + 1.U)
   }
   when(io.toIfu.req.fire) {
     ifuPtr := ifuPtr + 1.U
@@ -225,41 +242,89 @@ class Ftq(implicit p: Parameters) extends FtqModule
     }
   }
 
-  // FIXME: backend redirect delay should be more than ITLB csr delay
-  io.toICache.prefetchReq.valid := (bpuPtr(0) > pfPtr(0) || redirectNext.valid) && !redirect.valid
-  io.toICache.prefetchReq.bits.startVAddr := Mux(
+  // --------------------------------------------------------------------------------
+  // 2-prefetch
+  // --------------------------------------------------------------------------------
+
+  private val prefetchFirstBlock  = getFetchBlockInfo(entryQueue(pfPtr(0).value))
+  private val prefetchSecondBlock = getFetchBlockInfo(entryQueue(pfPtr(1).value))
+
+  private val twoPrefetchCaseEncode = getTwoPrefetchCaseEncode(prefetchFirstBlock, prefetchSecondBlock)
+  dontTouch(twoPrefetchCaseEncode)
+
+  private val twoPrefetchValid = twoPrefetchCaseEncode.orR && distanceBetween(bpuPtr(0), pfPtr(0)) >= 3.U
+  dontTouch(twoPrefetchValid)
+
+  private val prefetchReq = Wire(Vec(2, new PrefetchReqBundle))
+
+  // first req
+  prefetchReq(0).startAddr := Mux(
     redirectNext.valid,
     PrunedAddrInit(redirectNext.bits.target),
     entryQueue(pfPtr(0).value).startPc
   )
-  io.toICache.prefetchReq.bits.nextCachelineVAddr :=
-    io.toICache.prefetchReq.bits.startVAddr + (CacheLineSize / 8).U
-  io.toICache.prefetchReq.bits.ftqIdx := pfPtr(0)
+  prefetchReq(0).nextlineStart := prefetchReq(0).startAddr + (CacheLineSize / 8).U
+  prefetchReq(0).ftqIdx        := pfPtr(0)
   // we don't have takenCfiOffset after redirect
-  io.toICache.prefetchReq.bits.takenCfiOffset := Mux(
+  prefetchReq(0).crossCacheline := Mux(
     redirectNext.valid,
-    (FetchBlockInstNum - 1).U, // assume maximum fetch block size
-    entryQueue(pfPtr(0).value).takenCfiOffset.bits
+    isCrossLine(prefetchReq(0).startAddr, (FetchBlockInstNum - 1).U), // assume maximum fetch block size
+    prefetchFirstBlock.isCrossLine
   )
-  io.toICache.prefetchReq.bits.backendException := Mux(
+  prefetchReq(0).backendException := Mux(
     backendExceptionPtr === pfPtr(0),
     backendException,
     ExceptionType.None
   )
+  prefetchReq(0).isSoftPrefetch := false.B
 
-  private val ifuReqValid = bpuPtr(0) > ifuPtr(0) && !redirect.valid &&
+  // second req
+  prefetchReq(1).startAddr      := entryQueue(pfPtr(1).value).startPc
+  prefetchReq(1).nextlineStart  := prefetchReq(1).startAddr + (CacheLineSize / 8).U
+  prefetchReq(1).ftqIdx         := pfPtr(1)
+  prefetchReq(1).crossCacheline := prefetchSecondBlock.isCrossLine
+  prefetchReq(1).backendException := Mux(
+    backendExceptionPtr === pfPtr(1),
+    backendException,
+    ExceptionType.None
+  )
+  prefetchReq(1).isSoftPrefetch := false.B
+
+  // FIXME: backend redirect delay should be more than ITLB csr delay
+  io.toICache.prefetchReq.valid                      := (bpuPtr(0) > pfPtr(0) || redirectNext.valid) && !redirect.valid
+  io.toICache.prefetchReq.bits.req                   := prefetchReq
+  io.toICache.prefetchReq.bits.secondReqValid        := twoPrefetchValid
+  io.toICache.prefetchReq.bits.twoPrefetchCaseEncode := twoPrefetchCaseEncode.asUInt
+
+  when(io.toICache.prefetchReq.fire) {
+    assert(PopCount(twoPrefetchCaseEncode) <= 1.U)
+  }
+
+  // --------------------------------------------------------------------------------
+  // 2-fetch
+  // --------------------------------------------------------------------------------
+
+  private val firstBlock  = getFetchBlockInfo(entryQueue(ifuPtr(0).value))
+  private val secondBlock = getFetchBlockInfo(entryQueue(ifuPtr(1).value))
+
+  private val twoFetchValid = (firstBlock.size +& secondBlock.size) <= FetchBlockSize.U &&
+    !firstBlock.isMmio & !secondBlock.isMmio &&
+    !isICacheDataSramReadConflict(firstBlock, secondBlock) &&
+    distanceBetween(bpuPtr(0), ifuPtr(0)) >= 2.U
+
+  private val fetchReqValid = pfPtr(0) > ifuPtr(0) && !redirect.valid &&
     distanceBetween(ifuPtr(0), commitPtr(0)) < (FtqSize - 1).U
 
   // TODO: consider BPU bypass
-  io.toICache.fetchReq.valid                   := ifuReqValid
+  io.toICache.fetchReq.valid                   := fetchReqValid
   io.toICache.fetchReq.bits.startVAddr         := entryQueue(ifuPtr(0).value).startPc
   io.toICache.fetchReq.bits.nextCachelineVAddr := entryQueue(ifuPtr(0).value).startPc + (CacheLineSize / 8).U
   io.toICache.fetchReq.bits.ftqIdx             := ifuPtr(0)
   io.toICache.fetchReq.bits.takenCfiOffset     := entryQueue(ifuPtr(0).value).takenCfiOffset.bits
   io.toICache.fetchReq.bits.isBackendException := backendException.hasException && backendExceptionPtr === ifuPtr(0)
 
-  io.toIfu.req.valid                    := ifuReqValid
-  io.toIfu.req.bits.fetch(0).valid      := ifuReqValid
+  io.toIfu.req.valid                    := fetchReqValid
+  io.toIfu.req.bits.fetch(0).valid      := fetchReqValid
   io.toIfu.req.bits.fetch(0).startVAddr := entryQueue(ifuPtr(0).value).startPc
   io.toIfu.req.bits.fetch(0).nextStartVAddr := MuxCase(
     entryQueue(ifuPtr(1).value).startPc,

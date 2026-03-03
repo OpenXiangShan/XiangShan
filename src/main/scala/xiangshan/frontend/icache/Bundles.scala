@@ -380,3 +380,15 @@ class PrefetchPipePerfInfo(implicit p: Parameters) extends ICacheBundle {
 class WayLookupPerfInfo(implicit p: Parameters) extends ICacheBundle {
   val empty: Bool = Bool()
 }
+
+class TwoFetchInfo(implicit p: Parameters) extends ICacheBundle {
+  val valid:   Bool      = Bool()
+  val isMmio:  Bool      = Bool()
+  val wayMask: Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
+}
+
+class PrefetchToFtqBundle(implicit p: Parameters) extends ICacheBundle {
+  val ftqIdx:  FtqPtr    = new FtqPtr
+  val isMmio:  Bool      = Bool()
+  val wayMask: Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
+}

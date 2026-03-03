@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import ftq.BpuFlushInfo
 import ftq.FtqPtr
+import ftq.FtqToPrefetchBundle
 import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
 import utils.EnumUInt
@@ -36,7 +37,6 @@ import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
-import xiangshan.frontend.bpu.mbtb.MainBtbMeta
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICachePerfInfo
@@ -111,10 +111,10 @@ class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with ICache
 class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
   // NOTE: req.bits must be prepared in T cycle
   // while req.valid is set true in T + 1 cycle
-  val fetchReq:      DecoupledIO[FtqFetchRequest]    = Decoupled(new FtqFetchRequest)
-  val prefetchReq:   DecoupledIO[FtqPrefetchRequest] = Decoupled(new FtqPrefetchRequest)
-  val flushFromBpu:  BpuFlushInfo                    = new BpuFlushInfo
-  val redirectFlush: Bool                            = Output(Bool())
+  val fetchReq:      DecoupledIO[FtqFetchRequest]     = Decoupled(new FtqFetchRequest)
+  val prefetchReq:   DecoupledIO[FtqToPrefetchBundle] = Decoupled(new FtqToPrefetchBundle)
+  val flushFromBpu:  BpuFlushInfo                     = new BpuFlushInfo
+  val redirectFlush: Bool                             = Output(Bool())
 }
 
 class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle {

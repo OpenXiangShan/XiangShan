@@ -23,10 +23,14 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPerfMeta
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.icache.HasICacheParameters
+import xiangshan.frontend.icache.PrefetchReqBundle
+import xiangshan.frontend.icache.TwoFetchInfo
 
 class FtqEntry(implicit p: Parameters) extends FtqBundle {
-  val startPc:        PrunedAddr  = PrunedAddr(VAddrBits)
-  val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  val startPc:        PrunedAddr   = PrunedAddr(VAddrBits)
+  val takenCfiOffset: Valid[UInt]  = Valid(UInt(CfiPositionWidth.W))
+  val twoFetchInfo:   TwoFetchInfo = new TwoFetchInfo
 }
 
 class MetaEntry(implicit p: Parameters) extends FtqBundle {
@@ -88,4 +92,22 @@ class PerfMeta(implicit p: Parameters) extends FtqBundle {
   // no matter how many mispredictions happened before, count correct-path only
   val mispredict:           Bool       = Bool()
   val mispredictBranchInfo: BranchInfo = new BranchInfo()
+}
+
+class FtqToPrefetchBundle(implicit p: Parameters) extends FtqBundle {
+  val req:                   Vec[PrefetchReqBundle] = Vec(2, new PrefetchReqBundle)
+  val secondReqValid:        Bool                   = Bool()
+  val twoPrefetchCaseEncode: UInt                   = UInt(NumTwoPrefetchCases.W)
+}
+
+class FetchBlockInfo(implicit p: Parameters) extends FtqBundle with HasICacheParameters {
+  val startPc:        PrunedAddr  = PrunedAddr(VAddrBits)
+  val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  val size:           UInt        = UInt((log2Ceil(FetchBlockSize) + 1).W)
+  val isCrossLine:    Bool        = Bool()
+  val isMmio:         Bool        = Bool()
+  val wayMask:        Vec[UInt]   = Vec(2, UInt(nWays.W))
+  val bankMask:       Vec[UInt]   = Vec(2, UInt(DataBanks.W))
+  val vSetIdx:        Vec[UInt]   = Vec(2, UInt(idxBits.W))
+  val vPageNumber:    UInt        = UInt((VAddrBits - PageOffsetWidth).W)
 }

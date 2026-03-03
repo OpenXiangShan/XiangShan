@@ -36,4 +36,6 @@ trait HasFtqParameters extends HasFrontendParameters {
   def BpRunAheadDistance: Int           = ftqParameters.BpRunAheadDistance
   def BpTrainStallLimit:  Int           = ftqParameters.BpTrainStallLimit
   def CommitQueueSize:    Int           = ftqParameters.CommitQueueSize
+
+  def NumTwoPrefetchCases: Int = 4
 }

@@ -19,17 +19,16 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.DataHoldBypass
-import utility.PriorityMuxDefault
 import utility.ValidHold
 import utility.XSPerfAccumulate
 import utils.EnumUInt
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.cache.mmu.ValidHoldBypass // FIXME: should move this to utility?
+import xiangshan.cache.mmu.ValidHoldBypass
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.ftq.BpuFlushInfo
+import xiangshan.frontend.ftq.FtqToPrefetchBundle
 
 class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     with ICacheAddrHelper
@@ -42,15 +41,17 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     val eccEnable:   Bool = Input(Bool())
     val flush:       Bool = Input(Bool())
 
-    val req:            DecoupledIO[PrefetchReqBundle]    = Flipped(Decoupled(new PrefetchReqBundle))
-    val flushFromBpu:   BpuFlushInfo                      = Flipped(new BpuFlushInfo)
-    val itlb:           TlbRequestIO                      = new TlbRequestIO
-    val itlbFlushPipe:  Bool                              = Output(Bool())
-    val pmp:            PmpCheckBundle                    = new PmpCheckBundle
-    val metaRead:       MetaReadBundle                    = new MetaReadBundle
-    val missReq:        DecoupledIO[MissReqBundle]        = DecoupledIO(new MissReqBundle)
-    val missResp:       Valid[MissRespBundle]             = Flipped(ValidIO(new MissRespBundle))
-    val wayLookupWrite: DecoupledIO[WayLookupWriteBundle] = DecoupledIO(new WayLookupWriteBundle)
+    val prefetchReq:      DecoupledIO[FtqToPrefetchBundle]       = Flipped(Decoupled(new FtqToPrefetchBundle))
+    val flushFromBpu:     BpuFlushInfo                           = Flipped(new BpuFlushInfo)
+    val itlb:             TlbRequestIO                           = new TlbRequestIO
+    val itlbFlushPipe:    Bool                                   = Output(Bool())
+    val pmp:              PmpCheckBundle                         = new PmpCheckBundle
+    val metaRead:         MetaReadBundle                         = new MetaReadBundle
+    val missReq:          DecoupledIO[MissReqBundle]             = DecoupledIO(new MissReqBundle)
+    val missResp:         Valid[MissRespBundle]                  = Flipped(ValidIO(new MissRespBundle))
+    val wayLookupWrite:   DecoupledIO[Vec[WayLookupWriteBundle]] = DecoupledIO(Vec(2, new WayLookupWriteBundle))
+    val secondWriteValid: Bool                                   = Output(Bool())
+    val toFtq:            Valid[PrefetchToFtqBundle]             = Valid(new PrefetchToFtqBundle)
 
     val perf: PrefetchPipePerfInfo = Output(new PrefetchPipePerfInfo)
   }
@@ -76,25 +77,45 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     * - 3. send req to Meta SRAM
     ******************************************************************************
     */
-  private val s0_valid = io.req.valid
+  private val s0_valid = io.prefetchReq.valid
 
   /**
     ******************************************************************************
     * receive ftq req
     ******************************************************************************
     */
-  private val s0_vAddr            = VecInit(Seq(io.req.bits.startAddr, io.req.bits.nextlineStart))
-  private val s0_ftqIdx           = io.req.bits.ftqIdx
-  private val s0_isSoftPrefetch   = io.req.bits.isSoftPrefetch
-  private val s0_doubleline       = io.req.bits.crossCacheline
-  private val s0_vSetIdx          = VecInit(s0_vAddr.map(get_idx))
-  private val s0_backendException = io.req.bits.backendException
+  private val s0_req              = io.prefetchReq.bits.req
+  private val s0_vAddr            = VecInit(s0_req(0).startAddr, s0_req(0).nextlineStart)
+  private val s0_ftqIdx           = s0_req(0).ftqIdx
+  private val s0_isSoftPrefetch   = s0_req(0).isSoftPrefetch
+  private val s0_backendException = s0_req(0).backendException
+
+  private val s0_twoPrefetch           = io.prefetchReq.bits.secondReqValid
+  private val s0_twoPrefetchCaseEncode = io.prefetchReq.bits.twoPrefetchCaseEncode
+
+  private val s0_firstReqSetIdx  = VecInit(get_idx(s0_req(0).startAddr), get_idx(s0_req(0).nextlineStart))
+  private val s0_secondReqSetIdx = VecInit(get_idx(s0_req(1).startAddr), get_idx(s0_req(1).nextlineStart))
+  private val s0_vSetIdx = MuxCase(
+    s0_firstReqSetIdx,
+    Seq(
+      (s0_twoPrefetch && s0_twoPrefetchCaseEncode(2)) -> s0_secondReqSetIdx,
+      (s0_twoPrefetch && s0_twoPrefetchCaseEncode(3)) -> VecInit(s0_firstReqSetIdx(0), s0_secondReqSetIdx(0))
+    )
+  )
+  private val s0_doubleline = MuxCase(
+    s0_req(0).crossCacheline,
+    Seq(
+      (s0_twoPrefetch && s0_twoPrefetchCaseEncode(0)) -> (s0_req(0).crossCacheline || s0_req(1).crossCacheline),
+      (s0_twoPrefetch &&
+        (s0_twoPrefetchCaseEncode(1) || s0_twoPrefetchCaseEncode(2) || s0_twoPrefetchCaseEncode(3))) -> true.B
+    )
+  )
 
   fromBpuS0Flush := !s0_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
   s0_flush       := io.flush || fromBpuS0Flush || s1_flush
 
   private val s0_canGo = s1_ready && toItlb.ready && toMeta.ready
-  io.req.ready := s0_canGo
+  io.prefetchReq.ready := s0_canGo
 
   s0_fire := s0_valid && s0_canGo && !s0_flush
 
@@ -109,12 +130,26 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     */
   private val s1_valid = ValidHold(s0_fire, s1_fire, s1_flush)
 
+  private val s1_req              = RegEnable(s0_req, 0.U.asTypeOf(s0_req), s0_fire)
   private val s1_vAddr            = RegEnable(s0_vAddr, 0.U.asTypeOf(s0_vAddr), s0_fire)
   private val s1_isSoftPrefetch   = RegEnable(s0_isSoftPrefetch, 0.U.asTypeOf(s0_isSoftPrefetch), s0_fire)
-  private val s1_doubleline       = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
   private val s1_ftqIdx           = RegEnable(s0_ftqIdx, 0.U.asTypeOf(s0_ftqIdx), s0_fire)
-  private val s1_vSetIdx          = VecInit(s1_vAddr.map(get_idx))
   private val s1_backendException = RegEnable(s0_backendException, 0.U.asTypeOf(s0_backendException), s0_fire)
+
+  private val s1_twoPrefetch           = RegEnable(s0_twoPrefetch, s0_fire)
+  private val s1_twoPrefetchCaseEncode = RegEnable(s0_twoPrefetchCaseEncode, s0_fire)
+
+  private val s1_vSetIdx    = RegEnable(s0_vSetIdx, 0.U.asTypeOf(s0_vSetIdx), s0_fire)
+  private val s1_doubleline = RegEnable(s0_doubleline, 0.U.asTypeOf(s0_doubleline), s0_fire)
+
+  private val s1_firstReqSetIdx = VecInit(
+    get_idx(s1_req(0).startAddr),
+    get_idx(s1_req(0).nextlineStart)
+  )
+  private val s1_secondReqSetIdx = VecInit(
+    get_idx(s1_req(1).startAddr),
+    get_idx(s1_req(1).nextlineStart)
+  )
 
   private def nS1FsmState: Int = 5
   private object S1FsmState extends EnumUInt(nS1FsmState) {
@@ -267,21 +302,47 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     * send enqueue req to ICacheWayLookup
     ******** **********************************************************************
     */
+  private val s1_firstReqMetaInfo =
+    Mux(
+      s1_twoPrefetch && s1_twoPrefetchCaseEncode(2),
+      VecInit(s1_metaInfo(1), 0.U.asTypeOf(new MetaInfo)),
+      s1_metaInfo
+    )
+  private val s1_secondReqMetaInfo =
+    Mux(
+      s1_twoPrefetch && (s1_twoPrefetchCaseEncode(1) || s1_twoPrefetchCaseEncode(3)),
+      VecInit(s1_metaInfo(1), 0.U.asTypeOf(new MetaInfo)),
+      s1_metaInfo
+    )
+
   // Disallow enqueuing wayLookup when SRAM write occurs.
   toWayLookup.valid := (
     (s1_state === S1FsmState.EnqWay) ||
       ((s1_state === S1FsmState.Idle) && tlbFinish)
   ) && !s1_flush && !fromMiss.valid && !s1_isSoftPrefetch // do not enqueue soft prefetch
-  toWayLookup.bits.ftqIdx            := s1_ftqIdx
-  toWayLookup.bits.vSetIdx           := s1_vSetIdx
-  toWayLookup.bits.waymask           := VecInit(s1_metaInfo.map(_.waymask))
-  toWayLookup.bits.pTag              := s1_pTag
-  toWayLookup.bits.maybeRvcMap       := VecInit(s1_metaInfo.map(_.maybeRvcMap))
-  toWayLookup.bits.gpAddr            := s1_gpAddr(PAddrBitsMax - 1, 0)
-  toWayLookup.bits.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
-  toWayLookup.bits.metaCodes         := VecInit(s1_metaInfo.map(_.metaCodes))
-  toWayLookup.bits.itlbException     := s1_itlbException
-  toWayLookup.bits.itlbPbmt          := s1_itlbPbmt
+  toWayLookup.bits(0).ftqIdx            := s1_req(0).ftqIdx
+  toWayLookup.bits(0).vSetIdx           := s1_firstReqSetIdx
+  toWayLookup.bits(0).waymask           := VecInit(s1_firstReqMetaInfo.map(_.waymask))
+  toWayLookup.bits(0).pTag              := s1_pTag
+  toWayLookup.bits(0).maybeRvcMap       := VecInit(s1_firstReqMetaInfo.map(_.maybeRvcMap))
+  toWayLookup.bits(0).gpAddr            := s1_gpAddr(PAddrBitsMax - 1, 0)
+  toWayLookup.bits(0).isForVSnonLeafPTE := s1_isForVSnonLeafPTE
+  toWayLookup.bits(0).metaCodes         := VecInit(s1_firstReqMetaInfo.map(_.metaCodes))
+  toWayLookup.bits(0).itlbException     := s1_itlbException
+  toWayLookup.bits(0).itlbPbmt          := s1_itlbPbmt
+
+  toWayLookup.bits(1).ftqIdx            := s1_req(1).ftqIdx
+  toWayLookup.bits(1).vSetIdx           := s1_secondReqSetIdx
+  toWayLookup.bits(1).waymask           := VecInit(s1_secondReqMetaInfo.map(_.waymask))
+  toWayLookup.bits(1).pTag              := s1_pTag
+  toWayLookup.bits(1).maybeRvcMap       := VecInit(s1_secondReqMetaInfo.map(_.maybeRvcMap))
+  toWayLookup.bits(1).gpAddr            := s1_gpAddr(PAddrBitsMax - 1, 0) // FIXME: need 2 itlb?
+  toWayLookup.bits(1).isForVSnonLeafPTE := s1_isForVSnonLeafPTE           // FIXME
+  toWayLookup.bits(1).metaCodes         := VecInit(s1_secondReqMetaInfo.map(_.metaCodes))
+  toWayLookup.bits(1).itlbException     := s1_itlbException               // FIXME
+  toWayLookup.bits(1).itlbPbmt          := s1_itlbPbmt                    // FIXME
+
+  io.secondWriteValid := s1_twoPrefetch
 
   when(toWayLookup.fire) {
     val waymasksVec = s1_metaInfo.map(_.waymask.asTypeOf(Vec(nWays, Bool())))
@@ -318,6 +379,16 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   // merge pmp mmio and itlb pbmt
   private val s1_isMmio = s1_pmpMmio || Pbmt.isUncache(s1_itlbPbmt)
+
+  /**
+    ******************************************************************************
+    * send 2-fetch needed info to Ftq
+    ******************************************************************************
+    */
+  io.toFtq.valid        := s1_valid
+  io.toFtq.bits.ftqIdx  := s1_ftqIdx
+  io.toFtq.bits.isMmio  := s1_isMmio
+  io.toFtq.bits.wayMask := VecInit(s1_metaInfo.map(_.waymask))
 
   /**
     ******************************************************************************
@@ -399,7 +470,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s2_isMmio   = RegEnable(s1_isMmio, 0.U.asTypeOf(s1_isMmio), s1_realFire)
   private val s2_sramHits = RegEnable(s1_sramHits, 0.U.asTypeOf(s1_sramHits), s1_realFire)
 
-  private val s2_vSetIdx = s2_vAddr.map(get_idx)
+  private val s2_vSetIdx = RegEnable(s1_vSetIdx, 0.U.asTypeOf(s1_vSetIdx), s1_realFire)
 
   /**
     ******************************************************************************
@@ -470,8 +541,8 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   XSPerfAccumulate("bpuS0Flush", fromBpuS0Flush)
   XSPerfAccumulate("bpuS1Flush", fromBpuS1Flush)
   // the number of prefetch request received from ftq or backend (software prefetch)
-  XSPerfAccumulate("hwReq", io.req.fire && !io.req.bits.isSoftPrefetch)
-  XSPerfAccumulate("swReq", io.req.fire && io.req.bits.isSoftPrefetch)
+  XSPerfAccumulate("hwReq", io.prefetchReq.fire && !io.prefetchReq.bits.req(0).isSoftPrefetch) // FIXME
+  XSPerfAccumulate("swReq", io.prefetchReq.fire && io.prefetchReq.bits.req(0).isSoftPrefetch)
   // the number of prefetch request sent to missUnit
   XSPerfAccumulate("hwMiss", toMiss.fire && !s2_isSoftPrefetch)
   XSPerfAccumulate("swMiss", toMiss.fire && s2_isSoftPrefetch)

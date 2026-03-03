@@ -42,7 +42,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   class ICacheIO(implicit p: Parameters) extends ICacheBundle {
     val hartId: UInt = Input(UInt(hartIdLen.W))
     // FTQ
-    val fromFtq: FtqToICacheIO = Flipped(new FtqToICacheIO)
+    val fromFtq: FtqToICacheIO              = Flipped(new FtqToICacheIO)
+    val toFtq:   Valid[PrefetchToFtqBundle] = Valid(new PrefetchToFtqBundle)
     // memblock
     val softPrefetchReq: Vec[Valid[SoftIfetchPrefetchBundle]] =
       Vec(backendParams.LduCnt, Flipped(Valid(new SoftIfetchPrefetchBundle)))
@@ -167,17 +168,15 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
       0.U.asTypeOf(new SoftIfetchPrefetchBundle),
       io.softPrefetchReq.map(req => req.valid -> req.bits)
     ))
-  }.elsewhen(prefetcher.io.req.fire) {
+  }.elsewhen(prefetcher.io.prefetchReq.fire) {
     softPrefetchValid := false.B
   }
-  // pass ftqPrefetch
-  private val ftqPrefetch = WireInit(0.U.asTypeOf(new PrefetchReqBundle))
-  ftqPrefetch.fromFtqPrefetch(io.fromFtq.prefetchReq.bits)
   // software prefetch has higher priority
-  prefetcher.io.req.valid                 := softPrefetchValid || io.fromFtq.prefetchReq.valid
-  prefetcher.io.req.bits                  := Mux(softPrefetchValid, softPrefetch, ftqPrefetch)
-  prefetcher.io.req.bits.backendException := io.fromFtq.prefetchReq.bits.backendException
-  io.fromFtq.prefetchReq.ready            := prefetcher.io.req.ready && !softPrefetchValid
+  prefetcher.io.prefetchReq.valid       := softPrefetchValid || io.fromFtq.prefetchReq.valid
+  prefetcher.io.prefetchReq.bits        := io.fromFtq.prefetchReq.bits
+  prefetcher.io.prefetchReq.bits.req(0) := Mux(softPrefetchValid, softPrefetch, io.fromFtq.prefetchReq.bits.req(0))
+  io.fromFtq.prefetchReq.ready          := prefetcher.io.prefetchReq.ready && !softPrefetchValid
+  io.toFtq                              := prefetcher.io.toFtq
 
   missUnit.io.hartId := io.hartId
   missUnit.io.fencei := io.fencei
@@ -201,7 +200,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   wayLookup.io.flush        := io.fromFtq.redirectFlush
   wayLookup.io.flushFromBpu := io.fromFtq.flushFromBpu
   wayLookup.io.write <> prefetcher.io.wayLookupWrite
-  wayLookup.io.update := missUnit.io.resp
+  wayLookup.io.secondWriteValid := prefetcher.io.secondWriteValid
+  wayLookup.io.update           := missUnit.io.resp
 
   replacer.io.touch <> mainPipe.io.replacerTouch
   replacer.io.victim <> missUnit.io.victim
@@ -249,7 +249,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   XSPerfAccumulate(
     "softPrefetch_drop_not_ready",
-    io.softPrefetchReq.map(_.valid).reduce(_ || _) && softPrefetchValid && !prefetcher.io.req.fire
+    io.softPrefetchReq.map(_.valid).reduce(_ || _) && softPrefetchValid && !prefetcher.io.prefetchReq.fire
   )
   XSPerfAccumulate("softPrefetch_drop_multi_req", PopCount(io.softPrefetchReq.map(_.valid)) > 1.U)
   XSPerfAccumulate("softPrefetch_block_ftq", softPrefetchValid && io.fromFtq.prefetchReq.valid)
