@@ -21,6 +21,7 @@ import ftq.BpuFlushInfo
 import ftq.FtqPtr
 import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
+import utility.XSError
 import utils.EnumUInt
 import xiangshan.Redirect
 import xiangshan.TopDownCounters
@@ -367,62 +368,88 @@ object BlameBpuSource {
     def SC:     UInt = 4.U(width.W)
   }
 
-  def apply(perf: BpuPerfMeta, branch: BranchInfo): UInt = {
+  def apply(en: Bool, perf: BpuPerfMeta, branch: BranchInfo): UInt = {
     import BlameType.{BTB, TAGE, RAS, ITTAGE, SC}
-    val src         = perf.bpSource
-    val pred        = perf.bpPred
-    val attr        = branch.attribute
-    val isHitInMbtb = perf.mbtbMeta.entries.flatten.map(_.hit(branch)).reduce(_ || _)
+    val src              = perf.bpSource
+    val pred             = perf.bpPred
+    val attr             = branch.attribute
+    val isMatchMask      = perf.mbtbMeta.entries.flatten.map(e => e.hit(branch) && e.attribute === branch.attribute)
+    val isMatchInMbtb    = isMatchMask.reduce(_ || _)
+    val matchBranchOH    = PriorityEncoderOH(isMatchMask)
+    val matchBranchUseSc = Mux1H(matchBranchOH, perf.scUsed.asBools)
 
-    // Check mispredict type
-    val onlyDirectionWrong = branch.taken =/= pred.taken && branch.cfiPosition === pred.cfiPosition
-    val blame              = WireInit(BTB) // Default to BTB
+    val blame    = WireInit(BTB) // Default to BTB
+    val posError = WireInit(false.B)
+    val retError = WireInit(false.B)
 
-    when(!isHitInMbtb) {
+    when(!isMatchInMbtb) {
       blame := BTB
-    }.elsewhen(src.s3Ras) {
+    }.elsewhen(src.s3Sc || src.s3Tage) {
       when(attr.isConditional) {
-        // If cond before, TAGE mispredicts
-        // If cond after, should trigger assertion, TODO
-        blame := TAGE
-      }.elsewhen(attr.isReturn && pred.cfiPosition === branch.cfiPosition) {
-        blame := RAS
+        when(branch.cfiPosition < pred.cfiPosition) {
+          blame := Mux(matchBranchUseSc, SC, TAGE)
+        }.elsewhen(branch.cfiPosition === pred.cfiPosition) {
+          blame := Mux(branch.taken =/= pred.taken, Mux(src.s3Sc, SC, TAGE), BTB)
+        }.otherwise {
+          blame := Mux(src.s3Sc, SC, TAGE)
+        }
       }.otherwise {
-        // Other branch type mismatch
-        blame := BTB
+        when(branch.cfiPosition <= pred.cfiPosition) {
+          blame := BTB
+        }.otherwise {
+          blame := Mux(src.s3Sc, SC, TAGE)
+        }
       }
-    }.elsewhen(src.s3ITTage) {
-      when(attr.isIndirect) {
-        blame := ITTAGE
-      }.elsewhen(attr.isConditional) {
-        blame := TAGE
-        // If cond after, should trigger assertion, TODO
-      }.otherwise {
-        blame := BTB
-      }
-    }.elsewhen(src.s3MbtbSc) {
+    }.elsewhen(src.s3Ras || src.s3ITTage || src.s3Mbtb) {
       when(attr.isConditional) {
-        blame := Mux(onlyDirectionWrong, SC, BTB)
-      }.otherwise {
-        blame := BTB
-      }
-    }.elsewhen(src.s3MbtbTage || src.s3FallthroughTage) {
-      when(attr.isConditional) {
-        blame := Mux(onlyDirectionWrong, TAGE, BTB)
-      }.otherwise {
-        blame := BTB
-      }
-    }.elsewhen(src.s3Mbtb) {
-      when(attr.isConditional) {
-        blame := Mux(onlyDirectionWrong, TAGE, BTB)
+        when(branch.cfiPosition < pred.cfiPosition) {
+          blame := Mux(matchBranchUseSc, SC, TAGE)
+        }.elsewhen(branch.cfiPosition === pred.cfiPosition) {
+          blame := BTB
+        }.otherwise {
+          // resolved branch's position > predicted branch(jump)'s position,
+          // which means execution flow error, should trigger assertion.
+          posError := true.B
+        }
+      }.elsewhen(attr.isReturn) {
+        when(branch.cfiPosition < pred.cfiPosition) {
+          blame := BTB
+        }
+        when(branch.cfiPosition === pred.cfiPosition) {
+          // if branch type is return, prediction use ras directly
+          // so blame to ras only when source is ras
+          // and trigger assertion when source is mbtb
+          blame    := Mux(src.s3Ras, RAS, BTB)
+          retError := src.s3Mbtb
+        }.otherwise {
+          posError := true.B
+        }
       }.elsewhen(attr.isIndirect) {
-        blame := ITTAGE
+        when(branch.cfiPosition < pred.cfiPosition) {
+          blame := BTB
+        }.elsewhen(branch.cfiPosition === pred.cfiPosition) {
+          // if branch type is indirect, prediction use ittage when hit, otherwise use mbtb as base table
+          // so blame to ittage when src is ittage(target wrong) or src is mbtb(ittage not hit)
+          blame := Mux(src.s3ITTage || src.s3Mbtb, ITTAGE, BTB)
+        }.otherwise {
+          posError := true.B
+        }
+      }.otherwise { // isDirect
+        when(branch.cfiPosition <= pred.cfiPosition) {
+          blame := BTB
+        }.otherwise {
+          posError := true.B
+        }
+      }
+    }.otherwise { // s3Fallthrough
+      when(attr.isConditional) {
+        blame := Mux(matchBranchUseSc, SC, TAGE)
       }.otherwise {
         blame := BTB
       }
-    }.elsewhen(src.s3Fallthrough) {
-      blame := BTB
     }
+    assert(!(en && posError), "resolved branch's position cannot be greater than predicted jump's position")
+    assert(!(en && retError), "prediction source cannot be mbtb when resolved branch type is return")
     blame
   }
 }

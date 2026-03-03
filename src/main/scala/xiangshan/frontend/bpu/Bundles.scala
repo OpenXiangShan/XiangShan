@@ -144,16 +144,15 @@ class BpuPredictionSource extends Bundle {
   val s3Source:   UInt = BpuPredictionSource.Stage3()
   val s3Override: Bool = Bool()
 
-  def s1Ubtb:            Bool = s1Source === BpuPredictionSource.Stage1.Ubtb
-  def s1Abtb:            Bool = s1Source === BpuPredictionSource.Stage1.Abtb
-  def s1Fallthrough:     Bool = s1Source === BpuPredictionSource.Stage1.Fallthrough
-  def s3Ras:             Bool = s3Source === BpuPredictionSource.Stage3.Ras
-  def s3ITTage:          Bool = s3Source === BpuPredictionSource.Stage3.ITTage
-  def s3MbtbSc:          Bool = s3Source === BpuPredictionSource.Stage3.MbtbSc
-  def s3MbtbTage:        Bool = s3Source === BpuPredictionSource.Stage3.MbtbTage
-  def s3Mbtb:            Bool = s3Source === BpuPredictionSource.Stage3.Mbtb
-  def s3FallthroughTage: Bool = s3Source === BpuPredictionSource.Stage3.FallthroughTage
-  def s3Fallthrough:     Bool = s3Source === BpuPredictionSource.Stage3.Fallthrough
+  def s1Ubtb:        Bool = s1Source === BpuPredictionSource.Stage1.Ubtb
+  def s1Abtb:        Bool = s1Source === BpuPredictionSource.Stage1.Abtb
+  def s1Fallthrough: Bool = s1Source === BpuPredictionSource.Stage1.Fallthrough
+  def s3Ras:         Bool = s3Source === BpuPredictionSource.Stage3.Ras
+  def s3ITTage:      Bool = s3Source === BpuPredictionSource.Stage3.ITTage
+  def s3Sc:          Bool = s3Source === BpuPredictionSource.Stage3.Sc
+  def s3Tage:        Bool = s3Source === BpuPredictionSource.Stage3.Tage
+  def s3Mbtb:        Bool = s3Source === BpuPredictionSource.Stage3.Mbtb
+  def s3Fallthrough: Bool = s3Source === BpuPredictionSource.Stage3.Fallthrough
 }
 
 object BpuPredictionSource {
@@ -164,14 +163,13 @@ object BpuPredictionSource {
     def AbtbUtage:   UInt = 3.U(width.W)
     def Fallthrough: UInt = 4.U(width.W)
   }
-  object Stage3 extends EnumUInt(7) {
-    def Ras:             UInt = 0.U(width.W)
-    def ITTage:          UInt = 1.U(width.W)
-    def MbtbSc:          UInt = 2.U(width.W)
-    def MbtbTage:        UInt = 3.U(width.W)
-    def Mbtb:            UInt = 4.U(width.W)
-    def FallthroughTage: UInt = 5.U(width.W)
-    def Fallthrough:     UInt = 6.U(width.W)
+  object Stage3 extends EnumUInt(6) {
+    def Ras:         UInt = 0.U(width.W)
+    def ITTage:      UInt = 1.U(width.W)
+    def Sc:          UInt = 2.U(width.W)
+    def Tage:        UInt = 3.U(width.W)
+    def Mbtb:        UInt = 4.U(width.W)
+    def Fallthrough: UInt = 5.U(width.W)
   }
 }
 
@@ -287,6 +285,7 @@ class BpuResolveMeta(implicit p: Parameters) extends BpuBundle {
 
 class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {
   val bpId:         UInt                = UInt(XLEN.W)
+  val scUsed:       UInt                = UInt(NumBtbResultEntries.W)
   val startPc:      PrunedAddr          = new PrunedAddr(VAddrBits)
   val s1Prediction: Prediction          = new Prediction
   val s3Prediction: Prediction          = new Prediction

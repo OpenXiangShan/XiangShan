@@ -478,34 +478,46 @@ class Ftq(implicit p: Parameters) extends FtqModule
     )
   )
 
+  private val perf_commitHasMispredict = commit && commitPerfMeta.mispredict
+  private val perf_commitHasMispredictConditional =
+    perf_commitHasMispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional
+
   XSPerfAccumulate(
     "commit_branch_mispredicts_s1_mispred_s1_source",
-    commit && commitPerfMeta.mispredict && !commitPerfMeta.bpuPerf.bpSource.s3Override,
+    perf_commitHasMispredict && !commitPerfMeta.bpuPerf.bpSource.s3Override,
     BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
   )
   XSPerfAccumulate(
     "commit_branch_mispredicts_s1_source",
-    commit && commitPerfMeta.mispredict,
+    perf_commitHasMispredict,
     BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
   )
   XSPerfAccumulate(
     "commit_branch_mispredicts_s3_source",
-    commit && commitPerfMeta.mispredict,
+    perf_commitHasMispredict,
     BpuPredictionSource.Stage3.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s3Source)
   )
   XSPerfAccumulate(
     "commit_branch_mispredicts_reason",
-    commit && commitPerfMeta.mispredict,
-    BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(commitPerfMeta.bpuPerf, commitPerfMeta.mispredictBranchInfo))
+    perf_commitHasMispredict,
+    BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(
+      perf_commitHasMispredict,
+      commitPerfMeta.bpuPerf,
+      commitPerfMeta.mispredictBranchInfo
+    ))
   )
   XSPerfAccumulate(
     "commit_conditional_branch_mispredicts_reason",
-    commit && commitPerfMeta.mispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional,
-    BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(commitPerfMeta.bpuPerf, commitPerfMeta.mispredictBranchInfo))
+    perf_commitHasMispredictConditional,
+    BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(
+      perf_commitHasMispredictConditional,
+      commitPerfMeta.bpuPerf,
+      commitPerfMeta.mispredictBranchInfo
+    ))
   )
   XSPerfAccumulate(
     "commit_branch_mispredicts_type",
-    commit && commitPerfMeta.mispredict,
+    perf_commitHasMispredict,
     Seq(
       ("conditional", commitPerfMeta.mispredictBranchInfo.attribute.isConditional),
       ("direct", commitPerfMeta.mispredictBranchInfo.attribute.isDirect),
