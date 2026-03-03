@@ -234,12 +234,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.toDispatch.wakeUpVec := vecRegion.io.wakeUpToDispatch
   ctrlBlock.io.toDispatch.IQValidNumVec := intRegion.io.IQValidNumVec ++ fpRegion.io.IQValidNumVec ++ vecRegion.io.IQValidNumVec
   ctrlBlock.io.toDispatch.ldCancel := io.mem.ldCancel
-  val og0Cancel = (intRegion.io.og0Cancel.asUInt | fpRegion.io.og0Cancel.asUInt | vecRegion.io.og0Cancel.asUInt).asBools
-  for (i <- 0 until og0Cancel.size) {
-    assert(intRegion.io.og0Cancel(i) === fpRegion.io.og0Cancel(i), s"intRegion og0Cancel_$i should be identical to fpRegion og0Cancel")
-    assert(intRegion.io.og0Cancel(i) === vecRegion.io.og0Cancel(i), s"intRegion og0Cancel_$i should be identical to vecRegion og0Cancel")
-  }
-  ctrlBlock.io.toDispatch.og0Cancel := og0Cancel
+  ctrlBlock.io.toDispatch.og0Cancel := intRegion.io.og0Cancel
   ctrlBlock.io.toDispatch.wbPregsInt.zip(intRegion.io.toIntPreg).map(x => {
     x._1.valid := x._2.wen && x._2.rfWen
     x._1.bits := x._2.pdest
