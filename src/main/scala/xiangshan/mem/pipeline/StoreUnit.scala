@@ -97,10 +97,14 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val s0_vec_valid        = io.vecstin.valid
   val s0_ma_st_valid      = io.misalign_stin.valid
   val s0_valid            = s0_iss_valid || s0_prf_valid || s0_vec_valid || s0_ma_st_valid
-  val s0_use_flow_ma      = s0_ma_st_valid
-  val s0_use_flow_vec     = s0_vec_valid && !s0_ma_st_valid
-  val s0_use_flow_rs      = s0_iss_valid && !s0_vec_valid && !s0_ma_st_valid
-  val s0_use_flow_prf     = s0_prf_valid && !s0_iss_valid && !s0_vec_valid && !s0_ma_st_valid
+  val s0_flow_ma_ready = true.B
+  val s0_flow_vec_ready = !s0_ma_st_valid
+  val s0_flow_rs_ready = !s0_vec_valid && !s0_ma_st_valid
+  val s0_flow_prf_ready = !s0_iss_valid && !s0_vec_valid && !s0_ma_st_valid
+  val s0_use_flow_ma      = s0_ma_st_valid && s0_flow_ma_ready
+  val s0_use_flow_vec     = s0_vec_valid && s0_flow_vec_ready
+  val s0_use_flow_rs      = s0_iss_valid && s0_flow_rs_ready
+  val s0_use_flow_prf     = s0_prf_valid && s0_flow_prf_ready
   val s0_use_non_prf_flow = s0_use_flow_rs || s0_use_flow_vec || s0_use_flow_ma
   val s0_stin             = Mux(s0_use_flow_rs, io.stin.bits, 0.U.asTypeOf(io.stin.bits))
   val s0_vecstin          = Mux(s0_use_flow_vec, io.vecstin.bits, 0.U.asTypeOf(io.vecstin.bits))
@@ -144,19 +148,11 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   val s0_saddr = s0_stin.src(0) + SignExt(s0_stin.imm(11,0), VAddrBits)
   val s0_fullva = Wire(UInt(XLEN.W))
 
-  val s0_vaddr = Mux(
-    s0_use_flow_ma,
-    io.misalign_stin.bits.vaddr,
-    Mux(
-      s0_use_flow_rs,
-      s0_saddr,
-      Mux(
-        s0_use_flow_vec,
-        s0_vecstin.vaddr(VAddrBits - 1, 0),
-        io.prefetch_req.bits.vaddr
-      )
-    )
-  )
+  val s0_vaddr = PriorityMuxDefault(Seq(
+    s0_ma_st_valid -> io.misalign_stin.bits.vaddr,
+    s0_vec_valid -> s0_vecstin.vaddr(VAddrBits - 1, 0),
+    s0_iss_valid -> s0_saddr
+  ), io.prefetch_req.bits.vaddr)
 
   val s0_isCbo = s0_use_flow_rs && LSUOpType.isCboAll(s0_stin.fuOpType)
   val s0_isCbo_noZero = s0_use_flow_rs && LSUOpType.isCbo(s0_stin.fuOpType)
@@ -278,10 +274,10 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.st_mask_out.bits.mask   := s0_out.mask
   io.st_mask_out.bits.sqIdx  := s0_out.uop.sqIdx
 
-  io.stin.ready := s1_ready && s0_use_flow_rs
-  io.vecstin.ready := s1_ready && s0_use_flow_vec
-  io.prefetch_req.ready := s1_ready && io.dcache.req.ready && !s0_iss_valid && !s0_vec_valid && !s0_ma_st_valid
-  io.misalign_stin.ready := s1_ready && s0_use_flow_ma
+  io.stin.ready := s1_ready && s0_flow_rs_ready
+  io.vecstin.ready := s1_ready && s0_flow_vec_ready
+  io.prefetch_req.ready := s1_ready && io.dcache.req.ready && s0_flow_prf_ready
+  io.misalign_stin.ready := s1_ready && s0_flow_ma_ready
 
   // Pipeline
   // --------------------------------------------------------------------------------
