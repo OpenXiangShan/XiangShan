@@ -496,14 +496,6 @@ object Bundles {
     // from dispatch
     val lqIdx = Option.when(params.issueBlockParam.needLqIdx)(new LqPtr)
     val sqIdx = Option.when(params.issueBlockParam.needSqIdx)(new SqPtr) // load unit need sqIdx
-    // for read regfile, rf and rfVl are only for param config
-    private val rfReadDataCfgSet: Seq[Set[DataConfig]] = params.getRfReadDataCfgSet
-    val rf: MixedVec[MixedVec[RfReadPortWithConfig]] = MixedVec(
-      rfReadDataCfgSet.map((set: Set[DataConfig]) =>
-        MixedVec(set.map((x: DataConfig) => new RfReadPortWithConfig(x, params.rdPregIdxWidth)).toSeq)
-      )
-    )
-    val rfVl = Option.when(params.readVlRf)(new RfReadPortWithConfig(VlData(), params.backendParam.getPregParams(VlData()).addrWidth))
   }
 
   class IssueQueuePayload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
