@@ -650,7 +650,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val l1_pf_req = Wire(Decoupled(new L1PrefetchReq()))
   val prefetcher = Module(new PrefetcherWrapper)
   prefetcher.io.pfCtrlFromTile.l2PfqBusy := io.l2PfqBusy
-  prefetcher.io.l2_fdbk_pf_ctrl := 0.U.asTypeOf(new L2ToL1PfCtrl) // io.l2_fdbk_pf_ctrl
+  prefetcher.io.l2_fdbk_pf_ctrl := io.l2_fdbk_pf_ctrl
   prefetcher.io.pfCtrlFromCSR := io.ooo_to_mem.csrCtrl.pf_ctrl
   prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
   prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
