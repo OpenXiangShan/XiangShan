@@ -132,18 +132,20 @@ jobs:
             --max-instr 5000000 \
             ${CKPT} \
             2> stderr.log | tee stdout.log
-      - name: Report
+          cat stderr.log | sort | tee stderr-sorted.log
+      - name: Archive log
         if: always()
         run: |
-          cat stderr.log | sort | tee ${PERF_HOME}/${{ matrix.name }}_${{ matrix.ckpt }}.log
-          grep -oP 'IPC = \K\d+\.\d+' stdout.log > build/ipc-${{ matrix.name }}_${{ matrix.ckpt }}
-          echo "IPC: $(cat build/ipc-${{ matrix.name }}_${{ matrix.ckpt }})"
+          tar -czvf "${PERF_HOME}/${{ matrix.name }}_${{ matrix.ckpt }}.tar.gz" stdout.log stderr-sorted.log
+      - name: Generate report
+        run: |
+          grep -oP 'IPC = \K\d+\.\d+' stdout.log > ipc-${{ matrix.name }}_${{ matrix.ckpt }}
+          echo "IPC: $(cat ipc-${{ matrix.name }}_${{ matrix.ckpt }})"
       - name: Upload report
-        if: always()
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: build/ipc-${{ matrix.name }}_${{ matrix.ckpt }}
+          path: ipc-${{ matrix.name }}_${{ matrix.ckpt }}
 
   summary:
     name: Summary
