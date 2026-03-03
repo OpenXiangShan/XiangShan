@@ -9,7 +9,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.issue.SchdBlockParams
 import xiangshan.{HasXSParameter, Redirect, Resolve, XSBundle}
 import utility._
-import xiangshan.backend.fu.FuConfig.{AluCfg, BrhCfg, FcmpCfg, I2fCfg}
+import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
@@ -33,6 +33,10 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     exu.io.csrin.foreach(exuio => io.csrin.get <> exuio)
     exu.io.I2FDataIn.foreach(exuio => io.cross.I2FDataIn.get <> exuio)
     exu.io.F2IDataIn.foreach(exuio => io.cross.F2IDataIn.get <> exuio)
+    exu.io.F2VDataIn.foreach(exuio => io.cross.F2VDataIn.get <> exuio)
+    exu.io.V2FDataIn.foreach(exuio => io.cross.V2FDataIn.get <> exuio)
+    exu.io.V2IDataIn.foreach(exuio => io.cross.V2IDataIn.get <> exuio)
+    exu.io.I2VDataIn.foreach(exuio => io.cross.I2VDataIn.get <> exuio)
     exu.io.fenceio.foreach(exuio => io.fenceio.get <> exuio)
     exu.io.frm.foreach(exuio => exuio := RegNext(io.frm.get))  // each vf exu pipe frm from csr
     exu.io.vxrm.foreach(exuio => io.vxrm.get <> exuio)
@@ -67,20 +71,68 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     x.bits.rfWen := exuF2IIn.bits.ctrl.rfWen.get
     x.bits.pdest := exuF2IIn.bits.toRF.pdest
   }
+  io.cross.F2VWakeupOut.foreach { x =>
+    val exuF2VIn = exus.filter(x => x.exuParams.fuConfigs.contains(F2vCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuF2VIn.valid && exuF2VIn.bits.ctrl.vecWen.get
+    x.bits.vecWen := exuF2VIn.bits.ctrl.vecWen.get
+    x.bits.pdest  := exuF2VIn.bits.toRF.pdest
+  }
+  io.cross.V2FWakeupOut.foreach { x =>
+    val exuV2FIn = exus.filter(x => x.exuParams.fuConfigs.contains(VmoveCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuV2FIn.valid && exuV2FIn.bits.ctrl.fpWen.get
+    x.bits.fpWen := exuV2FIn.bits.ctrl.fpWen.get
+    x.bits.pdest := exuV2FIn.bits.toRF.pdest
+  }
+  io.cross.V2IWakeupOut.foreach { x =>
+    val exuV2IIn = exus.filter(x => x.exuParams.fuConfigs.contains(VmoveCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuV2IIn.valid && exuV2IIn.bits.ctrl.rfWen.get
+    x.bits.rfWen := exuV2IIn.bits.ctrl.rfWen.get
+    x.bits.pdest := exuV2IIn.bits.toRF.pdest
+  }
+  io.cross.I2VWakeupOut.foreach { x =>
+    val exuI2VIn = exus.filter(x => x.exuParams.fuConfigs.contains(I2vCfg)).head.io.in
+    x := 0.U.asTypeOf(x)
+    x.valid := exuI2VIn.valid && exuI2VIn.bits.ctrl.vecWen.get
+    x.bits.vecWen := exuI2VIn.bits.ctrl.vecWen.get
+    x.bits.pdest  := exuI2VIn.bits.toRF.pdest
+  }
   io.uncertainWakeupOut.foreach{ x =>
     x.zip(exus.filter(exu => exu.io.uncertainWakeupOut.nonEmpty).map(_.io.uncertainWakeupOut.get)).map{ case (sink, source) =>
       sink <> source
     }
   }
   io.cross.I2FDataOut.foreach { x =>
-    val i2fFuOut = exus.filter(exu => exu.exuParams.hasi2fFu).head.io.out
-    x.valid := i2fFuOut.valid && i2fFuOut.bits.toFpRf.get.valid
-    x.bits := i2fFuOut.bits.toFpRf.get.bits
+    val i2fFu = exus.filter(exu => exu.exuParams.hasi2fFu).head.io
+    x.valid := i2fFu.out.valid && i2fFu.I2FOutValid.get
+    x.bits  := i2fFu.out.bits.toFpRf.get.bits
   }
   io.cross.F2IDataOut.foreach { x =>
-    val f2iFuOut = exus.filter(exu => exu.exuParams.hasf2iFu).head.io.out
-    x.valid := f2iFuOut.valid && f2iFuOut.bits.toIntRf.get.valid
-    x.bits := f2iFuOut.bits.toIntRf.get.bits
+    val f2iFu = exus.filter(exu => exu.exuParams.hasf2iFu).head.io
+    x.valid := f2iFu.out.valid && f2iFu.F2IOutValid.get
+    x.bits  := f2iFu.out.bits.toIntRf.get.bits
+  }
+  io.cross.F2VDataOut.foreach { x =>
+    val f2vFu = exus.filter(exu => exu.exuParams.hasf2vFu).head.io
+    x.valid := f2vFu.out.valid && f2vFu.F2VOutValid.get
+    x.bits  := f2vFu.out.bits.toVecRf.get.bits
+  }
+  io.cross.V2FDataOut.foreach { x =>
+    val v2fFu = exus.filter(exu => exu.exuParams.hasv2fFu).head.io
+    x.valid := v2fFu.out.valid && v2fFu.V2FOutValid.get
+    x.bits  := v2fFu.out.bits.toFpRf.get.bits
+  }
+  io.cross.I2VDataOut.foreach { x =>
+    val i2vFu = exus.filter(exu => exu.exuParams.hasi2vFu).head.io
+    x.valid := i2vFu.out.valid && i2vFu.I2VOutValid.get
+    x.bits := i2vFu.out.bits.toVecRf.get.bits
+  }
+  io.cross.V2IDataOut.foreach { x =>
+    val v2iFu = exus.filter(exu => exu.exuParams.hasv2iFu).head.io
+    x.valid := v2iFu.out.valid && v2iFu.V2IOutValid.get
+    x.bits  := v2iFu.out.bits.toIntRf.get.bits
   }
   exus.find(_.io.csrio.nonEmpty).map(_.io.csrio.get).foreach { csrio =>
     exus.map(_.io.instrAddrTransType.foreach(_ := csrio.instrAddrTransType))

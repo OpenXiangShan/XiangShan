@@ -9,7 +9,7 @@ import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.{DataSource, WakeUpConfig}
-import xiangshan.backend.datapath.WbConfig.PregWB
+import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.decode.{ImmUnion, XDecode}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
@@ -26,6 +26,7 @@ import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.VecMissalignedDebugBundle
 
 import utility._
+import scala.collection.mutable
 
 
 object Bundles {
@@ -83,22 +84,28 @@ object Bundles {
     connectSamePort(sink.bits.toRob.bits, source.bits)
     connectSamePort(sink.bits, source.bits)
     sink.bits.toRob.valid             := source.valid
-    sink.bits.toIntRf.foreach(_.valid := source.bits.intWen.get)
-    sink.bits.toIntRf.foreach(_.bits  := source.bits.data(0))
-    sink.bits.toFpRf. foreach(_.valid := source.bits.fpWen.get)
-    sink.bits.toFpRf. foreach(_.bits  := source.bits.data(0))
-    sink.bits.toVecRf.foreach(_.valid := source.bits.vecWen.get)
-    sink.bits.toVecRf.foreach(_.bits  := source.bits.data(0))
+    sink.bits.toIntRf.foreach(_.valid := source.valid && source.bits.intWen.get)
+    sink.bits.toIntRf.foreach(_.bits.pdest := source.bits.pdest)
+    sink.bits.toIntRf.foreach(_.bits.data  := source.bits.data(0))
+    sink.bits.toFpRf. foreach(_.valid := source.valid && source.bits.fpWen.get)
+    sink.bits.toFpRf. foreach(_.bits.pdest  := source.bits.pdest)
+    sink.bits.toFpRf. foreach(_.bits.data  := source.bits.data(0))
+    sink.bits.toVecRf.foreach(_.valid := source.valid && source.bits.vecWen.get)
+    sink.bits.toVecRf.foreach(_.bits.pdest  := source.bits.pdest)
+    sink.bits.toVecRf.foreach(_.bits.data  := source.bits.data(0))
     sink.bits.toV0Rf. foreach(_.valid := source.bits.v0Wen.get)
-    sink.bits.toV0Rf. foreach(_.bits  := source.bits.data(0))
+    sink.bits.toV0Rf. foreach(_.bits.pdest  := source.bits.pdest)
+    sink.bits.toV0Rf. foreach(_.bits.data  := source.bits.data(0))
     sink.bits.toVlRf. foreach(_.valid := source.bits.vlWen.get)
-    sink.bits.toVlRf. foreach(_.bits  := source.bits.data(0))
+    sink.bits.toVlRf. foreach(_.bits.pdest  := source.bits.pdestVl.get)
+    sink.bits.toVlRf. foreach(_.bits.data  := source.bits.data(0))
   }
 
   def connectWriteBackRob(sink: WriteBackRobBundle, source: NewExuOutput) = {
     connectSamePort(sink, source.toRob.bits)
     connectSamePort(sink, source)
-    sink.data              := source.toIntRf.map(_.bits).getOrElse(0.U(64.W))
+    sink.pdest             := 0.U
+    sink.data              := source.toIntRf.map(_.bits.data).getOrElse(0.U(64.W))
     sink.vecWen. foreach(_ := source.toVecRf.map(_.valid).getOrElse(false.B))
     sink.v0Wen.  foreach(_ := source.toV0Rf.map(_.valid).getOrElse(false.B))
   }
@@ -994,9 +1001,22 @@ object Bundles {
     private val vfCertainLat = params.vfLatencyCertain
     private val v0CertainLat = params.v0LatencyCertain
     private val vlCertainLat = params.vlLatencyCertain
-    private val intLat = params.intLatencyValMax
-    private val fpLat = params.fpLatencyValMax
-    private val vfLat = params.vfLatencyValMax
+
+    val intFuMap = mutable.Map[FuType.OHType, Int]()
+    val fpFuMap  = mutable.Map[FuType.OHType, Int]()
+    val vecFuMap = mutable.Map[FuType.OHType, Int]()
+
+    intFuMap ++= params.intFuLatencyMap
+    fpFuMap  ++= params.fpFuLatencyMap
+    vecFuMap ++= params.vfFuLatencyMap
+
+    params.allIntWenPortSeq.map(x => params.fuMapAddSameWenPortFu(params, "int", intFuMap, x))
+    params.allFpWenPortSeq.map( x => params.fuMapAddSameWenPortFu(params, "fp",  fpFuMap, x))
+    params.allVecWenPortSeq.map(x => params.fuMapAddSameWenPortFu(params, "vec", vecFuMap, x))
+
+    private val intLat = params.latMax(intFuMap.toMap)
+    private val fpLat = params.latMax(fpFuMap.toMap)
+    private val vfLat = params.latMax(vecFuMap.toMap)
     private val v0Lat = params.v0LatencyValMax
     private val vlLat = params.vlLatencyValMax
 
@@ -1018,9 +1038,22 @@ object Bundles {
     private val vfCertainLat = params.vfLatencyCertain
     private val v0CertainLat = params.v0LatencyCertain
     private val vlCertainLat = params.vlLatencyCertain
-    private val intLat = params.intLatencyValMax
-    private val fpLat = params.fpLatencyValMax
-    private val vfLat = params.vfLatencyValMax
+  
+    val intFuMap = mutable.Map[FuType.OHType, Int]()
+    val fpFuMap  = mutable.Map[FuType.OHType, Int]()
+    val vecFuMap = mutable.Map[FuType.OHType, Int]()
+
+    intFuMap ++= params.intFuLatencyMap
+    fpFuMap  ++= params.fpFuLatencyMap
+    vecFuMap ++= params.vfFuLatencyMap
+
+    params.allIntWenPortSeq.map(x => params.fuMapAddSameWenPortFu(params, "int", intFuMap, x))
+    params.allFpWenPortSeq.map( x => params.fuMapAddSameWenPortFu(params, "fp",  fpFuMap, x))
+    params.allVecWenPortSeq.map(x => params.fuMapAddSameWenPortFu(params, "vec", vecFuMap, x))
+
+    private val intLat = params.latMax(intFuMap.toMap)
+    private val fpLat = params.latMax(fpFuMap.toMap)
+    private val vfLat = params.latMax(vecFuMap.toMap)
     private val v0Lat = params.v0LatencyValMax
     private val vlLat = params.vlLatencyValMax
 
@@ -1255,14 +1288,40 @@ object Bundles {
     val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
   }
 
+  class ToIntRegFile(implicit p: Parameters) extends XSBundle {
+    val pdest = UInt(IntPhyRegIdxWidth.W)
+    val data  = UInt(XLEN.W)
+  }
+
+  class ToFpRegFile(implicit p: Parameters) extends XSBundle {
+    val pdest = UInt(FpPhyRegIdxWidth.W)
+    val data  = UInt(XLEN.W)
+  }
+
+  class ToVecRegFile(implicit p: Parameters) extends XSBundle {
+    val pdest = UInt(VfPhyRegIdxWidth.W)
+    val data  = UInt(VLEN.W)
+  }
 
   class ExuCrossRegion(val params: SchdBlockParams)(implicit p: Parameters) extends XSBundle {
     val I2FWakeupOut = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam)))
-    val I2FDataOut   = Option.when(params.isIntSchd)(ValidIO(UInt(XLEN.W)))
-    val I2FDataIn    = Option.when(params.isFpSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+    val I2FDataOut   = Option.when(params.isIntSchd)(ValidIO(new ToFpRegFile))
+    val I2FDataIn    = Option.when(params.isFpSchd)(Flipped(ValidIO(new ToFpRegFile)))
     val F2IWakeupOut = Option.when(params.isFpSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam)))
-    val F2IDataOut   = Option.when(params.isFpSchd)(ValidIO(UInt(XLEN.W)))
-    val F2IDataIn    = Option.when(params.isIntSchd)(Flipped(ValidIO(UInt(XLEN.W))))
+    val F2IDataOut   = Option.when(params.isFpSchd)(ValidIO(new ToIntRegFile))
+    val F2IDataIn    = Option.when(params.isIntSchd)(Flipped(ValidIO(new ToIntRegFile)))
+    val F2VWakeupOut = Option.when(params.isFpSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2V, params.backendParam)))
+    val F2VDataOut   = Option.when(params.isFpSchd)(ValidIO(new ToVecRegFile))
+    val F2VDataIn    = Option.when(params.isVecSchd)(Flipped(ValidIO(new ToVecRegFile)))
+    val V2FWakeupOut = Option.when(params.isVecSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2F, params.backendParam)))
+    val V2FDataOut   = Option.when(params.isVecSchd)(ValidIO(new ToFpRegFile))
+    val V2FDataIn    = Option.when(params.isFpSchd)(Flipped(ValidIO(new ToFpRegFile)))
+    val V2IWakeupOut = Option.when(params.isVecSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxV2I, params.backendParam)))
+    val V2IDataOut   = Option.when(params.isVecSchd)(ValidIO(new ToIntRegFile))
+    val V2IDataIn    = Option.when(params.isIntSchd)(Flipped(ValidIO(new ToIntRegFile)))
+    val I2VWakeupOut = Option.when(params.isIntSchd)(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2V, params.backendParam)))
+    val I2VDataOut   = Option.when(params.isIntSchd)(ValidIO(new ToVecRegFile))
+    val I2VDataIn    = Option.when(params.isVecSchd)(Flipped(ValidIO(new ToVecRegFile)))
   }
 
   // ExuInput --[FuncUnit]--> ExuOutput
@@ -1340,19 +1399,23 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val sqIdx        = Option.when(params.hasStoreAddrFu || params.hasStdFu)(new SqPtr())
     val vls          = Option.when(params.hasVLoadFu)(new ExuOutputVLoad(params))
   }
+
+  class ToRegFile(val params: ExeUnitParams)(implicit p: Parameters) extends Bundle {
+    val pdest = UInt(params.wbPregIdxWidth.W)
+    val data  = UInt(params.destDataBitsMax.W)
+  }
+
   class NewExuOutput(
     val params: ExeUnitParams,
   )(implicit
     val p: Parameters
   ) extends Bundle with BundleSource with HasXSParameter {
     val toRob          = ValidIO(new ExuOutputToRob(params))
-    val pdest          = UInt(params.wbPregIdxWidth.W)
-    val pdestVl        = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
-    val toIntRf        = Option.when(params.writeIntRf)(ValidIO(UInt(params.destDataBitsMax.W)))
-    val toFpRf         = Option.when(params.writeFpRf)(ValidIO(UInt(params.destDataBitsMax.W)))
-    val toVecRf        = Option.when(params.writeVecRf)(ValidIO(UInt(params.destDataBitsMax.W)))
-    val toV0Rf         = Option.when(params.writeV0Rf)(ValidIO(UInt(params.destDataBitsMax.W)))
-    val toVlRf         = Option.when(params.writeVlRf)(ValidIO(UInt(params.destDataBitsMax.W)))
+    val toIntRf        = Option.when(params.writeIntRf)(ValidIO(new ToRegFile(params)))
+    val toFpRf         = Option.when(params.writeFpRf)( ValidIO(new ToRegFile(params)))
+    val toVecRf        = Option.when(params.writeVecRf)(ValidIO(new ToRegFile(params)))
+    val toV0Rf         = Option.when(params.writeV0Rf)( ValidIO(new ToRegFile(params)))
+    val toVlRf         = Option.when(params.writeVlRf)( ValidIO(new ToRegFile(params)))
     val redirect       = Option.when(params.hasRedirect)(ValidIO(new Redirect))
     val isFromLoadUnit = Option.when(params.hasLoadFu)(Bool())
     val debug          = new DebugBundle
@@ -1472,12 +1535,17 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
       this.vecWen := source.toVecRf.map(_.valid).getOrElse(false.B)
       this.v0Wen  := source.toV0Rf.map(_.valid).getOrElse(false.B)
       this.vlWen  := source.toVlRf.map(_.valid).getOrElse(false.B)
-      this.pdest  := (if (wbType == "vl") { source.pdestVl.getOrElse(0.U(VlPhyRegIdxWidth.W)) } else { source.pdest })
-      this.data   := (if (wbType == "int") { source.toIntRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) }
-                      else if (wbType == "fp") { source.toFpRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) }
-                      else if (wbType == "vf") { source.toVecRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) }
-                      else if (wbType == "v0") { source.toV0Rf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) }
-                      else                     { source.toVlRf.map(_.bits).getOrElse(0.U(params.dataWidth.W)) })
+      this.pdest  := (if (wbType == "int") { source.toIntRf.map(_.bits.pdest).getOrElse(0.U(params.pregIdxWidth(backendParams).W)) }
+                      else if (wbType == "fp") { source.toFpRf.map(_.bits.pdest).getOrElse(0.U(params.pregIdxWidth(backendParams).W)) }
+                      else if (wbType == "vf") { source.toVecRf.map(_.bits.pdest).getOrElse(0.U(params.pregIdxWidth(backendParams).W)) }
+                      else if (wbType == "v0") { source.toV0Rf.map(_.bits.pdest).getOrElse(0.U(params.pregIdxWidth(backendParams).W)) }
+                      else { source.toVlRf.map(_.bits.pdest).getOrElse(0.U(params.pregIdxWidth(backendParams).W)) })
+
+      this.data   := (if (wbType == "int") { source.toIntRf.map(_.bits.data).getOrElse(0.U(params.dataWidth.W)) }
+                      else if (wbType == "fp") { source.toFpRf.map(_.bits.data).getOrElse(0.U(params.dataWidth.W)) }
+                      else if (wbType == "vf") { source.toVecRf.map(_.bits.data).getOrElse(0.U(params.dataWidth.W)) } 
+                      else if (wbType == "v0") { source.toV0Rf.map(_.bits.data).getOrElse(0.U(params.dataWidth.W)) }
+                      else                     { source.toVlRf.map(_.bits.data).getOrElse(0.U(params.dataWidth.W)) })
     }
 
     def asIntRfWriteBundle(fire: Bool): RfWritePortBundle = {

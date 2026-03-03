@@ -5,6 +5,7 @@ import chisel3.util._
 import utils.PipeWithFlush
 import xiangshan.backend.Bundles.{ExuInput, connectSamePort}
 import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.fu._
 
 class MultiWakeupQueueIO[T <: Bundle, TFlush <: Data](
   gen       : ExuInput,
@@ -62,9 +63,14 @@ class MultiWakeupQueue[T <: Bundle, TFlush <: Data](
     case (deq, i) => modificationFunc(deq)
   }))
   // for i2f in fp iq, donot need && !pipesValidVec.asUInt.orR, for fdiv, need !pipesValidVec.asUInt.orR
-  val allValidVec = VecInit(pipesValidVec :+ (io.enqAppend.valid && !pipesValidVec.asUInt.orR))
+  assert(!(io.enqAppend.fire && pipesValidVec.head), "enq wakeup queue lat is 1 and enqAppend.fire is true")
+  val allValidVec = VecInit(pipesValidVec :+ (io.enqAppend.fire && !pipesValidVec.head))
   val allBitsVec = VecInit(pipesBitsVec :+ io.enqAppend.bits.uop)
-  io.enqAppend.ready := Mux(io.enqAppend.valid, !pipesValidVec.asUInt.orR, true.B)
+  if (exuParam.issueBlockParam.needUncertainWakeupFromExu) {
+    io.enqAppend.ready := Mux(io.enqAppend.valid, !pipesValidVec.asUInt.orR, true.B)
+  } else {
+    io.enqAppend.ready := true.B
+  }
   pipesOut.valid := allValidVec.asUInt.orR
   pipesOut.bits := Mux1H(allValidVec, allBitsVec)
   pipesOut.bits.rfWen .foreach(_ := allValidVec.zip(allBitsVec.map(_.rfWen .get)).map{case(valid,wen) => valid && wen}.reduce(_||_))

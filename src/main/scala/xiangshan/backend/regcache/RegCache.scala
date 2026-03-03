@@ -33,8 +33,8 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
 
   println(s"[RegCache] dataWidth: ${params.intSchdParams.get.rfDataWidth}, addrWidth: ${RegCacheIdxWidth}, tagWidth: ${params.intSchdParams.get.pregIdxWidth}")
 
-  require(RegCacheIdxWidth == (log2Up(IntRegCacheSize) + 1), "IntRegCache should be half of the whole RegCache")
-  require(RegCacheIdxWidth == (log2Up(MemRegCacheSize) + 1), "MemRegCache should be half of the whole RegCache")
+  val regCacheRepSize = Math.max(log2Up(IntRegCacheSize + 1), log2Up(MemRegCacheSize + 1))
+  require(RegCacheIdxWidth == (regCacheRepSize + 1), "IntRegCache or MemRegCache should be half of the whole RegCache")
 
   private val IntRegCacheReadSize = params.getIntExuRCReadSize + params.getMemExuRCReadSize
   private val IntRegCacheWriteSize = params.getIntExuRCWriteSize
@@ -51,8 +51,10 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
 
   val MemRegCacheAgeTimer = Module(new RegCacheAgeTimer(MemRegCacheSize, MemRegCacheReadSize, MemRegCacheWriteSize, RegCacheIdxWidth - 1))
 
-  val IntRegCacheRepRCIdx = RegCacheAgeDetector(IntRegCacheSize, IntRegCacheWriteSize, IntRegCacheAgeTimer.io.ageInfo)
-  val MemRegCacheRepRCIdx = RegCacheAgeDetector(MemRegCacheSize, MemRegCacheWriteSize, MemRegCacheAgeTimer.io.ageInfo)
+  val IntRegCacheRepRCIdx = Wire(Vec(IntRegCacheWriteSize, UInt(regCacheRepSize.W)))
+  IntRegCacheRepRCIdx := RegCacheAgeDetector(IntRegCacheSize, IntRegCacheWriteSize, IntRegCacheAgeTimer.io.ageInfo)
+  val MemRegCacheRepRCIdx = Wire(Vec(MemRegCacheWriteSize, UInt(regCacheRepSize.W)))
+  MemRegCacheRepRCIdx := RegCacheAgeDetector(MemRegCacheSize, MemRegCacheWriteSize, MemRegCacheAgeTimer.io.ageInfo)
 
   IntRegCacheAgeTimer.io.validInfo := IntRegCache.io.validInfo
   MemRegCacheAgeTimer.io.validInfo := MemRegCache.io.validInfo
