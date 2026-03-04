@@ -43,7 +43,7 @@ class MemXbar(implicit p: Parameters) extends LazyModule
       aligned = true
     ))
   )))
-  
+
   val devNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
       name = "device_node",
@@ -83,7 +83,7 @@ class MemXbar(implicit p: Parameters) extends LazyModule
   val io_memNode = InModuleBody {memNode.makeIOs()}
 
   lazy val module = new Imp
-  class Imp extends LazyModuleImp(this) 
+  class Imp extends LazyModuleImp(this)
 }
 
 class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
@@ -110,11 +110,11 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
 
   val l_simAXIMem = AXI4MemorySlave(
     l_memXbar.memNode,
-    8190L * 1024 * 1024 * 1024,
+    8190L * 1024 * 1024, // 8GB - 2MB, keep the top 2MB for MMIO
     useBlackBox = true,
     dynamicLatency = debugOpts.UseDRAMSim
   )
-  val simAXIMem = Module(l_simAXIMem.module) 
+  val simAXIMem = Module(l_simAXIMem.module)
 
   l_memXbar.io_cpuNode.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
   l_memXbar.io_devNode.elements.head._2 <> l_simMMIO.io_mem.elements.head._2

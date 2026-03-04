@@ -594,7 +594,7 @@ class CHIFuzzConfig(dummy: Int = 0) extends Config(
 class FuzzConfig(dummy: Int = 0) extends CHIFuzzConfig(dummy) with DeprecatedConfigWarning
 
 class TLConfig(n: Int = 1) extends Config(
-  L3CacheConfig("16MB", inclusive = false, banks = 4, ways = 16)
+  L3CacheConfig("4MB", inclusive = false, banks = 4, ways = 16)
     ++ L2CacheConfig("1MB", inclusive = true, banks = 4)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
