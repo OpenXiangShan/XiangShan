@@ -1688,7 +1688,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !deqismmio
   val commitStuckCycle = RegInit(0.U(log2Up(maxCommitStuck).W))
   when(commitStuck) {
-    commitStuckCycle := commitStuckCycle + 1.U
+    if (enableCommitStuckCheck || env.EnableDifftest) {
+      commitStuckCycle := commitStuckCycle + 1.U
+    }
   }.elsewhen(!commitStuck && RegNext(commitStuck)) {
     commitStuckCycle := 0.U
   }
