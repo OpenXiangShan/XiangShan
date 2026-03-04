@@ -245,33 +245,53 @@ jobs:
     name: Summary
     permissions:
       actions: read # to download upstream artifact
-      pull-requests: write
+      pull-requests: write # to post PR comment
     needs:
       - run
       - run-legacy # TODO: drop this
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # we need full history to find upstream commit
       - name: Download reports
         uses: actions/download-artifact@v8
         with:
           pattern: ipc-*
           path: current
+          merge-multiple: true
       - name: Find upstream run_id
         if: ${{ github.event_name == 'pull_request' }}
         id: find_upstream
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BRANCH: ${{ github.base_ref }}
         run: |
-          echo "Finding upstream run_id for branch: ${BRANCH}"
-          # We assume the upstream run is always the latest run on the base branch, which should be true in most cases
-          run_id=$(gh run list --branch ${BRANCH} --workflow emu-performance.yml --json databaseId --limit 1 | jq -r '.[0].databaseId')
-          if [ -z "${run_id}" ] || [ "${run_id}" == "null" ]; then
-            echo "No upstream run found for branch ${BRANCH}"
+          # Find upstream commit sha
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          base_sha="${{ github.event.pull_request.base.sha }}"
+
+          echo "Head SHA: ${head_sha}"
+          echo "Base SHA: ${base_sha}"
+
+          upstream=$(git merge-base "${head_sha}" "${base_sha}")
+          if [ -z "${upstream}" ]; then
+            echo "Failed to find upstream commit"
+            echo "error=Failed to find upstream commit" >> $GITHUB_OUTPUT
             echo "found=false" >> $GITHUB_OUTPUT
             exit 0
           fi
+
+          echo "Upstream commit sha: ${upstream}"
+          echo "upstream=${upstream}" >> $GITHUB_OUTPUT
+
+          run_id=$(gh run list --commit "${upstream}" --workflow "${{ github.workflow }}" --json databaseId --limit 1 | jq -r '.[0].databaseId')
+          if [ -z "${run_id}" ] || [ "${run_id}" == "null" ]; then
+            echo "Failed to find upstream run for commit ${upstream}"
+            echo "error=Failed to find upstream run for commit ${upstream}" >> $GITHUB_OUTPUT
+            echo "found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
           echo "Upstream run_id: ${run_id}"
           echo "run_id=${run_id}" >> $GITHUB_OUTPUT
           echo "found=true" >> $GITHUB_OUTPUT
@@ -281,25 +301,59 @@ jobs:
         with:
           pattern: ipc-*
           path: upstream
+          merge-multiple: true
           github-token: ${{ secrets.GITHUB_TOKEN }} # we need this to download artifact from another run
-          run_id: ${{ steps.find_upstream.outputs.run_id }}
+          run-id: ${{ steps.find_upstream.outputs.run_id }}
       - name: Summary
         run: |
+          function geomean() {
+            python3 -c "import sys, math; print(math.exp(sum(math.log(float(x)) for x in sys.argv[1:]) / len(sys.argv[1:])))" "$@"
+          }
+
+          function diff() {
+            python3 -c "print(f'{(float($1) - float($2)) / float($2) * 100:.2f}')" "$@"
+          }
+
           {
-            echo "## Emu - Performance summary"
-            echo "| Testcase | IPC | upstream IPC | diff |"
-            echo "| -------- | --- | ------------ | ---- |"
+            echo "## Emu - Performance Summary"
+            echo ""
+            if [ -n "${{ steps.find_upstream.outputs.error }}" ]; then
+              echo "Error: ${{ steps.find_upstream.outputs.error }}"
+              echo "Please checkout workflow logs for details."
+              echo ""
+            fi
+            echo "### Metadata"
+            echo "| - | Branch | SHA | Run ID |"
+            echo "| - | ------ | --- | ------ |"
+            if [ "${{ steps.find_upstream.outputs.found }}" == "true" ]; then
+              echo "| Upstream | ${{ github.base_ref }} | ${{ steps.find_upstream.outputs.upstream }} | ${{ steps.find_upstream.outputs.run_id }} |"
+            fi
+            echo "| Current | ${{ github.head_ref }} | ${{ github.sha }} | ${{ github.run_id }} |"
+            echo ""
+            echo "### IPC Report"
+            echo "| Testcase | Current | Upstream | Diff |"
+            echo "| -------- | ------- | -------- | ---- |"
             for file in current/ipc-*; do
               name=$(basename ${file} | cut -d '-' -f 2-)
               ipc=$(cat "${file}")
+              has_na=false
               if [ -f "upstream/ipc-${name}" ]; then
                 upstream_ipc=$(cat "upstream/ipc-${name}")
-                diff=$(python3 -c "print(f'{(float(${ipc}) - float(${upstream_ipc})) / float(${upstream_ipc}) * 100:.2f}')")
-                echo "| ${name} | ${ipc} | ${upstream_ipc} | ${diff}% |"
+                echo "| ${name} | ${ipc} | ${upstream_ipc} | $(diff ${ipc} ${upstream_ipc})% |"
               else
                 echo "| ${name} | ${ipc} | N/A | N/A |"
+                has_na=true
               fi
             done
+
+            current_geomean=$(geomean $(cat current/ipc-* | xargs))
+            upstream_geomean=$(geomean $(cat upstream/ipc-* | xargs) 2>/dev/null || echo "N/A")
+            geomean_diff=$(diff ${current_geomean} ${upstream_geomean} 2>/dev/null || echo "N/A")
+            echo "| **GEOMEAN** | **${current_geomean}** | **${upstream_geomean}** | **${geomean_diff}%** |"
+            echo
+            if [ "${has_na}" = true ]; then
+              echo "**NOTE**: Some testcases do not have upstream data, diff is shown as N/A and GEOMEAN diff may not be accurate."
+            fi
           } > report.md
           cat report.md >> $GITHUB_STEP_SUMMARY
       - name: Post PR comment
@@ -307,4 +361,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh pr comment ${{ github.event.pull_request.number }} --body-file report.md --edit-last --create-if-none
+          gh pr comment ${{ github.event.pull_request.number }} --body-file report.md
