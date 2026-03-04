@@ -16,6 +16,7 @@
 package xiangshan.frontend.bpu.sc
 
 import chisel3.util._
+import scala.math.min
 import xiangshan.frontend.bpu.HasBpuParameters
 import xiangshan.frontend.bpu.ScTableInfo
 
@@ -33,20 +34,16 @@ case class ScParameters(
       new ScTableInfo(128, 8)
     ),
     BiasTableSize:       Int = 128,
-    BiasUseTageBitWidth: Int = 2, // use tage_taken as index bits
+    BiasUseTageBitWidth: Int = 2,    // use tage_taken as index bits
     PathEnable:          Boolean = true,
     GlobalEnable:        Boolean = false,
     BWEnable:            Boolean = false,
     BiasEnable:          Boolean = true,
     CtrWidth:            Int = 6,
     ThresholdWidth:      Int = 13,
-    ThresholdInit:       Int = 1130,
-    MinThreshold:        Int = 768,
-    MaxThreshold:        Int = 7100,
-    NumTables:           Int = 2,
+    ThresholdInit:       Int = 1130, // magic number,greater than min and less than max
     NumBanks:            Int = 2,
     WriteBufferSize:     Int = 4,
-    TagWidth:            Int = 12,
     EnableScTrace:       Boolean = false
 ) {}
 
@@ -64,8 +61,6 @@ trait HasScParameters extends HasBpuParameters {
   def NumBanks:          Int = scParameters.NumBanks
   def BankWidth:         Int = log2Ceil(NumBanks)
   def ThresholdWidth:    Int = scParameters.ThresholdWidth
-  def MinThreshold:      Int = scParameters.MinThreshold
-  def MaxThreshold:      Int = scParameters.MaxThreshold
 
   def PathTableInfos: Seq[ScTableInfo] = scParameters.PathTableInfos
   def NumPathTables:  Int              = PathTableInfos.length
@@ -80,6 +75,13 @@ trait HasScParameters extends HasBpuParameters {
 
   def BackwardTableInfos: Seq[ScTableInfo] = scParameters.BackwardTableInfos
   def NumBWTables:        Int              = BackwardTableInfos.length
+
+  // If tage LowConf, the totoalSum should be at least NumTables + 4, Threshold should be (NumTables + 4) << 6(threshold >> 3 + lowConf threshold >> 3)
+  // The value of ctr saturation is 63.
+  // If all ctrs are saturated, the corresponding Threshold should be (NumTables * 63) << 4(threshold >> 3 + highConf threshold >> 1)
+  def NumTables:    Int = NumPathTables + NumGlobalTables + NumBiasTable + NumBWTables
+  def MinThreshold: Int = (NumTables + 4) << 6
+  def MaxThreshold: Int = min((NumTables * 63) << 4, (1 << ThresholdWidth) - 1)
 
   def WriteBufferSize: Int = scParameters.WriteBufferSize
   def TotalSumWidth: Int = CtrWidth + 1 + log2Ceil(NumPathTables + NumGlobalTables + NumBiasTable) // +1 for counter * 2

@@ -284,6 +284,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       conf            := false.B
       s2_useScPred(i) := false.B
     }
+    // If the sum is greater than threshold/2, then the current threshold can already use the sc result under tage high Confidence.
+    // And if scWrang does not occur at this time, there is no need to update ctr/threshold again
     s2_sumAboveThres(i) := aboveThreshold(sum, thres >> 1)
     dontTouch(tageConfHigh)
     dontTouch(tageConfMid)
