@@ -321,7 +321,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   def MakeGPAddr(ppn: UInt, off: UInt) = {
     require(off.getWidth == 9 || off.getWidth == 11)
-    (Cat(ppn, 0.U(offLen.W)) + Cat(off, 0.U(log2Up(XLEN / 8).W)))(GPAddrBits - 1, 0)
+    (Cat(ppn, 0.U(offLen.W)) | Cat(off, 0.U(log2Up(XLEN / 8).W)))(GPAddrBits - 1, 0)
   }
 
   def getVpnn(vpn: UInt, idx: Int): UInt = {
