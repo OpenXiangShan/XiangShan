@@ -307,8 +307,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val ncPtr = Mux(io.uncacheOutstanding, ncSlaveAckMid, ncWaitRespPtrReg)
 
   // store can be committed by ROB
-  io.rob.mmio := DontCare
-  io.rob.uop := DontCare
+  io.rob.loadMmio := DontCare
+  io.rob.loadMmioUop := DontCare
 
   // Read dataModule
   assert(EnsbufferWidth <= 2)
@@ -899,6 +899,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   mmioReq.bits.nc := false.B
   mmioReq.bits.id := rdataPtrExt(0).value
 
+  io.rob.storeMmio := mmioReq.valid
+  io.rob.storeMmioUop  := uncacheUop
   /**
     * NC Store
     * (1) req: when it has been commited, it can be sent to lower level.

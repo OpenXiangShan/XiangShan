@@ -171,8 +171,10 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.writebackHyuSta <> memBlock.io.mem_to_ooo.writebackHyuSta
   backend.io.mem.writebackStd <> memBlock.io.mem_to_ooo.writebackStd
   backend.io.mem.writebackVldu <> memBlock.io.mem_to_ooo.writebackVldu
-  backend.io.mem.robLsqIO.mmio := memBlock.io.mem_to_ooo.lsqio.mmio
-  backend.io.mem.robLsqIO.uop := memBlock.io.mem_to_ooo.lsqio.uop
+  backend.io.mem.robLsqIO.loadMmio := memBlock.io.mem_to_ooo.lsqio.loadMmio
+  backend.io.mem.robLsqIO.loadMmioUop := memBlock.io.mem_to_ooo.lsqio.loadMmioUop
+  backend.io.mem.robLsqIO.storeMmio := memBlock.io.mem_to_ooo.lsqio.storeMmio
+  backend.io.mem.robLsqIO.storeMmioUop := memBlock.io.mem_to_ooo.lsqio.storeMmioUop
 
   // memblock error exception writeback, 1 cycle after normal writeback
   backend.io.mem.s3_delayed_load_error := memBlock.io.mem_to_ooo.s3_delayed_load_error
