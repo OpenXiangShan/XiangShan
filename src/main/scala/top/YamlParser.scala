@@ -42,6 +42,7 @@ case class YamlConfig(
   OpenLLCConfig: Option[OpenLLCConfig],
   ZhuJiangConfig: Option[ZhuJiangConfig],
   HartIDBits: Option[Int],
+  HartIDDmodeWidth: Option[Int],
   DebugAttachProtocals: Option[List[String]],
   DebugModuleParams: Option[DebugModuleParams],
   WFIResume: Option[Boolean],
@@ -116,6 +117,11 @@ object YamlParser {
     yamlConfig.HartIDBits.foreach { bits =>
       newConfig = newConfig.alter((site, here, up) => {
         case MaxHartIdBits => bits
+      })
+    }
+    yamlConfig.HartIDDmodeWidth.foreach { width =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(hartIDDmodeWidth = width))
       })
     }
     yamlConfig.DebugModuleParams.foreach { params =>
