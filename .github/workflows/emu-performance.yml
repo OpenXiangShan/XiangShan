@@ -12,9 +12,7 @@ env:
   AM_HOME: /nfs/home/share/ci-workloads/nexus-am
   PERF_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}
   WAVE_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}/wave
-  # TODO: migrate to gcc15
-  # CKPT_HOME: /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122
-  CKPT_HOME: /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0
+  CKPT_HOME: /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0
 
 jobs:
   changes:
@@ -102,6 +100,7 @@ jobs:
           - name: hmmer-Vector
             with-restore-bin: false
       fail-fast: false
+      max-parallel: 4
     steps:
       - uses: actions/checkout@v6
         with:
@@ -147,32 +146,66 @@ jobs:
     strategy:
       matrix:
         include:
-          # TODO: migrate to gcc15
-          - name: perlbench_diffmail
-            ckpt: 18104
-          - name: bzip2_source
-            ckpt: 8439
-          - name: gcc_cpdecl
-            ckpt: 2233
+          - name: perlbench_splitmail
+            ckpt: 3995
+          - name: bzip2_liberty
+            ckpt: 739
+          - name: gcc_s04
+            ckpt: 2772
           - name: mcf
-            ckpt: 12253
-          - name: gobmk_score2
-            ckpt: 13713
+            ckpt: 6388
+          - name: gobmk_nngs
+            ckpt: 453
           - name: hmmer_nph3
-            ckpt: 2887
+            ckpt: 33214
           - name: sjeng
-            ckpt: 84999
+            ckpt: 64284
           - name: libquantum
-            ckpt: 22269
-          - name: h264ref_foreman.baseline
-            ckpt: 793
+            ckpt: 81539
+          - name: h264ref_foreman.main
+            ckpt: 10053
           - name: omnetpp
-            ckpt: 20261
+            ckpt: 14042
           - name: astar_rivers
-            ckpt: 9999
+            ckpt: 8728
           - name: xalancbmk
-            ckpt: 25293
+            ckpt: 9874
+          - name: bwaves
+            ckpt: 30350
+          - name: gamess_gradient
+            ckpt: 36450
+          - name: milc
+            ckpt: 7124
+          - name: zeusmp
+            ckpt: 45598
+          - name: gromacs
+            ckpt: 2907
+          - name: cactusADM
+            ckpt: 61235
+          - name: leslie3d
+            ckpt: 37552
+          - name: namd
+            ckpt: 75757
+          - name: dealII
+            ckpt: 13061
+          - name: soplex_ref
+            ckpt: 10774
+          - name: povray
+            ckpt: 8362
+          - name: calculix
+            ckpt: 53456
+          - name: GemsFDTD
+            ckpt: 49458
+          - name: tonto
+            ckpt: 69015
+          - name: lbm
+            ckpt: 31064
+          - name: wrf
+            ckpt: 112496
+          - name: sphinx3
+            ckpt: 141036
       fail-fast: false
+      max-parallel: 12 # TODO: increase this to 16 after dropping legacy workflow
     steps:
       - uses: actions/checkout@v6
         with:
@@ -215,7 +248,7 @@ jobs:
       pull-requests: write
     needs:
       - run
-      - run-legacy
+      - run-legacy # TODO: drop this
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
