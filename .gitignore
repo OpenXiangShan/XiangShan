@@ -377,3 +377,7 @@ cr*/
 # Bug report files
 bug-report/
 bug-report.tar.gz
+
+# Python virtual environment
+.venv/
+venv/
