@@ -101,15 +101,14 @@ class BypassShadowBuffer(
 
   // Prediction logic
   private val entryDataVec = VecInit(entries.map(e => e.entryData))
-  private val a0_entryHit  = Wire(Vec(numEntry, Bool()))
-  a0_entryHit := entries.map(e => (e.index === io.req.readIndex) && e.valid)
-
-  private val a0_chosenFirst = (a0_entryHit.asUInt & priorityMask).orR
-  private val a1_chosenFirst = RegNext(a0_chosenFirst, false.B)
-  private val a1_firstHit    = RegInit(VecInit(Seq.fill(numEntry)(false.B)))
-  private val a1_entryHit    = RegInit(VecInit(Seq.fill(numEntry)(false.B)))
-  a1_firstHit := (a0_entryHit.asUInt & priorityMask).asBools
-  a1_entryHit := a0_entryHit
+  private val a1_readIndex = RegNext(io.req.readIndex, 0.U(MaxNumSets.W))
+  private val a1_entryHit  = WireDefault(VecInit(Seq.fill(numEntry)(false.B)))
+  a1_entryHit := VecInit(entries.map(e => (e.index === a1_readIndex) && e.valid))
+  private val a1_firstHit    = WireDefault(VecInit(Seq.fill(numEntry)(false.B)))
+  private val a1_chosenFirst = (a1_entryHit.asUInt & priorityMask).orR
+  a1_firstHit := VecInit(a1_entryHit.zipWithIndex.map {
+    case (hit, i) => hit & priorityMask(i)
+  })
   private val a1_firstEntry        = ParallelPriorityMux(a1_firstHit.reverse, entryDataVec.reverse)
   private val a1_secondEntry       = ParallelPriorityMux(a1_entryHit.reverse, entryDataVec.reverse)
   private val a1_bufferEntry       = Mux(a1_chosenFirst, a1_firstEntry, a1_secondEntry)
