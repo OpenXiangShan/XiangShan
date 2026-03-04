@@ -12,7 +12,6 @@ env:
   AM_HOME: /nfs/home/share/ci-workloads/nexus-am
   PERF_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}
   WAVE_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}/wave
-  GCPT_RESTORE_BIN: /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin
   # TODO: migrate to gcc15
   # CKPT_HOME: /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122
   CKPT_HOME: /nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0
@@ -74,6 +73,68 @@ jobs:
           else
             echo "cluster=open" >> ${GITHUB_OUTPUT}
           fi
+
+  run-legacy: # TODO: drop this after most of the dev branches are migrated to the new workflow
+    name: Run (legacy)
+    needs: build
+    runs-on:
+      - ${{ needs.build.outputs.cluster }} # use same cluster as builder to avoid cross-cluster network copy & pgo issue
+      - runner
+    timeout-minutes: 300
+    continue-on-error: false
+    strategy:
+      matrix:
+        name:
+          - hmmer-Vector
+          - mcf
+          - xalancbmk
+          - gcc
+          - namd
+          - milc
+          - lbm
+          - gromacs
+          - wrf
+          - astar
+        with-restore-bin: [true]
+        exclude:
+          - name: hmmer-Vector
+        include:
+          - name: hmmer-Vector
+            with-restore-bin: false
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Get artifact
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+          mkdir -p build
+          echo "Getting EMU binary from ${PERF_HOME}/emu"
+          cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
+      - name: Run Legacy CI Test - ${{ matrix.name }}
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --numa --threads 1 \
+            --max-instr 5000000 \
+            --ci ${{ matrix.name }} \
+            ${{ matrix.with-restore-bin && '--gcpt-restore-bin /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin' || '' }} \
+            2> stderr.log | tee stdout.log
+          cat stderr.log | sort | tee stderr-sorted.log
+      - name: Archive log
+        if: always()
+        run: |
+          tar -czvf "${PERF_HOME}/legacy_${{ matrix.name }}.tar.gz" stdout.log stderr-sorted.log
+      - name: Generate report
+        run: |
+          grep -oP 'IPC = \K\d+\.\d+' stdout.log > ipc-legacy-${{ matrix.name }}
+          echo "IPC: $(cat ipc-legacy-${{ matrix.name }})"
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: ipc-legacy-${{ matrix.name }}
 
   run:
     name: Run
@@ -152,7 +213,9 @@ jobs:
     permissions:
       actions: read # to download upstream artifact
       pull-requests: write
-    needs: run
+    needs:
+      - run
+      - run-legacy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
