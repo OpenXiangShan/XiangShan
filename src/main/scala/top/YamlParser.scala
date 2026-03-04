@@ -102,6 +102,10 @@ object YamlParser {
       })
     }
     yamlConfig.L2CacheConfig.foreach(l2 => newConfig = newConfig.alter(l2))
+    yamlConfig.L2CacheConfig.foreach { l2 =>
+      val updatedL2 = l2.copy( enableCHIAsyncBridge = yamlConfig.EnableCHIAsyncBridge)
+      newConfig = newConfig.alter(updatedL2)
+    }
     yamlConfig.L3CacheConfig.foreach(l3 => newConfig = newConfig.alter(l3))
     yamlConfig.DebugAttachProtocals.foreach { protocols =>
       newConfig = newConfig.alter((site, here, up) => {
