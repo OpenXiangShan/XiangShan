@@ -35,6 +35,8 @@ DebugModuleParams:
   hasHartResets: true
 
 WFIResume: true
+  
+EnableCommitStuckCheck: false
 
 BEURange: { base: 0x38010000, mask: 0xFFF }
 
