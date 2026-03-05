@@ -1050,7 +1050,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.mmioStout.bits.uop.flushPipe := deqCanDoCbo // flush Pipeline to keep order in CMO
   io.mmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
   io.mmioStout.bits.isFromLoadUnit := DontCare
-  io.mmioStout.bits.debug.isMMIO := true.B
+  io.mmioStout.bits.debug.isMMIO := !memBackTypeMM(deqPtr)
   io.mmioStout.bits.debug.isNCIO := false.B
   io.mmioStout.bits.debug.paddr := DontCare
   io.mmioStout.bits.debug.isPerfCnt := false.B
@@ -1094,7 +1094,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.vecmmioStout.bits.uop := uop(deqPtr)
   io.vecmmioStout.bits.uop.sqIdx := deqPtrExt(0)
   io.vecmmioStout.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data) // dataModule.io.rdata.read(deqPtr)
-  io.vecmmioStout.bits.debug.isMMIO := true.B
+  io.vecmmioStout.bits.debug.isMMIO := !memBackTypeMM(deqPtr)
   io.vecmmioStout.bits.debug.isNCIO   := false.B
   io.vecmmioStout.bits.debug.paddr := DontCare
   io.vecmmioStout.bits.debug.isPerfCnt := false.B
@@ -1413,8 +1413,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
       io.diffStore.pmaStore(i).valid := dataBuffer.io.enq(i).fire
       io.diffStore.pmaStore(i).bits.fromDataBufferEntry(dataBuffer.io.enq(i).bits, MemoryOpConstants.M_XWR)
     }
-    io.diffStore.ncStore.valid := ncReq.fire && ncReq.bits.memBackTypeMM
-    io.diffStore.ncStore.bits := ncReq.bits
+    io.diffStore.ncStore.valid := ncReq.fire && ncReq.bits.memBackTypeMM || mmioReq.fire && mmioReq.bits.memBackTypeMM
+    io.diffStore.ncStore.bits := Mux(ncReq.fire, ncReq.bits, mmioReq.bits)
   }
 
 
