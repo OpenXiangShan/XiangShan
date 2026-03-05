@@ -104,9 +104,6 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   private val v0RFRen : Seq2[Option[Vec[Bool]]] = fromIQ.map(x => x.map(xx => xx.bits.v0Ren).toSeq)
   private val vlRFRen : Seq2[Option[Bool]]      = fromIQ.map(x => x.map(xx => xx.bits.vlRen)).toSeq
 
-  private val allDataSources: Seq[Seq[Vec[DataSource]]] = fromIQ.map(x => x.map(xx => xx.bits.dataSources).toSeq)
-  private val allNumRegSrcs: Seq[Seq[Int]] = fromIQ.map(x => x.map(xx => xx.bits.exuParams.numRegSrc).toSeq)
-
   intRFReadArbiter.io.in.zipWithIndex.foreach { case (arbInSeq2, iqIdx) =>
     arbInSeq2.zipWithIndex.foreach { case (arbInSeq, exuIdx) =>
       val srcIndices: Seq[Int] = fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(IntData())
