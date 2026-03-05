@@ -719,9 +719,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       0.U(wordBytes.W)
     )
     s3_amo_data_merged(i) := mergePutData(old_data, new_data, wmask)
-    s3_sc_data_merged(i) := mergePutData(old_data, s3_req.amo_data,
-      Mux(s3_req.word_idx === i.U && !s3_sc_fail, s3_req.amo_mask, 0.U(wordBytes.W))
-    )
+    s3_sc_data_merged(i) := mergePutData(old_data, s3_req.amo_data, s3_req.amo_mask)
     val l_select = !s3_cas_fail && s3_req.word_idx === i.U
     val h_select = !s3_cas_fail && s3_req.cmd === M_XA_CASQ &&
       (if (i % 2 == 1) s3_req.word_idx === (i - 1).U else false.B)
@@ -808,16 +806,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   )
   assert(!(s3_valid && banked_wmask.orR && !update_data))
 
-  for (i <- 0 until DCacheBanks) {
-    val old_data = s3_store_data_merged(i)
-    s3_sc_data_merged(i) := mergePutData(old_data, s3_req.amo_data,
-      Mux(
-        s3_req.word_idx === i.U && !s3_sc_fail,
-        s3_req.amo_mask,
-        0.U(wordBytes.W)
-      )
-    )
-  }
   for (i <- 0 until DCacheBanks) {
     io.data_write_dup(i).valid := s3_valid && s3_update_data_cango && update_data
     io.data_write_dup(i).bits.way_en := s3_way_en
