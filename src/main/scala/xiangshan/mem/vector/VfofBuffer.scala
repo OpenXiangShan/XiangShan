@@ -39,10 +39,14 @@ class VfofDataBundle(implicit p: Parameters) extends VLSUBundle{
 class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUModule{
   val io = IO(new VfofDataBuffIO(param))
 
+  private def isOlder(left: DynInst, right: DynInst): Bool = {
+    (right.vpu.vl > left.vpu.vl || left.exceptionVec.asUInt.orR) && !right.exceptionVec.asUInt.orR
+  }
   implicit val vfofParam: ExeUnitParams = param
 
   val entries = RegInit(0.U.asTypeOf(new VfofDataBundle()))
   val valid   = RegInit(false.B)
+  val selectOldestModule = Module(new SelectOldest(new DynInst, VLUopWritebackWidth, isOlder))
 
   val entriesIsFixVl = entries.uop.vpu.lastUop && entries.uop.vpu.isVleff
 
@@ -86,35 +90,6 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
   //Gather writeback information
   val wbIsfof = io.mergeUopWriteback.map{ x => x.valid && x.bits.robIdx === entries.uop.robIdx }
 
-  def getOldest(valid: Seq[Bool], bits: Seq[DynInst]): DynInst = {
-    def getOldest_recursion[T <: Data](valid: Seq[Bool], bits: Seq[DynInst]): (Seq[Bool], Seq[DynInst]) = {
-      assert(valid.length == bits.length)
-      if (valid.length == 1) {
-        (valid, bits)
-      } else if (valid.length == 2) {
-        val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-        for (i <- res.indices) {
-          res(i).valid := valid(i)
-          res(i).bits := bits(i)
-        }
-        val withExcep0 = bits(0).exceptionVec.asUInt.orR
-        val withExcep1 = bits(1).exceptionVec.asUInt.orR
-        XSError(this.valid && withExcep0 && withExcep1 && valid(0) && valid(1), "Writeback to multiple Uop with exceptions at the same time!\n")
-        val oldest = Mux(
-          valid(0) && valid(1),
-          Mux((bits(1).vpu.vl > bits(0).vpu.vl || withExcep0) && !withExcep1, res(0), res(1)),
-          Mux(valid(0) && !valid(1), res(0), res(1))
-        )
-        (Seq(oldest.valid), Seq(oldest.bits))
-      } else {
-        val left = getOldest_recursion(valid.take(valid.length / 2), bits.take(valid.length / 2))
-        val right = getOldest_recursion(valid.drop(valid.length / 2), bits.drop(valid.length / 2))
-        getOldest_recursion(left._1 ++ right._1, left._2 ++ right._2)
-      }
-    }
-    getOldest_recursion(valid, bits)._2.head
-  }
-
   //Update uop vl
   io.mergeUopWriteback.map{_.ready := true.B}
   val portUop         = Wire(Vec(VLUopWritebackWidth, new DynInst))
@@ -124,8 +99,12 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
     sink.vpu.vl       := source.vl
     sink.exceptionVec := source.exceptionVec
   }
-  val wbBits          = getOldest(wbIsfof, portUop)
-  val wbValid         = wbIsfof.reduce(_ || _)
+  selectOldestModule.io.in.zipWithIndex.map{case (sink, i) =>
+    sink.valid := wbIsfof(i)
+    sink.bits := portUop(i)
+  }
+  val wbBits          = selectOldestModule.io.out.bits
+  val wbValid         = selectOldestModule.io.out.valid
   val wbHasException  = wbBits.exceptionVec.asUInt.orR
   val wbUpdateValid = wbValid && (wbBits.vpu.vl < entries.vl || wbHasException) && valid && !needRedirect && !entries.hasException
 
