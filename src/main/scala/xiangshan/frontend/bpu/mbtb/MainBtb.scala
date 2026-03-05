@@ -38,6 +38,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
     val result:          Vec[Valid[Prediction]] = Output(Vec(NumBtbResultEntries, Valid(new Prediction)))
     val meta:            MainBtbMeta            = Output(new MainBtbMeta)
     val prefetchBbtMeta: PrefetchBtbMeta        = Output(new PrefetchBtbMeta)
+    val prefetchBtbUsed: Vec[Bool]              = Output(Vec(NumPrefetchWay, Bool()))
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
     val s3_takenMask: Vec[Bool] = Input(Vec(NumBtbResultEntries, Bool()))
     // prefecth io
@@ -77,8 +78,8 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   prefetchBtb.io.startPc   := io.startPc
   prefetchBtb.io.stageCtrl := io.stageCtrl
   prefetchBtb.io.train     := io.train
-
-  io.prefetchBbtMeta := finalPrefetchBtbMeta
+  io.prefetchBtbUsed       := prefetchBtb.io.used
+  io.prefetchBbtMeta       := finalPrefetchBtbMeta
 
   io.resetDone := alignBanks.map(_.io.resetDone).reduce(_ && _)
 

@@ -40,7 +40,7 @@ trait Helpers extends HasPrefetchBtbParameters
       ("replacerSetIdx", FetchBlockSizeWidth, SetIdxLen),
       ("targetLower", instOffsetBits, TargetWidth),
       ("position", instOffsetBits, FetchBlockAlignWidth),
-      ("cfiPosition", instOffsetBits, FetchBlockSizeWidth)
+      ("cfiPosition", instOffsetBits, log2Ceil(FetchBlockInstNum))
     )
   )
   def getTargetUpper(pc: PrunedAddr): UInt =
@@ -60,6 +60,11 @@ trait Helpers extends HasPrefetchBtbParameters
     pc(pc.length - 1, FetchBlockAlignWidth)
   def getPosition(pc: PrunedAddr): UInt =
     addrFields.extract("cfiPosition", pc)
+  def getCfiAlignedPosition(pc: PrunedAddr): UInt = {
+    val halfAlign = pc(FetchBlockSizeWidth - 1)
+    val position  = addrFields.extract("position", pc)
+    Cat(~halfAlign, position)
+  }
 
   def getBlockPc(pc: PrunedAddr): PrunedAddr =
     PrunedAddrInit(Cat(

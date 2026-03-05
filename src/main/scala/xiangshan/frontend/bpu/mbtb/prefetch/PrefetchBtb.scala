@@ -26,6 +26,7 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val redirectPrefetchBtbMeta: PrefetchBtbMeta        = Input(new PrefetchBtbMeta)
     val result:                  Vec[Valid[Prediction]] = Output(Vec(NumWay, Valid(new Prediction)))
     val meta:                    PrefetchBtbMeta        = Output(new PrefetchBtbMeta)
+    val used:                    Vec[Bool]              = Output(Vec(NumWay, Bool()))
 
     // prefetch data
     val prefetchData: Valid[BtbPrefetchBundle] = Flipped(Valid(new BtbPrefetchBundle))
@@ -84,7 +85,7 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s2_halfAlign  = s2_startPc(FetchBlockSizeWidth - 1).asBool
   dontTouch(s2_halfAlign)
   s2_fire := io.stageCtrl.s2_fire && io.enable
-  (io.result zip s2_entries zip io.meta.entries).zipWithIndex.foreach { case (((result, entry), meta), idx) =>
+  (io.result zip s2_entries zip io.meta.entries zip io.used).foreach { case (((result, entry), meta), used) =>
     /*prefetch btb pos is 64B ALIGN
     e.g.
     startPC:0x10, postion = entry.sramData.position
@@ -107,6 +108,8 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     meta.position           := position
     meta.counter            := Mux(entry.used, entry.counter, TakenCounter.WeakPositive)
     meta.attribute          := entry.sramData.attribute
+    used                    := s2_fire && hit && entry.used
+
   }
 
   private val s3_takenMask      = VecInit(io.s3_takenMask.slice(NumMBtbResultEntries, NumBtbResultEntries))

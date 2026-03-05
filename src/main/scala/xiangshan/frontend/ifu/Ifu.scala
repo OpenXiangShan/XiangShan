@@ -775,7 +775,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
     b
   }
 
-  toFtq.wbRedirect := Mux(wbValid, checkFlushWb, uncacheFlushWb)
+  toFtq.wbRedirect           := Mux(wbValid, checkFlushWb, uncacheFlushWb)
+  toFtq.ifuRedirectIsChecker := checkFlushWb.valid
 
   wbRedirect.valid          := checkFlushWb.valid
   wbRedirect.isHalfInstr    := wbCurrentLastRvi && checkerRedirect.bits.invalidTaken

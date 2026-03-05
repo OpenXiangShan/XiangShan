@@ -22,6 +22,7 @@ import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.BpuRedirect
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.HasFastTrainIO
 import xiangshan.frontend.bpu.Prediction
@@ -31,6 +32,9 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   class MicroBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
     // predict
     val prediction: Valid[Prediction] = Output(Valid(new Prediction))
+
+    // invalid
+    val redirect: ValidIO[BpuRedirect] = Flipped(Valid(new BpuRedirect))
   }
 
   val io: MicroBtbIO = IO(new MicroBtbIO)
@@ -221,6 +225,17 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   // and write back the updated entry
   when(t1_fire && (t1_hit || t1_allocate)) { // update entry if hit, or alloc entry only for taken branches
     entries(t1_updateIdx) := t1_updatedEntry
+  }
+
+  // Invalid pipe
+  private val i0_fire       = io.redirect.valid
+  private val i0_tag        = getTag(io.redirect.bits.cfiPc)
+  private val i0_hitOH      = VecInit(entries.map(e => e.valid && e.tag === i0_tag)).asUInt
+  private val i0_realHit    = i0_hitOH.orR
+  private val i0_realHitIdx = OHToUInt(i0_hitOH)
+
+  when(i0_fire && i0_realHit) {
+    entries(i0_realHitIdx) := 0.U.asTypeOf(new MicroBtbEntry)
   }
 
   // update replacer

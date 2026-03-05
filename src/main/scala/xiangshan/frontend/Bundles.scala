@@ -74,6 +74,8 @@ class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
   // only for prefetchBtb
   val redirectPrefetchBtbMeta: PrefetchBtbMeta = Output(new PrefetchBtbMeta)
   val redirectFromIFU:         Bool            = Output(Bool())
+  val redirectUsePrefetchBtb:  Bool            = Output(Bool())
+//  val redirectAbtbMeta: AheadBtbRedirectMeta = Output(new AheadBtbRedirectMeta())
 }
 
 // TODO: unify FetchRequestBundle (Ftq->Ifu) with FtqFetchRequest (Ftq->ICache.MainPipe)
@@ -170,8 +172,9 @@ class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
 }
 
 class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
-  val mmioCommitRead: MmioCommitRead          = new MmioCommitRead
-  val wbRedirect:     Valid[FrontendRedirect] = Valid(new FrontendRedirect)
+  val mmioCommitRead:       MmioCommitRead          = new MmioCommitRead
+  val wbRedirect:           Valid[FrontendRedirect] = Valid(new FrontendRedirect)
+  val ifuRedirectIsChecker: Bool                    = Output(Bool())
 }
 
 class MmioCommitRead(implicit p: Parameters) extends FrontendBundle {

@@ -277,14 +277,14 @@ class BpuRedirectMeta(implicit p: Parameters) extends BpuBundle {
 
 // metadata for resolve training (e.g. tage, mainBtb)
 class BpuResolveMeta(implicit p: Parameters) extends BpuBundle {
-  val mbtb:        MainBtbMeta     = new MainBtbMeta
-  val prefetchBtb: PrefetchBtbMeta = new PrefetchBtbMeta
-  val tage:        TageMeta        = new TageMeta
-  val sc:          ScMeta          = new ScMeta
-  val ittage:      IttageMeta      = new IttageMeta
-  val phr:         PhrMeta         = new PhrMeta
-
-  val debug_utage: Option[MicroTageMeta] = Option.when(!env.FPGAPlatform)(new MicroTageMeta)
+  val mbtb:             MainBtbMeta           = new MainBtbMeta
+  val prefetchBtb:      PrefetchBtbMeta       = new PrefetchBtbMeta
+  val tage:             TageMeta              = new TageMeta
+  val sc:               ScMeta                = new ScMeta
+  val ittage:           IttageMeta            = new IttageMeta
+  val phr:              PhrMeta               = new PhrMeta
+  val s3UsePrefetchBtb: Bool                  = Bool()
+  val debug_utage:      Option[MicroTageMeta] = Option.when(!env.FPGAPlatform)(new MicroTageMeta)
 }
 
 class BpuPerfMeta(implicit p: Parameters) extends BpuBundle {

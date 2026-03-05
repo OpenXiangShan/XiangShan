@@ -318,14 +318,30 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // TODO: only valid should be needed
   io.toIfu.redirect.bits := DontCare
 
-  io.toBpu.redirect.valid            := redirect.valid
-  io.toBpu.redirect.bits.cfiPc       := getCfiPcFromOffset(PrunedAddrInit(redirect.bits.pc), redirect.bits.ftqOffset)
-  io.toBpu.redirect.bits.target      := redirect.bits.target
-  io.toBpu.redirect.bits.taken       := redirect.bits.taken
-  io.toBpu.redirect.bits.attribute   := redirect.bits.attribute
-  io.toBpu.redirect.bits.meta        := metaQueueRedirect(redirect.bits.ftqIdx.value)
-  io.toBpu.redirectFromIFU           := ifuRedirect.valid
-  io.toBpu.redirectPrefetchBtbMeta   := metaQueueResolve(redirect.bits.ftqIdx.value).prefetchBtb
+  // TODO: need simplify logic
+  private val redirectUsePrefetchBtb = metaQueueResolve(ifuRedirect.bits.ftqIdx.value).s3UsePrefetchBtb
+  private val redirectCfiPosition    = getAlignedPosition(PrunedAddrInit(redirect.bits.pc), redirect.bits.ftqOffset)._1
+//  private val redirectAbtbHitMask = metaQueueResolve(redirect.bits.ftqIdx.value)
+  when(redirectUsePrefetchBtb && ifuRedirect.valid && io.fromIfu.ifuRedirectIsChecker) {
+    metaQueueResolve(redirect.bits.ftqIdx.value).prefetchBtb.entries.map { entry =>
+      val hit = entry.rawHit && entry.position === redirectCfiPosition
+      when(hit) {
+        entry.rawHit := false.B
+      }
+    }
+  }
+
+  io.toBpu.redirect.valid          := redirect.valid
+  io.toBpu.redirect.bits.cfiPc     := getCfiPcFromOffset(PrunedAddrInit(redirect.bits.pc), redirect.bits.ftqOffset)
+  io.toBpu.redirect.bits.target    := redirect.bits.target
+  io.toBpu.redirect.bits.taken     := redirect.bits.taken
+  io.toBpu.redirect.bits.attribute := redirect.bits.attribute
+  io.toBpu.redirect.bits.meta      := metaQueueRedirect(redirect.bits.ftqIdx.value)
+  // only send checker redirect
+  io.toBpu.redirectFromIFU         := ifuRedirect.valid && io.fromIfu.ifuRedirectIsChecker
+  io.toBpu.redirectPrefetchBtbMeta := metaQueueResolve(redirect.bits.ftqIdx.value).prefetchBtb
+  io.toBpu.redirectUsePrefetchBtb  := redirectUsePrefetchBtb
+
   resolveQueue.io.backendRedirect    := backendRedirect.valid
   resolveQueue.io.backendRedirectPtr := backendRedirect.bits.ftqIdx
 
