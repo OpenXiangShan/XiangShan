@@ -590,7 +590,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   val redirectNext = Wire(redirect.cloneType)
   redirectNext.valid := GatedValidRegNext(redirect.valid)
   redirectNext.bits := RegEnable(redirect.bits, redirect.valid)
-  val kill = io.kill || isSwInstrPrefetch || robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext)
+  val kill = io.kill || isSwInstrPrefetch || robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) || !pipeIn.valid
 
   /**
     * Tlb & DCache

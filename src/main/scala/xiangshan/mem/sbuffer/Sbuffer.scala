@@ -784,6 +784,7 @@ class Sbuffer(implicit p: Parameters)
     val s1ReqValid = RegNext(s0ReqValid)
     val s1Req = RegEnable(s0Req, s0ReqValid)
     val s1Paddr = forward.s1Req.paddr
+    val s1Kill = forward.s1Kill
     val s2RespValid = forward.s2Resp.valid
     val s2Resp = forward.s2Resp.bits
     val vtag_matches = VecInit(widthMap(w => vtag(w) === getVTag(s1Req.vaddr)))
@@ -792,7 +793,7 @@ class Sbuffer(implicit p: Parameters)
     val tag_matches = vtag_matches
     val tag_mismatch = RegNext(s1ReqValid) && VecInit(widthMap(w =>
       GatedValidRegNext(vtag_matches(w)) =/= ptag_matches(w) && GatedValidRegNext((activeMask(w) || inflightMask(w)))
-    )).asUInt.orR
+    )).asUInt.orR && !RegEnable(s1Kill, s1ReqValid)
     mismatch(i) := tag_mismatch
     when (tag_mismatch) {
       forward_need_uarch_drain := true.B
