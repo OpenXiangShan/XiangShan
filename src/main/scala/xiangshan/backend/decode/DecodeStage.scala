@@ -365,13 +365,12 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val decodeBubbleReason = 0.U
 
   io.stallReason.out.reason.zipWithIndex.foreach{ case (stallReason, idx) =>
-    val inValid = inValidVec(idx)
-    val outValid = outValidVec(idx)
+    val outFire = outFireVec(idx)
     val inReason = io.stallReason.in.reason(idx)
     // TopDown collect pre pipe reason
     val prePipeStall = frontendStall
     val prePipeBubble = frontendBubbleValidVec(idx)
-    // TODO
+    // TopDown collect pre pipe bubble
     val prePipeStallReason = Mux(inReason === NoStall.id.U, FrontendOtherCoreStall.id.U, inReason)
     val prePipeBubbleReason = frontendBubbleReasonVec(idx)
     // other reason like out.ready will be collect by next stage dispatch
@@ -379,7 +378,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     //      assert(!reset.asBool && (!inValid) && (inReason === NoStall.id.U || inReason === OtherCoreStall.id.U),
     //        "[TopDown]: Rename has no instruction in ,but reason is null")
     //    }
-    // TopDown count current stage stall
+    // TopDown collect current stage stall
     val redirect = redirectStall
     val redirectReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
       ctrlRedirectStall  -> ControlRedirectStall.id.U,
@@ -387,9 +386,11 @@ class DecodeStage(implicit p: Parameters) extends XSModule
       otherRedirectStall -> OtherRedirectStall.id.U,
     ))
 
+    // as decode not generate bubble now, Topdown donot collect current stage Bubble
+    // if decode generate bubble later, Topdown should add here
 
     val stallReasonPipe = Module(new PipelineStallReason(log2Ceil(TopDownCounters.NumStallReasons.id)))
-    stallReasonPipe.io.rightFire := outFireVec(idx)
+    stallReasonPipe.io.rightFire := outFire
     stallReasonPipe.io.rightHasFire := outHasValidAllFire
     stallReasonPipe.io.prePipeStall := prePipeStall
     stallReasonPipe.io.prePipeStallReason := prePipeStallReason
@@ -405,7 +406,6 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     stallReason := stallReasonPipe.io.outReason
   }
 
-  io.stallReason.in.backReason := 0.U.asTypeOf(io.stallReason.in.backReason)
 
   io.toCSR.trapInstInfo.valid := RegNext(hasIllegalInst && !io.redirect.valid)
   io.toCSR.trapInstInfo.bits.fromDecodedInst(RegNext(illegalInst))
