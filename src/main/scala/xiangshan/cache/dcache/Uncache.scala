@@ -518,6 +518,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val f0_fwdValid = RegNext(fn1_fwdValid)
     val f0_req = RegEnable(fn1_req, fn1_fwdValid)
     val f0_paddr = forward.s1Req.paddr
+    val f0_kill = forward.s1Kill
     val f1_fwdValid = RegNext(f0_fwdValid)
 
     /* f0 */
@@ -539,6 +540,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val f1_flyTagMatches = RegEnable(f0_flyTagMatches, f0_fwdValid)
     val f1_idleTagMatches = RegEnable(f0_idleTagMatches, f0_fwdValid)
     val f1_fwdPAddr = RegEnable(f0_paddr, f0_fwdValid)
+    val f1_kill = RegEnable(f0_kill, f0_fwdValid)
     // select
     val f1_flyMask = Mux1H(f1_flyTagMatches, f1_fwdMaskCandidates)
     val f1_flyData = Mux1H(f1_flyTagMatches, f1_fwdDataCandidates)
@@ -552,7 +554,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
     val f1_ptagMatches = sizeMap(w => addrMatch(RegEnable(entries(w).addr, f0_fwdValid), f1_fwdPAddr))
     f1_tagMismatchVec(i) := sizeMap(w =>
       RegEnable(f0_vtagMatches(w), f0_fwdValid) =/= f1_ptagMatches(w) && RegEnable(f0_validMask(w), f0_fwdValid) && f1_fwdValid
-    ).asUInt.orR
+    ).asUInt.orR && !f1_kill
     XSDebug(
       f1_tagMismatchVec(i),
       "forward tag mismatch: pmatch %x vmatch %x vaddr %x paddr %x\n",
