@@ -35,7 +35,7 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on:
-      - bosc
+      - open
       - builder
     outputs:
       cluster: ${{ steps.save.outputs.cluster }}
