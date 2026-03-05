@@ -1758,7 +1758,10 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   val enqCancelNum = enqCancelValid.zip(vStoreFlow).map{case (v, flow) =>
     Mux(v, flow, 0.U)
   }
-  val lastEnqCancel = RegEnable(enqCancelNum.reduce(_ + _), io.redirect.valid) // 1 cycle after redirect
+  val lastEnqCancelNumIn2Group = enqCancelNum.grouped(LSQEnqWidth / 2).map(g =>
+    RegEnable(g.reduce(_ + _), io.redirect.valid)
+  ) // 1 cycle after redirect
+  val lastEnqCancel = lastEnqCancelNumIn2Group.reduce(_ + _)
 
   val lastCycleCancelCount = PopCount(RegEnable(needCancel, io.redirect.valid)) // 1 cycle after redirect
   val lastCycleRedirect = RegNext(io.redirect.valid) // 1 cycle after redirect
