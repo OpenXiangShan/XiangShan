@@ -368,7 +368,7 @@ object BlameBpuSource {
     def SC:     UInt = 4.U(width.W)
   }
 
-  def apply(en: Bool, perf: BpuPerfMeta, branch: BranchInfo): UInt = {
+  def apply(en: Bool, perf: BpuPerfMeta, branch: BranchInfo)(implicit p: Parameters): UInt = {
     import BlameType.{BTB, TAGE, RAS, ITTAGE, SC}
     val src              = perf.bpSource
     val pred             = perf.bpPred
@@ -448,8 +448,8 @@ object BlameBpuSource {
         blame := BTB
       }
     }
-    assert(!(en && posError), "resolved branch's position cannot be greater than predicted jump's position")
-    assert(!(en && retError), "prediction source cannot be mbtb when resolved branch type is return")
+    XSError(en && posError, "resolved branch's position cannot be greater than predicted jump's position")
+    XSError(en && retError, "prediction source cannot be mbtb when resolved branch type is return")
     blame
   }
 }
