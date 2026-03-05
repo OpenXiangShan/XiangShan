@@ -584,7 +584,7 @@ jobs:
       - name: check yunsuan
         run: cd yunsuan && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
       - name: check coupledL2
-        run: cd coupledL2 && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
+        run: cd coupledL2 && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/kunminghu-v2
       - name: check openLLC
         run: cd openLLC && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
       - name: check ChiselAIA
