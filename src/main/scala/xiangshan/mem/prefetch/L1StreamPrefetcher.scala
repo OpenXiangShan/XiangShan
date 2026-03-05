@@ -32,12 +32,24 @@ trait HasStreamPrefetchHelper extends HasL1PrefetchHelper {
   val WIDTH_CACHE_BLOCKS = WIDTH_BYTES / dcacheParameters.blockBytes
 
   val L2_DEPTH_RATIO = 3
-  val L2_WIDTH_BYTES = WIDTH_BYTES * 2
-  val L2_WIDTH_CACHE_BLOCKS = L2_WIDTH_BYTES / dcacheParameters.blockBytes
+  // val L2_WIDTH_BYTES = WIDTH_BYTES * 2
+  // val L2_WIDTH_CACHE_BLOCKS = L2_WIDTH_BYTES / dcacheParameters.blockBytes
+  def L2_WIDTH_BYTES(degree: UInt): UInt = Mux(
+    degree <= 1.U,
+    (WIDTH_BYTES * 2).U,
+    Mux(degree === 2.U, (WIDTH_BYTES * 3).U, (WIDTH_BYTES * 4).U)
+  )
+  def L2_WIDTH_CACHE_BLOCKS(degree: UInt = 1.U): UInt = L2_WIDTH_BYTES(degree) / dcacheParameters.blockBytes.U
 
   val L3_DEPTH_RATIO = 3
-  val L3_WIDTH_BYTES = WIDTH_BYTES * 2 * 2
-  val L3_WIDTH_CACHE_BLOCKS = L3_WIDTH_BYTES / dcacheParameters.blockBytes
+  // val L3_WIDTH_BYTES = WIDTH_BYTES * 2 * 2
+  // val L3_WIDTH_CACHE_BLOCKS = L3_WIDTH_BYTES / dcacheParameters.blockBytes
+  def L3_WIDTH_BYTES(degree: UInt): UInt = Mux(
+    degree <= 1.U,
+    (WIDTH_BYTES * 2 * 2).U,
+    Mux(degree === 2.U, (WIDTH_BYTES * 2 * 3).U, (WIDTH_BYTES * 2 * 4).U)
+  )
+  def L3_WIDTH_CACHE_BLOCKS(degree: UInt = 1.U): UInt = L3_WIDTH_BYTES(degree) / dcacheParameters.blockBytes.U
 
   val DEPTH_LOOKAHEAD = 6
   val DEPTH_BITS = log2Up(DEPTH_CACHE_BLOCKS) + DEPTH_LOOKAHEAD
@@ -121,7 +133,7 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
   val trigger_va = UInt(VAddrBits.W)
 
   // align prefetch vaddr and width to region
-  def getStreamPrefetchReqBundle(valid: Bool, vaddr: UInt, width: Int, decr_mode: Bool, sink: UInt, source: UInt, confidence: UInt, t_pc: UInt, t_va: UInt): StreamPrefetchReqBundle = {
+  def getStreamPrefetchReqBundle(valid: Bool, vaddr: UInt, width: UInt, decr_mode: Bool, sink: UInt, source: UInt, confidence: UInt, t_pc: UInt, t_va: UInt): StreamPrefetchReqBundle = {
     val res = Wire(new StreamPrefetchReqBundle)
     res.region := get_region_tag(vaddr)
     res.sink := sink
@@ -133,13 +145,15 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
 
     val region_bits = get_region_bits(vaddr)
     val region_bit_vec = UIntToOH(region_bits)
-    res.bit_vec := Mux(
-      decr_mode,
-      (0 until width).map{ case i => region_bit_vec >> i}.reduce(_ | _),
-      (0 until width).map{ case i => region_bit_vec << i}.reduce(_ | _)
-    )
+    val decr_bit_vec = (0 until BIT_VEC_WITDH).map { i =>
+      Mux(i.U < width, region_bit_vec >> i, 0.U(BIT_VEC_WITDH.W))
+    }.reduce(_ | _)
+    val incr_bit_vec = (0 until BIT_VEC_WITDH).map { i =>
+      Mux(i.U < width, region_bit_vec << i, 0.U(BIT_VEC_WITDH.W))
+    }.reduce(_ | _)
+    res.bit_vec := Mux(decr_mode, decr_bit_vec, incr_bit_vec)
 
-    assert(!valid || PopCount(res.bit_vec) <= width.U, "actual prefetch block number should less than or equals to WIDTH_CACHE_BLOCKS")
+    assert(!valid || PopCount(res.bit_vec) <= width, "actual prefetch block number should less than or equals to WIDTH_CACHE_BLOCKS")
     assert(!valid || PopCount(res.bit_vec) >= 1.U, "at least one block should be included")
     assert(sink <= SINK_L3, "invalid sink")
     for(i <- 0 until BIT_VEC_WITDH) {
@@ -162,9 +176,13 @@ class StreamPrefetchReqBundle(implicit p: Parameters) extends XSBundle with HasS
   }
 }
 
-class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStreamPrefetchHelper {
+class StreamBitVectorArray(implicit p: Parameters) extends XSModule
+  with HasStreamPrefetchHelper
+  with HasPrefetcherParams
+{
   val io = IO(new XSBundle {
     val enable = Input(Bool())
+    val fdbkDegree = Input(UInt(DEGREE_WIDTH.W))
     // TODO: flush all entry when process changing happens, or disable stream prefetch for a while
     val flush = Input(Bool())
     val dynamic_depth = Input(UInt(DEPTH_BITS.W))
@@ -348,7 +366,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s2_pf_l1_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     valid = s2_valid,
     vaddr = s2_l1_vaddr,
-    width = WIDTH_CACHE_BLOCKS,
+    width = WIDTH_CACHE_BLOCKS.U,
     decr_mode = s2_decr_mode,
     sink = SINK_L1,
     source = L1_HW_PREFETCH_STREAM,
@@ -357,9 +375,9 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     t_va = s2_vaddr
     )
   val s2_pf_l2_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
-    valid = s2_valid,
+    valid = s2_valid && io.fdbkDegree > 0.U,
     vaddr = s2_l2_vaddr,
-    width = L2_WIDTH_CACHE_BLOCKS,
+    width = L2_WIDTH_CACHE_BLOCKS(io.fdbkDegree),
     decr_mode = s2_decr_mode,
     sink = SINK_L2,
     source = L1_HW_PREFETCH_STREAM,
@@ -368,9 +386,9 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     t_va = s2_vaddr
     )
   val s2_pf_l3_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
-    valid = s2_valid,
+    valid = s2_valid && io.fdbkDegree > 0.U,
     vaddr = s2_l3_vaddr,
-    width = L3_WIDTH_CACHE_BLOCKS,
+    width = L3_WIDTH_CACHE_BLOCKS(io.fdbkDegree),
     decr_mode = s2_decr_mode,
     sink = SINK_L3,
     source = L1_HW_PREFETCH_STREAM,
@@ -444,4 +462,5 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   XSPerfHistogram("bit_vector_active", PopCount(VecInit(array.map(_.active)).asUInt), true.B, 0, BIT_VEC_ARRAY_SIZE, 1)
   XSPerfHistogram("bit_vector_decr_mode", PopCount(VecInit(array.map(_.decr_mode)).asUInt), true.B, 0, BIT_VEC_ARRAY_SIZE, 1)
   XSPerfAccumulate("hash_conflict", s0_valid && s2_valid && (s0_region_tag =/= s2_region_tag) && (region_hash_tag(s0_region_tag) === region_hash_tag(s2_region_tag)))
+  XSPerfAccumulate("stream_l2_feedback_control_drop", s2_valid && io.fdbkDegree === 0.U)
 }

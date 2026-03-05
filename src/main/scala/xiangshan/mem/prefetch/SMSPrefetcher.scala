@@ -1325,7 +1325,8 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
     pht.io.pf_gen_req.bits
   )
   assert(!(agt_gen_valid && stride_gen_valid))
-  pf_filter.io.gen_req.valid := pht_gen_valid || agt_gen_valid || stride_gen_valid
+  val l2_pf_gen_valid = pht_gen_valid || agt_gen_valid || stride_gen_valid
+  pf_filter.io.gen_req.valid := l2_pf_gen_valid && io.fdbkDegree > 0.U
   pf_filter.io.gen_req.bits := pf_gen_req
   io.tlb_req <> pf_filter.io.tlb_req
   pf_filter.io.pmp_resp := io.pmp_resp
@@ -1363,4 +1364,5 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   XSPerfAccumulate("sms_pf_real_issued", io.l2_req.valid)
   XSPerfAccumulate("sms_l1_req_valid", io.l1_req.valid)
   XSPerfAccumulate("sms_l1_req_fire", io.l1_req.fire)
+  XSPerfAccumulate("sms_l2_feedback_control_drop", l2_pf_gen_valid && io.fdbkDegree === 0.U)
 }

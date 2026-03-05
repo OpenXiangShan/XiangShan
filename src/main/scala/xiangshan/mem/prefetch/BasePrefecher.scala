@@ -91,8 +91,9 @@ class SourcePrefetchReq()(implicit p: Parameters) extends DCacheBundle {
   val prefetchTarget = UInt(PrefetchTarget.PfTgtBits.W)
 }
 
-class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
+class PrefetcherIO()(implicit p: Parameters) extends XSBundle with HasPrefetcherParams {
   val enable = Input(Bool())
+  val fdbkDegree = Input(UInt(DEGREE_WIDTH.W))
   val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LsPrefetchTrainBundle())))
   val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new LsPrefetchTrainBundle())))
   val tlb_req = new TlbRequestIO(nRespDups = 2)
@@ -116,6 +117,7 @@ class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
 
 abstract class BasePrefecher()(implicit p: Parameters) extends XSModule
   with PrefetcherParams
+  with HasPrefetcherParams
   with HasDCacheParameters
 {
   lazy val io: PrefetcherIO = IO(new PrefetcherIO())
