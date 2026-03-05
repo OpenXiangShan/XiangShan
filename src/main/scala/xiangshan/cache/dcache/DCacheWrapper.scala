@@ -32,6 +32,7 @@ import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache.wpu._
 import xiangshan.mem.prefetch._
 import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr, MemorySize}
+import xiangshan.mem.L1PrefetchReq
 
 // DCache specific parameters
 case class DCacheParameters
