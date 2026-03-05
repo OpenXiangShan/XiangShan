@@ -269,33 +269,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   val lgSelectGroupSize = log2Ceil(SelectGroupSize)
   val TotalSelectCycles = scala.math.ceil(log2Ceil(LoadQueueRAWSize).toFloat / lgSelectGroupSize).toInt + 1
 
-  // TODO: unify selectOldest
-  def selectPartialOldest[T <: UopEntry](
-    valid: Seq[Bool], bits: Seq[T], isOlderFu: (T, T) => Bool
-    ): (Seq[Bool], Seq[T]) = {
-    assert(valid.length == bits.length)
-    if (valid.length == 0 || valid.length == 1) {
-      (valid, bits)
-    } else if (valid.length == 2) {
-      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-      for (i <- res.indices) {
-        res(i).valid := valid(i)
-        res(i).bits := bits(i)
-      }
-      val oldest = Mux(
-        valid(0) && valid(1),
-        Mux(isOlderFu(bits(0), bits(1)), res(0), res(1)),
-        Mux(valid(0) && !valid(1), res(0), res(1))
-      )
-      (Seq(oldest.valid), Seq(oldest.bits))
-    } else {
-      val left = selectPartialOldest(valid.take(valid.length / 2), bits.take(bits.length / 2), isOlderFu)
-      val right = selectPartialOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)), isOlderFu)
-      selectPartialOldest(left._1 ++ right._1, left._2 ++ right._2, isOlderFu)
-    }
-  }
-
-  def selectOldest[T <: UopEntry](valid: Seq[Bool], bits: Seq[T], isOlderFu: (T, T) => Bool): (Seq[Bool], Seq[T]) = {
+  def selectOldestByGroup[T <: UopEntry](valid: Seq[Bool], bits: Seq[T], level: Int, isOlderFu: (T, T) => Bool): (Seq[Bool], Seq[T]) = {
     assert(valid.length == bits.length)
     val numSelectGroups = scala.math.ceil(valid.length.toFloat / SelectGroupSize).toInt
 
@@ -304,18 +278,30 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     val selectBitsGroups = bits.grouped(SelectGroupSize).toList
     // select logic
     if (valid.length <= SelectGroupSize) {
-      val (selValid, selBits) = selectPartialOldest(valid, bits, isOlderFu)
-      val selValidNext = GatedValidRegNext(selValid(0))
-      val selBitsNext = RegEnable(selBits(0), selValid(0))
+      val selectModule = Module(new SelectOldest(bits.head.cloneType, bits.length, isOlderFu).suggestName(s"selectModule_level_${level}"))
+      selectModule.io.in.zipWithIndex.map{case (sink, i) =>
+        sink.valid := valid(i)
+        sink.bits := bits(i)
+      }
+      val selValid = selectModule.io.out.valid
+      val selBits = selectModule.io.out.bits
+      val selValidNext = GatedValidRegNext(selValid)
+      val selBitsNext = RegEnable(selBits, selValid)
       (Seq(selValidNext && !selBitsNext.robIdx.needFlush(RegNext(io.redirect))), Seq(selBitsNext))
     } else {
       val select = (0 until numSelectGroups).map(g => {
-        val (selValid, selBits) = selectPartialOldest(selectValidGroups(g), selectBitsGroups(g), isOlderFu)
-        val selValidNext = RegNext(selValid(0))
-        val selBitsNext = RegEnable(selBits(0), selValid(0))
+        val selectModule = Module(new SelectOldest(bits.head.cloneType, selectValidGroups(g).length, isOlderFu).suggestName(s"selectModule_level_${level}_group_${g}"))
+        selectModule.io.in.zipWithIndex.map{case (sink, i) =>
+          sink.valid := selectValidGroups(g)(i)
+          sink.bits := selectBitsGroups(g)(i)
+        }
+        val selValid = selectModule.io.out.valid
+        val selBits = selectModule.io.out.bits
+        val selValidNext = RegNext(selValid)
+        val selBitsNext = RegEnable(selBits, selValid)
         (selValidNext && !selBitsNext.robIdx.needFlush(io.redirect) && !selBitsNext.robIdx.needFlush(RegNext(io.redirect)), selBitsNext)
       })
-      selectOldest(select.map(_._1), select.map(_._2), isOlderFu)
+      selectOldestByGroup(select.map(_._1), select.map(_._2), level + 1, isOlderFu)
     }
   }
 
@@ -335,7 +321,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
     }))
 
     // select logic
-    val lqSelect: (Seq[Bool], Seq[UopEntry]) = selectOldest(lqViolationSelVec, uop, isOlder)
+    val lqSelect: (Seq[Bool], Seq[UopEntry]) = selectOldestByGroup(lqViolationSelVec, uop, 0, isOlder)
 
     // select one inst
     val lqViolation = lqSelect._1(0)

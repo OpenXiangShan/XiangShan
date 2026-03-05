@@ -71,35 +71,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     SD -> 0xff.U
   ))
 
-  def selectOldest[T <: LsPipelineBundle](valid: Seq[Bool], bits: Seq[T], index: Seq[UInt]): (Seq[Bool], Seq[T], Seq[UInt]) = {
-    assert(valid.length == bits.length)
-    if (valid.length == 0 || valid.length == 1) {
-      (valid, bits, index)
-    } else if (valid.length == 2) {
-      val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-      val resIndex = Seq.fill(2)(Wire(chiselTypeOf(index(0))))
-      for (i <- res.indices) {
-        res(i).valid := valid(i)
-        res(i).bits := bits(i)
-        resIndex(i) := index(i)
-      }
-      val oldest = Mux(valid(0) && valid(1),
-        Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
-          (isNotBefore(bits(0).uop.robIdx, bits(1).uop.robIdx) && bits(0).uop.uopIdx > bits(1).uop.uopIdx), res(1), res(0)),
-        Mux(valid(0) && !valid(1), res(0), res(1)))
-
-      val oldestIndex = Mux(valid(0) && valid(1),
-        Mux(isAfter(bits(0).uop.robIdx, bits(1).uop.robIdx) ||
-          (bits(0).uop.robIdx === bits(1).uop.robIdx && bits(0).uop.uopIdx > bits(1).uop.uopIdx), resIndex(1), resIndex(0)),
-        Mux(valid(0) && !valid(1), resIndex(0), resIndex(1)))
-      (Seq(oldest.valid), Seq(oldest.bits), Seq(oldestIndex))
-    } else {
-      val left = selectOldest(valid.take(valid.length / 2), bits.take(bits.length / 2), index.take(index.length / 2))
-      val right = selectOldest(valid.takeRight(valid.length - (valid.length / 2)), bits.takeRight(bits.length - (bits.length / 2)), index.takeRight(index.length - (index.length / 2)))
-      selectOldest(left._1 ++ right._1, left._2 ++ right._2, left._3 ++ right._3)
-    }
-  }
-
   val io = IO(new Bundle() {
     val redirect        = Flipped(Valid(new Redirect))
     val enq             = Vec(enqPortNum, Flipped(new MisalignBufferEnqIO))
@@ -126,11 +97,18 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   class StoreMisalignBufferEntry(implicit p: Parameters) extends LsPipelineBundle {
     val portIndex = UInt(log2Up(enqPortNum).W)
   }
+  private def selectOlder(left: StoreMisalignBufferEntry, right: StoreMisalignBufferEntry): Bool = {
+    isBefore(left.uop.robIdx, right.uop.robIdx) ||
+      (left.uop.robIdx === right.uop.robIdx && left.uop.uopIdx < right.uop.uopIdx)
+  }
+
   val req_valid = RegInit(false.B)
   val req = Reg(new StoreMisalignBufferEntry)
 
   val cross4KBPageBoundary = Wire(Bool())
   val needFlushPipe = RegInit(false.B)
+
+  val selectOldestModule = Module(new SelectOldest(new StoreMisalignBufferEntry, enqPortNum, selectOlder))
 
   // buffer control:
   //  - s_idle:  Idle
@@ -148,11 +126,19 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val s1_valid = VecInit(io.enq.map(x => x.req.valid))
 
   val s1_index = (0 until io.enq.length).map(_.asUInt)
-  val reqSel = selectOldest(s1_valid, s1_req, s1_index)
+  val selectEntries = Wire(Vec(enqPortNum, new StoreMisalignBufferEntry))
+  selectEntries.zipWithIndex.map{case (sink, i) =>
+    connectSamePort(sink, s1_req(i))
+    sink.portIndex := s1_index(i)
+  }
+  selectOldestModule.io.in.zip(selectEntries).zip(s1_valid).map {case ((sink, source), v) =>
+    sink.bits := source
+    sink.valid := v
+  }
+  val reqSel = selectOldestModule.io.out
 
-  val reqSelValid = reqSel._1(0)
-  val reqSelBits  = reqSel._2(0)
-  val reqSelPort  = reqSel._3(0)
+  val reqSelValid = reqSel.valid
+  val reqSelBits  = reqSel.bits
 
   val reqRedirect = reqSelBits.uop.robIdx.needFlush(io.redirect)
 
@@ -161,14 +147,13 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   val robMatch = req_valid && (io.rob.pendingPtr === req.uop.robIdx)
 
   val s2_canEnq = GatedRegNext(canEnq)
-  val s2_reqSelPort = GatedRegNext(reqSelPort)
+  val s2_reqSelPort = GatedRegNext(reqSelBits.portIndex)
   val s2_needRevoke = s2_canEnq && (0 until enqPortNum).map {
     case i => io.enq(i).revoke && s2_reqSelPort === i.U
   }.reduce(_|_)
 
   when(canEnq) {
     connectSamePort(req, reqSelBits)
-    req.portIndex := reqSelPort
     req_valid := true.B
   }
   val cross4KBPageEnq = WireInit(false.B)
@@ -179,7 +164,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       bufferState === s_idle
     ) {
       connectSamePort(req, reqSelBits)
-      req.portIndex := reqSelPort
       cross4KBPageEnq := true.B
       needFlushPipe   := true.B
       canEnq := true.B
@@ -189,7 +173,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
   }
 
-  val reqSelCanEnq = UIntToOH(reqSelPort)
+  val reqSelCanEnq = UIntToOH(reqSelBits.portIndex)
 
   io.enq.zipWithIndex.map{
     case (reqPort, index) => reqPort.req.ready := reqSelCanEnq(index) && (!req_valid || cross4KBPageBoundary && cross4KBPageEnq)

@@ -53,7 +53,7 @@ class ExceptionOut(implicit p: Parameters) extends XSBundle {
   val isForVSnonLeafPTE = Output(Bool())
 }
 
-class ExceptionInfoGen(implicit p: Parameters) extends XSModule {
+class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper{
   // loadUnit, storeUnit, VLoad, VStore, storeQueue Uncache, LoadQueue Uncache, VSegmentUnit, Atomic
   private val enqPortNum = StorePipelineWidth + LoadPipelineWidth + VecLoadPipelineWidth + VecStorePipelineWidth + 1 + 1 + 1 + 1
   val io = IO(new Bundle{
@@ -62,33 +62,10 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule {
     val req           = Vec(enqPortNum, Flipped(ValidIO(new MemExceptionInfo)))
     val exceptionInfo = new ExceptionOut // don't have valid
   })
-  private def getOldest(valid: Seq[Bool], bits: Seq[MemExceptionInfo]): MemExceptionInfo = {
-    def getOldestRecursion(valid: Seq[Bool], bits: Seq[MemExceptionInfo]): (Seq[Bool], Seq[MemExceptionInfo]) = {
-      assert(valid.length == bits.length)
-      if(valid.length == 1) {
-        (valid, bits)
-      }
-      else if (valid.length == 2) {
-        val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
-        for (i <- res.indices) {
-          res(i).valid := valid(i)
-          res(i).bits := bits(i)
-        }
-        val oldest = Mux(
-          !valid(1) || (valid(0) && (bits(1).robIdx > bits(0).robIdx || ((bits(1).robIdx === bits(0).robIdx) && bits(1).uopIdx > bits(0).uopIdx))),
-          res(0),
-          res(1)
-        )
-        (Seq(oldest.valid), Seq(oldest.bits))
-      }
-      else {
-        val left = getOldestRecursion(valid.take(valid.length / 2), bits.take(valid.length / 2))
-        val right = getOldestRecursion(valid.drop(valid.length / 2), bits.drop(valid.length / 2))
-        getOldestRecursion(left._1 ++ right._1, left._2 ++ right._2)
-      }
-    }
-    getOldestRecursion(valid, bits)._2.head
+  private def isOlder(left: MemExceptionInfo, right: MemExceptionInfo): Bool = {
+    isBefore(left.robIdx, right.robIdx) || (left.robIdx === right.robIdx && left.uopIdx < right.uopIdx)
   }
+  val selectOldestModule = Module(new SelectOldest(new MemExceptionInfo, enqPortNum, isOlder))
 
   private def GenExceptionVa(
                                 mode: UInt, isVirt: Bool, vaNeedExt: Bool,
@@ -167,17 +144,21 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule {
     v && p.hasException && !p.robIdx.needFlush(io.redirect)
   } // for timing, generate selectValid here
 
-  private val oldest = getOldest(selectValid, s1Bits)
-  private val s1OutValid = selectValid.reduce(_ || _)
+  selectOldestModule.io.in.zipWithIndex.map{case (sink, i) =>
+    sink.valid := selectValid(i)
+    sink.bits := s1Bits(i)
+  }
+  private val oldestBits = selectOldestModule.io.out.bits
+  private val s1OutValid = selectOldestModule.io.out.valid
 
   when(currentValid) {
     when(s1OutValid) {
-      when(currentExcp.robIdx > oldest.robIdx || oldest.robIdx === currentExcp.robIdx && currentExcp.uopIdx > oldest.uopIdx) {
-        currentExcp := oldest
+      when(currentExcp.robIdx > oldestBits.robIdx || oldestBits.robIdx === currentExcp.robIdx && currentExcp.uopIdx > oldestBits.uopIdx) {
+        currentExcp := oldestBits
       }
     }
   }.otherwise{
-    currentExcp  := oldest
+    currentExcp  := oldestBits
   }
 
   when(!currentValid && s1OutValid) { // TODO: need valid ? maby for debug.
