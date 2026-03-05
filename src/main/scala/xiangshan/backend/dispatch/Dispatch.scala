@@ -49,17 +49,17 @@ class CoreDispatchTopDownIO extends Bundle {
   val fromMem = Flipped(new MemCoreTopDownIO)
 }
 // TODO delete trigger message from frontend to iq
-class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with HasVLSUParameters {
+class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with HasVLSUParameters {
   // std IQ donot need dispatch, only copy sta IQ, but need sta IQ's ready && std IQ's ready
   val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
   val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
   val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
   val sortedFuConfigs = allFuConfigs.sortBy(_.fuType.id)
-  println(s"[NewDispatch] ${allExuParams.map(_.name)}")
-  println(s"[NewDispatch] ${allFuConfigs.map(_.name)}")
-  println(s"[NewDispatch] ${allFuConfigs.map(_.fuType.id)}")
-  println(s"[NewDispatch] ${sortedFuConfigs.map(_.name)}")
-  println(s"[NewDispatch] ${sortedFuConfigs.map(_.fuType.id)}")
+  println(s"[Dispatch] ${allExuParams.map(_.name)}")
+  println(s"[Dispatch] ${allFuConfigs.map(_.name)}")
+  println(s"[Dispatch] ${allFuConfigs.map(_.fuType.id)}")
+  println(s"[Dispatch] ${sortedFuConfigs.map(_.name)}")
+  println(s"[Dispatch] ${sortedFuConfigs.map(_.fuType.id)}")
   val fuConfigsInIssueParams = allIssueParams.map(_.allExuParams.map(_.fuConfigs).flatten.toSet.toSeq)
   val fuMapIQIdx = sortedFuConfigs.map( fu => {
     val fuInIQIdx = fuConfigsInIssueParams.zipWithIndex.filter { case (f, i) => f.contains(fu) }.map(_._2)
@@ -67,7 +67,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
    }
   )
   fuMapIQIdx.map { case (fu, iqidx) =>
-    println(s"[NewDispatch] ${fu.name} $iqidx")
+    println(s"[Dispatch] ${fu.name} $iqidx")
   }
   val sameIQIdxFus = fuMapIQIdx.map{ case (fu, iqidx) =>
     fuMapIQIdx.filter(_._2 == iqidx).map(_._1) -> iqidx
@@ -75,10 +75,10 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val needMultiIQ = sameIQIdxFus.sortBy(_._1.head.fuType.id).filter(_._2.size > 1)
   val needSingleIQ = sameIQIdxFus.sortBy(_._1.head.fuType.id).filter(_._2.size == 1)
   needMultiIQ.map { case (fus, iqidx) =>
-    println(s"[NewDispatch] needMultiIQ: ${fus.map(_.name)} $iqidx")
+    println(s"[Dispatch] needMultiIQ: ${fus.map(_.name)} $iqidx")
   }
   needSingleIQ.map { case (fus, iqidx) =>
-    println(s"[NewDispatch] needSingleIQ: ${fus.map(_.name)} $iqidx")
+    println(s"[Dispatch] needSingleIQ: ${fus.map(_.name)} $iqidx")
   }
   val fuConfigsInExuParams = allExuParams.map(_.fuConfigs)
   val fuMapExuIdx = sortedFuConfigs.map { case fu => {
@@ -214,11 +214,11 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
       xx.zipWithIndex.filter(y => VlRegSrcDataSet.contains(y._1)).map(_._2)
     }).flatten
   }).flatten.toSet.toSeq.sorted
-  println(s"[NewDispatch] idxRegTypeInt: $idxRegTypeInt")
-  println(s"[NewDispatch] idxRegTypeFp: $idxRegTypeFp")
-  println(s"[NewDispatch] idxRegTypeVec: $idxRegTypeVec")
-  println(s"[NewDispatch] idxRegTypeV0: $idxRegTypeV0")
-  println(s"[NewDispatch] idxRegTypeVl: $idxRegTypeVl")
+  println(s"[Dispatch] idxRegTypeInt: $idxRegTypeInt")
+  println(s"[Dispatch] idxRegTypeFp: $idxRegTypeFp")
+  println(s"[Dispatch] idxRegTypeVec: $idxRegTypeVec")
+  println(s"[Dispatch] idxRegTypeV0: $idxRegTypeV0")
+  println(s"[Dispatch] idxRegTypeVl: $idxRegTypeVl")
   val numRegSrc: Int = issueBlockParams.map(_.exuBlockParams.map(
     x => if (x.hasStdFu) x.numRegSrc + 1 else x.numRegSrc
   ).max).max
@@ -417,7 +417,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     val suffix = fus.map(_.name).mkString("_")
     val iqNum = exuidx.size
     val iqidx = allIssueParams.map(_.exuBlockParams.map(_.fuConfigs).flatten.toSet.toSeq).zipWithIndex.filter{x => fus.toSet.subsetOf(x._1.toSet)}.map(_._2)
-    println(s"[NewDispatch] ${fus.map(_.name)};iqidx:$iqidx;exuIdx:$exuidx")
+    println(s"[Dispatch] ${fus.map(_.name)};iqidx:$iqidx;exuIdx:$exuidx")
     val compareMatrix = Wire(Vec(iqNum, Vec(iqNum, Bool()))).suggestName(s"compareMatrix_$suffix")
     for (i <- 0 until iqNum) {
       for (j <- 0 until iqNum) {
@@ -571,7 +571,7 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
   val lsqEnqCtrl = Module(new LsqEnqCtrl)
 
   // TODO: check lsqEnqCtrl redirect logic
-  // here is RegNext because dispatch2iq use s2_s4_redirect, newDispatch use s1_s3_redirect
+  // here is RegNext because dispatch2iq use s2_s4_redirect, Dispatch use s1_s3_redirect
   lsqEnqCtrl.io.redirect := RegNext(io.redirect)
   lsqEnqCtrl.io.lcommit := io.fromMem.lcommit
   lsqEnqCtrl.io.scommit := io.fromMem.scommit
@@ -949,9 +949,6 @@ class NewDispatch(implicit p: Parameters) extends XSModule with HasPerfEvents wi
     ready
   }
   val fuTypeMapIQIdx = fuMapIQIdx.map(_._2)
-  fuTypeMapIQIdx.map { case (iqidx) =>
-    println(s"[NewDispatch] $iqidx")
-  }
   val issueQueueStallMatrix = allIssueParams.zipWithIndex.map { case (issue, iqidx) => {
     val result = uopSelIQMatrix.map(_(iqidx)).map(x => !iqReadyVec(iqidx).orR && x.orR && x <= issue.numEnq.U)
     result
