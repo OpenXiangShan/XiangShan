@@ -994,6 +994,7 @@ package object xiangshan {
     // TODO: explain only load store exist
     val LoadDispatchPolicyStall = Value("LoadDispatchPolicyStall")
     val StoreDispatchPolicyStall = Value("StoreDispatchPolicyStall")
+    val BalanceDispatchPolicyStall = Value("BalanceDispatchPolicyStall")
     val OtherDispatchPolicyStall = Value("OtherDispatchPolicyStall")
     // dispatch stall for issuequeue full
     val IntIQFullStallAlu = Value("IntIQFullStallAlu")
