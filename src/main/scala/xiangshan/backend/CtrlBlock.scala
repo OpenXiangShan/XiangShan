@@ -734,8 +734,6 @@ class CtrlBlockImp(
   rob.io.enq.req := enqRob.req
   dispatch.io.robHeadFuType := rob.io.debugRobHeadFuType
   dispatch.io.stallReason <> rename.io.stallReason.out
-  dispatch.io.lqCanAccept := io.lqCanAccept
-  dispatch.io.sqCanAccept := io.sqCanAccept
   dispatch.io.fromMem.lcommit := io.fromMemToDispatch.lcommit
   dispatch.io.fromMem.scommit := io.fromMemToDispatch.scommit
   dispatch.io.fromMem.lqDeqPtr := io.fromMemToDispatch.lqDeqPtr
@@ -756,7 +754,6 @@ class CtrlBlockImp(
   dispatch.io.wbPregsVl := io.toDispatch.wbPregsVl
   dispatch.io.vlWriteBackInfo := io.toDispatch.vlWriteBackInfo
   dispatch.io.robHeadNotReady := rob.io.headNotReady
-  dispatch.io.robFull := rob.io.robFull
   dispatch.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
   dispatch.io.debugBlockBackward.foreach(_ := rob.io.debugBlockBackward.get)
   dispatch.io.debugWaitForward.foreach(_ := rob.io.debugWaitForward.get)
