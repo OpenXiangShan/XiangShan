@@ -63,6 +63,7 @@ class L1BankedDataReadReqWithMask(implicit p: Parameters) extends DCacheBundle
 class L1BankedDataReadLineReq(implicit p: Parameters) extends L1BankedDataReadReq
 {
   val rmask = Bits(DCacheBanks.W)
+  val way = Bits(log2Up(DCacheWays).W) // UInt format of way_en for better timing
 }
 
 // Now, we can write a cache-block in a single cycle
@@ -582,7 +583,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   // readline port
   val readline_error_delayed = Wire(Vec(DCacheBanks, Bool()))
-  val readline_r_way_addr = RegEnable(OHToUInt(io.readline.bits.way_en), io.readline.valid)
+  val readline_r_way_addr = RegEnable(io.readline.bits.way, io.readline.valid)
   val readline_rr_way_addr = RegEnable(readline_r_way_addr, RegNext(io.readline.valid))
   val readline_r_div_addr = RegEnable(line_div_addr, io.readline.valid)
   val readline_rr_div_addr = RegEnable(readline_r_div_addr, RegNext(io.readline.valid))

@@ -352,7 +352,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_tag_match = ParallelORR(s1_tag_ecc_match_way)
   val s1_real_tag_eq_way = wayMap((w: Int) => io.tag_resp(w)(tagBits - 1, 0) === get_tag(s1_req.addr) && s1_meta_valids(w)).asUInt
   val s1_has_real_tag_eq_way = ParallelORR(s1_real_tag_eq_way)
-  val s1_real_tag_match_way = PriorityEncoderOH(s1_real_tag_eq_way)
+  val s1_real_tag_match_way_en = PriorityEncoderOH(s1_real_tag_eq_way)
+  val s1_real_tag_match_way = PriorityEncoder(s1_real_tag_eq_way)
 
   val s1_hit_tag = get_tag(s1_req.addr)
   val s1_hit_coh = ClientMetadata(ParallelMux(s1_tag_ecc_match_way.asBools, (0 until nWays).map(w => meta_resp(w))))
@@ -377,11 +378,21 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     GatedValidRegNext(s0_fire),
     Mux(
       io.pseudo_error.valid && s1_has_real_tag_eq_way,
-      s1_real_tag_match_way,
+      s1_real_tag_match_way_en,
       Mux(s1_req.miss_fail_cause_evict_btot, s1_req.occupy_way, UIntToOH(io.replace_way.way)
     )),
     RegEnable(s1_repl_way_en, s1_valid)
   )
+  val s1_repl_way = Wire(UInt(wayBits.W))
+  s1_repl_way := Mux(
+    GatedValidRegNext(s0_fire),
+    Mux(
+      io.pseudo_error.valid && s1_has_real_tag_eq_way,
+      s1_real_tag_match_way,
+      Mux(s1_req.miss_fail_cause_evict_btot, OHToUInt(s1_req.occupy_way), io.replace_way.way)
+    ),
+    RegEnable(s1_repl_way, s1_valid)
+  ) // UInt format of `s1_repl_way_en`
   val s1_repl_tag = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => tag_resp(w)))
   val s1_repl_coh = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
   val s1_repl_pf  = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
@@ -392,6 +403,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_need_eviction = s1_req.miss && !s1_tag_match && s1_repl_coh.state =/= ClientStates.Nothing
 
   val s1_way_en = Mux(io.pseudo_error.valid || s1_need_replacement, s1_repl_way_en, s1_tag_ecc_match_way)
+  val s1_way = Mux(io.pseudo_error.valid || s1_need_replacement, s1_repl_way, OHToUInt(s1_tag_ecc_match_way))
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
 
   val s1_tag = s1_hit_tag
@@ -829,6 +841,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.data_readline.valid := s1_valid && s1_need_data
   io.data_readline.bits.rmask := s1_banked_rmask
   io.data_readline.bits.way_en := s1_way_en
+  io.data_readline.bits.way := s1_way
   io.data_readline.bits.addr := s1_req.vaddr
 
   io.miss_req.valid := s2_valid && s2_can_go_to_mq
