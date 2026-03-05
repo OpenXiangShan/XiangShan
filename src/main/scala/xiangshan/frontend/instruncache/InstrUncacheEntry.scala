@@ -157,7 +157,8 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
 
     is(State.SendResp) {
       when(io.resp.fire || needFlush) {
-        state := State.Invalid
+        state     := State.Invalid
+        resending := false.B
       }
     }
   }
