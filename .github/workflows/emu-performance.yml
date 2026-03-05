@@ -1,0 +1,364 @@
+name: EMU Performance Test
+
+on:
+  push:
+    branches: [ master, kunminghu-v3 ]
+  pull_request:
+    branches: [ master, kunminghu-v3 ]
+
+env:
+  # Set common environment variables for all jobs
+  NEMU_HOME: /nfs/home/share/ci-workloads/NEMU
+  AM_HOME: /nfs/home/share/ci-workloads/nexus-am
+  PERF_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}
+  WAVE_HOME: /nfs/home/ci-runner/emu-performance/${{ github.run_number }}/wave
+  CKPT_HOME: /nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0
+
+jobs:
+  changes:
+    name: Changes Detection
+    permissions:
+      pull-requests: read
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          predicate-quantifier: 'every'
+          filters: .github/filters.yaml
+
+  build:
+    name: Build
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on:
+      - bosc
+      - builder
+    outputs:
+      cluster: ${{ steps.save.outputs.cluster }}
+    timeout-minutes: 120
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Init
+        run: |
+          mkdir -p ${PERF_HOME} ${WAVE_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+      - name: Build EMU
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+            --emulator gsim \
+            --yaml-config ${GITHUB_WORKSPACE}/src/main/resources/config/Default.yml \
+            --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
+            --pgo ${GITHUB_WORKSPACE}/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
+            --trace-fst
+      - name: Save artifact
+        id: save
+        # Maybe we can use upload-artifact here
+        # but ~100MB is too large and we don't have good enough internet on self-hosted runner
+        # so we just copy the binary to a shared directory
+        run: |
+          cp -L ${GITHUB_WORKSPACE}/build/emu ${PERF_HOME}/emu
+          if [[ $(hostname) == *.bosccluster.com ]]; then
+            echo "cluster=node" >> ${GITHUB_OUTPUT}
+          else
+            echo "cluster=open" >> ${GITHUB_OUTPUT}
+          fi
+
+  run-legacy: # TODO: drop this after most of the dev branches are migrated to the new workflow
+    name: Run (legacy)
+    needs: build
+    runs-on:
+      - ${{ needs.build.outputs.cluster }} # use same cluster as builder to avoid cross-cluster network copy & pgo issue
+      - runner
+    timeout-minutes: 300
+    continue-on-error: false
+    strategy:
+      matrix:
+        name:
+          - hmmer-Vector
+          - mcf
+          - xalancbmk
+          - gcc
+          - namd
+          - milc
+          - lbm
+          - gromacs
+          - wrf
+          - astar
+        with-restore-bin: [true]
+        exclude:
+          - name: hmmer-Vector
+        include:
+          - name: hmmer-Vector
+            with-restore-bin: false
+      fail-fast: false
+      max-parallel: 4
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Get artifact
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+          mkdir -p build
+          echo "Getting EMU binary from ${PERF_HOME}/emu"
+          cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
+      - name: Run Legacy CI Test - ${{ matrix.name }}
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --numa --threads 1 \
+            --max-instr 5000000 \
+            --ci ${{ matrix.name }} \
+            ${{ matrix.with-restore-bin && '--gcpt-restore-bin /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin' || '' }} \
+            2> stderr.log | tee stdout.log
+          cat stderr.log | sort | tee stderr-sorted.log
+      - name: Archive log
+        if: always()
+        run: |
+          tar -czvf "${PERF_HOME}/legacy_${{ matrix.name }}.tar.gz" stdout.log stderr-sorted.log
+      - name: Generate report
+        run: |
+          grep -oP 'IPC = \K\d+\.\d+' stdout.log > ipc-legacy-${{ matrix.name }}
+          echo "IPC: $(cat ipc-legacy-${{ matrix.name }})"
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: ipc-legacy-${{ matrix.name }}
+
+  run:
+    name: Run
+    needs: build
+    runs-on:
+      - ${{ needs.build.outputs.cluster }} # use same cluster as builder to avoid cross-cluster network copy & pgo issue
+      - runner
+    timeout-minutes: 300
+    continue-on-error: false
+    strategy:
+      matrix:
+        include:
+          - name: perlbench_splitmail
+            ckpt: 3995
+          - name: bzip2_liberty
+            ckpt: 739
+          - name: gcc_s04
+            ckpt: 2772
+          - name: mcf
+            ckpt: 6388
+          - name: gobmk_nngs
+            ckpt: 453
+          - name: hmmer_nph3
+            ckpt: 33214
+          - name: sjeng
+            ckpt: 64284
+          - name: libquantum
+            ckpt: 81539
+          - name: h264ref_foreman.main
+            ckpt: 10053
+          - name: omnetpp
+            ckpt: 14042
+          - name: astar_rivers
+            ckpt: 8728
+          - name: xalancbmk
+            ckpt: 9874
+          - name: bwaves
+            ckpt: 30350
+          - name: gamess_gradient
+            ckpt: 36450
+          - name: milc
+            ckpt: 7124
+          - name: zeusmp
+            ckpt: 45598
+          - name: gromacs
+            ckpt: 2907
+          - name: cactusADM
+            ckpt: 61235
+          - name: leslie3d
+            ckpt: 37552
+          - name: namd
+            ckpt: 75757
+          - name: dealII
+            ckpt: 13061
+          - name: soplex_ref
+            ckpt: 10774
+          - name: povray
+            ckpt: 8362
+          - name: calculix
+            ckpt: 53456
+          - name: GemsFDTD
+            ckpt: 49458
+          - name: tonto
+            ckpt: 69015
+          - name: lbm
+            ckpt: 31064
+          - name: wrf
+            ckpt: 112496
+          - name: sphinx3
+            ckpt: 141036
+      fail-fast: false
+      max-parallel: 12 # TODO: increase this to 16 after dropping legacy workflow
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Get artifact
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+          mkdir -p build
+          echo "Getting EMU binary from ${PERF_HOME}/emu"
+          cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
+      - name: Run SPEC06 Test - ${{ matrix.name }}
+        run: |
+          export CKPT=$(find "${CKPT_HOME}/${{ matrix.name }}/${{ matrix.ckpt }}" -type f \( -name "*.gz" -o -name "*.zstd" \) | head -n 1)
+          echo "Running checkpoint: ${CKPT}"
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --numa --threads 1 \
+            --max-instr 5000000 \
+            ${CKPT} \
+            2> stderr.log | tee stdout.log
+          cat stderr.log | sort | tee stderr-sorted.log
+      - name: Archive log
+        if: always()
+        run: |
+          tar -czvf "${PERF_HOME}/${{ matrix.name }}_${{ matrix.ckpt }}.tar.gz" stdout.log stderr-sorted.log
+      - name: Generate report
+        run: |
+          grep -oP 'IPC = \K\d+\.\d+' stdout.log > ipc-${{ matrix.name }}_${{ matrix.ckpt }}
+          echo "IPC: $(cat ipc-${{ matrix.name }}_${{ matrix.ckpt }})"
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          archive: false
+          path: ipc-${{ matrix.name }}_${{ matrix.ckpt }}
+
+  summary:
+    name: Summary
+    permissions:
+      actions: read # to download upstream artifact
+      pull-requests: write # to post PR comment
+    needs:
+      - run
+      - run-legacy # TODO: drop this
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0 # we need full history to find upstream commit
+      - name: Download reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ipc-*
+          path: current
+          merge-multiple: true
+      - name: Find upstream run_id
+        if: ${{ github.event_name == 'pull_request' }}
+        id: find_upstream
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Find upstream commit sha
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          base_sha="${{ github.event.pull_request.base.sha }}"
+
+          echo "Head SHA: ${head_sha}"
+          echo "Base SHA: ${base_sha}"
+
+          upstream=$(git merge-base "${head_sha}" "${base_sha}")
+          if [ -z "${upstream}" ]; then
+            echo "Failed to find upstream commit"
+            echo "error=Failed to find upstream commit" >> $GITHUB_OUTPUT
+            echo "found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Upstream commit sha: ${upstream}"
+          echo "upstream=${upstream}" >> $GITHUB_OUTPUT
+
+          run_id=$(gh run list --commit "${upstream}" --workflow "${{ github.workflow }}" --json databaseId --limit 1 | jq -r '.[0].databaseId')
+          if [ -z "${run_id}" ] || [ "${run_id}" == "null" ]; then
+            echo "Failed to find upstream run for commit ${upstream}"
+            echo "error=Failed to find upstream run for commit ${upstream}" >> $GITHUB_OUTPUT
+            echo "found=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Upstream run_id: ${run_id}"
+          echo "run_id=${run_id}" >> $GITHUB_OUTPUT
+          echo "found=true" >> $GITHUB_OUTPUT
+      - name: Download upstream reports
+        if: ${{ steps.find_upstream.outputs.found == 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ipc-*
+          path: upstream
+          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }} # we need this to download artifact from another run
+          run-id: ${{ steps.find_upstream.outputs.run_id }}
+      - name: Summary
+        run: |
+          function geomean() {
+            python3 -c "import sys, math; print(math.exp(sum(math.log(float(x)) for x in sys.argv[1:]) / len(sys.argv[1:])))" "$@"
+          }
+
+          function diff() {
+            python3 -c "print(f'{(float($1) - float($2)) / float($2) * 100:.2f}')" "$@"
+          }
+
+          {
+            echo "## Emu - Performance Summary"
+            echo ""
+            if [ -n "${{ steps.find_upstream.outputs.error }}" ]; then
+              echo "Error: ${{ steps.find_upstream.outputs.error }}"
+              echo "Please checkout workflow logs for details."
+              echo ""
+            fi
+            echo "### Metadata"
+            echo "| - | Branch | SHA | Run ID |"
+            echo "| - | ------ | --- | ------ |"
+            if [ "${{ steps.find_upstream.outputs.found }}" == "true" ]; then
+              echo "| Upstream | ${{ github.base_ref }} | ${{ steps.find_upstream.outputs.upstream }} | ${{ steps.find_upstream.outputs.run_id }} |"
+            fi
+            echo "| Current | ${{ github.head_ref }} | ${{ github.sha }} | ${{ github.run_id }} |"
+            echo ""
+            echo "### IPC Report"
+            echo "| Testcase | Current | Upstream | Diff |"
+            echo "| -------- | ------- | -------- | ---- |"
+            for file in current/ipc-*; do
+              name=$(basename ${file} | cut -d '-' -f 2-)
+              ipc=$(cat "${file}")
+              has_na=false
+              if [ -f "upstream/ipc-${name}" ]; then
+                upstream_ipc=$(cat "upstream/ipc-${name}")
+                echo "| ${name} | ${ipc} | ${upstream_ipc} | $(diff ${ipc} ${upstream_ipc})% |"
+              else
+                echo "| ${name} | ${ipc} | N/A | N/A |"
+                has_na=true
+              fi
+            done
+
+            current_geomean=$(geomean $(cat current/ipc-* | xargs))
+            upstream_geomean=$(geomean $(cat upstream/ipc-* | xargs) 2>/dev/null || echo "N/A")
+            geomean_diff=$(diff ${current_geomean} ${upstream_geomean} 2>/dev/null || echo "N/A")
+            echo "| **GEOMEAN** | **${current_geomean}** | **${upstream_geomean}** | **${geomean_diff}%** |"
+            echo
+            if [ "${has_na}" = true ]; then
+              echo "**NOTE**: Some testcases do not have upstream data, diff is shown as N/A and GEOMEAN diff may not be accurate."
+            fi
+          } > report.md
+          cat report.md >> $GITHUB_STEP_SUMMARY
+      - name: Post PR comment
+        if: ${{ github.event_name == 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --body-file report.md
