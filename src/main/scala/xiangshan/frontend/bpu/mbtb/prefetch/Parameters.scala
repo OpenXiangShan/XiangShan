@@ -37,12 +37,12 @@ trait HasPrefetchBtbParameters extends HasBpuParameters {
   def NumEntries:         Int                   = prefetchParameters.NumEntries
   def NumWay:             Int                   = prefetchParameters.NumWay
   // NumSets is the number of sets in one bank, a bank corresponds to a physical SRAM
-  def NumSets:         Int    = NumEntries / NumWay / prefetchParameters.NumBanks
-  def TagWidth:        Int    = prefetchParameters.TagWidth
-  def TargetWidth:     Int    = prefetchParameters.TargetWidth
-  def SetIdxLen:       Int    = log2Ceil(NumSets)
-  def BankIdxLen:      Int    = log2Ceil(prefetchParameters.NumBanks)
-  def WriteBufferSize: Int    = prefetchParameters.WriteBufferSize
-  def Replacer:        String = prefetchParameters.Replacer
-
+  def NumSets:                 Int    = NumEntries / NumWay / prefetchParameters.NumBanks
+  def TagWidth:                Int    = prefetchParameters.TagWidth
+  def TargetWidth:             Int    = prefetchParameters.TargetWidth
+  def SetIdxLen:               Int    = log2Ceil(NumSets)
+  def BankIdxLen:              Int    = log2Ceil(prefetchParameters.NumBanks)
+  def WriteBufferSize:         Int    = prefetchParameters.WriteBufferSize
+  def Replacer:                String = prefetchParameters.Replacer
+  def CfiAlignedPositionWidth: Int    = CfiPositionWidth - 1 // TODO: fix it
 }

@@ -22,10 +22,11 @@ import utils.AddrField
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.TargetFixHelper
 
 trait Helpers extends HasPrefetchBtbParameters
-    with HasXSParameter with TargetFixHelper {
+    with HasXSParameter with TargetFixHelper with HalfAlignHelper {
 
   val addrFields = AddrField(
     Seq(
@@ -55,14 +56,20 @@ trait Helpers extends HasPrefetchBtbParameters
     addrFields.extract("tag", pc)
   def getBlockPcUpper(pc: PrunedAddr): UInt =
     pc(pc.length - 1, FetchBlockSizeWidth)
-
+  def getAlignPcUpper(pc: PrunedAddr): UInt =
+    pc(pc.length - 1, FetchBlockAlignWidth)
   def getPosition(pc: PrunedAddr): UInt =
-    addrFields.extract("position", pc)
+    addrFields.extract("cfiPosition", pc)
 
   def getBlockPc(pc: PrunedAddr): PrunedAddr =
     PrunedAddrInit(Cat(
       getBlockPcUpper(pc),
       0.U(FetchBlockSizeWidth.W)
+    ))
+  def getAlignPc(pc: PrunedAddr): PrunedAddr =
+    PrunedAddrInit(Cat(
+      getAlignPcUpper(pc),
+      0.U(FetchBlockAlignWidth.W)
     ))
   def getCfiPc(pc: PrunedAddr, pos: UInt): PrunedAddr =
     PrunedAddrInit(Cat(

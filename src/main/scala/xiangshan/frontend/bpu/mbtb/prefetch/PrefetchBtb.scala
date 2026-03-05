@@ -81,16 +81,30 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s2_InstOffset = getPosition(s2_startPc)
   private val s2_setIdx     = getSetIndex(s2_startPc)
   private val s2_bankMask   = UIntToOH(getBankIndex(s2_startPc))
+  private val s2_halfAlign  = s2_startPc(FetchBlockSizeWidth - 1).asBool
+  dontTouch(s2_halfAlign)
   s2_fire := io.stageCtrl.s2_fire && io.enable
-  (io.result zip s2_entries zip io.meta.entries).foreach { case ((result, entry), meta) =>
-    val hit = entry.sramData.tag === s2_tag
-    result.valid            := entry.valid && s2_fire && hit && entry.sramData.position >= s2_InstOffset
+  (io.result zip s2_entries zip io.meta.entries).zipWithIndex.foreach { case (((result, entry), meta), idx) =>
+    /*prefetch btb pos is 64B ALIGN
+    e.g.
+    startPC:0x10, postion = entry.sramData.position
+    startPC:0x30, postion = entry.sramData.position - 16 =
+    Cat(0,entry.sramData.position(CfiAlignedPositionWidth-1,0)
+    TODO: add align bank to increase pred res
+     */
+    val hit = entry.valid && entry.sramData.tag === s2_tag && entry.sramData.position >= s2_InstOffset
+    val position = Mux(
+      s2_halfAlign,
+      Cat(~s2_halfAlign, entry.sramData.position(CfiAlignedPositionWidth - 1, 0)),
+      entry.sramData.position
+    )
+    result.valid            := s2_fire && hit
     result.bits.taken       := meta.counter.isPositive
     result.bits.target      := getFullTarget(s2_startPc, entry.sramData.target, None)
     result.bits.attribute   := entry.sramData.attribute
-    result.bits.cfiPosition := entry.sramData.position
-    meta.rawHit             := hit && entry.valid
-    meta.position           := entry.sramData.position
+    result.bits.cfiPosition := position
+    meta.rawHit             := hit
+    meta.position           := position
     meta.counter            := Mux(entry.used, entry.counter, TakenCounter.WeakPositive)
     meta.attribute          := entry.sramData.attribute
   }
@@ -204,7 +218,6 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   for (i <- 0 until NumWay) {
     val writeIdx = if (i == 0) 0.U else PopCount(w1_victimWayMask(i - 1, 0))
-
     w1_writeEntries(i) := w1_prefetchEntries(writeIdx)
   }
   banks.zipWithIndex.foreach { case (bank, idx) =>

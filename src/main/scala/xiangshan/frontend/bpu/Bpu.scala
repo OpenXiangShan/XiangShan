@@ -154,12 +154,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_startPc = RegEnable(s2_startPc, s2_fire)
 
   // abtb meta won't be sent to ftq, used for abtb fast train
-  private val s2_abtbMeta = RegEnable(abtb.io.meta, s1_fire)
-  private val s3_abtbMeta = RegEnable(s2_abtbMeta, s2_fire)
-
-  private val s1_utageMeta = Wire(new MicroTageMeta)
-  private val s2_utageMeta = RegEnable(s1_utageMeta, s1_fire)
-  private val s3_utageMeta = RegEnable(s2_utageMeta, s2_fire)
+  private val s2_abtbMeta       = RegEnable(abtb.io.meta, s1_fire)
+  private val s3_abtbMeta       = RegEnable(s2_abtbMeta, s2_fire)
+  private val s3_usePrefetchBtb = Wire(Bool())
+  private val s1_utageMeta      = Wire(new MicroTageMeta)
+  private val s2_utageMeta      = RegEnable(s1_utageMeta, s1_fire)
+  private val s3_utageMeta      = RegEnable(s2_utageMeta, s2_fire)
 
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
@@ -185,7 +185,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   }
 
   private val fastTrain = Wire(Valid(new BpuFastTrain))
-  fastTrain.valid                := s3_valid
+  fastTrain.valid                := s3_valid && !s3_usePrefetchBtb
   fastTrain.bits.startPc         := s3_startPc
   fastTrain.bits.finalPrediction := s3_prediction
   fastTrain.bits.abtbMeta        := s3_abtbMeta
@@ -364,9 +364,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_condHitMask        = RegEnable(s2_condHitMask, s2_fire)
   private val s3_mbtbResult         = RegEnable(s2_mbtbResult, s2_fire)
   private val s3_firstTakenBranchOH = RegEnable(s2_firstTakenBranchOH, s2_fire)
-  private val s3_firstTakenBranch   = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult)
-  private val s3_useRas             = s3_firstTakenBranch.bits.attribute.isReturn
-  private val s3_useIttage          = s3_firstTakenBranch.bits.attribute.needIttage && ittage.io.prediction.hit
+
+  private val s3_firstTakenBranch = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult)
+  private val s3_useRas           = s3_firstTakenBranch.bits.attribute.isReturn
+  private val s3_useIttage        = s3_firstTakenBranch.bits.attribute.needIttage && ittage.io.prediction.hit
 
   private val s2_fallThroughPrediction = RegEnable(fallThrough.io.prediction, s1_fire)
   private val s3_fallThroughPrediction = RegEnable(s2_fallThroughPrediction, s2_fire)
@@ -374,6 +375,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_takenMask = RegEnable(s2_takenMask, s2_fire)
   mbtb.io.s3_takenMask := s3_takenMask
 
+  s3_usePrefetchBtb         := OHToUInt(s3_firstTakenBranchOH) >= NumMBtbResultEntries.U
   s3_prediction.taken       := s3_taken
   s3_prediction.cfiPosition := Mux(s3_taken, s3_firstTakenBranch.bits.cfiPosition, s3_fallThroughPrediction.cfiPosition)
   s3_prediction.attribute   := Mux(s3_taken, s3_firstTakenBranch.bits.attribute, s3_fallThroughPrediction.attribute)

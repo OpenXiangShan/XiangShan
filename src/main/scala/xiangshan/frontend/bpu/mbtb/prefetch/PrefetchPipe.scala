@@ -43,11 +43,15 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   /* S1:Get pc and decode data
    *  */
   private val s1_isNextLine = RegEnable(s0_isNextLine, s0_valid)
+  // 64B align :because refill addr is 64B align
   private val s1_startPc =
     Mux(s1_isNextLine, getBlockPc(io.ftqEntry.startPc + (CacheLineSize / 8).U), io.ftqEntry.startPc)
-  private val s1_cfiOffset = WireInit(io.ftqEntry.takenCfiOffset)
-  private val s1_data      = RegEnable(io.prefetchData.bits.data, s0_valid)
-  private val s1_isRVC     = RegEnable(io.prefetchData.bits.maybeRvcMap, s0_valid).asBools
+  private val s1_cfiOffset = WireInit(io.ftqEntry.takenCfiOffset) // the offset relative with startPC
+  private val s1_cfiPosition =
+    Wire(UInt(CfiPositionWidth.W)) // the offset relative with align 32B(max 32) simliar to mbtb pos
+  private val s1_cfiAlignPosition = Wire(UInt(CfiPositionWidth.W)) // the offset relative with align 64B
+  private val s1_data             = RegEnable(io.prefetchData.bits.data, s0_valid)
+  private val s1_isRVC            = RegEnable(io.prefetchData.bits.maybeRvcMap, s0_valid).asBools
 
   // default at most 32 inst per cacheline
   private val s1_cutInst       = Wire(Vec(ICacheLineBytes / 2, UInt(32.W)))
@@ -66,13 +70,22 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   private val s1_finalInstValidOff2 = Wire(Vec(ICacheLineBytes / 2, Bool()))
   private val s1_finalInstValid     = Wire(Vec(ICacheLineBytes / 2, Bool()))
 
-  s1_cfiOffset.bits := Mux(
-    io.ftqEntry.takenCfiOffset.valid && !s1_isNextLine,
-    io.ftqEntry.takenCfiOffset.bits,
-    ((1 << s1_cfiOffset.bits.getWidth) - 1).U
+  private val s1_blkOffset = s1_startPc(FetchBlockSizeWidth - 1, 0)
+
+  // if end cfi cross line
+  private val s1_blkEndOffsetTmp = s1_blkOffset +& Cat(s1_cfiOffset.bits, 0.U(instOffsetBits.W))
+  private val s1_doubleline      = s1_valid && s1_blkEndOffsetTmp(FetchBlockSizeWidth)
+  // if startPC in the second half 32B
+  private val s1_halfAlign = s1_startPc(FetchBlockSizeWidth - 1).asBool
+  s1_cfiPosition := getAlignedPosition(s1_startPc, s1_cfiOffset.bits)._1
+
+  s1_cfiAlignPosition := Mux(
+    s1_isNextLine || s1_doubleline,
+    (FetchBlockInstNum - 1).U,
+    Mux(s1_halfAlign, s1_cfiPosition + FetchBlockAlignInstNum.U, s1_cfiPosition)
   )
   s1_startRange := (Fill(FetchBlockInstNum, 1.U(1.W)) << getPosition(s1_startPc))(FetchBlockInstNum - 1, 0).asBools
-  s1_endRange   := (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~s1_cfiOffset.bits).asUInt).asBools
+  s1_endRange   := (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~s1_cfiAlignPosition).asUInt).asBools
   // TODO:simplify logic
   s1_instRange   := (s1_startRange.asUInt & s1_endRange.asUInt).asBools
   s1_shadowRange := s1_instRange.map(!_)
@@ -124,7 +137,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
 
   // TODO: add more branch type
   private val s2_shadowBranchMask = (s2_branchInfo zip s2_finalInstrValid).map { case (info, valid) =>
-    info.valid && (info.brAttribute.isDirect || info.brAttribute.isConditional) && valid
+    info.valid && (info.brAttribute.isDirect) && valid
   }
   private val s2_revBranchInfo = s2_branchInfo.reverse
 
@@ -147,12 +160,14 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
     val idx     = Wire(UInt(CfiPositionWidth.W)).suggestName(s"s2_reverseIdx${i - 1}")
     idx := OHToUInt(matchOH)
     val buildValid = matchOH.reduce(_ || _)
+    // different from mbtb pos
+    val position = ~idx
     prefetchWrite.bits.entries(i - 1).valid                   := s2_revBranchInfo(idx).valid && buildValid
     prefetchWrite.bits.entries(i - 1).bits.victim             := false.B
     prefetchWrite.bits.entries(i - 1).bits.valid              := s2_revBranchInfo(idx).valid && buildValid
     prefetchWrite.bits.entries(i - 1).bits.used               := false.B
     prefetchWrite.bits.entries(i - 1).bits.counter            := TakenCounter.WeakPositive
-    prefetchWrite.bits.entries(i - 1).bits.sramData.position  := ~idx
+    prefetchWrite.bits.entries(i - 1).bits.sramData.position  := position
     prefetchWrite.bits.entries(i - 1).bits.sramData.attribute := s2_revBranchInfo(idx).brAttribute
     prefetchWrite.bits.entries(i - 1).bits.sramData.target    := s2_jumpOffset.reverse(idx).asUInt
     prefetchWrite.bits.entries(i - 1).bits.sramData.tag       := getTag(s2_startPc)
@@ -180,6 +195,9 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   dontTouch(debug_s1InstRange)
   dontTouch(debug_s1ShadowRange)
   dontTouch(debug_s1FinalInstValid)
+  dontTouch(s1_doubleline)
+  dontTouch(s1_halfAlign)
+  dontTouch(s1_cfiAlignPosition)
   dontTouch(s1_startPc)
   dontTouch(s1_isNextLine)
   dontTouch(s1_instRange)
