@@ -776,27 +776,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // Because all the unfairness between ldu0 and ldu1/2, such as bank conflicts and lower entry priority in MissQueue,
   // belong to the replay channel, whose priority is higher than prefetch channel in loadunit.
   // Therefore, there is no need to distinguish among ldu0, ldu1, and ldu2 if **prefetch-request outstanding <= 1**.
-  // val canAcceptHighConfPrefetch = loadUnits.map(_.io.canAcceptHighConfPrefetch)
-  // val canAcceptLowConfPrefetch = loadUnits.map(_.io.canAcceptLowConfPrefetch)
-  // val canAcceptPrefetch = (0 until LduCnt + HyuCnt).map{ case i =>
-    // Mux(l1_pf_req.bits.confidence === 1.U, false.B, canAcceptLowConfPrefetch(i))
-    /* // if it needs to distinguish ldu0 with others, use the code below
-    if (LduCnt > 1 && i == 0) {
-      Mux(l1_pf_req.bits.confidence === 1.U, canAcceptHighConfPrefetch(i), canAcceptLowConfPrefetch(i))
-    } else {
-      canAcceptLowConfPrefetch(i)
-    } */
-  // }
+
   l1_pf_req.ready := dcache.io.prefetch_req.ready
 
-  // val toPrefetchValidVec = (0 until LduCnt + HyuCnt).map{ case i =>
-  //   if(i==0) l1_pf_req.valid && l1_pf_req.bits.confidence === 0.U
-  //   else l1_pf_req.valid && l1_pf_req.bits.confidence === 0.U && !canAcceptPrefetch.take(i).reduce(_ || _)
-  // }
-  loadUnits.zipWithIndex.foreach { case(u, i) => {
-    u.io.prefetch_req.valid <> false.B
-    u.io.prefetch_req.bits <> DontCare
-  }}
 
   // move all confidence prefetch to mainpipe
   dcache.io.prefetch_req.valid <> l1_pf_req.valid
@@ -810,11 +792,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     fuzzer.io.vaddr := DontCare
     fuzzer.io.paddr := DontCare
 
-    // override load_unit prefetch_req
-    loadUnits.foreach(load_unit => {
-      load_unit.io.prefetch_req.valid <> false.B
-      load_unit.io.prefetch_req.bits <> DontCare
-    })
 
     // move high confidence prefetch to mainpipe
     dcache.io.prefetch_req.valid <> fuzzer.io.req.valid
@@ -1448,8 +1425,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // use load_0's TLB
     atomicsUnit.io.dtlb <> amoTlb
 
-    // hw prefetch should be disabled while executing atomic insts
-    newLoadUnits.foreach(_.io.prefetchReq.valid := false.B)
 
     // make sure there's no in-flight uops in load unit
     assert(!newLoadUnits(0).io.ldout.toRob.valid)
