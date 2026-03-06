@@ -762,6 +762,19 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   XSPerfAccumulate(s"threshold_try_overflow", t1_writeValid && t1_thresholdOverflowVec.reduce(_ || _))
   XSPerfAccumulate(s"threshold_try_underflow", t1_writeValid && t1_thresholdUnderflowVec.reduce(_ || _))
 
+  private val s2_wayConflictMask = WireInit(VecInit.fill(NumWays)(false.B))
+  for {
+    i <- 0 until NumWays
+    j <- i + 1 until NumWays
+  } {
+    val sameWay      = (s2_mbtbResult(i).valid && s2_mbtbResult(i).valid) && (s2_wayIdx(i) === s2_wayIdx(j))
+    val diffPosition = s2_mbtbResult(i).bits.cfiPosition =/= s2_mbtbResult(j).bits.cfiPosition
+    when(sameWay && diffPosition) {
+      s2_wayConflictMask(j) := true.B
+    }
+  }
+  XSPerfAccumulate(s"s2_way_conflict", s2_wayConflictMask.reduce(_ || _))
+
   dontTouch(s2_sumPercsum)
   dontTouch(s2_totalPercsum)
   dontTouch(s2_hitMask)
