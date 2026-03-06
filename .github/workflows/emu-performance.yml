@@ -1,4 +1,4 @@
-name: EMU - Performance Test
+name: EMU Performance Test
 
 on:
   push:
