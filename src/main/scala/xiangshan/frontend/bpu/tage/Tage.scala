@@ -23,6 +23,7 @@ import utility.ChiselDB
 import utility.DataHoldBypass
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfLevel
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.HalfAlignHelper
@@ -645,7 +646,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   XSPerfAccumulate("total_train", io.stageCtrl.t0_fire)
   XSPerfAccumulate("train_has_cond", t0_fire)
   XSPerfAccumulate("read_conflict", debug_readBankConflict)
-  XSPerfAccumulate("reset_useful", t2_fire && usefulResetCtr.isSaturatePositive)
+  XSPerfAccumulate("reset_useful", t2_fire && usefulResetCtr.isSaturatePositive, XSPerfLevel.CRITICAL)
   XSPerfAccumulate(
     "allocate_not_needed_due_to_already_on_highest_table", {
       val mispredictBranchOH = PriorityEncoderOH(t2_trainInfoVec.map(b => b.valid && b.mispredicted))
@@ -653,11 +654,11 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       trainInfo.valid && trainInfo.mispredicted && trainInfo.hasProvider && trainInfo.providerTableOH(NumTables - 1)
     }
   )
-  XSPerfAccumulate("allocate_needed", t2_fire && t2_needAllocate)
-  XSPerfAccumulate("allocate_success", t2_fire && t2_allocate)
-  XSPerfAccumulate("allocate_failure", t2_fire && t2_needAllocate && !t2_canAllocate)
+  XSPerfAccumulate("allocate_needed", t2_fire && t2_needAllocate, XSPerfLevel.CRITICAL)
+  XSPerfAccumulate("allocate_success", t2_fire && t2_allocate, XSPerfLevel.CRITICAL)
+  XSPerfAccumulate("allocate_failure", t2_fire && t2_needAllocate && !t2_canAllocate, XSPerfLevel.CRITICAL)
   for (i <- 0 until NumTables) {
-    XSPerfAccumulate(s"table_${i}_allocate", t2_fire && t2_allocate && t2_allocateTableOH(i))
+    XSPerfAccumulate(s"table_${i}_allocate", t2_fire && t2_allocate && t2_allocateTableOH(i), XSPerfLevel.CRITICAL)
     XSPerfAccumulate(
       s"allocate_branch_provider_is_table_${i}",
       t2_fire && t2_allocateBranchTrainInfo.hasProvider && t2_allocateBranchTrainInfo.providerTableOH(i)

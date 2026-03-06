@@ -24,6 +24,7 @@ import utility.DelayN
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfLevel
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
@@ -531,6 +532,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     case (info, flip) =>
       flip && (s3_taken && info.bits.cfiPosition < s3_firstTakenPosition)
   }).reduce(_ || _) || (!s3_taken && s3_scFlipTage.reduce(_ || _))
+  XSPerfAccumulate("sc_flip_tage", s3_firstT2NT, XSPerfLevel.CRITICAL)
   // see class BpuPredictionSource in bpu/Bundles.scala:137
   private val s1_predictionSource =
     MuxCase(

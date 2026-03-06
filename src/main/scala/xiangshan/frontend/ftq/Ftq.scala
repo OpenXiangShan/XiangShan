@@ -30,6 +30,7 @@ import utility.UIntToMask
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfLevel
 import utility.XSPerfPriorityAccumulate
 import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
@@ -415,7 +416,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ("wrong_position", redirectCfiOffset =/= redirectPerfMeta.bpPred.cfiPosition),
       ("wrong_attribute", !(redirect.bits.attribute === redirectPerfMeta.bpPred.attribute)),
       ("wrong_target", redirect.bits.target =/= redirectPerfMeta.bpPred.target.toUInt)
-    )
+    ),
+    XSPerfLevel.CRITICAL
   )
 
   XSPerfAccumulate(
@@ -430,7 +432,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ("direct", redirect.bits.attribute.isDirect),
       ("indirect", redirect.bits.attribute.isIndirect),
       ("indirect_ret_call", redirect.bits.attribute.isReturnAndCall && redirect.bits.attribute.isIndirect)
-    )
+    ),
+    XSPerfLevel.CRITICAL
   )
 
   private val perf_mispredS1SourceVec = BpuPredictionSource.Stage1.getValidSeq(redirectPerfMeta.bpSource.s1Source)
@@ -439,17 +442,27 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate(
     "resolve_branch_mispredicts_s1_source",
     backendRedirect.valid && backendRedirect.bits.isMisPred && !redirectPerfMeta.bpSource.s3Override,
-    perf_mispredS1SourceVec
+    perf_mispredS1SourceVec,
+    XSPerfLevel.CRITICAL
   )
 
   XSPerfAccumulate(
     "resolve_branch_mispredicts_s3_source",
     backendRedirect.valid && backendRedirect.bits.isMisPred && redirectPerfMeta.bpSource.s3Override,
-    perf_mispredS3SourceVec
+    perf_mispredS3SourceVec,
+    XSPerfLevel.CRITICAL
   )
-  XSPerfAccumulate("resolve_redirects", backendRedirect.valid)
-  XSPerfAccumulate("resolve_branch_mispredicts", backendRedirect.valid && backendRedirect.bits.isMisPred)
-  XSPerfAccumulate("resolve_other_redirects", backendRedirect.valid && !backendRedirect.bits.isMisPred)
+  XSPerfAccumulate("resolve_redirects", backendRedirect.valid, XSPerfLevel.CRITICAL)
+  XSPerfAccumulate(
+    "resolve_branch_mispredicts",
+    backendRedirect.valid && backendRedirect.bits.isMisPred,
+    XSPerfLevel.CRITICAL
+  )
+  XSPerfAccumulate(
+    "resolve_other_redirects",
+    backendRedirect.valid && !backendRedirect.bits.isMisPred,
+    XSPerfLevel.CRITICAL
+  )
 
   // Commit-time statistics, should be correct-path only
   XSPerfAccumulate(
@@ -458,7 +471,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     Seq(
       ("num", true.B, PopCount(commitPerfMeta.isCfi)),
       ("mispredicts", true.B, commitPerfMeta.mispredict)
-    )
+    ),
+    XSPerfLevel.CRITICAL
   )
   XSPerfAccumulate(
     "commit_branch_type",
@@ -474,33 +488,39 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ),
       ("call", commitPerfMeta.mispredictBranchInfo.attribute.isCall),
       ("ret", commitPerfMeta.mispredictBranchInfo.attribute.isReturn)
-    )
+    ),
+    XSPerfLevel.CRITICAL
   )
 
   XSPerfAccumulate(
     "commit_branch_mispredicts_s1_mispred_s1_source",
     commit && commitPerfMeta.mispredict && !commitPerfMeta.bpuPerf.bpSource.s3Override,
-    BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
+    BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source),
+    XSPerfLevel.CRITICAL
   )
   XSPerfAccumulate(
     "commit_branch_mispredicts_s1_source",
     commit && commitPerfMeta.mispredict,
-    BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
+    BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source),
+    XSPerfLevel.CRITICAL
   )
   XSPerfAccumulate(
     "commit_branch_mispredicts_s3_source",
     commit && commitPerfMeta.mispredict,
-    BpuPredictionSource.Stage3.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s3Source)
+    BpuPredictionSource.Stage3.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s3Source),
+    XSPerfLevel.CRITICAL
   )
   XSPerfAccumulate(
     "commit_branch_mispredicts_reason",
     commit && commitPerfMeta.mispredict,
-    BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(commitPerfMeta.bpuPerf, commitPerfMeta.mispredictBranchInfo))
+    BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(commitPerfMeta.bpuPerf, commitPerfMeta.mispredictBranchInfo)),
+    XSPerfLevel.CRITICAL
   )
   XSPerfAccumulate(
     "commit_conditional_branch_mispredicts_reason",
     commit && commitPerfMeta.mispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional,
-    BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(commitPerfMeta.bpuPerf, commitPerfMeta.mispredictBranchInfo))
+    BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(commitPerfMeta.bpuPerf, commitPerfMeta.mispredictBranchInfo)),
+    XSPerfLevel.CRITICAL
   )
   XSPerfAccumulate(
     "commit_branch_mispredicts_type",
@@ -516,7 +536,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ),
       ("call", commitPerfMeta.mispredictBranchInfo.attribute.isCall),
       ("ret", commitPerfMeta.mispredictBranchInfo.attribute.isReturn)
-    )
+    ),
+    XSPerfLevel.CRITICAL
   )
 
   XSPerfHistogram(

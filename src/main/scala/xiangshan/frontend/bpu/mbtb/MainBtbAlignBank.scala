@@ -20,6 +20,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfLevel
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.Prediction
@@ -300,7 +301,8 @@ class MainBtbAlignBank(
       ("allocate", t1_entryNeedWrite),
       ("fixTarget", t1_hit && t1_mispredictInfo.bits.attribute.needIttage),
       ("fixAttribute", t1_hit && !(t1_mispredictInfo.bits.attribute === Mux1H(t1_hitMask, t1_meta.map(_.attribute))))
-    )
+    ),
+    XSPerfLevel.CRITICAL
   )
 
   XSPerfAccumulate("updateCounter", Mux(t1_fire, PopCount(t1_counterWayMask), 0.U))
