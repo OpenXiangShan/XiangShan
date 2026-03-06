@@ -254,6 +254,11 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   io.exceptionAddr.gpaddr := Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.gpaddr, loadQueue.io.exceptionAddr.gpaddr)
   io.exceptionAddr.isForVSnonLeafPTE:= Mux(RegNext(io.exceptionAddr.isStore), storeQueue.io.exceptionAddr.isForVSnonLeafPTE, loadQueue.io.exceptionAddr.isForVSnonLeafPTE)
   io.issuePtrExt := storeQueue.io.stAddrReadySqPtr
+  io.rob.loadMmio := loadQueue.io.rob.loadMmio
+  io.rob.loadMmioUop := loadQueue.io.rob.loadMmioUop
+  io.rob.storeMmio := storeQueue.io.rob.storeMmio
+  io.rob.storeMmioUop := storeQueue.io.rob.storeMmioUop
+
 
   // naive uncache arbiter
   val s_idle :: s_load :: s_store :: Nil = Enum(3)

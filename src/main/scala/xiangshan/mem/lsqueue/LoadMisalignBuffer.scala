@@ -135,8 +135,10 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
     val loadMisalignFull = Output(Bool())
   })
 
-  io.rob.mmio := 0.U.asTypeOf(Vec(LoadPipelineWidth, Bool()))
-  io.rob.uop  := 0.U.asTypeOf(Vec(LoadPipelineWidth, new DynInst))
+  io.rob.loadMmio := DontCare
+  io.rob.loadMmioUop  := DontCare
+  io.rob.storeMmio := DontCare
+  io.rob.storeMmioUop  := DontCare
 
   val req_valid = RegInit(false.B)
   val req = Reg(new LqWriteBundle)
