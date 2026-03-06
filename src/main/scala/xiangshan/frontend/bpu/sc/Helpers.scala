@@ -78,17 +78,22 @@ trait Helpers extends HasScParameters with PhrHelper {
       "Length of writeValidVec, takenMask and wayIdxVec should be the same"
     )
     val newEntries = Wire(Vec(oldEntries.length, new ScEntry()))
-    oldEntries.zip(newEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), wayIdx) =>
-      val newCtr = writeValidVec.zip(takenMask).zip(wayIdxVec).zip(branchIdxVec).foldLeft(oldEntry.ctr) {
-        case (prevCtr, (((writeValid, writeTaken), writeWayIdx), branchIdx)) =>
-          val needUpdate = writeValid && writeWayIdx === wayIdx.U && metaData.tagePredValid(branchIdx) &&
-            (metaData.scPred(branchIdx) =/= writeTaken || !metaData.sumAboveThres(branchIdx))
-          prevCtr.getUpdate(
-            writeTaken,
-            needUpdate
-          )
-      }
-      newEntry.ctr := WireInit(newCtr)
+    // For each reslove branch, record its update direction, whether it has been updated, and which way it has been updated to
+    val writeNeedMask = VecInit(Seq.fill(writeValidVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
+    val writeDirMask  = VecInit(Seq.fill(writeValidVec.length)(VecInit(Seq.fill(oldEntries.length)(false.B))))
+    writeValidVec.zip(takenMask).zip(wayIdxVec).zip(branchIdxVec).zipWithIndex.foreach {
+      case ((((valid, taken), writeIdx), oldIdx), i) =>
+        val needUpdate = valid && metaData.tagePredValid(oldIdx) &&
+          (metaData.scPred(oldIdx) =/= taken || !metaData.sumAboveThres(oldIdx))
+        writeNeedMask(i)(writeIdx) := needUpdate
+        writeDirMask(i)(writeIdx)  := taken
+    }
+    oldEntries.zip(newEntries).zipWithIndex.foreach { case ((oldEntry, newEntry), i) =>
+      val writeHit = writeNeedMask.map(_(i))
+      val writeDir = writeDirMask.map(_(i))
+      val inc      = PopCount(writeHit.zip(writeDir).map { case (hit, dir) => hit && dir })
+      val dec      = PopCount(writeHit.zip(writeDir).map { case (hit, dir) => hit && !dir })
+      newEntry.ctr := Mux(inc >= dec, oldEntry.ctr.getIncrease(inc - dec), oldEntry.ctr.getDecrease(dec - inc))
     }
     newEntries
   }
