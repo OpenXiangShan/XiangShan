@@ -359,6 +359,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     req.bits.hlvx := DontCare
     req.bits.hyperinst := DontCare
     req.bits.pmp_addr := DontCare
+    req.bits.frm_mabuf := DontCare
   }
 
   val l1_replacement = new ValidPseudoLRU(MLP_L1_SIZE)

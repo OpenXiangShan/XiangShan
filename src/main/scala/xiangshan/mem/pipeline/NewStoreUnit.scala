@@ -224,6 +224,8 @@ class StoreUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.memidx.idx := uop.sqIdx.value
   io.tlbReq.bits.no_translate := false.B
   io.tlbReq.bits.pmp_addr := DontCare
+  // TODO: Should be fixed later; see https://github.com/OpenXiangShan/XiangShan/pull/5610
+  io.tlbReq.bits.frm_mabuf := false.B
   io.tlbReq.bits.debug.pc := uop.pc
   io.tlbReq.bits.debug.robIdx := uop.robIdx
   io.tlbReq.bits.debug.isFirstIssue := sink.bits.isFirstIssue

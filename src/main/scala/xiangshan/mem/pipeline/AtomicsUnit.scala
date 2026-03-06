@@ -137,6 +137,8 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   io.dtlb.req.valid    := false.B
   io.dtlb.req.bits     := DontCare
+  // TODO: Should be fixed later; see https://github.com/OpenXiangShan/XiangShan/pull/5610
+  io.dtlb.req.bits.frm_mabuf := false.B
   io.dtlb.req_kill     := false.B
   io.dtlb.resp.ready   := true.B
 

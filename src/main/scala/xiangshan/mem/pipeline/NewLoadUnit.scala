@@ -416,6 +416,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.isPrefetch := isPrefetch
   io.tlbReq.bits.no_translate := noQuery
   io.tlbReq.bits.pmp_addr := DontCare // TODO: move this outside of TlbReq
+  // TODO: Should be fixed later; see https://github.com/OpenXiangShan/XiangShan/pull/5610
+  io.tlbReq.bits.frm_mabuf := false.B
   io.tlbReq.bits.debug.pc := uop.pc
   io.tlbReq.bits.debug.robIdx := uop.robIdx
   io.tlbReq.bits.debug.isFirstIssue := firstIssue
