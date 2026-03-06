@@ -84,11 +84,11 @@ jobs:
         run: |
           make sim-verilog CHISEL_TARGET=chirrtl
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: build MinimalConfig Release emu
+      - name: build TLMinimalConfig Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 8 --config MinimalConfig --release --trace-fst
-      - name: run MinimalConfig - Linux
+            --threads 8 --config TLMinimalConfig --release --trace-fst
+      - name: run TLMinimalConfig - Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort
@@ -229,15 +229,15 @@ jobs:
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: build KunminghuV2Config Release emu
+      - name: build CHIConfig Release emu
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 8 --config KunminghuV2Config --release --trace-fst
-      - name: run KunminghuV2Config - nommu Linux UART16550
+            --threads 8 --config CHIConfig --release --trace-fst
+      - name: run CHIConfig - nommu Linux UART16550
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-nommu-uart16550 2> perf.log
           cat perf.log | sort
-      - name: run KunminghuV2Config - Linux
+      - name: run CHIConfig - Linux
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
           cat perf.log | sort

@@ -25,7 +25,7 @@ import chiseltest._
 import chiseltest.ChiselScalatestTester
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.must.Matchers
-import top.{ArgParser, BaseConfig, DefaultConfig}
+import top.{ArgParser, TLConfig}
 import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.{VSew, Vl}
 import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
@@ -212,7 +212,7 @@ object VerilogMgu extends App {
 
 class MguTest extends AnyFlatSpec with ChiselScalatestTester with Matchers {
 
-  val defaultConfig = (new DefaultConfig).alterPartial({
+  val defaultConfig = (new TLConfig).alterPartial({
     case XSCoreParamsKey => XSCoreParameters()
   })
 
