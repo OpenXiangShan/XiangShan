@@ -39,8 +39,8 @@ trait Helpers extends HasMainBtbParameters
     extraFields = Seq(
       ("replacerSetIdx", FetchBlockSizeWidth, SetIdxLen),
       ("targetLower", instOffsetBits, TargetWidth),
-      ("position", instOffsetBits, FetchBlockAlignWidth),
-      ("cfiPosition", instOffsetBits, FetchBlockSizeWidth)
+      ("position", instOffsetBits, CfiAlignedPositionWidth),
+      ("cfiPosition", instOffsetBits, CfiPositionWidth)
     )
   )
 
