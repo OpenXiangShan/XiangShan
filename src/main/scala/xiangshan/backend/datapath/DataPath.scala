@@ -98,45 +98,33 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   private val vfRdNotBlock: Seq2[Bool] = vfRdArbWinner.map(_.map(_.asUInt.andR))
   private val v0RdNotBlock: Seq2[Bool] = v0RdArbWinner.map(_.map(_.asUInt.andR))
 
-  private val intRFReadReq: Seq3[RfReadPortWithConfig] = fromIQDeqOg1Payload.map(x => x.map(xx => xx.rf.map(_.head)).toSeq).toSeq
-  private val fpRFReadReq : Seq3[RfReadPortWithConfig] = fromIQDeqOg1Payload.map(x => x.map(xx => xx.rf.map(_.head)).toSeq).toSeq
-  private val vecRFReadReq: Seq3[RfReadPortWithConfig] = fromIQDeqOg1Payload.map(x => x.map(xx => xx.rf.map(_.head)).toSeq).toSeq
-  private val v0RFReadReq : Seq3[RfReadPortWithConfig] = fromIQDeqOg1Payload.map(x => x.map(xx => xx.rf.map(_.head)).toSeq).toSeq
-  private val vlRFReadReq : Seq2[Option[RfReadPortWithConfig]] = fromIQDeqOg1Payload.map(x => x.map(xx => xx.rfVl)).toSeq
-
   private val intRFRen: Seq2[Option[Vec[Bool]]] = fromIQ.map(x => x.map(xx => xx.bits.rfRen).toSeq)
   private val fpRFRen : Seq2[Option[Vec[Bool]]] = fromIQ.map(x => x.map(xx => xx.bits.fpRen).toSeq)
   private val vecRFRen: Seq2[Option[Vec[Bool]]] = fromIQ.map(x => x.map(xx => xx.bits.vecRen).toSeq)
   private val v0RFRen : Seq2[Option[Vec[Bool]]] = fromIQ.map(x => x.map(xx => xx.bits.v0Ren).toSeq)
   private val vlRFRen : Seq2[Option[Bool]]      = fromIQ.map(x => x.map(xx => xx.bits.vlRen)).toSeq
 
-  private val allDataSources: Seq[Seq[Vec[DataSource]]] = fromIQ.map(x => x.map(xx => xx.bits.dataSources).toSeq)
-  private val allNumRegSrcs: Seq[Seq[Int]] = fromIQ.map(x => x.map(xx => xx.bits.exuParams.numRegSrc).toSeq)
-
-  intRFReadArbiter.io.in.zip(intRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
-    arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
+  intRFReadArbiter.io.in.zipWithIndex.foreach { case (arbInSeq2, iqIdx) =>
+    arbInSeq2.zipWithIndex.foreach { case (arbInSeq, exuIdx) =>
       val srcIndices: Seq[Int] = fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(IntData())
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
-        if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
+        if (srcIndices.contains(srcIdx)) {
           arbInSeq(srcIdx).valid := intRFRen(iqIdx)(exuIdx).get(srcIdx)
           arbInSeq(srcIdx).bits.addr := fromIQ(iqIdx)(exuIdx).bits.psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
           arbInSeq(srcIdx).bits.issueValid := fromIQ(iqIdx)(exuIdx).valid
         } else {
-          println(s"inRFReadReqSeq.size = ${inRFReadReqSeq.size}")
-          println(s"srcIndices.contains(srcIdx) = ${srcIndices.contains(srcIdx)}, inRFReadReqSeq.isDefinedAt(srcIdx) = ${inRFReadReqSeq.isDefinedAt(srcIdx)}")
-          println(s"iqIdx = $iqIdx, exuIdx = $exuIdx, srcIdx = $srcIdx, ${fromIQDeqOg1Payload(iqIdx)(exuIdx).params.name}")
           arbInSeq(srcIdx).valid := false.B
           arbInSeq(srcIdx).bits := 0.U.asTypeOf(arbInSeq(srcIdx).bits)
         }
       }
     }
   }
-  fpRFReadArbiter.io.in.zip(fpRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
-    arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
+  fpRFReadArbiter.io.in.zipWithIndex.foreach { case (arbInSeq2, iqIdx) =>
+    arbInSeq2.zipWithIndex.foreach { case (arbInSeq, exuIdx) =>
       val srcIndices: Seq[Int] = FpRegSrcDataSet.flatMap(data => fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(data)).toSeq.sorted
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
-        if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
+        if (srcIndices.contains(srcIdx)) {
           arbInSeq(srcIdx).valid := fpRFRen(iqIdx)(exuIdx).get(srcIdx)
           arbInSeq(srcIdx).bits.addr := fromIQ(iqIdx)(exuIdx).bits.psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
@@ -149,11 +137,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     }
   }
 
-  vfRFReadArbiter.io.in.zip(vecRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
-    arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
+  vfRFReadArbiter.io.in.zipWithIndex.foreach { case (arbInSeq2, iqIdx) =>
+    arbInSeq2.zipWithIndex.foreach { case (arbInSeq, exuIdx) =>
       val srcIndices: Seq[Int] = VecRegSrcDataSet.flatMap(data => fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(data)).toSeq.sorted
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
-        if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
+        if (srcIndices.contains(srcIdx)) {
           arbInSeq(srcIdx).valid := vecRFRen(iqIdx)(exuIdx).get(srcIdx)
           arbInSeq(srcIdx).bits.addr := fromIQ(iqIdx)(exuIdx).bits.psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
@@ -166,11 +154,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     }
   }
 
-  v0RFReadArbiter.io.in.zip(v0RFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq2), iqIdx) =>
-    arbInSeq2.zip(inRFReadReqSeq2).zipWithIndex.foreach { case ((arbInSeq, inRFReadReqSeq), exuIdx) =>
+  v0RFReadArbiter.io.in.zipWithIndex.foreach { case (arbInSeq2, iqIdx) =>
+    arbInSeq2.zipWithIndex.foreach { case (arbInSeq, exuIdx) =>
       val srcIndices: Seq[Int] = V0RegSrcDataSet.flatMap(data => fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(data)).toSeq.sorted
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
-        if (srcIndices.contains(srcIdx) && inRFReadReqSeq.isDefinedAt(srcIdx)) {
+        if (srcIndices.contains(srcIdx)) {
           arbInSeq(srcIdx).valid := v0RFRen(iqIdx)(exuIdx).get(srcIdx)
           arbInSeq(srcIdx).bits.addr := fromIQ(iqIdx)(exuIdx).bits.psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
@@ -183,8 +171,8 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     }
   }
 
-  vlRFReadArbiter.io.in.zip(vlRFReadReq).zipWithIndex.foreach { case ((arbInSeq2, inRFReadReqSeq), iqIdx) =>
-    arbInSeq2.zip(inRFReadReqSeq).zipWithIndex.foreach { case ((arbInSeq, inRFReadReq), exuIdx) =>
+  vlRFReadArbiter.io.in.zipWithIndex.foreach { case (arbInSeq2, iqIdx) =>
+    arbInSeq2.zipWithIndex.foreach { case (arbInSeq, exuIdx) =>
       arbInSeq.headOption.foreach(_.valid := vlRFRen(iqIdx)(exuIdx).get)
       arbInSeq.headOption.foreach(_.bits.addr := fromIQ(iqIdx)(exuIdx).bits.psrcVl.get)
       arbInSeq.headOption.foreach(_.bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx)
