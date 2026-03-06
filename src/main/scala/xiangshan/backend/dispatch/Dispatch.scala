@@ -455,6 +455,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     oh := fuConfigSeq.map(x => x.map(xx => in.bits.fuType(xx.fuType.id)).reduce(_ || _) && in.valid)
   }
   }
+  val fuTypeOHFromRename = Wire(Vec(renameWidth, Vec(needMultiExu.size, Bool())))
+  fuTypeOHFromRename.zip(fromRename).map{ case(oh, in) => {
+    oh := fuConfigSeq.map(x => x.map(xx => in.bits.fuType(xx.fuType.id)).reduce(_ || _) && in.valid)
+  }
+  }
   // not count itself
   val popFuTypeOH = Wire(Vec(renameWidth, Vec(needMultiExu.size, UInt((renameWidth-1).U.getWidth.W))))
   popFuTypeOH.zipWithIndex.map{ case (pop, idx) => {
@@ -468,9 +473,25 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
       }
     }
   }}
+  val popFuTypeOHFromRename = Wire(Vec(renameWidth, Vec(needMultiExu.size, UInt((renameWidth-1).U.getWidth.W))))
+  popFuTypeOHFromRename.zipWithIndex.map{ case (pop, idx) => {
+    if (idx == 0){
+      pop := 0.U.asTypeOf(pop)
+    }
+    else {
+      pop.zipWithIndex.map{ case (p, i) => {
+        p := PopCount(fuTypeOHFromRename.take(idx).map(x => x(i)))
+        }
+      }
+    }
+  }}
   val uopSelIQ = Reg(Vec(renameWidth, Vec(issueQueueNum, Bool())))
   val fuTypeOHSingle = Wire(Vec(renameWidth, Vec(needSingleIQ.size, Bool())))
   fuTypeOHSingle.zip(renameIn).map{ case (oh, in) => {
+    oh := needSingleIQ.map(_._1).map(x => x.map(xx => in.valid && in.bits.fuType(xx.fuType.id)).reduce(_ || _))
+  }}
+  val fuTypeOHSingleFromRename = Wire(Vec(renameWidth, Vec(needSingleIQ.size, Bool())))
+  fuTypeOHSingleFromRename.zip(fromRename).map{ case (oh, in) => {
     oh := needSingleIQ.map(_._1).map(x => x.map(xx => in.valid && in.bits.fuType(xx.fuType.id)).reduce(_ || _))
   }}
   val uopSelIQSingle = Wire(Vec(needSingleIQ.size, Vec(issueQueueNum, Bool())))
@@ -481,6 +502,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
                 Mux(fuTypeOH(i).asUInt.orR,
                   Mux1H(fuTypeOH(i), minIQSelAll)(Mux1H(fuTypeOH(i), popFuTypeOH(i))),
                   Mux1H(fuTypeOHSingle(i), uopSelIQSingle)),
+                0.U.asTypeOf(u)
+              )
+    }.elsewhen(io.fromRename(i).valid && !io.fromRename(i).ready) {
+      u := Mux(fromRename(i).valid,
+                Mux(fuTypeOHFromRename(i).asUInt.orR,
+                  Mux1H(fuTypeOHFromRename(i), minIQSelAll)(Mux1H(fuTypeOHFromRename(i), popFuTypeOHFromRename(i))),
+                  Mux1H(fuTypeOHSingleFromRename(i), uopSelIQSingle)),
                 0.U.asTypeOf(u)
               )
     }.elsewhen(io.fromRename(i).fire){
