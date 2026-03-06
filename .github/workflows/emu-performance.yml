@@ -308,7 +308,7 @@ jobs:
             if [ "${{ github.event_name }}" == "pull_request" ]; then
               echo "| Upstream | ${{ github.base_ref }} | ${{ github.event.pull_request.base.sha }} | ${{ steps.find_upstream.outputs.run_id }} |"
             fi
-            echo "| Current | ${{ github.head_ref }} | ${{ github.sha }} | ${{ github.run_id }} |"
+            echo "| Current | ${{ github.head_ref }} | ${{ github.event.pull_request.head.sha || github.sha }} | ${{ github.run_id }} |"
             echo ""
             echo "### IPC Report"
             echo "| Testcase | Current | Upstream | Diff |"
