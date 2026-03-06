@@ -123,7 +123,7 @@ case class Pbus2Params(
 /**
  * A configurable hierarchical AXI4 bus interconnect with heterogeneous input widths.
  */
-class AXIDataBridge(DataWidth: Int)(implicit p: Parameters) extends LazyModule {
+class AXIDataBridge(SrcDataWidth: Int,DestDataWidth: Int)(implicit p: Parameters) extends LazyModule {
   println("=====AXIDataBridge: start define=====")
   val axi_xbar_i = AXI4Xbar()
   val axi_xbar_o = AXI4Xbar()
@@ -133,8 +133,8 @@ class AXIDataBridge(DataWidth: Int)(implicit p: Parameters) extends LazyModule {
     params = DevNullParams(
       address = Seq(AddressSet(0x1000000000000L, 0xffffffffffffL)),
       maxAtomic = 1,
-      maxTransfer = DataWidth),
-    beatBytes = DataWidth/8
+      maxTransfer = 256), // max 32B
+    beatBytes = DestDataWidth/8
   ))
   error.node := error_xbar
   axi_xbar_o :=
@@ -142,14 +142,15 @@ class AXIDataBridge(DataWidth: Int)(implicit p: Parameters) extends LazyModule {
     AXI4Buffer() :=
 //    AXI4IdIndexer(idBits = 10) :=
     AXI4UserYanker() :=
-    AXI4Deinterleaver(DataWidth/8) :=
+    AXI4Deinterleaver(DestDataWidth/8) :=
     TLToAXI4() :=
     error_xbar :=
     TLBuffer.chainNode(2) :=
     TLFIFOFixer() :=
-    TLWidthWidget(DataWidth / 8) :=
+    TLWidthWidget(SrcDataWidth/8) :=
     AXI4ToTL() :=
     AXI4UserYanker() :=
+    // AXI4Fragmenter() :=
     AXI4Buffer() :=
     axi_xbar_i
   println("=====AXIDataBridge: end define=====")
@@ -268,7 +269,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   pcie_xbar1to2 := aplic_mNode
   pcie_xbar1to2 := AXI4Buffer() := hni_s_xbar
   // instance data width switch bridge
-  val u_DataBridge = LazyModule(new AXIDataBridge(DataWidth = params.MSIOutDataWidth))
+  val u_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.cpuDataWidth, DestDataWidth = params.MSIOutDataWidth))
   u_DataBridge.axi_xbar_i := Cbus.cpum
   pbus_xbar := u_DataBridge.axi_xbar_o
 //  val DataWidth = 32
