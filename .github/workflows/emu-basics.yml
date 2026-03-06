@@ -1,0 +1,182 @@
+name: EMU Basics Test
+
+on:
+  push:
+    branches: [ master, kunminghu-v3 ]
+  pull_request:
+    branches: [ master, kunminghu-v3 ]
+
+env:
+  # Set common environment variables for all jobs
+  NEMU_HOME: /nfs/home/share/ci-workloads/NEMU
+  AM_HOME: /nfs/home/share/ci-workloads/nexus-am
+  PERF_HOME: /nfs/home/ci-runner/emu-basics/${{ github.run_number }}
+  WAVE_HOME: /nfs/home/ci-runner/emu-basics/${{ github.run_number }}/wave
+
+jobs:
+  changes:
+    name: Changes Detection
+    permissions:
+      pull-requests: read
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          predicate-quantifier: 'every'
+          filters: .github/filters.yaml
+
+  build:
+    name: EMU - Basics - Build
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on: builder
+    outputs:
+      cluster: ${{ steps.save.outputs.cluster }}
+    timeout-minutes: 120
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Init
+        run: |
+          mkdir -p ${PERF_HOME} ${WAVE_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+      - name: Build EMU
+        run: |
+          # TODO: Use verilator for wave dump, switch to GSIM when ready
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+            --emulator verilator --threads 8 \
+            --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
+            --trace-fst
+      - name: Save artifact
+        id: save
+        # Maybe we can use upload-artifact here
+        # but ~100MB is too large and we don't have good enough internet on self-hosted runner
+        # so we just copy the binary to a shared directory
+        run: |
+          cp -L ${GITHUB_WORKSPACE}/build/emu ${PERF_HOME}/emu
+          if [[ $(hostname) == *.bosccluster.com ]]; then
+            echo "cluster=node" >> ${GITHUB_OUTPUT}
+          else
+            echo "cluster=open" >> ${GITHUB_OUTPUT}
+          fi
+
+  run:
+    name: EMU - Basics - Run
+    needs: build
+    runs-on:
+      - ${{ needs.build.outputs.cluster }} # use same cluster as builder to avoid cross-cluster network copy & pgo issue
+      - runner
+    timeout-minutes: 300
+    continue-on-error: false
+    strategy:
+      matrix:
+        include:
+          - name: cputest
+            without-numa: true # cputest is large number of small tests, numa is not necessary and slow
+          - name: riscv-tests
+            extra: --rvtest /nfs/home/share/ci-workloads/riscv-tests
+            without-numa: true # similar to cputest
+          - name: misc-tests
+          - name: rvh-tests
+          - name: microbench
+            report: true
+          - name: coremark
+            report: true
+          - name: linux-hello-opensbi
+            report: true
+          - name: povray
+            extra: --max-instr 5000000 --gcpt-restore-bin /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin
+            report: true
+          - name: copy_and_run
+            extra: --flash ${GITHUB_WORKSPACE}/ready-to-run/copy_and_run.bin
+            workload: ${GITHUB_WORKSPACE}/ready-to-run/microbench.bin
+            report: true
+          - name: rvv-bench
+          - name: f16_test
+            without-numa: true # similar to cputest
+          - name: zcb-test
+            without-numa: true # similar to cputest
+      fail-fast: false
+      max-parallel: 2
+    steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
+      - uses: actions/checkout@v6
+        with:
+          submodules: true
+      - name: Get artifact
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+          mkdir -p build
+          echo "Getting EMU binary from ${PERF_HOME}/emu"
+          cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
+      - name: Run Basic Test - ${{ matrix.name }}
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            ${{ !matrix.without-numa && '--numa' || '' }} --threads 8 \
+            ${{ matrix.workload || format('--ci {0}', matrix.name) }} \
+            ${{ matrix.extra }} \
+            2> ${{ matrix.report && 'stderr.log' || '/dev/null' }} | tee stdout.log
+
+            if [[ -n "${{ matrix.report }}" ]]; then
+              cat stderr.log | sort | tee stderr-sorted.log
+              grep -oP 'IPC = \K\d+\.\d+' stdout.log > "${PERF_HOME}/ipc-basics-${{ matrix.name }}"
+              echo "IPC: $(cat "${PERF_HOME}/ipc-basics-${{ matrix.name }}")"
+            fi
+      - name: Archive log
+        if: always() && matrix.report
+        run: |
+          tar -czvf "${PERF_HOME}/${{ matrix.name }}.tar.gz" stdout.log stderr-sorted.log
+
+  upload:
+    name: EMU - Basics - Upload
+    needs:
+      - build # needed to get the cluster info
+      - run
+    runs-on:
+      - ${{ needs.build.outputs.cluster }} # use same cluster as builder/runner to access NFS
+      - runner
+    steps:
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          name: ipc-reports
+          path: ${{ env.PERF_HOME }}/ipc-*
+
+  # We don't want a complex summary like emu-performance, here we just post to GITHUB_STEP_SUMMARY
+  summary:
+    name: EMU - Basics - Summary
+    permissions:
+      actions: read
+    needs: upload
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ipc-*
+          path: reports
+          merge-multiple: true
+      - name: Generate summary
+        if: always()
+        run: |
+          {
+            echo "## EMU - Basics Summary"
+            echo "| Testcase | IPC |"
+            echo "| -------- | --- |"
+            for file in reports/ipc-*; do
+              name=$(basename ${file} | cut -d '-' -f 2-)
+              ipc=$(cat ${file})
+              echo "| ${name} | ${ipc} |"
+            done
+          } >> $GITHUB_STEP_SUMMARY
