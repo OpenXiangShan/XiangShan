@@ -1730,4 +1730,9 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
       ld1Cancel.map(_ || ld2Cancel.get).getOrElse(false.B)
     }
   }
+
+  class DiffRCIdx(implicit p: Parameters) extends XSBundle {
+    val wen    = Bool()
+    val rcIdx = UInt(RegCacheIdxWidth.W)
+  }
 }
