@@ -116,6 +116,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val resp_s1_isLeaf = RegInit(false.B)
   val resp_s1_isFakePte = RegInit(false.B)
   val hasGpf = Wire(Vec(Width, Bool()))
+  val need_replay = WireInit(VecInit.fill(Width) {false.B})
 
   val Sv39Enable = csr.satp.mode === 8.U
   val Sv48Enable = csr.satp.mode === 9.U
@@ -133,6 +134,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) &&
     (mode(i) < ModeM)
   )
+  val isRobMatch = (0 until Width).map(i => req_out(i).debug.robIdx === io.robPendingPtr)
+  val canGetGpa =  (0 until Width).map(i => isRobMatch(i) || TlbCmd.isExec(req_out(i).cmd) || req_out(i).frm_mabuf)
 
   val useReqS1Paddr = (0 until Width).map(i => RegNext(req(i).bits.no_translate))
   val privNeedTranslate = (0 until Width).map(i => (vmEnable(i) || s2xlateEnable(i)))
@@ -291,15 +294,20 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp_gpa_refill := false.B
       need_gpa_vpn := 0.U
     }.elsewhen (req_out_v(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate && hasGpf(i) && need_gpa === false.B && !io.requestor(i).req_kill && !isPrefetch && !currentRedirect && !lastCycleRedirect) {
-      maybe_need_gpa_not_allow_refill := true.B
-      need_gpa_wire := true.B
-      need_gpa := true.B
-      need_gpa_vpn := get_pn(req_out(i).vaddr)
-      resp_gpa_refill := false.B
-      need_gpa_robidx := req_out(i).debug.robIdx
-      when (p_hit_fast) {
-        need_clear_need_gpa := true.B
+      when(canGetGpa(i)) {
+        maybe_need_gpa_not_allow_refill := true.B
+        need_gpa_wire := true.B
+        need_gpa := true.B
+        need_gpa_vpn := get_pn(req_out(i).vaddr)
+        resp_gpa_refill := false.B
+        need_gpa_robidx := req_out(i).debug.robIdx
+        when (p_hit_fast) {
+          need_clear_need_gpa := true.B
+        }
+      } .otherwise {
+        need_replay(i) := true.B
       }
+
     }.elsewhen (ptw.resp.fire && need_gpa && need_gpa_vpn === ptw.resp.bits.getVpn(need_gpa_vpn)) {
       resp_gpa_gvpn := Mux(ptw.resp.bits.s2xlate === onlyStage2, ptw.resp.bits.s2.entry.tag, ptw.resp.bits.s1.genGVPN(need_gpa_vpn))
       resp_s1_level := ptw.resp.bits.s1.entry.level.get
@@ -524,7 +532,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     when (req_out_v(idx) && missVec(idx)) {
       // NOTE: for an miss tlb request: either send a ptw request, or ask for a replay
-      when (ptw_just_back || ptw_already_back) {
+      when (ptw_just_back || ptw_already_back || need_replay(idx)) {
         io.tlbreplay(idx) := true.B;
       } .elsewhen (need_gpa && !need_gpa_vpn_hit && !resp_gpa_refill) {
         // not send any unrelated ptw request when l1tlb is in need_gpa state
@@ -533,7 +541,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         io.ptw.req(idx).valid := true.B;
       }
     }
-
+    dontTouch(need_replay(idx))
     when (io.requestor(idx).req_kill && GatedValidRegNext(io.requestor(idx).req.fire)) {
       io.ptw.req(idx).valid := false.B
       io.tlbreplay(idx) := true.B

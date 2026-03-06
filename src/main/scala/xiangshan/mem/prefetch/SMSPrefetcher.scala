@@ -984,6 +984,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
     tlb_req_arb.io.in(i).bits.hlvx := DontCare
     tlb_req_arb.io.in(i).bits.hyperinst := DontCare
     tlb_req_arb.io.in(i).bits.pmp_addr := DontCare
+    tlb_req_arb.io.in(i).bits.frm_mabuf := DontCare
 
     val pending_req_vec = ent.region_bits & (~ent.filter_bits).asUInt
     val first_one_offset = PriorityMux(
