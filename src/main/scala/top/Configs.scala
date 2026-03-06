@@ -466,7 +466,7 @@ class WithFuzzer extends Config((site, here, up) => {
   }
 })
 
-class FrontendDebugConfig(n: Int = 1) extends Config(
+class CHIFrontendDebugConfig(n: Int = 1) extends Config(
   (new CHIConfig(n)).alter((site, here, up) => {
     case XSTileKey => up(XSTileKey).map{ p => p.copy(
       frontendParameters = p.frontendParameters.copy(
