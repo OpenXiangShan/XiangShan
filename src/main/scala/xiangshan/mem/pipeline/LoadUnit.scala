@@ -650,7 +650,7 @@ class LoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModul
   )
   s0_dcache_vaddr := Mux(
     s0_src_select_vec(fast_rep_idx), io.fast_rep_in.bits.vaddr,
-    Mux(s0_hw_prf_select, io.prefetch_req.bits.getVaddr(),
+    Mux(s0_hw_prf_select, io.prefetch_req.bits.vaddr,
     Mux(s0_src_select_vec(nc_idx), io.lsq.nc_ldin.bits.vaddr, // not for dcache access, but for address alignment check
     s0_tlb_vaddr))
   )
