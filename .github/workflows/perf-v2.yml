@@ -40,7 +40,7 @@ jobs:
     if: needs.check-run.outputs.should_run == 'true'
     uses: ./.github/workflows/perf-template.yml
     with:
-      test_branch: master
+      test_branch: kunminghu-v2
       test_commit: ${{ github.event.inputs.test_commit }}
       benchmark_type: ${{ github.event.inputs.benchmark_type || 'spec06-1.0c' }}
       all_spec_dir: /nfs/home/cirunner/perf-report-master

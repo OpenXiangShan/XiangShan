@@ -3,9 +3,9 @@ name: EMU Test
 
 on:
   push:
-    branches: [ master ]
+    branches: [ kunminghu-v2 ]
   pull_request:
-    branches: [ master ]
+    branches: [ kunminghu-v2 ]
 
 jobs:
   changes: # Changes Detection

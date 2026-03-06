@@ -11,7 +11,7 @@ jobs:
     # At most 12 hours to finish (before 11:33 UTC+8).
     timeout-minutes: 720
     # Build + 8 checkpoints * 1-hour timeout
-    name: Nightly Regression(master) - Checkpoints
+    name: Nightly Regression(kunminghu-v2) - Checkpoints
     steps:
       - uses: actions/checkout@v4
         with:
