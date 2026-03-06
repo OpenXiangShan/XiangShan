@@ -21,11 +21,12 @@ import xiangshan.frontend.bpu.HasBpuParameters
 
 case class MainBtbParameters(
     NumEntries: Int = 8192,
-    NumWay:     Int = 4,
-    // Lowest level banks used to resolve read-write conflicts and reduce SRAM power, each bank is a physical SRAM
+    NumWay:     Int = 8,
+    // Lowest level banks, each bank is a physical SRAM
+    // This banking is used to resolve read-write conflicts and reduce SRAM power
     NumInternalBanks: Int = 4,
     // NumAlignBanks is determined by top-level FetchBlockSize and FetchBlockAlignSize, not adjustable in mbtb
-    WriteBufferSize: Int = 4,
+    WriteBufferSize: Int = 8,
     Replacer:        String = "Lru", // "Lru" or "Plru"
     // Entry config
     TagWidth:        Int = 16,
