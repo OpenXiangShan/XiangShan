@@ -28,6 +28,7 @@ import utility.XSPerfHistogram
 import xiangshan.Redirect
 import xiangshan.TopDownCounters
 import xiangshan.XSCoreParamsKey
+import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.icache.ICachePerfInfo
 import xiangshan.frontend.icache.ICacheTopdownInfo
@@ -47,9 +48,9 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
     }
 
     class IfuTopdownIn(implicit p: Parameters) extends IfuBundle {
-      val icacheTopdown:   ICacheTopdownInfo     = new ICacheTopdownInfo
-      val ftqTopdown:      FrontendTopDownBundle = new FrontendTopDownBundle
-      val topdownRedirect: Valid[Redirect]       = Valid(new Redirect)
+      val icacheTopdown:          ICacheTopdownInfo      = new ICacheTopdownInfo
+      val ftqTopdown:             FrontendTopDownBundle  = new FrontendTopDownBundle
+      val backendRedirectTopdown: BackendRedirectTopdown = new BackendRedirectTopdown
     }
     class IfuTopdownOut(implicit p: Parameters) extends IfuBundle {
       val topdown = new FrontendTopDownBundle
@@ -83,7 +84,6 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   val io: PerfAnalysisIO = IO(new PerfAnalysisIO)
   private val icacheTopdown     = io.topdownIn.icacheTopdown
   private val ftqTopdown        = io.topdownIn.ftqTopdown
-  private val topdownRedirect   = io.topdownIn.topdownRedirect
   private val s3_icachePerfInfo = io.perfInfo.icachePerfInfo
   private val checkPerfInfo     = io.perfInfo.checkPerfInfo
   private val toIBufferInfo     = io.perfInfo.toIBufferInfo
@@ -106,20 +106,7 @@ class IfuPerfAnalysis(implicit p: Parameters) extends IfuModule {
   when(itlbMissBubble) {
     topdownStages(1).reasons(TopDownCounters.ITLBMissBubble.id) := true.B
   }
-  when(topdownRedirect.valid) {
-    // only redirect from backend, IFU redirect itself is handled elsewhere
-    when(topdownRedirect.bits.debugIsCtrl) {}.elsewhen(topdownRedirect.bits.debugIsMemVio) {
-      for (i <- 0 until numOfStage) {
-        topdownStages(i).reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
-      }
-      io.topdownOut.topdown.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
-    }.otherwise {
-      for (i <- 0 until numOfStage) {
-        topdownStages(i).reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
-      }
-      io.topdownOut.topdown.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
-    }
-  }
+  topdownStages.foreach(_.backendRedirectOverride(io.topdownIn.backendRedirectTopdown))
 
   when(io.ifuPerfCtrl.ifuWbRedirect) {
     for (i <- 0 until numOfStage) {

@@ -2,6 +2,106 @@ package xiangshan.backend
 
 import chisel3._
 import chisel3.util._
+import xiangshan.TopDownCounters._
+
+class StoreBubbleReason(reasonW: Int) extends Module {
+  val io = IO(new Bundle{
+    val bubbleValid = Input(Bool())
+    val bubbleReason = Input(UInt(reasonW.W))
+    val redirect = Input(Bool())
+    val reasonFire = Input(Bool())
+    val outReasonValid = Output(Bool())
+    val outReason = Output(UInt(reasonW.W))
+  })
+  val NoStallReason = NoStall.id.U
+  val bubbleValidReg = RegInit(false.B)
+  val bubbleReasonReg = RegInit(NoStallReason)
+  val bubblevalidNext = WireDefault(bubbleValidReg)
+  val bubbleReasonNext = WireDefault(bubbleReasonReg)
+
+  val bubbleConsumed = bubbleValidReg && io.reasonFire
+  val canUpdate = (!bubbleValidReg) || bubbleConsumed
+
+  when (io.redirect) {
+    bubblevalidNext := false.B
+    bubbleReasonNext := NoStallReason
+  }.elsewhen(canUpdate && io.bubbleValid) {
+    bubblevalidNext := true.B
+    bubbleReasonNext := io.bubbleReason
+  }.elsewhen(bubbleConsumed) {
+    bubblevalidNext := false.B
+    bubbleReasonNext := NoStallReason
+  }.otherwise {
+    bubblevalidNext := bubbleValidReg
+    bubbleReasonNext := bubbleReasonReg
+  }
+
+  bubbleValidReg := bubblevalidNext
+  bubbleReasonReg := bubbleReasonNext
+
+  dontTouch(bubbleValidReg)
+  dontTouch(bubbleReasonReg)
+
+  io.outReason := Mux(io.bubbleValid && !bubbleValidReg, io.bubbleReason, bubbleReasonReg)
+  io.outReasonValid := bubbleValidReg || io.bubbleValid
+}
+
+class PipelineStallReason(reasonW: Int) extends Module {
+  val io = IO(new Bundle{
+    val rightFire = Input(Bool())
+    val rightHasFire = Input(Bool())
+    val prePipeStall = Input(Bool())
+    val prePipeStallReason = Input(UInt(reasonW.W))
+    val prePipeBubble = Input(Bool())
+    val prePipeBubbleReason = Input(UInt(reasonW.W))
+    val redirect = Input(Bool())
+    val redirectReason = Input(UInt(reasonW.W))
+    val currentPipeStall = Input(Bool())
+    val currentPipeStallReason = Input(UInt(reasonW.W))
+    val currentPipeBubble = Input(Bool())
+    val currentPipeBubbleReason = Input(UInt(reasonW.W))
+    val outReason = Output(UInt(reasonW.W))
+  })
+
+  val NoStallReason = NoStall.id.U
+
+  val redirectReg = RegNext(io.redirect)
+  val redirectReason = RegNext(io.redirectReason)
+
+  val prePipeStallReg = RegNext(io.prePipeStall)
+  val prePipeStallReasonReg = RegNext(io.prePipeStallReason)
+
+  val currentPipeStallReg = RegNext(io.currentPipeStall)
+  val currentPipeStallReasonReg = RegNext(io.currentPipeStallReason)
+
+  // todo current pipe bubble
+  // todo seperate bubble stall here(with class)
+
+  val currentPipeBubbleReg = RegNext(io.currentPipeBubble)
+  val currentPipeBubbleReasonReg = RegNext(io.currentPipeBubbleReason)
+
+
+  val reasonNext = Wire(UInt(reasonW.W))
+
+  when (io.redirect || redirectReg) {
+    reasonNext := Mux(io.redirect, io.redirectReason, redirectReg)
+  }.otherwise {
+    when (io.rightFire) {
+      reasonNext := NoStallReason
+    }.elsewhen(prePipeStallReg && !io.rightHasFire) {
+      reasonNext := prePipeStallReasonReg
+    }.elsewhen (currentPipeStallReg && !io.rightHasFire) {
+      reasonNext := currentPipeStallReasonReg
+    }.elsewhen (io.prePipeBubble) {
+      reasonNext := io.prePipeBubbleReason
+    }.elsewhen (currentPipeBubbleReg){
+      reasonNext := currentPipeBubbleReasonReg
+    }otherwise {
+      reasonNext := NoStallReason
+    }
+  }
+  io.outReason := reasonNext
+}
 
 class PipeGroupConnect[T <: Data](n: Int, gen: => T) extends Module {
   val io = IO(new Bundle {
