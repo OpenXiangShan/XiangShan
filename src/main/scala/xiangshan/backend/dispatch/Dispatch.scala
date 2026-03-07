@@ -1018,16 +1018,26 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
 
   val issueQueueStall = issueQueueStallVec(0)
   val issueQueueStallFutype = PriorityMux(issueQueueStallVec, fuTypes)
+  val balanceDispatchStall = PriorityMux(issueQueueStallVec, fromRenameFutypeNotOverIQ)
+  val balanceDispatchStallReason = MuxCase(NoStall.id.U, Seq(
+    FuType.isAlu(issueQueueStallFutype)         -> BalanceDispatchPolicyStallAlu.id.U   ,
+    FuType.isBJU(issueQueueStallFutype)         -> BalanceDispatchPolicyStallBrh.id.U   ,
+    FuType.isInt(issueQueueStallFutype)         -> BalanceDispatchPolicyStallInt.id.U   ,
+    FuType.isFArith(issueQueueStallFutype)      -> BalanceDispatchPolicyStallFp.id.U    ,
+    FuType.isVArith(issueQueueStallFutype)      -> BalanceDispatchPolicyStallVec.id.U   ,
+    FuType.isLoadVload(issueQueueStallFutype)   -> BalanceDispatchPolicyStallLoad.id.U  ,
+    FuType.isStoreVstore(issueQueueStallFutype) -> BalanceDispatchPolicyStallStore.id.U ,
+  ))
   val issueQueueStallReason = MuxCase(NoStall.id.U, Seq(
-    fromRenameFutypeNotOverIQ(0)                -> BalanceDispatchPolicyStall.id.U ,
-    FuType.isAlu(issueQueueStallFutype)         -> IntIQFullStallAlu.id.U          ,
-    FuType.isBJU(issueQueueStallFutype)         -> IntIQFullStallBrh.id.U          ,
-    FuType.isInt(issueQueueStallFutype)         -> IntIQFullStallOther.id.U        ,
-    FuType.isFArith(issueQueueStallFutype)      -> FpIQFullStall.id.U              ,
-    FuType.isVArith(issueQueueStallFutype)      -> VecIQFullStall.id.U             ,
-    FuType.isLoadVload(issueQueueStallFutype)   -> LoadIQFullStall.id.U            ,
-    FuType.isStoreVstore(issueQueueStallFutype) -> StoreIQFullStall.id.U           ,
-    issueQueueStall                             -> OtherIQFullStall.id.U           ,
+    fromRenameFutypeNotOverIQ(0)                -> balanceDispatchStallReason ,
+    FuType.isAlu(issueQueueStallFutype)         -> IntIQFullStallAlu.id.U     ,
+    FuType.isBJU(issueQueueStallFutype)         -> IntIQFullStallBrh.id.U     ,
+    FuType.isInt(issueQueueStallFutype)         -> IntIQFullStallOther.id.U   ,
+    FuType.isFArith(issueQueueStallFutype)      -> FpIQFullStall.id.U         ,
+    FuType.isVArith(issueQueueStallFutype)      -> VecIQFullStall.id.U        ,
+    FuType.isLoadVload(issueQueueStallFutype)   -> LoadIQFullStall.id.U       ,
+    FuType.isStoreVstore(issueQueueStallFutype) -> StoreIQFullStall.id.U      ,
+    issueQueueStall                             -> OtherIQFullStall.id.U      ,
   ))
 
   val dispatchlsqStall = dispatchlsqBubbleVec.reduce(_ && _)
@@ -1059,18 +1069,17 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
 
 
   val issueQueueBubble = issueQueueStallVec.reduce(_ || _)
-  val issueQueueBubbleFutype = PriorityMux(issueQueueStallVec, fuTypes)
-  val balanceDispatchStall = PriorityMux(issueQueueStallVec, fromRenameFutypeNotOverIQ)
+
 
   val issueQueueBubbleReason = MuxCase(NoStall.id.U, Seq(
-    balanceDispatchStall                         -> BalanceDispatchPolicyStall.id.U ,
-    FuType.isAlu(issueQueueBubbleFutype)         -> IntIQFullStallAlu.id.U          ,
-    FuType.isBJU(issueQueueBubbleFutype)         -> IntIQFullStallBrh.id.U          ,
-    FuType.isInt(issueQueueBubbleFutype)         -> IntIQFullStallOther.id.U        ,
-    FuType.isFArith(issueQueueBubbleFutype)      -> FpIQFullStall.id.U              ,
-    FuType.isVArith(issueQueueBubbleFutype)      -> VecIQFullStall.id.U             ,
-    FuType.isLoadVload(issueQueueBubbleFutype)   -> LoadIQFullStall.id.U            ,
-    FuType.isStoreVstore(issueQueueBubbleFutype) -> StoreIQFullStall.id.U           ,
+    balanceDispatchStall                        -> balanceDispatchStallReason ,
+    FuType.isAlu(issueQueueStallFutype)         -> IntIQFullStallAlu.id.U     ,
+    FuType.isBJU(issueQueueStallFutype)         -> IntIQFullStallBrh.id.U     ,
+    FuType.isInt(issueQueueStallFutype)         -> IntIQFullStallOther.id.U   ,
+    FuType.isFArith(issueQueueStallFutype)      -> FpIQFullStall.id.U         ,
+    FuType.isVArith(issueQueueStallFutype)      -> VecIQFullStall.id.U        ,
+    FuType.isLoadVload(issueQueueStallFutype)   -> LoadIQFullStall.id.U       ,
+    FuType.isStoreVstore(issueQueueStallFutype) -> StoreIQFullStall.id.U      ,
   ))
   //TODO explain
   val dispatchPolicyBubble = dispatchPolicyStallVec.reduce(_ || _)
