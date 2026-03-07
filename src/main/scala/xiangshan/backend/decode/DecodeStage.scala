@@ -318,7 +318,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   val inValidVec = io.in.map(_.valid)
   val inReadyVec = io.in.map(_.ready)
   val outReadyVec = io.out.map(_.ready)
-  val outValidVec = io.debugOutValid.get
+  val outValidVec = io.debugOutValid.getOrElse(VecInit.fill(RenameWidth)(false.B))
   val outFireVec = outReadyVec.zip(outValidVec).map { case (ready, valid) =>
     ready && valid
   }
