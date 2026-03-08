@@ -186,7 +186,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   }
 
   private val fastTrain = Wire(Valid(new BpuFastTrain))
-  fastTrain.valid                := Mux(s3_usePrefetchBtb, s3_valid && s3_usePrefetchUsed, s3_valid)
+  fastTrain.valid                := s3_valid // Mux(s3_usePrefetchBtb, s3_valid && s3_usePrefetchUsed, s3_valid)
   fastTrain.bits.startPc         := s3_startPc
   fastTrain.bits.finalPrediction := s3_prediction
   fastTrain.bits.abtbMeta        := s3_abtbMeta

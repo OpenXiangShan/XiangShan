@@ -88,7 +88,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   s1_endRange   := (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~s1_cfiAlignPosition).asUInt).asBools
   // TODO:simplify logic
   s1_instRange   := (s1_startRange.asUInt & s1_endRange.asUInt).asBools
-  s1_shadowRange := s1_instRange.map(!_)
+  s1_shadowRange := s1_endRange.map(!_)
   (0 until ICacheLineBytes / 2).foreach { i =>
     if (i == 0) {
       s1_instValidOff0(i) := true.B
@@ -137,7 +137,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
 
   // TODO: add more branch type
   private val s2_shadowBranchMask = (s2_branchInfo zip s2_finalInstrValid).map { case (info, valid) =>
-    info.valid && (info.brAttribute.isDirect) && valid
+    info.valid && (info.brAttribute.isDirect || info.brAttribute.isReturn) && valid
   }
   private val s2_revBranchInfo = s2_branchInfo.reverse
 
@@ -231,5 +231,9 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
     prefetchWrite.valid,
     0,
     NumWay
+  )
+  XSPerfAccumulate(
+    "prefetch_has_end_range",
+    s1_valid && s1_endRange.reduce(_ || _)
   )
 }

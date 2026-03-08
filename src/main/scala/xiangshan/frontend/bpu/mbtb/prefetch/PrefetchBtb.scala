@@ -276,6 +276,10 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     NumWay
   )
   XSPerfAccumulate(
+    "prefetch_used",
+    PopCount(t1_usedWayMask.map(_ && t1_fire))
+  )
+  XSPerfAccumulate(
     "predict_branch",
     io.result.map(_.valid).reduce(_ || _),
     Seq(
