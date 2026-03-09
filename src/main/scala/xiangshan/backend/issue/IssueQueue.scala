@@ -1006,8 +1006,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   }
   protected val enqValidCntDeq0 = PopCount(io.enq.map(_.fire).zip(deqCanAcceptVecEnq(0)).map { case (a, b) => a && b })
   protected val enqValidCntDeq1 = PopCount(io.enq.map(_.fire).zip(deqCanAcceptVecEnq.last).map { case (a, b) => a && b })
-  io.validCntDeqVec.head := RegNext(enqEntryValidCntDeq0 +& othersValidCntDeq0 - io.deqDelay.head.fire) // validCntDeqVec(0)
-  io.validCntDeqVec.last := RegNext(enqEntryValidCntDeq1 +& othersValidCntDeq1 - io.deqDelay.last.fire) // validCntDeqVec(1)
+  val finalSuccess = if (param.needSnResp) io.snResp.get.map(_.finalSuccess)
+                     else if (param.needS2Resp) io.s2Resp.get.map(_.finalSuccess)
+                     else if (param.needS0Resp) io.s0Resp.get.map(_.finalSuccess)
+                     else if (param.needOg2Resp) io.og2Resp.get.map(_.finalSuccess)
+                     else io.og1Resp.map(_.finalSuccess)
+  io.validCntDeqVec.head := enqEntryValidCntDeq0 +& othersValidCntDeq0 - finalSuccess.head // validCntDeqVec(0)
+  io.validCntDeqVec.last := enqEntryValidCntDeq1 +& othersValidCntDeq1 - finalSuccess.last // validCntDeqVec(1)
   private val othersLeftOneCaseVec = Wire(Vec(params.numEntries - params.numEnq, UInt((params.numEntries - params.numEnq).W)))
   othersLeftOneCaseVec.zipWithIndex.foreach { case (leftone, i) =>
     leftone := ~(1.U((params.numEntries - params.numEnq).W) << i)
