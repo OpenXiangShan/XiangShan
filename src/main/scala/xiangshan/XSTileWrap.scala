@@ -18,7 +18,7 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import device.{TIMER, TIMERParams, TimeAsync}
+import device.{CHIAsyncIODSU, CHIAsyncDEVDSU, CDBParams, TIMER, TIMERParams, TimeAsync}
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
@@ -87,9 +87,10 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         val l3MissMatch = Input(Bool())
       }
       val l3Miss = Input(Bool())
-      val chi = EnableCHIAsyncBridge match {
-        case Some(param) => new AsyncPortIO(param)
-        case None => new PortIO
+      val chi = (EnableCHIAsyncBridge, CHIAsyncFromDSU) match {
+        case (Some(param), true) => Flipped(new CHIAsyncIODSU(CDBParams()))
+        case (Some(param), false) =>new AsyncPortIO(param)
+        case _ => new PortIO
       }
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = EnableClintAsyncBridge match {
@@ -106,7 +107,6 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     })
 
     val reset_sync = withClockAndReset(clock, (reset.asBool || io.hartResetReq).asAsyncReset)(ResetGen(io.dft_reset))
-    val noc_reset_sync = EnableCHIAsyncBridge.map(_ => withClockAndReset(clock, noc_reset.get)(ResetGen(io.dft_reset)))
     val soc_reset_sync = withClockAndReset(clock, soc_reset)(ResetGen(io.dft_reset))
 
     // override LazyRawModuleImp's clock and reset
@@ -183,12 +183,16 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
 
     // CHI Async Queue Source
-    EnableCHIAsyncBridge match {
-      case Some(param) =>
-        val source = withClockAndReset(clock, reset_sync)(Module(new CHIAsyncBridgeSource(param)))
-        source.io.enq <> tile.module.io.chi.get
-        io.chi <> source.io.async
-      case None =>
+    (EnableCHIAsyncBridge, CHIAsyncFromDSU) match {
+      case (Some(param), true) => // chiasync bridge can be provided by customer J.
+        val chiasync_source = withClockAndReset(clock, reset_sync)(Module(new CHIAsyncDEVDSU(CDBParams())))
+        chiasync_source.io.chi <> tile.module.io.chi.get
+        io.chi <> chiasync_source.io.cdb
+      case (Some(param), false) =>
+        val chiasync_source = withClockAndReset(clock, reset_sync)(Module(new CHIAsyncBridgeSource(param)))
+        chiasync_source.io.enq <> tile.module.io.chi.get
+        io.chi <> chiasync_source.io.async
+      case _ =>
         require(enableCHI)
         io.chi <> tile.module.io.chi.get
     }
