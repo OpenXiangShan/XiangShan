@@ -625,6 +625,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           og0resp.bits.lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
           og0resp.bits.resp             := RespType.block
           og0resp.bits.fuType           := fromIQ(iqIdx)(iuIdx).bits.common.fuType
+          og0resp.bits.isVecPartReplay.foreach(_:= false.B)
+          og0resp.bits.vecReplayMask  .foreach(_:= 0.U)
+          og0resp.bits.vecReplayMbIdx .foreach(_:= 0.U)
 
           val og1resp = toIU.og1resp
           og1FailedVec2(iqIdx)(iuIdx)   := s1_toExuValid(iqIdx)(iuIdx) && !s1_toExuReady(iqIdx)(iuIdx)
@@ -633,6 +636,9 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           og1resp.bits.uopIdx.foreach(_ := s1_toExuData(iqIdx)(iuIdx).vpu.get.vuopIdx)
           og1resp.bits.sqIdx.foreach(_ :=  0.U.asTypeOf(new SqPtr))
           og1resp.bits.lqIdx.foreach(_ :=  0.U.asTypeOf(new LqPtr))
+          og1resp.bits.isVecPartReplay.foreach(_:= false.B)
+          og1resp.bits.vecReplayMask  .foreach(_:= 0.U)
+          og1resp.bits.vecReplayMbIdx .foreach(_:= 0.U)
           // respType:  success    -> IQ entry clear
           //            uncertain  -> IQ entry no action
           //            block      -> IQ entry issued set false, then re-issue

@@ -162,8 +162,10 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
 
   /* control */
   io.flush := flush
-  io.rob.mmio := DontCare
-  io.rob.uop := DontCare
+  io.rob.loadMmio := DontCare
+  io.rob.loadMmioUop := DontCare
+  io.rob.storeMmio := DontCare
+  io.rob.storeMmioUop := DontCare
   io.mmioSelect := (uncacheState =/= s_idle) && req.mmio
   io.slaveId.valid := slaveAccept
   io.slaveId.bits := slaveId
@@ -498,8 +500,8 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
 
   // rob
   for (i <- 0 until LoadPipelineWidth) {
-    io.rob.mmio(i) := RegNext(s1_valid(i) && s1_req(i).mmio)
-    io.rob.uop(i) := RegEnable(s1_req(i).uop, s1_valid(i))
+    io.rob.loadMmio(i) := RegNext(s1_valid(i) && s1_req(i).mmio)
+    io.rob.loadMmioUop(i) := RegEnable(s1_req(i).uop, s1_valid(i))
   }
 
 
