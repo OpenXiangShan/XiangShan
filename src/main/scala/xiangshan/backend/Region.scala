@@ -734,6 +734,12 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       staIQIdx = staIQIdx + 1
       VecInit(Mux(stdCnt > staCnt, stdCnt, staCnt))
     }
+    else if (iq.param.BrhCnt > 0 && iq.param.numDeq > 1) {
+      val allCnt = iq.io.validCntDeqVec(0) + iq.io.validCntDeqVec(1)
+      val aluCnt = Mux(allCnt > 12.U, allCnt, iq.io.validCntDeqVec(0))
+      val bjuCnt = Mux(allCnt > 12.U, allCnt, iq.io.validCntDeqVec(1))
+      VecInit(aluCnt, bjuCnt)
+    }
     else iq.io.validCntDeqVec
   }.flatten
   io.og0Cancel := dataPath.io.og0Cancel
