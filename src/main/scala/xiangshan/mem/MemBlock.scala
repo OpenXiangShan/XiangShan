@@ -899,6 +899,19 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // forward & NC bypass
     lsq.io.forward(i) <> newLoadUnits(i).io.sqForward
     sbuffer.io.forward(i) <> newLoadUnits(i).io.sbufferForward
+    dcache.io.lsu.forward_mshrStData(i) <> newLoadUnits(i).io.sbufferForward
+    // Rewrite newLoadUnits(i).io.sbufferForward.s2Resp to merge sbuffer and mshr st-ld forwarding data
+    newLoadUnits(i).io.sbufferForward.s2Resp.valid := sbuffer.io.forward(i).s2Resp.valid || dcache.io.lsu.forward_mshrStData(i).s2Resp.valid
+    newLoadUnits(i).io.sbufferForward.s2Resp.bits.matchInvalid := sbuffer.io.forward(i).s2Resp.valid && sbuffer.io.forward(i).s2Resp.bits.matchInvalid
+    for (k <- 0 until VDataBytes) {
+      when (sbuffer.io.forward(i).s2Resp.valid && sbuffer.io.forward(i).s2Resp.bits.forwardMask(k)) {
+        newLoadUnits(i).io.sbufferForward.s2Resp.bits.forwardData(k) := sbuffer.io.forward(i).s2Resp.bits.forwardData(k)
+        newLoadUnits(i).io.sbufferForward.s2Resp.bits.forwardMask(k) := true.B
+      } otherwise {
+        newLoadUnits(i).io.sbufferForward.s2Resp.bits.forwardData(k) := dcache.io.lsu.forward_mshrStData(i).s2Resp.bits.forwardData(k)
+        newLoadUnits(i).io.sbufferForward.s2Resp.bits.forwardMask(k) := dcache.io.lsu.forward_mshrStData(i).s2Resp.bits.forwardMask(k)
+      }
+    }
     uncache.io.forward(i) <> newLoadUnits(i).io.uncacheForward
     dcache.io.lsu.forward_D(i) <> newLoadUnits(i).io.tldForward
     dcache.io.lsu.forward_mshr(i) <> newLoadUnits(i).io.mshrForward

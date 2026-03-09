@@ -31,6 +31,7 @@ import xiangshan._
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache.wpu._
 import xiangshan.mem.prefetch._
+import xiangshan.mem.Bundles.SbufferForward
 import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr, MemorySize}
 
 // DCache specific parameters
@@ -634,6 +635,8 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
   val inflight = Bool()
   val paddr = UInt(PAddrBits.W)
   val raw_data = Vec(blockRows, UInt(rowBits.W))
+  val isFromStore = Bool()
+  val store_mask = UInt(cfg.blockBytes.W)
   val firstbeat_valid = Bool()
   val lastbeat_valid = Bool()
   val denied = Bool()
@@ -740,6 +743,8 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check
   val forward_D = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
   val forward_mshr = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
+  // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
+  val forward_mshrStData = Flipped(Vec(LoadPipelineWidth, new SbufferForward))
 }
 
 class DCacheTopDownIO(implicit p: Parameters) extends DCacheBundle {
@@ -1526,6 +1531,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // forward missqueue
   missQueue.io.forward <> io.lsu.forward_mshr
+  // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
+  missQueue.io.forward_stData <> io.lsu.forward_mshrStData
 
   // refill to load queue
  // io.lsu.lsq <> missQueue.io.refill_to_ldq

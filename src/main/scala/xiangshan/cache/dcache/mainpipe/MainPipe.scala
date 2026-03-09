@@ -869,11 +869,17 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.store_replay_resp.bits.replay := true.B // s2_grow_perm_fail
   io.store_replay_resp.bits.id := s2_req.id
 
-  io.store_hit_resp.valid := s3_valid && (s3_store_can_go || (s3_miss_can_go && s3_req.isStore))
+  val mshr_accept_store_miss = s2_valid && s2_can_go_to_mq && s2_req.isStore && !io.store_replay_resp.valid
+  val mshr_accept_store_miss_s3 = RegNext(mshr_accept_store_miss)
+  val mshr_accept_store_miss_id_s3 = RegEnable(s2_req.id, mshr_accept_store_miss)
+  // If a store is miss and accepted by mshr, tell Sbuffer it is a "hit". Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
+  //                                      (1) real hit       (2) store miss and accepted by mshr
+  io.store_hit_resp.valid := s3_valid && s3_store_can_go || mshr_accept_store_miss_s3
   io.store_hit_resp.bits.data := DontCare
   io.store_hit_resp.bits.miss := false.B
   io.store_hit_resp.bits.replay := false.B
-  io.store_hit_resp.bits.id := s3_req.id
+  io.store_hit_resp.bits.id := Mux(mshr_accept_store_miss_s3, mshr_accept_store_miss_id_s3, s3_req.id)
+  // io.store_refill_done_resp.valid := s3_valid && s3_miss_can_go && s3_req.isStore
 
   val atomic_hit_resp = Wire(new MainPipeResp)
   atomic_hit_resp.source := s3_req.source

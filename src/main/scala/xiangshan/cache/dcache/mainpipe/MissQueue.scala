@@ -36,6 +36,8 @@ import xiangshan._
 import xiangshan.mem.LqPtr
 import xiangshan.mem.prefetch._
 import xiangshan.mem.trace._
+import xiangshan.mem.Bundles.SbufferForward
+import freechips.rocketchip.util.UIntToAugmentedUInt
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
@@ -833,7 +835,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_to_ldq.bits.error := RegEnable(io.mem_grant.bits.corrupt || io.mem_grant.bits.denied, refill_to_ldq_en)
   io.refill_to_ldq.bits.refill_done := RegEnable(refill_done && io.mem_grant.fire, refill_to_ldq_en)
   io.refill_to_ldq.bits.hasdata := hasData
-  io.refill_to_ldq.bits.data_raw := refill_data_raw.asUInt
+  io.refill_to_ldq.bits.data_raw := refill_and_store_data.asUInt
   io.refill_to_ldq.bits.id := io.id
 
   // if the entry has a pending merge req, wait for it
@@ -958,6 +960,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.forwardInfo.inflight := req_valid
   io.forwardInfo.paddr := req.addr
   io.forwardInfo.raw_data := refill_and_store_data
+  io.forwardInfo.isFromStore := req.isFromStore
+  io.forwardInfo.store_mask := req_store_mask
   io.forwardInfo.firstbeat_valid := w_grantfirst_forward_info
   io.forwardInfo.lastbeat_valid := w_grantlast_forward_info
   io.forwardInfo.denied := denied
@@ -1062,6 +1066,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     // forward missqueue
     val forward = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
     val forwardS1PAddrMatch = Output(Vec(LoadPipelineWidth, Bool()))
+    // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
+    val forward_stData = Flipped(Vec(LoadPipelineWidth, new SbufferForward))
     val l2_pf_store_only = Input(Bool())
 
     val memSetPattenDetected = Output(Bool())
@@ -1183,6 +1189,51 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     XSError(((s1SelectOH - 1.U) & s1SelectOH).orR && s1RespValid, "multi mshr hit when forward!\n")
   }
 
+  io.forward_stData.zipWithIndex.foreach { case (forward, i) =>
+    val s0ReqValid_stLdForward = forward.s0Req.valid
+    val s0Req_stLdForward = forward.s0Req.bits
+    val s1ReqValid_stLdForward = RegNext(s0ReqValid_stLdForward)
+    val s1Req_stLdForward = RegEnable(s0Req_stLdForward, s0ReqValid_stLdForward)
+    val paddr_stLdForward = forward.s1Req.paddr
+    val s1PaddrMatchVec_stLdForward = VecInit(forwardInfo_vec.map{ case info =>
+      paddr_stLdForward(paddr_stLdForward.getWidth - 1, blockOffBits) === info.paddr(info.paddr.getWidth - 1, blockOffBits) &&
+      info.inflight})
+    val s1SelectOH_stLdForward = s1PaddrMatchVec_stLdForward.asUInt
+    dontTouch(s1SelectOH_stLdForward)
+    val s1ForwardInfo_stLdForward = Mux1H(s1SelectOH_stLdForward, forwardInfo_vec)
+
+    val VLENB = VLEN / 8
+    val paddr_selOH = (0 until (blockBytes / VLENB)).map(i => paddr_stLdForward(blockOffBits - 1, log2Up(VLENB)) === i.U)
+    val s1RespData_stLdForward = Mux1H(paddr_selOH,
+          s1ForwardInfo_stLdForward.raw_data.grouped(VLEN / rowBits).map(VecInit(_).asUInt).toSeq)
+    dontTouch(s1RespData_stLdForward)
+    val s1RespMask_stLdForward = Mux1H(paddr_selOH,
+         s1ForwardInfo_stLdForward.store_mask.grouped(VLENB).map(x => Mux(s1ForwardInfo_stLdForward.isFromStore, x, 0.U)))
+    dontTouch(s1RespMask_stLdForward)
+    val s1RespValid_stLdForward = s1ReqValid_stLdForward && s1SelectOH_stLdForward.orR
+    
+    forward.s2Resp.valid := RegNext(s1RespValid_stLdForward)
+    for (i <- 0 until VDataBytes) {
+      forward.s2Resp.bits.forwardData(i) := RegEnable(s1RespData_stLdForward.asUInt(8 * i + 7, 8 * i), s1RespValid_stLdForward) 
+      forward.s2Resp.bits.forwardMask(i) := RegEnable(s1RespMask_stLdForward(i), s1RespValid_stLdForward) && forward.s2Resp.valid
+    }
+
+    // val s1RespData_stLdForward = VecInit(
+    //   s1ForwardInfo_stLdForward.raw_data.grouped(VLEN / rowBits).map(VecInit(_).asUInt).toSeq
+    // )(paddr_stLdForward(blockOffBits - 1, log2Up(VLEN / 8)))
+    // dontTouch(s1RespData_stLdForward)
+    // val s1RespMask_stLdForward = Mux1H(s1SelectOH_stLdForward, forwardInfo_vec.map(x => Mux(x.isFromStore, x.store_mask, 0.U)))
+    // dontTouch(s1RespMask_stLdForward)
+    // val s1RespValid_stLdForward = s1ReqValid_stLdForward && s1SelectOH_stLdForward.orR
+    
+    // forward.s2Resp.valid := RegNext(s1RespValid_stLdForward)
+    // for (i <- 0 until VDataBytes) {
+    //   forward.s2Resp.bits.forwardData(i) := RegEnable(s1RespData_stLdForward.asUInt(8 * i + 7, 8 * i), s1RespValid_stLdForward) 
+    //   forward.s2Resp.bits.forwardMask(i) := RegEnable(s1RespMask_stLdForward(i), s1RespValid_stLdForward) && forward.s2Resp.valid
+    // }
+    forward.s2Resp.bits.matchInvalid := false.B
+  }
+    
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
 //  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
   // It is possible that one mshr wants to merge a req, while another mshr wants to reject it.
