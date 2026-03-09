@@ -78,9 +78,25 @@ jobs:
           echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}-${{ inputs.xs_config }}" >> $GITHUB_ENV
 
           case "${{ inputs.benchmark_type }}" in
+            "gcc15-spec06-0.3c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc15-spec06-0.3.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
+              ;;
+            "gcc15-spec06-0.8c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc15-spec06-0.8.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
+              ;;
             "gcc15-spec06-1.0c")
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
+              ;;
+            "xscc-spec06-0.3c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/xscc-spec06-0.3.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
+              ;;
+            "xscc-spec06-0.8c")
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/xscc-spec06-0.8.json" >> $GITHUB_ENV
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
               ;;
             "xscc-spec06-1.0c")
               echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
