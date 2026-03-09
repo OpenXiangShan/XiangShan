@@ -92,7 +92,9 @@ case class PeriParams(
 
 case class Pbus2Params(
     NumHarts:       Int = 2, // number of cpus +1(aplic)+1(pcie msi)
-    idBits:         Int = 4,
+    CPUidBits:      Int = 3,
+    APLICidBits:    Int = 0,
+    NOCidBits:    Int = 11,
     cpuAddrWidth:   Int = 32,
     cpuDataWidth:   Int = 64,
     dmHasBusMaster: Boolean = true,
@@ -140,7 +142,7 @@ class AXIDataBridge(SrcDataWidth: Int,DestDataWidth: Int)(implicit p: Parameters
   axi_xbar_o :=
 //    AXI4Buffer() :=
     AXI4Buffer() :=
-//    AXI4IdIndexer(idBits = 10) :=
+//    AXI4IdIndexer(CPUidBits = 10) :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(DestDataWidth/8) :=
     TLToAXI4() :=
@@ -162,7 +164,7 @@ class AXIDataBridge(SrcDataWidth: Int,DestDataWidth: Int)(implicit p: Parameters
 //  AXI4Buffer() :=
 //  AXI4Buffer() :=
 //  AXI4Buffer() :=
-//  AXI4IdIndexer(idBits =) :=
+//  AXI4IdIndexer(CPUidBits =) :=
 //  AXI4UserYanker() :=
 //  AXI4Deinterleaver(L3BlockSize) :=
 //  TLToAXI4() :=
@@ -241,7 +243,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     masters = Seq(AXI4MasterParameters(
       name = "master-node",
       maxFlight = Some(1),
-      id = IdRange(0, 1 << params.idBits)
+      id = IdRange(0, 1 << params.APLICidBits)
     ))
   )))
 
@@ -417,15 +419,15 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   val dm_self_mNode =
     AXI4MasterNode(Seq(AXI4MasterPortParameters(
       masters = Seq(AXI4MasterParameters(
-        name = "dm-self-Mnode",
-        id = IdRange(0, 1 << params.idBits)
+        name = "dm-self-Mnode"
+        // id = IdRange(0, 1 << params.idBits)
       ))
     )))
   val dm_mNode_crs =
     AXI4MasterNode(Seq(AXI4MasterPortParameters(
       masters = Seq(AXI4MasterParameters(
         name = "dm-mnode-crs",
-        id = IdRange(0, 1 << params.idBits)
+        id = IdRange(0, 1 << params.NOCidBits)
       ))
     )))
   val dmxbar2to1 = AXI4Xbar()
@@ -435,12 +437,8 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   println("=== exit dmPbusTop class last ====")
   class Imp(outer: dmPbusTop) extends LazyModuleImp(outer) {
     println("==== enter uncoreTop Imp ... ==")
-    val dm_crs_s = IO(Flipped(new AXI4Bundle(AXI4BundleParameters(
-      addrBits = params.CrsAddrWidth,dataBits=params.CrsDataWidth,idBits = params.idBits
-    ))))// cross-die slave ports for debug
-    val dm_crs_m = IO(new AXI4Bundle(AXI4BundleParameters(
-      addrBits = params.CrsAddrWidth,dataBits=params.CrsDataWidth,idBits = params.idBits
-    )))
+    val dm_crs_s = IO(Flipped(new AXI4Bundle(dm_mNode_crs.out.head._2.bundle)))// cross-die slave ports for debug
+    val dm_crs_m = IO(new AXI4Bundle(cpu2dm_s.in.head._2.bundle))
     // instance debugModule sba port
     val dm_m = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
     val dmio = IO(new dm.debugModule.DebugModuleIO)
@@ -486,7 +484,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
         name = "cpu-Mnode",
         maxFlight = Some(1),
         aligned = true,
-        id = IdRange(0, 1 << params.idBits)
+        id = IdRange(0, 1 << params.CPUidBits)
       ))
     )))
   }
@@ -498,7 +496,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     masters = Seq(AXI4MasterParameters(
       name = "master-node",
       maxFlight = Some(1),
-      id = IdRange(0, 1 << params.idBits)
+      id = IdRange(0, 1 << params.NOCidBits)
     ))
   )))
   imsicTop.hni_s_xbar := hni_mNode
@@ -525,7 +523,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     masters = Seq(AXI4MasterParameters(
       name = "master-node",
       maxFlight = Some(1),
-      id = IdRange(0, 1 << params.idBits)
+      id = IdRange(0, 1 << params.NOCidBits)
     ))
   )))
   // peri snode <> aplic cfg
@@ -651,7 +649,7 @@ object PbusGen extends App {
   val aplicparams = AplicParams(
     CFG_ADDR_WIDTH = 40,
     CFG_DATA_WIDTH = 64,
-    CFG_ID_WIDTH = 8,
+    CFG_ID_WIDTH = 11,
     APLICAddrMap = AddressSet(0x31100000L, 0x7fff),
     MSI_DATA_WIDTH = 32,
     NumIntSrcs = 512
