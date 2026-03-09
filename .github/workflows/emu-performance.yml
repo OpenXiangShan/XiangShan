@@ -31,12 +31,10 @@ jobs:
           filters: .github/filters.yaml
 
   build:
-    name: Build
+    name: EMU - Performance - Build
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
-    runs-on:
-      - bosc
-      - builder
+    runs-on: builder
     outputs:
       cluster: ${{ steps.save.outputs.cluster }}
     timeout-minutes: 120
@@ -73,7 +71,7 @@ jobs:
           fi
 
   run-legacy: # TODO: drop this after most of the dev branches are migrated to the new workflow
-    name: Run (legacy)
+    name: EMU - Performance - Run (legacy)
     needs: build
     runs-on:
       - ${{ needs.build.outputs.cluster }} # use same cluster as builder to avoid cross-cluster network copy & pgo issue
@@ -136,7 +134,7 @@ jobs:
           path: ipc-legacy-${{ matrix.name }}
 
   run:
-    name: Run
+    name: EMU - Performance - Run
     needs: build
     runs-on:
       - ${{ needs.build.outputs.cluster }} # use same cluster as builder to avoid cross-cluster network copy & pgo issue
@@ -242,7 +240,7 @@ jobs:
           path: ipc-${{ matrix.name }}_${{ matrix.ckpt }}
 
   summary:
-    name: Summary
+    name: EMU - Performance - Summary
     permissions:
       actions: read # to download upstream artifact
       pull-requests: write # to post PR comment
@@ -252,8 +250,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0 # we need full history to find upstream commit
       - name: Download reports
         uses: actions/download-artifact@v8
         with:
@@ -266,28 +262,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Find upstream commit sha
-          head_sha="${{ github.event.pull_request.head.sha }}"
-          base_sha="${{ github.event.pull_request.base.sha }}"
-
-          echo "Head SHA: ${head_sha}"
-          echo "Base SHA: ${base_sha}"
-
-          upstream=$(git merge-base "${head_sha}" "${base_sha}")
-          if [ -z "${upstream}" ]; then
-            echo "Failed to find upstream commit"
-            echo "error=Failed to find upstream commit" >> $GITHUB_OUTPUT
-            echo "found=false" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          echo "Upstream commit sha: ${upstream}"
-          echo "upstream=${upstream}" >> $GITHUB_OUTPUT
-
-          run_id=$(gh run list --commit "${upstream}" --workflow "${{ github.workflow }}" --json databaseId --limit 1 | jq -r '.[0].databaseId')
+          echo "Upstream commit sha: ${{ github.event.pull_request.base.sha }}"
+          run_id=$(gh run list --commit "${{ github.event.pull_request.base.sha }}" --workflow "${{ github.workflow }}" --json databaseId --limit 1 | jq -r '.[0].databaseId')
           if [ -z "${run_id}" ] || [ "${run_id}" == "null" ]; then
-            echo "Failed to find upstream run for commit ${upstream}"
-            echo "error=Failed to find upstream run for commit ${upstream}" >> $GITHUB_OUTPUT
+            echo "Failed to find upstream run"
+            echo "error=Failed to find upstream run (commit ${{ github.event.pull_request.base.sha }})" >> $GITHUB_OUTPUT
+            echo "run_id=N/A" >> $GITHUB_OUTPUT
             echo "found=false" >> $GITHUB_OUTPUT
             exit 0
           fi
@@ -304,7 +284,7 @@ jobs:
           merge-multiple: true
           github-token: ${{ secrets.GITHUB_TOKEN }} # we need this to download artifact from another run
           run-id: ${{ steps.find_upstream.outputs.run_id }}
-      - name: Summary
+      - name: Generate summary
         run: |
           function geomean() {
             python3 -c "import sys, math; print(math.exp(sum(math.log(float(x)) for x in sys.argv[1:]) / len(sys.argv[1:])))" "$@"
@@ -325,10 +305,10 @@ jobs:
             echo "### Metadata"
             echo "| - | Branch | SHA | Run ID |"
             echo "| - | ------ | --- | ------ |"
-            if [ "${{ steps.find_upstream.outputs.found }}" == "true" ]; then
-              echo "| Upstream | ${{ github.base_ref }} | ${{ steps.find_upstream.outputs.upstream }} | ${{ steps.find_upstream.outputs.run_id }} |"
+            if [ "${{ github.event_name }}" == "pull_request" ]; then
+              echo "| Upstream | ${{ github.base_ref }} | ${{ github.event.pull_request.base.sha }} | ${{ steps.find_upstream.outputs.run_id }} |"
             fi
-            echo "| Current | ${{ github.head_ref }} | ${{ github.sha }} | ${{ github.run_id }} |"
+            echo "| Current | ${{ github.head_ref }} | ${{ github.event.pull_request.head.sha || github.sha }} | ${{ github.run_id }} |"
             echo ""
             echo "### IPC Report"
             echo "| Testcase | Current | Upstream | Diff |"
