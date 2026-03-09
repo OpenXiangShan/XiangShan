@@ -66,7 +66,7 @@ class PipelineStallReason(reasonW: Int) extends Module {
   val NoStallReason = NoStall.id.U
 
   val redirectReg = RegNext(io.redirect)
-  val redirectReason = RegNext(io.redirectReason)
+  val redirectReasonReg = RegNext(io.redirectReason)
 
   val prePipeStallReg = RegNext(io.prePipeStall)
   val prePipeStallReasonReg = RegNext(io.prePipeStallReason)
@@ -84,7 +84,7 @@ class PipelineStallReason(reasonW: Int) extends Module {
   val reasonNext = Wire(UInt(reasonW.W))
 
   when (io.redirect || redirectReg) {
-    reasonNext := Mux(io.redirect, io.redirectReason, redirectReg)
+    reasonNext := Mux(io.redirect, io.redirectReason, redirectReasonReg)
   }.otherwise {
     when (io.rightFire) {
       reasonNext := NoStallReason
