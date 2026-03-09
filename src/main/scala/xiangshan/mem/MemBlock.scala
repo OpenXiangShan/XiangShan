@@ -149,8 +149,10 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     val vl = Output(UInt((log2Up(VLEN) + 1).W))
     val gpaddr = Output(UInt(XLEN.W))
     val isForVSnonLeafPTE = Output(Bool())
-    val mmio = Output(Vec(LoadPipelineWidth, Bool()))
-    val uop = Output(Vec(LoadPipelineWidth, new DynInst))
+    val loadMmio = Output(Vec(LoadPipelineWidth, Bool()))
+    val loadMmioUop = Output(Vec(LoadPipelineWidth, new DynInst))
+    val storeMmio = Output(Bool())
+    val storeMmioUop = Output(new DynInst)
     val lqCanAccept = Output(Bool())
     val sqCanAccept = Output(Bool())
   }
@@ -1405,8 +1407,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
-  io.mem_to_ooo.lsqio.mmio       := lsq.io.rob.mmio
-  io.mem_to_ooo.lsqio.uop        := lsq.io.rob.uop
+  io.mem_to_ooo.lsqio.loadMmio     := lsq.io.rob.loadMmio
+  io.mem_to_ooo.lsqio.loadMmioUop  := lsq.io.rob.loadMmioUop
+  io.mem_to_ooo.lsqio.storeMmio    := lsq.io.rob.storeMmio
+  io.mem_to_ooo.lsqio.storeMmioUop := lsq.io.rob.storeMmioUop
+
   lsq.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
   lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
   lsq.io.rob.pendingMMIOld       := io.ooo_to_mem.lsqio.pendingMMIOld
@@ -1600,6 +1605,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vsSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid &&
                               vStoreCanAccept(i) && !isSegment
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
+    vsSplit(i).io.threshold.valid := vsMergeBuffer(i).io.toSplit.threshold
+    vsSplit(i).io.threshold.bits  := lsq.io.sqDeqPtr
     NewPipelineConnect(
       vsSplit(i).io.out, storeUnits(i).io.vecstin, storeUnits(i).io.vecstin.fire,
       Mux(vsSplit(i).io.out.fire, vsSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect), storeUnits(i).io.vecstin.bits.uop.robIdx.needFlush(io.redirect)),
@@ -1620,8 +1627,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vlSplit(i).io.in.valid := io.ooo_to_mem.issueVldu(i).valid &&
                               vLoadCanAccept(i) && !isSegment && !isFixVlUop(i)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
-    vlSplit(i).io.threshold.get.valid := vlMergeBuffer.io.toSplit.get.threshold
-    vlSplit(i).io.threshold.get.bits  := lsq.io.lqDeqPtr
+    vlSplit(i).io.threshold.valid := vlMergeBuffer.io.toSplit.threshold
+    vlSplit(i).io.threshold.bits  := lsq.io.lqDeqPtr
     NewPipelineConnect(
       vlSplit(i).io.out, loadUnits(i).io.vecldin, loadUnits(i).io.vecldin.fire,
       Mux(vlSplit(i).io.out.fire, vlSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect), loadUnits(i).io.vecldin.bits.uop.robIdx.needFlush(io.redirect)),
