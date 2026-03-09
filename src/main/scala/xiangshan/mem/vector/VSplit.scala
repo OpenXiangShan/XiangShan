@@ -40,8 +40,16 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   //TODO vdIdxReg should no longer be useful, don't delete it for now
   val vdIdxReg = RegInit(0.U(3.W))
 
+  val mergeBufferNack = io.threshold.valid && ({
+    (isVStore, io.threshold.bits) match {
+      case (true,  p: SqPtr) => p =/= io.in.bits.uop.sqIdx
+      case (false, p: LqPtr) => p =/= io.in.bits.uop.lqIdx
+      case _ => throw new Exception("Pointer type mismatch!")
+    }
+  })
+
   val s1_ready = WireInit(false.B)
-  io.in.ready := s1_ready
+  io.in.ready := s1_ready && !mergeBufferNack
 
   /**-----------------------------------------------------------
     * s0 stage
@@ -106,6 +114,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val flowsPrevThisUop = (uopIdxInField << flowsLog2).asUInt // # of flows before this uop in a field
   val flowsPrevThisVd = (vdIdxInField << numFlowsSameVdLog2).asUInt // # of flows before this vd in a field
   val flowsIncludeThisUop = ((uopIdxInField +& 1.U) << flowsLog2).asUInt // # of flows before this uop besides this uop
+//  val flowNum = Mux(io.in.bits.isVecPartReplay.get, PopCount(io.in.bits.vecReplayMask.get), io.in.bits.flowNum.get)
   val flowNum = io.in.bits.flowNum.get
   // max index in vd, only use in index instructions for calculate index
   val maxIdxInVdIndex = GenVLMAX(Mux(s0_emul.asSInt > 0.S, 0.U, s0_emul), s0_eew)
@@ -127,10 +136,10 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val srcMask = GenFlowMask(Mux(s0_vm, Fill(VLEN, 1.U(1.W)), io.in.bits.src_mask), vvstart, evl, true)
   val srcMaskShiftBits = Mux(isSpecialIndexed, flowsPrevThisUop, flowsPrevThisVd)
 
-  val flowMask = ((srcMask &
-    UIntToMask(flowsIncludeThisUop.asUInt, VLEN + 1) &
-    (~UIntToMask(flowsPrevThisUop.asUInt, VLEN)).asUInt
-  ) >> srcMaskShiftBits)(VLENB - 1, 0)
+  val flowMask = Mux(io.in.bits.isVecPartReplay.get,
+    io.in.bits.vecReplayMask.get,
+    ((srcMask & UIntToMask(flowsIncludeThisUop.asUInt, VLEN + 1) &
+    (~UIntToMask(flowsPrevThisUop.asUInt, VLEN)).asUInt) >> srcMaskShiftBits)(VLENB - 1, 0))
   val indexedSrcMask = (srcMask >> flowsPrevThisVd).asUInt //only for index instructions
 
   // Used to calculate the element index.
@@ -172,6 +181,8 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
     x.preIsSplit  := s0_preIsSplit
     x.alignedType := broadenAligendType
     x.indexVlMaxInVd := indexVlMaxInVd
+    x.isVecPartReplay := io.in.bits.isVecPartReplay.get
+    x.vecReplayMbIdx := io.in.bits.vecReplayMbIdx.get
   }
   s0_valid := io.in.valid && !s0_kill
   /**-------------------------------------
@@ -182,7 +193,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   val s1_valid         = RegInit(false.B)
   val s1_kill          = Wire(Bool())
   val s1_in            = Wire(new VLSBundle(isVStore))
-  val s1_can_go        = io.out.ready && io.toMergeBuffer.req.ready
+  val s1_can_go        = io.out.ready && (io.toMergeBuffer.req.ready || s1_in.isVecPartReplay && s1_valid)
   val s1_fire          = s1_valid && !s1_kill && s1_can_go
 
   s1_ready         := s1_kill || !s1_valid || s1_can_go
@@ -238,7 +249,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
   s1_kill               := s1_in.uop.robIdx.needFlush(io.redirect)
 
   // query mergeBuffer
-  io.toMergeBuffer.req.valid             := io.out.ready && s1_valid// only can_go will get MergeBuffer entry
+  io.toMergeBuffer.req.valid             := io.out.ready && s1_valid && !s1_in.isVecPartReplay// only can_go will get MergeBuffer entry
   io.toMergeBuffer.req.bits.flowNum      := activeNum
   io.toMergeBuffer.req.bits.data         := s1_in.data
   io.toMergeBuffer.req.bits.uop          := s1_in.uop
@@ -258,12 +269,12 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
 //    XSError(vdIdxReg + 1.U === 0.U, s"Overflow! The number of vd should be less than 8\n")
 //  }
   // out connect
-  io.out.valid          := s1_valid && io.toMergeBuffer.resp.valid // if activeNum == 0, this uop do nothing, can be killed.
+  io.out.valid          := s1_valid && (io.toMergeBuffer.resp.valid || s1_in.isVecPartReplay) // if activeNum == 0, this uop do nothing, can be killed.
   io.out.bits           := s1_in
   io.out.bits.uopOffset := uopOffset
   io.out.bits.uopAddr   := s1_in.baseAddr + uopOffset
   io.out.bits.stride    := stride
-  io.out.bits.mBIndex   := io.toMergeBuffer.resp.bits.mBIndex
+  io.out.bits.mBIndex   := Mux(s1_in.isVecPartReplay, s1_in.vecReplayMbIdx, io.toMergeBuffer.resp.bits.mBIndex)
   io.out.bits.usLowBitsAddr := usLowBitsAddr
   io.out.bits.usAligned128  := usAligned128
   io.out.bits.usMask        := usMask
@@ -397,6 +408,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     x.uop_unit_stride_fof   := DontCare
     x.isFirstIssue          := DontCare
     x.mBIndex               := issueMbIndex
+    x.splitIndx             := splitIdx
   }
 
   // redirect
@@ -532,11 +544,10 @@ class VLSplitImp(implicit p: Parameters) extends VLSUModule{
   val io = IO(new VSplitIO(isVStore=false))
   val splitPipeline = Module(new VLSplitPipelineImp())
   val splitBuffer = Module(new VLSplitBufferImp())
-  val mergeBufferNack = io.threshold.get.valid && io.threshold.get.bits =/= io.in.bits.uop.lqIdx
   // Split Pipeline
   splitPipeline.io.in <> io.in
-  io.in.ready := splitPipeline.io.in.ready && !mergeBufferNack
   splitPipeline.io.redirect <> io.redirect
+  splitPipeline.io.threshold <> io.threshold
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
   // skid buffer
@@ -558,6 +569,7 @@ class VSSplitImp(implicit p: Parameters) extends VLSUModule{
   // Split Pipeline
   splitPipeline.io.in <> io.in
   splitPipeline.io.redirect <> io.redirect
+  splitPipeline.io.threshold <> io.threshold
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
   // skid buffer
