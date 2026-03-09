@@ -111,7 +111,7 @@ make idea
 运行示例：
 
 ```bash
-make emu CONFIG=MinimalConfig EMU_THREADS=2 -j10
+make emu CONFIG=TLMinimalConfig EMU_THREADS=2 -j10
 ./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 ```
 
