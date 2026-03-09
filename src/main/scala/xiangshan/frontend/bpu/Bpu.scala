@@ -470,6 +470,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     )
   )
 
+  abtb.io.trainS1Pred        := s3_s1Prediction
+  abtb.io.predUsePrefetchBtb := s3_usePrefetchBtb
   private val phrBits        = WireInit(0.U(PhrHistoryLength.W))
   private val s0_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val s1_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))

@@ -70,6 +70,7 @@ class AheadBtbMetaEntry(implicit p: Parameters) extends AheadBtbBundle {
   val hit:             Bool            = Bool()
   val attribute:       BranchAttribute = new BranchAttribute
   val position:        UInt            = UInt(CfiPositionWidth.W)
+  val isPrefetchTrain: Bool            = Bool()
   val targetLowerBits: UInt            = UInt(TargetLowerBitsWidth.W)
 }
 
@@ -86,6 +87,7 @@ class AheadBtbEntry(implicit p: Parameters) extends AheadBtbBundle {
   val position:        UInt            = UInt(CfiPositionWidth.W)
   val attribute:       BranchAttribute = new BranchAttribute
   val targetLowerBits: UInt            = UInt(TargetLowerBitsWidth.W)
+  val isPrefetchTrain: Bool            = Bool()
   // target fix, see comment in Parameters.scala
   val targetCarry: Option[TargetCarry] = if (EnableTargetFix) Option(new TargetCarry) else None
 }

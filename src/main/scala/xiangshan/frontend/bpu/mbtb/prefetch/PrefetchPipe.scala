@@ -137,7 +137,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
 
   // TODO: add more branch type
   private val s2_shadowBranchMask = (s2_branchInfo zip s2_finalInstrValid).map { case (info, valid) =>
-    info.valid && (info.brAttribute.isDirect || info.brAttribute.isReturn) && valid
+    info.valid && (info.brAttribute.isDirect) && valid
   }
   private val s2_revBranchInfo = s2_branchInfo.reverse
 
