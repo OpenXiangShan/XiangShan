@@ -7,7 +7,7 @@ import utility.DataHoldBypass
 import xiangshan.backend.fu.vector.Bundles.VConfig
 import xiangshan.backend.fu.vector.utils.ScalaDupToVector
 import xiangshan.backend.fu.{FuConfig, FuncUnit}
-import xiangshan.ExceptionNO.illegalInstr
+import xiangshan.ExceptionNO
 import yunsuan.VialuFixType
 
 class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
@@ -47,8 +47,10 @@ class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUni
   if (cfg.exceptionOut.nonEmpty) {
     val outVstart = outCtrl.vpu.get.vstart
     val vstartIllegal = outVstart =/= 0.U
-    io.out.bits.ctrl.exceptionVec.get := 0.U.asTypeOf(io.out.bits.ctrl.exceptionVec.get)
-    io.out.bits.ctrl.exceptionVec.get(illegalInstr) := vstartIllegal
+    io.out.bits.ctrl.exceptionVec.init
+    require(cfg.exceptionOut.contains(ExceptionNO.illegalInstr),
+      "VecNonPipedFuncUnit with non-empty excptionOut must have illegal instruction exception output")
+    io.out.bits.ctrl.exceptionVec.getAndAssign(ExceptionNO.illegalInstr)(vstartIllegal)
   }
 
   connectNonPipedCtrlSingal

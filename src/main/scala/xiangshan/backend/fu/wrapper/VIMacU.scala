@@ -147,5 +147,5 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
 
   io.out.bits.res.data := mgu.io.out.vd
   io.out.bits.res.vxsat.get := (outVxsat & mgu.io.out.active).orR
-  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
+  io.out.bits.ctrl.exceptionVec.getAndAssign(ExceptionNO.illegalInstr)(mgu.io.out.illegal)
 }

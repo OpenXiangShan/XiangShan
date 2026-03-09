@@ -505,7 +505,7 @@ class VFAlu(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg)
   // when dest is mask, the result need to be masked by mgtu
   io.out.bits.res.data := Mux(notModifyVd, outOldVd, Mux(outVecCtrl.isDstMask, mgtu.io.out.vd, mgu.io.out.vd) & resultFpMask)
   io.out.bits.res.fflags.get := Mux(notModifyVd, 0.U(5.W), outFFlags)
-  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
+  io.out.bits.ctrl.exceptionVec.getAndAssign(ExceptionNO.illegalInstr)(mgu.io.out.illegal)
 
 }
 

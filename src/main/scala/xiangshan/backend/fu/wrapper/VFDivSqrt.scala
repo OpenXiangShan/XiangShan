@@ -155,5 +155,5 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
   mgu.io.in.info.dstMask := outVecCtrl.isDstMask
   mgu.io.in.isIndexedVls := false.B
   io.out.bits.res.data := mgu.io.out.vd
-  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
+  io.out.bits.ctrl.exceptionVec.getAndAssign(ExceptionNO.illegalInstr)(mgu.io.out.illegal)
 }

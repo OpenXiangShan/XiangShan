@@ -11,7 +11,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl, Vxsat}
-import xiangshan.ExceptionNO.illegalInstr
+import xiangshan.ExceptionNO
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.frontend.bpu.{BranchAttribute, BranchInfo}
 
@@ -80,7 +80,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val vecWen        = OptionWrapper(cfg.needVecWen, Bool())
   val v0Wen         = OptionWrapper(cfg.needV0Wen, Bool())
   val vlWen         = OptionWrapper(cfg.needVlWen, Bool())
-  val exceptionVec  = OptionWrapper(cfg.exceptionOut.nonEmpty, ExceptionVec())
+  val exceptionVec  = ExceptSparseVec(cfg.exceptionOut)
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val isRVC         = OptionWrapper(cfg.hasIsRVC, Bool())
@@ -300,8 +300,10 @@ trait HasPipelineReg { this: FuncUnit =>
   if (cfg.exceptionOut.nonEmpty) {
     val outVstart = ctrlVec.last.vpu.get.vstart
     val vstartIllegal = outVstart =/= 0.U
-    io.out.bits.ctrl.exceptionVec.get := 0.U.asTypeOf(io.out.bits.ctrl.exceptionVec.get)
-    io.out.bits.ctrl.exceptionVec.get(illegalInstr) := vstartIllegal
+    io.out.bits.ctrl.exceptionVec.init
+    require(cfg.exceptionOut.contains(ExceptionNO.illegalInstr),
+      "HasPipelineReg trait with non-empty excptionOut must have illegal instruction exception output")
+    io.out.bits.ctrl.exceptionVec.getAndAssign(ExceptionNO.illegalInstr)(vstartIllegal)
   }
 
   def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1)

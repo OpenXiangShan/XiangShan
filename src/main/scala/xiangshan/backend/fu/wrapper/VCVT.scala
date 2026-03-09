@@ -176,7 +176,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
     Fill(32, result(31)) ## result(31, 0),
     result
   )
-  io.out.bits.ctrl.exceptionVec.get(ExceptionNO.illegalInstr) := mgu.io.out.illegal
+  io.out.bits.ctrl.exceptionVec.getAndAssign(ExceptionNO.illegalInstr)(mgu.io.out.illegal)
 }
 
 class VectorCvtTopIO(vlen: Int, xlen: Int) extends Bundle{

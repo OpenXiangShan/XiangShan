@@ -111,7 +111,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
 
   private val maxUopIdx = VLEN / 8
   private val numBytes = maxUopIdx
-  
+
   private val activeEn = Wire(UInt(numBytes.W))
   private val agnosticEn = Wire(UInt(numBytes.W))
   activeEn := mgu.io.out.activeEn
@@ -137,7 +137,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val outNarrowVd = Mux(outVuopIdx0,
     Cat(narrowVd, outOldVd(dataWidth / 2 - 1, 0)),
     Cat(outOldVd(dataWidth - 1, dataWidth / 2), narrowVd))
-  
+
   private val outVd = Mux(outNarrow, outNarrowVd, vd)
 
   private val resVecByte = Wire(Vec(numBytes, UInt(8.W)))
@@ -151,7 +151,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val outVsewOH = RegEnable(vsewOH, valid)
 
   private val addCarryCmpMask = Mux1H(outVsewOH, Seq(8, 4, 2, 1).map(i =>
-    Cat(vIAluFixPoints.map(_.io.out.addCarryCmpMask(i - 1, 0)).reverse)  
+    Cat(vIAluFixPoints.map(_.io.out.addCarryCmpMask(i - 1, 0)).reverse)
   ))
 
   private val dstMgu = Module(new DstMgu(dataWidth))

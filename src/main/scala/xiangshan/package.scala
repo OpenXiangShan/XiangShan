@@ -176,6 +176,217 @@ package object xiangshan {
     def apply(init: Bool) = VecInit(Seq.fill(ExceptionVecSize)(init))
   }
 
+  trait SparseVecHelper[T <: Data] { this: SparseVec[T] =>
+    val length: Int
+    /**
+     * get the element at [[idx]] as Option[T]
+     * @param idx the index of element
+     * @return Some(element) if exist, None otherwise
+     */
+    def find(idx: Int): Option[T] = this.elements.get(idx.toString)
+
+    /**
+     * get the element at [[idx]], or return [[default]] if not exist
+     * @param idx the index of element
+     * @param default the default value if the element does not exist
+     * @tparam T1 the super type of T, to allow default value to be of a super type
+     * @return the element at [[idx]] if exist, [[default]] otherwise
+     */
+    def getOrElse[T1 >: T](idx: Int, default: => T1): T1 = this.elements.getOrElse(idx.toString, default)
+
+    /**
+     * find the element at [[idx]], and perform function [[f]] on it if exist, or return [[default]] otherwise
+     * @param idx the index of element
+     * @param f the function to perform on the element if exist
+     * @param default the default value if the element does not exist
+     * @tparam R the return type of function [[f]] and default value
+     * @return f(element) if exist, [[default]] otherwise
+     */
+    def getAndPerformOrElse[R](idx: Int)(f: T => R, default: R): R = {
+      this.find(idx) match {
+        case Some(bit) => f(bit)
+        case None => default
+      }
+    }
+
+    /**
+     * find the element at [[idx]], and perform function [[f]] on it if exist
+     * @param idx the index of element
+     * @param f the function to perform on the element if exist
+     * @return Unit
+     */
+    def getAndPerform(idx: Int)(f: T => Unit): Unit = {
+      this.find(idx) match {
+        case Some(bit) => f(bit)
+        case None => /* do nothing */
+      }
+    }
+
+    /**
+     * find the element at [[idx]], and assign singnal [[s]] on it if exist
+     * @param idx the index of element
+     * @param f the function to perform on the element if exist
+     * @return Unit
+     */
+    def getAndAssign(idx: Int)(s: UInt): Unit = {
+      getAndPerform(idx)(_ := s)
+    }
+
+    /**
+     * perform function [[f]] on all existing elements, or [[default]] otherwise
+     * @param f the function to perform on existing elements
+     * @param default the default value if the element does not exist
+     */
+    def foreachExist(f: T => Unit, default: Unit = { /* do nothing */ }): Unit = {
+      (0 until this.length).foreach { i =>
+        this.getAndPerformOrElse(i)(f, default)
+      }
+    }
+  }
+
+  // For optional bits in the exception vector
+  class ExceptSparseVec(val indices: Seq[Int]) extends SparseVec[Bool](
+    size         = ExceptionVec.ExceptionVecSize,
+    gen          = Bool(),
+    indices      = indices,
+    defaultValue = SparseVec.DefaultValueBehavior.UserSpecified(0.U)
+  )  with SparseVecHelper[Bool] {
+    override val length = ExceptionVec.ExceptionVecSize
+
+    // initialize all existing bits to false
+    def init: Unit = {
+      this.foreachExist(_ := false.B)
+    }
+
+    /**
+     * map all existing bits with function [[f]]
+     * @param f the function to map existing bits
+     * @return a new ExceptSparseVec after mapping
+     */
+    def mapExist(f: Bool => Bool): ExceptSparseVec = {
+      val result = Wire(ExceptSparseVec(indices))
+      this.elements.foreach { case (idx, srcBit) =>
+        result.elements(idx) := f(srcBit)
+      }
+      result
+    }
+
+    /**
+     * map all existing bits with function [[f]], and fill non-existing bits with [[default]]
+     * @param f the function to map existing bits
+     * @param default the default value for non-existing bits
+     * @return a Vec after mapping
+     */
+    def mapExist2Seq[T <: Data](f: Bool => T, default: T): Vec[T] = {
+      val result = Wire(VecInit(Seq.fill(this.length)(default)))
+      this.elements.foreach { case (idx, srcBit) =>
+        result(idx.toInt) := f(srcBit)
+      }
+      result
+    }
+
+    /**
+     * get the element at [[idx]], assume it exists
+     * @param idx the index of element
+     * @return the element at [[idx]]
+     */
+    def get(idx: Int): Bool = this.find(idx).get
+
+    /**
+     * get the element at [[idx]], or return [[default]] if not exist
+     * @param idx the index of element
+     * @param default the default value if the element does not exist
+     * @return the element at [[idx]] if exist, [[default]] otherwise
+     */
+    def getOrElse(idx: Int, default: Bool): Bool = this.find(idx).getOrElse(default)
+  }
+
+  object ExceptSparseVec {
+    // Generate a 24-wide exception vector of Option[Bool], decided by whether the index is given by excpList
+    // vec(i).get is a Bool only when i in excpList, otherwise None
+    def apply(excpList: Seq[Int]): ExceptSparseVec = new ExceptSparseVec(excpList)
+    def apply(): ExceptSparseVec = new ExceptSparseVec(ExceptionNO.all)
+
+    // def construct(src: ExceptSparseVec): ExceptSparseVec = {
+    //   val result = Wire(apply(src.indices))
+    //   connect(result, seq)
+    //   result
+    // }
+
+    // def newAs(src: ExceptSparseVec): ExceptSparseVec = {
+    //   Wire(apply(src.indices))
+    // }
+
+    @inline private def mergeHelper(operator: (Vec[Bool], Vec[Bool]) => Bool)(oh: Vec[Bool], seqs: Seq[ExceptSparseVec]): ExceptSparseVec = {
+      require(seqs.nonEmpty, "ExceptSparseVec merge/select with empty seqs")
+      require(oh.length == seqs.length, "ExceptSparseVec merge/select length mismatch")
+
+      val mergeIndices = seqs.flatMap(_.indices).distinct.sorted
+      val result = Wire(ExceptSparseVec(mergeIndices))
+
+      result.elements.foreach { case (idx, srcBit) =>
+        val optionsAtIdx: Vec[Bool] = VecInit(seqs.map(_.elements.getOrElse(idx, false.B)))
+        srcBit := operator(optionsAtIdx, oh)
+      }
+      result
+    }
+
+    def orReduce(seqs: Seq[ExceptSparseVec]): ExceptSparseVec = {
+      val oh = Wire(VecInit.fill(seqs.length)(true.B))
+      val mergeOperator = (ors: Vec[Bool], _: Vec[Bool]) => ors.reduce(_ || _)
+      mergeHelper(mergeOperator)(oh, seqs)
+    }
+
+    def mux1h(oh: Vec[Bool], seqs: Seq[ExceptSparseVec]): ExceptSparseVec = {
+      val selectOperator = (ors: Vec[Bool], oh: Vec[Bool]) => Mux1H(oh, ors)
+      mergeHelper(selectOperator)(oh, seqs)
+    }
+
+    def mux2(cond: Bool, seqTrue: ExceptSparseVec, seqFalse: ExceptSparseVec): ExceptSparseVec = {
+      mux1h(VecInit(cond, ~cond), Seq(seqTrue, seqFalse))
+    }
+
+    // connect two exceptionVecs together under different circumstances
+    def connect(dstVec: ExceptSparseVec, srcVec: ExceptSparseVec): Unit = {
+      require(srcVec.indices.toSet.subsetOf(dstVec.indices.toSet), "ExceptSparseVec connect indices mismatch")
+
+      (0 until dstVec.length).foreach { idx =>
+        (dstVec.find(idx), srcVec.find(idx)) match {
+          case (Some(dst), Some(src)) => dst := src
+          case (Some(dst), None      ) => dst := false.B
+          case _ => // do nothing
+        }
+      }
+    }
+
+    // def connect(destSeq: ExceptSparseVec, srcSeq: ExceptSparseVec): Unit = connect(destSeq.spVec, srcSeq.spVec)
+
+    def connect(destSeq: ExceptSparseVec, srcVec: Vec[Bool]): Unit = {
+      require(destSeq.length == srcVec.length, "ExceptSparseVec connect length mismatch")
+
+      (0 until destSeq.length).foreach { idx =>
+        (destSeq.find(idx), srcVec(idx)) match {
+          case (Some(dest), srcBit) => dest := srcBit
+          case _ => // do nothing
+        }
+      }
+    }
+
+    def connect(destVec: Vec[Bool], srcSeq: ExceptSparseVec): Unit = {
+      require(srcSeq.length == destVec.length, "ExceptSparseVec connect length mismatch")
+
+      (0 until srcSeq.length).foreach { idx =>
+        (destVec(idx), srcSeq.find(idx)) match {
+          case (destBit, Some(src)) => destBit := src
+          case (destBit, None     ) => destBit := false.B
+          case _ => // do nothing
+        }
+      }
+    }
+
+    def connect(none: None.type, srcSeq: Any): Unit = { /* do nothing */ }
+  }
+
   object PMAMode {
     def R = "b1".U << 0 //readable
     def W = "b1".U << 1 //writeable
