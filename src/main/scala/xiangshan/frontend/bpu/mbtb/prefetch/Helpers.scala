@@ -92,12 +92,43 @@ trait SBDHelper extends HasPrefetchBtbParameters {
     val maxWidth  = rviOffset.getWidth
     PrunedAddrInit(SignExt(Mux(isRvc, SignExt(rvcOffset, maxWidth), SignExt(rviOffset, maxWidth)), 20))
   }
+
+  // TODO: add more detail decode and retime to s0
   def isValidInstr(inst: UInt): Bool = {
-    val opcode      = inst(6, 0)
-    val validOpcode = Seq(3.U, 15.U, 19.U, 23.U, 27.U, 35.U, 47.U, 51.U, 55.U, 59.U, 99.U, 103.U, 111.U, 115.U)
-    val isValid     = Wire(Bool())
-    isValid := validOpcode.map(_ === opcode).reduce(_ || _)
-    isValid
+
+    val opcode = inst(6, 0)
+    val f3     = inst(14, 12)
+
+    val f7_reserved_zero = (inst(31) === 0.U) && (inst(29, 25) === 0.U)
+
+    val shift64_reserved_zero = (inst(31) === 0.U) && (inst(29, 26) === 0.U)
+
+    val bit30_valid = (inst(30) === 0.U) || (f3 === 0.U) || (f3 === 5.U)
+
+    val shift_bit30_valid = (inst(30) === 0.U) || (f3 === 5.U)
+
+    val rtype_f7_valid   = f7_reserved_zero && bit30_valid
+    val shift64_f7_valid = shift64_reserved_zero && shift_bit30_valid
+    val shift32_f7_valid = f7_reserved_zero && shift_bit30_valid
+
+    val is_op32_f3 = (f3 === 0.U) || (f3 === 1.U) || (f3 === 5.U)
+
+    val is_legal = MuxLookup(opcode, false.B)(Seq(
+      "b0000011".U -> (f3 =/= 7.U),                                                            // LOAD
+      "b0100011".U -> (f3 <= 3.U),                                                             // STORE
+      "b0001111".U -> (f3 <= 1.U),                                                             // MISC-MEM
+      "b0010011".U -> Mux(f3 === 1.U || f3 === 5.U, shift64_f7_valid, true.B),                 // OP-IMM
+      "b0110011".U -> rtype_f7_valid,                                                          // OP
+      "b0011011".U -> (is_op32_f3 && Mux(f3 === 1.U || f3 === 5.U, shift32_f7_valid, true.B)), // OP-IMM-32
+      "b0111011".U -> (is_op32_f3 && rtype_f7_valid),                                          // OP-32
+      "b1100011".U -> (f3(2, 1) =/= 1.U),                                                      // BRANCH
+      "b1100111".U -> (f3 === 0.U),                                                            // JALR
+      "b1101111".U -> true.B,                                                                  // JAL
+      "b0010111".U -> true.B,                                                                  // AUIPC
+      "b0110111".U -> true.B,                                                                  // LUI
+      "b1110011".U -> true.B                                                                   // SYSTEM
+    ))
+    is_legal
   }
   def getBrOffset(inst: UInt, isRvc: Bool): PrunedAddr = {
     val rvcOffset = Cat(inst(12), inst(6, 5), inst(2), inst(11, 10), inst(4, 3), 0.U(1.W))
