@@ -74,8 +74,8 @@ trait HasBertiHelper extends HasCircularQueuePtrHelper with HasDCacheParameters 
   def HtSetWidth: Int = log2Up(HtSetSize)
   def DtWayWidth: Int = log2Up(DtWaySize)
 
-  def DELTA_MIN: Int = -(1 << (DeltaWidth - 1))
   def DELTA_MAX: Int = (1 << (DeltaWidth - 1)) - 1
+  def DELTA_MIN: Int = -(DELTA_MAX)
   def DELTA_THRESHOLD: Int = if (useByteAddr) blockBytes else 1 // 64 Bytes = 1 line
 
   def _getLineVAddr(vaddr: UInt): UInt = {
@@ -168,14 +168,17 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   def getDelta(lineVA1: UInt, lineVA2: UInt): (Bool, SInt) = {
     // here should handle the overflow
     val diffFull = (lineVA1.zext - lineVA2.zext).asSInt
-    val overflow = diffFull < DELTA_MIN.S(DeltaWidth.W) || diffFull > DELTA_MAX.S(DeltaWidth.W)
-    val dissatisfy = checkDissatisfy(diffFull)
+    val deltaMin = DELTA_MIN.S(diffFull.getWidth.W)
+    val deltaMax = DELTA_MAX.S(diffFull.getWidth.W)
+    val overflow = diffFull < deltaMin || diffFull > deltaMax
+    val delta = diffFull(DeltaWidth - 1, 0).asSInt
+    val dissatisfy = checkDissatisfy(delta)
     stat_overflow := overflow
     stat_dissatisfy := dissatisfy
     stat_satisfy := !overflow && !dissatisfy
     stat_currLineVA := lineVA1
     stat_histLineVA := lineVA2
-    (stat_satisfy, diffFull)
+    (stat_satisfy, delta)
   }
 
   /*** built-in class */
