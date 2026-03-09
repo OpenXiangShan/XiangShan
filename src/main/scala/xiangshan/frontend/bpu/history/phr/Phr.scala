@@ -36,6 +36,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     val phr:            Vec[Bool]             = Output(Vec(PhrHistoryLength, Bool()))
     val phrMeta:        PhrMeta               = Output(new PhrMeta)
     val train:          PhrUpdate             = Input(new PhrUpdate)       // redirect from backend
+    val s1_takenData:   PhrBtbCandidates      = Input(new PhrBtbCandidates)
     val commit:         Valid[BpuTrain]       = Input(Valid(new BpuTrain)) // update from commit
     val trainFoldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
   }
@@ -207,6 +208,43 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
       computeFoldedHist(phrValue, info.FoldedLength)(info.HistoryLength)
   }
 
+  private val s1_takenData   = io.s1_takenData
+  private val s1_abtbHashVec = VecInit(s1_takenData.abtb.map{
+    e => pathHash(e.cfiPc, e.target)
+  })
+
+
+  private val s1_ubtbHash      = pathHash(s1_takenData.ubtb.cfiPc, s1_takenData.ubtb.target)
+  private val s1_ubtbFoldedPhr = {
+    val takenFoldedPhr = s1_foldedPhrReg.update(
+      VecInit(phrDup(0).asBools),
+      s1_overrideData.phrMeta.phrPtr,
+      s1_ubtbHash(PathHashWidth - 1, Shamt),
+      Shamt,
+      s1_ubtbHash(Shamt - 1, 0)
+    )
+    Mux(s1_takenData.ubtb.taken, takenFoldedPhr, s1_foldedPhrReg)
+  }
+
+  private val s1_abtbTakenFoldedPhrVec = VecInit(s1_takenData.abtb.map{
+    e => {
+      val s1_abtbHash = pathHash(e.cfiPc, e.target)
+      val takenFoldedOhr = s1_foldedPhrReg.update(
+        VecInit(phrDup(0).asBools),
+        s1_overrideData.phrMeta.phrPtr,
+        s1_abtbHash(PathHashWidth - 1, Shamt),
+        Shamt,
+        s1_abtbHash(Shamt - 1, 0)
+      )
+      takenFoldedOhr
+    }
+  })
+  private val s1_abtbTaken = s1_takenData.abtb.map(_.taken).reduce(_ || _)
+  private val s1_abtbTakenFoldedPhr = Mux1H(s1_takenData.abtbOH, s1_abtbTakenFoldedPhrVec)
+  private val s1_abtbFoldedPhr = Mux(s1_abtbTaken, s1_abtbTakenFoldedPhr, s1_foldedPhrReg)
+  private val s1_overrideFoldedPhr = Mux(s1_takenData.useAbtb, s1_abtbFoldedPhr, s1_ubtbFoldedPhr)
+
+
   when(redirectData.valid) {
     val redirectHash      = pathHash(redirectData.cfiPc, redirectData.target)
     val redirectShiftBits = redirectHash(Shamt - 1, 0)
@@ -241,20 +279,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
       )
     }
   }.elsewhen(s1_valid) {
-    val s1Hash      = pathHash(s1_overrideData.cfiPc, s1_overrideData.target)
-    val s1ShiftBits = s1Hash(Shamt - 1, 0)
-    val s1HashHigh  = s1Hash(PathHashWidth - 1, Shamt)
-    s0_foldedPhr := s1_foldedPhrReg
-    when(s1_overrideData.taken) {
-      s0_foldedPhr := s1_foldedPhrReg.update(
-        // VecInit(getRedirectPhr(s1_overrideData.phrMeta).asBools),
-        VecInit(phrDup(0).asBools),
-        s1_overrideData.phrMeta.phrPtr,
-        s1HashHigh,
-        Shamt,
-        s1ShiftBits
-      )
-    }
+    s0_foldedPhr := s1_overrideFoldedPhr
   }.otherwise {
     s0_foldedPhr := s0_foldedPhrReg
   }

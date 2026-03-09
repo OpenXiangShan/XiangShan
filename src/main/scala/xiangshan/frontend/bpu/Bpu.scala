@@ -42,6 +42,7 @@ import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.bpu.utage.MicroTage
 import xiangshan.frontend.bpu.utage.MicroTageMeta
+import xiangshan.frontend.bpu.history.phr.PhrTakenData
 
 class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class BpuIO extends Bundle {
@@ -307,6 +308,25 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val debug_s1UseUbtbUtage = s1_taken && !useAbtb
   private val debug_s1UseAbtb      = s1_taken && useAbtb && !s1_utageHitMask.reduce(_ || _)
   private val debug_s1UseAbtbUtage = s1_taken && useAbtb && s1_utageHitMask.reduce(_ || _)
+  private val ubtbTakenData = Wire(new PhrTakenData)
+  private val abtbTakenData = Wire(Vec(NumAheadBtbPredictionEntries, new PhrTakenData))
+  ubtbTakenData.taken  := ubtb.io.prediction.bits.taken
+  ubtbTakenData.cfiPc  := getCfiPcFromPosition(s1_startPc, ubtb.io.prediction.bits.cfiPosition)
+  ubtbTakenData.target := Mux(
+    ubtb.io.prediction.bits.attribute.isReturn && uras.io.specOut.isCanUse,
+     uras.io.specOut.retTarget,
+      ubtb.io.prediction.bits.target
+  )
+
+  for (i <- 0 until NumAheadBtbPredictionEntries) {
+    abtbTakenData(i).taken  := s1_abtbTakenMask(i)
+    abtbTakenData(i).cfiPc  := getCfiPcFromPosition(s1_startPc, abtb.io.prediction(i).bits.cfiPosition)
+    abtbTakenData(i).target := Mux(
+    abtb.io.prediction(i).bits.attribute.isReturn && uras.io.specOut.isCanUse,
+     uras.io.specOut.retTarget,
+      abtb.io.prediction(i).bits.target
+    )
+  }
 
   s1_utageMeta := utage.io.meta.bits
 
@@ -454,6 +474,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.s1_valid      := s1_fire
   phr.io.train.s1_prediction := s1_prediction
   phr.io.train.s1_startPc    := s1_startPc
+  phr.io.s1_takenData.ubtb  := ubtbTakenData
+  phr.io.s1_takenData.abtb  := abtbTakenData
+  phr.io.s1_takenData.useAbtb := s1_abtbValid
+  phr.io.s1_takenData.abtbOH  := s1_abtbFirstTakenBrOH
 
   phr.io.commit.valid := io.fromFtq.train.fire
   phr.io.commit.bits  := train

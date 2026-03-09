@@ -51,6 +51,19 @@ class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParamet
   val foldedPhr: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
 }
 
+class PhrTakenData(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
+  val taken:     Bool                  = Bool()
+  val cfiPc:     PrunedAddr            = PrunedAddr(VAddrBits)
+  val target:    PrunedAddr            = PrunedAddr(VAddrBits)
+}
+
+class PhrBtbCandidates(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
+  val ubtb:      PhrTakenData          = new PhrTakenData
+  val abtb:      Vec[PhrTakenData]     = Vec(NumAheadBtbPredictionEntries, new PhrTakenData)
+  val useAbtb:   Bool                  = Bool()
+  val abtbOH:    Vec[Bool]             = Vec(NumAheadBtbPredictionEntries, Bool())
+}
+
 class PhrUpdate(implicit p: Parameters) extends PhrBundle {
   // NOTE: if the StageCtrl structure changes, it may require refactoring
   val s0_stall:  Bool      = Bool()
