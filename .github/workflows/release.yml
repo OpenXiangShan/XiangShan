@@ -2,9 +2,9 @@ name: Release Jobs
 
 on:
   push:
-    branches: [ master ]
+    branches: [ kunminghu-v2 ]
   pull_request:
-    branches: [ master ]
+    branches: [ kunminghu-v2 ]
 
 jobs:
   build-xsdev-image:
@@ -16,7 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Initialize submodules 
+      - name: Initialize submodules
         run: make init-force
 
       - uses: docker/metadata-action@v5
@@ -25,7 +25,7 @@ jobs:
           images: |
             ghcr.io/${{ github.repository_owner }}/xsdev
           tags: |
-            master
+            kunminghu-v2
           labels: |
             maintainer=${{ github.repository_owner }}
 
@@ -41,7 +41,7 @@ jobs:
         with:
           context: .
           platforms: linux/amd64
-          push: ${{ github.ref == 'refs/heads/master' }}
+          push: ${{ github.ref == 'refs/heads/kunminghu-v2' }}
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
 
@@ -66,7 +66,7 @@ jobs:
         run: |
           echo "Checking picker command..."
           picker --check || echo "picker not exist"
-      - name: build XSPdb 
+      - name: build XSPdb
         run: |
           source /nfs/share/unitychip/activate
           make pdb
@@ -81,7 +81,7 @@ jobs:
           cd XSPdb
           make pdb-run
       - name: upload compressed XSPdb package (pr merge only)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/kunminghu-v2'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.FILE_NAME }}
