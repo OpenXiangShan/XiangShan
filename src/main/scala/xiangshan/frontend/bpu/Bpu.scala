@@ -24,6 +24,7 @@ import utility.DelayN
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.ParallelPriorityMux
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
@@ -283,9 +284,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     )
   })
 
-  private val s1_compareMatrix      = CompareMatrix(s1_abtbPosition)
-  private val s1_abtbFirstTakenBrOH = s1_compareMatrix.getLeastElementOH(s1_abtbTakenMask)
-  private val s1_abtbFirstTakenBr   = Mux1H(s1_abtbFirstTakenBrOH, s1_abtbPrediction)
+  private val s1_abtbFirstTakenBrOH = s1_abtbTakenMask
+  private val s1_abtbFirstTakenBr   = ParallelPriorityMux(s1_abtbFirstTakenBrOH, s1_abtbPrediction)
   private val s1_abtbValid          = s1_abtbPrediction.map(_.valid).reduce(_ || _)
 
   private val s1_abtbResult = Wire(new Prediction)
