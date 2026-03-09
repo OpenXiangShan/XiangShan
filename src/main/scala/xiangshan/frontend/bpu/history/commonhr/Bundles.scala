@@ -41,6 +41,13 @@ class CommonHRUpdate(implicit p: Parameters) extends CommonHRBundle {
   val target:           PrunedAddr        = PrunedAddr(VAddrBits)
 }
 
+class CommonHRResolveMeta(implicit p: Parameters) extends CommonHRBundle {
+  val valid: Bool = Bool() // commonHR valid bit
+  val ghr:   UInt = UInt(GhrHistoryLength.W)
+  val bw:    UInt = UInt(BWHistoryLength.W)
+
+  val imli: UInt = UInt(ImliWidth.W)
+}
 class CommonHRMeta(implicit p: Parameters) extends CommonHRBundle {
   val ghr:       UInt                 = UInt(GhrHistoryLength.W)
   val bw:        UInt                 = UInt(BWHistoryLength.W)

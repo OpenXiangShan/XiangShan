@@ -28,14 +28,13 @@ import xiangshan.frontend.bpu.StageCtrl
 
 class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with HasCircularQueuePtrHelper {
   class CommonHRIO extends CommonHRBundle {
-    val stageCtrl:    StageCtrl        = Input(new StageCtrl)
-    val s1_imliTaken: Bool             = Input(Bool())
-    val update:       CommonHRUpdate   = Input(new CommonHRUpdate)
-    val redirect:     CommonHRRedirect = Input(new CommonHRRedirect)
-    val s0_imli:      UInt             = Output(UInt(ImliWidth.W))
-    val s3_imli:      UInt             = Output(UInt(ImliWidth.W))
-    val s0_commonHR:  CommonHREntry    = Output(new CommonHREntry)
-    val commonHR:     CommonHREntry    = Output(new CommonHREntry)
+    val stageCtrl:     StageCtrl           = Input(new StageCtrl)
+    val s1_imliTaken:  Bool                = Input(Bool())
+    val update:        CommonHRUpdate      = Input(new CommonHRUpdate)
+    val redirect:      CommonHRRedirect    = Input(new CommonHRRedirect)
+    val s0_imli:       UInt                = Output(UInt(ImliWidth.W))
+    val s0_commonHR:   CommonHREntry       = Output(new CommonHREntry)
+    val s3ResolveMeta: CommonHRResolveMeta = Output(new CommonHRResolveMeta)
 
     val s0_startPc: Option[PrunedAddr] = Some(Input(PrunedAddr(VAddrBits))) // for debug
   }
@@ -50,13 +49,17 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val s3_override = io.update.s3Override
 
   // common history register
-  private val s0_imli     = WireInit(0.U(ImliWidth.W))
-  private val s1_imli     = RegEnable(s0_imli, s0_fire)
-  private val s2_imli     = RegEnable(s1_imli, s1_fire)
-  private val s3_imli     = RegEnable(s2_imli, s2_fire)
-  private val imli        = RegInit(0.U(ImliWidth.W))
-  private val s0_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
-  private val commonHR    = RegInit(0.U.asTypeOf(new CommonHREntry))
+  private val s0_imli                = WireInit(0.U(ImliWidth.W))
+  private val s1_imli                = RegEnable(s0_imli, s0_fire)
+  private val s2_imli                = RegEnable(s1_imli, s1_fire)
+  private val s3_imli                = RegEnable(s2_imli, s2_fire)
+  private val imli                   = RegInit(0.U(ImliWidth.W))
+  private val s0_commonHR            = WireInit(0.U.asTypeOf(new CommonHREntry))
+  private val s1_commonHR            = RegEnable(s0_commonHR, s0_fire)
+  private val s2_commonHR            = RegEnable(s1_commonHR, s1_fire)
+  private val s3_commonHR            = RegEnable(s2_commonHR, s2_fire)
+  private val commonHR               = RegInit(0.U.asTypeOf(new CommonHREntry))
+  private val s3_commonHRResolveMeta = WireInit(0.U.asTypeOf(new CommonHRResolveMeta))
 
   private val enqPtr     = RegInit(HistPtr(false.B, 0.U))
   private val predPtr    = RegInit(HistPtr(false.B, 0.U))
@@ -67,10 +70,14 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   /*
    * CommonHR train from redirect/s3_prediction
    */
-  io.s0_imli     := s0_imli
-  io.s3_imli     := s3_imli
-  io.s0_commonHR := s0_commonHR
-  io.commonHR    := commonHR
+  s3_commonHRResolveMeta.valid := s3_commonHR.valid
+  s3_commonHRResolveMeta.ghr   := s3_commonHR.ghr
+  s3_commonHRResolveMeta.bw    := s3_commonHR.bw
+  s3_commonHRResolveMeta.imli  := s3_imli
+
+  io.s0_imli       := s0_imli
+  io.s3ResolveMeta := s3_commonHRResolveMeta
+  io.s0_commonHR   := s0_commonHR
 
   /*
    * s3_fire update CommonHR
@@ -89,14 +96,14 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     case (pos, hit) => hit && (pos < s3_firstTakenPos)
   }
   // NOTE: Usually, the maximum value of GhrShamt is NumBtbResultEntries, but in reality, the maximum value is NumBtbResultEntries+ 1
-  private val s3_numLess  = PopCount(s3_lessThanFirstTaken)
-  private val s3_numHit   = PopCount(s3_hitMask)
-  private val s3_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
+  private val s3_numLess     = PopCount(s3_lessThanFirstTaken)
+  private val s3_numHit      = PopCount(s3_hitMask)
+  private val s3_newCommonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
 
-  s3_commonHR.valid           := s3_fire
-  s3_commonHR.predStartPc.get := s3_update.startPc
-  s3_commonHR.ghr := getNewHR(commonHR.ghr, s3_numLess, s3_numHit, s3_taken, s3_firstTakenIsCond)(GhrHistoryLength)
-  s3_commonHR.bw := getNewHR(
+  s3_newCommonHR.valid           := s3_fire
+  s3_newCommonHR.predStartPc.get := s3_update.startPc
+  s3_newCommonHR.ghr := getNewHR(commonHR.ghr, s3_numLess, s3_numHit, s3_taken, s3_firstTakenIsCond)(GhrHistoryLength)
+  s3_newCommonHR.bw := getNewHR(
     commonHR.bw,
     s3_numLess,
     s3_numHit,
@@ -138,7 +145,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   when(r0_valid) {
     commonHR := r0_commonHR // TODO: redirect commonHR recovery can delay one/two cycle
   }.elsewhen(s3_fire) {
-    commonHR := s3_commonHR
+    commonHR := s3_newCommonHR
   }
 
   // imli update
@@ -183,11 +190,11 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     enqPtr                    := writePtr + 1.U
     recoverPtr                := writePtr
     predPtr                   := writePtr
-    histQueue(writePtr.value) := initCommonHR // The queue value during redirect is used for diff
+    histQueue(writePtr.value) := r0_commonHR // The queue value during redirect is used for diff
   }.elsewhen(s3_override) {
     val realRecoverPtr = Mux(hasOverrideHist, recoverPtr + 1.U, recoverPtr)
-    histQueue(writePtr.value)         := s3_commonHR  // update s3_fire block
-    histQueue((writePtr + 1.U).value) := initCommonHR // write new s0_block
+    histQueue(writePtr.value)         := s3_newCommonHR // update s3_fire block
+    histQueue((writePtr + 1.U).value) := initCommonHR   // write new s0_block
     enqPtr                            := writePtr + 2.U
     predPtr                           := realRecoverPtr
     writePtr                          := writePtr + 1.U
@@ -199,7 +206,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
       predPtr                 := Mux(predEnable, predPtr + 1.U, predPtr)
     }
     when(writeEnable) {
-      histQueue(writePtr.value) := s3_commonHR
+      histQueue(writePtr.value) := s3_newCommonHR
       writePtr                  := writePtr + 1.U
       recoverPtr                := Mux(recoverInc, recoverPtr + 1.U, recoverPtr)
     }
@@ -216,7 +223,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     Seq(
       r0_valid          -> r0_commonHR,
       s3_override       -> histQueue(recoverPtr.value),
-      (s0_fire && sync) -> s3_commonHR, // bypass s3_commonHR
+      (s0_fire && sync) -> s3_newCommonHR, // bypass s3_newCommonHR
       s0_fire           -> histQueue(predPtr.value)
     )
   )
@@ -235,7 +242,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     val ghrUInt                   = commonHR.ghr.asUInt
     val bwUInt                    = commonHR.bw.asUInt
     dontTouch(s3_numLess)
-    dontTouch(s3_commonHR)
+    dontTouch(s3_newCommonHR)
     dontTouch(s3_lessThanFirstTakenUInt)
     dontTouch(r0_numLess)
     dontTouch(r0_commonHR)

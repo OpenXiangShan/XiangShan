@@ -94,10 +94,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    * ghr stage ctrl signals
    */
-  private val s0_commonHR = io.commonHR
-  // private val s0_commonHR = WireInit(0.U.asTypeOf(io.commonHR))
-  private val s1_commonHR = RegEnable(s0_commonHR, s0_fire)
-  private val s2_commonHR = RegEnable(s1_commonHR, s1_fire)
+  private val s0_commonHR      = io.commonHR
+  private val s1_commonHRValid = RegEnable(s0_commonHR.valid, s0_fire)
 
   /*
    *  predict pipeline stage 0
@@ -175,13 +173,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   )
   // if s0_commonHR invalid, global table resp is also invalid
   private val s1_globalResp = Mux(
-    s1_commonHR.valid && GlobalEnable.B,
+    s1_commonHRValid && GlobalEnable.B,
     VecInit(globalTable.map(_.io.resp)),
     VecInit.fill(NumGlobalTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
   )
 
   private val s1_bwResp = Mux(
-    s1_commonHR.valid && BWEnable.B,
+    s1_commonHRValid && BWEnable.B,
     VecInit(bwTable.map(_.io.resp)),
     VecInit.fill(NumBWTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
   )
@@ -330,8 +328,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   io.meta.scBiasLowerBits := RegEnable(s2_biasIdxLowBits, s2_fire)
 
   io.meta.scPred        := RegEnable(s2_scPred, s2_fire)
-  io.meta.scCommonHR    := RegEnable(s2_commonHR, s2_fire)
-  io.meta.scImli        := DontCare // NOTE: s3_imli can be got from Bpu
   io.meta.tagePred      := RegEnable(s2_providerTakenMask, s2_fire)
   io.meta.tagePredValid := RegEnable(s2_providerValid, s2_fire)
   io.meta.useScPred     := RegEnable(s2_useScPred, s2_fire)
@@ -361,6 +357,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_train    = RegEnable(io.train, t0_fire)
   private val t1_branches = t1_train.branches
   private val t1_meta     = t1_train.meta.sc
+  private val t1_commonHR = t1_train.meta.commonHR
 
   private val t1_bankMask = getBankMask(t1_train.startPc)
 
@@ -375,16 +372,16 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t1_globalSetIdx = GlobalTableInfos.map(info =>
     getGlobalTableIdx(
       t1_train.startPc,
-      t1_meta.scCommonHR.ghr(info.HistoryLength - 1, 0),
+      t1_commonHR.ghr(info.HistoryLength - 1, 0),
       info.Size,
       info.HistoryLength
     )
   )
 
   private val t1_bwSetIdx = BackwardTableInfos.map(info =>
-    getBWTableIdx(t1_train.startPc, t1_meta.scCommonHR.bw(info.HistoryLength - 1, 0), info.Size, info.HistoryLength)
+    getBWTableIdx(t1_train.startPc, t1_commonHR.bw(info.HistoryLength - 1, 0), info.Size, info.HistoryLength)
   )
-  private val t1_imliSetIdx = getImliTableIdx(t1_train.startPc, t1_meta.scImli, BiasTableSize, ImliWidth)
+  private val t1_imliSetIdx = getImliTableIdx(t1_train.startPc, t1_commonHR.imli, BiasTableSize, ImliWidth)
   private val t1_biasSetIdx = getBiasTableIdx(t1_train.startPc, BiasTableSize)
 
   private val t1_oldPathEntries = VecInit(t1_meta.scPathResp.map(v => VecInit(v.map(r => r.asTypeOf(new ScEntry())))))
@@ -576,7 +573,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t2_globalSetIdx               = RegEnable(VecInit(t1_globalSetIdx), t1_fire)
   private val t2_imliSetIdx                 = RegEnable(t1_imliSetIdx, t1_fire)
   private val t2_biasSetIdx                 = RegEnable(t1_biasSetIdx, t1_fire)
-  private val t2_commonMeta                 = RegEnable(t1_meta.scCommonHR, t1_fire)
+  private val t2_commonHR                   = RegEnable(t1_commonHR, t1_fire)
   private val t2_writePathWayMaskVec        = RegEnable(VecInit(t1_writePathWayMaskVec), t1_fire)
   private val t2_writePathEntryVec          = RegEnable(t1_writePathEntryVec, t1_fire)
   private val t2_writeGlobalEntryWayMaskVec = RegEnable(VecInit(t1_writeGlobalEntryWayMaskVec), t1_fire)
@@ -599,7 +596,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   globalTable.zip(t2_globalSetIdx).zip(t2_writeGlobalEntryVec).zip(t2_writeGlobalEntryWayMaskVec).foreach {
     case (((table, idx), writeEntries), writeWayMask) =>
-      table.io.update.valid    := t2_writeValid && t2_commonMeta.valid && GlobalEnable.B
+      table.io.update.valid    := t2_writeValid && t2_commonHR.valid && GlobalEnable.B
       table.io.update.setIdx   := idx
       table.io.update.bankMask := t1_bankMask
       table.io.update.wayMask  := writeWayMask
@@ -608,7 +605,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   bwTable.zip(t1_bwSetIdx).zip(t1_writeBWEntryVec).zip(t1_writeBWEntryWayMaskVec).foreach {
     case (((table, idx), writeEntries), writeWayMask) =>
-      table.io.update.valid    := t2_writeValid && t2_commonMeta.valid && BWEnable.B
+      table.io.update.valid    := t2_writeValid && t2_commonHR.valid && BWEnable.B
       table.io.update.setIdx   := idx
       table.io.update.bankMask := t2_bankMask
       table.io.update.wayMask  := writeWayMask
@@ -665,13 +662,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       scPathCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.debug_scPathTakenVec.get(branchWayIdx)
       scPathWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.debug_scPathTakenVec.get(branchWayIdx)
       scGlobalCorrectVec(branchWayIdx) := t1_writeTakenVec(i) ===
-        t1_meta.debug_scGlobalTakenVec.get(branchWayIdx) && t1_meta.scCommonHR.valid
+        t1_meta.debug_scGlobalTakenVec.get(branchWayIdx) && t1_commonHR.valid
       scGlobalWrongVec(branchWayIdx) := t1_writeTakenVec(i) =/=
-        t1_meta.debug_scGlobalTakenVec.get(branchWayIdx) && t1_meta.scCommonHR.valid
+        t1_meta.debug_scGlobalTakenVec.get(branchWayIdx) && t1_commonHR.valid
       scBWCorrectVec(branchWayIdx) := t1_writeTakenVec(i) ===
-        t1_meta.debug_scBWTakenVec.get(branchWayIdx) && t1_meta.scCommonHR.valid
+        t1_meta.debug_scBWTakenVec.get(branchWayIdx) && t1_commonHR.valid
       scBWWrongVec(branchWayIdx) := t1_writeTakenVec(i) =/=
-        t1_meta.debug_scBWTakenVec.get(branchWayIdx) && t1_meta.scCommonHR.valid
+        t1_meta.debug_scBWTakenVec.get(branchWayIdx) && t1_commonHR.valid
 
       scImliCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.debug_scImliTakenVec.get(branchWayIdx)
       scImliWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.debug_scImliTakenVec.get(branchWayIdx)

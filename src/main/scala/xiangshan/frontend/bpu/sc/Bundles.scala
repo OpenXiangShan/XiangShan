@@ -76,8 +76,6 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val scImliResp:      Vec[UInt]      = Vec(NumWays, UInt(ScEntryWidth.W))
   val scBiasResp:      Vec[UInt]      = Vec(BiasTableNumWays, UInt(ScEntryWidth.W))
   val scBiasLowerBits: Vec[UInt]      = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
-  val scCommonHR:      CommonHREntry  = new CommonHREntry
-  val scImli:          UInt           = UInt(ImliWidth.W)
   val scPred:          Vec[Bool]      = Vec(NumWays, Bool())
   val tagePred:        Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
   val tagePredValid:   Vec[Bool]      = Vec(NumBtbResultEntries, Bool())

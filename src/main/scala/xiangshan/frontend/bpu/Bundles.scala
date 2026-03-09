@@ -24,6 +24,7 @@ import xiangshan.backend.decode.isa.predecode.PreDecodeInst
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.abtb.AheadBtbMeta
 import xiangshan.frontend.bpu.history.commonhr.CommonHRMeta
+import xiangshan.frontend.bpu.history.commonhr.CommonHRResolveMeta
 import xiangshan.frontend.bpu.history.phr.PhrMeta
 import xiangshan.frontend.bpu.ittage.IttageMeta
 import xiangshan.frontend.bpu.mbtb.MainBtbMeta
@@ -276,11 +277,12 @@ class BpuRedirectMeta(implicit p: Parameters) extends BpuBundle {
 
 // metadata for resolve training (e.g. tage, mainBtb)
 class BpuResolveMeta(implicit p: Parameters) extends BpuBundle {
-  val mbtb:   MainBtbMeta = new MainBtbMeta
-  val tage:   TageMeta    = new TageMeta
-  val sc:     ScMeta      = new ScMeta
-  val ittage: IttageMeta  = new IttageMeta
-  val phr:    PhrMeta     = new PhrMeta
+  val mbtb:     MainBtbMeta         = new MainBtbMeta
+  val tage:     TageMeta            = new TageMeta
+  val sc:       ScMeta              = new ScMeta
+  val ittage:   IttageMeta          = new IttageMeta
+  val phr:      PhrMeta             = new PhrMeta
+  val commonHR: CommonHRResolveMeta = new CommonHRResolveMeta
 
   // val debug_utage: Option[MicroTageMeta] = Option.when(!env.FPGAPlatform)(new MicroTageMeta)
   val utage: MicroTageMeta = new MicroTageMeta
