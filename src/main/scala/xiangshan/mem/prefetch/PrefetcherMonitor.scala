@@ -21,6 +21,7 @@ class PrefetchControlBundle()(implicit p: Parameters) extends XSBundle with HasS
 class LoadPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
   val total_prefetch = Bool() // from loadpipe s2, pf req sent
   val pf_late_in_cache = Bool() // from loadpipe s2, pf req sent but hit
+  val pf_late_in_cache_source = UInt(L1PfSourceBits.W) // from loadpipe s2, pf req sent but hit, hit's source
   val nack_prefetch = Bool() // from loadpipe s2, pf req miss but nack
   val pf_source = UInt(L1PfSourceBits.W)
 
@@ -41,11 +42,12 @@ class MainPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with Has
 
 class MissPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with HasL1PrefetchSourceParameter {
   val pf_late_in_mshr = Bool() // from missqueue, pf req match a existing mshr
+  val pf_late_in_mshr_source = UInt(L1PfSourceBits.W) // from missqueue, pf req match a existing mshr, it's source type
   val prefetch_miss = Bool() // from missqueue, pf req allocate a new mshr
   val pf_source = UInt(L1PfSourceBits.W)
 
   val hit_pf_in_mshr = Bool() // from missqueue, demand miss match a existing pf mshr, then clear pf flag
-  val hit_pf_source_in_mshr = UInt(L1PfSourceBits.W) // from missqueue, the pf source of demand miss matched
+  val hit_pf_in_mshr_source = UInt(L1PfSourceBits.W) // from missqueue, the pf source of demand miss matched
   val load_miss = Bool() // from missqueue, load demand miss allocate a new mshr
 }
 
@@ -77,9 +79,11 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
 
   val StreamMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("stream")))
   val StrideMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("stride")))
+  val BertiMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("berti")))
 
   StreamMonitor.io.prefetch_info:= prefetch_info
   StrideMonitor.io.prefetch_info := prefetch_info
+  BertiMonitor.io.prefetch_info := prefetch_info
   
   // stream 0, stride 1
   io.pf_ctrl(0) := StreamMonitor.io.pf_ctrl
@@ -196,7 +200,7 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   val hit_pf_in_cache = PopCount(io.prefetch_info.loadinfo.map(t => t.hit_pf_in_cache && param.isMyType(t.hit_source)) ++ Seq(io.prefetch_info.maininfo.hit_pf_in_cache && param.isMyType(io.prefetch_info.maininfo.hit_pf_source_in_cache)))
   val pf_useless = io.prefetch_info.maininfo.pf_useless && param.isMyType(io.prefetch_info.maininfo.pf_source_useless)
   val prefetch_miss = io.prefetch_info.missinfo.prefetch_miss && param.isMyType(io.prefetch_info.missinfo.pf_source)
-  val hit_pf_in_mshr = io.prefetch_info.missinfo.hit_pf_in_mshr && param.isMyType(io.prefetch_info.missinfo.hit_pf_source_in_mshr)
+  val hit_pf_in_mshr = io.prefetch_info.missinfo.hit_pf_in_mshr && param.isMyType(io.prefetch_info.missinfo.hit_pf_in_mshr_source)
   val hit_pf = hit_pf_in_cache + hit_pf_in_mshr.asUInt
   val pf_late = pf_late_in_cache.asUInt + pf_late_in_mshr.asUInt
 
@@ -253,6 +257,13 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     depth := depth_const
   }
 
+  val pfTypes: Seq[(String, UInt => Bool)] = Seq(
+    // (name, PfSource)
+    ("Demand", isDemand),
+    ("Stream", isFromStream),
+    ("Stride", isFromStride),
+    ("Berti", isFromBerti)
+  )
   XSPerfAccumulate(s"l1prefetchSent${param.name}", total_prefetch)
   XSPerfAccumulate(s"l1prefetchHit${param.name}", hit_pf)
   XSPerfAccumulate(s"l1prefetchHitInCache${param.name}", hit_pf_in_cache)
@@ -260,6 +271,16 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
   XSPerfAccumulate(s"l1prefetchLate${param.name}", pf_late)
   XSPerfAccumulate(s"l1prefetchLateInCache${param.name}", pf_late_in_cache)
   XSPerfAccumulate(s"l1prefetchLateInMSHR${param.name}", pf_late_in_mshr)
+  for ((x, isLateHitX) <- pfTypes) {
+    XSPerfAccumulate(s"l1prefetchLateInCache${param.name}_Hit${x}", PopCount(
+      io.prefetch_info.loadinfo.map(y =>
+        y.pf_late_in_cache && param.isMyType(y.pf_source) && isLateHitX(y.pf_late_in_cache_source)
+    )))
+    XSPerfAccumulate(s"l1prefetchLateInMSHR${param.name}_Hit${x}",
+      io.prefetch_info.missinfo.pf_late_in_mshr && param.isMyType(io.prefetch_info.missinfo.pf_source)
+        && isLateHitX(io.prefetch_info.missinfo.pf_late_in_mshr_source)
+    )
+  }
   XSPerfAccumulate(s"l1prefetchUseless${param.name}", pf_useless)
   XSPerfAccumulate(s"l1prefetchDropByNack${param.name}", nack_prefetch)
   XSPerfAccumulate(s"mshr_count_Prefetch${param.name}", prefetch_miss)
@@ -298,6 +319,7 @@ object PrefetcherMonitorParam {
   def fromString(s: String): PrefetcherMonitorParam = s.toLowerCase match {
     case "stream" => new StreamMonitorParam()
     case "stride" => new StrideMonitorParam()
+    case "berti" => new BertiMonitorParam()
     case t => throw new IllegalArgumentException(s"unknown Prefetcher type $t")
   }
 }
@@ -313,4 +335,9 @@ class StrideMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSource
 
   override val VALIDITY_CHECK_INTERVAL = 800
   override val DISABLE_THRESHOLD = 700
+}
+
+class BertiMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
+  override val name: String = "Berti"
+  override def isMyType(value: UInt) = value === L1_HW_PREFETCH_BERTI
 }
