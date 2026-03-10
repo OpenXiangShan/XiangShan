@@ -52,16 +52,16 @@ class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParamet
 }
 
 class PhrTakenData(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
-  val taken:     Bool                  = Bool()
-  val cfiPc:     PrunedAddr            = PrunedAddr(VAddrBits)
-  val target:    PrunedAddr            = PrunedAddr(VAddrBits)
+  val taken:  Bool       = Bool()
+  val cfiPc:  PrunedAddr = PrunedAddr(VAddrBits)
+  val target: PrunedAddr = PrunedAddr(VAddrBits)
 }
 
 class PhrBtbCandidates(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
-  val ubtb:      PhrTakenData          = new PhrTakenData
-  val abtb:      Vec[PhrTakenData]     = Vec(NumAheadBtbPredictionEntries, new PhrTakenData)
-  val useAbtb:   Bool                  = Bool()
-  val abtbOH:    Vec[Bool]             = Vec(NumAheadBtbPredictionEntries, Bool())
+  val ubtb:    PhrTakenData      = new PhrTakenData
+  val abtb:    Vec[PhrTakenData] = Vec(NumAheadBtbPredictionEntries, new PhrTakenData)
+  val useAbtb: Bool              = Bool()
+  val abtbOH:  Vec[Bool]         = Vec(NumAheadBtbPredictionEntries, Bool())
 }
 
 class PhrUpdate(implicit p: Parameters) extends PhrBundle {
