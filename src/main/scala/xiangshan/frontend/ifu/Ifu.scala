@@ -25,6 +25,7 @@ import utility.PerfCCT
 import utility.UIntToMask
 import utility.ValidHold
 import utility.XORFold
+import utility.XSPerfAccumulate
 import xiangshan.FrontendTdataDistributeIO
 import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.cache.mmu.TlbRequestIO
@@ -787,7 +788,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s2_icachePerfInfo = RegEnable(io.fromICache.perf, s1_fire)
   private val s3_icachePerfInfo = RegEnable(s2_icachePerfInfo, s2_fire)
-
+  XSPerfAccumulate("ifu_redirect_is_checker", toFtq.ifuRedirectIsChecker)
   val perfEvents: Seq[(String, Bool)] = Seq(
     ("frontendFlush                ", wbRedirect.valid),
     ("ifu_req                      ", io.toIBuffer.fire),

@@ -51,7 +51,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
     Wire(UInt(CfiPositionWidth.W)) // the offset relative with align 32B(max 32) simliar to mbtb pos
   private val s1_cfiAlignPosition = Wire(UInt(CfiPositionWidth.W)) // the offset relative with align 64B
   private val s1_data             = RegEnable(io.prefetchData.bits.data, s0_valid)
-  private val s1_isRVC            = RegEnable(io.prefetchData.bits.maybeRvcMap, s0_valid).asBools
+  private val s1_isRVC            = RegEnable(io.prefetchData.bits.maybeRvcMap, s0_valid)
 
   // default at most 32 inst per cacheline
   private val s1_cutInst       = Wire(Vec(ICacheLineBytes / 2, UInt(32.W)))
@@ -94,8 +94,8 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
       s1_instValidOff0(i) := true.B
       s1_instValidOff2(i) := false.B
     } else {
-      s1_instValidOff0(i) := !s1_instValidOff0(i - 1) || s1_isRVC(i - 1)
-      s1_instValidOff2(i) := !s1_instValidOff2(i - 1) || s1_isRVC(i - 1)
+      s1_instValidOff0(i) := !s1_instValidOff0(i - 1) || s1_isRVC(i - 1).asBool
+      s1_instValidOff2(i) := !s1_instValidOff2(i - 1) || s1_isRVC(i - 1).asBool
     }
     // TODO:CHECK LOGIC
     if (i == 0) {
@@ -120,7 +120,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   s1_cutInst(ICacheLineBytes / 2 - 1) := Cat(s1_dataVec(0), s1_dataVec(ICacheLineBytes / 2 - 1))
 
   preDecoder.io.req.valid               := s1_valid
-  preDecoder.io.req.bits.isRvc          := s1_isRVC
+  preDecoder.io.req.bits.isRvc          := s1_isRVC.asBools
   preDecoder.io.req.bits.data           := s1_finalInst
   preDecoder.io.req.bits.instrValidOff0 := s1_finalInstValidOff0
   preDecoder.io.req.bits.instrValidOff2 := s1_finalInstValidOff2
@@ -134,6 +134,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   private val s2_branchInfo      = RegEnable(s1_branchInfo, s1_valid)
   private val s2_jumpOffset      = RegEnable(s1_jumpOffset, s1_valid)
   private val s2_startPc         = RegEnable(s1_startPc, s1_valid)
+  private val s2_isRVC           = RegEnable(s1_isRVC, s1_valid)
 
   // TODO: add more branch type
   private val s2_shadowBranchMask = (s2_branchInfo zip s2_finalInstrValid).map { case (info, valid) =>
@@ -162,12 +163,13 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
     val buildValid = matchOH.reduce(_ || _)
     // different from mbtb pos
     val position = ~idx
+    val rviPos   = position + 1.U
     prefetchWrite.bits.entries(i - 1).valid                   := s2_revBranchInfo(idx).valid && buildValid
     prefetchWrite.bits.entries(i - 1).bits.victim             := false.B
     prefetchWrite.bits.entries(i - 1).bits.valid              := s2_revBranchInfo(idx).valid && buildValid
     prefetchWrite.bits.entries(i - 1).bits.used               := false.B
     prefetchWrite.bits.entries(i - 1).bits.counter            := TakenCounter.WeakPositive
-    prefetchWrite.bits.entries(i - 1).bits.sramData.position  := position
+    prefetchWrite.bits.entries(i - 1).bits.sramData.position  := Mux(s2_isRVC.asBools.reverse(idx), position, rviPos)
     prefetchWrite.bits.entries(i - 1).bits.sramData.attribute := s2_revBranchInfo(idx).brAttribute
     prefetchWrite.bits.entries(i - 1).bits.sramData.target    := s2_jumpOffset.reverse(idx).asUInt
     prefetchWrite.bits.entries(i - 1).bits.sramData.tag       := getTag(s2_startPc)
