@@ -559,10 +559,16 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     val writeDir = writeBiasDirMask.map(_(i))
     val inc      = PopCount(writeHit.zip(writeDir).map { case (hit, dir) => hit && dir })
     val dec      = PopCount(writeHit.zip(writeDir).map { case (hit, dir) => hit && !dir })
+
     newEntry.ctr := Mux(inc >= dec, oldEntry.ctr.getIncrease(inc - dec), oldEntry.ctr.getDecrease(dec - inc))
   }
-
+  dontTouch(writeBiasWayMask)
+  dontTouch(writeBiasDirMask)
   dontTouch(t1_writeBiasEntryVec)
+
+  when(t1_writeValid) {
+    scThreshold := t1_writeThresVec
+  }
 
   /*
    *  train pipeline stage 2
@@ -580,9 +586,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t2_writeGlobalEntryVec        = RegEnable(t1_writeGlobalEntryVec, t1_fire)
   private val t2_writeBiasWayMask           = RegEnable(t1_writeBiasWayMask, t1_fire)
   private val t2_writeBiasEntryVec          = RegEnable(t1_writeBiasEntryVec, t1_fire)
-  private val t2_writeImliWayMask           = RegEnable(t1_writeImliWayMask, t1_fire)
-  private val t2_writeImliEntryVec          = RegEnable(t1_writeImliEntryVec, t1_fire)
-  private val t2_writeThresVec              = RegEnable(t1_writeThresVec, t1_fire)
 
   // new entries write back to tables
   pathTable.zip(t2_pathSetIdx).zip(t2_writePathEntryVec).zip(t2_writePathWayMaskVec).foreach {
@@ -624,9 +627,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   biasTable.io.update.wayMask  := t2_writeBiasWayMask
   biasTable.io.update.entryVec := t2_writeBiasEntryVec
 
-  when(t2_writeValid) {
-    scThreshold := t2_writeThresVec
-  }
+  /*
+   *  PerfAccumulate
+   */
 
   private val scCorrectVec   = WireInit(VecInit.fill(NumWays)(false.B))
   private val scWrongVec     = WireInit(VecInit.fill(NumWays)(false.B))
