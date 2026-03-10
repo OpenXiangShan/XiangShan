@@ -34,6 +34,7 @@ trait HasPhrParameters extends HasBpuParameters {
   def PathHashWidth:     Int     = phrParameters.PathHashWidth
   def PathHashHighWidth: Int     = PathHashWidth - Shamt
   def MaxHistLens:       Int     = bpuParameters.tageParameters.TableInfos.map(_.HistoryLength).max
+  def DupNum:            Int     = 2
 
   // inherited from HasBpuParameters
   // def PhrHistoryLength: Int = PhrHistoryLength

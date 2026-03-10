@@ -18,6 +18,8 @@ package xiangshan.frontend.bpu.history.phr
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.HasCircularQueuePtrHelper
+import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSWarn
 import xiangshan.frontend.PrunedAddr
@@ -25,7 +27,7 @@ import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BpuTrain
 
 // PHR: Predicted History Register
-class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with Helpers {
+class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with HasCircularQueuePtrHelper with Helpers {
   class PhrIO(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
     val s0_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val s1_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
@@ -39,14 +41,35 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   }
   val io: PhrIO = IO(new PhrIO)
 
-  private val phr    = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
-  private val phrPtr = RegInit(0.U.asTypeOf(new PhrPtr))
+  private val phrDup   = RegInit(VecInit(Seq.fill(DupNum)(0.U(PhrHistoryLength.W))))
+  private val debugPhr = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
+  private val phrPtr   = RegInit(0.U.asTypeOf(new PhrPtr))
 
-  private def getPhr(ptr: PhrPtr): UInt =
-    (Cat(phr.asUInt, phr.asUInt) >> (ptr.value + 1.U))(PhrHistoryLength - 1, 0)
+  private def getPhr(ptr: PhrPtr, dupId: Int = 0): UInt = {
+    val shiftNum  = distanceBetween(ptr, phrPtr) // (ptr - phrPtr).value(log2Ceil(FtqSize*Shamt) - 1, 1)
+    val doublePhr = Cat(phrDup(dupId), phrDup(dupId))
+    // Distance is a multiple of 2; LSB of shift amount omitted.
+    val shiftPhr = doublePhr >> Cat(shiftNum(log2Ceil(FtqSize * Shamt) - 1, 1), 0.U(1.W))
+    // It is more efficient to add a Mux stage than to widen the shift amount by 1 bit.
+    val result = Mux(shiftNum === (FtqSize * Shamt).U, doublePhr >> (FtqSize * Shamt).U, shiftPhr)
+    result(PhrHistoryLength - 1, 0)
+  }
+
+  private def getOverridePhr(phrMeta: PhrMeta): UInt = {
+    // Pipeline constraint: BPU has 3 stages, so the max shift distance won't exceed 8 entries (4 * Shamt=2)
+    val stageNum  = 4
+    val ptr       = phrMeta.phrPtr
+    val shiftNum  = distanceBetween(ptr, phrPtr)
+    val doublePhr = Cat(phrDup(0), phrDup(0))
+    val shiftPhr  = (doublePhr >> Cat(shiftNum(log2Ceil(stageNum * Shamt) - 1, 1), 0.U(1.W)))(PhrHistoryLength - 1, 0)
+    Cat(shiftPhr(PhrHistoryLength - 1, PathHashHighWidth), phrMeta.phrLowBits)
+  }
+
+  private def getDebugPhr(ptr: PhrPtr): UInt =
+    (Cat(debugPhr.asUInt, debugPhr.asUInt) >> (ptr.value + 1.U))(PhrHistoryLength - 1, 0)
 
   private def getRedirectPhr(phrMeta: PhrMeta): UInt = {
-    val redirectErrorPhr = getPhr(phrMeta.phrPtr)
+    val redirectErrorPhr = getPhr(phrMeta.phrPtr, 1)
     Cat(redirectErrorPhr(PhrHistoryLength - 1, PathHashHighWidth), phrMeta.phrLowBits)
   }
 
@@ -78,8 +101,13 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
   private val s0_phrValue    = getPhr(s0_phrPtr)                       // debug use it
   private val s0_phrRegValue = getPhr(RegEnable(s0_phrPtr, !s0_stall)) // debug use it
-  private val s1_phrValue    = getPhr(s1_phrPtr)
-  private val phrValue       = getPhr(phrPtr)
+  private val s1_phrValue    = phrDup(0)                               // getPhr(s1_phrPtr)
+  private val phrValue       = phrDup(0)                               // getPhr(phrPtr)
+  private val debugPhrValue  = getDebugPhr(phrPtr)
+
+  private val diffPhrValue = phrValue =/= debugPhrValue
+  XSError(s0_fire && diffPhrValue, "PHR Mismatch: Data value differs from debug reference")
+  XSError(s1_valid && (s1_phrPtr =/= phrPtr), "unexception: diff s1_phrPtr and phrPtr")
 
   private val redirectData    = WireInit(0.U.asTypeOf(new PhrUpdateData))
   private val s1_overrideData = WireInit(0.U.asTypeOf(new PhrUpdateData))
@@ -132,24 +160,51 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val shiftBits = hash(Shamt - 1, 0)
   private val hashHigh  = hash(PathHashWidth - 1, Shamt)
 
+  private val updatePhr = Wire(UInt(PhrHistoryLength.W))
+  updatePhr := MuxCase(
+    0.U(PhrHistoryLength.W),
+    Seq(
+      redirectData.valid -> getRedirectPhr(redirectData.phrMeta),
+      s3_override        -> getOverridePhr(s3_overrideData.phrMeta),
+      s1_valid           -> phrDup(0)
+    )
+  )
   when(updateData.valid) {
+    val phr = Wire(Vec(PhrHistoryLength, Bool()))
     phrPtr    := updateData.phrMeta.phrPtr
     s0_phrPtr := updateData.phrMeta.phrPtr
-    for (i <- 1 to PathHashHighWidth) {
-      phr((updateData.phrMeta.phrPtr + i.U).value) := updateData.phrMeta.phrLowBits(i - 1)
+    phr       := updatePhr.asBools
+    for (i <- 0 until PathHashHighWidth) {
+      phr(i) := updateData.phrMeta.phrLowBits(i)
     }
     when(updateData.taken) {
+      phr := (updatePhr << Shamt.U)(PhrHistoryLength - 1, 0).asBools
       for (i <- 0 until Shamt) {
-        phr((updateData.phrMeta.phrPtr - i.U).value) := shiftBits(Shamt - 1 - i)
+        phr(Shamt - 1 - i) := shiftBits(Shamt - 1 - i)
       }
-      for (i <- 1 to PathHashHighWidth) {
-        phr((updateData.phrMeta.phrPtr + i.U).value) := hashHigh(i - 1) ^ updateData.phrMeta.phrLowBits(i - 1)
+      for (i <- Shamt until PathHashWidth) {
+        phr(i) := hashHigh(i - Shamt) ^ updateData.phrMeta.phrLowBits(i - Shamt)
       }
       phrPtr    := updateData.phrMeta.phrPtr - Shamt.U
       s0_phrPtr := updateData.phrMeta.phrPtr - Shamt.U
     }
+    phrDup.map(_ := phr.asUInt)
   }.otherwise {
     s0_phrPtr := phrPtr
+  }
+
+  when(updateData.valid) {
+    for (i <- 1 to PathHashHighWidth) {
+      debugPhr((updateData.phrMeta.phrPtr + i.U).value) := updateData.phrMeta.phrLowBits(i - 1)
+    }
+    when(updateData.taken) {
+      for (i <- 0 until Shamt) {
+        debugPhr((updateData.phrMeta.phrPtr - i.U).value) := shiftBits(Shamt - 1 - i)
+      }
+      for (i <- 1 to PathHashHighWidth) {
+        debugPhr((updateData.phrMeta.phrPtr + i.U).value) := hashHigh(i - 1) ^ updateData.phrMeta.phrLowBits(i - 1)
+      }
+    }
   }
 
   /*
@@ -161,6 +216,9 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   }
 
   when(redirectData.valid) {
+    val redirectHash      = pathHash(redirectData.cfiPc, redirectData.target)
+    val redirectShiftBits = redirectHash(Shamt - 1, 0)
+    val redirectHashHigh  = redirectHash(PathHashWidth - 1, Shamt)
     redirectPhr := getRedirectPhr(redirectData.phrMeta)
     AllFoldedHistoryInfo.foreach { info =>
       redirectData.foldedPhr.getHistWithInfo(info).foldedHist :=
@@ -171,31 +229,37 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
       s0_foldedPhr := redirectData.foldedPhr.update(
         VecInit(redirectPhr.asBools),
         redirectData.phrMeta.phrPtr,
-        hashHigh,
+        redirectHashHigh,
         Shamt,
-        shiftBits
+        redirectShiftBits
       )
     }
   }.elsewhen(s3_override) {
+    val s3Hash      = pathHash(s3_overrideData.cfiPc, s3_overrideData.target)
+    val s3ShiftBits = s3Hash(Shamt - 1, 0)
+    val s3HashHigh  = s3Hash(PathHashWidth - 1, Shamt)
     s0_foldedPhr := s3_foldedPhrReg
     when(s3_overrideData.taken) {
       s0_foldedPhr := s3_foldedPhrReg.update(
-        VecInit(getRedirectPhr(s3_overrideData.phrMeta).asBools),
+        VecInit(getOverridePhr(s3_overrideData.phrMeta).asBools),
         s3_overrideData.phrMeta.phrPtr,
-        hashHigh,
+        s3HashHigh,
         Shamt,
-        shiftBits
+        s3ShiftBits
       )
     }
   }.elsewhen(s1_valid) {
+    val s1Hash      = pathHash(s1_overrideData.cfiPc, s1_overrideData.target)
+    val s1ShiftBits = s1Hash(Shamt - 1, 0)
+    val s1HashHigh  = s1Hash(PathHashWidth - 1, Shamt)
     s0_foldedPhr := s1_foldedPhrReg
     when(s1_overrideData.taken) {
       s0_foldedPhr := s1_foldedPhrReg.update(
-        VecInit(getRedirectPhr(s1_overrideData.phrMeta).asBools),
+        VecInit(phrDup(0).asBools),
         s1_overrideData.phrMeta.phrPtr,
-        hashHigh,
+        s1HashHigh,
         Shamt,
-        shiftBits
+        s1ShiftBits
       )
     }
   }.otherwise {
@@ -222,7 +286,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   io.phrMeta.phrPtr     := s1_phrPtr
   io.phrMeta.phrLowBits := s1_phrValue(PathHashHighWidth - 1, 0)
   io.phrMeta.predFoldedHist.foreach(_ := s1_foldedPhrReg)
-  io.phr            := phr
+  io.phr            := phrDup(1).asBools
   io.s0_foldedPhr   := s0_foldedPhr
   io.s1_foldedPhr   := s1_foldedPhrReg
   io.s2_foldedPhr   := s2_foldedPhrReg

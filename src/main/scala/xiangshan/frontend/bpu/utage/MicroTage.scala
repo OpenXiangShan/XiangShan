@@ -123,8 +123,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   for (i <- 0 until NumAheadBtbPredictionEntries) {
     for (j <- 0 until NumTables) {
       for (k <- 0 until NumWays) {
-        a1_posHitVec(i)(j)(k) :=
-          a1_predEntries(j)(k).valid && (a1_predEntries(j)(k).cfiPosition === io.abtbPosVec(i))
+        a1_posHitVec(i)(j)(k) := (a1_predEntries(j)(k).cfiPosition === io.abtbPosVec(i))
       }
     }
   }
