@@ -100,6 +100,9 @@ jobs:
       fail-fast: false
       max-parallel: 4
     steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
       - uses: actions/checkout@v6
         with:
           submodules: true
@@ -205,6 +208,9 @@ jobs:
       fail-fast: false
       max-parallel: 12 # TODO: increase this to 16 after dropping legacy workflow
     steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
       - uses: actions/checkout@v6
         with:
           submodules: true
