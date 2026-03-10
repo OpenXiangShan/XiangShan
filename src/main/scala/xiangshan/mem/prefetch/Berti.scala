@@ -298,8 +298,10 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     res.valid := stat_find_delta && isTimely && pair._1
     when (decrModes(set) ^ pair._2(pair._2.getWidth-1)){
       stat_directCorrect := true.B
+      res.delta := -pair._2
+    }.otherwise{
+      res.delta := pair._2
     }
-    res.delta := pair._2
     learnPtrs.get(set) := learnPtrs.get(set) + 1.U
     res
   }
