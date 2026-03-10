@@ -199,6 +199,10 @@ object ArgParser {
                 OpenLLCParamsOpt = openLLCParam
               )
           }), tail)
+        case "--sim-mem-size" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(SimMemSize = value.toLong * 1024 * 1024 * 1024) // GB
+          }), tail)
         case "--dfx" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DFTOptionsKey => up(DFTOptionsKey).copy(EnableMbist = value.toBoolean)
