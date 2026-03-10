@@ -263,17 +263,20 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val vaMatchVec = wayMap(w => valids(set)(w) && entries(set)(w).baseVAddr === baseVAddr)
     when(pcMatch) {
       when(!vaMatchVec.orR){
-        stat_access_update := valids(set)(way)
-        val lastWay = (accessPtrs.get(set) - 1.U).value
-        decrModes(set) := valids(set)(lastWay) && baseVAddr < entries(set)(lastWay).baseVAddr
+        val lastWay = (accessPtrs.get(set) - (HtWaySize >> 1).U).value
+        when(valids(set)(lastWay)){
+          val isDecr = baseVAddr < entries(set)(lastWay).baseVAddr
+          decrModes(set) := isDecr
+          stat_access_dirChange := (decrModes(set) ^ isDecr)
+        }
         hysteresis(set) := true.B
         valids(set)(way) := true.B
         entries(set)(way).alloc(baseVAddr, currTsp)
         accessPtrs.get(set) := accessPtrs.get(set) + 1.U
 
+        stat_access_update := valids(set)(way)
         stat_access_currVA := baseVAddr
         stat_access_lastVA := entries(set)(lastWay).baseVAddr
-        stat_access_dirChange := (decrModes(set) ^ (valids(set)(lastWay) && baseVAddr < entries(set)(lastWay).baseVAddr))
       }
     }.elsewhen(hysteresis(set)) {
       hysteresis(set) := false.B
