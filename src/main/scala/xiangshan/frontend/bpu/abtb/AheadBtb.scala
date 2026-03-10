@@ -272,7 +272,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val t1_targetDiff        = t1_predictInfo.targetLowerBits =/= t1_trainTargetLowerBits
   private val t1_needCorrectTarget = t1_hit && t1_trainAttribute.isIndirect && t1_targetDiff
   private val t1_needCorrectAttribute =
-    t1_hit && !(t1_predictInfo.attribute === t1_trainAttribute) && !t1_predUsePrefetchBtb
+    t1_hit && !(t1_predictInfo.attribute === t1_trainAttribute) && t1_predictInfo.isPrefetchTrain
 
   // TODO: if the attribute of the taken branch is wrong, we need replace it or invalidate it
 
