@@ -10,5 +10,44 @@ jobs:
     with:
       test_branch: kunminghu-v3
       perf_report_dir: /nfs/home/cirunner/perf-report-nightly
-      benchmark_type: gcc12-spec06-0.3c
+      benchmark_type: gcc15-spec06-0.3c
       servers: all
+
+  diff-report:
+    needs: performance-test
+    runs-on: perf
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Compute paths
+        run: |
+          XS_CONFIG=CHIConfig
+          PERF_DIR=/nfs/home/cirunner/perf-report-nightly
+          # determine the most recent report directory for this config
+          SPEC_DIR=$(ls -td $PERF_DIR/cr*-${XS_CONFIG} 2>/dev/null | head -n1 || true)
+          if [ -n "$SPEC_DIR" ]; then
+            # extract date and short sha from dirname: cr<date>-<sha>-<config>
+            base=$(basename "$SPEC_DIR")
+            DATE=${base#cr}; DATE=${DATE%%-*}
+            SHORT_SHA=${base#cr${DATE}-}; SHORT_SHA=${SHORT_SHA%%-*}
+          else
+            DATE=$(date +%y%m%d)
+            SHORT_SHA="unknown"
+          fi
+          echo "SPEC_DIR=$SPEC_DIR" >> $GITHUB_ENV
+          echo "PERF_DIR=$PERF_DIR" >> $GITHUB_ENV
+          echo "XS_CONFIG=$XS_CONFIG" >> $GITHUB_ENV
+          echo "DATE=$DATE" >> $GITHUB_ENV
+          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+      - name: Diff with previous result
+        run: |
+          echo "### :bar_chart: Diff with previous run" >> $GITHUB_STEP_SUMMARY
+          PREV_DIR=$(ls -td $PERF_DIR/cr*-${XS_CONFIG} 2>/dev/null | grep -v "cr${DATE}-${SHORT_SHA}-${XS_CONFIG}" | head -n1 || true)
+          if [ -n "$PREV_DIR" ] && [ -f "$PREV_DIR/score.txt" ]; then
+            echo "Comparing with $PREV_DIR" >> $GITHUB_STEP_SUMMARY
+            python3 $GITHUB_WORKSPACE/.github/workflows/nightly_perf_diff.py "$SPEC_DIR/score.txt" "$PREV_DIR/score.txt" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No previous score.txt found" >> $GITHUB_STEP_SUMMARY
+          fi

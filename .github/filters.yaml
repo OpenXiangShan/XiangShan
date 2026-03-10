@@ -9,6 +9,7 @@ core:
   - "!.github/workflows/perf-v3.yml"
   - "!.github/workflows/perf-trigger.yml"
   - "!.github/workflows/pr-labeler.yml"
+  - "!.github/workflows/nightly_perf_diff.py"
   - "!.gitignore"
   - "!**/*.md"
   - "!LICENSE"
