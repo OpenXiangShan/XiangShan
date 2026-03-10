@@ -50,7 +50,7 @@ on:
 
 jobs:
   run:
-    runs-on: node
+    runs-on: perf
     continue-on-error: false
     #At most 2 days to finish
     timeout-minutes: 7200
