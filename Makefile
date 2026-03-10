@@ -199,11 +199,10 @@ endif
 
 # emu for the release version
 RELEASE_ARGS += --fpga-platform --reset-gen --firtool-opt --ignore-read-enable-mem --firtool-opt "--default-layer-specialization=disable"
-override DEBUG_ARGS += --firtool-opt "--default-layer-specialization=enable"
 ifeq ($(FPGA), 1)
-override DEBUG_ARGS	+= --fpga-platform --disable-all --remove-assert
+override DEBUG_ARGS	+= --fpga-platform --firtool-opt "--default-layer-specialization=disable"
 else
-override DEBUG_ARGS	+= --enable-difftest
+override DEBUG_ARGS	+= --enable-difftest --firtool-opt "--default-layer-specialization=enable"
 endif
 ifeq ($(RELEASE),1)
 override SIM_ARGS += $(RELEASE_ARGS)
