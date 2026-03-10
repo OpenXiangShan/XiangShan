@@ -29,12 +29,15 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
 
   val common          = Wire(new CommonWireBundle)
   val entryUpdate     = Wire(new EntryBundle)
-  val entryRegNext    = Wire(new EntryBundle)
   val hasWakeupIQ     = OptionWrapper(params.hasIQWakeUp, Wire(new CommonIQWakeupBundle))
 
   //Reg
   val validReg = GatedValidRegNext(common.validRegNext, false.B)
-  val entryReg = RegNext(entryRegNext)
+  val entryReg = RegNext(Mux(
+    io.commonIn.enq.valid,
+    io.commonIn.enq.bits,
+    entryUpdate
+  ))
 
   //Wire
   CommonWireConnect(common, hasWakeupIQ, validReg, entryReg.payload.og1Payload, entryReg.status, io.commonIn, false)
@@ -48,16 +51,10 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
     assert(common.enqReady, s"${params.getIQName}'s OthersEntry is not ready when enq is valid\n")
   }
 
-  when(io.commonIn.enq.valid) {
-    entryRegNext := io.commonIn.enq.bits
-  }.otherwise {
-    entryRegNext := entryUpdate
-  }
-
   EntryRegCommonConnect(common, hasWakeupIQ, validReg, entryUpdate, entryReg, entryReg.status, io.commonIn, false, isComp)
 
   //output
-  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, entryRegNext, entryReg.status, io.commonIn, false, isComp)
+  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, entryReg.status, io.commonIn, false, isComp)
   hasWakeupIQ.foreach(dontTouch(_))
   hasWakeupIQ.foreach(x => dontTouch(x.srcWakeupByIQIsUncertain))
 }
@@ -66,8 +63,7 @@ class OthersEntryVecMem(isComp: Boolean)(implicit p: Parameters, params: IssueBl
   with HasCircularQueuePtrHelper {
 
   require(params.isVecMemIQ, "OthersEntryVecMem can only be instance of VecMem IQ")
-
-  EntryVecMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate)
+  EntryVecMemConnect(io.commonIn, entryReg, entryUpdate)
 }
 
 object OthersEntry {

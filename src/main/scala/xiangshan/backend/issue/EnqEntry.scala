@@ -32,7 +32,6 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
 
   val common              = Wire(new CommonWireBundle)
   val entryUpdate         = Wire(new EntryBundle)
-  val entryRegNext        = Wire(new EntryBundle)
   val enqDelayValidRegNext= Wire(Bool())
   val hasWakeupIQ         = OptionWrapper(params.hasIQWakeUp, Wire(new CommonIQWakeupBundle))
 
@@ -46,7 +45,11 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
 
   //Reg
   val validReg = GatedValidRegNext(common.validRegNext, false.B)
-  val entryReg = RegNext(entryRegNext)
+  val entryReg = RegNext(Mux(
+    io.commonIn.enq.valid && common.enqReady,
+    io.commonIn.enq.bits,
+    entryUpdate
+  ))
   val enqDelayValidReg = GatedValidRegNext(enqDelayValidRegNext, false.B)
 
   //Wire
@@ -54,12 +57,6 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
 
   when(io.commonIn.enq.valid) {
     assert(common.enqReady, s"${params.getIQName}'s EnqEntry is not ready when enq is valid\n")
-  }
-
-  when(io.commonIn.enq.valid && common.enqReady) {
-    entryRegNext := io.commonIn.enq.bits
-  }.otherwise {
-    entryRegNext := entryUpdate
   }
 
   when(io.commonIn.enq.valid && common.enqReady) {
@@ -148,7 +145,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
   EntryRegCommonConnect(common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true, isComp)
 
   //output
-  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, entryRegNext, currentStatus, io.commonIn, true, isComp)
+  CommonOutConnect(io.commonOut, common, hasWakeupIQ, validReg, entryUpdate, entryReg, currentStatus, io.commonIn, true, isComp)
 }
 
 class EnqEntryVecMem(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) extends EnqEntry(isComp)
@@ -156,7 +153,7 @@ class EnqEntryVecMem(isComp: Boolean)(implicit p: Parameters, params: IssueBlock
 
   require(params.isVecMemIQ, "EnqEntryVecMem can only be instance of VecMem IQ")
 
-  EntryVecMemConnect(io.commonIn, common, validReg, entryReg, entryRegNext, entryUpdate)
+  EntryVecMemConnect(io.commonIn, entryReg, entryUpdate)
 }
 
 object EnqEntry {
