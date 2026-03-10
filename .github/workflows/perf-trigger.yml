@@ -45,7 +45,11 @@ on:
         required: false
         type: choice
         options:
+          - gcc15-spec06-0.3c
+          - gcc15-spec06-0.8c
           - gcc15-spec06-1.0c
+          - xscc-spec06-0.3c
+          - xscc-spec06-0.8c
           - xscc-spec06-1.0c
           - gcc12-spec06-0.3c
           - gcc12-spec06-0.8c
