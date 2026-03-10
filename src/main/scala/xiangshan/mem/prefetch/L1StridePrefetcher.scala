@@ -55,6 +55,17 @@ trait HasStridePrefetchHelper extends HasL1PrefetchHelper {
   def MAX_CONF = (1 << STRIDE_CONF_BITS) - 1
 }
 
+class StatStrideBundle(implicit p: Parameters) extends XSBundle with HasStridePrefetchHelper {
+  val new_stride = UInt(STRIDE_BITS.W)
+  val dissatisfy = Bool()
+  val overflow = Bool()
+  val valid = Bool()
+  val valid_confirm = Bool()
+  val valid_confirm_sendpf = Bool()
+  val valid_mismatch = Bool()
+  val valid_mismatch_replace = Bool()
+}
+
 class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePrefetchHelper {
   val pre_vaddr = UInt(STRIDE_VADDR_BITS.W)
   val stride = UInt(STRIDE_BITS.W)
@@ -89,6 +100,16 @@ class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePr
     val low_confidence = confidence <= 1.U
     val can_send_pf = stride_valid && stride_match && confidence === MAX_CONF.U
 
+    val stat = Wire(new StatStrideBundle)
+    stat.new_stride := new_stride
+    stat.dissatisfy := new_stride_blk === 0.U || new_stride_blk === 1.U
+    stat.overflow := new_stride(STRIDE_VADDR_BITS - 1) === 1.U // negtive or overflow
+    stat.valid := stride_valid
+    stat.valid_confirm := stride_valid && stride_match
+    stat.valid_confirm_sendpf := stride_valid && stride_match && confidence === MAX_CONF.U
+    stat.valid_mismatch := stride_valid && !stride_match
+    stat.valid_mismatch_replace := stride_valid && !stride_match && low_confidence
+
     when(stride_valid) {
       when(stride_match) {
         confidence := Mux(confidence === MAX_CONF.U, confidence, confidence + 1.U)
@@ -104,7 +125,7 @@ class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePr
       pre_vaddr := new_vaddr
     }
 
-    (can_send_pf, new_stride)
+    (can_send_pf, new_stride, stat)
   }
 
 }
@@ -172,6 +193,8 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
 
   val always_update = Constantin.createRecord(s"always_update${p(XSCoreParamsKey).HartId}", initValue = ALWAYS_UPDATE_PRE_VADDR)
 
+  val s1_stat = WireInit(0.U.asTypeOf(new StatStrideBundle))
+
   when(s1_alloc) {
     valids(s1_index) := true.B
     array(s1_index).alloc(
@@ -182,6 +205,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     val res = array(s1_index).update(s1_vaddr, always_update)
     s1_can_send_pf := res._1
     s1_new_stride := res._2
+    s1_stat := res._3
   }
 
   val l1_stride_ratio_const = Constantin.createRecord(s"l1_stride_ratio${p(XSCoreParamsKey).HartId}", initValue = 2)
@@ -256,4 +280,21 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
       reset_array(i)
     }
   }
+
+  XSPerfAccumulate("s1_stat_dissatisfy", s1_stat.dissatisfy)
+  XSPerfAccumulate("s1_stat_overflow", s1_stat.overflow)
+  XSPerfAccumulate("s1_stat_valid", s1_stat.valid)
+  XSPerfAccumulate("s1_stat_valid_confirm", s1_stat.valid_confirm)
+  XSPerfAccumulate("s1_stat_valid_confirm_sendpf", s1_stat.valid_confirm_sendpf)
+  XSPerfAccumulate("s1_stat_valid_mismatch", s1_stat.valid_mismatch)
+  XSPerfAccumulate("s1_stat_valid_mismatch_replace", s1_stat.valid_mismatch_replace)
+  class StrideLearn extends Bundle {
+    val stat = new StatStrideBundle()
+    val pc = UInt(VAddrBits.W)
+  }
+  val strideLearn = Wire(new StrideLearn())
+  strideLearn.stat := s1_stat
+  strideLearn.pc := RegEnable(s0_pc, s0_valid)
+  val strideLearnDb = ChiselDB.createTable(s"StrideLearnTable${p(XSCoreParamsKey).HartId}", new StrideLearn, basicDB = true)
+  strideLearnDb.log(data = strideLearn, en = s1_update, clock = clock, reset = reset)
 }

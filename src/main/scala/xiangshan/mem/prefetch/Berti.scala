@@ -139,8 +139,13 @@ class LearnDeltasIO(implicit p: Parameters) extends BertiBundle {
 
 class HistoryTable()(implicit p: Parameters) extends BertiModule {
   /*** static variable ***/
+  val stat_access_pcHysteresis = WireInit(false.B)
+  val stat_access_dirHysteresis = WireInit(false.B)
   val stat_access_replace = WireInit(false.B)
   val stat_access_update = WireInit(false.B)
+  val stat_access_dirChange = WireInit(false.B)
+  val stat_access_currVA = WireInit(0.U(HtLineVAddrWidth.W))
+  val stat_access_lastVA = WireInit(0.U(HtLineVAddrWidth.W))
   val stat_find_delta = WireInit(false.B)
   val stat_late = WireInit(false.B)
   val stat_overflow = WireInit(false.B)
@@ -265,9 +270,14 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
         valids(set)(way) := true.B
         entries(set)(way).alloc(baseVAddr, currTsp)
         accessPtrs.get(set) := accessPtrs.get(set) + 1.U
+
+        stat_access_currVA := baseVAddr
+        stat_access_lastVA := entries(set)(lastWay).baseVAddr
+        stat_access_dirChange := (decrModes(set) ^ (valids(set)(lastWay) && baseVAddr < entries(set)(lastWay).baseVAddr))
       }
     }.elsewhen(hysteresis(set)) {
       hysteresis(set) := false.B
+      stat_access_pcHysteresis := true.B
     }.otherwise {
       stat_access_replace := true.B
       val repWay = 0
@@ -318,9 +328,9 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     this.access(io.access.bits.pc, io.access.bits.vaddr)
   }
 
+  val searchReq = io.search.req.bits
   val searchResult = Wire(new LearnDeltasLiteIO)
   when(io.search.req.valid){
-    val searchReq = io.search.req.bits
     searchResult := this.searchLite(searchReq.pc, searchReq.vaddr, searchReq.latency)
   }.otherwise{
     searchResult := DontCare
@@ -333,24 +343,51 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   XSPerfAccumulate("access_req", io.access.valid)
   XSPerfAccumulate("access_replace", io.access.valid && stat_access_replace)
   XSPerfAccumulate("access_update", io.access.valid && stat_access_update)
+  XSPerfAccumulate("access_pcHysteresis", io.access.valid && stat_access_pcHysteresis)
+  XSPerfAccumulate("access_dirHysteresis", io.access.valid && stat_access_dirHysteresis)
+  XSPerfAccumulate("access_dirChange", io.access.valid && stat_access_dirChange)
   XSPerfAccumulate("search_req", io.search.req.valid)
   XSPerfAccumulate("search_resp_valid", io.search.resp.valid)
   XSPerfAccumulate("search_resp_find_total", stat_find_delta)
-  XSPerfAccumulate("search_resp_find_late", stat_find_delta && stat_late)
-  XSPerfAccumulate("search_resp_find_overflow", stat_find_delta && stat_overflow)
-  XSPerfAccumulate("search_resp_find_dissatisfy", stat_find_delta && stat_dissatisfy)
-  XSPerfAccumulate("search_resp_find_satisfy", stat_find_delta && stat_satisfy)
-  XSPerfAccumulate("search_resp_find_directCorrect", stat_find_delta && stat_directCorrect)
+  XSPerfAccumulate("search_resp_find_overflow", stat_find_delta && stat_overflow) // too large
+  XSPerfAccumulate("search_resp_find_dissatisfy", stat_find_delta && !stat_overflow && stat_dissatisfy) // too small
+  XSPerfAccumulate("search_resp_find_late", stat_find_delta && !stat_overflow && !stat_dissatisfy && stat_late) // too late
+  XSPerfAccumulate("search_resp_find_satisfy", stat_find_delta && !stat_overflow && !stat_dissatisfy && !stat_late) // satisfy
+  XSPerfAccumulate("search_resp_find_directCorrect", io.search.resp.valid && stat_directCorrect)
+
+  class AccessLogDb extends Bundle {
+    val pcHysteresis = Bool()
+    val dirHysteresis = Bool()
+    val isReplace = Bool() // to avoid SQLite keywords
+    val isUpdate = Bool() // to avoid SQLite keywords
+    val dirChange = Bool()
+    val currVA = UInt(HtLineVAddrWidth.W)
+    val lastVA = UInt(HtLineVAddrWidth.W)
+    val pc = UInt(VAddrBits.W)
+  }
+  val accessLog = Wire(new AccessLogDb())
+  accessLog.pcHysteresis := stat_access_pcHysteresis
+  accessLog.dirHysteresis := stat_access_dirHysteresis
+  accessLog.isReplace := stat_access_replace
+  accessLog.isUpdate := stat_access_update
+  accessLog.dirChange := stat_access_dirChange
+  accessLog.currVA := stat_access_currVA
+  accessLog.lastVA := stat_access_lastVA
+  accessLog.pc := io.access.bits.pc
+  val accessLogDb = ChiselDB.createTable(s"${_name}_accessLog${p(XSCoreParamsKey).HartId}", new AccessLogDb, basicDB = true)
+  accessLogDb.log(data = accessLog, en = io.access.valid, clock = clock, reset = reset)
 
   class SearchLogDb extends Bundle {
     val histLineVA = UInt(HtLineVAddrWidth.W)
     val currLineVA = UInt(HtLineVAddrWidth.W)
+    val pc = UInt(VAddrBits.W)
     val calDelta = UInt(DeltaWidth.W)
   }
   val searchLog = Wire(new SearchLogDb())
   searchLog.histLineVA := stat_histLineVA
   searchLog.currLineVA := stat_currLineVA
   searchLog.calDelta := io.search.resp.delta.asUInt
+  searchLog.pc := searchReq.pc
   val searchLogDb = ChiselDB.createTable(s"${_name}_searchLog${p(XSCoreParamsKey).HartId}", new SearchLogDb, basicDB = true)
   searchLogDb.log(data = searchLog, en = io.search.resp.valid, clock = clock, reset = reset)
 }
