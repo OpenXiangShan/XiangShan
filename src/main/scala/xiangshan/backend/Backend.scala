@@ -234,6 +234,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.toDispatch.wakeUpVec := vecRegion.io.wakeUpToDispatch
   ctrlBlock.io.toDispatch.IQValidNumVec := intRegion.io.IQValidNumVec ++ fpRegion.io.IQValidNumVec ++ vecRegion.io.IQValidNumVec
   ctrlBlock.io.toDispatch.ldCancel := io.mem.ldCancel
+  // Todo: when add cross domain wake up, it is necessary to add assertions that fp and vec do not have 0 lat fu.
   ctrlBlock.io.toDispatch.og0Cancel := intRegion.io.og0Cancel
   ctrlBlock.io.toDispatch.wbPregsInt.zip(intRegion.io.toIntPreg).map(x => {
     x._1.valid := x._2.wen && x._2.rfWen
