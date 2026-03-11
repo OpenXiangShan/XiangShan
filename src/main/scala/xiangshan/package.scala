@@ -987,6 +987,8 @@ package object xiangshan {
     val V0FlStall = Value("V0FlStall")
     val VlFlStall = Value("VlFlStall")
     val MultiFlStall = Value("MultiFlStall")
+    val IntFlStallForBank = Value("IntFlStallForBank")
+    val FpFlStallForBank = Value("FpFlStallForBank")
     // fusion bubble
     val FusionBubble = Value("FusionBubble")
     // dispatch stall

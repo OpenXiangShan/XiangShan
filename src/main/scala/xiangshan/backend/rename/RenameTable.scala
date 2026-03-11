@@ -105,8 +105,8 @@ class RenameTable(reg_t: RegType, numDiffWritePorts: Int)(implicit p: Parameters
   // speculative rename table
   val rename_table_init = reg_t match {
     case Reg_I => VecInit.fill    (IntLogicRegs)(0.U(PhyRegIdxWidth.W))
-    case Reg_F => VecInit.tabulate(FpLogicRegs)(_.U(PhyRegIdxWidth.W))
-    case Reg_V => VecInit.tabulate(VecLogicRegs)(_.U(PhyRegIdxWidth.W))
+    case Reg_F => VecInit.tabulate(FpLogicRegs)(i => (i*(FpPhyRegs/FpLogicRegs)).U(PhyRegIdxWidth.W))
+    case Reg_V => VecInit.tabulate(VecLogicRegs)(i => (i*(VfPhyRegs/VecLogicRegs)).U(PhyRegIdxWidth.W))
     case Reg_V0 => VecInit.tabulate(V0LogicRegs)(_.U(PhyRegIdxWidth.W))
     case Reg_Vl => VecInit.tabulate(VlLogicRegs)(_.U(PhyRegIdxWidth.W))
   }

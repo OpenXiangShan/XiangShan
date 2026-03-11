@@ -112,11 +112,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val compressUnit = Module(new CompressUnit())
   // create free list and rat
-  val intFreeList = Module(new MEFreeList(IntPhyRegs, RabCommitWidth))
-  val fpFreeList = Module(new StdFreeList(FpPhyRegs - FpLogicRegs, FpLogicRegs, Reg_F, RabCommitWidth))
-  val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs, VecLogicRegs, Reg_V, RabCommitWidth, 31))
-  val v0FreeList = Module(new StdFreeList(V0PhyRegs - V0LogicRegs, V0LogicRegs, Reg_V0, RabCommitWidth, 1))
-  val vlFreeList = Module(new StdFreeList(VlPhyRegs - VlLogicRegs, VlLogicRegs, Reg_Vl, RabCommitWidth, 1))
+  val intFreeList = Module(new NewFreeList(IntPhyRegs,RabCommitWidth,RenameWidth,Reg_I,IntLogicRegs))
+  val fpFreeList = Module(new NewFreeList(FpPhyRegs, RabCommitWidth,RenameWidth, Reg_F,FpLogicRegs))
+  val vecFreeList = Module(new NewFreeList(VfPhyRegs, RabCommitWidth,RenameWidth, Reg_V, VecLogicRegs))
+  val v0FreeList = Module(new NewFreeList(V0PhyRegs, RabCommitWidth,RenameWidth, Reg_V0, V0LogicRegs))
+  val vlFreeList = Module(new NewFreeList(VlPhyRegs, RabCommitWidth,RenameWidth, Reg_Vl, VlLogicRegs))
 
   val rat = Module(new RenameTableWrapper)
 
@@ -146,8 +146,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       commit.archAlloc := io.rabCommits.commitValid zip io.rabCommits.info map {
         case (valid, info) => valid && info.rfWen && !info.isMove
       }
+      commit.archAllocPhyReg := io.rabCommits.info map {
+        case info => info.pdest
+      }
   }
-  intFreeList.io.debug_rat.foreach(_ := debug_int_rat.get)
 
   fpFreeList.io.commit match {
     case commit =>
@@ -156,8 +158,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         case (valid, info) =>
           valid && info.fpWen
       }
+      commit.archAllocPhyReg := io.rabCommits.info map {
+        case info => info.pdest
+      }
   }
-  fpFreeList.io.debug_rat.foreach(_ := debug_fp_rat.get)
+  // fpFreeList.io.debug_rat.foreach(_ := io.debug_fp_rat.get)
 
   vecFreeList.io.commit match {
     case commit =>
@@ -166,8 +171,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         case (valid, info) =>
           valid && info.vecWen
       }
+      commit.archAllocPhyReg := io.rabCommits.info map {
+        case info => info.pdest
+      }
   }
-  vecFreeList.io.debug_rat.foreach(_ := debug_vec_rat.get)
 
   v0FreeList.io.commit match {
     case commit =>
@@ -176,15 +183,19 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         case (valid, info) =>
           valid && info.v0Wen
       }
+      commit.archAllocPhyReg := io.rabCommits.info map {
+        case info => info.pdest
+      }
   }
-  v0FreeList.io.debug_rat.foreach(_ := debug_v0_rat.get)
 
   vlFreeList.io.commit match {
     case commit =>
       commit.doCommit := io.vlCommits.isCommit
       commit.archAlloc := io.vlCommits.commitValid
+      commit.archAllocPhyReg := io.rabCommits.info map {
+        case info => info.pdest
+      }
   }
-  vlFreeList.io.debug_rat.foreach(_ := debug_vl_rat.get)
 
   val intReadPorts = rat.io.intReadPorts
   val fpReadPorts  = rat.io.fpReadPorts
@@ -464,6 +475,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     vlFreeList.io.walkReq(i) := walkNeedVlDest(i)
     intFreeList.io.allocateReq(i) := needIntDest(i) && !isMove(i)
     intFreeList.io.walkReq(i) := walkNeedIntDest(i) && !walkIsMove(i)
+
+    intFreeList.io.walkPhyReg(i) := io.rabCommits.info(i).pdest
+    fpFreeList.io.walkPhyReg(i) := io.rabCommits.info(i).pdest
+    vecFreeList.io.walkPhyReg(i) := io.rabCommits.info(i).pdest
+    v0FreeList.io.walkPhyReg(i) := io.rabCommits.info(i).pdest
+    vlFreeList.io.walkPhyReg(i) := io.rabCommits.info(i).pdest
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !io.in(0).valid || canOut
@@ -912,6 +929,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val vecFlStall  = !vecFreeList.io.canAllocate
   val v0FlStall   = !v0FreeList.io.canAllocate
   val vlFlStall   = !vlFreeList.io.canAllocate
+  val intFlStallForBank = !intFreeList.io.canAllocate && (intFreeList.io.debug_UnusedRegCount.getOrElse(8.U) > 7.U)
+  val fpFlStallForBank = !intFreeList.io.canAllocate && (fpFreeList.io.debug_UnusedRegCount.getOrElse(8.U) > 7.U)
   val multiFlStall = PopCount(Cat(
     !intFreeList.io.canAllocate,
     !fpFreeList.io.canAllocate,
@@ -924,6 +943,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     redirectStall -> redirectStallReason,
     recStall      -> recStallReason,
     multiFlStall  -> MultiFlStall.id.U,
+    intFlStallForBank -> IntFlStallForBank.id.U,
+    fpFlStallForBank -> FpFlStallForBank.id.U,
     intFlStall    -> IntFlStall.id.U,
     fpFlStall     -> FpFlStall.id.U,
     vecFlStall    -> VecFlStall.id.U,
