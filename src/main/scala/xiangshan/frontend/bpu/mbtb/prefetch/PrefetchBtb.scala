@@ -33,9 +33,9 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     // get pc from ftq
     val prefetchBtbFtqPtr: ValidIO[FtqPtr] = Valid(new FtqPtr)
     val ftqEntry:          FtqEntry        = Input(new FtqEntry())
-
-    val s3_inValid:   Vec[Bool] = Input(Vec(NumWay, Bool()))
-    val s3_takenMask: Vec[Bool] = Input(Vec(NumBtbResultEntries, Bool()))
+    val prevTaken:         Bool            = Input(Bool())
+    val s3_inValid:        Vec[Bool]       = Input(Vec(NumWay, Bool()))
+    val s3_takenMask:      Vec[Bool]       = Input(Vec(NumBtbResultEntries, Bool()))
   }
 
   val io: PrefetchBtbIO = IO(new PrefetchBtbIO)
@@ -45,9 +45,9 @@ class PrefetchBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   val banks:        Seq[PrefetchBtbBank] = Seq.tabulate(NumBanks)(bankIdx => Module(new PrefetchBtbBank(bankIdx)))
   val prefetchPipe: PrefetchPipe         = Module(new PrefetchPipe)
   val replacer:     PrefetchBtbReplacer  = Module(new PrefetchBtbReplacer)
-  io.resetDone  := banks.map(_.io.resetDone).reduce(_ && _)
-  io.trainReady := true.B
-
+  io.resetDone              := banks.map(_.io.resetDone).reduce(_ && _)
+  io.trainReady             := true.B
+  prefetchPipe.io.prevTaken := io.prevTaken
   // Predict pipe
   private val s0_fire, s1_fire, s2_fire = Wire(Bool())
 

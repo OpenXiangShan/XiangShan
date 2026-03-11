@@ -196,7 +196,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val prefetchBtbPtr      = io.fromBpu.prefetchBtbFtqPtr
   private val prefetchBtbFtqEntry = entryQueue(prefetchBtbPtr.bits.value)
-  io.toBpu.ftqEntry := RegEnable(prefetchBtbFtqEntry, prefetchBtbPtr.valid)
+  io.toBpu.ftqEntry  := RegEnable(prefetchBtbFtqEntry, prefetchBtbPtr.valid)
+  io.toBpu.prevTaken := entryQueue(prefetchBtbPtr.bits.value - 1.U).takenCfiOffset.valid
 //  io.toBpu.ifuPtr   := ifuPtr(0)
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU

@@ -236,7 +236,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   mbtb.io.redirect                := redirect
   mbtb.io.redirectFromIfu         := io.fromFtq.redirectFromIFU
   mbtb.io.redirectPrefetchBtbMeta := io.fromFtq.redirectPrefetchBtbMeta
-//  mbtb.io.ifuPtr := io.fromFtq.ifuPtr
+  mbtb.io.prevTaken               := io.fromFtq.prevTaken
 
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromPhr.foldedPathHist         := phr.io.s0_foldedPhr

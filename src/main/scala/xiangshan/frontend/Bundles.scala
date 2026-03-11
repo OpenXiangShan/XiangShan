@@ -68,7 +68,8 @@ class FtqToBpuIO(implicit p: Parameters) extends FrontendBundle {
   val train:    DecoupledIO[BpuTrain] = Decoupled(new BpuTrain)
   val commit:   Valid[BpuCommit]      = Valid(new BpuCommit)
 
-  val ftqEntry: FtqEntry = Output(new FtqEntry())
+  val ftqEntry:  FtqEntry = Output(new FtqEntry())
+  val prevTaken: Bool     = Output(Bool())
 //  val ifuPtr:          FtqPtr   = Output(new FtqPtr)
   val bpuPtr: FtqPtr = Output(new FtqPtr)
   // only for prefetchBtb

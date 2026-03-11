@@ -21,6 +21,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
     val prefetchBtbFtqPtr: ValidIO[FtqPtr]          = Valid(new FtqPtr)
 //    val ifuPtr:            FtqPtr                    = Input(new FtqPtr)
     val ftqEntry:      FtqEntry                  = Input(new FtqEntry())
+    val prevTaken:     Bool                      = Input(Bool())
     val prefetchWrite: ValidIO[PrefetchWriteReq] = Valid(new PrefetchWriteReq)
 
   }
@@ -88,7 +89,7 @@ class PrefetchPipe(implicit p: Parameters) extends PrefetchBtbModule with Helper
   s1_endRange   := (Fill(FetchBlockInstNum, 1.U(1.W)) >> (~s1_cfiAlignPosition).asUInt).asBools
   // TODO:simplify logic
   s1_instRange   := (s1_startRange.asUInt & s1_endRange.asUInt).asBools
-  s1_shadowRange := s1_endRange.map(!_)
+  s1_shadowRange := Mux(io.prevTaken, VecInit(s1_instRange.map(!_)), VecInit(s1_endRange.map(!_)))
   (0 until ICacheLineBytes / 2).foreach { i =>
     if (i == 0) {
       s1_instValidOff0(i) := true.B
