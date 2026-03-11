@@ -477,6 +477,7 @@ class DeltaTable()(implicit p: Parameters) extends BertiModule {
     def set(_delta: SInt): Unit = {
       delta := _delta
       coverageCnt := 1.U
+      status := DeltaStatus.NO_PREF
     }
 
     def update(inc: UInt = 1.U): Unit = {
