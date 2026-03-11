@@ -74,6 +74,8 @@ trait HasBertiHelper extends HasCircularQueuePtrHelper with HasDCacheParameters 
   def HtSetWidth: Int = log2Up(HtSetSize)
   def DtWayWidth: Int = log2Up(DtWaySize)
 
+  def DIR_REGION: Int = 256 // 256 lines -> a dcache way
+  def DIR_REGION_BITS: Int = log2Up(DIR_REGION)
   def DELTA_MAX: Int = (1 << (DeltaWidth - 1)) - 1
   def DELTA_MIN: Int = -(DELTA_MAX)
   def DELTA_THRESHOLD: Int = if (useByteAddr) blockBytes else 1 // 64 Bytes = 1 line
@@ -144,6 +146,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val stat_access_replace = WireInit(false.B)
   val stat_access_update = WireInit(false.B)
   val stat_access_dirChange = WireInit(false.B)
+  val stat_access_dirNotSameRegion = WireInit(false.B)
   val stat_access_currVA = WireInit(0.U(HtLineVAddrWidth.W))
   val stat_access_lastVA = WireInit(0.U(HtLineVAddrWidth.W))
   val stat_find_delta = WireInit(false.B)
@@ -151,7 +154,9 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val stat_overflow = WireInit(false.B)
   val stat_satisfy = WireInit(false.B)
   val stat_dissatisfy = WireInit(false.B)
-  val stat_directCorrect = WireInit(false.B)
+  val stat_dirDiffCorrect = WireInit(false.B)
+  val stat_dirDiffNotValid = WireInit(false.B)
+  val stat_dirDiffNotSameRegion = WireInit(false.B)
   val stat_histLineVA = WireInit(0.U(HtLineVAddrWidth.W))
   val stat_currLineVA = WireInit(0.U(HtLineVAddrWidth.W))
   /*** built-in function */
@@ -160,6 +165,12 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   def getTag(pc: UInt): UInt = getPCHash(pc)(HtPcTagWidth + HtSetWidth - 1, HtSetWidth)
   def getTrainBaseAddr2HT(vaddr: UInt): UInt = {
     getTrainBaseAddr(vaddr)(HtLineVAddrWidth - 1, 0)
+  }
+  def getDirRegionAddr(baseVAddr: UInt): UInt = {
+    baseVAddr >> DIR_REGION_BITS
+  }
+  def checkDirSameRegion(delta: SInt): Bool = {
+    delta < (DIR_REGION).S(DeltaWidth.W) && delta > (-DIR_REGION).S(DeltaWidth.W)
   }
   def checkTimeliness(currTsp: UInt, latency: UInt, recordTsp: UInt): Bool = {
     // control the width of the calculation
@@ -221,6 +232,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val entries = Reg(Vec(HtSetSize, Vec(HtWaySize, new Entry)))
   val valids = RegInit(0.U.asTypeOf(Vec(HtSetSize, Vec(HtWaySize, Bool()))))
   val decrModes = RegInit(0.U.asTypeOf(Vec(HtSetSize, Bool())))
+  val decrModeValids = RegInit(0.U.asTypeOf(Vec(HtSetSize, Bool())))
   val hysteresis = RegInit(0.U.asTypeOf(Vec(HtSetSize, Bool())))
   val pcTags = RegInit(0.U.asTypeOf(Vec(HtSetSize, UInt(HtPcTagWidth.W))))
   // FIFO: for FIFO replace policy
@@ -266,8 +278,11 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
         val lastWay = (accessPtrs.get(set) - (HtWaySize >> 1).U).value
         when(valids(set)(lastWay)){
           val isDecr = baseVAddr < entries(set)(lastWay).baseVAddr
+          val isSameRegion = getDirRegionAddr(baseVAddr) ===  getDirRegionAddr(entries(set)(lastWay).baseVAddr)
           decrModes(set) := isDecr
+          decrModeValids(set) := isSameRegion
           stat_access_dirChange := (decrModes(set) ^ isDecr)
+          stat_access_dirNotSameRegion := !isSameRegion
         }
         hysteresis(set) := true.B
         valids(set)(way) := true.B
@@ -288,6 +303,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
       valids(set).map(_ := false.B)
       valids(set)(repWay) := true.B
       decrModes(set) := false.B
+      decrModeValids(set) := false.B
       hysteresis(set) := true.B
       pcTags(set) := tag
       accessPtrs.get(set) := 0.U.asTypeOf(new HtWayPointer)
@@ -305,12 +321,14 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
     val isTimely = checkTimeliness(currTsp, latency, entries(set)(way).tsp)
     stat_find_delta := valids(set)(way)
+    stat_dirDiffNotValid := (decrModes(set) ^ pair._2(pair._2.getWidth-1)) && !decrModeValids(set)
+    stat_dirDiffNotSameRegion := (decrModes(set) ^ pair._2(pair._2.getWidth-1)) && decrModeValids(set) && !checkDirSameRegion(pair._2)
     stat_late:= !isTimely
 
     res.pc := pc
     res.valid := stat_find_delta && isTimely && pair._1
-    when (decrModes(set) ^ pair._2(pair._2.getWidth-1)){
-      stat_directCorrect := true.B
+    when (decrModeValids(set) & checkDirSameRegion(pair._2) & (decrModes(set) ^ pair._2(pair._2.getWidth-1))){
+      stat_dirDiffCorrect := true.B
       res.delta := -pair._2
     }.otherwise{
       res.delta := pair._2
@@ -349,6 +367,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   XSPerfAccumulate("access_pcHysteresis", io.access.valid && stat_access_pcHysteresis)
   XSPerfAccumulate("access_dirHysteresis", io.access.valid && stat_access_dirHysteresis)
   XSPerfAccumulate("access_dirChange", io.access.valid && stat_access_dirChange)
+  XSPerfAccumulate("access_dirNotSameRegion", io.access.valid && stat_access_dirNotSameRegion)
   XSPerfAccumulate("search_req", io.search.req.valid)
   XSPerfAccumulate("search_resp_valid", io.search.resp.valid)
   XSPerfAccumulate("search_resp_find_total", stat_find_delta)
@@ -356,7 +375,9 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   XSPerfAccumulate("search_resp_find_dissatisfy", stat_find_delta && !stat_overflow && stat_dissatisfy) // too small
   XSPerfAccumulate("search_resp_find_late", stat_find_delta && !stat_overflow && !stat_dissatisfy && stat_late) // too late
   XSPerfAccumulate("search_resp_find_satisfy", stat_find_delta && !stat_overflow && !stat_dissatisfy && !stat_late) // satisfy
-  XSPerfAccumulate("search_resp_find_directCorrect", io.search.resp.valid && stat_directCorrect)
+  XSPerfAccumulate("search_resp_find_directCorrect", io.search.resp.valid && stat_dirDiffCorrect)
+  XSPerfAccumulate("search_resp_find_dirDiffNotValid", io.search.resp.valid && stat_dirDiffNotValid)
+  XSPerfAccumulate("search_resp_find_dirDiffNotSameRegion", io.search.resp.valid && stat_dirDiffNotSameRegion)
 
   class AccessLogDb extends Bundle {
     val pcHysteresis = Bool()
@@ -364,6 +385,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val isReplace = Bool() // to avoid SQLite keywords
     val isUpdate = Bool() // to avoid SQLite keywords
     val dirChange = Bool()
+    val dirNotSameRegion = Bool()
     val currVA = UInt(HtLineVAddrWidth.W)
     val lastVA = UInt(HtLineVAddrWidth.W)
     val pc = UInt(VAddrBits.W)
@@ -374,6 +396,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   accessLog.isReplace := stat_access_replace
   accessLog.isUpdate := stat_access_update
   accessLog.dirChange := stat_access_dirChange
+  accessLog.dirNotSameRegion := stat_access_dirNotSameRegion
   accessLog.currVA := stat_access_currVA
   accessLog.lastVA := stat_access_lastVA
   accessLog.pc := io.access.bits.pc
