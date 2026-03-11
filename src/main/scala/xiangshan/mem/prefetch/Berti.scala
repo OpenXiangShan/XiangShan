@@ -154,6 +154,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   val stat_overflow = WireInit(false.B)
   val stat_satisfy = WireInit(false.B)
   val stat_dissatisfy = WireInit(false.B)
+  val stat_dirDiff = WireInit(false.B)
   val stat_dirDiffCorrect = WireInit(false.B)
   val stat_dirDiffNotValid = WireInit(false.B)
   val stat_dirDiffNotSameRegion = WireInit(false.B)
@@ -228,6 +229,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   })
 
   /*** data structure */
+  val enableDecrMode = Constantin.createRecord(_name+"_enableDecrMode", 1)
   // TODO lyq: refractor
   val entries = Reg(Vec(HtSetSize, Vec(HtWaySize, new Entry)))
   val valids = RegInit(0.U.asTypeOf(Vec(HtSetSize, Vec(HtWaySize, Bool()))))
@@ -321,13 +323,14 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
     val pair = getDelta(getTrainBaseAddr2HT(vaddr), entries(set)(way).baseVAddr)
     val isTimely = checkTimeliness(currTsp, latency, entries(set)(way).tsp)
     stat_find_delta := valids(set)(way)
+    stat_dirDiff := (decrModes(set) ^ pair._2(pair._2.getWidth-1))
     stat_dirDiffNotValid := (decrModes(set) ^ pair._2(pair._2.getWidth-1)) && !decrModeValids(set)
     stat_dirDiffNotSameRegion := (decrModes(set) ^ pair._2(pair._2.getWidth-1)) && decrModeValids(set) && !checkDirSameRegion(pair._2)
     stat_late:= !isTimely
 
     res.pc := pc
     res.valid := stat_find_delta && isTimely && pair._1
-    when (decrModeValids(set) & checkDirSameRegion(pair._2) & (decrModes(set) ^ pair._2(pair._2.getWidth-1))){
+    when (enableDecrMode.orR && decrModeValids(set) & checkDirSameRegion(pair._2) & (decrModes(set) ^ pair._2(pair._2.getWidth-1))){
       stat_dirDiffCorrect := true.B
       res.delta := -pair._2
     }.otherwise{
@@ -376,6 +379,7 @@ class HistoryTable()(implicit p: Parameters) extends BertiModule {
   XSPerfAccumulate("search_resp_find_late", stat_find_delta && !stat_overflow && !stat_dissatisfy && stat_late) // too late
   XSPerfAccumulate("search_resp_find_satisfy", stat_find_delta && !stat_overflow && !stat_dissatisfy && !stat_late) // satisfy
   XSPerfAccumulate("search_resp_find_directCorrect", io.search.resp.valid && stat_dirDiffCorrect)
+  XSPerfAccumulate("search_resp_find_dirDiff", io.search.resp.valid && stat_dirDiff)
   XSPerfAccumulate("search_resp_find_dirDiffNotValid", io.search.resp.valid && stat_dirDiffNotValid)
   XSPerfAccumulate("search_resp_find_dirDiffNotSameRegion", io.search.resp.valid && stat_dirDiffNotSameRegion)
 
