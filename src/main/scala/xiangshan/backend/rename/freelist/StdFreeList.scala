@@ -23,6 +23,7 @@ import xiangshan._
 import xiangshan.backend.rename._
 import utils._
 import utility._
+import freechips.rocketchip.util.SeqToAugmentedSeq
 
 
 class StdFreeList(
@@ -34,28 +35,31 @@ class StdFreeList(
 )(implicit p: Parameters) extends BaseFreeList(freeListSize, commitWidth, realNumLogicRegs) with HasPerfEvents {
 
   val freeList = RegInit(VecInit(Seq.tabulate(freeListSize)( i => (i + numLogicRegs).U(PhyRegIdxWidth.W) )))
-  val lastTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
-  val tailPtr = Wire(new FreeListPtr) // this is the real tailPtr
+  val tailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
+  val tailPtrNext = Wire(new FreeListPtr) // this is the real tailPtr
 
   //
   // free committed instructions' `old_pdest` reg
   //
-  val freeReqReg = io.freeReq
+  val freePtr = VecInit(Seq.tabulate(commitWidth)(i => tailPtr + PopCount(io.freeReq.take(i))))
+  for (i <- 0 until freeListSize) {
+    val freeReqOH = VecInit(io.freeReq.zipWithIndex.map { case (w, idx) =>
+      w && freePtr(idx).value === i.U
+    })
+    val freePhyReg = Mux1H(freeReqOH, io.freePhyReg)
+    when(freeReqOH.asUInt.orR) {
+      freeList(i) := freePhyReg
+    }
+  }
   for (i <- 0 until commitWidth) {
-    val offset = if (i == 0) 0.U else PopCount(freeReqReg.take(i))
-    val enqPtr = lastTailPtr + offset
-
     // Why RegNext (from RAT and Rename): for better timing
     // Why we can RegNext: these free registers won't be used in the next cycle,
     // since we set canAllocate only when the current free regs > RenameWidth.
-    when (freeReqReg(i)) {
-      freeList(enqPtr.value) := io.freePhyReg(i)
-    }
     XSDebug(io.freeReq(i), p"req#$i free physical reg: ${io.freePhyReg(i)}\n")
   }
 
-  tailPtr := lastTailPtr + PopCount(freeReqReg)
-  lastTailPtr := tailPtr
+  tailPtrNext := tailPtr + PopCount(io.freeReq)
+  tailPtr := tailPtrNext
 
   //
   // allocate new physical registers for instructions at rename stage
@@ -82,9 +86,9 @@ class StdFreeList(
   val isAllocate = isWalkAlloc || isNormalAlloc
   val numAllocate = Mux(io.walk, PopCount(io.walkReq), PopCount(io.allocateReq))
   val headPtrAllocate = Mux(lastCycleRedirect, redirectedHeadPtr, headPtr + numAllocate)
-  freeRegCnt := Mux(isWalkAlloc && !lastCycleRedirect, distanceBetween(tailPtr, headPtr) - PopCount(io.walkReq),
-                Mux(isNormalAlloc,                     distanceBetween(tailPtr, headPtr) - PopCount(io.allocateReq),
-                                                       distanceBetween(tailPtr, headPtr)))
+  freeRegCnt := Mux(isWalkAlloc && !lastCycleRedirect, distanceBetween(tailPtrNext, headPtr) - PopCount(io.walkReq),
+                Mux(isNormalAlloc,                     distanceBetween(tailPtrNext, headPtr) - PopCount(io.allocateReq),
+                                                       distanceBetween(tailPtrNext, headPtr)))
 
   // priority: (1) exception and flushPipe; (2) walking; (3) mis-prediction; (4) normal dequeue
   val realDoAllocate = !io.redirect && isAllocate
@@ -94,9 +98,9 @@ class StdFreeList(
     headPtrVec(i) := headPtrNext + i.U
   }
 
-  XSDebug(p"head:$headPtr tail:$tailPtr\n")
+  XSDebug(p"head:$headPtr tail:$tailPtrNext\n")
 
-  XSError(!isFull(tailPtr, archHeadPtr), s"${regType}ArchFreeList should always be full\n")
+  XSError(!isFull(tailPtrNext, archHeadPtr), s"${regType}ArchFreeList should always be full\n")
 
   val enableFreeListCheck = false
   if (enableFreeListCheck) {
