@@ -385,7 +385,7 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     blk := io.miss_req_conflict_check(i).valid && miss_req_conflict(i)
   }
 
-  TLArbiter.robin(edge, io.mem_release, entries.map(_.io.mem_release):_*)
+  TLArbiter.lowest(edge, io.mem_release, entries.map(_.io.mem_release):_*)
 
   // sanity check
   // print all input/output requests for debug purpose
