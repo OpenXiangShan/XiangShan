@@ -209,12 +209,15 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   utage.io.redirectValid          := redirect.valid
 
   // uras
-  uras.io.specIn.startPc     := s1_startPc
-  uras.io.specIn.cfiPosition := s1_prediction.cfiPosition
-  uras.io.specIn.attribute   := s1_prediction.attribute
-  uras.io.hasRedirect        := redirect.valid
-  uras.io.hasOverride        := s3_override
-  uras.io.fullRetAddr        := ras.io.topRetAddr
+  uras.io.specIn.startPc                := s1_startPc
+  uras.io.specIn.cfiPosition            := s1_prediction.cfiPosition
+  uras.io.specIn.attribute              := s1_prediction.attribute
+  uras.io.hasRedirect                   := redirect.valid
+  uras.io.overrideData.valid            := s3_override
+  uras.io.overrideData.bits.startPc     := s3_startPc.toUInt
+  uras.io.overrideData.bits.attribute   := s3_prediction.attribute
+  uras.io.overrideData.bits.cfiPosition := s3_prediction.cfiPosition
+  uras.io.fullRetAddr                   := ras.io.topRetAddr
 
   ras.io.redirect                := redirect
   ras.io.commit                  := commit
