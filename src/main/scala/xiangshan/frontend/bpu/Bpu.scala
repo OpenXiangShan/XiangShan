@@ -96,7 +96,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     abtb.io.enable   := Mux(constCtrl(0), constCtrl(2), ctrl.abtbEnable)
     mbtb.io.enable   := Mux(constCtrl(0), constCtrl(3), ctrl.mbtbEnable)
     tage.io.enable   := Mux(constCtrl(0), constCtrl(4), ctrl.tageEnable)
-    sc.io.enable     := false.B
+    sc.io.enable     := Mux(constCtrl(0), constCtrl(5), ctrl.scEnable)
     ittage.io.enable := Mux(constCtrl(0), constCtrl(6), ctrl.ittageEnable)
     ras.io.enable    := Mux(constCtrl(0), constCtrl(7), ctrl.rasEnable)
     // utage.io.enable  := Mux(constCtrl(0), constCtrl(8), ctrl.utageEnable)
@@ -105,7 +105,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     abtb.io.enable   := ctrl.abtbEnable
     mbtb.io.enable   := ctrl.mbtbEnable
     tage.io.enable   := ctrl.tageEnable
-    sc.io.enable     := false.B
+    sc.io.enable     := ctrl.scEnable
     ittage.io.enable := ctrl.ittageEnable
     ras.io.enable    := ctrl.rasEnable
     // utage.io.enable  := ctrl.utageEnable
