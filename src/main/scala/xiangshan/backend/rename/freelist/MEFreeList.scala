@@ -64,10 +64,14 @@ class MEFreeList(size: Int, commitWidth: Int)(implicit p: Parameters) extends Ba
   /**
     * Deallocation: when refCounter becomes zero, the register can be released to freelist
     */
-  for (i <- 0 until commitWidth) {
-    when (io.freeReq(i)) {
-      val freePtr = tailPtr + PopCount(io.freeReq.take(i))
-      freeList(freePtr.value) := io.freePhyReg(i)
+  val freePtr = VecInit(Seq.tabulate(commitWidth)(i => tailPtr + PopCount(io.freeReq.take(i))))
+  for (i <- 0 until size) {
+    val freeReqOH = VecInit(io.freeReq.zipWithIndex.map { case (w, idx) =>
+      w && freePtr(idx).value === i.U
+    })
+    val freePhyReg = Mux1H(freeReqOH, io.freePhyReg)
+    when(freeReqOH.asUInt.orR) {
+      freeList(i) := freePhyReg
     }
   }
 
