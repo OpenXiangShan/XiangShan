@@ -749,6 +749,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val toUncacheBuffer = new UncacheWordIO
       val toDCache        = new ToCacheIO
       val fromRob         = Input(new FromRobIO)
+      val toRob           = Output(new toRobIO)
       val writeToSbuffer  = new SbufferWriteIO
       val writeBack       = DecoupledIO(new NewExuOutput(param))
       val exceptionInfo   = ValidIO(new MemExceptionInfo)
@@ -1239,6 +1240,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
     /*============================================ other connection ==================================================*/
     io.perfMmioBusy := uncacheState =/= UncacheState.idle
+    io.toRob.mmioBusy := uncacheState =/= UncacheState.idle
 
     if(debugEn) {
       // [NOTE]: low 4 bit of addr/vaddr will be omitted in the sbuffer, but it will be used for difftest.
@@ -1433,6 +1435,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   deqModule.io.toUncacheBuffer  <> io.toUncacheBuffer
   deqModule.io.toDCache         <> io.toDCache
   deqModule.io.fromRob          <> io.fromRob
+  deqModule.io.toRob            <> io.toRob
   deqModule.io.writeToSbuffer   <> io.writeToSbuffer
   io.writeBack                  <> deqModule.io.writeBack
   io.sbufferCtrl                <> deqModule.io.sbufferCtrl
@@ -1608,7 +1611,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       }
     }
 
-    // TODO: fix this for unalign store @LWD
+    // TODO: fix this for unalign store
     //TODO: vector element maybe set addrValid twice because of replay uop, which will be remove in the future.
 //    XSError(ctrlEntries(i).addrValid && staSetValid && !ctrlEntries(i).isVec, s"[addrValid] double allocate! index: ${i}\n")
 
@@ -1949,7 +1952,6 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   io.toLoadQueue.stAddrReadyVec := GatedValidRegNext(stAddrReadyVecWire)
 
   io.toLoadQueue.stIssuePtr := enqPtrExt(0)
-  // TODO: fix pr #5233 @LWD
   io.sqDeqPtr := deqPtrExt(0)
   io.sqDeqUopIdx := dataEntries(deqPtrExt(0).value).uop.uopIdx
   io.sqDeqRobIdx := dataEntries(deqPtrExt(0).value).uop.robIdx

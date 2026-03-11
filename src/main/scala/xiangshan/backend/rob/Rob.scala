@@ -589,12 +589,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val writebackNum = PopCount(exuWBs.map(_.valid))
   XSInfo(writebackNum =/= 0.U, "writebacked %d insts\n", writebackNum)
 
-//  for (i <- 0 until LoadPipelineWidth) {
-//    when(RegNext(io.lsq.mmio(i))) {
-//      robEntries(RegEnable(io.lsq.uop(i).robIdx, io.lsq.mmio(i)).value).mmio := true.B
-//    }
-//  }
-
 
   /**
    * RedirectOut: Interrupt and Exceptions
@@ -1684,8 +1678,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   generatePerfEvent()
 
   // max commit-stuck cycle
-  val deqismmio = Mux(robEntries(deqPtr.value).valid, robEntries(deqPtr.value).mmio, false.B)
-  val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !deqismmio
+  val mmioBusy = io.lsq.mmioBusy // lsq know uncache request is rob head
+  val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !mmioBusy
   val commitStuckCycle = RegInit(0.U(log2Up(maxCommitStuck).W))
   when(commitStuck) {
     commitStuckCycle := commitStuckCycle + 1.U

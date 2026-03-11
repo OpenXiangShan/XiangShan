@@ -219,7 +219,11 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.redirect            <> io.brqRedirect
   loadQueue.io.vecFeedback           <> io.ldvecFeedback
   loadQueue.io.ldu                 <> io.ldu
-  loadQueue.io.rob                 <> io.rob
+  loadQueue.io.rob.pendingPtr      := io.rob.pendingPtr
+  loadQueue.io.rob.pendingPtrNext  := io.rob.pendingPtrNext
+  loadQueue.io.rob.lcommit         := io.rob.lcommit
+  loadQueue.io.rob.scommit         := io.rob.scommit
+  loadQueue.io.rob.commit         := io.rob.commit
   loadQueue.io.nuke_rollback       <> io.nuke_rollback
   loadQueue.io.nack_rollback       <> io.nack_rollback
   loadQueue.io.replay              <> io.replay
@@ -247,6 +251,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
 
   io.issuePtrExt := storeQueue.io.toLoadQueue.stAddrReadySqPtr
 
+  // to rob
+  io.rob.mmioBusy                  := RegNext(storeQueue.io.toRob.mmioBusy || loadQueue.io.rob.mmioBusy)
   // naive uncache arbiter
   val s_idle :: s_load :: s_store :: Nil = Enum(3)
   val pendingstate = RegInit(s_idle)

@@ -91,8 +91,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     val toVecSplit = Output(new MisBuffertoVecSplitIO) // robIdx in misalignedBuffer
   })
 
-  io.rob.mmio := 0.U.asTypeOf(Vec(LoadPipelineWidth, Bool()))
-  io.rob.uop  := 0.U.asTypeOf(Vec(LoadPipelineWidth, new DynInst))
+  io.rob.mmioBusy := false.B
 
   class StoreMisalignBufferEntry(implicit p: Parameters) extends LsPipelineBundle {
     val portIndex = UInt(log2Up(enqPortNum).W)
