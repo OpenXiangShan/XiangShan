@@ -22,19 +22,17 @@ import xiangshan.frontend.bpu.ScTableInfo
 
 case class ScParameters(
     PathTableInfos: Seq[ScTableInfo] = Seq(
-      new ScTableInfo(128, 8),
-      new ScTableInfo(128, 16)
+      new ScTableInfo(2048, 8),
+      new ScTableInfo(2048, 16)
     ),
     GlobalTableInfos: Seq[ScTableInfo] = Seq(
-      new ScTableInfo(128, 8),
-      new ScTableInfo(128, 16)
+      new ScTableInfo(2048, 8),
+      new ScTableInfo(2048, 16)
     ),
     BackwardTableInfos: Seq[ScTableInfo] = Seq(
-      new ScTableInfo(128, 4),
-      new ScTableInfo(128, 8)
+      new ScTableInfo(2048, 4),
+      new ScTableInfo(2048, 8)
     ),
-    ImliTableSize:       Int = 128,
-    BiasTableSize:       Int = 128,
     BiasUseTageBitWidth: Int = 2,    // use tage_taken as index bits
     PathEnable:          Boolean = true,
     GlobalEnable:        Boolean = true,
@@ -67,21 +65,24 @@ trait HasScParameters extends HasBpuParameters {
 
   def PathTableInfos: Seq[ScTableInfo] = scParameters.PathTableInfos
   def NumPathTables:  Int              = PathTableInfos.length
+  def NumPathSets:    Int              = PathTableInfos(0).getNumSets(NumWays, NumBanks)
 
   def GlobalTableInfos: Seq[ScTableInfo] = scParameters.GlobalTableInfos
   def NumGlobalTables:  Int              = GlobalTableInfos.length
+  def NumGlobalSets:    Int              = GlobalTableInfos(0).getNumSets(NumWays, NumBanks)
 
-  def ImliTableSize: Int = scParameters.ImliTableSize
-  def ImliWidth:     Int = bpuParameters.commonHRParameters.ImliWidth
-  def NumImliTable:  Int = 1
+  def NumImliSets:  Int = NumPathSets
+  def ImliWidth:    Int = bpuParameters.commonHRParameters.ImliWidth
+  def NumImliTable: Int = 1
 
-  def BiasTableSize:       Int = scParameters.BiasTableSize
+  def NumBiasSets:         Int = NumPathSets
   def BiasUseTageBitWidth: Int = scParameters.BiasUseTageBitWidth
   def BiasTableNumWays:    Int = NumWays << BiasUseTageBitWidth // add tage_taken bits as wayIdx
   def NumBiasTable:        Int = 1
 
   def BackwardTableInfos: Seq[ScTableInfo] = scParameters.BackwardTableInfos
   def NumBWTables:        Int              = BackwardTableInfos.length
+  def NumBWSets:          Int              = BackwardTableInfos(0).getNumSets(NumWays, NumBanks)
 
   // If tage LowConf, the totoalSum should be at least NumTables + 5, Threshold should be (NumTables + 5) << 6(threshold >> 3 + lowConf threshold >> 3)
   // The value of ctr saturation is 63.
@@ -90,7 +91,6 @@ trait HasScParameters extends HasBpuParameters {
   def MinThreshold: Int = (NumTables + 5) << 6
   def MaxThreshold: Int = min((NumTables * 63) << 4, (1 << ThresholdWidth) - 1)
 
-  def WriteBufferSize: Int = scParameters.WriteBufferSize
-  def TotalSumWidth: Int = CtrWidth + 1 + log2Ceil(NumPathTables + NumGlobalTables + NumBiasTable) // +1 for counter * 2
-  def EnableScTrace: Boolean = scParameters.EnableScTrace
+  def WriteBufferSize: Int     = scParameters.WriteBufferSize
+  def EnableScTrace:   Boolean = scParameters.EnableScTrace
 }
