@@ -64,13 +64,11 @@ abstract class BaseFreeList(
   val lastCycleRedirect = RegNext(RegNext(io.redirect))
   val lastCycleSnpt = RegNext(RegNext(io.snpt, 0.U.asTypeOf(io.snpt)))
 
-  val headPtr = RegInit(FreeListPtr(false, 0))
-  val headPtrOH = RegInit(1.U(size.W))
+  val headPtrVec = RegInit(VecInit(Seq.tabulate(RenameWidth)(i => FreeListPtr(false, i))))
+
+  val headPtr = headPtrVec(0)
+
   val archHeadPtr = RegInit(FreeListPtr(false, 0))
-  XSError(headPtr.toOH =/= headPtrOH, p"wrong one-hot reg between $headPtr and $headPtrOH")
-  val headPtrOHShift = CircularShift(headPtrOH)
-  // may shift [0, RenameWidth] steps
-  val headPtrOHVec = VecInit.tabulate(RenameWidth + 1)(headPtrOHShift.left)
 
   val snapshots = SnapshotGenerator(headPtr, io.snpt.snptEnq, io.snpt.snptDeq, io.redirect, io.snpt.flushVec)
 
@@ -78,11 +76,6 @@ abstract class BaseFreeList(
     lastCycleSnpt.useSnpt,
     snapshots(lastCycleSnpt.snptSelect) + PopCount(io.walkReq),
     archHeadPtr + PopCount(io.walkReq)
-  )
-  val redirectedHeadPtrOH = Mux(
-    lastCycleSnpt.useSnpt,
-    (snapshots(lastCycleSnpt.snptSelect) + PopCount(io.walkReq)).toOH,
-    (archHeadPtr + PopCount(io.walkReq)).toOH
   )
 }
 

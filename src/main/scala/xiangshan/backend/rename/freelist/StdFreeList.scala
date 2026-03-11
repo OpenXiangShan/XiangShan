@@ -36,7 +36,6 @@ class StdFreeList(
   val freeList = RegInit(VecInit(Seq.tabulate(freeListSize)( i => (i + numLogicRegs).U(PhyRegIdxWidth.W) )))
   val lastTailPtr = RegInit(FreeListPtr(true, 0)) // tailPtr in the last cycle (need to add freeReqReg)
   val tailPtr = Wire(new FreeListPtr) // this is the real tailPtr
-  val tailPtrOHReg = RegInit(0.U(freeListSize.W))
 
   //
   // free committed instructions' `old_pdest` reg
@@ -65,7 +64,7 @@ class StdFreeList(
   io.canAllocate := GatedValidRegNext(freeRegCnt >= RenameWidth.U) // use RegNext for better timing
   XSDebug(p"freeRegCnt: $freeRegCnt\n")
 
-  val phyRegCandidates = VecInit(headPtrOHVec.map(sel => Mux1H(sel, freeList)))
+  val phyRegCandidates = VecInit((0 until RenameWidth).map(i => freeList(headPtrVec(i).value)))
 
   for(i <- 0 until RenameWidth) {
     io.allocatePhyReg(i) := phyRegCandidates(PopCount(io.allocateReq.take(i)))
@@ -83,16 +82,17 @@ class StdFreeList(
   val isAllocate = isWalkAlloc || isNormalAlloc
   val numAllocate = Mux(io.walk, PopCount(io.walkReq), PopCount(io.allocateReq))
   val headPtrAllocate = Mux(lastCycleRedirect, redirectedHeadPtr, headPtr + numAllocate)
-  val headPtrOHAllocate = Mux(lastCycleRedirect, redirectedHeadPtrOH, headPtrOHVec(numAllocate))
-  val headPtrNext = Mux(isAllocate, headPtrAllocate, headPtr)
   freeRegCnt := Mux(isWalkAlloc && !lastCycleRedirect, distanceBetween(tailPtr, headPtr) - PopCount(io.walkReq),
                 Mux(isNormalAlloc,                     distanceBetween(tailPtr, headPtr) - PopCount(io.allocateReq),
                                                        distanceBetween(tailPtr, headPtr)))
 
   // priority: (1) exception and flushPipe; (2) walking; (3) mis-prediction; (4) normal dequeue
   val realDoAllocate = !io.redirect && isAllocate
-  headPtr := Mux(realDoAllocate, headPtrAllocate, headPtr)
-  headPtrOH := Mux(realDoAllocate, headPtrOHAllocate, headPtrOH)
+  val headPtrNext = Mux(realDoAllocate, headPtrAllocate, headPtr)
+
+  for (i <- 0 until RenameWidth) {
+    headPtrVec(i) := headPtrNext + i.U
+  }
 
   XSDebug(p"head:$headPtr tail:$tailPtr\n")
 
