@@ -153,6 +153,10 @@ class FromRobIO(implicit p: Parameters) extends XSBundle {
   val pendingPtrNext     = new RobPtr
 }
 
+class toRobIO(implicit p: Parameters) extends XSBundle {
+  val mmioBusy      = Bool()
+}
+
 class SbufferCtrlIO(implicit p: Parameters) extends XSBundle {
   class Req(implicit p: Parameters) extends XSBundle {
     val flush            = Bool() // flush is to empty sbuffer
@@ -201,6 +205,7 @@ class StoreQueueIO(val param: ExeUnitParams)(implicit p: Parameters) extends Mem
   // from loadUnit, forward query.
   val forward            = Flipped(Vec(LoadPipelineWidth, new SQForward))
   val fromRob            = Input(new FromRobIO)
+  val toRob              = Output(new toRobIO)
   // write store request to uncacheBuffer.
   val toUncacheBuffer    = new UncacheWordIO
   // to backend , used to writeback uop when request is mmio, cmo.

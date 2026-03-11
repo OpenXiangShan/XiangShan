@@ -223,8 +223,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     val vl = Output(UInt((log2Up(VLEN) + 1).W))
     val gpaddr = Output(UInt(XLEN.W))
     val isForVSnonLeafPTE = Output(Bool())
-    val mmio = Output(Vec(LoadPipelineWidth, Bool()))
-    val uop = Output(Vec(LoadPipelineWidth, new DynInst))
+    val mmioBusy = Output(Bool())
     val lqCanAccept = Output(Bool())
     val sqCanAccept = Output(Bool())
   }
@@ -1062,8 +1061,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   lsq.io.uncacheOutstanding := io.ooo_to_mem.csrCtrl.uncache_write_outstanding_enable
 
   // Lsq
-  io.mem_to_ooo.lsqio.mmio       := lsq.io.rob.mmio
-  io.mem_to_ooo.lsqio.uop        := lsq.io.rob.uop
+  io.mem_to_ooo.lsqio.mmioBusy   := lsq.io.rob.mmioBusy
   lsq.io.rob.lcommit             := io.ooo_to_mem.lsqio.lcommit
   lsq.io.rob.scommit             := io.ooo_to_mem.lsqio.scommit
   lsq.io.rob.commit              := io.ooo_to_mem.lsqio.commit

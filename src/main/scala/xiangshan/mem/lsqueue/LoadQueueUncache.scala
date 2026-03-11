@@ -169,8 +169,7 @@ class UncacheEntry(entryIndex: Int)(implicit p: Parameters) extends XSModule
 
   /* control */
   io.flush := flush
-  io.rob.mmio := DontCare
-  io.rob.uop := DontCare
+  io.rob.mmioBusy := DontCare // will be assign later!
   io.mmioSelect := (uncacheState =/= s_idle) && req.mmio
   io.slaveId.valid := slaveAccept
   io.slaveId.bits := slaveId
@@ -485,11 +484,8 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   io.exceptionInfo.bits.vl           := 0.U.asTypeOf(io.exceptionInfo.bits.vl)
   io.exceptionInfo.bits.vstart       := 0.U.asTypeOf(io.exceptionInfo.bits.vstart)
 
-  // rob
-  for (i <- 0 until LoadPipelineWidth) {
-    io.rob.mmio(i) := RegNext(s1_valid(i) && s1_req(i).mmio)
-    io.rob.uop(i) := RegEnable(s1_req(i).uop, s1_valid(i))
-  }
+  // rob, for commit-stuck detect
+  io.rob.mmioBusy := mmioSelect
 
   /******************************************************************
    * Forward Logic
