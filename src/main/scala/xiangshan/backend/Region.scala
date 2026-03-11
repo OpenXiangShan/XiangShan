@@ -736,7 +736,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     }
     else if (iq.param.BrhCnt > 0 && iq.param.numDeq > 1) {
       val allCnt = iq.io.validCntDeqVec(0) + iq.io.validCntDeqVec(1)
-      val aluCnt = Mux(allCnt > 12.U, allCnt, iq.io.validCntDeqVec(0))
+      val aluAppendCnt = Mux(allCnt > 12.U, 2.U, Mux(allCnt > 8.U, 1.U, 0.U))
+      val aluCnt = Mux(allCnt > 8.U, allCnt + aluAppendCnt, iq.io.validCntDeqVec(0))
       val bjuCnt = Mux(allCnt > 12.U, allCnt, iq.io.validCntDeqVec(1))
       VecInit(aluCnt, bjuCnt)
     }
