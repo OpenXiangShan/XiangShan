@@ -42,7 +42,7 @@ case class ScParameters(
     CtrWidth:            Int = 6,
     ThresholdWidth:      Int = 13,
     ThresholdInit:       Int = 1130, // magic number,greater than min and less than max
-    NumBanks:            Int = 2,
+    NumBanks:            Int = 4,
     WriteBufferSize:     Int = 4,
     EnableScTrace:       Boolean = true
 ) {}
