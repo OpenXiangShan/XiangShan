@@ -31,7 +31,7 @@ trait Helpers extends HasScParameters with PhrHelper {
   def neg(x:  SInt): Bool = sign(x)
 
   def getBankMask(pc: PrunedAddr): UInt =
-    UIntToOH((pc >> (instOffsetBits + log2Ceil(NumWays)))(BankWidth - 1, 0))
+    UIntToOH((pc >> instOffsetBits)(BankWidth - 1, 0))
 
   def getWayIdx(cfiPosition: UInt): UInt = {
     val nChunks = (cfiPosition.getWidth + log2Ceil(NumWays) - 1) / log2Ceil(NumWays)
@@ -45,32 +45,32 @@ trait Helpers extends HasScParameters with PhrHelper {
   def getPathTableIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories, numSets: Int): UInt =
     if (info.HistoryLength > 0) {
       val idxFoldedHist = allFh.getHistWithInfo(info).foldedHist
-      ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ idxFoldedHist)(log2Ceil(numSets) - 1, 0)
+      ((pc >> (instOffsetBits + BankWidth)) ^ idxFoldedHist)(log2Ceil(numSets) - 1, 0)
     } else {
-      (pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth))(log2Ceil(numSets) - 1, 0)
+      (pc >> (instOffsetBits + BankWidth))(log2Ceil(numSets) - 1, 0)
     }
 
   // get pc ^ foldedGhr for index
   def getGlobalTableIdx(pc: PrunedAddr, ghr: UInt, numSets: Int, ghrLen: Int): UInt = {
     val foldedGhr = computeFoldedHist(ghr, log2Ceil(numSets))(ghrLen)
-    ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ foldedGhr)(log2Ceil(numSets) - 1, 0)
+    ((pc >> (instOffsetBits + BankWidth)) ^ foldedGhr)(log2Ceil(numSets) - 1, 0)
   }
 
   // get pc ^ foldedBW for index
   def getBWTableIdx(pc: PrunedAddr, bw: UInt, numSets: Int, bwLen: Int): UInt = {
     val foldedBW = computeFoldedHist(bw, log2Ceil(numSets))(bwLen)
-    ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ foldedBW)(log2Ceil(numSets) - 1, 0)
+    ((pc >> (instOffsetBits + BankWidth)) ^ foldedBW)(log2Ceil(numSets) - 1, 0)
   }
 
   // get pc ^ foldedImli index
   def getImliTableIdx(pc: PrunedAddr, imli: UInt, numSets: Int, imliLen: Int): UInt = {
     val foldedImli = computeFoldedHist(imli, log2Ceil(numSets))(imliLen)
-    ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ foldedImli)(log2Ceil(numSets) - 1, 0)
+    ((pc >> (instOffsetBits + BankWidth)) ^ foldedImli)(log2Ceil(numSets) - 1, 0)
   }
 
   // get bias index
   def getBiasTableIdx(pc: PrunedAddr, numSets: Int): UInt =
-    (pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth))(log2Ceil(numSets) - 1, 0)
+    (pc >> (instOffsetBits + BankWidth))(log2Ceil(numSets) - 1, 0)
 
   def getPercsum(ctr: SInt): SInt = Cat(ctr, 1.U(1.W)).asSInt
 
