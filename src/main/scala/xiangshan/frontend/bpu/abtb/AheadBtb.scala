@@ -130,7 +130,10 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s1_bankIdx  = RegEnable(s0_bankIdx, s0_fire)
   private val s1_bankMask = RegEnable(s0_bankMask, s0_fire)
 
-  private val s1_entries = Mux1H(s1_bankMask, banks.map(_.io.readResp.entries))
+  private val s1_entries    = Mux1H(s1_bankMask, banks.map(_.io.readResp.entries))
+  private val s1_ctrVec     = takenCounter(s1_bankIdx)(s1_setIdx)
+  private val s1_ctrResult  = VecInit(s1_ctrVec.map(_.isPositive))
+  private val s1_strongBias = VecInit(s1_ctrVec.map(_.isSaturate))
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 2 / 3
@@ -142,29 +145,32 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
      - stage 3 is only for fast prediction when override is valid
      -------------------------------------------------------------------------------------------------------------- */
 
-  private val s3_setIdx   = RegInit(0.U.asTypeOf(s1_setIdx))
-  private val s3_bankIdx  = RegInit(0.U.asTypeOf(s1_bankIdx))
-  private val s3_bankMask = RegInit(0.U.asTypeOf(s1_bankMask))
-  private val s3_entries  = RegInit(0.U.asTypeOf(s1_entries))
-  private val s3_startPc  = RegInit(0.U.asTypeOf(s1_startPc))
+  private val s3_setIdx     = RegInit(0.U.asTypeOf(s1_setIdx))
+  private val s3_bankIdx    = RegInit(0.U.asTypeOf(s1_bankIdx))
+  private val s3_bankMask   = RegInit(0.U.asTypeOf(s1_bankMask))
+  private val s3_entries    = RegInit(0.U.asTypeOf(s1_entries))
+  private val s3_startPc    = RegInit(0.U.asTypeOf(s1_startPc))
+  private val s3_ctrResult  = RegInit(VecInit.fill(NumWays)(false.B))
+  private val s3_strongBias = RegInit(VecInit.fill(NumWays)(false.B))
 
   private val s1_realEntries = Mux(overrideValid, s3_entries, s1_entries)
   private val s2_setIdx      = RegEnable(Mux(overrideValid, s3_setIdx, s1_setIdx), s1_fire)
   private val s2_bankIdx     = RegEnable(Mux(overrideValid, s3_bankIdx, s1_bankIdx), s1_fire)
   private val s2_bankMask    = RegEnable(Mux(overrideValid, s3_bankMask, s1_bankMask), s1_fire)
+  private val s2_ctrResult   = RegEnable(Mux(overrideValid, s3_ctrResult, s1_ctrResult), s1_fire)
+  private val s2_strongBias  = RegEnable(Mux(overrideValid, s3_strongBias, s1_strongBias), s1_fire)
   private val s2_entries     = RegEnable(s1_realEntries, s1_fire)
   private val s2_startPc     = RegEnable(s1_startPc, s1_fire)
 
   when(s2_fire) {
-    s3_setIdx   := s2_setIdx
-    s3_bankIdx  := s2_bankIdx
-    s3_bankMask := s2_bankMask
-    s3_entries  := s2_entries
-    s3_startPc  := s2_startPc
+    s3_setIdx     := s2_setIdx
+    s3_bankIdx    := s2_bankIdx
+    s3_bankMask   := s2_bankMask
+    s3_entries    := s2_entries
+    s3_startPc    := s2_startPc
+    s3_ctrResult  := s2_ctrResult
+    s3_strongBias := s2_strongBias
   }
-
-  private val s2_ctrResult  = takenCounter(s2_bankIdx)(s2_setIdx).map(_.isPositive)
-  private val s2_strongBias = takenCounter(s2_bankIdx)(s2_setIdx).map(_.isSaturate)
 
   private val s2_tag = getTag(s2_startPc)
   dontTouch(s2_tag)
