@@ -17,6 +17,8 @@ package xiangshan.frontend.bpu.sc
 
 import chisel3._
 import chisel3.util._
+import scala.math.min
+import utility.ParallelXOR
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
@@ -31,7 +33,13 @@ trait Helpers extends HasScParameters with PhrHelper {
   def getBankMask(pc: PrunedAddr): UInt =
     UIntToOH((pc >> (instOffsetBits + log2Ceil(NumWays)))(BankWidth - 1, 0))
 
-  def getWayIdx(cfiPosition: UInt): UInt = cfiPosition(log2Ceil(NumWays) - 1, 0)
+  def getWayIdx(cfiPosition: UInt): UInt = {
+    val nChunks = (cfiPosition.getWidth + log2Ceil(NumWays) - 1) / log2Ceil(NumWays)
+    val hashChunks = (0 until nChunks) map { i =>
+      cfiPosition(min((i + 1) * log2Ceil(NumWays), cfiPosition.getWidth) - 1, i * log2Ceil(NumWays))
+    }
+    ParallelXOR(hashChunks)
+  }
 
   // get pc ^ foldedHist for index
   def getPathTableIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories, numSets: Int): UInt =
@@ -52,6 +60,12 @@ trait Helpers extends HasScParameters with PhrHelper {
   def getBWTableIdx(pc: PrunedAddr, bw: UInt, numSets: Int, bwLen: Int): UInt = {
     val foldedBW = computeFoldedHist(bw, log2Ceil(numSets))(bwLen)
     ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ foldedBW)(log2Ceil(numSets) - 1, 0)
+  }
+
+  // get pc ^ foldedImli index
+  def getImliTableIdx(pc: PrunedAddr, imli: UInt, numSets: Int, imliLen: Int): UInt = {
+    val foldedImli = computeFoldedHist(imli, log2Ceil(numSets))(imliLen)
+    ((pc >> (instOffsetBits + log2Ceil(NumWays) + BankWidth)) ^ foldedImli)(log2Ceil(numSets) - 1, 0)
   }
 
   // get bias index
