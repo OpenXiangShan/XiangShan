@@ -421,9 +421,11 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s5_pf_l3_valid = GatedValidRegNext(s4_pf_l2_valid) && enable_l3_pf
   val s5_pf_l3_bits = RegEnable(s4_pf_l3_bits, s4_pf_l2_valid)
 
-  io.l1_prefetch_req.valid := s3_pf_l1_valid
+  // io.l1_prefetch_req.valid := s3_pf_l1_valid
+  io.l1_prefetch_req.valid := false.B
   io.l1_prefetch_req.bits := s3_pf_l1_bits
-  io.l2_l3_prefetch_req.valid := s4_pf_l2_valid || s5_pf_l3_valid
+  // io.l2_l3_prefetch_req.valid := s4_pf_l2_valid || s5_pf_l3_valid
+  io.l2_l3_prefetch_req.valid := false.B
   io.l2_l3_prefetch_req.bits := Mux(s4_pf_l2_valid, s4_pf_l2_bits, s5_pf_l3_bits)
 
   XSPerfAccumulate("s4_pf_sent", s4_pf_l2_valid)
