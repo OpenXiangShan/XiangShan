@@ -617,14 +617,14 @@ class WithCHI extends Config((_, _, _) => {
 })
 
 class CHIConfig(n: Int = 1) extends Config(
-  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = false)
+  L2CacheConfig("1MB", inclusive = true, banks = 4, tp = true)
     ++ new TLConfig(n)
     ++ new WithCHI
 )
 class KunminghuV2Config(n: Int = 1) extends CHIConfig(n) with DeprecatedConfigWarning
 
 class CHIMinimalConfig(n: Int = 1) extends Config(
-  L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
+  L2CacheConfig("128KB", inclusive = true, banks = 1, tp = true)
     ++ WithNKBL1D(32, ways = 4)
     ++ new TLMinimalConfig(n)
     ++ new WithCHI

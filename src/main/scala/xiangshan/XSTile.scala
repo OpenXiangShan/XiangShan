@@ -81,15 +81,6 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     case None =>
   }
 
-  val core_l3_tpmeta_source_port = l2top.inner.l2cache match {
-    case Some(l2) => l2.tpmeta_source_node
-    case None => None
-  }
-  val core_l3_tpmeta_sink_port = l2top.inner.l2cache match {
-    case Some(l2) => l2.tpmeta_sink_node
-    case None => None
-  }
-
   // mmio
   l2top.inner.i_mmio_port := l2top.inner.i_mmio_buffer.node := memBlock.frontendBridge.instr_uncache_node
   if (icacheCtrlEnabled) {
