@@ -18,7 +18,6 @@ class UopInfoRename extends Bundle {
   val src2Ren = Bool()
   val src2Type = DecodeSrcType()
   val vlRen = Bool()
-  val v0Ren = Bool()
   val maskType = MaskTypeChiselEnum()
   val intRmRen = Bool()
   val readVdAsSrc = Bool()
@@ -42,7 +41,6 @@ object UopInfoRename {
     src1Type   : Option[OperandType],
     src2Type   : Option[OperandType],
     vlRen      : Boolean,
-    v0Ren      : Boolean,
     maskType   : MaskType,
     intRmRen   : Boolean,
     readVdAsSrc: Boolean,
@@ -56,7 +54,6 @@ object UopInfoRename {
     val src1: String = operandTypeToString(src1Type)
     val src2: String = operandTypeToString(src2Type)
     val vlR = booleanToString(vlRen)
-    val v0R = booleanToString(v0Ren)
     val maskTy = maskType.chiselEnum.toBitPat.rawString
     val intRmR = booleanToString(intRmRen)
     val rdAsSrc = booleanToString(readVdAsSrc)
@@ -67,7 +64,7 @@ object UopInfoRename {
     val vxsatW = booleanToString(vxsatWen)
     val vdAllocStr = booleanToString(vdAlloc)
 
-    val bp = BitPat(s"b$src1$src2$vlR$v0R$maskTy$intRmR$rdAsSrc$gpW$fpW$vpW$vlW$vxsatW$vdAllocStr")
+    val bp = BitPat(s"b$src1$src2$vlR$maskTy$intRmR$rdAsSrc$gpW$fpW$vpW$vlW$vxsatW$vdAllocStr")
     require(
       bp.width == UopInfoRename.width,
       s"bitpat width is ${bp.width}, but ${UopInfoRename.width} is expected"

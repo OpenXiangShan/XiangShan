@@ -17,7 +17,7 @@ class OpcodeField(uopIdx: Int) extends DecodeField[InstSewLmulNfPattern, UInt] {
   override def genTable(op: InstSewLmulNfPattern): BitPat = {
     val uopSeq = UopInfoFieldVec.genUopSeq(op)
     if (uopSeq.isDefinedAt(uopIdx)) {
-      Option(uopSeq(uopIdx).opcode).map(_.encode.padDcTo(Opcode.getWidth)).getOrElse(default)
+      Option(uopSeq(uopIdx)).map(_.encode.padDcTo(Opcode.getWidth)).getOrElse(default)
     } else {
       default
     }
