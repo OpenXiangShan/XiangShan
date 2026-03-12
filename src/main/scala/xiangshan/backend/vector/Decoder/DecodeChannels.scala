@@ -352,7 +352,7 @@ object DecodeChannelOutput {
     uop.lsrc2 := vuop.src.src2
     uop.lsrc3 := vuop.src.dest
     uop.vlRen := vuop.renameInfo.uop.vlRen
-    uop.v0Ren := vuop.renameInfo.uop.v0Ren
+    uop.v0Ren := vuop.v0Ren
     uop.frmRen := vuop.frmRen
     uop.maskType := vuop.renameInfo.uop.maskType
     uop.intRmRen := vuop.renameInfo.uop.intRmRen
