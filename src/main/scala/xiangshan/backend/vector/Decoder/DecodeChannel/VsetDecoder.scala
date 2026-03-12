@@ -8,14 +8,14 @@ import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.decode.isa.Instructions
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
 import xiangshan.backend.decode.opcode.Opcode
-import xiangshan.backend.decode.opcode.Opcode.{Opcode, castToUInt}
+import xiangshan.backend.decode.opcode.Opcode.VSetOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.{Opcode, toOpcodeUtil}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.vector.Decoder.DecodePatterns.{RdZeroPattern, Rs1ZeroPattern}
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
 import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
-import xiangshan.backend.vector.Decoder.Uop.UopTrait.UopBase
-import xiangshan.backend.vector.Decoder.Uop.{UopInfoRename, VecUopDefines}
+import xiangshan.backend.vector.Decoder.Uop.UopInfoRename
 import xiangshan.backend.vector.Decoder.util.{BoolDecodeField, DecodeField, DecodePattern, DecodeTable}
 import xiangshan.backend.vector.Decoder.{Lmuls, Sews}
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
@@ -27,8 +27,8 @@ import scala.language.implicitConversions
 
 @instantiable
 class VsetDecoder extends Module {
-  import VsetDecoderUtil._
   import VsetDecoder._
+  import VsetDecoderUtil._
 
   @public
   val in = IO(Input(new In))
@@ -65,46 +65,46 @@ class VsetDecoder extends Module {
 
   uop := Mux1H(Seq(
     isVSETVL -> Mux1H(Seq(
-      (rdIsZero && rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypex_vll.genUopInfoRenameBitPat),
-      (!rdIsZero && rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypex_vlmax.genUopInfoRenameBitPat),
-      (!rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypex_vlx.genUopInfoRenameBitPat),
+      (rdIsZero && rs1IsZero) -> bitPatToUInt(uvset_vtypex_vll.genUopInfoRenameBitPat),
+      (!rdIsZero && rs1IsZero) -> bitPatToUInt(uvset_vtypex_vlmax.genUopInfoRenameBitPat),
+      (!rs1IsZero) -> bitPatToUInt(uvset_vtypex_vlx.genUopInfoRenameBitPat),
     )),
     isVSETVLI -> Mux(
       sewLmulIllegal || vsetvliVill,
-      bitPatToUInt(VecUopDefines.vset_vtypei_ill.genUopInfoRenameBitPat),
+      bitPatToUInt(uvset_ill.genUopInfoRenameBitPat),
       Mux1H(Seq(
-        (rdIsZero && rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypei_nop.genUopInfoRenameBitPat),
-        (!rdIsZero && rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypei_vlmax.genUopInfoRenameBitPat),
-        (!rs1IsZero) -> bitPatToUInt(VecUopDefines.vset_vtypei_vlx.genUopInfoRenameBitPat),
+        (rdIsZero && rs1IsZero) -> bitPatToUInt(uvset_vtypei_nop.genUopInfoRenameBitPat),
+        (!rdIsZero && rs1IsZero) -> bitPatToUInt(uvset_vtypei_vlmax.genUopInfoRenameBitPat),
+        (!rs1IsZero) -> bitPatToUInt(uvset_vtypei_vlx.genUopInfoRenameBitPat),
       )),
     ),
     isVSETIVLI -> Mux(
       sewLmulIllegal || vsetivliVill,
-      bitPatToUInt(VecUopDefines.vset_vtypei_ill.genUopInfoRenameBitPat),
-      bitPatToUInt(VecUopDefines.vset_vtypei_vli.genUopInfoRenameBitPat)
+      bitPatToUInt(uvset_ill.genUopInfoRenameBitPat),
+      bitPatToUInt(uvset_vtypei_vli.genUopInfoRenameBitPat)
     ),
   )).asTypeOf(uop)
 
   val opcode = Wire(Opcode())
   opcode := Mux1H(Seq(
     isVSETVL -> Mux1H(Seq(
-      (rdIsZero && rs1IsZero) -> VecUopDefines.vset_vtypex_vll.opcode.encode,
-      (!rdIsZero && rs1IsZero) -> VecUopDefines.vset_vtypex_vlmax.opcode.encode,
-      (!rs1IsZero) -> VecUopDefines.vset_vtypex_vlx.opcode.encode,
+      (rdIsZero && rs1IsZero) -> uvset_vtypex_vll.encode,
+      (!rdIsZero && rs1IsZero) -> uvset_vtypex_vlmax.encode,
+      (!rs1IsZero) -> uvset_vtypex_vlx.encode,
     )),
     isVSETVLI -> Mux(
       sewLmulIllegal || vsetvliVill,
-      VecUopDefines.vset_vtypei_ill.opcode.encode,
+      uvset_ill.encode,
       Mux1H(Seq(
-        (rdIsZero && rs1IsZero) -> VecUopDefines.vset_vtypei_nop.opcode.encode,
-        (!rdIsZero && rs1IsZero) -> VecUopDefines.vset_vtypei_vlmax.opcode.encode,
-        (!rs1IsZero) -> VecUopDefines.vset_vtypei_vlx.opcode.encode,
+        (rdIsZero && rs1IsZero) -> uvset_vtypei_nop.encode,
+        (!rdIsZero && rs1IsZero) -> uvset_vtypei_vlmax.encode,
+        (!rs1IsZero) -> uvset_vtypei_vlx.encode,
       )),
     ),
     isVSETIVLI -> Mux(
       sewLmulIllegal || vsetivliVill,
-      VecUopDefines.vset_vtypei_ill.opcode.encode,
-      VecUopDefines.vset_vtypei_vli.opcode.encode,
+      uvset_ill.encode,
+      uvset_vtypei_vli.encode,
     ),
   ))
 
@@ -218,14 +218,14 @@ object VsetDecoderUtil {
     override def chiselType: UopInfoRename = new UopInfoRename
 
     override def genTable(op: InstPatternWithRdRs1Zero): BitPat = {
-      val uopSeq: Seq[_ <: UopBase] = genUop(op).toSeq
+      val uopSeq: Seq[Opcode] = genUop(op).toSeq
 
       val bitPatSeq: Seq[BitPat] = uopSeq.map(_.genUopInfoRenameBitPat).padTo(1, BitPat.dontCare(UopInfoRename.width))
 
       bitPatSeq.reverse.reduce(_ ## _)
     }
 
-    def genUop(op: InstPatternWithRdRs1Zero): Option[UopBase] = {
+    def genUop(op: InstPatternWithRdRs1Zero): Option[Opcode] = {
       val DecodePatternComb5(
         instP,
         vsetvliVtypeiLegalHead,
@@ -237,31 +237,31 @@ object VsetDecoderUtil {
       if (instP.isVSETVL) {
         Some((
           if (rdZero.rdZero.get && rs1Zero.rs1Zero.get)
-            VecUopDefines.vset_vtypex_vll
+            uvset_vtypex_vll
           else if (rs1Zero.rs1Zero.get)
-            VecUopDefines.vset_vtypex_vlmax
+            uvset_vtypex_vlmax
           else
-            VecUopDefines.vset_vtypex_vlx
-        ).asInstanceOf[UopBase])
+            uvset_vtypex_vlx
+        ))
       }
       else if (instP.isVSETVLI) {
-        Some((
+        Some(
           if (instP.isIllegalVSETVLI || !vsetvliVtypeiLegalHead.zimm11bHead3Zero.get)
-            VecUopDefines.vset_vtypei_ill
+            uvset_ill
           else if (rdZero.rdZero.get && rs1Zero.rs1Zero.get)
-            VecUopDefines.vset_vtypei_nop
+            uvset_vtypei_nop
           else if (rs1Zero.rs1Zero.get)
-            VecUopDefines.vset_vtypei_vlmax
+            uvset_vtypei_vlmax
           else
-            VecUopDefines.vset_vtypei_vlx
-        ).asInstanceOf[UopBase])
+            uvset_vtypei_vlx
+        )
       }
       else if (instP.isVSETIVLI) {
         Some(
           if (instP.isIllegalVSETIVLI || !vsetivliVtypeiLegalHead.zimm10bHead2Zero.get)
-            VecUopDefines.vset_vtypei_ill
+            uvset_ill
           else
-            VecUopDefines.vset_vtypei_vli
+            uvset_vtypei_vli
         )
       }
       else {
@@ -329,7 +329,7 @@ object VsetDecoderUtil {
 
     override def genTable(op: InstPatternWithRdRs1Zero): BitPat = {
       val uop = UopInfoField.genUop(op)
-      uop.map(_.opcode.encode.pad0To(Opcode.getWidth)).getOrElse(default)
+      uop.map(_.encode.pad0To(Opcode.getWidth)).getOrElse(default)
     }
   }
 
