@@ -1412,6 +1412,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldld_nuke_query.req.bits.paddr      := s2_in.paddr
   io.lsq.ldld_nuke_query.req.bits.data_valid := Mux(s2_full_fwd || s2_fwd_data_valid || s2_nc_with_data, true.B, !s2_dcache_miss)
   io.lsq.ldld_nuke_query.req.bits.is_nc := s2_nc_with_data
+  val s2_rar_replay_baseline = (s2_nuke || s2_bank_conflict || s2_wpu_pred_fail ||
+    s2_fwd_fail || s2_mem_amb || s2_mq_nack) && s2_troublem
+  // s2_rar_replay_baseline -> s2_out.rep_info.need_rep
+  assert(!s2_rar_replay_baseline || s2_out.rep_info.need_rep)
+
 
   // st-ld violation require
   io.lsq.stld_nuke_query.req.valid           := s2_valid && s2_can_query && !s2_in.isFrmMisAlignBuf
