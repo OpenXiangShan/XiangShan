@@ -204,7 +204,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     paddrModule.io.waddr(w) := idx
     paddrModule.io.wdata(w) := genPartialPAddr(c.req.bits.paddr)
     paddrModule.io.wen(w) := c.req.valid
-    sameCycleCompletion = sameCycleCompletion | (Mux(c.req.valid, 1.U(LoadQueueRARSize.U), 0.U(LoadQueueRARSize.U)) << idx).asUInt
+    sameCycleCompletion = sameCycleCompletion | (Mux(c.req.valid, 1.U(LoadQueueRARSize.W), 0.U(LoadQueueRARSize.W)) << idx).take(LoadQueueRARSize)
 
     // Completion
     when(RegNext(c.req.valid && c.req.bits.data_valid) && !c.revoke) {
