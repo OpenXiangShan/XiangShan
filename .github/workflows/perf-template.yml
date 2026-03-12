@@ -76,8 +76,8 @@ jobs:
           echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
           echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}-${{ inputs.xs_config }}" >> $GITHUB_ENV
           
-          if "${{ inputs.servers }}" == ""; then
-            if "${{ inputs.emulator }}" == "gsim" ; then
+          if [[ -z "${{ inputs.servers }}" ]]; then
+            if [[ "${{ inputs.emulator }}" == "gsim" ]]; then
               echo "SERVER_LIST=node" >> $GITHUB_ENV
             else
               echo "SERVER_LIST=open" >> $GITHUB_ENV
