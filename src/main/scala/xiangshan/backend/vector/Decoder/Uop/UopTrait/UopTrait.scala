@@ -104,7 +104,6 @@ abstract class UopBase(baseTraits: UopTrait*) {
       src1Type = this.getSrc1Type.map(_.srcType.operand),
       src2Type = this.getSrc2Type.map(_.srcType.operand),
       vlRen = vlRen,
-      v0Ren = v0Ren,
       maskType = this match {
         case uop: VecUop => uop.maskType()
         case _ => NoMask

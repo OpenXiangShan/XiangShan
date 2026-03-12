@@ -250,7 +250,7 @@ object PseudoDecodeChannel {
 
   val selImmField = new DecodeFieldGen(
     ValidIO(DecodeSelImm()),
-    (op: InstPattern) => uopTable(op).getTraits.collect { case Src2Imm(selImm) => selImm.toBitPat }
+    (op: InstPattern) => uopTable(op).getTraits.collect { case Src2Imm(selImm) => selImm }
       .ensuring(_.size <= 1)
       .headOption
       .map(BitPat.Y() ## _)

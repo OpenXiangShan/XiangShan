@@ -1,9 +1,12 @@
 package xiangshan.backend.decode.opcode
 
+import chisel3._
 import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util._
-import chisel3.{UInt, _}
 import xiangshan.backend.decode.opcode.OpcodeTraits._
+import xiangshan.backend.vector.Decoder.Types
+import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, MaskType, Operand, OperandType}
+import xiangshan.backend.vector.Decoder.Uop.UopInfoRename
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
 import yunsuan.encoding.Opcode.Opcodes
 
@@ -533,12 +536,12 @@ object Opcode {
     val vlse32      = Value(CS    , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Gp
     val vlse64      = Value(CS    , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Gp
 
-    val vlm         = Value(MASK  , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp
+    val vlm         = Value(MASK  , nonH, nonX, nonFof, VB, uopLoad) + VpWen + VmWen + Src1Gp
 
-    val vlnr8       = Value(MASK  , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp
-    val vlnr16      = Value(MASK  , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp
-    val vlnr32      = Value(MASK  , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp
-    val vlnr64      = Value(MASK  , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp
+    val vlnre8      = Value(MASK  , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp
+    val vlnre16     = Value(MASK  , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp
+    val vlnre32     = Value(MASK  , nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp
+    val vlnre64     = Value(MASK  , nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp
 
     val vluxei8e8   = Value(IUEI8 , nonH, nonX, nonFof, VB, uopLoad) + VpWen + Src1Gp + Src2Vp
     val vluxei8e16  = Value(IUEI8 , nonH, nonX, nonFof, VH, uopLoad) + VpWen + Src1Gp + Src2Vp
@@ -574,14 +577,14 @@ object Opcode {
     val vloxei64e32 = Value(IOEI64, nonH, nonX, nonFof, VW, uopLoad) + VpWen + Src1Gp + Src2Vp
     val vloxei64e64 = Value(IOEI64, nonH, nonX, nonFof, VD, uopLoad) + VpWen + Src1Gp + Src2Vp
 
-    private val prefetchI = bb"000"
-    private val prefetchR = bb"001"
-    private val prefetchW = bb"010"
+    private val prefetchI = bb"0000"
+    private val prefetchR = bb"0001"
+    private val prefetchW = bb"0010"
 
     // Zicbop software prefetch
-    val prefetch_i = Value(SCALA, nonH, nonX, nonFof, prefetchI, uopPrefetch)
-    val prefetch_r = Value(SCALA, nonH, nonX, nonFof, prefetchR, uopPrefetch)
-    val prefetch_w = Value(SCALA, nonH, nonX, nonFof, prefetchW, uopPrefetch)
+    val prefetch_i = Value(SCALA, nonH, nonX, prefetchI, uopPrefetch)
+    val prefetch_r = Value(SCALA, nonH, nonX, prefetchR, uopPrefetch)
+    val prefetch_w = Value(SCALA, nonH, nonX, prefetchW, uopPrefetch)
 
     def getUopType(op: UInt): UInt = op(0)
 
@@ -638,10 +641,10 @@ object Opcode {
 
     val vsm         = Value(MASK  , nonH, nonX, nonFof, VB, uopStore) + Src1Gp + Src3Vp
 
-    val vsnr8       = Value(MASK  , nonH, nonX, nonFof, VB, uopStore) + Src1Gp + Src3Vp
-    val vsnr16      = Value(MASK  , nonH, nonX, nonFof, VH, uopStore) + Src1Gp + Src3Vp
-    val vsnr32      = Value(MASK  , nonH, nonX, nonFof, VW, uopStore) + Src1Gp + Src3Vp
-    val vsnr64      = Value(MASK  , nonH, nonX, nonFof, VD, uopStore) + Src1Gp + Src3Vp
+    val vsnre8      = Value(MASK  , nonH, nonX, nonFof, VB, uopStore) + Src1Gp + Src3Vp
+    val vsnre16     = Value(MASK  , nonH, nonX, nonFof, VH, uopStore) + Src1Gp + Src3Vp
+    val vsnre32     = Value(MASK  , nonH, nonX, nonFof, VW, uopStore) + Src1Gp + Src3Vp
+    val vsnre64     = Value(MASK  , nonH, nonX, nonFof, VD, uopStore) + Src1Gp + Src3Vp
 
     val vsuxei8e8   = Value(IUEI8 , nonH, nonX, nonFof, VB, uopStore) + Src1Gp + Src3Vp + Src2Vp
     val vsuxei8e16  = Value(IUEI8 , nonH, nonX, nonFof, VH, uopStore) + Src1Gp + Src3Vp + Src2Vp
@@ -716,13 +719,13 @@ object Opcode {
       val maxu = bb"111"
     }
 
+
     // atomics
     // bit(1, 0) are size
     // since atomics use a different fu type
     // so we can safely reuse other load/store's encodings
     // bit encoding: | optype (3bit) | size (3bit) | alu (1bit) |
     def AMOFuOpWidth = 7
-
     //                    4b     3b             3b 1b
     val amoswap_b = Value(SCALA, NoALU.swap   , B, noALU)
     val amoadd_b  = Value(SCALA, WithALU.add  , B, withALU)
@@ -1139,53 +1142,53 @@ object Opcode {
     val fadd_fp16    : Opcode = Value(FADD  , OP2, S2V, DV, FP16, F)
     val fsub_fp16    : Opcode = Value(FSUB  , OP2, S2V, DV, FP16, F)
     val fmul_fp16    : Opcode = Value(FMUL  , OP2, S2V, DV, FP16, F)
-    val vfadd_fp16   : Opcode = Value(FADD  , OP2, S2V, DV, FP16, V)
-    val vfsub_fp16   : Opcode = Value(FSUB  , OP2, S2V, DV, FP16, V)
-    val vfmul_fp16   : Opcode = Value(FMUL  , OP2, S2V, DV, FP16, V)
-    val vfmadd_fp16  : Opcode = Value(FMADD , OP3, S2V, DV, FP16, V)
-    val vfnmadd_fp16 : Opcode = Value(FNMADD, OP3, S2V, DV, FP16, V)
-    val vfmsub_fp16  : Opcode = Value(FMSUB , OP3, S2V, DV, FP16, V)
-    val vfnmsub_fp16 : Opcode = Value(FNMSUB, OP3, S2V, DV, FP16, V)
-    val vfmacc_fp16  : Opcode = Value(FMACC , OP3, S2V, DV, FP16, V)
-    val vfnmacc_fp16 : Opcode = Value(FNMACC, OP3, S2V, DV, FP16, V)
-    val vfmsac_fp16  : Opcode = Value(FMSAC , OP3, S2V, DV, FP16, V)
-    val vfnmsac_fp16 : Opcode = Value(FNMSAC, OP3, S2V, DV, FP16, V)
-    val vfwadd_fp16  : Opcode = Value(FADD  , OP2, S2V, DW, FP16, V)
-    val vfwsub_fp16  : Opcode = Value(FSUB  , OP2, S2V, DW, FP16, V)
-    val vfwadd_w_fp16: Opcode = Value(FADD  , OP2, S2W, DW, FP16, V)
-    val vfwsub_w_fp16: Opcode = Value(FSUB  , OP2, S2W, DW, FP16, V)
-    val vfwmul_fp16  : Opcode = Value(FMUL  , OP2, S2V, DW, FP16, V)
-    val vfwmacc_fp16 : Opcode = Value(FMACC , OP3, S2V, DW, FP16, V)
-    val vfwnmacc_fp16: Opcode = Value(FNMACC, OP3, S2V, DW, FP16, V)
-    val vfwmsac_fp16 : Opcode = Value(FMSAC , OP3, S2V, DW, FP16, V)
-    val vfwnmsac_fp16: Opcode = Value(FNMSAC, OP3, S2V, DW, FP16, V)
-    val fmadd_fp32   : Opcode = Value(FMADD , OP3, S2V, DV, FP32, F)
-    val fmsub_fp32   : Opcode = Value(FMSUB , OP3, S2V, DV, FP32, F)
-    val fnmsub_fp32  : Opcode = Value(FNMSUB, OP3, S2V, DV, FP32, F)
-    val fnmadd_fp32  : Opcode = Value(FNMADD, OP3, S2V, DV, FP32, F)
+    val vfadd_fp16   : Opcode = DvSvlS2vS1(FADD  , OP2, S2V, DV, FP16, V)
+    val vfsub_fp16   : Opcode = DvSvlS2vS1(FSUB  , OP2, S2V, DV, FP16, V)
+    val vfmul_fp16   : Opcode = DvSvlS2vS1(FMUL  , OP2, S2V, DV, FP16, V)
+    val vfmadd_fp16  : Opcode = DvSvlS2vS1S3v(FMADD , OP3, S2V, DV, FP16, V)
+    val vfnmadd_fp16 : Opcode = DvSvlS2vS1S3v(FNMADD, OP3, S2V, DV, FP16, V)
+    val vfmsub_fp16  : Opcode = DvSvlS2vS1S3v(FMSUB , OP3, S2V, DV, FP16, V)
+    val vfnmsub_fp16 : Opcode = DvSvlS2vS1S3v(FNMSUB, OP3, S2V, DV, FP16, V)
+    val vfmacc_fp16  : Opcode = DvSvlS2vS1S3v(FMACC , OP3, S2V, DV, FP16, V)
+    val vfnmacc_fp16 : Opcode = DvSvlS2vS1S3v(FNMACC, OP3, S2V, DV, FP16, V)
+    val vfmsac_fp16  : Opcode = DvSvlS2vS1S3v(FMSAC , OP3, S2V, DV, FP16, V)
+    val vfnmsac_fp16 : Opcode = DvSvlS2vS1S3v(FNMSAC, OP3, S2V, DV, FP16, V)
+    val vfwadd_fp16  : Opcode = DvSvlS2vS1S3v(FADD  , OP2, S2V, DW, FP16, V)
+    val vfwsub_fp16  : Opcode = DvSvlS2vS1S3v(FSUB  , OP2, S2V, DW, FP16, V)
+    val vfwadd_w_fp16: Opcode = DvSvlS2vS1S3v(FADD  , OP2, S2W, DW, FP16, V)
+    val vfwsub_w_fp16: Opcode = DvSvlS2vS1S3v(FSUB  , OP2, S2W, DW, FP16, V)
+    val vfwmul_fp16  : Opcode = DvSvlS2vS1S3v(FMUL  , OP2, S2V, DW, FP16, V)
+    val vfwmacc_fp16 : Opcode = DvSvlS2vS1S3v(FMACC , OP3, S2V, DW, FP16, V)
+    val vfwnmacc_fp16: Opcode = DvSvlS2vS1S3v(FNMACC, OP3, S2V, DW, FP16, V)
+    val vfwmsac_fp16 : Opcode = DvSvlS2vS1S3v(FMSAC , OP3, S2V, DW, FP16, V)
+    val vfwnmsac_fp16: Opcode = DvSvlS2vS1S3v(FNMSAC, OP3, S2V, DW, FP16, V)
+    val fmadd_fp32   : Opcode = DvSvlS2vS1S3v(FMADD , OP3, S2V, DV, FP32, F)
+    val fmsub_fp32   : Opcode = DvSvlS2vS1S3v(FMSUB , OP3, S2V, DV, FP32, F)
+    val fnmsub_fp32  : Opcode = DvSvlS2vS1S3v(FNMSUB, OP3, S2V, DV, FP32, F)
+    val fnmadd_fp32  : Opcode = DvSvlS2vS1S3v(FNMADD, OP3, S2V, DV, FP32, F)
     val fadd_fp32    : Opcode = Value(FADD  , OP2, S2V, DV, FP32, F)
     val fsub_fp32    : Opcode = Value(FSUB  , OP2, S2V, DV, FP32, F)
     val fmul_fp32    : Opcode = Value(FMUL  , OP2, S2V, DV, FP32, F)
-    val vfadd_fp32   : Opcode = Value(FADD  , OP2, S2V, DV, FP32, V)
-    val vfsub_fp32   : Opcode = Value(FSUB  , OP2, S2V, DV, FP32, V)
-    val vfmul_fp32   : Opcode = Value(FMUL  , OP2, S2V, DV, FP32, V)
-    val vfmadd_fp32  : Opcode = Value(FMADD , OP3, S2V, DV, FP32, V)
-    val vfnmadd_fp32 : Opcode = Value(FNMADD, OP3, S2V, DV, FP32, V)
-    val vfmsub_fp32  : Opcode = Value(FMSUB , OP3, S2V, DV, FP32, V)
-    val vfnmsub_fp32 : Opcode = Value(FNMSUB, OP3, S2V, DV, FP32, V)
-    val vfmacc_fp32  : Opcode = Value(FMACC , OP3, S2V, DV, FP32, V)
-    val vfnmacc_fp32 : Opcode = Value(FNMACC, OP3, S2V, DV, FP32, V)
-    val vfmsac_fp32  : Opcode = Value(FMSAC , OP3, S2V, DV, FP32, V)
-    val vfnmsac_fp32 : Opcode = Value(FNMSAC, OP3, S2V, DV, FP32, V)
-    val vfwadd_fp32  : Opcode = Value(FADD  , OP2, S2V, DW, FP32, V)
-    val vfwsub_fp32  : Opcode = Value(FSUB  , OP2, S2V, DW, FP32, V)
-    val vfwadd_w_fp32: Opcode = Value(FADD  , OP2, S2W, DW, FP32, V)
-    val vfwsub_w_fp32: Opcode = Value(FSUB  , OP2, S2W, DW, FP32, V)
-    val vfwmul_fp32  : Opcode = Value(FMUL  , OP2, S2V, DW, FP32, V)
-    val vfwmacc_fp32 : Opcode = Value(FMACC , OP3, S2V, DW, FP32, V)
-    val vfwnmacc_fp32: Opcode = Value(FNMACC, OP3, S2V, DW, FP32, V)
-    val vfwmsac_fp32 : Opcode = Value(FMSAC , OP3, S2V, DW, FP32, V)
-    val vfwnmsac_fp32: Opcode = Value(FNMSAC, OP3, S2V, DW, FP32, V)
+    val vfadd_fp32   : Opcode = DvSvlS2vS1(FADD  , OP2, S2V, DV, FP32, V)
+    val vfsub_fp32   : Opcode = DvSvlS2vS1(FSUB  , OP2, S2V, DV, FP32, V)
+    val vfmul_fp32   : Opcode = DvSvlS2vS1(FMUL  , OP2, S2V, DV, FP32, V)
+    val vfmadd_fp32  : Opcode = DvSvlS2vS1S3v(FMADD , OP3, S2V, DV, FP32, V)
+    val vfnmadd_fp32 : Opcode = DvSvlS2vS1S3v(FNMADD, OP3, S2V, DV, FP32, V)
+    val vfmsub_fp32  : Opcode = DvSvlS2vS1S3v(FMSUB , OP3, S2V, DV, FP32, V)
+    val vfnmsub_fp32 : Opcode = DvSvlS2vS1S3v(FNMSUB, OP3, S2V, DV, FP32, V)
+    val vfmacc_fp32  : Opcode = DvSvlS2vS1S3v(FMACC , OP3, S2V, DV, FP32, V)
+    val vfnmacc_fp32 : Opcode = DvSvlS2vS1S3v(FNMACC, OP3, S2V, DV, FP32, V)
+    val vfmsac_fp32  : Opcode = DvSvlS2vS1S3v(FMSAC , OP3, S2V, DV, FP32, V)
+    val vfnmsac_fp32 : Opcode = DvSvlS2vS1S3v(FNMSAC, OP3, S2V, DV, FP32, V)
+    val vfwadd_fp32  : Opcode = DvSvlS2vS1(FADD  , OP2, S2V, DW, FP32, V)
+    val vfwsub_fp32  : Opcode = DvSvlS2vS1(FSUB  , OP2, S2V, DW, FP32, V)
+    val vfwadd_w_fp32: Opcode = DvSvlS2vS1(FADD  , OP2, S2W, DW, FP32, V)
+    val vfwsub_w_fp32: Opcode = DvSvlS2vS1(FSUB  , OP2, S2W, DW, FP32, V)
+    val vfwmul_fp32  : Opcode = DvSvlS2vS1(FMUL  , OP2, S2V, DW, FP32, V)
+    val vfwmacc_fp32 : Opcode = DvSvlS2vS1S3v(FMACC , OP3, S2V, DW, FP32, V)
+    val vfwnmacc_fp32: Opcode = DvSvlS2vS1S3v(FNMACC, OP3, S2V, DW, FP32, V)
+    val vfwmsac_fp32 : Opcode = DvSvlS2vS1S3v(FMSAC , OP3, S2V, DW, FP32, V)
+    val vfwnmsac_fp32: Opcode = DvSvlS2vS1S3v(FNMSAC, OP3, S2V, DW, FP32, V)
     val fmadd_fp64   : Opcode = Value(FMADD , OP3, S2V, DV, FP64, F)
     val fmsub_fp64   : Opcode = Value(FMSUB , OP3, S2V, DV, FP64, F)
     val fnmsub_fp64  : Opcode = Value(FNMSUB, OP3, S2V, DV, FP64, F)
@@ -1193,17 +1196,17 @@ object Opcode {
     val fadd_fp64    : Opcode = Value(FADD  , OP2, S2V, DV, FP64, F)
     val fsub_fp64    : Opcode = Value(FSUB  , OP2, S2V, DV, FP64, F)
     val fmul_fp64    : Opcode = Value(FMUL  , OP2, S2V, DV, FP64, F)
-    val vfadd_fp64   : Opcode = Value(FADD  , OP2, S2V, DV, FP64, V)
-    val vfsub_fp64   : Opcode = Value(FSUB  , OP2, S2V, DV, FP64, V)
-    val vfmul_fp64   : Opcode = Value(FMUL  , OP2, S2V, DV, FP64, V)
-    val vfmadd_fp64  : Opcode = Value(FMADD , OP3, S2V, DV, FP64, V)
-    val vfnmadd_fp64 : Opcode = Value(FNMADD, OP3, S2V, DV, FP64, V)
-    val vfmsub_fp64  : Opcode = Value(FMSUB , OP3, S2V, DV, FP64, V)
-    val vfnmsub_fp64 : Opcode = Value(FNMSUB, OP3, S2V, DV, FP64, V)
-    val vfmacc_fp64  : Opcode = Value(FMACC , OP3, S2V, DV, FP64, V)
-    val vfnmacc_fp64 : Opcode = Value(FNMACC, OP3, S2V, DV, FP64, V)
-    val vfmsac_fp64  : Opcode = Value(FMSAC , OP3, S2V, DV, FP64, V)
-    val vfnmsac_fp64 : Opcode = Value(FNMSAC, OP3, S2V, DV, FP64, V)
+    val vfadd_fp64   : Opcode = DvSvlS2vS1(FADD  , OP2, S2V, DV, FP64, V)
+    val vfsub_fp64   : Opcode = DvSvlS2vS1(FSUB  , OP2, S2V, DV, FP64, V)
+    val vfmul_fp64   : Opcode = DvSvlS2vS1(FMUL  , OP2, S2V, DV, FP64, V)
+    val vfmadd_fp64  : Opcode = DvSvlS2vS1S3v(FMADD , OP3, S2V, DV, FP64, V)
+    val vfnmadd_fp64 : Opcode = DvSvlS2vS1S3v(FNMADD, OP3, S2V, DV, FP64, V)
+    val vfmsub_fp64  : Opcode = DvSvlS2vS1S3v(FMSUB , OP3, S2V, DV, FP64, V)
+    val vfnmsub_fp64 : Opcode = DvSvlS2vS1S3v(FNMSUB, OP3, S2V, DV, FP64, V)
+    val vfmacc_fp64  : Opcode = DvSvlS2vS1S3v(FMACC , OP3, S2V, DV, FP64, V)
+    val vfnmacc_fp64 : Opcode = DvSvlS2vS1S3v(FNMACC, OP3, S2V, DV, FP64, V)
+    val vfmsac_fp64  : Opcode = DvSvlS2vS1S3v(FMSAC , OP3, S2V, DV, FP64, V)
+    val vfnmsac_fp64 : Opcode = DvSvlS2vS1S3v(FNMSAC, OP3, S2V, DV, FP64, V)
 
     val vfwadd4_fp16 : Opcode = Value(FWADD4, OP2, S2V, DW, FP16, V)
     val vfwadd4_fp32 : Opcode = Value(FWADD4, OP2, S2V, DW, FP32, V)
@@ -1237,12 +1240,12 @@ object Opcode {
     val fsqrt_fp32: Opcode = Value(FSQRT, FP32, F)
     val fsqrt_fp64: Opcode = Value(FSQRT, FP64, F)
 
-    val vfdiv_fp16 : Opcode = Value(FDIV , FP16, V)
-    val vfsqrt_fp16: Opcode = Value(FSQRT, FP16, V)
-    val vfdiv_fp32 : Opcode = Value(FDIV , FP32, V)
-    val vfsqrt_fp32: Opcode = Value(FSQRT, FP32, V)
-    val vfdiv_fp64 : Opcode = Value(FDIV , FP64, V)
-    val vfsqrt_fp64: Opcode = Value(FSQRT, FP64, V)
+    val vfdiv_fp16 : Opcode = DvSvlS2vS1(FDIV , FP16, V)
+    val vfsqrt_fp16: Opcode = DvSvlS2vS1(FSQRT, FP16, V)
+    val vfdiv_fp32 : Opcode = DvSvlS2vS1(FDIV , FP32, V)
+    val vfsqrt_fp32: Opcode = DvSvlS2vS1(FSQRT, FP32, V)
+    val vfdiv_fp64 : Opcode = DvSvlS2vS1(FDIV , FP64, V)
+    val vfsqrt_fp64: Opcode = DvSvlS2vS1(FSQRT, FP64, V)
   }
 
   object FDivOpcodes extends FDivOpcodes
@@ -1280,17 +1283,17 @@ object Opcode {
     val fsgnj_fp16  : Opcode = Value(FSGNJ , DV, FP16, F)
     val fsgnjn_fp16 : Opcode = Value(FSGNJN, DV, FP16, F)
     val fsgnjx_fp16 : Opcode = Value(FSGNJX, DV, FP16, F)
-    val vmfeq_fp16  : Opcode = Value(FEQ   , DM, FP16, V)
-    val vmfle_fp16  : Opcode = Value(FLE   , DM, FP16, V)
-    val vmflt_fp16  : Opcode = Value(FLT   , DM, FP16, V)
-    val vmfne_fp16  : Opcode = Value(FNE   , DM, FP16, V)
-    val vmfgt_fp16  : Opcode = Value(FGT   , DM, FP16, V)
-    val vmfge_fp16  : Opcode = Value(FGE   , DM, FP16, V)
-    val vfmin_fp16  : Opcode = Value(FMIN  , DV, FP16, V)
-    val vfmax_fp16  : Opcode = Value(FMAX  , DV, FP16, V)
-    val vfsgnj_fp16 : Opcode = Value(FSGNJ , DV, FP16, V)
-    val vfsgnjn_fp16: Opcode = Value(FSGNJN, DV, FP16, V)
-    val vfsgnjx_fp16: Opcode = Value(FSGNJX, DV, FP16, V)
+    val vmfeq_fp16  : Opcode = DmSvlS2vS1(FEQ   , DM, FP16, V)
+    val vmfle_fp16  : Opcode = DmSvlS2vS1(FLE   , DM, FP16, V)
+    val vmflt_fp16  : Opcode = DmSvlS2vS1(FLT   , DM, FP16, V)
+    val vmfne_fp16  : Opcode = DmSvlS2vS1(FNE   , DM, FP16, V)
+    val vmfgt_fp16  : Opcode = DmSvlS2vS1(FGT   , DM, FP16, V)
+    val vmfge_fp16  : Opcode = DmSvlS2vS1(FGE   , DM, FP16, V)
+    val vfmin_fp16  : Opcode = DvSvlS2vS1(FMIN  , DV, FP16, V)
+    val vfmax_fp16  : Opcode = DvSvlS2vS1(FMAX  , DV, FP16, V)
+    val vfsgnj_fp16 : Opcode = DvSvlS2vS1(FSGNJ , DV, FP16, V)
+    val vfsgnjn_fp16: Opcode = DvSvlS2vS1(FSGNJN, DV, FP16, V)
+    val vfsgnjx_fp16: Opcode = DvSvlS2vS1(FSGNJX, DV, FP16, V)
     val feq_fp32    : Opcode = Value(FEQ   , DM, FP32, F)
     val fle_fp32    : Opcode = Value(FLE   , DM, FP32, F)
     val flt_fp32    : Opcode = Value(FLT   , DM, FP32, F)
@@ -1303,17 +1306,17 @@ object Opcode {
     val fsgnj_fp32  : Opcode = Value(FSGNJ , DV, FP32, F)
     val fsgnjn_fp32 : Opcode = Value(FSGNJN, DV, FP32, F)
     val fsgnjx_fp32 : Opcode = Value(FSGNJX, DV, FP32, F)
-    val vmfeq_fp32  : Opcode = Value(FEQ   , DM, FP32, V)
-    val vmfle_fp32  : Opcode = Value(FLE   , DM, FP32, V)
-    val vmflt_fp32  : Opcode = Value(FLT   , DM, FP32, V)
-    val vmfne_fp32  : Opcode = Value(FNE   , DM, FP32, V)
-    val vmfgt_fp32  : Opcode = Value(FGT   , DM, FP32, V)
-    val vmfge_fp32  : Opcode = Value(FGE   , DM, FP32, V)
-    val vfmin_fp32  : Opcode = Value(FMIN  , DV, FP32, V)
-    val vfmax_fp32  : Opcode = Value(FMAX  , DV, FP32, V)
-    val vfsgnj_fp32 : Opcode = Value(FSGNJ , DV, FP32, V)
-    val vfsgnjn_fp32: Opcode = Value(FSGNJN, DV, FP32, V)
-    val vfsgnjx_fp32: Opcode = Value(FSGNJX, DV, FP32, V)
+    val vmfeq_fp32  : Opcode = DmSvlS2vS1(FEQ   , DM, FP32, V)
+    val vmfle_fp32  : Opcode = DmSvlS2vS1(FLE   , DM, FP32, V)
+    val vmflt_fp32  : Opcode = DmSvlS2vS1(FLT   , DM, FP32, V)
+    val vmfne_fp32  : Opcode = DmSvlS2vS1(FNE   , DM, FP32, V)
+    val vmfgt_fp32  : Opcode = DmSvlS2vS1(FGT   , DM, FP32, V)
+    val vmfge_fp32  : Opcode = DmSvlS2vS1(FGE   , DM, FP32, V)
+    val vfmin_fp32  : Opcode = DvSvlS2vS1(FMIN  , DV, FP32, V)
+    val vfmax_fp32  : Opcode = DvSvlS2vS1(FMAX  , DV, FP32, V)
+    val vfsgnj_fp32 : Opcode = DvSvlS2vS1(FSGNJ , DV, FP32, V)
+    val vfsgnjn_fp32: Opcode = DvSvlS2vS1(FSGNJN, DV, FP32, V)
+    val vfsgnjx_fp32: Opcode = DvSvlS2vS1(FSGNJX, DV, FP32, V)
     val feq_fp64    : Opcode = Value(FEQ   , DM, FP64, F)
     val fle_fp64    : Opcode = Value(FLE   , DM, FP64, F)
     val flt_fp64    : Opcode = Value(FLT   , DM, FP64, F)
@@ -1326,17 +1329,17 @@ object Opcode {
     val fsgnj_fp64  : Opcode = Value(FSGNJ , DV, FP64, F)
     val fsgnjn_fp64 : Opcode = Value(FSGNJN, DV, FP64, F)
     val fsgnjx_fp64 : Opcode = Value(FSGNJX, DV, FP64, F)
-    val vmfeq_fp64  : Opcode = Value(FEQ   , DM, FP64, V)
-    val vmfle_fp64  : Opcode = Value(FLE   , DM, FP64, V)
-    val vmflt_fp64  : Opcode = Value(FLT   , DM, FP64, V)
-    val vmfne_fp64  : Opcode = Value(FNE   , DM, FP64, V)
-    val vmfgt_fp64  : Opcode = Value(FGT   , DM, FP64, V)
-    val vmfge_fp64  : Opcode = Value(FGE   , DM, FP64, V)
-    val vfmin_fp64  : Opcode = Value(FMIN  , DV, FP64, V)
-    val vfmax_fp64  : Opcode = Value(FMAX  , DV, FP64, V)
-    val vfsgnj_fp64 : Opcode = Value(FSGNJ , DV, FP64, V)
-    val vfsgnjn_fp64: Opcode = Value(FSGNJN, DV, FP64, V)
-    val vfsgnjx_fp64: Opcode = Value(FSGNJX, DV, FP64, V)
+    val vmfeq_fp64  : Opcode = DmSvlS2vS1(FEQ   , DM, FP64, V)
+    val vmfle_fp64  : Opcode = DmSvlS2vS1(FLE   , DM, FP64, V)
+    val vmflt_fp64  : Opcode = DmSvlS2vS1(FLT   , DM, FP64, V)
+    val vmfne_fp64  : Opcode = DmSvlS2vS1(FNE   , DM, FP64, V)
+    val vmfgt_fp64  : Opcode = DmSvlS2vS1(FGT   , DM, FP64, V)
+    val vmfge_fp64  : Opcode = DmSvlS2vS1(FGE   , DM, FP64, V)
+    val vfmin_fp64  : Opcode = DvSvlS2vS1(FMIN  , DV, FP64, V)
+    val vfmax_fp64  : Opcode = DvSvlS2vS1(FMAX  , DV, FP64, V)
+    val vfsgnj_fp64 : Opcode = DvSvlS2vS1(FSGNJ , DV, FP64, V)
+    val vfsgnjn_fp64: Opcode = DvSvlS2vS1(FSGNJN, DV, FP64, V)
+    val vfsgnjx_fp64: Opcode = DvSvlS2vS1(FSGNJX, DV, FP64, V)
   }
 
   object FMiscOpcodes extends FMiscOpcodes
@@ -1357,8 +1360,22 @@ object Opcode {
     private val vset = bb"0"
     private val rdvl = bb"1"
 
-    // Todo: use BitPat.dontCare
-    private def dc(n: Int) = BitPat.N(n)
+    private def dc(n: Int) = BitPat.dontCare(n)
+
+    /**
+     * [[uvset_vtypex_vlx]] is used for VSETVL when rs1 != x0
+     * [[uvset_vtypex_vlmax]] is used for VSETVL when rs1 == x0 and rd != x0
+     * [[uvset_vtypex_vll]] is used for VSETVL when rs1 == x0 and rd == x0
+     * [[uvset_vtypei_vlx]] is used for VSETVLI when rs1 != x0
+     * [[uvset_vtypei_vlmax]] is used for VSETVLI when rs1 == x0
+     * [[uvset_vtypei_nop]] is used for VSETVLI when rs1 == x0 and rd == x0
+     * This uop does not change vl but modifies vtype.
+     * if vlmax shrink, [[uvset_vtypei_ill]] should be used to set vill
+     * [[uvset_vtypei_vli]] is used for VSETIVLI
+     * [[uvset_ill]] is used for illegal VSETVLI and VSETIVLI when rs1 == x0 and rd == x0.
+     * When rs1 == x0, rd == x0 and SEW/LMUL ratio is changed, the instruction is reserved.
+     * This uop will set vill = 1 and vl = 0.
+     */
 
     val uvset_vtypex_vlx   = Value(vset, notIll, vtypeX, avlX)     + GpWen + VlWen + Src2Gp + Src1Gp
     val uvset_vtypex_vlmax = Value(vset, notIll, vtypeX, avlVlmax) + GpWen + VlWen + Src2Gp
@@ -1389,621 +1406,6 @@ object Opcode {
   }
 
   object VSetOpcodes extends VSetOpcodes
-    //
-  //  trait VIAluOpcodes extends Opcode with DataType {
-  //    private val ADDER  = bb"000"
-  //    private val CMP    = bb"100"
-  //    private val LOGIC  = bb"010"
-  //    private val MOVE   = bb"110"
-  //    private val CADDER = bb"001"
-  //    private val SHIFT  = bb"011"
-  //    private val CSHIFT = bb"111"
-  //
-  //    private val S2VDV  = bb"000"
-  //    private val S2VDW  = bb"001"
-  //    private val S2WDV  = bb"010"
-  //    private val S2WDW  = bb"011"
-  //    private val S2VDM  = bb"100"
-  //    private val S2F8DV = bb"101"
-  //    private val S2F4DV = bb"110"
-  //    private val S2F2DV = bb"111"
-  //
-  //    /**
-  //     * sub opcode of [[ADDER]]
-  //     */
-  //    private val ADD  = bb"000"
-  //    private val SUB  = bb"001"
-  //    private val ADC  = bb"010"
-  //    private val SBC  = bb"011"
-  //    private val MINU = bb"100"
-  //    private val MIN  = bb"101"
-  //    private val MAXU = bb"110"
-  //    private val MAX  = bb"111"
-  //
-  //    /**
-  //     * sub opcode of [[CMP]]
-  //     */
-  //    private val EQ  = bb"000"
-  //    private val NE  = bb"001"
-  //    private val LTU = bb"010"
-  //    private val LT  = bb"011"
-  //    private val LEU = bb"100"
-  //    private val LE  = bb"101"
-  //    private val GTU = bb"110"
-  //    private val GT  = bb"111"
-  //
-  //    /**
-  //     * sub opcode of [[LOGIC]]
-  //     */
-  //    private val ANDN = bb"000"
-  //    private val AND  = bb"001"
-  //    private val OR   = bb"010"
-  //    private val XOR  = bb"011"
-  //    private val ORN  = bb"100"
-  //    private val NAND = bb"101"
-  //    private val NOR  = bb"110"
-  //    private val XNOR = bb"111"
-  //
-  //    /**
-  //     * sub opcode of [[MOVE]]
-  //     */
-  //    private val MERGE  = bb"000"
-  //    private val VMV_NR = bb"001"
-  //    private val VMV_VS = bb"010"
-  //    private val ZEXT   = bb"100"
-  //    private val SEXT   = bb"101"
-  //
-  //    /**
-  //     * sub opcode of [[CADDER]]
-  //     * [[AADDU]] and [[WADDU]] will be distinguashed by [[S2VDV]] or [[S2VDW]]
-  //     */
-  //    private val AADDU = bb"000"
-  //    private val AADD  = bb"001"
-  //    private val ASUBU = bb"010"
-  //    private val ASUB  = bb"011"
-  //    private val SADDU = bb"100"
-  //    private val SADD  = bb"101"
-  //    private val SSUBU = bb"110"
-  //    private val SSUB  = bb"111"
-  //    private val WADDU = bb"000"
-  //    private val WADD  = bb"001"
-  //    private val WSUBU = bb"010"
-  //    private val WSUB  = bb"011"
-  //
-  //    /**
-  //     * WADD4U:
-  //     *   vd(i) = waddu( vs1(2i) + vs2(2i) ) + waddu( vs1(2i + 1) + vs2(2i + 1) )
-  //     */
-  //    private val WADD4U = bb"110"
-  //
-  //    /**
-  //     * WADD4:
-  //     *   vd(i) = wadd( vs1(2i) + vs2(2i) ) + wadd( vs1(2i + 1) + vs2(2i + 1) )
-  //     */
-  //    private val WADD4  = bb"111"
-  //
-  //    /**
-  //     * sub opcode of [[SHIFT]] and [[CSHIFT]]
-  //     */
-  //    private val SLL   = bb"000"
-  //    private val SRL   = bb"001"
-  //    private val SRA   = bb"010"
-  //    private val ROR   = bb"100"
-  //    private val ROL   = bb"101"
-  //    private val CLIPU = bb"110"
-  //    private val CLIP  = bb"111"
-  //
-  //
-  //    val vadd_e8   = VIAluOpcode(ADD, ADDER, S2VDV, E8)
-  //    val vadd_e16  = VIAluOpcode(ADD, ADDER, S2VDV, E16)
-  //    val vadd_e32  = VIAluOpcode(ADD, ADDER, S2VDV, E32)
-  //    val vadd_e64  = VIAluOpcode(ADD, ADDER, S2VDV, E64)
-  //    val vsub_e8   = VIAluOpcode(SUB, ADDER, S2VDV, E8)
-  //    val vsub_e16  = VIAluOpcode(SUB, ADDER, S2VDV, E16)
-  //    val vsub_e32  = VIAluOpcode(SUB, ADDER, S2VDV, E32)
-  //    val vsub_e64  = VIAluOpcode(SUB, ADDER, S2VDV, E64)
-  //    val vadc_e8   = VIAluOpcode(ADC, ADDER, S2VDV, E8)
-  //    val vadc_e16  = VIAluOpcode(ADC, ADDER, S2VDV, E16)
-  //    val vadc_e32  = VIAluOpcode(ADC, ADDER, S2VDV, E32)
-  //    val vadc_e64  = VIAluOpcode(ADC, ADDER, S2VDV, E64)
-  //    val vmadc_e8  = VIAluOpcode(ADC, ADDER, S2VDM, E8)
-  //    val vmadc_e16 = VIAluOpcode(ADC, ADDER, S2VDM, E16)
-  //    val vmadc_e32 = VIAluOpcode(ADC, ADDER, S2VDM, E32)
-  //    val vmadc_e64 = VIAluOpcode(ADC, ADDER, S2VDM, E64)
-  //    val vsbc_e8   = VIAluOpcode(SBC, ADDER, S2VDV, E8)
-  //    val vsbc_e16  = VIAluOpcode(SBC, ADDER, S2VDV, E16)
-  //    val vsbc_e32  = VIAluOpcode(SBC, ADDER, S2VDV, E32)
-  //    val vsbc_e64  = VIAluOpcode(SBC, ADDER, S2VDV, E64)
-  //    val vmsbc_e8  = VIAluOpcode(SBC, ADDER, S2VDM, E8)
-  //    val vmsbc_e16 = VIAluOpcode(SBC, ADDER, S2VDM, E16)
-  //    val vmsbc_e32 = VIAluOpcode(SBC, ADDER, S2VDM, E32)
-  //    val vmsbc_e64 = VIAluOpcode(SBC, ADDER, S2VDM, E64)
-  //
-  //    val vminu_e8  = VIAluOpcode(MINU, ADDER, S2VDV, E8)
-  //    val vminu_e16 = VIAluOpcode(MINU, ADDER, S2VDV, E16)
-  //    val vminu_e32 = VIAluOpcode(MINU, ADDER, S2VDV, E32)
-  //    val vminu_e64 = VIAluOpcode(MINU, ADDER, S2VDV, E64)
-  //    val vmin_e8   = VIAluOpcode(MIN,  ADDER, S2VDV, E8)
-  //    val vmin_e16  = VIAluOpcode(MIN,  ADDER, S2VDV, E16)
-  //    val vmin_e32  = VIAluOpcode(MIN,  ADDER, S2VDV, E32)
-  //    val vmin_e64  = VIAluOpcode(MIN,  ADDER, S2VDV, E64)
-  //    val vmaxu_e8  = VIAluOpcode(MAXU, ADDER, S2VDV, E8)
-  //    val vmaxu_e16 = VIAluOpcode(MAXU, ADDER, S2VDV, E16)
-  //    val vmaxu_e32 = VIAluOpcode(MAXU, ADDER, S2VDV, E32)
-  //    val vmaxu_e64 = VIAluOpcode(MAXU, ADDER, S2VDV, E64)
-  //    val vmax_e8   = VIAluOpcode(MAX,  ADDER, S2VDV, E8)
-  //    val vmax_e16  = VIAluOpcode(MAX,  ADDER, S2VDV, E16)
-  //    val vmax_e32  = VIAluOpcode(MAX,  ADDER, S2VDV, E32)
-  //    val vmax_e64  = VIAluOpcode(MAX,  ADDER, S2VDV, E64)
-  //
-  //    val vmseq_e8   = VIAluOpcode(EQ , CMP, S2VDM, E8)
-  //    val vmseq_e16  = VIAluOpcode(EQ , CMP, S2VDM, E16)
-  //    val vmseq_e32  = VIAluOpcode(EQ , CMP, S2VDM, E32)
-  //    val vmseq_e64  = VIAluOpcode(EQ , CMP, S2VDM, E64)
-  //    val vmsne_e8   = VIAluOpcode(NE , CMP, S2VDM, E8)
-  //    val vmsne_e16  = VIAluOpcode(NE , CMP, S2VDM, E16)
-  //    val vmsne_e32  = VIAluOpcode(NE , CMP, S2VDM, E32)
-  //    val vmsne_e64  = VIAluOpcode(NE , CMP, S2VDM, E64)
-  //    val vmsltu_e8  = VIAluOpcode(LTU, CMP, S2VDM, E8)
-  //    val vmsltu_e16 = VIAluOpcode(LTU, CMP, S2VDM, E16)
-  //    val vmsltu_e32 = VIAluOpcode(LTU, CMP, S2VDM, E32)
-  //    val vmsltu_e64 = VIAluOpcode(LTU, CMP, S2VDM, E64)
-  //    val vmslt_e8   = VIAluOpcode(LT , CMP, S2VDM, E8)
-  //    val vmslt_e16  = VIAluOpcode(LT , CMP, S2VDM, E16)
-  //    val vmslt_e32  = VIAluOpcode(LT , CMP, S2VDM, E32)
-  //    val vmslt_e64  = VIAluOpcode(LT , CMP, S2VDM, E64)
-  //    val vmsleu_e8  = VIAluOpcode(LEU, CMP, S2VDM, E8)
-  //    val vmsleu_e16 = VIAluOpcode(LEU, CMP, S2VDM, E16)
-  //    val vmsleu_e32 = VIAluOpcode(LEU, CMP, S2VDM, E32)
-  //    val vmsleu_e64 = VIAluOpcode(LEU, CMP, S2VDM, E64)
-  //    val vmsle_e8   = VIAluOpcode(LE , CMP, S2VDM, E8)
-  //    val vmsle_e16  = VIAluOpcode(LE , CMP, S2VDM, E16)
-  //    val vmsle_e32  = VIAluOpcode(LE , CMP, S2VDM, E32)
-  //    val vmsle_e64  = VIAluOpcode(LE , CMP, S2VDM, E64)
-  //    val vmsgtu_e8  = VIAluOpcode(GTU, CMP, S2VDM, E8)
-  //    val vmsgtu_e16 = VIAluOpcode(GTU, CMP, S2VDM, E16)
-  //    val vmsgtu_e32 = VIAluOpcode(GTU, CMP, S2VDM, E32)
-  //    val vmsgtu_e64 = VIAluOpcode(GTU, CMP, S2VDM, E64)
-  //    val vmsgt_e8   = VIAluOpcode(GT , CMP, S2VDM, E8)
-  //    val vmsgt_e16  = VIAluOpcode(GT , CMP, S2VDM, E16)
-  //    val vmsgt_e32  = VIAluOpcode(GT , CMP, S2VDM, E32)
-  //    val vmsgt_e64  = VIAluOpcode(GT , CMP, S2VDM, E64)
-  //
-  //    val vandn_e8  = VIAluOpcode(ANDN, LOGIC, S2VDV, E8)
-  //    val vandn_e16 = VIAluOpcode(ANDN, LOGIC, S2VDV, E16)
-  //    val vandn_e32 = VIAluOpcode(ANDN, LOGIC, S2VDV, E32)
-  //    val vandn_e64 = VIAluOpcode(ANDN, LOGIC, S2VDV, E64)
-  //    val vand_e8   = VIAluOpcode(AND , LOGIC, S2VDV, E8)
-  //    val vand_e16  = VIAluOpcode(AND , LOGIC, S2VDV, E16)
-  //    val vand_e32  = VIAluOpcode(AND , LOGIC, S2VDV, E32)
-  //    val vand_e64  = VIAluOpcode(AND , LOGIC, S2VDV, E64)
-  //    val vor_e8    = VIAluOpcode(OR  , LOGIC, S2VDV, E8)
-  //    val vor_e16   = VIAluOpcode(OR  , LOGIC, S2VDV, E16)
-  //    val vor_e32   = VIAluOpcode(OR  , LOGIC, S2VDV, E32)
-  //    val vor_e64   = VIAluOpcode(OR  , LOGIC, S2VDV, E64)
-  //    val vxor_e8   = VIAluOpcode(XOR , LOGIC, S2VDV, E8)
-  //    val vxor_e16  = VIAluOpcode(XOR , LOGIC, S2VDV, E16)
-  //    val vxor_e32  = VIAluOpcode(XOR , LOGIC, S2VDV, E32)
-  //    val vxor_e64  = VIAluOpcode(XOR , LOGIC, S2VDV, E64)
-  //
-  //    val vmandn = VIAluOpcode(ANDN, LOGIC, S2VDM, EX)
-  //    val vmand  = VIAluOpcode(AND , LOGIC, S2VDM, EX)
-  //    val vmor   = VIAluOpcode(OR  , LOGIC, S2VDM, EX)
-  //    val vmxor  = VIAluOpcode(XOR , LOGIC, S2VDM, EX)
-  //    val vmorn  = VIAluOpcode(ORN , LOGIC, S2VDM, EX)
-  //    val vmnand = VIAluOpcode(NAND, LOGIC, S2VDM, EX)
-  //    val vmnor  = VIAluOpcode(NOR , LOGIC, S2VDM, EX)
-  //    val vmxnor = VIAluOpcode(XNOR, LOGIC, S2VDM, EX)
-  //
-  //    val vmerge_e8  = VIAluOpcode(MERGE, MOVE, S2VDV, E8 )
-  //    val vmerge_e16 = VIAluOpcode(MERGE, MOVE, S2VDV, E16)
-  //    val vmerge_e32 = VIAluOpcode(MERGE, MOVE, S2VDV, E32)
-  //    val vmerge_e64 = VIAluOpcode(MERGE, MOVE, S2VDV, E64)
-  //    val vmvnr      = VIAluOpcode(VMV_NR, MOVE, S2VDV, EX )
-  //    val vmv_x2vs_e8  = VIAluOpcode(VMV_VS, MOVE, S2VDV, E8 )
-  //    val vmv_x2vs_e16 = VIAluOpcode(VMV_VS, MOVE, S2VDV, E16)
-  //    val vmv_x2vs_e32 = VIAluOpcode(VMV_VS, MOVE, S2VDV, E32)
-  //    val vmv_x2vs_e64 = VIAluOpcode(VMV_VS, MOVE, S2VDV, E64)
-  //    val vzext2_e8  = VIAluOpcode(ZEXT, MOVE, S2F2DV, E8 ) // vzext.vf2 when sew=e16
-  //    val vzext2_e16 = VIAluOpcode(ZEXT, MOVE, S2F2DV, E16)
-  //    val vzext2_e32 = VIAluOpcode(ZEXT, MOVE, S2F2DV, E32)
-  //    val vzext4_e8  = VIAluOpcode(ZEXT, MOVE, S2F4DV, E8 )
-  //    val vzext4_e16 = VIAluOpcode(ZEXT, MOVE, S2F4DV, E16)
-  //    val vzext8_e8  = VIAluOpcode(ZEXT, MOVE, S2F4DV, E8 )
-  //    val vsext2_e8  = VIAluOpcode(SEXT, MOVE, S2F2DV, E8 ) // vsext.vf2 when sew=e16
-  //    val vsext2_e16 = VIAluOpcode(SEXT, MOVE, S2F2DV, E16)
-  //    val vsext2_e32 = VIAluOpcode(SEXT, MOVE, S2F2DV, E32)
-  //    val vsext4_e8  = VIAluOpcode(SEXT, MOVE, S2F4DV, E8 )
-  //    val vsext4_e16 = VIAluOpcode(SEXT, MOVE, S2F4DV, E16)
-  //    val vsext8_e8  = VIAluOpcode(SEXT, MOVE, S2F4DV, E8 )
-  //
-  //    val vwaddu_e8    = VIAluOpcode(WADDU, CADDER, S2VDW, E8)
-  //    val vwaddu_e16   = VIAluOpcode(WADDU, CADDER, S2VDW, E16)
-  //    val vwaddu_e32   = VIAluOpcode(WADDU, CADDER, S2VDW, E32)
-  //    val vwaddu_e64   = VIAluOpcode(WADDU, CADDER, S2VDW, E64)
-  //    val vwadd_e8     = VIAluOpcode(WADD , CADDER, S2VDW, E8)
-  //    val vwadd_e16    = VIAluOpcode(WADD , CADDER, S2VDW, E16)
-  //    val vwadd_e32    = VIAluOpcode(WADD , CADDER, S2VDW, E32)
-  //    val vwadd_e64    = VIAluOpcode(WADD , CADDER, S2VDW, E64)
-  //    val vwsubu_e8    = VIAluOpcode(WSUBU, CADDER, S2VDW, E8)
-  //    val vwsubu_e16   = VIAluOpcode(WSUBU, CADDER, S2VDW, E16)
-  //    val vwsubu_e32   = VIAluOpcode(WSUBU, CADDER, S2VDW, E32)
-  //    val vwsubu_e64   = VIAluOpcode(WSUBU, CADDER, S2VDW, E64)
-  //    val vwsub_e8     = VIAluOpcode(WSUB , CADDER, S2VDW, E8)
-  //    val vwsub_e16    = VIAluOpcode(WSUB , CADDER, S2VDW, E16)
-  //    val vwsub_e32    = VIAluOpcode(WSUB , CADDER, S2VDW, E32)
-  //    val vwsub_e64    = VIAluOpcode(WSUB , CADDER, S2VDW, E64)
-  //    val vwaddu_w_e8  = VIAluOpcode(WADDU, CADDER, S2WDW, E8)
-  //    val vwaddu_w_e16 = VIAluOpcode(WADDU, CADDER, S2WDW, E16)
-  //    val vwaddu_w_e32 = VIAluOpcode(WADDU, CADDER, S2WDW, E32)
-  //    val vwaddu_w_e64 = VIAluOpcode(WADDU, CADDER, S2WDW, E64)
-  //    val vwadd_w_e8   = VIAluOpcode(WADD , CADDER, S2WDW, E8)
-  //    val vwadd_w_e16  = VIAluOpcode(WADD , CADDER, S2WDW, E16)
-  //    val vwadd_w_e32  = VIAluOpcode(WADD , CADDER, S2WDW, E32)
-  //    val vwadd_w_e64  = VIAluOpcode(WADD , CADDER, S2WDW, E64)
-  //    val vwsubu_w_e8  = VIAluOpcode(WSUBU, CADDER, S2WDW, E8)
-  //    val vwsubu_w_e16 = VIAluOpcode(WSUBU, CADDER, S2WDW, E16)
-  //    val vwsubu_w_e32 = VIAluOpcode(WSUBU, CADDER, S2WDW, E32)
-  //    val vwsubu_w_e64 = VIAluOpcode(WSUBU, CADDER, S2WDW, E64)
-  //    val vwsub_w_e8   = VIAluOpcode(WSUB , CADDER, S2WDW, E8)
-  //    val vwsub_w_e16  = VIAluOpcode(WSUB , CADDER, S2WDW, E16)
-  //    val vwsub_w_e32  = VIAluOpcode(WSUB , CADDER, S2WDW, E32)
-  //    val vwsub_w_e64  = VIAluOpcode(WSUB , CADDER, S2WDW, E64)
-  //
-  //    // internal uop to support reduction sum
-  //    val vwadd4u_e8  = VIAluOpcode(WADD4U, CADDER, S2VDW, E8 )
-  //    val vwadd4u_e16 = VIAluOpcode(WADD4U, CADDER, S2VDW, E16)
-  //    val vwadd4u_e32 = VIAluOpcode(WADD4U, CADDER, S2VDW, E32)
-  //    val vwadd4_e8   = VIAluOpcode(WADD4 , CADDER, S2VDW, E8 )
-  //    val vwadd4_e16  = VIAluOpcode(WADD4 , CADDER, S2VDW, E16)
-  //    val vwadd4_e32  = VIAluOpcode(WADD4 , CADDER, S2VDW, E32)
-  //
-  //    val vaaddu_e8  = VIAluOpcode(AADDU, CADDER, S2VDV, E8)
-  //    val vaaddu_e16 = VIAluOpcode(AADDU, CADDER, S2VDV, E16)
-  //    val vaaddu_e32 = VIAluOpcode(AADDU, CADDER, S2VDV, E32)
-  //    val vaaddu_e64 = VIAluOpcode(AADDU, CADDER, S2VDV, E64)
-  //    val vaadd_e8   = VIAluOpcode(AADD , CADDER, S2VDV, E8)
-  //    val vaadd_e16  = VIAluOpcode(AADD , CADDER, S2VDV, E16)
-  //    val vaadd_e32  = VIAluOpcode(AADD , CADDER, S2VDV, E32)
-  //    val vaadd_e64  = VIAluOpcode(AADD , CADDER, S2VDV, E64)
-  //    val vasubu_e8  = VIAluOpcode(ASUBU, CADDER, S2VDV, E8)
-  //    val vasubu_e16 = VIAluOpcode(ASUBU, CADDER, S2VDV, E16)
-  //    val vasubu_e32 = VIAluOpcode(ASUBU, CADDER, S2VDV, E32)
-  //    val vasubu_e64 = VIAluOpcode(ASUBU, CADDER, S2VDV, E64)
-  //    val vasub_e8   = VIAluOpcode(ASUB , CADDER, S2VDV, E8)
-  //    val vasub_e16  = VIAluOpcode(ASUB , CADDER, S2VDV, E16)
-  //    val vasub_e32  = VIAluOpcode(ASUB , CADDER, S2VDV, E32)
-  //    val vasub_e64  = VIAluOpcode(ASUB , CADDER, S2VDV, E64)
-  //    val vsaddu_e8  = VIAluOpcode(SADDU, CADDER, S2VDV, E8)
-  //    val vsaddu_e16 = VIAluOpcode(SADDU, CADDER, S2VDV, E16)
-  //    val vsaddu_e32 = VIAluOpcode(SADDU, CADDER, S2VDV, E32)
-  //    val vsaddu_e64 = VIAluOpcode(SADDU, CADDER, S2VDV, E64)
-  //    val vsadd_e8   = VIAluOpcode(SADD , CADDER, S2VDV, E8)
-  //    val vsadd_e16  = VIAluOpcode(SADD , CADDER, S2VDV, E16)
-  //    val vsadd_e32  = VIAluOpcode(SADD , CADDER, S2VDV, E32)
-  //    val vsadd_e64  = VIAluOpcode(SADD , CADDER, S2VDV, E64)
-  //    val vssubu_e8  = VIAluOpcode(SSUBU, CADDER, S2VDV, E8)
-  //    val vssubu_e16 = VIAluOpcode(SSUBU, CADDER, S2VDV, E16)
-  //    val vssubu_e32 = VIAluOpcode(SSUBU, CADDER, S2VDV, E32)
-  //    val vssubu_e64 = VIAluOpcode(SSUBU, CADDER, S2VDV, E64)
-  //    val vssub_e8   = VIAluOpcode(SSUB , CADDER, S2VDV, E8)
-  //    val vssub_e16  = VIAluOpcode(SSUB , CADDER, S2VDV, E16)
-  //    val vssub_e32  = VIAluOpcode(SSUB , CADDER, S2VDV, E32)
-  //    val vssub_e64  = VIAluOpcode(SSUB , CADDER, S2VDV, E64)
-  //
-  //    val vsll_e8   = VIAluOpcode(SLL, SHIFT, S2VDV, E8)
-  //    val vsll_e16  = VIAluOpcode(SLL, SHIFT, S2VDV, E16)
-  //    val vsll_e32  = VIAluOpcode(SLL, SHIFT, S2VDV, E32)
-  //    val vsll_e64  = VIAluOpcode(SLL, SHIFT, S2VDV, E64)
-  //    val vsrl_e8   = VIAluOpcode(SRL, SHIFT, S2VDV, E8)
-  //    val vsrl_e16  = VIAluOpcode(SRL, SHIFT, S2VDV, E16)
-  //    val vsrl_e32  = VIAluOpcode(SRL, SHIFT, S2VDV, E32)
-  //    val vsrl_e64  = VIAluOpcode(SRL, SHIFT, S2VDV, E64)
-  //    val vsra_e8   = VIAluOpcode(SRA, SHIFT, S2VDV, E8)
-  //    val vsra_e16  = VIAluOpcode(SRA, SHIFT, S2VDV, E16)
-  //    val vsra_e32  = VIAluOpcode(SRA, SHIFT, S2VDV, E32)
-  //    val vsra_e64  = VIAluOpcode(SRA, SHIFT, S2VDV, E64)
-  //    val vror_e8   = VIAluOpcode(ROR, SHIFT, S2VDV, E8)
-  //    val vror_e16  = VIAluOpcode(ROR, SHIFT, S2VDV, E16)
-  //    val vror_e32  = VIAluOpcode(ROR, SHIFT, S2VDV, E32)
-  //    val vror_e64  = VIAluOpcode(ROR, SHIFT, S2VDV, E64)
-  //    val vrol_e8   = VIAluOpcode(ROL, SHIFT, S2VDV, E8)
-  //    val vrol_e16  = VIAluOpcode(ROL, SHIFT, S2VDV, E16)
-  //    val vrol_e32  = VIAluOpcode(ROL, SHIFT, S2VDV, E32)
-  //    val vrol_e64  = VIAluOpcode(ROL, SHIFT, S2VDV, E64)
-  //
-  //    val vssrl_e8    = VIAluOpcode(SRL  , CSHIFT, S2VDV, E8)
-  //    val vssrl_e16   = VIAluOpcode(SRL  , CSHIFT, S2VDV, E16)
-  //    val vssrl_e32   = VIAluOpcode(SRL  , CSHIFT, S2VDV, E32)
-  //    val vssrl_e64   = VIAluOpcode(SRL  , CSHIFT, S2VDV, E64)
-  //    val vssra_e8    = VIAluOpcode(SRA  , CSHIFT, S2VDV, E8)
-  //    val vssra_e16   = VIAluOpcode(SRA  , CSHIFT, S2VDV, E16)
-  //    val vssra_e32   = VIAluOpcode(SRA  , CSHIFT, S2VDV, E32)
-  //    val vssra_e64   = VIAluOpcode(SRA  , CSHIFT, S2VDV, E64)
-  //    val vwsll_e8    = VIAluOpcode(SLL  , CSHIFT, S2VDW, E8)
-  //    val vwsll_e16   = VIAluOpcode(SLL  , CSHIFT, S2VDW, E16)
-  //    val vwsll_e32   = VIAluOpcode(SLL  , CSHIFT, S2VDW, E32)
-  //    val vwsll_e64   = VIAluOpcode(SLL  , CSHIFT, S2VDW, E64)
-  //    val vnsrl_e8    = VIAluOpcode(SRL  , CSHIFT, S2WDV, E8)
-  //    val vnsrl_e16   = VIAluOpcode(SRL  , CSHIFT, S2WDV, E16)
-  //    val vnsrl_e32   = VIAluOpcode(SRL  , CSHIFT, S2WDV, E32)
-  //    val vnsrl_e64   = VIAluOpcode(SRL  , CSHIFT, S2WDV, E64)
-  //    val vnsra_e8    = VIAluOpcode(SRA  , CSHIFT, S2WDV, E8)
-  //    val vnsra_e16   = VIAluOpcode(SRA  , CSHIFT, S2WDV, E16)
-  //    val vnsra_e32   = VIAluOpcode(SRA  , CSHIFT, S2WDV, E32)
-  //    val vnsra_e64   = VIAluOpcode(SRA  , CSHIFT, S2WDV, E64)
-  //    val vnclipu_e8  = VIAluOpcode(CLIPU, CSHIFT, S2WDV, E8)
-  //    val vnclipu_e16 = VIAluOpcode(CLIPU, CSHIFT, S2WDV, E16)
-  //    val vnclipu_e32 = VIAluOpcode(CLIPU, CSHIFT, S2WDV, E32)
-  //    val vnclipu_e64 = VIAluOpcode(CLIPU, CSHIFT, S2WDV, E64)
-  //    val vnclip_e8   = VIAluOpcode(CLIP , CSHIFT, S2WDV, E8)
-  //    val vnclip_e16  = VIAluOpcode(CLIP , CSHIFT, S2WDV, E16)
-  //    val vnclip_e32  = VIAluOpcode(CLIP , CSHIFT, S2WDV, E32)
-  //    val vnclip_e64  = VIAluOpcode(CLIP , CSHIFT, S2WDV, E64)
-  //  }
-  //
-  //  object VIAluOpcodes extends VIAluOpcodes
-  //
-  //  trait VMAluOpcodes extends Opcode[VMAluOpcode] with DataType {
-  //    private val DV = bb"00"
-  //    private val DX = bb"01"
-  //    private val DM = bb"11"
-  //
-  //    private val CPOP_M = bb"000"
-  //    private val CPOP_V = bb"001"
-  //    private val FIRST = bb"010"
-  //    private val ID    = bb"011"
-  //    private val MSBF  = bb"100"
-  //    private val MSIF  = bb"101"
-  //    private val MSOF  = bb"110"
-  //    private val IOTA  = bb"111"
-  //
-  //    val vcpop_m = VMAluOpcode(CPOP_M, DX, EX)
-  //    val vfirst  = VMAluOpcode(FIRST , DX, EX)
-  //    val vmsbf   = VMAluOpcode(MSBF  , DM, EX)
-  //    val vmsif   = VMAluOpcode(MSIF  , DM, EX)
-  //    val vmsof   = VMAluOpcode(MSOF  , DM, EX)
-  //
-  //    val vcpop_v_e8  = VMAluOpcode(CPOP_V, DV, E8 )
-  //    val vcpop_v_e16 = VMAluOpcode(CPOP_V, DV, E16)
-  //    val vcpop_v_e32 = VMAluOpcode(CPOP_V, DV, E32)
-  //    val vcpop_v_e64 = VMAluOpcode(CPOP_V, DV, E64)
-  //    val viota_e8    = VMAluOpcode(IOTA  , DV, E8 )
-  //    val viota_e16   = VMAluOpcode(IOTA  , DV, E16)
-  //    val viota_e32   = VMAluOpcode(IOTA  , DV, E32)
-  //    val viota_e64   = VMAluOpcode(IOTA  , DV, E64)
-  //    val vid_e8      = VMAluOpcode(ID    , DV, E8 )
-  //    val vid_e16     = VMAluOpcode(ID    , DV, E16)
-  //    val vid_e32     = VMAluOpcode(ID    , DV, E32)
-  //    val vid_e64     = VMAluOpcode(ID    , DV, E64)
-  //
-  //  }
-  //
-  //  object VMAluOpcodes extends VMAluOpcodes
-  //
-  //  trait VIMacOpcodes extends Opcode[VIMacOpcode] with DataType {
-  //    private val S1U = bb"0"
-  //    private val S1S = bb"1"
-  //    private val S2U = bb"0"
-  //    private val S2S = bb"1"
-  //
-  //    private val DW = bb"1"
-  //    private val DV = bb"0"
-  //
-  //    private val OP2 = bb"0"
-  //    private val OP3 = bb"1"
-  //
-  //    private val MADD  = bb"000"
-  //    private val NMSUB = bb"001"
-  //    private val MACC  = bb"010"
-  //    private val NMSAC = bb"011"
-  //
-  //    private val MUL  = bb"000"
-  //    private val MULH = bb"001"
-  //    private val SMUL = bb"010"
-  //    private val WADD4 = bb"011"
-  //
-  //    val vmulhu_e8   = VIMacOpcode(S2U, S1U, MULH , OP2, DV, E8 )
-  //    val vmulhu_e16  = VIMacOpcode(S2U, S1U, MULH , OP2, DV, E16)
-  //    val vmulhu_e32  = VIMacOpcode(S2U, S1U, MULH , OP2, DV, E32)
-  //    val vmulhu_e64  = VIMacOpcode(S2U, S1U, MULH , OP2, DV, E64)
-  //    val vmul_e8     = VIMacOpcode(S2S, S1S, MUL  , OP2, DV, E8 )
-  //    val vmul_e16    = VIMacOpcode(S2S, S1S, MUL  , OP2, DV, E16)
-  //    val vmul_e32    = VIMacOpcode(S2S, S1S, MUL  , OP2, DV, E32)
-  //    val vmul_e64    = VIMacOpcode(S2S, S1S, MUL  , OP2, DV, E64)
-  //    val vmulhsu_e8  = VIMacOpcode(S2S, S1U, MULH , OP2, DV, E8 )
-  //    val vmulhsu_e16 = VIMacOpcode(S2S, S1U, MULH , OP2, DV, E16)
-  //    val vmulhsu_e32 = VIMacOpcode(S2S, S1U, MULH , OP2, DV, E32)
-  //    val vmulhsu_e64 = VIMacOpcode(S2S, S1U, MULH , OP2, DV, E64)
-  //    val vmulh_e8    = VIMacOpcode(S2S, S1S, MULH , OP2, DV, E8 )
-  //    val vmulh_e16   = VIMacOpcode(S2S, S1S, MULH , OP2, DV, E16)
-  //    val vmulh_e32   = VIMacOpcode(S2S, S1S, MULH , OP2, DV, E32)
-  //    val vmulh_e64   = VIMacOpcode(S2S, S1S, MULH , OP2, DV, E64)
-  //
-  //    val vmadd_e8    = VIMacOpcode(S2S, S1S, MADD , OP3, DV, E8 )
-  //    val vmadd_e16   = VIMacOpcode(S2S, S1S, MADD , OP3, DV, E16)
-  //    val vmadd_e32   = VIMacOpcode(S2S, S1S, MADD , OP3, DV, E32)
-  //    val vmadd_e64   = VIMacOpcode(S2S, S1S, MADD , OP3, DV, E64)
-  //    val vnmsub_e8   = VIMacOpcode(S2S, S1S, NMSUB, OP3, DV, E8 )
-  //    val vnmsub_e16  = VIMacOpcode(S2S, S1S, NMSUB, OP3, DV, E16)
-  //    val vnmsub_e32  = VIMacOpcode(S2S, S1S, NMSUB, OP3, DV, E32)
-  //    val vnmsub_e64  = VIMacOpcode(S2S, S1S, NMSUB, OP3, DV, E64)
-  //    val vmacc_e8    = VIMacOpcode(S2S, S1S, MACC , OP3, DV, E8 )
-  //    val vmacc_e16   = VIMacOpcode(S2S, S1S, MACC , OP3, DV, E16)
-  //    val vmacc_e32   = VIMacOpcode(S2S, S1S, MACC , OP3, DV, E32)
-  //    val vmacc_e64   = VIMacOpcode(S2S, S1S, MACC , OP3, DV, E64)
-  //    val vnmsac_e8   = VIMacOpcode(S2S, S1S, NMSAC, OP3, DV, E8 )
-  //    val vnmsac_e16  = VIMacOpcode(S2S, S1S, NMSAC, OP3, DV, E16)
-  //    val vnmsac_e32  = VIMacOpcode(S2S, S1S, NMSAC, OP3, DV, E32)
-  //    val vnmsac_e64  = VIMacOpcode(S2S, S1S, NMSAC, OP3, DV, E64)
-  //
-  //    val vwmulu_e8   = VIMacOpcode(S2U, S1U, MUL, OP2, DW, E8 )
-  //    val vwmulu_e16  = VIMacOpcode(S2U, S1U, MUL, OP2, DW, E16)
-  //    val vwmulu_e32  = VIMacOpcode(S2U, S1U, MUL, OP2, DW, E32)
-  //    val vwmulsu_e8  = VIMacOpcode(S2S, S1U, MUL, OP2, DW, E8 )
-  //    val vwmulsu_e16 = VIMacOpcode(S2S, S1U, MUL, OP2, DW, E16)
-  //    val vwmulsu_e32 = VIMacOpcode(S2S, S1U, MUL, OP2, DW, E32)
-  //    val vwmul_e8    = VIMacOpcode(S2S, S1S, MUL, OP2, DW, E8 )
-  //    val vwmul_e16   = VIMacOpcode(S2S, S1S, MUL, OP2, DW, E16)
-  //    val vwmul_e32   = VIMacOpcode(S2S, S1S, MUL, OP2, DW, E32)
-  //
-  //    val vwmaccu_e8   = VIMacOpcode(S2U, S1U, MACC, OP2, DW, E8 )
-  //    val vwmaccu_e16  = VIMacOpcode(S2U, S1U, MACC, OP2, DW, E16)
-  //    val vwmaccu_e32  = VIMacOpcode(S2U, S1U, MACC, OP2, DW, E32)
-  //    val vwmacc_e8    = VIMacOpcode(S2S, S1S, MACC, OP2, DW, E8 )
-  //    val vwmacc_e16   = VIMacOpcode(S2S, S1S, MACC, OP2, DW, E16)
-  //    val vwmacc_e32   = VIMacOpcode(S2S, S1S, MACC, OP2, DW, E32)
-  //    val vwmaccus_e8  = VIMacOpcode(S2S, S1U, MACC, OP2, DW, E8 )
-  //    val vwmaccus_e16 = VIMacOpcode(S2S, S1U, MACC, OP2, DW, E16)
-  //    val vwmaccus_e32 = VIMacOpcode(S2S, S1U, MACC, OP2, DW, E32)
-  //    val vwmaccsu_e8  = VIMacOpcode(S2U, S1S, MACC, OP2, DW, E8 )
-  //    val vwmaccsu_e16 = VIMacOpcode(S2U, S1S, MACC, OP2, DW, E16)
-  //    val vwmaccsu_e32 = VIMacOpcode(S2U, S1S, MACC, OP2, DW, E32)
-  //
-  //    val vsmul_e8  = VIMacOpcode(S2S, S1S, SMUL, OP2, DV, E8 )
-  //    val vsmul_e16 = VIMacOpcode(S2S, S1S, SMUL, OP2, DV, E16)
-  //    val vsmul_e32 = VIMacOpcode(S2S, S1S, SMUL, OP2, DV, E32)
-  //    val vsmul_e64 = VIMacOpcode(S2S, S1S, SMUL, OP2, DV, E64)
-  //  }
-  //
-  //  object VIMacOpcodes extends VIMacOpcodes
-  //
-  //  trait VIDivOpcodes extends Opcode[VIDivOpcode] with DataType {
-  //    private val DIVU = bb"00"
-  //    private val DIV  = bb"01"
-  //    private val REMU = bb"10"
-  //    private val REM  = bb"11"
-  //
-  //    val vdivu_e8  = VIDivOpcode(DIVU, E8 )
-  //    val vdivu_e16 = VIDivOpcode(DIVU, E16)
-  //    val vdivu_e32 = VIDivOpcode(DIVU, E32)
-  //    val vdivu_e64 = VIDivOpcode(DIVU, E64)
-  //    val vdiv_e8   = VIDivOpcode(DIV , E8 )
-  //    val vdiv_e16  = VIDivOpcode(DIV , E16)
-  //    val vdiv_e32  = VIDivOpcode(DIV , E32)
-  //    val vdiv_e64  = VIDivOpcode(DIV , E64)
-  //    val vremu_e8  = VIDivOpcode(REMU, E8 )
-  //    val vremu_e16 = VIDivOpcode(REMU, E16)
-  //    val vremu_e32 = VIDivOpcode(REMU, E32)
-  //    val vremu_e64 = VIDivOpcode(REMU, E64)
-  //    val vrem_e8   = VIDivOpcode(REM , E8 )
-  //    val vrem_e16  = VIDivOpcode(REM , E16)
-  //    val vrem_e32  = VIDivOpcode(REM , E32)
-  //    val vrem_e64  = VIDivOpcode(REM , E64)
-  //  }
-  //
-  //  object VIDivOpcodes extends VIDivOpcodes
-  //
-  //  trait VIRedOpcodes extends Opcode[VIRedOpcode] with DataType {
-  //    private val DV = bb"0"
-  //    private val DW = bb"1"
-  //
-  //    private val SUM  = bb"0000"
-  //    private val AND  = bb"0001"
-  //    private val OR   = bb"0010"
-  //    private val XOR  = bb"0011"
-  //    private val MINU = bb"0100"
-  //    private val MIN  = bb"0101"
-  //    private val MAXU = bb"0110"
-  //    private val MAX  = bb"0111"
-  //
-  //    private val SUMU = bb"1000"
-  //
-  //    val vredsum_e8   = VIRedOpcode(SUM , DV, E8 )
-  //    val vredsum_e16  = VIRedOpcode(SUM , DV, E16)
-  //    val vredsum_e32  = VIRedOpcode(SUM , DV, E32)
-  //    val vredsum_e64  = VIRedOpcode(SUM , DV, E64)
-  //    val vredand_e8   = VIRedOpcode(AND , DV, E8 )
-  //    val vredand_e16  = VIRedOpcode(AND , DV, E16)
-  //    val vredand_e32  = VIRedOpcode(AND , DV, E32)
-  //    val vredand_e64  = VIRedOpcode(AND , DV, E64)
-  //    val vredor_e8    = VIRedOpcode(OR  , DV, E8 )
-  //    val vredor_e16   = VIRedOpcode(OR  , DV, E16)
-  //    val vredor_e32   = VIRedOpcode(OR  , DV, E32)
-  //    val vredor_e64   = VIRedOpcode(OR  , DV, E64)
-  //    val vredxor_e8   = VIRedOpcode(XOR , DV, E8 )
-  //    val vredxor_e16  = VIRedOpcode(XOR , DV, E16)
-  //    val vredxor_e32  = VIRedOpcode(XOR , DV, E32)
-  //    val vredxor_e64  = VIRedOpcode(XOR , DV, E64)
-  //    val vredminu_e8  = VIRedOpcode(MINU, DV, E8 )
-  //    val vredminu_e16 = VIRedOpcode(MINU, DV, E16)
-  //    val vredminu_e32 = VIRedOpcode(MINU, DV, E32)
-  //    val vredminu_e64 = VIRedOpcode(MINU, DV, E64)
-  //    val vredmin_e8   = VIRedOpcode(MIN , DV, E8 )
-  //    val vredmin_e16  = VIRedOpcode(MIN , DV, E16)
-  //    val vredmin_e32  = VIRedOpcode(MIN , DV, E32)
-  //    val vredmin_e64  = VIRedOpcode(MIN , DV, E64)
-  //    val vredmaxu_e8  = VIRedOpcode(MAXU, DV, E8 )
-  //    val vredmaxu_e16 = VIRedOpcode(MAXU, DV, E16)
-  //    val vredmaxu_e32 = VIRedOpcode(MAXU, DV, E32)
-  //    val vredmaxu_e64 = VIRedOpcode(MAXU, DV, E64)
-  //    val vredmax_e8   = VIRedOpcode(MAX , DV, E8 )
-  //    val vredmax_e16  = VIRedOpcode(MAX , DV, E16)
-  //    val vredmax_e32  = VIRedOpcode(MAX , DV, E32)
-  //    val vredmax_e64  = VIRedOpcode(MAX , DV, E64)
-  //
-  //    val vwredsum_e8   = VIRedOpcode(SUM, DW, E8 )
-  //    val vwredsum_e16  = VIRedOpcode(SUM, DW, E16)
-  //    val vwredsum_e32  = VIRedOpcode(SUM, DW, E32)
-  //    val vwredsumu_e8  = VIRedOpcode(SUMU, DW, E8 )
-  //    val vwredsumu_e16 = VIRedOpcode(SUMU, DW, E16)
-  //    val vwredsumu_e32 = VIRedOpcode(SUMU, DW, E32)
-  //  }
-  //
-  //  object VIRedOpcodes extends VIRedOpcodes
-  //
-  //  trait VIPermOpcodes extends Opcode[VIPermOpcode] with DataType {
-  //
-  //    // funct6(4) ## funct6(1,0) ## funct3(2,1)
-  //    private val RGATHER_V     = bb"00000"
-  //    private val RGATHER_X     = bb"00010"
-  //    private val RGATHER_I     = bb"00001"
-  //    private val RGATHER_EI16  = bb"01000"
-  //    private val SLIDEUP       = bb"01010"
-  //    private val SLIDEDOWN     = bb"01110"
-  //    private val COMPRESS      = bb"11101"
-  //    private val SLIDE1UP      = bb"01001"
-  //    private val SLIDE1DOWN    = bb"01101"
-  //
-  //    val vrgather_v_e8     = VIPermOpcode(RGATHER_V   , E8 )
-  //    val vrgather_v_e16    = VIPermOpcode(RGATHER_V   , E16)
-  //    val vrgather_v_e32    = VIPermOpcode(RGATHER_V   , E32)
-  //    val vrgather_v_e64    = VIPermOpcode(RGATHER_V   , E64)
-  //    val vrgather_x_e8     = VIPermOpcode(RGATHER_X   , E8 )
-  //    val vrgather_x_e16    = VIPermOpcode(RGATHER_X   , E16)
-  //    val vrgather_x_e32    = VIPermOpcode(RGATHER_X   , E32)
-  //    val vrgather_x_e64    = VIPermOpcode(RGATHER_X   , E64)
-  //    val vrgather_i_e8     = VIPermOpcode(RGATHER_I   , E8 )
-  //    val vrgather_i_e16    = VIPermOpcode(RGATHER_I   , E16)
-  //    val vrgather_i_e32    = VIPermOpcode(RGATHER_I   , E32)
-  //    val vrgather_i_e64    = VIPermOpcode(RGATHER_I   , E64)
-  //    val vrgather_ei16_e8  = VIPermOpcode(RGATHER_EI16, E8 )
-  //    val vrgather_ei16_e16 = VIPermOpcode(RGATHER_EI16, E16)
-  //    val vrgather_ei16_e32 = VIPermOpcode(RGATHER_EI16, E32)
-  //    val vrgather_ei16_e64 = VIPermOpcode(RGATHER_EI16, E64)
-  //    val vslideup_e8       = VIPermOpcode(SLIDEUP     , E8 )
-  //    val vslideup_e16      = VIPermOpcode(SLIDEUP     , E16)
-  //    val vslideup_e32      = VIPermOpcode(SLIDEUP     , E32)
-  //    val vslideup_e64      = VIPermOpcode(SLIDEUP     , E64)
-  //    val vslidedown_e8     = VIPermOpcode(SLIDEDOWN   , E8 )
-  //    val vslidedown_e16    = VIPermOpcode(SLIDEDOWN   , E16)
-  //    val vslidedown_e32    = VIPermOpcode(SLIDEDOWN   , E32)
-  //    val vslidedown_e64    = VIPermOpcode(SLIDEDOWN   , E64)
-  //    val vcompress_e8      = VIPermOpcode(COMPRESS    , E8 )
-  //    val vcompress_e16     = VIPermOpcode(COMPRESS    , E16)
-  //    val vcompress_e32     = VIPermOpcode(COMPRESS    , E32)
-  //    val vcompress_e64     = VIPermOpcode(COMPRESS    , E64)
-  //    val vslide1up_e8      = VIPermOpcode(SLIDE1UP    , E8 )
-  //    val vslide1up_e16     = VIPermOpcode(SLIDE1UP    , E16)
-  //    val vslide1up_e32     = VIPermOpcode(SLIDE1UP    , E32)
-  //    val vslide1up_e64     = VIPermOpcode(SLIDE1UP    , E64)
-  //    val vslide1down_e8    = VIPermOpcode(SLIDE1DOWN  , E8 )
-  //    val vslide1down_e16   = VIPermOpcode(SLIDE1DOWN  , E16)
-  //    val vslide1down_e32   = VIPermOpcode(SLIDE1DOWN  , E32)
-  //    val vslide1down_e64   = VIPermOpcode(SLIDE1DOWN  , E64)
-  //  }
-  //
-  //  object VIPermOpcodes extends VIPermOpcodes
 
   val ALUOpType = AluOpcodes
   val BRUOpType = BruOpcodes
@@ -2014,4 +1416,104 @@ object Opcode {
   val CSROpType = CsrOpcodes
   val LSUOpType = LsuOpcodes
   val BKUOpType = BkuOpcodes
+
+  class OpcodeUtil(opcode: Opcode) {
+    def traits: Set[OpcodeTrait] = opcode.getTraits
+
+    def vsi: Opcode = {
+      opcode + Src1Imm(DecodeSelImm.OPIVIS) + Src2Vp
+    }
+
+    def vui: Opcode = {
+      opcode + Src1Imm(DecodeSelImm.OPIVIU) + Src2Vp
+    }
+
+    def dx: Opcode = {
+      opcode + GpWen
+    }
+
+    def df: Opcode = {
+      opcode + FpWen
+    }
+
+    def genUopInfoRenameBitPat: BitPat = {
+      UopInfoRename.genBitPat(
+        src1Type = this.getSrc1Type,
+        src2Type = this.getSrc2Type,
+        vlRen = traits.contains(VlRen),
+        maskType = this.getMaskType,
+        intRmRen = traits.contains(VxrmRen),
+        readVdAsSrc = this.getSrc3Type.contains(Operand.VP),
+        gpWen = traits.contains(GpWen),
+        fpWen = traits.contains(FpWen),
+        vpWen = traits.exists(_.isInstanceOf[VecWenTrait]),
+        vlWen = traits.contains(VlWen),
+        vxsatWen = traits.contains(VxsatWen),
+        vdAlloc = !traits.contains(NoDestAlloc),
+      )
+    }
+
+    def getSrc1Type: Option[OperandType] = {
+      val ts = opcode.getTraits.collect{ case t : Src1Trait => t }.toSeq
+
+      require(
+        ts.size <= 1,
+        s"opcode${opcode} should only contain one Src1Trait, but it has $ts"
+      )
+
+      getSrcType(ts.headOption.map(_.srcType))
+    }
+
+    def getSrc2Type: Option[OperandType] = {
+      val ts = opcode.getTraits.collect{ case t : Src2Trait => t }.toSeq
+
+      require(
+        ts.size <= 1,
+        s"opcode${opcode} should only contain one Src2Trait, but it has $ts"
+      )
+
+      getSrcType(ts.headOption.map(_.srcType))
+    }
+
+    def getSrc3Type: Option[OperandType] = {
+      val ts = opcode.getTraits.collect{ case t : Src3Trait => t }.toSeq
+
+      require(
+        ts.size <= 1,
+        s"opcode${opcode} should only contain one Src3Trait, but it has $ts"
+      )
+
+      getSrcType(ts.headOption.map(_.srcType))
+    }
+
+    def getMaskType: MaskType = {
+      val ts = opcode.getTraits.collect{ case t : MaskTrait => t }.toSeq
+
+      require(
+        ts.size <= 1,
+        s"opcode${opcode} should only contain one MaskTrait, but it has $ts"
+      )
+
+      ts.headOption match {
+        case Some(typ) =>
+          typ match {
+            case OpcodeTraits.DestMask => Types.DestMask
+            case OpcodeTraits.NoMask => Types.NoMask
+            case OpcodeTraits.Src12Mask => Types.Src12Mask
+            case OpcodeTraits.Src2Mask => Types.Src2Mask
+            case _ => ???
+          }
+        case None => Types.NoMask
+      }
+    }
+
+    private def getSrcType(srcType: Option[SrcType]): Option[OperandType] = srcType.map {
+      case Gp => Operand.GP
+      case Fp => Operand.FP
+      case Vp | Vs | Vw | Vws => Operand.VP
+      case Imm => Operand.IMM
+    }
+  }
+
+  implicit def toOpcodeUtil(opcode: Opcode): OpcodeUtil = new OpcodeUtil(opcode)
 }

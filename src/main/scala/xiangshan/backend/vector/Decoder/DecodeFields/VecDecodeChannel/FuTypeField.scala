@@ -31,7 +31,7 @@ class FuTypeField(uopIdx: Int) extends DecodeField[InstSewLmulNfPattern, UInt] {
     val uop = uopSeq(uopIdx)
     val res: UInt = {
       try {
-        uop.opcode.factory match {
+        uop.factory match {
           case _: Opcode.AluOpcodes.type => FuType.alu.U
           case _: Opcode.BruOpcodes.type => FuType.brh.U
           case _: Opcode.JmpOpcodes.type => FuType.jmp.U
@@ -66,6 +66,9 @@ class FuTypeField(uopIdx: Int) extends DecodeField[InstSewLmulNfPattern, UInt] {
         case e: NullPointerException =>
           // println(s"inst ${op.p1.name} with sew ${sewP}, lmul ${lmulP}, nf ${nfP} has not decoded")
           BitPat.Y(FuType.width).U
+        case e: MatchError =>
+          println(s"inst ${op.p1.name}'s uop ${uop} futype ${uop.factory} not match")
+          throw e
         case e: Throwable =>
           println(s"inst ${op.p1.name} throw exception")
           throw e
