@@ -122,19 +122,12 @@ jobs:
             ${{ matrix.with-restore-bin && '--gcpt-restore-bin /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin' || '' }} \
             2> stderr.log | tee stdout.log
           cat stderr.log | sort | tee stderr-sorted.log
+          grep -oP 'IPC = \K\d+\.\d+' stdout.log > "${PERF_HOME}/ipc-legacy-${{ matrix.name }}"
+          echo "IPC: $(cat "${PERF_HOME}/ipc-legacy-${{ matrix.name }}")"
       - name: Archive log
         if: always()
         run: |
           tar -czvf "${PERF_HOME}/legacy_${{ matrix.name }}.tar.gz" stdout.log stderr-sorted.log
-      - name: Generate report
-        run: |
-          grep -oP 'IPC = \K\d+\.\d+' stdout.log > ipc-legacy-${{ matrix.name }}
-          echo "IPC: $(cat ipc-legacy-${{ matrix.name }})"
-      - name: Upload report
-        uses: actions/upload-artifact@v7
-        with:
-          archive: false
-          path: ipc-legacy-${{ matrix.name }}
 
   run:
     name: EMU - Performance - Run
@@ -231,28 +224,35 @@ jobs:
             ${CKPT} \
             2> stderr.log | tee stdout.log
           cat stderr.log | sort | tee stderr-sorted.log
+          grep -oP 'IPC = \K\d+\.\d+' stdout.log > "${PERF_HOME}/ipc-${{ matrix.name }}_${{ matrix.ckpt }}"
+          echo "IPC: $(cat "${PERF_HOME}/ipc-${{ matrix.name }}_${{ matrix.ckpt }}")"
       - name: Archive log
         if: always()
         run: |
           tar -czvf "${PERF_HOME}/${{ matrix.name }}_${{ matrix.ckpt }}.tar.gz" stdout.log stderr-sorted.log
-      - name: Generate report
-        run: |
-          grep -oP 'IPC = \K\d+\.\d+' stdout.log > ipc-${{ matrix.name }}_${{ matrix.ckpt }}
-          echo "IPC: $(cat ipc-${{ matrix.name }}_${{ matrix.ckpt }})"
+
+  upload:
+    name: EMU - Performance - Upload
+    needs:
+      - build # needed to get the cluster info
+      - run
+      - run-legacy # TODO: drop this
+    runs-on:
+      - ${{ needs.build.outputs.cluster }} # use same cluster as builder/runner to access NFS
+      - runner
+    steps:
       - name: Upload report
         uses: actions/upload-artifact@v7
         with:
-          archive: false
-          path: ipc-${{ matrix.name }}_${{ matrix.ckpt }}
+          name: ipc-reports
+          path: ${{ env.PERF_HOME }}/ipc-*
 
   summary:
     name: EMU - Performance - Summary
     permissions:
       actions: read # to download upstream artifact
       pull-requests: write # to post PR comment
-    needs:
-      - run
-      - run-legacy # TODO: drop this
+    needs: upload
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
