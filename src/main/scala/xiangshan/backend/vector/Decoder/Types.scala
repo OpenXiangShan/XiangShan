@@ -40,21 +40,21 @@ object Types {
 
   object DecodeSelImm extends NamedUInt(5) {
     type Type = UInt
-    def NO = b"00000"
-    def S  = b"00001"
-    def SB = b"00010"
-    def U  = b"00011"
-    def UJ = b"00100"
-    def I  = b"00101"
-    def Z  = b"00110"
-    def OPIVIS    = b"01000"
-    def OPIVIU    = b"01001"
-    def VSETVLI   = b"01010"
-    def VSETIVLI  = b"01011"
-    def VRORVI    = b"01100"
-    def LUI32     = b"01110"
-    def FI        = b"01111" // used by fli and it's fusion
-    def CSRRVLENB = b"10000" // load VLENB in gp
+    def NO = ub"00000"
+    def S  = ub"00001"
+    def SB = ub"00010"
+    def U  = ub"00011"
+    def UJ = ub"00100"
+    def I  = ub"00101"
+    def Z  = ub"00110"
+    def OPIVIS    = ub"01000"
+    def OPIVIU    = ub"01001"
+    def VSETVLI   = ub"01010"
+    def VSETIVLI  = ub"01011"
+    def VRORVI    = ub"01100"
+    def LUI32     = ub"01110"
+    def FI        = ub"01111" // used by fli and it's fusion
+    def CSRRVLENB = ub"10000" // load VLENB in gp
 
     def toSelImm(selImm: UInt): UInt = {
       Mux(
