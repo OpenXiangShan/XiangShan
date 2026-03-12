@@ -211,6 +211,7 @@ class VectorDecodeChannel(
     out.uop(i).bits.opcode := opcodes(i)
     out.uop(i).bits.src := srcSelectModule.out.src(i)
     out.uop(i).bits.frmRen := instBundle(FrmRenField)
+    out.uop(i).bits.v0Ren := !instFields.VM
     out.uop(i).bits.fflagsWen := instBundle(FFlagsWenField)
     out.uop(i).bits.frm := instBundle(FrmField)
     out.uop(i).bits.uopDepend := false.B // Todo
@@ -288,6 +289,7 @@ object VectorDecodeChannel {
     val opcode: UInt = Opcode()
     val renameInfo = new UopInfoRenameWithIllegal
     val src = new UopSrcBundle
+    val v0Ren = Bool()
     val frmRen = Bool()
     val fflagsWen = Bool()
     val frm = Frm()
