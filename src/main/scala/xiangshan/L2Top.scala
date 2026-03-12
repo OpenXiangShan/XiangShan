@@ -114,7 +114,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         hartId = p(XSCoreParamsKey).HartId,
         FPGAPlatform = debugOpts.FPGAPlatform,
         hasMbist = hasMbist,
-        EnablePrivateClint = SeperateBus != top.SeperatedBusType.NONE
+        PrivateClintRange = if(UsePrivateClint) Some(TIMERRange) else None
       )
       case EnableCHI => p(EnableCHI)
       case CHIIssue => p(CHIIssue)
@@ -161,7 +161,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
   private def icacheCtrlAddressOpt: Option[AddressSet] = Option.when(icacheCtrlEnabled)(icacheCtrlAddress)
   private def dcacheCtrlAddressOpt: Option[AddressSet] = dcacheParameters.cacheCtrlAddressOpt
   private def cacheAddressSet: Seq[AddressSet] = (icacheCtrlAddressOpt ++ dcacheCtrlAddressOpt).toSeq
-  private def mmioFilters = if(SeperateBus != top.SeperatedBusType.NONE) (SeperateBusRanges ++ cacheAddressSet) else cacheAddressSet
+  private def mmioFilters = (if(SeperateBus != top.SeperatedBusType.NONE) (SeperateBusRanges ++ cacheAddressSet) else cacheAddressSet) :+ soc.BEURange
   mmio_port :=
     TLFilter(TLFilter.mSubtract(mmioFilters)) :=
     TLBuffer() :=
