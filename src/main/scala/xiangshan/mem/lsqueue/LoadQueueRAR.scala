@@ -63,6 +63,17 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
 
+  // FIXME(meow):
+  // This module may have two problems
+  // 1. nc is not correctly handled. NC should also induce a immediate release at the same cycle, but we don't have
+  //   an extra CAM to detect same-address loads
+  // 2. There might be an extra racing condition if the metadata is read at LDU s0, returned at LDU s1
+  //  but release come in at LDU s1, so latestRelease is at LDU s2.
+  //  Whether this require us to do anything depends on how DCache handles this release. Is it possible?
+  //  - If the release is handled as LATER THAN the load, and the release takes at least two cycle so no loads can enter
+  //    DCache the exact next cycle, then we may be able to just bump the latestRelease delay
+  //  - Otherwise, headaches
+
   private val PartialPAddrStride: Int = 6
   require(PartialPAddrStride >= log2Up(blockBytes))
   private val PartialPAddrBits: Int = 16
@@ -110,6 +121,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   val tsoActive = RegNext(io.csrCtrl.tso_enable, true.B)
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
   val pending = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
+  val meow_debug_pending = MarkDebug(WireDefault(pending.asUInt))
+  val meow_debug_allocated = MarkDebug(WireDefault(allocated.asUInt))
   val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PartialPAddrBits.W),
@@ -179,35 +192,32 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     uop(i) := MuxCase(uop(i), allocationHit.zip(allocations.map({ case (_, uop, _) => uop })))
   }
 
-  // Allocate logic
-  val completedVec = Wire(Vec(LoadPipelineWidth, Bool()))
-  val completionVec = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueRARSize).W)))
+  var sameCycleCompletion = WireDefault(0.U(LoadQueueRARSize.W))
 
-  // Remember, this is actually completion
-  for ((enq, w) <- io.complete.map(_.req).zipWithIndex) {
-    //  Allocate ready
-    enq.ready := true.B
+  // Completions
+  for ((c, w) <- io.complete.zipWithIndex) {
+    // Allocate ready
+    c.req.ready := true.B
 
-    val doEnq = enq.valid && (enq.bits.data_valid || enq.bits.is_nc)
+    // Write CAM regardless of data_valid
+    val idx = c.req.bits.uop.lqIdx.value
+    paddrModule.io.waddr(w) := idx
+    paddrModule.io.wdata(w) := genPartialPAddr(c.req.bits.paddr)
+    paddrModule.io.wen(w) := c.req.valid
+    sameCycleCompletion = sameCycleCompletion | (Mux(c.req.valid, 1.U(LoadQueueRARSize.U), 0.U(LoadQueueRARSize.U)) << idx).asUInt
 
-    val enqIdx = enq.bits.uop.lqIdx.value
-    completedVec(w) := doEnq
-    completionVec(w) := enqIdx
-    paddrModule.io.waddr(w) := enq.bits.uop.lqIdx.value
-    paddrModule.io.wdata(w) := genPartialPAddr(enq.bits.paddr)
-
-    // Commit
-    when(doEnq) {
-      pending(enqIdx) := false.B
+    // Completion
+    when(RegNext(c.req.valid && c.req.bits.data_valid) && !c.revoke) {
+      pending(RegNext(idx)) := false.B
     }
-    paddrModule.io.wen(w) := doEnq
 
     // Assert: already allocated
-    assert(!enq.valid || allocated(enq.bits.uop.lqIdx.value))
+    assert(!c.req.valid || allocated(idx))
 
     // NC is uncachable and will not be explicitly released.
     // So NC requests are not allowed to have RAR
-    // FIXME
+    // FIXME: uncache gets implicitly released immediately
+    // Find any older susceptible loads
     /*
     val justReleased = enq.bits.is_nc || (
       enq.bits.data_valid && ParallelOR(releases.map(
@@ -217,20 +227,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     */
   }
 
-  // if need replay revoke completion
-  /* TODO: let's be pessimistic
-  val lastCanAccept = GatedRegNext(acceptedVec)
-  val lastAllocIndex = GatedRegNext(enqIndexVec)
-
-  for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
-    val revokeValid = revoke && lastCanAccept(w)
-    val revokeIndex = lastAllocIndex(w)
-
-    when (allocated(revokeIndex) && revokeValid) {
-      allocated(revokeIndex) := false.B
-    }
-  }
-  */
+  val meow_debug_sameCycleCompletion = MarkDebug(WireDefault(sameCycleCompletion))
 
   // LoadQueueRAR Query
   // Load-to-Load violation check condition:
@@ -282,7 +279,12 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   io.check.valid := checkPresent
 
   // Find oldest victim
-  val victim = dontTouch(allocated.asUInt & (~pending.asUInt).asUInt & released & (VecInit(uop.map(u => isAfter(u.robIdx, checkRobIdx))).asUInt))
+  val victim = (
+    allocated.asUInt
+    & ((~pending.asUInt).asUInt | sameCycleCompletion)
+    & released
+    & (VecInit(uop.map(u => isAfter(u.robIdx, checkRobIdx))).asUInt)
+  )
   val victimPresent = victim.orR
   val oldestVictim = dontTouch(findOldest(victim))
   val selectedVictim = Mux1H(oldestVictim, uop)
