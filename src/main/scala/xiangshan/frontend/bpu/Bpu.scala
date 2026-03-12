@@ -507,34 +507,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** Debug Meta *** */
   // used for performance counters
-  private val s3_scFlipTage = VecInit((s3_tagePrediction zip s3_scUsed zip s3_scTakenMask).map {
-    case ((tagePred, useSc), scTaken) =>
-      useSc && (tagePred.providerPred =/= scTaken)
-  }) // for bpSource counter
-  private val s3_condTakenMask = VecInit(s3_mbtbResult.zipWithIndex.map { case (entry, i) =>
-    val tagePred = s3_tagePrediction(i)
-    val useSc    = s3_scUsed(i)
-    val scTaken  = s3_scTakenMask(i)
-
-    entry.valid && entry.bits.attribute.isConditional &&
-    MuxCase(
-      entry.bits.taken, // default: base table
-      Seq(
-        useSc                -> scTaken,
-        tagePred.useProvider -> tagePred.providerPred,
-        tagePred.hasAlt      -> tagePred.altPred
-      )
-    )
-  })
-  private val s3_firstTakenPosition = Mux1H(s3_firstTakenBranchOH, VecInit(s3_mbtbResult.map(_.bits.cfiPosition)))
-  private val s3_firstTakenBlameSc  = Mux1H(s3_firstTakenBranchOH, s3_scFlipTage)
-  // if the branch before the first take has a flipped and !s3_taken && flipped, then blamed on sc
-  // first tage taken flip to not taken
-  private val s3_firstT2NT = VecInit((s3_mbtbResult zip s3_scFlipTage).map {
-    case (info, flip) =>
-      flip && (s3_taken && info.bits.cfiPosition < s3_firstTakenPosition)
-  }).reduce(_ || _) || (!s3_taken && s3_scFlipTage.reduce(_ || _))
-  // see class BpuPredictionSource in bpu/Bundles.scala:137
+  private val s3_firstTakenBlameSc = Mux1H(s3_firstTakenBranchOH, s3_scUsed)
+  // see class BpuPredictionSource in bpu/Bundles.scala
   private val s1_predictionSource =
     MuxCase(
       BpuPredictionSource.Stage1.Fallthrough,
@@ -546,15 +520,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       )
     )
   private val s3_predictionSource = PriorityEncoder(Seq(
-    s3_taken && s3_useRas,                                                                                    // RAS
-    s3_taken && s3_useIttage,                                                                                 // ITTage
-    s3_firstTakenBranch.bits.attribute.isConditional && ((s3_taken && s3_firstTakenBlameSc) || s3_firstT2NT), // MbtbSc
-    s3_taken && s3_firstTakenBranch.bits.attribute.isConditional, // MbtbTage
-    s3_taken,                                                     // Mbtb
-    (s3_mbtbResult zip s3_condTakenMask).map { case (info, taken) =>
-      info.valid && info.bits.attribute.isConditional && !taken
-    }.reduce(_ || _), // FallthroughTage
-    true.B            // Fallthrough
+    s3_taken && s3_useRas,                                                                // RAS
+    s3_taken && s3_useIttage,                                                             // ITTage
+    s3_taken && s3_firstTakenBranch.bits.attribute.isConditional && s3_firstTakenBlameSc, // Sc
+    s3_taken && s3_firstTakenBranch.bits.attribute.isConditional,                         // Tage
+    s3_taken,                                                                             // Mbtb
+    true.B                                                                                // Fallthrough
   ))
 
   private val s2_s1PredictionSource = RegEnable(s1_predictionSource, s1_fire)
@@ -569,6 +540,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_perfMeta.bpSource.s3Source   := s3_predictionSource
   s3_perfMeta.bpSource.s3Override := s3_override
   s3_perfMeta.mbtbMeta            := RegEnable(mbtb.io.meta, s2_fire)
+  s3_perfMeta.scUsed              := s3_scUsed.asUInt
 
   io.toFtq.perfMeta := s3_perfMeta
   // TODO: override reason and redirect reason
@@ -664,7 +636,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
   private val perf_s3TakenSourceVec = BpuPredictionSource.Stage3.getValidSeq(
     s3_perfMeta.bpSource.s3Source,
-    exclude = Set("Fallthrough", "FallthroughTage"),
+    exclude = Set("Fallthrough"),
     thisPrefix = "s3"
   )
 
@@ -677,12 +649,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfAccumulate(
     s"s3Override_takenMismatch_s3fall",
     io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s3Fallthrough,
-    perf_s1TakenSourceVec
-  )
-
-  XSPerfAccumulate(
-    s"s3Override_takenMismatch_s3fallTage",
-    io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s3FallthroughTage,
     perf_s1TakenSourceVec
   )
 
@@ -710,7 +676,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val perf_fullTakenSourceVec = BpuPredictionSource.Stage3.getValidSeq(
     s3_perfMeta.bpSource.s3Source,
     thatSeq = perf_s1TakenSourceVec,
-    exclude = Set("Fallthrough", "FallthroughTage"),
+    exclude = Set("Fallthrough"),
     thisPrefix = "s3"
   )
 
