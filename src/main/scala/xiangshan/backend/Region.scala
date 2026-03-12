@@ -726,7 +726,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   var staIQIdx = 0
   val staIssueQueue = issueQueues.filter(_.param.StaCnt > 0)
   val stdIssueQueue = issueQueues.filter(_.param.StdCnt > 0)
-  io.IQValidNumVec := issueQueues.filter(_.param.StdCnt == 0).map { case iq =>
+  val IQValidNumVecWire = VecInit(issueQueues.filter(_.param.StdCnt == 0).map { case iq =>
     if (iq.param.StaCnt > 0) {
       // sta and std iq has 1 deq
       val staCnt = staIssueQueue(staIQIdx).io.validCntDeqVec.head
@@ -742,7 +742,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       VecInit(aluCnt, bjuCnt)
     }
     else iq.io.validCntDeqVec
-  }.flatten
+  }.flatten)
+  io.IQValidNumVec := RegNext(IQValidNumVecWire)
   io.og0Cancel := dataPath.io.og0Cancel
   io.diffVl.foreach(_ := dataPath.io.diffVl.get)
   io.lduWriteback.foreach(_.flatten.foreach(_.ready := true.B))
