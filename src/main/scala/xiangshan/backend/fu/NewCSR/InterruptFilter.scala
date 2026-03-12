@@ -407,7 +407,7 @@ class InterruptFilter extends Module {
     iidC1C5 := iidOnlyC5
     iprioC1C5 := iprioC3C5Tmp
   }
-  
+
   // C2,C4 enable
   when(C4IsZero) {
     iidC2C4 := Mux(C4HighVSEI, iidOnlyC4, iidOnlyC1)
@@ -534,43 +534,27 @@ class InterruptFilter extends Module {
   val disableDebugIntr = io.in.debugMode || (io.in.dcsr.STEP.asBool && !io.in.dcsr.STEPIE.asBool)
   val enableDebugIntr = io.in.debugIntr && !disableDebugIntr
 
-  val disableAllIntr = RegNext(disableDebugIntr || !io.in.mnstatusNMIE, false.B)
+  val debugIntrReg = RegNext(enableDebugIntr, false.B)
+  val disableAllIntrReg = RegNext(disableDebugIntr || !io.in.mnstatusNMIE, false.B)
+  val nmiReg = RegNext(io.in.nmi, false.B)
+  val nmiVecReg = RegNext(nmiVec, 0.U.asTypeOf(nmiVec))
 
-  val normalIntrVec = mIRVec | hsIRVec | vsMapHostIRVec
-  val intrVec = Mux(disableAllIntr, 0.U, Mux(RegNext(io.in.nmi, false.B), RegNext(nmiVec, 0.U.asTypeOf(nmiVec)), normalIntrVec))
+  val normalIntrVecReg = mIRVec | hsIRVec | vsMapHostIRVec
+  val intrVecReg = Mux(disableAllIntrReg, 0.U, Mux(nmiReg, nmiVecReg, normalIntrVecReg))
 
   // virtual interrupt with hvictl injection
   val vsIRModeCond = privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS
   val SelectCandidate5 = onlyC5EnableReg || C3C5EnableReg ||
                          C1C5EnableReg && (iprioC1 === iprioC2C5 && !hvictlReg.DPR.asBool || iprioC1 > iprioC2C5)
-  // delay at least 6 cycles to maintain the atomic of sret/mret
-  // 65bit indict current interrupt is NMI
-  val intrVecReg = RegInit(0.U(8.W))
-  val debugIntrReg = RegInit(false.B)
-  val nmiReg = RegInit(false.B)
-  val viIsHvictlInjectReg = RegInit(false.B)
-  val irToHSReg = RegInit(false.B)
-  val irToVSReg = RegInit(false.B)
-  intrVecReg := intrVec
-  debugIntrReg := enableDebugIntr
-  nmiReg := io.in.nmi
-  viIsHvictlInjectReg := vsIRModeCond && SelectCandidate5 && io.in.mnstatusNMIE
-  irToHSReg := irToHS
-  irToVSReg := irToVS
-  val delayedIntrVec = DelayN(intrVecReg, 4)
-  val delayedDebugIntr = DelayN(debugIntrReg, 5)
-  val delayedNMI = DelayN(nmiReg, 5)
-  val delayedVIIsHvictlInjectReg = DelayN(viIsHvictlInjectReg, 5)
-  val delayedIRToHS = DelayN(irToHSReg, 5)
-  val delayedIRToVS = DelayN(irToVSReg, 5)
+  val viIsHvictlInjectReg = RegNext(vsIRModeCond && SelectCandidate5 && io.in.mnstatusNMIE, false.B)
 
-  io.out.interruptVec.valid := delayedIntrVec.orR || delayedDebugIntr || delayedVIIsHvictlInjectReg
-  io.out.interruptVec.bits := delayedIntrVec
-  io.out.debug := delayedDebugIntr
-  io.out.nmi := delayedNMI
-  io.out.virtualInterruptIsHvictlInject := delayedVIIsHvictlInjectReg & !delayedNMI
-  io.out.irToHS := delayedIRToHS & !delayedNMI
-  io.out.irToVS := delayedIRToVS & !delayedNMI
+  io.out.interruptVec.valid := intrVecReg.orR || debugIntrReg || viIsHvictlInjectReg
+  io.out.interruptVec.bits := intrVecReg
+  io.out.debug := debugIntrReg
+  io.out.nmi := nmiReg
+  io.out.virtualInterruptIsHvictlInject := viIsHvictlInjectReg & !nmiReg
+  io.out.irToHS := irToHS & !nmiReg
+  io.out.irToVS := irToVS & !nmiReg
 
   dontTouch(hsip)
   dontTouch(hsie)
