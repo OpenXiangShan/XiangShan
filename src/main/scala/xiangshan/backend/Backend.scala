@@ -391,6 +391,13 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vecRegion.io.fromIntIQ.get <> intRegion.io.intIQOut.get
   vecRegion.io.fromFpIQ.get <> fpRegion.io.fpIQOut.get
 
+  // deqOg1
+  Seq(intRegion, fpRegion, vecRegion).map{region =>
+    region.io.fromIntIQDeqOg1Payload.foreach(_ := intRegion.io.intIQDeqOg1PayloadOut.get)
+    region.io.fromFpIQDeqOg1Payload.foreach(_ := fpRegion.io.fpIQDeqOg1PayloadOut.get)
+    region.io.fromVecIQDeqOg1Payload.foreach(_ := vecRegion.io.vecIQDeqOg1PayloadOut.get)
+  }
+
   vecRegion.io.diffVlRat.foreach(_ := ctrlBlock.io.diff_vl_rat.get)
   vecRegion.io.fromVecExcpMod.get.r := vecExcpMod.o.toVPRF.r
   vecRegion.io.fromVecExcpMod.get.w := vecExcpMod.o.toVPRF.w
@@ -580,7 +587,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val csrevents = pfevent.io.hpmevent.slice(8,16)
 
   val ctrlBlockPerf    = ctrlBlock.getPerfEvents
-  
+
   val topDownPerf = topDownMod.getPerfEvents
 
   val perfBackend  = Seq()

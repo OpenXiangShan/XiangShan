@@ -103,6 +103,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       connectSamePort(deqOg1Payload, payload.og1Payload)
       // imm's width may be diffrent
       deqOg1Payload.imm.foreach(_ := payload.og1Payload.imm.get)
+      deqOg1Payload.psrc.zipWithIndex.foreach{case(pl, idx) => pl := status.srcStatus(idx).psrc}
+      deqOg1Payload.psrcVl.foreach{_ := status.srcStatusVl.get.psrc}
       deqOg1Payload
     }
   }
@@ -468,6 +470,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     if (isEnq || !isComp) {
       // Enq and Simp can back to back trans
       commonOut.entry.bits.payload.og1Payload         := RegNext(entryReg.payload.og1Payload)
+      commonOut.entry.bits.status.srcStatusVl.foreach{vl => vl.psrc := RegNext(entryReg.status.srcStatusVl.get.psrc)} // todo: entryReg or status?
+      commonOut.entry.bits.status.srcStatus.zip(entryReg.status.srcStatus).map{case(out, entry) => out.psrc := RegNext(entry.psrc)}
     }
     commonOut.issueTimerRead                          := status.issueTimer
     commonOut.deqPortIdxRead                          := status.deqPortIdx

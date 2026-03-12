@@ -110,7 +110,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
         if (srcIndices.contains(srcIdx)) {
           arbInSeq(srcIdx).valid := intRFRen(iqIdx)(exuIdx).get(srcIdx)
-          arbInSeq(srcIdx).bits.addr := fromIQ(iqIdx)(exuIdx).bits.psrc(srcIdx)
+          arbInSeq(srcIdx).bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
           arbInSeq(srcIdx).bits.issueValid := fromIQ(iqIdx)(exuIdx).valid
         } else {
@@ -126,7 +126,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
         if (srcIndices.contains(srcIdx)) {
           arbInSeq(srcIdx).valid := fpRFRen(iqIdx)(exuIdx).get(srcIdx)
-          arbInSeq(srcIdx).bits.addr := fromIQ(iqIdx)(exuIdx).bits.psrc(srcIdx)
+          arbInSeq(srcIdx).bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
           arbInSeq(srcIdx).bits.issueValid := fromIQ(iqIdx)(exuIdx).valid
         } else {
@@ -143,7 +143,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
         if (srcIndices.contains(srcIdx)) {
           arbInSeq(srcIdx).valid := vecRFRen(iqIdx)(exuIdx).get(srcIdx)
-          arbInSeq(srcIdx).bits.addr := fromIQ(iqIdx)(exuIdx).bits.psrc(srcIdx)
+          arbInSeq(srcIdx).bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
           arbInSeq(srcIdx).bits.issueValid := fromIQ(iqIdx)(exuIdx).valid
         } else {
@@ -160,7 +160,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
         if (srcIndices.contains(srcIdx)) {
           arbInSeq(srcIdx).valid := v0RFRen(iqIdx)(exuIdx).get(srcIdx)
-          arbInSeq(srcIdx).bits.addr := fromIQ(iqIdx)(exuIdx).bits.psrc(srcIdx)
+          arbInSeq(srcIdx).bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
           arbInSeq(srcIdx).bits.issueValid := fromIQ(iqIdx)(exuIdx).valid
         } else {
@@ -174,7 +174,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   vlRFReadArbiter.io.in.zipWithIndex.foreach { case (arbInSeq2, iqIdx) =>
     arbInSeq2.zipWithIndex.foreach { case (arbInSeq, exuIdx) =>
       arbInSeq.headOption.foreach(_.valid := vlRFRen(iqIdx)(exuIdx).get)
-      arbInSeq.headOption.foreach(_.bits.addr := fromIQ(iqIdx)(exuIdx).bits.psrcVl.get)
+      arbInSeq.headOption.foreach(_.bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrcVl.get)
       arbInSeq.headOption.foreach(_.bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx)
       arbInSeq.headOption.foreach(_.bits.issueValid := fromIQ(iqIdx)(exuIdx).valid)
     }
@@ -487,7 +487,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   val s1_toExuDataWire: MixedVec[MixedVec[Og1InUop]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.cloneType).toSeq)).toSeq))
   s1_toExuData := s1_toExuDataWire
   val s1_toExuReady = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.ready.cloneType).toSeq))))
-  val s1_intRfBankRaddr: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIQ.map(x => MixedVecInit(x.map(xx => VecInit(xx.bits.psrc.map(xxx =>
+  val s1_intRfBankRaddr: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIQDeqOg1Payload.map(x => MixedVecInit(x.map(xx => VecInit(xx.psrc.map(xxx =>
       RegNext(xxx.pad(intSchdParams.pregIdxWidth).head(intRfBankRaddrWidth))))))))
   val s1_intPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_fpPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
@@ -636,7 +636,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       }
   }
 
-  io.og0Cancel := og0FailedVec2.flatten.zip(params.allExuParams).map{ case (cancel, params) => 
+  io.og0Cancel := og0FailedVec2.flatten.zip(params.allExuParams).map{ case (cancel, params) =>
                     if (params.isIQWakeUpSource && params.wakeUpFuLatancySet.contains(0)) cancel else false.B
                   }.toSeq
   io.og1Cancel := toFlattenExu.map(x => x.valid && !x.fire)
@@ -666,19 +666,19 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           if (k == 3) {(
             Seq(None)
             :+
-            OptionWrapper(s1_v0PregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(V0RegSrcDataSet).nonEmpty, 
+            OptionWrapper(s1_v0PregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(V0RegSrcDataSet).nonEmpty,
               (sinkData.v0Ren.get(k) -> s1_v0PregRData(i)(j)(k)))
           )}
           else {(
             Seq(None)
             :+
-            OptionWrapper(s1_intPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(IntRegSrcDataSet).nonEmpty, 
+            OptionWrapper(s1_intPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(IntRegSrcDataSet).nonEmpty,
               (sinkData.rfRen.get(k) -> s1_intPregRData(i)(j)(k)))
             :+
             OptionWrapper(s1_vfPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(VecRegSrcDataSet).nonEmpty,
               (sinkData.vecRen.get(k) -> s1_vfPregRData(i)(j)(k)))
             :+
-            OptionWrapper(s1_fpPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(FpRegSrcDataSet).nonEmpty, 
+            OptionWrapper(s1_fpPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(FpRegSrcDataSet).nonEmpty,
               (sinkData.fpRen.get(k) -> s1_fpPregRData(i)(j)(k)))
           )}
         ).filter(_.nonEmpty).map(_.get)
@@ -738,7 +738,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   XSPerfHistogram(s"VfUopAfterArb_hist", PopCount(fromVfIQ.flatten.map(_.fire)), true.B, 0, 8, 2)
 
   // datasource perf counter (after arbiter)
-  fromIQ.foreach(iq => iq.foreach{exu => 
+  fromIQ.foreach(iq => iq.foreach{exu =>
     val exuParams = exu.bits.exuParams
     if (exuParams.isIntExeUnit) {
       for (i <- 0 until 2) {
@@ -766,7 +766,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     delayed := RegNext(x.fire)
     delayed
   }
-  val uopsIssued = IQsFireDelay.reduce(_ || _)  
+  val uopsIssued = IQsFireDelay.reduce(_ || _)
   val uopsIssuedCnt = PopCount(IQsFireDelay)
 
   val noStoreIssued = !fromIntIQ.flatten.filter(memIq => memIq.bits.exuParams.fuConfigs.contains(FuConfig.StaCfg) ||
@@ -845,7 +845,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
 
   val fromPcTargetMem = Flipped(new PcToDataPathIO(params))
 
-  val fromBypassNetwork: Vec[RCWritePort] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize, 
+  val fromBypassNetwork: Vec[RCWritePort] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize,
     new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn)
   )
 
@@ -855,7 +855,7 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
     )).flatten
   )
 
-  val toWakeupQueueRCIdx: Vec[UInt] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize, 
+  val toWakeupQueueRCIdx: Vec[UInt] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize,
     Output(UInt(RegCacheIdxWidth.W))
   )
 
