@@ -221,6 +221,11 @@ class Sbuffer(implicit p: Parameters)
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
 
+  // mshr_buffer: records miss requests being handled in mshr
+  val valid_mshr = RegInit(VecInit.fill(cacheParams.nMissEntries)(false.B))
+  val id_mshr = Reg(Vec(cacheParams.nMissEntries, UInt(reqIdWidth.W)))
+  val ptag_mshr = Reg(Vec(cacheParams.nMissEntries, UInt(PTagWidth.W)))
+
   val sbuffer_out_s0_fire = Wire(Bool())
 
   /*
@@ -264,6 +269,7 @@ class Sbuffer(implicit p: Parameters)
     if(seq.isEmpty) false.B else Cat(seq.map(_===key)).orR
 
   def widthMap[T <: Data](f: Int => T) = (0 until StoreBufferSize) map f
+  def widthMSHRMap[T <: Data](f: Int => T) = (0 until cacheParams.nMissEntries) map f
 
   // sbuffer entry count
 
@@ -585,13 +591,15 @@ class Sbuffer(implicit p: Parameters)
 
   def noSameBlockInflight(idx: UInt): Bool = {
     // stateVec(idx) itself must not be s_inflight
-    !Cat(widthMap(i => inflightMask(i) && ptag(idx) === ptag(i))).orR
+    !Cat(widthMap(i => inflightMask(i) && ptag(idx) === ptag(i))).orR &&
+    !Cat(widthMSHRMap(i => valid_mshr(i) && ptag(idx) === ptag_mshr(i))).orR
   }
 
   def genSameBlockInflightMask(ptag_in: UInt): UInt = {
     val mask = VecInit(widthMap(i => inflightMask(i) && ptag_in === ptag(i))).asUInt // quite slow, use it with care
-    assert(!(PopCount(mask) > 1.U))
-    mask
+    val mask_mshr = VecInit(widthMSHRMap(i => valid_mshr(i) && ptag_in === ptag_mshr(i))).asUInt
+    assert(!(PopCount(Cat(mask_mshr, mask)) > 1.U))
+    Cat(mask_mshr, mask)
   }
 
   def haveSameBlockInflight(ptag_in: UInt): Bool = {
@@ -641,7 +649,9 @@ class Sbuffer(implicit p: Parameters)
     stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
     !noSameBlockInflight(sbuffer_out_s0_evictionIdx)
   ))
-  val sbuffer_out_s0_cango = sbuffer_out_s1_ready
+  // If sbuffer_out_ID matches valid ID in mshr_buffer, block sbuffer_out.
+  val outID_match_mshrBufID = widthMSHRMap(i => valid_mshr(i) && id_mshr(i) === sbuffer_out_s0_evictionIdx).reduce(_ || _)
+  val sbuffer_out_s0_cango = sbuffer_out_s1_ready && !outID_match_mshrBufID
   sbuffer_out_s0_fire := sbuffer_out_s0_valid && sbuffer_out_s0_cango
 
   // ---------------------------------------------------------------------------
@@ -715,7 +725,7 @@ class Sbuffer(implicit p: Parameters)
       stateVec(dcache_resp_id).state_inflight := false.B
       stateVec(dcache_resp_id).state_valid := false.B
       assert(!resp.bits.replay)
-      assert(!resp.bits.miss) // not need to resp if miss, to be opted
+      // assert(!resp.bits.miss) // not need to resp if miss, to be opted
       assert(stateVec(dcache_resp_id).state_inflight === true.B)
     }
 
@@ -728,7 +738,7 @@ class Sbuffer(implicit p: Parameters)
       when(
         stateVec(i).w_sameblock_inflight &&
         stateVec(i).state_valid &&
-        GatedValidRegNext(resp.fire) &&
+        GatedValidRegNext(resp.fire && !resp.bits.miss) &&
         waitInflightMask(i) === UIntToOH(RegEnable(id_to_sbuffer_id(dcache_resp_id), resp.fire))
       ){
         stateVec(i).w_sameblock_inflight := false.B
@@ -740,6 +750,24 @@ class Sbuffer(implicit p: Parameters)
     maskFlush.valid := resp.fire
     maskFlush.bits.wvec := UIntToOH(resp.bits.id)
   }}
+
+  // operatins on mshr_buffer
+  val hitResp = io.dcache.main_pipe_hit_resp
+  val refillDone = io.dcache.refill_done
+  val enqOH_mshr = PriorityEncoderOH(valid_mshr.map(!_))
+  assert(!(valid_mshr.asUInt.andR && hitResp.fire && hitResp.bits.miss), "Assertion failed in Sbuffer: pls check mshr_buffer")
+  for (i <- 0 until cacheParams.nMissEntries) {
+    when (hitResp.fire && hitResp.bits.miss) {
+      when (enqOH_mshr(i)) {
+        valid_mshr(i) := true.B
+        id_mshr(i) := hitResp.bits.id
+        ptag_mshr(i) := ptag(hitResp.bits.id)
+      }
+    }
+    when (refillDone.valid && refillDone.bits.id === id_mshr(i) && valid_mshr(i)) {
+      valid_mshr(i) := false.B
+    }
+  }
 
   // replay resp
   val replay_resp_id = io.dcache.replay_resp.bits.id
