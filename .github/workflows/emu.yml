@@ -33,6 +33,9 @@ jobs:
     timeout-minutes: 900
     name: Generate Verilog
     steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -118,6 +121,9 @@ jobs:
     timeout-minutes: 900
     name: EMU - Basics
     steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -213,6 +219,9 @@ jobs:
     timeout-minutes: 900
     name: EMU - GSIM
     steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -242,6 +251,9 @@ jobs:
     timeout-minutes: 900
     name: EMU - CHI
     steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -295,6 +307,9 @@ jobs:
     timeout-minutes: 500
     name: EMU - SimFrontend
     steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -361,6 +376,9 @@ jobs:
     timeout-minutes: 900
     name: EMU - MC
     steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
