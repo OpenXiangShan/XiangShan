@@ -749,7 +749,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
   val lastCycleCreateSnpt = RegInit(false.B)
   lastCycleCreateSnpt := genSnapshot && !io.snptIsFull
-  val sameSnptDistance = (RobCommitWidth * 4).U
+  val sameSnptDistance = (RobSize / 5).U
   // notInSameSnpt: 1.robidxHead - snapLastEnq >= sameSnptDistance 2.no snap
   val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= sameSnptDistance || !io.snptLastEnq.valid)
   val allowSnpt = if (EnableRenameSnapshot) notInSameSnpt && !lastCycleCreateSnpt && io.in.head.bits.firstUop else false.B
