@@ -162,7 +162,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         case info => info.pdest
       }
   }
-  // fpFreeList.io.debug_rat.foreach(_ := io.debug_fp_rat.get)
 
   vecFreeList.io.commit match {
     case commit =>
@@ -192,9 +191,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     case commit =>
       commit.doCommit := io.vlCommits.isCommit
       commit.archAlloc := io.vlCommits.commitValid
-      commit.archAllocPhyReg := io.rabCommits.info map {
-        case info => info.pdest
-      }
+      commit.archAllocPhyReg := io.vlCommits.pdestVl
   }
 
   val intReadPorts = rat.io.intReadPorts
@@ -480,7 +477,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     fpFreeList.io.walkPhyReg(i) := io.rabCommits.info(i).pdest
     vecFreeList.io.walkPhyReg(i) := io.rabCommits.info(i).pdest
     v0FreeList.io.walkPhyReg(i) := io.rabCommits.info(i).pdest
-    vlFreeList.io.walkPhyReg(i) := io.rabCommits.info(i).pdest
+    vlFreeList.io.walkPhyReg(i) := io.vlCommits.pdestVl(i)
 
     // no valid instruction from decode stage || all resources (dispatch1 + both free lists) ready
     io.in(i).ready := !io.in(0).valid || canOut
