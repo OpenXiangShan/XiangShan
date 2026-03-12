@@ -60,6 +60,11 @@ class OOOToPrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   val s1_storePc = Vec(ST_TRAIN_WIDTH, Output(UInt(VAddrBits.W)))
 }
 
+class PrefetchStatFromMshr(implicit p: Parameters) extends PrefetchBundle {
+  val refillValid = Bool()
+  val refillLatency = UInt(LATENCY_WIDTH.W)
+}
+
 class DCacheToPrefetchIO(implicit p: Parameters) extends PrefetchBundle {
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq())
   val refillTrain = ValidIO(new TrainReqBundle)
@@ -100,6 +105,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val l1_pf_to_l1 = DecoupledIO(new L1PrefetchReq())
     val l1_pf_to_l2 = Output(new coupledL2.PrefetchRecv())
     val l1_pf_to_l3 = Output(new huancun.PrefetchRecv())
+    // stat
+    val pfStatFromMshr = Input(new PrefetchStatFromMshr())
   })
 
   def isLoadAccess(uop: DynInst): Bool = FuType.isLoad(uop.fuType) || FuType.isVLoad(uop.fuType)
@@ -126,6 +133,23 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val l2_pf_arb = Module(new Arbiter(new L2PrefetchReq, prefetcherNum))
   val l3_pf_req = Wire(Decoupled(new L3PrefetchReq()))
   val l3_pf_arb = Module(new Arbiter(new L3PrefetchReq, prefetcherNum))
+
+  private def movingAvg(oldValue: UInt, sample: UInt): UInt = ((oldValue +& sample) >> 1).asUInt
+  val refillLatencyAvgUpLLC = RegInit(0.U(LATENCY_WIDTH.W))
+  val refillLatencyAvgDRAM = RegInit(0.U(LATENCY_WIDTH.W))
+  val refillLatencyAvgAll = RegInit(0.U(LATENCY_WIDTH.W))
+
+  when(io.pfStatFromMshr.refillValid) {
+    val refillLatency = io.pfStatFromMshr.refillLatency
+    when (refillLatency < DDR_LATENCY_DIV) {
+      refillLatencyAvgAll := movingAvg(refillLatencyAvgAll, refillLatency)
+      when(refillLatency < LLC_LATENCY_DIV) {
+        refillLatencyAvgUpLLC := movingAvg(refillLatencyAvgUpLLC, refillLatency)
+      }.otherwise {
+        refillLatencyAvgDRAM := movingAvg(refillLatencyAvgDRAM, refillLatency)
+      }
+    }
+  }
 
   // init
   io.tlb_req.foreach{ x =>
@@ -278,6 +302,11 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
         s2_loadPcVec(i),
         s3_loadPcVec(i)
       )
+      pf.io.ld_in(i).bits.refillLatency := Mux(
+        pf.io.ld_in(i).bits.isDramRefill,
+        refillLatencyAvgDRAM,
+        refillLatencyAvgUpLLC
+      )
     }
 
     for (i <- 0 until ST_TRAIN_WIDTH) {
@@ -292,6 +321,11 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     }
 
     pf.io.refillTrain := io.fromDCache.refillTrain
+    pf.io.refillTrain.bits.refillLatency := Mux(
+      io.fromDCache.refillTrain.bits.isDramRefill,
+      refillLatencyAvgDRAM,
+      refillLatencyAvgUpLLC
+    )
 
     io.tlb_req(IdxBerti) <> pf.io.tlb_req
     pf.io.pmp_resp := io.pmp_resp(IdxBerti)
@@ -332,7 +366,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   l2_trace.paddr := l2_pf_req.bits.addr
   val l2_trace_table = ChiselDB.createTable(s"L2PrefetchTrace$hartId", new LoadPfDbBundle, basicDB = false)
   when(l2_pf_req.bits.source === MemReqSource.Prefetch2L2Stream.id.U || l2_pf_req.bits.source === MemReqSource.Prefetch2L2Stride.id.U) {
-    l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2StreamStride", clock, reset) 
+    l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2StreamStride", clock, reset)
   }.elsewhen(l2_pf_req.bits.source === MemReqSource.Prefetch2L2SMS.id.U) {
     l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2SMS", clock, reset)
   }.otherwise {

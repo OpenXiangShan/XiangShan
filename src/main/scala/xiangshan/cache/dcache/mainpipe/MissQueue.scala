@@ -103,6 +103,7 @@ class MissQueueRefillInfo(implicit p: Parameters) extends MissReqStoreData {
   val miss_param = UInt(TLPermissions.bdWidth.W)
   val miss_dirty = Bool()
   val error      = Bool()
+  val is_dram_refill = Bool()
   val refill_latency = UInt(LATENCY_WIDTH.W)
 }
 
@@ -917,6 +918,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_info.bits.miss_param := grant_param
   io.refill_info.bits.miss_dirty := isDirty
   io.refill_info.bits.error      := error
+  io.refill_info.bits.is_dram_refill := isRefillFromDram(refill_latency)
   io.refill_info.bits.refill_latency := Mux(
     isFromL1Prefetch(req.pf_source),
     refill_latency,
@@ -930,6 +932,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_train.bits.miss := true.B
   // FIXME lyq: when mshr entry merges, req.pf_source may be cleaned.
   io.refill_train.bits.metaSource := req.pf_source
+  io.refill_train.bits.isDramRefill := isRefillFromDram(refill_latency)
   io.refill_train.bits.refillLatency := refill_latency
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
@@ -1050,6 +1053,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val lqEmpty = Input(Bool())
 
     val prefetch_stat = Output(new MissPrefetchStatBundle)
+    val pfStatFromMshr = Output(new PrefetchStatFromMshr)
 
     val wfi = Flipped(new WfiReqBundle)
 
@@ -1306,6 +1310,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     zip
     Seq(miss_req_pipe_reg.req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
   )
+
+  io.pfStatFromMshr.refillValid := io.refill_train.valid
+  io.pfStatFromMshr.refillLatency := io.refill_train.bits.refillLatency
 
   // L1MissTrace Chisel DB
   val debug_miss_trace = Wire(new L1MissTrace)

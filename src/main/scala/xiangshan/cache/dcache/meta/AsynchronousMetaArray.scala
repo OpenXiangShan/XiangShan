@@ -244,11 +244,11 @@ class L1PrefetchSourceArray(readPorts: Int, writePorts: Int)(implicit p: Paramet
 
 // TODO lyq: here can use abstract class to replace L1CohMetaArray\L1FlagMetaArray\L1PrefetchSourceArray
 class LatencyMetaWriteReq(implicit p: Parameters) extends MetaReadReq {
-  val latency = UInt(LATENCY_WIDTH.W)
+  val latency = Bool()
 }
 class L1RefillLatencyArray(readPorts: Int, writePorts: Int)(implicit p: Parameters) extends DCacheModule {
 
-  def DataType: UInt = UInt(LATENCY_WIDTH.W)
+  def DataType = Bool()
 
   val io = IO(new Bundle() {
     val read = Vec(readPorts, Flipped(DecoupledIO(new MetaReadReq)))

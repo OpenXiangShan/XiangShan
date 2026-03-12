@@ -131,6 +131,7 @@ object Bundles {
     val meta_prefetch = UInt(L1PfSourceBits.W)
     val meta_access = Bool()
     val is_from_hw_pf = Bool() // s0 source is from prefetch
+    val isDramRefill = Bool()
     val refillLatency = UInt(LATENCY_WIDTH.W)
 
     def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
@@ -159,6 +160,7 @@ object Bundles {
       res.pc := this.uop.pc
       res.miss := this.miss
       res.metaSource := this.meta_prefetch
+      res.isDramRefill := this.isDramRefill
       res.refillLatency := this.refillLatency
       res
     }

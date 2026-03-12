@@ -1345,7 +1345,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.meta_prefetch := RegEnable(io.dcache.resp.bits.meta_prefetch, s2_prefetch_train_valid)
   io.prefetch_train.bits.meta_access := RegEnable(io.dcache.resp.bits.meta_access, s2_prefetch_train_valid)
   io.prefetch_train.bits.is_from_hw_pf := RegNext(s2_hw_prf)
-  io.prefetch_train.bits.refillLatency := RegEnable(io.dcache.resp.bits.refill_latency, s2_prefetch_train_valid)
+  io.prefetch_train.bits.isDramRefill := RegEnable(io.dcache.resp.bits.is_dram_refill, s2_prefetch_train_valid)
+  io.prefetch_train.bits.refillLatency := 0.U // TODO: delete this ,because it will not be used in new berti
   io.prefetch_train.bits.isFinalSplit := false.B
   io.prefetch_train.bits.misalignWith16Byte := false.B
   io.prefetch_train.bits.misalignNeedWakeUp := false.B

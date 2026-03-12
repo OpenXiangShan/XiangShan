@@ -114,6 +114,10 @@ trait HasDCacheParameters extends HasL1CacheParameters with HasL1PrefetchSourceP
   def BLOOM_FILTER_ENTRY_NUM = 4096
   def TIMESTAMP_WIDTH = 16
   def LATENCY_WIDTH = 16 // FIXME lyq: here should be 12, test for 16
+  // refill latency fixed divide
+  def LLC_LATENCY_DIV = 50.U // >50 is regarded as DRAM Latency
+  def DDR_LATENCY_DIV = LLC_LATENCY_DIV + 500.U // >500+ is regarded as DDR flush
+  def isRefillFromDram(latency: UInt) : Bool = latency >= LLC_LATENCY_DIV
 
   // each source use a id to distinguish its multiple reqs
   def reqIdWidth = log2Up(nEntries) max log2Up(StoreBufferSize)
@@ -471,7 +475,7 @@ class DCacheWordResp(implicit p: Parameters) extends BaseDCacheWordResp
 {
   val meta_prefetch = UInt(L1PfSourceBits.W)
   val meta_access = Bool()
-  val refill_latency = UInt(LATENCY_WIDTH.W)
+  val is_dram_refill = Bool()
   // s2
   val handled = Bool()
   val real_miss = Bool()
@@ -831,6 +835,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lqEmpty = Input(Bool())
   val pf_ctrl = Output(Vec(L1PrefetcherNum, new PrefetchControlBundle))
   val refillTrain = ValidIO(new TrainReqBundle)
+  val pfStatFromMshr = Output(new PrefetchStatFromMshr)
   val force_write = Input(Bool())
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
   val debugTopDown = new DCacheTopDownIO
@@ -1050,6 +1055,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
   io.wfi <> missQueue.io.wfi
   io.refillTrain := missQueue.io.refill_train
+  io.pfStatFromMshr := missQueue.io.pfStatFromMshr
 
   // l1 dcache controller
   outer.cacheCtrlOpt.foreach {

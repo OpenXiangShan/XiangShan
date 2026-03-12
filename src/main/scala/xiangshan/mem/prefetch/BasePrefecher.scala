@@ -81,6 +81,7 @@ class TrainReqBundle()(implicit p: Parameters) extends DCacheBundle {
   val pc = UInt(VAddrBits.W)
   val miss = Bool()
   val metaSource = UInt(L1PfSourceBits.W)
+  val isDramRefill = Bool()
   val refillLatency = UInt(LATENCY_WIDTH.W)
 }
 
