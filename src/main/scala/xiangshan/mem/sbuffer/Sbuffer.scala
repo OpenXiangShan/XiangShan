@@ -215,6 +215,7 @@ class Sbuffer(implicit p: Parameters)
   val vtag = Reg(Vec(StoreBufferSize, UInt(VTagWidth.W)))
   val debug_mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
   val waitInflightMask = Reg(Vec(StoreBufferSize, UInt(StoreBufferSize.W)))
+  val waitInflightMask_mshr = Reg(Vec(StoreBufferSize, UInt(cacheParams.nMissEntries.W)))
   val data = dataModule.io.dataOut
   val mask = dataModule.io.maskOut
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
@@ -443,6 +444,7 @@ class Sbuffer(implicit p: Parameters)
         stateVec(entryIdx).w_sameblock_inflight := sameBlockInflightMask.orR // set w_sameblock_inflight when a line is first allocated
         when(sameBlockInflightMask.orR){
           waitInflightMask(entryIdx) := sameBlockInflightMask
+          waitInflightMask_mshr(entryIdx) := sameBlockInflightMask >> StoreBufferSize
         }
         cohCount(entryIdx) := 0.U
         // missqReplayCount(insertIdx) := 0.U
@@ -768,6 +770,16 @@ class Sbuffer(implicit p: Parameters)
       valid_mshr(i) := false.B
     }
   }
+  (0 until StoreBufferSize).map(i => {
+    when(
+      stateVec(i).w_sameblock_inflight &&
+      stateVec(i).state_valid &&
+      GatedValidRegNext(refillDone.fire) &&
+      waitInflightMask_mshr(i) === VecInit(widthMSHRMap(j => id_mshr(j) === RegEnable(id_to_sbuffer_id(refillDone.bits.id), refillDone.fire))).asUInt
+    ){
+      stateVec(i).w_sameblock_inflight := false.B
+    }
+  })
 
   // replay resp
   val replay_resp_id = io.dcache.replay_resp.bits.id
