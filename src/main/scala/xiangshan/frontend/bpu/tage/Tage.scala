@@ -466,9 +466,18 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   dontTouch(t2_longerHistoryTableMask)
 
   private val t2_allTableCanAllocateWayMask = t2_readResp.map { tableReadResp =>
-    tableReadResp.entries.zip(tableReadResp.usefulCtrs).map { case (entry, usefulCtr) =>
-      !entry.valid || entry.valid && entry.takenCtr.isWeak && usefulCtr.isSaturateNegative
+    val notValidMask  = tableReadResp.entries.map(!_.valid).asUInt
+    val notUsefulMask = tableReadResp.usefulCtrs.map(_.isSaturateNegative).asUInt
+    val ctrWeakAndNotUsefulMask = tableReadResp.entries.zip(tableReadResp.usefulCtrs).map { case (entry, usefulCtr) =>
+      entry.takenCtr.isWeak && usefulCtr.isSaturateNegative
     }.asUInt
+    MuxCase(
+      notUsefulMask,
+      Seq(
+        notValidMask.orR            -> notValidMask,
+        ctrWeakAndNotUsefulMask.orR -> ctrWeakAndNotUsefulMask
+      )
+    )
   }
   private val t2_canAllocateTableMask = t2_longerHistoryTableMask & t2_allTableCanAllocateWayMask.map(_.orR).asUInt
   private val t2_canAllocate          = t2_canAllocateTableMask.orR
