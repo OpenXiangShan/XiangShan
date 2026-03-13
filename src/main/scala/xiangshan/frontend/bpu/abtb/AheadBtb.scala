@@ -223,7 +223,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val t0_train = io.fastTrain.get.bits
 
-  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.finalPrediction.taken && t0_train.abtbMeta.valid
+  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
@@ -299,7 +299,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val victimWayIdx = replacers.map(_.io.victimWayIdx)
 
   banks.zipWithIndex.foreach { case (b, i) =>
-    when(t1_fire && t1_needWriteNewEntry && t1_bankMask(i)) {
+    when(t1_fire && t1_needWriteNewEntry && t1_trainTaken && t1_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := true.B
       b.io.writeReq.bits.setIdx       := t1_setIdx
