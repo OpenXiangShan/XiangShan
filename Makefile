@@ -296,6 +296,7 @@ sim-verilog: $(call docker-deps,$(SIM_TOP_V))
 clean:
 	$(MAKE) -C ./difftest clean
 	rm -rf $(BUILD_DIR)
+	rm -rf out
 
 GIT_FORCE_FLAG := $(if $(GIT_FORCE_INIT),--force)
 
