@@ -80,20 +80,48 @@ class NewFreeList(numPhyRegs: Int, commitWidth: Int, RenameWidth: Int,regType: R
   }
   
   //allocate phyreg
-  val salt = RegInit(0.U((log2Up(RenameWidth)-1).W))
-    when(io.doAllocate){
-      salt := salt+1.U
+  def argSortDesc(in: Seq[UInt]): Seq[UInt] = {
+    val n = in.length
+    val idxWidth = log2Ceil(n)
+
+    val values = collection.mutable.ArrayBuffer(in: _*)
+    val idxs   = collection.mutable.ArrayBuffer.tabulate(n)(i => i.U(idxWidth.W))
+
+    for (_ <- 0 until n) {
+      for (j <- 0 until n - 1) {
+        val swap = values(j) < values(j + 1)
+
+        val vj = values(j)
+        val vk = values(j + 1)
+        val ij = idxs(j)
+        val ik = idxs(j + 1)
+
+        values(j)     = Mux(swap, vk, vj)
+        values(j + 1) = Mux(swap, vj, vk)
+
+        idxs(j)       = Mux(swap, ik, ij)
+        idxs(j + 1)   = Mux(swap, ij, ik)
+      }
+    }
+
+    idxs.toSeq
   }
-  val ifCanAllocateRegOnSalt = Wire(Vec(RenameWidth, Bool()))
+  val freeRegCountPerBank = Wire(Vec(bankCount,UInt(log2Up(inBankRegCount).W)))
   for(i <- 0 until bankCount){
-    val saltIndex = (salt + i.U(RenameWidth.W))(log2Up(RenameWidth)-1,0)
-    val saltIndexAddbankCount = (saltIndex+bankCount.U)(log2Up(RenameWidth)-1,0)
-    ifCanAllocateRegOnSalt(i) := Mux(io.allocateReq(i),ifCanAllocateReg(saltIndex),true.B)
-    ifCanAllocateRegOnSalt(i+bankCount) := Mux(io.allocateReq(i+bankCount),ifCanAllocateReg(saltIndexAddbankCount),true.B)
-    io.allocatePhyReg(i) := getAllocatePhyReg(saltIndex)
-    io.allocatePhyReg(i+bankCount) := getAllocatePhyReg(saltIndexAddbankCount)
+    freeRegCountPerBank(i) := PopCount(specfreeListReg.asUInt(inBankRegCount * (i + 1) - 1, inBankRegCount * i))
   }
-  io.canAllocate := ifCanAllocateRegOnSalt.asUInt.andR
+  val allocateIndex = argSortDesc(freeRegCountPerBank)
+  val ifCanAllocateRegOnArgSort = Wire(Vec(RenameWidth, Bool()))
+  for(i <- 0 until bankCount){
+    ifCanAllocateRegOnArgSort(i) := Mux(io.allocateReq(i),ifCanAllocateReg(allocateIndex(i)),true.B)
+    io.allocatePhyReg(i) := getAllocatePhyReg(allocateIndex(i))
+    
+    val nextBank = (allocateIndex(i)+bankCount.U)(log2Up(RenameWidth)-1,0)
+    ifCanAllocateRegOnArgSort(i+bankCount) := Mux(io.allocateReq(i+bankCount),ifCanAllocateReg(nextBank),true.B)
+    io.allocatePhyReg(i+bankCount) := getAllocatePhyReg(nextBank)
+  }
+
+  io.canAllocate := ifCanAllocateRegOnArgSort.asUInt.andR
 
   val AllocateOHOR = (0 until RenameWidth).map { i =>
     Mux(
