@@ -26,7 +26,10 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
+import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.PreDecodeInfo
 import xiangshan.mem.prefetch.{PrefetchReqBundle, TrainReqBundle}
+import xiangshan.backend.exu.ExeUnitParams
 
 import scala.math._
 
@@ -125,6 +128,41 @@ object Bundles {
     val updateAddrValid = Bool()
 
     def isSWPrefetch: Bool = isPrefetch && !isHWPrefetch
+    def toExuOutput(param: ExeUnitParams): ExuOutput = {
+      val output = Wire(new ExuOutput(param))
+      output.data   := VecInit(Seq.fill(param.wbPathNum)(this.data))
+      output.pdest  := this.uop.pdest
+      output.robIdx := this.uop.robIdx
+      output.intWen.foreach(_ := this.uop.rfWen)
+      output.fpWen.foreach(_ := this.uop.fpWen)
+      output.vecWen.foreach(_ := this.uop.vecWen)
+      output.v0Wen.foreach(_ := this.uop.v0Wen)
+      output.vlWen.foreach(_ := this.uop.vlWen)
+      output.exceptionVec.foreach(_ := this.uop.exceptionVec)
+      output.flushPipe.foreach(_ := this.uop.flushPipe)
+      output.replay.foreach(_ := this.uop.replayInst)
+      // output.debug := this.debug
+      output.perfDebugInfo.foreach(_ := this.uop.perfDebugInfo)
+      output.debug_seqNum.foreach(_ := this.uop.debug_seqNum)
+      output.lqIdx.foreach(_ := this.uop.lqIdx)
+      output.sqIdx.foreach(_ := this.uop.sqIdx)
+      output.isRVC.foreach(_ := this.uop.isRVC)
+      output.vls.foreach(x => {
+        // x.vdIdx := this.vdIdx.get
+        // x.vdIdxInField := this.vdIdxInField.get
+        x.vpu   := this.uop.vpu
+        x.oldVdPsrc := this.uop.psrc(2)
+        x.isIndexed := VlduType.isIndexed(this.uop.fuOpType)
+        x.isMasked := VlduType.isMasked(this.uop.fuOpType)
+        x.isStrided := VlduType.isStrided(this.uop.fuOpType)
+        x.isWhole := VlduType.isWhole(this.uop.fuOpType)
+        x.isVecLoad := VlduType.isVecLd(this.uop.fuOpType)
+        x.isVlm := VlduType.isMasked(this.uop.fuOpType) && VlduType.isVecLd(this.uop.fuOpType)
+      })
+      // output.isFromLoadUnit.foreach(_ := this.isFromLoadUnit)
+      output.trigger.foreach(_ := this.uop.trigger)
+      output
+    }
   }
 
   class LsPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
@@ -168,7 +206,6 @@ object Bundles {
     // load inst replay informations
     val rep_info = new LoadToLsqReplayIO
     val nc_with_data = Bool() // nc access with data
-    val nuke_first   = Bool() // When stld_nuke and storeset hit occur simultaneously, stld_nuke should be handled first.
     // queue entry data, except flag bits, will be updated if writeQueue is true,
     // valid bit in LqWriteBundle will be ignored
     val data_wen_dup = Vec(6, Bool()) // dirty reg dup
@@ -182,7 +219,6 @@ object Bundles {
       this.rep_info := DontCare
       this.nc_with_data := DontCare
       this.data_wen_dup := DontCare
-      this.nuke_first   := DontCare
     }
   }
 
@@ -190,6 +226,93 @@ object Bundles {
     val need_rep = Bool()
   }
 
+  class StoreForwardReqS0(implicit p: Parameters) extends XSBundle {
+    val vaddr = UInt(VAddrBits.W)
+    val sqIdx = new SqPtr
+    val size = UInt(MemorySize.Size.width.W)
+    // MDP
+    // load inst will not be executed until former store (predicted by mdp) addr calcuated
+    val loadWaitBit = Bool()
+    // If (loadWaitBit && loadWaitStrict), strict load wait is needed
+    // load inst will not be executed until ALL former store addr calcuated
+    val loadWaitStrict = Bool()
+    val ssid = UInt(SSIDWidth.W)
+    val storeSetHit = Bool() // inst has been allocated an store set
+    val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
+  }
+
+  class StoreForwardReqS1(implicit p: Parameters) extends XSBundle {
+    val paddr = UInt(PAddrBits.W)
+  }
+
+  class SbufferForwardResp(implicit p: Parameters) extends XSBundle {
+    val forwardMask = Vec((VLEN/8), Bool())
+    val forwardData = Vec((VLEN/8), UInt(8.W))
+    val matchInvalid = Bool()
+  }
+
+  class SQForwardRespS1(implicit p: Parameters) extends XSBundle {
+    // dataInvalid: addr match, but data is not valid for now
+    val dataInvalidFast  = Bool() // resp to load_s1
+    val forwardMaskFast  = Vec((VLEN/8), Bool()) // resp to load_s1
+  }
+
+  class SQForwardRespS2(implicit p: Parameters) extends XSBundle {
+    val forwardMask = Vec((VLEN/8), Bool())
+    val forwardData = Vec((VLEN/8), UInt(8.W))
+    val forwardInvalid = Bool()
+    val matchInvalid = Bool()
+    val addrInvalid = Valid(new SqPtr)
+    val dataInvalid = Valid(new SqPtr)
+  }
+
+  class UncacheForwardResp(implicit p: Parameters) extends SbufferForwardResp // ?
+
+  class SbufferForward(implicit p: Parameters) extends XSBundle {
+    val s0Req = ValidIO(new StoreForwardReqS0)
+    val s1Req = Output(new StoreForwardReqS1)
+    val s1Kill = Output(Bool())
+    val s2Resp = Flipped(ValidIO(new SbufferForwardResp))
+  }
+
+  class SQForward(implicit p: Parameters) extends XSBundle {
+    val s0Req = ValidIO(new StoreForwardReqS0)
+    val s1Req = Output(new StoreForwardReqS1)
+    val s1Kill = Output(Bool())
+    val s1Resp = Flipped(ValidIO(new SQForwardRespS1))
+    val s2Resp = Flipped(ValidIO(new SQForwardRespS2))
+  }
+
+  class UncacheForward(implicit p: Parameters) extends XSBundle {
+    val s0Req = ValidIO(new StoreForwardReqS0)
+    val s1Req = Output(new StoreForwardReqS1)
+    val s1Kill = Output(Bool())
+    val s2Resp = Flipped(ValidIO(new UncacheForwardResp))
+  }
+
+  class UncacheBypassReqS0(implicit p: Parameters) extends XSBundle {
+    val lqIdx = new LqPtr
+    val isNCReplay = Bool()
+    val isMMIOReplay = Bool()
+  }
+
+  class UncacheBypassRespS1(implicit p: Parameters) extends XSBundle {
+    val paddr = UInt(PAddrBits.W)
+  }
+
+  class UncacheBypassRespS2(implicit p: Parameters) extends XSBundle {
+    val data = UInt(VLEN.W)
+    val nderr = Bool()
+    val derr = Bool()
+  }
+
+  class UncacheBypass(implicit p: Parameters) extends XSBundle {
+    val s0Req = ValidIO(new UncacheBypassReqS0)
+    val s1Resp = Flipped(ValidIO(new UncacheBypassRespS1))
+    val s2Resp = Flipped(ValidIO(new UncacheBypassRespS2))
+  }
+
+  // TODO: LoadForwardQueryIO = LoadForwardReq + LoadForwardResp
   class LoadForwardQueryIO(implicit p: Parameters) extends XSBundle {
     val vaddr = Output(UInt(VAddrBits.W))
     val paddr = Output(UInt(PAddrBits.W))
@@ -237,6 +360,9 @@ object Bundles {
     val addrInvalidSqIdx = Input(new SqPtr) // resp to load_s2, sqIdx
   }
 
+
+  // TODO: remove these
+
   // Query load queue for ld-ld violation
   //
   // Req should be send in load_s1
@@ -251,6 +377,7 @@ object Bundles {
 
     // paddr: load's paddr.
     val paddr      = UInt(PAddrBits.W)
+    // TODO: remove data_valid
     // dataInvalid: load data is invalid.
     val data_valid = Bool()
     // nc: is NC access
@@ -268,7 +395,40 @@ object Bundles {
     val revoke = Output(Bool())
   }
 
-  class StoreNukeQueryBundle(implicit p: Parameters) extends XSBundle {
+  class LoadNukeQueryReq(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr
+    val paddr = UInt(PAddrBits.W)
+    val lqIdx = new LqPtr
+    val sqIdx = new SqPtr
+    val dataValid = Bool()
+    val nc = Bool() // always mark a writebacked NC load as released in RAR
+    val mask = UInt((VLEN/8).W)
+    val isRVC = Bool()
+    val ftqPtr = new FtqPtr
+    val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
+    val pc = UInt(VAddrBits.W)
+    val debugInfo = new PerfDebugInfo
+  }
+
+  class LoadNukeQueryResp(implicit p: Parameters) extends XSBundle {
+    val nuke = Bool()
+  }
+
+  class LoadRARNukeQuery(implicit p: Parameters) extends XSBundle {
+    val req = DecoupledIO(new LoadNukeQueryReq)
+    val resp = Flipped(ValidIO(new LoadNukeQueryResp))
+    val revokeLastCycle = Output(Bool()) // revoke the req in the last cycle
+    val revokeLastLastCycle = Output(Bool()) // revoke the req in the last cycle before last cycle
+  }
+
+  class LoadRAWNukeQuery(implicit p: Parameters) extends XSBundle {
+    // RAW nuke is generated in LoadQueueRAW, therefore there is no response to LDU
+    val req = DecoupledIO(new LoadNukeQueryReq)
+    val revokeLastCycle = Output(Bool())
+    val revokeLastLastCycle = Output(Bool())
+  }
+
+  class StoreNukeQueryReq(implicit p: Parameters) extends XSBundle {
     //  robIdx: Requestor's (a store instruction) rob index for match logic.
     val robIdx = new RobPtr
 
@@ -399,8 +559,17 @@ class VecMissalignedDebugBundle (implicit p: Parameters) extends XSBundle {
   val offset     = UInt(log2Up(XLEN).W) // indicate byte offset of unit-stride's element when unaligned
 }
 
+class DifftestPmaStoreIO(implicit p: Parameters) extends XSBundle {
+  val data           = UInt(VLEN.W)
+  val mask           = UInt((VLEN/8).W)
+  val addr           = UInt(PAddrBits.W)
+  val wline          = Bool()
+  val vecValid       = Bool()
+  val diffIsHighPart = Bool() // indicate whether valid data in high 64-bit, only for scalar store event!
+}
+
 class DiffStoreIO(implicit p: Parameters) extends XSBundle{
   val diffInfo = Vec(EnsbufferWidth, Flipped(new ToSbufferDifftestInfoBundle()))
-  val pmaStore = Vec(EnsbufferWidth, Flipped(Valid(new DCacheWordReqWithVaddrAndPfFlag())))
+  val pmaStore = Vec(EnsbufferWidth, Flipped(Valid(new DifftestPmaStoreIO)))
   val ncStore = Flipped(Valid(new UncacheWordReq()))
 }

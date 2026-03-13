@@ -419,7 +419,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                           (commonIn.deqSel && !cancelBypassVec.asUInt.orR)  -> true.B,
                                                           (srcCancelByLoad || respIssueFail)                -> false.B,
                                                          ))
-    entryUpdate.status.firstIssue                     := Mux(status.firstIssue && status.issueTimer === "b11".U, !respIssueFail, status.firstIssue)
+    entryUpdate.status.firstIssue                     := Mux(status.firstIssue && status.issueTimer === params.issueTimerMaxValue.U, !respIssueFail, status.firstIssue)
     val updateIssueTimer = Mux(status.issueTimer === params.issueTimerMaxValue.U, status.issueTimer, status.issueTimer + 1.U)
     entryUpdate.status.issueTimer                     := Mux(validReg && status.issued, updateIssueTimer, 0.U)
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))

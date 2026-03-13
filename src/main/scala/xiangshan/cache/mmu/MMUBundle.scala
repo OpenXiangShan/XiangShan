@@ -437,7 +437,7 @@ object Pbmt {
   def rsvd: UInt = "b11".U  // Reserved for future standard use
   def width: Int = 2
 
-  def apply() = UInt(2.W)
+  def apply() = UInt(width.W)
   def isUncache(a: UInt) = a===nc || a===io
   def isPMA(a: UInt) = a===pma
   def isNC(a: UInt) = a===nc
@@ -559,6 +559,11 @@ class MemBlockidxBundle(implicit p: Parameters) extends TlbBundle {
 }
 
 class TlbReq(implicit p: Parameters) extends TlbBundle {
+  /**
+    * TODO:
+    * 1. remove size, either kill or no_translate
+    * 2. move pmp_addr outside this Bundle
+    */
   val vaddr = Output(UInt(VAddrBits.W))
   val fullva = Output(UInt(XLEN.W))
   val checkfullva = Output(Bool())
@@ -585,9 +590,17 @@ class TlbReq(implicit p: Parameters) extends TlbBundle {
 }
 
 class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
-  val ld = Output(Bool())
-  val st = Output(Bool())
-  val instr = Output(Bool())
+  val ld = Bool()
+  val st = Bool()
+  val instr = Bool()
+}
+
+class TlbRespExcp(implicit p: Parameters) extends TlbBundle {
+  val vaNeedExt = Bool()
+  val isHyper = Bool()
+  val gpf = new TlbExceptionBundle
+  val pf = new TlbExceptionBundle
+  val af = new TlbExceptionBundle
 }
 
 class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
@@ -598,13 +611,7 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val miss = Output(Bool())
   val fastMiss = Output(Bool())
   val isForVSnonLeafPTE = Output(Bool())
-  val excp = Vec(nDups, new Bundle {
-    val vaNeedExt = Output(Bool())
-    val isHyper = Output(Bool())
-    val gpf = new TlbExceptionBundle()
-    val pf = new TlbExceptionBundle()
-    val af = new TlbExceptionBundle()
-  })
+  val excp = Output(Vec(nDups, new TlbRespExcp))
   val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
   val memidx = Output(new MemBlockidxBundle)
 

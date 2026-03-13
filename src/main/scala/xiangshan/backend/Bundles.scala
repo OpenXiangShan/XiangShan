@@ -95,6 +95,11 @@ object Bundles {
     sink.bits.toVlRf. foreach(_.bits  := source.bits.data(0))
   }
 
+  def connectMemDecoupledNewExuOutput(sink: DecoupledIO[NewExuOutput], source: NewExuOutput) = {
+    sink.valid := source.toRob.valid
+    sink.bits := source
+  }
+
   def connectWriteBackRob(sink: WriteBackRobBundle, source: NewExuOutput) = {
     connectSamePort(sink, source.toRob.bits)
     connectSamePort(sink, source)
@@ -614,6 +619,8 @@ object Bundles {
     // load inst will not be executed until ALL former store addr calcuated
     val loadWaitStrict  = Bool()
     val ssid            = UInt(SSIDWidth.W)
+    val nc = Bool()
+    val mmio = Bool()
     // Todo
     val lqIdx = new LqPtr
     val sqIdx = new SqPtr

@@ -500,6 +500,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val acquire_not_sent = !s_acquire && !io.mem_acquire.ready
   val data_not_refilled = !w_grantfirst
 
+  val error = RegInit(false.B)
   val denied = RegInit(false.B)
   val corrupt = RegInit(false.B)
   val prefetch = RegInit(false.B)
@@ -589,6 +590,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     }
 
     should_refill_data_reg := miss_req_pipe_reg_bits.isFromLoad
+
+    error := false.B
     denied := false.B
     corrupt := false.B
     prefetch := input_req_is_prefetch && !io.miss_req_pipe_reg.prefetch_late_en(io.req.bits, io.req.valid)
@@ -689,8 +692,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       hasData := false.B
     }
 
-    denied := io.mem_grant.bits.denied || denied
-    corrupt := io.mem_grant.bits.corrupt || corrupt
+    error := io.mem_grant.bits.denied || io.mem_grant.bits.corrupt || error
+    denied := denied || io.mem_grant.bits.denied
+    corrupt := corrupt || io.mem_grant.bits.corrupt
 
     refill_data_raw(refill_count ^ isKeyword) := io.mem_grant.bits.data
     isDirty := io.mem_grant.bits.echo.lift(DirtyKey).getOrElse(false.B)
@@ -1056,7 +1060,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val full = Output(Bool())
 
     // forward missqueue
-    val forward = Vec(LoadPipelineWidth, new LduToMissqueueForwardIO)
+    val forward = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
+    val forwardS1PAddrMatch = Output(Vec(LoadPipelineWidth, Bool()))
     val l2_pf_store_only = Input(Bool())
 
     val memSetPattenDetected = Output(Bool())
@@ -1144,18 +1149,39 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.memSetPattenDetected := memSetPattenDetected
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
-  (0 until LoadPipelineWidth).map(i => {
-    val id = io.forward(i).mshrid
-    val req_valid = io.forward(i).valid
-    val paddr = io.forward(i).paddr
+  io.forward.zipWithIndex.foreach { case (forward, i) =>
+    val s0ReqValid = forward.s0Req.valid
+    val s0Req = forward.s0Req.bits
+    val s1ReqValid = RegNext(s0ReqValid)
+    val s1Req = RegEnable(s0Req, s0ReqValid)
+    val mshrIdOH = UIntToOH(s1Req.mshrId)
+    val paddr = forward.s1Req.paddr
+//    val mshrForwardInfo = forwardInfo_vec(mshrId)
 
-    val (forward_mshr, forwardData) = forwardInfo_vec(id).forward(req_valid, paddr)
-    io.forward(i).forward_result_valid := forwardInfo_vec(id).check(req_valid, paddr)
-    io.forward(i).forward_mshr := forward_mshr
-    io.forward(i).forwardData := forwardData
-    io.forward(i).corrupt := RegNext(forwardInfo_vec(id).corrupt)
-    io.forward(i).denied := RegNext(forwardInfo_vec(id).denied)
-  })
+    val s1PaddrMatchVec = VecInit(forwardInfo_vec.map{ case info =>
+      paddr(paddr.getWidth - 1, blockOffBits) === info.paddr(paddr.getWidth - 1, blockOffBits) &&
+      info.inflight})
+    val s1BeatMatchVec  = VecInit(forwardInfo_vec.map{ case info =>
+      Mux(paddr(log2Up(refillBytes)).asBool,
+        info.lastbeat_valid,
+        info.firstbeat_valid
+    )})
+    val s1SelectOH     = s1PaddrMatchVec.asUInt & s1BeatMatchVec.asUInt
+    val s1MshrForwardInfo = Mux1H(s1SelectOH, forwardInfo_vec)
+    val s1RespData = VecInit(
+      s1MshrForwardInfo.raw_data.grouped(VLEN / rowBits).map(VecInit(_).asUInt).toSeq
+    )(paddr(blockOffBits - 1, log2Up(VLEN / 8)))
+    val s1RespValid = s1ReqValid && s1SelectOH.orR
+
+
+    forward.s2Resp.valid := RegNext(s1RespValid)
+    forward.s2Resp.bits.matchInvalid := false.B
+    forward.s2Resp.bits.forwardData := RegEnable(s1RespData.asTypeOf(forward.s2Resp.bits.forwardData), s1ReqValid)
+    forward.s2Resp.bits.denied := RegEnable(s1MshrForwardInfo.denied, s1ReqValid)
+    forward.s2Resp.bits.corrupt := RegEnable(s1MshrForwardInfo.corrupt, s1ReqValid)
+    io.forwardS1PAddrMatch(i) := s1ReqValid && (mshrIdOH & s1PaddrMatchVec.asUInt).orR
+    XSError(((s1SelectOH - 1.U) & s1SelectOH).orR && s1RespValid, "multi mshr hit when forward!\n")
+  }
 
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
 //  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
