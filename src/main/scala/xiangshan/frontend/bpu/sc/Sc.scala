@@ -263,6 +263,20 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       biasPercsum +& s1_sumPercsum(idx)
   }.grouped(BiasTableNumWays / NumWays).toSeq.map(group => VecInit(group)))
 
+  // helper that computes an above-threshold vector for every bias group
+  private def calcSumAboveThresholdShiftAll(
+      totalPercsumAll: Vec[Vec[SInt]],
+      shiftRight:      Int
+  ): Vec[Vec[Bool]] =
+    VecInit(totalPercsumAll.zipWithIndex.map { case (vec, idx) =>
+      VecInit(vec.map(percsum =>
+        aboveThreshold(percsum, scThreshold(idx).value >> shiftRight)
+      ))
+    })
+
+  private val Seq(s1_sumAboveThresholdShift1All, s1_sumAboveThresholdShift2All, s1_sumAboveThresholdShift3All) =
+    Seq(4, 5, 6).map(sh => calcSumAboveThresholdShiftAll(s1_totalPercsumAll, sh))
+
   /*
    *  predict pipeline stage 2
    *  match entries and calculate final percSum
@@ -303,9 +317,23 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_bwPred     = s2_wayIdx.map(wayIdx => s2_bwPercsum(wayIdx) >= 0.S)         // for performance counter
   private val s2_biasPred   = s2_biasWayIdx.map(biasIdx => s2_biasPercsum(biasIdx) >= 0.S) // for performance counter
 
-  private val s2_totalPercsumAll = RegEnable(s1_totalPercsumAll, s1_fire)
+  private val s2_totalPercsumAll            = RegEnable(s1_totalPercsumAll, s1_fire)
+  private val s2_sumAboveThresholdShift1All = RegEnable(s1_sumAboveThresholdShift1All, s1_fire)
+  private val s2_sumAboveThresholdShift2All = RegEnable(s1_sumAboveThresholdShift2All, s1_fire)
+  private val s2_sumAboveThresholdShift3All = RegEnable(s1_sumAboveThresholdShift3All, s1_fire)
+
   private val s2_totalPercsum = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
     s2_totalPercsumAll(wayIdx)(lowBits)
+  })
+
+  private val s2_sumAboveThresholdShift1 = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
+    s2_sumAboveThresholdShift1All(wayIdx)(lowBits)
+  })
+  private val s2_sumAboveThresholdShift2 = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
+    s2_sumAboveThresholdShift2All(wayIdx)(lowBits)
+  })
+  private val s2_sumAboveThresholdShift3 = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
+    s2_sumAboveThresholdShift3All(wayIdx)(lowBits)
   })
 
   require(NumWays == s2_mbtbResult.length, s"NumWays $NumWays != s2_mbtbHitMask.length ${s2_mbtbResult.length}")
@@ -316,31 +344,34 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_sumAboveThres = WireInit(VecInit.fill(NumWays)(false.B))
 
   for (i <- 0 until NumWays) {
-    val hit                     = s2_hitMask(i)
-    val valid                   = s2_providerValid(i)
-    val sum                     = s2_totalPercsum(i)
-    val thres                   = s2_thresholds(s2_wayIdx(i))
-    val tageConfHigh            = s2_providerCtr(i).isSaturatePositive || s2_providerCtr(i).isSaturateNegative
-    val tageConfMid             = s2_providerCtr(i).isMid
-    val tageConfLow             = s2_providerCtr(i).isWeak
-    val sumAboveThresholdShift1 = aboveThreshold(sum, thres >> 1)
-    val sumAboveThresholdShift2 = aboveThreshold(sum, thres >> 2)
-    val sumAboveThresholdShift3 = aboveThreshold(sum, thres >> 3)
-    val conf                    = WireInit(false.B)
-    when(hit && valid && tageConfHigh) {
-      conf            := sumAboveThresholdShift1
-      s2_useScPred(i) := Mux(conf, true.B, false.B)
-    }.elsewhen(hit && valid && tageConfMid) {
-      conf            := sumAboveThresholdShift2
-      s2_useScPred(i) := Mux(conf, true.B, false.B)
-    }.elsewhen(hit && valid && tageConfLow) {
-      conf            := sumAboveThresholdShift3
-      s2_useScPred(i) := Mux(conf, true.B, false.B)
-    }.otherwise {
-      conf            := false.B
-      s2_useScPred(i) := false.B
-    }
+    val hit   = s2_hitMask(i)
+    val valid = s2_providerValid(i)
+    val sum   = s2_totalPercsum(i)
+    val thres = s2_thresholds(s2_wayIdx(i))
+    val ctr   = s2_providerCtr(i)
+
+    val tageConfHigh = ctr.isSaturatePositive || ctr.isSaturateNegative
+    val tageConfMid  = ctr.isMid
+    val tageConfLow  = ctr.isWeak
+
+    // collect the three pre‑computed shift comparisons
+    val sumAboveShifts = Seq(
+      s2_sumAboveThresholdShift1(i),
+      s2_sumAboveThresholdShift2(i),
+      s2_sumAboveThresholdShift3(i)
+    )
+
+    // choose the right signal based on confidence level
+    val conf = WireInit(false.B)
+    conf := Mux1H(Seq(
+      tageConfHigh -> sumAboveShifts(0),
+      tageConfMid  -> sumAboveShifts(1),
+      tageConfLow  -> sumAboveShifts(2)
+    ))
+
+    s2_useScPred(i)     := hit && valid && conf
     s2_sumAboveThres(i) := aboveThreshold(sum, thres)
+
     dontTouch(tageConfHigh)
     dontTouch(tageConfMid)
     dontTouch(tageConfLow)
