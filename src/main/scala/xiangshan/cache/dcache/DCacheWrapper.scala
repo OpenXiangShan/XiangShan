@@ -625,7 +625,7 @@ class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle {
   val main_pipe_hit_resp = ValidIO(new DCacheLineResp)
   //val refill_hit_resp = ValidIO(new DCacheLineResp)
   val refill_done = ValidIO(new Bundle {
-    val id = UInt(reqIdWidth.W)
+    val paddr = UInt(PAddrBits.W)
   })
 
   val replay_resp = ValidIO(new DCacheLineResp)

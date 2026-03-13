@@ -67,7 +67,9 @@ class SbufferEntryState (implicit p: Parameters) extends SbufferBundle {
   val state_valid    = Bool() // this entry is active
   val state_inflight = Bool() // sbuffer is trying to write this entry to dcache
   val w_timeout = Bool() // with timeout resp, waiting for resend store pipeline req timeout
-  val w_sameblock_inflight = Bool() // same cache block dcache req is inflight
+  val w_sameblock_inflight_sbuf = Bool() // same cache block dcache req is inflight (only check sbuffer)
+  val w_sameblock_inflight_mshr = Bool() // same cache block dcache req is inflight (only check mshr_buffer)
+  def w_sameblock_inflight = w_sameblock_inflight_sbuf || w_sameblock_inflight_mshr
 
   def isInvalid(): Bool = !state_valid
   def isValid(): Bool = state_valid
@@ -214,7 +216,7 @@ class Sbuffer(implicit p: Parameters)
   val ptag = Reg(Vec(StoreBufferSize, UInt(PTagWidth.W)))
   val vtag = Reg(Vec(StoreBufferSize, UInt(VTagWidth.W)))
   val debug_mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
-  val waitInflightMask = Reg(Vec(StoreBufferSize, UInt(StoreBufferSize.W)))
+  val waitInflightMask_sbuf = Reg(Vec(StoreBufferSize, UInt(StoreBufferSize.W)))
   val waitInflightMask_mshr = Reg(Vec(StoreBufferSize, UInt(cacheParams.nMissEntries.W)))
   val data = dataModule.io.dataOut
   val mask = dataModule.io.maskOut
@@ -224,7 +226,6 @@ class Sbuffer(implicit p: Parameters)
 
   // mshr_buffer: records miss requests being handled in mshr
   val valid_mshr = RegInit(VecInit.fill(cacheParams.nMissEntries)(false.B))
-  val id_mshr = Reg(Vec(cacheParams.nMissEntries, UInt(reqIdWidth.W)))
   val ptag_mshr = Reg(Vec(cacheParams.nMissEntries, UInt(PTagWidth.W)))
 
   val sbuffer_out_s0_fire = Wire(Bool())
@@ -437,14 +438,18 @@ class Sbuffer(implicit p: Parameters)
     wordOffset: UInt
   ): Unit = {
     assert(UIntToOH(insertIdx) === insertVec)
-    val sameBlockInflightMask = genSameBlockInflightMask(reqptag)
+    val sameBlockInflightMask_sbuf = genSameBlockInflightMask_sbuf(reqptag)
+    val sameBlockInflightMask_mshr = genSameBlockInflightMask_mshr(reqptag)
     (0 until StoreBufferSize).map(entryIdx => {
       when(insertVec(entryIdx)){
         stateVec(entryIdx).state_valid := true.B
-        stateVec(entryIdx).w_sameblock_inflight := sameBlockInflightMask.orR // set w_sameblock_inflight when a line is first allocated
-        when(sameBlockInflightMask.orR){
-          waitInflightMask(entryIdx) := sameBlockInflightMask
-          waitInflightMask_mshr(entryIdx) := sameBlockInflightMask >> StoreBufferSize
+        stateVec(entryIdx).w_sameblock_inflight_sbuf := sameBlockInflightMask_sbuf.orR // set w_sameblock_inflight when a line is first allocated
+        stateVec(entryIdx).w_sameblock_inflight_mshr := sameBlockInflightMask_mshr.orR // set w_sameblock_inflight when a line is first allocated
+        when(sameBlockInflightMask_sbuf.orR){
+          waitInflightMask_sbuf(entryIdx) := sameBlockInflightMask_sbuf
+        }
+        when(sameBlockInflightMask_mshr.orR){
+          waitInflightMask_mshr(entryIdx) := sameBlockInflightMask_mshr
         }
         cohCount(entryIdx) := 0.U
         // missqReplayCount(insertIdx) := 0.U
@@ -597,15 +602,16 @@ class Sbuffer(implicit p: Parameters)
     !Cat(widthMSHRMap(i => valid_mshr(i) && ptag(idx) === ptag_mshr(i))).orR
   }
 
-  def genSameBlockInflightMask(ptag_in: UInt): UInt = {
+  def genSameBlockInflightMask_sbuf(ptag_in: UInt): UInt = {
     val mask = VecInit(widthMap(i => inflightMask(i) && ptag_in === ptag(i))).asUInt // quite slow, use it with care
-    val mask_mshr = VecInit(widthMSHRMap(i => valid_mshr(i) && ptag_in === ptag_mshr(i))).asUInt
-    assert(!(PopCount(Cat(mask_mshr, mask)) > 1.U))
-    Cat(mask_mshr, mask)
+    assert(!(PopCount(mask) > 1.U))
+    mask
   }
 
-  def haveSameBlockInflight(ptag_in: UInt): Bool = {
-    genSameBlockInflightMask(ptag_in).orR
+  def genSameBlockInflightMask_mshr(ptag_in: UInt): UInt = {
+    val mask_mshr = VecInit(widthMSHRMap(i => valid_mshr(i) && ptag_in === ptag_mshr(i))).asUInt
+    assert(!(PopCount(mask_mshr) > 1.U))
+    mask_mshr
   }
 
   // ---------------------------------------------------------------------------
@@ -651,9 +657,7 @@ class Sbuffer(implicit p: Parameters)
     stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
     !noSameBlockInflight(sbuffer_out_s0_evictionIdx)
   ))
-  // If sbuffer_out_ID matches valid ID in mshr_buffer, block sbuffer_out.
-  val outID_match_mshrBufID = widthMSHRMap(i => valid_mshr(i) && id_mshr(i) === sbuffer_out_s0_evictionIdx).reduce(_ || _)
-  val sbuffer_out_s0_cango = sbuffer_out_s1_ready && !outID_match_mshrBufID
+  val sbuffer_out_s0_cango = sbuffer_out_s1_ready
   sbuffer_out_s0_fire := sbuffer_out_s0_valid && sbuffer_out_s0_cango
 
   // ---------------------------------------------------------------------------
@@ -720,6 +724,8 @@ class Sbuffer(implicit p: Parameters)
     id(log2Up(StoreBufferSize)-1, 0)
   }
 
+  val enqOH_mshr = PriorityEncoderOH(valid_mshr.map(!_))
+
   // hit resp
   io.dcache.hit_resps.map(resp => {
     val dcache_resp_id = resp.bits.id
@@ -738,12 +744,16 @@ class Sbuffer(implicit p: Parameters)
     // if the same block is still inflight
     (0 until StoreBufferSize).map(i => {
       when(
-        stateVec(i).w_sameblock_inflight &&
+        stateVec(i).w_sameblock_inflight_sbuf &&
         stateVec(i).state_valid &&
-        GatedValidRegNext(resp.fire && !resp.bits.miss) &&
-        waitInflightMask(i) === UIntToOH(RegEnable(id_to_sbuffer_id(dcache_resp_id), resp.fire))
+        GatedValidRegNext(resp.fire) &&
+        waitInflightMask_sbuf(i) === UIntToOH(RegEnable(id_to_sbuffer_id(dcache_resp_id), resp.fire))
       ){
-        stateVec(i).w_sameblock_inflight := false.B
+        stateVec(i).w_sameblock_inflight_sbuf := false.B
+        when(RegNext(resp.bits.miss)){
+          stateVec(i).w_sameblock_inflight_mshr := true.B
+          waitInflightMask_mshr(i) := RegEnable(VecInit(enqOH_mshr).asUInt, resp.bits.miss)
+        }
       }
     })
   })
@@ -756,30 +766,31 @@ class Sbuffer(implicit p: Parameters)
   // operatins on mshr_buffer
   val hitResp = io.dcache.main_pipe_hit_resp
   val refillDone = io.dcache.refill_done
-  val enqOH_mshr = PriorityEncoderOH(valid_mshr.map(!_))
-  assert(!(valid_mshr.asUInt.andR && hitResp.fire && hitResp.bits.miss), "Assertion failed in Sbuffer: pls check mshr_buffer")
+  assert(!(valid_mshr.asUInt.andR && hitResp.fire && hitResp.bits.miss), "(Sbuffer) mshr_buffer enq when it is full")
+  val deqOH_mshr = ptag_mshr.map(_ === (refillDone.bits.paddr >> OffsetWidth))
   for (i <- 0 until cacheParams.nMissEntries) {
     when (hitResp.fire && hitResp.bits.miss) {
       when (enqOH_mshr(i)) {
         valid_mshr(i) := true.B
-        id_mshr(i) := hitResp.bits.id
         ptag_mshr(i) := ptag(hitResp.bits.id)
       }
     }
-    when (refillDone.valid && refillDone.bits.id === id_mshr(i) && valid_mshr(i)) {
+    when (refillDone.valid && deqOH_mshr(i)) {
       valid_mshr(i) := false.B
     }
+    assert(!(refillDone.valid && deqOH_mshr(i) && !valid_mshr(i)), "(Sbuffer) mshr_buffer deq when it is not valid")
   }
-  (0 until StoreBufferSize).map(i => {
+  
+  for (i <- 0 until StoreBufferSize) {
     when(
-      stateVec(i).w_sameblock_inflight &&
+      stateVec(i).w_sameblock_inflight_mshr &&
       stateVec(i).state_valid &&
-      GatedValidRegNext(refillDone.fire) &&
-      waitInflightMask_mshr(i) === VecInit(widthMSHRMap(j => id_mshr(j) === RegEnable(id_to_sbuffer_id(refillDone.bits.id), refillDone.fire))).asUInt
+      GatedValidRegNext(refillDone.valid) &&
+      waitInflightMask_mshr(i) === RegEnable(VecInit(deqOH_mshr).asUInt, refillDone.valid)
     ){
-      stateVec(i).w_sameblock_inflight := false.B
+      stateVec(i).w_sameblock_inflight_mshr := false.B
     }
-  })
+  }
 
   // replay resp
   val replay_resp_id = io.dcache.replay_resp.bits.id
