@@ -364,6 +364,7 @@ stack.info*
 *.vpd
 *.vcd
 *.bin
+*.fst
 
 !ready-to-run/*
 
@@ -374,6 +375,9 @@ simulator_out.txt
 *.err
 cr*/
 
+# external dependence
+NEMU/
+nexus-am
 # Bug report files
 bug-report/
 bug-report.tar.gz

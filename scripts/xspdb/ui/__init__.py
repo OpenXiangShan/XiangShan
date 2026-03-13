@@ -14,6 +14,8 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
+"""Textual UI entry for XSPdb."""
 
-from xspdb.xscmd.util import message, error, warn, info, GREEN, RESET, YELLOW, ui_prompt
-from xspdb.xscmd.util import get_completions, find_executable_in_dirs, dasm_bytes
+from .server import enter_tui
+
+__all__ = ["enter_tui"]

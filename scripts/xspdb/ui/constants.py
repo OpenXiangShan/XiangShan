@@ -14,6 +14,25 @@
 # See the Mulan PSL v2 for more details.
 #***************************************************************************************
 
+STYLE_MAP = {
+    "norm_red": "red",
+    "error_red": "bright_red",
+    "light red": "bright_red",
+    "light blue": "bright_blue",
+    "light green": "bright_green",
+    "yellow": "yellow",
+}
 
-from xspdb.xscmd.util import message, error, warn, info, GREEN, RESET, YELLOW, ui_prompt
-from xspdb.xscmd.util import get_completions, find_executable_in_dirs, dasm_bytes
+LEVEL_PREFIX = {
+    "info": "[Info] ",
+    "warn": "[Warn] ",
+    "error": "[Error] ",
+    "debug": "[Debug] ",
+}
+
+LEVEL_STYLE = {
+    "info": "green",
+    "warn": "yellow",
+    "error": "red",
+    "debug": "cyan",
+}

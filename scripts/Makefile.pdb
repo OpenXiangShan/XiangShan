@@ -25,7 +25,7 @@ PYTHON_VERSION     = $(shell python3 --version | awk '{print $$2}' | cut -d'.' -
 SIM_LDFLAGS        = $(shell cat $(DIFFTEST_HOME)/sim_ld_flags.txt)
 
 PYTHON_DEP_FILE    = scripts/xspdb/requirements.txt
-PDB_PYTHONPATH    := $(PDB_HOME):scripts/xspdb
+PDB_PYTHONPATH    := $(abspath scripts):$(PDB_HOME)
 PDB_LD_PRELOAD    := $(PDB_HOME)/pyxscore/xspcomm/libxspcomm.so.0.0.1 
 
 PDB_ARGS          ?=
@@ -78,6 +78,7 @@ package-pdb:
 	cp -r ${PDB_HOME}/pydifftest $(PACKAGE_TMP_DIR)/XSPdb/xspdb
 	cp -r ${PDB_HOME}/pyxscore $(PACKAGE_TMP_DIR)/XSPdb/xspdb
 	cp scripts/pdb-run.py $(PACKAGE_TMP_DIR)/XSPdb
+	cp ${PDB_HOME}/xs.fst $(PACKAGE_TMP_DIR)/XSPdb/xspdb/pyxscore/
 	if [ -f "/nfs/share/unitychip/xspdb/Makefile" ]; then \
 		cp /nfs/share/unitychip/xspdb/Makefile $(PACKAGE_TMP_DIR)/XSPdb; \
 	fi
