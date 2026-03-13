@@ -92,7 +92,7 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
     assert(PopCount(alloc_bit_vec) === 1.U, "alloc vector should be one hot")
   }
 
-  def update(update_bit_vec: UInt, update_active: Bool) = {
+  def update(update_bit_vec: UInt, update_active: Bool, update_decr_mode: Bool) = {
     // if the slot is 0 before, increment cnt
     val cnt_en = !((bit_vec & update_bit_vec).orR)
     val cnt_next = Mux(cnt_en, cnt + 1.U, cnt)
@@ -104,6 +104,10 @@ class StreamBitVectorBundle(implicit p: Parameters) extends XSBundle with HasStr
     }
     when(update_active) {
       active := true.B
+    }
+    
+    if(ENABLE_DECR_MODE) {
+      decr_mode := decr_mode || update_decr_mode
     }
 
     assert(PopCount(update_bit_vec) === 1.U, "update vector should be one hot")
@@ -334,7 +338,9 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     assert(array(s1_index).cnt =/= 0.U || valids(s1_index), "entry should have been allocated before")
     array(s1_index).update(
       update_bit_vec = UIntToOH(s1_region_bits),
-      update_active = s1_plus_one_hit || s1_minus_one_hit)
+      update_active = s1_plus_one_hit || s1_minus_one_hit,
+      update_decr_mode = RegEnable(s0_plus_one_hit, s0_valid)
+      )
   }
 
   XSPerfAccumulate("s1_alloc", s1_alloc)
