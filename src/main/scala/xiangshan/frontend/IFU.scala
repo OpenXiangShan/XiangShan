@@ -663,7 +663,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
    *        but we actually can do speculative execution if pbmt is NC, maybe fix this later for performance
    */
   val f3_req_is_mmio =
-    f3_valid && (f3_pmp_mmio || Pbmt.isUncache(f3_itlb_pbmt)) && !ExceptionType.hasException(f3_exception)
+    f3_valid && (f3_pmp_mmio || Pbmt.isUncache(f3_itlb_pbmt)) && !ExceptionType.hasException(f3_exception(0))
   val mmio_commit = VecInit(io.rob_commits.map { commit =>
     commit.valid && commit.bits.ftqIdx === f3_ftq_req.ftqIdx && commit.bits.ftqOffset === 0.U
   }).asUInt.orR
@@ -748,8 +748,16 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
     is(m_waitResp) {
       when(fromUncache.fire) {
-        val isRVC      = fromUncache.bits.data(1, 0) =/= 3.U
-        val exception  = ExceptionType.fromTilelink(fromUncache.bits.corrupt)
+        val isRVC        = fromUncache.bits.data(1, 0) =/= 3.U
+        val busException = ExceptionType.fromTilelink(fromUncache.bits.corrupt)
+        // if the instr we just fetched is last 2B in a cacheline, and this instr is RVI
+        // we need to ensure the second cacheline has no exception
+        // we should have f3_exception(1) != f3_exception(0) only if crossing page boundary
+        val crossPageException = Mux(!isRVC && isLastInLine(f3_paddrs(0)), f3_exception(1), ExceptionType.none)
+
+        // the bus exception of the current request has higher priority
+        val exception = ExceptionType.merge(busException, crossPageException)
+
         val needResend = !isRVC && f3_paddrs(0)(2, 1) === 3.U && !ExceptionType.hasException(exception)
         mmio_state      := Mux(needResend, m_sendTLB, m_waitCommit)
         mmio_exception  := exception
