@@ -97,13 +97,12 @@ case class Pbus2Params(
     NOCidBits:    Int = 11,
     cpuAddrWidth:   Int = 32,
     cpuDataWidth:   Int = 64,
+    dmDataWidth:   Int = 64,
     dmHasBusMaster: Boolean = true,
     SYSCNTAddrMap: AddressSet = AddressSet(0x38040000L, 0x10000 - 1), // SYSCNTConsts.size - 1), 0x10000
     DebugAddrMap:  AddressSet = AddressSet(0x00010000L, 0x1000 - 1),  // 4KB
     dmsize:        Int = 0x1000,
     DieIDWidth:    Int = 3,
-    CrsDataWidth:  Int = 128,
-    CrsAddrWidth:  Int = 48,
     IMSICParams: aia.IMSICParams = aia.IMSICParams(
       imsicIntSrcWidth = 9,
       mAddr = 0x3a000000,
@@ -410,10 +409,10 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
         address = Seq(params.DebugAddrMap),
-        supportsWrite = TransferSizes(1, params.cpuDataWidth / 8),
-        supportsRead = TransferSizes(1, params.cpuDataWidth / 8)
+        supportsWrite = TransferSizes(1, params.dmDataWidth / 8),
+        supportsRead = TransferSizes(1, params.dmDataWidth / 8)
       )),
-      beatBytes = params.cpuAddrWidth / 8
+      beatBytes = params.dmDataWidth / 8
     )))
   // define dm_self channel dm_self_mNode <> cpu2dm_s & is_self_id
   // dm_self_mNode,dm_crs_mNode --> dmxbar2to1 --->debugModule
@@ -428,13 +427,19 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     AXI4MasterNode(Seq(AXI4MasterPortParameters(
       masters = Seq(AXI4MasterParameters(
         name = "dm-mnode-crs",
+        maxFlight = Some(1),
+        aligned = true,
         id = IdRange(0, 1 << params.NOCidBits)
       ))
     )))
+  // data width switch bridge for cross-die debug
+  val u_dm_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.cpuDataWidth, DestDataWidth = params.dmDataWidth)) // dm cfg data must be 64bit
+  u_dm_DataBridge.axi_xbar_i := dm_mNode_crs
   val dmxbar2to1 = AXI4Xbar()
   dmxbar2to1 := dm_self_mNode
-  dmxbar2to1 := AXI4Buffer() := dm_mNode_crs
+  dmxbar2to1 := AXI4Buffer() := u_dm_DataBridge.axi_xbar_o
   dm_sNode := dmxbar2to1
+  // data width switch from 64bit to 256bit for access to cross-die debugModule 
   println("=== exit dmPbusTop class last ====")
   class Imp(outer: dmPbusTop) extends LazyModuleImp(outer) {
     println("==== enter uncoreTop Imp ... ==")
