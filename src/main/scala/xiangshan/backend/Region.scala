@@ -315,9 +315,15 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     x.valid := false.B
     x.bits := 0.U.asTypeOf(x.bits)
   })
-  dataPath.io.fromIntIQDeqOg1Payload := 0.U.asTypeOf(dataPath.io.fromIntIQDeqOg1Payload)
-  dataPath.io.fromFpIQDeqOg1Payload  := 0.U.asTypeOf(dataPath.io.fromFpIQDeqOg1Payload )
-  dataPath.io.fromVecIQDeqOg1Payload := 0.U.asTypeOf(dataPath.io.fromVecIQDeqOg1Payload)
+
+  io.fromIntIQDeqOg1Payload.foreach(pl => dataPath.io.fromIntIQDeqOg1Payload := pl)
+  io.fromFpIQDeqOg1Payload.foreach(pl => dataPath.io.fromFpIQDeqOg1Payload := pl)
+  io.fromVecIQDeqOg1Payload.foreach(pl => dataPath.io.fromVecIQDeqOg1Payload := pl)
+
+  io.intIQDeqOg1PayloadOut.foreach(_ := dataPath.io.fromIntIQDeqOg1Payload)
+  io.fpIQDeqOg1PayloadOut.foreach(_ := dataPath.io.fromFpIQDeqOg1Payload)
+  io.vecIQDeqOg1PayloadOut.foreach(_ := dataPath.io.fromVecIQDeqOg1Payload)
+
   val dataPathToExus = (dataPath.io.toIntExu ++ dataPath.io.toFpExu ++ dataPath.io.toVecExu).flatten
   dataPathToExus.map(x => {
     x.ready := false.B
@@ -863,6 +869,22 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   // to write int regfile
   val fpIQOut = Option.when(params.isFpSchd)(MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle)))
   val fromFpIQ = Option.when(params.isIntSchd || params.isVecSchd)(Flipped(MixedVec(fpSchdParam.issueBlockParams.map(_.genIssueDecoupledBundle))))
+
+  // todo: parameter
+  val fromIntIQDeqOg1Payload: Option[MixedVec[MixedVec[IssueQueueDeqOg1Payload]]] =
+    Option.when(!params.isIntSchd)(Input(MixedVec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.genIssueDeqOg1PayloadBundle))))
+  val fromFpIQDeqOg1Payload: Option[MixedVec[MixedVec[IssueQueueDeqOg1Payload]]] =
+    Option.when(!params.isFpSchd)(Input(MixedVec(backendParams.schdParams(FpScheduler()).issueBlockParams.map(_.genIssueDeqOg1PayloadBundle))))
+  val fromVecIQDeqOg1Payload: Option[MixedVec[MixedVec[IssueQueueDeqOg1Payload]]] =
+    Option.when(!params.isVecSchd)(Input(MixedVec(backendParams.schdParams(VecScheduler()).issueBlockParams.map(_.genIssueDeqOg1PayloadBundle))))
+
+  val intIQDeqOg1PayloadOut: Option[MixedVec[MixedVec[IssueQueueDeqOg1Payload]]] =
+    Option.when(params.isIntSchd)(Output(MixedVec(backendParams.schdParams(IntScheduler()).issueBlockParams.map(_.genIssueDeqOg1PayloadBundle))))
+  val fpIQDeqOg1PayloadOut: Option[MixedVec[MixedVec[IssueQueueDeqOg1Payload]]] =
+    Option.when(params.isFpSchd)(Output(MixedVec(backendParams.schdParams(FpScheduler()).issueBlockParams.map(_.genIssueDeqOg1PayloadBundle))))
+  val vecIQDeqOg1PayloadOut: Option[MixedVec[MixedVec[IssueQueueDeqOg1Payload]]] =
+    Option.when(params.isVecSchd)(Output(MixedVec(backendParams.schdParams(VecScheduler()).issueBlockParams.map(_.genIssueDeqOg1PayloadBundle))))
+
   // TopDown
   val uopTopDown = new UopTopDown
 }

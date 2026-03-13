@@ -881,8 +881,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.robIdx := deqEntryVec(i).bits.status.robIdx
 
     require(deq.bits.dataSources.size <= finalDataSources(i).size)
-    deq.bits.psrc.zip(deqEntryVec(i).bits.status.srcStatus).map(x => x._1 := x._2.psrc)
-    deq.bits.psrcVl.zip(deqEntryVec(i).bits.status.srcStatusVl).map(x => x._1 := x._2.psrc)
     deq.bits.dataSources.zip(finalDataSources(i)).foreach { case (sink, source) => sink := source}
     deq.bits.exuSources.foreach(_.zip(finalExuSources.get(i)).foreach { case (sink, source) => sink := source})
     deq.bits.loadDependency.foreach(_.zip(finalLoadDependency(i)).foreach { case (sink, source) => sink := source})
