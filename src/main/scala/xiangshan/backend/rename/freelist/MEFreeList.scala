@@ -39,7 +39,7 @@ class MEFreeList(size: Int, commitWidth: Int)(implicit p: Parameters) extends Ba
   /**
     * Allocation: from freelist (same as StdFreelist)
     */
-  val phyRegCandidates = VecInit(headPtrOHVec.map(sel => Mux1H(sel, freeList)))
+  val phyRegCandidates = VecInit((0 until RenameWidth).map(i => freeList(headPtrVec(i).value)))
   for (i <- 0 until RenameWidth) {
     // enqueue instr, is move elimination
     io.allocatePhyReg(i) := phyRegCandidates(PopCount(io.allocateReq.take(i)))
@@ -54,20 +54,24 @@ class MEFreeList(size: Int, commitWidth: Int)(implicit p: Parameters) extends Ba
 
   // update head pointer
   val numAllocate = Mux(io.walk, PopCount(io.walkReq), PopCount(io.allocateReq))
-  val headPtrNew   = Mux(lastCycleRedirect, redirectedHeadPtr, headPtr + numAllocate)
-  val headPtrOHNew = Mux(lastCycleRedirect, redirectedHeadPtrOH, headPtrOHVec(numAllocate))
-  val headPtrNext   = Mux(doRename, headPtrNew, headPtr)
-  val headPtrOHNext = Mux(doRename, headPtrOHNew, headPtrOH)
-  headPtr   := headPtrNext
-  headPtrOH := headPtrOHNext
+  val headPtrNew  = Mux(lastCycleRedirect, redirectedHeadPtr, headPtr + numAllocate)
+  val headPtrNext = Mux(doRename, headPtrNew, headPtr)
+
+  for (i <- 0 until RenameWidth) {
+    headPtrVec(i) := headPtrNext + i.U
+  }
 
   /**
     * Deallocation: when refCounter becomes zero, the register can be released to freelist
     */
-  for (i <- 0 until commitWidth) {
-    when (io.freeReq(i)) {
-      val freePtr = tailPtr + PopCount(io.freeReq.take(i))
-      freeList(freePtr.value) := io.freePhyReg(i)
+  val freePtr = VecInit(Seq.tabulate(commitWidth)(i => tailPtr + PopCount(io.freeReq.take(i))))
+  for (i <- 0 until size) {
+    val freeReqOH = VecInit(io.freeReq.zipWithIndex.map { case (w, idx) =>
+      w && freePtr(idx).value === i.U
+    })
+    val freePhyReg = Mux1H(freeReqOH, io.freePhyReg)
+    when(freeReqOH.asUInt.orR) {
+      freeList(i) := freePhyReg
     }
   }
 
