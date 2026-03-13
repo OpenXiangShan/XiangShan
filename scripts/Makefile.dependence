@@ -1,32 +1,48 @@
+#***************************************************************************************
+# Copyright (c) 2025 Beijing Institute of Open Source Chip (BOSC)
+# Copyright (c) 2025 Institute of Computing Technology, Chinese Academy of Sciences
+#
+# XiangShan is licensed under Mulan PSL v2.
+# You can use this software according to the terms and conditions of the Mulan PSL v2.
+# You may obtain a copy of Mulan PSL v2 at:
+#          http://license.coscl.org.cn/MulanPSL2
+#
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+# EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+# MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+#
+# See the Mulan PSL v2 for more details.
+#***************************************************************************************
+
 # scripts/Makefile.dependence
 
-# 1. 自动推导并定义路径变量
-# NOOP_HOME 将是项目根目录的绝对路径
+# 1. Automatically derive and define path variables
+# NOOP_HOME will be the absolute path to the project root directory
 NOOP_HOME ?= $(CURDIR)
 NEMU_HOME ?= $(NOOP_HOME)/NEMU
 AM_HOME   ?= $(NOOP_HOME)/nexus-am
 
-# 2. 将这些变量导出，使其在子 Makefile (如 difftest/Makefile) 中可见
+# 2. Export these variables to make them visible in sub-Makefiles (e.g., difftest/Makefile)
 export NOOP_HOME NEMU_HOME AM_HOME
 
-# 3. 定义一个伪目标 `deps`，用于触发依赖检查和下载
+# 3. Define a phony target 'deps' to trigger dependency checking and downloading
 .PHONY: deps
 
-# 4. 当 `make deps` 执行或任何目标依赖 `deps` 时，
-#    make 会检查下面的目标是否存在。
-#    如果 $(NEMU_HOME) 目录不存在，则会执行 git clone。
+# 4. When 'make deps' is executed or any target depends on 'deps',
+#    make will check if the following targets exist.
+#    If $(NEMU_HOME) directory does not exist, git clone will be executed.
 $(NEMU_HOME):
 	@echo "Cloning NEMU repository..."
 	git clone https://github.com/OpenXiangShan/NEMU.git $@
 	@echo "Initializing NEMU submodules..."
 	@cd $@ && git submodule update --init --recursive
 
-#    同理，检查 $(AM_HOME) 目录。
+#    Similarly, check $(AM_HOME) directory.
 $(AM_HOME):
 	@echo "Cloning nexus-am repository..."
 	git clone https://github.com/OpenXiangShan/nexus-am.git $@
 	@echo "Initializing nexus-am submodules..."
 	@cd $@ && git submodule update --init --recursive
 
-# `deps` 依赖于这两个仓库目录，从而自动触发检查和下载
+# 'deps' depends on these two repository directories, thus automatically triggering checking and downloading
 deps: $(NEMU_HOME) $(AM_HOME)
