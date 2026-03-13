@@ -102,6 +102,7 @@ class XSArgs(object):
         self.pgo = args.pgo
         self.pgo_max_cycle = args.pgo_max_cycle
         self.pgo_emu_args = args.pgo_emu_args
+        self.pgo_bolt = args.pgo_bolt
         self.llvm_profdata = args.llvm_profdata
         self.emulator = args.emulator
         # wave dump path
@@ -148,6 +149,7 @@ class XSArgs(object):
             (self.pgo,           "PGO_WORKLOAD"),
             (self.pgo_max_cycle, "PGO_MAX_CYCLE"),
             (self.pgo_emu_args,  "PGO_EMU_ARGS"),
+            (self.pgo_bolt,      "PGO_BOLT"),
             (self.llvm_profdata, "LLVM_PROFDATA"),
             (self.issue,         "ISSUE"),
             (self.simfrontend,   "ENABLE_SIMFRONTEND"),
@@ -794,6 +796,7 @@ if __name__ == "__main__":
     parser.add_argument('--pgo', nargs='?', type=str, help='workload for pgo (null to disable pgo)')
     parser.add_argument('--pgo-max-cycle', nargs='?', default=400000, type=int, help='maximun cycle to train pgo')
     parser.add_argument('--pgo-emu-args', nargs='?', default='--no-diff', type=str, help='emu arguments for pgo')
+    parser.add_argument('--pgo-bolt', nargs='?', default=0, type=int, help='whether to use bolt for pgo')
     parser.add_argument('--llvm-profdata', nargs='?', type=str, help='corresponding llvm-profdata command of clang to compile emu, do not set with GCC')
     parser.add_argument('--emulator', choices=['verilator', 'gsim'], default='verilator', type=str, help='use verilator or gsim to compile emu')
 

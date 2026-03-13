@@ -28,8 +28,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
 import xiangshan.backend.decode.{DecodeStage, FusionDecoder}
-import xiangshan.backend.dispatch.CoreDispatchTopDownIO
-import xiangshan.backend.dispatch.NewDispatch
+import xiangshan.backend.dispatch._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
@@ -94,7 +93,7 @@ class CtrlBlockImp(
 
   val io = IO(new CtrlBlockIO())
 
-  val dispatch = Module(new NewDispatch)
+  val dispatch = Module(new Dispatch)
   val gpaMem = wrapper.gpaMem.module
   val decode = Module(new DecodeStage)
   val fusionDecoder = Module(new FusionDecoder)
@@ -419,7 +418,8 @@ class CtrlBlockImp(
   decode.io.fromRob.commitVType := rob.io.toDecode.commitVType
   decode.io.fromRob.walkVType := rob.io.toDecode.walkVType
 
-  decode.io.redirect := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
+  decode.io.redirect.valid := s1_s3_redirect.valid || s2_s4_pendingRedirectValid
+  decode.io.redirect.bits := Mux(s1_s3_redirect.valid, s1_s3_redirect.bits, s2_s4_redirect.bits)
 
   // add decode Buf for in.ready better timing
   /**
@@ -484,7 +484,7 @@ class CtrlBlockImp(
    */
   for (i <- 0 until DecodeWidth) {
     // decodeBufValid update
-    when(decode.io.redirect || decodeBufValid(0) && decodeBufValid(i) && decode.io.in(i).ready && !VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
+    when(decode.io.redirect.valid || decodeBufValid(0) && decodeBufValid(i) && decode.io.in(i).ready && !VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
       decodeBufValid(i) := false.B
     }.elsewhen(decodeBufValid(i) && VecInit(decodeBufNotAccept.drop(i)).asUInt.orR) {
       decodeBufValid(i) := Mux(decodeBufAcceptNum > DecodeWidth.U - 1.U - i.U, false.B, decodeBufValid(i.U + decodeBufAcceptNum))
@@ -518,7 +518,7 @@ class CtrlBlockImp(
    */
   decode.io.in.zipWithIndex.foreach { case (decodeIn, i) =>
     decodeIn.valid := Mux(decodeBufValid(0), decodeBufValid(i), decodeFromFrontend(i).valid)
-    decodeFromFrontend(i).ready := decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.io.redirect
+    decodeFromFrontend(i).ready := decodeFromFrontend(0).valid && !decodeBufValid(0) && decodeFromFrontend(i).valid && !decode.io.redirect.valid
     decodeIn.bits := Mux(decodeBufValid(i), decodeBufBits(i), decodeConnectFromFrontend(i))
   }
   /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
@@ -605,6 +605,7 @@ class CtrlBlockImp(
     rename.io.validVec(i) := decodePipeRename(i).valid
     rename.io.isFusionVec(i) := false.B
     rename.io.fusionCross2FtqVec(i) := false.B
+    decode.io.debugOutValid.get(i) := decodePipeRename(i).valid
   }
 
   for (i <- 0 until RenameWidth - 1) {
@@ -671,6 +672,14 @@ class CtrlBlockImp(
   rename.io.snpt.flushVec := flushVecNext
   rename.io.snptLastEnq.valid := !isEmpty(snpt.io.enqPtr, snpt.io.deqPtr)
   rename.io.snptLastEnq.bits := snpt.io.snapshots((snpt.io.enqPtr - 1.U).value).robIdx.head
+  rename.io.debugDispatchAllFire.foreach(_ := dispatch.io.toRenameAllFire)
+
+  for (i <- 0 until RenameWidth - 1) {
+    when (fusionDecoder.io.out(i).valid) {
+      // Topdown fusion bubble
+      rename.io.stallReason.in.reason(i + 1) := TopDownCounters.FusionBubble.id.U
+    }
+  }
 
   val renameOut = Wire(chiselTypeOf(dispatch.io.fromRename))
   renameOut.zip(rename.io.out).map{ case (sink, source) => {
@@ -687,6 +696,9 @@ class CtrlBlockImp(
 
   // pipeline between rename and dispatch
   PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, dispatch.io.toRenameAllFire, "renamePipeDispatch")
+
+  rename.io.debugOutValidVec.get := dispatch.io.fromRename.map(_.valid)
+
 
   dispatch.io.redirect := s1_s3_redirect
   val enqRob = Wire(chiselTypeOf(rob.io.enq))
@@ -707,8 +719,6 @@ class CtrlBlockImp(
   rob.io.enq.req := enqRob.req
   dispatch.io.robHeadFuType := rob.io.debugRobHeadFuType
   dispatch.io.stallReason <> rename.io.stallReason.out
-  dispatch.io.lqCanAccept := io.lqCanAccept
-  dispatch.io.sqCanAccept := io.sqCanAccept
   dispatch.io.fromMem.lcommit := io.fromMemToDispatch.lcommit
   dispatch.io.fromMem.scommit := io.fromMemToDispatch.scommit
   dispatch.io.fromMem.lqDeqPtr := io.fromMemToDispatch.lqDeqPtr
@@ -729,8 +739,9 @@ class CtrlBlockImp(
   dispatch.io.wbPregsVl := io.toDispatch.wbPregsVl
   dispatch.io.vlWriteBackInfo := io.toDispatch.vlWriteBackInfo
   dispatch.io.robHeadNotReady := rob.io.headNotReady
-  dispatch.io.robFull := rob.io.robFull
   dispatch.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
+  dispatch.io.debugBlockBackward.foreach(_ := rob.io.debugBlockBackward.get)
+  dispatch.io.debugWaitForward.foreach(_ := rob.io.debugWaitForward.get)
 
   val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops).flatten
   println(s"[CtrlBlock] toIssueBlockUops.size = ${toIssueBlockUops.size}")

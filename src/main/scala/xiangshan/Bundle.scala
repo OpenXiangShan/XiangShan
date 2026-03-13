@@ -777,7 +777,6 @@ class MatchTriggerIO(implicit p: Parameters) extends XSBundle {
 
 class StallReasonIO(width: Int) extends Bundle {
   val reason = Output(Vec(width, UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
-  val backReason = Flipped(Valid(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
 }
 
 // custom l2 - l1 interface

@@ -29,7 +29,7 @@ import utility.XSPerfAccumulate
 import xiangshan.CtrlFlow
 import xiangshan.StallReasonIO
 import xiangshan.TopDownCounters
-import xiangshan.frontend.BpuTopDownInfo
+import xiangshan.frontend.BackendRedirectTopdown
 import xiangshan.frontend.FetchToIBuffer
 import xiangshan.frontend.FrontendTopDownBundle
 
@@ -42,10 +42,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     val decodeCanAccept: Bool                        = Input(Bool())
 
     // top-down
-    val bpuTopDownInfo:  BpuTopDownInfo = Input(new BpuTopDownInfo)
-    val controlRedirect: Bool           = Input(Bool())
-    val memVioRedirect:  Bool           = Input(Bool())
-    val stallReason:     StallReasonIO  = new StallReasonIO(DecodeWidth)
+    val backendRedirectTopdown: BackendRedirectTopdown = Input(new BackendRedirectTopdown)
+    val stallReason:            StallReasonIO          = new StallReasonIO(DecodeWidth)
   }
 
   val io: IBufferIO = IO(new IBufferIO)
@@ -367,32 +365,21 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  private val topdownStage = RegInit(0.U.asTypeOf(new FrontendTopDownBundle))
-  topdownStage := io.in.bits.topdownInfo
-  when(io.flush) {
-    when(io.controlRedirect) {
-      when(io.bpuTopDownInfo.btbMissBubble) {
-        topdownStage.reasons(TopDownCounters.BTBMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.tageMissBubble) {
-        topdownStage.reasons(TopDownCounters.TAGEMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.scMissBubble) {
-        topdownStage.reasons(TopDownCounters.SCMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.ittageMissBubble) {
-        topdownStage.reasons(TopDownCounters.ITTAGEMissBubble.id) := true.B
-      }.elsewhen(io.bpuTopDownInfo.rasMissBubble) {
-        topdownStage.reasons(TopDownCounters.RASMissBubble.id) := true.B
-      }
-    }.elsewhen(io.memVioRedirect) {
-      topdownStage.reasons(TopDownCounters.MemVioRedirectBubble.id) := true.B
-    }.otherwise {
-      topdownStage.reasons(TopDownCounters.OtherRedirectBubble.id) := true.B
-    }
+  private def numStages    = 2
+  private val topdownStages = RegInit(VecInit(Seq.fill(numStages)(0.U.asTypeOf(new FrontendTopDownBundle))))
+
+  topdownStages(0) := io.in.bits.topdownInfo
+  for (i <- 1 until numStages) {
+    topdownStages(i) := topdownStages(i - 1)
   }
 
-  private val matchBubble   = Wire(UInt(log2Up(TopDownCounters.NumStallReasons.id).W))
-  private val deqValidCount = PopCount(validVec.asBools)
+  topdownStages.foreach(_.backendRedirectOverride(io.backendRedirectTopdown))
+
+  private val deqValidCount = PopCount(io.out.map(_.valid))
   private val deqWasteCount = DecodeWidth.U - deqValidCount
-  matchBubble := (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(topdownStage.reasons.reverse)
+  private val matchBubble = (TopDownCounters.NumStallReasons.id - 1).U - PriorityEncoder(
+    topdownStages(numStages - 1).reasons.reverse
+  )
 
   io.stallReason.reason.foreach(_ := 0.U)
   for (i <- 0 until DecodeWidth) {
@@ -401,7 +388,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     }
   }
 
-  when(!(deqWasteCount === DecodeWidth.U || topdownStage.reasons.asUInt.orR)) {
+  when(!(deqWasteCount === DecodeWidth.U || topdownStages(numStages - 1).reasons.asUInt.orR)) {
     // should set reason for FetchFragmentationStall
     // topdownStage.reasons(TopDownCounters.FetchFragmentationStall.id) := true.B
     for (i <- 0 until DecodeWidth) {
@@ -409,11 +396,6 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
         io.stallReason.reason(DecodeWidth - i - 1) := TopDownCounters.FetchFragBubble.id.U
       }
     }
-  }
-
-  when(io.stallReason.backReason.valid) {
-    // Backend always overrides frontend reasons
-    io.stallReason.reason.map(_ := io.stallReason.backReason.bits)
   }
 
   // Debug info
