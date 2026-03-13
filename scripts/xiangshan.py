@@ -88,6 +88,7 @@ class XSArgs(object):
         self.with_chiseldb = 1 if args.dump_db else 0
         # emu arguments
         self.max_instr = args.max_instr
+        self.warmup_instr = args.warmup_instr
         self.ram_size = args.ram_size
         self.seed = args.seed if args.seed is not None else random.randint(0, 9999)
         self.numa = args.numa
@@ -159,6 +160,7 @@ class XSArgs(object):
     def get_emu_args(self):
         emu_args = [
             (self.max_instr, "max-instr"),
+            (self.warmup_instr, "warmup-instr"),
             (self.diff,      "diff"),
             (self.seed,      "seed"),
             (self.ram_size,  "ram-size"),
@@ -783,6 +785,7 @@ if __name__ == "__main__":
     parser.add_argument('--numa', action='store_true', help='use numactl')
     parser.add_argument('--diff', nargs='?', default="./ready-to-run/riscv64-nemu-interpreter-so", type=str, help='nemu so')
     parser.add_argument('--max-instr', nargs='?', type=int, help='max instr')
+    parser.add_argument('--warmup-instr', nargs='?', type=int, help='warmup instr')
     parser.add_argument('--disable-fork', action='store_true', help='disable lightSSS')
     parser.add_argument('--no-diff', action='store_true', help='disable difftest')
     parser.add_argument('--ram-size', nargs='?', type=str, help='manually set simulation memory size (8GB by default)')

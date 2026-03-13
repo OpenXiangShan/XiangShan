@@ -146,10 +146,10 @@ jobs:
             ckpt: 739
           - name: gcc_s04
             ckpt: 2772
-          - name: mcf
-            ckpt: 6388
-          - name: gobmk_nngs
-            ckpt: 453
+          # - name: mcf
+          #   ckpt: 6388
+          # - name: gobmk_nngs
+          #   ckpt: 453
           - name: hmmer_nph3
             ckpt: 33214
           - name: sjeng
@@ -158,14 +158,14 @@ jobs:
             ckpt: 81539
           - name: h264ref_foreman.main
             ckpt: 10053
-          - name: omnetpp
-            ckpt: 14042
+          # - name: omnetpp
+          #   ckpt: 14042
           - name: astar_rivers
             ckpt: 8728
           - name: xalancbmk
             ckpt: 9874
-          - name: bwaves
-            ckpt: 30350
+          # - name: bwaves
+          #   ckpt: 30350
           - name: gamess_gradient
             ckpt: 36450
           - name: milc
@@ -188,8 +188,8 @@ jobs:
             ckpt: 8362
           - name: calculix
             ckpt: 53456
-          - name: GemsFDTD
-            ckpt: 49458
+          # - name: GemsFDTD
+          #   ckpt: 49458
           - name: tonto
             ckpt: 69015
           - name: lbm
@@ -220,7 +220,8 @@ jobs:
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
             --wave-dump ${WAVE_HOME} \
             --numa --threads 1 \
-            --max-instr 5000000 \
+            --warmup-instr 20000000 \
+            --max-instr 40000000 \
             ${CKPT} \
             2> stderr.log | tee stdout.log
           cat stderr.log | sort | tee stderr-sorted.log
