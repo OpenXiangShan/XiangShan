@@ -266,10 +266,11 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   })
   println("IMSICXbar: end sNodes define")
 
-
-
+  // instance data width switch bridge for peri_s (256bit -> 64bit)
+  val u_hnis_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = 256, DestDataWidth = params.MSIOutDataWidth))
+  u_hnis_DataBridge.axi_xbar_i := hni_s_xbar
   pcie_xbar1to2 := aplic_mNode
-  pcie_xbar1to2 := AXI4Buffer() := hni_s_xbar
+  pcie_xbar1to2 := AXI4Buffer() := u_hnis_DataBridge.axi_xbar_o
   // instance data width switch bridge
   val u_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.cpuDataWidth, DestDataWidth = params.MSIOutDataWidth))
   u_DataBridge.axi_xbar_i := Cbus.cpum
@@ -496,15 +497,12 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     masters = Seq(AXI4MasterParameters(
       name = "master-node",
       maxFlight = Some(1),
+      aligned = true,
       id = IdRange(0, 1 << params.NOCidBits)
     ))
   )))
   imsicTop.hni_s_xbar := hni_mNode
-  println("====uncoreTop: after imsicTop instance ..==")
-  println("====uncoreTop: before dmTop instance ..==")
   val dmTop = LazyModule(new dmPbusTop(params))
-  println("====uncoreTop: after dmTop instance ..==")
-  println("====uncoreTop: before syscnt instance ..==")
   val syscnt = LazyModule(new StandAloneSYSCNT(
     useTL = false,
     baseAddress = params.SYSCNTAddrMap.base,
@@ -512,7 +510,6 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     dataWidth = params.periParams.timedataBytes * 8,
     hartNum = params.NumHarts
   ))
-  println("====uncoreTop: after syscnt instance ..==")
   for (i <- 0 until params.NumHarts) {
     cpu_xbar1to2(i) := AXI4Buffer() := cpu_mNodes(i)
     imsicTop.Cbus.cpus(i) := cpu_xbar1to2(i)
@@ -523,6 +520,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     masters = Seq(AXI4MasterParameters(
       name = "master-node",
       maxFlight = Some(1),
+      aligned = true,
       id = IdRange(0, 1 << params.NOCidBits)
     ))
   )))
@@ -537,7 +535,10 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       )),
       beatBytes = params.aplicParams.CFG_DATA_WIDTH / 8
     )))
-  peri_xbar  := peri_mNode
+  // instance data width switch bridge for peri_s (256bit -> 64bit)
+  val u_peri_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = 256, DestDataWidth = params.aplicParams.CFG_DATA_WIDTH))
+  u_peri_DataBridge.axi_xbar_i := peri_mNode
+  peri_xbar  := u_peri_DataBridge.axi_xbar_o
   peri_sNode := peri_xbar
   val peri_s1Node =
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
