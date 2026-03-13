@@ -221,7 +221,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   vec_old_pdest := rat.io.vec_old_pdest
   v0_old_pdest := rat.io.v0_old_pdest
   vl_old_pdest := rat.io.vl_old_pdest
-  
+
   debug_int_rat.foreach(_ := rat.io.debug_int_rat.get)
   debug_fp_rat.foreach (_ := rat.io.debug_fp_rat.get)
   debug_vec_rat.foreach(_ := rat.io.debug_vec_rat.get)
@@ -637,7 +637,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       }
     }.elsewhen(needRobFlags(i)) {
       uops(i).traceBlockInPipe.ilastsize := Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word)
-      
+
       // CSR systemop instruction excluding ebreak & ecall
       val csrAddr = Imm_Z().getCSRAddr(uops(i).imm(Imm_Z().len - 1, 0))
       val isXret = FuType.isCsr(uops(i).fuType) && CSROpType.isSystemOp(uops(i).fuOpType) && (csrAddr(11, 1).orR)
