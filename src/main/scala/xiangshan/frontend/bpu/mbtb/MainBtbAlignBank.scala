@@ -64,20 +64,13 @@ class MainBtbAlignBank(
 
       val req: Valid[Req] = Flipped(Valid(new Req))
     }
-    class Trace extends Bundle {
-      val needWrite: Bool         = Bool()
-      val setIdx:    UInt         = UInt(SetIdxLen.W)
-      val bankIdx:   UInt         = UInt(log2Ceil(NumInternalBanks).W)
-      val wayIdx:    UInt         = UInt(log2Ceil(NumWay).W)
-      val entry:     MainBtbEntry = new MainBtbEntry
-    }
 
     val resetDone: Bool      = Output(Bool())
     val stageCtrl: StageCtrl = Input(new StageCtrl)
 
-    val read:  Read  = new Read
-    val write: Write = new Write
-    val trace: Trace = Output(new Trace)
+    val read:  Read                  = new Read
+    val write: Write                 = new Write
+    val trace: MainBtbAlignBankTrace = Output(new MainBtbAlignBankTrace)
 
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
     val s3_takenMask: Vec[Bool] = Input(Vec(NumWay, Bool()))
