@@ -187,10 +187,11 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   initCommonHR.predStartPc.get := io.s0_startPc.get
 
   when(r0_valid) {
-    enqPtr                    := writePtr + 1.U
-    recoverPtr                := writePtr
-    predPtr                   := writePtr
-    histQueue(writePtr.value) := r0_commonHR // The queue value during redirect is used for diff
+    enqPtr                            := writePtr + 1.U
+    recoverPtr                        := writePtr - 1.U
+    predPtr                           := writePtr - 1.U
+    histQueue(writePtr.value)         := initCommonHR // The queue value during redirect is used for diff
+    histQueue((writePtr - 1.U).value) := r0_commonHR  // The queue value during redirect is used for diff
   }.elsewhen(s3_override) {
     val realRecoverPtr = Mux(hasOverrideHist, recoverPtr + 1.U, recoverPtr)
     histQueue(writePtr.value)         := s3_newCommonHR // update s3_fire block
