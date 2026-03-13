@@ -55,9 +55,9 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val s3_imli                = RegEnable(s2_imli, s2_fire)
   private val imli                   = RegInit(0.U(ImliWidth.W))
   private val s0_commonHR            = WireInit(0.U.asTypeOf(new CommonHREntry))
-  private val s1_commonHR            = RegEnable(s0_commonHR, s0_fire)
-  private val s2_commonHR            = RegEnable(s1_commonHR, s1_fire)
-  private val s3_commonHR            = RegEnable(s2_commonHR, s2_fire)
+  private val s1_commonHR            = RegEnable(s0_commonHR, 0.U.asTypeOf(new CommonHREntry), s0_fire)
+  private val s2_commonHR            = RegEnable(s1_commonHR, 0.U.asTypeOf(new CommonHREntry), s1_fire)
+  private val s3_commonHR            = RegEnable(s2_commonHR, 0.U.asTypeOf(new CommonHREntry), s2_fire)
   private val commonHR               = RegInit(0.U.asTypeOf(new CommonHREntry))
   private val s3_commonHRResolveMeta = WireInit(0.U.asTypeOf(new CommonHRResolveMeta))
 
@@ -187,10 +187,11 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   initCommonHR.predStartPc.get := io.s0_startPc.get
 
   when(r0_valid) {
-    enqPtr                    := writePtr + 1.U
-    recoverPtr                := writePtr
-    predPtr                   := writePtr
-    histQueue(writePtr.value) := r0_commonHR // The queue value during redirect is used for diff
+    enqPtr                            := writePtr + 1.U
+    recoverPtr                        := writePtr - 1.U
+    predPtr                           := writePtr - 1.U
+    histQueue(writePtr.value)         := initCommonHR // The queue value during redirect is used for diff
+    histQueue((writePtr - 1.U).value) := r0_commonHR  // The queue value during redirect is used for diff
   }.elsewhen(s3_override) {
     val realRecoverPtr = Mux(hasOverrideHist, recoverPtr + 1.U, recoverPtr)
     histQueue(writePtr.value)         := s3_newCommonHR // update s3_fire block
@@ -221,10 +222,10 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   s0_commonHR := MuxCase(
     0.U.asTypeOf(new CommonHREntry),
     Seq(
-      r0_valid          -> r0_commonHR,
-      s3_override       -> histQueue(recoverPtr.value),
-      (s0_fire && sync) -> s3_newCommonHR, // bypass s3_newCommonHR
-      s0_fire           -> histQueue(predPtr.value)
+      r0_valid                     -> r0_commonHR,
+      s3_override                  -> histQueue(recoverPtr.value),
+      (s0_fire && s3_fire && sync) -> s3_newCommonHR, // bypass s3_newCommonHR
+      s0_fire                      -> histQueue(predPtr.value)
     )
   )
 
