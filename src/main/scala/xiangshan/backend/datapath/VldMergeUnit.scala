@@ -47,6 +47,7 @@ class VldMergeUnit(val params: ExeUnitParams)(implicit p: Parameters) extends XS
   io.writebackAfterMerge.bits.toVecRf.foreach(_.valid := wbReg.bits.toVecRf.map(_.valid).getOrElse(false.B))
   io.writebackAfterMerge.bits.toV0Rf.foreach(_.valid := wbReg.bits.toV0Rf.map(_.valid).getOrElse(false.B))
   io.writebackAfterMerge.bits.toVecRf.foreach(_.bits := vdAfterMerge)
+  io.writebackAfterMerge.bits.toV0Rf.foreach(_.bits  := vdAfterMerge)
 }
 
 class VldMergeUnitIO(param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
