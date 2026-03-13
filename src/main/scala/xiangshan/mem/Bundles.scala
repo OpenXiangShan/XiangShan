@@ -149,6 +149,8 @@ object Bundles {
       res.pc := this.uop.pc
       res.miss := this.miss
       res.pfHitStream := isFromStream(this.meta_prefetch)
+      // Finer-grained access information
+      res.accessVec := UIntToOH(this.vaddr(DCacheLineOffset-1, DCacheWordOffset))
       res
     }
 
