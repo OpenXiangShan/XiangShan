@@ -81,14 +81,17 @@ class NewFreeList(numPhyRegs: Int, commitWidth: Int, RenameWidth: Int,regType: R
   
   //allocate phyreg
   val salt = RegInit(0.U((log2Up(RenameWidth)-1).W))
-  when(io.doAllocate){
-    salt := salt+1.U
+    when(io.doAllocate){
+      salt := salt+1.U
   }
   val ifCanAllocateRegOnSalt = Wire(Vec(RenameWidth, Bool()))
-  for(i <- 0 until RenameWidth){
-    val saltIndex = (salt + i.U(RenameWidth.W))(RenameWidth-1,0)
+  for(i <- 0 until bankCount){
+    val saltIndex = (salt + i.U(RenameWidth.W))(log2Up(RenameWidth)-1,0)
+    val saltIndexAddbankCount = (saltIndex+bankCount.U)(log2Up(RenameWidth)-1,0)
     ifCanAllocateRegOnSalt(i) := Mux(io.allocateReq(i),ifCanAllocateReg(saltIndex),true.B)
+    ifCanAllocateRegOnSalt(i+bankCount) := Mux(io.allocateReq(i+bankCount),ifCanAllocateReg(saltIndexAddbankCount),true.B)
     io.allocatePhyReg(i) := getAllocatePhyReg(saltIndex)
+    io.allocatePhyReg(i+bankCount) := getAllocatePhyReg(saltIndexAddbankCount)
   }
   io.canAllocate := ifCanAllocateRegOnSalt.asUInt.andR
 
