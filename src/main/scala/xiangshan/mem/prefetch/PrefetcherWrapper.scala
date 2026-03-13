@@ -238,9 +238,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
         s2_loadPcVec(i),
         s3_loadPcVec(i)
       )
-      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && (
-        source.bits.miss || isFromStream(source.bits.meta_prefetch)
-      )&& !source.bits.is_from_hw_pf // && isLoadAccess(source.bits.uop)
+      pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && !source.bits.is_from_hw_pf
+      // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
     }
 
