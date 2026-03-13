@@ -310,6 +310,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   s1_utageMeta := utage.io.meta.bits
 
+  // calculate compare matrix in s2 to optimize timing
+  private val s2_compareMatrix = CompareMatrix(VecInit(mbtb.io.result.map(_.bits.cfiPosition)))
+
   /* *** s3 prediction selection *** */
   private val s3_mbtbResult     = RegEnable(mbtb.io.result, s2_fire)
   private val s3_tagePrediction = RegEnable(tage.io.prediction, s2_fire)
@@ -337,7 +340,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   })
   private val s3_taken = s3_takenMask.reduce(_ || _)
 
-  private val s3_compareMatrix      = CompareMatrix(VecInit(s3_mbtbResult.map(_.bits.cfiPosition)))
+  private val s3_compareMatrix      = RegEnable(s2_compareMatrix, s2_fire)
   private val s3_firstTakenBranchOH = s3_compareMatrix.getLeastElementOH(s3_takenMask)
   private val s3_firstTakenBranch   = Mux1H(s3_firstTakenBranchOH, s3_mbtbResult)
   private val s3_useRas             = s3_firstTakenBranch.bits.attribute.isReturn
