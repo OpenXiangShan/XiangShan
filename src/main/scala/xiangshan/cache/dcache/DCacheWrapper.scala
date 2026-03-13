@@ -32,6 +32,7 @@ import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache.wpu._
 import xiangshan.mem.prefetch._
 import xiangshan.mem.{AddPipelineReg, DataBufferEntry, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr}
+import xiangshan.mem.L1PrefetchReq
 
 // DCache specific parameters
 case class DCacheParameters
@@ -797,6 +798,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val cmoOpResp = DecoupledIO(new CMOResp)
   val l1Miss = Output(Bool())
   val wfi = Flipped(new WfiReqBundle)
+  val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
 }
 
 private object ArbiterCtrl {
@@ -1007,6 +1009,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
   io.wfi <> missQueue.io.wfi
   io.refillTrain := missQueue.io.refill_train
+  mainPipe.io.prefetch_req <> io.prefetch_req
 
   // l1 dcache controller
   outer.cacheCtrlOpt.foreach {
@@ -1378,6 +1381,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   for (w <- 0 until LoadPipelineWidth) {
     prefetcherMonitor.io.loadinfo(w) := ldu(w).io.prefetch_stat
   }
+  prefetcherMonitor.io.mainpipeinfo := mainPipe.io.prefetch_stat
   prefetcherMonitor.io.missinfo := missQueue.io.prefetch_stat
   prefetcherMonitor.io.debugRolling := io.debugRolling
   prefetcherMonitor.io.clear_flag := clear_flag
