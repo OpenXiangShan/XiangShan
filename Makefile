@@ -281,6 +281,25 @@ ifeq ($(CHISEL_TARGET),systemverilog)
 	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
 endif
 
+FRONTEND_BUILD_DIR = ./build-frontend
+FRONTEND_RTL_DIR   = $(FRONTEND_BUILD_DIR)/rtl
+FRONTENDTOP        = top.FrontendTopMain
+FRONTEND_TOP_V     = $(FRONTEND_RTL_DIR)/FrontendTop.$(RTL_SUFFIX)
+
+$(FRONTEND_TOP_V): $(SCALA_FILE)
+	mkdir -p $(@D)
+	$(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.runMain $(FRONTENDTOP) \
+		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) \
+		--num-cores $(NUM_CORES) $(TOPMAIN_ARGS)
+ifeq ($(CHISEL_TARGET),systemverilog)
+	@{ git log -n 1; git diff; } | sed 's/^/\/\// ' > $(dir $@).__diff__
+	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
+endif
+
+frontend: $(FRONTEND_TOP_V)
+
+.PHONY: frontend
+
 verilog: $(call docker-deps,$(TOP_V))
 
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
