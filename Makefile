@@ -17,6 +17,7 @@
 
 BUILD_DIR = ./build
 RTL_DIR = $(BUILD_DIR)/rtl
+NOOP_HOME ?= `pwd`
 
 # import docker support
 include scripts/Makefile.docker
