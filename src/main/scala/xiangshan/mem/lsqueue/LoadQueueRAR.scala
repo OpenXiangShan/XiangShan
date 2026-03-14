@@ -192,7 +192,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     uop(i) := MuxCase(uop(i), allocationHit.zip(allocations.map({ case (_, uop, _) => uop })))
   }
 
-  var sameCycleCompletion = WireDefault(0.U(LoadQueueRARSize.W))
+  var sameCycleCompletion = 0.U(LoadQueueRARSize.W)
 
   // Completions
   for ((c, w) <- io.complete.zipWithIndex) {
@@ -204,10 +204,11 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     paddrModule.io.waddr(w) := idx
     paddrModule.io.wdata(w) := genPartialPAddr(c.req.bits.paddr)
     paddrModule.io.wen(w) := c.req.valid
-    sameCycleCompletion = sameCycleCompletion | (Mux(c.req.valid, 1.U(LoadQueueRARSize.W), 0.U(LoadQueueRARSize.W)) << idx).take(LoadQueueRARSize)
 
-    // Completion
-    when(RegNext(c.req.valid && c.req.bits.data_valid) && !c.revoke) {
+    // Completion, delay by one cycle
+    val commit = RegNext(c.req.valid && c.req.bits.data_valid) && !c.revoke
+    sameCycleCompletion = sameCycleCompletion | (Mux(commit, 1.U(LoadQueueRARSize.W), 0.U(LoadQueueRARSize.W)) << idx).take(LoadQueueRARSize)
+    when(commit) {
       pending(RegNext(idx)) := false.B
     }
 
