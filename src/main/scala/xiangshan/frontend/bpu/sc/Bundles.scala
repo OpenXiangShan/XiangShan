@@ -47,10 +47,10 @@ class ScEntry(implicit p: Parameters) extends ScBundle {
 
 class ScTableSramWriteReq(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends WriteReqBundle
     with HasScParameters {
-  val setIdx:       UInt         = UInt(log2Ceil(numSets).W)
-  val wayMask:      Vec[Bool]    = Vec(numWays, Bool())
-  val entryVec:     Vec[ScEntry] = Vec(numWays, new ScEntry())
-  override def tag: Option[UInt] = Some(this.wayMask.asUInt) // use wayMask as tag
+  val setIdx:           UInt              = UInt(log2Ceil(numSets).W)
+  override val wayMask: Option[Vec[Bool]] = Some(Vec(numWays, Bool()))
+  override val wayData: Option[Vec[UInt]] = Some(Vec(numWays, UInt((new ScEntry).getWidth.W)))
+
 }
 
 class ScTableReq(val numSets: Int, val numWays: Int)(implicit p: Parameters) extends ScBundle {

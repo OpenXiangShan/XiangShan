@@ -63,6 +63,8 @@ class ScTable(
       new ScTableSramWriteReq(numRows, numWays),
       WriteBufferSize,
       numPorts = 1,
+      numWays = numWays,
+      hasWayMask = true,
       nameSuffix = s"sc${tableType}${tableIdx}_${bankIdx}"
     ))
   )
@@ -92,15 +94,15 @@ class ScTable(
       val writeValid = updateValid && bankEnable
       buffer.io.write.head.valid       := writeValid
       buffer.io.write.head.bits.setIdx := updateIdx
-      buffer.io.write.head.bits.wayMask := Mux(
+      buffer.io.write.head.bits.wayMask.get := Mux(
         writeValid,
         updateWayMask,
         VecInit.fill(numWays)(false.B)
       )
-      buffer.io.write.head.bits.entryVec := Mux(
+      buffer.io.write.head.bits.wayData.get := Mux(
         writeValid,
-        io.update.entryVec,
-        VecInit.fill(numWays)(0.U.asTypeOf(new ScEntry()))
+        VecInit(io.update.entryVec.map(_.asUInt)),
+        VecInit.fill(numWays)(0.U.asTypeOf(new ScEntry()).asUInt)
       )
   }
 
@@ -108,8 +110,9 @@ class ScTable(
     case ((bank, buffer), i) =>
       bank.io.w.req.valid            := buffer.io.read.head.valid && !bank.io.r.req.valid
       bank.io.w.req.bits.setIdx      := buffer.io.read.head.bits.setIdx
-      bank.io.w.req.bits.waymask.get := buffer.io.read.head.bits.wayMask.asUInt
-      bank.io.w.req.bits.data        := buffer.io.read.head.bits.entryVec
+      bank.io.w.req.bits.waymask.get := buffer.io.read.head.bits.wayMask.get.asUInt
+      bank.io.w.req.bits.data        := VecInit(buffer.io.read.head.bits.wayData.get.map(_.asTypeOf(new ScEntry())))
+      buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
       buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
   }
 

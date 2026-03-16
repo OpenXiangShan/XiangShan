@@ -35,6 +35,9 @@ import xiangshan.XSModule
  * @param gen The type of the write request bundle
  * @param numEntries The number of entries in the write buffer
  * @param numPorts The number of write ports
+ * @param numWays The number of ways for each entry, used when hasWayMask is true
+ * @param hasWayMask Whether the write request bundle has wayMask and wayData fields,
+ * used to update the entry's wayMask and wayData when hit the same entry
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write buffer
  * @param nameSuffix Suffix of name, used for clearer logging
@@ -43,7 +46,9 @@ class WriteBuffer[T <: WriteReqBundle](
     gen:        T,
     numEntries: Int = 1,
     numPorts:   Int = 1,
+    numWays:    Int = 1,
     hasCnt:     Boolean = false,
+    hasWayMask: Boolean = false,
     hasFlush:   Boolean = false,
     nameSuffix: String = ""
 )(implicit p: Parameters) extends XSModule {
@@ -62,6 +67,19 @@ class WriteBuffer[T <: WriteReqBundle](
 
   // clean write buffer when flush is true
   private val flush = io.flush.getOrElse(false.B)
+
+  private def mergeSameWay(entry: T, writeGen: T): T = {
+    val merged = WireInit(entry)
+    require(
+      hasWayMask && entry.wayMask.isDefined && writeGen.wayMask.isDefined && entry.wayData.isDefined && writeGen.wayData.isDefined,
+      "hasWayMask is true, entry and writeGen should have wayMask and wayData"
+    )
+    for (i <- 0 until numWays) {
+      merged.wayMask.foreach(_(i) := entry.wayMask.get(i) || writeGen.wayMask.get(i))
+      merged.wayData.foreach(_(i) := Mux(writeGen.wayMask.get(i), writeGen.wayData.get(i), entry.wayData.get(i)))
+    }
+    merged
+  }
 
   private val needWrite = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
   private val entries = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(0.U.asTypeOf(gen.cloneType))))))
@@ -172,14 +190,16 @@ class WriteBuffer[T <: WriteReqBundle](
       when(hit) {
         hitTouchVec(rowIdx)(hitIdx).valid := hit
         hitTouchVec(rowIdx)(hitIdx).bits  := hitIdx
+        val mergedEntry =
+          if (hasWayMask) mergeSameWay(entries(rowIdx)(hitIdx), io.write(portIdx).bits) else io.write(portIdx).bits
         when(hitNotWritten) {
-          entries(rowIdx)(hitIdx) := io.write(portIdx).bits
+          entries(rowIdx)(hitIdx) := mergedEntry
           valids(rowIdx)(hitIdx)  := true.B
         }.elsewhen(hitWritten) {
-          val entryChange = entries(rowIdx)(hitIdx).asUInt =/= io.write(portIdx).bits.asUInt
+          val entryChange = entries(rowIdx)(hitIdx).asUInt =/= mergedEntry.asUInt
           when(entryChange) {
             needWrite(rowIdx)(hitIdx) := true.B
-            entries(rowIdx)(hitIdx)   := io.write(portIdx).bits
+            entries(rowIdx)(hitIdx)   := mergedEntry
             valids(rowIdx)(hitIdx)    := true.B
           }
         }
