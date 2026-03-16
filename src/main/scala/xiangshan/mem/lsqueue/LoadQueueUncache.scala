@@ -479,7 +479,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   io.exceptionInfo.bits.gpaddr       := exceptionEntry.gpaddr
   io.exceptionInfo.bits.isForVSnonLeafPTE := exceptionEntry.isForVSnonLeafPTE
   io.exceptionInfo.bits.vaNeedExt    := true.B
-  io.exceptionInfo.bits.isHyper      := false.B
+  io.exceptionInfo.bits.isHyper      := exceptionEntry.isHyper
   io.exceptionInfo.bits.uopIdx       := 0.U.asTypeOf(io.exceptionInfo.bits.uopIdx)
   io.exceptionInfo.bits.vl           := 0.U.asTypeOf(io.exceptionInfo.bits.vl)
   io.exceptionInfo.bits.vstart       := 0.U.asTypeOf(io.exceptionInfo.bits.vstart)

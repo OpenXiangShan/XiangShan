@@ -18,10 +18,8 @@ package xiangshan.mem
 
 import chisel3._
 import chisel3.util._
-import scala.collection.immutable.ListMap
 import utils._
 import utils.EnumUtils.ChiselOHEnum
-import MathUtils.IntToOH
 
 object LoadStage extends Enumeration {
   val s0, s1, s2, s3, s4 = Value
@@ -46,7 +44,6 @@ trait OnLoadStage {
   def afterS2: Boolean = after(s, LoadS2())
   def afterS3: Boolean = after(s, LoadS3())
   def lastStage: Boolean = s match {
-    // case _: LoadS4 => true // TODO
     case _: LoadS4 => true
     case _ => false
   }
@@ -76,11 +73,6 @@ object LoadEntrance extends ChiselOHEnum {
   def num = this.values.size
 
   def apply() = UInt(num.W)
-  // def apply(): Bundle = new Record {
-  //   val elements: ListMap[String, Data] = ListMap(
-  //     values.toSeq.map { v => (v.getName -> Bool()) }: _*
-  //   )
-  // }.asInstanceOf[Bundle]
 
   def isUnalignTail(source: UInt): Bool = IsOneOf(source, unalignTail)
   def isReplay(source: UInt): Bool = IsOneOf(source, replayHiPrio, replayLoPrio)
@@ -90,7 +82,7 @@ object LoadEntrance extends ChiselOHEnum {
   def isScalarIssue(source: UInt): Bool = IsOneOf(source, scalarIssue)
 
   def findNameById(id: Int): String = {
-    values.find(_.id == id).map(_.getName).getOrElse("UNKNOW")
+    values.find(_.id == id).map(_.getName).getOrElse("UNKNOWN")
   }
 }
 

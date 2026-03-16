@@ -225,7 +225,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAR.io.release   <> io.release
   loadQueueRAR.io.ldWbPtr   <> virtualLoadQueue.io.ldWbPtr
   loadQueueRAR.io.validCount<> io.rarValidCount
-  loadQueueRAR.io.query <> io.ldu.rarNukeQuery
+  loadQueueRAR.io.query     <> io.ldu.rarNukeQuery
 
   /**
    * LoadQueueRAW
@@ -234,7 +234,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAW.io.storeIn          <> io.sta.storeAddrIn
   loadQueueRAW.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
   loadQueueRAW.io.stIssuePtr       <> io.sq.stIssuePtr
-  loadQueueRAW.io.query <> io.ldu.rawNukeQuery
+  loadQueueRAW.io.query            <> io.ldu.rawNukeQuery
   io.mdpTrain                      := loadQueueRAW.io.mdpTrain
 
   /**

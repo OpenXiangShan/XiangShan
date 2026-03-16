@@ -157,14 +157,14 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircular
         currentExcp := oldestBits
       }
     }
-  }.otherwise{
+  }.otherwise {
     currentExcp  := oldestBits
   }
 
   when(!currentValid && s1OutValid) { // TODO: need valid ? maby for debug.
     currentValid := true.B
-  }.elsewhen(currentValid && currentExcp.robIdx.needFlush(io.redirect) && !s1OutValid){
-    currentValid :=false.B
+  }.elsewhen(currentValid && currentExcp.robIdx.needFlush(io.redirect) && !s1OutValid) {
+    currentValid := false.B
   }
 
   // whether vaddr need ext or is hyper inst:

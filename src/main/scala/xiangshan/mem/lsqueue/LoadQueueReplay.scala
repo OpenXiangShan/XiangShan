@@ -862,7 +862,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_storeQueue_multi_match", replayMultiMatchCount)
 
   // replay counter
-  val perfReplayCounter = RegInit(VecInit(Seq.fill(LoadQueueReplaySize)(0.U(4.W))))
+  val perfReplayCounter = RegInit(VecInit(Seq.fill(LoadQueueReplaySize)(0.U(8.W))))
   for((enq, i) <- io.enq.zipWithIndex){
     //  Allocated ready
     val offset = PopCount(newEnqueue.take(i))

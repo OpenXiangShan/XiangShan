@@ -1156,7 +1156,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val s1Req = RegEnable(s0Req, s0ReqValid)
     val mshrIdOH = UIntToOH(s1Req.mshrId)
     val paddr = forward.s1Req.paddr
-//    val mshrForwardInfo = forwardInfo_vec(mshrId)
 
     val s1PaddrMatchVec = VecInit(forwardInfo_vec.map{ case info =>
       paddr(paddr.getWidth - 1, blockOffBits) === info.paddr(paddr.getWidth - 1, blockOffBits) &&

@@ -357,20 +357,6 @@ class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWord
   val vecValid = Bool()
   val sqNeedDeq = Bool()
 
-//  def fromDataBufferEntry(src: DataBufferEntry, cmd: UInt) = {
-//    this := DontCare
-//    this := DontCare
-//    this.cmd := cmd
-//    this.addr := src.addr
-//    this.vaddr := src.vaddr
-//    this.data := src.data
-//    this.mask := src.mask
-//    this.wline := src.wline && src.vecValid
-//    this.prefetch := src.prefetch
-//    this.vecValid := src.vecValid
-//    this.sqNeedDeq := src.sqNeedDeq
-//  }
-
   def toDCacheWordReqWithVaddr() = {
     val res = Wire(new DCacheWordReqWithVaddr)
     res.vaddr := vaddr

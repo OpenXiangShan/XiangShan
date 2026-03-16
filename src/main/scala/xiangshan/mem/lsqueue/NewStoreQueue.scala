@@ -23,12 +23,12 @@ import top.ArgParser
 import utility._
 import xiangshan.ExceptionNO.{hardwareError, storeAccessFault}
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, ExuOutput, NewExuOutput, UopIdx, connectMemDecoupledNewExuOutput, connectSamePort}
+import xiangshan.backend.Bundles._
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig.StaCfg
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.{DCacheWordReqWithVaddrAndPfFlag, MemoryOpConstants, UncacheWordIO}
-import xiangshan.backend.fu.FuType
 import xiangshan.mem.Bundles.SQForward
 
 class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
@@ -485,7 +485,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val s2HasAddrInvalid   = RegEnable(s1HasAddrInvalid, s1Valid)
       val s2CanForward       = RegEnable((s1AgeMaskLow | s1AgeMaskHigh) & s1OverlapMask & addrValidVec.asUInt, s1Valid)
       val s2SelectOH         = RegEnable(s1SelectOH, s1Valid)
-      val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CaculateSelectMask(s1LoadStart, s1LoadEnd), VLENB), s1Valid)
+      val s2LoadMaskEnd      = RegEnable(UIntToMask(MemorySize.CalculateSelectMask(s1LoadStart, s1LoadEnd), VLENB), s1Valid)
       val s2DataInvalidSqIdx = RegEnable(s1DataInvalidSqIdx, s1Valid)
       val s2AddrInvalidSqIdx = RegEnable(s1AddrInvalidSqIdx, s1Valid)
       val s2LoadWaitStrict   = RegEnable(s1LoadWaitStrict, s1Valid)
@@ -1184,7 +1184,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     /*============================================ deqPtr generate ===================================================*/
     /*
     * NOTE: Only when port 0 and port 1 are ready can write cross16B request, so only use io.writeToSbuffer.req.head.fire
-    *       to caculate sbufferFireNum.
+    *       to calculate sbufferFireNum.
     * deqPtr will move when [write to sbuffer / writeback / vector inactive element]
     * rdataPtr will move when [nc request fire / write to SQ2SBPipelineConnect_i / vector inactive element]
     * NOTE: when deq mmio/cbo, rdataPtr === deqPtr, because mmio/cbo need to execute at head of StoreQueue.
@@ -1352,8 +1352,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     }
 
   }
-
-
 
   val io = IO(new StoreQueueIO(param))
   println("StoreQueue: size:" + StoreQueueSize)
@@ -1860,7 +1858,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       // only unit-stride use it, because unit-stride mask is not continue true.
       dataEntries(stWbIdx).byteMask  := Mux(MemorySize.sizeIs(storeAddrIn.bits.size, MemorySize.Q),
         storeAddrIn.bits.mask,
-        UIntToMask(MemorySize.CaculateSelectMask(byteStart, byteStart + byteOffset), VLENB))
+        UIntToMask(MemorySize.CalculateSelectMask(byteStart, byteStart + byteOffset), VLENB))
       dataEntries(stWbIdx).size      := storeAddrIn.bits.size
 
       // debug singal

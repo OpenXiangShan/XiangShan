@@ -573,7 +573,6 @@ class LoadUnitS1(param: ExeUnitParams)(
   val uop = in.uop
   val robIdx = uop.robIdx
   val fuOpType = uop.fuOpType
-  val mop = fuOpType(6, 5) // ?
   val vaddr = in.vaddr
   val mask = in.mask
 
@@ -625,7 +624,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.csrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode := io.csrTrigger.debugMode
   loadTrigger.io.fromLoadStore.vaddr := vaddr
-  loadTrigger.io.fromLoadStore.isVectorUnitStride := accessType.isVector() && isUnitStride(mop)
+  loadTrigger.io.fromLoadStore.isVectorUnitStride := accessType.isVector() && VlduType.isUnitStride(fuOpType)
   loadTrigger.io.fromLoadStore.mask := mask
   loadTrigger.io.isPrf.get := accessType.isPrefetch()
 
@@ -1458,7 +1457,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.nc := in.nc.get || in.isNCReplay()
   lqWrite.mmio := in.mmio.get
   lqWrite.memBackTypeMM := !in.pmp.get.mmio
-  lqWrite.hasException := false.B // ?
+  lqWrite.hasException := false.B // LQ is no longer responsible for handling exception for timing reason
   lqWrite.isHyper := in.tlbException.get.isHyper
   lqWrite.isForVSnonLeafPTE := exceptionIsForVSnonLeafPTE
   lqWrite.isPrefetch := false.B // TODO: remove this

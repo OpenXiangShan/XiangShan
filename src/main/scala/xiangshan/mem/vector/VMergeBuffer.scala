@@ -291,7 +291,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
         // For fof loads, if element 0 raises an exception, vl is not modified, and the trap is taken.
         entry.vstart       := vstart
         entry.exceptionVec := ExceptionNO.selectByFu(selExceptionVec, fuCfg)
-        entry.uop.trigger     := selPort.trigger
+        entry.uop.trigger  := selPort.trigger
         entry.vaddr        := vaddr
         entry.vaNeedExt    := selPort.vaNeedExt
         entry.gpaddr       := gpaddr

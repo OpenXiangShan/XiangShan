@@ -171,7 +171,7 @@ object MemorySize {
   }
 
   // The range of request is [BytesStart, ByteEnd]
-  def CaculateSelectMask(start: UInt, end: UInt): UInt = {
+  def CalculateSelectMask(start: UInt, end: UInt): UInt = {
     end - start + 1.U
   }
 

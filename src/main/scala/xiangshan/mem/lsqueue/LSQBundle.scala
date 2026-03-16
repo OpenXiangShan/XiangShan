@@ -228,7 +228,3 @@ class StoreQueueIO(val param: ExeUnitParams)(implicit p: Parameters) extends Mem
   // for store difftest
   val diffStore          = Option.when(debugEn)(Flipped(new DiffStoreIO))
 }
-
-
-
-

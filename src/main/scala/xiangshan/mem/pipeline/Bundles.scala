@@ -41,7 +41,6 @@ sealed trait HasLoadPipeBundleParam {
   def hasS2PreProcess: Boolean = false
   def hasS3PreProcess: Boolean = false
   def hasS4PreProcess: Boolean = false
-  def hasWritebacked: Boolean = false
   def hasUnalignHandling: Boolean = false
 
   def replayFromToLRQ = replayToLRQ || replayFromLRQ
@@ -196,7 +195,6 @@ case class LoadStageIOParam()(
   override val hasS2PreProcess: Boolean = afterS1
   override val hasS3PreProcess: Boolean = afterS2
   override val hasS4PreProcess: Boolean = afterS3
-  // override val hasWritebacked: Boolean =
   override val hasUnalignHandling: Boolean = true
 }
 

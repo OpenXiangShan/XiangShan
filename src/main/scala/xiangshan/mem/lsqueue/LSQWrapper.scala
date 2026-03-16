@@ -186,7 +186,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   }
 
   // store queue wiring
-  storeQueue.io.redirect                    <> io.brqRedirect
+  storeQueue.io.redirect                      <> io.brqRedirect
   storeQueue.io.fromVMergeBuffer              <> io.stvecFeedback
   storeQueue.io.fromStoreUnit.unalignQueueReq <> io.sta.unalignQueueReq
   storeQueue.io.fromStoreUnit.storeAddrIn     <> io.sta.storeAddrIn // from store_s1
@@ -209,7 +209,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   io.flushSbuffer.valid                       := storeQueue.io.sbufferCtrl.req.flush
   storeQueue.io.sbufferCtrl.resp.empty        := io.flushSbuffer.empty
 //  storeQueue.io.maControl    <> io.maControl
-  io.diffStore.foreach{case sink =>
+  io.diffStore.foreach{ case sink =>
     storeQueue.io.diffStore.foreach(sink := _)
   }
 
@@ -217,13 +217,13 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
 
   //  load queue wiring
   loadQueue.io.redirect            <> io.brqRedirect
-  loadQueue.io.vecFeedback           <> io.ldvecFeedback
+  loadQueue.io.vecFeedback         <> io.ldvecFeedback
   loadQueue.io.ldu                 <> io.ldu
   loadQueue.io.rob.pendingPtr      := io.rob.pendingPtr
   loadQueue.io.rob.pendingPtrNext  := io.rob.pendingPtrNext
   loadQueue.io.rob.lcommit         := io.rob.lcommit
   loadQueue.io.rob.scommit         := io.rob.scommit
-  loadQueue.io.rob.commit         := io.rob.commit
+  loadQueue.io.rob.commit          := io.rob.commit
   loadQueue.io.nuke_rollback       <> io.nuke_rollback
   loadQueue.io.nack_rollback       <> io.nack_rollback
   loadQueue.io.replay              <> io.replay

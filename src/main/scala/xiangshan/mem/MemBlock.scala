@@ -236,7 +236,6 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val intWriteback: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = intSchdParams.genNewExuOutputDecoupledBundleMemBlock
   val vecWriteback: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = vecSchdParams.genExuOutputDecoupledBundleMemBlock
 
-  val ldaIqFeedback = Vec(LduCnt, new MemRSFeedbackIO)
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
   val hyuIqFeedback = Vec(HyuCnt, new MemRSFeedbackIO)
   val vstuIqFeedback= Vec(VstuCnt, new MemRSFeedbackIO(isVector = true))
@@ -846,7 +845,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // get input form dispatch
     newLoadUnits(i).io.ldin <> issueLda(i)
-    io.mem_to_ooo.ldaIqFeedback(i) := DontCare
     io.mem_to_ooo.ldCancel(i).ld1Cancel := false.B
     io.mem_to_ooo.ldCancel(i).ld2Cancel := newLoadUnits(i).io.cancel
     io.mem_to_ooo.wakeup(i) := newLoadUnits(i).io.wakeup
