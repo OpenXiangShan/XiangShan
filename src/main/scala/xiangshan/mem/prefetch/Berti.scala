@@ -882,7 +882,7 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
   switch(entries(pfIdx).target){
     is(PrefetchTarget.L1.id.U){
       pfIdxArb.io.out.ready := io.l1_req.ready
-      io.l1_req.valid := pfIdxArb.io.out.valid
+      io.l1_req.valid := false.B
       io.l1_req.bits.paddr := entries(pfIdx).getPrefetchPA
       io.l1_req.bits.vaddr := entries(pfIdx).getPrefetchVA
       io.l1_req.bits.confidence := 1.U
@@ -891,13 +891,13 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
     }
     is(PrefetchTarget.L2.id.U){
       pfIdxArb.io.out.ready := io.l2_req.ready
-      io.l2_req.valid := pfIdxArb.io.out.valid
+      io.l2_req.valid := false.B
       io.l2_req.bits.addr := entries(pfIdx).getPrefetchPA
       io.l2_req.bits.source := MemReqSource.Prefetch2L2Berti.id.U
     }
     is(PrefetchTarget.L3.id.U){
       pfIdxArb.io.out.ready := io.l3_req.ready
-      io.l3_req.valid := pfIdxArb.io.out.valid
+      io.l3_req.valid := false.B
       io.l3_req.bits.addr := entries(pfIdx).getPrefetchPA
       io.l3_req.bits.source := MemReqSource.Prefetch2L3Berti.id.U
     }
