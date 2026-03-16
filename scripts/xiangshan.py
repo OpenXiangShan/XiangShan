@@ -104,6 +104,7 @@ class XSArgs(object):
         self.pgo_emu_args = args.pgo_emu_args
         self.llvm_profdata = args.llvm_profdata
         self.emulator = args.emulator
+        self.emu_trace_all = 1 if args.trace_all else None
         # wave dump path
         if args.wave_dump is not None:
             self.set_wave_home(args.wave_dump)
@@ -151,6 +152,7 @@ class XSArgs(object):
             (self.llvm_profdata, "LLVM_PROFDATA"),
             (self.issue,         "ISSUE"),
             (self.simfrontend,   "ENABLE_SIMFRONTEND"),
+            (self.emu_trace_all, "EMU_TRACE_ALL"),
         ]
         args = filter(lambda arg: arg[0] is not None, makefile_args)
         args = [(shlex.quote(str(arg[0])), arg[1]) for arg in args] # shell escape
@@ -773,6 +775,7 @@ if __name__ == "__main__":
     parser.add_argument('--make-threads', nargs='?', type=int, help='number of make threads', default=200)
     parser.add_argument('--trace', action='store_true', help='enable vcd waveform')
     parser.add_argument('--trace-fst', action='store_true', help='enable fst waveform')
+    parser.add_argument('--trace-all', action='store_true', help='enable EMU_TRACE_ALL for makefile')
     parser.add_argument('--config', nargs='?', type=str, help='config')
     parser.add_argument('--yaml-config', nargs='?', type=str, help='yaml config')
     parser.add_argument('--emu-optimize', nargs='?', type=str, help='verilator optimization letter')
