@@ -19,7 +19,7 @@ jobs:
       core: ${{ steps.filter.outputs.core }}
     steps:
     - uses: actions/checkout@v4
-    - uses: dorny/paths-filter@v3
+    - uses: dorny/paths-filter@v4
       id: filter
       with:
         predicate-quantifier: 'every'
