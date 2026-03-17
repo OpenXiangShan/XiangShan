@@ -98,7 +98,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   private val vfRdNotBlock: Seq2[Bool] = vfRdArbWinner.map(_.map(_.asUInt.andR))
   private val v0RdNotBlock: Seq2[Bool] = v0RdArbWinner.map(_.map(_.asUInt.andR))
 
-  private val intRFRen: Seq2[Option[Vec[Bool]]] = fromIQ.map(x => x.map(xx => xx.bits.rfRen).toSeq)
+  private val intRFBankRen: Seq2[Option[Vec[Vec[Bool]]]] = fromIQ.map(x => x.map(xx => xx.bits.rfBankRen).toSeq)
   private val fpRFRen : Seq2[Option[Vec[Bool]]] = fromIQ.map(x => x.map(xx => xx.bits.fpRen).toSeq)
   private val vecRFRen: Seq2[Option[Vec[Bool]]] = fromIQ.map(x => x.map(xx => xx.bits.vecRen).toSeq)
   private val v0RFRen : Seq2[Option[Vec[Bool]]] = fromIQ.map(x => x.map(xx => xx.bits.v0Ren).toSeq)
@@ -109,7 +109,8 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       val srcIndices: Seq[Int] = fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(IntData())
       for (srcIdx <- 0 until fromIQ(iqIdx)(exuIdx).bits.exuParams.numRegSrc) {
         if (srcIndices.contains(srcIdx)) {
-          arbInSeq(srcIdx).valid := intRFRen(iqIdx)(exuIdx).get(srcIdx)
+          arbInSeq(srcIdx).valid := intRFBankRen(iqIdx)(exuIdx).get(srcIdx).asUInt.orR
+          arbInSeq(srcIdx).bits.bankValidVec.foreach(_ := intRFBankRen(iqIdx)(exuIdx).get(srcIdx))
           arbInSeq(srcIdx).bits.addr := fromIQDeqOg1Payload(iqIdx)(exuIdx).psrc(srcIdx)
           arbInSeq(srcIdx).bits.robIdx := fromIQ(iqIdx)(exuIdx).bits.robIdx
           arbInSeq(srcIdx).bits.issueValid := fromIQ(iqIdx)(exuIdx).valid
@@ -487,8 +488,8 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   val s1_toExuDataWire: MixedVec[MixedVec[Og1InUop]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.cloneType).toSeq)).toSeq))
   s1_toExuData := s1_toExuDataWire
   val s1_toExuReady = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.ready.cloneType).toSeq))))
-  val s1_intRfBankRaddr: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIQDeqOg1Payload.map(x => MixedVecInit(x.map(xx => VecInit(xx.psrc.map(xxx =>
-      RegNext(xxx.pad(intSchdParams.pregIdxWidth).head(intRfBankRaddrWidth))))))))
+  val s1_intRfBankRaddr: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIntIQ.map(x => MixedVecInit(x.map(xx => VecInit(xx.bits.rfBankRen.get.map(xxx =>
+      RegNext(xxx.asUInt)))))))
   val s1_intPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_fpPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_vfPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
@@ -507,7 +508,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       iqRdata.lazyZip(iqCfg).lazyZip(bankAddrs).foreach { case (iuRdata, iuCfg, bankAddr) =>
         iuRdata.zip(iuCfg).zip(bankAddr)
           .filter { case ((_, cfg), addr) => cfg.count(_.isInstanceOf[IntRD]) > 0 }
-          .foreach { case ((sink, cfg), addr) => sink := intRfRdata.get(cfg.find(_.isInstanceOf[IntRD]).get.port)(addr) }
+          .foreach { case ((sink, cfg), addr) => sink := Mux1H(addr, intRfRdata.get(cfg.find(_.isInstanceOf[IntRD]).get.port)) }
       }
     }
     s1_vlPregRData.foreach(_.foreach(_ := 0.U))
@@ -590,6 +591,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         s1_valid := false.B
       }
       connectSamePort(s1_data, s0.bits)
+      s1_data.rfRen.foreach(x => x.zipWithIndex.foreach{ case(xx, idx) => xx := s0.bits.rfBankRen.get(idx).asUInt.orR })
       // same name, need shift logic, not simple connection
       s1_data.loadDependency.foreach(_ := s0.bits.loadDependency.get.map(_ << 1))
       // timing Optimize, clock gate can use RegNext(s0.valid)

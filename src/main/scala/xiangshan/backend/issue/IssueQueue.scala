@@ -233,7 +233,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
   io.fuTypeVec := fuTypeVec
-  val deqEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle)))
+  val deqEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle(isDeq = true))))
   val canIssueMergeAllBusy = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
   val deqCanIssue = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
 
@@ -865,11 +865,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.iqIdx    := OHToUInt(finalDeqSelOHVec(i))
     deq.bits.fuType   := IQFuType.readFuType(deqEntryVec(i).bits.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     // TODO: entries use Mux1H sel oldest uop, there can remove deq.valid
-    deq.bits.rfRen .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && SrcType.isXp(deqEntryVec(i).bits.payload.srcType(idx)) && deqEntryVec(i).bits.status.srcStatus(idx).dataSources.readReg})
-    deq.bits.fpRen .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && SrcType.isFp(deqEntryVec(i).bits.payload.srcType(idx)) && deqEntryVec(i).bits.status.srcStatus(idx).dataSources.readReg})
-    deq.bits.vecRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && SrcType.isVp(deqEntryVec(i).bits.payload.srcType(idx)) && deqEntryVec(i).bits.status.srcStatus(idx).dataSources.readReg})
-    deq.bits.v0Ren .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && SrcType.isV0(deqEntryVec(i).bits.payload.srcType(idx)) && deqEntryVec(i).bits.status.srcStatus(idx).dataSources.readReg})
-    deq.bits.vlRen .foreach(x => x := deq.valid && deqEntryVec(i).bits.status.srcStatusVl.get.dataSource.readReg)
+    deq.bits.rfBankRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx.zipWithIndex.foreach{case (xxx, bank) => xxx :=
+      deq.valid && deqEntryVec(i).bits.rfBankRen.get(idx)(bank)
+    }})
+    deq.bits.fpRen .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && deqEntryVec(i).bits.fpRen.get(idx)})
+    deq.bits.vecRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && deqEntryVec(i).bits.vecRen.get(idx)})
+    deq.bits.vlRen .foreach(x => x := deq.valid && deqEntryVec(i).bits.vlRen.get)
+    deq.bits.v0Ren .foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := deq.valid && deqEntryVec(i).bits.v0Ren.get(idx)})
     deq.bits.rfWen.foreach(_ := deqEntryVec(i).bits.payload.rfWen.get)
     deq.bits.fpWen.foreach(_ := deqEntryVec(i).bits.payload.fpWen.get)
     deq.bits.vecWen.foreach(_ := deqEntryVec(i).bits.payload.vecWen.get)
@@ -887,7 +889,9 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     // when alu select jump uop, src0's dataSource change to imm
     if (params.aluDeqNeedPickJump && (i == 0)) {
       val src0IsReadReg = finalDataSources(i)(0).readReg
-      deq.bits.dataSources(0).value := Mux(entries.io.aluDeqSelectJump.get && src0IsReadReg, DataSource.imm, finalDataSources(i)(0).value)
+      when(entries.io.aluDeqSelectJump.get && src0IsReadReg){
+        deq.bits.rfBankRen.get(0) := 0.U.asTypeOf(deq.bits.rfBankRen.get(0))
+      }
     }
     else if (params.aluDeqNeedPickJump && (i == 1)) {
       // assign jump uop form alu deq
@@ -914,7 +918,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       deqDly.bits := deq.bits
     }
     // for oldestArbiter readReq valid
-    deqDly.bits.rfRen .foreach(_ := deq.bits.rfRen .get)
+    deqDly.bits.rfBankRen .foreach(_ := deq.bits.rfBankRen .get)
     deqDly.bits.fpRen .foreach(_ := deq.bits.fpRen .get)
     deqDly.bits.vecRen.foreach(_ := deq.bits.vecRen.get)
     deqDly.bits.v0Ren .foreach(_ := deq.bits.v0Ren .get)

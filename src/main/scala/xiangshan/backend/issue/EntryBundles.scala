@@ -95,9 +95,14 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val success = "b11".U
   }
 
-  class EntryBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
+  class EntryBundle(isDeq: Boolean = false)(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
     val status                = new Status()
     val payload               = new IssueQueuePayload(params)
+    val rfBankRen             = Option.when(isDeq && params.readIntRf)(Vec(params.numRegSrc, Vec(coreParams.intPreg.numBank, Bool())))
+    val fpRen                 = Option.when(isDeq && params.readFpRf )(Vec(params.numRegSrc, Bool()))
+    val vecRen                = Option.when(isDeq && params.readVecRf)(Vec(params.numRegSrc, Bool()))
+    val v0Ren                 = Option.when(isDeq && params.readV0Rf )(Vec(params.numRegSrc, Bool()))
+    val vlRen                 = Option.when(isDeq && params.readVlRf )(Bool())
     def toDeqOg1Payload(deqIdx: Int): IssueQueueDeqOg1Payload = {
       val deqOg1Payload = Wire(new IssueQueueDeqOg1Payload(params.exuBlockParams(deqIdx)))
       connectSamePort(deqOg1Payload, payload.og1Payload)
@@ -106,6 +111,17 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       deqOg1Payload.psrc.zipWithIndex.foreach{case(pl, idx) => pl := status.srcStatus(idx).psrc}
       deqOg1Payload.psrcVl.foreach{_ := status.srcStatusVl.get.psrc}
       deqOg1Payload
+    }
+    def genXrfRen(entry: EntryBundle): Unit = {
+      this.rfBankRen.foreach{x => x.zipWithIndex.map{case(xx, idx) => xx.zipWithIndex.map{case(xxx, bank) => xxx :=
+        SrcType.isXp(entry.payload.srcType(idx)) &&
+        entry.status.srcStatus(idx).dataSources.readReg &&
+        entry.status.srcStatus(idx).psrc.head(log2Ceil(coreParams.intPreg.numBank)) === bank.U
+      }}}
+      this.fpRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := SrcType.isFp(entry.payload.srcType(idx)) && entry.status.srcStatus(idx).dataSources.readReg})
+      this.vecRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := SrcType.isVp(entry.payload.srcType(idx)) && entry.status.srcStatus(idx).dataSources.readReg})
+      this.vlRen.foreach(x => x := entry.status.srcStatusVl.get.dataSource.readReg)
+      this.v0Ren.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := SrcType.isV0(entry.payload.srcType(idx)) && entry.status.srcStatus(idx).dataSources.readReg})
     }
   }
 
@@ -154,7 +170,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val exuSources            = Option.when(params.hasIQWakeUp)(Vec(params.numRegSrc, Output(ExuSource())))
     //deq
     val isFirstIssue          = Output(Bool())
-    val entry                 = ValidIO(new EntryBundle)
+    val entry                 = ValidIO(new EntryBundle(isDeq = true))
     val cancelBypass          = Output(Bool())
     val deqPortIdxRead        = Output(UInt(1.W))
     val issueTimerRead        = Output(UInt(params.issueTimerWidth.W))
@@ -430,6 +446,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
 
   def CommonOutConnect(commonOut: CommonOutBundle, common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean, isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
     val hasIQWakeupGet                                 = hasIQWakeup.getOrElse(0.U.asTypeOf(new CommonIQWakeupBundle))
+    val entryWireGenRen                                = WireInit(0.U.asTypeOf(entryReg))
     commonOut.valid                                   := validReg
     commonOut.issued                                  := entryReg.status.issued
     commonOut.canIssue                                := (if (isComp) (common.canIssue || hasIQWakeupGet.canIssueBypass) && !common.flushed
@@ -463,10 +480,16 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
     commonOut.isFirstIssue                            := status.firstIssue
     commonOut.entry.valid                             := validReg
-    commonOut.entry.bits                              := entryReg
+    commonOut.entry.bits.status                       := entryReg.status
+    commonOut.entry.bits.payload                      := entryReg.payload
+    entryWireGenRen.status                            := entryReg.status
+    entryWireGenRen.payload                           := entryReg.payload
+    commonOut.entry.bits.genXrfRen(entryWireGenRen)
     if(isEnq) {
       commonOut.entry.bits.status                     := status
+      entryWireGenRen.status                          := status
     }
+    entryWireGenRen.status.srcStatus.zip(commonOut.dataSources).map{case(ss, ds) => ss.dataSources := ds}
     if (isEnq || !isComp) {
       // Enq and Simp can back to back trans
       commonOut.entry.bits.payload.og1Payload         := RegNext(entryReg.payload.og1Payload)

@@ -21,18 +21,20 @@ case class RFRdArbParams(
 
   def genInputBundle: MixedVec3[DecoupledIO[RFArbiterBundle]] = {
     val pregWidth = pregParams.addrWidth
-    SeqUtils.mapToMixedVec3(this.inRdCfgs, (rd: RdConfig) => DecoupledIO(new RFArbiterBundle(rd, pregWidth)))
+    val numBank   = pregParams.numBank
+    SeqUtils.mapToMixedVec3(this.inRdCfgs, (rd: RdConfig) => DecoupledIO(new RFArbiterBundle(rd, pregWidth, numBank)))
   }
 
   def portMax: Int = inRdCfgs.flatten.flatten.map(_.port).max
 }
 
-class RFArbiterBundle(var rdCfg: Option[RdConfig], pregWidth: Int)(implicit p: Parameters) extends Bundle {
+class RFArbiterBundle(var rdCfg: Option[RdConfig], pregWidth: Int, numBank: Int = 1)(implicit p: Parameters) extends Bundle {
+  val bankValidVec = Option.when(numBank > 1)(Vec(numBank, Bool()))
   val addr       = UInt(pregWidth.W)
   val robIdx     = new RobPtr
   val issueValid = Bool()
 
-  def this(rdCfg_ : RdConfig, pregWidth_ : Int)(implicit p: Parameters) = this(Some(rdCfg_), pregWidth_)
+  def this(rdCfg_ : RdConfig, pregWidth_ : Int, numBank_ : Int)(implicit p: Parameters) = this(Some(rdCfg_), pregWidth_,  numBank_)
 
   def this(pregWidth_ :Int)(implicit p: Parameters) = this(None, pregWidth_)
 }
@@ -203,7 +205,7 @@ abstract class RFBankReadArbiterBase(val params: RFRdArbParams)(implicit p: Para
     if (arbiters.nonEmpty) {
       arbiters.get.zipWithIndex.map{ case (arbiter, i) => {
           arbiter.io.in.zip(inGroup(portIdx)).zipWithIndex.foreach { case ((arbiterIn, ioIn), idx) =>
-            arbiterIn.valid := ioIn.valid && (ioIn.bits.addr.head(bankAddrWidth) === i.U)
+            arbiterIn.valid := (if(params.pregParams.numBank == 1) ioIn.valid else ioIn.bits.bankValidVec.get(i))
             arbiterIn.bits := ioIn.bits
             ioIn.ready := arbiters.get.map(x => x.io.in(idx).ready).reduce(_ && _)
           }

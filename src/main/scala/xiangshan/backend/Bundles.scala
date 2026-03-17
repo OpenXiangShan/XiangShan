@@ -921,7 +921,7 @@ object Bundles {
     val robIdx         = new RobPtr
     val iqIdx          = UInt(log2Up(iqParams.numEntries).W)
     val isFirstIssue   = Bool()
-    val rfRen          = Option.when(exuParams.readIntRf)(Vec(exuParams.numRegSrc, Bool()))
+    val rfBankRen      = Option.when(exuParams.readIntRf)(Vec(exuParams.numRegSrc, Vec(coreParams.intPreg.numBank, Bool())))
     val fpRen          = Option.when(exuParams.readFpRf )(Vec(exuParams.numRegSrc, Bool()))
     val vecRen         = Option.when(exuParams.readVecRf)(Vec(exuParams.numRegSrc, Bool()))
     val v0Ren          = Option.when(exuParams.readV0Rf )(Vec(exuParams.numRegSrc, Bool()))
