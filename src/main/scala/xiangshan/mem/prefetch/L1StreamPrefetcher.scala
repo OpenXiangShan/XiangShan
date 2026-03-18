@@ -315,12 +315,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s1_pf_l2_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - l2_depth, 0.U(BLOCK_OFFSET.W))
   val s1_pf_l3_incr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) + l3_depth, 0.U(BLOCK_OFFSET.W))
   val s1_pf_l3_decr_vaddr = Cat(region_to_block_addr(s1_region_tag, s1_region_bits) - l3_depth, 0.U(BLOCK_OFFSET.W))
-  // TODO: remove this
-  val strict_trigger_const = Constantin.createRecord(s"StreamStrictTrigger_${p(XSCoreParamsKey).HartId}", initValue = 1)
-  // If use strict triggering mode, the stream prefetcher will only trigger prefetching
-  // under **cache miss or prefetch hit stream**, but will still perform training on the entire memory access trace.
-  val s1_can_trigger = Mux(strict_trigger_const.orR, s1_miss || s1_pfHit, true.B)
-  val s1_can_send_pf = Mux(s1_update, !((array(s1_index).bit_vec & UIntToOH(s1_region_bits)).orR), true.B) && s1_can_trigger
+  val s1_can_send_pf = Mux(s1_update, !((array(s1_index).bit_vec & UIntToOH(s1_region_bits)).orR), true.B)
   // Check s0 s1 same region, avoid duplicate alloc
   val s1_s0_same_region = region_hash_tag(s1_region_tag) === region_hash_tag(s0_region_tag)
   // s1 replace the s0 region entry
