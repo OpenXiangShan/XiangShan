@@ -9,10 +9,12 @@ import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.{Mgu, VecNonPipedFuncUnit}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.ExceptionNO
-import yunsuan.encoding.Opcode.Opcodes.VIDivOpcode
 import yunsuan.vector.VectorIdiv
+import xiangshan.backend.decode.opcode.Opcode.VIDivOpcodes
 
 class VIDiv(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(cfg) {
+  // XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VidivType.dummy, "Vfdiv OpType not supported")
+
   // params alias
   private val dataWidth = cfg.destDataBits
 
@@ -35,7 +37,7 @@ class VIDiv(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(c
       subIO.div_in_valid  := io.in.valid
       subIO.div_out_ready := io.out.ready & io.out.valid
       subIO.sew           := vsew
-      subIO.sign          := VIDivOpcode.isSigned(fuOpType)
+      subIO.sign          := VIDivOpcodes.isSigned(fuOpType)
       subIO.dividend_v    := vs2
       subIO.divisor_v     := vs1
       subIO.flush         := thisRobIdx.needFlush(io.flush)
@@ -45,7 +47,7 @@ class VIDiv(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(c
   io.out.valid := vidiv.io.div_out_valid
 
   private val outFuOpType = outCtrl.fuOpType
-  private val outIsDiv = VIDivOpcode.isDiv(outFuOpType)
+  private val outIsDiv = VIDivOpcodes.isDiv(outFuOpType)
   private val resultData = Mux(outIsDiv, vidiv.io.div_out_q_v, vidiv.io.div_out_rem_v)
   private val notModifyVd = outVl === 0.U
 
