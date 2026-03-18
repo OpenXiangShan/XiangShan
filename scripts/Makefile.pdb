@@ -78,7 +78,6 @@ package-pdb:
 	cp -r ${PDB_HOME}/pydifftest $(PACKAGE_TMP_DIR)/XSPdb/xspdb
 	cp -r ${PDB_HOME}/pyxscore $(PACKAGE_TMP_DIR)/XSPdb/xspdb
 	cp scripts/pdb-run.py $(PACKAGE_TMP_DIR)/XSPdb
-	cp ${PDB_HOME}/xs.fst $(PACKAGE_TMP_DIR)/XSPdb/xspdb/pyxscore/
 	if [ -f "/nfs/share/unitychip/xspdb/Makefile" ]; then \
 		cp /nfs/share/unitychip/xspdb/Makefile $(PACKAGE_TMP_DIR)/XSPdb; \
 	fi
