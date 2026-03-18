@@ -34,7 +34,9 @@ jobs:
     name: EMU - Performance - Build
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
-    runs-on: builder
+    runs-on:
+      - node # Run on node servers for the moment, as gsim is having performance issue on open servers
+      - builder
     outputs:
       cluster: ${{ steps.save.outputs.cluster }}
     timeout-minutes: 120
