@@ -289,7 +289,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val respIssueFail                                  = commonIn.issueResp.valid && RespType.isBlocked(commonIn.issueResp.bits.resp)
     entryUpdate.status.robIdx                         := status.robIdx
     entryUpdate.status.fuType                         := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType))
-    entryUpdate.status.isVecPartReplay.foreach(_      := commonIn.issueResp.bits.isVecPartReplay.get)
+    // issueTimerMaxValue is 3
+    entryUpdate.status.isVecPartReplay.foreach(_      := Mux(commonIn.issueResp.valid && entryReg.status.issueTimer.andR, commonIn.issueResp.bits.isVecPartReplay.get, entryReg.status.isVecPartReplay .get))
     entryUpdate.status.vecReplayMask  .foreach(_      := Mux(commonIn.issueResp.bits.isVecPartReplay.get, commonIn.issueResp.bits.vecReplayMask .get, entryReg.status.vecReplayMask .get))
     entryUpdate.status.vecReplayMbIdx .foreach(_      := Mux(commonIn.issueResp.bits.isVecPartReplay.get, commonIn.issueResp.bits.vecReplayMbIdx.get, entryReg.status.vecReplayMbIdx.get))
     entryUpdate.status.srcStatus.zip(status.srcStatus).zipWithIndex.foreach { case ((srcStatusNext, srcStatus), srcIdx) =>
