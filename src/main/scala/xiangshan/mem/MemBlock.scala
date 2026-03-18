@@ -774,17 +774,27 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // Because all the unfairness between ldu0 and ldu1/2, such as bank conflicts and lower entry priority in MissQueue,
   // belong to the replay channel, whose priority is higher than prefetch channel in loadunit.
   // Therefore, there is no need to distinguish among ldu0, ldu1, and ldu2 if **prefetch-request outstanding <= 1**.
-  val canAcceptPrefetch = newLoadUnits.map(_.io.prefetchReq.ready)
+
+  // move hw prefetch from newLoadUnits to mainPipe, but keep the interface incase further considering
+  // val canAcceptPrefetch = newLoadUnits.map(_.io.prefetchReq.ready)
+  val canAcceptPrefetch = newLoadUnits.map(i => false.B)
 
   val toPrefetchValidVec = (0 until LduCnt + HyuCnt).map{ case i =>
     if(i==0) l1_pf_req.valid
     else l1_pf_req.valid && !canAcceptPrefetch.take(i).reduce(_ || _)
   }
-  l1_pf_req.ready := Cat(canAcceptPrefetch).orR
+  // l1_pf_req.ready := Cat(canAcceptPrefetch).orR
+  l1_pf_req.ready := dcache.io.prefetch_req.ready
   newLoadUnits.zipWithIndex.foreach { case(u, i) => {
-    u.io.prefetchReq.valid <> toPrefetchValidVec(i)
-    u.io.prefetchReq.bits <> l1_pf_req.bits
+    // u.io.prefetchReq.valid <> toPrefetchValidVec(i)
+    // u.io.prefetchReq.bits <> l1_pf_req.bits
+    u.io.prefetchReq.valid <> false.B
+    u.io.prefetchReq.bits <> DontCare
   }}
+
+  // move hw prefetch to mainpipe
+  dcache.io.prefetch_req.valid <> l1_pf_req.valid
+  dcache.io.prefetch_req.bits <> l1_pf_req.bits
 
   /** l1 pf fuzzer interface */
   val DebugEnableL1PFFuzzer = false
@@ -795,10 +805,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     fuzzer.io.paddr := DontCare
 
     // override load_unit prefetch_req
-    newLoadUnits.foreach( ldu => {
-       ldu.io.prefetchReq.valid <> fuzzer.io.req.valid
-       ldu.io.prefetchReq.bits <> fuzzer.io.req.bits
-    })
+    // newLoadUnits.foreach( ldu => {
+    //    ldu.io.prefetchReq.valid <> fuzzer.io.req.valid
+    //    ldu.io.prefetchReq.bits <> fuzzer.io.req.bits
+    // })
+
+    // move hw prefetch to mainpipe
+    dcache.io.prefetch_req.valid <> fuzzer.io.req.valid
+    dcache.io.prefetch_req.bits <> fuzzer.io.req.bits
 
     fuzzer.io.req.ready := l1_pf_req.ready
   }
