@@ -286,7 +286,10 @@ class LoadUnitS0(param: ExeUnitParams)(
     */
   val needAlignCheckSources = Seq(replayHiPrio, fastReplay, replayLoPrio, vectorIssue, scalarIssue)
   val needAlignCheckValids = needAlignCheckSources.map(_.valid)
-  val noAlignCheckSources = sources.filterNot(needAlignCheckSources.contains) // unalign tail, hardware prefetch
+  val alwaysUnalignSources = Seq(unalignTail)
+  val alwaysUnalign = Cat(alwaysUnalignSources.map(_.fire)).orR
+  val alwaysAlignSources = Seq(prefetchHiConf, prefetchLoConf)
+  val noAlignCheckSources = alwaysUnalignSources ++ alwaysAlignSources // unalign tail, hardware prefetch
   val noAlignCheck = Cat(noAlignCheckSources.map(_.fire)).orR || isPrefetch // unalign tail, hardware & software prefetch
   val needAlignCheck = !noAlignCheck
 
@@ -294,7 +297,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   val _align = ParallelPriorityMux(needAlignCheckValids, alignCheckResults._1)
   val _crossWordInsideBank = ParallelPriorityMux(needAlignCheckValids, alignCheckResults._2)
   val _crossBank = ParallelPriorityMux(needAlignCheckValids, alignCheckResults._3)
-  val align = noAlignCheck || _align
+  val align = !alwaysUnalign && (noAlignCheck || _align)
   val crossWordInsideBank = needAlignCheck && _crossWordInsideBank
   val crossBank = needAlignCheck && _crossBank
   val readWholeBank = unalignTail.valid || crossWordInsideBank
@@ -914,12 +917,13 @@ class LoadUnitS2(param: ExeUnitParams)(
   // load access fault
   val afUnaccessable = uop.exceptionVec(loadAccessFault) || pmpUnaccessable
   val afVectorUncache = accessType.isVector() && isUncache
+  val afUnalignMMIO = !in.align.get && isMMIO
   val afTagError = io.dcacheResp.bits.tag_error && tlbHit && io.csrCtrl.cache_error_enable
   val afForwardDenied = Wire(Bool())
   val afBypassDenied = Wire(Bool())
-  val af = afUnaccessable || afVectorUncache || afTagError || afForwardDenied || afBypassDenied
+  val af = afUnaccessable || afVectorUncache || afUnalignMMIO || afTagError || afForwardDenied || afBypassDenied
   // load address misaligned
-  val am = !in.align.get && accessType.isScalar() && isUncache && !pmpUnaccessable
+  val am = !in.align.get && accessType.isScalar() && isNC && !pmpUnaccessable
   // hardware error
   val hweForwardCorrupt = Wire(Bool())
   val hweBypassCorrupt = Wire(Bool())
