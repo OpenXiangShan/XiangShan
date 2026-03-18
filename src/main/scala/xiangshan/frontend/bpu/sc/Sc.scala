@@ -59,7 +59,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s0_fire = io.stageCtrl.s0_fire && io.enable
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
   private val s2_fire = io.stageCtrl.s2_fire && io.enable
-  private val s3_fire = io.stageCtrl.s3_fire && io.enable
 
   /*
    *  instantiate tables
@@ -333,6 +332,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   io.meta.scPred        := RegEnable(s2_scPred, s2_fire)
   io.meta.tagePred      := RegEnable(s2_providerTakenMask, s2_fire)
+  io.meta.tageCtr       := RegEnable(VecInit(s2_providerCtr.map(_.value)), s2_fire)
   io.meta.tagePredValid := RegEnable(s2_providerValid, s2_fire)
   io.meta.useScPred     := RegEnable(s2_useScPred, s2_fire)
   io.meta.sumAboveThres := RegEnable(s2_sumAboveThres, s2_fire)
@@ -352,7 +352,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    *  train pipeline stage 0
    */
-  private val t0_fire = io.stageCtrl.t0_fire
+  private val t0_fire = io.stageCtrl.t0_fire && io.enable
 
   /*
    *  train pipeline stage 1
@@ -575,6 +575,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t2_bankMask                   = RegEnable(t1_bankMask, t1_fire)
   private val t2_pathSetIdx                 = RegEnable(VecInit(t1_pathSetIdx), t1_fire)
   private val t2_globalSetIdx               = RegEnable(VecInit(t1_globalSetIdx), t1_fire)
+  private val t2_bwSetIdx                   = RegEnable(VecInit(t1_bwSetIdx), t1_fire)
   private val t2_imliSetIdx                 = RegEnable(t1_imliSetIdx, t1_fire)
   private val t2_biasSetIdx                 = RegEnable(t1_biasSetIdx, t1_fire)
   private val t2_commonHR                   = RegEnable(t1_commonHR, t1_fire)
@@ -582,6 +583,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val t2_writePathEntryVec          = RegEnable(t1_writePathEntryVec, t1_fire)
   private val t2_writeGlobalEntryWayMaskVec = RegEnable(VecInit(t1_writeGlobalEntryWayMaskVec), t1_fire)
   private val t2_writeGlobalEntryVec        = RegEnable(t1_writeGlobalEntryVec, t1_fire)
+  private val t2_writeBWEntryWayMaskVec     = RegEnable(VecInit(t1_writeBWEntryWayMaskVec), t1_fire)
+  private val t2_writeBWEntryVec            = RegEnable(t1_writeBWEntryVec, t1_fire)
   private val t2_writeBiasWayMask           = RegEnable(t1_writeBiasWayMask, t1_fire)
   private val t2_writeBiasEntryVec          = RegEnable(t1_writeBiasEntryVec, t1_fire)
   private val t2_writeImliWayMask           = RegEnable(t1_writeImliWayMask, t1_fire)
@@ -606,7 +609,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       table.io.update.entryVec := writeEntries
   }
 
-  bwTable.zip(t1_bwSetIdx).zip(t1_writeBWEntryVec).zip(t1_writeBWEntryWayMaskVec).foreach {
+  bwTable.zip(t2_bwSetIdx).zip(t2_writeBWEntryVec).zip(t2_writeBWEntryWayMaskVec).foreach {
     case (((table, idx), writeEntries), writeWayMask) =>
       table.io.update.valid    := t2_writeValid && t2_commonHR.valid && BWEnable.B
       table.io.update.setIdx   := idx
@@ -648,7 +651,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val scBiasCorrectVec   = WireInit(VecInit.fill(NumWays)(false.B))
   private val scBiasWrongVec     = WireInit(VecInit.fill(NumWays)(false.B))
 
-  private val newBranchVec = WireInit(VecInit.fill(NumWays)(false.B))
   private val scUsedVec    = WireInit(VecInit.fill(NumWays)(false.B))
   private val scNotUsedVec = WireInit(VecInit.fill(NumWays)(false.B))
   private val changeVec    = VecInit.fill(NumWays)(false.B)
@@ -807,7 +809,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
     trace.bits.providerValid := t1_meta.tagePredValid(predWayIdx)
     trace.bits.providerTaken := t1_meta.tagePred(predWayIdx)
-    trace.bits.providerCtr   := t1_meta.tagePred(predWayIdx)
+    trace.bits.providerCtr   := t1_meta.tageCtr(predWayIdx)
 
     trace.bits.pathResp   := VecInit(t1_oldPathEntries.map(v => v(predWayIdx).asUInt))
     trace.bits.globalResp := VecInit(t1_oldGlobalEntries.map(v => v(predWayIdx).asUInt))

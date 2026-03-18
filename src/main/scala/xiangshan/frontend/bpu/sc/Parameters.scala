@@ -38,7 +38,7 @@ case class ScParameters(
     BiasUseTageBitWidth: Int = 2,    // use tage_taken as index bits
     PathEnable:          Boolean = true,
     GlobalEnable:        Boolean = true,
-    BWEnable:            Boolean = false,
+    BWEnable:            Boolean = true,
     ImliEnable:          Boolean = true,
     BiasEnable:          Boolean = true,
     CtrWidth:            Int = 6,

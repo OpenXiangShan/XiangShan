@@ -78,6 +78,7 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val scBiasLowerBits: Vec[UInt]      = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
   val scPred:          Vec[Bool]      = Vec(NumWays, Bool())
   val tagePred:        Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
+  val tageCtr:         Vec[UInt]      = Vec(NumBtbResultEntries, UInt(TageTakenCtrWidth.W))
   val tagePredValid:   Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
   val useScPred:       Vec[Bool]      = Vec(NumWays, Bool())
   val sumAboveThres:   Vec[Bool]      = Vec(NumWays, Bool())
