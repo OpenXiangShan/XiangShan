@@ -466,7 +466,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val s_noc2dm = IO(Flipped(new AXI4Bundle(dm_fcrs_mNode.out.head._2.bundle)))// cross-die slave ports for debug
     val m_dm2noc = IO(new VerilogAXI4Record(dm_tcrs_sNode.in.head._2.bundle))
     // instance debugModule sba port
-    val dm_m = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
+    val m_sba2noc = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
     val dmio = IO(new dm.debugModule.DebugModuleIO)
     val dmint = IO(Output(UInt(params.NumHarts.W)))
     val req_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
@@ -474,7 +474,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val isselfid = req_id === self_id
     dm_fcrs_mNode.out.head._1 <> s_noc2dm
     dm_tcrs_sNode.in.head._1 <> m_dm2noc.viewAs[AXI4Bundle]
-    dm_m.foreach(_ <> dm.axi4masternode.get)
+    m_sba2noc.foreach(_ <> dm.axi4masternode.get)
     dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
     // self node control
     dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle].aw.valid := isselfid & dm_sNode.in.head._1.aw.valid)
@@ -594,7 +594,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val s_noc2dm = IO(Flipped(new VerilogAXI4Record(dmTop.dm_fcrs_mNode.out.head._2.bundle))) // cross-die slave ports for debug
     val m_dm2noc = IO(dmTop.module.m_dm2noc.cloneType)
     // instance debugModule sba port
-    val dm_m    = Option.when(params.dmHasBusMaster)(IO(dmTop.module.dm_m.get.cloneType))
+    val m_sba2noc    = Option.when(params.dmHasBusMaster)(IO(dmTop.module.m_sba2noc.get.cloneType))
     val dmio    = IO(dmTop.module.dmio.cloneType)
     val dmint   = IO(dmTop.module.dmint.cloneType)
     val req_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
@@ -638,7 +638,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     imsicTop.module.reset := reset
     dmTop.module.clock := clock
     dmTop.module.reset := reset
-    dmTop.module.dm_m.foreach(_ <> dm_m.get)
+    dmTop.module.m_sba2noc.foreach(_ <> m_sba2noc.get)
     dmio <> dmTop.module.dmio
     dmint <> dmTop.module.dmint
     dmTop.module.req_id := req_id
