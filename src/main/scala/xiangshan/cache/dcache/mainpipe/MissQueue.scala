@@ -476,6 +476,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val req_valid = RegInit(false.B)
   val set = addr_to_dcache_set(req.vaddr)
   val evict_BtoT_way = RegInit(false.B)
+  val hasStoreAll = Reg(Bool())  // The alloc req is a store req and all merged reqs are store reqs
   // initial keyword
   val isKeyword = RegInit(false.B)
 
@@ -561,6 +562,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
     req_primary_fire := miss_req_pipe_reg_bits.toMissReqWoStoreData()
     evict_BtoT_way := false.B
+    hasStoreAll := miss_req_pipe_reg_bits.isFromStore
     //only  load miss need keyword
     isKeyword := Mux(miss_req_pipe_reg_bits.isFromLoad, miss_req_pipe_reg_bits.vaddr(5).asBool,false.B)
 
@@ -580,6 +582,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       for (i <- 0 until blockRows) {
         refill_and_store_data(i) := miss_req_pipe_reg_bits.store_data(rowBits * (i + 1) - 1, rowBits * i)
       }
+    }.otherwise {
+      req_store_mask := 0.U
     }
     full_overwrite := miss_req_pipe_reg_bits.isFromStore && miss_req_pipe_reg_bits.full_overwrite
 
@@ -610,6 +614,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     // use the most uptodate meta
     req.req_coh := miss_req_pipe_reg_bits.req_coh
 
+    hasStoreAll := hasStoreAll && miss_req_pipe_reg_bits.isFromStore
+
     isKeyword := Mux(
       before_req_sent_can_merge(miss_req_pipe_reg_bits),
       before_req_sent_merge_iskeyword(miss_req_pipe_reg_bits),
@@ -622,9 +628,25 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       req.occupy_way := miss_req_pipe_reg_bits.occupy_way
       evict_BtoT_way := false.B
       req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
-      req_store_mask := miss_req_pipe_reg_bits.store_mask
-      for (i <- 0 until blockRows) {
-        refill_and_store_data(i) := miss_req_pipe_reg_bits.store_data(rowBits * (i + 1) - 1, rowBits * i)
+      req_store_mask := req_store_mask | miss_req_pipe_reg_bits.store_mask
+
+      // for (i <- 0 until blockRows) {
+      //   val store_mask_temp = miss_req_pipe_reg_bits.store_mask.grouped(rowBytes)(i).asBools
+      //   val store_data_temp = (miss_req_pipe_reg_bits.store_data.grouped(8).grouped(rowBytes).toSeq)(i)
+      //   refill_and_store_data(i) := VecInit((0 until rowBytes).map(k => 
+      //     Mux(store_mask_temp(k), store_data_temp(k), refill_and_store_data(i).grouped(8)(k)))).asUInt
+      // }
+
+      for (i <- 0 until blockRows) {  //todo: dirty code rewrite
+        val store_data_temp = Wire(Vec(rowBits/8, UInt(8.W)))
+        for (j <- 0 until rowBits/8) {
+          when (miss_req_pipe_reg_bits.store_mask(i * rowBits/8 + j)) {
+            store_data_temp(j) := miss_req_pipe_reg_bits.store_data(i * rowBits + 8 * (j + 1) - 1, i * rowBits + 8 * j)
+          }.otherwise {
+            store_data_temp(j) := refill_and_store_data(i)(8 * (j + 1) - 1, 8 * j)
+          }
+        }
+        refill_and_store_data(i) := store_data_temp.asUInt
       }
       full_overwrite := miss_req_pipe_reg_bits.isFromStore && miss_req_pipe_reg_bits.full_overwrite
       assert(is_alias_match(req.vaddr, miss_req_pipe_reg_bits.vaddr), "alias bits should be the same when merging store")
@@ -750,7 +772,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   def before_data_refill_can_merge(new_req: MissReqWoStoreData): Bool = {
-    data_not_refilled && new_req.isFromLoad
+    data_not_refilled && new_req.isFromLoad ||
+    data_not_refilled && new_req.isFromStore && hasStoreAll
   }
 
   // Note that late prefetch will be ignored
@@ -1136,6 +1159,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   miss_req_pipe_reg.merge   := merge && io.req.valid && !io.req.bits.cancel && !io.wbq_block_miss_req
   miss_req_pipe_reg.cancel  := io.wbq_block_miss_req
   miss_req_pipe_reg.mshr_id := io.resp.id
+  assert(!(io.req.bits.isFromStore && io.req.valid && miss_req_pipe_reg.req.isFromStore &&
+          get_block(io.req.bits.addr) === get_block(miss_req_pipe_reg.req.addr)), "Two consecutive store reqs to the same block!")
 
   assert(PopCount(Seq(alloc && io.req.valid, merge && io.req.valid)) <= 1.U, "allocate and merge a mshr in same cycle!")
 
