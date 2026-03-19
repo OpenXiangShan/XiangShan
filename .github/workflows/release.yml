@@ -2,24 +2,28 @@ name: Release Jobs
 
 on:
   push:
-    branches: [ master, kunminghu-v3 ]
+    branches: [ kunminghu-v3 ]
   pull_request:
-    branches: [ master, kunminghu-v3 ]
+    branches: [ kunminghu-v3 ]
+
+env:
+  NOOP_HOME: ${{ github.workspace }}
 
 jobs:
   build-xsdev-image:
+    name: Build XSDev Docker Image
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Initialize submodules 
         run: make init-force
 
-      - uses: docker/metadata-action@v5
+      - uses: docker/metadata-action@v6
         id: metadata
         with:
           images: |
@@ -29,15 +33,15 @@ jobs:
           labels: |
             maintainer=${{ github.repository_owner }}
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -46,16 +50,18 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
 
   build-xspdb:
-    runs-on: [self-hosted, xspdb]
+    name: Build XSPdb
+    runs-on:
+      - builder
+      - open # use open servers only, keep node servers for emu jobs
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: true
       - name: set env
         run: |
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "PDB_HOME=${GITHUB_WORKSPACE}/build/xspdb" >> $GITHUB_ENV
+          echo "PDB_HOME=${NOOP_HOME}/build/xspdb" >> $GITHUB_ENV
           FILE_TIME=$(date +%Y%m)
           FILE_SHA=$(git rev-parse --short HEAD)
           FILE_NAME="XSPdb-${FILE_TIME}-${FILE_SHA}.tar.bz2"
@@ -82,8 +88,95 @@ jobs:
           make pdb-run
       - name: upload compressed XSPdb package (pr merge only)
         if: github.event_name == 'push' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/kunminghu-v3')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.FILE_NAME }}
           path: build/xspdb/${{ env.FILE_NAME }}
 
+  artifacts-uploading:
+    name: Upload Artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install deps
+        run: |
+          sudo apt install python3-psutil
+          mkdir -p ~/.local/bin
+          curl -L https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.0.4/mill-dist-1.0.4-mill.sh -o ~/.local/bin/mill
+          chmod +x ~/.local/bin/mill
+          export PATH=~/.local/bin:$PATH
+      - name: Init submodules
+        run: make init-force
+      - name: Init swapfile
+        run: |
+          if [ -f /mnt/swapfile ]; then
+            sudo swapoff /mnt/swapfile || true
+            sudo rm -f /mnt/swapfile
+          fi
+          sudo fallocate -l 32G /mnt/xs-swapfile
+          sudo chmod 600 /mnt/xs-swapfile
+          sudo mkswap /mnt/xs-swapfile
+          sudo swapon /mnt/xs-swapfile
+      - name: Clean up
+        run: python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Generate standalone devices for AXI4
+        run: |
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
+          make StandAloneSYSCNT DEVICE_BASE_ADDR=0x38040000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=DM_
+          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=PLIC_
+      - name: Generate CHI Issue B XSNoCTop verilog with difftest and filelist
+        run: |
+          make verilog WITH_CONSTANTIN=0 WITH_CHISELDB=0 CONFIG='XSNoCTopConfig --enable-difftest' ISSUE=B XSTOP_PREFIX=bosc_ JVM_XMX=10g
+          rm `find $GITHUB_WORKSPACE/build -name "*.fir"`
+          cd $GITHUB_WORKSPACE/build/rtl && find . -name "*.*v" > filelist.f
+      - name: Archive issue B verilog artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: xs-issue-b-difftest-verilog
+          path: build
+      - name: Clean up
+        run: python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Generate standalone devices for AXI4
+        run: |
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
+          make StandAloneSYSCNT DEVICE_BASE_ADDR=0x38040000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=DM_
+          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=PLIC_
+      - name: Generate CHI Issue E.b XSNoCTop verilog with difftest and filelist
+        run: |
+          make verilog WITH_CONSTANTIN=0 WITH_CHISELDB=0 CONFIG='XSNoCTopConfig --enable-difftest' ISSUE=E.b XSTOP_PREFIX=bosc_ JVM_XMX=10g
+          rm `find $GITHUB_WORKSPACE/build -name "*.fir"`
+          cd $GITHUB_WORKSPACE/build/rtl && find . -name "*.*v" > filelist.f
+      - name: Archive issue E.b verilog artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: xs-issue-e-b-difftest-verilog
+          path: build
+      - name: Clean up
+        run: python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Generate standalone devices for AXI4
+        run: |
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
+          make StandAloneSYSCNT DEVICE_BASE_ADDR=0x38040000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=DM_
+          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=PLIC_
+      - name: Generate CHI Issue E.b lowpower XSNoCTop verilog with difftest and filelist
+        run: |
+          make verilog WITH_CONSTANTIN=0 WITH_CHISELDB=0 CONFIG='XSNoCTopConfig --enable-difftest' ISSUE=E.b XSTOP_PREFIX=bosc_ JVM_XMX=10g YAML_CONFIG=$NOOP_HOME/src/main/resources/config/Poweroff.yml
+          rm `find $GITHUB_WORKSPACE/build -name "*.fir"`
+          cd $GITHUB_WORKSPACE/build/rtl && find . -name "*.*v" > filelist.f
+      - name: Archive issue E.b lowpower verilog artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: xs-issue-e-b-lowpower-difftest-verilog
+          path: build
+      - name: Generate test-jar
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+          make test-jar
+      - name: Archive test jar artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: xsgen
+          path: out/xiangshan/test/assembly.dest/out.jar

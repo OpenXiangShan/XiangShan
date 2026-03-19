@@ -1,349 +1,273 @@
-# This file describes the GitHub Actions workflow for continuous integration of XS Core.
-name: EMU Test
+# This workflow is for misc non-parallelizable tests / checks related to EMU
+name: EMU Misc Test
 
 on:
   push:
-    branches: [ master, kunminghu-v3 ]
+    branches: [ kunminghu-v3 ]
   pull_request:
-    branches: [ master, kunminghu-v3 ]
+    branches: [ kunminghu-v3 ]
+
+env:
+  # Set common environment variables for all jobs
+  NOOP_HOME: ${{ github.workspace }}
+  NEMU_HOME: /nfs/home/share/ci-workloads/NEMU
+  AM_HOME: /nfs/home/share/ci-workloads/nexus-am
+  WAVE_HOME: /nfs/home/ci-runner/xs-wave/${{ github.run_number }}
+  PERF_HOME: /nfs/home/ci-runner/xs-perf/${{ github.run_number }}
+  GCPT_RESTORE_BIN: /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin
 
 jobs:
-  changes: # Changes Detection
+  changes:
     name: Changes Detection
-    runs-on: ubuntu-latest
-    # Required permissions
     permissions:
       pull-requests: read
-    # Set job outputs to values from filter step
+    runs-on: ubuntu-latest
     outputs:
       core: ${{ steps.filter.outputs.core }}
     steps:
-    - uses: actions/checkout@v4
-    - uses: dorny/paths-filter@v4
-      id: filter
-      with:
-        predicate-quantifier: 'every'
-        filters: .github/filters.yaml
-
-  generate-verilog:
-    runs-on: bosc
-    needs: changes
-    if: ${{ needs.changes.outputs.core == 'true' }}
-    continue-on-error: false
-    timeout-minutes: 900
-    name: Generate Verilog
-    steps:
-      - name: Cleanup orphan EMU
-        run: |
-          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v4
+        id: filter
         with:
-          fetch-depth: 0
-          submodules: true
-      - name: set env
-        run: |
-          export HEAD_SHA=${{ github.run_number }}
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: Initialize submodules
-        run: make init-force
-      - name: clean up
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: check top wiring
-        run:
-          bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
-      - name: generate standalone devices for TL
-        run: |
-          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1 DEVICE_PREFIX=CLINT_
-          make StandAloneSYSCNT DEVICE_BASE_ADDR=0x38040000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1 DEVICE_PREFIX=CLINT_
-          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1 DEVICE_PREFIX=DM_
-          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1 DEVICE_PREFIX=PLIC_
-          make clean
-      - name: generate standalone devices for AXI4
-        run: |
-          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
-          make StandAloneSYSCNT DEVICE_BASE_ADDR=0x38040000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
-          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=DM_
-          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=PLIC_
-          make clean
-      - name: generate XSNoCTop verilog file
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --config XSNoCTopConfig
-      - name: check XSNoCTop verilog
-        run: |
-          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: generate verilog file
-        run:
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2
-      - name: check verilog
-        run: |
-          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: generate chirrtl only
-        run: |
-          make sim-verilog CHISEL_TARGET=chirrtl
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: build TLMinimalConfig Release emu
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 8 --config TLMinimalConfig --release --trace-fst
-      - name: run TLMinimalConfig - Linux
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
-          cat perf.log | sort
-      - name: generate NOC XiangShan
-        run: |
-          make clean
-          make verilog CONFIG=XSNoCDiffTopConfig
-      - name: generate NOC Difftest
-        run: |
-          export NOOP_HOME=$GITHUB_WORKSPACE/difftest
-          cd difftest && make difftest_verilog PROFILE=../build/generated-src/difftest_profile.json NUM_CORES=2 CONFIG=ZESNH
-      - name: check interface between XSNoCDiffTop and Difftest
-        run: |
-          cd $GITHUB_WORKSPACE
-          python3 difftest/scripts/st_tools/interface.py build/rtl/SimTop.sv --interface build/difftest-interface.sv --path_level 4
-          sed 's|^|build/rtl/|' difftest/build/rtl/filelist.f | xargs -d '\n' rm -f
-          rm -rf build/rtl/DiffExt*
-          verilator --lint-only -Wno-fatal -Wno-MODDUP -Wno-lint --top-module XSDiffTopChecker \
-            build/XSDiffTopChecker.sv build/difftest-interface.sv build/rtl/*.sv build/rtl/*.v difftest/build/rtl/*.sv difftest/build/rtl/*.v\
-            -Idifftest/build/generated-src/ -LDFLAGS -"lreadline"
+          predicate-quantifier: 'every'
+          filters: .github/filters.yaml
 
+  ### Misc Tests
+  # NOTE: These tests may be built and ran both on 'builder' machines, this might be confusing.
+  #       The reason is that we dont want a complex builder-runner workflow like EMU Performance Test,
+  #       and these tests may consume ~16 threads verlator, while 'runner' label is designed to be used with single-thread gsim,
+  #       so we just run them on 'builder' to ensure enough resource.
+
+  # GSIM functional test
+  # TODO: maybe didn't need this as we're using gsim for EMU Performance Test
+  # TODO: maybe move to gsim repo?
   emu-gsim:
-    runs-on: bosc
+    name: EMU - GSIM
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
-    continue-on-error: false
+    runs-on:
+      - builder
+      - node # Run on node servers for the moment, as gsim is having performance issue on open servers
     timeout-minutes: 900
-    name: EMU - GSIM
+    continue-on-error: false
     steps:
       - name: Cleanup orphan EMU
         run: |
           pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: true
-      - name: set env
+      - name: Init
         run: |
-          export HEAD_SHA=${{ github.run_number }}
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-      - name: clean up
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
       - name: Build GSIM emu
         run: |
-          make gsim GSIM=1 -j 200 PGO_WORKLOAD=$GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin LLVM_PROFDATA=llvm-profdata WITH_DRAMSIM3=1 DRAMSIM3_HOME=/nfs/home/share/ci-workloads/DRAMsim3
-      - name: System Test - Linux
-        id: linux
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+            --emulator gsim \
+            --yaml-config ${GITHUB_WORKSPACE}/src/main/resources/config/Default.yml \
+            --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
+            --pgo ${GITHUB_WORKSPACE}/ready-to-run/coremark-2-iteration.bin --llvm-profdata llvm-profdata \
+            --trace-fst
+      - name: GSIM Test - Linux
         run: |
-          ./build/emu -b 0 -e 0 -i ./ready-to-run/linux.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --numa --threads 1 \
+            --ci linux-hello-opensbi \
+            2> stderr.log
+          cat stderr.log | sort
 
+  # CHI Release config test
   emu-chi:
-    runs-on: bosc
-    needs: changes
-    if: ${{ needs.changes.outputs.core == 'true' }}
-    continue-on-error: false
-    timeout-minutes: 900
     name: EMU - CHI
-    steps:
-      - name: Cleanup orphan EMU
-        run: |
-          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: true
-      - name: set env
-        run: |
-          export HEAD_SHA=${{ github.run_number }}
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: Initialize submodules
-        run: make init-force
-      - name: clean up
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: build CHIConfig Release emu
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --threads 8 --config CHIConfig --release --trace-fst
-      - name: run CHIConfig - Linux
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
-          cat perf.log | sort
-      - name: run KunminghuV2Config - Iopmp
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --no-diff --ci iopmp-test 2> perf.log
-          cat perf.log | sort
-
-  docker-build:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: changes
-    continue-on-error: true
-    timeout-minutes: 30
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Build docker image
-        run: make image
-
-      - name: Compile generator JAR
-        run: make test-jar
-
-  emu-simfrontend:
-    runs-on: bosc
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on: builder
+    timeout-minutes: 900
     continue-on-error: false
-    timeout-minutes: 500
-    name: EMU - SimFrontend
     steps:
       - name: Cleanup orphan EMU
         run: |
           pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: true
-      - name: set env
+      - name: Init
         run: |
-          export HEAD_SHA=${{ github.run_number }}
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
-          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-          echo "GCPT_RESTORE_BIN=/nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin" >> $GITHUB_ENV
-          mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
-          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: Initialize submodules
-        run: make init-force
-      - name: clean up
+          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+      - name: Build CHIConfig Release EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: Build EMU
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+            --emulator verilator --threads 8 \
+            --config CHIConfig --release \
+            --trace-fst
+      - name: CHIConfig Test - Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --yaml-config $GITHUB_WORKSPACE/src/main/resources/config/Default.yml \
-            --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 --threads 8 --simfrontend --trace-fst
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --threads 8 --numa \
+            --ci linux-hello-opensbi \
+            2> stderr.log
+          cat stderr.log | sort
+      - name: CHIConfig Test - Iopmp
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --threads 8 --numa \
+            --no-diff \
+            --ci iopmp-test \
+          2> stderr.log
+          cat stderr.log | sort
 
-      - name: SPEC06 Test - astar_simfrontend
+  # Simfrontend test
+  emu-simfrontend:
+    name: EMU - SimFrontend
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on: builder
+    timeout-minutes: 500
+    continue-on-error: false
+    steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Init
+        run: |
+          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+      - name: Build Simfrontend EMU
+        run: |
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+            --emulator verilator --threads 8 \
+            --yaml-config ${GITHUB_WORKSPACE}/src/main/resources/config/Default.yml \
+            --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
+            --simfrontend \
+            --trace-fst
+      - name: Simfrontend Test - SPEC06 astar
         id: astar_simfrontend
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci astar --instr-trace astar --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
-          cat perf.log | sort | tee $PERF_HOME/astar_simfrontend.log
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --numa --threads 8 \
+            --max-instr 5000000 \
+            --ci astar \
+            --instr-trace astar \
+            --gcpt-restore-bin ${GCPT_RESTORE_BIN} \
+            2> stderr.log | tee stdout.log
+          cat stderr.log | sort | tee ${PERF_HOME}/astar_simfrontend.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
-
-      - name: SPEC06 Test - milc_simfrontend
+      - name: Simfrontend Test - SPEC06 milc
         id: milc_simfrontend
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci milc --instr-trace milc --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
-          cat perf.log | sort | tee $PERF_HOME/milc_simfrontend.log
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --numa --threads 8 \
+            --max-instr 5000000 \
+            --ci milc \
+            --instr-trace milc \
+            --gcpt-restore-bin ${GCPT_RESTORE_BIN} \
+            2> stderr.log | tee stdout.log
+          cat stderr.log | sort | tee ${PERF_HOME}/milc_simfrontend.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
-
-      - name: SPEC06 Test - xalancbmk_simfrontend
+      - name: Simfrontend Test - SPEC06 xalancbmk
         id: xalancbmk_simfrontend
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --max-instr 5000000 --numa --ci xalancbmk --instr-trace xalancbmk --gcpt-restore-bin $GCPT_RESTORE_BIN 2> perf.log | tee stdout.log
-          cat perf.log | sort | tee $PERF_HOME/xalancbmk_simfrontend.log
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --numa --threads 8 \
+            --max-instr 5000000 \
+            --ci xalancbmk \
+            --instr-trace xalancbmk \
+            --gcpt-restore-bin ${GCPT_RESTORE_BIN} \
+            2> stderr.log | tee stdout.log
+          cat stderr.log | sort | tee ${PERF_HOME}/xalancbmk_simfrontend.log
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
-
       - name: Generate summary
         if: always()
         run: |
           echo "## Emu - SimFrontend summary" >> $GITHUB_STEP_SUMMARY
-          echo "| Testcase | IPC |" >> $GITHUB_STEP_SUMMARY
-          echo "| -------- | --- |" >> $GITHUB_STEP_SUMMARY
-          echo "| astar_simfrontend | ${{ steps.astar_simfrontend.outputs.IPC }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| milc_simfrontend | ${{ steps.milc_simfrontend.outputs.IPC }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| xalancbmk_simfrontend | ${{ steps.xalancbmk_simfrontend.outputs.IPC }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Testcase  | IPC |" >> $GITHUB_STEP_SUMMARY
+          echo "| --------- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| astar     | ${{ steps.astar_simfrontend.outputs.IPC }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| milc      | ${{ steps.milc_simfrontend.outputs.IPC }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| xalancbmk | ${{ steps.xalancbmk_simfrontend.outputs.IPC }} |" >> $GITHUB_STEP_SUMMARY
 
-
+  # Multi-core test
   emu-mc:
-    runs-on: bosc
+    name: EMU - MC
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
-    continue-on-error: false
+    runs-on: builder
     timeout-minutes: 900
-    name: EMU - MC
+    continue-on-error: false
     steps:
       - name: Cleanup orphan EMU
         run: |
           pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           submodules: true
-      - name: set env
+      - name: Init
         run: |
-          export HEAD_SHA=${{ github.run_number }}
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
-          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-          mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
-          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: Initialize submodules
-        run: make init-force
-      - name: clean up
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
       - name: Build MC EMU
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
-            --num-cores 2 --emu-optimize "" \
-            --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 --threads 16 \
-            --pgo /nfs/home/share/ci-workloads/linux-hello-smp-new/bbl.bin --llvm-profdata llvm-profdata \
-            --trace-fst --trace-all
-      - name: MC Test
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --build \
+            --emulator verilator --threads 16 \
+             --num-cores 2 --emu-optimize "" \
+             --with-dramsim3 --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 \
+             --pgo /nfs/home/share/ci-workloads/linux-hello-smp-new/bbl.bin --llvm-profdata llvm-profdata \
+             --trace-fst --trace-all
+      - name: MC Test - Basics
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci mc-tests 2> /dev/zero
-      - name: SMP Linux
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --numa --threads 16 \
+            --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so \
+            --ci mc-tests 2> /dev/zero
+      - name: MC Test - SMP Linux
         run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 16 --numa --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so --ci linux-hello-smp-new 2> /dev/null
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
+            --wave-dump ${WAVE_HOME} \
+            --numa --threads 16 \
+            --diff ./ready-to-run/riscv64-nemu-interpreter-dual-so \
+            --ci linux-hello-smp-new 2> /dev/null
 
+  # SIMV basics test
   simv-basics:
-    runs-on: eda
+    name: SIMV - Basics
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on: eda
     continue-on-error: false
     timeout-minutes: 900
-    name: SIMV - Basics
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: true
-      - name: set env
-        run: |
-          export HEAD_SHA=${{ github.run_number }}
-          echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-          echo "NEMU_HOME=/nfs/home/share/ci-workloads/NEMU" >> $GITHUB_ENV
-          echo "AM_HOME=/nfs/home/share/ci-workloads/nexus-am" >> $GITHUB_ENV
-          echo "PERF_HOME=/nfs/home/ci-runner/xs-perf/${HEAD_SHA}" >> $GITHUB_ENV
-          echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
-          mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
-          mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
-      - name: Initialize submodules
-        run: make init-force
-      - name: clean up
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
       - name: Remote Connection Test
         run: |
           ssh -tt eda01 "echo test-ok"
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Init
+        run: |
+          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
       - name: Generate Verilog for VCS
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --vcs-gen --xprop
@@ -369,147 +293,159 @@ jobs:
       #   run: |
       #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --ci-vcs linux-hello-opensbi --timeout 7200" 2> /dev/zero
 
-  artifacts-uploading:
-    runs-on: ubuntu-latest
+  ### Code quality checks
+  # Check if docker image can be built
+  check-docker:
+    name: Check Docker
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
-    continue-on-error: false
-    timeout-minutes: 60
-    name: Upload Artifacts
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - name: Set env
-        run: echo "NOOP_HOME=$GITHUB_WORKSPACE" >> $GITHUB_ENV
-      - name: Install deps
-        run: |
-          sudo apt install python3-psutil
-          mkdir -p ~/.local/bin
-          sh -c "curl -L https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.0.4/mill-dist-1.0.4-mill.sh -o ~/.local/bin/mill && chmod +x ~/.local/bin/mill"
-          export PATH=~/.local/bin:$PATH
-      - name: Initialize submodules
-        run: make init-force
-      - name: Init swapfile
-        run: |
-          if [ -f /mnt/swapfile ]; then
-            sudo swapoff /mnt/swapfile || true
-            sudo rm -f /mnt/swapfile
-          fi
-          sudo fallocate -l 32G /mnt/xs-swapfile
-          sudo chmod 600 /mnt/xs-swapfile
-          sudo mkswap /mnt/xs-swapfile
-          sudo swapon /mnt/xs-swapfile
-      - name: Clean up
-        run: python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: Generate standalone devices for AXI4
-        run: |
-          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
-          make StandAloneSYSCNT DEVICE_BASE_ADDR=0x38040000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
-          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=DM_
-          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=PLIC_
-      - name: Generate CHI Issue B XSNoCTop verilog with difftest and filelist
-        run: |
-          make verilog WITH_CONSTANTIN=0 WITH_CHISELDB=0 CONFIG='XSNoCTopConfig --enable-difftest' ISSUE=B XSTOP_PREFIX=bosc_ JVM_XMX=10g
-          rm `find $GITHUB_WORKSPACE/build -name "*.fir"`
-          cd $GITHUB_WORKSPACE/build/rtl && find . -name "*.*v" > filelist.f
-      - name: Archive issue B verilog artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: xs-issue-b-difftest-verilog
-          path: build
-      - name: Clean up
-        run: python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: Generate standalone devices for AXI4
-        run: |
-          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
-          make StandAloneSYSCNT DEVICE_BASE_ADDR=0x38040000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
-          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=DM_
-          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=PLIC_
-      - name: Generate CHI Issue E.b XSNoCTop verilog with difftest and filelist
-        run: |
-          make verilog WITH_CONSTANTIN=0 WITH_CHISELDB=0 CONFIG='XSNoCTopConfig --enable-difftest' ISSUE=E.b XSTOP_PREFIX=bosc_ JVM_XMX=10g
-          rm `find $GITHUB_WORKSPACE/build -name "*.fir"`
-          cd $GITHUB_WORKSPACE/build/rtl && find . -name "*.*v" > filelist.f
-      - name: Archive issue E.b verilog artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: xs-issue-e-b-difftest-verilog
-          path: build
-      - name: Clean up
-        run: python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-      - name: Generate standalone devices for AXI4
-        run: |
-          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
-          make StandAloneSYSCNT DEVICE_BASE_ADDR=0x38040000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
-          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=DM_
-          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=PLIC_
-      - name: Generate CHI Issue E.b lowpower XSNoCTop verilog with difftest and filelist
-        run: |
-          make verilog WITH_CONSTANTIN=0 WITH_CHISELDB=0 CONFIG='XSNoCTopConfig --enable-difftest' ISSUE=E.b XSTOP_PREFIX=bosc_ JVM_XMX=10g YAML_CONFIG=$NOOP_HOME/src/main/resources/config/Poweroff.yml
-          rm `find $GITHUB_WORKSPACE/build -name "*.fir"`
-          cd $GITHUB_WORKSPACE/build/rtl && find . -name "*.*v" > filelist.f
-      - name: Archive issue E.b lowpower verilog artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: xs-issue-e-b-lowpower-difftest-verilog
-          path: build
-      - name: Generate test-jar
-        run: |
-          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
-          make test-jar
-      - name: Archive test jar artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: xsgen
-          path: out/xiangshan/test/assembly.dest/out.jar
+      - uses: actions/checkout@v6
+      - name: Build docker image
+        run: make image
+      - name: Compile generator JAR
+        run: make test-jar
 
-  check-submodules:
-    runs-on: ubuntu-latest
+  # Check verilog generation and check wiring/interface
+  check-verilog:
+    name: Check Verilog
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on: builder
+    timeout-minutes: 900
     continue-on-error: false
-    timeout-minutes: 5
-    name: Check Submodules
     steps:
-      - uses: actions/checkout@v4
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: true
+      - name: Init
+        run: |
+          mkdir -p ${WAVE_HOME} ${PERF_HOME}
+          make init-force
+          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
+      - name: Check top wiring
+        run:
+          bash .github/workflows/check-usage.sh "BoringUtils" $GITHUB_WORKSPACE
+      - name: Generate standalone devices for TL
+        run: |
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1 DEVICE_PREFIX=CLINT_
+          make StandAloneSYSCNT DEVICE_BASE_ADDR=0x38040000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1 DEVICE_PREFIX=CLINT_
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1 DEVICE_PREFIX=DM_
+          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=1 DEVICE_PREFIX=PLIC_
+          make clean
+      - name: Generate standalone devices for AXI4
+        run: |
+          make StandAloneCLINT DEVICE_BASE_ADDR=0x38000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
+          make StandAloneSYSCNT DEVICE_BASE_ADDR=0x38040000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=CLINT_
+          make StandAloneDebugModule DEVICE_BASE_ADDR=0x38020000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=DM_
+          make StandAlonePLIC DEVICE_BASE_ADDR=0x3C000000 DEVICE_ADDR_WIDTH=32 DEVICE_DATA_WIDTH=64 DEVICE_TL=0 DEVICE_PREFIX=PLIC_
+          make clean
+      - name: Generate XSNoCTop verilog file
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --config XSNoCTopConfig
+      - name: Check XSNoCTop verilog
+        run: |
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Generate verilog file
+        run:
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --generate --num-cores 2
+      - name: Check verilog
+        run: |
+          python3 $GITHUB_WORKSPACE/.github/workflows/check_verilog.py build/rtl
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Generate chirrtl only
+        run: |
+          make sim-verilog CHISEL_TARGET=chirrtl
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
+      - name: Build TLMinimalConfig Release EMU
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
+            --threads 8 --config TLMinimalConfig --release --trace-fst
+      - name: Run TLMinimalConfig - Linux
+        run: |
+          python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --wave-dump $WAVE_HOME --threads 8 --numa --ci linux-hello-opensbi 2> perf.log
+          cat perf.log | sort
+      - name: Generate NOC XiangShan
+        run: |
+          make clean
+          make verilog CONFIG=XSNoCDiffTopConfig
+      - name: Generate NOC Difftest
+        run: |
+          export NOOP_HOME=$GITHUB_WORKSPACE/difftest
+          cd difftest && make difftest_verilog PROFILE=../build/generated-src/difftest_profile.json NUM_CORES=2 CONFIG=ZESNH
+      - name: Check interface between XSNoCDiffTop and Difftest
+        run: |
+          cd $GITHUB_WORKSPACE
+          python3 difftest/scripts/st_tools/interface.py build/rtl/SimTop.sv --interface build/difftest-interface.sv --path_level 4
+          sed 's|^|build/rtl/|' difftest/build/rtl/filelist.f | xargs -d '\n' rm -f
+          rm -rf build/rtl/DiffExt*
+          verilator --lint-only -Wno-fatal -Wno-MODDUP -Wno-lint --top-module XSDiffTopChecker \
+            build/XSDiffTopChecker.sv build/difftest-interface.sv build/rtl/*.sv build/rtl/*.v difftest/build/rtl/*.sv difftest/build/rtl/*.v\
+            -Idifftest/build/generated-src/ -LDFLAGS -"lreadline"
+
+  # Check submodules must be merged to its default branch
+  check-submodules:
+    name: Check Submodules
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: false
+    steps:
+      - uses: actions/checkout@v6
         with:
           submodules: 'true'
           fetch-depth: '0'
-      - name: check rocket-chip
+      - name: Check rocket-chip
         run: cd rocket-chip && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
-      - name: check difftest
+      - name: Check difftest
         run: cd difftest && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
-      - name: check ready-to-run
+      - name: Check ready-to-run
         run: cd ready-to-run && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
-      - name: check huancun
+      - name: Check huancun
         run: cd huancun && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
-      - name: check utility
+      - name: Check utility
         run: cd utility && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
-      - name: check yunsuan
+      - name: Check yunsuan
         run: cd yunsuan && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/kunminghu-v3
-      - name: check coupledL2
+      - name: Check coupledL2
         run: cd coupledL2 && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
-      - name: check openLLC
+      - name: Check openLLC
         run: cd openLLC && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
-      - name: check ChiselAIA
+      - name: Check ChiselAIA
         run: cd ChiselAIA && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/kunminghu-v3
 
-  scalafmt:
-    runs-on: ubuntu-latest
+  # Check format
+  check-format:
+    name: Check Format
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
-    continue-on-error: true
-    timeout-minutes: 900
-    name: Check Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+      - name: Install Java
+        uses: actions/setup-java@v5
         with:
-          submodules: 'recursive'
-      - uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '11'
-      - run: |
+          distribution: 'graalvm'
+          java-version: '21'
+      - name: Install mill
+        env:
+          MILL_VERSION: 1.0.4
+        run: |
           mkdir -p ~/.local/bin
-          sh -c "curl -L https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/1.0.4/mill-dist-1.0.4-mill.sh -o ~/.local/bin/mill && chmod +x ~/.local/bin/mill"
+          curl -L https://repo1.maven.org/maven2/com/lihaoyi/mill-dist/${MILL_VERSION}/mill-dist-${MILL_VERSION}-mill.sh -o ~/.local/bin/mill
+          chmod +x ~/.local/bin/mill
+      - name: Run check-format
+        run: |
           export PATH=~/.local/bin:$PATH
-      - run: make check-format
+          make check-format
