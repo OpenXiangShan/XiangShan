@@ -222,8 +222,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   dontTouch(canIssueVec)
   val deqFirstIssueVec = entries.io.isFirstIssue
 
-  val dataSources: Vec[Vec[DataSource]] = entries.io.dataSources
-  val finalDataSources: Vec[Vec[DataSource]] = VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, dataSources)))
   val loadDependency: Vec[Vec[UInt]] = entries.io.loadDependency
   val finalLoadDependency: IndexedSeq[Vec[UInt]] = VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, loadDependency)))
   // (entryIdx)(srcIdx)
@@ -882,13 +880,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.pdestVl.foreach(_ := deqEntryVec(i).bits.payload.pdestVl.get)
     deq.bits.robIdx := deqEntryVec(i).bits.status.robIdx
 
-    require(deq.bits.dataSources.size <= finalDataSources(i).size)
-    deq.bits.dataSources.zip(finalDataSources(i)).foreach { case (sink, source) => sink := source}
+    val deqDataSources = deqEntryVec.map(_.bits.status.srcStatus.map(_.dataSources))
+    deq.bits.dataSources.zip(deqDataSources(i)).foreach { case (sink, source) => sink := source}
     deq.bits.exuSources.foreach(_.zip(finalExuSources.get(i)).foreach { case (sink, source) => sink := source})
     deq.bits.loadDependency.foreach(_.zip(finalLoadDependency(i)).foreach { case (sink, source) => sink := source})
-    // when alu select jump uop, src0's dataSource change to imm
+    // when alu select jump uop, src0's refren change to false
     if (params.aluDeqNeedPickJump && (i == 0)) {
-      val src0IsReadReg = finalDataSources(i)(0).readReg
+      val src0IsReadReg = deqDataSources(i)(0).readReg
       when(entries.io.aluDeqSelectJump.get && src0IsReadReg){
         deq.bits.rfBankRen.get(0) := 0.U.asTypeOf(deq.bits.rfBankRen.get(0))
       }
@@ -896,7 +894,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     else if (params.aluDeqNeedPickJump && (i == 1)) {
       // assign jump uop form alu deq
       when(entries.io.aluDeqSelectJump.get) {
-        deq.bits.dataSources := finalDataSources(0)
+        deq.bits.dataSources := deqDataSources(0)
         deq.bits.exuSources.foreach(_ := deqBeforeDly(0).bits.exuSources.get)
         deq.bits.loadDependency.foreach(_ := deqBeforeDly(0).bits.loadDependency.get)
       }

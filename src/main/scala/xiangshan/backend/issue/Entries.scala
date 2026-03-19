@@ -68,7 +68,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val validVecRegNext     = Wire(Vec(params.numEntries, Bool()))
   val issuedVecRegNext    = Wire(Vec(params.numEntries, Bool()))
   //src status
-  val dataSourceVec       = Wire(Vec(params.numEntries, Vec(params.numRegSrc, DataSource())))
   val loadDependencyVec   = Wire(Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))))
   val exuSourceVec        = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, ExuSource()))))
   //deq sel
@@ -408,7 +407,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.srcReady                       := srcReadyVec.asUInt
   io.rfWen                          := rfWenVec.asUInt
   io.fuType                         := fuTypeVec
-  io.dataSources                    := dataSourceVec
   io.exuSources.foreach(_           := exuSourceVec.get)
   io.loadDependency                 := loadDependencyVec
   io.isFirstIssue.zipWithIndex.foreach{ case (isFirstIssue, deqIdx) =>
@@ -444,7 +442,6 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     srcReadyVec(entryIdx)       := out.srcReady
     fuTypeVec(entryIdx)         := out.fuType
     robIdxVec(entryIdx)         := out.robIdx
-    dataSourceVec(entryIdx)     := out.dataSources
     isFirstIssueVec(entryIdx)   := out.isFirstIssue
     entries(entryIdx)           := out.entry
     deqPortIdxReadVec(entryIdx) := out.deqPortIdxRead
@@ -575,7 +572,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val rfWen               = Output(UInt(params.numEntries.W))
   val srcReady            = Output(UInt(params.numEntries.W))
   val fuType              = Vec(params.numEntries, Output(FuType()))
-  val dataSources         = Vec(params.numEntries, Vec(params.numRegSrc, Output(DataSource())))
   val loadDependency      = Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   val exuSources          = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(ExuSource()))))
   // for enq.ready timing

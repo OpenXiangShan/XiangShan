@@ -166,7 +166,6 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val validRegNext          = Output(Bool())
     val issuedRegNext         = Output(Bool())
     //src
-    val dataSources           = Vec(params.numRegSrc, Output(DataSource()))
     val exuSources            = Option.when(params.hasIQWakeUp)(Vec(params.numRegSrc, Output(ExuSource())))
     //deq
     val isFirstIssue          = Output(Bool())
@@ -454,13 +453,24 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.srcReady                                := common.canIssue
     commonOut.fuType                                  := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     commonOut.robIdx                                  := status.robIdx
-    commonOut.dataSources.zipWithIndex.foreach{ case (dataSourceOut, srcIdx) =>
+    commonOut.isFirstIssue                            := status.firstIssue
+    commonOut.entry.valid                             := validReg
+    commonOut.entry.bits.status                       := entryReg.status
+    commonOut.entry.bits.payload                      := entryReg.payload
+    entryWireGenRen.status                            := entryReg.status
+    entryWireGenRen.payload                           := entryReg.payload
+    commonOut.entry.bits.genXrfRen(entryWireGenRen)
+    if(isEnq) {
+      commonOut.entry.bits.status                     := status
+      entryWireGenRen.status                          := status
+    }
+    commonOut.entry.bits.status.srcStatus.zip(entryWireGenRen.status.srcStatus).zipWithIndex.foreach{ case ((dataSourceOut, entryWire), srcIdx) =>
       val wakeupByIQWithoutCancel = hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx).asUInt.orR
       val wakeupByIQIsUncertain = hasIQWakeupGet.srcWakeupByIQIsUncertain(srcIdx).asUInt.orR
       val wakeupByIQWithoutCancelOH = hasIQWakeupGet.srcWakeupByIQWithoutCancel(srcIdx)
       val isWakeupByMemIQ = wakeupByIQWithoutCancelOH.zip(commonIn.wakeUpFromIQ).filter(_._2.bits.params.isMemExeUnit).map(_._1).fold(false.B)(_ || _)
       val useRegCache = status.srcStatus(srcIdx).useRegCache.getOrElse(false.B) && status.srcStatus(srcIdx).dataSources.readReg
-      dataSourceOut.value                             := (if (isComp)
+      dataSourceOut.dataSources.value                 := (if (isComp)
                                                             if (params.inVfSchd && params.readVfRf && params.hasWakeupFromMem) {
                                                               MuxCase(status.srcStatus(srcIdx).dataSources.value, Seq(
                                                                 (wakeupByIQWithoutCancel && !isWakeupByMemIQ)  -> DataSource.forward,
@@ -477,19 +487,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                                 useRegCache                                    -> DataSource.regcache,
                                                               ))
                                                           })
+      entryWire.dataSources := dataSourceOut.dataSources
     }
-    commonOut.isFirstIssue                            := status.firstIssue
-    commonOut.entry.valid                             := validReg
-    commonOut.entry.bits.status                       := entryReg.status
-    commonOut.entry.bits.payload                      := entryReg.payload
-    entryWireGenRen.status                            := entryReg.status
-    entryWireGenRen.payload                           := entryReg.payload
-    commonOut.entry.bits.genXrfRen(entryWireGenRen)
-    if(isEnq) {
-      commonOut.entry.bits.status                     := status
-      entryWireGenRen.status                          := status
-    }
-    entryWireGenRen.status.srcStatus.zip(commonOut.dataSources).map{case(ss, ds) => ss.dataSources := ds}
     if (isEnq || !isComp) {
       // Enq and Simp can back to back trans
       commonOut.entry.bits.payload.og1Payload         := RegNext(entryReg.payload.og1Payload)
