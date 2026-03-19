@@ -10,29 +10,23 @@ import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, Utils, VecPipedFuncUnit, VecSrcTypeModule}
 import xiangshan.ExceptionNO
 import yunsuan.VialuFixType
-import yunsuan.encoding.Opcode.Opcodes.VIMacOpcode
 import yunsuan.encoding.{VdType, Vs1IntType, Vs2IntType}
-import yunsuan.{OpType}
 import yunsuan.vector.mac.VIMac64b
+import xiangshan.backend.decode.opcode.Opcode.VIMacOpcodes
 
 class VIMacSrcTypeModule extends VecSrcTypeModule {
 
-  private val opcode  = 0.U
-  private val vs2Sign = VIMacOpcode.vs2Sign(fuOpType)
-  private val vs1Sign = VIMacOpcode.vs1Sign(fuOpType)
-  private val vdSign  = VIMacOpcode.vdSign(fuOpType)
-  private val format  = 0.U
-  private val widen   = false.B
-
-  private val vs2IntType = Cat(0.U(1.W), vs2Sign)
-  private val vs1IntType = Cat(0.U(1.W), vs1Sign)
-  private val vdIntType  = Cat(0.U(1.W),  vdSign)
+  private val vs2Sign = VIMacOpcodes.vs2Sign(fuOpType)
+  private val vs1Sign = VIMacOpcodes.vs1Sign(fuOpType)
+  private val vdSign  = VIMacOpcodes.vdSign(fuOpType)
+  private val format  = VIMacOpcodes.getFormat(fuOpType)
+  private val widen   = VIMacOpcodes.isWiden(fuOpType)
 
   private val vsewX2 = vsew + 1.U
 
-  private val vs2Type = Cat(vs2IntType, vsew)
-  private val vs1Type = Cat(vs1IntType, vsew)
-  private val vdType  = Cat( vdIntType, Mux(widen, vsewX2, vsew))
+  private val vs2Type = Cat(vs2Sign, vsew)
+  private val vs1Type = Cat(vs1Sign, vsew)
+  private val vdType  = Cat(vdSign, Mux(widen, vsewX2, vsew))
 
   private val widenIllegal = widen && vsewX2 === VSew.e8
 
@@ -43,7 +37,6 @@ class VIMacSrcTypeModule extends VecSrcTypeModule {
 }
 
 class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
-//  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VimacType.dummy, "VialuF OpType not supported")
 
   // params alias
   private val dataWidth = cfg.destDataBits
@@ -51,10 +44,9 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   private val numVecModule = dataWidth / dataWidthOfDataModule
 
   // io alias
-  private val opcode  = 0.U
-  private val format  = 0.U
-  private val widen   = false.B
-  private val exchangeVs2Vd = false.B
+  private val format  = VIMacOpcodes.getFormat(fuOpType)
+  private val widen   = VIMacOpcodes.isWiden(fuOpType)
+  private val exchangeVs2Vd = VIMacOpcodes.overWriteMultiplicand(fuOpType)
 
   // modules
   private val typeMod = Module(new VIMacSrcTypeModule)
@@ -110,11 +102,11 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
       mod.io.vs1         := vs1VecUsed(i)
       mod.io.vs2         := Mux(!exchangeVs2Vd, vs2VecUsed(i), oldVdVecUsed(i))
       mod.io.oldVd       := Mux(!exchangeVs2Vd, oldVdVecUsed(i), vs2VecUsed(i))
-      mod.io.highHalf    := 0.U
-      mod.io.isMacc      := 0.U
-      mod.io.isSub       := 0.U
+      mod.io.highHalf    := VIMacOpcodes.ishighHalf(fuOpType)
+      mod.io.isMacc      := VIMacOpcodes.isVmaccType(fuOpType)
+      mod.io.isSub       := VIMacOpcodes.isSub(fuOpType)
       mod.io.widen       := widen
-      mod.io.isFixP      := 0.U
+      mod.io.isFixP      := VIMacOpcodes.isVsmul(fuOpType)
       mod.io.sew         := 0.U
       mod.io.vs1Sign     := 0.U
       mod.io.vs2Sign     := 0.U
@@ -125,8 +117,8 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
     * [[mgu]]'s in connection
     */
   private val outVd = Cat(vimacs.reverse.map(_.io.vd))
-  private val outFormat = 0.U
-  private val outWiden = false.B
+  private val outFormat = VIMacOpcodes.getFormat(outCtrl.fuOpType)
+  private val outWiden = VIMacOpcodes.isWiden(outCtrl.fuOpType)
   private val outVxsat = Cat(vimacs.reverse.map(_.io.vxsat))
 
   private val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
