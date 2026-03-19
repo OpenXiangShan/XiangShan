@@ -80,7 +80,7 @@ case class AplicParams(
     CFG_ADDR_WIDTH: Int = 40,
     CFG_DATA_WIDTH: Int = 64,
     CFG_ID_WIDTH:   Int = 16,
-    APLICAddrMap:   AddressSet = AddressSet(0x31100000L, 0x7fff),
+    APLICAddrMap:   AddressSet = AddressSet(0x1E020000L, 0x7fff),
     MSI_DATA_WIDTH: Int = 32,
     NumIntSrcs:     Int = 512
 )
@@ -98,15 +98,30 @@ case class Pbus2Params(
     cpuAddrWidth:   Int = 32,
     cpuDataWidth:   Int = 64,
     dmDataWidth:   Int = 64,
+    nocDataWidth:   Int = 256,
     dmHasBusMaster: Boolean = true,
-    SYSCNTAddrMap: AddressSet = AddressSet(0x38040000L, 0x10000 - 1), // SYSCNTConsts.size - 1), 0x10000
-    DebugAddrMap:  AddressSet = AddressSet(0x00010000L, 0x1000 - 1),  // 4KB
+    SYSCNTAddrMap: AddressSet = AddressSet(0x1E000000L, 0x10000 - 1), // SYSCNTConsts.size - 1), 0x10000
+    DebugAddrMap:  AddressSet = AddressSet(0x1B000000L, 0x1000 - 1),  // 4KB
     dmsize:        Int = 0x1000,
     DieIDWidth:    Int = 3,
+    // bit[47:44] >0, 0x1C00_0000~0x1DFF_FFFF, access to imsic for crossdie
+    crsimsicAddrMap: Seq[AddressSet] = Seq(
+      AddressSet((BigInt(1) << 44) + 0x1C000000L, 0x1FFFFFF), // die 1
+      AddressSet((BigInt(2) << 44) + 0x1C000000L, 0x1FFFFFF), // die 2
+      AddressSet((BigInt(3) << 44) + 0x1C000000L, 0x1FFFFFF), // die 3
+      AddressSet((BigInt(4) << 44) + 0x1C000000L, 0x1FFFFFF) // die 4
+    ),
+    // bit[47:44] >0,0x1B000000~0x1B000FFF,for cross die debug
+    crsdmAddrMap: Seq[AddressSet] = Seq(
+      AddressSet((BigInt(1) << 44) + 0x1B000000L, 0xFFF),
+      AddressSet((BigInt(2) << 44) + 0x1B000000L, 0xFFF),
+      AddressSet((BigInt(3) << 44) + 0x1B000000L, 0xFFF),
+      AddressSet((BigInt(4) << 44) + 0x1B000000L, 0xFFF)
+    ),
     IMSICParams: aia.IMSICParams = aia.IMSICParams(
       imsicIntSrcWidth = 9,
-      mAddr = 0x3a000000,
-      sgAddr = 0x3b000000,
+      mAddr = 0x1C000000,
+      sgAddr = 0x1D000000,
       geilen = 7,
       vgeinWidth = 6,
       iselectWidth = 12,
@@ -124,7 +139,7 @@ case class Pbus2Params(
 /**
  * A configurable hierarchical AXI4 bus interconnect with heterogeneous input widths.
  */
-class AXIDataBridge(SrcDataWidth: Int,DestDataWidth: Int)(implicit p: Parameters) extends LazyModule {
+class AXIDataBridge(SrcDataWidth: Int, DestDataWidth: Int, errorAddrMap: AddressSet)(implicit p: Parameters) extends LazyModule {
   println("=====AXIDataBridge: start define=====")
   val axi_xbar_i = AXI4Xbar()
   val axi_xbar_o = AXI4Xbar()
@@ -132,32 +147,32 @@ class AXIDataBridge(SrcDataWidth: Int,DestDataWidth: Int)(implicit p: Parameters
   val error_xbar = TLXbar()
   val error = LazyModule(new TLError(
     params = DevNullParams(
-      address = Seq(AddressSet(0x1000000000000L, 0xffffffffffffL)),
+      address = Seq(errorAddrMap),
       maxAtomic = 1,
       maxTransfer = 256), // max 32B
     beatBytes = DestDataWidth/8
   ))
   error.node := error_xbar
+
   axi_xbar_o :=
 //    AXI4Buffer() :=
     AXI4Buffer() :=
 //    AXI4IdIndexer(CPUidBits = 10) :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(DestDataWidth/8) :=
-    TLToAXI4() :=
+    TLToAXI4(wcorrupt = false) :=
     error_xbar :=
     TLBuffer.chainNode(2) :=
     TLFIFOFixer() :=
     TLWidthWidget(SrcDataWidth/8) :=
-    AXI4ToTL() :=
+    AXI4ToTL(wcorrupt = false) :=
     AXI4UserYanker() :=
-    // AXI4Fragmenter() :=
+//   AXI4Fragmenter() :=
     AXI4Buffer() :=
+//    AXI4IdIndexer(1) :=
     axi_xbar_i
-  println("=====AXIDataBridge: end define=====")
   lazy val module = new Imp
   class Imp extends LazyModuleImp(this)
-  println("=====AXIDataBridge: exit ======")
 }
 //  axi_xbar_o :=
 //  AXI4Buffer() :=
@@ -261,42 +276,40 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
         supportsWrite = TransferSizes(1, params.MSIOutDataWidth/8),
         supportsRead = TransferSizes(1, params.MSIOutDataWidth/8)
       )),
-      beatBytes = 4)))
+      beatBytes = params.MSIOutDataWidth/8)))
   })
   println("IMSICXbar: end sNodes define")
+  // cross-die MSI slave Node,bit[47:44]!=0，data width is 256bit
+  val crsdie_msi_sN =
+    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+      slaves = Seq(AXI4SlaveParameters(
+        address = params.crsimsicAddrMap,
+        supportsWrite = TransferSizes(1, params.nocDataWidth / 8),
+        supportsRead = TransferSizes(1, params.nocDataWidth / 8)
+      )),
+      beatBytes = params.nocDataWidth / 8
+    )))
 
   // instance data width switch bridge for peri_s (256bit -> 64bit)
-  val u_hnis_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = 256, DestDataWidth = params.MSIOutDataWidth))
+  val u_hnis_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.nocDataWidth,
+    DestDataWidth = params.MSIOutDataWidth, errorAddrMap = AddressSet(0x1C100000L, 0xfffffL)))
   u_hnis_DataBridge.axi_xbar_i := hni_s_xbar
   pcie_xbar1to2 := aplic_mNode
   pcie_xbar1to2 := AXI4Buffer() := u_hnis_DataBridge.axi_xbar_o
   // instance data width switch bridge
-  val u_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.cpuDataWidth, DestDataWidth = params.MSIOutDataWidth))
-  u_DataBridge.axi_xbar_i := Cbus.cpum
-  pbus_xbar := u_DataBridge.axi_xbar_o
-//  val DataWidth = 32
-//  val error_xbar = TLXbar()
-//  val error = LazyModule(new TLError(
-//    params = DevNullParams(
-//      address = Seq(AddressSet(0x1000000000000L, 0xffffffffffffL)),
-//      maxAtomic = 1,
-//      maxTransfer = DataWidth),
-//    beatBytes = DataWidth/8
-//  ))
-//  error.node := error_xbar
-//pbus_xbar :=
-////  AXI4Deinterleaver(DataWidth/8) :=
-//  TLToAXI4() :=
-////  error_xbar :=
-//  TLBuffer.chainNode(2) :=
-//  TLFIFOFixer() :=
-//  TLWidthWidget(DataWidth / 8) :=
-//  AXI4ToTL() :=
-//  AXI4UserYanker() :=
-//  Cbus.cpum
-  pbus_xbar := pcie_xbar1to2
+  val u_cpus_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.cpuDataWidth,
+    DestDataWidth = params.MSIOutDataWidth, errorAddrMap = AddressSet(0x1C200000L, 0xfffffL)))
+  u_cpus_DataBridge.axi_xbar_i := Cbus.cpum
+  pbus_xbar := u_cpus_DataBridge.axi_xbar_o
+  pbus_xbar := AXI4Buffer() := pcie_xbar1to2
   // start to decoder for imsic below
-
+  // imsic for cross-die
+  // instance data width switch bridge from 32bit to 256bit
+  val u_crsdie_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.MSIOutDataWidth,
+    DestDataWidth = params.nocDataWidth, errorAddrMap = AddressSet(0x800000000000L, 0xfffffffffffL)))
+  u_crsdie_DataBridge.axi_xbar_i := pbus_xbar // 32bit
+  crsdie_msi_sN := u_crsdie_DataBridge.axi_xbar_o // 256bit
+  // imsic inside die
   val imsic_l4 = Seq.fill(params.NumHarts / 1)(AXI4Xbar())
   val NumCX = 11
   val NumCX_l1 = 4
@@ -313,7 +326,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   }
 
   // l0 <- l1 <- l2 <- l3
-  l1xbar1to2(3) := AXI4Buffer() := pbus_xbar
+  l1xbar1to2(3) := pbus_xbar
   l1xbar1to2(2) := l1xbar1to2(3)
   l1xbar1to2(1) := AXI4Buffer() := l1xbar1to2(2)
   l1xbar1to2(0) := l1xbar1to2(1)
@@ -321,13 +334,11 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   for (i <- 0 until NumCX_l1) {
     xbar1to2(4 + i * 2) := l1xbar1to2(i)
   }
-  println("imsicPbusTop: test 00 ===")
   xbar1to2(2) := l1xbar1to2(0)
   // icx xbar 1to2 design
   for (i <- 0 until 2) {
     imsic_l4(i) :*= xbar1to2(0)
   }
-  println("imsicPbusTop: test 01 ===")
   imsic_l4(2) := xbar1to2(1)
   xbar1to2(0) := xbar1to2(1)
   imsic_l4(3) := xbar1to2(2)
@@ -338,7 +349,6 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     imsic_l4(i + 3 * 2) :*= xbar1to2(7)
     imsic_l4(i + 3 * 3) :*= xbar1to2(9)
   }
-  println("imsicPbusTop: test 01 ===")
   //  icx0->cx1->cx2   cx3->cx4,cx5->cx6,cx7->cx8, cx9->cx10
   xbar1to2(3) := xbar1to2(4)
   imsic_l4(6) := xbar1to2(4)
@@ -348,7 +358,6 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   imsic_l4(12) := xbar1to2(8)
   xbar1to2(9) := xbar1to2(10)
   imsic_l4(15) := xbar1to2(10)
-  println("imsicPbusTop: test 02 ===")
   for (i <- 0 until params.NumHarts) {
     sNodes(i) := AXI4Buffer() := imsic_l4(i)
   }
@@ -361,8 +370,11 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     // master to imsic
     val m = IO(Vec(
       params.NumHarts,new VerilogAXI4Record(sNodes.head.in.head._2.bundle)))
+    // cross-die imsic
+    val msi_crs_m = IO(new VerilogAXI4Record(crsdie_msi_sN.in.head._2.bundle))
     // connect io
     aplic_mNode.out.head._1 <> s_aplic
+    msi_crs_m.viewAs[AXI4Bundle] <> crsdie_msi_sN.in.head._1
     for (i <- 0 until params.NumHarts) {
       m(i).viewAs[AXI4Bundle] <> sNodes(i).in.head._1
       sNodes(i).in.head._1.ar.ready := true.B
@@ -378,7 +390,6 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
       m(i).viewAs[AXI4Bundle].ar.bits.qos := 0.U
       m(i).viewAs[AXI4Bundle].ar.valid := false.B
       m(i).viewAs[AXI4Bundle].r.ready := true.B
-
     }
   }
 }
@@ -389,22 +400,30 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     useTL = false,
     baseAddress = params.DebugAddrMap.base,
     addrWidth = params.cpuAddrWidth,
-    dataWidth = params.cpuDataWidth,
+    dataWidth = params.dmDataWidth,
     hartNum = params.NumHarts
   ))
-  // dm master: cpus--> cpu_xbarNto1-->cpu2dm_s
+  // dm master: cpus--> cpu_xbarNto1-->Cbus.cpum
   val Cbus = LazyModule(new Cbus(params))
-  val cpu2dm_s =
-    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
-      slaves = Seq(AXI4SlaveParameters(
-        address = Seq(params.DebugAddrMap),
-        supportsWrite = TransferSizes(1, params.cpuDataWidth / 8),
-        supportsRead = TransferSizes(1, params.cpuDataWidth / 8)
-      )),
-      beatBytes = params.cpuDataWidth / 8
+  // define node from noc(access to debug of current die from other die)
+  val dm_fcrs_mNode =
+    AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = "dm-mnode-crs",
+        maxFlight = Some(1),
+        aligned = true,
+        id = IdRange(0, 1 << params.NOCidBits)
+      ))
     )))
-  cpu2dm_s := Cbus.cpum
-  // define dm_s_self
+  // data width switch bridge for cross-die debug, 256bit->64bit
+  val u_dm_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.nocDataWidth, DestDataWidth = params.dmDataWidth,
+    errorAddrMap = AddressSet(0x1B020000L, 0xffffL))) // dm cfg data must be 64bit
+  u_dm_DataBridge.axi_xbar_i := dm_fcrs_mNode // 64bit
+  val dmxbar2to1 = AXI4Xbar()
+  // Cbus.cpum,dm_fcrs_mNode --> dmxbar2to1 --->(sefid==reqid) & dm_sNode =>debugModule
+  dmxbar2to1 := Cbus.cpum // dm_self_mNode
+  dmxbar2to1 := AXI4Buffer() := u_dm_DataBridge.axi_xbar_o
+  // define slaveNode, addr space is for debug
   val dm_sNode =
     AXI4SlaveNode(Seq(AXI4SlavePortParameters(
       slaves = Seq(AXI4SlaveParameters(
@@ -414,37 +433,38 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       )),
       beatBytes = params.dmDataWidth / 8
     )))
-  // define dm_self channel dm_self_mNode <> cpu2dm_s & is_self_id
-  // dm_self_mNode,dm_crs_mNode --> dmxbar2to1 --->debugModule
-  val dm_self_mNode =
-    AXI4MasterNode(Seq(AXI4MasterPortParameters(
-      masters = Seq(AXI4MasterParameters(
-        name = "dm-self-Mnode"
-        // id = IdRange(0, 1 << params.idBits)
-      ))
-    )))
-  val dm_mNode_crs =
-    AXI4MasterNode(Seq(AXI4MasterPortParameters(
-      masters = Seq(AXI4MasterParameters(
-        name = "dm-mnode-crs",
-        maxFlight = Some(1),
-        aligned = true,
-        id = IdRange(0, 1 << params.NOCidBits)
-      ))
-    )))
-  // data width switch bridge for cross-die debug
-  val u_dm_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.cpuDataWidth, DestDataWidth = params.dmDataWidth)) // dm cfg data must be 64bit
-  u_dm_DataBridge.axi_xbar_i := dm_mNode_crs
-  val dmxbar2to1 = AXI4Xbar()
-  dmxbar2to1 := dm_self_mNode
-  dmxbar2to1 := AXI4Buffer() := u_dm_DataBridge.axi_xbar_o
   dm_sNode := dmxbar2to1
-  // data width switch from 64bit to 256bit for access to cross-die debugModule 
+  // current die -> other die
+  val dm_tcrs_sNode =
+    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+      slaves = Seq(AXI4SlaveParameters(
+        address = params.crsdmAddrMap,
+        supportsWrite = TransferSizes(1, params.nocDataWidth / 8),
+        supportsRead = TransferSizes(1, params.nocDataWidth / 8)
+      )),
+      beatBytes = params.nocDataWidth / 8
+    )))
+  // data width switch bridge for cross-die debug from current die, 64bit->256bit
+  val u_dm_mDataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.dmDataWidth, DestDataWidth = params.nocDataWidth,
+    errorAddrMap = AddressSet(0x1B010000L, 0xffffL))) // dm cfg data must be 64bit
+  // master Node for accessing to debugModule of other dies, whose addr[47:44] is reqid,based on sNodes
+  val dm_tcrs_mNode =
+    AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = "dm-buf-master",
+        maxFlight = Some(1), // 必须指定
+        aligned = true,
+        id = IdRange(0, 1 << params.NOCidBits)  // 需要适当的 ID 范围
+      ))
+    )))
+  u_dm_mDataBridge.axi_xbar_i := dm_tcrs_mNode
+  dm_tcrs_sNode := u_dm_mDataBridge.axi_xbar_o
+  // data width switch from 64bit to 256bit for access to cross-die debugModule
   println("=== exit dmPbusTop class last ====")
   class Imp(outer: dmPbusTop) extends LazyModuleImp(outer) {
     println("==== enter uncoreTop Imp ... ==")
-    val dm_crs_s = IO(Flipped(new AXI4Bundle(dm_mNode_crs.out.head._2.bundle)))// cross-die slave ports for debug
-    val dm_crs_m = IO(new AXI4Bundle(cpu2dm_s.in.head._2.bundle))
+    val dm_crs_s = IO(Flipped(new VerilogAXI4Record(dm_fcrs_mNode.out.head._2.bundle)))// cross-die slave ports for debug
+    val dm_crs_m = IO(new VerilogAXI4Record(dm_tcrs_sNode.in.head._2.bundle))
     // instance debugModule sba port
     val dm_m = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
     val dmio = IO(new dm.debugModule.DebugModuleIO)
@@ -452,36 +472,27 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val req_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
     val self_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for current die
     val isselfid = req_id === self_id
-    dm_mNode_crs.out.head._1 <> dm_crs_s
-    println("==== test00..==")
-    dm_crs_m.aw <> cpu2dm_s.in.head._1.aw
-    dm_crs_m.w <> cpu2dm_s.in.head._1.w
-    dm_crs_m.b <> cpu2dm_s.in.head._1.b
-    dm_crs_m.ar <> cpu2dm_s.in.head._1.ar
-    dm_crs_m.r <> cpu2dm_s.in.head._1.r
-    dm_crs_m.aw.valid := !isselfid & cpu2dm_s.in.head._1.aw.valid
-    dm_crs_m.w.valid := !isselfid & cpu2dm_s.in.head._1.w.valid
-    dm_crs_m.ar.valid := !isselfid & cpu2dm_s.in.head._1.ar.valid
+    dm_fcrs_mNode.out.head._1 <> dm_crs_s.viewAs[AXI4Bundle]
+    dm_tcrs_sNode.in.head._1 <> dm_crs_m.viewAs[AXI4Bundle]
     dm_m.foreach(_ <> dm.axi4masternode.get)
     dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
-    dm_self_mNode.out.head._1 <> cpu2dm_s.in.head._1
-    dm_self_mNode.out.head._1.aw.valid := isselfid & cpu2dm_s.in.head._1.aw.valid
-    dm_self_mNode.out.head._1.w.valid  := isselfid & cpu2dm_s.in.head._1.w.valid
-    dm_self_mNode.out.head._1.ar.valid := isselfid & cpu2dm_s.in.head._1.ar.valid
-//    for (i <- 0 until params.NumHarts) {
-//      cpu_mNodes(i).out.head._1 <> cpu_s(i).viewAs[AXI4Bundle]
-//    }
+    // self node control
+    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle].aw.valid := isselfid & dm_sNode.in.head._1.aw.valid)
+    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle].w.valid := isselfid & dm_sNode.in.head._1.w.valid)
+    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle].ar.valid := isselfid & dm_sNode.in.head._1.ar.valid)
+    dm_tcrs_mNode.out.head._1 <> dm_sNode.in.head._1
+    dm_tcrs_mNode.out.head._1.aw.valid := !isselfid & dm_sNode.in.head._1.aw.valid
+    dm_tcrs_mNode.out.head._1.aw.bits.addr := (req_id << 44) + dm_sNode.in.head._1.aw.bits.addr //bit[47:44] is req_id
+    dm_tcrs_mNode.out.head._1.w.valid := !isselfid & dm_sNode.in.head._1.w.valid
+    dm_tcrs_mNode.out.head._1.ar.valid := !isselfid & dm_sNode.in.head._1.ar.valid
+    dm_tcrs_mNode.out.head._1.ar.bits.addr := (req_id << 44) + dm_sNode.in.head._1.ar.bits.addr
     dmio <> dm.module.io
     val dmintSrc = dm.int.getWrappedValue.asInstanceOf[HeterogeneousBag[Vec[Bool]]]
     dmint := dmintSrc.head.asUInt
-    println("==== dmPbusTop Imp end ..==")
   }
-  println("==== dmPbusTop before override define ..==")
   override lazy val module = new Imp(this)
-  println("==== dmPbusTop after override define ..==")
 }
 class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
-
   // cpu axi ports -> xbar1to2 -> imsic slave and dm slave
   println("====start: enter uncoreTop ..==")
   val cpu_mNodes = Seq.fill(params.NumHarts) {
@@ -495,7 +506,6 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     )))
   }
   val cpu_xbar1to2 = Seq.fill(params.NumHarts)(AXI4Xbar())
-  println("====uncoreTop: before imsicTop instance ..==")
   // instance modules
   val imsicTop = LazyModule(new imsicPbusTop(params))
   val hni_mNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -541,7 +551,8 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       beatBytes = params.aplicParams.CFG_DATA_WIDTH / 8
     )))
   // instance data width switch bridge for peri_s (256bit -> 64bit)
-  val u_peri_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = 256, DestDataWidth = params.aplicParams.CFG_DATA_WIDTH))
+  val u_peri_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.nocDataWidth, DestDataWidth = params.aplicParams.CFG_DATA_WIDTH,
+    errorAddrMap = AddressSet(0x1E030000L, 0xffffL)))
   u_peri_DataBridge.axi_xbar_i := peri_mNode
   peri_xbar  := u_peri_DataBridge.axi_xbar_o
   peri_sNode := peri_xbar
@@ -555,8 +566,11 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       beatBytes = params.periParams.timedataBytes
     )))
   peri_s1Node := peri_xbar
-  // define debugModule sba node
   println("==== uncoreTop last..==")
+  // define node for access to cross-die dm
+//  val io_crs_dm = AXI4IdentityNode()
+//    io_crs_dm := dmTop.dm_tcrs_sNode
+//  val io_crs_dm = InModuleBody(dmTop.dm_tcrs_sNode.makeIOs())
   class Imp(outer: uncoreTop) extends LazyRawModuleImp(outer) {
     // 在模块实现类中添加前缀注解
     println("==== start: enter uncoreTop Imp..==")
@@ -575,12 +589,13 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val clock                = IO(Input(Clock()))
     val reset                = IO(Input(AsyncReset()))
     val time                 = IO(Output(ValidIO(UInt(64.W))))
-    val peri_s = IO(Flipped(new AXI4Bundle(peri_mNode.out.head._2.bundle))) // peri slave ports: aplic and clint
+    val peri_s = IO(Flipped(new VerilogAXI4Record(peri_mNode.out.head._2.bundle))) // peri slave ports: aplic and clint
     val hni_s = IO(Flipped(new VerilogAXI4Record(hni_mNode.out.head._2.bundle)))
     val msi_m  = IO(imsicTop.module.m.cloneType) // to imsic master ports
+    val msi_crs_m  = IO(imsicTop.module.msi_crs_m.cloneType) // to imsic master ports
     val cpu_s =
       IO(Vec(params.NumHarts, Flipped(new VerilogAXI4Record(cpu_mNodes.head.out.head._2.bundle)))) // cpu access ports
-    val dm_crs_s = IO(Flipped(new AXI4Bundle(dmTop.module.dm_crs_s.params))) // cross-die slave ports for debug
+    val dm_crs_s = IO(dmTop.module.dm_crs_s.cloneType) // cross-die slave ports for debug
     val dm_crs_m = IO(dmTop.module.dm_crs_m.cloneType)
     // instance debugModule sba port
     val dm_m    = Option.when(params.dmHasBusMaster)(IO(dmTop.module.dm_m.get.cloneType))
@@ -601,7 +616,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     }
     // connect io
     hni_mNode.out.head._1 <> hni_s.viewAs[AXI4Bundle]
-    peri_mNode.out.head._1 <> peri_s // uncore peri cfg slave io
+    peri_mNode.out.head._1 <> peri_s.viewAs[AXI4Bundle] // uncore peri cfg slave io
     cpu_mNodes.zip(cpu_s).foreach { case (node, io) => node.out.head._1 <> io.viewAs[AXI4Bundle] }
     // bypass the read channel
     hni_mNode.out.head._1.ar.bits.addr := 0.U
@@ -616,10 +631,11 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     hni_mNode.out.head._1.ar.valid := false.B
     hni_mNode.out.head._1.r.ready := true.B
     // connection about cross-die access ports for debug
-    println("==== 12.17start to connect debugModule..==")
     syscnt.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> peri_s1Node.in.head._1)
     // cpu2msi_sNodes -> imsicTop
     msi_m <> imsicTop.module.m
+    // cross-die msi connect io
+    msi_crs_m <> imsicTop.module.msi_crs_m
     dm_crs_s <> dmTop.module.dm_crs_s
     dm_crs_m <> dmTop.module.dm_crs_m
     imsicTop.module.clock := clock
@@ -656,7 +672,7 @@ object PbusGen extends App {
     CFG_ADDR_WIDTH = 40,
     CFG_DATA_WIDTH = 64,
     CFG_ID_WIDTH = 11,
-    APLICAddrMap = AddressSet(0x31100000L, 0x7fff),
+    APLICAddrMap = AddressSet(0x1E020000L, 0x7fff),
     MSI_DATA_WIDTH = 32,
     NumIntSrcs = 512
   )
@@ -665,7 +681,7 @@ object PbusGen extends App {
     timedataBytes = 8
   )
   val dmParams = DebugModuleParams(
-    baseAddress = 0x38020000L,
+    baseAddress = 0x1B000000L,
     // nDMIAddrSize  : Int = 7,
     // nProgramBufferWords: Int = 16,
     nAbstractDataWords = 2,
