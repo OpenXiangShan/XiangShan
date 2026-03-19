@@ -115,11 +115,11 @@ make emu CONFIG=TLMinimalConfig EMU_THREADS=2 -j10
 ./build/emu -b 0 -e 0 -i ./ready-to-run/coremark-2-iteration.bin --diff ./ready-to-run/riscv64-nemu-interpreter-so
 ```
 
-### 运行xspdb 
+### 运行 xspdb
 
-* 安装多语言芯片验证辅助工具 [picker](https://github.com/XS-MLVP/picker)
-* 运行 `make pdb` 以利用 picker 构建香山的二进制版本
-* 运行 `make pdb-run` 来运行香山二进制版本
+* 安装多语言芯片验证辅助工具 [picker](https://github.com/XS-MLVP/picker)。
+* 运行 `make pdb`，使用 picker 构建香山的二进制版本。
+* 运行 `make pdb-run`，启动香山二进制版本。
 
 运行示例：
 
@@ -131,18 +131,18 @@ Using simulated 32768B flash
 [Info] reset dut complete
 > XiangShan/scripts/pdb-run.py(13)run()
 -> while True:
-(XiangShan) xload ready-to-run/microbench.bin   # 加载需要运行的bin文件
+(XiangShan) xload ready-to-run/microbench.bin   # 加载需要运行的 bin 文件
 (XiangShan) xwatch_commit_pc 0x80000004         # 设置观察点 
-(XiangShan) xistep 3                            # 执行到下三条指令提交，如设置观察点则执行到观察点
+(XiangShan) xistep 3                            # 执行到接下来三条指令提交；若命中观察点则提前停止
 [Info] Find break point (Inst commit), break (step 2107 cycles) at cycle: 2207 (0x89f)
 [Info] Find break point (Inst commit, Target commit), break (step 2108 cycles) at cycle: 2208 (0x8a0)
-(XiangShan) xpc                                 # 打印pc信息
+(XiangShan) xpc                                 # 打印 PC 信息
 PC[0]: 0x80000000    Instr: 0x00000093
 PC[1]: 0x80000004    Instr: 0x00000113
 PC[2]: 0x0    Instr: 0x0
 ...
 PC[7]: 0x0    Instr: 0x0
-(XiangShan) xistep 1000000                      # 执行到结束
+(XiangShan) xistep 1000000                      # 执行至程序结束
 [Info] Find break point (Inst commit), break (step 2037 cycles) at cycle: 2207 (0x89f)
 [Info] Find break point (Inst commit), break (step 2180 cycles) at cycle: 2207 (0x89f)
 ...
