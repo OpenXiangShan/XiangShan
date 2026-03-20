@@ -303,7 +303,7 @@ trait HasPipelineReg { this: FuncUnit =>
     io.out.bits.ctrl.exceptionVec.init
     require(cfg.exceptionOut.contains(ExceptionNO.illegalInstr),
       "HasPipelineReg trait with non-empty excptionOut must have illegal instruction exception output")
-    io.out.bits.ctrl.exceptionVec.getAndAssign(ExceptionNO.illegalInstr)(vstartIllegal)
+    io.out.bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := vstartIllegal
   }
 
   def regEnable(i: Int): Bool = validVec(i - 1) && rdyVec(i - 1)

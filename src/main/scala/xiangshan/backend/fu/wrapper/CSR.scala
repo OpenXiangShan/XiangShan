@@ -243,13 +243,13 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   // private val exceptionVec = WireInit(0.U.asTypeOf(ExceptionVec())) // Todo:
   private val exceptionVec = Wire(ExceptSparseVec(cfg.exceptionOut))
   // exceptionVec.foreach(_.foreach(_ := false.B))
-  exceptionVec.getAndAssign(EX_BP    )(DataHoldBypass(isEbreak, false.B, io.in.fire))
-  exceptionVec.getAndAssign(EX_MCALL )(DataHoldBypass(isEcall && privState.isModeM, false.B, io.in.fire))
-  exceptionVec.getAndAssign(EX_HSCALL)(DataHoldBypass(isEcall && privState.isModeHS, false.B, io.in.fire))
-  exceptionVec.getAndAssign(EX_VSCALL)(DataHoldBypass(isEcall && privState.isModeVS, false.B, io.in.fire))
-  exceptionVec.getAndAssign(EX_UCALL )(DataHoldBypass(isEcall && privState.isModeHUorVU, false.B, io.in.fire))
-  exceptionVec.getAndAssign(EX_II    )(csrMod.io.out.bits.EX_II)
-  exceptionVec.getAndAssign(EX_VI    )(csrMod.io.out.bits.EX_VI)
+  exceptionVec(EX_BP    ) := DataHoldBypass(isEbreak, false.B, io.in.fire)
+  exceptionVec(EX_MCALL ) := DataHoldBypass(isEcall && privState.isModeM, false.B, io.in.fire)
+  exceptionVec(EX_HSCALL) := DataHoldBypass(isEcall && privState.isModeHS, false.B, io.in.fire)
+  exceptionVec(EX_VSCALL) := DataHoldBypass(isEcall && privState.isModeVS, false.B, io.in.fire)
+  exceptionVec(EX_UCALL ) := DataHoldBypass(isEcall && privState.isModeHUorVU, false.B, io.in.fire)
+  exceptionVec(EX_II    ) := csrMod.io.out.bits.EX_II
+  exceptionVec(EX_VI    ) := csrMod.io.out.bits.EX_VI
 
   val isXRet = valid && func === CSROpType.jmp && !isEcall && !isEbreak
 
@@ -299,10 +299,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   val isXRetReg = RegEnable(isXRet, false.B, io.in.fire)
   io.out.valid := Mux(isXRetReg, csrModOutValid, DelayN(csrModOutValid, 3))
   // io.out.bits.ctrl.exceptionVec.get := Mux(isXRetReg, exceptionVec, DelayNWithValid(exceptionVec, csrModOutValid, 3)._2)
-  ExceptSparseVec.connect(
-    io.out.bits.ctrl.exceptionVec,
-    // Mux(isXRetReg, exceptionVec, exceptionVec.mapExist(x => DelayNWithValid(x, csrModOutValid, 3)._2))
-    ExceptSparseVec.mux2(isXRetReg, exceptionVec, exceptionVec.mapExist(x => DelayNWithValid(x, csrModOutValid, 3)._2))
+  io.out.bits.ctrl.exceptionVec := ExceptSparseVec.mux2(
+    isXRetReg,
+    exceptionVec,
+    exceptionVec.map(x => DelayNWithValid(x, csrModOutValid, 3)._2)
   )
   io.out.bits.ctrl.flushPipe.get := Mux(isXRetReg, flushPipe, DelayNWithValid(flushPipe, csrModOutValid, 3)._2)
   io.out.bits.res.data := DelayNWithValid(csrMod.io.out.bits.rData, csrModOutValid, 3)._2

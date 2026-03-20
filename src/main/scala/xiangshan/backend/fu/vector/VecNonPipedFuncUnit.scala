@@ -50,7 +50,7 @@ class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUni
     io.out.bits.ctrl.exceptionVec.init
     require(cfg.exceptionOut.contains(ExceptionNO.illegalInstr),
       "VecNonPipedFuncUnit with non-empty excptionOut must have illegal instruction exception output")
-    io.out.bits.ctrl.exceptionVec.getAndAssign(ExceptionNO.illegalInstr)(vstartIllegal)
+    io.out.bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := vstartIllegal
   }
 
   connectNonPipedCtrlSingal
