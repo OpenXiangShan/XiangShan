@@ -93,6 +93,7 @@ object Bundles {
     sink.bits.toV0Rf. foreach(_.bits  := source.bits.data(0))
     sink.bits.toVlRf. foreach(_.valid := source.bits.vlWen.get)
     sink.bits.toVlRf. foreach(_.bits  := source.bits.data(0))
+    ExceptSparseVec.connect(sink.bits.toRob.bits.exceptionVec, source.bits.exceptionVec.getOrElse(0.U.asTypeOf(ExceptionVec())))
   }
 
   def connectWriteBackRob(sink: WriteBackRobBundle, source: NewExuOutput) = {
@@ -101,6 +102,7 @@ object Bundles {
     sink.data              := source.toIntRf.map(_.bits).getOrElse(0.U(64.W))
     sink.vecWen. foreach(_ := source.toVecRf.map(_.valid).getOrElse(false.B))
     sink.v0Wen.  foreach(_ := source.toV0Rf.map(_.valid).getOrElse(false.B))
+    sink.exceptionVec.foreach(ExceptSparseVec.connect(_, source.toRob.bits.exceptionVec))
   }
 
   // Frontend --[CtrlBlock]--> DecodeInUop
