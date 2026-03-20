@@ -636,7 +636,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
         refill_and_store_data(i) := VecInit((0 until rowBytes).map(k => 
           Mux(store_mask_temp(k), store_data_temp(k), refill_and_store_data(i).grouped(8)(k)))).asUInt
       }
-      full_overwrite := miss_req_pipe_reg_bits.isFromStore && miss_req_pipe_reg_bits.full_overwrite
+      full_overwrite := full_overwrite || miss_req_pipe_reg_bits.full_overwrite
       assert(is_alias_match(req.vaddr, miss_req_pipe_reg_bits.vaddr), "alias bits should be the same when merging store")
     }
 
