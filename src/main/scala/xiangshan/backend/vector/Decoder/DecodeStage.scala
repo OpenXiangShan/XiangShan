@@ -127,7 +127,10 @@ class DecodeStageImp(
         bits.isLastInFtqEntry := mopInfo.isLastInFtqEntry
         bits.instr := mopInfo.rawInst
         bits.commitType := uopInfo.commitType
-        bits.srcType := Seq(uopInfo.src1Type, uopInfo.src2Type, uopInfo.src3Type).map(_.toSrcType)
+        bits.srcType :=
+          Seq(uopInfo.src1Ren, uopInfo.src2Ren, uopInfo.src3Ren)
+            .zip(Seq(uopInfo.src1Type, uopInfo.src2Type, uopInfo.src3Type))
+            .map{ case (ren, typ) => Mux(ren, typ.toSrcType, SrcType.no) }
         bits.v0Ren := uopInfo.v0Ren
         bits.lsrc := Seq(uopInfo.lsrc1, uopInfo.lsrc2, uopInfo.lsrc3)
         bits.ldest := uopInfo.ldest
