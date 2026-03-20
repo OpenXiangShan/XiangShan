@@ -79,9 +79,6 @@ object Itype extends NamedUInt(4) {
   def OtherUninferableJump = 14.U   //rename
   def OtherInferableJump   = 15.U   //rename
 
-  // Assuming the branchType is NonTaken here, it will be correctly modified after writeBack.
-  def Branch = NonTaken
-
   def jumpTypeGen(fuType: UInt, fuoptype: UInt, rd: OpRegType, rs: OpRegType): UInt = {
 
     val isEqualRdRs = rd === rs
@@ -112,7 +109,7 @@ object Itype extends NamedUInt(4) {
         isOtherInferableJump,
       ),
       Seq(
-        Branch,
+        NonTaken, // Assuming the branchType is NonTaken here, it will be correctly modified after writeBack.
         UninferableCall,
         InferableCall,
         UninferableTailCall,
@@ -133,7 +130,9 @@ object Itype extends NamedUInt(4) {
 
   def isNotNone(itype: UInt) = itype =/= None
 
-  def isBranchType(itype: UInt) = itype === Branch
+  def isNonTaken(itype: UInt) = itype === NonTaken
+
+  def isBranch(itype: UInt) = Seq(NonTaken, Taken).map(_ === itype).reduce(_ || _)
 
   def isPush(itype: UInt) = Seq(UninferableCall, InferableCall, CoRoutineSwap).map(_ === itype).reduce(_ || _)
 
