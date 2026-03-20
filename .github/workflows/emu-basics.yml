@@ -37,7 +37,7 @@ jobs:
     runs-on: builder
     outputs:
       cluster: ${{ steps.save.outputs.cluster }}
-    timeout-minutes: 120
+    timeout-minutes: 180
     continue-on-error: false
     steps:
       - uses: actions/checkout@v6

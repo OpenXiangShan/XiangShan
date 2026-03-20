@@ -131,7 +131,7 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on: builder
-    timeout-minutes: 500
+    timeout-minutes: 900
     continue-on-error: false
     steps:
       - name: Cleanup orphan EMU
@@ -397,7 +397,7 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     continue-on-error: false
     steps:
       - uses: actions/checkout@v6
@@ -429,7 +429,7 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     continue-on-error: false
     steps:
       - uses: actions/checkout@v6
