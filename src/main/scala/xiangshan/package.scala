@@ -253,7 +253,7 @@ package object xiangshan {
      * @param idx the index of element
      * @return the element at [[idx]] if exist, [[false.B]] otherwise
      */
-    def apply(idx: Int) = findOrElse(idx, false.B)
+    def apply(idx: Int): Bool = findOrElse(idx, false.B)
 
     // initialize all existing bits to false
     def init: Unit = {
@@ -323,7 +323,7 @@ package object xiangshan {
       result.asUInt
     }
 
-    override def do_asUInt(implicit sourceInfo: SourceInfo): UInt = asUInt
+    override def do_asUInt(implicit sourceInfo: SourceInfo): UInt = toUInt
 
     /**
      * Or reduction operator
@@ -391,20 +391,6 @@ package object xiangshan {
     }
 
     // connect two exceptionVecs together under different circumstances
-    def connect(sinkVec: ExceptSparseVec, sourceVec: ExceptSparseVec): Unit = {
-      require(sourceVec.indices.toSet.subsetOf(sinkVec.indices.toSet), "ExceptSparseVec connect indices mismatch")
-
-      (0 until sinkVec.length).foreach { idx =>
-        (sinkVec.find(idx), sourceVec.find(idx)) match {
-          case (Some(sink), Some(source)) => sink := source
-          case (Some(sink), None        ) => sink := false.B
-          case _ => // do nothing
-        }
-      }
-    }
-
-    // def connect(destSeq: ExceptSparseVec, sourceSeq: ExceptSparseVec): Unit = connect(destSeq.spVec, sourceSeq.spVec)
-
     def connect(sinkSeq: ExceptSparseVec, sourceVec: Vec[Bool]): Unit = {
       require(sinkSeq.length == sourceVec.length, "ExceptSparseVec connect length mismatch")
 
@@ -419,13 +405,7 @@ package object xiangshan {
     def connect(sinkVec: Vec[Bool], sourceSeq: ExceptSparseVec): Unit = {
       require(sourceSeq.length == sinkVec.length, "ExceptSparseVec connect length mismatch")
 
-      (0 until sourceSeq.length).foreach { idx =>
-        (sinkVec(idx), sourceSeq.find(idx)) match {
-          case (sink, Some(source)) => sink := source
-          case (sink, None        ) => sink := false.B
-          case _ => // do nothing
-        }
-      }
+      (0 until sinkVec.length).foreach { i => sinkVec(i) := sourceSeq(i) }
     }
 
     def connect(none: None.type, sourceSeq: Any): Unit = { /* do nothing */ }
