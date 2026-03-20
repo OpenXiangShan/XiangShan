@@ -13,9 +13,22 @@ on:
         default: kunminghu-v3
 
 jobs:
-  performance-test:
+  run:
+    name: Run Performance Test
     uses: ./.github/workflows/perf-template.yml
     with:
       test_branch: ${{ github.event.inputs.test_branch }}
       perf_report_dir: /nfs/home/cirunner/perf-report-kmhv3
       servers: all
+
+  report:
+    name: Generate Report
+    needs: run
+    runs-on: perf
+    steps:
+      - uses: actions/checkout@v6
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          name: score
+          path: ${{ needs.run.outputs.SCORE_FILE }}

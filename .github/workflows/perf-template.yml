@@ -47,6 +47,25 @@ on:
         description: Directory for all spec reports
         required: true
         type: string
+    outputs:
+      SHORT_SHA:
+        description: Short git commit sha used in this run
+        value: ${{ jobs.run.outputs.SHORT_SHA }}
+      DATE:
+        description: Commit date in yymmdd format used in this run
+        value: ${{ jobs.run.outputs.DATE }}
+      PERF_DIR:
+        description: Base directory for performance reports
+        value: ${{ inputs.perf_report_dir }}
+      SPEC_DIR:
+        description: Output report directory for this performance run
+        value: ${{ jobs.run.outputs.SPEC_DIR }}
+      CONFIG:
+        description: XiangShan config used in this run
+        value: ${{ inputs.xs_config }}
+      SCORE_FILE:
+        description: Path to the score.txt generated in this run
+        value: ${{ jobs.run.outputs.SPEC_DIR }}/score.txt
 
 jobs:
   run:
@@ -55,6 +74,10 @@ jobs:
     #At most 2 days to finish
     timeout-minutes: 7200
     name: Checkpoints
+    outputs:
+      SHORT_SHA: ${{ steps.set_env.outputs.SHORT_SHA }}
+      DATE: ${{ steps.set_env.outputs.DATE }}
+      SPEC_DIR: ${{ steps.set_env.outputs.SPEC_DIR }}
     steps:
       - name: Set test branch or commit
         id: set_test
@@ -63,18 +86,22 @@ jobs:
           echo "commit_sha=${{ inputs.test_branch }}" >> $GITHUB_OUTPUT
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ steps.set_test.outputs.commit_sha }}
           fetch-depth: 0
           submodules: true
 
       - name: Set env
+        id: set_env
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
           echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
           echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}-${{ inputs.xs_config }}" >> $GITHUB_ENV
+          echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "DATE=${DATE}" >> $GITHUB_OUTPUT
+          echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}-${{ inputs.xs_config }}" >> $GITHUB_OUTPUT
           
           if [[ -z "${{ inputs.servers }}" ]]; then
             if [[ "${{ inputs.emulator }}" == "gsim" ]]; then

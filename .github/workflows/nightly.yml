@@ -5,49 +5,42 @@ on:
     - cron: '33 15 * * *'
 
 jobs:
-  performance-test:
+  run:
+    name: Run Performance Test
     uses: ./.github/workflows/perf-template.yml
     with:
       test_branch: kunminghu-v3
-      perf_report_dir: /nfs/home/cirunner/perf-report-nightly
+      perf_report_dir: /nfs/home/cirunner/perf-report-custom
       benchmark_type: gcc15-spec06-0.3c
       servers: all
 
-  diff-report:
-    needs: performance-test
+  report:
+    name: Generate Report
+    needs: run
     runs-on: perf
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Compute paths
+      - uses: actions/checkout@v6
+      - name: Link current report
         run: |
-          XS_CONFIG=CHIConfig
-          PERF_DIR=/nfs/home/cirunner/perf-report-nightly
-          # determine the most recent report directory for this config
-          SPEC_DIR=$(ls -td $PERF_DIR/cr*-${XS_CONFIG} 2>/dev/null | head -n1 || true)
-          if [ -n "$SPEC_DIR" ]; then
-            # extract date and short sha from dirname: cr<date>-<sha>-<config>
-            base=$(basename "$SPEC_DIR")
-            DATE=${base#cr}; DATE=${DATE%%-*}
-            SHORT_SHA=${base#cr${DATE}-}; SHORT_SHA=${SHORT_SHA%%-*}
-          else
-            DATE=$(date +%y%m%d)
-            SHORT_SHA="unknown"
-          fi
-          echo "SPEC_DIR=$SPEC_DIR" >> $GITHUB_ENV
-          echo "PERF_DIR=$PERF_DIR" >> $GITHUB_ENV
-          echo "XS_CONFIG=$XS_CONFIG" >> $GITHUB_ENV
-          echo "DATE=$DATE" >> $GITHUB_ENV
-          echo "SHORT_SHA=$SHORT_SHA" >> $GITHUB_ENV
+          ln -s "${{ needs.run.outputs.SPEC_DIR }}" "${{ needs.run.outputs.PERF_DIR }}/nightly-${{ needs.run.outputs.DATE }}"
+      - name: Find previous commit
+        run: |
+          PREV_DIR=$(ls -td "${{ needs.run.outputs.PERF_DIR }}/nightly-*" | grep -v "nightly-${{ needs.run.outputs.DATE }}" | head -n1 || true)
+          echo "Found previous report: $PREV_DIR"
+          PREV_DIR=$(readlink -f "$PREV_DIR")
+          echo "Resolved to: $PREV_DIR"
+          echo "PREV_DIR=$PREV_DIR" >> $GITHUB_ENV
       - name: Diff with previous result
         run: |
           echo "### :bar_chart: Diff with previous run" >> $GITHUB_STEP_SUMMARY
-          PREV_DIR=$(ls -td $PERF_DIR/cr*-${XS_CONFIG} 2>/dev/null | grep -v "cr${DATE}-${SHORT_SHA}-${XS_CONFIG}" | head -n1 || true)
           if [ -n "$PREV_DIR" ] && [ -f "$PREV_DIR/score.txt" ]; then
             echo "Comparing with $PREV_DIR" >> $GITHUB_STEP_SUMMARY
-            python3 $GITHUB_WORKSPACE/.github/workflows/nightly_perf_diff.py "$SPEC_DIR/score.txt" "$PREV_DIR/score.txt" >> $GITHUB_STEP_SUMMARY
+            python3 $GITHUB_WORKSPACE/.github/workflows/nightly_perf_diff.py "${{ needs.run.outputs.SCORE_FILE }}" "$PREV_DIR/score.txt" >> $GITHUB_STEP_SUMMARY
           else
             echo "No previous score.txt found" >> $GITHUB_STEP_SUMMARY
           fi
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          name: score
+          path: ${{ needs.run.outputs.SCORE_FILE }}
