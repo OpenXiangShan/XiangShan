@@ -774,6 +774,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private object UncacheState extends ChiselEnum {
       val idle      = Value
       val sendReq   = Value
+      val waitReqAck = Value // wait for idResp to make sure Uncache receives req
       val waitResp  = Value
       val writeback = Value
     }
@@ -924,7 +925,14 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       }
       is(UncacheState.sendReq) {
         when(io.toUncacheBuffer.req.fire) {
-          uncacheStateNext := Mux(isNC, UncacheState.idle, UncacheState.waitResp)
+          uncacheStateNext := Mux(isNC, UncacheState.waitReqAck, UncacheState.waitResp)
+        }
+      }
+      is(UncacheState.waitReqAck) {
+        when(io.toUncacheBuffer.idResp.valid && !io.toUncacheBuffer.idResp.bits.is2lq) {
+          assert(isNC && io.toUncacheBuffer.idResp.bits.nc, "only NC store enters `waitReqAck` state")
+          assert(io.toUncacheBuffer.idResp.bits.mid === headrdataPtr.value, "rdataPtr mismatch with idResp")
+          uncacheStateNext := UncacheState.idle
         }
       }
       is(UncacheState.waitResp) {
@@ -1218,8 +1226,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       Cat(writeSbufferWire.head.fire, 0.U),
       Cat(writeSbufferWire.map(_.fire)))
     // nc/mmio/cbo deq
-    private val otherMove        = uncacheState === UncacheState.sendReq && io.toUncacheBuffer.req.fire && isNC ||
-      io.writeBack.fire
+    val ncMove = uncacheState === UncacheState.waitReqAck &&
+      io.toUncacheBuffer.idResp.valid && !io.toUncacheBuffer.idResp.bits.is2lq
+    private val otherMove = ncMove || io.writeBack.fire
 
     // [NOTE]: when point a inactive entry, move pointer.
     private val rdataPtrVectorInactiveValid = WireInit(VecInit(Seq.fill(EnsbufferWidth)(false.B)))
