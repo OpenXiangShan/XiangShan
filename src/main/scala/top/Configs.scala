@@ -249,7 +249,7 @@ class TLMinimalConfig(n: Int = 1) extends Config(
           ways = 8,
           sets = 128,
           echoField = Seq(huancun.DirtyField()),
-          prefetch = Nil,
+          prefetch = Seq(DespacitoStreamParameters()),
           clientCaches = Seq(L1Param(
             "dcache",
             isKeywordBitsOpt = p.dcacheParametersOpt.get.isKeywordBitsOpt
