@@ -167,8 +167,8 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   dstMgu.io.in.toS1.eewS1 := outVecCtrl.vsew
   dstMgu.io.in.toS1.vdIdxS1 := outVecCtrl.vuopIdx(2, 0)
 
-  private val outDstMask = outVecCtrl.isDstMask
-  private val outOpMask = outVecCtrl.isOpMask
+  private val outOpMask = VIAluOpcodes.isOpMask(fuOpType)
+  private val outDstMask = VIAluOpcodes.isDestM(fuOpType)
 
   private val outVxsat = Mux1H(Seq(
     (outNarrow & outVuopIdx0) -> Cat(Cat(vIAluFixPoints.map(_.io.out.vxsat(3, 0)).reverse), 0.U(8.W)),
