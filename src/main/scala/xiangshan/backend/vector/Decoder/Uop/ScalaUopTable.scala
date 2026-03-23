@@ -17,6 +17,7 @@ import xiangshan.backend.decode.opcode.Opcode.JmpOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.LduOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.MulOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.StuOpcodes._
+import xiangshan.backend.decode.opcode.Opcode._
 
 object ScalaUopTable {
   val tableI = {
@@ -148,15 +149,15 @@ object ScalaUopTable {
     val tableF64Type = F64Type.mapOpcode(
       _.FCVT_L_S  -> fcvt_si64_fp32,
       _.FCVT_LU_S -> fcvt_ui64_fp32,
-      _.FCVT_S_L  -> fcvt_fp32_si64,
-      _.FCVT_S_LU -> fcvt_fp32_ui64,
+      _.FCVT_S_L  -> I2fOpcodes.fcvt_fp32_si64,
+      _.FCVT_S_LU -> I2fOpcodes.fcvt_fp32_ui64,
     )
 
     val tableFType = FType.mapOpcode(
-      _.FADD_S    -> fadd_fp32,
+      _.FADD_S    -> FAluOpcodes.fadd_fp32,
       _.FCLASS_S  -> fclass_fp32,
-      _.FCVT_S_W  -> fcvt_fp32_si32,
-      _.FCVT_S_WU -> fcvt_fp32_ui32,
+      _.FCVT_S_W  -> I2fOpcodes.fcvt_fp32_si32,
+      _.FCVT_S_WU -> I2fOpcodes.fcvt_fp32_ui32,
       _.FCVT_W_S  -> fcvt_si32_fp32,
       _.FCVT_WU_S -> fcvt_ui32_fp32,
       _.FDIV_S    -> fdiv_fp32,
@@ -169,7 +170,7 @@ object ScalaUopTable {
       _.FMIN_S    -> fmin_fp32,
       _.FMSUB_S   -> fmsub_fp32,
       _.FMUL_S    -> fmul_fp32,
-      _.FMV_W_X   -> fmv_fp32_i,
+      _.FMV_W_X   -> I2fOpcodes.fmv_fp32_i,
       _.FMV_X_W   -> fmv_i_fp32,
       _.FNMADD_S  -> fnmadd_fp32,
       _.FNMSUB_S  -> fnmsub_fp32,
@@ -177,7 +178,7 @@ object ScalaUopTable {
       _.FSGNJN_S  -> fsgnjn_fp32,
       _.FSGNJX_S  -> fsgnjx_fp32,
       _.FSQRT_S   -> fsqrt_fp32,
-      _.FSUB_S    -> fsub_fp32,
+      _.FSUB_S    -> FAluOpcodes.fsub_fp32,
       _.FSW       -> sw,
     )
 
@@ -188,20 +189,20 @@ object ScalaUopTable {
     import xiangshan.backend.decode.isa.Instructions.{D64Type, DType}
 
     val tableD64Type = D64Type.mapOpcode(
-      _.FCVT_D_L  -> fcvt_fp64_si64,
-      _.FCVT_D_LU -> fcvt_fp64_ui64,
+      _.FCVT_D_L  -> I2fOpcodes.fcvt_fp64_si64,
+      _.FCVT_D_LU -> I2fOpcodes.fcvt_fp64_ui64,
       _.FCVT_L_D  -> fcvt_si64_fp64,
       _.FCVT_LU_D -> fcvt_ui64_fp64,
-      _.FMV_D_X   -> fmv_fp64_i,
+      _.FMV_D_X   -> I2fOpcodes.fmv_fp64_i,
       _.FMV_X_D   -> fmv_i_fp64,
     )
 
     val tableDType = DType.mapOpcode(
-      _.FADD_D    -> fadd_fp64,
+      _.FADD_D    -> FAluOpcodes.fadd_fp64,
       _.FCLASS_D  -> fclass_fp64,
       _.FCVT_D_S  -> fcvt_fp64_fp32,
-      _.FCVT_D_W  -> fcvt_fp64_si32,
-      _.FCVT_D_WU -> fcvt_fp64_ui32,
+      _.FCVT_D_W  -> I2fOpcodes.fcvt_fp64_si32,
+      _.FCVT_D_WU -> I2fOpcodes.fcvt_fp64_ui32,
       _.FCVT_S_D  -> fcvt_fp32_fp64,
       _.FCVT_W_D  -> fcvt_si32_fp64,
       _.FCVT_WU_D -> fcvt_ui32_fp64,
@@ -221,7 +222,7 @@ object ScalaUopTable {
       _.FSGNJN_D  -> fsgnjn_fp64,
       _.FSGNJX_D  -> fsgnjx_fp64,
       _.FSQRT_D   -> fsqrt_fp64,
-      _.FSUB_D    -> fsub_fp64,
+      _.FSUB_D    -> FAluOpcodes.fsub_fp64,
       _.FSD       -> sd,
     )
 

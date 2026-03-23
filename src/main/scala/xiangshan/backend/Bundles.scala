@@ -174,12 +174,11 @@ object Bundles {
     val canRobCompress = Bool()
     val selImm = SelImm()
     val imm = UInt(32.W)
-    val fpu = new FPUCtrlSignals
     val vpu = new VPUCtrlSignals
     val vtype = VType()
     val oldVType = VType()
     val vlsInstr = Bool()
-    val wfflags = Bool()
+    val fflagsWen = Bool()
     val isMove = Bool()
     val uopIdx = UopIdx()
     val uopSplitType = UopSplitType()
@@ -267,10 +266,9 @@ object Bundles {
     val flushPipe = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val selImm = SelImm()
     val imm = UInt(32.W)
-    val fpu = new FPUCtrlSignals
     val vpu = new VPUCtrlSignals
     val vlsInstr = Bool()
-    val wfflags = Bool()
+    val fflagsWen = Bool()
     val isMove = Bool()
     val uopIdx = UopIdx()
     val isVset = Bool()
@@ -395,9 +393,8 @@ object Bundles {
     val vlWen = Bool()
     val selImm = SelImm()
     val imm = UInt(32.W)
-    val fpu = new FPUCtrlSignals
     val vpu = new VPUCtrlSignals
-    val wfflags = Bool()
+    val fflagsWen = Bool()
     val uopIdx = UopIdx()
     val lastUop = Bool()
     // from rename
@@ -460,11 +457,10 @@ object Bundles {
     val vlWen    = Option.when(params.needVlWen )(Bool())
     val selImm   = Option.when(params.needImm)(SelImm())
     val imm      = Option.when(params.needImm)(UInt(32.W))
-    val fpu      = Option.when(params.writeFflags)(new FPUCtrlSignals)
     val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
     val oldVType = Option.when(params.writeVType)(VType())
     val vtype    = Option.when(params.readVlRf)(VType())
-    val wfflags  = Option.when(params.writeFflags)(Bool())
+    val fflagsWen  = Option.when(params.writeFflags)(Bool())
     val uopIdx   = Option.when(params.inVfSchd || params.isMemAddrIQ)(UopIdx())
     val lastUop  = Option.when(params.inVfSchd || params.isMemAddrIQ)(Bool())
     // from rename
@@ -508,11 +504,10 @@ object Bundles {
     val fuOpType = Opcode()
     val selImm   = Option.when(params.needImm)(SelImm())
     val imm      = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
-    val fpu      = Option.when(params.writeFflags)(new FPUCtrlSignals)
     val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
     val oldVType = Option.when(params.writeVType)(VType())
     val vtype    = Option.when(params.readVlRf)(VType())
-    val wfflags  = Option.when(params.writeFflags)(Bool())
+    val fflagsWen = Option.when(params.writeFflags)(Bool())
     val uopIdx   = Option.when(params.inVfSchd)(UopIdx())
     val lastUop  = Option.when(params.inVfSchd)(Bool())
     // from rename
@@ -587,7 +582,7 @@ object Bundles {
   }
   class ExuToRob(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val robIdx = new RobPtr
-    val wflags = OptionWrapper(params.writeFflags, Bool())
+    val fflagsWen = OptionWrapper(params.writeFflags, Bool())
     val fflags = OptionWrapper(params.writeFflags, UInt(5.W))
     val vxsat = OptionWrapper(params.writeVxsat, Bool())
     val exceptionVec = ExceptSparseVec()
@@ -636,12 +631,11 @@ object Bundles {
     val fusionNum       = UInt(2.W)
     val selImm          = SelImm()
     val imm             = UInt(32.W)
-    val fpu             = new FPUCtrlSignals
     val vpu             = new VPUCtrlSignals
     val oldVType        = VType()
     val vtype           = VType()
     val vlsInstr        = Bool()
-    val wfflags         = Bool()
+    val fflagsWen       = Bool()
     val isMove          = Bool()
     val isDropAmocasSta = Bool()
     val uopIdx          = UopIdx()
@@ -1252,8 +1246,8 @@ object Bundles {
     val vecWen        = if (params.needVecWen)    Some(Bool())                        else None
     val v0Wen         = if (params.needV0Wen)     Some(Bool())                        else None
     val vlWen         = if (params.needVlWen)     Some(Bool())                        else None
-    val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
+    val fflagsWen     = if (params.writeFflags)   Some(Bool())                       else None
     val oldVType      = Option.when(params.writeVType)(VType())
     val vtype         = Option.when(params.readVlRf)(VType())
     val vialuCtrl     = if (params.needVIaluCtrl) Some(new VIAluCtrlSignals)          else None
@@ -1302,7 +1296,7 @@ object Bundles {
       this.fuOpType                 := source.fuOpType
       this.imm                      := source.imm.getOrElse(0.U) // sta need this, other use immInfo assign in bypassNetwork
       this.selImm                   := source.selImm.getOrElse(0.U) // sta need this, other use immInfo assign in bypassNetwork
-      this.fpu           .foreach(_ := source.fpu.get)
+      this.fflagsWen     .foreach(_ := source.fflagsWen.get)
       this.vpu           .foreach(_ := source.vpu.get)
       this.numLsElem     .foreach(_ := source.numLsElem.get)
       this.rasAction     .foreach(_ := source.rasAction.get)
@@ -1366,7 +1360,7 @@ object Bundles {
     val vecWen         = Option.when(params.needVecWen)(Bool())
     val v0Wen          = Option.when(params.needV0Wen)(Bool())
     val vlWen          = Option.when(params.needVlWen)(Bool())
-    val fpu            = Option.when(params.writeFflags)(new FPUCtrlSignals)
+    val fflagsWen      = Option.when(params.writeFflags)(Bool())
     val vpu            = Option.when(params.needVPUCtrl)(new VPUCtrlSignals)
     val oldVType       = Option.when(params.writeVType)(VType())
     val vtype          = Option.when(params.readVlRf)(VType())
@@ -1459,7 +1453,7 @@ object Bundles {
     val vlWen        = Option.when(params.needVlWen )(Bool())
     val redirect     = if (params.hasRedirect)  Some(ValidIO(new Redirect))   else None
     val fflags       = if (params.writeFflags)  Some(UInt(5.W))               else None
-    val wflags       = if (params.writeFflags)  Some(Bool())                  else None
+    val fflagsWen    = if (params.writeFflags)  Some(Bool())                  else None
     val vxsat        = if (params.writeVxsat)   Some(Bool())                  else None
     val exceptionVec = ExceptSparseVec(params.exceptionOut)
     val flushPipe    = if (params.flushPipe)    Some(Bool())                  else None
@@ -1506,7 +1500,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
   class ExuOutputToRob(val params: ExeUnitParams)(implicit p: Parameters) extends Bundle {
     val robIdx       = new RobPtr
     val fflags       = Option.when(params.writeFflags)(UInt(5.W))
-    val wflags       = Option.when(params.writeFflags)(Bool())
+    val fflagsWen    = Option.when(params.writeFflags)(Bool())
     val vxsat        = Option.when(params.writeVxsat)(Bool())
     val exceptionVec = ExceptSparseVec(params.exceptionOut)
     val flushPipe    = Option.when(params.flushPipe)(Bool())
@@ -1794,7 +1788,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val replay        = Option.when(params.replayInst)(Bool())
     val redirect      = Option.when(params.hasRedirect)(ValidIO(new Redirect))
     val fflags        = Option.when(params.writeFflags)(UInt(5.W))
-    val wflags        = Option.when(params.writeFflags)(Bool())
+    val fflagsWen     = Option.when(params.writeFflags)(Bool())
     val vxsat         = Option.when(params.writeVxsat)(Bool())
     val exceptionVec  = ExceptSparseVec(params.exceptionOut)
     val lqIdx         = Option.when(params.hasLoadFu)(new LqPtr())
