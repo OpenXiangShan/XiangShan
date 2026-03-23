@@ -414,7 +414,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val refill_info = ValidIO(new MissQueueRefillInfo)
     val refill_train = ValidIO(new TrainReqBundle)
     // store replay to main pipe s3 (finally to sbuffer)
-    //   only triggerd when a store req is being merged to an entry but the grant.fire comes at the same time
+    // -- only triggered when a store req is being merged to an entry but the grant.fire comes at the same time
     val store_replay_resp = Output(Bool())
 
     val occupy_way = Output(UInt(nWays.W))
@@ -610,7 +610,10 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     refill_start_time := GTimer()
   }
 
-  when (io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && !(io.mem_grant.fire && miss_req_pipe_reg_bits.isFromStore)) {
+  val store_at_grant = io.mem_grant.fire && miss_req_pipe_reg_bits.isFromStore
+  io.store_replay_resp := io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && store_at_grant
+
+  when (io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && !store_at_grant) {
     assert(RegNext(secondary_fire) || RegNext(RegNext(primary_fire)), "after 1 cycle of secondary_fire or 2 cycle of primary_fire, entry will be merged")
     assert(miss_req_pipe_reg_bits.req_coh.state <= req.req_coh.state || (prefetch && !access))
     assert(!(miss_req_pipe_reg_bits.isFromAMO || req.isFromAMO))
@@ -648,9 +651,6 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     secondary_fired := true.B
   }
 
-  io.store_replay_resp := io.mem_grant.fire && io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel &&
-                          miss_req_pipe_reg_bits.isFromStore
-
   when (io.mem_acquire.fire) {
     s_acquire := true.B
     no_pending := false.B
@@ -678,20 +678,12 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     w_grantfirst := true.B
     grant_param := io.mem_grant.bits.param
     when (edge.hasData(io.mem_grant.bits)) {
-      // GrantData
-      when (isKeyword) {
-       for (i <- 0 until beatRows) {
-         val idx = ((refill_count << log2Floor(beatRows)) + i.U) ^ 4.U
-         val grant_row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
-         refill_and_store_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
-        }
-      }
-      .otherwise{
-       for (i <- 0 until beatRows) {
-         val idx = (refill_count << log2Floor(beatRows)) + i.U
-         val grant_row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
-         refill_and_store_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
-        }
+      // GrantData: keyword load swaps beat-to-row mapping (^4 rows for 8-row line, 4 rows/beat)
+      for (i <- 0 until beatRows) {
+        val base_idx = (refill_count << log2Floor(beatRows)) + i.U
+        val idx = Mux(isKeyword, base_idx ^ 4.U, base_idx)
+        val grant_row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
+        refill_and_store_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
       }
       w_grantlast := w_grantlast || refill_done
       no_pending := no_pending || refill_done
@@ -1094,8 +1086,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val debugTopDown = new DCacheTopDownIO
     val l1Miss = Output(Bool())
 
-    /** Store merged in pipereg gets grant same cycle: pulse to MainPipe → Sbuffer main_pipe_hit_resp.replay */
-    val mq_merge_grant_store_replay = ValidIO(UInt(reqIdWidth.W))
+    // store replay to main pipe S3 (finally to sbuffer)
+    // -- only triggered when a store req is being merged to an entry but the grant.fire comes at the same time
+    val store_replay_resp_s3 = ValidIO(UInt(reqIdWidth.W))
   })
 
   // 128KBL1: FIXME: provide vaddr for l2
@@ -1319,8 +1312,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       e.io.wfi.wfiReq := io.wfi.wfiReq
   }
 
-  io.mq_merge_grant_store_replay.valid := VecInit(entries.map(_.io.store_replay_resp)).asUInt.orR
-  io.mq_merge_grant_store_replay.bits := miss_req_pipe_reg.req.id
+  io.store_replay_resp_s3.valid := entries.map(_.io.store_replay_resp).reduce(_||_)
+  io.store_replay_resp_s3.bits := miss_req_pipe_reg.req.id
 
   cmo_unit.io.wfi.wfiReq := io.wfi.wfiReq
   cmo_unit.io.req <> io.cmo_req

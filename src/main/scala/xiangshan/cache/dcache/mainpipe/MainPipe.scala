@@ -132,8 +132,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val store_req = Flipped(DecoupledIO(new DCacheLineReq))
     val store_replay_resp = ValidIO(new DCacheLineResp)
     val store_hit_resp = ValidIO(new DCacheLineResp)
-    /** From MissQueue: store merged in pipereg + mem_grant same cycle → Sbuffer via store_hit_resp.replay */
-    val mq_merge_grant_store_replay = Flipped(ValidIO(UInt(reqIdWidth.W)))
+    // store replay resp of S3 stage from miss queue
+    val store_replay_resp_s3_valid = Input(Bool())
     // atmoics
     val atomic_req = Flipped(DecoupledIO(new MainPipeReq))
     val atomic_resp = ValidIO(new MainPipeResp)
@@ -876,17 +876,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val mshr_accept_store_miss_s3 = RegNext(mshr_accept_store_miss)
   val mshr_accept_store_miss_id_s3 = RegEnable(s2_req.id, mshr_accept_store_miss)
   // If a store is miss and accepted by mshr, tell Sbuffer it is a "hit". Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
-  //                                      (1) real hit       (2) store miss and accepted by mshr  (3) MQ merge+grant store replay
-  val mq_merge_grant_store_replay_fire = io.mq_merge_grant_store_replay.valid
-  io.store_hit_resp.valid := s3_valid && s3_store_can_go || mshr_accept_store_miss_s3 || mq_merge_grant_store_replay_fire
+  //                                      (1) real hit       (2) store miss and accepted by mshr
+  io.store_hit_resp.valid := (s3_valid && s3_store_can_go || mshr_accept_store_miss_s3) && !io.store_replay_resp_s3_valid
   io.store_hit_resp.bits.data := DontCare
   io.store_hit_resp.bits.miss := false.B
-  io.store_hit_resp.bits.replay := mq_merge_grant_store_replay_fire
-  io.store_hit_resp.bits.id := Mux(
-    mq_merge_grant_store_replay_fire,
-    io.mq_merge_grant_store_replay.bits,
-    Mux(mshr_accept_store_miss_s3, mshr_accept_store_miss_id_s3, s3_req.id)
-  )
+  io.store_hit_resp.bits.replay := false.B
+  io.store_hit_resp.bits.id := Mux(mshr_accept_store_miss_s3, mshr_accept_store_miss_id_s3, s3_req.id)
   // io.store_refill_done_resp.valid := s3_valid && s3_miss_can_go && s3_req.isStore
 
   val atomic_hit_resp = Wire(new MainPipeResp)

@@ -612,6 +612,8 @@ class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle {
   //val refill_hit_resp = ValidIO(new DCacheLineResp)
 
   val replay_resp = ValidIO(new DCacheLineResp)
+  // store replay resp from main pipe S3
+  val replay_resp_s3 = ValidIO(UInt(reqIdWidth.W))
 
   //def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp, refill_hit_resp)
   def hit_resps: Seq[ValidIO[DCacheLineResp]] = Seq(main_pipe_hit_resp)
@@ -970,7 +972,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.debugTopDown <> io.debugTopDown
   missQueue.io.l2_hint <> RegNext(io.l2_hint)
   missQueue.io.mainpipe_info := mainPipe.io.mainpipe_info
-  mainPipe.io.mq_merge_grant_store_replay := missQueue.io.mq_merge_grant_store_replay
+  mainPipe.io.store_replay_resp_s3_valid := missQueue.io.store_replay_resp_s3.valid
   missQueue.io.occupy_set.zip(ldu.map(_.io.occupy_set)).foreach { case (l, r) => l <> r }
   missQueue.io.occupy_fail.zip(ldu.map(_.io.occupy_fail)).foreach { case (l, r) => l <> r }
   mainPipe.io.refill_info := missQueue.io.refill_info
@@ -1565,6 +1567,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.lsu.store.replay_resp.valid := RegNext(mainPipe.io.store_replay_resp.valid)
   io.lsu.store.replay_resp.bits := RegEnable(mainPipe.io.store_replay_resp.bits, mainPipe.io.store_replay_resp.valid)
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
+  io.lsu.store.replay_resp_s3 := missQueue.io.store_replay_resp_s3
 
   mainPipe.io.atomic_req <> io.lsu.atomics.req
 

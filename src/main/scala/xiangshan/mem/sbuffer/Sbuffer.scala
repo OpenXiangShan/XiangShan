@@ -711,10 +711,10 @@ class Sbuffer(implicit p: Parameters)
   // hit resp
   io.dcache.hit_resps.map(resp => {
     val dcache_resp_id = resp.bits.id
-    when (resp.fire && !resp.bits.replay) {
+    when (resp.fire) {
       stateVec(dcache_resp_id).state_inflight := false.B
       stateVec(dcache_resp_id).state_valid := false.B
-      // assert(!resp.bits.replay)
+      assert(!resp.bits.replay)
       assert(!resp.bits.miss) // not need to resp if miss, to be opted
       assert(stateVec(dcache_resp_id).state_inflight === true.B)
     }
@@ -728,8 +728,8 @@ class Sbuffer(implicit p: Parameters)
       when(
         stateVec(i).w_sameblock_inflight &&
         stateVec(i).state_valid &&
-        GatedValidRegNext(resp.fire && !resp.bits.replay) &&
-        waitInflightMask(i) === UIntToOH(RegEnable(id_to_sbuffer_id(dcache_resp_id), resp.fire && !resp.bits.replay))
+        GatedValidRegNext(resp.fire) &&
+        waitInflightMask(i) === UIntToOH(RegEnable(id_to_sbuffer_id(dcache_resp_id), resp.fire))
       ){
         stateVec(i).w_sameblock_inflight := false.B
       }
@@ -737,22 +737,29 @@ class Sbuffer(implicit p: Parameters)
   })
 
   io.dcache.hit_resps.zip(dataModule.io.maskFlushReq).map{case (resp, maskFlush) => {
-    maskFlush.valid := resp.fire && !resp.bits.replay
+    maskFlush.valid := resp.fire
     maskFlush.bits.wvec := UIntToOH(resp.bits.id)
   }}
 
-  // replay resp (id from replay channel or main_pipe hit with replay bit)
-  val replay_resp_id = Mux(
-    io.dcache.replay_resp.fire,
-    io.dcache.replay_resp.bits.id,
-    io.dcache.main_pipe_hit_resp.bits.id
-  )
-  when (io.dcache.replay_resp.fire || io.dcache.main_pipe_hit_resp.fire && io.dcache.main_pipe_hit_resp.bits.replay) {
-    missqReplayCount(replay_resp_id) := 0.U
-    stateVec(replay_resp_id).w_timeout := true.B
-    // waiting for timeout
-    assert(io.dcache.replay_resp.bits.replay || io.dcache.main_pipe_hit_resp.bits.replay)
-    assert(stateVec(replay_resp_id).state_inflight === true.B)
+  // replay resp
+  val replay_resp_id = io.dcache.replay_resp.bits.id
+  val replay_resp_id_s3 = io.dcache.replay_resp_s3.bits
+  
+  for (i <- 0 until StoreBufferSize) {
+    when (io.dcache.replay_resp.fire && replay_resp_id === i.U || io.dcache.replay_resp_s3.valid && replay_resp_id_s3 === i.U) {
+      missqReplayCount(i) := 0.U
+      stateVec(i).w_timeout := true.B
+    }
+  }
+  when (io.dcache.replay_resp.fire) {
+    assert(io.dcache.replay_resp.bits.replay)
+    assert(stateVec(replay_resp_id).state_inflight === true.B, "(Sbuffer): replay s2 id is not inflight")
+  }
+  when (io.dcache.replay_resp_s3.valid) {
+    assert(stateVec(replay_resp_id_s3).state_inflight === true.B, "(Sbuffer): replay s3 id is not inflight")
+  }
+  when (io.dcache.replay_resp.fire && io.dcache.replay_resp_s3.valid) {
+    assert(replay_resp_id =/= replay_resp_id_s3, "(Sbuffer): replay s2 and replay s3 have the same id")
   }
 
   // TODO: reuse cohCount
@@ -772,7 +779,7 @@ class Sbuffer(implicit p: Parameters)
       val dcache_resp_id = resp.bits.id
       difftest.coreid := io.hartId
       difftest.index  := index.U
-      difftest.valid  := resp.fire && !resp.bits.replay
+      difftest.valid  := resp.fire
       difftest.addr   := getAddr(ptag(dcache_resp_id))
       difftest.data   := data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
       difftest.mask   := mask(dcache_resp_id).asUInt
