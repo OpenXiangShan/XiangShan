@@ -67,7 +67,18 @@ class StdFreeList(
   io.canAllocate := GatedValidRegNext(freeRegCnt >= RenameWidth.U) // use RegNext for better timing
   XSDebug(p"freeRegCnt: $freeRegCnt\n")
 
-  val phyRegCandidates = VecInit(headPtrOHVec.map(sel => Mux1H(sel, freeList)))
+  val freeListVec = Wire(Vec(freeListSize, Vec(RenameWidth, UInt(PhyRegIdxWidth.W))))
+  for (i <- 0 until freeListSize) {
+    for (j <- 0 until RenameWidth) {
+      if (i + j > (freeListSize - 1)) {
+        freeListVec(i)(j) := freeList(i + j - freeListSize)
+      } else {
+        freeListVec(i)(j) := freeList(i + j)
+      }
+    }
+  }
+
+  val phyRegCandidates = Mux1H(headPtrOHVec(0), freeListVec)
 
   for(i <- 0 until RenameWidth) {
     io.allocatePhyReg(i) := phyRegCandidates(PopCount(io.allocateReq.take(i)))
