@@ -515,7 +515,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         uops(i).commitType := uops(i + 1).commitType
       }
     }
-    uops(i).wfflags := (compressMasksVec(i) & Cat(io.in.map(_.bits.wfflags).reverse)).orR
+    uops(i).fflagsWen := (compressMasksVec(i) & Cat(io.in.map(_.bits.fflagsWen).reverse)).orR
     uops(i).dirtyFs := (compressMasksVec(i) & Cat(io.in.map(_.bits.fpWen).reverse)).orR
     uops(i).dirtyVs := false.B // Todo: handle this in some DecodeField
       /* (

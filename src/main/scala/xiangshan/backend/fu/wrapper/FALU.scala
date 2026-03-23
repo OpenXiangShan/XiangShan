@@ -14,7 +14,7 @@ class FAlu(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "falu OpType not supported")
 
   // io alias
-  private val opcode = fuOpType(4, 0)
+  private val opcode = fuOpType(8, 6)
   private val src0 = inData.src(0)
   private val src1 = inData.src(1)
 

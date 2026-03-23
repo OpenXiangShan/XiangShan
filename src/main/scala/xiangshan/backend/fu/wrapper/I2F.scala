@@ -7,75 +7,70 @@ import chisel3.util.experimental.decode._
 import utility.XSError
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
-import xiangshan.backend.fu.vector.Bundles.VSew
-import xiangshan.FuOpType
-import yunsuan.{VfpuType}
+import utility._
 import yunsuan.scalar.FPCVT
-import yunsuan.util._
+import yunsuan.encoding.Opcode.Opcodes.FCvtOpcode
 
 class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfcvt OpType not supported")
 
   // io alias
-  private val opcode = fuOpType
-  private val src0 = inData.src(0)
-  private val sew = fp_fmt
-  private val vfcvtRm = rm
+  private val src1 = inData.src(0)
+  private val fpRm = rm // todo
 
-  val widen = opcode(4, 3) // 0: single 1: widen 2: norrow  3: 16->64/64->16
-  val fire = io.in.valid
-  val fireReg = GatedValidRegNext(fire)
+  private val fire = io.in.valid
+  private val fireReg = GatedValidRegNext(fire)
 
-  // output width 8， 16， 32， 64
-  val output1H = Wire(UInt(4.W))
-  output1H := chisel3.util.experimental.decode.decoder(
-    widen ## sew,
+  // input width 16, 32, 64
+  val inSew1H = Wire(UInt(4.W))
+  inSew1H := chisel3.util.experimental.decode.decoder(
+    FCvtOpcode.getInputDataWidth(fuOpType),
     TruthTable(
       Seq(
-        BitPat("b00_01") -> BitPat("b0010"), // 16
-        BitPat("b00_10") -> BitPat("b0100"), // 32
-        BitPat("b00_11") -> BitPat("b1000"), // 64
-
-        BitPat("b01_00") -> BitPat("b0010"), // 16
-        BitPat("b01_01") -> BitPat("b0100"), // 32
-        BitPat("b01_10") -> BitPat("b1000"), // 64
-
-        BitPat("b10_00") -> BitPat("b0001"), // 8
-        BitPat("b10_01") -> BitPat("b0010"), // 16
-        BitPat("b10_10") -> BitPat("b0100"), // 32
-
-        BitPat("b11_01") -> BitPat("b1000"),
-        BitPat("b11_11") -> BitPat("b0010"), // e64->e16
+        BitPat("b01") -> BitPat("b0010"), // 16
+        BitPat("b10") -> BitPat("b0100"), // 32
+        BitPat("b11") -> BitPat("b1000"), // 64
       ),
       BitPat.N(4)
     )
   )
-  if(backendParams.debugEn) {
-    dontTouch(output1H)
+  // output width 16， 32， 64
+  val outSew1H = Wire(UInt(4.W))
+  outSew1H := chisel3.util.experimental.decode.decoder(
+    FCvtOpcode.getOutputDataWidth(fuOpType),
+    TruthTable(
+      Seq(
+        BitPat("b01") -> BitPat("b0010"), // 16
+        BitPat("b10") -> BitPat("b0100"), // 32
+        BitPat("b11") -> BitPat("b1000"), // 64
+      ),
+      BitPat.N(4)
+    )
+  )
+  if (backendParams.debugEn) {
+    dontTouch(inSew1H)
+    dontTouch(outSew1H)
   }
-  
-  val outIsMvInst = outCtrl.fuOpType(8).asBool
-  val outSew      = outCtrl.fpu.get.fmt
+
+  val outIsMvInst = FCvtOpcode.getCvtSign(fuOpType).andR
 
   // modules
   val fcvt = Module(new FPCVT(XLEN, isI2F = true))
-  fcvt.io.fire := fire
-  fcvt.io.src := src0
-  fcvt.io.opType := opcode(7, 0)
-  fcvt.io.rm := vfcvtRm
-  // Todo: remove these
-  fcvt.io.inSew1H := 0.U
-  fcvt.io.outSew1H := 0.U
+  fcvt.io.fire          := fire
+  fcvt.io.src           := src1
+  fcvt.io.opType        := fuOpType
+  fcvt.io.rm            := fpRm
+  fcvt.io.inSew1H       := inSew1H
+  fcvt.io.outSew1H      := outSew1H
 
   io.out.bits.res.fflags.get := Mux(outIsMvInst, 0.U, fcvt.io.fflags)
 
   val result = Mux(
-    outIsMvInst, 
-    RegEnable(RegEnable(src0, fire), fireReg),
+    RegEnable(RegEnable(outIsMvInst, fire), fireReg),
+    RegEnable(RegEnable(src1, fire), fireReg),
     fcvt.io.result
   )
   // box
-  val res1H = RegEnable(RegEnable(output1H(3, 1), fire), fireReg)
+  val res1H = RegEnable(RegEnable(outSew1H(3, 1), fire), fireReg)
   io.out.bits.res.data := Mux1H(
     res1H,
     Seq(

@@ -148,9 +148,6 @@ class DecodeStageImp(
         bits.canRobCompress := uopInfo.canRobCompress
         bits.selImm := Mux(uopInfo.selImm.valid, DecodeSelImm.toSelImm(uopInfo.selImm.bits), DecodeSelImm.NO)
         bits.imm := uopInfo.imm
-        bits.fpu.wflags := 0.U // Todo: remove it
-        bits.fpu.fmt := 0.U // Todo: remove it
-        bits.fpu.rm := 0.U // Todo: decode it
         bits.vpu.vill     := mopInfo.vtype.illegal     // Todo: remove it
         bits.vpu.vma      := mopInfo.vtype.vma         // Todo: remove it
         bits.vpu.vta      := mopInfo.vtype.vta         // Todo: remove it
@@ -184,7 +181,7 @@ class DecodeStageImp(
         bits.vtype := mopInfo.vtype
         bits.oldVType := mopInfo.oldVType
         bits.vlsInstr := false.B // Todo: remove
-        bits.wfflags := uopInfo.fflagsWen
+        bits.fflagsWen := uopInfo.fflagsWen
         bits.isMove := false.B // Todo
         bits.uopIdx := uopInfo.uopIdx
         bits.uopSplitType := 0.U // Todo: remove

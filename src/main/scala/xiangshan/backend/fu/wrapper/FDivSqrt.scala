@@ -15,7 +15,7 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
   XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "fdiv OpType not supported")
 
   // io alias
-  private val opcode = fuOpType(0)
+  private val opcode = fuOpType(3)
   private val src0 = inData.src(0)
   private val src1 = inData.src(1)
 
@@ -45,11 +45,13 @@ class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit
   fdiv.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN
   fdiv.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN
 
+  private val outFmt = outCtrl.fuOpType(2, 1)
+
   private val resultData = Mux1H(
     Seq(
-      (outCtrl.fpu.get.fmt === VSew.e16) -> Cat(Fill(48, 1.U), fdiv.io.fpdiv_res_o(15, 0)),
-      (outCtrl.fpu.get.fmt === VSew.e32) -> Cat(Fill(32, 1.U), fdiv.io.fpdiv_res_o(31, 0)),
-      (outCtrl.fpu.get.fmt === VSew.e64) -> fdiv.io.fpdiv_res_o
+      (outFmt === VSew.e16) -> Cat(Fill(48, 1.U), fdiv.io.fpdiv_res_o(15, 0)),
+      (outFmt === VSew.e32) -> Cat(Fill(32, 1.U), fdiv.io.fpdiv_res_o(31, 0)),
+      (outFmt === VSew.e64) -> fdiv.io.fpdiv_res_o
     )
   )
   private val fflagsData = fdiv.io.fflags_o

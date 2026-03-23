@@ -49,7 +49,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val interrupt_safe = Bool()
     val fpWen = Bool()
     val rfWen = Bool()
-    val wflags = Bool()
     val dirtyVs = Bool()
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
@@ -59,11 +58,11 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val needVTB = Bool()
     val isHls = Bool()
     // data end
-
     // trace
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
     // status begin
     val valid = Bool()
+    val fflagsWen = Bool()
     val fflags = UInt(5.W)
     val mmio = Bool()
     val vxsat = Bool()
@@ -105,7 +104,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val commit_w = Bool()
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val interrupt_safe = Bool()
-    val wflags = Bool()
+    val fflagsWen = Bool()
     val fflags = UInt(5.W)
     val vxsat = Bool()
     val isRVC = Bool()
@@ -136,7 +135,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop): Unit = {
-    robEntry.wflags := robEnq.wfflags
+    robEntry.fflagsWen := robEnq.fflagsWen
     robEntry.commitType := robEnq.commitType
     robEntry.ftqIdx := robEnq.ftqPtr
     robEntry.ftqOffset := robEnq.ftqOffset
@@ -180,7 +179,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.rfWen := robEntry.rfWen
     robCommitEntry.fpWen := robEntry.fpWen
     robCommitEntry.fflags := robEntry.fflags
-    robCommitEntry.wflags := robEntry.wflags
+    robCommitEntry.fflagsWen := robEntry.fflagsWen
     robCommitEntry.vxsat := robEntry.vxsat
     robCommitEntry.isRVC := robEntry.isRVC
     robCommitEntry.needVTB := robEntry.needVTB
@@ -191,7 +190,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.ftqIdx := robEntry.ftqIdx
     robCommitEntry.ftqOffset := robEntry.ftqOffset
     robCommitEntry.commitType := robEntry.commitType
-    robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.wflags
+    robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.fflagsWen
     robCommitEntry.dirtyVs := robEntry.dirtyVs
     robCommitEntry.needFlush := robEntry.needFlush
     robCommitEntry.traceBlockInPipe := robEntry.traceBlockInPipe
