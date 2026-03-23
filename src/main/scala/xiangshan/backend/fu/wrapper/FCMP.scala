@@ -5,14 +5,12 @@ import chisel3._
 import chisel3.util._
 import utility.XSError
 import xiangshan.backend.fu.FuConfig
-import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import yunsuan.fpu.FloatCompare
-import yunsuan.encoding.Opcode.Opcodes.FCvtOpcode
 
 class FCMP(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   // io alias
-  private val opcode = io.in.bits.ctrl.fuOpType
+  private val opcode = fuOpType
   private val src0 = inData.src(0)
   private val src1 = inData.src(1)
 

@@ -9,10 +9,10 @@ import xiangshan.backend.fu.{FuConfig, FuncUnit, HasPipelineReg}
 trait FpFuncUnitAlias { this: FuncUnit =>
   protected val inCtrl  = io.in.bits.ctrl
   protected val inData  = io.in.bits.data
-  protected val fp_fmt  = inCtrl.fpu.get.fmt
+  protected val fp_fmt  = inCtrl.fuOpType(2, 1)
 
   protected val frm     = io.frm.getOrElse(0.U(3.W))
-  protected val instRm  = inCtrl.fpu.getOrElse(0.U.asTypeOf(new FPUCtrlSignals)).rm
+  protected val instRm  = 0.U // todo
   protected val rm      = Mux(instRm =/= "b111".U, instRm, frm)
 
   protected val fuOpType  = inCtrl.fuOpType
