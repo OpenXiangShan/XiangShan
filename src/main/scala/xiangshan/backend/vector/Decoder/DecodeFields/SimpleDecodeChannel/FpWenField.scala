@@ -21,7 +21,10 @@ object FpWenField extends BoolDecodeField[InstPattern] {
             case _: FpITypeI2fInstPattern => y
             case FpITypeLoadInstPattern() => y
           }
-          case _: FpRTypeInstPattern => y
+          case fpR: FpRTypeInstPattern => fpR match {
+            case FpRTypeIntDestInstPattern() => n
+            case _: FpRTypeFpDestInstPattern => y
+          }
           case FpR4TypeInstPattern() => y
           case FpSTypeInstPattern() => n
         }

@@ -66,7 +66,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
     val fixedTaken = Bool()
     val predTaken  = Bool()
   })
-  val fpu         = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
+  val fflagsWen   = OptionWrapper(cfg.writeFflags, Bool())
   val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
   val oldVType    = Option.when(cfg.writeVType)(VType())
   val vialuCtrl   = OptionWrapper(cfg.needVIaluCtrl, new VIAluCtrlSignals)
@@ -87,7 +87,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
   val flushPipe     = OptionWrapper(cfg.flushPipe,  Bool())
   val replay        = OptionWrapper(cfg.replayInst, Bool())
   val isRVC         = OptionWrapper(cfg.hasIsRVC, Bool())
-  val fpu           = OptionWrapper(cfg.writeFflags, new FPUCtrlSignals)
+  val fflagsWen     = OptionWrapper(cfg.writeFflags, Bool())
   val vpu           = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
 }
 
@@ -165,7 +165,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.vlWen .foreach(_ := RegEnable(io.in.bits.ctrl.vlWen.get, io.in.fire))
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.isRVC.foreach(_ := RegEnable(io.in.bits.ctrl.isRVC.get, io.in.fire))
-    io.out.bits.ctrl.fpu      .foreach(_ := RegEnable(io.in.bits.ctrl.fpu.get, io.in.fire))
+    io.out.bits.ctrl.fflagsWen.foreach(_ := RegEnable(io.in.bits.ctrl.fflagsWen.get, io.in.fire))
     io.out.bits.ctrl.vpu      .foreach(_ := RegEnable(io.in.bits.ctrl.vpu.get, io.in.fire))
     io.out.bits.perfDebugInfo.foreach(_ := RegEnable(io.in.bits.perfDebugInfo.get, io.in.fire))
     io.out.bits.debug_seqNum.foreach(_ := RegEnable(io.in.bits.debug_seqNum.get, io.in.fire))
@@ -183,7 +183,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.vlWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vlWen.get, io.in.fire))
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.isRVC.foreach(_ := DataHoldBypass(io.in.bits.ctrl.isRVC.get, io.in.fire))
-    io.out.bits.ctrl.fpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fpu.get, io.in.fire))
+    io.out.bits.ctrl.fflagsWen.foreach(_ := DataHoldBypass(io.in.bits.ctrl.fflagsWen.get, io.in.fire))
     io.out.bits.ctrl.vpu.foreach(_ := DataHoldBypass(io.in.bits.ctrl.vpu.get, io.in.fire))
     io.out.bits.perfDebugInfo.foreach(_ := DataHoldBypass(io.in.bits.perfDebugInfo.get, io.in.fire))
     io.out.bits.debug_seqNum.foreach(_ := DataHoldBypass(io.in.bits.debug_seqNum.get, io.in.fire))
@@ -201,7 +201,7 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
     io.out.bits.ctrl.vlWen.foreach(_ := io.in.bits.ctrl.vlWen.get)
     // io.out.bits.ctrl.flushPipe should be connected in fu
     io.out.bits.ctrl.isRVC.foreach(_ := io.in.bits.ctrl.isRVC.get)
-    io.out.bits.ctrl.fpu.foreach(_ := io.in.bits.ctrl.fpu.get)
+    io.out.bits.ctrl.fflagsWen.foreach(_ := io.in.bits.ctrl.fflagsWen.get)
     io.out.bits.ctrl.vpu.foreach(_ := io.in.bits.ctrl.vpu.get)
     io.out.bits.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
     io.out.bits.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
@@ -297,7 +297,7 @@ trait HasPipelineReg { this: FuncUnit =>
   io.out.bits.ctrl.vecWen.foreach(_ := ctrlVec.last.vecWen.get)
   io.out.bits.ctrl.v0Wen.foreach(_ := ctrlVec.last.v0Wen.get)
   io.out.bits.ctrl.vlWen.foreach(_ := ctrlVec.last.vlWen.get)
-  io.out.bits.ctrl.fpu.foreach(_ := ctrlVec.last.fpu.get)
+  io.out.bits.ctrl.fflagsWen.foreach(_ := ctrlVec.last.fflagsWen.get)
   io.out.bits.ctrl.vpu.foreach(_ := ctrlVec.last.vpu.get)
   io.out.bits.perfDebugInfo.foreach(_ := fixPerfVec.last.get)
   io.out.bits.debug_seqNum.foreach(_ := fixSeqNumVec.last.get)

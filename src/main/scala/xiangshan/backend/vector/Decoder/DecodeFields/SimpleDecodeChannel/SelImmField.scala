@@ -46,8 +46,10 @@ object SelImmField extends DecodeField[InstPattern, ValidIO[UInt]] {
             case FpITypeImmInstPattern() => DecodeSelImm.FI
             case _ => null
           }
+          case FpITypeLoadInstPattern() => DecodeSelImm.I
           case _ => null
         }
+        case FpSTypeInstPattern() => DecodeSelImm.S
         case _ => null
       }
       case vec: VecInstPattern => vec match {
