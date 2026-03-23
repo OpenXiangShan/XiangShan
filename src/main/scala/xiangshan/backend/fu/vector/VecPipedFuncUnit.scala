@@ -26,8 +26,8 @@ trait VecFuncUnitAlias { this: FuncUnit =>
 
   protected val frm     = io.frm.getOrElse(0.U(3.W))
   protected val vxrm    = io.vxrm.getOrElse(0.U(2.W))
-  protected val instRm  = inCtrl.fpu.getOrElse(0.U.asTypeOf(new FPUCtrlSignals)).rm
-  protected val rm      = Mux(vecCtrl.fpu.isFpToVecInst && instRm =/= "b111".U, instRm, frm)
+  protected val instRm  = 0.U // Todo
+  protected val rm      = frm
   protected val vuopIdx = vecCtrl.vuopIdx
   protected val nf      = 0.U  // No need to handle nf in vector arith unit
 

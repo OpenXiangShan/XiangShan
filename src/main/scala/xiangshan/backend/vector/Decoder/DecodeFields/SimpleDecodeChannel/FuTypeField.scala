@@ -34,8 +34,10 @@ class FuTypeField(table: Map[BitPat, Opcode]) extends DecodeField[InstPattern, U
           case _: Opcode.FenceOpcodes.type => FuType.fence.U
           case _: Opcode.FMacOpcodes.type => FuType.fmac.U
           case _: Opcode.FDivOpcodes.type => FuType.fDivSqrt.U
+          case _: Opcode.I2fOpcodes.type => FuType.i2f.U
           case _: Opcode.FCvtOpcodes.type => FuType.fcvt.U
           case _: Opcode.FMiscOpcodes.type => FuType.fcmp.U
+          case _: Opcode.FAluOpcodes.type => FuType.falu.U
         }
       catch {
         case e: NoSuchElementException =>
