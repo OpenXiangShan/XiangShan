@@ -221,7 +221,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   vec_old_pdest := rat.io.vec_old_pdest
   v0_old_pdest := rat.io.v0_old_pdest
   vl_old_pdest := rat.io.vl_old_pdest
-  
+
   debug_int_rat.foreach(_ := rat.io.debug_int_rat.get)
   debug_fp_rat.foreach (_ := rat.io.debug_fp_rat.get)
   debug_vec_rat.foreach(_ := rat.io.debug_vec_rat.get)
@@ -525,6 +525,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).psrc(2) := Mux1H(uops(i).srcType(2)(2, 1), Seq(fpReadPortsData(i)(2), vecReadPortsData(i)(2)))
     uops(i).psrc(3) := v0ReadPortsData(i)(0)
     uops(i).psrcVl := vlReadPortsData(i).head
+    uops(i).psrcIntForMove := intReadPortsData(i).head
 
     // int psrc2 should be bypassed from next instruction if it is fused
     if (i < RenameWidth - 1) {
@@ -554,6 +555,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // dirty code
     if (i == 0) {
       io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrc(0))
+      io.out(i).bits.psrcIntForMove := Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrcIntForMove)
     }
     // Todo: move these shit in decode stage
     // dirty code for fence. The lsrc is passed by imm.
@@ -637,7 +639,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       }
     }.elsewhen(needRobFlags(i)) {
       uops(i).traceBlockInPipe.ilastsize := Mux(lastIsRVC, Ilastsize.HalfWord, Ilastsize.Word)
-      
+
       // CSR systemop instruction excluding ebreak & ecall
       val csrAddr = Imm_Z().getCSRAddr(uops(i).imm(Imm_Z().len - 1, 0))
       val isXret = FuType.isCsr(uops(i).fuType) && CSROpType.isSystemOp(uops(i).fuOpType) && (csrAddr(11, 1).orR)
@@ -711,6 +713,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, io.out.take(i).map(_.bits.pdest).zip(bypassCond(0)(i-1).asBools).foldLeft(uops(i).psrc(0)) {
       (z, next) => Mux(next._2, next._1, z)
     })
+    io.out(i).bits.psrcIntForMove := Mux(io.out(i).bits.isLUI, 0.U, io.out.take(i).map(_.bits.pdest).zip(bypassCond(0)(i-1).asBools).foldLeft(uops(i).psrcIntForMove) {
+      (z, next) => Mux(next._2, next._1, z)
+    })
     io.out(i).bits.psrc(1) := io.out.take(i).map(_.bits.pdest).zip(bypassCond(1)(i-1).asBools).foldLeft(uops(i).psrc(1)) {
       (z, next) => Mux(next._2, next._1, z)
     }
@@ -724,7 +729,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       uops(i).psrcVl,
       (bypassCondVl(i-1).asBools zip io.out.take(i).map(_.bits.pdest)).reverse
     )
-    io.out(i).bits.pdest := Mux(isMove(i), io.out(i).bits.psrc(0), uops(i).pdest)
+    io.out(i).bits.pdest := Mux(isMove(i), io.out(i).bits.psrcIntForMove, uops(i).pdest)
 
     // Todo: better implementation for fields reuse
     // For fused-lui-load, load.src(0) is replaced by the imm.

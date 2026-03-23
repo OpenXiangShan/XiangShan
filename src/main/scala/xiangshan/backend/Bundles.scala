@@ -273,6 +273,7 @@ object Bundles {
     val numWB = UInt(log2Up(MaxUopSize).W) // rob need this
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
+    val psrcIntForMove = UInt(PhyRegIdxWidth.W)
     val psrcVl = UInt(VlPhyRegIdxWidth.W)
     val pdest = UInt(PhyRegIdxWidth.W)
     val pdestVl = UInt(VlPhyRegIdxWidth.W)
