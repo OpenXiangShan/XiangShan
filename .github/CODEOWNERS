@@ -1,10 +1,10 @@
-src/main/scala/xiangshan/frontend/ @Gao-Zeyu
-src/main/scala/xiangshan/frontend/bpu/ @eastonman @Gao-Zeyu
-src/main/scala/xiangshan/frontend/ftq/ @Yan-Muzi @Gao-Zeyu
-src/main/scala/xiangshan/frontend/ibuffer/ @Gao-Zeyu
-src/main/scala/xiangshan/frontend/icache/ @ngc7331 @Gao-Zeyu
-src/main/scala/xiangshan/frontend/ifu/ @ngc7331 @my-mayfly @Gao-Zeyu
-src/main/scala/xiangshan/frontend/instruncache/ @ngc7331 @Gao-Zeyu
+src/main/scala/xiangshan/frontend/ @rich-cake
+src/main/scala/xiangshan/frontend/bpu/ @eastonman @rich-cake
+src/main/scala/xiangshan/frontend/ftq/ @Yan-Muzi @rich-cake
+src/main/scala/xiangshan/frontend/ibuffer/ @rich-cake
+src/main/scala/xiangshan/frontend/icache/ @ngc7331 @rich-cake
+src/main/scala/xiangshan/frontend/ifu/ @ngc7331 @my-mayfly @rich-cake
+src/main/scala/xiangshan/frontend/instruncache/ @ngc7331 @rich-cake
 
 src/main/scala/xiangshan/backend/ @lewislzh
 src/main/scala/xiangshan/backend/Region.scala @xiaofeibao-xjtu @lewislzh
