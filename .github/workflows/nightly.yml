@@ -27,7 +27,7 @@ jobs:
         run: |
           PREV_DIR=$(find "${{ needs.run.outputs.PERF_DIR }}" -maxdepth 1 -name "nightly-*" ! -name "nightly-${{ needs.run.outputs.DATE }}" | sort | tail -n1)
           echo "Found previous report: $PREV_DIR"
-          PREV_DIR=$(readlink -f "$PREV_DIR")
+          PREV_DIR=$(readlink -f "$PREV_DIR" || true)
           echo "Resolved to: $PREV_DIR"
           echo "PREV_DIR=$PREV_DIR" >> $GITHUB_ENV
       - name: Diff with previous result
