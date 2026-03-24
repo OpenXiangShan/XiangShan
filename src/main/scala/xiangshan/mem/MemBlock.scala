@@ -2101,7 +2101,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   )
   traceToL2Top.toEncoder.mstatus := RegNext(traceFromBackend.toEncoder.mstatus)
   (0 until TraceGroupNum).foreach { i =>
-    traceToL2Top.toEncoder.groups(i).valid := RegNext(traceFromBackend.toEncoder.groups(i).valid)
+    traceToL2Top.toEncoder.groups(i).valid := RegNext(traceFromBackend.toEncoder.groups(i).valid, false.B)
     traceToL2Top.toEncoder.groups(i).bits.iretire := RegNext(traceFromBackend.toEncoder.groups(i).bits.iretire)
     traceToL2Top.toEncoder.groups(i).bits.itype := RegNext(traceFromBackend.toEncoder.groups(i).bits.itype)
     traceToL2Top.toEncoder.groups(i).bits.ilastsize := RegEnable(
