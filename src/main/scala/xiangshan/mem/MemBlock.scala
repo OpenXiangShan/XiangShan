@@ -474,8 +474,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         val loadPc = RegNext(io.ooo_to_mem.issueLda(i).bits.uop.pc) // for s1
         l1Prefetcher.stride_train(i).bits.uop.pc := Mux(
           loadUnits(i).io.s2_ptr_chasing,
-          RegEnable(loadPc, loadUnits(i).io.s2_prefetch_spec),
-          RegEnable(RegEnable(loadPc, loadUnits(i).io.s1_prefetch_spec), loadUnits(i).io.s2_prefetch_spec)
+          RegEnable(loadPc, loadUnits(i).io.s2_prefetch_spec_l1),
+          RegEnable(RegEnable(loadPc, loadUnits(i).io.s1_prefetch_spec_l1), loadUnits(i).io.s2_prefetch_spec_l1)
         )
       }
       for (i <- 0 until HyuCnt) {

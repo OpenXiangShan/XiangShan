@@ -159,6 +159,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // speculative for gated control
     val s1_prefetch_spec = Output(Bool())
     val s2_prefetch_spec = Output(Bool())
+    val s1_prefetch_spec_l1 = Output(Bool())
+    val s2_prefetch_spec_l1 = Output(Bool())
 
     val prefetch_req              = Flipped(ValidIO(new L1PrefetchReq)) // hardware prefetch to l1 cache req
     val canAcceptLowConfPrefetch  = Output(Bool())
@@ -1497,6 +1499,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train_l1.bits.updateAddrValid := false.B
   io.prefetch_train_l1.bits.hasException := false.B
   io.prefetch_train_l1.bits.isMisalign := false.B
+  io.s1_prefetch_spec_l1 := s1_fire
+  io.s2_prefetch_spec_l1 := s2_prefetch_train_l1_valid
+
   if (env.FPGAPlatform){
     io.dcache.s0_pc := DontCare
     io.dcache.s1_pc := DontCare
