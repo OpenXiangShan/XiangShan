@@ -285,6 +285,7 @@ FRONTEND_BUILD_DIR = ./build-frontend
 FRONTEND_RTL_DIR   = $(FRONTEND_BUILD_DIR)/rtl
 FRONTENDTOP        = top.FrontendTopMain
 FRONTEND_TOP_V     = $(FRONTEND_RTL_DIR)/FrontendTop.$(RTL_SUFFIX)
+FRONTEND_PYLIB     = $(FRONTEND_BUILD_DIR)/pylib/libUTFrontend.so
 
 $(FRONTEND_TOP_V): $(SCALA_FILE)
 	mkdir -p $(@D)
@@ -296,8 +297,16 @@ ifeq ($(CHISEL_TARGET),systemverilog)
 	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
 endif
 
-frontend: $(FRONTEND_TOP_V)
-
+$(FRONTEND_PYLIB): $(FRONTEND_TOP_V)
+	time picker export $(dir $<)ClockGate.sv --sname Frontend \
+		--filelist $(dir $<)/filelist.f \
+		--lang python --autobuild true --cp_lib true \
+		--sim verilator --access-mode MEM_DIRECT \
+		--tdir $(FRONTEND_BUILD_DIR)/pylib/Frontend \
+		-w $(FRONTEND_BUILD_DIR)/frontend.fst \
+		--coverage \
+		-V "--output-split;20000;--no-timing"
+frontend: $(FRONTEND_PYLIB)
 .PHONY: frontend
 
 verilog: $(call docker-deps,$(TOP_V))
