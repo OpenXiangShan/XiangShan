@@ -106,10 +106,14 @@ case class Pbus2Params(
     DieIDWidth:    Int = 3,
     // bit[47:44] >0, 0x1C00_0000~0x1DFF_FFFF, access to imsic for crossdie
     crsimsicAddrMap: Seq[AddressSet] = Seq(
-      AddressSet((BigInt(1) << 44) + 0x1C000000L, 0x1FFFFFF), // die 1
-      AddressSet((BigInt(2) << 44) + 0x1C000000L, 0x1FFFFFF), // die 2
-      AddressSet((BigInt(3) << 44) + 0x1C000000L, 0x1FFFFFF), // die 3
-      AddressSet((BigInt(4) << 44) + 0x1C000000L, 0x1FFFFFF) // die 4
+      AddressSet((BigInt(1) << 44) + 0x1C000000L, 0xFFFF), // die 1 m interrupt file
+      AddressSet((BigInt(2) << 44) + 0x1C000000L, 0xFFFF), // die 2
+      AddressSet((BigInt(3) << 44) + 0x1C000000L, 0xFFFF), // die 3
+      AddressSet((BigInt(4) << 44) + 0x1C000000L, 0xFFFF), // die 4
+      AddressSet((BigInt(1) << 44) + 0x1D000000L, 0xFFFFF), // die 1 s/VS interrupt file
+      AddressSet((BigInt(2) << 44) + 0x1D000000L, 0xFFFFF), // die 2
+      AddressSet((BigInt(3) << 44) + 0x1D000000L, 0xFFFFF), // die 3
+      AddressSet((BigInt(4) << 44) + 0x1D000000L, 0xFFFFF), // die 4
     ),
     // bit[47:44] >0,0x1B000000~0x1B000FFF,for cross die debug
     crsdmAddrMap: Seq[AddressSet] = Seq(
