@@ -25,7 +25,7 @@ jobs:
           ln -s "${{ needs.run.outputs.SPEC_DIR }}" "${{ needs.run.outputs.PERF_DIR }}/nightly-${{ needs.run.outputs.DATE }}"
       - name: Find previous commit
         run: |
-          PREV_DIR=$(ls -td "${{ needs.run.outputs.PERF_DIR }}/nightly-*" | grep -v "nightly-${{ needs.run.outputs.DATE }}" | head -n1 || true)
+          PREV_DIR=$(find "${{ needs.run.outputs.PERF_DIR }}" -maxdepth 1 -name "nightly-*" ! -name "nightly-${{ needs.run.outputs.DATE }}" | sort | tail -n1)
           echo "Found previous report: $PREV_DIR"
           PREV_DIR=$(readlink -f "$PREV_DIR")
           echo "Resolved to: $PREV_DIR"
