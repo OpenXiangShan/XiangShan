@@ -364,6 +364,12 @@ object TriggerUtil {
     !ConsecutiveOnes(chainVec, chainLen)
   }
 
+  def triggerActionMatchVec(triggerCanFireVec: Vec[Bool], actionVec: Vec[UInt], targetAction: UInt): Vec[Bool] = {
+    VecInit(triggerCanFireVec.zip(actionVec).map {
+      case (canFire, action) => canFire && (action === targetAction)
+    })
+  }
+
   /**
    * Generate Trigger action
    * @return triggerAction return
@@ -372,19 +378,15 @@ object TriggerUtil {
    * @param  triggerCanRaiseBpExp from csr
    */
   def triggerActionGen(triggerAction: UInt, triggerCanFireVec: Vec[Bool], actionVec: Vec[UInt], triggerCanRaiseBpExp: Bool): Unit = {
-    // More than one triggers can hit at the same time, but only fire one.
-    // We select the first hit trigger to fire.
-    val hasTriggerFire    = triggerCanFireVec.asUInt.orR
-    val triggerFireOH     = PriorityEncoderOH(triggerCanFireVec)
-    val triggerFireAction = PriorityMux(triggerFireOH, actionVec).asUInt
-    val actionIsBPExp     = hasTriggerFire && (triggerFireAction === TriggerAction.BreakpointExp)
-    val actionIsDmode     = hasTriggerFire && (triggerFireAction === TriggerAction.DebugMode)
-    val breakPointExp     = actionIsBPExp && triggerCanRaiseBpExp
+    val fireDebugModeVec = triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.DebugMode)
+    val fireBreakpointExpVec = triggerActionMatchVec(triggerCanFireVec, actionVec, TriggerAction.BreakpointExp)
+    val fireDebugMode = fireDebugModeVec.asUInt.orR
+    val breakPointExp = fireBreakpointExpVec.asUInt.orR && triggerCanRaiseBpExp
 
     // todo: add more for trace
     triggerAction := MuxCase(TriggerAction.None, Seq(
+      fireDebugMode -> TriggerAction.DebugMode,
       breakPointExp -> TriggerAction.BreakpointExp,
-      actionIsDmode -> TriggerAction.DebugMode,
     ))
   }
 }
