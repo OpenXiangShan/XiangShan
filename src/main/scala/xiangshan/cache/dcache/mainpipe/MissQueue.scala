@@ -1190,23 +1190,13 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val s1ReqValid = RegNext(s0ReqValid)
     val s1Req = RegEnable(s0Req, s0ReqValid)
     val mshrIdOH = UIntToOH(s1Req.mshrId)
-    // val paddr = forward.s1Req.paddr
 
-    // val s1PaddrMatchVec = VecInit(forwardInfo_vec.map{ case info =>
-    //   paddr(paddr.getWidth - 1, blockOffBits) === info.paddr(paddr.getWidth - 1, blockOffBits) &&
-    //   info.inflight})
     val s1BeatMatchVec  = VecInit(forwardInfo_vec.map{ case info =>
       Mux(paddrFwd(i)(log2Up(refillBytes)).asBool,
         info.lastbeat_valid,
         info.firstbeat_valid
     )})
-    // val s1SelectOH     = s1PaddrMatchVec.asUInt & s1BeatMatchVec.asUInt
-    // val s1MshrForwardInfo = Mux1H(s1SelectOH, forwardInfo_vec)
-    // val s1RespData = VecInit(
-    //   s1MshrForwardInfo.raw_data.grouped(VLEN / rowBits).map(VecInit(_).asUInt).toSeq
-    // )(paddr(blockOffBits - 1, log2Up(VLEN / 8)))
     val s1RespValid = s1ReqValid && (s1SelectOH(i) & s1BeatMatchVec.asUInt).orR
-
 
     forward.s2Resp.valid := RegNext(s1RespValid)
     forward.s2Resp.bits.matchInvalid := false.B
@@ -1219,20 +1209,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   io.forward_stData.zipWithIndex.foreach { case (forward, i) =>
     val s0ReqValid_stLdFwd = forward.s0Req.valid
-    val s0Req_stLdFwd = forward.s0Req.bits
     val s1ReqValid_stLdFwd = RegNext(s0ReqValid_stLdFwd)
-    val s1Req_stLdFwd = RegEnable(s0Req_stLdFwd, s0ReqValid_stLdFwd)
-    // val paddr_stLdFwd = forward.s1Req.paddr
-    // val s1PaddrMatchVec_stLdFwd = VecInit(forwardInfo_vec.map{ case info =>
-    //   paddr_stLdFwd(paddr_stLdFwd.getWidth - 1, blockOffBits) === info.paddr(info.paddr.getWidth - 1, blockOffBits) &&
-    //   info.inflight})
-    // val s1SelectOH_stLdFwd = s1PaddrMatchVec_stLdFwd.asUInt
-    // val s1ForwardInfo_stLdFwd = Mux1H(s1SelectOH_stLdFwd, forwardInfo_vec)
 
-    // val VLENB = VLEN / 8
-    // val paddr_selOH = (0 until (blockBytes / VLENB)).map(i => paddr_stLdFwd(blockOffBits - 1, log2Up(VLENB)) === i.U)
-    // val s1RespData_stLdFwd = Mux1H(paddr_selOH,
-    //       s1ForwardInfo_stLdFwd.raw_data.grouped(VLEN / rowBits).map(VecInit(_).asUInt).toSeq)
     val s1RespMask_stLdFwd = Mux1H(paddrFwd_selOH(i),
           s1ForwardInfo(i).store_mask.grouped(VLENB).map(x => Mux(s1ForwardInfo(i).isFromStore, x, 0.U)))
     val s1RespValid_stLdFwd = s1ReqValid_stLdFwd && s1SelectOH(i).orR
