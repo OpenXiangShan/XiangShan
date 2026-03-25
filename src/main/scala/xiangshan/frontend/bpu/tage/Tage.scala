@@ -32,6 +32,11 @@ import xiangshan.frontend.bpu.TageTableInfo
  * This module is the implementation of the TAGE (TAgged GEometric history length predictor).
  */
 class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters with TopHelper with HalfAlignHelper {
+  class WideTableReadResp extends TageBundle {
+    val entries:    Vec[TageEntry]       = Vec(MaxNumWays, new TageEntry)
+    val usefulCtrs: Vec[SaturateCounter] = Vec(MaxNumWays, UsefulCounter())
+  }
+
   class TageIO(implicit p: Parameters) extends BasePredictorIO {
     val fromPhr:     PhrToTageIO         = new PhrToTageIO
     val fromMainBtb: MainBtbToTageIO     = new MainBtbToTageIO
@@ -55,6 +60,14 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   /* *** reset *** */
   io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
+
+  private def widenTableReadResp(resp: TableReadResp, tableIdx: Int): WideTableReadResp = {
+    val padWays  = MaxNumWays - TableInfos(tableIdx).NumWays
+    val wideResp = Wire(new WideTableReadResp)
+    wideResp.entries := VecInit(resp.entries.toSeq ++ Seq.fill(padWays)(0.U.asTypeOf(new TageEntry)))
+    wideResp.usefulCtrs := VecInit(resp.usefulCtrs.toSeq ++ Seq.fill(padWays)(UsefulCounter.WeakPositive))
+    wideResp
+  }
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 0
@@ -481,12 +494,14 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   }
   dontTouch(t3_longerHistoryTableMask)
 
-  private val t3_allTableCanAllocateWayMask = t3_readResp.map { tableReadResp =>
-    val notValidMask  = tableReadResp.entries.map(!_.valid).asUInt
-    val notUsefulMask = tableReadResp.usefulCtrs.map(_.isSaturateNegative).asUInt
+  private val t3_allTableCanAllocateWayMask = t3_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
+    val tableInfo      = TableInfos(tableIdx)
+    val actualWayMask  = ((BigInt(1) << tableInfo.NumWays) - 1).U(MaxNumWays.W)
+    val notValidMask   = tableReadResp.entries.map(!_.valid).asUInt & actualWayMask
+    val notUsefulMask  = tableReadResp.usefulCtrs.map(_.isSaturateNegative).asUInt & actualWayMask
     val ctrWeakAndNotUsefulMask = tableReadResp.entries.zip(tableReadResp.usefulCtrs).map { case (entry, usefulCtr) =>
       entry.takenCtr.isWeak && usefulCtr.isSaturateNegative
-    }.asUInt
+    }.asUInt & actualWayMask
     MuxCase(
       notUsefulMask,
       Seq(
@@ -573,7 +588,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     }
 
     table.io.writeReq.valid                := t3_fire && writeWayMask.reduce(_ || _)
-    table.io.writeReq.bits.setIdx          := t3_setIdx(tableIdx)
+    table.io.writeReq.bits.setIdx          := t3_setIdx(tableIdx)(table.io.writeReq.bits.setIdx.getWidth - 1, 0)
     table.io.writeReq.bits.bankMask        := t3_bankMask
     table.io.writeReq.bits.wayMask         := writeWayMask.asUInt
     table.io.writeReq.bits.writeEntryEn    := writeEntryEn
