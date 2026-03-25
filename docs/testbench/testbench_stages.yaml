@@ -1,0 +1,153 @@
+  - name: dut_wrapper_implementation
+    desc: "DUT封装"
+    task:
+      - "目标：创建基础接口，为后续覆盖分组创建，测试用例开发提供支撑"
+      - "第1步：分析{DUT}的底层接口和工作方式"
+      - "第2步：设计create_dut(request)函数 - 负责创建芯片实例"
+      - "第3步：配置时钟(时序电路需要，组合电路不需要)"
+      - "第4步：实现dut fixture - 管理测试的完整生命周期"
+      - "需要将结果及时写入{OUT}/tests/{DUT}_api.py，请使用{DOC_GEN_LANG}编写注释"
+      - "参考Guide_Doc/dut_fixture.md了解标准写法"
+    output_files:
+      - "{OUT}/tests/{DUT}_api.py"
+    stage:
+     - name: dut_creation_implementation
+       desc: "DUT创建函数实现"
+       task:
+         - "在文件{OUT}/tests/{DUT}_api.py实现create_dut(request)函数，仅完成DUT实例的创建"
+         - "不要对DUT的任何引脚/接口进行赋值操作"
+         - "如果芯片有时钟引脚，必须通过 `InitClock` 方法配置时钟，进行绑定"
+         - "通过get_coverage_data_path(request, new_path=True)获取代码行覆盖率文件路径"
+         - "将覆盖率文件路径传递给dut.SetCoverage方法"
+         - "确保create_dut函数能够正常创建DUT实例并返回"
+       reference_files:
+         - "Guide_Doc/dut_fixture.md"
+         - "Guide_Doc/dut_function_coverage_def.md"
+     - name: pytest_fixture_dut_implementation
+       desc: "dut fixture实现"
+       task:
+         - "实现dut fixture，包含完整的生命周期管理"
+         - "请按已有模板确保:"
+         - "- 确保在dut fixture的清理阶段，调用通过get_coverage_data_path(request, new_path=False)获取已有路径的代码行覆盖率文件，并传递给 set_line_coverage"
+         - "- 确保dut fixture能正确初始化和清理芯片"
+         - "- 确保dut fixture的scope设置为function"
+       reference_files:
+         - "Guide_Doc/dut_fixture.md"
+
+  - name: coverage_model_implementation
+    desc: "功能覆盖率模型实现"
+    task:
+      - "目标：创建覆盖率统计系统，跟踪哪些功能已测试"
+      - "第1步：读取功能分析文档{OUT}/{DUT}_functions_and_checks.md"
+      - "第2步：为每个功能分组<FG-*>创建CovGroup覆盖组"
+      - "第3步：为每个功能点<FC-*>添加watch_point监测点"
+      - "第4步：为每个检测点<CK-*>实现检查函数(尽可能的用lambda函数)"
+      - "第5步：实现get_coverage_groups(dut)主函数"
+      - "参考Guide_Doc/dut_function_coverage_def.md了解实现方法"
+      - "需要将结果及时写入{OUT}/tests/{DUT}_function_coverage_def.py，请使用{DOC_GEN_LANG}编写注释"
+      - "关键：检查函数要使用dut对象引用，不要用值(如dut而不是dut.a.value)"
+    stage:
+      - name: coverage_group_creation
+        desc: "功能覆盖组创建"
+        task:
+          - "为每个功能分组<FG-*>创建对应的CovGroup对象"
+          - "实现get_coverage_groups(dut)基础框架"
+          - "确保覆盖组可以正常创建和访问"
+        reference_files:
+          - "Guide_Doc/dut_function_coverage_def.md"
+
+      - name: coverage_point_implementation
+        desc: "覆盖率检查点实现"
+        task:
+          - "为每个功能点添加watch_point和检查函数"
+          - "用lambda函数实现检查逻辑，传递引用参数(dut对象)"
+          - "如果检查函数过于复杂，lambda函数可以用普通函数替代"
+          - "如果多个检查函数有公共检查部分，也可以把公共部分实现为普通函数"
+          - "完成完整的覆盖率定义，代码需要有注释，可读性强"
+    output_files:
+      - "{OUT}/tests/{DUT}_function_coverage_def.py"
+
+  - name: test_environment_implementation
+    desc: "基础测试环境实现"
+    task:
+      - "目标：实现基础测试环境fixture，封装DUT引脚和上下游依赖"
+      - "1. 分析{DUT}的引脚定义，确定引脚封装方式"
+      - "2. 如果存在多个分组，则按分组定义toffee.Bundle子类，通过from_prefix接口进行关联"
+      - "3. 如果不存在分组，则定义包含所有引脚的toffee.Bundle子类，通过from_dict接口进行关联"
+      - "4. 确保引脚封装设计合理，便于理解和使用"
+      - "5. 设计并实现Mock组件，模拟{DUT}的上下游依赖模块"
+      - "6. 实现env fixture，包含需要的必要引脚封装和Mock组件"
+      - "7. 编写简单的测试用例验证env fixture功能"
+    stage:
+     - name: bundle_wrapper_design
+       desc: "引脚封装设计"
+       task:
+         - "分析{DUT}的引脚定义，确定引脚封装方式"
+         - "如果存在多个分组，且有共同前缀，则按分组定义toffee.Bundle子类，通过from_prefix接口进行关联"
+         - "如果不存在分组，或者没有共同前缀，则定义包含所有引脚的toffee.Bundle子类，通过from_dict接口进行关联"
+         - "确保引脚封装设计合理，便于理解和使用"
+         - "注意："
+         - " - toffee.Signal类没有位宽参数，会在bind到dut时自动获取位宽"
+         - " - toffee.Signals类用于一次定义多个信号，也不用位宽参数（其参数为一次定义信号的个数），会在bind到dut时自动获取位宽"
+       reference_files:
+         - "Guide_Doc/dut_fixture.md"
+         - "{DUT}/__init__.py"
+
+     - name: env_fixture_implementation
+       desc: "env fixture实现"
+       task:
+         - "实现env fixture，包含需要的必要引脚封装"
+         - "1. 对dut的引脚进行分析，确定哪些是输入，哪些是输出，有哪些分组（请通过文件 {DUT}/__init__.py获取所有引脚）"
+         - "2. 如果存在多个分组，则按分组定义toffee.Bundle子类，通过from_prefix接口进行关联, 在env中按分组命名，例如io_group1.a, io_group2.b等"
+         - "3. 如果不存在分组，则定义包含所有引脚的toffee.Bundle子类，通过from_dict接口进行关联，在env中统一用io命名，例如io.a, io.b等"
+         - "4. 如果需要，请务必在env fixture中添加必要的组件和功能，例如为{DUT}添加上下游依赖模块的Mock组件，并通过dut.StepRis进行Mock组件的驱动"
+         - "5. 可以按dut功能需要，添加一些常用的操作方法,例如reset, Finish, Step等"
+         - "6. 引脚封装要有意义，便于理解和使用"
+         - "7. 如果定义了Mock组件，请确保在env fixture中正确实例化和使用"
+         - "8. 注意{DUT}相关的文件名，用例名等大小写敏感"
+       reference_files:
+         - "Guide_Doc/dut_fixture.md"
+         - "{DUT}/__init__.py"
+
+     - name: evaluate_env_fixture
+       desc: "env fixture实现测试与评估"
+       task:
+         - "完成env fixture的实现后，编写简单的测试用例验证其功能"
+         - "测试内容包括：引脚封装是否正确，Mock组件是否能正常工作，常用操作方法是否可用等"
+         - "确保env fixture能满足后续API和测试用例的需求"
+         - "测试函数命名格式：test_api_{DUT}_env_<Name>"
+         - "测试函数的第一个参数为env (pytest fixture)"
+         - "测试用例写入文件{OUT}/tests/test_{DUT}_env_fixture.py"
+         - "所有测试用例都必须通过，可以通过RunTestCases('test_{DUT}_env_fixture.py')运行测试"
+         - "注意："
+         - "  该阶段测试的是env以及其中的Mock组件（如果有的话）是否按预期工作"
+         - "  只要对{DUT}进行基本驱动，不要进行过多的DUT功能测试，防止DUT功能缺陷导致测试用例失败"
+         - "  注意{DUT}相关的文件名，用例名等大小写敏感"
+       output_files:
+         - "{OUT}/tests/test_{DUT}_env_fixture.py"
+       reference_files:
+         - "Guide_Doc/dut_fixture.md"
+         - "Guide_Doc/dut_test_case.md"
+
+  - name: basic_api_implementation
+    desc: "基础API实现"
+    task:
+      - "请参考文档：Guide_Doc/dut_api_instruction.md创建API"
+      - "所有API必须以'api_{DUT}_'前缀开头，用于封装DUT对应Env的常用操作（注意前缀大小写敏感）"
+      - "至少实现1个基础API函数"
+      - "原则：让测试人员使用简单的API，而不是复杂的底层信号"
+      - "确保API函数能正确调用底层接口"
+      - "每个API函数都必须要有对应的注释（位于函数__doc__）对功能进行详细描述，包括功能、输入参数、返回值等"
+      - "需要根据{DUT}的功能进行API实现，如果可以，需要提供底层功能API和任务功能API"
+      - "把结果及时写入{OUT}/tests/{DUT}_api.py，请使用{DOC_GEN_LANG}编写注释"
+      - "API可以相互嵌套，例如：对于ALU，需要实现底层功能 api_{DUT}_operate(env, data1, data2, operation, max_cycles=100), 然后基于其实现 api_{DUT}_add(env, data1, data2, max_cycles=200)等上层API接口"
+      - "注意："
+      - "  API函数参数："
+      - "  - 第一个参数必须为：env (pytest fixture)"
+      - "  - 最后一个参数必须为：max_cycles=default_value(根据需要调整默认值大小，无论是组合电路还是时序电路都需要该参数)"
+      - "  - 其他参数根据测试需求添加"
+      - "  API函数底层必须使用Step接口驱动DUT，无论是组合电路还是时序电路"
+      - "  对于总线类DUT，建议基于 dut.StepRis 实现总线事务级驱动"
+      - "  有需要时，请在Env中通过 dut.StepRis 实现对关联Mock组件的驱动"
+    reference_files:
+      - "Guide_Doc/dut_api_instruction.md"
