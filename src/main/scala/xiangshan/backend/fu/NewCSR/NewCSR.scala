@@ -273,7 +273,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val debugMode = RegInit(false.B)
   private val nextV = WireInit(VirtMode(0), VirtMode.Off)
   V := nextV
-  // dcsr stopcount 
+  // dcsr stopcount
   val debugModeStopCountNext = debugMode && dcsr.regOut.STOPCOUNT
   val debugModeStopTimeNext  = debugMode && dcsr.regOut.STOPTIME
   val debugModeStopCount = RegNext(debugModeStopCountNext)
@@ -930,7 +930,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val addrInPerfCnt = (wenLegal || ren) && (
     (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
     (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U)
-  ) || 
+  ) ||
   ren && (
     (addr === CSRs.vstopi.U) || (addr === CSRs.vstopei.U) ||
     (addr === CSRs.stopi.U) || (addr === CSRs.stopei.U) ||
@@ -1200,11 +1200,18 @@ class NewCSR(implicit val p: Parameters) extends Module
     tdata1Pre := (if (idx > 0) tdata1RegVec(idx - 1) else tdata1RegVec(idx)).rdata.asUInt
     mcontrol6Pre := tdata1Pre.DATA.asUInt
     val canWriteDmode = WireInit(false.B)
-    canWriteDmode := (if(idx > 0) (Mux(mcontrol6Pre.CHAIN.asBool, tdata1Pre.DMODE.asBool && tdata1Pre.TYPE.isLegal, true.B)) && debugMode else debugMode).asBool
+    canWriteDmode := (if (idx > 0) (Mux(mcontrol6Pre.CHAIN.asBool, tdata1Pre.DMODE.asBool && tdata1Pre.TYPE.isLegal, true.B)) && debugMode else debugMode).asBool
+
+    val tdata1Next = Wire(new Tdata1Bundle)
+    tdata1Next := (if (idx < TriggerNum - 1) tdata1RegVec(idx + 1) else tdata1RegVec(idx)).rdata.asUInt
+    val dmodeNextTrigger = WireInit(false.B)
+    dmodeNextTrigger := (if (idx < TriggerNum - 1) tdata1Next.TYPE.isLegal && tdata1Next.DMODE.asBool else false.B)
+
     tdata1RegVec(idx) match {
       case m: HasTriggerBundle =>
         m.canWriteDmode := canWriteDmode
         m.chainable := debugMod.io.out.newTriggerChainIsLegal
+        m.dmodeNextTrigger := dmodeNextTrigger
       case _ =>
     }
   }
@@ -1250,7 +1257,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     Seq(mtval.rdata,       stval.rdata,        vstval.rdata)
   )
   io.status.traceCSR.mstatus  := mstatus.regOut.asUInt
-  
+
   /**
    * perf_begin
    * perf number: 29 (frontend 8, ctrlblock 8, memblock 8, huancun 5)
@@ -1271,7 +1278,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val countingEn        = RegInit(0.U.asTypeOf(Vec(perfCntNum, Bool())))
   val ofFromPerfCntVec  = Wire(Vec(perfCntNum, Bool()))
   val lcofiReqVec       = Wire(Vec(perfCntNum, Bool()))
-  
+
   for(i <- 0 until perfCntNum) {
     mhpmcounters(i) match {
       case m: HasPerfCounterBundle =>
@@ -1286,7 +1293,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.ofFromPerfCnt := ofFromPerfCntVec(i)
       case _ =>
     }
-    
+
     val mhpmevent = Wire(new MhpmeventBundle)
     mhpmevent := mhpmevents(i).rdata
     lcofiReqVec(i) := ofFromPerfCntVec(i) && !mhpmevent.OF.asBool
