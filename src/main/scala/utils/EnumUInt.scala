@@ -129,7 +129,7 @@ abstract class EnumUInt(
         s"EnumUInt ${this.getClass.getName} has duplicate value(${litValue}): ${name} and ${this.names(dupIdx)}."
       )
       assert( // check3.1: one-hot values must be power of 2
-        !useOneHot || isPow2(litValue),
+        !useOneHot || (if (allowZeroForOneHot) litValue == 0 || isPow2(litValue) else isPow2(litValue)),
         s"EnumUInt ${this.getClass.getName} using one-hot has non one-hot value(${litValue}): ${name}."
       )
       assert( // check3.2: one-hot values must not be 0
