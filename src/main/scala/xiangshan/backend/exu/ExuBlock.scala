@@ -94,9 +94,6 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     XSPerfAccumulate(s"brh_fire_${i}_cnt", PopCount(brhFireSeq) === i.U)
   }
   val criticalErrors = exus.filter(_.exuParams.needCriticalErrors).flatMap(exu => exu.getCriticalErrors)
-  for (((name, error), _) <- criticalErrors.zipWithIndex) {
-    XSError(error, s"critical error: $name \n")
-  }
   generateCriticalErrors()
 }
 

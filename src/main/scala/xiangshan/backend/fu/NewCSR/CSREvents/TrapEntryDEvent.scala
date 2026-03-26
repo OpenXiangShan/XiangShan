@@ -30,6 +30,7 @@ class TrapEntryDEventInput(implicit override val p: Parameters) extends TrapEntr
   val hasSingleStep                = Input(Bool())
   val breakPoint                   = Input(Bool())
   val criticalErrorStateEnterDebug = Input(Bool())
+  val holdDpc                      = Input(Bool())
 }
 
 class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSREventBase with DebugMMIO {
@@ -79,7 +80,7 @@ class TrapEntryDEventModule(implicit val p: Parameters) extends Module with CSRE
   out := DontCare
   // output
   out.dcsr.valid              := valid
-  out.dpc.valid               := valid
+  out.dpc.valid               := valid && !in.holdDpc
   // !debugMode trap || debugMode hasExp
   out.targetPc.valid          := RegNext(valid || hasExceptionInDmode)
   out.debugMode.valid         := valid

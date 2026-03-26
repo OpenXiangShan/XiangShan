@@ -381,9 +381,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   }
   io.wbFuBusyTableWriteOut := wbFuBusyTableWrite
   val criticalErrors = exuBlock.getCriticalErrors
-  for (((name, error), _) <- criticalErrors.zipWithIndex) {
-    XSError(error, s"critical error: $name \n")
-  }
   generateCriticalErrors()
   if (params.isIntSchd) {
     io.toFrontendBJUResolve.get := exuBlock.io.toFrontendBJUResolve.get
