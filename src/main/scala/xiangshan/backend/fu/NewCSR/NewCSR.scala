@@ -281,6 +281,11 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   val criticalErrorStateInCSR = Wire(Bool())
   val criticalErrorState = RegEnable(true.B, false.B, io.fromTop.criticalErrorState || criticalErrorStateInCSR)
+  // When cetrig is 1, resuming from DebugMode following an entry due to a critical
+  // error will result in an immediate re-entry into Debug Mode due to the critical error.
+  // Ensure that dpc remains unchanged when criticalErrorState causes a re-entry into dmode,
+  // since the PC fetched from pcmem for updating dpc is random in this case.
+  val holdDpc = RegEnable(criticalErrorState && dcsr.regOut.CETRIG, false.B, dretEvent.valid)
 
   private val privState = Wire(new PrivState)
   privState.PRVM := PRVM
@@ -1193,6 +1198,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapEntryDEvent.in.hasDebugEbreakException      := debugMod.io.out.hasDebugEbreakException
   trapEntryDEvent.in.breakPoint                   := debugMod.io.out.breakPoint
   trapEntryDEvent.in.criticalErrorStateEnterDebug := debugMod.io.out.criticalErrorStateEnterDebug
+  trapEntryDEvent.in.holdDpc                      := holdDpc
 
   for(idx <- 0 until TriggerNum) {
     val tdata1Pre = Wire(new Tdata1Bundle)
