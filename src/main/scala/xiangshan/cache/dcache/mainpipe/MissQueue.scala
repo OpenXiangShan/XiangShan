@@ -1168,6 +1168,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
   val VLENB = VLEN / 8
+  // Forwarding paddr CAM, shared by io.forward and io.forward_stData
   val paddrFwd = Wire(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
   val s1PaddrMatchVec = Wire(Vec(LoadPipelineWidth, Vec(cfg.nMissEntries, Bool())))
   val s1SelectOH = Wire(Vec(LoadPipelineWidth, UInt((cfg.nMissEntries).W)))
@@ -1180,6 +1181,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       (paddrFwd(i) >> blockOffBits) === (info.paddr >> blockOffBits) && info.inflight})
     s1SelectOH(i) := s1PaddrMatchVec(i).asUInt
     s1ForwardInfo(i) := Mux1H(s1SelectOH(i), forwardInfo_vec)
+    // Select VLEN (128-bit) data from cacheline data
     paddrFwd_selOH(i) := (0 until (blockBytes / VLENB)).map(k => paddrFwd(i)(blockOffBits - 1, log2Up(VLENB)) === k.U)
     s1RespDataFwd(i) := Mux1H(paddrFwd_selOH(i), s1ForwardInfo(i).raw_data.grouped(VLEN / rowBits).map(VecInit(_).asUInt).toSeq)
   }
@@ -1208,17 +1210,16 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   io.forward_stData.zipWithIndex.foreach { case (forward, i) =>
-    val s0ReqValid_stLdFwd = forward.s0Req.valid
-    val s1ReqValid_stLdFwd = RegNext(s0ReqValid_stLdFwd)
+    val s1ReqValid_stLdFwd = RegNext(forward.s0Req.valid)
 
     val s1RespMask_stLdFwd = Mux1H(paddrFwd_selOH(i),
           s1ForwardInfo(i).store_mask.grouped(VLENB).map(x => Mux(s1ForwardInfo(i).isFromStore, x, 0.U)))
     val s1RespValid_stLdFwd = s1ReqValid_stLdFwd && s1SelectOH(i).orR
     
     forward.s2Resp.valid := RegNext(s1RespValid_stLdFwd)
-    for (j <- 0 until VDataBytes) {
-      forward.s2Resp.bits.forwardData(j) := RegEnable(s1RespDataFwd(i)(8 * j + 7, 8 * j), s1RespValid_stLdFwd) 
-      forward.s2Resp.bits.forwardMask(j) := RegEnable(s1RespMask_stLdFwd(j), s1RespValid_stLdFwd) && forward.s2Resp.valid
+    for (k <- 0 until VLENB) {
+      forward.s2Resp.bits.forwardData(k) := RegEnable(s1RespDataFwd(i)(8 * k + 7, 8 * k), s1RespValid_stLdFwd) 
+      forward.s2Resp.bits.forwardMask(k) := RegEnable(s1RespMask_stLdFwd(k), s1RespValid_stLdFwd) && forward.s2Resp.valid
     }
     forward.s2Resp.bits.matchInvalid := false.B
   }
