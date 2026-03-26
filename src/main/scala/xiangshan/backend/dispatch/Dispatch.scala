@@ -188,7 +188,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }
 
   val renameWidth = io.fromRename.size
-  val issueQueueCount = io.IQValidNumVec
+  val issueQueueCount = RegNext(io.IQValidNumVec)
   // int fp vec v0
   val numRegType = 4
   val idxRegTypeInt = allFuConfigs.map(x => {
