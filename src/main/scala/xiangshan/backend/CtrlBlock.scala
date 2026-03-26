@@ -152,6 +152,14 @@ class CtrlBlockImp(
   }
 
   val wbData = io.fromWB.wbData
+  val needPerfCounterExuName = Seq("ALU", "BJU", "LDU", "FEX", "STA", "STD")
+  needPerfCounterExuName.map { name =>
+    val exuWBValid = params.allExuParams.zip(delayedWriteBack).filter(_._1.name.contains(name)).map(_._2).map(_.valid)
+    val exuNum = exuWBValid.size
+    for (i <- 0 to exuNum) {
+      XSPerfAccumulate(s"${name}_SameWBNum_$i", PopCount(exuWBValid) === i.U)
+    }
+  }
   val intScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[IntScheduler])
   val fpScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[FpScheduler])
   val vfScheWbData = io.fromWB.wbData.filter(_.bits.params.schdType.isInstanceOf[VecScheduler])
