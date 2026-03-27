@@ -55,6 +55,7 @@
   - any-glob-to-any-file:
     - src/main/scala/device/**
     - ChiselAIA
+    - ChiselIOPMP
     - rocket-chip
 
 "module: documentation":
@@ -63,6 +64,21 @@
     - images/**
     - "**.md"
     - LICENSE
+
+"note: submodule bump":
+- changed-files:
+  - any-glob-to-any-file:
+    - .gitmodules
+    - ChiselAIA
+    - ChiselIOPMP
+    - coupledL2
+    - difftest
+    - huancun
+    - openLLC
+    - ready-to-run
+    - rocket-chip
+    - utility
+    - yunsuan
 
 "topic: functionality":
 - head-branch:
