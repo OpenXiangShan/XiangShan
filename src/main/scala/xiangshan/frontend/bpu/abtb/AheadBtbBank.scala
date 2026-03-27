@@ -31,6 +31,8 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
     val readResp:  BankReadResp             = Output(new BankReadResp)
     val writeReq:  Valid[BankWriteReq]      = Flipped(Valid(new BankWriteReq))
     val writeResp: Valid[BankWriteResp]     = Valid(new BankWriteResp)
+
+    val sramResetDone: Bool = Output(Bool())
   }
   val io: BankIO = IO(new BankIO)
 
@@ -59,6 +61,8 @@ class AheadBtbBank(bandIdx: Int)(implicit p: Parameters) extends AheadBtbModule 
   io.readReq.ready := sram.io.r.req.ready
 
   io.readResp.entries := sram.io.r.resp.data
+
+  io.sramResetDone := sram.io.resetDone
 
   /* --------------------------------------------------------------------------------------------------------------
      write

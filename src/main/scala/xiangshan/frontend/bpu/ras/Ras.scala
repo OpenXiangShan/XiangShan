@@ -52,7 +52,8 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   val io: RasIO = IO(new RasIO)
 
-  io.resetDone := true.B
+  // Ras used Regfile instead of SRAM to store entires
+  io.sramResetDone := true.B
 
   io.trainReady := true.B
 

@@ -68,6 +68,8 @@ class IttageTable(
     val req:    DecoupledIO[Req] = Flipped(DecoupledIO(new Req))
     val resp:   Valid[Resp]      = Output(Valid(new Resp))
     val update: Update           = Input(new Update)
+
+    val sramResetDone: Bool = Output(Bool())
   }
 
   val io: IttageTableIO = IO(new IttageTableIO)
@@ -149,6 +151,9 @@ class IttageTable(
       suffix = Option(s"bpu_ittage_bank$bankIdx")
     )).suggestName(s"ittage_table_bank$bankIdx")
   }
+
+  io.sramResetDone := tables.map(_.io.resetDone).reduce(_ && _)
+
   private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeIttage", hasMbist)
   tables.zipWithIndex.foreach { case (bank, idx) =>
     bank.io.r.req.valid       := io.req.fire && s0_bankMask(idx)

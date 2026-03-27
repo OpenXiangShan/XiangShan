@@ -53,8 +53,6 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   val io: IttageIO = IO(new IttageIO)
 
-  io.resetDone := true.B // FIXME: sram read ready
-
   io.trainReady := true.B
 
   private val s0_startPc = io.startPc
@@ -72,6 +70,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
       val t = Module(new IttageTable(info.Size, info.HistoryLength, TagWidth, i))
       t
   }
+
+  io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
 
   private val useAltOnNa = RegInit((1 << (UseAltOnNaWidth - 1)).U(UseAltOnNaWidth.W))
   private val tickCnt    = RegInit(TickCounter.Zero)

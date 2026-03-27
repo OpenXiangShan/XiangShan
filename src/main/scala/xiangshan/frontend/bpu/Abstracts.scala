@@ -43,7 +43,7 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   // fast train for s1 predictors
   val fastTrain: Option[Valid[BpuFastTrain]] = None
 
-  val resetDone: Bool = Output(Bool())
+  val sramResetDone: Bool = Output(Bool())
 }
 
 trait HasFastTrainIO extends BasePredictorIO {

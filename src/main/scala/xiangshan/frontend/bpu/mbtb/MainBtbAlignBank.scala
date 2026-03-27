@@ -67,8 +67,8 @@ class MainBtbAlignBank(
       val req: Valid[Req] = Flipped(Valid(new Req))
     }
 
-    val resetDone: Bool      = Output(Bool())
-    val stageCtrl: StageCtrl = Input(new StageCtrl)
+    val sramResetDone: Bool      = Output(Bool())
+    val stageCtrl:     StageCtrl = Input(new StageCtrl)
 
     val read:  Read                  = new Read
     val write: Write                 = new Write
@@ -90,7 +90,7 @@ class MainBtbAlignBank(
 
   private val replacer = Module(new MainBtbReplacer)
 
-  io.resetDone := internalBanks.map(_.io.resetDone).reduce(_ && _)
+  io.sramResetDone := internalBanks.map(_.io.sramResetDone).reduce(_ && _)
 
   /* *** s0 ***
    * send read req to internal banks (srams)

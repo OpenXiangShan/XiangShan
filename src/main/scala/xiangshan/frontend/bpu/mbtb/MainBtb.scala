@@ -50,7 +50,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   /* *** submodules *** */
   private val alignBanks = Seq.tabulate(NumAlignBanks)(alignIdx => Module(new MainBtbAlignBank(alignIdx)))
 
-  io.resetDone := alignBanks.map(_.io.resetDone).reduce(_ && _)
+  io.sramResetDone := alignBanks.map(_.io.sramResetDone).reduce(_ && _)
 
   io.trainReady := true.B
 

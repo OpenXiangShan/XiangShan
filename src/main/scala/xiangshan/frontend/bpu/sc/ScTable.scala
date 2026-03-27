@@ -33,10 +33,10 @@ class ScTable(
 )(implicit p: Parameters)
     extends ScModule with HasScParameters with Helpers {
   class ScTableIO extends ScBundle {
-    val req:       Valid[ScTableReq] = Flipped(Valid(new ScTableReq(numSets, numWays)))
-    val resp:      Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
-    val update:    ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
-    val resetDone: Bool              = Output(Bool())
+    val req:           Valid[ScTableReq] = Flipped(Valid(new ScTableReq(numSets, numWays)))
+    val resp:          Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
+    val update:        ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
+    val sramResetDone: Bool              = Output(Bool())
   }
 
   val io = IO(new ScTableIO())
@@ -83,7 +83,7 @@ class ScTable(
       bank.io.r.req.bits.setIdx := reqSetIdx
   }
 
-  io.resetDone := sram.map(_.io.r.req.ready).reduce(_ && _)
+  io.sramResetDone := sram.map(_.io.resetDone).reduce(_ && _)
 
   private val respBankMask = RegEnable(reqBankMask, io.req.valid)
   io.resp := Mux1H(respBankMask.asBools, sram.map(_.io.r.resp.data))

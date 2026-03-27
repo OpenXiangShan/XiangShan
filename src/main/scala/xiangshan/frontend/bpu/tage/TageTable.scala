@@ -35,7 +35,7 @@ class TageTable(
     val trainReadResp:   TableReadResp        = Output(new TableReadResp)
     val writeReq:        Valid[TableWriteReq] = Flipped(Valid(new TableWriteReq))
     val resetUseful:     Bool                 = Input(Bool())
-    val resetDone:       Bool                 = Output(Bool())
+    val sramResetDone:   Bool                 = Output(Bool())
   }
 
   val io: TageTableIO = IO(new TageTableIO)
@@ -154,7 +154,7 @@ class TageTable(
     )
   )
 
-  io.resetDone := entrySram.flatten.map(_.io.r.req.ready).reduce(_ && _)
+  io.sramResetDone := entrySram.flatten.map(_.io.resetDone).reduce(_ && _)
 
   XSPerfAccumulate("predict_read", io.predictReadReq.valid)
   XSPerfAccumulate("train_read", io.trainReadReq.valid)

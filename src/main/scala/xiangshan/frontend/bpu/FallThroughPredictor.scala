@@ -29,7 +29,7 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
 
   val io: FallThroughPredictorIO = IO(new FallThroughPredictorIO)
 
-  io.resetDone := true.B
+  io.sramResetDone := true.B
 
   io.trainReady := true.B
 

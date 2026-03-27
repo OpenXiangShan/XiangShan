@@ -43,11 +43,11 @@ class MicroTageTable(
     class MicroTageResp extends Bundle {
       val readEntries: Vec[MicroTageEntry] = Vec(numWay, new MicroTageEntry)
     }
-    val req:         Valid[MicroTageReq] = Input(Valid(new MicroTageReq))
-    val resps:       MicroTageResp       = Output(new MicroTageResp)
-    val train:       MicroTageTrain      = new MicroTageTrain(numWay, numSets)
-    val usefulReset: Bool                = Input(Bool())
-    val resetDone:   Bool                = Output(Bool())
+    val req:           Valid[MicroTageReq] = Input(Valid(new MicroTageReq))
+    val resps:         MicroTageResp       = Output(new MicroTageResp)
+    val train:         MicroTageTrain      = new MicroTageTrain(numWay, numSets)
+    val usefulReset:   Bool                = Input(Bool())
+    val sramResetDone: Bool                = Output(Bool())
   }
   val io = IO(new MicroTageTableIO)
   // Write buffer to handle write conflicts
@@ -97,7 +97,7 @@ class MicroTageTable(
     bank.io.r.req.bits.setIdx := bankReadInnerIndex
   }
 
-  io.resetDone := entrySram.map(_.io.r.req.ready).reduce(_ && _)
+  io.sramResetDone := entrySram.map(_.io.resetDone).reduce(_ && _)
 
   // Pipeline stage: capture bank selection from previous cycle
   private val a1_bankOH = RegNext(bankOH, 0.U(numBanks.W))

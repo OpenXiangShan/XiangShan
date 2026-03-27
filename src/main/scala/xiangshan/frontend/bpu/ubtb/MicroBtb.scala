@@ -42,8 +42,8 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   println(f"  Address fields:")
   addrFields.show(indent = 4)
 
-  io.resetDone  := true.B
-  io.trainReady := true.B
+  io.sramResetDone := true.B
+  io.trainReady    := true.B
 
   /* *** submodules *** */
   private val entries = RegInit(VecInit(Seq.fill(NumEntries)(0.U.asTypeOf(new MicroBtbEntry))))

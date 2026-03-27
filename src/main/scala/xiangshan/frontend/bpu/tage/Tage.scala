@@ -53,11 +53,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.Zero))
 
   /* *** reset *** */
-  private val resetDone = RegInit(false.B)
-  when(tables.map(_.io.resetDone).reduce(_ && _)) {
-    resetDone := true.B
-  }
-  io.resetDone := resetDone
+  io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 0

@@ -61,8 +61,8 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
     val fullRetAddr: PrunedAddr      = Input(PrunedAddr(VAddrBits)) // Current top of the main RAS
   }
   val io = IO(new MicroRasIO)
-  io.resetDone  := true.B
-  io.trainReady := true.B
+  io.sramResetDone := true.B
+  io.trainReady    := true.B
 
   // Track whether S2/S3 stages contain pending push/pop operations
   private val s2_hasPush = RegInit(false.B)

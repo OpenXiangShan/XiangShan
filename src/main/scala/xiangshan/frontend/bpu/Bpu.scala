@@ -248,12 +248,14 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s2_ready := s2_fire || !s2_valid
   s3_ready := s3_fire || !s3_valid
 
-  private val resetDone = RegInit(false.B)
-  resetDone := predictors.map(_.io.resetDone).reduce(_ && _)
-  s0_fire   := s1_ready && resetDone
-  s1_fire   := s1_valid && s2_ready && io.toFtq.prediction.ready
-  s2_fire   := s2_valid && s3_ready
-  s3_fire   := s3_valid
+  private val sramResetDone = RegInit(false.B)
+  when(predictors.map(_.io.sramResetDone).reduce(_ && _)) {
+    sramResetDone := true.B
+  }
+  s0_fire := s1_ready && sramResetDone
+  s1_fire := s1_valid && s2_ready && io.toFtq.prediction.ready
+  s2_fire := s2_valid && s3_ready
+  s3_fire := s3_valid
 
   when(s0_fire)(s1_valid := true.B)
     .elsewhen(s1_flush)(s1_valid := false.B)

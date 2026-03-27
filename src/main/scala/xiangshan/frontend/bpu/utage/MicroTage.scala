@@ -51,7 +51,6 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     val redirectValid:  Bool                       = Input(Bool())
   }
   val io: MicroTageIO = IO(new MicroTageIO)
-  private val resetDone = RegInit(false.B)
   io.trainReady := true.B
 
   // Ahead pipeline implementation. Advantage: get data one cycle earlier.
@@ -77,10 +76,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
       )).io
       t
   }
-  when(tables.map(_.resetDone).reduce(_ && _)) {
-    resetDone := true.B
-  }
-  io.resetDone := resetDone
+  io.sramResetDone := tables.map(_.sramResetDone).reduce(_ && _)
   // High-order tables have longer history, better discrimination, relatively stable,
   // and lower access frequency. No need to frequently clean dead entries based on useful counters.
   private val lowTickCounter  = RegInit(0.U((LowTickWidth + 1).W))

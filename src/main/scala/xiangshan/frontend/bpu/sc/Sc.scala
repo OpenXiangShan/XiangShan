@@ -92,15 +92,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val scThreshold = RegInit(VecInit.tabulate(NumWays)(_ => ThresholdCounter.Init))
 
-  private val resetDone = RegInit(false.B)
-  when(pathTable.map(_.io.resetDone).reduce(_ && _) &&
-    globalTable.map(_.io.resetDone).reduce(_ && _) &&
-    bwTable.map(_.io.resetDone).reduce(_ && _) &&
-    imliTable.io.resetDone &&
-    biasTable.io.resetDone) {
-    resetDone := true.B
-  }
-  io.resetDone := resetDone
+  io.sramResetDone := (
+    pathTable.map(_.io.sramResetDone) ++
+      globalTable.map(_.io.sramResetDone) ++
+      bwTable.map(_.io.sramResetDone) :+
+      imliTable.io.sramResetDone :+
+      biasTable.io.sramResetDone
+  ).reduce(_ && _)
 
   io.trainReady := true.B
 

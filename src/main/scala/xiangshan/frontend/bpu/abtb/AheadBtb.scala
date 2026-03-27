@@ -49,11 +49,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val banks     = Seq.tabulate(NumBanks)(i => Module(new AheadBtbBank(i)))
   private val replacers = Seq.fill(NumBanks)(Module(new AheadBtbReplacer))
 
-  private val resetDone = RegInit(false.B)
-  when(banks.map(_.io.readReq.ready).reduce(_ && _)) {
-    resetDone := true.B
-  }
-  io.resetDone := resetDone
+  io.sramResetDone := banks.map(_.io.sramResetDone).reduce(_ && _)
 
   io.trainReady := true.B
 
