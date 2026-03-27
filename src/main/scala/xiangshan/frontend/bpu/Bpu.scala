@@ -697,9 +697,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   XSPerfAccumulate(
     "train",
-    io.fromFtq.train.fire,
+    io.fromFtq.train.valid,
     Seq(
-      ("total", true.B),
+      ("total", io.fromFtq.train.ready),
       ("stall", !io.fromFtq.train.ready)
     )
   )
