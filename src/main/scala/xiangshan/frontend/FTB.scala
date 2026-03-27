@@ -422,6 +422,12 @@ class FTBEntryWithTag(implicit p: Parameters) extends XSBundle with FTBParams wi
   }
 }
 
+class FTBStoredEntryWithTag(implicit p: Parameters) extends XSBundle with FTBParams with BPUUtils {
+  private val entryWidth = 0.U.asTypeOf(new FTBEntry).getWidth
+  val entryBits = UInt(entryWidth.W)
+  val tag       = UInt(tagLength.W)
+}
+
 class FTBMeta(implicit p: Parameters) extends XSBundle with FTBParams {
   val writeWay   = UInt(log2Ceil(numWays).W)
   val hit        = Bool()
@@ -465,6 +471,18 @@ class FTBTableAddr(val idxBits: Int, val banks: Int, val skewedBits: Int)(implic
 class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUUtils
     with HasCircularQueuePtrHelper with HasPerfEvents {
   override val meta_size = WireInit(0.U.asTypeOf(new FTBMeta)).getWidth
+  private val ftbSecurityDebugEnable = true.B
+
+  private val ftbEntryWidth = 0.U.asTypeOf(new FTBEntry).getWidth
+
+  private def expandKey(src: UInt): UInt = {
+    val repeat = (ftbEntryWidth + src.getWidth - 1) / src.getWidth
+    Cat(Seq.fill(repeat)(src))(ftbEntryWidth - 1, 0)
+  }
+
+  private val securityContextBits =
+    Cat(io.securityCtx.seed, io.securityCtx.asid, io.securityCtx.vmid, io.securityCtx.privMode, io.securityCtx.virt)
+  private val securityKey = expandKey(securityContextBits ^ Reverse(securityContextBits))
 
   val ftbAddr = new FTBTableAddr(log2Up(numSets), 1, 3)
 
@@ -490,11 +508,21 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       val update_write_data  = Flipped(Valid(new FTBEntryWithTag))
       val update_write_way   = Input(UInt(log2Ceil(numWays).W))
       val update_write_alloc = Input(Bool())
+      val security_enable    = Input(Bool())
+      val security_key       = Input(UInt(ftbEntryWidth.W))
     })
+
+    private def cryptEntry(entryBits: UInt): UInt = Mux(io.security_enable, entryBits ^ io.security_key, entryBits)
+
+    private def decodeStoredEntry(stored: FTBStoredEntryWithTag): FTBEntry = {
+      val entry = Wire(new FTBEntry)
+      entry := cryptEntry(stored.entryBits).asTypeOf(new FTBEntry)
+      entry
+    }
 
     // Extract holdRead logic to fix bug that update read override predict read result
     val ftb = Module(new SplittedSRAMTemplate(
-      new FTBEntryWithTag,
+      new FTBStoredEntryWithTag,
       set = numSets,
       way = numWays,
       dataSplit = 8,
@@ -506,12 +534,12 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       hasSramCtl = hasSramCtl
     ))
     private val mbistPl = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeFtb", hasMbist)
-    val ftb_r_entries   = ftb.io.r.resp.data.map(_.entry)
+    val ftb_r_entries   = ftb.io.r.resp.data.map(decodeStoredEntry)
 
     val pred_rdata = HoldUnless(
       ftb.io.r.resp.data,
       RegNext(io.req_pc.valid && !io.update_access),
-      init = Some(VecInit.fill(numWays)(0.U.asTypeOf(new FTBEntryWithTag)))
+      init = Some(VecInit.fill(numWays)(0.U.asTypeOf(new FTBStoredEntryWithTag)))
     ) // rdata has ftb_entry.valid, shoud reset
     ftb.io.r.req.valid := io.req_pc.valid || io.u_req_pc.valid // io.s0_fire
     ftb.io.r.req.bits.setIdx := Mux(
@@ -530,7 +558,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
 
     val u_req_tag = RegEnable(ftbAddr.getTag(io.u_req_pc.bits)(tagLength - 1, 0), io.u_req_pc.valid)
 
-    val read_entries = pred_rdata.map(_.entry)
+    val read_entries = pred_rdata.map(decodeStoredEntry)
     val read_tags    = pred_rdata.map(_.tag)
 
     val total_hits =
@@ -569,7 +597,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     }
 
     val u_total_hits = VecInit((0 until numWays).map(b =>
-      ftb.io.r.resp.data(b).tag === u_req_tag && ftb.io.r.resp.data(b).entry.valid && RegNext(io.update_access)
+      ftb.io.r.resp.data(b).tag === u_req_tag && ftb_r_entries(b).valid && RegNext(io.update_access)
     ))
     val u_hit = u_total_hits.reduce(_ || _)
     // val hit_way_1h = VecInit(PriorityEncoderOH(total_hits))
@@ -639,6 +667,7 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     val allocWriteWay = allocWay(RegNext(VecInit(ftb_r_entries.map(_.valid))).asUInt, u_idx)
     val u_way         = Mux(io.update_write_alloc, allocWriteWay, io.update_write_way)
     val u_mask        = UIntToOH(u_way)
+    val encryptedWriteBits = cryptEntry(u_data.entry.asUInt)
 
     for (i <- 0 until numWays) {
       XSPerfAccumulate(f"ftb_replace_way$i", u_valid && io.update_write_alloc && u_way === i.U)
@@ -649,7 +678,18 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
       XSPerfAccumulate(f"ftb_hit_way$i", hit && !io.update_access && hit_way === i.U)
     }
 
-    ftb.io.w.apply(u_valid, u_data, u_idx, u_mask)
+    when(u_valid && io.security_enable) {
+      assert(cryptEntry(encryptedWriteBits) === u_data.entry.asUInt, "FTB security round-trip mismatch")
+      XSDebug(
+        p"[ftb-sec-w] pc=${Hexadecimal(io.update_pc)} tag=${Hexadecimal(u_data.tag)} key=${Hexadecimal(io.security_key)} plain=${Hexadecimal(u_data.entry.asUInt)} cipher=${Hexadecimal(encryptedWriteBits)}\n"
+      )
+    }
+
+    val storedWriteData = Wire(new FTBStoredEntryWithTag)
+    storedWriteData.entryBits := encryptedWriteBits
+    storedWriteData.tag       := u_data.tag
+
+    ftb.io.w.apply(u_valid, storedWriteData, u_idx, u_mask)
 
     // for replacer
     write_set       := u_idx
@@ -657,7 +697,16 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
     write_way.bits  := Mux(io.update_write_alloc, allocWriteWay, io.update_write_way)
 
     // print hit entry info
-    Mux1H(total_hits, ftb.io.r.resp.data).display(true.B)
+    val selectedReadEntry = Wire(new FTBEntryWithTag)
+    selectedReadEntry.entry := Mux1H(total_hits, read_entries)
+    selectedReadEntry.tag   := Mux1H(total_hits, read_tags)
+    selectedReadEntry.display(true.B)
+
+    when(hit && io.s1_fire && !io.update_access && io.security_enable) {
+      XSDebug(
+        p"[ftb-sec-r] pc=${Hexadecimal(io.req_pc.bits)} tag=${Hexadecimal(Mux1H(total_hits, read_tags))} key=${Hexadecimal(io.security_key)} cipher=${Hexadecimal(Mux1H(total_hits, pred_rdata.map(_.entryBits)))} plain=${Hexadecimal(Mux1H(total_hits, read_entries.map(_.asUInt)))}\n"
+      )
+    }
   } // FTBBank
 
   // FTB switch register & temporary storage of fauftb prediction results
@@ -668,6 +717,8 @@ class FTB(implicit p: Parameters) extends BasePredictor with FTBParams with BPUU
   val s2_fauftb_ftb_entry_hit_dup = io.s1_fire.map(f => RegEnable(io.fauftb_entry_hit_in, f))
 
   val ftbBank = Module(new FTBBank(numSets, numWays))
+  ftbBank.io.security_enable := io.securityCtx.enable && ftbSecurityDebugEnable
+  ftbBank.io.security_key    := securityKey
 
   // for close ftb read_req
   ftbBank.io.req_pc.valid := io.s0_fire(0) && !s0_close_ftb_req

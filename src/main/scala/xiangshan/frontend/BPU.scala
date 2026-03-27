@@ -138,12 +138,23 @@ class BasePredictorInput(implicit p: Parameters) extends XSBundle with HasBPUCon
 
 class BasePredictorOutput(implicit p: Parameters) extends BranchPredictionResp {}
 
+class PredictorSecurityContext(implicit p: Parameters) extends XSBundle {
+  val enable   = Bool()
+  val asid     = UInt(AsidLength.W)
+  val vmid     = UInt(VmidLength.W)
+  val privMode = UInt(2.W)
+  val virt     = Bool()
+  val seed     = UInt(32.W)
+}
+
 class BasePredictorIO(implicit p: Parameters) extends XSBundle with HasBPUConst {
   val reset_vector = Input(UInt(PAddrBits.W))
   val in           = Flipped(DecoupledIO(new BasePredictorInput)) // TODO: Remove DecoupledIO
   // val out = DecoupledIO(new BasePredictorOutput)
   val out = Output(new BasePredictorOutput)
   // val flush_out = Valid(UInt(VAddrBits.W))
+
+  val securityCtx = Input(new PredictorSecurityContext)
 
   val fauftb_entry_in      = Input(new FTBEntry)
   val fauftb_entry_hit_in  = Input(Bool())
@@ -226,6 +237,7 @@ class PredictorIO(implicit p: Parameters) extends XSBundle {
   val ftq_to_bpu   = Flipped(new FtqToBpuIO)
   val ctrl         = Input(new BPUCtrl)
   val reset_vector = Input(UInt(PAddrBits.W))
+  val securityCtx  = Input(new PredictorSecurityContext)
 }
 
 class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with HasPerfEvents
@@ -272,6 +284,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   // ctrl signal
   predictors.io.ctrl         := ctrl
   predictors.io.reset_vector := io.reset_vector
+  predictors.io.securityCtx  := io.securityCtx
 
   val s0_stall_dup = dup_wire(Bool()) // For some reason s0 stalled, usually FTQ Full
   val s0_fire_dup, s1_fire_dup, s2_fire_dup, s3_fire_dup                        = dup_wire(Bool())

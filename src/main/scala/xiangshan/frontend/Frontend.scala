@@ -130,6 +130,12 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   // bpu ctrl
   bpu.io.ctrl         := csrCtrl.bp_ctrl
   bpu.io.reset_vector := io.reset_vector
+  bpu.io.securityCtx.enable   := true.B
+  bpu.io.securityCtx.asid     := Mux(tlbCsr.priv.virt, tlbCsr.vsatp.asid, tlbCsr.satp.asid)
+  bpu.io.securityCtx.vmid     := tlbCsr.hgatp.vmid
+  bpu.io.securityCtx.privMode := tlbCsr.priv.imode
+  bpu.io.securityCtx.virt     := tlbCsr.priv.virt
+  bpu.io.securityCtx.seed     := Cat(tlbCsr.satp.asid, tlbCsr.hgatp.vmid, tlbCsr.priv.imode)
 
   // pmp
   val PortNumber = ICacheParameters().PortNumber
