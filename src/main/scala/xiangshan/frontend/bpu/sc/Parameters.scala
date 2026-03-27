@@ -46,7 +46,7 @@ case class ScParameters(
     ThresholdInit:       Int = 1130, // magic number,greater than min and less than max
     NumBanks:            Int = 2,
     WriteBufferSize:     Int = 4,
-    EnableScTrace:       Boolean = false
+    EnableScTrace:       Boolean = true
 ) {}
 
 trait HasScParameters extends HasBpuParameters {

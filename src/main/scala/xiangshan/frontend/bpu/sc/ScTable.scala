@@ -33,10 +33,12 @@ class ScTable(
 )(implicit p: Parameters)
     extends ScModule with HasScParameters with Helpers {
   class ScTableIO extends ScBundle {
-    val req:           Valid[ScTableReq] = Flipped(Valid(new ScTableReq(numSets, numWays)))
-    val resp:          Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
-    val update:        ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
-    val sramResetDone: Bool              = Output(Bool())
+    val predictReadReq:  Valid[ScTableReq] = Flipped(Valid(new ScTableReq(numSets, numWays)))
+    val predictReadResp: Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
+    val trainReadReq:    Valid[ScTableReq] = Flipped(Valid(new ScTableReq(numSets, numWays)))
+    val trainReadResp:   Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
+    val update:          ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
+    val sramResetDone:   Bool              = Output(Bool())
   }
 
   val io = IO(new ScTableIO())
@@ -75,18 +77,21 @@ class ScTable(
   )
 
   // read path table by setIndex
-  private val reqSetIdx   = io.req.bits.setIdx
-  private val reqBankMask = io.req.bits.bankMask
-  sram.zip(reqBankMask.asBools).foreach {
-    case (bank, bankEnable) =>
-      bank.io.r.req.valid       := io.req.valid && bankEnable
-      bank.io.r.req.bits.setIdx := reqSetIdx
+  sram.zipWithIndex.foreach { case (bank, bankIdx) =>
+    val predictReadValid = io.predictReadReq.valid && io.predictReadReq.bits.bankMask(bankIdx)
+    val trainReadValid   = io.trainReadReq.valid && io.trainReadReq.bits.bankMask(bankIdx)
+    bank.io.r.req.valid       := predictReadValid || trainReadValid
+    bank.io.r.req.bits.setIdx := Mux(predictReadValid, io.predictReadReq.bits.setIdx, io.trainReadReq.bits.setIdx)
+    assert(!(predictReadValid && trainReadValid), s"read conflict in sc${tableType}${tableIdx}_${bankIdx}")
   }
 
   io.sramResetDone := sram.map(_.io.resetDone).reduce(_ && _)
 
-  private val respBankMask = RegEnable(reqBankMask, io.req.valid)
-  io.resp := Mux1H(respBankMask.asBools, sram.map(_.io.r.resp.data))
+  private val predictReadBankMaskNext = RegEnable(io.predictReadReq.bits.bankMask, io.predictReadReq.valid)
+  io.predictReadResp := Mux1H(predictReadBankMaskNext, sram.map(_.io.r.resp.data))
+
+  private val trainReadBankMaskNext = RegEnable(io.trainReadReq.bits.bankMask, io.trainReadReq.valid)
+  io.trainReadResp := Mux1H(trainReadBankMaskNext, sram.map(_.io.r.resp.data))
 
   // update path table
   private val updateValid    = io.update.valid && io.update.wayMask.reduce(_ || _)
@@ -120,5 +125,4 @@ class ScTable(
       buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
       buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
   }
-
 }

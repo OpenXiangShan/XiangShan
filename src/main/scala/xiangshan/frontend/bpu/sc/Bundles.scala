@@ -70,18 +70,13 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   // NOTE: Seems ChiselDB has problem dealing with SInt, so we do not use ScEntry for scResp here
   // FIXME: is there a better way to do this?
   private def ScEntryWidth = (new ScEntry).getWidth
-  val scPathResp:      Vec[Vec[UInt]] = Vec(NumPathTables, Vec(NumWays, UInt(ScEntryWidth.W)))
-  val scGlobalResp:    Vec[Vec[UInt]] = Vec(NumGlobalTables, Vec(NumWays, UInt(ScEntryWidth.W)))
-  val scBWResp:        Vec[Vec[UInt]] = Vec(NumBWTables, Vec(NumWays, UInt(ScEntryWidth.W)))
-  val scImliResp:      Vec[UInt]      = Vec(NumWays, UInt(ScEntryWidth.W))
-  val scBiasResp:      Vec[UInt]      = Vec(BiasTableNumWays, UInt(ScEntryWidth.W))
-  val scBiasLowerBits: Vec[UInt]      = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
-  val scPred:          Vec[Bool]      = Vec(NumWays, Bool())
-  val tagePred:        Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
-  val tageCtr:         Vec[UInt]      = Vec(NumBtbResultEntries, UInt(TageTakenCtrWidth.W))
-  val tagePredValid:   Vec[Bool]      = Vec(NumBtbResultEntries, Bool())
-  val useScPred:       Vec[Bool]      = Vec(NumWays, Bool())
-  val sumAboveThres:   Vec[Bool]      = Vec(NumWays, Bool())
+  val scBiasLowerBits: Vec[UInt] = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
+  val scPred:          Vec[Bool] = Vec(NumWays, Bool())
+  val tagePred:        Vec[Bool] = Vec(NumBtbResultEntries, Bool())
+  val tageCtr:         Vec[UInt] = Vec(NumBtbResultEntries, UInt(TageTakenCtrWidth.W))
+  val tagePredValid:   Vec[Bool] = Vec(NumBtbResultEntries, Bool())
+  val useScPred:       Vec[Bool] = Vec(NumWays, Bool())
+  val sumAboveThres:   Vec[Bool] = Vec(NumWays, Bool())
 
   // for debug
   val debug_scPathTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
