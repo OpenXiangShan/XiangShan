@@ -22,7 +22,11 @@ jobs:
       - uses: actions/checkout@v6
       - name: Link current report
         run: |
-          ln -s "${{ needs.run.outputs.SPEC_DIR }}" "${{ needs.run.outputs.PERF_DIR }}/nightly-${{ needs.run.outputs.DATE }}"
+          if [ ! -L "${{ needs.run.outputs.PERF_DIR }}/nightly-${{ needs.run.outputs.DATE }}" ]; then
+            ln -s "${{ needs.run.outputs.SPEC_DIR }}" "${{ needs.run.outputs.PERF_DIR }}/nightly-${{ needs.run.outputs.DATE }}"
+          else
+            echo "Symlink already exists"
+          fi
       - name: Find previous commit
         run: |
           PREV_DIR=$(find "${{ needs.run.outputs.PERF_DIR }}" -maxdepth 1 -name "nightly-*" ! -name "nightly-${{ needs.run.outputs.DATE }}" | sort | tail -n1)
