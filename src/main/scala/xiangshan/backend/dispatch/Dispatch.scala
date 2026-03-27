@@ -188,7 +188,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }
 
   val renameWidth = io.fromRename.size
-  val issueQueueCount = RegNext(io.IQValidNumVec)
   // int fp vec v0
   val numRegType = 4
   val idxRegTypeInt = allFuConfigs.map(x => {
@@ -414,6 +413,19 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     }
   }
 
+  val uopSelIQ = Reg(Vec(renameWidth, Vec(issueQueueNum, Bool())))
+  val needAppendIQValidNumVec = Wire(Vec(exuNum, UInt(RenameWidth.U.getWidth.W)))
+  allExuParams.zipWithIndex.map { case (exuParams, iqDeqIdx) => {
+    val iqidx = allIssueParams.indexWhere(_.exuBlockParams.contains(exuParams))
+    val selIQNumReg = PopCount(uopSelIQ.zipWithIndex.map { case (u, i) =>
+      RegNext(u(iqidx) && FuType.FuTypeOrR(fromRename(i).bits.fuType, exuParams.fuConfigs.map(_.fuType)) && fromRename(i).fire)
+    })
+    val selIQNum = PopCount(uopSelIQ.zipWithIndex.map { case (u, i) =>
+      u(iqidx) && FuType.FuTypeOrR(fromRename(i).bits.fuType, exuParams.fuConfigs.map(_.fuType))
+    })
+    needAppendIQValidNumVec(iqDeqIdx) := selIQNum
+  }}
+  val issueQueueCount = VecInit(io.IQValidNumVec.zip(needAppendIQValidNumVec).map(x => RegNext(x._1 + x._2)))
   val minIQSelAll = Wire(Vec(needMultiExu.size, Vec(renameWidth, Vec(issueQueueNum, Bool()))))
   needMultiExu.zipWithIndex.map{ case ((fus, exuidx), needMultiExuidx) => {
     val suffix = fus.map(_.name).mkString("_")
@@ -448,6 +460,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
       dontTouch(compareMatrix)
       dontTouch(IQSort)
       dontTouch(minIQSel)
+      dontTouch(issueQueueCount)
+      dontTouch(needAppendIQValidNumVec)
     }
   }
   }
@@ -470,7 +484,6 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
       }
     }
   }}
-  val uopSelIQ = Reg(Vec(renameWidth, Vec(issueQueueNum, Bool())))
   val fuTypeOHSingle = Wire(Vec(renameWidth, Vec(needSingleIQ.size, Bool())))
   fuTypeOHSingle.zip(renameIn).map{ case (oh, in) => {
     oh := needSingleIQ.map(_._1).map(x => x.map(xx => in.valid && in.bits.fuType(xx.fuType.id)).reduce(_ || _))
