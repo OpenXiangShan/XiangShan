@@ -88,8 +88,5 @@ object SelImmField extends DecodeField[InstPattern, ValidIO[UInt]] {
   }
 
   val unsignedImmVecInst = getVariableNameSeq(
-    VMSLEU_VI,
-    VMSGTU_VI,
-    VSADDU_VI,
   )
 }
