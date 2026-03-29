@@ -436,7 +436,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     for (i <- 0 until iqNum) {
       for (j <- 0 until iqNum) {
         if (i == j) compareMatrix(i)(j) := false.B
-        else if (i < j) compareMatrix(i)(j) := issueQueueCount(exuidx(i)) < issueQueueCount(exuidx(j))
+        else if (i < j) compareMatrix(i)(j) := (issueQueueCount(exuidx(i)) + needAppendIQValidNumVec(exuidx(i))) < (issueQueueCount(exuidx(j)) + needAppendIQValidNumVec(exuidx(j)))
         else compareMatrix(i)(j) := !compareMatrix(j)(i)
       }
     }
