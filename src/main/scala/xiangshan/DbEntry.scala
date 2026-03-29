@@ -48,7 +48,7 @@ class InstInfoEntry(implicit p: Parameters) extends XSBundle{
   // val commitLatency = UInt(XLEN.W) // can not record when writing back
   val tlbLatency = UInt(XLEN.W)  // original requirements is L1toL2TlbLatency
   val lsInfo = new DebugLsInfo
-  val exceptType = UInt(ExceptionVec.ExceptionVecSize.W)
+  val exceptType = UInt(ExceptSparseVec.ExceptionVecSize.W)
 }
 
 class LoadInfoEntry(implicit p: Parameters) extends XSBundle{

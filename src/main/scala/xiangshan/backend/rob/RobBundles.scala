@@ -288,7 +288,7 @@ class RobDebugRollingIO extends Bundle {
   val robTrueCommit = Output(UInt(64.W))
 }
 
-class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
+class RobExceptionInfo(exceptList: Seq[Int]=ExceptionNO.all)(implicit p: Parameters) extends XSBundle {
   // val valid = Bool()
   val robIdx = new RobPtr
   val ftqPtr = new FtqPtr
@@ -298,7 +298,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   // This signal is valid iff currentValid is true
   // 0: is execute exception, 1: is fetch exception
   val isEnqExcp = Bool()
-  val exceptionVec = ExceptionVec()
+  val exceptionVec = ExceptSparseVec(exceptList)
   val isFetchMalAddr = Bool()
   val flushPipe = Bool()
   val isVset = Bool()

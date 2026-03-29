@@ -240,9 +240,8 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
     csrMod.fromAIA.notice_pending := imsicsec.notice_pending
   }
 
-  // private val exceptionVec = WireInit(0.U.asTypeOf(ExceptionVec())) // Todo:
   private val exceptionVec = Wire(ExceptSparseVec(cfg.exceptionOut))
-  // exceptionVec.foreach(_.foreach(_ := false.B))
+  exceptionVec.zeroInit()
   exceptionVec(EX_BP    ) := DataHoldBypass(isEbreak, false.B, io.in.fire)
   exceptionVec(EX_MCALL ) := DataHoldBypass(isEcall && privState.isModeM, false.B, io.in.fire)
   exceptionVec(EX_HSCALL) := DataHoldBypass(isEcall && privState.isModeHS, false.B, io.in.fire)

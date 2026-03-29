@@ -1026,11 +1026,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     val writeBackValid = uncacheState === UncacheState.writeback || cboState === CboState.writeback
     val writeBackToRob = Wire(new MemToRob(staParams.head))
     writeBackToRob.robIdx := dataEntries.head.uop.robIdx
-    writeBackToRob.exceptionVec.foreach{ case x =>
-      x := ExceptionNO.selectByFu(0.U.asTypeOf(ExceptionVec()), StaCfg)
-      x(hardwareError) := hasHardwareError
-      x(storeAccessFault) := hasAccessFault
-    }
+    writeBackToRob.exceptionVec.init
+    writeBackToRob.exceptionVec(hardwareError) := hasHardwareError
+    writeBackToRob.exceptionVec(storeAccessFault) := hasAccessFault // override
     writeBackToRob.trigger.foreach(_ := DontCare)
     writeBackToRob.isRVC.foreach(_ := DontCare)
     writeBackToRob.sqIdx.foreach(_ := io.rdataPtrExt.head)
@@ -1048,7 +1046,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
     io.exceptionInfo.valid             := writeBackValid
     io.exceptionInfo.bits.robIdx       := dataEntries.head.uop.robIdx
-    io.exceptionInfo.bits.exceptionVec := ExceptionNO.selectByFu(writeBackToRob.exceptionVec.get, StaCfg)
+    io.exceptionInfo.bits.exceptionVec extendFrom writeBackToRob.exceptionVec
     // TODO: why not fullVaddr and why don't have gpaddr ?
     io.exceptionInfo.bits.vaddr        := dataEntries.head.vaddr
     io.exceptionInfo.bits.gpaddr       := 0.U.asTypeOf(io.exceptionInfo.bits.gpaddr)

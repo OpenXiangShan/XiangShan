@@ -148,7 +148,7 @@ class CtrlBlockImp(
   }
   val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
   delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
-    x.bits.exceptionVec.get.asUInt.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
+    x.bits.exceptionVec.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
       (if (x.bits.trigger.nonEmpty) TriggerAction.isDmode(x.bits.trigger.get) else false.B)
   }
 
@@ -596,7 +596,7 @@ class CtrlBlockImp(
   rename.io.ratSnpt.snptSelect := snptSelect
   rename.io.ratSnpt.flushVec := flushVec
 
-  val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec.asUInt.orR || (!TriggerAction.isNone(x.bits.trigger)))
+  val decodeHasException = decode.io.out.map(x => x.bits.exceptionVec.orR || (!TriggerAction.isNone(x.bits.trigger)))
   // fusion decoder
   fusionDecoder.io.disableFusion := disableFusion
   for (i <- 0 until DecodeWidth) {

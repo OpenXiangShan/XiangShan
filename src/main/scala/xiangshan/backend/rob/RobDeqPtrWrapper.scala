@@ -33,7 +33,7 @@ import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
-class NewRobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class NewRobDeqPtrWrapper(implicit p: Parameters, params: BackendParams) extends XSModule with HasCircularQueuePtrHelper {
   val io = IO(new Bundle {
     // for commits/flush
     val state = Input(UInt(2.W))
@@ -41,7 +41,7 @@ class NewRobDeqPtrWrapper(implicit p: Parameters) extends XSModule with HasCircu
     val deq_w = Vec(CommitWidth, Input(Bool()))
     val hasCommitted = Vec(CommitWidth, Input(Bool()))
     val allCommitted = Input(Bool())
-    val exception_state = Flipped(ValidIO(new RobExceptionInfo))
+    val exception_state = Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.exceptionGenSet(params))))
     // for flush: when exception occurs, reset deqPtrs to range(0, CommitWidth)
     val intrBitSetReg = Input(Bool())
     val allowOnlyOneCommit = Input(Bool())

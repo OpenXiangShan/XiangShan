@@ -25,6 +25,7 @@ import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.NewCSR.CsrTriggerBundle
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.exu.ExeUnitParams
@@ -38,7 +39,6 @@ class VLSBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBun
   val data                = UInt(VLEN.W)
   // val fof            = Bool() // fof is only used for vector loads
   val excp_eew_index      = UInt(elemIdxBits.W)
-  // val exceptionVec   = ExceptionVec() // uop has exceptionVec
   val baseAddr            = UInt(XLEN.W)
   val uopAddr             = UInt(XLEN.W)
   val stride              = UInt(VLEN.W)
@@ -102,7 +102,7 @@ class VSFQFeedback (implicit p: Parameters) extends XSBundle {
   val paddr = UInt(PAddrBits.W)
   val mmio = Bool()
   val atomic = Bool()
-  val exceptionVec = ExceptionVec()
+  val exceptionVec = ExceptSparseVec()
 }
 
 class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) extends VLSUBundle {
@@ -117,7 +117,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val nc                   = Bool()
   val mmio                 = Bool()
   //val atomic               = Bool()
-  val exceptionVec         = ExceptionVec()
+  val exceptionVec         = ExceptSparseVec((if (isVStore) FuConfig.VstuCfg else FuConfig.VlduCfg).exceptionOut)
   val hasException         = Bool() // Active
   val vaddr                = UInt(XLEN.W)
   val vaNeedExt            = Bool()

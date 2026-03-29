@@ -661,7 +661,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       allocated(enqIndex) := true.B
       scheduled(enqIndex) := false.B
       uop(enqIndex)       := enq.bits.uop
-      uop(enqIndex).exceptionVec := 0.U.asTypeOf(enq.bits.uop.exceptionVec)
+      uop(enqIndex).exceptionVec.init
       isNC(enqIndex)      := enq.bits.nc && enq.bits.rep_info.cause(LoadReplayCauses.C_UNCACHE)
       vecReplay(enqIndex).isvec := enq.bits.isvec
       vecReplay(enqIndex).isLastElem := enq.bits.isLastElem

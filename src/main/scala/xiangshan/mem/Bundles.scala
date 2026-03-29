@@ -138,7 +138,7 @@ object Bundles {
       output.vecWen.foreach(_ := this.uop.vecWen)
       output.v0Wen.foreach(_ := this.uop.v0Wen)
       output.vlWen.foreach(_ := this.uop.vlWen)
-      output.exceptionVec.foreach(_ := this.uop.exceptionVec)
+      output.exceptionVec := this.uop.exceptionVec
       output.flushPipe.foreach(_ := this.uop.flushPipe)
       output.replay.foreach(_ := this.uop.replayInst)
       // output.debug := this.debug

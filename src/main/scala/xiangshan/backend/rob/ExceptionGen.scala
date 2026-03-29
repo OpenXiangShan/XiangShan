@@ -25,6 +25,7 @@ import utility._
 import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
+import xiangshan.backend.Bundles.connectSamePort
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -32,14 +33,16 @@ import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
 class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+  val allExceptions = ExceptionNO.exceptionGenSet(params)
+
   val io = IO(new Bundle {
     val redirect = Input(Valid(new Redirect))
     val flush = Input(Bool())
-    val enq = Vec(RenameWidth, Flipped(ValidIO(new RobExceptionInfo)))
+    val enq = Vec(RenameWidth, Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.decodeSet))))
     // csr + load + store + varith + vload + vstore
-    val wb = Vec(params.numException, Flipped(ValidIO(new RobExceptionInfo)))
-    val out = ValidIO(new RobExceptionInfo)
-    val state = ValidIO(new RobExceptionInfo)
+    val wb = MixedVec(params.getExceptionOutList.map { x => Flipped(ValidIO(new RobExceptionInfo(x))) } )
+    val out = ValidIO(new RobExceptionInfo(allExceptions))
+    val state = ValidIO(new RobExceptionInfo(allExceptions))
   })
 
   val wbExuParams = params.allExuParams.filter(_.exceptionOut.nonEmpty)
@@ -50,7 +53,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
       if (valid.length == 1) {
         (valid, bits)
       } else if (valid.length == 2) {
-        val res = Seq.fill(2)(Wire(ValidIO(chiselTypeOf(bits(0)))))
+        val res = Seq.fill(2)(Wire(ValidIO(new RobExceptionInfo(allExceptions))))
         for (i <- res.indices) {
           res(i).valid := valid(i)
           res(i).bits := bits(i)
@@ -72,22 +75,32 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
 
 
   val currentValid = RegInit(false.B)
-  val current = Reg(new RobExceptionInfo)
+  val current = Reg(new RobExceptionInfo(allExceptions))
+
+  val enqAllExcept = Wire(Vec(RenameWidth, Valid(new RobExceptionInfo(allExceptions))))
+  val wbAllExcept = Wire(Vec(params.numException, Valid(new RobExceptionInfo(allExceptions))))
+
+  enqAllExcept.zip(io.enq) foreach { case (sink, source) =>
+    (sink: Data).waiveAll :<= (source: Data).waiveAll
+    sink.bits.exceptionVec extendFrom source.bits.exceptionVec
+    sink.bits.flushPipe := source.bits.flushPipe && !source.bits.hasException
+  }
+  wbAllExcept.zip(io.wb) foreach { case (sink, source) =>
+    (sink: Data).waiveAll :<= (source: Data).waiveAll
+    sink.bits.exceptionVec extendFrom source.bits.exceptionVec
+  }
 
   // orR the exceptionVec
   val lastCycleFlush = RegNext(io.flush)
-  val enq_s0_valid = VecInit(io.enq.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
-  val enq_s0_bits = WireInit(VecInit(io.enq.map(_.bits)))
-  enq_s0_bits zip io.enq foreach { case (sink, source) =>
-    sink.flushPipe := source.bits.flushPipe && !source.bits.hasException
-  }
+  val enq_s0_valid = VecInit(enqAllExcept.map(e => e.valid && e.bits.has_exception && !lastCycleFlush))
+  val enq_s0_bits = WireInit(VecInit(enqAllExcept.map(_.bits)))
 
   // s0: compare wb in 6 groups
-  val csr_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(t => t.isCsr).nonEmpty).map(_._1)
-  val load_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.fuType == FuType.ldu).nonEmpty).map(_._1)
-  val store_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(t => t.isSta || t.fuType == FuType.mou).nonEmpty).map(_._1)
-  val varith_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.isVecArith).nonEmpty).map(_._1)
-  val vls_wb = io.wb.zip(wbExuParams).filter(_._2.fuConfigs.exists(x => FuType.FuTypeOrR(x.fuType, FuType.vecMem))).map(_._1)
+  val csr_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.filter(t => t.isCsr).nonEmpty).map(_._1)
+  val load_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.fuType == FuType.ldu).nonEmpty).map(_._1)
+  val store_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.filter(t => t.isSta || t.fuType == FuType.mou).nonEmpty).map(_._1)
+  val varith_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.isVecArith).nonEmpty).map(_._1)
+  val vls_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.exists(x => FuType.FuTypeOrR(x.fuType, FuType.vecMem))).map(_._1)
 
   val writebacks = Seq(csr_wb, load_wb, store_wb, varith_wb, vls_wb)
   val in_wb_valids = writebacks.map(_.map(w => w.valid && w.bits.has_exception && !lastCycleFlush))
@@ -100,7 +113,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val s0_out_bits = wb_bits.zip(wb_valid).map{ case(b, v) => RegEnable(b, v)}
 
   // s1: compare last six and current flush
-  val s1_valid = VecInit(s0_out_valid.zip(s0_out_bits).map{ case (v, b) => v && !(b.robIdx.needFlush(io.redirect) || io.flush) })
+  val s1_valid = VecInit(s0_out_valid.zip(s0_out_bits).map{ case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) })
   val s1_out_bits = RegEnable(getOldest(s0_out_valid, s0_out_bits), s1_valid.asUInt.orR)
   val s1_out_valid = RegNext(s1_valid.asUInt.orR)
 
@@ -126,9 +139,9 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
         // s1 is older than current and caused by wb, set current.isEnqExcp to false
         current.isEnqExcp := false.B
       }.elsewhen (current.robIdx === s1_out_bits.robIdx) {
-        current.exceptionVec := Mux(isVecUpdate, s1_out_bits.exceptionVec, current.exceptionVec)
+        current.exceptionVec := ExceptSparseVec.mux2(isVecUpdate, s1_out_bits.exceptionVec, current.exceptionVec)
         current.hasException := Mux(isVecUpdate, s1_out_bits.hasException, current.hasException)
-        current.flushPipe := (s1_out_bits.flushPipe || current.flushPipe) && !s1_out_bits.exceptionVec.asUInt.orR
+        current.flushPipe := (s1_out_bits.flushPipe || current.flushPipe) && !s1_out_bits.exceptionVec.orR
         current.replayInst := s1_out_bits.replayInst || current.replayInst
         current.singleStep := s1_out_bits.singleStep || current.singleStep
         current.trigger   := Mux(isVecUpdate, s1_out_bits.trigger,    current.trigger)

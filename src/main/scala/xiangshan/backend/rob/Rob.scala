@@ -485,7 +485,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         hasWaitForward := true.B
       }
       val enqTriggerActionIsDebugMode = TriggerAction.isDmode(io.enq.req(i).bits.trigger)
-      val enqHasException = ExceptionNO.selectFrontend(enqUop.exceptionVec).asUInt.orR
+      val enqHasException = enqUop.exceptionVec.orR
       when(enqUop.isWFI && !enqHasException && !enqTriggerActionIsDebugMode) {
         hasWFI := true.B
       }
@@ -612,7 +612,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqNeedFlush = deqPtrEntry.needFlush && deqPtrEntry.commit_v && deqPtrEntry.commit_w
   val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
-  val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.asUInt.orR || exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
+  val exceptionGenStateIsException = exceptionDataRead.bits.exceptionVec.orR || exceptionDataRead.bits.singleStep || TriggerAction.isDmode(exceptionDataRead.bits.trigger)
   val deqHasException = deqNeedFlushAndHitExceptionGenState && exceptionGenStateIsException && RegNext(RegNext(deqPtrEntry.commit_w))
   val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.flushPipe && !deqHasException && RegNext(RegNext(deqPtrEntry.commit_w))
   val deqHasReplayInst = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.replayInst
@@ -675,7 +675,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.exception.bits.isForVSnonLeafPTE := io.readGPAMemData.isForVSnonLeafPTE
   io.exception.bits.instr := RegEnable(debug_deqUop.debug_instr.getOrElse(0.U), exceptionHappen)
   io.exception.bits.commitType := RegEnable(deqPtrEntry.commitType, exceptionHappen)
-  io.exception.bits.exceptionVec := RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
+  io.exception.bits.exceptionVec extendFrom RegEnable(exceptionDataRead.bits.exceptionVec, exceptionHappen)
   // fetch trigger fire or execute ebreak
   io.exception.bits.isPcBkpt := RegEnable(
     exceptionDataRead.bits.exceptionVec(ExceptionNO.EX_BP) && (
@@ -1186,7 +1186,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exceptionGen.io.enq(i).bits.robIdx := io.enq.req(i).bits.robIdx
     exceptionGen.io.enq(i).bits.ftqPtr := io.enq.req(i).bits.ftqPtr
     exceptionGen.io.enq(i).bits.ftqOffset := io.enq.req(i).bits.ftqOffset
-    exceptionGen.io.enq(i).bits.exceptionVec := ExceptionNO.selectFrontend(io.enq.req(i).bits.exceptionVec)
+    exceptionGen.io.enq(i).bits.exceptionVec := io.enq.req(i).bits.exceptionVec
     exceptionGen.io.enq(i).bits.hasException := io.enq.req(i).bits.hasException
     exceptionGen.io.enq(i).bits.isEnqExcp := io.enq.req(i).bits.hasException
     exceptionGen.io.enq(i).bits.isFetchMalAddr := io.enq.req(i).bits.isFetchMalAddr
@@ -1222,8 +1222,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // only enq inst use ftqPtr to read gpa
     exc_wb.bits.ftqPtr          := 0.U.asTypeOf(exc_wb.bits.ftqPtr)
     exc_wb.bits.ftqOffset       := 0.U.asTypeOf(exc_wb.bits.ftqOffset)
-    exc_wb.bits.exceptionVec    := wb.bits.exceptionVec.get
-    exc_wb.bits.hasException    := wb.bits.exceptionVec.get.asUInt.orR // Todo: use io.writebackNeedFlush(i) instead
+    exc_wb.bits.exceptionVec    := wb.bits.exceptionVec
+    exc_wb.bits.hasException    := wb.bits.exceptionVec.orR // Todo: use io.writebackNeedFlush(i) instead
     exc_wb.bits.isEnqExcp       := false.B
     exc_wb.bits.isFetchMalAddr  := false.B
     exc_wb.bits.flushPipe       := wb.bits.flushPipe.getOrElse(false.B)
@@ -1233,7 +1233,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.crossPageIPFFix := false.B
     val trigger = wb.bits.trigger.getOrElse(TriggerAction.None).asTypeOf(exc_wb.bits.trigger)
     exc_wb.bits.trigger := trigger
-    exc_wb.bits.vstartEn := (if (wb.bits.vls.nonEmpty) wb.bits.exceptionVec.get.asUInt.orR || TriggerAction.isDmode(trigger) else 0.U)
+    exc_wb.bits.vstartEn := (if (wb.bits.vls.nonEmpty) wb.bits.exceptionVec.orR || TriggerAction.isDmode(trigger) else 0.U)
     exc_wb.bits.vstart := (if (wb.bits.vls.nonEmpty) wb.bits.vls.get.vpu.vstart else 0.U)
     exc_wb.bits.vuopIdx := (if (wb.bits.vls.nonEmpty) wb.bits.vls.get.vpu.vuopIdx else 0.U)
     exc_wb.bits.isVecLoad := wb.bits.vls.map(_.isVecLoad).getOrElse(false.B)
@@ -1470,7 +1470,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         debug_instData.executeLatency := wb.bits.perfDebugInfo.get.writebackTime - wb.bits.perfDebugInfo.get.issueTime
         debug_instData.rsFuLatency := wb.bits.perfDebugInfo.get.writebackTime - wb.bits.perfDebugInfo.get.enqRsTime
         debug_instData.tlbLatency := wb.bits.perfDebugInfo.get.tlbRespTime - wb.bits.perfDebugInfo.get.tlbFirstReqTime
-        debug_instData.exceptType := Cat(wb.bits.exceptionVec.getOrElse(ExceptionVec(false.B)))
+        debug_instData.exceptType := wb.bits.exceptionVec.asUInt
         debug_instData.lsInfo := debug_lsInfo(idx)
         // debug_instData.globalID := wb.bits.uop.ctrl.debug_globalID
         // debug_instData.instType := wb.bits.uop.ctrl.fuType

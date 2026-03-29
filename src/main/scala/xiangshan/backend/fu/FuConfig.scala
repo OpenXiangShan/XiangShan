@@ -369,7 +369,6 @@ object FuConfig {
     ),
     piped = false,
     latency = UncertainLatency(),
-    exceptionOut = Seq(illegalInstr, virtualInstr),
     flushPipe = true
   )
 

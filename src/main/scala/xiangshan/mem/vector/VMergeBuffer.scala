@@ -33,11 +33,11 @@ import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.mem._
 import xiangshan.mem.Bundles._
 
-class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
+class MBufferBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val data             = UInt(VLEN.W)
   val mask             = UInt(VLENB.W)
   val flowNum          = UInt(flowIdxBits.W)
-  val exceptionVec     = ExceptionVec()
+  val exceptionVec     = ExceptSparseVec((if (isVStore) VstuCfg else VlduCfg).exceptionOut)
   val uop              = new DynInst
   // val vdOffset         = UInt(vOffsetBits.W)
   val sourceType       = VSFQFeedbackType()
@@ -81,7 +81,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.data         := source.data
     sink.mask         := source.mask
     sink.flowNum      := source.flowNum
-    sink.exceptionVec := ExceptionNO.selectByFu(0.U.asTypeOf(ExceptionVec()), fuCfg)
+    sink.exceptionVec.init
     sink.uop          := source.uop
     sink.sourceType   := 0.U.asTypeOf(VSFQFeedbackType())
     sink.flushState   := false.B
@@ -104,7 +104,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.vecWen.foreach(_ := source.uop.vecWen)
     sink.v0Wen.foreach(_ := source.uop.v0Wen)
     sink.vlWen.foreach(_ := source.uop.vlWen)
-    sink.exceptionVec.foreach(_ := ExceptionNO.selectByFu(source.exceptionVec, fuCfg))
+    sink.exceptionVec extendFrom source.exceptionVec
     sink.flushPipe.foreach(_ := source.uop.flushPipe)
     sink.replay.foreach(_ := source.uop.replayInst)
     sink.lqIdx.foreach(_ := source.uop.lqIdx)
@@ -131,7 +131,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
   }
   def ToLsqConnect(source: MBufferBundle): FeedbackToLsqIO = {
     val sink                                 = WireInit(0.U.asTypeOf(new FeedbackToLsqIO))
-    val hasExp                               = ExceptionNO.selectByFu(source.exceptionVec, fuCfg).asUInt.orR
+    val hasExp                               = source.exceptionVec.orR
     sink.robidx                             := source.uop.robIdx
     sink.uopidx                             := source.uop.uopIdx
     sink.feedback(VecFeedbacks.COMMIT)      := !hasExp
@@ -150,13 +150,13 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.gpaddr                             := source.gpaddr
     sink.isForVSnonLeafPTE                  := source.isForVSnonLeafPTE
     sink.vl                                 := source.vl
-    sink.exceptionVec                       := ExceptionNO.selectByFu(source.exceptionVec, fuCfg)
+    sink.exceptionVec               extendFrom source.exceptionVec
     sink.isHyper                            := false.B
     sink
   }
 
 
-  val entries      = Reg(Vec(uopSize, new MBufferBundle))
+  val entries      = Reg(Vec(uopSize, new MBufferBundle(isVStore)))
   val needCancel   = WireInit(VecInit(Seq.fill(uopSize)(false.B)))
   val allocated    = RegInit(VecInit(Seq.fill(uopSize)(false.B)))
   val freeMaskVec  = WireInit(VecInit(Seq.fill(uopSize)(false.B)))
@@ -257,7 +257,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val entry               = entries(pipeWbMbIndex)
     val entryVeew           = entry.uop.vpu.veew
     val entryIsUS           = LSUOpType.isAllUS(entry.uop.fuOpType)
-    val entryHasException   = ExceptionNO.selectByFu(entry.exceptionVec, fuCfg).asUInt.orR || TriggerAction.isDmode(entry.uop.trigger)
+    val entryHasException   = entry.exceptionVec.orR || TriggerAction.isDmode(entry.uop.trigger)
     val entryExcp           = entryHasException && entry.mask.orR
     val entryVaddr          = entry.vaddr
     val entryVstart         = entry.vstart
@@ -290,7 +290,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       when(!entry.fof || vstart === 0.U){
         // For fof loads, if element 0 raises an exception, vl is not modified, and the trap is taken.
         entry.vstart       := vstart
-        entry.exceptionVec := ExceptionNO.selectByFu(selExceptionVec, fuCfg)
+        entry.exceptionVec := selExceptionVec
         entry.uop.trigger  := selPort.trigger
         entry.vaddr        := vaddr
         entry.vaNeedExt    := selPort.vaNeedExt
@@ -307,7 +307,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     val wbIndex          = pipewb.bits.mBIndex
     val flowNumOffset    = PopCount(mergePortMatrix(i))
     val sourceTypeNext   = entries(wbIndex).sourceType | pipewb.bits.sourceType
-    val hasExp           = ExceptionNO.selectByFu(pipewb.bits.exceptionVec, fuCfg).asUInt.orR
+    val hasExp           = pipewb.bits.exceptionVec.orR
 
     // if is VLoad, need latch 1 cycle to merge data. only flowNum and wbIndex need to latch
     val latchWbValid     = if(isVStore) pipewb.valid else RegNext(pipewb.valid)
@@ -339,7 +339,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
    val selPolicy = SelectOne("circ", uopFinish, deqWidth) // select one entry to deq
    private val pipelineOut              = Wire(Vec(deqWidth, DecoupledIO(new ExuOutput(param))))
    private val writeBackOut             = Wire(Vec(deqWidth, DecoupledIO(new ExuOutput(param))))
-   private val writeBackOutExceptionVec = writeBackOut.map(_.bits.exceptionVec.get)
+   private val writeBackOutExceptionVec = writeBackOut.map(_.bits.exceptionVec)
    for(((port, lsqport), i) <- (pipelineOut zip io.toLsq).zipWithIndex){
     val canGo    = port.ready
     val (selValid, selOHVec) = selPolicy.getNthOH(i + 1)
@@ -384,7 +384,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
       Option(s"VMergebufferPipelineConnect${i}")
     )
      io.uopWriteback(i)                  <> writeBackOut(i)
-     io.uopWriteback(i).bits.exceptionVec.foreach(_ := ExceptionNO.selectByFu(writeBackOutExceptionVec(i), fuCfg))
+     io.uopWriteback(i).bits.exceptionVec extendFrom writeBackOutExceptionVec(i).selectByFu(fuCfg)
    }
 
   QueuePerf(uopSize, freeList.io.validCount, freeList.io.validCount === 0.U)
@@ -413,7 +413,7 @@ class VLMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     Mux(
       TriggerAction.isExp(x.bits.trigger) || TriggerAction.isDmode(x.bits.trigger),
       ~x.bits.vecTriggerMask,
-      Fill(x.bits.mask.getWidth, !ExceptionNO.selectByFuAndUnSelect(x.bits.exceptionVec, fuCfg, Seq(breakPoint)).asUInt.orR)
+      Fill(x.bits.mask.getWidth, !x.bits.exceptionVec.unselect(breakPoint).orR)
     ).asUInt & x.bits.mask
   }
 
@@ -488,7 +488,7 @@ class VSMergeBufferImp(implicit p: Parameters) extends BaseVMergeBuffer(isVStore
     sink.vecWen.foreach(_ := source.uop.vecWen)
     sink.v0Wen.foreach(_ := source.uop.v0Wen)
     sink.vlWen.foreach(_ := source.uop.vlWen)
-    sink.exceptionVec.foreach(_ := ExceptionNO.selectByFu(source.exceptionVec, fuCfg))
+    sink.exceptionVec extendFrom source.exceptionVec
     sink.flushPipe.foreach(_ := source.uop.flushPipe)
     sink.replay.foreach(_ := source.uop.replayInst)
     sink.lqIdx.foreach(_ := source.uop.lqIdx)

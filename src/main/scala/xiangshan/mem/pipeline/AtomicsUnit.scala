@@ -104,7 +104,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   val rd = Cat(rd_h, rd_l)
   val stdCnt = RegInit(0.U(log2Ceil(stds.length + 1).W))
 
-  val exceptionVec = RegInit(0.U.asTypeOf(ExceptionVec()))
+  val exceptionVec = RegInit(ExceptSparseVec.zeros(param.exceptionOut))
   val trigger = RegInit(TriggerAction.None)
   val atom_override_xtval = RegInit(false.B)
   val have_sent_first_tlb_req = RegInit(false.B)
@@ -464,7 +464,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.exceptionInfo.bits.vaddr             := vaddr
   io.exceptionInfo.bits.gpaddr            := gpaddr
   io.exceptionInfo.bits.isForVSnonLeafPTE := isForVSnonLeafPTE
-  io.exceptionInfo.bits.exceptionVec      := exceptionVec
+  io.exceptionInfo.bits.exceptionVec extendFrom exceptionVec
   io.exceptionInfo.bits.vaNeedExt         := false.B
   io.exceptionInfo.bits.isHyper           := false.B
   io.exceptionInfo.bits.uopIdx            := 0.U.asTypeOf(io.exceptionInfo.bits.uopIdx)
@@ -524,7 +524,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     port.bits.pdest := Mux(state === s_finish2, pdest2, pdest1)
   }
   io.out.toRob.bits.robIdx := uop.robIdx
-  io.out.toRob.bits.exceptionVec.foreach(_ := exceptionVec)
+  io.out.toRob.bits.exceptionVec := exceptionVec
   io.out.toRob.bits.trigger.foreach(_ := trigger)
   io.out.toRob.bits.isRVC.foreach(_ := uop.isRVC)
   io.out.toRob.bits.lqIdx.foreach(_ := uop.lqIdx)

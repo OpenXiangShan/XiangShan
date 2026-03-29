@@ -354,7 +354,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
     !s2_req(i).uop.robIdx.needFlush(RegNext(io.redirect)) &&
     !s2_req(i).uop.robIdx.needFlush(io.redirect)
   })
-  val s2_has_exception = s2_req.map(x => ExceptionNO.selectByFu(x.uop.exceptionVec, LduCfg).asUInt.orR)
+  val s2_has_exception = s2_req.map(x => x.uop.exceptionVec.selectByFu(LduCfg).orR)
   val s2_need_replay = s2_req.map { req =>
      req.rep_info.need_rep && !req.rep_info.mmioOrNc}
 
@@ -474,7 +474,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   ))
   io.exceptionInfo.valid := Cat(entries.map(_.io.exception.valid)).orR
   io.exceptionInfo.bits.robIdx       := exceptionEntry.uop.robIdx
-  io.exceptionInfo.bits.exceptionVec := ExceptionNO.selectByFu(exceptionEntry.uop.exceptionVec, LduCfg)
+  io.exceptionInfo.bits.exceptionVec extendFrom exceptionEntry.uop.exceptionVec.selectByFu(LduCfg)
   io.exceptionInfo.bits.vaddr        := exceptionEntry.fullva
   io.exceptionInfo.bits.gpaddr       := exceptionEntry.gpaddr
   io.exceptionInfo.bits.isForVSnonLeafPTE := exceptionEntry.isForVSnonLeafPTE

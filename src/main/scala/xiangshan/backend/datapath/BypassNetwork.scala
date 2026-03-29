@@ -7,7 +7,7 @@ import utility.{GatedValidRegNext, SignExt, ZeroExt}
 import utils.SeqUtils._
 import xiangshan._
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuOutput, ExuVec, ImmInfo}
+import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, ExuVec, ImmInfo}
 import xiangshan.backend.issue._
 import xiangshan.backend.datapath.DataConfig.RegDataMaxWidth
 import xiangshan.backend.decode.ImmUnion

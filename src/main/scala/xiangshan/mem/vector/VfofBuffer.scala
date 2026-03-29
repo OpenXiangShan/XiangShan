@@ -40,7 +40,7 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
   val io = IO(new VfofDataBuffIO(param))
 
   private def isOlder(left: DynInst, right: DynInst): Bool = {
-    (right.vpu.vl > left.vpu.vl || left.exceptionVec.asUInt.orR) && !right.exceptionVec.asUInt.orR
+    (right.vpu.vl > left.vpu.vl || left.exceptionVec.orR) && !right.exceptionVec.orR
   }
   implicit val vfofParam: ExeUnitParams = param
 
@@ -105,7 +105,7 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
   }
   val wbBits          = selectOldestModule.io.out.bits
   val wbValid         = selectOldestModule.io.out.valid
-  val wbHasException  = wbBits.exceptionVec.asUInt.orR
+  val wbHasException  = wbBits.exceptionVec.orR
   val wbUpdateValid = wbValid && (wbBits.vpu.vl < entries.vl || wbHasException) && valid && !needRedirect && !entries.hasException
 
   XSError(wbValid && wbHasException && valid && entries.hasException, "The same instruction triggers an exception multiple times!\n")
@@ -126,7 +126,7 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
   io.uopWriteback.bits.vecWen.foreach(_ := entries.uop.vecWen)
   io.uopWriteback.bits.v0Wen.foreach(_ := entries.uop.v0Wen)
   io.uopWriteback.bits.vlWen.foreach(_ := entries.uop.vlWen)
-  io.uopWriteback.bits.exceptionVec.foreach(_ := 0.U.asTypeOf(ExceptionVec()))
+  io.uopWriteback.bits.exceptionVec.init
   io.uopWriteback.bits.lqIdx.foreach(_ := entries.uop.lqIdx)
   io.uopWriteback.bits.sqIdx.foreach(_ := entries.uop.sqIdx)
   io.uopWriteback.bits.vls.foreach(vls => {

@@ -927,7 +927,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
     writebackOut.vecWen.foreach(_ := fofBuffer.vecWen)
     writebackOut.v0Wen.foreach(_ := fofBuffer.v0Wen)
     writebackOut.vlWen.foreach(_ := fofBuffer.vlWen)
-    writebackOut.exceptionVec.foreach(_ := fofBuffer.exceptionVec)
+    writebackOut.exceptionVec := fofBuffer.exceptionVec
     writebackOut.flushPipe.foreach(_ := false.B)
     writebackOut.replay.foreach(_ := false.B)
     writebackOut.trigger.foreach(_ := fofBuffer.trigger)
@@ -954,14 +954,14 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
     writebackOut.vecWen.foreach(_ := uopq(deqPtr.value).uop.vecWen)
     writebackOut.v0Wen.foreach(_ := uopq(deqPtr.value).uop.v0Wen)
     writebackOut.vlWen.foreach(_ := uopq(deqPtr.value).uop.vlWen)
-    writebackOut.exceptionVec.foreach(_ := instMicroOp.uop.exceptionVec)
+    writebackOut.exceptionVec := instMicroOp.uop.exceptionVec
     writebackOut.flushPipe.foreach(_ := false.B)
     writebackOut.replay.foreach(_ := false.B)
     writebackOut.trigger.foreach(_ := instMicroOp.uop.trigger)
     writebackOut.vls.foreach(vls => {
       vls.vpu := instMicroOp.uop.vpu
       vls.vpu.vl := instMicroOp.vl
-      vls.vpu.vstart := Mux(instMicroOp.uop.exceptionVec.asUInt.orR || TriggerAction.isDmode(instMicroOp.uop.trigger), instMicroOp.exceptionVstart, instMicroOp.vstart)
+      vls.vpu.vstart := Mux(instMicroOp.uop.exceptionVec.orR || TriggerAction.isDmode(instMicroOp.uop.trigger), instMicroOp.exceptionVstart, instMicroOp.vstart)
       vls.vpu.vmask := maskUsed
       vls.vpu.vuopIdx := uopq(deqPtr.value).uop.vpu.vuopIdx
       vls.oldVdPsrc := uopq(deqPtr.value).uop.psrc(2)
@@ -1011,6 +1011,6 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl.bits
   io.exceptionInfo.bits.exceptionVec  := instMicroOp.uop.exceptionVec
   io.exceptionInfo.bits.isHyper       := false.B
-  io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
+  io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.orR && !isEmpty(enqPtr, deqPtr)
 }
 

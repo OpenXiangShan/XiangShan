@@ -6,8 +6,8 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 import xiangshan.backend.fu.util.SdtrigExt
-import xiangshan._
 import utils._
+import xiangshan._
 
 class Debug(implicit val p: Parameters) extends Module with HasXSParameter {
   val io = IO(new DebugIO)

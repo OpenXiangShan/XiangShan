@@ -386,7 +386,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   io.out.bits match { case x =>
     x.uop                   := issueUop
     x.uop.imm               := 0.U
-    x.uop.exceptionVec      := ExceptionNO.selectByFu(issueUop.exceptionVec, fuCfg)
+    x.uop.exceptionVec extendFrom issueUop.exceptionVec.selectByFu(fuCfg)
     x.vaddr                 := Mux(!issuePreIsSplit, usSplitVaddr, vaddr)
     x.basevaddr             := issueBaseAddr
     x.alignedType           := issueAlignedType

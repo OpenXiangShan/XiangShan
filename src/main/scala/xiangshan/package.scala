@@ -18,6 +18,7 @@ import chisel3._
 import chisel3.experimental.SourceInfo
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.backend.BackendParams
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.decode.{Imm, ImmUnion}
 
@@ -164,12 +165,6 @@ package object xiangshan {
     // def isException(level: UInt) = level(1) && level(0)
   }
 
-  object ExceptionVec {
-    val ExceptionVecSize = 24
-    def apply() = Vec(ExceptionVecSize, Bool())
-    def apply(init: Bool) = VecInit(Seq.fill(ExceptionVecSize)(init))
-  }
-
   trait SparseVecHelper[T <: Data] { this: SparseVec[T] =>
     val length: Int
     /**
@@ -196,7 +191,7 @@ package object xiangshan {
      * @tparam R the return type of function [[f]] and default value
      * @return f(element) if exist, [[default]] otherwise
      */
-    def getAndPerformOrElse[R](idx: Int)(f: T => R, default: R): R = {
+    def getAndPerform[R](idx: Int)(f: T => R, default: R={}): R = {
       this.find(idx) match {
         case Some(bit) => f(bit)
         case None => default
@@ -217,35 +212,25 @@ package object xiangshan {
     // }
 
     /**
-     * find the element at [[idx]], and assign singnal [[s]] on it if exist
-     * @param idx the index of element
-     * @param f the function to perform on the element if exist
-     * @return Unit
-     */
-    // def getAndAssign(idx: Int)(s: UInt): Unit = {
-    //   getAndPerform(idx)(_ := s)
-    // }
-
-    /**
      * perform function [[f]] on all existing elements, or [[default]] otherwise
      * @param f the function to perform on existing elements
      * @param default the default value if the element does not exist
      */
     def foreach(f: T => Unit, default: Unit = { /* do nothing */ }): Unit = {
       (0 until this.length).foreach { i =>
-        this.getAndPerformOrElse(i)(f, default)
+        this.getAndPerform(i)(f, default)
       }
     }
   }
 
   // For optional bits in the exception vector
   class ExceptSparseVec(val indices: Seq[Int]) extends SparseVec[Bool](
-    size         = ExceptionVec.ExceptionVecSize,
+    size         = ExceptSparseVec.ExceptionVecSize,
     gen          = Bool(),
     indices      = indices,
     defaultValue = SparseVec.DefaultValueBehavior.UserSpecified(0.U)
   )  with SparseVecHelper[Bool] {
-    override val length = ExceptionVec.ExceptionVecSize
+    override val length: Int = ExceptSparseVec.ExceptionVecSize
 
     /**
      * The apply method can get the element at [[idx]], or return [[false.B]] if not exist because exceptions will be
@@ -256,9 +241,7 @@ package object xiangshan {
     def apply(idx: Int): Bool = findOrElse(idx, false.B)
 
     // initialize all existing bits to false
-    def init: Unit = {
-      this.foreach(_ := false.B)
-    }
+    def zeroInit(): Unit = { this.foreach(_ := false.B) }
 
     /**
      * Map all existing bits with function [[f]]
@@ -273,12 +256,12 @@ package object xiangshan {
       result
     }
 
-    /**
-     * Map all existing bits with function [[f]], and fill non-existing bits with [[default]]
-     * @param f the function to map existing bits
-     * @param default the default value for non-existing bits
-     * @return a Vec after mapping
-     */
+    // /**
+    //  * Map all existing bits with function [[f]], and fill non-existing bits with [[default]]
+    //  * @param f the function to map existing bits
+    //  * @param default the default value for non-existing bits
+    //  * @return a Vec after mapping
+    //  */
     // def mapExist2Seq[T <: Data](f: Bool => T, default: T): Vec[T] = {
     //   val result = Wire(VecInit(Seq.fill(this.length)(default)))
     //   this.elements.foreach { case (idx, source) =>
@@ -287,28 +270,28 @@ package object xiangshan {
     //   result
     // }
 
-    /**
-     * Get the element at [[idx]], assume it exists
-     * @param idx the index of element
-     * @return the element at [[idx]]
-     */
-    def getIndex(idx: Int): Bool = this.find(idx).get
+    // /**
+    //  * Get the element at [[idx]], assume it exists
+    //  * @param idx the index of element
+    //  * @return the element at [[idx]]
+    //  */
+    // def getIndex(idx: Int): Bool = this.find(idx).get
 
-    /**
-     * Get the element at [[idx]], assume it exists
-     * @param idx the index of element
-     * @return the element at [[idx]]
-     */
-    def get: ExceptSparseVec = if (indices.isEmpty) throw new NoSuchElementException("Empty_Exception_Vector.get") else this.map(identity)
+    // /**
+    //  * Get the element at [[idx]], assume it exists
+    //  * @param idx the index of element
+    //  * @return the element at [[idx]]
+    //  */
+    // def get: ExceptSparseVec = if (indices.isEmpty) throw new NoSuchElementException("Empty_Exception_Vector.get") else this.map(identity)
 
     /**
      * Convert this SparseVec to a Vec[Bool],
      * @param default the default value of a non-exist element ([[false.B]] as default)
      * @return a Vec[Bool] after convertion
      */
-    def toVec(default: Bool = false.B): Vec[Bool] = {
+    def toVec: Vec[Bool] = {
       val result = Wire(Vec(length, Bool()))
-      (0 until length).foreach(idx => result(idx) := this(idx))
+      (0 until length).foreach { idx => result(idx) := this(idx) }
       result
     }
 
@@ -318,11 +301,10 @@ package object xiangshan {
      * @return a UInt after convertion
      */
     def toUInt: UInt = {
-      val result = Wire(ExceptionVec())
-      ExceptSparseVec.connect(result, this)
-      result.asUInt
+      this.toVec.asUInt
     }
 
+    // TODO: check whether the override of do_asUInt is done correctly
     override def do_asUInt(implicit sourceInfo: SourceInfo): UInt = toUInt
 
     /**
@@ -333,19 +315,59 @@ package object xiangshan {
 
     def nonEmpty: Boolean = this.indices.nonEmpty
 
-    def select(select: Seq[Int], unselect: Seq[Int] = Seq.empty): ExceptSparseVec = {
+    def select(sel: Seq[Int], unsel: Seq[Int]): ExceptSparseVec = {
       // assert if (select - unselect) is not a subset of this.indices,
       // the result will be wrong but no error will be thrown, so better to avoid this case
-      val newIndices = select.diff(unselect)
+      val newIndices = sel.diff(unsel)
       assert(newIndices.toSet.subsetOf(this.indices.toSet), "ExceptSparseVec select indices mismatch")
 
       val result = Wire(ExceptSparseVec(newIndices))
       newIndices.foreach(i => result(i) := this(i))
       result
     }
+
+    def select(sel: Seq[Int], unsel: Int): ExceptSparseVec          = select(sel, Seq(unsel))
+    def select(sel: Seq[Int]): ExceptSparseVec                      = select(sel, Seq.empty)
+    def selectByFu(cfg: FuConfig, unsel: Seq[Int]): ExceptSparseVec = select(cfg.exceptionOut, unsel)
+    def selectByFu(cfg: FuConfig, unsel: Int): ExceptSparseVec      = select(cfg.exceptionOut, unsel)
+    def selectByFu(cfg: FuConfig): ExceptSparseVec                  = select(cfg.exceptionOut)
+    def unselect(unsel: Seq[Int]): ExceptSparseVec                  = select(this.indices, unsel)
+    def unselect(unsel: Int): ExceptSparseVec                       = select(this.indices, unsel)
+
+    // drive all bits in sink by corresponding bits in source.
+    // if not exist in source, use default value false.B
+    def extendFrom(source: ExceptSparseVec): Unit = {
+      require(this.length == source.length, "ExceptSparseVec extendFrom() length mismatch")
+      require(source.indices.toSet.subsetOf(this.indices.toSet),
+        "ExceptSparseVec extendFrom(): source indices should be subset of sink indices")
+
+      this.indices.foreach { idx => this (idx) := source(idx) }
+    }
+
+    /**
+     * Bitwise OR operator, the resulting ExceptSparseVec will have bits that are the OR of corresponding bits
+     * in this and right. the result has indices of the union of this.indices and right.indices
+     * @param [[that]] the other ExceptSparseVec to OR with
+     * @return OR result
+     */
+    def |(that: ExceptSparseVec): ExceptSparseVec = {
+      ExceptSparseVec.orReduce(Seq(this, that))
+    }
+
+    /**
+     * Bitwise AND operator, the resulting ExceptSparseVec will have bits that are the AND of corresponding bits
+     * in this and right. the result has indices of the union of this.indices and right.indices
+     * @param [[that]] the other ExceptSparseVec to AND with
+     * @return AND result
+     */
+    def &(that: ExceptSparseVec): ExceptSparseVec = {
+      ExceptSparseVec.orReduce(Seq(this, that))
+    }
   }
 
   object ExceptSparseVec {
+    val ExceptionVecSize = 24
+
     // Generate a 24-wide exception vector of Option[Bool], decided by whether the index is given by excpList
     // vec(i).get is a Bool only when i in excpList, otherwise None
     def apply(excpList: Seq[Int]): ExceptSparseVec = new ExceptSparseVec(excpList)
@@ -376,9 +398,16 @@ package object xiangshan {
     }
 
     def orReduce(seqs: Seq[ExceptSparseVec]): ExceptSparseVec = {
-      val oh = Wire(VecInit.fill(seqs.length)(true.B))
-      val mergeOperator = (ors: Vec[Bool], x: Vec[Bool]) => ors.reduce(_ || _)
-      mergeHelper(mergeOperator)(oh, seqs)
+      require(seqs.nonEmpty, "ExceptSparseVec merge with empty seqs")
+
+      val mergeIndices = seqs.flatMap(_.indices).distinct.sorted
+      val result = Wire(ExceptSparseVec(mergeIndices))
+
+      result.indices.foreach { idx =>
+        result(idx) := seqs.map(_(idx)).reduce(_ || _)
+      }
+
+      result
     }
 
     def mux1h(oh: Vec[Bool], seqs: Seq[ExceptSparseVec]): ExceptSparseVec = {
@@ -390,31 +419,32 @@ package object xiangshan {
       mux1h(VecInit(cond, ~cond), Seq(seqTrue, seqFalse))
     }
 
-    // connect two exceptionVecs together under different circumstances
-    def connect(sinkSeq: ExceptSparseVec, sourceVec: Vec[Bool]): Unit = {
-      require(sinkSeq.length == sourceVec.length, "ExceptSparseVec connect length mismatch")
+    // def connect(sinkVec: ExceptSparseVec, sourceVec: Vec[Bool]): Unit = {
+    //   require(sinkVec.length == sourceVec.length, "ExceptSparseVec connect length mismatch")
+    //
+    //   (0 until sinkVec.length).foreach { idx =>
+    //     (sinkVec.find(idx), sourceVec(idx)) match {
+    //       case (Some(sink), source) => sink := source
+    //       case _ => // do nothing
+    //     }
+    //   }
+    // }
 
-      (0 until sinkSeq.length).foreach { idx =>
-        (sinkSeq.find(idx), sourceVec(idx)) match {
-          case (Some(sink), source) => sink := source
-          case _ => // do nothing
-        }
-      }
-    }
+    // def connect(sinkVec: Vec[Bool], sourceVec: ExceptSparseVec): Unit = {
+    //   require(sourceVec.length == sinkVec.length, "ExceptSparseVec connect length mismatch")
+    //
+    //   (0 until sinkVec.length).foreach { i => sinkVec(i) := sourceVec(i) }
+    // }
 
-    def connect(sinkVec: Vec[Bool], sourceSeq: ExceptSparseVec): Unit = {
-      require(sourceSeq.length == sinkVec.length, "ExceptSparseVec connect length mismatch")
+    // def connect(none: None.type, sourceVec: Any): Unit = { /* do nothing */ }
 
-      (0 until sinkVec.length).foreach { i => sinkVec(i) := sourceSeq(i) }
-    }
-
-    def connect(none: None.type, sourceSeq: Any): Unit = { /* do nothing */ }
-
-    def zeros(excpList: Seq[Int]): ExceptSparseVec = {
+    def fill(excpList: Seq[Int], value: Bool): ExceptSparseVec = {
       val result = Wire(apply(excpList))
-      result.init
+      result.foreach(_ := value)
       result
     }
+
+    def zeros(excpList: Seq[Int]): ExceptSparseVec = fill(excpList, false.B)
   }
 
   object PMAMode {
@@ -1176,21 +1206,23 @@ package object xiangshan {
       virtualInstr,
       breakPoint
     )
-    def partialSelect(vec: Vec[Bool], select: Seq[Int], unSelect: Seq[Int] = Seq.empty): Vec[Bool] = {
-      val new_vec = Wire(ExceptionVec())
-      new_vec.foreach(_ := false.B)
-      select.diff(unSelect).foreach(i => new_vec(i) := vec(i))
-      new_vec
-    }
-    def selectFrontend(vec: Vec[Bool]): Vec[Bool] = partialSelect(vec, frontendSet)
-    def selectByFu(vec:Vec[Bool], fuConfig: FuConfig): Vec[Bool] = partialSelect(vec, fuConfig.exceptionOut)
-    def selectByFuAndUnSelect(vec:Vec[Bool], fuConfig: FuConfig, unSelect: Seq[Int]): Vec[Bool] =
-      partialSelect(vec, fuConfig.exceptionOut, unSelect)
-
-    def selectFrontend(vec: ExceptSparseVec): ExceptSparseVec = vec.select(frontendSet)
-    def selectByFu(vec:ExceptSparseVec, fuConfig: FuConfig): ExceptSparseVec = vec.select(fuConfig.exceptionOut)
-    def selectByFuAndUnSelect(vec:ExceptSparseVec, fuConfig: FuConfig, unSelect: Seq[Int]): ExceptSparseVec =
-      vec.select(fuConfig.exceptionOut, unSelect)
+    def fromFrontendSet = Seq(
+      instrAccessFault,
+      illegalInstr,
+      instrPageFault,
+      hardwareError,
+      instrGuestPageFault
+    )
+    def decodeSet = Seq(
+      instrAccessFault,
+      illegalInstr,
+      breakPoint, // new
+      instrPageFault,
+      hardwareError,
+      instrGuestPageFault,
+      virtualInstr, // new
+    )
+    def exceptionGenSet(params: BackendParams) = (params.exceptionOut ++ ExceptionNO.decodeSet).distinct.sorted
   }
 
   object TopDownCounters extends Enumeration {

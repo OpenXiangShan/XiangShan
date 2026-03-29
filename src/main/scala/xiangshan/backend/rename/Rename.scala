@@ -405,7 +405,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val isMove = Wire(Vec(RenameWidth, Bool()))
   isMove zip io.in.map(_.bits) foreach {
-    case (move, in) => move := Mux(in.exceptionVec.asUInt.orR, false.B, in.isMove)
+    case (move, in) => move := Mux(in.exceptionVec.orR, false.B, in.isMove)
   }
 
   val walkNeedIntDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
@@ -474,7 +474,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     uops(i).robIdx := robIdxHead + PopCount(io.in.zip(needRobFlags).zip(io.validVec).take(i).map{ case((in, needRobFlag), valid) => valid && in.bits.lastUop && needRobFlag})
     instrSize(i) := instrSizesVec(i) + io.fusionCross2FtqVec(i)
     uops(i).debug.foreach(_.fusionNum := PopCount(compressMasksVec(i) & Cat(io.isFusionVec.reverse)))
-    val hasExceptionExceptFlushPipe = Cat(selectFrontend(uops(i).exceptionVec) :+ uops(i).exceptionVec(illegalInstr) :+ uops(i).exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(uops(i).trigger)
+    val hasExceptionExceptFlushPipe = uops(i).exceptionVec.orR || TriggerAction.isDmode(uops(i).trigger)
     when(isMove(i) || hasExceptionExceptFlushPipe) {
       uops(i).numWB := 0.U
     }
@@ -763,7 +763,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   val allowSnpt = if (EnableRenameSnapshot) notInSameSnpt && !lastCycleCreateSnpt && io.in.head.bits.firstUop else false.B
   io.out.zip(io.in).foreach{ case (out, in) => out.bits.snapshot := allowSnpt && FuType.isJump(in.bits.fuType) && in.fire }
   io.out.map{ x =>
-    x.bits.hasException := Cat(selectFrontend(x.bits.exceptionVec) :+ x.bits.exceptionVec(illegalInstr) :+ x.bits.exceptionVec(virtualInstr)).orR || TriggerAction.isDmode(x.bits.trigger)
+    x.bits.hasException := x.bits.exceptionVec.orR || TriggerAction.isDmode(x.bits.trigger)
   }
   if(backendParams.debugEn){
     dontTouch(robIdxHeadNext)

@@ -23,7 +23,7 @@ import chisel3.util.BitPat.bitPatToUInt
 import chisel3.util.experimental.decode.EspressoMinimizer
 
 import utility._
-import utils._
+import _root_.utils.{OptionWrapper, NamedUInt}
 
 import org.chipsalliance.cde.config.Parameters
 
@@ -95,7 +95,7 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val instr = UInt(32.W)
   val pc = UInt(VAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
-  val exceptionVec = ExceptionVec()
+  val exceptionVec = ExceptSparseVec(ExceptionNO.fromFrontendSet)
   val backendException = Bool()
   val trigger = TriggerAction()
   val isRvc = Bool()
@@ -807,8 +807,8 @@ class UopTopDown(implicit p: Parameters) extends XSBundle {
 
 class LowPowerIO(implicit p: Parameters) extends Bundle {
   /* i_*: SoC -> CPU   o_*: CPU -> SoC */
-  val o_cpu_no_op = Output(Bool()) 
-  //physical power down 
+  val o_cpu_no_op = Output(Bool())
+  //physical power down
   val i_cpu_pwrdown_req_n = Input(Bool())
   val o_cpu_pwrdown_ack_n = Output(Bool())
   // power on/off sequence control for Core iso/rst

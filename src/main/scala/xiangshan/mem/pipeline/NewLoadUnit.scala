@@ -929,8 +929,8 @@ class LoadUnitS2(param: ExeUnitParams)(
   val hweBypassCorrupt = Wire(Bool())
   val hwe = uop.exceptionVec(hardwareError) || hweForwardCorrupt || hweBypassCorrupt
 
-  val exceptionVec = WireInit(uop.exceptionVec)
-  val exception = TriggerAction.isDmode(uop.trigger) || ExceptionNO.selectByFu(exceptionVec, LduCfg).asUInt.orR
+  val exceptionVec = uop.exceptionVec.selectByFu(LduCfg)
+  val exception = TriggerAction.isDmode(uop.trigger) || exceptionVec.orR
   exceptionVec(loadAddrMisaligned) := am
   exceptionVec(loadAccessFault) := af
   exceptionVec(hardwareError) := hwe
@@ -1108,7 +1108,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val stageInfo = Wire(pipeOut.bits.cloneType)
   connectSamePort(stageInfo, in)
   stageInfo.uop.flushPipe := false.B
-  stageInfo.uop.exceptionVec := exceptionVec
+  stageInfo.uop.exceptionVec extendFrom exceptionVec
   stageInfo.uop.vpu.vstart := Mux(
     LoadEntrance.isReplay(entrance) || LoadEntrance.isFastReplay(entrance),
     uop.vpu.vstart,
@@ -1308,7 +1308,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     */
   val s4HeadValid = io.unalignConcat.valid
   val s4Head = io.unalignConcat.bits
-  val s4HeadExceptionVec = s4Head.uop.exceptionVec
+  val s4HeadExceptionVec = s4Head.uop.exceptionVec.selectByFu(LduCfg)
   val s4HeadVAddr = s4Head.vaddr
   val s4HeadMask = s4Head.mask
   val s4HeadPAddr = s4Head.paddr.get
@@ -1334,9 +1334,9 @@ class LoadUnitS3(param: ExeUnitParams)(
     * Noted that exception can affect control signals for wakeup and writeback
     */
   val dcacheError = EnableAccurateLoadError.B && io.csrCtrl.cache_error_enable && troubleMaker && io.dcacheError
-  val s3ExceptionVec = WireInit(uop.exceptionVec)
-  val s3Exception = ExceptionNO.selectByFu(s3ExceptionVec, LduCfg).asUInt.orR || TriggerAction.isDmode(uop.trigger)
-  val exceptionVec = Mux(
+  val s3ExceptionVec = uop.exceptionVec.selectByFu(LduCfg)
+  val s3Exception = s3ExceptionVec.orR || TriggerAction.isDmode(uop.trigger)
+  val exceptionVec = ExceptSparseVec.mux2(
     s4HeadValid && s4HeadHasException,
     s4HeadExceptionVec,
     s3ExceptionVec
@@ -1427,7 +1427,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   }
   ldout.toRob.valid := ldoutValid
   ldout.toRob.bits.robIdx := uop.robIdx
-  ldout.toRob.bits.exceptionVec.get := exceptionVec
+  ldout.toRob.bits.exceptionVec extendFrom exceptionVec
   ldout.toRob.bits.lqIdx.get := uop.lqIdx
   ldout.toRob.bits.trigger.get := uop.trigger
   ldout.toRob.bits.isRVC.get := uop.isRVC
@@ -1449,7 +1449,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val lqWriteHandledByMSHR = Mux(s4HeadCacheMiss && s4HeadValid, s4HeadHandledByMSHR, in.handledByMSHR.get)
   // TODO: remove useless fields after old LoadUnit is removed
   lqWrite.uop := uop
-  lqWrite.uop.exceptionVec := exceptionVec
+  lqWrite.uop.exceptionVec extendFrom exceptionVec
   lqWrite.vaddr := vaddr
   lqWrite.fullva := exceptionFullva
   lqWrite.vaNeedExt := exceptionVaNeedExt
@@ -1556,7 +1556,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val exceptionInfoValid = ldoutValid && !in.isMMIOReplay() // MMIO replay sends exceptionInfo independently
   val exceptionInfo = Wire(new MemExceptionInfo)
   exceptionInfo.robIdx := robIdx
-  exceptionInfo.exceptionVec := exceptionVec
+  exceptionInfo.exceptionVec extendFrom exceptionVec
   exceptionInfo.vaddr := exceptionFullva
   exceptionInfo.gpaddr := exceptionGpaddr
   exceptionInfo.isForVSnonLeafPTE := exceptionIsForVSnonLeafPTE
@@ -1578,7 +1578,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   // Consider only unalign head
   val stageInfo = Wire(pipeOut.bits.cloneType)
   connectSamePort(stageInfo, in)
-  stageInfo.uop.exceptionVec := s3ExceptionVec
+  stageInfo.uop.exceptionVec extendFrom s3ExceptionVec
   stageInfo.matchInvalid.get := s3MatchInvalid
   stageInfo.shouldWakeup.get := s3ShouldWakeup
   stageInfo.shouldWriteback.get := s3ShouldWriteback

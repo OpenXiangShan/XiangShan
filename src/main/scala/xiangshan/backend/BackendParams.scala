@@ -445,6 +445,9 @@ case class BackendParams(
   def getV0WBExeGroup : Map[Int, Seq[ExeUnitParams]] = allRealExuParams.filter(_.getV0WBPort .nonEmpty).groupBy(_.getV0WBPort.get.port)
   def getVlWBExeGroup : Map[Int, Seq[ExeUnitParams]] = allRealExuParams.filter(_.getVlWBPort .nonEmpty).groupBy(_.getVlWBPort.get.port)
 
+  def exceptionOut = allExuParams.flatMap(_.exceptionOut).distinct.sorted
+  def getExceptionOutList = allRealExuParams.map(_.exceptionOut).filter(_.nonEmpty)
+
   private def isContinuous(portIndices: Seq[Int]): Boolean = {
     val portIndicesSet = portIndices.toSet
     portIndicesSet.min == 0 && portIndicesSet.max == portIndicesSet.size - 1

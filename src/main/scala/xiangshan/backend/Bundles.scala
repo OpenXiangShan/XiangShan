@@ -93,7 +93,6 @@ object Bundles {
     sink.bits.toV0Rf. foreach(_.bits  := source.bits.data(0))
     sink.bits.toVlRf. foreach(_.valid := source.bits.vlWen.get)
     sink.bits.toVlRf. foreach(_.bits  := source.bits.data(0))
-    ExceptSparseVec.connect(sink.bits.toRob.bits.exceptionVec, source.bits.exceptionVec.getOrElse(0.U.asTypeOf(ExceptionVec())))
   }
 
   def connectWriteBackRob(sink: WriteBackRobBundle, source: NewExuOutput) = {
@@ -102,13 +101,12 @@ object Bundles {
     sink.data              := source.toIntRf.map(_.bits).getOrElse(0.U(64.W))
     sink.vecWen. foreach(_ := source.toVecRf.map(_.valid).getOrElse(false.B))
     sink.v0Wen.  foreach(_ := source.toV0Rf.map(_.valid).getOrElse(false.B))
-    sink.exceptionVec.foreach(ExceptSparseVec.connect(_, source.toRob.bits.exceptionVec))
   }
 
   // Frontend --[CtrlBlock]--> DecodeInUop
   class DecodeInUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
-    val exceptionVec = ExceptionVec()
+    val exceptionVec = ExceptSparseVec(ExceptionNO.fromFrontendSet)
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
@@ -137,7 +135,7 @@ object Bundles {
   // DecodeInUop --[Decode]--> DecodeOutUop
   class DecodeOutUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
-    val exceptionVec = ExceptionVec()
+    val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
@@ -200,7 +198,8 @@ object Bundles {
     }
 
     def connectDecodeInUop(source: DecodeInUop): Unit = {
-      connectSamePort(this, source)
+      (this: Data).waiveAll :<= (source: Data).waiveAll
+      this.exceptionVec extendFrom source.exceptionVec
       this.debug.foreach(x => connectSamePort(x, source.debug.get))
     }
   }
@@ -231,7 +230,7 @@ object Bundles {
 
   class RenameOutUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
-    val exceptionVec = ExceptionVec()
+    val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
@@ -530,7 +529,7 @@ object Bundles {
     val wflags = OptionWrapper(params.writeFflags, Bool())
     val fflags = OptionWrapper(params.writeFflags, UInt(5.W))
     val vxsat = OptionWrapper(params.writeVxsat, Bool())
-    val exceptionVec = OptionWrapper(params.exceptionOut.nonEmpty, ExceptionVec())
+    val exceptionVec = ExceptSparseVec()
     val flushPipe = OptionWrapper(params.flushPipe, Bool())
     val replay = OptionWrapper(params.replayInst, Bool())
     val trigger = OptionWrapper(params.trigger, TriggerAction())
@@ -546,7 +545,7 @@ object Bundles {
     val instr           = UInt(32.W)
     val pc              = UInt(VAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
-    val exceptionVec    = ExceptionVec()
+    val exceptionVec    = ExceptSparseVec() // TODO: optimize valid indices
     val isFetchMalAddr  = Bool()
     val hasException    = Bool()
     val trigger         = TriggerAction()
@@ -1304,7 +1303,7 @@ object Bundles {
     val fflags       = if (params.writeFflags)  Some(UInt(5.W))               else None
     val wflags       = if (params.writeFflags)  Some(Bool())                  else None
     val vxsat        = if (params.writeVxsat)   Some(Bool())                  else None
-    val exceptionVec = if (params.exceptionOut.nonEmpty) Some(ExceptionVec()) else None
+    val exceptionVec = ExceptSparseVec(params.exceptionOut)
     val flushPipe    = if (params.flushPipe)    Some(Bool())                  else None
     val replay       = if (params.replayInst)   Some(Bool())                  else None
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
@@ -1468,7 +1467,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val redirect = ValidIO(new Redirect)
     val fflags = UInt(5.W)
     val vxsat = Bool()
-    val exceptionVec = ExceptionVec()
+    val exceptionVec = ExceptSparseVec()
     val debug = new DebugBundle
     val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
     val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
@@ -1491,7 +1490,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
       this.redirect := source.redirect.getOrElse(0.U.asTypeOf(this.redirect))
       this.fflags := source.fflags.getOrElse(0.U.asTypeOf(this.fflags))
       this.vxsat := source.vxsat.getOrElse(0.U.asTypeOf(this.vxsat))
-      this.exceptionVec := source.exceptionVec.getOrElse(0.U.asTypeOf(this.exceptionVec))
+      this.exceptionVec extendFrom source.exceptionVec
       this.debug := source.debug
       this.perfDebugInfo.foreach(_ := source.perfDebugInfo.get)
       this.debug_seqNum.foreach(_ := source.debug_seqNum.get)
@@ -1632,7 +1631,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val fflags        = Option.when(params.writeFflags)(UInt(5.W))
     val wflags        = Option.when(params.writeFflags)(Bool())
     val vxsat         = Option.when(params.writeVxsat)(Bool())
-    val exceptionVec  = Option.when(params.exceptionOut.nonEmpty)(ExceptionVec())
+    val exceptionVec  = ExceptSparseVec(params.exceptionOut)
     val lqIdx         = Option.when(params.hasLoadFu)(new LqPtr())
     val sqIdx         = Option.when(params.hasStoreAddrFu || params.hasStdFu)(new SqPtr())
     val trigger       = Option.when(params.trigger)(TriggerAction())
@@ -1661,7 +1660,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val pc = UInt(VAddrData().dataWidth.W)
     val instr = UInt(32.W)
     val commitType = CommitType()
-    val exceptionVec = ExceptionVec()
+    val exceptionVec = ExceptSparseVec() // TODO: optimize valid indices
     val isPcBkpt = Bool()
     val isFetchMalAddr = Bool()
     val gpaddr = UInt(XLEN.W)
@@ -1763,7 +1762,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
       output.vecWen.foreach(_ := this.uop.vecWen)
       output.v0Wen.foreach(_ := this.uop.v0Wen)
       output.vlWen.foreach(_ := this.uop.vlWen)
-      output.exceptionVec.foreach(_ := this.uop.exceptionVec)
+      output.exceptionVec := this.uop.exceptionVec
       output.flushPipe.foreach(_ := this.uop.flushPipe)
       output.replay.foreach(_ := this.uop.replayInst)
       output.debug := this.debug

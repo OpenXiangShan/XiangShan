@@ -33,8 +33,8 @@ import xiangshan.mem.Bundles.LqWriteBundle
 class MemExceptionInfo(implicit p: Parameters) extends XSBundle {
   val robIdx            = new RobPtr
   val uopIdx            = UopIdx()
-  val exceptionVec      = ExceptionVec()
-  def hasException      = exceptionVec.asUInt.orR
+  val exceptionVec      = ExceptSparseVec() // TODO: optimize valid indices
+  def hasException      = exceptionVec.orR
 
   val vaddr             = UInt(XLEN.W)
   val vaNeedExt         = Bool()

@@ -23,7 +23,6 @@ import utility.InstSeqNum
 import utils.EnumUInt
 import xiangshan.CtrlFlow
 import xiangshan.ExceptionNO
-import xiangshan.ExceptionVec
 import xiangshan.TriggerAction
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.ExceptionType
@@ -135,7 +134,6 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.instr                                         := inst
     cf.pc                                            := pc.toUInt
     cf.foldpc                                        := foldpc
-    cf.exceptionVec                                  := 0.U.asTypeOf(ExceptionVec())
     cf.exceptionVec(ExceptionNO.instrPageFault)      := exceptionType.isPf
     cf.exceptionVec(ExceptionNO.instrGuestPageFault) := exceptionType.isGpf
     cf.exceptionVec(ExceptionNO.instrAccessFault)    := exceptionType.isAf
