@@ -94,7 +94,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }
 
   val exuNum = allExuParams.size
-  val maxIQSize = allIssueParams.map(_.numEntries).max
+  // + 6 because that need add 3 cycle enqNum
+  val maxIQSize = allIssueParams.map(_.numEntries).max + 6
   val IQEnqSum = allIssueParams.map(_.numEnq).sum
   val issueQueueNum = allIssueParams.size
 
@@ -426,6 +427,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     needAppendIQValidNumVec(iqDeqIdx) := selIQNum
   }}
   val issueQueueCount = VecInit(io.IQValidNumVec.zip(needAppendIQValidNumVec).map(x => RegNext(x._1 + x._2)))
+  val issueQueueCountAddEnq = VecInit(issueQueueCount.zip(needAppendIQValidNumVec).map(x => x._1 + x._2))
   val minIQSelAll = Wire(Vec(needMultiExu.size, Vec(renameWidth, Vec(issueQueueNum, Bool()))))
   needMultiExu.zipWithIndex.map{ case ((fus, exuidx), needMultiExuidx) => {
     val suffix = fus.map(_.name).mkString("_")
@@ -436,18 +438,49 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     for (i <- 0 until iqNum) {
       for (j <- 0 until iqNum) {
         if (i == j) compareMatrix(i)(j) := false.B
-        else if (i < j) compareMatrix(i)(j) := (issueQueueCount(exuidx(i)) + needAppendIQValidNumVec(exuidx(i))) < (issueQueueCount(exuidx(j)) + needAppendIQValidNumVec(exuidx(j)))
+        else if (i < j) compareMatrix(i)(j) := issueQueueCountAddEnq(exuidx(i)) < issueQueueCountAddEnq(exuidx(j))
         else compareMatrix(i)(j) := !compareMatrix(j)(i)
       }
     }
     val IQSort = Reg(Vec(iqNum, Vec(iqNum, Bool()))).suggestName(s"IQSort_$suffix}")
+    val IQSortWire = Wire(Vec(iqNum, Vec(iqNum, Bool()))).suggestName(s"IQSortWire_$suffix}")
+    IQSort := IQSortWire
+    val IQSortValidCnt = Reg(Vec(iqNum, UInt(maxIQSize.U.getWidth.W))).suggestName(s"IQSortValidCnt_$suffix}")
+    val IQSortValidCntAddEnq = Wire(Vec(iqNum, UInt(maxIQSize.U.getWidth.W))).suggestName(s"IQSortValidCntAddEnq_$suffix}")
     for (i <- 0 until iqNum){
       // i = 0 minimum iq, i = iqNum - 1 -> maximum iq
-      IQSort(i) := compareMatrix.map(x => PopCount(x) === (iqNum - 1 - i).U)
+      IQSortWire(i) := compareMatrix.map(x => PopCount(x) === (iqNum - 1 - i).U)
+      IQSortValidCnt(i) := Mux1H(IQSortWire(i), exuidx.map(x => issueQueueCountAddEnq(x)))
+      IQSortValidCntAddEnq(i) := Mux1H(IQSort(i), exuidx.map(x => needAppendIQValidNumVec(x)))
     }
+    // update IQSort
+    val IQSortUpdate = Wire(Vec(iqNum, Vec(iqNum, Bool()))).suggestName(s"IQSortUpdate_$suffix}")
+    val updateInterval = 3
+    val segmentNum = (iqNum - 1) / updateInterval + 1
+    for (segIdx <- 0 until segmentNum) {
+      val realNum = Seq(iqNum - segIdx * updateInterval, updateInterval).min
+      val compareMatrixNew = Wire(Vec(realNum, Vec(realNum, Bool())))
+      val startNum = segIdx * updateInterval
+      val endNum   = startNum + realNum
+      for (i <- 0 until realNum) {
+        for (j <- 0 until realNum) {
+          if (i == j) compareMatrixNew(i)(j) := false.B
+          else if (i < j) compareMatrixNew(i)(j) := IQSortValidCnt(startNum+i) + IQSortValidCntAddEnq(startNum+i) <
+                                                 IQSortValidCnt(startNum+j) + IQSortValidCntAddEnq(startNum+j)
+          else compareMatrixNew(i)(j) := !compareMatrixNew(j)(i)
+        }
+      }
+      val newIQSort = Wire(Vec(realNum, Vec(realNum, Bool())))
+      for (i <- 0 until realNum) {
+        // i = 0 minimum iq, i = realNum - 1 -> maximum iq
+        newIQSort(i) := compareMatrixNew.map(x => PopCount(x) === (realNum - 1 - i).U)
+        IQSortUpdate(startNum + i) := Mux1H(newIQSort(i), IQSort.drop(startNum).take(realNum))
+      }
+    }
+
     val minIQSel = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool()))).suggestName(s"minIQSel_$suffix")
     for (i <- 0 until renameWidth){
-      val minIQSel_ith = IQSort(i % iqNum)
+      val minIQSel_ith = IQSortUpdate(i % iqNum)
       for (j <- 0 until issueQueueNum){
         minIQSel(i)(j) := false.B
         if (iqidx.contains(j)){
