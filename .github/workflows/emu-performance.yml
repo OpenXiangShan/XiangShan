@@ -117,6 +117,7 @@ jobs:
           echo "Getting EMU binary from ${PERF_HOME}/emu"
           cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
       - name: Run Legacy CI Test - ${{ matrix.name }}
+        shell: bash
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
             --wave-dump ${WAVE_HOME} \
@@ -218,6 +219,7 @@ jobs:
           echo "Getting EMU binary from ${PERF_HOME}/emu"
           cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
       - name: Run SPEC06 Test - ${{ matrix.name }}
+        shell: bash
         run: |
           export CKPT=$(find "${CKPT_HOME}/${{ matrix.name }}/${{ matrix.ckpt }}" -type f \( -name "*.gz" -o -name "*.zstd" \) | head -n 1)
           echo "Running checkpoint: ${CKPT}"

@@ -156,6 +156,7 @@ jobs:
             --trace-fst
       - name: Simfrontend Test - SPEC06 astar
         id: astar_simfrontend
+        shell: bash
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
             --wave-dump ${WAVE_HOME} \
@@ -169,6 +170,7 @@ jobs:
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: Simfrontend Test - SPEC06 milc
         id: milc_simfrontend
+        shell: bash
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
             --wave-dump ${WAVE_HOME} \
@@ -182,6 +184,7 @@ jobs:
           echo "IPC=$(grep -oP 'IPC = \K\d+\.\d+' stdout.log)" >> $GITHUB_OUTPUT
       - name: Simfrontend Test - SPEC06 xalancbmk
         id: xalancbmk_simfrontend
+        shell: bash
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
             --wave-dump ${WAVE_HOME} \
