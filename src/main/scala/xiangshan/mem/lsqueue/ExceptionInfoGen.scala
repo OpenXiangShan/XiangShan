@@ -21,7 +21,6 @@ import difftest.common.DifftestMem
 import org.chipsalliance.cde.config.Parameters
 import top.ArgParser
 import utility._
-import xiangshan.ExceptionNO.hardwareError
 import xiangshan._
 import xiangshan.backend.Bundles.{MemExuOutput, UopIdx, connectSamePort}
 import xiangshan.backend.datapath.NewPipelineConnect

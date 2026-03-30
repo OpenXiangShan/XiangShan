@@ -1026,7 +1026,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     val writeBackValid = uncacheState === UncacheState.writeback || cboState === CboState.writeback
     val writeBackToRob = Wire(new MemToRob(staParams.head))
     writeBackToRob.robIdx := dataEntries.head.uop.robIdx
-    writeBackToRob.exceptionVec.init
+    writeBackToRob.exceptionVec.zeroInit()
     writeBackToRob.exceptionVec(hardwareError) := hasHardwareError
     writeBackToRob.exceptionVec(storeAccessFault) := hasAccessFault // override
     writeBackToRob.trigger.foreach(_ := DontCare)

@@ -22,7 +22,6 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.ExceptionNO._
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend._
 import xiangshan.backend.fu.fpu._

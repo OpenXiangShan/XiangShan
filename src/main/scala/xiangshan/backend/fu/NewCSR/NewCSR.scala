@@ -19,7 +19,6 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan._
 import xiangshan.backend.fu.PerfCounterIO
 import xiangshan.backend.fu.util.CSRConst
-import xiangshan.ExceptionNO._
 import xiangshan.backend.trace._
 import xiangshan.backend.decode.isa.CSRs
 

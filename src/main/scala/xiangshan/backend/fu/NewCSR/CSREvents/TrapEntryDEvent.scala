@@ -4,8 +4,6 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.{SignExt, ZeroExt, GatedValidRegNext}
-import xiangshan.{ExceptionNO, HasXSParameter, TriggerAction}
-import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.NewCSR
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, OneFieldBundle, PrivState}
 import xiangshan.backend.fu.NewCSR.CSRConfig.{VaddrMaxWidth, XLEN}

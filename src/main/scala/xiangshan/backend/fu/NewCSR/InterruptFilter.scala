@@ -4,7 +4,6 @@ import chisel3._
 import chisel3.util._
 import utility.{DelayN, GatedValidRegNext}
 import utils._
-import xiangshan.ExceptionNO
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CauseBundle, PrivState, XtvecBundle}
 import xiangshan.backend.fu.NewCSR.CSRDefines.{PrivMode, XtvecMode}
 import xiangshan.backend.fu.NewCSR.InterruptNO

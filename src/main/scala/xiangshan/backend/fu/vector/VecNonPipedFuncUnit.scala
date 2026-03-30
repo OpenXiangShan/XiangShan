@@ -47,7 +47,7 @@ class VecNonPipedFuncUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUni
   if (cfg.exceptionOut.nonEmpty) {
     val outVstart = outCtrl.vpu.get.vstart
     val vstartIllegal = outVstart =/= 0.U
-    io.out.bits.ctrl.exceptionVec.init
+    io.out.bits.ctrl.exceptionVec.zeroInit()
     require(cfg.exceptionOut.contains(ExceptionNO.illegalInstr),
       "VecNonPipedFuncUnit with non-empty excptionOut must have illegal instruction exception output")
     io.out.bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := vstartIllegal

@@ -1222,7 +1222,7 @@ package object xiangshan {
       instrGuestPageFault,
       virtualInstr, // new
     )
-    def exceptionGenSet(params: BackendParams) = (params.exceptionOut ++ ExceptionNO.decodeSet).distinct.sorted
+    def exceptionGenSet(params: BackendParams) = (params.exceptionOut ++ decodeSet).distinct.sorted
   }
 
   object TopDownCounters extends Enumeration {

@@ -81,7 +81,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
     sink.data         := source.data
     sink.mask         := source.mask
     sink.flowNum      := source.flowNum
-    sink.exceptionVec.init
+    sink.exceptionVec.zeroInit()
     sink.uop          := source.uop
     sink.sourceType   := 0.U.asTypeOf(VSFQFeedbackType())
     sink.flushState   := false.B

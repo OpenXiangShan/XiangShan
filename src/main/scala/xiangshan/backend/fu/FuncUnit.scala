@@ -300,7 +300,7 @@ trait HasPipelineReg { this: FuncUnit =>
   if (cfg.exceptionOut.nonEmpty) {
     val outVstart = ctrlVec.last.vpu.get.vstart
     val vstartIllegal = outVstart =/= 0.U
-    io.out.bits.ctrl.exceptionVec.init
+    io.out.bits.ctrl.exceptionVec.zeroInit()
     require(cfg.exceptionOut.contains(ExceptionNO.illegalInstr),
       "HasPipelineReg trait with non-empty excptionOut must have illegal instruction exception output")
     io.out.bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := vstartIllegal
