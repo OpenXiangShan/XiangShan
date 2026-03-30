@@ -332,6 +332,7 @@ class DecodeChannelOutput extends Bundle {
   val uopIdx = UopIdx()
   val isFirstUop = Bool()
   val isLastUop = Bool()
+  val src12Rev = Bool()
 }
 
 object DecodeChannelOutput {
@@ -342,14 +343,14 @@ object DecodeChannelOutput {
     uop.opcode := vuop.opcode
     uop.isVset := vuop.isVset
 
-    uop.src1Ren := vuop.renameInfo.uop.src1Ren
-    uop.src1Type := vuop.renameInfo.uop.src1Type
-    uop.src2Ren := vuop.renameInfo.uop.src2Ren
-    uop.src2Type := vuop.renameInfo.uop.src2Type
+    uop.src1Ren := Mux(vuop.src12Rev, vuop.renameInfo.uop.src2Ren, vuop.renameInfo.uop.src1Ren)
+    uop.src1Type := Mux(vuop.src12Rev, vuop.renameInfo.uop.src2Type, vuop.renameInfo.uop.src1Type)
+    uop.src2Ren := Mux(vuop.src12Rev, vuop.renameInfo.uop.src1Ren,vuop.renameInfo.uop.src2Ren)
+    uop.src2Type := Mux(vuop.src12Rev, vuop.renameInfo.uop.src1Type,vuop.renameInfo.uop.src2Type)
     uop.src3Ren := vuop.renameInfo.uop.readVdAsSrc
     uop.src3Type.value := DecodeSrcType.VP
-    uop.lsrc1 := vuop.src.src1
-    uop.lsrc2 := vuop.src.src2
+    uop.lsrc1 := Mux(vuop.src12Rev, vuop.src.src2, vuop.src.src1)
+    uop.lsrc2 := Mux(vuop.src12Rev, vuop.src.src1, vuop.src.src2)
     uop.lsrc3 := vuop.src.dest
     uop.vlRen := vuop.renameInfo.uop.vlRen
     uop.v0Ren := vuop.v0Ren
@@ -385,6 +386,7 @@ object DecodeChannelOutput {
     uop.uopIdx := vuop.uopIdx
     uop.isFirstUop := vuop.isFirstUop
     uop.isLastUop := vuop.isLastUop
+    uop.src12Rev := vuop.src12Rev
 
     uop
   }
@@ -441,6 +443,7 @@ object DecodeChannelOutput {
     uop.uopIdx := 0.U
     uop.isFirstUop := true.B
     uop.isLastUop := true.B
+    uop.src12Rev := false.B
 
     uop
   }
@@ -495,6 +498,7 @@ object DecodeChannelOutput {
     uop.uopIdx := 0.U
     uop.isFirstUop := true.B
     uop.isLastUop := true.B
+    uop.src12Rev := false.B
 
     uop
   }
@@ -554,6 +558,7 @@ object DecodeChannelOutput {
     uop.uopIdx := 0.U
     uop.isFirstUop := true.B
     uop.isLastUop := true.B
+    uop.src12Rev := false.B
 
     uop
   }
