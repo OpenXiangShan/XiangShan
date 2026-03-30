@@ -23,6 +23,7 @@ import utility.ChiselDB
 import utility.ParallelSingedExpandingAdd
 import utility.XSError
 import utility.XSPerfAccumulate
+import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.FoldedHistoryInfo
@@ -719,7 +720,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     XSPerfAccumulate(s"sc_train${i}", t1_writeValid && changeVec(i))
   }
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "total",
     t1_writeValid,
     Seq(

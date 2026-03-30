@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import scala.math.min
 import utility.ChiselDB
 import utility.XSPerfAccumulate
+import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
@@ -377,7 +378,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     )
   }
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "total_br",
     t1_fire,
     Seq(

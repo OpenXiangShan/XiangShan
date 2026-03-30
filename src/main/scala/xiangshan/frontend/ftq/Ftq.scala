@@ -30,7 +30,7 @@ import utility.UIntToMask
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
-import utility.XSPerfPriorityAccumulate
+import utility.XSPerfSeqAccumulate
 import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
@@ -408,7 +408,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val redirectPerfMeta = perfQueue(backendRedirectFtqIdx.bits.value).bpuPerf
   private val commitPerfMeta   = perfQueue(commitPtr(0).value)
 
-  XSPerfPriorityAccumulate(
+  XSPerfSeqAccumulate(
     "squash_cycles_bp_wrong_redirect",
     backendRedirect.valid && backendRedirect.bits.isMisPred,
     Seq(
@@ -416,10 +416,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ("wrong_position", redirectCfiOffset =/= redirectPerfMeta.bpPred.cfiPosition),
       ("wrong_attribute", !(redirect.bits.attribute === redirectPerfMeta.bpPred.attribute)),
       ("wrong_target", redirect.bits.target =/= redirectPerfMeta.bpPred.target.toUInt)
-    )
+    ),
+    withPriority = true
   )
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "squash_cycles_bp_wrong_redirect_wrong_target",
     backendRedirect.valid && backendRedirect.bits.isMisPred &&
       redirect.bits.taken === redirectPerfMeta.bpPred.taken &&
@@ -437,13 +438,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val perf_mispredS1SourceVec = BpuPredictionSource.Stage1.getValidSeq(redirectPerfMeta.bpSource.s1Source)
   private val perf_mispredS3SourceVec = BpuPredictionSource.Stage3.getValidSeq(redirectPerfMeta.bpSource.s3Source)
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "resolve_branch_mispredicts_s1_source",
     backendRedirect.valid && backendRedirect.bits.isMisPred && !redirectPerfMeta.bpSource.s3Override,
     perf_mispredS1SourceVec
   )
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "resolve_branch_mispredicts_s3_source",
     backendRedirect.valid && backendRedirect.bits.isMisPred && redirectPerfMeta.bpSource.s3Override,
     perf_mispredS3SourceVec
@@ -453,7 +454,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate("resolve_other_redirects", backendRedirect.valid && !backendRedirect.bits.isMisPred)
 
   // Commit-time statistics, should be correct-path only
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "commit_branch",
     commit,
     Seq(
@@ -461,7 +462,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
       ("mispredicts", true.B, commitPerfMeta.mispredict)
     )
   )
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "commit_branch_type",
     commit,
     Seq(
@@ -482,22 +483,22 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val perf_commitHasMispredictConditional =
     perf_commitHasMispredict && commitPerfMeta.mispredictBranchInfo.attribute.isConditional
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "commit_branch_mispredicts_s1_mispred_s1_source",
     perf_commitHasMispredict && !commitPerfMeta.bpuPerf.bpSource.s3Override,
     BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
   )
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "commit_branch_mispredicts_s1_source",
     perf_commitHasMispredict,
     BpuPredictionSource.Stage1.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s1Source)
   )
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "commit_branch_mispredicts_s3_source",
     perf_commitHasMispredict,
     BpuPredictionSource.Stage3.getValidSeq(commitPerfMeta.bpuPerf.bpSource.s3Source)
   )
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "commit_branch_mispredicts_reason",
     perf_commitHasMispredict,
     BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(
@@ -506,7 +507,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
       commitPerfMeta.mispredictBranchInfo
     ))
   )
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "commit_conditional_branch_mispredicts_reason",
     perf_commitHasMispredictConditional,
     BlameBpuSource.BlameType.getValidSeq(BlameBpuSource(
@@ -515,7 +516,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
       commitPerfMeta.mispredictBranchInfo
     ))
   )
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "commit_branch_mispredicts_type",
     perf_commitHasMispredict,
     Seq(

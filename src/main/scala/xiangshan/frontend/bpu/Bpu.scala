@@ -24,6 +24,7 @@ import utility.DelayN
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
@@ -599,7 +600,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     0,
     FetchBlockInstNum + 1
   )
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "s1_use",
     io.toFtq.prediction.fire,
     Seq(
@@ -614,13 +615,13 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   XSPerfAccumulate("s3_use_ittage", s3_fire && s3_taken && !s3_useRas && s3_useIttage)
   XSPerfAccumulate("s3_use_mbtb_tage", s3_fire && s3_prediction.attribute.isConditional)
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "finalPred_s1",
     s3_fire && !s3_override,
     BpuPredictionSource.Stage1.getValidSeq(s3_perfMeta.bpSource.s1Source)
   )
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "finalPred_s3",
     s3_fire && s3_override,
     BpuPredictionSource.Stage3.getValidSeq(s3_perfMeta.bpSource.s3Source)
@@ -640,20 +641,20 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     thisPrefix = "s3"
   )
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     s"s3Override_takenMismatch_s1fall",
     io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s1Fallthrough,
     perf_s3TakenSourceVec
   )
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     s"s3Override_takenMismatch_s3fall",
     io.toFtq.prediction.fire && s3_override && s3_perfMeta.bpSource.s3Fallthrough,
     perf_s1TakenSourceVec
   )
 
   // position mismatch
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     s"s3Override_positionMismatch",
     io.toFtq.prediction.fire && s3_override &&
       s3_prediction.taken && s3_s1Prediction.taken &&
@@ -662,7 +663,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   )
 
   // attribute mismatch
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     s"s3Override_attributeMismatch",
     io.toFtq.prediction.fire && s3_override &&
       s3_prediction.taken && s3_s1Prediction.taken &&
@@ -680,7 +681,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     thisPrefix = "s3"
   )
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     s"s3Override_targetMismatch",
     io.toFtq.prediction.fire && s3_override &&
       s3_prediction.taken && s3_s1Prediction.taken &&
@@ -695,7 +696,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val t0_branches         = train.branches
   private val t0_mbtbHit          = t0_mbtbMeta.entries.flatten.map(_.hit(t0_mispredictBranch.bits)).reduce(_ || _)
 
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "train",
     io.fromFtq.train.fire,
     Seq(
@@ -703,7 +704,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       ("stall", !io.fromFtq.train.ready)
     )
   )
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "train_branch",
     io.fromFtq.train.fire,
     Seq(
@@ -715,7 +716,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       ("conditional", true.B, PopCount(t0_branches.map(b => b.valid && b.bits.attribute.isConditional)))
     )
   )
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "train_mispredict",
     io.fromFtq.train.fire && t0_mispredictBranch.valid,
     Seq(
