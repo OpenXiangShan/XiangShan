@@ -178,6 +178,7 @@ class DecodeStageImp(
         bits.vpu.sew16 := false.B // Todo: remove it
         bits.vpu.sew32 := false.B // Todo: remove it
         bits.vpu.sew64 := false.B // Todo: remove it
+        bits.vm := uopInfo.vm
         bits.vtype := mopInfo.vtype
         bits.oldVType := mopInfo.oldVType
         bits.vlsInstr := false.B // Todo: remove

@@ -1062,11 +1062,11 @@ object Opcode {
     def traits: Set[OpcodeTrait] = opcode.getTraits
 
     def vsi: Opcode = {
-      opcode + Src1Imm(DecodeSelImm.OPIVIS) + Src2Vp
+      opcode + Src1Imm(DecodeSelImm.OPIVIS)
     }
 
     def vui: Opcode = {
-      opcode + Src1Imm(DecodeSelImm.OPIVIU) + Src2Vp
+      opcode + Src1Imm(DecodeSelImm.OPIVIU)
     }
 
     def dx: Opcode = {
