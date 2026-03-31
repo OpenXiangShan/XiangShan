@@ -493,7 +493,7 @@ case class XSCoreParameters
           v0WB = V0WB(0, 0),
           v0RD = V0RD(0, 0),
         ),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
+      ), numEntries = 16, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX1",
@@ -504,7 +504,7 @@ case class XSCoreParameters
           v0WB = V0WB(1, 0),
           v0RD = V0RD(1, 0),
         ),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
+      ), numEntries = 16, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX2",
@@ -515,7 +515,7 @@ case class XSCoreParameters
           v0WB = V0WB(2, 0),
           v0RD = V0RD(2, 0),
         ),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
+      ), numEntries = 16, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VFEX3",
@@ -526,7 +526,7 @@ case class XSCoreParameters
           v0WB = V0WB(3, 0),
           v0RD = V0RD(3, 0),
         ),
-      ), numEntries = 16, numEnq = 2, numComp = 12),
+      ), numEntries = 16, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VSTD0",
@@ -534,7 +534,7 @@ case class XSCoreParameters
           Seq(),
           Seq(Seq(VfRD(12, 0))),
         )
-      ), numEntries = 16, numEnq = 2, numComp = 12),
+      ), numEntries = 16, numEnq = 2, numComp = 14),
       IssueBlockParams(Seq(
         ExeUnitParams(
           "VSTD1",
@@ -542,7 +542,7 @@ case class XSCoreParameters
           Seq(),
           Seq(Seq(VfRD(13, 0))),
         )
-      ), numEntries = 16, numEnq = 2, numComp = 12),
+      ), numEntries = 16, numEnq = 2, numComp = 14),
     ),
       numPregs = vfPreg.numEntries,
       numDeqOutside = 0,

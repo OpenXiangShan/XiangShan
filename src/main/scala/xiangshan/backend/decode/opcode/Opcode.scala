@@ -890,7 +890,7 @@ object Opcode {
 
   object FDivOpcodes extends FDivOpcodes
 
-  object FAluOpcodes extends opcodes.FMiscOpcode
+  object FAluOpcodes extends Opcodes.FMacOpcode
 
   trait VSetOpcodes extends Opcodes {
     // vtype is from imm
@@ -969,11 +969,11 @@ object Opcode {
     def traits: Set[OpcodeTrait] = opcode.getTraits
 
     def vsi: Opcode = {
-      opcode + Src1Imm(DecodeSelImm.OPIVIS) + Src2Vp
+      opcode + Src1Imm(DecodeSelImm.OPIVIS)
     }
 
     def vui: Opcode = {
-      opcode + Src1Imm(DecodeSelImm.OPIVIU) + Src2Vp
+      opcode + Src1Imm(DecodeSelImm.OPIVIU)
     }
 
     def dx: Opcode = {

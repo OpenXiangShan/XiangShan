@@ -347,7 +347,7 @@ object DecodeChannelOutput {
     uop.src1Type := Mux(vuop.src12Rev, vuop.renameInfo.uop.src2Type, vuop.renameInfo.uop.src1Type)
     uop.src2Ren := Mux(vuop.src12Rev, vuop.renameInfo.uop.src1Ren,vuop.renameInfo.uop.src2Ren)
     uop.src2Type := Mux(vuop.src12Rev, vuop.renameInfo.uop.src1Type,vuop.renameInfo.uop.src2Type)
-    uop.src3Ren := vuop.renameInfo.uop.readVdAsSrc
+    uop.src3Ren := vuop.renameInfo.uop.readVdAsSrc || vuop.vdDepElim =/= VdDepElim.Always
     uop.src3Type.value := DecodeSrcType.VP
     uop.lsrc1 := Mux(vuop.src12Rev, vuop.src.src2, vuop.src.src1)
     uop.lsrc2 := Mux(vuop.src12Rev, vuop.src.src1, vuop.src.src2)

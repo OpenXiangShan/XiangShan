@@ -6,9 +6,11 @@ import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{ExuInput, NewExuInput}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.decode._
+import xiangshan.backend.fu.FuConfig.VectorV2Config
 import xiangshan.backend.fu.fpu.IntFPToVec
 import xiangshan.backend.fu.wrapper._
 import xiangshan.backend.fu.vector.{DummyVecPipedFuncUnit, DummyVecNonPipedFuncUnit}
+import xiangshan.backend.vector.Exu
 import xiangshan.mem.{Std, VStd}
 
 /**
@@ -79,8 +81,9 @@ case class FuConfig (
   maskWakeUp    : Boolean = false,
   readV0        : Boolean = false,
   readVl        : Boolean = false,
+  readVType     : Boolean = false,
   readOldVtype  : Boolean = false,
-) {
+) extends VectorV2Config {
   require(srcData.forall(!_.contains(V0Data())), s"V0Data() should not appear in srcData args")
   require(srcData.forall(!_.contains(VlData())), s"VlData() should not appear in srcData args")
 
@@ -107,6 +110,10 @@ case class FuConfig (
     // Don't add more shit here!!!
     // Todo: add new FuType to distinguish f2i, f2f
     uop.ctrl.fuType === this.fuType.U
+  }
+
+  def fuSel2(uop: Exu.InUop): Bool = {
+    (uop.ctrl.fuType & this.fuType.U).orR
   }
 
   /**
@@ -454,6 +461,7 @@ object FuConfig {
     immType = Set(Imm_I()),
     readVl = true,
     readV0 = true,
+    readVType = true,
   )
 
   val StaCfg: FuConfig = FuConfig (
@@ -471,6 +479,7 @@ object FuConfig {
     immType = Set(Imm_S()),
     readVl = true,
     readV0 = true,
+    readVType = true,
   )
 
   val StdCfg: FuConfig = FuConfig (
@@ -571,6 +580,7 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
     readV0 = true,
     readVl = true,
+    readVType = true,
     immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
   )
 
@@ -593,6 +603,7 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
     readV0 = true,
     readVl = true,
+    readVType = true,
     immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
   )
 
@@ -613,6 +624,7 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
     readVl = true,
     readV0 = true,
+    readVType = true,
     immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
   )
 
@@ -633,6 +645,7 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
     readV0 = true,
     readVl = true,
+    readVType = true,
     immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
   )
 
@@ -654,6 +667,7 @@ object FuConfig {
     exceptionOut = Seq(illegalInstr),
     readV0 = true,
     readVl = true,
+    readVType = true,
     immType = Set(Imm_OPIVIS(), Imm_OPIVIU()),
   )
 
@@ -675,6 +689,7 @@ object FuConfig {
     destDataBits = 128,
     readV0 = true,
     readVl = true,
+    readVType = true,
   )
 
   val VfaluCfg = FuConfig (
@@ -697,6 +712,7 @@ object FuConfig {
     needSrcFrm = true,
     readV0 = true,
     readVl = true,
+    readVType = true,
   )
 
   val VfmaCfg = FuConfig (
@@ -718,6 +734,7 @@ object FuConfig {
     needSrcFrm = true,
     readV0 = true,
     readVl = true,
+    readVType = true,
   )
 
   val VfdivCfg = FuConfig(
@@ -739,6 +756,7 @@ object FuConfig {
     needSrcFrm = true,
     readV0 = true,
     readVl = true,
+    readVType = true,
   )
 
   val VfcvtCfg = FuConfig(
@@ -760,6 +778,7 @@ object FuConfig {
     needSrcFrm = true,
     readV0 = true,
     readVl = true,
+    readVType = true,
   )
 
   val VSha256msCfg = FuConfig(
@@ -780,6 +799,7 @@ object FuConfig {
     needSrcFrm = true,
     readV0 = true,
     readVl = true,
+    readVType = true,
   )
 
   val VSha256cCfg = FuConfig(
@@ -800,6 +820,7 @@ object FuConfig {
     needSrcFrm = true,
     readV0 = true,
     readVl = true,
+    readVType = true,
   )
 
   val FaluCfg = FuConfig(
@@ -896,6 +917,7 @@ object FuConfig {
     destDataBits = 128,
     readV0 = true,
     readVl = true,
+    readVType = true,
   )
 
   val VstuCfg: FuConfig = FuConfig (
@@ -917,6 +939,7 @@ object FuConfig {
     destDataBits = 128,
     readV0 = true,
     readVl = true,
+    readVType = true,
   )
 
   val VseglduCfg: FuConfig = FuConfig (
@@ -940,6 +963,7 @@ object FuConfig {
     destDataBits = 128,
     readV0 = true,
     readVl = true,
+    readVType = true,
   )
 
   val VsegstuCfg: FuConfig = FuConfig(
@@ -961,6 +985,7 @@ object FuConfig {
     destDataBits = 128,
     readV0 = true,
     readVl = true,
+    readVType = true,
   )
 
   def allConfigs = Seq(
@@ -977,5 +1002,15 @@ object FuConfig {
   def needUncertainWakeupFuConfigs = Seq(
     CsrCfg, DivCfg, FdivCfg, VfdivCfg/*, VidivCfg*/
   )
+
+  trait VectorV2Config { self: FuConfig =>
+    def writeGpRf = this.writeIntRf
+    def writeVpRf = this.writeVecRf
+
+    def needFlushPipe = this.flushPipe
+    def needVM = this.readV0
+    def readOldVType = this.writeVlRf
+
+  }
 }
 
