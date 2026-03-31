@@ -12,6 +12,7 @@ import xiangshan.FuOpType
 import yunsuan.scalar.FPCVT
 import yunsuan.util._
 import yunsuan.encoding.Opcode.Opcodes._
+import yunsuan.vector.Common._
 import yunsuan.VfmaType
 
 

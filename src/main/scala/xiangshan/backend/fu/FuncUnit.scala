@@ -46,7 +46,6 @@ object UncertainLatency {
 
 class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val fuOpType    = FuOpType()
-  val toRobValid  = Bool()
   val robIdx      = new RobPtr
   val pdest       = UInt(PhyRegIdxWidth.W)
   val pdestV0     = Option.when(cfg.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
@@ -73,7 +72,6 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
 }
 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
-  val toRobValid    = Bool()
   val robIdx        = new RobPtr
   val pdest         = UInt(PhyRegIdxWidth.W) // Todo: use maximum of pregIdxWidth of different pregs
   val pdestV0       = Option.when(cfg.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
@@ -155,7 +153,6 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
 
   // should only be used in non-piped fu
   def connectNonPipedCtrlSingal: Unit = {
-    io.out.bits.ctrl.toRobValid := RegEnable(io.in.bits.ctrl.toRobValid, io.in.fire)
     io.out.bits.ctrl.robIdx := RegEnable(io.in.bits.ctrl.robIdx, io.in.fire)
     io.out.bits.ctrl.pdest  := RegEnable(io.in.bits.ctrl.pdest, io.in.fire)
     io.out.bits.ctrl.pdestV0.foreach(_ := RegEnable(io.in.bits.ctrl.pdestV0.get, io.in.fire))
@@ -173,7 +170,6 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
   }
 
   def connectNonPipedCtrlDataHoldBypass: Unit = {
-    io.out.bits.ctrl.toRobValid := DataHoldBypass(io.in.bits.ctrl.toRobValid, io.in.fire)
     io.out.bits.ctrl.robIdx := DataHoldBypass(io.in.bits.ctrl.robIdx, io.in.fire)
     io.out.bits.ctrl.pdest := DataHoldBypass(io.in.bits.ctrl.pdest, io.in.fire)
     io.out.bits.ctrl.pdestV0.foreach(_ := DataHoldBypass(io.in.bits.ctrl.pdestV0.get, io.in.fire))
@@ -191,7 +187,6 @@ abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSMod
   }
 
   def connect0LatencyCtrlSingal: Unit = {
-    io.out.bits.ctrl.toRobValid := io.in.bits.ctrl.toRobValid
     io.out.bits.ctrl.robIdx := io.in.bits.ctrl.robIdx
     io.out.bits.ctrl.pdest := io.in.bits.ctrl.pdest
     io.out.bits.ctrl.pdestVl.foreach(_ := io.in.bits.ctrl.pdestVl.get)
@@ -289,7 +284,6 @@ trait HasPipelineReg { this: FuncUnit =>
 
   io.in.ready := fixRdyVec.head
   io.out.valid := fixValidVec.last
-  io.out.bits.ctrl.toRobValid := ctrlVec.last.toRobValid
   io.out.bits.ctrl.robIdx := ctrlVec.last.robIdx
   io.out.bits.ctrl.pdest := ctrlVec.last.pdest
   io.out.bits.ctrl.pdestV0.foreach(_ := ctrlVec.last.pdestV0.get)
