@@ -49,6 +49,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val sel16 = sew16
   private val sel32 = sew32
   private val sel64 = sew64
+  private val isNarrow = VIAluOpcodes.isNarrow(fuOpType)
 
   vs2Split.io.inVecData := vs2
   vs1Split.io.inVecData := vs1
@@ -167,7 +168,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val vlIsZeroS1 = RegEnable(vlIsZero, valid)
 
   private val vd = Cat(vIAluFixPoints.map(_.out.ex1.vd).reverse)
-  private val outNarrow = outVecCtrl.isNarrow
+  private val outNarrow = isNarrow
   private val outVuopIdx0 = outVecCtrl.vuopIdx(0).asBool
   private val narrowVd = Cat(vIAluFixPoints.map(_.out.ex1.narrowVd).reverse)
   private val outNarrowVd = Mux(outVuopIdx0,
