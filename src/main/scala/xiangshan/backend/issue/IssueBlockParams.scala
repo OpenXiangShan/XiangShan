@@ -18,7 +18,7 @@ import xiangshan.backend.fu.FuConfig._
 
 case class IssueBlockParams(
   // top down
-  private val exuParams: Seq[ExeUnitParams],
+  val exuParams: Seq[ExeUnitParams],
   val numEntries       : Int,
   numEnq               : Int,
   numComp              : Int,
