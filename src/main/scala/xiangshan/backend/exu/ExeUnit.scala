@@ -178,7 +178,6 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.bits.data.nextPcOffset.foreach(x => x := source.bits.data.nextPcOffset.get)
       sink.bits.data.imm         := source.bits.data.imm
       sink.bits.ctrl.fuOpType    := source.bits.ctrl.fuOpType
-      sink.bits.ctrl.toRobValid  := source.bits.toRobValid
       sink.bits.ctrl.robIdx      := source.bits.robIdx
       sink.bits.ctrl.pdest       := source.bits.toRF.pdest
       sink.bits.ctrl.pdestV0     .foreach(x => x := source.bits.toRF.pdestV0.get)
@@ -214,7 +213,6 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       val source = inPipe._1(i)
       fu.io.in.bits.validPipe.get(i) := inPipe._2(i)
       sink.fuOpType := source.ctrl.fuOpType
-      sink.toRobValid := source.toRobValid
       sink.robIdx := source.robIdx
       sink.pdest := source.toRF.pdest
       sink.pdestV0.foreach(_ := source.toRF.pdestV0.get)
@@ -420,7 +418,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   io.out.bits.pdestV0.                foreach(x => x := Mux1H(fuOutValidOH, funcUnits.map(_.io.out.bits.ctrl.pdestV0.getOrElse(0.U))))
   io.out.bits.pdestVl.                foreach(x => x := Mux1H(fuOutValidOH, funcUnits.map(_.io.out.bits.ctrl.pdestVl.getOrElse(0.U))))
   io.out.bits.redirect.               foreach(x => x := Mux1H((fuOutValidOH zip fuRedirectVec).filter(_._2.isDefined).map(x => (x._1, x._2.get))))
-  io.out.bits.toRob.valid                            := Mux1H(fuOutValidOH, funcUnits.map(_.io.out.bits.ctrl.toRobValid))
+  io.out.bits.toRob.valid                            := Mux1H(fuOutValidOH, funcUnits.map(_.io.out.valid))
   io.out.bits.toRob.bits.robIdx                      := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.robIdx))
   io.out.bits.toRob.bits.fflags.      foreach(x => x := Mux1H(fuOutValidOH, fuOutresVec.map(_.fflags.getOrElse(0.U.asTypeOf(io.out.bits.toRob.bits.fflags.get)))))
   io.out.bits.toRob.bits.fflagsWen.   foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.fflagsWen.getOrElse(false.B))))
