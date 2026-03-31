@@ -105,6 +105,7 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val memoryType               = MemoryType()
   val cboType                  = CboType()
   val prefetch                 = Bool() //TODO: need it ?
+  val isHyper                  = Bool()
 
   // debug signal
   val debugPaddr               = Option.when(debugEn)(UInt((PAddrBits).W))
@@ -177,6 +178,10 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   def isCacheable(in: UInt): Bool = {
     require(in.getWidth == MemoryType.width)
     MemoryType.isCacheable(in)
+  }
+  def isMemory(in: UInt): Bool = {
+    require(in.getWidth == MemoryType.width)
+    MemoryType.isMemoryRegion(in)
   }
   // is cbo zero
   def isCboZero(in: UInt): Bool = {
@@ -914,6 +919,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
     private val isNC             = isPbmtNC(headDataEntry.memoryType)
     private val isPBMTIO         = isPbmtIO(headDataEntry.memoryType)
+    private val isMemoryRegion   = isMemory(headDataEntry.memoryType)
     private val uncacheCanHandle = !isCacheable(headDataEntry.memoryType) && !headCtrlEntry.isCbo &&
       headCtrlEntry.allValid && !headCtrlEntry.hasException && headCtrlEntry.allocated && headCtrlEntry.committed
 
@@ -962,7 +968,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.toUncacheBuffer.req.bits.data          := Mux(headDataEntry.vaddr(3), outData.head(VLEN - 1, 64), outData.head(63,0))
     io.toUncacheBuffer.req.bits.mask          := Mux(headDataEntry.vaddr(3), outMask.head(VLENB - 1 , 8), outMask.head(7,0))
     io.toUncacheBuffer.req.bits.robIdx        := headDataEntry.uop.robIdx
-    io.toUncacheBuffer.req.bits.memBackTypeMM := isNC || isPBMTIO
+    io.toUncacheBuffer.req.bits.memBackTypeMM := isMemoryRegion
     io.toUncacheBuffer.req.bits.nc            := isNC //TODO: remove it, why not use memBackTypeMM ?!
     io.toUncacheBuffer.req.bits.id            := brodenId
 
@@ -1023,7 +1029,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.exceptionInfo.bits.uopIdx       := 0.U.asTypeOf(io.exceptionInfo.bits.uopIdx)
     io.exceptionInfo.bits.vl           := 0.U.asTypeOf(io.exceptionInfo.bits.vl)
     io.exceptionInfo.bits.vstart       := 0.U.asTypeOf(io.exceptionInfo.bits.vstart)
-    io.exceptionInfo.bits.isHyper      := false.B
+    io.exceptionInfo.bits.isHyper      := dataEntries.head.isHyper
 
     /*============================================ cacheable handle ==================================================*/
     /**
@@ -1583,6 +1589,9 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       LSUOpType.isCboAll(port.bits.uop.fuOpType) && staValidSetVec(j)
     }
     val isCboSet = cboSetVec.reduce(_ || _)
+    val isHyperSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
+      port.bits.isHyper && staValidSetVec(j)
+    }.reduce(_ || _)
 
     when(staSetValid) {
       ctrlEntries(i).addrValid    := addrValidSet // need hasException?
@@ -1606,6 +1615,10 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
           isCboZero(port.bits.uop.fuOpType(1, 0))  -> CboType.zero
         ))
       }
+    }
+
+    when(staSetValid) {
+      dataEntries(i).isHyper := isHyperSet
     }
 
 
@@ -1671,21 +1684,25 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
          pbmtIo:    "10".U
          io:        "11".U // IO device
       */
-      dataEntries(i).memoryType := Cat(mmioSet, ncSet || !memBackTypeSet)
+      dataEntries(i).memoryType := Cat(!memBackTypeSet, mmioSet, ncSet || !memBackTypeSet)
       /*
        * [NOTE]: To explain the logical operations above, the truth table is as follows:
        * The signal of [memBackTypeMM] means request is main memory region.
        *
-       *           |  memBackTypeSet | !memBackTypeSet | ncSet | mmioSet | memoryType[1] | memoryType[0] |
-       * Cacheable |       1         |       0         |   0   |    0    |        0      |       0       |
-       * NC        |       1         |       0         |   1   |    0    |        0      |       1       |
-       * PbmtIO    |       1         |       0         |   0   |    1    |        1      |       0       |
-       * IO        |       0         |       1         |   0   |    1    |        1      |       1       |
-       *                                     |             |        |             ^              ^
-       *                                     |             |        +-------------+              |
-       *                                     +----- or ----+                                     |
-       *                                            |                                            |
-       *                                            +--------------------------------------------+
+       *                                     +-----------------------------------+
+       *                                     |                                   v
+       *              |  memBackTypeSet | !memBackTypeSet | ncSet | mmioSet | memoryType[2] | memoryType[1] | memoryType[0] |
+       * Cacheable    |       1         |       0         |   0   |    0    |       0       |       0       |       0       |
+       * MemoryNC     |       1         |       0         |   1   |    0    |       0       |       0       |       1       |
+       * MemoryPbmtIO |       1         |       0         |   0   |    1    |       0       |       1       |       0       |
+       * DeviceNC     |       0         |       1         |   1   |    0    |       1       |       0       |       1       |
+       * DevicePbmtIO |       0         |       1         |   0   |    1    |       1       |       1       |       1       |
+       * IO           |       0         |       1         |   0   |    1    |       1       |       1       |       1       |
+       *                                        |             |        |                            ^               ^
+       *                                        |             |        +----------------------------+               |
+       *                                        +----- or ----+                                                     |
+       *                                               |                                                            |
+       *                                               +------------------------------------------------------------+
        * */
     }//  don't need to set false for low power, it will be set every instruction.
 

@@ -425,6 +425,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.toLsq.bits.uop.ftqOffset := s1_out.uop.ftqOffset
   io.toLsq.bits.uop.isRVC     := s1_out.uop.isRVC
   io.toLsq.bits.uop.isFirstIssue := s1_out.isFirstIssue
+  io.toLsq.bits.isHyper       := s1_out.isHyper
   io.toLsq.bits.nc            := DontCare // will be set in stage 2
   io.toLsq.bits.mmio          := DontCare // will be set in stage 2
   io.toLsq.bits.memBackTypeMM := DontCare // will be set in stage 2
@@ -575,6 +576,7 @@ class StoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModu
   io.toLsqRe.mask                := DontCare
   io.toLsqRe.size                := DontCare
   io.toLsqRe.uop                 := DontCare
+  io.toLsqRe.isHyper             := DontCare
   io.toLsqRe.cross4KPage         := false.B
   io.toLsqRe.unalignWithin16Byte := s2_out.misalignWith16Byte && !s2_frm_mabuf
   io.toLsqRe.isUnalign          := s2_out.isMisalign || s2_frm_mabuf

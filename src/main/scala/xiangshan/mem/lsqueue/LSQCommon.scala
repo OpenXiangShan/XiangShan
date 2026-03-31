@@ -30,18 +30,20 @@ abstract class LSQModule(implicit p: Parameters) extends XSModule
 
 
 object MemoryType {
-  def cacheable: UInt     = "b00".U
-  def pbmtNc: UInt        = "b01".U
-  def pbmtIo: UInt        = "b10".U
-  def io: UInt            = "b11".U // IO device
+  def cacheable: UInt     = "b000".U
+  def memoryPbmtNc: UInt  = "b001".U
+  def memoryPbmtIo: UInt  = "b010".U
+  def devicePbmtNc: UInt  = "b101".U
+  def deviceIo: UInt      = "b111".U // device IO & pbmt device IO
 
-  def isPMPIO(in: UInt):  Bool = in(0) && in(1)
-  def isMMIO(in: UInt):   Bool = in(1) // pbmt io and device io
+  def isDeviceRegion(in: UInt): Bool = in(2) // device region
+  def isMemoryRegion(in: UInt): Bool = !isDeviceRegion(in) // memory region
   def isPbmtIO(in: UInt): Bool = !in(0) && in(1)
   def isPbmtNC(in: UInt): Bool = in(0) && !in(1)
   def isCacheable(in: UInt): Bool = !in(0) && !in(1)
+  def isMMIO(in: UInt):   Bool = in(1) // pbmt io and device io
 
-  def width: Int = 2
+  def width: Int = 3
   def apply() = UInt(width.W)
 }
 
