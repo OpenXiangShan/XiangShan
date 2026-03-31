@@ -32,7 +32,6 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val nf      = 0.U  // No need to handle nf in vector arith unit
 
   protected val fuOpType  = inCtrl.fuOpType
-  protected val isNarrow  = vecCtrl.isNarrow
   protected val isExt     = vecCtrl.isExt
   protected val isDstMask = vecCtrl.isDstMask
   protected val isMove    = vecCtrl.isMove
