@@ -178,6 +178,10 @@ class VStd(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.valid := io.in.valid
   io.out.bits.res.data := io.in.bits.data.src(0)
   io.out.bits.ctrl.robIdx := io.in.bits.ctrl.robIdx
+  io.out.bits.ctrl.pdest := io.in.bits.ctrl.pdest
+  io.out.bits.ctrl.isRVC.foreach(_ := false.B)
+  io.out.bits.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
+  io.out.bits.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
 }
 
 class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {

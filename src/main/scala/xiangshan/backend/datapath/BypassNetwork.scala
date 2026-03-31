@@ -148,7 +148,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   println(s"[BypassNetwork] HasBypass2SourceExu: ${fromDPsHasBypass2Source}")
   println(s"[BypassNetwork] HasBypass2SinkExu: ${fromDPsHasBypass2Sink}")
 
-  toExus.zip(fromDPs).foreach { case (sink, source) =>
+  toExus.zip(fromDPs).foreach { case (sink, source: DecoupledIO[Og1InUop]) =>
     connectSamePort(sink.bits, source.bits)
     sink.bits.imm := source.bits.imm.getOrElse(0.U)
     sink.bits.selImm := source.bits.selImm.getOrElse(0.U)

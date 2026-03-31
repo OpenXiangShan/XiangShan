@@ -29,6 +29,7 @@ import xiangshan.backend.issue._
 import xiangshan.backend.regfile._
 import xiangshan.{DebugOptionsKey, XSCoreParamsKey}
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.vector.{Exu, RegionParam}
 
 import scala.collection.mutable
 import scala.reflect.{ClassTag, classTag}
@@ -37,7 +38,7 @@ case class BackendParams(
   schdParams : Map[SchedulerType, SchdBlockParams],
   pregParams : Seq[PregParams],
   iqWakeUpParams : Seq[WakeUpConfig],
-) {
+) extends NewParam {
 
   def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).EnableDifftest
 
@@ -414,6 +415,15 @@ case class BackendParams(
     this.vlPregParams.numWrite.getOrElse(this.getWbPortIndices(VlData()).size)
   }
 
+  /**
+   * Get size of read ports of vl regfile
+   *
+   * @return if [[VlPregParams.numRead]] is [[None]], get size of ports in [[VlRD]]
+   */
+  def getVlRfReadSize = {
+    this.vlPregParams.numRead.getOrElse(this.getRdPortIndices(VlData()).size)
+  }
+
   def getRfReadSize(dataCfg: DataConfig) = {
     dataCfg match{
       case IntData() | FpData() | VecData() | V0Data() | VlData() => this.getPregParams(dataCfg).numRead.getOrElse(this.getRdPortIndices(dataCfg).size)
@@ -588,6 +598,22 @@ case class BackendParams(
       }
     }
   }
+}
+
+sealed trait NewParam { self: BackendParams =>
+  def getIntRegionParam: RegionParam = RegionParam(intSchdParams.get, this)
+  def getFltRegionParam: RegionParam = RegionParam(fpSchdParams.get, this)
+  def getVecRegionParam: RegionParam = RegionParam(vecSchdParams.get, this)
+
+  def regionParams: Seq[RegionParam] = Seq(
+    getIntRegionParam,
+    getFltRegionParam,
+    getVecRegionParam,
+  )
+
+  def genExuToRfBundle(pregParams: PregParams): MixedVec[MixedVec[MixedVec[Exu.ToRf]]] = MixedVec(
+    regionParams.map(_.genExuToRfBundle(pregParams))
+  )
 }
 
 object BackendV2SchdParams {

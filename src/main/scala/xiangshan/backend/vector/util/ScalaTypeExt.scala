@@ -1,6 +1,7 @@
 package xiangshan.backend.vector.util
 
-import chisel3.util.BitPat
+import chisel3.Data
+import chisel3.util.{BitPat, MixedVec}
 
 import scala.language.implicitConversions
 
@@ -45,4 +46,12 @@ object ScalaTypeExt {
   }
 
   implicit def SeqToExt[T](seq: Seq[T]): SeqExt[T] = new SeqExt[T](seq)
+
+  class ChiselSeqDataExt[T <: Data](val seq: Seq[T]) {
+    def toMixedVec: MixedVec[T] = {
+      MixedVec(seq)
+    }
+  }
+
+  implicit def toChiselSeqDataExt[T <: Data](seq: Seq[T]): ChiselSeqDataExt[T] = new ChiselSeqDataExt[T](seq)
 }

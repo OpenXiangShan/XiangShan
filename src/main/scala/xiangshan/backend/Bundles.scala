@@ -61,7 +61,6 @@ object Bundles {
     connectSamePort(sink.bits.data, source.bits)
     connectSamePort(sink.bits.toRF, source.bits)
     connectSamePort(sink.bits, source.bits)
-    sink.bits.toRobValid := source.valid
     sink.bits.robIdx     := source.bits.robIdx
   }
 
@@ -173,6 +172,7 @@ object Bundles {
     val selImm = SelImm()
     val imm = UInt(32.W)
     val vpu = new VPUCtrlSignals
+    val vm = Bool()
     val vtype = VType()
     val oldVType = VType()
     val vlsInstr = Bool()
@@ -264,6 +264,7 @@ object Bundles {
     val selImm = SelImm()
     val imm = UInt(32.W)
     val vpu = new VPUCtrlSignals
+    val vm = Bool()
     val vlsInstr = Bool()
     val fflagsWen = Bool()
     val isMove = Bool()
@@ -369,6 +370,7 @@ object Bundles {
     val pdest = UInt(PhyRegIdxWidth.W)
     val pdestV0 = UInt(V0PhyRegIdxWidth.W)
     val pdestVl = UInt(VlPhyRegIdxWidth.W)
+    val vm = Bool()
     val vtype = VType()
     val oldVType = VType()
     val robIdx = new RobPtr
@@ -423,6 +425,7 @@ object Bundles {
     val selImm   = Option.when(params.needImm)(SelImm())
     val imm      = Option.when(params.needImm)(UInt(32.W))
     val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
+    val vm       = Option.when(params.readV0Rf)(Bool())
     val oldVType = Option.when(params.writeVType)(VType())
     val vtype    = Option.when(params.readVlRf)(VType())
     val fflagsWen  = Option.when(params.writeFflags)(Bool())
@@ -499,9 +502,8 @@ object Bundles {
     val fuOpType = FuOpType()
     val selImm   = Option.when(params.needImm)(SelImm())
     val imm      = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
-    val fpu      = Option.when(params.writeFflags)(new FPUCtrlSignals)
     val vpu      = Option.when(params.issueBlockParam.inVfSchd)(new VPUCtrlSignals)
-    val wfflags  = Option.when(params.writeFflags)(Bool())
+    val fflagsWen = Option.when(params.writeFflags)(Bool())
     val uopIdx   = Option.when(params.issueBlockParam.inVfSchd)(UopIdx())
     val lastUop  = Option.when(params.issueBlockParam.inVfSchd)(Bool())
     // from rename
@@ -998,11 +1000,10 @@ object Bundles {
     val fuOpType       = FuOpType()
     val selImm         = Option.when(exuParams.needImm)(SelImm())
     val imm            = Option.when(exuParams.needImm)(UInt(exuParams.deqImmTypesMaxLen.W))
-    val fpu      = Option.when(exuParams.writeFflags)(new FPUCtrlSignals)
     val vpu      = Option.when(iqParams.inVfSchd)(new VPUCtrlSignals)
     val oldVType = Option.when(exuParams.writeVType)(VType())
     val vtype    = Option.when(exuParams.readVlRf)(VType())
-    val wfflags  = Option.when(exuParams.writeFflags)(Bool())
+    val fflagsWen = Option.when(exuParams.writeFflags)(Bool())
     val numLsElem = Option.when(iqParams.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(exuParams.needRasAction)(BranchAttribute.RasAction())
     val storeSetHit    = Option.when(exuParams.hasLoadExu || exuParams.hasStoreAddrExu)(Bool())
@@ -1064,11 +1065,10 @@ object Bundles {
       this.fuOpType := 0.U
       this.selImm.foreach(_ := 0.U)
       this.imm.foreach(_ := 0.U)
-      this.fpu.foreach(_ := 0.U.asTypeOf(new FPUCtrlSignals))
       this.vpu.foreach(_ := 0.U.asTypeOf(new VPUCtrlSignals))
       this.oldVType.foreach(_ := 0.U.asTypeOf(VType()))
       this.vtype.foreach(_ := 0.U.asTypeOf(VType()))
-      this.wfflags.foreach(_ := false.B)
+      this.fflagsWen.foreach(_ := false.B)
       this.numLsElem.foreach(_ := 0.U.asTypeOf(NumLsElem()))
       this.rasAction.foreach(_ := 0.U)
       this.storeSetHit.foreach(_ := false.B)
@@ -1094,9 +1094,8 @@ object Bundles {
       this.selImm.foreach(_ := source.selImm.get)
       this.imm.foreach(_ := source.imm.get)
 
-      this.fpu.foreach(_ := source.fpu.get)
       this.vpu.foreach(_ := source.vpu.get)
-      this.wfflags.foreach(_ := source.wfflags.get)
+      this.fflagsWen.foreach(_ := source.fflagsWen.get)
 
       this.numLsElem.foreach(_ := source.numLsElem.get)
       this.rasAction.foreach(_ := source.rasAction.get)
@@ -1369,7 +1368,6 @@ object Bundles {
   class NewExuInput(val params: ExeUnitParams, copyWakeupOut: Boolean = false, copyNum: Int = 0, hasCopySrc: Boolean = false)(implicit p: Parameters) extends XSBundle {
     val ctrl           = new ExuInputCtrlBundle(params)
     val data           = new ExuInputDataBundle(params)
-    val toRobValid     = Bool()
     val robIdx         = new RobPtr
     val toRF           = new ExuInputToRegFileBundle(params)
     val iqIdx          = UInt(log2Up(params.issueBlockParam.numEntries).W)
