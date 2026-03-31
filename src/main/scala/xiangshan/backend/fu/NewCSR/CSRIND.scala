@@ -14,77 +14,77 @@ import xiangshan.XSBundle
 import scala.collection.immutable.SeqMap
 
 trait CSRIND { self: NewCSR with HypervisorLevel =>
-  val mireg2 = Module(new CSRModule("Mireg2") {
+  val mireg2 = Module(new CSRModule("Mireg2", new ZeroFieldBundle("Reserved machine interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.mireg2)
 
-  val mireg3 = Module(new CSRModule("Mireg3") {
+  val mireg3 = Module(new CSRModule("Mireg3", new ZeroFieldBundle("Reserved machine interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.mireg3)
 
-  val mireg4 = Module(new CSRModule("Mireg4") {
+  val mireg4 = Module(new CSRModule("Mireg4", new ZeroFieldBundle("Reserved machine interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.mireg4)
 
-  val mireg5 = Module(new CSRModule("Mireg5") {
+  val mireg5 = Module(new CSRModule("Mireg5", new ZeroFieldBundle("Reserved machine interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.mireg5)
 
-  val mireg6 = Module(new CSRModule("Mireg6") {
+  val mireg6 = Module(new CSRModule("Mireg6", new ZeroFieldBundle("Reserved machine interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.mireg6)
 
-  val sireg2 = Module(new CSRModule("Sireg2") {
+  val sireg2 = Module(new CSRModule("Sireg2", new ZeroFieldBundle("Reserved supervisor interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.sireg2)
 
-  val sireg3 = Module(new CSRModule("Sireg3") {
+  val sireg3 = Module(new CSRModule("Sireg3", new ZeroFieldBundle("Reserved supervisor interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.sireg3)
 
-  val sireg4 = Module(new CSRModule("Sireg4") {
+  val sireg4 = Module(new CSRModule("Sireg4", new ZeroFieldBundle("Reserved supervisor interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.sireg4)
 
-  val sireg5 = Module(new CSRModule("Sireg5") {
+  val sireg5 = Module(new CSRModule("Sireg5", new ZeroFieldBundle("Reserved supervisor interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.sireg5)
 
-  val sireg6 = Module(new CSRModule("Sireg6") {
+  val sireg6 = Module(new CSRModule("Sireg6", new ZeroFieldBundle("Reserved supervisor interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.sireg6)
 
-  val vsireg2 = Module(new CSRModule("VSireg2") {
+  val vsireg2 = Module(new CSRModule("VSireg2", new ZeroFieldBundle("Reserved virtual supervisor interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.vsireg2)
 
-  val vsireg3 = Module(new CSRModule("VSireg3") {
+  val vsireg3 = Module(new CSRModule("VSireg3", new ZeroFieldBundle("Reserved virtual supervisor interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.vsireg3)
 
-  val vsireg4 = Module(new CSRModule("VSireg4") {
+  val vsireg4 = Module(new CSRModule("VSireg4", new ZeroFieldBundle("Reserved virtual supervisor interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.vsireg4)
 
-  val vsireg5 = Module(new CSRModule("VSireg5") {
+  val vsireg5 = Module(new CSRModule("VSireg5", new ZeroFieldBundle("Reserved virtual supervisor interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.vsireg5)
 
-  val vsireg6 = Module(new CSRModule("VSireg6") {
+  val vsireg6 = Module(new CSRModule("VSireg6", new ZeroFieldBundle("Reserved virtual supervisor interrupt-file indirect data register; reads as zero.")) {
     rdata := 0.U
   })
     .setAddr(CSRs.vsireg6)

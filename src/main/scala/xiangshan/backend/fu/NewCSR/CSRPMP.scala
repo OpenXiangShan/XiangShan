@@ -22,7 +22,7 @@ trait CSRPMP { self: NewCSR =>
       .setAddr(CSRs.pmpcfg0 + num)
     } else {
       Module(new CSRModule(s"Pmpcfg$num", new CSRBundle {
-        val ALL = RO(63, 0)
+        val ALL = RO(63, 0).withDescription("Reserved PMP configuration register. XiangShan implements it as zero.")
       }))
       .setAddr(CSRs.pmpcfg0 + num)
     }
@@ -49,7 +49,7 @@ trait CSRPMP { self: NewCSR =>
         .setAddr(CSRs.pmpaddr0 + num)
     } else {
       Module(new CSRModule(s"Pmpaddr${num}", new CSRBundle {
-        val ALL = RO(63, 0)
+        val ALL = RO(63, 0).withDescription("Reserved PMP address register. XiangShan implements it as zero.")
       }))
         .setAddr(CSRs.pmpaddr0 + num)
     }
@@ -79,17 +79,19 @@ trait CSRPMP { self: NewCSR =>
 
 class PMPCfgBundle extends CSRBundle {
   override val len = 8
-  val R      = WARL(           0, wNoFilter).withReset(false.B)
-  val W      = WARL(           1, wNoFilter).withReset(false.B)
-  val X      = WARL(           2, wNoFilter).withReset(false.B)
-  val A      = PMPCfgAField(4, 3, wNoFilter).withReset(PMPCfgAField.OFF)
-  val ATOMIC = RO(5).withReset(false.B)           // res(0), unuse in pmp
-  val C      = RO(6).withReset(false.B)           // res(1), unuse in pmp
-  val L      = PMPCfgLField(   7, wNoFilter).withReset(PMPCfgLField.UNLOCKED)
+  val R      = WARL(           0, wNoFilter).withReset(false.B).withDescription("Read permission bit.")
+  val W      = WARL(           1, wNoFilter).withReset(false.B).withDescription("Write permission bit.")
+  val X      = WARL(           2, wNoFilter).withReset(false.B).withDescription("Execute permission bit.")
+  val A      = PMPCfgAField(4, 3, wNoFilter).withReset(PMPCfgAField.OFF).withDescription("Address-matching mode.")
+  val ATOMIC = RO(5).withReset(false.B).withDescription("Atomic access permission bit. Reserved and unused in PMP.")
+  val C      = RO(6).withReset(false.B).withDescription("Cacheable attribute bit. Reserved and unused in PMP.")
+  val L      = PMPCfgLField(   7, wNoFilter).withReset(PMPCfgLField.UNLOCKED).withDescription("Lock bit.")
 }
 
 object PMPCfgLField extends CSREnum with WARLApply {
   val UNLOCKED = Value(0.U)
+  val LOCKED = Value(1.U)
+  override protected def legalValues: Seq[EnumType] = Seq(UNLOCKED, LOCKED)
 
   def locked(cfg: PMPCfgBundle): Bool = cfg.L.asBool
   def addrLocked(cfg: PMPCfgBundle): Bool = locked(cfg)
@@ -101,6 +103,7 @@ object PMPCfgAField extends CSREnum with WARLApply {
   val TOR   = Value(1.U)  // Top of range
   val NA4   = Value(2.U)  // Naturally aligned four-byte region
   val NAPOT = Value(3.U)  // Naturally aligned power-of-two region, ≥ 8 bytes
+  override protected def legalValues: Seq[EnumType] = Seq(OFF, TOR, NA4, NAPOT)
 
   def off(cfg: PMPCfgBundle): Bool = cfg.A.asUInt === 0.U
   def tor(cfg: PMPCfgBundle): Bool = cfg.A.asUInt === 1.U
@@ -114,7 +117,7 @@ object PMPCfgAField extends CSREnum with WARLApply {
 }
 
 class PMPAddrBundle extends CSRBundle {
-  val ADDRESS  = WARL(PMPAddrBits-1,  0, wNoFilter).withReset(false.B)
+  val ADDRESS  = WARL(PMPAddrBits-1,  0, wNoFilter).withReset(false.B).withDescription("Protected-region address encoding.")
 }
 
 trait HasPMPCfgRSink { self: CSRModule[_] =>

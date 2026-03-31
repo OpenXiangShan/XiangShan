@@ -230,17 +230,17 @@ trait HypervisorLevel { self: NewCSR =>
 
 class HstatusBundle extends CSRBundle {
 
-  val VSBE  = RO(5).withReset(0.U)
-  val GVA   = RW(6)
-  val SPV   = VirtMode(7)
-  val SPVP  = RW(8)
-  val HU    = RW(9)
-  val VGEIN = HstatusVgeinField(17, 12, wNoFilter, rNoFilter).withReset(0.U)
-  val VTVM  = RW(20).withReset(0.U)
-  val VTW   = RW(21).withReset(0.U)
-  val VTSR  = RW(22).withReset(0.U)
-  val VSXL  = XLENField(33, 32).withReset(XLENField.XLEN64)
-  val HUPMM = EnvPMM(49, 48, wNoEffect).withReset(EnvPMM.Disable) // Ssnpm extension
+  val VSBE  = RO(5).withReset(0.U).withDescription("VS-mode endianness selector.")
+  val GVA   = RW(6).withDescription("Indicates that trap information is associated with a guest virtual address.")
+  val SPV   = VirtMode(7).withDescription("Saved virtualization mode from before trap entry to HS-mode.")
+  val SPVP  = RW(8).withDescription("Saved virtual privilege level from before trap entry to HS-mode.")
+  val HU    = RW(9).withDescription("Permit virtual load and store instructions in U-mode when set.")
+  val VGEIN = HstatusVgeinField(17, 12, wNoFilter, rNoFilter).withReset(0.U).withDescription("Selected guest external interrupt identity.")
+  val VTVM  = RW(20).withReset(0.U).withDescription("Trap VS-stage virtual-memory management operations when set.")
+  val VTW   = RW(21).withReset(0.U).withDescription("Trap WFI in VS-mode when set.")
+  val VTSR  = RW(22).withReset(0.U).withDescription("Trap SRET in VS-mode when set.")
+  val VSXL  = XLENField(33, 32).withReset(XLENField.XLEN64).withDescription("Effective XLEN for VS-mode.")
+  val HUPMM = EnvPMM(49, 48, wNoEffect).withReset(EnvPMM.Disable).withDescription("Hypervisor user-mode memory privilege mode from the Ssnpm extension.")
 
 }
 
@@ -278,12 +278,12 @@ class HvienBundle extends InterruptEnableBundle {
 }
 
 class HgeieBundle(implicit val p: Parameters) extends CSRBundle with HasSoCParameter {
-  val ie = RW(soc.IMSICParams.geilen, 1).withReset(0.U)
+  val ie = RW(soc.IMSICParams.geilen, 1).withReset(0.U).withDescription("Guest external interrupt enable bits.")
   // bit 0 is read only 0
 }
 
 class HgeipBundle(implicit val p: Parameters) extends CSRBundle with HasSoCParameter {
-  val ip = RO(soc.IMSICParams.geilen, 1)
+  val ip = RO(soc.IMSICParams.geilen, 1).withDescription("Guest external interrupt pending bits.")
   // bit 0 is read only 0
 }
 
@@ -329,36 +329,36 @@ class HieToMie extends IeValidBundle {
 
 class HvictlBundle extends CSRBundle {
   // Virtual Trap Interrupt control
-  val VTI = RW(30).withReset(0.U)
+  val VTI = RW(30).withReset(0.U).withDescription("Enable virtual interrupt injection through hvictl.")
   // WARL in AIA spec.
   // RW, since we support max width of IID
-  val IID = RW(15 + HIIDWidth, 16).withReset(0.U)
+  val IID = RW(15 + HIIDWidth, 16).withReset(0.U).withDescription("Virtual interrupt identity to inject.")
   // determines the interrupt’s presumed default priority order relative to a (virtual) supervisor external interrupt (SEI), major identity 9
   // 0 = interrupt has higher default priority than an SEI
   // 1 = interrupt has lower default priority than an SEI
   // When hvictl.IID = 9, DPR is ignored.
   // Todo: sort the interrupt specified by hvictl with DPR
-  val DPR = RW(9).withReset(0.U)
-  val IPRIOM = RW(8).withReset(0.U)
-  val IPRIO = RW(7, 0).withReset(0.U)
+  val DPR = RW(9).withReset(0.U).withDescription("Default-priority relation relative to supervisor external interrupt.")
+  val IPRIOM = RW(8).withReset(0.U).withDescription("Interpret IPRIO as machine-defined priority when set.")
+  val IPRIO = RW(7, 0).withReset(0.U).withDescription("Priority value for the injected virtual interrupt.")
 }
 
 class Hviprio1Bundle extends CSRBundle {
-  val PrioSSI = RW(15,  8).withReset(0.U)
-  val PrioSTI = RW(31, 24).withReset(0.U)
-  val PrioCOI = RW(47, 40).withReset(0.U)
-  val Prio14  = RW(55, 48).withReset(0.U)
-  val Prio15  = RW(63, 56).withReset(0.U)
+  val PrioSSI = RW(15,  8).withReset(0.U).withDescription("Priority value for supervisor software interrupt.")
+  val PrioSTI = RW(31, 24).withReset(0.U).withDescription("Priority value for supervisor timer interrupt.")
+  val PrioCOI = RW(47, 40).withReset(0.U).withDescription("Priority value for counter-overflow interrupt.")
+  val Prio14  = RW(55, 48).withReset(0.U).withDescription("Priority value for local interrupt 14.")
+  val Prio15  = RW(63, 56).withReset(0.U).withDescription("Priority value for local interrupt 15.")
 }
 
-class Hviprio2Bundle extends FieldInitBundle
+class Hviprio2Bundle extends FieldInitBundle(Some("Additional virtual interrupt-priority register contents."))
 
 class HgatpBundle extends CSRBundle {
-  val MODE = HgatpMode(63, 60, wNoFilter).withReset(HgatpMode.Bare)
+  val MODE = HgatpMode(63, 60, wNoFilter).withReset(HgatpMode.Bare).withDescription("G-stage address-translation mode selector.")
   // WARL in privileged spec.
   // RW, since we support max width of VMID
-  val VMID = RW(44 - 1 + VMIDLEN, 44).withReset(0.U)
-  val PPN = RW(43, 0).withReset(0.U)
+  val VMID = RW(44 - 1 + VMIDLEN, 44).withReset(0.U).withDescription("Virtual machine identifier.")
+  val PPN = RW(43, 0).withReset(0.U).withDescription("Root page-table physical page number for G-stage translation.")
 }
 
 class HEnvCfg extends EnvCfg {
@@ -373,7 +373,7 @@ class HEnvCfg extends EnvCfg {
   }
 }
 
-class Htimedelta extends FieldInitBundle
+class Htimedelta extends FieldInitBundle(Some("Delta applied to virtual time for VS-mode timer interrupts."))
 
 trait HypervisorBundle { self: CSRModule[_] =>
   val hstatus = IO(Input(new HstatusBundle))

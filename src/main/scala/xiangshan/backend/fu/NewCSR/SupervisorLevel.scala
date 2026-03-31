@@ -70,7 +70,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val senvcfg = Module(new CSRModule("Senvcfg", new SEnvCfg))
     .setAddr(CSRs.senvcfg)
 
-  val sscratch = Module(new CSRModule("Sscratch"))
+  val sscratch = Module(new CSRModule("Sscratch", new ScratchBundle("Supervisor-mode scratch register.")))
     .setAddr(CSRs.sscratch)
 
   val sepc = Module(new CSRModule("Sepc", new Epc) with TrapEntryHSEventSinkBundle)
@@ -129,7 +129,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     .setAddr(CSRs.sip)
 
   val stimecmp = Module(new CSRModule("Stimecmp", new CSRBundle {
-    val stimecmp = RW(63, 0).withReset(bitPatToUInt(BitPat.Y(64)))
+    val stimecmp = RW(63, 0).withReset(bitPatToUInt(BitPat.Y(64))).withDescription("Supervisor timer compare value.")
   }))
     .setAddr(CSRs.stimecmp)
 
@@ -152,7 +152,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   // or series of calls ultimately up to M-mode).
   val scountovf = Module(new CSRModule("Scountovf", new CSRBundle {
     override val len: Int = 32
-    val OFVEC = RO(31, 3).withReset(0.U)
+    val OFVEC = RO(31, 3).withReset(0.U).withDescription("Overflow status bits for mhpmcounter3 through mhpmcounter31.")
   }) with HasMhpmeventOfBundle {
     regOut.OFVEC := Mux1H(Seq(
       privState.isModeM  -> ofVec,
@@ -212,18 +212,18 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
 }
 
 class SstatusBundle extends CSRBundle {
-  val SIE  = CSRWARLField   (1, wNoFilter)
-  val SPIE = CSRWARLField   (5, wNoFilter)
-  val UBE  = CSRROField     (6).withReset(0.U)
-  val SPP  = CSRWARLField   (8, wNoFilter).withReset(0.U)
-  val VS   = ContextStatus  (10, 9).withReset(ContextStatus.Off)
-  val FS   = ContextStatus  (14, 13).withReset(ContextStatus.Off)
-  val XS   = ContextStatusRO(16, 15).withReset(0.U)
-  val SUM  = CSRWARLField   (18, wNoFilter).withReset(0.U)
-  val MXR  = CSRWARLField   (19, wNoFilter).withReset(0.U)
-  val SDT  = CSRWARLField   (24, wNoFilter).withReset(0.U)
-  val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64)
-  val SD   = CSRROField     (63, (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty)
+  val SIE  = CSRWARLField   (1, wNoFilter).withDescription("Global interrupt enable for S-mode.")
+  val SPIE = CSRWARLField   (5, wNoFilter).withDescription("Saved SIE value from before trap entry.")
+  val UBE  = CSRROField     (6).withReset(0.U).withDescription("U-mode endianness selector.")
+  val SPP  = CSRWARLField   (8, wNoFilter).withReset(0.U).withDescription("Privilege level active before trap entry to S-mode.")
+  val VS   = ContextStatus  (10, 9).withReset(ContextStatus.Off).withDescription("Vector context status.")
+  val FS   = ContextStatus  (14, 13).withReset(ContextStatus.Off).withDescription("Floating-point context status.")
+  val XS   = ContextStatusRO(16, 15).withReset(0.U).withDescription("Additional user extension state summary.")
+  val SUM  = CSRWARLField   (18, wNoFilter).withReset(0.U).withDescription("Permit S-mode data accesses to pages marked as user.")
+  val MXR  = CSRWARLField   (19, wNoFilter).withReset(0.U).withDescription("Make executable pages readable when set.")
+  val SDT  = CSRWARLField   (24, wNoFilter).withReset(0.U).withDescription("S-mode disable-trap bit used by the Ssdbltrp extension.")
+  val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64).withDescription("Effective XLEN for U-mode.")
+  val SD   = CSRROField     (63, (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty).withDescription("Dirty summary bit for the floating-point or vector context.")
 }
 
 class SieBundle extends InterruptEnableBundle {
@@ -243,17 +243,17 @@ class SipBundle extends InterruptPendingBundle {
 }
 
 class SatpBundle extends CSRBundle {
-  val MODE = SatpMode(63, 60, null).withReset(SatpMode.Bare)
+  val MODE = SatpMode(63, 60, null).withReset(SatpMode.Bare).withDescription("Address-translation mode selector.")
   // WARL in privileged spec.
   // RW, since we support max width of ASID
-  val ASID = RW(44 - 1 + ASIDLEN, 44).withReset(0.U)
+  val ASID = RW(44 - 1 + ASIDLEN, 44).withReset(0.U).withDescription("Address-space identifier.")
   // Do WARL in SatpModule/VSatpModule
-  val PPN  = RW(43, 0).withReset(0.U)
+  val PPN  = RW(43, 0).withReset(0.U).withDescription("Root page-table physical page number.")
 }
 
 class ScontextBundle extends CSRBundle {
   override val len = 32
-  val ALL = RW(31, 0).withReset(0.U)
+  val ALL = RW(31, 0).withReset(0.U).withDescription("Supervisor trigger context value.")
 }
 
 class SEnvCfg extends EnvCfg
