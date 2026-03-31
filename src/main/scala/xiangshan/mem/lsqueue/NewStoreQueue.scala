@@ -1516,8 +1516,8 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       ptr.value === i.U && sqDeqCnt > j.U
     }).asUInt.orR
 
-    val handleFinishSet = rdataPtrExt.head.value === i.U &&
-      (io.writeBack.fire || io.toUncacheBuffer.req.fire && isPbmtNC(dataEntries(i).memoryType))
+    val ncFinish = io.toUncacheBuffer.idResp.valid && !io.toUncacheBuffer.idResp.bits.is2lq && isPbmtNC(dataEntries(i).memoryType)
+    val handleFinishSet = rdataPtrExt.head.value === i.U && (io.writeBack.fire || ncFinish)
 
     when (entryCanEnq) {
       connectSamePort(dataEntries(i).uop, selectBits.uop) //TODO: will be remove in the future.
