@@ -1,0 +1,160 @@
+# Generate performance summary report from EMU Performance Test workflow runs and post as a comment on the PR. Can be triggered manually or by EMU Performance Comment Trigger workflow.
+name: EMU Performance Summary
+
+on:
+  workflow_dispatch:
+    inputs:
+      HEAD_SHA:
+        description: Head commit SHA
+        required: true
+        type: string
+      BASE_SHA:
+        description: Base commit SHA
+        required: false
+        type: string
+      PR:
+        description: Pull request number
+        required: false
+        type: string
+      COMMENT_ID:
+        description: Existing issue comment id to update
+        required: false
+        type: string
+
+jobs:
+  summary:
+    name: EMU - Performance - Summary
+    permissions:
+      actions: read
+      pull-requests: write
+      issues: write
+    runs-on: ubuntu-latest
+    env:
+      HEAD_SHA: ${{ inputs.HEAD_SHA }}
+      BASE_SHA: ${{ inputs.BASE_SHA }}
+      PR: ${{ inputs.PR }}
+      COMMENT_ID: ${{ inputs.COMMENT_ID }}
+    steps:
+      - name: Find run ids
+        id: runs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          head_run_id=$(gh run list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow "EMU Performance Test" \
+            --commit "${HEAD_SHA}" \
+            --json databaseId \
+            --limit 1 | jq -r '.[0].databaseId')
+
+          if [ -z "${head_run_id}" ] || [ "${head_run_id}" = "null" ]; then
+            echo "Failed to find head run for ${HEAD_SHA}" >&2
+            exit 1
+          fi
+
+          echo "head_run_id=${head_run_id}" >> "$GITHUB_OUTPUT"
+
+          if [ -n "${BASE_SHA}" ]; then
+            base_run_id=$(gh run list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --workflow "EMU Performance Test" \
+              --commit "${BASE_SHA}" \
+              --json databaseId \
+              --limit 1 | jq -r '.[0].databaseId')
+            if [ -n "${base_run_id}" ] && [ "${base_run_id}" != "null" ]; then
+              echo "base_found=true" >> "$GITHUB_OUTPUT"
+              echo "base_run_id=${base_run_id}" >> "$GITHUB_OUTPUT"
+            else
+              echo "base_found=false" >> "$GITHUB_OUTPUT"
+              echo "base_error=Failed to find base run (commit ${BASE_SHA})" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "base_found=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download head reports
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ipc-*
+          path: current
+          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.runs.outputs.head_run_id }}
+      - name: Download base reports
+        if: ${{ steps.runs.outputs.base_found == 'true' }}
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ipc-*
+          path: base
+          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ steps.runs.outputs.base_run_id }}
+      - name: Generate summary
+        run: |
+          geomean() {
+            python3 -c "import sys, math; print(math.exp(sum(math.log(float(x)) for x in sys.argv[1:]) / len(sys.argv[1:])))" "$@"
+          }
+
+          diff() {
+            python3 -c "print(f'{(float($1) - float($2)) / float($2) * 100:.2f}')" "$@"
+          }
+
+          {
+            echo "## Emu - Performance Summary"
+            echo
+            if [ -n "${{ steps.runs.outputs.base_error }}" ]; then
+              echo "Error: ${{ steps.runs.outputs.base_error }}"
+              echo "Please check workflow logs for details."
+              echo
+            fi
+            echo "### Metadata"
+            echo "| - | SHA | Run ID |"
+            echo "| - | --- | ------ |"
+            if [ -n "${BASE_SHA}" ]; then
+              echo "| Base | ${BASE_SHA} | ${{ steps.runs.outputs.base_run_id || 'N/A' }} |"
+            fi
+            echo "| Current | ${HEAD_SHA} | ${{ steps.runs.outputs.head_run_id }} |"
+            echo
+            echo "### IPC Report"
+            echo "| Testcase | Current | Base | Diff |"
+            echo "| -------- | ------- | ---- | ---- |"
+
+            has_na=false
+            for file in current/ipc-*; do
+              name=$(basename "${file}" | cut -d '-' -f 2-)
+              ipc=$(cat "${file}")
+              if [ -f "base/ipc-${name}" ]; then
+                base_ipc=$(cat "base/ipc-${name}")
+                echo "| ${name} | ${ipc} | ${base_ipc} | $(diff "${ipc}" "${base_ipc}")% |"
+              else
+                echo "| ${name} | ${ipc} | N/A | N/A |"
+                has_na=true
+              fi
+            done
+
+            current_geomean=$(geomean $(cat current/ipc-* | xargs))
+            base_geomean=$(geomean $(cat base/ipc-* | xargs) 2>/dev/null || echo "N/A")
+            geomean_diff=$(diff "${current_geomean}" "${base_geomean}" 2>/dev/null || echo "N/A")
+            echo "| **GEOMEAN** | **${current_geomean}** | **${base_geomean}** | **${geomean_diff}%** |"
+            echo
+            if [ "${has_na}" = true ]; then
+              echo "**NOTE**: Some testcases do not have base data, diff is shown as N/A and GEOMEAN diff may not be accurate."
+            fi
+          } > report.md
+
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Create or Update Comment from Bot
+        if: ${{ inputs.PR != '' && inputs.COMMENT_ID == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr comment "${PR}" --repo "${GITHUB_REPOSITORY}" --body-file report.md --edit-last --create-if-none
+      - name: Update Comment from Specified ID
+        if: ${{ inputs.COMMENT_ID != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          body=$(cat report.md)
+          gh api \
+            -X PATCH \
+            "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" \
+            -f body="${body}"

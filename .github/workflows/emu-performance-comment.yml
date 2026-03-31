@@ -1,0 +1,72 @@
+# Call EMU Performance Summary workflow when a comment is created with the format "/diff <BASE_SHA>" or "/diff" (auto-detect base sha from PR base)
+name: EMU Performance Comment Trigger
+
+on:
+  issue_comment:
+    types: [ created ]
+
+jobs:
+  dispatch-summary:
+    name: Dispatch summary for /diff
+    if: ${{ github.event.issue.pull_request && startsWith(github.event.comment.body, '/diff') }}
+    permissions:
+      actions: write
+      pull-requests: read
+      issues: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Parse /diff command
+        id: parse
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          cmd=$(echo "${COMMENT_BODY}" | tr -d '\r' | head -n 1 | xargs)
+          if [[ "${cmd}" =~ ^/diff$ ]]; then
+            echo "use_base_sha=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ ! "${cmd}" =~ ^/diff[[:space:]]+([0-9a-fA-F]{7,40})$ ]]; then
+            echo "Invalid command format. Expected: /diff or /diff {BASE_SHA}" >&2
+            exit 1
+          fi
+          base_sha="${BASH_REMATCH[1]}"
+          echo "use_base_sha=false" >> "$GITHUB_OUTPUT"
+          echo "base_sha=${base_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Get PR info
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          pr_json=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")
+          head_sha=$(echo "${pr_json}" | jq -r '.head.sha')
+          base_sha=$(echo "${pr_json}" | jq -r '.base.sha')
+
+          if [ -z "${head_sha}" ] || [ "${head_sha}" = "null" ]; then
+            echo "Failed to get PR head sha" >&2
+            exit 1
+          fi
+          if [ -z "${base_sha}" ] || [ "${base_sha}" = "null" ]; then
+            echo "Failed to get PR base sha" >&2
+            exit 1
+          fi
+
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+          echo "base_sha=${base_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch emu-performance-summary workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+          BASE_SHA: ${{ steps.parse.outputs.use_base_sha == 'true' && steps.pr.outputs.base_sha || steps.parse.outputs.base_sha }}
+          PR: ${{ github.event.issue.number }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          gh api repos/${GITHUB_REPOSITORY}/actions/workflows/emu-performance-summary.yml/dispatches \
+            -f ref=${GITHUB_REF_NAME} \
+            -f inputs[HEAD_SHA]="${HEAD_SHA}" \
+            -f inputs[BASE_SHA]="${BASE_SHA}" \
+            -f inputs[PR]="${PR}" \
+            -f inputs[COMMENT_ID]="${COMMENT_ID}"

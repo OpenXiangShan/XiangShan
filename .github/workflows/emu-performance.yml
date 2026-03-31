@@ -249,104 +249,53 @@ jobs:
           name: ipc-reports
           path: ${{ env.PERF_HOME }}/ipc-*
 
-  summary:
-    name: EMU - Performance - Summary
+  dispatch-summary:
+    name: EMU - Performance - Dispatch Summary
     permissions:
-      actions: read # to download upstream artifact
-      pull-requests: write # to post PR comment
+      actions: write
     needs: upload
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - name: Download reports
-        uses: actions/download-artifact@v8
-        with:
-          pattern: ipc-*
-          path: current
-          merge-multiple: true
-      - name: Find upstream run_id
-        if: ${{ github.event_name == 'pull_request' }}
-        id: find_upstream
+      - name: Dispatch emu-performance-summary workflow
+        if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DISPATCH_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
+          COMMENT_ID: ""
         run: |
-          echo "Upstream commit sha: ${{ github.event.pull_request.base.sha }}"
-          run_id=$(gh run list --commit "${{ github.event.pull_request.base.sha }}" --workflow "${{ github.workflow }}" --json databaseId --limit 1 | jq -r '.[0].databaseId')
-          if [ -z "${run_id}" ] || [ "${run_id}" == "null" ]; then
-            echo "Failed to find upstream run"
-            echo "error=Failed to find upstream run (commit ${{ github.event.pull_request.base.sha }})" >> $GITHUB_OUTPUT
-            echo "run_id=N/A" >> $GITHUB_OUTPUT
-            echo "found=false" >> $GITHUB_OUTPUT
-            exit 0
+          dispatch_ts=$(date -u +%s)
+          gh api repos/${GITHUB_REPOSITORY}/actions/workflows/emu-performance-summary.yml/dispatches \
+            -f ref="${DISPATCH_REF}" \
+            -f inputs[HEAD_SHA]="${HEAD_SHA}" \
+            -f inputs[BASE_SHA]="${BASE_SHA}" \
+            -f inputs[PR]="${PR}" \
+            -f inputs[COMMENT_ID]="${COMMENT_ID}"
+
+          summary_url=""
+          for _ in {1..20}; do
+            summary_url=$(gh run list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --workflow "EMU Performance Summary" \
+              --event workflow_dispatch \
+              --branch "${DISPATCH_REF}" \
+              --limit 20 \
+              --json url,createdAt \
+              | jq -r --argjson ts "${dispatch_ts}" '[.[] | select((.createdAt | fromdateiso8601) >= $ts)] | first | .url // empty')
+            if [ -n "${summary_url}" ]; then
+              break
+            fi
+            sleep 3
+          done
+
+          if [ -n "${summary_url}" ]; then
+            echo "Summary workflow dispatched: ${summary_url}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Summary workflow dispatched, but run URL not found yet. Please check workflow list manually." >> "$GITHUB_STEP_SUMMARY"
           fi
-
-          echo "Upstream run_id: ${run_id}"
-          echo "run_id=${run_id}" >> $GITHUB_OUTPUT
-          echo "found=true" >> $GITHUB_OUTPUT
-      - name: Download upstream reports
-        if: ${{ steps.find_upstream.outputs.found == 'true' }}
-        uses: actions/download-artifact@v8
-        with:
-          pattern: ipc-*
-          path: upstream
-          merge-multiple: true
-          github-token: ${{ secrets.GITHUB_TOKEN }} # we need this to download artifact from another run
-          run-id: ${{ steps.find_upstream.outputs.run_id }}
-      - name: Generate summary
+      - name: Skip dispatch for fork PR
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
         run: |
-          function geomean() {
-            python3 -c "import sys, math; print(math.exp(sum(math.log(float(x)) for x in sys.argv[1:]) / len(sys.argv[1:])))" "$@"
-          }
-
-          function diff() {
-            python3 -c "print(f'{(float($1) - float($2)) / float($2) * 100:.2f}')" "$@"
-          }
-
-          {
-            echo "## Emu - Performance Summary"
-            echo ""
-            if [ -n "${{ steps.find_upstream.outputs.error }}" ]; then
-              echo "Error: ${{ steps.find_upstream.outputs.error }}"
-              echo "Please checkout workflow logs for details."
-              echo ""
-            fi
-            echo "### Metadata"
-            echo "| - | Branch | SHA | Run ID |"
-            echo "| - | ------ | --- | ------ |"
-            if [ "${{ github.event_name }}" == "pull_request" ]; then
-              echo "| Upstream | ${{ github.base_ref }} | ${{ github.event.pull_request.base.sha }} | ${{ steps.find_upstream.outputs.run_id }} |"
-            fi
-            echo "| Current | ${{ github.head_ref }} | ${{ github.event.pull_request.head.sha || github.sha }} | ${{ github.run_id }} |"
-            echo ""
-            echo "### IPC Report"
-            echo "| Testcase | Current | Upstream | Diff |"
-            echo "| -------- | ------- | -------- | ---- |"
-            for file in current/ipc-*; do
-              name=$(basename ${file} | cut -d '-' -f 2-)
-              ipc=$(cat "${file}")
-              has_na=false
-              if [ -f "upstream/ipc-${name}" ]; then
-                upstream_ipc=$(cat "upstream/ipc-${name}")
-                echo "| ${name} | ${ipc} | ${upstream_ipc} | $(diff ${ipc} ${upstream_ipc})% |"
-              else
-                echo "| ${name} | ${ipc} | N/A | N/A |"
-                has_na=true
-              fi
-            done
-
-            current_geomean=$(geomean $(cat current/ipc-* | xargs))
-            upstream_geomean=$(geomean $(cat upstream/ipc-* | xargs) 2>/dev/null || echo "N/A")
-            geomean_diff=$(diff ${current_geomean} ${upstream_geomean} 2>/dev/null || echo "N/A")
-            echo "| **GEOMEAN** | **${current_geomean}** | **${upstream_geomean}** | **${geomean_diff}%** |"
-            echo
-            if [ "${has_na}" = true ]; then
-              echo "**NOTE**: Some testcases do not have upstream data, diff is shown as N/A and GEOMEAN diff may not be accurate."
-            fi
-          } > report.md
-          cat report.md >> $GITHUB_STEP_SUMMARY
-      - name: Post PR comment
-        if: ${{ github.event_name == 'pull_request' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr comment ${{ github.event.pull_request.number }} --body-file report.md
+          echo "Fork PR detected, skip summary workflow dispatch because GITHUB_TOKEN cannot dispatch workflows in pull_request from fork." >> $GITHUB_STEP_SUMMARY
