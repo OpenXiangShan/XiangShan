@@ -1,0 +1,92 @@
+# Archive and remove stale CI results, like logrotate.
+# To prevent single-point failure, we use github actions to schedule this task, instead of a cron job on a single local server.
+name: Logrotate
+
+on:
+  schedule: # every Sunday 22:00 UTC+8
+    - cron: '0 14 * * 0'
+  workflow_dispatch: # allow manual trigger
+    inputs:
+      dry_run:
+        description: "Print actions only, do not archive or delete"
+        type: boolean
+        required: false
+        default: false
+
+# this workflow does not need repository token permissions
+permissions: {}
+
+# to prevent multiple runs at the same time
+concurrency:
+  group: logrotate
+  cancel-in-progress: true
+
+jobs:
+  logrotate:
+    name: Logrotate on ${{ matrix.cluster }} - ${{ matrix.target }}
+    runs-on: ${{ matrix.cluster }}
+    strategy:
+      matrix:
+        cluster:
+          - open
+          - node
+        target:
+          - /nfs/home/ci-runner/emu-basics         # EMU Basics Test
+          - /nfs/home/ci-runner/emu-performance    # EMU Performance Test
+          - /nfs/home/ci-runner/perf-report-custom # Performance Regression
+          - /nfs/home/ci-runner/xs-wave            # EMU Miscs Test
+          - /nfs/home/ci-runner/xs-perf            # EMU Miscs Test
+      max-parallel: 1 # prevent using too much resources
+    steps:
+      - name: Archive Results > 30 days old
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          dry_run="${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}"
+          if [[ ! -d "$target" ]]; then
+            echo "Error: target not found: $target"
+            exit 1
+          fi
+
+          if [[ "$dry_run" == "true" ]]; then
+            echo "[DRY_RUN] Archive stage: no files will be changed"
+          fi
+
+          find "$target" -mindepth 1 -maxdepth 1 -type d -mtime +30 -print0 | while IFS= read -r -d '' dir; do
+            base="$(basename "$dir")"
+            archive="$target/$base.tar.zst"
+            tmp_archive="$archive.tmp"
+            if [[ "$dry_run" == "true" ]]; then
+              echo "[DRY_RUN] Would archive $dir -> $archive"
+              echo "[DRY_RUN] Would remove directory $dir"
+            else
+              echo "Archiving $dir"
+              tar -I "zstd -19 -T0" -cf "$tmp_archive" -C "$target" -- "$base"
+              mv -f -- "$tmp_archive" "$archive"
+              rm -rf -- "$dir"
+            fi
+          done
+
+      - name: Remove Results > 90 days old
+        run: |
+          set -euo pipefail
+          target="${{ matrix.target }}"
+          dry_run="${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}"
+          if [[ ! -d "$target" ]]; then
+            echo "Error: target not found: $target"
+            exit 1
+          fi
+
+          if [[ "$dry_run" == "true" ]]; then
+            echo "[DRY_RUN] Cleanup stage: no files will be deleted"
+          fi
+
+          # .tar.zst are created >30 days old, so we check for files >60, to give >90 in total
+          find "$target" -mindepth 1 -maxdepth 1 -type f -name "*.tar.zst" -mtime +60 -print0 | while IFS= read -r -d '' file; do
+            if [[ "$dry_run" == "true" ]]; then
+              echo "[DRY_RUN] Would remove $file"
+            else
+              echo "Removing $file"
+              rm -f -- "$file"
+            fi
+          done

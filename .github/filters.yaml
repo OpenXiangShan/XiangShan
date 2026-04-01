@@ -3,6 +3,7 @@ core:
   - "!.github/CODEOWNERS"
   - "!.github/filters.yaml"
   - "!.github/labeler.yml"
+  - "!.github/workflows/logrotate.yml"
   - "!.github/workflows/nightly.yml"
   - "!.github/workflows/perf-template.yml"
   - "!.github/workflows/perf-v2.yml"
