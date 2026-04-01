@@ -13,6 +13,7 @@ import yunsuan.VfpuType
 import yunsuan.vector.VectorConvert.VectorCvt
 import yunsuan.util._
 import yunsuan.encoding.Opcode.Opcodes.FCvtOpcode
+import yunsuan.vector.Common._
 
 
 class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
@@ -164,18 +165,18 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 }
 
 class VectorCvtTopIO(vlen: Int, xlen: Int) extends Bundle{
-  val fire = Input(Bool())
-  val uopIdx = Input(Bool())
-  val src = Input(Vec(vlen / xlen, UInt(xlen.W)))
-  val opType = Input(UInt(9.W))
-  val rm = Input(UInt(3.W))
-  val inSew1H = Input(UInt(4.W))
-  val outSew1H = Input(UInt(4.W))
-  val isWiden = Input(Bool())
+  val fire     = Input(Bool())
+  val uopIdx   = Input(Bool())
+  val src      = Input(Vec(vlen / xlen, UInt(xlen.W)))
+  val opType   = Input(FCvtOpcode())
+  val rm       = Input(Frm())
+  val inSew1H  = Input(Sew())
+  val outSew1H = Input(Sew())
+  val isWiden  = Input(Bool())
   val isNarrow = Input(Bool())
 
   val result = Output(UInt(vlen.W))
-  val fflags = Output(UInt((vlen/16*5).W))
+  val fflags = Output(Vec(vlen/16, Fflags()))
 }
 
 
@@ -190,12 +191,12 @@ class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
   val fireReg = GatedValidRegNext(fire)
 
   val in0 = Mux(isWiden,
-    Mux(uopIdx, src(1).tail(32), src(0).tail(32)),
+    Mux(uopIdx, src(1)(31, 0), src(0)(31, 0)),
     src(0)
   )
 
   val in1 = Mux(isWiden,
-    Mux(uopIdx, src(1).head(32), src(0).head(32)),
+    Mux(uopIdx, src(1)(63, 32), src(0)(63, 32)),
     src(1)
   )
 
@@ -220,15 +221,19 @@ class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
 
   //cycle2
   io.result := Mux(isNarrowCycle2,
-    vectorCvt1.io.result.tail(32) ## vectorCvt0.io.result.tail(32),
+    vectorCvt1.io.result(31, 0) ## vectorCvt0.io.result(31, 0),
     vectorCvt1.io.result ## vectorCvt0.io.result)
 
-  io.fflags := Mux1H(outSew1HCycle2, Seq(
-    vectorCvt1.io.fflags ## vectorCvt0.io.fflags,
-    Mux(isNarrowCycle2, vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10), vectorCvt1.io.fflags ## vectorCvt0.io.fflags),
-    Mux(isNarrowCycle2, vectorCvt1.io.fflags(4,0) ## vectorCvt0.io.fflags(4,0), vectorCvt1.io.fflags.tail(10) ## vectorCvt0.io.fflags.tail(10)),
-    vectorCvt1.io.fflags(4,0) ## vectorCvt0.io.fflags(4,0)
+  val fflags = Mux1H(outSew1HCycle2, Seq(
+    vectorCvt1.io.fflags.asUInt ## vectorCvt0.io.fflags.asUInt,
+    Mux(isNarrowCycle2, vectorCvt1.io.fflags.asUInt.tail(10) ## vectorCvt0.io.fflags.asUInt.tail(10), vectorCvt1.io.fflags.asUInt ## vectorCvt0.io.fflags.asUInt),
+    Mux(isNarrowCycle2, vectorCvt1.io.fflags(0) ## vectorCvt0.io.fflags(0), vectorCvt1.io.fflags.asUInt.tail(10) ## vectorCvt0.io.fflags.asUInt.tail(10)),
+    vectorCvt1.io.fflags(0) ## vectorCvt0.io.fflags(0)
   ))
+
+  for (i <- 0 until vlen/16) {
+    io.fflags(i) := fflags(Fflags.width * (i + 1) - 1, Fflags.width * i)
+  }
 }
 
 
