@@ -64,13 +64,6 @@ object UopInfoFieldVec extends DecodeField[
     instP match {
       case vai: VecArithInstPattern =>
         val instBP = instP.rawInst
-        vai match {
-          case pattern: VecIntArithInstPattern if pattern.name.startsWith("VADD") =>
-            println(s"[tmp-genUopSeqImpl] ${instP} ${sewP} ${lmulP} ${nfP}")
-            println(SplitTable.table(instBP)(sewP ## lmulP))
-
-          case _ => ()
-        }
         SplitTable.table(instBP)(sewP ## lmulP)
 
       case vci: VecConfigInstPattern =>
@@ -126,6 +119,7 @@ object UopInfoFieldVec extends DecodeField[
                 case _: VecLoadOrderIndex    => Seq.fill(uopNum)(getIndexMemUop(vloxeiUops, sew, eew))
                 case _: VecStoreUnorderIndex => Seq.fill(uopNum)(getIndexMemUop(vsuxeiUops, sew, eew))
                 case _: VecStoreOrderIndex   => Seq.fill(uopNum)(getIndexMemUop(vsoxeiUops, sew, eew))
+                case _ => Seq()
               }
             } else {
               Seq()

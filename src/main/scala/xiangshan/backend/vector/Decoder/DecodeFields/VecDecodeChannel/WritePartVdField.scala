@@ -1,7 +1,7 @@
 package xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel
 
 import chisel3.util.BitPat
-import xiangshan.backend.vector.Decoder.InstPattern.{VecArithInstPattern, VecCarryMPattern, VecCarryPattern, VecCompressPattern, VecConfigInstPattern, VecDVPattern, VecGatherEI16Pattern, VecGatherIPattern, VecGatherVPattern, VecGatherXPattern, VecInstPattern, VecIntAvgVVVPattern, VecIntClipWVVPattern, VecIntMMMPattern, VecIntNarrowShiftWVVPattern, VecIntRedPattern, VecIntS1VDVPattern, VecIntS1XDVPattern, VecIntS2DVExtF2Pattern, VecIntS2DVExtF4Pattern, VecIntS2DVExtF8Pattern, VecIntS2DVPattern, VecIntSatMulVVVPattern, VecIntSatVVVPattern, VecIntScaleShiftVVVPattern, VecIntVVMPattern, VecIntVVVPattern, VecIntVVVVPattern, VecIntVVWPattern, VecIntVVWWPattern, VecIntWRedPattern, VecIntWVWPattern, VecLoadInstPattern, VecMemFF, VecMemIndex, VecMemInstPattern, VecMemMask, VecMemStrided, VecMemTrait, VecMemUnitStride, VecMemWhole, VecS1XDAPattern, VecS2ADXPattern, VecS2MDMPattern, VecS2MDVPattern, VecS2MDXPattern, VecSlide1Pattern, VecSlideIPattern, VecSlideXPattern, VecStoreInstPattern}
+import xiangshan.backend.vector.Decoder.InstPattern.{VecArithInstPattern, VecCarryMPattern, VecCarryPattern, VecCompressPattern, VecConfigInstPattern, VecDVPattern, VecFpRedPattern, VecFpWRedPattern, VecGatherEI16Pattern, VecGatherIPattern, VecGatherVPattern, VecGatherXPattern, VecInstPattern, VecIntAvgVVVPattern, VecIntClipWVVPattern, VecIntMMMPattern, VecIntNarrowShiftWVVPattern, VecIntRedPattern, VecIntS1VDVPattern, VecIntS1XDVPattern, VecIntS2DVExtF2Pattern, VecIntS2DVExtF4Pattern, VecIntS2DVExtF8Pattern, VecIntS2DVPattern, VecIntSatMulVVVPattern, VecIntSatVVVPattern, VecIntScaleShiftVVVPattern, VecIntVVMPattern, VecIntVVVPattern, VecIntVVVVPattern, VecIntVVWPattern, VecIntVVWWPattern, VecIntWRedPattern, VecIntWVWPattern, VecLoadInstPattern, VecMemFF, VecMemIndex, VecMemInstPattern, VecMemMask, VecMemStrided, VecMemTrait, VecMemUnitStride, VecMemWhole, VecS1XDAPattern, VecS2ADXPattern, VecS2MDMPattern, VecS2MDVPattern, VecS2MDXPattern, VecSlide1Pattern, VecSlideIPattern, VecSlideXPattern, VecStoreInstPattern}
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.{DecodePatternComb, DecodePatternComb3, DecodePatternComb4, LmulPattern, NfPattern, SewPattern}
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 
@@ -38,6 +38,8 @@ object WritePartVdField extends BoolDecodeField[
         case VecS2MDMPattern() => y
         case VecIntRedPattern() => y
         case VecIntWRedPattern() => y
+        case VecFpRedPattern() => y
+        case VecFpWRedPattern() => y
         case _  =>
           if (lmul.get > 0 && lmul.get < 1)
             y
