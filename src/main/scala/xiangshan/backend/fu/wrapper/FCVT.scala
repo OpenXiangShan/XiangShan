@@ -26,7 +26,7 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   val fireReg = GatedValidRegNext(fire)
 
   // input width 8, 16, 32, 64
-  val inSew1H = Wire(UInt(4.W))
+  val inSew1H = Wire(Sew())
   inSew1H := chisel3.util.experimental.decode.decoder(
     FCvtOpcode.getInputDataWidth(fuOpType),
     TruthTable(
@@ -41,7 +41,7 @@ class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   )
 
   // output width 8， 16， 32， 64
-  val outSew1H = Wire(UInt(4.W))
+  val outSew1H = Wire(Sew())
   outSew1H := chisel3.util.experimental.decode.decoder(
     FCvtOpcode.getOutputDataWidth(fuOpType),
     TruthTable(
