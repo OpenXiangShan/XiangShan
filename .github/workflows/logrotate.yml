@@ -53,6 +53,16 @@ jobs:
           fi
 
           find "$target" -mindepth 1 -maxdepth 1 -type d -mtime +30 -print0 | while IFS= read -r -d '' dir; do
+            if [[ -z "$(ls -A "$dir")" ]]; then
+              if [[ "$dry_run" == "true" ]]; then
+                echo "[DRY_RUN] Would remove empty directory: $dir"
+              else
+                echo "Removing empty directory: $dir"
+                rm -rf -- "$dir"
+              fi
+              continue
+            fi
+            
             base="$(basename "$dir")"
             archive="$target/$base.tar.zst"
             tmp_archive="$archive.tmp"
