@@ -90,9 +90,27 @@ class VectorDecodeChannel(
                     }
                 }
               case vfai: VecFpArithInstPattern =>
-                for (sewlmul <- SewLmulPattern.fpAll) yield {
-                  vi ## sewlmul ## NfPattern.dontCare
+                vfai match {
+                  case VecFpWRedPattern() |
+                       VecFpOp2VVWPattern() |
+                       VecFpOp2WVWPattern() |
+                       VecFpOp3VVWPattern() |
+                       VecFpS2VVWPattern() |
+                       VecFpS2WVFpPattern() =>
+                    for (sewlmul <- SewLmulPattern.fpWidenAll) yield {
+                      vi ## sewlmul ## NfPattern.dontCare
+                    }
+                  case VecFpS2WVIntPattern() =>
+                    for (sewlmul <- SewLmulPattern.widenAll) yield {
+                      vi ## sewlmul ## NfPattern.dontCare
+                    }
+                  case _ =>
+                    for (sewlmul <- SewLmulPattern.fpAll) yield {
+                      vi ## sewlmul ## NfPattern.dontCare
+                    }
                 }
+              case _ =>
+                throw new IllegalArgumentException(s"Unsupported vector arith pattern $vai in VectorDecodeChannel")
             }
           case vmi: VecMemInstPattern =>
             vmi match {

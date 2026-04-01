@@ -99,7 +99,25 @@ object Src2SelectField extends DecodeField[
               case VecIntRedPattern() => INC1x7_S1
               case VecIntWRedPattern() => INCF2x7_S1
             }
-          case vfi: VecFpArithInstPattern => ???
+          case vfi: VecFpArithInstPattern =>
+            vfi match {
+              case VecFpOp2VVPattern() => INC1
+              case VecFpOp2VMPattern() => INC1
+              case VecFpOp3VVVPattern() => INC1
+              case VecFpRedPattern() => INC1x7_S1
+              case VecFpWRedPattern() => INCF2x7_S1
+              case VecFpOp2VVWPattern() => INC1
+              case VecFpOp2WVWPattern() => INCF2
+              case VecFpOp3VVWPattern() => INC1
+              case VecFpS2VPattern() => INC1
+              case VecFpS2VVWPattern() => INC1
+              case VecFpS2WVIntPattern() => INCF2
+              case VecFpS2WVFpPattern() => INCF2
+              case VecFpS2APattern() => CONST
+              case VecFpS1VPattern() => NONE
+            }
+          case _ =>
+            throw new IllegalArgumentException(s"Unsupported vector arith pattern $vai in Src2SelectField")
         }
       case VecConfigInstPattern() => CONST
       case vmi: VecMemInstPattern =>
@@ -123,7 +141,6 @@ object Src2SelectField extends DecodeField[
             }
           case _: VecMemWhole => NONE
           case _: VecMemMask => NONE
-          case _: VecMemFF => NONE
         }
     }
 
