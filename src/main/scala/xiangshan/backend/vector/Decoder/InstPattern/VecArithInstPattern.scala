@@ -188,6 +188,76 @@ object VecArithInstPattern extends VecInstFieldDefination {
           // vwmacc
           case s if s.startsWith("1111") => VecIntVVWWPattern()
         }
+      case OPFVV | OPFVF =>
+        func6.rawString match {
+          // vfredusum/vfredosum/vfredmin/vfredmax
+          case "000001" | "000011" | "000101" | "000111" =>
+            category.rawString match {
+              case OPFVV => VecFpRedPattern()
+            }
+          // vfadd/vfsub/vfmin/vfmax/vfsgnj/vfsgnjn/vfsgnjx/vfdiv/vfrdiv/vfmul/vfrsub
+          case "000000" | "000010" | "000100" | "000110" |
+               "001000" | "001001" | "001010" |
+               "001110" | "001111" |
+               "100000" | "100001" | "100100" | "100111" =>
+            VecFpOp2VVPattern()
+          // unary move/extract family around func6=010000:
+          // opfvv + vs1=00000 -> vfmv.f.s, extracting one fp element from vector to scalar.
+          // opfvf             -> vfmv.s.f, writing one scalar fp value into vd[0].
+          case "010000" =>
+            category.rawString match {
+              case OPFVV =>
+                vs1.rawString match {
+                  case "00000" => VecFpS2APattern()
+                }
+              case OPFVF => VecFpS1VPattern()
+            }
+          // vfunary0 group. classification is refined by vs1 sub-op:
+          // 01xxx -> widening fp convert from narrow source.
+          // 10000/10001/10110/10111 -> narrowing from wide fp source to integer dest.
+          // 1xxxx -> narrowing from wide fp source to fp dest.
+          // others -> same-width unary fp op/conversion on vs2.
+          case "010010" =>
+            vs1.rawString match {
+              case s if s.startsWith("01") => VecFpS2VVWPattern()
+              case "10000" | "10001" | "10110" | "10111" => VecFpS2WVIntPattern()
+              case s if s.startsWith("1") => VecFpS2WVFpPattern()
+              case _ => VecFpS2VPattern()
+            }
+          // vfunary1 same-width single-source fp ops such as vfsqrt/vfrec7/vfrsqrt7/vfclass.
+          case "010011" =>
+            VecFpS2VPattern()
+          // vm-dependent merge/move form:
+          // vm=0 -> vfmerge.vfm behaves like a 2-operand op.
+          // vm=1 -> vfmv.v.f is a scalar-to-vector move.
+          case "010111" =>
+            vm.rawString match {
+              case "0" => VecFpOp2VVPattern()
+              case "1" => VecFpS1VPattern()
+            }
+          // vmfeq/vmfle/vmflt/vmfne/vmfgt/vmfge
+          case "011000" | "011001" | "011011" | "011100" | "011101" | "011111" =>
+            VecFpOp2VMPattern()
+          // vfmadd/vfnmadd/vfmsub/vfnmsub/vfmacc/vfnmacc/vfmsac/vfnmsac
+          case "101000" | "101001" | "101010" | "101011" |
+               "101100" | "101101" | "101110" | "101111" =>
+            VecFpOp3VVVPattern()
+          // vfwredusum/vfwredosum
+          case "110001" | "110011" =>
+            category.rawString match {
+              case OPFVV => VecFpWRedPattern()
+            }
+          // vfwadd/vfwsub/vfwmul
+          case "110000" | "110010" | "111000" =>
+            VecFpOp2VVWPattern()
+          // vfwadd.w/vfwsub.w
+          case "110100" | "110110" =>
+            VecFpOp2WVWPattern()
+          // vfwmacc/vfwnmacc/vfwmsac/vfwnmsac
+          case "111011" | "111100" | "111101" | "111110" | "111111" =>
+            VecFpOp3VVWPattern()
+          case _ => null
+        }
       case _ => null
     }
   }
@@ -241,6 +311,21 @@ case class VecDVPattern()(implicit rawInst: BitPat) extends VecIntArithInstPatte
 
 case class VecIntRedPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
 case class VecIntWRedPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
+
+case class VecFpOp2VVPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpOp2VMPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpOp3VVVPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpRedPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpWRedPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpOp2VVWPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpOp2WVWPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpOp3VVWPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS2VPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS2VVWPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS2WVIntPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS2WVFpPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS2APattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
+case class VecFpS1VPattern()(implicit rawInst: BitPat) extends VecFpArithInstPattern
 
 case class VecCryptoVVVVPattern()(implicit rawInst: BitPat) extends VecIntArithInstPattern
 

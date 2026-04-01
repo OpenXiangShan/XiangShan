@@ -20,6 +20,7 @@ import xiangshan.backend.decode.opcode.Opcode.FCvtOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FMacOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FDivOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FMiscOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.VFRedOpcodes._
 import xiangshan.backend.decode.opcode.OpcodeTraits._
 import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
 
@@ -100,7 +101,7 @@ object SplitTable {
         case _ => sew ## mf4 -> Seq.empty
       }) ++
       SeqMap(sew.sewValue match {
-        case e8 => sew ## mf8 -> Seq.fill(1)(uop)
+        case 8 => sew ## mf8 -> Seq.fill(1)(uop)
         case _ => sew ## mf8 -> Seq.empty
       })
   }
@@ -148,7 +149,7 @@ object SplitTable {
         case _ => sew ## mf4 -> Seq.empty
       }) ++
       SeqMap(sew match {
-        case e8 => sew ## mf8 -> Seq.fill(1)(uop0)
+        case SewPattern.e8 => sew ## mf8 -> Seq.fill(1)(uop0)
         case _ => sew ## mf8 -> Seq.empty
       })
   }
@@ -430,6 +431,60 @@ object SplitTable {
     val e32SeqMap  = wredu(_.e32)(wadd4e32uop, wrede32uop, adde64uop, rede64uop)
 
     e8SeqMap ++ e16SeqMap ++ e32SeqMap
+  }
+
+  private def fwredu(
+    sewFunc: SewPattern.type => SewPattern
+  )(
+    _uop0: => Opcode,
+    _uopM: => Opcode,
+    _reduop: => Opcode,
+  ): SeqMap[SewLmulPattern, Seq[Opcode]] = {
+    val sew = sewFunc(SewPattern)
+
+    val uop0 = Option(_uop0).map(_.copy().S1v + Src12Mask).orNull
+    val uopM = Option(_uopM).map(_.copy().S1v + Src2Mask).orNull
+    val reduopMasked = Option(_reduop).map(_.copy() + Src2Mask).orNull
+    val reduopLast = Option(_reduop).map(_.copy() + NoMask).orNull
+
+    SeqMap(
+      sew ## m8 -> Seq.empty,
+      sew ## m4 -> (Seq(uop0) ++ Seq.fill(6)(uopM) :+ reduopLast),
+      sew ## m2 -> (Seq(uop0) ++ Seq.fill(2)(uopM) :+ reduopLast),
+      sew ## m1 -> Seq(uop0, reduopLast),
+    ) ++
+      SeqMap(sew.sewValue match {
+        case 16 | 32 => sew ## mf2 -> Seq(reduopMasked)
+        case _ => sew ## mf2 -> Seq.empty
+      }) ++
+      SeqMap(sew.sewValue match {
+        case 16 => sew ## mf4 -> Seq(reduopMasked)
+        case _ => sew ## mf4 -> Seq.empty
+      })
+  }
+
+  private def fwredosum(
+    sewFunc: SewPattern.type => SewPattern
+  )(
+    _reduop: => Opcode,
+  ): SeqMap[SewLmulPattern, Seq[Opcode]] = {
+    val sew = sewFunc(SewPattern)
+    val reduop = Option(_reduop).map(_.copy() + Src2Mask).orNull
+
+    SeqMap(
+      sew ## m8 -> Seq.empty,
+      sew ## m4 -> Seq.fill(8)(reduop),
+      sew ## m2 -> Seq.fill(4)(reduop),
+      sew ## m1 -> Seq.fill(2)(reduop),
+    ) ++
+      SeqMap(sew.sewValue match {
+        case 16 | 32 => sew ## mf2 -> Seq(reduop)
+        case _ => sew ## mf2 -> Seq.empty
+      }) ++
+      SeqMap(sew.sewValue match {
+        case 16 => sew ## mf4 -> Seq(reduop)
+        case _ => sew ## mf4 -> Seq.empty
+      })
   }
 
   val table: SeqMap[BitPat, SeqMap[SewLmulPattern, Seq[Opcode]]] = {
@@ -851,20 +906,25 @@ object SplitTable {
       VFMAX_VV -> dup(null, vfmax_fp16, vfmax_fp32, vfmax_fp64)(_.S1v),
       VFMAX_VF -> dup(null, vfmax_fp16, vfmax_fp32, vfmax_fp64)(_.S1f),
 
-      // Todo: float point reduction
-      //VFREDUSUM_VS -> redu(
-      //  null, vfredosum_fp16, vfredosum_fp32, vfredosum_fp64,
-      //  null, vfadd_fp16.vv, vfadd_fp32.vv, vfadd_fp64.vv,
-      //),
-      //VFREDOSUM_VS -> dup(null, vfredosum_fp16, vfredosum_fp32, vfredosum_fp64),
-      //VFREDMIN_VS -> redu(
-      //  null, vfredmin_fp16, vfredmin_fp32, vfredmin_fp64,
-      //  null, vfmin_fp16.vv, vfmin_fp32.vv, vfmin_fp64.vv,
-      //),
-      //VFREDMAX_VS -> redu(
-      //  null, vfredmax_fp16, vfredmax_fp32, vfredmax_fp64,
-      //  null, vfmax_fp16.vv, vfmax_fp32.vv, vfmax_fp64.vv,
-      //),
+      VFREDUSUM_VS -> redu(
+        null, null,
+        vfredosum_fp16, vfadd_fp16.copy().S1v,
+        vfredosum_fp32, vfadd_fp32.copy().S1v,
+        vfredosum_fp64, vfadd_fp64.copy().S1v,
+      ),
+      VFREDOSUM_VS -> dup(null, vfredosum_fp16, vfredosum_fp32, vfredosum_fp64)(_ + Src2Mask),
+      VFREDMIN_VS -> redu(
+        null, null,
+        vfredmin_fp16, vfmin_fp16.copy().S1v,
+        vfredmin_fp32, vfmin_fp32.copy().S1v,
+        vfredmin_fp64, vfmin_fp64.copy().S1v,
+      ),
+      VFREDMAX_VS -> redu(
+        null, null,
+        vfredmax_fp16, vfmax_fp16.copy().S1v,
+        vfredmax_fp32, vfmax_fp32.copy().S1v,
+        vfredmax_fp64, vfmax_fp64.copy().S1v,
+      ),
 
       VFSGNJ_VV  -> dup(null, vfsgnj_fp16, vfsgnj_fp32, vfsgnj_fp64)(_.S1v),
       VFSGNJ_VF  -> dup(null, vfsgnj_fp16, vfsgnj_fp32, vfsgnj_fp64)(_.S1f),
@@ -889,7 +949,7 @@ object SplitTable {
           e32 -> vmv_x2vs_e32,
           e64 -> vmv_x2vs_e64,
         ).flatMap { case (sew, _uop) =>
-          val uop = _uop.copy() + Src1Fp
+          val uop = _uop.copy() - Src1Vp + Src1Fp
           val leM1Uops = for (lmul <- Seq(mf8, mf4, mf2, m1)) yield {
             (sew ## lmul) -> Seq(uop)
           }
@@ -952,6 +1012,7 @@ object SplitTable {
       VFRDIV_VF         -> dup(null, vfdiv_fp16, vfdiv_fp32, vfdiv_fp64)(_.S1f.rev),
       VFMUL_VV          -> dup(null, vfmul_fp16, vfmul_fp32, vfmul_fp64)(_.S1v),
       VFMUL_VF          -> dup(null, vfmul_fp16, vfmul_fp32, vfmul_fp64)(_.S1f),
+      VFRSUB_VF         -> dup(null, vfsub_fp16, vfsub_fp32, vfsub_fp64)(_.S1f.rev),
 
       VFMADD_VV         -> dup(null, vfmadd_fp16, vfmadd_fp32, vfmadd_fp64)(_.S1v),
       VFMADD_VF         -> dup(null, vfmadd_fp16, vfmadd_fp32, vfmadd_fp64)(_.S1f),
@@ -990,6 +1051,14 @@ object SplitTable {
       VFWMSAC_VF        -> dupF2W(null, vfwmsac_fp16, vfwmsac_fp32)(_.S1f),
       VFWNMSAC_VV       -> dupF2W(null, vfwnmsac_fp16, vfwnmsac_fp32)(_.S1v),
       VFWNMSAC_VF       -> dupF2W(null, vfwnmsac_fp16, vfwnmsac_fp32)(_.S1f),
+      VFWREDUSUM_VS     -> (
+        fwredu(_.e16)(vfwadd_fp16, vfwadd_w_fp16, vfwredosum_fp16) ++
+        fwredu(_.e32)(vfwadd_fp32, vfwadd_w_fp32, vfwredosum_fp32)
+      ),
+      VFWREDOSUM_VS     -> (
+        fwredosum(_.e16)(vfwredosum_fp16) ++
+        fwredosum(_.e32)(vfwredosum_fp32)
+      ),
     )
 
     val cryptoTable = SeqMap[BitPat, SeqMap[SewLmulPattern, Seq[Opcode]]](

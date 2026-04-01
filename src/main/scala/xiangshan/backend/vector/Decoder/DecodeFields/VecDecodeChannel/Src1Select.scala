@@ -43,6 +43,10 @@ object Src1SelectField extends DecodeField[
 ] {
   import Src1SelectEnum._
 
+  private def fpSrc1Sel(pattern: VecFpArithInstPattern): Src1Val = {
+    if (pattern.category.rawString == VecInstPattern.Category.OPFVF.str) CONST else INC1
+  }
+
   override def name: String = "src1Sel"
 
   override def chiselType: UInt = Src1SelectEnum.UInt()
@@ -101,7 +105,25 @@ object Src1SelectField extends DecodeField[
               case VecIntRedPattern() => S2MAXx1_DCONST
               case VecIntWRedPattern() => S2MAXF2x1_DCONST
             }
-          case vfi: VecFpArithInstPattern => ???
+          case vfi: VecFpArithInstPattern =>
+            vfi match {
+              case VecFpOp2VVPattern() => fpSrc1Sel(vfi)
+              case VecFpOp2VMPattern() => fpSrc1Sel(vfi)
+              case VecFpOp3VVVPattern() => fpSrc1Sel(vfi)
+              case VecFpRedPattern() => S2MAXx1_DCONST
+              case VecFpWRedPattern() => S2MAXF2x1_DCONST
+              case VecFpOp2VVWPattern() => fpSrc1Sel(vfi)
+              case VecFpOp2WVWPattern() => fpSrc1Sel(vfi)
+              case VecFpOp3VVWPattern() => fpSrc1Sel(vfi)
+              case VecFpS2VPattern() => NONE
+              case VecFpS2VVWPattern() => NONE
+              case VecFpS2WVIntPattern() => NONE
+              case VecFpS2WVFpPattern() => NONE
+              case VecFpS2APattern() => NONE
+              case VecFpS1VPattern() => CONST
+            }
+          case _ =>
+            throw new IllegalArgumentException(s"Unsupported vector arith pattern $vai in Src1SelectField")
         }
       case VecConfigInstPattern() => CONST
       case vmi: VecMemInstPattern => CONST
