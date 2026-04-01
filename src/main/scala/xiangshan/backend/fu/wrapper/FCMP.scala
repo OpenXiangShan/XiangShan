@@ -10,15 +10,14 @@ import yunsuan.fpu.FloatCompare
 
 class FCMP(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   // io alias
-  private val opcode = fuOpType
   private val src0 = inData.src(0)
   private val src1 = inData.src(1)
 
   // modules
-  private val fcmp = Module(new FloatCompare())
+  private val fcmp = Module(new FloatCompare)
   fcmp.io.src0            := src0
   fcmp.io.src1            := src1
-  fcmp.io.opCode          := opcode
+  fcmp.io.opCode          := fuOpType
 
   private val resultData = fcmp.io.result
   private val fflagsData = fcmp.io.fflags

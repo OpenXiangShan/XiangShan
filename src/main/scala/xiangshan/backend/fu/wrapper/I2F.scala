@@ -10,6 +10,7 @@ import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import utility._
 import yunsuan.scalar.FPCVT
 import yunsuan.encoding.Opcode.Opcodes.FCvtOpcode
+import yunsuan.vector.Common._
 
 class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
 
@@ -21,7 +22,7 @@ class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   private val fireReg = GatedValidRegNext(fire)
 
   // input width 16, 32, 64
-  val inSew1H = Wire(UInt(4.W))
+  val inSew1H = Wire(Sew())
   inSew1H := chisel3.util.experimental.decode.decoder(
     FCvtOpcode.getInputDataWidth(fuOpType),
     TruthTable(
@@ -34,7 +35,7 @@ class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
     )
   )
   // output width 16， 32， 64
-  val outSew1H = Wire(UInt(4.W))
+  val outSew1H = Wire(Sew())
   outSew1H := chisel3.util.experimental.decode.decoder(
     FCvtOpcode.getOutputDataWidth(fuOpType),
     TruthTable(
