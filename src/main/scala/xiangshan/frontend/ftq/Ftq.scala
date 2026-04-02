@@ -50,13 +50,16 @@ import xiangshan.frontend.bpu.BpuPredictionSource
 import xiangshan.frontend.bpu.BpuRedirectMeta
 import xiangshan.frontend.bpu.BpuResolveMeta
 import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.icache.ICacheCacheLineHelper
+import xiangshan.frontend.icache.ICacheToFtqIO
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HalfAlignHelper
     with HasPerfEvents
     with HasCircularQueuePtrHelper
     with IfuRedirectReceiver
-    with BackendRedirectReceiver {
+    with BackendRedirectReceiver
+    with ICacheCacheLineHelper {
 
   class FtqIO extends FtqBundle {
     val fromBpu: BpuToFtqIO = Flipped(new BpuToFtqIO)
@@ -65,7 +68,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val fromIfu: IfuToFtqIO = Flipped(new IfuToFtqIO)
     val toIfu:   FtqToIfuIO = new FtqToIfuIO
 
-    val toICache: FtqToICacheIO = new FtqToICacheIO
+    val fromICache: ICacheToFtqIO = Flipped(new ICacheToFtqIO)
+    val toICache:   FtqToICacheIO = new FtqToICacheIO
 
     val fromBackend: CtrlToFtqIO = Flipped(new CtrlToFtqIO)
     val toBackend:   FtqToCtrlIO = new FtqToCtrlIO
@@ -92,6 +96,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   // entryQueue stores predictions made by BPU.
   private val entryQueue = Reg(Vec(FtqSize, new FtqEntry))
+
+  private val twoFetchInfoVec = Reg(Vec(FtqSize, new TwoFetchInfo))
 
   // metaQueueRedirect stores speculation information needed by BPU when redirect happens.
   private val metaQueueRedirect = Reg(Vec(FtqSize, new BpuRedirectMeta))
@@ -177,6 +183,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
     entryQueue(predictionPtr.value).takenCfiOffset := prediction.bits.takenCfiOffset
   }
 
+  when(io.fromICache.fromPrefetch.valid) {
+    val ftqIdx       = io.fromICache.fromPrefetch.bits.ftqIdx
+    val twoFetchInfo = io.fromICache.fromPrefetch.bits.twoFetchInfo
+    twoFetchInfoVec(ftqIdx.value) := twoFetchInfo(0).bits
+    twoFetchInfoVec((ftqIdx + 1.U).value) := Mux(
+      twoFetchInfo(1).valid,
+      twoFetchInfo(1).bits,
+      0.U.asTypeOf(new TwoFetchInfo)
+    )
+  }
+
   when(io.fromBpu.meta.valid) {
     val s3BpuPtr = io.fromBpu.s3FtqPtr.value
     metaQueueRedirect(s3BpuPtr) := io.fromBpu.meta.bits.redirectMeta
@@ -195,8 +212,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // Interaction with ICache and IFU
   // --------------------------------------------------------------------------------
 
-  when(io.toICache.prefetchReq.fire) {
-    pfPtr := pfPtr + 1.U
+  when(io.toICache.toPrefetch.fire) {
+    val twoPrefetchValid = io.toICache.toPrefetch.bits.twoPrefetchCase.valid
+    pfPtr := Mux(twoPrefetchValid, pfPtr + 2.U, pfPtr + 1.U)
   }
   when(io.toIfu.req.fire) {
     ifuPtr := ifuPtr + 1.U
@@ -222,32 +240,54 @@ class Ftq(implicit p: Parameters) extends FtqModule
     }
   }
 
+  // --------------------------------------------------------------------------------
+  // 2-prefetch
+  // --------------------------------------------------------------------------------
+
+  private val prefetchReq = VecInit(
+    Wire(new FtqPrefetchReq).fromFtqEntry(entryQueue(pfPtr(0).value)),
+    Wire(new FtqPrefetchReq).fromFtqEntry(entryQueue(pfPtr(1).value))
+  )
+
+  private val canTwoPrefetch = distanceBetween(bpuPtr(0), pfPtr(0)) >= 3.U &&
+    prefetchReq(0).vPageNumber === prefetchReq(1).vPageNumber &&
+    !(backendException.hasException && (
+      backendExceptionPtr === pfPtr(0) || backendExceptionPtr === pfPtr(1)
+    ))
+
+  // (io.toICache.toPrefetch.fire && canTwoPrefetch) is passed to apply(..., canAssert) to prevent assert(x-state)
+  private val twoPrefetchCase =
+    TwoPrefetchCase(prefetchReq(0), prefetchReq(1), io.toICache.toPrefetch.fire && canTwoPrefetch)
+
+  private val twoPrefetchValid = twoPrefetchCase.valid && canTwoPrefetch
+//
+//  private val twoPrefetchValid = false.B
+
   // FIXME: backend redirect delay should be more than ITLB csr delay
-  io.toICache.prefetchReq.valid := (bpuPtr(0) > pfPtr(0) || redirectNext.valid) && !redirect.valid
-  io.toICache.prefetchReq.bits.startVAddr := Mux(
-    redirectNext.valid,
-    PrunedAddrInit(redirectNext.bits.target),
-    entryQueue(pfPtr(0).value).startPc
-  )
-  io.toICache.prefetchReq.bits.nextCachelineVAddr :=
-    io.toICache.prefetchReq.bits.startVAddr + (CacheLineSize / 8).U
-  io.toICache.prefetchReq.bits.ftqIdx := pfPtr(0)
-  // we don't have takenCfiOffset after redirect
-  io.toICache.prefetchReq.bits.takenCfiOffset := Mux(
-    redirectNext.valid,
-    (FetchBlockInstNum - 1).U, // assume maximum fetch block size
-    entryQueue(pfPtr(0).value).takenCfiOffset.bits
-  )
-  io.toICache.prefetchReq.bits.backendException := Mux(
-    backendExceptionPtr === pfPtr(0),
-    backendException,
-    ExceptionType.None
-  )
+  io.toICache.toPrefetch.valid := (bpuPtr(0) > pfPtr(0) || redirectNext.valid) && !redirect.valid
+  io.toICache.toPrefetch.bits.req.zipWithIndex.foreach { case (req, i) =>
+    req.startVAddr := {
+      if (i == 0)
+        Mux(redirectNext.valid, PrunedAddrInit(redirectNext.bits.target), prefetchReq(i).startVAddr)
+      else
+        prefetchReq(i).startVAddr
+    }
+    req.nextLineVAddr := req.startVAddr + blockBytes.U
+    req.isCrossLine := {
+      if (i == 0)
+        Mux(redirectNext.valid, true.B, prefetchReq(i).isCrossLine)
+      else
+        prefetchReq(i).isCrossLine
+    }
+    req.ftqIdx           := pfPtr(i)
+    req.backendException := Mux(backendExceptionPtr === pfPtr(i), backendException, ExceptionType.None)
+    req.isSoftPrefetch   := false.B
+  }
+  io.toICache.toPrefetch.bits.twoPrefetchCase := Mux(twoPrefetchValid, twoPrefetchCase, TwoPrefetchCase.None)
 
   private val ifuReqValid = bpuPtr(0) > ifuPtr(0) && !redirect.valid &&
     distanceBetween(ifuPtr(0), commitPtr(0)) < (FtqSize - 1).U
 
-  // TODO: consider BPU bypass
   io.toICache.fetchReq.valid                   := ifuReqValid
   io.toICache.fetchReq.bits.startVAddr         := entryQueue(ifuPtr(0).value).startPc
   io.toICache.fetchReq.bits.nextCachelineVAddr := entryQueue(ifuPtr(0).value).startPc + (CacheLineSize / 8).U
@@ -556,5 +596,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate(
     "total_commits",
     commit
+  )
+  XSPerfAccumulate(
+    "2prefetch",
+    io.toICache.toPrefetch.fire && io.toICache.toPrefetch.bits.twoPrefetchCase.valid
   )
 }

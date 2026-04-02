@@ -20,7 +20,6 @@ import chisel3.util._
 import difftest.DiffRefillEvent
 import difftest.DifftestModule
 import org.chipsalliance.cde.config.Parameters
-import utility.BoolStopWatch
 import utility.ChiselDB
 import utility.DataHoldBypass
 import utility.ValidHold

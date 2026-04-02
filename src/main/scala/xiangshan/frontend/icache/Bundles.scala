@@ -25,9 +25,11 @@ import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.FtqPrefetchRequest
+import xiangshan.frontend.FtqFetchRequest
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.ftq.TwoFetchInfo
+import xiangshan.frontend.ftq.TwoPrefetchCase
 
 /* ***
  * Naming:
@@ -153,6 +155,7 @@ class DataReadBundle(implicit p: Parameters) extends ICacheBundle {
     val datas: Vec[UInt] = Vec(DataBanks, UInt(ICacheDataBits.W))
     val codes: Vec[UInt] = Vec(DataBanks, UInt(DataEccBits.W))
   }
+
   val req:  DecoupledIO[DataReadReqBundle] = DecoupledIO(new DataReadReqBundle)
   val resp: DataReadRespBundle             = Input(new DataReadRespBundle)
 }
@@ -201,32 +204,26 @@ class ICacheRespBundle(implicit p: Parameters) extends ICacheBundle {
   val isForVSnonLeafPTE: Bool       = Bool()
 }
 
+class MainPipeToIfuIO(implicit p: Parameters) extends ICacheBundle {
+  val req: DecoupledIO[Vec[FtqFetchRequest]] = Decoupled(Vec(MaxFetchReqNum, new FtqFetchRequest))
+}
+
 /* ***** PrefetchPipe ***** */
 class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val startAddr:        PrunedAddr    = PrunedAddr(VAddrBits)
-  val nextlineStart:    PrunedAddr    = PrunedAddr(VAddrBits)
-  val crossCacheline:   Bool          = Bool()
+  val startVAddr:       PrunedAddr    = PrunedAddr(VAddrBits)
+  val nextLineVAddr:    PrunedAddr    = PrunedAddr(VAddrBits)
+  val isCrossLine:      Bool          = Bool()
   val ftqIdx:           FtqPtr        = new FtqPtr
   val backendException: ExceptionType = new ExceptionType
   val isSoftPrefetch:   Bool          = Bool()
 
-  def fromFtqPrefetch(req: FtqPrefetchRequest): PrefetchReqBundle = {
-    this.startAddr        := req.startVAddr
-    this.nextlineStart    := req.nextCachelineVAddr
-    this.crossCacheline   := req.crossCacheline
-    this.ftqIdx           := req.ftqIdx
-    this.backendException := req.backendException
-    this.isSoftPrefetch   := false.B
-    this
-  }
-
   def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): PrefetchReqBundle = {
-    this.startAddr        := req.vaddr
-    this.nextlineStart    := DontCare
-    this.crossCacheline   := false.B // prefetch only one line for a prefetch.i instruction
-    this.ftqIdx           := DontCare
-    this.backendException := ExceptionType.None
-    this.isSoftPrefetch   := true.B
+    startVAddr       := req.vaddr
+    nextLineVAddr    := DontCare
+    isCrossLine      := false.B // prefetch only one line for a prefetch.i instruction
+    ftqIdx           := DontCare
+    backendException := ExceptionType.None
+    isSoftPrefetch   := true.B
     this
   }
 }
@@ -245,6 +242,8 @@ class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val metaCodes:   Vec[UInt] = Vec(PortNumber, UInt(MetaEccBits.W))
   val pTag:        UInt      = UInt(tagBits.W)
   val itlbPbmt:    UInt      = UInt(Pbmt.width.W)
+
+  val debug_startVAddr: PrunedAddr = PrunedAddr(VAddrBits)
 
   def getMetaInfo(i: Int): MetaInfo = {
     val info = Wire(new MetaInfo)
@@ -379,4 +378,13 @@ class PrefetchPipePerfInfo(implicit p: Parameters) extends ICacheBundle {
 // inner WayLookup -> top
 class WayLookupPerfInfo(implicit p: Parameters) extends ICacheBundle {
   val empty: Bool = Bool()
+}
+
+class PrefetchToFtqBundle(implicit p: Parameters) extends ICacheBundle {
+  val ftqIdx:       FtqPtr                   = new FtqPtr
+  val twoFetchInfo: Vec[Valid[TwoFetchInfo]] = Vec(2, Valid(new TwoFetchInfo))
+}
+
+class ICacheToFtqIO(implicit p: Parameters) extends ICacheBundle {
+  val fromPrefetch: Valid[PrefetchToFtqBundle] = Valid(new PrefetchToFtqBundle)
 }

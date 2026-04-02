@@ -131,8 +131,30 @@ trait ICacheDataHelper extends HasICacheParameters {
     )
   }
 
+  def getBankSel(startPc: PrunedAddr, takenCfiOffset: UInt): (Bool, Vec[UInt]) = {
+    val blockOffset        = startPc(blockOffBits - 1, 0)
+    val blockEndOffsetTemp = blockOffset +& Cat(takenCfiOffset, 0.U(instOffsetBits.W))
+    val blockEndOffset     = blockEndOffsetTemp(blockOffBits - 1, 0)
+    val isCrossLine        = blockEndOffsetTemp(blockOffBits)
+    val bankIdxLow         = getBankIdx(blockOffset)
+    val bankIdxHigh        = getBankIdx(blockEndOffset)
+    val bankSel = VecInit(
+      // first line: if in same line, select [low, high], else select [low, end]
+      VecInit((0 until DataBanks).map(i => (i.U >= bankIdxLow) && (isCrossLine || i.U <= bankIdxHigh))).asUInt,
+      // second line: if in same line, select nothing, else select [start, high]
+      VecInit((0 until DataBanks).map(i => (i.U <= bankIdxHigh) && isCrossLine)).asUInt
+    )
+    (isCrossLine, bankSel)
+  }
+
   def getLineSel(blkOffset: UInt): Vec[Bool] = {
     val bankIdxLow = getBankIdx(blkOffset)
+    VecInit((0 until DataBanks).map(i => i.U < bankIdxLow))
+  }
+
+  def getLineSel(startPc: PrunedAddr): Vec[Bool] = {
+    val blockOffset = startPc(blockOffBits - 1, 0)
+    val bankIdxLow  = getBankIdx(blockOffset)
     VecInit((0 until DataBanks).map(i => i.U < bankIdxLow))
   }
 }
@@ -140,6 +162,9 @@ trait ICacheDataHelper extends HasICacheParameters {
 trait ICacheAddrHelper extends HasICacheParameters {
   def getBlkAddrFromPTag(vAddr: PrunedAddr, pTag: UInt): UInt =
     Cat(pTag, vAddr(pgUntagBits - 1, blockOffBits))
+
+  def getGPAddr(gpAddrFromItlb: UInt, vAddr: PrunedAddr): UInt =
+    Cat(gpAddrFromItlb(PAddrBitsMax - 1, PageOffsetWidth), vAddr(PageOffsetWidth - 1, 0))
 
   def getPTagFromBlk(blkAddr: UInt): UInt =
     (blkAddr >> (pgUntagBits - blockOffBits)).asUInt
