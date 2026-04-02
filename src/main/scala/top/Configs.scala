@@ -485,10 +485,19 @@ class KunminghuV2Config(n: Int = 1) extends Config(
 )
 
 class KunminghuV2MinimalConfig(n: Int = 1) extends Config(
-  L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
+  (L2CacheConfig("128KB", inclusive = true, banks = 1, tp = false)
     ++ WithNKBL1D(32, ways = 4)
     ++ new MinimalConfig(n)
-    ++ new WithCHI
+    ++ new WithCHI).alter((site, here, up) => {
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      OpenLLCParamsOpt = up(SoCParamsKey).OpenLLCParamsOpt.map(_.copy(
+        sets = 512,
+        banks = 1,
+        fullAddressBits = up(SoCParamsKey).PAddrBits
+      )),
+      L3NBanks = 1
+    )
+  })
 )
 
 class XSNoCTopConfig(n: Int = 1) extends Config(
@@ -510,7 +519,7 @@ class XSNoCDiffTopConfig(n: Int = 1) extends Config(
 )
 
 class XSNoCDiffTopMinimalConfig(n: Int = 1) extends Config(
-  (new XSNoCTopConfig(n)).alter((site, here, up) => {
+  (new XSNoCTopMinimalConfig(n)).alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UseXSNoCDiffTop = true)
   })
 )
@@ -546,6 +555,30 @@ class FpgaDiffDefaultConfig(n: Int = 1) extends Config(
       L3CacheParamsOpt = Some(up(SoCParamsKey).L3CacheParamsOpt.get.copy(
         sramClkDivBy2 = false,
       )),
+    )
+  })
+)
+
+class FpgaDiffKMHV2Config(n: Int = 1) extends Config(
+  (new KunminghuV2Config(n)).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = true,
+      AlwaysBasicDB = false
+    )
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      UseXSTileDiffTop = true
+    )
+  })
+)
+
+class FpgaDiffKMHV2MinimalConfig(n: Int = 1) extends Config(
+  (new KunminghuV2MinimalConfig(n)).alter((site, here, up) => {
+    case DebugOptionsKey => up(DebugOptionsKey).copy(
+      AlwaysBasicDiff = true,
+      AlwaysBasicDB = false
+    )
+    case SoCParamsKey => up(SoCParamsKey).copy(
+      UseXSTileDiffTop = true
     )
   })
 )
