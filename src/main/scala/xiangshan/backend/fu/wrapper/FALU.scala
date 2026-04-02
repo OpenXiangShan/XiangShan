@@ -12,23 +12,22 @@ import yunsuan.fpu.FloatAdder
 class FAlu(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
 
   // io alias
-  private val opcode = fuOpType(8, 6)
   private val src0 = inData.src(0)
   private val src1 = inData.src(1)
 
   // modules
   private val falu = Module(new FloatAdder)
 
-  val fp_aIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src0.head(32).andR ||
-                              fp_fmt === VSew.e16 && !src0.head(48).andR
-  val fp_bIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src1.head(32).andR ||
-                              fp_fmt === VSew.e16 && !src1.head(48).andR
+  val fp_aIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src0(63, 32).andR ||
+                              fp_fmt === VSew.e16 && !src0(63, 16).andR
+  val fp_bIsFpCanonicalNAN  = fp_fmt === VSew.e32 && !src1(63, 32).andR ||
+                              fp_fmt === VSew.e16 && !src1(63, 16).andR
 
-  falu.io.fire             := io.in.valid
-  falu.io.fp_a             := src0
-  falu.io.fp_b             := src1
-  falu.io.rm               := rm
-  falu.io.op_code          := opcode
+  falu.io.fire                 := io.in.valid
+  falu.io.fp_a                 := src0
+  falu.io.fp_b                 := src1
+  falu.io.rm                   := rm
+  falu.io.op_code              := fuOpType
   falu.io.fp_aIsFpCanonicalNAN := fp_aIsFpCanonicalNAN
   falu.io.fp_bIsFpCanonicalNAN := fp_bIsFpCanonicalNAN
 
