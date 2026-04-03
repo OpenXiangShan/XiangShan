@@ -317,7 +317,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   redirect.cfiUpdate.backendIAF := csrMod.io.out.bits.targetPc.raiseIAF
   redirect.cfiUpdate.backendIGPF := csrMod.io.out.bits.targetPc.raiseIGPF
   // Only mispred will send redirect to frontend
-  redirect.cfiUpdate.isMisPred := true.B
+  redirect.cfiUpdate.isMisPred := false.B
 
   connectNonPipedCtrlSingal
 

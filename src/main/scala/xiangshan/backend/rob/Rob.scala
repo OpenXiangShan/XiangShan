@@ -128,7 +128,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val robHeadLqIdx = Valid(new LqPtr)
     }
     val debugRolling = new RobDebugRollingIO
-    val debugInstrAddrTransType = Input(new AddrTransType) 
+    val debugInstrAddrTransType = Input(new AddrTransType)
 
     // store event difftest information
     val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
@@ -1610,12 +1610,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  val brhMispred = PopCount(branchWBs.map(wb => wb.valid & wb.bits.redirect.get.valid))
-  val jmpMispred = PopCount(jmpWBs.map(wb => wb.valid && wb.bits.redirect.get.valid))
-  val brhJump    = PopCount((branchWBs ++ jmpWBs).map(wb => wb.valid))
-  val misPred = brhMispred +& jmpMispred
+  val brhJump = PopCount((branchWBs ++ jmpWBs).map(wb => wb.valid))
+  val misPred = io.redirect.valid && io.redirect.bits.cfiUpdate.isMisPred
 
+  XSPerfAccumulate("brh_jump", brhJump)
   XSPerfAccumulate("br_mis_pred", misPred)
+  XSPerfAccumulate("total_flush", io.redirect.valid)
 
   val commitLoadVec = VecInit(commitLoadValid)
   val commitBranchVec = VecInit(commitBranchValid)
@@ -1639,7 +1639,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     ("rob_4_4_valid          ", numValidEntries > (RobSize * 3 / 4).U),
     ("BRANCH_JUMP            ", brhJump),
     ("BR_MIS_PRED            ", misPred),
-    ("TOTAL_FLUSH            ", io.flushOut.valid)
+    ("TOTAL_FLUSH            ", io.redirect.valid)
   )
   generatePerfEvent()
 
