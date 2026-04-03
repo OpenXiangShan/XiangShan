@@ -1401,8 +1401,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
     difftest.coreid := io.hartId
     difftest.index := 1.U
-    // difftest.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
-    difftest.valid := false.B
+    difftest.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
     difftest.addr := io.refill_to_ldq.bits.addr
     difftest.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.data)
     difftest.mask := VecInit.fill(difftest.mask.getWidth)(true.B).asUInt
