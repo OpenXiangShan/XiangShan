@@ -24,6 +24,7 @@ import utility.XSError
 import utility.XSPerfAccumulate
 import xiangshan.Resolve
 import xiangshan.frontend.bpu.HalfAlignHelper
+import xiangshan.frontend.bpu.SaturateCounter
 
 class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelper with HasCircularQueuePtrHelper {
 
@@ -64,12 +65,44 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     "Backend resolves branches that should have been flushed\n"
   )
 
-  private val resolve = io.backendResolve.map { backendResolve =>
+  private val filteredResolve = io.backendResolve.map { backendResolve =>
     val filteredResolve = Wire(Valid(new Resolve))
     filteredResolve.valid := backendResolve.valid &&
       !(backendRedirect.reduce(_ || _) && backendResolve.bits.ftqIdx > backendRedirectPtr)
     filteredResolve.bits := backendResolve.bits
     filteredResolve
+  }
+
+  /*
+   * When dropResolveCounter saturates,
+   * it indicates that the BPU has been predicting everything correctly over the previous period of time.
+   * Therefore, the ResolveQueue will enter a state where it drops update operations,
+   * and it will exit this state when a misprediction occurs.
+   * This can reduce the number of updates, lower power consumption,
+   * and also reduce read-port conflicts within TAGE and SC.
+   */
+  private val dropResolveCounter = RegInit(0.U.asTypeOf(new SaturateCounter(DropResolveCounterWidth)))
+
+  private val hasResolve    = filteredResolve.map(_.valid).reduce(_ || _)
+  private val hasMispredict = filteredResolve.map(branch => branch.valid && branch.bits.mispredict).reduce(_ || _)
+
+  when(hasResolve) {
+    when(hasMispredict) {
+      dropResolveCounter.selfDecrease(step = DropResolveCounterDecreaseValue.U)
+    }.otherwise {
+      dropResolveCounter.selfIncrease(step = 1.U)
+    }
+  }
+
+  private val resolve = filteredResolve.map { filteredResolve =>
+    val hasMispredict = filteredResolve.bits.mispredict
+    val isDirect      = filteredResolve.bits.attribute.isDirect
+    val shouldDrop    = !hasMispredict && (dropResolveCounter.isSaturatePositive || isDirect)
+
+    val resolve = Wire(Valid(new Resolve))
+    resolve.valid := filteredResolve.valid && !shouldDrop
+    resolve.bits  := filteredResolve.bits
+    resolve
   }
 
   private val hit = resolve.map { branch =>
@@ -155,5 +188,8 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   // because it is a sequential queue, which results in multiple flushed entries staying in the queue and blocking new
   // entries from being enqueued. More sophisticated designs should be considered.
   XSPerfAccumulate("resolveQueueFull", full)
-  XSPerfAccumulate("dropResolve", PopCount(io.backendResolve.map(_.valid && full)))
+  XSPerfAccumulate("resolveQueueFullDropResolve", PopCount(resolve.map(_.valid && full)))
+  XSPerfAccumulate("originResolve", PopCount(io.backendResolve.map(_.valid && !full)))
+  XSPerfAccumulate("filteredResolve", PopCount(filteredResolve.map(_.valid && !full)))
+  XSPerfAccumulate("finalResolve", PopCount(resolve.map(_.valid && !full)))
 }

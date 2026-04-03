@@ -24,16 +24,22 @@ case class FtqParameters(
     ResolveQueueSize:   Int = 16,
     BpRunAheadDistance: Int = 8,
     BpTrainStallLimit:  Int = 8,
-    CommitQueueSize:    Int = 64
+    CommitQueueSize:    Int = 64,
+    // drop resolve requests if there have been no mispredicts for a long period
+    DropResolveCounterWidth: Int = 10
 ) {
   // sanity check
   require(isPow2(FtqSize))
 }
 
 trait HasFtqParameters extends HasFrontendParameters {
-  def ftqParameters:      FtqParameters = frontendParameters.ftqParameters
-  def ResolveQueueSize:   Int           = ftqParameters.ResolveQueueSize
-  def BpRunAheadDistance: Int           = ftqParameters.BpRunAheadDistance
-  def BpTrainStallLimit:  Int           = ftqParameters.BpTrainStallLimit
-  def CommitQueueSize:    Int           = ftqParameters.CommitQueueSize
+  def ftqParameters: FtqParameters = frontendParameters.ftqParameters
+
+  def ResolveQueueSize:   Int = ftqParameters.ResolveQueueSize
+  def BpRunAheadDistance: Int = ftqParameters.BpRunAheadDistance
+  def BpTrainStallLimit:  Int = ftqParameters.BpTrainStallLimit
+  def CommitQueueSize:    Int = ftqParameters.CommitQueueSize
+
+  def DropResolveCounterWidth:         Int = ftqParameters.DropResolveCounterWidth
+  def DropResolveCounterDecreaseValue: Int = 1 << (DropResolveCounterWidth - 1)
 }
