@@ -569,7 +569,7 @@ class DifftestPmaStoreIO(implicit p: Parameters) extends XSBundle {
 }
 
 class DiffStoreIO(implicit p: Parameters) extends XSBundle{
-  val diffInfo = Vec(EnsbufferWidth, Flipped(new ToSbufferDifftestInfoBundle()))
-  val pmaStore = Vec(EnsbufferWidth, Flipped(Valid(new DifftestPmaStoreIO)))
-  val ncStore = Flipped(Valid(new UncacheWordReq()))
+  val diffInfo       = Vec(EnsbufferWidth, Input(new ToSbufferDifftestInfoBundle()))
+  val cacheableStore = Vec(EnsbufferWidth, Flipped(ValidIO(new DifftestPmaStoreIO)))
+  val ncStore        = Flipped(Valid(new UncacheWordReq()))
 }

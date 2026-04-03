@@ -763,6 +763,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
   private class DeqModule(val param: ExeUnitParams)(implicit p: Parameters) extends LSQModule {
     val io = IO(new Bundle {
+      val hartId           = Input(UInt(hartIdLen.W))
       val redirect         = Flipped(ValidIO(new Redirect))
       //The head request of StoreQueue that will write to sbuffer. The rdataPtr point entries.
       val rdataDataEntries = Vec(EnsbufferWidth, Input(new SQDataEntryBundle))
@@ -791,7 +792,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         val sqIdx         = new SqPtr
       }))
       // for debug
-      val pmaStore        = Option.when(debugEn)(Vec(EnsbufferWidth, ValidIO(new DifftestPmaStoreIO)))
+      val diffStore       = Option.when(debugEn)(Flipped(new DiffStoreIO))
       // for perf
       val perfMmioBusy    = Output(Bool())
     })
@@ -1278,18 +1279,44 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     io.toRob.mmioBusy := uncacheState =/= UncacheState.idle
 
     if(debugEn) {
-      // [NOTE]: low 4 bit of addr/vaddr will be omitted in the sbuffer, but it will be used for difftest.
-      for (i <- 0 until EnsbufferWidth) {
-        io.pmaStore.foreach { case sink =>
-          sink(i).valid := writeSbufferWire(i).fire
-          sink(i).bits.addr := writeSbufferWire(i).bits.addr
-          sink(i).bits.data := writeSbufferWire(i).bits.data
-          sink(i).bits.mask := writeSbufferWire(i).bits.mask
-          sink(i).bits.wline := writeSbufferWire(i).bits.wline
-          sink(i).bits.vecValid := writeSbufferWire(i).bits.vecValid
-          sink(i).bits.diffIsHighPart := diffIsHighPart(i) // indicate whether valid data in high 64-bit, only for scalar store event!
-        }
+      val deqCanDoCbo = deqCtrlEntries.head.allValid && !deqCtrlEntries.head.hasException && deqCtrlEntries.head.allocated &&
+      deqCtrlEntries.head.isCbo
+      val diffStore = io.diffStore.get
+      // commit cbo.inval to difftest
+      val cmoInvalEvent = DifftestModule(new DiffCMOInvalEvent)
+      cmoInvalEvent.coreid := io.hartId
+      cmoInvalEvent.valid  := io.writeBack.fire && deqCanDoCbo && isCboInval(deqDataEntries.head.cboType)
+      cmoInvalEvent.addr   := deqDataEntries.head.paddr
+
+      // DiffStoreEvent happens when rdataPtr moves.
+      // That is, pmsStore enter dataBuffer or ncStore enter Ubuffer
+      (0 until EnsbufferWidth).foreach { i =>
+        // when i = 0, the sqPtr is rdataPtr(0), which is rdataPtrExt(0), so it applies to NC as well.
+        val ptr = io.rdataPtrExt(i).value
+          if(i == 1) {
+            diffStore.diffInfo(i).uop                     := Mux(headCross16B, dataEntries.head.debugUop.get, dataEntries(i).debugUop.get)
+            diffStore.diffInfo(i).start                   := Mux(headCross16B, dataEntries.head.debugVecUnalignedStart.get, dataEntries(i).debugVecUnalignedStart.get)
+            diffStore.diffInfo(i).offset                  := Mux(headCross16B, dataEntries.head.debugVecUnalignedOffset.get, dataEntries(i).debugVecUnalignedOffset.get)
+          }
+          else {
+            diffStore.diffInfo(i).uop                     := dataEntries(i).debugUop.get
+            diffStore.diffInfo(i).start                   := dataEntries(i).debugVecUnalignedStart.get
+            diffStore.diffInfo(i).offset                  := dataEntries(i).debugVecUnalignedOffset.get
+          }
+
+          diffStore.cacheableStore(i).valid               := writeSbufferWire(i).fire
+          diffStore.cacheableStore(i).bits.addr           := writeSbufferWire(i).bits.addr
+          diffStore.cacheableStore(i).bits.data           := writeSbufferWire(i).bits.data
+          diffStore.cacheableStore(i).bits.mask           := writeSbufferWire(i).bits.mask
+          diffStore.cacheableStore(i).bits.wline          := writeSbufferWire(i).bits.wline
+          diffStore.cacheableStore(i).bits.vecValid       := writeSbufferWire(i).bits.vecValid
+          diffStore.cacheableStore(i).bits.diffIsHighPart := diffIsHighPart(i) // indicate whether valid data in high 64-bit, only for scalar store event!
       }
+      diffStore.ncStore.valid := io.toUncacheBuffer.req.fire && io.toUncacheBuffer.req.bits.nc
+      diffStore.ncStore.bits := io.toUncacheBuffer.req.bits
+
+      XSError(io.toUncacheBuffer.req.fire && io.toUncacheBuffer.req.bits.nc && headCross16B, "NC request should not cross 16B!\n")
+      (1 until EnsbufferWidth).foreach(i => when(io.writeToSbuffer.req(i).fire) { assert(io.writeToSbuffer.req(i - 1).fire) })
     }
 
     /*=============================================== debug dontTouch =================================================*/
@@ -1470,6 +1497,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   deqModule.io.fromRob          <> io.fromRob
   deqModule.io.toRob            <> io.toRob
   deqModule.io.writeToSbuffer   <> io.writeToSbuffer
+  deqModule.io.hartId           := io.hartId
   io.writeBack                  <> deqModule.io.writeBack
   io.sbufferCtrl                <> deqModule.io.sbufferCtrl
   deqModule.io.fromUnalignQueue <> unalignQueue.io.toDeqModule
@@ -1481,7 +1509,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   val deqPtrExtNext = deqModule.io.deqPtrExtNext
   val sqDeqCnt      = deqModule.io.sqDeqCnt
   val mmioBusy      = deqModule.io.perfMmioBusy
-  val diffPmaStore  = deqModule.io.pmaStore
+  val diffStore     = deqModule.io.diffStore
   val rdataMoveCnt  = deqModule.io.rdataPtrMoveCnt
 
   // unalignQueue connection
@@ -2016,70 +2044,9 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   /************************************************* Difftest *********************************************************/
   // Initialize when unenabled difftest.
   io.diffStore.foreach(_ := DontCare) //TODO: FIX ME!!
-  // Consistent with the logic above.
-  // Only the vector store difftest required signal is separated from the rtl code.
-  val deqCanDoCbo = deqCtrlEntries.head.allValid && !deqCtrlEntries.head.hasException && deqCtrlEntries.head.allocated &&
-    deqCtrlEntries.head.isCbo
+
   if (debugEn) {
-    /*=========================================== Data and Mask Generate =============================================*/
-
-    val outData        = Wire(Vec(EnsbufferWidth , UInt(VLEN.W)))
-    val outMask        = Wire(Vec(EnsbufferWidth , UInt((VLENB).W)))
-
-    for (i <- 0 until EnsbufferWidth) {
-      val selectOffset       = 0.U - dataEntries(i).byteStart // need to generate 0 align data and mask
-      val selectData         = (0 until VLENB).map(j => // generate circular right shift byte data.
-        j.U -> rotateByteRight(dataEntries(i).data, j * 8)
-      )
-
-      val byteMask           = dataEntries(i).byteMask
-      val selectMsk          = (0 until VLENB).map(j => // generate circular right shift byte data.
-        j.U -> rotateByteRight(byteMask, j)
-      )
-
-      outData(i)         := ParallelLookUp(selectOffset, selectData)
-      outMask(i)         := ParallelLookUp(selectOffset, selectMsk)
-    }
-//     commit cbo.inval to difftest
-    val cmoInvalEvent = DifftestModule(new DiffCMOInvalEvent)
-    cmoInvalEvent.coreid := io.hartId
-    cmoInvalEvent.valid  := io.writeBack.fire && deqCanDoCbo && isCboInval(deqDataEntries.head.cboType)
-    cmoInvalEvent.addr   := deqDataEntries.head.paddr
-
-//     DiffStoreEvent happens when rdataPtr moves.
-//     That is, pmsStore enter dataBuffer or ncStore enter Ubuffer
-    (0 until EnsbufferWidth).foreach { i =>
-      // when i = 0, the sqPtr is rdataPtr(0), which is rdataPtrExt(0), so it applies to NC as well.
-      val ptr = rdataPtrExt(i).value
-      io.diffStore.foreach{case sink =>
-        sink.diffInfo(i).uop            := dataEntries(ptr).debugUop.get
-        sink.diffInfo(i).start          := dataEntries(ptr).debugVecUnalignedStart.get
-        sink.diffInfo(i).offset         := dataEntries(ptr).debugVecUnalignedOffset.get
-        sink.pmaStore(i).valid          := diffPmaStore.get(i).valid
-        sink.pmaStore(i).bits           := diffPmaStore.get(i).bits
-      }
-    }
-
-    io.diffStore.foreach { case sink =>
-      sink.ncStore.valid := io.toUncacheBuffer.req.fire && io.toUncacheBuffer.req.bits.nc
-      sink.ncStore.bits := io.toUncacheBuffer.req.bits
-    }
-
-
-    (1 until EnsbufferWidth).foreach(i => when(io.writeToSbuffer.req(i).fire) { assert(io.writeToSbuffer.req(i - 1).fire) })
-    if (coreParams.dcacheParametersOpt.isEmpty) {
-      for (i <- 0 until EnsbufferWidth) {
-        val ptr = deqPtrExt(i).value
-        val ram = DifftestMem(64L * 1024 * 1024 * 1024, 8)
-        val wen = ctrlEntries(ptr).allocated && ctrlEntries(ptr).committed(ptr) && isCacheable(dataEntries(ptr).memoryType)
-        val waddr = ((rdataDataEntries(i).paddr - "h80000000".U) >> 3).asUInt
-        val wdata = Mux(rdataDataEntries(i).paddr(3), rdataDataEntries(i).data(127, 64), rdataDataEntries(i).data(63, 0))
-        val wmask = Mux(rdataDataEntries(i).paddr(3), outMask(i)(15, 8), outMask(i)(7, 0))
-        when (wen) {
-          ram.write(waddr, wdata.asTypeOf(Vec(8, UInt(8.W))), wmask.asBools)
-        }
-      }
-    }
+    io.diffStore.get := diffStore.get
   }
 
 

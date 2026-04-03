@@ -438,6 +438,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   })
 
   require(HyuCnt == 0) // HybridUnit is not supported for now
+  require(coreParams.dcacheParametersOpt.nonEmpty) // L1 dcache must be define for now
 
   val intIssue: Seq[DecoupledIO[ExuInput]] = io.ooo_to_mem.intIssue.flatten
   val vecIssue: Seq[DecoupledIO[ExuInput]] = io.ooo_to_mem.vecIssue.flatten
@@ -1175,19 +1176,19 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.storeDebugInfo := DontCare
   // store event difftest information
   if (env.EnableDifftest) {
-    // diffStoreEvent for vSegment, pmaStore and ncStore
+    // diffStoreEvent for vSegment, cacheableStore and ncStore
     (0 until EnsbufferWidth).foreach{i =>
       if(i == 0) {
         when(vSegmentUnit.io.sbuffer.valid) {
           sbuffer.io.diffStore.diffInfo(0) := vSegmentUnit.io.vecDifftestInfo.bits
-          sbuffer.io.diffStore.pmaStore(0) := vSegmentUnit.io.diffPmaStore.get
+          sbuffer.io.diffStore.cacheableStore(0) := vSegmentUnit.io.diffPmaStore.get
         }.otherwise{
           sbuffer.io.diffStore.diffInfo(0) := lsq.io.diffStore.get.diffInfo(0)
-          sbuffer.io.diffStore.pmaStore(0) := lsq.io.diffStore.get.pmaStore(0)
+          sbuffer.io.diffStore.cacheableStore(0) := lsq.io.diffStore.get.cacheableStore(0)
         }
       }else{
         sbuffer.io.diffStore.diffInfo(i) := lsq.io.diffStore.get.diffInfo(i)
-        sbuffer.io.diffStore.pmaStore(i) := lsq.io.diffStore.get.pmaStore(i)
+        sbuffer.io.diffStore.cacheableStore(i) := lsq.io.diffStore.get.cacheableStore(i)
       }
       sbuffer.io.diffStore.ncStore := lsq.io.diffStore.get.ncStore
       io.mem_to_ooo.storeDebugInfo(i).robidx := sbuffer.io.diffStore.diffInfo(i).uop.robIdx
