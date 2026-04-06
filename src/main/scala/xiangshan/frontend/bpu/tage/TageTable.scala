@@ -103,10 +103,12 @@ class TageTable(
   // write to write buffer
   entryWriteBuffers.zipWithIndex.foreach { case (buffer, bankIdx) =>
     buffer.io.write.zipWithIndex.foreach { case (writePort, wayIdx) =>
-      writePort.valid          := writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx)
-      writePort.bits.setIdx    := writeReq.setIdx
-      writePort.bits.entry     := writeReq.entries(wayIdx)
-      writePort.bits.usefulCtr := writeReq.usefulCtrs(wayIdx)
+      writePort.valid              := writeReqValid && writeReq.bankMask(bankIdx) && writeReq.wayMask(wayIdx)
+      writePort.bits.setIdx        := writeReq.setIdx
+      writePort.bits.entry         := writeReq.entries(wayIdx)
+      writePort.bits.usefulCtr     := writeReq.usefulCtrs(wayIdx)
+      writePort.bits.writeEntryEn  := writeReq.writeEntryEn(wayIdx)
+      writePort.bits.writeUsefulEn := writeReq.writeUsefulEn(wayIdx)
     }
     buffer.io.takenMask.get := writeReq.actualTakenMask
   }
@@ -114,15 +116,15 @@ class TageTable(
   // write to sram from write buffer
   entrySram.zip(usefulCtrs).zip(entryWriteBuffers) foreach { case ((bank, ctrsPerBank), buffer) =>
     bank.zip(ctrsPerBank).zip(buffer.io.read).foreach { case ((way, ctrsPerWay), readPort) =>
-      val valid  = readPort.valid && !way.io.r.req.valid
+      val valid  = readPort.valid && !way.io.r.req.valid && readPort.bits.writeEntryEn
       val setIdx = readPort.bits.setIdx
       val entry  = readPort.bits.entry
       way.io.w.apply(valid, entry, setIdx, 1.U(1.W))
       readPort.ready := way.io.w.req.ready && !way.io.r.req.valid
-
+      val writeUseful = readPort.fire && readPort.bits.writeUsefulEn
       when(io.resetUseful) {
         ctrsPerWay.foreach(_.resetZero())
-      }.elsewhen(readPort.fire) {
+      }.elsewhen(writeUseful) {
         ctrsPerWay(setIdx) := readPort.bits.usefulCtr
       }
     }
@@ -159,6 +161,15 @@ class TageTable(
   XSPerfAccumulate("predict_read", io.predictReadReq.valid)
   XSPerfAccumulate("train_read", io.trainReadReq.valid)
   XSPerfAccumulate("write", io.writeReq.valid)
+  XSPerfAccumulate(
+    s"tage_write_entry_${tableIdx}",
+    Mux(io.writeReq.valid, PopCount(io.writeReq.bits.writeEntryEn), 0.U)
+  )
+  XSPerfAccumulate(
+    s"tage_write_useful_${tableIdx}",
+    Mux(io.writeReq.valid, PopCount(io.writeReq.bits.writeUsefulEn), 0.U)
+  )
+  XSPerfAccumulate(s"tage_write_total_${tableIdx}", Mux(io.writeReq.valid, PopCount(io.writeReq.bits.wayMask), 0.U))
   XSPerfAccumulate(
     "drop_write",
     PopCount(entryWriteBuffers.flatMap(writePorts => writePorts.io.write.map(p => p.valid && !p.ready)))

@@ -398,11 +398,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       !(hasProvider && providerTableOH(NumTables - 1)) &&
       !(hasProvider && !useProvider && providerPred === actualTaken && provider.takenCtr.isWeak)
 
-    val notNeedUpdate = hasProvider && provider.takenCtr.shouldHold(actualTaken) &&
-      provider.usefulCtr.isSaturatePositive && incProviderUsefulCtr &&
-      (useProvider || !hasAlt || alt.takenCtr.shouldHold(actualTaken))
-    val needUpdateProvider = !notNeedUpdate && hasProvider
-    val needUpdateAlt      = !notNeedUpdate && useAlt
+    val needUpdateProviderCtr    = !provider.takenCtr.shouldHold(actualTaken) && hasProvider
+    val needUpdateProviderUseful = !provider.usefulCtr.isSaturatePositive && incProviderUsefulCtr && hasProvider
+
+    val needUpdateAltCtr = !alt.takenCtr.shouldHold(actualTaken) && useAlt
 
     val incUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred === actualTaken
     val decUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred =/= actualTaken
@@ -429,9 +428,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     trainInfo.altEntry.takenCtr := altNewTakenCtr
     trainInfo.altOldUsefulCtr   := alt.usefulCtr
 
-    trainInfo.needAllocate       := needAllocate
-    trainInfo.needUpdateProvider := needUpdateProvider
-    trainInfo.needUpdateAlt      := needUpdateAlt
+    trainInfo.needAllocate             := needAllocate
+    trainInfo.needUpdateProviderCtr    := needUpdateProviderCtr
+    trainInfo.needUpdateProviderUseful := needUpdateProviderUseful
+    trainInfo.needUpdateAltCtr         := needUpdateAltCtr
 
     trainInfo.incUseAltOnNa := incUseAltOnNa
     trainInfo.decUseAltOnNa := decUseAltOnNa
@@ -508,6 +508,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     implicit val info: TageTableInfo = TableInfos(tableIdx) // used by NumWays
 
     val writeWayMask    = Wire(Vec(NumWays, Bool()))
+    val writeEntryEn    = Wire(Vec(NumWays, Bool()))
+    val writeUsefulEn   = Wire(Vec(NumWays, Bool()))
     val writeEntries    = Wire(Vec(NumWays, new TageEntry))
     val writeUsefulCtrs = Wire(Vec(NumWays, UsefulCounter()))
 
@@ -515,22 +517,29 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val actualTakenMask = Wire(Vec(NumWays, Bool()))
 
     (0 until NumWays).foreach { wayIdx =>
-      val (hitProviderMask, hitAltMask) = t2_trainInfoVec.map { info =>
-        val hitProvider =
-          info.valid && info.needUpdateProvider && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
-        val hitAlt = info.valid && info.needUpdateAlt && info.altTableOH(tableIdx) && info.altWayOH(wayIdx)
-        (hitProvider, hitAlt)
-      }.unzip
-      val hitProvider = hitProviderMask.reduce(_ || _)
-      val hitAlt      = hitAltMask.reduce(_ || _)
+      val (providerWriteCtr, providerWriteUseful, altWriteCtr) = t2_trainInfoVec.map { info =>
+        val providerNeedUpdateCtr =
+          info.valid && info.needUpdateProviderCtr && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
+        val providerNeedUpdateUseful =
+          info.valid && info.needUpdateProviderUseful && info.providerTableOH(tableIdx) && info.providerWayOH(wayIdx)
+        val altNeedUpdateCtr = info.valid && info.needUpdateAltCtr && info.altTableOH(tableIdx) && info.altWayOH(wayIdx)
+        (providerNeedUpdateCtr, providerNeedUpdateUseful, altNeedUpdateCtr)
+      }.unzip3
+
+      val hitProvider = providerWriteCtr.reduce(_ || _) || providerWriteUseful.reduce(_ || _)
+      val hitProviderMask = (providerWriteCtr zip providerWriteUseful).map {
+        case (writeCtr, writeUseful) =>
+          writeCtr || writeUseful
+      }
+      val hitAlt = altWriteCtr.reduce(_ || _)
       when(t2_fire) {
         assert(PopCount(hitProviderMask) <= 1.U)
-        assert(PopCount(hitAltMask) <= 1.U)
+        assert(PopCount(altWriteCtr) <= 1.U)
         assert(!(hitProvider && hitAlt))
       }
 
       val providerInfo = Mux1H(hitProviderMask, t2_trainInfoVec)
-      val altInfo      = Mux1H(hitAltMask, t2_trainInfoVec)
+      val altInfo      = Mux1H(altWriteCtr, t2_trainInfoVec)
 
       val updateEn                = hitProvider || hitAlt
       val updateEntry             = Mux(hitProvider, providerInfo.providerEntry, altInfo.altEntry)
@@ -540,6 +549,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
       val allocateEn = t2_allocate && t2_allocateTableOH(tableIdx) && t2_allocateWayOH(wayIdx)
 
       writeWayMask(wayIdx)    := updateEn || allocateEn
+      writeEntryEn(wayIdx)    := providerWriteCtr.reduce(_ || _) || hitAlt || allocateEn
+      writeUsefulEn(wayIdx)   := providerWriteUseful.reduce(_ || _) || allocateEn
       writeEntries(wayIdx)    := Mux(allocateEn, t2_allocateEntry, updateEntry)
       writeUsefulCtrs(wayIdx) := Mux(allocateEn, UsefulCounter.Init, updateUsefulCtr)
       actualTakenMask(wayIdx) := Mux(allocateEn, t2_allocateBranch.bits.taken, updateBranchActualTaken)
@@ -549,11 +560,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.writeReq.bits.setIdx          := t2_setIdx(tableIdx)
     table.io.writeReq.bits.bankMask        := t2_bankMask
     table.io.writeReq.bits.wayMask         := writeWayMask.asUInt
+    table.io.writeReq.bits.writeEntryEn    := writeEntryEn
+    table.io.writeReq.bits.writeUsefulEn   := writeUsefulEn
     table.io.writeReq.bits.entries         := writeEntries
     table.io.writeReq.bits.usefulCtrs      := writeUsefulCtrs
     table.io.writeReq.bits.actualTakenMask := actualTakenMask
-
-    table.io.resetUseful := t2_fire && usefulResetCtr.isSaturatePositive
+    table.io.resetUseful                   := t2_fire && usefulResetCtr.isSaturatePositive
   }
 
   when(t2_fire) {
