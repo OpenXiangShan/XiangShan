@@ -233,8 +233,8 @@ class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
 class storeMisaignIO(implicit p: Parameters) extends Bundle{
   val storePipeEmpty            = Input(Bool())
   val storeMisalignBufferEmpty  = Input(Bool())
-  val storeMisalignBufferRobIdx = Input(new RobPtr)
-  val storeMisalignBufferUopIdx = Input(UopIdx())
+  val scalaIssueValid           = Input(Bool())
+  val scalaIssueRobIdx          = Input(new RobPtr)
   val blockScalaIssue           = Output(Bool())
 
 }

@@ -75,7 +75,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val sqCommitUopIdx = Input(UopIdx())
     val sqCommitRobIdx = Input(new RobPtr)
 
-    val s0_s1_s2_valid = Output(Bool())
+    val s1_s2_valid = Output(Bool())
     val vecMisalignBlockScalaIssue = Input(Bool())
 
   })
@@ -89,7 +89,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // stage 0
   // --------------------------------------------------------------------------------
   // generate addr, use addr to query DCache and DTLB
-  val s0_iss_valid        = io.stin.valid && !io.vecMisalignBlockScalaIssue
+  val s0_iss_valid        = io.stin.valid
   val s0_prf_valid        = io.prefetch_req.valid && io.dcache.req.ready
   val s0_vec_valid        = io.vecstin.valid
   val s0_ma_st_valid      = io.misalign_stin.valid
@@ -183,7 +183,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   )) + s0_addr_low
   val s0_rs_corss16Bytes = s0_addr_Up_low(4) =/= s0_addr_low(4)
   val s0_misalignWith16Byte = !s0_rs_corss16Bytes && !s0_addr_aligned && !s0_use_flow_prf
-  val s0_misalignNeedReplay = (s0_use_flow_vec || s0_rs_corss16Bytes) && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
+  val s0_misalignNeedReplay = s0_rs_corss16Bytes && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
   s0_is128bit := Mux(s0_use_flow_ma, io.misalign_stin.bits.is128bit, is128Bit(s0_vecstin.alignedType) || s0_misalignWith16Byte)
 
   s0_fullva := Mux(
@@ -566,7 +566,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.hasException := false.B
 
   // for misalign in vsMergeBuffer
-  io.s0_s1_s2_valid := s0_valid || s1_valid || s2_valid
+  io.s1_s2_valid := s1_valid || s2_valid
 
   // Pipeline
   // --------------------------------------------------------------------------------

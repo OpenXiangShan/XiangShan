@@ -37,8 +37,6 @@ import xiangshan.cache.wpu.ReplayCarry
 
 class MisBuffertoVecSplitIO(implicit p: Parameters) extends XSBundle {
   val empty  = Bool()
-  val robIdx = new RobPtr
-  val uopIdx = UopIdx()
 }
 class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   with HasCircularQueuePtrHelper
@@ -199,8 +197,6 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   }
 
   io.toVecSplit.empty  := !req_valid
-  io.toVecSplit.robIdx := req.uop.robIdx
-  io.toVecSplit.uopIdx := req.uop.uopIdx
 
   //logic
   val splitStoreReqs = RegInit(VecInit(List.fill(maxSplitNum)(0.U.asTypeOf(new LsPipelineBundle))))
