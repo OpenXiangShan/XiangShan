@@ -715,7 +715,7 @@ class Sbuffer(implicit p: Parameters)
       stateVec(dcache_resp_id).state_inflight := false.B
       stateVec(dcache_resp_id).state_valid := false.B
       assert(!resp.bits.replay)
-      assert(!resp.bits.miss) // not need to resp if miss, to be opted
+      // assert(!resp.bits.miss)
       assert(stateVec(dcache_resp_id).state_inflight === true.B)
     }
 
@@ -778,8 +778,8 @@ class Sbuffer(implicit p: Parameters)
       val difftest = DifftestModule(new DiffSbufferEvent, delay = 1)
       val dcache_resp_id = resp.bits.id
       difftest.coreid := io.hartId
-      difftest.index  := index.U
-      difftest.valid  := resp.fire
+      difftest.index  := 1.U + index.U
+      difftest.valid  := resp.fire && !resp.bits.miss
       difftest.addr   := getAddr(ptag(dcache_resp_id))
       difftest.data   := data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
       difftest.mask   := mask(dcache_resp_id).asUInt

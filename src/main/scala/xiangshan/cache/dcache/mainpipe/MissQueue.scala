@@ -841,7 +841,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_to_ldq.bits.error := RegEnable(io.mem_grant.bits.corrupt || io.mem_grant.bits.denied, refill_to_ldq_en)
   io.refill_to_ldq.bits.refill_done := RegEnable(refill_done && io.mem_grant.fire, refill_to_ldq_en)
   io.refill_to_ldq.bits.hasdata := hasData
-  io.refill_to_ldq.bits.data_raw := refill_and_store_data.asUInt
+  io.refill_to_ldq.bits.data_raw := refill_data_raw.asUInt
   io.refill_to_ldq.bits.id := io.id
 
   // if the entry has a pending merge req, wait for it
@@ -1401,11 +1401,25 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
     difftest.coreid := io.hartId
     difftest.index := 1.U
-    // difftest.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
-    difftest.valid := false.B
+    difftest.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
     difftest.addr := io.refill_to_ldq.bits.addr
     difftest.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.data)
     difftest.mask := VecInit.fill(difftest.mask.getWidth)(true.B).asUInt
+  }
+
+  if (env.EnableDifftest) {
+    // Store-miss refill completed in MainPipe S3: update difftest (DiffSbufferEvent).
+    val mq_s3_sel_info = Mux1H(
+      entries.map(e => (io.mainpipe_info.s3_miss_id === e.io.id) -> e.io.forwardInfo)
+    )
+    val hasStore = mq_s3_sel_info.store_mask.orR
+    val difftest_store = DifftestModule(new DiffSbufferEvent, delay = 1)
+    difftest_store.coreid := io.hartId
+    difftest_store.index := 0.U
+    difftest_store.valid := io.mainpipe_info.s3_valid && io.mainpipe_info.s3_refill_resp && hasStore
+    difftest_store.addr := mq_s3_sel_info.paddr
+    difftest_store.data := mq_s3_sel_info.raw_data.asUInt.asTypeOf(difftest_store.data)
+    difftest_store.mask := mq_s3_sel_info.store_mask
   }
 
   // Perf count
