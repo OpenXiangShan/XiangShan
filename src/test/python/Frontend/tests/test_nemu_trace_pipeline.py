@@ -1,5 +1,8 @@
 import json
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 from env.trace import GoldenTrace
 
@@ -167,6 +170,35 @@ def test_api_prepare_program_and_nemu_trace_rejects_non_default_base(tmp_path):
 
 
 def test_run_bin_trace_pipeline_defaults_to_jsonl_output(tmp_path):
-    import pytest
+    package_root = Path(__file__).resolve().parents[1]
+    repo_root = package_root.parents[3]
+    script_path = package_root / "run_bin_trace_pipeline.sh"
+    fake_nemu = _make_fake_nemu(tmp_path)
+    bin_path = tmp_path / f"{tmp_path.name}.bin"
+    bin_path.write_bytes(b"\x13\x00\x00\x00")
 
-    pytest.skip("run_bin_trace_pipeline.sh is intentionally out of scope for the Frontend package migration")
+    expected_trace_path = repo_root / "NEMU" / "logs" / f"{bin_path.stem}.trace.jsonl"
+    expected_log_path = repo_root / "NEMU" / "logs" / f"{bin_path.stem}.nemu.log"
+    expected_trace_path.unlink(missing_ok=True)
+    expected_log_path.unlink(missing_ok=True)
+
+    env = dict(os.environ)
+    env["TB_RUN_DUT"] = "0"
+    env["TB_NEMU_EXEC"] = str(fake_nemu)
+    env["PYTHON"] = sys.executable
+
+    try:
+        out = subprocess.run(
+            [str(script_path), str(bin_path)],
+            cwd=str(repo_root),
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert out.returncode == 0, out.stderr
+        assert f"[frontend] trace: {expected_trace_path}" in out.stdout
+        assert expected_trace_path.is_file()
+    finally:
+        expected_trace_path.unlink(missing_ok=True)
+        expected_log_path.unlink(missing_ok=True)

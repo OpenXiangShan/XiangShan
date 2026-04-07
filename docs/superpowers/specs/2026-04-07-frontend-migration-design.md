@@ -7,9 +7,9 @@ Migrate the refactored Frontend Python verification environment from
 canonical package rooted at `src/test/python/Frontend/`, aligned with the
 existing `src/test/python/MemBlock/` workspace shape.
 
-This migration intentionally carries only the Frontend verification code and
-tests. It does not migrate the original `testbench/docs/`, `testbench/web/`,
-`testbench/tools/`, or helper shell scripts.
+This migration carries the Frontend verification code, tests, package-local
+tools, web console assets, shell entry points, and packaged fixture bins. It
+does not migrate the original `testbench/docs/`.
 
 ## User-Approved Constraints
 
@@ -17,9 +17,13 @@ tests. It does not migrate the original `testbench/docs/`, `testbench/web/`,
 - The package must live at `src/test/python/Frontend/`, parallel to
   `src/test/python/MemBlock/`.
 - The package shape should follow the MemBlock workspace organization.
-- Only the main verification code and tests are migrated:
+- Migrate the operational Frontend package surface:
   - source: `testbench/env/*`
   - tests: `testbench/tests/*`
+  - web console: `testbench/web/*`
+  - helper tools: `testbench/tools/*`
+  - shell entry points: `testbench/run_*.sh`
+  - packaged bins required by scripts/webui: `testbench/bins/*`
 - Internal module names and implementation structure should change as little as
   practical.
 - Existing old Frontend entry points may be replaced when they conflict with the
@@ -36,6 +40,10 @@ The relevant implemented surface in that worktree is:
 
 - `testbench/env/`
 - `testbench/tests/`
+- `testbench/web/`
+- `testbench/tools/`
+- `testbench/run_*.sh`
+- `testbench/bins/`
 
 The source tree already reflects the MemBlock-style refactor completed in the
 frontend workstream:
@@ -62,6 +70,13 @@ src/test/python/Frontend/
 |-- conftest.py
 |-- Frontend_api.py
 |-- Frontend_env.py
+|-- nemu_bin_to_golden_trace.py
+|-- nemu_log_to_golden_trace.py
+|-- run_dut_with_bin_trace.py
+|-- run_bin_trace_pipeline.sh
+|-- run_pytest_with_log.sh
+|-- run_web_console.sh
+|-- bins/
 |-- env/
 |   |   |-- api.py
 |   |-- frontend_env.py
@@ -73,6 +88,12 @@ src/test/python/Frontend/
 |   |-- monitors/
 |   |-- model/
 |   `-- sequences/
+|-- webui/
+|   |-- __init__.py
+|   |-- event_bus.py
+|   |-- runner.py
+|   |-- server.py
+|   `-- static/
 `-- tests/
     |-- conftest.py
     `-- test_*.py
@@ -108,7 +129,7 @@ The canonical implementation should live under:
 - `src/test/python/Frontend/env/`
 - `src/test/python/Frontend/tests/`
 
-### Root-level entry points
+### Root-level entry points and tools
 
 To match the MemBlock user experience without flattening the full codebase,
 introduce thin root-level modules:
@@ -116,10 +137,16 @@ introduce thin root-level modules:
 - `src/test/python/Frontend/Frontend_api.py`
 - `src/test/python/Frontend/Frontend_env.py`
 - `src/test/python/Frontend/conftest.py`
+- `src/test/python/Frontend/nemu_bin_to_golden_trace.py`
+- `src/test/python/Frontend/nemu_log_to_golden_trace.py`
+- `src/test/python/Frontend/run_dut_with_bin_trace.py`
+- `src/test/python/Frontend/run_bin_trace_pipeline.sh`
+- `src/test/python/Frontend/run_pytest_with_log.sh`
+- `src/test/python/Frontend/run_web_console.sh`
 
-These files should be lightweight adapters that expose the new package through a
-MemBlock-like top-level interface. They should not become a second
-implementation layer.
+These files should stay thin. The Python adapters expose the new package
+through a MemBlock-like top-level interface, while the shell wrappers keep the
+requested CLI entry points without reintroducing the old `testbench/` root.
 
 ### Old entry points in the repository
 
@@ -162,6 +189,18 @@ Legacy repository-root `tests/*` files are no longer the canonical home for the
 Frontend verification environment. They may be bridged or replaced only where
 needed to avoid broken entry points.
 
+## WebUI and Script Placement
+
+- Web console implementation moves from `testbench/web/` to
+  `src/test/python/Frontend/webui/`.
+- Static assets stay bundled under `src/test/python/Frontend/webui/static/`.
+- Shell entry points stay at the Frontend package root so they behave like the
+  requested MemBlock-style package commands.
+- `testbench/tools/*` scripts are promoted into package-root Frontend helper
+  scripts rather than keeping a nested `tools/` directory.
+- `testbench/bins/microbench.bin` is retained under `src/test/python/Frontend/bins/`
+  because the web runner and trace pipeline use it directly.
+
 ## Pytest and Discovery Model
 
 The package should follow the same discoverability pattern used by MemBlock:
@@ -182,9 +221,6 @@ The following are intentionally excluded from this migration:
 
 - `testbench/design.md`
 - `testbench/docs/*`
-- `testbench/web/*`
-- `testbench/tools/*`
-- helper shell scripts such as `run_pytest_with_log.sh` and `run_web_console.sh`
 - broad behavioral cleanup unrelated to path migration
 - making every historical root-level `tests/*` case green under every legacy
   invocation mode
@@ -200,9 +236,12 @@ The migration is complete when all of the following are true:
 3. The canonical Frontend tests live under `src/test/python/Frontend/tests/`.
 4. `Frontend_api.py` and `Frontend_env.py` provide the expected top-level entry
    points without duplicating business logic.
-5. The migrated package imports successfully from the XiangShan tree.
-6. Focused Frontend tests pass from the new location.
-7. Conflicting old Frontend entry points are either removed, replaced, or
+5. The package-local helper tools and shell wrappers resolve through the new
+   `src/test/python/Frontend/` root.
+6. The web console assets and server modules load from `src/test/python/Frontend/webui/`.
+7. The migrated package imports successfully from the XiangShan tree.
+8. Focused Frontend tests pass from the new location.
+9. Conflicting old Frontend entry points are either removed, replaced, or
    bridged to the new package.
 
 ## Risks and Mitigations

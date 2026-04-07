@@ -4,3 +4,5 @@
 .nfs*
 __pycache__/
 data/
+logs/
+output/

@@ -1,0 +1,1711 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Frontend Interactive Console</title>
+    <style>
+      :root {
+        --bg-0: #090c12;
+        --bg-1: #121a26;
+        --panel: #131e2d;
+        --panel-2: #102236;
+        --line: #26384e;
+        --line-soft: #1d2d43;
+        --fg: #e6f0ff;
+        --muted: #9db0cc;
+        --accent: #59c3ff;
+        --warn: #f5bd4a;
+        --err: #ff6f73;
+        --ok: #5ed89a;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      body {
+        font: 14px/1.4 "Space Grotesk", "Noto Sans", "Segoe UI", sans-serif;
+        color: var(--fg);
+        background:
+          radial-gradient(1200px 580px at 12% -4%, #173a63 0%, transparent 65%),
+          radial-gradient(920px 460px at 90% 12%, #1a3652 0%, transparent 72%),
+          linear-gradient(160deg, var(--bg-0), var(--bg-1));
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        height: 100vh;
+        overflow: hidden;
+      }
+      .sidebar {
+        background: linear-gradient(180deg, #0d1622, #101c2b);
+        border-right: 1px solid var(--line);
+        padding: 12px;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-height: 0;
+      }
+      .content {
+        padding: 12px;
+        display: grid;
+        --pc-panel-size: 42%;
+        grid-template-rows: minmax(120px, auto) minmax(180px, var(--pc-panel-size)) 8px minmax(180px, 1fr);
+        gap: 10px;
+        min-height: 0;
+        overflow: hidden;
+      }
+      .card, .panel {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: linear-gradient(160deg, var(--panel), var(--panel-2));
+        box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+      }
+      .card {
+        padding: 10px;
+        margin-bottom: 0;
+      }
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 13px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .card-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 8px;
+      }
+      .card-head h3 {
+        margin: 0;
+      }
+      .session-ws {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        display: inline-block;
+        border: 1px solid #33516f;
+        background: #44576f;
+        box-shadow: 0 0 0 0 rgba(159, 182, 207, 0.35);
+      }
+      .session-ws.ws-connected {
+        background: #38c172;
+        border-color: #5be28f;
+      }
+      .session-ws.ws-connecting {
+        background: #f1c057;
+        border-color: #f6d388;
+        animation: ws-pulse 1.2s infinite;
+      }
+      @keyframes ws-pulse {
+        0% { box-shadow: 0 0 0 0 rgba(241, 192, 87, 0.35); }
+        70% { box-shadow: 0 0 0 6px rgba(241, 192, 87, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(241, 192, 87, 0); }
+      }
+      .row {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 6px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      label {
+        display: inline-flex;
+        gap: 6px;
+        align-items: center;
+        color: var(--muted);
+      }
+      input, select, button {
+        background: #0a1320;
+        color: var(--fg);
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        padding: 6px 8px;
+        min-width: 0;
+      }
+      input, select { width: 128px; }
+      input[type="range"] { width: 220px; }
+      button {
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button:hover {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 1px rgba(89, 195, 255, 0.25) inset;
+      }
+      .status {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(5, minmax(110px, 1fr));
+      }
+      .status.status-compact {
+        grid-template-columns: repeat(2, minmax(130px, 1fr));
+      }
+      .status-panel {
+        margin-top: auto;
+      }
+      .pill {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 8px 10px;
+        background: rgba(13, 24, 38, 0.75);
+      }
+      .pill .k {
+        display: block;
+        font-size: 11px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+      .pill .v {
+        font-weight: 700;
+        font-size: 16px;
+      }
+      .ok { color: var(--ok); }
+      .warn { color: var(--warn); }
+      .err { color: var(--err); }
+      .hint { color: var(--muted); font-size: 12px; }
+      .hint.warn-text { color: #f7cf6c; }
+      .mem-badge {
+        position: fixed;
+        top: 8px;
+        right: 10px;
+        z-index: 100;
+        pointer-events: none;
+        border: 1px solid #2f4a67;
+        border-radius: 999px;
+        background: rgba(7, 18, 30, 0.9);
+        color: #b8d7f6;
+        padding: 4px 8px;
+        font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: nowrap;
+      }
+
+      .timeline-panel {
+        padding: 10px;
+        display: grid;
+        grid-template-rows: auto auto 1fr auto;
+        gap: 8px;
+        min-height: 0;
+      }
+      .panel-splitter {
+        border-radius: 8px;
+        border: 1px solid var(--line-soft);
+        background: linear-gradient(180deg, #0f1a29, #0d1724);
+        cursor: ns-resize;
+      }
+      .panel-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .panel-head h2 {
+        margin: 0;
+        font-size: 16px;
+        letter-spacing: 0.03em;
+      }
+      .timeline-tools {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .head-ops {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .mini-btn {
+        padding: 4px 8px;
+        font-size: 12px;
+      }
+      .timeline-wrap {
+        position: relative;
+        min-height: 0;
+        height: 100%;
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        background: radial-gradient(800px 280px at 22% -10%, #19324f 0%, transparent 70%), #0b1421;
+        overflow: hidden;
+      }
+      #timeline {
+        width: 100%;
+        height: 100%;
+        user-select: none;
+        cursor: grab;
+      }
+      #timeline.dragging { cursor: grabbing; }
+      #laneOverlay {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+      }
+      .lane-header {
+        position: absolute;
+        left: 8px;
+        width: 165px;
+        display: flex;
+        gap: 6px;
+        align-items: center;
+        pointer-events: auto;
+      }
+      .lane-title {
+        min-width: 86px;
+        max-width: 86px;
+        font-size: 11px;
+        color: #c7d6ea;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .lane-select {
+        width: 74px;
+        font-size: 11px;
+        padding: 2px 4px;
+      }
+      .legend {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .legend .item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+
+      .pc-panel {
+        padding: 10px;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        gap: 8px;
+        min-height: 0;
+      }
+      .pc-metrics {
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        padding: 8px;
+        background: rgba(11, 20, 33, 0.75);
+      }
+      .pc-metrics h3 {
+        margin: 0 0 8px;
+        font-size: 13px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .pc-metrics .metric-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+      #pcTrace {
+        width: 100%;
+        min-height: 0;
+        height: 100%;
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        background: radial-gradient(1000px 320px at 10% -20%, #2d3947 0%, transparent 70%), #0d1320;
+      }
+      .metrics-panel {
+        padding: 10px;
+      }
+      .metrics-panel h3 {
+        margin: 0 0 8px;
+        font-size: 13px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .metrics-panel .metric-grid {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+      }
+      .metric-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .metric {
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        padding: 8px;
+        background: rgba(11, 20, 33, 0.75);
+      }
+      .metric .k {
+        display: block;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .metric .v {
+        font-weight: 700;
+        margin-top: 3px;
+      }
+      .detail-card {
+        height: 213px;
+        display: flex;
+        flex-direction: column;
+        min-height: 213px;
+      }
+      #detailText {
+        margin: 0;
+        border: 1px solid var(--line-soft);
+        border-radius: 8px;
+        padding: 8px;
+        min-height: 0;
+        max-height: none;
+        height: 100%;
+        flex: 1 1 auto;
+        overflow: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        background: rgba(11, 20, 33, 0.75);
+        white-space: pre-wrap;
+      }
+      @media (max-width: 1100px) {
+        .layout { grid-template-columns: 1fr; }
+        .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+        .status, .status.status-compact { grid-template-columns: repeat(2, minmax(120px, 1fr)); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <div class="sidebar">
+        <div class="card">
+          <div class="card-head">
+            <h3>Session</h3>
+            <span id="conn" class="session-ws ws-connecting" title="WS connecting" aria-label="WS connecting"></span>
+          </div>
+          <div class="row">
+            <button id="loadMicrobenchBtn" onclick="loadFixedMicrobench()">Load Microbench</button>
+            <button onclick="startSession()">Start</button>
+            <button onclick="resetSession()">Reset</button>
+          </div>
+          <div id="programModeHint" class="hint">Fixed bin mode is off. Manual redirect is available.</div>
+          <div class="row">
+            <label>reset_vector <input id="resetVector" value="0x80000000" /></label>
+          </div>
+          <div class="row">
+            <label>log_level
+              <select id="logLevel">
+                <option>DEBUG</option><option selected>INFO</option><option>WARNING</option><option>ERROR</option>
+              </select>
+            </label>
+            <button onclick="setLogLevel()">Apply</button>
+          </div>
+          <div class="row">
+            <label>run_interval_ms <input id="runInterval" value="0" /></label>
+            <button onclick="runClock()">Run</button>
+            <button onclick="pauseClock()">Pause</button>
+          </div>
+          <div class="row">
+            <label>fst_path <input id="waveformPath" value="output/web_console.fst" /></label>
+          </div>
+          <div class="row">
+            <button onclick="setWaveformPath()">Set FST Path</button>
+            <button onclick="enableWaveformDump()">Enable FST</button>
+            <button onclick="flushWaveformDump()">Save FST</button>
+            <button onclick="pauseWaveformDump()">Pause FST</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Inject</h3>
+          <div class="row">
+            <label>target_pc <input id="redirectPc" value="0x80000040" /></label>
+            <button id="redirectBtn" onclick="injectRedirect()">Redirect</button>
+          </div>
+          <div class="row">
+            <label>cause <input id="excCause" value="2" /></label>
+            <label>pc <input id="excPc" value="0x80000000" /></label>
+            <button onclick="injectException()">Exception</button>
+          </div>
+        </div>
+
+        <div class="card detail-card">
+          <h3>Event Detail (Parsed)</h3>
+          <pre id="detailText">Select an event point in the timeline...</pre>
+        </div>
+
+        <div class="card status-panel">
+          <h3>Runtime Status</h3>
+          <div class="status status-compact">
+            <div class="pill"><span class="k">State</span><span id="state" class="v">idle</span></div>
+            <div class="pill"><span class="k">Cycle</span><span id="cycle" class="v">0</span></div>
+            <div class="pill"><span class="k">Errors</span><span id="errors" class="v">0</span></div>
+            <div class="pill"><span class="k">Events</span><span id="eventCount" class="v">0/0</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="content">
+        <section class="panel metrics-panel">
+          <h3>Live Metrics</h3>
+          <div class="metric-grid">
+            <div class="metric"><span class="k">Fetch Width</span><span id="mFetchWidth" class="v">0.00</span></div>
+            <div class="metric"><span class="k">Bubble Ratio</span><span id="mBubble" class="v">0.00%</span></div>
+            <div class="metric"><span class="k">ICache Miss Rate</span><span id="mIMissRate" class="v">0.00%</span></div>
+            <div class="metric"><span class="k">Branch MPKI</span><span id="mMpki" class="v">0.00</span></div>
+            <div class="metric"><span class="k">Backend Pending</span><span id="mBackendPending" class="v">0</span></div>
+            <div class="metric"><span class="k">ICache Pending</span><span id="mICachePending" class="v">0</span></div>
+          </div>
+        </section>
+
+        <section id="pcPanel" class="panel pc-panel">
+          <div class="panel-head">
+            <h2>PC Trajectory (Frontend vs Golden)</h2>
+            <div class="hint">X: cycle, Y: PC address, queued arrow ends on pc point</div>
+          </div>
+          <svg id="pcTrace"></svg>
+          <div class="legend">
+            <span class="item"><i class="dot" style="background:#57c8ff"></i> frontend pc</span>
+            <span class="item"><i class="dot" style="background:radial-gradient(circle, #57c8ff 0 34%, #ffd166 35% 100%)"></i> aligned frontend/golden pc</span>
+            <span class="item"><i class="dot" style="background:#3fd17e"></i> redirect trigger</span>
+            <span class="item"><i class="dot" style="background:#ff4d4f"></i> exception trigger</span>
+          </div>
+        </section>
+
+        <div id="panelSplitter" class="panel-splitter"></div>
+
+        <section id="timelinePanel" class="panel timeline-panel">
+          <div class="panel-head">
+            <h2>Interaction Timeline</h2>
+            <div class="head-ops">
+              <button class="mini-btn" onclick="stepClock(1)">Step 1</button>
+              <button class="mini-btn" onclick="stepClock(10)">Step 10</button>
+              <button class="mini-btn" onclick="stepClock(100)">Step 100</button>
+              <label>window_cycles <input id="cycleWindow" value="320" onchange="updateCycleWindow()" /></label>
+            </div>
+          </div>
+          <div class="timeline-tools">
+            <div class="hint">Ctrl+wheel: zoom, Shift+wheel: pan, drag: scroll</div>
+            <button class="mini-btn" onclick="zoomOut()">Zoom -</button>
+            <button class="mini-btn" onclick="zoomIn()">Zoom +</button>
+            <button class="mini-btn" onclick="fitLatest()">Latest</button>
+            <label>timeline_scroll <input id="timelineScroll" type="range" min="0" max="1000" value="1000" oninput="onScrollInput(this.value)" /></label>
+          </div>
+          <div id="timelineWrap" class="timeline-wrap">
+            <svg id="timeline"></svg>
+            <div id="laneOverlay"></div>
+          </div>
+          <div class="legend">
+            <span class="item"><i class="dot" style="background:#57c8ff"></i> handshake</span>
+            <span class="item"><i class="dot" style="background:#4de7be"></i> control</span>
+            <span class="item"><i class="dot" style="background:#ffd166"></i> redirect</span>
+            <span class="item"><i class="dot" style="background:#ff8c5a"></i> exception</span>
+            <span class="item"><i class="dot" style="background:#ff6f73"></i> error</span>
+            <span class="item"><i class="dot" style="background:#9bb1d4"></i> other</span>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div id="memBadge" class="mem-badge">mem: n/a</div>
+
+    <script src="/static/pc_trace_markers.js"></script>
+    <script>
+      const stateEl = document.getElementById("state");
+      const cycleEl = document.getElementById("cycle");
+      const errEl = document.getElementById("errors");
+      const connEl = document.getElementById("conn");
+      const eventCountEl = document.getElementById("eventCount");
+      const programModeHintEl = document.getElementById("programModeHint");
+      const redirectPcInputEl = document.getElementById("redirectPc");
+      const redirectBtnEl = document.getElementById("redirectBtn");
+      const detailTextEl = document.getElementById("detailText");
+      const timelineEl = document.getElementById("timeline");
+      const timelineWrapEl = document.getElementById("timelineWrap");
+      const laneOverlayEl = document.getElementById("laneOverlay");
+      const timelineScrollEl = document.getElementById("timelineScroll");
+      const pcTraceEl = document.getElementById("pcTrace");
+      const contentEl = document.querySelector(".content");
+      const pcPanelEl = document.getElementById("pcPanel");
+      const timelinePanelEl = document.getElementById("timelinePanel");
+      const panelSplitterEl = document.getElementById("panelSplitter");
+      const memBadgeEl = document.getElementById("memBadge");
+
+      const mFetchWidthEl = document.getElementById("mFetchWidth");
+      const mBubbleEl = document.getElementById("mBubble");
+      const mIMissRateEl = document.getElementById("mIMissRate");
+      const mMpkiEl = document.getElementById("mMpki");
+      const mBackendPendingEl = document.getElementById("mBackendPending");
+      const mICachePendingEl = document.getElementById("mICachePending");
+      const traceMarkerApi = globalThis.PcTraceMarkers;
+
+      const MAX_EVENTS = 2400;
+      const MAX_TRACE_POINTS = 9000;
+      const MAX_REDIRECT_MARKS = 1200;
+      const MAX_QUEUE_MARKS = 1200;
+      const MAX_PAYLOAD_DEPTH = 5;
+      const MAX_PAYLOAD_KEYS = 48;
+      const MAX_PAYLOAD_ARRAY = 48;
+      const MAX_STRING_LENGTH = 240;
+      const RENDER_MIN_INTERVAL_MS = 34;
+      const AXIS_LEFT = 176;
+      const AXIS_RIGHT = 22;
+      const DEFAULT_LANES = [
+        "runner",
+        "frontend_env",
+        "backend_model",
+        "frontend_monitor",
+        "icache_agent",
+        "uncache_agent",
+        "ptw_agent",
+      ];
+      const HEX_KEY_RE = /(addr|address|pc|vpn|ppn|target|from|expected|actual|instr|tval|base|size|length|len|offset|bytes)/i;
+
+      const model = {
+        events: [],
+        selectedEventId: "",
+        cycleWindow: 320,
+        viewStartCycle: 0,
+        followLatest: true,
+        snapshot: null,
+        laneTypeFilter: {},
+        laneEventTypes: {},
+        timelineGeometry: null,
+        pcGeometry: null,
+        dragState: null,
+        splitDrag: null,
+        tracePoints: [],
+        redirectMarks: [],
+        queuedMarks: [],
+        pcHoverCycle: null,
+        renderScheduled: false,
+        renderDirty: false,
+        lastRenderTs: 0,
+        fixedProgram: null,
+      };
+
+      function compactValue(value, depth) {
+        if (depth >= MAX_PAYLOAD_DEPTH) return "[truncated_depth]";
+        if (Array.isArray(value)) {
+          const kept = value.slice(0, MAX_PAYLOAD_ARRAY).map((item) => compactValue(item, depth + 1));
+          if (value.length > MAX_PAYLOAD_ARRAY) {
+            kept.push("...(" + String(value.length - MAX_PAYLOAD_ARRAY) + " more items)");
+          }
+          return kept;
+        }
+        if (value && typeof value === "object") {
+          const out = {};
+          const keys = Object.keys(value);
+          for (const key of keys.slice(0, MAX_PAYLOAD_KEYS)) {
+            out[key] = compactValue(value[key], depth + 1);
+          }
+          if (keys.length > MAX_PAYLOAD_KEYS) {
+            out._truncated_keys = keys.length - MAX_PAYLOAD_KEYS;
+          }
+          return out;
+        }
+        if (typeof value === "string" && value.length > MAX_STRING_LENGTH) {
+          return value.slice(0, MAX_STRING_LENGTH) + "...(" + String(value.length) + " chars)";
+        }
+        return value;
+      }
+
+      function compactEvent(rawEvt) {
+        return {
+          __id: rawEvt.__id,
+          type: rawEvt.type,
+          source: rawEvt.source,
+          cycle: rawEvt.cycle,
+          level: rawEvt.level,
+          ts: rawEvt.ts,
+          payload: compactValue(rawEvt.payload || {}, 0),
+        };
+      }
+
+      function requestRender(forceNow) {
+        if (forceNow === true) {
+          model.renderDirty = false;
+          model.lastRenderTs = performance.now();
+          renderTimeline();
+          return;
+        }
+        model.renderDirty = true;
+        if (model.renderScheduled) return;
+        model.renderScheduled = true;
+        requestAnimationFrame((ts) => {
+          model.renderScheduled = false;
+          if (!model.renderDirty) return;
+          const delta = ts - model.lastRenderTs;
+          if (delta < RENDER_MIN_INTERVAL_MS) {
+            setTimeout(() => requestRender(false), Math.max(0, RENDER_MIN_INTERVAL_MS - delta));
+            return;
+          }
+          model.renderDirty = false;
+          model.lastRenderTs = ts;
+          renderTimeline();
+        });
+      }
+
+      function resetLiveData() {
+        model.events = [];
+        model.selectedEventId = "";
+        model.tracePoints = [];
+        model.redirectMarks = [];
+        model.queuedMarks = [];
+        model.pcHoverCycle = null;
+        model.laneTypeFilter = {};
+        model.laneEventTypes = {};
+        detailTextEl.textContent = "Select an event point in the timeline...";
+        updateMemoryBadge();
+        requestRender(true);
+      }
+
+      function parseNumber(raw, fieldName) {
+        const text = String(raw).trim().toLowerCase();
+        if (!text) throw new Error(fieldName + " is empty");
+        let value;
+        if (text.startsWith("0x")) value = Number.parseInt(text.slice(2), 16);
+        else value = Number(text);
+        if (!Number.isFinite(value)) throw new Error(fieldName + " is not a valid number");
+        return value;
+      }
+
+      function clamp(v, lo, hi) {
+        return Math.max(lo, Math.min(hi, v));
+      }
+
+      function toHex(v) {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return String(v);
+        if (n < 0) return "-0x" + Math.abs(n).toString(16);
+        return "0x" + n.toString(16);
+      }
+
+      function toMiB(v) {
+        if (!Number.isFinite(v)) return "n/a";
+        return (v / (1024 * 1024)).toFixed(1) + "MiB";
+      }
+
+      function decodeInstrName(instr, isRvc) {
+        if (instr == null || !Number.isFinite(instr)) return "n/a";
+        if (isRvc) return "compressed";
+        const opc = instr & 0x7f;
+        const funct3 = (instr >>> 12) & 0x7;
+        const funct7 = (instr >>> 25) & 0x7f;
+        if (opc === 0x03) return ["lb", "lh", "lw", "ld", "lbu", "lhu", "lwu"][funct3] || "load";
+        if (opc === 0x13) {
+          if (funct3 === 0x0) return "addi";
+          if (funct3 === 0x1) return "slli";
+          if (funct3 === 0x5) return funct7 === 0x20 ? "srai" : "srli";
+          if (funct3 === 0x7) return "andi";
+          if (funct3 === 0x6) return "ori";
+          if (funct3 === 0x4) return "xori";
+          return "alu-imm";
+        }
+        if (opc === 0x23) return ["sb", "sh", "sw", "sd"][funct3] || "store";
+        if (opc === 0x33) {
+          if (funct3 === 0x0) return funct7 === 0x20 ? "sub" : "add";
+          if (funct3 === 0x1) return "sll";
+          if (funct3 === 0x5) return funct7 === 0x20 ? "sra" : "srl";
+          if (funct3 === 0x7) return "and";
+          if (funct3 === 0x6) return "or";
+          if (funct3 === 0x4) return "xor";
+          return "alu-reg";
+        }
+        if (opc === 0x63) return ["beq", "bne", "?", "?", "blt", "bge", "bltu", "bgeu"][funct3] || "branch";
+        if (opc === 0x6f) return "jal";
+        if (opc === 0x67) return "jalr";
+        if (opc === 0x17) return "auipc";
+        if (opc === 0x37) return "lui";
+        if (opc === 0x73) return "system";
+        return "unknown";
+      }
+
+      function updateMemoryBadge() {
+        const parts = [];
+        if (performance && performance.memory) {
+          const used = performance.memory.usedJSHeapSize;
+          const limit = performance.memory.jsHeapSizeLimit;
+          parts.push("heap " + toMiB(used) + "/" + toMiB(limit));
+        } else {
+          parts.push("heap n/a");
+        }
+        parts.push("evt " + String(model.events.length));
+        parts.push("tr " + String(model.tracePoints.length));
+        parts.push("tg " + String(model.redirectMarks.length));
+        parts.push("q " + String(model.queuedMarks.length));
+        memBadgeEl.textContent = parts.join(" | ");
+      }
+
+      function shouldShowHex(key, value) {
+        if (typeof value !== "number" || !Number.isFinite(value)) return false;
+        return HEX_KEY_RE.test(String(key || ""));
+      }
+
+      function formatValueByKey(key, value) {
+        if (typeof value !== "number" || !Number.isFinite(value)) return value;
+        if (shouldShowHex(key, value)) return toHex(value) + " (" + value + ")";
+        return value;
+      }
+
+      function convertForDisplay(value, keyHint) {
+        if (Array.isArray(value)) return value.map((item) => convertForDisplay(item, keyHint));
+        if (value && typeof value === "object") {
+          const out = {};
+          for (const [k, v] of Object.entries(value)) out[k] = convertForDisplay(v, k);
+          return out;
+        }
+        return formatValueByKey(keyHint || "", value);
+      }
+
+      function eventCategory(evt) {
+        const t = String(evt.type || "");
+        if (t.includes("error")) return "error";
+        if (t.includes("exception")) return "exception";
+        if (t.includes("redirect")) return "redirect";
+        if (t.includes("handshake")) return "handshake";
+        if (t.includes("control") || t.includes("session")) return "control";
+        return "other";
+      }
+
+      function eventColor(evt) {
+        const cat = eventCategory(evt);
+        if (cat === "error") return "#ff6f73";
+        if (cat === "exception") return "#ff8c5a";
+        if (cat === "redirect") return "#ffd166";
+        if (cat === "handshake") return "#57c8ff";
+        if (cat === "control") return "#4de7be";
+        return "#9bb1d4";
+      }
+
+      function ensureEventId(evt) {
+        if (evt.__id) return evt.__id;
+        evt.__id = [
+          evt.ts || Date.now(),
+          evt.source || "src",
+          evt.type || "type",
+          evt.cycle || 0,
+          Math.random().toString(36).slice(2, 8),
+        ].join(":");
+        return evt.__id;
+      }
+
+      function getLaneList() {
+        const seen = new Set(DEFAULT_LANES);
+        for (const evt of model.events) {
+          if (evt.source) seen.add(String(evt.source));
+        }
+        const lanes = [];
+        for (const base of DEFAULT_LANES) if (seen.has(base)) lanes.push(base);
+        for (const name of Array.from(seen).sort()) if (!DEFAULT_LANES.includes(name)) lanes.push(name);
+        return lanes;
+      }
+
+      function ensureLaneTypeFilter(lane) {
+        if (!Object.prototype.hasOwnProperty.call(model.laneTypeFilter, lane)) {
+          model.laneTypeFilter[lane] = "__all__";
+        }
+      }
+
+      function laneEventTypes(lane) {
+        const set = model.laneEventTypes[lane];
+        if (!set) return [];
+        return Array.from(set).sort();
+      }
+
+      function eventPassFilter(evt) {
+        const lane = String(evt.source || "runner");
+        ensureLaneTypeFilter(lane);
+        const selectedType = model.laneTypeFilter[lane];
+        if (selectedType === "__all__") return true;
+        return String(evt.type || "") === selectedType;
+      }
+
+      function getCycleBounds() {
+        if (model.events.length === 0) {
+          const c = Number(cycleEl.textContent || 0);
+          return { min: 0, max: Math.max(1, c) };
+        }
+        let min = Number.POSITIVE_INFINITY;
+        let max = Number.NEGATIVE_INFINITY;
+        for (const evt of model.events) {
+          const cyc = Number(evt.cycle || 0);
+          if (cyc < min) min = cyc;
+          if (cyc > max) max = cyc;
+        }
+        return { min: Math.max(0, min), max: Math.max(1, max) };
+      }
+
+      function maxStartCycle(bounds) {
+        return Math.max(bounds.min, bounds.max - model.cycleWindow);
+      }
+
+      function clampViewStart(start, bounds) {
+        return clamp(Number(start) || 0, bounds.min, maxStartCycle(bounds));
+      }
+
+      function refreshScrollBar(bounds) {
+        const maxStart = maxStartCycle(bounds);
+        if (maxStart <= bounds.min) {
+          timelineScrollEl.value = "1000";
+          timelineScrollEl.disabled = true;
+          return;
+        }
+        timelineScrollEl.disabled = false;
+        const ratio = (model.viewStartCycle - bounds.min) / (maxStart - bounds.min);
+        timelineScrollEl.value = String(Math.round(clamp(ratio, 0, 1) * 1000));
+      }
+
+      function eventSummary(evt) {
+        const p = evt.payload || {};
+        if (evt.type === "handshake.icache_a") return "ICache req addr=" + toHex(p.address || 0) + " latency=" + String(p.latency || 0);
+        if (evt.type === "handshake.uncache_a") return "Uncache req addr=" + toHex(p.address || 0) + " latency=" + String(p.latency || 0);
+        if (evt.type === "handshake.ptw_req") return "PTW req vpn=" + toHex(p.vpn || 0) + " mode=" + String(p.mode || "unknown");
+        if (String(evt.type || "").includes("redirect")) return "Redirect target=" + toHex(p.target_pc || p.target || 0) + " reason=" + String(p.reason || "none");
+        if (String(evt.type || "").includes("exception")) return "Exception cause=" + String(p.cause || 0) + " pc=" + toHex(p.pc || p.target_pc || 0);
+        if (String(evt.type || "").includes("pc_track")) {
+          const hasFrontend = p.frontend_valid === true && p.frontend_pc != null;
+          const inst = hasFrontend ? decodeInstrName(Number(p.frontend_instr), Boolean(p.is_rvc === true)) : "bubble";
+          return "PC track frontend=" + (hasFrontend ? toHex(p.frontend_pc) : "bubble") + " golden=" + toHex(p.golden_pc || 0) + " instr=" + inst;
+        }
+        if (String(evt.type || "").includes("error")) return "Error in lane " + String(evt.source || "unknown");
+        return String(evt.type || "event");
+      }
+
+      function normalizePayload(payload) {
+        const source = payload && typeof payload === "object" ? payload : {};
+        const out = {};
+        for (const [k, v] of Object.entries(source)) out[k.replaceAll("_", " ")] = convertForDisplay(v, k);
+        return out;
+      }
+
+      function parsedEvent(evt) {
+        return {
+          event: String(evt.type || "event"),
+          lane: String(evt.source || "unknown"),
+          category: eventCategory(evt),
+          level: String(evt.level || "INFO"),
+          cycle: Number(evt.cycle || 0),
+          timestamp: evt.ts ? new Date(Number(evt.ts) * 1000).toISOString() : "n/a",
+          summary: eventSummary(evt),
+          decoded_payload: normalizePayload(evt.payload),
+        };
+      }
+
+      function emitObjectLines(lines, key, value, depth) {
+        const indent = "  ".repeat(depth);
+        if (Array.isArray(value)) {
+          if (value.length === 0) {
+            lines.push(indent + key + ": []");
+            return;
+          }
+          lines.push(indent + key + ":");
+          for (const item of value) {
+            if (item && typeof item === "object") {
+              lines.push(indent + "  -");
+              for (const [k, v] of Object.entries(item)) emitObjectLines(lines, k, v, depth + 2);
+            } else {
+              lines.push(indent + "  - " + String(item));
+            }
+          }
+          return;
+        }
+        if (value && typeof value === "object") {
+          const entries = Object.entries(value);
+          if (entries.length === 0) {
+            lines.push(indent + key + ": {}");
+            return;
+          }
+          lines.push(indent + key + ":");
+          for (const [k, v] of entries) emitObjectLines(lines, k, v, depth + 1);
+          return;
+        }
+        lines.push(indent + key + ": " + String(value));
+      }
+
+      function renderParsedDetail(evt) {
+        const d = parsedEvent(evt);
+        const lines = [];
+        lines.push("Summary: " + d.summary);
+        lines.push("Event: " + d.event);
+        lines.push("Lane: " + d.lane);
+        lines.push("Category: " + d.category);
+        lines.push("Level: " + d.level);
+        lines.push("Cycle: " + d.cycle);
+        lines.push("Timestamp: " + d.timestamp);
+        lines.push("");
+        lines.push("Decoded Payload:");
+        emitObjectLines(lines, "fields", d.decoded_payload, 0);
+        detailTextEl.textContent = lines.join("\n");
+      }
+
+      function selectEvent(evt) {
+        model.selectedEventId = ensureEventId(evt);
+        renderParsedDetail(evt);
+        requestRender(true);
+      }
+
+      function rememberTrace(evt) {
+        if (evt.type === "monitor.raw_fetch") {
+          model.tracePoints.push(...traceMarkerApi.expandRawTracePoints(evt));
+          if (model.tracePoints.length > MAX_TRACE_POINTS) {
+            model.tracePoints.splice(0, model.tracePoints.length - MAX_TRACE_POINTS);
+          }
+        }
+        const triggerMark = traceMarkerApi.buildTriggerMark(evt);
+        if (triggerMark) {
+          function isDupMark(arr, item) {
+            if (arr.length === 0) return false;
+            const last = arr[arr.length - 1];
+            return (
+              Number(last.cycle || 0) === Number(item.cycle || 0)
+              && String(last.kind || "") === String(item.kind || "")
+              && Number(last.target_pc || 0) === Number(item.target_pc || 0)
+              && String(last.reason || "") === String(item.reason || "")
+            );
+          }
+          const targetArr = triggerMark.phase === "queued" ? model.queuedMarks : model.redirectMarks;
+          const maxCount = triggerMark.phase === "queued" ? MAX_QUEUE_MARKS : MAX_REDIRECT_MARKS;
+          if (!isDupMark(targetArr, triggerMark)) {
+            targetArr.push(triggerMark);
+          }
+          if (targetArr.length > maxCount) {
+            targetArr.splice(0, targetArr.length - maxCount);
+          }
+        }
+      }
+
+      function addEvent(evt) {
+        ensureEventId(evt);
+        const compacted = compactEvent(evt);
+        model.events.push(compacted);
+        if (model.events.length > MAX_EVENTS) {
+          model.events.splice(0, model.events.length - MAX_EVENTS);
+        }
+        const lane = String(compacted.source || "runner");
+        if (!model.laneEventTypes[lane]) model.laneEventTypes[lane] = new Set();
+        model.laneEventTypes[lane].add(String(compacted.type || ""));
+        rememberTrace(compacted);
+        if (eventCategory(compacted) === "error") {
+          model.selectedEventId = compacted.__id;
+          renderParsedDetail(compacted);
+        }
+        updateMemoryBadge();
+        requestRender(false);
+      }
+
+      function svgNode(tag, attrs) {
+        const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
+        for (const [k, v] of Object.entries(attrs || {})) node.setAttribute(k, String(v));
+        return node;
+      }
+
+      function renderLaneOverlay(lanes, yAtLane) {
+        laneOverlayEl.replaceChildren();
+        laneOverlayEl.id = "laneOverlay";
+        for (const lane of lanes) {
+          ensureLaneTypeFilter(lane);
+          const row = document.createElement("div");
+          row.className = "lane-header";
+          row.style.top = String(Math.max(0, yAtLane(lanes.indexOf(lane)) - 10)) + "px";
+
+          const title = document.createElement("span");
+          title.className = "lane-title";
+          title.textContent = lane;
+          row.appendChild(title);
+
+          const select = document.createElement("select");
+          select.className = "lane-select";
+          const allOp = document.createElement("option");
+          allOp.value = "__all__";
+          allOp.textContent = "All";
+          select.appendChild(allOp);
+          for (const tp of laneEventTypes(lane)) {
+            const op = document.createElement("option");
+            op.value = tp;
+            op.textContent = tp;
+            select.appendChild(op);
+          }
+          select.value = model.laneTypeFilter[lane] || "__all__";
+          select.onchange = () => {
+            model.laneTypeFilter[lane] = select.value;
+            requestRender(true);
+          };
+          row.appendChild(select);
+          laneOverlayEl.appendChild(row);
+        }
+      }
+
+      function renderTimeline() {
+        const width = Math.max(720, Math.floor(timelineWrapEl.clientWidth || 900));
+        const lanes = getLaneList();
+
+        const laneHeight = 34;
+        const left = AXIS_LEFT;
+        const right = AXIS_RIGHT;
+        const top = 22;
+        const bottom = 24;
+        const height = top + bottom + Math.max(1, lanes.length) * laneHeight;
+        const plotWidth = Math.max(160, width - left - right);
+        model.timelineGeometry = { left, plotWidth };
+
+        timelineWrapEl.style.height = String(height) + "px";
+        timelineEl.setAttribute("viewBox", "0 0 " + width + " " + height);
+        timelineEl.setAttribute("preserveAspectRatio", "none");
+        timelineEl.replaceChildren();
+
+        const bounds = getCycleBounds();
+        if (model.followLatest) model.viewStartCycle = maxStartCycle(bounds);
+        else model.viewStartCycle = clampViewStart(model.viewStartCycle, bounds);
+        const startCycle = model.viewStartCycle;
+        const endCycle = startCycle + Math.max(1, model.cycleWindow);
+        const cycleSpan = Math.max(1, endCycle - startCycle);
+
+        const xAt = (cycle) => left + ((Number(cycle || 0) - startCycle) / cycleSpan) * plotWidth;
+        const yAtLane = (idx) => top + idx * laneHeight + laneHeight / 2;
+
+        timelineEl.appendChild(svgNode("rect", { x: 0, y: 0, width, height, fill: "transparent" }));
+
+        const ticks = 7;
+        for (let i = 0; i < ticks; i += 1) {
+          const ratio = i / (ticks - 1);
+          const x = left + ratio * plotWidth;
+          const cyc = Math.round(startCycle + ratio * cycleSpan);
+          timelineEl.appendChild(svgNode("line", { x1: x, y1: top - 10, x2: x, y2: height - bottom + 8, stroke: "#1f3046", "stroke-width": 1 }));
+          const txt = svgNode("text", { x, y: 15, fill: "#88a4c5", "font-size": 10, "text-anchor": "middle" });
+          txt.textContent = String(cyc);
+          timelineEl.appendChild(txt);
+        }
+
+        for (let i = 0; i < lanes.length; i += 1) {
+          const y = yAtLane(i);
+          timelineEl.appendChild(svgNode("line", { x1: left - 6, y1: y, x2: width - right, y2: y, stroke: "#22405f", "stroke-width": 1 }));
+        }
+
+        renderLaneOverlay(lanes, yAtLane);
+
+        const visibleEvents = model.events.filter((evt) => {
+          const cyc = Number(evt.cycle || 0);
+          if (cyc < startCycle || cyc > endCycle) return false;
+          return eventPassFilter(evt);
+        });
+        eventCountEl.textContent = String(visibleEvents.length) + "/" + String(model.events.length);
+
+        for (const evt of visibleEvents) {
+          const laneIndex = Math.max(0, lanes.indexOf(String(evt.source || "runner")));
+          const x = xAt(evt.cycle || 0);
+          const y = yAtLane(laneIndex);
+          const selected = evt.__id === model.selectedEventId;
+          const dot = svgNode("circle", {
+            cx: x,
+            cy: y,
+            r: selected ? 6.2 : 4.4,
+            fill: eventColor(evt),
+            stroke: selected ? "#ffffff" : "#0a1320",
+            "stroke-width": selected ? 1.5 : 1,
+            opacity: 0.95,
+          });
+          dot.style.cursor = "pointer";
+          dot.addEventListener("click", () => selectEvent(evt));
+          const tt = svgNode("title", {});
+          tt.textContent = (evt.type || "event") + " @ cycle " + String(evt.cycle || 0);
+          dot.appendChild(tt);
+          timelineEl.appendChild(dot);
+        }
+
+        refreshScrollBar(bounds);
+        renderPcTrace(startCycle, endCycle);
+      }
+
+      function renderPcTrace(startCycle, endCycle) {
+        const width = Math.max(680, Math.floor(pcTraceEl.clientWidth || 860));
+        const height = Math.max(250, Math.floor(pcTraceEl.clientHeight || 270));
+        const left = AXIS_LEFT;
+        const right = AXIS_RIGHT;
+        const top = 16;
+        const bottom = 24;
+        const plotWidth = Math.max(120, width - left - right);
+        const plotHeight = Math.max(100, height - top - bottom);
+        const cycleSpan = Math.max(1, endCycle - startCycle);
+        const pointCoordSpan = cycleSpan + 1;
+        model.pcGeometry = { left, plotWidth, top, bottom, width, height, coordSpan: pointCoordSpan };
+
+        pcTraceEl.setAttribute("viewBox", "0 0 " + width + " " + height);
+        pcTraceEl.setAttribute("preserveAspectRatio", "none");
+        pcTraceEl.replaceChildren();
+        pcTraceEl.appendChild(svgNode("rect", { x: 0, y: 0, width, height, fill: "transparent" }));
+
+        const points = model.tracePoints
+          .filter((p) => p.cycle >= startCycle && p.cycle <= endCycle)
+          .sort((a, b) => {
+            if (a.cycle !== b.cycle) return a.cycle - b.cycle;
+            if ((a.ts || 0) !== (b.ts || 0)) return (a.ts || 0) - (b.ts || 0);
+            return (a.slot || 0) - (b.slot || 0);
+          });
+        let minPc = Number.POSITIVE_INFINITY;
+        let maxPc = Number.NEGATIVE_INFINITY;
+        for (const p of points) {
+          if (p.frontend_pc != null) {
+            minPc = Math.min(minPc, p.frontend_pc);
+            maxPc = Math.max(maxPc, p.frontend_pc);
+          }
+          if (p.golden_pc != null) {
+            minPc = Math.min(minPc, p.golden_pc);
+            maxPc = Math.max(maxPc, p.golden_pc);
+          }
+        }
+        if (!Number.isFinite(minPc) || !Number.isFinite(maxPc)) {
+          minPc = 0x7fffff00;
+          maxPc = 0x80000100;
+        }
+        if (maxPc <= minPc) maxPc = minPc + 4;
+        const pad = Math.max(8, Math.floor((maxPc - minPc) * 0.07));
+        minPc -= pad;
+        maxPc += pad;
+        const pcSpan = Math.max(1, maxPc - minPc);
+
+        const xAt = (coord) => left + ((coord - startCycle) / pointCoordSpan) * plotWidth;
+        const yAt = (pc) => top + (1 - ((pc - minPc) / pcSpan)) * plotHeight;
+
+        for (let i = 0; i < 6; i += 1) {
+          const ratio = i / 5;
+          const y = top + ratio * plotHeight;
+          const pc = Math.round(maxPc - ratio * pcSpan);
+          pcTraceEl.appendChild(svgNode("line", { x1: left, y1: y, x2: width - right, y2: y, stroke: "#213145", "stroke-width": 1 }));
+          const lb = svgNode("text", { x: left - 6, y: y + 3, "text-anchor": "end", fill: "#9ab0cc", "font-size": 10 });
+          lb.textContent = toHex(pc);
+          pcTraceEl.appendChild(lb);
+        }
+        for (let i = 0; i < 7; i += 1) {
+          const ratio = i / 6;
+          const cyc = Math.round(startCycle + ratio * cycleSpan);
+          const x = xAt(cyc);
+          pcTraceEl.appendChild(svgNode("line", { x1: x, y1: top, x2: x, y2: height - bottom, stroke: "#1a2b42", "stroke-width": 1 }));
+          const lb = svgNode("text", { x, y: height - 7, "text-anchor": "middle", fill: "#9ab0cc", "font-size": 10 });
+          lb.textContent = String(cyc);
+          pcTraceEl.appendChild(lb);
+        }
+
+        const triggerMarks = model.redirectMarks.filter((m) => m.cycle >= startCycle && m.cycle <= endCycle);
+        for (const mark of triggerMarks) {
+          const x = xAt(mark.cycle);
+          const trigColor = mark.kind === "exception" ? "#ff4d4f" : "#3fd17e";
+          pcTraceEl.appendChild(svgNode("line", {
+            x1: x,
+            y1: top,
+            x2: x,
+            y2: height - bottom,
+            stroke: trigColor,
+            "stroke-width": 0.7,
+            "stroke-dasharray": "2 4",
+            opacity: 0.9,
+          }));
+          const tri = svgNode("polygon", {
+            points: (x - 4) + "," + (top + 2) + " " + (x + 4) + "," + (top + 2) + " " + x + "," + (top + 10),
+            fill: trigColor,
+            opacity: 0.9,
+          });
+          pcTraceEl.appendChild(tri);
+        }
+
+        const queuedMarks = model.queuedMarks.filter((m) => m.cycle >= startCycle && m.cycle <= endCycle);
+        for (const mark of queuedMarks) {
+          const x = xAt(mark.cycle);
+          const qColor = mark.kind === "exception" ? "#ff4d4f" : "#3fd17e";
+          const yPoint = clamp(yAt(Number(mark.target_pc || 0)), top + 1, height - bottom - 1);
+          const tip = svgNode("polygon", {
+            points: (x - 2.8) + "," + (yPoint - 4.2) + " " + (x + 2.8) + "," + (yPoint - 4.2) + " " + x + "," + yPoint,
+            fill: qColor,
+            opacity: 0.9,
+          });
+          pcTraceEl.appendChild(tip);
+        }
+
+        function drawSegmentedPolyline(data, getPc, attrs) {
+          let seg = [];
+          for (const p of data) {
+            const pc = getPc(p);
+            if (pc == null) {
+              if (seg.length >= 2) {
+                pcTraceEl.appendChild(svgNode("polyline", {
+                  points: seg.join(" "),
+                  fill: "none",
+                  ...attrs,
+                }));
+              }
+              seg = [];
+              continue;
+            }
+            seg.push(xAt(traceMarkerApi.tracePointCoord(p)) + "," + yAt(pc));
+          }
+          if (seg.length >= 2) {
+            pcTraceEl.appendChild(svgNode("polyline", {
+              points: seg.join(" "),
+              fill: "none",
+              ...attrs,
+            }));
+          }
+        }
+
+        function drawGoldenLines(data) {
+          const goldenPoints = traceMarkerApi.goldenTrackPoints(data);
+          for (let i = 0; i + 1 < goldenPoints.length; i += 1) {
+            const a = goldenPoints[i];
+            const b = goldenPoints[i + 1];
+            pcTraceEl.appendChild(svgNode("line", {
+              x1: xAt(a.cycle),
+              y1: yAt(a.golden_pc),
+              x2: xAt(b.cycle),
+              y2: yAt(b.golden_pc),
+              stroke: "#ffd166",
+              "stroke-width": 1.8,
+              opacity: 0.95,
+            }));
+          }
+        }
+
+        drawGoldenLines(points);
+        drawSegmentedPolyline(points, (p) => traceMarkerApi.frontendTrackPc(p), {
+          stroke: "#57c8ff",
+          "stroke-width": 1.15,
+          opacity: 0.95,
+        });
+
+        for (const p of points) {
+          const marker = traceMarkerApi.classifyTracePointMarker(p);
+          if (marker.golden) {
+            const gg = svgNode("circle", {
+              cx: xAt(traceMarkerApi.tracePointCoord(p)),
+              cy: yAt(p.golden_pc),
+              r: marker.golden.radius,
+              fill: marker.golden.fill,
+              opacity: 0.95,
+            });
+            pcTraceEl.appendChild(gg);
+          }
+          if (marker.frontend) {
+            const fg = svgNode("circle", {
+              cx: xAt(traceMarkerApi.tracePointCoord(p)),
+              cy: yAt(p.frontend_pc),
+              r: marker.frontend.radius,
+              fill: marker.frontend.fill,
+              opacity: 0.95,
+            });
+            pcTraceEl.appendChild(fg);
+          }
+        }
+
+        if (model.pcHoverCycle != null) {
+          const hoverCycle = clamp(model.pcHoverCycle, startCycle, endCycle + 1);
+          const xHover = xAt(hoverCycle);
+          pcTraceEl.appendChild(svgNode("line", {
+            x1: xHover,
+            y1: top,
+            x2: xHover,
+            y2: height - bottom,
+            stroke: "#9fb6cf",
+            "stroke-width": 0.8,
+            "stroke-dasharray": "2 3",
+            opacity: 0.9,
+          }));
+
+          let hoverPoint = null;
+          for (const p of points) {
+            if (hoverPoint == null) {
+              hoverPoint = p;
+              continue;
+            }
+            const da = Math.abs(traceMarkerApi.tracePointCoord(p) - hoverCycle);
+            const db = Math.abs(traceMarkerApi.tracePointCoord(hoverPoint) - hoverCycle);
+            if (da < db || (da === db && p.frontend_valid && !hoverPoint.frontend_valid)) {
+              hoverPoint = p;
+            }
+          }
+          if (hoverPoint != null) {
+            const instr = hoverPoint.frontend_instr;
+            const instrName = hoverPoint.frontend_valid ? decodeInstrName(instr, hoverPoint.is_rvc) : "bubble";
+            const opcode = instr == null ? null : (hoverPoint.is_rvc ? (instr & 0x3) : (instr & 0x7f));
+            const lines = [
+              "cycle: " + String(Math.floor(hoverCycle)),
+              "slot: " + String(Math.max(0, Number(hoverPoint.slot || 0))),
+              "pc(front): " + (hoverPoint.frontend_valid ? toHex(hoverPoint.frontend_pc) : "bubble"),
+              "pc(golden): " + toHex(hoverPoint.golden_pc),
+              "instr: " + instrName,
+              "instr_code: " + (instr == null ? "n/a" : toHex(instr)),
+              "opcode: " + (opcode == null ? "n/a" : toHex(opcode)),
+            ];
+            const boxW = 240;
+            const lineH = 14;
+            const boxH = 8 + lines.length * lineH;
+            const margin = 8;
+            const boxX = xHover + boxW + margin < width ? xHover + margin : Math.max(left + 2, xHover - boxW - margin);
+            const boxY = top + 10;
+            pcTraceEl.appendChild(svgNode("rect", {
+              x: boxX,
+              y: boxY,
+              width: boxW,
+              height: boxH,
+              rx: 6,
+              ry: 6,
+              fill: "rgba(9, 20, 34, 0.9)",
+              stroke: "#335170",
+              "stroke-width": 1,
+            }));
+            for (let i = 0; i < lines.length; i += 1) {
+              const txt = svgNode("text", {
+                x: boxX + 8,
+                y: boxY + 16 + i * lineH,
+                fill: "#d5e5f7",
+                "font-size": 11,
+              });
+              txt.textContent = lines[i];
+              pcTraceEl.appendChild(txt);
+            }
+          }
+        }
+
+        const lb1 = svgNode("text", { x: left + 10, y: top + 14, fill: "#57c8ff", "font-size": 11 });
+        lb1.textContent = "Frontend PC";
+        pcTraceEl.appendChild(lb1);
+        const lb2 = svgNode("text", { x: left + 106, y: top + 14, fill: "#ffd166", "font-size": 11 });
+        lb2.textContent = "Aligned Golden";
+        pcTraceEl.appendChild(lb2);
+      }
+
+      function shiftViewBy(deltaCycles) {
+        const bounds = getCycleBounds();
+        model.followLatest = false;
+        model.viewStartCycle = clampViewStart(model.viewStartCycle + deltaCycles, bounds);
+        const maxStart = maxStartCycle(bounds);
+        if (Math.abs(model.viewStartCycle - maxStart) <= 1) model.followLatest = true;
+        requestRender(false);
+      }
+
+      function zoomTimeline(factor, anchorRatio) {
+        const bounds = getCycleBounds();
+        const oldWindow = model.cycleWindow;
+        const minWindow = 16;
+        const maxWindow = Math.max(32, (bounds.max - bounds.min) + 200);
+        const newWindow = clamp(Math.round(oldWindow * factor), minWindow, maxWindow);
+        if (newWindow === oldWindow) return;
+
+        const keepLatest = model.followLatest;
+        const r = clamp(anchorRatio == null ? 0.5 : anchorRatio, 0, 1);
+        const anchorCycle = model.viewStartCycle + oldWindow * r;
+        model.cycleWindow = newWindow;
+        document.getElementById("cycleWindow").value = String(newWindow);
+        if (keepLatest) {
+          model.followLatest = true;
+        } else {
+          model.followLatest = false;
+          model.viewStartCycle = clampViewStart(anchorCycle - newWindow * r, bounds);
+        }
+        requestRender(false);
+      }
+
+      function zoomIn() { zoomTimeline(0.86, 0.5); }
+      function zoomOut() { zoomTimeline(1.16, 0.5); }
+      function fitLatest() { model.followLatest = true; requestRender(true); }
+
+      function onScrollInput(raw) {
+        const bounds = getCycleBounds();
+        const maxStart = maxStartCycle(bounds);
+        if (maxStart <= bounds.min) return;
+        const ratio = clamp(Number(raw) / 1000, 0, 1);
+        model.followLatest = ratio >= 0.999;
+        model.viewStartCycle = bounds.min + ratio * (maxStart - bounds.min);
+        model.viewStartCycle = clampViewStart(model.viewStartCycle, bounds);
+        requestRender(false);
+      }
+
+      function formatPercent(v) {
+        if (!Number.isFinite(v)) return "0.00%";
+        return (v * 100).toFixed(2) + "%";
+      }
+
+      function refreshMetrics(snapshot) {
+        const st = (snapshot && snapshot.stats) || {};
+        const monitor = st.monitor || {};
+        const icache = st.icache || {};
+        const backend = st.backend || {};
+        const branch = st.branch || {};
+
+        mFetchWidthEl.textContent = Number(monitor.avg_fetch_width || 0).toFixed(2);
+        mBubbleEl.textContent = formatPercent(Number(monitor.bubble_ratio || 0));
+        const req = Number(icache.req_count || 0);
+        const miss = Number(icache.miss_count || 0);
+        const missRate = req > 0 ? miss / req : 0;
+        mIMissRateEl.textContent = (missRate * 100).toFixed(2) + "%";
+        mMpkiEl.textContent = Number(branch.mpki || 0).toFixed(2);
+        mBackendPendingEl.textContent = String(backend.pending_events || 0);
+        mICachePendingEl.textContent = String(icache.pending || 0);
+      }
+
+      async function post(url, body) {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body || {}),
+        });
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+        refreshState(data);
+        return data;
+      }
+
+      async function pullSnapshot() {
+        const r = await fetch("/api/state/snapshot");
+        const data = await r.json();
+        refreshState(data);
+      }
+
+      function refreshState(snapshot) {
+        if (!snapshot) return;
+        model.snapshot = snapshot;
+        model.fixedProgram = snapshot.fixed_program || null;
+        stateEl.textContent = snapshot.state || "unknown";
+        cycleEl.textContent = String(snapshot.cycle || 0);
+        const ec = (((snapshot.stats || {}).monitor || {}).error_count) || 0;
+        errEl.textContent = String(ec);
+        errEl.className = ec > 0 ? "v err" : "v";
+        const fixedProgram = snapshot.fixed_program || {};
+        const manualRedirectEnabled = fixedProgram.manual_redirect_enabled !== false;
+        redirectPcInputEl.disabled = !manualRedirectEnabled;
+        redirectBtnEl.disabled = !manualRedirectEnabled;
+        if (fixedProgram.active) {
+          programModeHintEl.textContent =
+            "Fixed bin mode: "
+            + String(fixedProgram.name || "unknown")
+            + " | redirect disabled | trace "
+            + String(fixedProgram.trace_cached ? "cached" : "generated");
+          programModeHintEl.className = "hint warn-text";
+        } else {
+          programModeHintEl.textContent = "Fixed bin mode is off. Manual redirect is available.";
+          programModeHintEl.className = "hint";
+        }
+        refreshMetrics(snapshot);
+      }
+
+      function updateCycleWindow() {
+        try {
+          const oldWindow = model.cycleWindow;
+          const newWindow = Math.max(16, parseNumber(document.getElementById("cycleWindow").value, "window_cycles"));
+          if (newWindow === oldWindow) return;
+          const center = model.viewStartCycle + oldWindow / 2;
+          const keepLatest = model.followLatest;
+          model.cycleWindow = newWindow;
+          if (!keepLatest) {
+            const bounds = getCycleBounds();
+            model.viewStartCycle = clampViewStart(center - newWindow / 2, bounds);
+          }
+          requestRender(true);
+        } catch (e) {
+          alert(e.message || e);
+        }
+      }
+
+      function getWaveformPathInput() {
+        return String(document.getElementById("waveformPath").value || "").trim();
+      }
+
+      function startSession() {
+        try {
+          const waveformPath = getWaveformPathInput();
+          post("/api/session/start", {
+            reset_vector: parseNumber(document.getElementById("resetVector").value, "reset_vector"),
+            log_level: document.getElementById("logLevel").value,
+            waveform_path: waveformPath ? waveformPath : null,
+          }).catch((e) => alert(e));
+        } catch (e) { alert(e.message || e); }
+      }
+
+      function loadFixedMicrobench() {
+        resetLiveData();
+        post("/api/program/load_fixed_microbench", {}).catch((e) => alert(e));
+      }
+
+      function resetSession() {
+        try {
+          post("/api/session/reset", {
+            reset_vector: parseNumber(document.getElementById("resetVector").value, "reset_vector"),
+            log_level: document.getElementById("logLevel").value,
+          }).catch((e) => alert(e));
+        } catch (e) { alert(e.message || e); }
+      }
+
+      function setLogLevel() {
+        post("/api/log/level", { level: document.getElementById("logLevel").value }).catch((e) => alert(e));
+      }
+
+      function setWaveformPath() {
+        const path = getWaveformPathInput();
+        if (!path) {
+          alert("fst_path is empty");
+          return;
+        }
+        post("/api/waveform/set_path", { path }).catch((e) => alert(e));
+      }
+
+      function enableWaveformDump() {
+        const path = getWaveformPathInput();
+        post("/api/waveform/enable", { path: path || null }).catch((e) => alert(e));
+      }
+
+      function flushWaveformDump() {
+        post("/api/waveform/flush", {}).catch((e) => alert(e));
+      }
+
+      function pauseWaveformDump() {
+        post("/api/waveform/pause", { flush: true }).catch((e) => alert(e));
+      }
+
+      function stepClock(n) { post("/api/clock/step", { cycles: n }).catch((e) => alert(e)); }
+
+      function runClock() {
+        try {
+          post("/api/clock/run", { interval_ms: parseNumber(document.getElementById("runInterval").value, "run_interval_ms") }).catch((e) => alert(e));
+        } catch (e) { alert(e.message || e); }
+      }
+
+      function pauseClock() { post("/api/clock/pause", {}).catch((e) => alert(e)); }
+
+      function injectRedirect() {
+        try {
+          post("/api/inject/redirect", {
+            target_pc: parseNumber(document.getElementById("redirectPc").value, "target_pc"),
+            reason: "ui_manual",
+          }).catch((e) => alert(e));
+        } catch (e) { alert(e.message || e); }
+      }
+
+      function injectException() {
+        try {
+          post("/api/inject/exception", {
+            cause: parseNumber(document.getElementById("excCause").value, "cause"),
+            tval: 0,
+            pc: parseNumber(document.getElementById("excPc").value, "pc"),
+          }).catch((e) => alert(e));
+        } catch (e) { alert(e.message || e); }
+      }
+
+      function handleSharedAxisWheel(e, geometry) {
+        if (!geometry) return;
+        if (e.shiftKey) {
+          e.preventDefault();
+          const panCycles = (e.deltaY / geometry.plotWidth) * model.cycleWindow * 1.5;
+          shiftViewBy(panCycles);
+          return;
+        }
+        if (e.ctrlKey) {
+          e.preventDefault();
+          const ratio = clamp((e.offsetX - geometry.left) / geometry.plotWidth, 0, 1);
+          const factor = e.deltaY > 0 ? 1.14 : 0.88;
+          zoomTimeline(factor, ratio);
+        }
+      }
+
+      function connectWs() {
+        const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/events");
+        ws.onopen = () => {
+          connEl.className = "session-ws ws-connected";
+          connEl.title = "WS connected";
+          connEl.setAttribute("aria-label", "WS connected");
+        };
+        ws.onclose = () => {
+          connEl.className = "session-ws ws-connecting";
+          connEl.title = "WS reconnecting";
+          connEl.setAttribute("aria-label", "WS reconnecting");
+          setTimeout(connectWs, 1000);
+        };
+        ws.onmessage = (msg) => {
+          try {
+            const evt = JSON.parse(msg.data);
+            addEvent(evt);
+            if (evt.type === "clock.tick" || evt.type === "session.started" || evt.type === "control.step") {
+              cycleEl.textContent = String(evt.cycle || 0);
+            }
+          } catch (_) {
+            return;
+          }
+        };
+      }
+
+      timelineEl.addEventListener("wheel", (e) => {
+        handleSharedAxisWheel(e, model.timelineGeometry);
+      }, { passive: false });
+
+      pcTraceEl.addEventListener("wheel", (e) => {
+        handleSharedAxisWheel(e, model.pcGeometry);
+      }, { passive: false });
+
+      pcTraceEl.addEventListener("mousemove", (e) => {
+        if (!model.pcGeometry) return;
+        const ratio = clamp((e.offsetX - model.pcGeometry.left) / model.pcGeometry.plotWidth, 0, 1);
+        model.pcHoverCycle = model.viewStartCycle + ratio * model.pcGeometry.coordSpan;
+        requestRender(false);
+      });
+
+      pcTraceEl.addEventListener("mouseleave", () => {
+        if (model.pcHoverCycle == null) return;
+        model.pcHoverCycle = null;
+        requestRender(false);
+      });
+
+      timelineEl.addEventListener("mousedown", (e) => {
+        if (e.button !== 0 || !model.timelineGeometry) return;
+        model.dragState = { startX: e.clientX, startCycle: model.viewStartCycle };
+        timelineEl.classList.add("dragging");
+      });
+
+      panelSplitterEl.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const pcRect = pcPanelEl.getBoundingClientRect();
+        const tlRect = timelinePanelEl.getBoundingClientRect();
+        model.splitDrag = {
+          startY: e.clientY,
+          startPcPx: pcRect.height,
+          totalPx: pcRect.height + tlRect.height,
+          minPcPx: 180,
+          minTlPx: 180,
+        };
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        if (model.splitDrag) {
+          const s = model.splitDrag;
+          const deltaY = e.clientY - s.startY;
+          const newPcPx = clamp(s.startPcPx + deltaY, s.minPcPx, s.totalPx - s.minTlPx);
+          contentEl.style.setProperty("--pc-panel-size", String(newPcPx) + "px");
+          requestRender(false);
+          return;
+        }
+        if (!model.dragState || !model.timelineGeometry) return;
+        const deltaX = e.clientX - model.dragState.startX;
+        const cyclesPerPixel = model.cycleWindow / model.timelineGeometry.plotWidth;
+        model.followLatest = false;
+        model.viewStartCycle = clampViewStart(model.dragState.startCycle - deltaX * cyclesPerPixel, getCycleBounds());
+        requestRender(false);
+      });
+
+      window.addEventListener("mouseup", () => {
+        model.splitDrag = null;
+        model.dragState = null;
+        timelineEl.classList.remove("dragging");
+      });
+
+      pullSnapshot();
+      connectWs();
+      updateMemoryBadge();
+      requestRender(true);
+      setInterval(pullSnapshot, 1000);
+      setInterval(updateMemoryBadge, 1000);
+      window.addEventListener("resize", () => requestRender(true));
+    </script>
+  </body>
+</html>

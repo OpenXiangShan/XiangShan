@@ -16,7 +16,7 @@ from .nemu_trace_converter import convert_nemu_log_file
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[5]
 
 
 def _default_nemu_exec_path() -> Path:

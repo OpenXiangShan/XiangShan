@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Migrate the refactored Frontend Python verification environment from `/tmp/frontend_bt_head_20260403_clean/testbench/` into `src/test/python/Frontend/` in XiangShan, with MemBlock-aligned package placement and Frontend-owned canonical env/tests roots.
+**Goal:** Migrate the refactored Frontend Python verification environment from `/tmp/frontend_bt_head_20260403_clean/testbench/` into `src/test/python/Frontend/` in XiangShan, including env/tests plus the remaining non-doc operational assets: web console, helper tools, shell entry points, and packaged bins.
 
-**Architecture:** Create a new `src/test/python/Frontend/` package that mirrors MemBlock's outer workspace shape while preserving the already-refactored Frontend internals under `env/` and `tests/`. Use thin root adapters (`Frontend_api.py`, `Frontend_env.py`, package `conftest.py`) instead of flattening the implementation, then normalize imports and verify the migrated tests from the new location.
+**Architecture:** Create a new `src/test/python/Frontend/` package that mirrors MemBlock's outer workspace shape while preserving the already-refactored Frontend internals under `env/` and `tests/`. Use thin root adapters (`Frontend_api.py`, `Frontend_env.py`, package `conftest.py`), promote tool scripts and shell entry points into the Frontend package root, move the web console into `webui/`, and normalize imports/paths so everything resolves from the new location.
 
 **Tech Stack:** Python 3, pytest, toffee/unitychip DUT bindings, XiangShan `src/test/python` package layout.
 
@@ -17,8 +17,16 @@
 - Create: `src/test/python/Frontend/conftest.py`
 - Create: `src/test/python/Frontend/Frontend_api.py`
 - Create: `src/test/python/Frontend/Frontend_env.py`
+- Create: `src/test/python/Frontend/nemu_bin_to_golden_trace.py`
+- Create: `src/test/python/Frontend/nemu_log_to_golden_trace.py`
+- Create: `src/test/python/Frontend/run_dut_with_bin_trace.py`
+- Create: `src/test/python/Frontend/run_bin_trace_pipeline.sh`
+- Create: `src/test/python/Frontend/run_pytest_with_log.sh`
+- Create: `src/test/python/Frontend/run_web_console.sh`
+- Create: `src/test/python/Frontend/bins/`
 - Create: `src/test/python/Frontend/env/`
 - Create: `src/test/python/Frontend/tests/`
+- Create: `src/test/python/Frontend/webui/`
 
 ### Environment subtree copied from source worktree
 
@@ -84,6 +92,29 @@ Source root: `/tmp/frontend_bt_head_20260403_clean/testbench/tests/`
 - Create: `src/test/python/Frontend/tests/test_nemu_trace_pipeline.py`
 - Create: `src/test/python/Frontend/tests/test_sequence_unit.py`
 - Create: `src/test/python/Frontend/tests/test_trace.py`
+
+### Remaining non-doc assets copied from source worktree
+
+Source roots:
+- `/tmp/frontend_bt_head_20260403_clean/testbench/web/`
+- `/tmp/frontend_bt_head_20260403_clean/testbench/tools/`
+- `/tmp/frontend_bt_head_20260403_clean/testbench/run_*.sh`
+- `/tmp/frontend_bt_head_20260403_clean/testbench/bins/`
+
+- Create: `src/test/python/Frontend/webui/__init__.py`
+- Create: `src/test/python/Frontend/webui/event_bus.py`
+- Create: `src/test/python/Frontend/webui/runner.py`
+- Create: `src/test/python/Frontend/webui/server.py`
+- Create: `src/test/python/Frontend/webui/static/index.html`
+- Create: `src/test/python/Frontend/webui/static/pc_trace_markers.js`
+- Create: `src/test/python/Frontend/webui/README.md`
+- Create: `src/test/python/Frontend/nemu_bin_to_golden_trace.py`
+- Create: `src/test/python/Frontend/nemu_log_to_golden_trace.py`
+- Create: `src/test/python/Frontend/run_dut_with_bin_trace.py`
+- Create: `src/test/python/Frontend/run_bin_trace_pipeline.sh`
+- Create: `src/test/python/Frontend/run_pytest_with_log.sh`
+- Create: `src/test/python/Frontend/run_web_console.sh`
+- Create: `src/test/python/Frontend/bins/microbench.bin`
 
 ---
 
@@ -498,13 +529,13 @@ Run:
 git diff --stat HEAD~10..HEAD
 ```
 
-- [ ] **Step 2: Verify no out-of-scope assets were copied**
+- [ ] **Step 2: Verify no out-of-scope docs were copied**
 
 Run:
 ```bash
-find src/test/python/Frontend -type f | rg 'web|tools|run_.*\.sh|design\.md|docs/'
+find src/test/python/Frontend -type f | rg 'design\.md|/docs/'
 ```
-Expected: no matches, unless you intentionally kept a tiny compatibility stub.
+Expected: no matches.
 
 - [ ] **Step 3: Record final acceptance evidence**
 
@@ -526,5 +557,5 @@ Confidence: medium
 Scope-risk: moderate
 Directive: Treat src/test/python/Frontend as canonical; do not reintroduce a second Frontend source tree
 Tested: Focused Frontend package tests and canonical Frontend pytest suite
-Not-tested: Out-of-scope web/tools/docs migration"
+Not-tested: Out-of-scope docs migration"
 ```
