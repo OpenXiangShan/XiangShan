@@ -6,8 +6,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from Frontend import DUTFrontend
-
+from env.dut_factory import create_frontend_dut
 from env.frontend_env import FrontendEnv
 from env.logging_utils import configure_env_logging
 from env.nemu_trace_pipeline import generate_nemu_trace_from_bin
@@ -34,7 +33,7 @@ class SimulationRunner:
         self._run_flag = threading.Event()
         self._run_interval_s = 0.0
 
-        self.dut: Optional[DUTFrontend] = None
+        self.dut: Optional[Any] = None
         self.env: Optional[FrontendEnv] = None
         self.state = "idle"
         self.last_error: Optional[str] = None
@@ -144,7 +143,7 @@ class SimulationRunner:
             self._release_env()
             self.fixed_program = None
 
-            dut = DUTFrontend()
+            dut = create_frontend_dut(tc_name="webui", dut_logger=self.logger)
             dut.InitClock("clock")
 
             wave_path = cfg.get("waveform_path")

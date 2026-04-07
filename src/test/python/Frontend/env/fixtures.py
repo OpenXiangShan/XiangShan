@@ -17,73 +17,13 @@ for _path in (str(_PYLIB_PATH), str(_HERE)):
 
 from .api import api_Frontend_load_program
 from .coverage_def import get_coverage_groups
+from .dut_factory import create_frontend_dut
 from .env_config import DEFAULT_ENV_CONFIG
 from .frontend_env import FrontendEnv
 from .logging_utils import configure_env_logging
 
 
 logger = getLogger("env.fixtures")
-
-
-class _FakeSignal:
-    def __init__(self, value: int = 0) -> None:
-        self.value = int(value)
-
-
-class _FakeDUTFrontend:
-    """Fallback DUT used when the compiled Frontend pylib is unavailable."""
-
-    def __init__(self) -> None:
-        self._signals = {}
-        self._step_ris_callbacks = []
-        self._cycle = 0
-        self._waveform_paused = 0
-
-        self.reset = _FakeSignal(1)
-        self.clock = _FakeSignal(0)
-
-    def __getattr__(self, name: str):
-        if name.startswith("__"):
-            raise AttributeError(name)
-        signal = self._signals.get(name)
-        if signal is None:
-            signal = _FakeSignal(0)
-            self._signals[name] = signal
-        return signal
-
-    def SetWaveform(self, _path: str) -> None:
-        return None
-
-    def SetCoverage(self, _path: str) -> None:
-        return None
-
-    def InitClock(self, _name: str) -> None:
-        return None
-
-    def StepRis(self, callback) -> None:
-        self._step_ris_callbacks.append(callback)
-
-    def Step(self, cycles: int) -> int:
-        for _ in range(int(cycles)):
-            self._cycle += 1
-            for callback in list(self._step_ris_callbacks):
-                callback(self._cycle)
-        return self._cycle
-
-    def Finish(self) -> None:
-        return None
-
-    def ResumeWaveformDump(self) -> None:
-        self._waveform_paused = 0
-
-    def PauseWaveformDump(self) -> None:
-        self._waveform_paused = 1
-
-    def FlushWaveform(self) -> None:
-        return None
-
-    def WaveformPaused(self) -> int:
-        return int(self._waveform_paused)
 
 
 def _data_dir() -> Path:
@@ -123,13 +63,7 @@ def create_dut(request):
     configure_env_logging()
     tc_name = request.node.name if request is not None else "frontend"
     data_dir = _data_dir()
-    try:
-        from Frontend import DUTFrontend
-
-        dut = DUTFrontend()
-    except ModuleNotFoundError:
-        logger.warning("compiled Frontend DUT not found; using fallback fake DUT for tc=%s", tc_name)
-        dut = _FakeDUTFrontend()
+    dut = create_frontend_dut(tc_name=tc_name, dut_logger=logger)
 
     waveform = _waveform_path(request, data_dir)
     coverage = _coverage_path(request, data_dir)
