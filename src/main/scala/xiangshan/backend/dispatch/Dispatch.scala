@@ -158,6 +158,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     val debugWaitForward   = Option.when(backendParams.debugEn)(Input(Bool()))
     val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(issueQueueNum, Input(UInt(maxIQSize.U.getWidth.W))))
     val debugIQEnqHasIssuedVec = Option.when(backendParams.debugEn)(Vec(issueQueueNum, Input(Bool())))
+    val debugRobHeadStall = Option.when(backendParams.debugEn)(Input(Bool()))
     val debugTopDown = new Bundle {
       val fromRob = Flipped(new RobDispatchTopDownIO)
       val fromCore = new CoreDispatchTopDownIO
@@ -962,7 +963,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val issueQueueSizeVec = Wire(Vec(issueQueueNum, UInt(maxIQSize.U.getWidth.W)))
   issueQueueSizeVec := allIssueParams.map{ param =>
     // Now only when iq has two clear entry, instruction can enq
-    (param.numEntries - 2).asUInt
+    (param.numEntries - param.numEnq).asUInt
   }
 
   val fuTypes = fromRename.map(_.bits.fuType)
@@ -1047,6 +1048,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val dispatchStall = !(inReadyVec.reduce(_ || _))
   val dispatchStallReason = Wire(chiselTypeOf(io.stallReason.reason(0)))
 
+  val robHeadStall = io.debugRobHeadStall.getOrElse(false.B)
 
   val robHeadFutype = io.robHeadFuType
 
@@ -1055,14 +1057,20 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val roblsqStall = robStall ||  lsqStall
   val lqStall  = lsqEnqCtrl.io.lqStall.getOrElse(false.B)
   val sqStall  = lsqEnqCtrl.io.sqStall.getOrElse(false.B)
+  val robHeadStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
+    FuType.isAMO(robHeadFutype)          -> AtomicStall.id.U          ,
+    FuType.isStoreVstore(robHeadFutype)  -> StoreStall.id.U           ,
+    FuType.isLoadVload(robHeadFutype)    -> ldReason                  ,
+    FuType.isDivSqrt(robHeadFutype)      -> DivStall.id.U             ,
+    FuType.isInt(robHeadFutype)          -> IntNotReadyStall.id.U     ,
+    FuType.isFArith(robHeadFutype)       -> FPNotReadyStall.id.U      ,
+  ))
+
   val roblsqStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
-    (FuType.isAMO(robHeadFutype) && io.robHeadNotReady)                      -> AtomicStall.id.U          ,
-    ((FuType.isStoreVstore(robHeadFutype) && io.robHeadNotReady) || sqStall) -> StoreStall.id.U           ,
-    ((FuType.isLoadVload(robHeadFutype) && io.robHeadNotReady) || lqStall)   -> ldReason                  ,
-    (FuType.isDivSqrt(robHeadFutype) && io.robHeadNotReady)                  -> DivStall.id.U             ,
-    (FuType.isInt(robHeadFutype) && io.robHeadNotReady)                      -> IntNotReadyStall.id.U     ,
-    (FuType.isFArith(robHeadFutype) && io.robHeadNotReady)                   -> FPNotReadyStall.id.U      ,
-    (robStall || lsqStall)                                                   -> RobStall.id.U             ,
+    robHeadStall                         -> robHeadStallReason        ,
+    robStall                             -> RobStall.id.U             ,
+    lqStall                              -> LqStall.id.U              ,
+    sqStall                              -> SqStall.id.U              ,
   ))
 
   /** BalanceDispatchStall or Bubble: IQ can enq, but fail to dispatch cause stall/bubble
@@ -1085,9 +1093,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     FuType.isStoreVstore(issueQueueStallFutype) -> BalanceDispatchPolicyStallStore.id.U ,
   ))
   val issueQueueStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
-    fromRenameFutypeNotOverIQ(0)                -> balanceDispatchStallReason  ,
+    robHeadStall                                -> robHeadStallReason          ,
     fromRenameMapIQEnqHasIssuedNotFull(0)       -> IQEnqPolicyStallIssued.id.U ,
     fromRenameMapIQNotFull(0)                   -> IQEnqPolicyStall.id.U       ,
+    fromRenameFutypeNotOverIQ(0)                -> balanceDispatchStallReason  ,
     FuType.isAlu(issueQueueStallFutype)         -> IntIQFullStallAlu.id.U      ,
     FuType.isBJU(issueQueueStallFutype)         -> IntIQFullStallBrh.id.U      ,
     FuType.isInt(issueQueueStallFutype)         -> IntIQFullStallOther.id.U    ,
@@ -1101,8 +1110,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val dispatchlsqStall = dispatchlsqBubbleVec.reduce(_ && _)
   val dispatchlsqStallFutype = PriorityMux(dispatchlsqBubbleVec , fuTypes)
   val dispatchlsqStallReason = MuxCase(NoStall.id.U, Seq(
-    FuType.isLoadVload(dispatchlsqStallFutype)   -> LoadIQFullStall.id.U  ,
-    FuType.isStoreVstore(dispatchlsqStallFutype) -> StoreIQFullStall.id.U ,
+    robHeadStall                                 -> robHeadStallReason ,
+    FuType.isLoadVload(dispatchlsqStallFutype)   -> LqStall.id.U       ,
+    FuType.isStoreVstore(dispatchlsqStallFutype) -> SqStall.id.U       ,
   ))
 
   // block backward will not stall whole pipe in current cycle
@@ -1149,10 +1159,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val issueQueueBubble = issueQueueStallVec.reduce(_ || _)
 
   val issueQueueBubbleReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
-    balanceDispatchStall                        -> balanceDispatchStallReason  ,
-    dispatchBandWidthPolicyBubble               -> dispatchBandWidthPolicyBubbleReason ,
+    robHeadStall                                -> robHeadStallReason          ,
     issueQueueEnqPolicyStallIssued              -> IQEnqPolicyStallIssued.id.U ,
     issueQueueEnqPolicyStall                    -> IQEnqPolicyStall.id.U       ,
+    balanceDispatchStall                        -> balanceDispatchStallReason  ,
+    dispatchBandWidthPolicyBubble               -> dispatchBandWidthPolicyBubbleReason ,
     FuType.isAlu(issueQueueStallFutype)         -> IntIQFullStallAlu.id.U      ,
     FuType.isBJU(issueQueueStallFutype)         -> IntIQFullStallBrh.id.U      ,
     FuType.isInt(issueQueueStallFutype)         -> IntIQFullStallOther.id.U    ,
@@ -1162,12 +1173,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     FuType.isStoreVstore(issueQueueStallFutype) -> StoreIQFullStall.id.U       ,
   ))
 
-  /** Dispatch lsq Bubble : lsq cannot enter */
+  /** Dispatch lsq Bubble : lsq cannot enter caculate by dispatch: allowdispatch*/
   val dispatchlsqBubble = dispatchlsqBubbleVec.reduce(_ || _)
   val dispatchlsqBubbleFutype = PriorityMux(dispatchlsqBubbleVec , fuTypes)
   val dispatchlsqBubbleReason = MuxCase(NoStall.id.U, Seq(
-    FuType.isLoadVload(dispatchlsqBubbleFutype)   -> LoadIQFullStall.id.U  ,
-    FuType.isStoreVstore(dispatchlsqBubbleFutype) -> StoreIQFullStall.id.U ,
+    robHeadStall                                  -> robHeadStallReason    ,
+    FuType.isLoadVload(dispatchlsqBubbleFutype)   -> LqStall.id.U  ,
+    FuType.isStoreVstore(dispatchlsqBubbleFutype) -> SqStall.id.U ,
   ))
 
   /** Special Instruction bubble: wait forward or block backward */
