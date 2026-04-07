@@ -54,17 +54,16 @@ frontend workstream:
 
 The migration target is a new package rooted at `src/test/python/Frontend/`.
 The package should present a MemBlock-like top-level shape while preserving the
-refactored Frontend internals.
+refactored Frontend internals. The root stays a module directory rather than a
+Python package so it does not shadow the compiled `Frontend` DUT module.
 
 ```text
 src/test/python/Frontend/
-|-- __init__.py
 |-- conftest.py
 |-- Frontend_api.py
 |-- Frontend_env.py
 |-- env/
-|   |-- __init__.py
-|   |-- api.py
+|   |   |-- api.py
 |   |-- frontend_env.py
 |   |-- fixtures.py
 |   |-- env_config.py

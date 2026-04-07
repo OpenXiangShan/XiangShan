@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class ICacheConfig:
+    hit_latency: int = 1
+    miss_latency: int = 20
+    miss_rate: float = 0.0
+    seed: int = 1
+
+
+@dataclass(frozen=True)
+class UncacheConfig:
+    latency: int = 2
+    mmio_latency: int = 4
+
+
+@dataclass(frozen=True)
+class PTWConfig:
+    latency: int = 3
+    mode: str = "bare"
+
+
+@dataclass(frozen=True)
+class BackendConfig:
+    ftq_size: int = 64
+    ibuf_watchdog_threshold: int = 32
+    safe_pc: int = 0x80000000
+    resolve_min_delay: int = 3
+    resolve_max_delay: int = 8
+    auto_redirect_on_golden_mispredict: bool = True
+
+
+@dataclass(frozen=True)
+class TraceConfig:
+    nemu_image_base_addr: int = 0x80000000
+
+
+@dataclass(frozen=True)
+class SequenceConfig:
+    reset_vector: int = 0x80000000
+    reset_cycles: int = 20
+    redirect_delay_cycles: int = 3
+    run_until_commit_max_cycles: int = 10000
+    inject_redirect_max_cycles: int = 1000
+    check_pc_sequence_max_cycles: int = 5000
+
+
+@dataclass(frozen=True)
+class EnvConfig:
+    icache: ICacheConfig = field(default_factory=ICacheConfig)
+    uncache: UncacheConfig = field(default_factory=UncacheConfig)
+    ptw: PTWConfig = field(default_factory=PTWConfig)
+    backend: BackendConfig = field(default_factory=BackendConfig)
+    trace: TraceConfig = field(default_factory=TraceConfig)
+    sequence: SequenceConfig = field(default_factory=SequenceConfig)
+
+
+DEFAULT_ENV_CONFIG = EnvConfig()

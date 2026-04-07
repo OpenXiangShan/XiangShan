@@ -14,7 +14,6 @@
 
 ### New canonical package root
 
-- Create: `src/test/python/Frontend/__init__.py`
 - Create: `src/test/python/Frontend/conftest.py`
 - Create: `src/test/python/Frontend/Frontend_api.py`
 - Create: `src/test/python/Frontend/Frontend_env.py`
@@ -91,7 +90,6 @@ Source root: `/tmp/frontend_bt_head_20260403_clean/testbench/tests/`
 ### Task 1: Scaffold the new Frontend package root
 
 **Files:**
-- Create: `src/test/python/Frontend/__init__.py`
 - Create: `src/test/python/Frontend/conftest.py`
 - Create: `src/test/python/Frontend/env/`
 - Create: `src/test/python/Frontend/tests/`
@@ -113,13 +111,7 @@ Run:
 mkdir -p src/test/python/Frontend/env src/test/python/Frontend/tests
 ```
 
-- [ ] **Step 3: Add package root files**
-
-Use this minimal `src/test/python/Frontend/__init__.py`:
-
-```python
-"""Frontend Python verification package."""
-```
+- [ ] **Step 3: Add package root bootstrap files**
 
 Use this `src/test/python/Frontend/conftest.py` as the initial package bootstrap:
 
@@ -153,7 +145,7 @@ Expected to include:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/test/python/Frontend/__init__.py src/test/python/Frontend/conftest.py
+git add src/test/python/Frontend/conftest.py
 git commit -m "refactor(frontend): scaffold XiangShan Frontend package root"
 ```
 
@@ -202,7 +194,6 @@ git commit -m "refactor(frontend): migrate canonical env package"
 **Files:**
 - Create: `src/test/python/Frontend/Frontend_api.py`
 - Create: `src/test/python/Frontend/Frontend_env.py`
-- Modify: `src/test/python/Frontend/__init__.py`
 
 - [ ] **Step 1: Write the adapter modules**
 
@@ -226,8 +217,6 @@ from env.fixtures import env, full_env  # noqa: F401
 from env.frontend_env import FrontendEnv  # noqa: F401
 ```
 
-Update `src/test/python/Frontend/__init__.py` to re-export the main package surface through `env`.
-
 - [ ] **Step 2: Verify imports fail before fixes if adapter references are wrong**
 
 Run:
@@ -249,7 +238,7 @@ Do not move logic from `env/api.py`, `env/fixtures.py`, or `env/frontend_env.py`
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/test/python/Frontend/Frontend_api.py src/test/python/Frontend/Frontend_env.py src/test/python/Frontend/__init__.py
+git add src/test/python/Frontend/Frontend_api.py src/test/python/Frontend/Frontend_env.py
 git commit -m "refactor(frontend): add package root adapters"
 ```
 

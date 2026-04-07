@@ -1,0 +1,6 @@
+*.fst
+*.dat
+*.fst.hier
+.nfs*
+__pycache__/
+data/
