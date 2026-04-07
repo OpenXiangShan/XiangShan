@@ -178,6 +178,7 @@ xs_coarse_rename_map = {
     'DivStall': 'MergeCore',
     'IntNotReadyStall': 'MergeCore',
     'FPNotReadyStall': 'MergeCore',
+    'OtherNotReadyStall': 'MergeCore',
 
     'MemNotReadyStall': 'MergeLoad',
 
@@ -207,6 +208,7 @@ xs_coarse_rename_map = {
     'BalanceDispatchPolicyStallVec':  'MergeCore',
     'BalanceDispatchPolicyStallLoad': 'MergeCore',
     'BalanceDispatchPolicyStallStore':'MergeCore',
+    'OtherBalanceDispatchPolicyStall':'MergeCore',
 
     'IQEnqPolicyStallIssued': 'MergeCore',
     'IQEnqPolicyStall': 'MergeCore',

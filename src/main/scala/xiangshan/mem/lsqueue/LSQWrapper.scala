@@ -406,8 +406,8 @@ class LsqEnqCtrl(implicit p: Parameters) extends XSModule
   // To solve the issue easily, we block enqueue when t3_update, which is RegNext(t2_update).
   io.enq.canAccept := RegNext(ldCanAccept && sqCanAccept && !t2_update)
   // for Topdown
-  io.lqStall.foreach(_ := !ldCanAccept || t2_update)
-  io.sqStall.foreach(_ := !sqCanAccept || t2_update)
+  io.lqStall.foreach(_ := RegNext(!ldCanAccept || t2_update))
+  io.sqStall.foreach(_ := RegNext(!sqCanAccept || t2_update))
 
   val lqOffset = Wire(Vec(io.enq.resp.length, UInt(lqPtr.value.getWidth.W)))
   val sqOffset = Wire(Vec(io.enq.resp.length, UInt(sqPtr.value.getWidth.W)))

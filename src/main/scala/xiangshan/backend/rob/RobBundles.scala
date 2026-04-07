@@ -91,6 +91,9 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_v0Wen      = OptionWrapper(backendParams.debugEn, Bool() )
     val debug_commitType = OptionWrapper(backendParams.debugEn, CommitType() )
     // debug_end
+    // topdown
+    val topdownIssued    = OptionWrapper(backendParams.debugEn, Bool())
+    val topdownIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
 
     def isWritebacked: Bool = !uopNum.orR
     def isUopWritebacked: Bool = !uopNum.orR
@@ -167,6 +170,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
       robEntry.perfDebugInfo.foreach(_ := debug.perfDebugInfo)
       robEntry.debug_sim_trig.foreach(_ := debug.debug_sim_trig)
     }
+    robEntry.topdownIssued.foreach(_ := false.B)
+    robEntry.topdownIssueTime.foreach(_ := 0.U)
   }
 
   def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle): Unit = {

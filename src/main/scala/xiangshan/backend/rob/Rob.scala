@@ -89,8 +89,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val csr = new RobCSRIO
     val snpt = Input(new SnapshotPort)
     val robFull = Output(Bool())
-    val headNotReady = Output(Bool())
-    val cpu_wfi = Output(Bool())
+    val cpu_halt = Output(Bool())
     val wfi = new Bundle {
       val wfiReq = Output(Bool())
       val safeFromMem = Input(Bool())
@@ -120,10 +119,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val logicPhyRegMap = Vec(RabCommitWidth, ValidIO(new RegWriteFromRab))
       val excpInfo = ValidIO(new VecExcpInfo)
     })
+    val IssueQueueDeqSum  = backendParams.allIssueParams.map(_.numDeq).sum
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHeadFuType = Output(FuType())
     val debugBlockBackward = Option.when(backendParams.debugEn)(Output(Bool()))
     val debugWaitForward   = Option.when(backendParams.debugEn)(Output(Bool()))
+    val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(IssueQueueDeqSum, Flipped(ValidIO(new RobPtr()))))
+    val debugRobHeadStall = Option.when(backendParams.debugEn)(Output(Bool()))
     val debugEnqLsq = Input(new LsqEnqIO)
     val debugHeadLsIssue = Input(Bool())
     val lsTopdownInfo = Vec(LduCnt + HyuCnt, Input(new LsTopdownInfo))
@@ -323,6 +325,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val debug_lsIssue = WireDefault(debug_lsIssued)
   debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue
 
+
+
+
   /**
    * states of Rob
    */
@@ -366,7 +371,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val vxsatDataRead = Wire(Vec(CommitWidth, Bool()))
   io.robDeqPtr := deqPtr
 
+  // topdown
   io.debugRobHeadFuType := robEntries(deqPtr.value).debug_fuType.getOrElse(0.U.asTypeOf(FuType()))
+  val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
+  val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
+  val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
+  val sortedFuConfigs = allFuConfigs.sortBy(_.fuType.id)
+  val sortedFulatency = sortedFuConfigs.map(_.latency.latencyVal.getOrElse(4).asUInt)
+  sortedFulatency.zipWithIndex.map { case (latency, idx) =>
+    println(s"[Rob] fu latency ${idx} $latency")
+  }
+  val bypassLatency = 3.U
+
 
   /**
    * connection of [[rab]]
@@ -1258,7 +1274,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
   io.csr.perfinfo.retiredInstr := retireCounter
   io.robFull := !allowEnqueue
-  io.headNotReady := commit_vDeqGroup(deqPtr.value(bankNumWidth-1, 0)) && !commit_wDeqGroup(deqPtr.value(bankNumWidth-1, 0))
 
   io.toVecExcpMod.logicPhyRegMap := rab.io.toVecExcpMod.logicPhyRegMap
   io.toVecExcpMod.excpInfo := vecExcpInfo
@@ -1518,6 +1533,47 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     when (vldWb.fire && robEntries(vldWbRobIdx).valid && (vldWb.bits.vecWen.get || vldWb.bits.v0Wen.get)) {
       debug_VecOtherPdest(vldWbRobIdx)(vldWbvdIdx) := vldWbPdest
     }
+  }
+
+  // topdown
+  val candidateVec = Option.when(backendParams.debugEn)(Wire(Vec(RobSize, Vec(io.IssueQueueDeqSum, Bool()))))
+  candidateVec.foreach( _ := VecInit.tabulate(RobSize, io.IssueQueueDeqSum){ (index, i) =>
+    val deq = io.debugIQDeqRobIdxVec.get(i)
+    deq.valid && (deq.bits.value === index.U)
+  })
+  for (i <- 0 until RobSize) {
+    when(robEntries(i).valid){
+      val candidate = candidateVec.get(i)
+      robEntries(i).topdownIssued.foreach(_ := candidate.reduce(_ || _) || robEntries(i).topdownIssued.get)
+    }
+  }
+  if (backendParams.debugEn) {
+    dontTouch(candidateVec.get)
+  }
+
+//  io.debugIQDeqRobIdxVec.foreach(_.foreach{ case iqDeqRobIdx =>
+//    when(iqDeqRobIdx.valid) {
+//      for (i <- 0 until RobSize) {
+//        val robIdxMatch = i.U === iqDeqRobIdx.bits.value
+//        when(robIdxMatch && robEntries(i).valid) {
+//          robEntries(i).topdownIssued.foreach(_ := true.B)
+//        }
+//      }
+//    }
+//  })
+  for (i <- 0 until RobSize) {
+    when(robEntries(i).valid){
+      val hasWriteBack = robEntries(i).uopNum === 0.U
+      robEntries(i).topdownIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
+        robEntries(i).topdownIssueTime.get +& robEntries(i).topdownIssued.get) )
+    }
+  }
+
+  io.debugRobHeadStall.foreach{ case stall =>
+    val deqEntry = robEntries(deqPtr.value)
+    println(s"[rob] futype length ${robEntries(0).debug_fuType.get.getWidth}; sortedfulatency length ${sortedFulatency.length}")
+    val deqEntryNormalLatency = Mux1H(deqEntry.debug_fuType.get, sortedFulatency) +& bypassLatency
+    stall := deqEntry.valid && (robEntries(deqPtr.value).topdownIssueTime.get > deqEntryNormalLatency)
   }
 
   //difftest signals
