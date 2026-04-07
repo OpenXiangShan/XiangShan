@@ -18,7 +18,8 @@ from .event_bus import EventBus
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PACKAGE_ROOT.parents[3]
-MICROBENCH_BIN_PATH = PACKAGE_ROOT / "bins" / "microbench.bin"
+READY_TO_RUN_DIR = REPO_ROOT / "ready-to-run"
+MICROBENCH_BIN_PATH = READY_TO_RUN_DIR / "microbench.bin"
 MICROBENCH_TRACE_PATH = REPO_ROOT / "NEMU" / "logs" / "microbench.trace.jsonl"
 MICROBENCH_BASE_ADDR = 0x80000000
 
