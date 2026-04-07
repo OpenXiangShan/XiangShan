@@ -23,6 +23,7 @@ import utils.AddrField
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.PhrHelper
+import xiangshan.frontend.bpu.ScTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 trait Helpers extends HasScParameters with PhrHelper {
@@ -30,14 +31,15 @@ trait Helpers extends HasScParameters with PhrHelper {
   def pos(x:  SInt): Bool = !sign(x)
   def neg(x:  SInt): Bool = sign(x)
 
-  val addrFields = AddrField(
+  protected def generateAddrField(setIdxWidth: Option[Int] = None): AddrField = AddrField(
     Seq(
       ("shiftBit", FetchBlockAlignWidth),
-      ("bankIdx", BankWidth),
-      ("setIdx", SetIdxWidth)
-    ),
+      ("bankIdx", BankWidth)
+    ) ++ (if (setIdxWidth.isDefined) Seq(("setIdx", setIdxWidth.get)) else Seq()),
     maxWidth = Option(VAddrBits)
   )
+
+  lazy val addrFields = generateAddrField()
 
   // sc should start using startPc as setIdx from the highest bit of CfiPosition
   def getBankMask(pc: PrunedAddr): UInt =
@@ -50,37 +52,6 @@ trait Helpers extends HasScParameters with PhrHelper {
     }
     ParallelXOR(hashChunks)
   }
-
-  // get pc ^ foldedHist for index
-  def getPathTableIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories, numSets: Int): UInt =
-    if (info.HistoryLength > 0) {
-      val idxFoldedHist = allFh.getHistWithInfo(info).foldedHist
-      (addrFields.extract("setIdx", pc) ^ idxFoldedHist)(log2Ceil(numSets) - 1, 0)
-    } else {
-      addrFields.extract("setIdx", pc)
-    }
-
-  // get pc ^ foldedGhr for index
-  def getGlobalTableIdx(pc: PrunedAddr, ghr: UInt, numSets: Int, ghrLen: Int): UInt = {
-    val foldedGhr = computeFoldedHist(ghr, log2Ceil(numSets))(ghrLen)
-    (addrFields.extract("setIdx", pc) ^ foldedGhr)(log2Ceil(numSets) - 1, 0)
-  }
-
-  // get pc ^ foldedBW for index
-  def getBWTableIdx(pc: PrunedAddr, bw: UInt, numSets: Int, bwLen: Int): UInt = {
-    val foldedBW = computeFoldedHist(bw, log2Ceil(numSets))(bwLen)
-    (addrFields.extract("setIdx", pc) ^ foldedBW)(log2Ceil(numSets) - 1, 0)
-  }
-
-  // get pc ^ foldedImli index
-  def getImliTableIdx(pc: PrunedAddr, imli: UInt, numSets: Int, imliLen: Int): UInt = {
-    val foldedImli = computeFoldedHist(imli, log2Ceil(numSets))(imliLen)
-    (addrFields.extract("setIdx", pc) ^ foldedImli)(log2Ceil(numSets) - 1, 0)
-  }
-
-  // get bias index
-  def getBiasTableIdx(pc: PrunedAddr, numSets: Int): UInt =
-    addrFields.extract("setIdx", pc)
 
   def getPercsum(ctr: SInt): SInt = Cat(ctr, 1.U(1.W)).asSInt
 
@@ -142,4 +113,42 @@ trait Helpers extends HasScParameters with PhrHelper {
     }
     updateWayMask
   }
+}
+
+trait AbstractTableHelper extends Helpers {
+  protected def TableInfo: ScTableInfo
+
+  final protected def NumSets: Int = TableInfo.NumSets
+
+  final protected def SetIdxWidth: Int = log2Ceil(NumSets)
+
+  override lazy val addrFields = generateAddrField(Option(SetIdxWidth))
+}
+
+trait PathTableHelper extends AbstractTableHelper {
+
+  def getPathTableIdx(pc: PrunedAddr, info: FoldedHistoryInfo, allFh: PhrAllFoldedHistories): UInt =
+    if (info.HistoryLength > 0) {
+      val idxFoldedHist = allFh.getHistWithInfo(info).foldedHist
+      addrFields.extract("setIdx", pc) ^ idxFoldedHist
+    } else {
+      addrFields.extract("setIdx", pc)
+    }
+}
+
+trait CommonTableHelper extends AbstractTableHelper {
+  final protected def HistoryLength: Int = TableInfo.HistoryLength
+
+  // get pc ^ foldedHist for index
+  // ghr/imli/bw using getTableIdx to calculate setIdx
+  def getTableIdx(pc: PrunedAddr, hist: UInt): UInt = {
+    val foldedHist = computeFoldedHist(hist, SetIdxWidth)(HistoryLength)
+    addrFields.extract("setIdx", pc) ^ foldedHist
+  }
+}
+
+trait BiasTableHelper extends AbstractTableHelper {
+
+  def getBiasTableIdx(pc: PrunedAddr): UInt =
+    addrFields.extract("setIdx", pc)
 }

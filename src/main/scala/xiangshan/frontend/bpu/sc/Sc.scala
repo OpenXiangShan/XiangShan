@@ -29,6 +29,7 @@ import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.ScTableInfo
 import xiangshan.frontend.bpu.history.commonhr.CommonHREntry
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 import xiangshan.frontend.bpu.tage.{TakenCounter => TageTakenCounter}
@@ -43,7 +44,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     val providerTakenCtrs: Vec[Valid[SaturateCounter]] =
       Input(Vec(NumBtbResultEntries, Valid(TageTakenCounter()))) // s2 stage tage info
     val foldedPathHist:      PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val imli:                UInt                  = Input(UInt(ImliWidth.W))
+    val imli:                UInt                  = Input(UInt(ImliHistoryLength.W))
     val commonHR:            CommonHREntry         = Input(new CommonHREntry())
     val trainFoldedPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val scTakenMask:         Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
@@ -64,19 +65,30 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  instantiate tables
    */
   private val pathTable = PathTableInfos.zipWithIndex.map { case (info, i) =>
-    Module(new ScTable(NumPathSets, NumWays, "pathTable", i))
+    Module(new ScTable(info.NumSets, NumWays, "pathTable", i) with PathTableHelper {
+      override protected def TableInfo: ScTableInfo = info
+    })
   }
 
   private val globalTable = GlobalTableInfos.zipWithIndex.map { case (info, i) =>
-    Module(new ScTable(NumGlobalSets, NumWays, "globalTable", i))
+    Module(new ScTable(info.NumSets, NumWays, "globalTable", i) with CommonTableHelper {
+      override protected def TableInfo: ScTableInfo = info
+    })
   }
 
   private val bwTable = BackwardTableInfos.zipWithIndex.map { case (info, i) =>
-    Module(new ScTable(NumBWSets, NumWays, "bwTable", i))
+    Module(new ScTable(info.NumSets, NumWays, "bwTable", i) with CommonTableHelper {
+      override protected def TableInfo: ScTableInfo = info
+    })
   }
-  private val imliTable = Module(new ScTable(NumImliSets, NumWays, "imliTable", 0))
+  private val imliTable = Module(new ScTable(ImliTableInfo.NumSets, NumWays, "imliTable", 0) with CommonTableHelper {
+    override protected def TableInfo: ScTableInfo = ImliTableInfo
+  })
 
-  private val biasTable = Module(new ScTable(NumBiasSets, BiasTableNumWays, "biasTable", 0))
+  private val biasTable =
+    Module(new ScTable(BiasTableInfo.NumSets, BiasTableNumWays, "biasTable", 0) with BiasTableHelper {
+      override protected def TableInfo: ScTableInfo = BiasTableInfo
+    })
 
   private val scThreshold = RegInit(VecInit.tabulate(NumWays)(_ => ThresholdCounter.Init))
 
@@ -103,36 +115,35 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    */
   private val s0_startPc  = io.startPc
   private val s0_bankMask = getBankMask(s0_startPc)
-  private val s0_pathIdx = PathTableInfos.map(info =>
-    getPathTableIdx(
+  private val s0_pathIdx = PathTableInfos.zip(pathTable).map { case (info, table) =>
+    table.getPathTableIdx(
       s0_startPc,
-      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(NumPathSets))),
-      io.foldedPathHist,
-      NumPathSets
+      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.NumSets))),
+      io.foldedPathHist
     )
-  )
+  }
 
   private val s1_pathIdx = s0_pathIdx.map(RegEnable(_, s0_fire)) // for debug
   private val s2_pathIdx = s1_pathIdx.map(RegEnable(_, s1_fire)) // for debug
 
-  private val s0_globalIdx = GlobalTableInfos.map(info =>
-    getGlobalTableIdx(s0_startPc, s0_commonHR.ghr(info.HistoryLength - 1, 0), NumGlobalSets, info.HistoryLength)
-  )
+  private val s0_globalIdx = GlobalTableInfos.zip(globalTable).map { case (info, table) =>
+    table.getTableIdx(s0_startPc, s0_commonHR.ghr(info.HistoryLength - 1, 0))
+  }
 
   private val s1_globalIdx = s0_globalIdx.map(RegEnable(_, s0_fire)) // for debug
   private val s2_globalIdx = s1_globalIdx.map(RegEnable(_, s1_fire)) // for debug
 
-  private val s0_imliIdx = getImliTableIdx(s0_startPc, io.imli, NumImliSets, ImliWidth)
+  private val s0_imliIdx = imliTable.getTableIdx(s0_startPc, io.imli)
   private val s1_imliIdx = RegEnable(s0_imliIdx, s0_fire) // for debug
   private val s2_imliIdx = RegEnable(s1_imliIdx, s1_fire) // for debug
 
-  private val s0_biasIdx = getBiasTableIdx(s0_startPc, NumBiasSets)
+  private val s0_biasIdx = biasTable.getBiasTableIdx(s0_startPc)
   private val s1_biasIdx = RegEnable(s0_biasIdx, s0_fire) // for debug
   private val s2_biasIdx = RegEnable(s1_biasIdx, s1_fire) // for debug
 
-  private val s0_bwIdx = BackwardTableInfos.map(info =>
-    getBWTableIdx(s0_startPc, s0_commonHR.bw(info.HistoryLength - 1, 0), NumBWSets, info.HistoryLength)
-  )
+  private val s0_bwIdx = BackwardTableInfos.zip(bwTable).map { case (info, table) =>
+    table.getTableIdx(s0_startPc, s0_commonHR.bw(info.HistoryLength - 1, 0))
+  }
   private val s1_bwIdx = s0_bwIdx.map(RegEnable(_, s0_fire)) // for debug
   private val s2_bwIdx = s1_bwIdx.map(RegEnable(_, s1_fire)) // for debug
 
@@ -332,9 +343,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   io.meta.debug_scImliTakenVec.get   := VecInit(s2_imliPred.map(RegEnable(_, s2_fire)))
   io.meta.debug_scBiasTakenVec.get   := VecInit(s2_biasPred.map(RegEnable(_, s2_fire)))
 
-  io.meta.debug_predPathIdx.get   := RegEnable(VecInit(s2_pathIdx), s2_fire) // for debug
-  io.meta.debug_predGlobalIdx.get := RegEnable(VecInit(s2_globalIdx), s2_fire)
-  io.meta.debug_predBWIdx.get     := RegEnable(VecInit(s2_bwIdx), s2_fire)
+  io.meta.debug_predPathIdx.get   := RegEnable(MixedVecInit(s2_pathIdx), s2_fire) // for debug
+  io.meta.debug_predGlobalIdx.get := RegEnable(MixedVecInit(s2_globalIdx), s2_fire)
+  io.meta.debug_predBWIdx.get     := RegEnable(MixedVecInit(s2_bwIdx), s2_fire)
   io.meta.debug_predImliIdx.get   := RegEnable(s2_imliIdx, s2_fire)
   io.meta.debug_predBiasIdx.get   := RegEnable(s2_biasIdx, s2_fire)
 
@@ -354,28 +365,22 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   private val t1_bankMask = getBankMask(t1_train.startPc)
 
-  private val t1_pathSetIdx = PathTableInfos.map(info =>
-    getPathTableIdx(
+  private val t1_pathSetIdx = PathTableInfos.zip(pathTable).map { case (info, table) =>
+    table.getPathTableIdx(
       t1_train.startPc,
-      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(NumPathSets))),
-      RegEnable(io.trainFoldedPathHist, t0_fire),
-      NumPathSets
+      new FoldedHistoryInfo(info.HistoryLength, min(info.HistoryLength, log2Ceil(info.NumSets))),
+      RegEnable(io.trainFoldedPathHist, t0_fire)
     )
-  )
-  private val t1_globalSetIdx = GlobalTableInfos.map(info =>
-    getGlobalTableIdx(
-      t1_train.startPc,
-      t1_commonHR.ghr(info.HistoryLength - 1, 0),
-      NumGlobalSets,
-      info.HistoryLength
-    )
-  )
+  }
+  private val t1_globalSetIdx = GlobalTableInfos.zip(globalTable).map { case (info, table) =>
+    table.getTableIdx(t1_train.startPc, t1_commonHR.ghr(info.HistoryLength - 1, 0))
+  }
 
-  private val t1_bwSetIdx = BackwardTableInfos.map(info =>
-    getBWTableIdx(t1_train.startPc, t1_commonHR.bw(info.HistoryLength - 1, 0), NumBWSets, info.HistoryLength)
-  )
-  private val t1_imliSetIdx = getImliTableIdx(t1_train.startPc, t1_commonHR.imli, NumImliSets, ImliWidth)
-  private val t1_biasSetIdx = getBiasTableIdx(t1_train.startPc, NumBiasSets)
+  private val t1_bwSetIdx = BackwardTableInfos.zip(bwTable).map { case (info, table) =>
+    table.getTableIdx(t1_train.startPc, t1_commonHR.bw(info.HistoryLength - 1, 0))
+  }
+  private val t1_imliSetIdx = imliTable.getTableIdx(t1_train.startPc, t1_commonHR.imli)
+  private val t1_biasSetIdx = biasTable.getBiasTableIdx(t1_train.startPc)
 
   private val t1_oldPathEntries = VecInit(t1_meta.scPathResp.map(v => VecInit(v.map(r => r.asTypeOf(new ScEntry())))))
   private val t1_oldGlobalEntries =

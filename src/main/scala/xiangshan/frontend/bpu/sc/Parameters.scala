@@ -67,25 +67,20 @@ trait HasScParameters extends HasBpuParameters {
 
   def PathTableInfos: Seq[ScTableInfo] = scParameters.PathTableInfos
   def NumPathTables:  Int              = PathTableInfos.length
-  def NumPathSets:    Int              = PathTableInfos.head.Size
 
   def GlobalTableInfos: Seq[ScTableInfo] = scParameters.GlobalTableInfos
   def NumGlobalTables:  Int              = GlobalTableInfos.length
-  def NumGlobalSets:    Int              = GlobalTableInfos.head.Size
 
-  def NumImliSets:  Int = scParameters.ImliTableInfo.Size
-  def NumImliTable: Int = 1
+  def ImliTableInfo: ScTableInfo = scParameters.ImliTableInfo
+  def NumImliTable:  Int         = 1
 
-  def NumBiasSets:         Int = scParameters.BiasTableInfo.Size
-  def BiasUseTageBitWidth: Int = scParameters.BiasUseTageBitWidth
-  def BiasTableNumWays:    Int = NumWays << BiasUseTageBitWidth // add tage_taken bits as wayIdx
-  def NumBiasTable:        Int = 1
+  def BiasTableInfo:       ScTableInfo = scParameters.BiasTableInfo
+  def BiasUseTageBitWidth: Int         = scParameters.BiasUseTageBitWidth
+  def BiasTableNumWays:    Int         = NumWays << BiasUseTageBitWidth // add tage_taken bits as wayIdx
+  def NumBiasTable:        Int         = 1
 
   def BackwardTableInfos: Seq[ScTableInfo] = scParameters.BackwardTableInfos
   def NumBWTables:        Int              = BackwardTableInfos.length
-  def NumBWSets:          Int              = BackwardTableInfos.head.Size
-
-  def SetIdxWidth: Int = log2Ceil(NumPathSets)
 
   // If tage LowConf, the totalSum should be at least NumTables + 5, Threshold should be (NumTables + 5) << 6(threshold >> 3 + lowConf threshold >> 3)
   // The value of ctr saturation is 63.
@@ -99,6 +94,7 @@ trait HasScParameters extends HasBpuParameters {
     s"ThresholdInit($ThresholdInit) should be in [$MinThreshold, $MaxThreshold]"
   )
 
-  def WriteBufferSize: Int     = scParameters.WriteBufferSize
-  def EnableScTrace:   Boolean = scParameters.EnableScTrace
+  def WriteBufferSize: Int = scParameters.WriteBufferSize
+
+  def EnableScTrace: Boolean = scParameters.EnableScTrace
 }

@@ -67,10 +67,10 @@ trait HasBpuParameters extends HasFrontendParameters {
 
   def NumBtbResultEntries: Int = bpuParameters.mbtbParameters.NumWay * bpuParameters.mbtbParameters.NumAlignBanks
 
-  def GhrShamt:         Int = NumBtbResultEntries
-  def GhrHistoryLength: Int = bpuParameters.scParameters.GlobalTableInfos.map(_.HistoryLength).max
-  def BWHistoryLength:  Int = bpuParameters.scParameters.BackwardTableInfos.map(_.HistoryLength).max
-  def ImliWidth:        Int = bpuParameters.scParameters.ImliTableInfo.HistoryLength
+  def GhrShamt:          Int = NumBtbResultEntries
+  def GhrHistoryLength:  Int = bpuParameters.scParameters.GlobalTableInfos.map(_.HistoryLength).max
+  def BWHistoryLength:   Int = bpuParameters.scParameters.BackwardTableInfos.map(_.HistoryLength).max
+  def ImliHistoryLength: Int = bpuParameters.scParameters.ImliTableInfo.HistoryLength
 
   // phr history
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
@@ -81,7 +81,7 @@ trait HasBpuParameters extends HasFrontendParameters {
         _.getFoldedHistoryInfoSet(bpuParameters.ittageParameters.TagWidth, bpuParameters.ittageParameters.NumBanks)
       }.reduce(_ ++ _) ++
       bpuParameters.scParameters.PathTableInfos.map {
-        _.getFoldedHistoryInfoSet(NumBtbResultEntries, bpuParameters.scParameters.NumBanks)
+        _.getFoldedHistoryInfoSet()
       }.reduce(_ ++ _) ++
       bpuParameters.utageParameters.TableInfos.map {
         _.getFoldedHistoryInfoSet()

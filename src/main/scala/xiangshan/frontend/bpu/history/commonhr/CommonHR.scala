@@ -32,7 +32,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     val s1_imliTaken:  Bool                = Input(Bool())
     val update:        CommonHRUpdate      = Input(new CommonHRUpdate)
     val redirect:      CommonHRRedirect    = Input(new CommonHRRedirect)
-    val s0_imli:       UInt                = Output(UInt(ImliWidth.W))
+    val s0_imli:       UInt                = Output(UInt(ImliHistoryLength.W))
     val s0_commonHR:   CommonHREntry       = Output(new CommonHREntry)
     val s3ResolveMeta: CommonHRResolveMeta = Output(new CommonHRResolveMeta)
 
@@ -49,11 +49,11 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val s3_override = io.update.s3Override
 
   // common history register
-  private val s0_imli                = WireInit(0.U(ImliWidth.W))
+  private val s0_imli                = WireInit(0.U(ImliHistoryLength.W))
   private val s1_imli                = RegEnable(s0_imli, s0_fire)
   private val s2_imli                = RegEnable(s1_imli, s1_fire)
   private val s3_imli                = RegEnable(s2_imli, s2_fire)
-  private val imli                   = RegInit(0.U(ImliWidth.W))
+  private val imli                   = RegInit(0.U(ImliHistoryLength.W))
   private val s0_commonHR            = WireInit(0.U.asTypeOf(new CommonHREntry))
   private val s1_commonHR            = RegEnable(s0_commonHR, 0.U.asTypeOf(new CommonHREntry), s0_fire)
   private val s2_commonHR            = RegEnable(s1_commonHR, 0.U.asTypeOf(new CommonHREntry), s1_fire)
