@@ -39,11 +39,20 @@ NEMU_EXEC="${TB_NEMU_EXEC:-${REPO_DIR}/NEMU/build/riscv64-nemu-interpreter}"
 NEMU_MAX_INSTR="${TB_NEMU_MAX_INSTR:-0}"
 TRACE_LIMIT="${TB_TRACE_LIMIT:-0}"
 RUN_DUT="${TB_RUN_DUT:-1}"
+RUN_TO_TRACE_COMPLETION="${TB_RUN_TO_TRACE_COMPLETION:-0}"
 PYTEST_TARGET_DEFAULT="${SCRIPT_DIR}/tests/test_bin_trace_dut.py::test_bin_trace"
 PYTEST_TARGET="${4:-${TB_PYTEST_TARGET:-${PYTEST_TARGET_DEFAULT}}}"
 BASE_ADDR="${TB_BASE_ADDR:-0x80000000}"
 STEP_CYCLES="${TB_STEP_CYCLES:-0}"
 PYTHON_BIN="${PYTHON:-python3}"
+
+if [[ "${BIN_STEM}" == "microbench" ]]; then
+  NEMU_MAX_INSTR=0
+  TRACE_LIMIT=0
+  STEP_CYCLES=0
+  RUN_TO_TRACE_COMPLETION=1
+  echo "[frontend] microbench detected: forcing unrestricted runtime"
+fi
 
 echo "[frontend] repo: ${REPO_DIR}"
 echo "[frontend] package: ${SCRIPT_DIR}"
@@ -53,6 +62,7 @@ echo "[frontend] nemu_log: ${NEMU_LOG_PATH}"
 echo "[frontend] nemu_exec: ${NEMU_EXEC}"
 echo "[frontend] python: ${PYTHON_BIN}"
 echo "[frontend] run_dut: ${RUN_DUT}"
+echo "[frontend] run_to_trace_completion: ${RUN_TO_TRACE_COMPLETION}"
 echo "[frontend] pytest_target: ${PYTEST_TARGET}"
 echo "[frontend] base_addr: ${BASE_ADDR}"
 echo "[frontend] step_cycles: ${STEP_CYCLES}"
@@ -92,6 +102,7 @@ if [[ "${RUN_DUT}" != "0" ]]; then
   TB_TRACE_PATH="${TRACE_PATH}" \
   TB_BASE_ADDR="${BASE_ADDR}" \
   TB_STEP_CYCLES="${STEP_CYCLES}" \
+  TB_RUN_TO_TRACE_COMPLETION="${RUN_TO_TRACE_COMPLETION}" \
   "${PYTHON_BIN}" -m pytest -v "${PYTEST_TARGET}"
 fi
 
