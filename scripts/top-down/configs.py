@@ -7,7 +7,7 @@ OUT_BASE = 'results/results-weighted_base.csv'
 OUT_REF = 'results/results-weighted_ref.csv'
 
 INT_ONLY = False
-FP_ONLY = True
+FP_ONLY = False
 
 TOTAL_ANALYSE = True
 BACKEND_ANALYSE = True
@@ -35,7 +35,6 @@ xs_custom_rename_map = {
     'StoreDispatchPolicyStall': 'MergeDispatchPolicyBandwidth',
     'OtherDispatchPolicyStall': 'MergeDispatchPolicyBandwidth',
 
-    'BalanceDispatchPolicyStall':     'MergeDispatchPolicyBalance',
     'BalanceDispatchPolicyStallAlu':  'MergeDispatchPolicyBalance',
     'BalanceDispatchPolicyStallBrh':  'MergeDispatchPolicyBalance',
     'BalanceDispatchPolicyStallInt':  'MergeDispatchPolicyBalance',
@@ -43,6 +42,7 @@ xs_custom_rename_map = {
     'BalanceDispatchPolicyStallVec':  'MergeDispatchPolicyBalance',
     'BalanceDispatchPolicyStallLoad': 'MergeDispatchPolicyBalance',
     'BalanceDispatchPolicyStallStore':'MergeDispatchPolicyBalance',
+    'OtherBalanceDispatchPolicyStall':'MergeDispatchPolicyBalance',
 
     'NoStall': 'MergeBase',
     'commitInstr': 'Insts',
@@ -81,6 +81,7 @@ xs_backend_rename_map = {
     'DivStall': 'MergeExecStall',
     'IntNotReadyStall': 'MergeExecStall',
     'FPNotReadyStall': 'MergeExecStall',
+    'OtherNotReadyStall': 'MergeExecStall',
 
     'RobStall': 'MergeRobStall',
 
@@ -90,7 +91,6 @@ xs_backend_rename_map = {
     'StoreDispatchPolicyStall': 'MergeDispatchPolicy',
     'OtherDispatchPolicyStall': 'MergeDispatchPolicy',
 
-    'BalanceDispatchPolicyStall':     'MergeDispatchPolicy',
     'BalanceDispatchPolicyStallAlu':  'MergeDispatchPolicy',
     'BalanceDispatchPolicyStallBrh':  'MergeDispatchPolicy',
     'BalanceDispatchPolicyStallInt':  'MergeDispatchPolicy',
@@ -98,6 +98,7 @@ xs_backend_rename_map = {
     'BalanceDispatchPolicyStallVec':  'MergeDispatchPolicy',
     'BalanceDispatchPolicyStallLoad': 'MergeDispatchPolicy',
     'BalanceDispatchPolicyStallStore':'MergeDispatchPolicy',
+    'OtherBalanceDispatchPolicyStall':'MergeDispatchPolicy',
 
     'IQEnqPolicyStallIssued': 'MergeIQpolicyStall',
     'IQEnqPolicyStall': 'MergeIQpolicyStall',
@@ -125,8 +126,6 @@ xs_backend_rename_map = {
     'VlFlStall': 'MergeFreelistStall',
     'MultiFlStall': 'MergeFreelistStall',
 
-    'IntFlStallForBank': 'MergeFreelistStall',
-    'FpFlStallForBank': 'MergeFreelistStall',
 
     'SpecialInsts': 'MergePrivileged',
 
@@ -178,6 +177,7 @@ xs_coarse_rename_map = {
     'DivStall': 'MergeCore',
     'IntNotReadyStall': 'MergeCore',
     'FPNotReadyStall': 'MergeCore',
+    ‘OtherNotReadyStall’： ‘MergeCore’
 
     'MemNotReadyStall': 'MergeLoad',
 
@@ -190,16 +190,12 @@ xs_coarse_rename_map = {
     'VlFlStall': 'MergeFreelistStall',
     'MultiFlStall': 'MergeFreelistStall',
 
-    'IntFlStallForBank': 'MergeFreelistStall',
-    'FpFlStallForBank': 'MergeFreelistStall',
-
     'FusionBubble' : 'MergeCore',
 
     'LoadDispatchPolicyStall':  'MergeCore',
     'StoreDispatchPolicyStall': 'MergeCore',
     'OtherDispatchPolicyStall': 'MergeCore',
 
-    'BalanceDispatchPolicyStall':     'MergeCore',
     'BalanceDispatchPolicyStallAlu':  'MergeCore',
     'BalanceDispatchPolicyStallBrh':  'MergeCore',
     'BalanceDispatchPolicyStallInt':  'MergeCore',
@@ -207,6 +203,7 @@ xs_coarse_rename_map = {
     'BalanceDispatchPolicyStallVec':  'MergeCore',
     'BalanceDispatchPolicyStallLoad': 'MergeCore',
     'BalanceDispatchPolicyStallStore':'MergeCore',
+    'OtherBalanceDispatchPolicyStall':'MergeCore'
 
     'IQEnqPolicyStallIssued': 'MergeCore',
     'IQEnqPolicyStall': 'MergeCore',
@@ -328,6 +325,7 @@ targets = {
     'IntNotReadyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IntNotReadyStall,\s+(\d+)',
     'FPNotReadyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FPNotReadyStall,\s+(\d+)',
     'MemNotReadyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: MemNotReadyStall,\s+(\d+)',
+    'OtherNotReadyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: OtherNotReadyStall,\s+(\d+)',
     'RobStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: RobStall,\s+(\d+)',
 
     'IntFlStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IntFlStall,\s+(\d+)',
@@ -337,16 +335,12 @@ targets = {
     'VlFlStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VlFlStall,\s+(\d+)',
     'MultiFlStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: MultiFlStall,\s+(\d+)',
 
-    'IntFlStallForBank': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IntFlStallForBank,\s+(\d+)',
-    'FpFlStallForBank': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FpFlStallForBank,\s+(\d+)',
-
     'FusionBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FusionBubble,\s+(\d+)',
 
     'LoadDispatchPolicyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: LoadDispatchPolicyStall,\s+(\d+)',
     'StoreDispatchPolicyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: StoreDispatchPolicyStall,\s+(\d+)',
     'OtherDispatchPolicyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: OtherDispatchPolicyStall,\s+(\d+)',
 
-    'BalanceDispatchPolicyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: BalanceDispatchPolicyStall,\s+(\d+)',
     'BalanceDispatchPolicyStallAlu': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: BalanceDispatchPolicyStallAlu,\s+(\d+)',
     'BalanceDispatchPolicyStallBrh': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: BalanceDispatchPolicyStallBrh,\s+(\d+)',
     'BalanceDispatchPolicyStallInt': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: BalanceDispatchPolicyStallInt,\s+(\d+)',
@@ -354,6 +348,7 @@ targets = {
     'BalanceDispatchPolicyStallVec': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: BalanceDispatchPolicyStallVec,\s+(\d+)',
     'BalanceDispatchPolicyStallLoad': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: BalanceDispatchPolicyStallLoad,\s+(\d+)',
     'BalanceDispatchPolicyStallStore': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: BalanceDispatchPolicyStallStore,\s+(\d+)',
+    'OtherBalanceDispatchPolicyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: OtherBalanceDispatchPolicyStall,\s+(\d+)',
 
     'IQEnqPolicyStallIssued': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IQEnqPolicyStallIssued,\s+(\d+)',
     'IQEnqPolicyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IQEnqPolicyStall,\s+(\d+)',

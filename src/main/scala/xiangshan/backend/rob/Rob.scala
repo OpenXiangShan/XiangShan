@@ -374,15 +374,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // topdown
   io.debugRobHeadFuType := robEntries(deqPtr.value).debug_fuType.getOrElse(0.U.asTypeOf(FuType()))
-  val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
-  val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
-  val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
-  val sortedFuConfigs = allFuConfigs.sortBy(_.fuType.id)
-  val sortedFulatency = sortedFuConfigs.map(_.latency.latencyVal.getOrElse(4).asUInt)
-  sortedFulatency.zipWithIndex.map { case (latency, idx) =>
-    println(s"[Rob] fu latency ${idx} $latency")
-  }
-  val bypassLatency = 3.U
 
 
   /**
@@ -1538,6 +1529,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // topdown
+  val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
+  val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
+  val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
+  val sortedFuConfigs = allFuConfigs.sortBy(_.fuType.id)
+  val sortedFulatency = sortedFuConfigs.map(_.latency.latencyVal.getOrElse(4).asUInt)
+  sortedFulatency.zipWithIndex.map { case (latency, idx) =>
+    println(s"[Rob] fu latency ${idx} $latency")
+  }
+  val bypassLatency = 3.U
+
   val candidateVec = Option.when(backendParams.debugEn)(Wire(Vec(RobSize, Vec(io.IssueQueueDeqSum, Bool()))))
   candidateVec.foreach( _ := VecInit.tabulate(RobSize, io.IssueQueueDeqSum){ (index, i) =>
     val deq = io.debugIQDeqRobIdxVec.get(i)
@@ -1545,8 +1546,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   })
   for (i <- 0 until RobSize) {
     when(robEntries(i).valid){
-      val candidate = candidateVec.get(i)
-      robEntries(i).topdownIssued.foreach(_ := candidate.reduce(_ || _) || robEntries(i).topdownIssued.get)
+      robEntries(i).topdownIssued.foreach(_ := candidateVec.get(i).reduce(_ || _) || robEntries(i).topdownIssued.get)
     }
   }
   if (backendParams.debugEn) {
