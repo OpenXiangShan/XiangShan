@@ -7,9 +7,9 @@ from dataclasses import replace
 from typing import Callable, Deque, Dict, Optional
 
 from .agents.backend_agent import BackendAgent
+from .bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, FrontendInfoBundle, bind_bundle_optional
 from .model.backend_state import BackendEvent, BackendState, FrontendPacket, FtqEntry, ResolveEntry
 from .model.ftq_scoreboard import FtqScoreboard
-from .signal_utils import get_sig, set_sig
 from .trace import GoldenTrace, TraceEntry
 
 _MIN_BACKEND_DELAY = 3
@@ -38,6 +38,10 @@ class BackendModel:
     ) -> None:
         self.logger = logging.getLogger("env.backend_model")
         self.dut = None
+        self.drive_if = None
+        self.observe_if = None
+        self.from_ftq_if = None
+        self.frontend_info_if = None
         self.env = None
         self.monitor = None
         self.branch_checker = None
@@ -186,7 +190,27 @@ class BackendModel:
 
     def bind(self, dut) -> None:
         self.dut = dut
-        self._backend_agent.bind(dut)
+        self.bind_interfaces(
+            drive_if=bind_bundle_optional(BackendCtrlBundle, dut),
+            observe_if=bind_bundle_optional(BackendObserveBundle, dut),
+            from_ftq_if=bind_bundle_optional(BackendFromFtqBundle, dut),
+            frontend_info_if=bind_bundle_optional(FrontendInfoBundle, dut),
+        )
+
+    @staticmethod
+    def _read(signal, default: int = 0) -> int:
+        try:
+            value = getattr(signal, "value", None)
+            return default if value is None else int(value)
+        except Exception:
+            return default
+
+    def bind_interfaces(self, *, drive_if, observe_if, from_ftq_if, frontend_info_if) -> None:
+        self.drive_if = drive_if
+        self.observe_if = observe_if
+        self.from_ftq_if = from_ftq_if
+        self.frontend_info_if = frontend_info_if
+        self._backend_agent.bind(drive_if)
 
     def attach_env(self, env) -> None:
         self.env = env
@@ -559,20 +583,19 @@ class BackendModel:
         (flag<<6 | value[5:0]) so that _sample_cfvec can look it up by the same
         key reconstructed from cfVec's ftqPtr_flag / ftqPtr_value fields.
         """
-        assert self.dut is not None
-        if get_sig(self.dut, "io_backend_fromFtq_wen", 0):
-            ftq_idx = int(get_sig(self.dut, "io_backend_fromFtq_ftqIdx", 0))
-            start_pc = self._decode_backend_addr(get_sig(self.dut, "io_backend_fromFtq_startPc_addr", 0))
+        assert self.from_ftq_if is not None
+        if self._read(self.from_ftq_if.io_backend_fromFtq_wen, 0):
+            ftq_idx = int(self._read(self.from_ftq_if.io_backend_fromFtq_ftqIdx, 0))
+            start_pc = self._decode_backend_addr(self._read(self.from_ftq_if.io_backend_fromFtq_startPc_addr, 0))
             self._ftq_start_pc_cache[ftq_idx] = start_pc
             self._ftq_start_pc_by_value[ftq_idx & 0x3F] = start_pc
 
     def _has_later_cfvec_slot_matching_pc(self, current_slot: int, target_pc: int) -> bool:
-        assert self.dut is not None
+        assert self.observe_if is not None
         for slot in range(int(current_slot) + 1, 8):
-            base = f"io_backend_cfVec_{slot}_"
-            if get_sig(self.dut, base + "valid", 0) != 1:
+            if self._read(self.observe_if.cfvec_valid[slot], 0) != 1:
                 continue
-            if int(get_sig(self.dut, base + "bits_pc", 0)) == int(target_pc):
+            if int(self._read(self.observe_if.cfvec_pc[slot], 0)) == int(target_pc):
                 return True
         return False
 
@@ -642,19 +665,18 @@ class BackendModel:
         }
 
     def _sample_cfvec(self) -> None:
-        assert self.dut is not None
+        assert self.observe_if is not None
         for i in range(8):
-            base = f"io_backend_cfVec_{i}_"
-            if get_sig(self.dut, base + "valid", 0) != 1:
+            if self._read(self.observe_if.cfvec_valid[i], 0) != 1:
                 continue
-            pc = get_sig(self.dut, base + "bits_pc", 0)
-            instr = get_sig(self.dut, base + "bits_instr", 0)
-            is_rvc = bool(get_sig(self.dut, base + "bits_isRvc", 0))
-            pred_taken = bool(get_sig(self.dut, base + "bits_predTaken", 0))
-            ftq_flag = get_sig(self.dut, base + "bits_ftqPtr_flag", 0)
-            ftq_value = get_sig(self.dut, base + "bits_ftqPtr_value", 0)
-            ftq_offset = get_sig(self.dut, base + "bits_ftqOffset", 0)
-            is_last = bool(get_sig(self.dut, base + "bits_isLastInFtqEntry", 0))
+            pc = self._read(self.observe_if.cfvec_pc[i], 0)
+            instr = self._read(self.observe_if.cfvec_instr[i], 0)
+            is_rvc = bool(self._read(self.observe_if.cfvec_is_rvc[i], 0))
+            pred_taken = bool(self._read(self.observe_if.cfvec_pred_taken[i], 0))
+            ftq_flag = self._read(self.observe_if.cfvec_ftq_ptr_flag[i], 0)
+            ftq_value = self._read(self.observe_if.cfvec_ftq_ptr_value[i], 0)
+            ftq_offset = self._read(self.observe_if.cfvec_ftq_offset[i], 0)
+            is_last = bool(self._read(self.observe_if.cfvec_is_last_in_ftq_entry[i], 0))
 
             if self._golden_wait_pc is not None:
                 if int(pc) != int(self._golden_wait_pc):
@@ -765,7 +787,6 @@ class BackendModel:
             break
 
     def _drive_resolves(self) -> None:
-        assert self.dut is not None
         driven_entries: list[ResolveEntry] = []
         to_remove = []
         frontier_pc = self.current_golden_pc()
@@ -857,7 +878,6 @@ class BackendModel:
             self._pending_resolves.remove(entry)
 
     def _drive_commit(self) -> None:
-        assert self.dut is not None
         self._backend_agent.drive_commit(None)
         if self.can_accept == 0:
             return
@@ -876,7 +896,6 @@ class BackendModel:
         self._emit_event("commit", {"commit_count": self.commit_count, "ftq_flag": head.ftq_flag, "ftq_value": head.ftq_value})
 
     def _clear_one_shot_signals(self) -> None:
-        assert self.dut is not None
         self._backend_agent.clear_one_shot_signals()
 
     def _recompute_cfi_budgets_from_pending_resolves(self) -> None:
@@ -885,7 +904,6 @@ class BackendModel:
         self._apply_backend_state()
 
     def _drive_redirect(self, payload: dict) -> None:
-        assert self.dut is not None
         target_pc = int(payload.get("target_pc", self.safe_pc))
         reason = str(payload.get("reason", "redirect"))
         from_pc = int(payload.get("pc", target_pc))
@@ -983,8 +1001,8 @@ class BackendModel:
             self._emit_event("exception", {"cause": top.payload.get("cause", 0)})
 
     def _watchdog(self) -> None:
-        assert self.dut is not None
-        if get_sig(self.dut, "io_frontendInfo_ibufFull", 0) == 1:
+        assert self.frontend_info_if is not None
+        if self._read(self.frontend_info_if.io_frontendInfo_ibufFull, 0) == 1:
             self.ibuf_full_streak += 1
         else:
             self.ibuf_full_streak = 0
@@ -1066,7 +1084,7 @@ class BackendModel:
         return self.commit_count - start
 
     def on_clock_edge(self, cycle: int) -> None:
-        if self.dut is None:
+        if self.drive_if is None or self.observe_if is None or self.from_ftq_if is None or self.frontend_info_if is None:
             return
         self.current_cycle = int(cycle)
         self._cycle_start_golden_cursor = None if self.golden_trace is None else int(self.golden_trace.cursor)

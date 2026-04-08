@@ -8,6 +8,18 @@ from .agents.icache_agent import ICacheAgent
 from .agents.ptw_agent import PTWAgent
 from .agents.uncache_agent import UncacheAgent
 from .backend_model import BackendModel
+from .bundles import (
+    BackendCtrlBundle,
+    BackendFromFtqBundle,
+    BackendObserveBundle,
+    CSRControlBundle,
+    ClockResetBundle,
+    FrontendInfoBundle,
+    ICacheBundle,
+    PTWBundle,
+    UncacheBundle,
+    bind_bundle_optional,
+)
 from .env_config import DEFAULT_ENV_CONFIG, EnvConfig
 from .logging_utils import configure_env_logging, parse_log_level
 from .model import GoldenTrace, MemoryModel, PageTableModel
@@ -48,6 +60,7 @@ class FrontendEnv:
         self.bp_ctrl_ittage_enable = 1 if int(bp_ctrl_ittage_enable) else 0
         self.memory = memory_model or MemoryModel()
         self.page_table = page_table_model or PageTableModel(mode=self.config.ptw.mode)
+        self._create_interfaces()
         self._apply_collaborators(self._create_collaborators())
         self._configure_collaborators(explicit_page_table=page_table_model is not None)
         self._bind_collaborators()
@@ -100,9 +113,39 @@ class FrontendEnv:
             mode=(None if explicit_page_table else self.config.ptw.mode),
         )
 
+    @staticmethod
+    def _write(signal, value: int) -> None:
+        try:
+            signal.value = int(value)
+        except Exception:
+            return
+
+    def _create_interfaces(self) -> None:
+        self.clock_reset = bind_bundle_optional(ClockResetBundle, self.dut)
+        self.icache_if = bind_bundle_optional(ICacheBundle, self.dut)
+        self.uncache_if = bind_bundle_optional(UncacheBundle, self.dut)
+        self.ptw_if = bind_bundle_optional(PTWBundle, self.dut)
+        self.backend_ctrl_if = bind_bundle_optional(BackendCtrlBundle, self.dut)
+        self.backend_observe_if = bind_bundle_optional(BackendObserveBundle, self.dut)
+        self.backend_from_ftq_if = bind_bundle_optional(BackendFromFtqBundle, self.dut)
+        self.frontend_info_if = bind_bundle_optional(FrontendInfoBundle, self.dut)
+        self.csr_ctrl_if = bind_bundle_optional(CSRControlBundle, self.dut)
+
     def _bind_collaborators(self) -> None:
+        self.icache_agent.bind(self.icache_if)
+        self.uncache_agent.bind(self.uncache_if)
+        self.ptw_agent.bind(self.ptw_if)
+        self.monitor.bind(self.backend_observe_if)
+        if hasattr(self.backend_model, "bind_interfaces"):
+            self.backend_model.bind_interfaces(
+                drive_if=self.backend_ctrl_if,
+                observe_if=self.backend_observe_if,
+                from_ftq_if=self.backend_from_ftq_if,
+                frontend_info_if=self.frontend_info_if,
+            )
+        else:
+            self.backend_model.bind(self.dut)
         for collaborator in self._bindable_collaborators():
-            collaborator.bind(self.dut)
             collaborator.set_event_sink(self.event_sink)
 
     def _connect_collaborators(self) -> None:
@@ -150,87 +193,19 @@ class FrontendEnv:
             set_sig(self.dut, name, value)
 
     def _init_inputs(self) -> None:
-        self._set_if_exists("reset", 1)
-        self._set_if_exists("clock", 0)
-        self._set_if_exists("io_reset_vector_addr", 0x40000000)
-        self._set_if_exists("io_fencei", 0)
-
-        # ICache D channel
-        self._set_if_exists("auto_inner_icache_client_out_d_valid", 0)
-        self._set_if_exists("auto_inner_icache_client_out_d_bits_opcode", 0)
-        self._set_if_exists("auto_inner_icache_client_out_d_bits_source", 0)
-        self._set_if_exists("auto_inner_icache_client_out_d_bits_denied", 0)
-        self._set_if_exists("auto_inner_icache_client_out_d_bits_data", 0)
-        self._set_if_exists("auto_inner_icache_client_out_d_bits_corrupt", 0)
-
-        # Uncache D channel
-        self._set_if_exists("auto_inner_instrUncache_client_out_d_valid", 0)
-        self._set_if_exists("auto_inner_instrUncache_client_out_d_bits_source", 0)
-        self._set_if_exists("auto_inner_instrUncache_client_out_d_bits_denied", 0)
-        self._set_if_exists("auto_inner_instrUncache_client_out_d_bits_data", 0)
-        self._set_if_exists("auto_inner_instrUncache_client_out_d_bits_corrupt", 0)
-
-        # PTW
-        self._set_if_exists("io_ptw_req_0_ready", 0)
-        self._set_if_exists("io_ptw_resp_valid", 0)
-        self._set_if_exists("io_ptw_resp_bits_s2xlate", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_tag", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_asid", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_vmid", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_n", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_pbmt", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_perm_a", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_perm_g", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_perm_u", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_perm_x", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_perm_w", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_perm_r", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_level", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_v", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_entry_ppn", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_addr_low", 0)
-        for i in range(8):
-            self._set_if_exists(f"io_ptw_resp_bits_s1_ppn_low_{i}", 0)
-            self._set_if_exists(f"io_ptw_resp_bits_s1_valididx_{i}", 0)
-            self._set_if_exists(f"io_ptw_resp_bits_s1_pteidx_{i}", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_pf", 0)
-        self._set_if_exists("io_ptw_resp_bits_s1_af", 0)
-
-        # SFence
-        self._set_if_exists("io_sfence_valid", 0)
-        self._set_if_exists("io_sfence_bits_rs1", 0)
-        self._set_if_exists("io_sfence_bits_rs2", 0)
-        self._set_if_exists("io_sfence_bits_addr", 0)
-        self._set_if_exists("io_sfence_bits_id", 0)
-        self._set_if_exists("io_sfence_bits_hv", 0)
-        self._set_if_exists("io_sfence_bits_hg", 0)
-
-        # backend defaults
-        self._set_if_exists("io_backend_canAccept", 1)
-        self._set_if_exists("io_backend_toFtq_commit_valid", 0)
-        self._set_if_exists("io_backend_toFtq_redirect_valid", 0)
-        self._set_if_exists("io_backend_stallReason_backReason_valid", 0)
-        self._set_if_exists("io_backend_wfi_wfiReq", 0)
-        self._set_if_exists("io_backend_toFtq_ftqIdxAhead_0_valid", 0)
-        for i in range(8):
-            self._set_if_exists(f"io_backend_toFtq_callRetCommit_{i}_valid", 0)
-        for i in range(3):
-            self._set_if_exists(f"io_backend_toFtq_resolve_{i}_valid", 0)
-
-        # tlb/csr for bare mode execution
-        self._set_if_exists("io_tlbCsr_priv_imode", 3)
-        self._set_if_exists("io_tlbCsr_satp_mode", 0)
-        self._set_if_exists("io_tlbCsr_vsatp_mode", 0)
-        self._set_if_exists("io_tlbCsr_hgatp_mode", 0)
-        self._set_if_exists("io_csrCtrl_bp_ctrl_ubtbEnable", self.bp_ctrl_ubtb_enable)
-        self._set_if_exists("io_csrCtrl_bp_ctrl_abtbEnable", self.bp_ctrl_abtb_enable)
-        self._set_if_exists("io_csrCtrl_bp_ctrl_mbtbEnable", self.bp_ctrl_mbtb_enable)
-        self._set_if_exists("io_csrCtrl_bp_ctrl_tageEnable", self.bp_ctrl_tage_enable)
-        self._set_if_exists("io_csrCtrl_bp_ctrl_scEnable", self.bp_ctrl_sc_enable)
-        self._set_if_exists("io_csrCtrl_bp_ctrl_ittageEnable", self.bp_ctrl_ittage_enable)
-        self._set_if_exists("io_csrCtrl_pf_ctrl_l1I_pf_enable", 1)
-        self._set_if_exists("io_csrCtrl_fsIsOff", 0)
-        self._set_if_exists("io_csrCtrl_distribute_csr_w_valid", 0)
+        self.clock_reset.drive_idle(reset_vector_addr=0x40000000)
+        self.icache_if.drive_idle()
+        self.uncache_if.drive_idle()
+        self.ptw_if.drive_idle()
+        self.backend_ctrl_if.drive_idle()
+        self.csr_ctrl_if.drive_idle(
+            ubtb_enable=self.bp_ctrl_ubtb_enable,
+            abtb_enable=self.bp_ctrl_abtb_enable,
+            mbtb_enable=self.bp_ctrl_mbtb_enable,
+            tage_enable=self.bp_ctrl_tage_enable,
+            sc_enable=self.bp_ctrl_sc_enable,
+            ittage_enable=self.bp_ctrl_ittage_enable,
+        )
 
     def _on_clock_edge(self, cycle: int) -> None:
         self.current_cycle = int(cycle)
@@ -247,9 +222,9 @@ class FrontendEnv:
     def reset(self, cycles: int = 20) -> None:
         self.logger.info("reset dut: cycles=%d", int(cycles))
         self._emit_event("control.reset", {"cycles": int(cycles)})
-        self._set_if_exists("reset", 1)
+        self._write(self.clock_reset.reset, 1)
         self.step(cycles)
-        self._set_if_exists("reset", 0)
+        self._write(self.clock_reset.reset, 0)
         self.step(1)
 
     def initialize(self, reset_vector: int = 0x80000000, bare_mode: bool = True, reset_cycles: int = 20) -> None:
@@ -259,12 +234,12 @@ class FrontendEnv:
             bool(bare_mode),
             int(reset_cycles),
         )
-        self._set_if_exists("io_reset_vector_addr", int(reset_vector) >> 1)
+        self._write(self.clock_reset.io_reset_vector_addr, int(reset_vector) >> 1)
         if bare_mode:
             self.page_table.set_mode("bare")
-            self._set_if_exists("io_tlbCsr_satp_mode", 0)
-            self._set_if_exists("io_tlbCsr_vsatp_mode", 0)
-            self._set_if_exists("io_tlbCsr_hgatp_mode", 0)
+            self._write(self.csr_ctrl_if.io_tlbCsr_satp_mode, 0)
+            self._write(self.csr_ctrl_if.io_tlbCsr_vsatp_mode, 0)
+            self._write(self.csr_ctrl_if.io_tlbCsr_hgatp_mode, 0)
         self.reset(reset_cycles)
         self.monitor.set_expected_pc(int(reset_vector))
 
@@ -315,12 +290,12 @@ class FrontendEnv:
         if ittage_enable is not None:
             self.bp_ctrl_ittage_enable = 1 if int(ittage_enable) else 0
 
-        self._set_if_exists("io_csrCtrl_bp_ctrl_ubtbEnable", self.bp_ctrl_ubtb_enable)
-        self._set_if_exists("io_csrCtrl_bp_ctrl_abtbEnable", self.bp_ctrl_abtb_enable)
-        self._set_if_exists("io_csrCtrl_bp_ctrl_mbtbEnable", self.bp_ctrl_mbtb_enable)
-        self._set_if_exists("io_csrCtrl_bp_ctrl_tageEnable", self.bp_ctrl_tage_enable)
-        self._set_if_exists("io_csrCtrl_bp_ctrl_scEnable", self.bp_ctrl_sc_enable)
-        self._set_if_exists("io_csrCtrl_bp_ctrl_ittageEnable", self.bp_ctrl_ittage_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_ubtbEnable, self.bp_ctrl_ubtb_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_abtbEnable, self.bp_ctrl_abtb_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_mbtbEnable, self.bp_ctrl_mbtb_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_tageEnable, self.bp_ctrl_tage_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_scEnable, self.bp_ctrl_sc_enable)
+        self._write(self.csr_ctrl_if.io_csrCtrl_bp_ctrl_ittageEnable, self.bp_ctrl_ittage_enable)
 
         cfg = {
             "ubtb_enable": int(self.bp_ctrl_ubtb_enable),

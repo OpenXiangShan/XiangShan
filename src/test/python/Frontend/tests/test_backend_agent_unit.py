@@ -1,4 +1,5 @@
 from env.agents.backend_agent import BackendAgent
+from env.bundles import BackendCtrlBundle, bind_bundle_optional
 from env.model.backend_state import FtqEntry, ResolveEntry
 
 
@@ -147,3 +148,15 @@ def test_drive_redirect_asserts_payload_and_next_cycle_clears_valid():
     agent.start_cycle(can_accept=1)
 
     assert int(dut.io_backend_toFtq_redirect_valid.value) == 0
+
+
+def test_backend_agent_accepts_explicit_backend_ctrl_bundle_binding():
+    dut = _DummyDut()
+    interface = bind_bundle_optional(BackendCtrlBundle, dut)
+    agent = BackendAgent()
+
+    agent.bind(interface)
+    agent.start_cycle(can_accept=1)
+
+    assert agent.interface is interface
+    assert int(dut.io_backend_canAccept.value) == 1

@@ -197,3 +197,17 @@ def test_initialize_keeps_reset_defaults_and_top_level_helpers():
     assert page_table.mode_calls == ["bare"]
     assert reset_calls == [20]
     assert collaborators["monitor"].expected_pcs == [0x80000000]
+
+
+def test_frontend_env_passes_phase1_bundles_into_main_collaborators():
+    dut = _DummyDut()
+    env = frontend_env_module.FrontendEnv(dut, register_callbacks=False)
+
+    assert env.icache_agent.interface is env.icache_if
+    assert env.uncache_agent.interface is env.uncache_if
+    assert env.ptw_agent.interface is env.ptw_if
+    assert env.monitor.interface is env.backend_observe_if
+    assert env.backend_model.drive_if is env.backend_ctrl_if
+    assert env.backend_model.observe_if is env.backend_observe_if
+    assert env.backend_model.from_ftq_if is env.backend_from_ftq_if
+    assert env.backend_model.frontend_info_if is env.frontend_info_if

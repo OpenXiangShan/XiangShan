@@ -1,6 +1,7 @@
 from env.monitor import BranchChecker as LegacyBranchChecker
 from env.monitor import FrontendMonitor as LegacyFrontendMonitor
 from env.monitor import Observation as LegacyObservation
+from env.bundles import BackendObserveBundle, bind_bundle_optional
 from env.monitors.frontend_monitor import FrontendMonitor, Observation
 
 
@@ -104,3 +105,13 @@ def test_redirect_replay_packets_are_suppressed_during_wait_sync_and_grace():
     assert monitor.get_errors() == []
     assert monitor.wait_sync_after_redirect is False
     assert monitor.redirect_grace == 0
+
+
+def test_monitor_accepts_explicit_backend_observe_bundle_binding():
+    dut = _DummyDut()
+    interface = bind_bundle_optional(BackendObserveBundle, dut)
+    monitor = FrontendMonitor()
+
+    monitor.bind(interface)
+
+    assert monitor.interface is interface

@@ -4,10 +4,10 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
+from ..bundles import BackendObserveBundle, bind_bundle_optional
 from ..model.branch_checker import BranchChecker
 from ..model.memory_model import MemoryModel
 from ..rvc_decoder import expand_rvc
-from ..signal_utils import get_sig
 
 
 @dataclass
@@ -28,7 +28,7 @@ class FrontendMonitor:
         redirect_sync_max: int = 32,
     ) -> None:
         self.logger = logging.getLogger("env.monitor")
-        self.dut = None
+        self.interface = None
         self.memory = memory
         self.branch_checker = branch_checker
         self.expected_pc: Optional[int] = None
@@ -108,8 +108,19 @@ class FrontendMonitor:
             return True
         return False
 
-    def bind(self, dut) -> None:
-        self.dut = dut
+    @staticmethod
+    def _read(signal, default: int = 0) -> int:
+        try:
+            value = getattr(signal, "value", None)
+            return default if value is None else int(value)
+        except Exception:
+            return default
+
+    def bind(self, target) -> None:
+        if isinstance(target, BackendObserveBundle):
+            self.interface = target
+            return
+        self.interface = bind_bundle_optional(BackendObserveBundle, target)
 
     def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
         self.event_sink = sink
@@ -166,7 +177,7 @@ class FrontendMonitor:
         self._emit(int(kwargs.get("cycle", 0)), "monitor.error", kwargs, level="WARNING")
 
     def on_clock_edge(self, cycle: int) -> None:
-        if self.dut is None:
+        if self.interface is None:
             return
 
         self.current_cycle = int(cycle)
@@ -185,14 +196,13 @@ class FrontendMonitor:
         cycle_frontend_slots: List[dict] = []
 
         for i in range(8):
-            base = f"io_backend_cfVec_{i}_"
-            if get_sig(self.dut, base + "valid", 0) != 1:
+            if self._read(self.interface.cfvec_valid[i], 0) != 1:
                 continue
 
-            pc = get_sig(self.dut, base + "bits_pc", 0)
-            instr = get_sig(self.dut, base + "bits_instr", 0)
-            is_rvc = bool(get_sig(self.dut, base + "bits_isRvc", 0))
-            pred_taken = bool(get_sig(self.dut, base + "bits_predTaken", 0))
+            pc = self._read(self.interface.cfvec_pc[i], 0)
+            instr = self._read(self.interface.cfvec_instr[i], 0)
+            is_rvc = bool(self._read(self.interface.cfvec_is_rvc[i], 0))
+            pred_taken = bool(self._read(self.interface.cfvec_pred_taken[i], 0))
 
             self.slots_valid += 1
             obs = Observation(
@@ -225,11 +235,11 @@ class FrontendMonitor:
             golden_pc = self.expected_pc if self.expected_pc is not None else pc
 
             ex_sum = (
-                get_sig(self.dut, base + "bits_exceptionVec_1", 0)
-                + get_sig(self.dut, base + "bits_exceptionVec_2", 0)
-                + get_sig(self.dut, base + "bits_exceptionVec_12", 0)
-                + get_sig(self.dut, base + "bits_exceptionVec_19", 0)
-                + get_sig(self.dut, base + "bits_exceptionVec_20", 0)
+                self._read(self.interface.cfvec_exception_vec[i][1], 0)
+                + self._read(self.interface.cfvec_exception_vec[i][2], 0)
+                + self._read(self.interface.cfvec_exception_vec[i][12], 0)
+                + self._read(self.interface.cfvec_exception_vec[i][19], 0)
+                + self._read(self.interface.cfvec_exception_vec[i][20], 0)
             )
             if ex_sum > 0:
                 self.exception_mark_count += 1
@@ -313,14 +323,14 @@ class FrontendMonitor:
             level="DEBUG",
         )
 
-        if get_sig(self.dut, "io_backend_toFtq_redirect_valid", 0) == 1:
+        if self._read(self.interface.redirect_valid, 0) == 1:
             self._emit(
                 cycle,
                 "monitor.dut_redirect",
                 {
-                    "pc": int(get_sig(self.dut, "io_backend_toFtq_redirect_bits_pc", 0)),
-                    "target_pc": int(get_sig(self.dut, "io_backend_toFtq_redirect_bits_target", 0)),
-                    "taken": int(get_sig(self.dut, "io_backend_toFtq_redirect_bits_taken", 0)),
+                    "pc": int(self._read(self.interface.redirect_bits_pc, 0)),
+                    "target_pc": int(self._read(self.interface.redirect_bits_target, 0)),
+                    "taken": int(self._read(self.interface.redirect_bits_taken, 0)),
                 },
                 level="DEBUG",
             )

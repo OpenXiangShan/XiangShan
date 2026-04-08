@@ -6,8 +6,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional
 
+from ..bundles import ICacheBundle, bind_bundle_optional
 from ..memory_model import MemoryModel
-from ..signal_utils import get_sig, set_sig
 
 
 @dataclass
@@ -23,7 +23,7 @@ class ICacheAgent:
     def __init__(self, memory: MemoryModel) -> None:
         self.logger = logging.getLogger("env.agents.icache")
         self.memory = memory
-        self.dut = None
+        self.interface = None
         self.hit_latency = 1
         self.miss_latency = 20
         self.miss_rate = 0.0
@@ -36,8 +36,26 @@ class ICacheAgent:
         self.miss_count = 0
         self.max_pending_depth = 0
 
-    def bind(self, dut) -> None:
-        self.dut = dut
+    @staticmethod
+    def _read(signal, default: int = 0) -> int:
+        try:
+            value = getattr(signal, "value", None)
+            return default if value is None else int(value)
+        except Exception:
+            return default
+
+    @staticmethod
+    def _write(signal, value: int) -> None:
+        try:
+            signal.value = int(value)
+        except Exception:
+            return
+
+    def bind(self, target) -> None:
+        if isinstance(target, ICacheBundle):
+            self.interface = target
+            return
+        self.interface = bind_bundle_optional(ICacheBundle, target)
 
     def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
         self.event_sink = sink
@@ -69,12 +87,12 @@ class ICacheAgent:
         )
 
     def _handle_request(self, cycle: int) -> None:
-        assert self.dut is not None
-        set_sig(self.dut, "auto_inner_icache_client_out_a_ready", 1)
-        if get_sig(self.dut, "auto_inner_icache_client_out_a_valid", 0) != 1:
+        assert self.interface is not None
+        self._write(self.interface.a_ready, 1)
+        if self._read(self.interface.a_valid, 0) != 1:
             return
-        source = get_sig(self.dut, "auto_inner_icache_client_out_a_bits_source", 0)
-        addr = get_sig(self.dut, "auto_inner_icache_client_out_a_bits_address", 0)
+        source = self._read(self.interface.a_bits_source, 0)
+        addr = self._read(self.interface.a_bits_address, 0)
         beat0, beat1 = self.memory.read_cacheline(addr, line_bytes=64)
         is_miss = self.rng.random() < self.miss_rate
         latency = self.miss_latency if is_miss else self.hit_latency
@@ -103,20 +121,20 @@ class ICacheAgent:
         self.max_pending_depth = max(self.max_pending_depth, len(self.pending))
 
     def _drive_response(self, cycle: int) -> None:
-        assert self.dut is not None
-        set_sig(self.dut, "auto_inner_icache_client_out_d_valid", 0)
+        assert self.interface is not None
+        self._write(self.interface.d_valid, 0)
         if not self.pending:
             return
         top = self.pending[0]
         if cycle < top.ready_cycle:
             return
         data = top.beat0 if top.beat_idx == 0 else top.beat1
-        set_sig(self.dut, "auto_inner_icache_client_out_d_valid", 1)
-        set_sig(self.dut, "auto_inner_icache_client_out_d_bits_opcode", 1)
-        set_sig(self.dut, "auto_inner_icache_client_out_d_bits_source", top.source)
-        set_sig(self.dut, "auto_inner_icache_client_out_d_bits_data", data)
-        set_sig(self.dut, "auto_inner_icache_client_out_d_bits_denied", 0)
-        set_sig(self.dut, "auto_inner_icache_client_out_d_bits_corrupt", 0)
+        self._write(self.interface.d_valid, 1)
+        self._write(self.interface.d_bits_opcode, 1)
+        self._write(self.interface.d_bits_source, top.source)
+        self._write(self.interface.d_bits_data, data)
+        self._write(self.interface.d_bits_denied, 0)
+        self._write(self.interface.d_bits_corrupt, 0)
 
         self.resp_beat_count += 1
         sent_beat_idx = int(top.beat_idx)
@@ -137,7 +155,7 @@ class ICacheAgent:
         )
 
     def on_clock_edge(self, cycle: int) -> None:
-        if self.dut is None:
+        if self.interface is None:
             return
         self._handle_request(cycle)
         self._drive_response(cycle)
