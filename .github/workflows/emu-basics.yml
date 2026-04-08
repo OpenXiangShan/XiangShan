@@ -40,6 +40,9 @@ jobs:
     timeout-minutes: 180
     continue-on-error: false
     steps:
+      - name: Cleanup orphan EMU
+        run: |
+          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
