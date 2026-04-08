@@ -945,6 +945,5 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(UInt(maxIQSize.U.getWidth.W))))
   val debugIQEnqHasIssuedVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(Bool())))
   val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(iqDeqSum, ValidIO(new RobPtr())))
-  println(s"[region]: deqsum ${iqDeqSum}")
 }
 

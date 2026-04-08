@@ -977,9 +977,10 @@ package object xiangshan {
     // backend
     // long inst stall at rob head
     val DivStall = Value("DivStall") // int div, float div/sqrt
-    val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head not issue
-    val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head not issue
-    val MemNotReadyStall = Value("MemNotReadyStall") // mem-inst at rob head not issue
+    val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head exec long
+    val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head exec long
+    val MemNotReadyStall = Value("MemNotReadyStall") // mem-inst at rob head exec long
+    val OtherNotReadyStall = Value("OtherNotReadyStall")
     val RobStall = Value("RobStall")
     val LqStall = Value("LqStall")
     val SqStall = Value("SqStall")
@@ -1006,6 +1007,7 @@ package object xiangshan {
     val BalanceDispatchPolicyStallVec = Value("BalanceDispatchPolicyStallVec")
     val BalanceDispatchPolicyStallLoad = Value("BalanceDispatchPolicyStallLoad")
     val BalanceDispatchPolicyStallStore = Value("BalanceDispatchPolicyStallStore")
+    val OtherBalanceDispatchPolicyStall = Value("OtherBalanceDispatchPolicyStall")
     val IQEnqPolicyStallIssued = Value("IQEnqPolicyStallIssued")
     val IQEnqPolicyStall = Value("IQEnqPolicyStall")
     val IntIQFullStallAlu = Value("IntIQFullStallAlu")
