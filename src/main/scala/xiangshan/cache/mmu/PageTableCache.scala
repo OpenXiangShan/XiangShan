@@ -1444,12 +1444,12 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   XSDebug(RegNext(sfence_dup(0).valid), p"[sfence] spv:${Binary(spv)}\n")
 
   val perfEvents = Seq(
-    ("access           ", base_valid_access_0             ),
-    ("l2_hit           ", l2Hit                           ),
-    ("l1_hit           ", l1Hit                           ),
-    ("l0_hit           ", l0Hit                           ),
-    ("sp_hit           ", spHit                           ),
-    ("pte_hit          ", l0Hit || spHit                  ),
+    ("access           ", base_valid_access_0),
+    ("l2_hit           ", base_valid_access_0 && io.resp.bits.toFsm.l2Hit && !io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit),
+    ("l1_hit           ", base_valid_access_0 && io.resp.bits.toFsm.l1Hit && !io.resp.bits.hit),
+    ("l0_hit           ", base_valid_access_0 && resp_l0),
+    ("sp_hit           ", base_valid_access_0 && resp_sp),
+    ("pte_hit          ", base_valid_access_0 && io.resp.bits.hit),
     ("rwHarzad         ", io.req.valid && !io.req.ready   ),
     ("out_blocked      ", io.resp.valid && !io.resp.ready ),
   )
