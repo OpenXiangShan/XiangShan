@@ -1322,6 +1322,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val s4HeadIsReplay = LoadEntrance.isReplay(s4Head.entrance)
   val s4HeadCacheMiss = s4Head.cause.get(C_DM)
   val s4HeadMshrId    = s4Head.mshrId.get
+  val s4HeadHandledByMSHR = s4Head.handledByMSHR.get
 
   val vaddr = Mux(s4HeadValid, s4HeadVAddr, in.vaddr)
   val paddr = Mux(s4HeadValid, s4HeadPAddr, in.paddr.get)
@@ -1443,6 +1444,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val lqWriteCauseOH = PriorityEncoderOH(lqWriteCause)
   val lqWrite = Wire(new LqWriteBundle)
   val lqWriteMshrId = Mux(s4HeadCacheMiss && s4HeadValid, s4HeadMshrId, in.mshrId.get)
+  val lqWriteHandledByMSHR = Mux(s4HeadCacheMiss && s4HeadValid, s4HeadHandledByMSHR, in.handledByMSHR.get)
   // TODO: remove useless fields after old LoadUnit is removed
   lqWrite.uop := uop
   lqWrite.uop.exceptionVec := exceptionVec
@@ -1491,7 +1493,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.isFirstIssue := DontCare // TODO: remove this
   lqWrite.hasROBEntry := DontCare // TODO: remove this
   lqWrite.mshrid := DontCare // TODO: remove this
-  lqWrite.handledByMSHR := in.handledByMSHR.get
+  lqWrite.handledByMSHR := lqWriteHandledByMSHR
   lqWrite.replacementUpdated := DontCare // TODO: remove this
   lqWrite.missDbUpdated := DontCare // TODO: remove this
   lqWrite.forward_tlDchannel := DontCare // TODO: remove this
