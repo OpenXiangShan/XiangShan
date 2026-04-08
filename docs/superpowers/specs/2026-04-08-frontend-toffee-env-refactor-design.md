@@ -147,6 +147,17 @@ Recommended bundle groups:
 - `CSRControlBundle`
   - TLB/CSR/BPU control inputs initialized by the env
 
+Supporting observe-side bundles may be added in phase 1 where they are required
+to move monitor/backend-model DUT reads off raw signal-name access. Likely
+examples include:
+
+- `BackendObserveBundle`
+  - fetch-slot observation signals such as `io_backend_cfVec_*`
+- `BackendFromFtqBundle`
+  - DUT-reported FTQ start-PC metadata such as `io_backend_fromFtq_*`
+- `FrontendInfoBundle`
+  - frontend status/watchdog inputs such as `io_frontendInfo_ibufFull`
+
 This set is intentionally limited. It is enough to remove the largest block of
 stringly-typed DUT signal handling from `FrontendEnv` without forcing a full
 signal taxonomy redesign in phase 1.
