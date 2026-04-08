@@ -10,19 +10,18 @@ import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, VecNonPipedFuncUnit}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.ExceptionNO
-import yunsuan.VfpuType
 import yunsuan.vector.VectorFloatDivider
+import xiangshan.backend.decode.opcode.Opcode.VFDivOpcodes
 
 class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfdiv OpType not supported")
-
+  import VFDivOpcodes._
   // params alias
   private val dataWidth = cfg.destDataBits
   private val dataWidthOfDataModule = 64
   private val numVecModule = dataWidth / dataWidthOfDataModule
 
   // io alias
-  private val opcode  = fuOpType(0)
+  private val opcode  = fuOpType
 
   // modules
   private val vfdivs = Seq.fill(numVecModule)(Module(new VectorFloatDivider))
@@ -66,7 +65,7 @@ class VFDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUn
       mod.io.frs1_i         := 0.U     // already vf -> vv
       mod.io.is_frs2_i      := false.B // already vf -> vv
       mod.io.is_frs1_i      := false.B // already vf -> vv
-      mod.io.is_sqrt_i      := opcode
+      mod.io.is_sqrt_i      := isFSqrt(opcode) 
       mod.io.rm_i           := rm
       mod.io.is_vec_i       := true.B // Todo
       resultData(i) := mod.io.fpdiv_res_o
