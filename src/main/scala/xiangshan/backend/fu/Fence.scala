@@ -64,6 +64,9 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   // NOTE: icache & tlb & sbuffer must receive flush signal at any time
   sbuffer      := state === s_wait
   fencei       := state === s_icache
+  val useVmid   = io.in.bits.ctrl.fuOpType === FenceOpType.hfence_g
+  val fenceAsid = io.in.bits.data.src(1)(AsidLength - 1, 0)
+  val fenceVmid = Cat(0.U((AsidLength - VmidLength).W), io.in.bits.data.src(1)(VmidLength - 1, 0))
   sfence.valid := state === s_tlb && (func === FenceOpType.sfence || func === FenceOpType.hfence_v || func === FenceOpType.hfence_g)
   sfence.bits.rs1  := uop.data.imm(4, 0) === 0.U
   sfence.bits.rs2  := uop.data.imm(9, 5) === 0.U
@@ -71,7 +74,7 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   sfence.bits.hv := func === FenceOpType.hfence_v
   sfence.bits.hg := func === FenceOpType.hfence_g
   sfence.bits.addr := RegEnable(io.in.bits.data.src(0), io.in.fire)
-  sfence.bits.id   := RegEnable(io.in.bits.data.src(1), io.in.fire)
+  sfence.bits.id   := RegEnable(Mux(useVmid, fenceVmid, fenceAsid), io.in.fire)
 
   when (state === s_idle && io.in.valid) { state := s_wait }
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }
