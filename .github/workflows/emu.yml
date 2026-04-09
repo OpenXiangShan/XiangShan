@@ -36,7 +36,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -45,7 +44,10 @@ jobs:
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: Initialize submodules
-        run: make init-force
+        run: |
+          make init-force || {
+            cd rocket-chip && git fetch --unshallow && cd .. && make init-force
+          }
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -121,7 +123,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -134,7 +135,10 @@ jobs:
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: Initialize submodules
-        run: make init-force
+        run: |
+          make init-force || {
+            cd rocket-chip && git fetch --unshallow && cd .. && make init-force
+          }
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -216,7 +220,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -225,7 +228,10 @@ jobs:
           echo "WAVE_HOME=/nfs/home/ci-runner/xs-wave/${HEAD_SHA}" >> $GITHUB_ENV
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: Initialize submodules
-        run: make init-force
+        run: |
+          make init-force || {
+            cd rocket-chip && git fetch --unshallow && cd .. && make init-force
+          }
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -269,7 +275,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -282,7 +287,10 @@ jobs:
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: Initialize submodules
-        run: make init-force
+        run: |
+          make init-force || {
+            cd rocket-chip && git fetch --unshallow && cd .. && make init-force
+          }
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -380,7 +388,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -392,7 +399,10 @@ jobs:
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: Initialize submodules
-        run: make init-force
+        run: |
+          make init-force || {
+            cd rocket-chip && git fetch --unshallow && cd .. && make init-force
+          }
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -421,7 +431,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: true
       - name: set env
         run: |
           export HEAD_SHA=${{ github.run_number }}
@@ -433,7 +442,10 @@ jobs:
           mkdir -p /nfs/home/ci-runner/xs-perf/${HEAD_SHA}
           mkdir -p /nfs/home/ci-runner/xs-wave/${HEAD_SHA}
       - name: Initialize submodules
-        run: make init-force
+        run: |
+          make init-force || {
+            cd rocket-chip && git fetch --unshallow && cd .. && make init-force
+          }
       - name: clean up
         run: |
           python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --clean
@@ -479,7 +491,10 @@ jobs:
       - name: psutil
         run: sudo apt install python3-psutil
       - name: Initialize submodules
-        run: make init-force
+        run: |
+          make init-force || {
+            cd rocket-chip && git fetch --unshallow && cd .. && make init-force
+          }
       - name: mill
         uses: jodersky/setup-mill@v0.3.0
         with:
