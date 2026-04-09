@@ -694,8 +694,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   // l2 pf
   // s0: generate prefetch req paddr per entry, arb them, sent out
-  io.l2_pf_addr.valid := l2_pf_req_arb.io.out.valid
-  io.l2_pf_addr.bits := l2_pf_req_arb.io.out.bits.req
+  io.l2_pf_addr.valid := RegNext(l2_pf_req_arb.io.out.valid)
+  io.l2_pf_addr.bits := RegNext(l2_pf_req_arb.io.out.bits.req)
 
   l2_pf_req_arb.io.out.ready := io.l2_pf_addr.ready
 
@@ -739,8 +739,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   // last level cache pf
   // s0: generate prefetch req paddr per entry, arb them, sent out
-  io.l3_pf_addr.valid := l3_pf_req_arb.io.out.valid
-  io.l3_pf_addr.bits := l3_pf_req_arb.io.out.bits
+  io.l3_pf_addr.valid := RegNext(l3_pf_req_arb.io.out.valid)
+  io.l3_pf_addr.bits := RegNext(l3_pf_req_arb.io.out.bits)
 
   l3_pf_req_arb.io.out.ready := io.l3_pf_addr.ready
 
