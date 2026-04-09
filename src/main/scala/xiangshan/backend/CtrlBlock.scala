@@ -50,6 +50,7 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val resolve = Vec(backendParams.BrhCnt, Valid(new Resolve))
 
   val commit = Valid(new FtqPtr)
+  val backendIsEmpty = Output(Bool())
   val callRetCommit = Vec(CommitWidth, Valid(new CallRetCommit))
 }
 
@@ -364,6 +365,12 @@ class CtrlBlockImp(
     ),
     frontendCommit
   )
+
+  val isEmptyDelay = !(RegNext(VecInit(decode.io.in.map(_.valid))).asUInt.orR ||
+    RegNext(VecInit(rename.io.in.map(_.valid))).asUInt.orR ||
+    RegNext(VecInit(dispatch.io.enqRob.req.map(_.valid))).asUInt.orR) &&
+    RegNext(rob.io.enq.isEmpty)
+  io.frontend.toFtq.backendIsEmpty := RegNext(isEmptyDelay)
 
   io.frontend.toFtq.redirect.valid := s5_flushFromRobValid || s3_redirectGen.valid
   io.frontend.toFtq.redirect.bits := Mux(s5_flushFromRobValid, frontendFlushBits, s3_redirectGen.bits)
@@ -949,7 +956,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val fromWB = new Bundle {
     val wbData = Flipped(MixedVec(params.genWrite2RobBundles))
-    val delayedOldestExuRedirect = Flipped(ValidIO(new Redirect)) 
+    val delayedOldestExuRedirect = Flipped(ValidIO(new Redirect))
   }
   val redirect = ValidIO(new Redirect)
   val fromMem = new Bundle {

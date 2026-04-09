@@ -571,8 +571,6 @@ object Bundles {
     val blockBackward   = Bool()
     val flushPipe       = Bool() // This inst will flush all the pipe when commit, like exception but can commit
     val canRobCompress  = Bool()
-    val crossFtqCommit  = UInt(2.W) // use to caculate the ftq idx of ftqentry when commit
-    val crossFtq        = Bool() // use to caculate the ftq idx of brh instructions when pass to exu
     val fusionNum       = UInt(2.W)
     val selImm          = SelImm()
     val imm             = UInt(32.W)
