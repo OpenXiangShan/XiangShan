@@ -120,7 +120,6 @@ class FrontendTopImp(wrapper: FrontendTop) extends LazyRawModuleImp(wrapper) {
     val tlbCsr          = chiselTypeOf(wrapper.frontend.module.io.tlbCsr)
     val csrCtrl         = chiselTypeOf(wrapper.frontend.module.io.csrCtrl)
     val resetInFrontend = chiselTypeOf(wrapper.frontend.module.io.resetInFrontend)
-    val frontendInfo    = chiselTypeOf(wrapper.frontend.module.io.frontendInfo)
     val softPrefetch    = chiselTypeOf(wrapper.frontend.module.io.softPrefetch)
     val debugTopDown    = chiselTypeOf(wrapper.frontend.module.io.debugTopDown)
     val dft             = wrapper.frontend.module.io.dft.map(chiselTypeOf(_))
@@ -137,7 +136,6 @@ class FrontendTopImp(wrapper: FrontendTop) extends LazyRawModuleImp(wrapper) {
   frontend_io.tlbCsr          <> wrapper.frontend.module.io.tlbCsr
   frontend_io.csrCtrl         <> wrapper.frontend.module.io.csrCtrl
   frontend_io.resetInFrontend <> wrapper.frontend.module.io.resetInFrontend
-  frontend_io.frontendInfo    <> wrapper.frontend.module.io.frontendInfo
   frontend_io.softPrefetch    <> wrapper.frontend.module.io.softPrefetch
   frontend_io.debugTopDown    <> wrapper.frontend.module.io.debugTopDown
   wrapper.frontend.module.io.dft.zip(frontend_io.dft).foreach { case (m, f) => f <> m }
