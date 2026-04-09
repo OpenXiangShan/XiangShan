@@ -8,11 +8,9 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.fpu.FpNonPipedFuncUnit
 import xiangshan.backend.rob.RobPtr
-import yunsuan.VfpuType
 import yunsuan.fpu.FloatDivider
 
 class FDivSqrt(cfg: FuConfig)(implicit p: Parameters) extends FpNonPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "fdiv OpType not supported")
 
   // io alias
   private val opcode = fuOpType(3)
