@@ -200,8 +200,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   wayLookup.io.flush        := io.fromFtq.redirectFlush
   wayLookup.io.flushFromBpu := io.fromFtq.flushFromBpu
   wayLookup.io.write <> prefetcher.io.wayLookupWrite
-  wayLookup.io.secondWriteValid := prefetcher.io.secondWriteValid
-  wayLookup.io.update           := missUnit.io.resp
+  wayLookup.io.update := missUnit.io.resp
 
   replacer.io.touch <> mainPipe.io.replacerTouch
   replacer.io.victim <> missUnit.io.victim

@@ -267,8 +267,8 @@ class WayLookupExceptionEntry(implicit p: Parameters) extends ICacheBundle {
 }
 
 class WayLookupBundle(implicit p: Parameters) extends ICacheBundle {
-  val entry          = new WayLookupEntry
-  val exceptionEntry = new WayLookupExceptionEntry
+  val entry:          WayLookupEntry          = new WayLookupEntry
+  val exceptionEntry: WayLookupExceptionEntry = new WayLookupExceptionEntry
 
   // for compatibility
   def vSetIdx:           Vec[UInt]     = entry.vSetIdx

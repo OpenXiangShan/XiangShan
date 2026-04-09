@@ -58,6 +58,7 @@ case class FrontendParameters(
 
   // sanity check
   require(isPow2(FetchBlockSize))
+  require(FetchPorts == 1 || FetchPorts == 2, "Only 1 or 2-fetch is supported")
 }
 
 trait HasFrontendParameters extends HasXSParameter {

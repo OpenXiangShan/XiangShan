@@ -42,17 +42,17 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     val eccEnable:   Bool = Input(Bool())
     val flush:       Bool = Input(Bool())
 
-    val fromFtq:          DecoupledIO[FtqToPrefetchBundle]       = Flipped(Decoupled(new FtqToPrefetchBundle))
-    val toFtq:            Valid[PrefetchToFtqBundle]             = Valid(new PrefetchToFtqBundle)
-    val flushFromBpu:     BpuFlushInfo                           = Flipped(new BpuFlushInfo)
-    val itlb:             TlbRequestIO                           = new TlbRequestIO
-    val itlbFlushPipe:    Bool                                   = Output(Bool())
-    val pmp:              PmpCheckBundle                         = new PmpCheckBundle
-    val metaRead:         MetaReadBundle                         = new MetaReadBundle
-    val missReq:          DecoupledIO[MissReqBundle]             = DecoupledIO(new MissReqBundle)
-    val missResp:         Valid[MissRespBundle]                  = Flipped(ValidIO(new MissRespBundle))
-    val wayLookupWrite:   DecoupledIO[Vec[WayLookupWriteBundle]] = DecoupledIO(Vec(2, new WayLookupWriteBundle))
-    val secondWriteValid: Bool                                   = Output(Bool())
+    val fromFtq:       DecoupledIO[FtqToPrefetchBundle] = Flipped(Decoupled(new FtqToPrefetchBundle))
+    val toFtq:         Valid[PrefetchToFtqBundle]       = Valid(new PrefetchToFtqBundle)
+    val flushFromBpu:  BpuFlushInfo                     = Flipped(new BpuFlushInfo)
+    val itlb:          TlbRequestIO                     = new TlbRequestIO
+    val itlbFlushPipe: Bool                             = Output(Bool())
+    val pmp:           PmpCheckBundle                   = new PmpCheckBundle
+    val metaRead:      MetaReadBundle                   = new MetaReadBundle
+    val missReq:       DecoupledIO[MissReqBundle]       = DecoupledIO(new MissReqBundle)
+    val missResp:      Valid[MissRespBundle]            = Flipped(ValidIO(new MissRespBundle))
+
+    val wayLookupWrite: Vec[DecoupledIO[WayLookupWriteBundle]] = Vec(FetchPorts, DecoupledIO(new WayLookupWriteBundle))
 
     val perf: PrefetchPipePerfInfo = Output(new PrefetchPipePerfInfo)
   }
@@ -98,7 +98,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
       s0_twoPrefetchCase.isCase4 -> VecInit(s0_req(0).startVAddr, s0_req(1).startVAddr)
     )
   )
-  private val s0_readMetaSetIdx = VecInit(get_idx(s0_readMetaVAddr(0)), get_idx(s0_readMetaVAddr(1)))
+  private val s0_readMetaSetIdx = VecInit(s0_readMetaVAddr.map(get_idx))
   private val s0_readDoubleLine = MuxCase(
     s0_req(0).isCrossLine,
     Seq(
@@ -313,55 +313,48 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   )
 
   // Disallow enqueuing wayLookup when SRAM write occurs.
-  toWayLookup.valid := (
-    (s1_state === S1FsmState.EnqWay) ||
-      ((s1_state === S1FsmState.Idle) && tlbFinish)
-  ) && !s1_flush && !fromMiss.valid && !s1_isSoftPrefetch // do not enqueue soft prefetch
-  toWayLookup.bits.zipWithIndex.foreach { case (toWayLookup, i) =>
-    toWayLookup.entry.debug_startVAddr := s1_req(i).startVAddr
-    toWayLookup.ftqIdx                 := s1_req(i).ftqIdx
-    toWayLookup.vSetIdx                := VecInit(get_idx(s1_req(i).startVAddr), get_idx(s1_req(i).nextLineVAddr))
-    toWayLookup.waymask                := VecInit(s1_reqMetaInfo(i).map(_.waymask))
-    toWayLookup.pTag                   := s1_pTag
-    toWayLookup.maybeRvcMap            := VecInit(s1_reqMetaInfo(i).map(_.maybeRvcMap))
-    toWayLookup.gpAddr                 := s1_gpAddr(i)(PAddrBitsMax - 1, 0)
-    toWayLookup.isForVSnonLeafPTE      := s1_isForVSnonLeafPTE
-    toWayLookup.metaCodes              := VecInit(s1_reqMetaInfo(i).map(_.metaCodes))
-    toWayLookup.itlbException          := s1_itlbException
-    toWayLookup.itlbPbmt               := s1_itlbPbmt
-  }
-  io.secondWriteValid := s1_twoPrefetchCase.valid
+  toWayLookup.zipWithIndex.foreach { case (port, i) =>
+    port.valid :=
+      // tlb/meta ready
+      ((s1_state === S1FsmState.EnqWay) || ((s1_state === S1FsmState.Idle) && tlbFinish)) &&
+        // meta is not being updated
+        !fromMiss.valid &&
+        // pipeline is not being flushed
+        !s1_flush &&
+        // do not send soft prefetch to waylookup/mainpipe, as it does not affect control flow
+        !s1_isSoftPrefetch &&
+        // first port is always valid, the second port is valid only if we can do 2-prefetch
+        (if (i == 0) true.B else s1_twoPrefetchCase.valid)
 
-  when(toWayLookup.fire) {
-    val waymasksVec = s1_reqMetaInfo(0).map(_.waymask.asTypeOf(Vec(nWays, Bool())))
-    assert(
-      PopCount(waymasksVec(0)) <= 1.U && (PopCount(waymasksVec(1)) <= 1.U || !s1_req(0).isCrossLine),
-      "Multi-hit:\nport0: count=%d pTag=0x%x vSet=0x%x vAddr=0x%x\nport1: count=%d pTag=0x%x vSet=0x%x vAddr=0x%x",
-      PopCount(waymasksVec(0)),
-      s1_pTag,
-      s1_reqSetIdx(0)(0),
-      s1_req(0).startVAddr.toUInt,
-      PopCount(waymasksVec(1)),
-      s1_pTag,
-      s1_reqSetIdx(0)(1),
-      s1_req(0).nextLineVAddr.toUInt // FIXME
-    )
-  }
+    port.bits.ftqIdx := s1_req(i).ftqIdx
 
-  when(toWayLookup.fire && s1_twoPrefetchCase.valid) {
-    val waymasksVec = s1_reqMetaInfo(1).map(_.waymask.asTypeOf(Vec(nWays, Bool())))
-    assert(
-      PopCount(waymasksVec(0)) <= 1.U && (PopCount(waymasksVec(1)) <= 1.U || !s1_req(1).isCrossLine),
-      "Multi-hit:\nport0: count=%d pTag=0x%x vSet=0x%x vAddr=0x%x\nport1: count=%d pTag=0x%x vSet=0x%x vAddr=0x%x",
-      PopCount(waymasksVec(0)),
-      s1_pTag,
-      s1_reqSetIdx(1)(0),
-      s1_req(1).startVAddr.toUInt,
-      PopCount(waymasksVec(1)),
-      s1_pTag,
-      s1_reqSetIdx(1)(1),
-      s1_req(1).nextLineVAddr.toUInt // FIXME
-    )
+    port.bits.entry.vSetIdx     := VecInit(get_idx(s1_req(i).startVAddr), get_idx(s1_req(i).nextLineVAddr))
+    port.bits.entry.waymask     := VecInit(s1_reqMetaInfo(i).map(_.waymask))
+    port.bits.entry.pTag        := s1_pTag
+    port.bits.entry.maybeRvcMap := VecInit(s1_reqMetaInfo(i).map(_.maybeRvcMap))
+    port.bits.entry.metaCodes   := VecInit(s1_reqMetaInfo(i).map(_.metaCodes))
+    port.bits.entry.itlbPbmt    := s1_itlbPbmt
+
+    port.bits.exceptionEntry.itlbException     := s1_itlbException
+    port.bits.exceptionEntry.gpAddr            := s1_gpAddr(i)(PAddrBitsMax - 1, 0)
+    port.bits.exceptionEntry.isForVSnonLeafPTE := s1_isForVSnonLeafPTE
+
+    port.bits.entry.debug_startVAddr := s1_req(i).startVAddr
+
+    when(port.fire) {
+      val waymasksVec = s1_reqMetaInfo(i).map(_.waymask.asTypeOf(Vec(nWays, Bool())))
+      assert(
+        PopCount(waymasksVec(0)) <= 1.U && (PopCount(waymasksVec(1)) <= 1.U || !s1_req(i).isCrossLine),
+        s"Block $i multi-hit:\npTag: 0x%x\nport0: count=%d vSet=0x%x vAddr=0x%x\nport1: count=%d vSet=0x%x vAddr=0x%x",
+        s1_pTag,
+        PopCount(waymasksVec(0)),
+        s1_reqSetIdx(i)(0),
+        s1_req(i).startVAddr.toUInt,
+        PopCount(waymasksVec(1)),
+        s1_reqSetIdx(i)(1),
+        s1_req(i).nextLineVAddr.toUInt
+      )
+    }
   }
 
   /**
@@ -404,9 +397,9 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
       when(s1_valid) {
         when(!tlbFinish) {
           s1_nextState := S1FsmState.ItlbResend
-        }.elsewhen(!toWayLookup.fire) { // tlbFinish
+        }.elsewhen(!toWayLookup.head.fire) { // tlbFinish
           s1_nextState := S1FsmState.EnqWay
-        }.elsewhen(!s2_ready) { // tlbFinish && toWayLookup.fire
+        }.elsewhen(!s2_ready) { // tlbFinish && toWayLookup.head.fire
           s1_nextState := S1FsmState.EnterS2
         } // .otherwise { s1_nextState := S1FsmState.Idle }
       }   // .otherwise { s1_nextState := S1FsmState.Idle }  // !s1_valid
@@ -426,7 +419,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
       } // .otherwise { s1_nextState := S1FsmState.metaResend }  // !toMeta.ready
     }
     is(S1FsmState.EnqWay) {
-      when(toWayLookup.fire || s1_isSoftPrefetch) {
+      when(toWayLookup.head.fire || s1_isSoftPrefetch) {
         when(!s2_ready) {
           s1_nextState := S1FsmState.EnterS2
         }.otherwise { // s2_ready
