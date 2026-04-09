@@ -67,13 +67,16 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val s1_fire = io.stageCtrl.s1_fire && io.enable
 
   private val s1_startPc = RegEnable(s0_startPc, s0_fire)
-  private val s1_tag     = getTag(s1_startPc)
 
-  private val s1_hitOH = VecInit(entries.map(e => e.valid && e.tag === s1_tag)).asUInt
+  private val s0_tag   = getTag(s0_startPc)
+  private val s0_hitOH = VecInit(entries.map(e => e.valid && e.tag === s0_tag)).asUInt
+  private val s1_hitOH = RegEnable(s0_hitOH, 0.U(NumEntries.W), s0_fire)
   assert(PopCount(s1_hitOH) <= 1.U, "MicroBtb s1_hitOH should be one-hot")
   private val s1_hit      = s1_hitOH.orR
   private val s1_hitIdx   = OHToUInt(s1_hitOH)
   private val s1_hitEntry = entries(s1_hitIdx)
+  // Count wrong hits due to the hit entry being replaced by fastTrain in the same cycle.
+  XSPerfAccumulate("false_hit", s1_hit && s1_hitEntry.tag =/= getTag(s1_startPc))
 
   // we do always-taken prediction in ubtb
   io.prediction.valid            := s1_hit

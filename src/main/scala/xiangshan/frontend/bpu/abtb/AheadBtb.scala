@@ -33,6 +33,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val redirectValid: Bool                       = Input(Bool())
     val overrideValid: Bool                       = Input(Bool())
     val prediction:    Vec[Valid[Prediction]]     = Output(Vec(NumAheadBtbPredictionEntries, Valid(new Prediction)))
+    val predCtrl:      AbtbBranchCtrl             = Output(new AbtbBranchCtrl)
     val abtbResult:    Vec[Valid[AheadBtbResult]] = Output(Vec(NumAheadBtbPredictionEntries, Valid(new AheadBtbResult)))
     val abtbResultPos: Vec[UInt]                  = Output(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
     val abtbPos:       Vec[UInt]                  = Output(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
@@ -149,6 +150,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s3_strongBias = RegInit(VecInit.fill(NumWays)(false.B))
 
   private val s1_realEntries = Mux(overrideValid, s3_entries, s1_entries)
+  private val s1_tag         = getTag(s1_startPc)
+  private val s1_realHitMask = VecInit(s1_realEntries.map(entry => entry.valid && entry.tag === s1_tag))
   private val s2_setIdx      = RegEnable(Mux(overrideValid, s3_setIdx, s1_setIdx), s1_fire)
   private val s2_bankIdx     = RegEnable(Mux(overrideValid, s3_bankIdx, s1_bankIdx), s1_fire)
   private val s2_bankMask    = RegEnable(Mux(overrideValid, s3_bankMask, s1_bankMask), s1_fire)
@@ -156,6 +159,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val s2_strongBias  = RegEnable(Mux(overrideValid, s3_strongBias, s1_strongBias), s1_fire)
   private val s2_entries     = RegEnable(s1_realEntries, s1_fire)
   private val s2_startPc     = RegEnable(s1_startPc, s1_fire)
+  private val s2_hitMask     = RegEnable(s1_realHitMask, s1_fire)
 
   when(s2_fire) {
     s3_setIdx     := s2_setIdx
@@ -167,13 +171,28 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     s3_strongBias := s2_strongBias
   }
 
-  private val s2_tag = getTag(s2_startPc)
-  dontTouch(s2_tag)
-  private val s2_hitMask = s2_entries.map(entry => entry.valid && entry.tag === s2_tag)
-  private val s2_hit     = s2_hitMask.reduce(_ || _)
+  // private val s2_tag = getTag(s2_startPc)
+  // dontTouch(s2_tag)
+  // private val s2_hitMask = s2_entries.map(entry => entry.valid && entry.tag === s2_tag)
+  // private val s2_hit     = s2_hitMask.reduce(_ || _)
+  private val s2_hit = s2_hitMask.reduce(_ || _)
 
   // When detect multi-hit, we need to invalidate one entry.
   private val (s2_multiHit, s2_multiHitWayIdx) = detectMultiHit(s2_hitMask, s2_entries.map(_.position))
+
+  private val s2_jumpValidVec      = RegInit(VecInit.fill(NumAheadBtbPredictionEntries)(false.B))
+  private val s2_conditionValidVec = RegInit(VecInit.fill(NumAheadBtbPredictionEntries)(false.B))
+  when(s1_fire) {
+    s2_jumpValidVec := VecInit.tabulate(NumAheadBtbPredictionEntries) {
+      i => (s1_realEntries(i).attribute.isDirect || s1_realEntries(i).attribute.isIndirect) && s1_realHitMask(i)
+    }
+    s2_conditionValidVec := VecInit.tabulate(NumAheadBtbPredictionEntries) {
+      i => s1_realEntries(i).attribute.isConditional && s1_realHitMask(i)
+    }
+  }.elsewhen(s2_flush || s2_fire) {
+    s2_jumpValidVec      := VecInit.fill(NumAheadBtbPredictionEntries)(false.B)
+    s2_conditionValidVec := VecInit.fill(NumAheadBtbPredictionEntries)(false.B)
+  }
 
   io.prediction.zipWithIndex.foreach { case (pred, i) =>
     pred.valid            := s2_valid && s2_hitMask(i)
@@ -182,6 +201,9 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     pred.bits.attribute   := s2_entries(i).attribute
     pred.bits.target      := getFullTarget(s2_startPc, s2_entries(i).targetLowerBits, s2_entries(i).targetCarry)
   }
+  // Advance the calculation of critical control signals.
+  io.predCtrl.jumpValidVec      := s2_jumpValidVec
+  io.predCtrl.conditionValidVec := s2_conditionValidVec
   io.abtbResult.zipWithIndex.foreach { case (pred, i) =>
     pred.valid             := s2_valid && s2_hitMask(i)
     pred.bits.taken        := s2_ctrResult(i)
@@ -265,6 +287,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
         val needDecrease = updateThisSet && isCond && (!t1_trainTaken || t1_trainTaken && posBefore)
         val needIncrease = updateThisSet && isCond && t1_trainTaken && posEqual
 
+        // For timing purposes, the indirect jump branch in the abtb comparison matrix relies on
+        // the default CTR assignment and omits extra attribute checks.
         when(needReset)(ctr.resetWeakPositive())
           .elsewhen(needDecrease)(ctr.selfDecrease())
           .elsewhen(needIncrease)(ctr.selfIncrease())

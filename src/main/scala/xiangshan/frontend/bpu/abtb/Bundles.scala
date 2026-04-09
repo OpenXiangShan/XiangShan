@@ -96,3 +96,8 @@ class AheadBtbResult(implicit p: Parameters) extends AheadBtbBundle {
   val attribute:    BranchAttribute = new BranchAttribute
   val isStrongBias: Bool            = Bool()
 }
+
+class AbtbBranchCtrl(implicit p: Parameters) extends AheadBtbBundle {
+  val jumpValidVec:      Vec[Bool] = Vec(NumAheadBtbPredictionEntries, Bool())
+  val conditionValidVec: Vec[Bool] = Vec(NumAheadBtbPredictionEntries, Bool())
+}

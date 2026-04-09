@@ -275,37 +275,53 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // s0_stall should be exclusive with any other PC source
   s0_stall := !(s1_valid || s3_override || redirect.valid)
 
-  private val s1_ubtbPrediction = ubtb.io.prediction
-  private val s1_abtbPrediction = abtb.io.prediction
-  private val s1_abtbPosition   = abtb.io.abtbResultPos
-  private val s1_utageHitMask   = utage.io.prediction.hitVec
-  private val s1_utageTakenMask = utage.io.prediction.takenVec
-  private val s1_abtbTakenMask = VecInit(s1_abtbPrediction.zipWithIndex.map { case (pred, i) =>
-    pred.valid && (
-      pred.bits.attribute.isDirect ||
-        pred.bits.attribute.isIndirect ||
-        pred.bits.attribute.isConditional && Mux(s1_utageHitMask(i), s1_utageTakenMask(i), pred.bits.taken)
+  private val s1_ubtbPrediction = Wire(new Prediction)
+  private val s1_abtbPrediction = Wire(Vec(NumAheadBtbPredictionEntries, new Prediction))
+  s1_ubtbPrediction := ubtb.io.prediction.bits
+  s1_ubtbPrediction.target := Mux(
+    ubtb.io.prediction.bits.attribute.isReturn && uras.io.specOut.isCanUse,
+    uras.io.specOut.retTarget,
+    ubtb.io.prediction.bits.target
+  )
+  for (i <- 0 until NumAheadBtbPredictionEntries) {
+    s1_abtbPrediction(i) := abtb.io.prediction(i).bits
+  }
+
+  private val s1_abtbPosition       = abtb.io.abtbResultPos
+  private val s1_utageHitMask       = utage.io.prediction.hitVec
+  private val s1_utageTakenMask     = utage.io.prediction.takenVec
+  private val s1_jumpValidVec       = abtb.io.predCtrl.jumpValidVec
+  private val s1_conditonalValidVec = abtb.io.predCtrl.conditionValidVec
+  private val s1_abtbTakenMask = VecInit(abtb.io.prediction.zipWithIndex.map { case (pred, i) =>
+    XSPerfAccumulate(
+      s"abtb_attribute_mismatch_takenCtr${i}",
+      pred.valid && (pred.bits.attribute.isDirect || pred.bits.attribute.isIndirect) && !pred.bits.taken
     )
+    XSPerfAccumulate(
+      s"microTage_false_hit_way${i}",
+      pred.valid && !pred.bits.attribute.isConditional && s1_utageHitMask(i)
+    )
+    s1_jumpValidVec(i) || (s1_conditonalValidVec(i) && Mux(s1_utageHitMask(i), s1_utageTakenMask(i), pred.bits.taken))
   })
 
   private val s1_compareMatrix      = CompareMatrix(s1_abtbPosition)
   private val s1_abtbFirstTakenBrOH = s1_compareMatrix.getLeastElementOH(s1_abtbTakenMask)
   private val s1_abtbFirstTakenBr   = Mux1H(s1_abtbFirstTakenBrOH, s1_abtbPrediction)
-  private val s1_abtbValid          = s1_abtbPrediction.map(_.valid).reduce(_ || _)
+  private val s1_abtbValid          = abtb.io.prediction.map(_.valid).reduce(_ || _)
 
   private val s1_abtbResult = Wire(new Prediction)
-  s1_abtbResult       := s1_abtbFirstTakenBr.bits
-  s1_abtbResult.taken := s1_abtbFirstTakenBrOH.reduce(_ || _)
+  s1_abtbResult       := s1_abtbFirstTakenBr
+  s1_abtbResult.taken := s1_abtbTakenMask.reduce(_ || _)
+  s1_abtbResult.target := Mux(
+    s1_abtbFirstTakenBr.attribute.isReturn && uras.io.specOut.isCanUse,
+    uras.io.specOut.retTarget,
+    s1_abtbFirstTakenBr.target
+  )
   s1_prediction := Mux(
     s1_abtbValid,
     Mux(s1_abtbResult.taken, s1_abtbResult, fallThrough.io.prediction),
-    Mux(s1_ubtbPrediction.bits.taken, s1_ubtbPrediction.bits, fallThrough.io.prediction)
+    Mux(s1_ubtbPrediction.taken, s1_ubtbPrediction, fallThrough.io.prediction)
   )
-
-  private val s1_isRet = s1_prediction.attribute.isReturn
-  when(s1_isRet && uras.io.specOut.isCanUse) {
-    s1_prediction.target := uras.io.specOut.retTarget
-  }
 
   private val s1_taken             = s1_prediction.taken
   private val useAbtb              = s1_abtbValid && s1_abtbResult.taken

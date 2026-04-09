@@ -117,8 +117,8 @@ class MicroTageTable(
 
   // Select data from buffer (if hit) or SRAM (if miss)
   private val readEntries = VecInit(
-    (bufferHit, bufferReadEntries, sramRealReadEntries).zipped.map {
-      case (hit, bufferEntry, sramEntry) => Mux(hit, bufferEntry, sramEntry)
+    (bufferHit zip bufferReadEntries zip sramRealReadEntries).map {
+      case ((hit, bufferEntry), sramEntry) => Mux(hit, bufferEntry, sramEntry)
     }
   )
 
