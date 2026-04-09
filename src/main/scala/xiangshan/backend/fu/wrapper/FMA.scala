@@ -8,11 +8,9 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import yunsuan.encoding.Opcode.Opcodes.FMacOpcode
-import yunsuan.VfpuType
 import yunsuan.fpu.FloatFMA
 
 class FMA(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "fma OpType not supported")
 
   // io alias
   private val src0 = inData.src(0)
