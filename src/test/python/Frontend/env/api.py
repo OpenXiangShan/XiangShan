@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Sequence
 
 from .env_config import DEFAULT_ENV_CONFIG
@@ -20,6 +21,7 @@ from .request_apis import (
     normalize_redirect_txn,
     run_until_commit,
 )
+from .signal_utils import get_sig
 
 
 logger = logging.getLogger("env.api")
@@ -27,6 +29,285 @@ logger = logging.getLogger("env.api")
 
 def _env_config(env):
     return getattr(env, "config", DEFAULT_ENV_CONFIG)
+
+
+def _read_positive_int_env(name: str) -> int:
+    raw = str(os.getenv(name, "")).strip()
+    if not raw:
+        return 0
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("ignore invalid %s=%r", str(name), raw)
+        return 0
+    if value <= 0:
+        return 0
+    return value
+
+
+def _read_progress_interval_from_env() -> int:
+    return _read_positive_int_env("TB_TRACE_PROGRESS_INTERVAL")
+
+
+def _read_stall_snapshot_interval_from_env() -> int:
+    return _read_positive_int_env("TB_TRACE_STALL_SNAPSHOT_INTERVAL")
+
+
+def _format_optional_pc(value) -> str:
+    if value is None:
+        return "none"
+    return f"0x{int(value):x}"
+
+
+def _get_current_golden_pc(trace, backend_model):
+    getter = getattr(backend_model, "current_golden_pc", None)
+    if callable(getter):
+        return getter()
+    cur = trace.peek()
+    if cur is None:
+        return None
+    return int(cur.pc)
+
+
+def _read_sig(dut, name: str, default=None):
+    if dut is None:
+        return default
+    if default is None:
+        return get_sig(dut, name, 0)
+    return get_sig(dut, name, default)
+
+
+def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
+    """Capture a read-only snapshot of key DUT frontend boundary signals."""
+    trace = getattr(env.backend_model, "golden_trace", None)
+    dut = getattr(env, "dut", None)
+    monitor = getattr(env, "monitor", None)
+    redirect_head = None
+    if monitor is not None and hasattr(monitor, "oldest_unsynced_redirect"):
+        redirect_head = monitor.oldest_unsynced_redirect()
+    backend_model = getattr(env, "backend_model", None)
+
+    def _encode_ftq_entry(entry):
+        if entry is None:
+            return None
+        return {
+            "ftq_flag": int(getattr(entry, "ftq_flag", 0)),
+            "ftq_value": int(getattr(entry, "ftq_value", 0)),
+            "total_cfi": int(getattr(entry, "total_cfi", 0)),
+            "resolved_cfi": int(getattr(entry, "resolved_cfi", 0)),
+            "dispatch_complete": int(bool(getattr(entry, "dispatch_complete", False))),
+            "has_redirect": int(bool(getattr(entry, "has_redirect", False))),
+            "commit_ready_cycle": int(getattr(entry, "commit_ready_cycle", 0)),
+        }
+
+    pending_level0_target_ftq = getattr(backend_model, "_pending_level0_target_ftq", None)
+    recent_redirect = None
+    if backend_model is not None:
+        for event in reversed(list(getattr(backend_model, "last_events", []))):
+            if str(event.get("kind", "")) != "redirect":
+                continue
+            recent_redirect = {
+                "cycle": int(event.get("cycle", 0)),
+                "target_pc": int(event.get("target_pc", 0)),
+                "reason": str(event.get("reason", "")),
+            }
+            break
+
+    cfvec = []
+    for slot in range(8):
+        if _read_sig(dut, f"io_backend_cfVec_{slot}_valid", 0) != 1:
+            continue
+        cfvec.append(
+            {
+                "slot": int(slot),
+                "pc": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_pc", 0),
+                "instr": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_instr", 0),
+                "ftq_flag": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_ftqPtr_flag", 0),
+                "ftq_value": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_ftqPtr_value", 0),
+                "ftq_offset": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_ftqOffset", 0),
+                "is_last": _read_sig(dut, f"io_backend_cfVec_{slot}_bits_isLastInFtqEntry", 0),
+            }
+        )
+
+    stall_reason = [_read_sig(dut, f"io_backend_stallReason_reason_{idx}", 0) for idx in range(8)]
+    return {
+        "cursor": (None if trace is None else int(trace.cursor)),
+        "total_entries": (0 if trace is None else int(len(trace.entries))),
+        "golden_pc": _get_current_golden_pc(trace, env.backend_model) if trace is not None else None,
+        "golden_wait_pc": getattr(env.backend_model, "_golden_wait_pc", None),
+        "backend_can_accept": _read_sig(dut, "io_backend_canAccept", 0),
+        "from_ftq": {
+            "wen": _read_sig(dut, "io_backend_fromFtq_wen", 0),
+            "ftq_idx": _read_sig(dut, "io_backend_fromFtq_ftqIdx", 0),
+            "start_pc_addr": _read_sig(dut, "io_backend_fromFtq_startPc_addr", 0),
+        },
+        "from_ifu_gpaddr": {
+            "wen": _read_sig(dut, "io_backend_fromIfu_gpAddrMem_wen", 0),
+            "waddr": _read_sig(dut, "io_backend_fromIfu_gpAddrMem_waddr", 0),
+            "gpaddr": _read_sig(dut, "io_backend_fromIfu_gpAddrMem_wdata_gpaddr", 0),
+            "is_for_vs_nonleaf_pte": _read_sig(dut, "io_backend_fromIfu_gpAddrMem_wdata_isForVSnonLeafPTE", 0),
+        },
+        "backend_state": {
+            "commit_ptr": {
+                "flag": int(getattr(backend_model, "commit_ptr_flag", 0)),
+                "value": int(getattr(backend_model, "commit_ptr_value", 0)),
+            },
+            "pending_level0_target_ftq": (
+                None
+                if pending_level0_target_ftq is None
+                else {
+                    "flag": int(pending_level0_target_ftq[0]),
+                    "value": int(pending_level0_target_ftq[1]),
+                }
+            ),
+            "current_ftq_entry": _encode_ftq_entry(getattr(backend_model, "_current_ftq_entry", None)),
+            "ftq_entries": [
+                _encode_ftq_entry(entry) for entry in list(getattr(backend_model, "ftq_entries", []))[:4]
+            ],
+            "recent_redirect": recent_redirect,
+        },
+        "stall_reason": stall_reason,
+        "wfi": {
+            "req": _read_sig(dut, "io_backend_wfi_wfiReq", 0),
+            "safe": _read_sig(dut, "io_backend_wfi_wfiSafe", 0),
+        },
+        "icache_req": {
+            "valid": _read_sig(dut, "auto_inner_icache_client_out_a_valid", 0),
+            "ready": _read_sig(dut, "auto_inner_icache_client_out_a_ready", 0),
+            "address": _read_sig(dut, "auto_inner_icache_client_out_a_bits_address", 0),
+            "source": _read_sig(dut, "auto_inner_icache_client_out_a_bits_source", 0),
+        },
+        "icache_resp": {
+            "valid": _read_sig(dut, "auto_inner_icache_client_out_d_valid", 0),
+            "source": _read_sig(dut, "auto_inner_icache_client_out_d_bits_source", 0),
+            "opcode": _read_sig(dut, "auto_inner_icache_client_out_d_bits_opcode", 0),
+        },
+        "uncache_req": {
+            "valid": _read_sig(dut, "auto_inner_instrUncache_client_out_a_valid", 0),
+            "ready": _read_sig(dut, "auto_inner_instrUncache_client_out_a_ready", 0),
+            "address": _read_sig(dut, "auto_inner_instrUncache_client_out_a_bits_address", 0),
+        },
+        "uncache_resp": {
+            "valid": _read_sig(dut, "auto_inner_instrUncache_client_out_d_valid", 0),
+            "source": _read_sig(dut, "auto_inner_instrUncache_client_out_d_bits_source", 0),
+        },
+        "monitor_redirect": {
+            "wait_sync_after_redirect": int(bool(getattr(monitor, "wait_sync_after_redirect", False))),
+            "expected_pc": getattr(monitor, "expected_pc", None),
+            "redirect_grace": int(getattr(monitor, "redirect_grace", 0)),
+            "redirect_sync_deadline": int(getattr(monitor, "redirect_sync_deadline", 0)),
+            "queue_len": int(len(getattr(monitor, "_redirect_queue", []))) if monitor is not None else 0,
+            "head": (
+                None
+                if redirect_head is None
+                else {
+                    "seq": int(getattr(redirect_head, "seq", 0)),
+                    "target_pc": int(getattr(redirect_head, "target_pc", 0)),
+                    "reason": str(getattr(redirect_head, "reason", "")),
+                    "deadline": int(getattr(redirect_head, "deadline", 0)),
+                }
+            ),
+        },
+        "cfvec_valid_count": len(cfvec),
+        "cfvec": cfvec,
+    }
+
+
+def _format_stall_snapshot(snapshot: dict) -> str:
+    from_ftq = snapshot["from_ftq"]
+    from_ifu_gpaddr = snapshot["from_ifu_gpaddr"]
+    backend_state = snapshot["backend_state"]
+    icache_req = snapshot["icache_req"]
+    icache_resp = snapshot["icache_resp"]
+    uncache_req = snapshot["uncache_req"]
+    uncache_resp = snapshot["uncache_resp"]
+    monitor_redirect = snapshot["monitor_redirect"]
+    redirect_head = monitor_redirect["head"]
+    current_ftq_entry = backend_state["current_ftq_entry"]
+    recent_redirect = backend_state["recent_redirect"]
+
+    def _format_ftq_entry(entry):
+        if entry is None:
+            return "none"
+        return "({flag},{value},cfi={resolved}/{total},redirect={redirect})".format(
+            flag=int(entry["ftq_flag"]),
+            value=int(entry["ftq_value"]),
+            resolved=int(entry["resolved_cfi"]),
+            total=int(entry["total_cfi"]),
+            redirect=int(entry["has_redirect"]),
+        )
+
+    return (
+        "backend_can_accept={backend_can_accept} "
+        "golden_pc={golden_pc} golden_wait_pc={golden_wait_pc} "
+        "from_ftq_wen={from_ftq_wen} from_ftq_idx={from_ftq_idx} from_ftq_start={from_ftq_start} "
+        "from_ifu_gpaddr=({from_ifu_wen},{from_ifu_waddr},0x{from_ifu_gpaddr:x},vs_nonleaf={from_ifu_vs_nonleaf}) "
+        "commit_ptr=({commit_ptr_flag},{commit_ptr_value}) "
+        "pending_level0_target_ftq={pending_level0_target_ftq} "
+        "current_ftq_entry={current_ftq_entry} "
+        "ftq_entries_head={ftq_entries_head} "
+        "recent_redirect_target={recent_redirect_target} "
+        "stall_reason={stall_reason} "
+        "icache_req=({icache_req_valid},{icache_req_ready},0x{icache_req_addr:x},src={icache_req_source}) "
+        "icache_resp=({icache_resp_valid},src={icache_resp_source},opc={icache_resp_opcode}) "
+        "uncache_req=({uncache_req_valid},{uncache_req_ready},0x{uncache_req_addr:x}) "
+        "uncache_resp=({uncache_resp_valid},src={uncache_resp_source}) "
+        "wfi=({wfi_req},{wfi_safe}) "
+        "monitor_wait_sync={monitor_wait_sync} monitor_expected_pc={monitor_expected_pc} "
+        "redirect_grace={redirect_grace} redirect_queue_len={redirect_queue_len} "
+        "redirect_head_target={redirect_head_target} redirect_head_deadline={redirect_head_deadline} "
+        "cfvec_valid_count={cfvec_valid_count}"
+    ).format(
+        backend_can_accept=int(snapshot["backend_can_accept"]),
+        golden_pc=_format_optional_pc(snapshot["golden_pc"]),
+        golden_wait_pc=_format_optional_pc(snapshot["golden_wait_pc"]),
+        from_ftq_wen=int(from_ftq["wen"]),
+        from_ftq_idx=int(from_ftq["ftq_idx"]),
+        from_ftq_start=_format_optional_pc(from_ftq["start_pc_addr"] << 1),
+        from_ifu_wen=int(from_ifu_gpaddr["wen"]),
+        from_ifu_waddr=int(from_ifu_gpaddr["waddr"]),
+        from_ifu_gpaddr=int(from_ifu_gpaddr["gpaddr"]),
+        from_ifu_vs_nonleaf=int(from_ifu_gpaddr["is_for_vs_nonleaf_pte"]),
+        commit_ptr_flag=int(backend_state["commit_ptr"]["flag"]),
+        commit_ptr_value=int(backend_state["commit_ptr"]["value"]),
+        pending_level0_target_ftq=(
+            "none"
+            if backend_state["pending_level0_target_ftq"] is None
+            else "({flag},{value})".format(
+                flag=int(backend_state["pending_level0_target_ftq"]["flag"]),
+                value=int(backend_state["pending_level0_target_ftq"]["value"]),
+            )
+        ),
+        current_ftq_entry=_format_ftq_entry(current_ftq_entry),
+        ftq_entries_head="[" + ",".join(_format_ftq_entry(entry) for entry in backend_state["ftq_entries"]) + "]",
+        recent_redirect_target=(
+            _format_optional_pc(recent_redirect["target_pc"]) if recent_redirect is not None else "none"
+        ),
+        stall_reason="[" + ",".join(str(int(x)) for x in snapshot["stall_reason"]) + "]",
+        icache_req_valid=int(icache_req["valid"]),
+        icache_req_ready=int(icache_req["ready"]),
+        icache_req_addr=int(icache_req["address"]),
+        icache_req_source=int(icache_req["source"]),
+        icache_resp_valid=int(icache_resp["valid"]),
+        icache_resp_source=int(icache_resp["source"]),
+        icache_resp_opcode=int(icache_resp["opcode"]),
+        uncache_req_valid=int(uncache_req["valid"]),
+        uncache_req_ready=int(uncache_req["ready"]),
+        uncache_req_addr=int(uncache_req["address"]),
+        uncache_resp_valid=int(uncache_resp["valid"]),
+        uncache_resp_source=int(uncache_resp["source"]),
+        wfi_req=int(snapshot["wfi"]["req"]),
+        wfi_safe=int(snapshot["wfi"]["safe"]),
+        monitor_wait_sync=int(monitor_redirect["wait_sync_after_redirect"]),
+        monitor_expected_pc=_format_optional_pc(monitor_redirect["expected_pc"]),
+        redirect_grace=int(monitor_redirect["redirect_grace"]),
+        redirect_queue_len=int(monitor_redirect["queue_len"]),
+        redirect_head_target=(
+            _format_optional_pc(redirect_head["target_pc"]) if redirect_head is not None else "none"
+        ),
+        redirect_head_deadline=(int(redirect_head["deadline"]) if redirect_head is not None else 0),
+        cfvec_valid_count=int(snapshot["cfvec_valid_count"]),
+    )
 
 
 def api_Frontend_load_program(env, bin_data, base_addr, max_cycles=1000):
@@ -127,6 +408,80 @@ def api_Frontend_run_until_commit(env, target_count, max_cycles=10000) -> int:
     got = int(run_until_commit(env, target))
     logger.info("api run until commit: target=%d got=%d max_cycles=%d", target.target_count, got, target.max_cycles)
     return got
+
+
+def api_Frontend_run_until_golden_complete(env, max_cycles=10000) -> bool:
+    """Run simulation until the attached golden trace is fully consumed and backend state is quiescent."""
+    configure_env_logging()
+    trace = getattr(env.backend_model, "golden_trace", None)
+    if trace is None:
+        raise ValueError("golden trace must be loaded before waiting for golden completion")
+
+    total_entries = int(len(trace.entries))
+    max_cycles = int(max_cycles)
+    progress_interval = _read_progress_interval_from_env()
+    stall_snapshot_interval = _read_stall_snapshot_interval_from_env()
+    cycles_run = 0
+    last_cursor = int(trace.cursor)
+    stagnant_cycles = 0
+    while max_cycles <= 0 or cycles_run < max_cycles:
+        env.step(1)
+        cycles_run += 1
+        current_cursor = int(trace.cursor)
+        if current_cursor == last_cursor:
+            stagnant_cycles += 1
+        else:
+            stagnant_cycles = 0
+            last_cursor = current_cursor
+        monitor_errors = env.monitor.get_errors()
+        if progress_interval > 0 and (cycles_run % progress_interval) == 0:
+            logger.info(
+                (
+                    "api run until golden progress checkpoint: cycles=%d cursor=%d/%d "
+                    "golden_pc=%s golden_wait_pc=%s pending_events=%d pending_resolves=%d monitor_errors=%d"
+                ),
+                cycles_run,
+                int(trace.cursor),
+                total_entries,
+                _format_optional_pc(_get_current_golden_pc(trace, env.backend_model)),
+                _format_optional_pc(getattr(env.backend_model, "_golden_wait_pc", None)),
+                len(env.backend_model.pending_events),
+                len(env.backend_model._pending_resolves),
+                len(monitor_errors),
+            )
+        if stall_snapshot_interval > 0 and stagnant_cycles > 0 and (stagnant_cycles % stall_snapshot_interval) == 0:
+            snapshot = api_Frontend_capture_frontend_stall_snapshot(env)
+            logger.warning(
+                "api run until golden stall snapshot: stagnant_cycles=%d cursor=%d/%d %s",
+                stagnant_cycles,
+                int(trace.cursor),
+                total_entries,
+                _format_stall_snapshot(snapshot),
+            )
+        if monitor_errors:
+            logger.warning("api run until golden complete aborted by monitor errors")
+            return False
+        if (
+            int(trace.cursor) >= total_entries
+            and len(env.backend_model.pending_events) == 0
+            and len(env.backend_model._pending_resolves) == 0
+        ):
+            logger.info(
+                "api run until golden complete: cursor=%d entries=%d cycles=%d",
+                int(trace.cursor),
+                total_entries,
+                cycles_run,
+            )
+            return True
+
+    logger.warning(
+        "api run until golden complete timeout: cursor=%d entries=%d pending_events=%d pending_resolves=%d",
+        int(trace.cursor),
+        total_entries,
+        len(env.backend_model.pending_events),
+        len(env.backend_model._pending_resolves),
+    )
+    return False
 
 
 def api_Frontend_inject_redirect(env, target_pc, reason, max_cycles=1000) -> bool:

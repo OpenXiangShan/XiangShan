@@ -64,6 +64,7 @@ class BackendModel:
         self._pending_resolves: Deque[ResolveEntry] = deque()
         self._current_ftq_entry: Optional[FtqEntry] = None
         self._current_ftq_seen_packets: set[tuple[int, int, int, int, int]] = set()
+        self._current_ftq_max_offset = -1
         self.pending_events: Deque[BackendEvent] = deque()
         self.last_events: Deque[dict] = deque(maxlen=64)
 
@@ -187,6 +188,7 @@ class BackendModel:
     def _seal_current_ftq_entry(self) -> None:
         self._sync_backend_state().seal_current_ftq_entry()
         self._apply_backend_state()
+        self._current_ftq_max_offset = -1
 
     def bind(self, dut) -> None:
         self.dut = dut
@@ -389,6 +391,39 @@ class BackendModel:
                     saw_target = True
                 continue
             if int(obs.pc) != int(target_pc):
+                return True
+        return False
+
+    def _current_golden_cfi_successor_observed_after_issue(self, inst_pc: int, start_cycle: int) -> bool:
+        if self.monitor is None or self.golden_trace is None:
+            return False
+        trace = self.golden_trace
+        start = int(trace.cursor)
+        if start + 1 >= len(trace.entries):
+            return False
+        cur = trace.entries[start]
+        nxt = trace.entries[start + 1]
+        if int(getattr(cur, "target_pc", 0) or 0) == 0:
+            return False
+
+        armed = False
+        saw_cur = False
+        for obs in self.monitor.observations:
+            if int(obs.cycle) < int(start_cycle):
+                continue
+            if not armed:
+                if int(obs.cycle) > int(start_cycle):
+                    armed = True
+                elif int(obs.pc) == int(inst_pc):
+                    armed = True
+                    continue
+                else:
+                    continue
+            if not saw_cur:
+                if int(obs.pc) == int(cur.pc):
+                    saw_cur = True
+                continue
+            if int(obs.pc) == int(nxt.pc):
                 return True
         return False
 
@@ -621,7 +656,40 @@ class BackendModel:
             return None
         return int(start_pc)
 
+    def _should_reset_reused_ftq_slot_state(self, ftq_flag: int, ftq_value: int, pc: int) -> bool:
+        group = (int(ftq_flag), int(ftq_value))
+        history = self._ftq_group_pc_history.get(group)
+        if not history:
+            return False
+        if any(int(seen_pc) == int(pc) for seen_pc, _is_rvc in history):
+            return False
+        if self._current_ftq_entry is not None and self._ftq_entry_matches(
+            self._current_ftq_entry,
+            ftq_flag,
+            ftq_value,
+        ):
+            return False
+        return any(self._ftq_entry_matches(entry, ftq_flag, ftq_value) for entry in self.ftq_entries)
+
+    def _reset_ftq_slot_reuse_state(self, ftq_flag: int, ftq_value: int) -> None:
+        group = (int(ftq_flag), int(ftq_value))
+        history = self._ftq_group_pc_history.pop(group, [])
+        for pc, _is_rvc in history:
+            occurrences = self._pc_group_occurrences.get(int(pc))
+            if occurrences:
+                remaining = [
+                    occurrence
+                    for occurrence in occurrences
+                    if (int(occurrence[0]), int(occurrence[1])) != group
+                ]
+                if remaining:
+                    self._pc_group_occurrences[int(pc)] = remaining
+                else:
+                    self._pc_group_occurrences.pop(int(pc), None)
+
     def _simfrontend_redirect_drive_override(self, payload: dict) -> Optional[dict]:
+        if int(payload.get("branch_type", 0)) == 3:
+            return None
         target_pc = int(payload.get("target_pc", self.safe_pc))
         redirect_flag = int(payload.get("ftq_flag", self.commit_ptr_flag))
         redirect_value = int(payload.get("ftq_value", self.commit_ptr_value))
@@ -666,6 +734,50 @@ class BackendModel:
 
     def _sample_cfvec(self) -> None:
         assert self.observe_if is not None
+
+        def _track_waiting_target_entry_prefix(
+            pc: int,
+            instr: int,
+            is_rvc: bool,
+            pred_taken: bool,
+            ftq_flag: int,
+            ftq_value: int,
+            ftq_offset: int,
+            is_last: bool,
+        ) -> None:
+            if self._current_ftq_entry is None or (
+                self._current_ftq_entry.ftq_flag != ftq_flag
+                or self._current_ftq_entry.ftq_value != ftq_value
+            ):
+                if self._current_ftq_entry is not None:
+                    self._seal_current_ftq_entry()
+                if (
+                    not self._has_seen_ftq_ptr(int(ftq_flag), int(ftq_value))
+                    or self._should_reset_reused_ftq_slot_state(int(ftq_flag), int(ftq_value), int(pc))
+                ):
+                    self._reset_ftq_slot_reuse_state(int(ftq_flag), int(ftq_value))
+                self._current_ftq_entry = FtqEntry(ftq_flag=ftq_flag, ftq_value=ftq_value)
+                self._current_ftq_seen_packets.clear()
+                self._current_ftq_max_offset = -1
+
+            packet_key = (
+                int(pc),
+                int(instr),
+                1 if bool(is_rvc) else 0,
+                int(ftq_offset),
+                1 if bool(pred_taken) else 0,
+            )
+            if packet_key in self._current_ftq_seen_packets:
+                return
+            self._current_ftq_seen_packets.add(packet_key)
+            self._current_ftq_max_offset = max(int(self._current_ftq_max_offset), int(ftq_offset))
+            self._record_ftq_group_pc(int(ftq_flag), int(ftq_value), int(pc), bool(is_rvc))
+            if is_last:
+                self._current_ftq_entry.commit_ready_cycle = max(
+                    int(self._current_ftq_entry.commit_ready_cycle),
+                    int(self.current_cycle) + 1,
+                )
+
         for i in range(8):
             if self._read(self.observe_if.cfvec_valid[i], 0) != 1:
                 continue
@@ -680,6 +792,16 @@ class BackendModel:
 
             if self._golden_wait_pc is not None:
                 if int(pc) != int(self._golden_wait_pc):
+                    _track_waiting_target_entry_prefix(
+                        int(pc),
+                        int(instr),
+                        bool(is_rvc),
+                        bool(pred_taken),
+                        int(ftq_flag),
+                        int(ftq_value),
+                        int(ftq_offset),
+                        bool(is_last),
+                    )
                     continue
                 self._golden_wait_pc = None
 
@@ -699,10 +821,25 @@ class BackendModel:
                         self._current_ftq_entry.ftq_flag, self._current_ftq_entry.ftq_value,
                     )
                     self._seal_current_ftq_entry()
+                if (
+                    not self._has_seen_ftq_ptr(int(ftq_flag), int(ftq_value))
+                    or self._should_reset_reused_ftq_slot_state(int(ftq_flag), int(ftq_value), int(pc))
+                ):
+                    self._reset_ftq_slot_reuse_state(int(ftq_flag), int(ftq_value))
                 self._current_ftq_entry = FtqEntry(ftq_flag=ftq_flag, ftq_value=ftq_value)
                 self._current_ftq_seen_packets.clear()
-                if self._pending_level0_target_ftq == (int(ftq_flag), int(ftq_value)):
+                self._current_ftq_max_offset = -1
+                if (
+                    self._pending_level0_target_ftq == (int(ftq_flag), int(ftq_value))
+                    and (self._golden_wait_pc is None or int(pc) == int(self._golden_wait_pc))
+                ):
                     self._pending_level0_target_ftq = None
+            elif self._current_ftq_max_offset >= 0 and int(ftq_offset) < int(self._current_ftq_max_offset):
+                self._seal_current_ftq_entry()
+                self._reset_ftq_slot_reuse_state(int(ftq_flag), int(ftq_value))
+                self._current_ftq_entry = FtqEntry(ftq_flag=ftq_flag, ftq_value=ftq_value)
+                self._current_ftq_seen_packets.clear()
+                self._current_ftq_max_offset = -1
 
             packet_key = (
                 int(pc),
@@ -714,6 +851,7 @@ class BackendModel:
             if packet_key in self._current_ftq_seen_packets:
                 continue
             self._current_ftq_seen_packets.add(packet_key)
+            self._current_ftq_max_offset = max(int(self._current_ftq_max_offset), int(ftq_offset))
             self._record_ftq_group_pc(int(ftq_flag), int(ftq_value), int(pc), bool(is_rvc))
 
             # Identify CFI and enqueue resolve.
@@ -830,6 +968,17 @@ class BackendModel:
                 effective_mispredict = False
             if effective_mispredict and int(entry.branch_type) == 3 and target_path_progressed_after_queue:
                 effective_mispredict = False
+            elif (
+                effective_mispredict
+                and int(entry.branch_type) == 3
+                and self.current_golden_pc() is not None
+                and int(entry.target) != int(self.current_golden_pc())
+                and self._current_golden_cfi_successor_observed_after_issue(
+                    int(entry.inst_pc),
+                    int(entry.queued_cycle),
+                )
+            ):
+                effective_mispredict = False
             allow_indirect_catchup_redirect = (
                 effective_mispredict
                 and int(entry.branch_type) == 3
@@ -887,6 +1036,11 @@ class BackendModel:
         if head is None:
             return
         self.ftq_entries.remove(head)
+        self.ftq_entries = deque(
+            entry
+            for entry in self.ftq_entries
+            if not self._ftq_entry_matches(entry, head.ftq_flag, head.ftq_value)
+        )
         if self._reuse_commit_ptr_once and self._ftq_entry_matches(head, self.commit_ptr_flag, self.commit_ptr_value):
             self._reuse_commit_ptr_once = False
         self.commit_ptr_flag = head.ftq_flag
@@ -915,12 +1069,19 @@ class BackendModel:
         ras_action = int(payload.get("ras_action", 0))
         is_rvc = int(payload.get("is_rvc", 0))
         level = int(payload.get("level", 0))
+        original_commit_ptr = (int(self.commit_ptr_flag), int(self.commit_ptr_value))
         flush_itself = bool(level & 0x1)
         if flush_itself:
             self._pending_level0_target_ftq = None
         else:
             next_target_ftq = self._increment_ftq_ptr(ftq_flag, ftq_value)
-            self._pending_level0_target_ftq = None if self._has_seen_ftq_ptr(*next_target_ftq) else next_target_ftq
+            target_group_history = self._ftq_group_pc_history.get(next_target_ftq, []) if next_target_ftq is not None else []
+            target_pc_seen_in_next_target_group = any(int(seen_pc) == int(target_pc) for seen_pc, _ in target_group_history)
+            self._pending_level0_target_ftq = (
+                None
+                if target_pc_seen_in_next_target_group or self._has_seen_ftq_ptr(*next_target_ftq)
+                else next_target_ftq
+            )
         if bool(payload.get("flush_on_drive", False)):
             state = self._sync_backend_state()
             self._ftq_scoreboard.apply_redirect_flush(
@@ -934,6 +1095,18 @@ class BackendModel:
                 pending_event_survives=state.pending_event_survives_redirect,
             )
             self._apply_backend_state()
+            if not flush_itself:
+                next_target_ftq = self._increment_ftq_ptr(ftq_flag, ftq_value)
+                target_group_history = self._ftq_group_pc_history.get(next_target_ftq, [])
+                target_pc_seen_in_next_target_group = any(
+                    int(seen_pc) == int(target_pc) for seen_pc, _ in target_group_history
+                )
+                next_target_already_committed = next_target_ftq == original_commit_ptr
+                self._pending_level0_target_ftq = (
+                    None
+                    if next_target_already_committed or target_pc_seen_in_next_target_group
+                    else next_target_ftq
+                )
         if "pc" not in payload and self.monitor is not None and self.monitor.observations:
             from_pc = int(self.monitor.observations[-1].pc)
 

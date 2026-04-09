@@ -32,6 +32,7 @@ from env.api import (
     api_Frontend_pause_fst_dump,
     api_Frontend_prepare_program_and_nemu_trace,
     api_Frontend_run_until_commit,
+    api_Frontend_run_until_golden_complete,
     api_Frontend_set_bp_ctrl_enable,
     api_Frontend_set_log_level,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "api_Frontend_pause_fst_dump",
     "api_Frontend_prepare_program_and_nemu_trace",
     "api_Frontend_run_until_commit",
+    "api_Frontend_run_until_golden_complete",
     "api_Frontend_set_bp_ctrl_enable",
     "api_Frontend_set_log_level",
     "create_dut",

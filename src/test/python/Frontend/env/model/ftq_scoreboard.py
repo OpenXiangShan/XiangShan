@@ -21,6 +21,7 @@ class FtqScoreboard:
             self.state.current_ftq_entry is not None
             and self.state.ftq_entry_matches(self.state.current_ftq_entry, entry.ftq_flag, entry.ftq_value)
         ):
+            self.state.current_ftq_entry.resolved_cfi += 1
             self.state.current_ftq_entry.has_redirect = (
                 self.state.current_ftq_entry.has_redirect or bool(entry_flushes_itself)
             )
@@ -60,6 +61,13 @@ class FtqScoreboard:
         pending_event_survives: Callable[[BackendEvent, int, int, int, int, bool, int], bool],
     ) -> None:
         redirect_rank = self.state.ftq_ptr_rank_after_commit(ftq_flag, ftq_value)
+        next_target_ftq = None if flush_itself else self.state.increment_ftq_ptr(ftq_flag, ftq_value)
+        current_entry_is_next_target_ftq = bool(
+            not flush_itself
+            and next_target_ftq is not None
+            and self.state.current_ftq_entry is not None
+            and self.state.ftq_entry_matches(self.state.current_ftq_entry, *next_target_ftq)
+        )
         self.state.pending_resolves = deque(
             entry
             for entry in self.state.pending_resolves
@@ -117,8 +125,9 @@ class FtqScoreboard:
                 )
                 > redirect_rank
             ):
-                self.state.current_ftq_entry = None
-                self.state.current_ftq_seen_packets.clear()
+                if not current_entry_is_next_target_ftq:
+                    self.state.current_ftq_entry = None
+                    self.state.current_ftq_seen_packets.clear()
             if self.state.ftq_entries and (
                 self.state.commit_count > 0
                 or self.state.commit_ptr_flag != 0

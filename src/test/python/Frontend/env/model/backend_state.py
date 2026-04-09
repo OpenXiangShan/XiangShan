@@ -179,6 +179,15 @@ class BackendState:
                     break
             if candidate is None and self.ftq_entries:
                 oldest_survivor = self.ftq_entries[0]
+                if self.ftq_entry_matches(oldest_survivor, self.commit_ptr_flag, self.commit_ptr_value) and not self.reuse_commit_ptr_once:
+                    return None
+                if expected is not None:
+                    duplicate_expected_survivor = any(
+                        self.ftq_entry_matches(entry, exp_flag, exp_value)
+                        for entry in list(self.ftq_entries)[1:]
+                    )
+                    if duplicate_expected_survivor and self.ftq_entry_matches(oldest_survivor, exp_flag, exp_value):
+                        return None
                 if self.pending_level0_target_ftq is not None:
                     wait_flag, wait_value = self.pending_level0_target_ftq
                     if self.ftq_entry_matches(oldest_survivor, wait_flag, wait_value):
@@ -212,6 +221,21 @@ class BackendState:
             int(self.current_ftq_entry.commit_ready_cycle),
             int(self.current_cycle) + 1,
         )
-        self.ftq_entries.append(self.current_ftq_entry)
+        if self.ftq_entries and self.ftq_entry_matches(
+            self.ftq_entries[-1],
+            self.current_ftq_entry.ftq_flag,
+            self.current_ftq_entry.ftq_value,
+        ):
+            tail = self.ftq_entries[-1]
+            tail.total_cfi = max(int(tail.total_cfi), int(self.current_ftq_entry.total_cfi))
+            tail.resolved_cfi = max(int(tail.resolved_cfi), int(self.current_ftq_entry.resolved_cfi))
+            tail.dispatch_complete = bool(tail.dispatch_complete or self.current_ftq_entry.dispatch_complete)
+            tail.has_redirect = bool(tail.has_redirect or self.current_ftq_entry.has_redirect)
+            tail.commit_ready_cycle = max(
+                int(tail.commit_ready_cycle),
+                int(self.current_ftq_entry.commit_ready_cycle),
+            )
+        else:
+            self.ftq_entries.append(self.current_ftq_entry)
         self.current_ftq_entry = None
         self.current_ftq_seen_packets.clear()
