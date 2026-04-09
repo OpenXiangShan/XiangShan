@@ -360,7 +360,8 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   val l1_replacement = new ValidPseudoLRU(MLP_L1_SIZE)
   val l2_replacement = new ValidPseudoLRU(MLP_L2L3_SIZE)
-  val tlb_req_arb = Module(new RRArbiterInit(new TlbReq, MLP_SIZE))
+  val l1_tlb_req_arb = Module(new RRArbiterInit(new TlbReq, MLP_L1_SIZE))
+  val l2_tlb_req_arb = Module(new RRArbiterInit(new TlbReq, MLP_L2L3_SIZE))
   val l1_pf_req_arb = Module(new RRArbiterInit(new Bundle {
     val req = new L1PrefetchReq
     val debug_vaddr = UInt(VAddrBits.W)
@@ -535,38 +536,50 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   // tlb req
   // s0: arb all tlb reqs
-  val s0_tlb_fire_vec = VecInit((0 until MLP_SIZE).map{case i => tlb_req_arb.io.in(i).fire})
+  val s0_tlb_fire_vec = VecInit(l1_tlb_req_arb.io.in.map(_.fire) ++ l2_tlb_req_arb.io.in.map(_.fire))
   val s1_tlb_fire_vec = GatedValidRegNext(s0_tlb_fire_vec)
   val s2_tlb_fire_vec = GatedValidRegNext(s1_tlb_fire_vec)
   val s3_tlb_fire_vec = GatedValidRegNext(s2_tlb_fire_vec)
   val not_tlbing_vec = VecInit((0 until MLP_SIZE).map{case i =>
     !s1_tlb_fire_vec(i) && !s2_tlb_fire_vec(i) && !s3_tlb_fire_vec(i)
   })
-
-  for(i <- 0 until MLP_SIZE) {
+  for(i <- 0 until MLP_L1_SIZE) {
     val l1_evict = s1_l1_alloc && (s1_l1_index === i.U)
-    val l2_evict = s1_l2_alloc && ((s1_l2_index + MLP_L1_SIZE.U) === i.U)
-    if(i < MLP_L1_SIZE) {
-      tlb_req_arb.io.in(i).valid := l1_valids(i) && l1_array(i).is_vaddr && not_tlbing_vec(i) && !l1_evict
-      tlb_req_arb.io.in(i).bits.vaddr := l1_array(i).get_tlb_va()
-    }else {
-      tlb_req_arb.io.in(i).valid := l2_valids(i - MLP_L1_SIZE) && l2_array(i - MLP_L1_SIZE).is_vaddr && not_tlbing_vec(i) && !l2_evict
-      tlb_req_arb.io.in(i).bits.vaddr := l2_array(i - MLP_L1_SIZE).get_tlb_va()
-    }
-    tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
-    tlb_req_arb.io.in(i).bits.isPrefetch := true.B
-    tlb_req_arb.io.in(i).bits.size := 3.U
-    tlb_req_arb.io.in(i).bits.kill := false.B
-    tlb_req_arb.io.in(i).bits.no_translate := false.B
-    tlb_req_arb.io.in(i).bits.fullva := 0.U
-    tlb_req_arb.io.in(i).bits.checkfullva := false.B
-    tlb_req_arb.io.in(i).bits.memidx := DontCare
-    tlb_req_arb.io.in(i).bits.debug := DontCare
-    tlb_req_arb.io.in(i).bits.hlvx := DontCare
-    tlb_req_arb.io.in(i).bits.hyperinst := DontCare
-    tlb_req_arb.io.in(i).bits.pmp_addr  := DontCare
+    l1_tlb_req_arb.io.in(i).valid := l1_valids(i) && l1_array(i).is_vaddr && not_tlbing_vec(i) && !l1_evict
+    l1_tlb_req_arb.io.in(i).bits.vaddr := l1_array(i).get_tlb_va()
+    l1_tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
+    l1_tlb_req_arb.io.in(i).bits.isPrefetch := true.B
+    l1_tlb_req_arb.io.in(i).bits.size := 3.U
+    l1_tlb_req_arb.io.in(i).bits.kill := false.B
+    l1_tlb_req_arb.io.in(i).bits.no_translate := false.B
+    l1_tlb_req_arb.io.in(i).bits.fullva := 0.U
+    l1_tlb_req_arb.io.in(i).bits.checkfullva := false.B
+    l1_tlb_req_arb.io.in(i).bits.memidx := DontCare
+    l1_tlb_req_arb.io.in(i).bits.debug := DontCare
+    l1_tlb_req_arb.io.in(i).bits.hlvx := DontCare
+    l1_tlb_req_arb.io.in(i).bits.hyperinst := DontCare
+    l1_tlb_req_arb.io.in(i).bits.pmp_addr  := DontCare
   }
-
+  for(i <- 0 until MLP_L2L3_SIZE) {
+    val l2_evict = s1_l2_alloc && (s1_l2_index === i.U)
+    l2_tlb_req_arb.io.in(i).valid := l2_valids(i) && l2_array(i).is_vaddr && not_tlbing_vec(i + MLP_L1_SIZE) && !l2_evict
+    l2_tlb_req_arb.io.in(i).bits.vaddr := l2_array(i).get_tlb_va()
+    l2_tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
+    l2_tlb_req_arb.io.in(i).bits.isPrefetch := true.B
+    l2_tlb_req_arb.io.in(i).bits.size := 3.U
+    l2_tlb_req_arb.io.in(i).bits.kill := false.B
+    l2_tlb_req_arb.io.in(i).bits.no_translate := false.B
+    l2_tlb_req_arb.io.in(i).bits.fullva := 0.U
+    l2_tlb_req_arb.io.in(i).bits.checkfullva := false.B
+    l2_tlb_req_arb.io.in(i).bits.memidx := DontCare
+    l2_tlb_req_arb.io.in(i).bits.debug := DontCare
+    l2_tlb_req_arb.io.in(i).bits.hlvx := DontCare
+    l2_tlb_req_arb.io.in(i).bits.hyperinst := DontCare
+    l2_tlb_req_arb.io.in(i).bits.pmp_addr  := DontCare
+  }
+  val tlb_req_arb = Module(new RRArbiterInit(new TlbReq, 2))
+  tlb_req_arb.io.in(0) <> l1_tlb_req_arb.io.out
+  tlb_req_arb.io.in(1) <> l2_tlb_req_arb.io.out
   assert(PopCount(s0_tlb_fire_vec) <= 1.U, "s0_tlb_fire_vec should be one-hot or empty")
 
   // s1: send out the req
