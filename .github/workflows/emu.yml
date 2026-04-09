@@ -482,7 +482,7 @@ jobs:
     needs: changes
     if: ${{ needs.changes.outputs.core == 'true' }}
     continue-on-error: false
-    timeout-minutes: 40
+    timeout-minutes: 60
     name: Upload Artifacts
     steps:
       - uses: actions/checkout@v6
