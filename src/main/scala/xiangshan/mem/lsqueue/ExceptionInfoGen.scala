@@ -64,7 +64,6 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircular
   private def isOlder(left: MemExceptionInfo, right: MemExceptionInfo): Bool = {
     isBefore(left.robIdx, right.robIdx) || (left.robIdx === right.robIdx && left.uopIdx < right.uopIdx)
   }
-  val selectOldestModule = Module(new SelectOldest(new MemExceptionInfo, enqPortNum, isOlder))
 
   private def GenExceptionVa(
                                 mode: UInt, isVirt: Bool, vaNeedExt: Bool,
@@ -134,7 +133,7 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircular
     port.valid && !port.bits.robIdx.needFlush(io.redirect)
   }
   /*===================================================== s1 stage ===================================================*/
-  // select an oldest enq exception, compare the current exception.
+  // select an oldest enq exception on group
   private val s1Valid = s0Valid.map(x => RegNext(x))
   private val s1Bits  = io.req.map(x => RegNext(x.bits)) // for timing, don't use RegEnable
 
@@ -143,15 +142,46 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircular
     v && p.hasException && !p.robIdx.needFlush(io.redirect)
   } // for timing, generate selectValid here
 
-  selectOldestModule.io.in.zipWithIndex.map{case (sink, i) =>
-    sink.valid := selectValid(i)
-    sink.bits := s1Bits(i)
+  private val groupSize = 4
+  private val s1SelectValidGroups = selectValid.grouped(groupSize).toSeq
+  private val s1BitsGroups = s1Bits.grouped(groupSize).toSeq
+  private val numSelectGroups = s1SelectValidGroups.length
+
+  private val s1Oldest = s1SelectValidGroups.zip(s1BitsGroups).zipWithIndex.map { case ((vg, bg), g) =>
+    val m = Module(
+      new SelectOldest(new MemExceptionInfo, bg.length, isOlder)
+        .suggestName(s"s1SelectOldestGroup_$g")
+    )
+    m.io.in.zipWithIndex.foreach { case (sink, i) =>
+      sink.valid := vg(i)
+      sink.bits  := bg(i)
+    }
+    (m.io.out.valid, m.io.out.bits)
   }
-  private val oldestBits = selectOldestModule.io.out.bits
-  private val s1OutValid = selectOldestModule.io.out.valid
+
+  /*===================================================== s2 stage ===================================================*/
+  // select an oldest enq exception, compare the current exception.
+  private val s2Valid = s1Oldest.map { case (v, _) => RegNext(v) }
+  private val s2Bits  = s1Oldest.map { case (_, b) => RegNext(b) }
+  private val s2SelectValid = s2Valid.zip(s2Bits).map{case (v, p) =>
+    v && p.hasException && !p.robIdx.needFlush(io.redirect)
+  } 
+
+  private val s2SelectOldestModule = Module(
+    new SelectOldest(new MemExceptionInfo, numSelectGroups, isOlder)
+      .suggestName("s2SelectOldest")
+  )
+
+  s2SelectOldestModule.io.in.zipWithIndex.foreach{case (sink, i) =>
+    sink.valid := s2SelectValid(i)
+    sink.bits := s2Bits(i)
+  }
+
+  private val oldestBits = s2SelectOldestModule.io.out.bits
+  private val outValid = s2SelectOldestModule.io.out.valid
 
   when(currentValid) {
-    when(s1OutValid) {
+    when(outValid) {
       when(currentExcp.robIdx > oldestBits.robIdx || oldestBits.robIdx === currentExcp.robIdx && currentExcp.uopIdx > oldestBits.uopIdx) {
         currentExcp := oldestBits
       }
@@ -160,9 +190,9 @@ class ExceptionInfoGen(implicit p: Parameters) extends XSModule with HasCircular
     currentExcp  := oldestBits
   }
 
-  when(!currentValid && s1OutValid) { // TODO: need valid ? maby for debug.
+  when(!currentValid && outValid) { // TODO: need valid ? maby for debug.
     currentValid := true.B
-  }.elsewhen(currentValid && currentExcp.robIdx.needFlush(io.redirect) && !s1OutValid) {
+  }.elsewhen(currentValid && currentExcp.robIdx.needFlush(io.redirect) && !outValid) {
     currentValid := false.B
   }
 
