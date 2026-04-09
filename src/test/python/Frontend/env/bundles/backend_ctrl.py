@@ -60,6 +60,8 @@ class BackendCtrlBundle(Bundle):
     resolve_bits_attribute_branch_type = SignalList("io_backend_toFtq_resolve_#_bits_attribute_branchType", 3)
     resolve_bits_attribute_ras_action = SignalList("io_backend_toFtq_resolve_#_bits_attribute_rasAction", 3)
     call_ret_commit_valid = SignalList("io_backend_toFtq_callRetCommit_#_valid", 8)
+    call_ret_commit_bits_ras_action = SignalList("io_backend_toFtq_callRetCommit_#_bits_rasAction", 8)
+    call_ret_commit_bits_ftq_ptr_value = SignalList("io_backend_toFtq_callRetCommit_#_bits_ftqPtr_value", 8)
     wfi_req = Signal()
     ftq_idx_ahead_0_valid = Signal()
 
@@ -85,6 +87,10 @@ class BackendCtrlBundle(Bundle):
         for signal in self.resolve_valid:
             signal.value = 0
         for signal in self.call_ret_commit_valid:
+            signal.value = 0
+        for signal in self.call_ret_commit_bits_ras_action:
+            signal.value = 0
+        for signal in self.call_ret_commit_bits_ftq_ptr_value:
             signal.value = 0
         self.wfi_req.value = 0
         self.ftq_idx_ahead_0_valid.value = 0

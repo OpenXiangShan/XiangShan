@@ -17,6 +17,7 @@ class BackendCycleActions:
     can_accept: int = 1
     commit_entry: Optional[Any] = None
     resolve_entries: tuple = ()
+    call_ret_commit_group: tuple = ()
     redirect_payload: Optional[dict] = None
 
 

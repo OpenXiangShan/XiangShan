@@ -9,7 +9,7 @@ from typing import Callable, Deque, Dict, Optional
 from .agents.backend_agent import BackendAgent
 from .bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, FrontendInfoBundle, bind_bundle_optional
 from .model.backend_runtime import BackendCycleActions, BackendObservationSnapshot
-from .model.backend_state import BackendEvent, BackendState, FrontendPacket, FtqEntry, ResolveEntry
+from .model.backend_state import BackendEvent, BackendState, CommitInstruction, FrontendPacket, FtqEntry, ResolveEntry
 from .model.ftq_scoreboard import FtqScoreboard
 from .trace import GoldenTrace, TraceEntry
 
@@ -77,6 +77,12 @@ class BackendModel:
         self._ftq_group_pc_history: Dict[tuple[int, int], list[tuple[int, bool]]] = {}
         self._pc_group_occurrences: Dict[int, list[tuple[int, int, int]]] = {}
         self._pending_level0_target_ftq: Optional[tuple[int, int]] = None
+        self._pending_commit_instructions: Deque[CommitInstruction] = deque()
+        self._scheduled_commit_groups: Deque[tuple[int, list[CommitInstruction]]] = deque()
+        self._visible_commit_group: list[CommitInstruction] = []
+        self._visible_json_commit_count = 0
+        self._ftq_real_instr_total: Dict[tuple[int, int], int] = {}
+        self._ftq_visible_instr_commits: Dict[tuple[int, int], int] = {}
         self.golden_trace: Optional[GoldenTrace] = None
         self.golden_resync_window = 64
         self._golden_wait_pc: Optional[int] = None
@@ -107,6 +113,12 @@ class BackendModel:
         state.ftq_group_pc_history = self._ftq_group_pc_history
         state.pc_group_occurrences = self._pc_group_occurrences
         state.pending_level0_target_ftq = self._pending_level0_target_ftq
+        state.pending_commit_instructions = self._pending_commit_instructions
+        state.scheduled_commit_groups = self._scheduled_commit_groups
+        state.visible_commit_group = self._visible_commit_group
+        state.visible_json_commit_count = int(self._visible_json_commit_count)
+        state.ftq_real_instr_total = self._ftq_real_instr_total
+        state.ftq_visible_instr_commits = self._ftq_visible_instr_commits
         return state
 
     def _apply_backend_state(self) -> None:
@@ -128,6 +140,12 @@ class BackendModel:
         self._ftq_group_pc_history = state.ftq_group_pc_history
         self._pc_group_occurrences = state.pc_group_occurrences
         self._pending_level0_target_ftq = state.pending_level0_target_ftq
+        self._pending_commit_instructions = state.pending_commit_instructions
+        self._scheduled_commit_groups = state.scheduled_commit_groups
+        self._visible_commit_group = state.visible_commit_group
+        self._visible_json_commit_count = int(state.visible_json_commit_count)
+        self._ftq_real_instr_total = state.ftq_real_instr_total
+        self._ftq_visible_instr_commits = state.ftq_visible_instr_commits
 
     @staticmethod
     def _clamp_backend_delay(delay_cycles: int) -> int:
@@ -181,7 +199,9 @@ class BackendModel:
         )
 
     def _find_next_commitable_entry(self) -> Optional[FtqEntry]:
-        candidate = self._sync_backend_state().find_next_commitable_entry()
+        candidate = self._sync_backend_state().find_next_commitable_entry(
+            golden_trace_attached=self.golden_trace is not None,
+        )
         self._apply_backend_state()
         return candidate
 
@@ -277,6 +297,8 @@ class BackendModel:
         self._golden_wait_pc = None
         self._cycle_start_golden_pc = None
         self._cycle_start_golden_cursor = None
+        self._sync_backend_state().reset_commit_visibility()
+        self._apply_backend_state()
         if self.golden_trace is not None:
             self.resolve_min_delay = _GOLDEN_TRACE_RESOLVE_MIN_DELAY
             self.resolve_max_delay = _GOLDEN_TRACE_RESOLVE_MAX_DELAY
@@ -525,6 +547,30 @@ class BackendModel:
             trace.next_entry()
             return cur
         return None
+
+    def _record_consumed_commit_instruction(
+        self,
+        entry: TraceEntry,
+        ftq_flag: int,
+        ftq_value: int,
+        instr: int,
+    ) -> None:
+        self._sync_backend_state().record_consumed_commit_instruction(
+            json_index=int(entry.index),
+            pc=int(entry.pc),
+            instr=int(instr),
+            ftq_flag=int(ftq_flag),
+            ftq_value=int(ftq_value),
+        )
+        self._apply_backend_state()
+
+    def _schedule_next_commit_group(self) -> None:
+        self._sync_backend_state().schedule_next_commit_group()
+        self._apply_backend_state()
+
+    def _activate_visible_commit_group(self) -> None:
+        self._sync_backend_state().activate_visible_commit_group()
+        self._apply_backend_state()
 
     def _predicted_cfi_outcome(self, instr: int, pc: int, pred_taken: bool, is_rvc: bool) -> Optional[tuple]:
         step = 2 if is_rvc else 4
@@ -829,6 +875,13 @@ class BackendModel:
                 self._golden_wait_pc = None
 
             golden_entry = self._consume_golden_entry(int(pc))
+            if golden_entry is not None:
+                self._record_consumed_commit_instruction(
+                    golden_entry,
+                    int(ftq_flag),
+                    int(ftq_value),
+                    int(instr),
+                )
 
             # Start or continue the current FTQ entry
             if self._current_ftq_entry is None or (
@@ -1236,6 +1289,8 @@ class BackendModel:
         self._pending_resolves.clear()
         self._current_ftq_entry = None
         self._current_ftq_seen_packets.clear()
+        self._sync_backend_state().reset_commit_visibility()
+        self._apply_backend_state()
         self._golden_wait_pc = None
         # Note: do NOT clear ftq_entries — entries already dispatch-complete remain valid;
         # they will naturally drain via _drive_commit() until the redirect fires.
@@ -1291,6 +1346,7 @@ class BackendModel:
 
     def plan_cycle_actions(self) -> BackendCycleActions:
         observation = self._last_observation
+        self._activate_visible_commit_group()
         self._update_ftq_start_pc_cache(observation)
         self._watchdog(observation)
         if self.observe_if is not None:
@@ -1298,10 +1354,13 @@ class BackendModel:
         resolve_entries = self._ready_resolves_for_cycle()
         commit_entry = self._plan_commit_entry_for_cycle()
         redirect_payload = self._ready_redirect_for_cycle()
+        call_ret_commit_group = tuple(self._visible_commit_group)
+        self._schedule_next_commit_group()
         return BackendCycleActions(
             can_accept=self.can_accept,
             commit_entry=commit_entry,
             resolve_entries=resolve_entries,
+            call_ret_commit_group=call_ret_commit_group,
             redirect_payload=redirect_payload,
         )
 
@@ -1313,8 +1372,9 @@ class BackendModel:
         agent.start_cycle(self.can_accept)
         self.consume_backend_observation(self._snapshot_bound_observation())
         actions = self.plan_cycle_actions()
-        agent.drive_commit(actions.commit_entry)
         agent.drive_resolves(actions.resolve_entries)
+        agent.drive_call_ret_commit(actions.call_ret_commit_group)
+        agent.drive_commit(actions.commit_entry)
         if actions.redirect_payload is not None:
             agent.drive_redirect(actions.redirect_payload)
 

@@ -33,6 +33,10 @@ class BackendAgent:
         self._write(self._drive_if.redirect_valid, 0)
         for channel in range(3):
             self._write(self._drive_if.resolve_valid[channel], 0)
+        for lane in range(8):
+            self._write(self._drive_if.call_ret_commit_valid[lane], 0)
+            self._write(self._drive_if.call_ret_commit_bits_ras_action[lane], 0)
+            self._write(self._drive_if.call_ret_commit_bits_ftq_ptr_value[lane], 0)
 
     def start_cycle(self, can_accept: int) -> None:
         assert self._drive_if is not None
@@ -61,6 +65,13 @@ class BackendAgent:
             self._write(self._drive_if.resolve_bits_attribute_branch_type[channel], int(entry.branch_type))
             self._write(self._drive_if.resolve_bits_attribute_ras_action[channel], int(entry.ras_action))
             self._write(self._drive_if.resolve_valid[channel], 1)
+
+    def drive_call_ret_commit(self, group: Iterable[object]) -> None:
+        assert self._drive_if is not None
+        for lane, inst in enumerate(list(group)[:8]):
+            self._write(self._drive_if.call_ret_commit_bits_ras_action[lane], int(getattr(inst, "ras_action", 0)))
+            self._write(self._drive_if.call_ret_commit_bits_ftq_ptr_value[lane], int(getattr(inst, "ftq_value", 0)))
+            self._write(self._drive_if.call_ret_commit_valid[lane], 1)
 
     def drive_redirect(self, payload: Mapping[str, int]) -> None:
         assert self._drive_if is not None

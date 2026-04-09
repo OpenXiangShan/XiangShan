@@ -49,6 +49,16 @@ class ResolveEntry:
 
 
 @dataclass
+class CommitInstruction:
+    json_index: int
+    pc: int
+    instr: int
+    ftq_flag: int
+    ftq_value: int
+    ras_action: int
+
+
+@dataclass
 class BackendState:
     ftq_size: int = 64
     current_cycle: int = 0
@@ -68,6 +78,12 @@ class BackendState:
     ftq_group_pc_history: dict[tuple[int, int], list[tuple[int, bool]]] = field(default_factory=dict)
     pc_group_occurrences: dict[int, list[tuple[int, int, int]]] = field(default_factory=dict)
     pending_level0_target_ftq: Optional[tuple[int, int]] = None
+    pending_commit_instructions: Deque[CommitInstruction] = field(default_factory=deque)
+    scheduled_commit_groups: Deque[tuple[int, list[CommitInstruction]]] = field(default_factory=deque)
+    visible_commit_group: list[CommitInstruction] = field(default_factory=list)
+    visible_json_commit_count: int = 0
+    ftq_real_instr_total: dict[tuple[int, int], int] = field(default_factory=dict)
+    ftq_visible_instr_commits: dict[tuple[int, int], int] = field(default_factory=dict)
 
     def increment_ftq_ptr(self, flag: int, value: int) -> tuple[int, int]:
         next_value = int(value) + 1
@@ -157,7 +173,91 @@ class BackendState:
             )
         return False
 
-    def find_next_commitable_entry(self) -> Optional[FtqEntry]:
+    @staticmethod
+    def decode_commit_ras_action(instr: int) -> int:
+        opc = int(instr) & 0x7F
+        if opc == 0x6F:
+            rd = (int(instr) >> 7) & 0x1F
+            return 2 if rd in (1, 5) else 0
+        if opc == 0x67:
+            rd = (int(instr) >> 7) & 0x1F
+            rs1 = (int(instr) >> 15) & 0x1F
+            is_rd_link = rd in (1, 5)
+            is_rs1_link = rs1 in (1, 5)
+            if is_rd_link and is_rs1_link and rd != rs1:
+                return 3
+            if is_rs1_link and not is_rd_link:
+                return 1
+            if is_rd_link:
+                return 2
+        return 0
+
+    def record_consumed_commit_instruction(
+        self,
+        json_index: int,
+        pc: int,
+        instr: int,
+        ftq_flag: int,
+        ftq_value: int,
+    ) -> None:
+        key = (int(ftq_flag), int(ftq_value))
+        self.pending_commit_instructions.append(
+            CommitInstruction(
+                json_index=int(json_index),
+                pc=int(pc),
+                instr=int(instr),
+                ftq_flag=int(ftq_flag),
+                ftq_value=int(ftq_value),
+                ras_action=self.decode_commit_ras_action(int(instr)),
+            )
+        )
+        self.ftq_real_instr_total[key] = self.ftq_real_instr_total.get(key, 0) + 1
+
+    def schedule_next_commit_group(self) -> None:
+        if not self.pending_commit_instructions:
+            return
+        if self.scheduled_commit_groups and int(self.scheduled_commit_groups[-1][0]) >= int(self.current_cycle) + 1:
+            return
+        group: list[CommitInstruction] = []
+        while self.pending_commit_instructions and len(group) < 8:
+            group.append(self.pending_commit_instructions.popleft())
+        if not group:
+            return
+        self.scheduled_commit_groups.append((int(self.current_cycle) + 1, group))
+
+    def activate_visible_commit_group(self) -> None:
+        self.visible_commit_group = []
+        if not self.scheduled_commit_groups:
+            return
+        ready_cycle, group = self.scheduled_commit_groups[0]
+        if int(self.current_cycle) < int(ready_cycle):
+            return
+        self.scheduled_commit_groups.popleft()
+        self.visible_commit_group = list(group)
+        self.visible_json_commit_count += len(group)
+        for inst in group:
+            key = (int(inst.ftq_flag), int(inst.ftq_value))
+            self.ftq_visible_instr_commits[key] = self.ftq_visible_instr_commits.get(key, 0) + 1
+
+    def ftq_entry_commit_covered(self, entry: FtqEntry, *, golden_trace_attached: bool) -> bool:
+        if not golden_trace_attached:
+            return True
+        key = (int(entry.ftq_flag), int(entry.ftq_value))
+        total_real_instr = int(self.ftq_real_instr_total.get(key, 0))
+        if total_real_instr <= 0:
+            return False
+        visible_instr = int(self.ftq_visible_instr_commits.get(key, 0))
+        return visible_instr >= total_real_instr
+
+    def reset_commit_visibility(self) -> None:
+        self.pending_commit_instructions.clear()
+        self.scheduled_commit_groups.clear()
+        self.visible_commit_group = []
+        self.visible_json_commit_count = 0
+        self.ftq_real_instr_total.clear()
+        self.ftq_visible_instr_commits.clear()
+
+    def find_next_commitable_entry(self, *, golden_trace_attached: bool = False) -> Optional[FtqEntry]:
         if not self.ftq_entries:
             return None
 
@@ -206,6 +306,8 @@ class BackendState:
         if candidate is None:
             return None
         if not candidate.dispatch_complete or candidate.resolved_cfi < candidate.total_cfi:
+            return None
+        if not self.ftq_entry_commit_covered(candidate, golden_trace_attached=golden_trace_attached):
             return None
         if candidate.has_redirect:
             return None
