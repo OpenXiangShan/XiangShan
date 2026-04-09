@@ -20,6 +20,7 @@ from .request_apis import (
     normalize_program_image,
     normalize_redirect_txn,
     run_until_commit,
+    run_until_golden_trace_complete,
 )
 from .signal_utils import get_sig
 
@@ -314,18 +315,16 @@ def api_Frontend_load_program(env, bin_data, base_addr, max_cycles=1000):
     """Load a program image into the env memory model."""
     configure_env_logging()
     image = normalize_program_image(bin_data=bin_data, base_addr=base_addr)
-    written = int(load_program(env, image))
+    written = int(load_program(env, image, step_cycles=1))
     logger.info("api load program: base=0x%x size=%d", image.base_addr, len(image.payload))
-    env.step(1)
     return written
 
 
 def api_Frontend_load_program_file(env, path, base_addr, max_cycles=1000):
     """Load a program image from a binary file into the env memory model."""
     configure_env_logging()
-    size = int(load_program_file(env, path, base_addr))
+    size = int(load_program_file(env, path, base_addr, step_cycles=1))
     logger.info("api load program file: path=%s base=0x%x size=%d", str(path), int(base_addr), size)
-    env.step(1)
     return size
 
 
@@ -413,75 +412,19 @@ def api_Frontend_run_until_commit(env, target_count, max_cycles=10000) -> int:
 def api_Frontend_run_until_golden_complete(env, max_cycles=10000) -> bool:
     """Run simulation until the attached golden trace is fully consumed and backend state is quiescent."""
     configure_env_logging()
-    trace = getattr(env.backend_model, "golden_trace", None)
-    if trace is None:
-        raise ValueError("golden trace must be loaded before waiting for golden completion")
-
-    total_entries = int(len(trace.entries))
-    max_cycles = int(max_cycles)
-    progress_interval = _read_progress_interval_from_env()
-    stall_snapshot_interval = _read_stall_snapshot_interval_from_env()
-    cycles_run = 0
-    last_cursor = int(trace.cursor)
-    stagnant_cycles = 0
-    while max_cycles <= 0 or cycles_run < max_cycles:
-        env.step(1)
-        cycles_run += 1
-        current_cursor = int(trace.cursor)
-        if current_cursor == last_cursor:
-            stagnant_cycles += 1
-        else:
-            stagnant_cycles = 0
-            last_cursor = current_cursor
-        monitor_errors = env.monitor.get_errors()
-        if progress_interval > 0 and (cycles_run % progress_interval) == 0:
-            logger.info(
-                (
-                    "api run until golden progress checkpoint: cycles=%d cursor=%d/%d "
-                    "golden_pc=%s golden_wait_pc=%s pending_events=%d pending_resolves=%d monitor_errors=%d"
-                ),
-                cycles_run,
-                int(trace.cursor),
-                total_entries,
-                _format_optional_pc(_get_current_golden_pc(trace, env.backend_model)),
-                _format_optional_pc(getattr(env.backend_model, "_golden_wait_pc", None)),
-                len(env.backend_model.pending_events),
-                len(env.backend_model._pending_resolves),
-                len(monitor_errors),
-            )
-        if stall_snapshot_interval > 0 and stagnant_cycles > 0 and (stagnant_cycles % stall_snapshot_interval) == 0:
-            snapshot = api_Frontend_capture_frontend_stall_snapshot(env)
-            logger.warning(
-                "api run until golden stall snapshot: stagnant_cycles=%d cursor=%d/%d %s",
-                stagnant_cycles,
-                int(trace.cursor),
-                total_entries,
-                _format_stall_snapshot(snapshot),
-            )
-        if monitor_errors:
-            logger.warning("api run until golden complete aborted by monitor errors")
-            return False
-        if (
-            int(trace.cursor) >= total_entries
-            and len(env.backend_model.pending_events) == 0
-            and len(env.backend_model._pending_resolves) == 0
-        ):
-            logger.info(
-                "api run until golden complete: cursor=%d entries=%d cycles=%d",
-                int(trace.cursor),
-                total_entries,
-                cycles_run,
-            )
-            return True
-
-    logger.warning(
-        "api run until golden complete timeout: cursor=%d entries=%d pending_events=%d pending_resolves=%d",
-        int(trace.cursor),
-        total_entries,
-        len(env.backend_model.pending_events),
-        len(env.backend_model._pending_resolves),
+    return bool(
+        run_until_golden_trace_complete(
+            env,
+            max_cycles=int(max_cycles),
+            progress_interval=_read_progress_interval_from_env(),
+            stall_snapshot_interval=_read_stall_snapshot_interval_from_env(),
+            logger=logger,
+            current_golden_pc_getter=_get_current_golden_pc,
+            format_optional_pc=_format_optional_pc,
+            stall_snapshot_capture=api_Frontend_capture_frontend_stall_snapshot,
+            stall_snapshot_formatter=_format_stall_snapshot,
+        )
     )
-    return False
 
 
 def api_Frontend_inject_redirect(env, target_pc, reason, max_cycles=1000) -> bool:

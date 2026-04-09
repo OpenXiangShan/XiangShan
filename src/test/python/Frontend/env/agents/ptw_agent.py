@@ -5,7 +5,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional
 
-from ..bundles import PTWBundle, bind_bundle_optional
+from ..bundles import PTWBundle
 from ..memory_model import PageTableModel
 
 
@@ -42,10 +42,9 @@ class PTWAgent:
             return
 
     def bind(self, target) -> None:
-        if isinstance(target, PTWBundle):
-            self.interface = target
-            return
-        self.interface = bind_bundle_optional(PTWBundle, target)
+        if not isinstance(target, PTWBundle):
+            raise TypeError(f"PTWAgent.bind requires a ptw interface, got {type(target).__name__}")
+        self.interface = target
 
     def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
         self.event_sink = sink

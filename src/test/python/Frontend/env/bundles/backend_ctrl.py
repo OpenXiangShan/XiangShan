@@ -25,7 +25,6 @@ class BackendCtrlBundle(Bundle):
         "redirect_bits_backend_iaf": "io_backend_toFtq_redirect_bits_backendIAF",
         "redirect_bits_debug_is_ctrl": "io_backend_toFtq_redirect_bits_debugIsCtrl",
         "redirect_bits_debug_is_mem_vio": "io_backend_toFtq_redirect_bits_debugIsMemVio",
-        "stall_reason_back_valid": "io_backend_stallReason_backReason_valid",
         "wfi_req": "io_backend_wfi_wfiReq",
         "ftq_idx_ahead_0_valid": "io_backend_toFtq_ftqIdxAhead_0_valid",
     }
@@ -61,7 +60,6 @@ class BackendCtrlBundle(Bundle):
     resolve_bits_attribute_branch_type = SignalList("io_backend_toFtq_resolve_#_bits_attribute_branchType", 3)
     resolve_bits_attribute_ras_action = SignalList("io_backend_toFtq_resolve_#_bits_attribute_rasAction", 3)
     call_ret_commit_valid = SignalList("io_backend_toFtq_callRetCommit_#_valid", 8)
-    stall_reason_back_valid = Signal()
     wfi_req = Signal()
     ftq_idx_ahead_0_valid = Signal()
 
@@ -88,6 +86,5 @@ class BackendCtrlBundle(Bundle):
             signal.value = 0
         for signal in self.call_ret_commit_valid:
             signal.value = 0
-        self.stall_reason_back_valid.value = 0
         self.wfi_req.value = 0
         self.ftq_idx_ahead_0_valid.value = 0

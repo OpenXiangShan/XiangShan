@@ -6,6 +6,16 @@ except Exception:  # pragma: no cover
     fc = None
 
 
+def _read_signal_value(dut, name: str, default: int = 0) -> int:
+    signal = getattr(dut, str(name), None)
+    if signal is None:
+        return int(default)
+    value = getattr(signal, "value", None)
+    if value is None:
+        return int(default)
+    return int(value)
+
+
 def _safe_add_watch_point(group, dut, bins, name):
     try:
         group.add_watch_point(dut, bins, name=name)
@@ -85,9 +95,9 @@ def get_coverage_groups(dut):
         fg_perf,
         dut,
         {
-            "CK-ICACHE-FIRE": lambda x: int(x.auto_inner_icache_client_out_a_valid.value) == 1
-            and int(x.auto_inner_icache_client_out_a_ready.value) == 1,
-            "CK-IBUF-FULL": lambda x: int(x.io_frontendInfo_ibufFull.value) == 1,
+            "CK-ICACHE-FIRE": lambda x: _read_signal_value(x, "auto_inner_icache_client_out_a_valid") == 1
+            and _read_signal_value(x, "auto_inner_icache_client_out_a_ready") == 1,
+            "CK-IBUF-FULL": lambda x: _read_signal_value(x, "io_frontendInfo_ibufFull") == 1,
         },
         name="FC-PERFORMANCE",
     )

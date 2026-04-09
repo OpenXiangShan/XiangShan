@@ -6,7 +6,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional
 
-from ..bundles import ICacheBundle, bind_bundle_optional
+from ..bundles import ICacheBundle
 from ..memory_model import MemoryModel
 
 
@@ -52,10 +52,9 @@ class ICacheAgent:
             return
 
     def bind(self, target) -> None:
-        if isinstance(target, ICacheBundle):
-            self.interface = target
-            return
-        self.interface = bind_bundle_optional(ICacheBundle, target)
+        if not isinstance(target, ICacheBundle):
+            raise TypeError(f"ICacheAgent.bind requires an icache interface, got {type(target).__name__}")
+        self.interface = target
 
     def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
         self.event_sink = sink

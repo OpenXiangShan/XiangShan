@@ -4,11 +4,14 @@ from typing import Iterable, Sequence
 
 from .sequences import (
     CheckPcSequence,
+    InitializeFrontendSequence,
     InjectRedirectSequence,
     LoadGoldenTraceSequence,
     LoadProgramFileSequence,
     LoadProgramSequence,
+    ResetFrontendSequence,
     RunUntilCommitSequence,
+    RunUntilGoldenTraceCompleteSequence,
 )
 from .transactions import (
     BpCtrlConfig,
@@ -70,12 +73,32 @@ def normalize_bp_ctrl_config(
     )
 
 
-def load_program(env, image: ProgramImage) -> int:
-    return LoadProgramSequence(image).run(env)
+def initialize_frontend(env, reset_vector=0x80000000, bare_mode=True, reset_cycles=20, step_cycles=0):
+    return InitializeFrontendSequence(
+        reset_vector=int(reset_vector),
+        bare_mode=bool(bare_mode),
+        reset_cycles=int(reset_cycles),
+        step_cycles=int(step_cycles),
+    ).run(env)
 
 
-def load_program_file(env, path, base_addr) -> int:
-    return LoadProgramFileSequence(path=str(path), base_addr=int(base_addr)).run(env)
+def reset_frontend(env, reset_cycles=1, step_cycles=0):
+    return ResetFrontendSequence(
+        reset_cycles=int(reset_cycles),
+        step_cycles=int(step_cycles),
+    ).run(env)
+
+
+def load_program(env, image: ProgramImage, step_cycles=0) -> int:
+    return LoadProgramSequence(image, step_cycles=int(step_cycles)).run(env)
+
+
+def load_program_file(env, path, base_addr, step_cycles=0) -> int:
+    return LoadProgramFileSequence(
+        path=str(path),
+        base_addr=int(base_addr),
+        step_cycles=int(step_cycles),
+    ).run(env)
 
 
 def load_golden_trace(env, source: GoldenTraceSource, step_cycles=0) -> int:
@@ -84,6 +107,29 @@ def load_golden_trace(env, source: GoldenTraceSource, step_cycles=0) -> int:
 
 def run_until_commit(env, target: CommitTarget) -> int:
     return RunUntilCommitSequence(target).run(env)
+
+
+def run_until_golden_trace_complete(
+    env,
+    max_cycles=10000,
+    progress_interval=0,
+    stall_snapshot_interval=0,
+    logger=None,
+    current_golden_pc_getter=None,
+    format_optional_pc=None,
+    stall_snapshot_capture=None,
+    stall_snapshot_formatter=None,
+) -> bool:
+    return RunUntilGoldenTraceCompleteSequence(
+        max_cycles=int(max_cycles),
+        progress_interval=int(progress_interval),
+        stall_snapshot_interval=int(stall_snapshot_interval),
+        logger=logger,
+        current_golden_pc_getter=current_golden_pc_getter,
+        format_optional_pc=format_optional_pc,
+        stall_snapshot_capture=stall_snapshot_capture,
+        stall_snapshot_formatter=stall_snapshot_formatter,
+    ).run(env)
 
 
 def inject_redirect(env, txn: RedirectTxn, redirect_delay_cycles=0) -> bool:

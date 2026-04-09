@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
 
-from ..bundles import BackendObserveBundle, bind_bundle_optional
+from ..bundles import BackendObserveBundle
 from ..model.branch_checker import BranchChecker
 from ..model.memory_model import MemoryModel
 from ..rvc_decoder import expand_rvc
@@ -132,10 +132,9 @@ class FrontendMonitor:
             return default
 
     def bind(self, target) -> None:
-        if isinstance(target, BackendObserveBundle):
-            self.interface = target
-            return
-        self.interface = bind_bundle_optional(BackendObserveBundle, target)
+        if not isinstance(target, BackendObserveBundle):
+            raise TypeError("FrontendMonitor requires an explicitly bound BackendObserveBundle")
+        self.interface = target
 
     def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
         self.event_sink = sink

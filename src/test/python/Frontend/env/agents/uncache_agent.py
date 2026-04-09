@@ -5,7 +5,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional
 
-from ..bundles import UncacheBundle, bind_bundle_optional
+from ..bundles import UncacheBundle
 from ..memory_model import MemoryModel
 
 
@@ -43,10 +43,9 @@ class UncacheAgent:
             return
 
     def bind(self, target) -> None:
-        if isinstance(target, UncacheBundle):
-            self.interface = target
-            return
-        self.interface = bind_bundle_optional(UncacheBundle, target)
+        if not isinstance(target, UncacheBundle):
+            raise TypeError(f"UncacheAgent.bind requires an uncache interface, got {type(target).__name__}")
+        self.interface = target
 
     def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
         self.event_sink = sink

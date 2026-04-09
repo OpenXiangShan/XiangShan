@@ -1,15 +1,12 @@
 import os
 import random
 import logging
+from typing import Iterable
 
 import pytest
 
-from env.api import (
-    api_Frontend_check_pc_sequence,
-    api_Frontend_load_program,
-    api_Frontend_get_branch_stats,
-    api_Frontend_run_until_commit,
-)
+from env.sequences import CheckPcSequence, LoadProgramSequence, RunUntilCommitSequence
+from env.transactions import CommitTarget, PcSequenceExpectation, ProgramImage
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -65,6 +62,17 @@ def _make_program(size: int = 128) -> list:
     return [NOP] * size
 
 
+def _instructions_to_bytes(instructions: Iterable[int]) -> bytes:
+    buf = bytearray()
+    for instr in instructions:
+        buf.extend((int(instr) & 0xFFFFFFFF).to_bytes(4, "little"))
+    return bytes(buf)
+
+
+def _program_image(instructions: Iterable[int], base_addr: int = BASE) -> ProgramImage:
+    return ProgramImage(payload=_instructions_to_bytes(instructions), base_addr=base_addr)
+
+
 def _rand_resolve_delays(rng: random.Random, env) -> tuple:
     """Randomize backend resolve delays and return (min_d, max_d)."""
     min_d = rng.randint(1, 6)
@@ -79,9 +87,11 @@ def test_jal_forward_jump_observes_target_pc(env):
     prog = _make_program(64)
     prog[0] = _jal(0, 8)
 
-    api_Frontend_load_program(env, prog, BASE)
+    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
 
-    assert api_Frontend_check_pc_sequence(env, [BASE, BASE + 8], max_cycles=600)
+    assert CheckPcSequence(
+        expectation=PcSequenceExpectation(expected_pcs=(BASE, BASE + 8), max_cycles=600),
+    ).run(env)
     assert not env.monitor.get_errors()
 
 
@@ -93,8 +103,8 @@ def test_jal_resolve_drains_pending_queue(env):
     prog = _make_program(64)
     prog[8] = _jal(0, 8)
 
-    api_Frontend_load_program(env, prog, BASE)
-    commits = api_Frontend_run_until_commit(env, target_count=6, max_cycles=3000)
+    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    commits = RunUntilCommitSequence(target=CommitTarget(target_count=6, max_cycles=3000)).run(env)
 
     assert commits >= 6
     assert len(env.backend_model._pending_resolves) == 0
@@ -143,9 +153,11 @@ def test_multi_branch_random_positions(env):
         seed, prog_size, stride, positions, n_jal, n_beq, min_d, max_d, target_commits,
     )
 
-    api_Frontend_load_program(env, prog, BASE)
-    commits = api_Frontend_run_until_commit(env, target_commits, max_cycles=5000)
-    stats = api_Frontend_get_branch_stats(env)
+    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    commits = RunUntilCommitSequence(
+        target=CommitTarget(target_count=target_commits, max_cycles=5000),
+    ).run(env)
+    stats = env.branch_checker.get_stats()
 
     logger.info("commits=%d stats=%s", commits, stats)
 
@@ -218,9 +230,11 @@ def test_multi_cfi_per_ftq_entry(env):
         min_d, max_d, target_commits,
     )
 
-    api_Frontend_load_program(env, prog, BASE)
-    commits = api_Frontend_run_until_commit(env, target_commits, max_cycles=8000)
-    stats = api_Frontend_get_branch_stats(env)
+    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    commits = RunUntilCommitSequence(
+        target=CommitTarget(target_count=target_commits, max_cycles=8000),
+    ).run(env)
+    stats = env.branch_checker.get_stats()
 
     logger.info("commits=%d stats=%s", commits, stats)
 
@@ -272,9 +286,11 @@ def test_multi_branch_dense_loop(env):
         seed, loop_size, beq_stride, beq_positions, n_beq, min_d, max_d, target_commits,
     )
 
-    api_Frontend_load_program(env, prog, BASE)
-    commits = api_Frontend_run_until_commit(env, target_commits, max_cycles=6000)
-    stats = api_Frontend_get_branch_stats(env)
+    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    commits = RunUntilCommitSequence(
+        target=CommitTarget(target_count=target_commits, max_cycles=6000),
+    ).run(env)
+    stats = env.branch_checker.get_stats()
 
     logger.info("commits=%d stats=%s", commits, stats)
 
@@ -348,9 +364,11 @@ def test_large_loop_multi_segment(env):
         min_d, max_d, target_commits,
     )
 
-    api_Frontend_load_program(env, prog, BASE)
-    commits = api_Frontend_run_until_commit(env, target_commits, max_cycles=30000)
-    stats   = api_Frontend_get_branch_stats(env)
+    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    commits = RunUntilCommitSequence(
+        target=CommitTarget(target_count=target_commits, max_cycles=30000),
+    ).run(env)
+    stats = env.branch_checker.get_stats()
 
     logger.info("commits=%d stats=%s", commits, stats)
 

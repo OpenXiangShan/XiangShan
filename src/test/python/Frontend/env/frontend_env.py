@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable, Dict, Optional
 
+from .agents.backend_agent import BackendAgent
 from .agents.icache_agent import ICacheAgent
 from .agents.ptw_agent import PTWAgent
 from .agents.uncache_agent import UncacheAgent
@@ -14,18 +16,20 @@ from .bundles import (
     BackendObserveBundle,
     CSRControlBundle,
     ClockResetBundle,
+    DFTControlBundle,
     FrontendInfoBundle,
     ICacheBundle,
     PTWBundle,
     UncacheBundle,
     bind_bundle_optional,
+    bind_bundle_required,
 )
 from .env_config import DEFAULT_ENV_CONFIG, EnvConfig
 from .logging_utils import configure_env_logging, parse_log_level
 from .model import GoldenTrace, MemoryModel, PageTableModel
 from .model.branch_checker import BranchChecker
+from .monitors.backend_observe_monitor import BackendObserveMonitor
 from .monitors.frontend_monitor import FrontendMonitor
-from .signal_utils import has_sig, set_sig
 
 
 class FrontendEnv:
@@ -76,9 +80,11 @@ class FrontendEnv:
         return {
             "branch_checker": branch_checker,
             "monitor": FrontendMonitor(memory=self.memory, branch_checker=branch_checker),
+            "backend_observe_monitor": BackendObserveMonitor(),
             "icache_agent": ICacheAgent(self.memory),
             "uncache_agent": UncacheAgent(self.memory),
             "ptw_agent": PTWAgent(self.page_table),
+            "backend_agent": BackendAgent(),
             "backend_model": BackendModel(
                 ftq_size=self.config.backend.ftq_size,
                 ibuf_watchdog_threshold=self.config.backend.ibuf_watchdog_threshold,
@@ -92,9 +98,11 @@ class FrontendEnv:
     def _apply_collaborators(self, collaborators: Dict[str, object]) -> None:
         self.branch_checker = collaborators["branch_checker"]
         self.monitor = collaborators["monitor"]
+        self.backend_observe_monitor = collaborators["backend_observe_monitor"]
         self.icache_agent = collaborators["icache_agent"]
         self.uncache_agent = collaborators["uncache_agent"]
         self.ptw_agent = collaborators["ptw_agent"]
+        self.backend_agent = collaborators["backend_agent"]
         self.backend_model = collaborators["backend_model"]
 
     def _configure_collaborators(self, explicit_page_table: bool = False) -> None:
@@ -120,21 +128,32 @@ class FrontendEnv:
         except Exception:
             return
 
+    def _backend_observe_bind_target(self):
+        return SimpleNamespace(
+            io_backend_fromFtq_wen=self.backend_from_ftq_if.io_backend_fromFtq_wen,
+            io_backend_fromFtq_ftqIdx=self.backend_from_ftq_if.io_backend_fromFtq_ftqIdx,
+            io_backend_fromFtq_startPc_addr=self.backend_from_ftq_if.io_backend_fromFtq_startPc_addr,
+            io_frontendInfo_ibufFull=self.frontend_info_if.io_frontendInfo_ibufFull,
+        )
+
     def _create_interfaces(self) -> None:
-        self.clock_reset = bind_bundle_optional(ClockResetBundle, self.dut)
+        self.clock_reset = bind_bundle_required(ClockResetBundle, self.dut)
+        self.csr_ctrl_if = bind_bundle_required(CSRControlBundle, self.dut)
+        self.dft_ctrl_if = bind_bundle_required(DFTControlBundle, self.dut)
         self.icache_if = bind_bundle_optional(ICacheBundle, self.dut)
         self.uncache_if = bind_bundle_optional(UncacheBundle, self.dut)
         self.ptw_if = bind_bundle_optional(PTWBundle, self.dut)
-        self.backend_ctrl_if = bind_bundle_optional(BackendCtrlBundle, self.dut)
+        self.backend_ctrl_if = bind_bundle_required(BackendCtrlBundle, self.dut)
         self.backend_observe_if = bind_bundle_optional(BackendObserveBundle, self.dut)
         self.backend_from_ftq_if = bind_bundle_optional(BackendFromFtqBundle, self.dut)
         self.frontend_info_if = bind_bundle_optional(FrontendInfoBundle, self.dut)
-        self.csr_ctrl_if = bind_bundle_optional(CSRControlBundle, self.dut)
 
     def _bind_collaborators(self) -> None:
         self.icache_agent.bind(self.icache_if)
         self.uncache_agent.bind(self.uncache_if)
         self.ptw_agent.bind(self.ptw_if)
+        self.backend_agent.bind(self.backend_ctrl_if)
+        self.backend_observe_monitor.bind(self._backend_observe_bind_target())
         self.monitor.bind(self.backend_observe_if)
         if hasattr(self.backend_model, "bind_interfaces"):
             self.backend_model.bind_interfaces(
@@ -167,14 +186,16 @@ class FrontendEnv:
             self.backend_model,
         )
 
-    def _clock_edge_collaborators(self) -> tuple:
-        return (
-            self.icache_agent,
-            self.uncache_agent,
-            self.ptw_agent,
-            self.backend_model,
-            self.monitor,
-        )
+    def _drive_backend_cycle(self, cycle: int) -> None:
+        self.backend_model.begin_cycle(cycle)
+        observation = self.backend_observe_monitor.snapshot()
+        self.backend_model.consume_backend_observation(observation)
+        actions = self.backend_model.plan_cycle_actions()
+        self.backend_agent.start_cycle(actions.can_accept)
+        self.backend_agent.drive_commit(actions.commit_entry)
+        self.backend_agent.drive_resolves(actions.resolve_entries)
+        if actions.redirect_payload is not None:
+            self.backend_agent.drive_redirect(actions.redirect_payload)
 
     def _emit_event(self, event_type: str, payload: Dict, level: str = "INFO") -> None:
         if self.event_sink is None:
@@ -188,16 +209,8 @@ class FrontendEnv:
         }
         self.event_sink(evt)
 
-    def _set_if_exists(self, name: str, value: int) -> None:
-        if has_sig(self.dut, name):
-            set_sig(self.dut, name, value)
-
     def _init_inputs(self) -> None:
         self.clock_reset.drive_idle(reset_vector_addr=0x40000000)
-        self.icache_if.drive_idle()
-        self.uncache_if.drive_idle()
-        self.ptw_if.drive_idle()
-        self.backend_ctrl_if.drive_idle()
         self.csr_ctrl_if.drive_idle(
             ubtb_enable=self.bp_ctrl_ubtb_enable,
             abtb_enable=self.bp_ctrl_abtb_enable,
@@ -206,11 +219,19 @@ class FrontendEnv:
             sc_enable=self.bp_ctrl_sc_enable,
             ittage_enable=self.bp_ctrl_ittage_enable,
         )
+        self.dft_ctrl_if.drive_idle()
+        self.icache_if.drive_idle()
+        self.uncache_if.drive_idle()
+        self.ptw_if.drive_idle()
+        self.backend_ctrl_if.drive_idle()
 
     def _on_clock_edge(self, cycle: int) -> None:
         self.current_cycle = int(cycle)
-        for collaborator in self._clock_edge_collaborators():
-            collaborator.on_clock_edge(cycle)
+        self.icache_agent.on_clock_edge(cycle)
+        self.uncache_agent.on_clock_edge(cycle)
+        self.ptw_agent.on_clock_edge(cycle)
+        self._drive_backend_cycle(cycle)
+        self.monitor.on_clock_edge(cycle)
         self._emit_event("clock.tick", {"cycle": int(cycle)}, level="DEBUG")
 
     def step(self, cycles: int = 1) -> int:

@@ -8,6 +8,7 @@ from typing import Callable, Deque, Dict, Optional
 
 from .agents.backend_agent import BackendAgent
 from .bundles import BackendCtrlBundle, BackendFromFtqBundle, BackendObserveBundle, FrontendInfoBundle, bind_bundle_optional
+from .model.backend_runtime import BackendCycleActions, BackendObservationSnapshot
 from .model.backend_state import BackendEvent, BackendState, FrontendPacket, FtqEntry, ResolveEntry
 from .model.ftq_scoreboard import FtqScoreboard
 from .trace import GoldenTrace, TraceEntry
@@ -16,14 +17,13 @@ _MIN_BACKEND_DELAY = 3
 _GOLDEN_TRACE_RESOLVE_MIN_DELAY = 3
 _GOLDEN_TRACE_RESOLVE_MAX_DELAY = 5
 
-# BackendModel Task 8 compatibility checklist:
+# BackendModel compatibility checklist:
 # - Public methods stay source-compatible: bind/attach_*/set_event_sink/set_golden_trace/
 #   set_can_accept/inject_redirect/inject_exception/wait_for_commits/on_clock_edge/get_stats/
 #   pending_work_count/has_pending_work/recent_events.
-# - FrontendEnv clock-edge ordering stays fixed: canAccept+one-shot clear before sampling, then
-#   resolves, commits, and finally pending event delivery.
-# - commit/resolve/redirect FTQ pointer, valid-bit, and flush semantics must remain compatible.
-# - golden trace attach/reset, per-cycle cursor snapshots, and wait_pc/cursor behavior must match.
+# - FrontendEnv owns backend-agent/backend-observation ordering; BackendModel plans actions and
+#   retains FTQ, golden-trace, commit, resolve, and redirect semantics.
+# - The legacy model-owned drive path remains available only as a compatibility wrapper.
 
 
 class BackendModel:
@@ -82,10 +82,10 @@ class BackendModel:
         self._golden_wait_pc: Optional[int] = None
         self._cycle_start_golden_pc: Optional[int] = None
         self._cycle_start_golden_cursor: Optional[int] = None
+        self._last_observation = BackendObservationSnapshot()
 
         self._backend_state = BackendState(ftq_size=self.ftq_size)
         self._ftq_scoreboard = FtqScoreboard(self._backend_state)
-        self._backend_agent = BackendAgent()
 
     def _sync_backend_state(self) -> BackendState:
         state = self._backend_state
@@ -212,7 +212,6 @@ class BackendModel:
         self.observe_if = observe_if
         self.from_ftq_if = from_ftq_if
         self.frontend_info_if = frontend_info_if
-        self._backend_agent.bind(drive_if)
 
     def attach_env(self, env) -> None:
         self.env = env
@@ -247,6 +246,31 @@ class BackendModel:
         start = int(self._cycle_start_golden_cursor)
         stop = min(len(trace.entries), start + int(count))
         return [int(trace.entries[idx].pc) for idx in range(start, stop)]
+
+    def begin_cycle(self, cycle: int) -> None:
+        self.current_cycle = int(cycle)
+        self._cycle_start_golden_cursor = None if self.golden_trace is None else int(self.golden_trace.cursor)
+        self._cycle_start_golden_pc = self.current_golden_pc()
+
+    def consume_backend_observation(self, observation: BackendObservationSnapshot) -> None:
+        self._last_observation = observation
+
+    def current_frontend_observation(self) -> BackendObservationSnapshot:
+        return self._last_observation
+
+    def _snapshot_bound_observation(self) -> BackendObservationSnapshot:
+        return BackendObservationSnapshot(
+            from_ftq_wen=self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_wen", None)),
+            from_ftq_ftq_idx=self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_ftqIdx", None)),
+            from_ftq_start_pc_addr=self._read(getattr(self.from_ftq_if, "io_backend_fromFtq_startPc_addr", None)),
+            ibuf_full=self._read(getattr(self.frontend_info_if, "io_frontendInfo_ibufFull", None)),
+        )
+
+    def _bound_backend_agent(self) -> BackendAgent:
+        assert self.drive_if is not None
+        agent = BackendAgent()
+        agent.bind(self.drive_if)
+        return agent
 
     def set_golden_trace(self, trace: Optional[GoldenTrace]) -> None:
         self.golden_trace = trace
@@ -610,7 +634,7 @@ class BackendModel:
             return 3, ras_action, 0, True
         return None
 
-    def _update_ftq_start_pc_cache(self) -> None:
+    def _update_ftq_start_pc_cache(self, observation: BackendObservationSnapshot) -> None:
         """Cache per-FTQ-entry start PCs reported by DUT's fromFtq interface.
 
         When io_backend_fromFtq_wen is high the DUT writes the canonical startPc
@@ -618,10 +642,9 @@ class BackendModel:
         (flag<<6 | value[5:0]) so that _sample_cfvec can look it up by the same
         key reconstructed from cfVec's ftqPtr_flag / ftqPtr_value fields.
         """
-        assert self.from_ftq_if is not None
-        if self._read(self.from_ftq_if.io_backend_fromFtq_wen, 0):
-            ftq_idx = int(self._read(self.from_ftq_if.io_backend_fromFtq_ftqIdx, 0))
-            start_pc = self._decode_backend_addr(self._read(self.from_ftq_if.io_backend_fromFtq_startPc_addr, 0))
+        if int(observation.from_ftq_wen):
+            ftq_idx = int(observation.from_ftq_ftq_idx)
+            start_pc = self._decode_backend_addr(int(observation.from_ftq_start_pc_addr))
             self._ftq_start_pc_cache[ftq_idx] = start_pc
             self._ftq_start_pc_by_value[ftq_idx & 0x3F] = start_pc
 
@@ -924,14 +947,14 @@ class BackendModel:
                 self._seal_current_ftq_entry()
             break
 
-    def _drive_resolves(self) -> None:
-        driven_entries: list[ResolveEntry] = []
+    def _ready_resolves_for_cycle(self) -> tuple[ResolveEntry, ...]:
+        ready_entries: list[ResolveEntry] = []
         to_remove = []
         frontier_pc = self.current_golden_pc()
         if frontier_pc is None and self._golden_wait_pc is not None:
             frontier_pc = int(self._golden_wait_pc)
         for entry in self._pending_resolves:
-            if len(driven_entries) >= 3:
+            if len(ready_entries) >= 3:
                 break
             if entry.ready_cycle > self.current_cycle:
                 continue
@@ -992,7 +1015,7 @@ class BackendModel:
                 and not allow_indirect_catchup_redirect
             ):
                 continue
-            driven_entries.append(replace(entry, mispredict=bool(effective_mispredict)))
+            ready_entries.append(replace(entry, mispredict=bool(effective_mispredict)))
             redirect_level = 0
             if self.auto_redirect_on_golden_mispredict and effective_mispredict:
                 self._queue_redirect_event(
@@ -1022,19 +1045,21 @@ class BackendModel:
             self._ftq_scoreboard.note_resolve(entry, self.current_cycle, entry_flushes_itself)
             self._apply_backend_state()
             to_remove.append(entry)
-        self._backend_agent.drive_resolves(driven_entries)
         for entry in to_remove:
             self._pending_resolves.remove(entry)
+        return tuple(ready_entries)
 
-    def _drive_commit(self) -> None:
-        self._backend_agent.drive_commit(None)
+    def _drive_resolves(self) -> None:
+        self._bound_backend_agent().drive_resolves(self._ready_resolves_for_cycle())
+
+    def _plan_commit_entry_for_cycle(self) -> Optional[FtqEntry]:
         if self.can_accept == 0:
-            return
+            return None
         if self._has_pending_control_event():
-            return
+            return None
         head = self._find_next_commitable_entry()
         if head is None:
-            return
+            return None
         self.ftq_entries.remove(head)
         self.ftq_entries = deque(
             entry
@@ -1046,18 +1071,21 @@ class BackendModel:
         self.commit_ptr_flag = head.ftq_flag
         self.commit_ptr_value = head.ftq_value
         self.commit_count += 1
-        self._backend_agent.drive_commit(head)
         self._emit_event("commit", {"commit_count": self.commit_count, "ftq_flag": head.ftq_flag, "ftq_value": head.ftq_value})
+        return head
+
+    def _drive_commit(self) -> None:
+        self._bound_backend_agent().drive_commit(self._plan_commit_entry_for_cycle())
 
     def _clear_one_shot_signals(self) -> None:
-        self._backend_agent.clear_one_shot_signals()
+        self._bound_backend_agent().clear_one_shot_signals()
 
     def _recompute_cfi_budgets_from_pending_resolves(self) -> None:
         self._sync_backend_state()
         self._ftq_scoreboard.recompute_cfi_budgets_from_pending_resolves()
         self._apply_backend_state()
 
-    def _drive_redirect(self, payload: dict) -> None:
+    def _plan_redirect_payload(self, payload: dict) -> dict:
         target_pc = int(payload.get("target_pc", self.safe_pc))
         reason = str(payload.get("reason", "redirect"))
         from_pc = int(payload.get("pc", target_pc))
@@ -1123,7 +1151,7 @@ class BackendModel:
             drive_ftq_offset = int(drive_override.get("ftq_offset", drive_ftq_offset))
             drive_is_rvc = int(drive_override.get("is_rvc", drive_is_rvc))
 
-        self._backend_agent.drive_redirect({
+        drive_payload = {
             "pc": drive_from_pc,
             "target_pc": target_pc,
             "taken": taken,
@@ -1134,7 +1162,7 @@ class BackendModel:
             "branch_type": branch_type,
             "ras_action": ras_action,
             "level": 0,
-        })
+        }
         if self.monitor is not None:
             self.monitor.notify_redirect(target_pc, reason=reason)
         if "mispredict" in reason and self.branch_checker is not None:
@@ -1150,13 +1178,17 @@ class BackendModel:
             "backend.redirect",
             {"from_pc": int(from_pc), "target_pc": int(target_pc), "reason": reason},
         )
+        return drive_payload
 
-    def _process_pending_events(self) -> None:
+    def _drive_redirect(self, payload: dict) -> None:
+        self._bound_backend_agent().drive_redirect(self._plan_redirect_payload(payload))
+
+    def _ready_redirect_for_cycle(self) -> Optional[dict]:
         if not self.pending_events:
-            return
+            return None
         top = self.pending_events[0]
         if self.current_cycle < top.ready_cycle:
-            return
+            return None
         top = self.pending_events.popleft()
         if top.kind == "redirect":
             target_pc = top.payload.get("target_pc", None)
@@ -1166,16 +1198,17 @@ class BackendModel:
                     if int(obs.cycle) < queued_cycle:
                         break
                     if int(obs.pc) == int(target_pc):
-                        return
+                        return None
         if top.kind == "redirect":
-            self._drive_redirect(top.payload)
+            return self._plan_redirect_payload(top.payload)
         elif top.kind == "exception":
-            self._drive_redirect(top.payload)
+            redirect_payload = self._plan_redirect_payload(top.payload)
             self._emit_event("exception", {"cause": top.payload.get("cause", 0)})
+            return redirect_payload
+        return None
 
-    def _watchdog(self) -> None:
-        assert self.frontend_info_if is not None
-        if self._read(self.frontend_info_if.io_frontendInfo_ibufFull, 0) == 1:
+    def _watchdog(self, observation: BackendObservationSnapshot) -> None:
+        if int(observation.ibuf_full) == 1:
             self.ibuf_full_streak += 1
         else:
             self.ibuf_full_streak = 0
@@ -1256,18 +1289,34 @@ class BackendModel:
             self.env.step(1)
         return self.commit_count - start
 
+    def plan_cycle_actions(self) -> BackendCycleActions:
+        observation = self._last_observation
+        self._update_ftq_start_pc_cache(observation)
+        self._watchdog(observation)
+        if self.observe_if is not None:
+            self._sample_cfvec()
+        resolve_entries = self._ready_resolves_for_cycle()
+        commit_entry = self._plan_commit_entry_for_cycle()
+        redirect_payload = self._ready_redirect_for_cycle()
+        return BackendCycleActions(
+            can_accept=self.can_accept,
+            commit_entry=commit_entry,
+            resolve_entries=resolve_entries,
+            redirect_payload=redirect_payload,
+        )
+
     def on_clock_edge(self, cycle: int) -> None:
         if self.drive_if is None or self.observe_if is None or self.from_ftq_if is None or self.frontend_info_if is None:
             return
-        self.current_cycle = int(cycle)
-        self._cycle_start_golden_cursor = None if self.golden_trace is None else int(self.golden_trace.cursor)
-        self._cycle_start_golden_pc = self.current_golden_pc()
-        self._backend_agent.start_cycle(self.can_accept)
-        self._update_ftq_start_pc_cache()
-        self._sample_cfvec()
-        self._drive_resolves()
-        self._drive_commit()
-        self._process_pending_events()
+        self.begin_cycle(cycle)
+        agent = self._bound_backend_agent()
+        agent.start_cycle(self.can_accept)
+        self.consume_backend_observation(self._snapshot_bound_observation())
+        actions = self.plan_cycle_actions()
+        agent.drive_commit(actions.commit_entry)
+        agent.drive_resolves(actions.resolve_entries)
+        if actions.redirect_payload is not None:
+            agent.drive_redirect(actions.redirect_payload)
 
     def get_stats(self) -> dict:
         return {

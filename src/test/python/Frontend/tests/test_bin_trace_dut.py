@@ -3,11 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from env.api import (
-    api_Frontend_load_golden_trace,
-    api_Frontend_load_program_file,
-    api_Frontend_run_until_golden_complete,
+from env.sequences import (
+    LoadGoldenTraceSequence,
+    LoadProgramFileSequence,
+    RunUntilGoldenTraceCompleteSequence,
 )
+from env.transactions import GoldenTraceSource
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -28,7 +29,10 @@ def _parse_int(raw: str) -> int:
 
 def _should_run_to_trace_completion(bin_path: Path) -> bool:
     return _RUN_TO_TRACE_COMPLETION or Path(bin_path).name == "microbench.bin"
+
+
 _TRACE_MAX_CYCLES = _parse_int(os.getenv("TB_TRACE_MAX_CYCLES", "0"))
+
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.skipif(not _RUN_PIPELINE_TEST, reason="pipeline-only test")
@@ -41,11 +45,19 @@ def test_bin_trace(env):
     assert bin_path.is_file(), f"bin file not found: {bin_path}"
     assert trace_path.is_file(), f"trace file not found: {trace_path}"
 
-    bin_size = int(api_Frontend_load_program_file(env, str(bin_path), base_addr))
-    trace_entries = int(api_Frontend_load_golden_trace(env, str(trace_path)))
+    bin_size = LoadProgramFileSequence(
+        path=str(bin_path),
+        base_addr=base_addr,
+        step_cycles=1,
+    ).run(env)
+    trace_entries = LoadGoldenTraceSequence(
+        source=GoldenTraceSource(path=str(trace_path)),
+    ).run(env)
 
     if _should_run_to_trace_completion(bin_path):
-        completed = bool(api_Frontend_run_until_golden_complete(env, max_cycles=_TRACE_MAX_CYCLES))
+        completed = RunUntilGoldenTraceCompleteSequence(
+            max_cycles=_TRACE_MAX_CYCLES,
+        ).run(env)
         assert completed is True
     elif step_cycles > 0:
         env.step(step_cycles)
