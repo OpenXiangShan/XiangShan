@@ -17,7 +17,6 @@ import yunsuan.VfmaType
 
 
 class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfmaType.dummy, "Vfcvt OpType not supported")
 
   // io alias
   private val src0 = inData.src(0)
