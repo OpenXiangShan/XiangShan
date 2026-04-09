@@ -117,6 +117,7 @@ case class Pbus2Params(
     ),
     // bit[47:44] >0,0x1B000000~0x1B000FFF,for cross die debug
     crsdmAddrMap: Seq[AddressSet] = Seq(
+      AddressSet((BigInt(0) << 44) + 0x1B000000L, 0xFFF),
       AddressSet((BigInt(1) << 44) + 0x1B000000L, 0xFFF),
       AddressSet((BigInt(2) << 44) + 0x1B000000L, 0xFFF),
       AddressSet((BigInt(3) << 44) + 0x1B000000L, 0xFFF),
@@ -145,15 +146,18 @@ case class Pbus2Params(
  */
 class AXIDataBridge(SrcDataWidth: Int, DestDataWidth: Int, errorAddrMap: AddressSet)(implicit p: Parameters) extends LazyModule {
   println("=====AXIDataBridge: start define=====")
+  private val indexedIdBits = 6
+  private val maxInFlightSources = 1 << indexedIdBits
   val axi_xbar_i = AXI4Xbar()
   val axi_xbar_o = AXI4Xbar()
   //  private val tmp_xbar = TLXbar()
   val error_xbar = TLXbar()
+  private val errorMaxTransfer = scala.math.min(4096, (DestDataWidth / 8) * (1 << AXI4Parameters.lenBits))
   val error = LazyModule(new TLError(
     params = DevNullParams(
       address = Seq(errorAddrMap),
       maxAtomic = 1,
-      maxTransfer = 256), // max 32B
+      maxTransfer = errorMaxTransfer),
     beatBytes = DestDataWidth/8
   ))
   error.node := error_xbar
@@ -161,19 +165,21 @@ class AXIDataBridge(SrcDataWidth: Int, DestDataWidth: Int, errorAddrMap: Address
   axi_xbar_o :=
 //    AXI4Buffer() :=
     AXI4Buffer() :=
-//    AXI4IdIndexer(CPUidBits = 10) :=
+    AXI4IdIndexer(indexedIdBits) :=
     AXI4UserYanker() :=
     AXI4Deinterleaver(DestDataWidth/8) :=
     TLToAXI4(wcorrupt = false) :=
+    TLSourceShrinker(maxInFlightSources) :=
+    TLFragmenter(DestDataWidth/8, errorMaxTransfer, holdFirstDeny = true) :=
     error_xbar :=
     TLBuffer.chainNode(2) :=
     TLFIFOFixer() :=
     TLWidthWidget(SrcDataWidth/8) :=
     AXI4ToTL(wcorrupt = false) :=
-    AXI4UserYanker() :=
-//   AXI4Fragmenter() :=
+    AXI4UserYanker(Some(1)) :=
+    AXI4Fragmenter() :=
+    AXI4IdIndexer(indexedIdBits) :=
     AXI4Buffer() :=
-//    AXI4IdIndexer(1) :=
     axi_xbar_i
   lazy val module = new Imp
   class Imp extends LazyModuleImp(this)
@@ -260,8 +266,8 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   val aplic_mNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     masters = Seq(AXI4MasterParameters(
       name = "master-node",
-      maxFlight = Some(1),
-      id = IdRange(0, 1 << params.APLICidBits)
+      maxFlight = Some(16),
+      id = IdRange(0, 0)
     ))
   )))
 
