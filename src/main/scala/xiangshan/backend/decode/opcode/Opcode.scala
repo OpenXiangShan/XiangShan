@@ -64,6 +64,7 @@ object Opcode {
   val FCvtOpcodes = opcodes.FCvtOpcode
   val FMiscOpcodes = opcodes.FMiscOpcode
   val FMacOpcodes = opcodes.FMacOpcode
+  val VFMacOpcodes = opcodes.VFMacOpcode
 
   // Todo: remove these
   def X = BitPat("b0_0000_0000")
@@ -1011,6 +1012,8 @@ object Opcode {
 
   object VFRedOpcodes extends VFRedOpcodes
 
+  object VFDivOpcodes extends opcodes.VFDivOpcode
+
   trait VSetOpcodes extends Opcodes {
     // vtype is from imm
     private val vtypeI   = bb"0"
@@ -1124,7 +1127,7 @@ object Opcode {
       val ts = opcode.getTraits.collect{ case t : Src1Trait => t }.toSeq
 
       require(
-        ts.size <= 1,
+        ts.size <= 2,
         s"opcode${opcode} should only contain one Src1Trait, but it has $ts"
       )
 
@@ -1135,7 +1138,7 @@ object Opcode {
       val ts = opcode.getTraits.collect{ case t : Src2Trait => t }.toSeq
 
       require(
-        ts.size <= 1,
+        ts.size <= 2,
         s"opcode${opcode} should only contain one Src2Trait, but it has $ts"
       )
 
@@ -1146,7 +1149,7 @@ object Opcode {
       val ts = opcode.getTraits.collect{ case t : Src3Trait => t }.toSeq
 
       require(
-        ts.size <= 1,
+        ts.size <= 2,
         s"opcode${opcode} should only contain one Src3Trait, but it has $ts"
       )
 
@@ -1157,7 +1160,7 @@ object Opcode {
       val ts = opcode.getTraits.collect{ case t : MaskTrait => t }.toSeq
 
       require(
-        ts.size <= 1,
+        ts.size <= 2,
         s"opcode${opcode} should only contain one MaskTrait, but it has $ts"
       )
 
