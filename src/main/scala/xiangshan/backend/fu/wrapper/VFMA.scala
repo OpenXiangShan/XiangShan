@@ -9,12 +9,11 @@ import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
 import xiangshan.ExceptionNO
-import yunsuan.VfpuType
-import yunsuan.VfmaType
 import yunsuan.vector.VectorFloatFMA
+import xiangshan.backend.decode.opcode.Opcode.VFMacOpcodes
 
 class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfalu OpType not supported")
+  import VFMacOpcodes._
 
   // params alias
   private val dataWidth = cfg.destDataBits
@@ -22,8 +21,8 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val numVecModule = dataWidth / dataWidthOfDataModule
 
   // io alias
-  private val opcode  = fuOpType(3,0)
-  private val resWiden  = fuOpType(4)
+  private val opcode: UInt = fuOpType
+  private val resWiden  = isResWiden(opcode)
 
   // modules
   private val vfmas = Seq.fill(numVecModule)(Module(new VectorFloatFMA))
@@ -80,7 +79,7 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
         ((vsew === VSew.e32) & (!vs1Split.io.outVec64b(i).head(32).andR)) |
           ((vsew === VSew.e16) & (!vs1Split.io.outVec64b(i).head(48).andR))
         )
-      fp_cIsFpCanonicalNAN(i) := !(opcode === VfmaType.vfmul) & vecCtrl.fpu.isFpToVecInst & (
+      fp_cIsFpCanonicalNAN(i) := !isFmul(opcode) & vecCtrl.fpu.isFpToVecInst & (
         ((vsew === VSew.e32) & (!oldVdSplit.io.outVec64b(i).head(32).andR)) |
           ((vsew === VSew.e16) & (!oldVdSplit.io.outVec64b(i).head(48).andR))
         )
@@ -90,7 +89,7 @@ class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   }
 
   val outFuOpType = outCtrl.fuOpType
-  val outWiden = outCtrl.fuOpType(4)
+  val outWiden = isResWiden(outCtrl.fuOpType)
   val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
   val outVuopidx = outVecCtrl.vuopIdx(2, 0)
   val vlMax = ((VLEN / 8).U >> outEew).asUInt
