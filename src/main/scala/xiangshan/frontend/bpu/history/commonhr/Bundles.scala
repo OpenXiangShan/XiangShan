@@ -46,12 +46,12 @@ class CommonHRResolveMeta(implicit p: Parameters) extends CommonHRBundle {
   val ghr:   UInt = UInt(GhrHistoryLength.W)
   val bw:    UInt = UInt(BWHistoryLength.W)
 
-  val imli: UInt = UInt(ImliWidth.W)
+  val imli: UInt = UInt(ImliHistoryLength.W)
 }
 class CommonHRMeta(implicit p: Parameters) extends CommonHRBundle {
   val ghr:       UInt                 = UInt(GhrHistoryLength.W)
   val bw:        UInt                 = UInt(BWHistoryLength.W)
-  val imli:      UInt                 = UInt(ImliWidth.W)
+  val imli:      UInt                 = UInt(ImliHistoryLength.W)
   val hitMask:   Vec[Bool]            = Vec(NumBtbResultEntries, Bool())
   val attribute: Vec[BranchAttribute] = Vec(NumBtbResultEntries, new BranchAttribute)
   val position:  Vec[UInt]            = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))

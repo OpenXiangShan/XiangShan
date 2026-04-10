@@ -41,6 +41,11 @@ class ScTable(
 
   val io = IO(new ScTableIO())
 
+  println(f"Sc$tableType[$tableIdx]:")
+  println(f"  Size(set, bank, way): $numSets * $NumBanks * $numWays")
+  println(f"  Address fields:")
+  addrFields.show(indent = 4)
+
   def numRows: Int = numSets
 
   private val sram = Seq.fill(NumBanks)(

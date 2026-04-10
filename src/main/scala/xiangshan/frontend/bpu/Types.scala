@@ -130,24 +130,22 @@ class IttageTableInfo(
 }
 
 class ScTableInfo(
-    val Size:          Int,
+    val NumSets:       Int,
     val HistoryLength: Int
 ) extends NamedTuple[(Int, Int)] {
-  require(Size > 0, "Size must be > 0")
+  require(NumSets > 0, "NumSets must be > 0")
   require(HistoryLength >= 0, "HistoryLength must be >= 0")
 
   def asTuple: (Int, Int) =
-    (Size, HistoryLength)
+    (NumSets, HistoryLength)
 
-  def getFoldedHistoryInfoSet(numWays: Int, numBanks: Int): Set[FoldedHistoryInfo] = {
-    require(numBanks > 0, "numBanks must be > 0")
+  def getFoldedHistoryInfoSet(): Set[FoldedHistoryInfo] =
     if (HistoryLength > 0)
       Set(
-        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(Size)))
+        new FoldedHistoryInfo(HistoryLength, min(HistoryLength, log2Ceil(NumSets)))
       )
     else
       Set[FoldedHistoryInfo]()
-  }
 }
 
 class FoldedHistoryInfo(

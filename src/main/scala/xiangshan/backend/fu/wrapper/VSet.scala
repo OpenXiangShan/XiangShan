@@ -17,7 +17,7 @@ class VSetBase(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   protected val in = io.in.bits
   protected val out = io.out.bits
 
-  protected val vsetModule = Module(new VsetModule)
+  protected val vsetModule = Module(new VsetModule(cfg))
 
   protected val flushed = io.in.bits.ctrl.robIdx.needFlush(io.flush)
 
@@ -100,19 +100,23 @@ class VSetRvfWvf(cfg: FuConfig)(implicit p: Parameters) extends VSetBase(cfg) {
   vsetModule.io.in.avl := oldVL
   vsetModule.io.in.vtype := vtype
 
+  // assume cfg of VSetRvfWvf is VSetRvfWvfCfg
+  protected val oldVt = in.ctrl.vpu.get.specVType
+  vsetModule.io.in.oldVt.get := oldVt
+
   val vl = vsetModule.io.out.vconfig.vl
   val vlmax = vsetModule.io.out.vlmax
   val isVsetvl = VSETOpType.isVsetvl(in.ctrl.fuOpType)
-  val isReadVl = in.ctrl.fuOpType === VSETOpType.csrrvl
+  val isCSRReadVl = in.ctrl.fuOpType === VSETOpType.csrrvl
 
   // csrr vl instruction will use this exu to read vl
-  out.res.data := Mux(isReadVl, oldVL, vl)
+  out.res.data := Mux(isCSRReadVl, oldVL, vl)
   out.ctrl.pdestVl.get := in.ctrl.pdestVl.get
 
   if (cfg.writeVlRf) io.vtype.get.bits := vsetModule.io.out.vconfig.vtype
   if (cfg.writeVlRf) io.vtype.get.valid := isVsetvl && io.out.valid
-  if (cfg.writeVlRf) io.vlIsZero.get := io.out.valid && !isReadVl && vl === 0.U
-  if (cfg.writeVlRf) io.vlIsVlmax.get := io.out.valid && !isReadVl && vl === vlmax
+  if (cfg.writeVlRf) io.vlIsZero.get := io.out.valid && !isCSRReadVl && vl === 0.U
+  if (cfg.writeVlRf) io.vlIsVlmax.get := io.out.valid && !isCSRReadVl && vl === vlmax
 
   debugIO.vconfig := vsetModule.io.out.vconfig
 }

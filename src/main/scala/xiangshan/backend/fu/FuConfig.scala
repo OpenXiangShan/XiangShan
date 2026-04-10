@@ -36,10 +36,12 @@ import xiangshan.mem.Std
   * @param trigger if the $fu need trigger out
   * @param needSrcFrm if the $fu need float rounding mode signal
   * @param needSrcVxrm if the $fu need vector fixed-point rounding mode signal
+  * @param writeVType if the $fu need write vtype
   * @param immType the immediate type of this $fu
   * @param vlWakeUp
   * @param maskWakeUp
   * @param readVl if the $fu need read vl
+  * @param readOldVtype if the $fu need read old vtype
   *
   * @define fu function unit
   */
@@ -75,6 +77,7 @@ case class FuConfig (
   vlWakeUp      : Boolean = false,
   maskWakeUp    : Boolean = false,
   readVl        : Boolean = false,
+  readOldVtype  : Boolean = false,
 ) {
   require(srcData.forall(!_.contains(VlData())), s"VlData() should not appear in srcData args")
 
@@ -159,7 +162,7 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu).contains(fuType)
+    Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu, vsetfwf).contains(fuType)
   }
 
   def needVIaluCtrl: Boolean = Seq(FuType.vialuF).contains(fuType)
@@ -397,6 +400,7 @@ object FuConfig {
     latency = CertainLatency(0),
     immType = Set(Imm_VSETVLI(), Imm_VSETIVLI()),
     readVl = true,
+    readOldVtype = true,
   )
 
   val VSetRiWvfCfg: FuConfig = FuConfig(

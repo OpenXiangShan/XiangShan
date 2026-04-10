@@ -166,7 +166,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     TLFilter(TLFilter.mSubtract(mmioFilters)) :=
     TLBuffer() :=
     mmio_xbar
-  
+
   beu_local_int_source_buffer := beu_local_int_source
 
   class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
@@ -196,7 +196,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
       })
-      val cpu_halt = new Bundle() {
+      val cpu_wfi = new Bundle() {
         val fromCore = Input(Bool())
         val toTile = Output(Bool())
       }
@@ -262,7 +262,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       teemsiInfo.toCore.valid := RegNext(teemsiInfo.fromTile.valid)
       teemsiInfo.toCore.bits := RegEnable(teemsiInfo.fromTile.bits, teemsiInfo.fromTile.valid)
     }
-    io.cpu_halt.toTile := RegNext(io.cpu_halt.fromCore)
+    io.cpu_wfi.toTile := RegNext(io.cpu_wfi.fromCore)
     io.cpu_critical_error.toTile := RegNext(io.cpu_critical_error.fromCore)
     io.msiAck.toTile := io.msiAck.fromCore
     io.teemsiAck.foreach( teemsiAck => teemsiAck.toTile := teemsiAck.fromCore)
@@ -296,7 +296,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     }
 
     dontTouch(io.hartId)
-    dontTouch(io.cpu_halt)
+    dontTouch(io.cpu_wfi)
     dontTouch(io.cpu_critical_error)
     if (!io.chi.isEmpty) { dontTouch(io.chi.get) }
 
@@ -358,7 +358,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
           val l2 = l2cache.module
           l2.io_nodeID := io.nodeID.get
           io.chi.get <> l2.io_chi
-          l2.io_cpu_halt.foreach { _:= io.cpu_halt.fromCore }
+          l2.io_cpu_wfi.foreach { _:= io.cpu_wfi.fromCore }
         case l2cache: TL2TLCoupledL2 =>
       }
 

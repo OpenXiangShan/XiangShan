@@ -731,7 +731,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
     io.out(i).bits.psrcVl := MuxCase(
       uops(i).psrcVl,
-      (bypassCondVl(i-1).asBools zip io.out.take(i).map(_.bits.pdest)).reverse
+      (bypassCondVl(i-1).asBools zip io.out.take(i).map(_.bits.pdestVl)).reverse
     )
     io.out(i).bits.pdest := Mux(isMove(i), io.out(i).bits.psrcIntForMove, uops(i).pdest)
 

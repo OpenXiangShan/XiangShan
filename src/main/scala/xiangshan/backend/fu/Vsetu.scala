@@ -22,13 +22,14 @@ import chisel3.util._
 import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.{VConfig, VType, Vl, VSew, VLmul, VsetVType}
 
-class VsetModuleIO(implicit p: Parameters) extends XSBundle {
+class VsetModuleIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   private val vlWidth = p(XSCoreParamsKey).vlWidth
 
   val in = Input(new Bundle {
     val avl   : UInt = UInt(XLEN.W)
     val vtype : VsetVType = VsetVType()
     val func  : UInt = FuOpType()
+    val oldVt = Option.when(cfg.readOldVtype)(VType())
   })
 
   val out = Output(new Bundle {
@@ -43,8 +44,8 @@ class VsetModuleIO(implicit p: Parameters) extends XSBundle {
   })
 }
 
-class VsetModule(implicit p: Parameters) extends XSModule {
-  val io = IO(new VsetModuleIO)
+class VsetModule(cfg: FuConfig)(implicit p: Parameters) extends XSModule {
+  val io = IO(new VsetModuleIO(cfg))
 
   private val avl   = io.in.avl
   private val func  = io.in.func
@@ -56,6 +57,7 @@ class VsetModule(implicit p: Parameters) extends XSModule {
 
   private val isSetVlmax = VSETOpType.isSetVlmax(func)
   private val isVsetivli = VSETOpType.isVsetivli(func)
+  private val isKeepVl   = VSETOpType.isKeepVl(func)
 
   private val vlmul: UInt = vtype.vlmul
   private val vsew : UInt = vtype.vsew
@@ -97,7 +99,23 @@ class VsetModule(implicit p: Parameters) extends XSModule {
   private val lmulIllegal = VLmul.isReserved(vlmul)
   private val vtypeIllegal = vtype.reserved.orR
 
-  private val illegal = lmulIllegal | sewIllegal | vtypeIllegal | vtype.illegal
+  private val oldVt = io.in.oldVt.getOrElse(VType.initVtype())
+
+  /* vlmul is not sign extended because overlap impossible: 
+   *     | mf8 | mf4 | mf2 | m1  | m2  | m4  | m8  |
+   * e8  | 101 | 110 | 111 | 000 | 001 | 010 | 011 |
+   * e16 |  R  | 101 | 110 | 111 | 000 | 001 | 010 |
+   * e32 |  R  |  R  | 101 | 110 | 111 | 000 | 001 |
+   * e64 |  R  |  R  |  R  | 101 | 110 | 111 | 000 |
+   */
+  private val log2NewRatio = vlmul - vsew
+  private val log2OldRatio = oldVt.vlmul- oldVt.vsew
+  private val keepVlIllegal: Bool = io.in.oldVt match {
+    case Some(_) => isKeepVl && (oldVt.illegal || log2NewRatio =/= log2OldRatio)
+    case None => 0.B
+  }
+
+  private val illegal = lmulIllegal | sewIllegal | vtypeIllegal | vtype.illegal | keepVlIllegal
 
   outVConfig.vl := Mux(illegal, 0.U, vl)
   outVConfig.vtype.illegal := illegal

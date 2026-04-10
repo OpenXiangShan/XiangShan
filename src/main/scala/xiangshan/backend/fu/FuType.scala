@@ -117,7 +117,8 @@ object FuType extends ChiselOHEnum {
   val vecArith = vecOPI ++ vecOPF
   val vecMem = Seq(vldu, vstu, vsegldu, vsegstu)
   val vecArithOrMem = vecArith ++ vecMem
-  val vecAll = vecVSET ++ vecArithOrMem
+  val vecMove = Seq(vmove)
+  val vecAll = vecVSET ++ vecArithOrMem ++ vecMove
   val fpOP = fpArithAll ++ Seq(i2f, i2v)
   val scalaNeedFrm = Seq(i2f, fmac, fDivSqrt)
   val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
@@ -144,6 +145,8 @@ object FuType extends ChiselOHEnum {
   def isBrh(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(brh))
 
   def isVset(fuType: UInt): Bool = FuTypeOrR(fuType, vecVSET)
+
+  def isVall(futype: UInt): Bool = FuTypeOrR(futype, vecAll)
 
   def isJump(fuType: UInt): Bool = FuTypeOrR(fuType, jmp)
 

@@ -53,6 +53,7 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
   private val isVArithMem = FuType.isVArithMem(io.decodedInst.fuType)
   private val isVArith = FuType.isVArith(io.decodedInst.fuType)
   private val isVset = FuType.isVset(io.decodedInst.fuType)
+  private val isVall = FuType.isVall(io.decodedInst.fuType)
 
   private val SEW = io.vtype.vsew(1, 0)
   private val LMUL = Cat(~io.vtype.vlmul(2), io.vtype.vlmul(1, 0))
@@ -162,20 +163,24 @@ class VecExceptionGen(implicit p: Parameters) extends XSModule{
     VMV1R_V, VMV2R_V, VMV4R_V, VMV8R_V
   ).map(_ === inst.ALL).reduce(_ || _)
 
+  private val vsetInst = Seq(
+    VSETVLI, VSETIVLI, VSETVL
+  ).map(_ === inst.ALL).reduce(_ || _)
+
   private val vrgather16 = VRGATHEREI16_VV === inst.ALL
   private val vcompress = VCOMPRESS_VM === inst.ALL
   private val intExt2 = Seq(VSEXT_VF2, VZEXT_VF2).map(_ === inst.ALL).reduce(_ || _)
   private val intExt4 = Seq(VSEXT_VF4, VZEXT_VF4).map(_ === inst.ALL).reduce(_ || _)
   private val intExt8 = Seq(VSEXT_VF8, VZEXT_VF8).map(_ === inst.ALL).reduce(_ || _)
 
-  private val notDependVtypeInst = Seq(VSETVLI, VSETIVLI, VSETVL).map(_ === inst.ALL).reduce(_ || _) || lsWholeInst
+  private val notDependVtypeInst = vsetInst || lsWholeInst
 
 
   // 1. inst Illegal
   private val instIllegal = maskLogicalInst && inst.VM === 0.U
 
   // 2. vill Illegal
-  private val villIllegal = io.vtype.illegal && isVArithMem && !notDependVtypeInst
+  private val villIllegal = io.vtype.illegal && isVall && !notDependVtypeInst
 
   // 3. EEW Illegal
   private val doubleFpInst = Seq(

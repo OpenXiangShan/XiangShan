@@ -7,6 +7,7 @@ import xiangshan._
 import xiangshan.backend.fu.vector.Bundles.{VType, VsetVType}
 import xiangshan.backend.decode.isa.bitfield.{InstVType, Riscv32BitInst, XSInstBitFields}
 import xiangshan.backend.fu.VsetModule
+import xiangshan.backend.fu.FuConfig.VSetRiWvfCfg
 
 /**
  * IO of VTypeGen
@@ -72,7 +73,7 @@ class VTypeGen(implicit p: Parameters) extends XSModule{
   private val vtypei: VsetVType = VsetVType.fromInstVType(instVType)
 
   /** New vtype configuration set by new vset instruction. */
-  private val vsetModule = Module(new VsetModule)
+  private val vsetModule = Module(new VsetModule(VSetRiWvfCfg))
   vsetModule.io.in.avl := 0.U
   vsetModule.io.in.vtype := vtypei
   vsetModule.io.in.func := VSETOpType.uvsetvcfg_xi
