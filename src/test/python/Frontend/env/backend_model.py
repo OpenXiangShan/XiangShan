@@ -1150,6 +1150,17 @@ class BackendModel:
         ras_action = int(payload.get("ras_action", 0))
         is_rvc = int(payload.get("is_rvc", 0))
         level = int(payload.get("level", 0))
+        backend_igpf = int(payload.get("backend_igpf", 0))
+        backend_ipf = int(payload.get("backend_ipf", 0))
+        backend_iaf = int(payload.get("backend_iaf", 0))
+        if any((backend_igpf, backend_ipf, backend_iaf)):
+            required_keys = ("ftq_flag", "ftq_value", "ftq_offset", "pc")
+            missing = [key for key in required_keys if key not in payload]
+            if missing:
+                raise AssertionError(
+                    "backend-fault redirect requires explicit FTQ context: "
+                    + ", ".join(missing)
+                )
         original_commit_ptr = (int(self.commit_ptr_flag), int(self.commit_ptr_value))
         flush_itself = bool(level & 0x1)
         if flush_itself:
@@ -1174,6 +1185,12 @@ class BackendModel:
                 current_cycle=int(self.current_cycle),
                 is_rvc=bool(is_rvc),
                 pending_event_survives=state.pending_event_survives_redirect,
+            )
+            self._apply_backend_state()
+            self._sync_backend_state().assert_no_stale_commit_visibility(
+                redirect_flag=int(ftq_flag),
+                redirect_value=int(ftq_value),
+                flush_itself=bool(flush_itself),
             )
             self._apply_backend_state()
             if not flush_itself:
@@ -1215,6 +1232,9 @@ class BackendModel:
             "branch_type": branch_type,
             "ras_action": ras_action,
             "level": 0,
+            "backend_igpf": backend_igpf,
+            "backend_ipf": backend_ipf,
+            "backend_iaf": backend_iaf,
         }
         if self.monitor is not None:
             self.monitor.notify_redirect(target_pc, reason=reason)

@@ -241,6 +241,14 @@ class BackendState:
 
     def ftq_entry_commit_covered(self, entry: FtqEntry, *, golden_trace_attached: bool) -> bool:
         if not golden_trace_attached:
+            if (
+                self.ftq_real_instr_total
+                or self.ftq_visible_instr_commits
+                or self.pending_commit_instructions
+                or self.scheduled_commit_groups
+                or self.visible_commit_group
+            ):
+                raise AssertionError("commit visibility requires an attached golden trace")
             return True
         key = (int(entry.ftq_flag), int(entry.ftq_value))
         total_real_instr = int(self.ftq_real_instr_total.get(key, 0))
@@ -256,6 +264,54 @@ class BackendState:
         self.visible_json_commit_count = 0
         self.ftq_real_instr_total.clear()
         self.ftq_visible_instr_commits.clear()
+
+    def _commit_visibility_survives_redirect(
+        self,
+        *,
+        ftq_flag: int,
+        ftq_value: int,
+        redirect_flag: int,
+        redirect_value: int,
+        redirect_rank: int,
+        flush_itself: bool,
+    ) -> bool:
+        if int(ftq_flag) == int(redirect_flag) and int(ftq_value) == int(redirect_value):
+            return True
+        return self.ftq_ptr_survives_redirect(int(ftq_flag), int(ftq_value), int(redirect_rank), bool(flush_itself))
+
+    def assert_no_stale_commit_visibility(
+        self,
+        *,
+        redirect_flag: int,
+        redirect_value: int,
+        flush_itself: bool,
+    ) -> None:
+        redirect_rank = self.ftq_ptr_rank_after_commit(int(redirect_flag), int(redirect_value))
+        stale: list[tuple[int, int]] = []
+
+        def _check_inst(inst) -> None:
+            if self._commit_visibility_survives_redirect(
+                ftq_flag=int(getattr(inst, "ftq_flag")),
+                ftq_value=int(getattr(inst, "ftq_value")),
+                redirect_flag=int(redirect_flag),
+                redirect_value=int(redirect_value),
+                redirect_rank=int(redirect_rank),
+                flush_itself=bool(flush_itself),
+            ):
+                return
+            stale.append((int(getattr(inst, "ftq_flag")), int(getattr(inst, "ftq_value"))))
+
+        for inst in self.pending_commit_instructions:
+            _check_inst(inst)
+        for _, group in self.scheduled_commit_groups:
+            for inst in group:
+                _check_inst(inst)
+        for inst in self.visible_commit_group:
+            _check_inst(inst)
+
+        if stale:
+            stale_desc = ", ".join(f"({flag},{value})" for flag, value in stale)
+            raise AssertionError(f"stale commit visibility survives redirect flush: {stale_desc}")
 
     def find_next_commitable_entry(self, *, golden_trace_attached: bool = False) -> Optional[FtqEntry]:
         if not self.ftq_entries:
