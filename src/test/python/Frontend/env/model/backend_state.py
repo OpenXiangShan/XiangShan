@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, Optional
@@ -84,6 +85,8 @@ class BackendState:
     visible_json_commit_count: int = 0
     ftq_real_instr_total: dict[tuple[int, int], int] = field(default_factory=dict)
     ftq_visible_instr_commits: dict[tuple[int, int], int] = field(default_factory=dict)
+    commit_min_delay: int = 3
+    commit_max_delay: int = 10
 
     def increment_ftq_ptr(self, flag: int, value: int) -> tuple[int, int]:
         next_value = int(value) + 1
@@ -119,6 +122,18 @@ class BackendState:
         base = int(self.commit_ptr_flag) * int(self.ftq_size) + int(self.commit_ptr_value)
         target = int(flag) * int(self.ftq_size) + int(value)
         return (target - base) % modulus
+
+    def sample_commit_delay(self) -> int:
+        min_delay = max(1, int(self.commit_min_delay))
+        max_delay = max(min_delay, int(self.commit_max_delay))
+        return random.randint(min_delay, max_delay)
+
+    def extend_commit_ready_cycle(self, entry: FtqEntry, *, current_cycle: Optional[int] = None) -> None:
+        base_cycle = int(self.current_cycle) if current_cycle is None else int(current_cycle)
+        entry.commit_ready_cycle = max(
+            int(entry.commit_ready_cycle),
+            base_cycle + self.sample_commit_delay(),
+        )
 
     def ftq_ptr_survives_redirect(self, flag: int, value: int, redirect_rank: int, flush_itself: bool) -> bool:
         entry_rank = self.ftq_ptr_rank_after_commit(flag, value)
@@ -375,10 +390,7 @@ class BackendState:
         if self.current_ftq_entry is None:
             return
         self.current_ftq_entry.dispatch_complete = True
-        self.current_ftq_entry.commit_ready_cycle = max(
-            int(self.current_ftq_entry.commit_ready_cycle),
-            int(self.current_cycle) + 1,
-        )
+        self.extend_commit_ready_cycle(self.current_ftq_entry)
         if self.ftq_entries and self.ftq_entry_matches(
             self.ftq_entries[-1],
             self.current_ftq_entry.ftq_flag,

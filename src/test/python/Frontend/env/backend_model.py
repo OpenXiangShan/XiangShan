@@ -34,6 +34,10 @@ class BackendModel:
         safe_pc: int = 0x80000000,
         resolve_min_delay: int = 3,
         resolve_max_delay: int = 8,
+        redirect_min_delay: int = 5,
+        redirect_max_delay: int = 8,
+        commit_min_delay: int = 3,
+        commit_max_delay: int = 10,
         auto_redirect_on_golden_mispredict: bool = True,
     ) -> None:
         self.logger = logging.getLogger("env.backend_model")
@@ -56,6 +60,14 @@ class BackendModel:
         self.resolve_max_delay = int(resolve_max_delay)
         self._default_resolve_min_delay = int(resolve_min_delay)
         self._default_resolve_max_delay = int(resolve_max_delay)
+        self.redirect_min_delay = int(redirect_min_delay)
+        self.redirect_max_delay = int(redirect_max_delay)
+        if self.redirect_max_delay < self.redirect_min_delay:
+            raise ValueError("redirect_max_delay must be >= redirect_min_delay")
+        self.commit_min_delay = int(commit_min_delay)
+        self.commit_max_delay = int(commit_max_delay)
+        if self.commit_max_delay < self.commit_min_delay:
+            raise ValueError("commit_max_delay must be >= commit_min_delay")
         self.auto_redirect_on_golden_mispredict = bool(auto_redirect_on_golden_mispredict)
 
         self.current_cycle = 0
@@ -119,6 +131,8 @@ class BackendModel:
         state.visible_json_commit_count = int(self._visible_json_commit_count)
         state.ftq_real_instr_total = self._ftq_real_instr_total
         state.ftq_visible_instr_commits = self._ftq_visible_instr_commits
+        state.commit_min_delay = int(self.commit_min_delay)
+        state.commit_max_delay = int(self.commit_max_delay)
         return state
 
     def _apply_backend_state(self) -> None:
@@ -146,10 +160,17 @@ class BackendModel:
         self._visible_json_commit_count = int(state.visible_json_commit_count)
         self._ftq_real_instr_total = state.ftq_real_instr_total
         self._ftq_visible_instr_commits = state.ftq_visible_instr_commits
+        self.commit_min_delay = int(state.commit_min_delay)
+        self.commit_max_delay = int(state.commit_max_delay)
 
     @staticmethod
     def _clamp_backend_delay(delay_cycles: int) -> int:
         return max(_MIN_BACKEND_DELAY, int(delay_cycles))
+
+    def _sample_redirect_delay(self) -> int:
+        min_delay = self._clamp_backend_delay(self.redirect_min_delay)
+        max_delay = self._clamp_backend_delay(self.redirect_max_delay)
+        return random.randint(min_delay, max_delay)
 
     def _increment_ftq_ptr(self, flag: int, value: int) -> tuple[int, int]:
         return self._sync_backend_state().increment_ftq_ptr(flag, value)
@@ -477,11 +498,12 @@ class BackendModel:
         self,
         target_pc: int,
         reason: str,
-        delay_cycles: int = _MIN_BACKEND_DELAY,
+        delay_cycles: Optional[int] = None,
         flush_on_drive: bool = False,
         payload_extra: Optional[Dict] = None,
     ) -> None:
-        ready_cycle = self.current_cycle + self._clamp_backend_delay(delay_cycles)
+        effective_delay = self._sample_redirect_delay() if delay_cycles is None else self._clamp_backend_delay(delay_cycles)
+        ready_cycle = self.current_cycle + effective_delay
         from_pc = int(target_pc)
         if self.monitor is not None and self.monitor.observations:
             from_pc = int(self.monitor.observations[-1].pc)
@@ -842,10 +864,9 @@ class BackendModel:
             self._current_ftq_max_offset = max(int(self._current_ftq_max_offset), int(ftq_offset))
             self._record_ftq_group_pc(int(ftq_flag), int(ftq_value), int(pc), bool(is_rvc))
             if is_last:
-                self._current_ftq_entry.commit_ready_cycle = max(
-                    int(self._current_ftq_entry.commit_ready_cycle),
-                    int(self.current_cycle) + 1,
-                )
+                state = self._sync_backend_state()
+                state.extend_commit_ready_cycle(self._current_ftq_entry, current_cycle=int(self.current_cycle))
+                self._apply_backend_state()
 
         for i in range(8):
             if self._read(self.observe_if.cfvec_valid[i], 0) != 1:
@@ -1074,7 +1095,6 @@ class BackendModel:
                 self._queue_redirect_event(
                     target_pc=int(entry.target),
                     reason="golden_resolve_redirect",
-                    delay_cycles=_MIN_BACKEND_DELAY,
                     flush_on_drive=True,
                     payload_extra={
                         "pc": int(entry.pc),
@@ -1286,7 +1306,7 @@ class BackendModel:
         else:
             self.ibuf_full_streak = 0
         if self.ibuf_full_streak >= self.ibuf_watchdog_threshold:
-            self.inject_redirect(self.safe_pc, "ibuf_full_watchdog", delay_cycles=_MIN_BACKEND_DELAY)
+            self.inject_redirect(self.safe_pc, "ibuf_full_watchdog")
             self.logger.warning(
                 "ibufFull watchdog fired: threshold=%d safe_pc=0x%x",
                 self.ibuf_watchdog_threshold,
@@ -1299,11 +1319,11 @@ class BackendModel:
             )
             self.ibuf_full_streak = 0
 
-    def inject_redirect(self, target_pc: int, reason: str, delay_cycles: int = _MIN_BACKEND_DELAY) -> None:
+    def inject_redirect(self, target_pc: int, reason: str, delay_cycles: Optional[int] = None) -> None:
         self._queue_redirect_event(
             target_pc=int(target_pc),
             reason=str(reason),
-            delay_cycles=int(delay_cycles),
+            delay_cycles=delay_cycles,
             flush_on_drive=False,
         )
         self._pending_resolves.clear()

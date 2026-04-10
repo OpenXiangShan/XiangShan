@@ -132,11 +132,8 @@ def run_until_golden_trace_complete(
     ).run(env)
 
 
-def inject_redirect(env, txn: RedirectTxn, redirect_delay_cycles=0) -> bool:
-    return InjectRedirectSequence(
-        txn=txn,
-        redirect_delay_cycles=int(redirect_delay_cycles),
-    ).run(env)
+def inject_redirect(env, txn: RedirectTxn) -> bool:
+    return InjectRedirectSequence(txn=txn).run(env)
 
 
 def check_pc_sequence(env, expectation: PcSequenceExpectation) -> bool:

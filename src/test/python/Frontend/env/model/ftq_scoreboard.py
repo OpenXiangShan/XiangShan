@@ -15,7 +15,7 @@ class FtqScoreboard:
             if self.state.ftq_entry_matches(ftq_entry, entry.ftq_flag, entry.ftq_value):
                 ftq_entry.resolved_cfi += 1
                 ftq_entry.has_redirect = ftq_entry.has_redirect or bool(entry_flushes_itself)
-                ftq_entry.commit_ready_cycle = max(int(ftq_entry.commit_ready_cycle), int(current_cycle) + 1)
+                self.state.extend_commit_ready_cycle(ftq_entry, current_cycle=int(current_cycle))
                 break
         if (
             self.state.current_ftq_entry is not None
@@ -25,10 +25,7 @@ class FtqScoreboard:
             self.state.current_ftq_entry.has_redirect = (
                 self.state.current_ftq_entry.has_redirect or bool(entry_flushes_itself)
             )
-            self.state.current_ftq_entry.commit_ready_cycle = max(
-                int(self.state.current_ftq_entry.commit_ready_cycle),
-                int(current_cycle) + 1,
-            )
+            self.state.extend_commit_ready_cycle(self.state.current_ftq_entry, current_cycle=int(current_cycle))
 
     def recompute_cfi_budgets_from_pending_resolves(self) -> None:
         pending_by_entry: dict[tuple[int, int], int] = {}
@@ -143,14 +140,11 @@ class FtqScoreboard:
                     )
             for entry in self.state.ftq_entries:
                 if self.state.ftq_entry_matches(entry, ftq_flag, ftq_value):
-                    entry.commit_ready_cycle = max(int(entry.commit_ready_cycle), int(current_cycle) + 1)
+                    self.state.extend_commit_ready_cycle(entry, current_cycle=int(current_cycle))
                     break
             if (
                 self.state.current_ftq_entry is not None
                 and self.state.ftq_entry_matches(self.state.current_ftq_entry, ftq_flag, ftq_value)
             ):
-                self.state.current_ftq_entry.commit_ready_cycle = max(
-                    int(self.state.current_ftq_entry.commit_ready_cycle),
-                    int(current_cycle) + 1,
-                )
+                self.state.extend_commit_ready_cycle(self.state.current_ftq_entry, current_cycle=int(current_cycle))
         self.recompute_cfi_budgets_from_pending_resolves()

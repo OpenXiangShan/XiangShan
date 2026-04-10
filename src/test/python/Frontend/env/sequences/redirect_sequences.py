@@ -39,13 +39,11 @@ def _advance_pc_matches(env, expected_pcs, max_cycles: int) -> bool:
 @dataclass(frozen=True)
 class InjectRedirectSequence:
     txn: RedirectTxn
-    redirect_delay_cycles: int = 0
 
     def run(self, env) -> bool:
         env.backend_model.inject_redirect(
             self.txn.target_pc,
             self.txn.reason,
-            delay_cycles=int(self.redirect_delay_cycles),
         )
         if self.txn.target_pc in _recent_pcs(env, limit=16):
             return True

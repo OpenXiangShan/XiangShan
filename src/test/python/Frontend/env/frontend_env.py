@@ -91,6 +91,10 @@ class FrontendEnv:
                 safe_pc=self.config.backend.safe_pc,
                 resolve_min_delay=self.config.backend.resolve_min_delay,
                 resolve_max_delay=self.config.backend.resolve_max_delay,
+                redirect_min_delay=self.config.backend.redirect_min_delay,
+                redirect_max_delay=self.config.backend.redirect_max_delay,
+                commit_min_delay=self.config.backend.commit_min_delay,
+                commit_max_delay=self.config.backend.commit_max_delay,
                 auto_redirect_on_golden_mispredict=self.config.backend.auto_redirect_on_golden_mispredict,
             ),
         }

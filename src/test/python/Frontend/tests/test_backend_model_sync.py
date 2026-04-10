@@ -1,0 +1,673 @@
+from __future__ import annotations
+
+from env.backend_model import BackendModel, FtqEntry, ResolveEntry
+from env.model.backend_runtime import BackendObservationSnapshot
+from env.monitor import Observation
+from env.trace import GoldenTrace, TraceEntry
+
+
+class _Pin:
+    def __init__(self, value=0):
+        self.value = int(value)
+
+
+class _DummyDut:
+    def __init__(self):
+        self._pins = {}
+
+    def __getattr__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        pin = self._pins.get(name)
+        if pin is None:
+            pin = _Pin(0)
+            self._pins[name] = pin
+        return pin
+
+
+def _drive_cfvec_slot(
+    dut,
+    slot: int,
+    *,
+    valid: int,
+    pc: int = 0,
+    instr: int = 0,
+    is_rvc: int = 0,
+    pred_taken: int = 0,
+    ftq_flag: int = 0,
+    ftq_value: int = 0,
+    ftq_offset: int = 0,
+    is_last: int = 0,
+) -> None:
+    base = f"io_backend_cfVec_{int(slot)}_bits_"
+    getattr(dut, f"io_backend_cfVec_{int(slot)}_valid").value = int(valid)
+    getattr(dut, base + "pc").value = int(pc)
+    getattr(dut, base + "instr").value = int(instr)
+    getattr(dut, base + "isRvc").value = int(is_rvc)
+    getattr(dut, base + "predTaken").value = int(pred_taken)
+    getattr(dut, base + "ftqPtr_flag").value = int(ftq_flag)
+    getattr(dut, base + "ftqPtr_value").value = int(ftq_value)
+    getattr(dut, base + "ftqOffset").value = int(ftq_offset)
+    getattr(dut, base + "isLastInFtqEntry").value = int(is_last)
+
+
+def _clear_cfvec(dut) -> None:
+    for slot in range(8):
+        getattr(dut, f"io_backend_cfVec_{slot}_valid").value = 0
+
+
+def test_indirect_redirect_is_dropped_after_current_golden_cfi_successor_is_observed():
+    wrong_target = 0x80004852
+    golden_target = 0x80004A9A
+
+    dut = _DummyDut()
+    bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0)
+    bm.bind(dut)
+    trace = GoldenTrace(
+        [
+            TraceEntry(index=0, pc=0x80003AA0, instr=0x00008082, size=2, kind="jump_indirect", taken=True, target_pc=golden_target),
+            TraceEntry(index=1, pc=golden_target, instr=0x00007782, size=2, kind="normal", taken=False, target_pc=None),
+        ]
+    )
+    trace.cursor = 0
+    bm.set_golden_trace(trace)
+
+    class _Monitor:
+        def __init__(self):
+            self.observations = [
+                Observation(cycle=921, slot=0, pc=0x80003AA0, instr=0x00008082, is_rvc=True, pred_taken=False),
+                Observation(cycle=922, slot=0, pc=golden_target, instr=0x00007782, is_rvc=True, pred_taken=False),
+            ]
+
+        def notify_redirect(self, target_pc, reason="redirect"):
+            return None
+
+    bm.attach_monitor(_Monitor())
+    bm.current_cycle = 925
+    bm._pending_resolves.append(
+        ResolveEntry(
+            ready_cycle=925,
+            inst_pc=0x80003AA0,
+            pc=0x80003A84,
+            target=wrong_target,
+            taken=True,
+            mispredict=True,
+            ftq_flag=0,
+            ftq_value=33,
+            ftq_offset=14,
+            branch_type=3,
+            ras_action=1,
+            queued_cycle=920,
+            is_rvc=True,
+        )
+    )
+
+    bm._drive_resolves()
+
+    assert int(dut.io_backend_toFtq_resolve_0_valid.value) == 1
+    assert int(dut.io_backend_toFtq_resolve_0_bits_target_addr.value) == (wrong_target >> 1)
+    assert len(bm.pending_events) == 0
+    assert len(bm._pending_resolves) == 0
+
+
+def test_inject_redirect_uses_random_delay_range_from_backend_config():
+    bm = BackendModel(redirect_min_delay=5, redirect_max_delay=8)
+    bm.current_cycle = 100
+
+    bm.inject_redirect(target_pc=0x80000080, reason="unit-test")
+
+    assert len(bm.pending_events) == 1
+    event = bm.pending_events[0]
+    assert event.kind == "redirect"
+    assert event.payload["target_pc"] == 0x80000080
+    assert 105 <= int(event.ready_cycle) <= 108
+
+
+def test_last_packet_sets_commit_ready_cycle_in_commit_delay_range():
+    dut = _DummyDut()
+    bm = BackendModel(commit_min_delay=3, commit_max_delay=10)
+    bm.bind(dut)
+    bm.current_cycle = 100
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x80000000,
+        instr=0x00000013,
+        ftq_flag=0,
+        ftq_value=1,
+        ftq_offset=0,
+        is_last=1,
+    )
+
+    bm._sample_cfvec()
+
+    assert len(bm.ftq_entries) == 1
+    assert 103 <= int(bm.ftq_entries[0].commit_ready_cycle) <= 110
+
+
+def test_resolve_extends_commit_ready_cycle_in_commit_delay_range():
+    bm = BackendModel(commit_min_delay=3, commit_max_delay=10)
+    bm.current_cycle = 200
+    entry = FtqEntry(ftq_flag=0, ftq_value=7, total_cfi=1, resolved_cfi=0, dispatch_complete=True, commit_ready_cycle=0)
+    bm.ftq_entries.append(entry)
+
+    bm._sync_backend_state()
+    bm._ftq_scoreboard.note_resolve(
+        ResolveEntry(
+            ready_cycle=200,
+            inst_pc=0x80000000,
+            pc=0x80000000,
+            target=0x80000010,
+            taken=True,
+            mispredict=False,
+            ftq_flag=0,
+            ftq_value=7,
+            ftq_offset=0,
+            branch_type=0,
+            ras_action=0,
+        ),
+        current_cycle=200,
+        entry_flushes_itself=False,
+    )
+    bm._apply_backend_state()
+
+    assert 203 <= int(entry.commit_ready_cycle) <= 210
+
+
+def test_commit_does_not_rewind_into_duplicate_same_ftq_entry_after_commit():
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.commit_count = 260
+    bm.commit_ptr_flag = 1
+    bm.commit_ptr_value = 49
+    bm.current_cycle = 1237
+    bm.ftq_entries.extend(
+        [
+            FtqEntry(ftq_flag=1, ftq_value=50, total_cfi=3, resolved_cfi=3, dispatch_complete=True, commit_ready_cycle=1236),
+            FtqEntry(ftq_flag=1, ftq_value=50, total_cfi=3, resolved_cfi=3, dispatch_complete=True, commit_ready_cycle=1238),
+        ]
+    )
+
+    bm._drive_commit()
+
+    assert int(dut.io_backend_toFtq_commit_valid.value) == 1
+    assert int(dut.io_backend_toFtq_commit_bits_flag.value) == 1
+    assert int(dut.io_backend_toFtq_commit_bits_value.value) == 50
+    assert bm.commit_ptr_flag == 1
+    assert bm.commit_ptr_value == 50
+
+    dut.io_backend_toFtq_commit_valid.value = 0
+    bm.current_cycle = 1238
+    bm._drive_commit()
+
+    assert int(dut.io_backend_toFtq_commit_valid.value) == 0
+    assert bm.commit_ptr_flag == 1
+    assert bm.commit_ptr_value == 50
+
+
+def test_commit_removes_stale_duplicate_entries_with_same_ftq_ptr():
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.commit_count = 260
+    bm.commit_ptr_flag = 1
+    bm.commit_ptr_value = 49
+    bm.current_cycle = 1237
+    bm.ftq_entries.extend(
+        [
+            FtqEntry(ftq_flag=1, ftq_value=50, total_cfi=3, resolved_cfi=3, dispatch_complete=True, commit_ready_cycle=1236),
+            FtqEntry(ftq_flag=1, ftq_value=50, total_cfi=3, resolved_cfi=3, dispatch_complete=True, commit_ready_cycle=1238),
+        ]
+    )
+
+    bm._drive_commit()
+
+    assert len(bm.ftq_entries) == 0
+    assert bm.commit_ptr_flag == 1
+    assert bm.commit_ptr_value == 50
+
+
+def test_sealing_same_ftq_entry_twice_merges_instead_of_appending_duplicate():
+    bm = BackendModel()
+    bm._current_ftq_entry = FtqEntry(
+        ftq_flag=1,
+        ftq_value=50,
+        total_cfi=3,
+        resolved_cfi=0,
+        dispatch_complete=False,
+        has_redirect=False,
+        commit_ready_cycle=1236,
+    )
+    bm.ftq_entries.append(
+        FtqEntry(
+            ftq_flag=1,
+            ftq_value=50,
+            total_cfi=3,
+            resolved_cfi=3,
+            dispatch_complete=True,
+            has_redirect=False,
+            commit_ready_cycle=1238,
+        )
+    )
+    bm.current_cycle = 1237
+
+    bm._seal_current_ftq_entry()
+
+    assert len(bm.ftq_entries) == 1
+    entry = bm.ftq_entries[0]
+    assert (entry.ftq_flag, entry.ftq_value) == (1, 50)
+    assert entry.dispatch_complete is True
+    assert entry.commit_ready_cycle >= 1238
+
+
+def test_level0_redirect_does_not_wait_for_next_target_slot_that_is_already_committed():
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.commit_count = 247
+    bm.commit_ptr_flag = 1
+    bm.commit_ptr_value = 51
+
+    bm._drive_redirect(
+        {
+            "target_pc": 0x80004A28,
+            "reason": "golden_resolve_redirect",
+            "flush_on_drive": True,
+            "pc": 0x800049C2,
+            "taken": 1,
+            "ftq_flag": 1,
+            "ftq_value": 50,
+            "ftq_offset": 16,
+            "branch_type": 1,
+            "ras_action": 0,
+            "level": 0,
+        }
+    )
+
+    assert bm._pending_level0_target_ftq is None
+
+
+def test_level0_redirect_does_not_wait_for_committed_next_target_slot_after_commit_ptr_rewinds():
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.commit_count = 247
+    bm.commit_ptr_flag = 1
+    bm.commit_ptr_value = 51
+    bm.ftq_entries.append(
+        FtqEntry(ftq_flag=1, ftq_value=50, total_cfi=3, resolved_cfi=3, dispatch_complete=True, commit_ready_cycle=1243)
+    )
+
+    bm._drive_redirect(
+        {
+            "target_pc": 0x80004A28,
+            "reason": "golden_resolve_redirect",
+            "flush_on_drive": True,
+            "pc": 0x800049C2,
+            "taken": 1,
+            "ftq_flag": 1,
+            "ftq_value": 50,
+            "ftq_offset": 16,
+            "branch_type": 1,
+            "ras_action": 0,
+            "level": 0,
+        }
+    )
+
+    assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (1, 49)
+    assert bm._pending_level0_target_ftq is None
+
+
+def test_flush_after_redirect_keeps_partially_observed_next_target_current_entry():
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.commit_count = 247
+    bm.commit_ptr_flag = 1
+    bm.commit_ptr_value = 49
+    bm.ftq_entries.append(
+        FtqEntry(ftq_flag=1, ftq_value=50, total_cfi=3, resolved_cfi=3, dispatch_complete=True, commit_ready_cycle=1243)
+    )
+    bm._current_ftq_entry = FtqEntry(ftq_flag=1, ftq_value=51)
+    bm._ftq_group_pc_history[(1, 51)] = [
+        (0x80004A00, False),
+        (0x80004A02, False),
+        (0x80004A04, False),
+        (0x80004A06, False),
+    ]
+
+    bm._drive_redirect(
+        {
+            "target_pc": 0x80004A28,
+            "reason": "golden_resolve_redirect",
+            "flush_on_drive": True,
+            "pc": 0x800049C2,
+            "taken": 1,
+            "ftq_flag": 1,
+            "ftq_value": 50,
+            "ftq_offset": 16,
+            "branch_type": 1,
+            "ras_action": 0,
+            "level": 0,
+        }
+    )
+
+    assert bm._current_ftq_entry is not None
+    assert (bm._current_ftq_entry.ftq_flag, bm._current_ftq_entry.ftq_value) == (1, 51)
+
+
+def test_golden_wait_pc_does_not_drop_partially_observed_target_entry_prefix():
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.set_golden_trace(GoldenTrace([TraceEntry(index=0, pc=0x80004A28, instr=0x000C3783, size=4)]))
+    bm._golden_wait_pc = 0x80004A28
+
+    _drive_cfvec_slot(dut, 0, valid=1, pc=0x80004A00, instr=0x00000013, is_rvc=0, pred_taken=0, ftq_flag=1, ftq_value=51, ftq_offset=0, is_last=0)
+    _drive_cfvec_slot(dut, 1, valid=1, pc=0x80004A02, instr=0x00000013, is_rvc=1, pred_taken=0, ftq_flag=1, ftq_value=51, ftq_offset=1, is_last=0)
+    _drive_cfvec_slot(dut, 2, valid=1, pc=0x80004A04, instr=0x00000013, is_rvc=1, pred_taken=0, ftq_flag=1, ftq_value=51, ftq_offset=2, is_last=0)
+    _drive_cfvec_slot(dut, 3, valid=1, pc=0x80004A06, instr=0x00000013, is_rvc=0, pred_taken=0, ftq_flag=1, ftq_value=51, ftq_offset=4, is_last=1)
+
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    assert bm._current_ftq_entry is not None
+    assert (bm._current_ftq_entry.ftq_flag, bm._current_ftq_entry.ftq_value) == (1, 51)
+    assert bm._current_ftq_entry.dispatch_complete is False
+    assert [(entry.ftq_flag, entry.ftq_value) for entry in bm.ftq_entries] == []
+
+
+def test_level0_redirect_keeps_waiting_if_next_target_slot_was_seen_only_on_wrong_path():
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.commit_count = 64
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 35
+    bm._golden_wait_pc = 0x800047FA
+    bm._current_ftq_entry = FtqEntry(ftq_flag=0, ftq_value=36)
+
+    bm._drive_redirect(
+        {
+            "target_pc": 0x800047FA,
+            "reason": "golden_resolve_redirect",
+            "flush_on_drive": True,
+            "pc": 0x80004848,
+            "taken": 1,
+            "ftq_flag": 0,
+            "ftq_value": 35,
+            "ftq_offset": 4,
+            "branch_type": 3,
+            "ras_action": 1,
+            "level": 0,
+        }
+    )
+
+    assert bm._pending_level0_target_ftq == (0, 36)
+
+
+def test_level0_redirect_does_not_clear_waiting_target_slot_on_ptr_match_without_target_pc():
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm._golden_wait_pc = 0x800047FA
+    bm._pending_level0_target_ftq = (0, 36)
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x80004852,
+        instr=0x00000013,
+        is_rvc=0,
+        pred_taken=0,
+        ftq_flag=0,
+        ftq_value=36,
+        ftq_offset=0,
+        is_last=0,
+    )
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    assert bm._pending_level0_target_ftq == (0, 36)
+
+
+def test_simfrontend_redirect_override_does_not_reuse_internal_group_for_indirect_redirect():
+    bm = BackendModel()
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 42
+    bm._ftq_group_pc_history[(1, 54)] = [
+        (0x80004852, False),
+        (0x80004856, False),
+        (0x8000485A, True),
+        (0x8000485C, False),
+        (0x800047FA, False),
+    ]
+    bm._pc_group_occurrences[0x800047FA] = [(1, 54, 4)]
+
+    override = bm._simfrontend_redirect_drive_override(
+        {
+            "target_pc": 0x800047FA,
+            "ftq_flag": 0,
+            "ftq_value": 43,
+            "branch_type": 3,
+        }
+    )
+
+    assert override is None
+
+
+def test_same_ftq_slot_replay_resets_observed_group_start_pc() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x80004A28,
+        instr=0x00000013,
+        is_rvc=0,
+        pred_taken=0,
+        ftq_flag=0,
+        ftq_value=39,
+        ftq_offset=4,
+        is_last=0,
+    )
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    _clear_cfvec(dut)
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x800047FA,
+        instr=0x00000013,
+        is_rvc=0,
+        pred_taken=0,
+        ftq_flag=0,
+        ftq_value=39,
+        ftq_offset=0,
+        is_last=0,
+    )
+    bm.current_cycle = 1
+    bm._sample_cfvec()
+
+    assert bm._observed_ftq_start_pc(0, 39) == 0x800047FA
+    assert bm._ftq_group_pc_history[(0, 39)] == [(0x800047FA, False)]
+
+
+def test_backend_model_consumes_backend_observation_snapshot() -> None:
+    bm = BackendModel()
+    obs = BackendObservationSnapshot(
+        from_ftq_wen=1,
+        from_ftq_ftq_idx=7,
+        from_ftq_start_pc_addr=0x40000123,
+        ibuf_full=0,
+    )
+
+    bm.consume_backend_observation(obs)
+
+    assert bm.current_frontend_observation().from_ftq_ftq_idx == 7
+
+
+def test_callret_commit_becomes_visible_one_cycle_after_golden_trace_consumption() -> None:
+    base = 0x80000000
+    instr = 0x008000EF  # jal x1, 8
+
+    dut = _DummyDut()
+    bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0)
+    bm.bind(dut)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(
+                    index=0,
+                    pc=base,
+                    instr=instr,
+                    size=4,
+                    kind="jump",
+                    taken=True,
+                    target_pc=base + 8,
+                )
+            ]
+        )
+    )
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=base,
+        instr=instr,
+        is_rvc=0,
+        pred_taken=1,
+        ftq_flag=0,
+        ftq_value=5,
+        ftq_offset=0,
+        is_last=1,
+    )
+
+    bm.on_clock_edge(0)
+
+    assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 0
+
+    _clear_cfvec(dut)
+    bm.on_clock_edge(1)
+
+    assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 1
+    assert int(dut.io_backend_toFtq_callRetCommit_0_bits_rasAction.value) == 2
+    assert int(dut.io_backend_toFtq_callRetCommit_0_bits_ftqPtr_value.value) == 5
+
+
+def test_golden_trace_commit_waits_until_visible_commit_coverage() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.set_golden_trace(GoldenTrace([]))
+    bm.current_cycle = 10
+    bm.ftq_entries.append(
+        FtqEntry(
+            ftq_flag=0,
+            ftq_value=7,
+            total_cfi=0,
+            resolved_cfi=0,
+            dispatch_complete=True,
+            commit_ready_cycle=0,
+        )
+    )
+    bm._ftq_real_instr_total = {(0, 7): 2}
+    bm._ftq_visible_instr_commits = {(0, 7): 1}
+
+    assert bm._plan_commit_entry_for_cycle() is None
+
+    bm._ftq_visible_instr_commits[(0, 7)] = 2
+
+    commit_entry = bm._plan_commit_entry_for_cycle()
+
+    assert commit_entry is not None
+    assert (commit_entry.ftq_flag, commit_entry.ftq_value) == (0, 7)
+
+
+def test_commit_visibility_state_without_golden_trace_fails_fast() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.current_cycle = 10
+    bm.ftq_entries.append(
+        FtqEntry(
+            ftq_flag=0,
+            ftq_value=9,
+            total_cfi=0,
+            resolved_cfi=0,
+            dispatch_complete=True,
+            commit_ready_cycle=0,
+        )
+    )
+    bm._ftq_real_instr_total = {(0, 9): 1}
+
+    import pytest
+
+    with pytest.raises(AssertionError, match="golden trace"):
+        bm._plan_commit_entry_for_cycle()
+
+
+def test_backend_fault_redirect_requires_explicit_ftq_context() -> None:
+    bm = BackendModel()
+
+    import pytest
+
+    with pytest.raises(AssertionError, match="backend-fault redirect"):
+        bm._plan_redirect_payload(
+            {
+                "target_pc": 0x80000000,
+                "reason": "backend_fault",
+                "backend_ipf": 1,
+            }
+        )
+
+
+def test_redirect_flush_rejects_stale_commit_visibility_state() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([]))
+    bm.current_cycle = 20
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 0
+    bm._pending_commit_instructions.append(
+        type(
+            "_CommitInst",
+            (),
+            {
+                "json_index": 0,
+                "pc": 0x80000010,
+                "instr": 0x00000013,
+                "ftq_flag": 0,
+                "ftq_value": 2,
+                "ras_action": 0,
+            },
+        )()
+    )
+
+    import pytest
+
+    with pytest.raises(AssertionError, match="stale commit visibility"):
+        bm._plan_redirect_payload(
+            {
+                "target_pc": 0x80000020,
+                "reason": "golden_resolve_redirect",
+                "flush_on_drive": True,
+                "pc": 0x80000000,
+                "taken": 1,
+                "ftq_flag": 0,
+                "ftq_value": 0,
+                "ftq_offset": 0,
+                "branch_type": 1,
+                "ras_action": 0,
+                "level": 0,
+            }
+        )

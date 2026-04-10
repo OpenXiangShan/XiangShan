@@ -30,6 +30,10 @@ class BackendConfig:
     safe_pc: int = 0x80000000
     resolve_min_delay: int = 3
     resolve_max_delay: int = 8
+    redirect_min_delay: int = 5
+    redirect_max_delay: int = 8
+    commit_min_delay: int = 3
+    commit_max_delay: int = 10
     auto_redirect_on_golden_mispredict: bool = True
 
 
@@ -42,7 +46,6 @@ class TraceConfig:
 class SequenceConfig:
     reset_vector: int = 0x80000000
     reset_cycles: int = 20
-    redirect_delay_cycles: int = 3
     run_until_commit_max_cycles: int = 10000
     inject_redirect_max_cycles: int = 1000
     check_pc_sequence_max_cycles: int = 5000

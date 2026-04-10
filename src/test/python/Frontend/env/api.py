@@ -430,7 +430,6 @@ def api_Frontend_run_until_golden_complete(env, max_cycles=10000) -> bool:
 def api_Frontend_inject_redirect(env, target_pc, reason, max_cycles=1000) -> bool:
     """Inject a redirect event and wait until monitor sees target PC."""
     configure_env_logging()
-    env_config = _env_config(env)
     txn = normalize_redirect_txn(target_pc=target_pc, reason=reason, max_cycles=max_cycles)
     logger.info(
         "api inject redirect: target=0x%x reason=%s max_cycles=%d",
@@ -438,7 +437,7 @@ def api_Frontend_inject_redirect(env, target_pc, reason, max_cycles=1000) -> boo
         txn.reason,
         txn.max_cycles,
     )
-    ok = inject_redirect(env, txn, redirect_delay_cycles=env_config.sequence.redirect_delay_cycles)
+    ok = inject_redirect(env, txn)
     if ok:
         logger.info("api inject redirect success: target=0x%x", txn.target_pc)
     else:
