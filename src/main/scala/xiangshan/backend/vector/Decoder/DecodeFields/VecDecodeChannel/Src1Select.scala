@@ -47,6 +47,10 @@ object Src1SelectField extends DecodeField[
     if (pattern.category.rawString == VecInstPattern.Category.OPFVF.str) CONST else INC1
   }
 
+  private def fpWideSrc1Sel(pattern: VecFpArithInstPattern): Src1Val = {
+    if (pattern.category.rawString == VecInstPattern.Category.OPFVF.str) CONST else INCF2
+  }
+
   override def name: String = "src1Sel"
 
   override def chiselType: UInt = Src1SelectEnum.UInt()
@@ -112,9 +116,9 @@ object Src1SelectField extends DecodeField[
               case VecFpOp3VVVPattern() => fpSrc1Sel(vfi)
               case VecFpRedPattern() => S2MAXx1_DCONST
               case VecFpWRedPattern() => S2MAXF2x1_DCONST
-              case VecFpOp2VVWPattern() => fpSrc1Sel(vfi)
-              case VecFpOp2WVWPattern() => fpSrc1Sel(vfi)
-              case VecFpOp3VVWPattern() => fpSrc1Sel(vfi)
+              case VecFpOp2VVWPattern() => fpWideSrc1Sel(vfi)
+              case VecFpOp2WVWPattern() => fpWideSrc1Sel(vfi)
+              case VecFpOp3VVWPattern() => fpWideSrc1Sel(vfi)
               case VecFpS2VPattern() => NONE
               case VecFpS2VVWPattern() => NONE
               case VecFpS2WVIntPattern() => NONE
