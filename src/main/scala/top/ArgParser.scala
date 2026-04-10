@@ -235,6 +235,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => up(XSTileKey).map(_.copy(wfiResume = value.toBoolean))
           }), tail)
+        case "--enable-commitstuck-check" :: value :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case XSTileKey => up(XSTileKey).map(_.copy(enableCommitStuckCheck = value.toBoolean))
+          }), tail)
         case "--disable-xmr" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableXMR = false)

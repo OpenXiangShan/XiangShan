@@ -49,6 +49,7 @@ case class YamlConfig(
   DCacheCtrlRange: Option[AddressSet],
   EnableICacheCtrl: Option[Boolean],
   ICacheCtrlRange: Option[AddressSet],
+  EnableCommitStuckCheck: Option[Boolean],
   SeperateDM: Option[Boolean],
   SeperateBus: Option[String],
   SeperateBusRanges: Option[List[AddressSet]],
@@ -161,6 +162,11 @@ object YamlParser {
     yamlConfig.ICacheCtrlRange.foreach { range =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(ICacheCtrlRange = range)
+      })
+    }
+    yamlConfig.EnableCommitStuckCheck.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(enableCommitStuckCheck = enable))
       })
     }
     yamlConfig.SeperateDM.foreach { enable =>
