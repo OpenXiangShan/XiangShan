@@ -221,37 +221,37 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
   val cpum = cpum_LM.suggestName("cpu_m").node
   println("Cbus: test 00 ===")
   for (i <- 0 until 2) {
-    xbar2to1(0) :=* cpus(i)
+    xbar2to1(0) :=* AXI4Buffer() := cpus(i)
   }
-  xbar2to1(1) := cpus(2)
-  xbar2to1(1) := xbar2to1(0)
-  xbar2to1(2) := cpus(3)
-  xbar2to1(2) := xbar2to1(1)
+  xbar2to1(1) := AXI4Buffer() := cpus(2)
+  xbar2to1(1) := AXI4Buffer() := xbar2to1(0)
+  xbar2to1(2) := AXI4Buffer() := cpus(3)
+  xbar2to1(2) := AXI4Buffer() := xbar2to1(1)
   for (i <- 4 until 6) {
-    xbar2to1(3) :=* cpus(i)
-    xbar2to1(5) :=* cpus(i+3)
-    xbar2to1(7) :=* cpus(i+3*2)
-    xbar2to1(9) :=* cpus(i+3*3)
+    xbar2to1(3) :=* AXI4Buffer() := cpus(i)
+    xbar2to1(5) :=* AXI4Buffer() := cpus(i+3)
+    xbar2to1(7) :=* AXI4Buffer() := cpus(i+3*2)
+    xbar2to1(9) :=* AXI4Buffer() := cpus(i+3*3)
   }
   println("Cbus: test 01 ===")
 //  xbar2to10->xbar2to11->xbar2to12   xbar2to13->xbar2to14,xbar2to15->xbar2to16,xbar2to17->xbar2to18, xbar2to19->xbar2to110
 
-  xbar2to1(4) := xbar2to1(3)
-  xbar2to1(4) := cpus(6)
-  xbar2to1(6) := xbar2to1(5)
-  xbar2to1(6) := cpus(9)
-  xbar2to1(8) := xbar2to1(7)
-  xbar2to1(8) := cpus(12)
-  xbar2to1(10) :=* xbar2to1(9)
-  xbar2to1(10) :=* cpus(15)
+  xbar2to1(4) := AXI4Buffer() := xbar2to1(3)
+  xbar2to1(4) := AXI4Buffer() := cpus(6)
+  xbar2to1(6) := AXI4Buffer() := xbar2to1(5)
+  xbar2to1(6) := AXI4Buffer() := cpus(9)
+  xbar2to1(8) := AXI4Buffer() := xbar2to1(7)
+  xbar2to1(8) := AXI4Buffer() := cpus(12)
+  xbar2to1(10) :=* AXI4Buffer() := xbar2to1(9)
+  xbar2to1(10) :=* AXI4Buffer() := cpus(15)
   println("Cbus: test 02 ===")
 
-  l1xbar2to1(0) := xbar2to1(2)
-  l1xbar2to1(3) :=* l1xbar2to1(2)
-  l1xbar2to1(2) := AXI4Buffer() :=* l1xbar2to1(1)
-  l1xbar2to1(1) :=* l1xbar2to1(0)
+  l1xbar2to1(0) := AXI4Buffer() := xbar2to1(10)
+  l1xbar2to1(3) :=* AXI4Buffer() := l1xbar2to1(2)
+  l1xbar2to1(2) := AXI4Buffer() := l1xbar2to1(1)
+  l1xbar2to1(1) :=* AXI4Buffer() := l1xbar2to1(0)
   for (i <- 0 until NumCX_l1) {
-    l1xbar2to1(i) :=* xbar2to1(4 + i *2)
+    l1xbar2to1(i) :=* AXI4Buffer() := xbar2to1(8 - i *2)
   }
   println("Cbus: test 03 ===")
   cpum := AXI4Buffer() := l1xbar2to1(NumCX_l1-1)
@@ -267,7 +267,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     masters = Seq(AXI4MasterParameters(
       name = "master-node",
       maxFlight = Some(16),
-      id = IdRange(0, 0)
+      id = IdRange(0, 1)
     ))
   )))
 
@@ -337,37 +337,37 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
 
   // l0 <- l1 <- l2 <- l3
   l1xbar1to2(3) := pbus_xbar
-  l1xbar1to2(2) := l1xbar1to2(3)
+  l1xbar1to2(2) := AXI4Buffer() := l1xbar1to2(3)
   l1xbar1to2(1) := AXI4Buffer() := l1xbar1to2(2)
-  l1xbar1to2(0) := l1xbar1to2(1)
+  l1xbar1to2(0) := AXI4Buffer() := l1xbar1to2(1)
   // icx4 <- icxl1_0, icx6 <- icxl1_1, icx8 <- icxl1_2, icx10 <- icxl1_3
   for (i <- 0 until NumCX_l1) {
-    xbar1to2(4 + i * 2) := l1xbar1to2(i)
+    xbar1to2(8 - i * 2) := l1xbar1to2(i)
   }
-  xbar1to2(2) := l1xbar1to2(0)
+  xbar1to2(10) := l1xbar1to2(0)
   // icx xbar 1to2 design
   for (i <- 0 until 2) {
     imsic_l4(i) :*= xbar1to2(0)
   }
-  imsic_l4(2) := xbar1to2(1)
-  xbar1to2(0) := xbar1to2(1)
-  imsic_l4(3) := xbar1to2(2)
-  xbar1to2(1) := xbar1to2(2)
+  imsic_l4(2) := AXI4Buffer() := xbar1to2(1)
+  xbar1to2(0) := AXI4Buffer() := xbar1to2(1)
+  imsic_l4(3) := AXI4Buffer() := xbar1to2(2)
+  xbar1to2(1) := AXI4Buffer() := xbar1to2(2)
   for (i <- 4 until 6) {
-    imsic_l4(i) :*= xbar1to2(3)
-    imsic_l4(i + 3) :*= xbar1to2(5)
-    imsic_l4(i + 3 * 2) :*= xbar1to2(7)
-    imsic_l4(i + 3 * 3) :*= xbar1to2(9)
+    imsic_l4(i) :*= AXI4Buffer() := xbar1to2(3)
+    imsic_l4(i + 3) :*= AXI4Buffer() := xbar1to2(5)
+    imsic_l4(i + 3 * 2) :*= AXI4Buffer() := xbar1to2(7)
+    imsic_l4(i + 3 * 3) :*= AXI4Buffer() := xbar1to2(9)
   }
   //  icx0->cx1->cx2   cx3->cx4,cx5->cx6,cx7->cx8, cx9->cx10
-  xbar1to2(3) := xbar1to2(4)
-  imsic_l4(6) := xbar1to2(4)
-  xbar1to2(5) := xbar1to2(6)
-  imsic_l4(9) := xbar1to2(6)
-  xbar1to2(7) := xbar1to2(8)
-  imsic_l4(12) := xbar1to2(8)
-  xbar1to2(9) := xbar1to2(10)
-  imsic_l4(15) := xbar1to2(10)
+  xbar1to2(3) := AXI4Buffer() := xbar1to2(4)
+  imsic_l4(6) := AXI4Buffer() := xbar1to2(4)
+  xbar1to2(5) := AXI4Buffer() := xbar1to2(6)
+  imsic_l4(9) := AXI4Buffer() := xbar1to2(6)
+  xbar1to2(7) := AXI4Buffer() := xbar1to2(8)
+  imsic_l4(12) := AXI4Buffer() := xbar1to2(8)
+  xbar1to2(9) := AXI4Buffer() := xbar1to2(10)
+  imsic_l4(15) := AXI4Buffer() := xbar1to2(10)
   for (i <- 0 until params.NumHarts) {
     sNodes(i) := AXI4Buffer() := imsic_l4(i)
   }
