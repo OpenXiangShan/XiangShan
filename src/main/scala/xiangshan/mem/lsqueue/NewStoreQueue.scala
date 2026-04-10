@@ -152,7 +152,6 @@ class UnalignBufferEntry(implicit p: Parameters) extends MemBlockBundle {
 class WriteToSbufferReqEntry(implicit p: Parameters) extends MemBlockBundle {
   val addr         = UInt(PAddrBits.W)
   val prefetch     = Bool()
-  val vecValid     = Bool() //TODO: need to remove.
   val wline        = Bool()
   val vaddr        = UInt(VAddrBits.W)
   val data         = UInt(VLEN.W)
@@ -661,7 +660,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       sink.vaddr    := source.vaddr
       sink.wline    := source.wline
       sink.addr     := source.addr
-      sink.vecValid := source.vecValid
       sink.prefetch := source.prefetch
       sink
     }
@@ -1203,7 +1201,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
 
       port.bits.wline    := ctrlEntry.isCbo && isCboZero(dataEntry.cboType)
       port.bits.prefetch := dataEntry.prefetch
-      port.bits.vecValid := true.B
       port.valid         := toSbufferValid(i)
 
       XSError(ctrlEntry.vecInactive && !ctrlEntry.isVec, s"inactive element must be vector! ${i}")
@@ -1309,7 +1306,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
           diffStore.cacheableStore(i).bits.data           := writeSbufferWire(i).bits.data
           diffStore.cacheableStore(i).bits.mask           := writeSbufferWire(i).bits.mask
           diffStore.cacheableStore(i).bits.wline          := writeSbufferWire(i).bits.wline
-          diffStore.cacheableStore(i).bits.vecValid       := writeSbufferWire(i).bits.vecValid
           diffStore.cacheableStore(i).bits.diffIsHighPart := diffIsHighPart(i) // indicate whether valid data in high 64-bit, only for scalar store event!
       }
       diffStore.ncStore.valid := io.toUncacheBuffer.req.fire && io.toUncacheBuffer.req.bits.nc
@@ -2054,8 +2050,6 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   val entriesUtilization = PopCount(ctrlEntries.map(e => (e.addrValid || e.dataValid) && e.allocated))
   QueuePerf(StoreQueueSize, validCount, !allowEnqueue)
   XSPerfHistogram("entries_util", entriesUtilization, true.B, 0, StoreQueueSize, 1)
-//  val vecValidVec = WireInit(VecInit((0 until StoreQueueSize).map(i => allocated(i) && isVec(i))))
-//  QueuePerf(StoreQueueSize, PopCount(vecValidVec), !allowEnqueue)
   io.sqFull := !allowEnqueue
   XSPerfAccumulate("mmioCycle", (mmioBusy)) // lq is busy dealing with uncache req
   XSPerfAccumulate("mmioCnt", io.writeBack.fire && isMmio(rdataDataEntries.head.memoryType))

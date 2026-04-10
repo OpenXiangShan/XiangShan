@@ -763,7 +763,6 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   dontTouch(Cross16ByteMask)
   sbufferOut.bits                  := DontCare
   sbufferOut.valid                 := state === s_send_data && segmentActive
-  sbufferOut.bits.vecValid         := state === s_send_data && segmentActive
   sbufferOut.bits.mask             := sbufferMask
   sbufferOut.bits.data             := sbufferData
   sbufferOut.bits.vaddr            := sbufferVaddr
@@ -788,7 +787,6 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
     sink.bits.data                 := io.sbuffer.bits.data
     sink.bits.mask                 := io.sbuffer.bits.mask
     sink.bits.wline                := io.sbuffer.bits.wline
-    sink.bits.vecValid             := io.sbuffer.bits.vecValid
     sink.bits.diffIsHighPart       := io.sbuffer.bits.addr(3)  // segment store event is treat as scalar store!
   }
 

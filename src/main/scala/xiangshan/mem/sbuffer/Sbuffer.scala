@@ -318,7 +318,7 @@ class Sbuffer(implicit p: Parameters)
 
   val inptags = io.in.req.map(in => getPTag(in.bits.addr))
   val invtags = io.in.req.map(in => getVTag(in.bits.vaddr))
-  val sameTag = inptags(0) === inptags(1) && io.in.req(0).valid && io.in.req(1).valid && io.in.req(0).bits.vecValid && io.in.req(1).bits.vecValid
+  val sameTag = inptags(0) === inptags(1) && io.in.req(0).valid && io.in.req(1).valid
   val firstWord = getVWord(io.in.req(0).bits.addr)
   val secondWord = getVWord(io.in.req(1).bits.addr)
   // merge condition
@@ -331,7 +331,7 @@ class Sbuffer(implicit p: Parameters)
     mergeMask(i) := widthMap(j =>
       inptags(i) === ptag(j) && activeMask(j)
     )
-    assert(!(PopCount(mergeMask(i).asUInt) > 1.U && io.in.req(i).fire && io.in.req(i).bits.vecValid))
+    assert(!(PopCount(mergeMask(i).asUInt) > 1.U && io.in.req(i).fire))
   }
 
   // insert condition
@@ -391,7 +391,7 @@ class Sbuffer(implicit p: Parameters)
   for (i <- 0 until EnsbufferWidth) {
     // train
     if (EnableStorePrefetchSPB) {
-      prefetcher.io.sbuffer_enq(i).valid := io.in.req(i).fire && io.in.req(i).bits.vecValid
+      prefetcher.io.sbuffer_enq(i).valid := io.in.req(i).fire
       prefetcher.io.sbuffer_enq(i).bits := DontCare
       prefetcher.io.sbuffer_enq(i).bits.vaddr := io.in.req(i).bits.vaddr
     } else {
@@ -402,9 +402,9 @@ class Sbuffer(implicit p: Parameters)
     // prefetch req
     if (EnableStorePrefetchAtCommit) {
       if (EnableAtCommitMissTrigger) {
-        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in.req(i).fire && io.in.req(i).bits.vecValid && io.in.req(i).bits.prefetch)
+        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in.req(i).fire && io.in.req(i).bits.prefetch)
       } else {
-        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in.req(i).fire && io.in.req(i).bits.vecValid)
+        io.store_prefetch(i).valid := prefetcher.io.prefetch_req(i).valid || (io.in.req(i).fire)
       }
       io.store_prefetch(i).bits.paddr := DontCare
       io.store_prefetch(i).bits.vaddr := Mux(prefetcher.io.prefetch_req(i).valid, prefetcher.io.prefetch_req(i).bits.vaddr, io.in.req(i).bits.vaddr)
@@ -468,16 +468,16 @@ class Sbuffer(implicit p: Parameters)
   }
 
   for(((in, vwordOffset), i) <- io.in.req.zip(Seq(firstWord, secondWord)).zipWithIndex){
-    writeReq(i).valid := in.fire && in.bits.vecValid
+    writeReq(i).valid := in.fire
     writeReq(i).bits.vwordOffset := vwordOffset
     writeReq(i).bits.mask := in.bits.mask
     writeReq(i).bits.data := in.bits.data
     writeReq(i).bits.wline := in.bits.wline
     val debug_insertIdx = if(i == 0) firstInsertIdx else secondInsertIdx
     val insertVec = if(i == 0) firstInsertVec else secondInsertVec
-    assert(!((PopCount(insertVec) > 1.U) && in.fire && in.bits.vecValid))
+    assert(!((PopCount(insertVec) > 1.U) && in.fire))
     val insertIdx = OHToUInt(insertVec)
-    val accessValid = in.fire && in.bits.vecValid
+    val accessValid = in.fire
     accessIdx(i).valid := RegNext(accessValid)
     accessIdx(i).bits := RegEnable(Mux(canMerge(i), mergeIdx(i), insertIdx), accessValid)
 
@@ -515,7 +515,7 @@ class Sbuffer(implicit p: Parameters)
   }
 
   for((req, i) <- io.in.req.zipWithIndex){
-    XSDebug(req.fire && req.bits.vecValid,
+    XSDebug(req.fire,
       p"accept req [$i]: " +
         p"addr:${Hexadecimal(req.bits.addr)} " +
         p"mask:${Binary(shiftMaskToLow(req.bits.addr,req.bits.mask))} " +
@@ -920,7 +920,7 @@ class Sbuffer(implicit p: Parameters)
       // A common difftest interface for scalar and vector instr
       val difftestCommon = DifftestModule(new DiffStoreEvent, delay = 2, dontCare = true)
 
-      val storeCommitValid = cacStore.fire && rawMask.orR && cacStore.bits.vecValid
+      val storeCommitValid = cacStore.fire && rawMask.orR
 
       difftestCommon.coreid       := io.hartId
       difftestCommon.index        := i.U
@@ -984,7 +984,6 @@ class Sbuffer(implicit p: Parameters)
   XSPerfHistogram("util", perf_valid_entry_count, true.B, 0, StoreBufferSize, 1)
   XSPerfAccumulate("sbuffer_req_valid", PopCount(VecInit(io.in.req.map(_.valid)).asUInt))
   XSPerfAccumulate("sbuffer_req_fire", PopCount(VecInit(io.in.req.map(_.fire)).asUInt))
-  XSPerfAccumulate("sbuffer_req_fire_vecinvalid", PopCount(VecInit(io.in.req.map(data => data.fire && !data.bits.vecValid)).asUInt))
   XSPerfAccumulate("sbuffer_merge", PopCount(VecInit(io.in.req.zipWithIndex.map({case (in, i) => in.fire && canMerge(i)})).asUInt))
   XSPerfAccumulate("sbuffer_newline", PopCount(VecInit(io.in.req.zipWithIndex.map({case (in, i) => in.fire && !canMerge(i)})).asUInt))
   XSPerfAccumulate("dcache_req_valid", io.dcache.req.valid)
