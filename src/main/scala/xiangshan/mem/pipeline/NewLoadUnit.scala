@@ -1641,12 +1641,14 @@ class LoadUnitS3(param: ExeUnitParams)(
 
   // source occupy others but fail perf counter
   val executeFail = lqWriteValid && lqWriteCause.asUInt.orR || pipeIn.valid && shouldFastReplay
+  // fastReplay's entrance maybe not one-hot.
+  val perfEntrance = Mux((pipeIn.bits.entrance & LoadEntrance.fastReplay.U).orR, LoadEntrance.fastReplay.U, pipeIn.bits.entrance)
   for (i <- 0 until LoadEntrance.num) {
     val highPrioNume = LoadEntrance.findNameById(i)
     for (j <- i + 1 until LoadEntrance.num) {
       val lowPrioNume = LoadEntrance.findNameById(j)
       println(s"[${param.name}] Add S0 Occupy PerfEvents of ${highPrioNume} oocupy ${lowPrioNume}, index: ${i} and ${j}")
-      val enable = pipeIn.bits.occupySource(j.U) && pipeIn.bits.entrance(i.U)
+      val enable = pipeIn.bits.occupySource(j.U) && perfEntrance(i.U)
       XSPerfAccumulate(s"${highPrioNume}_occupy_${lowPrioNume}", executeFail && enable)
     }
   }
@@ -1655,7 +1657,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   for (i <- 0 until LoadEntrance.num) {
     val sourceNum = LoadEntrance.findNameById(i)
     println(s"[${param.name}] Add execute successed PerfEvents of ${sourceNum}, index: ${i}")
-    val enable = pipeIn.bits.entrance(i.U) && ldoutValid // success writeback
+    val enable = perfEntrance(i.U) && ldoutValid // success writeback
     XSPerfAccumulate(s"${sourceNum}_execute_success", enable)
   }
 
@@ -1663,7 +1665,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   for (i <- 0 until LoadEntrance.num) {
     val sourceNum = LoadEntrance.findNameById(i)
     println(s"[${param.name}] Add execute failed PerfEvents of ${sourceNum}, index: ${i}")
-    val enable = pipeIn.bits.entrance(i.U) && executeFail
+    val enable = perfEntrance(i.U) && executeFail
     XSPerfAccumulate(s"${sourceNum}_execute_fail", enable)
   }
 
