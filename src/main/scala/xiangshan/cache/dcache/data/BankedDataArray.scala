@@ -464,6 +464,10 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
   })
   XSPerfAccumulate("data_array_multi_read", perf_multi_read)
+  val rr_bank_conflict_count = PopCount((1 until LoadPipelineWidth).flatMap(y =>
+    (0 until y).map(x => rr_bank_conflict(x)(y))
+  ))
+  XSPerfAccumulate("data_array_multi_rr_bank_conflict", rr_bank_conflict_count >= 2.U)
   (1 until LoadPipelineWidth).foreach(y => (0 until y).foreach(x =>
     XSPerfAccumulate(s"data_array_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y))
   ))
@@ -778,6 +782,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       (if (i == 0) 0.B else (0 until i).map(rr_bank_conflict(_)(i)).reduce(_ || _))
   })
   XSPerfAccumulate("data_array_multi_read", perf_multi_read)
+  val rr_bank_conflict_count = PopCount((1 until LoadPipelineWidth).flatMap(y =>
+    (0 until y).map(x => rr_bank_conflict(x)(y))
+  ))
+  XSPerfAccumulate("data_array_multi_rr_bank_conflict", rr_bank_conflict_count >= 2.U)
   (1 until LoadPipelineWidth).foreach(y => (0 until y).foreach(x =>
     XSPerfAccumulate(s"data_array_rr_bank_conflict_${x}_${y}", rr_bank_conflict(x)(y))
   ))
