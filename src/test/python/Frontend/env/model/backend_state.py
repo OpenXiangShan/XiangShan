@@ -5,6 +5,26 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Deque, Optional
 
+PATH_STATE_UNKNOWN = "unknown"
+PATH_STATE_CORRECT = "correct"
+PATH_STATE_WRONG = "wrong"
+
+RESOLVE_STATE_NOT_NEEDED = "not_needed"
+RESOLVE_STATE_PENDING = "pending"
+RESOLVE_STATE_EMITTED = "emitted"
+RESOLVE_STATE_SKIPPED = "skipped"
+
+ROB_COMMIT_STATE_PENDING = "pending"
+ROB_COMMIT_STATE_COMMITTED = "committed"
+
+CALL_RET_STATE_NONE = "none"
+CALL_RET_STATE_PENDING = "pending"
+CALL_RET_STATE_EMITTED = "emitted"
+
+GOLDEN_MATCH_STATE_UNKNOWN = "unknown"
+GOLDEN_MATCH_STATE_MATCHED = "matched"
+GOLDEN_MATCH_STATE_MISMATCHED = "mismatched"
+
 
 @dataclass
 class FrontendPacket:
@@ -28,6 +48,7 @@ class FtqEntry:
     total_cfi: int = 0
     resolved_cfi: int = 0
     dispatch_complete: bool = False
+    observed_last_in_entry: bool = False
     has_redirect: bool = False
     commit_ready_cycle: int = 0
 
@@ -47,6 +68,7 @@ class ResolveEntry:
     ras_action: int
     queued_cycle: int = 0
     is_rvc: bool = False
+    queue_index: Optional[int] = None
 
 
 @dataclass
@@ -57,6 +79,29 @@ class CommitInstruction:
     ftq_flag: int
     ftq_value: int
     ras_action: int
+    queue_index: Optional[int] = None
+
+
+@dataclass
+class QueueInstr:
+    cycle: int
+    slot: int
+    pc: int
+    instr: int
+    is_rvc: bool
+    pred_taken: bool
+    ftq_flag: int
+    ftq_value: int
+    ftq_offset: int
+    is_last_in_entry: bool
+    path_state: str = PATH_STATE_UNKNOWN
+    resolve_state: str = RESOLVE_STATE_NOT_NEEDED
+    rob_commit_state: str = ROB_COMMIT_STATE_PENDING
+    call_ret_commit_state: str = CALL_RET_STATE_NONE
+    call_ret_ras_action: int = 0
+    golden_match_state: str = GOLDEN_MATCH_STATE_UNKNOWN
+    golden_index: Optional[int] = None
+    is_cfi: bool = False
 
 
 @dataclass
@@ -79,14 +124,61 @@ class BackendState:
     ftq_group_pc_history: dict[tuple[int, int], list[tuple[int, bool]]] = field(default_factory=dict)
     pc_group_occurrences: dict[int, list[tuple[int, int, int]]] = field(default_factory=dict)
     pending_level0_target_ftq: Optional[tuple[int, int]] = None
-    pending_commit_instructions: Deque[CommitInstruction] = field(default_factory=deque)
-    scheduled_commit_groups: Deque[tuple[int, list[CommitInstruction]]] = field(default_factory=deque)
-    visible_commit_group: list[CommitInstruction] = field(default_factory=list)
-    visible_json_commit_count: int = 0
-    ftq_real_instr_total: dict[tuple[int, int], int] = field(default_factory=dict)
-    ftq_visible_instr_commits: dict[tuple[int, int], int] = field(default_factory=dict)
+    semantic_queue: Deque[QueueInstr] = field(default_factory=deque)
+    pending_redirect_origin_index: Optional[int] = None
+    pending_queue_resolve_indices: Deque[int] = field(default_factory=deque)
+    pending_queue_call_ret_commit_indices: Deque[int] = field(default_factory=deque)
+    scheduled_queue_call_ret_commit_groups: Deque[tuple[int, list[CommitInstruction]]] = field(default_factory=deque)
+    visible_queue_call_ret_commit_group: list[CommitInstruction] = field(default_factory=list)
     commit_min_delay: int = 3
     commit_max_delay: int = 10
+
+    def append_semantic_queue_instruction(self, instr: QueueInstr) -> int:
+        self.semantic_queue.append(instr)
+        return len(self.semantic_queue) - 1
+
+    def schedule_next_queue_call_ret_commit_group(self) -> None:
+        if not self.pending_queue_call_ret_commit_indices:
+            return
+        if (
+            self.scheduled_queue_call_ret_commit_groups
+            and int(self.scheduled_queue_call_ret_commit_groups[-1][0]) >= int(self.current_cycle) + 1
+        ):
+            return
+        group: list[CommitInstruction] = []
+        while self.pending_queue_call_ret_commit_indices and len(group) < 8:
+            idx = int(self.pending_queue_call_ret_commit_indices.popleft())
+            if idx < 0 or idx >= len(self.semantic_queue):
+                continue
+            entry = self.semantic_queue[idx]
+            group.append(
+                CommitInstruction(
+                    json_index=-1 if entry.golden_index is None else int(entry.golden_index),
+                    pc=int(entry.pc),
+                    instr=int(entry.instr),
+                    ftq_flag=int(entry.ftq_flag),
+                    ftq_value=int(entry.ftq_value),
+                    ras_action=int(entry.call_ret_ras_action),
+                    queue_index=int(idx),
+                )
+            )
+        if not group:
+            return
+        self.scheduled_queue_call_ret_commit_groups.append((int(self.current_cycle) + 1, group))
+
+    def activate_visible_queue_call_ret_commit_group(self) -> None:
+        self.visible_queue_call_ret_commit_group = []
+        if not self.scheduled_queue_call_ret_commit_groups:
+            return
+        ready_cycle, group = self.scheduled_queue_call_ret_commit_groups[0]
+        if int(self.current_cycle) < int(ready_cycle):
+            return
+        self.scheduled_queue_call_ret_commit_groups.popleft()
+        self.visible_queue_call_ret_commit_group = list(group)
+        for inst in self.visible_queue_call_ret_commit_group:
+            idx = getattr(inst, "queue_index", None)
+            if idx is not None and 0 <= int(idx) < len(self.semantic_queue):
+                self.semantic_queue[int(idx)].call_ret_commit_state = CALL_RET_STATE_EMITTED
 
     def increment_ftq_ptr(self, flag: int, value: int) -> tuple[int, int]:
         next_value = int(value) + 1
@@ -207,190 +299,122 @@ class BackendState:
                 return 2
         return 0
 
-    def record_consumed_commit_instruction(
-        self,
-        json_index: int,
-        pc: int,
-        instr: int,
-        ftq_flag: int,
-        ftq_value: int,
-    ) -> None:
-        key = (int(ftq_flag), int(ftq_value))
-        self.pending_commit_instructions.append(
-            CommitInstruction(
-                json_index=int(json_index),
-                pc=int(pc),
-                instr=int(instr),
-                ftq_flag=int(ftq_flag),
-                ftq_value=int(ftq_value),
-                ras_action=self.decode_commit_ras_action(int(instr)),
-            )
-        )
-        self.ftq_real_instr_total[key] = self.ftq_real_instr_total.get(key, 0) + 1
-
-    def schedule_next_commit_group(self) -> None:
-        if not self.pending_commit_instructions:
-            return
-        if self.scheduled_commit_groups and int(self.scheduled_commit_groups[-1][0]) >= int(self.current_cycle) + 1:
-            return
-        group: list[CommitInstruction] = []
-        while self.pending_commit_instructions and len(group) < 8:
-            group.append(self.pending_commit_instructions.popleft())
-        if not group:
-            return
-        self.scheduled_commit_groups.append((int(self.current_cycle) + 1, group))
-
-    def activate_visible_commit_group(self) -> None:
-        self.visible_commit_group = []
-        if not self.scheduled_commit_groups:
-            return
-        ready_cycle, group = self.scheduled_commit_groups[0]
-        if int(self.current_cycle) < int(ready_cycle):
-            return
-        self.scheduled_commit_groups.popleft()
-        self.visible_commit_group = list(group)
-        self.visible_json_commit_count += len(group)
-        for inst in group:
-            key = (int(inst.ftq_flag), int(inst.ftq_value))
-            self.ftq_visible_instr_commits[key] = self.ftq_visible_instr_commits.get(key, 0) + 1
-
-    def ftq_entry_commit_covered(self, entry: FtqEntry, *, golden_trace_attached: bool) -> bool:
-        if not golden_trace_attached:
-            if (
-                self.ftq_real_instr_total
-                or self.ftq_visible_instr_commits
-                or self.pending_commit_instructions
-                or self.scheduled_commit_groups
-                or self.visible_commit_group
-            ):
-                raise AssertionError("commit visibility requires an attached golden trace")
+    def ftq_entry_dispatch_ready_for_commit(self, entry: FtqEntry) -> bool:
+        if bool(entry.dispatch_complete):
             return True
-        key = (int(entry.ftq_flag), int(entry.ftq_value))
-        total_real_instr = int(self.ftq_real_instr_total.get(key, 0))
-        if total_real_instr <= 0:
+        if self.pending_level0_target_ftq is None:
             return False
-        visible_instr = int(self.ftq_visible_instr_commits.get(key, 0))
-        return visible_instr >= total_real_instr
+        wait_flag, wait_value = self.pending_level0_target_ftq
+        if self.ftq_entry_matches(entry, wait_flag, wait_value):
+            return False
+        return self.ftq_ptr_rank_after_commit(
+            int(entry.ftq_flag),
+            int(entry.ftq_value),
+        ) < self.ftq_ptr_rank_after_commit(int(wait_flag), int(wait_value))
 
-    def reset_commit_visibility(self) -> None:
-        self.pending_commit_instructions.clear()
-        self.scheduled_commit_groups.clear()
-        self.visible_commit_group = []
-        self.visible_json_commit_count = 0
-        self.ftq_real_instr_total.clear()
-        self.ftq_visible_instr_commits.clear()
-
-    def _commit_visibility_survives_redirect(
+    def ftq_entry_is_ready_to_commit(
         self,
+        entry: FtqEntry,
         *,
-        ftq_flag: int,
-        ftq_value: int,
-        redirect_flag: int,
-        redirect_value: int,
-        redirect_rank: int,
-        flush_itself: bool,
+        golden_trace_attached: bool,
+        allow_pending_target_match: bool = False,
     ) -> bool:
-        if int(ftq_flag) == int(redirect_flag) and int(ftq_value) == int(redirect_value):
-            return True
-        return self.ftq_ptr_survives_redirect(int(ftq_flag), int(ftq_value), int(redirect_rank), bool(flush_itself))
-
-    def assert_no_stale_commit_visibility(
-        self,
-        *,
-        redirect_flag: int,
-        redirect_value: int,
-        flush_itself: bool,
-    ) -> None:
-        redirect_rank = self.ftq_ptr_rank_after_commit(int(redirect_flag), int(redirect_value))
-        stale: list[tuple[int, int]] = []
-
-        def _check_inst(inst) -> None:
-            if self._commit_visibility_survives_redirect(
-                ftq_flag=int(getattr(inst, "ftq_flag")),
-                ftq_value=int(getattr(inst, "ftq_value")),
-                redirect_flag=int(redirect_flag),
-                redirect_value=int(redirect_value),
-                redirect_rank=int(redirect_rank),
-                flush_itself=bool(flush_itself),
-            ):
-                return
-            stale.append((int(getattr(inst, "ftq_flag")), int(getattr(inst, "ftq_value"))))
-
-        for inst in self.pending_commit_instructions:
-            _check_inst(inst)
-        for _, group in self.scheduled_commit_groups:
-            for inst in group:
-                _check_inst(inst)
-        for inst in self.visible_commit_group:
-            _check_inst(inst)
-
-        if stale:
-            stale_desc = ", ".join(f"({flag},{value})" for flag, value in stale)
-            raise AssertionError(f"stale commit visibility survives redirect flush: {stale_desc}")
+        dispatch_ready = bool(entry.dispatch_complete)
+        if not dispatch_ready and not allow_pending_target_match:
+            dispatch_ready = self.ftq_entry_dispatch_ready_for_commit(entry)
+        if not dispatch_ready:
+            return False
+        if entry.resolved_cfi < entry.total_cfi:
+            return False
+        if entry.has_redirect:
+            return False
+        if int(self.current_cycle) < int(entry.commit_ready_cycle):
+            return False
+        return True
 
     def find_next_commitable_entry(self, *, golden_trace_attached: bool = False) -> Optional[FtqEntry]:
         if not self.ftq_entries:
             return None
 
-        expected: Optional[tuple[int, int]] = None
-        if self.commit_count > 0 or self.commit_ptr_flag != 0 or self.commit_ptr_value != 0:
-            if self.reuse_commit_ptr_once:
-                expected = (int(self.commit_ptr_flag), int(self.commit_ptr_value))
-            else:
-                expected = self.increment_ftq_ptr(self.commit_ptr_flag, self.commit_ptr_value)
-
-        candidate = None
-        if expected is None:
-            candidate = self.ftq_entries[0]
+        if self.commit_count <= 0 and self.commit_ptr_flag == 0 and self.commit_ptr_value == 0 and not self.reuse_commit_ptr_once:
+            oldest = self.ftq_entries[0]
+            expected = (int(oldest.ftq_flag), int(oldest.ftq_value))
+        elif self.reuse_commit_ptr_once:
+            expected = (int(self.commit_ptr_flag), int(self.commit_ptr_value))
         else:
-            exp_flag, exp_value = expected
-            for entry in self.ftq_entries:
-                if self.ftq_entry_matches(entry, exp_flag, exp_value):
-                    candidate = entry
-                    break
-            if candidate is None and self.ftq_entries:
-                oldest_survivor = self.ftq_entries[0]
-                if self.ftq_entry_matches(oldest_survivor, self.commit_ptr_flag, self.commit_ptr_value) and not self.reuse_commit_ptr_once:
-                    return None
-                if expected is not None:
-                    duplicate_expected_survivor = any(
-                        self.ftq_entry_matches(entry, exp_flag, exp_value)
-                        for entry in list(self.ftq_entries)[1:]
-                    )
-                    if duplicate_expected_survivor and self.ftq_entry_matches(oldest_survivor, exp_flag, exp_value):
-                        return None
-                if self.pending_level0_target_ftq is not None:
-                    wait_flag, wait_value = self.pending_level0_target_ftq
-                    if self.ftq_entry_matches(oldest_survivor, wait_flag, wait_value):
-                        self.pending_level0_target_ftq = None
-                    elif self.ftq_ptr_rank_after_commit(wait_flag, wait_value) <= self.ftq_ptr_rank_after_commit(
-                        oldest_survivor.ftq_flag,
-                        oldest_survivor.ftq_value,
-                    ):
-                        return None
-                self.commit_ptr_flag, self.commit_ptr_value = self.decrement_ftq_ptr(
-                    oldest_survivor.ftq_flag,
-                    oldest_survivor.ftq_value,
+            expected = self.increment_ftq_ptr(self.commit_ptr_flag, self.commit_ptr_value)
+
+        if self.pending_level0_target_ftq is not None:
+            matching_entries = [
+                entry
+                for entry in self.ftq_entries
+                if self.ftq_entry_matches(entry, int(expected[0]), int(expected[1]))
+            ]
+            if not matching_entries:
+                return None
+            if (int(expected[0]), int(expected[1])) == (
+                int(self.pending_level0_target_ftq[0]),
+                int(self.pending_level0_target_ftq[1]),
+            ):
+                return next(
+                    (
+                        entry
+                        for entry in matching_entries
+                        if self.ftq_entry_is_ready_to_commit(
+                            entry,
+                            golden_trace_attached=golden_trace_attached,
+                            allow_pending_target_match=True,
+                        )
+                    ),
+                    None,
                 )
-                candidate = oldest_survivor
+            return next(
+                (
+                    entry
+                    for entry in matching_entries
+                    if self.ftq_entry_is_ready_to_commit(
+                        entry,
+                        golden_trace_attached=golden_trace_attached,
+                    )
+                ),
+                None,
+            )
 
-        if candidate is None:
-            return None
-        if not candidate.dispatch_complete or candidate.resolved_cfi < candidate.total_cfi:
-            return None
-        if not self.ftq_entry_commit_covered(candidate, golden_trace_attached=golden_trace_attached):
-            return None
-        if candidate.has_redirect:
-            return None
-        if int(self.current_cycle) < int(candidate.commit_ready_cycle):
-            return None
-        return candidate
+        upper_bound: Optional[FtqEntry] = None
+        while True:
+            matching_entries = [
+                entry
+                for entry in self.ftq_entries
+                if self.ftq_entry_matches(entry, int(expected[0]), int(expected[1]))
+            ]
+            if not matching_entries:
+                break
+            candidate = next(
+                (
+                    entry
+                    for entry in matching_entries
+                    if self.ftq_entry_is_ready_to_commit(
+                        entry,
+                        golden_trace_attached=golden_trace_attached,
+                    )
+                ),
+                None,
+            )
+            if candidate is None:
+                break
+            upper_bound = candidate
+            expected = self.increment_ftq_ptr(int(candidate.ftq_flag), int(candidate.ftq_value))
+        return upper_bound
 
-    def seal_current_ftq_entry(self) -> None:
+    def seal_current_ftq_entry(self, *, observed_last_in_entry: bool = False) -> None:
         if self.current_ftq_entry is None:
             return
-        self.current_ftq_entry.dispatch_complete = True
-        self.extend_commit_ready_cycle(self.current_ftq_entry)
+        self.current_ftq_entry.observed_last_in_entry = bool(
+            self.current_ftq_entry.observed_last_in_entry or observed_last_in_entry
+        )
+        self.current_ftq_entry.dispatch_complete = bool(self.current_ftq_entry.observed_last_in_entry)
+        if self.current_ftq_entry.dispatch_complete:
+            self.extend_commit_ready_cycle(self.current_ftq_entry)
         if self.ftq_entries and self.ftq_entry_matches(
             self.ftq_entries[-1],
             self.current_ftq_entry.ftq_flag,
@@ -400,6 +424,9 @@ class BackendState:
             tail.total_cfi = max(int(tail.total_cfi), int(self.current_ftq_entry.total_cfi))
             tail.resolved_cfi = max(int(tail.resolved_cfi), int(self.current_ftq_entry.resolved_cfi))
             tail.dispatch_complete = bool(tail.dispatch_complete or self.current_ftq_entry.dispatch_complete)
+            tail.observed_last_in_entry = bool(
+                tail.observed_last_in_entry or self.current_ftq_entry.observed_last_in_entry
+            )
             tail.has_redirect = bool(tail.has_redirect or self.current_ftq_entry.has_redirect)
             tail.commit_ready_cycle = max(
                 int(tail.commit_ready_cycle),
