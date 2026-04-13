@@ -92,12 +92,12 @@ object Extensions {
 
   case object ZfaF extends CombExt[Zfa.type, F.type] {
     override val types: Seq[InstType] = Seq(F_ZFAType)
-    override val table: Map[BitPat, Opcode] = Map()
+    override val table: Map[BitPat, Opcode] = tableZfaF
   }
 
   case object ZfaD extends CombExt[Zfa.type, D.type] {
     override val types: Seq[InstType] = Seq(D_ZFAType)
-    override val table: Map[BitPat, Opcode] = Map()
+    override val table: Map[BitPat, Opcode] = tableZfaD
   }
 
   case object ZfaZfh extends CombExt[Zfa.type, Zfh.type] {
