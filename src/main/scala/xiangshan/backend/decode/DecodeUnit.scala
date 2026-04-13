@@ -393,16 +393,6 @@ object ScalarCryptoDecode extends DecodeConstants {
     SHA512SUM0 -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha512sum0, SelImm.X    , xWen = T, canRobCompress = T),
     SHA512SUM1 -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sha512sum1, SelImm.X    , xWen = T, canRobCompress = T),
 
-    // Zksed: ShangMi Suite: SM4 Block Cipher Instructions
-    SM4ED0     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed0    , SelImm.X    , xWen = T, canRobCompress = T),
-    SM4ED1     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed1    , SelImm.X    , xWen = T, canRobCompress = T),
-    SM4ED2     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed2    , SelImm.X    , xWen = T, canRobCompress = T),
-    SM4ED3     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ed3    , SelImm.X    , xWen = T, canRobCompress = T),
-    SM4KS0     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks0    , SelImm.X    , xWen = T, canRobCompress = T),
-    SM4KS1     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks1    , SelImm.X    , xWen = T, canRobCompress = T),
-    SM4KS2     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks2    , SelImm.X    , xWen = T, canRobCompress = T),
-    SM4KS3     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.bku, BKUOpType.sm4ks3    , SelImm.X    , xWen = T, canRobCompress = T),
-
     // Zksh: ShangMi Suite: SM3 Hash Function Instructions
     SM3P0      -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sm3p0     , SelImm.X    , xWen = T, canRobCompress = T),
     SM3P1      -> XSDecode(SrcType.reg, SrcType.DC,  SrcType.X, FuType.bku, BKUOpType.sm3p1     , SelImm.X    , xWen = T, canRobCompress = T),
