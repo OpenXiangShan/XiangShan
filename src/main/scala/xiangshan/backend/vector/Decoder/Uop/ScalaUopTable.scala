@@ -448,8 +448,95 @@ object ScalaUopTable {
       _.FCVTMOD_W_D -> fcvtmod_si32_fp64,
     )
   }
-  def tableZfaZfh = ???
-  def tableZfh = ???
+
+  val tableZfaZfh = {
+    import xiangshan.backend.decode.isa.Instructions.ZFH_ZFAType
+
+    ZFH_ZFAType.mapOpcode(
+      _.FLEQ_H      -> fleq_fp16,
+      _.FLI_H       -> fleq_fp16, // todo
+      _.FLTQ_H      -> fltq_fp16,
+      _.FMAXM_H     -> fmaxm_fp16,
+      _.FMINM_H     -> fminm_fp16,
+      _.FROUND_H    -> frnd_fp16,
+      _.FROUNDNX_H  -> frndnx_fp16,
+    )
+  }
+  val tableZfh = {
+    import xiangshan.backend.decode.isa.Instructions.{ZFH64Type,ZFHType}
+
+    val tableZFH64Type = ZFH64Type.mapOpcode(
+      _.FCVT_H_L  -> I2fOpcodes.fcvt_fp16_si64,
+      _.FCVT_H_LU -> I2fOpcodes.fcvt_fp16_ui64,
+      _.FCVT_L_H  -> fcvt_si64_fp16,
+      _.FCVT_LU_H -> fcvt_ui64_fp16,
+    )
+
+    val tableZFHType = ZFHType.mapOpcode(
+      _.FADD_H    -> FAluOpcodes.fadd_fp16,
+      _.FCLASS_H  -> fclass_fp16,
+      _.FCVT_H_S  -> fcvt_fp16_fp32,
+      _.FCVT_H_W  -> I2fOpcodes.fcvt_fp16_si32,
+      _.FCVT_H_WU -> I2fOpcodes.fcvt_fp16_ui32,
+      _.FCVT_S_H  -> fcvt_fp32_fp16,
+      _.FCVT_W_H  -> fcvt_si32_fp16,
+      _.FCVT_WU_H -> fcvt_ui32_fp16,
+      _.FDIV_H    -> fdiv_fp16,
+      _.FEQ_H     -> feq_fp16,
+      _.FLE_H     -> fle_fp16,
+      _.FLT_H     -> flt_fp16,
+      _.FLH       -> lh,
+      _.FMADD_H   -> fmadd_fp16,
+      _.FMAX_H    -> FAluOpcodes.fmax_fp16,
+      _.FMIN_H    -> FAluOpcodes.fmin_fp16,
+      _.FMSUB_H   -> fmsub_fp16,
+      _.FMUL_H    -> fmul_fp16,
+      _.FMV_H_X   -> I2fOpcodes.fmv_fp16_i,
+      _.FMV_X_H   -> fmv_i_fp16,
+      _.FNMADD_H  -> fnmadd_fp16,
+      _.FNMSUB_H  -> fnmsub_fp16,
+      _.FSGNJ_H   -> FAluOpcodes.fsgnj_fp16,
+      _.FSGNJN_H  -> FAluOpcodes.fsgnjn_fp16,
+      _.FSGNJX_H  -> FAluOpcodes.fsgnjx_fp16,
+      _.FSH       -> sh,
+      _.FSQRT_H   -> fsqrt_fp16,
+      _.FSUB_H    -> FAluOpcodes.fsub_fp16,
+    )
+
+    tableZFHType ++ tableZFH64Type
+  }
+
+  val tableZfhDType = {
+    import xiangshan.backend.decode.isa.Instructions.D_ZFHType
+
+    D_ZFHType.mapOpcode(
+      _.FCVT_D_H -> fcvt_fp64_fp16,
+      _.FCVT_H_D -> fcvt_fp16_fp64,
+    )
+  }
+
+  val tableZfhmin = {
+    import xiangshan.backend.decode.isa.Instructions.ZFHMINType
+
+    ZFHMINType.mapOpcode(
+      _.FCVT_S_H -> fcvt_fp32_fp16,
+      _.FCVT_H_S -> fcvt_fp16_fp32,
+      _.FLH      -> lh,
+      _.FMV_H_X  -> I2fOpcodes.fmv_fp16_i,
+      _.FMV_X_H  -> fmv_i_fp16,
+      _.FSH      -> sh,
+    )
+  }
+
+  val tableZfhminD = {
+    import xiangshan.backend.decode.isa.Instructions.D_ZFHType
+
+    D_ZFHType.mapOpcode(
+      _.FCVT_D_H -> fcvt_fp64_fp16,
+      _.FCVT_H_D -> fcvt_fp16_fp64,
+    )
+  }
+
   def tableZicfi = ???
   def tableZicond = ???
 
