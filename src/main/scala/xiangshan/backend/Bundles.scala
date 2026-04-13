@@ -172,6 +172,7 @@ object Bundles {
     val selImm = SelImm()
     val imm = UInt(32.W)
     val vpu = new VPUCtrlSignals
+    val frm = Frm()
     val vm = Bool()
     val vtype = VType()
     val oldVType = VType()
@@ -264,6 +265,7 @@ object Bundles {
     val selImm = SelImm()
     val imm = UInt(32.W)
     val vpu = new VPUCtrlSignals
+    val frm = Frm()
     val vm = Bool()
     val vlsInstr = Bool()
     val fflagsWen = Bool()
@@ -370,6 +372,7 @@ object Bundles {
     val pdest = UInt(PhyRegIdxWidth.W)
     val pdestV0 = UInt(V0PhyRegIdxWidth.W)
     val pdestVl = UInt(VlPhyRegIdxWidth.W)
+    val frm = Frm()
     val vm = Bool()
     val vtype = VType()
     val oldVType = VType()
@@ -425,6 +428,7 @@ object Bundles {
     val selImm   = Option.when(params.needImm)(SelImm())
     val imm      = Option.when(params.needImm)(UInt(32.W))
     val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
+    val frm      = Option.when(params.needSrcFrm)(Frm())
     val vm       = Option.when(params.readV0Rf)(Bool())
     val oldVType = Option.when(params.writeVType)(VType())
     val vtype    = Option.when(params.readVlRf)(VType())
@@ -473,6 +477,7 @@ object Bundles {
     val selImm   = Option.when(params.needImm)(SelImm())
     val imm      = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
     val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
+    val frm      = Option.when(params.needSrcFrm)(Frm())
     val oldVType = Option.when(params.writeVType)(VType())
     val vtype    = Option.when(params.readVlRf)(VType())
     val fflagsWen = Option.when(params.writeFflags)(Bool())
@@ -502,6 +507,7 @@ object Bundles {
     val fuOpType = FuOpType()
     val selImm   = Option.when(params.needImm)(SelImm())
     val imm      = Option.when(params.needImm)(UInt((params.deqImmTypesMaxLen).W))
+    val frm      = Option.when(params.needSrcFrm)(Frm())
     val vpu      = Option.when(params.issueBlockParam.inVfSchd)(new VPUCtrlSignals)
     val fflagsWen = Option.when(params.writeFflags)(Bool())
     val uopIdx   = Option.when(params.issueBlockParam.inVfSchd)(UopIdx())
@@ -598,6 +604,7 @@ object Bundles {
     val selImm          = SelImm()
     val imm             = UInt(32.W)
     val vpu             = new VPUCtrlSignals
+    val frm             = Frm()
     val oldVType        = VType()
     val vtype           = VType()
     val vlsInstr        = Bool()
@@ -1000,6 +1007,7 @@ object Bundles {
     val fuOpType       = FuOpType()
     val selImm         = Option.when(exuParams.needImm)(SelImm())
     val imm            = Option.when(exuParams.needImm)(UInt(exuParams.deqImmTypesMaxLen.W))
+    val frm            = Option.when(exuParams.needSrcFrm)(Frm())
     val vpu      = Option.when(iqParams.inVfSchd)(new VPUCtrlSignals)
     val oldVType = Option.when(exuParams.writeVType)(VType())
     val vtype    = Option.when(exuParams.readVlRf)(VType())
@@ -1094,6 +1102,7 @@ object Bundles {
       this.selImm.foreach(_ := source.selImm.get)
       this.imm.foreach(_ := source.imm.get)
 
+      this.frm.foreach(_ := source.frm.get)
       this.vpu.foreach(_ := source.vpu.get)
       this.fflagsWen.foreach(_ := source.fflagsWen.get)
 
@@ -1210,6 +1219,7 @@ object Bundles {
     val v0Wen         = if (params.needV0Wen)     Some(Bool())                        else None
     val vlWen         = if (params.needVlWen)     Some(Bool())                        else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
+    val frm           = if (params.needSrcFrm)    Some(Frm())                         else None
     val fflagsWen     = if (params.writeFflags)   Some(Bool())                       else None
     val oldVType      = Option.when(params.writeVType)(VType())
     val vtype         = Option.when(params.readVlRf)(VType())
@@ -1261,6 +1271,7 @@ object Bundles {
       this.selImm                   := source.selImm.getOrElse(0.U) // sta need this, other use immInfo assign in bypassNetwork
       this.fflagsWen     .foreach(_ := source.fflagsWen.get)
       this.vpu           .foreach(_ := source.vpu.get)
+      this.frm           .foreach(_ := source.frm.get)
       this.numLsElem     .foreach(_ := source.numLsElem.get)
       this.rasAction     .foreach(_ := source.rasAction.get)
       this.storeSetHit   .foreach(_ := source.storeSetHit.get)
@@ -1301,6 +1312,7 @@ object Bundles {
       uop.perfDebugInfo  := this.perfDebugInfo.getOrElse(0.U.asTypeOf(new PerfDebugInfo))
       uop.debug_seqNum   := this.debug_seqNum.getOrElse(0.U.asTypeOf(InstSeqNum()))
       uop.vpu            := this.vpu.getOrElse(0.U.asTypeOf(new VPUCtrlSignals))
+      uop.frm            := this.frm.getOrElse(0.U.asTypeOf(Frm()))
       uop.isRVC          := this.isRVC.getOrElse(false.B)
       uop.rasAction      := this.rasAction.getOrElse(0.U)
       uop.numLsElem      := this.numLsElem.getOrElse(0.U)
@@ -1325,6 +1337,7 @@ object Bundles {
     val vlWen          = Option.when(params.needVlWen)(Bool())
     val fflagsWen      = Option.when(params.writeFflags)(Bool())
     val vpu            = Option.when(params.needVPUCtrl)(new VPUCtrlSignals)
+    val frm            = Option.when(params.needSrcFrm)(Frm())
     val oldVType       = Option.when(params.writeVType)(VType())
     val vtype          = Option.when(params.readVlRf)(VType())
     val vialuCtrl      = Option.when(params.needVIaluCtrl)(new VIAluCtrlSignals)

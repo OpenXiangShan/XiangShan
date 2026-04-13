@@ -162,11 +162,6 @@ case class FuConfig (
 
   var aluNeedPc: Boolean = false
 
-  def needFPUCtrl: Boolean = {
-    import FuType._
-    Seq(fmac, fDivSqrt, i2f).contains(fuType)
-  }
-
   def needVecCtrl: Boolean = {
     import FuType._
     Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu, vsha256ms, vsha256c).contains(fuType)
@@ -197,7 +192,8 @@ case class FuConfig (
                             fuType == FuType.vppu || fuType == FuType.vipu ||
                             fuType == FuType.vfalu || fuType == FuType.vfma ||
                             fuType == FuType.vfdiv || fuType == FuType.vfcvt ||
-                            fuType == FuType.vidiv || fuType == FuType.vmove
+                            fuType == FuType.vidiv || fuType == FuType.vmove ||
+                            fuType == FuType.vsha256ms || fuType == FuType.vsha256c
 
   def isVecMem: Boolean = fuType == FuType.vldu || fuType == FuType.vstu ||
                           fuType == FuType.vsegldu || fuType == FuType.vsegstu ||
@@ -210,6 +206,8 @@ case class FuConfig (
   def isStd: Boolean = name.contains("std")
 
   def ckAlwaysEn: Boolean = isCsr || isFence
+
+  def needInstFrm: Boolean = needSrcFrm && !needOg2
 
   override def toString: String = {
     var str = s"${this.name}: "

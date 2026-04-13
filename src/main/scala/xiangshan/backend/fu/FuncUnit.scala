@@ -14,6 +14,7 @@ import xiangshan.backend.fu.vector.Bundles.{V0, VType, Vl, Vxsat}
 import xiangshan.ExceptionNO
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.frontend.bpu.{BranchAttribute, BranchInfo}
+import xiangshan.backend.fu.fpu.Bundles._
 
 trait HasFuLatency {
   val latencyVal: Option[Int]
@@ -65,6 +66,7 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
     val fixedTaken = Bool()
     val predTaken  = Bool()
   })
+  val frm         = Option.when(cfg.needInstFrm)(Frm())
   val fflagsWen   = OptionWrapper(cfg.writeFflags, Bool())
   val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
   val oldVType    = Option.when(cfg.writeVType)(VType())
@@ -136,7 +138,7 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val csrToDecode = OptionWrapper(cfg.isCsr, Output(new CSRToDecode))
   val toFrontendBJUResolve = OptionWrapper(cfg.isBrh || cfg.isJmp, Output(Valid(new Resolve)))
   val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
-  val frm = OptionWrapper(cfg.needSrcFrm, Input(UInt(3.W)))
+  val frm = OptionWrapper(cfg.needSrcFrm, Input(Frm()))
   val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))
   val vtype = OptionWrapper(cfg.writeVlRf, (Valid(new VType)))
   val vlIsZero = OptionWrapper(cfg.writeVlRf, Output(Bool()))
