@@ -372,9 +372,54 @@ object ScalaUopTable {
   }
 
   def tableH = ???
-  def tableZabha = ???
-  def tableZacas = ???
-  def tableZabhaZacas = ???
+
+  val tableZabha = {
+    import xiangshan.backend.decode.isa.Instructions.ZABHAType
+    ZABHAType.mapOpcode(
+      _.AMOADD_B  -> amoadd_b,
+      _.AMOADD_H  -> amoadd_h,
+      _.AMOAND_B  -> amoand_b,
+      _.AMOAND_H  -> amoand_h,
+      _.AMOMAX_B  -> amomax_b,
+      _.AMOMAX_H  -> amomax_h,
+      _.AMOMAXU_B -> amomaxu_b,
+      _.AMOMAXU_H -> amomaxu_h,
+      _.AMOMIN_B  -> amomin_b,
+      _.AMOMIN_H  -> amomin_h,
+      _.AMOMINU_B -> amominu_b,
+      _.AMOMINU_H -> amominu_h,
+      _.AMOOR_B   -> amoor_b,
+      _.AMOOR_H   -> amoor_h,
+      _.AMOSWAP_B -> amoswap_b,
+      _.AMOSWAP_H -> amoswap_h,
+      _.AMOXOR_B  -> amoxor_b,
+      _.AMOXOR_H  -> amoxor_h,
+    )
+  }
+
+  val tableZacas = {
+    import xiangshan.backend.decode.isa.Instructions.{ZACAS64Type,ZACASType}
+
+    val tableZacas64 = ZACAS64Type.mapOpcode(
+      _.AMOCAS_Q -> amocas_q,
+    )
+    val tableZacas = ZACASType.mapOpcode(
+      _.AMOCAS_D -> amocas_d,
+      _.AMOCAS_W -> amocas_w,
+    )
+
+    tableZacas ++ tableZacas64
+  }
+
+  val tableZabhaZacas = {
+    import xiangshan.backend.decode.isa.Instructions.ZABHA_ZACASType
+
+    ZABHA_ZACASType.mapOpcode(
+      _.AMOCAS_B -> amocas_b,
+      _.AMOCAS_H -> amocas_h,
+    )
+  }
+
   def tableZfaF = ???
   def tableZfaD = ???
   def tableZfaZfh = ???
