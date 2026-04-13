@@ -37,7 +37,8 @@ class DecodeStageImp(
     Zvknha,
     XSTrap,
     // Zcb, Zcmop,
-    // Zfa, Zfh, ZfaZfh, ZfaF, ZfaD, Zfhmin,
+    ZfaF, ZfaD,
+    // Zfh, ZfaZfh, Zfhmin,
   )
 
   import DecodeStage._
