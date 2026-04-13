@@ -1047,7 +1047,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   private val scalarIsSew32 = scalarSew32.map(ctrl_flow.instr === _).reduce(_ || _)
   private val scalarIsSew16 = scalarSew16.map(ctrl_flow.instr === _).reduce(_ || _)
 
-  private val isFmaNeedVd = FuType.isVecOPFFma(decodedInst.fuType) & (decodedInst.fuOpType(3, 0) =/= VfmaOpCode.vfmul)
+  private val isFmaNeedVd = FuType.isVecOPFFma(decodedInst.fuType) & !VFMacOpcode.isFmul(decodedInst.fuOpType)
 
   decodedInst.fflagsWen := wfflagsInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.needFrm.scalaNeedFrm := scalaNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)

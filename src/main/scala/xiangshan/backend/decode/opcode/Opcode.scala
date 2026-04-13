@@ -26,9 +26,13 @@ object Opcode {
       FenceOpcodes,
       BkuOpcodes,
       FCvtOpcodes,
+      VFCvtOpcodes,
       FMacOpcodes,
+      VFMacOpcodes,
       FDivOpcodes,
+      VFDivOpcodes,
       FMiscOpcodes,
+      VFMiscOpcodes,
       VSetOpcodes,
       VIAluOpcodes,
       VMAluOpcodes,
@@ -36,7 +40,7 @@ object Opcode {
       VIDivOpcodes,
       VIRedOpcodes,
       VIPermOpcodes,
-      VFRedOpcodes,
+      VFRedOpcodes
     )
 
     for (opcodeCls <- opcodes) {
@@ -62,8 +66,11 @@ object Opcode {
   val VSha256msOpcodes = opcodes.VSha256msOpcode
   val VSha256cOpcodes = opcodes.VSha256cOpcode
   val FCvtOpcodes = opcodes.FCvtOpcode
+  val VFCvtOpcodes = opcodes.VFCvtOpcode
   val FMiscOpcodes = opcodes.FMiscOpcode
+  val VFMiscOpcodes = opcodes.VFMiscOpcode
   val FMacOpcodes = opcodes.FMacOpcode
+  val VFMacOpcodes = opcodes.VFMacOpcode
 
   // Todo: remove these
   def X = BitPat("b0_0000_0000")
@@ -985,30 +992,8 @@ object Opcode {
   object FDivOpcodes extends FDivOpcodes
 
   object FAluOpcodes extends opcodes.FMiscOpcode
-
-  trait VFRedOpcodes extends Opcodes with DataType {
-    private val opbN = bb"0"
-    private val resN = bb"0"
-    private val resW = bb"1"
-
-    private val FRED_MIN  = bb"10100"
-    private val FRED_MAX  = bb"10101"
-    private val FRED_OSUM = bb"10110"
-
-    val vfredosum_fp16 : Opcode = DsSvlS2vS1s(FRED_OSUM, opbN, resN, FP16)
-    val vfredosum_fp32 : Opcode = DsSvlS2vS1s(FRED_OSUM, opbN, resN, FP32)
-    val vfredosum_fp64 : Opcode = DsSvlS2vS1s(FRED_OSUM, opbN, resN, FP64)
-    val vfredmin_fp16  : Opcode = DsSvlS2vS1s(FRED_MIN,  opbN, resN, FP16)
-    val vfredmin_fp32  : Opcode = DsSvlS2vS1s(FRED_MIN,  opbN, resN, FP32)
-    val vfredmin_fp64  : Opcode = DsSvlS2vS1s(FRED_MIN,  opbN, resN, FP64)
-    val vfredmax_fp16  : Opcode = DsSvlS2vS1s(FRED_MAX,  opbN, resN, FP16)
-    val vfredmax_fp32  : Opcode = DsSvlS2vS1s(FRED_MAX,  opbN, resN, FP32)
-    val vfredmax_fp64  : Opcode = DsSvlS2vS1s(FRED_MAX,  opbN, resN, FP64)
-    val vfwredosum_fp16: Opcode = DwsSvlS2vS1ws(FRED_OSUM, opbN, resW, FP16)
-    val vfwredosum_fp32: Opcode = DwsSvlS2vS1ws(FRED_OSUM, opbN, resW, FP32)
-  }
-
-  object VFRedOpcodes extends VFRedOpcodes
+  object VFRedOpcodes extends opcodes.VFRedOpcode
+  object VFDivOpcodes extends opcodes.VFDivOpcode
 
   trait VSetOpcodes extends Opcodes {
     // vtype is from imm
