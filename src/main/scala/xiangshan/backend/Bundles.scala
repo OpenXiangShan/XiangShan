@@ -1484,7 +1484,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val pdestVl        = Option.when(params.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
     val toIntRf        = Option.when(params.writeIntRf)(ValidIO(UInt(params.destDataBitsMax.W)))
     val toFpRf         = Option.when(params.writeFpRf)(ValidIO(UInt(params.destDataBitsMax.W)))
-    val toVecRf        = Option.when(params.writeVecRf)(ValidIO(UInt(params.destDataBitsMax.W)))
+    val toVecRf        = Option.when(params.writeVecRf)(ValidIO(UInt(VLEN.W)))
     val toV0Rf         = Option.when(params.writeV0Rf)(ValidIO(UInt(params.destDataBitsMax.W)))
     val toVlRf         = Option.when(params.writeVlRf)(ValidIO(UInt(params.destDataBitsMax.W)))
     val redirect       = Option.when(params.hasRedirect)(ValidIO(new Redirect))
