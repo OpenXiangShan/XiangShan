@@ -113,6 +113,18 @@ object Extensions {
 
   case object Zicsr extends UnprivExt(Seq(ZICSRType), tableZicsr)
 
+  case object Zifencei extends UnprivExt(Seq(ZIFENCEIType), tableZifencei)
+
+  case object Zknd extends UnprivExt(Seq(ZKND64Type), tableZknd)
+
+  case object Zkne extends UnprivExt(Seq(ZKNE64Type), tableZkne)
+
+  case object Zknh extends UnprivExt(Seq(ZKNH64Type, ZKNHType), tableZknh)
+
+  case object Zksed extends UnprivExt(Seq(ZKSEDType), tableZksed)
+
+  case object Zksh extends UnprivExt(Seq(ZKSHType), tableZksh)
+
   case object Sdtrig extends PrivExt
 //  case object Sha extends PrivExt
   case object Shcounterenw extends PrivExt
