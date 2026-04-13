@@ -371,7 +371,32 @@ object ScalaUopTable {
     )
   }
 
-  def tableH = ???
+  val tableH = {
+    import xiangshan.backend.decode.isa.Instructions.{H64Type, HType}
+
+    val tableH64Type = H64Type.mapOpcode(
+      _.HLV_D  -> hlvd,
+      _.HLV_WU -> hlvwu,
+      _.HSV_D  -> hsvd,
+    )
+
+    val tableHType = HType.mapOpcode(
+      _.HFENCE_GVMA -> hfence_g,
+      _.HFENCE_VVMA -> hfence_v,
+      _.HLV_B       -> hlvb,
+      _.HLV_BU      -> hlvbu,
+      _.HLV_H       -> hlvh,
+      _.HLV_HU      -> hlvhu,
+      _.HLV_W       -> hlvw,
+      _.HLVX_HU     -> hlvxhu,
+      _.HLVX_WU     -> hlvxwu,
+      _.HSV_B       -> hsvb,
+      _.HSV_H       -> hsvh,
+      _.HSV_W       -> hsvw,
+    )
+
+    tableH64Type ++ tableHType
+  }
 
   val tableZabha = {
     import xiangshan.backend.decode.isa.Instructions.ZABHAType
@@ -538,7 +563,15 @@ object ScalaUopTable {
   }
 
   def tableZicfi = ???
-  def tableZicond = ???
+
+  val tableZicond = {
+    import xiangshan.backend.decode.isa.Instructions.ZICONDType
+
+    ZICONDType.mapOpcode(
+      _.CZERO_EQZ -> czero_eqz,
+      _.CZERO_NEZ -> czero_nez,
+    )
+  }
 
   val tableZicsr = {
     import xiangshan.backend.decode.isa.Instructions.ZICSRType
@@ -621,6 +654,22 @@ object ScalaUopTable {
       _.SM3P0 -> sm3p0,
       _.SM3P1 -> sm3p1,
     )
+  }
+
+  val tableSvinval = {
+    import xiangshan.backend.decode.isa.Instructions.{SVINVALType, SVINVAL_HType}
+
+    val tableSvinval = SVINVALType.mapOpcode(
+      _.SFENCE_INVAL_IR -> nofence,
+      _.SFENCE_W_INVAL  -> nofence,
+      _.SINVAL_VMA      -> sfence,
+    )
+    val tableSvinvalH = SVINVAL_HType.mapOpcode(
+      _.HINVAL_GVMA -> hfence_g,
+      _.HINVAL_VVMA -> hfence_v,
+    )
+
+    tableSvinval ++ tableSvinvalH
   }
 
   def tableSExt = {
