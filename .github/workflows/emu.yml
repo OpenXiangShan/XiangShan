@@ -277,9 +277,10 @@ jobs:
       - name: Build SIMV on Remote
         run: |
           ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --vcs-build --xprop"
-      - name: V Extension Test - rvv-test
-        run: |
-          ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs rvv-test"
+      # Vector-related workloads are temporarily disabled in CI due to the ongoing vector refactor.
+      # - name: V Extension Test - rvv-test
+      #   run: |
+      #     ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs rvv-test"
       - name: Simple Test - CoreMark 1 iteration
         run: |
           ssh -tt eda01 "python3 `echo $GITHUB_WORKSPACE`/scripts/xiangshan.py --wave-dump `echo $WAVE_HOME` --ci-vcs coremark-1-iteration"

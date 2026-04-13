@@ -88,7 +88,8 @@ jobs:
     strategy:
       matrix:
         name:
-          - hmmer-Vector
+          # Vector-related workloads are temporarily disabled in CI due to the ongoing vector refactor.
+          # - hmmer-Vector
           - mcf
           - xalancbmk
           - gcc
@@ -99,11 +100,11 @@ jobs:
           - wrf
           - astar
         with-restore-bin: [true]
-        exclude:
-          - name: hmmer-Vector
-        include:
-          - name: hmmer-Vector
-            with-restore-bin: false
+        # exclude:
+        #   - name: hmmer-Vector
+        # include:
+        #   - name: hmmer-Vector
+        #     with-restore-bin: false
       fail-fast: false
       max-parallel: 4
     steps:

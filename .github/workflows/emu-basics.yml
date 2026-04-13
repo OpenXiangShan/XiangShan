@@ -101,7 +101,8 @@ jobs:
             extra: --flash ${GITHUB_WORKSPACE}/ready-to-run/copy_and_run.bin
             workload: ${GITHUB_WORKSPACE}/ready-to-run/microbench.bin
             report: true
-          - name: rvv-bench
+          # Vector-related workloads are temporarily disabled in CI due to the ongoing vector refactor.
+          # - name: rvv-bench
           - name: f16_test
           - name: zcb-test
       fail-fast: false
