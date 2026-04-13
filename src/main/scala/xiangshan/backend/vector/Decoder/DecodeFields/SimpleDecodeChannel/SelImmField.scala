@@ -27,7 +27,7 @@ object SelImmField extends DecodeField[InstPattern, ValidIO[UInt]] {
           case IntLoadInstPattern() => DecodeSelImm.I
           case JalrPattern() => DecodeSelImm.I
           case SystemInstPattern() => DecodeSelImm.I
-          case HyperLoadInstPattern() => DecodeSelImm.I
+          case HyperLoadInstPattern() => null
           case CSRInstPattern() => DecodeSelImm.Z
           case AmoLrInstPattern() => null
           case CboInstPattern() => DecodeSelImm.S
@@ -35,7 +35,10 @@ object SelImmField extends DecodeField[InstPattern, ValidIO[UInt]] {
           case FenceiInstPattern() => null
           case CustomTrapPattern() => null
         }
-        case _: IntSTypePattern => DecodeSelImm.S
+        case intS: IntSTypePattern => intS match {
+          case HyperStoreInstPattern() => null
+          case _ => DecodeSelImm.S
+        }
         case IntBTypePattern() => DecodeSelImm.SB
         case IntUTypePattern() => DecodeSelImm.U
         case IntJTypePattern() => DecodeSelImm.UJ
