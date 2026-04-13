@@ -29,13 +29,15 @@ class DecodeStageImp(
 
   val extensions: Seq[ExtBase] = Seq(
     I, M, A, F, D, Zicsr,
-    System, S,
+    System, S, Svinval,
+    H,
     Za64rs, Zabha, Zacas, ZacasZabha, Zawrs,
     Zba, Zbb, Zbc, Zbs, Zbkb, Zbkc, Zbkx,
     V,
     Zvbb,
     Zvknha,
     XSTrap,
+    Zicond,
     Zifencei, Zknd, Zkne, Zknh, Zksed, Zksh,
     // Zcb, Zcmop,
     ZfaF, ZfaD, ZfaZfh, Zfh, Zfhmin, ZfhminD,
