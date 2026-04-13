@@ -134,7 +134,8 @@ object SbufferThreshold extends CSREnum with RWApply {
 }
 
 object SbufferTimeout extends CSREnum with RWApply {
-  val initValue = Value((1<<20).U)
+  // val initValue = Value((1<<20).U)
+  val initValue = Value((1<<10).U)
 }
 
 object SpfctlL1DPfActiveStride extends CSREnum with RWApply {
