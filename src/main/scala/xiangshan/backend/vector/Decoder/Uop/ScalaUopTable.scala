@@ -552,13 +552,77 @@ object ScalaUopTable {
     )
   }
 
-  def tableZifencei = ???
+  val tableZifencei = {
+    import xiangshan.backend.decode.isa.Instructions.ZIFENCEIType
+    ZIFENCEIType.mapOpcode(
+      _.FENCE_I -> fencei,
+    )
+  }
+
   def tableZimop = ???
-  def tableZknd = ???
-  def tableZkne = ???
-  def tableZknh = ???
-  def tableZksed = ???
-  def tableZsh = ???
+
+  val tableZknd = {
+    import xiangshan.backend.decode.isa.Instructions.ZKND64Type
+    ZKND64Type.mapOpcode(
+      _.AES64DS   -> aes64ds,
+      _.AES64DSM  -> aes64dsm,
+      _.AES64IM   -> aes64im,
+      _.AES64KS1I -> aes64ks1i,
+      _.AES64KS2  -> aes64ks2,
+    )
+  }
+
+  val tableZkne = {
+    import xiangshan.backend.decode.isa.Instructions.ZKNE64Type
+    ZKNE64Type.mapOpcode(
+      _.AES64ES  -> aes64es,
+      _.AES64ESM -> aes64esm,
+      _.AES64KS1I -> aes64ks1i,
+      _.AES64KS2  -> aes64ks2,
+    )
+  }
+
+  val tableZknh = {
+    import xiangshan.backend.decode.isa.Instructions.{ZKNH64Type, ZKNHType}
+
+    val tableZKNH64Type = ZKNH64Type.mapOpcode(
+      _.SHA512SIG0 -> sha512sig0,
+      _.SHA512SIG1 -> sha512sig1,
+      _.SHA512SUM0 -> sha512sum0,
+      _.SHA512SUM1 -> sha512sum1,
+    )
+    val tableZKNHType = ZKNHType.mapOpcode(
+      _.SHA256SIG0 -> sha256sig0,
+      _.SHA256SIG1 -> sha256sig1,
+      _.SHA256SUM0 -> sha256sum0,
+      _.SHA256SUM1 -> sha256sum1,
+    )
+
+    tableZKNH64Type ++ tableZKNHType
+  }
+
+  val tableZksed = {
+    import xiangshan.backend.decode.isa.Instructions.ZKSEDType
+    ZKSEDType.mapOpcode(
+      _.SM4ED0 -> sm4ed0,
+      _.SM4ED1 -> sm4ed1,
+      _.SM4ED2 -> sm4ed2,
+      _.SM4ED3 -> sm4ed3,
+      _.SM4KS0 -> sm4ks0,
+      _.SM4KS1 -> sm4ks1,
+      _.SM4KS2 -> sm4ks2,
+      _.SM4KS3 -> sm4ks3,
+    )
+  }
+
+  val tableZksh = {
+    import xiangshan.backend.decode.isa.Instructions.ZKSHType
+    ZKSHType.mapOpcode(
+      _.SM3P0 -> sm3p0,
+      _.SM3P1 -> sm3p1,
+    )
+  }
+
   def tableSExt = {
   }
 
