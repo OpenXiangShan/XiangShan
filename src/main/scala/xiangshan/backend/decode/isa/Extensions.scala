@@ -71,12 +71,13 @@ object Extensions {
 
   case object Zfa extends UnprivExt
 
-  case object Zfh extends UnprivExt(Seq(ZFHType, ZFH64Type))
+  case object Zfh extends UnprivExt(Seq(ZFHType, ZFH64Type), tableZfh)
 
   case object Zfhmin extends UnprivExt {
     // Todo: This extension has parts of instructions of Zfh
     //       But it has not been defined in riscv-opcodes
-    override val types: Seq[InstType] = Seq()
+    override val types: Seq[InstType] = Seq(ZFHMINType)
+    override val table: Map[BitPat, Opcode] = tableZfhmin
   }
 
   case object H extends PrivExt {
@@ -102,7 +103,12 @@ object Extensions {
 
   case object ZfaZfh extends CombExt[Zfa.type, Zfh.type] {
     override val types: Seq[InstType] = Seq(ZFH_ZFAType)
-    override val table: Map[BitPat, Opcode] = Map()
+    override val table: Map[BitPat, Opcode] = tableZfaZfh
+  }
+
+  case object ZfhminD extends CombExt[Zfhmin.type, D.type] {
+    override val types: Seq[InstType] = Seq(D_ZFHType)
+    override val table: Map[BitPat, Opcode] = tableZfhminD
   }
 
   case object Zicsr extends UnprivExt(Seq(ZICSRType), tableZicsr)
