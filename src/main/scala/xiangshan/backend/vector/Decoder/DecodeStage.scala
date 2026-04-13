@@ -36,6 +36,7 @@ class DecodeStageImp(
     Zvbb,
     Zvknha,
     XSTrap,
+    Zifencei, Zknd, Zkne, Zknh, Zksed, Zksh,
     // Zcb, Zcmop,
     ZfaF, ZfaD, ZfaZfh, Zfh, Zfhmin, ZfhminD,
   )
