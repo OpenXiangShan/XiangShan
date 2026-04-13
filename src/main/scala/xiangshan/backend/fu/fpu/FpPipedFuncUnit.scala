@@ -5,14 +5,15 @@ import chisel3._
 import chisel3.util._
 import xiangshan._
 import xiangshan.backend.fu.{FuConfig, FuncUnit, HasPipelineReg}
+import xiangshan.backend.fu.fpu.Bundles._
 
 trait FpFuncUnitAlias { this: FuncUnit =>
   protected val inCtrl  = io.in.bits.ctrl
   protected val inData  = io.in.bits.data
   protected val fp_fmt  = inCtrl.fuOpType(2, 1)
 
-  protected val frm     = io.frm.getOrElse(0.U(3.W))
-  protected val instRm  = 0.U // todo
+  protected val frm     = io.frm.getOrElse(0.U.asTypeOf(Frm()))
+  protected val instRm  = inCtrl.frm.getOrElse(0.U.asTypeOf(Frm()))
   protected val rm      = Mux(instRm =/= "b111".U, instRm, frm)
 
   protected val fuOpType  = inCtrl.fuOpType
