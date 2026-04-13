@@ -43,5 +43,6 @@ object FrmRenField extends BoolDecodeField[InstPattern] {
     FROUND_D, FROUNDNX_D,
     FROUND_S, FROUNDNX_S,
     FROUND_H, FROUNDNX_H,
+    FCVT_D_S, FCVT_D_H, FCVT_S_H,
   ).toSet
 }
