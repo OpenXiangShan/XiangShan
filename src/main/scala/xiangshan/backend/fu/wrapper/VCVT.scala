@@ -4,12 +4,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import chisel3.util.experimental.decode._
-import utility.XSError
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
-import xiangshan.ExceptionNO
-import xiangshan.FuOpType
-import yunsuan.VfpuType
 import yunsuan.vector.VectorConvert.VectorCvt
 import yunsuan.util._
 import yunsuan.encoding.Opcode.Opcodes.FCvtOpcode
@@ -17,7 +13,6 @@ import yunsuan.vector.Common._
 
 
 class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfcvt OpType not supported")
 
   // params alias
   private val dataWidth = cfg.destDataBits
@@ -29,41 +24,35 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
   private val lmul = vlmul // -3->3 => 1/8 ->8
 
-  val widen = 0.U // 0->single 1->widen 2->norrow => width of result
-  val isWidenCvt = !widen(1) & widen(0)
-  val isNarrowCvt = widen(1) & !widen(0)
+  private val inWidth = FCvtOpcode.getInputDataWidth(fuOpType)
+  private val outWidth = FCvtOpcode.getOutputDataWidth(fuOpType)
+  private val sew = FCvtOpcode.getSew(fuOpType)
+  val isWidenCvt = outWidth > inWidth
+  val isNarrowCvt = outWidth < inWidth
   val fire = io.in.valid
   val fireReg = GatedValidRegNext(fire)
 
-  // input width 8, 16, 32, 64
-  val inSew1H = Wire(UInt(4.W))
-  inSew1H := chisel3.util.experimental.decode.decoder(
-    FCvtOpcode.getInputDataWidth(fuOpType),
-    TruthTable(
-      Seq(
-        BitPat("b00") -> BitPat("b0001"), // 8
-        BitPat("b01") -> BitPat("b0010"), // 16
-        BitPat("b10") -> BitPat("b0100"), // 32
-        BitPat("b11") -> BitPat("b1000"), // 64
-      ),
-      BitPat.N(4)
+  private def decodeDataWidth1H(width: UInt): UInt =
+    chisel3.util.experimental.decode.decoder(
+      width,
+      TruthTable(
+        Seq(
+          BitPat("b00") -> BitPat("b0001"), // 8
+          BitPat("b01") -> BitPat("b0010"), // 16
+          BitPat("b10") -> BitPat("b0100"), // 32
+          BitPat("b11") -> BitPat("b1000"), // 64
+        ),
+        BitPat.N(4)
+      )
     )
-  )
 
-  // output width 8， 16， 32， 64
+  // input/output width 8, 16, 32, 64
+  val inSew1H = Wire(UInt(4.W))
+  inSew1H := decodeDataWidth1H(inWidth)
+
   val outSew1H = Wire(UInt(4.W))
-  outSew1H := chisel3.util.experimental.decode.decoder(
-    FCvtOpcode.getOutputDataWidth(fuOpType),
-    TruthTable(
-      Seq(
-        BitPat("b00") -> BitPat("b0001"), // 8
-        BitPat("b01") -> BitPat("b0010"), // 16
-        BitPat("b10") -> BitPat("b0100"), // 32
-        BitPat("b11") -> BitPat("b1000"), // 64
-      ),
-      BitPat.N(4)
-    )
-  )
+  outSew1H := decodeDataWidth1H(outWidth)
+
   if(backendParams.debugEn) {
     dontTouch(inSew1H)
     dontTouch(outSew1H)
@@ -95,23 +84,21 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
   /** fflags:
    */
-  // val eNum1H = chisel3.util.experimental.decode.decoder(sew ## (isWidenCvt || isNarrowCvt),
-  //   TruthTable(
-  //     Seq(                     // 8, 4, 2, 1
-  //       BitPat("b001") -> BitPat("b1000"), //8
-  //       BitPat("b010") -> BitPat("b1000"), //8
-  //       BitPat("b011") -> BitPat("b0100"), //4
-  //       BitPat("b100") -> BitPat("b0100"), //4
-  //       BitPat("b101") -> BitPat("b0010"), //2
-  //       BitPat("b110") -> BitPat("b0010"), //2
-  //     ),
-  //     BitPat.N(4)
-  //   )
-  // )
-  val eNum1H = 0.U
+  val eNum1H = chisel3.util.experimental.decode.decoder(sew ## (isWidenCvt || isNarrowCvt),
+    TruthTable(
+      Seq(                     // 8, 4, 2, 1
+        BitPat("b001") -> BitPat("b1000"), //8
+        BitPat("b010") -> BitPat("b1000"), //8
+        BitPat("b011") -> BitPat("b0100"), //4
+        BitPat("b100") -> BitPat("b0100"), //4
+        BitPat("b101") -> BitPat("b0010"), //2
+        BitPat("b110") -> BitPat("b0010"), //2
+      ),
+      BitPat.N(4)
+    )
+  )
   val eNum1HEffect = Mux(isWidenCvt || isNarrowCvt, eNum1H << 1, eNum1H)
-  // val eNumMax1H = Mux(lmul.head(1).asBool, eNum1HEffect >> ((~lmul.tail(1)).asUInt +1.U), eNum1HEffect << lmul.tail(1)).asUInt(6, 0)
-  val eNumMax1H = 0.U
+  val eNumMax1H = Mux(lmul.head(1).asBool, eNum1HEffect >> ((~lmul.tail(1)).asUInt +1.U), eNum1HEffect << lmul.tail(1)).asUInt(6, 0)
   val eNumMax = Mux1H(eNumMax1H, Seq(1,2,4,8,16,32,64).map(i => i.U)) //only for cvt intr, don't exist 128 in cvt
   val vlForFflags = Mux(vecCtrl.fpu.isFpToVecInst, 1.U, vl)
   val eNumEffectIdx = Mux(vlForFflags > eNumMax, eNumMax, vlForFflags)
@@ -143,7 +130,6 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val outNarrowVd = Mux(narrowNeedCat, Cat(resultDataUInt(dataWidth / 2 - 1, 0), outOldVd(dataWidth / 2 - 1, 0)),
                                                Cat(outOldVd(dataWidth - 1, dataWidth / 2), resultDataUInt(dataWidth / 2 - 1, 0)))
 
-  // mgu.io.in.vd := resultDataUInt
   mgu.io.in.vd := Mux(narrow, outNarrowVd, resultDataUInt)
   mgu.io.in.oldVd := outOldVd
   mgu.io.in.mask := outSrcMask
@@ -235,5 +221,3 @@ class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
     io.fflags(i) := fflags(Fflags.width * (i + 1) - 1, Fflags.width * i)
   }
 }
-
-

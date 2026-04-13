@@ -44,7 +44,7 @@ import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfo, LsTopdownInfo}
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
-import yunsuan.VfaluType
+import xiangshan.backend.decode.opcode.Opcode.{VFMiscOpcode, VFRedOpcode, VFMacOpcode, VMoveOpcode}
 import xiangshan.backend.rob.RobBundles._
 import xiangshan.backend.trace._
 import chisel3.experimental.BundleLiterals._
