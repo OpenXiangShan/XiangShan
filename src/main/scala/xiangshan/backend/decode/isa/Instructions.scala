@@ -2775,6 +2775,24 @@ object Instructions {
     )
   }
 
+  object ZFHMINType extends InstType {
+    def FCVT_S_H           = outer.FCVT_S_H
+    def FCVT_H_S           = outer.FCVT_H_S
+    def FLH                = outer.FLH
+    def FMV_H_X            = outer.FMV_H_X
+    def FMV_X_H            = outer.FMV_X_H
+    def FSH                = outer.FSH
+
+    val allWithNames = withNameSeq(
+      FCVT_S_H,
+      FCVT_H_S,
+      FLH,
+      FMV_H_X,
+      FMV_X_H,
+      FSH,
+    )
+  }
+
   object ZFHType extends InstType {
     def FADD_H             = outer.FADD_H
     def FCLASS_H           = outer.FCLASS_H
