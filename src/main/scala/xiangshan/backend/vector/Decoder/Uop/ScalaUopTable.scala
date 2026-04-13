@@ -420,8 +420,34 @@ object ScalaUopTable {
     )
   }
 
-  def tableZfaF = ???
-  def tableZfaD = ???
+  val tableZfaF = {
+    import xiangshan.backend.decode.isa.Instructions.F_ZFAType
+
+    F_ZFAType.mapOpcode(
+      _.FLEQ_S     -> fleq_fp32,
+      _.FLI_S      -> fleq_fp32, // todo
+      _.FLTQ_S     -> fltq_fp32,
+      _.FMAXM_S    -> fmaxm_fp32,
+      _.FMINM_S    -> fminm_fp32,
+      _.FROUND_S   -> frnd_fp32,
+      _.FROUNDNX_S -> frndnx_fp32,
+    )
+  }
+
+  val tableZfaD = {
+    import xiangshan.backend.decode.isa.Instructions.D_ZFAType
+
+    D_ZFAType.mapOpcode(
+      _.FLEQ_D      -> fleq_fp64,
+      _.FLI_D       -> fleq_fp64, // todo
+      _.FLTQ_D      -> fltq_fp64,
+      _.FMAXM_D     -> fmaxm_fp64,
+      _.FMINM_D     -> fminm_fp64,
+      _.FROUND_D    -> frnd_fp64,
+      _.FROUNDNX_D  -> frndnx_fp64,
+      _.FCVTMOD_W_D -> fcvtmod_si32_fp64,
+    )
+  }
   def tableZfaZfh = ???
   def tableZfh = ???
   def tableZicfi = ???
