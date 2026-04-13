@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 
+from env.request_apis import run_until_golden_trace_complete
 from env.sequences import (
     LoadGoldenTraceSequence,
     LoadProgramFileSequence,
-    RunUntilGoldenTraceCompleteSequence,
 )
 from env.transactions import GoldenTraceSource
 
@@ -55,9 +55,10 @@ def test_bin_trace(env):
     ).run(env)
 
     if _should_run_to_trace_completion(bin_path):
-        completed = RunUntilGoldenTraceCompleteSequence(
+        completed = run_until_golden_trace_complete(
+            env,
             max_cycles=_TRACE_MAX_CYCLES,
-        ).run(env)
+        )
         assert completed is True
     elif step_cycles > 0:
         env.step(step_cycles)
