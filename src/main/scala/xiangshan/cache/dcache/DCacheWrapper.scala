@@ -19,7 +19,7 @@ package xiangshan.cache
 import chisel3._
 import chisel3.experimental.ExtModule
 import chisel3.util._
-import coupledL2.{IsKeywordKey, IsKeywordField, MemBackTypeMMField, MemPageTypeNCField, PCKey, PCField, VaddrField}
+import coupledL2.{IsKeywordKey, IsKeywordField, MemBackTypeMMField, MemPageTypeNCField, PCField, VaddrField}
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
