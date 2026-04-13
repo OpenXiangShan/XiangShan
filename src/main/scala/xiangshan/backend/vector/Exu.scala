@@ -21,7 +21,7 @@ import xiangshan.mem.SqPtr
 
 class Exu(val param: ExuParam)(implicit p: Parameters) extends Module {
   val latencyMax: Int = param.fuConfigs.map(_.latency.latencyVal.getOrElse(0)).max
-  
+
   val in = IO(Input(new Exu.In(param)))
   val out = IO(Output(new Exu.Out(param)))
 
