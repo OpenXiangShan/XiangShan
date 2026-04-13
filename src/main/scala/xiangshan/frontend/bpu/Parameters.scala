@@ -72,6 +72,8 @@ trait HasBpuParameters extends HasFrontendParameters {
   def BWHistoryLength:   Int = bpuParameters.scParameters.BackwardTableInfos.map(_.HistoryLength).max
   def ImliHistoryLength: Int = bpuParameters.scParameters.ImliTableInfo.HistoryLength
 
+  def CompareAddrLowWidth: Int = bpuParameters.mbtbParameters.TargetWidth
+
   // phr history
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
     bpuParameters.tageParameters.TableInfos.map {

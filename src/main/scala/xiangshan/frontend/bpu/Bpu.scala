@@ -500,7 +500,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   // ghr update
   private val s1_cfiPc = getCfiPcFromPosition(s1_startPc, s1_prediction.cfiPosition)
   private val s1_imliTaken =
-    s1_prediction.taken && s1_prediction.attribute.isConditional && (s1_cfiPc.addr > s1_prediction.target.addr)
+    s1_prediction.taken && s1_prediction.attribute.isConditional &&
+      (s1_cfiPc.addr(CompareAddrLowWidth - 1, 0) > s1_prediction.target.addr(CompareAddrLowWidth - 1, 0))
 
   commonHR.io.stageCtrl               := stageCtrl
   commonHR.io.s0_startPc.get          := s0_startPc
