@@ -238,10 +238,13 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   // IFU-Ibuffer
   ifu.io.toIBuffer <> ibuffer.io.in
+  ifu.io.ibufferEmpty := ibuffer.io.empty
 
   ftq.io.fromBackend <> io.backend.toFtq
   io.backend.fromFtq := ftq.io.toBackend
-  io.backend.fromIfu := ifu.io.toBackend
+
+  ifu.io.backendEmpty := io.backend.backendEmpty
+  io.backend.fromIfu  := ifu.io.toBackend
 
   ibuffer.io.flush           := needFlush
   ibuffer.io.decodeCanAccept := io.backend.canAccept

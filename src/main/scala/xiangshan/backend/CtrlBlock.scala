@@ -50,7 +50,6 @@ class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val resolve = Vec(backendParams.BrhCnt, Valid(new Resolve))
 
   val commit = Valid(new FtqPtr)
-  val backendIsEmpty = Output(Bool())
   val callRetCommit = Vec(CommitWidth, Valid(new CallRetCommit))
 }
 
@@ -370,7 +369,7 @@ class CtrlBlockImp(
     RegNext(VecInit(rename.io.in.map(_.valid))).asUInt.orR ||
     RegNext(VecInit(dispatch.io.enqRob.req.map(_.valid))).asUInt.orR) &&
     RegNext(rob.io.enq.isEmpty)
-  io.frontend.toFtq.backendIsEmpty := RegNext(isEmptyDelay)
+  io.frontend.backendEmpty := RegNext(isEmptyDelay)
 
   io.frontend.toFtq.redirect.valid := s5_flushFromRobValid || s3_redirectGen.valid
   io.frontend.toFtq.redirect.bits := Mux(s5_flushFromRobValid, frontendFlushBits, s3_redirectGen.bits)

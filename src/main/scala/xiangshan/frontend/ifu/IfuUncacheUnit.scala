@@ -40,12 +40,12 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
       val exception:   ExceptionType = new ExceptionType
       val crossPage:   Bool          = Bool()
     }
-    val req            = Flipped(DecoupledIO(new IfuUncacheReq))
-    val resp           = Output(ValidIO(new IfuUncacheResp))
-    val isFirstInstr   = Input(Bool())
-    val ifuStall       = Input(Bool())
-    val flush          = Input(Bool())
-    val mmioCommitRead = new MmioCommitRead
+    val req          = Flipped(DecoupledIO(new IfuUncacheReq))
+    val resp         = Output(ValidIO(new IfuUncacheResp))
+    val isFirstInstr = Input(Bool())
+    val ifuStall     = Input(Bool())
+    val flush        = Input(Bool())
+    val emptyAfter   = Input(Bool())
     // Uncache: mmio request / response
     val toUncache   = new IfuToInstrUncacheIO
     val fromUncache = Flipped(new InstrUncacheToIfuIO)
@@ -102,7 +102,7 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
       when(isFirstInstr) {
         uncacheState := UncacheFsmState.SendReq
       }.otherwise {
-        uncacheState := Mux(io.mmioCommitRead.mmioLastCommit, UncacheFsmState.SendReq, UncacheFsmState.WaitLastCommit)
+        uncacheState := Mux(io.emptyAfter, UncacheFsmState.SendReq, UncacheFsmState.WaitLastCommit)
       }
     }
 
@@ -147,8 +147,6 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
 
   // When a single MMIO instruction spans pages,
   // should the second send for confirming the oldest instruction be blocked?
-  io.mmioCommitRead.valid      := uncacheValid && isMmio
-  io.mmioCommitRead.mmioFtqPtr := RegEnable(io.req.bits.ftqIdx - 1.U, io.req.valid)
   when(io.flush) {
     uncacheReset()
   }

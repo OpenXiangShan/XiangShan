@@ -422,15 +422,6 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.commit.bits.attribute.rasAction  := commitQueue.io.bpuTrain.bits.rasAction
 
   // --------------------------------------------------------------------------------
-  // MMIO fetch
-  // --------------------------------------------------------------------------------
-  private val mmioPtr   = io.fromIfu.mmioCommitRead.mmioFtqPtr
-  private val mmioValid = io.fromIfu.mmioCommitRead.valid
-  private val lastMmioCommitted =
-    commitPtr > mmioPtr || commitPtr === mmioPtr && commit || io.fromBackend.backendIsEmpty
-  io.fromIfu.mmioCommitRead.mmioLastCommit := RegNext(lastMmioCommitted && mmioValid)
-
-  // --------------------------------------------------------------------------------
   // Performance monitoring
   // --------------------------------------------------------------------------------
 

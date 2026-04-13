@@ -35,11 +35,15 @@ import xiangshan.frontend.FrontendTopDownBundle
 
 class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueuePtrHelper with HasPerfEvents {
   class IBufferIO extends Bundle {
-    val flush:           Bool                        = Input(Bool())
-    val in:              DecoupledIO[FetchToIBuffer] = Flipped(DecoupledIO(new FetchToIBuffer))
-    val out:             Vec[DecoupledIO[CtrlFlow]]  = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
-    val full:            Bool                        = Output(Bool())
-    val decodeCanAccept: Bool                        = Input(Bool())
+    val in:  DecoupledIO[FetchToIBuffer] = Flipped(DecoupledIO(new FetchToIBuffer))
+    val out: Vec[DecoupledIO[CtrlFlow]]  = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
+
+    val flush: Bool = Input(Bool())
+
+    val full:  Bool = Output(Bool())
+    val empty: Bool = Output(Bool())
+
+    val decodeCanAccept: Bool = Input(Bool())
 
     // top-down
     val backendRedirectTopdown: BackendRedirectTopdown = Input(new BackendRedirectTopdown)
@@ -99,6 +103,13 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   private val enqPtrVec = RegInit(VecInit.tabulate(EnqueueWidth)(_.U.asTypeOf(new IBufPtr)))
   private val enqPtr    = enqPtrVec(0)
+
+  // No bubble for ibuffer.out, so head.valid is enough
+  io.empty := enqPtr === deqPtr && !io.out.head.valid
+  XSError(
+    !io.out.head.valid && io.out.tail.map(_.valid).reduce(_ || _),
+    "Bubble in ibuffer.out"
+  )
 
   XSError(
     io.in.valid && io.in.bits.prevIBufEnqPtr =/= enqPtr,

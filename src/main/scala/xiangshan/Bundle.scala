@@ -452,6 +452,7 @@ class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // from backend
   val toFtq = Flipped(new CtrlToFtqIO)
   val canAccept = Input(Bool())
+  val backendEmpty = Input(Bool())
 
   val wfi = Flipped(new WfiReqBundle)
 }

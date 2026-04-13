@@ -155,8 +155,7 @@ class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
 }
 
 class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {
-  val mmioCommitRead: MmioCommitRead          = new MmioCommitRead
-  val wbRedirect:     Valid[FrontendRedirect] = Valid(new FrontendRedirect)
+  val wbRedirect: Valid[FrontendRedirect] = Valid(new FrontendRedirect)
 }
 
 class MmioCommitRead(implicit p: Parameters) extends FrontendBundle {
