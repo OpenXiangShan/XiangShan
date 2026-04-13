@@ -82,6 +82,7 @@ object Extensions {
 
   case object H extends PrivExt {
     override val types: Seq[InstType] = Seq(H64Type, HType)
+    override val table: Map[BitPat,Opcode] = tableH
   }
 
   case object S extends PrivExt(Seq(SType), tableS)
@@ -111,6 +112,8 @@ object Extensions {
     override val table: Map[BitPat, Opcode] = tableZfhminD
   }
 
+  case object Zicond extends UnprivExt(Seq(ZICONDType), tableZicond)
+
   case object Zicsr extends UnprivExt(Seq(ZICSRType), tableZicsr)
 
   case object Zifencei extends UnprivExt(Seq(ZIFENCEIType), tableZifencei)
@@ -133,6 +136,8 @@ object Extensions {
   case object Shtvala extends PrivExt
   case object Shvsatpa extends PrivExt
   case object Shvstvala extends PrivExt
+
+  case object Svinval extends PrivExt(Seq(SVINVALType, SVINVAL_HType), tableSvinval)
 
   case object System extends PrivExt(Seq(SYSTEMType), tableSystem)
 
