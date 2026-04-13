@@ -405,9 +405,9 @@ object InstPattern {
         func3.rawString match {
           case "000" => SystemInstPattern()
           case "100" =>
-            func7.rawString(0) match {
-              case '0' => HyperLoadInstPattern()
-              case '1' => HyperStoreInstPattern()
+            func7(0).rawString match {
+              case "0" => HyperLoadInstPattern()
+              case "1" => HyperStoreInstPattern()
             }
           // Todo: Check it
           case _ => CSRInstPattern()
