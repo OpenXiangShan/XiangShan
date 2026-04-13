@@ -42,9 +42,9 @@ object Extensions {
 
   case object Za64rs extends UnprivExt()
 
-  case object Zabha extends UnprivExt(Seq(ZABHAType))
+  case object Zabha extends UnprivExt(Seq(ZABHAType), tableZabha)
 
-  case object Zacas extends UnprivExt(Seq(ZACASType, ZACAS64Type))
+  case object Zacas extends UnprivExt(Seq(ZACASType, ZACAS64Type), tableZacas)
 
   case object Zawrs extends UnprivExt(Seq(ZAWRSType), tableZawrs)
 
@@ -87,7 +87,7 @@ object Extensions {
 
   case object ZacasZabha extends CombExt[Zacas.type, Zabha.type] {
     override val types: Seq[InstType] = Seq(ZABHA_ZACASType)
-    override val table: Map[BitPat, Opcode] = Map()
+    override val table: Map[BitPat, Opcode] = tableZabhaZacas
   }
 
   case object ZfaF extends CombExt[Zfa.type, F.type] {
