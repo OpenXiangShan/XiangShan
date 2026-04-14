@@ -33,8 +33,9 @@ trait Helpers extends HasScParameters with PhrHelper {
 
   protected def generateAddrField(setIdxWidth: Option[Int] = None): AddrField = AddrField(
     Seq(
-      ("shiftBit", FetchBlockAlignWidth),
-      ("bankIdx", BankWidth)
+      ("instOffset", instOffsetBits),
+      ("bankIdx", BankWidth),
+      ("shiftBits", ShiftBits)
     ) ++ (if (setIdxWidth.isDefined) Seq(("setIdx", setIdxWidth.get)) else Seq()),
     maxWidth = Option(VAddrBits)
   )
