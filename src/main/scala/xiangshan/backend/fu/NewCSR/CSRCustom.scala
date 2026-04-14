@@ -120,7 +120,8 @@ class SrnctlBundle extends CSRBundle {
 }
 
 class McorepwrBundle extends CSRBundle {
-  val POWER_DOWN_ENABLE = RW(0).withReset(false.B).withDescription("Enable core power-down requests.")
+  val COMMIT_STUCK_CHECK_ENABLE = RW(1).withReset(false.B).withDescription("Enable commit stuck check.")
+  val POWER_DOWN_ENABLE         = RW(0).withReset(false.B).withDescription("Enable core power-down requests.")
 }
 
 class MflushpwrBundle extends CSRBundle {

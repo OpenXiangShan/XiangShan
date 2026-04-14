@@ -363,6 +363,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.hd_misalign_st_enable            := csrMod.io.status.custom.hd_misalign_st_enable
       custom.hd_misalign_ld_enable            := csrMod.io.status.custom.hd_misalign_ld_enable
       custom.power_down_enable                := csrMod.io.status.custom.power_down_enable
+      custom.commit_stuck_check_enable        := csrMod.io.status.custom.commit_stuck_check_enable
       custom.flush_l2_enable                  := csrMod.io.status.custom.flush_l2_enable
       // Rename
       custom.fusion_enable            := csrMod.io.status.custom.fusion_enable

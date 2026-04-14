@@ -761,6 +761,7 @@ class CtrlBlockImp(
   // When wfi is disabled, it will not block ROB commit.
   rob.io.csr.wfiEvent := io.robio.csr.wfiEvent
   rob.io.wfi_enable := decode.io.csrCtrl.wfi_enable
+  rob.io.commit_stuck_check_enable := decode.io.csrCtrl.commit_stuck_check_enable
 
   io.toTop.cpuHalt := DelayN(rob.io.cpu_halt, 5)
 
