@@ -202,9 +202,6 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
 class ISelectField(final val maxValue: Int, reserved: Seq[Range]) extends CSREnum with WARLApply {
   override protected def legalRange: Option[(BigInt, BigInt)] = Some(0, maxValue)
   override protected def legalBoundString(value: BigInt): String = f"0x$value%x"
-  private def isReservedValue(value: UInt): Bool =
-    reserved.map(range => value >= range.start.U && value <= range.last.U).reduceOption(_ || _).getOrElse(false.B)
-  override def isLegal(enumeration: CSREnumType): Bool = super.isLegal(enumeration) && !isReservedValue(enumeration.asUInt)
   override def warlConstraintDescription(enumeration: CSREnumType): Option[String] = {
     val reservedText = reserved match {
       case Nil => ""
@@ -219,7 +216,8 @@ class ISelectField(final val maxValue: Int, reserved: Seq[Range]) extends CSREnu
 object VSISelectField extends ISelectField(
   0xFFF,
   reserved = Seq(
-    Range.inclusive(0x000, 0x06F),
+    Range.inclusive(0x000, 0x02F),
+    Range.inclusive(0x040, 0x06F),
     Range.inclusive(0x100, 0xFFF),
   ),
 )
@@ -228,14 +226,6 @@ object MISelectField extends ISelectField(
   maxValue = 0xFF,
   reserved = Seq(
     Range.inclusive(0x00, 0x2F),
-    Range.inclusive(0x31, 0x31),
-    Range.inclusive(0x33, 0x33),
-    Range.inclusive(0x35, 0x35),
-    Range.inclusive(0x37, 0x37),
-    Range.inclusive(0x39, 0x39),
-    Range.inclusive(0x3B, 0x3B),
-    Range.inclusive(0x3D, 0x3D),
-    Range.inclusive(0x3F, 0x3F),
     Range.inclusive(0x40, 0x6F),
   ),
 )
@@ -244,14 +234,6 @@ object SISelectField extends ISelectField(
   maxValue = 0xFFF,
   reserved = Seq(
     Range.inclusive(0x000, 0x02F),
-    Range.inclusive(0x031, 0x031),
-    Range.inclusive(0x033, 0x033),
-    Range.inclusive(0x035, 0x035),
-    Range.inclusive(0x037, 0x037),
-    Range.inclusive(0x039, 0x039),
-    Range.inclusive(0x03B, 0x03B),
-    Range.inclusive(0x03D, 0x03D),
-    Range.inclusive(0x03F, 0x03F),
     Range.inclusive(0x040, 0x06F),
     Range.inclusive(0x100, 0xFFF),
   ),
