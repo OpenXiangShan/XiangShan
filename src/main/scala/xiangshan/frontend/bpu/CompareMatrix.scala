@@ -19,7 +19,7 @@ import chisel3._
 import chisel3.util._
 
 class CompareMatrix(n: Int) extends Bundle {
-  val m: Vec[Vec[Bool]] = Wire(Vec(n, Vec(n, Bool())))
+  val m: Vec[Vec[Bool]] = Vec(n, Vec(n, Bool()))
 
   def apply(i: Int): Vec[Bool] = m(i)
 
@@ -119,7 +119,7 @@ object CompareMatrix {
       order: (UInt, UInt) => Bool = (a: UInt, b: UInt) => a < b
   ): CompareMatrix = {
     val n = value.length
-    val m = new CompareMatrix(n)
+    val m = Wire(new CompareMatrix(n))
     (0 until n).foreach { i =>
       (0 until n).foreach { j =>
         if (i == j)

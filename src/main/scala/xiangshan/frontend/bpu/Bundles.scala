@@ -59,6 +59,9 @@ class BranchAttribute extends Bundle {
   def hasPush: Bool = rasAction(BranchAttribute.RasAction.pushBit)
 
   def needIttage: Bool = isIndirect && !hasPop
+
+  def =/=(that: BranchAttribute): Bool =
+    this.branchType =/= that.branchType || this.rasAction =/= that.rasAction
 }
 
 object BranchAttribute {
