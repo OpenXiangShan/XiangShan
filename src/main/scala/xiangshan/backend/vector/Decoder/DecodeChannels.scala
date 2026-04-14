@@ -274,7 +274,7 @@ class DecodeChannels(
   }
 }
 
-class DecodeChannelInput extends Bundle {
+class DecodeChannelInput(implicit p: Parameters) extends Bundle {
   val rawInst = UInt(32.W)
   val vtype = VType()
   def sew: UInt = vtype.vsew
