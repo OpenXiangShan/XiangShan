@@ -1,5 +1,6 @@
 ### Project Specific stuff
 test_run_dir/*
+.worktrees/
 ### XilinxISE template
 # intermediate build files
 *.bgn
