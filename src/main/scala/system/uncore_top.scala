@@ -90,8 +90,26 @@ case class PeriParams(
     addrWidth:      Int = 32
 )
 
+object Pbus2Params {
+  def defaultCrsImsicAddrMap(numDies: Int): Seq[AddressSet] = {
+    (1 to numDies).flatMap { dieId =>
+      Seq(
+        AddressSet((BigInt(dieId) << 44) + 0x1C000000L, 0xFFFF),
+        AddressSet((BigInt(dieId) << 44) + 0x1D000000L, 0xFFFFF)
+      )
+    }
+  }
+
+  def defaultCrsDmAddrMap(numDies: Int): Seq[AddressSet] = {
+    (0 to numDies).map { dieId =>
+      AddressSet((BigInt(dieId) << 44) + 0x1B000000L, 0xFFF)
+    }
+  }
+}
+
 case class Pbus2Params(
     NumHarts:       Int = 2, // number of cpus +1(aplic)+1(pcie msi)
+    NumDies:        Int = 4,
     CPUidBits:      Int = 3,
     APLICidBits:    Int = 0,
     NOCidBits:    Int = 11,
@@ -105,24 +123,9 @@ case class Pbus2Params(
     dmsize:        Int = 0x1000,
     DieIDWidth:    Int = 3,
     // bit[47:44] >0, 0x1C00_0000~0x1DFF_FFFF, access to imsic for crossdie
-    crsimsicAddrMap: Seq[AddressSet] = Seq(
-      AddressSet((BigInt(1) << 44) + 0x1C000000L, 0xFFFF), // die 1 m interrupt file
-      AddressSet((BigInt(2) << 44) + 0x1C000000L, 0xFFFF), // die 2
-      AddressSet((BigInt(3) << 44) + 0x1C000000L, 0xFFFF), // die 3
-      AddressSet((BigInt(4) << 44) + 0x1C000000L, 0xFFFF), // die 4
-      AddressSet((BigInt(1) << 44) + 0x1D000000L, 0xFFFFF), // die 1 s/VS interrupt file
-      AddressSet((BigInt(2) << 44) + 0x1D000000L, 0xFFFFF), // die 2
-      AddressSet((BigInt(3) << 44) + 0x1D000000L, 0xFFFFF), // die 3
-      AddressSet((BigInt(4) << 44) + 0x1D000000L, 0xFFFFF), // die 4
-    ),
+    crsimsicAddrMapOverride: Seq[AddressSet] = Nil,
     // bit[47:44] >0,0x1B000000~0x1B000FFF,for cross die debug
-    crsdmAddrMap: Seq[AddressSet] = Seq(
-      AddressSet((BigInt(0) << 44) + 0x1B000000L, 0xFFF),
-      AddressSet((BigInt(1) << 44) + 0x1B000000L, 0xFFF),
-      AddressSet((BigInt(2) << 44) + 0x1B000000L, 0xFFF),
-      AddressSet((BigInt(3) << 44) + 0x1B000000L, 0xFFF),
-      AddressSet((BigInt(4) << 44) + 0x1B000000L, 0xFFF)
-    ),
+    crsdmAddrMapOverride: Seq[AddressSet] = Nil,
     IMSICParams: aia.IMSICParams = aia.IMSICParams(
       imsicIntSrcWidth = 9,
       mAddr = 0x1C000000,
@@ -137,6 +140,10 @@ case class Pbus2Params(
     MSIOutDataWidth: Int = 32,
     periParams:      PeriParams
 ) {
+  val crsimsicAddrMap: Seq[AddressSet] =
+    if (crsimsicAddrMapOverride.nonEmpty) crsimsicAddrMapOverride else Pbus2Params.defaultCrsImsicAddrMap(NumDies)
+  val crsdmAddrMap: Seq[AddressSet] =
+    if (crsdmAddrMapOverride.nonEmpty) crsdmAddrMapOverride else Pbus2Params.defaultCrsDmAddrMap(NumDies)
   lazy val NumInputs  = NumHarts + 0
   lazy val NumIntSrcs = 1 << IMSICParams.imsicIntSrcWidth
 }
@@ -258,6 +265,215 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
   lazy val module = new Imp
   class Imp extends LazyModuleImp(this)
 }
+class dm_axi2w(bundleParams: AXI4BundleParameters, totalHartCount: Int) extends Module {
+  val io = IO(new Bundle {
+    val axi = Flipped(new AXI4Bundle(bundleParams))
+    val dmint = Output(UInt(totalHartCount.W))
+    val hartResetReq = Output(UInt(totalHartCount.W))
+    val hartIsInReset = Output(UInt(totalHartCount.W))
+  })
+  private val sidebandWidth = 64
+  require(totalHartCount <= sidebandWidth, s"dm_axi2w expects totalHartCount <= $sidebandWidth, got $totalHartCount")
+
+  val dmintShadow = RegInit(0.U(totalHartCount.W))
+  val hartResetReqShadow = RegInit(0.U(totalHartCount.W))
+  val hartIsInResetShadow = RegInit(0.U(totalHartCount.W))
+
+  val awQueue = Module(new Queue(chiselTypeOf(io.axi.aw.bits), 1, pipe = true, flow = true))
+  val wQueue = Module(new Queue(chiselTypeOf(io.axi.w.bits), 1, pipe = true, flow = true))
+  awQueue.io.enq <> io.axi.aw
+  wQueue.io.enq <> io.axi.w
+
+  val bBits = Wire(chiselTypeOf(io.axi.b.bits))
+  bBits := 0.U.asTypeOf(bBits)
+  val bValid = RegInit(false.B)
+  val bResp = RegInit(AXI4Parameters.RESP_OKAY)
+  val bId = RegInit(0.U(io.axi.b.bits.id.getWidth.W))
+  bBits.id := bId
+  bBits.resp := bResp
+  io.axi.b.bits := bBits
+  io.axi.b.valid := bValid
+  when (io.axi.b.fire) {
+    bValid := false.B
+  }
+
+  val rBits = Wire(chiselTypeOf(io.axi.r.bits))
+  rBits := 0.U.asTypeOf(rBits)
+  val rValid = RegInit(false.B)
+  val rResp = RegInit(AXI4Parameters.RESP_DECERR)
+  val rId = RegInit(0.U(io.axi.r.bits.id.getWidth.W))
+  val rData = RegInit(0.U(io.axi.r.bits.data.getWidth.W))
+  rBits.id := rId
+  rBits.data := rData
+  rBits.resp := rResp
+  rBits.last := true.B
+  io.axi.r.bits := rBits
+  io.axi.r.valid := rValid
+  io.axi.ar.ready := !rValid
+  when (io.axi.ar.fire) {
+    val readOffset = io.axi.ar.bits.addr(7, 0)
+    rValid := true.B
+    rId := io.axi.ar.bits.id
+    when (readOffset === 0.U) {
+      rResp := AXI4Parameters.RESP_OKAY
+      rData := Cat(
+        0.U((io.axi.r.bits.data.getWidth - 3 * sidebandWidth).W),
+        hartIsInResetShadow.pad(sidebandWidth),
+        hartResetReqShadow.pad(sidebandWidth),
+        dmintShadow.pad(sidebandWidth)
+      )
+    }.otherwise {
+      rResp := AXI4Parameters.RESP_DECERR
+      rData := 0.U
+    }
+  }
+  when (io.axi.r.fire) {
+    rValid := false.B
+  }
+
+  val consumeWrite = !bValid && awQueue.io.deq.valid && wQueue.io.deq.valid
+  awQueue.io.deq.ready := consumeWrite
+  wQueue.io.deq.ready := consumeWrite
+  when (consumeWrite) {
+    val writeOffset = awQueue.io.deq.bits.addr(7, 0)
+    val dmintData = wQueue.io.deq.bits.data(sidebandWidth - 1, 0)
+    val hartResetReqData = wQueue.io.deq.bits.data(2 * sidebandWidth - 1, sidebandWidth)
+    val hartIsInResetData = wQueue.io.deq.bits.data(3 * sidebandWidth - 1, 2 * sidebandWidth)
+    bValid := true.B
+    bId := awQueue.io.deq.bits.id
+    bResp := AXI4Parameters.RESP_OKAY
+    when (writeOffset === 0.U) {
+      dmintShadow := dmintData(totalHartCount - 1, 0)
+      hartResetReqShadow := hartResetReqData(totalHartCount - 1, 0)
+      hartIsInResetShadow := hartIsInResetData(totalHartCount - 1, 0)
+    }.otherwise {
+      bResp := AXI4Parameters.RESP_DECERR
+    }
+  }
+
+  io.dmint := dmintShadow
+  io.hartResetReq := hartResetReqShadow
+  io.hartIsInReset := hartIsInResetShadow
+}
+
+class dm_w2axi(
+  bundleParams: AXI4BundleParameters,
+  totalHartCount: Int,
+  numDies: Int,
+  dieIdWidth: Int,
+  nocDataWidth: Int,
+  baseAddr: Long
+) extends Module {
+  val io = IO(new Bundle {
+    val axi = new AXI4Bundle(bundleParams)
+    val dmint = Input(UInt(totalHartCount.W))
+    val hartResetReq = Input(UInt(totalHartCount.W))
+    val hartIsInReset = Input(UInt(totalHartCount.W))
+  })
+  private val sidebandWidth = 64
+  require(totalHartCount <= sidebandWidth, s"dm_w2axi expects totalHartCount <= $sidebandWidth, got $totalHartCount")
+  require(numDies > 0, s"dm_w2axi expects numDies > 0, got $numDies")
+  require(nocDataWidth >= 3 * sidebandWidth, s"dm_w2axi expects nocDataWidth >= ${3 * sidebandWidth}, got $nocDataWidth")
+
+  val dmIntAddr = baseAddr.U(io.axi.aw.bits.addr.getWidth.W)
+  val dmintSent = RegInit(VecInit(Seq.fill(numDies)(0.U(totalHartCount.W))))
+  val hartResetReqSent = RegInit(VecInit(Seq.fill(numDies)(0.U(totalHartCount.W))))
+  val hartIsInResetSent = RegInit(VecInit(Seq.fill(numDies)(0.U(totalHartCount.W))))
+
+  val dmintDirtyByDie = VecInit.tabulate(numDies) { dieIdx =>
+    io.dmint =/= dmintSent(dieIdx)
+  }
+  val hartResetReqDirtyByDie = VecInit.tabulate(numDies) { dieIdx =>
+    io.hartResetReq =/= hartResetReqSent(dieIdx)
+  }
+  val hartIsInResetDirtyByDie = VecInit.tabulate(numDies) { dieIdx =>
+    io.hartIsInReset =/= hartIsInResetSent(dieIdx)
+  }
+
+  val txReqValid = dmintDirtyByDie.asUInt.orR || hartResetReqDirtyByDie.asUInt.orR || hartIsInResetDirtyByDie.asUInt.orR
+  val txSendDmint = dmintDirtyByDie.asUInt.orR
+  val txSendHartResetReq = !txSendDmint && hartResetReqDirtyByDie.asUInt.orR
+  val txSendHartIsInReset = !txSendDmint && !txSendHartResetReq && hartIsInResetDirtyByDie.asUInt.orR
+  val txGroupMask = Mux1H(Seq(
+    txSendDmint -> dmintDirtyByDie.asUInt,
+    txSendHartResetReq -> hartResetReqDirtyByDie.asUInt,
+    txSendHartIsInReset -> hartIsInResetDirtyByDie.asUInt,
+    !txReqValid -> 0.U(numDies.W)
+  ))
+  val txGroupIdx = PriorityEncoder(txGroupMask)
+  val txDieId = txGroupIdx + 1.U
+  val txDmintNow = io.dmint
+  val txHartResetReqNow = io.hartResetReq
+  val txHartIsInResetNow = io.hartIsInReset
+  val txAddrNow = (txDieId << 44) | dmIntAddr
+
+  val txBusy = RegInit(false.B)
+  val txAwDone = RegInit(false.B)
+  val txWDone = RegInit(false.B)
+  val txAddrReg = Reg(UInt(io.axi.aw.bits.addr.getWidth.W))
+  val txDataReg = Reg(UInt(nocDataWidth.W))
+  val txDmintReg = Reg(UInt(totalHartCount.W))
+  val txHartResetReqReg = Reg(UInt(totalHartCount.W))
+  val txHartIsInResetReg = Reg(UInt(totalHartCount.W))
+  val txGroupIdxReg = Reg(UInt(log2Ceil(numDies).W))
+
+  when (!txBusy && txReqValid) {
+    txBusy := true.B
+    txAwDone := false.B
+    txWDone := false.B
+    txAddrReg := txAddrNow
+    txDataReg := Cat(
+      0.U((nocDataWidth - 3 * sidebandWidth).W),
+      txHartIsInResetNow.pad(sidebandWidth),
+      txHartResetReqNow.pad(sidebandWidth),
+      txDmintNow.pad(sidebandWidth)
+    )
+    txDmintReg := txDmintNow
+    txHartResetReqReg := txHartResetReqNow
+    txHartIsInResetReg := txHartIsInResetNow
+    txGroupIdxReg := txGroupIdx
+  }
+
+  val awBits = Wire(chiselTypeOf(io.axi.aw.bits))
+  awBits := 0.U.asTypeOf(awBits)
+  awBits.id := 0.U
+  awBits.addr := txAddrReg
+  awBits.len := 0.U
+  awBits.size := log2Ceil(nocDataWidth / 8).U
+  awBits.burst := AXI4Parameters.BURST_INCR
+  awBits.lock := 0.U
+  awBits.cache := 0.U
+  awBits.prot := 0.U
+  awBits.qos := 0.U
+  io.axi.aw.bits := awBits
+  io.axi.aw.valid := txBusy && !txAwDone
+  when (io.axi.aw.fire) {
+    txAwDone := true.B
+  }
+
+  val wBits = Wire(chiselTypeOf(io.axi.w.bits))
+  wBits := 0.U.asTypeOf(wBits)
+  wBits.data := txDataReg
+  wBits.strb := Fill(nocDataWidth / 8, 1.U(1.W))
+  wBits.last := true.B
+  io.axi.w.bits := wBits
+  io.axi.w.valid := txBusy && !txWDone
+  when (io.axi.w.fire) {
+    txWDone := true.B
+  }
+
+  io.axi.ar.valid := false.B
+  io.axi.ar.bits := 0.U.asTypeOf(io.axi.ar.bits)
+  io.axi.r.ready := true.B
+  io.axi.b.ready := txBusy && txAwDone && txWDone
+  when (io.axi.b.fire) {
+    txBusy := false.B
+    dmintSent(txGroupIdxReg) := txDmintReg
+    hartResetReqSent(txGroupIdxReg) := txHartResetReqReg
+    hartIsInResetSent(txGroupIdxReg) := txHartIsInResetReg
+  }
+}
+
 class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
   val Cbus = LazyModule(new Cbus(params))
   val hni_s_xbar = AXI4Xbar()
@@ -404,6 +620,11 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   }
 }
 class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
+  private val totalHartCount = params.NumDies * params.NumHarts
+  private val dmWcrsBaseAddr = 0x1B100000L
+  private val dmWcrsAddrMap = (0 to params.NumDies).map { dieId =>
+    AddressSet((BigInt(dieId) << 44) + dmWcrsBaseAddr, (params.nocDataWidth / 8) - 1)
+  }
   // debugModule instance
   println("=== enter dmPbusTop class ====")
   val dm = LazyModule(new StandAloneDebugModule(
@@ -411,7 +632,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     baseAddress = params.DebugAddrMap.base,
     addrWidth = params.cpuAddrWidth,
     dataWidth = params.dmDataWidth,
-    hartNum = params.NumHarts
+    hartNum = params.NumDies * params.NumHarts // support all dies access to debugModule.
   ))
   // dm master: cpus--> cpu_xbarNto1-->Cbus.cpum
   val Cbus = LazyModule(new Cbus(params))
@@ -425,10 +646,22 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
         id = IdRange(0, 1 << params.NOCidBits)
       ))
     )))
+  val dm_fcrs_xbar = AXI4Xbar()
+  val dm_wcrs_sNode =
+    AXI4SlaveNode(Seq(AXI4SlavePortParameters(
+      slaves = Seq(AXI4SlaveParameters(
+        address = dmWcrsAddrMap,
+        supportsWrite = TransferSizes(1, params.nocDataWidth / 8),
+        supportsRead = TransferSizes(1, params.nocDataWidth / 8)
+      )),
+      beatBytes = params.nocDataWidth / 8
+    )))
   // data width switch bridge for cross-die debug, 256bit->64bit
   val u_dm_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.nocDataWidth, DestDataWidth = params.dmDataWidth,
     errorAddrMap = AddressSet(0x1B020000L, 0xffffL))) // dm cfg data must be 64bit
-  u_dm_DataBridge.axi_xbar_i := dm_fcrs_mNode // 64bit
+  u_dm_DataBridge.axi_xbar_i := dm_fcrs_xbar // 64bit
+  dm_wcrs_sNode := dm_fcrs_xbar
+  dm_fcrs_xbar := dm_fcrs_mNode
   val dmxbar2to1 = AXI4Xbar()
   // Cbus.cpum,dm_fcrs_mNode --> dmxbar2to1 --->(sefid==reqid) & dm_sNode =>debugModule
   dmxbar2to1 := Cbus.cpum // dm_self_mNode
@@ -468,7 +701,19 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       ))
     )))
   u_dm_mDataBridge.axi_xbar_i := dm_tcrs_mNode
-  dm_tcrs_sNode := u_dm_mDataBridge.axi_xbar_o
+  val dm_wcrs_mNode =
+    AXI4MasterNode(Seq(AXI4MasterPortParameters(
+      masters = Seq(AXI4MasterParameters(
+        name = "dm-wcrs-master",
+        maxFlight = Some(1),
+        aligned = true,
+        id = IdRange(0, 1) // id is fix
+      ))
+    )))
+  val dm_tcrs_xbar = AXI4Xbar()
+  dm_tcrs_sNode := dm_tcrs_xbar
+  dm_tcrs_xbar := u_dm_mDataBridge.axi_xbar_o
+  dm_tcrs_xbar := dm_wcrs_mNode
   // data width switch from 64bit to 256bit for access to cross-die debugModule
   println("=== exit dmPbusTop class last ====")
   class Imp(outer: dmPbusTop) extends LazyModuleImp(outer) {
@@ -478,14 +723,45 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     // instance debugModule sba port
     val m_sba2noc = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
     val dmio = IO(new dm.debugModule.DebugModuleIO)
-    val dmint = IO(Output(UInt(params.NumHarts.W)))
+    val dmint = IO(Output(UInt(totalHartCount.W)))
     val req_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
     val self_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for current die
     val isselfid = req_id === self_id
+    val dmWcrsIn = dm_wcrs_sNode.in.head._1
+    val dmWcrsOut = dm_wcrs_mNode.out.head._1
+    val u_dm_axi2w = Module(new dm_axi2w(dm_wcrs_sNode.in.head._2.bundle, totalHartCount))
+    val u_dm_w2axi = Module(new dm_w2axi(
+      bundleParams = dm_wcrs_mNode.out.head._2.bundle,
+      totalHartCount = totalHartCount,
+      numDies = params.NumDies,
+      dieIdWidth = params.DieIDWidth,
+      nocDataWidth = params.nocDataWidth,
+      baseAddr = dmWcrsBaseAddr
+    ))
+
     dm_fcrs_mNode.out.head._1 <> s_noc2dm
     dm_tcrs_sNode.in.head._1 <> m_dm2noc.viewAs[AXI4Bundle]
     m_sba2noc.foreach(_ <> dm.axi4masternode.get)
     dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
+    dmio <> dm.module.io
+
+    val dmintSrc = dm.int.getWrappedValue.asInstanceOf[HeterogeneousBag[Vec[Bool]]]
+    val dmintLocal = dmintSrc.head.asUInt
+    val hartResetReqLocal = dm.module.io.resetCtrl.hartResetReq.map(_.asUInt).getOrElse(0.U(totalHartCount.W))
+    val hartIsInResetExternal = dmio.resetCtrl.hartIsInReset.asUInt
+
+    u_dm_axi2w.io.axi <> dmWcrsIn
+    u_dm_w2axi.io.axi <> dmWcrsOut
+    u_dm_w2axi.io.dmint := dmintLocal
+    u_dm_w2axi.io.hartResetReq := hartResetReqLocal
+    u_dm_w2axi.io.hartIsInReset := hartIsInResetExternal
+
+    dm.module.io.resetCtrl.hartIsInReset := VecInit(u_dm_axi2w.io.hartIsInReset.asBools)
+    dmio.resetCtrl.hartResetReq.foreach { req =>
+      req := VecInit(u_dm_axi2w.io.hartResetReq.asBools)
+    }
+    dmint := u_dm_axi2w.io.dmint
+
     // self node control
     dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle].aw.valid := isselfid & dm_sNode.in.head._1.aw.valid)
     dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle].w.valid := isselfid & dm_sNode.in.head._1.w.valid)
@@ -496,9 +772,6 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     dm_tcrs_mNode.out.head._1.w.valid := !isselfid & dm_sNode.in.head._1.w.valid
     dm_tcrs_mNode.out.head._1.ar.valid := !isselfid & dm_sNode.in.head._1.ar.valid
     dm_tcrs_mNode.out.head._1.ar.bits.addr := (req_id << 44) + dm_sNode.in.head._1.ar.bits.addr
-    dmio <> dm.module.io
-    val dmintSrc = dm.int.getWrappedValue.asInstanceOf[HeterogeneousBag[Vec[Bool]]]
-    dmint := dmintSrc.head.asUInt
   }
   override lazy val module = new Imp(this)
 }
