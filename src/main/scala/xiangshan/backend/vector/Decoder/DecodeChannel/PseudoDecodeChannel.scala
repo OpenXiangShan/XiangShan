@@ -4,8 +4,11 @@ import chisel3._
 import chisel3.experimental.hierarchy.{instantiable, public}
 import chisel3.util.{BitPat, ValidIO}
 import freechips.rocketchip.rocket.CSRs
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.decode.opcode.OpcodeTraits._
 import sourcecode.{Name => SourceName}
+import top.ArgParser
+import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 import xiangshan.backend.decode.isa.PseudoInstructions
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.decode.opcode.Opcode
@@ -26,11 +29,13 @@ import scala.collection.SeqMap
 import scala.language.implicitConversions
 
 @instantiable
-class PseudoDecodeChannel(instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTable.keys.toSeq) extends Module {
+class PseudoDecodeChannel(
+  instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTable.keys.toSeq
+)(implicit val p: Parameters) extends Module {
   import PseudoDecodeChannel._
 
   @public
-  val in = IO(Input(new In))
+  val in = IO(Input(new In()))
   @public
   val out = IO(Output(ValidIO(new Out)))
 
@@ -79,15 +84,22 @@ object PseudoDecodeChannel {
   def main(args: Array[String]): Unit = {
     val targetDir = "build/decoder"
 
+    val (config, _, _) = ArgParser.parse(
+      args :+ "--disable-always-basic-diff" :+ "--fpga-platform" :+ "--target" :+ "verilog")
+
+    val defaultConfig = config.alterPartial({
+      case XSCoreParamsKey => XSCoreParameters
+    })
+
     Verilog.emitVerilog(
-      new PseudoDecodeChannel(),
+      new PseudoDecodeChannel()(defaultConfig),
       Array("--full-stacktrace", "--target-dir", targetDir),
     )
   }
 
   import InstPatterns._
 
-  class In extends Bundle {
+  class In(implicit p: Parameters) extends Bundle {
     val rawInst = UInt(32.W)
   }
 

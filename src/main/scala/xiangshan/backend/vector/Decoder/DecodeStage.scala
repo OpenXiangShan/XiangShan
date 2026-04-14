@@ -249,8 +249,6 @@ object DecodeStage {
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
 
     // from CSR
-    // Todo: merge this bundle in only one
-    val csrCtrl = Input(new CustomCSRCtrlIO)
     val fromCSR = Input(new CSRToDecode)
     val vstart = Input(Vl())
   }
