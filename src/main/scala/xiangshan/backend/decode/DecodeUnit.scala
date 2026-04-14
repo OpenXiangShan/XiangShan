@@ -802,7 +802,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
 
   val isMove = BitPat("b000000000000_?????_000_?????_0010011") === ctrl_flow.instr
   // temp decode zimop as move
-  decodedInst.isMove := (isMove || isZimop) && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U && !io.csrCtrl.singlestep
+  decodedInst.isMove := (isMove || isZimop) && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U && !io.fromCSR.singlestep
 
   // fmadd - b1000011
   // fmsub - b1000111

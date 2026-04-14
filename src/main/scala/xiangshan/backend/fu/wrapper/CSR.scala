@@ -387,16 +387,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.hd_misalign_ld_enable            := csrMod.io.status.custom.hd_misalign_ld_enable
       custom.power_down_enable                := csrMod.io.status.custom.power_down_enable
       custom.flush_l2_enable                  := csrMod.io.status.custom.flush_l2_enable
-      // Rename
-      custom.fusion_enable            := csrMod.io.status.custom.fusion_enable
-      custom.wfi_enable               := csrMod.io.status.custom.wfi_enable
       // distribute csr write signal
       // write to frontend and memory
       custom.distribute_csr.w.valid := csrMod.io.distributedWenLegal
       custom.distribute_csr.w.bits.addr := waddrReg
       custom.distribute_csr.w.bits.data := wdataReg
-      // rename single step
-      custom.singlestep := csrMod.io.status.singleStepFlag
       // trigger
       custom.frontend_trigger := csrMod.io.status.frontendTrigger
       custom.mem_trigger      := csrMod.io.status.memTrigger
@@ -578,4 +573,13 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
      */
     val cboI2F = Bool()
   }
+
+  val custom = new Bundle {
+    // Rename
+    val fusion_enable = Bool()
+    val wfi_enable = Bool()
+  }
+
+  // rename single step
+  val singlestep = Bool()
 }

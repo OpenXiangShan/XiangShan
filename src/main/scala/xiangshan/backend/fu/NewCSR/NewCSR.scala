@@ -1457,9 +1457,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.custom.hd_misalign_st_enable            := smblockctl.regOut.HD_MISALIGN_ST_ENABLE.asBool
   io.status.custom.hd_misalign_ld_enable            := smblockctl.regOut.HD_MISALIGN_LD_ENABLE.asBool
 
-  io.status.custom.fusion_enable           := srnctl.regOut.FUSION_ENABLE.asBool
-  io.status.custom.wfi_enable              := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
-
   io.status.custom.power_down_enable := mcorepwr.regOut.POWER_DOWN_ENABLE.asBool
 
   io.status.custom.flush_l2_enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
@@ -1594,6 +1591,10 @@ class NewCSR(implicit val p: Parameters) extends Module
     senvcfg.regOut.CBIE === EnvCBIE.Flush && (isModeHU || isModeVU) ||
     henvcfg.regOut.CBIE === EnvCBIE.Flush && (isModeVS || isModeVU)
   )
+  // Rename
+  io.toDecode.custom.fusion_enable := srnctl.regOut.FUSION_ENABLE.asBool
+  io.toDecode.custom.wfi_enable    := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
+  io.toDecode.singlestep := io.status.singleStepFlag
 
   io.distributedWenLegal := wenLegalReg && !noCSRIllegalReg
   io.status.criticalErrorState := criticalErrorState && !dcsr.regOut.CETRIG.asBool

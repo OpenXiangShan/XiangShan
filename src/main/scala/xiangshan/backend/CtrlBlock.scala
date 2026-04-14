@@ -120,7 +120,7 @@ class CtrlBlockImp(
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
-  private val disableFusion = decode.in.csrCtrl.singlestep || !decode.in.csrCtrl.fusion_enable
+  private val disableFusion = decode.in.fromCSR.singlestep || !decode.in.fromCSR.custom.fusion_enable
 
   private val s0_robFlushRedirect = rob.io.flushOut
   private val s1_robFlushRedirect = Wire(Valid(new Redirect))
@@ -551,8 +551,6 @@ class CtrlBlockImp(
   /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
   io.frontend.toIBuf.decodeCanAccept := !decodeBufValid(0) || !decodeFromFrontend(0).valid
 
-  decode.in.csrCtrl := RegNext(io.csrCtrl)
-
   Seq(
     rename.io.intReadPorts -> decode.out.intRat,
     rename.io.fpReadPorts  -> decode.out.fpRat,
@@ -704,7 +702,7 @@ class CtrlBlockImp(
   rename.io.redirect := s1_s3_redirect
   rename.io.rabCommits := rob.io.rabCommits
   rename.io.vlCommits := rob.io.vlCommits
-  rename.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
+  rename.io.singleStep := io.fromCSR.toDecode.singlestep
   rename.io.waittable := (memCtrl.io.waitTable2Rename zip decode.out.uop).map{ case(waittable2rename, decodeOut) =>
     RegEnable(waittable2rename, decodeOut.fire)
   }
@@ -788,7 +786,7 @@ class CtrlBlockImp(
   dispatch.io.wbPregsV0 := io.toDispatch.wbPregsV0
   dispatch.io.wbPregsVl := io.toDispatch.wbPregsVl
   dispatch.io.vlWriteBackInfo := io.toDispatch.vlWriteBackInfo
-  dispatch.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
+  dispatch.io.singleStep := io.fromCSR.toDecode.singlestep
   dispatch.io.debugBlockBackward.foreach(_ := rob.io.debugBlockBackward.get)
   dispatch.io.debugWaitForward.foreach(_ := rob.io.debugWaitForward.get)
   dispatch.io.debugIQValidNumVec.foreach(_ := io.toDispatch.debugIQValidNumVec.get)
@@ -830,7 +828,7 @@ class CtrlBlockImp(
   io.robio.csr <> rob.io.csr
   // When wfi is disabled, it will not block ROB commit.
   rob.io.csr.wfiEvent := io.robio.csr.wfiEvent
-  rob.io.wfi_enable := decode.in.csrCtrl.wfi_enable
+  rob.io.wfi_enable := decode.in.fromCSR.custom.wfi_enable
 
   io.toTop.cpuWfi := DelayN(rob.io.cpu_wfi, 5)
 
