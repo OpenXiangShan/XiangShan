@@ -98,16 +98,11 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
     val pendingDrain = Output(Bool())
   })
 
-  val drainQueueDepth = 16
-  val drainPtrWidth = log2Ceil(drainQueueDepth)
-  val drainCountWidth = log2Ceil(drainQueueDepth + 1)
-
-  def wrapInc(ptr: UInt): UInt = Mux(ptr === (drainQueueDepth - 1).U, 0.U, ptr + 1.U)
-
-  val drainCycles = Reg(Vec(drainQueueDepth, UInt(64.W)))
-  val drainEnqPtr = RegInit(0.U(drainPtrWidth.W))
-  val drainDeqPtr = RegInit(0.U(drainPtrWidth.W))
-  val drainCount = RegInit(0.U(drainCountWidth.W))
+  val drainCount = RegInit(0.U(64.W))
+  val oldestDrainCycle = RegInit(0.U(64.W))
+  val lastDrainCycle = RegInit(0.U(64.W))
+  val drainStride = RegInit(0.U(64.W))
+  val drainStrideValid = RegInit(false.B)
   val replayActive = RegInit(false.B)
   val replayPc = RegInit(0.U(VAddrBits.W))
   val replayPsv = RegInit(0.U(TeaEvent.width.W))
@@ -118,11 +113,10 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
   val sampleValid = WireDefault(false.B)
   val drainSampleFire = io.sampleFire && io.state === 3.U
   val replayValid = replayActive && drainCount =/= 0.U
-  val drainFull = drainCount === drainQueueDepth.U
-  val drainEmpty = drainCount === 0.U
   val doDrainDeq = replayValid
-  val canDrainEnq = !drainFull || doDrainDeq
+  val drainEmpty = drainCount === 0.U
   val nextDrainCount = WireDefault(drainCount)
+  val observedDrainStride = cycle - lastDrainCycle
 
   when(drainSampleFire && !doDrainDeq) {
     nextDrainCount := drainCount + 1.U
@@ -158,10 +152,19 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
   }
 
   when(drainSampleFire) {
-    assert(canDrainEnq, "TeaSampleSelector drain queue overflow")
-    when(canDrainEnq) {
-      drainCycles(drainEnqPtr) := cycle
-      drainEnqPtr := wrapInc(drainEnqPtr)
+    when(drainEmpty) {
+      oldestDrainCycle := cycle
+      lastDrainCycle := cycle
+      drainStride := 0.U
+      drainStrideValid := false.B
+    }.otherwise {
+      when(drainStrideValid) {
+        assert(observedDrainStride === drainStride, "TeaSampleSelector expects periodic drained sample fires")
+      }.otherwise {
+        drainStride := observedDrainStride
+        drainStrideValid := true.B
+      }
+      lastDrainCycle := cycle
     }
   }
 
@@ -172,7 +175,7 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
   }
 
   when(replayValid) {
-    sample.cycle := drainCycles(drainDeqPtr)
+    sample.cycle := oldestDrainCycle
     sample.state := 3.U
     sample.validMask := 1.U(CommitWidth.W)
     sample.pcVec(0) := replayPc
@@ -181,14 +184,14 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
     sampleValid := true.B
   }
 
-  when(doDrainDeq) {
-    drainDeqPtr := wrapInc(drainDeqPtr)
-  }
-
   when(drainSampleFire && !doDrainDeq) {
     drainCount := drainCount + 1.U
   }.elsewhen(!drainSampleFire && doDrainDeq) {
     drainCount := drainCount - 1.U
+  }
+
+  when(doDrainDeq && drainCount > 1.U) {
+    oldestDrainCycle := oldestDrainCycle + Mux(drainStrideValid, drainStride, 0.U)
   }
 
   when(replayActive && doDrainDeq && drainCount === 1.U && !drainSampleFire) {

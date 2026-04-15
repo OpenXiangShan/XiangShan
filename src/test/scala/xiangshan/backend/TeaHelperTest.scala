@@ -439,6 +439,7 @@ class TeaHelperTest extends XSTester {
       dut.clock.step()
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
+      dut.io.sample.cycle.expect(0.U(64.W))
       dut.io.sample.pcVec(0).expect("h80000300".U)
       dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_MB))
       dut.io.sample.pendingDrain.expect(true.B)
@@ -448,10 +449,87 @@ class TeaHelperTest extends XSTester {
       dut.clock.step()
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
+      dut.io.sample.cycle.expect(1.U(64.W))
       dut.io.sample.pcVec(0).expect("h80000300".U)
       dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_MB))
       dut.io.sample.pendingDrain.expect(true.B)
       dut.io.pendingDrain.expect(false.B)
+    }
+  }
+
+  it should "preserve spaced drained sample cycles when replaying deferred outputs" in {
+    test(new TeaSelectorHarness) { dut =>
+      val commitMaskWidth = dut.io.commitMask.getWidth
+
+      dut.io.sampleFire.poke(true.B)
+      dut.io.state.poke(3.U)
+      dut.io.firstAllocValid.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(true.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(false.B)
+      dut.io.firstAllocValid.poke(true.B)
+      dut.io.firstAllocPc.poke("h80000400".U)
+      dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.ST_L1))
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
+      dut.io.sample.cycle.expect(0.U(64.W))
+      dut.io.sample.pcVec(0).expect("h80000400".U)
+      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.ST_L1))
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
+      dut.io.sample.cycle.expect(2.U(64.W))
+      dut.io.sample.pcVec(0).expect("h80000400".U)
+      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.ST_L1))
+      dut.io.pendingDrain.expect(false.B)
+    }
+  }
+
+  it should "replay long drained backlogs without a bounded queue overflow" in {
+    test(new TeaSelectorHarness) { dut =>
+      val commitMaskWidth = dut.io.commitMask.getWidth
+      val deferredSamples = 20
+
+      dut.io.state.poke(3.U)
+      dut.io.firstAllocValid.poke(false.B)
+      for (_ <- 0 until deferredSamples) {
+        dut.io.sampleFire.poke(true.B)
+        dut.clock.step()
+        dut.io.sampleValid.expect(false.B)
+        dut.io.pendingDrain.expect(true.B)
+      }
+
+      dut.io.sampleFire.poke(false.B)
+      dut.io.firstAllocValid.poke(true.B)
+      dut.io.firstAllocPc.poke("h80000500".U)
+      dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
+      for (i <- 0 until deferredSamples) {
+        dut.clock.step()
+        dut.io.sampleValid.expect(true.B)
+        dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
+        dut.io.sample.cycle.expect(i.U(64.W))
+        dut.io.sample.pcVec(0).expect("h80000500".U)
+        dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.DR_L1))
+        dut.io.sample.pendingDrain.expect(true.B)
+        dut.io.pendingDrain.expect((i != deferredSamples - 1).B)
+        dut.io.firstAllocValid.poke(false.B)
+      }
     }
   }
 }
