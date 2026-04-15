@@ -8,7 +8,7 @@ import xiangshan._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
 import xiangshan.backend.rob.RobBundles
 import xiangshan.backend.rob.RobBundles.RobEntryBundle
-import xiangshan.TeaEvent
+import xiangshan.{TeaEvent, TeaFrontend}
 
 class TeaHelperTest extends XSTester {
   behavior of "TEA helper metadata"
@@ -54,6 +54,15 @@ class TeaHelperTest extends XSTester {
     io.robTea := rob.teaPsv
   }
 
+  class PacketPsvHarness extends Module {
+    val io = IO(new Bundle {
+      val valids = Input(Vec(4, Bool()))
+      val packetPsv = Input(UInt(TeaEvent.width.W))
+      val out = Output(Vec(4, UInt(TeaEvent.width.W)))
+    })
+    io.out := TeaFrontend.bindPacketPsv(io.valids, io.packetPsv)
+  }
+
   it should "define a 9-bit TEA event space and expose teaPsv on the main pipeline bundles" in {
     TeaEvent.width shouldBe 9
     TeaEvent.bit(TeaEvent.ST_LLC).getWidth shouldBe TeaEvent.width
@@ -72,6 +81,21 @@ class TeaHelperTest extends XSTester {
       dut.io.staticTea.expect(ctrlTea.U(TeaEvent.width.W))
       dut.io.decodedTea.expect(ctrlTea.U(TeaEvent.width.W))
       dut.io.robTea.expect(robTea.U(TeaEvent.width.W))
+    }
+  }
+
+  it should "bind a packet PSV only to the first valid instruction slot" in {
+    test(new PacketPsvHarness) { dut =>
+      dut.io.valids(0).poke(false.B)
+      dut.io.valids(1).poke(true.B)
+      dut.io.valids(2).poke(true.B)
+      dut.io.valids(3).poke(false.B)
+      dut.io.packetPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.clock.step()
+      dut.io.out(0).expect(0.U)
+      dut.io.out(1).expect(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.io.out(2).expect(0.U)
+      dut.io.out(3).expect(0.U)
     }
   }
 }

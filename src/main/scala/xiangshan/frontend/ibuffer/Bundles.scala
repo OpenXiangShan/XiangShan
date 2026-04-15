@@ -23,6 +23,7 @@ import utility.InstSeqNum
 import utils.EnumUInt
 import xiangshan.CtrlFlow
 import xiangshan.ExceptionNO
+import xiangshan.TeaEvent
 import xiangshan.TriggerAction
 import xiangshan.XSCoreParamsKey
 import xiangshan.backend.fu.vector.Bundles.VType
@@ -54,6 +55,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
   val isRvc:            Bool   = Bool()
   val predTaken:        Bool   = Bool()
   val fixedTaken:       Bool   = Bool()
+  val teaPsv:           UInt   = UInt(TeaEvent.width.W)
   val ftqPtr:           FtqPtr = new FtqPtr
   val instrEndOffset:   UInt   = UInt(FetchBlockInstOffsetWidth.W)
   val triggered:        UInt   = TriggerAction()
@@ -68,6 +70,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     isRvc            := fetch.isRvc(i)
     predTaken        := fetch.instrEndOffset(i).predTaken
     fixedTaken       := fetch.instrEndOffset(i).fixedTaken
+    teaPsv           := 0.U
     ftqPtr           := fetch.ftqPtr(i)
     instrEndOffset   := fetch.instrEndOffset(i).offset
     triggered        := fetch.triggered(i)
@@ -86,6 +89,7 @@ class IBufEntry(implicit p: Parameters) extends IBufferBundle {
     result.isRvc              := isRvc
     result.predTaken          := predTaken
     result.fixedTaken         := fixedTaken
+    result.teaPsv             := teaPsv
     result.ftqPtr             := ftqPtr
     result.exceptionType      := exception.exceptionType
     result.exceptionCrossPage := exception.exceptionCrossPage
@@ -126,6 +130,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
   val isRvc:              Bool          = Bool()
   val predTaken:          Bool          = Bool()
   val fixedTaken:         Bool          = Bool()
+  val teaPsv:             UInt          = UInt(TeaEvent.width.W)
   val ftqPtr:             FtqPtr        = new FtqPtr
   val exceptionType:      ExceptionType = new ExceptionType
   val exceptionCrossPage: Bool          = Bool()
@@ -157,6 +162,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.fixedTaken                                    := fixedTaken
     cf.predTaken                                     := predTaken
     cf.crossPageIPFFix                               := exceptionCrossPage
+    cf.teaPsv                                        := teaPsv
     cf.storeSetHit                                   := DontCare
     cf.waitForRobIdx                                 := DontCare
     cf.loadWaitBit                                   := DontCare

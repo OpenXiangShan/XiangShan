@@ -1,6 +1,7 @@
 package xiangshan
 
 import chisel3._
+import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 
 object TeaEvent {
@@ -27,6 +28,15 @@ object TeaPsvOps {
 
   def setBit(psv: UInt, event: Int): UInt = {
     psv | TeaEvent.bit(event)
+  }
+}
+
+object TeaFrontend {
+  def bindPacketPsv(valids: Seq[Bool], packetPsv: UInt): Vec[UInt] = {
+    val firstValidOH = PriorityEncoderOH(VecInit(valids))
+    VecInit(valids.indices.map { i =>
+      Mux(firstValidOH(i), packetPsv, TeaPsvOps.empty)
+    })
   }
 }
 
