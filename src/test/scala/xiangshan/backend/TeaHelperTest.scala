@@ -8,6 +8,8 @@ import xiangshan._
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
 import xiangshan.backend.rob.RobBundles
 import xiangshan.backend.rob.RobBundles.RobEntryBundle
+import xiangshan.frontend.{FetchToIBuffer, FrontendTopDownBundle, IBuffer}
+import utility.{LogUtilsOptions, LogUtilsOptionsKey, PerfCounterOptions, PerfCounterOptionsKey}
 import xiangshan.{TeaEvent, TeaFrontend}
 
 class TeaHelperTest extends XSTester {
@@ -80,6 +82,51 @@ class TeaHelperTest extends XSTester {
     )
   }
 
+  class IBufferBypassRegressionHarness(implicit val p: Parameters) extends Module with HasXSParameter {
+    require(PredictWidth > DecodeWidth, "IBuffer bypass regression needs PredictWidth > DecodeWidth")
+
+    val io = IO(new Bundle {
+      val inValid = Input(Bool())
+      val validMask = Input(UInt(PredictWidth.W))
+      val enqEnableMask = Input(UInt(PredictWidth.W))
+      val instrs = Input(Vec(PredictWidth, UInt(32.W)))
+      val decodeCanAccept = Input(Bool())
+      val packetDrL1 = Input(Bool())
+      val inReady = Output(Bool())
+      val outValid = Output(Vec(DecodeWidth, Bool()))
+      val outInstr = Output(Vec(DecodeWidth, UInt(32.W)))
+      val outTeaPsv = Output(Vec(DecodeWidth, UInt(TeaEvent.width.W)))
+    })
+
+    val ibuffer = Module(new IBuffer()(p))
+    val inBits = WireInit(0.U.asTypeOf(new FetchToIBuffer()(p)))
+
+    inBits.instrs := io.instrs
+    inBits.valid := io.validMask
+    inBits.enqEnable := io.enqEnableMask
+    inBits.topdown_info.reasons(TopDownCounters.ICacheMissBubble.id) := io.packetDrL1
+
+    ibuffer.io.flush := false.B
+    ibuffer.io.ControlRedirect := false.B
+    ibuffer.io.ControlBTBMissBubble := false.B
+    ibuffer.io.TAGEMissBubble := false.B
+    ibuffer.io.SCMissBubble := false.B
+    ibuffer.io.ITTAGEMissBubble := false.B
+    ibuffer.io.RASMissBubble := false.B
+    ibuffer.io.MemVioRedirect := false.B
+    ibuffer.io.decodeCanAccept := io.decodeCanAccept
+    ibuffer.io.in.valid := io.inValid
+    ibuffer.io.in.bits := inBits
+    ibuffer.io.stallReason.backReason.valid := false.B
+    ibuffer.io.stallReason.backReason.bits := 0.U
+    ibuffer.io.out.foreach(_.ready := true.B)
+
+    io.inReady := ibuffer.io.in.ready
+    io.outValid := VecInit(ibuffer.io.out.map(_.valid))
+    io.outInstr := VecInit(ibuffer.io.out.map(_.bits.instr))
+    io.outTeaPsv := VecInit(ibuffer.io.out.map(_.bits.teaPsv))
+  }
+
   it should "define a 9-bit TEA event space and expose teaPsv on the main pipeline bundles" in {
     TeaEvent.width shouldBe 9
     TeaEvent.bit(TeaEvent.ST_LLC).getWidth shouldBe TeaEvent.width
@@ -138,6 +185,53 @@ class TeaHelperTest extends XSTester {
       dut.io.out(1).expect(0.U)
       dut.io.out(2).expect(TeaEvent.bit(TeaEvent.DR_L1))
       dut.io.out(3).expect(0.U)
+    }
+  }
+
+  it should "bind DR_L1 to the first queued IBuffer entry after bypassed outputs" in {
+    val ibufferConfig = config.alterPartial {
+      case LogUtilsOptionsKey => LogUtilsOptions(enableDebug = false, enablePerf = false, fpgaPlatform = true)
+      case PerfCounterOptionsKey => PerfCounterOptions(enablePerfPrint = false, enablePerfDB = false, perfDBHartID = 0)
+    }
+
+    test(new IBufferBypassRegressionHarness()(ibufferConfig)) { dut =>
+      val predictWidth = dut.io.instrs.length
+      val decodeWidth = dut.io.outInstr.length
+      val fullMask = ((BigInt(1) << predictWidth) - 1).U
+      val queuedInstr = (0x1000 + decodeWidth).U(32.W)
+
+      dut.io.inValid.poke(false.B)
+      dut.io.validMask.poke(0.U)
+      dut.io.enqEnableMask.poke(0.U)
+      dut.io.decodeCanAccept.poke(true.B)
+      dut.io.packetDrL1.poke(false.B)
+      for (i <- 0 until predictWidth) {
+        dut.io.instrs(i).poke((0x1000 + i).U(32.W))
+      }
+      dut.clock.step()
+
+      dut.io.inValid.poke(true.B)
+      dut.io.validMask.poke(fullMask)
+      dut.io.enqEnableMask.poke(fullMask)
+      dut.io.packetDrL1.poke(true.B)
+      dut.io.inReady.expect(true.B)
+      dut.clock.step()
+
+      dut.io.outValid(0).expect(true.B)
+      dut.io.outInstr(0).expect(0x1000.U)
+      dut.io.outTeaPsv(0).expect(0.U)
+      dut.io.outInstr(decodeWidth - 1).expect((0x1000 + decodeWidth - 1).U(32.W))
+      dut.io.outTeaPsv(decodeWidth - 1).expect(0.U)
+
+      dut.io.inValid.poke(false.B)
+      dut.io.validMask.poke(0.U)
+      dut.io.enqEnableMask.poke(0.U)
+      dut.io.packetDrL1.poke(false.B)
+      dut.clock.step()
+
+      dut.io.outValid(0).expect(true.B)
+      dut.io.outInstr(0).expect(queuedInstr)
+      dut.io.outTeaPsv(0).expect(TeaEvent.bit(TeaEvent.DR_L1))
     }
   }
 }
