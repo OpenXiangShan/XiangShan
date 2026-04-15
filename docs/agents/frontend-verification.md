@@ -105,11 +105,37 @@ intention. Therefore:
 For non-trivial frontend commits, prefer adding a short body that summarizes
 the major changed areas from the staged diff.
 
-Run the DUT bin-trace case directly:
+Run the standard DUT bin-trace pipeline for `microbench.bin`:
 
 ```bash
-TB_ENABLE_DUT_TESTS=1 python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
+source /nfs/share/unitychip/activate
+source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
+TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter \
+TB_ENV_LOG_LEVEL=INFO \
+TB_TRACE_PROGRESS_INTERVAL=50000 \
+TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000 \
+PYTEST_ADDOPTS='-s -o log_cli=true --log-cli-level=INFO' \
+src/test/python/Frontend/run_bin_trace_pipeline.sh ready-to-run/microbench.bin
 ```
+
+Use direct `pytest` only when the golden trace has already been prepared and
+the pipeline-only environment variables are set explicitly:
+
+```bash
+TB_ENABLE_DUT_TESTS=1 \
+TB_BIN_TRACE_PIPELINE=1 \
+TB_BIN_PATH=ready-to-run/microbench.bin \
+TB_TRACE_PATH=NEMU/logs/microbench.trace.jsonl \
+TB_BASE_ADDR=0x80000000 \
+TB_STEP_CYCLES=0 \
+TB_RUN_TO_TRACE_COMPLETION=1 \
+python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
+```
+
+Do not treat the bare command
+`TB_ENABLE_DUT_TESTS=1 python -m pytest ...::test_bin_trace`
+as a complete bin-case workflow. The test is pipeline-gated and requires the
+bin/trace environment above.
 
 ## Bin-Trace Run Requirements
 
@@ -142,6 +168,9 @@ Therefore:
   or manual interruption
 - when debugging a stuck bin-trace case, prefer enabling progress/stall
   reporting before changing semantic logic
+- for `microbench.bin`, prefer `run_bin_trace_pipeline.sh` with
+  `TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter` in the current tree;
+  do not assume `NEMU/build/riscv64-nemu-interpreter` exists locally
 
 Start the frontend web console:
 

@@ -75,6 +75,43 @@
   - 若不传 `output.fsdb`，默认在输入文件同目录下生成同名 `.fsdb`
   - 中间 `.vcd` 放在临时目录，脚本结束后自动清理
 
+## Bin Case 标准入口
+
+- `microbench.bin` 的标准运行入口不是裸 `pytest`，而是：
+
+```bash
+source /nfs/share/unitychip/activate
+source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
+TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter \
+TB_ENV_LOG_LEVEL=INFO \
+TB_TRACE_PROGRESS_INTERVAL=50000 \
+TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000 \
+PYTEST_ADDOPTS='-s -o log_cli=true --log-cli-level=INFO' \
+src/test/python/Frontend/run_bin_trace_pipeline.sh ready-to-run/microbench.bin
+```
+
+- 上面这条命令同时完成：
+  - 从 bin 生成 NEMU trace
+  - 设置 `test_bin_trace_dut.py::test_bin_trace` 所需的 pipeline 环境变量
+  - 打开 progress / stall 观测输出
+  - 生成 DUT `.fst` 和配套 `.log`
+- 只有在 trace 已经准备好，并且以下环境变量都已显式设置时，才允许直接运行 `pytest`：
+
+```bash
+TB_ENABLE_DUT_TESTS=1 \
+TB_BIN_TRACE_PIPELINE=1 \
+TB_BIN_PATH=ready-to-run/microbench.bin \
+TB_TRACE_PATH=NEMU/logs/microbench.trace.jsonl \
+TB_BASE_ADDR=0x80000000 \
+TB_STEP_CYCLES=0 \
+TB_RUN_TO_TRACE_COMPLETION=1 \
+python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
+```
+
+- 当前仓库里实际存在的 NEMU 可执行文件路径是
+  `ready-to-run/riscv64-nemu-interpreter`。
+  不要默认假设 `NEMU/build/riscv64-nemu-interpreter` 已经存在。
+
 ## Bin Case 运行要求
 
 - `tests/test_bin_trace_dut.py::test_bin_trace` 这类 bin case，每次运行都必须生成：
