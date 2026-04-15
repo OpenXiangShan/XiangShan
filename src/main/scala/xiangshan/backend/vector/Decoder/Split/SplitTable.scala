@@ -949,7 +949,7 @@ object SplitTable {
           e32 -> vmv_x2vs_e32,
           e64 -> vmv_x2vs_e64,
         ).flatMap { case (sew, _uop) =>
-          val uop = _uop.copy() - Src1Vp + Src1Fp
+          val uop = _uop.copy() + Src1Fp
           val leM1Uops = for (lmul <- Seq(mf8, mf4, mf2, m1)) yield {
             (sew ## lmul) -> Seq(uop)
           }
