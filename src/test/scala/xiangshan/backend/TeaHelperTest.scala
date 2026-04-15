@@ -131,11 +131,13 @@ class TeaHelperTest extends XSTester {
   class LoadBinderHarness(implicit p: Parameters) extends Module {
     val io = IO(new Bundle {
       val in = Input(UInt(TeaEvent.width.W))
+      val dcacheFirstMiss = Input(Bool())
+      val tlbFirstMiss = Input(Bool())
       val out = Output(UInt(TeaEvent.width.W))
     })
     val ls = DebugLsInfo.init(p)
-    ls.s2_isDcacheFirstMiss := true.B
-    ls.s1_isTlbFirstMiss := true.B
+    ls.s2_isDcacheFirstMiss := io.dcacheFirstMiss
+    ls.s1_isTlbFirstMiss := io.tlbFirstMiss
     io.out := TeaBinders.applyLoadDebug(io.in, ls)
   }
 
@@ -256,27 +258,53 @@ class TeaHelperTest extends XSTester {
     }
   }
 
-  it should "set ST_L1 and ST_TLB without clearing existing bits" in {
-    val expected = teaBitValue(TeaEvent.DR_L1) | teaBitValue(TeaEvent.ST_L1) | teaBitValue(TeaEvent.ST_TLB)
+  it should "gate load-debug binder bits independently while preserving the input PSV" in {
+    val base = teaBitValue(TeaEvent.DR_L1)
+    val withL1 = base | teaBitValue(TeaEvent.ST_L1)
+    val withTlb = base | teaBitValue(TeaEvent.ST_TLB)
+    val withBoth = withL1 | teaBitValue(TeaEvent.ST_TLB)
 
     test(new LoadBinderHarness) { dut =>
-      dut.io.in.poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.io.in.poke(base.U(TeaEvent.width.W))
+      dut.io.dcacheFirstMiss.poke(true.B)
+      dut.io.tlbFirstMiss.poke(false.B)
       dut.clock.step()
-      dut.io.out.expect(expected.U(TeaEvent.width.W))
+      dut.io.out.expect(withL1.U(TeaEvent.width.W))
+
+      dut.io.in.poke(base.U(TeaEvent.width.W))
+      dut.io.dcacheFirstMiss.poke(false.B)
+      dut.io.tlbFirstMiss.poke(true.B)
+      dut.clock.step()
+      dut.io.out.expect(withTlb.U(TeaEvent.width.W))
+
+      dut.io.in.poke(base.U(TeaEvent.width.W))
+      dut.io.dcacheFirstMiss.poke(false.B)
+      dut.io.tlbFirstMiss.poke(false.B)
+      dut.clock.step()
+      dut.io.out.expect(base.U(TeaEvent.width.W))
+
+      dut.io.in.poke(base.U(TeaEvent.width.W))
+      dut.io.dcacheFirstMiss.poke(true.B)
+      dut.io.tlbFirstMiss.poke(true.B)
+      dut.clock.step()
+      dut.io.out.expect(withBoth.U(TeaEvent.width.W))
     }
   }
 
-  it should "set FL_MB only for control redirects" in {
+  it should "set FL_MB only for control redirects while preserving existing PSV bits" in {
+    val base = teaBitValue(TeaEvent.DR_L1)
+    val redirected = base | teaBitValue(TeaEvent.FL_MB)
+
     test(new RedirectBinderHarness) { dut =>
-      dut.io.in.poke(0.U)
+      dut.io.in.poke(base.U(TeaEvent.width.W))
       dut.io.isCtrl.poke(true.B)
       dut.clock.step()
-      dut.io.out.expect(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.io.out.expect(redirected.U(TeaEvent.width.W))
 
-      dut.io.in.poke(0.U)
+      dut.io.in.poke(base.U(TeaEvent.width.W))
       dut.io.isCtrl.poke(false.B)
       dut.clock.step()
-      dut.io.out.expect(0.U)
+      dut.io.out.expect(base.U(TeaEvent.width.W))
     }
   }
 }
