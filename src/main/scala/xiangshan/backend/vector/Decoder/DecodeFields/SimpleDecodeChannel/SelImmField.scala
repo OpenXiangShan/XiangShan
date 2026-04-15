@@ -23,14 +23,17 @@ object SelImmField extends DecodeField[InstPattern, ValidIO[UInt]] {
       case int: IntInstPattern => int match {
         case _: IntRTypePattern => null
         case intI: IntITypePattern => intI match {
-          case IntImmInstPattern() => DecodeSelImm.I
+          case _: IntImmInstPattern => DecodeSelImm.I
           case IntLoadInstPattern() => DecodeSelImm.I
           case JalrPattern() => DecodeSelImm.I
-          case SystemInstPattern() => DecodeSelImm.I
+          case system: SystemInstPattern => system match {
+            case _: PrivInstPattern => DecodeSelImm.I
+            case _ => null
+          }
           case HyperLoadInstPattern() => null
           case CSRInstPattern() => DecodeSelImm.Z
           case AmoLrInstPattern() => null
-          case CboInstPattern() => DecodeSelImm.S
+          case _: CboInstPattern => DecodeSelImm.S
           case FenceInstPattern() => null
           case FenceiInstPattern() => null
           case CustomTrapPattern() => null
