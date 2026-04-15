@@ -121,9 +121,10 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
   val sample = WireInit(0.U.asTypeOf(new TeaEntry()(p)))
   val sampleValid = WireDefault(false.B)
   val effectiveState = Mux(io.oir.valid, 2.U(4.W), io.state)
+  val oirSampleFire = io.sampleFire && io.oir.valid
   val drainSampleFire = io.sampleFire && io.state === 3.U
   val replayValid = replayActive && drainCount =/= 0.U
-  val doDrainDeq = replayValid
+  val doDrainDeq = replayValid && !oirSampleFire
   val drainEmpty = drainCount === 0.U
   val nextDrainCount = WireDefault(drainCount)
   val observedDrainStride = cycle - lastDrainCycle
@@ -185,7 +186,7 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
     replayPsv := io.firstAllocPsv
   }
 
-  when(replayValid && !sample.oirValid) {
+  when(doDrainDeq && !sample.oirValid) {
     sample.cycle := oldestDrainCycle
     sample.state := 3.U
     sample.validMask := 1.U(CommitWidth.W)

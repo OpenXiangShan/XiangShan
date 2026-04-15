@@ -627,6 +627,56 @@ class TeaHelperTest extends XSTester {
     }
   }
 
+  it should "preserve drained replay backlog when an OIR sample takes the same cycle" in {
+    test(new TeaSelectorHarness) { dut =>
+      dut.io.overflow.poke(false.B)
+      dut.io.firstAllocValid.poke(false.B)
+
+      dut.io.state.poke(3.U)
+      dut.io.sampleFire.poke(true.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(true.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(false.B)
+      dut.io.firstAllocValid.poke(true.B)
+      dut.io.firstAllocPc.poke("h80003000".U)
+      dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.cycle.expect(0.U(64.W))
+      dut.io.sample.pcVec(0).expect("h80003000".U)
+      dut.io.sample.pendingDrain.expect(true.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.io.sampleFire.poke(true.B)
+      dut.io.state.poke(0.U)
+      dut.io.oir.valid.poke(true.B)
+      dut.io.oir.pc.poke("h80003100".U)
+      dut.io.oir.psv.poke(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.oirValid.expect(true.B)
+      dut.io.sample.pcVec(0).expect("h80003100".U)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(false.B)
+      dut.io.oir.valid.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.cycle.expect(1.U(64.W))
+      dut.io.sample.pcVec(0).expect("h80003000".U)
+      dut.io.sample.pendingDrain.expect(true.B)
+      dut.io.pendingDrain.expect(false.B)
+    }
+  }
+
   it should "surface overflow in emitted TEA samples" in {
     test(new TeaSelectorHarness) { dut =>
       dut.io.sampleFire.poke(true.B)
