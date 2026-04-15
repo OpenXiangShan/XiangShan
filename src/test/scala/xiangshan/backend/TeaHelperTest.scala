@@ -409,6 +409,27 @@ class TeaHelperTest extends XSTester {
     }
   }
 
+  it should "emit a pending OIR payload even after ROB state leaves walk" in {
+    test(new TeaSelectorHarness) { dut =>
+      val commitMaskWidth = dut.io.commitMask.getWidth
+      dut.io.sampleFire.poke(true.B)
+      dut.io.state.poke(0.U)
+      dut.io.commitMask.poke("b00000001".U(commitMaskWidth.W))
+      dut.io.commitPc(0).poke("h80001000".U)
+      dut.io.commitPsv(0).poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.io.oir.valid.poke(true.B)
+      dut.io.oir.pc.poke("h80001080".U)
+      dut.io.oir.psv.poke(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.io.overflow.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
+      dut.io.sample.oirValid.expect(true.B)
+      dut.io.sample.pcVec(0).expect("h80001080".U)
+      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_MB))
+    }
+  }
+
   it should "emit the ROB head payload in stalled state" in {
     test(new TeaSelectorHarness) { dut =>
       val commitMaskWidth = dut.io.commitMask.getWidth
@@ -567,6 +588,42 @@ class TeaHelperTest extends XSTester {
         dut.io.pendingDrain.expect((i != deferredSamples - 1).B)
         dut.io.firstAllocValid.poke(false.B)
       }
+    }
+  }
+
+  it should "advance the deferred drained timestamp when replay and a new drained sample overlap at count one" in {
+    test(new TeaSelectorHarness) { dut =>
+      dut.io.state.poke(3.U)
+      dut.io.overflow.poke(false.B)
+      dut.io.firstAllocValid.poke(false.B)
+      dut.io.sampleFire.poke(true.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(false.B)
+      dut.io.firstAllocValid.poke(true.B)
+      dut.io.firstAllocPc.poke("h80002000".U)
+      dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.cycle.expect(0.U(64.W))
+      dut.io.pendingDrain.expect(false.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.io.sampleFire.poke(true.B)
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.cycle.expect(0.U(64.W))
+      dut.io.sample.pendingDrain.expect(true.B)
+      dut.io.pendingDrain.expect(true.B)
+      dut.clock.step()
+
+      dut.io.sampleFire.poke(false.B)
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.cycle.expect(2.U(64.W))
+      dut.io.sample.pcVec(0).expect("h80002000".U)
+      dut.io.sample.pendingDrain.expect(true.B)
+      dut.io.pendingDrain.expect(false.B)
     }
   }
 

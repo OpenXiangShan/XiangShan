@@ -413,10 +413,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val teaTable = ChiselDB.createTable(s"Tea_$hartId", new TeaEntry, basicDB = true)
   teaTable.log(teaSelector.io.sample, enableTea.asBool && teaSelector.io.sampleValid, "", clock, reset)
   val teaSampleLogged = enableTea.asBool && teaSelector.io.sampleValid
+  val teaLoggedOir = teaSampleLogged && teaSelector.io.sample.oirValid
   when (teaSampleLogged) {
     teaOverflow := false.B
   }
-  when (teaSampleLogged && teaState === 2.U) {
+  when (teaLoggedOir) {
     teaOir.valid := false.B
   }
   when (!enableTea.asBool) {
@@ -1096,7 +1097,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     debug_lsTopdownInfo(io.lsTopdownInfo(i).s1.robIdx).s1SignalEnable(io.lsTopdownInfo(i))
     debug_lsTopdownInfo(io.lsTopdownInfo(i).s2.robIdx).s2SignalEnable(io.lsTopdownInfo(i))
   }
-  val walkSampleEmit = teaSampleLogged && teaState === 2.U
+  val walkSampleEmit = teaLoggedOir
   when (enableTea.asBool && io.redirect.valid && io.redirect.bits.debugIsCtrl) {
     val idx = io.redirect.bits.robIdx.value
     robEntries(idx).teaPsv := TeaBinders.applyControlRedirect(robEntries(idx).teaPsv, true.B)
