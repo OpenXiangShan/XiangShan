@@ -110,9 +110,9 @@ object Src2SelectField extends DecodeField[
               case VecFpOp2WVWPattern() => INC1
               case VecFpOp3VVWPattern() => INCF2
               case VecFpS2VPattern() => INC1
-              case VecFpS2VVWPattern() => INC1
-              case VecFpS2WVIntPattern() => INCF2
-              case VecFpS2WVFpPattern() => INCF2
+              case VecFpS2VVWPattern() => INCF2
+              case VecFpS2WVIntPattern() => INC1
+              case VecFpS2WVFpPattern() => INC1
               case VecFpS2APattern() => CONST
               case VecFpS1VPattern() => NONE
             }
