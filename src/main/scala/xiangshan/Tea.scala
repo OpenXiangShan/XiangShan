@@ -14,9 +14,12 @@ object TeaEvent {
   val ST_TLB = 7
   val ST_LLC = 8
 
-  val width = 9
+  val width = ST_LLC + 1
 
-  def bit(idx: Int): UInt = 1.U(width.W) << idx
+  def bit(idx: Int): UInt = {
+    require(idx >= 0 && idx < width, s"TEA event index $idx out of range [0, $width)")
+    1.U(width.W) << idx
+  }
 }
 
 object TeaPsvOps {
