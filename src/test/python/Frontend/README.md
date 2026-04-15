@@ -26,6 +26,8 @@
   - 结合程序镜像和 golden trace 的 DUT 运行入口。
 - `run_bin_trace_pipeline.sh`
   - bin + NEMU trace 联动脚本。
+- `fst_to_fsdb.sh`
+  - 将 `.fst` 波形转换为 `.fsdb` 的脚本。
 - `nemu_bin_to_golden_trace.py`
   - 从二进制触发 NEMU trace 生成。
 - `nemu_log_to_golden_trace.py`
@@ -65,3 +67,22 @@
 7. `tests/test_layout_import_compat.py`
 8. `tests/test_bin_trace_dut.py`
 9. `tests/test_multi_branch.py`
+
+## 常用脚本
+
+- `fst_to_fsdb.sh`
+  - 用法: `src/test/python/Frontend/fst_to_fsdb.sh <input.fst> [output.fsdb]`
+  - 若不传 `output.fsdb`，默认在输入文件同目录下生成同名 `.fsdb`
+  - 中间 `.vcd` 放在临时目录，脚本结束后自动清理
+
+## Bin Case 运行要求
+
+- `tests/test_bin_trace_dut.py::test_bin_trace` 这类 bin case，每次运行都必须生成：
+  - 一份 `.fst` 波形
+  - 一份配套 `.log` 日志
+- 默认应优先落到 `src/test/python/Frontend/data/<YYYYMMDD>/` 这样的日期目录下。
+- bin case 运行时必须有明确的观测机制，例如：
+  - progress checkpoint
+  - stall snapshot
+  - 或等价的运行时诊断输出
+- 不接受“卡死后一直无输出、只能靠外部 timeout/手动中断结束”的 bin case 运行方式。

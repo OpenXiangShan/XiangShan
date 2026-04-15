@@ -86,6 +86,38 @@ Run the DUT bin-trace case directly:
 TB_ENABLE_DUT_TESTS=1 python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
 ```
 
+## Bin-Trace Run Requirements
+
+Any DUT bin-trace case, especially
+`src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace`, must
+meet the following operational requirements:
+
+- every run must generate an FST waveform artifact
+- every run must generate a readable log artifact
+- the default artifact location should be a date-stamped directory under
+  `src/test/python/Frontend/data/` unless an explicit path override is given
+- waveform and log filenames should be logically tied to the binary and test
+  case, so the reproduction can be matched back to the exact run
+
+In addition, bin-trace runs must have explicit runtime observability. Do not
+run them as opaque long-running jobs with no bounded diagnostics. A valid
+bin-trace run must provide at least one of the following while it is running:
+
+- progress checkpoints
+- stall snapshots
+- an equivalent explicit observation mechanism that can distinguish
+  “still making progress” from “stuck”
+
+Therefore:
+
+- a bin-trace case must not be allowed to sit in a silent apparent dead loop
+  after progress has stopped
+- if forward progress stalls, the run should surface that fact through logs or
+  an equivalent observation channel instead of only hanging until external kill
+  or manual interruption
+- when debugging a stuck bin-trace case, prefer enabling progress/stall
+  reporting before changing semantic logic
+
 Start the frontend web console:
 
 ```bash
@@ -126,6 +158,8 @@ When running `pytest` from Codex, the sandbox may block the local socket opened 
 - Waveform filenames must be logically named from the reproduction context, for example: test name, binary name, seed, and purpose or fix tag.
 - Prefer names in the form `<test-or-bin>_<seed-or-case>_<purpose>.fst`; once the file already lives under a date directory, do not repeat the date in the filename.
 - Apply the same naming discipline to paired debug logs when you intentionally keep them under `data/`.
+- For bin-trace runs, treat the waveform and the paired log as a single required
+  artifact set. Do not keep only one of them.
 
 ## Deeper References
 

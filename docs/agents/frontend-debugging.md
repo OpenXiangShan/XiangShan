@@ -24,6 +24,31 @@ Do not start from an internal-model assumption and search for evidence to fit it
 - When DUT behavior depends on env-driven `redirect`, `commit`, or other backend-agent stimuli, do not jump to a DUT-bug conclusion first. Prefer checking whether env stimulus timing or stimulus-generation logic is still incorrect before blaming the DUT.
 - When you regenerate waveforms for debugging, store them under a date-stamped subdirectory of `src/test/python/Frontend/data/` and give each waveform a logical filename derived from the exact case, seed, and purpose.
 
+## Bin-Case Observability Rule
+
+For DUT bin-trace cases, observability is mandatory, not optional.
+
+Every bin-trace run must leave behind:
+
+- an FST waveform artifact
+- a paired log artifact
+
+And every bin-trace run must expose runtime progress information, such as:
+
+- progress checkpoints
+- stall snapshots
+- or an equivalent mechanism that can explicitly tell whether the run is still
+  moving forward
+
+Do not accept a bin case that can only:
+
+- print nothing while it runs
+- appear stuck indefinitely
+- and reveal no structured information until an external timeout or manual kill
+
+If a bin-trace case stops making progress, the run should make that visible in
+its own logs instead of degenerating into an opaque hang.
+
 ## Address And Payload Facts
 
 These frontend facts are easy to get wrong and should be checked early:
@@ -70,12 +95,24 @@ When debugging backend-agent behavior, apply these rules:
   a few cycles, treat them as recovery residuals from the same redirect event.
   Do not immediately open a brand-new mismatch episode unless you have evidence
   that a new wrong path has actually begun.
+- If the recovery target PC is observed but does not sit at queue head, treat
+  the older queued prefix ahead of it as recovery residual from the previous
+  redirect, not as a new correct-path prefix.
+- If the same FTQ pointer appears again while queue still contains older
+  instructions from that FTQ entry, interpret the new observation as part of
+  the same active FTQ entry, not as a brand-new entry.
 - Every correct-path CFI must eventually produce `resolve`.
 - Wrong-path CFI may produce `resolve` before being flushed, but are not
   required to do so.
 - `commit` is FTQ-entry-granular, must remain strictly in order, and means the
   corresponding entry's instructions are at the logical queue head and have all
   been ROB-committed on the correct path.
+- In queue semantics, an FTQ entry leaves queue only in two legal ways:
+  by its in-order `commit`, or by being flushed as wrong-path content under a
+  later `redirect`.
+- If later observations can only be explained by reviving an FTQ entry that is
+  already older than current `commit_ptr`, diagnose the earlier `commit` as
+  premature instead of treating the old entry as legitimately active again.
 - A committable FTQ entry must not still owe a `redirect`; if a redirect for
   that entry is still semantically pending, treat the entry as not yet
   committable even if other bookkeeping appears ready.
@@ -111,7 +148,6 @@ For the current `microbench.bin` DUT failure window around `0x80004a82`, treat t
 - After gating off that over-commit path, the reproduction still stalls earlier around cursor `374` and target `0x800047fa`, with `ifuPtr = (1,8)`, env-side `commit_ptr = (0,8)`, and no new IFU stage fire. Treat that earlier stop as the opposite env-side failure mode: commit starvation / commit-coverage mismatch for truncated FTQ entries, not yet clean DUT-only evidence.
 - A later env bug remained on the golden-trace commit path: when semantic commit reached the pending level-0 target entry, it updated `commit_ptr` but did not clear `pending_level0_target_ftq`. That created a self-deadlock where later commits were blocked forever by the stale pending target. This bug has now been fixed.
 - In the latest seed-locked rerun after that fix, the stop still happens around cursor `245` / target `0x80003a84`, but the env state is different: `commit_ptr = (0,31)`, `pending_level0_target_ftq = none`, and the only remaining backend-model work is FTQ entry `(0,32)`. Treat the previous stale-pending-target explanation as closed; the next env-first question is why the post-redirect FTQ entry containing the wait PC never becomes visible/committable.
-
 ## Debugging Checklist
 
 - Confirm the exact binary and trace input in use.
@@ -119,7 +155,12 @@ For the current `microbench.bin` DUT failure window around `0x80004a82`, treat t
 - Cross-check signal names and units against `build-frontend/pylib/Frontend/signals.json`.
 - Verify whether the environment is using generated DUT artifacts that match the current source tree.
 - Inspect local diffs before changing shared frontend files such as `backend_model.py` or `test_multi_branch.py`.
-
+- When the same FTQ pointer is observed again, first check whether queue still
+  contains older instructions from that FTQ entry before inventing a “new
+  entry” explanation.
+- When the env appears to need an already-committed older FTQ entry to explain
+  later observations, first audit whether the earlier `commit` was issued too
+  early.
 ## Related References
 
 - `docs/agents/frontend-verification.md`
