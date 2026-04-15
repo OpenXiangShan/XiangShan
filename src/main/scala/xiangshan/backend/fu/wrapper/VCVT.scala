@@ -18,6 +18,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   private val dataWidth = cfg.destDataBits
   private val dataWidthOfDataModule = 64
   private val numVecModule = dataWidth / dataWidthOfDataModule
+  private val fflagsLaneNum = dataWidth / 16
 
   // io alias
   private val vfcvtRm = rm
@@ -26,7 +27,6 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
   private val inWidth = FCvtOpcode.getInputDataWidth(fuOpType)
   private val outWidth = FCvtOpcode.getOutputDataWidth(fuOpType)
-  private val sew = FCvtOpcode.getSew(fuOpType)
   val isWidenCvt = outWidth > inWidth
   val isNarrowCvt = outWidth < inWidth
   val fire = io.in.valid
@@ -45,6 +45,11 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
         BitPat.N(4)
       )
     )
+
+  private def elemNumByWidth(width: UInt): UInt = (dataWidth / 8).U(8.W) >> width
+
+  private def scaleElemNumByLmul(elemNum: UInt, lmul: UInt): UInt =
+    Mux(lmul(2), elemNum >> ((~lmul(1, 0)).asUInt + 1.U), elemNum << lmul(1, 0))
 
   // input/output width 8, 16, 32, 64
   val inSew1H = Wire(UInt(4.W))
@@ -84,36 +89,24 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
   /** fflags:
    */
-  val eNum1H = chisel3.util.experimental.decode.decoder(sew ## (isWidenCvt || isNarrowCvt),
-    TruthTable(
-      Seq(                     // 8, 4, 2, 1
-        BitPat("b001") -> BitPat("b1000"), //8
-        BitPat("b010") -> BitPat("b1000"), //8
-        BitPat("b011") -> BitPat("b0100"), //4
-        BitPat("b100") -> BitPat("b0100"), //4
-        BitPat("b101") -> BitPat("b0010"), //2
-        BitPat("b110") -> BitPat("b0010"), //2
-      ),
-      BitPat.N(4)
-    )
-  )
-  val eNum1HEffect = Mux(isWidenCvt || isNarrowCvt, eNum1H << 1, eNum1H)
-  val eNumMax1H = Mux(lmul.head(1).asBool, eNum1HEffect >> ((~lmul.tail(1)).asUInt +1.U), eNum1HEffect << lmul.tail(1)).asUInt(6, 0)
-  val eNumMax = Mux1H(eNumMax1H, Seq(1,2,4,8,16,32,64).map(i => i.U)) //only for cvt intr, don't exist 128 in cvt
-  val vlForFflags = Mux(vecCtrl.fpu.isFpToVecInst, 1.U, vl)
-  val eNumEffectIdx = Mux(vlForFflags > eNumMax, eNumMax, vlForFflags)
+  val maxWidth = Mux(outWidth > inWidth, outWidth, inWidth)
+  val minWidth = Mux(outWidth > inWidth, inWidth, outWidth)
+  val uopElemNum = elemNumByWidth(maxWidth)
+  val groupElemNumMax = scaleElemNumByLmul(elemNumByWidth(minWidth), lmul)(6, 0) // only for cvt intr, no 128 here
+  val vlForFflags = vl
+  val validElemUpperBound = Mux(vlForFflags > groupElemNumMax, groupElemNumMax, vlForFflags)
 
-  val eNum = Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num =>num.U))
-  val eStart = vuopIdx * eNum
+  val eStart = vuopIdx * uopElemNum
   val maskForFflags = srcMask
-  val maskPart = maskForFflags >> eStart
-  val mask =  Mux1H(eNum1H, Seq(1, 2, 4, 8).map(num => maskPart(num-1, 0)))
-  val fflagsEn = Wire(Vec(4 * numVecModule, Bool()))
+  val maskPart = (maskForFflags >> eStart)(fflagsLaneNum - 1, 0)
+  val fflagsEn = Wire(Vec(fflagsLaneNum, Bool()))
 
-  fflagsEn := mask.asBools.zipWithIndex.map{case(mask, i) => mask & (eNumEffectIdx > eStart + i.U) }
+  fflagsEn := VecInit.tabulate(fflagsLaneNum) { i =>
+    (i.U < uopElemNum) && maskPart(i) && (validElemUpperBound > (eStart + i.U))
+  }
 
   val fflagsEnCycle2 = RegEnable(RegEnable(fflagsEn, fire), fireReg)
-  val fflagsAll = Wire(Vec(8, UInt(5.W)))
+  val fflagsAll = Wire(Vec(fflagsLaneNum, UInt(5.W)))
   fflagsAll := vfcvtFflags.asTypeOf(fflagsAll)
   val fflags = fflagsEnCycle2.zip(fflagsAll).map{case(en, fflag) => Mux(en, fflag, 0.U(5.W))}.reduce(_ | _)
   io.out.bits.res.fflags.get := fflags
