@@ -11,7 +11,7 @@ import xiangshan.backend.rob.RobBundles
 import xiangshan.backend.rob.RobBundles.RobEntryBundle
 import xiangshan.frontend.{FetchToIBuffer, FrontendTopDownBundle, IBuffer}
 import utility.{LogUtilsOptions, LogUtilsOptionsKey, PerfCounterOptions, PerfCounterOptionsKey}
-import xiangshan.{TeaBinders, TeaEvent, TeaFrontend}
+import xiangshan.{TeaBinders, TeaEntry, TeaEvent, TeaFrontend, TeaOIR, TeaSampleSelector}
 
 class TeaHelperTest extends XSTester {
   behavior of "TEA helper metadata"
@@ -148,6 +148,39 @@ class TeaHelperTest extends XSTester {
       val out = Output(UInt(TeaEvent.width.W))
     })
     io.out := TeaBinders.applyControlRedirect(io.in, io.isCtrl)
+  }
+
+  class TeaSelectorHarness(implicit val p: Parameters) extends Module with HasXSParameter {
+    val io = IO(new Bundle {
+      val sampleFire = Input(Bool())
+      val state = Input(UInt(4.W))
+      val commitMask = Input(UInt(CommitWidth.W))
+      val commitPc = Input(Vec(CommitWidth, UInt(VAddrBits.W)))
+      val commitPsv = Input(Vec(CommitWidth, UInt(TeaEvent.width.W)))
+      val headPc = Input(UInt(VAddrBits.W))
+      val headPsv = Input(UInt(TeaEvent.width.W))
+      val oir = Input(new TeaOIR()(p))
+      val firstAllocValid = Input(Bool())
+      val firstAllocPc = Input(UInt(VAddrBits.W))
+      val firstAllocPsv = Input(UInt(TeaEvent.width.W))
+      val sampleValid = Output(Bool())
+      val sample = Output(new TeaEntry()(p))
+    })
+
+    val selector = Module(new TeaSampleSelector()(p))
+    selector.io.sampleFire := io.sampleFire
+    selector.io.state := io.state
+    selector.io.commitMask := io.commitMask
+    selector.io.commitPc := io.commitPc
+    selector.io.commitPsv := io.commitPsv
+    selector.io.headPc := io.headPc
+    selector.io.headPsv := io.headPsv
+    selector.io.oir := io.oir
+    selector.io.firstAllocValid := io.firstAllocValid
+    selector.io.firstAllocPc := io.firstAllocPc
+    selector.io.firstAllocPsv := io.firstAllocPsv
+    io.sampleValid := selector.io.sampleValid
+    io.sample := selector.io.sample
   }
 
   it should "define a 9-bit TEA event space and expose teaPsv on the main pipeline bundles" in {
@@ -305,6 +338,60 @@ class TeaHelperTest extends XSTester {
       dut.io.isCtrl.poke(false.B)
       dut.clock.step()
       dut.io.out.expect(base.U(TeaEvent.width.W))
+    }
+  }
+
+  it should "emit all commit lanes in computing state" in {
+    test(new TeaSelectorHarness) { dut =>
+      val commitMaskWidth = dut.io.commitMask.getWidth
+      dut.io.sampleFire.poke(true.B)
+      dut.io.state.poke(0.U)
+      dut.io.commitMask.poke("b00000011".U(commitMaskWidth.W))
+      dut.io.commitPc(0).poke("h80000000".U)
+      dut.io.commitPc(1).poke("h80000004".U)
+      dut.io.commitPsv(0).poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.io.commitPsv(1).poke(TeaEvent.bit(TeaEvent.ST_L1))
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.validMask.expect("b00000011".U(commitMaskWidth.W))
+      dut.io.sample.pcVec(0).expect("h80000000".U)
+      dut.io.sample.pcVec(1).expect("h80000004".U)
+    }
+  }
+
+  it should "emit the OIR payload in walk state" in {
+    test(new TeaSelectorHarness) { dut =>
+      val commitMaskWidth = dut.io.commitMask.getWidth
+      dut.io.sampleFire.poke(true.B)
+      dut.io.state.poke(2.U)
+      dut.io.oir.valid.poke(true.B)
+      dut.io.oir.pc.poke("h80000100".U)
+      dut.io.oir.psv.poke(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
+      dut.io.sample.pcVec(0).expect("h80000100".U)
+      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_MB))
+    }
+  }
+
+  it should "defer drained samples until the first new ROB allocation arrives" in {
+    test(new TeaSelectorHarness) { dut =>
+      val commitMaskWidth = dut.io.commitMask.getWidth
+      dut.io.sampleFire.poke(true.B)
+      dut.io.state.poke(3.U)
+      dut.io.firstAllocValid.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+
+      dut.io.sampleFire.poke(false.B)
+      dut.io.firstAllocValid.poke(true.B)
+      dut.io.firstAllocPc.poke("h80000200".U)
+      dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
+      dut.io.sample.pcVec(0).expect("h80000200".U)
     }
   }
 }
