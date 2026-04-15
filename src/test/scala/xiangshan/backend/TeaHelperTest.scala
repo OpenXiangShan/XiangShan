@@ -63,6 +63,23 @@ class TeaHelperTest extends XSTester {
     io.out := TeaFrontend.bindPacketPsv(io.valids, io.packetPsv)
   }
 
+  class BypassAwarePacketPsvHarness extends Module {
+    val io = IO(new Bundle {
+      val valids = Input(Vec(4, Bool()))
+      val enqEnable = Input(Vec(4, Bool()))
+      val enqOffset = Input(Vec(4, UInt(3.W)))
+      val useBypass = Input(Bool())
+      val numBypass = Input(UInt(3.W))
+      val packetPsv = Input(UInt(TeaEvent.width.W))
+      val out = Output(Vec(4, UInt(TeaEvent.width.W)))
+    })
+
+    io.out := TeaFrontend.bindPacketPsv(
+      TeaFrontend.selectEnqueued(io.valids, io.enqEnable, io.enqOffset, io.useBypass, io.numBypass),
+      io.packetPsv
+    )
+  }
+
   it should "define a 9-bit TEA event space and expose teaPsv on the main pipeline bundles" in {
     TeaEvent.width shouldBe 9
     TeaEvent.bit(TeaEvent.ST_LLC).getWidth shouldBe TeaEvent.width
@@ -95,6 +112,31 @@ class TeaHelperTest extends XSTester {
       dut.io.out(0).expect(0.U)
       dut.io.out(1).expect(TeaEvent.bit(TeaEvent.DR_L1))
       dut.io.out(2).expect(0.U)
+      dut.io.out(3).expect(0.U)
+    }
+  }
+
+  it should "skip bypassed instructions and bind packet PSV to the first actually enqueued slot" in {
+    test(new BypassAwarePacketPsvHarness) { dut =>
+      dut.io.valids(0).poke(true.B)
+      dut.io.valids(1).poke(true.B)
+      dut.io.valids(2).poke(true.B)
+      dut.io.valids(3).poke(false.B)
+      dut.io.enqEnable(0).poke(true.B)
+      dut.io.enqEnable(1).poke(true.B)
+      dut.io.enqEnable(2).poke(true.B)
+      dut.io.enqEnable(3).poke(false.B)
+      dut.io.enqOffset(0).poke(0.U)
+      dut.io.enqOffset(1).poke(1.U)
+      dut.io.enqOffset(2).poke(2.U)
+      dut.io.enqOffset(3).poke(3.U)
+      dut.io.useBypass.poke(true.B)
+      dut.io.numBypass.poke(2.U)
+      dut.io.packetPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.clock.step()
+      dut.io.out(0).expect(0.U)
+      dut.io.out(1).expect(0.U)
+      dut.io.out(2).expect(TeaEvent.bit(TeaEvent.DR_L1))
       dut.io.out(3).expect(0.U)
     }
   }

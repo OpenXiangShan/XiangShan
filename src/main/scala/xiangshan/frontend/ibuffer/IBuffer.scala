@@ -177,31 +177,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
    */
   allowEnq := io.in.bits.prevInstrCount < nextNumInvalid
 
-  private val packetTeaPsv = Mux(
-    io.in.bits.topdownInfo.reasons(TopDownCounters.ICacheMissBubble.id),
-    TeaEvent.bit(TeaEvent.DR_L1),
-    TeaPsvOps.empty
-  )
-  private val packetTeaPsvVec = TeaFrontend.bindPacketPsv(
-    (0 until EnqueueWidth).map(i => io.in.bits.valid(i) && io.in.bits.enqEnable(i)),
-    packetTeaPsv
-  )
   private val enqOffset = VecInit.tabulate(EnqueueWidth)(i => PopCount(io.in.bits.valid.asBools.take(i)))
-  private val enqData = VecInit.tabulate(EnqueueWidth) { i =>
-    val entry = Wire(new IBufEntry).fromFetch(io.in.bits, i)
-    entry.teaPsv := packetTeaPsvVec(i)
-    entry
-  }
-  private val enqBankOffset =
-    WireDefault(0.U.asTypeOf(Vec(NumWriteBank, Vec(EnqueueWidth / NumWriteBank, UInt(log2Ceil(EnqueueWidth).W)))))
-  private val enqBankEntrys =
-    WireDefault(0.U.asTypeOf(Vec(NumWriteBank, Vec(EnqueueWidth / NumWriteBank, new IBufEntry))))
-  for (i <- 0 until NumWriteBank) {
-    for (j <- 0 until EnqueueWidth / NumWriteBank) {
-      enqBankOffset(i)(j) := enqOffset(i + NumWriteBank * j)
-      enqBankEntrys(i)(j) := enqData(i + NumWriteBank * j)
-    }
-  }
 
   // Only one exception is stored at a time.
   private val firstExceptionIdx = RegInit(0.U.asTypeOf(new IBufPtr))
@@ -231,6 +207,35 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     numBypass := 0.U
   }
   numTryEnq := numFromFetch
+
+  private val actualEnqMask = TeaFrontend.selectEnqueued(
+    io.in.bits.valid.asBools,
+    io.in.bits.enqEnable.asBools,
+    enqOffset,
+    useBypass,
+    numBypass
+  )
+  private val packetTeaPsv = Mux(
+    io.in.bits.topdownInfo.reasons(TopDownCounters.ICacheMissBubble.id),
+    TeaEvent.bit(TeaEvent.DR_L1),
+    TeaPsvOps.empty
+  )
+  private val packetTeaPsvVec = TeaFrontend.bindPacketPsv(actualEnqMask, packetTeaPsv)
+  private val enqData = VecInit.tabulate(EnqueueWidth) { i =>
+    val entry = Wire(new IBufEntry).fromFetch(io.in.bits, i)
+    entry.teaPsv := packetTeaPsvVec(i)
+    entry
+  }
+  private val enqBankOffset =
+    WireDefault(0.U.asTypeOf(Vec(NumWriteBank, Vec(EnqueueWidth / NumWriteBank, UInt(log2Ceil(EnqueueWidth).W)))))
+  private val enqBankEntrys =
+    WireDefault(0.U.asTypeOf(Vec(NumWriteBank, Vec(EnqueueWidth / NumWriteBank, new IBufEntry))))
+  for (i <- 0 until NumWriteBank) {
+    for (j <- 0 until EnqueueWidth / NumWriteBank) {
+      enqBankOffset(i)(j) := enqOffset(i + NumWriteBank * j)
+      enqBankEntrys(i)(j) := enqData(i + NumWriteBank * j)
+    }
+  }
 
   when(resumingVType) {
     numOut := 0.U

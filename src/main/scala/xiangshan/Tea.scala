@@ -32,6 +32,18 @@ object TeaPsvOps {
 }
 
 object TeaFrontend {
+  def selectEnqueued(
+    valids: Seq[Bool],
+    enqEnable: Seq[Bool],
+    enqOffset: Seq[UInt],
+    useBypass: Bool,
+    numBypass: UInt
+  ): Vec[Bool] = {
+    VecInit(valids.indices.map { i =>
+      valids(i) && enqEnable(i) && (!useBypass || enqOffset(i) >= numBypass)
+    })
+  }
+
   def bindPacketPsv(valids: Seq[Bool], packetPsv: UInt): Vec[UInt] = {
     val firstValidOH = PriorityEncoderOH(VecInit(valids))
     VecInit(valids.indices.map { i =>
