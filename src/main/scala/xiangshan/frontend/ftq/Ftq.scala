@@ -249,7 +249,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     Wire(new FtqPrefetchReq).fromFtqEntry(entryQueue(pfPtr(1).value))
   )
 
-  private val canTwoPrefetch = distanceBetween(bpuPtr(0), pfPtr(0)) >= 3.U &&
+  private val canTwoPrefetch = distanceBetween(bpuPtr(0), pfPtr(0)) > 3.U &&
     prefetchReq(0).vPageNumber === prefetchReq(1).vPageNumber &&
     !(backendException.hasException && (
       backendExceptionPtr === pfPtr(0) || backendExceptionPtr === pfPtr(1)
