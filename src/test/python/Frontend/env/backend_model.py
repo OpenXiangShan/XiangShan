@@ -283,16 +283,69 @@ class BackendModel:
         queue_entry.golden_match_state = GOLDEN_MATCH_STATE_MATCHED
         queue_entry.golden_index = int(entry.index)
 
+    def _find_preceding_correct_path_cfi(self, queue_index: int) -> Optional[tuple[int, QueueInstr]]:
+        if queue_index <= 0:
+            return None
+        for idx in range(int(queue_index) - 1, -1, -1):
+            entry = self._semantic_queue[idx]
+            if entry.path_state != PATH_STATE_CORRECT:
+                continue
+            if entry.is_cfi:
+                return int(idx), entry
+        return None
+
     def _semantic_queue_note_mismatch(self, queue_index: int) -> None:
         if queue_index < 0 or queue_index >= len(self._semantic_queue):
             return
         queue_entry = self._semantic_queue[queue_index]
         queue_entry.golden_match_state = GOLDEN_MATCH_STATE_MISMATCHED
-        if self._pending_redirect_origin_index is None and queue_entry.is_cfi:
-            queue_entry.path_state = PATH_STATE_CORRECT
+        if self._pending_redirect_origin_index is None:
             self._pending_redirect_origin_index = int(queue_index)
+            queue_entry.path_state = PATH_STATE_WRONG
+            if not queue_entry.is_cfi:
+                prev_cfi = self._find_preceding_correct_path_cfi(int(queue_index))
+                target_pc = self.current_golden_pc()
+                if prev_cfi is not None and target_pc is not None:
+                    prev_queue_index, prev_entry = prev_cfi
+                    cfi = self._classify_cfi(
+                        int(prev_entry.instr),
+                        int(prev_entry.pc),
+                        bool(prev_entry.pred_taken),
+                        bool(prev_entry.is_rvc),
+                    )
+                    if cfi is not None:
+                        branch_type, ras_action, _pred_target, _pred_taken = cfi
+                        redirect_taken = int(
+                            int(target_pc) != int(self._sequential_next_pc(int(prev_entry.pc), bool(prev_entry.is_rvc)))
+                        )
+                        redirected_by_pending_resolve = False
+                        for resolve_entry in self._pending_resolves:
+                            if resolve_entry.queue_index != int(prev_queue_index):
+                                continue
+                            resolve_entry.mispredict = True
+                            resolve_entry.target = int(target_pc)
+                            resolve_entry.taken = bool(redirect_taken)
+                            redirected_by_pending_resolve = True
+                            break
+                        if not redirected_by_pending_resolve:
+                            self._queue_redirect_event(
+                                target_pc=int(target_pc),
+                                reason="golden_first_mismatch_redirect",
+                                flush_on_drive=True,
+                                payload_extra={
+                                    "pc": int(prev_entry.pc),
+                                    "taken": int(redirect_taken),
+                                    "ftq_flag": int(prev_entry.ftq_flag),
+                                    "ftq_value": int(prev_entry.ftq_value),
+                                    "ftq_offset": int(prev_entry.ftq_offset),
+                                    "branch_type": int(branch_type),
+                                    "ras_action": int(ras_action),
+                                    "is_rvc": int(prev_entry.is_rvc),
+                                    "level": 0,
+                                },
+                            )
             return
-        if self._pending_redirect_origin_index is not None and int(queue_index) > int(self._pending_redirect_origin_index):
+        if self._pending_redirect_origin_index is not None and int(queue_index) >= int(self._pending_redirect_origin_index):
             queue_entry.path_state = PATH_STATE_WRONG
 
     def _semantic_queue_mark_resolve_state(self, queue_index: Optional[int], resolve_state: str) -> None:
@@ -318,7 +371,7 @@ class BackendModel:
         state = self._sync_backend_state()
         if state.pending_redirect_origin_index is None:
             return
-        keep_count = max(0, int(state.pending_redirect_origin_index) + 1)
+        keep_count = max(0, int(state.pending_redirect_origin_index))
         kept = list(state.semantic_queue)[:keep_count]
         state.semantic_queue = deque(kept)
         state.pending_resolves = deque(
@@ -396,6 +449,13 @@ class BackendModel:
             for idx in self._pending_queue_call_ret_commit_indices
             if int(idx) >= pop_count
         )
+
+    def _semantic_queue_close_current_ftq_span(self, ftq_flag: int, ftq_value: int) -> None:
+        for entry in reversed(self._semantic_queue):
+            if int(entry.ftq_flag) != int(ftq_flag) or int(entry.ftq_value) != int(ftq_value):
+                continue
+            entry.is_last_in_entry = True
+            return
 
     def _clear_semantic_queue_state(self) -> None:
         self._semantic_queue.clear()
@@ -974,6 +1034,12 @@ class BackendModel:
         history = self._ftq_group_pc_history.get(group)
         if not history:
             return False
+        if (
+            self._golden_wait_pc is not None
+            and self._pending_level0_target_ftq is not None
+            and (int(self._pending_level0_target_ftq[0]), int(self._pending_level0_target_ftq[1])) == group
+        ):
+            return False
         if any(int(seen_pc) == int(pc) for seen_pc, _is_rvc in history):
             return False
         if self._current_ftq_entry is not None and self._ftq_entry_matches(
@@ -1125,6 +1191,10 @@ class BackendModel:
                 or self._current_ftq_entry.ftq_value != ftq_value
             ):
                 if self._current_ftq_entry is not None:
+                    self._semantic_queue_close_current_ftq_span(
+                        int(self._current_ftq_entry.ftq_flag),
+                        int(self._current_ftq_entry.ftq_value),
+                    )
                     self._seal_current_ftq_entry()
                 if self._should_reset_reused_ftq_slot_state(int(ftq_flag), int(ftq_value), int(pc)):
                     self._reset_ftq_slot_reuse_state(int(ftq_flag), int(ftq_value))
@@ -1155,12 +1225,13 @@ class BackendModel:
                 is_last=bool(is_last),
             )
             self._semantic_queue_note_mismatch(int(queue_index))
+            if 0 <= int(queue_index) < len(self._semantic_queue) and self._semantic_queue[int(queue_index)].is_cfi:
+                self._semantic_queue_mark_resolve_state(int(queue_index), RESOLVE_STATE_SKIPPED)
             self._current_ftq_max_offset = max(int(self._current_ftq_max_offset), int(ftq_offset))
             self._record_ftq_group_pc(int(ftq_flag), int(ftq_value), int(pc), bool(is_rvc))
             if is_last:
-                state = self._sync_backend_state()
-                state.extend_commit_ready_cycle(self._current_ftq_entry, current_cycle=int(self.current_cycle))
-                self._apply_backend_state()
+                self._semantic_queue_close_current_ftq_span(int(ftq_flag), int(ftq_value))
+                self._seal_current_ftq_entry(observed_last_in_entry=True)
 
         for i in range(8):
             if self._read(self.observe_if.cfvec_valid[i], 0) != 1:
@@ -1213,6 +1284,10 @@ class BackendModel:
                         "FTQ entry transition without isLastInFtqEntry: flag=%d value=%d",
                         self._current_ftq_entry.ftq_flag, self._current_ftq_entry.ftq_value,
                     )
+                    self._semantic_queue_close_current_ftq_span(
+                        int(self._current_ftq_entry.ftq_flag),
+                        int(self._current_ftq_entry.ftq_value),
+                    )
                     self._seal_current_ftq_entry()
                 if self._should_reset_reused_ftq_slot_state(int(ftq_flag), int(ftq_value), int(pc)):
                     self._reset_ftq_slot_reuse_state(int(ftq_flag), int(ftq_value))
@@ -1221,6 +1296,10 @@ class BackendModel:
                 self._current_ftq_max_offset = -1
                 self._current_ftq_contains_wait_pc = False
             elif self._current_ftq_max_offset >= 0 and int(ftq_offset) < int(self._current_ftq_max_offset):
+                self._semantic_queue_close_current_ftq_span(
+                    int(self._current_ftq_entry.ftq_flag),
+                    int(self._current_ftq_entry.ftq_value),
+                )
                 self._seal_current_ftq_entry()
                 self._reset_ftq_slot_reuse_state(int(ftq_flag), int(ftq_value))
                 self._current_ftq_entry = FtqEntry(ftq_flag=ftq_flag, ftq_value=ftq_value)
@@ -1339,6 +1418,10 @@ class BackendModel:
             if self._has_later_cfvec_slot_matching_pc(i, int(next_entry.pc)):
                 continue
             if self._current_ftq_entry is not None:
+                self._semantic_queue_close_current_ftq_span(
+                    int(self._current_ftq_entry.ftq_flag),
+                    int(self._current_ftq_entry.ftq_value),
+                )
                 self._seal_current_ftq_entry()
             break
 
@@ -1477,14 +1560,30 @@ class BackendModel:
                 return None
 
             committed_entry = FtqEntry(ftq_flag=int(ftq_flag), ftq_value=int(ftq_value))
+            while self.ftq_entries and not self._semantic_queue_has_ftq(
+                int(self.ftq_entries[0].ftq_flag),
+                int(self.ftq_entries[0].ftq_value),
+            ):
+                self.ftq_entries.popleft()
             if self.ftq_entries:
-                head_ftq_entry = self.ftq_entries[0]
-                if not self._ftq_entry_matches(head_ftq_entry, int(ftq_flag), int(ftq_value)):
+                matching_entries = [
+                    entry
+                    for entry in self.ftq_entries
+                    if self._ftq_entry_matches(entry, int(ftq_flag), int(ftq_value))
+                ]
+                if not matching_entries:
                     return None
+                head_ftq_entry = matching_entries[0]
                 if int(self.current_cycle) < int(head_ftq_entry.commit_ready_cycle):
                     return None
-                while self.ftq_entries and self._ftq_entry_matches(self.ftq_entries[0], int(ftq_flag), int(ftq_value)):
-                    committed_entry = self.ftq_entries.popleft()
+                retained_entries: Deque[FtqEntry] = deque()
+                while self.ftq_entries:
+                    entry = self.ftq_entries.popleft()
+                    if self._ftq_entry_matches(entry, int(ftq_flag), int(ftq_value)):
+                        committed_entry = entry
+                        continue
+                    retained_entries.append(entry)
+                self.ftq_entries = retained_entries
             self._schedule_next_queue_call_ret_commit_group()
             self._semantic_queue_pop_head(int(span_len))
             self.commit_ptr_flag = int(ftq_flag)

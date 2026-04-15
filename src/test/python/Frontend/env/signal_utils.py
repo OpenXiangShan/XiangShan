@@ -8,6 +8,13 @@ def has_sig(dut: Any, name: str) -> bool:
 def get_sig(dut: Any, name: str, default: int = 0) -> int:
     pin = getattr(dut, name, None)
     if pin is None:
+        getter = getattr(dut, "GetInternalSignal", None)
+        if callable(getter):
+            try:
+                pin = getter(name)
+            except Exception:
+                pin = None
+    if pin is None:
         return default
     try:
         return int(pin.value)

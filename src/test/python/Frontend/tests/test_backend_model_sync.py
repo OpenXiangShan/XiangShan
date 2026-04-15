@@ -266,7 +266,7 @@ def test_semantic_queue_scaffolding_deduplicates_repeated_packet_within_same_ftq
     assert semantic_queue[0].ftq_value == 3
 
 
-def test_semantic_queue_marks_first_cfi_mismatch_as_redirect_origin() -> None:
+def test_semantic_queue_marks_first_mismatch_as_wrong_path_start() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -311,7 +311,7 @@ def test_semantic_queue_marks_first_cfi_mismatch_as_redirect_origin() -> None:
     assert semantic_queue[0].golden_match_state == "matched"
     assert semantic_queue[0].path_state == "correct"
     assert semantic_queue[1].golden_match_state == "mismatched"
-    assert semantic_queue[1].path_state == "correct"
+    assert semantic_queue[1].path_state == "wrong"
     assert bm._pending_redirect_origin_index == 1
 
 
@@ -367,8 +367,71 @@ def test_semantic_queue_marks_younger_packets_wrong_after_redirect_origin() -> N
     bm._sample_cfvec()
 
     semantic_queue = list(bm._semantic_queue)
-    assert [entry.path_state for entry in semantic_queue] == ["correct", "correct", "wrong"]
+    assert [entry.path_state for entry in semantic_queue] == ["correct", "wrong", "wrong"]
     assert bm._pending_redirect_origin_index == 1
+
+
+def test_semantic_queue_non_cfi_first_mismatch_starts_wrong_path() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=0, pc=0x80000000, instr=0x00000063, size=4, kind="branch", taken=False, target_pc=0x80000004),
+                TraceEntry(index=1, pc=0x80000004, instr=0x00000013, size=4),
+            ]
+        )
+    )
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x80000000,
+        instr=0x00000063,
+        pred_taken=0,
+        ftq_flag=0,
+        ftq_value=3,
+        ftq_offset=0,
+        is_last=0,
+    )
+    _drive_cfvec_slot(
+        dut,
+        1,
+        valid=1,
+        pc=0x80000010,
+        instr=0x00000013,
+        ftq_flag=0,
+        ftq_value=3,
+        ftq_offset=2,
+        is_last=0,
+    )
+    _drive_cfvec_slot(
+        dut,
+        2,
+        valid=1,
+        pc=0x80000020,
+        instr=0x0000006F,
+        pred_taken=1,
+        ftq_flag=0,
+        ftq_value=3,
+        ftq_offset=4,
+        is_last=1,
+    )
+
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    semantic_queue = list(bm._semantic_queue)
+    assert [entry.path_state for entry in semantic_queue] == ["correct", "wrong", "wrong"]
+    assert [entry.golden_match_state for entry in semantic_queue] == ["matched", "mismatched", "mismatched"]
+    assert bm._pending_redirect_origin_index == 1
+    assert len(bm.pending_events) == 0
+    assert len(bm._pending_resolves) == 2
+    assert bm._pending_resolves[0].queue_index == 0
+    assert bm._pending_resolves[0].mispredict is True
+    assert bm._pending_resolves[0].target == 0x80000004
 
 
 def test_semantic_queue_redirect_flush_prunes_wrong_path_suffix() -> None:
@@ -441,10 +504,7 @@ def test_semantic_queue_redirect_flush_prunes_wrong_path_suffix() -> None:
     )
 
     assert payload["target_pc"] == 0x80000004
-    assert [(entry.pc, entry.path_state) for entry in bm._semantic_queue] == [
-        (0x80000000, "correct"),
-        (0x80000010, "correct"),
-    ]
+    assert [(entry.pc, entry.path_state) for entry in bm._semantic_queue] == [(0x80000000, "correct")]
     assert bm._pending_redirect_origin_index is None
 
 
@@ -518,8 +578,279 @@ def test_semantic_queue_redirect_flush_prunes_wrong_path_pending_resolves() -> N
         }
     )
 
-    assert len(bm._pending_resolves) == 1
-    assert bm._pending_resolves[0].queue_index == 1
+    assert len(bm._pending_resolves) == 0
+
+
+def test_semantic_queue_transition_without_last_marks_surviving_prefix_closed() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x80000000,
+        instr=0x00000013,
+        ftq_flag=0,
+        ftq_value=20,
+        ftq_offset=0,
+        is_last=0,
+    )
+    _drive_cfvec_slot(
+        dut,
+        1,
+        valid=1,
+        pc=0x80000004,
+        instr=0x00000013,
+        ftq_flag=0,
+        ftq_value=20,
+        ftq_offset=2,
+        is_last=0,
+    )
+    _drive_cfvec_slot(
+        dut,
+        2,
+        valid=1,
+        pc=0x80000020,
+        instr=0x00000013,
+        ftq_flag=0,
+        ftq_value=21,
+        ftq_offset=0,
+        is_last=1,
+    )
+
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    semantic_queue = list(bm._semantic_queue)
+    assert [(entry.ftq_value, entry.is_last_in_entry) for entry in semantic_queue] == [
+        (20, False),
+        (20, True),
+        (21, True),
+    ]
+
+
+def test_semantic_queue_wait_break_marks_current_entry_closed() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=0, pc=0x80000000, instr=0x0000006F, size=4, kind="jump", taken=True, target_pc=0x80000020),
+                TraceEntry(index=1, pc=0x80000020, instr=0x00000013, size=4),
+            ]
+        )
+    )
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x80000000,
+        instr=0x0000006F,
+        pred_taken=1,
+        ftq_flag=0,
+        ftq_value=22,
+        ftq_offset=0,
+        is_last=0,
+    )
+    _drive_cfvec_slot(
+        dut,
+        1,
+        valid=1,
+        pc=0x80000004,
+        instr=0x00000013,
+        ftq_flag=0,
+        ftq_value=22,
+        ftq_offset=2,
+        is_last=0,
+    )
+
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    semantic_queue = list(bm._semantic_queue)
+    assert len(semantic_queue) == 1
+    assert semantic_queue[0].is_last_in_entry is True
+
+
+def test_waiting_target_prefix_last_seals_current_ftq_entry() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=0, pc=0x80000000, instr=0x00000013, size=4),
+                TraceEntry(index=1, pc=0x80000020, instr=0x00000013, size=4),
+            ]
+        )
+    )
+    bm._golden_wait_pc = 0x80000020
+    bm._pending_level0_target_ftq = (0, 30)
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x80000010,
+        instr=0x00000013,
+        ftq_flag=0,
+        ftq_value=30,
+        ftq_offset=0,
+        is_last=1,
+    )
+
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    assert bm._current_ftq_entry is None
+    assert [(entry.ftq_flag, entry.ftq_value, entry.dispatch_complete, entry.observed_last_in_entry) for entry in bm.ftq_entries] == [
+        (0, 30, True, True)
+    ]
+    assert list(bm._semantic_queue)[0].is_last_in_entry is True
+
+
+def test_waiting_target_prefix_cfi_is_marked_resolve_skipped() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.set_golden_trace(GoldenTrace([TraceEntry(index=0, pc=0x80000020, instr=0x00000013, size=4)]))
+    bm._golden_wait_pc = 0x80000020
+    bm._pending_level0_target_ftq = (0, 31)
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x80000010,
+        instr=0x0000006F,
+        pred_taken=1,
+        ftq_flag=0,
+        ftq_value=31,
+        ftq_offset=0,
+        is_last=1,
+    )
+
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    semantic_queue = list(bm._semantic_queue)
+    assert len(semantic_queue) == 1
+    assert semantic_queue[0].is_cfi is True
+    assert semantic_queue[0].path_state == "wrong"
+    assert semantic_queue[0].resolve_state == "skipped"
+    assert list(bm._pending_queue_resolve_indices) == []
+
+
+def test_semantic_queue_commit_drops_stale_older_ftq_entries() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([]))
+    bm._semantic_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x80000020,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=9,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="correct",
+                rob_commit_state="committed",
+                golden_match_state="matched",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000024,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=9,
+                ftq_offset=2,
+                is_last_in_entry=True,
+                path_state="correct",
+                rob_commit_state="committed",
+                golden_match_state="matched",
+            ),
+        ]
+    )
+    bm.ftq_entries.extend(
+        [
+            FtqEntry(ftq_flag=0, ftq_value=8, dispatch_complete=True, observed_last_in_entry=True, commit_ready_cycle=0),
+            FtqEntry(ftq_flag=0, ftq_value=9, dispatch_complete=True, observed_last_in_entry=True, commit_ready_cycle=0),
+        ]
+    )
+    bm.current_cycle = 1
+
+    committed = bm._plan_commit_entry_for_cycle()
+
+    assert committed is not None
+    assert (committed.ftq_flag, committed.ftq_value) == (0, 9)
+    assert len(bm._semantic_queue) == 0
+    assert list(bm.ftq_entries) == []
+    assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (0, 9)
+
+
+def test_semantic_queue_commit_uses_queue_head_when_ftq_entries_are_out_of_order() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([]))
+    bm._semantic_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x80000020,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=12,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="correct",
+                rob_commit_state="committed",
+                golden_match_state="matched",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000024,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=12,
+                ftq_offset=2,
+                is_last_in_entry=True,
+                path_state="correct",
+                rob_commit_state="committed",
+                golden_match_state="matched",
+            ),
+        ]
+    )
+    bm.ftq_entries.extend(
+        [
+            FtqEntry(ftq_flag=0, ftq_value=13, dispatch_complete=False, observed_last_in_entry=False, commit_ready_cycle=0),
+            FtqEntry(ftq_flag=0, ftq_value=12, dispatch_complete=False, observed_last_in_entry=False, commit_ready_cycle=0),
+            FtqEntry(ftq_flag=0, ftq_value=14, dispatch_complete=True, observed_last_in_entry=True, commit_ready_cycle=0),
+        ]
+    )
+    bm.current_cycle = 1
+
+    committed = bm._plan_commit_entry_for_cycle()
+
+    assert committed is not None
+    assert (committed.ftq_flag, committed.ftq_value) == (0, 12)
+    assert [(entry.ftq_flag, entry.ftq_value) for entry in bm.ftq_entries] == [(0, 14)]
+    assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (0, 12)
 
 
 def test_semantic_queue_correct_path_cfi_emits_resolve_and_marks_emitted() -> None:
@@ -614,8 +945,8 @@ def test_semantic_queue_wrong_path_cfi_resolve_is_skipped() -> None:
     bm._sample_cfvec()
     bm._drive_resolves()
 
-    assert int(dut.io_backend_toFtq_resolve_0_valid.value) == 1
-    assert bm._semantic_queue[1].resolve_state == "emitted"
+    assert int(dut.io_backend_toFtq_resolve_0_valid.value) == 0
+    assert bm._semantic_queue[1].resolve_state == "skipped"
     assert bm._semantic_queue[2].resolve_state == "skipped"
     assert len(bm._pending_resolves) == 0
     assert list(bm._pending_queue_resolve_indices) == []
@@ -848,10 +1179,57 @@ def test_golden_wait_pc_does_not_drop_partially_observed_target_entry_prefix():
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    assert bm._current_ftq_entry is not None
-    assert (bm._current_ftq_entry.ftq_flag, bm._current_ftq_entry.ftq_value) == (1, 51)
-    assert bm._current_ftq_entry.dispatch_complete is False
-    assert [(entry.ftq_flag, entry.ftq_value) for entry in bm.ftq_entries] == []
+    assert bm._current_ftq_entry is None
+    assert [(entry.ftq_flag, entry.ftq_value, entry.dispatch_complete, entry.observed_last_in_entry) for entry in bm.ftq_entries] == [
+        (1, 51, True, True)
+    ]
+
+
+def test_golden_wait_target_entry_suffix_does_not_reset_same_ftq_slot_state() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=0, pc=0x800048FE, instr=0x06700713, size=4),
+                TraceEntry(index=1, pc=0x80004902, instr=0x00068C93, size=4),
+                TraceEntry(index=2, pc=0x80004904, instr=0x0AA76F63, size=4, kind="branch", taken=True, target_pc=0x800049C2),
+                TraceEntry(index=3, pc=0x800049C2, instr=0xF975071B, size=4),
+            ]
+        )
+    )
+
+    _drive_cfvec_slot(dut, 0, valid=1, pc=0x800048FE, instr=0x06700713, is_rvc=0, pred_taken=0, ftq_flag=1, ftq_value=49, ftq_offset=1, is_last=0)
+    _drive_cfvec_slot(dut, 1, valid=1, pc=0x80004902, instr=0x00068C93, is_rvc=0, pred_taken=0, ftq_flag=1, ftq_value=49, ftq_offset=2, is_last=0)
+    _drive_cfvec_slot(dut, 2, valid=1, pc=0x80004904, instr=0x0AA76F63, is_rvc=0, pred_taken=0, ftq_flag=1, ftq_value=49, ftq_offset=4, is_last=0)
+
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    assert bm._golden_wait_pc == 0x800049C2
+    assert [(entry.pc, entry.path_state) for entry in bm._semantic_queue] == [
+        (0x800048FE, "correct"),
+        (0x80004902, "correct"),
+        (0x80004904, "correct"),
+    ]
+    bm._pending_level0_target_ftq = (1, 49)
+
+    _clear_cfvec(dut)
+    _drive_cfvec_slot(dut, 0, valid=1, pc=0x8000491C, instr=0xF2E6E6E3, is_rvc=0, pred_taken=0, ftq_flag=1, ftq_value=49, ftq_offset=16, is_last=1)
+
+    bm.current_cycle = 1
+    bm._sample_cfvec()
+
+    assert [(entry.pc, entry.path_state, entry.is_last_in_entry) for entry in bm._semantic_queue] == [
+        (0x800048FE, "correct", False),
+        (0x80004902, "correct", False),
+        (0x80004904, "correct", True),
+        (0x8000491C, "wrong", True),
+    ]
+    assert len(bm._pending_resolves) == 1
+    assert bm._pending_resolves[0].inst_pc == 0x80004904
+    assert bm.ftq_entries[0].total_cfi == 1
 
 
 def test_golden_wait_pc_ignores_wrong_path_prefix_when_target_slot_is_known():

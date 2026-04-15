@@ -78,6 +78,21 @@ def _read_sig(dut, name: str, default=None):
     return get_sig(dut, name, default)
 
 
+def _read_addr_sig(dut, name: str) -> int:
+    return int(_read_sig(dut, name, 0)) << 1
+
+
+def _read_indexed_bits(dut, prefix: str, count: int) -> tuple[list[int], int]:
+    bits: list[int] = []
+    mask = 0
+    for idx in range(int(count)):
+        bit = 1 if int(_read_sig(dut, f"{prefix}{idx}", 0)) else 0
+        bits.append(bit)
+        if bit:
+            mask |= 1 << idx
+    return bits, mask
+
+
 def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
     """Capture a read-only snapshot of key DUT frontend boundary signals."""
     trace = getattr(env.backend_model, "golden_trace", None)
@@ -114,6 +129,16 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
             }
             break
 
+    def _read_ftq_entry(idx: int | None):
+        if idx is None or idx < 0:
+            return None
+        return {
+            "idx": int(idx),
+            "start_pc": _read_addr_sig(dut, f"Frontend_top.Frontend.inner_ftq.entryQueue_{idx}_startPc_addr"),
+            "taken_valid": _read_sig(dut, f"Frontend_top.Frontend.inner_ftq.entryQueue_{idx}_takenCfiOffset_valid", 0),
+            "taken_bits": _read_sig(dut, f"Frontend_top.Frontend.inner_ftq.entryQueue_{idx}_takenCfiOffset_bits", 0),
+        }
+
     cfvec = []
     for slot in range(8):
         if _read_sig(dut, f"io_backend_cfVec_{slot}_valid", 0) != 1:
@@ -131,6 +156,34 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
         )
 
     stall_reason = [_read_sig(dut, f"io_backend_stallReason_reason_{idx}", 0) for idx in range(8)]
+    s3_instr_valid_bits, s3_instr_valid_mask = _read_indexed_bits(
+        dut,
+        "Frontend_top.Frontend.inner_ifu.s3_alignInstrValid_",
+        12,
+    )
+    s3_invalid_taken_bits, s3_invalid_taken_mask = _read_indexed_bits(
+        dut,
+        "Frontend_top.Frontend.inner_ifu.s3_alignInvalidTaken_",
+        12,
+    )
+    s3_select_block_bits, s3_select_block_mask = _read_indexed_bits(
+        dut,
+        "Frontend_top.Frontend.inner_ifu.s3_alignCompactInfo_selectBlock_",
+        12,
+    )
+    fixed_two_fetch_bits, fixed_two_fetch_mask = _read_indexed_bits(
+        dut,
+        "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage1Out_fixedTwoFetchRange_",
+        12,
+    )
+    ifu_ptr_flag = _read_sig(dut, "Frontend_top.Frontend.inner_ftq.ifuPtr_ptrs_0_flag", 0)
+    ifu_ptr_value = _read_sig(dut, "Frontend_top.Frontend.inner_ftq.ifuPtr_ptrs_0_value", 0)
+    bpu_ptr_flag = _read_sig(dut, "Frontend_top.Frontend.inner_ftq.bpuPtr_ptrs_0_flag", 0)
+    bpu_ptr_value = _read_sig(dut, "Frontend_top.Frontend.inner_ftq.bpuPtr_ptrs_0_value", 0)
+    ibuffer_lane_pcs = [
+        _read_addr_sig(dut, f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_pc_{idx}_addr")
+        for idx in range(4)
+    ]
     return {
         "cursor": (None if trace is None else int(trace.cursor)),
         "total_entries": (0 if trace is None else int(len(trace.entries))),
@@ -167,6 +220,15 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
             ],
             "recent_redirect": recent_redirect,
         },
+        "redirect_drive": {
+            "valid": _read_sig(dut, "io_backend_toFtq_redirect_valid", 0),
+            "pc": _read_sig(dut, "io_backend_toFtq_redirect_bits_pc", 0),
+            "target": _read_sig(dut, "io_backend_toFtq_redirect_bits_target", 0),
+            "level": _read_sig(dut, "io_backend_toFtq_redirect_bits_level", 0),
+            "debug_is_ctrl": _read_sig(dut, "io_backend_toFtq_redirect_bits_debugIsCtrl", 0),
+            "debug_is_mem_vio": _read_sig(dut, "io_backend_toFtq_redirect_bits_debugIsMemVio", 0),
+        },
+        "monitor_recent_dut_redirect": getattr(monitor, "last_dut_redirect", None),
         "stall_reason": stall_reason,
         "wfi": {
             "req": _read_sig(dut, "io_backend_wfi_wfiReq", 0),
@@ -209,6 +271,57 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
                 }
             ),
         },
+        "ftq_runtime": {
+            "ifu_ptr": {"flag": int(ifu_ptr_flag), "value": int(ifu_ptr_value)},
+            "bpu_ptr": {"flag": int(bpu_ptr_flag), "value": int(bpu_ptr_value)},
+            "prediction_ptr_value": _read_sig(dut, "Frontend_top.Frontend.inner_ftq.predictionPtr_value", 0),
+            "ifu_entry": _read_ftq_entry(int(ifu_ptr_value)),
+            "bpu_entry": _read_ftq_entry(int(bpu_ptr_value)),
+            "backend_redirect_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ftq.backendRedirect_valid", 0),
+            "redirect_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ftq.redirect_valid", 0),
+            "redirect_reg_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ftq.redirectReg_valid", 0),
+            "redirect_next_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ftq.redirectNext_valid", 0),
+        },
+        "ifu_runtime": {
+            "from_ftq_req_ready": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.io_fromFtq_req_ready", 0),
+            "from_ftq_taken_valid": _read_sig(
+                dut,
+                "Frontend_top.Frontend.inner_ifu.io_fromFtq_req_bits_fetch_0_takenCfiOffset_valid",
+                0,
+            ),
+            "to_ibuffer_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid", 0),
+            "s0_fire": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s0_fire", 0),
+            "s1_fire": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s1_fire", 0),
+            "s2_fire": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s2_fire", 0),
+            "s1_ready": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s1_ready", 0),
+            "s2_ready": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s2_ready", 0),
+            "s3_ready": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_ready", 0),
+            "s1_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s1_valid", 0),
+            "s2_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s2_valid", 0),
+            "s3_valid": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_valid_valid", 0),
+            "s1_start_pc": _read_addr_sig(dut, "Frontend_top.Frontend.inner_ifu.s1_fetchBlock_0_startVAddr_addr"),
+            "s2_start_pc": _read_addr_sig(dut, "Frontend_top.Frontend.inner_ifu.s2_fetchBlock_0_startVAddr_addr"),
+            "s3_start_pc": _read_addr_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_alignFetchBlock_0_startVAddr_addr"),
+            "s3_target_pc": _read_addr_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_alignFetchBlock_0_target_addr"),
+            "s3_ftq": {
+                "flag": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_alignFetchBlock_0_ftqIdx_flag", 0),
+                "value": _read_sig(dut, "Frontend_top.Frontend.inner_ifu.s3_alignFetchBlock_0_ftqIdx_value", 0),
+            },
+            "to_ibuffer_enq_enable_mask": _read_sig(
+                dut,
+                "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0",
+                0,
+            ),
+            "s3_instr_valid_bits": s3_instr_valid_bits,
+            "s3_instr_valid_mask": s3_instr_valid_mask,
+            "s3_invalid_taken_bits": s3_invalid_taken_bits,
+            "s3_invalid_taken_mask": s3_invalid_taken_mask,
+            "s3_select_block_bits": s3_select_block_bits,
+            "s3_select_block_mask": s3_select_block_mask,
+            "fixed_two_fetch_range_bits": fixed_two_fetch_bits,
+            "fixed_two_fetch_range_mask": fixed_two_fetch_mask,
+            "ibuffer_lane_pcs": ibuffer_lane_pcs,
+        },
         "cfvec_valid_count": len(cfvec),
         "cfvec": cfvec,
     }
@@ -218,11 +331,15 @@ def _format_stall_snapshot(snapshot: dict) -> str:
     from_ftq = snapshot["from_ftq"]
     from_ifu_gpaddr = snapshot["from_ifu_gpaddr"]
     backend_state = snapshot["backend_state"]
+    redirect_drive = snapshot["redirect_drive"]
     icache_req = snapshot["icache_req"]
     icache_resp = snapshot["icache_resp"]
     uncache_req = snapshot["uncache_req"]
     uncache_resp = snapshot["uncache_resp"]
     monitor_redirect = snapshot["monitor_redirect"]
+    monitor_recent_dut_redirect = snapshot["monitor_recent_dut_redirect"]
+    ftq_runtime = snapshot["ftq_runtime"]
+    ifu_runtime = snapshot["ifu_runtime"]
     redirect_head = monitor_redirect["head"]
     current_ftq_entry = backend_state["current_ftq_entry"]
     recent_redirect = backend_state["recent_redirect"]
@@ -236,6 +353,31 @@ def _format_stall_snapshot(snapshot: dict) -> str:
             resolved=int(entry["resolved_cfi"]),
             total=int(entry["total_cfi"]),
             redirect=int(entry["has_redirect"]),
+        )
+
+    def _format_runtime_ftq_entry(entry):
+        if entry is None:
+            return "none"
+        return "({idx},start={start},taken={taken_valid}/{taken_bits})".format(
+            idx=int(entry["idx"]),
+            start=_format_optional_pc(entry["start_pc"]),
+            taken_valid=int(entry["taken_valid"]),
+            taken_bits=int(entry["taken_bits"]),
+        )
+
+    def _format_recent_dut_redirect(entry):
+        if entry is None:
+            return "none"
+        return (
+            "(cycle={cycle},pc={pc},target={target},taken={taken},level={level},ctrl={ctrl},mem_vio={mem_vio})"
+        ).format(
+            cycle=int(entry.get("cycle", 0)),
+            pc=_format_optional_pc(entry.get("pc")),
+            target=_format_optional_pc(entry.get("target_pc")),
+            taken=int(entry.get("taken", 0)),
+            level=int(entry.get("level", 0)),
+            ctrl=int(entry.get("debug_is_ctrl", 0)),
+            mem_vio=int(entry.get("debug_is_mem_vio", 0)),
         )
 
     return (
@@ -257,6 +399,19 @@ def _format_stall_snapshot(snapshot: dict) -> str:
         "monitor_wait_sync={monitor_wait_sync} monitor_expected_pc={monitor_expected_pc} "
         "redirect_grace={redirect_grace} redirect_queue_len={redirect_queue_len} "
         "redirect_head_target={redirect_head_target} redirect_head_deadline={redirect_head_deadline} "
+        "redirect_drive=({redirect_drive_valid},pc={redirect_drive_pc},target={redirect_drive_target},"
+        "level={redirect_drive_level},ctrl={redirect_drive_ctrl},mem_vio={redirect_drive_mem_vio}) "
+        "recent_dut_redirect={recent_dut_redirect} "
+        "ftq_runtime=(ifu=({ifu_ptr_flag},{ifu_ptr_value}) bpu=({bpu_ptr_flag},{bpu_ptr_value}) "
+        "pred={prediction_ptr_value} ifu_entry={ifu_entry} bpu_entry={bpu_entry} "
+        "redirects=[{ftq_backend_redirect},{ftq_redirect},{ftq_redirect_reg},{ftq_redirect_next}]) "
+        "ifu_runtime=(req_ready={ifu_req_ready} taken_valid={ifu_req_taken_valid} to_ibuf_valid={ifu_to_ibuf_valid} "
+        "fire=[{s0_fire},{s1_fire},{s2_fire}] ready=[{s1_ready},{s2_ready},{s3_ready}] "
+        "valid=[{s1_valid},{s2_valid},{s3_valid}] s1={ifu_s1_start} s2={ifu_s2_start} "
+        "s3={ifu_s3_start} s3_target={ifu_s3_target} s3_ftq=({ifu_s3_ftq_flag},{ifu_s3_ftq_value}) "
+        "enq=0x{ifu_enq_mask:x} s3_valid_mask=0x{ifu_s3_valid_mask:x} "
+        "invalid_taken_mask=0x{ifu_s3_invalid_taken_mask:x} select_block_mask=0x{ifu_s3_select_block_mask:x} "
+        "fixed_range_mask=0x{ifu_fixed_range_mask:x} ibuf_pcs={ibuf_pcs}) "
         "cfvec_valid_count={cfvec_valid_count}"
     ).format(
         backend_can_accept=int(snapshot["backend_can_accept"]),
@@ -307,6 +462,48 @@ def _format_stall_snapshot(snapshot: dict) -> str:
             _format_optional_pc(redirect_head["target_pc"]) if redirect_head is not None else "none"
         ),
         redirect_head_deadline=(int(redirect_head["deadline"]) if redirect_head is not None else 0),
+        redirect_drive_valid=int(redirect_drive["valid"]),
+        redirect_drive_pc=_format_optional_pc(redirect_drive["pc"]),
+        redirect_drive_target=_format_optional_pc(redirect_drive["target"]),
+        redirect_drive_level=int(redirect_drive["level"]),
+        redirect_drive_ctrl=int(redirect_drive["debug_is_ctrl"]),
+        redirect_drive_mem_vio=int(redirect_drive["debug_is_mem_vio"]),
+        recent_dut_redirect=_format_recent_dut_redirect(monitor_recent_dut_redirect),
+        ifu_ptr_flag=int(ftq_runtime["ifu_ptr"]["flag"]),
+        ifu_ptr_value=int(ftq_runtime["ifu_ptr"]["value"]),
+        bpu_ptr_flag=int(ftq_runtime["bpu_ptr"]["flag"]),
+        bpu_ptr_value=int(ftq_runtime["bpu_ptr"]["value"]),
+        prediction_ptr_value=int(ftq_runtime["prediction_ptr_value"]),
+        ifu_entry=_format_runtime_ftq_entry(ftq_runtime["ifu_entry"]),
+        bpu_entry=_format_runtime_ftq_entry(ftq_runtime["bpu_entry"]),
+        ftq_backend_redirect=int(ftq_runtime["backend_redirect_valid"]),
+        ftq_redirect=int(ftq_runtime["redirect_valid"]),
+        ftq_redirect_reg=int(ftq_runtime["redirect_reg_valid"]),
+        ftq_redirect_next=int(ftq_runtime["redirect_next_valid"]),
+        ifu_req_ready=int(ifu_runtime["from_ftq_req_ready"]),
+        ifu_req_taken_valid=int(ifu_runtime["from_ftq_taken_valid"]),
+        ifu_to_ibuf_valid=int(ifu_runtime["to_ibuffer_valid"]),
+        s0_fire=int(ifu_runtime["s0_fire"]),
+        s1_fire=int(ifu_runtime["s1_fire"]),
+        s2_fire=int(ifu_runtime["s2_fire"]),
+        s1_ready=int(ifu_runtime["s1_ready"]),
+        s2_ready=int(ifu_runtime["s2_ready"]),
+        s3_ready=int(ifu_runtime["s3_ready"]),
+        s1_valid=int(ifu_runtime["s1_valid"]),
+        s2_valid=int(ifu_runtime["s2_valid"]),
+        s3_valid=int(ifu_runtime["s3_valid"]),
+        ifu_s1_start=_format_optional_pc(ifu_runtime["s1_start_pc"]),
+        ifu_s2_start=_format_optional_pc(ifu_runtime["s2_start_pc"]),
+        ifu_s3_start=_format_optional_pc(ifu_runtime["s3_start_pc"]),
+        ifu_s3_target=_format_optional_pc(ifu_runtime["s3_target_pc"]),
+        ifu_s3_ftq_flag=int(ifu_runtime["s3_ftq"]["flag"]),
+        ifu_s3_ftq_value=int(ifu_runtime["s3_ftq"]["value"]),
+        ifu_enq_mask=int(ifu_runtime["to_ibuffer_enq_enable_mask"]),
+        ifu_s3_valid_mask=int(ifu_runtime["s3_instr_valid_mask"]),
+        ifu_s3_invalid_taken_mask=int(ifu_runtime["s3_invalid_taken_mask"]),
+        ifu_s3_select_block_mask=int(ifu_runtime["s3_select_block_mask"]),
+        ifu_fixed_range_mask=int(ifu_runtime["fixed_two_fetch_range_mask"]),
+        ibuf_pcs="[" + ",".join(_format_optional_pc(pc) for pc in ifu_runtime["ibuffer_lane_pcs"]) + "]",
         cfvec_valid_count=int(snapshot["cfvec_valid_count"]),
     )
 

@@ -382,3 +382,10 @@ bug-report.tar.gz
 # Python virtual environment
 .venv/
 venv/
+
+build*/
+
+# Codex
+AGENTS.md
+docs/agents/
+docs/superpowers/

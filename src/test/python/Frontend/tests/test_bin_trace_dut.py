@@ -3,12 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from env.request_apis import run_until_golden_trace_complete
-from env.sequences import (
-    LoadGoldenTraceSequence,
-    LoadProgramFileSequence,
+from env.api import (
+    api_Frontend_load_golden_trace,
+    api_Frontend_load_program_file,
+    api_Frontend_run_until_golden_complete,
 )
-from env.transactions import GoldenTraceSource
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -45,20 +44,11 @@ def test_bin_trace(env):
     assert bin_path.is_file(), f"bin file not found: {bin_path}"
     assert trace_path.is_file(), f"trace file not found: {trace_path}"
 
-    bin_size = LoadProgramFileSequence(
-        path=str(bin_path),
-        base_addr=base_addr,
-        step_cycles=1,
-    ).run(env)
-    trace_entries = LoadGoldenTraceSequence(
-        source=GoldenTraceSource(path=str(trace_path)),
-    ).run(env)
+    bin_size = api_Frontend_load_program_file(env, str(bin_path), base_addr, max_cycles=0)
+    trace_entries = api_Frontend_load_golden_trace(env, str(trace_path), max_cycles=0)
 
     if _should_run_to_trace_completion(bin_path):
-        completed = run_until_golden_trace_complete(
-            env,
-            max_cycles=_TRACE_MAX_CYCLES,
-        )
+        completed = api_Frontend_run_until_golden_complete(env, max_cycles=_TRACE_MAX_CYCLES)
         assert completed is True
     elif step_cycles > 0:
         env.step(step_cycles)

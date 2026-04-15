@@ -49,6 +49,8 @@
 - `env/fixtures.py` 是 DUT fixture 与环境装配的真实实现位置。
 - `env/api.py` 是公共 `api_Frontend_*` helper 的真实实现位置。
 - `env/frontend_env.py` 是 `FrontendEnv` 的真实实现位置。
+- `env/bundles/`、coverage 和启动控制里出现的信号名，必须以当前生成出来的 DUT 接口为准。
+  不允许长期保留已经不在 DUT 中出现的历史信号；缺失信号要么从 bundle/coverage 中删除，要么被明确建模为可选信号。
 
 ## 阅读建议
 

@@ -1,0 +1,135 @@
+# Frontend Verification Guide
+
+## Scope
+
+Treat the project root as `$NOOP_HOME`.
+
+Most agent work in this repository is expected to target the frontend Python verification stack under `src/test/python/Frontend/`, not the whole XiangShan tree. Start here unless the task explicitly says otherwise.
+
+## File Map
+
+- `src/test/python/Frontend/env/frontend_env.py`: top-level frontend environment orchestration.
+- `src/test/python/Frontend/env/agents.py`: simulated side agents such as ICache, PTW, and uncache support.
+- `src/test/python/Frontend/env/backend_model.py`: backend-side model and resolve/redirect behavior.
+- `src/test/python/Frontend/env/api.py`: public helper APIs used by tests.
+- `src/test/python/Frontend/env/fixtures.py`: shared pytest fixtures. Prefer these over custom setup.
+- `src/test/python/Frontend/env/coverage_def.py`: coverage definitions. Update when behavior changes introduce new scenario classes.
+- `src/test/python/Frontend/fst_to_fsdb.sh`: convert a frontend `.fst` waveform to `.fsdb` through a temporary `.vcd`.
+- `src/test/python/Frontend/tests/`: active frontend regressions. Put new tests here.
+- `build-frontend/pylib/Frontend/`: generated Python bindings, shared objects, signal map, and `Frontend_top.sv`.
+- `build-frontend/rtl/`: generated RTL artifacts useful for cross-checking DUT behavior.
+- `ready-to-run/microbench.bin`: common reproduction binary for frontend mismatch and stall investigations.
+- `NEMU/logs/`: trace inputs used to reconstruct failing windows.
+
+## Source Of Truth
+
+Use the most direct artifact that reflects real DUT behavior:
+
+1. Observed DUT-facing IO in the Python environment and tests.
+2. Generated artifacts under `build-frontend/pylib/Frontend/`, especially `Frontend_top.sv` and `signals.json`.
+3. Generated RTL under `build-frontend/rtl/` when signal-level confirmation is needed.
+4. Reference docs under `docs/testbench/Guide_Doc/`.
+
+Do not treat host-side implementation files as runtime truth unless you have confirmed the built DUT artifacts actually include that behavior.
+
+All env-side signals and bundle fields must be based on the actual generated DUT interface. If a signal is not present on the current DUT object or in the generated `Frontend_top.sv` / `signals.json`, remove it from the bundle or treat it as intentionally optional; do not keep historical or guessed signal names in the active env contract.
+
+## Working Rules
+
+- Start from first principles and confirm the real goal before editing code.
+- If the requested path is not minimal, prefer the shorter path and explain the change in direction.
+- Do not add compatibility shims, fallback logic, or speculative extensions.
+- Do not rewrite absolute paths in any `source` command.
+- Preserve the black-box verification boundary. Interact through DUT-facing agents, APIs, traces, and generated artifacts rather than assuming hidden RTL state.
+- Before modifying files, inspect current local changes and avoid overwriting in-progress work.
+- When changing bundles, coverage points, or startup/control wiring, verify every signal name against the current DUT object and generated artifacts first. Required signals should fail fast when absent; signals not present on the DUT should not remain in the active contract.
+- After changing code, rerun the relevant tests before giving a conclusion. If you have not rerun the relevant tests yet, say that explicitly and do not present the result as a validated conclusion.
+- When DUT behavior is coupled to env-generated stimuli, first suspect env stimulus generation or timing before concluding there is an obvious DUT bug. Only escalate to a DUT-side diagnosis after the env stimulus path has been checked against waveforms and the semantic contract.
+
+## Build And Test
+
+Activate the environments before running frontend commands:
+
+```bash
+source /nfs/share/unitychip/activate
+source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
+cd "$NOOP_HOME"
+```
+
+Run the default frontend regression flow from the repo root:
+
+```bash
+src/test/python/Frontend/run_pytest_with_log.sh
+```
+
+Run a narrower frontend test:
+
+```bash
+TB_ENABLE_DUT_TESTS=1 python -m pytest src/test/python/Frontend/tests/test_multi_branch.py -v
+```
+
+Run the fast frontend smoke guard used by the local change hook:
+
+```bash
+python src/test/python/Frontend/change_guard.py
+```
+
+Enable the versioned git hook so staged frontend changes run the smoke guard before commit:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Run the DUT bin-trace case directly:
+
+```bash
+TB_ENABLE_DUT_TESTS=1 python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
+```
+
+Start the frontend web console:
+
+```bash
+TB_ENV_LOG_LEVEL=INFO src/test/python/Frontend/run_web_console.sh
+```
+
+Convert a frontend FST waveform to FSDB:
+
+```bash
+src/test/python/Frontend/fst_to_fsdb.sh path/to/wave.fst [path/to/wave.fsdb]
+```
+
+Rebuild the frontend Python DUT artifacts from the repo root:
+
+```bash
+source /nfs/share/unitychip/activate
+cd "$NOOP_HOME"
+make frontend -j
+```
+
+## Pytest Sandbox Note
+
+When running `pytest` from Codex, the sandbox may block the local socket opened by `pytest-rerunfailures` during `pytest_configure`, which shows up as `PermissionError: [Errno 1] Operation not permitted` before tests start. Treat that as a sandbox limitation and rerun the same pytest command with escalation instead of debugging the test itself.
+
+## Test Authoring Rules
+
+- Add new regressions under `src/test/python/Frontend/tests/`.
+- Name tests `test_*.py`.
+- Gate DUT-only cases with `TB_ENABLE_DUT_TESTS=1` and existing `_RUN_DUT` patterns.
+- Reuse fixtures from `src/test/python/Frontend/env/fixtures.py`.
+- Update `src/test/python/Frontend/env/coverage_def.py` when introducing new fetch, branch, redirect, exception, or performance scenario coverage.
+- Do not commit transient logs, generated waveforms, or other temporary artifacts unless they are intentional fixtures.
+
+## Artifact Naming
+
+- When you generate debugging waveforms under `src/test/python/Frontend/data/`, place them in a date folder instead of dumping them directly in `data/`.
+- Use a stable date folder name such as `src/test/python/Frontend/data/20260414/`.
+- Waveform filenames must be logically named from the reproduction context, for example: test name, binary name, seed, and purpose or fix tag.
+- Prefer names in the form `<test-or-bin>_<seed-or-case>_<purpose>.fst`; once the file already lives under a date directory, do not repeat the date in the filename.
+- Apply the same naming discipline to paired debug logs when you intentionally keep them under `data/`.
+
+## Deeper References
+
+- `docs/testbench/Guide_Doc/dut_fixture.md`
+- `docs/testbench/Guide_Doc/dut_api_instruction.md`
+- `docs/testbench/Guide_Doc/dut_function_coverage_def.md`
+- `docs/testbench/testbench_stages.yaml`

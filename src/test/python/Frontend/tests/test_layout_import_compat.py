@@ -15,6 +15,7 @@ def test_frontend_api_re_exports_env_api_and_fixtures():
     assert Frontend_api.api_Frontend_load_golden_trace is env_api.api_Frontend_load_golden_trace
     assert Frontend_api.api_Frontend_prepare_program_and_nemu_trace is env_api.api_Frontend_prepare_program_and_nemu_trace
     assert Frontend_api.api_Frontend_run_until_commit is env_api.api_Frontend_run_until_commit
+    assert Frontend_api.api_Frontend_run_until_golden_complete is env_api.api_Frontend_run_until_golden_complete
     assert Frontend_api.api_Frontend_inject_redirect is env_api.api_Frontend_inject_redirect
     assert Frontend_api.api_Frontend_check_pc_sequence is env_api.api_Frontend_check_pc_sequence
     assert Frontend_api.api_Frontend_get_branch_stats is env_api.api_Frontend_get_branch_stats
@@ -35,6 +36,7 @@ def test_frontend_api_re_exports_env_api_and_fixtures():
         "api_Frontend_pause_fst_dump",
         "api_Frontend_prepare_program_and_nemu_trace",
         "api_Frontend_run_until_commit",
+        "api_Frontend_run_until_golden_complete",
         "api_Frontend_set_bp_ctrl_enable",
         "api_Frontend_set_log_level",
         "create_dut",
