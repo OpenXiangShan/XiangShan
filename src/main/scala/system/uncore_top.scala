@@ -411,63 +411,81 @@ class dm_w2axi(
   val txAwDone = RegInit(false.B)
   val txWDone = RegInit(false.B)
   val txAddrReg = Reg(UInt(io.axi.aw.bits.addr.getWidth.W))
-  val txDataReg = Reg(UInt(nocDataWidth.W))
   val txDmintReg = Reg(UInt(totalHartCount.W))
   val txHartResetReqReg = Reg(UInt(totalHartCount.W))
   val txHartIsInResetReg = Reg(UInt(totalHartCount.W))
   val txGroupIdxReg = Reg(UInt(log2Ceil(numDies).W))
+  val awBitsReg = RegInit(0.U.asTypeOf(chiselTypeOf(io.axi.aw.bits)))
+  val awValidReg = RegInit(false.B)
+  val wBitsReg = RegInit(0.U.asTypeOf(chiselTypeOf(io.axi.w.bits)))
+  val wValidReg = RegInit(false.B)
+  val bReadyReg = RegInit(false.B)
+
+  val txDataNow = Cat(
+    0.U((nocDataWidth - 3 * sidebandWidth).W),
+    txHartIsInResetNow.pad(sidebandWidth),
+    txHartResetReqNow.pad(sidebandWidth),
+    txDmintNow.pad(sidebandWidth)
+  )
+  val awBitsBundle = WireInit(0.U.asTypeOf(chiselTypeOf(io.axi.aw.bits)))
+  awBitsBundle.id := 0.U
+  awBitsBundle.addr := txAddrNow
+  awBitsBundle.len := 0.U
+  awBitsBundle.size := log2Ceil(nocDataWidth / 8).U
+  awBitsBundle.burst := AXI4Parameters.BURST_INCR
+  awBitsBundle.lock := 0.U
+  awBitsBundle.cache := 0.U
+  awBitsBundle.prot := 0.U
+  awBitsBundle.qos := 0.U
+  val wBitsBundle = WireInit(0.U.asTypeOf(chiselTypeOf(io.axi.w.bits)))
+  wBitsBundle.data := txDataNow
+  wBitsBundle.strb := Fill(nocDataWidth / 8, 1.U(1.W))
+  wBitsBundle.last := true.B
 
   when (!txBusy && txReqValid) {
     txBusy := true.B
     txAwDone := false.B
     txWDone := false.B
     txAddrReg := txAddrNow
-    txDataReg := Cat(
-      0.U((nocDataWidth - 3 * sidebandWidth).W),
-      txHartIsInResetNow.pad(sidebandWidth),
-      txHartResetReqNow.pad(sidebandWidth),
-      txDmintNow.pad(sidebandWidth)
-    )
     txDmintReg := txDmintNow
     txHartResetReqReg := txHartResetReqNow
     txHartIsInResetReg := txHartIsInResetNow
     txGroupIdxReg := txGroupIdx
+    awBitsReg := awBitsBundle
+    awValidReg := true.B
+    wBitsReg := wBitsBundle
+    wValidReg := true.B
+    bReadyReg := false.B
   }
 
-  val awBits = Wire(chiselTypeOf(io.axi.aw.bits))
-  awBits := 0.U.asTypeOf(awBits)
-  awBits.id := 0.U
-  awBits.addr := txAddrReg
-  awBits.len := 0.U
-  awBits.size := log2Ceil(nocDataWidth / 8).U
-  awBits.burst := AXI4Parameters.BURST_INCR
-  awBits.lock := 0.U
-  awBits.cache := 0.U
-  awBits.prot := 0.U
-  awBits.qos := 0.U
-  io.axi.aw.bits := awBits
-  io.axi.aw.valid := txBusy && !txAwDone
-  when (io.axi.aw.fire) {
+  val awFire = io.axi.aw.fire
+  val wFire = io.axi.w.fire
+  val txReqComplete = (awFire && (txWDone || wFire)) || (wFire && (txAwDone || awFire))
+
+  io.axi.aw.bits := awBitsReg
+  io.axi.aw.valid := awValidReg
+  when (awFire) {
     txAwDone := true.B
+    awValidReg := false.B
   }
 
-  val wBits = Wire(chiselTypeOf(io.axi.w.bits))
-  wBits := 0.U.asTypeOf(wBits)
-  wBits.data := txDataReg
-  wBits.strb := Fill(nocDataWidth / 8, 1.U(1.W))
-  wBits.last := true.B
-  io.axi.w.bits := wBits
-  io.axi.w.valid := txBusy && !txWDone
-  when (io.axi.w.fire) {
+  io.axi.w.bits := wBitsReg
+  io.axi.w.valid := wValidReg
+  when (wFire) {
     txWDone := true.B
+    wValidReg := false.B
   }
 
   io.axi.ar.valid := false.B
   io.axi.ar.bits := 0.U.asTypeOf(io.axi.ar.bits)
   io.axi.r.ready := true.B
-  io.axi.b.ready := txBusy && txAwDone && txWDone
+  io.axi.b.ready := bReadyReg
+  when (txReqComplete) {
+    bReadyReg := true.B
+  }
   when (io.axi.b.fire) {
     txBusy := false.B
+    bReadyReg := false.B
     dmintSent(txGroupIdxReg) := txDmintReg
     hartResetReqSent(txGroupIdxReg) := txHartResetReqReg
     hartIsInResetSent(txGroupIdxReg) := txHartIsInResetReg
@@ -711,7 +729,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       ))
     )))
   val dm_tcrs_xbar = AXI4Xbar()
-  dm_tcrs_sNode := dm_tcrs_xbar
+  dm_tcrs_sNode := AXI4Buffer() := dm_tcrs_xbar
   dm_tcrs_xbar := u_dm_mDataBridge.axi_xbar_o
   dm_tcrs_xbar := dm_wcrs_mNode
   // data width switch from 64bit to 256bit for access to cross-die debugModule
