@@ -187,7 +187,6 @@ object Bundles {
     val firstUop = Bool()
     val lastUop = Bool()
     val numWB = NumWB() // rob need this
-    val needFrm = new NeedFrmBundle
     val latency = Latency()
 
     val debug = OptionWrapper(backendParams.debugEn, new DecodeOutUopDebug())
@@ -965,11 +964,6 @@ object Bundles {
       this.vsew  := source.vsew
       this.vlmul := source.vlmul
     }
-  }
-
-  class NeedFrmBundle(implicit p: Parameters) extends XSBundle {
-    val scalaNeedFrm = Bool()
-    val vectorNeedFrm = Bool()
   }
 
   class VIAluCtrlSignals(implicit p: Parameters) extends XSBundle {

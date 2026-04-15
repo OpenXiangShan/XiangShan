@@ -13,6 +13,7 @@ import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
 import xiangshan.backend.vector.LatDecoder
+import xiangshan.ExceptionNO._
 
 class DecodeStage()(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -73,6 +74,11 @@ class DecodeStageImp(
 
   val debug_globalCounter = RegInit(0.U(XLEN.W))
 
+  /** whether instruction decoded are illegal */
+  val isIllegalInstVec = VecInit(out.uop.map(x => x.fire && (x.bits.exceptionVec(illegalInstr) || x.bits.exceptionVec(virtualInstr))))
+  val hasIllegalInst = isIllegalInstVec.reduce(_ || _)
+  val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(out.uop.map(_.bits)), 0.U.asTypeOf(new DecodeOutUop))
+
 
   for (i <- decodeChannels.in.mops.indices) {
     val inMopBits = in.mop(i).bits
@@ -83,13 +89,13 @@ class DecodeStageImp(
     decodeChannels.in.mops(i).bits.info match {
       case info =>
         info.rawInst := inMopBits.instr
-        info.vtype    := inMopBits.vtype
+        info.vtype   := inMopBits.vtype
+        info.fromCSR := in.fromCSR
     }
     decodeChannels.in.mops(i).bits.ctrl match {
       case ctrl =>
         ctrl.foldpc           := inMopBits.foldpc
-        // FIXME: exceptionVec removed - needs ExceptSparseVec migration
-        // ctrl.exceptionVec     := inMopBits.exceptionVec
+        ctrl.exceptionVec     := inMopBits.exceptionVec
         ctrl.satpFlushFirstFetchFault := inMopBits.satpFlushFirstFetchFault
         ctrl.isFetchMalAddr   := inMopBits.isFetchMalAddr
         ctrl.trigger          := inMopBits.trigger
@@ -103,7 +109,7 @@ class DecodeStageImp(
         ctrl.vtype            := inMopBits.vtype
         ctrl.oldVType         := inMopBits.specvtype
         ctrl.rawInst          := inMopBits.instr
-        ctrl.debug.foreach(_ := inMopBits.debug.get)
+        ctrl.debug.foreach(_  := inMopBits.debug.get)
     }
   }
 
@@ -121,8 +127,10 @@ class DecodeStageImp(
     uop.bits match {
       case bits =>
         bits.foldpc := mopInfo.foldpc
-        // FIXME: exceptionVec grounded - needs proper migration
-        bits.exceptionVec.foreach(_ := false.B)
+        bits.exceptionVec extendFrom mopInfo.exceptionVec
+        bits.exceptionVec(illegalInstr) := mopInfo.exceptionVec(illegalInstr) || uopInfo.exceptionII
+        bits.exceptionVec(virtualInstr) := uopInfo.exceptionVI
+        bits.exceptionVec(breakPoint)   := TriggerAction.isExp(mopInfo.trigger)
         bits.satpFlushFirstFetchFault := mopInfo.satpFlushFirstFetchFault
         bits.isFetchMalAddr := mopInfo.isFetchMalAddr
         bits.trigger := mopInfo.trigger
@@ -199,7 +207,6 @@ class DecodeStageImp(
         bits.firstUop := uopInfo.isFirstUop
         bits.lastUop := uopInfo.isLastUop
         bits.numWB := uopInfo.numWb +& 1.U
-        bits.needFrm := 0.U.asTypeOf(bits.needFrm)
         bits.latency := LatDecoder(bits.fuType, bits.fuOpType)
         bits.debug.foreach{ x =>
           x.pc := mopInfo.debug.get.pc
@@ -230,8 +237,12 @@ class DecodeStageImp(
 
   out.toFrontend.canAccept := !in.redirect.valid && out.uop.head.ready
 
-  out.toCSR.trapInstInfo.valid := !in.redirect.valid && false.B // Todo: illegal inst
-  out.toCSR.trapInstInfo.bits := 0.U.asTypeOf(out.toCSR.trapInstInfo.bits)
+  val illegalTrapInstInfo = Wire(chiselTypeOf(out.toCSR.trapInstInfo.bits))
+  illegalTrapInstInfo := DontCare
+  illegalTrapInstInfo.fromDecodedInst(illegalInst)
+
+  out.toCSR.trapInstInfo.valid := RegNext(!in.redirect.valid && hasIllegalInst)
+  out.toCSR.trapInstInfo.bits  := RegNext(illegalTrapInstInfo)
 
   stallReason.out.reason := stallReason.in.reason
 
