@@ -387,5 +387,4 @@ build*/
 
 # Codex
 AGENTS.md
-docs/agents/
-docs/superpowers/
+*.dat
