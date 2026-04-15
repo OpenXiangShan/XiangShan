@@ -354,7 +354,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val redirect_pc = UInt(VAddrBits.W)  // PC of the redirect uop
     val debugLsInfo = new DebugLsInfo()
   }
-  val tip_table = ChiselDB.createTable("Tip_" + p(XSCoreParamsKey).HartId.toString, new TipEntry)
+  val tip_table = ChiselDB.createTable("Tip_" + p(XSCoreParamsKey).HartId.toString, new TipEntry, basicDB = true)
   val tip_data = Wire(new TipEntry())
   tip_data.state := tip_state
   tip_data.commits := io.commits
