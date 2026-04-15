@@ -1,5 +1,6 @@
 package utils
 
+import scala.language.implicitConversions
 import chisel3._
 import MathUtils.IntToOH
 

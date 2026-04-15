@@ -19,9 +19,8 @@ package device
 
 import chisel3._
 import xiangshan._
-import chisel3.experimental.{ExtModule, IntParam, noPrefix}
+import chisel3.experimental.noPrefix
 import chisel3.util._
-import chisel3.util.HasExtModuleResource
 import org.chipsalliance.cde.config.{Field, Parameters}
 import freechips.rocketchip.subsystem._
 import freechips.rocketchip.amba.apb._
@@ -100,8 +99,7 @@ class DebugModule(numCores: Int)(implicit p: Parameters) extends LazyModule {
 
 case object EnableJtag extends Field[Bool]
 
-class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule(Map("TICK_DELAY" -> IntParam(tickDelay)))
-  with HasExtModuleResource {
+class SimJTAG(tickDelay: Int = 50)(implicit val p: Parameters) extends ExtModule(Map("TICK_DELAY" -> IntParam(tickDelay))) {
 
   val clock = IO(Input(Clock()))
   val reset = IO(Input(Reset()))

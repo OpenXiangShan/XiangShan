@@ -219,7 +219,7 @@ class CtrlBlockImp(
   for ((pcMemIdx, i) <- pcMemRdIndexes("memPredLoad").zipWithIndex) {
     val ren   = mdpTrainValid
     val raddr = io.fromMem.mdpTrain.bits.ftqIdx.value
-    val offset = RegEnable(io.fromMem.mdpTrain.bits.getPcOffset, mdpTrainValid)
+    val offset = RegEnable(io.fromMem.mdpTrain.bits.getPcOffset(), mdpTrainValid)
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
     memCtrl.io.memPredUpdate.ldpc := XORFold((pcMem.io.rdata(pcMemIdx).toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)
@@ -231,7 +231,7 @@ class CtrlBlockImp(
   for ((pcMemIdx, i) <- pcMemRdIndexes("memPredStore").zipWithIndex) {
     val ren   = mdpTrainValid
     val raddr = io.fromMem.mdpTrain.bits.stFtqIdx.value
-    val offset = RegEnable(io.fromMem.mdpTrain.bits.getStPcOffset, mdpTrainValid)
+    val offset = RegEnable(io.fromMem.mdpTrain.bits.getStPcOffset(), mdpTrainValid)
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
     memCtrl.io.memPredUpdate.stpc := XORFold((pcMem.io.rdata(pcMemIdx).toUInt + offset)(VAddrBits - 1, 1), MemPredPCWidth)

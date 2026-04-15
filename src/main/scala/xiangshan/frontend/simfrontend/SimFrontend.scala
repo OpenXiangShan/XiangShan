@@ -24,7 +24,6 @@
 package xiangshan.frontend.simfrontend
 
 import chisel3._
-import chisel3.experimental.ExtModule
 import chisel3.util._
 import utility._
 import utility.InstSeqNum
@@ -47,7 +46,7 @@ import xiangshan.frontend.ifu._
  * However, in most cases, when the backend executes/submits commands slowly, it causes a false ftq full condition.
  * This prevents sending all 8 commands within a cycle, limiting transmission to only the commands stored in the false ftq.
  */
-class SimFrontFetchHelper extends ExtModule() with HasExtModuleInline {
+class SimFrontFetchHelper extends ExtModule() {
   val clock = IO(Input(Clock()))
   val reset = IO(Input(Reset()))
   val io = IO(new Bundle {

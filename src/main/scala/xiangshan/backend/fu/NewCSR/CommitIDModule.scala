@@ -1,12 +1,11 @@
 package xiangshan.backend.fu.NewCSR
 
 import chisel3._
-import chisel3.util.HasBlackBoxInline
 
 import java.util.Properties
 
-class PrintCommitIDModule(shaWidth: Int, hartIdlen: Int) extends BlackBox with HasBlackBoxInline {
-  val io = IO(new Bundle{
+class PrintCommitIDModule(shaWidth: Int, hartIdlen: Int) extends ExtModule {
+  val io = FlatIO(new Bundle{
     val hartID = Input(UInt(hartIdlen.W))
     val commitID = Input(UInt(shaWidth.W))
     val dirty = Input(Bool())

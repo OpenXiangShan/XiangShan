@@ -17,7 +17,7 @@ package device
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.experimental.{ExtModule, prefix}
+import chisel3.experimental.prefix
 import chisel3.util._
 import difftest.common.DifftestMem
 import freechips.rocketchip.amba.axi4.{AXI4MasterNode, AXI4Parameters, AXI4SlaveNode}
@@ -26,7 +26,6 @@ import utility._
 
 class MemoryRequestHelper(requestType: Int)
   extends ExtModule(Map("REQUEST_TYPE" -> requestType))
-  with HasExtModuleInline
 {
   val clock     = IO(Input(Clock()))
   val reset     = IO(Input(Reset()))
@@ -82,7 +81,6 @@ class MemoryRequestHelper(requestType: Int)
 
 class MemoryResponseHelper(requestType: Int)
   extends ExtModule(Map("REQUEST_TYPE" -> requestType))
-  with HasExtModuleInline
 {
   val clock    = IO(Input(Clock()))
   val reset    = IO(Input(Reset()))
