@@ -530,12 +530,6 @@ object ZfaDecode extends DecodeConstants {
     FLI_H       -> FDecode(SrcType.no, SrcType.X, SrcType.X, FuType.f2v, FuOpType.X, fWen = T, canRobCompress = T),
     FLI_S       -> FDecode(SrcType.no, SrcType.X, SrcType.X, FuType.f2v, FuOpType.X, fWen = T, canRobCompress = T),
     FLI_D       -> FDecode(SrcType.no, SrcType.X, SrcType.X, FuType.f2v, FuOpType.X, fWen = T, canRobCompress = T),
-    FMINM_H     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fminm, fWen = T, canRobCompress = T),
-    FMINM_S     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fminm, fWen = T, canRobCompress = T),
-    FMINM_D     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fminm, fWen = T, canRobCompress = T),
-    FMAXM_H     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fmaxm, fWen = T, canRobCompress = T),
-    FMAXM_S     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fmaxm, fWen = T, canRobCompress = T),
-    FMAXM_D     -> FDecode(SrcType.fp, SrcType.fp, SrcType.X, FuType.falu, VfaluType.fmaxm, fWen = T, canRobCompress = T),
   )
 }
 
@@ -1047,7 +1041,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   private val scalarIsSew32 = scalarSew32.map(ctrl_flow.instr === _).reduce(_ || _)
   private val scalarIsSew16 = scalarSew16.map(ctrl_flow.instr === _).reduce(_ || _)
 
-  private val isFmaNeedVd = FuType.isVecOPFFma(decodedInst.fuType) & !VFMacOpcode.isFmul(decodedInst.fuOpType)
+  private val isFmaNeedVd = false.B
 
   decodedInst.fflagsWen := wfflagsInsts.map(_ === inst.ALL).reduce(_ || _)
   decodedInst.needFrm.scalaNeedFrm := scalaNeedFrmInsts.map(_ === inst.ALL).reduce(_ || _)
