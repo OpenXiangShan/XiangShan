@@ -18,7 +18,7 @@ object TeaEvent {
 
   def bit(idx: Int): UInt = {
     require(idx >= 0 && idx < width, s"TEA event index $idx out of range [0, $width)")
-    1.U(width.W) << idx
+    (BigInt(1) << idx).U(TeaEvent.width.W)
   }
 }
 

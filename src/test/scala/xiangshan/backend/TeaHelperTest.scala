@@ -56,6 +56,7 @@ class TeaHelperTest extends XSTester {
 
   it should "define a 9-bit TEA event space and expose teaPsv on the main pipeline bundles" in {
     TeaEvent.width shouldBe 9
+    TeaEvent.bit(TeaEvent.ST_LLC).getWidth shouldBe TeaEvent.width
     test(new TeaFieldSmoke(config)) { dut =>
       dut.clock.step()
       dut.io.out.getWidth shouldBe TeaEvent.width * 5
