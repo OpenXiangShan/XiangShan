@@ -125,19 +125,6 @@ class FtqScoreboard:
                 if not current_entry_is_next_target_ftq:
                     self.state.current_ftq_entry = None
                     self.state.current_ftq_seen_packets.clear()
-            if self.state.ftq_entries and (
-                self.state.commit_count > 0
-                or self.state.commit_ptr_flag != 0
-                or self.state.commit_ptr_value != 0
-            ):
-                oldest_survivor = self.state.ftq_entries[0]
-                expected_next = self.state.increment_ftq_ptr(self.state.commit_ptr_flag, self.state.commit_ptr_value)
-                survivor_ptr = (int(oldest_survivor.ftq_flag), int(oldest_survivor.ftq_value))
-                if survivor_ptr != expected_next:
-                    self.state.commit_ptr_flag, self.state.commit_ptr_value = self.state.decrement_ftq_ptr(
-                        oldest_survivor.ftq_flag,
-                        oldest_survivor.ftq_value,
-                    )
             for entry in self.state.ftq_entries:
                 if self.state.ftq_entry_matches(entry, ftq_flag, ftq_value):
                     self.state.extend_commit_ready_cycle(entry, current_cycle=int(current_cycle))

@@ -96,13 +96,14 @@ class RunUntilGoldenTraceCompleteSequence:
                 logger.info(
                     (
                         "run until golden progress checkpoint: cycles=%d cursor=%d/%d "
-                        "golden_pc=%s golden_wait_pc=%s pending_work=%d monitor_errors=%d"
+                        "golden_pc=%s golden_wait_pc=%s recovery_target_pc=%s pending_work=%d monitor_errors=%d"
                     ),
                     cycles_run,
                     int(trace.cursor),
                     total_entries,
                     format_optional_pc(current_golden_pc_getter(trace, env.backend_model)),
                     format_optional_pc(getattr(env.backend_model, "_golden_wait_pc", None)),
+                    format_optional_pc(getattr(env.backend_model, "_semantic_recovery_target_pc", None)),
                     _pending_work_count(env.backend_model),
                     len(monitor_errors),
                 )

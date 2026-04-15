@@ -117,6 +117,10 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
         }
 
     pending_level0_target_ftq = getattr(backend_model, "_pending_level0_target_ftq", None)
+    semantic_queue = list(getattr(backend_model, "_semantic_queue", [])) if backend_model is not None else []
+    semantic_recovery_target_pc = (
+        getattr(backend_model, "_semantic_recovery_target_pc", None) if backend_model is not None else None
+    )
     recent_redirect = None
     if backend_model is not None:
         for event in reversed(list(getattr(backend_model, "last_events", []))):
@@ -189,6 +193,7 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
         "total_entries": (0 if trace is None else int(len(trace.entries))),
         "golden_pc": _get_current_golden_pc(trace, env.backend_model) if trace is not None else None,
         "golden_wait_pc": getattr(env.backend_model, "_golden_wait_pc", None),
+        "semantic_recovery_target_pc": semantic_recovery_target_pc,
         "backend_can_accept": _read_sig(dut, "io_backend_canAccept", 0),
         "from_ftq": {
             "wen": _read_sig(dut, "io_backend_fromFtq_wen", 0),
@@ -217,6 +222,19 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
             "current_ftq_entry": _encode_ftq_entry(getattr(backend_model, "_current_ftq_entry", None)),
             "ftq_entries": [
                 _encode_ftq_entry(entry) for entry in list(getattr(backend_model, "ftq_entries", []))[:4]
+            ],
+            "semantic_queue_len": int(len(semantic_queue)),
+            "semantic_queue_head": [
+                {
+                    "pc": int(getattr(entry, "pc", 0)),
+                    "ftq_flag": int(getattr(entry, "ftq_flag", 0)),
+                    "ftq_value": int(getattr(entry, "ftq_value", 0)),
+                    "path_state": str(getattr(entry, "path_state", "")),
+                    "rob_commit_state": str(getattr(entry, "rob_commit_state", "")),
+                    "resolve_state": str(getattr(entry, "resolve_state", "")),
+                    "is_last_in_entry": int(bool(getattr(entry, "is_last_in_entry", False))),
+                }
+                for entry in semantic_queue[:4]
             ],
             "recent_redirect": recent_redirect,
         },
@@ -347,12 +365,27 @@ def _format_stall_snapshot(snapshot: dict) -> str:
     def _format_ftq_entry(entry):
         if entry is None:
             return "none"
-        return "({flag},{value},cfi={resolved}/{total},redirect={redirect})".format(
+        return "({flag},{value},cfi={resolved}/{total},redirect={redirect},dispatch={dispatch},ready={ready})".format(
             flag=int(entry["ftq_flag"]),
             value=int(entry["ftq_value"]),
             resolved=int(entry["resolved_cfi"]),
             total=int(entry["total_cfi"]),
             redirect=int(entry["has_redirect"]),
+            dispatch=int(entry["dispatch_complete"]),
+            ready=int(entry["commit_ready_cycle"]),
+        )
+
+    def _format_semantic_entry(entry):
+        if entry is None:
+            return "none"
+        return "({pc},ftq={flag}/{value},path={path},rob={rob},resolve={resolve},last={last})".format(
+            pc=_format_optional_pc(entry["pc"]),
+            flag=int(entry["ftq_flag"]),
+            value=int(entry["ftq_value"]),
+            path=str(entry["path_state"]),
+            rob=str(entry["rob_commit_state"]),
+            resolve=str(entry["resolve_state"]),
+            last=int(entry["is_last_in_entry"]),
         )
 
     def _format_runtime_ftq_entry(entry):
@@ -383,12 +416,14 @@ def _format_stall_snapshot(snapshot: dict) -> str:
     return (
         "backend_can_accept={backend_can_accept} "
         "golden_pc={golden_pc} golden_wait_pc={golden_wait_pc} "
+        "semantic_recovery_target_pc={semantic_recovery_target_pc} "
         "from_ftq_wen={from_ftq_wen} from_ftq_idx={from_ftq_idx} from_ftq_start={from_ftq_start} "
         "from_ifu_gpaddr=({from_ifu_wen},{from_ifu_waddr},0x{from_ifu_gpaddr:x},vs_nonleaf={from_ifu_vs_nonleaf}) "
         "commit_ptr=({commit_ptr_flag},{commit_ptr_value}) "
         "pending_level0_target_ftq={pending_level0_target_ftq} "
         "current_ftq_entry={current_ftq_entry} "
         "ftq_entries_head={ftq_entries_head} "
+        "semantic_queue_len={semantic_queue_len} semantic_queue_head={semantic_queue_head} "
         "recent_redirect_target={recent_redirect_target} "
         "stall_reason={stall_reason} "
         "icache_req=({icache_req_valid},{icache_req_ready},0x{icache_req_addr:x},src={icache_req_source}) "
@@ -417,6 +452,7 @@ def _format_stall_snapshot(snapshot: dict) -> str:
         backend_can_accept=int(snapshot["backend_can_accept"]),
         golden_pc=_format_optional_pc(snapshot["golden_pc"]),
         golden_wait_pc=_format_optional_pc(snapshot["golden_wait_pc"]),
+        semantic_recovery_target_pc=_format_optional_pc(snapshot["semantic_recovery_target_pc"]),
         from_ftq_wen=int(from_ftq["wen"]),
         from_ftq_idx=int(from_ftq["ftq_idx"]),
         from_ftq_start=_format_optional_pc(from_ftq["start_pc_addr"] << 1),
@@ -436,6 +472,8 @@ def _format_stall_snapshot(snapshot: dict) -> str:
         ),
         current_ftq_entry=_format_ftq_entry(current_ftq_entry),
         ftq_entries_head="[" + ",".join(_format_ftq_entry(entry) for entry in backend_state["ftq_entries"]) + "]",
+        semantic_queue_len=int(backend_state["semantic_queue_len"]),
+        semantic_queue_head="[" + ",".join(_format_semantic_entry(entry) for entry in backend_state["semantic_queue_head"]) + "]",
         recent_redirect_target=(
             _format_optional_pc(recent_redirect["target_pc"]) if recent_redirect is not None else "none"
         ),

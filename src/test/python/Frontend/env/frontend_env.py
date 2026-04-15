@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable, Dict, Optional
@@ -76,6 +77,7 @@ class FrontendEnv:
         self._emit_event("session.init", {"register_callbacks": bool(register_callbacks)})
 
     def _create_collaborators(self) -> Dict[str, object]:
+        backend_random_seed = os.getenv("TB_BACKEND_RANDOM_SEED", "").strip()
         branch_checker = BranchChecker()
         return {
             "branch_checker": branch_checker,
@@ -96,6 +98,7 @@ class FrontendEnv:
                 commit_min_delay=self.config.backend.commit_min_delay,
                 commit_max_delay=self.config.backend.commit_max_delay,
                 auto_redirect_on_golden_mispredict=self.config.backend.auto_redirect_on_golden_mispredict,
+                random_seed=(None if not backend_random_seed else int(backend_random_seed, 0)),
             ),
         }
 

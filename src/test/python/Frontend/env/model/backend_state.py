@@ -132,6 +132,7 @@ class BackendState:
     visible_queue_call_ret_commit_group: list[CommitInstruction] = field(default_factory=list)
     commit_min_delay: int = 3
     commit_max_delay: int = 10
+    rng: object = random
 
     def append_semantic_queue_instruction(self, instr: QueueInstr) -> int:
         self.semantic_queue.append(instr)
@@ -218,7 +219,7 @@ class BackendState:
     def sample_commit_delay(self) -> int:
         min_delay = max(1, int(self.commit_min_delay))
         max_delay = max(min_delay, int(self.commit_max_delay))
-        return random.randint(min_delay, max_delay)
+        return self.rng.randint(min_delay, max_delay)
 
     def extend_commit_ready_cycle(self, entry: FtqEntry, *, current_cycle: Optional[int] = None) -> None:
         base_cycle = int(self.current_cycle) if current_cycle is None else int(current_cycle)

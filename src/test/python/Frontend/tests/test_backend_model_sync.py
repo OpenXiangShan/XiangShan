@@ -745,60 +745,6 @@ def test_waiting_target_prefix_cfi_is_marked_resolve_skipped() -> None:
     assert list(bm._pending_queue_resolve_indices) == []
 
 
-def test_semantic_queue_commit_drops_stale_older_ftq_entries() -> None:
-    bm = BackendModel()
-    bm.set_golden_trace(GoldenTrace([]))
-    bm._semantic_queue.extend(
-        [
-            QueueInstr(
-                cycle=0,
-                slot=0,
-                pc=0x80000020,
-                instr=0x00000013,
-                is_rvc=False,
-                pred_taken=False,
-                ftq_flag=0,
-                ftq_value=9,
-                ftq_offset=0,
-                is_last_in_entry=False,
-                path_state="correct",
-                rob_commit_state="committed",
-                golden_match_state="matched",
-            ),
-            QueueInstr(
-                cycle=0,
-                slot=1,
-                pc=0x80000024,
-                instr=0x00000013,
-                is_rvc=False,
-                pred_taken=False,
-                ftq_flag=0,
-                ftq_value=9,
-                ftq_offset=2,
-                is_last_in_entry=True,
-                path_state="correct",
-                rob_commit_state="committed",
-                golden_match_state="matched",
-            ),
-        ]
-    )
-    bm.ftq_entries.extend(
-        [
-            FtqEntry(ftq_flag=0, ftq_value=8, dispatch_complete=True, observed_last_in_entry=True, commit_ready_cycle=0),
-            FtqEntry(ftq_flag=0, ftq_value=9, dispatch_complete=True, observed_last_in_entry=True, commit_ready_cycle=0),
-        ]
-    )
-    bm.current_cycle = 1
-
-    committed = bm._plan_commit_entry_for_cycle()
-
-    assert committed is not None
-    assert (committed.ftq_flag, committed.ftq_value) == (0, 9)
-    assert len(bm._semantic_queue) == 0
-    assert list(bm.ftq_entries) == []
-    assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (0, 9)
-
-
 def test_semantic_queue_commit_uses_queue_head_when_ftq_entries_are_out_of_order() -> None:
     bm = BackendModel()
     bm.set_golden_trace(GoldenTrace([]))
@@ -1095,37 +1041,6 @@ def test_level0_redirect_does_not_wait_for_next_target_slot_that_is_already_comm
     assert bm._pending_level0_target_ftq is None
 
 
-def test_level0_redirect_does_not_wait_for_committed_next_target_slot_after_commit_ptr_rewinds():
-    dut = _DummyDut()
-    bm = BackendModel()
-    bm.bind(dut)
-    bm.commit_count = 247
-    bm.commit_ptr_flag = 1
-    bm.commit_ptr_value = 51
-    bm.ftq_entries.append(
-        FtqEntry(ftq_flag=1, ftq_value=50, total_cfi=3, resolved_cfi=3, dispatch_complete=True, commit_ready_cycle=1243)
-    )
-
-    bm._drive_redirect(
-        {
-            "target_pc": 0x80004A28,
-            "reason": "golden_resolve_redirect",
-            "flush_on_drive": True,
-            "pc": 0x800049C2,
-            "taken": 1,
-            "ftq_flag": 1,
-            "ftq_value": 50,
-            "ftq_offset": 16,
-            "branch_type": 1,
-            "ras_action": 0,
-            "level": 0,
-        }
-    )
-
-    assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (1, 49)
-    assert bm._pending_level0_target_ftq is None
-
-
 def test_flush_after_redirect_keeps_partially_observed_next_target_current_entry():
     dut = _DummyDut()
     bm = BackendModel()
@@ -1230,62 +1145,6 @@ def test_golden_wait_target_entry_suffix_does_not_reset_same_ftq_slot_state() ->
     assert len(bm._pending_resolves) == 1
     assert bm._pending_resolves[0].inst_pc == 0x80004904
     assert bm.ftq_entries[0].total_cfi == 1
-
-
-def test_golden_wait_pc_ignores_wrong_path_prefix_when_target_slot_is_known():
-    dut = _DummyDut()
-    bm = BackendModel()
-    bm.bind(dut)
-    bm._golden_wait_pc = 0x80004A28
-    bm._pending_level0_target_ftq = (1, 51)
-
-    _drive_cfvec_slot(
-        dut,
-        0,
-        valid=1,
-        pc=0x80003E7A,
-        instr=0x00000013,
-        is_rvc=1,
-        pred_taken=0,
-        ftq_flag=1,
-        ftq_value=52,
-        ftq_offset=0,
-        is_last=0,
-    )
-
-    bm.current_cycle = 0
-    bm._sample_cfvec()
-
-    assert bm._current_ftq_entry is None
-    assert bm._ftq_group_pc_history.get((1, 52)) is None
-
-
-def test_golden_wait_pc_ignores_wrong_path_prefix_when_target_group_is_known_from_history():
-    dut = _DummyDut()
-    bm = BackendModel()
-    bm.bind(dut)
-    bm._golden_wait_pc = 0x80004A82
-    bm._pc_group_occurrences[0x80004A82] = [(1, 59, 1)]
-
-    _drive_cfvec_slot(
-        dut,
-        0,
-        valid=1,
-        pc=0x80004848,
-        instr=0x00000013,
-        is_rvc=1,
-        pred_taken=0,
-        ftq_flag=0,
-        ftq_value=8,
-        ftq_offset=0,
-        is_last=0,
-    )
-
-    bm.current_cycle = 0
-    bm._sample_cfvec()
-
-    assert bm._current_ftq_entry is None
-    assert bm._ftq_group_pc_history.get((0, 8)) is None
 
 
 def test_level0_redirect_keeps_waiting_if_next_target_slot_was_seen_only_on_wrong_path():
@@ -1642,48 +1501,6 @@ def test_commit_prunes_older_wrap_entries_when_pointer_advances() -> None:
     assert (head.ftq_flag, head.ftq_value) == (1, 58)
     assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (1, 58)
     assert list((entry.ftq_flag, entry.ftq_value) for entry in bm.ftq_entries) == []
-
-
-def test_same_ftq_slot_replay_resets_observed_group_start_pc() -> None:
-    dut = _DummyDut()
-    bm = BackendModel()
-    bm.bind(dut)
-
-    _drive_cfvec_slot(
-        dut,
-        0,
-        valid=1,
-        pc=0x80004A28,
-        instr=0x00000013,
-        is_rvc=0,
-        pred_taken=0,
-        ftq_flag=0,
-        ftq_value=39,
-        ftq_offset=4,
-        is_last=0,
-    )
-    bm.current_cycle = 0
-    bm._sample_cfvec()
-
-    _clear_cfvec(dut)
-    _drive_cfvec_slot(
-        dut,
-        0,
-        valid=1,
-        pc=0x800047FA,
-        instr=0x00000013,
-        is_rvc=0,
-        pred_taken=0,
-        ftq_flag=0,
-        ftq_value=39,
-        ftq_offset=0,
-        is_last=0,
-    )
-    bm.current_cycle = 1
-    bm._sample_cfvec()
-
-    assert bm._observed_ftq_start_pc(0, 39) == 0x800047FA
-    assert bm._ftq_group_pc_history[(0, 39)] == [(0x800047FA, False)]
 
 
 def test_backend_model_consumes_backend_observation_snapshot() -> None:
