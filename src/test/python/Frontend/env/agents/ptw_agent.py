@@ -108,6 +108,12 @@ class PTWAgent:
             self._write(self.interface.resp_bits_s1_entry_v, item.resp.get("s1_entry_v", 0))
             self._write(self.interface.resp_bits_s1_entry_ppn, item.resp.get("s1_entry_ppn", 0))
             self._write(self.interface.resp_bits_s1_addr_low, item.resp.get("s1_addr_low", 0))
+            for idx in range(8):
+                self._write(self.interface.resp_bits_s1_ppn_low[idx], item.resp.get(f"s1_ppn_low_{idx}", 0))
+                self._write(self.interface.resp_bits_s1_valididx[idx], item.resp.get(f"s1_valididx_{idx}", 0))
+                self._write(self.interface.resp_bits_s1_pteidx[idx], item.resp.get(f"s1_pteidx_{idx}", 0))
+            self._write(self.interface.resp_bits_s1_pf, item.resp.get("s1_pf", 0))
+            self._write(self.interface.resp_bits_s1_af, item.resp.get("s1_af", 0))
             self.resp_count += 1
             self._emit(
                 cycle,

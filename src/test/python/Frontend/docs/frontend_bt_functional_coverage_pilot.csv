@@ -1,0 +1,35 @@
+Bin_ID,阶段,覆盖类型,Coverage_Group,Bin_Name,映射测试点路径,建议采样事件,建议观测对象,命中判据,优先级,建议试点用例
+BIN-001,L0,场景覆盖,reset_boot_path,seen,Frontend/复位与启动/TOP/复位启动/基本闭环/reset_vector对齐启动,reset释放后首个有效fetch建立,io.resetInFrontend; io.reset_vector; ftq.io.toIfu.req; io.backend.cfVec,reset释放后出现首个由reset_vector路径启动的有效取指闭环,P0,tc_boot_reset_vector
+BIN-002,L0,场景覆盖,fetch_path_type,icache_seq,Frontend/非MMIO取指/TOP/顺序取指/基本闭环/全RVI顺序流,IFU选择ICache主路径并形成顺序cfVec,ftq.io.toIfu.req; ifu.io.fromICache.fetchResp; io.backend.cfVec,出现至少一次非MMIO顺序取指闭环,P0,tc_seq_icache_basic
+BIN-003,L0,场景覆盖,fetch_path_type,mmio_uncache,Frontend/MMIO取指/TOP/MMIO取指闭环/基本闭环/纯MMIO闭环,IFU选择uncache路径并完成返回,ifu.io.toUncache; ifu.io.fromUncache; io.backend.cfVec,出现至少一次MMIO取指闭环,P0,tc_mmio_basic
+BIN-004,L0,类型覆盖,redirect_type,ctrl,Frontend/重定向与冲刷恢复/TOP/后端重定向闭环/基本闭环/单次redirect恢复,backend.toFtq.redirect有效,io.backend.toFtq.redirect; ftq.io.redirect,出现ctrl类redirect并完成前端恢复,P0,tc_backend_ctrl_redirect
+BIN-005,L0,类型覆盖,redirect_type,memVio,Frontend/重定向与冲刷恢复/TOP/后端重定向闭环/基本闭环/单次redirect恢复,backend.toFtq.redirect有效,io.backend.toFtq.redirect; ftq.io.redirect,出现memVio类redirect并完成前端恢复,P1,tc_backend_memvio_redirect
+BIN-006,L0,类型覆盖,redirect_type,interrupt,Frontend/重定向与冲刷恢复/TOP/后端重定向闭环/基本闭环/单次redirect恢复,backend.toFtq.redirect有效,io.backend.toFtq.redirect; ftq.io.redirect,出现interrupt类redirect并完成前端恢复,P1,tc_backend_interrupt_redirect
+BIN-007,L0,类型覆盖,frontend_exception_type,pf,Frontend/取指异常与错误传播/TOP/异常取指闭环/基本闭环/单异常源闭环,前端异常向backend/fromIfu传播,ifu.io.toBackend; io.backend.fromIfu,出现instruction page fault异常并被前端正确传播,P0,tc_itlb_pf_basic
+BIN-008,L0,类型覆盖,frontend_exception_type,af,Frontend/取指异常与错误传播/TOP/异常取指闭环/基本闭环/单异常源闭环,前端异常向backend/fromIfu传播,ifu.io.toBackend; io.backend.fromIfu,出现instruction access fault异常并被前端正确传播,P0,tc_pmp_af_basic
+BIN-009,L0,类型覆盖,frontend_exception_type,gpf,Frontend/取指异常与错误传播/TOP/异常取指闭环/基本闭环/单异常源闭环,前端异常向backend/fromIfu传播,ifu.io.toBackend; io.backend.fromIfu,出现guest page fault异常并被前端正确传播,P1,tc_itlb_gpf_basic
+BIN-010,L0,类型覆盖,frontend_exception_type,ill,Frontend/取指异常与错误传播/TOP/异常取指闭环/基本闭环/单异常源闭环,前端异常向backend/fromIfu传播,ifu.io.toBackend; io.backend.fromIfu,出现非法取指相关异常并被前端正确传播,P2,tc_illegal_fetch_basic
+BIN-011,L0,类型覆盖,frontend_exception_type,hwe,Frontend/取指异常与错误传播/TOP/异常取指闭环/基本闭环/单异常源闭环,前端异常向backend/fromIfu传播,ifu.io.toBackend; io.backend.fromIfu,出现硬件错误类异常并被前端正确传播,P2,tc_hardware_error_basic
+BIN-012,L0,场景覆盖,itlb_ptw_flow,miss_walk_refill,Frontend/地址翻译与权限检查/ITLB/命中缺失/单次miss/单请求walk成功,ITLB miss后发起PTW请求并返回,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp,出现单次ITLB miss-walk-refill完整闭环,P0,tc_itlb_miss_refill
+BIN-013,L0,场景覆盖,pmp_exec_result,deny,Frontend/地址翻译与权限检查/PMP/权限组合/可执行拒绝/单条规则拒绝,PMP拒绝取指并产生fault,pmp.io.pmp; pmp.io.pma; ifu.io.toBackend,出现PMP deny并向前端异常链路传播,P0,tc_pmp_deny_exec
+BIN-014,L0,场景覆盖,backend_accept_mode,all_block_short,Frontend/取指结果交付/IBuffer/出队/backend全反压/短时全反压,backend.canAccept拉低阻塞出队,ibuffer.io.out; io.backend.canAccept; io.backend.stallReason,出现短时全反压且恢复后无重复/丢失,P0,tc_backend_short_backpressure
+BIN-101,L1,类型覆盖,bpu_basic_pred_type,seq_no_cfi,Frontend/分支预测与预测块生成/BPU/基本预测/*,BPU向FTQ发出prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta,出现无CFI顺序预测,P1,tc_bpu_seq_basic
+BIN-102,L1,类型覆盖,bpu_basic_pred_type,direct_jmp,Frontend/分支预测与预测块生成/BPU/基本预测/*,BPU向FTQ发出prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta,出现直接跳转预测,P1,tc_bpu_direct_jmp
+BIN-103,L1,类型覆盖,bpu_basic_pred_type,cond_taken,Frontend/分支预测与预测块生成/BPU/基本预测/*,BPU向FTQ发出prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta,出现条件分支taken预测,P1,tc_bpu_cond_taken
+BIN-104,L1,类型覆盖,bpu_basic_pred_type,cond_nt,Frontend/分支预测与预测块生成/BPU/基本预测/*,BPU向FTQ发出prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta,出现条件分支not-taken预测,P1,tc_bpu_cond_nt
+BIN-105,L1,类型覆盖,ftq_queue_state,empty,Frontend/取指队列管理/FTQ/队列边界/*,FTQ occupancy变化,ftq.io.toIfu.req; ftq.io.fromBpu; ftq.io.toBackend,FTQ进入empty状态,P1,tc_ftq_empty_recover
+BIN-106,L1,类型覆盖,ftq_queue_state,near_full,Frontend/取指队列管理/FTQ/队列边界/*,FTQ occupancy变化,ftq.io.toIfu.req; ftq.io.fromBpu; ftq.io.toBackend,FTQ进入near_full状态,P1,tc_ftq_near_full
+BIN-107,L1,类型覆盖,ftq_queue_state,full,Frontend/取指队列管理/FTQ/队列边界/*,FTQ进入full状态或等价满边界状态,ftq.io.toIfu.req; ftq.io.fromBpu; ftq.io.toBackend,FTQ进入full状态或等价满边界状态,P2,tc_ftq_full_boundary
+BIN-108,L1,类型覆盖,itlb_result_type,hit,Frontend/地址翻译与权限检查/ITLB/命中缺失/*,ITLB request/resp结果,itlb.io.requestor,出现ITLB hit,P1,tc_itlb_hit_basic
+BIN-109,L1,类型覆盖,itlb_result_type,miss,Frontend/地址翻译与权限检查/ITLB/命中缺失/*,ITLB request/resp结果,itlb.io.requestor; itlb.io.ptw.req,出现ITLB miss并发起walk,P0,tc_itlb_miss_refill
+BIN-110,L1,类型覆盖,ptw_resp_type,leaf_pte,Frontend/地址翻译与权限检查/PTW/返回类型/*,PTW返回结果类型,itlb.io.ptw.resp,出现leaf pte返回,P0,tc_itlb_miss_refill
+BIN-111,L1,类型覆盖,ptw_resp_type,pf,Frontend/地址翻译与权限检查/PTW/返回类型/*,PTW返回结果类型,itlb.io.ptw.resp; ifu.io.toBackend,出现page fault类PTW返回,P1,tc_ptw_pf_resp
+BIN-112,L1,类型覆盖,pmp_exec_type,allow,Frontend/地址翻译与权限检查/PMP/权限组合/*,PMP/PMA对取指的判定结果,pmp.io.pmp; pmp.io.pma,出现allow判定,P1,tc_pmp_allow_exec
+BIN-113,L1,类型覆盖,pmp_exec_type,deny,Frontend/地址翻译与权限检查/PMP/权限组合/*,PMP/PMA对取指的判定结果,pmp.io.pmp; pmp.io.pma; ifu.io.toBackend,出现deny判定,P0,tc_pmp_deny_exec
+BIN-114,L1,类型覆盖,ibuffer_state,empty,Frontend/取指结果交付/IBuffer/空满边界/*,IBuffer occupancy状态,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full,IBuffer进入empty状态,P1,tc_ibuffer_empty_to_fill
+BIN-115,L1,类型覆盖,ibuffer_state,near_full,Frontend/取指结果交付/IBuffer/空满边界/*,IBuffer occupancy状态,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full,IBuffer进入near_full状态,P1,tc_ibuffer_near_full_backpressure
+BIN-116,L1,类型覆盖,ibuffer_state,full,Frontend/取指结果交付/IBuffer/空满边界/*,IBuffer occupancy状态,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full,IBuffer进入full状态或等价满边界状态,P2,tc_ibuffer_full_boundary
+BIN-201,L1,交叉覆盖,fetch_path_x_exception,icache_x_pf,Frontend/关键交叉/fetch_path x exception,异常传播事件发生时进行交叉采样,fetch_path_type; frontend_exception_type,在ICache取指路径上命中pf异常组合,P1,tc_itlb_pf_basic
+BIN-202,L1,交叉覆盖,fetch_path_x_exception,mmio_x_af,Frontend/关键交叉/fetch_path x exception,异常传播事件发生时进行交叉采样,fetch_path_type; frontend_exception_type,在MMIO路径上命中af异常组合,P1,tc_mmio_af_basic
+BIN-203,L1,交叉覆盖,itlb_state_x_ptw_resp,single_miss_x_leaf_pte,Frontend/关键交叉/itlb x ptw,PTW返回时进行交叉采样,itlb_result_type; ptw_resp_type,单次miss与leaf_pte返回组合被命中,P0,tc_itlb_miss_refill
+BIN-204,L1,交叉覆盖,ibuffer_state_x_backend_mode,near_full_x_all_block,Frontend/关键交叉/ibuffer x backend_accept,backend.canAccept变化时进行交叉采样,ibuffer_state; backend_accept_mode,IBuffer near_full且backend全反压组合被命中,P1,tc_ibuffer_near_full_backpressure

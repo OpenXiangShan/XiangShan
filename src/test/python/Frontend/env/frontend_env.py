@@ -54,9 +54,12 @@ class FrontendEnv:
         self.logger = logging.getLogger("env.frontend_env")
         self.dut = dut
         self.waveform_path: Optional[str] = None
+        self.line_coverage_path: Optional[str] = None
+        self.functional_coverage = None
         self.event_sink = event_sink
         self.config = config or DEFAULT_ENV_CONFIG
         self.current_cycle = 0
+        self._cycle_observers = []
         self.bp_ctrl_ubtb_enable = 1 if int(bp_ctrl_ubtb_enable) else 0
         self.bp_ctrl_abtb_enable = 1 if int(bp_ctrl_abtb_enable) else 0
         self.bp_ctrl_mbtb_enable = 1 if int(bp_ctrl_mbtb_enable) else 0
@@ -75,6 +78,14 @@ class FrontendEnv:
         self._register_callbacks(register_callbacks)
         self.logger.info("frontend env initialized")
         self._emit_event("session.init", {"register_callbacks": bool(register_callbacks)})
+
+    def set_event_sink(self, sink: Optional[Callable[[Dict], None]]) -> None:
+        self.event_sink = sink
+        for collaborator in self._bindable_collaborators():
+            collaborator.set_event_sink(sink)
+
+    def register_cycle_observer(self, observer: Callable[[int, "FrontendEnv"], None]) -> None:
+        self._cycle_observers.append(observer)
 
     def _create_collaborators(self) -> Dict[str, object]:
         backend_random_seed = os.getenv("TB_BACKEND_RANDOM_SEED", "").strip()
@@ -240,6 +251,8 @@ class FrontendEnv:
         self.ptw_agent.on_clock_edge(cycle)
         self._drive_backend_cycle(cycle)
         self.monitor.on_clock_edge(cycle)
+        for observer in list(self._cycle_observers):
+            observer(int(cycle), self)
         self._emit_event("clock.tick", {"cycle": int(cycle)}, level="DEBUG")
 
     def step(self, cycles: int = 1) -> int:

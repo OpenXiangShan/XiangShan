@@ -21,6 +21,7 @@ from .api import api_Frontend_load_program
 from .coverage_def import get_coverage_groups
 from .dut_factory import create_frontend_dut
 from .env_config import DEFAULT_ENV_CONFIG
+from .functional_coverage import FunctionalCoverageRecorder, default_pilot_csv_path
 from .frontend_env import FrontendEnv
 from .logging_utils import configure_env_logging
 
@@ -162,11 +163,29 @@ def dut(request):
 
 
 @pytest.fixture(scope="function")
-def env(dut):
+def env(dut, request):
     configure_env_logging()
-    tb = FrontendEnv(dut, config=DEFAULT_ENV_CONFIG)
+    data_dir = _data_dir()
+    tag = _artifact_tag(request)
+    waveform = _waveform_path(request, data_dir)
+    coverage = _coverage_path(request, data_dir)
+    recorder = FunctionalCoverageRecorder.from_pilot_csv(
+        default_pilot_csv_path(),
+        testcase_name=request.node.name if request is not None else "frontend",
+        artifact_tag=tag,
+        output_dir=data_dir,
+        waveform_path=waveform,
+        line_coverage_path=coverage,
+    )
+    tb = FrontendEnv(dut, event_sink=recorder.handle_event, config=DEFAULT_ENV_CONFIG)
+    tb.waveform_path = str(waveform)
+    tb.line_coverage_path = str(coverage)
+    tb.functional_coverage = recorder
+    recorder.attach(tb)
+    dut.StepRis(lambda cycle: recorder.on_cycle(cycle, tb))
     tb.initialize(reset_vector=0x80000000, bare_mode=True, reset_cycles=20)
-    return tb
+    yield tb
+    recorder.write_artifacts()
 
 
 @pytest.fixture(scope="function")

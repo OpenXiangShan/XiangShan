@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, Tuple
 
 from .memory_model import PTE
 
@@ -75,9 +75,11 @@ class PageTableModel:
             pte = PTE(ppn=int(vpn), level=0)
         else:
             pte = self.pte_map.get(int(vpn), PTE(ppn=int(vpn), v=0, r=0, x=0, level=0))
-        return {
+        sector_idx = int(vpn) & 0x7
+        pf = 1 if (pte.v == 0 or pte.x == 0) else 0
+        resp = {
             "s2xlate": 0,
-            "s1_entry_tag": int(vpn) & ((1 << 35) - 1),
+            "s1_entry_tag": (int(vpn) >> 3) & ((1 << 35) - 1),
             "s1_entry_asid": pte.asid,
             "s1_entry_vmid": pte.vmid,
             "s1_entry_n": 0,
@@ -91,8 +93,15 @@ class PageTableModel:
             "s1_entry_level": pte.level,
             "s1_entry_v": pte.v,
             "s1_entry_ppn": pte.ppn,
-            "s1_addr_low": 0,
+            "s1_addr_low": sector_idx,
+            "s1_pf": pf,
+            "s1_af": 0,
         }
+        for i in range(8):
+            resp[f"s1_ppn_low_{i}"] = (pte.ppn & 0x7) if (i == sector_idx and pte.v) else 0
+            resp[f"s1_valididx_{i}"] = 1 if (i == sector_idx and pte.v) else 0
+            resp[f"s1_pteidx_{i}"] = 1 if i == sector_idx else 0
+        return resp
 
 
 __all__ = ["PageTableModel"]
