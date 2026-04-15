@@ -98,18 +98,37 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
     val pendingDrain = Output(Bool())
   })
 
-  val pendingDrain = RegInit(false.B)
-  val pendingCycle = RegInit(0.U(64.W))
-  val emitDrainSample = RegInit(false.B)
-  val emitDrainCycle = RegInit(0.U(64.W))
-  val emitDrainPc = RegInit(0.U(VAddrBits.W))
-  val emitDrainPsv = RegInit(0.U(TeaEvent.width.W))
+  val drainQueueDepth = 16
+  val drainPtrWidth = log2Ceil(drainQueueDepth)
+  val drainCountWidth = log2Ceil(drainQueueDepth + 1)
+
+  def wrapInc(ptr: UInt): UInt = Mux(ptr === (drainQueueDepth - 1).U, 0.U, ptr + 1.U)
+
+  val drainCycles = Reg(Vec(drainQueueDepth, UInt(64.W)))
+  val drainEnqPtr = RegInit(0.U(drainPtrWidth.W))
+  val drainDeqPtr = RegInit(0.U(drainPtrWidth.W))
+  val drainCount = RegInit(0.U(drainCountWidth.W))
+  val replayActive = RegInit(false.B)
+  val replayPc = RegInit(0.U(VAddrBits.W))
+  val replayPsv = RegInit(0.U(TeaEvent.width.W))
   val cycle = RegInit(0.U(64.W))
   cycle := cycle + 1.U
-  emitDrainSample := false.B
 
   val sample = WireInit(0.U.asTypeOf(new TeaEntry()(p)))
   val sampleValid = WireDefault(false.B)
+  val drainSampleFire = io.sampleFire && io.state === 3.U
+  val replayValid = replayActive && drainCount =/= 0.U
+  val drainFull = drainCount === drainQueueDepth.U
+  val drainEmpty = drainCount === 0.U
+  val doDrainDeq = replayValid
+  val canDrainEnq = !drainFull || doDrainDeq
+  val nextDrainCount = WireDefault(drainCount)
+
+  when(drainSampleFire && !doDrainDeq) {
+    nextDrainCount := drainCount + 1.U
+  }.elsewhen(!drainSampleFire && doDrainDeq) {
+    nextDrainCount := drainCount - 1.U
+  }
 
   sample.cycle := cycle
   sample.state := io.state
@@ -135,32 +154,48 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
         sample.oirValid := io.oir.valid
         sampleValid := io.oir.valid
       }
-      is(3.U) {
-        pendingDrain := true.B
-        pendingCycle := cycle
-      }
     }
   }
 
-  when(pendingDrain && io.firstAllocValid) {
-    emitDrainSample := true.B
-    emitDrainCycle := pendingCycle
-    emitDrainPc := io.firstAllocPc
-    emitDrainPsv := io.firstAllocPsv
-    pendingDrain := false.B
+  when(drainSampleFire) {
+    assert(canDrainEnq, "TeaSampleSelector drain queue overflow")
+    when(canDrainEnq) {
+      drainCycles(drainEnqPtr) := cycle
+      drainEnqPtr := wrapInc(drainEnqPtr)
+    }
   }
 
-  when(emitDrainSample) {
-    sample.cycle := emitDrainCycle
+  when(!replayActive && io.firstAllocValid && (!drainEmpty || drainSampleFire)) {
+    replayActive := true.B
+    replayPc := io.firstAllocPc
+    replayPsv := io.firstAllocPsv
+  }
+
+  when(replayValid) {
+    sample.cycle := drainCycles(drainDeqPtr)
     sample.state := 3.U
     sample.validMask := 1.U(CommitWidth.W)
-    sample.pcVec(0) := emitDrainPc
-    sample.psvVec(0) := emitDrainPsv
+    sample.pcVec(0) := replayPc
+    sample.psvVec(0) := replayPsv
     sample.pendingDrain := true.B
     sampleValid := true.B
   }
 
+  when(doDrainDeq) {
+    drainDeqPtr := wrapInc(drainDeqPtr)
+  }
+
+  when(drainSampleFire && !doDrainDeq) {
+    drainCount := drainCount + 1.U
+  }.elsewhen(!drainSampleFire && doDrainDeq) {
+    drainCount := drainCount - 1.U
+  }
+
+  when(replayActive && doDrainDeq && drainCount === 1.U && !drainSampleFire) {
+    replayActive := false.B
+  }
+
   io.sampleValid := sampleValid
   io.sample := sample
-  io.pendingDrain := pendingDrain
+  io.pendingDrain := nextDrainCount =/= 0.U
 }

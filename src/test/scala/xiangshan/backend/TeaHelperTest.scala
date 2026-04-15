@@ -165,6 +165,7 @@ class TeaHelperTest extends XSTester {
       val firstAllocPsv = Input(UInt(TeaEvent.width.W))
       val sampleValid = Output(Bool())
       val sample = Output(new TeaEntry()(p))
+      val pendingDrain = Output(Bool())
     })
 
     val selector = Module(new TeaSampleSelector()(p))
@@ -181,6 +182,7 @@ class TeaHelperTest extends XSTester {
     selector.io.firstAllocPsv := io.firstAllocPsv
     io.sampleValid := selector.io.sampleValid
     io.sample := selector.io.sample
+    io.pendingDrain := selector.io.pendingDrain
   }
 
   it should "define a 9-bit TEA event space and expose teaPsv on the main pipeline bundles" in {
@@ -375,6 +377,22 @@ class TeaHelperTest extends XSTester {
     }
   }
 
+  it should "emit the ROB head payload in stalled state" in {
+    test(new TeaSelectorHarness) { dut =>
+      val commitMaskWidth = dut.io.commitMask.getWidth
+      dut.io.sampleFire.poke(true.B)
+      dut.io.state.poke(1.U)
+      dut.io.headPc.poke("h80000180".U)
+      dut.io.headPsv.poke(TeaEvent.bit(TeaEvent.ST_TLB))
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
+      dut.io.sample.pcVec(0).expect("h80000180".U)
+      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.ST_TLB))
+      dut.io.pendingDrain.expect(false.B)
+    }
+  }
+
   it should "defer drained samples until the first new ROB allocation arrives" in {
     test(new TeaSelectorHarness) { dut =>
       val commitMaskWidth = dut.io.commitMask.getWidth
@@ -383,6 +401,7 @@ class TeaHelperTest extends XSTester {
       dut.io.firstAllocValid.poke(false.B)
       dut.clock.step()
       dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
 
       dut.io.sampleFire.poke(false.B)
       dut.io.firstAllocValid.poke(true.B)
@@ -392,6 +411,47 @@ class TeaHelperTest extends XSTester {
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
       dut.io.sample.pcVec(0).expect("h80000200".U)
+      dut.io.sample.pendingDrain.expect(true.B)
+      dut.io.pendingDrain.expect(false.B)
+    }
+  }
+
+  it should "replay every deferred drained sample after the first new ROB allocation" in {
+    test(new TeaSelectorHarness) { dut =>
+      val commitMaskWidth = dut.io.commitMask.getWidth
+
+      dut.io.sampleFire.poke(true.B)
+      dut.io.state.poke(3.U)
+      dut.io.firstAllocValid.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(true.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(false.B)
+      dut.io.firstAllocValid.poke(true.B)
+      dut.io.firstAllocPc.poke("h80000300".U)
+      dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
+      dut.io.sample.pcVec(0).expect("h80000300".U)
+      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.io.sample.pendingDrain.expect(true.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
+      dut.io.sample.pcVec(0).expect("h80000300".U)
+      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.io.sample.pendingDrain.expect(true.B)
+      dut.io.pendingDrain.expect(false.B)
     }
   }
 }
