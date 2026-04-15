@@ -12,11 +12,11 @@ object NoSpecField extends BoolDecodeField[InstPattern] {
     op match {
       case int: IntInstPattern => int match {
         case intR: IntRTypePattern => intR match {
-          case AmoInstPattern() => y
+          case _: AmoInstPattern => y
           case _ => n
         }
         case intI: IntITypePattern => intI match {
-          case SystemInstPattern() => y
+          case _: SystemInstPattern => y
           case CSRInstPattern() => y
           case AmoLrInstPattern() => y
           case FenceInstPattern() => y
