@@ -315,6 +315,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val debug_lsTopdownInfo = RegInit(VecInit(Seq.fill(RobSize)(LsTopdownInfo.init)))
   val debug_lqIdxValid = RegInit(VecInit.fill(RobSize)(false.B))
   val debug_lsIssued = RegInit(VecInit.fill(RobSize)(false.B))
+  val teaOir = RegInit(0.U.asTypeOf(new TeaOIR))
+  val teaOverflow = RegInit(false.B)
+  dontTouch(teaOverflow)
 
   val isEmpty = enqPtr === deqPtr
   val snptEnq = io.enq.canAccept && io.enq.req.map(x => x.valid && x.bits.snapshot).reduce(_ || _)
@@ -326,6 +329,20 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val snapshots = SnapshotGenerator(snapshotPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
   val debug_lsIssue = WireDefault(debug_lsIssued)
   debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue
+  val hartId = p(XSCoreParamsKey).HartId
+  val enableTip = Constantin.createRecord(s"enableTip$hartId", true)
+  val enableTea = Constantin.createRecord(s"enableTea$hartId", false)
+  val teaSamplePeriod = Constantin.createRecord(s"teaSamplePeriod$hartId", 1)
+  val teaCountdown = RegInit(0.U(64.W))
+  val teaSampleFire = WireDefault(false.B)
+  when (!enableTea) {
+    teaCountdown := 0.U
+  }.elsewhen (teaCountdown === 0.U) {
+    teaSampleFire := true.B
+    teaCountdown := Mux(teaSamplePeriod === 0.U, 0.U, teaSamplePeriod - 1.U)
+  }.otherwise {
+    teaCountdown := teaCountdown - 1.U
+  }
 
   /**
    * states of Rob
@@ -362,7 +379,40 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   tip_data.redirect_pc := robEntries(io.redirect.bits.robIdx.value).debug_pc.getOrElse(0.U)
   tip_data.debugLsInfo := debug_lsInfo(io.commits.robIdx(0).value)
-  tip_table.log(tip_data, true.B, "", clock, reset)
+  tip_table.log(tip_data, enableTip.asBool, "", clock, reset)
+
+  val teaSelector = Module(new TeaSampleSelector)
+  val teaState = tip_state
+  val teaHeadPc = debug_microOp(deqPtr.value).pc
+  val teaHeadPsv = robEntries(deqPtr.value).teaPsv
+  val firstAllocValid = canEnqueue.reduce(_ || _)
+  val firstAllocPc = Mux1H(canEnqueue, io.enq.req.map(_.bits.pc))
+  val firstAllocPsv = Mux1H(canEnqueue, io.enq.req.map(_.bits.teaPsv))
+
+  val commitPcVec = Wire(Vec(CommitWidth, UInt(VAddrBits.W)))
+  val commitPsvVec = Wire(Vec(CommitWidth, UInt(TeaEvent.width.W)))
+  for (i <- 0 until CommitWidth) {
+    commitPcVec(i) := debug_microOp(io.commits.robIdx(i).value).pc
+    commitPsvVec(i) := robEntries(io.commits.robIdx(i).value).teaPsv
+  }
+
+  teaSelector.io.sampleFire := teaSampleFire
+  teaSelector.io.state := teaState
+  teaSelector.io.commitMask := io.commits.commitValid.asUInt
+  teaSelector.io.commitPc := commitPcVec
+  teaSelector.io.commitPsv := commitPsvVec
+  teaSelector.io.headPc := teaHeadPc
+  teaSelector.io.headPsv := teaHeadPsv
+  teaSelector.io.oir := teaOir
+  teaSelector.io.firstAllocValid := firstAllocValid
+  teaSelector.io.firstAllocPc := firstAllocPc
+  teaSelector.io.firstAllocPsv := firstAllocPsv
+
+  val teaTable = ChiselDB.createTable(s"Tea_$hartId", new TeaEntry, basicDB = true)
+  teaTable.log(teaSelector.io.sample, enableTea.asBool && teaSelector.io.sampleValid, "", clock, reset)
+  when (enableTea.asBool && teaSelector.io.sampleValid && teaState === 2.U) {
+    teaOir.valid := false.B
+  }
 
   val exceptionGen = Module(new ExceptionGen(params))
   val exceptionDataRead = exceptionGen.io.state
@@ -1023,10 +1073,26 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(io.debug_ls.debugLsInfo(i))
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(io.debug_ls.debugLsInfo(i))
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s3_robIdx).s3SignalEnable(io.debug_ls.debugLsInfo(i))
+    val s1Idx = io.debug_ls.debugLsInfo(i).s1_robIdx
+    val s2Idx = io.debug_ls.debugLsInfo(i).s2_robIdx
+    when (io.debug_ls.debugLsInfo(i).s1_isTlbFirstMiss) {
+      robEntries(s1Idx).teaPsv := TeaBinders.applyLoadDebug(robEntries(s1Idx).teaPsv, io.debug_ls.debugLsInfo(i))
+    }
+    when (io.debug_ls.debugLsInfo(i).s2_isDcacheFirstMiss) {
+      robEntries(s2Idx).teaPsv := TeaBinders.applyLoadDebug(robEntries(s2Idx).teaPsv, io.debug_ls.debugLsInfo(i))
+    }
   }
   for (i <- 0 until LduCnt) {
     debug_lsTopdownInfo(io.lsTopdownInfo(i).s1.robIdx).s1SignalEnable(io.lsTopdownInfo(i))
     debug_lsTopdownInfo(io.lsTopdownInfo(i).s2.robIdx).s2SignalEnable(io.lsTopdownInfo(i))
+  }
+  when (io.redirect.valid && io.redirect.bits.debugIsCtrl) {
+    val idx = io.redirect.bits.robIdx.value
+    robEntries(idx).teaPsv := TeaBinders.applyControlRedirect(robEntries(idx).teaPsv, true.B)
+    teaOverflow := teaOir.valid
+    teaOir.valid := true.B
+    teaOir.pc := debug_microOp(idx).pc
+    teaOir.psv := TeaBinders.applyControlRedirect(robEntries(idx).teaPsv, true.B)
   }
 
   // status field: writebacked
