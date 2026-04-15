@@ -69,6 +69,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // VTypeBuffer
     val needVTB = Bool()
     val isHls = Bool()
+    val teaPsv = UInt(xiangshan.TeaEvent.width.W)
     // data end
     // trace
     val traceBlockInPipe = new TracePipe(IretireWidthEncoded)
@@ -164,6 +165,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.rfWen := robEnq.rfWen
     robEntry.fpWen := robEnq.dirtyFs
     robEntry.dirtyVs := robEnq.dirtyVs
+    robEntry.teaPsv := robEnq.teaPsv
     // flushPipe needFlush but not exception
     robEntry.needFlush := robEnq.hasException || robEnq.flushPipe
     // trace

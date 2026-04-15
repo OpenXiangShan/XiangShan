@@ -112,6 +112,7 @@ object Bundles {
     val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
+    val teaPsv = UInt(xiangshan.TeaEvent.width.W)
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val isLastInFtqEntry = Bool()
@@ -146,6 +147,7 @@ object Bundles {
     val fixedTaken = Bool()
     val predTaken  = Bool()
     val crossPageIPFFix = Bool()
+    val teaPsv = UInt(xiangshan.TeaEvent.width.W)
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val isLastInFtqEntry = Bool()
@@ -238,6 +240,7 @@ object Bundles {
     val fixedTaken = Bool()
     val predTaken = Bool()
     val crossPageIPFFix = Bool()
+    val teaPsv = UInt(xiangshan.TeaEvent.width.W)
     val ftqPtr = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val commitType = CommitType()
@@ -608,6 +611,7 @@ object Bundles {
     val fixedTaken      = Bool()
     val predTaken       = Bool()
     val crossPageIPFFix = Bool()
+    val teaPsv          = UInt(xiangshan.TeaEvent.width.W)
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(FetchBlockInstOffsetWidth.W)
     val ftqLastOffset   = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before channge in rename
