@@ -5,12 +5,13 @@ import chisel3.util.Cat
 import chiseltest._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan._
+import xiangshan.backend.ctrlblock.DebugLsInfo
 import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
 import xiangshan.backend.rob.RobBundles
 import xiangshan.backend.rob.RobBundles.RobEntryBundle
 import xiangshan.frontend.{FetchToIBuffer, FrontendTopDownBundle, IBuffer}
 import utility.{LogUtilsOptions, LogUtilsOptionsKey, PerfCounterOptions, PerfCounterOptionsKey}
-import xiangshan.{TeaEvent, TeaFrontend}
+import xiangshan.{TeaBinders, TeaEvent, TeaFrontend}
 
 class TeaHelperTest extends XSTester {
   behavior of "TEA helper metadata"
@@ -127,6 +128,26 @@ class TeaHelperTest extends XSTester {
     io.outTeaPsv := VecInit(ibuffer.io.out.map(_.bits.teaPsv))
   }
 
+  class LoadBinderHarness(implicit p: Parameters) extends Module {
+    val io = IO(new Bundle {
+      val in = Input(UInt(TeaEvent.width.W))
+      val out = Output(UInt(TeaEvent.width.W))
+    })
+    val ls = DebugLsInfo.init(p)
+    ls.s2_isDcacheFirstMiss := true.B
+    ls.s1_isTlbFirstMiss := true.B
+    io.out := TeaBinders.applyLoadDebug(io.in, ls)
+  }
+
+  class RedirectBinderHarness(implicit p: Parameters) extends Module {
+    val io = IO(new Bundle {
+      val in = Input(UInt(TeaEvent.width.W))
+      val isCtrl = Input(Bool())
+      val out = Output(UInt(TeaEvent.width.W))
+    })
+    io.out := TeaBinders.applyControlRedirect(io.in, io.isCtrl)
+  }
+
   it should "define a 9-bit TEA event space and expose teaPsv on the main pipeline bundles" in {
     TeaEvent.width shouldBe 9
     TeaEvent.bit(TeaEvent.ST_LLC).getWidth shouldBe TeaEvent.width
@@ -232,6 +253,30 @@ class TeaHelperTest extends XSTester {
       dut.io.outValid(0).expect(true.B)
       dut.io.outInstr(0).expect(queuedInstr)
       dut.io.outTeaPsv(0).expect(TeaEvent.bit(TeaEvent.DR_L1))
+    }
+  }
+
+  it should "set ST_L1 and ST_TLB without clearing existing bits" in {
+    val expected = teaBitValue(TeaEvent.DR_L1) | teaBitValue(TeaEvent.ST_L1) | teaBitValue(TeaEvent.ST_TLB)
+
+    test(new LoadBinderHarness) { dut =>
+      dut.io.in.poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.clock.step()
+      dut.io.out.expect(expected.U(TeaEvent.width.W))
+    }
+  }
+
+  it should "set FL_MB only for control redirects" in {
+    test(new RedirectBinderHarness) { dut =>
+      dut.io.in.poke(0.U)
+      dut.io.isCtrl.poke(true.B)
+      dut.clock.step()
+      dut.io.out.expect(TeaEvent.bit(TeaEvent.FL_MB))
+
+      dut.io.in.poke(0.U)
+      dut.io.isCtrl.poke(false.B)
+      dut.clock.step()
+      dut.io.out.expect(0.U)
     }
   }
 }

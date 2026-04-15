@@ -3,6 +3,7 @@ package xiangshan
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan.backend.ctrlblock.DebugLsInfo
 
 object TeaEvent {
   val DR_L1  = 0
@@ -28,6 +29,17 @@ object TeaPsvOps {
 
   def setBit(psv: UInt, event: Int): UInt = {
     psv | TeaEvent.bit(event)
+  }
+}
+
+object TeaBinders {
+  def applyLoadDebug(psv: UInt, lsInfo: DebugLsInfo): UInt = {
+    val withL1 = Mux(lsInfo.s2_isDcacheFirstMiss, TeaPsvOps.setBit(psv, TeaEvent.ST_L1), psv)
+    Mux(lsInfo.s1_isTlbFirstMiss, TeaPsvOps.setBit(withL1, TeaEvent.ST_TLB), withL1)
+  }
+
+  def applyControlRedirect(psv: UInt, isControlRedirect: Bool): UInt = {
+    Mux(isControlRedirect, TeaPsvOps.setBit(psv, TeaEvent.FL_MB), psv)
   }
 }
 
