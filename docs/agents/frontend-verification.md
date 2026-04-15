@@ -80,6 +80,31 @@ Enable the versioned git hook so staged frontend changes run the smoke guard bef
 git config core.hooksPath .githooks
 ```
 
+## Commit Message Rules
+
+When a frontend change is committed, the commit subject must follow the same
+format used by recent history under `src/test/python/Frontend/`:
+
+- use `type(scope): summary`
+- keep `type` and `scope` lowercase
+- for frontend verification changes, use `frontend` as the default scope
+- choose `type` from the actual change intent, for example:
+  `fix`, `feat`, `refactor`, `docs`, `test`, `chore`
+
+The summary must be derived from the staged file content, not from a vague
+intention. Therefore:
+
+- inspect the staged diff before writing the message
+- describe the concrete behavior or artifact change in the subject
+- do not use generic subjects such as `update frontend`, `misc fixes`, or
+  `tune logic`
+- if the commit mainly removes tests or checks that contradict the documented
+  semantic contract, say so explicitly instead of pretending it is a feature
+  change
+
+For non-trivial frontend commits, prefer adding a short body that summarizes
+the major changed areas from the staged diff.
+
 Run the DUT bin-trace case directly:
 
 ```bash
