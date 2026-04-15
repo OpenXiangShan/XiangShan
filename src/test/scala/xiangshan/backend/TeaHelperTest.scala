@@ -141,6 +141,19 @@ class TeaHelperTest extends XSTester {
     io.out := TeaBinders.applyLoadDebug(io.in, ls)
   }
 
+  class StageScopedLoadBinderHarness(implicit p: Parameters) extends Module {
+    val io = IO(new Bundle {
+      val s1In = Input(UInt(TeaEvent.width.W))
+      val s2In = Input(UInt(TeaEvent.width.W))
+      val dcacheFirstMiss = Input(Bool())
+      val tlbFirstMiss = Input(Bool())
+      val s1Out = Output(UInt(TeaEvent.width.W))
+      val s2Out = Output(UInt(TeaEvent.width.W))
+    })
+    io.s1Out := TeaBinders.applyLoadTlbFirstMiss(io.s1In, io.tlbFirstMiss)
+    io.s2Out := TeaBinders.applyLoadDcacheFirstMiss(io.s2In, io.dcacheFirstMiss)
+  }
+
   class RedirectBinderHarness(implicit p: Parameters) extends Module {
     val io = IO(new Bundle {
       val in = Input(UInt(TeaEvent.width.W))
@@ -160,6 +173,7 @@ class TeaHelperTest extends XSTester {
       val headPc = Input(UInt(VAddrBits.W))
       val headPsv = Input(UInt(TeaEvent.width.W))
       val oir = Input(new TeaOIR()(p))
+      val overflow = Input(Bool())
       val firstAllocValid = Input(Bool())
       val firstAllocPc = Input(UInt(VAddrBits.W))
       val firstAllocPsv = Input(UInt(TeaEvent.width.W))
@@ -177,6 +191,7 @@ class TeaHelperTest extends XSTester {
     selector.io.headPc := io.headPc
     selector.io.headPsv := io.headPsv
     selector.io.oir := io.oir
+    selector.io.overflow := io.overflow
     selector.io.firstAllocValid := io.firstAllocValid
     selector.io.firstAllocPc := io.firstAllocPc
     selector.io.firstAllocPsv := io.firstAllocPsv
@@ -326,6 +341,21 @@ class TeaHelperTest extends XSTester {
     }
   }
 
+  it should "scope load-debug first-miss bits to their matching ROB entries" in {
+    val s1Base = teaBitValue(TeaEvent.DR_L1)
+    val s2Base = teaBitValue(TeaEvent.FL_MB)
+
+    test(new StageScopedLoadBinderHarness) { dut =>
+      dut.io.s1In.poke(s1Base.U(TeaEvent.width.W))
+      dut.io.s2In.poke(s2Base.U(TeaEvent.width.W))
+      dut.io.dcacheFirstMiss.poke(true.B)
+      dut.io.tlbFirstMiss.poke(true.B)
+      dut.clock.step()
+      dut.io.s1Out.expect((s1Base | teaBitValue(TeaEvent.ST_TLB)).U(TeaEvent.width.W))
+      dut.io.s2Out.expect((s2Base | teaBitValue(TeaEvent.ST_L1)).U(TeaEvent.width.W))
+    }
+  }
+
   it should "set FL_MB only for control redirects while preserving existing PSV bits" in {
     val base = teaBitValue(TeaEvent.DR_L1)
     val redirected = base | teaBitValue(TeaEvent.FL_MB)
@@ -348,6 +378,7 @@ class TeaHelperTest extends XSTester {
       val commitMaskWidth = dut.io.commitMask.getWidth
       dut.io.sampleFire.poke(true.B)
       dut.io.state.poke(0.U)
+      dut.io.overflow.poke(false.B)
       dut.io.commitMask.poke("b00000011".U(commitMaskWidth.W))
       dut.io.commitPc(0).poke("h80000000".U)
       dut.io.commitPc(1).poke("h80000004".U)
@@ -369,6 +400,7 @@ class TeaHelperTest extends XSTester {
       dut.io.oir.valid.poke(true.B)
       dut.io.oir.pc.poke("h80000100".U)
       dut.io.oir.psv.poke(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.io.overflow.poke(false.B)
       dut.clock.step()
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
@@ -384,6 +416,7 @@ class TeaHelperTest extends XSTester {
       dut.io.state.poke(1.U)
       dut.io.headPc.poke("h80000180".U)
       dut.io.headPsv.poke(TeaEvent.bit(TeaEvent.ST_TLB))
+      dut.io.overflow.poke(false.B)
       dut.clock.step()
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
@@ -398,6 +431,7 @@ class TeaHelperTest extends XSTester {
       val commitMaskWidth = dut.io.commitMask.getWidth
       dut.io.sampleFire.poke(true.B)
       dut.io.state.poke(3.U)
+      dut.io.overflow.poke(false.B)
       dut.io.firstAllocValid.poke(false.B)
       dut.clock.step()
       dut.io.sampleValid.expect(false.B)
@@ -422,6 +456,7 @@ class TeaHelperTest extends XSTester {
 
       dut.io.sampleFire.poke(true.B)
       dut.io.state.poke(3.U)
+      dut.io.overflow.poke(false.B)
       dut.io.firstAllocValid.poke(false.B)
       dut.clock.step()
       dut.io.sampleValid.expect(false.B)
@@ -463,6 +498,7 @@ class TeaHelperTest extends XSTester {
 
       dut.io.sampleFire.poke(true.B)
       dut.io.state.poke(3.U)
+      dut.io.overflow.poke(false.B)
       dut.io.firstAllocValid.poke(false.B)
       dut.clock.step()
       dut.io.sampleValid.expect(false.B)
@@ -507,6 +543,7 @@ class TeaHelperTest extends XSTester {
       val deferredSamples = 20
 
       dut.io.state.poke(3.U)
+      dut.io.overflow.poke(false.B)
       dut.io.firstAllocValid.poke(false.B)
       for (_ <- 0 until deferredSamples) {
         dut.io.sampleFire.poke(true.B)
@@ -530,6 +567,20 @@ class TeaHelperTest extends XSTester {
         dut.io.pendingDrain.expect((i != deferredSamples - 1).B)
         dut.io.firstAllocValid.poke(false.B)
       }
+    }
+  }
+
+  it should "surface overflow in emitted TEA samples" in {
+    test(new TeaSelectorHarness) { dut =>
+      dut.io.sampleFire.poke(true.B)
+      dut.io.state.poke(2.U)
+      dut.io.oir.valid.poke(true.B)
+      dut.io.oir.pc.poke("h80000600".U)
+      dut.io.oir.psv.poke(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.io.overflow.poke(true.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.overflow.expect(true.B)
     }
   }
 }

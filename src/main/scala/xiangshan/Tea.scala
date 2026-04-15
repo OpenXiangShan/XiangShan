@@ -33,9 +33,16 @@ object TeaPsvOps {
 }
 
 object TeaBinders {
+  def applyLoadDcacheFirstMiss(psv: UInt, isDcacheFirstMiss: Bool): UInt = {
+    Mux(isDcacheFirstMiss, TeaPsvOps.setBit(psv, TeaEvent.ST_L1), psv)
+  }
+
+  def applyLoadTlbFirstMiss(psv: UInt, isTlbFirstMiss: Bool): UInt = {
+    Mux(isTlbFirstMiss, TeaPsvOps.setBit(psv, TeaEvent.ST_TLB), psv)
+  }
+
   def applyLoadDebug(psv: UInt, lsInfo: DebugLsInfo): UInt = {
-    val withL1 = Mux(lsInfo.s2_isDcacheFirstMiss, TeaPsvOps.setBit(psv, TeaEvent.ST_L1), psv)
-    Mux(lsInfo.s1_isTlbFirstMiss, TeaPsvOps.setBit(withL1, TeaEvent.ST_TLB), withL1)
+    applyLoadTlbFirstMiss(applyLoadDcacheFirstMiss(psv, lsInfo.s2_isDcacheFirstMiss), lsInfo.s1_isTlbFirstMiss)
   }
 
   def applyControlRedirect(psv: UInt, isControlRedirect: Bool): UInt = {
@@ -77,6 +84,7 @@ class TeaEntry(implicit p: Parameters) extends XSBundle {
   val pcVec = Vec(CommitWidth, UInt(VAddrBits.W))
   val psvVec = Vec(CommitWidth, UInt(TeaEvent.width.W))
   val oirValid = Bool()
+  val overflow = Bool()
   val pendingDrain = Bool()
 }
 
@@ -90,6 +98,7 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
     val headPc = Input(UInt(VAddrBits.W))
     val headPsv = Input(UInt(TeaEvent.width.W))
     val oir = Input(new TeaOIR()(p))
+    val overflow = Input(Bool())
     val firstAllocValid = Input(Bool())
     val firstAllocPc = Input(UInt(VAddrBits.W))
     val firstAllocPsv = Input(UInt(TeaEvent.width.W))
@@ -126,6 +135,7 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
 
   sample.cycle := cycle
   sample.state := io.state
+  sample.overflow := io.overflow
 
   when(io.sampleFire) {
     switch(io.state) {

@@ -202,12 +202,18 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.enq.resp := allocatePtrVec
   val canEnqueue = VecInit(io.enq.req.map(req => req.valid && req.bits.firstUop && io.enq.canAccept))
   val timer = GTimer()
+  val hartId = p(XSCoreParamsKey).HartId
+  val enableTip = Constantin.createRecord(s"enableTip$hartId", true)
+  val enableTea = Constantin.createRecord(s"enableTea$hartId", false)
+  val teaSamplePeriod = Constantin.createRecord(s"teaSamplePeriod$hartId", 1)
   // robEntries enqueue
   for (i <- 0 until RobSize) {
     val enqOH = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === i.U)).map(x => x._1 && x._2))
     assert(PopCount(enqOH) < 2.U, s"robEntries$i enqOH is not one hot")
     when(enqOH.asUInt.orR && !io.redirect.valid){
-      connectEnq(robEntries(i), Mux1H(enqOH, io.enq.req.map(_.bits)))
+      val enqUop = Mux1H(enqOH, io.enq.req.map(_.bits))
+      connectEnq(robEntries(i), enqUop)
+      robEntries(i).teaPsv := Mux(enableTea.asBool, enqUop.teaPsv, TeaPsvOps.empty)
     }
   }
   // robBanks0 include robidx : 0 8 16 24 32 ...
@@ -317,7 +323,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val debug_lsIssued = RegInit(VecInit.fill(RobSize)(false.B))
   val teaOir = RegInit(0.U.asTypeOf(new TeaOIR))
   val teaOverflow = RegInit(false.B)
-  dontTouch(teaOverflow)
 
   val isEmpty = enqPtr === deqPtr
   val snptEnq = io.enq.canAccept && io.enq.req.map(x => x.valid && x.bits.snapshot).reduce(_ || _)
@@ -329,10 +334,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val snapshots = SnapshotGenerator(snapshotPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
   val debug_lsIssue = WireDefault(debug_lsIssued)
   debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue
-  val hartId = p(XSCoreParamsKey).HartId
-  val enableTip = Constantin.createRecord(s"enableTip$hartId", true)
-  val enableTea = Constantin.createRecord(s"enableTea$hartId", false)
-  val teaSamplePeriod = Constantin.createRecord(s"teaSamplePeriod$hartId", 1)
   val teaCountdown = RegInit(0.U(64.W))
   val teaSampleFire = WireDefault(false.B)
   when (!enableTea) {
@@ -404,14 +405,23 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   teaSelector.io.headPc := teaHeadPc
   teaSelector.io.headPsv := teaHeadPsv
   teaSelector.io.oir := teaOir
+  teaSelector.io.overflow := teaOverflow
   teaSelector.io.firstAllocValid := firstAllocValid
   teaSelector.io.firstAllocPc := firstAllocPc
   teaSelector.io.firstAllocPsv := firstAllocPsv
 
   val teaTable = ChiselDB.createTable(s"Tea_$hartId", new TeaEntry, basicDB = true)
   teaTable.log(teaSelector.io.sample, enableTea.asBool && teaSelector.io.sampleValid, "", clock, reset)
-  when (enableTea.asBool && teaSelector.io.sampleValid && teaState === 2.U) {
+  val teaSampleLogged = enableTea.asBool && teaSelector.io.sampleValid
+  when (teaSampleLogged) {
+    teaOverflow := false.B
+  }
+  when (teaSampleLogged && teaState === 2.U) {
     teaOir.valid := false.B
+  }
+  when (!enableTea.asBool) {
+    teaOir := 0.U.asTypeOf(new TeaOIR)
+    teaOverflow := false.B
   }
 
   val exceptionGen = Module(new ExceptionGen(params))
@@ -1075,21 +1085,22 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     debug_lsInfo(io.debug_ls.debugLsInfo(i).s3_robIdx).s3SignalEnable(io.debug_ls.debugLsInfo(i))
     val s1Idx = io.debug_ls.debugLsInfo(i).s1_robIdx
     val s2Idx = io.debug_ls.debugLsInfo(i).s2_robIdx
-    when (io.debug_ls.debugLsInfo(i).s1_isTlbFirstMiss) {
-      robEntries(s1Idx).teaPsv := TeaBinders.applyLoadDebug(robEntries(s1Idx).teaPsv, io.debug_ls.debugLsInfo(i))
+    when (enableTea.asBool && io.debug_ls.debugLsInfo(i).s1_isTlbFirstMiss) {
+      robEntries(s1Idx).teaPsv := TeaBinders.applyLoadTlbFirstMiss(robEntries(s1Idx).teaPsv, true.B)
     }
-    when (io.debug_ls.debugLsInfo(i).s2_isDcacheFirstMiss) {
-      robEntries(s2Idx).teaPsv := TeaBinders.applyLoadDebug(robEntries(s2Idx).teaPsv, io.debug_ls.debugLsInfo(i))
+    when (enableTea.asBool && io.debug_ls.debugLsInfo(i).s2_isDcacheFirstMiss) {
+      robEntries(s2Idx).teaPsv := TeaBinders.applyLoadDcacheFirstMiss(robEntries(s2Idx).teaPsv, true.B)
     }
   }
   for (i <- 0 until LduCnt) {
     debug_lsTopdownInfo(io.lsTopdownInfo(i).s1.robIdx).s1SignalEnable(io.lsTopdownInfo(i))
     debug_lsTopdownInfo(io.lsTopdownInfo(i).s2.robIdx).s2SignalEnable(io.lsTopdownInfo(i))
   }
-  when (io.redirect.valid && io.redirect.bits.debugIsCtrl) {
+  val walkSampleEmit = teaSampleLogged && teaState === 2.U
+  when (enableTea.asBool && io.redirect.valid && io.redirect.bits.debugIsCtrl) {
     val idx = io.redirect.bits.robIdx.value
     robEntries(idx).teaPsv := TeaBinders.applyControlRedirect(robEntries(idx).teaPsv, true.B)
-    teaOverflow := teaOir.valid
+    teaOverflow := (teaOverflow && !teaSampleLogged) || (teaOir.valid && !walkSampleEmit)
     teaOir.valid := true.B
     teaOir.pc := debug_microOp(idx).pc
     teaOir.psv := TeaBinders.applyControlRedirect(robEntries(idx).teaPsv, true.B)
