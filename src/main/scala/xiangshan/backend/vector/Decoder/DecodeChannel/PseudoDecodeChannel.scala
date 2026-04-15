@@ -13,6 +13,7 @@ import xiangshan.backend.decode.opcode.Opcode.AluOpcodes.add
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.{AluOpcodes, VSetOpcodes}
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.SrcRenType
 import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, DecodeSrcType}
@@ -73,6 +74,7 @@ class PseudoDecodeChannel(instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTab
   out.bits.flushPipe := bundle(flushPipeField)
   out.bits.selImm := bundle(selImmField)
   out.bits.canRobCompress := !bundle(canRobCompressField)
+  out.bits.exceptionII := bundle(needVecEnableField) && in.fromCSR.illegalInst.vsIsOff
 }
 
 object PseudoDecodeChannel {
@@ -89,6 +91,7 @@ object PseudoDecodeChannel {
 
   class In extends Bundle {
     val rawInst = UInt(32.W)
+    val fromCSR = new CSRToDecode
   }
 
   class Out extends Bundle {
@@ -106,6 +109,7 @@ object PseudoDecodeChannel {
     val flushPipe = Bool()
     val selImm = ValidIO(DecodeSelImm())
     val canRobCompress = Bool()
+    val exceptionII = Bool()
   }
 
   object InstPatterns {
@@ -141,7 +145,7 @@ object PseudoDecodeChannel {
   }
 
   val uopTable: SeqMap[InstPattern, Opcode] = SeqMap(
-    CSRRVL    -> VSetOpcodes.readvl,
+    CSRRVL    -> (VSetOpcodes.readvl + NeedVecEnable),
     CSRRVLENB -> (AluOpcodes.add - Src1Gp - Src2En + Src2Imm(DecodeSelImm.I) + NeedVecEnable),
   )
 

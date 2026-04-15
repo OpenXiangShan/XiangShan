@@ -20,7 +20,7 @@ object Src1Field extends DecodeField[InstPattern, SrcRenType] {
       case int: IntInstPattern => int match {
         case _: IntRTypePattern => GP
         case intI: IntITypePattern => intI match {
-          case SystemInstPattern() | CboInstPattern() => null
+          case _: SystemInstPattern | _: CboInstPattern => null
           case _ => GP
         }
         case _: IntSTypePattern => GP

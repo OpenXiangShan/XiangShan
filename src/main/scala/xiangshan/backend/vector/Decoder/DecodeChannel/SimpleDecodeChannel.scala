@@ -2,7 +2,9 @@ package xiangshan.backend.vector.Decoder.DecodeChannel
 
 import chisel3._
 import chisel3.experimental.hierarchy.{instantiable, public}
-import chisel3.util.{BitPat, ValidIO}
+import chisel3.util._
+import org.chipsalliance.cde.config.Parameters
+import top.ArgParser
 import utility.LookupTree
 import xiangshan.CommitType
 import xiangshan.backend.decode.ImmUnion
@@ -18,9 +20,10 @@ import xiangshan.backend.vector.Decoder.{DecodeChannelInput, SrcRenType}
 import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, NumWB}
 import xiangshan.backend.vector.Decoder.util._
 import xiangshan.backend.vector.util.Verilog
+import xiangshan._
 
 @instantiable
-class SimpleDecodeChannel(instSeq: Seq[InstPattern], opcodeTable: Map[BitPat, Opcode]) extends Module {
+class SimpleDecodeChannel(instSeq: Seq[InstPattern], opcodeTable: Map[BitPat, Opcode])(implicit val p: Parameters) extends Module with HasXSParameter {
   import xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel._
 
   @public val in = IO(Input(new DecodeChannelInput))
@@ -56,6 +59,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], opcodeTable: Map[BitPat, Op
     SelImmField,
     CommitTypeField,
     CanRobCompressField,
+    NeedFsField,
+    PrivExceptionCauseField,
   )
 
   println(s"The length of DecodeTable in SimpleDecodeChannel: ${patterns.length}")
@@ -70,6 +75,38 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], opcodeTable: Map[BitPat, Op
   val imm = LookupTree(selImm.bits, ImmUnion.immSelMap.map {
     case (sel, enum) =>
       sel -> enum.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == enum.len)
+  })
+
+  val needFs = result(NeedFsField)
+  val privCause = result(PrivExceptionCauseField)
+
+  dontTouch(privCause)
+
+  val frmExceptionII = out.bits.frmRen && (out.bits.frmIll || (out.bits.frm === Frm.DYN && in.fromCSR.illegalInst.frm))
+
+  val fsOffExceptionII = in.fromCSR.illegalInst.fsIsOff && needFs
+
+  val privExceptionSources = Seq(
+    (PrivExceptionCause.sfenceVMA,  in.fromCSR.illegalInst.sfenceVMA,              in.fromCSR.virtualInst.sfenceVMA),
+    (PrivExceptionCause.sfencePart, in.fromCSR.illegalInst.sfencePart,             in.fromCSR.virtualInst.sfencePart),
+    (PrivExceptionCause.hfenceGVMA, in.fromCSR.illegalInst.hfenceGVMA,             in.fromCSR.virtualInst.hfence),
+    (PrivExceptionCause.hfenceVVMA, in.fromCSR.illegalInst.hfenceVVMA,             in.fromCSR.virtualInst.hfence),
+    (PrivExceptionCause.hlsv,       in.fromCSR.illegalInst.hlsv,                   in.fromCSR.virtualInst.hlsv),
+    (PrivExceptionCause.wfi,        in.fromCSR.illegalInst.wfi,                    in.fromCSR.virtualInst.wfi),
+    (PrivExceptionCause.wrsNto,     in.fromCSR.illegalInst.wrs_nto,                in.fromCSR.virtualInst.wrs_nto),
+    (PrivExceptionCause.cboZ,       !HasCMO.B || in.fromCSR.illegalInst.cboZ,      in.fromCSR.virtualInst.cboZ),
+    (PrivExceptionCause.cboCF,      !HasCMO.B || in.fromCSR.illegalInst.cboCF,     in.fromCSR.virtualInst.cboCF),
+    (PrivExceptionCause.cboI,       !HasCMO.B || in.fromCSR.illegalInst.cboI,      in.fromCSR.virtualInst.cboI),
+    (PrivExceptionCause.aes64ks1i,  true.B,                                        false.B),
+    (PrivExceptionCause.amocasQ,    true.B,                                        false.B),
+  )
+
+  val privExceptionII = Mux1H(privExceptionSources.map {
+    case (cause, illegal, _) => (privCause === cause) -> illegal
+  })
+
+  val privExceptionVI = Mux1H(privExceptionSources.map {
+    case (cause, _, virtual) => (privCause === cause) -> virtual
   })
 
   out.valid := result(LegalField)
@@ -96,6 +133,9 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], opcodeTable: Map[BitPat, Op
   out.bits.commitType := result(CommitTypeField)
   out.bits.canRobCompress := result(CanRobCompressField)
   out.bits.numWb := resultInstRd(NumWbField)
+  out.bits.exceptionII := frmExceptionII || fsOffExceptionII || privExceptionII
+  out.bits.exceptionVI := privExceptionVI
+
 }
 
 class SimpleDecodeChannelOutput() extends Bundle {
@@ -122,10 +162,20 @@ class SimpleDecodeChannelOutput() extends Bundle {
   val commitType = CommitType()
   val canRobCompress = Bool()
   val numWb = NumWB()
+  val exceptionII = Bool()
+  val exceptionVI = Bool()
 }
 
 object SimpleDecodeChannelMain extends App {
   import xiangshan.backend.decode.isa.Extensions._
+
+  val (config, firrtlOpts, firtoolOpts) = ArgParser.parse(
+    args :+ "--disable-always-basic-diff" :+ "--fpga-platform" :+ "--target" :+ "verilog"
+  )
+
+  val defaultConfig = config.alterPartial({
+    case XSCoreParamsKey => XSCoreParameters()
+  })
 
   val extensions: Seq[ExtBase] = Seq(
     I, M, A, F, D, Zicsr,
@@ -146,7 +196,7 @@ object SimpleDecodeChannelMain extends App {
   val targetDir = "build/decoder"
 
   Verilog.emitVerilog(
-    new SimpleDecodeChannel(insts, table),
+    new SimpleDecodeChannel(insts, table)(defaultConfig),
     Array("--full-stacktrace", "--target-dir", targetDir),
   )
 
