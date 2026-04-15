@@ -94,8 +94,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }
 
   val exuNum = allExuParams.size
+  val enableDispatchIQBalanceOpt = coreParams.EnableDispatchIQBalanceOpt
   // + 6 because that need add 3 cycle enqNum
-  val maxIQSize = allIssueParams.map(_.numEntries).max + 6
+  val maxIQSize = allIssueParams.map(_.numEntries).max + (if (enableDispatchIQBalanceOpt) 6 else 0)
   val IQEnqSum = allIssueParams.map(_.numEnq).sum
   val issueQueueNum = allIssueParams.size
 
@@ -424,7 +425,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     val selIQNum = PopCount(uopSelIQ.zipWithIndex.map { case (u, i) =>
       u(iqidx) && FuType.FuTypeOrR(fromRename(i).bits.fuType, exuParams.fuConfigs.map(_.fuType))
     })
-    needAppendIQValidNumVec(iqDeqIdx) := selIQNum
+    needAppendIQValidNumVec(iqDeqIdx) := (if (enableDispatchIQBalanceOpt) selIQNum else 0.U)
   }}
   val issueQueueCount = VecInit(io.IQValidNumVec.zip(needAppendIQValidNumVec).map(x => RegNext(x._1 + x._2)))
   val issueQueueCountAddEnq = VecInit(issueQueueCount.zip(needAppendIQValidNumVec).map(x => x._1 + x._2))
@@ -480,7 +481,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
 
     val minIQSel = Wire(Vec(renameWidth, Vec(issueQueueNum, Bool()))).suggestName(s"minIQSel_$suffix")
     for (i <- 0 until renameWidth){
-      val minIQSel_ith = IQSortUpdate(i % iqNum)
+      val minIQSel_ith = (if (enableDispatchIQBalanceOpt) IQSortUpdate(i % iqNum) else IQSort(i % iqNum))
       for (j <- 0 until issueQueueNum){
         minIQSel(i)(j) := false.B
         if (iqidx.contains(j)){
@@ -496,8 +497,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
       dontTouch(issueQueueCount)
       dontTouch(needAppendIQValidNumVec)
     }
-  }
-  }
+  }}
   val fuConfigSeq = needMultiExu.map(_._1)
   val fuTypeOH = Wire(Vec(renameWidth, Vec(needMultiExu.size, Bool())))
   fuTypeOH.zip(renameIn).map{ case(oh, in) => {
@@ -552,7 +552,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
                   Mux1H(fuTypeOHSingle(i), uopSelIQSingle)),
                 0.U.asTypeOf(u)
               )
-    }.elsewhen(io.fromRename(i).valid && !io.fromRename(i).ready) {
+    }.elsewhen(io.fromRename(i).valid && !io.fromRename(i).ready && enableDispatchIQBalanceOpt.B) {
       u := Mux(fromRename(i).valid,
                 Mux(fuTypeOHFromRename(i).asUInt.orR,
                   Mux1H(fuTypeOHFromRename(i), minIQSelAll)(Mux1H(fuTypeOHFromRename(i), popFuTypeOHFromRename(i))),

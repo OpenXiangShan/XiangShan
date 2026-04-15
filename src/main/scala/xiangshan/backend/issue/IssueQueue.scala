@@ -1014,9 +1014,13 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val issuedCnt1 = Mux(entryIssuedCntDeq1 > 3.U, 3.U, entryIssuedCntDeq1)
   val finalResp0 = og1RespIsFinal.B & deqBeforeDly.head.valid
   val finalResp1 = og1RespIsFinal.B & deqBeforeDly.last.valid
-  // valid counter -> uopSelIQ has 3 pipe latancy, sub deq
-  io.validCntDeqVec.head := entryValidCntDeq0 - issuedCnt0 - finalResp0
-  io.validCntDeqVec.last := entryValidCntDeq1 - issuedCnt1 - finalResp1
+  if (coreParams.EnableDispatchIQBalanceOpt) {
+    io.validCntDeqVec.head := entryValidCntDeq0 - issuedCnt0 - finalResp0
+    io.validCntDeqVec.last := entryValidCntDeq1 - issuedCnt1 - finalResp1
+  } else {
+    io.validCntDeqVec.head := entryValidCntDeq0 - io.deqDelay.head.fire
+    io.validCntDeqVec.last := entryValidCntDeq1 - io.deqDelay.last.fire
+  }
   private val othersLeftOneCaseVec = Wire(Vec(params.numEntries - params.numEnq, UInt((params.numEntries - params.numEnq).W)))
   othersLeftOneCaseVec.zipWithIndex.foreach { case (leftone, i) =>
     leftone := ~(1.U((params.numEntries - params.numEnq).W) << i)

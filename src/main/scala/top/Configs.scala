@@ -502,6 +502,7 @@ class CHIBackendV2Config(n: Int = 1) extends Config(
     case XSTileKey => up(XSTileKey).map { p =>
       p.copy(
         EnableBackendV2Config = true,
+        EnableDispatchIQBalanceOpt = false,
         frontendParameters = p.frontendParameters.copy(
           ibufferParameters = p.frontendParameters.ibufferParameters.copy(
             NumReadBank = 6
