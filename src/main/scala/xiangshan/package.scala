@@ -1211,6 +1211,7 @@ package object xiangshan {
 
     // backend
     // long inst stall at rob head
+    val IssueCancelStall = Value("IssueCancelStall")
     val DivStall = Value("DivStall") // int div, float div/sqrt
     val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head exec long
     val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head exec long

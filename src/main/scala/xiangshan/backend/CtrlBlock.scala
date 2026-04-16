@@ -776,6 +776,7 @@ class CtrlBlockImp(
   dispatch.io.debugIQValidNumVec.foreach(_ := io.toDispatch.debugIQValidNumVec.get)
   dispatch.io.debugIQEnqHasIssuedVec.foreach(_ := io.toDispatch.debugIQEnqHasIssuedVec.get)
   dispatch.io.debugRobHeadStall.foreach(_ := rob.io.debugRobHeadStall.get)
+  dispatch.io.debugRobHeadIssueCancelStall.foreach(_ := rob.io.debugRobHeadIssueCancelStall.get)
   val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops).flatten
   println(s"[CtrlBlock] toIssueBlockUops.size = ${toIssueBlockUops.size}")
   println(s"[CtrlBlock] io.toIssueBlock.intUops.size = ${io.toIssueBlock.intUops.size}")
@@ -884,6 +885,7 @@ class CtrlBlockImp(
   rename.io.debugLoadReason.foreach(_ := ldReason)
   rename.io.debugRobHeadFuType.foreach(_ := rob.io.debugRobHeadFuType)
   rename.io.debugRobHeadStall.foreach(_ := rob.io.debugRobHeadStall.get)
+  rename.io.debugRobHeadIssueCancelStall.foreach(_ := rob.io.debugRobHeadIssueCancelStall.get)
 
   io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := false.B

@@ -97,6 +97,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val debugOutValidVec = OptionWrapper(backendParams.debugEn, Vec(RenameWidth, Input(Bool())))
     val debugRobHeadFuType = Option.when(backendParams.debugEn)(Input(FuType()))
     val debugRobHeadStall = Option.when(backendParams.debugEn)(Input(Bool()))
+    val debugRobHeadIssueCancelStall = Option.when(backendParams.debugEn)(Input(Bool()))
     val debugLoadReason = Option.when(backendParams.debugEn)(Input(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(RenameWidth))
@@ -951,6 +952,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // TODO make all stall reason option to remove getorElse
   val robHeadStall = io.debugRobHeadStall.getOrElse(false.B)
+  val robIssueCancel = io.debugRobHeadIssueCancelStall.getOrElse(false.B)
   val robHeadFutype = io.debugRobHeadFuType.getOrElse(0.U)
   val ldReason = io.debugLoadReason.getOrElse(0.U)
 
@@ -964,13 +966,14 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   ))
   val freelistStall = intFlStall || fpFlStall || vecFlStall || v0FlStall || vlFlStall
   val freelistStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
-    robHeadStall  -> robHeadStallReason,
-    multiFlStall  -> MultiFlStall.id.U,
-    intFlStall    -> IntFlStall.id.U,
-    fpFlStall     -> FpFlStall.id.U,
-    vecFlStall    -> VecFlStall.id.U,
-    v0FlStall     -> V0FlStall.id.U,
-    vlFlStall     -> VlFlStall.id.U,
+    robIssueCancel -> IssueCancelStall.id.U,
+    robHeadStall   -> robHeadStallReason,
+    multiFlStall   -> MultiFlStall.id.U,
+    intFlStall     -> IntFlStall.id.U,
+    fpFlStall      -> FpFlStall.id.U,
+    vecFlStall     -> VecFlStall.id.U,
+    v0FlStall      -> V0FlStall.id.U,
+    vlFlStall      -> VlFlStall.id.U,
   ))
   renameStallReason := MuxCase(BackendOtherCoreStall.id.U, Seq(
     redirectStall -> redirectStallReason,

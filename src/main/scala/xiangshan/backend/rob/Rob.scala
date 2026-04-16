@@ -126,6 +126,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val debugWaitForward   = Option.when(backendParams.debugEn)(Output(Bool()))
     val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(IssueQueueDeqSum, Flipped(ValidIO(new RobPtr()))))
     val debugRobHeadStall = Option.when(backendParams.debugEn)(Output(Bool()))
+    val debugRobHeadIssueCancelStall = Option.when(backendParams.debugEn)(Output(Bool()))
     val debugEnqLsq = Input(new LsqEnqIO)
     val debugHeadLsIssue = Input(Bool())
     val lsTopdownInfo = Vec(LduCnt + HyuCnt, Input(new LsTopdownInfo))
@@ -1539,7 +1540,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   })
   for (i <- 0 until RobSize) {
     when(robEntries(i).valid){
-      robEntries(i).topdownIssued.foreach(_ := candidateVec.get(i).reduce(_ || _) || robEntries(i).topdownIssued.get)
+      val issued = candidateVec.get(i).reduce(_ || _)
+      robEntries(i).topdownCanceled.foreach(_ := (issued && robEntries(i).topdownIssued.get)
+        || robEntries(i).topdownCanceled.get)
+      robEntries(i).topdownIssued.foreach(_ := issued || robEntries(i).topdownIssued.get)
     }
   }
   if (backendParams.debugEn) {
@@ -1549,15 +1553,23 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   for (i <- 0 until RobSize) {
     when(robEntries(i).valid){
       val hasWriteBack = robEntries(i).uopNum === 0.U
+      val issued = candidateVec.get(i).reduce(_ || _)
       robEntries(i).topdownIssueTime.foreach(_ := Mux(hasWriteBack , 0.U,
         robEntries(i).topdownIssueTime.get +& robEntries(i).topdownIssued.get) )
+      robEntries(i).topdownLastIssueTime.foreach(_ := Mux(hasWriteBack || issued , 0.U,
+        robEntries(i).topdownLastIssueTime.get +& robEntries(i).topdownIssued.get))
     }
   }
 
   io.debugRobHeadStall.foreach{ case stall =>
     val deqEntry = robEntries(deqPtr.value)
     val deqEntryNormalLatency = Mux1H(deqEntry.debug_fuType.get, sortedFulatency) +& bypassLatency +& writeBackLatency
-    stall := deqEntry.valid && (robEntries(deqPtr.value).topdownIssueTime.get > deqEntryNormalLatency)
+    stall := deqEntry.valid && (deqEntry.topdownLastIssueTime.get > deqEntryNormalLatency)
+  }
+  io.debugRobHeadIssueCancelStall.foreach{ case cancel =>
+    val deqEntry = robEntries(deqPtr.value)
+    val deqEntryNormalLatency = Mux1H(deqEntry.debug_fuType.get, sortedFulatency) +& bypassLatency +& writeBackLatency
+    cancel := deqEntry.valid && deqEntry.topdownCanceled.get && (deqEntry.topdownIssueTime.get > deqEntryNormalLatency)
   }
 
   //difftest signals

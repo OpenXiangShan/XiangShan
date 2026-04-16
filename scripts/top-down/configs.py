@@ -78,6 +78,7 @@ xs_frontend_rename_map = {
 
 xs_backend_rename_map = {
 
+    'IssueCancelStall': 'MergeCancelStall',
     'DivStall': 'MergeExecStall',
     'IntNotReadyStall': 'MergeExecStall',
     'FPNotReadyStall': 'MergeExecStall',
@@ -176,6 +177,7 @@ xs_coarse_rename_map = {
     'FetchFragBubble': 'MergeFrontend',
     'FrontendOtherCoreStall': "MergeCoreOther",
 
+    'IssueCancelStall': 'MergeCore',
     'DivStall': 'MergeCore',
     'IntNotReadyStall': 'MergeCore',
     'FPNotReadyStall': 'MergeCore',
@@ -325,6 +327,7 @@ targets = {
     'FetchFragBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FetchFragBubble,\s+(\d+)',
     'FrontendOtherCoreStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FrontendOtherCoreStall,\s+(\d+)',
 
+    'IssueCancelStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IssueCancelStall,\s+(\d+)',
     'DivStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: DivStall,\s+(\d+)',
     'IntNotReadyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: IntNotReadyStall,\s+(\d+)',
     'FPNotReadyStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FPNotReadyStall,\s+(\d+)',
