@@ -17,7 +17,7 @@ import yunsuan.vector.VectorALU.{Adder, Misc}
 
 import math.pow
 
-class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
+class VIAluWrapper(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
 //  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VialuFixType.dummy, "VialuF OpType not supported")
 
   // params
@@ -72,7 +72,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
 
   vIAluFixPoints.zipWithIndex.foreach {
     case (mod, i) =>
-      mod.in.vxrm := vxrm
+      mod.in.vxrm := vxrm.asTypeOf(yunsuan.vector.Common.Vxrm())
       mod.in.ex0.valid := valid
       mod.in.ex0.bits.ctrl.opcode := opcode
       mod.in.ex0.bits.ctrl.adder match { case adderCtrl =>
