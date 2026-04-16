@@ -672,7 +672,12 @@ class TeaHelperTest extends XSTester {
       dut.clock.step()
       dut.io.sampleValid.expect(false.B)
 
+      dut.io.sampleFire.poke(true.B)
       dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(false.B)
       dut.clock.step()
 
       dut.io.sampleFire.poke(true.B)
