@@ -27,9 +27,8 @@ import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FtqFetchRequest
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.TwoFetchInfo
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.frontend.ftq.TwoFetchInfo
-import xiangshan.frontend.ftq.TwoPrefetchCase
 
 /* ***
  * Naming:

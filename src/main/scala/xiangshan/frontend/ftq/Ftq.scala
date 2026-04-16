@@ -45,6 +45,8 @@ import xiangshan.frontend.FtqToICacheIO
 import xiangshan.frontend.FtqToIfuIO
 import xiangshan.frontend.IfuToFtqIO
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.TwoFetchInfo
+import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuCommitMeta
 import xiangshan.frontend.bpu.BpuPredictionSource
 import xiangshan.frontend.bpu.BpuRedirectMeta
