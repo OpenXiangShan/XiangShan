@@ -123,10 +123,12 @@ jobs:
       - name: Run Legacy CI Test - ${{ matrix.name }}
         shell: bash
         run: |
+          # TODO: remove --disable-fork to enable lightSSS when gsim supports it
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
             --wave-dump ${WAVE_HOME} \
             --numa --threads 1 \
             --max-instr 5000000 \
+            --disable-fork \
             --ci ${{ matrix.name }} \
             ${{ matrix.with-restore-bin && '--gcpt-restore-bin /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin' || '' }} \
             2> stderr.log | tee stdout.log
@@ -227,10 +229,12 @@ jobs:
         run: |
           export CKPT=$(find "${CKPT_HOME}/${{ matrix.name }}/${{ matrix.ckpt }}" -type f \( -name "*.gz" -o -name "*.zstd" \) | head -n 1)
           echo "Running checkpoint: ${CKPT}"
+          # TODO: remove --disable-fork to enable lightSSS when gsim supports it
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
             --wave-dump ${WAVE_HOME} \
             --numa --threads 1 \
             --max-instr 5000000 \
+            --disable-fork \
             ${CKPT} \
             2> stderr.log | tee stdout.log
           cat stderr.log | sort | tee stderr-sorted.log
