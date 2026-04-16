@@ -91,21 +91,9 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   private val s0_backendException = s0_req(0).backendException
   private val s0_twoPrefetchCase  = io.fromFtq.bits.twoPrefetchCase
 
-  private val s0_readMetaVAddr = MuxCase(
-    VecInit(s0_req(0).startVAddr, s0_req(0).nextLineVAddr),
-    Seq(
-      s0_twoPrefetchCase.isCase3 -> VecInit(s0_req(1).startVAddr, s0_req(1).nextLineVAddr),
-      s0_twoPrefetchCase.isCase4 -> VecInit(s0_req(0).startVAddr, s0_req(1).startVAddr)
-    )
-  )
+  private val s0_readMetaVAddr  = s0_twoPrefetchCase.selectMetaVAddr(s0_req)
   private val s0_readMetaSetIdx = VecInit(s0_readMetaVAddr.map(get_idx))
-  private val s0_readDoubleLine = MuxCase(
-    s0_req(0).isCrossLine,
-    Seq(
-      s0_twoPrefetchCase.isCase1 -> (s0_req(0).isCrossLine || s0_req(1).isCrossLine),
-      (s0_twoPrefetchCase.isCase2 || s0_twoPrefetchCase.isCase3 || s0_twoPrefetchCase.isCase4) -> true.B
-    )
-  )
+  private val s0_readDoubleLine = s0_twoPrefetchCase.selectIsCrossLine(s0_req)
 
   fromBpuS0Flush := !s0_isSoftPrefetch && io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
   s0_flush       := io.flush || fromBpuS0Flush || s1_flush
@@ -285,18 +273,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   private val s1_sramHits = VecInit(s1_metaInfo.map(_.waymask.orR))
 
-  private val s1_reqMetaInfo = VecInit(
-    Mux(
-      s1_twoPrefetchCase.isCase3,
-      VecInit(s1_metaInfo(1), 0.U.asTypeOf(new MetaInfo)),
-      s1_metaInfo
-    ),
-    Mux(
-      s1_twoPrefetchCase.isCase2 || s1_twoPrefetchCase.isCase4,
-      VecInit(s1_metaInfo(1), 0.U.asTypeOf(new MetaInfo)),
-      s1_metaInfo
-    )
-  )
+  private val s1_reqMetaInfo = s1_twoPrefetchCase.generateReqMetaInfo(s1_metaInfo)
 
   dontTouch(s1_metaInfo)
   dontTouch(s1_reqMetaInfo)

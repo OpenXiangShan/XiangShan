@@ -283,7 +283,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     req.backendException := Mux(backendExceptionPtr === pfPtr(i), backendException, ExceptionType.None)
     req.isSoftPrefetch   := false.B
   }
-  io.toICache.toPrefetch.bits.twoPrefetchCase := Mux(twoPrefetchValid, twoPrefetchCase, TwoPrefetchCase.None)
+  io.toICache.toPrefetch.bits.twoPrefetchCase := Mux(twoPrefetchValid, twoPrefetchCase, TwoPrefetchCase.Unable)
 
   private val ifuReqValid = bpuPtr(0) > ifuPtr(0) && !redirect.valid &&
     distanceBetween(ifuPtr(0), commitPtr(0)) < (FtqSize - 1).U

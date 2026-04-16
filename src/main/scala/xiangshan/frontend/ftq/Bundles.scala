@@ -25,13 +25,11 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPerfMeta
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.icache.{MetaInfo => ICacheMetaInfo}
 import xiangshan.frontend.icache.HasICacheParameters
-import xiangshan.frontend.icache.ICacheBundle
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICacheDataHelper
-import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.frontend.icache.PrefetchReqBundle
-import xiangshan.frontend.icache.WayLookupEntry
 
 class FtqEntry(implicit p: Parameters) extends FtqBundle {
   val startPc:        PrunedAddr  = PrunedAddr(VAddrBits)
@@ -158,21 +156,61 @@ class FtqFetchReq(implicit p: Parameters) extends FtqBundle with ICacheDataHelpe
 class TwoPrefetchCase extends Bundle {
   val value: UInt = TwoPrefetchCase.Value()
 
-  def valid:   Bool = value.orR
-  def isCase1: Bool = value(0)
-  def isCase2: Bool = value(1)
-  def isCase3: Bool = value(2)
-  def isCase4: Bool = value(3)
+  def valid: Bool = value.orR
+
+  // select 2 vaddr to read ICacheMetaArray
+  def selectMetaVAddr(reqVec: Vec[PrefetchReqBundle]): Vec[PrunedAddr] =
+    MuxCase(
+      // unable to do 2-prefetch, or isSameLine or isOverlap1, both use req1's start and nextLine
+      VecInit(reqVec(0).startVAddr, reqVec(0).nextLineVAddr),
+      Seq(
+        isOverlap2   -> VecInit(reqVec(1).startVAddr, reqVec(1).nextLineVAddr),
+        isInterleave -> VecInit(reqVec(0).startVAddr, reqVec(1).startVAddr)
+      )
+    )
+
+  // select isCrossLine flag to read ICacheMetaArray
+  def selectIsCrossLine(reqVec: Vec[PrefetchReqBundle]): Bool =
+    MuxCase(
+      // unable to do 2-prefetch, use req1.isCrossLine
+      reqVec(0).isCrossLine,
+      Seq(
+        // if 2 fb are in the same line, read 2 if one of them crosses cacheline
+        isSameLine -> (reqVec(0).isCrossLine || reqVec(1).isCrossLine),
+        // otherwise, we must read 2 cacheline
+        (isOverlap1 || isOverlap2 || isInterleave) -> true.B
+      )
+    )
+
+  // NOTE: refer to object TwoPrefetchCase.Value for explanation
+  def isSameLine: Bool = value(0)
+
+  def isOverlap1: Bool = value(1)
+
+  def isOverlap2: Bool = value(2)
+
+  def isInterleave: Bool = value(3)
+
+  // after read 2 (at most) metaInfo from ICacheMetaArray, broadcast to 2 fetch blocks
+  def generateReqMetaInfo(readInfoVec: Vec[ICacheMetaInfo]): Vec[Vec[ICacheMetaInfo]] =
+    VecInit(
+      VecInit(
+        // if isOverlap2, fb1's first line is fb2's second line and is from port 2, otherwise from port 1
+        Mux(isOverlap2, readInfoVec(1), readInfoVec(0)),
+        // if isOverlap2 or isInterleave, fb1 does not have a second line, otherwise from port 1
+        Mux(isOverlap2 || isInterleave, 0.U.asTypeOf(readInfoVec(0)), readInfoVec(1))
+      ),
+      VecInit(
+        // if isSameLine or isOverlap2, fb2's first line is from port 1, otherwise from port 2
+        Mux(isSameLine || isOverlap2, readInfoVec(0), readInfoVec(1)),
+        // if isOverlap1 or isInterleave, fb2 does not have a second line, otherwise from port 2
+        Mux(isOverlap1 || isInterleave, 0.U.asTypeOf(readInfoVec(0)), readInfoVec(1))
+      )
+    )
 }
 
 object TwoPrefetchCase {
-  private object Value extends EnumUInt(5, useOneHot = true, allowZeroForOneHot = true) {
-    def None:  UInt = 0.U(width.W)
-    def Case1: UInt = 1.U(width.W)
-    def Case2: UInt = 2.U(width.W)
-    def Case3: UInt = 4.U(width.W)
-    def Case4: UInt = 8.U(width.W)
-  }
+  def Unable: TwoPrefetchCase = apply(Value.Unable)
 
   def apply(that: UInt, canAssert: Bool = true.B): TwoPrefetchCase = {
     when(canAssert) {
@@ -183,37 +221,56 @@ object TwoPrefetchCase {
     twoPrefetchCase
   }
 
-  def None:  TwoPrefetchCase = apply(Value.None)
-  def Case1: TwoPrefetchCase = apply(Value.Case1)
-  def Case2: TwoPrefetchCase = apply(Value.Case2)
-  def Case3: TwoPrefetchCase = apply(Value.Case3)
-  def Case4: TwoPrefetchCase = apply(Value.Case4)
+  def SameLine: TwoPrefetchCase = apply(Value.SameLine)
 
-  def apply(firstReq: FtqPrefetchReq, secondReq: FtqPrefetchReq, canAssert: Bool): TwoPrefetchCase = {
-    // case1: two blocks' startPc are in the same cache line
-    val case1 = firstReq.vSetIdx(0) === secondReq.vSetIdx(0)
+  def Overlap1: TwoPrefetchCase = apply(Value.Overlap1)
 
-    // case2: the first block is cross line,
-    // and the second block's startPc is in the same cache line with the first block's second line
-    val case2 = firstReq.isCrossLine && firstReq.vSetIdx(1) === secondReq.vSetIdx(0) && !secondReq.isCrossLine
+  def Overlap2: TwoPrefetchCase = apply(Value.Overlap2)
 
-    // case3: the second block is cross line,
-    // and the first block's startPc is in the same cache line with the second block's second line
-    val case3 = secondReq.isCrossLine && secondReq.vSetIdx(1) === firstReq.vSetIdx(0) && !firstReq.isCrossLine
+  def Interleave: TwoPrefetchCase = apply(Value.Interleave)
 
-    // case4: the two blocks' startPc are in different cache lines (one even, one odd),
-    // and both of them are not cross line
-    val case4 = (firstReq.vSetIdx(0)(0) ^ secondReq.vSetIdx(0)(0)) && !firstReq.isCrossLine && !secondReq.isCrossLine
+  def apply(req1: FtqPrefetchReq, req2: FtqPrefetchReq, canAssert: Bool): TwoPrefetchCase =
+    TwoPrefetchCase(
+      req1.vSetIdx(0) === req2.vSetIdx(0),                                                    // sameLine
+      req1.isCrossLine && !req2.isCrossLine && req1.vSetIdx(1) === req2.vSetIdx(0), // overlap1
+      !req1.isCrossLine && req2.isCrossLine && req2.vSetIdx(1) === req1.vSetIdx(0), // overlap2
+      !req1.isCrossLine && !req2.isCrossLine && req1.vSetIdx(0)(0) =/= req2.vSetIdx(0)(0), // interleave
+      canAssert
+    )
 
-    // TODO: remove them
-    dontTouch(firstReq)
-    dontTouch(secondReq)
-    dontTouch(case1)
-    dontTouch(case2)
-    dontTouch(case3)
-    dontTouch(case4)
+  def apply(sameLine: Bool, overlap1: Bool, overlap2: Bool, interleave: Bool, canAssert: Bool): TwoPrefetchCase =
+    apply(VecInit(sameLine, overlap1, overlap2, interleave).asUInt, canAssert)
 
-    TwoPrefetchCase(VecInit(case1, case2, case3, case4).asUInt, canAssert)
+  private object Value extends EnumUInt(5, useOneHot = true, allowZeroForOneHot = true) {
+    // cannot do 2-prefetch due to SRAM read port conflict
+    def Unable: UInt = 0.U(width.W)
+
+    /* SameLine: 2 fetch block in the same cacheline(s)
+     * |    cacheline0    |    cacheline1    |
+     *      |  fb1             |
+     *          | fb2 |
+     */
+    def SameLine: UInt = 1.U(width.W)
+
+    /* Overlap1: fb2 is in fb1's next line
+     * |    cacheline0    |    cacheline1    |
+     *      |  fb1             |
+     *                       | fb2 |
+     *                       | fb2                | // bad: fb2 cannot cross cacheline
+     */
+    def Overlap1: UInt = 2.U(width.W)
+
+    /* Overlap2: reverse of Overlap1, i.e. fb1 is in fb2's next line
+     */
+    def Overlap2: UInt = 4.U(width.W)
+
+    /* Interleave: 2 fetch block in interleaved cachelines
+     *  |    cacheline(2n)    | ... |    cacheline(2n+1)    |
+     *        | fb1 |
+     *                                   | fb2 |
+     *                                   | fb2                 | // bad: both fb1 and fb2 cannot cross cacheline
+     */
+    def Interleave: UInt = 8.U(width.W)
   }
 }
 
