@@ -75,6 +75,21 @@ class _GoldenTraceEnv:
         return 1
 
 
+class _StagnantGoldenTraceEnv:
+    def __init__(self) -> None:
+        self.dut = _NoRawDutAccess()
+        self.monitor = SimpleNamespace(get_errors=lambda: [])
+        self.backend_model = SimpleNamespace(
+            golden_trace=SimpleNamespace(entries=[SimpleNamespace(pc=0x80000000)], cursor=0),
+            has_pending_work=lambda: True,
+            current_golden_pc=lambda: 0x80000000,
+        )
+
+    def step(self, cycles: int) -> int:
+        assert int(cycles) == 1
+        return 1
+
+
 def test_check_pc_sequence_uses_monitor_observations_without_raw_dut_peeks():
     env = _CheckPcEnv([0x80000000, 0x80000004])
 
@@ -103,3 +118,11 @@ def test_run_until_golden_trace_complete_uses_monitor_and_backend_model_contract
     completed = RunUntilGoldenTraceCompleteSequence(max_cycles=2).run(env)
 
     assert completed is True
+
+
+def test_run_until_golden_trace_complete_stops_on_stagnant_cursor_limit():
+    env = _StagnantGoldenTraceEnv()
+
+    completed = RunUntilGoldenTraceCompleteSequence(max_cycles=100, stagnant_cycles_limit=3).run(env)
+
+    assert completed is False

@@ -32,6 +32,9 @@ Every bin-trace run must leave behind:
 
 - an FST waveform artifact
 - a paired log artifact
+- a hard runtime upper bound so the run cannot execute indefinitely
+- a stagnation early-stop limit (for example `TB_TRACE_STAGNANT_CYCLES_LIMIT`)
+  so long stalls fail in-test instead of relying on external kill
 
 And every bin-trace run must expose runtime progress information, such as:
 

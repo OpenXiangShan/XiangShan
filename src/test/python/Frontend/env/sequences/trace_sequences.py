@@ -59,6 +59,7 @@ class RunUntilGoldenTraceCompleteSequence:
     max_cycles: int = 10000
     progress_interval: int = 0
     stall_snapshot_interval: int = 0
+    stagnant_cycles_limit: int = 0
     logger: logging.Logger | None = None
     current_golden_pc_getter: Callable | None = None
     format_optional_pc: Callable | None = None
@@ -77,6 +78,7 @@ class RunUntilGoldenTraceCompleteSequence:
         max_cycles = int(self.max_cycles)
         progress_interval = int(self.progress_interval)
         stall_snapshot_interval = int(self.stall_snapshot_interval)
+        stagnant_cycles_limit = int(self.stagnant_cycles_limit)
         cycles_run = 0
         last_cursor = int(trace.cursor)
         stagnant_cycles = 0
@@ -123,6 +125,28 @@ class RunUntilGoldenTraceCompleteSequence:
                     total_entries,
                     self.stall_snapshot_formatter(snapshot),
                 )
+            if stagnant_cycles_limit > 0 and stagnant_cycles >= stagnant_cycles_limit:
+                if logger is not None:
+                    if self.stall_snapshot_capture is not None and self.stall_snapshot_formatter is not None:
+                        snapshot = self.stall_snapshot_capture(env)
+                        logger.error(
+                            "run until golden early stop by stagnant_cycles_limit=%d: "
+                            "stagnant_cycles=%d cursor=%d/%d %s",
+                            stagnant_cycles_limit,
+                            stagnant_cycles,
+                            int(trace.cursor),
+                            total_entries,
+                            self.stall_snapshot_formatter(snapshot),
+                        )
+                    else:
+                        logger.error(
+                            "run until golden early stop by stagnant_cycles_limit=%d: stagnant_cycles=%d cursor=%d/%d",
+                            stagnant_cycles_limit,
+                            stagnant_cycles,
+                            int(trace.cursor),
+                            total_entries,
+                        )
+                return False
             if monitor_errors:
                 if logger is not None:
                     logger.warning("run until golden complete aborted by monitor errors")

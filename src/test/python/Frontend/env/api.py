@@ -54,6 +54,10 @@ def _read_stall_snapshot_interval_from_env() -> int:
     return _read_positive_int_env("TB_TRACE_STALL_SNAPSHOT_INTERVAL")
 
 
+def _read_stagnant_cycles_limit_from_env() -> int:
+    return _read_positive_int_env("TB_TRACE_STAGNANT_CYCLES_LIMIT")
+
+
 def _format_optional_pc(value) -> str:
     if value is None:
         return "none"
@@ -653,6 +657,7 @@ def api_Frontend_run_until_golden_complete(env, max_cycles=10000) -> bool:
             max_cycles=int(max_cycles),
             progress_interval=_read_progress_interval_from_env(),
             stall_snapshot_interval=_read_stall_snapshot_interval_from_env(),
+            stagnant_cycles_limit=_read_stagnant_cycles_limit_from_env(),
             logger=logger,
             current_golden_pc_getter=_get_current_golden_pc,
             format_optional_pc=_format_optional_pc,

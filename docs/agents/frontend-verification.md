@@ -114,6 +114,8 @@ TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter \
 TB_ENV_LOG_LEVEL=INFO \
 TB_TRACE_PROGRESS_INTERVAL=50000 \
 TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000 \
+TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
+TB_PYTEST_TIMEOUT_SECS=900 \
 PYTEST_ADDOPTS='-s -o log_cli=true --log-cli-level=INFO' \
 src/test/python/Frontend/run_bin_trace_pipeline.sh ready-to-run/microbench.bin
 ```
@@ -128,6 +130,7 @@ TB_BIN_PATH=ready-to-run/microbench.bin \
 TB_TRACE_PATH=NEMU/logs/microbench.trace.jsonl \
 TB_BASE_ADDR=0x80000000 \
 TB_STEP_CYCLES=0 \
+TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
 TB_RUN_TO_TRACE_COMPLETION=1 \
 python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
 ```
@@ -143,6 +146,8 @@ Any DUT bin-trace case, especially
 `src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace`, must
 meet the following operational requirements:
 
+- every run must have a hard runtime upper bound; unbounded bin runs are not
+  allowed
 - every run must generate an FST waveform artifact
 - every run must generate a readable log artifact
 - the default artifact location should be a date-stamped directory under
@@ -166,6 +171,10 @@ Therefore:
 - if forward progress stalls, the run should surface that fact through logs or
   an equivalent observation channel instead of only hanging until external kill
   or manual interruption
+- for DUT bin runs, set `TB_TRACE_STAGNANT_CYCLES_LIMIT` and fail early when
+  golden-trace cursor stops advancing (pipeline default: `20000`)
+- for pipeline runs, use `TB_PYTEST_TIMEOUT_SECS` to set the DUT-stage timeout;
+  default is `900` seconds
 - when debugging a stuck bin-trace case, prefer enabling progress/stall
   reporting before changing semantic logic
 - for `microbench.bin`, prefer `run_bin_trace_pipeline.sh` with

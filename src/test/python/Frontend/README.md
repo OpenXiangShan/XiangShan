@@ -86,6 +86,8 @@ TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter \
 TB_ENV_LOG_LEVEL=INFO \
 TB_TRACE_PROGRESS_INTERVAL=50000 \
 TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000 \
+TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
+TB_PYTEST_TIMEOUT_SECS=900 \
 PYTEST_ADDOPTS='-s -o log_cli=true --log-cli-level=INFO' \
 src/test/python/Frontend/run_bin_trace_pipeline.sh ready-to-run/microbench.bin
 ```
@@ -104,6 +106,7 @@ TB_BIN_PATH=ready-to-run/microbench.bin \
 TB_TRACE_PATH=NEMU/logs/microbench.trace.jsonl \
 TB_BASE_ADDR=0x80000000 \
 TB_STEP_CYCLES=0 \
+TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
 TB_RUN_TO_TRACE_COMPLETION=1 \
 python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
 ```
@@ -123,3 +126,5 @@ python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_b
   - stall snapshot
   - 或等价的运行时诊断输出
 - 不接受“卡死后一直无输出、只能靠外部 timeout/手动中断结束”的 bin case 运行方式。
+- 统一要求设置 `TB_TRACE_STAGNANT_CYCLES_LIMIT`，当 golden cursor 长时间不前进时，
+  在测试内部早停并失败（优先于外部 kill）。
