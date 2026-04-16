@@ -229,12 +229,12 @@ object TwoPrefetchCase {
 
   def Interleave: TwoPrefetchCase = apply(Value.Interleave)
 
-  def apply(req1: FtqPrefetchReq, req2: FtqPrefetchReq, canAssert: Bool): TwoPrefetchCase =
+  def apply(reqVec: Vec[FtqPrefetchReq], canAssert: Bool): TwoPrefetchCase =
     TwoPrefetchCase(
-      req1.vSetIdx(0) === req2.vSetIdx(0),                                                    // sameLine
-      req1.isCrossLine && !req2.isCrossLine && req1.vSetIdx(1) === req2.vSetIdx(0), // overlap1
-      !req1.isCrossLine && req2.isCrossLine && req2.vSetIdx(1) === req1.vSetIdx(0), // overlap2
-      !req1.isCrossLine && !req2.isCrossLine && req1.vSetIdx(0)(0) =/= req2.vSetIdx(0)(0), // interleave
+      reqVec(0).vSetIdx(0) === reqVec(1).vSetIdx(0),                                                    // sameLine
+      reqVec(0).isCrossLine && !reqVec(1).isCrossLine && reqVec(0).vSetIdx(1) === reqVec(1).vSetIdx(0), // overlap1
+      !reqVec(0).isCrossLine && reqVec(1).isCrossLine && reqVec(1).vSetIdx(1) === reqVec(0).vSetIdx(0), // overlap2
+      !reqVec(0).isCrossLine && !reqVec(1).isCrossLine && reqVec(0).vSetIdx(0)(0) =/= reqVec(1).vSetIdx(0)(0), // inter
       canAssert
     )
 

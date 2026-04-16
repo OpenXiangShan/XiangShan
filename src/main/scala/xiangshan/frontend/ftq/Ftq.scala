@@ -256,12 +256,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     ))
 
   // (io.toICache.toPrefetch.fire && canTwoPrefetch) is passed to apply(..., canAssert) to prevent assert(x-state)
-  private val twoPrefetchCase =
-    TwoPrefetchCase(prefetchReq(0), prefetchReq(1), io.toICache.toPrefetch.fire && canTwoPrefetch)
-
-  private val twoPrefetchValid = twoPrefetchCase.valid && canTwoPrefetch
-//
-//  private val twoPrefetchValid = false.B
+  private val twoPrefetchCase = TwoPrefetchCase(prefetchReq, io.toICache.toPrefetch.fire && canTwoPrefetch)
 
   // FIXME: backend redirect delay should be more than ITLB csr delay
   io.toICache.toPrefetch.valid := (bpuPtr(0) > pfPtr(0) || redirectNext.valid) && !redirect.valid
@@ -283,7 +278,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     req.backendException := Mux(backendExceptionPtr === pfPtr(i), backendException, ExceptionType.None)
     req.isSoftPrefetch   := false.B
   }
-  io.toICache.toPrefetch.bits.twoPrefetchCase := Mux(twoPrefetchValid, twoPrefetchCase, TwoPrefetchCase.Unable)
+  io.toICache.toPrefetch.bits.twoPrefetchCase := Mux(canTwoPrefetch, twoPrefetchCase, TwoPrefetchCase.Unable)
 
   private val ifuReqValid = bpuPtr(0) > ifuPtr(0) && !redirect.valid &&
     distanceBetween(ifuPtr(0), commitPtr(0)) < (FtqSize - 1).U
