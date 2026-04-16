@@ -441,16 +441,18 @@ trait HasTraceIO { this: BaseXSSoc with HasXSTile =>
 
     // trace Interface
     val traceInterface = core_with_l2.module.io.traceCoreInterface
-    traceInterface.fromEncoder := io.traceCoreInterface.fromEncoder
-    io.traceCoreInterface.toEncoder.priv := traceInterface.toEncoder.priv
-    io.traceCoreInterface.toEncoder.cause := traceInterface.toEncoder.trap.cause
-    io.traceCoreInterface.toEncoder.tval := traceInterface.toEncoder.trap.tval
-    io.traceCoreInterface.toEncoder.mstatus := traceInterface.toEncoder.mstatus
-    io.traceCoreInterface.toEncoder.valid := VecInit(traceInterface.toEncoder.groups.map(_.valid)).asUInt
-    io.traceCoreInterface.toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(_.bits.iaddr)).asUInt
-    io.traceCoreInterface.toEncoder.itype := VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt
-    io.traceCoreInterface.toEncoder.iretire := VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt
-    io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(_.bits.ilastsize)).asUInt
+    withClockAndReset(core_with_l2.module.clock, core_with_l2.module.reset){
+      traceInterface.fromEncoder := RegNext(io.traceCoreInterface.fromEncoder)
+      io.traceCoreInterface.toEncoder.priv := RegEnable(traceInterface.toEncoder.priv, traceInterface.toEncoder.groups(0).valid)
+      io.traceCoreInterface.toEncoder.cause := RegEnable(traceInterface.toEncoder.trap.cause, traceInterface.toEncoder.groups(0).valid)
+      io.traceCoreInterface.toEncoder.tval := RegEnable(traceInterface.toEncoder.trap.tval, traceInterface.toEncoder.groups(0).valid)
+      io.traceCoreInterface.toEncoder.mstatus := RegNext(traceInterface.toEncoder.mstatus)
+      io.traceCoreInterface.toEncoder.valid := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.valid)).asUInt, 0.U)
+      io.traceCoreInterface.toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(gp => RegEnable(gp.bits.iaddr, gp.valid))).asUInt
+      io.traceCoreInterface.toEncoder.itype := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt)
+      io.traceCoreInterface.toEncoder.iretire := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt)
+      io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(gp => RegEnable(gp.bits.ilastsize, gp.valid))).asUInt
+    }
   }
 }
 
