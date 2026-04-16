@@ -165,6 +165,29 @@ def test_inject_redirect_clears_semantic_queue_state() -> None:
     assert list(bm._pending_resolves) == []
 
 
+def test_pending_work_count_includes_callret_related_queues() -> None:
+    bm = BackendModel()
+    assert bm.pending_work_count() == 0
+    assert bm.has_pending_work() is False
+
+    bm._pending_queue_call_ret_commit_indices.extend([0, 1])
+    bm._scheduled_queue_call_ret_commit_groups.append(
+        (
+            10,
+            [
+                CommitInstruction(0, 0x80000000, 0x13, 0, 1, 0, queue_index=0, ftq_offset=0),
+                CommitInstruction(1, 0x80000004, 0x13, 0, 1, 0, queue_index=1, ftq_offset=2),
+            ],
+        )
+    )
+    bm._visible_queue_call_ret_commit_group = [
+        CommitInstruction(2, 0x80000008, 0x13, 0, 2, 0, queue_index=0, ftq_offset=0)
+    ]
+
+    assert bm.pending_work_count() == 5
+    assert bm.has_pending_work() is True
+
+
 def test_last_packet_sets_commit_ready_cycle_in_commit_delay_range():
     dut = _DummyDut()
     bm = BackendModel(commit_min_delay=3, commit_max_delay=10)
@@ -1772,6 +1795,64 @@ def test_semantic_queue_commit_pops_only_queue_head_ftq_entry() -> None:
     assert bm.commit_count == 1
 
 
+def test_callret_emitted_mark_uses_ftq_offset_identity_after_pop_head() -> None:
+    bm = BackendModel()
+    bm._semantic_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x80001000,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=10,
+                ftq_offset=0,
+                is_last_in_entry=True,
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80001004,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=11,
+                ftq_offset=0,
+                is_last_in_entry=True,
+            ),
+        ]
+    )
+    bm._scheduled_queue_call_ret_commit_groups.append(
+        (
+            1,
+            [
+                CommitInstruction(
+                    json_index=0,
+                    pc=0x80001000,
+                    instr=0x00000013,
+                    ftq_flag=0,
+                    ftq_value=10,
+                    ras_action=0,
+                    queue_index=0,
+                    ftq_offset=0,
+                )
+            ],
+        )
+    )
+
+    bm._semantic_queue_pop_head(1)
+    bm.current_cycle = 1
+    bm._activate_visible_queue_call_ret_commit_group()
+
+    assert [inst.ftq_value for inst in bm._visible_queue_call_ret_commit_group] == [10]
+    assert len(bm._semantic_queue) == 1
+    assert int(bm._semantic_queue[0].ftq_value) == 11
+    assert bm._semantic_queue[0].call_ret_commit_state == "none"
+
+
 def test_semantic_queue_commit_waits_for_correct_path_cfi_resolve() -> None:
     dut = _DummyDut()
     bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0)
@@ -1840,6 +1921,35 @@ def test_golden_trace_zero_instruction_entry_does_not_wait_for_commit_visibility
     assert (commit_entry.ftq_flag, commit_entry.ftq_value) == (0, 7)
 
 
+def test_semantic_recovery_window_blocks_fallback_commit_when_queue_empty() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=0, pc=0x80000000, instr=0x00000013, size=4),
+            ]
+        )
+    )
+    bm.current_cycle = 10
+    bm._semantic_recovery_target_pc = 0x80000000
+    bm.ftq_entries.append(
+        FtqEntry(
+            ftq_flag=0,
+            ftq_value=7,
+            total_cfi=0,
+            resolved_cfi=0,
+            dispatch_complete=True,
+            commit_ready_cycle=0,
+        )
+    )
+
+    commit_entry = bm._plan_commit_entry_for_cycle()
+
+    assert commit_entry is None
+    assert bm.commit_count == 0
+    assert len(bm.ftq_entries) == 1
+
+
 def test_backend_fault_redirect_requires_explicit_ftq_context() -> None:
     bm = BackendModel()
 
@@ -1903,3 +2013,36 @@ def test_ready_exception_preempts_older_unready_redirect() -> None:
     assert payload is not None
     assert int(payload["target_pc"]) == 0x80000100
     assert [evt.kind for evt in bm.pending_events] == ["redirect"]
+
+
+def test_ready_redirect_is_not_dropped_when_target_pc_was_observed() -> None:
+    bm = BackendModel()
+    bm.current_cycle = 10
+
+    class _Monitor:
+        def __init__(self):
+            self.observations = [
+                Observation(cycle=8, slot=0, pc=0x80000040, instr=0x13, is_rvc=False, pred_taken=False),
+                Observation(cycle=10, slot=0, pc=0x80000080, instr=0x13, is_rvc=False, pred_taken=False),
+            ]
+            self.redirects = []
+
+        def notify_redirect(self, target_pc, reason="redirect"):
+            self.redirects.append((int(target_pc), str(reason)))
+
+    monitor = _Monitor()
+    bm.attach_monitor(monitor)
+    bm.pending_events.append(
+        BackendEvent(
+            kind="redirect",
+            ready_cycle=10,
+            payload={"target_pc": 0x80000080, "reason": "unit_redirect", "queued_cycle": 8, "flush_on_drive": True},
+        )
+    )
+
+    payload = bm._ready_redirect_for_cycle()
+
+    assert payload is not None
+    assert int(payload["target_pc"]) == 0x80000080
+    assert len(bm.pending_events) == 0
+    assert monitor.redirects == [(0x80000080, "unit_redirect")]

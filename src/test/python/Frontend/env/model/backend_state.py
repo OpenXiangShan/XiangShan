@@ -80,6 +80,7 @@ class CommitInstruction:
     ftq_value: int
     ras_action: int
     queue_index: Optional[int] = None
+    ftq_offset: Optional[int] = None
 
 
 @dataclass
@@ -161,11 +162,32 @@ class BackendState:
                     ftq_value=int(entry.ftq_value),
                     ras_action=int(entry.call_ret_ras_action),
                     queue_index=int(idx),
+                    ftq_offset=int(entry.ftq_offset),
                 )
             )
         if not group:
             return
         self.scheduled_queue_call_ret_commit_groups.append((int(self.current_cycle) + 1, group))
+
+    def _call_ret_queue_index_from_identity(self, inst: CommitInstruction) -> Optional[int]:
+        inst_offset = getattr(inst, "ftq_offset", None)
+        if inst_offset is None:
+            return None
+        candidates: list[int] = []
+        for idx, entry in enumerate(self.semantic_queue):
+            if int(entry.ftq_flag) != int(inst.ftq_flag):
+                continue
+            if int(entry.ftq_value) != int(inst.ftq_value):
+                continue
+            if int(entry.ftq_offset) != int(inst_offset):
+                continue
+            candidates.append(int(idx))
+        if not candidates:
+            return None
+        for idx in candidates:
+            if self.semantic_queue[int(idx)].call_ret_commit_state == CALL_RET_STATE_PENDING:
+                return int(idx)
+        return int(candidates[0])
 
     def activate_visible_queue_call_ret_commit_group(self) -> None:
         self.visible_queue_call_ret_commit_group = []
@@ -177,7 +199,12 @@ class BackendState:
         self.scheduled_queue_call_ret_commit_groups.popleft()
         self.visible_queue_call_ret_commit_group = list(group)
         for inst in self.visible_queue_call_ret_commit_group:
-            idx = getattr(inst, "queue_index", None)
+            idx = self._call_ret_queue_index_from_identity(inst)
+            # Backward compatibility: legacy groups without ftq_offset still rely on queue_index.
+            if idx is None and getattr(inst, "ftq_offset", None) is None:
+                queue_index = getattr(inst, "queue_index", None)
+                if queue_index is not None:
+                    idx = int(queue_index)
             if idx is not None and 0 <= int(idx) < len(self.semantic_queue):
                 self.semantic_queue[int(idx)].call_ret_commit_state = CALL_RET_STATE_EMITTED
 

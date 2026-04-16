@@ -242,6 +242,17 @@ class BackendModel:
     def _semantic_queue_mode_active(self) -> bool:
         return self.golden_trace is not None and bool(self._semantic_queue)
 
+    def _semantic_fallback_commit_blocked(self) -> bool:
+        if self.golden_trace is None or self._semantic_queue:
+            return False
+        # When semantic recovery/wait is in progress, keep commit gating on the
+        # semantic-queue path semantics instead of falling back to FTQ-only rules.
+        return (
+            self._semantic_recovery_target_pc is not None
+            or self._golden_wait_pc is not None
+            or self._pending_redirect_origin_index is not None
+        )
+
     def _semantic_queue_has_ftq(self, ftq_flag: int, ftq_value: int) -> bool:
         return any(
             int(entry.ftq_flag) == int(ftq_flag) and int(entry.ftq_value) == int(ftq_value)
@@ -1772,6 +1783,8 @@ class BackendModel:
                 },
             )
             return committed_entry
+        if self._semantic_fallback_commit_blocked():
+            return None
         head = self._find_next_commitable_entry()
         if head is None:
             return None
@@ -1961,15 +1974,6 @@ class BackendModel:
         top = self.pending_events[chosen_index]
         del self.pending_events[chosen_index]
         if top.kind == "redirect":
-            target_pc = top.payload.get("target_pc", None)
-            queued_cycle = int(top.payload.get("queued_cycle", self.current_cycle))
-            if target_pc is not None and self.monitor is not None:
-                for obs in reversed(self.monitor.observations):
-                    if int(obs.cycle) < queued_cycle:
-                        break
-                    if int(obs.pc) == int(target_pc):
-                        return None
-        if top.kind == "redirect":
             return self._plan_redirect_payload(top.payload)
         elif top.kind == "exception":
             redirect_payload = self._plan_redirect_payload(top.payload)
@@ -2107,10 +2111,17 @@ class BackendModel:
         }
 
     def pending_work_count(self) -> int:
+        scheduled_call_ret_count = sum(
+            len(group)
+            for _ready_cycle, group in self._scheduled_queue_call_ret_commit_groups
+        )
         return (
             len(self.ftq_entries)
             + len(self._pending_resolves)
             + len(self.pending_events)
+            + len(self._pending_queue_call_ret_commit_indices)
+            + int(scheduled_call_ret_count)
+            + len(self._visible_queue_call_ret_commit_group)
             + (1 if self._current_ftq_entry is not None else 0)
             + (1 if self._pending_level0_target_ftq is not None else 0)
             + (1 if self._semantic_recovery_target_pc is not None else 0)
