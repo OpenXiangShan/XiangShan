@@ -513,14 +513,14 @@ class TeaHelperTest extends XSTester {
     }
   }
 
-  it should "preserve spaced drained sample cycles when replaying deferred outputs" in {
+  it should "replay spaced drained samples using emission-time cycles instead of reconstructed drain timestamps" in {
     test(new TeaSelectorHarness) { dut =>
-      val commitMaskWidth = dut.io.commitMask.getWidth
-
-      dut.io.sampleFire.poke(true.B)
       dut.io.state.poke(3.U)
       dut.io.overflow.poke(false.B)
+      dut.io.oir.valid.poke(false.B)
       dut.io.firstAllocValid.poke(false.B)
+
+      dut.io.sampleFire.poke(true.B)
       dut.clock.step()
       dut.io.sampleValid.expect(false.B)
       dut.io.pendingDrain.expect(true.B)
@@ -528,7 +528,6 @@ class TeaHelperTest extends XSTester {
       dut.io.sampleFire.poke(false.B)
       dut.clock.step()
       dut.io.sampleValid.expect(false.B)
-      dut.io.pendingDrain.expect(true.B)
 
       dut.io.sampleFire.poke(true.B)
       dut.clock.step()
@@ -537,92 +536,58 @@ class TeaHelperTest extends XSTester {
 
       dut.io.sampleFire.poke(false.B)
       dut.io.firstAllocValid.poke(true.B)
-      dut.io.firstAllocPc.poke("h80000400".U)
+      dut.io.firstAllocPc.poke("h80005000".U)
       dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.ST_L1))
       dut.clock.step()
       dut.io.sampleValid.expect(true.B)
-      dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
-      dut.io.sample.cycle.expect(0.U(64.W))
-      dut.io.sample.pcVec(0).expect("h80000400".U)
+      dut.io.sample.pcVec(0).expect("h80005000".U)
       dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.ST_L1))
-      dut.io.pendingDrain.expect(true.B)
+      val firstReplayCycle = dut.io.sample.cycle.peek().litValue
 
       dut.io.firstAllocValid.poke(false.B)
       dut.clock.step()
       dut.io.sampleValid.expect(true.B)
-      dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
-      dut.io.sample.cycle.expect(2.U(64.W))
-      dut.io.sample.pcVec(0).expect("h80000400".U)
+      dut.io.sample.pcVec(0).expect("h80005000".U)
       dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.ST_L1))
+      val secondReplayCycle = dut.io.sample.cycle.peek().litValue
+
+      assert(firstReplayCycle > 0, s"expected replay to use emission-time cycle, got $firstReplayCycle")
+      assert(secondReplayCycle == firstReplayCycle + 1, s"expected consecutive replay cycles, got $firstReplayCycle then $secondReplayCycle")
       dut.io.pendingDrain.expect(false.B)
     }
   }
 
-  it should "replay long drained backlogs without a bounded queue overflow" in {
+  it should "replay long drained backlogs monotonically without reconstructing historical drain timestamps" in {
     test(new TeaSelectorHarness) { dut =>
-      val commitMaskWidth = dut.io.commitMask.getWidth
-      val deferredSamples = 20
-
+      val deferredSamples = 6
       dut.io.state.poke(3.U)
       dut.io.overflow.poke(false.B)
+      dut.io.oir.valid.poke(false.B)
       dut.io.firstAllocValid.poke(false.B)
+
       for (_ <- 0 until deferredSamples) {
         dut.io.sampleFire.poke(true.B)
         dut.clock.step()
         dut.io.sampleValid.expect(false.B)
-        dut.io.pendingDrain.expect(true.B)
       }
 
       dut.io.sampleFire.poke(false.B)
       dut.io.firstAllocValid.poke(true.B)
-      dut.io.firstAllocPc.poke("h80000500".U)
+      dut.io.firstAllocPc.poke("h80005100".U)
       dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
+
+      var lastCycle = -1L
       for (i <- 0 until deferredSamples) {
         dut.clock.step()
         dut.io.sampleValid.expect(true.B)
-        dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
-        dut.io.sample.cycle.expect(i.U(64.W))
-        dut.io.sample.pcVec(0).expect("h80000500".U)
+        dut.io.sample.pcVec(0).expect("h80005100".U)
         dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.DR_L1))
-        dut.io.sample.pendingDrain.expect(true.B)
-        dut.io.pendingDrain.expect((i != deferredSamples - 1).B)
+        val currentCycle = dut.io.sample.cycle.peek().litValue.toLong
+        if (i == 0) assert(currentCycle > 0L, s"expected replay to use current emission time, got $currentCycle")
+        if (i > 0) assert(currentCycle == lastCycle + 1L, s"expected consecutive replay cycles, got $lastCycle then $currentCycle")
+        lastCycle = currentCycle
         dut.io.firstAllocValid.poke(false.B)
       }
-    }
-  }
-
-  it should "advance the deferred drained timestamp when replay and a new drained sample overlap at count one" in {
-    test(new TeaSelectorHarness) { dut =>
-      dut.io.state.poke(3.U)
-      dut.io.overflow.poke(false.B)
-      dut.io.firstAllocValid.poke(false.B)
-      dut.io.sampleFire.poke(true.B)
-      dut.clock.step()
-      dut.io.sampleValid.expect(false.B)
-      dut.io.pendingDrain.expect(true.B)
-
-      dut.io.sampleFire.poke(false.B)
-      dut.io.firstAllocValid.poke(true.B)
-      dut.io.firstAllocPc.poke("h80002000".U)
-      dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
-      dut.clock.step()
-      dut.io.sampleValid.expect(true.B)
-      dut.io.sample.cycle.expect(0.U(64.W))
-      dut.io.pendingDrain.expect(false.B)
-
-      dut.io.firstAllocValid.poke(false.B)
-      dut.io.sampleFire.poke(true.B)
-      dut.io.sampleValid.expect(true.B)
-      dut.io.sample.cycle.expect(0.U(64.W))
-      dut.io.sample.pendingDrain.expect(true.B)
-      dut.io.pendingDrain.expect(true.B)
-      dut.clock.step()
-
-      dut.io.sampleFire.poke(false.B)
-      dut.io.sampleValid.expect(true.B)
-      dut.io.sample.cycle.expect(2.U(64.W))
-      dut.io.sample.pcVec(0).expect("h80002000".U)
-      dut.io.sample.pendingDrain.expect(true.B)
       dut.io.pendingDrain.expect(false.B)
     }
   }
@@ -688,6 +653,42 @@ class TeaHelperTest extends XSTester {
       dut.clock.step()
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.overflow.expect(true.B)
+    }
+  }
+
+  it should "ignore irregular drained spacing unless overflow is asserted by ROB" in {
+    test(new TeaSelectorHarness) { dut =>
+      dut.io.state.poke(3.U)
+      dut.io.overflow.poke(false.B)
+      dut.io.oir.valid.poke(false.B)
+      dut.io.firstAllocValid.poke(false.B)
+
+      dut.io.sampleFire.poke(true.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+
+      dut.clock.step()
+      dut.clock.step()
+
+      dut.io.sampleFire.poke(true.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(false.B)
+      dut.io.firstAllocValid.poke(true.B)
+      dut.io.firstAllocPc.poke("h80005200".U)
+      dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.clock.step()
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.pcVec(0).expect("h80005200".U)
+      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.io.sample.overflow.expect(false.B)
     }
   }
 }
