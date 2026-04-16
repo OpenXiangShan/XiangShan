@@ -12,11 +12,11 @@ import xiangshan.backend.fu.vector.Utils._
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import yunsuan.VialuFixType
 import yunsuan.vector.Common.SewOH
-import yunsuan.vector.VectorALU.VIAluFixPoint
+import yunsuan.vector.VectorALU.VIAlu
 
 import math.pow
 
-class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
+class VIAluWrapper(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
 //  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VialuFixType.dummy, "VialuF OpType not supported")
 
   // params
@@ -29,7 +29,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   // modules
   private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
-  private val vIAluFixPoints = Seq.fill(numVecModule)(Module(new VIAluFixPoint(XLEN)))
+  private val vIAluFixPoints = Seq.fill(numVecModule)(Module(new VIAlu))
   private val mgu = Module(new NewMgu(dataWidth))
   private val mgtu = Module(new Mgtu(dataWidth))
 
@@ -70,30 +70,10 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   }
 
   vIAluFixPoints.zipWithIndex.foreach {
-    case (mod, i) =>
-      mod.io.in.ctrl.valid := valid
-      mod.io.in.opcode := opcode
-      mod.io.in.info.sel8 := sel8
-      mod.io.in.info.sel16 := sel16
-      mod.io.in.info.sel32 := sel32
-      mod.io.in.info.sel64 := sel64
-      mod.io.in.info.vm := vm
-      mod.io.in.ctrl.widen := widen
-      mod.io.in.ctrl.isSigned := isSigned
-      mod.io.in.ctrl.adderCtrl.widenVs2 := widenVs2
-      mod.io.in.ctrl.adderCtrl.isAddCarry := isAddCarry
-      mod.io.in.ctrl.miscCtrl.isExt.valid := isExt
-      mod.io.in.ctrl.miscCtrl.isExt.bits.isVf2 := isVf2
-      mod.io.in.ctrl.miscCtrl.isExt.bits.isVf4 := isVf4
-      mod.io.in.ctrl.miscCtrl.isExt.bits.isVf8 := isVf8
-      mod.io.in.ctrl.miscCtrl.isMisc := isMisc
-      mod.io.in.ctrl.miscCtrl.isNarrow := isNarrow
-      mod.io.in.data.vs2 := vs2Vec(i)
-      mod.io.in.data.vs1 := vs1Vec(i)
-      mod.io.in.data.vs2Widen := vs2WidenVec(i)
-      mod.io.in.data.vs1Widen := vs1WidenVec(i)
-      mod.io.in.data.mask := maskVec(i)
-      mod.io.in.data.vxrm := vxrm
+    case (mod: VIAlu, i) =>
+      mod.in.vxrm := vxrm
+      mod.in.ex0 := ???
+      mod.in.ex1 := ???
   }
 
   private val maskToMgu = Mux(isAddCarry, allMaskTrue, srcMask)
@@ -132,10 +112,10 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val vlIsZero = !vl.orR
   private val vlIsZeroS1 = RegEnable(vlIsZero, valid)
 
-  private val vd = Cat(vIAluFixPoints.map(_.io.out.vd).reverse)
+  private val vd = Cat(vIAluFixPoints.map(_.out.ex1.vd).reverse) // Todo: ex0
   private val outNarrow = isNarrow
   private val outVuopIdx0 = outVecCtrl.vuopIdx(0).asBool
-  private val narrowVd = Cat(vIAluFixPoints.map(_.io.out.narrowVd).reverse)
+  private val narrowVd = Cat(vIAluFixPoints.map(_.out.ex1.narrowVd).reverse) // Todo: ex1
   private val outNarrowVd = Mux(outVuopIdx0,
     Cat(narrowVd, outOldVd(dataWidth / 2 - 1, 0)),
     Cat(outOldVd(dataWidth - 1, dataWidth / 2), narrowVd))
@@ -152,9 +132,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val vsewOH = SewOH(vsew).oneHot
   private val outVsewOH = RegEnable(vsewOH, valid)
 
-  private val addCarryCmpMask = Mux1H(outVsewOH, Seq(8, 4, 2, 1).map(i =>
-    Cat(vIAluFixPoints.map(_.io.out.addCarryCmpMask(i - 1, 0)).reverse)
-  ))
+  private val addCarryCmpMask = ???
 
   private val dstMgu = Module(new DstMgu(dataWidth))
   dstMgu.io.in.valid := valid
@@ -171,11 +149,7 @@ class VIAluFix(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(c
   private val outOpMask = VIAluOpcodes.isOpMask(fuOpType)
   private val outDstMask = VIAluOpcodes.isDestM(fuOpType)
 
-  private val outVxsat = Mux1H(Seq(
-    (outNarrow & outVuopIdx0) -> Cat(Cat(vIAluFixPoints.map(_.io.out.vxsat(3, 0)).reverse), 0.U(8.W)),
-    (outNarrow & !outVuopIdx0) -> Cat(vIAluFixPoints.map(_.io.out.vxsat(3, 0)).reverse),
-    !outNarrow -> Cat(vIAluFixPoints.map(_.io.out.vxsat).reverse),
-  ))
+  private val outVxsat: UInt = ???
 
   mgtu.io.in.vd := Mux(outOpMask, vd, dstMgu.io.out.vd)
   mgtu.io.in.vl := outVl

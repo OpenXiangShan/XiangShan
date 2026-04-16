@@ -561,7 +561,7 @@ object FuConfig {
   val VialuCfg = FuConfig (
     name = "vialuFix",
     fuType = FuType.vialuF,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIAluFix(cfg)(p).suggestName("VialuFix")),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIAluWrapper(cfg)(p).suggestName("VialuFix")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
     ),
@@ -649,7 +649,7 @@ object FuConfig {
   val VipuCfg: FuConfig = FuConfig (
     name = "vipu",
     fuType = FuType.vipu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIPU(cfg)(p).suggestName("Vipu")),
+    fuGen = (p: Parameters, cfg: FuConfig) => null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
     ),
