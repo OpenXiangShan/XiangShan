@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from env.backend_model import BackendModel, FtqEntry, ResolveEntry
-from env.model.backend_state import CommitInstruction, QueueInstr
+from env.model.backend_state import BackendEvent, CommitInstruction, QueueInstr
 from env.model.backend_runtime import BackendObservationSnapshot
 from env.monitor import Observation
 from env.trace import GoldenTrace, TraceEntry
@@ -327,6 +327,8 @@ def test_semantic_queue_marks_younger_packets_wrong_after_redirect_origin() -> N
             ]
         )
     )
+    bm.resolve_min_delay = 0
+    bm.resolve_max_delay = 0
 
     _drive_cfvec_slot(
         dut,
@@ -383,6 +385,8 @@ def test_semantic_queue_non_cfi_first_mismatch_starts_wrong_path() -> None:
             ]
         )
     )
+    bm.resolve_min_delay = 0
+    bm.resolve_max_delay = 0
 
     _drive_cfvec_slot(
         dut,
@@ -446,6 +450,8 @@ def test_semantic_queue_redirect_flush_prunes_wrong_path_suffix() -> None:
             ]
         )
     )
+    bm.resolve_min_delay = 0
+    bm.resolve_max_delay = 0
 
     _drive_cfvec_slot(
         dut,
@@ -520,6 +526,8 @@ def test_semantic_queue_redirect_flush_prunes_wrong_path_pending_resolves() -> N
             ]
         )
     )
+    bm.resolve_min_delay = 0
+    bm.resolve_max_delay = 0
 
     _drive_cfvec_slot(
         dut,
@@ -1500,6 +1508,7 @@ def test_commit_prunes_older_wrap_entries_when_pointer_advances() -> None:
     assert head is not None
     assert (head.ftq_flag, head.ftq_value) == (1, 58)
     assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (1, 58)
+    assert bm.commit_count == 252
     assert list((entry.ftq_flag, entry.ftq_value) for entry in bm.ftq_entries) == []
 
 
@@ -1517,7 +1526,7 @@ def test_backend_model_consumes_backend_observation_snapshot() -> None:
     assert bm.current_frontend_observation().from_ftq_ftq_idx == 7
 
 
-def test_callret_commit_becomes_visible_one_cycle_after_golden_trace_consumption() -> None:
+def test_semantic_queue_match_does_not_immediately_mark_instruction_committed() -> None:
     base = 0x80000000
     instr = 0x008000EF  # jal x1, 8
 
@@ -1539,6 +1548,8 @@ def test_callret_commit_becomes_visible_one_cycle_after_golden_trace_consumption
             ]
         )
     )
+    bm.resolve_min_delay = 0
+    bm.resolve_max_delay = 0
 
     _drive_cfvec_slot(
         dut,
@@ -1556,17 +1567,81 @@ def test_callret_commit_becomes_visible_one_cycle_after_golden_trace_consumption
 
     bm.on_clock_edge(0)
 
+    assert bm._semantic_queue[0].golden_match_state == "matched"
+    assert bm._semantic_queue[0].path_state == "correct"
+    assert bm._semantic_queue[0].rob_commit_state == "pending"
+    assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 0
+
+
+def test_callret_commit_becomes_visible_one_cycle_after_simulated_instruction_commit() -> None:
+    base = 0x80000000
+    instr = 0x008000EF  # jal x1, 8
+
+    dut = _DummyDut()
+    bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0)
+    bm.bind(dut)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(
+                    index=0,
+                    pc=base,
+                    instr=instr,
+                    size=4,
+                    kind="jump",
+                    taken=True,
+                    target_pc=base + 8,
+                )
+            ]
+        )
+    )
+    bm.resolve_min_delay = 3
+    bm.resolve_max_delay = 3
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=base,
+        instr=instr,
+        is_rvc=0,
+        pred_taken=1,
+        ftq_flag=0,
+        ftq_value=5,
+        ftq_offset=0,
+        is_last=1,
+    )
+
+    bm.on_clock_edge(0)
+
+    assert bm._semantic_queue[0].rob_commit_state == "pending"
     assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 0
 
     _clear_cfvec(dut)
     bm.on_clock_edge(1)
+
+    assert bm._semantic_queue[0].rob_commit_state == "pending"
+    assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 0
+
+    bm.on_clock_edge(2)
+
+    assert bm._semantic_queue[0].rob_commit_state == "pending"
+    assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 0
+
+    bm.on_clock_edge(3)
+
+    assert bm._semantic_queue[0].rob_commit_state == "committed"
+    assert bm._semantic_queue[0].call_ret_commit_state == "pending"
+    assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 0
+
+    bm.on_clock_edge(4)
 
     assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 1
     assert int(dut.io_backend_toFtq_callRetCommit_0_bits_rasAction.value) == 2
     assert int(dut.io_backend_toFtq_callRetCommit_0_bits_ftqPtr_value.value) == 5
 
 
-def test_semantic_queue_callret_tracks_per_instruction_commit_projection() -> None:
+def test_semantic_queue_callret_tracks_per_instruction_commit_frontier() -> None:
     base = 0x80000100
     instr = 0x008000EF  # jal x1, 8
 
@@ -1588,6 +1663,8 @@ def test_semantic_queue_callret_tracks_per_instruction_commit_projection() -> No
             ]
         )
     )
+    bm.resolve_min_delay = 3
+    bm.resolve_max_delay = 3
 
     _drive_cfvec_slot(
         dut,
@@ -1605,17 +1682,36 @@ def test_semantic_queue_callret_tracks_per_instruction_commit_projection() -> No
 
     bm.on_clock_edge(0)
 
+    assert bm._semantic_queue[0].rob_commit_state == "pending"
+    assert bm._semantic_queue[0].call_ret_commit_state == "none"
+    assert list(bm._pending_queue_call_ret_commit_indices) == []
+    assert list(bm._scheduled_queue_call_ret_commit_groups) == []
+
+    _clear_cfvec(dut)
+    bm.on_clock_edge(1)
+
+    assert bm._semantic_queue[0].rob_commit_state == "pending"
+    assert bm._semantic_queue[0].call_ret_commit_state == "none"
+    assert list(bm._scheduled_queue_call_ret_commit_groups) == []
+
+    bm.on_clock_edge(2)
+
+    assert bm._semantic_queue[0].rob_commit_state == "pending"
+    assert bm._semantic_queue[0].call_ret_commit_state == "none"
+    assert list(bm._scheduled_queue_call_ret_commit_groups) == []
+
+    bm.on_clock_edge(3)
+
     assert bm._semantic_queue[0].rob_commit_state == "committed"
     assert bm._semantic_queue[0].call_ret_commit_state == "pending"
     assert list(bm._pending_queue_call_ret_commit_indices) == []
     scheduled_groups = list(bm._scheduled_queue_call_ret_commit_groups)
     assert len(scheduled_groups) == 1
-    assert scheduled_groups[0][0] == 1
+    assert scheduled_groups[0][0] == 4
     assert len(scheduled_groups[0][1]) == 1
     assert scheduled_groups[0][1][0].queue_index == 0
 
-    _clear_cfvec(dut)
-    bm.on_clock_edge(1)
+    bm.on_clock_edge(4)
 
     assert bm._semantic_queue[0].call_ret_commit_state == "emitted"
     assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 1
@@ -1664,6 +1760,7 @@ def test_semantic_queue_commit_pops_only_queue_head_ftq_entry() -> None:
     for entry in bm.ftq_entries:
         entry.commit_ready_cycle = 0
     bm.current_cycle = 10
+    assert bm._plan_instruction_commits_for_cycle() == 2
 
     commit_entry = bm._plan_commit_entry_for_cycle()
 
@@ -1710,6 +1807,7 @@ def test_semantic_queue_commit_waits_for_correct_path_cfi_resolve() -> None:
 
     bm._drive_resolves()
     bm.current_cycle = 20
+    assert bm._plan_instruction_commits_for_cycle() == 1
     commit_entry = bm._plan_commit_entry_for_cycle()
 
     assert commit_entry is not None
@@ -1755,3 +1853,53 @@ def test_backend_fault_redirect_requires_explicit_ftq_context() -> None:
                 "backend_ipf": 1,
             }
         )
+
+
+def test_ready_redirect_does_not_wait_for_older_unready_redirect() -> None:
+    bm = BackendModel()
+    bm.current_cycle = 10
+    bm.pending_events.extend(
+        [
+            BackendEvent(
+                kind="redirect",
+                ready_cycle=20,
+                payload={"target_pc": 0x80000040, "reason": "older_redirect", "queued_cycle": 0},
+            ),
+            BackendEvent(
+                kind="redirect",
+                ready_cycle=10,
+                payload={"target_pc": 0x80000080, "reason": "younger_ready_redirect", "queued_cycle": 1},
+            ),
+        ]
+    )
+
+    payload = bm._ready_redirect_for_cycle()
+
+    assert payload is not None
+    assert int(payload["target_pc"]) == 0x80000080
+    assert [str(evt.payload.get("reason", "")) for evt in bm.pending_events] == ["older_redirect"]
+
+
+def test_ready_exception_preempts_older_unready_redirect() -> None:
+    bm = BackendModel()
+    bm.current_cycle = 10
+    bm.pending_events.extend(
+        [
+            BackendEvent(
+                kind="redirect",
+                ready_cycle=20,
+                payload={"target_pc": 0x80000040, "reason": "older_redirect", "queued_cycle": 0},
+            ),
+            BackendEvent(
+                kind="exception",
+                ready_cycle=10,
+                payload={"target_pc": 0x80000100, "reason": "exception", "cause": 12, "tval": 0},
+            ),
+        ]
+    )
+
+    payload = bm._ready_redirect_for_cycle()
+
+    assert payload is not None
+    assert int(payload["target_pc"]) == 0x80000100
+    assert [evt.kind for evt in bm.pending_events] == ["redirect"]

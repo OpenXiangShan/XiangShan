@@ -180,6 +180,28 @@ instr.valid && instr.bits.rasAction =/= BranchAttribute.RasAction.None
 - 某条指令一旦 ROB commit，就可以独立地产生对应 `callRetCommit`
 - 只有 `call` / `ret` 指令的 `rasAction` 具有非 `None` 语义
 
+除此之外，如果目标是“尽可能模拟真实 backend 行为”，当前 env 的实现还应满足下面这些更具体的约束：
+
+- `golden trace` 只负责判定 correct-path / wrong-path，不直接等价于 ROB commit
+- 环境需要维护一个独立的 instruction commit frontier，来近似 backend 的顺序提交
+- 只有这个独立 frontier 推进后，才允许派生 `callRetCommit`
+- FTQ-entry `commit` 也应从这条独立 frontier 的结果聚合出来，而不是直接从 golden trace 消费结果聚合
+- instruction commit frontier 应只从 queue 头连续推进；不能跳过更老未提交指令
+- 对正确路径 CFI，只有在其 `resolve` 已经完成后，才允许它进入 committed
+
+也就是说，推荐的职责分层是：
+
+1. `cfVec` + golden trace：判定路径语义
+2. 独立 instruction commit frontier：近似 ROB commit
+3. `callRetCommit`：从单条 committed 指令派生
+4. FTQ-entry `commit`：从 queue 头已 committed 指令聚合
+
+不推荐的实现方式是：
+
+- `golden match` 一发生，就直接把指令标成 committed
+- 把 `callRetCommit` 直接建模成“golden trace 已消费到这里”
+- 在内部一次性吞掉多个 FTQ entry，再对外只打一拍 `commit`
+
 因此最需要避免的是：
 
 - 把 `commit` 建模成无条件随机推进的边界脉冲

@@ -21,6 +21,7 @@ from .model.backend_state import (
     PATH_STATE_WRONG,
     QueueInstr,
     ResolveEntry,
+    ROB_COMMIT_STATE_PENDING,
     ROB_COMMIT_STATE_COMMITTED,
     CALL_RET_STATE_PENDING,
     RESOLVE_STATE_EMITTED,
@@ -50,6 +51,7 @@ class BackendModel:
         ftq_size: int = 64,
         ibuf_watchdog_threshold: int = 32,
         safe_pc: int = 0x80000000,
+        instruction_commit_width: int = 8,
         resolve_min_delay: int = 3,
         resolve_max_delay: int = 8,
         redirect_min_delay: int = 5,
@@ -73,6 +75,9 @@ class BackendModel:
         self.ftq_size = int(ftq_size)
         self.ibuf_watchdog_threshold = int(ibuf_watchdog_threshold)
         self.safe_pc = int(safe_pc)
+        self.instruction_commit_width = int(instruction_commit_width)
+        if not 1 <= self.instruction_commit_width <= 8:
+            raise ValueError("instruction_commit_width must be within [1, 8]")
         self.can_accept = 1
 
         self.resolve_min_delay = int(resolve_min_delay)
@@ -956,17 +961,34 @@ class BackendModel:
             return cur
         return None
 
-    def _record_consumed_commit_instruction(
-        self,
-        entry: TraceEntry,
-        ftq_flag: int,
-        ftq_value: int,
-        instr: int,
-        queue_index: Optional[int] = None,
-    ) -> None:
+    def _record_instruction_commit(self, queue_index: Optional[int], instr: int) -> None:
         if queue_index is not None:
             self._semantic_queue_mark_committed(int(queue_index), int(instr))
         self._apply_backend_state()
+
+    def _plan_instruction_commits_for_cycle(self) -> int:
+        if not self._semantic_queue:
+            return 0
+        committed = 0
+        width = int(self.instruction_commit_width)
+        queue_snapshot = list(self._semantic_queue)
+        for idx, entry in enumerate(queue_snapshot):
+            if committed >= width:
+                break
+            queue_entry = self._semantic_queue[idx]
+            if queue_entry.rob_commit_state != ROB_COMMIT_STATE_PENDING:
+                continue
+            if idx > 0 and self._semantic_queue[idx - 1].rob_commit_state != ROB_COMMIT_STATE_COMMITTED:
+                break
+            if queue_entry.path_state != PATH_STATE_CORRECT:
+                break
+            if int(queue_entry.cycle) >= int(self.current_cycle):
+                break
+            if queue_entry.is_cfi and queue_entry.resolve_state != RESOLVE_STATE_EMITTED:
+                break
+            self._record_instruction_commit(int(idx), int(queue_entry.instr))
+            committed += 1
+        return int(committed)
 
     def _schedule_next_queue_call_ret_commit_group(self) -> None:
         self._sync_backend_state().schedule_next_queue_call_ret_commit_group()
@@ -1412,13 +1434,6 @@ class BackendModel:
             )
             if golden_entry is not None:
                 self._semantic_queue_mark_matched(int(queue_index), golden_entry)
-                self._record_consumed_commit_instruction(
-                    golden_entry,
-                    int(ftq_flag),
-                    int(ftq_value),
-                    int(instr),
-                    queue_index=int(queue_index),
-                )
             elif expected_golden is not None:
                 self._semantic_queue_note_mismatch(int(queue_index))
             self._current_ftq_max_offset = max(int(self._current_ftq_max_offset), int(ftq_offset))
@@ -1764,18 +1779,14 @@ class BackendModel:
             return None
         state = self._sync_backend_state()
         committed_entries = []
+        retained_entries: Deque[FtqEntry] = deque()
         while state.ftq_entries:
             entry = state.ftq_entries.popleft()
-            committed_entries.append(entry)
-            if not self._ftq_entry_matches(entry, int(head.ftq_flag), int(head.ftq_value)):
+            if self._ftq_entry_matches(entry, int(head.ftq_flag), int(head.ftq_value)):
+                committed_entries.append(entry)
                 continue
-            while state.ftq_entries and self._ftq_entry_matches(
-                state.ftq_entries[0],
-                int(head.ftq_flag),
-                int(head.ftq_value),
-            ):
-                committed_entries.append(state.ftq_entries.popleft())
-            break
+            retained_entries.append(entry)
+        state.ftq_entries = retained_entries
         commit_rank = state.ftq_ptr_rank_after_commit(int(head.ftq_flag), int(head.ftq_value))
         if state.reuse_commit_ptr_once and self._ftq_entry_matches(head, state.commit_ptr_flag, state.commit_ptr_value):
             state.reuse_commit_ptr_once = False
@@ -1789,7 +1800,12 @@ class BackendModel:
             ) <= int(commit_rank)
         ):
             state.pending_level0_target_ftq = None
-        state.commit_count += max(1, len(committed_entries))
+        state.ftq_entries = deque(
+            entry
+            for entry in state.ftq_entries
+            if 0 < state.ftq_ptr_rank_after_commit(int(entry.ftq_flag), int(entry.ftq_value)) < int(state.ftq_size)
+        )
+        state.commit_count += 1
         self._apply_backend_state()
         self._emit_event(
             "commit",
@@ -1930,10 +1946,20 @@ class BackendModel:
     def _ready_redirect_for_cycle(self) -> Optional[dict]:
         if not self.pending_events:
             return None
-        top = self.pending_events[0]
-        if self.current_cycle < top.ready_cycle:
+        ready_indices = [
+            idx
+            for idx, evt in enumerate(self.pending_events)
+            if int(self.current_cycle) >= int(evt.ready_cycle)
+        ]
+        if not ready_indices:
             return None
-        top = self.pending_events.popleft()
+        ready_exception_index = next(
+            (idx for idx in ready_indices if self.pending_events[idx].kind == "exception"),
+            None,
+        )
+        chosen_index = ready_exception_index if ready_exception_index is not None else ready_indices[0]
+        top = self.pending_events[chosen_index]
+        del self.pending_events[chosen_index]
         if top.kind == "redirect":
             target_pc = top.payload.get("target_pc", None)
             queued_cycle = int(top.payload.get("queued_cycle", self.current_cycle))
@@ -2044,6 +2070,7 @@ class BackendModel:
         if self.observe_if is not None:
             self._sample_cfvec()
         resolve_entries = self._ready_resolves_for_cycle()
+        self._plan_instruction_commits_for_cycle()
         commit_entry = self._plan_commit_entry_for_cycle()
         redirect_payload = self._ready_redirect_for_cycle()
         call_ret_commit_group = self._current_semantic_call_ret_commit_group()

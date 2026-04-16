@@ -102,6 +102,7 @@ class FrontendEnv:
                 ftq_size=self.config.backend.ftq_size,
                 ibuf_watchdog_threshold=self.config.backend.ibuf_watchdog_threshold,
                 safe_pc=self.config.backend.safe_pc,
+                instruction_commit_width=self.config.backend.instruction_commit_width,
                 resolve_min_delay=self.config.backend.resolve_min_delay,
                 resolve_max_delay=self.config.backend.resolve_max_delay,
                 redirect_min_delay=self.config.backend.redirect_min_delay,

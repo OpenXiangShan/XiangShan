@@ -381,31 +381,24 @@ class BackendState:
                 None,
             )
 
-        upper_bound: Optional[FtqEntry] = None
-        while True:
-            matching_entries = [
+        matching_entries = [
+            entry
+            for entry in self.ftq_entries
+            if self.ftq_entry_matches(entry, int(expected[0]), int(expected[1]))
+        ]
+        if not matching_entries:
+            return None
+        return next(
+            (
                 entry
-                for entry in self.ftq_entries
-                if self.ftq_entry_matches(entry, int(expected[0]), int(expected[1]))
-            ]
-            if not matching_entries:
-                break
-            candidate = next(
-                (
-                    entry
-                    for entry in matching_entries
-                    if self.ftq_entry_is_ready_to_commit(
-                        entry,
-                        golden_trace_attached=golden_trace_attached,
-                    )
-                ),
-                None,
-            )
-            if candidate is None:
-                break
-            upper_bound = candidate
-            expected = self.increment_ftq_ptr(int(candidate.ftq_flag), int(candidate.ftq_value))
-        return upper_bound
+                for entry in matching_entries
+                if self.ftq_entry_is_ready_to_commit(
+                    entry,
+                    golden_trace_attached=golden_trace_attached,
+                )
+            ),
+            None,
+        )
 
     def seal_current_ftq_entry(self, *, observed_last_in_entry: bool = False) -> None:
         if self.current_ftq_entry is None:

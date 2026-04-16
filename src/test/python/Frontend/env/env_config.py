@@ -28,6 +28,7 @@ class BackendConfig:
     ftq_size: int = 64
     ibuf_watchdog_threshold: int = 32
     safe_pc: int = 0x80000000
+    instruction_commit_width: int = 8
     resolve_min_delay: int = 3
     resolve_max_delay: int = 8
     redirect_min_delay: int = 5
