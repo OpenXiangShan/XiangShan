@@ -1479,6 +1479,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.custom.hd_misalign_ld_enable            := smblockctl.regOut.HD_MISALIGN_LD_ENABLE.asBool
 
   io.status.custom.power_down_enable := mcorepwr.regOut.POWER_DOWN_ENABLE.asBool
+  io.status.custom.commit_stuck_check_enable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
 
   io.status.custom.flush_l2_enable := mflushpwr.regOut.FLUSH_L2_ENABLE.asBool
 
@@ -1616,6 +1617,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   // Rename
   io.toDecode.custom.fusion_enable := srnctl.regOut.FUSION_ENABLE.asBool
   io.toDecode.custom.wfi_enable    := srnctl.regOut.WFI_ENABLE.asBool && (!io.status.singleStepFlag) && !debugMode
+  io.toDecode.custom.commit_stuck_check_enable := mcorepwr.regOut.COMMIT_STUCK_CHECK_ENABLE.asBool
   io.toDecode.singlestep := io.status.singleStepFlag
 
   io.distributedWenLegal := wenLegalReg && !noCSRIllegalReg

@@ -401,6 +401,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
       custom.hd_misalign_st_enable            := csrMod.io.status.custom.hd_misalign_st_enable
       custom.hd_misalign_ld_enable            := csrMod.io.status.custom.hd_misalign_ld_enable
       custom.power_down_enable                := csrMod.io.status.custom.power_down_enable
+      custom.commit_stuck_check_enable        := csrMod.io.status.custom.commit_stuck_check_enable
       custom.flush_l2_enable                  := csrMod.io.status.custom.flush_l2_enable
       // distribute csr write signal
       // write to frontend and memory
@@ -593,6 +594,7 @@ class CSRToDecode(implicit p: Parameters) extends XSBundle {
     // Rename
     val fusion_enable = Bool()
     val wfi_enable = Bool()
+    val commit_stuck_check_enable = Bool()
   }
 
   // rename single step
