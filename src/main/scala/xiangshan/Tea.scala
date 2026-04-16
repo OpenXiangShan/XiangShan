@@ -51,18 +51,6 @@ object TeaBinders {
 }
 
 object TeaFrontend {
-  def selectEnqueued(
-    valids: Seq[Bool],
-    enqEnable: Seq[Bool],
-    enqOffset: Seq[UInt],
-    useBypass: Bool,
-    numBypass: UInt
-  ): Vec[Bool] = {
-    VecInit(valids.indices.map { i =>
-      valids(i) && enqEnable(i) && (!useBypass || enqOffset(i) >= numBypass)
-    })
-  }
-
   def bindPacketPsv(valids: Seq[Bool], packetPsv: UInt): Vec[UInt] = {
     val firstValidOH = PriorityEncoderOH(VecInit(valids))
     VecInit(valids.indices.map { i =>
@@ -107,11 +95,7 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
     val pendingDrain = Output(Bool())
   })
 
-  val drainCount = RegInit(0.U(64.W))
-  val oldestDrainCycle = RegInit(0.U(64.W))
-  val lastDrainCycle = RegInit(0.U(64.W))
-  val drainStride = RegInit(0.U(64.W))
-  val drainStrideValid = RegInit(false.B)
+  val pendingDrainCount = RegInit(0.U(64.W))
   val replayActive = RegInit(false.B)
   val replayPc = RegInit(0.U(VAddrBits.W))
   val replayPsv = RegInit(0.U(TeaEvent.width.W))
@@ -120,99 +104,63 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
 
   val sample = WireInit(0.U.asTypeOf(new TeaEntry()(p)))
   val sampleValid = WireDefault(false.B)
-  val effectiveState = Mux(io.oir.valid, 2.U(4.W), io.state)
-  val oirSampleFire = io.sampleFire && io.oir.valid
-  val drainSampleFire = io.sampleFire && io.state === 3.U
-  val replayValid = replayActive && drainCount =/= 0.U
-  val doDrainDeq = replayValid && !oirSampleFire
-  val drainEmpty = drainCount === 0.U
-  val nextDrainCount = WireDefault(drainCount)
-  val observedDrainStride = cycle - lastDrainCycle
+  val oirSample = io.sampleFire && io.oir.valid
+  val regularSample = io.sampleFire && !io.oir.valid && io.state =/= 3.U
+  val drainCapture = io.sampleFire && !io.oir.valid && io.state === 3.U
 
-  when(drainSampleFire && !doDrainDeq) {
-    nextDrainCount := drainCount + 1.U
-  }.elsewhen(!drainSampleFire && doDrainDeq) {
-    nextDrainCount := drainCount - 1.U
-  }
+  val pendingAfterCapture = pendingDrainCount + drainCapture.asUInt
+  val replayFromNewAlloc = !replayActive && io.firstAllocValid && pendingAfterCapture =/= 0.U
+  val replayNow = replayActive && !io.oir.valid
+  val replayDeq = (replayActive || replayFromNewAlloc) && pendingAfterCapture =/= 0.U && !io.oir.valid
+  val pendingAfterReplay = pendingAfterCapture - replayDeq.asUInt
 
   sample.cycle := cycle
-  sample.state := effectiveState
   sample.overflow := io.overflow
 
-  when(io.sampleFire) {
-    switch(effectiveState) {
-      is(0.U) {
-        sample.validMask := io.commitMask
-        sample.pcVec := io.commitPc
-        sample.psvVec := io.commitPsv
-        sampleValid := io.commitMask.orR
-      }
-      is(1.U) {
-        sample.validMask := 1.U(CommitWidth.W)
-        sample.pcVec(0) := io.headPc
-        sample.psvVec(0) := io.headPsv
-        sampleValid := true.B
-      }
-      is(2.U) {
-        sample.validMask := 1.U(CommitWidth.W)
-        sample.pcVec(0) := io.oir.pc
-        sample.psvVec(0) := io.oir.psv
-        sample.oirValid := io.oir.valid
-        sampleValid := io.oir.valid
-      }
-    }
-  }
-
-  when(drainSampleFire) {
-    when(drainEmpty) {
-      oldestDrainCycle := cycle
-      lastDrainCycle := cycle
-      drainStride := 0.U
-      drainStrideValid := false.B
-    }.otherwise {
-      when(drainStrideValid) {
-        assert(observedDrainStride === drainStride, "TeaSampleSelector expects periodic drained sample fires")
-      }.otherwise {
-        drainStride := observedDrainStride
-        drainStrideValid := true.B
-      }
-      lastDrainCycle := cycle
-    }
-  }
-
-  when(!replayActive && io.firstAllocValid && (!drainEmpty || drainSampleFire)) {
-    replayActive := true.B
-    replayPc := io.firstAllocPc
-    replayPsv := io.firstAllocPsv
-  }
-
-  when(doDrainDeq && !sample.oirValid) {
-    sample.cycle := oldestDrainCycle
+  when(oirSample) {
+    sample.state := 2.U
+    sample.validMask := 1.U(CommitWidth.W)
+    sample.pcVec(0) := io.oir.pc
+    sample.psvVec(0) := io.oir.psv
+    sample.oirValid := true.B
+    sampleValid := true.B
+  }.elsewhen(replayNow) {
     sample.state := 3.U
     sample.validMask := 1.U(CommitWidth.W)
     sample.pcVec(0) := replayPc
     sample.psvVec(0) := replayPsv
     sample.pendingDrain := true.B
     sampleValid := true.B
+  }.elsewhen(regularSample) {
+    switch(io.state) {
+      is(0.U) {
+        sample.state := 0.U
+        sample.validMask := io.commitMask
+        sample.pcVec := io.commitPc
+        sample.psvVec := io.commitPsv
+        sampleValid := io.commitMask.orR
+      }
+      is(1.U) {
+        sample.state := 1.U
+        sample.validMask := 1.U(CommitWidth.W)
+        sample.pcVec(0) := io.headPc
+        sample.psvVec(0) := io.headPsv
+        sampleValid := true.B
+      }
+    }
   }
 
-  when(drainSampleFire && !doDrainDeq) {
-    drainCount := drainCount + 1.U
-  }.elsewhen(!drainSampleFire && doDrainDeq) {
-    drainCount := drainCount - 1.U
-  }
+  pendingDrainCount := pendingAfterReplay
 
-  when(doDrainDeq && drainCount > 1.U) {
-    oldestDrainCycle := oldestDrainCycle + Mux(drainStrideValid, drainStride, 0.U)
-  }.elsewhen(doDrainDeq && drainSampleFire) {
-    oldestDrainCycle := cycle
-  }
-
-  when(replayActive && doDrainDeq && drainCount === 1.U && !drainSampleFire) {
+  when(replayFromNewAlloc) {
+    replayPc := io.firstAllocPc
+    replayPsv := io.firstAllocPsv
+    replayActive := true.B
+  }.elsewhen(replayActive && pendingDrainCount === 0.U) {
     replayActive := false.B
   }
 
   io.sampleValid := sampleValid
   io.sample := sample
-  io.pendingDrain := nextDrainCount =/= 0.U
+  io.pendingDrain := pendingAfterReplay =/= 0.U
 }
