@@ -229,6 +229,10 @@ else
 TOPMAIN_ARGS += $(RELEASE_ARGS)
 endif
 
+ifeq ($(DUMP_CSR),1)
+TOPMAIN_ARGS += --dump-csr
+endif
+
 TIMELOG = $(BUILD_DIR)/time.log
 TIME_CMD = time -avp -o $(TIMELOG)
 

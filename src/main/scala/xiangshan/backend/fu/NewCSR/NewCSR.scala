@@ -10,6 +10,7 @@ import utils.OptionWrapper
 import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
+import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.NewCSR.CSREvents.{CSREvents, DretEventSinkBundle, EventUpdatePrivStateOutput, MNretEventSinkBundle, MretEventSinkBundle, SretEventSinkBundle, SretEventSDTSinkBundle,  TargetPCBundle, TrapEntryDEventSinkBundle, TrapEntryEventInput, TrapEntryHSEventSinkBundle, TrapEntryMEventSinkBundle, TrapEntryMNEventSinkBundle, TrapEntryVSEventSinkBundle}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart, Vxrm, Vxsat}
@@ -111,6 +112,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   with CSRCustom
   with CSRPMP
   with CSRPMA
+  with CSRDocDump
   with HasCriticalErrors
   with IpIeAliasConnect
 {
@@ -787,11 +789,6 @@ class NewCSR(implicit val p: Parameters) extends Module
         m.l2FlushDone := io.fromTop.l2FlushDone
       case _ =>
     }
-  }
-
-  csrMods.foreach { mod =>
-    println(s"${mod.modName}: ")
-    println(mod.dumpFields)
   }
 
   trapEntryMNEvent.valid  := ((hasTrap && nmi) || dbltrpToMN) && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
@@ -1536,6 +1533,18 @@ class NewCSR(implicit val p: Parameters) extends Module
   )
   criticalErrorStateInCSR := criticalErrors.map(criticalError => criticalError._2).reduce(_ || _).asBool
   generateCriticalErrors()
+
+  // ---------------------------------------------------------------------------
+  // CSR documentation export
+  // ---------------------------------------------------------------------------
+
+  if (env.DumpCSR) {
+    dumpCSRDoc()
+  }
+
+  // ---------------------------------------------------------------------------
+  // Difftest
+  // ---------------------------------------------------------------------------
 
   // Always instantiate basic difftest modules.
   if (env.AlwaysBasicDiff || env.EnableDifftest) {

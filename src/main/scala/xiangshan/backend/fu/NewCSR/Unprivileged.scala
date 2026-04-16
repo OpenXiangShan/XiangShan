@@ -16,12 +16,12 @@ import scala.collection.immutable.SeqMap
 trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
   val fcsr = Module(new CSRModule("Fcsr", new CSRBundle {
-    val NX = WARL(0, wNoFilter)
-    val UF = WARL(1, wNoFilter)
-    val OF = WARL(2, wNoFilter)
-    val DZ = WARL(3, wNoFilter)
-    val NV = WARL(4, wNoFilter)
-    val FRM = WARL(7, 5, wNoFilter).withReset(0.U)
+    val NX = WARL(0, wNoFilter).withDescription("Inexact accrued exception flag.")
+    val UF = WARL(1, wNoFilter).withDescription("Underflow accrued exception flag.")
+    val OF = WARL(2, wNoFilter).withDescription("Overflow accrued exception flag.")
+    val DZ = WARL(3, wNoFilter).withDescription("Divide-by-zero accrued exception flag.")
+    val NV = WARL(4, wNoFilter).withDescription("Invalid-operation accrued exception flag.")
+    val FRM = WARL(7, 5, wNoFilter).withReset(0.U).withDescription("Floating-point dynamic rounding mode.")
   }) with HasRobCommitBundle {
     val wAliasFflags = IO(Input(new CSRAddrWriteBundle(new CSRFFlagsBundle)))
     val wAliasFfm = IO(Input(new CSRAddrWriteBundle(new CSRFrmBundle)))
@@ -62,7 +62,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   val vstart = Module(new CSRModule("Vstart", new CSRBundle {
     // vstart is not a WARL CSR.
     // Since we need to judge whether flush pipe by vstart being not 0 in DecodeStage, vstart must be initialized to some value at reset.
-    val vstart = RW(VlWidth - 2, 0).withReset(0.U) // hold [0, 128)
+    val vstart = RW(VlWidth - 2, 0).withReset(0.U).withDescription("Index of the first vector element to execute. The implemented width covers indices 0 through 127.")
   }) with HasRobCommitBundle {
     // Todo make The use of vstart values greater than the largest element index for the current SEW setting is reserved.
     // Not trap
@@ -79,14 +79,14 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     .setAddr(CSRs.vstart)
 
   val vcsr = Module(new CSRModule("Vcsr", new CSRBundle {
-    val VXSAT = RW(   0)
-    val VXRM  = RW(2, 1)
+    val VXSAT = RW(   0).withDescription("Vector fixed-point saturation accrued flag.")
+    val VXRM  = RW(2, 1).withDescription("Vector fixed-point rounding mode.")
   }) with HasRobCommitBundle {
     val wAliasVxsat = IO(Input(new CSRAddrWriteBundle(new CSRBundle {
-      val VXSAT = RW(0)
+      val VXSAT = RW(0).withDescription("Vector fixed-point saturation accrued flag.")
     })))
     val wAliasVxrm = IO(Input(new CSRAddrWriteBundle(new CSRBundle {
-      val VXRM = RW(1, 0)
+      val VXRM = RW(1, 0).withDescription("Vector fixed-point rounding mode.")
     })))
     val vxsat = IO(Output(Vxsat()))
     val vxrm  = IO(Output(Vxrm()))
@@ -113,7 +113,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   }).setAddr(CSRs.vcsr)
 
   val vl = Module(new CSRModule("Vl", new CSRBundle {
-    val VL = RO(VlWidth - 1, 0).withReset(0.U)
+    val VL = RO(VlWidth - 1, 0).withReset(0.U).withDescription("Current application vector length.")
   }))
     .setAddr(CSRs.vl)
 
@@ -125,12 +125,12 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     .setAddr(CSRs.vtype)
 
   val vlenb = Module(new CSRModule("Vlenb", new CSRBundle {
-    val VLENB = VlenbField(63, 0).withReset(VlenbField.init)
+    val VLENB = VlenbField(63, 0).withReset(VlenbField.init).withDescription("Vector register length in bytes.")
   }))
     .setAddr(CSRs.vlenb)
 
   val cycle = Module(new CSRModule("cycle", new CSRBundle {
-    val cycle = RO(63, 0)
+    val cycle = RO(63, 0).withDescription("Counter value.")
   }) with HasMHPMSink with HasDebugStopBundle {
     when(unprivCountUpdate) {
       reg := mHPM.cycle
@@ -142,7 +142,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     .setAddr(CSRs.cycle)
 
   val time = Module(new CSRModule("time", new CSRBundle {
-    val time = RO(63, 0)
+    val time = RO(63, 0).withDescription("Counter value.")
   }) with HasMHPMSink with HasDebugStopBundle {
     val updated = IO(Output(Bool()))
     val stime  = IO(Output(UInt(64.W)))
@@ -168,7 +168,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     .setAddr(CSRs.time)
 
   val instret = Module(new CSRModule("instret", new CSRBundle {
-    val instret = RO(63, 0)
+    val instret = RO(63, 0).withDescription("Counter value.")
   }) with HasMHPMSink with HasDebugStopBundle {
     when(unprivCountUpdate) {
       reg := mHPM.instret
@@ -181,7 +181,7 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
   val hpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
     Module(new CSRModule(s"Hpmcounter$num", new CSRBundle {
-      val hpmcounter = RO(63, 0).withReset(0.U)
+      val hpmcounter = RO(63, 0).withReset(0.U).withDescription("Counter value.")
     }) with HasMHPMSink with HasDebugStopBundle {
       when(unprivCountUpdate) {
         reg := mHPM.hpmcounters(num - 3)
@@ -240,23 +240,23 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 class CSRVTypeBundle extends CSRBundle {
   // vtype's vill is initialized to 1, when executing vector instructions
   // which depend on vtype, will raise illegal instruction exception
-  val VILL  = RO(  63).withReset(1.U)
-  val VMA   = RO(   7).withReset(0.U)
-  val VTA   = RO(   6).withReset(0.U)
-  val VSEW  = RO(5, 3).withReset(0.U)
-  val VLMUL = RO(2, 0).withReset(0.U)
+  val VILL  = RO(  63).withReset(1.U).withDescription("Illegal vtype encoding indicator.")
+  val VMA   = RO(   7).withReset(0.U).withDescription("Vector mask agnostic policy.")
+  val VTA   = RO(   6).withReset(0.U).withDescription("Vector tail agnostic policy.")
+  val VSEW  = RO(5, 3).withReset(0.U).withDescription("Selected standard element width.")
+  val VLMUL = RO(2, 0).withReset(0.U).withDescription("Selected vector register grouping multiplier.")
 }
 
 class CSRFrmBundle extends CSRBundle {
-  val FRM = WARL(2, 0, wNoFilter)
+  val FRM = WARL(2, 0, wNoFilter).withDescription("Floating-point dynamic rounding mode.")
 }
 
 class CSRFFlagsBundle extends CSRBundle {
-  val NX = WARL(0, wNoFilter)
-  val UF = WARL(1, wNoFilter)
-  val OF = WARL(2, wNoFilter)
-  val DZ = WARL(3, wNoFilter)
-  val NV = WARL(4, wNoFilter)
+  val NX = WARL(0, wNoFilter).withDescription("Inexact accrued exception flag.")
+  val UF = WARL(1, wNoFilter).withDescription("Underflow accrued exception flag.")
+  val OF = WARL(2, wNoFilter).withDescription("Overflow accrued exception flag.")
+  val DZ = WARL(3, wNoFilter).withDescription("Divide-by-zero accrued exception flag.")
+  val NV = WARL(4, wNoFilter).withDescription("Invalid-operation accrued exception flag.")
 }
 
 object VlenbField extends CSREnum with ROApply {

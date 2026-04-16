@@ -198,7 +198,7 @@ trait MachineLevel { self: NewCSR =>
       .setAddr(CSRs.mhpmevent3 - 3 + num).suggestName(s"Mhpmevent$num")
   )
 
-  val mscratch = Module(new CSRModule("Mscratch"))
+  val mscratch = Module(new CSRModule("Mscratch", new ScratchBundle("Machine-mode scratch register.")))
     .setAddr(CSRs.mscratch)
 
   val mepc = Module(new CSRModule("Mepc", new Epc) with TrapEntryMEventSinkBundle)
@@ -317,16 +317,16 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mtval2)
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
-    val PMM   = EnvPMM(33, 32, wNoEffect).withReset(EnvPMM.Disable)  // Smmpm extension
-    val MLPE  = RO(10) // Landing pand, Zicfilp extension
-    val SSEED = RO( 9) // Zkr extension
-    val USEED = RO( 8) // Zkr extension
-    val RLB   = RO( 2) // Smepmp
-    val MMWP  = RO( 1) // Smepmp
-    val MML   = RO( 0) // Smepmp
+    val PMM   = EnvPMM(33, 32, wNoEffect).withReset(EnvPMM.Disable).withDescription("Machine security memory protection mode from the Smmpm extension.")
+    val MLPE  = RO(10).withDescription("Machine landing-pad enable from the Zicfilp extension.")
+    val SSEED = RO( 9).withDescription("Seed CSR enable from the Zkr extension.")
+    val USEED = RO( 8).withDescription("User seed CSR enable from the Zkr extension.")
+    val RLB   = RO( 2).withDescription("Rule-locking bypass control from the Smepmp extension.")
+    val MMWP  = RO( 1).withDescription("Machine-mode whitelist policy control from the Smepmp extension.")
+    val MML   = RO( 0).withDescription("Machine-mode lock-down control from the Smepmp extension.")
   })).setAddr(CSRs.mseccfg)
 
-  val mcycle = Module(new CSRModule("Mcycle") with HasMachineCounterControlBundle with SmcntrpmfBundle {
+  val mcycle = Module(new CSRModule("Mcycle", new CounterValueBundle("Machine cycle counter value.")) with HasMachineCounterControlBundle with SmcntrpmfBundle {
     when(w.wen) {
       reg := w.wdata
     }.elsewhen(!this.mcountinhibit.CY.asUInt.asBool && countingEn) {
@@ -337,7 +337,7 @@ trait MachineLevel { self: NewCSR =>
   }).setAddr(CSRs.mcycle)
 
 
-  val minstret = Module(new CSRModule("Minstret") with HasMachineCounterControlBundle with HasRobCommitBundle with SmcntrpmfBundle {
+  val minstret = Module(new CSRModule("Minstret", new CounterValueBundle("Machine retired-instruction counter value.")) with HasMachineCounterControlBundle with HasRobCommitBundle with SmcntrpmfBundle {
     when(w.wen) {
       reg := w.wdata
     }.elsewhen(!this.mcountinhibit.IR && robCommit.instNum.valid && countingEn) {
@@ -378,16 +378,16 @@ trait MachineLevel { self: NewCSR =>
   // architecture id for XiangShan is 25
   // see https://github.com/riscv/riscv-isa-manual/blob/master/marchid.md
   val marchid = Module(new CSRModule("Marchid", new CSRBundle {
-    val ALL = MarchidField(63, 0).withReset(MarchidField.XSArchid)
+    val ALL = MarchidField(63, 0).withReset(MarchidField.XSArchid).withDescription("Machine architecture identifier assigned to XiangShan.")
   })).setAddr(CSRs.marchid)
 
   val mimpid = Module(new CSRModule("Mimpid", new CSRBundle {
-    val ALL = RO(0).withReset(0.U)
+    val ALL = RO(0).withReset(0.U).withDescription("Machine implementation identifier.")
   }))
     .setAddr(CSRs.mimpid)
 
   val mhartid = Module(new CSRModule("Mhartid", new CSRBundle {
-    val ALL = RO(hartIdLen - 1, 0)
+    val ALL = RO(hartIdLen - 1, 0).withDescription("Hardware thread identifier.")
   }) {
     val hartid = IO(Input(UInt(hartIdLen.W)))
     this.regOut.ALL := hartid
@@ -395,7 +395,7 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mhartid)
 
   val mconfigptr = Module(new CSRModule("Mconfigptr", new CSRBundle {
-    val ALL = RO(63, 0)
+    val ALL = RO(63, 0).withDescription("Pointer to the machine configuration data structure.")
   }))
     .setAddr(CSRs.mconfigptr)
 
@@ -425,7 +425,7 @@ trait MachineLevel { self: NewCSR =>
 //      reg.NMIE := reg.NMIE
 //    }
   }).setAddr(CSRs.mnstatus)
-  val mnscratch = Module(new CSRModule("Mnscratch"))
+  val mnscratch = Module(new CSRModule("Mnscratch", new ScratchBundle("Scratch register for resumable NMI handlers.")))
     .setAddr(CSRs.mnscratch)
 
   val mcontext = Module(new CSRModule("Mcontext", new McontextBundle) {
@@ -492,42 +492,42 @@ trait MachineLevel { self: NewCSR =>
 }
 
 class MbmcBundle extends  CSRBundle {
-  val BMA     = BMAField(63, 6, null).withReset(BMAField.ResetBMA)
-  val KEYIDEN = RW(3).withReset(0.U)
-  val BME     = RW(2).withReset(0.U)
-  val BCLEAR  = RW(1).withReset(0.U)
-  val CMODE   = RW(0).withReset(0.U)
+  val BMA     = BMAField(63, 6, null).withReset(BMAField.ResetBMA).withDescription("Bitmap access-policy encoding.")
+  val KEYIDEN = RW(3).withReset(0.U).withDescription("Enable key-ID checking for bitmap accesses.")
+  val BME     = RW(2).withReset(0.U).withDescription("Enable bitmap checking.")
+  val BCLEAR  = RW(1).withReset(0.U).withDescription("Request clearing of bitmap state.")
+  val CMODE   = RW(0).withReset(0.U).withDescription("Bitmap checking mode selector.")
 }
 
 class MstatusBundle extends CSRBundle {
 
-  val SIE  = CSRRWField     (1).withReset(0.U)
-  val MIE  = CSRRWField     (3).withReset(0.U)
-  val SPIE = CSRRWField     (5).withReset(0.U)
-  val UBE  = CSRROField     (6).withReset(0.U)
-  val MPIE = CSRRWField     (7).withReset(0.U)
-  val SPP  = CSRRWField     (8).withReset(0.U)
-  val VS   = ContextStatus  (10,  9).withReset(ContextStatus.Off)
-  val MPP  = PrivMode       (12, 11).withReset(PrivMode.U)
-  val FS   = ContextStatus  (14, 13).withReset(ContextStatus.Off)
-  val XS   = ContextStatusRO(16, 15).withReset(0.U)
-  val MPRV = CSRRWField     (17).withReset(0.U)
-  val SUM  = CSRRWField     (18).withReset(0.U)
-  val MXR  = CSRRWField     (19).withReset(0.U)
-  val TVM  = CSRRWField     (20).withReset(0.U)
-  val TW   = CSRRWField     (21).withReset(0.U)
-  val TSR  = CSRRWField     (22).withReset(0.U)
-  val SDT  = CSRRWField     (24).withReset(0.U)
-  val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64)
-  val SXL  = XLENField      (35, 34).withReset(XLENField.XLEN64)
-  val SBE  = CSRROField     (36).withReset(0.U)
-  val MBE  = CSRROField     (37).withReset(0.U)
-  val GVA  = CSRRWField     (38).withReset(0.U)
-  val MPV  = VirtMode       (39).withReset(0.U)
-  val MDT  = CSRRWField     (42).withReset(mdtInit.U)
+  val SIE  = CSRRWField     (1).withReset(0.U).withDescription("Global interrupt enable for S-mode.")
+  val MIE  = CSRRWField     (3).withReset(0.U).withDescription("Global interrupt enable for M-mode.")
+  val SPIE = CSRRWField     (5).withReset(0.U).withDescription("Saved SIE value from before trap entry.")
+  val UBE  = CSRROField     (6).withReset(0.U).withDescription("U-mode endianness selector.")
+  val MPIE = CSRRWField     (7).withReset(0.U).withDescription("Saved MIE value from before trap entry.")
+  val SPP  = CSRRWField     (8).withReset(0.U).withDescription("Privilege level active before trap entry to S-mode.")
+  val VS   = ContextStatus  (10,  9).withReset(ContextStatus.Off).withDescription("Vector context status.")
+  val MPP  = PrivMode       (12, 11).withReset(PrivMode.U).withDescription("Privilege level active before trap entry to M-mode.")
+  val FS   = ContextStatus  (14, 13).withReset(ContextStatus.Off).withDescription("Floating-point context status.")
+  val XS   = ContextStatusRO(16, 15).withReset(0.U).withDescription("Additional user extension state summary.")
+  val MPRV = CSRRWField     (17).withReset(0.U).withDescription("Use MPP for load and store privilege checks when set.")
+  val SUM  = CSRRWField     (18).withReset(0.U).withDescription("Permit S-mode data accesses to pages marked as user.")
+  val MXR  = CSRRWField     (19).withReset(0.U).withDescription("Make executable pages readable when set.")
+  val TVM  = CSRRWField     (20).withReset(0.U).withDescription("Trap virtual-memory management operations in S-mode when set.")
+  val TW   = CSRRWField     (21).withReset(0.U).withDescription("Trap WFI in lower privilege modes when set.")
+  val TSR  = CSRRWField     (22).withReset(0.U).withDescription("Trap SRET when set.")
+  val SDT  = CSRRWField     (24).withReset(0.U).withDescription("S-mode disable-trap bit used by the Ssdbltrp extension.")
+  val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64).withDescription("Effective XLEN for U-mode.")
+  val SXL  = XLENField      (35, 34).withReset(XLENField.XLEN64).withDescription("Effective XLEN for S-mode.")
+  val SBE  = CSRROField     (36).withReset(0.U).withDescription("S-mode endianness selector.")
+  val MBE  = CSRROField     (37).withReset(0.U).withDescription("M-mode endianness selector.")
+  val GVA  = CSRRWField     (38).withReset(0.U).withDescription("Indicates that trap information was derived from a guest virtual address.")
+  val MPV  = VirtMode       (39).withReset(0.U).withDescription("Saved virtualization mode from before trap entry to M-mode.")
+  val MDT  = CSRRWField     (42).withReset(mdtInit.U).withDescription("M-mode disable-trap bit used by the Smdbltrp extension.")
   val SD   = CSRROField     (63,
     (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty
-  )
+  ).withDescription("Dirty summary bit for the floating-point or vector context.")
 }
 
 class MstatusModule(implicit override val p: Parameters) extends CSRModule("MStatus", new MstatusBundle)
@@ -596,41 +596,42 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
 }
 
 class MnstatusBundle extends CSRBundle {
-  val NMIE   = CSRRWField  (3).withReset(1.U) // as opensbi not support smrnmi, we init nmie open
-  val MNPV   = VirtMode    (7).withReset(0.U)
-  val MNPELP = RO          (9).withReset(0.U)
-  val MNPP   = PrivMode    (12, 11).withReset(PrivMode.U)
+  // OpenSBI does not support Smrnmi yet, so NMIE resets enabled for bring-up.
+  val NMIE   = CSRRWField  (3).withReset(1.U).withDescription("Enable non-maskable interrupt handling.")
+  val MNPV   = VirtMode    (7).withReset(0.U).withDescription("Saved virtualization mode for resumable NMI handling.")
+  val MNPELP = RO          (9).withReset(0.U).withDescription("Saved landing-pad state for resumable NMI handling.")
+  val MNPP   = PrivMode    (12, 11).withReset(PrivMode.U).withDescription("Saved privilege level for resumable NMI handling.")
 }
 
 class MisaBundle extends CSRBundle {
   // Todo: reset with ISA string
-  val A = RO( 0).withReset(1.U) // Atomic extension
-  val B = RO( 1).withReset(1.U) // B extension
-  val C = RO( 2).withReset(1.U) // Compressed extension
-  val D = RO( 3).withReset(1.U) // Double-precision floating-point extension
-  val E = RO( 4).withReset(0.U) // RV32E/64E base ISA
-  val F = RO( 5).withReset(1.U) // Single-precision floating-point extension
-  val G = RO( 6).withReset(0.U) // Reserved
-  val H = RO( 7).withReset(1.U) // Hypervisor extension
-  val I = RO( 8).withReset(1.U) // RV32I/64I/128I base ISA
-  val J = RO( 9).withReset(0.U) // Reserved
-  val K = RO(10).withReset(0.U) // Reserved
-  val L = RO(11).withReset(0.U) // Reserved
-  val M = RO(12).withReset(1.U) // Integer Multiply/Divide extensi
-  val N = RO(13).withReset(0.U) // Tentatively reserved for User-Level Interrupts extension
-  val O = RO(14).withReset(0.U) // Reserved
-  val P = RO(15).withReset(0.U) // Tentatively reserved for Packed-SIMD extension
-  val Q = RO(16).withReset(0.U) // Quad-precision floating-point extension
-  val R = RO(17).withReset(0.U) // Reserved
-  val S = RO(18).withReset(1.U) // Supervisor mode implemented
-  val T = RO(19).withReset(0.U) // Reserved
-  val U = RO(20).withReset(1.U) // User mode implemented
-  val V = RO(21).withReset(1.U) // Vector extension
-  val W = RO(22).withReset(0.U) // Reserved
-  val X = RO(23).withReset(0.U) // Non-standard extensions present
-  val Y = RO(24).withReset(0.U) // Reserved
-  val Z = RO(25).withReset(0.U) // Reserved
-  val MXL = XLENField(63, 62).withReset(XLENField.XLEN64)
+  val A = RO( 0).withReset(1.U).withDescription("Atomic extension supported.")
+  val B = RO( 1).withReset(1.U).withDescription("Bit-manipulation extension supported.")
+  val C = RO( 2).withReset(1.U).withDescription("Compressed instruction extension supported.")
+  val D = RO( 3).withReset(1.U).withDescription("Double-precision floating-point extension supported.")
+  val E = RO( 4).withReset(0.U).withDescription("Embedded base ISA (RV32E/RV64E) supported.")
+  val F = RO( 5).withReset(1.U).withDescription("Single-precision floating-point extension supported.")
+  val G = RO( 6).withReset(0.U).withDescription("Reserved aggregate ISA bit.")
+  val H = RO( 7).withReset(1.U).withDescription("Hypervisor extension supported.")
+  val I = RO( 8).withReset(1.U).withDescription("Integer base ISA (RV32I/RV64I/RV128I) supported.")
+  val J = RO( 9).withReset(0.U).withDescription("Reserved extension bit J.")
+  val K = RO(10).withReset(0.U).withDescription("Reserved extension bit K.")
+  val L = RO(11).withReset(0.U).withDescription("Reserved extension bit L.")
+  val M = RO(12).withReset(1.U).withDescription("Integer multiply and divide extension supported.")
+  val N = RO(13).withReset(0.U).withDescription("Tentatively reserved user-level interrupts extension bit.")
+  val O = RO(14).withReset(0.U).withDescription("Reserved extension bit O.")
+  val P = RO(15).withReset(0.U).withDescription("Tentatively reserved packed-SIMD extension bit.")
+  val Q = RO(16).withReset(0.U).withDescription("Quad-precision floating-point extension supported.")
+  val R = RO(17).withReset(0.U).withDescription("Reserved extension bit R.")
+  val S = RO(18).withReset(1.U).withDescription("Supervisor mode supported.")
+  val T = RO(19).withReset(0.U).withDescription("Reserved extension bit T.")
+  val U = RO(20).withReset(1.U).withDescription("User mode supported.")
+  val V = RO(21).withReset(1.U).withDescription("Vector extension supported.")
+  val W = RO(22).withReset(0.U).withDescription("Reserved extension bit W.")
+  val X = RO(23).withReset(0.U).withDescription("Non-standard extensions implemented.")
+  val Y = RO(24).withReset(0.U).withDescription("Reserved extension bit Y.")
+  val Z = RO(25).withReset(0.U).withDescription("Reserved extension bit Z.")
+  val MXL = XLENField(63, 62).withReset(XLENField.XLEN64).withDescription("Machine XLEN encoding.")
 
   def getISAString = this.getFields.filter(x => x != MXL && x.init.litValue == 1).sortBy(_.lsb).map(x => ('A' + x.msb).toChar).mkString
 }
@@ -695,18 +696,18 @@ class MvipBundle extends InterruptPendingBundle {
 }
 
 class Epc extends CSRBundle {
-  val epc = RW(63, 1).withReset(0.U)
+  val epc = RW(63, 1).withReset(0.U).withDescription("Exception program counter.")
 }
 
 class McountinhibitBundle extends CSRBundle {
-  val CY = RW(0).withReset(0.U)
-  val IR = RW(2).withReset(0.U)
-  val HPM3 = RW(31, 3).withReset(0.U)
+  val CY = RW(0).withReset(0.U).withDescription("Inhibit mcycle when set.")
+  val IR = RW(2).withReset(0.U).withDescription("Inhibit minstret when set.")
+  val HPM3 = RW(31, 3).withReset(0.U).withDescription("Inhibit mhpmcounter3 through mhpmcounter31 when set.")
 }
 
-class Mtval2Bundle extends FieldInitBundle
+class Mtval2Bundle extends FieldInitBundle(Some("Guest physical address or additional trap value captured on trap entry."))
 
-class MhpmcounterBundle extends FieldInitBundle
+class MhpmcounterBundle extends FieldInitBundle(Some("Hardware performance-monitoring counter value."))
 
 class MEnvCfg extends EnvCfg {
   if (CSRConfig.EXT_SSTC) {
@@ -725,8 +726,8 @@ object MarchidField extends CSREnum with ROApply {
 }
 
 class MvendoridBundle extends CSRBundle {
-  val Bank   = MvidBankField(31, 7).withReset(MvidBankField.BANK)
-  val Offset = MvidOffsetField(6, 0).withReset(MvidOffsetField.OFFSET)
+  val Bank   = MvidBankField(31, 7).withReset(MvidBankField.BANK).withDescription("JEDEC manufacturer bank number.")
+  val Offset = MvidOffsetField(6, 0).withReset(MvidOffsetField.OFFSET).withDescription("JEDEC manufacturer offset within the bank.")
 }
 
 object MvidBankField extends CSREnum with ROApply {
@@ -766,22 +767,22 @@ class MipToMvip extends IpValidBundle {
 }
 
 class EventInhibitBundle extends CSRBundle {
-  val MINH    = RW(62).withReset(0.U)
-  val SINH    = RW(61).withReset(0.U)
-  val UINH    = RW(60).withReset(0.U)
-  val VSINH   = RW(59).withReset(0.U)
-  val VUINH   = RW(58).withReset(0.U)
+  val MINH    = RW(62).withReset(0.U).withDescription("Inhibit counting in M-mode.")
+  val SINH    = RW(61).withReset(0.U).withDescription("Inhibit counting in HS-mode.")
+  val UINH    = RW(60).withReset(0.U).withDescription("Inhibit counting in HU-mode.")
+  val VSINH   = RW(59).withReset(0.U).withDescription("Inhibit counting in VS-mode.")
+  val VUINH   = RW(58).withReset(0.U).withDescription("Inhibit counting in VU-mode.")
 }
 
 class MhpmeventBundle extends EventInhibitBundle {
-  val OF      = RW(63).withReset(0.U)
-  val OPTYPE2 = OPTYPE(54, 50, wNoFilter).withReset(OPTYPE.OR)
-  val OPTYPE1 = OPTYPE(49, 45, wNoFilter).withReset(OPTYPE.OR)
-  val OPTYPE0 = OPTYPE(44, 40, wNoFilter).withReset(OPTYPE.OR)
-  val EVENT3  = RW(39, 30).withReset(0.U)
-  val EVENT2  = RW(29, 20).withReset(0.U)
-  val EVENT1  = RW(19, 10).withReset(0.U)
-  val EVENT0  = RW(9, 0).withReset(0.U)
+  val OF      = RW(63).withReset(0.U).withDescription("Overflow latch for the associated performance counter.")
+  val OPTYPE2 = OPTYPE(54, 50, wNoFilter).withReset(OPTYPE.OR).withDescription("Reduction operator used to combine EVENT3 with the lower event groups.")
+  val OPTYPE1 = OPTYPE(49, 45, wNoFilter).withReset(OPTYPE.OR).withDescription("Reduction operator used to combine EVENT2 with the lower event groups.")
+  val OPTYPE0 = OPTYPE(44, 40, wNoFilter).withReset(OPTYPE.OR).withDescription("Reduction operator used to combine EVENT1 with EVENT0.")
+  val EVENT3  = RW(39, 30).withReset(0.U).withDescription("High event-selector bits for the performance monitor.")
+  val EVENT2  = RW(29, 20).withReset(0.U).withDescription("Event-selector bits 29:20 for the performance monitor.")
+  val EVENT1  = RW(19, 10).withReset(0.U).withDescription("Event-selector bits 19:10 for the performance monitor.")
+  val EVENT0  = RW(9, 0).withReset(0.U).withDescription("Low event-selector bits for the performance monitor.")
 }
 
 object OPTYPE extends CSREnum with WARLApply {
@@ -790,12 +791,12 @@ object OPTYPE extends CSREnum with WARLApply {
   val XOR = Value(2.U)
   val ADD = Value(4.U)
 
-  override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(OR, AND, XOR, ADD)
+  override protected def legalValues: Seq[EnumType] = Seq(OR, AND, XOR, ADD)
 }
 
 class McontextBundle extends CSRBundle {
   override val len = 14
-  val HCONTEXT = RW(13, 0).withReset(0.U)
+  val HCONTEXT = RW(13, 0).withReset(0.U).withDescription("Machine trigger context value.")
 }
 
 trait HasOfFromPerfCntBundle { self: CSRModule[_] =>

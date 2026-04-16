@@ -128,7 +128,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   val vstvec = Module(new CSRModule("VStvec", new XtvecBundle))
     .setAddr(CSRs.vstvec)
 
-  val vsscratch = Module(new CSRModule("VSscratch"))
+  val vsscratch = Module(new CSRModule("VSscratch", new ScratchBundle("Virtual supervisor-mode scratch register.")))
     .setAddr(CSRs.vsscratch)
 
   val vsepc = Module(
@@ -189,7 +189,7 @@ trait VirtualSupervisorLevel { self: NewCSR with SupervisorLevel with Hypervisor
   }).setAddr(CSRs.vsip)
 
   val vstimecmp = Module(new CSRModule("VStimecmp", new CSRBundle {
-    val vstimecmp = RW(63, 0).withReset(bitPatToUInt(BitPat.Y(64)))
+    val vstimecmp = RW(63, 0).withReset(bitPatToUInt(BitPat.Y(64))).withDescription("Virtual supervisor timer compare value.")
   }))
     .setAddr(CSRs.vstimecmp)
 

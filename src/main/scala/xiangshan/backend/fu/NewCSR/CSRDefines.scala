@@ -159,7 +159,7 @@ object CSRDefines {
     val Direct = Value(0.U)
     val Vectored = Value(1.U)
 
-    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Direct, Vectored)
+    override protected def legalValues: Seq[EnumType] = Seq(Direct, Vectored)
   }
 
   object SatpMode extends CSREnum with WARLApply {
@@ -170,7 +170,7 @@ object CSRDefines {
     val Sv64 = Value(11.U) // Reserved for page-based 64-bit virtual addressing
 
     // XiangShan only support Sv39 & Sv48 Page
-    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Bare, Sv39, Sv48)
+    override protected def legalValues: Seq[EnumType] = Seq(Bare, Sv39, Sv48)
   }
 
   object HgatpMode extends CSREnum with WARLApply {
@@ -180,7 +180,7 @@ object CSRDefines {
     val Sv57x4 = Value(10.U)
 
     // XiangShan only support Sv39 & Sv48 Page
-    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Bare, Sv39x4, Sv48x4)
+    override protected def legalValues: Seq[EnumType] = Seq(Bare, Sv39x4, Sv48x4)
   }
 
   object EnvCBIE extends CSREnum with WARLApply {
@@ -188,7 +188,7 @@ object CSRDefines {
     val Flush = Value("b01".U)
     val Inval = Value("b11".U)
 
-    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Off, Flush, Inval)
+    override protected def legalValues: Seq[EnumType] = Seq(Off, Flush, Inval)
   }
 
   object EnvPMM extends CSREnum with WARLApply {
@@ -196,7 +196,7 @@ object CSRDefines {
     val PMLEN7   = Value("b10".U)
     val PMLEN16  = Value("b11".U)
 
-    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Disable, PMLEN7, PMLEN16)
+    override protected def legalValues: Seq[EnumType] = Seq(Disable, PMLEN7, PMLEN16)
   }
 
   object ReflectHelper {
@@ -271,7 +271,7 @@ object CSRDefines {
     val S = Value(1.U)
     val M = Value(3.U)
 
-    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(U, S, M)
+    override protected def legalValues: Seq[EnumType] = Seq(U, S, M)
   }
 
   object VirtMode extends CSREnum with RWApply {

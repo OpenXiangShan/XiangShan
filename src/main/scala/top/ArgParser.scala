@@ -50,6 +50,7 @@ object ArgParser {
       |--disable-alwaysdb
       |--enable-dfx
       |--enable-simfrontend
+      |--dump-csr
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {
@@ -237,6 +238,10 @@ object ArgParser {
           }), tail)
         case "--yaml-config" :: yamlFile :: tail =>
           nextOption(YamlParser.parseYaml(config, yamlFile), tail)
+        case "--dump-csr" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(DumpCSR = true)
+          }), tail)
         case option :: tail =>
           // unknown option, maybe a firrtl option, skip
           firrtlOpts :+= option

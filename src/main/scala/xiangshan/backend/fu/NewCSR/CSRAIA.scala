@@ -25,7 +25,7 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.miselect)
 
-  val mireg = Module(new CSRModule("Mireg") with HasIregSink {
+  val mireg = Module(new CSRModule("Mireg", new ZeroFieldBundle("Machine interrupt-file indirect data register selected by miselect.")) with HasIregSink {
     rdata := iregRead.mireg
   })
     .setAddr(CSRs.mireg)
@@ -52,7 +52,7 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.siselect)
 
-  val sireg = Module(new CSRModule("Sireg") with HasIregSink {
+  val sireg = Module(new CSRModule("Sireg", new ZeroFieldBundle("Supervisor interrupt-file indirect data register selected by siselect.")) with HasIregSink {
     rdata := iregRead.sireg
   })
     .setAddr(CSRs.sireg)
@@ -77,7 +77,7 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.vsiselect)
 
-  val vsireg    = Module(new CSRModule("VSireg") with HasIregSink {
+  val vsireg    = Module(new CSRModule("VSireg", new ZeroFieldBundle("Virtual supervisor interrupt-file indirect data register selected by vsiselect.")) with HasIregSink {
     rdata := iregRead.sireg
   })
     .setAddr(CSRs.vsireg)
@@ -200,7 +200,17 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
 }
 
 class ISelectField(final val maxValue: Int, reserved: Seq[Range]) extends CSREnum with WARLApply {
-  override def isLegal(enumeration: CSREnumType): Bool = enumeration.asUInt <= maxValue.U
+  override protected def legalRange: Option[(BigInt, BigInt)] = Some(0, maxValue)
+  override protected def legalBoundString(value: BigInt): String = f"0x$value%x"
+  override def warlConstraintDescription(enumeration: CSREnumType): Option[String] = {
+    val reservedText = reserved match {
+      case Nil => ""
+      case rs =>
+        val text = rs.map(range => s"${legalBoundString(range.start)} to ${legalBoundString(range.last)}").mkString(", ")
+        s" Reserved subranges: $text."
+    }
+    Some(s"Legal values are in the range ${legalBoundString(0)} to ${legalBoundString(maxValue)}.$reservedText")
+  }
 }
 
 object VSISelectField extends ISelectField(
@@ -231,55 +241,58 @@ object SISelectField extends ISelectField(
 
 class VSISelectBundle extends CSRBundle {
   val ALL = VSISelectField(log2Up(0xFFF), 0, null).withReset(0.U)
+    .withDescription("Virtual supervisor interrupt selector for indirect AIA CSR accesses.")
 }
 
 class MISelectBundle extends CSRBundle {
   val ALL = MISelectField(log2Up(0xFF), 0, null).withReset(0.U)
+    .withDescription("Machine interrupt selector for indirect AIA CSR accesses.")
 }
 
 class SISelectBundle extends CSRBundle {
   val ALL = SISelectField(log2Up(0xFFF), 0, null).withReset(0.U)
+    .withDescription("Supervisor interrupt selector for indirect AIA CSR accesses.")
 }
 
 class TopIBundle extends CSRBundle {
-  val IID   = RO(27, 16)
-  val IPRIO = RO(7, 0)
+  val IID   = RO(27, 16).withDescription("Identity of the highest-priority pending interrupt.")
+  val IPRIO = RO(7, 0).withDescription("Priority of the highest-priority pending interrupt.")
 }
 
 class TopEIBundle extends CSRBundle {
-  val IID   = RW(26, 16)
-  val IPRIO = RW(10, 0)
+  val IID   = RW(26, 16).withDescription("Interrupt identity returned by a top-of-interrupt claim.")
+  val IPRIO = RW(10, 0).withDescription("Priority returned by a top-of-interrupt claim.")
 }
 
-class IprioBundle extends FieldInitBundle
+class IprioBundle extends FieldInitBundle(Some("Interrupt-priority register contents."))
 
 class Iprio0Bundle extends CSRBundle {
-  val PrioSSI  = RW(15,  8).withReset(0.U)
-  val PrioVSSI = RW(23, 16).withReset(0.U)
-  val PrioMSI  = RW(31, 24).withReset(0.U)
-  val PrioSTI  = RW(47, 40).withReset(0.U)
-  val PrioVSTI = RW(55, 48).withReset(0.U)
-  val PrioMTI  = RW(63, 56).withReset(0.U)
+  val PrioSSI  = RW(15,  8).withReset(0.U).withDescription("Priority value for supervisor software interrupt.")
+  val PrioVSSI = RW(23, 16).withReset(0.U).withDescription("Priority value for virtual supervisor software interrupt.")
+  val PrioMSI  = RW(31, 24).withReset(0.U).withDescription("Priority value for machine software interrupt.")
+  val PrioSTI  = RW(47, 40).withReset(0.U).withDescription("Priority value for supervisor timer interrupt.")
+  val PrioVSTI = RW(55, 48).withReset(0.U).withDescription("Priority value for virtual supervisor timer interrupt.")
+  val PrioMTI  = RW(63, 56).withReset(0.U).withDescription("Priority value for machine timer interrupt.")
 }
 
 class MIprio2Bundle extends CSRBundle {
-  val PrioSEI   = RW(15,  8).withReset(0.U)
-  val PrioVSEI  = RW(23, 16).withReset(0.U)
-  val PrioMEI   = RO(31, 24).withReset(0.U)
-  val PrioSGEI  = RW(39, 32).withReset(0.U)
-  val PrioLCOFI = RW(47, 40).withReset(0.U)
-  val Prio14    = RW(55, 48).withReset(0.U)
-  val Prio15    = RW(63, 56).withReset(0.U)
+  val PrioSEI   = RW(15,  8).withReset(0.U).withDescription("Priority value for supervisor external interrupt.")
+  val PrioVSEI  = RW(23, 16).withReset(0.U).withDescription("Priority value for virtual supervisor external interrupt.")
+  val PrioMEI   = RO(31, 24).withReset(0.U).withDescription("Priority value for machine external interrupt.")
+  val PrioSGEI  = RW(39, 32).withReset(0.U).withDescription("Priority value for supervisor guest external interrupt.")
+  val PrioLCOFI = RW(47, 40).withReset(0.U).withDescription("Priority value for local counter-overflow interrupt.")
+  val Prio14    = RW(55, 48).withReset(0.U).withDescription("Priority value for local interrupt 14.")
+  val Prio15    = RW(63, 56).withReset(0.U).withDescription("Priority value for local interrupt 15.")
 }
 
 class SIprio2Bundle extends CSRBundle {
-  val PrioSEI   = RO(15,  8).withReset(0.U)
-  val PrioVSEI  = RW(23, 16).withReset(0.U)
-  val PrioMEI   = RW(31, 24).withReset(0.U)
-  val PrioSGEI  = RW(39, 32).withReset(0.U)
-  val PrioLCOFI = RW(47, 40).withReset(0.U)
-  val Prio14    = RW(55, 48).withReset(0.U)
-  val Prio15    = RW(63, 56).withReset(0.U)
+  val PrioSEI   = RO(15,  8).withReset(0.U).withDescription("Priority value for supervisor external interrupt.")
+  val PrioVSEI  = RW(23, 16).withReset(0.U).withDescription("Priority value for virtual supervisor external interrupt.")
+  val PrioMEI   = RW(31, 24).withReset(0.U).withDescription("Priority value for machine external interrupt.")
+  val PrioSGEI  = RW(39, 32).withReset(0.U).withDescription("Priority value for supervisor guest external interrupt.")
+  val PrioLCOFI = RW(47, 40).withReset(0.U).withDescription("Priority value for local counter-overflow interrupt.")
+  val Prio14    = RW(55, 48).withReset(0.U).withDescription("Priority value for local interrupt 14.")
+  val Prio15    = RW(63, 56).withReset(0.U).withDescription("Priority value for local interrupt 15.")
 }
 
 class CSRToAIABundle(implicit p: Parameters) extends XSBundle with HasSoCParameter {
