@@ -42,6 +42,8 @@ All env-side signals and bundle fields must be based on the actual generated DUT
 - Do not rewrite absolute paths in any `source` command.
 - Preserve the black-box verification boundary. Interact through DUT-facing agents, APIs, traces, and generated artifacts rather than assuming hidden RTL state.
 - Before modifying files, inspect current local changes and avoid overwriting in-progress work.
+- Any user-provided process constraint must be written to the relevant repo docs in the same turn; do not keep it only in chat memory.
+- After every `git commit`, run `git fetch origin` and then `git rebase origin/<current-branch>`.
 - Before changing backend-agent semantics or related logic, run
   `docs/agents/frontend-backend-agent.md` section `实现一致性最小检查项`
   in order: `必须项` first, then `建议项`.
@@ -104,9 +106,7 @@ intention. Therefore:
 - if the commit mainly removes tests or checks that contradict the documented
   semantic contract, say so explicitly instead of pretending it is a feature
   change
-
-For non-trivial frontend commits, prefer adding a short body that summarizes
-the major changed areas from the staged diff.
+- commit message must be a single line only; do not add a multi-line body
 
 Run the standard DUT bin-trace pipeline for `microbench.bin`:
 
