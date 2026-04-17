@@ -610,6 +610,9 @@ class DCacheToSbufferIO(implicit p: Parameters) extends DCacheBundle {
 
   val main_pipe_hit_resp = ValidIO(new DCacheLineResp)
   //val refill_hit_resp = ValidIO(new DCacheLineResp)
+  val refill_done = ValidIO(new Bundle {
+    val paddr = UInt(PAddrBits.W)
+  })
 
   val replay_resp = ValidIO(new DCacheLineResp)
   // store replay resp from main pipe S3
@@ -1567,6 +1570,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.lsu.store.replay_resp.valid := RegNext(mainPipe.io.store_replay_resp.valid)
   io.lsu.store.replay_resp.bits := RegEnable(mainPipe.io.store_replay_resp.bits, mainPipe.io.store_replay_resp.valid)
   io.lsu.store.main_pipe_hit_resp := mainPipe.io.store_hit_resp
+  io.lsu.store.refill_done := mainPipe.io.store_refill_done
   io.lsu.store.replay_resp_s3 := missQueue.io.store_replay_resp_s3
 
   mainPipe.io.atomic_req <> io.lsu.atomics.req

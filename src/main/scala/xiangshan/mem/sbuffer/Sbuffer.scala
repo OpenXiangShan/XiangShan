@@ -220,6 +220,15 @@ class Sbuffer(implicit p: Parameters)
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
+  val longTimeNoMerge = RegInit(VecInit.fill(StoreBufferSize)(false.B))
+  val noMergeCount = RegInit(VecInit.fill(StoreBufferSize)(0.U(10.W)))
+
+  val activeMask = VecInit(stateVec.map(s => s.isActive()))
+  val validMask  = VecInit(stateVec.map(s => s.isValid()))
+
+  // mshr_buffer: records miss requests being handled in mshr
+  val valid_mshr = RegInit(VecInit.fill(cacheParams.nMissEntries)(false.B))
+  val ptag_mshr = Reg(Vec(cacheParams.nMissEntries, UInt(PTagWidth.W)))
 
   val sbuffer_out_s0_fire = Wire(Bool())
 
@@ -292,6 +301,21 @@ class Sbuffer(implicit p: Parameters)
   val missqReplayHasTimeOut = GatedValidRegNext(missqReplayHasTimeOutGen) && !GatedValidRegNext(sbuffer_out_s0_fire)
   val missqReplayTimeOutIdx = RegEnable(missqReplayTimeOutIdxGen, missqReplayHasTimeOutGen)
 
+  //-------- asmm: Active Store Merge to Missqueue --------
+  val asmmEntrySelOH = RegInit(1.U(StoreBufferSize.W))
+  // asmm_entry_sel_OH is a one-hot selector, it selects the entry to be merged to missqueue
+  // It looks like a cyclic left-shifting register, with period = StoreBufferSize
+  asmmEntrySelOH := Mux(asmmEntrySelOH === (1.U << (StoreBufferSize - 1)),
+                        1.U, asmmEntrySelOH << 1)
+  val asmmEntrySel = asmmEntrySelOH & activeMask.asUInt & longTimeNoMerge.asUInt
+  assert(PopCount(asmmEntrySel) <= 1.U, "ASMM (sbuffer): more than one entry selected")
+  val asmmSelPTag = Mux1H(asmmEntrySel, ptag)
+  val asmmSelPTag_mshrMatch = (valid_mshr zip ptag_mshr map {case (v, ptag) =>
+                               v && asmmSelPTag === ptag}).reduce(_ || _)
+  val asmmCanOutGen = asmmSelPTag_mshrMatch && asmmEntrySel.orR
+  val asmmCanOut = GatedValidRegNext(asmmCanOutGen) && !GatedValidRegNext(sbuffer_out_s0_fire)
+  val asmmOutIdx = RegEnable(OHToUInt(asmmEntrySel), asmmCanOutGen)
+
   //-------------------------sbuffer enqueue-----------------------------
 
   // Now sbuffer enq logic is divided into 3 stages:
@@ -310,8 +334,6 @@ class Sbuffer(implicit p: Parameters)
   // * use cacheline level buffer to update sbuffer data and mask
   // * remove dcache write block (if there is)
 
-  val activeMask = VecInit(stateVec.map(s => s.isActive()))
-  val validMask  = VecInit(stateVec.map(s => s.isValid()))
   val drainIdx = PriorityEncoder(activeMask)
 
   val inflightMask = VecInit(stateVec.map(s => s.isInflight()))
@@ -439,6 +461,7 @@ class Sbuffer(implicit p: Parameters)
           waitInflightMask(entryIdx) := sameBlockInflightMask
         }
         cohCount(entryIdx) := 0.U
+        noMergeCount(entryIdx) := 0.U
         // missqReplayCount(insertIdx) := 0.U
         ptag(entryIdx) := reqptag
         vtag(entryIdx) := reqvtag // update vtag if a new sbuffer line is allocated
@@ -458,6 +481,7 @@ class Sbuffer(implicit p: Parameters)
     (0 until StoreBufferSize).map(entryIdx => {
       when(mergeVec(entryIdx)) {
         cohCount(entryIdx) := 0.U
+        noMergeCount(entryIdx) := 0.U
         // missqReplayCount(entryIdx) := 0.U
         // check if vtag is the same, if not, trigger sbuffer flush
         when(reqvtag =/= vtag(entryIdx)) {
@@ -535,9 +559,11 @@ class Sbuffer(implicit p: Parameters)
   val sq_empty = !Cat(io.in.req.map(_.valid)).orR
   val empty = sbuffer_empty && sq_empty
   val threshold = Wire(UInt(5.W)) // RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
-  threshold := Constantin.createRecord(s"StoreBufferThreshold_${p(XSCoreParamsKey).HartId}", initValue = 12)
+  threshold := Constantin.createRecord(s"StoreBufferThreshold_${p(XSCoreParamsKey).HartId}", initValue = 9)
   val base = Wire(UInt(5.W))
   base := Constantin.createRecord(s"StoreBufferBase_${p(XSCoreParamsKey).HartId}", initValue = 4)
+  val longTimeNoMergeThreshold = Wire(UInt(10.W))
+  longTimeNoMergeThreshold := Constantin.createRecord(s"LongTimeNoMergeThreshold_${p(XSCoreParamsKey).HartId}", initValue = 128)
   val ActiveCount = PopCount(activeMask)
   val ValidCount = PopCount(validMask)
   val forceThreshold = Mux(io.force_write, threshold - base, threshold)
@@ -624,19 +650,17 @@ class Sbuffer(implicit p: Parameters)
 
   val need_drain = needDrain(sbuffer_state)
   val need_replace = do_eviction || (sbuffer_state === x_replace)
-  val sbuffer_out_s0_evictionIdx = Mux(missqReplayHasTimeOut,
-    missqReplayTimeOutIdx,
-    Mux(need_drain,
-      drainIdx,
-      Mux(cohHasTimeOut, cohTimeOutIdx, replaceIdx)
-    )
-  )
+  val sbuffer_out_s0_evictionIdx = Mux(missqReplayHasTimeOut, missqReplayTimeOutIdx,
+                                   Mux(need_drain, drainIdx,
+                                   Mux(cohHasTimeOut, cohTimeOutIdx,
+                                   Mux(need_replace, replaceIdx,
+                                       asmmOutIdx))))
 
   // If there is a inflight dcache req which has same ptag with sbuffer_out_s0_evictionIdx's ptag,
   // current eviction should be blocked.
   val sbuffer_out_s0_valid = missqReplayHasTimeOut ||
     stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
-    (need_drain || cohHasTimeOut || need_replace)
+    (need_drain || cohHasTimeOut || need_replace || asmmCanOut)
   assert(!(
     stateVec(sbuffer_out_s0_evictionIdx).isDcacheReqCandidate() &&
     !noSameBlockInflight(sbuffer_out_s0_evictionIdx)
@@ -741,6 +765,24 @@ class Sbuffer(implicit p: Parameters)
     maskFlush.bits.wvec := UIntToOH(resp.bits.id)
   }}
 
+  val enqOH_mshr = PriorityEncoderOH(valid_mshr.map(!_))
+  val hitResp = io.dcache.main_pipe_hit_resp
+  val refillDone = io.dcache.refill_done
+  assert(!(valid_mshr.asUInt.andR && hitResp.fire && hitResp.bits.miss), "(Sbuffer) mshr_buffer enq when it is full")
+  val deqOH_mshr = ptag_mshr.map(_ === (refillDone.bits.paddr >> OffsetWidth)) zip valid_mshr map {case (x, y) => x && y}
+  for (i <- 0 until cacheParams.nMissEntries) {
+    when (hitResp.fire && hitResp.bits.miss) {
+      when (enqOH_mshr(i)) {
+        valid_mshr(i) := true.B
+        ptag_mshr(i) := ptag(hitResp.bits.id)
+      }
+    }
+    when (refillDone.valid && deqOH_mshr(i)) {
+      valid_mshr(i) := false.B
+    }
+  }
+  assert(!(PopCount(deqOH_mshr) > 1.U && refillDone.valid), "(Sbuffer) Error: more than one mshr_buffer deq in the same cycle")
+
   // replay resp
   val replay_resp_id = io.dcache.replay_resp.bits.id
   val replay_resp_id_s3 = io.dcache.replay_resp_s3.bits
@@ -770,6 +812,11 @@ class Sbuffer(implicit p: Parameters)
     when(activeMask(i) && !cohTimeOutMask(i)){
       cohCount(i) := cohCount(i)+1.U
     }
+    val noMergeCountReachThreshold = noMergeCount(i) === longTimeNoMergeThreshold
+    when(activeMask(i) && !noMergeCountReachThreshold) {
+      noMergeCount(i) := noMergeCount(i) + 1.U
+    }
+    longTimeNoMerge(i) := noMergeCountReachThreshold && activeMask(i)
   })
 
   if (env.EnableDifftest) {
