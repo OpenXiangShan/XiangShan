@@ -10,15 +10,15 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.decode.Imm
 import xiangshan.backend.exu.ExeUnitParams
-import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.regfile._
 import xiangshan.backend.vector.IssuePipe.{RfReadAddrBundle, RfReadDataBundle}
+import xiangshan.backend.vector.fu.util.VecFuConfig
 
 import scala.beans.BeanProperty
 
 class ExuParam(
   val name         : String,
-  val fuConfigs    : Seq[FuConfig],
+  val fuConfigs    : Seq[VecFuConfig],
   val writePortCfgs: Seq[PregWB],
   val readPortCfgs : Seq[Seq[RdConfig]],
   val v0RD         : V0RD = null,
@@ -92,11 +92,11 @@ class ExuParam(
   def isVecExeUnit: Boolean = getRegionParam.region == VecRegion
   def isMemExeUnit: Boolean = getRegionParam.region == VecRegion && !name.contains("ALU") && !name.contains("BJU")
 
-  def writeGpFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeIntRf)
-  def writeFpFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeFpRf)
-  def writeVpFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeVecRf)
-  def writeV0FuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeV0Rf)
-  def writeVlFuConfigs: Seq[FuConfig] = fuConfigs.filter(x => x.writeVlRf)
+  def writeGpFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.writeIntRf)
+  def writeFpFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.writeFpRf)
+  def writeVpFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.writeVecRf)
+  def writeV0FuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.writeV0Rf)
+  def writeVlFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.writeVlRf)
 
   def getGpWbPort: Option[IntWB] = {
     writePortCfgs.collectFirst {
@@ -214,15 +214,15 @@ class ExuParam(
 
   def needImm = immTypes.nonEmpty
 
-  def hasLdu: Boolean = fuConfigs.contains(FuConfig.LduCfg)
+  def hasLdu: Boolean = fuConfigs.contains(VecFuConfig.LduCfg)
 
-  def hasSta: Boolean = fuConfigs.contains(FuConfig.StaCfg)
+  def hasSta: Boolean = fuConfigs.contains(VecFuConfig.StaCfg)
 
-  def hasHya: Boolean = fuConfigs.exists(Seq(FuConfig.HyldaCfg, FuConfig.HystaCfg).contains)
+  def hasHya: Boolean = fuConfigs.exists(Seq(VecFuConfig.HyldaCfg, VecFuConfig.HystaCfg).contains)
 
-  def hasStd: Boolean = fuConfigs.contains(FuConfig.StdCfg)
+  def hasStd: Boolean = fuConfigs.contains(VecFuConfig.StdCfg)
 
-  def hasVStd: Boolean = fuConfigs.exists(Seq(FuConfig.VStdCfg).contains)
+  def hasVStd: Boolean = fuConfigs.exists(Seq(VecFuConfig.VStdCfg).contains)
 
   def genRfRdAddrBundle(pregParams: PregParams): MixedVec[RfReadAddrBundle] = MixedVec(
     pregParams match {
@@ -303,7 +303,7 @@ object ExuParam {
   def apply(exeUnitParams: ExeUnitParams): ExuParam = {
     val instance = new ExuParam(
       name = exeUnitParams.name,
-      fuConfigs = exeUnitParams.fuConfigs,
+      fuConfigs = exeUnitParams.fuConfigs.map(x => VecFuConfig.allConfigs.find(_.fuConfig == x).get),
       writePortCfgs = exeUnitParams.wbPortConfigs,
       readPortCfgs = exeUnitParams.rfrPortConfigs,
       v0RD = exeUnitParams.v0RD,

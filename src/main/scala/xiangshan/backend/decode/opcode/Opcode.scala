@@ -54,23 +54,24 @@ object Opcode {
   def getWidth: Int = yunsuan.encoding.Opcode.Opcodes.getWidth
 
   type Opcode = yunsuan.encoding.Opcode.Opcode
+  type Opcodes = yunsuan.encoding.Opcode.Opcodes
 
-  val opcodes = yunsuan.encoding.Opcode.Opcodes
-  val VIAluOpcodes  = opcodes.VIAluOpcode
-  val VMAluOpcodes  = opcodes.VMAluOpcode
-  val VIMacOpcodes  = opcodes.VIMacOpcode
-  val VIDivOpcodes  = opcodes.VIDivOpcode
-  val VIRedOpcodes  = opcodes.VIRedOpcode
-  val VIPermOpcodes = opcodes.VIPermOpcode
-  val VMoveOpcodes  = opcodes.VMoveOpcode
-  val VSha256msOpcodes = opcodes.VSha256msOpcode
-  val VSha256cOpcodes = opcodes.VSha256cOpcode
-  val FCvtOpcodes = opcodes.FCvtOpcode
-  val VFCvtOpcodes = opcodes.VFCvtOpcode
-  val FMiscOpcodes = opcodes.FMiscOpcode
-  val VFMiscOpcodes = opcodes.VFMiscOpcode
-  val FMacOpcodes = opcodes.FMacOpcode
-  val VFMacOpcodes = opcodes.VFMacOpcode
+  val Opcodes = yunsuan.encoding.Opcode.Opcodes
+  val VIAluOpcodes  = Opcodes.VIAluOpcode
+  val VMAluOpcodes  = Opcodes.VMAluOpcode
+  val VIMacOpcodes  = Opcodes.VIMacOpcode
+  val VIDivOpcodes  = Opcodes.VIDivOpcode
+  val VIRedOpcodes  = Opcodes.VIRedOpcode
+  val VIPermOpcodes = Opcodes.VIPermOpcode
+  val VMoveOpcodes  = Opcodes.VMoveOpcode
+  val VSha256msOpcodes = Opcodes.VSha256msOpcode
+  val VSha256cOpcodes = Opcodes.VSha256cOpcode
+  val FCvtOpcodes = Opcodes.FCvtOpcode
+  val VFCvtOpcodes = Opcodes.VFCvtOpcode
+  val FMiscOpcodes = Opcodes.FMiscOpcode
+  val VFMiscOpcodes = Opcodes.VFMiscOpcode
+  val FMacOpcodes = Opcodes.FMacOpcode
+  val VFMacOpcodes = Opcodes.VFMacOpcode
 
   // Todo: remove these
   def X = BitPat("b0_0000_0000")
@@ -968,7 +969,7 @@ object Opcode {
     val sm3p1       = Value(bb"111001")
   }
 
-  object I2fOpcodes extends opcodes.FCvtOpcode
+  object I2fOpcodes extends Opcodes.FCvtOpcode
 
   trait FDivOpcodes extends Opcodes with DataType {
     private val FDIV  = bb"0"
@@ -991,9 +992,9 @@ object Opcode {
 
   object FDivOpcodes extends FDivOpcodes
 
-  object FAluOpcodes extends opcodes.FMiscOpcode
-  object VFRedOpcodes extends opcodes.VFRedOpcode
-  object VFDivOpcodes extends opcodes.VFDivOpcode
+  object FAluOpcodes extends Opcodes.FMiscOpcode
+  object VFRedOpcodes extends Opcodes.VFRedOpcode
+  object VFDivOpcodes extends Opcodes.VFDivOpcode
 
   trait VSetOpcodes extends Opcodes {
     // vtype is from imm

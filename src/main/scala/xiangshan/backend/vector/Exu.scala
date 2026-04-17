@@ -1,90 +1,157 @@
 package xiangshan.backend.vector
 
 import chisel3._
-import chisel3.util.{DecoupledIO, Mux1H, ValidIO}
+import chisel3.experimental.BundleLiterals._
+import chisel3.util._
+import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.Bundles
-import xiangshan.backend.Bundles.{ExuInput, UopIdx}
+import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig.WbConfig
-import xiangshan.backend.decode.opcode.Opcode
-import xiangshan.backend.exu.Dispatcher
-import xiangshan.backend.fu.{FuType, FuncUnitCtrlInput, FuncUnitDataInput, FuncUnitInput, FuncUnitOutput}
+import xiangshan.backend.decode.opcode.{Latency, Opcode}
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.{Fflags, Frm}
-import xiangshan.backend.fu.vector.Bundles.{V0, VType, Vl, Vxrm}
+import xiangshan.backend.fu.vector.Bundles.{V0, VType, Vl, Vxrm, Vxsat}
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecRegionModule.DebugBundle
-import xiangshan.{ExceptionVec, Redirect, TriggerAction, XSBundle}
-import chisel3.experimental.BundleLiterals._
+import xiangshan.backend.vector.fu.util._
 import xiangshan.mem.SqPtr
+import xiangshan._
+import yunsuan.vector.Common._
+import yunsuan.vector.v2.MergeUnit
 
-class Exu(val param: ExuParam)(implicit p: Parameters) extends Module {
-  val latencyMax: Int = param.fuConfigs.map(_.latency.latencyVal.getOrElse(0)).max
+class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with HasXSParameter {
+  override def desiredName: String = param.name
+
+  val latencyMax: Int = param.fuConfigs.map(_.latency).max
+  val vlenb = VLEN / 8
+  // The width of the number of e8 elem in VLEN bits
+  val byteElemWidth = log2Ceil(vlenb)
 
   val in = IO(Input(new Exu.In(param)))
   val out = IO(Output(new Exu.Out(param)))
 
-  val fus = param.fuConfigs.map(cfg => cfg.fuGen(p, cfg))
+  println(s"[tmp-$getClass] ${param.getInstanceNameOfPipe} ${param.fuConfigs.map(cfg => cfg.name -> cfg.fuGen2)}")
+  val fus: Seq[Func] = param.fuConfigs.map(cfg => cfg.fuGen2(p, cfg))
+  val mgus: Seq[MergeUnit] = Seq.fill(latencyMax + 1)(Module(new MergeUnit()))
 
-  val in1ToN: Dispatcher[Exu.InUop] = Module(
-    new Dispatcher[Exu.InUop](new Exu.InUop(param), fus.length, x => x.param.fuConfigs.map(_.fuSel2(x)))
+  val ex: Vec[ValidIO[Exu.ExStage]] = RegInit(
+    VecInit.fill(latencyMax + 1)(ValidIO(new Exu.ExStage(param)).Lit(_.valid -> false.B))
   )
 
-  val ex: Vec[ValidIO[Exu.InUop]] = RegInit(
-    VecInit.fill(latencyMax + 1)(ValidIO(new Exu.InUop(param)).Lit(_.valid -> false.B))
-  )
-  val pipe: Seq[ValidIO[Exu.InUop]] = in.uop +: ex
+  val inEx = Wire(ValidIO(new Exu.ExStage(param)))
+  inEx.valid := in.uop.valid
+  inEx.bits :<#= in.uop.bits
+  inEx.bits.fuSel := VecInit(param.fuConfigs.map(_.fuSel2(in.uop.bits)))
 
-  ex zip (in.uop +: ex) foreach {
-    case (sink: ValidIO[Exu.InUop], source: ValidIO[Exu.InUop]) =>
+  ex zip (inEx +: ex) foreach {
+    case (sink: ValidIO[Exu.ExStage], source: ValidIO[Exu.ExStage]) =>
       sink.valid := source.valid && !source.bits.ctrl.robIdx.needFlush(in.flush)
-      when (source.valid) {
+      when(source.valid) {
         sink.bits := source.bits
       }
   }
 
-  in1ToN.io.in.valid := ex(0).valid
-  in1ToN.io.in.bits := ex(0).bits
+  fus.map(_.in.ex0Next).zipWithIndex.foreach {
+    case (sink: ValidIO[Func.InUop], i) =>
+      sink.valid := inEx.valid && inEx.bits.fuSel(i)
+      sink.bits <#=: inEx.bits
+  }
 
-  fus.map(_.io.in).zip(in1ToN.io.out).foreach {
-    case (sink: DecoupledIO[FuncUnitInput], source: DecoupledIO[Exu.InUop]) =>
-      sink.valid := source.valid
-      source.ready := sink.ready
-      ex(0).bits =#> sink.bits.ctrl
-      ex(0).bits =#> sink.bits.data
-      sink.bits.validPipe lazyZip sink.bits.ctrlPipe lazyZip sink.bits.dataPipe foreach {
-        case (validPipe: Vec[Bool], ctrlPipe: Vec[FuncUnitCtrlInput], dataPipe: Vec[FuncUnitDataInput]) =>
-          require(
-            ex.size >= ctrlPipe.size,
-            s"ex.size = ${ex.size}, ctrlPipe.size = ${ctrlPipe.size}"
-          )
-
-          for ((sinkValid, sinkCtrl, sinkData, exN) <- (validPipe lazyZip ctrlPipe lazyZip dataPipe lazyZip ex)) {
-            exN.bits =#> sinkCtrl
-            exN.bits =#> sinkData
-            sinkValid := exN.valid
-          }
+  fus.map(_.in.ex).zipWithIndex.foreach {
+    case (sink, i) =>
+      sink.zip(ex).foreach {
+        case (fuInN: ValidIO[Func.InUop], exN) =>
+          fuInN.valid := exN.valid && exN.bits.fuSel(i)
+          fuInN.bits <#=: exN.bits
       }
-      sink.bits.perfDebugInfo .foreach(x => x := source.bits.ctrl.debug.get.perfDebugInfo)
-      sink.bits.debug_seqNum  .foreach(x => x := source.bits.ctrl.debug.get.seqNum)
-
   }
 
   fus.foreach {
     case fu =>
-      fu.io.flush := in.flush
-      fu.io.frm.foreach(_ := in.frm.get)
-      fu.io.vxrm.foreach(_ := in.vxrm.get)
-      fu.io.wakeupSuccess.foreach(_ := false.B) // Todo: remove it
+      fu.in.flush := in.flush
+      fu.in.frm.foreach(_ := in.frm.get)
+      fu.in.vxrm.foreach(_ := in.vxrm.get)
   }
 
-  val fuOutValidOH: Vec[Bool] = VecInit(fus.map(_.io.out.valid))
 
-  out.uop.valid := fuOutValidOH.asUInt.orR
-  out.uop.bits.fromFuOutputVec(fus.map(_.io.out))
+  mgus.zipWithIndex.foreach {
+    case (mgu, i) =>
+      val vl = ex(i).bits.data.vl.get.suggestName(s"ex${i}_vl")
+      // Todo: widen uop should use 2x value
+      val eewOH = UIntToOH(ex(i).bits.ctrl.vtype.get.vsew, SewOH.width).suggestName(s"ex${i}_eewOH")
+      val vdIdx = ex(i).bits.ctrl.uopIdx // Todo: may by wrong for some kind of uops
+      val vlMapVdIdx = elemIdxMapVdIdx(vl, eewOH)(3, 0) // 4 bits 0~8
+      val end = elemIdxMapElemE8Idx(vl, eewOH)
+      val vd = Mux1H(fus.flatMap(_.out.ex.lift(i)).map(validIO =>
+        validIO.valid -> validIO.bits.data.vec.get.normal
+      )).suggestName(s"ex${i}_vd")
 
-  fus.foreach(_.io.out.ready := true.B)
+      mgu.in.ctrl.vma := ex(i).bits.ctrl.vtype.get.vma
+      mgu.in.ctrl.vta := ex(i).bits.ctrl.vtype.get.vta
+      mgu.in.data.mask := Fill(vlenb, ex(i).bits.ctrl.vm.get) | ex(i).bits.data.v0.get // Todo: use vlenb v0
+      // since vstart is always 0 for vector arith instruction, begin is always 0
+      mgu.in.data.begin := 0.U
+      mgu.in.data.end := Mux1H(Seq(
+        (vdIdx > vlMapVdIdx) -> 0.U,
+        (vdIdx === vlMapVdIdx) -> end,
+        (vdIdx < vlMapVdIdx) -> vlenb.U,
+      ))
+      mgu.in.data.oldVd := ex(i).bits.data.src(2).toByteVec
+      mgu.in.data.vd := vd.toByteVec
+  }
+
+  val outFuUopEx = Wire(Vec(latencyMax + 1, ValidIO(new Exu.OutUop(param))))
+  outFuUopEx.zipWithIndex.foreach {
+    case (out: ValidIO[Exu.OutUop], i) =>
+      val fuOuts: Seq[ValidIO[Func.OutUop]] = fus.flatMap(_.out.ex.lift(i))
+      out.valid := fuOuts.map(_.valid).orR
+      out.bits :<#= fuOuts
+      out.bits.toVpRf.foreach(_.data := mgus(i).out.res.asUInt)
+
+      out.bits.toRob.vxsat.foreach {
+        case x =>
+          val vxsat: Vec[UInt] = Mux1H(
+            fus.flatMap(_.out.ex.lift(i)).map(
+              validIO => validIO.valid -> validIO.bits.data.vec.get.vxsatE8.getOrElse(0.U.asTypeOf(Vec(vlenb, Vxsat())))
+            )
+          ).suggestName(s"ex${i}_vxsat")
+
+          x := Mux1H(mgus(i).out.activeEn, vxsat)
+      }
+
+      out.bits.toRob.fflags.foreach {
+        case x =>
+          val fflags: Vec[UInt] = Mux1H(
+            fus.flatMap(_.out.ex.lift(i)).map(
+              validIO => validIO.valid -> validIO.bits.data.vec.get.fflagsE8.getOrElse(0.U.asTypeOf(Vec(vlenb, Fflags())))
+            )
+          ).suggestName(s"ex${i}_fflags")
+
+          x := Mux1H(mgus(i).out.activeEn, fflags)
+      }
+  }
+
+  val fuOutValidOH: Seq[Bool] = fus.flatMap(_.out.ex.map(_.valid))
+
+  out.uop.valid := Cat(outFuUopEx.map(_.valid)).orR
+  out.uop.bits := Mux1H(outFuUopEx.map(x => x.valid -> x.bits))
+
+  def elemIdxMapVdIdx(elemIdx: UInt, eewOH: UInt) = {
+    require(elemIdx.getWidth >= log2Up(VLEN))
+    // 3 = log2(8)
+    Mux1H(eewOH, Seq.tabulate(eewOH.getWidth)(x => elemIdx(byteElemWidth - x + 3, byteElemWidth - x)))
+  }
+
+  def elemIdxMapElemE8Idx(elemIdx: UInt, eewOH: UInt) = {
+    // eewOH(0) -> Cat(elemIdx(byteElemWidth - 1, 0), 0.U(0.W)),
+    // eewOH(1) -> Cat(elemIdx(byteElemWidth - 2, 0), 0.U(1.W)),
+    // eewOH(2) -> Cat(elemIdx(byteElemWidth - 3, 0), 0.U(2.W)),
+    // eewOH(3) -> Cat(elemIdx(byteElemWidth - 4, 0), 0.U(3.W)),
+    Mux1H(eewOH, Seq.tabulate(eewOH.getWidth)(x => Cat(elemIdx.take(byteElemWidth - x), 0.U(x.W))))
+  }
 }
 
 object Exu {
@@ -97,6 +164,16 @@ object Exu {
 
   class Out(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
     val uop = ValidIO(new Exu.OutUop(param))
+  }
+
+  class ExStage(param: ExuParam)(implicit p: Parameters) extends InUop(param) {
+    val fuSel = Vec(param.fuConfigs.size,Bool())
+
+    def :<#=(source: InUop): Unit = {
+      this.ctrl := source.ctrl
+      this.data := source.data
+      this.debug.foreach(_ := source.debug.get)
+    }
   }
 
   class InUop(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
@@ -166,9 +243,11 @@ object Exu {
       exuInput
     }
 
-    def =#>(sink: FuncUnitCtrlInput): Unit = {
-      sink.fuOpType                    := this.ctrl.opcode
+    def <#=:(sink: Func.InCtrl): Unit = {
+      sink.opcode                      := this.ctrl.opcode
+      sink.latency                     := this.ctrl.latency
       sink.robIdx                      := this.ctrl.robIdx
+      sink.uopIdx                      := this.ctrl.uopIdx
       sink.pdest                       := this.ctrl.pdest
       sink.pdestV0     .foreach(x => x := this.ctrl.pdestV0.get)
       sink.pdestVl     .foreach(x => x := this.ctrl.pdestVl.get)
@@ -178,39 +257,24 @@ object Exu {
       sink.v0Wen       .foreach(x => x := this.ctrl.v0Wen.get)
       sink.vlWen       .foreach(x => x := this.ctrl.vlWen.get)
       sink.flushPipe   .foreach(x => x := this.ctrl.flushPipe.get)
-      sink.isRVC       .foreach(x => x := 0.U.asTypeOf(x))
-      sink.rasAction   .foreach(x => x := 0.U.asTypeOf(x))
-      sink.ftqIdx      .foreach(x => x := 0.U.asTypeOf(x))
-      sink.ftqOffset   .foreach(x => x := 0.U.asTypeOf(x))
-      sink.predictInfo .foreach(x => x := 0.U.asTypeOf(x))
       sink.fflagsWen   .foreach(x => x := this.ctrl.fflagsWen.get)
-      sink.vpu         .foreach(x => x := 0.U.asTypeOf(x)) // Todo: remove it
-      sink.vpu         .foreach(x => {
-        x.vill                         := this.ctrl.vtype.get.illegal
-        x.vma                          := this.ctrl.vtype.get.vma
-        x.vta                          := this.ctrl.vtype.get.vta
-        x.vsew                         := this.ctrl.vtype.get.vsew
-        x.vlmul                        := this.ctrl.vtype.get.vlmul
-        x.vm                           := this.ctrl.vm.get
-      }) // Todo: remove it
+      sink.vtype       .foreach(x => x := this.ctrl.vtype.get)
       sink.oldVType    .foreach(x => x := this.ctrl.oldVType.get)
-      sink.vialuCtrl   .foreach(x => x := 0.U.asTypeOf(x))
+      sink.vm          .foreach(x => x := this.ctrl.vm.get)
     }
 
-    def =#>(sink: FuncUnitDataInput): Unit = {
+    def <#=:(sink: Func.InData): Unit = {
       sink.src                         := this.data.src
       sink.vl          .foreach(x => x := this.data.vl.get)
       sink.v0          .foreach(x => x := this.data.v0.get)
       sink.pc          .foreach(x => x := this.data.pc.get)
-      sink.nextPcOffset.foreach(x => x := 0.U.asTypeOf(x))
       sink.imm                         := this.data.imm.getOrElse(0.U)
     }
 
-    def =#>(sink: FuncUnitInput) : Unit = {
-      this =#> sink.data
-      this =#> sink.ctrl
-      sink.perfDebugInfo .foreach(x => x := this.ctrl.debug.get.perfDebugInfo)
-      sink.debug_seqNum  .foreach(x => x := this.ctrl.debug.get.seqNum)
+    def <#=:(sink: Func.InUop) : Unit = {
+      sink.data <#=: this
+      sink.ctrl <#=: this
+      sink.debug.foreach(x => x := this.debug.get)
     }
   }
 
@@ -222,51 +286,45 @@ object Exu {
     val toV0Rf = param.getV0WbPort.map(new ToRf(_, backendParams.v0PregParams))
     val toVlRf = param.getVlWbPort.map(new ToRf(_, backendParams.vlPregParams))
 
-    def fromFuOutputVec(fuOuts: Seq[DecoupledIO[FuncUnitOutput]]): Unit = {
+    def :<#=(fuOuts: Seq[ValidIO[Func.OutUop]]): Unit = {
       val fuOutValidOH: Vec[Bool] = VecInit(fuOuts.map(_.valid))
 
       this.toRob.robIdx := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.robIdx))
       this.toRob.flushPipe.foreach(_ := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.flushPipe.getOrElse(false.B))))
       this.toRob.replay.foreach(_ := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.replay.getOrElse(false.B))))
-      this.toRob.redirect.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.res.redirect.getOrElse(0.U.asTypeOf(x)))))
-      this.toRob.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.res.fflags.getOrElse(0.U.asTypeOf(x)))))
-      this.toRob.vxsat.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.res.vxsat.getOrElse(0.U.asTypeOf(x)))))
+      this.toRob.redirect.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.data.redirect.getOrElse(0.U.asTypeOf(x)))))
+//      this.toRob.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.data.fflags.getOrElse(0.U.asTypeOf(x)))))
+//      this.toRob.vxsat.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.data.vxsat.getOrElse(0.U.asTypeOf(x)))))
       this.toRob.exceptionVec.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.exceptionVec.getOrElse(0.U.asTypeOf(x)))))
-      this.toRob.debug.foreach { case x =>
-        x.debug := 0.U.asTypeOf(x.debug)
-        x.debug.isPerfCnt := false.B // Todo: connect it for csr
-        x.perfDebugInfo := Mux1H(fuOutValidOH, fuOuts.map(_.bits.perfDebugInfo.get))
-        x.seqNum := Mux1H(fuOutValidOH, fuOuts.map(_.bits.debug_seqNum.get))
-      }
+      this.toRob.debug.foreach(_ := Mux1H(fuOutValidOH, fuOuts.map(_.bits.debug.get)))
 
       this.toGpRf.foreach { case x =>
         x.wen := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.rfWen.getOrElse(false.B)))
         x.pdest := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.pdest))
-        x.data := Mux1H(fuOutValidOH, fuOuts.map(_.bits.res.data))
+        x.data := Mux1H(fuOutValidOH, fuOuts.map(_.bits.data.int.getOrElse(0.U)))
       }
 
       this.toFpRf.foreach { case x =>
         x.wen := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.fpWen.getOrElse(false.B)))
         x.pdest := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.pdest))
-        x.data := Mux1H(fuOutValidOH, fuOuts.map(_.bits.res.data))
+        x.data := Mux1H(fuOutValidOH, fuOuts.map(_.bits.data.fp.getOrElse(0.U)))
       }
 
       this.toVpRf.foreach { case x =>
         x.wen := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.vecWen.getOrElse(false.B)))
         x.pdest := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.pdest))
-        x.data := Mux1H(fuOutValidOH, fuOuts.map(_.bits.res.data))
       }
 
       this.toV0Rf.foreach { case x =>
         x.wen := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.v0Wen.getOrElse(false.B)))
         x.pdest := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.pdestV0.getOrElse(0.U)))
-        x.data := Mux1H(fuOutValidOH, fuOuts.map(_.bits.res.data))
+        x.data := 0.U
       }
 
       this.toVlRf.foreach { case x =>
         x.wen := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.vlWen.getOrElse(false.B)))
         x.pdest := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.pdestVl.getOrElse(0.U)))
-        x.data := Mux1H(fuOutValidOH, fuOuts.map(_.bits.res.data))
+        x.data := 0.U
       }
     }
   }
@@ -277,6 +335,7 @@ object Exu {
 
     val fuType    = FuType()
     val opcode    = Opcode()
+    val latency   = Latency()
 
     val gpWen     = Option.when(param.needGpWen)(Bool())
     val fpWen     = Option.when(param.needFpWen)(Bool())
@@ -306,6 +365,7 @@ object Exu {
       this.uopIdx := deq.uopIdx
       this.fuType := deq.fuType
       this.opcode := deq.opcode
+      this.latency := deq.latency
 
       this.gpWen.foreach(_ := deq.gpWen)
       this.fpWen.foreach(_ := deq.fpWen)
@@ -480,6 +540,18 @@ object Exu {
         x.perfDebugInfo := source.perfDebugInfo.get
         x.seqNum        := source.debug_seqNum.get
       }
+    }
+
+    def :<#=(source: Exu.InUop): Unit = {
+      this.robIdx              := source.ctrl.robIdx
+      this.flushPipe   .foreach(_ := source.ctrl.flushPipe.get)
+      this.replay      .foreach(_ := false.B)
+      this.redirect    .foreach(x => x := 0.U.asTypeOf(x))
+      this.fflags      .foreach(x => x := 0.U.asTypeOf(x))
+      this.vxsat       .foreach(x => x := 0.U.asTypeOf(x))
+      this.exceptionVec.foreach(x => x := 0.U.asTypeOf(x))
+      this.trigger     .foreach(x => x := 0.U.asTypeOf(x))
+      this.debug       .foreach(x => x := source.ctrl.debug.get)
     }
   }
 }

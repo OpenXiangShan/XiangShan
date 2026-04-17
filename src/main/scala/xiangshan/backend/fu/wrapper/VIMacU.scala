@@ -13,8 +13,10 @@ import yunsuan.VialuFixType
 import yunsuan.encoding.{VdType, Vs1IntType, Vs2IntType}
 import yunsuan.vector.mac.VIMac64b
 import xiangshan.backend.decode.opcode.Opcode.VIMacOpcodes
+import xiangshan.backend.vector.fu.util.VecFixLatFunc
+import xiangshan.backend.vector.fu.util.VecFuConfig
 
-class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
+class VIMacU(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg) {
   import VIMacOpcodes._
 
   // params alias
@@ -32,14 +34,13 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val oldVdSplit  = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vimacs = Seq.fill(numVecModule)(Module(new VIMac64b))
-  private val mgu = Module(new Mgu(dataWidth))
 
   /**
     * In connection of [[vs2Split]], [[vs1Split]] and [[oldVdSplit]]
     */
-  vs2Split.io.inVecData := vs2
-  vs1Split.io.inVecData := vs1
-  oldVdSplit.io.inVecData := oldVd
+  vs2Split.io.inVecData := ex0vs2
+  vs1Split.io.inVecData := ex0vs1
+  oldVdSplit.io.inVecData := ex0oldVd
 
   /**
     * [[vimacs]]'s in connection
@@ -56,56 +57,36 @@ class VIMacU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg
   private val vs1VecUsed: Vec[UInt] = Mux(widen, vs1GroupedVec, vs1Split.io.outVec64b)
   private val oldVdVecUsed: Vec[UInt] = WireInit(oldVdSplit.io.outVec64b)
 
+  /*
   vimacs.zipWithIndex.foreach {
     case (mod, i) =>
-      mod.io.fire        := io.in.valid
-      mod.io.info.vm     := vm
-      mod.io.info.ma     := vma
-      mod.io.info.ta     := vta
-      mod.io.info.vlmul  := vlmul
-      mod.io.info.vl     := vl
+      mod.io.fire := io.in(0).valid
+      mod.io.info.vm := ex0vm
+      mod.io.info.ma := ex0vma
+      mod.io.info.ta := ex0vta
+      mod.io.info.vlmul := vlmul
+      mod.io.info.vl := ex0vl
       mod.io.info.vstart := vstart
-      mod.io.info.uopIdx := vuopIdx
-      mod.io.info.vxrm   := vxrm
-      mod.io.vs1Sign     := vs1Sign
-      mod.io.vs2Sign     := vs2Sign
-      mod.io.vdSign      := vdSign
-      mod.io.sew         := getSew
-      mod.io.vs1         := vs1VecUsed(i)
-      mod.io.vs2         := Mux(exchangeVs2Vd, oldVdVecUsed(i), vs2VecUsed(i))
-      mod.io.oldVd       := Mux(exchangeVs2Vd, vs2VecUsed(i), oldVdVecUsed(i))
-      mod.io.highHalf    := ishighHalf
-      mod.io.isMacc      := isVmaccType
-      mod.io.isSub       := isSub
-      mod.io.widen       := widen
-      mod.io.isFixP      := isVsmul
+      mod.io.info.uopIdx := ex0uopIdx
+      mod.io.info.vxrm := vxrm
+      mod.io.vs1Sign := vs1Sign
+      mod.io.vs2Sign := vs2Sign
+      mod.io.vdSign := vdSign
+      mod.io.sew := getSew
+      mod.io.vs1 := vs1VecUsed(i)
+      mod.io.vs2 := Mux(exchangeVs2Vd, oldVdVecUsed(i), vs2VecUsed(i))
+      mod.io.oldVd := Mux(exchangeVs2Vd, vs2VecUsed(i), oldVdVecUsed(i))
+      mod.io.highHalf := ishighHalf
+      mod.io.isMacc := isVmaccType
+      mod.io.isSub := isSub
+      mod.io.widen := widen
+      mod.io.isFixP := isVsmul
   }
+  */
 
-  /**
-    * [[mgu]]'s in connection
-    */
-  private val outVd = Cat(vimacs.reverse.map(_.io.vd))
-  private val outWiden = VIMacOpcodes.isWiden(outCtrl.fuOpType)
-  private val outVxsat = Cat(vimacs.reverse.map(_.io.vxsat))
-
-  private val outEew = Mux(outWiden, outVecCtrl.vsew + 1.U, outVecCtrl.vsew)
-  mgu.io.in.vd := outVd
-  mgu.io.in.oldVd := outOldVd
-  mgu.io.in.mask := outSrcMask
-  mgu.io.in.info.ta := outVecCtrl.vta
-  mgu.io.in.info.ma := outVecCtrl.vma
-  mgu.io.in.info.vl := outVl
-  mgu.io.in.info.vlmul := outVecCtrl.vlmul
-  mgu.io.in.info.valid := io.out.valid
-  mgu.io.in.info.vstart := outVecCtrl.vstart
-  mgu.io.in.info.eew := outEew
-  mgu.io.in.info.vsew := outVecCtrl.vsew
-  mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
-  mgu.io.in.info.narrow := 0.B
-  mgu.io.in.info.dstMask := 0.B
-  mgu.io.in.isIndexedVls := false.B
-
+  /*
   io.out.bits.res.data := mgu.io.out.vd
   io.out.bits.res.vxsat.get := (outVxsat & mgu.io.out.active).orR
   io.out.bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := mgu.io.out.illegal
+  */
 }
