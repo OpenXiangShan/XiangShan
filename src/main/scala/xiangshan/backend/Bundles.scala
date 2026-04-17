@@ -25,7 +25,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.VecMissalignedDebugBundle
 import utility._
-import xiangshan.backend.decode.opcode.Opcode
+import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 
 
@@ -188,6 +188,8 @@ object Bundles {
     val lastUop = Bool()
     val numWB = NumWB() // rob need this
     val needFrm = new NeedFrmBundle
+    val latency = Latency()
+
     val debug = OptionWrapper(backendParams.debugEn, new DecodeOutUopDebug())
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
@@ -280,6 +282,7 @@ object Bundles {
     val firstUop = Bool()
     val lastUop = Bool()
     val numWB = NumWB() // rob need this
+    val latency = Latency()
     // rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val psrcIntForMove = UInt(PhyRegIdxWidth.W)
@@ -400,6 +403,7 @@ object Bundles {
     val fflagsWen = Bool()
     val uopIdx = UopIdx()
     val lastUop = Bool()
+    val latency = Latency()
     // from rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val psrcV0 = UInt(V0PhyRegIdxWidth.W)
@@ -470,6 +474,7 @@ object Bundles {
     val fflagsWen  = Option.when(params.writeFflags)(Bool())
     val uopIdx   = Option.when(params.inVfSchd || params.isMemAddrIQ)(UopIdx())
     val lastUop  = Option.when(params.inVfSchd || params.isMemAddrIQ)(Bool())
+    val latency  = Latency()
     // from rename
     val robIdx    = new RobPtr
     val psrc      = Vec(numSrc, UInt(PhyRegIdxWidth.W))
@@ -653,6 +658,7 @@ object Bundles {
     val lastUop         = Bool()
     val numUops         = UInt(log2Up(MaxUopSize).W) // rob need this
     val numWB           = NumWB() // rob need this
+    val latency         = Latency()
     val commitType      = CommitType()
     // rename
     val srcState        = Vec(numSrc, SrcState())
@@ -1324,6 +1330,7 @@ object Bundles {
       uop := 0.U.asTypeOf(uop)
       uop.fuType         := this.fuType
       uop.fuOpType       := this.fuOpType
+      uop.latency        := 0.U
       uop.imm            := this.imm
       uop.robIdx         := this.robIdx
       uop.pdest          := this.pdest

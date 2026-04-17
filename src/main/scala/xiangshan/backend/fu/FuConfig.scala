@@ -51,7 +51,7 @@ import xiangshan.mem.{Std, VStd}
 case class FuConfig (
   name          : String,
   fuType        : FuType.OHType,
-  fuGen         : (Parameters, FuConfig) => FuncUnit,
+  fuGen         : (Parameters, FuConfig) => FuncUnit =  (_, cfg) => throw new NotImplementedError(s"fuGen is not set for ${cfg.name}"),
   srcData       : Seq[Seq[DataConfig]],
   piped         : Boolean,
   maybeBlock    : Boolean = false,
@@ -562,7 +562,7 @@ object FuConfig {
   val VialuCfg = FuConfig (
     name = "vialuFix",
     fuType = FuType.vialuF,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecPipedFuncUnit(cfg)(p)).suggestName("Vialu"),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
     ),
@@ -585,7 +585,7 @@ object FuConfig {
   val VimacCfg = FuConfig (
     name = "vimac",
     fuType = FuType.vimac,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecPipedFuncUnit(cfg)(p)).suggestName("Vimac"),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -608,7 +608,7 @@ object FuConfig {
   val VidivCfg = FuConfig (
     name = "vidiv",
     fuType = FuType.vidiv,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecNonPipedFuncUnit(cfg)(p)).suggestName("Vidiv"),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -650,7 +650,7 @@ object FuConfig {
   val VipuCfg: FuConfig = FuConfig (
     name = "vipu",
     fuType = FuType.vipu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecPipedFuncUnit(cfg)(p)).suggestName("Vipu"),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
     ),
@@ -672,7 +672,7 @@ object FuConfig {
   val VmoveCfg = FuConfig (
     name = "vmove",
     fuType = FuType.vmove,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VMove(cfg)(p).suggestName("Vmove")),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -681,7 +681,7 @@ object FuConfig {
     writeFpRf = true,
     writeVecRf = true,
     writeV0Rf = true,
-    latency = CertainLatency(0, extraValue = 3),
+    latency = CertainLatency(0),
     vlWakeUp = true,
     maskWakeUp = true,
     destDataBits = 128,
@@ -760,7 +760,7 @@ object FuConfig {
   val VfcvtCfg = FuConfig(
     name = "vfcvt",
     fuType = FuType.vfcvt,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecPipedFuncUnit(cfg)(p)).suggestName("Vfcvt"),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -885,7 +885,7 @@ object FuConfig {
   val VStdCfg: FuConfig = FuConfig(
     name = "vstd",
     fuType = FuType.stu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VStd(cfg)(p).suggestName("VStd")),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData()),
     ),
@@ -1011,4 +1011,3 @@ object FuConfig {
 
   }
 }
-
