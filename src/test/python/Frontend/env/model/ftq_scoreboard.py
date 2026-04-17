@@ -59,6 +59,14 @@ class FtqScoreboard:
     ) -> None:
         redirect_rank = self.state.ftq_ptr_rank_after_commit(ftq_flag, ftq_value)
         next_target_ftq = None if flush_itself else self.state.increment_ftq_ptr(ftq_flag, ftq_value)
+        keep_next_target_ftq = bool(
+            not flush_itself
+            and next_target_ftq is not None
+            and (
+                int(next_target_ftq[0]) != int(self.state.commit_ptr_flag)
+                or int(next_target_ftq[1]) != int(self.state.commit_ptr_value)
+            )
+        )
         current_entry_is_next_target_ftq = bool(
             not flush_itself
             and next_target_ftq is not None
@@ -71,6 +79,11 @@ class FtqScoreboard:
             if (
                 int(entry.queued_cycle) >= int(keep_cycle)
                 or (
+                    keep_next_target_ftq
+                    and next_target_ftq is not None
+                    and self.state.ftq_entry_matches(entry, int(next_target_ftq[0]), int(next_target_ftq[1]))
+                )
+                or (
                     self.state.same_entry_offset_survives(entry.ftq_offset, ftq_offset, flush_itself)
                     if self.state.ftq_entry_matches(entry, ftq_flag, ftq_value)
                     else self.state.ftq_ptr_survives_redirect(entry.ftq_flag, entry.ftq_value, redirect_rank, flush_itself)
@@ -80,7 +93,15 @@ class FtqScoreboard:
         self.state.pending_events = deque(
             evt
             for evt in self.state.pending_events
-            if pending_event_survives(
+            if (
+                keep_next_target_ftq
+                and next_target_ftq is not None
+                and isinstance(evt.payload, dict)
+                and int(evt.payload.get("ftq_flag", -1)) == int(next_target_ftq[0])
+                and int(evt.payload.get("ftq_value", -1)) == int(next_target_ftq[1])
+                and "mismatch" not in str(evt.payload.get("reason", ""))
+            )
+            or pending_event_survives(
                 evt,
                 ftq_flag,
                 ftq_value,
