@@ -265,18 +265,43 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
   lazy val module = new Imp
   class Imp extends LazyModuleImp(this)
 }
-class dm_axi2w(bundleParams: AXI4BundleParameters, totalHartCount: Int) extends Module {
+
+class UncoreDebugModuleIO(val localHartCount: Int)(implicit val p: Parameters) extends Bundle {
+  val resetCtrl = new ResetCtrlIO(localHartCount)(p)
+  val debugIO = new DebugIO()(p)
+  val clock = Input(Clock())
+  val reset = Input(Reset())
+}
+
+class dm_axi2w(
+  bundleParams: AXI4BundleParameters,
+  localHartCount: Int,
+  totalHartCount: Int,
+  numDies: Int,
+  dieIdWidth: Int
+) extends Module {
   val io = IO(new Bundle {
     val axi = Flipped(new AXI4Bundle(bundleParams))
-    val dmint = Output(UInt(totalHartCount.W))
-    val hartResetReq = Output(UInt(totalHartCount.W))
+    val dmint = Output(UInt(localHartCount.W))
+    val hartResetReq = Output(UInt(localHartCount.W))
     val hartIsInReset = Output(UInt(totalHartCount.W))
   })
-  private val sidebandWidth = 64
-  require(totalHartCount <= sidebandWidth, s"dm_axi2w expects totalHartCount <= $sidebandWidth, got $totalHartCount")
+  private val dieIdFieldWidth = 4
+  private val writePayloadWidth = 2 * localHartCount + totalHartCount + dieIdFieldWidth
+  private val readPayloadWidth = 2 * localHartCount + totalHartCount
+  require(localHartCount > 0, s"dm_axi2w expects localHartCount > 0, got $localHartCount")
+  require(totalHartCount > 0, s"dm_axi2w expects totalHartCount > 0, got $totalHartCount")
+  require(numDies > 0, s"dm_axi2w expects numDies > 0, got $numDies")
+  require(totalHartCount == localHartCount * numDies,
+    s"dm_axi2w expects totalHartCount == localHartCount * numDies, got $totalHartCount, $localHartCount and $numDies")
+  require(dieIdWidth > 0, s"dm_axi2w expects dieIdWidth > 0, got $dieIdWidth")
+  require(io.axi.w.bits.data.getWidth >= writePayloadWidth,
+    s"dm_axi2w expects write payload width <= ${io.axi.w.bits.data.getWidth}, got $writePayloadWidth")
+  require(io.axi.r.bits.data.getWidth >= readPayloadWidth,
+    s"dm_axi2w expects read payload width <= ${io.axi.r.bits.data.getWidth}, got $readPayloadWidth")
 
-  val dmintShadow = RegInit(0.U(totalHartCount.W))
-  val hartResetReqShadow = RegInit(0.U(totalHartCount.W))
+  val dmintShadow = RegInit(0.U(localHartCount.W))
+  val hartResetReqShadow = RegInit(0.U(localHartCount.W))
   val hartIsInResetShadow = RegInit(0.U(totalHartCount.W))
 
   val awQueue = Module(new Queue(chiselTypeOf(io.axi.aw.bits), 1, pipe = true, flow = true))
@@ -312,16 +337,16 @@ class dm_axi2w(bundleParams: AXI4BundleParameters, totalHartCount: Int) extends 
   io.axi.ar.ready := !rValid
   when (io.axi.ar.fire) {
     val readOffset = io.axi.ar.bits.addr(7, 0)
+    val readPayload = Cat(hartIsInResetShadow, hartResetReqShadow, dmintShadow)
     rValid := true.B
     rId := io.axi.ar.bits.id
     when (readOffset === 0.U) {
       rResp := AXI4Parameters.RESP_OKAY
-      rData := Cat(
-        0.U((io.axi.r.bits.data.getWidth - 3 * sidebandWidth).W),
-        hartIsInResetShadow.pad(sidebandWidth),
-        hartResetReqShadow.pad(sidebandWidth),
-        dmintShadow.pad(sidebandWidth)
-      )
+      if (io.axi.r.bits.data.getWidth > readPayloadWidth) {
+        rData := Cat(0.U((io.axi.r.bits.data.getWidth - readPayloadWidth).W), readPayload)
+      } else {
+        rData := readPayload
+      }
     }.otherwise {
       rResp := AXI4Parameters.RESP_DECERR
       rData := 0.U
@@ -336,16 +361,16 @@ class dm_axi2w(bundleParams: AXI4BundleParameters, totalHartCount: Int) extends 
   wQueue.io.deq.ready := consumeWrite
   when (consumeWrite) {
     val writeOffset = awQueue.io.deq.bits.addr(7, 0)
-    val dmintData = wQueue.io.deq.bits.data(sidebandWidth - 1, 0)
-    val hartResetReqData = wQueue.io.deq.bits.data(2 * sidebandWidth - 1, sidebandWidth)
-    val hartIsInResetData = wQueue.io.deq.bits.data(3 * sidebandWidth - 1, 2 * sidebandWidth)
+    val dmintData = wQueue.io.deq.bits.data(localHartCount - 1, 0)
+    val hartResetReqData = wQueue.io.deq.bits.data(2 * localHartCount - 1, localHartCount)
+    val hartIsInResetData = wQueue.io.deq.bits.data(2 * localHartCount + totalHartCount - 1, 2 * localHartCount)
     bValid := true.B
     bId := awQueue.io.deq.bits.id
     bResp := AXI4Parameters.RESP_OKAY
     when (writeOffset === 0.U) {
-      dmintShadow := dmintData(totalHartCount - 1, 0)
-      hartResetReqShadow := hartResetReqData(totalHartCount - 1, 0)
-      hartIsInResetShadow := hartIsInResetData(totalHartCount - 1, 0)
+      dmintShadow := dmintData
+      hartResetReqShadow := hartResetReqData
+      hartIsInResetShadow := hartIsInResetData
     }.otherwise {
       bResp := AXI4Parameters.RESP_DECERR
     }
@@ -358,6 +383,7 @@ class dm_axi2w(bundleParams: AXI4BundleParameters, totalHartCount: Int) extends 
 
 class dm_w2axi(
   bundleParams: AXI4BundleParameters,
+  localHartCount: Int,
   totalHartCount: Int,
   numDies: Int,
   dieIdWidth: Int,
@@ -368,26 +394,43 @@ class dm_w2axi(
     val axi = new AXI4Bundle(bundleParams)
     val dmint = Input(UInt(totalHartCount.W))
     val hartResetReq = Input(UInt(totalHartCount.W))
-    val hartIsInReset = Input(UInt(totalHartCount.W))
+    val hartIsInReset = Input(UInt(localHartCount.W))
+    val reqId = Input(UInt(dieIdWidth.W))
+    val selfId = Input(UInt(dieIdWidth.W))
   })
-  private val sidebandWidth = 64
-  require(totalHartCount <= sidebandWidth, s"dm_w2axi expects totalHartCount <= $sidebandWidth, got $totalHartCount")
+  private val dieIdFieldWidth = 4
+  private val packedPayloadWidth = 2 * localHartCount + totalHartCount
+  private val txPayloadWidth = nocDataWidth
+  require(localHartCount > 0, s"dm_w2axi expects localHartCount > 0, got $localHartCount")
+  require(totalHartCount == localHartCount * numDies,
+    s"dm_w2axi expects totalHartCount == localHartCount * numDies, got $totalHartCount, $localHartCount and $numDies")
   require(numDies > 0, s"dm_w2axi expects numDies > 0, got $numDies")
-  require(nocDataWidth >= 3 * sidebandWidth, s"dm_w2axi expects nocDataWidth >= ${3 * sidebandWidth}, got $nocDataWidth")
+  require(dieIdWidth > 0, s"dm_w2axi expects dieIdWidth > 0, got $dieIdWidth")
+  require(numDies <= ((1 << dieIdWidth) - 1),
+    s"dm_w2axi expects dieIdWidth to encode die ids 1..$numDies, got dieIdWidth=$dieIdWidth")
+  require(nocDataWidth >= packedPayloadWidth + dieIdFieldWidth,
+    s"dm_w2axi expects nocDataWidth >= ${packedPayloadWidth + dieIdFieldWidth}, got $nocDataWidth")
 
   val dmIntAddr = baseAddr.U(io.axi.aw.bits.addr.getWidth.W)
-  val dmintSent = RegInit(VecInit(Seq.fill(numDies)(0.U(totalHartCount.W))))
-  val hartResetReqSent = RegInit(VecInit(Seq.fill(numDies)(0.U(totalHartCount.W))))
-  val hartIsInResetSent = RegInit(VecInit(Seq.fill(numDies)(0.U(totalHartCount.W))))
+  val dmintByDie = Wire(Vec(numDies, UInt(localHartCount.W)))
+  val hartResetReqByDie = Wire(Vec(numDies, UInt(localHartCount.W)))
+  for (dieIdx <- 0 until numDies) {
+    dmintByDie(dieIdx) := io.dmint((dieIdx + 1) * localHartCount - 1, dieIdx * localHartCount)
+    hartResetReqByDie(dieIdx) := io.hartResetReq((dieIdx + 1) * localHartCount - 1, dieIdx * localHartCount)
+  }
+
+  val dmintSent = RegInit(VecInit(Seq.fill(numDies)(0.U(localHartCount.W))))
+  val hartResetReqSent = RegInit(VecInit(Seq.fill(numDies)(0.U(localHartCount.W))))
+  val hartIsInResetSent = RegInit(VecInit(Seq.fill(numDies)(0.U(localHartCount.W))))
 
   val dmintDirtyByDie = VecInit.tabulate(numDies) { dieIdx =>
-    io.dmint =/= dmintSent(dieIdx)
+    dmintByDie(dieIdx) =/= dmintSent(dieIdx)
   }
   val hartResetReqDirtyByDie = VecInit.tabulate(numDies) { dieIdx =>
-    io.hartResetReq =/= hartResetReqSent(dieIdx)
+    hartResetReqByDie(dieIdx) =/= hartResetReqSent(dieIdx)
   }
   val hartIsInResetDirtyByDie = VecInit.tabulate(numDies) { dieIdx =>
-    io.hartIsInReset =/= hartIsInResetSent(dieIdx)
+    io.reqId === (dieIdx + 1).U && io.hartIsInReset =/= hartIsInResetSent(dieIdx)
   }
 
   val txReqValid = dmintDirtyByDie.asUInt.orR || hartResetReqDirtyByDie.asUInt.orR || hartIsInResetDirtyByDie.asUInt.orR
@@ -401,19 +444,28 @@ class dm_w2axi(
     !txReqValid -> 0.U(numDies.W)
   ))
   val txGroupIdx = PriorityEncoder(txGroupMask)
-  val txDieId = txGroupIdx + 1.U
-  val txDmintNow = io.dmint
-  val txHartResetReqNow = io.hartResetReq
+  val txDieId = Wire(UInt(dieIdFieldWidth.W))
+  txDieId := (txGroupIdx.pad(dieIdFieldWidth) +& 1.U(dieIdFieldWidth.W))(dieIdFieldWidth - 1, 0)
+  dontTouch(txDieId)
+  val txAddrDieId = txDieId(dieIdWidth - 1, 0)
+  val txDmintNow = dmintByDie(txGroupIdx)
+  val txHartResetReqNow = hartResetReqByDie(txGroupIdx)
   val txHartIsInResetNow = io.hartIsInReset
-  val txAddrNow = (txDieId << 44) | dmIntAddr
+  val txAddrNow = (txAddrDieId << 44) | dmIntAddr
+  val txDieIdField = txDieId
+  val txHartIsInResetExpandedNow = WireDefault(0.U(totalHartCount.W))
+  when (io.selfId >= 1.U && io.selfId <= numDies.U) {
+    val hartIsInResetShift = (io.selfId - 1.U) * localHartCount.U
+    txHartIsInResetExpandedNow := ((txHartIsInResetNow.pad(totalHartCount) << hartIsInResetShift)(totalHartCount - 1, 0))
+  }
 
   val txBusy = RegInit(false.B)
   val txAwDone = RegInit(false.B)
   val txWDone = RegInit(false.B)
   val txAddrReg = Reg(UInt(io.axi.aw.bits.addr.getWidth.W))
-  val txDmintReg = Reg(UInt(totalHartCount.W))
-  val txHartResetReqReg = Reg(UInt(totalHartCount.W))
-  val txHartIsInResetReg = Reg(UInt(totalHartCount.W))
+  val txDmintReg = Reg(UInt(localHartCount.W))
+  val txHartResetReqReg = Reg(UInt(localHartCount.W))
+  val txHartIsInResetReg = Reg(UInt(localHartCount.W))
   val txGroupIdxReg = Reg(UInt(log2Ceil(numDies).W))
   val awBitsReg = RegInit(0.U.asTypeOf(chiselTypeOf(io.axi.aw.bits)))
   val awValidReg = RegInit(false.B)
@@ -421,11 +473,13 @@ class dm_w2axi(
   val wValidReg = RegInit(false.B)
   val bReadyReg = RegInit(false.B)
 
-  val txDataNow = Cat(
-    0.U((nocDataWidth - 3 * sidebandWidth).W),
-    txHartIsInResetNow.pad(sidebandWidth),
-    txHartResetReqNow.pad(sidebandWidth),
-    txDmintNow.pad(sidebandWidth)
+  val txPayloadPaddingWidth = nocDataWidth - packedPayloadWidth - dieIdFieldWidth
+  val txPayload = Cat(
+    txDieIdField,
+    0.U(txPayloadPaddingWidth.W),
+    txHartIsInResetExpandedNow,
+    txHartResetReqNow,
+    txDmintNow
   )
   val awBitsBundle = WireInit(0.U.asTypeOf(chiselTypeOf(io.axi.aw.bits)))
   awBitsBundle.id := 0.U
@@ -438,7 +492,7 @@ class dm_w2axi(
   awBitsBundle.prot := 0.U
   awBitsBundle.qos := 0.U
   val wBitsBundle = WireInit(0.U.asTypeOf(chiselTypeOf(io.axi.w.bits)))
-  wBitsBundle.data := txDataNow
+  wBitsBundle.data := txPayload
   wBitsBundle.strb := Fill(nocDataWidth / 8, 1.U(1.W))
   wBitsBundle.last := true.B
 
@@ -740,16 +794,23 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val m_dm2noc = IO(new VerilogAXI4Record(dm_tcrs_sNode.in.head._2.bundle))
     // instance debugModule sba port
     val m_sba2noc = Option.when(params.dmHasBusMaster)(IO(new VerilogAXI4Record(dm.axi4masternode.get.params)))
-    val dmio = IO(new dm.debugModule.DebugModuleIO)
-    val dmint = IO(Output(UInt(totalHartCount.W)))
+    val dmio = IO(new UncoreDebugModuleIO(params.NumHarts))
+    val dmint = IO(Output(UInt(params.NumHarts.W)))
     val req_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for request die
     val self_id = IO(Input(UInt(params.DieIDWidth.W))) // die id number for current die
     val isselfid = req_id === self_id
     val dmWcrsIn = dm_wcrs_sNode.in.head._1
     val dmWcrsOut = dm_wcrs_mNode.out.head._1
-    val u_dm_axi2w = Module(new dm_axi2w(dm_wcrs_sNode.in.head._2.bundle, totalHartCount))
+    val u_dm_axi2w = Module(new dm_axi2w(
+      bundleParams = dm_wcrs_sNode.in.head._2.bundle,
+      localHartCount = params.NumHarts,
+      totalHartCount = totalHartCount,
+      numDies = params.NumDies,
+      dieIdWidth = params.DieIDWidth
+    ))
     val u_dm_w2axi = Module(new dm_w2axi(
       bundleParams = dm_wcrs_mNode.out.head._2.bundle,
+      localHartCount = params.NumHarts,
       totalHartCount = totalHartCount,
       numDies = params.NumDies,
       dieIdWidth = params.DieIDWidth,
@@ -761,7 +822,9 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     dm_tcrs_sNode.in.head._1 <> m_dm2noc.viewAs[AXI4Bundle]
     m_sba2noc.foreach(_ <> dm.axi4masternode.get)
     dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
-    dmio <> dm.module.io
+    dm.module.io.debugIO <> dmio.debugIO
+    dm.module.io.clock := dmio.clock
+    dm.module.io.reset := dmio.reset
 
     val dmintSrc = dm.int.getWrappedValue.asInstanceOf[HeterogeneousBag[Vec[Bool]]]
     val dmintLocal = dmintSrc.head.asUInt
@@ -773,6 +836,8 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     u_dm_w2axi.io.dmint := dmintLocal
     u_dm_w2axi.io.hartResetReq := hartResetReqLocal
     u_dm_w2axi.io.hartIsInReset := hartIsInResetExternal
+    u_dm_w2axi.io.reqId := req_id
+    u_dm_w2axi.io.selfId := self_id
 
     dm.module.io.resetCtrl.hartIsInReset := VecInit(u_dm_axi2w.io.hartIsInReset.asBools)
     dmio.resetCtrl.hartResetReq.foreach { req =>
