@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REPO_DIR="$(git rev-parse --show-toplevel)"
+cd "${REPO_DIR}"
+
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -Eq '^(src/test/python/Frontend/|\.githooks/pre-commit$)'; then
+  exit 0
+fi
+
+echo "[frontend-change-guard] running fast frontend smoke suite"
+python src/test/python/Frontend/change_guard.py
