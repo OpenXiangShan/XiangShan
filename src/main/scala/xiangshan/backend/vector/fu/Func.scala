@@ -49,8 +49,6 @@ class Func(val cfg: VecFuConfig)(implicit p: Parameters) extends XSModule {
     outStage.bits.ctrl.fflagsWen.foreach(_ := inStage.bits.ctrl.fflagsWen.get)
     outStage.bits.debug.foreach(_ := inStage.bits.debug.get)
   }
-  val selLat = VecInit(in.ex.map(_.valid))
-  assert(PopCount(selLat) <= 1.U, "selLat is not one-hot")
 
   val fuOpType = in.ex.head.bits.ctrl.opcode
 }
