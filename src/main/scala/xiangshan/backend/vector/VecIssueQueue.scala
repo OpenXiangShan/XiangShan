@@ -10,7 +10,7 @@ import utility.{PerfCCT, SelectOne}
 import utils.NamedUInt
 import xiangshan.backend.Bundles.{DispatchOutUop, IssueQueueInDebug, RegionInUop, UopIdx}
 import xiangshan.backend.datapath.DataConfig._
-import xiangshan.backend.decode.opcode.Opcode
+import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.issue.{AgeDetector, NewAgeDetector}
@@ -556,6 +556,7 @@ object VecIssueQueue {
     val fflagsWen = Bool()
     val vxsatWen  = Bool()
     val flushPipe = Bool()
+    val latency   = Latency()
 
     // from rename
     val robIdx    = new RobPtr
@@ -599,6 +600,7 @@ object VecIssueQueue {
       this.fflagsWen := source.fflagsWen
       this.vxsatWen := false.B // Todo
       this.flushPipe := false.B // Todo: Check if it is needed
+      this.latency := source.latency
       this.robIdx := source.robIdx
       this.psrc := source.psrc
       this.psrcV0 := source.psrcV0
@@ -641,6 +643,7 @@ object VecIssueQueue {
       this.fflagsWen := source.fflagsWen.getOrElse(false.B)
       this.vxsatWen := false.B // Todo
       this.flushPipe := false.B // Todo: Check if it is needed
+      this.latency := source.latency
       this.robIdx := source.robIdx
       this.psrc := source.psrc
       this.psrcV0 := source.psrcV0.getOrElse(0.U)
@@ -692,6 +695,7 @@ object VecIssueQueue {
 
     val fflagsWen    = Option.when(exuParam.needFFlagsWen)(Bool())
     val vxsatWen     = Option.when(exuParam.needVxsatWen)(Bool())
+    val latency      = Latency()
 
     val sqIdx        = Option.when(exuParam.needSqIdx)(new SqPtr)
 
@@ -735,6 +739,7 @@ object VecIssueQueue {
 
       this.fflagsWen.foreach(_ := entry.payload.fflagsWen.get)
       this.vxsatWen.foreach(_ := entry.payload.vxsatWen.get)
+      this.latency := entry.payload.latency
 
       this.sqIdx.foreach(_ := entry.payload.sqIdx.get)
 
@@ -827,6 +832,7 @@ object VecIssueQueue {
     val imm       = Option.when(param.needImm)(UInt(param.deqImmTypesMaxLen.W))
     val fflagsWen = Option.when(param.needFflagsWen)(Bool())
     val vxsatWen  = Option.when(param.needVxsatWen)(Bool())
+    val latency   = Latency()
     val uopIdx    = UopIdx()
     val lastUop   = Bool()
     val srcType   = Vec(param.numRegSrc, SrcType())
@@ -853,6 +859,7 @@ object VecIssueQueue {
       this.imm.foreach(_ := enq.imm)
       this.fflagsWen.foreach(_ := enq.fflagsWen)
       this.vxsatWen.foreach(_ := enq.vxsatWen)
+      this.latency := enq.latency
       this.uopIdx := enq.uopIdx
       this.lastUop := enq.lastUop
       this.srcType := enq.srcType

@@ -8,9 +8,9 @@ import xiangshan.backend.datapath.RdConfig
 import xiangshan.backend.datapath.RdConfig.RdConfig
 import xiangshan.backend.datapath.WbConfig.PregWB
 import xiangshan.backend.decode.Imm
-import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.issue.IssueBlockParams
 import xiangshan.backend.regfile.PregParams
+import xiangshan.backend.vector.fu.util.VecFuConfig
 
 import scala.beans.BeanProperty
 
@@ -83,9 +83,9 @@ class IssueParam(
 
   def numRedirect: Int = exuParams.count(_.needRedirect)
 
-  def getFuCfgs: Seq[FuConfig] = exuParams.flatMap(_.fuConfigs).distinct
+  def getFuCfgs: Seq[VecFuConfig] = exuParams.flatMap(_.fuConfigs).distinct
 
-  def deqFuCfgs: Seq[Seq[FuConfig]] = exuParams.map(_.fuConfigs)
+  def deqFuCfgs: Seq[Seq[VecFuConfig]] = exuParams.map(_.fuConfigs)
 
   def deqImmTypes: Seq[Imm] = getFuCfgs.flatMap(_.immType).distinct
 
@@ -196,4 +196,3 @@ object IssueParam {
     instance
   }
 }
-

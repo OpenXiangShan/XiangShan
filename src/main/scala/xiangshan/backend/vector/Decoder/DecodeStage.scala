@@ -12,6 +12,7 @@ import xiangshan.backend.fu.vector.Bundles.Vl
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
+import xiangshan.backend.vector.LatDecoder
 
 class DecodeStage()(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -195,6 +196,7 @@ class DecodeStageImp(
         bits.lastUop := uopInfo.isLastUop
         bits.numWB := uopInfo.numWb +& 1.U
         bits.needFrm := 0.U.asTypeOf(bits.needFrm)
+        bits.latency := LatDecoder(bits.fuType, bits.fuOpType)
         bits.debug.foreach{ x =>
           x.pc := mopInfo.debug.get.pc
           x.debug_seqNum.seqNum := mopInfo.debug.get.debug_seqNum.seqNum

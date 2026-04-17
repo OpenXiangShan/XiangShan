@@ -207,18 +207,27 @@ class IssuePipe(
     ex0.bits := ex0Next.bits
   }
 
-  val exu = Module(new Exu(param))
-  exu.in.flush := in.flush
-  exu.in.uop := ex0Next
-  exu.in.frm.foreach(_ := in.frm.get)
-  exu.in.vxrm.foreach(_ := in.vxrm.get)
+  val exu: Option[Exu] = Option.when(!param.hasVStd)(Module(new Exu(param)))
 
-  out.gpWbNext.foreach(_ := exu.out.uop.bits.toGpRf.get)
-  out.fpWbNext.foreach(_ := exu.out.uop.bits.toFpRf.get)
-  out.vpWbNext.foreach(_ := exu.out.uop.bits.toVpRf.get)
-  out.v0WbNext.foreach(_ := exu.out.uop.bits.toV0Rf.get)
-  out.robWbNext.valid := exu.out.uop.valid
-  out.robWbNext.bits := exu.out.uop.bits.toRob
+  exu.foreach {
+    exu =>
+      exu.in.flush := in.flush
+      exu.in.uop := ex0Next
+      exu.in.frm.foreach(_ := in.frm.get)
+      exu.in.vxrm.foreach(_ := in.vxrm.get)
+  }
+
+  out.gpWbNext.foreach(_ := exu.get.out.uop.bits.toGpRf.get)
+  out.fpWbNext.foreach(_ := exu.get.out.uop.bits.toFpRf.get)
+  out.vpWbNext.foreach(_ := exu.get.out.uop.bits.toVpRf.get)
+  out.v0WbNext.foreach(_ := exu.get.out.uop.bits.toV0Rf.get)
+  if (exu.nonEmpty) {
+    out.robWbNext.valid := exu.get.out.uop.valid
+    out.robWbNext.bits := exu.get.out.uop.bits.toRob
+  } else {
+    out.robWbNext.valid := ex0Next.valid
+    out.robWbNext.bits :<#= ex0Next.bits
+  }
 
   out.ex0 := ex0
 }

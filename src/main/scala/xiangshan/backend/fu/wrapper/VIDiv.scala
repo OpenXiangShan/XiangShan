@@ -11,8 +11,10 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.ExceptionNO
 import yunsuan.vector.VectorIdiv
 import xiangshan.backend.decode.opcode.Opcode.VIDivOpcodes
+import xiangshan.backend.vector.fu.util.VecNoFixLatFunc
+import xiangshan.backend.vector.fu.util.VecFuConfig
 
-class VIDiv(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(cfg) {
+class VIDiv(cfg: VecFuConfig)(implicit p: Parameters) extends VecNoFixLatFunc(cfg) {
   // XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VidivType.dummy, "Vfdiv OpType not supported")
 
   // params alias
@@ -20,52 +22,36 @@ class VIDiv(cfg: FuConfig)(implicit p: Parameters) extends VecNonPipedFuncUnit(c
 
   // modules
   private val vidiv = Module(new VectorIdiv)
-  private val mgu = Module(new Mgu(dataWidth))
 
   private val thisRobIdx = Wire(new RobPtr)
-  when(io.in.ready){
-    thisRobIdx := io.in.bits.ctrl.robIdx
-  }.otherwise{
-    thisRobIdx := outCtrl.robIdx
-  }
-
-  /**
-    * [[vidiv]]'s in connection
-    */
-  vidiv.io match {
-    case subIO =>
-      subIO.div_in_valid  := io.in.valid
-      subIO.div_out_ready := io.out.ready & io.out.valid
-      subIO.sew           := vsew
-      subIO.sign          := VIDivOpcodes.isSigned(fuOpType)
-      subIO.dividend_v    := vs2
-      subIO.divisor_v     := vs1
-      subIO.flush         := thisRobIdx.needFlush(io.flush)
-  }
-
-  io.in.ready  := vidiv.io.div_in_ready
-  io.out.valid := vidiv.io.div_out_valid
-
-  private val outFuOpType = outCtrl.fuOpType
-  private val outIsDiv = VIDivOpcodes.isDiv(outFuOpType)
-  private val resultData = Mux(outIsDiv, vidiv.io.div_out_q_v, vidiv.io.div_out_rem_v)
-  private val notModifyVd = outVl === 0.U
-
-  mgu.io.in.vd := resultData
-  mgu.io.in.oldVd := outOldVd
-  mgu.io.in.mask := outSrcMask
-  mgu.io.in.info.ta := outVecCtrl.vta
-  mgu.io.in.info.ma := outVecCtrl.vma
-  mgu.io.in.info.vl := outVl
-  mgu.io.in.info.vlmul := outVecCtrl.vlmul
-  mgu.io.in.info.valid := io.out.valid
-  mgu.io.in.info.vstart := outVecCtrl.vstart
-  mgu.io.in.info.eew := outVecCtrl.vsew
-  mgu.io.in.info.vsew := outVecCtrl.vsew
-  mgu.io.in.info.vdIdx := outVecCtrl.vuopIdx
-  mgu.io.in.info.narrow := outVecCtrl.isNarrow
-  mgu.io.in.info.dstMask := outVecCtrl.isDstMask
-  mgu.io.in.isIndexedVls := false.B
-  io.out.bits.res.data := Mux(notModifyVd, outOldVd, mgu.io.out.vd)
-  io.out.bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := mgu.io.out.illegal
+//  when(vidiv.io.div_in_ready) { //note
+//    thisRobIdx := io.in(0).bits.ctrl.robIdx
+//  }.otherwise {
+//    thisRobIdx := outCtrl.robIdx
+//  }
+//
+//  /**
+//   * [[vidiv]]'s in connection
+//   */
+//  vidiv.io match {
+//    case subIO =>
+//      subIO.div_in_valid := io.in(0).valid
+//      subIO.div_out_ready := io.out(0).ready & io.out(0).valid
+//      subIO.sew := vsew
+//      subIO.sign := VIDivOpcodes.isSigned(fuOpType)
+//      subIO.dividend_v := ex0vs2
+//      subIO.divisor_v := ex0vs1
+//      subIO.flush := thisRobIdx.needFlush(io.flush)
+//  }
+//
+//  // io.in.ready  := vidiv.io.div_in_ready note
+//  io.out(0).valid := vidiv.io.div_out_valid
+//
+//  private val outFuOpType = outCtrl.fuOpType
+//  private val outIsDiv = VIDivOpcodes.isDiv(outFuOpType)
+//  private val resultData = Mux(outIsDiv, vidiv.io.div_out_q_v, vidiv.io.div_out_rem_v)
+//  private val notModifyVd = outVl === 0.U
+//
+//  io.out(0).bits.res.data := Mux(notModifyVd, outOldVd, mgu.io.out.vd)
+//  io.out(0).bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := mgu.io.out.illegal
 }
