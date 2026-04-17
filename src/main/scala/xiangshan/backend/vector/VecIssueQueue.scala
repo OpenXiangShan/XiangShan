@@ -123,16 +123,95 @@ class VecIssueQueue(
     ))
   }
 
+  private def updateHoldingEntry(
+    entryNext: Entry,
+    entry: Entry,
+    entryValid: Bool,
+    gpWbWakeUpMatchVec: Seq[Seq[Bool]],
+    fpWbWakeUpMatchVec: Seq[Seq[Bool]],
+    vpWbWakeUpMatchVec: Seq[Seq[Bool]],
+    v0WbWakeUpMatchVec: Option[Seq[Bool]],
+    vlWbWakeUpMatchVec: Option[Seq[Bool]],
+    deqSel: Bool,
+    cancel: Bool,
+  ): Unit = {
+    entryNext := entry
+    (entryNext.status, entry.status) match { case (sNext, s) =>
+      (sNext.srcStatus lazyZip s.srcStatus).zipWithIndex.foreach { case ((ssNext, ss), srcIdx) =>
+        val gpWbWakeUpMatch = gpWbWakeUpMatchVec(srcIdx)
+        val fpWbWakeUpMatch = fpWbWakeUpMatchVec(srcIdx)
+        val vpWbWakeUpMatch = vpWbWakeUpMatchVec(srcIdx)
+        val gpWakeUpVec = gpWbWakeUpMatch.map(_ && ss.gpRen)
+        val fpWakeUpVec = fpWbWakeUpMatch.map(_ && ss.fpRen)
+        val vpWakeUpVec = vpWbWakeUpMatch.map(_ && ss.vpRen)
+        val gpWakeUp = ss.gpRen && Cat(gpWbWakeUpMatch).orR
+        val fpWakeUp = ss.fpRen && Cat(fpWbWakeUpMatch).orR
+        val vpWakeUp = ss.vpRen && Cat(vpWbWakeUpMatch).orR
+
+        val wakeUp = gpWakeUp || fpWakeUp || vpWakeUp
+
+        ssNext.srcState := ss.srcState || wakeUp
+        ssNext.bypassDelay := Mux1H(
+          Seq(
+            gpWakeUpVec zip in.wakeup.gpWbVec.map(_.delay),
+            fpWakeUpVec zip in.wakeup.fpWbVec.map(_.delay),
+            vpWakeUpVec zip in.wakeup.vpWbVec.map(_.delay),
+          ).reduce(_ ++ _)
+        )
+        ssNext.bypassSource.idx := Mux1H(
+          Seq(
+            gpWakeUpVec.zipWithIndex,
+            fpWakeUpVec.zipWithIndex,
+            vpWakeUpVec.zipWithIndex,
+          ).reduce(_ ++ _).map { case (wakeUpMath, exuIdx) => wakeUpMath -> exuIdx.U }
+        )
+      }
+
+      (sNext.srcStatusV0 lazyZip s.srcStatusV0).foreach {
+        case (ssNext, ss) =>
+          val wakeUpMatch = v0WbWakeUpMatchVec.get
+          ssNext.srcState := ss.srcState || Cat(wakeUpMatch).orR
+          ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.v0WbVec.get.map(_.delay))
+      }
+
+      (sNext.srcStatusVl lazyZip s.srcStatusVl).foreach {
+        case (ssNext, ss) =>
+          val wakeUpMatch = vlWbWakeUpMatchVec.get
+          ssNext.srcState := ss.srcState || Cat(wakeUpMatch).orR
+          ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.vlWbVec.get.map(_.delay))
+      }
+
+      sNext.issued := MuxCase(
+        s.issued,
+        Seq(
+          deqSel -> true.B,
+          cancel -> false.B,
+        ),
+      )
+      when(entryValid && s.issued) {
+        sNext.issuedTimer := Mux(
+          s.issuedTimer =/= IssuedTimer.maxValue,
+          s.issuedTimer + 1.U,
+          s.issuedTimer,
+        )
+      }.otherwise {
+        sNext.issuedTimer := s.issuedTimer
+      }
+    }
+  }
+
   private val fastEntryEmptySel: Vec[ValidIO[UInt]] = EnqPolicy((~fastEntryValid).asUInt, param.numEnq)
   private val fastEntryEmptyValid = VecInit(fastEntryEmptySel.map(_.valid))
   private val fastEntryEmptyOH = VecInit(fastEntryEmptySel.map(empty => Mux(empty.valid, empty.bits, 0.U)))
+  private val enqEntryForFast = Wire(Vec(param.numEnq, new Entry))
+  private val enqEntryCanTransfer = Wire(Vec(param.numEnq, Bool()))
   private val fastEntryEnqNotFlushOH: Vec[UInt] = VecInit(
-    fastEntryEmptySel zip enqEntries zip enqEntryFlush map {
-      case ((empty, enqEty), flush) => Mux(empty.valid && enqEty.valid && !flush, empty.bits, 0.U)
+    fastEntryEmptySel zip enqEntryCanTransfer map {
+      case (empty, canTransfer) => Mux(empty.valid && canTransfer, empty.bits, 0.U)
     }
   )
 
-  enqTransFastNotFlush := fastEntryEmptyValid zip enqEntryFlush map { case (fastEmpty, flush) => fastEmpty && !flush}
+  enqTransFastNotFlush := fastEntryEmptyValid zip enqEntryCanTransfer map { case (fastEmpty, canTransfer) => fastEmpty && canTransfer}
 
   for ((enq, etyIdx) <- enqEntryEnq.zipWithIndex) {
     val inEnq = in.enq(etyIdx)
@@ -143,10 +222,10 @@ class VecIssueQueue(
   }
 
   for ((enq, etyIdx) <- fastEntryEnq.zipWithIndex) {
-    enq.bits := Mux1H(fastEntryEmptySel.map(x => x.valid && x.bits(etyIdx)), enqEntries.map(_.bits))
+    enq.bits := Mux1H(fastEntryEmptySel.map(x => x.valid && x.bits(etyIdx)), enqEntryForFast)
     enq.valid := Mux1H(
       fastEntryEmptySel.map(x => x.valid && x.bits(etyIdx)),
-      enqEntries.map(_.valid),
+      enqEntryCanTransfer,
     )
   }
 
@@ -196,7 +275,7 @@ class VecIssueQueue(
     fastEntryEnqVpWbWakeUpMatchVec(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryVpWbWakeUpMatchVec)
     fastEntryEnqV0WbWakeUpMatchVec.foreach(_(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryV0WbWakeUpMatchVec.get))
     fastEntryEnqVlWbWakeUpMatchVec.foreach(_(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryVlWbWakeUpMatchVec.get))
-    fastEntryEnqNotFlush(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryFlush.map(!_))
+    fastEntryEnqNotFlush(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryCanTransfer)
 
     for (srcIdx <- etyBits.status.srcStatus.indices) {
       fastEntryGpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.gpWbVec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
@@ -208,6 +287,19 @@ class VecIssueQueue(
   }
 
   for (((entryNext, entry, enq: ValidIO[Entry]), enqIdx) <- (enqEntriesNext lazyZip enqEntries lazyZip enqEntryEnq).zipWithIndex) {
+    enqEntryCanTransfer(enqIdx) := entry.valid && !enqEntryFlush(enqIdx) && !enqEntrySuccess(enqIdx)
+    updateHoldingEntry(
+      entryNext = enqEntryForFast(enqIdx),
+      entry = entry.bits,
+      entryValid = entry.valid,
+      gpWbWakeUpMatchVec = enqEntryGpWbWakeUpMatchVec(enqIdx),
+      fpWbWakeUpMatchVec = enqEntryFpWbWakeUpMatchVec(enqIdx),
+      vpWbWakeUpMatchVec = enqEntryVpWbWakeUpMatchVec(enqIdx),
+      v0WbWakeUpMatchVec = enqEntryV0WbWakeUpMatchVec.map(_(enqIdx)),
+      vlWbWakeUpMatchVec = enqEntryVlWbWakeUpMatchVec.map(_(enqIdx)),
+      deqSel = enqEntryDeqSel(enqIdx),
+      cancel = enqEntryCancel(enqIdx),
+    )
     entryNext.valid := Mux(
       enq.valid && !in.flush.valid,
       true.B,
@@ -266,71 +358,18 @@ class VecIssueQueue(
         }
       }
     }.otherwise {
-      // !enq.valid
-      entryNext.bits := entry.bits
-      (entryNext.bits.status, entry.bits.status) match { case (sNext, s) =>
-        (sNext.srcStatus lazyZip s.srcStatus).zipWithIndex.foreach { case ((ssNext, ss), srcIdx) =>
-
-          val gpWbWakeUpMatch = enqEntryGpWbWakeUpMatchVec(enqIdx)(srcIdx)
-          val fpWbWakeUpMatch = enqEntryFpWbWakeUpMatchVec(enqIdx)(srcIdx)
-          val vpWbWakeUpMatch = enqEntryVpWbWakeUpMatchVec(enqIdx)(srcIdx)
-          val gpWakeUpVec = gpWbWakeUpMatch.map(_ && ss.gpRen)
-          val fpWakeUpVec = fpWbWakeUpMatch.map(_ && ss.fpRen)
-          val vpWakeUpVec = vpWbWakeUpMatch.map(_ && ss.vpRen)
-          val gpWakeUp = ss.gpRen && Cat(gpWbWakeUpMatch).orR
-          val fpWakeUp = ss.fpRen && Cat(fpWbWakeUpMatch).orR
-          val vpWakeUp = ss.vpRen && Cat(vpWbWakeUpMatch).orR
-
-          val wakeUp = gpWakeUp || fpWakeUp || vpWakeUp
-
-          ssNext.srcState := ss.srcState || wakeUp
-          ssNext.bypassDelay := Mux1H(
-            Seq(
-              gpWakeUpVec zip in.wakeup.gpWbVec.map(_.delay),
-              fpWakeUpVec zip in.wakeup.fpWbVec.map(_.delay),
-              vpWakeUpVec zip in.wakeup.vpWbVec.map(_.delay),
-            ).reduce(_ ++ _)
-          )
-          ssNext.bypassSource.idx := Mux1H(
-            Seq(
-              gpWakeUpVec.zipWithIndex,
-              fpWakeUpVec.zipWithIndex,
-              vpWakeUpVec.zipWithIndex,
-            ).reduce(_ ++ _).map { case (wakeUpMath, exuIdx) => wakeUpMath -> exuIdx.U }
-          )
-        }
-
-        (sNext.srcStatusV0 lazyZip s.srcStatusV0).foreach {
-          case (ssNext, ss) =>
-            val wakeUpMatch = enqEntryV0WbWakeUpMatchVec.get(enqIdx)
-            ssNext.srcState := ss.srcState || Cat(wakeUpMatch).orR
-            ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.v0WbVec.get.map(_.delay))
-        }
-
-        (sNext.srcStatusVl lazyZip s.srcStatusVl).foreach {
-          case (ssNext, ss) =>
-            val wakeUpMatch = enqEntryVlWbWakeUpMatchVec.get(enqIdx)
-            ssNext.srcState := ss.srcState || Cat(wakeUpMatch).orR
-            ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.vlWbVec.get.map(_.delay))
-        }
-
-        sNext.issued := MuxCase(
-          s.issued,
-          Seq(
-            enqEntryDeqSel(enqIdx) -> true.B,
-            enqEntryCancel(enqIdx) -> false.B,
-          ),
-        )
-        when(entry.valid && s.issued) {
-          sNext.issuedTimer := Mux(
-            s.issuedTimer =/= IssuedTimer.maxValue,
-            s.issuedTimer + 1.U,
-            s.issuedTimer,
-          )
-        }.otherwise {
-          sNext.issuedTimer := s.issuedTimer
-        }
-      }
+      updateHoldingEntry(
+        entryNext = entryNext.bits,
+        entry = entry.bits,
+        entryValid = entry.valid,
+        gpWbWakeUpMatchVec = enqEntryGpWbWakeUpMatchVec(enqIdx),
+        fpWbWakeUpMatchVec = enqEntryFpWbWakeUpMatchVec(enqIdx),
+        vpWbWakeUpMatchVec = enqEntryVpWbWakeUpMatchVec(enqIdx),
+        v0WbWakeUpMatchVec = enqEntryV0WbWakeUpMatchVec.map(_(enqIdx)),
+        vlWbWakeUpMatchVec = enqEntryVlWbWakeUpMatchVec.map(_(enqIdx)),
+        deqSel = enqEntryDeqSel(enqIdx),
+        cancel = enqEntryCancel(enqIdx),
+      )
     }
   }
 
@@ -394,71 +433,18 @@ class VecIssueQueue(
         }
       }
     }.otherwise {
-      // !enq.valid
-      entryNext.bits := entry.bits
-      (entryNext.bits.status, entry.bits.status) match { case (sNext, s) =>
-        (sNext.srcStatus lazyZip s.srcStatus).zipWithIndex.foreach { case ((ssNext, ss), srcIdx) =>
-
-          val gpWbWakeUpMatch = fastEntryGpWbWakeUpMatchVec(fastIdx)(srcIdx)
-          val fpWbWakeUpMatch = fastEntryFpWbWakeUpMatchVec(fastIdx)(srcIdx)
-          val vpWbWakeUpMatch = fastEntryVpWbWakeUpMatchVec(fastIdx)(srcIdx)
-          val gpWakeUpVec = gpWbWakeUpMatch.map(_ && ss.gpRen)
-          val fpWakeUpVec = fpWbWakeUpMatch.map(_ && ss.fpRen)
-          val vpWakeUpVec = vpWbWakeUpMatch.map(_ && ss.vpRen)
-          val gpWakeUp = ss.gpRen && Cat(gpWbWakeUpMatch).orR
-          val fpWakeUp = ss.fpRen && Cat(fpWbWakeUpMatch).orR
-          val vpWakeUp = ss.vpRen && Cat(vpWbWakeUpMatch).orR
-
-          val wakeUp = gpWakeUp || fpWakeUp || vpWakeUp
-
-          ssNext.srcState := ss.srcState || wakeUp
-          ssNext.bypassDelay := Mux1H(
-            Seq(
-              gpWakeUpVec zip in.wakeup.gpWbVec.map(_.delay),
-              fpWakeUpVec zip in.wakeup.fpWbVec.map(_.delay),
-              vpWakeUpVec zip in.wakeup.vpWbVec.map(_.delay),
-            ).reduce(_ ++ _)
-          )
-          ssNext.bypassSource.idx := Mux1H(
-            Seq(
-              gpWakeUpVec.zipWithIndex,
-              fpWakeUpVec.zipWithIndex,
-              vpWakeUpVec.zipWithIndex,
-            ).reduce(_ ++ _).map { case (wakeUpMath, exuIdx) => wakeUpMath -> exuIdx.U }
-          )
-        }
-
-        (sNext.srcStatusV0 lazyZip s.srcStatusV0).foreach {
-          case (ssNext, ss) =>
-            val wakeUpMatch = fastEntryV0WbWakeUpMatchVec.get(fastIdx)
-            ssNext.srcState := ss.srcState || Cat(wakeUpMatch).orR
-            ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.v0WbVec.get.map(_.delay))
-        }
-
-        (sNext.srcStatusVl lazyZip s.srcStatusVl).foreach {
-          case (ssNext, ss) =>
-            val wakeUpMatch = fastEntryVlWbWakeUpMatchVec.get(fastIdx)
-            ssNext.srcState := ss.srcState || Cat(wakeUpMatch).orR
-            ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.vlWbVec.get.map(_.delay))
-        }
-
-        sNext.issued := MuxCase(
-          s.issued,
-          Seq(
-            fastEntryDeqSel(fastIdx) -> true.B,
-            fastEntryCancel(fastIdx) -> false.B,
-          ),
-        )
-        when(entry.valid && s.issued) {
-          sNext.issuedTimer := Mux(
-            s.issuedTimer =/= IssuedTimer.maxValue,
-            s.issuedTimer + 1.U,
-            s.issuedTimer,
-          )
-        }.otherwise {
-          sNext.issuedTimer := s.issuedTimer
-        }
-      }
+      updateHoldingEntry(
+        entryNext = entryNext.bits,
+        entry = entry.bits,
+        entryValid = entry.valid,
+        gpWbWakeUpMatchVec = fastEntryGpWbWakeUpMatchVec(fastIdx),
+        fpWbWakeUpMatchVec = fastEntryFpWbWakeUpMatchVec(fastIdx),
+        vpWbWakeUpMatchVec = fastEntryVpWbWakeUpMatchVec(fastIdx),
+        v0WbWakeUpMatchVec = fastEntryV0WbWakeUpMatchVec.map(_(fastIdx)),
+        vlWbWakeUpMatchVec = fastEntryVlWbWakeUpMatchVec.map(_(fastIdx)),
+        deqSel = fastEntryDeqSel(fastIdx),
+        cancel = fastEntryCancel(fastIdx),
+      )
     }
   }
 
@@ -474,7 +460,7 @@ class VecIssueQueue(
       Mux(
         fastEntryOldest(deqIdx).valid,
         0.U(param.numEnq.W),
-        enqEntryOldest(deqIdx).valid,
+        enqEntryOldest(deqIdx).bits,
       )
     )
   }
@@ -490,6 +476,28 @@ class VecIssueQueue(
   for ((deq: ValidIO[Deq], valid, deqEty) <- out.deq lazyZip deqValidVec lazyZip deqEntries) {
     deq.valid := valid
     deq.bits.fromEntry(deqEty)
+  }
+
+  private val deqPrevValid = RegInit(VecInit(Seq.fill(param.numDeq)(false.B)))
+  private val deqPrevRobIdx = RegInit(VecInit(Seq.fill(param.numDeq)(0.U.asTypeOf(new RobPtr))))
+  private val deqPrevUopIdx = RegInit(VecInit(Seq.fill(param.numDeq)(0.U.asTypeOf(UopIdx()))))
+
+  for ((deq, deqIdx) <- out.deq.zipWithIndex) {
+    val sameAsPrev = deq.valid &&
+      deqPrevValid(deqIdx) &&
+      deq.bits.robIdx === deqPrevRobIdx(deqIdx) &&
+      deq.bits.uopIdx === deqPrevUopIdx(deqIdx)
+
+    assert(
+      !sameAsPrev,
+      s"VecIssueQueue out.deq($deqIdx) robIdx/uopIdx unchanged for more than 1 cycle while valid"
+    )
+
+    deqPrevValid(deqIdx) := deq.valid
+    when(deq.valid) {
+      deqPrevRobIdx(deqIdx) := deq.bits.robIdx
+      deqPrevUopIdx(deqIdx) := deq.bits.uopIdx
+    }
   }
 
   out.canAccept := PopCount(fastEntries.map(!_.valid)) >= 2.U
