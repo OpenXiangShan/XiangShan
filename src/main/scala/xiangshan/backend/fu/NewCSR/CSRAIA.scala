@@ -26,7 +26,7 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(CSRs.miselect)
 
   val mireg = Module(new CSRModule("Mireg", new ZeroFieldBundle("Machine interrupt-file indirect data register selected by miselect.")) with HasIregSink {
-    rdata := iregRead.mireg
+    regOut := iregRead.mireg
   })
     .setAddr(CSRs.mireg)
 
@@ -53,7 +53,7 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(CSRs.siselect)
 
   val sireg = Module(new CSRModule("Sireg", new ZeroFieldBundle("Supervisor interrupt-file indirect data register selected by siselect.")) with HasIregSink {
-    rdata := iregRead.sireg
+    regOut := iregRead.sireg
   })
     .setAddr(CSRs.sireg)
 
@@ -78,7 +78,7 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     .setAddr(CSRs.vsiselect)
 
   val vsireg    = Module(new CSRModule("VSireg", new ZeroFieldBundle("Virtual supervisor interrupt-file indirect data register selected by vsiselect.")) with HasIregSink {
-    rdata := iregRead.sireg
+    regOut := iregRead.sireg
   })
     .setAddr(CSRs.vsireg)
 
