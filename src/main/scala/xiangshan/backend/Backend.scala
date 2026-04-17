@@ -429,7 +429,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       sink.pdest := source.pdest
       sink.data := source.toVecRf.map(_.bits).getOrElse(0.U)
   }
-  vecRegion.in.fromMem.v0Wb := DontCare // Todo: support v0
+  vecRegion.in.fromMem.v0Wb.flatten lazyZip io.mem.vecWriteback.flatten foreach {
+    case (sink, source) =>
+      sink.wen := source.toV0Rf.map(_.valid).getOrElse(false.B)
+      sink.pdest := source.pdest
+      sink.data := source.toV0Rf.map(_.bits).getOrElse(0.U)
+  }
   vecRegion.in.fromMem.vstdWb.flatten zip io.mem.vecStdWriteback.flatten foreach {
     case (sink: ValidIO[Exu.ToRob], source: DecoupledIO[NewExuOutput]) =>
       sink.valid := source.valid
