@@ -32,7 +32,7 @@ class LatDecoder(opcodesSeq: Seq[Opcodes]) extends Module {
 
 object LatDecoder {
   def apply(fuType: UInt, opcode: UInt): UInt = {
-    val mod = Module(new LatDecoder(Seq(VIAluOpcodes)))
+    val mod = Module(new LatDecoder(Seq(VIAluOpcodes, VMoveOpcodes)))
     mod.in.fuType := fuType
     mod.in.opcode := opcode
     mod.out.lat
@@ -68,10 +68,10 @@ object LatDecoder {
   class LatField(opcodes: Opcodes) extends DecodeField[OpcodePattern, UInt] {
     override def name: String = "lat"
 
-    override def chiselType: UInt = UInt(opcodes.maxLat.W)
+    override def chiselType: UInt = UInt(log2Up(opcodes.maxLat).W)
 
     override def genTable(op: OpcodePattern): BitPat = {
-      BitPat(op.opcode.getLat.U).pad0To(opcodes.maxLat)
+      BitPat(op.opcode.getLat.U).pad0To(this.width)
     }
   }
 }
