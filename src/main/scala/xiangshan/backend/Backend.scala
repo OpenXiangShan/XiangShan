@@ -386,12 +386,22 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
         sink.bits.fromDispatchOutUop(source.bits)
         source.ready := sinkCanAccept
     }
-  vecRegion.in.fromIntRegion.vstdUops.flatten.zip(intRegion.io.toVecRegionVStd.get.flatten).foreach {
-    case (sink: ValidIO[VecIssueQueue.Enq], source: DecoupledIO[RegionInUop]) =>
-      sink.valid := source.valid
-      sink.bits.fromRegionInUop(source.bits)
-      source.ready := true.B // Todo
-  }
+  require(
+    vecRegion.in.fromIntRegion.vstdUops.flatten.size == vecRegion.out.toIntRegion.vstdCanAccept.flatten.size &&
+      vecRegion.out.toIntRegion.vstdCanAccept.flatten.size == intRegion.io.toVecRegionVStd.get.flatten.size,
+    s"vecRegion vstd ports: in=${vecRegion.in.fromIntRegion.vstdUops.flatten.size}, " +
+      s"canAccept=${vecRegion.out.toIntRegion.vstdCanAccept.flatten.size}, " +
+      s"intRegion=${intRegion.io.toVecRegionVStd.get.flatten.size}"
+  )
+  vecRegion.in.fromIntRegion.vstdUops.flatten
+    .lazyZip(vecRegion.out.toIntRegion.vstdCanAccept.flatten)
+    .lazyZip(intRegion.io.toVecRegionVStd.get.flatten)
+    .foreach {
+      case (sink: ValidIO[VecIssueQueue.Enq], sinkCanAccept: Bool, source: DecoupledIO[RegionInUop]) =>
+        sink.valid := source.valid
+        sink.bits.fromRegionInUop(source.bits)
+        source.ready := sinkCanAccept
+    }
   vecRegion.in.fromIntRegion.gpWbWakeUp zip intRegion.io.exuOut.flatten.filter(_.bits.toIntRf.nonEmpty) foreach {
     case (sink: VecIssueQueue.WakeUpBundle, source: ValidIO[NewExuOutput]) =>
       sink.wen := source.valid && source.bits.toIntRf.get.valid

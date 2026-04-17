@@ -226,6 +226,9 @@ class VecRegionImp(
   for ((iq, i) <- issueQueues.filterNot(_.param.hasVStd).zipWithIndex) {
     out.toDispatch.canAccept(i).foreach(_ := iq.out.canAccept)
   }
+  for ((iq, i) <- issueQueues.filter(_.param.hasVStd).zipWithIndex) {
+    out.toIntRegion.vstdCanAccept(i).foreach(_ := iq.out.canAccept)
+  }
 
   require(
     out.toRob.writeback.flatten.size == issuePipes.flatMap(_.map(_.out.robWbNext)).size,
@@ -353,6 +356,12 @@ object VecRegionModule {
         val IQValidNumVec = Vec(numIQ, UInt(numEntry.U.getWidth.W))
         val IQEnqHasIssuedVec = Vec(numIQ, Output(Bool()))
       })
+    }
+
+    val toIntRegion = new Bundle {
+      val vstdCanAccept: MixedVec[Vec[Bool]] = MixedVec(
+        param.issueParams.filter(_.hasVStd).map(x => Vec(x.numEnq, Bool()))
+      )
     }
 
     val toMem = new Bundle {
