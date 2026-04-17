@@ -9,7 +9,6 @@ import xiangshan.backend.decode._
 import xiangshan.backend.fu.FuConfig.VectorV2Config
 import xiangshan.backend.fu.fpu.IntFPToVec
 import xiangshan.backend.fu.wrapper._
-import xiangshan.backend.fu.vector.{DummyVecPipedFuncUnit, DummyVecNonPipedFuncUnit}
 import xiangshan.backend.vector.Exu
 import xiangshan.mem.{Std, VStd}
 
@@ -51,7 +50,7 @@ import xiangshan.mem.{Std, VStd}
 case class FuConfig (
   name          : String,
   fuType        : FuType.OHType,
-  fuGen         : (Parameters, FuConfig) => FuncUnit,
+  fuGen         : (Parameters, FuConfig) => FuncUnit =  (_, cfg) => throw new NotImplementedError(s"fuGen is not set for ${cfg.name}"),
   srcData       : Seq[Seq[DataConfig]],
   piped         : Boolean,
   maybeBlock    : Boolean = false,
@@ -562,7 +561,7 @@ object FuConfig {
   val VialuCfg = FuConfig (
     name = "vialuFix",
     fuType = FuType.vialuF,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIAluWrapper(cfg)(p).suggestName("VialuFix")),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
     ),
@@ -585,7 +584,7 @@ object FuConfig {
   val VimacCfg = FuConfig (
     name = "vimac",
     fuType = FuType.vimac,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecPipedFuncUnit(cfg)(p)).suggestName("Vimac"),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -608,7 +607,7 @@ object FuConfig {
   val VidivCfg = FuConfig (
     name = "vidiv",
     fuType = FuType.vidiv,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecNonPipedFuncUnit(cfg)(p)).suggestName("Vidiv"),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -650,7 +649,7 @@ object FuConfig {
   val VipuCfg: FuConfig = FuConfig (
     name = "vipu",
     fuType = FuType.vipu,
-    fuGen = (p: Parameters, cfg: FuConfig) => null,
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
     ),
@@ -672,7 +671,7 @@ object FuConfig {
   val VmoveCfg = FuConfig (
     name = "vmove",
     fuType = FuType.vmove,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VMove(cfg)(p).suggestName("Vmove")),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -681,7 +680,7 @@ object FuConfig {
     writeFpRf = true,
     writeVecRf = true,
     writeV0Rf = true,
-    latency = CertainLatency(0, extraValue = 3),
+    latency = CertainLatency(0),
     vlWakeUp = true,
     maskWakeUp = true,
     destDataBits = 128,
@@ -760,7 +759,7 @@ object FuConfig {
   val VfcvtCfg = FuConfig(
     name = "vfcvt",
     fuType = FuType.vfcvt,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecPipedFuncUnit(cfg)(p)).suggestName("Vfcvt"),
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VCVT(cfg)(p).suggestName("Vfcvt")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -885,7 +884,7 @@ object FuConfig {
   val VStdCfg: FuConfig = FuConfig(
     name = "vstd",
     fuType = FuType.stu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VStd(cfg)(p).suggestName("VStd")),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData()),
     ),
@@ -987,18 +986,20 @@ object FuConfig {
   )
 
   def allConfigs = Seq(
-    JmpCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
-    LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, /*VialuCfg,*/ /*VipuCfg,*/ VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg,
-    FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
-    VfaluCfg, VmoveCfg, VfmaCfg, /*VfcvtCfg,*/ HyldaCfg, HystaCfg
+    JmpCfg, BrhCfg, I2fCfg, FcmpCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg,
+    VSetCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
+    LduCfg, StaCfg, StdCfg, HyldaCfg, HystaCfg, FakeHystaCfg, MouCfg, MoudCfg,
+    VialuCfg, VimacCfg, VidivCfg, VppuCfg, VipuCfg, VmoveCfg, VfaluCfg, VfmaCfg, VfdivCfg, VfcvtCfg, VSha256msCfg, VSha256cCfg,
+    FaluCfg, FmacCfg, FdivCfg, FcvtCfg,
+    VStdCfg, VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg
   )
 
   def VecArithFuConfigs = Seq(
-    /*VialuCfg,*/ /*VimacCfg,*/ VppuCfg, /*VipuCfg,*/ VfaluCfg, VmoveCfg, VfmaCfg, /*VfcvtCfg,*/ VfdivCfg
+    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VmoveCfg, VfmaCfg, VfcvtCfg, VfdivCfg
   )
 
   def needUncertainWakeupFuConfigs = Seq(
-    CsrCfg, DivCfg, FdivCfg, VfdivCfg/*, VidivCfg*/
+    CsrCfg, DivCfg, FdivCfg, VfdivCfg, VidivCfg
   )
 
   trait VectorV2Config { self: FuConfig =>
@@ -1011,4 +1012,3 @@ object FuConfig {
 
   }
 }
-

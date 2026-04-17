@@ -322,6 +322,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     vstdEnq.bits.isRVC.foreach(_ := staEnq.bits.isRVC.get)
     vstdEnq.bits.fuType := staEnq.bits.fuType
     vstdEnq.bits.fuOpType := staEnq.bits.fuOpType
+    vstdEnq.bits.latency := staEnq.bits.latency
     vstdEnq.bits.robIdx := staEnq.bits.robIdx
     vstdEnq.bits.uopIdx.foreach(_ := staEnq.bits.uopIdx.get)
     vstdEnq.bits.lastUop.foreach(_ := staEnq.bits.lastUop.get)
