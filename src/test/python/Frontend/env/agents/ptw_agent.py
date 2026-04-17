@@ -78,19 +78,25 @@ class PTWAgent:
         self._write(self.interface.req_0_ready, 1)
         if self._read(self.interface.req_0_valid, 0) == 1:
             vpn = self._read(self.interface.req_0_bits_vpn, 0)
+            s2xlate = self._read(getattr(self.interface, "req_0_bits_s2xlate", None), 0)
             resp = self.page_table.build_ptw_resp(vpn)
             self.pending.append(_PTWPending(resp=resp, ready_cycle=cycle + self.latency))
             self.req_count += 1
             self._emit(
                 cycle,
                 "handshake.ptw_req",
-                {"vpn": int(vpn), "latency": int(self.latency), "mode": self.page_table.mode},
+                {
+                    "vpn": int(vpn),
+                    "latency": int(self.latency),
+                    "mode": self.page_table.mode,
+                    "s2xlate": int(s2xlate),
+                },
                 level="DEBUG",
             )
 
         self._write(self.interface.resp_valid, 0)
         if self.pending and cycle >= self.pending[0].ready_cycle:
-            item = self.pending.popleft()
+            item = self.pending[0]
             self._write(self.interface.resp_valid, 1)
             self._write(self.interface.resp_bits_s2xlate, item.resp.get("s2xlate", 0))
             self._write(self.interface.resp_bits_s1_entry_tag, item.resp.get("s1_entry_tag", 0))
@@ -114,13 +120,15 @@ class PTWAgent:
                 self._write(self.interface.resp_bits_s1_pteidx[idx], item.resp.get(f"s1_pteidx_{idx}", 0))
             self._write(self.interface.resp_bits_s1_pf, item.resp.get("s1_pf", 0))
             self._write(self.interface.resp_bits_s1_af, item.resp.get("s1_af", 0))
-            self.resp_count += 1
-            self._emit(
-                cycle,
-                "handshake.ptw_resp",
-                {"response_count": int(self.resp_count), "ppn": int(item.resp.get("s1_entry_ppn", 0))},
-                level="DEBUG",
-            )
+            if self._read(getattr(self.interface, "resp_ready", None), 0) == 1:
+                self.pending.popleft()
+                self.resp_count += 1
+                self._emit(
+                    cycle,
+                    "handshake.ptw_resp",
+                    {"response_count": int(self.resp_count), "ppn": int(item.resp.get("s1_entry_ppn", 0))},
+                    level="DEBUG",
+                )
 
     def get_stats(self) -> dict:
         return {

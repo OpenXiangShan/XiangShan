@@ -77,6 +77,8 @@ class PageTableModel:
             pte = self.pte_map.get(int(vpn), PTE(ppn=int(vpn), v=0, r=0, x=0, level=0))
         sector_idx = int(vpn) & 0x7
         pf = 1 if (pte.v == 0 or pte.x == 0) else 0
+        entry_ppn = int(pte.ppn) >> 3
+        ppn_low = int(pte.ppn) & 0x7
         resp = {
             "s2xlate": 0,
             "s1_entry_tag": (int(vpn) >> 3) & ((1 << 35) - 1),
@@ -92,13 +94,13 @@ class PageTableModel:
             "s1_entry_perm_r": pte.r,
             "s1_entry_level": pte.level,
             "s1_entry_v": pte.v,
-            "s1_entry_ppn": pte.ppn,
+            "s1_entry_ppn": entry_ppn,
             "s1_addr_low": sector_idx,
             "s1_pf": pf,
             "s1_af": 0,
         }
         for i in range(8):
-            resp[f"s1_ppn_low_{i}"] = (pte.ppn & 0x7) if (i == sector_idx and pte.v) else 0
+            resp[f"s1_ppn_low_{i}"] = ppn_low if (i == sector_idx and pte.v) else 0
             resp[f"s1_valididx_{i}"] = 1 if (i == sector_idx and pte.v) else 0
             resp[f"s1_pteidx_{i}"] = 1 if i == sector_idx else 0
         return resp

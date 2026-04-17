@@ -8,6 +8,8 @@ class PTWBundle(Bundle):
         "req_0_ready": "io_ptw_req_0_ready",
         "req_0_valid": "io_ptw_req_0_valid",
         "req_0_bits_vpn": "io_ptw_req_0_bits_vpn",
+        "req_0_bits_s2xlate": "io_ptw_req_0_bits_s2xlate",
+        "resp_ready": "io_ptw_resp_ready",
         "resp_valid": "io_ptw_resp_valid",
         "resp_bits_s2xlate": "io_ptw_resp_bits_s2xlate",
         "resp_bits_s1_entry_tag": "io_ptw_resp_bits_s1_entry_tag",
@@ -39,6 +41,8 @@ class PTWBundle(Bundle):
     req_0_ready = Signal()
     req_0_valid = Signal()
     req_0_bits_vpn = Signal()
+    req_0_bits_s2xlate = Signal()
+    resp_ready = Signal()
     resp_valid = Signal()
     resp_bits_s2xlate = Signal()
     resp_bits_s1_entry_tag = Signal()
