@@ -40,6 +40,11 @@
 `docs/agents/frontend-backend-agent.md` 的语义约束，再把这里的
 `Verification Model` 小节当作补充背景。
 
+如果你的问题是“`backend_model.py` 太长，先从哪里读、当前实现有哪些高风险点”，
+请直接看：
+
+- `docs/agents/frontend-backend-model-review.md`
+
 ## 源文档对应关系
 
 本目录内容主要整理自下列源文档：

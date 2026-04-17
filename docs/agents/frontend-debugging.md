@@ -78,11 +78,15 @@ For frontend functional verification, use
 
 When debugging backend-agent behavior, apply these rules:
 
+- Use a two-queue model as the default mental model:
+  `cfVec_queue` for path classification and wrong-path flush,
+  `commit_queue` for retire semantics.
 - Treat DUT `cfVec` as a logical instruction queue ordered by observation.
 - Compare that logical queue against golden trace in program order.
 - If queue head matches the current golden-trace entry, mark it as correct path;
-  do not dequeue it immediately. Correct-path instructions remain in queue until
-  a later FTQ-entry-granular `commit` removes them from queue head.
+  do not dequeue it immediately from `cfVec_queue`. Those correct-path
+  instructions enter `commit_queue` semantics, and only a later FTQ-entry-
+  granular `commit` removes the corresponding head span.
 - The first mismatch marks the beginning of a wrong path; that first mismatched
   instruction does not have to be a CFI, but the immediately preceding
   correct-path instruction should normally be the redirecting CFI in the
@@ -120,14 +124,17 @@ When debugging backend-agent behavior, apply these rules:
   that entry is still semantically pending, treat the entry as not yet
   committable even if other bookkeeping appears ready.
 - `callRetCommit` is instruction-granular and may appear as soon as the
-  corresponding instruction has ROB-committed; only `call` / `ret` carry
-  meaningful `rasAction`.
+  corresponding instruction has ROB-committed in `commit_queue`; only `call` /
+  `ret` carry meaningful `rasAction`.
 - Any modeled delay applies only after the corresponding behavior is already
   eligible to send; delay does not create eligibility by itself.
 - If DUT recovery appears wrong after env-driven `redirect`, first verify that
   env-side `redirect` / `commit` generation and their timing still satisfy the
   semantic contract. Treat env stimulus bugs as more likely than an obvious DUT
   bug until the stimulus path has been ruled out with waveform evidence.
+- When doing implementation review, run through
+  `frontend-backend-agent.md` section `实现一致性最小检查项` in order:
+  `必须项` first, then `建议项`.
 
 If a failing reproduction can be explained by env-side commit bookkeeping
 driving FTQ pointer relationships that suppress new IFU requests, do not call

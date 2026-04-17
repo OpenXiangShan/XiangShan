@@ -17,6 +17,57 @@
 - `commit`
 - `callRetCommit`
 
+## 双队列规范（强约束）
+
+Backend Agent 的行为语义应等价于两个逻辑队列：
+
+- `cfVec_queue`：接收 DUT `cfVec` 的观测流，承担路径判定和 wrong-path flush 语义
+- `commit_queue`：只承载正确路径上的可提交指令，承担 `commit` / `callRetCommit` 的派生语义
+
+### `cfVec_queue` 语义
+
+- 所有有效 `cfVec` 指令按观测顺序入队
+- queue 头与 golden trace 对比；匹配成功表示该指令位于正确路径
+- 首次 mismatch 标记 wrong-path 起点，并在后续某个时刻触发 `redirect`
+- mismatch 之后仍需继续接收并入队后续 `cfVec`，这些指令在语义上属于同一段 wrong-path，直到被 `redirect` 清除
+- `redirect` 生效后，必须 flush `cfVec_queue` 中该段 wrong-path；更老正确路径前缀必须保留
+
+### `commit_queue` 语义
+
+- 只接收来自 `cfVec_queue` 的正确路径指令，wrong-path 指令不得进入
+- 指令进入 `commit_queue` 后，按程序序等待提交条件满足再出队
+- 指令粒度的 `callRetCommit` 从 `commit_queue` 中“已提交”的指令派生
+- FTQ-entry 粒度的 `commit` 从 `commit_queue` 头部连续、已提交且同 FTQ entry 的指令聚合派生
+
+### 队列边界
+
+- `redirect` 负责清除 wrong-path 的对象是 `cfVec_queue` 语义段，而不是“任意待提交状态”
+- `commit_queue` 不允许通过“golden trace 已前进”直接推进，必须通过独立提交建模推进
+- 任何实现如果等价地违背上述双队列职责边界，都应视为语义错误
+
+## 实现一致性最小检查项
+
+下面的检查项按语义覆盖推导，条目数不预设；新增语义边界时应增补相应检查项。
+
+### 必须项（违反即语义错误）
+
+- `cfVec_queue` 入队严格按 DUT 观测顺序，不因等待目标 PC 而暂停或跳过包。
+- 首次 mismatch 只定义一个 wrong-path 起点，并沿该起点向后标记同一段 wrong-path。
+- mismatch 后继续接收 `cfVec`，不得进入“暂停构队列”等待模式。
+- `redirect` 按 wrong-path 起点 flush `cfVec_queue` 后缀，并保留更老 correct-path 前缀。
+- 进入 `commit_queue` 的仅为 correct-path 指令；wrong-path 指令不得进入 `commit_queue`。
+- `commit_queue` 严格按程序序推进，不跳过更老未提交指令。
+- 正确路径 CFI 在 `resolve` 完成后才允许对应指令进入 committed。
+- `callRetCommit` 从“已提交指令”派生，且保持指令粒度。
+- FTQ-entry `commit` 仅由 `commit_queue` 头部连续、同 FTQ、已提交指令聚合派生。
+- FTQ entry 出队原因仅有两类：被 `commit` 退休，或被 `redirect` 作为 wrong-path 清除。
+- 禁止“已提交旧 FTQ entry 复活”为 active 来解释后续观测。
+- delay 只作用于“已满足发送资格后的附加延迟”，不替代资格条件。
+
+### 建议项（不满足时优先排查）
+
+- `redirect` 之后的恢复残留优先视作同一恢复过程，而非直接开启新一轮 mismatch。
+
 ## Queue 中每条指令需要保存的信息
 
 queue 中的每条指令至少需要具备以下语义信息：
@@ -202,10 +253,10 @@ queue 中的每条指令至少需要具备以下语义信息：
 如果实现把“与 golden trace 对齐”直接当成“已经 ROB commit”，则它虽然可能还能跑通部分 testcase，
 但语义上已经不再是在“模拟 backend 提交”，而是在用 golden trace 直接驱动 backend 事件。
 
-## 独立的 backend 提交前沿
+## 独立的 backend 提交前沿（`commit_queue`）
 
-为了尽可能模拟真实 backend，环境应在 semantic queue 之上维护一个独立的、顺序的
-instruction commit frontier。
+为了尽可能模拟真实 backend，环境应在 `cfVec_queue` 之上维护一个独立的、顺序的
+instruction commit frontier（语义上即 `commit_queue`）。
 
 这个 frontier 的最小要求是：
 

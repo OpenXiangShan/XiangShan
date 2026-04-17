@@ -42,6 +42,9 @@ All env-side signals and bundle fields must be based on the actual generated DUT
 - Do not rewrite absolute paths in any `source` command.
 - Preserve the black-box verification boundary. Interact through DUT-facing agents, APIs, traces, and generated artifacts rather than assuming hidden RTL state.
 - Before modifying files, inspect current local changes and avoid overwriting in-progress work.
+- Before changing backend-agent semantics or related logic, run
+  `docs/agents/frontend-backend-agent.md` section `实现一致性最小检查项`
+  in order: `必须项` first, then `建议项`.
 - When changing bundles, coverage points, or startup/control wiring, verify every signal name against the current DUT object and generated artifacts first. Required signals should fail fast when absent; signals not present on the DUT should not remain in the active contract.
 - After changing code, rerun the relevant tests before giving a conclusion. If you have not rerun the relevant tests yet, say that explicitly and do not present the result as a validated conclusion.
 - When DUT behavior is coupled to env-generated stimuli, first suspect env stimulus generation or timing before concluding there is an obvious DUT bug. Only escalate to a DUT-side diagnosis after the env stimulus path has been checked against waveforms and the semantic contract.
