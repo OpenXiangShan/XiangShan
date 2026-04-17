@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from logging import Logger, getLogger
 
 
@@ -19,6 +20,7 @@ class FakeDUTFrontend:
         self._step_ris_callbacks = []
         self._cycle = 0
         self._waveform_paused = 0
+        self._frontend_is_fake_dut = True
 
         self.reset = FakeSignal(1)
         self.clock = FakeSignal(0)
@@ -74,6 +76,13 @@ def create_frontend_dut(tc_name: str = "frontend", dut_logger: Logger | None = N
     except ModuleNotFoundError as exc:
         if exc.name != "Frontend":
             raise
+        if os.getenv("TB_ENABLE_DUT_TESTS") == "1":
+            raise RuntimeError(
+                "compiled Frontend DUT not found while TB_ENABLE_DUT_TESTS=1; "
+                "run `make frontend` before DUT integration tests"
+            ) from exc
         active_logger.warning("compiled Frontend DUT not found; using fallback fake DUT for tc=%s", tc_name)
         return FakeDUTFrontend()
-    return DUTFrontend()
+    dut = DUTFrontend()
+    setattr(dut, "_frontend_is_fake_dut", False)
+    return dut

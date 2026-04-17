@@ -203,7 +203,12 @@ object xiangshan extends ChiselModule {
 
     // package ready-to-run binary as resources
     val ready_to_run = Seq("riscv64-nemu-interpreter-dual-so", "riscv64-nemu-interpreter-so", "riscv64-spike-so")
-    ready_to_run.foreach(f => os.copy(pwd / "ready-to-run" / f, destDir / "ready-to-run" / f, createFolders = true))
+    ready_to_run.foreach { f =>
+      val src = pwd / "ready-to-run" / f
+      if (os.exists(src)) {
+        os.copy(src, destDir / "ready-to-run" / f, createFolders = true)
+      }
+    }
   }
 
   override def resources: T[Seq[PathRef]] = Task.Sources {

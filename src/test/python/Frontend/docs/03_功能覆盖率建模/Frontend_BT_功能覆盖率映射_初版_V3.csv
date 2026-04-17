@@ -1,0 +1,36 @@
+﻿Coverage_ID,阶段,映射路径,覆盖类型,Coverage_Group,建议采样时机,覆盖目标,建议Bins,建议Cross,备注
+COV-001,L0,Frontend/复位与启动/TOP/复位启动/基本闭环/reset_vector对齐启动,场景覆盖,reset_boot_path,reset释放后首个有效fetch建立,一次reset启动场景被命中,seen,,最小闭环入口
+COV-002,L0,Frontend/非MMIO取指/TOP/顺序取指/基本闭环/全RVI顺序流,场景覆盖,fetch_path_type,IFU选择ICache主路径并形成顺序cfVec,非MMIO顺序流被命中,icache_seq,,主路径
+COV-003,L0,Frontend/MMIO取指/TOP/MMIO取指闭环/基本闭环/纯MMIO闭环,场景覆盖,fetch_path_type,IFU选择uncache路径并完成返回,MMIO取指路径被命中,mmio_uncache,,辅路径
+COV-004,L0,Frontend/重定向与冲刷恢复/TOP/后端重定向闭环/基本闭环/单次redirect恢复,类型覆盖,redirect_type,backend.toFtq.redirect有效,backend redirect类型覆盖,"ctrl,memVio,interrupt",,首批必须
+COV-005,L0,Frontend/取指异常与错误传播/TOP/异常取指闭环/基本闭环/单异常源闭环,类型覆盖,frontend_exception_type,前端异常向backend/fromIfu或error传播,基础异常类型覆盖,"pf,gpf,af,ill,hwe",,首批必须
+COV-006,L0,Frontend/地址翻译与权限检查/ITLB/命中缺失/单次miss/单请求walk成功,场景覆盖,itlb_ptw_flow,ITLB miss 后发起 PTW 请求并返回,单次 miss-walk-refill 流被命中,miss_walk_refill,,闭环关键
+COV-007,L0,Frontend/地址翻译与权限检查/PMP/权限组合/可执行拒绝/单条规则拒绝,场景覆盖,pmp_exec_result,PMP 拒绝取指并产生 fault,PMP deny 路径被命中,deny,,闭环关键
+COV-008,L0,Frontend/取指结果交付/IBuffer/出队/backend全反压/短时全反压,场景覆盖,backend_accept_mode,backend.canAccept 拉低阻塞出队,反压场景被命中,all_block_short,,闭环关键
+COV-101,L1,Frontend/分支预测与预测块生成/BPU/基本预测/*,类型覆盖,bpu_basic_pred_type,BPU 向 FTQ 发出 prediction/meta,基本预测类型覆盖,"seq_no_cfi,direct_jmp,cond_taken,cond_nt,跨块分支",,按四级聚合
+COV-102,L1,Frontend/分支预测与预测块生成/BPU/多预测器协同/*,类型覆盖,bpu_source_type,prediction/meta 来源字段,来源预测器覆盖,"uBTB,aBTB,mBTB,TAGE,SC,ITTAGE",,按 source 建模
+COV-103,L1,Frontend/分支预测与预测块生成/BPU/RAS/*,类型覆盖,ras_event_type,call/ret 相关预测出现,RAS 事件类型覆盖,"call_push,ret_pop,nested,redirect_recover",,建议基于 meta
+COV-104,L1,Frontend/分支预测与预测块生成/BPU/训练更新/*,类型覆盖,bpu_train_type,FTQ -> BPU train/commit/redirect反馈,训练路径覆盖,"commit,mispredict,back_to_back,train_pred_parallel,train_flush_parallel",,建议记录训练来源
+COV-105,L1,Frontend/分支预测与预测块生成/BPU/使能控制/*,类型覆盖,bpu_ctrl_mode,bp_ctrl 运行模式,预测器使能模式覆盖,"single_off,basic_only,all_on,dynamic_switch",,建议从 CSR 采样
+COV-121,L1,Frontend/取指队列管理/FTQ/入队出队/*,类型覆盖,ftq_alloc_release_mode,FTQ entry 分配与释放行为,入出队模式覆盖,"single,sustained,in_only,out_only,same_cycle",,队列核心
+COV-122,L1,Frontend/取指队列管理/FTQ/指针管理/*,类型覆盖,ftq_ptr_state,FTQ 指针状态推进,指针推进覆盖,"bpu_ptr,ifu_ptr,commit_ptr,wrap,multi_ptr_relation",,需状态机支持
+COV-123,L1,Frontend/取指队列管理/FTQ/队列边界/*,类型覆盖,ftq_queue_state,FTQ occupancy 变化,队列边界覆盖,"empty,near_full,full,recover_from_empty,recover_from_full",,建议 occupancy 采样
+COV-124,L1,Frontend/重定向与冲刷恢复/FTQ/重定向处理/*,类型覆盖,ftq_redirect_source,FTQ 接收到 redirect,redirect 来源覆盖,"ifu_checker,backend_ctrl,backend_interrupt,multi_source,realloc_after_redirect",,控制关键
+COV-125,L1,Frontend/取指队列管理/FTQ/异常提交/*,类型覆盖,ftq_feedback_type,commit/exception/redirect 信息进入FTQ,反馈类型覆盖,"backend_exception,commit_train,commit_redirect_parallel,exception_commit_parallel",,建议从backend/ftq交互采样
+COV-141,L1,Frontend/地址翻译与权限检查/ITLB/命中缺失/*,类型覆盖,itlb_result_type,ITLB request/resp 结果,ITLB 结果覆盖,"hit,miss,parallel_miss,refill_hit",,建议从 requestor 侧采样
+COV-142,L1,Frontend/地址翻译与权限检查/ITLB/翻译模式/*,类型覆盖,itlb_mode,tlbCsr 对应翻译模式,翻译模式覆盖,"bare,sv39,hypervisor,onlyStage1",,来自 csr
+COV-143,L1,Frontend/地址翻译与权限检查/ITLB/刷新/*,类型覆盖,itlb_flush_mode,sfence 与 miss 关系,刷新模式覆盖,"single_sfence,continuous_sfence,sfence_miss_parallel",,控制关键
+COV-144,L1,Frontend/地址翻译与权限检查/ITLB/异常/*,类型覆盖,itlb_exception_type,ITLB 异常结果,异常类型覆盖,"pf,gpf,af,fake_pte_boundary",,异常链路
+COV-151,L1,Frontend/地址翻译与权限检查/PTW/请求握手/*,类型覆盖,ptw_req_mode,PTW 请求和返回时序,握手模式覆盖,"single,queue,backpressure,cancel_flush",,建议事件驱动
+COV-152,L1,Frontend/地址翻译与权限检查/PTW/返回类型/*,类型覆盖,ptw_resp_type,PTW 返回结果类型,返回类型覆盖,"leaf_pte,normal_continue,pf,af,perm_fail,timeout",,建议从 resp decode
+COV-161,L1,Frontend/地址翻译与权限检查/PMP/权限组合/*,类型覆盖,pmp_exec_type,PMP/PMA 对取指的判定结果,权限判定覆盖,"allow,deny,boundary,priority",,建议按请求地址采样
+COV-162,L1,Frontend/地址翻译与权限检查/PMP/配置更新/*,类型覆盖,pmp_cfg_transition,PMP 配置切换路径,配置变化覆盖,"static_allow,static_deny,allow_to_deny,deny_to_allow,req_cfg_parallel",,建议按 CSR 变化采样
+COV-171,L1,Frontend/取指结果交付/IBuffer/入队/*,类型覆盖,ibuffer_enq_mode,IBuffer 入队形态,入队模式覆盖,"single,multi,full_bw,bubble",,建议从 ibuffer.io.in 采样
+COV-172,L1,Frontend/取指结果交付/IBuffer/出队/*,类型覆盖,ibuffer_deq_mode,IBuffer 出队形态,出队模式覆盖,"all_accept,all_block,partial_accept,continuous_consume",,结合 canAccept
+COV-173,L1,Frontend/取指结果交付/IBuffer/空满边界/*,类型覆盖,ibuffer_state,IBuffer occupancy 状态,边界状态覆盖,"empty,near_full,full,flush_empty,recover",,建议 occupancy 计数
+COV-174,L1,Frontend/取指结果交付/IBuffer/flush_redirect/*,类型覆盖,ibuffer_flush_type,IBuffer flush 来源和竞争,flush 场景覆盖,"ctrl,memVio,ifu,flush_enq_same_cycle",,控制关键
+COV-175,L1,Frontend/取指结果交付/IBuffer/旁路暂停/*,类型覆盖,ibuffer_stall_type,stallReason 与 decodeCanAccept 行为,阻塞类型覆盖,"fetch_stall,backend_stall,single_drop,periodic_drop,bypass_boundary",,便于 debug
+COV-201,L1,Frontend/关键交叉/redirect x inflight_resp,交叉覆盖,redirect_vs_inflight_resp,redirect 到来时存在在途返回,检查冲刷与竞争组合,"ctrl_x_icache_resp,ctrl_x_uncache_resp,memVio_x_icache_resp,interrupt_x_uncache_resp",redirect_type x inflight_resp_type,首批建议实现
+COV-202,L1,Frontend/关键交叉/itlb x ptw,交叉覆盖,itlb_state_x_ptw_resp,ITLB miss 与 PTW 返回组合,检查翻译闭环组合,"single_miss_x_leaf_pte,parallel_miss_x_timeout,sfence_parallel_x_pf",itlb_result_type x ptw_resp_type,首批建议实现
+COV-203,L1,Frontend/关键交叉/ibuffer x backend_accept,交叉覆盖,ibuffer_state_x_backend_mode,IBuffer 状态与 backend 接收模式组合,检查交付闭环组合,"near_full_x_all_block,full_x_recover,empty_x_all_accept",ibuffer_state x backend_accept_mode,首批建议实现
+COV-204,L1,Frontend/关键交叉/fetch_path x exception,交叉覆盖,fetch_path_x_exception,不同取指路径上的异常组合,检查路径与异常闭环,"icache_x_pf,icache_x_af,mmio_x_af,mmio_x_hwe",fetch_path_type x frontend_exception_type,首批建议实现

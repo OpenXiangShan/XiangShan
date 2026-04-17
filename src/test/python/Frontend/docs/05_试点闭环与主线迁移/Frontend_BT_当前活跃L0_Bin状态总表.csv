@@ -1,0 +1,15 @@
+Bin_ID,Coverage_Group,Bin_Name,Status,Status_Desc,Evidence_Source,Conclusion
+BIN-001,reset_boot_path,seen,B,历史闭环已完成,test_funcov_boot_and_icache_seq.funcov.json,可写历史闭环，主线待升级
+BIN-002,fetch_path_type,icache_seq,B,历史闭环已完成,test_funcov_boot_and_icache_seq.funcov.json,可写历史闭环，主线待升级
+BIN-003,fetch_path_type,mmio_uncache,B,历史闭环已完成,test_funcov_mmio_uncache_path.funcov.json,可写历史闭环，主线待升级
+BIN-004,redirect_type,ctrl,A,主线已验收,test_bin004_backend_ctrl_redirect_pilot.funcov.json,完整场景闭环
+BIN-005,redirect_type,memVio,E,规划中,none,不写成通过
+BIN-006,redirect_type,interrupt,E,规划中,none,不写成通过
+BIN-007,frontend_exception_type,pf,D,候选阻塞,test_funcov_itlb_page_fault.funcov.json,不具备验收条件
+BIN-008,frontend_exception_type,af,C,伴随命中,test_bin012_itlb_miss_walk_refill_pilot.funcov.json,只作为BIN-012 companion evidence
+BIN-009,frontend_exception_type,gpf,E,规划中,none,不写成通过
+BIN-010,frontend_exception_type,ill,E,规划中,none,不写成通过
+BIN-011,frontend_exception_type,hwe,E,规划中,none,不写成通过
+BIN-012,itlb_ptw_flow,miss_walk_refill,A,主线已验收,test_bin012_itlb_miss_walk_refill_pilot.funcov.json,功能/协议闭环通过，带checker边界
+BIN-013,pmp_exec_result,deny,D,候选阻塞,none,不具备验收条件
+BIN-014,backend_accept_mode,all_block_short,B,历史闭环已完成,test_funcov_short_backpressure.funcov.json,可写历史闭环，主线待升级

@@ -1,0 +1,569 @@
+﻿SPEC,一级测试点,二级测试点,三级测试点,四级测试点,五级测试点,Condition,Checkpoint,Object,分解方法,优先级
+功能测试点,,,,,,,,,,
+,复位与启动,,,,,,,,,
+,,TOP,,,,,,,,
+,,,复位启动,,,,,,,
+,,,,基本闭环,,,,,,
+,,,,,reset_vector对齐启动,hartId稳定，reset_vector为可取指地址；复位期间backend redirect/fencei/sfence均无效，ICache与ITLB返回正常；细化子场景：reset_vector为典型对齐地址启动,reset释放后io.resetInFrontend按周期拉低；ftq.io.toIfu.req开始握手；最终io.backend.cfVec出现首个有效项且PC源自reset_vector路径,io.resetInFrontend; io.reset_vector; ftq.io.toIfu.req; ifu.io.toIBuffer; io.backend.cfVec,场景分析,P0
+,,,,,reset_vector高位启动,hartId稳定，reset_vector为可取指地址；复位期间backend redirect/fencei/sfence均无效，ICache与ITLB返回正常；细化子场景：reset_vector为非零高位启动,reset释放后io.resetInFrontend按周期拉低；ftq.io.toIfu.req开始握手；最终io.backend.cfVec出现首个有效项且PC源自reset_vector路径,io.resetInFrontend; io.reset_vector; ftq.io.toIfu.req; ifu.io.toIBuffer; io.backend.cfVec,场景分析,P0
+,非MMIO取指,,,,,,,,,
+,,TOP,,,,,,,,
+,,,顺序取指,,,,,,,
+,,,,基本闭环,,,,,,
+,,,,,全RVI顺序流,顺序程序流，无分支/异常/flush；ICache命中，ITLB命中，backend.canAccept持续为1；细化子场景：顺序流由连续RVI指令构成,ftq->ifu->ibuffer链路连续握手，io.backend.cfVec持续输出顺序递增PC，io.backend.stallReason不出现异常类停顿原因,ftq.io.toIfu.req; ifu.io.fromICache.fetchResp; ifu.io.toIBuffer; io.backend.cfVec; io.backend.stallReason,场景分析,P1
+,,,,,RVC-RVI混合顺序流,顺序程序流，无分支/异常/flush；ICache命中，ITLB命中，backend.canAccept持续为1；细化子场景：顺序流中同时包含RVC与RVI指令,ftq->ifu->ibuffer链路连续握手，io.backend.cfVec持续输出顺序递增PC，io.backend.stallReason不出现异常类停顿原因,ftq.io.toIfu.req; ifu.io.fromICache.fetchResp; ifu.io.toIBuffer; io.backend.cfVec; io.backend.stallReason,场景分析,P1
+,,IFU,,,,,,,,
+,,,非MMIO取指,,,,,,,
+,,,,单cacheline顺序块,,,,,,
+,,,,,全RVI顺序块,构造单cacheline顺序块对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：单cacheline块内全部为RVI,IFU输出指令、redirect、异常、metadata在单cacheline顺序块下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,含RVC顺序块,构造单cacheline顺序块对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：单cacheline块内包含RVC,IFU输出指令、redirect、异常、metadata在单cacheline顺序块下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,双cacheline取指,,,,,,
+,,,,,双行完整有效,构造双cacheline取指对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：两条cacheline均返回完整有效数据,IFU输出指令、redirect、异常、metadata在双cacheline取指下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,首行末尾截断拼接,构造双cacheline取指对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：首条cacheline末尾与下一行拼接,IFU输出指令、redirect、异常、metadata在双cacheline取指下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,跨预测块RVI,,,,,,
+,,,,,前块尾半条RVI,构造跨预测块RVI对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：前一预测块尾部出现半条RVI,IFU输出指令、redirect、异常、metadata在跨预测块RVI下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,后块首补齐RVI,构造跨预测块RVI对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：后一预测块首部补齐半条RVI,IFU输出指令、redirect、异常、metadata在跨预测块RVI下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,RVC/RVI混排,,,,,,
+,,,,,RVC后接RVI,构造RVC/RVI混排对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：块内先RVC后RVI混排,IFU输出指令、redirect、异常、metadata在RVC/RVI混排下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,RVI后接RVC,构造RVC/RVI混排对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：块内先RVI后RVC混排,IFU输出指令、redirect、异常、metadata在RVC/RVI混排下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,异常前后混合块,,,,,,
+,,,,,异常前有合法指令,构造异常前后混合块对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：异常发生前已有若干合法指令,IFU输出指令、redirect、异常、metadata在异常前后混合块下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,首条即异常指令,构造异常前后混合块对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：取指块首条即为异常指令,IFU输出指令、redirect、异常、metadata在异常前后混合块下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,ICache,,,,,,,,
+,,,命中路径,,,,,,,
+,,,,连续命中,,,,,,
+,,,,,固定步长连续命中,通过L2_CACHE/PTW/PMP/FTQ激励制造连续命中；细化子场景：固定步长顺序访问连续命中,ICache响应、miss处理、预取和异常结果在连续命中下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,跨分支恢复后再次命中,通过L2_CACHE/PTW/PMP/FTQ激励制造连续命中；细化子场景：分支恢复后重新访问仍命中,ICache响应、miss处理、预取和异常结果在连续命中下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,单双cacheline命中,,,,,,
+,,,,,单cacheline命中,通过L2_CACHE/PTW/PMP/FTQ激励制造单双cacheline命中；细化子场景：命中单条cacheline返回,ICache响应、miss处理、预取和异常结果在单双cacheline命中下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,双cacheline命中,通过L2_CACHE/PTW/PMP/FTQ激励制造单双cacheline命中；细化子场景：命中双cacheline返回,ICache响应、miss处理、预取和异常结果在单双cacheline命中下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,命中且预取有效,,,,,,
+,,,,,FTQ预取带来命中收益,通过L2_CACHE/PTW/PMP/FTQ激励制造命中且预取有效；细化子场景：FTQ预取使后续取指命中,ICache响应、miss处理、预取和异常结果在命中且预取有效下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,softPrefetch带来命中收益,通过L2_CACHE/PTW/PMP/FTQ激励制造命中且预取有效；细化子场景：softPrefetch使后续取指命中,ICache响应、miss处理、预取和异常结果在命中且预取有效下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,命中与backend反压并发,,,,,,
+,,,,,短时backend反压,通过L2_CACHE/PTW/PMP/FTQ激励制造命中与backend反压并发；细化子场景：命中过程中伴随短时backend反压,ICache响应、miss处理、预取和异常结果在命中与backend反压并发下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,周期性backend反压,通过L2_CACHE/PTW/PMP/FTQ激励制造命中与backend反压并发；细化子场景：命中过程中伴随周期性backend反压,ICache响应、miss处理、预取和异常结果在命中与backend反压并发下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,缺失路径,,,,,,,
+,,,,单次miss,,,,,,
+,,,,,单次miss后填充成功,通过L2_CACHE/PTW/PMP/FTQ激励制造单次miss；细化子场景：单次miss后回填成功,ICache响应、miss处理、预取和异常结果在单次miss下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P0
+,,,,,单次miss后立即恢复命中,通过L2_CACHE/PTW/PMP/FTQ激励制造单次miss；细化子场景：单次miss回填后立即恢复命中,ICache响应、miss处理、预取和异常结果在单次miss下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P0
+,,,,连续miss,,,,,,
+,,,,,相邻line连续miss,通过L2_CACHE/PTW/PMP/FTQ激励制造连续miss；细化子场景：相邻cacheline连续miss,ICache响应、miss处理、预取和异常结果在连续miss下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,间隔line连续miss,通过L2_CACHE/PTW/PMP/FTQ激励制造连续miss；细化子场景：非相邻cacheline连续miss,ICache响应、miss处理、预取和异常结果在连续miss下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,miss填充后命中,,,,,,
+,,,,,首次回填后再次命中,通过L2_CACHE/PTW/PMP/FTQ激励制造miss填充后命中；细化子场景：首次回填后再次访问命中,ICache响应、miss处理、预取和异常结果在miss填充后命中下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P0
+,,,,,flush后再次命中,通过L2_CACHE/PTW/PMP/FTQ激励制造miss填充后命中；细化子场景：flush后重新访问命中,ICache响应、miss处理、预取和异常结果在miss填充后命中下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,miss与redirect并发,,,,,,
+,,,,,redirect早于miss返回,通过L2_CACHE/PTW/PMP/FTQ激励制造miss与redirect并发；细化子场景：redirect发生在miss返回之前,ICache响应、miss处理、预取和异常结果在miss与redirect并发下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,redirect晚于miss返回,通过L2_CACHE/PTW/PMP/FTQ激励制造miss与redirect并发；细化子场景：redirect发生在miss返回之后,ICache响应、miss处理、预取和异常结果在miss与redirect并发下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,miss与fencei并发,,,,,,
+,,,,,miss先发起后fencei,通过L2_CACHE/PTW/PMP/FTQ激励制造miss与fencei并发；细化子场景：miss请求先发起随后fencei,ICache响应、miss处理、预取和异常结果在miss与fencei并发下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,miss返回与fencei同拍,通过L2_CACHE/PTW/PMP/FTQ激励制造miss与fencei并发；细化子场景：miss返回与fencei同拍竞争,ICache响应、miss处理、预取和异常结果在miss与fencei并发下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P1
+,,,替换/索引,,,,,,,
+,,,,way选择,,,,,,
+,,,,,低way命中/回填,通过L2_CACHE/PTW/PMP/FTQ激励制造way选择；细化子场景：低编号way被选择,ICache响应、miss处理、预取和异常结果在way选择下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,高way命中/回填,通过L2_CACHE/PTW/PMP/FTQ激励制造way选择；细化子场景：高编号way被选择,ICache响应、miss处理、预取和异常结果在way选择下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,替换器更新,,,,,,
+,,,,,命中路径更新替换器,通过L2_CACHE/PTW/PMP/FTQ激励制造替换器更新；细化子场景：命中后更新替换器状态,ICache响应、miss处理、预取和异常结果在替换器更新下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,回填路径更新替换器,通过L2_CACHE/PTW/PMP/FTQ激励制造替换器更新；细化子场景：回填后更新替换器状态,ICache响应、miss处理、预取和异常结果在替换器更新下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,索引边界,,,,,,
+,,,,,组首索引访问,通过L2_CACHE/PTW/PMP/FTQ激励制造索引边界；细化子场景：访问索引边界的组首位置,ICache响应、miss处理、预取和异常结果在索引边界下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P1
+,,,,,组尾索引访问,通过L2_CACHE/PTW/PMP/FTQ激励制造索引边界；细化子场景：访问索引边界的组尾位置,ICache响应、miss处理、预取和异常结果在索引边界下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P1
+,,,,tag冲突,,,,,,
+,,,,,同index不同tag冲突,通过L2_CACHE/PTW/PMP/FTQ激励制造tag冲突；细化子场景：同一index不同tag连续访问,ICache响应、miss处理、预取和异常结果在tag冲突下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,冲突后替换生效,通过L2_CACHE/PTW/PMP/FTQ激励制造tag冲突；细化子场景：tag冲突后触发替换,ICache响应、miss处理、预取和异常结果在tag冲突下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,预取,,,,,,,
+,,,,FTQ预取请求,,,,,,
+,,,,,单次FTQ预取,通过L2_CACHE/PTW/PMP/FTQ激励制造FTQ预取请求；细化子场景：单次FTQ预取请求,ICache响应、miss处理、预取和异常结果在FTQ预取请求下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,连续FTQ预取,通过L2_CACHE/PTW/PMP/FTQ激励制造FTQ预取请求；细化子场景：连续多个FTQ预取请求,ICache响应、miss处理、预取和异常结果在FTQ预取请求下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,softPrefetch请求,,,,,,
+,,,,,单路softPrefetch,通过L2_CACHE/PTW/PMP/FTQ激励制造softPrefetch请求；细化子场景：单路softPrefetch请求,ICache响应、miss处理、预取和异常结果在softPrefetch请求下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,多路softPrefetch,通过L2_CACHE/PTW/PMP/FTQ激励制造softPrefetch请求；细化子场景：多路softPrefetch并发请求,ICache响应、miss处理、预取和异常结果在softPrefetch请求下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,多源预取并发,,,,,,
+,,,,,FTQ与softPrefetch同拍,通过L2_CACHE/PTW/PMP/FTQ激励制造多源预取并发；细化子场景：FTQ预取与softPrefetch同拍,ICache响应、miss处理、预取和异常结果在多源预取并发下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,多源不同地址并发,通过L2_CACHE/PTW/PMP/FTQ激励制造多源预取并发；细化子场景：多源对不同地址并发预取,ICache响应、miss处理、预取和异常结果在多源预取并发下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,预取被flush打断,,,,,,
+,,,,,flush前预取已发起,通过L2_CACHE/PTW/PMP/FTQ激励制造预取被flush打断；细化子场景：flush到来前预取已发起,ICache响应、miss处理、预取和异常结果在预取被flush打断下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,flush与预取返回同拍,通过L2_CACHE/PTW/PMP/FTQ激励制造预取被flush打断；细化子场景：flush与预取返回同拍竞争,ICache响应、miss处理、预取和异常结果在预取被flush打断下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P1
+,MMIO取指,,,,,,,,,
+,,TOP,,,,,,,,
+,,,MMIO取指闭环,,,,,,,
+,,,,基本闭环,,,,,,
+,,,,,纯MMIO闭环,构造MMIO区域取指，并穿插普通ICache路径；覆盖正常返回、延迟返回、异常返回与跨页；细化子场景：连续MMIO取指形成独立闭环,ifu根据地址属性向instrUncache发起请求，返回数据仅在合法返回后进入ibuffer/backend；普通路径与MMIO路径切换时无重复/丢失/串扰,ifu.io.toUncache; ifu.io.fromUncache; ifu.io.toIBuffer; io.backend.cfVec; io.backend.fromIfu,场景分析,P1
+,,,,,MMIO与普通路径切换闭环,构造MMIO区域取指，并穿插普通ICache路径；覆盖正常返回、延迟返回、异常返回与跨页；细化子场景：MMIO和普通ICache路径交替闭环,ifu根据地址属性向instrUncache发起请求，返回数据仅在合法返回后进入ibuffer/backend；普通路径与MMIO路径切换时无重复/丢失/串扰,ifu.io.toUncache; ifu.io.fromUncache; ifu.io.toIBuffer; io.backend.cfVec; io.backend.fromIfu,场景分析,P1
+,,IFU,,,,,,,,
+,,,MMIO/uncache取指,,,,,,,
+,,,,单页MMIO,,,,,,
+,,,,,单页正常返回,构造单页MMIO对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：单页MMIO请求正常返回,IFU输出指令、redirect、异常、metadata在单页MMIO下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,单页延迟返回,构造单页MMIO对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：单页MMIO请求延迟后返回,IFU输出指令、redirect、异常、metadata在单页MMIO下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,跨页MMIO,,,,,,
+,,,,,跨页后续页正常访问,构造跨页MMIO对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：跨页后第二页正常访问,IFU输出指令、redirect、异常、metadata在跨页MMIO下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,跨页后续页受阻,构造跨页MMIO对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：跨页后第二页访问受阻或等待,IFU输出指令、redirect、异常、metadata在跨页MMIO下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,MMIO异常corrupt,,,,,,
+,,,,,corrupt单独出现,构造MMIO异常corrupt对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：仅出现MMIO corrupt异常,IFU输出指令、redirect、异常、metadata在MMIO异常corrupt下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,corrupt后恢复普通取指,构造MMIO异常corrupt对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：corrupt异常后恢复普通取指路径,IFU输出指令、redirect、异常、metadata在MMIO异常corrupt下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,MMIO异常denied,,,,,,
+,,,,,denied单独出现,构造MMIO异常denied对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：仅出现MMIO denied异常,IFU输出指令、redirect、异常、metadata在MMIO异常denied下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,denied后恢复普通取指,构造MMIO异常denied对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：denied异常后恢复普通取指路径,IFU输出指令、redirect、异常、metadata在MMIO异常denied下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,普通与MMIO切换,,,,,,
+,,,,,普通后接MMIO,构造普通与MMIO切换对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：普通ICache路径后切换到MMIO,IFU输出指令、redirect、异常、metadata在普通与MMIO切换下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,MMIO后接普通,构造普通与MMIO切换对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：MMIO路径后切换回普通ICache,IFU输出指令、redirect、异常、metadata在普通与MMIO切换下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,分支预测与预测块生成,,,,,,,,,
+,,TOP,,,,,,,,
+,,,分支预测驱动取指,,,,,,,
+,,,,基本闭环,,,,,,
+,,,,,taken主导预测流,构造taken/not-taken/跳转目标混合程序流，BPU预测信息持续输出，FTQ允许正常入队出队；细化子场景：预测流以taken分支恢复为主,bpu.io.toFtq预测结果被ftq吸收并驱动ifu取指；io.backend.fromFtq中的预测元信息与最终送往backend的cfVec对应关系一致,bpu.io.toFtq; ftq.io.fromBpu; ftq.io.toIfu; io.backend.fromFtq; io.backend.cfVec,场景分析,P2
+,,,,,not-taken主导预测流,构造taken/not-taken/跳转目标混合程序流，BPU预测信息持续输出，FTQ允许正常入队出队；细化子场景：预测流以not-taken顺序推进为主,bpu.io.toFtq预测结果被ftq吸收并驱动ifu取指；io.backend.fromFtq中的预测元信息与最终送往backend的cfVec对应关系一致,bpu.io.toFtq; ftq.io.fromBpu; ftq.io.toIfu; io.backend.fromFtq; io.backend.cfVec,场景分析,P2
+,,BPU,,,,,,,,
+,,,基本预测,,,,,,,
+,,,,顺序流无分支,,,,,,
+,,,,,预测块内无CFI,构造顺序流无分支对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：预测块内无CFI,预测块输出的taken方向、目标地址、takenCfiOffset和来源预测器与顺序流无分支/预测块内无CFI一致；对应恢复后ftq.io.toIfu.req与io.backend.fromFtq中的控制流信息保持一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,连续多预测块顺序流,构造顺序流无分支对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：连续多预测块顺序流,预测块输出的taken方向、目标地址、takenCfiOffset和来源预测器与顺序流无分支/连续多预测块顺序流一致；对应恢复后ftq.io.toIfu.req与io.backend.fromFtq中的控制流信息保持一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,单个直接跳转,,,,,,
+,,,,,跳转位于块前半段,构造单个直接跳转对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：跳转位于块前半段,预测块输出的taken方向、目标地址、takenCfiOffset和来源预测器与单个直接跳转/跳转位于块前半段一致；对应恢复后ftq.io.toIfu.req与io.backend.fromFtq中的控制流信息保持一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,跳转位于块后半段,构造单个直接跳转对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：跳转位于块后半段,预测块输出的taken方向、目标地址、takenCfiOffset和来源预测器与单个直接跳转/跳转位于块后半段一致；对应恢复后ftq.io.toIfu.req与io.backend.fromFtq中的控制流信息保持一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,单个条件分支taken,,,,,,
+,,,,,taken位于块前半段,构造单个条件分支taken对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：taken位于块前半段,预测块输出的taken方向、目标地址、takenCfiOffset和来源预测器与单个条件分支taken/taken位于块前半段一致；对应恢复后ftq.io.toIfu.req与io.backend.fromFtq中的控制流信息保持一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,taken位于块后半段,构造单个条件分支taken对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：taken位于块后半段,预测块输出的taken方向、目标地址、takenCfiOffset和来源预测器与单个条件分支taken/taken位于块后半段一致；对应恢复后ftq.io.toIfu.req与io.backend.fromFtq中的控制流信息保持一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,单个条件分支not-taken,,,,,,
+,,,,,not-taken位于块前半段,构造单个条件分支not-taken对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：not-taken位于块前半段,预测块输出的taken方向、目标地址、takenCfiOffset和来源预测器与单个条件分支not-taken/not-taken位于块前半段一致；对应恢复后ftq.io.toIfu.req与io.backend.fromFtq中的控制流信息保持一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,not-taken位于块后半段,构造单个条件分支not-taken对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：not-taken位于块后半段,预测块输出的taken方向、目标地址、takenCfiOffset和来源预测器与单个条件分支not-taken/not-taken位于块后半段一致；对应恢复后ftq.io.toIfu.req与io.backend.fromFtq中的控制流信息保持一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,跨fetch block分支,,,,,,
+,,,,,分支落在块尾,构造跨fetch block分支对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：分支落在块尾,预测块输出的taken方向、目标地址、takenCfiOffset和来源预测器与跨fetch block分支/分支落在块尾一致；对应恢复后ftq.io.toIfu.req与io.backend.fromFtq中的控制流信息保持一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,目标落入下一块,构造跨fetch block分支对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：目标落入下一块,预测块输出的taken方向、目标地址、takenCfiOffset和来源预测器与跨fetch block分支/目标落入下一块一致；对应恢复后ftq.io.toIfu.req与io.backend.fromFtq中的控制流信息保持一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,多预测器协同,,,,,,,
+,,,,uBTB命中,,,,,,
+,,,,,首次uBTB命中,构造uBTB命中对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：首次uBTB命中,uBTB命中/首次uBTB命中场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P0
+,,,,,重复访问uBTB命中,构造uBTB命中对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：重复访问uBTB命中,uBTB命中/重复访问uBTB命中场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,aBTB命中,,,,,,
+,,,,,仅aBTB提供目标,构造aBTB命中对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：仅aBTB提供目标,aBTB命中/仅aBTB提供目标场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,aBTB与其他预测结果一致,构造aBTB命中对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：aBTB与其他预测结果一致,aBTB命中/aBTB与其他预测结果一致场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,mBTB命中,,,,,,
+,,,,,mBTB直接命中,构造mBTB命中对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：mBTB直接命中,mBTB命中/mBTB直接命中场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,mBTB命中后重复命中,构造mBTB命中对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：mBTB命中后重复命中,mBTB命中/mBTB命中后重复命中场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,TAGE提供方向,,,,,,
+,,,,,TAGE给出taken方向,构造TAGE提供方向对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：TAGE给出taken方向,TAGE提供方向/TAGE给出taken方向场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,TAGE给出not-taken方向,构造TAGE提供方向对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：TAGE给出not-taken方向,TAGE提供方向/TAGE给出not-taken方向场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,SC修正方向,,,,,,
+,,,,,SC修正为taken,构造SC修正方向对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：SC修正为taken,SC修正方向/SC修正为taken场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,SC修正为not-taken,构造SC修正方向对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：SC修正为not-taken,SC修正方向/SC修正为not-taken场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,ITTAGE提供间接目标,,,,,,
+,,,,,间接call目标预测,构造ITTAGE提供间接目标对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：间接call目标预测,ITTAGE提供间接目标/间接call目标预测场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,间接jump目标预测,构造ITTAGE提供间接目标对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：间接jump目标预测,ITTAGE提供间接目标/间接jump目标预测场景下prediction/meta/perfMeta中来源字段、目标字段和方向字段互相一致；被选择的预测器结果真正进入ftq，未被选择的来源不污染最终预测,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,RAS,,,,,,,
+,,,,call压栈,,,,,,
+,,,,,单次call压栈,构造call压栈对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：单次call压栈,RAS相关场景下call/ret目标预测与栈行为一致；redirect或嵌套后返回目标恢复正确，错误栈状态不会持续影响后续prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,连续call压栈,构造call压栈对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：连续call压栈,RAS相关场景下call/ret目标预测与栈行为一致；redirect或嵌套后返回目标恢复正确，错误栈状态不会持续影响后续prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,ret弹栈,,,,,,
+,,,,,正常ret弹栈,构造ret弹栈对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：正常ret弹栈,RAS相关场景下call/ret目标预测与栈行为一致；redirect或嵌套后返回目标恢复正确，错误栈状态不会持续影响后续prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,栈空保护ret,构造ret弹栈对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：栈空保护ret,RAS相关场景下call/ret目标预测与栈行为一致；redirect或嵌套后返回目标恢复正确，错误栈状态不会持续影响后续prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,call-ret嵌套1层,,,,,,
+,,,,,无redirect嵌套1层,构造call-ret嵌套1层对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：无redirect嵌套1层,RAS相关场景下call/ret目标预测与栈行为一致；redirect或嵌套后返回目标恢复正确，错误栈状态不会持续影响后续prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,带redirect恢复的1层嵌套,构造call-ret嵌套1层对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：带redirect恢复的1层嵌套,RAS相关场景下call/ret目标预测与栈行为一致；redirect或嵌套后返回目标恢复正确，错误栈状态不会持续影响后续prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,call-ret嵌套多层,,,,,,
+,,,,,深层连续返回,构造call-ret嵌套多层对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：深层连续返回,RAS相关场景下call/ret目标预测与栈行为一致；redirect或嵌套后返回目标恢复正确，错误栈状态不会持续影响后续prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,多层嵌套中插入其他跳转,构造call-ret嵌套多层对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：多层嵌套中插入其他跳转,RAS相关场景下call/ret目标预测与栈行为一致；redirect或嵌套后返回目标恢复正确，错误栈状态不会持续影响后续prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,redirect后RAS恢复,,,,,,
+,,,,,单次redirect后恢复,构造redirect后RAS恢复对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：单次redirect后恢复,RAS相关场景下call/ret目标预测与栈行为一致；redirect或嵌套后返回目标恢复正确，错误栈状态不会持续影响后续prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P0
+,,,,,背靠背redirect后恢复,构造redirect后RAS恢复对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：背靠背redirect后恢复,RAS相关场景下call/ret目标预测与栈行为一致；redirect或嵌套后返回目标恢复正确，错误栈状态不会持续影响后续prediction/meta,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,历史维护,,,,,,,
+,,,,GHR更新,,,,,,
+,,,,,taken更新GHR,构造GHR更新对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：taken更新GHR,GHR更新/taken更新GHR场景下历史状态更新与恢复时机正确；redirect或误预测后重新预测时历史相关输出可解释，后续预测不会使用错误历史,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,not-taken更新GHR,构造GHR更新对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：not-taken更新GHR,GHR更新/not-taken更新GHR场景下历史状态更新与恢复时机正确；redirect或误预测后重新预测时历史相关输出可解释，后续预测不会使用错误历史,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,PHR更新,,,,,,
+,,,,,顺序推进更新PHR,构造PHR更新对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：顺序推进更新PHR,PHR更新/顺序推进更新PHR场景下历史状态更新与恢复时机正确；redirect或误预测后重新预测时历史相关输出可解释，后续预测不会使用错误历史,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,分支后推进更新PHR,构造PHR更新对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：分支后推进更新PHR,PHR更新/分支后推进更新PHR场景下历史状态更新与恢复时机正确；redirect或误预测后重新预测时历史相关输出可解释，后续预测不会使用错误历史,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,redirect恢复历史,,,,,,
+,,,,,单次redirect恢复历史,构造redirect恢复历史对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：单次redirect恢复历史,redirect恢复历史/单次redirect恢复历史场景下历史状态更新与恢复时机正确；redirect或误预测后重新预测时历史相关输出可解释，后续预测不会使用错误历史,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P0
+,,,,,连续redirect恢复历史,构造redirect恢复历史对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：连续redirect恢复历史,redirect恢复历史/连续redirect恢复历史场景下历史状态更新与恢复时机正确；redirect或误预测后重新预测时历史相关输出可解释，后续预测不会使用错误历史,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,连续误预测恢复,,,,,,
+,,,,,两次连续误预测,构造连续误预测恢复对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：两次连续误预测,连续误预测恢复/两次连续误预测场景下历史状态更新与恢复时机正确；redirect或误预测后重新预测时历史相关输出可解释，后续预测不会使用错误历史,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,误预测后立即命中,构造连续误预测恢复对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：误预测后立即命中,连续误预测恢复/误预测后立即命中场景下历史状态更新与恢复时机正确；redirect或误预测后重新预测时历史相关输出可解释，后续预测不会使用错误历史,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,历史边界回卷,,,,,,
+,,,,,接近边界推进,构造历史边界回卷对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：接近边界推进,历史边界回卷/接近边界推进场景下历史状态更新与恢复时机正确；redirect或误预测后重新预测时历史相关输出可解释，后续预测不会使用错误历史,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P1
+,,,,,发生回卷后继续预测,构造历史边界回卷对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：发生回卷后继续预测,历史边界回卷/发生回卷后继续预测场景下历史状态更新与恢复时机正确；redirect或误预测后重新预测时历史相关输出可解释，后续预测不会使用错误历史,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P1
+,,,训练更新,,,,,,,
+,,,,commit训练,,,,,,
+,,,,,单条commit训练,构造commit训练对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：单条commit训练,commit训练/单条commit训练场景下train/commit/redirect信息被正确吸收；训练不会丢失、重放或越序，训练后下一轮相关预测行为与训练结果一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,背靠背commit训练,构造commit训练对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：背靠背commit训练,commit训练/背靠背commit训练场景下train/commit/redirect信息被正确吸收；训练不会丢失、重放或越序，训练后下一轮相关预测行为与训练结果一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,mispredict训练,,,,,,
+,,,,,单次mispredict训练,构造mispredict训练对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：单次mispredict训练,mispredict训练/单次mispredict训练场景下train/commit/redirect信息被正确吸收；训练不会丢失、重放或越序，训练后下一轮相关预测行为与训练结果一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P1
+,,,,,连续mispredict训练,构造mispredict训练对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：连续mispredict训练,mispredict训练/连续mispredict训练场景下train/commit/redirect信息被正确吸收；训练不会丢失、重放或越序，训练后下一轮相关预测行为与训练结果一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P1
+,,,,双连续训练,,,,,,
+,,,,,同类训练连续到达,构造双连续训练对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：同类训练连续到达,双连续训练/同类训练连续到达场景下train/commit/redirect信息被正确吸收；训练不会丢失、重放或越序，训练后下一轮相关预测行为与训练结果一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,异类训练连续到达,构造双连续训练对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：异类训练连续到达,双连续训练/异类训练连续到达场景下train/commit/redirect信息被正确吸收；训练不会丢失、重放或越序，训练后下一轮相关预测行为与训练结果一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,训练与预测并发,,,,,,
+,,,,,同块训练预测并发,构造训练与预测并发对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：同块训练预测并发,训练与预测并发/同块训练预测并发场景下train/commit/redirect信息被正确吸收；训练不会丢失、重放或越序，训练后下一轮相关预测行为与训练结果一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,跨块训练预测并发,构造训练与预测并发对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：跨块训练预测并发,训练与预测并发/跨块训练预测并发场景下train/commit/redirect信息被正确吸收；训练不会丢失、重放或越序，训练后下一轮相关预测行为与训练结果一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P1
+,,,,训练与flush并发,,,,,,
+,,,,,训练先到后flush,构造训练与flush并发对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：训练先到后flush,训练与flush并发/训练先到后flush场景下train/commit/redirect信息被正确吸收；训练不会丢失、重放或越序，训练后下一轮相关预测行为与训练结果一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,flush先到后训练,构造训练与flush并发对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：flush先到后训练,训练与flush并发/flush先到后训练场景下train/commit/redirect信息被正确吸收；训练不会丢失、重放或越序，训练后下一轮相关预测行为与训练结果一致,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,使能控制,,,,,,,
+,,,,关闭某单预测器,,,,,,
+,,,,,关闭方向类预测器,构造关闭某单预测器对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：关闭方向类预测器,csr bp_ctrl配置在关闭某单预测器/关闭方向类预测器场景下按预期影响prediction/meta来源；关闭的预测器不再产生有效贡献，开启后可重新参与且不残留旧状态,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,关闭目标类预测器,构造关闭某单预测器对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：关闭目标类预测器,csr bp_ctrl配置在关闭某单预测器/关闭目标类预测器场景下按预期影响prediction/meta来源；关闭的预测器不再产生有效贡献，开启后可重新参与且不残留旧状态,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,仅保留基础预测器,,,,,,
+,,,,,仅基础方向预测有效,构造仅保留基础预测器对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：仅基础方向预测有效,csr bp_ctrl配置在仅保留基础预测器/仅基础方向预测有效场景下按预期影响prediction/meta来源；关闭的预测器不再产生有效贡献，开启后可重新参与且不残留旧状态,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,基础方向+基础目标预测有效,构造仅保留基础预测器对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：基础方向+基础目标预测有效,csr bp_ctrl配置在仅保留基础预测器/基础方向+基础目标预测有效场景下按预期影响prediction/meta来源；关闭的预测器不再产生有效贡献，开启后可重新参与且不残留旧状态,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,全部预测器使能,,,,,,
+,,,,,冷启动全开,构造全部预测器使能对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：冷启动全开,csr bp_ctrl配置在全部预测器使能/冷启动全开场景下按预期影响prediction/meta来源；关闭的预测器不再产生有效贡献，开启后可重新参与且不残留旧状态,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P0
+,,,,,训练稳定后全开,构造全部预测器使能对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：训练稳定后全开,csr bp_ctrl配置在全部预测器使能/训练稳定后全开场景下按预期影响prediction/meta来源；关闭的预测器不再产生有效贡献，开启后可重新参与且不残留旧状态,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,运行中开关切换,,,,,,
+,,,,,从关闭切换到开启,构造运行中开关切换对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：从关闭切换到开启,csr bp_ctrl配置在运行中开关切换/从关闭切换到开启场景下按预期影响prediction/meta来源；关闭的预测器不再产生有效贡献，开启后可重新参与且不残留旧状态,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,,,,,从开启切换到关闭,构造运行中开关切换对应控制流程序，驱动ftq redirect/train/commit反馈与bp_ctrl配置；细化子场景：从开启切换到关闭,csr bp_ctrl配置在运行中开关切换/从开启切换到关闭场景下按预期影响prediction/meta来源；关闭的预测器不再产生有效贡献，开启后可重新参与且不残留旧状态,bpu.io.toFtq.prediction; bpu.io.toFtq.meta; bpu.io.toFtq.perfMeta; bpu.io.toFtq.topdownReasons; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit,等价类/正交/场景分析,P2
+,取指队列管理,,,,,,,,,
+,,FTQ,,,,,,,,
+,,,入队出队,,,,,,,
+,,,,单项入队单项出队,,,,,,
+,,,,,无环回单项流动,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：无环回单项流动,单项入队单项出队/无环回单项流动场景下FTQ分配/释放节奏正确；toIfu/toICache/toBackend输出与entry生命周期一致，不出现重复分配、重复释放或遗漏释放,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,邻近环回单项流动,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：邻近环回单项流动,单项入队单项出队/邻近环回单项流动场景下FTQ分配/释放节奏正确；toIfu/toICache/toBackend输出与entry生命周期一致，不出现重复分配、重复释放或遗漏释放,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,连续入队连续出队,,,,,,
+,,,,,满带宽连续流动,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：满带宽连续流动,连续入队连续出队/满带宽连续流动场景下FTQ分配/释放节奏正确；toIfu/toICache/toBackend输出与entry生命周期一致，不出现重复分配、重复释放或遗漏释放,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,含bubble连续流动,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：含bubble连续流动,连续入队连续出队/含bubble连续流动场景下FTQ分配/释放节奏正确；toIfu/toICache/toBackend输出与entry生命周期一致，不出现重复分配、重复释放或遗漏释放,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,只入队不出队,,,,,,
+,,,,,短时只入队积压,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：短时只入队积压,只入队不出队/短时只入队积压场景下FTQ分配/释放节奏正确；toIfu/toICache/toBackend输出与entry生命周期一致，不出现重复分配、重复释放或遗漏释放,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,接近满前持续积压,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：接近满前持续积压,只入队不出队/接近满前持续积压场景下FTQ分配/释放节奏正确；toIfu/toICache/toBackend输出与entry生命周期一致，不出现重复分配、重复释放或遗漏释放,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,只出队不入队,,,,,,
+,,,,,从非空到排空,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：从非空到排空,只出队不入队/从非空到排空场景下FTQ分配/释放节奏正确；toIfu/toICache/toBackend输出与entry生命周期一致，不出现重复分配、重复释放或遗漏释放,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,排空后保持空闲,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：排空后保持空闲,只出队不入队/排空后保持空闲场景下FTQ分配/释放节奏正确；toIfu/toICache/toBackend输出与entry生命周期一致，不出现重复分配、重复释放或遗漏释放,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,入队出队同拍,,,,,,
+,,,,,同拍稳定推进,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：同拍稳定推进,入队出队同拍/同拍稳定推进场景下FTQ分配/释放节奏正确；toIfu/toICache/toBackend输出与entry生命周期一致，不出现重复分配、重复释放或遗漏释放,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,同拍邻近环回推进,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：同拍邻近环回推进,入队出队同拍/同拍邻近环回推进场景下FTQ分配/释放节奏正确；toIfu/toICache/toBackend输出与entry生命周期一致，不出现重复分配、重复释放或遗漏释放,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,指针管理,,,,,,,
+,,,,bpuPtr自然增长,,,,,,
+,,,,,单步自然增长,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：单步自然增长,bpuPtr自然增长/单步自然增长场景下bpuPtr/ifuPtr/commitPtr相对关系保持合法；环回前后索引、empty/full判定和对外输出定位一致,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,连续多拍自然增长,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：连续多拍自然增长,bpuPtr自然增长/连续多拍自然增长场景下bpuPtr/ifuPtr/commitPtr相对关系保持合法；环回前后索引、empty/full判定和对外输出定位一致,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,ifuPtr自然增长,,,,,,
+,,,,,单步自然增长,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：单步自然增长,ifuPtr自然增长/单步自然增长场景下bpuPtr/ifuPtr/commitPtr相对关系保持合法；环回前后索引、empty/full判定和对外输出定位一致,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,连续多拍自然增长,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：连续多拍自然增长,ifuPtr自然增长/连续多拍自然增长场景下bpuPtr/ifuPtr/commitPtr相对关系保持合法；环回前后索引、empty/full判定和对外输出定位一致,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,commitPtr自然增长,,,,,,
+,,,,,单步自然增长,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：单步自然增长,commitPtr自然增长/单步自然增长场景下bpuPtr/ifuPtr/commitPtr相对关系保持合法；环回前后索引、empty/full判定和对外输出定位一致,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,连续多拍自然增长,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：连续多拍自然增长,commitPtr自然增长/连续多拍自然增长场景下bpuPtr/ifuPtr/commitPtr相对关系保持合法；环回前后索引、empty/full判定和对外输出定位一致,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,环回边界,,,,,,
+,,,,,bpuPtr环回,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：bpuPtr环回,环回边界/bpuPtr环回场景下bpuPtr/ifuPtr/commitPtr相对关系保持合法；环回前后索引、empty/full判定和对外输出定位一致,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,ifu/commitPtr环回,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：ifu/commitPtr环回,环回边界/ifu/commitPtr环回场景下bpuPtr/ifuPtr/commitPtr相对关系保持合法；环回前后索引、empty/full判定和对外输出定位一致,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,多指针相对关系保持,,,,,,
+,,,,,生产快于消费窗口,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：生产快于消费窗口,多指针相对关系保持/生产快于消费窗口场景下bpuPtr/ifuPtr/commitPtr相对关系保持合法；环回前后索引、empty/full判定和对外输出定位一致,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,消费追平生产窗口,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：消费追平生产窗口,多指针相对关系保持/消费追平生产窗口场景下bpuPtr/ifuPtr/commitPtr相对关系保持合法；环回前后索引、empty/full判定和对外输出定位一致,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,队列边界,,,,,,,
+,,,,队列空,,,,,,
+,,,,,冷启动为空,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：冷启动为空,队列空/冷启动为空场景下空/近满/满状态转换正确；上游回压、下游发射和恢复后重启均无死锁、无丢项,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P0
+,,,,,flush后为空,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：flush后为空,队列空/flush后为空场景下空/近满/满状态转换正确；上游回压、下游发射和恢复后重启均无死锁、无丢项,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,队列接近满,,,,,,
+,,,,,剩1个entry空间,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：剩1个entry空间,队列接近满/剩1个entry空间场景下空/近满/满状态转换正确；上游回压、下游发射和恢复后重启均无死锁、无丢项,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,剩2个entry空间,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：剩2个entry空间,队列接近满/剩2个entry空间场景下空/近满/满状态转换正确；上游回压、下游发射和恢复后重启均无死锁、无丢项,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,队列满,,,,,,
+,,,,,满时上游继续请求,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：满时上游继续请求,队列满/满时上游继续请求场景下空/近满/满状态转换正确；上游回压、下游发射和恢复后重启均无死锁、无丢项,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,满后等待下游释放,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：满后等待下游释放,队列满/满后等待下游释放场景下空/近满/满状态转换正确；上游回压、下游发射和恢复后重启均无死锁、无丢项,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,空转恢复,,,,,,
+,,,,,短空闲后恢复,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：短空闲后恢复,空转恢复/短空闲后恢复场景下空/近满/满状态转换正确；上游回压、下游发射和恢复后重启均无死锁、无丢项,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,长空闲后恢复,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：长空闲后恢复,空转恢复/长空闲后恢复场景下空/近满/满状态转换正确；上游回压、下游发射和恢复后重启均无死锁、无丢项,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,满后恢复,,,,,,
+,,,,,释放1项后恢复,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：释放1项后恢复,满后恢复/释放1项后恢复场景下空/近满/满状态转换正确；上游回压、下游发射和恢复后重启均无死锁、无丢项,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,连续释放后恢复,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：连续释放后恢复,满后恢复/连续释放后恢复场景下空/近满/满状态转换正确；上游回压、下游发射和恢复后重启均无死锁、无丢项,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,异常/提交,,,,,,,
+,,,,backend exception回传,,,,,,
+,,,,,exception单独回传,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：exception单独回传,backend exception回传/exception单独回传场景下commit、exception、redirect相关信息按优先级进入FTQ；训练与提交不丢失，异常或redirect不会污染错误entry,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,exception后训练抑制,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：exception后训练抑制,backend exception回传/exception后训练抑制场景下commit、exception、redirect相关信息按优先级进入FTQ；训练与提交不丢失，异常或redirect不会污染错误entry,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,commit信息训练,,,,,,
+,,,,,单条commit训练,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：单条commit训练,commit信息训练/单条commit训练场景下commit、exception、redirect相关信息按优先级进入FTQ；训练与提交不丢失，异常或redirect不会污染错误entry,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,连续commit训练,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：连续commit训练,commit信息训练/连续commit训练场景下commit、exception、redirect相关信息按优先级进入FTQ；训练与提交不丢失，异常或redirect不会污染错误entry,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,commit与redirect并发,,,,,,
+,,,,,commit先到,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：commit先到,commit与redirect并发/commit先到场景下commit、exception、redirect相关信息按优先级进入FTQ；训练与提交不丢失，异常或redirect不会污染错误entry,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,redirect先到,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：redirect先到,commit与redirect并发/redirect先到场景下commit、exception、redirect相关信息按优先级进入FTQ；训练与提交不丢失，异常或redirect不会污染错误entry,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,异常与commit并发,,,,,,
+,,,,,同拍并发,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：同拍并发,异常与commit并发/同拍并发场景下commit、exception、redirect相关信息按优先级进入FTQ；训练与提交不丢失，异常或redirect不会污染错误entry,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,邻拍并发,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：邻拍并发,异常与commit并发/邻拍并发场景下commit、exception、redirect相关信息按优先级进入FTQ；训练与提交不丢失，异常或redirect不会污染错误entry,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,重定向与冲刷恢复,,,,,,,,,
+,,TOP,,,,,,,,
+,,,后端重定向闭环,,,,,,,
+,,,,基本闭环,,,,,,
+,,,,,单次redirect恢复,backend.toFtq.redirect.valid置1，分别覆盖ctrl/memVio/interrupt/isMisPred；同时制造前端存在在途fetch/ibuffer项；细化子场景：一次backend redirect后恢复新路径,needFlush与ibuffer.io.flush按预期生效，旧路径cfVec被清空，新路径从redirect target重新建立；stallReason中冲刷相关现象与redirect原因一致,io.backend.toFtq.redirect; ibuffer.io.flush; ftq.io.fromBackend; io.backend.cfVec; io.backend.stallReason,场景分析,P0
+,,,,,背靠背redirect恢复,backend.toFtq.redirect.valid置1，分别覆盖ctrl/memVio/interrupt/isMisPred；同时制造前端存在在途fetch/ibuffer项；细化子场景：连续两个redirect窗口内恢复新路径,needFlush与ibuffer.io.flush按预期生效，旧路径cfVec被清空，新路径从redirect target重新建立；stallReason中冲刷相关现象与redirect原因一致,io.backend.toFtq.redirect; ibuffer.io.flush; ftq.io.fromBackend; io.backend.cfVec; io.backend.stallReason,场景分析,P2
+,,FTQ,,,,,,,,
+,,,重定向处理,,,,,,,
+,,,,IFU checker redirect,,,,,,
+,,,,,单次checker redirect,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：单次checker redirect,IFU checker redirect/单次checker redirect场景下旧路径entry被正确作废，新路径重新分配位置正确；toIfu/toICache不会继续发射已失效路径，fromBpu/fromIfu来源优先级可解释,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P1
+,,,,,checker与backend redirect竞争,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：checker与backend redirect竞争,IFU checker redirect/checker与backend redirect竞争场景下旧路径entry被正确作废，新路径重新分配位置正确；toIfu/toICache不会继续发射已失效路径，fromBpu/fromIfu来源优先级可解释,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P1
+,,,,backend ctrl redirect,,,,,,
+,,,,,单次ctrl redirect,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：单次ctrl redirect,backend ctrl redirect/单次ctrl redirect场景下旧路径entry被正确作废，新路径重新分配位置正确；toIfu/toICache不会继续发射已失效路径，fromBpu/fromIfu来源优先级可解释,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,连续ctrl redirect,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：连续ctrl redirect,backend ctrl redirect/连续ctrl redirect场景下旧路径entry被正确作废，新路径重新分配位置正确；toIfu/toICache不会继续发射已失效路径，fromBpu/fromIfu来源优先级可解释,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,backend interrupt redirect,,,,,,
+,,,,,单次interrupt redirect,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：单次interrupt redirect,backend interrupt redirect/单次interrupt redirect场景下旧路径entry被正确作废，新路径重新分配位置正确；toIfu/toICache不会继续发射已失效路径，fromBpu/fromIfu来源优先级可解释,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,中断夹在普通取指中,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：中断夹在普通取指中,backend interrupt redirect/中断夹在普通取指中场景下旧路径entry被正确作废，新路径重新分配位置正确；toIfu/toICache不会继续发射已失效路径，fromBpu/fromIfu来源优先级可解释,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,多来源背靠背redirect,,,,,,
+,,,,,IFU后接backend redirect,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：IFU后接backend redirect,多来源背靠背redirect/IFU后接backend redirect场景下旧路径entry被正确作废，新路径重新分配位置正确；toIfu/toICache不会继续发射已失效路径，fromBpu/fromIfu来源优先级可解释,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,backend后接IFU redirect,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：backend后接IFU redirect,多来源背靠背redirect/backend后接IFU redirect场景下旧路径entry被正确作废，新路径重新分配位置正确；toIfu/toICache不会继续发射已失效路径，fromBpu/fromIfu来源优先级可解释,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,redirect后重新分配entry,,,,,,
+,,,,,redirect后下一拍重分配,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：redirect后下一拍重分配,redirect后重新分配entry/redirect后下一拍重分配场景下旧路径entry被正确作废，新路径重新分配位置正确；toIfu/toICache不会继续发射已失效路径，fromBpu/fromIfu来源优先级可解释,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,,,,,redirect后多拍持续重分配,驱动BPU预测输入、IFU消费节奏、backend redirect/commit反馈与ICache请求推进；细化子场景：redirect后多拍持续重分配,redirect后重新分配entry/redirect后多拍持续重分配场景下旧路径entry被正确作废，新路径重新分配位置正确；toIfu/toICache不会继续发射已失效路径，fromBpu/fromIfu来源优先级可解释,ftq.io.toIfu.req; ftq.io.toICache.fetchReq; ftq.io.toICache.prefetchReq; ftq.io.toBackend; ftq.io.toBpu; ftq.io.fromBpu.redirect; ftq.io.fromBpu.train; ftq.io.fromBpu.commit; ftq.io.fromIfu.wbRedirect,边界值/错误推断/场景分析,P2
+,指令边界与预解码检查,,,,,,,,,
+,,IFU,,,,,,,,
+,,,PredChecker,,,,,,,
+,,,,JalFault,,,,,,
+,,,,,fault位于前半段,构造JalFault对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：JalFault发生在取指块前半段,IFU输出指令、redirect、异常、metadata在JalFault下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,fault位于后半段,构造JalFault对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：JalFault发生在取指块后半段,IFU输出指令、redirect、异常、metadata在JalFault下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,JalrFault,,,,,,
+,,,,,fault位于前半段,构造JalrFault对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：JalrFault发生在取指块前半段,IFU输出指令、redirect、异常、metadata在JalrFault下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,fault位于后半段,构造JalrFault对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：JalrFault发生在取指块后半段,IFU输出指令、redirect、异常、metadata在JalrFault下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,RetFault,,,,,,
+,,,,,fault位于前半段,构造RetFault对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：RetFault发生在取指块前半段,IFU输出指令、redirect、异常、metadata在RetFault下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,fault位于后半段,构造RetFault对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：RetFault发生在取指块后半段,IFU输出指令、redirect、异常、metadata在RetFault下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,InvalidTaken,,,,,,
+,,,,,fault位于前半段,构造InvalidTaken对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：InvalidTaken发生在取指块前半段,IFU输出指令、redirect、异常、metadata在InvalidTaken下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,fault位于后半段,构造InvalidTaken对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：InvalidTaken发生在取指块后半段,IFU输出指令、redirect、异常、metadata在InvalidTaken下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,NotCfiFault,,,,,,
+,,,,,fault位于前半段,构造NotCfiFault对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：NotCfiFault发生在取指块前半段,IFU输出指令、redirect、异常、metadata在NotCfiFault下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,fault位于后半段,构造NotCfiFault对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：NotCfiFault发生在取指块后半段,IFU输出指令、redirect、异常、metadata在NotCfiFault下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,TargetFault only,,,,,,
+,,,,,fault位于前半段,构造TargetFault only对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：TargetFault only发生在取指块前半段,IFU输出指令、redirect、异常、metadata在TargetFault only下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,fault位于后半段,构造TargetFault only对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：TargetFault only发生在取指块后半段,IFU输出指令、redirect、异常、metadata在TargetFault only下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,多fault竞争,,,,,,
+,,,,,同条指令多fault竞争,构造多fault竞争对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：同一条指令上出现多fault竞争,IFU输出指令、redirect、异常、metadata在多fault竞争下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,不同指令fault竞争,构造多fault竞争对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：相邻不同指令上出现fault竞争,IFU输出指令、redirect、异常、metadata在多fault竞争下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,指令边界/紧排,,,,,,,
+,,,,全RVI,,,,,,
+,,,,,4B步进整齐,构造全RVI对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：全RVI按4B步进整齐排列,IFU输出指令、redirect、异常、metadata在全RVI下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,跨32B边界全RVI,构造全RVI对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：全RVI排列跨越32B边界,IFU输出指令、redirect、异常、metadata在全RVI下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,全RVC,,,,,,
+,,,,,2B步进整齐,构造全RVC对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：全RVC按2B步进整齐排列,IFU输出指令、redirect、异常、metadata在全RVC下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,跨32B边界全RVC,构造全RVC对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：全RVC排列跨越32B边界,IFU输出指令、redirect、异常、metadata在全RVC下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,混排,,,,,,
+,,,,,RVC主导混排,构造混排对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：混排中RVC占主要比例,IFU输出指令、redirect、异常、metadata在混排下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,RVI主导混排,构造混排对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：混排中RVI占主要比例,IFU输出指令、redirect、异常、metadata在混排下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,firstInstrIsHalfRvi=1,,,,,,
+,,,,,块首补半成功,构造firstInstrIsHalfRvi=1对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：块首半条RVI在本块被正确补齐,IFU输出指令、redirect、异常、metadata在firstInstrIsHalfRvi=1下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,块首补半后接RVC,构造firstInstrIsHalfRvi=1对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：块首补半后继续接RVC,IFU输出指令、redirect、异常、metadata在firstInstrIsHalfRvi=1下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,lastInstrIsHalfRvi=1,,,,,,
+,,,,,块尾半条等待下块,构造lastInstrIsHalfRvi=1对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：块尾半条RVI等待下一块补齐,IFU输出指令、redirect、异常、metadata在lastInstrIsHalfRvi=1下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,块尾半条后续成功补齐,构造lastInstrIsHalfRvi=1对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：下一块成功补齐块尾半条RVI,IFU输出指令、redirect、异常、metadata在lastInstrIsHalfRvi=1下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,2-taken风险,,,,,,
+,,,,,前一条taken优先,构造2-taken风险对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：两条候选taken中前一条优先,IFU输出指令、redirect、异常、metadata在2-taken风险下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,后一条taken被抑制,构造2-taken风险对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：两条候选taken中后一条被抑制,IFU输出指令、redirect、异常、metadata在2-taken风险下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,取指异常与错误传播,,,,,,,,,
+,,TOP,,,,,,,,
+,,,异常取指闭环,,,,,,,
+,,,,基本闭环,,,,,,
+,,,,,单异常源闭环,分别制造ICache/ITLB/PMP/InstrUncache异常返回，backend可接受，且存在有效取指请求；细化子场景：仅一个异常源触发前端异常闭环,异常指令不会作为正常cfVec继续前递；io.backend.fromIfu或io.error能够体现异常来源，异常后的后续取指从正确恢复点继续,ifu.io.fromICache; ifu.io.fromUncache; io.backend.fromIfu; io.backend.cfVec; io.error,场景分析,P1
+,,,,,异常后恢复取指,分别制造ICache/ITLB/PMP/InstrUncache异常返回，backend可接受，且存在有效取指请求；细化子场景：异常处理后前端重新恢复取指,异常指令不会作为正常cfVec继续前递；io.backend.fromIfu或io.error能够体现异常来源，异常后的后续取指从正确恢复点继续,ifu.io.fromICache; ifu.io.fromUncache; io.backend.fromIfu; io.backend.cfVec; io.error,场景分析,P1
+,,IFU,,,,,,,,
+,,,异常传播,,,,,,,
+,,,,ICache pf,,,,,,
+,,,,,pf单独传播,构造ICache pf对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：ICache page fault单独传播,IFU输出指令、redirect、异常、metadata在ICache pf下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,pf后恢复取指,构造ICache pf对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：page fault处理后恢复取指,IFU输出指令、redirect、异常、metadata在ICache pf下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,ICache af,,,,,,
+,,,,,af单独传播,构造ICache af对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：ICache access fault单独传播,IFU输出指令、redirect、异常、metadata在ICache af下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,af后恢复取指,构造ICache af对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：access fault处理后恢复取指,IFU输出指令、redirect、异常、metadata在ICache af下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,RVC非法指令,,,,,,
+,,,,,单条RVC非法,构造RVC非法指令对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：单条RVC非法指令被捕获,IFU输出指令、redirect、异常、metadata在RVC非法指令下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,非法后续合法指令恢复,构造RVC非法指令对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：非法指令后继续恢复合法流,IFU输出指令、redirect、异常、metadata在RVC非法指令下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,uncache异常,,,,,,
+,,,,,uncache单独异常,构造uncache异常对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：uncache路径单独出现异常,IFU输出指令、redirect、异常、metadata在uncache异常下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,uncache异常后切回普通路径,构造uncache异常对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：uncache异常后恢复普通ICache路径,IFU输出指令、redirect、异常、metadata在uncache异常下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,异常与redirect并发,,,,,,
+,,,,,异常先产生,构造异常与redirect并发对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：异常先于redirect产生,IFU输出指令、redirect、异常、metadata在异常与redirect并发下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,redirect先产生,构造异常与redirect并发对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：redirect先于异常产生,IFU输出指令、redirect、异常、metadata在异常与redirect并发下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,ICache,,,,,,,,
+,,,异常,,,,,,,
+,,,,总线错误,,,,,,
+,,,,,单次总线错误,通过L2_CACHE/PTW/PMP/FTQ激励制造总线错误；细化子场景：单次总线错误上报,ICache响应、miss处理、预取和异常结果在总线错误下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,连续总线错误,通过L2_CACHE/PTW/PMP/FTQ激励制造总线错误；细化子场景：连续多拍总线错误上报,ICache响应、miss处理、预取和异常结果在总线错误下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,权限错误,,,,,,
+,,,,,页表权限拒绝,通过L2_CACHE/PTW/PMP/FTQ激励制造权限错误；细化子场景：页表权限导致取指失败,ICache响应、miss处理、预取和异常结果在权限错误下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,PMP权限拒绝,通过L2_CACHE/PTW/PMP/FTQ激励制造权限错误；细化子场景：PMP权限导致取指失败,ICache响应、miss处理、预取和异常结果在权限错误下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,ITLB miss,,,,,,
+,,,,,miss后retry成功,通过L2_CACHE/PTW/PMP/FTQ激励制造ITLB miss；细化子场景：ITLB miss后retry成功,ICache响应、miss处理、预取和异常结果在ITLB miss下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,miss后异常返回,通过L2_CACHE/PTW/PMP/FTQ激励制造ITLB miss；细化子场景：ITLB miss后最终异常返回,ICache响应、miss处理、预取和异常结果在ITLB miss下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P1
+,,,,PMP fail,,,,,,
+,,,,,区间内地址拒绝,通过L2_CACHE/PTW/PMP/FTQ激励制造PMP fail；细化子场景：地址位于拒绝区间内,ICache响应、miss处理、预取和异常结果在PMP fail下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,边界地址拒绝,通过L2_CACHE/PTW/PMP/FTQ激励制造PMP fail；细化子场景：地址命中权限边界而拒绝,ICache响应、miss处理、预取和异常结果在PMP fail下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P1
+,,,,fencei后恢复,,,,,,
+,,,,,fencei后首拍恢复,通过L2_CACHE/PTW/PMP/FTQ激励制造fencei后恢复；细化子场景：fencei后首个访问恢复,ICache响应、miss处理、预取和异常结果在fencei后恢复下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,,,,,fencei后连续命中恢复,通过L2_CACHE/PTW/PMP/FTQ激励制造fencei后恢复；细化子场景：fencei后连续访问恢复命中,ICache响应、miss处理、预取和异常结果在fencei后恢复下正确,icache mainpipe/missunit/prefetch/io.toIfu/io.error,等价类/边界值/场景分析,P2
+,地址翻译与权限检查,,,,,,,,,
+,,ITLB,,,,,,,,
+,,,命中/缺失,,,,,,,
+,,,,命中,,,,,,
+,,,,,bare直通命中,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：bare直通命中,命中/bare直通命中场景下ITLB命中/miss判定正确；命中时返回的地址转换结果稳定，miss时PTW请求、refill和retry时序正确，无重复walk,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,TLB缓存命中,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：TLB缓存命中,命中/TLB缓存命中场景下ITLB命中/miss判定正确；命中时返回的地址转换结果稳定，miss时PTW请求、refill和retry时序正确，无重复walk,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,单次miss,,,,,,
+,,,,,单请求walk成功,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：单请求walk成功,单次miss/单请求walk成功场景下ITLB命中/miss判定正确；命中时返回的地址转换结果稳定，miss时PTW请求、refill和retry时序正确，无重复walk,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,单请求walk异常,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：单请求walk异常,单次miss/单请求walk异常场景下ITLB命中/miss判定正确；命中时返回的地址转换结果稳定，miss时PTW请求、refill和retry时序正确，无重复walk,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P1
+,,,,并发miss,,,,,,
+,,,,,相邻页并发miss,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：相邻页并发miss,并发miss/相邻页并发miss场景下ITLB命中/miss判定正确；命中时返回的地址转换结果稳定，miss时PTW请求、refill和retry时序正确，无重复walk,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,不同页并发miss,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：不同页并发miss,并发miss/不同页并发miss场景下ITLB命中/miss判定正确；命中时返回的地址转换结果稳定，miss时PTW请求、refill和retry时序正确，无重复walk,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,miss后refill,,,,,,
+,,,,,refill后首拍命中,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：refill后首拍命中,miss后refill/refill后首拍命中场景下ITLB命中/miss判定正确；命中时返回的地址转换结果稳定，miss时PTW请求、refill和retry时序正确，无重复walk,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,refill后连续命中,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：refill后连续命中,miss后refill/refill后连续命中场景下ITLB命中/miss判定正确；命中时返回的地址转换结果稳定，miss时PTW请求、refill和retry时序正确，无重复walk,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,翻译模式,,,,,,,
+,,,,bare模式,,,,,,
+,,,,,低地址bare取指,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：低地址bare取指,bare模式/低地址bare取指场景下地址翻译模式与CSR配置一致；stage1/stage2/bare相关行为不混叠，输出的翻译结果与模式匹配,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,高地址bare取指,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：高地址bare取指,bare模式/高地址bare取指场景下地址翻译模式与CSR配置一致；stage1/stage2/bare相关行为不混叠，输出的翻译结果与模式匹配,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,sv39 stage1,,,,,,
+,,,,,页内sv39取指,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：页内sv39取指,sv39 stage1/页内sv39取指场景下地址翻译模式与CSR配置一致；stage1/stage2/bare相关行为不混叠，输出的翻译结果与模式匹配,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,跨页sv39取指,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：跨页sv39取指,sv39 stage1/跨页sv39取指场景下地址翻译模式与CSR配置一致；stage1/stage2/bare相关行为不混叠，输出的翻译结果与模式匹配,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P1
+,,,,hypervisor两阶段,,,,,,
+,,,,,两阶段均命中,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：两阶段均命中,hypervisor两阶段/两阶段均命中场景下地址翻译模式与CSR配置一致；stage1/stage2/bare相关行为不混叠，输出的翻译结果与模式匹配,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,stage2参与miss/等待,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：stage2参与miss/等待,hypervisor两阶段/stage2参与miss/等待场景下地址翻译模式与CSR配置一致；stage1/stage2/bare相关行为不混叠，输出的翻译结果与模式匹配,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,onlyStage1,,,,,,
+,,,,,onlyStage1页内,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：onlyStage1页内,onlyStage1/onlyStage1页内场景下地址翻译模式与CSR配置一致；stage1/stage2/bare相关行为不混叠，输出的翻译结果与模式匹配,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,onlyStage1跨页,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：onlyStage1跨页,onlyStage1/onlyStage1跨页场景下地址翻译模式与CSR配置一致；stage1/stage2/bare相关行为不混叠，输出的翻译结果与模式匹配,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P1
+,,,刷新,,,,,,,
+,,,,sfence单次,,,,,,
+,,,,,无在途miss时sfence,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：无在途miss时sfence,sfence单次/无在途miss时sfence场景下sfence影响范围和生效时机正确；旧翻译被丢弃，刷新前后的请求不会交叉使用失效结果,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,有在途miss时sfence,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：有在途miss时sfence,sfence单次/有在途miss时sfence场景下sfence影响范围和生效时机正确；旧翻译被丢弃，刷新前后的请求不会交叉使用失效结果,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,连续sfence,,,,,,
+,,,,,相同上下文连续sfence,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：相同上下文连续sfence,连续sfence/相同上下文连续sfence场景下sfence影响范围和生效时机正确；旧翻译被丢弃，刷新前后的请求不会交叉使用失效结果,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,不同上下文连续sfence,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：不同上下文连续sfence,连续sfence/不同上下文连续sfence场景下sfence影响范围和生效时机正确；旧翻译被丢弃，刷新前后的请求不会交叉使用失效结果,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,sfence与miss并发,,,,,,
+,,,,,sfence先到,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：sfence先到,sfence与miss并发/sfence先到场景下sfence影响范围和生效时机正确；旧翻译被丢弃，刷新前后的请求不会交叉使用失效结果,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,miss先到,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：miss先到,sfence与miss并发/miss先到场景下sfence影响范围和生效时机正确；旧翻译被丢弃，刷新前后的请求不会交叉使用失效结果,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,异常,,,,,,,
+,,,,page fault,,,,,,
+,,,,,PTE无效导致page fault,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：PTE无效导致page fault,page fault/PTE无效导致page fault场景下异常类型区分正确；page fault/guest page fault/access fault最终沿前端异常链路传播，正常取指不会误通过,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P1
+,,,,,权限位不符导致page fault,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：权限位不符导致page fault,page fault/权限位不符导致page fault场景下异常类型区分正确；page fault/guest page fault/access fault最终沿前端异常链路传播，正常取指不会误通过,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P1
+,,,,guest page fault,,,,,,
+,,,,,G-stage无效,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：G-stage无效,guest page fault/G-stage无效场景下异常类型区分正确；page fault/guest page fault/access fault最终沿前端异常链路传播，正常取指不会误通过,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,G-stage权限不符,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：G-stage权限不符,guest page fault/G-stage权限不符场景下异常类型区分正确；page fault/guest page fault/access fault最终沿前端异常链路传播，正常取指不会误通过,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,access fault,,,,,,
+,,,,,属性检查拒绝,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：属性检查拒绝,access fault/属性检查拒绝场景下异常类型区分正确；page fault/guest page fault/access fault最终沿前端异常链路传播，正常取指不会误通过,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,,非法物理属性拒绝,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：非法物理属性拒绝,access fault/非法物理属性拒绝场景下异常类型区分正确；page fault/guest page fault/access fault最终沿前端异常链路传播，正常取指不会误通过,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P2
+,,,,fake pte边界,,,,,,
+,,,,,fake pte低边界,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：fake pte低边界,fake pte边界/fake pte低边界场景下异常类型区分正确；page fault/guest page fault/access fault最终沿前端异常链路传播，正常取指不会误通过,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P1
+,,,,,fake pte高边界,配置tlbCsr模式、sfence时序、PTW返回类型与取指虚地址属性；细化子场景：fake pte高边界,fake pte边界/fake pte高边界场景下异常类型区分正确；page fault/guest page fault/access fault最终沿前端异常链路传播，正常取指不会误通过,itlb.io.requestor; itlb.io.ptw.req; itlb.io.ptw.resp; itlb.io.flushPipe; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr,等价类/边界值/因果分析,P1
+,,PTW,,,,,,,,
+,,,请求握手,,,,,,,
+,,,,单请求,,,,,,
+,,,,,单次walk正常完成,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：单次walk正常完成,单请求/单次walk正常完成场景下PTW请求发起、等待、返回或取消时序正确；请求不会丢失或重复，flush后失效walk不会再驱动旧翻译结果,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,,,单次walk异常完成,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：单次walk异常完成,单请求/单次walk异常完成场景下PTW请求发起、等待、返回或取消时序正确；请求不会丢失或重复，flush后失效walk不会再驱动旧翻译结果,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P1
+,,,,多请求排队,,,,,,
+,,,,,两项排队,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：两项排队,多请求排队/两项排队场景下PTW请求发起、等待、返回或取消时序正确；请求不会丢失或重复，flush后失效walk不会再驱动旧翻译结果,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,,,多项连续排队,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：多项连续排队,多请求排队/多项连续排队场景下PTW请求发起、等待、返回或取消时序正确；请求不会丢失或重复，flush后失效walk不会再驱动旧翻译结果,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,,反压,,,,,,
+,,,,,req ready拉低,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：req ready拉低,反压/req ready拉低场景下PTW请求发起、等待、返回或取消时序正确；请求不会丢失或重复，flush后失效walk不会再驱动旧翻译结果,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,,,resp延迟拉长,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：resp延迟拉长,反压/resp延迟拉长场景下PTW请求发起、等待、返回或取消时序正确；请求不会丢失或重复，flush后失效walk不会再驱动旧翻译结果,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,,取消/flush,,,,,,
+,,,,,flush前已发起请求,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：flush前已发起请求,取消/flush/flush前已发起请求场景下PTW请求发起、等待、返回或取消时序正确；请求不会丢失或重复，flush后失效walk不会再驱动旧翻译结果,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,,,flush与返回同拍,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：flush与返回同拍,取消/flush/flush与返回同拍场景下PTW请求发起、等待、返回或取消时序正确；请求不会丢失或重复，flush后失效walk不会再驱动旧翻译结果,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,返回类型,,,,,,,
+,,,,正常pte返回,,,,,,
+,,,,,叶子PTE返回,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：叶子PTE返回,正常pte返回/叶子PTE返回场景下PTW返回被正确解释为正常/异常/权限失败；对应ITLB retry或异常传播路径正确，前端不会把错误翻译当作正常结果使用,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,,,可继续使用的正常返回,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：可继续使用的正常返回,正常pte返回/可继续使用的正常返回场景下PTW返回被正确解释为正常/异常/权限失败；对应ITLB retry或异常传播路径正确，前端不会把错误翻译当作正常结果使用,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,,异常返回,,,,,,
+,,,,,page fault异常返回,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：page fault异常返回,异常返回/page fault异常返回场景下PTW返回被正确解释为正常/异常/权限失败；对应ITLB retry或异常传播路径正确，前端不会把错误翻译当作正常结果使用,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P1
+,,,,,access fault异常返回,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：access fault异常返回,异常返回/access fault异常返回场景下PTW返回被正确解释为正常/异常/权限失败；对应ITLB retry或异常传播路径正确，前端不会把错误翻译当作正常结果使用,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P1
+,,,,权限不符返回,,,,,,
+,,,,,X位权限不符,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：X位权限不符,权限不符返回/X位权限不符场景下PTW返回被正确解释为正常/异常/权限失败；对应ITLB retry或异常传播路径正确，前端不会把错误翻译当作正常结果使用,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,,,特权级权限不符,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：特权级权限不符,权限不符返回/特权级权限不符场景下PTW返回被正确解释为正常/异常/权限失败；对应ITLB retry或异常传播路径正确，前端不会把错误翻译当作正常结果使用,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,,超时/延迟返回,,,,,,
+,,,,,固定长延迟返回,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：固定长延迟返回,超时/延迟返回/固定长延迟返回场景下PTW返回被正确解释为正常/异常/权限失败；对应ITLB retry或异常传播路径正确，前端不会把错误翻译当作正常结果使用,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,,,,随机延迟返回,构造PTW请求排队关系、下层页表返回类型、sfence打断时序与虚地址映射属性；细化子场景：随机延迟返回,超时/延迟返回/随机延迟返回场景下PTW返回被正确解释为正常/异常/权限失败；对应ITLB retry或异常传播路径正确，前端不会把错误翻译当作正常结果使用,itlb.io.ptw.req; itlb.io.ptw.resp; io.ptw.req; io.ptw.resp; io.sfence; io.tlbCsr; io.backend.fromIfu,等价类/边界值/因果分析,P2
+,,PMP,,,,,,,,
+,,,权限组合,,,,,,,
+,,,,可执行允许,,,,,,
+,,,,,单条规则允许,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：单条规则允许,可执行允许/单条规则允许场景下PMP/PMA权限判定与配置一致；允许的请求能够继续取指，拒绝的请求产生正确的access fault且不会进入正常取指路径,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,,,,,重叠规则最终允许,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：重叠规则最终允许,可执行允许/重叠规则最终允许场景下PMP/PMA权限判定与配置一致；允许的请求能够继续取指，拒绝的请求产生正确的access fault且不会进入正常取指路径,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,,,,可执行拒绝,,,,,,
+,,,,,单条规则拒绝,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：单条规则拒绝,可执行拒绝/单条规则拒绝场景下PMP/PMA权限判定与配置一致；允许的请求能够继续取指，拒绝的请求产生正确的access fault且不会进入正常取指路径,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,,,,,重叠规则最终拒绝,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：重叠规则最终拒绝,可执行拒绝/重叠规则最终拒绝场景下PMP/PMA权限判定与配置一致；允许的请求能够继续取指，拒绝的请求产生正确的access fault且不会进入正常取指路径,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,,,,地址边界命中,,,,,,
+,,,,,起始边界命中,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：起始边界命中,地址边界命中/起始边界命中场景下PMP/PMA权限判定与配置一致；允许的请求能够继续取指，拒绝的请求产生正确的access fault且不会进入正常取指路径,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P1
+,,,,,末尾边界命中,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：末尾边界命中,地址边界命中/末尾边界命中场景下PMP/PMA权限判定与配置一致；允许的请求能够继续取指，拒绝的请求产生正确的access fault且不会进入正常取指路径,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P1
+,,,,多项规则优先级,,,,,,
+,,,,,高优先级规则放行,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：高优先级规则放行,多项规则优先级/高优先级规则放行场景下PMP/PMA权限判定与配置一致；允许的请求能够继续取指，拒绝的请求产生正确的access fault且不会进入正常取指路径,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,,,,,高优先级规则拒绝,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：高优先级规则拒绝,多项规则优先级/高优先级规则拒绝场景下PMP/PMA权限判定与配置一致；允许的请求能够继续取指，拒绝的请求产生正确的access fault且不会进入正常取指路径,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,,,配置更新,,,,,,,
+,,,,静态配置,,,,,,
+,,,,,静态全程允许,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：静态全程允许,静态配置/静态全程允许场景下PMP配置切换生效时机正确；切换前后请求按各自采样到的配置判定，不出现新旧权限混用,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,,,,,静态全程拒绝,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：静态全程拒绝,静态配置/静态全程拒绝场景下PMP配置切换生效时机正确；切换前后请求按各自采样到的配置判定，不出现新旧权限混用,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,,,,运行时切换,,,,,,
+,,,,,允许切换为拒绝,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：允许切换为拒绝,运行时切换/允许切换为拒绝场景下PMP配置切换生效时机正确；切换前后请求按各自采样到的配置判定，不出现新旧权限混用,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,,,,,拒绝切换为允许,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：拒绝切换为允许,运行时切换/拒绝切换为允许场景下PMP配置切换生效时机正确；切换前后请求按各自采样到的配置判定，不出现新旧权限混用,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,,,,切换与取指并发,,,,,,
+,,,,,配置切换先采样,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：配置切换先采样,切换与取指并发/配置切换先采样场景下PMP配置切换生效时机正确；切换前后请求按各自采样到的配置判定，不出现新旧权限混用,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,,,,,请求先采样后配置切换,配置PMP CSR项、地址命中区间、特权模式与取指请求时序组合；细化子场景：请求先采样后配置切换,切换与取指并发/请求先采样后配置切换场景下PMP配置切换生效时机正确；切换前后请求按各自采样到的配置判定，不出现新旧权限混用,pmp.io.pmp; pmp.io.pma; icache.io.pmp.req; icache.io.pmp.resp; io.csrCtrl.distribute_csr; io.tlbCsr.mbmc,等价类/边界值/因果分析,P2
+,取指结果交付,,,,,,,,,
+,,IBuffer,,,,,,,,
+,,,入队,,,,,,,
+,,,,单拍单条,,,,,,
+,,,,,顺序流单条入队,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：顺序流单条入队,单拍单条/顺序流单条入队场景下入队条目数、PC顺序和指令边界保持正确；buffer状态变化与上游IFU输出一致，不出现重复入队或漏入队,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,redirect后单条入队,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：redirect后单条入队,单拍单条/redirect后单条入队场景下入队条目数、PC顺序和指令边界保持正确；buffer状态变化与上游IFU输出一致，不出现重复入队或漏入队,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,单拍多条,,,,,,
+,,,,,同块多条连续入队,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：同块多条连续入队,单拍多条/同块多条连续入队场景下入队条目数、PC顺序和指令边界保持正确；buffer状态变化与上游IFU输出一致，不出现重复入队或漏入队,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,混合长度多条入队,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：混合长度多条入队,单拍多条/混合长度多条入队场景下入队条目数、PC顺序和指令边界保持正确；buffer状态变化与上游IFU输出一致，不出现重复入队或漏入队,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,连续满带宽入队,,,,,,
+,,,,,长突发连续入队,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：长突发连续入队,连续满带宽入队/长突发连续入队场景下入队条目数、PC顺序和指令边界保持正确；buffer状态变化与上游IFU输出一致，不出现重复入队或漏入队,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,周期性突发入队,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：周期性突发入队,连续满带宽入队/周期性突发入队场景下入队条目数、PC顺序和指令边界保持正确；buffer状态变化与上游IFU输出一致，不出现重复入队或漏入队,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,有bubble入队,,,,,,
+,,,,,单个bubble插入,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：单个bubble插入,有bubble入队/单个bubble插入场景下入队条目数、PC顺序和指令边界保持正确；buffer状态变化与上游IFU输出一致，不出现重复入队或漏入队,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,周期性bubble插入,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：周期性bubble插入,有bubble入队/周期性bubble插入场景下入队条目数、PC顺序和指令边界保持正确；buffer状态变化与上游IFU输出一致，不出现重复入队或漏入队,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,出队,,,,,,,
+,,,,backend完全可接受,,,,,,
+,,,,,全lane可出队,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：全lane可出队,backend完全可接受/全lane可出队场景下出队lane分布、cfVec有效位和程序顺序正确；backend反压恢复后不会重发旧项或跳过未消费项,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,部分有效但全部可接收,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：部分有效但全部可接收,backend完全可接受/部分有效但全部可接收场景下出队lane分布、cfVec有效位和程序顺序正确；backend反压恢复后不会重发旧项或跳过未消费项,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,backend全反压,,,,,,
+,,,,,短时全反压,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：短时全反压,backend全反压/短时全反压场景下出队lane分布、cfVec有效位和程序顺序正确；backend反压恢复后不会重发旧项或跳过未消费项,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,长时全反压,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：长时全反压,backend全反压/长时全反压场景下出队lane分布、cfVec有效位和程序顺序正确；backend反压恢复后不会重发旧项或跳过未消费项,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,部分lane可接受,,,,,,
+,,,,,前半lane可接受,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：前半lane可接受,部分lane可接受/前半lane可接受场景下出队lane分布、cfVec有效位和程序顺序正确；backend反压恢复后不会重发旧项或跳过未消费项,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,后半lane可接受,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：后半lane可接受,部分lane可接受/后半lane可接受场景下出队lane分布、cfVec有效位和程序顺序正确；backend反压恢复后不会重发旧项或跳过未消费项,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,连续消费,,,,,,
+,,,,,连续满带宽消费,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：连续满带宽消费,连续消费/连续满带宽消费场景下出队lane分布、cfVec有效位和程序顺序正确；backend反压恢复后不会重发旧项或跳过未消费项,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,含bubble连续消费,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：含bubble连续消费,连续消费/含bubble连续消费场景下出队lane分布、cfVec有效位和程序顺序正确；backend反压恢复后不会重发旧项或跳过未消费项,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,空满边界,,,,,,,
+,,,,空,,,,,,
+,,,,,冷启动为空,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：冷启动为空,空/冷启动为空场景下full/empty边界判定正确；边界切换、flush后清空和恢复后重新推进均可解释，无死锁,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P0
+,,,,,flush后为空,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：flush后为空,空/flush后为空场景下full/empty边界判定正确；边界切换、flush后清空和恢复后重新推进均可解释，无死锁,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,接近满,,,,,,
+,,,,,仅剩1拍空间,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：仅剩1拍空间,接近满/仅剩1拍空间场景下full/empty边界判定正确；边界切换、flush后清空和恢复后重新推进均可解释，无死锁,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,剩余空间不足一个满块,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：剩余空间不足一个满块,接近满/剩余空间不足一个满块场景下full/empty边界判定正确；边界切换、flush后清空和恢复后重新推进均可解释，无死锁,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,满,,,,,,
+,,,,,满时上游继续到达,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：满时上游继续到达,满/满时上游继续到达场景下full/empty边界判定正确；边界切换、flush后清空和恢复后重新推进均可解释，无死锁,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,满时等待backend释放,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：满时等待backend释放,满/满时等待backend释放场景下full/empty边界判定正确；边界切换、flush后清空和恢复后重新推进均可解释，无死锁,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,flush后空,,,,,,
+,,,,,flush前有积压,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：flush前有积压,flush后空/flush前有积压场景下full/empty边界判定正确；边界切换、flush后清空和恢复后重新推进均可解释，无死锁,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,flush后立即恢复入队,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：flush后立即恢复入队,flush后空/flush后立即恢复入队场景下full/empty边界判定正确；边界切换、flush后清空和恢复后重新推进均可解释，无死锁,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,满后恢复,,,,,,
+,,,,,释放1拍后恢复,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：释放1拍后恢复,满后恢复/释放1拍后恢复场景下full/empty边界判定正确；边界切换、flush后清空和恢复后重新推进均可解释，无死锁,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,连续释放后恢复,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：连续释放后恢复,满后恢复/连续释放后恢复场景下full/empty边界判定正确；边界切换、flush后清空和恢复后重新推进均可解释，无死锁,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,flush/redirect,,,,,,,
+,,,,ctrl redirect flush,,,,,,
+,,,,,flush前已有待发项,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：flush前已有待发项,ctrl redirect flush/flush前已有待发项场景下flush精确清除旧路径条目；flush与入队/出队竞争时旧路径不会残留到cfVec，恢复首拍对应新路径,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,flush后首拍恢复,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：flush后首拍恢复,ctrl redirect flush/flush后首拍恢复场景下flush精确清除旧路径条目；flush与入队/出队竞争时旧路径不会残留到cfVec，恢复首拍对应新路径,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,memVio redirect flush,,,,,,
+,,,,,单次memVio flush,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：单次memVio flush,memVio redirect flush/单次memVio flush场景下flush精确清除旧路径条目；flush与入队/出队竞争时旧路径不会残留到cfVec，恢复首拍对应新路径,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,memVio伴随反压,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：memVio伴随反压,memVio redirect flush/memVio伴随反压场景下flush精确清除旧路径条目；flush与入队/出队竞争时旧路径不会残留到cfVec，恢复首拍对应新路径,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,IFU redirect flush,,,,,,
+,,,,,单次IFU redirect flush,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：单次IFU redirect flush,IFU redirect flush/单次IFU redirect flush场景下flush精确清除旧路径条目；flush与入队/出队竞争时旧路径不会残留到cfVec，恢复首拍对应新路径,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,连续IFU redirect flush,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：连续IFU redirect flush,IFU redirect flush/连续IFU redirect flush场景下flush精确清除旧路径条目；flush与入队/出队竞争时旧路径不会残留到cfVec，恢复首拍对应新路径,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,flush与入队同拍,,,,,,
+,,,,,入队先到后flush,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：入队先到后flush,flush与入队同拍/入队先到后flush场景下flush精确清除旧路径条目；flush与入队/出队竞争时旧路径不会残留到cfVec，恢复首拍对应新路径,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,flush先到后入队抑制,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：flush先到后入队抑制,flush与入队同拍/flush先到后入队抑制场景下flush精确清除旧路径条目；flush与入队/出队竞争时旧路径不会残留到cfVec，恢复首拍对应新路径,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,旁路/暂停,,,,,,,
+,,,,stallReason记录,,,,,,
+,,,,,fetch阻塞stallReason,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：fetch阻塞stallReason,stallReason记录/fetch阻塞stallReason场景下stallReason、decodeCanAccept和旁路/暂停行为一致；阻塞原因可解释，恢复后输出顺序不受破坏,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,backend阻塞stallReason,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：backend阻塞stallReason,stallReason记录/backend阻塞stallReason场景下stallReason、decodeCanAccept和旁路/暂停行为一致；阻塞原因可解释，恢复后输出顺序不受破坏,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,decodeCanAccept波动,,,,,,
+,,,,,单次拉低波动,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：单次拉低波动,decodeCanAccept波动/单次拉低波动场景下stallReason、decodeCanAccept和旁路/暂停行为一致；阻塞原因可解释，恢复后输出顺序不受破坏,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,周期性拉低波动,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：周期性拉低波动,decodeCanAccept波动/周期性拉低波动场景下stallReason、decodeCanAccept和旁路/暂停行为一致；阻塞原因可解释，恢复后输出顺序不受破坏,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,bypass相关边界,,,,,,
+,,,,,单条可旁路,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：单条可旁路,bypass相关边界/单条可旁路场景下stallReason、decodeCanAccept和旁路/暂停行为一致；阻塞原因可解释，恢复后输出顺序不受破坏,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,,,,,多条混合旁路,构造IFU入队数据形态、backend canAccept波形、flush/redirect时序与lane可接受模式；细化子场景：多条混合旁路,bypass相关边界/多条混合旁路场景下stallReason、decodeCanAccept和旁路/暂停行为一致；阻塞原因可解释，恢复后输出顺序不受破坏,ibuffer.io.in; ibuffer.io.out; ibuffer.io.full; ibuffer.io.flush; ibuffer.io.decodeCanAccept; ibuffer.io.stallReason; io.backend.cfVec; io.backend.canAccept,边界值/场景分析,P2
+,触发器与调试控制,,,,,,,,,
+,,IFU,,,,,,,,
+,,,Trigger,,,,,,,
+,,,,PC命中,,,,,,
+,,,,,单次命中,构造PC命中对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：trigger PC单次命中,IFU输出指令、redirect、异常、metadata在PC命中下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,连续命中,构造PC命中对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：trigger PC连续命中,IFU输出指令、redirect、异常、metadata在PC命中下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,PC不命中,,,,,,
+,,,,,连续不命中,构造PC不命中对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：trigger PC持续不命中,IFU输出指令、redirect、异常、metadata在PC不命中下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,邻近地址不命中,构造PC不命中对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：邻近地址访问也不触发命中,IFU输出指令、redirect、异常、metadata在PC不命中下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,select屏蔽,,,,,,
+,,,,,select静态为0,构造select屏蔽对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：select长期为0实现屏蔽,IFU输出指令、redirect、异常、metadata在select屏蔽下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,select运行中切换,构造select屏蔽对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：select在运行中动态切换,IFU输出指令、redirect、异常、metadata在select屏蔽下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,debugMode屏蔽,,,,,,
+,,,,,非debug模式屏蔽,构造debugMode屏蔽对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：非debug模式下trigger被屏蔽,IFU输出指令、redirect、异常、metadata在debugMode屏蔽下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,debug模式进出切换,构造debugMode屏蔽对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：debug模式进出切换时观察屏蔽行为,IFU输出指令、redirect、异常、metadata在debugMode屏蔽下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,chain场景,,,,,,
+,,,,,单链命中,构造chain场景对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：单一trigger chain发生命中,IFU输出指令、redirect、异常、metadata在chain场景下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1
+,,,,,多链连续命中,构造chain场景对应的FTQ请求、ICache/InstrUncache返回和backend条件；细化子场景：多个chain连续触发命中,IFU输出指令、redirect、异常、metadata在chain场景下正确,ifu.io.fromFtq/toFtq; ifu.io.fromICache/toICache; ifu.io.toIBuffer; ifu.io.toBackend,等价类/边界值/错误推断,P1

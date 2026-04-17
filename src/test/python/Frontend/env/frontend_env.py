@@ -92,7 +92,7 @@ class FrontendEnv:
         branch_checker = BranchChecker()
         return {
             "branch_checker": branch_checker,
-            "monitor": FrontendMonitor(memory=self.memory, branch_checker=branch_checker),
+            "monitor": FrontendMonitor(memory=self.memory, page_table=self.page_table, branch_checker=branch_checker),
             "backend_observe_monitor": BackendObserveMonitor(),
             "icache_agent": ICacheAgent(self.memory),
             "uncache_agent": UncacheAgent(self.memory),

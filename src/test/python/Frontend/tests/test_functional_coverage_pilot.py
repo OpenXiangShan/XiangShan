@@ -94,7 +94,7 @@ def test_bin012_itlb_miss_walk_refill_pilot(env):
 
     Goal:
       - prove the new mainline env can drive a minimal sv39 miss -> PTW -> refill style path
-      - capture the current checker boundary explicitly instead of hiding it
+      - keep the translation-aware monitor aligned with the current sv39/PTW flow
     """
     prog = [_NOP] * 64
 
@@ -113,5 +113,4 @@ def test_bin012_itlb_miss_walk_refill_pilot(env):
     assert env.functional_coverage.key_hit("itlb_result_type", "miss")
     assert env.functional_coverage.key_hit("ptw_resp_type", "leaf_pte")
     assert env.functional_coverage.key_hit("itlb_ptw_flow", "miss_walk_refill")
-    assert errors, "expected current monitor to expose the known sv39 translation-mismatch boundary"
-    assert all(err["kind"] == "INSTR_MISMATCH" for err in errors)
+    assert not errors
