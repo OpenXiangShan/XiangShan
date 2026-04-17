@@ -10,20 +10,21 @@
 
 ## 模块总览
 
-- `BackendModel` 维护四类核心状态：FTQ 生命周期、`semantic_queue`、`pending_resolves`、`pending_events`。
+- `BackendModel` 维护五类核心状态：FTQ 生命周期、`cfvec_queue`、`commit_queue`、`pending_resolves`、`pending_events`。
 - 周期入口在 `plan_cycle_actions()`：采样 `cfVec`、更新 resolve、推进 instruction commit frontier、选择 FTQ-entry commit、选择 redirect、输出 callRetCommit。
-- `semantic_queue` 是主数据面，每条指令保存路径状态、resolve 状态、commit 状态、FTQ 归属等语义信息。
-- 指令级 commit 由 `_plan_instruction_commits_for_cycle()` 从 queue 头顺序推进，不再由 golden match 直接投影。
-- FTQ-entry commit 由 `_plan_commit_entry_for_cycle()` 基于 queue 头 span 的语义条件发出。
+- `cfvec_queue` 是观测数据面，每条指令保存路径状态、resolve 状态、FTQ 归属等语义信息。
+- `commit_queue` 保存可提交正确路径指令的程序序，指令级 commit 由 `_plan_instruction_commits_for_cycle()` 推进。
+- FTQ-entry commit 由 `_plan_commit_entry_for_cycle()` 基于 `commit_queue` 头部 span 的语义条件发出。
 - redirect 由 `_ready_redirect_for_cycle()` 选出，经 `_plan_redirect_payload()` 执行 flush/recovery 与对外驱动。
 
 ## 状态机关系（文字版）
 
-- `cfVec(valid)` -> `semantic_queue.append`，建立指令语义条目。
+- `cfVec(valid)` -> `cfvec_queue.append`，建立指令语义条目。
+- 正确路径指令 -> `commit_queue.append`，进入提交语义域。
 - CFI 指令 -> 入 `pending_resolves`，到 ready_cycle 后进入 `resolve emitted`。
-- `semantic_queue` 从头扫描：`correct-path` 且（非 CFI 或 CFI 已 resolve）且满足时序门槛 -> `rob_commit_state=committed`。
+- `commit_queue` 从头扫描：`correct-path` 且（非 CFI 或 CFI 已 resolve）且满足时序门槛 -> `rob_commit_state=committed`。
 - 指令被 committed 后 -> 进入 `pending_queue_call_ret_commit_indices` -> 下一拍激活 callRetCommit 可见组。
-- queue 头 FTQ span 满足条件（全部 correct + 全部 committed + 必要 resolve 已满足 + 无冲突 redirect）-> 发 FTQ-entry `commit` 并弹头。
+- `commit_queue` 头 FTQ span 满足条件（全部 correct + 全部 committed + 必要 resolve 已满足 + 无冲突 redirect）-> 发 FTQ-entry `commit` 并弹头。
 - redirect(`flush_on_drive`) -> scoreboard flush + semantic wrong-path flush + recovery 目标建立。
 
 ## 风险清单（按严重度）
@@ -55,13 +56,13 @@
 4. 看 `_plan_instruction_commits_for_cycle()`，理解 instruction commit frontier 的推进规则。
 5. 看 `_plan_commit_entry_for_cycle()`，理解 FTQ-entry commit 的门控与弹头逻辑。
 6. 看 `_ready_redirect_for_cycle()` 和 `_plan_redirect_payload()`，理解 redirect 选择、flush 与恢复过程。
-7. 最后看 `_semantic_queue_flush_wrong_path()` / `_semantic_queue_pop_head()` / `_semantic_queue_remove_range()`，理解索引维护与状态一致性。
+7. 最后看 `_cfvec_queue_flush_wrong_path()` / `_cfvec_queue_pop_head()` / `_cfvec_queue_remove_range()`，理解索引维护与状态一致性。
 
 ## 高误读点
 
 - redirect payload 会读取输入 `level` 参与内部 `flush_itself` 语义判断，但最终驱动对外 `level` 固定为 `0`。
 - `set_golden_trace()` 会把 resolve delay 覆盖到固定区间（当前默认 `[3,5]`），不是完全沿用构造参数。
-- fallback commit 路径已统一为单-entry commit，但仍是独立分支；阅读时要明确它与 semantic queue 路径的切换条件。
+- fallback commit 路径已统一为单-entry commit，但仍是独立分支；阅读时要明确它与 `cfvec_queue/commit_queue` 路径的切换条件。
 
 ## 建议修复顺序
 

@@ -121,7 +121,8 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
         }
 
     pending_level0_target_ftq = getattr(backend_model, "_pending_level0_target_ftq", None)
-    semantic_queue = list(getattr(backend_model, "_semantic_queue", [])) if backend_model is not None else []
+    cfvec_queue = list(getattr(backend_model, "_cfvec_queue", [])) if backend_model is not None else []
+    commit_queue = list(getattr(backend_model, "_commit_queue", [])) if backend_model is not None else []
     semantic_recovery_target_pc = (
         getattr(backend_model, "_semantic_recovery_target_pc", None) if backend_model is not None else None
     )
@@ -227,8 +228,8 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
             "ftq_entries": [
                 _encode_ftq_entry(entry) for entry in list(getattr(backend_model, "ftq_entries", []))[:4]
             ],
-            "semantic_queue_len": int(len(semantic_queue)),
-            "semantic_queue_head": [
+            "cfvec_queue_len": int(len(cfvec_queue)),
+            "cfvec_queue_head": [
                 {
                     "pc": int(getattr(entry, "pc", 0)),
                     "ftq_flag": int(getattr(entry, "ftq_flag", 0)),
@@ -238,7 +239,20 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
                     "resolve_state": str(getattr(entry, "resolve_state", "")),
                     "is_last_in_entry": int(bool(getattr(entry, "is_last_in_entry", False))),
                 }
-                for entry in semantic_queue[:4]
+                for entry in cfvec_queue[:4]
+            ],
+            "commit_queue_len": int(len(commit_queue)),
+            "commit_queue_head": [
+                {
+                    "queue_index": int(queue_index),
+                    "pc": int(getattr(cfvec_queue[int(queue_index)], "pc", 0)),
+                    "ftq_flag": int(getattr(cfvec_queue[int(queue_index)], "ftq_flag", 0)),
+                    "ftq_value": int(getattr(cfvec_queue[int(queue_index)], "ftq_value", 0)),
+                    "rob_commit_state": str(getattr(cfvec_queue[int(queue_index)], "rob_commit_state", "")),
+                    "resolve_state": str(getattr(cfvec_queue[int(queue_index)], "resolve_state", "")),
+                }
+                for queue_index in commit_queue[:4]
+                if 0 <= int(queue_index) < len(cfvec_queue)
             ],
             "recent_redirect": recent_redirect,
         },
@@ -392,6 +406,18 @@ def _format_stall_snapshot(snapshot: dict) -> str:
             last=int(entry["is_last_in_entry"]),
         )
 
+    def _format_commit_entry(entry):
+        if entry is None:
+            return "none"
+        return "(idx={idx},pc={pc},ftq={flag}/{value},rob={rob},resolve={resolve})".format(
+            idx=int(entry["queue_index"]),
+            pc=_format_optional_pc(entry["pc"]),
+            flag=int(entry["ftq_flag"]),
+            value=int(entry["ftq_value"]),
+            rob=str(entry["rob_commit_state"]),
+            resolve=str(entry["resolve_state"]),
+        )
+
     def _format_runtime_ftq_entry(entry):
         if entry is None:
             return "none"
@@ -427,7 +453,8 @@ def _format_stall_snapshot(snapshot: dict) -> str:
         "pending_level0_target_ftq={pending_level0_target_ftq} "
         "current_ftq_entry={current_ftq_entry} "
         "ftq_entries_head={ftq_entries_head} "
-        "semantic_queue_len={semantic_queue_len} semantic_queue_head={semantic_queue_head} "
+        "cfvec_queue_len={cfvec_queue_len} cfvec_queue_head={cfvec_queue_head} "
+        "commit_queue_len={commit_queue_len} commit_queue_head={commit_queue_head} "
         "recent_redirect_target={recent_redirect_target} "
         "stall_reason={stall_reason} "
         "icache_req=({icache_req_valid},{icache_req_ready},0x{icache_req_addr:x},src={icache_req_source}) "
@@ -476,8 +503,10 @@ def _format_stall_snapshot(snapshot: dict) -> str:
         ),
         current_ftq_entry=_format_ftq_entry(current_ftq_entry),
         ftq_entries_head="[" + ",".join(_format_ftq_entry(entry) for entry in backend_state["ftq_entries"]) + "]",
-        semantic_queue_len=int(backend_state["semantic_queue_len"]),
-        semantic_queue_head="[" + ",".join(_format_semantic_entry(entry) for entry in backend_state["semantic_queue_head"]) + "]",
+        cfvec_queue_len=int(backend_state["cfvec_queue_len"]),
+        cfvec_queue_head="[" + ",".join(_format_semantic_entry(entry) for entry in backend_state["cfvec_queue_head"]) + "]",
+        commit_queue_len=int(backend_state["commit_queue_len"]),
+        commit_queue_head="[" + ",".join(_format_commit_entry(entry) for entry in backend_state["commit_queue_head"]) + "]",
         recent_redirect_target=(
             _format_optional_pc(recent_redirect["target_pc"]) if recent_redirect is not None else "none"
         ),

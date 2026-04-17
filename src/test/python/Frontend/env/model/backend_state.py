@@ -125,7 +125,8 @@ class BackendState:
     ftq_group_pc_history: dict[tuple[int, int], list[tuple[int, bool]]] = field(default_factory=dict)
     pc_group_occurrences: dict[int, list[tuple[int, int, int]]] = field(default_factory=dict)
     pending_level0_target_ftq: Optional[tuple[int, int]] = None
-    semantic_queue: Deque[QueueInstr] = field(default_factory=deque)
+    cfvec_queue: Deque[QueueInstr] = field(default_factory=deque)
+    commit_queue: Deque[int] = field(default_factory=deque)
     pending_redirect_origin_index: Optional[int] = None
     pending_queue_resolve_indices: Deque[int] = field(default_factory=deque)
     pending_queue_call_ret_commit_indices: Deque[int] = field(default_factory=deque)
@@ -135,9 +136,9 @@ class BackendState:
     commit_max_delay: int = 10
     rng: object = random
 
-    def append_semantic_queue_instruction(self, instr: QueueInstr) -> int:
-        self.semantic_queue.append(instr)
-        return len(self.semantic_queue) - 1
+    def append_cfvec_queue_instruction(self, instr: QueueInstr) -> int:
+        self.cfvec_queue.append(instr)
+        return len(self.cfvec_queue) - 1
 
     def schedule_next_queue_call_ret_commit_group(self) -> None:
         if not self.pending_queue_call_ret_commit_indices:
@@ -150,9 +151,9 @@ class BackendState:
         group: list[CommitInstruction] = []
         while self.pending_queue_call_ret_commit_indices and len(group) < 8:
             idx = int(self.pending_queue_call_ret_commit_indices.popleft())
-            if idx < 0 or idx >= len(self.semantic_queue):
+            if idx < 0 or idx >= len(self.cfvec_queue):
                 continue
-            entry = self.semantic_queue[idx]
+            entry = self.cfvec_queue[idx]
             group.append(
                 CommitInstruction(
                     json_index=-1 if entry.golden_index is None else int(entry.golden_index),
@@ -174,7 +175,7 @@ class BackendState:
         if inst_offset is None:
             return None
         candidates: list[int] = []
-        for idx, entry in enumerate(self.semantic_queue):
+        for idx, entry in enumerate(self.cfvec_queue):
             if int(entry.ftq_flag) != int(inst.ftq_flag):
                 continue
             if int(entry.ftq_value) != int(inst.ftq_value):
@@ -185,7 +186,7 @@ class BackendState:
         if not candidates:
             return None
         for idx in candidates:
-            if self.semantic_queue[int(idx)].call_ret_commit_state == CALL_RET_STATE_PENDING:
+            if self.cfvec_queue[int(idx)].call_ret_commit_state == CALL_RET_STATE_PENDING:
                 return int(idx)
         return int(candidates[0])
 
@@ -205,8 +206,8 @@ class BackendState:
                 queue_index = getattr(inst, "queue_index", None)
                 if queue_index is not None:
                     idx = int(queue_index)
-            if idx is not None and 0 <= int(idx) < len(self.semantic_queue):
-                self.semantic_queue[int(idx)].call_ret_commit_state = CALL_RET_STATE_EMITTED
+            if idx is not None and 0 <= int(idx) < len(self.cfvec_queue):
+                self.cfvec_queue[int(idx)].call_ret_commit_state = CALL_RET_STATE_EMITTED
 
     def increment_ftq_ptr(self, flag: int, value: int) -> tuple[int, int]:
         next_value = int(value) + 1

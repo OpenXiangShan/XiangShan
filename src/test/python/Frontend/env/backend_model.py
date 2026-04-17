@@ -115,7 +115,8 @@ class BackendModel:
         self._ftq_group_pc_history: Dict[tuple[int, int], list[tuple[int, bool]]] = {}
         self._pc_group_occurrences: Dict[int, list[tuple[int, int, int]]] = {}
         self._pending_level0_target_ftq: Optional[tuple[int, int]] = None
-        self._semantic_queue: Deque[QueueInstr] = deque()
+        self._cfvec_queue: Deque[QueueInstr] = deque()
+        self._commit_queue: Deque[int] = deque()
         self._pending_redirect_origin_index: Optional[int] = None
         self._pending_queue_resolve_indices: Deque[int] = deque()
         self._pending_queue_call_ret_commit_indices: Deque[int] = deque()
@@ -153,7 +154,8 @@ class BackendModel:
         state.ftq_group_pc_history = self._ftq_group_pc_history
         state.pc_group_occurrences = self._pc_group_occurrences
         state.pending_level0_target_ftq = self._pending_level0_target_ftq
-        state.semantic_queue = self._semantic_queue
+        state.cfvec_queue = self._cfvec_queue
+        state.commit_queue = self._commit_queue
         state.pending_redirect_origin_index = self._pending_redirect_origin_index
         state.pending_queue_resolve_indices = self._pending_queue_resolve_indices
         state.pending_queue_call_ret_commit_indices = self._pending_queue_call_ret_commit_indices
@@ -183,7 +185,8 @@ class BackendModel:
         self._ftq_group_pc_history = state.ftq_group_pc_history
         self._pc_group_occurrences = state.pc_group_occurrences
         self._pending_level0_target_ftq = state.pending_level0_target_ftq
-        self._semantic_queue = state.semantic_queue
+        self._cfvec_queue = state.cfvec_queue
+        self._commit_queue = state.commit_queue
         self._pending_redirect_origin_index = state.pending_redirect_origin_index
         self._pending_queue_resolve_indices = state.pending_queue_resolve_indices
         self._pending_queue_call_ret_commit_indices = state.pending_queue_call_ret_commit_indices
@@ -239,11 +242,11 @@ class BackendModel:
         rank = int(state.ftq_ptr_rank_after_commit(int(flag), int(value)))
         return rank == 0 or rank > int(state.ftq_size)
 
-    def _semantic_queue_mode_active(self) -> bool:
-        return self.golden_trace is not None and bool(self._semantic_queue)
+    def _cfvec_queue_mode_active(self) -> bool:
+        return self.golden_trace is not None and bool(self._cfvec_queue)
 
     def _semantic_fallback_commit_blocked(self) -> bool:
-        if self.golden_trace is None or self._semantic_queue:
+        if self.golden_trace is None or self._cfvec_queue:
             return False
         # When semantic recovery/wait is in progress, keep commit gating on the
         # semantic-queue path semantics instead of falling back to FTQ-only rules.
@@ -259,7 +262,7 @@ class BackendModel:
             wait_value = int(self._pending_level0_target_ftq[1])
             wait_rank = self._ftq_ptr_rank_after_commit(wait_flag, wait_value)
             wait_present = bool(
-                self._semantic_queue_has_ftq(wait_flag, wait_value)
+                self._cfvec_queue_has_ftq(wait_flag, wait_value)
                 or (
                     self._current_ftq_entry is not None
                     and self._ftq_entry_matches(self._current_ftq_entry, wait_flag, wait_value)
@@ -271,19 +274,78 @@ class BackendModel:
 
         if self._semantic_recovery_target_pc is not None:
             has_pending_redirect = any(evt.kind == "redirect" for evt in self.pending_events)
-            has_wrong_path = any(entry.path_state == PATH_STATE_WRONG for entry in self._semantic_queue)
+            has_wrong_path = any(entry.path_state == PATH_STATE_WRONG for entry in self._cfvec_queue)
             if not has_pending_redirect and self._pending_redirect_origin_index is None and not has_wrong_path:
                 self._semantic_recovery_target_pc = None
                 self._semantic_recovery_queue_start = None
 
-    def _semantic_queue_has_ftq(self, ftq_flag: int, ftq_value: int) -> bool:
+    def _cfvec_queue_has_ftq(self, ftq_flag: int, ftq_value: int) -> bool:
         return any(
             int(entry.ftq_flag) == int(ftq_flag) and int(entry.ftq_value) == int(ftq_value)
-            for entry in self._semantic_queue
+            for entry in self._cfvec_queue
         )
 
+    def _commit_queue_append(self, queue_index: int) -> None:
+        idx = int(queue_index)
+        if idx < 0 or idx >= len(self._cfvec_queue):
+            return
+        if any(int(item) == idx for item in self._commit_queue):
+            return
+        self._commit_queue.append(idx)
+
+    def _commit_queue_remove(self, queue_index: int) -> None:
+        idx = int(queue_index)
+        if not self._commit_queue:
+            return
+        self._commit_queue = deque(item for item in self._commit_queue if int(item) != idx)
+
+    def _ensure_commit_queue_consistency(self) -> None:
+        if not self._cfvec_queue:
+            self._commit_queue.clear()
+            return
+        if self._commit_queue:
+            filtered = deque(
+                int(idx)
+                for idx in self._commit_queue
+                if 0 <= int(idx) < len(self._cfvec_queue)
+                and self._cfvec_queue[int(idx)].path_state == PATH_STATE_CORRECT
+            )
+            if filtered:
+                self._commit_queue = filtered
+                return
+        self._commit_queue = deque(
+            idx
+            for idx, entry in enumerate(self._cfvec_queue)
+            if entry.path_state == PATH_STATE_CORRECT
+        )
+
+    def _commit_queue_head_ftq_span(self) -> Optional[tuple[tuple[int, int], int]]:
+        if not self._commit_queue:
+            return None
+        head_index = int(self._commit_queue[0])
+        if head_index < 0 or head_index >= len(self._cfvec_queue):
+            return None
+        head_entry = self._cfvec_queue[head_index]
+        key = (int(head_entry.ftq_flag), int(head_entry.ftq_value))
+        span_len = 0
+        saw_last = False
+        for idx in self._commit_queue:
+            queue_index = int(idx)
+            if queue_index < 0 or queue_index >= len(self._cfvec_queue):
+                break
+            entry = self._cfvec_queue[queue_index]
+            if (int(entry.ftq_flag), int(entry.ftq_value)) != key:
+                break
+            span_len += 1
+            if bool(entry.is_last_in_entry):
+                saw_last = True
+                break
+        if span_len <= 0 or not saw_last:
+            return None
+        return key, span_len
+
     def _semantic_commit_can_skip_missing_ftq(self, ftq_flag: int, ftq_value: int) -> bool:
-        if self._semantic_queue_has_ftq(int(ftq_flag), int(ftq_value)):
+        if self._cfvec_queue_has_ftq(int(ftq_flag), int(ftq_value)):
             return False
         if (
             self._current_ftq_entry is not None
@@ -296,7 +358,7 @@ class BackendModel:
             return False
         return True
 
-    def _append_semantic_queue_instr(
+    def _append_cfvec_queue_instr(
         self,
         *,
         slot: int,
@@ -327,39 +389,43 @@ class BackendModel:
         if self.golden_trace is None:
             queue_instr.path_state = PATH_STATE_CORRECT
         state = self._sync_backend_state()
-        queue_index = state.append_semantic_queue_instruction(queue_instr)
+        queue_index = state.append_cfvec_queue_instruction(queue_instr)
+        if queue_instr.path_state == PATH_STATE_CORRECT:
+            state.commit_queue.append(int(queue_index))
         if queue_instr.is_cfi:
             state.pending_queue_resolve_indices.append(int(queue_index))
         self._apply_backend_state()
         return int(queue_index)
 
-    def _semantic_queue_mark_matched(self, queue_index: int, entry: TraceEntry) -> None:
-        if queue_index < 0 or queue_index >= len(self._semantic_queue):
+    def _cfvec_queue_mark_matched(self, queue_index: int, entry: TraceEntry) -> None:
+        if queue_index < 0 or queue_index >= len(self._cfvec_queue):
             return
-        queue_entry = self._semantic_queue[queue_index]
+        queue_entry = self._cfvec_queue[queue_index]
         queue_entry.path_state = PATH_STATE_CORRECT
         queue_entry.golden_match_state = GOLDEN_MATCH_STATE_MATCHED
         queue_entry.golden_index = int(entry.index)
+        self._commit_queue_append(int(queue_index))
 
     def _find_preceding_correct_path_cfi(self, queue_index: int) -> Optional[tuple[int, QueueInstr]]:
         if queue_index <= 0:
             return None
         for idx in range(int(queue_index) - 1, -1, -1):
-            entry = self._semantic_queue[idx]
+            entry = self._cfvec_queue[idx]
             if entry.path_state != PATH_STATE_CORRECT:
                 continue
             if entry.is_cfi:
                 return int(idx), entry
         return None
 
-    def _semantic_queue_note_mismatch(self, queue_index: int) -> None:
-        if queue_index < 0 or queue_index >= len(self._semantic_queue):
+    def _cfvec_queue_note_mismatch(self, queue_index: int) -> None:
+        if queue_index < 0 or queue_index >= len(self._cfvec_queue):
             return
-        queue_entry = self._semantic_queue[queue_index]
+        queue_entry = self._cfvec_queue[queue_index]
         queue_entry.golden_match_state = GOLDEN_MATCH_STATE_MISMATCHED
         if self._pending_redirect_origin_index is None:
             self._pending_redirect_origin_index = int(queue_index)
             queue_entry.path_state = PATH_STATE_WRONG
+            self._commit_queue_remove(int(queue_index))
             target_pc = self.current_golden_pc()
             redirect_queue_index: Optional[int] = None
             redirect_entry: Optional[QueueInstr] = None
@@ -415,55 +481,57 @@ class BackendModel:
             return
         if self._pending_redirect_origin_index is not None and int(queue_index) >= int(self._pending_redirect_origin_index):
             queue_entry.path_state = PATH_STATE_WRONG
+            self._commit_queue_remove(int(queue_index))
 
-    def _semantic_queue_mark_resolve_state(self, queue_index: Optional[int], resolve_state: str) -> None:
+    def _cfvec_queue_mark_resolve_state(self, queue_index: Optional[int], resolve_state: str) -> None:
         if queue_index is None:
             return
-        if queue_index < 0 or queue_index >= len(self._semantic_queue):
+        if queue_index < 0 or queue_index >= len(self._cfvec_queue):
             return
-        self._semantic_queue[queue_index].resolve_state = str(resolve_state)
+        self._cfvec_queue[queue_index].resolve_state = str(resolve_state)
         self._pending_queue_resolve_indices = deque(
             idx for idx in self._pending_queue_resolve_indices if int(idx) != int(queue_index)
         )
 
-    def _semantic_queue_mark_committed(self, queue_index: int, instr: int) -> None:
-        if queue_index < 0 or queue_index >= len(self._semantic_queue):
+    def _cfvec_queue_mark_committed(self, queue_index: int, instr: int) -> None:
+        if queue_index < 0 or queue_index >= len(self._cfvec_queue):
             return
-        queue_entry = self._semantic_queue[queue_index]
+        queue_entry = self._cfvec_queue[queue_index]
         queue_entry.rob_commit_state = ROB_COMMIT_STATE_COMMITTED
         queue_entry.call_ret_ras_action = self._sync_backend_state().decode_commit_ras_action(int(instr))
         queue_entry.call_ret_commit_state = CALL_RET_STATE_PENDING
         self._pending_queue_call_ret_commit_indices.append(int(queue_index))
 
-    def _semantic_queue_mark_recovery_residual(self, queue_index: int) -> None:
-        if queue_index < 0 or queue_index >= len(self._semantic_queue):
+    def _cfvec_queue_mark_recovery_residual(self, queue_index: int) -> None:
+        if queue_index < 0 or queue_index >= len(self._cfvec_queue):
             return
-        queue_entry = self._semantic_queue[queue_index]
+        queue_entry = self._cfvec_queue[queue_index]
         queue_entry.path_state = PATH_STATE_WRONG
         queue_entry.golden_match_state = GOLDEN_MATCH_STATE_MISMATCHED
+        self._commit_queue_remove(int(queue_index))
         if queue_entry.is_cfi:
-            self._semantic_queue_mark_resolve_state(int(queue_index), RESOLVE_STATE_SKIPPED)
+            self._cfvec_queue_mark_resolve_state(int(queue_index), RESOLVE_STATE_SKIPPED)
 
-    def _semantic_queue_recompute_redirect_origin(self) -> None:
-        for idx, entry in enumerate(self._semantic_queue):
+    def _cfvec_queue_recompute_redirect_origin(self) -> None:
+        for idx, entry in enumerate(self._cfvec_queue):
             if entry.path_state == PATH_STATE_WRONG:
                 self._pending_redirect_origin_index = int(idx)
                 return
         self._pending_redirect_origin_index = None
 
-    def _semantic_queue_flush_wrong_path(self) -> None:
+    def _cfvec_queue_flush_wrong_path(self) -> None:
         state = self._sync_backend_state()
         origin_index = state.pending_redirect_origin_index
         if origin_index is None:
-            for idx, entry in enumerate(state.semantic_queue):
+            for idx, entry in enumerate(state.cfvec_queue):
                 if entry.path_state == PATH_STATE_WRONG:
                     origin_index = int(idx)
                     break
         if origin_index is None:
             return
         keep_count = max(0, int(origin_index))
-        kept = list(state.semantic_queue)[:keep_count]
-        state.semantic_queue = deque(kept)
+        kept = list(state.cfvec_queue)[:keep_count]
+        state.cfvec_queue = deque(kept)
         state.pending_resolves = deque(
             entry
             for entry in state.pending_resolves
@@ -474,6 +542,9 @@ class BackendModel:
         )
         state.pending_queue_call_ret_commit_indices = deque(
             idx for idx in state.pending_queue_call_ret_commit_indices if int(idx) < keep_count
+        )
+        state.commit_queue = deque(
+            idx for idx in state.commit_queue if int(idx) < keep_count
         )
         state.scheduled_queue_call_ret_commit_groups = deque(
             (int(ready_cycle), kept_group)
@@ -492,33 +563,14 @@ class BackendModel:
         state.pending_redirect_origin_index = None
         self._apply_backend_state()
 
-    def _semantic_queue_head_ftq_span(self) -> Optional[tuple[tuple[int, int], int]]:
-        if not self._semantic_queue:
-            return None
-        queue_list = list(self._semantic_queue)
-        head = queue_list[0]
-        key = (int(head.ftq_flag), int(head.ftq_value))
-        span_len = 0
-        saw_last = False
-        for entry in queue_list:
-            if (int(entry.ftq_flag), int(entry.ftq_value)) != key:
-                break
-            span_len += 1
-            if bool(entry.is_last_in_entry):
-                saw_last = True
-                break
-        if span_len <= 0 or not saw_last:
-            return None
-        return key, span_len
-
-    def _semantic_queue_pop_head(self, count: int) -> None:
+    def _cfvec_queue_pop_head(self, count: int) -> None:
         pop_count = max(0, int(count))
         if pop_count <= 0:
             return
         for _ in range(pop_count):
-            if not self._semantic_queue:
+            if not self._cfvec_queue:
                 break
-            self._semantic_queue.popleft()
+            self._cfvec_queue.popleft()
         self._pending_resolves = deque(
             replace(entry, queue_index=(None if entry.queue_index is None else int(entry.queue_index) - pop_count))
             for entry in self._pending_resolves
@@ -528,7 +580,7 @@ class BackendModel:
             self._pending_redirect_origin_index = int(self._pending_redirect_origin_index) - pop_count
         else:
             self._pending_redirect_origin_index = None
-        self._semantic_queue_recompute_redirect_origin()
+        self._cfvec_queue_recompute_redirect_origin()
         self._pending_queue_resolve_indices = deque(
             int(idx) - pop_count
             for idx in self._pending_queue_resolve_indices
@@ -539,20 +591,25 @@ class BackendModel:
             for idx in self._pending_queue_call_ret_commit_indices
             if int(idx) >= pop_count
         )
+        self._commit_queue = deque(
+            int(idx) - pop_count
+            for idx in self._commit_queue
+            if int(idx) >= pop_count
+        )
 
-    def _semantic_queue_remove_range(self, start: int, stop: int) -> None:
+    def _cfvec_queue_remove_range(self, start: int, stop: int) -> None:
         remove_start = max(0, int(start))
         remove_stop = max(remove_start, int(stop))
         if remove_start >= remove_stop:
             return
         kept_queue: list[QueueInstr] = []
         queue_index_map: dict[int, int] = {}
-        for old_idx, entry in enumerate(self._semantic_queue):
+        for old_idx, entry in enumerate(self._cfvec_queue):
             if remove_start <= int(old_idx) < remove_stop:
                 continue
             queue_index_map[int(old_idx)] = len(kept_queue)
             kept_queue.append(entry)
-        self._semantic_queue = deque(kept_queue)
+        self._cfvec_queue = deque(kept_queue)
         if self._pending_redirect_origin_index is not None:
             self._pending_redirect_origin_index = queue_index_map.get(int(self._pending_redirect_origin_index))
         self._pending_resolves = deque(
@@ -568,6 +625,11 @@ class BackendModel:
         self._pending_queue_call_ret_commit_indices = deque(
             int(queue_index_map[int(idx)])
             for idx in self._pending_queue_call_ret_commit_indices
+            if int(idx) in queue_index_map
+        )
+        self._commit_queue = deque(
+            int(queue_index_map[int(idx)])
+            for idx in self._commit_queue
             if int(idx) in queue_index_map
         )
         self._scheduled_queue_call_ret_commit_groups = deque(
@@ -586,12 +648,12 @@ class BackendModel:
             for inst in self._visible_queue_call_ret_commit_group
             if getattr(inst, "queue_index", None) is None or int(inst.queue_index) in queue_index_map
         ]
-        self._semantic_queue_recompute_redirect_origin()
+        self._cfvec_queue_recompute_redirect_origin()
 
-    def _prune_ftq_entries_to_semantic_queue(self) -> None:
+    def _prune_ftq_entries_to_cfvec_queue(self) -> None:
         active_ftqs = {
             (int(entry.ftq_flag), int(entry.ftq_value))
-            for entry in self._semantic_queue
+            for entry in self._cfvec_queue
         }
         self.ftq_entries = deque(
             entry
@@ -607,15 +669,16 @@ class BackendModel:
             self._current_ftq_max_offset = -1
             self._current_ftq_contains_wait_pc = False
 
-    def _semantic_queue_close_current_ftq_span(self, ftq_flag: int, ftq_value: int) -> None:
-        for entry in reversed(self._semantic_queue):
+    def _cfvec_queue_close_current_ftq_span(self, ftq_flag: int, ftq_value: int) -> None:
+        for entry in reversed(self._cfvec_queue):
             if int(entry.ftq_flag) != int(ftq_flag) or int(entry.ftq_value) != int(ftq_value):
                 continue
             entry.is_last_in_entry = True
             return
 
-    def _clear_semantic_queue_state(self) -> None:
-        self._semantic_queue.clear()
+    def _clear_cfvec_queue_state(self) -> None:
+        self._cfvec_queue.clear()
+        self._commit_queue.clear()
         self._pending_redirect_origin_index = None
         self._pending_queue_resolve_indices.clear()
         self._pending_queue_call_ret_commit_indices.clear()
@@ -659,7 +722,7 @@ class BackendModel:
         )
 
     def _find_next_commitable_entry(self) -> Optional[FtqEntry]:
-        if self._semantic_queue_mode_active():
+        if self._cfvec_queue_mode_active():
             return None
         candidate = self._sync_backend_state().find_next_commitable_entry(
             golden_trace_attached=self.golden_trace is not None,
@@ -1030,30 +1093,37 @@ class BackendModel:
 
     def _record_instruction_commit(self, queue_index: Optional[int], instr: int) -> None:
         if queue_index is not None:
-            self._semantic_queue_mark_committed(int(queue_index), int(instr))
+            self._cfvec_queue_mark_committed(int(queue_index), int(instr))
         self._apply_backend_state()
 
     def _plan_instruction_commits_for_cycle(self) -> int:
-        if not self._semantic_queue:
+        self._ensure_commit_queue_consistency()
+        if not self._commit_queue:
             return 0
         committed = 0
         width = int(self.instruction_commit_width)
-        queue_snapshot = list(self._semantic_queue)
-        for idx, entry in enumerate(queue_snapshot):
+        queue_snapshot = [int(idx) for idx in self._commit_queue]
+        for commit_pos, queue_index in enumerate(queue_snapshot):
             if committed >= width:
                 break
-            queue_entry = self._semantic_queue[idx]
+            if queue_index < 0 or queue_index >= len(self._cfvec_queue):
+                continue
+            queue_entry = self._cfvec_queue[queue_index]
             if queue_entry.rob_commit_state != ROB_COMMIT_STATE_PENDING:
                 continue
-            if idx > 0 and self._semantic_queue[idx - 1].rob_commit_state != ROB_COMMIT_STATE_COMMITTED:
-                break
+            if commit_pos > 0:
+                prev_idx = int(queue_snapshot[commit_pos - 1])
+                if prev_idx < 0 or prev_idx >= len(self._cfvec_queue):
+                    break
+                if self._cfvec_queue[prev_idx].rob_commit_state != ROB_COMMIT_STATE_COMMITTED:
+                    break
             if queue_entry.path_state != PATH_STATE_CORRECT:
                 break
             if int(queue_entry.cycle) >= int(self.current_cycle):
                 break
             if queue_entry.is_cfi and queue_entry.resolve_state != RESOLVE_STATE_EMITTED:
                 break
-            self._record_instruction_commit(int(idx), int(queue_entry.instr))
+            self._record_instruction_commit(int(queue_index), int(queue_entry.instr))
             committed += 1
         return int(committed)
 
@@ -1234,7 +1304,7 @@ class BackendModel:
             return False
         if any(self._ftq_entry_matches(entry, ftq_flag, ftq_value) for entry in self.ftq_entries):
             return False
-        return not self._semantic_queue_has_ftq(ftq_flag, ftq_value)
+        return not self._cfvec_queue_has_ftq(ftq_flag, ftq_value)
 
     def _reset_ftq_slot_reuse_state(self, ftq_flag: int, ftq_value: int) -> None:
         group = (int(ftq_flag), int(ftq_value))
@@ -1320,7 +1390,7 @@ class BackendModel:
                 or self._current_ftq_entry.ftq_value != ftq_value
             ):
                 if self._current_ftq_entry is not None:
-                    self._semantic_queue_close_current_ftq_span(
+                    self._cfvec_queue_close_current_ftq_span(
                         int(self._current_ftq_entry.ftq_flag),
                         int(self._current_ftq_entry.ftq_value),
                     )
@@ -1342,7 +1412,7 @@ class BackendModel:
             if packet_key in self._current_ftq_seen_packets:
                 return
             self._current_ftq_seen_packets.add(packet_key)
-            queue_index = self._append_semantic_queue_instr(
+            queue_index = self._append_cfvec_queue_instr(
                 slot=-1,
                 pc=int(pc),
                 instr=int(instr),
@@ -1356,11 +1426,11 @@ class BackendModel:
             # Post-redirect / wait-prefix packets are recovery residuals of an
             # existing wrong-path episode. Mark them as wrong-path but do not
             # start a new mismatch/redirect cycle.
-            self._semantic_queue_mark_recovery_residual(int(queue_index))
+            self._cfvec_queue_mark_recovery_residual(int(queue_index))
             self._current_ftq_max_offset = max(int(self._current_ftq_max_offset), int(ftq_offset))
             self._record_ftq_group_pc(int(ftq_flag), int(ftq_value), int(pc), bool(is_rvc))
             if is_last:
-                self._semantic_queue_close_current_ftq_span(int(ftq_flag), int(ftq_value))
+                self._cfvec_queue_close_current_ftq_span(int(ftq_flag), int(ftq_value))
                 self._seal_current_ftq_entry(observed_last_in_entry=True)
 
         for i in range(8):
@@ -1374,7 +1444,7 @@ class BackendModel:
             ftq_value = self._read(self.observe_if.cfvec_ftq_ptr_value[i], 0)
             ftq_offset = self._read(self.observe_if.cfvec_ftq_offset[i], 0)
             is_last = bool(self._read(self.observe_if.cfvec_is_last_in_ftq_entry[i], 0))
-            active_ftq_ptr = self._semantic_queue_has_ftq(int(ftq_flag), int(ftq_value))
+            active_ftq_ptr = self._cfvec_queue_has_ftq(int(ftq_flag), int(ftq_value))
             stale_ftq_ptr = self._ftq_ptr_is_stale_relative_to_commit(int(ftq_flag), int(ftq_value))
 
             if self._semantic_recovery_target_pc is not None:
@@ -1398,13 +1468,13 @@ class BackendModel:
                     continue
                 if (
                     self._semantic_recovery_queue_start is not None
-                    and len(self._semantic_queue) > int(self._semantic_recovery_queue_start)
+                    and len(self._cfvec_queue) > int(self._semantic_recovery_queue_start)
                 ):
-                    self._semantic_queue_remove_range(
+                    self._cfvec_queue_remove_range(
                         int(self._semantic_recovery_queue_start),
-                        len(self._semantic_queue),
+                        len(self._cfvec_queue),
                     )
-                    self._prune_ftq_entries_to_semantic_queue()
+                    self._prune_ftq_entries_to_cfvec_queue()
                     self._current_ftq_entry = None
                     self._current_ftq_seen_packets.clear()
                     self._current_ftq_max_offset = -1
@@ -1471,7 +1541,7 @@ class BackendModel:
                         "FTQ entry transition without isLastInFtqEntry: flag=%d value=%d",
                         self._current_ftq_entry.ftq_flag, self._current_ftq_entry.ftq_value,
                     )
-                    self._semantic_queue_close_current_ftq_span(
+                    self._cfvec_queue_close_current_ftq_span(
                         int(self._current_ftq_entry.ftq_flag),
                         int(self._current_ftq_entry.ftq_value),
                     )
@@ -1493,7 +1563,7 @@ class BackendModel:
             if packet_key in self._current_ftq_seen_packets:
                 continue
             self._current_ftq_seen_packets.add(packet_key)
-            queue_index = self._append_semantic_queue_instr(
+            queue_index = self._append_cfvec_queue_instr(
                 slot=int(i),
                 pc=int(pc),
                 instr=int(instr),
@@ -1505,9 +1575,9 @@ class BackendModel:
                 is_last=bool(is_last),
             )
             if golden_entry is not None:
-                self._semantic_queue_mark_matched(int(queue_index), golden_entry)
+                self._cfvec_queue_mark_matched(int(queue_index), golden_entry)
             elif expected_golden is not None:
-                self._semantic_queue_note_mismatch(int(queue_index))
+                self._cfvec_queue_note_mismatch(int(queue_index))
             self._current_ftq_max_offset = max(int(self._current_ftq_max_offset), int(ftq_offset))
             if matched_wait_pc:
                 self._current_ftq_contains_wait_pc = True
@@ -1587,7 +1657,7 @@ class BackendModel:
             if self._has_later_cfvec_slot_matching_pc(i, int(next_entry.pc)):
                 continue
             if self._current_ftq_entry is not None:
-                self._semantic_queue_close_current_ftq_span(
+                self._cfvec_queue_close_current_ftq_span(
                     int(self._current_ftq_entry.ftq_flag),
                     int(self._current_ftq_entry.ftq_value),
                 )
@@ -1606,12 +1676,12 @@ class BackendModel:
             if entry.ready_cycle > self.current_cycle:
                 continue
             if entry.queue_index is not None:
-                if not (0 <= int(entry.queue_index) < len(self._semantic_queue)):
+                if not (0 <= int(entry.queue_index) < len(self._cfvec_queue)):
                     to_remove.append(entry)
                     continue
-                queue_entry = self._semantic_queue[int(entry.queue_index)]
+                queue_entry = self._cfvec_queue[int(entry.queue_index)]
                 if queue_entry.path_state == PATH_STATE_WRONG:
-                    self._semantic_queue_mark_resolve_state(entry.queue_index, RESOLVE_STATE_SKIPPED)
+                    self._cfvec_queue_mark_resolve_state(entry.queue_index, RESOLVE_STATE_SKIPPED)
                     to_remove.append(entry)
                     continue
                 if queue_entry.path_state != PATH_STATE_CORRECT:
@@ -1701,7 +1771,7 @@ class BackendModel:
             self._sync_backend_state()
             self._ftq_scoreboard.note_resolve(entry, self.current_cycle, entry_flushes_itself)
             self._apply_backend_state()
-            self._semantic_queue_mark_resolve_state(entry.queue_index, RESOLVE_STATE_EMITTED)
+            self._cfvec_queue_mark_resolve_state(entry.queue_index, RESOLVE_STATE_EMITTED)
             to_remove.append(entry)
         for entry in to_remove:
             self._pending_resolves.remove(entry)
@@ -1715,10 +1785,16 @@ class BackendModel:
             return None
         if self._has_pending_control_event():
             return None
-        if self.golden_trace is not None and self._semantic_queue:
-            head_span = self._semantic_queue_head_ftq_span()
-            if head_span is None and self._semantic_queue:
-                head_entry = self._semantic_queue[0]
+        self._ensure_commit_queue_consistency()
+        if self.golden_trace is not None and self._commit_queue:
+            if int(self._commit_queue[0]) != 0:
+                return None
+            head_span = self._commit_queue_head_ftq_span()
+            if head_span is None and self._commit_queue:
+                head_queue_index = int(self._commit_queue[0])
+                if not (0 <= head_queue_index < len(self._cfvec_queue)):
+                    return None
+                head_entry = self._cfvec_queue[head_queue_index]
                 head_ftq_flag = int(head_entry.ftq_flag)
                 head_ftq_value = int(head_entry.ftq_value)
                 current_matches_head = bool(
@@ -1734,7 +1810,11 @@ class BackendModel:
                 )
                 if not current_matches_head and head_dispatch_complete:
                     last_head_idx = -1
-                    for idx, entry in enumerate(self._semantic_queue):
+                    for queue_index in self._commit_queue:
+                        idx = int(queue_index)
+                        if idx < 0 or idx >= len(self._cfvec_queue):
+                            break
+                        entry = self._cfvec_queue[idx]
                         if (
                             int(entry.ftq_flag) != int(head_ftq_flag)
                             or int(entry.ftq_value) != int(head_ftq_value)
@@ -1742,11 +1822,16 @@ class BackendModel:
                             break
                         last_head_idx = int(idx)
                     if last_head_idx >= 0:
-                        self._semantic_queue[last_head_idx].is_last_in_entry = True
-                    head_span = self._semantic_queue_head_ftq_span()
+                        self._cfvec_queue[last_head_idx].is_last_in_entry = True
+                    head_span = self._commit_queue_head_ftq_span()
             if head_span is None:
                 return None
             (ftq_flag, ftq_value), span_len = head_span
+            queue_head_indices = [int(idx) for idx in list(self._commit_queue)[:span_len]]
+            if len(queue_head_indices) != int(span_len):
+                return None
+            if queue_head_indices != list(range(int(span_len))):
+                return None
             state = self._sync_backend_state()
             have_prior_commit = bool(
                 int(state.commit_count) > 0
@@ -1760,10 +1845,10 @@ class BackendModel:
                     int(head_rank) == 0 or int(head_rank) >= int(state.ftq_size)
                 ):
                     if int(head_rank) == 0:
-                        self._semantic_queue_pop_head(int(span_len))
+                        self._cfvec_queue_pop_head(int(span_len))
                         return None
                     raise AssertionError(
-                        "semantic queue head falls behind commit_ptr; "
+                        "commit queue head falls behind commit_ptr; "
                         f"head=({int(ftq_flag)},{int(ftq_value)}) "
                         f"commit_ptr=({int(state.commit_ptr_flag)},{int(state.commit_ptr_value)})"
                     )
@@ -1790,7 +1875,7 @@ class BackendModel:
             if have_prior_commit:
                 head_rank = state.ftq_ptr_rank_after_commit(int(ftq_flag), int(ftq_value))
                 candidate_ftq = expected_ftq
-                # Redirect-truncated holes may disappear entirely from both semantic queue
+                # Redirect-truncated holes may disappear entirely from both cfvec/commit queues
                 # and FTQ bookkeeping. Those specific gaps can be skipped; any visible
                 # intermediate FTQ still blocks commit to preserve in-order semantics.
                 for _ in range(max(0, int(head_rank) - 1)):
@@ -1804,7 +1889,7 @@ class BackendModel:
                     candidate_ftq = state.increment_ftq_ptr(int(candidate_ftq[0]), int(candidate_ftq[1]))
                 if candidate_ftq != (int(ftq_flag), int(ftq_value)):
                     return None
-            queue_head_entries = list(self._semantic_queue)[:span_len]
+            queue_head_entries = [self._cfvec_queue[idx] for idx in queue_head_indices]
             if any(entry.path_state != PATH_STATE_CORRECT for entry in queue_head_entries):
                 return None
             if any(entry.rob_commit_state != ROB_COMMIT_STATE_COMMITTED for entry in queue_head_entries):
@@ -1835,7 +1920,7 @@ class BackendModel:
                         int(older_rank) == 0 or int(older_rank) >= int(state.ftq_size)
                     ):
                         continue
-                    if self._semantic_queue_has_ftq(
+                    if self._cfvec_queue_has_ftq(
                         int(older_entry.ftq_flag),
                         int(older_entry.ftq_value),
                     ):
@@ -1855,7 +1940,7 @@ class BackendModel:
                         continue
                     if (
                         not matched_head_entry
-                        and not self._semantic_queue_has_ftq(
+                        and not self._cfvec_queue_has_ftq(
                             int(entry.ftq_flag),
                             int(entry.ftq_value),
                         )
@@ -1864,7 +1949,7 @@ class BackendModel:
                     retained_entries.append(entry)
                 self.ftq_entries = retained_entries
             self._schedule_next_queue_call_ret_commit_group()
-            self._semantic_queue_pop_head(int(span_len))
+            self._cfvec_queue_pop_head(int(span_len))
             committed_rank = self._ftq_ptr_rank_after_commit(int(ftq_flag), int(ftq_value))
             self.commit_ptr_flag = int(ftq_flag)
             self.commit_ptr_value = int(ftq_value)
@@ -1878,7 +1963,7 @@ class BackendModel:
                     "ftq_flag": int(ftq_flag),
                     "ftq_value": int(ftq_value),
                     "committed_entries": [{"ftq_flag": int(ftq_flag), "ftq_value": int(ftq_value)}],
-                    "semantic_queue_span": int(span_len),
+                    "cfvec_queue_span": int(span_len),
                 },
             )
             return committed_entry
@@ -1998,13 +2083,13 @@ class BackendModel:
             )
             self._apply_backend_state()
             if pre_flush_current_ftq is not None and self._current_ftq_entry is None:
-                self._semantic_queue_close_current_ftq_span(
+                self._cfvec_queue_close_current_ftq_span(
                     int(pre_flush_current_ftq[0]),
                     int(pre_flush_current_ftq[1]),
                 )
-            self._semantic_queue_flush_wrong_path()
+            self._cfvec_queue_flush_wrong_path()
             self._semantic_recovery_target_pc = int(target_pc)
-            self._semantic_recovery_queue_start = len(self._semantic_queue)
+            self._semantic_recovery_queue_start = len(self._cfvec_queue)
             self._apply_backend_state()
             if not flush_itself:
                 next_target_ftq = self._increment_ftq_ptr(ftq_flag, ftq_value)
@@ -2117,7 +2202,7 @@ class BackendModel:
             flush_on_drive=False,
         )
         self._pending_resolves.clear()
-        self._clear_semantic_queue_state()
+        self._clear_cfvec_queue_state()
         self._current_ftq_entry = None
         self._current_ftq_seen_packets.clear()
         self._golden_wait_pc = None
@@ -2229,6 +2314,7 @@ class BackendModel:
             len(self.ftq_entries)
             + len(self._pending_resolves)
             + len(self.pending_events)
+            + len(self._commit_queue)
             + len(self._pending_queue_call_ret_commit_indices)
             + int(scheduled_call_ret_count)
             + len(self._visible_queue_call_ret_commit_group)

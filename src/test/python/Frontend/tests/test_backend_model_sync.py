@@ -124,9 +124,9 @@ def test_inject_redirect_uses_random_delay_range_from_backend_config():
     assert 105 <= int(event.ready_cycle) <= 108
 
 
-def test_inject_redirect_clears_semantic_queue_state() -> None:
+def test_inject_redirect_clears_cfvec_queue_state() -> None:
     bm = BackendModel()
-    bm._semantic_queue.extend(
+    bm._cfvec_queue.extend(
         [
             QueueInstr(cycle=0, slot=0, pc=0x80000000, instr=0x13, is_rvc=False, pred_taken=False, ftq_flag=0, ftq_value=1, ftq_offset=0, is_last_in_entry=False),
             QueueInstr(cycle=0, slot=1, pc=0x80000004, instr=0x6F, is_rvc=False, pred_taken=True, ftq_flag=0, ftq_value=1, ftq_offset=2, is_last_in_entry=True, is_cfi=True),
@@ -156,7 +156,7 @@ def test_inject_redirect_clears_semantic_queue_state() -> None:
 
     bm.inject_redirect(target_pc=0x80000100, reason="manual")
 
-    assert list(bm._semantic_queue) == []
+    assert list(bm._cfvec_queue) == []
     assert bm._pending_redirect_origin_index is None
     assert list(bm._pending_queue_resolve_indices) == []
     assert list(bm._pending_queue_call_ret_commit_indices) == []
@@ -212,7 +212,7 @@ def test_last_packet_sets_commit_ready_cycle_in_commit_delay_range():
     assert 103 <= int(bm.ftq_entries[0].commit_ready_cycle) <= 110
 
 
-def test_semantic_queue_scaffolding_mirrors_unique_cfvec_packets_in_order() -> None:
+def test_cfvec_queue_scaffolding_mirrors_unique_cfvec_packets_in_order() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -247,19 +247,19 @@ def test_semantic_queue_scaffolding_mirrors_unique_cfvec_packets_in_order() -> N
     bm.current_cycle = 10
     bm._sample_cfvec()
 
-    semantic_queue = list(bm._semantic_queue)
-    assert len(semantic_queue) == 2
-    assert [(entry.slot, entry.pc, entry.ftq_offset) for entry in semantic_queue] == [
+    cfvec_queue = list(bm._cfvec_queue)
+    assert len(cfvec_queue) == 2
+    assert [(entry.slot, entry.pc, entry.ftq_offset) for entry in cfvec_queue] == [
         (0, 0x80000000, 0),
         (1, 0x80000004, 2),
     ]
-    assert semantic_queue[0].is_cfi is False
-    assert semantic_queue[0].resolve_state == "not_needed"
-    assert semantic_queue[1].is_cfi is True
-    assert semantic_queue[1].resolve_state == "pending"
+    assert cfvec_queue[0].is_cfi is False
+    assert cfvec_queue[0].resolve_state == "not_needed"
+    assert cfvec_queue[1].is_cfi is True
+    assert cfvec_queue[1].resolve_state == "pending"
 
 
-def test_semantic_queue_scaffolding_deduplicates_repeated_packet_within_same_ftq_entry() -> None:
+def test_cfvec_queue_scaffolding_deduplicates_repeated_packet_within_same_ftq_entry() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -283,13 +283,13 @@ def test_semantic_queue_scaffolding_deduplicates_repeated_packet_within_same_ftq
     bm.current_cycle = 1
     bm._sample_cfvec()
 
-    semantic_queue = list(bm._semantic_queue)
-    assert len(semantic_queue) == 1
-    assert semantic_queue[0].pc == 0x80000000
-    assert semantic_queue[0].ftq_value == 3
+    cfvec_queue = list(bm._cfvec_queue)
+    assert len(cfvec_queue) == 1
+    assert cfvec_queue[0].pc == 0x80000000
+    assert cfvec_queue[0].ftq_value == 3
 
 
-def test_semantic_queue_marks_first_mismatch_as_wrong_path_start() -> None:
+def test_cfvec_queue_marks_first_mismatch_as_wrong_path_start() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -329,16 +329,16 @@ def test_semantic_queue_marks_first_mismatch_as_wrong_path_start() -> None:
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    semantic_queue = list(bm._semantic_queue)
-    assert len(semantic_queue) == 2
-    assert semantic_queue[0].golden_match_state == "matched"
-    assert semantic_queue[0].path_state == "correct"
-    assert semantic_queue[1].golden_match_state == "mismatched"
-    assert semantic_queue[1].path_state == "wrong"
+    cfvec_queue = list(bm._cfvec_queue)
+    assert len(cfvec_queue) == 2
+    assert cfvec_queue[0].golden_match_state == "matched"
+    assert cfvec_queue[0].path_state == "correct"
+    assert cfvec_queue[1].golden_match_state == "mismatched"
+    assert cfvec_queue[1].path_state == "wrong"
     assert bm._pending_redirect_origin_index == 1
 
 
-def test_semantic_queue_marks_younger_packets_wrong_after_redirect_origin() -> None:
+def test_cfvec_queue_marks_younger_packets_wrong_after_redirect_origin() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -391,12 +391,12 @@ def test_semantic_queue_marks_younger_packets_wrong_after_redirect_origin() -> N
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    semantic_queue = list(bm._semantic_queue)
-    assert [entry.path_state for entry in semantic_queue] == ["correct", "wrong", "wrong"]
+    cfvec_queue = list(bm._cfvec_queue)
+    assert [entry.path_state for entry in cfvec_queue] == ["correct", "wrong", "wrong"]
     assert bm._pending_redirect_origin_index == 1
 
 
-def test_semantic_queue_non_cfi_first_mismatch_starts_wrong_path() -> None:
+def test_cfvec_queue_non_cfi_first_mismatch_starts_wrong_path() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -450,9 +450,9 @@ def test_semantic_queue_non_cfi_first_mismatch_starts_wrong_path() -> None:
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    semantic_queue = list(bm._semantic_queue)
-    assert [entry.path_state for entry in semantic_queue] == ["correct", "wrong", "wrong"]
-    assert [entry.golden_match_state for entry in semantic_queue] == ["matched", "mismatched", "mismatched"]
+    cfvec_queue = list(bm._cfvec_queue)
+    assert [entry.path_state for entry in cfvec_queue] == ["correct", "wrong", "wrong"]
+    assert [entry.golden_match_state for entry in cfvec_queue] == ["matched", "mismatched", "mismatched"]
     assert bm._pending_redirect_origin_index == 1
     assert len(bm.pending_events) == 0
     assert len(bm._pending_resolves) == 2
@@ -461,7 +461,7 @@ def test_semantic_queue_non_cfi_first_mismatch_starts_wrong_path() -> None:
     assert bm._pending_resolves[0].target == 0x80000004
 
 
-def test_semantic_queue_redirect_flush_prunes_wrong_path_suffix() -> None:
+def test_cfvec_queue_redirect_flush_prunes_wrong_path_suffix() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -513,7 +513,7 @@ def test_semantic_queue_redirect_flush_prunes_wrong_path_suffix() -> None:
 
     bm.current_cycle = 0
     bm._sample_cfvec()
-    assert len(bm._semantic_queue) == 3
+    assert len(bm._cfvec_queue) == 3
     assert bm._pending_redirect_origin_index == 1
 
     payload = bm._plan_redirect_payload(
@@ -533,7 +533,7 @@ def test_semantic_queue_redirect_flush_prunes_wrong_path_suffix() -> None:
     )
 
     assert payload["target_pc"] == 0x80000004
-    assert [(entry.pc, entry.path_state) for entry in bm._semantic_queue] == [(0x80000000, "correct")]
+    assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [(0x80000000, "correct")]
     assert bm._pending_redirect_origin_index is None
 
 
@@ -595,7 +595,7 @@ def test_semantic_recovery_target_does_not_reopen_mismatch_when_golden_frontier_
     )
     assert bm._semantic_recovery_target_pc == 0x80000004
     assert bm._pending_redirect_origin_index is None
-    assert [(entry.pc, entry.path_state) for entry in bm._semantic_queue] == [(0x80000000, "correct")]
+    assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [(0x80000000, "correct")]
 
     bm.golden_trace.cursor = 2
     _clear_cfvec(dut)
@@ -616,10 +616,10 @@ def test_semantic_recovery_target_does_not_reopen_mismatch_when_golden_frontier_
 
     assert bm._semantic_recovery_target_pc is None
     assert bm._pending_redirect_origin_index is None
-    assert [(entry.pc, entry.path_state) for entry in bm._semantic_queue] == [(0x80000000, "correct")]
+    assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [(0x80000000, "correct")]
 
 
-def test_semantic_queue_redirect_flush_prunes_wrong_path_pending_resolves() -> None:
+def test_cfvec_queue_redirect_flush_prunes_wrong_path_pending_resolves() -> None:
     dut = _DummyDut()
     bm = BackendModel(resolve_min_delay=100, resolve_max_delay=100)
     bm.bind(dut)
@@ -694,7 +694,7 @@ def test_semantic_queue_redirect_flush_prunes_wrong_path_pending_resolves() -> N
     assert len(bm._pending_resolves) == 0
 
 
-def test_semantic_queue_transition_without_last_marks_surviving_prefix_closed() -> None:
+def test_cfvec_queue_transition_without_last_marks_surviving_prefix_closed() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -736,15 +736,15 @@ def test_semantic_queue_transition_without_last_marks_surviving_prefix_closed() 
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    semantic_queue = list(bm._semantic_queue)
-    assert [(entry.ftq_value, entry.is_last_in_entry) for entry in semantic_queue] == [
+    cfvec_queue = list(bm._cfvec_queue)
+    assert [(entry.ftq_value, entry.is_last_in_entry) for entry in cfvec_queue] == [
         (20, False),
         (20, True),
         (21, True),
     ]
 
 
-def test_semantic_queue_wait_break_marks_current_entry_closed() -> None:
+def test_cfvec_queue_wait_break_marks_current_entry_closed() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -784,9 +784,9 @@ def test_semantic_queue_wait_break_marks_current_entry_closed() -> None:
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    semantic_queue = list(bm._semantic_queue)
-    assert len(semantic_queue) == 1
-    assert semantic_queue[0].is_last_in_entry is True
+    cfvec_queue = list(bm._cfvec_queue)
+    assert len(cfvec_queue) == 1
+    assert cfvec_queue[0].is_last_in_entry is True
 
 
 def test_waiting_target_prefix_last_seals_current_ftq_entry() -> None:
@@ -823,7 +823,7 @@ def test_waiting_target_prefix_last_seals_current_ftq_entry() -> None:
     assert [(entry.ftq_flag, entry.ftq_value, entry.dispatch_complete, entry.observed_last_in_entry) for entry in bm.ftq_entries] == [
         (0, 30, True, True)
     ]
-    assert list(bm._semantic_queue)[0].is_last_in_entry is True
+    assert list(bm._cfvec_queue)[0].is_last_in_entry is True
 
 
 def test_waiting_target_prefix_cfi_is_marked_resolve_skipped() -> None:
@@ -850,11 +850,11 @@ def test_waiting_target_prefix_cfi_is_marked_resolve_skipped() -> None:
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    semantic_queue = list(bm._semantic_queue)
-    assert len(semantic_queue) == 1
-    assert semantic_queue[0].is_cfi is True
-    assert semantic_queue[0].path_state == "wrong"
-    assert semantic_queue[0].resolve_state == "skipped"
+    cfvec_queue = list(bm._cfvec_queue)
+    assert len(cfvec_queue) == 1
+    assert cfvec_queue[0].is_cfi is True
+    assert cfvec_queue[0].path_state == "wrong"
+    assert cfvec_queue[0].resolve_state == "skipped"
     assert list(bm._pending_queue_resolve_indices) == []
     assert all(
         str(evt.payload.get("reason", "")) != "golden_first_mismatch_redirect"
@@ -868,7 +868,7 @@ def test_semantic_recovery_residual_prefix_does_not_queue_new_mismatch_redirect(
     bm = BackendModel()
     bm.bind(dut)
     bm.set_golden_trace(GoldenTrace([TraceEntry(index=0, pc=0x80000020, instr=0x00000013, size=4)]))
-    bm._semantic_queue.append(
+    bm._cfvec_queue.append(
         QueueInstr(
             cycle=0,
             slot=0,
@@ -885,7 +885,7 @@ def test_semantic_recovery_residual_prefix_does_not_queue_new_mismatch_redirect(
         )
     )
     bm._semantic_recovery_target_pc = 0x80000020
-    bm._semantic_recovery_queue_start = len(bm._semantic_queue)
+    bm._semantic_recovery_queue_start = len(bm._cfvec_queue)
 
     _drive_cfvec_slot(
         dut,
@@ -904,9 +904,9 @@ def test_semantic_recovery_residual_prefix_does_not_queue_new_mismatch_redirect(
     bm._sample_cfvec()
 
     assert bm._semantic_recovery_target_pc == 0x80000020
-    assert len(bm._semantic_queue) == 2
-    assert bm._semantic_queue[-1].path_state == "wrong"
-    assert bm._semantic_queue[-1].resolve_state == "skipped"
+    assert len(bm._cfvec_queue) == 2
+    assert bm._cfvec_queue[-1].path_state == "wrong"
+    assert bm._cfvec_queue[-1].resolve_state == "skipped"
     assert all(
         str(evt.payload.get("reason", "")) != "golden_first_mismatch_redirect"
         for evt in bm.pending_events
@@ -914,10 +914,10 @@ def test_semantic_recovery_residual_prefix_does_not_queue_new_mismatch_redirect(
     )
 
 
-def test_semantic_queue_commit_uses_queue_head_when_ftq_entries_are_out_of_order() -> None:
+def test_cfvec_queue_commit_uses_queue_head_when_ftq_entries_are_out_of_order() -> None:
     bm = BackendModel()
     bm.set_golden_trace(GoldenTrace([]))
-    bm._semantic_queue.extend(
+    bm._cfvec_queue.extend(
         [
             QueueInstr(
                 cycle=0,
@@ -968,7 +968,7 @@ def test_semantic_queue_commit_uses_queue_head_when_ftq_entries_are_out_of_order
     assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (0, 12)
 
 
-def test_semantic_queue_correct_path_cfi_emits_resolve_and_marks_emitted() -> None:
+def test_cfvec_queue_correct_path_cfi_emits_resolve_and_marks_emitted() -> None:
     dut = _DummyDut()
     bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0)
     bm.bind(dut)
@@ -1001,11 +1001,11 @@ def test_semantic_queue_correct_path_cfi_emits_resolve_and_marks_emitted() -> No
     bm._drive_resolves()
 
     assert int(dut.io_backend_toFtq_resolve_0_valid.value) == 1
-    assert bm._semantic_queue[0].resolve_state == "emitted"
+    assert bm._cfvec_queue[0].resolve_state == "emitted"
     assert list(bm._pending_queue_resolve_indices) == []
 
 
-def test_semantic_queue_wrong_path_cfi_resolve_is_skipped() -> None:
+def test_cfvec_queue_wrong_path_cfi_resolve_is_skipped() -> None:
     dut = _DummyDut()
     bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0)
     bm.bind(dut)
@@ -1061,13 +1061,13 @@ def test_semantic_queue_wrong_path_cfi_resolve_is_skipped() -> None:
     bm._drive_resolves()
 
     assert int(dut.io_backend_toFtq_resolve_0_valid.value) == 0
-    assert bm._semantic_queue[1].resolve_state == "skipped"
-    assert bm._semantic_queue[2].resolve_state == "skipped"
+    assert bm._cfvec_queue[1].resolve_state == "skipped"
+    assert bm._cfvec_queue[2].resolve_state == "skipped"
     assert len(bm._pending_resolves) == 0
     assert list(bm._pending_queue_resolve_indices) == []
 
 
-def test_semantic_queue_first_mismatch_cfi_queues_first_mismatch_redirect() -> None:
+def test_cfvec_queue_first_mismatch_cfi_queues_first_mismatch_redirect() -> None:
     dut = _DummyDut()
     bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0, redirect_min_delay=0, redirect_max_delay=0)
     bm.bind(dut)
@@ -1214,7 +1214,7 @@ def test_semantic_commit_skips_stale_older_ftq_entry_not_present_in_queue() -> N
             FtqEntry(ftq_flag=0, ftq_value=30, dispatch_complete=True, observed_last_in_entry=True, commit_ready_cycle=0),
         ]
     )
-    bm._semantic_queue.append(
+    bm._cfvec_queue.append(
         QueueInstr(
             cycle=150,
             slot=0,
@@ -1253,7 +1253,7 @@ def test_semantic_commit_infers_head_span_close_when_dispatch_complete_and_curre
     bm.ftq_entries.append(
         FtqEntry(ftq_flag=0, ftq_value=30, dispatch_complete=True, observed_last_in_entry=False, commit_ready_cycle=0)
     )
-    bm._semantic_queue.extend(
+    bm._cfvec_queue.extend(
         [
             QueueInstr(
                 cycle=150,
@@ -1297,7 +1297,7 @@ def test_semantic_commit_infers_head_span_close_when_dispatch_complete_and_curre
     assert commit_entry is not None
     assert (commit_entry.ftq_flag, commit_entry.ftq_value) == (0, 30)
     assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (0, 30)
-    assert len(bm._semantic_queue) == 0
+    assert len(bm._cfvec_queue) == 0
 
 
 def test_sealing_same_ftq_entry_twice_merges_instead_of_appending_duplicate():
@@ -1368,7 +1368,7 @@ def test_level0_redirect_flush_closes_surviving_current_ftq_span_when_current_en
     bm.commit_ptr_flag = 0
     bm.commit_ptr_value = 20
     bm._current_ftq_entry = FtqEntry(ftq_flag=0, ftq_value=25)
-    bm._semantic_queue.extend(
+    bm._cfvec_queue.extend(
         [
             QueueInstr(
                 cycle=10,
@@ -1424,7 +1424,7 @@ def test_level0_redirect_flush_closes_surviving_current_ftq_span_when_current_en
     )
 
     assert bm._current_ftq_entry is None
-    assert bm._semantic_queue[-1].is_last_in_entry is True
+    assert bm._cfvec_queue[-1].is_last_in_entry is True
 
 
 def test_flush_after_redirect_keeps_partially_observed_next_target_current_entry():
@@ -1631,7 +1631,7 @@ def test_golden_wait_target_entry_suffix_does_not_reset_same_ftq_slot_state() ->
     bm._sample_cfvec()
 
     assert bm._golden_wait_pc == 0x800049C2
-    assert [(entry.pc, entry.path_state) for entry in bm._semantic_queue] == [
+    assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [
         (0x800048FE, "correct"),
         (0x80004902, "correct"),
         (0x80004904, "correct"),
@@ -1644,7 +1644,7 @@ def test_golden_wait_target_entry_suffix_does_not_reset_same_ftq_slot_state() ->
     bm.current_cycle = 1
     bm._sample_cfvec()
 
-    assert [(entry.pc, entry.path_state, entry.is_last_in_entry) for entry in bm._semantic_queue] == [
+    assert [(entry.pc, entry.path_state, entry.is_last_in_entry) for entry in bm._cfvec_queue] == [
         (0x800048FE, "correct", False),
         (0x80004902, "correct", False),
         (0x80004904, "correct", True),
@@ -1968,7 +1968,7 @@ def test_clear_stale_wait_states_clears_semantic_recovery_without_pending_redire
     bm._semantic_recovery_queue_start = 7
     bm._pending_redirect_origin_index = None
     bm.pending_events.clear()
-    bm._semantic_queue.append(
+    bm._cfvec_queue.append(
         QueueInstr(
             cycle=0,
             slot=0,
@@ -2066,7 +2066,7 @@ def test_backend_model_consumes_backend_observation_snapshot() -> None:
     assert bm.current_frontend_observation().from_ftq_ftq_idx == 7
 
 
-def test_semantic_queue_match_does_not_immediately_mark_instruction_committed() -> None:
+def test_cfvec_queue_match_does_not_immediately_mark_instruction_committed() -> None:
     base = 0x80000000
     instr = 0x008000EF  # jal x1, 8
 
@@ -2107,9 +2107,9 @@ def test_semantic_queue_match_does_not_immediately_mark_instruction_committed() 
 
     bm.on_clock_edge(0)
 
-    assert bm._semantic_queue[0].golden_match_state == "matched"
-    assert bm._semantic_queue[0].path_state == "correct"
-    assert bm._semantic_queue[0].rob_commit_state == "pending"
+    assert bm._cfvec_queue[0].golden_match_state == "matched"
+    assert bm._cfvec_queue[0].path_state == "correct"
+    assert bm._cfvec_queue[0].rob_commit_state == "pending"
     assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 0
 
 
@@ -2154,24 +2154,24 @@ def test_callret_commit_becomes_visible_one_cycle_after_simulated_instruction_co
 
     bm.on_clock_edge(0)
 
-    assert bm._semantic_queue[0].rob_commit_state == "pending"
+    assert bm._cfvec_queue[0].rob_commit_state == "pending"
     assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 0
 
     _clear_cfvec(dut)
     bm.on_clock_edge(1)
 
-    assert bm._semantic_queue[0].rob_commit_state == "pending"
+    assert bm._cfvec_queue[0].rob_commit_state == "pending"
     assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 0
 
     bm.on_clock_edge(2)
 
-    assert bm._semantic_queue[0].rob_commit_state == "pending"
+    assert bm._cfvec_queue[0].rob_commit_state == "pending"
     assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 0
 
     bm.on_clock_edge(3)
 
-    assert bm._semantic_queue[0].rob_commit_state == "committed"
-    assert bm._semantic_queue[0].call_ret_commit_state == "pending"
+    assert bm._cfvec_queue[0].rob_commit_state == "committed"
+    assert bm._cfvec_queue[0].call_ret_commit_state == "pending"
     assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 0
 
     bm.on_clock_edge(4)
@@ -2181,7 +2181,7 @@ def test_callret_commit_becomes_visible_one_cycle_after_simulated_instruction_co
     assert int(dut.io_backend_toFtq_callRetCommit_0_bits_ftqPtr_value.value) == 5
 
 
-def test_semantic_queue_callret_tracks_per_instruction_commit_frontier() -> None:
+def test_cfvec_queue_callret_tracks_per_instruction_commit_frontier() -> None:
     base = 0x80000100
     instr = 0x008000EF  # jal x1, 8
 
@@ -2222,28 +2222,28 @@ def test_semantic_queue_callret_tracks_per_instruction_commit_frontier() -> None
 
     bm.on_clock_edge(0)
 
-    assert bm._semantic_queue[0].rob_commit_state == "pending"
-    assert bm._semantic_queue[0].call_ret_commit_state == "none"
+    assert bm._cfvec_queue[0].rob_commit_state == "pending"
+    assert bm._cfvec_queue[0].call_ret_commit_state == "none"
     assert list(bm._pending_queue_call_ret_commit_indices) == []
     assert list(bm._scheduled_queue_call_ret_commit_groups) == []
 
     _clear_cfvec(dut)
     bm.on_clock_edge(1)
 
-    assert bm._semantic_queue[0].rob_commit_state == "pending"
-    assert bm._semantic_queue[0].call_ret_commit_state == "none"
+    assert bm._cfvec_queue[0].rob_commit_state == "pending"
+    assert bm._cfvec_queue[0].call_ret_commit_state == "none"
     assert list(bm._scheduled_queue_call_ret_commit_groups) == []
 
     bm.on_clock_edge(2)
 
-    assert bm._semantic_queue[0].rob_commit_state == "pending"
-    assert bm._semantic_queue[0].call_ret_commit_state == "none"
+    assert bm._cfvec_queue[0].rob_commit_state == "pending"
+    assert bm._cfvec_queue[0].call_ret_commit_state == "none"
     assert list(bm._scheduled_queue_call_ret_commit_groups) == []
 
     bm.on_clock_edge(3)
 
-    assert bm._semantic_queue[0].rob_commit_state == "committed"
-    assert bm._semantic_queue[0].call_ret_commit_state == "pending"
+    assert bm._cfvec_queue[0].rob_commit_state == "committed"
+    assert bm._cfvec_queue[0].call_ret_commit_state == "pending"
     assert list(bm._pending_queue_call_ret_commit_indices) == []
     scheduled_groups = list(bm._scheduled_queue_call_ret_commit_groups)
     assert len(scheduled_groups) == 1
@@ -2253,13 +2253,13 @@ def test_semantic_queue_callret_tracks_per_instruction_commit_frontier() -> None
 
     bm.on_clock_edge(4)
 
-    assert bm._semantic_queue[0].call_ret_commit_state == "emitted"
+    assert bm._cfvec_queue[0].call_ret_commit_state == "emitted"
     assert int(dut.io_backend_toFtq_callRetCommit_0_valid.value) == 1
     assert int(dut.io_backend_toFtq_callRetCommit_0_bits_rasAction.value) == 2
     assert int(dut.io_backend_toFtq_callRetCommit_0_bits_ftqPtr_value.value) == 9
 
 
-def test_semantic_queue_commit_pops_only_queue_head_ftq_entry() -> None:
+def test_cfvec_queue_commit_pops_only_queue_head_ftq_entry() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -2306,7 +2306,7 @@ def test_semantic_queue_commit_pops_only_queue_head_ftq_entry() -> None:
 
     assert commit_entry is not None
     assert (commit_entry.ftq_flag, commit_entry.ftq_value) == (0, 10)
-    assert [(entry.pc, entry.ftq_value) for entry in bm._semantic_queue] == [(0x80000204, 11)]
+    assert [(entry.pc, entry.ftq_value) for entry in bm._cfvec_queue] == [(0x80000204, 11)]
     assert [(entry.ftq_flag, entry.ftq_value) for entry in bm.ftq_entries] == [(0, 11)]
     assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (0, 10)
     assert bm.commit_count == 1
@@ -2314,7 +2314,7 @@ def test_semantic_queue_commit_pops_only_queue_head_ftq_entry() -> None:
 
 def test_callret_emitted_mark_uses_ftq_offset_identity_after_pop_head() -> None:
     bm = BackendModel()
-    bm._semantic_queue.extend(
+    bm._cfvec_queue.extend(
         [
             QueueInstr(
                 cycle=0,
@@ -2360,19 +2360,19 @@ def test_callret_emitted_mark_uses_ftq_offset_identity_after_pop_head() -> None:
         )
     )
 
-    bm._semantic_queue_pop_head(1)
+    bm._cfvec_queue_pop_head(1)
     bm.current_cycle = 1
     bm._activate_visible_queue_call_ret_commit_group()
 
     assert [inst.ftq_value for inst in bm._visible_queue_call_ret_commit_group] == [10]
-    assert len(bm._semantic_queue) == 1
-    assert int(bm._semantic_queue[0].ftq_value) == 11
-    assert bm._semantic_queue[0].call_ret_commit_state == "none"
+    assert len(bm._cfvec_queue) == 1
+    assert int(bm._cfvec_queue[0].ftq_value) == 11
+    assert bm._cfvec_queue[0].call_ret_commit_state == "none"
 
 
-def test_semantic_queue_pop_head_recomputes_wrong_path_origin_when_suffix_survives() -> None:
+def test_cfvec_queue_pop_head_recomputes_wrong_path_origin_when_suffix_survives() -> None:
     bm = BackendModel()
-    bm._semantic_queue.extend(
+    bm._cfvec_queue.extend(
         [
             QueueInstr(
                 cycle=0,
@@ -2417,16 +2417,16 @@ def test_semantic_queue_pop_head_recomputes_wrong_path_origin_when_suffix_surviv
     )
     bm._pending_redirect_origin_index = 1
 
-    bm._semantic_queue_pop_head(2)
+    bm._cfvec_queue_pop_head(2)
 
-    assert len(bm._semantic_queue) == 1
-    assert bm._semantic_queue[0].path_state == "wrong"
+    assert len(bm._cfvec_queue) == 1
+    assert bm._cfvec_queue[0].path_state == "wrong"
     assert bm._pending_redirect_origin_index == 0
 
 
-def test_semantic_queue_flush_wrong_path_falls_back_to_first_wrong_when_origin_missing() -> None:
+def test_cfvec_queue_flush_wrong_path_falls_back_to_first_wrong_when_origin_missing() -> None:
     bm = BackendModel()
-    bm._semantic_queue.extend(
+    bm._cfvec_queue.extend(
         [
             QueueInstr(
                 cycle=0,
@@ -2471,13 +2471,13 @@ def test_semantic_queue_flush_wrong_path_falls_back_to_first_wrong_when_origin_m
     )
     bm._pending_redirect_origin_index = None
 
-    bm._semantic_queue_flush_wrong_path()
+    bm._cfvec_queue_flush_wrong_path()
 
-    assert [(entry.pc, entry.path_state) for entry in bm._semantic_queue] == [(0x80003000, "correct")]
+    assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [(0x80003000, "correct")]
     assert bm._pending_redirect_origin_index is None
 
 
-def test_semantic_queue_commit_waits_for_correct_path_cfi_resolve() -> None:
+def test_cfvec_queue_commit_waits_for_correct_path_cfi_resolve() -> None:
     dut = _DummyDut()
     bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0)
     bm.bind(dut)
@@ -2517,10 +2517,10 @@ def test_semantic_queue_commit_waits_for_correct_path_cfi_resolve() -> None:
 
     assert commit_entry is not None
     assert (commit_entry.ftq_flag, commit_entry.ftq_value) == (0, 12)
-    assert list(bm._semantic_queue) == []
+    assert list(bm._cfvec_queue) == []
 
 
-def test_semantic_queue_stale_head_equal_to_commit_ptr_is_dropped() -> None:
+def test_cfvec_queue_stale_head_equal_to_commit_ptr_is_dropped() -> None:
     bm = BackendModel()
     bm.set_golden_trace(
         GoldenTrace([TraceEntry(index=0, pc=0x80000000, instr=0x00000013, size=4)])
@@ -2529,7 +2529,7 @@ def test_semantic_queue_stale_head_equal_to_commit_ptr_is_dropped() -> None:
     bm.commit_ptr_flag = 0
     bm.commit_ptr_value = 14
     bm.current_cycle = 100
-    bm._semantic_queue.append(
+    bm._cfvec_queue.append(
         QueueInstr(
             cycle=90,
             slot=0,
@@ -2552,7 +2552,7 @@ def test_semantic_queue_stale_head_equal_to_commit_ptr_is_dropped() -> None:
     commit_entry = bm._plan_commit_entry_for_cycle()
 
     assert commit_entry is None
-    assert len(bm._semantic_queue) == 0
+    assert len(bm._cfvec_queue) == 0
 
 
 
