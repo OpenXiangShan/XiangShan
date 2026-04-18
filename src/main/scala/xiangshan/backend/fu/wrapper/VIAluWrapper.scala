@@ -5,8 +5,8 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
-import xiangshan.backend.vector.fu.util.Func._
-import xiangshan.backend.vector.fu.util.{VecFixLatFunc, VecFuConfig}
+import xiangshan.backend.vector.fu.Func._
+import xiangshan.backend.vector.fu.{VecFixLatFunc, VecFuConfig}
 import yunsuan.vector.Common.VSew
 import yunsuan.vector.VectorALU.VIAlu
 

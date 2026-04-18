@@ -12,7 +12,7 @@ import xiangshan.backend.decode.Imm
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.regfile._
 import xiangshan.backend.vector.IssuePipe.{RfReadAddrBundle, RfReadDataBundle}
-import xiangshan.backend.vector.fu.util.VecFuConfig
+import xiangshan.backend.vector.fu.VecFuConfig
 
 import scala.beans.BeanProperty
 
