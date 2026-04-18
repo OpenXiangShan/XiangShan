@@ -314,7 +314,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
 
     v0RfWaddr := io.fromV0Wb.get.map(x => RegEnable(x.pdest, x.wen))
     v0RfWdata := io.fromV0Wb.get.map(x => RegEnable(x.data, x.wen))
-    v0RfWen.foreach(_ := io.fromV0Wb.get.map(x => RegNext(x.wen)))
+    v0RfWen.foreach(_.foreach(_ := false.B))
     for (portIdx <- v0RfRaddr.indices) {
       if (v0RFReadArbiter.io.out.isDefinedAt(portIdx))
         v0RfRaddr(portIdx) := v0RFReadArbiter.io.out(portIdx).bits.addr
@@ -432,7 +432,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     }
     v0RfWaddr := io.fromV0Wb.get.map(x => RegEnable(x.pdest, x.wen)).toSeq
     v0RfWdata := io.fromV0Wb.get.map(x => RegEnable(x.data, x.wen)).toSeq
-    v0RfWen.foreach(_.zip(io.fromV0Wb.get.map(x => RegNext(x.wen))).foreach { case (wenSink, wenSource) => wenSink := wenSource })
+    v0RfWen.foreach(_.foreach(_ := false.B))
     for (portIdx <- v0RfRaddr.indices) {
       if (v0RFReadArbiter.io.out.isDefinedAt(portIdx))
         v0RfRaddr(portIdx) := v0RFReadArbiter.io.out(portIdx).bits.addr
