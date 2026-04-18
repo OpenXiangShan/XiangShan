@@ -13,8 +13,8 @@ import yunsuan.VialuFixType
 import yunsuan.encoding.{VdType, Vs1IntType, Vs2IntType}
 import yunsuan.vector.mac.VIMac64b
 import xiangshan.backend.decode.opcode.Opcode.VIMacOpcodes
-import xiangshan.backend.vector.fu.util.VecFixLatFunc
-import xiangshan.backend.vector.fu.util.VecFuConfig
+import xiangshan.backend.vector.fu.VecFixLatFunc
+import xiangshan.backend.vector.fu.VecFuConfig
 
 class VIMacU(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg) {
   import VIMacOpcodes._
