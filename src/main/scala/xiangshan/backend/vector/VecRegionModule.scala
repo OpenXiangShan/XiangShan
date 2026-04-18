@@ -223,16 +223,16 @@ class VecRegionImp(
       pipe.in.is0RdFail := false.B // Todo
       pipe.in.is0WtFail := false.B // Todo
       pipe.in.is0LdCancel := false.B // Todo
-      pipe.in.is1VpRdDataNext.foreach { case rdata =>
+      pipe.in.is2VpRdDataNext.foreach { case rdata =>
         rdata.data := vpRdata(rdata.rdConfig.port)
       }
-      pipe.in.is1VlRdDataNext.foreach { case rdata =>
+      pipe.in.is2VlRdDataNext.foreach { case rdata =>
         rdata.data := vlRdata(rdata.rdConfig.port)
       }
       pipe.in.is2GpRdDataNext := RegNext(in.fromIntRegion.is1GpRdDataNext(iqIdx)(pipeIdx))
       pipe.in.is2FpRdDataNext := RegNext(in.fromFltRegion.is1FpRdDataNext(iqIdx)(pipeIdx))
-      pipe.in.is0GpRdFailNext := in.fromIntRegion.is0GpRdDataFail(iqIdx)(pipeIdx)
-      pipe.in.is0FpRdFailNext := in.fromFltRegion.is0FpRdDataFail(iqIdx)(pipeIdx)
+      pipe.in.is2GpRdFailNext := in.fromIntRegion.is0GpRdDataFail(iqIdx)(pipeIdx)
+      pipe.in.is2FpRdFailNext := in.fromFltRegion.is0FpRdDataFail(iqIdx)(pipeIdx)
 
       pipe.in.frm.foreach(_ := in.fromCSR.frm)
       pipe.in.vxrm.foreach(_ := in.fromCSR.vxrm)
@@ -290,7 +290,7 @@ class VecRegionImp(
   vpWaddr := vpWbDataPath.out.toRf.map(_.pdest)
   vpWdata := vpWbDataPath.out.toRf.map(_.data)
   vpRaddr := issuePipes
-    .flatMap(_.flatMap(_.out.is0VpRdAddrNext))
+    .flatMap(_.flatMap(_.out.is1VpRdAddrNext))
     .groupBy(_.rdConfig.port)
     .toSeq
     .sortBy { case (port, raddr) => port }
@@ -300,7 +300,7 @@ class VecRegionImp(
   vlWaddr := in.fromIntRegion.vlWb.map(_.pdest)
   vlWdata := in.fromIntRegion.vlWb.map(_.data)
   vlRaddr := issuePipes
-    .flatMap(_.flatMap(_.out.is0VlRdAddrNext))
+    .flatMap(_.flatMap(_.out.is1VlRdAddrNext))
     .groupBy(_.rdConfig.port)
     .toSeq
     .sortBy { case (port, raddr) => port }

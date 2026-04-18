@@ -611,6 +611,10 @@ sealed trait NewParam { self: BackendParams =>
     getVecRegionParam,
   )
 
+  // New api name
+  def gpPregParams = this.intPregParams
+  def vpPregParams = this.vfPregParams
+
   def genExuToRfBundle(pregParams: PregParams): MixedVec[MixedVec[MixedVec[Exu.ToRf]]] = MixedVec(
     regionParams.map(_.genExuToRfBundle(pregParams))
   )
