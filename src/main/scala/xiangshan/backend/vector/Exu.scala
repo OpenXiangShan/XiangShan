@@ -16,7 +16,7 @@ import xiangshan.backend.fu.vector.Bundles.{V0, VType, Vl, Vxrm, Vxsat}
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecRegionModule.DebugBundle
-import xiangshan.backend.vector.fu.util._
+import xiangshan.backend.vector.fu._
 import xiangshan.{ExceptSparseVec, Redirect, TriggerAction, XSBundle}
 import chisel3.experimental.BundleLiterals._
 import xiangshan.mem.SqPtr

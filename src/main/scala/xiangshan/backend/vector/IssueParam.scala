@@ -10,7 +10,7 @@ import xiangshan.backend.datapath.WbConfig.PregWB
 import xiangshan.backend.decode.Imm
 import xiangshan.backend.issue.IssueBlockParams
 import xiangshan.backend.regfile.PregParams
-import xiangshan.backend.vector.fu.util.VecFuConfig
+import xiangshan.backend.vector.fu.VecFuConfig
 
 import scala.beans.BeanProperty
 

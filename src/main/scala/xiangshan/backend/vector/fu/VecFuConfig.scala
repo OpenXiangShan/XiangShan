@@ -1,4 +1,4 @@
-package xiangshan.backend.vector.fu.util
+package xiangshan.backend.vector.fu
 
 import chisel3._
 import org.chipsalliance.cde.config.Parameters
@@ -8,7 +8,7 @@ import xiangshan.backend.decode._
 import xiangshan.backend.fu.wrapper._
 import xiangshan.backend.fu.{FuConfig, FuType, FuncUnit}
 import xiangshan.backend.vector.Exu
-import xiangshan.backend.vector.fu.util.VecFuConfig.VecVectorV2Config
+import xiangshan.backend.vector.fu.VecFuConfig.VecVectorV2Config
 
 import scala.beans.BeanProperty
 

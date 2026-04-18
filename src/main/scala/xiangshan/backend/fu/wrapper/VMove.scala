@@ -10,7 +10,7 @@ import xiangshan.backend.fu.vector.Utils.VecDataToMaskDataVec
 import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
 import yunsuan.encoding.Opcode.Opcodes.VMoveOpcode
 import yunsuan.vector.VectorMove.VectorMove
-import xiangshan.backend.vector.fu.util._
+import xiangshan.backend.vector.fu._
 import yunsuan.vector.Common._
 
 class VMove(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg) {
