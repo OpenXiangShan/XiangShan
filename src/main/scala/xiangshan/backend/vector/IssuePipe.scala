@@ -31,8 +31,8 @@ class IssuePipe(
 
   val is0Next: ValidIO[VecIssueQueue.Deq] = in.is0Next
   val is0    : ValidIO[VecIssueQueue.Deq] = RegInit(chiselTypeOf(is0Next).Lit(_.valid -> false.B))
-  val is1Next: ValidIO[Exu.InUop]         = Wire(ValidIO(new Exu.InUop(param)))
-  val is1    : ValidIO[IssuePipe.Is1]     = RegInit(ValidIO(new IssuePipe.Is1(param)).Lit(_.valid -> false.B))
+  val is1Next: ValidIO[VecIssueQueue.Deq] = Wire(chiselTypeOf(is0Next))
+  val is1    : ValidIO[VecIssueQueue.Deq] = RegInit(chiselTypeOf(is0Next).Lit(_.valid -> false.B))
   val is2Next: ValidIO[Exu.InUop]         = Wire(ValidIO(new Exu.InUop(param)))
   val is2    : ValidIO[Exu.InUop]         = RegInit(ValidIO(new Exu.InUop(param)).Lit(_.valid -> false.B))
   val ex0Next: ValidIO[Exu.InUop]         = Wire(ValidIO(new Exu.InUop(param)))
@@ -51,54 +51,15 @@ class IssuePipe(
   val is1Resp = out.is1Resp
 
   is0.bits.debug.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueArb.id.U, is0.valid, clock, reset))
-  is1.bits.exuIn.debug.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, is1.valid, clock, reset))
+  is1.bits.debug.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, is1.valid, clock, reset))
   is2.bits.debug.foreach(x => PerfCCT.updateInstPos(x.seqNum, PerfCCT.InstPos.AtIssueReadReg.id.U, is2.valid, clock, reset))
 
   /**
    * is0 stage
    */
-  val is0GpRdAddrReqSrcIdx: Seq[Int] = is0Next.bits.exuParam.readPortCfgs.zipWithIndex collect {
-    case (readCfg, srcIdx) if readCfg.exists(_.getDataConfig == IntData()) => srcIdx
-  }
-  val is0FpRdAddrReqSrcIdx: Seq[Int] = is0Next.bits.exuParam.readPortCfgs.zipWithIndex collect {
-    case (readCfg, srcIdx) if readCfg.exists(_.getDataConfig == FpData()) => srcIdx
-  }
-  val is0VpRdAddrReqSrcIdx: Seq[Int] = is0Next.bits.exuParam.readPortCfgs.zipWithIndex collect {
-    case (readCfg, srcIdx) if readCfg.exists(_.getDataConfig == VecData()) => srcIdx
-  }
   val is0Failed: Bool = in.is0RdFail && in.is0LdCancel
   is0Resp.fail := is0.valid && is0Failed
   is0Resp.success := false.B // Todo
-
-  out.is0GpRdAddrNext.zip(is0GpRdAddrReqSrcIdx).foreach {
-    case (readBundle, srcIdx) =>
-      readBundle.ren := is0Next.valid && is0Next.bits.gpRen(srcIdx)
-      readBundle.addr := is0Next.bits.psrc(srcIdx)
-  }
-
-  out.is0FpRdAddrNext.zip(is0FpRdAddrReqSrcIdx).foreach {
-    case (readBundle, srcIdx) =>
-      readBundle.ren := is0Next.valid && is0Next.bits.fpRen(srcIdx)
-      readBundle.addr := is0Next.bits.psrc(srcIdx)
-  }
-
-  out.is0VpRdAddrNext.zip(is0VpRdAddrReqSrcIdx).foreach {
-    case (readBundle, srcIdx) =>
-      readBundle.ren := is0Next.valid && is0Next.bits.vpRen(srcIdx)
-      readBundle.addr := is0Next.bits.psrc(srcIdx)
-  }
-
-  out.is0V0RdAddrNext.zip(is0Next.bits.psrcV0).foreach {
-    case (readBundle, psrc) =>
-      readBundle.ren := is0Next.valid && psrc.valid
-      readBundle.addr := psrc.bits
-  }
-
-  out.is0VlRdAddrNext.zip(is0Next.bits.psrcVl).foreach {
-    case (readBundle, psrc) =>
-      readBundle.ren := is0Next.valid && psrc.valid
-      readBundle.addr := psrc.bits
-  }
 
   is0.valid := is0Next.valid
   when (is0Next.valid) {
@@ -108,39 +69,56 @@ class IssuePipe(
   /**
    * is1 stage
    */
-  val is1GpRdFail: Vec[Bool] = VecInit(is1.bits.exuIn.data.src.indices.map {
-    srcIdx =>
-      val idx = in.is2GpRdDataNext.map(_.srcIdx).indexWhere(_ == srcIdx)
-      if (idx != -1)
-        in.is0GpRdFailNext(idx)
-      else
-        false.B
-  })
-  val is1FpRdFail: Vec[Bool] = VecInit(is1.bits.exuIn.data.src.indices.map {
-    srcIdx =>
-      val idx = in.is2FpRdDataNext.map(_.srcIdx).indexWhere(_ == srcIdx)
-      if (idx != -1)
-        in.is0FpRdFailNext(idx)
-      else
-        false.B
-  })
+  val is1GpRdAddrReqSrcIdx: Seq[Int] = is1Next.bits.exuParam.readPortCfgs.zipWithIndex collect {
+    case (readCfg, srcIdx) if readCfg.exists(_.getDataConfig == IntData()) => srcIdx
+  }
+
+  val is1FpRdAddrReqSrcIdx: Seq[Int] = is1Next.bits.exuParam.readPortCfgs.zipWithIndex collect {
+    case (readCfg, srcIdx) if readCfg.exists(_.getDataConfig == FpData()) => srcIdx
+  }
+
+  val is1VpRdAddrReqSrcIdx: Seq[Int] = is1Next.bits.exuParam.readPortCfgs.zipWithIndex collect {
+    case (readCfg, srcIdx) if readCfg.exists(_.getDataConfig == VecData()) => srcIdx
+  }
+
   val is1FlushNext: Bool = is0.bits.robIdx.needFlush(in.flush)
 
-  is1Next.valid := is0.valid && !is1FlushNext && !is0Failed
-  is1Next.bits.ctrl.fromIssueDeq(is0.bits)
-  is1Next.bits.data.src.zipWithIndex.foreach {
-    case (src, srcIdx) => src := in.is1VpRdDataNext.find(_.srcIdx == srcIdx).get.data
+  out.is1GpRdAddrNext.zip(is1GpRdAddrReqSrcIdx).foreach {
+    case (readBundle, srcIdx) =>
+      readBundle.ren := is0Next.valid && is0Next.bits.gpRen(srcIdx)
+      readBundle.addr := is0Next.bits.psrc(srcIdx)
   }
-  is1Next.bits.data.v0.foreach(_ := 0.U)
-  is1Next.bits.data.vl.foreach(_ := in.is1VlRdDataNext.head.data)
-  is1Next.bits.data.imm.foreach(_ := is0.bits.imm.get)
-  is1Next.bits.data.pc.foreach(_ := ???)
-  is1Next.bits.debug.foreach(_ := is0.bits.debug.get)
+
+  out.is1FpRdAddrNext.zip(is1FpRdAddrReqSrcIdx).foreach {
+    case (readBundle, srcIdx) =>
+      readBundle.ren := is1Next.valid && is1Next.bits.fpRen(srcIdx)
+      readBundle.addr := is1Next.bits.psrc(srcIdx)
+  }
+
+  out.is1VpRdAddrNext.zip(is1VpRdAddrReqSrcIdx).foreach {
+    case (readBundle, srcIdx) =>
+      readBundle.ren := is1Next.valid && is1Next.bits.vpRen(srcIdx)
+      readBundle.addr := is1Next.bits.psrc(srcIdx)
+  }
+
+  out.is1V0RdAddrNext.zip(is1Next.bits.psrcV0).foreach {
+    case (readBundle, psrc) =>
+      readBundle.ren := is1Next.valid && psrc.valid
+      readBundle.addr := psrc.bits
+  }
+
+  out.is1VlRdAddrNext.zip(is1Next.bits.psrcVl).foreach {
+    case (readBundle, psrc) =>
+      readBundle.ren := is1Next.valid && psrc.valid
+      readBundle.addr := psrc.bits
+  }
+
+  is1Next.valid := is0.valid && !is1FlushNext && !is0Failed
+  is1Next.bits := is0.bits
 
   is1.valid := is1Next.valid
   when (is1Next.valid) {
-    is1.bits.exuIn := is1Next.bits
-    is1.bits.deq := is0.bits
+    is1.bits := is1Next.bits
   }
 
   is1Resp.fail := false.B
@@ -149,34 +127,55 @@ class IssuePipe(
   /**
    * is2 stage
    */
-  val is1Flush: Bool = is1.bits.exuIn.ctrl.robIdx.needFlush(in.flush)
+  val is1Flush: Bool = is1.bits.robIdx.needFlush(in.flush)
 
-  val is2ImmNext: Option[UInt] = Option.when(is1.bits.deq.imm.nonEmpty)(VecImmExtractor(
+  val is2GpRdFail: Vec[Bool] = VecInit(is1.bits.psrc.indices.map {
+    srcIdx =>
+      val idx = in.is2GpRdDataNext.map(_.srcIdx).indexWhere(_ == srcIdx)
+      if (idx != -1)
+        in.is2GpRdFailNext(idx)
+      else
+        false.B
+  })
+  val is2FpRdFail: Vec[Bool] = VecInit(is1.bits.psrc.indices.map {
+    srcIdx =>
+      val idx = in.is2FpRdDataNext.map(_.srcIdx).indexWhere(_ == srcIdx)
+      if (idx != -1)
+        in.is2FpRdFailNext(idx)
+      else
+        false.B
+  })
+
+  val is2ImmNext: Option[UInt] = Option.when(is1.bits.imm.nonEmpty)(VecImmExtractor(
     VLEN, param.immTypes
   )(
-    is1.bits.deq.imm.get,
-    is1.bits.deq.immType.get,
-    is1.bits.deq.vtype.get.vsew
+    is1.bits.imm.get,
+    is1.bits.immType.get,
+    is1.bits.vtype.get.vsew
   ))
 
-  is2Next.valid := is1.valid && !is1Flush && !is1GpRdFail.asUInt.orR && !is1FpRdFail.asUInt.orR
-  is2Next.bits := is1.bits.exuIn
+  is2Next.valid := is1.valid && !is1Flush && !is2GpRdFail.asUInt.orR && !is2FpRdFail.asUInt.orR
+  is2Next.bits.ctrl.fromIssueDeq(is1.bits)
+  is2Next.bits.data.imm.foreach(_ := is1.bits.imm.get)
+  is2Next.bits.data.pc.foreach(_ := ???)
+  is2Next.bits.debug.foreach(_ := is1.bits.debug.get)
+
   is2Next.bits.data.src.zipWithIndex.foreach {
     case (src, srcIdx) =>
       val gpKV: Seq[(Bool, UInt)] = Option.when(readPortCfgs(srcIdx).exists(_.isInstanceOf[IntRD]))(
-        is1.bits.deq.gpRen(srcIdx) -> in.is2GpRdDataNext.find(_.srcIdx == srcIdx).get.data
+        is1.bits.gpRen(srcIdx) -> in.is2GpRdDataNext.find(_.srcIdx == srcIdx).get.data
       ).toSeq
       val fpKV: Seq[(Bool, UInt)] = Option.when(readPortCfgs(srcIdx).exists(_.isInstanceOf[FpRD]))(
-        is1.bits.deq.fpRen(srcIdx) -> in.is2FpRdDataNext.find(_.srcIdx == srcIdx).get.data
+        is1.bits.fpRen(srcIdx) -> in.is2FpRdDataNext.find(_.srcIdx == srcIdx).get.data
       ).toSeq
       val vpKV: Seq[(Bool, UInt)] = Option.when(readPortCfgs(srcIdx).exists(_.isInstanceOf[VfRD]))(
-        is1.bits.deq.vpRen(srcIdx) -> is1.bits.exuIn.data.src(srcIdx)
+        is1.bits.vpRen(srcIdx) -> in.is2VpRdDataNext.find(_.srcIdx == srcIdx).get.data
       ).toSeq
       val immKV: Seq[(Bool, UInt)] = is2ImmNext.map { imm =>
         !Mux1H(Seq(
-          is1.bits.deq.gpRen(srcIdx) -> readPortCfgs(srcIdx).exists(_.isInstanceOf[IntRD]).B,
-          is1.bits.deq.fpRen(srcIdx) -> readPortCfgs(srcIdx).exists(_.isInstanceOf[FpRD]).B,
-          is1.bits.deq.vpRen(srcIdx) -> readPortCfgs(srcIdx).exists(_.isInstanceOf[VfRD]).B,
+          is1.bits.gpRen(srcIdx) -> readPortCfgs(srcIdx).exists(_.isInstanceOf[IntRD]).B,
+          is1.bits.fpRen(srcIdx) -> readPortCfgs(srcIdx).exists(_.isInstanceOf[FpRD]).B,
+          is1.bits.vpRen(srcIdx) -> readPortCfgs(srcIdx).exists(_.isInstanceOf[VfRD]).B,
         )) -> imm
       }.toSeq
 
@@ -187,6 +186,9 @@ class IssuePipe(
         immKV,
       ).reduce(_ ++ _))
   }
+
+  is2Next.bits.data.v0.foreach(_ := 0.U)
+  is2Next.bits.data.vl.foreach(_ := in.is2VlRdDataNext.head.data)
 
   is2.valid := is2Next.valid
   when(is2Next.valid) {
@@ -245,14 +247,14 @@ object IssuePipe {
     val is0RdFail = Bool()
     val is0WtFail = Bool()
     val is0LdCancel = Bool()
-    val is1VpRdDataNext: MixedVec[RfReadDataBundle] = param.genRfRdDataBundle(backendParams.vfPregParams)
-    val is1VlRdDataNext: MixedVec[RfReadDataBundle] = param.genRfRdDataBundle(backendParams.vlPregParams)
+    val is2VpRdDataNext: MixedVec[RfReadDataBundle] = param.genRfRdDataBundle(backendParams.vfPregParams)
+    val is2VlRdDataNext: MixedVec[RfReadDataBundle] = param.genRfRdDataBundle(backendParams.vlPregParams)
 
     val is2GpRdDataNext: MixedVec[RfReadDataBundle] = param.genRfRdDataBundle(backendParams.intPregParams)
     val is2FpRdDataNext: MixedVec[RfReadDataBundle] = param.genRfRdDataBundle(backendParams.fpPregParams)
 
-    val is0GpRdFailNext: Vec[Bool] = param.genRfRdFailBundle(backendParams.intPregParams)
-    val is0FpRdFailNext: Vec[Bool] = param.genRfRdFailBundle(backendParams.fpPregParams)
+    val is2GpRdFailNext: Vec[Bool] = param.genRfRdFailBundle(backendParams.intPregParams)
+    val is2FpRdFailNext: Vec[Bool] = param.genRfRdFailBundle(backendParams.fpPregParams)
 
     val frm = Option.when(param.readFrm)(Frm())
     val vxrm = Option.when(param.readVxrm)(Vxrm())
@@ -261,11 +263,11 @@ object IssuePipe {
   class Out(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
     val is0Resp: RespBundle = new RespBundle()(p, param.getIssueParam())
     val is1Resp: RespBundle = new RespBundle()(p, param.getIssueParam())
-    val is0GpRdAddrNext: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.intPregParams)
-    val is0FpRdAddrNext: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.fpPregParams)
-    val is0VpRdAddrNext: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.vfPregParams)
-    val is0V0RdAddrNext: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.v0PregParams)
-    val is0VlRdAddrNext: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.vlPregParams)
+    val is1GpRdAddrNext: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.gpPregParams)
+    val is1FpRdAddrNext: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.fpPregParams)
+    val is1VpRdAddrNext: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.vpPregParams)
+    val is1V0RdAddrNext: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.v0PregParams)
+    val is1VlRdAddrNext: MixedVec[RfReadAddrBundle] = param.genRfRdAddrBundle(backendParams.vlPregParams)
 
     val ex0 = param.genExuInputBundle(ValidIO(_))
 
@@ -275,11 +277,6 @@ object IssuePipe {
     val v0WbNext: Option[Exu.ToRf] = Option.when(param.v0WB != null)(new Exu.ToRf(param.v0WB, backendParams.v0PregParams))
     val vlWbNext: Option[Exu.ToRf] = Option.when(param.vlWB != null)(new Exu.ToRf(param.vlWB, backendParams.vlPregParams))
     val robWbNext: ValidIO[Exu.ToRob] = ValidIO(new Exu.ToRob(param))
-  }
-
-  class Is1(val param: ExuParam)(implicit p: Parameters) extends Bundle {
-    val exuIn: Exu.InUop = new Exu.InUop(param)
-    val deq: VecIssueQueue.Deq = new VecIssueQueue.Deq(param)
   }
 
   class RfReadAddrBundle(
