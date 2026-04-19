@@ -827,13 +827,17 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     dm.module.io.reset := dmio.reset
 
     val dmintSrc = dm.int.getWrappedValue.asInstanceOf[HeterogeneousBag[Vec[Bool]]]
-    val dmintLocal = dmintSrc.head.asUInt
+    require(dmintSrc.length == totalHartCount,
+      s"dm.int port count ${dmintSrc.length} does not match total hart count $totalHartCount")
+    require(dmintSrc.forall(_.length == 1),
+      s"dm.int entries must each contain exactly one interrupt bit")
+    val dmintGlobal = Cat(dmintSrc.reverse.map(_.head.asUInt).toSeq)
     val hartResetReqLocal = dm.module.io.resetCtrl.hartResetReq.map(_.asUInt).getOrElse(0.U(totalHartCount.W))
     val hartIsInResetExternal = dmio.resetCtrl.hartIsInReset.asUInt
 
     u_dm_axi2w.io.axi <> dmWcrsIn
     u_dm_w2axi.io.axi <> dmWcrsOut
-    u_dm_w2axi.io.dmint := dmintLocal
+    u_dm_w2axi.io.dmint := dmintGlobal
     u_dm_w2axi.io.hartResetReq := hartResetReqLocal
     u_dm_w2axi.io.hartIsInReset := hartIsInResetExternal
     u_dm_w2axi.io.reqId := req_id
