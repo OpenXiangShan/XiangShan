@@ -771,7 +771,7 @@ class Sbuffer(implicit p: Parameters)
   assert(!(valid_mshr.asUInt.andR && hitResp.fire && hitResp.bits.miss), "(Sbuffer) mshr_buffer enq when it is full")
   val deqOH_mshr = ptag_mshr.map(_ === (refillDone.bits.paddr >> OffsetWidth)) zip valid_mshr map {case (x, y) => x && y}
   for (i <- 0 until cacheParams.nMissEntries) {
-    when (hitResp.fire && hitResp.bits.miss) {
+    when (hitResp.fire && hitResp.bits.miss && hitResp.bits.isAlloc) {
       when (enqOH_mshr(i)) {
         valid_mshr(i) := true.B
         ptag_mshr(i) := ptag(hitResp.bits.id)

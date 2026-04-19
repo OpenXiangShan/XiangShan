@@ -137,6 +137,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     })
     // store replay resp of S3 stage from miss queue
     val store_replay_resp_s3_valid = Input(Bool())
+    // miss_req_pipe_reg.alloc from MissQueue (same as MissEntry alloc branch)
+    val miss_req_pipe_reg_alloc = Input(Bool())
     // atmoics
     val atomic_req = Flipped(DecoupledIO(new MainPipeReq))
     val atomic_resp = ValidIO(new MainPipeResp)
@@ -872,6 +874,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.store_replay_resp.valid := s2_valid && (s2_can_go_to_mq && replay && s2_req.isStore || s2_grow_perm_fail && s2_isStore)
   io.store_replay_resp.bits.data := DontCare
   io.store_replay_resp.bits.miss := true.B // s2_can_go_to_mq && replay
+  io.store_replay_resp.bits.isAlloc := false.B
   io.store_replay_resp.bits.replay := true.B // s2_grow_perm_fail
   io.store_replay_resp.bits.id := s2_req.id
 
@@ -883,6 +886,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.store_hit_resp.valid := (s3_valid && s3_store_can_go || mshr_handled_store_miss_s3) && !io.store_replay_resp_s3_valid
   io.store_hit_resp.bits.data := DontCare
   io.store_hit_resp.bits.miss := mshr_handled_store_miss_s3
+  io.store_hit_resp.bits.isAlloc := mshr_handled_store_miss_s3 && io.miss_req_pipe_reg_alloc
   io.store_hit_resp.bits.replay := false.B
   io.store_hit_resp.bits.id := Mux(mshr_handled_store_miss_s3, mshr_handled_store_miss_id_s3, s3_req.id)
 
