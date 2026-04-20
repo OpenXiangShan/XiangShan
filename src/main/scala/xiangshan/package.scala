@@ -122,6 +122,7 @@ package object xiangshan {
     def vsse      = "b10_10_00000".U // strided
     def vsoxe     = "b10_11_00000".U // index
 
+    def isUnitStride(fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U
     def isWhole  (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01000".U && (fuOpType(8) ^ fuOpType(7))
     def isMasked (fuOpType: UInt): Bool = fuOpType(6, 5) === "b00".U && fuOpType(4, 0) === "b01011".U && (fuOpType(8) ^ fuOpType(7))
     def isStrided(fuOpType: UInt): Bool = fuOpType(6, 5) === "b10".U && (fuOpType(8) ^ fuOpType(7))

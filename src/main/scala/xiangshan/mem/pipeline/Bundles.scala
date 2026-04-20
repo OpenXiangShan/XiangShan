@@ -213,6 +213,7 @@ class LoadStageIO(implicit p: Parameters, implicit val s: LoadStage)
 
 sealed trait HasStorePipeBundleParam {
   def hasVector: Boolean = false
+  def hasStoreSet: Boolean = false
   def hasUnalignHandling: Boolean = false
   def hasAddrTrans: Boolean = false
   def hasPAddrChecked: Boolean = false
@@ -236,6 +237,10 @@ class StorePipeBundle(
   val size = UInt(MemorySize.Size.width.W)
   val mask = UInt((VLEN/8).W)
   val isFirstIssue = Bool()
+
+  // StoreSet
+  val ssid = Option.when(param.hasStoreSet)(UInt(SSIDWidth.W))
+  val storeSetHit = Option.when(param.hasStoreSet)(Bool())
   
   // Unalign handling
   val align = Option.when(param.hasUnalignHandling)(Bool())
@@ -243,17 +248,17 @@ class StorePipeBundle(
   val cross16Byte = Option.when(param.hasUnalignHandling)(Bool())
 
   // MMU & exception handling
-  val tlbAccessResult = Option.when(param.hasAddrTrans)(TlbAccessResult())
+  val tlbHit = Option.when(param.hasAddrTrans)(Bool())
   val tlbException = Option.when(param.hasAddrTrans)(new TlbRespExcp)
   val pbmt = Option.when(param.hasAddrTrans)(Pbmt())
   val isForVSnonLeafPTE = Option.when(param.hasAddrTrans)(Bool())
   val paddr = Option.when(param.hasAddrTrans)(UInt(PAddrBits.W))
   val gpaddr = Option.when(param.hasAddrTrans)(UInt(XLEN.W))
-  val nc = Option.when(param.hasAddrTrans)(Bool())
-  val mmio = Option.when(param.hasAddrTrans)(Bool())
 
   val pmp = Option.when(param.hasPAddrChecked)(new PMPRespBundle)
   val hasException = Option.when(param.hasPAddrChecked)(Bool())
+  val nc = Option.when(param.hasPAddrChecked)(Bool())
+  val mmio = Option.when(param.hasPAddrChecked)(Bool())
 
   // Vector
   val vecActive = Option.when(param.hasVector)(Bool())
@@ -265,12 +270,13 @@ class StorePipeBundle(
   // After S1
   val vecTriggerMask = Option.when(param.isAfterS1)(UInt((VLEN/8).W))
   val vecVaddrOffset = Option.when(param.isAfterS1)(UInt(VAddrBits.W))
-  val Feedback = Option.when(param.isAfterS1)(new RSFeedback)
+  val feedBack = Option.when(param.isAfterS1)(Bool())
+  val vecFeedBack = Option.when(param.isAfterS1)(Bool())
 
   def DontCareUnalign(): Unit = {
     align.get := DontCare
     unalignHead.get := DontCare
-    is128bit.get := DontCare
+    cross16Byte.get := DontCare
   }
   def DontCareVectorFields(): Unit = {
     vecActive.get := false.B
@@ -278,6 +284,10 @@ class StorePipeBundle(
     usSecondInv.get := false.B
     elemIdx.get := 0.U
     mbIndex.get := 0.U
+  }
+  def DontCareStoreSet(): Unit = {
+    ssid.get := 0.U
+    storeSetHit.get := false.B
   }
 }
 
@@ -290,6 +300,7 @@ case class StoreStageIOParam()(
 ) extends HasStorePipeBundleParam with OnStoreStage {
   override val hasVector: Boolean = true
   override val hasUnalignHandling: Boolean = true
+  override val hasStoreSet: Boolean = true
   override val hasAddrTrans: Boolean = afterS1
   override val hasPAddrChecked: Boolean = afterS2
   override val isAfterS1: Boolean = afterS1

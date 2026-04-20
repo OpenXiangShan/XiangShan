@@ -37,11 +37,11 @@ object Bundles {
 
   object StLdNukeMatchType {
     def Normal      = "b00".U
-    def QuadWord    = "b01".U
+    def OctaWord    = "b01".U
     def CacheLine   = "b10".U
 
     def isNormal(matchType: UInt)    = matchType === Normal
-    def isQuadWord(matchType: UInt)  = matchType === QuadWord
+    def isOctaWord(matchType: UInt)  = matchType === OctaWord
     def isCacheLine(matchType: UInt) = matchType === CacheLine
 
     def apply() = UInt(2.W)

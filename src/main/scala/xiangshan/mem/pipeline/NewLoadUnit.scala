@@ -2048,7 +2048,11 @@ trait HasNukePAddrMatch { this: LoadUnitStage =>
     Mux(
       StLdNukeMatchType.isCacheLine(storeMatchType),
       (storePAddr >> blockOffBits) === (loadPAddr >> blockOffBits),
-      (storePAddr >> DCacheVWordOffset) === (loadPAddr >> DCacheVWordOffset)
+      Mux(
+        StLdNukeMatchType.isOctaWord(storeMatchType),
+        (storePAddr >> DCacheOctaWordOffset) === (loadPAddr >> DCacheOctaWordOffset),
+        (storePAddr >> DCacheVWordOffset) === (loadPAddr >> DCacheVWordOffset)
+      )
     )
   }
 }

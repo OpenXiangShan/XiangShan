@@ -160,6 +160,9 @@ trait HasDCacheParameters
   val DCacheWordOffset = log2Up(DCacheWordBytes)
   def DCacheVWordOffset = log2Up(DCacheVWordBytes)
 
+  def DCacheOctaWordBytes = DCacheWordBytes * 8
+  def DCacheOctaWordOffset = log2Up(DCacheOctaWordBytes)
+
   val DCacheBankOffset = log2Up(DCacheSRAMRowBytes)
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
