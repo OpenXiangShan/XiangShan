@@ -46,18 +46,18 @@ class StoreUnitS0(param: ExeUnitParams)(
     val stin = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
     val vecstin = Flipped(Decoupled(new VectorStoreIn))
     val prefetchReq = Flipped(DecoupledIO(new StorePrefetchReq))
-    
+
     // Tlb request
     val tlbReq = DecoupledIO(new TlbReq)
     val tlbReqKill = Output(Bool())
-    
+
     // DCache request
     val dcacheReq = DecoupledIO(new DcacheStoreRequestIO)
   })
 
   /**
     * Arbitrate all S0 request sources with the following priority::
-    * 
+    *
     * 0. unaligned tail injected from S1
     * 1. vector store elements produced by VSplit
     * 2. scalar store requests issued from the issue queue
@@ -67,7 +67,7 @@ class StoreUnitS0(param: ExeUnitParams)(
     vectorIssue,
     scalarIssue,
     prefetchReq = Wire(DecoupledIO(new StoreStageIO))
-  
+
   val sources = Seq(
     unalignTail,
     vectorIssue,
@@ -150,21 +150,21 @@ class StoreUnitS0(param: ExeUnitParams)(
 
   /**
     * Unalign handling
-    * 
+    *
     * 1. Align
     *   Check if the address is aligned, which is used to detect misalign exception in later stages.
     *   For prefetch req, we set align to true to avoid unnecessary exception check in later stages.
     *   CBO instructions may have unaligned addresses, but they operate on a whole cache line, so we also set align to true for them.
-    * 
+    *
     * 2. Cross16Byte
-    *   For unaligned requests that cross a 16-byte boundary but do not cross a 4K page boundary, 
+    *   For unaligned requests that cross a 16-byte boundary but do not cross a 4K page boundary,
     *     the StoreQueue is responsible for splitting them into two writes to the store buffer.
     *   Prefetch must be within 16 bytes, unalign tail must be cross16Byte
-    * 
+    *
     * 3. Cross4KPage
-    *   Check whether this address crosses an 4K page boundary, which is used to inject 
+    *   Check whether this address crosses an 4K page boundary, which is used to inject
     *     an unalign tail in the next stage.
-    * 
+    *
     * Some terminology explanations:
     * - **align** indicates whether the addr is aligned with the operation size. `!align` does not necessary mean
     *   splitting is required, but is only used for determining exception in subsequent stages.
@@ -177,7 +177,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   sink.bits.align.get := Mux(isCbo || isHWPrefetch, true.B, Mux(isUnalignTail, false.B, align))
   sink.bits.unalignHead.get := Mux(isCbo || isHWPrefetch || isUnalignTail, false.B, cross4KPage)
   sink.bits.cross16Byte.get := Mux(isCbo || isHWPrefetch, false.B, Mux(isUnalignTail, true.B, cross16Byte))
-  
+
   def alignCheck(vaddr: UInt, size: UInt, valid: Bool): (Bool, Bool, Bool) = {
     require(size.getWidth == MemorySize.Size.width)
     // 1.1 Align check
@@ -297,7 +297,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val pipeIn = io_pipeIn.get
   val pipeOut = io_pipeOut.get
   val in = pipeIn.bits
-  
+
   // alias
   val entrance = in.entrance
   val uop = in.uop
@@ -361,7 +361,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val triggerAction = storeTrigger.io.toLoadStore.triggerAction
   val isDebugMode = TriggerAction.isDmode(triggerAction)
   val isBreakPoint = TriggerAction.isExp(triggerAction)
-  
+
   val vecVaddrOffset = Mux(
     isDebugMode || isBreakPoint,
     storeTrigger.io.toLoadStore.triggerVaddr - vecBaseVaddr,
@@ -406,17 +406,27 @@ class StoreUnitS1(param: ExeUnitParams)(
   val updateLFSTValid = fire && tlbHit && isScalar
 
   /**
+    * Generate replay feedback for the RS.
+    * A miss here means the request must be replayed after translation ready.
+    */
+  val isNormal = isScalar && !isUnalignHead
+  val feedBackValid = fire && (isNormal || isUnalignTail)
+  val unalignTailHit = tlbHit && io.unalignHeadTlbHit && io.toUnalignQueue.ready
+  val feedBackHit = Mux(isNormal, tlbHit, unalignTailHit)
+  val needRSReplay = feedBackValid && !feedBackHit
+
+  /**
     * Information sent to the StoreQueue:
-    * 
+    *
     * Available in S1:
     * - Basic info: paddr, vaddr, mask, size, uop info
-    * - Unaligned info: whether this request is unaligned, crosses 16B/4KiB, and 
+    * - Unaligned info: whether this request is unaligned, crosses 16B/4KiB, and
     *   whether it is the last request in a split request.
     *
     * Filled later in S2:
     * - Exception status
     * - Memory type: NC or MMIO
-    * 
+    *
     * [NOTE]: the normal request is also the last request,
     */
   val toSqAddrValid = fire && !isHWPrefetch
@@ -426,7 +436,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   }
   toSqAddr.paddr := Mux(isCbo, alignVWordAddr(paddr), paddr)
   toSqAddr.vaddr := Mux(isCbo, alignVWordAddr(vaddr), vaddr)
-  toSqAddr.tlbMiss := tlbMiss
+  toSqAddr.tlbMiss := Mux(isVector, tlbMiss, !feedBackHit)
   toSqAddr.mask := mask
   toSqAddr.size := Mux(isCbo, MemorySize.Q.U, size)
   toSqAddr.wlineflag := isCbo
@@ -447,16 +457,6 @@ class StoreUnitS1(param: ExeUnitParams)(
   toSqAddr.hasException := DontCare
   toSqAddr.memBackTypeMM := DontCare
   toSqAddr.cacheMiss := false.B
-
-  /**
-    * Generate replay feedback for the RS.
-    * A miss here means the request must be replayed after translation ready.
-    */
-  val isNormal = isScalar && !isUnalignHead
-  val feedBackValid = fire && (isNormal || isUnalignTail)  
-  val unalignTailHit = tlbHit && io.unalignHeadTlbHit && io.toUnalignQueue.ready
-  val feedBackHit = Mux(isNormal, tlbHit, unalignTailHit)
-  val needRSReplay = feedBackValid && !feedBackHit
 
   // Pipeline connect
   val pipeOutValid = RegInit(false.B)
@@ -503,7 +503,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   io.updateLFST.bits.robIdx := robIdx
   io.updateLFST.bits.ssid := ssid
   io.updateLFST.bits.storeSetHit := storeSetHit
-  
+
   io.staNukeQueryReq.valid := nukeQueryReqValid
   io.staNukeQueryReq.bits := nukeQueryReq
 
@@ -520,7 +520,7 @@ class StoreUnitS1(param: ExeUnitParams)(
 
   io.feedBackSlow.valid := feedBackValid
   io.feedBackSlow.bits.hit := feedBackHit
-  io.feedBackSlow.bits.flushState := tlbResp.bits.ptwBack // TODO: Confirm that `ptwBack` 
+  io.feedBackSlow.bits.flushState := tlbResp.bits.ptwBack // TODO: Confirm that `ptwBack`
   io.feedBackSlow.bits.robIdx := robIdx
   io.feedBackSlow.bits.sourceType := RSFeedbackType.tlbMiss
   io.feedBackSlow.bits.sqIdx := uop.sqIdx
@@ -528,7 +528,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   io.feedBackSlow.bits.dataInvalidSqIdx := DontCare
 
   io.prefetchTrainHint := fire && isFirstIssue
-  
+
   io.debugInfo := DontCare
   io.debugInfo.s1_robIdx := robIdx.value
   io.debugInfo.s1_isTlbFirstMiss := tlbMiss && !isHWPrefetch && isFirstIssue
@@ -555,7 +555,7 @@ class StoreUnitS2(param: ExeUnitParams)(
     val dcacheKill = Output(Bool())
     val dcachePC = Output(UInt(VAddrBits.W))
     val dcacheResp = Flipped(DecoupledIO(new DcacheStoreRespIO()))
-    
+
     // Exception info and memory type to to Store Queue
     val toSqAddrRe = Output(new StoreAddrIO)
 
@@ -594,15 +594,15 @@ class StoreUnitS2(param: ExeUnitParams)(
 
   /**
     * PMP result & Exception Handling
-    * 
+    *
     * The response signal of `pmp/pma` is credible only after the physical address is actually generated.
-    * Therefore, the response signals of pmp/pma generated after an address translation has produced an 
+    * Therefore, the response signals of pmp/pma generated after an address translation has produced an
     * `access fault` or a `page fault` are completely unreliable.
-    * 
+    *
     * Therefore:
     * - `tlbAccessible` is used to guard all PMP/PMA-based checks.
     * - Once TLB translation reports an unaccessible condition, we should not trust PMA/PMP attributes
-    * 
+    *
     * Abbreviations:
     * - af  : access fault
     * - am  : misaligned access exception
@@ -625,7 +625,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   val afVectorUncache = isVector && isUncache
   val afCboUncache = isCbo && isUncache
   val afUnalignMMIO = isMMIO && !align
-  
+
   val af = afInaccessible || afVectorUncache || afCboUncache || afUnalignMMIO
   val am = !align && isScalar && isNC && !pmpInaccessible
   val hasException = in.hasException.get || af || am
@@ -661,7 +661,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   io.dcacheKill := killDCache
   io.dcachePC := uop.pc
   io.dcacheResp.ready := true.B
-  
+
   io.toSqAddrRe.memBackTypeMM := memBackTypeMM
   // TODO: reuse `mmiostall` logic in sq
   io.toSqAddrRe.mmio := (isMMIO || isCboNoZero) && !hasException
@@ -694,9 +694,9 @@ class StoreUnitS2(param: ExeUnitParams)(
   io.prefetchTrain.bits.meta_access := false.B
   io.prefetchTrain.bits.is_from_hw_pf := isHWPrefetch
   io.prefetchTrain.bits.refillLatency := 0.U // TODO: store not for berti, so there is no refillLatency
-  
+
   io.unalignHeadTlbHit := fire && isUnalignHead && tlbHit
-  
+
   // Perf counters
   XSPerfAccumulate("s2_valid", pipeIn.valid)
   XSPerfAccumulate("s2_fire", fire)
@@ -710,7 +710,7 @@ class StoreUnitS3(param: ExeUnitParams)(
 ) extends StoreUnitStage(param) {
   val io = IO(new Bundle {
     val redirect = Flipped(ValidIO(new Redirect))
-    
+
     // Unalign head from S4
     val unalignConcat = Flipped(ValidIO(new StoreStageIO))
 
@@ -723,7 +723,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   val pipeIn = io_pipeIn.get
   val pipeOut = io_pipeOut.get
   val in = pipeIn.bits
-  
+
   // alias
   val uop = in.uop
   val robIdx = uop.robIdx
@@ -747,7 +747,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   val wbValid = fire && ((!isMMIO && !isCbo) || hasException) && wbType // TODO: re-check MMIO do not writeback
   val wbData = Wire(in.cloneType)
   wbData := in
-  
+
   // Unalign head/tail concatenation
   val headValid = io.unalignConcat.valid
   val head = io.unalignConcat.bits
@@ -768,7 +768,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   )
   wbData.paddr.get := Mux(headHasException, head.paddr.get, in.paddr.get)
   wbData.gpaddr.get := Mux(headHasException, head.gpaddr.get, in.gpaddr.get)
-  
+
   /**
     * stage x
     * To sync with RAW violation checks and send to the backend, delay by x cycles.
@@ -937,7 +937,7 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
 
 class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new StoreUnitIO(param))
-  
+
   val s0 = Module(new StoreUnitS0(param))
   val s1 = Module(new StoreUnitS1(param))
   val s2 = Module(new StoreUnitS2(param))
