@@ -984,6 +984,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   when(io.prefetch_info.hit_prefetch) {
     prefetch := false.B
+    req.pf_source := L1_HW_PREFETCH_CLEAR
   }
 
   io.l1Miss := req_valid
