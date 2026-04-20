@@ -27,6 +27,7 @@ import xiangshan.backend.Bundles.DynInst
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.mem.LoadStage._
+import xiangshan.mem.StoreStage._
 
 sealed trait HasLoadPipeBundleParam {
   def hasPAddr: Boolean = false
@@ -209,3 +210,45 @@ class VectorLoadIn(implicit p: Parameters)
 
 class LoadStageIO(implicit p: Parameters, implicit val s: LoadStage)
   extends LoadPipeBundle(LoadStageIOParam())
+
+sealed trait HasStorePipeBundleParam {
+  def hasPAddr: Boolean = false
+  def hasNC: Boolean = false
+  def hasMMIO: Boolean = false
+  def hasVector: Boolean = false
+  def hasS2PreProcess: Boolean = false
+  def hasS3PreProcess: Boolean = false
+  def hasS4PreProcess: Boolean = false
+}
+
+case class DefaultStorePipeBundleParam() extends HasStorePipeBundleParam
+
+class StorePipeBundle(
+  param: HasStorePipeBundleParam = DefaultStorePipeBundleParam()
+)(
+  implicit p: Parameters
+) extends XSBundle
+  with HasStorePipeBundleParam {
+  val entrance = LoadEntrance()
+  val accessType = LoadAccessType()
+  val uop = new DynInst
+  val vaddr = UInt(VAddrBits.W)
+  val fullva = UInt(XLEN.W)
+  val size = UInt(MemorySize.Size.width.W)
+  val mask = UInt((VLEN/8).W)
+}
+
+case class StoreStageIOParam()(
+  implicit val s: StoreStage
+) extends HasStorePipeBundleParam with OnStoreStage {
+  override val hasPAddr: Boolean = true
+  override val hasNC: Boolean = afterS2
+  override val hasMMIO: Boolean = afterS2
+  override val hasVector: Boolean = true
+  override val hasS2PreProcess: Boolean = afterS1
+  override val hasS3PreProcess: Boolean = afterS2
+  override val hasS4PreProcess: Boolean = afterS3
+}
+
+class StoreStageIO(implicit p: Parameters, implicit val s: StoreStage)
+  extends StorePipeBundle(StoreStageIOParam())

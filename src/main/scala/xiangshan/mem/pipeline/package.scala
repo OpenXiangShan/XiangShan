@@ -148,3 +148,39 @@ object TlbAccessResult extends ChiselOHEnum {
   def isMiss(r: UInt): Bool = IsOneOf(r, miss)
   def isNotMiss(r: UInt): Bool = !isMiss(r)
 }
+
+object StoreStage extends Enumeration {
+  val s0, s1, s2, s3, s4 = Value
+  sealed abstract class StoreStage(val stage: Value) {
+    def id: Int = stage.id
+  }
+  case class StoreS0() extends StoreStage(s0)
+  case class StoreS1() extends StoreStage(s1)
+  case class StoreS2() extends StoreStage(s2)
+  case class StoreS3() extends StoreStage(s3)
+  case class StoreS4() extends StoreStage(s4)
+}
+
+trait OnStoreStage {
+  import StoreStage._
+  implicit val s: StoreStage
+  
+  def is(sn: StoreStage): Boolean = s.id == sn.id
+  def after(s1: StoreStage, s2: StoreStage): Boolean = s1.id >= s2.id
+  def afterS1: Boolean = after(s, StoreS1())
+  def afterS2: Boolean = after(s, StoreS2())
+  def afterS3: Boolean = after(s, StoreS3())
+  def lastStage: Boolean = s match {
+    case _: StoreS4 => true
+    case _ => false
+  }
+  def prevStage(stage: StoreStage): StoreStage = stage match {
+    case StoreS0() =>
+      require(false)
+      StoreS0()
+    case StoreS1() => StoreS0()
+    case StoreS2() => StoreS1()
+    case StoreS3() => StoreS2()
+    case StoreS4() => StoreS3()
+  }
+}
