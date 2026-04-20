@@ -740,7 +740,6 @@ class CtrlBlockImp(
   dispatch.io.enqRob.resp := enqRob.resp
   rob.io.enq.needAlloc := enqRob.needAlloc
   rob.io.enq.req := enqRob.req
-  dispatch.io.robHeadFuType := rob.io.debugRobHeadFuType
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt
   dispatch.io.wakeUpAll.wakeUpFp  := io.toDispatch.wakeUpFp
@@ -776,7 +775,6 @@ class CtrlBlockImp(
   dispatch.io.debugIQValidNumVec.foreach(_ := io.toDispatch.debugIQValidNumVec.get)
   dispatch.io.debugIQEnqHasIssuedVec.foreach(_ := io.toDispatch.debugIQEnqHasIssuedVec.get)
   dispatch.io.debugRobHeadStall.foreach(_ := rob.io.debugRobHeadStall.get)
-  dispatch.io.debugRobHeadIssueCancelStall.foreach(_ := rob.io.debugRobHeadIssueCancelStall.get)
   val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops).flatten
   println(s"[CtrlBlock] toIssueBlockUops.size = ${toIssueBlockUops.size}")
   println(s"[CtrlBlock] io.toIssueBlock.intUops.size = ${io.toIssueBlock.intUops.size}")
@@ -840,6 +838,8 @@ class CtrlBlockImp(
   rob.io.debugEnqLsq := io.debugEnqLsq
   rob.io.debugInstrAddrTransType := io.fromCSR.instrAddrTransType
   rob.io.debugIQDeqRobIdxVec.foreach(_ := io.robio.debugIQDeqRobIdxVec.get)
+  rob.io.debugIQSrcReadyVec.foreach(_ := io.robio.debugIQSrcReadyVec.get)
+  rob.io.topdownIQInfoVec.foreach(_ := io.robio.topdownIQInfoVec.get)
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
 
@@ -861,31 +861,10 @@ class CtrlBlockImp(
   io.toVecExcpMod.ratOldPest := rename.io.ratOldPdest
 
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
+  rob.io.debugTopDown.fromCore := io.debugTopDown.fromCore
   io.debugRolling := rob.io.debugRolling
-  // mem topdown reason collect
-  val notIssue = !rob.io.debugTopDown.toDispatch.robHeadLsIssue
-  val tlbReplay = io.debugTopDown.fromCore.fromMem.robHeadTlbReplay
-  val tlbMiss = io.debugTopDown.fromCore.fromMem.robHeadTlbMiss
-  val vioReplay = io.debugTopDown.fromCore.fromMem.robHeadLoadVio
-  val mshrReplay = io.debugTopDown.fromCore.fromMem.robHeadLoadMSHR
-  val l1Miss = io.debugTopDown.fromCore.fromMem.robHeadMissInDCache
-  val l2Miss = io.debugTopDown.fromCore.l2MissMatch
-  val l3Miss = io.debugTopDown.fromCore.l3MissMatch
-  val ldReason = Mux(l3Miss, LoadMemStall.id.U,
-    Mux(l2Miss, LoadL3Stall.id.U,
-      Mux(l1Miss, LoadL2Stall.id.U,
-        Mux(notIssue, MemNotReadyStall.id.U,
-          Mux(tlbMiss, LoadTLBStall.id.U,
-            Mux(tlbReplay, LoadTLBStall.id.U,
-              Mux(mshrReplay, LoadMSHRReplayStall.id.U,
-                Mux(vioReplay, LoadVioReplayStall.id.U,
-                  LoadL1Stall.id.U))))))))
-  dispatch.io.debugLoadReason.foreach(_ := ldReason)
   dispatch.io.debugRobTrueCommit.foreach(_ := rob.io.debugTopDown.toDispatch.robTrueCommit)
-  rename.io.debugLoadReason.foreach(_ := ldReason)
-  rename.io.debugRobHeadFuType.foreach(_ := rob.io.debugRobHeadFuType)
   rename.io.debugRobHeadStall.foreach(_ := rob.io.debugRobHeadStall.get)
-  rename.io.debugRobHeadIssueCancelStall.foreach(_ := rob.io.debugRobHeadIssueCancelStall.get)
 
   io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.io.robFull)
   io.perfInfo.ctrlInfo.intdqFull := false.B
@@ -997,6 +976,8 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val pc     = Output(UInt(VAddrBits.W))
     })
     val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(IssueQueueDeqSum, Flipped(ValidIO(new RobPtr()))))
+    val debugIQSrcReadyVec = Option.when(backendParams.debugEn)(Input(Vec(iqEntryNum, Flipped(ValidIO(new RobPtr())))))
+    val topdownIQInfoVec = Option.when(backendParams.debugEn)(Input(Vec(iqEntryNum, Flipped(ValidIO(new TopdownIQInfo())))))
   }
 
   val toDecode = new Bundle {

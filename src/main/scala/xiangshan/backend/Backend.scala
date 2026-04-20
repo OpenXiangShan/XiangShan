@@ -519,6 +519,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ).reduce(_ || _)
   ctrlBlock.io.robio.debugIQDeqRobIdxVec.foreach(_ := intRegion.io.debugIQDeqRobIdxVec.get ++
     fpRegion.io.debugIQDeqRobIdxVec.get ++ vecRegion.io.debugIQDeqRobIdxVec.get)
+  ctrlBlock.io.robio.debugIQSrcReadyVec.foreach(_ := intRegion.io.debugIQSrcReadyVec.get ++
+    fpRegion.io.debugIQSrcReadyVec.get ++ vecRegion.io.debugIQSrcReadyVec.get)
+  ctrlBlock.io.robio.topdownIQInfoVec.foreach(_ := intRegion.io.topdownIQInfoVec.get ++
+    fpRegion.io.topdownIQInfoVec.get ++ vecRegion.io.topdownIQInfoVec.get)
 
   // mem io
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq

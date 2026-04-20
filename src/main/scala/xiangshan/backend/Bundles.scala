@@ -332,6 +332,26 @@ object Bundles {
     }
   }
 
+  object IQCancelSource {
+    def apply() = UInt(3.W)
+
+    val none = 0.U(3.W)
+    val og0  = 1.U(3.W)
+    val og1  = 2.U(3.W)
+    val ld   = 3.U(3.W)
+    val st   = 4.U(3.W)
+
+    def isnone(cancelSource: UInt): Bool = cancelSource === none
+    def isog0(cancelSource: UInt): Bool = cancelSource === og0
+    def isog1(cancelSource: UInt): Bool = cancelSource === og1
+    def isld(cancelSource: UInt): Bool = cancelSource === ld
+    def isst(cancelSource: UInt): Bool = cancelSource === st
+  }
+  class TopdownIQInfo(implicit p: Parameters) extends XSBundle {
+    val robIdx = new RobPtr
+    val cancelSource = IQCancelSource()
+  }
+
   class DispatchOutBaseUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
     // from frontend
@@ -525,6 +545,7 @@ object Bundles {
     // from dispatch
     val srcLoadDependency = Vec(numSrc, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
     val debug             = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
+    val debugLastIssueCancelSource = OptionWrapper(backendParams.debugEn, IQCancelSource())
   }
   class ExuToRob(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val robIdx = new RobPtr

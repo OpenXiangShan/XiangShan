@@ -1211,7 +1211,12 @@ package object xiangshan {
 
     // backend
     // long inst stall at rob head
-    val IssueCancelStall = Value("IssueCancelStall")
+    val IssueCancelStallOg0 = Value("IssueCancelStallOg0")
+    val IssueCancelStallOg1 = Value("IssueCancelStallOg1")
+    val IssueCancelStallLd = Value("IssueCancelStallLd")
+    val IssueCancelStallSt = Value("issueCancelStallSt")
+    val IssueCancelStallOther = Value("IssueCancelStallOther")
+    val IssueDelayStall = Value("IssueDelayStall")
     val DivStall = Value("DivStall") // int div, float div/sqrt
     val IntNotReadyStall = Value("IntNotReadyStall") // int-inst at rob head exec long
     val FPNotReadyStall = Value("FPNotReadyStall") // fp-inst at rob head exec long
@@ -1254,6 +1259,7 @@ package object xiangshan {
     val LoadIQFullStall = Value("LoadIQFullStall")
     val StoreIQFullStall = Value("StoreIQFullStall")
     val OtherIQFullStall = Value("OtherIQFullStall")
+    val RobHeadNotIssued = Value("RobHeadNotIssued")
 
     // memblock
     val LoadTLBStall = Value("LoadTLBStall")

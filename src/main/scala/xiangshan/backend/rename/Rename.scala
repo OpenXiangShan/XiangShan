@@ -95,10 +95,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     // perf only
     val debugDispatchAllFire = OptionWrapper(backendParams.debugEn, Input(Bool()))
     val debugOutValidVec = OptionWrapper(backendParams.debugEn, Vec(RenameWidth, Input(Bool())))
-    val debugRobHeadFuType = Option.when(backendParams.debugEn)(Input(FuType()))
-    val debugRobHeadStall = Option.when(backendParams.debugEn)(Input(Bool()))
-    val debugRobHeadIssueCancelStall = Option.when(backendParams.debugEn)(Input(Bool()))
-    val debugLoadReason = Option.when(backendParams.debugEn)(Input(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
+    val debugRobHeadStall = Option.when(backendParams.debugEn)(Flipped(ValidIO(Input(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))))
     val stallReason = new Bundle {
       val in = Flipped(new StallReasonIO(RenameWidth))
       val out = new StallReasonIO(RenameWidth)
@@ -951,22 +948,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   )) > 1.U
 
   // TODO make all stall reason option to remove getorElse
-  val robHeadStall = io.debugRobHeadStall.getOrElse(false.B)
-  val robIssueCancel = io.debugRobHeadIssueCancelStall.getOrElse(false.B)
-  val robHeadFutype = io.debugRobHeadFuType.getOrElse(0.U)
-  val ldReason = io.debugLoadReason.getOrElse(0.U)
+  val robHeadStall = io.debugRobHeadStall.map(_.valid).getOrElse(false.B)
+  val robHeadStallReason = io.debugRobHeadStall.map(_.bits).getOrElse(0.U)
 
-  val robHeadStallReason = MuxCase(OtherNotReadyStall.id.U, Seq(
-    FuType.isAMO(robHeadFutype)          -> AtomicStall.id.U          ,
-    FuType.isStoreVstore(robHeadFutype)  -> StoreStall.id.U           ,
-    FuType.isLoadVload(robHeadFutype)    -> ldReason                  ,
-    FuType.isDivSqrt(robHeadFutype)      -> DivStall.id.U             ,
-    FuType.isInt(robHeadFutype)          -> IntNotReadyStall.id.U     ,
-    FuType.isFArith(robHeadFutype)       -> FPNotReadyStall.id.U      ,
-  ))
   val freelistStall = intFlStall || fpFlStall || vecFlStall || v0FlStall || vlFlStall
   val freelistStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
-    robIssueCancel -> IssueCancelStall.id.U,
     robHeadStall   -> robHeadStallReason,
     multiFlStall   -> MultiFlStall.id.U,
     intFlStall     -> IntFlStall.id.U,

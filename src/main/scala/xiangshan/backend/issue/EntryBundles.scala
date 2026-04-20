@@ -184,6 +184,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val perfOg0Cancel         = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Bool())))
     val perfWakeupByWB        = Output(Vec(params.numRegSrc, Bool()))
     val perfWakeupByIQ        = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
+    val debugCancelSource   = Option.when(backendParams.debugEn)(Output(IQCancelSource()))
   }
 
   class CommonWireBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -336,6 +337,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                             status.issueTimer === params.issueTimerMaxValue.U && entryReg.payload.og1Payload.sqIdx.get === commonIn.issueResp.sqIdx.get
                                                           else true.B)
     val respIssueFail                                  = commonIn.issueResp.failed && sqIdxHit
+    val ldIssueCancel                                  = status.issued && srcCancelByLoad
+    val og0IssueCancel                                 = status.issued && respIssueFail && status.issueTimer === 0.U
+    val og1IssueCancel                                 = status.issued && respIssueFail && status.issueTimer === 1.U
+    val stIssueCancel                                  = if (params.needFeedBackSqIdx)
+      status.issued && respIssueFail && status.issueTimer === params.issueTimerMaxValue.U
+    else false.B
     entryUpdate.status.robIdx                         := status.robIdx
     entryUpdate.status.fuType                         := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType))
     entryUpdate.status.srcStatus.zip(status.srcStatus).zipWithIndex.foreach { case ((srcStatusNext, srcStatus), srcIdx) =>
@@ -441,6 +448,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     entryUpdate.status.issueTimer                     := Mux(validReg && status.issued, updateIssueTimer, 0.U)
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))
     entryUpdate.payload                               := entryReg.payload
+    entryUpdate.payload.debugLastIssueCancelSource.foreach ( _ := MuxCase(IQCancelSource.none, Seq(
+      ldIssueCancel -> IQCancelSource.ld,
+      og0IssueCancel -> IQCancelSource.og0,
+      og1IssueCancel -> IQCancelSource.og1,
+      stIssueCancel -> IQCancelSource.st,
+    )))
   }
 
   def CommonOutConnect(commonOut: CommonOutBundle, common: CommonWireBundle, hasIQWakeup: Option[CommonIQWakeupBundle], validReg: Bool, entryUpdate: EntryBundle, entryReg: EntryBundle, status: Status, commonIn: CommonInBundle, isEnq: Boolean, isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams) = {
@@ -542,6 +555,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       commonOut.perfLdCancel.get                      := common.srcCancelVec.map(_ && validReg)
       commonOut.perfOg0Cancel.get                     := hasIQWakeupGet.srcWakeupByIQButCancel.map(_.asUInt.orR && validReg)
       commonOut.perfWakeupByIQ.get                    := hasIQWakeupGet.srcWakeupByIQ.map(x => VecInit(x.map(_ && validReg)))
+    }
+    commonOut.debugCancelSource.zip(entryReg.payload.debugLastIssueCancelSource).foreach { case (sourceOut, cancelSource) =>
+      sourceOut                                      := cancelSource
     }
     // vecMem
     if (params.isVecMemIQ) {
