@@ -1018,13 +1018,14 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       hasAccessFault := false.B
     }
 
-    val writeBackValid = (uncacheState === UncacheState.writeback) || (cboState === CboState.writeback)
+    val writeBackValid = uncacheState === UncacheState.writeback || cboState === CboState.writeback
     val writeBackToRob = Wire(new MemToRob(staParams.head))
     writeBackToRob.robIdx := dataEntries.head.uop.robIdx
     writeBackToRob.exceptionVec.foreach{ case x =>
       x := ExceptionNO.selectByFu(0.U.asTypeOf(ExceptionVec()), StaCfg)
       x(hardwareError) := hasHardwareError
-      x(storeAccessFault) := hasAccessFault} // override
+      x(storeAccessFault) := hasAccessFault
+    }
     writeBackToRob.trigger.foreach(_ := DontCare)
     writeBackToRob.isRVC.foreach(_ := DontCare)
     writeBackToRob.sqIdx.foreach(_ := io.rdataPtrExt.head)
@@ -1092,7 +1093,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val vaddrHigh         = Cat(headDataEntry.vaddr(headDataEntry.vaddr.getWidth - 1, 4), 0.U(4.W)) + 16.U
 
     for (i <- 0 until EnsbufferWidth) {
-      unalignMask(i)         := VecInit(Seq.fill(VLENB)(true.B)).asUInt << dataEntries(i).vaddr(3, 0)
+      unalignMask(i)         := Fill(VLENB, true.B) << dataEntries(i).vaddr(3, 0)
       // unalignWithin16Byte is for old unalign framework difftest, will be remove in the future.
       val unalignWithin16Byte = (if (debugEn) ctrlEntries(i).unalignWithin16Byte.get else false.B)
       if(i == 0) {

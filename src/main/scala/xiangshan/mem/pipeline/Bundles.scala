@@ -217,7 +217,6 @@ sealed trait HasStorePipeBundleParam {
   def hasUnalignHandling: Boolean = false
   def hasAddrTrans: Boolean = false
   def hasPAddrChecked: Boolean = false
-  def isAfterS1: Boolean = false
 }
 
 case class DefaultStorePipeBundleParam() extends HasStorePipeBundleParam
@@ -267,9 +266,9 @@ class StorePipeBundle(
   val mbIndex = Option.when(param.hasVector)(UInt(vlmBindexBits.W))
   
   // After S1
-  val vecTriggerMask = Option.when(param.isAfterS1)(UInt((VLEN/8).W))
-  val vecVaddrOffset = Option.when(param.isAfterS1)(UInt(VAddrBits.W))
-  val needRSReplay = Option.when(param.isAfterS1)(Bool())
+  val vecTriggerMask = Option.when(param.hasAddrTrans)(UInt((VLEN/8).W))
+  val vecVaddrOffset = Option.when(param.hasAddrTrans)(UInt(VAddrBits.W))
+  val needRSReplay = Option.when(param.hasAddrTrans)(Bool())
   
   def DontCareUnalign(): Unit = {
     align.get := DontCare
@@ -300,7 +299,6 @@ case class StoreStageIOParam()(
   override val hasStoreSet: Boolean = true
   override val hasAddrTrans: Boolean = afterS1
   override val hasPAddrChecked: Boolean = afterS2
-  override val isAfterS1: Boolean = afterS1
 }
 
 class StoreStageIO(implicit p: Parameters, implicit val s: StoreStage)

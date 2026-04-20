@@ -994,17 +994,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     io.mem_to_ooo.updateLFST(i) := stu.io.updateLFST
 
     // vector
-    if (i < VstuCnt) {
-      val vsSplitOut = Wire(DecoupledIO(new VectorStoreIn()))
-      vsSplitOut.valid := vsSplit(i).io.out.valid
-      vsSplitOut.bits := vsSplit(i).io.out.bits.toVectorStoreIn()
-      stu.io.vecstin <> vsSplitOut
-      // vsFlowQueue.io.pipeFeedback(i) <> stu.io.vec_feedback_slow // need connect
-    } else {
-      stu.io.vecstin.valid := false.B
-      stu.io.vecstin.bits := DontCare
-      stu.io.vecstout.ready := false.B
-    }
+    stu.io.vecstin.valid := false.B
+    stu.io.vecstin.bits := DontCare
+    stu.io.vecstout.ready := false.B
   }
 
   val sqStoutLatch = Wire(DecoupledIO(new MemToRob(staParams.head)))

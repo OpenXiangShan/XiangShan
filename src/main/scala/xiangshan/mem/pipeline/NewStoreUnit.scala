@@ -190,16 +190,16 @@ class StoreUnitS0(param: ExeUnitParams)(
     ))
     // 1.2 cross16Bytes check
     // 1.3 cross4KPage check
-    val lowAddr = vaddr(12, 0)
+    val lowAddr = vaddr.take(pgIdxBits)
     val upAddr = LookupTree(size, List(
       MemorySize.B.U -> 0.U,
       MemorySize.H.U -> 1.U,
       MemorySize.W.U -> 3.U,
       MemorySize.D.U -> 7.U,
       MemorySize.Q.U -> 15.U
-    )) + lowAddr
-    val cross16Byte = upAddr(4) =/= lowAddr(4)
-    val cross4KPage = upAddr(12) =/= lowAddr(12)
+    )) +& lowAddr
+    val cross16Byte = upAddr(DCacheVWordOffset) =/= lowAddr(DCacheVWordOffset)
+    val cross4KPage = upAddr.head(1).asBool
     (align, cross16Byte, cross4KPage)
   }
 
@@ -316,7 +316,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val align = in.align.get
   val isUnalignHead = isScalar && in.unalignHead.get
   val cross4KPage = isUnalignTail || isUnalignHead
-  val cross16Byte = !align && in.cross16Byte.get
+  val cross16Byte = in.cross16Byte.get
   val vecBaseVaddr = in.vecBaseVaddr.get
   val isCbo = isScalar && LSUOpType.isCboAll(uop.fuOpType)
 
@@ -397,7 +397,7 @@ class StoreUnitS1(param: ExeUnitParams)(
     isCbo,
     StLdNukeMatchType.CacheLine,
     Mux(
-      cross16Byte,
+      cross16Byte && !cross4KPage,
       StLdNukeMatchType.OctaWord,
       StLdNukeMatchType.Normal
     )
@@ -520,7 +520,7 @@ class StoreUnitS1(param: ExeUnitParams)(
 
   io.feedBackSlow.valid := feedBackValid
   io.feedBackSlow.bits.hit := feedBackHit
-  io.feedBackSlow.bits.flushState := tlbResp.bits.ptwBack // TODO: Confirm that `ptwBack`
+  io.feedBackSlow.bits.flushState := tlbResp.bits.ptwBack
   io.feedBackSlow.bits.robIdx := robIdx
   io.feedBackSlow.bits.sourceType := RSFeedbackType.tlbMiss
   io.feedBackSlow.bits.sqIdx := uop.sqIdx
@@ -587,7 +587,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   val tlbMiss = pipeIn.valid && !in.tlbHit.get
   val isUnalignHead = isScalar && in.unalignHead.get
   val cross4KPage = isUnalignTail || isUnalignHead
-  val cross16Byte = !align && in.cross16Byte.get
+  val cross16Byte = in.cross16Byte.get
 
   val kill = robIdx.needFlush(io.redirect)
   val fire = pipeIn.fire && !kill
@@ -663,9 +663,8 @@ class StoreUnitS2(param: ExeUnitParams)(
   io.dcacheResp.ready := true.B
 
   io.toSqAddrRe.memBackTypeMM := memBackTypeMM
-  // TODO: reuse `mmiostall` logic in sq
-  io.toSqAddrRe.mmio := (isMMIO || isCboNoZero) && !hasException
-  io.toSqAddrRe.nc := isNC // TODO: Confirm `isNC`` need `!hasException)``
+  io.toSqAddrRe.mmio := isMMIO
+  io.toSqAddrRe.nc := isNC
   io.toSqAddrRe.cacheMiss := cacheMiss
   io.toSqAddrRe.hasException := fire && hasException
   io.toSqAddrRe.isLastRequest := !isUnalignHead
@@ -744,7 +743,7 @@ class StoreUnitS3(param: ExeUnitParams)(
 
   // Scalar/vector store write back
   val wbType = !isUnalignHead && !isHWPrefetch && !in.needRSReplay.get
-  val wbValid = fire && ((!isMMIO && !isCbo) || hasException) && wbType // TODO: re-check MMIO do not writeback
+  val wbValid = fire && ((!isMMIO && !isCbo) || hasException) && wbType
   val wbData = Wire(in.cloneType)
   wbData := in
 
@@ -773,48 +772,17 @@ class StoreUnitS3(param: ExeUnitParams)(
     * stage x
     * To sync with RAW violation checks and send to the backend, delay by x cycles.
     */
-  val (sxValid, sxData, sxReady) = delayPipeline(
-    initValid = wbValid,
-    initData = wbData,
-    endReady = true.B, // TODO: vecstout is DecoupledIO, ignore ready ?
-    numDelays = RAWTotalDelayCycles
-  )(
-    _.uop.robIdx.needFlush(io.redirect)
-  )
+  val delayPipe = Module(new DelayPipeline(
+    wbData.cloneType, RAWTotalDelayCycles,
+    (data: StoreStageIO, redirect: ValidIO[Redirect]) => data.uop.robIdx.needFlush(redirect)
+  ))
+  delayPipe.io.in.valid := wbValid
+  delayPipe.io.in.bits := wbData
+  delayPipe.io.out.ready := true.B
+  delayPipe.io.redirect := io.redirect
+  val sxValid = delayPipe.io.out.valid
+  val sxData = delayPipe.io.out.bits
   val sxVector = StoreEntrance.isVectorIssue(sxData.entrance)
-
-  def delayPipeline[T <: Data](
-    initValid : Bool,
-    initData : T,
-    endReady : Bool,
-    numDelays : Int
-  )(killFn : T => Bool): (Bool, T, Bool) = {
-    val n = numDelays + 1
-    val valids = Wire(Vec(n, Bool()))
-    val readys = Wire(Vec(n, Bool()))
-    val datas = Wire(Vec(n, initData.cloneType))
-
-    valids(0) := initValid
-    datas(0) := initData
-    readys(0) := !initValid || killFn(datas(0)) ||
-                 (if (numDelays == 0) endReady else readys(1))
-
-    for (i <- 1 until n) {
-      val isLast = (i == numDelays)
-      val cur_kill = killFn(datas(i))
-      val cur_can_go = if (isLast) endReady else readys(i + 1)
-      val cur_fire = valids(i) && !cur_kill && cur_can_go
-      val prev_fire = valids(i - 1) && !killFn(datas(i - 1)) && readys(i)
-
-      readys(i) := !valids(i) || cur_kill || cur_can_go
-
-      val valid_update = prev_fire || cur_fire || cur_kill
-      valids(i) := RegEnable(Mux(prev_fire, true.B, false.B), false.B, valid_update)
-      datas(i) := RegEnable(datas(i - 1), prev_fire)
-    }
-
-    (valids(n - 1), datas(n - 1), readys(0))
-  }
 
   // Pipeline connect
   val pipeOutValid = RegInit(false.B)
@@ -984,12 +952,50 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   io.toSqAddrRe := s2.io.toSqAddrRe
   io.prefetchTrainHintS2 := s2.io.prefetchTrainHint
   io.prefetchTrain.valid := RegNext(s2.io.prefetchTrain.valid) // for better timing
-  io.prefetchTrain.bits := RegEnable(s2.io.prefetchTrain.bits, s2.io.prefetchTrain.valid) // TODO: GatedValidRegNext vs RegNext
+  io.prefetchTrain.bits := RegEnable(s2.io.prefetchTrain.bits, s2.io.prefetchTrain.valid)
   // s3
   s3.io.redirect := io.redirect
   io.stout := s3.io.stout
   io.vecstout <> s3.io.vecstout
   io.exceptionInfo := s3.io.exceptionInfo
+}
+
+class DelayPipeline[T <: Data](gen: T, numDelays: Int, killFn: (T, ValidIO[Redirect]) => Bool)(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val in = Flipped(DecoupledIO(gen))
+    val out = DecoupledIO(gen)
+    val redirect = Flipped(ValidIO(new Redirect))
+  })
+
+  val n = numDelays + 1
+  val valids = Wire(Vec(n, Bool()))
+  val readys = Wire(Vec(n, Bool()))
+  val datas = Wire(Vec(n, gen.cloneType))
+
+  private def kill(data: T): Bool = killFn(data, io.redirect)
+
+  valids(0) := io.in.valid
+  datas(0) := io.in.bits
+  readys(0) := !io.in.valid || kill(datas(0)) ||
+               (if (numDelays == 0) io.out.ready else readys(1))
+
+  for (i <- 1 until n) {
+    val isLast = (i == numDelays)
+    val curKill = kill(datas(i))
+    val curCanGo = if (isLast) io.out.ready else readys(i + 1)
+    val curFire = valids(i) && !curKill && curCanGo
+    val prevFire = valids(i - 1) && !kill(datas(i - 1)) && readys(i)
+
+    readys(i) := !valids(i) || curKill || curCanGo
+
+    val validUpdate = prevFire || curFire || curKill
+    valids(i) := RegEnable(Mux(prevFire, true.B, false.B), false.B, validUpdate)
+    datas(i) := RegEnable(datas(i - 1), prevFire)
+  }
+
+  io.out.valid := valids(n - 1)
+  io.out.bits := datas(n - 1)
+  io.in.ready := readys(0)
 }
 
 abstract class StoreUnitStage(val param: ExeUnitParams)(
