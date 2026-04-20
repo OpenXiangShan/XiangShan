@@ -981,7 +981,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val stu = storeUnits(i)
 
     stu.io.redirect      <> redirect
-    stu.io.csrCtrl       <> csrCtrl
     stu.io.dcache        <> dcache.io.lsu.sta(i)
     stu.io.feedbackSlow  <> io.mem_to_ooo.staIqFeedback(i).feedbackSlow
     stu.io.stin          <> issueSta(i)

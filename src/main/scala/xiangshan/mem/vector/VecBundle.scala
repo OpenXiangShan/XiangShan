@@ -191,7 +191,6 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
     out.mask := mask
     out.isFirstIssue := true.B // TODO: In new vector implement, modifications are required
 
-    out.vecActive.get := vecActive
     out.vecBaseVaddr.get := basevaddr
     out.usSecondInv.get := usSecondInv
     out.elemIdx.get := elemIdx

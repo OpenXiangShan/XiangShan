@@ -106,9 +106,13 @@ class StoreAddrIO(implicit p: Parameters) extends MemBlockBundle {
   val size            = UInt(MemorySize.Size.width.W)
   val memBackTypeMM   = Bool() // 1: main memory, 0: IO.
   val hasException    = Bool() // indicate request has exception.
-  val af              = Bool() // indicate access fault.
   val isHyper         = Bool()
 
+  /* only use in cmo.zero
+  * means this write request need to write whole cacheline.
+  * */
+  val wlineflag          = Bool() // store write the whole cache line.
+  
   // misalign
   val isUnalign           = Bool()
   val unalignWithin16Byte = Bool()

@@ -250,19 +250,17 @@ class StorePipeBundle(
   // MMU & exception handling
   val tlbHit = Option.when(param.hasAddrTrans)(Bool())
   val tlbException = Option.when(param.hasAddrTrans)(new TlbRespExcp)
-  val ptwBack = Option.when(param.hasAddrTrans)(Bool())
   val pbmt = Option.when(param.hasAddrTrans)(Pbmt())
   val isForVSnonLeafPTE = Option.when(param.hasAddrTrans)(Bool())
   val paddr = Option.when(param.hasAddrTrans)(UInt(PAddrBits.W))
   val gpaddr = Option.when(param.hasAddrTrans)(UInt(XLEN.W))
   val hasException = Option.when(param.hasAddrTrans)(Bool())
 
-  val pmp = Option.when(param.hasPAddrChecked)(new PMPRespBundle)
   val nc = Option.when(param.hasPAddrChecked)(Bool())
   val mmio = Option.when(param.hasPAddrChecked)(Bool())
+  val memBackTypeMM = Option.when(param.hasPAddrChecked)(Bool())
 
   // Vector
-  val vecActive = Option.when(param.hasVector)(Bool())
   val vecBaseVaddr = Option.when(param.hasVector)(UInt(VAddrBits.W))
   val usSecondInv = Option.when(param.hasVector)(Bool())
   val elemIdx = Option.when(param.hasVector)(UInt(elemIdxBits.W))
@@ -271,16 +269,14 @@ class StorePipeBundle(
   // After S1
   val vecTriggerMask = Option.when(param.isAfterS1)(UInt((VLEN/8).W))
   val vecVaddrOffset = Option.when(param.isAfterS1)(UInt(VAddrBits.W))
-  val feedBack = Option.when(param.isAfterS1)(Bool())
-  val vecFeedBack = Option.when(param.isAfterS1)(Bool())
-
+  val needRSReplay = Option.when(param.isAfterS1)(Bool())
+  
   def DontCareUnalign(): Unit = {
     align.get := DontCare
     unalignHead.get := DontCare
     cross16Byte.get := DontCare
   }
   def DontCareVectorFields(): Unit = {
-    vecActive.get := true.B
     vecBaseVaddr.get := 0.U
     usSecondInv.get := false.B
     elemIdx.get := 0.U
