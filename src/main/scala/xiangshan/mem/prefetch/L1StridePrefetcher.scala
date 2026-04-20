@@ -39,7 +39,7 @@ import scala.collection.SeqLike
 
 trait HasStridePrefetchHelper extends HasL1PrefetchHelper {
   val STRIDE_FILTER_SIZE = 6
-  val STRIDE_ENTRY_NUM = 10
+  val STRIDE_ENTRY_NUM = 16
   val STRIDE_BITS = 10 + BLOCK_OFFSET
   val STRIDE_VADDR_BITS = 10 + BLOCK_OFFSET
   val STRIDE_CONF_BITS = 2
