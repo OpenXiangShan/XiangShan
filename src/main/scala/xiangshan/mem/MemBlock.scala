@@ -998,10 +998,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // vector
     if (i < VstuCnt) {
-      val vlSplitOut = Wire(DecoupledIO(new VectorStoreIn()))
-      vlSplitOut.valid := vsSplit(i).io.out.valid
-      vlSplitOut.bits := vsSplit(i).io.out.bits.toVectorStoreIn()
-      stu.io.vecstin <> vlSplitOut
+      val vsSplitOut = Wire(DecoupledIO(new VectorStoreIn()))
+      vsSplitOut.valid := vsSplit(i).io.out.valid
+      vsSplitOut.bits := vsSplit(i).io.out.bits.toVectorStoreIn()
+      stu.io.vecstin <> vsSplitOut
       // vsFlowQueue.io.pipeFeedback(i) <> stu.io.vec_feedback_slow // need connect
     } else {
       stu.io.vecstin.valid := false.B
@@ -1209,14 +1209,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vsSplit(i).io.in.valid := issueVldu(i).valid &&
                               vStoreCanAccept(i) && !isSegment
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
-    val vlSplitOut = Wire(DecoupledIO(new VectorStoreIn()))
-    vlSplitOut.valid := vsSplit(i).io.out.valid
-    vlSplitOut.bits := vsSplit(i).io.out.bits.toVectorStoreIn()
-    vsSplit(i).io.out.ready := vlSplitOut.ready
+    val vsSplitOut = Wire(DecoupledIO(new VectorStoreIn()))
+    vsSplitOut.valid := vsSplit(i).io.out.valid
+    vsSplitOut.bits := vsSplit(i).io.out.bits.toVectorStoreIn()
+    vsSplit(i).io.out.ready := vsSplitOut.ready
     NewPipelineConnect(
-      vlSplitOut, storeUnits(i).io.vecstin, storeUnits(i).io.vecstin.fire,
-      Mux(vlSplitOut.fire,
-        vlSplitOut.bits.uop.robIdx.needFlush(io.redirect),
+      vsSplitOut, storeUnits(i).io.vecstin, storeUnits(i).io.vecstin.fire,
+      Mux(vsSplitOut.fire,
+        vsSplitOut.bits.uop.robIdx.needFlush(io.redirect),
         storeUnits(i).io.vecstin.bits.uop.robIdx.needFlush(io.redirect)
       ),
       Option("VsSplitConnectStu")

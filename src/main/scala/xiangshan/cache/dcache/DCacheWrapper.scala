@@ -160,9 +160,6 @@ trait HasDCacheParameters
   val DCacheWordOffset = log2Up(DCacheWordBytes)
   def DCacheVWordOffset = log2Up(DCacheVWordBytes)
 
-  def DCacheOctaWordBytes = DCacheWordBytes * 8
-  def DCacheOctaWordOffset = log2Up(DCacheOctaWordBytes)
-
   val DCacheBankOffset = log2Up(DCacheSRAMRowBytes)
   val DCacheSetOffset = DCacheBankOffset + log2Up(DCacheBanks)
   val DCacheAboveIndexOffset = DCacheSetOffset + log2Up(DCacheSets)
@@ -1358,7 +1355,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(w).io.disable_ld_fast_wakeup :=
       bankedDataArray.io.disable_ld_fast_wakeup(w) // load pipe fast wake up should be disabled when bank conflict
   }
-  
+
   val clear_flag = Wire(Vec(LoadPipelineWidth, Bool()))
   clear_flag(0) := false.B
   for (i <- 1 until LoadPipelineWidth) {
