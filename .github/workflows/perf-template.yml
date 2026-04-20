@@ -31,6 +31,10 @@ on:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
         type: string
+      cst_file:
+          description: Constantin file path (empty for default init setting, or file path for specific file)
+          required: false
+          type: string
       servers:
         description: Servers to run emulation on, leave empty to let the script select
         required: false
@@ -98,10 +102,9 @@ jobs:
           SHORT_SHA=$(git rev-parse --short HEAD)
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
           echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
-          echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}-${{ inputs.xs_config }}" >> $GITHUB_ENV
+          SPEC_DIR="${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}-${{ inputs.xs_config }}"
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "DATE=${DATE}" >> $GITHUB_OUTPUT
-          echo "SPEC_DIR=${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}-${{ inputs.xs_config }}" >> $GITHUB_OUTPUT
           
           if [[ -z "${{ inputs.servers }}" ]]; then
             if [[ "${{ inputs.emulator }}" == "gsim" ]]; then
@@ -112,6 +115,23 @@ jobs:
           else
             echo "SERVER_LIST=${{ inputs.servers }}" >> $GITHUB_ENV
           fi
+
+          # Set CST_COMPILE_FLAGS and CST_RUN_FLAGS based on cst_file
+          if [[ -n "${{ inputs.cst_file }}" ]]; then
+            if [[ ! -f "${{ inputs.cst_file }}" ]]; then
+              echo "Error: cst_file does not exist: ${{ inputs.cst_file }}"
+              exit 1
+            fi
+            echo "CST_COMPILE_FLAGS=--with-constantin" >> $GITHUB_ENV
+            echo "CST_RUN_FLAGS='--cst-file ${{ inputs.cst_file }}'" >> $GITHUB_ENV
+            SPEC_DIR=${SPEC_DIR}-cst
+          else
+            echo "CST_COMPILE_FLAGS=" >> $GITHUB_ENV
+            echo "CST_RUN_FLAGS=" >> $GITHUB_ENV
+          fi
+
+          echo "SPEC_DIR=${SPEC_DIR}" >> $GITHUB_ENV
+          echo "SPEC_DIR=${SPEC_DIR}" >> $GITHUB_OUTPUT
 
           case "${{ inputs.benchmark_type }}" in
             "gcc15-spec06-0.3c")
@@ -172,7 +192,7 @@ jobs:
               --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
               --llvm-profdata llvm-profdata --trace-fst \
-              --emulator ${{ inputs.emulator }}
+              --emulator ${{ inputs.emulator }} $CST_COMPILE_FLAGS
             mkdir -p $SPEC_DIR
             cp $GITHUB_WORKSPACE/build/emu $SPEC_DIR/emu
           fi
@@ -190,7 +210,7 @@ jobs:
             --server-list "$SERVER_LIST" \
             --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
-            --run
+            --run $CST_RUN_FLAGS
 
       - name: Report SPEC CPU2006 score
         if: always()

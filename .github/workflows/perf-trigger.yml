@@ -60,6 +60,10 @@ on:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
         required: false
         type: string
+      cst_file:
+        description: Constantin file path (empty for default init setting, or file path for specific file)
+        required: false
+        type: string
       servers:
         description: Servers to run emulation on, leave empty to let the script select
         required: false
@@ -83,6 +87,7 @@ jobs:
         xs_config: ${{ github.event.inputs.xs_config }}
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
+        cst_file: ${{ github.event.inputs.cst_file }}
         servers: ${{ github.event.inputs.servers }}
         checkpoint_path: ${{ github.event.inputs.checkpoint_path }}
         json_path: ${{ github.event.inputs.json_path }}
