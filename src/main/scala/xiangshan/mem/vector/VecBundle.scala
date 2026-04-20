@@ -265,7 +265,6 @@ class VSplitIO(param: ExeUnitParams, isVStore: Boolean=false)(implicit p: Parame
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) //to merge buffer req mergebuffer entry
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
   val vstd                = OptionWrapper(isVStore, Valid(new StoreQueueDataWrite))
-  val vstdMisalign        = OptionWrapper(isVStore, new storeMisaignIO)
   val threshold            = OptionWrapper(!isVStore, Flipped(ValidIO(new LqPtr)))
 }
 
@@ -281,7 +280,6 @@ class VSplitBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VL
   val in                  = Flipped(Decoupled(new VLSBundle()))
   val out                 = Decoupled(new VecPipeBundle(isVStore))//to scala pipeline
   val vstd                = OptionWrapper(isVStore, ValidIO(new StoreQueueDataWrite))
-  val vstdMisalign        = OptionWrapper(isVStore, new storeMisaignIO)
 }
 
 class VMergeBufferIO(isVStore : Boolean=false)(implicit p: Parameters) extends VLSUBundle{

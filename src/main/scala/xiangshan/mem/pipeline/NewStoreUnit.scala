@@ -52,7 +52,7 @@ class StoreUnitS0(param: ExeUnitParams)(
     val tlbReqKill = Output(Bool())
     
     // DCache request
-    val dcacheReq = DecoupledIO(new DCacheWordReq)
+    val dcacheReq = DecoupledIO(new DcacheStoreRequestIO)
 
     // Store mask
     val toSqMask = Valid(new StoreMaskBundle)
@@ -106,6 +106,8 @@ class StoreUnitS0(param: ExeUnitParams)(
     genVWmask128(stinVAddr, stinSize)
   )
   scalarIssue.bits.isFirstIssue := stin.isFirstIssue
+  scalarIssue.bits.ssid.get := stinUop.ssid
+  scalarIssue.bits.storeSetHit.get := stinUop.storeSetHit
   scalarIssue.bits.DontCareUnalign()
   scalarIssue.bits.DontCareVectorFields()
 
@@ -218,6 +220,10 @@ class StoreUnitS0(param: ExeUnitParams)(
   pipeOut.valid := pipeOutValid
   pipeOut.bits := pipeOutBits
 
+  io.stin.ready := scalarIssue.ready
+  io.vecstin.ready := vectorIssue.ready
+  io.prefetchReq.ready := prefetchReq.ready
+
   io.tlbReq.valid := sink.valid
   io.tlbReq.bits.vaddr := sink.bits.vaddr
   io.tlbReq.bits.fullva := sink.bits.fullva
@@ -292,14 +298,14 @@ class StoreUnitS1(param: ExeUnitParams)(
     // Unalign tail inject to s0
     val unalignTail = DecoupledIO(new StoreStageIO()(p, prevStage(s)))
 
-    // unalign head request require RS replay
-    val unalignHeadReplay = Input(Bool())
-
     // UnalignTail req addr to Store Queue
     val toUnalignQueue = DecoupledIO(new UnalignQueueIO)
 
     // Feedback to RS for store issue control
     val feedbackSlow = ValidIO(new RSFeedback)
+
+    // unalign head sent tlb info to unalign tail
+    val unalignHeadTlbHit = Input(Bool())
 
     // prefetch train hint
     val prefetchTrainHint = Output(Bool())
@@ -451,10 +457,11 @@ class StoreUnitS1(param: ExeUnitParams)(
   toSqAddr.size := Mux(isCbo, MemorySize.Q.U, size)
   toSqAddr.wlineflag := isCbo
   connectSamePort(toSqAddr.uop, uop)
-  toSqAddr.uop.pc.get := uop.pc
-  toSqAddr.uop.debugInfo.get := uop.perfDebugInfo
-  toSqAddr.uop.debug_seqNum.get := uop.debug_seqNum
+  toSqAddr.uop.pc.foreach(_ := uop.pc)
+  toSqAddr.uop.debugInfo.foreach(_  := uop.perfDebugInfo)
+  toSqAddr.uop.debug_seqNum.foreach(_ := uop.debug_seqNum)
   toSqAddr.uop.isFirstIssue := isFirstIssue
+  toSqAddr.isHyper := isHyper
   // Unalign info
   toSqAddr.isLastRequest := !isUnalignHead
   toSqAddr.cross4KPage := cross4KPage
@@ -548,11 +555,12 @@ class StoreUnitS1(param: ExeUnitParams)(
   io.feedbackSlow.bits.sourceType := RSFeedbackType.tlbMiss
   io.feedbackSlow.bits.sqIdx := uop.sqIdx
   io.feedbackSlow.bits.lqIdx := uop.lqIdx
+  io.feedbackSlow.bits.dataInvalidSqIdx := DontCare
 
   io.prefetchTrainHint := fire && isFirstIssue
   
   io.debugInfo := DontCare
-  io.debugInfo.s1_robIdx := robIdx
+  io.debugInfo.s1_robIdx := robIdx.value
   io.debugInfo.s1_isTlbFirstMiss := tlbMiss && !isHWPrefetch && isFirstIssue
 
   /**
@@ -577,7 +585,8 @@ class StoreUnitS2(param: ExeUnitParams)(
 
     // DCache
     val dcacheKill = Output(Bool())
-    val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
+    val dcachePC = Output(UInt(VAddrBits.W))
+    val dcacheResp = Flipped(DecoupledIO(new DcacheStoreRespIO()))
     
     // Exception info and memory type to to Store Queue
     val toSqAddrRe = Output(new StoreAddrIO)
@@ -688,6 +697,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   io_pipeIn.get.ready := !pipeOutValid || kill || pipeOut.ready
 
   io.dcacheKill := killDCache
+  io.dcachePC := uop.pc
   io.dcacheResp.ready := true.B
   
   io.toSqAddrRe.memBackTypeMM := memBackTypeMM
@@ -707,6 +717,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   io.toSqAddrRe.mask := DontCare
   io.toSqAddrRe.size := DontCare
   io.toSqAddrRe.uop := DontCare
+  io.toSqAddrRe.isHyper := DontCare
 
   val prefetchTrainValid = fire && io.dcacheResp.fire && tlbHit && tlbAccessible && !hasException && !isUncache
   io.prefetchTrainHint := prefetchTrainValid
@@ -717,8 +728,8 @@ class StoreUnitS2(param: ExeUnitParams)(
   io.prefetchTrain.bits.paddr := in.paddr.get
   io.prefetchTrain.bits.miss := cacheMiss
   io.prefetchTrain.bits.isFirstIssue := in.isFirstIssue
-  io.prefetchTrain.bits.meta_prefetch := io.dcacheResp.bits.meta_prefetch
-  io.prefetchTrain.bits.meta_access := io.dcacheResp.bits.meta_access
+  io.prefetchTrain.bits.meta_prefetch := false.B
+  io.prefetchTrain.bits.meta_access := false.B
   io.prefetchTrain.bits.is_from_hw_pf := isHWPrefetch
   io.prefetchTrain.bits.refillLatency := 0.U // TODO: store not for berti, so there is no refillLatency
   
@@ -784,21 +795,21 @@ class StoreUnitS3(param: ExeUnitParams)(
   val head = io.unalignConcat.bits
   val headExceptionVec = head.uop.exceptionVec
   val headHasException = headValid && head.hasException.get
-
-  wbData.vaddr := Mux(headValid, head.vaddr, wbData.vaddr)
-  wbData.mask := Mux(headValid, head.mask, wbData.mask)
-  wbData.fullva := Mux(headValid, head.fullva, wbData.fullva)
+  
+  wbData.vaddr := Mux(headValid, head.vaddr, in.vaddr)
+  wbData.mask := Mux(headValid, head.mask, in.mask)
+  wbData.fullva := Mux(headValid, head.fullva, in.fullva)
   wbData.hasException.get := hasException || headHasException
-  wbData.uop.exceptionVec := Mux(headHasException, headExceptionVec, wbData.uop.exceptionVec)
-  wbData.uop.trigger := Mux(headHasException, head.uop.trigger, wbData.uop.trigger)
-  wbData.tlbException.get := Mux(headHasException, head.tlbException.get, wbData.tlbException.get)
+  wbData.uop.exceptionVec := Mux(headHasException, headExceptionVec, in.uop.exceptionVec)
+  wbData.uop.trigger := Mux(headHasException, head.uop.trigger, in.uop.trigger)
+  wbData.tlbException.get := Mux(headHasException, head.tlbException.get, in.tlbException.get)
   wbData.isForVSnonLeafPTE.get := Mux(
     headHasException,
     head.isForVSnonLeafPTE.get,
-    wbData.isForVSnonLeafPTE.get
+    in.isForVSnonLeafPTE.get
   )
-  wbData.paddr.get := Mux(headHasException, head.paddr.get, wbData.paddr.get)
-  wbData.gpaddr.get := Mux(headHasException, head.gpaddr.get, wbData.gpaddr.get)
+  wbData.paddr.get := Mux(headHasException, head.paddr.get, in.paddr.get)
+  wbData.gpaddr.get := Mux(headHasException, head.gpaddr.get, in.gpaddr.get)
   
   /**
     * stage x
@@ -870,19 +881,19 @@ class StoreUnitS3(param: ExeUnitParams)(
 
   io.stout.toRob.valid := sxValid && !sxVector
   io.stout.toRob.bits.robIdx := sxData.uop.robIdx
-  io.stout.toRob.bits.isRVC.get := sxData.uop.isRVC
-  io.stout.toRob.bits.trigger.get := sxData.uop.trigger
-  io.stout.toRob.bits.sqIdx.get := sxData.uop.sqIdx
-  io.stout.toRob.bits.lqIdx.get := sxData.uop.lqIdx
-  io.stout.toRob.bits.exceptionVec.get := ExceptionNO.selectByFu(sxData.uop.exceptionVec, StaCfg)
+  io.stout.toRob.bits.isRVC.foreach(_ := sxData.uop.isRVC) 
+  io.stout.toRob.bits.trigger.foreach(_ := sxData.uop.trigger)
+  io.stout.toRob.bits.sqIdx.foreach(_ := sxData.uop.sqIdx)
+  io.stout.toRob.bits.lqIdx.foreach(_ := sxData.uop.lqIdx)
+  io.stout.toRob.bits.exceptionVec.foreach(_ := ExceptionNO.selectByFu(sxData.uop.exceptionVec, StaCfg))
   io.stout.pdest := DontCare
   io.stout.debug.isMMIO := sxData.mmio.get
   io.stout.debug.isNCIO := sxData.nc.get && !sxData.memBackTypeMM.get
   io.stout.debug.isPerfCnt := false.B
   io.stout.debug.paddr := sxData.paddr.get
   io.stout.debug.vaddr := sxData.vaddr
-  io.stout.debug_seqNum.get := sxData.uop.debug_seqNum
-  io.stout.perfDebugInfo.get := sxData.uop.perfDebugInfo
+  io.stout.debug_seqNum.foreach(_ := sxData.uop.debug_seqNum)
+  io.stout.perfDebugInfo.foreach(_ := sxData.uop.perfDebugInfo)
 
   io.exceptionInfo.valid := sxValid && !sxVector
   io.exceptionInfo.bits.robIdx := sxData.uop.robIdx
@@ -964,8 +975,7 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   val stout = new NewExuOutput(param)
   val vecstout = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
   val exceptionInfo = ValidIO(new MemExceptionInfo)
-
-  val storePipeEmpty = Output(Bool())
+  
   val debugInfo = Output(new DebugLsInfoBundle)
 }
 
@@ -1000,7 +1010,7 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   // s1
   s1.io.redirect := io.redirect
   s1.io.csrTrigger := io.csrTrigger
-  s1.io.tlbResp := io.tlb.resp
+  s1.io.tlbResp <> io.tlb.resp
   io.dcache.s1_paddr := s1.io.dcachePAddr
   io.dcache.s1_kill := s1.io.dcacheKill
   io.updateLFST := s1.io.updateLFST
@@ -1014,18 +1024,18 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   // s2
   s2.io.redirect := io.redirect
   s2.io.pmp := io.pmp
-  s2.io.dcacheResp := io.dcache.resp
+  s2.io.dcacheResp <> io.dcache.resp
   io.dcache.s2_kill := s2.io.dcacheKill
+  io.dcache.s2_pc := s2.io.dcachePC
   io.toSqAddrRe := s2.io.toSqAddrRe
   io.prefetchTrainHintS2 := s2.io.prefetchTrainHint
   io.prefetchTrain.valid := RegNext(s2.io.prefetchTrain.valid) // for better timing
   io.prefetchTrain.bits := RegEnable(s2.io.prefetchTrain.bits, s2.io.prefetchTrain.valid) // TODO: GatedValidRegNext ?
   // s3
+  s3.io.redirect := io.redirect
   io.stout := s3.io.stout
   io.vecstout <> s3.io.vecstout
   io.exceptionInfo := s3.io.exceptionInfo
-  // TODO: for misalign in vsMergeBuffer, wait new Vector
-  io.storePipeEmpty := true.B
 }
 
 abstract class StoreUnitStage(val param: ExeUnitParams)(

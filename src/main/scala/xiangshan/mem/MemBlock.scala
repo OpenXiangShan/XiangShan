@@ -505,10 +505,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val vSegmentUnit  = Module(new VSegmentUnit(vsegParam))
   val vfofBuffer    = Module(new VfofBuffer(vlduParams.head))
 
-  // misalign Buffer
-  // TODO: remove this buffer after we support new misalign access in store unit
-  val storeMisalignBuffer = Module(new StoreMisalignBuffer)
-
   // exceptionInfoGen
   val exceptionInfoGen = Module(new ExceptionInfoGen)
 
@@ -952,15 +948,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     newLoadUnits(i).io.csrTrigger.debugMode := debugMode
   }
 
-  storeMisalignBuffer.io.redirect               <> redirect
-  storeMisalignBuffer.io.rob.lcommit            := io.ooo_to_mem.lsqio.lcommit
-  storeMisalignBuffer.io.rob.scommit            := io.ooo_to_mem.lsqio.scommit
-  storeMisalignBuffer.io.rob.commit             := io.ooo_to_mem.lsqio.commit
-  storeMisalignBuffer.io.rob.pendingPtr         := io.ooo_to_mem.lsqio.pendingPtr
-  storeMisalignBuffer.io.rob.pendingPtrNext     := io.ooo_to_mem.lsqio.pendingPtrNext
-
-  lsq.io.maControl                              <> storeMisalignBuffer.io.sqControl
-
   lsq.io.cmoOpReq <> dcache.io.cmoOpReq
   lsq.io.cmoOpResp <> dcache.io.cmoOpResp
 
@@ -1008,16 +995,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // Lsq to sta unit
     lsq.io.sta.storeMaskIn(i) <> stu.io.toSqMask
 
-    // connect misalignBuffer
-    storeMisalignBuffer.io.enq(i) <> DontCare
-
     // 1. sync issue info to store set LFST
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
     io.mem_to_ooo.updateLFST(i) := stu.io.updateLFST
 
     // vector
     if (i < VstuCnt) {
-      stu.io.vecstin <> vsSplit(i).io.out
+      val vlSplitOut = Wire(DecoupledIO(new VectorStoreIn()))
+      vlSplitOut.valid := vsSplit(i).io.out.valid
+      vlSplitOut.bits := vsSplit(i).io.out.bits.toVectorStoreIn()
+      stu.io.vecstin <> vlSplitOut
       // vsFlowQueue.io.pipeFeedback(i) <> stu.io.vec_feedback_slow // need connect
     } else {
       stu.io.vecstin.valid := false.B
@@ -1033,7 +1020,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val staDecoupledOut = Wire(DecoupledIO(new NewExuOutput(staParams(i))))
       connectMemDecoupledNewExuOutput(staDecoupledOut, storeUnits(i).io.stout)
       arbiter(
-        Seq(staDecoupledOut, sqStoutLatch, storeMisalignBuffer.io.writeBack),
+        Seq(staDecoupledOut, sqStoutLatch),
         wb, Some(s"writebackSta_$i")
       )
     } else {
@@ -1217,9 +1204,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   (0 until VstuCnt).foreach{i =>
     vsMergeBuffer(i).io.fromPipeline := DontCare
     vsMergeBuffer(i).io.fromSplit := DontCare
-
-//    vsMergeBuffer(i).io.fromMisalignBuffer.get.flush := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).flush
-//    vsMergeBuffer(i).io.fromMisalignBuffer.get.mbIndex := storeMisalignBuffer.io.toVecStoreMergeBuffer(i).mbIndex
   }
 
   (0 until VstuCnt).foreach{i =>
@@ -1241,12 +1225,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       Option("VsSplitConnectStu")
     )
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
-
-    vsSplit(i).io.vstdMisalign.get.storeMisalignBufferEmpty  := storeMisalignBuffer.io.toVecSplit.empty
-    vsSplit(i).io.vstdMisalign.get.storeMisalignBufferRobIdx := storeMisalignBuffer.io.toVecSplit.robIdx
-    vsSplit(i).io.vstdMisalign.get.storeMisalignBufferUopIdx := storeMisalignBuffer.io.toVecSplit.uopIdx
-    vsSplit(i).io.vstdMisalign.get.storePipeEmpty := storeUnits.map(_.io.storePipeEmpty).reduce(_&&_)
-
   }
   (0 until VlduCnt).foreach { i =>
     vlSplit(i).io.redirect <> redirect
@@ -1286,7 +1264,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   (0 until StaCnt).foreach{i=>
     if(i < VstuCnt){
       arbiter(
-        Seq(storeUnits(i).io.vecstout, storeMisalignBuffer.io.vecWriteBack(i)),
+        Seq(storeUnits(i).io.vecstout),
         vsMergeBuffer(i).io.fromPipeline.head,
         Some(s"vecstout_$i")
       )

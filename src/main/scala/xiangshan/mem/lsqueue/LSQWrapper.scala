@@ -100,7 +100,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val mdpTrain        = ValidIO(new Redirect)
     val release = Flipped(Valid(new Release))
     val loadWakeup = Flipped(ValidIO(new DCacheLoadWakeup()))
-    val maControl     = Flipped(new StoreMaBufToSqControlIO)
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
     val mmioStout = DecoupledIO(new NewExuOutput(staParams.head)) // writeback uncached store
@@ -142,9 +141,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   storeQueue.io.wfi <> io.wfi
 
   if (backendParams.debugEn){ dontTouch(loadQueue.io.tlbReplayDelayCycleCtrl) }
-  // TODO: Don't use for now, will be remove in the feature
-  io.maControl := DontCare
-  io.maControl.toStoreMisalignBuffer.doDeq := true.B // always true, cross page unalign handled by store queue.
   // Todo: imm
   val tlbReplayDelayCycleCtrl = WireInit(VecInit(Seq(14.U(ReSelectLen.W), 0.U(ReSelectLen.W), 125.U(ReSelectLen.W), 0.U(ReSelectLen.W))))
   loadQueue.io.tlbReplayDelayCycleCtrl := tlbReplayDelayCycleCtrl
@@ -202,7 +198,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   storeQueue.io.toDCache.resp                 <> io.cmoOpResp
   io.flushSbuffer.valid                       := storeQueue.io.sbufferCtrl.req.flush
   storeQueue.io.sbufferCtrl.resp.empty        := io.flushSbuffer.empty
-//  storeQueue.io.maControl    <> io.maControl
   io.diffStore.foreach{ case sink =>
     storeQueue.io.diffStore.foreach(sink := _)
   }

@@ -29,6 +29,15 @@ class DcacheStoreRequestIO(implicit p: Parameters) extends DCacheBundle {
   val instrtype   = UInt(sourceTypeWidth.W)
 }
 
+class DcacheStoreRespIO(implicit p: Parameters) extends DCacheBundle {
+  // this store misses (for now, not used)
+  val miss = Bool()
+  // this store needs replay (for now, not used)
+  val replay = Bool()
+  // tag error TODO: add logic
+  val tag_error = Bool()
+}
+
 class DCacheStoreIO(implicit p: Parameters) extends DCacheBundle {
   // Paddr in STA s1, used for hit check
   val s1_paddr = Output(UInt(PAddrBits.W))
@@ -40,14 +49,7 @@ class DCacheStoreIO(implicit p: Parameters) extends DCacheBundle {
   val s2_pc = Output(UInt(VAddrBits.W))
 
   val req = DecoupledIO(new DcacheStoreRequestIO)
-  val resp = Flipped(DecoupledIO(new DCacheBundle() {
-    // this store misses (for now, not used)
-    val miss = Bool()
-    // this store needs replay (for now, not used)
-    val replay = Bool()
-    // tag error TODO: add logic
-    val tag_error = Bool()
-  }))
+  val resp = Flipped(DecoupledIO(new DcacheStoreRespIO()))
 }
 /** Non-Blocking Store Dcache Pipeline
   *

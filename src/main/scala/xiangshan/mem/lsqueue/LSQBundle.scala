@@ -210,7 +210,6 @@ class StoreQueueIO(val param: ExeUnitParams)(implicit p: Parameters) extends Mem
   // to backend , used to writeback uop when request is mmio, cmo.
   val writeBack          = DecoupledIO(new NewExuOutput(param))
   // from misalignBuffer, will be remove in the feature
-//  val maControl          = Flipped(new StoreMaBufToSqControlIO)
   val wfi                = Flipped(new WfiReqBundle)
   val sqEmpty            = Output(Bool())
   val sqFull             = Output(Bool())
@@ -222,8 +221,6 @@ class StoreQueueIO(val param: ExeUnitParams)(implicit p: Parameters) extends Mem
   val sqDeq              = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
   // to store unit
   val sqDeqPtr           = Output(new SqPtr)
-  val sqDeqUopIdx        = Output(UopIdx())
-  val sqDeqRobIdx        = Output(new RobPtr)
   // for store difftest
   val diffStore          = Option.when(debugEn)(Flipped(new DiffStoreIO))
 }

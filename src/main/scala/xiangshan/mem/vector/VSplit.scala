@@ -463,11 +463,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 }
 
 class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = true){
-  override lazy val misalignedCanGo = io.vstdMisalign.get.storePipeEmpty &&
-    (io.vstdMisalign.get.storeMisalignBufferEmpty ||
-      io.vstdMisalign.get.storeMisalignBufferRobIdx > io.out.bits.uop.robIdx ||
-      io.vstdMisalign.get.storeMisalignBufferRobIdx === io.out.bits.uop.robIdx &&
-        io.vstdMisalign.get.storeMisalignBufferUopIdx > io.out.bits.uop.uopIdx)
+  override lazy val misalignedCanGo = true.B
 
   // split data
   val splitData = genVSData(
@@ -568,7 +564,5 @@ class VSSplitImp(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
   splitBuffer.io.redirect <> io.redirect
   io.out <> splitBuffer.io.out
   io.vstd.get <> splitBuffer.io.vstd.get
-
-  io.vstdMisalign.get <> splitBuffer.io.vstdMisalign.get
 }
 
