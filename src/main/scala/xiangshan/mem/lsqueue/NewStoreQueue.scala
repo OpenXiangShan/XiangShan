@@ -792,7 +792,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val rdataPtrExt     = Input(Vec(EnsbufferWidth, new SqPtr))
       val deqPtrExt       = Input(Vec(EnsbufferWidth, new SqPtr))
       val validCnt        = Input(UInt(log2Ceil(StoreQueueSize + 1).W))
-      val fromUnalignQueue = Flipped(ValidIO(new Bundle {
+      val fromUnalignQueue = Flipped(DecoupledIO(new Bundle {
         val paddr         = UInt(PAddrBits.W)
         val sqIdx         = new SqPtr
       }))
@@ -1096,7 +1096,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val vaddrHigh         = Cat(headDataEntry.vaddr(headDataEntry.vaddr.getWidth - 1, 4), 0.U(4.W)) + 16.U
 
     for (i <- 0 until EnsbufferWidth) {
-      unalignMask(i)         := VecInit(Seq.fill(VLENB)(false.B)).asUInt >> dataEntries(i).vaddr(3, 0)
+      unalignMask(i)         := VecInit(Seq.fill(VLENB)(true.B)).asUInt << dataEntries(i).vaddr(3, 0)
       // unalignWithin16Byte is for old unalign framework difftest, will be remove in the future.
       val unalignWithin16Byte = (if (debugEn) ctrlEntries(i).unalignWithin16Byte.get else false.B)
       if(i == 0) {
@@ -1105,8 +1105,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         writeSbufferPaddr(i) := paddrLow
         writeSbufferVaddr(i) := vaddrLow
         diffIsHighPart(i)    := dataEntries(i).paddr(3) && !unalignWithin16Byte //TODO: will be fix in thefuture
-      }
-      if(i == 1) {
+      } else if (i == 1) {
         writeSbufferData(i)  := Mux(headCross16B, outData(0), outData(i))
         writeSbufferMask(i)  := Mux(headCross16B, outMask(0) & (~unalignMask(0)).asUInt, outMask(i))
         writeSbufferPaddr(i) := Mux(headCrossPage,
@@ -1220,6 +1219,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     }
 
     io.writeToSbuffer    <> dataQueue.io.toSbuffer
+    io.fromUnalignQueue.ready := headrdataPtr === io.fromUnalignQueue.bits.sqIdx && writeSbufferWire.head.fire
 
     /*============================================ deqPtr generate ===================================================*/
     /*
@@ -1351,7 +1351,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val fromSQ = new Bundle {
         val addrReadyPtr = Input(new SqPtr)
       }
-      val toDeqModule = ValidIO(new Bundle {
+      val toDeqModule = DecoupledIO(new Bundle {
         val paddr        = UInt(PAddrBits.W)
         val sqIdx        = new SqPtr
       })
