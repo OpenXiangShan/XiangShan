@@ -409,10 +409,10 @@ class StoreUnitS1(param: ExeUnitParams)(
     * Generate replay feedback for the RS.
     * A miss here means the request must be replayed after translation ready.
     */
-  val isNormal = isScalar && !isUnalignHead
-  val feedBackValid = fire && (isNormal || isUnalignTail)
+  val canFeedBack = isScalar && !isUnalignHead || isUnalignTail // unalign head should not feed back.
+  val feedBackValid = fire && canFeedBack
   val unalignTailHit = tlbHit && io.unalignHeadTlbHit && io.toUnalignQueue.ready
-  val feedBackHit = Mux(isNormal, tlbHit, unalignTailHit)
+  val feedBackHit = Mux(isUnalignTail, unalignTailHit, tlbHit)
   val needRSReplay = feedBackValid && !feedBackHit
 
   /**
@@ -436,7 +436,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   }
   toSqAddr.paddr := Mux(isCbo, alignVWordAddr(paddr), paddr)
   toSqAddr.vaddr := Mux(isCbo, alignVWordAddr(vaddr), vaddr)
-  toSqAddr.tlbMiss := Mux(isVector, tlbMiss, !feedBackHit)
+  toSqAddr.tlbMiss := !feedBackHit
   toSqAddr.mask := mask
   toSqAddr.size := Mux(isCbo, MemorySize.Q.U, size)
   toSqAddr.wlineflag := isCbo
