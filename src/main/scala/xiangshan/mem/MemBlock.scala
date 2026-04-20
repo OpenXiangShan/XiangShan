@@ -969,7 +969,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     stu.io.redirect      <> redirect
     stu.io.dcache        <> dcache.io.lsu.sta(i)
-    stu.io.feedbackSlow  <> io.mem_to_ooo.staIqFeedback(i).feedbackSlow
+    stu.io.feedBackSlow  <> io.mem_to_ooo.staIqFeedback(i).feedbackSlow
     stu.io.stin          <> issueSta(i)
     stu.io.toSqAddr      <> lsq.io.sta.storeAddrIn(i)
     stu.io.toSqAddrRe    <> lsq.io.sta.storeAddrInRe(i)
