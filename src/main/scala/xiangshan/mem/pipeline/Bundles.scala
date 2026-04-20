@@ -250,13 +250,14 @@ class StorePipeBundle(
   // MMU & exception handling
   val tlbHit = Option.when(param.hasAddrTrans)(Bool())
   val tlbException = Option.when(param.hasAddrTrans)(new TlbRespExcp)
+  val ptwBack = Option.when(param.hasAddrTrans)(Bool())
   val pbmt = Option.when(param.hasAddrTrans)(Pbmt())
   val isForVSnonLeafPTE = Option.when(param.hasAddrTrans)(Bool())
   val paddr = Option.when(param.hasAddrTrans)(UInt(PAddrBits.W))
   val gpaddr = Option.when(param.hasAddrTrans)(UInt(XLEN.W))
+  val hasException = Option.when(param.hasAddrTrans)(Bool())
 
   val pmp = Option.when(param.hasPAddrChecked)(new PMPRespBundle)
-  val hasException = Option.when(param.hasPAddrChecked)(Bool())
   val nc = Option.when(param.hasPAddrChecked)(Bool())
   val mmio = Option.when(param.hasPAddrChecked)(Bool())
 
@@ -279,7 +280,7 @@ class StorePipeBundle(
     cross16Byte.get := DontCare
   }
   def DontCareVectorFields(): Unit = {
-    vecActive.get := false.B
+    vecActive.get := true.B
     vecBaseVaddr.get := 0.U
     usSecondInv.get := false.B
     elemIdx.get := 0.U
