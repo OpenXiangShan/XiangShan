@@ -49,6 +49,7 @@ import xiangshan.frontend.bpu.BpuCommitMeta
 import xiangshan.frontend.bpu.BpuPredictionSource
 import xiangshan.frontend.bpu.BpuRedirectMeta
 import xiangshan.frontend.bpu.BpuResolveMeta
+import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.HalfAlignHelper
 
 class Ftq(implicit p: Parameters) extends FtqModule
@@ -315,12 +316,22 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   resolveQueue.io.backendResolve := io.fromBackend.resolve
 
-  io.toBpu.train.valid           := resolveQueue.io.bpuTrain.valid
-  resolveQueue.io.bpuTrain.ready := io.toBpu.train.ready
-  io.toBpu.train.bits.meta       := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
-  io.toBpu.train.bits.startPc    := resolveQueue.io.bpuTrain.bits.startPc
-  io.toBpu.train.bits.branches   := resolveQueue.io.bpuTrain.bits.branches
-  io.toBpu.train.bits.perfMeta   := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
+  private val trainCache = RegInit(0.U.asTypeOf(Valid(new BpuTrain)))
+
+  resolveQueue.io.bpuTrain.ready := !trainCache.valid || io.toBpu.train.fire
+
+  when(resolveQueue.io.bpuTrain.fire) {
+    trainCache.bits.meta     := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
+    trainCache.bits.startPc  := resolveQueue.io.bpuTrain.bits.startPc
+    trainCache.bits.branches := resolveQueue.io.bpuTrain.bits.branches
+    trainCache.bits.perfMeta := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
+    trainCache.valid         := true.B
+  }.elsewhen(io.toBpu.train.fire) {
+    trainCache.valid := false.B
+  }
+
+  io.toBpu.train.valid := trainCache.valid
+  io.toBpu.train.bits  := trainCache.bits
 
   io.fromBackend.resolve.foreach { branch =>
     val ftqIdx      = branch.bits.ftqIdx.value
