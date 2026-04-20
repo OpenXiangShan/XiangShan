@@ -1035,7 +1035,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       stu.io.vecstin.bits := DontCare
       stu.io.vecstout.ready := false.B
     }
-    stu.io.vec_isFirstIssue := true.B // TODO
+    stu.io.vecstin.bits.isFirstIssue := true.B // TODO
   }
 
   val sqStoutLatch = Wire(DecoupledIO(new NewExuOutput(staParams.head)))

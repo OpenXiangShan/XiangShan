@@ -167,6 +167,7 @@ trait OnStoreStage {
   
   def is(sn: StoreStage): Boolean = s.id == sn.id
   def after(s1: StoreStage, s2: StoreStage): Boolean = s1.id >= s2.id
+  def isS0: Boolean = is(StoreS0())
   def afterS1: Boolean = after(s, StoreS1())
   def afterS2: Boolean = after(s, StoreS2())
   def afterS3: Boolean = after(s, StoreS3())
@@ -182,5 +183,27 @@ trait OnStoreStage {
     case StoreS2() => StoreS1()
     case StoreS3() => StoreS2()
     case StoreS4() => StoreS3()
+  }
+}
+
+object StoreEntrance extends ChiselOHEnum {
+  type OHType = super.OHType
+
+  val unalignTail = addType(name = "unalignTail")
+  val prefetch = addType(name = "prefetch")
+  val vectorIssue = addType(name = "vectorIssue")
+  val scalarIssue = addType(name = "scalarIssue")
+
+  def num = this.values.size
+
+  def apply() = UInt(num.W)
+
+  def isUnalignTail(source: UInt): Bool = IsOneOf(source, unalignTail)
+  def isHWPrefetch(source: UInt): Bool = IsOneOf(source, prefetch)
+  def isVectorIssue(source: UInt): Bool = IsOneOf(source, vectorIssue)
+  def isScalarIssue(source: UInt): Bool = IsOneOf(source, scalarIssue)
+
+  def findNameById(id: Int): String = {
+    values.find(_.id == id).map(_.getName).getOrElse("UNKNOWN")
   }
 }

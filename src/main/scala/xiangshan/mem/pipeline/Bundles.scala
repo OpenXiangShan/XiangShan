@@ -212,13 +212,11 @@ class LoadStageIO(implicit p: Parameters, implicit val s: LoadStage)
   extends LoadPipeBundle(LoadStageIOParam())
 
 sealed trait HasStorePipeBundleParam {
-  def hasPAddr: Boolean = false
-  def hasNC: Boolean = false
-  def hasMMIO: Boolean = false
   def hasVector: Boolean = false
-  def hasS2PreProcess: Boolean = false
-  def hasS3PreProcess: Boolean = false
-  def hasS4PreProcess: Boolean = false
+  def hasUnalignHandling: Boolean = false
+  def hasAddrTrans: Boolean = false
+  def hasPAddrChecked: Boolean = false
+  def isAfterS1: Boolean = false
 }
 
 case class DefaultStorePipeBundleParam() extends HasStorePipeBundleParam
@@ -228,26 +226,68 @@ class StorePipeBundle(
 )(
   implicit p: Parameters
 ) extends XSBundle
-  with HasStorePipeBundleParam {
-  val entrance = LoadEntrance()
-  val accessType = LoadAccessType()
+  with HasStorePipeBundleParam
+  with HasVLSUParameters {
+  // Basic info
+  val entrance = StoreEntrance()
   val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
   val fullva = UInt(XLEN.W)
   val size = UInt(MemorySize.Size.width.W)
   val mask = UInt((VLEN/8).W)
+  
+  // Unalign handling
+  val align = Option.when(param.hasUnalignHandling)(Bool())
+  val unalignHead = Option.when(param.hasUnalignHandling)(Bool())
+  val is128bit = Option.when(param.hasUnalignHandling)(Bool()) // TODO: remove this
+
+  // MMU & exception handling
+  val tlbAccessResult = Option.when(param.hasAddrTrans)(TlbAccessResult())
+  val tlbException = Option.when(param.hasAddrTrans)(new TlbRespExcp)
+  val pbmt = Option.when(param.hasAddrTrans)(Pbmt())
+  val isForVSnonLeafPTE = Option.when(param.hasAddrTrans)(Bool())
+  val paddr = Option.when(param.hasAddrTrans)(UInt(PAddrBits.W))
+  val gpaddr = Option.when(param.hasAddrTrans)(UInt(XLEN.W))
+  val nc = Option.when(param.hasAddrTrans)(Bool())
+  val mmio = Option.when(param.hasAddrTrans)(Bool())
+
+  val pmp = Option.when(param.hasPAddrChecked)(new PMPRespBundle)
+  val hasException = Option.when(param.hasPAddrChecked)(Bool())
+
+  // Vector
+  val vecActive = Option.when(param.hasVector)(Bool())
+  val vecBaseVaddr = Option.when(param.hasVector)(UInt(VAddrBits.W))
+  val usSecondInv = Option.when(param.hasVector)(Bool())
+  val elemIdx = Option.when(param.hasVector)(UInt(elemIdxBits.W))
+  val mbIndex = Option.when(param.hasVector)(UInt(vlmBindexBits.W))
+  
+  // After S1
+  val vecTriggerMask = Option.when(param.isAfterS1)(UInt((VLEN/8).W))
+  val vecVaddrOffset = Option.when(param.isAfterS1)(UInt(VAddrBits.W))
+  val Feedback = Option.when(param.isAfterS1)(new RSFeedback)
+
+  def DontCareUnalign(): Unit = {
+    align.get := DontCare
+    unalignHead.get := DontCare
+    is128bit.get := DontCare
+  }
+  def DontCareVectorFields(): Unit = {
+    vecActive.get := false.B
+    vecBaseVaddr.get := 0.U
+    usSecondInv.get := false.B
+    elemIdx.get := 0.U
+    mbIndex.get := 0.U
+  }
 }
 
 case class StoreStageIOParam()(
   implicit val s: StoreStage
 ) extends HasStorePipeBundleParam with OnStoreStage {
-  override val hasPAddr: Boolean = true
-  override val hasNC: Boolean = afterS2
-  override val hasMMIO: Boolean = afterS2
   override val hasVector: Boolean = true
-  override val hasS2PreProcess: Boolean = afterS1
-  override val hasS3PreProcess: Boolean = afterS2
-  override val hasS4PreProcess: Boolean = afterS3
+  override val hasUnalignHandling: Boolean = true
+  override val hasAddrTrans: Boolean = afterS1
+  override val hasPAddrChecked: Boolean = afterS2
+  override val isAfterS1: Boolean = afterS1
 }
 
 class StoreStageIO(implicit p: Parameters, implicit val s: StoreStage)

@@ -21,9 +21,14 @@ import chisel3._
 import chisel3.util._
 import utility._
 import xiangshan._
+import xiangshan.backend.Bundles.{ExuInput, NewExuOutput, StoreUnitToLFST}
 import xiangshan.backend.exu.ExeUnitParams
-import xiangshan.mem.StoreStage._
+import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.fu.NewCSR._
 import xiangshan.cache._
+import xiangshan.cache.mmu._
+import xiangshan.mem.Bundles._
+import xiangshan.mem.StoreStage._
 
 class StoreUnitS0(param: ExeUnitParams)(
   implicit p: Parameters,
@@ -61,7 +66,41 @@ class StoreUnitS4(param: ExeUnitParams)(
 }
 
 class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
-  
+  val redirect = Flipped(ValidIO(new Redirect))
+  val csrCtrl = Flipped(new CustomCSRCtrlIO)
+  val csrTrigger = Input(new CsrTriggerBundle)
+  // Request sources
+  val stin = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
+  val vecstin = Flipped(Decoupled(new VecPipeBundle(isVStore = true)))
+  val prefetchReq = Flipped(DecoupledIO(new StorePrefetchReq))
+  // TLB / PMA / PMP
+  val tlb = new TlbRequestIO
+  val pmp = Flipped(new PMPRespBundle)
+  // DCache
+  val dcache = new DCacheStoreIO
+  // MDP
+  val updateLFST = Valid(new StoreUnitToLFST)
+  // Store mask, send to sq in s0
+  val toSqMask = Valid(new StoreMaskBundle)
+  // Store addr, send to sq in s1
+  val toSqAddr = ValidIO(new StoreAddrIO)
+  // Exception info and memory type, send to sq in s2
+  val toSqAddrRe = Output(new StoreAddrIO)
+  // UnalignTail req addr, send to sq in s2
+  val toUnalignQueue = DecoupledIO(new UnalignQueueIO)
+  // Nuke check req to LoadUnit
+  val staNukeQueryReq = ValidIO(new StoreNukeQueryReq)
+  // Prefetch Train
+  val prefetchTrain = ValidIO(new LsPrefetchTrainBundle())
+  // Feedback to RS in s2, for store issue control
+  val feedbackSlow = ValidIO(new RSFeedback)
+  // Writeback
+  val stout = new NewExuOutput(param)
+  val vecstout = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
+  val exceptionInfo = ValidIO(new MemExceptionInfo)
+  // TODO: Consider these wire
+  // s1_prefetch_spec? s2_prefetch_spec?
+  // debug_ls ? s0_s1_s2_valid
 }
 
 class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule {
