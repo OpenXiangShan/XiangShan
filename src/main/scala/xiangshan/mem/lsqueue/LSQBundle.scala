@@ -133,8 +133,6 @@ class StoreQueueDataWrite(implicit p: Parameters) extends MemBlockBundle {
 }
 
 class StaIO(implicit p: Parameters) extends MemBlockBundle {
-
-  val storeMaskIn      = Vec(StorePipelineWidth, Flipped(ValidIO(new StoreMaskBundle))) // store mask, send to sq
   val storeAddrIn      = Vec(StorePipelineWidth, Flipped(ValidIO(new StoreAddrIO))) // store addr, data is not included
   // this bundle will be removed in the feature.
   val storeAddrInRe    = Vec(StorePipelineWidth, Input(new StoreAddrIO)) // store more mmio and exception

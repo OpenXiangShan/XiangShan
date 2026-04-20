@@ -53,9 +53,6 @@ class StoreUnitS0(param: ExeUnitParams)(
     
     // DCache request
     val dcacheReq = DecoupledIO(new DcacheStoreRequestIO)
-
-    // Store mask
-    val toSqMask = Valid(new StoreMaskBundle)
   })
 
   /**
@@ -238,10 +235,6 @@ class StoreUnitS0(param: ExeUnitParams)(
   io.dcacheReq.bits.cmd := MemoryOpConstants.M_PFW
   io.dcacheReq.bits.vaddr := sink.bits.vaddr
   io.dcacheReq.bits.instrtype := Mux(isHWPrefetch, DCACHE_PREFETCH_SOURCE.U, STORE_SOURCE.U)
-
-  io.toSqMask.valid := isScalar || isVector
-  io.toSqMask.bits.mask := sink.bits.mask
-  io.toSqMask.bits.sqIdx := uop.sqIdx
 
   // Perf counters
   val fire = pipeIn.fire && !kill
@@ -920,8 +913,6 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   val dcache = new DCacheStoreIO
   // MDP
   val updateLFST = Valid(new StoreUnitToLFST)
-  // Store mask, send to sq in s0
-  val toSqMask = Valid(new StoreMaskBundle)
   // Store addr, send to sq in s1
   val toSqAddr = ValidIO(new StoreAddrIO)
   // Exception info and memory type, send to sq in s2
@@ -971,7 +962,6 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   io.tlb.req <> s0.io.tlbReq
   io.tlb.req_kill := s0.io.tlbReqKill
   io.dcache.req <> s0.io.dcacheReq
-  io.toSqMask <> s0.io.toSqMask
   // s1
   s1.io.redirect := io.redirect
   s1.io.csrTrigger := io.csrTrigger

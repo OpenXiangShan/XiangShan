@@ -992,9 +992,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // store unit does not need fast feedback
     io.mem_to_ooo.staIqFeedback(i).feedbackFast := DontCare
 
-    // Lsq to sta unit
-    lsq.io.sta.storeMaskIn(i) <> stu.io.toSqMask
-
     // 1. sync issue info to store set LFST
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
     io.mem_to_ooo.updateLFST(i) := stu.io.updateLFST

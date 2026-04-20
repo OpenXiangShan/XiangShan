@@ -80,7 +80,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
       val ldin = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
     }
     val sta = new Bundle() {
-      val storeMaskIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreMaskBundle))) // from store_s0, store mask, send to sq from rs
       val storeAddrIn = Vec(StorePipelineWidth, Flipped(Valid(new StoreAddrIO))) // from store_s1
       val storeAddrInRe = Vec(StorePipelineWidth, Input(new StoreAddrIO)) // from store_s2
       // ready indicate unaligned queue reject this unaligned request
@@ -182,7 +181,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   storeQueue.io.fromStoreUnit.storeAddrIn     <> io.sta.storeAddrIn // from store_s1
   storeQueue.io.fromStoreUnit.storeAddrInRe   <> io.sta.storeAddrInRe // from store_s2
   storeQueue.io.storeDataIn                   <> io.std.storeDataIn // from store_s0
-  storeQueue.io.fromStoreUnit.storeMaskIn     <> io.sta.storeMaskIn // from store_s0
   storeQueue.io.writeToSbuffer                <> io.sbuffer
   storeQueue.io.writeBack                     <> io.mmioStout
   storeQueue.io.fromRob.pendingPtr            := io.rob.pendingPtr
