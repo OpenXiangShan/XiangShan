@@ -852,7 +852,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   io.exceptionInfo.valid := sxValid && !sxVector
   io.exceptionInfo.bits.robIdx := sxData.uop.robIdx
   io.exceptionInfo.bits.exceptionVec := ExceptionNO.selectByFu(sxData.uop.exceptionVec, StaCfg)
-  io.exceptionInfo.bits.vaddr := sxData.vaddr
+  io.exceptionInfo.bits.vaddr := sxData.fullva
   io.exceptionInfo.bits.gpaddr := sxData.gpaddr.get
   io.exceptionInfo.bits.isForVSnonLeafPTE := sxData.isForVSnonLeafPTE.get
   io.exceptionInfo.bits.vaNeedExt := sxData.tlbException.get.vaNeedExt
@@ -875,7 +875,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   io.vecstout.bits.elemIdx := sxData.elemIdx.get
   io.vecstout.bits.alignedType := sxData.size
   io.vecstout.bits.mask := sxData.mask
-  io.vecstout.bits.vaddr := sxData.vaddr
+  io.vecstout.bits.vaddr := sxData.fullva
   io.vecstout.bits.vaNeedExt := sxData.tlbException.get.vaNeedExt
   io.vecstout.bits.gpaddr := sxData.gpaddr.get
   io.vecstout.bits.isForVSnonLeafPTE := sxData.isForVSnonLeafPTE.get
