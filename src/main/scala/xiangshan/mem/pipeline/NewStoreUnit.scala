@@ -755,7 +755,7 @@ class StoreUnitS3(param: ExeUnitParams)(
 
   wbData.vaddr := Mux(headValid, head.vaddr, in.vaddr)
   wbData.mask := Mux(headValid, head.mask, in.mask)
-  wbData.fullva := Mux(headValid, head.fullva, in.fullva)
+  wbData.fullva := Mux(headHasException, head.fullva, in.fullva)
   wbData.hasException.get := hasException || headHasException
   wbData.uop.exceptionVec := Mux(headHasException, headExceptionVec, in.uop.exceptionVec)
   wbData.uop.trigger := Mux(headHasException, head.uop.trigger, in.uop.trigger)
