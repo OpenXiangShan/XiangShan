@@ -137,8 +137,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     })
     // store replay resp of S3 stage from miss queue
     val store_replay_resp_s3_valid = Input(Bool())
-    // miss_req_pipe_reg.alloc from MissQueue (same as MissEntry alloc branch)
-    val miss_req_pipe_reg_alloc = Input(Bool())
+    // (from MissQueue) store miss that handled by mshr is allocation (not merge)
+    val missHandled_isAlloc = Input(Bool())
     // atmoics
     val atomic_req = Flipped(DecoupledIO(new MainPipeReq))
     val atomic_resp = ValidIO(new MainPipeResp)
@@ -886,7 +886,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.store_hit_resp.valid := (s3_valid && s3_store_can_go || mshr_handled_store_miss_s3) && !io.store_replay_resp_s3_valid
   io.store_hit_resp.bits.data := DontCare
   io.store_hit_resp.bits.miss := mshr_handled_store_miss_s3
-  io.store_hit_resp.bits.isAlloc := mshr_handled_store_miss_s3 && io.miss_req_pipe_reg_alloc
+  io.store_hit_resp.bits.isAlloc := mshr_handled_store_miss_s3 && io.missHandled_isAlloc
   io.store_hit_resp.bits.replay := false.B
   io.store_hit_resp.bits.id := Mux(mshr_handled_store_miss_s3, mshr_handled_store_miss_id_s3, s3_req.id)
 

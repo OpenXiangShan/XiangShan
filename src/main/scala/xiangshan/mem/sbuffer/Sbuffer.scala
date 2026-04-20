@@ -220,7 +220,7 @@ class Sbuffer(implicit p: Parameters)
   val stateVec = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U.asTypeOf(new SbufferEntryState))))
   val cohCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(EvictCountBits.W))))
   val missqReplayCount = RegInit(VecInit(Seq.fill(StoreBufferSize)(0.U(MissqReplayCountBits.W))))
-  val longTimeNoMerge = RegInit(VecInit.fill(StoreBufferSize)(false.B))
+  val longTimeNoMerge = RegInit(VecInit.fill(StoreBufferSize)(false.B)) // There is no merge from store-queue for a long time
   val noMergeCount = RegInit(VecInit.fill(StoreBufferSize)(0.U(10.W)))
 
   val activeMask = VecInit(stateVec.map(s => s.isActive()))
@@ -768,7 +768,7 @@ class Sbuffer(implicit p: Parameters)
   val enqOH_mshr = PriorityEncoderOH(valid_mshr.map(!_))
   val hitResp = io.dcache.main_pipe_hit_resp
   val refillDone = io.dcache.refill_done
-  assert(!(valid_mshr.asUInt.andR && hitResp.fire && hitResp.bits.miss), "(Sbuffer) mshr_buffer enq when it is full")
+  assert(!(valid_mshr.asUInt.andR && hitResp.fire && hitResp.bits.miss && hitResp.bits.isAlloc), "(Sbuffer) mshr_buffer enq when it is full")
   val deqOH_mshr = ptag_mshr.map(_ === (refillDone.bits.paddr >> OffsetWidth)) zip valid_mshr map {case (x, y) => x && y}
   for (i <- 0 until cacheParams.nMissEntries) {
     when (hitResp.fire && hitResp.bits.miss && hitResp.bits.isAlloc) {

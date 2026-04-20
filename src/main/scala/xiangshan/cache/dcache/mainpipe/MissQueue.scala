@@ -1090,7 +1090,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     // -- only triggered when a store req is being merged to an entry but the grant.fire comes at the same time
     val store_replay_resp_s3 = ValidIO(UInt(reqIdWidth.W))
 
-    val miss_req_pipe_reg_alloc = Output(Bool())
+    val missHandled_isAlloc = Output(Bool()) // Only used by Sbuffer
   })
 
   // 128KBL1: FIXME: provide vaddr for l2
@@ -1136,7 +1136,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.resp.id := Mux(!req_pipeline_reg_handled, OHToUInt(req_mshr_handled_vec), miss_req_pipe_reg.mshr_id)
   io.resp.handled := Cat(req_mshr_handled_vec).orR || req_pipeline_reg_handled
   io.resp.merged := merge
-  io.miss_req_pipe_reg_alloc := miss_req_pipe_reg.alloc
+  io.missHandled_isAlloc := miss_req_pipe_reg.alloc
 
   /*  MissQueue enq logic is now splitted into 2 cycles
    *
