@@ -91,9 +91,10 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
 
   // ldu 0, 1, 2 can only have one prefetch request at a time
   val total_prefetch = io.loadinfo.map(t => t.total_prefetch).reduce(_ || _)
-  val nack_prefetch = io.loadinfo.map(t => t.nack_prefetch).reduce(_ || _)
+  val nack_prefetch_raw = io.loadinfo.map(t => t.nack_prefetch).reduce(_ || _)
   val pf_late_in_cache = io.loadinfo.map(t => t.pf_late_in_cache).reduce(_ || _)
   val pf_late_in_mshr = io.missinfo.pf_late_in_mshr
+  val nack_prefetch = nack_prefetch_raw && !pf_late_in_mshr
   val pf_late = pf_late_in_cache.asUInt + pf_late_in_mshr.asUInt
   // demand accesses from different ldu may hit different prefetch blocks
   val hit_pf_in_cache = PopCount(prefetch_info.loadinfo.map(t => t.hit_pf_in_cache) ++ Seq(prefetch_info.maininfo.hit_pf_in_cache))
@@ -195,8 +196,9 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
 
   val total_prefetch = io.prefetch_info.loadinfo.map(t => t.total_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
   val pf_late_in_cache = io.prefetch_info.loadinfo.map(t => t.pf_late_in_cache && param.isMyType(t.pf_source)).reduce(_ || _)
-  val nack_prefetch = io.prefetch_info.loadinfo.map(t => t.nack_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
+  val nack_prefetch_raw = io.prefetch_info.loadinfo.map(t => t.nack_prefetch && param.isMyType(t.pf_source)).reduce(_ || _)
   val pf_late_in_mshr = io.prefetch_info.missinfo.pf_late_in_mshr && param.isMyType(io.prefetch_info.missinfo.pf_source)
+  val nack_prefetch = nack_prefetch_raw && !pf_late_in_mshr
   val hit_pf_in_cache = PopCount(io.prefetch_info.loadinfo.map(t => t.hit_pf_in_cache && param.isMyType(t.hit_source)) ++ Seq(io.prefetch_info.maininfo.hit_pf_in_cache && param.isMyType(io.prefetch_info.maininfo.hit_pf_source_in_cache)))
   val pf_useless = io.prefetch_info.maininfo.pf_useless && param.isMyType(io.prefetch_info.maininfo.pf_source_useless)
   val prefetch_miss = io.prefetch_info.missinfo.prefetch_miss && param.isMyType(io.prefetch_info.missinfo.pf_source)
@@ -341,3 +343,4 @@ class BertiMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceP
   override val name: String = "Berti"
   override def isMyType(value: UInt) = value === L1_HW_PREFETCH_BERTI
 }
+
