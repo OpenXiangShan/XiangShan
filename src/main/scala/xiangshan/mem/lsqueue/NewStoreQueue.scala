@@ -1720,8 +1720,9 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       ctrlEntries(i).waitStoreS2  := false.B
     }
 
-    when(staReValid) {
-      ctrlEntries(i).hasException := hasExceptionSet
+    // When any valid bit is true, this entry is in stage 2 and can update exception state.
+    when(staReValidVec.reduce(_ || _)) {
+      ctrlEntries(i).hasException := ctrlEntries(i).hasException || hasExceptionSet
     }.elsewhen(deqCancel || needCancel(i)) {
       ctrlEntries(i).hasException := false.B
     }
