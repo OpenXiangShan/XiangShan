@@ -19,7 +19,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.InstSeqNum
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, NewExuOutput, UopIdx}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, MemToRob, UopIdx}
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
@@ -206,7 +206,7 @@ class StoreQueueIO(val param: ExeUnitParams)(implicit p: Parameters) extends Mem
   // write store request to uncacheBuffer.
   val toUncacheBuffer    = new UncacheWordIO
   // to backend , used to writeback uop when request is mmio, cmo.
-  val writeBack          = DecoupledIO(new NewExuOutput(param))
+  val writeBack          = DecoupledIO(new MemToRob(param))
   // from misalignBuffer, will be remove in the feature
   val wfi                = Flipped(new WfiReqBundle)
   val sqEmpty            = Output(Bool())

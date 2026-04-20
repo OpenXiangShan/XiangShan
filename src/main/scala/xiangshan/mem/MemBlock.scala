@@ -233,7 +233,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     val pc     = Input(UInt(VAddrBits.W))
   })
 
-  val intWriteback: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = intSchdParams.genNewExuOutputDecoupledBundleMemBlock
+  val intWriteback: MixedVec[MixedVec[MemWriteBack]] = intSchdParams.genMemWriteBackBundle
   val vecWriteback: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = vecSchdParams.genExuOutputDecoupledBundleMemBlock
 
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
@@ -447,16 +447,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val issueStd = intIssue.filter(_.bits.params.hasStdFu)
   val issueVldu = vecIssue.filter(_.bits.params.hasVLoadFu)
 
-  val intWriteback: Seq[DecoupledIO[NewExuOutput]] = io.mem_to_ooo.intWriteback.flatten
+  val intWriteback: Seq[MemWriteBack] = io.mem_to_ooo.intWriteback.flatten
   val vecWriteback: Seq[DecoupledIO[ExuOutput]] = io.mem_to_ooo.vecWriteback.flatten
   val writeback = intWriteback ++ vecWriteback
-  val writebackLda = intWriteback.filter(_.bits.params.hasLoadFu)
-  val writebackSta = intWriteback.filter(_.bits.params.hasStoreAddrFu)
-  val writebackStd = intWriteback.filter(_.bits.params.hasStdFu)
+  val writebackLda = intWriteback.filter(_.params.hasLoadFu)
+  val writebackSta = intWriteback.filter(_.params.hasStoreAddrFu)
+  val writebackStd = intWriteback.filter(_.params.hasStdFu)
   val writebackVldu = vecWriteback.filter(_.bits.params.hasVLoadFu)
 
   intWriteback.zipWithIndex.foreach{ case (wb, i) =>
-    wb.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, wb.valid, clock, reset))
+    wb.toRob.bits.debugInfo.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, wb.toRob.valid, clock, reset))
   }
   vecWriteback.zipWithIndex.foreach{ case (wb, i) =>
     wb.bits.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, wb.valid, clock, reset))
@@ -515,20 +515,17 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   writebackLda.zipWithIndex.foreach { case (wb, i) =>
     if (i == AtomicWBPort) {
       // atomicsUnit writeback
-      val lduDecoupledOut = Wire(DecoupledIO(new NewExuOutput(ldaParams(i))))
-      val atomicDecoupledOut = Wire(DecoupledIO(new NewExuOutput(ldaParams(i))))
-      connectMemDecoupledNewExuOutput(lduDecoupledOut, newLoadUnits(i).io.ldout)
-      connectMemDecoupledNewExuOutput(atomicDecoupledOut, atomicsUnit.io.out)
-
-      oneHotArbiter(Seq(atomicDecoupledOut, lduDecoupledOut), wb, Some("writebackLdaAtomic"))
+      wb.toRob := Mux(atomicsUnit.io.out.toRob.valid, atomicsUnit.io.out.toRob, newLoadUnits(i).io.ldout.toRob)
+      wb.toIntRf.get := Mux(atomicsUnit.io.out.toIntRf.get.valid, atomicsUnit.io.out.toIntRf.get, newLoadUnits(i).io.ldout.toIntRf.get)
+      wb.toFpRf.get := Mux(atomicsUnit.io.out.toFpRf.get.valid, atomicsUnit.io.out.toFpRf.get, newLoadUnits(i).io.ldout.toFpRf.get)
     } else {
       // normal load writeback
-      connectMemDecoupledNewExuOutput(wb, newLoadUnits(i).io.ldout)
+      wb := newLoadUnits(i).io.ldout
     }
   }
 
   writebackStd.zipWithIndex.foreach { case (wb, i) =>
-    connectMemDecoupledNewExuOutput(wb, stdExeUnits(i).io.out)
+    wb := stdExeUnits(i).io.out
   }
 
   val lsq     = Module(new LsqWrapper)
@@ -1010,18 +1007,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     }
   }
 
-  val sqStoutLatch = Wire(DecoupledIO(new NewExuOutput(staParams.head)))
+  val sqStoutLatch = Wire(DecoupledIO(new MemToRob(staParams.head)))
   NewPipelineConnect(lsq.io.mmioStout, sqStoutLatch, sqStoutLatch.fire, false.B, Some("sqStout"))
   writebackSta.zipWithIndex.foreach { case (wb, i) =>
     if (i == 0) {
-      val staDecoupledOut = Wire(DecoupledIO(new NewExuOutput(staParams(i))))
-      connectMemDecoupledNewExuOutput(staDecoupledOut, storeUnits(i).io.stout)
-      arbiter(
-        Seq(staDecoupledOut, sqStoutLatch),
-        wb, Some(s"writebackSta_$i")
-      )
+      wb.toRob.valid := storeUnits(i).io.stout.toRob.valid || sqStoutLatch.valid
+      wb.toRob.bits := Mux(storeUnits(i).io.stout.toRob.valid, storeUnits(i).io.stout.toRob.bits, sqStoutLatch.bits)
+      sqStoutLatch.ready := !storeUnits(i).io.stout.toRob.valid
     } else {
-      connectMemDecoupledNewExuOutput(wb, storeUnits(i).io.stout)
+      wb := storeUnits(i).io.stout
     }
   }
 

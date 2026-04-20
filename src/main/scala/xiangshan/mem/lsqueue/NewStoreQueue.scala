@@ -782,7 +782,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       val fromRob         = Input(new FromRobIO)
       val toRob           = Output(new toRobIO)
       val writeToSbuffer  = new SbufferWriteIO
-      val writeBack       = DecoupledIO(new NewExuOutput(param))
+      val writeBack       = DecoupledIO(new MemToRob(param))
       val exceptionInfo   = ValidIO(new MemExceptionInfo)
       val sbufferCtrl     = new SbufferCtrlIO
 
@@ -1018,35 +1018,31 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       hasAccessFault := false.B
     }
 
-    val writeBack = Wire(new NewExuOutput(staParams.head))
-    writeBack.toRob.valid                        := (uncacheState === UncacheState.writeback) || (cboState === CboState.writeback)
-    writeBack.toRob.bits.robIdx := dataEntries.head.uop.robIdx
-    writeBack.toRob.bits.exceptionVec.foreach{ case x =>
+    val writeBackValid = (uncacheState === UncacheState.writeback) || (cboState === CboState.writeback)
+    val writeBackToRob = Wire(new MemToRob(staParams.head))
+    writeBackToRob.robIdx := dataEntries.head.uop.robIdx
+    writeBackToRob.exceptionVec.foreach{ case x =>
       x := ExceptionNO.selectByFu(0.U.asTypeOf(ExceptionVec()), StaCfg)
       x(hardwareError) := hasHardwareError
       x(storeAccessFault) := hasAccessFault} // override
-    writeBack.toRob.bits.trigger.foreach(_ := DontCare)
-    writeBack.toRob.bits.isRVC.foreach(_ := DontCare)
-    writeBack.toRob.bits.sqIdx.foreach(_ := io.rdataPtrExt.head)
-    writeBack.pdest := DontCare
+    writeBackToRob.trigger.foreach(_ := DontCare)
+    writeBackToRob.isRVC.foreach(_ := DontCare)
+    writeBackToRob.sqIdx.foreach(_ := io.rdataPtrExt.head)
     // for difftest, ref will skip mmio store
-    writeBack.debug := DontCare
-    if(debugEn) {
-      writeBack.debug.vaddr   := dataEntries.head.debugVaddr.get
-      writeBack.debug.paddr   := dataEntries.head.debugPaddr.get
-      writeBack.debug.isPerfCnt := DontCare
-      writeBack.debug_seqNum.foreach(_ := dataEntries.head.debugUop.get.debug_seqNum)
-      writeBack.perfDebugInfo.foreach(_ := dataEntries.head.debugUop.get.perfDebugInfo)
-    }
-    if(basicDebugEn) {
-      writeBack.debug.isMMIO  := isMmio(dataEntries.head.memoryType) || isPbmtIO(dataEntries.head.memoryType)
-      writeBack.debug.isNCIO  := isPbmtNC(dataEntries.head.memoryType)
-    }
-    connectMemDecoupledNewExuOutput(io.writeBack, writeBack)
+    writeBackToRob.debugInfo := DontCare
+    writeBackToRob.debugInfo.vaddr.foreach(_ := dataEntries.head.debugVaddr.get)
+    writeBackToRob.debugInfo.paddr.foreach(_ := dataEntries.head.debugPaddr.get)
+    writeBackToRob.debugInfo.isPerfCnt.foreach(_ := DontCare)
+    writeBackToRob.debugInfo.debug_seqNum.foreach(_ := dataEntries.head.debugUop.get.debug_seqNum)
+    writeBackToRob.debugInfo.perfDebugInfo.foreach(_ := dataEntries.head.debugUop.get.perfDebugInfo)
+    writeBackToRob.debugInfo.isMMIO.foreach(_ := isMmio(dataEntries.head.memoryType) || isPbmtIO(dataEntries.head.memoryType))
+    writeBackToRob.debugInfo.isNCIO.foreach(_ := isPbmtNC(dataEntries.head.memoryType))
+    io.writeBack.valid := writeBackValid
+    io.writeBack.bits := writeBackToRob
 
-    io.exceptionInfo.valid             := (uncacheState === UncacheState.writeback) || (cboState === CboState.writeback)
+    io.exceptionInfo.valid             := writeBackValid
     io.exceptionInfo.bits.robIdx       := dataEntries.head.uop.robIdx
-    io.exceptionInfo.bits.exceptionVec := ExceptionNO.selectByFu(writeBack.toRob.bits.exceptionVec.get, StaCfg)
+    io.exceptionInfo.bits.exceptionVec := ExceptionNO.selectByFu(writeBackToRob.exceptionVec.get, StaCfg)
     // TODO: why not fullVaddr and why don't have gpaddr ?
     io.exceptionInfo.bits.vaddr        := dataEntries.head.vaddr
     io.exceptionInfo.bits.gpaddr       := 0.U.asTypeOf(io.exceptionInfo.bits.gpaddr)

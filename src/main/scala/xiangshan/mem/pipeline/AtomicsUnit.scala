@@ -26,7 +26,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig.MouCfg
 import xiangshan.backend.fu.FuType
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuInput, ExuOutput, NewExuOutput}
+import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuInput, ExuOutput, MemWriteBack}
 import xiangshan.backend.fu.NewCSR.TriggerUtil
 import xiangshan.backend.fu.util.SdtrigExt
 import xiangshan.backend.exu.ExeUnitParams
@@ -46,7 +46,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     val in            = Flipped(Decoupled(new ExuInput(param, hasCopySrc = true)))
     val storeDataIn   = Flipped(Vec(StdCnt, Valid(new ExuInput(moudParam))))
     // AtomicsUnit re-uses lda port to write back
-    val out           = new NewExuOutput(ldaParams.head)
+    val out           = new MemWriteBack(ldaParams.head)
     val dcache        = new AtomicWordIO
     val dtlb          = new TlbRequestIO(2)
     val pmpResp       = Flipped(new PMPRespBundle())
@@ -514,26 +514,27 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   assert(!out_valid || state_sta_wb || state_std_wb, "out_valid reg error\n")
   io.out.toIntRf.foreach{case port =>
     port.valid := state_sta_wb
-    port.bits := Mux(state === s_finish2, resp_data >> XLEN, resp_data)
+    port.bits.data := Mux(state === s_finish2, resp_data >> XLEN, resp_data)
+    port.bits.pdest := Mux(state === s_finish2, pdest2, pdest1)
+    port.bits.isFromLoadUnit.get  := false.B
   }
   io.out.toFpRf.foreach{case port =>
     port.valid := false.B // amo will never write fp
-    port.bits := Mux(state === s_finish2, resp_data >> XLEN, resp_data)
+    port.bits.data := Mux(state === s_finish2, resp_data >> XLEN, resp_data)
+    port.bits.pdest := Mux(state === s_finish2, pdest2, pdest1)
   }
-  io.out.pdest := Mux(state === s_finish2, pdest2, pdest1)
   io.out.toRob.bits.robIdx := uop.robIdx
   io.out.toRob.bits.exceptionVec.foreach(_ := exceptionVec)
   io.out.toRob.bits.trigger.foreach(_ := trigger)
   io.out.toRob.bits.isRVC.foreach(_ := uop.isRVC)
   io.out.toRob.bits.lqIdx.foreach(_ := uop.lqIdx)
-  io.out.isFromLoadUnit.foreach(_ := false.B) // atomics are not issued from LoadUnit
-  io.out.debug.isNCIO := false.B
-  io.out.debug.isPerfCnt := DontCare
-  io.out.debug.isMMIO := is_mmio
-  io.out.debug.paddr := paddr
-  io.out.debug.vaddr := vaddr
-  io.out.debug_seqNum.foreach(_ := uop.debug_seqNum)
-  io.out.perfDebugInfo.foreach(_ := uop.perfDebugInfo)
+  io.out.toRob.bits.debugInfo.isNCIO.foreach(_ := false.B)
+  io.out.toRob.bits.debugInfo.isPerfCnt.foreach(_ := DontCare)
+  io.out.toRob.bits.debugInfo.isMMIO.foreach(_ := is_mmio)
+  io.out.toRob.bits.debugInfo.paddr.foreach(_ := paddr)
+  io.out.toRob.bits.debugInfo.vaddr.foreach(_ := vaddr)
+  io.out.toRob.bits.debugInfo.debug_seqNum.foreach(_ := uop.debug_seqNum)
+  io.out.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := uop.perfDebugInfo)
 
   io.dcache.req.valid := Mux(
     io.dcache.req.bits.cmd === M_XLR,

@@ -22,7 +22,7 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, NewExuOutput, UopIdx, connectSamePort}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, MemToRob, UopIdx, connectSamePort}
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.fu.FuType
@@ -101,7 +101,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val loadWakeup = Flipped(ValidIO(new DCacheLoadWakeup()))
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
-    val mmioStout = DecoupledIO(new NewExuOutput(staParams.head)) // writeback uncached store
+    val mmioStout = DecoupledIO(new MemToRob(staParams.head)) // writeback uncached store
     val sqEmpty = Output(Bool())
     val lq_rep_full = Output(Bool())
     val sqFull = Output(Bool())

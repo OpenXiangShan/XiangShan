@@ -29,7 +29,7 @@ class StdExeUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSB
   val flush = Flipped(ValidIO(new Redirect()))
   val in = Flipped(DecoupledIO(new ExuInput(param, hasCopySrc = true)))
   val vstdIn = Flipped(ValidIO(new StoreQueueDataWrite))
-  val out = new NewExuOutput(param) // std -> wb
+  val out = new MemWriteBack(param) // std -> wb
   val atomicData = Valid(new ExuInput(param)) // std -> atomicsUnit
   val sqData = Valid(new StoreQueueDataWrite) // std -> sq
 }
@@ -45,10 +45,9 @@ class StdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io.out.toRob.bits.robIdx := io.in.bits.robIdx
   io.out.toRob.bits.isRVC.foreach(_ := DontCare)
   io.out.toRob.bits.sqIdx.foreach(_ := io.in.bits.sqIdx.get)
-  io.out.pdest := io.in.bits.pdest
-  io.out.debug := DontCare
-  io.out.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
-  io.out.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
+  io.out.toRob.bits.debugInfo := DontCare
+  io.out.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := io.in.bits.perfDebugInfo.get)
+  io.out.toRob.bits.debugInfo.debug_seqNum.foreach(_ := io.in.bits.debug_seqNum.get)
 
   io.atomicData.valid := io.in.fire && FuType.storeIsAMO(io.in.bits.fuType)
   io.atomicData.bits := io.in.bits

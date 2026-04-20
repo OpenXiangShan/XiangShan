@@ -168,6 +168,10 @@ case class SchdBlockParams(
     MixedVec(this.issueBlockParams.filter(_.isMemBlockIQ).map(_.genNewExuOutputDecoupledBundle))
   }
 
+  def genMemWriteBackBundle(implicit p: Parameters): MixedVec[MixedVec[MemWriteBack]] = {
+    MixedVec(this.issueBlockParams.filter(_.isMemBlockIQ).map(_.genMemWriteBackBundle))
+  }
+
   def genExuOutputDecoupledBundleLoad(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
     MixedVec(backendParam.intSchdParams.get.issueBlockParams.filter(_.isLdAddrIQ).map(_.genExuOutputDecoupledBundle))
   }

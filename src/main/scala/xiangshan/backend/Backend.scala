@@ -299,12 +299,14 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   intRegion.io.memWriteback.zip(io.mem.intWriteback).foreach { case (sinkWriteback, sourceWriteback) =>
     sinkWriteback.zip(sourceWriteback).foreach { case (sink, source) =>
-      sink <> source
+      sink.valid := source.toRob.valid
+      sink.bits := source.toNewExuOutputBundle()
     }
   }
-  val lduWriteback = io.mem.intWriteback.flatten.filter(_.bits.params.hasLoadFu)
+  val lduWriteback = io.mem.intWriteback.flatten.filter(_.params.hasLoadFu)
   fpRegion.io.lduWriteback.get.flatten.zip(lduWriteback).map { case (sink, source) =>
-    sink <> source
+    sink.valid := source.toRob.valid
+    sink.bits := source.toNewExuOutputBundle()
   }
   intRegion.io.wakeUpFromFp. foreach(x => x := fpRegion.io.wakeUpToDispatch)
   intRegion.io.wakeupFromF2I.foreach(x => x := fpRegion.io.cross.F2IWakeupOut.get)
@@ -647,8 +649,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
   val hyuPcRead = Vec(params.HyuCnt, Output(UInt(VAddrBits.W)))
   // Input
-  val intWriteback: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] =
-    Flipped(intSchdParams.genNewExuOutputDecoupledBundleMemBlock)
+  val intWriteback: MixedVec[MixedVec[MemWriteBack]] =
+    Flipped(intSchdParams.genMemWriteBackBundle)
   val vecWriteback: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] =
     Flipped(vecSchdParams.genExuOutputDecoupledBundleMemBlock)
 

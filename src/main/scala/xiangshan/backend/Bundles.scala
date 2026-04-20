@@ -95,11 +95,6 @@ object Bundles {
     sink.bits.toVlRf. foreach(_.bits  := source.bits.data(0))
   }
 
-  def connectMemDecoupledNewExuOutput(sink: DecoupledIO[NewExuOutput], source: NewExuOutput) = {
-    sink.valid := source.toRob.valid
-    sink.bits := source
-  }
-
   def connectWriteBackRob(sink: WriteBackRobBundle, source: NewExuOutput) = {
     connectSamePort(sink, source.toRob.bits)
     connectSamePort(sink, source)
@@ -1383,6 +1378,79 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val debug          = new DebugBundle
     val perfDebugInfo  = Option.when(backendParams.debugEn)(new PerfDebugInfo())
     val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
+  }
+  
+  class MemDebugBundle(implicit p: Parameters) extends XSBundle {
+    val isMMIO = Option.when(backendParams.basicDebugEn)(Bool())
+    val isNCIO = Option.when(backendParams.basicDebugEn)(Bool())
+    val isPerfCnt = Option.when(backendParams.basicDebugEn)(Bool())
+
+    def isSkipDiff: Bool = isMMIO.get || isNCIO.get || isPerfCnt.get
+    /* add L/S inst info in EXU */
+    // val L1toL2TlbLatency = UInt(XLEN.W)
+    // val levelTlbHit = UInt(2.W)
+
+    val paddr = Option.when(backendParams.debugEn)(UInt(PAddrBits.W))
+    val vaddr = Option.when(backendParams.debugEn)(UInt(VAddrBits.W))
+    val perfDebugInfo = Option.when(backendParams.debugEn)(new PerfDebugInfo())
+    val debug_seqNum = Option.when(backendParams.debugEn)(new InstSeqNum())
+  }
+  class MemToRob(params: ExeUnitParams)(implicit p: Parameters) extends ExuOutputToRob(params) {
+    val debugInfo = new MemDebugBundle
+  }
+  class MemToIntRf(val params: ExeUnitParams)(implicit p: Parameters) extends Bundle {
+    val pdest = UInt(params.wbPregIdxWidth.W)
+    val data = UInt(params.destDataBitsMax.W)
+    val isFromLoadUnit = Option.when(params.hasLoadFu)(Bool())
+  }
+  class MemToFpRf(val params: ExeUnitParams)(implicit p: Parameters) extends Bundle {
+    val pdest = UInt(params.wbPregIdxWidth.W)
+    val data = UInt(params.destDataBitsMax.W)
+  }
+  class MemWriteBack(
+    val params: ExeUnitParams,
+  )(implicit
+    val p: Parameters
+  ) extends Bundle with BundleSource with HasXSParameter {
+    val toRob = ValidIO(new MemToRob(params))
+    val toIntRf = Option.when(params.writeIntRf)(ValidIO(new MemToIntRf(params)))
+    val toFpRf = Option.when(params.writeFpRf)(ValidIO(new MemToFpRf(params)))
+
+    def toNewExuOutputBundle(): NewExuOutput = {
+      val res = Wire(new NewExuOutput(params))
+      res := DontCare
+      res.toRob := toRob
+      res.toIntRf.zip(toIntRf).foreach { case (dst, src) =>
+        dst.valid := src.valid
+        dst.bits  := src.bits.data
+      }
+      res.toFpRf.zip(toFpRf).foreach { case (dst, src) =>
+        dst.valid := src.valid
+        dst.bits  := src.bits.data
+      }
+      res.pdest := ((toIntRf, toFpRf) match {
+        case (Some(int), Some(fp)) => Mux(int.valid, int.bits.pdest, fp.bits.pdest)
+        case (Some(int), None)     => int.bits.pdest
+        case (None, Some(fp))      => fp.bits.pdest
+        case _                     => 0.U(params.wbPregIdxWidth.W)
+      })
+      res.isFromLoadUnit.zip(toIntRf.flatMap(_.bits.isFromLoadUnit)).foreach {
+        case (dst, src) => dst := src
+      }
+      toRob.bits.debugInfo.isMMIO.foreach(res.debug.isMMIO := _)
+      toRob.bits.debugInfo.isNCIO.foreach(res.debug.isNCIO := _)
+      toRob.bits.debugInfo.isPerfCnt.foreach(res.debug.isPerfCnt := _)
+      toRob.bits.debugInfo.paddr.foreach(res.debug.paddr := _)
+      toRob.bits.debugInfo.vaddr.foreach(res.debug.vaddr := _)
+      res.perfDebugInfo.zip(toRob.bits.debugInfo.perfDebugInfo).foreach {
+        case (dst, src) => dst := src
+      }
+      res.debug_seqNum.zip(toRob.bits.debugInfo.debug_seqNum).foreach {
+        case (dst, src) => dst := src
+      }
+
+      res
+    }
   }
 
   // ExuOutput + DynInst --> WriteBackBundle

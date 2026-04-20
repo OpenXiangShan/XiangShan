@@ -23,7 +23,7 @@ import top.{ArgParser, Generator}
 import utility._
 import xiangshan._
 import xiangshan.ExceptionNO._
-import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemWakeUpBundle, NewExuOutput, UopIdx, connectSamePort}
+import xiangshan.backend.Bundles.{ExuInput, ExuOutput, MemWakeUpBundle, MemWriteBack, UopIdx, connectSamePort}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.fpu.FPU
@@ -1230,7 +1230,7 @@ class LoadUnitS3(param: ExeUnitParams)(
     val unalignConcat = Flipped(ValidIO(new LoadStageIO))
 
     // Writeback to Backend / LQ / VLMergeBuffer
-    val ldout = new NewExuOutput(param)
+    val ldout = new MemWriteBack(param)
     val lqWrite = DecoupledIO(new LqWriteBundle)
     val vecldout = Decoupled(new VecPipelineFeedbackIO(isVStore = false))
 
@@ -1412,30 +1412,31 @@ class LoadUnitS3(param: ExeUnitParams)(
     */
   // Writeback to Backend
   val ldoutValid = pipeIn.valid && shouldWriteback && !isVector && endPipe
-  val ldout = Wire(new NewExuOutput(param))
+  val ldout = Wire(new MemWriteBack(param))
   ldout.toIntRf.foreach { case port =>
     port.valid := uop.rfWen && pipeIn.valid && endPipe && shouldWakeup
     port.bits := DontCare // assign data from LoadUnitDataPath
+    port.bits.pdest := uop.pdest
+    port.bits.isFromLoadUnit.get := true.B
   }
   ldout.toFpRf.foreach { case port =>
     port.valid := uop.fpWen && pipeIn.valid && endPipe && shouldWakeup
     port.bits := DontCare
+    port.bits.pdest := uop.pdest
   }
-  ldout.pdest := uop.pdest
   ldout.toRob.valid := ldoutValid
   ldout.toRob.bits.robIdx := uop.robIdx
   ldout.toRob.bits.exceptionVec.get := exceptionVec
   ldout.toRob.bits.lqIdx.get := uop.lqIdx
   ldout.toRob.bits.trigger.get := uop.trigger
   ldout.toRob.bits.isRVC.get := uop.isRVC
-  ldout.isFromLoadUnit.get := true.B
-  ldout.debug.isMMIO := in.isMMIOReplay()
-  ldout.debug.isNCIO := in.isNCReplay() && in.pmp.get.mmio
-  ldout.debug.isPerfCnt := false.B
-  ldout.debug.paddr := paddr
-  ldout.debug.vaddr := vaddr
-  ldout.perfDebugInfo.foreach(_ := uop.perfDebugInfo)
-  ldout.debug_seqNum.foreach(_ := uop.debug_seqNum)
+  ldout.toRob.bits.debugInfo.isMMIO.foreach(_ := in.isMMIOReplay())
+  ldout.toRob.bits.debugInfo.isNCIO.foreach(_ := in.isNCReplay() && in.pmp.get.mmio)
+  ldout.toRob.bits.debugInfo.isPerfCnt.foreach(_ := false.B)
+  ldout.toRob.bits.debugInfo.paddr.foreach(_ := paddr)
+  ldout.toRob.bits.debugInfo.vaddr.foreach(_ := vaddr)
+  ldout.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := uop.perfDebugInfo)
+  ldout.toRob.bits.debugInfo.debug_seqNum.foreach(_ := uop.debug_seqNum)
 
   // Writeback to LQ
   val lqWriteValid = pipeIn.valid && !doFastReplay && endPipe
@@ -1827,7 +1828,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val replay = Flipped(DecoupledIO(new LoadReplayIO))
   val prefetchReq = Flipped(DecoupledIO(new L1PrefetchReq))
   // Writeback to Backend / LQ / VLMergeBuffer
-  val ldout = new NewExuOutput(param)
+  val ldout = new MemWriteBack(param)
   val lqWrite = DecoupledIO(new LqWriteBundle)
   val vecldout = Decoupled(new VecPipelineFeedbackIO(isVStore = false))
   // TLB / PMA / PMP
@@ -1984,8 +1985,8 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   dataPath.io.s2UncacheBypassResp := io.uncacheBypass.s2Resp
   dataPath.io.s2DCacheResp.valid := io.dcache.resp.valid
   dataPath.io.s2DCacheResp.bits := io.dcache.resp.bits
-  io.ldout.toFpRf.foreach(_.bits := dataPath.io.s3ShiftAndExtData(io.ldout.toFpRf.get.bits.getWidth - 1, 0))
-  io.ldout.toIntRf.foreach(_.bits := dataPath.io.s3ShiftAndExtData(io.ldout.toIntRf.get.bits.getWidth - 1, 0))
+  io.ldout.toFpRf.foreach(_.bits.data := dataPath.io.s3ShiftAndExtData(io.ldout.toFpRf.get.bits.data.getWidth - 1, 0))
+  io.ldout.toIntRf.foreach(_.bits.data := dataPath.io.s3ShiftAndExtData(io.ldout.toIntRf.get.bits.data.getWidth - 1, 0))
   io.vecldout.bits.vecdata.get := dataPath.io.s3ShiftData
 
   // Debug info

@@ -414,6 +414,10 @@ case class IssueBlockParams(
     MixedVec(this.exuParams.map(x => DecoupledIO(x.genNewExuOutputBundle)))
   }
 
+  def genMemWriteBackBundle(implicit p: Parameters): MixedVec[MemWriteBack] = {
+    MixedVec(this.exuParams.map(x => x.genMemWriteBackBundle))
+  }
+
   def genExuOutputValidBundle(implicit p: Parameters): MixedVec[ValidIO[ExuOutput]] = {
     MixedVec(this.exuParams.map(x => ValidIO(x.genExuOutputBundle)))
   }

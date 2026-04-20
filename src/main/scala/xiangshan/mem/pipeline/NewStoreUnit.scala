@@ -21,7 +21,7 @@ import chisel3._
 import chisel3.util._
 import utility._
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, ExuInput, NewExuOutput, StoreUnitToLFST, connectSamePort}
+import xiangshan.backend.Bundles.{DynInst, ExuInput, MemWriteBack, StoreUnitToLFST, connectSamePort}
 import xiangshan.backend.ctrlblock.DebugLsInfoBundle
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuConfig._
@@ -715,7 +715,7 @@ class StoreUnitS3(param: ExeUnitParams)(
     val unalignConcat = Flipped(ValidIO(new StoreStageIO))
 
     // Writeback
-    val stout = new NewExuOutput(param)
+    val stout = new MemWriteBack(param)
     val vecstout = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
     val exceptionInfo = ValidIO(new MemExceptionInfo)
   })
@@ -840,14 +840,13 @@ class StoreUnitS3(param: ExeUnitParams)(
   io.stout.toRob.bits.sqIdx.foreach(_ := sxData.uop.sqIdx)
   io.stout.toRob.bits.lqIdx.foreach(_ := sxData.uop.lqIdx)
   io.stout.toRob.bits.exceptionVec.foreach(_ := ExceptionNO.selectByFu(sxData.uop.exceptionVec, StaCfg))
-  io.stout.pdest := DontCare
-  io.stout.debug.isMMIO := sxData.mmio.get
-  io.stout.debug.isNCIO := sxData.nc.get && !sxData.memBackTypeMM.get
-  io.stout.debug.isPerfCnt := false.B
-  io.stout.debug.paddr := sxData.paddr.get
-  io.stout.debug.vaddr := sxData.vaddr
-  io.stout.debug_seqNum.foreach(_ := sxData.uop.debug_seqNum)
-  io.stout.perfDebugInfo.foreach(_ := sxData.uop.perfDebugInfo)
+  io.stout.toRob.bits.debugInfo.isMMIO.foreach(_ := sxData.mmio.get)
+  io.stout.toRob.bits.debugInfo.isNCIO.foreach(_ := sxData.nc.get && !sxData.memBackTypeMM.get)
+  io.stout.toRob.bits.debugInfo.isPerfCnt.foreach(_ := false.B)
+  io.stout.toRob.bits.debugInfo.paddr.foreach(_ := sxData.paddr.get)
+  io.stout.toRob.bits.debugInfo.vaddr.foreach(_ := sxData.vaddr)
+  io.stout.toRob.bits.debugInfo.debug_seqNum.foreach(_ := sxData.uop.debug_seqNum)
+  io.stout.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := sxData.uop.perfDebugInfo)
 
   io.exceptionInfo.valid := sxValid && !sxVector
   io.exceptionInfo.bits.robIdx := sxData.uop.robIdx
@@ -928,7 +927,7 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   // Feedback to RS in s2, for store issue control
   val feedBackSlow = ValidIO(new RSFeedback)
   // Writeback
-  val stout = new NewExuOutput(param)
+  val stout = new MemWriteBack(param)
   val vecstout = DecoupledIO(new VecPipelineFeedbackIO(isVStore = true))
   val exceptionInfo = ValidIO(new MemExceptionInfo)
 

@@ -4,7 +4,7 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.BackendParams
-import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, NewExuInput, ExuOutput}
+import xiangshan.backend.Bundles.{ExuBypassBundle, ExuInput, NewExuInput, ExuOutput, MemWriteBack}
 import xiangshan.backend.datapath.DataConfig.DataConfig
 import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
@@ -508,6 +508,10 @@ case class ExeUnitParams(
     new NewExuOutput(this)
   }
 
+  def genMemWriteBackBundle(implicit p: Parameters): MemWriteBack = {
+    new MemWriteBack(this)
+  }
+  
   def genWriteBackRobBundle(implicit p: Parameters): WriteBackRobBundle = {
     new WriteBackRobBundle(this, backendParam)
   }
