@@ -157,6 +157,7 @@ class StoreUnitS0(param: ExeUnitParams)(
     * 1. Align
     *   Check if the address is aligned, which is used to detect misalign exception in later stages.
     *   For prefetch req, we set align to true to avoid unnecessary exception check in later stages.
+    *   CBO instructions may have unaligned addresses, but they operate on a whole cache line, so we also set align to true for them.
     * 
     * 2. Cross16Byte
     *   For unaligned requests that cross a 16-byte boundary but do not cross a 4K page boundary, 
@@ -172,17 +173,13 @@ class StoreUnitS0(param: ExeUnitParams)(
     *   splitting is required, but is only used for determining exception in subsequent stages.
     * - **misalign** is used specifically to denote misalign exception.
     */
-  val needAlignCheckSources = Seq(vectorIssue, scalarIssue)
-  val needAlignCheckValids = needAlignCheckSources.map(_.valid)
-  val needAlignCheck = Cat(needAlignCheckValids).orR
-  val alignCheckResults = needAlignCheckSources.map(s => alignCheck(s.bits.vaddr, s.bits.size, s.valid)).unzip3
-  val align = ParallelPriorityMux(needAlignCheckValids, alignCheckResults._1)
-  val cross16Byte = ParallelPriorityMux(needAlignCheckValids, alignCheckResults._2)
-  val cross4KPage = ParallelPriorityMux(needAlignCheckValids, alignCheckResults._3)
-  
-  sink.bits.align.get := Mux(needAlignCheck, align, Mux(isUnalignTail, false.B, true.B))
-  sink.bits.unalignHead.get := Mux(needAlignCheck, cross4KPage, false.B)
-  sink.bits.cross16Byte.get := Mux(needAlignCheck, cross16Byte, Mux(isUnalignTail, true.B, false.B))
+  val alignCheckResults = alignCheck(sink.bits.vaddr, sink.bits.size, sink.valid)
+  val align = alignCheckResults._1
+  val cross16Byte = alignCheckResults._2
+  val cross4KPage = alignCheckResults._3
+  sink.bits.align.get := Mux(isCbo || isHWPrefetch, true.B, Mux(isUnalignTail, false.B, align))
+  sink.bits.unalignHead.get := Mux(isCbo || isHWPrefetch || isUnalignTail, false.B, cross4KPage)
+  sink.bits.cross16Byte.get := Mux(isCbo || isHWPrefetch, false.B, Mux(isUnalignTail, true.B, cross16Byte))
   
   def alignCheck(vaddr: UInt, size: UInt, valid: Bool): (Bool, Bool, Bool) = {
     require(size.getWidth == MemorySize.Size.width)

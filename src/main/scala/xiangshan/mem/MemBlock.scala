@@ -1403,7 +1403,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   for (i <- 0 until StaCnt) {
     when (state === s_atomics(i)) {
       io.mem_to_ooo.staIqFeedback(i).feedbackSlow := atomicsUnit.io.feedbackSlow
-      assert(!storeUnits(i).io.feedbackSlow.valid)
+      assert(!storeUnits(i).io.feedBackSlow.valid)
     }
   }
 
