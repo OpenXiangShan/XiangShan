@@ -93,6 +93,9 @@ class StoreUnitS0(param: ExeUnitParams)(
   val stinSize = Cat(0.U, LSUOpType.size(stinUop.fuOpType))
   scalarIssue.valid := io.stin.valid
   scalarIssue.bits.entrance := StoreEntrance.scalarIssue.U
+  scalarIssue.bits.accessType.instrType := InstrType.scalar.U
+  scalarIssue.bits.accessType.isCbo := LSUOpType.isCboAll(stinUop.fuOpType)
+  scalarIssue.bits.accessType.isCboNoZero := LSUOpType.isCbo(stinUop.fuOpType)
   scalarIssue.bits.uop := stinUop
   scalarIssue.bits.vaddr := stinVAddr
   scalarIssue.bits.fullva := stinFullva
@@ -109,8 +112,11 @@ class StoreUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.DontCareVectorFields()
 
   // 3. hardware prefetch requests
-  prefetchReq.valid := io.prefetchReq.valid
+  prefetchReq.valid := io.prefetchReq.valid && io.dcacheReq.ready
   prefetchReq.bits.entrance := StoreEntrance.prefetch.U
+  prefetchReq.bits.accessType.instrType := InstrType.prefetch.U
+  prefetchReq.bits.accessType.isCbo := false.B
+  prefetchReq.bits.accessType.isCboNoZero := false.B
   prefetchReq.bits.vaddr := io.prefetchReq.bits.vaddr
   prefetchReq.bits.fullva := io.prefetchReq.bits.vaddr
   prefetchReq.bits.DontCareUnalign()
@@ -128,12 +134,13 @@ class StoreUnitS0(param: ExeUnitParams)(
   val uop = sink.bits.uop
   val kill = uop.robIdx.needFlush(io.redirect)
   val entrance = sink.bits.entrance
+  val accessType = sink.bits.accessType
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
-  val isVector = StoreEntrance.isVectorIssue(entrance)
-  val isScalar = StoreEntrance.isScalarIssue(entrance)
-  val isHWPrefetch = StoreEntrance.isHWPrefetch(entrance)
-  val isCbo = isScalar && LSUOpType.isCboAll(uop.fuOpType)
-  val isCboNoZero = isScalar && LSUOpType.isCbo(uop.fuOpType)
+  val isVector = accessType.isVector()
+  val isScalar = accessType.isScalar()
+  val isHWPrefetch = accessType.isPrefetch()
+  val isCbo = accessType.isCbo
+  val isCboNoZero = accessType.isCboNoZero
 
   /**
     * Pipeline connect
@@ -300,6 +307,7 @@ class StoreUnitS1(param: ExeUnitParams)(
 
   // alias
   val entrance = in.entrance
+  val accessType = in.accessType
   val uop = in.uop
   val robIdx = uop.robIdx
   val fuOpType = uop.fuOpType
@@ -310,15 +318,16 @@ class StoreUnitS1(param: ExeUnitParams)(
   val ssid = in.ssid.get
   val storeSetHit = in.storeSetHit.get
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
-  val isVector = StoreEntrance.isVectorIssue(entrance)
-  val isScalar = StoreEntrance.isScalarIssue(entrance)
-  val isHWPrefetch = StoreEntrance.isHWPrefetch(entrance)
+  val isVector = accessType.isVector()
+  val isScalar = accessType.isScalar()
+  val isHWPrefetch = accessType.isPrefetch()
+  val isCbo = accessType.isCbo
+  val isCboNoZero = accessType.isCboNoZero
   val align = in.align.get
-  val isUnalignHead = isScalar && in.unalignHead.get
+  val isUnalignHead = in.unalignHead.get
   val cross4KPage = isUnalignTail || isUnalignHead
   val cross16Byte = in.cross16Byte.get
   val vecBaseVaddr = in.vecBaseVaddr.get
-  val isCbo = isScalar && LSUOpType.isCboAll(uop.fuOpType)
 
   val kill = robIdx.needFlush(io.redirect)
   val fire = pipeIn.fire && !kill
@@ -386,6 +395,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   unalignTail.unalignHead.get := false.B
   unalignTail.cross16Byte.get := true.B
   unalignTail.DontCareStoreSet()
+  assert(!(unalignTailInjectValid && (isCbo || isCboNoZero)))
 
   // Nuke check to LoadUnit
   val nukeQueryReqValid = fire && tlbHit && !isHWPrefetch
@@ -403,13 +413,13 @@ class StoreUnitS1(param: ExeUnitParams)(
     )
   )
 
-  val updateLFSTValid = fire && tlbHit && isScalar
+  val updateLFSTValid = fire && tlbHit && isScalar && !isUnalignTail
 
   /**
     * Generate replay feedback for the RS.
     * A miss here means the request must be replayed after translation ready.
     */
-  val canFeedBack = isScalar && !isUnalignHead || isUnalignTail // unalign head should not feed back.
+  val canFeedBack = isScalar && !isUnalignHead // unalign head should not feed back.
   val feedBackValid = fire && canFeedBack
   val unalignTailHit = tlbHit && io.unalignHeadTlbHit && io.toUnalignQueue.ready
   val feedBackHit = Mux(isUnalignTail, unalignTailHit, tlbHit)
@@ -476,7 +486,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   stageInfo.vecTriggerMask.get := vecTriggerMask
   stageInfo.vecVaddrOffset.get := vecVaddrOffset
   stageInfo.needRSReplay.get := needRSReplay
-  stageInfo.hasException.get := hasException || isDebugMode
+  stageInfo.hasException.get := hasException || isDebugMode || isBreakPoint
   stageInfo.uop.trigger := triggerAction
   stageInfo.uop.exceptionVec(breakPoint) := isBreakPoint
   stageInfo.uop.exceptionVec(storePageFault) := pf
@@ -573,19 +583,20 @@ class StoreUnitS2(param: ExeUnitParams)(
 
   // alias
   val entrance = in.entrance
+  val accessType = in.accessType
   val uop = in.uop
   val robIdx = uop.robIdx
   val align = in.align.get
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
-  val isVector = StoreEntrance.isVectorIssue(entrance)
-  val isScalar = StoreEntrance.isScalarIssue(entrance)
-  val isHWPrefetch = StoreEntrance.isHWPrefetch(entrance)
-  val isCbo = isScalar && LSUOpType.isCboAll(uop.fuOpType)
-  val isCboNoZero = isScalar && LSUOpType.isCbo(uop.fuOpType)
+  val isVector = accessType.isVector()
+  val isScalar = accessType.isScalar()
+  val isHWPrefetch = accessType.isPrefetch()
+  val isCbo = accessType.isCbo
+  val isCboNoZero = accessType.isCboNoZero
   val tlbException = in.tlbException.get
   val tlbHit = pipeIn.valid && in.tlbHit.get
   val tlbMiss = pipeIn.valid && !in.tlbHit.get
-  val isUnalignHead = isScalar && in.unalignHead.get
+  val isUnalignHead = in.unalignHead.get
   val cross4KPage = isUnalignTail || isUnalignHead
   val cross16Byte = in.cross16Byte.get
 
@@ -727,14 +738,15 @@ class StoreUnitS3(param: ExeUnitParams)(
   val uop = in.uop
   val robIdx = uop.robIdx
   val entrance = in.entrance
+  val accessType = in.accessType
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
-  val isVector = StoreEntrance.isVectorIssue(entrance)
-  val isScalar = StoreEntrance.isScalarIssue(entrance)
-  val isHWPrefetch = StoreEntrance.isHWPrefetch(entrance)
-  val isCbo = isScalar && LSUOpType.isCboAll(uop.fuOpType)
+  val isVector = accessType.isVector()
+  val isScalar = accessType.isScalar()
+  val isHWPrefetch = accessType.isPrefetch()
+  val isCbo = accessType.isCbo
   val isMMIO = in.mmio.get
   val hasException = in.hasException.get
-  val isUnalignHead = isScalar && in.unalignHead.get
+  val isUnalignHead = in.unalignHead.get
 
   val kill = robIdx.needFlush(io.redirect)
   val fire = pipeIn.fire && !kill
@@ -760,6 +772,8 @@ class StoreUnitS3(param: ExeUnitParams)(
   wbData.uop.exceptionVec := Mux(headHasException, headExceptionVec, in.uop.exceptionVec)
   wbData.uop.trigger := Mux(headHasException, head.uop.trigger, in.uop.trigger)
   wbData.tlbException.get := Mux(headHasException, head.tlbException.get, in.tlbException.get)
+  wbData.uop.vpu.vstart := Mux(headHasException, head.uop.vpu.vstart, in.uop.vpu.vstart)
+  wbData.vecTriggerMask.get := Mux(headHasException, head.vecTriggerMask.get, in.vecTriggerMask.get)
   wbData.isForVSnonLeafPTE.get := Mux(
     headHasException,
     head.isForVSnonLeafPTE.get,
@@ -782,7 +796,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   delayPipe.io.redirect := io.redirect
   val sxValid = delayPipe.io.out.valid
   val sxData = delayPipe.io.out.bits
-  val sxVector = StoreEntrance.isVectorIssue(sxData.entrance)
+  val sxVector = sxData.accessType.isVector()
 
   // Pipeline connect
   val pipeOutValid = RegInit(false.B)

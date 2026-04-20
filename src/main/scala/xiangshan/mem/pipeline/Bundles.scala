@@ -230,6 +230,7 @@ class StorePipeBundle(
   with HasVLSUParameters {
   // Basic info
   val entrance = StoreEntrance()
+  val accessType = StoreAccessType()
   val uop = new DynInst
   val vaddr = UInt(VAddrBits.W)
   val fullva = UInt(XLEN.W)
@@ -254,6 +255,7 @@ class StorePipeBundle(
   val paddr = Option.when(param.hasAddrTrans)(UInt(PAddrBits.W))
   val gpaddr = Option.when(param.hasAddrTrans)(UInt(XLEN.W))
   val hasException = Option.when(param.hasAddrTrans)(Bool())
+  val needRSReplay = Option.when(param.hasAddrTrans)(Bool())
 
   val nc = Option.when(param.hasPAddrChecked)(Bool())
   val mmio = Option.when(param.hasPAddrChecked)(Bool())
@@ -264,11 +266,8 @@ class StorePipeBundle(
   val usSecondInv = Option.when(param.hasVector)(Bool())
   val elemIdx = Option.when(param.hasVector)(UInt(elemIdxBits.W))
   val mbIndex = Option.when(param.hasVector)(UInt(vlmBindexBits.W))
-  
-  // After S1
-  val vecTriggerMask = Option.when(param.hasAddrTrans)(UInt((VLEN/8).W))
-  val vecVaddrOffset = Option.when(param.hasAddrTrans)(UInt(VAddrBits.W))
-  val needRSReplay = Option.when(param.hasAddrTrans)(Bool())
+  val vecTriggerMask = Option.when(param.hasVector)(UInt((VLEN/8).W))
+  val vecVaddrOffset = Option.when(param.hasVector)(UInt(VAddrBits.W))
   
   def DontCareUnalign(): Unit = {
     align.get := DontCare
@@ -280,6 +279,8 @@ class StorePipeBundle(
     usSecondInv.get := false.B
     elemIdx.get := 0.U
     mbIndex.get := 0.U
+    vecTriggerMask.get := 0.U
+    vecVaddrOffset.get := 0.U
   }
   def DontCareStoreSet(): Unit = {
     ssid.get := 0.U

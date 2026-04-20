@@ -184,6 +184,9 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
     require(isVStore)
     val out = Wire(new VectorStoreIn())
     out.entrance := StoreEntrance.vectorIssue.U
+    out.accessType.instrType := InstrType.vector.U
+    out.accessType.isCbo := false.B
+    out.accessType.isCboNoZero := false.B
     out.uop := uop
     out.vaddr := vaddr
     out.fullva := vaddr
@@ -195,6 +198,8 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
     out.usSecondInv.get := usSecondInv
     out.elemIdx.get := elemIdx
     out.mbIndex.get := mBIndex
+    out.vecTriggerMask.get := 0.U
+    out.vecVaddrOffset.get := 0.U
     out
   }
 }

@@ -515,9 +515,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   writebackLda.zipWithIndex.foreach { case (wb, i) =>
     if (i == AtomicWBPort) {
       // atomicsUnit writeback
-      wb.toRob := Mux(atomicsUnit.io.out.toRob.valid, atomicsUnit.io.out.toRob, newLoadUnits(i).io.ldout.toRob)
-      wb.toIntRf.get := Mux(atomicsUnit.io.out.toIntRf.get.valid, atomicsUnit.io.out.toIntRf.get, newLoadUnits(i).io.ldout.toIntRf.get)
-      wb.toFpRf.get := Mux(atomicsUnit.io.out.toFpRf.get.valid, atomicsUnit.io.out.toFpRf.get, newLoadUnits(i).io.ldout.toFpRf.get)
+      when (atomicsUnit.io.out.toRob.valid) {
+        wb := atomicsUnit.io.out
+      } .otherwise {
+        wb := newLoadUnits(i).io.ldout
+      }
     } else {
       // normal load writeback
       wb := newLoadUnits(i).io.ldout

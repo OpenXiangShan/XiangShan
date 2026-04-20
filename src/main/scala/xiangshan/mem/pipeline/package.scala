@@ -207,3 +207,18 @@ object StoreEntrance extends ChiselOHEnum {
     values.find(_.id == id).map(_.getName).getOrElse("UNKNOWN")
   }
 }
+
+class StoreAccessType extends Bundle {
+  val instrType = InstrType()
+  val isCbo = Bool()
+  val isCboNoZero = Bool()
+
+  import InstrType._
+  def isScalar(): Bool = IsOneOf(instrType, scalar)
+  def isVector(): Bool = IsOneOf(instrType, vector)
+  def isPrefetch(): Bool = IsOneOf(instrType, prefetch)
+}
+
+object StoreAccessType {
+  def apply() = new StoreAccessType
+}
