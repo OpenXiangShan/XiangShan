@@ -179,6 +179,25 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
     out.occupySource := DontCare
     out
   }
+
+  def toVectorStoreIn(): VectorStoreIn = {
+    require(isVStore)
+    val out = Wire(new VectorStoreIn())
+    out.entrance := StoreEntrance.vectorIssue.U
+    out.uop := uop
+    out.vaddr := vaddr
+    out.fullva := vaddr
+    out.size := alignedType
+    out.mask := mask
+    out.isFirstIssue := true.B // TODO: In new vector implement, modifications are required
+
+    out.vecActive.get := vecActive
+    out.vecBaseVaddr.get := basevaddr
+    out.usSecondInv.get := usSecondInv
+    out.elemIdx.get := elemIdx
+    out.mbIndex.get := mBIndex
+    out
+  }
 }
 
 object VecFeedbacks {

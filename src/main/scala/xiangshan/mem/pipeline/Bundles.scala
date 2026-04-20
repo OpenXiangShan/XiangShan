@@ -235,11 +235,12 @@ class StorePipeBundle(
   val fullva = UInt(XLEN.W)
   val size = UInt(MemorySize.Size.width.W)
   val mask = UInt((VLEN/8).W)
+  val isFirstIssue = Bool()
   
   // Unalign handling
   val align = Option.when(param.hasUnalignHandling)(Bool())
   val unalignHead = Option.when(param.hasUnalignHandling)(Bool())
-  val is128bit = Option.when(param.hasUnalignHandling)(Bool()) // TODO: remove this
+  val cross16Byte = Option.when(param.hasUnalignHandling)(Bool())
 
   // MMU & exception handling
   val tlbAccessResult = Option.when(param.hasAddrTrans)(TlbAccessResult())
@@ -280,6 +281,10 @@ class StorePipeBundle(
   }
 }
 
+case class VectorStoreInParam(
+  override val hasVector: Boolean = true
+) extends HasStorePipeBundleParam
+
 case class StoreStageIOParam()(
   implicit val s: StoreStage
 ) extends HasStorePipeBundleParam with OnStoreStage {
@@ -292,3 +297,6 @@ case class StoreStageIOParam()(
 
 class StoreStageIO(implicit p: Parameters, implicit val s: StoreStage)
   extends StorePipeBundle(StoreStageIOParam())
+
+class VectorStoreIn(implicit p: Parameters)
+  extends StorePipeBundle(VectorStoreInParam())

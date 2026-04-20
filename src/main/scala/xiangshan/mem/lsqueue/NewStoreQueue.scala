@@ -2025,9 +2025,6 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
   io.toLoadQueue.stAddrReadyVec := GatedValidRegNext(stAddrReadyVecWire)
 
   io.toLoadQueue.stIssuePtr := enqPtrExt(0)
-  io.sqDeqPtr := deqPtrExt(0)
-  io.sqDeqUopIdx := dataEntries(deqPtrExt(0).value).uop.uopIdx
-  io.sqDeqRobIdx := dataEntries(deqPtrExt(0).value).uop.robIdx
 
   // Currently, storeQueue will always safe, no other uncommitted instructions may precede the wfi instruction.
   io.wfi.wfiSafe := true.B

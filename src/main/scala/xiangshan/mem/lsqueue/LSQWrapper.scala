@@ -116,9 +116,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val sqCanAccept = Output(Bool())
     val lqDeqPtr = Output(new LqPtr)
     val sqDeqPtr = Output(new SqPtr)
-    val sqCommitPtr = Output(new SqPtr)
-    val sqCommitUopIdx = Output(UopIdx())
-    val sqCommitRobIdx = Output(new RobPtr)
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
@@ -162,9 +159,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   storeQueue.io.enq.lqCanAccept := loadQueue.io.enq.canAccept
   io.lqDeqPtr := loadQueue.io.lqDeqPtr
   io.sqDeqPtr := storeQueue.io.sqDeqPtr
-  io.sqCommitRobIdx := storeQueue.io.sqDeqRobIdx
-  io.sqCommitUopIdx := storeQueue.io.sqDeqUopIdx
-  io.sqCommitPtr    := storeQueue.io.sqDeqPtr
   io.rarValidCount := loadQueue.io.rarValidCount
   for (i <- io.enq.req.indices) {
     loadQueue.io.enq.needAlloc(i)      := io.enq.needAlloc(i)(0)
