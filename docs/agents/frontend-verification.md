@@ -167,11 +167,9 @@ TB_BIN_TRACE_PIPELINE=1 \
 TB_BIN_PATH=ready-to-run/microbench.bin \
 TB_TRACE_PATH=NEMU/logs/microbench.trace.jsonl \
 TB_BASE_ADDR=0x80000000 \
-TB_STEP_CYCLES=0 \
 TB_TRACE_PROGRESS_INTERVAL=50000 \
 TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000 \
 TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
-TB_RUN_TO_TRACE_COMPLETION=1 \
 python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
 ```
 
@@ -183,6 +181,14 @@ bin/trace environment above.
 More generally: direct `pytest` is only valid for a bin-trace case when the
 trace input, bin path, runtime bounds, and observability-related environment are
 already set to match that case's run requirements.
+
+`src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace` is a
+run-to-completion entrypoint. Do not use it as a load-only or partial-step
+smoke path. By default it runs until golden completion; set
+`TB_TRACE_MAX_CYCLES` to a positive integer only when you intentionally want a
+bounded debug run. In that bounded mode, exhausting the explicit cycle budget is
+not itself a failure; only observed DUT/env misbehavior such as monitor errors
+or stagnant-cycle early-stop should fail the run.
 
 For direct `pytest`, use an outer `timeout` guard explicitly. The
 `TB_PYTEST_TIMEOUT_SECS` knob is consumed by `run_bin_trace_pipeline.sh`; it

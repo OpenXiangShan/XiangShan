@@ -105,11 +105,16 @@ TB_BIN_TRACE_PIPELINE=1 \
 TB_BIN_PATH=ready-to-run/microbench.bin \
 TB_TRACE_PATH=NEMU/logs/microbench.trace.jsonl \
 TB_BASE_ADDR=0x80000000 \
-TB_STEP_CYCLES=0 \
 TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
-TB_RUN_TO_TRACE_COMPLETION=1 \
 python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
 ```
+
+- `tests/test_bin_trace_dut.py::test_bin_trace` 现在统一按 run-to-completion
+  语义执行；不要把它当成“只加载 bin/trace 就退出”的快速入口。
+- 默认会一直运行到 golden trace 完成；只有显式设置
+  `TB_TRACE_MAX_CYCLES>0` 时，才会按 cycle 上限提前停止。
+- 当 `TB_TRACE_MAX_CYCLES>0` 且 DUT 在这段运行里没有 monitor error、
+  stagnation early-stop 或其他不符合预期的行为时，这次部分运行不应报错。
 
 - 当前仓库里实际存在的 NEMU 可执行文件路径是
   `ready-to-run/riscv64-nemu-interpreter`。

@@ -16,11 +16,12 @@ Environment variables:
   TB_RUN_DUT           Run DUT pytest after trace generation (default: 1)
   TB_TRACE_STAGNANT_CYCLES_LIMIT
                        Early-stop DUT run when golden cursor is stagnant for this many cycles (default: 20000)
+  TB_TRACE_MAX_CYCLES  Optional DUT cycle budget for test_bin_trace; 0 means run until
+                       golden completion (default: 0)
   TB_PYTEST_TIMEOUT_SECS
                        Hard timeout in seconds for DUT pytest stage (default: 900)
   TB_PYTEST_TARGET     Pytest target path/nodeid
   TB_BASE_ADDR         Program load base addr for DUT test (default: 0x80000000)
-  TB_STEP_CYCLES       Extra step cycles in DUT test (default: 0)
   PYTHON               Python executable (default: python3)
 
 Note:
@@ -43,21 +44,18 @@ NEMU_EXEC="${TB_NEMU_EXEC:-${REPO_DIR}/ready-to-run/riscv64-nemu-interpreter}"
 NEMU_MAX_INSTR="${TB_NEMU_MAX_INSTR:-0}"
 TRACE_LIMIT="${TB_TRACE_LIMIT:-0}"
 RUN_DUT="${TB_RUN_DUT:-1}"
-RUN_TO_TRACE_COMPLETION="${TB_RUN_TO_TRACE_COMPLETION:-0}"
 PYTEST_TARGET_DEFAULT="${SCRIPT_DIR}/tests/test_bin_trace_dut.py::test_bin_trace"
 PYTEST_TARGET="${4:-${TB_PYTEST_TARGET:-${PYTEST_TARGET_DEFAULT}}}"
 BASE_ADDR="${TB_BASE_ADDR:-0x80000000}"
-STEP_CYCLES="${TB_STEP_CYCLES:-0}"
 TRACE_STAGNANT_CYCLES_LIMIT="${TB_TRACE_STAGNANT_CYCLES_LIMIT:-20000}"
+TRACE_MAX_CYCLES="${TB_TRACE_MAX_CYCLES:-0}"
 PYTEST_TIMEOUT_SECS="${TB_PYTEST_TIMEOUT_SECS:-900}"
 PYTHON_BIN="${PYTHON:-python3}"
 
 if [[ "${BIN_STEM}" == "microbench" ]]; then
   NEMU_MAX_INSTR=0
   TRACE_LIMIT=0
-  STEP_CYCLES=0
-  RUN_TO_TRACE_COMPLETION=1
-  echo "[frontend] microbench detected: forcing run-to-trace-completion with bounded runtime"
+  echo "[frontend] microbench detected: using run-to-completion bin-trace flow"
 fi
 
 echo "[frontend] repo: ${REPO_DIR}"
@@ -68,11 +66,10 @@ echo "[frontend] nemu_log: ${NEMU_LOG_PATH}"
 echo "[frontend] nemu_exec: ${NEMU_EXEC}"
 echo "[frontend] python: ${PYTHON_BIN}"
 echo "[frontend] run_dut: ${RUN_DUT}"
-echo "[frontend] run_to_trace_completion: ${RUN_TO_TRACE_COMPLETION}"
 echo "[frontend] pytest_target: ${PYTEST_TARGET}"
 echo "[frontend] base_addr: ${BASE_ADDR}"
-echo "[frontend] step_cycles: ${STEP_CYCLES}"
 echo "[frontend] trace_stagnant_cycles_limit: ${TRACE_STAGNANT_CYCLES_LIMIT}"
+echo "[frontend] trace_max_cycles: ${TRACE_MAX_CYCLES}"
 echo "[frontend] pytest_timeout_secs: ${PYTEST_TIMEOUT_SECS}"
 
 cd "${REPO_DIR}"
@@ -120,9 +117,8 @@ if [[ "${RUN_DUT}" != "0" ]]; then
     TB_BIN_PATH="${BIN_PATH}" \
     TB_TRACE_PATH="${TRACE_PATH}" \
     TB_BASE_ADDR="${BASE_ADDR}" \
-    TB_STEP_CYCLES="${STEP_CYCLES}" \
     TB_TRACE_STAGNANT_CYCLES_LIMIT="${TRACE_STAGNANT_CYCLES_LIMIT}" \
-    TB_RUN_TO_TRACE_COMPLETION="${RUN_TO_TRACE_COMPLETION}" \
+    TB_TRACE_MAX_CYCLES="${TRACE_MAX_CYCLES}" \
     "${PYTHON_BIN}" -m pytest -v "${PYTEST_TARGET}"; then
     :
   else

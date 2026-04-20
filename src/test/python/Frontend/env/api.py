@@ -678,22 +678,27 @@ def api_Frontend_run_until_commit(env, target_count, max_cycles=10000) -> int:
 
 
 def api_Frontend_run_until_golden_complete(env, max_cycles=10000) -> bool:
-    """Run simulation until the attached golden trace is fully consumed and backend state is quiescent."""
+    """Run simulation until golden completion or until the explicit cycle budget is exhausted.
+
+    Returns False only when the DUT/env shows unexpected behavior within the run:
+    monitor errors or stagnant-cycle early-stop. When `max_cycles > 0`, exhausting
+    that explicit budget without such errors is treated as a clean partial run.
+    """
     configure_env_logging()
-    return bool(
-        run_until_golden_trace_complete(
-            env,
-            max_cycles=int(max_cycles),
-            progress_interval=_read_progress_interval_from_env(),
-            stall_snapshot_interval=_read_stall_snapshot_interval_from_env(),
-            stagnant_cycles_limit=_read_stagnant_cycles_limit_from_env(),
-            logger=logger,
-            current_golden_pc_getter=_get_current_golden_pc,
-            format_optional_pc=_format_optional_pc,
-            stall_snapshot_capture=api_Frontend_capture_frontend_stall_snapshot,
-            stall_snapshot_formatter=_format_stall_snapshot,
-        )
+    result = run_until_golden_trace_complete(
+        env,
+        max_cycles=int(max_cycles),
+        progress_interval=_read_progress_interval_from_env(),
+        stall_snapshot_interval=_read_stall_snapshot_interval_from_env(),
+        stagnant_cycles_limit=_read_stagnant_cycles_limit_from_env(),
+        logger=logger,
+        current_golden_pc_getter=_get_current_golden_pc,
+        format_optional_pc=_format_optional_pc,
+        stall_snapshot_capture=api_Frontend_capture_frontend_stall_snapshot,
+        stall_snapshot_formatter=_format_stall_snapshot,
     )
+    setattr(env, "_last_run_until_golden_result", result)
+    return bool(result.ok)
 
 
 def api_Frontend_inject_redirect(env, target_pc, reason, max_cycles=1000) -> bool:

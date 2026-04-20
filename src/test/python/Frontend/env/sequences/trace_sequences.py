@@ -66,7 +66,7 @@ class RunUntilGoldenTraceCompleteSequence:
     stall_snapshot_capture: Callable | None = None
     stall_snapshot_formatter: Callable | None = None
 
-    def run(self, env) -> bool:
+    def run(self, env) -> "RunUntilGoldenTraceResult":
         trace = getattr(env.backend_model, "golden_trace", None)
         if trace is None:
             raise ValueError("golden trace must be loaded before waiting for golden completion")
@@ -146,11 +146,29 @@ class RunUntilGoldenTraceCompleteSequence:
                             int(trace.cursor),
                             total_entries,
                         )
-                return False
+                return RunUntilGoldenTraceResult(
+                    ok=False,
+                    completed=False,
+                    status="stagnant_limit",
+                    cycles_run=cycles_run,
+                    cursor=int(trace.cursor),
+                    total_entries=total_entries,
+                    pending_work=_pending_work_count(env.backend_model),
+                    monitor_error_count=len(monitor_errors),
+                )
             if monitor_errors:
                 if logger is not None:
                     logger.warning("run until golden complete aborted by monitor errors")
-                return False
+                return RunUntilGoldenTraceResult(
+                    ok=False,
+                    completed=False,
+                    status="monitor_error",
+                    cycles_run=cycles_run,
+                    cursor=int(trace.cursor),
+                    total_entries=total_entries,
+                    pending_work=_pending_work_count(env.backend_model),
+                    monitor_error_count=len(monitor_errors),
+                )
             if int(trace.cursor) >= total_entries and not env.backend_model.has_pending_work():
                 if logger is not None:
                     logger.info(
@@ -159,7 +177,16 @@ class RunUntilGoldenTraceCompleteSequence:
                         total_entries,
                         cycles_run,
                     )
-                return True
+                return RunUntilGoldenTraceResult(
+                    ok=True,
+                    completed=True,
+                    status="completed",
+                    cycles_run=cycles_run,
+                    cursor=int(trace.cursor),
+                    total_entries=total_entries,
+                    pending_work=_pending_work_count(env.backend_model),
+                    monitor_error_count=len(monitor_errors),
+                )
 
         if logger is not None:
             logger.warning(
@@ -168,4 +195,25 @@ class RunUntilGoldenTraceCompleteSequence:
                 total_entries,
                 _pending_work_count(env.backend_model),
             )
-        return False
+        return RunUntilGoldenTraceResult(
+            ok=(max_cycles > 0),
+            completed=False,
+            status=("budget_exhausted" if max_cycles > 0 else "timeout"),
+            cycles_run=cycles_run,
+            cursor=int(trace.cursor),
+            total_entries=total_entries,
+            pending_work=_pending_work_count(env.backend_model),
+            monitor_error_count=len(env.monitor.get_errors()),
+        )
+
+
+@dataclass(frozen=True)
+class RunUntilGoldenTraceResult:
+    ok: bool
+    completed: bool
+    status: str
+    cycles_run: int
+    cursor: int
+    total_entries: int
+    pending_work: int
+    monitor_error_count: int

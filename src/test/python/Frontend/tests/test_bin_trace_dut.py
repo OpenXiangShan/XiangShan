@@ -12,7 +12,6 @@ from env.api import (
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _RUN_PIPELINE_TEST = os.getenv("TB_BIN_TRACE_PIPELINE") == "1"
-_RUN_TO_TRACE_COMPLETION = os.getenv("TB_RUN_TO_TRACE_COMPLETION") == "1"
 
 
 def _require_env(name: str) -> str:
@@ -26,11 +25,11 @@ def _parse_int(raw: str) -> int:
     return int(str(raw), 0)
 
 
-def _should_run_to_trace_completion(bin_path: Path) -> bool:
-    return _RUN_TO_TRACE_COMPLETION or Path(bin_path).name == "microbench.bin"
-
-
-_TRACE_MAX_CYCLES = _parse_int(os.getenv("TB_TRACE_MAX_CYCLES", "0"))
+def _trace_cycle_limit() -> int:
+    value = _parse_int(os.getenv("TB_TRACE_MAX_CYCLES", "0"))
+    if value < 0:
+        raise AssertionError("TB_TRACE_MAX_CYCLES must be >= 0")
+    return int(value)
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -39,19 +38,14 @@ def test_bin_trace(env):
     bin_path = Path(_require_env("TB_BIN_PATH"))
     trace_path = Path(_require_env("TB_TRACE_PATH"))
     base_addr = _parse_int(os.getenv("TB_BASE_ADDR", "0x80000000"))
-    step_cycles = int(os.getenv("TB_STEP_CYCLES", "0"))
 
     assert bin_path.is_file(), f"bin file not found: {bin_path}"
     assert trace_path.is_file(), f"trace file not found: {trace_path}"
 
     bin_size = api_Frontend_load_program_file(env, str(bin_path), base_addr, max_cycles=0)
     trace_entries = api_Frontend_load_golden_trace(env, str(trace_path), max_cycles=0)
-
-    if _should_run_to_trace_completion(bin_path):
-        completed = api_Frontend_run_until_golden_complete(env, max_cycles=_TRACE_MAX_CYCLES)
-        assert completed is True
-    elif step_cycles > 0:
-        env.step(step_cycles)
+    completed = api_Frontend_run_until_golden_complete(env, max_cycles=_trace_cycle_limit())
+    assert completed is True
 
     assert bin_size > 0
     assert trace_entries > 0
