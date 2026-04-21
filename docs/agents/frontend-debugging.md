@@ -17,6 +17,8 @@ Use this order:
 Do not start from an internal-model assumption and search for evidence to fit it.
 Do not work around the failure by switching to partial execution, reduced stepping, or any other path that avoids the failing window unless the user explicitly asks for a temporary observability run; such runs do not count as a fix.
 Do not hide a real error just to get a passing test. If the failure cause is not yet established, keep debugging until it is, and if you still cannot prove the cause, stop and discuss with the user before making speculative changes.
+When a test is failing, analyze and state the root cause before changing behavior.
+Do not make speculative or “try-and-see” behavioral fixes just to move the testcase forward.
 
 For every DUT bin-trace failure, treat the following as mandatory:
 
@@ -31,6 +33,10 @@ For every DUT bin-trace failure, treat the following as mandatory:
 - If you claim a timing or delay issue, show cycle-accurate evidence that the payload is already correct and only arrives late.
 - When DUT behavior depends on env-driven `redirect`, `commit`, or other backend-agent stimuli, do not jump to a DUT-bug conclusion first. Prefer checking whether env stimulus timing or stimulus-generation logic is still incorrect before blaming the DUT.
 - When you regenerate waveforms for debugging, store them under a date-stamped subdirectory of `src/test/python/Frontend/data/` and give each waveform a logical filename derived from the exact case, seed, and purpose.
+- When using a `.vcd` for debugging, regenerate it from the current run's `.fst` artifact first; do not reuse a stale `.vcd` from an older rerun or a mismatched `.fst`.
+- Do not silently drop an observed `cfVec` packet from sampling. Any observed `cfVec` packet must either enter queue semantics or be explicitly justified as having been cleared by a concrete `redirect`.
+- When a redirect target is wrong, first check whether env derived that target from a drifting global golden cursor instead of from the already-matched golden dynamic instance of the responsible CFI.
+- When a redirect has the right `target` but wrong FTQ context, first suspect that env mixed fields from different dynamic instances or let an already-cleared old wrong-path instance participate in later redirect selection.
 
 ## Bin-Case Runtime Requirements
 

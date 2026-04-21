@@ -52,9 +52,13 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 ### 必须项（违反即语义错误）
 
 - `cfVec_queue` 入队严格按 DUT 观测顺序，不因等待目标 PC 而暂停或跳过包。
+- 除非该指令在语义上被某次 `redirect` 作为 wrong-path flush 清除，否则任何已观测到的 `cfVec` 包都不得被丢弃、跳过采样或绕过入队。
 - 首次 mismatch 只定义一个 wrong-path 起点，并沿该起点向后标记同一段 wrong-path。
 - mismatch 后继续接收 `cfVec`，不得进入“暂停构队列”等待模式。
 - `redirect` 按 wrong-path 起点 flush `cfVec_queue` 后缀，并保留更老 correct-path 前缀。
+- 某条 CFI 一旦已经与 golden 的某个动态实例匹配，其后续用于 `redirect` 的恢复目标必须绑定到该动态实例自身的 golden 语义，不得从一个可能已经漂移的全局 golden cursor 临时推导。
+- 某条 `redirect` 的 `target`、`pc`、FTQ 上下文必须来自同一个动态实例；不得把 `target` 绑定到当前实例、却把 FTQ idx / offset 绑定到另一条更老或已失效的实例。
+- 已被 earlier `redirect` 在语义上清除的 wrong-path 指令，即使暂时仍残留在内部结构中，也不得再参与后续 `redirect` 的归因、FTQ 上下文选择或 flush 范围计算。
 - 进入 `commit_queue` 的仅为 correct-path 指令；wrong-path 指令不得进入 `commit_queue`。
 - `commit_queue` 严格按程序序推进，不跳过更老未提交指令。
 - 正确路径 CFI 在 `resolve` 完成后才允许对应指令进入 committed。

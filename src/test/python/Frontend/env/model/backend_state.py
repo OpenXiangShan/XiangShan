@@ -102,6 +102,7 @@ class QueueInstr:
     call_ret_ras_action: int = 0
     golden_match_state: str = GOLDEN_MATCH_STATE_UNKNOWN
     golden_index: Optional[int] = None
+    golden_target_pc: Optional[int] = None
     is_cfi: bool = False
 
 

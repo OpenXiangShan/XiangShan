@@ -13,7 +13,6 @@ from .model.backend_state import (
     BackendEvent,
     BackendState,
     CommitInstruction,
-    FrontendPacket,
     FtqEntry,
     GOLDEN_MATCH_STATE_MATCHED,
     GOLDEN_MATCH_STATE_MISMATCHED,
@@ -92,7 +91,6 @@ class BackendModel:
         self.commit_max_delay = int(commit_max_delay)
         if self.commit_max_delay < self.commit_min_delay:
             raise ValueError("commit_max_delay must be >= commit_min_delay")
-        self.auto_redirect_on_golden_mispredict = bool(auto_redirect_on_golden_mispredict)
         self._rng = random.Random(int(random_seed)) if random_seed is not None else random
 
         self.current_cycle = 0
@@ -124,12 +122,16 @@ class BackendModel:
         self._visible_queue_call_ret_commit_group: list[int] = []
         self._semantic_recovery_target_pc: Optional[int] = None
         self._semantic_recovery_queue_start: Optional[int] = None
+        self._post_redirect_target_pc: Optional[int] = None
         self.golden_trace: Optional[GoldenTrace] = None
-        self.golden_resync_window = 64
         self._golden_wait_pc: Optional[int] = None
+        self._golden_wait_requires_redirect: bool = False
         self._cycle_start_golden_pc: Optional[int] = None
         self._cycle_start_golden_cursor: Optional[int] = None
         self._last_observation = BackendObservationSnapshot()
+        self._explicit_injection_enabled = True
+        self._explicit_injection_block_reason = ""
+        self._last_correct_cfi_context: Optional[dict] = None
 
         self._backend_state = BackendState(ftq_size=self.ftq_size)
         self._ftq_scoreboard = FtqScoreboard(self._backend_state)
@@ -207,28 +209,9 @@ class BackendModel:
     def _increment_ftq_ptr(self, flag: int, value: int) -> tuple[int, int]:
         return self._sync_backend_state().increment_ftq_ptr(flag, value)
 
-    def _decrement_ftq_ptr(self, flag: int, value: int) -> tuple[int, int]:
-        return self._sync_backend_state().decrement_ftq_ptr(flag, value)
-
     @staticmethod
     def _ftq_entry_matches(entry: FtqEntry, flag: int, value: int) -> bool:
         return BackendState.ftq_entry_matches(entry, flag, value)
-
-    def _has_seen_ftq_ptr(self, flag: int, value: int) -> bool:
-        return self._sync_backend_state().has_seen_ftq_ptr(flag, value)
-
-    def _has_dispatch_complete_ftq_entry(self, flag: int, value: int) -> bool:
-        state = self._sync_backend_state()
-        if (
-            state.current_ftq_entry is not None
-            and state.ftq_entry_matches(state.current_ftq_entry, flag, value)
-            and bool(state.current_ftq_entry.dispatch_complete)
-        ):
-            return True
-        return any(
-            state.ftq_entry_matches(entry, flag, value) and bool(entry.dispatch_complete)
-            for entry in state.ftq_entries
-        )
 
     def _ftq_ptr_is_stale_relative_to_commit(self, flag: int, value: int) -> bool:
         state = self._sync_backend_state()
@@ -272,6 +255,21 @@ class BackendModel:
             if int(wait_rank) >= int(self.ftq_size) and not wait_present:
                 self._pending_level0_target_ftq = None
 
+        if self._golden_wait_pc is not None:
+            has_pending_redirect = any(evt.kind == "redirect" for evt in self.pending_events)
+            has_wait_anchor = bool(
+                has_pending_redirect
+                or self._pending_level0_target_ftq is not None
+                or self._semantic_recovery_target_pc is not None
+                or self._pending_redirect_origin_index is not None
+                or self._current_ftq_entry is not None
+                or self.ftq_entries
+                or any(entry.path_state == PATH_STATE_CORRECT for entry in self._cfvec_queue)
+            )
+            if not has_wait_anchor:
+                self._golden_wait_pc = None
+                self._golden_wait_requires_redirect = False
+
         if self._semantic_recovery_target_pc is not None:
             has_pending_redirect = any(evt.kind == "redirect" for evt in self.pending_events)
             has_wrong_path = any(entry.path_state == PATH_STATE_WRONG for entry in self._cfvec_queue)
@@ -279,9 +277,30 @@ class BackendModel:
                 self._semantic_recovery_target_pc = None
                 self._semantic_recovery_queue_start = None
 
+        # If no redirect/recovery/wait context remains, wrong-path residues in
+        # cfvec_queue are stale and must be purged; otherwise they can pin the
+        # queue head to wrong-path forever and starve commit progression.
+        if (
+            self._semantic_recovery_target_pc is None
+            and self._golden_wait_pc is None
+            and self._pending_level0_target_ftq is None
+            and not any(evt.kind == "redirect" for evt in self.pending_events)
+            and any(entry.path_state == PATH_STATE_WRONG for entry in self._cfvec_queue)
+        ):
+            self._cfvec_queue_flush_wrong_path()
+
     def _cfvec_queue_has_ftq(self, ftq_flag: int, ftq_value: int) -> bool:
         return any(
             int(entry.ftq_flag) == int(ftq_flag) and int(entry.ftq_value) == int(ftq_value)
+            for entry in self._cfvec_queue
+        )
+
+    def _cfvec_queue_has_correct_path_pc_in_ftq(self, ftq_flag: int, ftq_value: int, pc: int) -> bool:
+        return any(
+            int(entry.ftq_flag) == int(ftq_flag)
+            and int(entry.ftq_value) == int(ftq_value)
+            and int(entry.pc) == int(pc)
+            and entry.path_state == PATH_STATE_CORRECT
             for entry in self._cfvec_queue
         )
 
@@ -304,15 +323,33 @@ class BackendModel:
             self._commit_queue.clear()
             return
         if self._commit_queue:
-            filtered = deque(
-                int(idx)
-                for idx in self._commit_queue
-                if 0 <= int(idx) < len(self._cfvec_queue)
-                and self._cfvec_queue[int(idx)].path_state == PATH_STATE_CORRECT
-            )
-            if filtered:
-                self._commit_queue = filtered
-                return
+            prev_idx = -1
+            seen_indices: set[int] = set()
+            for raw_idx in self._commit_queue:
+                idx = int(raw_idx)
+                if not (0 <= idx < len(self._cfvec_queue)):
+                    raise AssertionError(
+                        "commit_queue invariant violated: index out of range "
+                        f"idx={idx} len={len(self._cfvec_queue)}"
+                    )
+                if idx in seen_indices:
+                    raise AssertionError(
+                        "commit_queue invariant violated: duplicate index "
+                        f"idx={idx}"
+                    )
+                if idx <= prev_idx:
+                    raise AssertionError(
+                        "commit_queue invariant violated: non-increasing index order "
+                        f"prev={prev_idx} cur={idx}"
+                    )
+                if self._cfvec_queue[idx].path_state != PATH_STATE_CORRECT:
+                    raise AssertionError(
+                        "commit_queue invariant violated: non-correct-path instruction "
+                        f"idx={idx} path_state={self._cfvec_queue[idx].path_state}"
+                    )
+                seen_indices.add(idx)
+                prev_idx = idx
+            return
         self._commit_queue = deque(
             idx
             for idx, entry in enumerate(self._cfvec_queue)
@@ -352,10 +389,32 @@ class BackendModel:
             and self._ftq_entry_matches(self._current_ftq_entry, int(ftq_flag), int(ftq_value))
         ):
             return False
-        if any(self._ftq_entry_matches(entry, int(ftq_flag), int(ftq_value)) for entry in self.ftq_entries):
-            return False
         if self._has_pending_redirect_for_ftq(int(ftq_flag), int(ftq_value)):
             return False
+        matching_ftq_entries = [
+            entry for entry in self.ftq_entries
+            if self._ftq_entry_matches(entry, int(ftq_flag), int(ftq_value))
+        ]
+        if matching_ftq_entries:
+            if any(
+                self._ftq_entry_matches(resolve_entry, int(ftq_flag), int(ftq_value))
+                for resolve_entry in self._pending_resolves
+            ):
+                return False
+            if not all(
+                bool(entry.dispatch_complete)
+                and int(entry.resolved_cfi) >= int(entry.total_cfi)
+                and int(entry.commit_ready_cycle) <= int(self.current_cycle)
+                for entry in matching_ftq_entries
+            ):
+                return False
+            self.ftq_entries = deque(
+                entry
+                for entry in self.ftq_entries
+                if not self._ftq_entry_matches(entry, int(ftq_flag), int(ftq_value))
+            )
+            if self._pending_level0_target_ftq == (int(ftq_flag), int(ftq_value)):
+                self._pending_level0_target_ftq = None
         return True
 
     def _append_cfvec_queue_instr(
@@ -404,18 +463,121 @@ class BackendModel:
         queue_entry.path_state = PATH_STATE_CORRECT
         queue_entry.golden_match_state = GOLDEN_MATCH_STATE_MATCHED
         queue_entry.golden_index = int(entry.index)
+        if queue_entry.is_cfi:
+            queue_entry.golden_target_pc = self._golden_redirect_target_from_trace_entry(entry)
         self._commit_queue_append(int(queue_index))
+
+    @staticmethod
+    def _golden_redirect_target_from_trace_entry(entry: TraceEntry) -> Optional[int]:
+        kind = str(getattr(entry, "kind", "normal"))
+        if kind not in {"branch", "jump", "jump_indirect", "call", "ret"}:
+            return None
+        if bool(entry.taken):
+            target_pc = getattr(entry, "target_pc", None)
+            if target_pc is None:
+                return None
+            return int(target_pc)
+        return (int(entry.pc) + int(entry.size)) & 0xFFFFFFFFFFFFFFFF
+
+    def _replay_golden_matches_from_queue_head(self) -> None:
+        if self.golden_trace is None:
+            return
+        replayed_any = False
+        for queue_index, entry in enumerate(list(self._cfvec_queue)):
+            if entry.path_state == PATH_STATE_WRONG:
+                break
+            if entry.golden_match_state == GOLDEN_MATCH_STATE_MATCHED:
+                replayed_any = True
+                continue
+            golden_entry = self._consume_golden_entry(int(entry.pc))
+            if golden_entry is None:
+                break
+            self._cfvec_queue_mark_matched(int(queue_index), golden_entry)
+            replayed_any = True
+            next_entry = self.golden_trace.peek()
+            if next_entry is None:
+                break
+            if int(next_entry.pc) != self._sequential_next_pc(int(entry.pc), bool(entry.is_rvc)):
+                self._golden_wait_pc = int(next_entry.pc)
+                self._golden_wait_requires_redirect = True
+                self._mark_ftq_redirect_pending(int(entry.ftq_flag), int(entry.ftq_value))
+                break
+        if replayed_any:
+            self._ensure_commit_queue_consistency()
+
+    def _drop_pending_redirects_for_target(self, target_pc: int) -> None:
+        self.pending_events = deque(
+            evt
+            for evt in self.pending_events
+            if not (
+                evt.kind == "redirect"
+                and str(evt.payload.get("reason", "")) == "golden_first_mismatch_redirect"
+                and int(evt.payload.get("target_pc", -1)) == int(target_pc)
+            )
+        )
 
     def _find_preceding_correct_path_cfi(self, queue_index: int) -> Optional[tuple[int, QueueInstr]]:
         if queue_index <= 0:
             return None
         for idx in range(int(queue_index) - 1, -1, -1):
             entry = self._cfvec_queue[idx]
+            if entry.path_state == PATH_STATE_WRONG:
+                break
             if entry.path_state != PATH_STATE_CORRECT:
                 continue
             if entry.is_cfi:
                 return int(idx), entry
         return None
+
+    def _has_wrong_path_barrier_before(self, queue_index: int) -> bool:
+        if queue_index <= 0:
+            return False
+        for idx in range(int(queue_index) - 1, -1, -1):
+            entry = self._cfvec_queue[idx]
+            if entry.path_state == PATH_STATE_WRONG:
+                return True
+            if entry.path_state == PATH_STATE_CORRECT:
+                continue
+        return False
+
+    def _build_redirect_context_from_queue_entry(
+        self,
+        queue_index: Optional[int],
+        entry: QueueInstr,
+    ) -> Optional[dict]:
+        cfi = self._classify_cfi(
+            int(entry.instr),
+            int(entry.pc),
+            bool(entry.pred_taken),
+            bool(entry.is_rvc),
+        )
+        if cfi is None:
+            return None
+        branch_type, ras_action, _pred_target, _pred_taken = cfi
+        return {
+            "pc": int(entry.pc),
+            "is_rvc": int(entry.is_rvc),
+            "ftq_flag": int(entry.ftq_flag),
+            "ftq_value": int(entry.ftq_value),
+            "ftq_offset": int(entry.ftq_offset),
+            "branch_type": int(branch_type),
+            "ras_action": int(ras_action),
+            "queue_index": None if queue_index is None else int(queue_index),
+        }
+
+    def _queue_entry_predicted_target_mismatches(self, entry: QueueInstr, target_pc: int) -> bool:
+        predicted = self._predicted_cfi_outcome(
+            int(entry.instr),
+            int(entry.pc),
+            bool(entry.pred_taken),
+            bool(entry.is_rvc),
+        )
+        if predicted is None:
+            return False
+        _pred_taken, pred_target = predicted
+        if pred_target is None:
+            return False
+        return int(pred_target) != int(target_pc)
 
     def _cfvec_queue_note_mismatch(self, queue_index: int) -> None:
         if queue_index < 0 or queue_index >= len(self._cfvec_queue):
@@ -429,55 +591,81 @@ class BackendModel:
             target_pc = self.current_golden_pc()
             redirect_queue_index: Optional[int] = None
             redirect_entry: Optional[QueueInstr] = None
-            prefer_direct_redirect = False
-            if bool(queue_entry.is_cfi):
+            redirect_context: Optional[dict] = None
+            queued_redirect = False
+            redirect_target_pc = (
+                int(redirect_entry.golden_target_pc)
+                if redirect_entry is not None and redirect_entry.golden_target_pc is not None
+                else None
+            )
+            if redirect_target_pc is None:
+                redirect_target_pc = self.current_golden_pc()
+            prev_cfi = self._find_preceding_correct_path_cfi(int(queue_index))
+            if prev_cfi is not None:
+                prev_idx, prev_entry = prev_cfi
+                if (
+                    not bool(queue_entry.is_cfi)
+                    or (
+                        redirect_target_pc is not None
+                        and self._queue_entry_predicted_target_mismatches(prev_entry, int(redirect_target_pc))
+                    )
+                ):
+                    redirect_queue_index = int(prev_idx)
+                    redirect_entry = prev_entry
+                    if prev_entry.golden_target_pc is not None:
+                        redirect_target_pc = int(prev_entry.golden_target_pc)
+            if redirect_entry is None and bool(queue_entry.is_cfi):
                 redirect_queue_index = int(queue_index)
                 redirect_entry = queue_entry
-                # First mismatch is already a CFI on the wrong path; queue a redirect
-                # immediately because this CFI resolve will be skipped by wrong-path gating.
-                prefer_direct_redirect = True
-            else:
-                prev_cfi = self._find_preceding_correct_path_cfi(int(queue_index))
-                if prev_cfi is not None:
-                    redirect_queue_index, redirect_entry = prev_cfi
-            if redirect_entry is not None and target_pc is not None:
-                cfi = self._classify_cfi(
-                    int(redirect_entry.instr),
-                    int(redirect_entry.pc),
-                    bool(redirect_entry.pred_taken),
-                    bool(redirect_entry.is_rvc),
+            if redirect_entry is not None:
+                redirect_context = self._build_redirect_context_from_queue_entry(
+                    redirect_queue_index,
+                    redirect_entry,
                 )
-                if cfi is not None:
-                    branch_type, ras_action, _pred_target, _pred_taken = cfi
-                    redirect_taken = int(
-                        int(target_pc) != int(self._sequential_next_pc(int(redirect_entry.pc), bool(redirect_entry.is_rvc)))
-                    )
-                    redirected_by_pending_resolve = False
+            elif self._last_correct_cfi_context is not None and not self._has_wrong_path_barrier_before(int(queue_index)):
+                redirect_context = dict(self._last_correct_cfi_context)
+                if redirect_context.get("golden_target_pc") is not None:
+                    redirect_target_pc = int(redirect_context["golden_target_pc"])
+            if redirect_context is not None and redirect_target_pc is not None:
+                redirect_pc = int(redirect_context["pc"])
+                redirect_is_rvc = bool(redirect_context["is_rvc"])
+                redirect_taken = int(
+                    int(redirect_target_pc)
+                    != int(self._sequential_next_pc(int(redirect_pc), bool(redirect_is_rvc)))
+                )
+                redirect_context_queue_index = redirect_context.get("queue_index")
+                if redirect_context_queue_index is not None:
                     for resolve_entry in self._pending_resolves:
-                        if resolve_entry.queue_index != int(redirect_queue_index):
+                        if resolve_entry.queue_index != int(redirect_context_queue_index):
                             continue
                         resolve_entry.mispredict = True
-                        resolve_entry.target = int(target_pc)
+                        resolve_entry.target = int(redirect_target_pc)
                         resolve_entry.taken = bool(redirect_taken)
-                        redirected_by_pending_resolve = True
                         break
-                    if not redirected_by_pending_resolve or prefer_direct_redirect:
-                        self._queue_redirect_event(
-                            target_pc=int(target_pc),
-                            reason="golden_first_mismatch_redirect",
-                            flush_on_drive=True,
-                            payload_extra={
-                                "pc": int(redirect_entry.pc),
-                                "taken": int(redirect_taken),
-                                "ftq_flag": int(redirect_entry.ftq_flag),
-                                "ftq_value": int(redirect_entry.ftq_value),
-                                "ftq_offset": int(redirect_entry.ftq_offset),
-                                "branch_type": int(branch_type),
-                                "ras_action": int(ras_action),
-                                "is_rvc": int(redirect_entry.is_rvc),
-                                "level": 0,
-                            },
-                        )
+                self._queue_redirect_event(
+                    target_pc=int(redirect_target_pc),
+                    reason="golden_first_mismatch_redirect",
+                    flush_on_drive=True,
+                    payload_extra={
+                        "pc": int(redirect_pc),
+                        "taken": int(redirect_taken),
+                        "ftq_flag": int(redirect_context["ftq_flag"]),
+                        "ftq_value": int(redirect_context["ftq_value"]),
+                        "ftq_offset": int(redirect_context["ftq_offset"]),
+                        "branch_type": int(redirect_context["branch_type"]),
+                        "ras_action": int(redirect_context["ras_action"]),
+                        "is_rvc": int(redirect_context["is_rvc"]),
+                        "level": 0,
+                    },
+                )
+                queued_redirect = True
+            if not queued_redirect:
+                raise AssertionError(
+                    "first mismatch has no attributable CFI for redirect; "
+                    "treat as env-model or DUT bug: "
+                    f"queue_index={int(queue_index)} pc=0x{int(queue_entry.pc):x} "
+                    f"target_pc={None if redirect_target_pc is None else hex(int(redirect_target_pc))}"
+                )
             return
         if self._pending_redirect_origin_index is not None and int(queue_index) >= int(self._pending_redirect_origin_index):
             queue_entry.path_state = PATH_STATE_WRONG
@@ -513,23 +701,65 @@ class BackendModel:
             self._cfvec_queue_mark_resolve_state(int(queue_index), RESOLVE_STATE_SKIPPED)
 
     def _cfvec_queue_recompute_redirect_origin(self) -> None:
+        # redirect origin tracks an active mismatch episode that is expected to
+        # be recovered by a queued redirect event. Do not infer a new origin
+        # from residual wrong-path entries when there is no pending redirect.
+        if not any(evt.kind == "redirect" for evt in self.pending_events):
+            self._pending_redirect_origin_index = None
+            return
         for idx, entry in enumerate(self._cfvec_queue):
             if entry.path_state == PATH_STATE_WRONG:
                 self._pending_redirect_origin_index = int(idx)
                 return
         self._pending_redirect_origin_index = None
 
-    def _cfvec_queue_flush_wrong_path(self) -> None:
+    @staticmethod
+    def _format_queue_pc_ranges(entries: list[QueueInstr]) -> str:
+        if not entries:
+            return "none"
+        ranges: list[str] = []
+        range_start = int(entries[0].pc)
+        range_end = int(entries[0].pc)
+        for entry in entries[1:]:
+            pc = int(entry.pc)
+            if pc == range_end or pc == range_end + 2 or pc == range_end + 4:
+                range_end = pc
+                continue
+            ranges.append(
+                f"0x{range_start:x}" if range_start == range_end else f"0x{range_start:x}-0x{range_end:x}"
+            )
+            range_start = pc
+            range_end = pc
+        ranges.append(
+            f"0x{range_start:x}" if range_start == range_end else f"0x{range_start:x}-0x{range_end:x}"
+        )
+        return ",".join(ranges)
+
+    def _cfvec_queue_flush_wrong_path(self) -> Optional[dict]:
         state = self._sync_backend_state()
         origin_index = state.pending_redirect_origin_index
+        first_wrong_index = None
+        for idx, entry in enumerate(state.cfvec_queue):
+            if entry.path_state == PATH_STATE_WRONG:
+                first_wrong_index = int(idx)
+                break
+        if first_wrong_index is not None:
+            if origin_index is None:
+                origin_index = int(first_wrong_index)
+            else:
+                origin_index = min(int(origin_index), int(first_wrong_index))
         if origin_index is None:
-            for idx, entry in enumerate(state.cfvec_queue):
-                if entry.path_state == PATH_STATE_WRONG:
-                    origin_index = int(idx)
-                    break
-        if origin_index is None:
-            return
+            return None
         keep_count = max(0, int(origin_index))
+        removed_entries = list(state.cfvec_queue)[keep_count:]
+        summary = {
+            "removed_count": len(removed_entries),
+            "queue_index_start": keep_count if removed_entries else -1,
+            "queue_index_end": keep_count + len(removed_entries) - 1 if removed_entries else -1,
+            "observed_first_pc": int(removed_entries[0].pc) if removed_entries else None,
+            "observed_last_pc": int(removed_entries[-1].pc) if removed_entries else None,
+            "pc_ranges": self._format_queue_pc_ranges(removed_entries),
+        }
         kept = list(state.cfvec_queue)[:keep_count]
         state.cfvec_queue = deque(kept)
         state.pending_resolves = deque(
@@ -562,6 +792,7 @@ class BackendModel:
         ]
         state.pending_redirect_origin_index = None
         self._apply_backend_state()
+        return summary
 
     def _cfvec_queue_pop_head(self, count: int) -> None:
         pop_count = max(0, int(count))
@@ -669,6 +900,27 @@ class BackendModel:
             self._current_ftq_max_offset = -1
             self._current_ftq_contains_wait_pc = False
 
+    def _apply_semantic_recovery_if_target_queued(self) -> None:
+        if self._semantic_recovery_target_pc is None:
+            return
+        target_pc = int(self._semantic_recovery_target_pc)
+        target_idx = next(
+            (idx for idx, entry in enumerate(self._cfvec_queue) if int(entry.pc) == int(target_pc)),
+            None,
+        )
+        if target_idx is None:
+            return
+        if int(target_idx) > 0:
+            self._cfvec_queue_remove_range(0, int(target_idx))
+            self._prune_ftq_entries_to_cfvec_queue()
+            self._current_ftq_entry = None
+            self._current_ftq_seen_packets.clear()
+            self._current_ftq_max_offset = -1
+            self._current_ftq_contains_wait_pc = False
+        self._semantic_recovery_target_pc = None
+        self._semantic_recovery_queue_start = None
+        self._replay_golden_matches_from_queue_head()
+
     def _cfvec_queue_close_current_ftq_span(self, ftq_flag: int, ftq_value: int) -> None:
         for entry in reversed(self._cfvec_queue):
             if int(entry.ftq_flag) != int(ftq_flag) or int(entry.ftq_value) != int(ftq_value):
@@ -686,6 +938,9 @@ class BackendModel:
         self._visible_queue_call_ret_commit_group = []
         self._semantic_recovery_target_pc = None
         self._semantic_recovery_queue_start = None
+        self._post_redirect_target_pc = None
+        self._golden_wait_requires_redirect = False
+        self._last_correct_cfi_context = None
 
     @staticmethod
     def _redirect_reuses_same_ftq_slot(ftq_offset: int, is_rvc: bool) -> bool:
@@ -722,13 +977,77 @@ class BackendModel:
         )
 
     def _find_next_commitable_entry(self) -> Optional[FtqEntry]:
-        if self._cfvec_queue_mode_active():
+        if self._cfvec_queue_mode_active() and self._commit_queue:
             return None
         candidate = self._sync_backend_state().find_next_commitable_entry(
             golden_trace_attached=self.golden_trace is not None,
         )
         self._apply_backend_state()
         return candidate
+
+    def _pending_redirect_blocks_commit(self, ftq_flag: int, ftq_value: int) -> bool:
+        candidate_rank = int(self._ftq_ptr_rank_after_commit(int(ftq_flag), int(ftq_value)))
+        if candidate_rank <= 0 or candidate_rank >= int(self.ftq_size):
+            return False
+        for evt in self.pending_events:
+            if evt.kind != "redirect":
+                continue
+            payload = evt.payload
+            if "ftq_flag" not in payload or "ftq_value" not in payload:
+                continue
+            pending_rank = int(
+                self._ftq_ptr_rank_after_commit(
+                    int(payload.get("ftq_flag", -1)),
+                    int(payload.get("ftq_value", -1)),
+                )
+            )
+            if pending_rank <= 0 or pending_rank >= int(self.ftq_size):
+                continue
+            if pending_rank <= candidate_rank:
+                return True
+        return False
+
+    def _pending_target_redirect_blocks_commit(self, ftq_flag: int, ftq_value: int) -> bool:
+        if (
+            self.golden_trace is None
+            or self._pending_level0_target_ftq is None
+            or not self._golden_wait_requires_redirect
+        ):
+            return False
+        candidate_rank = int(self._ftq_ptr_rank_after_commit(int(ftq_flag), int(ftq_value)))
+        pending_rank = int(
+            self._ftq_ptr_rank_after_commit(
+                int(self._pending_level0_target_ftq[0]),
+                int(self._pending_level0_target_ftq[1]),
+            )
+        )
+        if candidate_rank <= 0 or candidate_rank >= int(self.ftq_size):
+            return False
+        if pending_rank <= 0 or pending_rank >= int(self.ftq_size):
+            return False
+        return candidate_rank >= pending_rank
+
+    def _mark_ftq_redirect_pending(self, ftq_flag: int, ftq_value: int) -> None:
+        if (
+            self._current_ftq_entry is not None
+            and self._ftq_entry_matches(self._current_ftq_entry, int(ftq_flag), int(ftq_value))
+        ):
+            self._current_ftq_entry.has_redirect = True
+        for entry in self.ftq_entries:
+            if not self._ftq_entry_matches(entry, int(ftq_flag), int(ftq_value)):
+                continue
+            entry.has_redirect = True
+
+    def _clear_ftq_redirect_pending(self, ftq_flag: int, ftq_value: int) -> None:
+        if (
+            self._current_ftq_entry is not None
+            and self._ftq_entry_matches(self._current_ftq_entry, int(ftq_flag), int(ftq_value))
+        ):
+            self._current_ftq_entry.has_redirect = False
+        for entry in self.ftq_entries:
+            if not self._ftq_entry_matches(entry, int(ftq_flag), int(ftq_value)):
+                continue
+            entry.has_redirect = False
 
     def _seal_current_ftq_entry(self, *, observed_last_in_entry: bool = False) -> None:
         self._sync_backend_state().seal_current_ftq_entry(
@@ -823,8 +1142,11 @@ class BackendModel:
     def set_golden_trace(self, trace: Optional[GoldenTrace]) -> None:
         self.golden_trace = trace
         self._golden_wait_pc = None
+        self._golden_wait_requires_redirect = False
         self._semantic_recovery_target_pc = None
         self._semantic_recovery_queue_start = None
+        self._post_redirect_target_pc = None
+        self._last_correct_cfi_context = None
         self._cycle_start_golden_pc = None
         self._cycle_start_golden_cursor = None
         if self.golden_trace is not None:
@@ -855,16 +1177,20 @@ class BackendModel:
         self.logger.info("backend can_accept=%d", self.can_accept)
         self._publish("backend.can_accept", {"value": self.can_accept}, level="DEBUG")
 
+    def set_explicit_injection_enabled(self, enabled: bool, reason: str = "") -> None:
+        self._explicit_injection_enabled = bool(enabled)
+        self._explicit_injection_block_reason = "" if bool(enabled) else str(reason)
+
+    def _assert_explicit_injection_allowed(self, kind: str) -> None:
+        if self._explicit_injection_enabled:
+            return
+        reason = str(self._explicit_injection_block_reason or "explicit injection disabled")
+        raise AssertionError(f"{str(kind)} injection is disabled: {reason}")
+
     def _emit_event(self, kind: str, payload: dict) -> None:
         item = {"cycle": self.current_cycle, "kind": kind, **payload}
         self.last_events.append(item)
         self._publish(f"backend.{kind}", item, level="DEBUG")
-
-    def _has_pending_control_event(self) -> bool:
-        for evt in self.pending_events:
-            if evt.kind == "exception":
-                return True
-        return False
 
     def _has_pending_redirect_for_ftq(self, ftq_flag: int, ftq_value: int) -> bool:
         for evt in self.pending_events:
@@ -879,15 +1205,6 @@ class BackendModel:
             ):
                 return True
         return False
-
-    @staticmethod
-    def _event_source_cycle(evt: BackendEvent) -> int:
-        payload = evt.payload if isinstance(evt.payload, dict) else {}
-        if "source_cycle" in payload:
-            return int(payload["source_cycle"])
-        if "queued_cycle" in payload:
-            return int(payload["queued_cycle"])
-        return -1
 
     def _target_observed_since(self, target_pc: int, start_cycle: int) -> bool:
         if self.monitor is None:
@@ -1045,6 +1362,8 @@ class BackendModel:
                 payload=payload,
             )
         )
+        if "golden_first_mismatch_redirect" in str(reason):
+            self._post_redirect_target_pc = int(target_pc)
         self.logger.info(
             "redirect queued: target=0x%x reason=%s ready_cycle=%d",
             int(target_pc),
@@ -1323,6 +1642,8 @@ class BackendModel:
                     self._pc_group_occurrences.pop(int(pc), None)
 
     def _simfrontend_redirect_drive_override(self, payload: dict) -> Optional[dict]:
+        if "mismatch" in str(payload.get("reason", "")):
+            return None
         if int(payload.get("branch_type", 0)) == 3:
             return None
         target_pc = int(payload.get("target_pc", self.safe_pc))
@@ -1367,6 +1688,29 @@ class BackendModel:
             "is_rvc": int(prev_is_rvc),
         }
 
+    def _assert_redirect_drive_ftq_not_stale(
+        self,
+        *,
+        payload_ftq_flag: int,
+        payload_ftq_value: int,
+        drive_ftq_flag: int,
+        drive_ftq_value: int,
+        target_pc: int,
+        reason: str,
+    ) -> None:
+        if (int(drive_ftq_flag), int(drive_ftq_value)) != (int(payload_ftq_flag), int(payload_ftq_value)):
+            return
+        if not self._ftq_ptr_is_stale_relative_to_commit(int(drive_ftq_flag), int(drive_ftq_value)):
+            return
+        raise AssertionError(
+            "redirect drive selected stale ftq context: "
+            f"reason={str(reason)} "
+            f"payload_ftq=({int(payload_ftq_flag)},{int(payload_ftq_value)}) "
+            f"drive_ftq=({int(drive_ftq_flag)},{int(drive_ftq_value)}) "
+            f"commit_ptr=({int(self.commit_ptr_flag)},{int(self.commit_ptr_value)}) "
+            f"target_pc=0x{int(target_pc):x}"
+        )
+
     def _sample_cfvec(self) -> None:
         assert self.observe_if is not None
 
@@ -1384,7 +1728,10 @@ class BackendModel:
             ftq_value: int,
             ftq_offset: int,
             is_last: bool,
+            *,
+            force_recovery_residual: bool = False,
         ) -> None:
+            waiting_target_group = _waiting_target_group()
             if self._current_ftq_entry is None or (
                 self._current_ftq_entry.ftq_flag != ftq_flag
                 or self._current_ftq_entry.ftq_value != ftq_value
@@ -1423,10 +1770,22 @@ class BackendModel:
                 ftq_offset=int(ftq_offset),
                 is_last=bool(is_last),
             )
-            # Post-redirect / wait-prefix packets are recovery residuals of an
-            # existing wrong-path episode. Mark them as wrong-path but do not
-            # start a new mismatch/redirect cycle.
-            self._cfvec_queue_mark_recovery_residual(int(queue_index))
+            # Prefix packets while waiting for a target PC are wrong-path.
+            # If semantic recovery is active, treat them as residuals of an
+            # already-issued redirect; otherwise this is a fresh mismatch episode
+            # and should follow the normal mismatch->redirect path.
+            if force_recovery_residual or self._semantic_recovery_target_pc is not None:
+                self._cfvec_queue_mark_recovery_residual(int(queue_index))
+            elif (
+                bool(self._golden_wait_requires_redirect)
+                and (
+                    waiting_target_group is None
+                    or (int(ftq_flag), int(ftq_value)) == waiting_target_group
+                )
+            ):
+                self._cfvec_queue_note_mismatch(int(queue_index))
+            else:
+                self._cfvec_queue_mark_recovery_residual(int(queue_index))
             self._current_ftq_max_offset = max(int(self._current_ftq_max_offset), int(ftq_offset))
             self._record_ftq_group_pc(int(ftq_flag), int(ftq_value), int(pc), bool(is_rvc))
             if is_last:
@@ -1447,12 +1806,41 @@ class BackendModel:
             active_ftq_ptr = self._cfvec_queue_has_ftq(int(ftq_flag), int(ftq_value))
             stale_ftq_ptr = self._ftq_ptr_is_stale_relative_to_commit(int(ftq_flag), int(ftq_value))
 
+            if stale_ftq_ptr and not active_ftq_ptr:
+                _track_waiting_target_entry_prefix(
+                    int(pc),
+                    int(instr),
+                    bool(is_rvc),
+                    bool(pred_taken),
+                    int(ftq_flag),
+                    int(ftq_value),
+                    int(ftq_offset),
+                    bool(is_last),
+                    force_recovery_residual=True,
+                )
+                continue
+
+            if self._post_redirect_target_pc is not None:
+                post_redirect_target_pc = int(self._post_redirect_target_pc)
+                if int(pc) != int(post_redirect_target_pc):
+                    _track_waiting_target_entry_prefix(
+                        int(pc),
+                        int(instr),
+                        bool(is_rvc),
+                        bool(pred_taken),
+                        int(ftq_flag),
+                        int(ftq_value),
+                        int(ftq_offset),
+                        bool(is_last),
+                        force_recovery_residual=True,
+                    )
+                    continue
+                self._drop_pending_redirects_for_target(int(post_redirect_target_pc))
+                self._post_redirect_target_pc = None
+
             if self._semantic_recovery_target_pc is not None:
                 recovery_target_pc = int(self._semantic_recovery_target_pc)
-                recovery_frontier_pc = self.current_golden_pc()
                 if int(pc) != int(recovery_target_pc):
-                    if stale_ftq_ptr and not active_ftq_ptr:
-                        continue
                     _track_waiting_target_entry_prefix(
                         int(pc),
                         int(instr),
@@ -1464,36 +1852,15 @@ class BackendModel:
                         bool(is_last),
                     )
                     continue
-                if stale_ftq_ptr and not active_ftq_ptr:
-                    continue
-                if (
-                    self._semantic_recovery_queue_start is not None
-                    and len(self._cfvec_queue) > int(self._semantic_recovery_queue_start)
-                ):
-                    self._cfvec_queue_remove_range(
-                        int(self._semantic_recovery_queue_start),
-                        len(self._cfvec_queue),
-                    )
-                    self._prune_ftq_entries_to_cfvec_queue()
-                    self._current_ftq_entry = None
-                    self._current_ftq_seen_packets.clear()
-                    self._current_ftq_max_offset = -1
-                    self._current_ftq_contains_wait_pc = False
-                self._semantic_recovery_target_pc = None
-                self._semantic_recovery_queue_start = None
-                if (
-                    recovery_frontier_pc is not None
-                    and int(recovery_frontier_pc) != int(recovery_target_pc)
-                ):
-                    continue
+                # Recovery target observed on DUT output. Keep processing this
+                # slot normally so the target packet enters cfvec_queue; after
+                # the loop we will trim the prefix before the first target packet.
 
             matched_wait_pc = self._golden_wait_pc is not None and int(pc) == int(self._golden_wait_pc)
 
             if self._golden_wait_pc is not None:
                 if int(pc) != int(self._golden_wait_pc):
                     waiting_target_group = _waiting_target_group()
-                    if stale_ftq_ptr and not active_ftq_ptr:
-                        continue
                     if waiting_target_group is not None and (int(ftq_flag), int(ftq_value)) != waiting_target_group:
                         _track_waiting_target_entry_prefix(
                             int(pc),
@@ -1518,15 +1885,14 @@ class BackendModel:
                     )
                     continue
                 else:
-                    if stale_ftq_ptr and not active_ftq_ptr:
-                        continue
                     self._golden_wait_pc = None
-
-            if stale_ftq_ptr and not active_ftq_ptr:
-                continue
+                    self._golden_wait_requires_redirect = False
 
             expected_golden = self.current_golden_pc()
-            golden_entry = self._consume_golden_entry(int(pc))
+            # Once mismatch is detected, keep sampling cfVec but freeze golden
+            # consumption until redirect flushes the wrong-path suffix.
+            allow_golden_match = self._pending_redirect_origin_index is None
+            golden_entry = self._consume_golden_entry(int(pc)) if allow_golden_match else None
 
             # Start or continue the current FTQ entry
             if self._current_ftq_entry is None or (
@@ -1576,7 +1942,7 @@ class BackendModel:
             )
             if golden_entry is not None:
                 self._cfvec_queue_mark_matched(int(queue_index), golden_entry)
-            elif expected_golden is not None:
+            elif expected_golden is not None or self._pending_redirect_origin_index is not None:
                 self._cfvec_queue_note_mismatch(int(queue_index))
             self._current_ftq_max_offset = max(int(self._current_ftq_max_offset), int(ftq_offset))
             if matched_wait_pc:
@@ -1636,6 +2002,24 @@ class BackendModel:
                     queue_index=int(queue_index),
                 ))
                 self._current_ftq_entry.total_cfi += 1
+                if self._cfvec_queue[int(queue_index)].path_state == PATH_STATE_CORRECT:
+                    self._last_correct_cfi_context = {
+                        "pc": int(pc),
+                        "instr": int(instr),
+                        "is_rvc": int(is_rvc),
+                        "pred_taken": int(pred_taken),
+                        "ftq_flag": int(ftq_flag),
+                        "ftq_value": int(ftq_value),
+                        "ftq_offset": int(ftq_offset),
+                        "branch_type": int(branch_type),
+                        "ras_action": int(ras_action),
+                        "queue_index": int(queue_index),
+                        "golden_target_pc": (
+                            None
+                            if self._cfvec_queue[int(queue_index)].golden_target_pc is None
+                            else int(self._cfvec_queue[int(queue_index)].golden_target_pc)
+                        ),
+                    }
 
             if is_last:
                 closes_waiting_target = (
@@ -1654,6 +2038,8 @@ class BackendModel:
             if int(next_entry.pc) == self._sequential_next_pc(int(pc), bool(is_rvc)):
                 continue
             self._golden_wait_pc = int(next_entry.pc)
+            self._golden_wait_requires_redirect = True
+            self._mark_ftq_redirect_pending(int(ftq_flag), int(ftq_value))
             if self._has_later_cfvec_slot_matching_pc(i, int(next_entry.pc)):
                 continue
             if self._current_ftq_entry is not None:
@@ -1662,7 +2048,9 @@ class BackendModel:
                     int(self._current_ftq_entry.ftq_value),
                 )
                 self._seal_current_ftq_entry()
-            break
+            continue
+
+        self._apply_semantic_recovery_if_target_queued()
 
     def _ready_resolves_for_cycle(self) -> tuple[ResolveEntry, ...]:
         ready_entries: list[ResolveEntry] = []
@@ -1744,30 +2132,7 @@ class BackendModel:
             ):
                 continue
             ready_entries.append(replace(entry, mispredict=bool(effective_mispredict)))
-            redirect_level = 0
-            if self.auto_redirect_on_golden_mispredict and effective_mispredict:
-                self._queue_redirect_event(
-                    target_pc=int(entry.target),
-                    reason="golden_resolve_redirect",
-                    flush_on_drive=True,
-                    payload_extra={
-                        "pc": int(entry.pc),
-                        "taken": int(entry.taken),
-                        "ftq_flag": int(entry.ftq_flag),
-                        "ftq_value": int(entry.ftq_value),
-                        "ftq_offset": int(entry.ftq_offset),
-                        "branch_type": int(entry.branch_type),
-                        "ras_action": int(entry.ras_action),
-                        "source_cycle": int(entry.queued_cycle),
-                        "is_rvc": int(entry.is_rvc),
-                        "level": redirect_level,
-                    },
-                )
-            entry_flushes_itself = bool(
-                effective_mispredict
-                and self.auto_redirect_on_golden_mispredict
-                and (redirect_level & 0x1)
-            )
+            entry_flushes_itself = False
             self._sync_backend_state()
             self._ftq_scoreboard.note_resolve(entry, self.current_cycle, entry_flushes_itself)
             self._apply_backend_state()
@@ -1783,12 +2148,18 @@ class BackendModel:
     def _plan_commit_entry_for_cycle(self) -> Optional[FtqEntry]:
         if self.can_accept == 0:
             return None
-        if self._has_pending_control_event():
-            return None
         self._ensure_commit_queue_consistency()
         if self.golden_trace is not None and self._commit_queue:
-            if int(self._commit_queue[0]) != 0:
-                return None
+            head_idx = int(self._commit_queue[0])
+            if head_idx != 0:
+                if all(entry.path_state == PATH_STATE_WRONG for entry in list(self._cfvec_queue)[:head_idx]):
+                    self._cfvec_queue_pop_head(int(head_idx))
+                    self._ensure_commit_queue_consistency()
+                    if not self._commit_queue:
+                        return None
+                    head_idx = int(self._commit_queue[0])
+                if head_idx != 0:
+                    return None
             head_span = self._commit_queue_head_ftq_span()
             if head_span is None and self._commit_queue:
                 head_queue_index = int(self._commit_queue[0])
@@ -1857,6 +2228,10 @@ class BackendModel:
                     if bool(state.reuse_commit_ptr_once)
                     else state.increment_ftq_ptr(int(state.commit_ptr_flag), int(state.commit_ptr_value))
                 )
+            if self._pending_target_redirect_blocks_commit(int(ftq_flag), int(ftq_value)):
+                return None
+            if self._pending_redirect_blocks_commit(int(ftq_flag), int(ftq_value)):
+                return None
             if self._has_pending_redirect_for_ftq(int(ftq_flag), int(ftq_value)):
                 return None
             pending_wait_rank = None
@@ -1972,6 +2347,10 @@ class BackendModel:
         head = self._find_next_commitable_entry()
         if head is None:
             return None
+        if self._pending_target_redirect_blocks_commit(int(head.ftq_flag), int(head.ftq_value)):
+            return None
+        if self._pending_redirect_blocks_commit(int(head.ftq_flag), int(head.ftq_value)):
+            return None
         if self._has_pending_redirect_for_ftq(int(head.ftq_flag), int(head.ftq_value)):
             return None
         state = self._sync_backend_state()
@@ -2063,14 +2442,21 @@ class BackendModel:
             self._pending_level0_target_ftq = None
         else:
             next_target_ftq = self._increment_ftq_ptr(ftq_flag, ftq_value)
+            next_target_already_visible = bool(
+                next_target_ftq is not None
+                and self._cfvec_queue_has_correct_path_pc_in_ftq(
+                    int(next_target_ftq[0]),
+                    int(next_target_ftq[1]),
+                    int(target_pc),
+                )
+            )
             self._pending_level0_target_ftq = (
                 None
-                if next_target_ftq == original_commit_ptr
+                if next_target_ftq == original_commit_ptr or next_target_already_visible
                 else next_target_ftq
             )
         if bool(payload.get("flush_on_drive", False)):
             state = self._sync_backend_state()
-            redirect_rank = state.ftq_ptr_rank_after_commit(int(ftq_flag), int(ftq_value))
             self._ftq_scoreboard.apply_redirect_flush(
                 ftq_flag=ftq_flag,
                 ftq_value=ftq_value,
@@ -2087,18 +2473,61 @@ class BackendModel:
                     int(pre_flush_current_ftq[0]),
                     int(pre_flush_current_ftq[1]),
                 )
-            self._cfvec_queue_flush_wrong_path()
+            flush_summary = self._cfvec_queue_flush_wrong_path()
+            if flush_summary is not None:
+                semantic_start_pc = flush_summary["observed_first_pc"]
+                if (
+                    not flush_itself
+                    and int(payload.get("taken", 0)) != 0
+                    and "pc" in payload
+                ):
+                    semantic_start_pc = int(
+                        self._sequential_next_pc(
+                            int(payload["pc"]),
+                            bool(payload.get("is_rvc", 0)),
+                        )
+                    )
+                self.logger.info(
+                    "redirect queue flush: reason=%s target=0x%x removed=%d queue_idx=[%d,%d] pc_start=%s queue_pc_ranges=%s",
+                    reason,
+                    int(target_pc),
+                    int(flush_summary["removed_count"]),
+                    int(flush_summary["queue_index_start"]),
+                    int(flush_summary["queue_index_end"]),
+                    (
+                        "none"
+                        if semantic_start_pc is None
+                        else f"0x{int(semantic_start_pc):x}"
+                    ),
+                    str(flush_summary["pc_ranges"]),
+                )
             self._semantic_recovery_target_pc = int(target_pc)
             self._semantic_recovery_queue_start = len(self._cfvec_queue)
+            self._apply_semantic_recovery_if_target_queued()
+            self._post_redirect_target_pc = (
+                int(target_pc)
+                if self._semantic_recovery_target_pc is not None
+                else None
+            )
+            self._sync_backend_state()
             self._apply_backend_state()
             if not flush_itself:
                 next_target_ftq = self._increment_ftq_ptr(ftq_flag, ftq_value)
+                next_target_already_visible = bool(
+                    next_target_ftq is not None
+                    and self._cfvec_queue_has_correct_path_pc_in_ftq(
+                        int(next_target_ftq[0]),
+                        int(next_target_ftq[1]),
+                        int(target_pc),
+                    )
+                )
                 next_target_already_committed = next_target_ftq == original_commit_ptr
                 self._pending_level0_target_ftq = (
                     None
-                    if next_target_already_committed
+                    if next_target_already_committed or next_target_already_visible
                     else next_target_ftq
                 )
+        self._clear_ftq_redirect_pending(int(ftq_flag), int(ftq_value))
         if "pc" not in payload and self.monitor is not None and self.monitor.observations:
             from_pc = int(self.monitor.observations[-1].pc)
 
@@ -2114,6 +2543,14 @@ class BackendModel:
             drive_from_pc = int(drive_override.get("pc", drive_from_pc))
             drive_ftq_offset = int(drive_override.get("ftq_offset", drive_ftq_offset))
             drive_is_rvc = int(drive_override.get("is_rvc", drive_is_rvc))
+        self._assert_redirect_drive_ftq_not_stale(
+            payload_ftq_flag=int(ftq_flag),
+            payload_ftq_value=int(ftq_value),
+            drive_ftq_flag=int(drive_ftq_flag),
+            drive_ftq_value=int(drive_ftq_value),
+            target_pc=int(target_pc),
+            reason=str(reason),
+        )
 
         drive_payload = {
             "pc": drive_from_pc,
@@ -2181,20 +2618,24 @@ class BackendModel:
         else:
             self.ibuf_full_streak = 0
         if self.ibuf_full_streak >= self.ibuf_watchdog_threshold:
-            self.inject_redirect(self.safe_pc, "ibuf_full_watchdog")
             self.logger.warning(
-                "ibufFull watchdog fired: threshold=%d safe_pc=0x%x",
+                "ibufFull watchdog fired without redirect: threshold=%d safe_pc=0x%x",
                 self.ibuf_watchdog_threshold,
                 self.safe_pc,
             )
             self._publish(
                 "backend.watchdog",
-                {"reason": "ibuf_full", "threshold": int(self.ibuf_watchdog_threshold), "safe_pc": int(self.safe_pc)},
+                {
+                    "reason": "ibuf_full_no_redirect",
+                    "threshold": int(self.ibuf_watchdog_threshold),
+                    "safe_pc": int(self.safe_pc),
+                },
                 level="WARNING",
             )
             self.ibuf_full_streak = 0
 
     def inject_redirect(self, target_pc: int, reason: str, delay_cycles: Optional[int] = None) -> None:
+        self._assert_explicit_injection_allowed("redirect")
         self._queue_redirect_event(
             target_pc=int(target_pc),
             reason=str(reason),
@@ -2206,12 +2647,16 @@ class BackendModel:
         self._current_ftq_entry = None
         self._current_ftq_seen_packets.clear()
         self._golden_wait_pc = None
+        self._golden_wait_requires_redirect = False
         self._semantic_recovery_target_pc = None
         self._semantic_recovery_queue_start = None
+        self._post_redirect_target_pc = None
+        self._last_correct_cfi_context = None
         # Note: do NOT clear ftq_entries — entries already dispatch-complete remain valid;
         # they will naturally drain via _drive_commit() until the redirect fires.
 
     def inject_exception(self, cause: int, tval: int, pc: int, delay_cycles: int = _MIN_BACKEND_DELAY) -> None:
+        self._assert_explicit_injection_allowed("exception")
         ready_cycle = self.current_cycle + self._clamp_backend_delay(delay_cycles)
         from_pc = int(pc)
         if self.monitor is not None and self.monitor.observations:
