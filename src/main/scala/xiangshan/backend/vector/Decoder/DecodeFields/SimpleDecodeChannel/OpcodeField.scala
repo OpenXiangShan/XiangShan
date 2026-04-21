@@ -10,24 +10,28 @@ import xiangshan.backend.vector.Decoder.Uop.ScalaUopTable
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.{BitPatToExt, UIntToUIntField}
 
-class OpcodeField(table: Map[BitPat, Opcode]) extends DecodeField[InstPattern, UInt] {
+class OpcodeField(uopIdx: Int) extends DecodeField[InstPattern, UInt] {
 
   override def name: String = "opcode"
 
   override def chiselType: UInt = Opcode()
 
   override def genTable(op: InstPattern): BitPat = {
-    val res = {
-      try
-        table(op.bitPat).encode.pad0To(Opcode.getWidth)
-      catch {
-        case e: NoSuchElementException =>
-          println(s"inst ${op.name} is not in uop table")
-          throw e
-        case e: Throwable => throw e
-      }
+    // try
+    //   table(op.bitPat).encode.pad0To(Opcode.getWidth)
+    // catch {
+    //   case e: NoSuchElementException =>
+    //     println(s"inst ${op.name} is not in uop table")
+    //     throw e
+    //   case e: Throwable => throw e
+    // }
+
+    val uopSeq = UopInfoFieldSimple.genUopSeq(op)
+    if (uopSeq.isDefinedAt(uopIdx)) {
+      uopSeq(uopIdx).encode.pad0To(Opcode.getWidth)
+    } else {
+      default
     }
 
-    res
   }
 }

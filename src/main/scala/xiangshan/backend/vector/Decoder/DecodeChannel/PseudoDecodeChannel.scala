@@ -12,7 +12,6 @@ import xiangshan.{XSCoreParameters, XSCoreParamsKey}
 import xiangshan.backend.decode.isa.PseudoInstructions
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.decode.opcode.Opcode
-import xiangshan.backend.decode.opcode.Opcode.AluOpcodes.add
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.{AluOpcodes, VSetOpcodes}
 import xiangshan.backend.fu.FuType
@@ -158,7 +157,7 @@ object PseudoDecodeChannel {
 
   val uopTable: SeqMap[InstPattern, Opcode] = SeqMap(
     CSRRVL    -> (VSetOpcodes.readvl + NeedVecEnable),
-    CSRRVLENB -> (AluOpcodes.add - Src1Gp - Src2En + Src2Imm(DecodeSelImm.I) + NeedVecEnable),
+    CSRRVLENB -> (AluOpcodes.add.copy() - Src1Gp - Src2En - Src2Gp + Src2Imm(DecodeSelImm.I) + NeedVecEnable),
   )
 
   val legalField = new DecodeFieldGen(
