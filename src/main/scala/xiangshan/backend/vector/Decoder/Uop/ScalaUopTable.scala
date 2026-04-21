@@ -18,34 +18,36 @@ import xiangshan.backend.decode.opcode.Opcode.LduOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.MulOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.StuOpcodes._
 import xiangshan.backend.decode.opcode.Opcode._
+import xiangshan.backend.decode.opcode.OpcodeTraits._
+
 
 object ScalaUopTable {
   val tableI = {
     import xiangshan.backend.decode.isa.Instructions.{I64Type, IType}
 
-    val tableI64Type = I64Type.mapOpcode(
-      _.ADDIW -> addw,
+    val tableI64Type = I64Type.mapUopcode(
+      _.ADDIW -> addw.S2xRemove,
       _.ADDW  -> addw,
       _.LD    -> ld,
       _.LWU   -> lwu,
       _.SD    -> sd,
-      _.SLLI  -> sll,
-      _.SLLIW -> sllw,
+      _.SLLI  -> sll.S2xRemove,
+      _.SLLIW -> sllw.S2xRemove,
       _.SLLW  -> sllw,
-      _.SRAI  -> sra,
-      _.SRAIW -> sraw,
+      _.SRAI  -> sra.S2xRemove,
+      _.SRAIW -> sraw.S2xRemove,
       _.SRAW  -> sraw,
-      _.SRLI  -> srl,
-      _.SRLIW -> srlw,
+      _.SRLI  -> srl.S2xRemove,
+      _.SRLIW -> srlw.S2xRemove,
       _.SRLW  -> srlw,
       _.SUBW  -> subw,
     )
 
-    val tableIType = IType.mapOpcode(
+    val tableIType = IType.mapUopcode(
       _.ADD     -> add,
-      _.ADDI    -> add,
+      _.ADDI    -> add.S2xRemove,
       _.AND     -> and,
-      _.ANDI    -> and,
+      _.ANDI    -> and.S2xRemove,
       _.AUIPC   -> auipc,
       _.BEQ     -> beq,
       _.BGE     -> bge,
@@ -53,8 +55,8 @@ object ScalaUopTable {
       _.BLT     -> blt,
       _.BLTU    -> bltu,
       _.BNE     -> bne,
-      _.EBREAK  -> jmp,
-      _.ECALL   -> jmp,
+      _.EBREAK  -> jmp, // system i-type
+      _.ECALL   -> jmp, // system i-type
       _.FENCE   -> fence,
       _.JAL     -> jal,
       _.JALR    -> jalr,
@@ -62,23 +64,23 @@ object ScalaUopTable {
       _.LBU     -> lbu,
       _.LH      -> lh,
       _.LHU     -> lhu,
-      _.LUI     -> add,
+      _.LUI     -> add.S1xS2xRemove, // TODO: U-Type
       _.LW      -> lw,
       _.OR      -> or,
-      _.ORI     -> or,
+      _.ORI     -> or.S2xRemove,
       _.SB      -> sb,
       _.SH      -> sh,
       _.SLL     -> sll,
       _.SLT     -> slt,
-      _.SLTI    -> slt,
-      _.SLTIU   -> sltu,
+      _.SLTI    -> slt.S2xRemove,
+      _.SLTIU   -> sltu.S2xRemove,
       _.SLTU    -> sltu,
       _.SRA     -> sra,
       _.SRL     -> srl,
       _.SUB     -> sub,
       _.SW      -> sw,
       _.XOR     -> xor,
-      _.XORI    -> xor,
+      _.XORI    -> xor.S2xRemove,
     )
 
     tableI64Type ++ tableIType
@@ -87,7 +89,7 @@ object ScalaUopTable {
   val tableM = {
     import xiangshan.backend.decode.isa.Instructions.{M64Type, MType}
 
-    val tableM64Type = M64Type.mapOpcode(
+    val tableM64Type = M64Type.mapUopcode(
       _.DIVUW -> divuw,
       _.DIVW  -> divw,
       _.MULW  -> mulw,
@@ -95,7 +97,7 @@ object ScalaUopTable {
       _.REMW  -> remw,
     )
 
-    val tableMType = MType.mapOpcode(
+    val tableMType = MType.mapUopcode(
       _.DIV    -> div,
       _.DIVU   -> divu,
       _.MUL    -> mul,
@@ -112,7 +114,7 @@ object ScalaUopTable {
   val tableA = {
     import xiangshan.backend.decode.isa.Instructions.{A64Type, AType}
 
-    val tableA64Type = A64Type.mapOpcode(
+    val tableA64Type = A64Type.mapUopcode(
       _.AMOADD_D  -> amoadd_d ,
       _.AMOAND_D  -> amoand_d ,
       _.AMOMAX_D  -> amomax_d ,
@@ -126,7 +128,7 @@ object ScalaUopTable {
       _.SC_D      -> sc_d     ,
     )
 
-    val tableAType = AType.mapOpcode(
+    val tableAType = AType.mapUopcode(
       _.AMOADD_W  -> amoadd_w ,
       _.AMOAND_W  -> amoand_w ,
       _.AMOMAX_W  -> amomax_w ,
@@ -146,14 +148,14 @@ object ScalaUopTable {
   val tableF = {
     import xiangshan.backend.decode.isa.Instructions.{F64Type, FType}
 
-    val tableF64Type = F64Type.mapOpcode(
+    val tableF64Type = F64Type.mapUopcode(
       _.FCVT_L_S  -> fcvt_si64_fp32,
       _.FCVT_LU_S -> fcvt_ui64_fp32,
       _.FCVT_S_L  -> I2fOpcodes.fcvt_fp32_si64,
       _.FCVT_S_LU -> I2fOpcodes.fcvt_fp32_ui64,
     )
 
-    val tableFType = FType.mapOpcode(
+    val tableFType = FType.mapUopcode(
       _.FADD_S    -> FAluOpcodes.fadd_fp32,
       _.FCLASS_S  -> fclass_fp32,
       _.FCVT_S_W  -> I2fOpcodes.fcvt_fp32_si32,
@@ -164,7 +166,7 @@ object ScalaUopTable {
       _.FEQ_S     -> feq_fp32,
       _.FLE_S     -> fle_fp32,
       _.FLT_S     -> flt_fp32,
-      _.FLW       -> lw,
+      _.FLW       -> (lw.copy() - GpWen + FpWen), // FpITypeLoadInst
       _.FMADD_S   -> fmadd_fp32,
       _.FMAX_S    -> FAluOpcodes.fmax_fp32,
       _.FMIN_S    -> FAluOpcodes.fmin_fp32,
@@ -179,7 +181,7 @@ object ScalaUopTable {
       _.FSGNJX_S  -> FAluOpcodes.fsgnjx_fp32,
       _.FSQRT_S   -> fsqrt_fp32,
       _.FSUB_S    -> FAluOpcodes.fsub_fp32,
-      _.FSW       -> sw,
+      _.FSW       -> (sw.copy() - Src2Gp + Src2Fp), // FpSTypeInstPattern
     )
 
     tableF64Type ++ tableFType
@@ -188,7 +190,7 @@ object ScalaUopTable {
   val tableD = {
     import xiangshan.backend.decode.isa.Instructions.{D64Type, DType}
 
-    val tableD64Type = D64Type.mapOpcode(
+    val tableD64Type = D64Type.mapUopcode(
       _.FCVT_D_L  -> I2fOpcodes.fcvt_fp64_si64,
       _.FCVT_D_LU -> I2fOpcodes.fcvt_fp64_ui64,
       _.FCVT_L_D  -> fcvt_si64_fp64,
@@ -197,7 +199,7 @@ object ScalaUopTable {
       _.FMV_X_D   -> fmv_i_fp64,
     )
 
-    val tableDType = DType.mapOpcode(
+    val tableDType = DType.mapUopcode(
       _.FADD_D    -> FAluOpcodes.fadd_fp64,
       _.FCLASS_D  -> fclass_fp64,
       _.FCVT_D_S  -> fcvt_fp64_fp32,
@@ -210,7 +212,7 @@ object ScalaUopTable {
       _.FEQ_D     -> feq_fp64,
       _.FLE_D     -> fle_fp64,
       _.FLT_D     -> flt_fp64,
-      _.FLD       -> ld,
+      _.FLD       -> (ld.copy() - GpWen + FpWen), // FpITypeLoadInst
       _.FMADD_D   -> fmadd_fp64,
       _.FMAX_D    -> FAluOpcodes.fmax_fp64,
       _.FMIN_D    -> FAluOpcodes.fmin_fp64,
@@ -223,30 +225,30 @@ object ScalaUopTable {
       _.FSGNJX_D  -> FAluOpcodes.fsgnjx_fp64,
       _.FSQRT_D   -> fsqrt_fp64,
       _.FSUB_D    -> FAluOpcodes.fsub_fp64,
-      _.FSD       -> sd,
+      _.FSD       -> (sd.copy() - Src2Gp + Src2Fp), // FpSTypeInstPattern
     )
 
     tableD64Type ++ tableDType
   }
 
   val tableZawrs = {
-    xiangshan.backend.decode.isa.Instructions.ZAWRSType.mapOpcode(
+    xiangshan.backend.decode.isa.Instructions.ZAWRSType.mapUopcode(
       _.WRS_NTO -> wrs_nto,
       _.WRS_STO -> wrs_sto,
     )
   }
 
-  val tableZba: Map[BitPat, Opcode] = {
+  val tableZba: Map[BitPat, Seq[Opcode]] = {
     import xiangshan.backend.decode.isa.Instructions.{ZBA64Type, ZBAType}
 
-    val tableZba64Type = ZBA64Type.mapOpcode(
+    val tableZba64Type = ZBA64Type.mapUopcode(
       _.ADD_UW -> adduw,
       _.SH1ADD_UW -> sh1adduw,
       _.SH2ADD_UW -> sh2adduw,
       _.SH3ADD_UW -> sh3adduw,
       _.SLLI_UW -> slliuw,
     )
-    val tableZbaType = ZBAType.mapOpcode(
+    val tableZbaType = ZBAType.mapUopcode(
       _.SH1ADD -> sh1add,
       _.SH2ADD -> sh2add,
       _.SH3ADD -> sh3add,
@@ -258,17 +260,17 @@ object ScalaUopTable {
   val tableZbb = {
     import xiangshan.backend.decode.isa.Instructions.{ZBB64Type, ZBBType}
 
-    val tableZbb64Type = ZBB64Type.mapOpcode(
+    val tableZbb64Type = ZBB64Type.mapUopcode(
       _.CLZW  -> clzw,
       _.CPOPW -> cpopw,
       _.CTZW  -> ctzw,
       _.REV8  -> rev8,
       _.ROLW  -> rolw,
-      _.RORI  -> ror,
-      _.RORIW -> rorw,
+      _.RORI  -> ror.S2xRemove,
+      _.RORIW -> rorw.S2xRemove,
       _.RORW  -> rorw,
     )
-    val tableZbbType = ZBBType.mapOpcode(
+    val tableZbbType = ZBBType.mapUopcode(
       _.ANDN   -> andn,
       _.CLZ    -> clz,
       _.CPOP   -> cpop,
@@ -292,7 +294,7 @@ object ScalaUopTable {
   val tableZbc = {
     import xiangshan.backend.decode.isa.Instructions.ZBCType
 
-    ZBCType.mapOpcode(
+    ZBCType.mapUopcode(
       _.CLMUL  -> clmul,
       _.CLMULH -> clmulh,
       _.CLMULR -> clmulr,
@@ -303,16 +305,16 @@ object ScalaUopTable {
     import xiangshan.backend.decode.isa.Instructions.ZBKB64Type
     import xiangshan.backend.decode.isa.Instructions.ZBKBType
 
-    val tableZbkb64Type = ZBKB64Type.mapOpcode(
+    val tableZbkb64Type = ZBKB64Type.mapUopcode(
       _.PACKW -> packw,
       _.REV8  -> rev8,
       _.ROLW  -> rolw,
-      _.RORI  -> ror,
-      _.RORIW -> rorw,
+      _.RORI  -> ror.S2xRemove,
+      _.RORIW -> rorw.S2xRemove,
       _.RORW  -> rorw,
     )
 
-    val tableZbkbType = ZBKBType.mapOpcode(
+    val tableZbkbType = ZBKBType.mapUopcode(
       _.ANDN    -> andn,
       _.BREV8   -> revb,
       _.ORN     -> orn,
@@ -327,7 +329,7 @@ object ScalaUopTable {
   }
 
   val tableZbkx = {
-    xiangshan.backend.decode.isa.Instructions.ZBKXType.mapOpcode(
+    xiangshan.backend.decode.isa.Instructions.ZBKXType.mapUopcode(
       _.XPERM4 -> xpermn,
       _.XPERM8 -> xpermb,
     )
@@ -336,14 +338,14 @@ object ScalaUopTable {
   val tableZbs = {
     import xiangshan.backend.decode.isa.Instructions.{ZBS64Type, ZBSType}
 
-    val tableZbs64Type = ZBS64Type.mapOpcode(
-      _.BCLRI -> bclr,
-      _.BEXTI -> bext,
-      _.BINVI -> binv,
-      _.BSETI -> bset,
+    val tableZbs64Type = ZBS64Type.mapUopcode(
+      _.BCLRI -> bclr.S2xRemove,
+      _.BEXTI -> bext.S2xRemove,
+      _.BINVI -> binv.S2xRemove,
+      _.BSETI -> bset.S2xRemove,
     )
 
-    val tableZbsTable = ZBSType.mapOpcode(
+    val tableZbsTable = ZBSType.mapUopcode(
       _.BCLR -> bclr,
       _.BEXT -> bext,
       _.BINV -> binv,
@@ -356,8 +358,8 @@ object ScalaUopTable {
   val tableSystem = {
     import xiangshan.backend.decode.isa.Instructions.SYSTEMType
 
-    SYSTEMType.mapOpcode(
-      _.MRET -> jmp,
+    SYSTEMType.mapUopcode(
+      _.MRET -> jmp, // system i-type
       _.WFI  -> wfi,
     )
   }
@@ -365,22 +367,22 @@ object ScalaUopTable {
   val tableS = {
     import xiangshan.backend.decode.isa.Instructions.SType
 
-    SType.mapOpcode(
+    SType.mapUopcode(
       _.SFENCE_VMA -> sfence,
-      _.SRET -> jmp,
+      _.SRET -> jmp, // system i-type
     )
   }
 
   val tableH = {
     import xiangshan.backend.decode.isa.Instructions.{H64Type, HType}
 
-    val tableH64Type = H64Type.mapOpcode(
+    val tableH64Type = H64Type.mapUopcode(
       _.HLV_D  -> hlvd,
       _.HLV_WU -> hlvwu,
       _.HSV_D  -> hsvd,
     )
 
-    val tableHType = HType.mapOpcode(
+    val tableHType = HType.mapUopcode(
       _.HFENCE_GVMA -> hfence_g,
       _.HFENCE_VVMA -> hfence_v,
       _.HLV_B       -> hlvb,
@@ -400,7 +402,7 @@ object ScalaUopTable {
 
   val tableZabha = {
     import xiangshan.backend.decode.isa.Instructions.ZABHAType
-    ZABHAType.mapOpcode(
+    ZABHAType.mapUopcode(
       _.AMOADD_B  -> amoadd_b,
       _.AMOADD_H  -> amoadd_h,
       _.AMOAND_B  -> amoand_b,
@@ -425,10 +427,10 @@ object ScalaUopTable {
   val tableZacas = {
     import xiangshan.backend.decode.isa.Instructions.{ZACAS64Type,ZACASType}
 
-    val tableZacas64 = ZACAS64Type.mapOpcode(
+    val tableZacas64 = ZACAS64Type.mapUopcode(
       _.AMOCAS_Q -> amocas_q,
     )
-    val tableZacas = ZACASType.mapOpcode(
+    val tableZacas = ZACASType.mapUopcode(
       _.AMOCAS_D -> amocas_d,
       _.AMOCAS_W -> amocas_w,
     )
@@ -439,7 +441,7 @@ object ScalaUopTable {
   val tableZabhaZacas = {
     import xiangshan.backend.decode.isa.Instructions.ZABHA_ZACASType
 
-    ZABHA_ZACASType.mapOpcode(
+    ZABHA_ZACASType.mapUopcode(
       _.AMOCAS_B -> amocas_b,
       _.AMOCAS_H -> amocas_h,
     )
@@ -448,7 +450,7 @@ object ScalaUopTable {
   val tableZfaF = {
     import xiangshan.backend.decode.isa.Instructions.F_ZFAType
 
-    F_ZFAType.mapOpcode(
+    F_ZFAType.mapUopcode(
       _.FLEQ_S     -> fleq_fp32,
       _.FLI_S      -> fleq_fp32, // todo
       _.FLTQ_S     -> fltq_fp32,
@@ -462,7 +464,7 @@ object ScalaUopTable {
   val tableZfaD = {
     import xiangshan.backend.decode.isa.Instructions.D_ZFAType
 
-    D_ZFAType.mapOpcode(
+    D_ZFAType.mapUopcode(
       _.FLEQ_D      -> fleq_fp64,
       _.FLI_D       -> fleq_fp64, // todo
       _.FLTQ_D      -> fltq_fp64,
@@ -477,7 +479,7 @@ object ScalaUopTable {
   val tableZfaZfh = {
     import xiangshan.backend.decode.isa.Instructions.ZFH_ZFAType
 
-    ZFH_ZFAType.mapOpcode(
+    ZFH_ZFAType.mapUopcode(
       _.FLEQ_H      -> fleq_fp16,
       _.FLI_H       -> fleq_fp16, // todo
       _.FLTQ_H      -> fltq_fp16,
@@ -490,14 +492,14 @@ object ScalaUopTable {
   val tableZfh = {
     import xiangshan.backend.decode.isa.Instructions.{ZFH64Type,ZFHType}
 
-    val tableZFH64Type = ZFH64Type.mapOpcode(
+    val tableZFH64Type = ZFH64Type.mapUopcode(
       _.FCVT_H_L  -> I2fOpcodes.fcvt_fp16_si64,
       _.FCVT_H_LU -> I2fOpcodes.fcvt_fp16_ui64,
       _.FCVT_L_H  -> fcvt_si64_fp16,
       _.FCVT_LU_H -> fcvt_ui64_fp16,
     )
 
-    val tableZFHType = ZFHType.mapOpcode(
+    val tableZFHType = ZFHType.mapUopcode(
       _.FADD_H    -> FAluOpcodes.fadd_fp16,
       _.FCLASS_H  -> fclass_fp16,
       _.FCVT_H_S  -> fcvt_fp16_fp32,
@@ -510,7 +512,7 @@ object ScalaUopTable {
       _.FEQ_H     -> feq_fp16,
       _.FLE_H     -> fle_fp16,
       _.FLT_H     -> flt_fp16,
-      _.FLH       -> lh,
+      _.FLH       -> (lh.copy() - GpWen + FpWen),
       _.FMADD_H   -> fmadd_fp16,
       _.FMAX_H    -> FAluOpcodes.fmax_fp16,
       _.FMIN_H    -> FAluOpcodes.fmin_fp16,
@@ -523,7 +525,7 @@ object ScalaUopTable {
       _.FSGNJ_H   -> FAluOpcodes.fsgnj_fp16,
       _.FSGNJN_H  -> FAluOpcodes.fsgnjn_fp16,
       _.FSGNJX_H  -> FAluOpcodes.fsgnjx_fp16,
-      _.FSH       -> sh,
+      _.FSH       -> (sh.copy() - Src2Gp + Src2Fp),
       _.FSQRT_H   -> fsqrt_fp16,
       _.FSUB_H    -> FAluOpcodes.fsub_fp16,
     )
@@ -534,7 +536,7 @@ object ScalaUopTable {
   val tableZfhDType = {
     import xiangshan.backend.decode.isa.Instructions.D_ZFHType
 
-    D_ZFHType.mapOpcode(
+    D_ZFHType.mapUopcode(
       _.FCVT_D_H -> fcvt_fp64_fp16,
       _.FCVT_H_D -> fcvt_fp16_fp64,
     )
@@ -543,20 +545,20 @@ object ScalaUopTable {
   val tableZfhmin = {
     import xiangshan.backend.decode.isa.Instructions.ZFHMINType
 
-    ZFHMINType.mapOpcode(
+    ZFHMINType.mapUopcode(
       _.FCVT_S_H -> fcvt_fp32_fp16,
       _.FCVT_H_S -> fcvt_fp16_fp32,
-      _.FLH      -> lh,
+      _.FLH      -> (lh.copy() - GpWen + FpWen),
       _.FMV_H_X  -> I2fOpcodes.fmv_fp16_i,
       _.FMV_X_H  -> fmv_i_fp16,
-      _.FSH      -> sh,
+      _.FSH      -> (sh.copy() - Src2Gp + Src2Fp),
     )
   }
 
   val tableZfhminD = {
     import xiangshan.backend.decode.isa.Instructions.D_ZFHType
 
-    D_ZFHType.mapOpcode(
+    D_ZFHType.mapUopcode(
       _.FCVT_D_H -> fcvt_fp64_fp16,
       _.FCVT_H_D -> fcvt_fp16_fp64,
     )
@@ -567,7 +569,7 @@ object ScalaUopTable {
   val tableZicond = {
     import xiangshan.backend.decode.isa.Instructions.ZICONDType
 
-    ZICONDType.mapOpcode(
+    ZICONDType.mapUopcode(
       _.CZERO_EQZ -> czero_eqz,
       _.CZERO_NEZ -> czero_nez,
     )
@@ -575,7 +577,7 @@ object ScalaUopTable {
 
   val tableZicsr = {
     import xiangshan.backend.decode.isa.Instructions.ZICSRType
-    ZICSRType.mapOpcode(
+    ZICSRType.mapUopcode(
       _.CSRRC  -> clr,
       _.CSRRCI -> clri,
       _.CSRRS  -> set,
@@ -587,7 +589,7 @@ object ScalaUopTable {
 
   val tableZifencei = {
     import xiangshan.backend.decode.isa.Instructions.ZIFENCEIType
-    ZIFENCEIType.mapOpcode(
+    ZIFENCEIType.mapUopcode(
       _.FENCE_I -> fencei,
     )
   }
@@ -596,7 +598,7 @@ object ScalaUopTable {
 
   val tableZknd = {
     import xiangshan.backend.decode.isa.Instructions.ZKND64Type
-    ZKND64Type.mapOpcode(
+    ZKND64Type.mapUopcode(
       _.AES64DS   -> aes64ds,
       _.AES64DSM  -> aes64dsm,
       _.AES64IM   -> aes64im,
@@ -607,7 +609,7 @@ object ScalaUopTable {
 
   val tableZkne = {
     import xiangshan.backend.decode.isa.Instructions.ZKNE64Type
-    ZKNE64Type.mapOpcode(
+    ZKNE64Type.mapUopcode(
       _.AES64ES  -> aes64es,
       _.AES64ESM -> aes64esm,
       _.AES64KS1I -> aes64ks1i,
@@ -618,13 +620,13 @@ object ScalaUopTable {
   val tableZknh = {
     import xiangshan.backend.decode.isa.Instructions.{ZKNH64Type, ZKNHType}
 
-    val tableZKNH64Type = ZKNH64Type.mapOpcode(
+    val tableZKNH64Type = ZKNH64Type.mapUopcode(
       _.SHA512SIG0 -> sha512sig0,
       _.SHA512SIG1 -> sha512sig1,
       _.SHA512SUM0 -> sha512sum0,
       _.SHA512SUM1 -> sha512sum1,
     )
-    val tableZKNHType = ZKNHType.mapOpcode(
+    val tableZKNHType = ZKNHType.mapUopcode(
       _.SHA256SIG0 -> sha256sig0,
       _.SHA256SIG1 -> sha256sig1,
       _.SHA256SUM0 -> sha256sum0,
@@ -636,7 +638,7 @@ object ScalaUopTable {
 
   val tableZksed = {
     import xiangshan.backend.decode.isa.Instructions.ZKSEDType
-    ZKSEDType.mapOpcode(
+    ZKSEDType.mapUopcode(
       _.SM4ED0 -> sm4ed0,
       _.SM4ED1 -> sm4ed1,
       _.SM4ED2 -> sm4ed2,
@@ -650,7 +652,7 @@ object ScalaUopTable {
 
   val tableZksh = {
     import xiangshan.backend.decode.isa.Instructions.ZKSHType
-    ZKSHType.mapOpcode(
+    ZKSHType.mapUopcode(
       _.SM3P0 -> sm3p0,
       _.SM3P1 -> sm3p1,
     )
@@ -659,12 +661,12 @@ object ScalaUopTable {
   val tableSvinval = {
     import xiangshan.backend.decode.isa.Instructions.{SVINVALType, SVINVAL_HType}
 
-    val tableSvinval = SVINVALType.mapOpcode(
+    val tableSvinval = SVINVALType.mapUopcode(
       _.SFENCE_INVAL_IR -> nofence,
       _.SFENCE_W_INVAL  -> nofence,
       _.SINVAL_VMA      -> sfence,
     )
-    val tableSvinvalH = SVINVAL_HType.mapOpcode(
+    val tableSvinvalH = SVINVAL_HType.mapUopcode(
       _.HINVAL_GVMA -> hfence_g,
       _.HINVAL_VVMA -> hfence_v,
     )
@@ -675,7 +677,10 @@ object ScalaUopTable {
   def tableSExt = {
   }
 
-  val tableXSTrap = Map(
-    xiangshan.backend.decode.isa.CustomInstructions.TRAP -> xstrap
-  )
+  val tableXSTrap = {
+    import xiangshan.backend.decode.isa.CustomInstructions.XSTrapType
+    XSTrapType.mapUopcode(
+      _.TRAP -> xstrap
+    )
+  }
 }

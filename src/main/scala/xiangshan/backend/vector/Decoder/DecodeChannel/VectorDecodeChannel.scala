@@ -42,6 +42,7 @@ class VectorDecodeChannel(
   val sew = in.sew
   val lmul = in.lmul
 
+  // Split raw instruction into bit fields for easier decoding
   val instFields: Riscv32BitInst with BitFieldsVec = in.rawInst.asTypeOf(new Riscv32BitInst with BitFieldsVec)
 
   val nf = instFields.NF
@@ -141,6 +142,8 @@ class VectorDecodeChannel(
     }
   }
 
+  // Generate decode tables. A decode field is a signal bundle that can be directly generated
+  // from the instruction bits, with the the instruction bits itself as decode pattern.
   val instDecodeFields: Seq[DecodeField[VecInstPattern, Data]] = Seq(
     FrmRenField,
     FrmField,
@@ -154,6 +157,7 @@ class VectorDecodeChannel(
     ImmIsUnsign5b,
   )
 
+  // Generate decode tables, using both instruction bits and sew as decode pattern.
   val instSewDecodeFields: Seq[DecodeField[DecodePatternComb2[VecInstPattern, SewPattern], UInt]] = Seq(
     Src1SelectField,
     Src2SelectField,
@@ -164,6 +168,7 @@ class VectorDecodeChannel(
   val opcodeFields = Seq.tabulate(maxSplitUopNum)(i => new OpcodeField(i))
   val fuTypeFields = Seq.tabulate(maxSplitUopNum)(i => new FuTypeField(i))
 
+  // Generate decode tables, using instruction bits, sew, lmul and nf-bits (inst(31:29)) as decode pattern.
   val instSewLmulNfDecodeFields = uopInfoFields ++ opcodeFields ++ fuTypeFields ++ Seq(
     NumWbField,
     NumUopField,
@@ -176,10 +181,12 @@ class VectorDecodeChannel(
   println(s"instSewPats.length: ${instSewPats.length}")
   println(s"instSewNfLmulPats.length: ${instSewLmulNfPats.length}")
 
+  // Use different decode patterns and decode fields to prepare decode tables generation
   val instDecodeTable = new DecodeTable(instPats, instDecodeFields)
   val instSewDecodeTable = new DecodeTable(instSewPats, instSewDecodeFields)
   val instSewLmulNfDecodeTable = new DecodeTable(instSewLmulNfPats, instSewLmulNfDecodeFields)
 
+  // Drive the output of decode tables from given input signals. `decode` method will generate decode table
   val instBundle = dontTouch(instDecodeTable.decode(rawInst))
   val instSewBundle = dontTouch(instSewDecodeTable.decode(rawInst ## sew))
   val instSewLmulNfBundle = dontTouch(instSewLmulNfDecodeTable.decode(rawInst ## sew ## lmul ## nf))
@@ -188,6 +195,7 @@ class VectorDecodeChannel(
   println(s"the width of instSewBundle: ${instSewBundle.getWidth}")
   println(s"the width of instSewNfLmulBundle: ${instSewLmulNfBundle.getWidth}")
 
+  // Get diffrent decode fields from different decode tables as output
   val immIsSign5b = instBundle(ImmIsSign5b)
   val immIsUnsign5b = instBundle(ImmIsUnsign5b)
   val isVecMemContinous = instBundle(IsVecMemContinousField)
@@ -204,6 +212,7 @@ class VectorDecodeChannel(
   val numUopOH = instSewLmulNfBundle(NumUopOhField)
   val isWritePartVd = instSewLmulNfBundle(WritePartVdField)
 
+  // Drive the source register select signals of `SrcSelectModule` from decode table output.
   srcSelectModule.in match {
     case in =>
       in.src1Sel := instSewBundle(Src1SelectField)
@@ -230,6 +239,7 @@ class VectorDecodeChannel(
     (tu && !vm && mu)  -> VdDepElim.IfVlmaxAndMaskOne
   ))
 
+  // Drive output signals
   for (i <- 0 until maxSplitUopNum) {
     out.uop(i).valid := uopInfos(i).valid
     out.uop(i).bits.renameInfo.uop := uopInfos(i).bits

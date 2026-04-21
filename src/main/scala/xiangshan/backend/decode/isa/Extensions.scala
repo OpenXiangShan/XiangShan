@@ -9,17 +9,17 @@ import xiangshan.backend.vector.Decoder.Uop.ScalaUopTable._
 object Extensions {
   sealed trait ExtBase {
     val types: Seq[InstType]
-    val table: Map[BitPat, Opcode]
+    val table: Map[BitPat, Seq[Opcode]]
   }
 
   sealed abstract class UnprivExt(
     val types: Seq[InstType] = Seq(),
-    val table: Map[BitPat, Opcode] = Map[BitPat, Opcode](),
+    val table: Map[BitPat, Seq[Opcode]] = Map[BitPat, Seq[Opcode]](),
   ) extends ExtBase
 
   sealed abstract class PrivExt(
     val types: Seq[InstType] = Seq(),
-    val table: Map[BitPat, Opcode] = Map[BitPat, Opcode](),
+    val table: Map[BitPat, Seq[Opcode]] = Map[BitPat, Seq[Opcode]](),
   ) extends ExtBase
 
   sealed trait CombExt[T1 <: ExtBase, T2 <: ExtBase] extends ExtBase
@@ -77,39 +77,39 @@ object Extensions {
     // Todo: This extension has parts of instructions of Zfh
     //       But it has not been defined in riscv-opcodes
     override val types: Seq[InstType] = Seq(ZFHMINType)
-    override val table: Map[BitPat, Opcode] = tableZfhmin
+    override val table: Map[BitPat, Seq[Opcode]] = tableZfhmin
   }
 
   case object H extends PrivExt {
     override val types: Seq[InstType] = Seq(H64Type, HType)
-    override val table: Map[BitPat,Opcode] = tableH
+    override val table: Map[BitPat, Seq[Opcode]] = tableH
   }
 
   case object S extends PrivExt(Seq(SType), tableS)
 
   case object ZacasZabha extends CombExt[Zacas.type, Zabha.type] {
     override val types: Seq[InstType] = Seq(ZABHA_ZACASType)
-    override val table: Map[BitPat, Opcode] = tableZabhaZacas
+    override val table: Map[BitPat, Seq[Opcode]] = tableZabhaZacas
   }
 
   case object ZfaF extends CombExt[Zfa.type, F.type] {
     override val types: Seq[InstType] = Seq(F_ZFAType)
-    override val table: Map[BitPat, Opcode] = tableZfaF
+    override val table: Map[BitPat, Seq[Opcode]] = tableZfaF
   }
 
   case object ZfaD extends CombExt[Zfa.type, D.type] {
     override val types: Seq[InstType] = Seq(D_ZFAType)
-    override val table: Map[BitPat, Opcode] = tableZfaD
+    override val table: Map[BitPat, Seq[Opcode]] = tableZfaD
   }
 
   case object ZfaZfh extends CombExt[Zfa.type, Zfh.type] {
     override val types: Seq[InstType] = Seq(ZFH_ZFAType)
-    override val table: Map[BitPat, Opcode] = tableZfaZfh
+    override val table: Map[BitPat, Seq[Opcode]] = tableZfaZfh
   }
 
   case object ZfhminD extends CombExt[Zfhmin.type, D.type] {
     override val types: Seq[InstType] = Seq(D_ZFHType)
-    override val table: Map[BitPat, Opcode] = tableZfhminD
+    override val table: Map[BitPat, Seq[Opcode]] = tableZfhminD
   }
 
   case object Zicond extends UnprivExt(Seq(ZICONDType), tableZicond)
@@ -147,8 +147,23 @@ object Extensions {
 
   case object XSTrap extends UnprivExt(Seq(XSTrapType), tableXSTrap)
 
+  def extensions: Seq[ExtBase] = Seq(
+    I, M, A, F, D, Zicsr,
+    System, S, Svinval,
+    Za64rs, Zabha, Zacas, ZacasZabha, Zawrs,
+    Zba, Zbb, Zbc, Zbs, Zbkb, Zbkc, Zbkx,
+    V, H,
+    Zvknha,
+    Zvbb,
+    XSTrap,
+    Zicond,
+    Zifencei, Zknd, Zkne, Zknh, Zksed, Zksh,
+    // Zcb, Zcmop,
+    ZfaF, ZfaD, ZfaZfh, Zfh, Zfhmin, ZfhminD,
+  )
+
   trait HasInst { self: ExtBase =>
     val types: Seq[InstType]
-    val table: Map[BitPat, Opcode]
+    val table: Map[BitPat, Seq[Opcode]]
   }
 }

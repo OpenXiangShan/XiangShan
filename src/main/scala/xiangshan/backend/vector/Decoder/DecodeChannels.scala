@@ -35,7 +35,6 @@ import scala.language.implicitConversions
 class DecodeChannels(
   mopWidth: Int,
   uopWidth: Int,
-  extensions: Seq[ExtBase],
   numM2M4M8Channel: (Int, Int, Int) = (8, 8, 8),
   postfix: String = "",
 )(
@@ -50,11 +49,12 @@ class DecodeChannels(
     s"_MOP${mopWidth}_UOP${uopWidth}" +
     s"_M2x${MaxM2UopIdx}_M4x${MaxM4UopIdx}_M8x${MaxM8UopIdx}"
 
-  val simpleExts: Seq[ExtBase] = extensions.filterNot(Seq(V, Zvbb, Zvknha).contains)
+  require(extensions.distinct.size == extensions.size, "Duplicate extensions are not allowed")
+  val simpleExts: Seq[ExtBase] = extensions.diff(Seq(V, Zvbb, Zvknha))
   val simpleInsts = InstPattern.extensionInsts(simpleExts: _*)
-  val simpleTable = simpleExts.map(_.table).reduce(_ ++ _)
 
-  val vectorExts = extensions.filter(Seq(V, Zvbb, Zvknha).contains)
+  // Get vector instruction bits pattern by extensions
+  val vectorExts = extensions.intersect(Seq(V, Zvbb, Zvknha))
   val vectorInsts = InstPattern.extensionInsts(vectorExts: _*).map(_.asInstanceOf[VecInstPattern])
 
   val uopBufferSize = maxSplitUopNum - 1
@@ -81,6 +81,7 @@ class DecodeChannels(
   val insts: Seq[Riscv32BitInst with BitFieldsVec] = in.mops.map(_.bits.info.rawInst.asTypeOf(new Riscv32BitInst with BitFieldsVec))
   val inMopCtrl: Seq[MopCtrlBundle] = in.mops.map(_.bits.ctrl)
 
+  // Instantiate vector decode channel by vector instruction patterns
   val vectorDecodeChannelM8: Definition[VectorDecodeChannel] = Definition(new VectorDecodeChannel(vectorInsts))
   val vsetDecodeChannel: Definition[VsetDecoder] = Definition(new VsetDecoder)
 
@@ -89,7 +90,7 @@ class DecodeChannels(
 //  lazy val vecDecodeChannelM2: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (true, false, false)))
 //  lazy val vecDecodeChannelM1: Definition[VecDecodeChannel] = Definition(new VecDecodeChannel(vecInstPatterns, enableM2M4M8 = (false, false, false)))
 
-  val simpleDecodeChannel: Definition[SimpleDecodeChannel] = Definition(new SimpleDecodeChannel(simpleInsts, simpleTable))
+  val simpleDecodeChannel: Definition[SimpleDecodeChannel] = Definition(new SimpleDecodeChannel(simpleInsts))
   val pseudoDecodeChannel: Definition[PseudoDecodeChannel] = Definition(new PseudoDecodeChannel())
 
 //  out.bits.imm := Mux1HLookUp(
@@ -119,7 +120,7 @@ class DecodeChannels(
 
   val vecUopOuts: Seq[Seq[ValidIO[VecDecodeChannelOutputUop]]] = vectorDecodeChannels.map(_.out.uop)
   val vsetUopOuts: Seq[ValidIO[VsetDecoder.Out]] = vsetDecodeChannels.map(_.out)
-  val simUopOuts: Seq[ValidIO[SimpleDecodeChannelOutput]] = simpleDecodeChannels.map(_.out)
+  val simUopOuts: Seq[ValidIO[SimpleDecodeChannelOutput]] = simpleDecodeChannels.map(_.out.uop(0)) // TODO: wait for simple channel supporting multi-uop in one mop
   val psdUopOuts: Seq[ValidIO[PseudoDecodeChannel.Out]] = pseudoDecodeChannels.map(_.out)
 
   val vecUopNumOHs: Seq[NumUopOH.Type] = vectorDecodeChannels.map(_.out.uopNumOH)
@@ -495,12 +496,12 @@ object DecodeChannelOutput {
     uop.opcode := suop.opcode
     uop.isVset := false.B
 
-    uop.src1Ren := suop.src1RenType.ren
-    uop.src1Type := suop.src1RenType.typ
-    uop.src2Ren := suop.src2RenType.ren
-    uop.src2Type := suop.src2RenType.typ
-    uop.src3Ren := suop.src3RenType.ren
-    uop.src3Type := suop.src3RenType.typ
+    uop.src1Ren := suop.renameInfo.src1Ren
+    uop.src1Type := suop.renameInfo.src1Type
+    uop.src2Ren := suop.renameInfo.src2Ren
+    uop.src2Type := suop.renameInfo.src2Type
+    uop.src3Ren := suop.renameInfo.src3Ren
+    uop.src3Type := suop.renameInfo.src3Type
     uop.lsrc1 := suop.lsrc1
     uop.lsrc2 := suop.lsrc2
     uop.lsrc3 := suop.lsrc3
@@ -509,8 +510,8 @@ object DecodeChannelOutput {
     uop.frmRen := suop.frmRen
     uop.maskType := 0.U.asTypeOf(uop.maskType)
     uop.intRmRen := false.B
-    uop.gpWen := suop.gpWen
-    uop.fpWen := suop.fpWen
+    uop.gpWen := suop.renameInfo.gpWen
+    uop.fpWen := suop.renameInfo.fpWen
     uop.vpWen := false.B
 
     uop.vlWen := false.B
@@ -524,9 +525,9 @@ object DecodeChannelOutput {
 
     uop.vm := false.B
 
-    uop.noSpec := suop.noSpec
-    uop.blockBack := suop.blockBack
-    uop.flushPipe := suop.flushPipe
+    uop.noSpec := suop.renameInfo.noSpec
+    uop.blockBack := suop.renameInfo.blockBack
+    uop.flushPipe := suop.renameInfo.flushPipe
     uop.selImm := suop.selImm
     uop.imm := suop.imm
     uop.commitType := suop.commitType
@@ -666,24 +667,23 @@ object DecodeChannelsMain extends App {
     case XSVectorParamKey => XSVectorParameters(128)
   })
 
-  val extensions: Seq[ExtBase] = Seq(
-    I, M, A, F, D, Zicsr,
-    System, S,
-    Za64rs, /*Zacas,*/ Zawrs,
-    Zba, Zbb, Zbc, Zbs, Zbkb, Zbkc, Zbkx,
-    V,
-    Zvbb,
-    Zvknha,
-    XSTrap,
-    // Zcb, Zcmop,
-    // Zfa, Zfh, ZfaZfh, ZfaF, ZfaD, Zfhmin,
-  )
+  // val extensions: Seq[ExtBase] = Seq(
+  //   I, M, A, F, D, Zicsr,
+  //   System, S,
+  //   Za64rs, /*Zacas,*/ Zawrs,
+  //   Zba, Zbb, Zbc, Zbs, Zbkb, Zbkc, Zbkx,
+  //   V,
+  //   Zvbb,
+  //   Zvknha,
+  //   XSTrap,
+  //   // Zcb, Zcmop,
+  //   // Zfa, Zfh, ZfaZfh, ZfaF, ZfaD, Zfhmin,
+  // )
 
   Verilog.emitVerilog(
     new DecodeChannels(
       mopWidth = 8,
       uopWidth = 8,
-      extensions = extensions,
       numM2M4M8Channel = (8, 8, 8),
       postfix = "_" + LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd")) + "_1"
     )(defaultConfig),
