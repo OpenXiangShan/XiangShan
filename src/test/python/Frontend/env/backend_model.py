@@ -1688,6 +1688,45 @@ class BackendModel:
             "is_rvc": int(prev_is_rvc),
         }
 
+    def _redirect_drive_context_for_ftq_group(self, ftq_flag: int, ftq_value: int) -> Optional[dict]:
+        group = (int(ftq_flag), int(ftq_value))
+        history = self._ftq_group_pc_history.get(group)
+        start_pc = self._observed_ftq_start_pc(int(ftq_flag), int(ftq_value))
+        if not history or start_pc is None:
+            return None
+        last_pc, last_is_rvc = history[-1]
+        last_pc = int(last_pc)
+        last_is_rvc = bool(last_is_rvc)
+        drive_ftq_offset = (
+            (last_pc - int(start_pc) + (0 if last_is_rvc else 2)) // 2
+        ) & 0x1F
+        return {
+            "ftq_flag": int(ftq_flag),
+            "ftq_value": int(ftq_value),
+            "pc": int(start_pc),
+            "ftq_offset": int(drive_ftq_offset),
+            "is_rvc": int(last_is_rvc),
+        }
+
+    def _latest_non_stale_redirect_drive_context(self) -> Optional[dict]:
+        candidates: list[tuple[int, int]] = []
+        if self._current_ftq_entry is not None:
+            candidates.append((int(self._current_ftq_entry.ftq_flag), int(self._current_ftq_entry.ftq_value)))
+        candidates.extend((int(entry.ftq_flag), int(entry.ftq_value)) for entry in reversed(self.ftq_entries))
+
+        seen: set[tuple[int, int]] = set()
+        for ftq_flag, ftq_value in candidates:
+            group = (int(ftq_flag), int(ftq_value))
+            if group in seen:
+                continue
+            seen.add(group)
+            if self._ftq_ptr_is_stale_relative_to_commit(int(ftq_flag), int(ftq_value)):
+                continue
+            context = self._redirect_drive_context_for_ftq_group(int(ftq_flag), int(ftq_value))
+            if context is not None:
+                return context
+        return None
+
     def _assert_redirect_drive_ftq_not_stale(
         self,
         *,
@@ -2543,6 +2582,14 @@ class BackendModel:
             drive_from_pc = int(drive_override.get("pc", drive_from_pc))
             drive_ftq_offset = int(drive_override.get("ftq_offset", drive_ftq_offset))
             drive_is_rvc = int(drive_override.get("is_rvc", drive_is_rvc))
+        if self._ftq_ptr_is_stale_relative_to_commit(int(drive_ftq_flag), int(drive_ftq_value)):
+            fallback_context = self._latest_non_stale_redirect_drive_context()
+            if fallback_context is not None:
+                drive_ftq_flag = int(fallback_context.get("ftq_flag", drive_ftq_flag))
+                drive_ftq_value = int(fallback_context.get("ftq_value", drive_ftq_value))
+                drive_from_pc = int(fallback_context.get("pc", drive_from_pc))
+                drive_ftq_offset = int(fallback_context.get("ftq_offset", drive_ftq_offset))
+                drive_is_rvc = int(fallback_context.get("is_rvc", drive_is_rvc))
         self._assert_redirect_drive_ftq_not_stale(
             payload_ftq_flag=int(ftq_flag),
             payload_ftq_value=int(ftq_value),

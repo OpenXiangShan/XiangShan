@@ -75,6 +75,15 @@ def _warmup_commits(env, target_count: int = 4, max_cycles: int = 3000) -> int:
     ).run(env)
 
 
+def _step_until_coverage_hits(env, expected_keys, max_cycles: int = 32) -> bool:
+    keys = list(expected_keys)
+    for _ in range(max(0, int(max_cycles))):
+        env.step(1)
+        if all(env.functional_coverage.key_hit(*key) for key in keys):
+            return True
+    return all(env.functional_coverage.key_hit(*key) for key in keys)
+
+
 def _queue_backend_fault_redirect(env, *, target_pc: int, **fault_bits: int) -> None:
     last_pc = env.monitor.recent_pcs(1)[-1]
     env.backend_model._queue_redirect_event(
@@ -110,9 +119,18 @@ def test_baremode_mmio_uncache_redirect_pilot(env):
     commits = _warmup_commits(env, target_count=4)
 
     env.backend_model.inject_redirect(_MMIO_BASE, "ctrl_redirect")
-    env.step(120)
+    covered = _step_until_coverage_hits(
+        env,
+        [
+            ("fetch_path_type", "mmio_uncache"),
+            ("frontend_exception_type", "af"),
+            ("fetch_path_x_exception", "mmio_x_af"),
+        ],
+        max_cycles=24,
+    )
 
     assert commits >= 4
+    assert covered is True
     assert env.functional_coverage.key_hit("fetch_path_type", "mmio_uncache")
     assert env.functional_coverage.key_hit("frontend_exception_type", "af")
     assert env.functional_coverage.key_hit("fetch_path_x_exception", "mmio_x_af")
