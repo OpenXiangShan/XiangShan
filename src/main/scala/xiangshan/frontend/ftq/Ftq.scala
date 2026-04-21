@@ -280,7 +280,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     req.backendException := Mux(backendExceptionPtr === pfPtr(i), backendException, ExceptionType.None)
     req.isSoftPrefetch   := false.B
   }
-  io.toICache.toPrefetch.bits.twoPrefetchCase := Mux(canTwoPrefetch, twoPrefetchCase, TwoPrefetchCase.Unable)
+  io.toICache.toPrefetch.bits.twoPrefetchCase := Mux(canTwoPrefetch, twoPrefetchCase, TwoPrefetchCase.Conflict)
 
   private val ifuReqValid = bpuPtr(0) > ifuPtr(0) && !redirect.valid &&
     distanceBetween(ifuPtr(0), commitPtr(0)) < (FtqSize - 1).U
@@ -597,5 +597,17 @@ class Ftq(implicit p: Parameters) extends FtqModule
   XSPerfAccumulate(
     "2prefetch",
     io.toICache.toPrefetch.fire && io.toICache.toPrefetch.bits.twoPrefetchCase.valid
+  )
+  XSPerfSeqAccumulate(
+    "2prefetch_fail_reason",
+    io.toICache.toPrefetch.fire && !io.toICache.toPrefetch.bits.twoPrefetchCase.valid,
+    Seq(
+      ("fb_not_enough", distanceBetween(bpuPtr(0), pfPtr(0)) <= 3.U),
+      ("fb1_exception", backendException.hasException && backendExceptionPtr === pfPtr(0)),
+      ("fb2_exception", backendException.hasException && backendExceptionPtr === pfPtr(1)),
+      ("page_conflict", prefetchReq(0).vPageNumber =/= prefetchReq(1).vPageNumber),
+      ("sram_conflict", twoPrefetchCase.isConflict)
+    ),
+    withPriority = true
   )
 }

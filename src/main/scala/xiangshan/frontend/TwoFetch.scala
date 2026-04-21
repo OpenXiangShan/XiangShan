@@ -32,7 +32,7 @@ import utils.EnumUInt
 class TwoPrefetchCase extends Bundle {
   val value: UInt = TwoPrefetchCase.Value()
 
-  def valid: Bool = value.orR
+  def valid: Bool = !isConflict
 
   // select 2 vaddr to read ICacheMetaArray
   def selectMetaVAddr(reqVec: Vec[PrefetchReqBundle]): Vec[PrunedAddr] =
@@ -59,6 +59,7 @@ class TwoPrefetchCase extends Bundle {
     )
 
   // NOTE: refer to object TwoPrefetchCase.Value for explanation
+  def isConflict:   Bool = !value.orR
   def isSameLine:   Bool = value(0)
   def isOverlap1:   Bool = value(1)
   def isOverlap2:   Bool = value(2)
@@ -83,7 +84,7 @@ class TwoPrefetchCase extends Bundle {
 }
 
 object TwoPrefetchCase {
-  def Unable: TwoPrefetchCase = apply(Value.Unable)
+  def Conflict: TwoPrefetchCase = apply(Value.Conflict)
 
   def apply(that: UInt, canAssert: Bool = true.B): TwoPrefetchCase = {
     when(canAssert) {
@@ -115,8 +116,8 @@ object TwoPrefetchCase {
     apply(VecInit(sameLine, overlap1, overlap2, interleave).asUInt, canAssert)
 
   private object Value extends EnumUInt(5, useOneHot = true, allowZeroForOneHot = true) {
-    // cannot do 2-prefetch due to SRAM read port conflict
-    def Unable: UInt = 0.U(width.W)
+    // Conflict: cannot do 2-prefetch due to SRAM read port conflict
+    def Conflict: UInt = 0.U(width.W)
 
     /* SameLine: 2 fetch block in the same cacheline(s)
      * |    cacheline0    |    cacheline1    |
