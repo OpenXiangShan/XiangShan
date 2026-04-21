@@ -2028,7 +2028,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.outer_cpu_halt := RegNext(io.ooo_to_mem.backendToTopBypass.cpuHalted)
   io.outer_l2_flush_en := io.ooo_to_mem.csrCtrl.flush_l2_enable
   io.outer_power_down_en := io.ooo_to_mem.csrCtrl.power_down_enable
-  io.outer_cpu_critical_error := RegNext(io.ooo_to_mem.backendToTopBypass.cpuCriticalError)
+  io.outer_cpu_critical_error := RegNext(io.ooo_to_mem.backendToTopBypass.cpuCriticalError, false.B)
   io.outer_msi_ack := io.ooo_to_mem.backendToTopBypass.msiAck
   io.outer_teemsi_ack zip io.ooo_to_mem.backendToTopBypass.teemsiAck foreach { case (teemsi_ack, teemsiAck) =>
     teemsi_ack := teemsiAck
