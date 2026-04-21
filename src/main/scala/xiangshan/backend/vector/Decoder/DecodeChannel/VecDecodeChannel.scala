@@ -17,7 +17,6 @@ import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
 import xiangshan.backend.vector.Decoder.Split.{SplitType, SplitTypeOH}
 import xiangshan.backend.vector.Decoder.Types.{EnumLMUL, NumWB, VdDepElim}
-import xiangshan.backend.vector.Decoder.Uop.UopInfoRenameWithIllegal
 import xiangshan.backend.vector.Decoder.util._
 import xiangshan.backend.vector.Decoder.{util, _}
 import xiangshan.backend.vector._

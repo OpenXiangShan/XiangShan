@@ -29,22 +29,6 @@ class DecodeStageImp(
   with HasXSParameter
   with HasPerfEvents {
 
-  val extensions: Seq[ExtBase] = Seq(
-    I, M, A, F, D, Zicsr,
-    System, S, Svinval,
-    H,
-    Za64rs, Zabha, Zacas, ZacasZabha, Zawrs,
-    Zba, Zbb, Zbc, Zbs, Zbkb, Zbkc, Zbkx,
-    V,
-    Zvbb,
-    Zvknha,
-    XSTrap,
-    Zicond,
-    Zifencei, Zknd, Zkne, Zknh, Zksed, Zksh,
-    // Zcb, Zcmop,
-    ZfaF, ZfaD, ZfaZfh, Zfh, Zfhmin, ZfhminD,
-  )
-
   import DecodeStage._
 
   val in = IO(new In)
@@ -68,7 +52,6 @@ class DecodeStageImp(
   val decodeChannels: DecodeChannels = Module(new DecodeChannels(
     mopWidth = DecodeWidth,
     uopWidth = RenameWidth,
-    extensions = extensions,
     numM2M4M8Channel = (8, 8, 8),
   ))
 
