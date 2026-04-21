@@ -594,9 +594,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
     "total_commits",
     commit
   )
-  XSPerfAccumulate(
+  XSPerfSeqAccumulate(
     "2prefetch",
-    io.toICache.toPrefetch.fire && io.toICache.toPrefetch.bits.twoPrefetchCase.valid
+    io.toICache.toPrefetch.fire && io.toICache.toPrefetch.bits.twoPrefetchCase.valid,
+    Seq(
+      ("total", true.B)
+    ) ++ io.toICache.toPrefetch.bits.twoPrefetchCase.getValidSeq
   )
   XSPerfSeqAccumulate(
     "2prefetch_fail_reason",

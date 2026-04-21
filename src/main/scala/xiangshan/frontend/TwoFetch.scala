@@ -81,6 +81,8 @@ class TwoPrefetchCase extends Bundle {
         Mux(isOverlap1 || isInterleave, 0.U.asTypeOf(readInfoVec(0)), readInfoVec(1))
       )
     )
+
+  def getValidSeq: Seq[(String, Bool)] = TwoPrefetchCase.Value.getValidSeq(value, exclude = Set("Conflict"))
 }
 
 object TwoPrefetchCase {
