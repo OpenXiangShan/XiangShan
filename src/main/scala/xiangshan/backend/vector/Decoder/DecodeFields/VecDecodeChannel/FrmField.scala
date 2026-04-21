@@ -18,6 +18,13 @@ object Frm extends NamedUInt(3) {
   val DYN = 7.U(width.W)
 }
 
+/**
+ * `FrmField` is a `DecodeField` that decodes the rounding mode (frm) for vector floating-point instructions.
+ * It generates a `BitPat` based on the instruction pattern, categorizing instructions into three groups:
+ * - Rounding to Zero (RTZ)
+ * - Rounding to Odd (ROD)
+ * - Dynamic Rounding Mode (DYN)
+ */
 object FrmField extends DecodeField[VecInstPattern, UInt] {
 
   override def name: String = "frm"

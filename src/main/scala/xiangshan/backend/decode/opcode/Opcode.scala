@@ -6,7 +6,7 @@ import chisel3.util._
 import xiangshan.backend.decode.opcode.OpcodeTraits._
 import xiangshan.backend.vector.Decoder.Types
 import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, MaskType, Operand, OperandType}
-import xiangshan.backend.vector.Decoder.Uop.UopInfoRename
+import xiangshan.backend.vector.Decoder.Uop.{UopInfoRename, UopInfoRenameSimple}
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
 import yunsuan.encoding.Opcode.Opcodes
 
@@ -171,72 +171,72 @@ object Opcode {
   object AluOpcodes extends Opcodes {
     // slliuw: ZEXT(src1[31:0]) << shamt
     // sll:     src1 << src2
-    val slliuw     = Value(bb"000_0000")
-    val sll        = Value(bb"000_0001")
+    val slliuw     = IntIType(bb"000_0000")
+    val sll        = IntRType(bb"000_0001")
 
     // bclr:    src1 & ~(1 << src2[5:0])
     // bset:    src1 | (1 << src2[5:0])
     // binv:    src1 ^ (1 << src2[5:0])
-    val bclr       = Value(bb"000_0010")
-    val bset       = Value(bb"000_0011")
-    val binv       = Value(bb"000_0100")
+    val bclr       = IntRType(bb"000_0010")
+    val bset       = IntRType(bb"000_0011")
+    val binv       = IntRType(bb"000_0100")
 
     // srl:     src1 >> src2
     // bext:    (src1 >> src2)[0]
     // sra:     src1 >> src2 (arithmetic)
-    val srl        = Value(bb"000_0101")
-    val bext       = Value(bb"000_0110")
-    val sra        = Value(bb"000_0111")
+    val srl        = IntRType(bb"000_0101")
+    val bext       = IntRType(bb"000_0110")
+    val sra        = IntRType(bb"000_0111")
 
     // rol:     (src1 << src2) | (src1 >> (xlen - src2))
     // ror:     (src1 >> src2) | (src1 << (xlen - src2))
-    val rol        = Value(bb"000_1001")
-    val ror        = Value(bb"000_1011")
+    val rol        = IntRType(bb"000_1001")
+    val ror        = IntRType(bb"000_1011")
 
     // addw:      SEXT((src1 + src2)[31:0])
     // oddaddw:   SEXT((src1[0] + src2)[31:0])
     // subw:      SEXT((src1 - src2)[31:0])
     // lui32addw: SEXT(SEXT(src2[11:0], 32) + {src2[31:12], 12'b0}, 64)
-    val addw       = Value(bb"001_0000")
-    val oddaddw    = Value(bb"001_0001")
-    val subw       = Value(bb"001_0010")
-    val lui32addw  = Value(bb"001_0011")
+    val addw       = IntRType(bb"001_0000")
+    val oddaddw    = Value(bb"001_0001") // TODO: fusion decode
+    val subw       = IntRType(bb"001_0010")
+    val lui32addw  = Value(bb"001_0011") // TODO: fusion decode
 
     // addwbit:   (src1 + src2)[0]
     // addwbyte:  (src1 + src2)[7:0]
     // addwzexth: ZEXT((src1  + src2)[15:0])
     // addwsexth: SEXT((src1  + src2)[15:0])
-    val addwbit    = Value(bb"001_0100")
-    val addwbyte   = Value(bb"001_0101")
-    val addwzexth  = Value(bb"001_0110")
-    val addwsexth  = Value(bb"001_0111")
+    val addwbit    = Value(bb"001_0100") // TODO: fusion decode
+    val addwbyte   = Value(bb"001_0101") // TODO: fusion decode
+    val addwzexth  = Value(bb"001_0110") // TODO: fusion decode
+    val addwsexth  = Value(bb"001_0111") // TODO: fusion decode
 
     // sllw:     SEXT((src1 << src2)[31:0])
     // srlw:     SEXT((src1[31:0] >> src2)[31:0])
     // sraw:     SEXT((src1[31:0] >> src2)[31:0])
-    val sllw       = Value(bb"001_1000")
-    val srlw       = Value(bb"001_1001")
-    val sraw       = Value(bb"001_1010")
-    val rolw       = Value(bb"001_1100")
-    val rorw       = Value(bb"001_1101")
+    val sllw       = IntRType(bb"001_1000")
+    val srlw       = IntRType(bb"001_1001")
+    val sraw       = IntRType(bb"001_1010")
+    val rolw       = IntRType(bb"001_1100")
+    val rorw       = IntRType(bb"001_1101")
 
     // adduw:  src1[31:0]  + src2
     // oddadd:  src1[0]     + src2
     // add:     src1        + src2
     // lui32add: SEXT(src2[11:0]) + {src2[63:12], 12'b0}
-    val adduw      = Value(bb"010_0000")
-    val oddadd     = Value(bb"010_0001")
-    val add        = Value(bb"010_0010")
-    val lui32add   = Value(bb"010_0011")
+    val adduw      = IntRType(bb"010_0000")
+    val oddadd     = Value(bb"010_0001") // TODO: fusion decode
+    val add        = IntRType(bb"010_0010")
+    val lui32add   = Value(bb"010_0011") // TODO: fusion decode
 
     // sr29add: src1[63:29] + src2
     // sr30add: src1[63:30] + src2
     // sr31add: src1[63:31] + src2
     // sr32add: src1[63:32] + src2
-    val sr29add    = Value(bb"010_0100")
-    val sr30add    = Value(bb"010_0101")
-    val sr31add    = Value(bb"010_0110")
-    val sr32add    = Value(bb"010_0111")
+    val sr29add    = Value(bb"010_0100") // TODO: fusion decode
+    val sr30add    = Value(bb"010_0101") // TODO: fusion decode
+    val sr31add    = Value(bb"010_0110") // TODO: fusion decode
+    val sr32add    = Value(bb"010_0111") // TODO: fusion decode
 
     // sh1adduw: {src1[31:0], 1'b0} + src2
     // sh1add: {src1[62:0], 1'b0} + src2
@@ -245,50 +245,50 @@ object Opcode {
     // sh3add_uw: {src1[31:0], 3'b0} + src2
     // sh3add: {src1[60:0], 3'b0} + src2
     // sh4add: {src1[59:0], 4'b0} + src2
-    val sh1adduw   = Value(bb"010_1000")
-    val sh1add     = Value(bb"010_1001")
-    val sh2adduw   = Value(bb"010_1010")
-    val sh2add     = Value(bb"010_1011")
-    val sh3adduw   = Value(bb"010_1100")
-    val sh3add     = Value(bb"010_1101")
-    val sh4add     = Value(bb"010_1111")
+    val sh1adduw   = IntRType(bb"010_1000")
+    val sh1add     = IntRType(bb"010_1001")
+    val sh2adduw   = IntRType(bb"010_1010")
+    val sh2add     = IntRType(bb"010_1011")
+    val sh3adduw   = IntRType(bb"010_1100")
+    val sh3add     = IntRType(bb"010_1101")
+    val sh4add     = Value(bb"010_1111") // TODO: fusion decode
 
     // SUB-op: src1 - src2
-    val sub        = Value(bb"011_0000")
-    val sltu       = Value(bb"011_0001")
-    val slt        = Value(bb"011_0010")
-    val maxu       = Value(bb"011_0100")
-    val minu       = Value(bb"011_0101")
-    val max        = Value(bb"011_0110")
-    val min        = Value(bb"011_0111")
+    val sub        = IntRType(bb"011_0000")
+    val sltu       = IntRType(bb"011_0001")
+    val slt        = IntRType(bb"011_0010")
+    val maxu       = IntRType(bb"011_0100")
+    val minu       = IntRType(bb"011_0101")
+    val max        = IntRType(bb"011_0110")
+    val min        = IntRType(bb"011_0111")
 
     // Zicond
-    val czero_eqz  = Value(bb"111_0100")
-    val czero_nez  = Value(bb"111_0110")
+    val czero_eqz  = IntRType(bb"111_0100")
+    val czero_nez  = IntRType(bb"111_0110")
 
     // misc optype
-    val and        = Value(bb"100_0000")
-    val andn       = Value(bb"100_0001")
-    val or         = Value(bb"100_0010")
-    val orn        = Value(bb"100_0011")
-    val xor        = Value(bb"100_0100")
-    val xnor       = Value(bb"100_0101")
-    val orcb       = Value(bb"100_0110")
+    val and        = IntRType(bb"100_0000")
+    val andn       = IntRType(bb"100_0001")
+    val or         = IntRType(bb"100_0010")
+    val orn        = IntRType(bb"100_0011")
+    val xor        = IntRType(bb"100_0100")
+    val xnor       = IntRType(bb"100_0101")
+    val orcb       = IntIType(bb"100_0110")
 
-    val sextb      = Value(bb"100_1000")
-    val packh      = Value(bb"100_1001")
-    val sexth      = Value(bb"100_1010")
-    val packw      = Value(bb"100_1011")
+    val sextb      = IntIType(bb"100_1000")
+    val packh      = IntRType(bb"100_1001")
+    val sexth      = IntIType(bb"100_1010")
+    val packw      = IntRType(bb"100_1011")
 
-    val revb       = Value(bb"101_0000")
-    val rev8       = Value(bb"101_0001")
-    val pack       = Value(bb"101_0010")
-    val orh48      = Value(bb"101_0011")
+    val revb       = IntIType(bb"101_0000")
+    val rev8       = IntIType(bb"101_0001")
+    val pack       = IntRType(bb"101_0010")
+    val orh48      = Value(bb"101_0011") // TODO: fusion decode
 
-    val szewl1     = Value(bb"101_1000")
-    val szewl2     = Value(bb"101_1001")
-    val szewl3     = Value(bb"101_1010")
-    val byte2      = Value(bb"101_1011")
+    val szewl1     = Value(bb"101_1000") // TODO: fusion decode
+    val szewl2     = Value(bb"101_1001") // TODO: fusion decode
+    val szewl3     = Value(bb"101_1010") // TODO: fusion decode
+    val byte2      = Value(bb"101_1011") // TODO: fusion decode
 
     val andlsb     = Value(bb"110_0000")
     val andzexth   = Value(bb"110_0001")
@@ -299,11 +299,11 @@ object Opcode {
     val orcblsb    = Value(bb"110_0110")
     val orcbzexth  = Value(bb"110_0111")
     // for xstrap
-    val xstrap     = Value(bb"111_1111")
+    val xstrap     = IntIType(bb"111_1111") + BlockBack // CustomTrapPattern
 
-    this.all.foreach(_ + GpWen)
-    this.all.foreach(_ + Src1Gp)
-    (this.all.toSet -- Seq(sextb, sexth, orcb, rev8, revb)).foreach(_ + Src2En)
+    // this.all.foreach(_ + GpWen)
+    // this.all.foreach(_ + Src1Gp)
+    // (this.all.toSet -- Seq(sextb, sexth, orcb, rev8, revb)).foreach(_ + Src2En)
 
     def logicToLsb(func: UInt) = Cat("b110".U(3.W), func(3, 1), 0.U(1.W))
     def logicToZexth(func: UInt) = Cat("b110".U(3.W), func(3, 1), 1.U(1.W))
@@ -359,21 +359,21 @@ object Opcode {
 
   object BruOpcodes extends Opcodes {
     // branch
-    val beq        = Value(bb"000_000")
-    val bne        = Value(bb"000_001")
-    val blt        = Value(bb"000_100")
-    val bge        = Value(bb"000_101")
-    val bltu       = Value(bb"001_000")
-    val bgeu       = Value(bb"001_001")
+    val beq        = IntBSType(bb"000_000")
+    val bne        = IntBSType(bb"000_001")
+    val blt        = IntBSType(bb"000_100")
+    val bge        = IntBSType(bb"000_101")
+    val bltu       = IntBSType(bb"001_000")
+    val bgeu       = IntBSType(bb"001_001")
 
     def getBranchType(func: UInt) = func(3, 1)
     def isBranchInvert(func: UInt) = func(0)
   }
 
   object JmpOpcodes extends Opcodes {
-    val jal        = Value(bb"111_1000")
-    val jalr       = Value(bb"111_1001")
-    val auipc      = Value(bb"111_1010")
+    val jal        = IntUJType(bb"111_1000")
+    val jalr       = IntIType(bb"111_1001")
+    val auipc      = IntUJType(bb"111_1010")
 
     def jumpOpisJalr(op: UInt) = op(0)
     def jumpOpisAuipc(op: UInt) = op(1)
@@ -382,12 +382,12 @@ object Opcode {
   object MulOpcodes extends Opcodes {
     // mul
     // bit encoding: | type (2bit) | isWord(1bit) | opcode(2bit) |
-    val mul    = Value(bb"00000")
-    val mulh   = Value(bb"00001")
-    val mulhsu = Value(bb"00010")
-    val mulhu  = Value(bb"00011")
-    val mulw   = Value(bb"00100")
-    val mulw7  = Value(bb"01100")
+    val mul    = IntRType(bb"00000")
+    val mulh   = IntRType(bb"00001")
+    val mulhsu = IntRType(bb"00010")
+    val mulhu  = IntRType(bb"00011")
+    val mulw   = IntRType(bb"00100")
+    val mulw7  = IntRType(bb"01100")
     def isSign(op: UInt) = !op(1)
     def isW(op: UInt) = op(2)
     def isH(op: UInt) = op(1, 0) =/= 0.U
@@ -397,15 +397,15 @@ object Opcode {
   object DivOpcodes extends Opcodes {
     // div
     // bit encoding: | type (2bit) | isWord(1bit) | isSign(1bit) | opcode(1bit) |
-    val div    = Value(bb"10000")
-    val divu   = Value(bb"10010")
-    val rem    = Value(bb"10001")
-    val remu   = Value(bb"10011")
+    val div    = IntRType(bb"10000")
+    val divu   = IntRType(bb"10010")
+    val rem    = IntRType(bb"10001")
+    val remu   = IntRType(bb"10011")
 
-    val divw   = Value(bb"10100")
-    val divuw  = Value(bb"10110")
-    val remw   = Value(bb"10101")
-    val remuw  = Value(bb"10111")
+    val divw   = IntRType(bb"10100")
+    val divuw  = IntRType(bb"10110")
+    val remw   = IntRType(bb"10101")
+    val remuw  = IntRType(bb"10111")
 
     def isSign(op: UInt) = !op(1)
     def isW(op: UInt) = op(2)
@@ -506,24 +506,24 @@ object Opcode {
     protected val uopLoad = bb"0"
 
     // normal load
-    val lb     = Value(SCALA, nonH, nonX, sign  , B, uopLoad)
-    val lh     = Value(SCALA, nonH, nonX, sign  , H, uopLoad)
-    val lw     = Value(SCALA, nonH, nonX, sign  , W, uopLoad)
-    val ld     = Value(SCALA, nonH, nonX, sign  , D, uopLoad)
-    val lq     = Value(SCALA, nonH, nonX, sign  , Q, uopLoad)
-    val lbu    = Value(SCALA, nonH, nonX, unsign, B, uopLoad)
-    val lhu    = Value(SCALA, nonH, nonX, unsign, H, uopLoad)
-    val lwu    = Value(SCALA, nonH, nonX, unsign, W, uopLoad)
+    val lb     = IntIType(SCALA, nonH, nonX, sign  , B, uopLoad)
+    val lh     = IntIType(SCALA, nonH, nonX, sign  , H, uopLoad)
+    val lw     = IntIType(SCALA, nonH, nonX, sign  , W, uopLoad)
+    val ld     = IntIType(SCALA, nonH, nonX, sign  , D, uopLoad)
+    val lq     = IntIType(SCALA, nonH, nonX, sign  , Q, uopLoad) // TODO: no corresponding store instruction
+    val lbu    = IntIType(SCALA, nonH, nonX, unsign, B, uopLoad)
+    val lhu    = IntIType(SCALA, nonH, nonX, unsign, H, uopLoad)
+    val lwu    = IntIType(SCALA, nonH, nonX, unsign, W, uopLoad)
     // hypervior load
-    val hlvb   = Value(SCALA, isH, nonX, sign  , B, uopLoad)
-    val hlvh   = Value(SCALA, isH, nonX, sign  , H, uopLoad)
-    val hlvw   = Value(SCALA, isH, nonX, sign  , W, uopLoad)
-    val hlvd   = Value(SCALA, isH, nonX, sign  , D, uopLoad)
-    val hlvbu  = Value(SCALA, isH, nonX, unsign, B, uopLoad)
-    val hlvhu  = Value(SCALA, isH, nonX, unsign, H, uopLoad)
-    val hlvwu  = Value(SCALA, isH, nonX, unsign, W, uopLoad)
-    val hlvxhu = Value(SCALA, isH, isX , unsign, H, uopLoad)
-    val hlvxwu = Value(SCALA, isH, isX , unsign, W, uopLoad)
+    val hlvb   = IntIType(SCALA, isH, nonX, sign  , B, uopLoad)
+    val hlvh   = IntIType(SCALA, isH, nonX, sign  , H, uopLoad)
+    val hlvw   = IntIType(SCALA, isH, nonX, sign  , W, uopLoad)
+    val hlvd   = IntIType(SCALA, isH, nonX, sign  , D, uopLoad)
+    val hlvbu  = IntIType(SCALA, isH, nonX, unsign, B, uopLoad)
+    val hlvhu  = IntIType(SCALA, isH, nonX, unsign, H, uopLoad)
+    val hlvwu  = IntIType(SCALA, isH, nonX, unsign, W, uopLoad)
+    val hlvxhu = IntIType(SCALA, isH, isX , unsign, H, uopLoad)
+    val hlvxwu = IntIType(SCALA, isH, isX , unsign, W, uopLoad)
 
     def isHlv(op: UInt): Bool = op(6) === isH && op(0) === uopLoad
     def isHlvx(op: UInt): Bool = (op(6, 5) === (isH ## isX)) && op(0) === uopLoad
@@ -617,17 +617,17 @@ object Opcode {
 
     // store pipeline
     // normal store
-    val sb = Value(SCALA, nonH, nonX, sign, B, uopStore)
-    val sh = Value(SCALA, nonH, nonX, sign, H, uopStore)
-    val sw = Value(SCALA, nonH, nonX, sign, W, uopStore)
-    val sd = Value(SCALA, nonH, nonX, sign, D, uopStore)
-    val sq = Value(SCALA, nonH, nonX, sign, Q, uopStore)
+    val sb = IntBSType(SCALA, nonH, nonX, sign, B, uopStore)
+    val sh = IntBSType(SCALA, nonH, nonX, sign, H, uopStore)
+    val sw = IntBSType(SCALA, nonH, nonX, sign, W, uopStore)
+    val sd = IntBSType(SCALA, nonH, nonX, sign, D, uopStore)
+    val sq = IntBSType(SCALA, nonH, nonX, sign, Q, uopStore) // TODO: no corresponding store instruction
 
     //hypervisor store
-    val hsvb = Value(SCALA, isH, nonX, sign, B, uopStore)
-    val hsvh = Value(SCALA, isH, nonX, sign, H, uopStore)
-    val hsvw = Value(SCALA, isH, nonX, sign, W, uopStore)
-    val hsvd = Value(SCALA, isH, nonX, sign, D, uopStore)
+    val hsvb = IntBSType(SCALA, isH, nonX, sign, B, uopStore)
+    val hsvh = IntBSType(SCALA, isH, nonX, sign, H, uopStore)
+    val hsvw = IntBSType(SCALA, isH, nonX, sign, W, uopStore)
+    val hsvd = IntBSType(SCALA, isH, nonX, sign, D, uopStore)
 
     def isHsv(op: UInt): Bool = op(6) === isH && op(0) === uopStore
 
@@ -693,11 +693,11 @@ object Opcode {
     val vsoxei64e64 = Value(IOEI64, nonH, nonX, nonFof, VD, uopStore) + Src1Gp + Src3Vp + Src2Vp
 
     // l1 cache op
-    val cbo_zero  = Value(SCALA, nonH, nonX, sign, CBO.zero , uopCbo)
+    val cbo_zero  = IntIType(SCALA, nonH, nonX, sign, CBO.zero , uopCbo) + NoSpec + BlockBack
     // llc op
-    val cbo_clean = Value(SCALA, nonH, nonX, sign, CBO.clean, uopCbo)
-    val cbo_flush = Value(SCALA, nonH, nonX, sign, CBO.flush, uopCbo)
-    val cbo_inval = Value(SCALA, nonH, nonX, sign, CBO.inval, uopCbo)
+    val cbo_clean = IntIType(SCALA, nonH, nonX, sign, CBO.clean, uopCbo) + NoSpec + BlockBack
+    val cbo_flush = IntIType(SCALA, nonH, nonX, sign, CBO.flush, uopCbo) + NoSpec + BlockBack
+    val cbo_inval = IntIType(SCALA, nonH, nonX, sign, CBO.inval, uopCbo) + NoSpec + BlockBack
 
     def getCmoOpcode(op: UInt): UInt = op(3, 1)
     def isCbo(op: UInt): Bool = op(0) === uopCbo && getCmoOpcode(op) === CBO.zero
@@ -739,55 +739,55 @@ object Opcode {
     // bit encoding: | optype (3bit) | size (3bit) | alu (1bit) |
     def AMOFuOpWidth = 7
     //                    4b     3b             3b 1b
-    val amoswap_b = Value(SCALA, NoALU.swap   , B, noALU)
-    val amoadd_b  = Value(SCALA, WithALU.add  , B, withALU)
-    val amoxor_b  = Value(SCALA, WithALU.xor  , B, withALU)
-    val amoand_b  = Value(SCALA, WithALU.and  , B, withALU)
-    val amoor_b   = Value(SCALA, WithALU.or   , B, withALU)
-    val amomin_b  = Value(SCALA, WithALU.min  , B, withALU)
-    val amomax_b  = Value(SCALA, WithALU.max  , B, withALU)
-    val amominu_b = Value(SCALA, WithALU.minu , B, withALU)
-    val amomaxu_b = Value(SCALA, WithALU.maxu , B, withALU)
+    val amoswap_b = IntRType(SCALA, NoALU.swap   , B, noALU)   + NoSpec + BlockBack
+    val amoadd_b  = IntRType(SCALA, WithALU.add  , B, withALU) + NoSpec + BlockBack
+    val amoxor_b  = IntRType(SCALA, WithALU.xor  , B, withALU) + NoSpec + BlockBack
+    val amoand_b  = IntRType(SCALA, WithALU.and  , B, withALU) + NoSpec + BlockBack
+    val amoor_b   = IntRType(SCALA, WithALU.or   , B, withALU) + NoSpec + BlockBack
+    val amomin_b  = IntRType(SCALA, WithALU.min  , B, withALU) + NoSpec + BlockBack
+    val amomax_b  = IntRType(SCALA, WithALU.max  , B, withALU) + NoSpec + BlockBack
+    val amominu_b = IntRType(SCALA, WithALU.minu , B, withALU) + NoSpec + BlockBack
+    val amomaxu_b = IntRType(SCALA, WithALU.maxu , B, withALU) + NoSpec + BlockBack
 
-    val amoswap_h = Value(SCALA, NoALU.swap   , H, noALU)
-    val amoadd_h  = Value(SCALA, WithALU.add  , H, withALU)
-    val amoxor_h  = Value(SCALA, WithALU.xor  , H, withALU)
-    val amoand_h  = Value(SCALA, WithALU.and  , H, withALU)
-    val amoor_h   = Value(SCALA, WithALU.or   , H, withALU)
-    val amomin_h  = Value(SCALA, WithALU.min  , H, withALU)
-    val amomax_h  = Value(SCALA, WithALU.max  , H, withALU)
-    val amominu_h = Value(SCALA, WithALU.minu , H, withALU)
-    val amomaxu_h = Value(SCALA, WithALU.maxu , H, withALU)
+    val amoswap_h = IntRType(SCALA, NoALU.swap   , H, noALU)   + NoSpec + BlockBack
+    val amoadd_h  = IntRType(SCALA, WithALU.add  , H, withALU) + NoSpec + BlockBack
+    val amoxor_h  = IntRType(SCALA, WithALU.xor  , H, withALU) + NoSpec + BlockBack
+    val amoand_h  = IntRType(SCALA, WithALU.and  , H, withALU) + NoSpec + BlockBack
+    val amoor_h   = IntRType(SCALA, WithALU.or   , H, withALU) + NoSpec + BlockBack
+    val amomin_h  = IntRType(SCALA, WithALU.min  , H, withALU) + NoSpec + BlockBack
+    val amomax_h  = IntRType(SCALA, WithALU.max  , H, withALU) + NoSpec + BlockBack
+    val amominu_h = IntRType(SCALA, WithALU.minu , H, withALU) + NoSpec + BlockBack
+    val amomaxu_h = IntRType(SCALA, WithALU.maxu , H, withALU) + NoSpec + BlockBack
 
-    val lr_w      = Value(SCALA, NoALU.lr     , W, noALU)
-    val sc_w      = Value(SCALA, NoALU.sc     , W, noALU)
-    val amoswap_w = Value(SCALA, NoALU.swap   , W, noALU)
-    val amocas_w  = Value(SCALA, NoALU.cas    , W, noALU)
-    val amoadd_w  = Value(SCALA, WithALU.add  , W, withALU)
-    val amoxor_w  = Value(SCALA, WithALU.xor  , W, withALU)
-    val amoand_w  = Value(SCALA, WithALU.and  , W, withALU)
-    val amoor_w   = Value(SCALA, WithALU.or   , W, withALU)
-    val amomin_w  = Value(SCALA, WithALU.min  , W, withALU)
-    val amomax_w  = Value(SCALA, WithALU.max  , W, withALU)
-    val amominu_w = Value(SCALA, WithALU.minu , W, withALU)
-    val amomaxu_w = Value(SCALA, WithALU.maxu , W, withALU)
+    val lr_w      = IntIType(SCALA, NoALU.lr     , W, noALU) + NoSpec + BlockBack
+    val sc_w      = IntRType(SCALA, NoALU.sc     , W, noALU)   + NoSpec + BlockBack
+    val amoswap_w = IntRType(SCALA, NoALU.swap   , W, noALU)   + NoSpec + BlockBack
+    val amocas_w  = IntRType(SCALA, NoALU.cas    , W, noALU)   + NoSpec + BlockBack
+    val amoadd_w  = IntRType(SCALA, WithALU.add  , W, withALU) + NoSpec + BlockBack
+    val amoxor_w  = IntRType(SCALA, WithALU.xor  , W, withALU) + NoSpec + BlockBack
+    val amoand_w  = IntRType(SCALA, WithALU.and  , W, withALU) + NoSpec + BlockBack
+    val amoor_w   = IntRType(SCALA, WithALU.or   , W, withALU) + NoSpec + BlockBack
+    val amomin_w  = IntRType(SCALA, WithALU.min  , W, withALU) + NoSpec + BlockBack
+    val amomax_w  = IntRType(SCALA, WithALU.max  , W, withALU) + NoSpec + BlockBack
+    val amominu_w = IntRType(SCALA, WithALU.minu , W, withALU) + NoSpec + BlockBack
+    val amomaxu_w = IntRType(SCALA, WithALU.maxu , W, withALU) + NoSpec + BlockBack
 
-    val lr_d      = Value(SCALA, NoALU.lr     , D, noALU)
-    val sc_d      = Value(SCALA, NoALU.sc     , D, noALU)
-    val amoswap_d = Value(SCALA, NoALU.swap   , D, noALU)
-    val amoadd_d  = Value(SCALA, WithALU.add  , D, withALU)
-    val amoxor_d  = Value(SCALA, WithALU.xor  , D, withALU)
-    val amoand_d  = Value(SCALA, WithALU.and  , D, withALU)
-    val amoor_d   = Value(SCALA, WithALU.or   , D, withALU)
-    val amomin_d  = Value(SCALA, WithALU.min  , D, withALU)
-    val amomax_d  = Value(SCALA, WithALU.max  , D, withALU)
-    val amominu_d = Value(SCALA, WithALU.minu , D, withALU)
-    val amomaxu_d = Value(SCALA, WithALU.maxu , D, withALU)
+    val lr_d      = IntIType(SCALA, NoALU.lr     , D, noALU) + NoSpec + BlockBack
+    val sc_d      = IntRType(SCALA, NoALU.sc     , D, noALU)   + NoSpec + BlockBack
+    val amoswap_d = IntRType(SCALA, NoALU.swap   , D, noALU)   + NoSpec + BlockBack
+    val amoadd_d  = IntRType(SCALA, WithALU.add  , D, withALU) + NoSpec + BlockBack
+    val amoxor_d  = IntRType(SCALA, WithALU.xor  , D, withALU) + NoSpec + BlockBack
+    val amoand_d  = IntRType(SCALA, WithALU.and  , D, withALU) + NoSpec + BlockBack
+    val amoor_d   = IntRType(SCALA, WithALU.or   , D, withALU) + NoSpec + BlockBack
+    val amomin_d  = IntRType(SCALA, WithALU.min  , D, withALU) + NoSpec + BlockBack
+    val amomax_d  = IntRType(SCALA, WithALU.max  , D, withALU) + NoSpec + BlockBack
+    val amominu_d = IntRType(SCALA, WithALU.minu , D, withALU) + NoSpec + BlockBack
+    val amomaxu_d = IntRType(SCALA, WithALU.maxu , D, withALU) + NoSpec + BlockBack
 
-    val amocas_b  = Value(SCALA, NoALU.cas, B, noALU)
-    val amocas_h  = Value(SCALA, NoALU.cas, H, noALU)
-    val amocas_d  = Value(SCALA, NoALU.cas, D, noALU)
-    val amocas_q  = Value(SCALA, NoALU.cas, Q, noALU)
+    val amocas_b  = IntRType(SCALA, NoALU.cas, B, noALU) + NoSpec + BlockBack
+    val amocas_h  = IntRType(SCALA, NoALU.cas, H, noALU) + NoSpec + BlockBack
+    val amocas_d  = IntRType(SCALA, NoALU.cas, D, noALU) + NoSpec + BlockBack
+    val amocas_q  = IntRType(SCALA, NoALU.cas, Q, noALU) + NoSpec + BlockBack
 
     def getAmocasUopIdx(opType: UInt): UInt = (opType >> this.AMOFuOpWidth).asUInt
 
@@ -887,16 +887,16 @@ object Opcode {
 
   object CsrOpcodes extends Opcodes {
     //                        | func3|
-    val jmp     = Value(bb"010_000")
-    val wfi     = Value(bb"100_000")
-    val wrs_nto = Value(bb"100_010")
-    val wrs_sto = Value(bb"100_011")
-    val wrt     = Value(bb"001_001")
-    val set     = Value(bb"001_010")
-    val clr     = Value(bb"001_011")
-    val wrti    = Value(bb"001_101")
-    val seti    = Value(bb"001_110")
-    val clri    = Value(bb"001_111")
+    val jmp     = IntIType(bb"010_000") - Src1Gp + BlockBack + NoSpec
+    val wfi     = IntIType(bb"100_000") - Src1Gp + BlockBack + NoSpec
+    val wrs_nto = IntIType(bb"100_010") - Src1Gp + BlockBack + NoSpec
+    val wrs_sto = IntIType(bb"100_011") - Src1Gp + BlockBack + NoSpec
+    val wrt     = IntIType(bb"001_001")          + BlockBack + NoSpec
+    val set     = IntIType(bb"001_010")          + BlockBack + NoSpec
+    val clr     = IntIType(bb"001_011")          + BlockBack + NoSpec
+    val wrti    = IntIType(bb"001_101")          + BlockBack + NoSpec
+    val seti    = IntIType(bb"001_110")          + BlockBack + NoSpec
+    val clri    = IntIType(bb"001_111")          + BlockBack + NoSpec
 
     def isSystemOp (op: UInt): Bool = op(4)
     def isWfi      (op: UInt): Bool = op(5) && !op(1)
@@ -915,58 +915,58 @@ object Opcode {
   }
 
   object FenceOpcodes extends Opcodes {
-    val fence  = Value(bb"10000")
-    val sfence = Value(bb"10001")
-    val fencei = Value(bb"10010")
-    val hfence_v = Value(bb"10011")
-    val hfence_g = Value(bb"10100")
-    val nofence = Value(bb"00000")
+    val fence    = IntIType(bb"10000") - Src1Gp                      + FlushPipe // FENCE           / PAUSE
+    val sfence   = IntIType(bb"10001") - Src1Gp + NoSpec + BlockBack + FlushPipe // SFENCE_VMA      / SINVAL_VMA (no flushpipe)
+    val fencei   = IntIType(bb"10010") - Src1Gp                      + FlushPipe // FENCE_I
+    val hfence_v = IntIType(bb"10011") - Src1Gp + NoSpec + BlockBack + FlushPipe // HFENCE_VVMA     / HINVAL_VVMA (no flushpipe)
+    val hfence_g = IntIType(bb"10100") - Src1Gp + NoSpec + BlockBack + FlushPipe // HFENCE_GVMA     / HINVAL_GVMA (no flushpipe)
+    val nofence  = IntIType(bb"00000") - Src1Gp + NoSpec + BlockBack + FlushPipe // SFENCE_INVAL_IR / SFENCE_W_INVAL (no flushpipe)
   }
 
   object BkuOpcodes extends Opcodes {
-    val clmul       = Value(bb"000000")
-    val clmulh      = Value(bb"000001")
-    val clmulr      = Value(bb"000010")
-    val xpermn      = Value(bb"000100")
-    val xpermb      = Value(bb"000101")
+    val clmul       = IntRType(bb"000000")
+    val clmulh      = IntRType(bb"000001")
+    val clmulr      = IntRType(bb"000010")
+    val xpermn      = IntRType(bb"000100")
+    val xpermb      = IntRType(bb"000101")
 
-    val clz         = Value(bb"001000")
-    val clzw        = Value(bb"001001")
-    val ctz         = Value(bb"001010")
-    val ctzw        = Value(bb"001011")
-    val cpop        = Value(bb"001100")
-    val cpopw       = Value(bb"001101")
+    val clz         = IntIType(bb"001000")
+    val clzw        = IntIType(bb"001001")
+    val ctz         = IntIType(bb"001010")
+    val ctzw        = IntIType(bb"001011")
+    val cpop        = IntIType(bb"001100")
+    val cpopw       = IntIType(bb"001101")
 
     // 01xxxx is reserve
-    val aes64es     = Value(bb"100000")
-    val aes64esm    = Value(bb"100001")
-    val aes64ds     = Value(bb"100010")
-    val aes64dsm    = Value(bb"100011")
-    val aes64im     = Value(bb"100100")
-    val aes64ks1i   = Value(bb"100101")
-    val aes64ks2    = Value(bb"100110")
+    val aes64es     = IntRType(bb"100000")
+    val aes64esm    = IntRType(bb"100001")
+    val aes64ds     = IntRType(bb"100010")
+    val aes64dsm    = IntRType(bb"100011")
+    val aes64im     = IntIType(bb"100100")
+    val aes64ks1i   = IntIType(bb"100101")
+    val aes64ks2    = IntRType(bb"100110")
 
     // merge to two instruction sm4ks & sm4ed
-    val sm4ed0      = Value(bb"101000")
-    val sm4ed1      = Value(bb"101001")
-    val sm4ed2      = Value(bb"101010")
-    val sm4ed3      = Value(bb"101011")
-    val sm4ks0      = Value(bb"101100")
-    val sm4ks1      = Value(bb"101101")
-    val sm4ks2      = Value(bb"101110")
-    val sm4ks3      = Value(bb"101111")
+    val sm4ed0      = IntRType(bb"101000")
+    val sm4ed1      = IntRType(bb"101001")
+    val sm4ed2      = IntRType(bb"101010")
+    val sm4ed3      = IntRType(bb"101011")
+    val sm4ks0      = IntRType(bb"101100")
+    val sm4ks1      = IntRType(bb"101101")
+    val sm4ks2      = IntRType(bb"101110")
+    val sm4ks3      = IntRType(bb"101111")
 
-    val sha256sum0  = Value(bb"110000")
-    val sha256sum1  = Value(bb"110001")
-    val sha256sig0  = Value(bb"110010")
-    val sha256sig1  = Value(bb"110011")
-    val sha512sum0  = Value(bb"110100")
-    val sha512sum1  = Value(bb"110101")
-    val sha512sig0  = Value(bb"110110")
-    val sha512sig1  = Value(bb"110111")
+    val sha256sum0  = IntIType(bb"110000")
+    val sha256sum1  = IntIType(bb"110001")
+    val sha256sig0  = IntIType(bb"110010")
+    val sha256sig1  = IntIType(bb"110011")
+    val sha512sum0  = IntIType(bb"110100")
+    val sha512sum1  = IntIType(bb"110101")
+    val sha512sig0  = IntIType(bb"110110")
+    val sha512sig1  = IntIType(bb"110111")
 
-    val sm3p0       = Value(bb"111000")
-    val sm3p1       = Value(bb"111001")
+    val sm3p0       = IntIType(bb"111000")
+    val sm3p1       = IntIType(bb"111001")
   }
 
   object I2fOpcodes extends Opcodes.FCvtOpcode
@@ -975,12 +975,12 @@ object Opcode {
     private val FDIV  = bb"0"
     private val FSQRT = bb"1"
 
-    val fdiv_fp16 : Opcode = Value(FDIV , FP16, F)
-    val fdiv_fp32 : Opcode = Value(FDIV , FP32, F)
-    val fdiv_fp64 : Opcode = Value(FDIV , FP64, F)
-    val fsqrt_fp16: Opcode = Value(FSQRT, FP16, F)
-    val fsqrt_fp32: Opcode = Value(FSQRT, FP32, F)
-    val fsqrt_fp64: Opcode = Value(FSQRT, FP64, F)
+    val fdiv_fp16 : Opcode = FpRTypeFpDestInst(FDIV , FP16, F)
+    val fdiv_fp32 : Opcode = FpRTypeFpDestInst(FDIV , FP32, F)
+    val fdiv_fp64 : Opcode = FpRTypeFpDestInst(FDIV , FP64, F)
+    val fsqrt_fp16: Opcode = FpITypeF2fInst(FSQRT, FP16, F)
+    val fsqrt_fp32: Opcode = FpITypeF2fInst(FSQRT, FP32, F)
+    val fsqrt_fp64: Opcode = FpITypeF2fInst(FSQRT, FP64, F)
 
     val vfdiv_fp16 : Opcode = DvSvlS2vS1(FDIV , FP16, V)
     val vfsqrt_fp16: Opcode = DvSvlS2vS1(FSQRT, FP16, V)
@@ -1088,6 +1088,11 @@ object Opcode {
       opcode + FpWen
     }
 
+    /**
+     * Generate the BitPat for uop-info to rename stage based on the traits of the opcode.
+     * The order of the bits in the BitPat should be consistent with the order of the fields in the UopInfoRename.
+     * @return the BitPat for uop-info to rename stage
+     */
     def genUopInfoRenameBitPat: BitPat = {
       UopInfoRename.genBitPat(
         src1Type = this.getSrc1Type,
@@ -1102,6 +1107,19 @@ object Opcode {
         vlWen = traits.contains(VlWen),
         vxsatWen = traits.contains(VxsatWen),
         vdAlloc = !traits.contains(NoDestAlloc),
+      )
+    }
+
+    def genUopInfoRenameSimpleBitPat: BitPat = {
+      UopInfoRenameSimple.genBitPat(
+        src1Type = this.getSrc1Type,
+        src2Type = this.getSrc2Type,
+        src3Type = this.getSrc3Type,
+        gpWen = traits.contains(GpWen), // further modified at SimpleDecoddeChannel for RD=0 won't write back
+        fpWen = traits.contains(FpWen),
+        noSpec = traits.contains(NoSpec),
+        blockBack = traits.contains(BlockBack),
+        flushPipe = traits.contains(FlushPipe),
       )
     }
 

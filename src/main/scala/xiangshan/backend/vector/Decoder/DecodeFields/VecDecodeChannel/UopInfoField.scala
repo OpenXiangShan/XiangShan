@@ -12,6 +12,14 @@ import xiangshan.backend.vector.Decoder.Uop.UopInfoRename
 import xiangshan.backend.vector.Decoder.Uop.UopTrait.{UopBase, VecLoadUop}
 import xiangshan.backend.vector.Decoder.util.DecodeField
 
+/**
+ * UopInfoField generates the uop information for each micro-op of a vector instruction based on the instruction
+ * pattern, sew, lmul, and nf. It uses the UopInfoRename format to encode the uop information, which can be used for
+ * renaming in the backend.
+ * @param uopIdx the index of the micro-op for which to generate the uop information. For example, if uopIdx is 0, it
+ *               generates the uop information for the first micro-op of the instruction, and so on. The maximum value
+ *               of uopIdx is 7 now
+ */
 class UopInfoField(uopIdx: Int) extends DecodeField[
   DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern],
   ValidIO[UopInfoRename],
@@ -58,6 +66,12 @@ object UopInfoFieldVec extends DecodeField[
     this.genUopSeqImpl(op)
   }
 
+  /**
+   * Generate the sequence of micro-ops for a given instruction pattern, sew, lmul, and nf. The generation logic is
+   * based on the instruction type and the vector configuration.
+   * @param op
+   * @return
+   */
   def genUopSeqImpl(op: Pattern): Seq[Opcode] = {
     val DecodePatternComb(instP, sewP, lmulP, nfP) = op
 
