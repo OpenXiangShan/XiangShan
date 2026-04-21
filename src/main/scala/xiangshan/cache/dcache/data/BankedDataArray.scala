@@ -939,7 +939,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       // data write
       val wen_reg = write_bank_mask_reg(bank_index) &&
         write_valid_dup_reg(bank_index) &&
-        write_div_addr_dup_reg(bank_index) === div_index.U && RegNext(io.write.valid)
+        write_div_addr_dup_reg(bank_index) === div_index.U && RegNext(io.write.valid, false.B)
       val write_ecc_reg = RegEnable(getECCFromEncWord(cacheParams.dataCode.encode(io.write.bits.data(bank_index))), io.write.valid)
       val data_bank = data_banks(div_index)(bank_index)
       data_bank.io.w.en := wen_reg
