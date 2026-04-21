@@ -7,6 +7,10 @@ import xiangshan.backend.vector.Decoder.InstPattern.{FpInstPattern, InstPattern,
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 
+/**
+ * This field is used to determine whether the frm registers' read enable signal should be set or not. This object
+ * extends BoolDecodeField, which means it will generate a boolean value (y or n) based on the instruction pattern.
+ */
 object FrmRenField extends BoolDecodeField[InstPattern] {
   override def name: String = "frmRen"
 

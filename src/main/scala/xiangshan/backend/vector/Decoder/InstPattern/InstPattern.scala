@@ -527,6 +527,11 @@ object InstPattern {
     }.filter(_.nonEmpty).map(_.get).toSeq
   }
 
+  /**
+   * Get the instruction patterns of given extensions.
+   * @param exts the extensions to get instruction patterns from
+   * @return the instruction patterns of given extensions
+   */
   def extensionInsts(exts: ExtBase*): Seq[InstPattern] = {
     val extTypes: Seq[Instructions.InstType] = exts.flatMap(_.types)
 
