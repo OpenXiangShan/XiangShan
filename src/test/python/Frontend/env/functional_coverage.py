@@ -259,6 +259,9 @@ class FunctionalCoverageRecorder:
         if self._read_dut_signal(dut, "io_frontendInfo_ibufFull", 0) == 1:
             self.mark("ibuffer_state", "full", cycle, {"event": "io_frontendInfo_ibufFull"})
 
+        if self._read_dut_signal(dut, "io_backend_toFtq_redirect_valid", 0) == 1:
+            self._sample_backend_redirect_faults(env, dut, cycle)
+
         if self._read_dut_signal(dut, "io_ptw_resp_valid", 0) == 1:
             self._sample_ptw_response(dut, cycle)
         elif self._pending_ptw_resp_cycle == cycle:
@@ -434,6 +437,25 @@ class FunctionalCoverageRecorder:
                 self.mark("itlb_state_x_ptw_resp", "single_miss_x_leaf_pte", cycle, {"pending_reqs": self._ptw_req_pending})
         self._ptw_req_pending = max(0, self._ptw_req_pending - 1)
         self._pending_ptw_resp_cycle = None
+
+    def _sample_backend_redirect_faults(self, env, dut, cycle: int) -> None:
+        target_pc = self._read_dut_signal(dut, "io_backend_toFtq_redirect_bits_target", 0)
+        evidence = {
+            "event": "backend_redirect_fault",
+            "target_pc": int(target_pc),
+        }
+        backend_ipf = self._read_dut_signal(dut, "io_backend_toFtq_redirect_bits_backendIPF", 0)
+        backend_iaf = self._read_dut_signal(dut, "io_backend_toFtq_redirect_bits_backendIAF", 0)
+        backend_igpf = self._read_dut_signal(dut, "io_backend_toFtq_redirect_bits_backendIGPF", 0)
+        if backend_ipf == 1:
+            self.mark("frontend_exception_type", "pf", cycle, evidence)
+            self.mark("fetch_path_x_exception", "icache_x_pf", cycle, evidence)
+        if backend_iaf == 1:
+            self.mark("frontend_exception_type", "af", cycle, evidence)
+            if env.memory.is_mmio(int(target_pc)):
+                self.mark("fetch_path_x_exception", "mmio_x_af", cycle, evidence)
+        if backend_igpf == 1:
+            self.mark("frontend_exception_type", "gpf", cycle, evidence)
 
     def _infer_fetch_path(self, env, pc: int, cycle: int) -> str:
         if env.memory.is_mmio(int(pc)):

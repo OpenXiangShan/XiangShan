@@ -75,6 +75,23 @@ def _warmup_commits(env, target_count: int = 4, max_cycles: int = 3000) -> int:
     ).run(env)
 
 
+def _queue_backend_fault_redirect(env, *, target_pc: int, **fault_bits: int) -> None:
+    last_pc = env.monitor.recent_pcs(1)[-1]
+    env.backend_model._queue_redirect_event(
+        target_pc=int(target_pc),
+        reason="backend_fault",
+        delay_cycles=1,
+        flush_on_drive=False,
+        payload_extra={
+            "pc": int(last_pc),
+            "ftq_flag": int(env.backend_model.commit_ptr_flag),
+            "ftq_value": int(env.backend_model.commit_ptr_value),
+            "ftq_offset": 0,
+            **fault_bits,
+        },
+    )
+
+
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_baremode_seq_icache_basic_pilot(env):
     _load_nop_program(env, words=128)
@@ -142,6 +159,35 @@ def test_baremode_backend_interrupt_redirect_pilot(env):
     assert env.functional_coverage.key_hit("redirect_type", "interrupt")
     assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
     assert env.functional_coverage.key_hit("reset_boot_path", "seen")
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_baremode_backend_ipf_redirect_pilot(env):
+    _load_nop_program(env, words=128)
+    commits = _warmup_commits(env, target_count=4)
+
+    _queue_backend_fault_redirect(env, target_pc=_BASE + 0xC0, backend_ipf=1)
+    env.step(30)
+
+    assert commits >= 4
+    assert env.functional_coverage.key_hit("frontend_exception_type", "pf")
+    assert env.functional_coverage.key_hit("fetch_path_x_exception", "icache_x_pf")
+    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_baremode_backend_iaf_redirect_pilot(env):
+    _load_nop_program(env, words=128)
+    commits = _warmup_commits(env, target_count=4)
+
+    _queue_backend_fault_redirect(env, target_pc=_BASE + 0xE0, backend_iaf=1)
+    env.step(30)
+
+    assert commits >= 4
+    assert env.functional_coverage.key_hit("frontend_exception_type", "af")
+    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
     assert not env.monitor.get_errors()
 
 
