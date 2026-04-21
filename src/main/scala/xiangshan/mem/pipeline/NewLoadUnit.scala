@@ -832,6 +832,7 @@ class LoadUnitS2(param: ExeUnitParams)(
 
     // DCache request: s2 kill signal
     val dcacheKill = Output(Bool())
+    val dcacheFullForward = Output(Bool())
 
     // DCache response
     val dcacheResp = Flipped(DecoupledIO(new DCacheWordResp))
@@ -1184,6 +1185,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.unalignTailValid := pipeIn.valid && isUnalignTail
 
   io.dcacheKill := kill || exception || isUncache || isUncacheReplay
+  io.dcacheFullForward := dcacheFullForward
   io.dcacheResp.ready := true.B
 
   io.rarNukeQueryReq.valid := nukeQueryReqValid && pipeIn.valid
@@ -2059,6 +2061,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s2.io.pmp := io.pmp
   s2.io.tlbHint := io.tlbHint
   io.dcache.s2_kill := s2.io.dcacheKill
+  io.dcache.s2_mshr_or_tld_full_fwd := s2.io.dcacheFullForward
   s2.io.dcacheResp <> io.dcache.resp
   s2.io.dcacheBankConflict := io.dcache.s2_bank_conflict
   s2.io.dcacheRRBankConflict := io.dcache.s2_rr_bank_conflict
