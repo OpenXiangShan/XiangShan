@@ -42,7 +42,7 @@ trait HasStridePrefetchHelper extends HasL1PrefetchHelper {
   val STRIDE_ENTRY_NUM = 16
   val STRIDE_BITS = 10 + BLOCK_OFFSET
   val STRIDE_VADDR_BITS = 10 + BLOCK_OFFSET
-  val STRIDE_CONF_BITS = 2
+  val STRIDE_CONF_BITS = 3
 
   // detail control
   val ALWAYS_UPDATE_PRE_VADDR = true
@@ -53,6 +53,7 @@ trait HasStridePrefetchHelper extends HasL1PrefetchHelper {
   val STRIDE_WIDTH_BLOCKS = if(AGGRESIVE_POLICY) STRIDE_LOOK_AHEAD_BLOCKS else 1
 
   def MAX_CONF = (1 << STRIDE_CONF_BITS) - 1
+  def CONF_THRESHOLD = (1 << (STRIDE_CONF_BITS-1)) - 1
 }
 
 class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePrefetchHelper {
@@ -91,7 +92,7 @@ class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePr
     val stride_valid = new_stride_blk =/= 0.U && new_stride_blk =/= 1.U
     val stride_match = new_stride === stride && isDecrMode === decr_mode
     val low_confidence = confidence <= 1.U
-    val can_send_pf = stride_valid && stride_match && confidence === MAX_CONF.U
+    val can_send_pf = stride_valid && stride_match && confidence >= CONF_THRESHOLD.U
 
     when(stride_valid) {
       when(stride_match) {
