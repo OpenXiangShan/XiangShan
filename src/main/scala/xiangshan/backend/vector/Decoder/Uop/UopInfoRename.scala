@@ -11,6 +11,55 @@ class UopInfoRenameWithIllegal extends Bundle {
   val uop = new UopInfoRename()
 }
 
+class UopInfoRenameSimple extends Bundle {
+  // rename used
+  val src1Ren = Bool()
+  val src1Type = DecodeSrcType()
+  val src2Ren = Bool()
+  val src2Type = DecodeSrcType()
+  val src3Ren = Bool()
+  val src3Type = DecodeSrcType()
+
+  val gpWen = Bool()
+  val fpWen = Bool()
+
+  // pipeline control signal
+  val noSpec = Bool()
+  val blockBack = Bool()
+  val flushPipe = Bool()
+}
+
+object UopInfoRenameSimple extends InfoToString {
+  lazy val width = (new UopInfoRenameSimple).getWidth
+
+  def genBitPat(
+                 src1Type   : Option[OperandType],
+                 src2Type   : Option[OperandType],
+                 src3Type   : Option[OperandType],
+                 gpWen      : Boolean,
+                 fpWen      : Boolean,
+                 noSpec     : Boolean,
+                 blockBack  : Boolean,
+                 flushPipe  : Boolean,
+               ): BitPat = {
+    val src1: String = operandTypeToString(src1Type)
+    val src2: String = operandTypeToString(src2Type)
+    val src3: String = operandTypeToString(src3Type)
+    val gpW = booleanToString(gpWen)
+    val fpW = booleanToString(fpWen)
+    val noS = booleanToString(noSpec)
+    val blockB = booleanToString(blockBack)
+    val flushP = booleanToString(flushPipe)
+
+    val bp = BitPat(s"b$src1$src2$src3$gpW$fpW$noS$blockB$flushP")
+    require(
+      bp.width == width,
+      s"bitpat width is ${bp.width}, but ${width} is expected"
+    )
+    bp
+  }
+}
+
 class UopInfoRename extends Bundle {
   // rename used
   val src1Ren = Bool()
@@ -34,7 +83,7 @@ class UopInfoRename extends Bundle {
   val vdAlloc = Bool()
 }
 
-object UopInfoRename {
+object UopInfoRename extends InfoToString {
   lazy val width = (new UopInfoRename).getWidth
 
   def genBitPat(
@@ -66,12 +115,14 @@ object UopInfoRename {
 
     val bp = BitPat(s"b$src1$src2$vlR$maskTy$intRmR$rdAsSrc$gpW$fpW$vpW$vlW$vxsatW$vdAllocStr")
     require(
-      bp.width == UopInfoRename.width,
-      s"bitpat width is ${bp.width}, but ${UopInfoRename.width} is expected"
+      bp.width == width,
+      s"bitpat width is ${bp.width}, but ${width} is expected"
     )
     bp
   }
+}
 
+trait InfoToString {
   def operandTypeToString(s: Option[OperandType]): String = {
     s match {
       case Some(value) => "1" + (value match {

@@ -12,15 +12,20 @@ import xiangshan.backend.vector.Decoder.util.DecodeField
 import scala.language.implicitConversions
 
 
-class FuTypeField(table: Map[BitPat, Opcode]) extends DecodeField[InstPattern, UInt]{
+class FuTypeField(uopIdx: Int) extends DecodeField[InstPattern, UInt]{
   override def name: String = "fuType"
 
   override def chiselType: UInt = FuType()
 
   override def genTable(op: InstPattern): BitPat = {
+    val uopSeq = UopInfoFieldSimple.genUopSeq(op)
+    if (!uopSeq.isDefinedAt(uopIdx)) {
+      return default
+    }
+    val uop = uopSeq(uopIdx)
     val res: UInt =
       try
-        table(op.bitPat).factory match {
+        uop.factory match {
           case _: Opcode.AluOpcodes.type => FuType.alu.U
           case _: Opcode.BruOpcodes.type => FuType.brh.U
           case _: Opcode.JmpOpcodes.type => FuType.jmp.U

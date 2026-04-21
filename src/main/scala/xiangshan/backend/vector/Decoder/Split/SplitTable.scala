@@ -75,6 +75,17 @@ object SplitTable {
     })
   }
 
+  /**
+   * Generate a SeqMap[SewLmulPattern, Seq[Opcode]] by duplicating the given uop according to the sew and lmul pattern.
+   *
+   * @param sewFunc A function that takes a SewPattern.type and returns a SewPattern. This is used to specify the sew
+   *                pattern for which the uop should be duplicated.
+   * @param _uop The uop to be duplicated. This is a by-name parameter, so it will be evaluated each time it is used.
+   * @param func A function that takes an Opcode and returns an Opcode. This is used to modify the uop before
+   *             duplication, for example by setting certain flags.
+   * @return A SeqMap[SewLmulPattern, Seq[Opcode]] where each key is a combination of sew and lmul pattern, and the
+   *         value is a sequence of duplicated uops according to that pattern.
+   */
   private def dup(
     sewFunc: SewPattern.type => SewPattern,
   )(

@@ -537,7 +537,7 @@ object ZfaDecode extends DecodeConstants {
  * XiangShan Debug Decode constants
  */
 object XSDebugDecode extends DecodeConstants {
-  def TRAP = BitPat("b000000000000?????000000001101011")
+  def TRAP = BitPat("b000000000000?????000000001101011") // CustomTrapPattern
   def SIM_TRIG = BitPat("b11011111101010010010000000010011") // HINT, slti x0, x18, -518
   val decodeArray: Array[(BitPat, XSDecodeBase)] = Array(
     TRAP    -> XSDecode(SrcType.imm, SrcType.imm, SrcType.X, FuType.alu, ALUOpType.xstrap, SelImm.IMM_I, blockBack = T)
