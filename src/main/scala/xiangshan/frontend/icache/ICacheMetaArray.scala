@@ -37,15 +37,6 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheAd
   private val banks = Seq.tabulate(PortNumber)(i => Module(new ICacheMetaInterleavedBank(i)))
 
   /* *** read *** */
-  // vSetIdx(1) must be vSetIdx(0) + 1 if isDoubleLine, it's pre-computed in Ftq for better timing (maybe)
-//  assert(
-//    !(
-//      io.read.req.valid && io.read.req.bits.isDoubleLine &&
-//        io.read.req.bits.vSetIdx(0) + 1.U =/= io.read.req.bits.vSetIdx(1)
-//    ),
-//    "2 read setIdx must be adjacent!"
-//  )
-
   // rotate setIdxVec to match interleaved banking
   // e.g. 2-interleaved, if vSetIdx(0) is even (getInterleavedBankIdx == 0), we don't need to rotate
   //      i.e. vSetIdx(0) goes to bank0, vSetIdx(1) goes to bank1
