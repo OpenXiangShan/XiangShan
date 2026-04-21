@@ -288,12 +288,17 @@ class FrontendEnv:
 
     def load_program(self, data: bytes, base_addr: int) -> None:
         self.memory.load_bin(data, int(base_addr))
+        self.backend_model.set_explicit_injection_enabled(True)
         self.logger.info("program loaded: base=0x%x size=%d", int(base_addr), len(data))
         self._emit_event("control.load_program", {"base_addr": int(base_addr), "size": len(data)})
 
     def load_program_file(self, path: str, base_addr: int) -> int:
         size = Path(path).stat().st_size
         self.memory.load_file(path, int(base_addr))
+        self.backend_model.set_explicit_injection_enabled(
+            False,
+            reason=f"bin/program-file mode active ({str(path)})",
+        )
         self.logger.info("program file loaded: path=%s base=0x%x size=%d", path, int(base_addr), size)
         self._emit_event(
             "control.load_program",
