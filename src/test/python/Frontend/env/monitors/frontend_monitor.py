@@ -173,6 +173,51 @@ class FrontendMonitor:
         except Exception:
             return default
 
+    @staticmethod
+    def _is_add_mv_form(instr: int) -> Optional[tuple[int, int]]:
+        val = int(instr) & 0xFFFFFFFF
+        if (val & 0x7F) != 0x33:
+            return None
+        funct3 = (val >> 12) & 0x7
+        funct7 = (val >> 25) & 0x7F
+        rs1 = (val >> 15) & 0x1F
+        rs2 = (val >> 20) & 0x1F
+        rd = (val >> 7) & 0x1F
+        if funct3 == 0 and funct7 == 0 and rs1 == 0:
+            return int(rd), int(rs2)
+        return None
+
+    @staticmethod
+    def _is_addi_mv_form(instr: int) -> Optional[tuple[int, int]]:
+        val = int(instr) & 0xFFFFFFFF
+        if (val & 0x7F) != 0x13:
+            return None
+        funct3 = (val >> 12) & 0x7
+        imm12 = (val >> 20) & 0xFFF
+        rs1 = (val >> 15) & 0x1F
+        rd = (val >> 7) & 0x1F
+        if funct3 == 0 and imm12 == 0:
+            return int(rd), int(rs1)
+        return None
+
+    @classmethod
+    def _instr_equivalent_for_compare(cls, expected: int, actual: int, is_rvc: bool) -> bool:
+        exp = int(expected) & 0xFFFFFFFF
+        got = int(actual) & 0xFFFFFFFF
+        if exp == got:
+            return True
+        if not bool(is_rvc):
+            return False
+        exp_add = cls._is_add_mv_form(exp)
+        got_addi = cls._is_addi_mv_form(got)
+        if exp_add is not None and got_addi is not None and exp_add == got_addi:
+            return True
+        exp_addi = cls._is_addi_mv_form(exp)
+        got_add = cls._is_add_mv_form(got)
+        if exp_addi is not None and got_add is not None and exp_addi == got_add:
+            return True
+        return False
+
     def _read_dut_signal(self, name: str, default: int = 0) -> int:
         env = getattr(self.backend_model, "env", None) if self.backend_model is not None else None
         dut = getattr(env, "dut", None) if env is not None else None
@@ -408,7 +453,7 @@ class FrontendMonitor:
                 else:
                     exp = int(raw_fetch) & 0xFFFFFFFF
                 got = int(instr) & 0xFFFFFFFF
-                if exp is not None and exp != got:
+                if exp is not None and not self._instr_equivalent_for_compare(exp, got, bool(is_rvc)):
                     if int(ex_sum) > 0:
                         self.instr_compare_skipped_count += 1
                         self._emit(
