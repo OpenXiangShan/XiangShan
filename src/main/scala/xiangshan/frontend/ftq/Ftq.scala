@@ -115,7 +115,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val (backendRedirectFtqIdx, backendRedirect) = receiveBackendRedirect(io.fromBackend)
 
-  private val redirect     = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
+  // Delay one cycle for timing considerations
+  private val redirect     = RegNext(Mux(backendRedirect.valid, backendRedirect, ifuRedirect))
   private val redirectNext = RegNext(redirect)
 
   // Instruction page fault and instruction access fault are sent from backend with redirect requests.
