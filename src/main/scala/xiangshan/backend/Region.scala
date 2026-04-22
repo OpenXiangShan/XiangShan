@@ -801,10 +801,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   val srcReadyVec = issueQueues.flatMap(_.io.srcReadyVec)
   val robIdxVec = issueQueues.flatMap(_.io.debugRobIdxVec.get)
   val validVec = issueQueues.flatMap(_.io.validVec)
-  io.debugIQSrcReadyVec.foreach(_.zip(srcReadyVec.zip(robIdxVec)).foreach{ case(sink, (valid, robIdx)) =>
-    sink.valid := valid
-    sink.bits := robIdx
-  })
   val topdownIQInfoVec = issueQueues.flatMap(_.io.topdownIQInfoVec.get)
   io.topdownIQInfoVec.foreach( _ := topdownIQInfoVec)
 
@@ -970,9 +966,9 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   // TopDown
   val uopTopDown = new UopTopDown
   val iqDeqSum = params.issueBlockParams.map(_.numDeq).sum
+  val iqEntryNum = params.issueBlockParams.map(_.numEntries).sum
   val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(UInt(maxIQSize.U.getWidth.W))))
   val debugIQEnqHasIssuedVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(Bool())))
   val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(iqDeqSum, ValidIO(new RobPtr())))
-  val debugIQSrcReadyVec = Option.when(backendParams.debugEn)(Output(Vec(iqEntryNum, ValidIO(new RobPtr()))))
   val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(iqEntryNum, ValidIO(new TopdownIQInfo()))))
 }

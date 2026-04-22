@@ -838,7 +838,6 @@ class CtrlBlockImp(
   rob.io.debugEnqLsq := io.debugEnqLsq
   rob.io.debugInstrAddrTransType := io.fromCSR.instrAddrTransType
   rob.io.debugIQDeqRobIdxVec.foreach(_ := io.robio.debugIQDeqRobIdxVec.get)
-  rob.io.debugIQSrcReadyVec.foreach(_ := io.robio.debugIQSrcReadyVec.get)
   rob.io.topdownIQInfoVec.foreach(_ := io.robio.topdownIQInfoVec.get)
 
   io.robio.robDeqPtr := rob.io.robDeqPtr
@@ -958,6 +957,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
 
   val csrCtrl = Input(new CustomCSRCtrlIO)
   val IssueQueueDeqSum  = backendParams.allIssueParams.map(_.numDeq).sum
+  val iqEntryNum = backendParams.allIssueParams.map(_.numEntries).sum
   val robio = new Bundle {
     val csr = new RobCSRIO
     val exception = ValidIO(new ExceptionInfo)
@@ -976,7 +976,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
       val pc     = Output(UInt(VAddrBits.W))
     })
     val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(IssueQueueDeqSum, Flipped(ValidIO(new RobPtr()))))
-    val debugIQSrcReadyVec = Option.when(backendParams.debugEn)(Input(Vec(iqEntryNum, Flipped(ValidIO(new RobPtr())))))
     val topdownIQInfoVec = Option.when(backendParams.debugEn)(Input(Vec(iqEntryNum, Flipped(ValidIO(new TopdownIQInfo())))))
   }
 

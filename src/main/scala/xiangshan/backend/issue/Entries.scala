@@ -107,7 +107,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val perfOg0CancelVec       = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, Bool()))))
   val perfWakeupByWBVec      = Wire(Vec(params.numEntries, Vec(params.numRegSrc, Bool())))
   val perfWakeupByIQVec      = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool())))))
-  val debugCancelSourceVec = OptionWrapper(backendParams.debugEn, Wire(Vec(params.numEntries, IQCancelSource())))
+  val debugCancelSourceVec   = OptionWrapper(backendParams.debugEn, Wire(Vec(params.numEntries, IQCancelSource())))
+  val debugSrcReadyVec       = OptionWrapper(backendParams.debugEn, Wire(Vec(params.numEntries, Bool())))
   //cancel bypass
   val cancelBypassVec        = Wire(Vec(params.numEntries, Bool()))
 
@@ -422,6 +423,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.issuedRegNext                  := issuedVecRegNext.asUInt
   io.debugRobIdxVec.foreach(_       := robIdxVec)
   io.debugCancelSourceVec.foreach(_ := debugCancelSourceVec.get)
+  io.debugSrcReadyVec.foreach(_     := debugSrcReadyVec.get)
+
 
 
   def EntriesConnect(in: CommonInBundle, out: CommonOutBundle, entryIdx: Int) = {
@@ -466,6 +469,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     }
     debugCancelSourceVec.foreach { case cancelSourceVec =>
       cancelSourceVec(entryIdx)       := out.debugCancelSource.get
+    }
+    debugSrcReadyVec.foreach { case srcReadyVec =>
+      srcReadyVec(entryIdx)     := out.debugSrcReady.get
     }
     validVecRegNext(entryIdx)   := out.validRegNext
     issuedVecRegNext(entryIdx)  := out.issuedRegNext
@@ -608,6 +614,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   // todpown
   val debugRobIdxVec = Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, new RobPtr)))
   val debugCancelSourceVec = Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, IQCancelSource())))
+  val debugSrcReadyVec = Option.when(backendParams.debugEn)(Output(Vec(params.numEntries, Bool())))
 
   def wakeup = wakeUpFromWB ++ wakeUpFromIQ
 }

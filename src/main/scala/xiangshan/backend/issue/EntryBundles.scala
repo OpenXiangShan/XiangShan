@@ -184,7 +184,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val perfOg0Cancel         = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Bool())))
     val perfWakeupByWB        = Output(Vec(params.numRegSrc, Bool()))
     val perfWakeupByIQ        = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
-    val debugCancelSource   = Option.when(backendParams.debugEn)(Output(IQCancelSource()))
+    val debugCancelSource     = Option.when(backendParams.debugEn)(Output(IQCancelSource()))
+    val debugSrcReady         = Option.when(backendParams.debugEn)(Output(Bool()))
   }
 
   class CommonWireBundle(implicit p: Parameters, params: IssueBlockParams) extends XSBundle {
@@ -463,6 +464,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.issued                                  := entryReg.status.issued
     commonOut.canIssue                                := (if (isComp) (common.canIssue || hasIQWakeupGet.canIssueBypass) && !common.flushed
                                                           else common.canIssue && !common.flushed)
+    commonOut.debugSrcReady.foreach(_                 := entryReg.status.srcReady)
     commonOut.srcReady                                := common.canIssue
     commonOut.fuType                                  := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
     commonOut.robIdx                                  := status.robIdx
