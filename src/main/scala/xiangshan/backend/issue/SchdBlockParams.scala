@@ -251,8 +251,8 @@ case class SchdBlockParams(
     MixedVec(this.issueBlockParams.map(_.genNewExuOutputValidBundle))
   }
 
-  def genWriteBackRobValidBundle(implicit p: Parameters): MixedVec[MixedVec[ValidIO[WriteBackRobBundle]]] = {
-    MixedVec(this.issueBlockParams.map(_.genWriteBackRobValidBundle))
+  def genWriteBackRobValidBundle(needExtraVld: Boolean)(implicit p: Parameters): MixedVec[MixedVec[ValidIO[WriteBackRobBundle]]] = {
+    MixedVec(this.issueBlockParams.map(_.genWriteBackRobValidBundle(needExtraVld = needExtraVld)))
   }
 
   def genExuBypassValidBundle(implicit p: Parameters): MixedVec[MixedVec[ValidIO[ExuBypassBundle]]] = {

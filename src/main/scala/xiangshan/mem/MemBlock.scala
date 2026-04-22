@@ -41,6 +41,7 @@ import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.Bundles._
+import xiangshan.backend.vector.VecIssueQueue
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
@@ -262,6 +263,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val hyuIqFeedback = Vec(HyuCnt, new MemRSFeedbackIO)
   val ldCancel = Vec(backendParams.LdExuCnt, new LoadCancelIO)
   val wakeup = Vec(backendParams.LdExuCnt, Valid(new MemWakeUpBundle))
+  val vldS3WakeUp = Vec(backendParams.LdExuCnt, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams))
 }
 
 class MemCoreTopDownIO extends Bundle {
@@ -558,6 +560,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       // normal load writeback
       wb := newLoadUnits(i).io.ldout
     }
+  }
+
+  writebackVldu.zipWithIndex.foreach { case (wb, i) =>
+    wb := newLoadUnits(i).io.vldout
   }
 
   writebackStd.zipWithIndex.foreach { case (wb, i) =>
@@ -895,6 +901,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     io.mem_to_ooo.ldCancel(i).ld1Cancel := false.B
     io.mem_to_ooo.ldCancel(i).ld2Cancel := newLoadUnits(i).io.cancel
     io.mem_to_ooo.wakeup(i) := newLoadUnits(i).io.wakeup
+    io.mem_to_ooo.vldS3WakeUp(i) := newLoadUnits(i).io.vldS3WakeUp
 
     // Perf-only head/full qualifiers for MDP counters.
     newLoadUnits(i).io.perfRobHeadPtr := io.ooo_to_mem.lsqio.pendingPtr
