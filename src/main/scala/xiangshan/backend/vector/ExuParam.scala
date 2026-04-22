@@ -1,7 +1,8 @@
 package xiangshan.backend.vector
 
+import chisel3._
+import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 import chisel3.util.MixedVec
-import chisel3.{Bool, Bundle, Vec}
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.BackendParams
 import xiangshan.backend.datapath.DataConfig
@@ -38,8 +39,6 @@ class ExuParam(
   require(readPortCfgs.forall(!_.exists(_.isInstanceOf[VlRD])), "VlRD should not appear in rfrPortConfigs")
   require(!writePortCfgs.exists(_.isInstanceOf[V0WB]), "V0WB should not appear in wbPortConfigs")
   require(!writePortCfgs.exists(_.isInstanceOf[VlWB]), "VlWB should not appear in wbPortConfigs")
-
-  var exuIdx: Int = -1
 
   val numRegSrc: Int = fuConfigs.map(_.numRegSrc).max
   val numGpSrc: Int = fuConfigs.map(_.numIntSrc).max
@@ -98,29 +97,29 @@ class ExuParam(
   def writeV0FuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.writeV0Rf)
   def writeVlFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.writeVlRf)
 
-  def getGpWbPort: Option[IntWB] = {
+  def getGpWriteCfg: Option[IntWB] = {
     writePortCfgs.collectFirst {
       case x: IntWB => x
     }
   }
 
-  def getFpWbPort: Option[FpWB] = {
+  def getFpWriteCfg: Option[FpWB] = {
     writePortCfgs.collectFirst {
       case x: FpWB => x
     }
   }
 
-  def getVpWbPort: Option[VfWB] = {
+  def getVpWriteCfg: Option[VfWB] = {
     writePortCfgs.collectFirst {
       case x: VfWB => x
     }
   }
 
-  def getV0WbPort: Option[V0WB] = {
+  def getV0WriteCfg: Option[V0WB] = {
     Option(v0WB)
   }
 
-  def getVlWbPort: Option[VlWB] = {
+  def getVlWriteCfg: Option[VlWB] = {
     Option(vlWB)
   }
 
@@ -191,11 +190,11 @@ class ExuParam(
 
   def getWbConfigByPregParam(pregParam: PregParams): Option[WbConfig] = {
     pregParam match {
-      case IntPregParams(numEntries, numBank, numRead, numWrite) => getGpWbPort
-      case FpPregParams(numEntries, numBank, numRead, numWrite) => getFpWbPort
-      case VfPregParams(numEntries, numBank, numRead, numWrite) => getVpWbPort
-      case V0PregParams(numEntries, numBank, numRead, numWrite) => getV0WbPort
-      case VlPregParams(numEntries, numBank, numRead, numWrite) => getVlWbPort
+      case IntPregParams(numEntries, numBank, numRead, numWrite) => getGpWriteCfg
+      case FpPregParams(numEntries, numBank, numRead, numWrite) => getFpWriteCfg
+      case VfPregParams(numEntries, numBank, numRead, numWrite) => getVpWriteCfg
+      case V0PregParams(numEntries, numBank, numRead, numWrite) => getV0WriteCfg
+      case VlPregParams(numEntries, numBank, numRead, numWrite) => getVlWriteCfg
       case _ => ???
     }
   }

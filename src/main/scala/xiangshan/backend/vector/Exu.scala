@@ -5,22 +5,24 @@ import chisel3.experimental.BundleLiterals._
 import chisel3.util._
 import freechips.rocketchip.util._
 import org.chipsalliance.cde.config.Parameters
+import xiangshan._
 import xiangshan.backend.Bundles
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.datapath.DataConfig._
+import xiangshan.backend.datapath.RdConfig.IntRD
 import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.{Fflags, Frm}
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
-import xiangshan.backend.fu.vector.Bundles.{V0, VType, Vl, Vxrm, Vxsat}
+import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm, _}
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, BypassSource}
 import xiangshan.backend.vector.VecRegionModule.DebugBundle
 import xiangshan.backend.vector.fu._
 import xiangshan.mem.SqPtr
-import xiangshan._
-import yunsuan.vector.Common._
+import yunsuan.vector.Common.{SewOH, VSew, _}
 import yunsuan.vector.v2.MergeUnit
 
 class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with HasXSParameter {
@@ -30,16 +32,18 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
   val vlenb = VLEN / 8
   // The width of the number of e8 elem in VLEN bits
   val byteElemWidth = log2Ceil(vlenb)
+  private val numOfMgu = if (param.hasVStd) 0 else latencyMax + 1
+  private val numOfEx = latencyMax + 1
 
   val in = IO(Input(new Exu.In(param)))
   val out = IO(Output(new Exu.Out(param)))
 
-  println(s"[tmp-$getClass] ${param.getInstanceNameOfPipe} ${param.fuConfigs.map(cfg => cfg.name -> cfg.fuGen2)}")
+  val bypass: BypassNetwork = Module(new BypassNetwork()(param, p))
   val fus: Seq[Func] = param.fuConfigs.map(cfg => cfg.fuGen2(p, cfg))
-  val mgus: Seq[MergeUnit] = Seq.fill(latencyMax + 1)(Module(new MergeUnit()))
+  val mgus: Seq[MergeUnit] = Seq.fill(numOfMgu)(Module(new MergeUnit()))
 
   val ex: Vec[ValidIO[Exu.ExStage]] = RegInit(
-    VecInit.fill(latencyMax + 1)(ValidIO(new Exu.ExStage(param)).Lit(_.valid -> false.B))
+    VecInit.fill(numOfEx)(ValidIO(new Exu.ExStage(param)).Lit(_.valid -> false.B))
   )
 
   val inEx = Wire(ValidIO(new Exu.ExStage(param)))
@@ -52,8 +56,20 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       sink.valid := source.valid && !source.bits.ctrl.robIdx.needFlush(in.flush)
       when(source.valid) {
         sink.bits := source.bits
+        sink.bits.data.src := bypass.out.src
       }
   }
+
+  bypass.in.sewOH := SewOH(in.uop.ctrl.vtype.get.vsew)
+  bypass.in.bypassCtrl := in.uop.bypassCtrl
+  bypass.in.gpRdData := in.gpRdData
+  bypass.in.fpRdData := in.fpRdData
+  bypass.in.vpRdData := in.uop.bits.data.src
+  bypass.in.gpWb1 := in.gpWb0
+  bypass.in.fpWb1 := in.fpWb0
+  bypass.in.vpWb0 := in.vpWbM1
+  bypass.in.vpWb1 := in.vpWb0
+  bypass.in.vpWb2 := in.vpWb1
 
   fus.map(_.in.ex0Next).zipWithIndex.foreach {
     case (sink: ValidIO[Func.InUop], i) =>
@@ -76,10 +92,11 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
         Mux(instFrm === VecFrm.DYN, in.frm.get, instFrm)
       )
       fu.in.flush := in.flush
-      (fu.in.frm zip effectiveFrm).foreach { case (fuFrm, frm) => fuFrm := frm }
-      fu.in.vxrm.foreach(_ := in.vxrm.get)
+      if (fu.in.frm.nonEmpty) require(in.frm.nonEmpty, s"${fu.name} needs frm input, but it's not provided by exu")
+      if (fu.in.vxrm.nonEmpty) require(in.vxrm.nonEmpty, s"${fu.name} needs vxrm input, but it's not provided by exu")
+      fu.in.frm.zip(effectiveFrm).foreach { case (sink, source) => sink := source }
+      fu.in.vxrm.zip(in.vxrm).foreach { case (sink, source) => sink := source }
   }
-
 
   mgus.zipWithIndex.foreach {
     case (mgu, i) =>
@@ -170,6 +187,12 @@ object Exu {
     val uop = ValidIO(new Exu.InUop(param))
     val frm = Option.when(param.readFrm)(Frm())
     val vxrm = Option.when(param.readVxrm)(Vxrm())
+    val gpRdData = Vec(param.numRegSrc, UInt(XLEN.W))
+    val fpRdData = Vec(param.numRegSrc, UInt(XLEN.W))
+    val vpWbM1 = Vec(backendParams.getWbPortIndices(backendParams.vpPregParams.dataCfg).size, UInt(VLEN.W))
+    val vpWb0, vpWb1 = Vec(backendParams.getVfRfWriteSize, UInt(VLEN.W))
+    val gpWb0 = Vec(backendParams.getIntRfWriteSize, UInt(XLEN.W))
+    val fpWb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
   }
 
   class Out(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
@@ -182,6 +205,7 @@ object Exu {
     def :<#=(source: InUop): Unit = {
       this.ctrl := source.ctrl
       this.data := source.data
+      this.bypassCtrl := source.bypassCtrl
       this.debug.foreach(_ := source.debug.get)
     }
   }
@@ -189,11 +213,8 @@ object Exu {
   class InUop(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
     val ctrl = new InCtrl(param)
     val data = new InData(param)
+    val bypassCtrl = new InBypassCtrl(param)
     val debug = Option.when(backendParams.debugEn)(new DebugBundle())
-
-    def fromIssueDeq(deq: VecIssueQueue.Deq): Unit = {
-      this.ctrl.fromIssueDeq(deq)
-    }
 
     def toOldExuInput: Bundles.ExuInput = {
       val exuInput = Wire(new Bundles.ExuInput(param.getExeUnitParams()))
@@ -290,11 +311,11 @@ object Exu {
 
   class OutUop(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
     val toRob = new ToRob(param)
-    val toGpRf = param.getGpWbPort.map(new ToRf(_, backendParams.intPregParams))
-    val toFpRf = param.getFpWbPort.map(new ToRf(_, backendParams.fpPregParams))
-    val toVpRf = param.getVpWbPort.map(new ToRf(_, backendParams.vfPregParams))
-    val toV0Rf = param.getV0WbPort.map(new ToRf(_, backendParams.v0PregParams))
-    val toVlRf = param.getVlWbPort.map(new ToRf(_, backendParams.vlPregParams))
+    val toGpRf = param.getGpWriteCfg.map(new ToRf(_, backendParams.intPregParams))
+    val toFpRf = param.getFpWriteCfg.map(new ToRf(_, backendParams.fpPregParams))
+    val toVpRf = param.getVpWriteCfg.map(new ToRf(_, backendParams.vfPregParams))
+    val toV0Rf = param.getV0WriteCfg.map(new ToRf(_, backendParams.v0PregParams))
+    val toVlRf = param.getVlWriteCfg.map(new ToRf(_, backendParams.vlPregParams))
 
     def :<#=(fuOuts: Seq[ValidIO[Func.OutUop]]): Unit = {
       val fuOutValidOH: Vec[Bool] = VecInit(fuOuts.map(_.valid))
@@ -409,6 +430,29 @@ object Exu {
     val vl  = Option.when(param.readVlRf)(Vl())
     val imm = Option.when(param.needImm)(UInt(param.immWidth.W))
     val pc  = Option.when(param.needPc)(UInt(VAddrData().dataWidth.W))
+  }
+
+  class InBypassCtrl(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
+    val gpRen = Vec(param.numRegSrc, Bool())
+    val fpRen = Vec(param.numRegSrc, Bool())
+    val vpRen = Vec(param.numRegSrc, Bool())
+    val bypassSource = Vec(param.numRegSrc, new BypassSource)
+    val bypassDelay  = Vec(param.numRegSrc, BypassDelay())
+
+    def fromIssueDeq(deq: VecIssueQueue.Deq): Unit = {
+      this.gpRen := deq.gpRen
+      this.fpRen := deq.fpRen
+      this.vpRen := deq.vpRen
+      this.bypassSource := deq.bypassSource
+      this.bypassDelay := deq.bypassDelay
+    }
+  }
+
+  class BypassCtrl(val param: ExuParam, val pregParams: PregParams)(implicit p: Parameters) extends XSBundle {
+    private val sourceWidth = log2Up(pregParams.getNumWrite(backendParams))
+
+    val source = UInt(sourceWidth.W)
+    val delay = BypassDelay()
   }
 
   class ToRf(val wbCfg: WbConfig, val pregParams: PregParams) extends Bundle {

@@ -23,14 +23,16 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
+import xiangshan.backend.Bundles.IssueQueueIQWakeUpBundle
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.RdConfig.RdConfig
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.Vxrm
 import xiangshan.backend.regfile.{FpRegFile, PregParams, VfRegFile}
 import xiangshan.backend.rob.RobPtr
-import xiangshan.backend.vector.VecIssueQueue.WakeUpBundle
+import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, WakeUpBundle}
 import xiangshan.backend.vector.VecRegionModule._
+import xiangshan.backend.vector.util.ScalaTypeExt.toChiselSeqDataExt
 import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
 
 class VecRegionModule(val regionParam: RegionParam)(implicit p: Parameters) extends LazyModule {
@@ -194,25 +196,29 @@ class VecRegionImp(
       iq.in.enq := in.fromIntRegion.vstdUops(i)
   }
 
+  val vpWbM3WakeUp: Seq[WakeUpBundle] =
+    issuePipes.flatten.filter(_.param.needVpWen).map(_.out.vpWbM3Wakeup) ++ in.fromMem.vldS3WakeUp
+
   issueQueues.zipWithIndex.foreach {
     case (iq, i) =>
       iq.in.resps.is0 := issuePipes(i).map(_.out.is0Resp)
       iq.in.resps.is1 := issuePipes(i).map(_.out.is1Resp)
       iq.in.wakeup.gpWbVec := in.fromIntRegion.gpWbWakeUp
       iq.in.wakeup.fpWbVec := in.fromFltRegion.fpWbWakeUp
-      iq.in.wakeup.vlWbVec.foreach(_ := in.fromIntRegion.vlWbWakeUp)
-      iq.in.wakeup.vpWbVec.zipWithIndex.foreach { case (wakeup, i) =>
-        wakeup.wen := vpWbDataPath.out.toRf(i).wen
-        wakeup.pdest := vpWbDataPath.out.toRf(i).pdest
-        wakeup.delay := 0.U // Todo
-      }
+      iq.in.wakeup.vlWb0Vec.foreach(_ := in.vlWb0WakeUp)
       iq.in.wakeup.v0WbVec.foreach(
         _.zipWithIndex.foreach { case (wakeup, i) =>
-          wakeup.wen := v0WbDataPath.out.toRf(i).wen
-          wakeup.pdest := v0WbDataPath.out.toRf(i).pdest
+          wakeup.wen := v0WbDataPath.out.wb0(i).wen
+          wakeup.pdest := v0WbDataPath.out.wb0(i).pdest
           wakeup.delay := 0.U // Todo
         }
       )
+
+      require(
+        vpWbM3WakeUp.size == iq.in.wakeup.vpWbM3Vec.size,
+        s"vpWbM3WakeUp: ${vpWbM3WakeUp.size}, iq.in.wakeup.vpWbM3Vec: ${iq.in.wakeup.vpWbM3Vec.size}"
+      )
+      iq.in.wakeup.vpWbM3Vec := vpWbM3WakeUp
   }
 
 
@@ -229,52 +235,77 @@ class VecRegionImp(
       pipe.in.is2VlRdDataNext.foreach { case rdata =>
         rdata.data := vlRdata(rdata.rdConfig.port)
       }
-      pipe.in.is2GpRdDataNext := RegNext(in.fromIntRegion.is1GpRdDataNext(iqIdx)(pipeIdx))
-      pipe.in.is2FpRdDataNext := RegNext(in.fromFltRegion.is1FpRdDataNext(iqIdx)(pipeIdx))
+      pipe.in.ex0GpRdDataNext := RegNext(in.fromIntRegion.is1GpRdDataNext(iqIdx)(pipeIdx))
+      pipe.in.ex0FpRdDataNext := RegNext(in.fromFltRegion.is1FpRdDataNext(iqIdx)(pipeIdx))
       pipe.in.is2GpRdFailNext := in.fromIntRegion.is0GpRdDataFail(iqIdx)(pipeIdx)
       pipe.in.is2FpRdFailNext := in.fromFltRegion.is0FpRdDataFail(iqIdx)(pipeIdx)
 
       pipe.in.frm.foreach(_ := in.fromCSR.frm)
       pipe.in.vxrm.foreach(_ := in.fromCSR.vxrm)
+
+      pipe.in.vpWbM1 := vpWbDataPath.in.fromExus.flatten.flatten.sortBy(_.wbCfg.port).map(_.data)
+      pipe.in.vpWb0 := vpWbDataPath.out.wb0.map(_.data)
+      pipe.in.vpWb1 := vpWbDataPath.out.wb1.map(_.data)
+      pipe.in.gpWb0 := 0.U.asTypeOf(pipe.in.gpWb0) // TODO: vec read gp bypass
+      pipe.in.fpWb0 := 0.U.asTypeOf(pipe.in.fpWb0) // TODO: vec read fp bypass
+    }
+  }
+
+  private val vldS3VpWb = in.fromMem.vldS3VpWbNext
+  private val vldS4VpWb = Reg(chiselTypeOf(vldS3VpWb))
+  private val vldS5VpWb = Reg(chiselTypeOf(vldS3VpWb))
+  private val vldS6VpWb = Reg(chiselTypeOf(vldS3VpWb))
+
+  private val vldS6RobWb: Seq[Seq[ValidIO[Exu.ToRob]]] = in.fromMem.vldS3RobWb.map { iqWB => iqWB.map {
+    exuWB => Pipe(exuWB, 3)
+  }}
+
+  for ((sinks: MixedVec[Exu.ToRf], sources: MixedVec[Exu.ToRf]) <- Seq(vldS4VpWb, vldS5VpWb, vldS6VpWb).flatten zip Seq(vldS3VpWb, vldS4VpWb, vldS5VpWb).flatten) {
+    for ((sink, source) <- sinks zip sources) {
+      sink.wen := source.wen
+      when (source.wen) {
+        sink.pdest := source.pdest
+        sink.data := source.data
+      }
     }
   }
 
   println(s"[tmp-${this.getClass}] " +
     s"vpWbDataPath.in.fromExus: ${vpWbDataPath.in.fromExus.map(_.map(_.size))} " +
     s"issuePipes vpWbNext: ${issuePipes.map(_.map(_.out.vpWbNext).collect { case x if x.nonEmpty => x.get }.size)}" +
-    s"in.fromMem.vpWb: ${in.fromMem.vpWb.map(_.size)}"
+    s"in.fromMem.vpWb: ${in.fromMem.vldS3VpWbNext.map(_.size)}"
   )
 
   require(
     vpWbDataPath.in.fromExus.flatten.flatten.size ==
       (issuePipes.map(_.map(_.out.vpWbNext).collect { case x if x.nonEmpty => x.get }) ++
-        in.fromMem.vpWb).flatten.size
+        vldS6VpWb).flatten.size
   )
 
   vpWbDataPath.in.fromExus.flatten.flatten
     .zip(Seq(
       issuePipes.map(_.map(_.out.vpWbNext).collect { case x if x.nonEmpty => x.get }),
-      in.fromMem.vpWb,
+      vldS6VpWb,
     ).flatten.flatten)
     .foreach { case (sink, source) => sink := source }
 
   println(s"[tmp-${this.getClass}] " +
     s"vlWbDataPath.in.fromExus: ${vlWbDataPath.in.fromExus.map(_.map(_.size))} " +
-    s"issuePipes vlWbNext: ${issuePipes.map(_.map(_.out.vlWbNext).collect { case x if x.nonEmpty => x.get })}" +
-    s"in.fromIntRegion.vlWb: ${in.fromIntRegion.vlWb.size}"
+    s"issuePipes vlWbNext: ${issuePipes.map(_.map(_.out.vlWb0Next).collect { case x if x.nonEmpty => x.get })}" +
+    s"in.fromIntRegion.vlWb0Next: ${in.fromIntRegion.vlWb0Next.size}"
   )
 
   require(
     vlWbDataPath.in.fromExus.flatten.flatten.size == (
-      issuePipes.flatMap(_.map(_.out.vlWbNext).collect { case x if x.nonEmpty => x.get }) ++
-      in.fromIntRegion.vlWb
+      issuePipes.flatMap(_.map(_.out.vlWb0Next).collect { case x if x.nonEmpty => x.get }) ++
+      in.fromIntRegion.vlWb0Next
     ).size
   )
 
   vlWbDataPath.in.fromExus.flatten.flatten
     .zip(Seq(
-      issuePipes.flatMap(_.map(_.out.vlWbNext).collect { case x if x.nonEmpty => x.get }),
-      in.fromIntRegion.vlWb,
+      issuePipes.flatMap(_.map(_.out.vlWb0Next).collect { case x if x.nonEmpty => x.get }),
+      in.fromIntRegion.vlWb0Next,
     ).flatten)
     .foreach { case (sink, source) => sink := source }
 
@@ -286,9 +317,9 @@ class VecRegionImp(
     ).flatten.flatten)
     .foreach { case (sink, source) => sink := source }
 
-  vpWen := vpWbDataPath.out.toRf.map(_.wen)
-  vpWaddr := vpWbDataPath.out.toRf.map(_.pdest)
-  vpWdata := vpWbDataPath.out.toRf.map(_.data)
+  vpWen := vpWbDataPath.out.wb0.map(_.wen)
+  vpWaddr := vpWbDataPath.out.wb0.map(_.pdest)
+  vpWdata := vpWbDataPath.out.wb0.map(_.data)
   vpRaddr := issuePipes
     .flatMap(_.flatMap(_.out.is1VpRdAddrNext))
     .groupBy(_.rdConfig.port)
@@ -296,9 +327,9 @@ class VecRegionImp(
     .sortBy { case (port, raddr) => port }
     .map { case (port, raddrSeq) => raddrSeq.ensuring(_.size == 1).head.addr }
 
-  vlWen := in.fromIntRegion.vlWb.map(_.wen)
-  vlWaddr := in.fromIntRegion.vlWb.map(_.pdest)
-  vlWdata := in.fromIntRegion.vlWb.map(_.data)
+  vlWen := in.fromIntRegion.vlWb0Next.map(_.wen)
+  vlWaddr := in.fromIntRegion.vlWb0Next.map(_.pdest)
+  vlWdata := in.fromIntRegion.vlWb0Next.map(_.data)
   vlRaddr := issuePipes
     .flatMap(_.flatMap(_.out.is1VlRdAddrNext))
     .groupBy(_.rdConfig.port)
@@ -312,6 +343,9 @@ class VecRegionImp(
   for ((iq, i) <- issueQueues.filterNot(_.param.hasVStd).zipWithIndex) {
     out.toDispatch.canAccept(i).foreach(_ := iq.out.canAccept)
   }
+
+  out.toDispatch.wakeUpVec := vpWbM3WakeUp
+
   for ((iq, i) <- issueQueues.filter(_.param.hasVStd).zipWithIndex) {
     out.toIntRegion.vstdCanAccept(i).foreach(_ := iq.out.canAccept)
   }
@@ -326,6 +360,10 @@ class VecRegionImp(
     case (sink: ValidIO[Exu.ToRob], source: ValidIO[Exu.ToRob]) => sink := source
   }
 
+  out.toRob.vldWriteback.flatten zip vldS6RobWb.flatten foreach {
+    case (sink: ValidIO[Exu.ToRob], source: ValidIO[Exu.ToRob]) => sink := source
+  }
+
   out.toMem.ex0 zip issuePipes.map(_.filter(_.param.hasVStd).map(_.out.ex0)) foreach {
     case (sink: MixedVec[ValidIO[Exu.InUop]], source: Seq[ValidIO[Exu.InUop]]) => sink := source
   }
@@ -336,12 +374,19 @@ class VecRegionImp(
     out.vpWbNext(i) := issuePipes(i).map(_.out.vpWbNext).filter(_.nonEmpty).map(_.get)
 
     out.v0WbNext(i) := issuePipes(i).map(_.out.v0WbNext).filter(_.nonEmpty).map(_.get)
-    out.vlWbNext(i) := issuePipes(i).map(_.out.vlWbNext).filter(_.nonEmpty).map(_.get)
+    out.vlWbNext(i) := issuePipes(i).map(_.out.vlWb0Next).filter(_.nonEmpty).map(_.get)
   }
 
-  out.vpWb := vpWbDataPath.out.toRf
-  out.v0Wb := v0WbDataPath.out.toRf
-  out.vlWb := vlWbDataPath.out.toRf
+  out.vpWb := vpWbDataPath.out.wb0
+  out.v0Wb := v0WbDataPath.out.wb0
+  out.vlWb := vlWbDataPath.out.wb0
+
+  out.vlWb0WakeUp zip vlWbDataPath.out.wb0 foreach {
+    case (wakeup, wb) =>
+      wakeup.wen := wb.wen
+      wakeup.pdest := wb.pdest
+      wakeup.delay := BypassDelay.delay0
+  }
 
   out.toVecExcpMod := 0.U.asTypeOf(out.toVecExcpMod)
 
@@ -383,20 +428,14 @@ object VecRegionModule {
         param.issueParams.filterNot(_.hasVStd).map(x => Vec(x.numEnq, ValidIO(new VecIssueQueue.Enq()(p, x))))
       )
     }
-    val fromMem = new Bundle {
-      val wakeUp = Vec(backendParams.LdExuCnt, Valid(new MemWakeUpBundle))
-      val vpWb: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.vfPregParams)
-      val v0Wb: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.v0PregParams)
-      val vstdWb = param.genExuToRobBundle(ValidIO(_), _.hasVStd)
-    }
+    val fromMem = new FromMem
 
     val fromIntRegion = new Bundle {
       val vstdUops: MixedVec[Vec[ValidIO[VecIssueQueue.Enq]]] = MixedVec(
         param.issueParams.filter(_.numVStd > 0).map(x => Flipped(Vec(x.numEnq, ValidIO(new VecIssueQueue.Enq()(p, x)))))
       )
-      val gpWbWakeUp = Vec(backendParams.getIntRfWriteSize, new WakeUpBundle(IntPhyRegIdxWidth, IntData()))
-      val vlWbWakeUp = Vec(backendParams.getVlRfWriteSize, new WakeUpBundle(VlPhyRegIdxWidth, VlData()))
-      val vlWb: MixedVec[Exu.ToRf] = MixedVec(intRegion.genExuToRfBundle(backendParams.vlPregParams).flatten)
+      val gpWbWakeUp = Vec(backendParams.getIntRfWriteSize, new WakeUpBundle(backendParams.gpPregParams))
+      val vlWb0Next: MixedVec[Exu.ToRf] = MixedVec(intRegion.genExuToRfBundle(backendParams.vlPregParams).flatten)
       val is0GpRdDataFail: MixedVec[MixedVec[Vec[Bool]]] = param.genRfRdFailBundle(backendParams.intPregParams)
       val is1GpRdDataNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadDataBundle]]] = param.genRfRdDataBundle(backendParams.intPregParams)
       // Todo: bypass data
@@ -405,7 +444,7 @@ object VecRegionModule {
     val fromFltRegion = new Bundle {
       val is0FpRdDataFail: MixedVec[MixedVec[Vec[Bool]]] = param.genRfRdFailBundle(backendParams.fpPregParams)
       val is1FpRdDataNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadDataBundle]]] = param.genRfRdDataBundle(backendParams.fpPregParams)
-      val fpWbWakeUp = Vec(backendParams.getFpRfWriteSize, new WakeUpBundle(FpPhyRegIdxWidth, FpData()))
+      val fpWbWakeUp = Vec(backendParams.getFpRfWriteSize, new WakeUpBundle(backendParams.fpPregParams))
       // Todo: bypass data
     }
 
@@ -416,10 +455,24 @@ object VecRegionModule {
 
     val fromVecExcpMod = new ExcpModToVprf(maxMergeNumPerCycle * 2, maxMergeNumPerCycle)
 
+    val vlWb0WakeUp = Vec(backendParams.getVlRfWriteSize, new WakeUpBundle(backendParams.vlPregParams))
+
     val diff = Option.when(backendParams.basicDebugEn)(new DiffIn)
   }
 
+  class FromMem(implicit p: Parameters, param: RegionParam) extends XSBundle {
+    private val intRegion = backendParams.getIntRegionParam
+
+    val vldS3WakeUp: Vec[WakeUpBundle] = Vec(backendParams.LdExuCnt, new WakeUpBundle(backendParams.vpPregParams))
+    val vldS3VpWbNext: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.vpPregParams)
+    val vldS3RobWb: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = intRegion.genExuToRobBundle(ValidIO(_), _.needVpWen)
+    val v0Wb: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.v0PregParams)
+    val vstdWb: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = param.genExuToRobBundle(ValidIO(_), _.hasVStd)
+  }
+
   class Out(implicit p: Parameters, param: RegionParam) extends XSBundle {
+    private val intRegion = backendParams.getIntRegionParam
+
     val numDeq: Int = param.issueParams.map(_.numDeq).sum
     val numEntry: Int = param.issueParams.map(_.numEntry).max
     val numIQ: Int = param.issueParams.count(x => !x.hasVStd)
@@ -429,6 +482,8 @@ object VecRegionModule {
         param.issueParams.filterNot(_.hasVStd).map(_.numDeq).sum,
         UInt(numEntry.U.getWidth.W)
       )
+      val wakeUpVec: Vec[VecIssueQueue.WakeUpBundle] =
+        Vec(backendParams.getVpWriteSize, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams))
 
       val canAccept: MixedVec[Vec[Bool]] = MixedVec(
         param.issueParams.filterNot(_.hasVStd).map(x => Flipped(Vec(x.numEnq, Bool())))
@@ -452,6 +507,7 @@ object VecRegionModule {
 
     val toRob = new Bundle {
       val writeback: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = param.genExuToRobBundle(ValidIO(_))
+      val vldWriteback: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = intRegion.genExuToRobBundle(ValidIO(_), _.needVpWen)
     }
     val gpWbNext: MixedVec[MixedVec[Exu.ToRf]] = param.genExuToRfBundle(backendParams.intPregParams)
     val fpWbNext: MixedVec[MixedVec[Exu.ToRf]] = param.genExuToRfBundle(backendParams.fpPregParams)
@@ -476,6 +532,8 @@ object VecRegionModule {
       backendParams.getRfWriteSize(backendParams.vlPregParams.dataCfg),
       new RfWriteBundle(backendParams.vlPregParams)
     )
+
+    val vlWb0WakeUp: Vec[WakeUpBundle] = Vec(backendParams.getVlRfWriteSize, new WakeUpBundle(backendParams.vlPregParams))
 
     val toVecExcpMod = new VprfToExcpMod(maxMergeNumPerCycle * 2)
 

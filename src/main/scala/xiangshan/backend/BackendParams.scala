@@ -130,7 +130,7 @@ case class BackendParams(
   def numNoDataWB = allSchdParams.map(_.numNoDataWB).sum
   def numExu = allSchdParams.map(_.numExu).sum
 
-  def numException = allRealExuParams.count(_.exceptionOut.nonEmpty)
+  def numException(implicit p: Parameters) = getWrite2RobSize(_.needExceptionGen)
 
   def numRedirect = 1 // only for ahead info to frontend
 
@@ -171,8 +171,11 @@ case class BackendParams(
   }
 
   def genWrite2RobBundles(implicit p: Parameters): MixedVec[ValidIO[WriteBackRobBundle]] = {
-    MixedVec(allSchdParams.map(_.genWriteBackRobValidBundle.flatten).flatten)
+    MixedVec(allSchdParams.map(_.genWriteBackRobValidBundle(needExtraVld = true).flatten).flatten)
   }
+
+  def getWrite2RobSize(cond: ExeUnitParams => Boolean = _ => true)(implicit p: Parameters): Int =
+    genWrite2RobBundles.count(x => cond(x.bits.params))
 
   def genNewExuOutputBundle[T <: Bundle](
     builder: NewExuOutput => T,
@@ -617,6 +620,7 @@ sealed trait NewParam { self: BackendParams =>
   // New api name
   def gpPregParams = this.intPregParams
   def vpPregParams = this.vfPregParams
+  def getVpWriteSize = this.getVfRfWriteSize
 
   def genExuToRfBundle(pregParams: PregParams): MixedVec[MixedVec[MixedVec[Exu.ToRf]]] = MixedVec(
     regionParams.map(_.genExuToRfBundle(pregParams))

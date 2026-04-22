@@ -4,13 +4,14 @@ import chisel3.util.MixedVec
 import chisel3.{Bool, Bundle, Vec}
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.BackendParams
-import xiangshan.backend.datapath.RdConfig
+import xiangshan.backend.datapath.{RdConfig, WbConfig}
 import xiangshan.backend.datapath.RdConfig.RdConfig
 import xiangshan.backend.datapath.WbConfig.PregWB
 import xiangshan.backend.decode.Imm
 import xiangshan.backend.issue.IssueBlockParams
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.vector.fu.VecFuConfig
+import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
 
 import scala.beans.BeanProperty
 
@@ -135,6 +136,18 @@ class IssueParam(
 
   def getVpReadCfgs: Seq[RdConfig] = {
     exuParams.flatMap(_.getVpReadCfgs)
+  }
+
+  def getGpWriteCfgs: Seq[WbConfig.IntWB] = {
+    exuParams.flatMap(_.getGpWriteCfg)
+  }
+
+  def getFpWriteCfgs = {
+    exuParams.flatMap(_.getFpWriteCfg)
+  }
+
+  def getVpWriteCfgs = {
+    exuParams.flatMap(_.getFpWriteCfg)
   }
 
   def genIssueBundle[T <: Bundle](wrapper: VecIssueQueue.Deq => T)(implicit p: Parameters): MixedVec[T] = {
