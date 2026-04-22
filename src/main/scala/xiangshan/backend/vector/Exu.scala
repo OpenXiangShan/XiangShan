@@ -135,6 +135,12 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
   }
 
   val fuOutValidOH: Seq[Bool] = fus.flatMap(_.out.ex.map(_.valid))
+  val simultaneousOutCnt = PopCount(outFuUopEx.map(_.valid))
+
+  assert(
+    simultaneousOutCnt <= 1.U,
+    s"${param.name} produced multiple Exu outputs in one cycle"
+  )
 
   out.uop.valid := Cat(outFuUopEx.map(_.valid)).orR
   out.uop.bits := Mux1H(outFuUopEx.map(x => x.valid -> x.bits))
