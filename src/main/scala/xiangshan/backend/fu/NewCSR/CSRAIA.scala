@@ -14,22 +14,6 @@ import xiangshan.XSBundle
 import scala.collection.immutable.SeqMap
 
 trait CSRAIA { self: NewCSR with HypervisorLevel =>
-  val miselect = Module(new CSRModule("Miselect", new MISelectBundle) with HasISelectBundle {
-    private val value = reg.ALL.asUInt
-    inIMSICRange := value >= 0x70.U && value < 0x100.U
-    isIllegal :=
-      value < 0x30.U ||
-      value >= 0x30.U && value < 0x40.U && value(0) === 1.U ||
-      value >= 0x40.U && value < 0x70.U ||
-      value >= 0x100.U
-  })
-    .setAddr(CSRs.miselect)
-
-  val mireg = Module(new CSRModule("Mireg", new ZeroFieldBundle("Machine interrupt-file indirect data register selected by miselect.")) with HasIregSink {
-    regOut := iregRead.mireg
-  })
-    .setAddr(CSRs.mireg)
-
   val mtopei = Module(new CSRModule("Mtopei", new TopEIBundle) with HasAIABundle {
     regOut := aiaToCSR.mtopei
   })
@@ -41,22 +25,6 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.mtopi)
 
-  val siselect = Module(new CSRModule("Siselect", new SISelectBundle) with HasISelectBundle {
-    private val value = reg.ALL.asUInt
-    inIMSICRange := value >= 0x70.U && value < 0x100.U
-    isIllegal :=
-      value < 0x30.U ||
-      value >= 0x30.U && value < 0x40.U && value(0) === 1.U ||
-      value >= 0x40.U && value < 0x70.U ||
-      value >= 0x100.U
-  })
-    .setAddr(CSRs.siselect)
-
-  val sireg = Module(new CSRModule("Sireg", new ZeroFieldBundle("Supervisor interrupt-file indirect data register selected by siselect.")) with HasIregSink {
-    regOut := iregRead.sireg
-  })
-    .setAddr(CSRs.sireg)
-
   val stopei = Module(new CSRModule("Stopei", new TopEIBundle) with HasAIABundle {
     regOut := aiaToCSR.stopei
   })
@@ -67,20 +35,6 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
     regOut.IPRIO := topIR.stopi.IPRIO
   })
     .setAddr(CSRs.stopi)
-
-  val vsiselect = Module(new CSRModule("VSiselect", new VSISelectBundle) with HasISelectBundle {
-    private val value = reg.ALL.asUInt
-    inIMSICRange := value >= 0x70.U && value < 0x100.U
-    isIllegal :=
-      value < 0x70.U ||
-      value >= 0x100.U
-  })
-    .setAddr(CSRs.vsiselect)
-
-  val vsireg    = Module(new CSRModule("VSireg", new ZeroFieldBundle("Virtual supervisor interrupt-file indirect data register selected by vsiselect.")) with HasIregSink {
-    regOut := iregRead.sireg
-  })
-    .setAddr(CSRs.vsireg)
 
   val vstopei   = Module(new CSRModule("VStopei", new TopEIBundle) with HasAIABundle {
     regOut := aiaToCSR.vstopei
@@ -158,16 +112,10 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   val iregiprios = miregiprios ++ siregiprios
 
   val aiaCSRMods = Seq(
-    miselect,
-    mireg,
     mtopei,
     mtopi,
-    siselect,
-    sireg,
     stopei,
     stopi,
-    vsiselect,
-    vsireg,
     vstopi,
     vstopei,
   )
@@ -179,24 +127,6 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   val aiaCSROutMap: SeqMap[Int, UInt] = SeqMap.from(
     aiaCSRMods.map(csr => (csr.addr -> csr.regOut.asInstanceOf[CSRBundle].asUInt)).iterator
   )
-
-  private val miregRData: UInt = Mux1H(
-    miregiprios.map(prio => (miselect.rdata.asUInt === prio.addr.U) -> prio.rdata)
-  )
-
-  private val siregRData: UInt = Mux1H(
-    siregiprios.map(prio => (siselect.rdata.asUInt === prio.addr.U) -> prio.rdata)
-  )
-
-  aiaCSRMods.foreach { mod =>
-    mod match {
-      case m: HasIregSink =>
-        m.iregRead.mireg := miregRData
-        m.iregRead.sireg := siregRData
-        m.iregRead.vsireg := 0.U // Todo: IMSIC
-      case _ =>
-    }
-  }
 }
 
 class ISelectField(final val maxValue: Int, reserved: Seq[Range]) extends CSREnum with WARLApply {
@@ -342,7 +272,6 @@ trait HasInterruptFilterSink { self: CSRModule[_] =>
 
 trait HasISelectBundle { self: CSRModule[_] =>
   val inIMSICRange = IO(Output(Bool()))
-  val isIllegal = IO(Output(Bool()))
 }
 
 trait HasIregSink { self: CSRModule[_] =>

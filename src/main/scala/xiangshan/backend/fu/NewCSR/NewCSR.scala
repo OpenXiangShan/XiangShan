@@ -70,6 +70,8 @@ object CSRConfig {
   // TODO: as current test not support clean mdt , we set mstatus->mdt = 0 to allow exception in m-mode
   final val mdtInit = 0
 
+  final val csrindSelectWidth = 12
+
 }
 
 class NewCSRInput(implicit p: Parameters) extends Bundle {
@@ -465,6 +467,30 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   }
 
+  sireg.smcdelegSelect := siselect.regOut.ALL.asUInt
+  sireg2.smcdelegSelect := siselect.regOut.ALL.asUInt
+
+  (Seq(mcycle, minstret) ++ mhpmcounters).zipWithIndex.foreach { case (mod, i) =>
+    mod match {
+      case m: HasSiregCounterBundle =>
+        sireg.fromMcounter(i) := m.toSireg
+        m.fromSireg <> sireg.toMcounter(i)
+      case _ =>
+    }
+  }
+
+  (Seq(mcyclecfg, minstretcfg) ++ mhpmevents).zipWithIndex.foreach { case (mod, i) =>
+    mod match {
+      case m: HasSiregCfgBundle =>
+        sireg2.fromMcfg(i) := m.toSireg2
+        m.fromSireg2 <> sireg2.toMcfg(i)
+      case _ =>
+    }
+  }
+
+  mcountinhibit.fromScntinhibit := scountinhibit.toMcntinhibit
+  scountinhibit.fromMcntinhibit := mcountinhibit.toScntinhibit
+
   private val writeFpLegal  = permitMod.io.out.hasLegalWriteFcsr
   private val writeVecLegal = permitMod.io.out.hasLegalWriteVcsr
 
@@ -589,6 +615,11 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod match {
       case m: HasMachineCounterControlBundle =>
         m.mcountinhibit := mcountinhibit.regOut
+      case _ =>
+    }
+    mod match {
+      case m: HasMcounterenBundle =>
+        m.mcounteren := mcounteren.regOut
       case _ =>
     }
     mod match {
@@ -930,7 +961,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   // perf
   val addrInPerfCnt = (wenLegal || ren) && (
     (addr >= CSRs.mcycle.U) && (addr <= CSRs.mhpmcounter31.U) ||
-    (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U)
+    (addr >= CSRs.cycle.U) && (addr <= CSRs.hpmcounter31.U) ||
+    (addr === CSRs.sireg.U) && (Iselect.isInSmcdeleg(siselect.rdata))
   ) ||
   ren && (
     (addr === CSRs.vstopi.U) || (addr === CSRs.vstopei.U) ||

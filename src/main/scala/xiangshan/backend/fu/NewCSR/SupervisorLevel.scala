@@ -70,6 +70,16 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
   val senvcfg = Module(new CSRModule("Senvcfg", new SEnvCfg))
     .setAddr(CSRs.senvcfg)
 
+  val scountinhibit = Module(new CSRModule("Scountinhibit", new McountinhibitBundle) with HasMcounterenBundle {
+    private val delegMask = Cat(mcounteren.HPM.asUInt, mcounteren.IR.asUInt, 0.U(1.W), mcounteren.CY.asUInt)
+    val fromMcntinhibit = IO(Input(new McountinhibitBundle))
+    val toMcntinhibit   = IO(ValidIO(new McountinhibitBundle))
+    toMcntinhibit.valid := wen
+    toMcntinhibit.bits := (delegMask & wdata) | (~delegMask & fromMcntinhibit.asUInt)
+    regOut := fromMcntinhibit.asUInt & delegMask
+  })
+    .setAddr(CSRs.scountinhibit)
+
   val sscratch = Module(new CSRModule("Sscratch", new ScratchBundle("Supervisor-mode scratch register.")))
     .setAddr(CSRs.sscratch)
 
@@ -183,6 +193,7 @@ trait SupervisorLevel { self: NewCSR with MachineLevel =>
     stvec,
     scounteren,
     senvcfg,
+    scountinhibit,
     sscratch,
     sepc,
     scause,

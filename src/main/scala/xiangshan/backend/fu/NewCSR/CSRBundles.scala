@@ -69,6 +69,7 @@ object CSRBundles {
     val STCE  =      RO(    63)           .withReset(0.U).withDescription("Enable supervisor and virtual-supervisor timer compare CSRs from the Sstc extension.")
     val PBMTE =      RO(    62)           .withReset(0.U).withDescription("Enable page-based memory types during address translation from the Svpbmt extension.")
     val ADUE  =      RO(    61)           .withReset(0.U).withDescription("Enable hardware A/D-bit update during page-table walks from the Svadu extension.")
+    val CDE   =      RO(    60)           .withReset(0.U).withDescription("Enable Smcdeleg/Ssccfg extension.")
     val DTE   =      RO(    59)           .withReset(0.U).withDescription("Enable double-trap support for lower privilege modes from the Ssdbltrp extension.")
     val PMM   =  EnvPMM(33, 32, wNoEffect).withReset(EnvPMM.Disable).withDescription("Environment protection and memory-type mode from the Smnpm extension.")
     val CBZE  =      RW(     7)           .withReset(1.U).withDescription("Enable cache-block zero operations from the Zicboz extension.")

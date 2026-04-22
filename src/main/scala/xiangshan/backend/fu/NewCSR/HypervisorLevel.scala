@@ -254,7 +254,7 @@ class HvipBundle extends InterruptPendingBundle {
   // VSSIP, VSTIP, VSEIP, localIP is writable
   this.getVS.foreach(_.setRW().withReset(0.U))
   this.getLocal.foreach(_.setRW().withReset(0.U))
-  this.LCOFIP.setRO().withReset(0.U)
+  this.LCOFIP.setRW().withReset(0.U)
 }
 
 class HieBundle extends InterruptEnableBundle {
@@ -274,7 +274,7 @@ class HvienBundle extends InterruptEnableBundle {
   // For interrupt numbers 13–63, implementations may freely choose which bits of hvien are writable
   // and which bits are read-only zero or one.
   this.getLocal.foreach(_.setRW().withReset(0.U))
-  this.LCOFIE.setRO().withReset(0.U)
+  this.LCOFIE.setRW().withReset(0.U)
 }
 
 class HgeieBundle(implicit val p: Parameters) extends CSRBundle with HasSoCParameter {

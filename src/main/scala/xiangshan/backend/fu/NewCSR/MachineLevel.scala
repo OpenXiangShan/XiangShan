@@ -184,13 +184,25 @@ trait MachineLevel { self: NewCSR =>
   val menvcfg = Module(new CSRModule("Menvcfg", new MEnvCfg))
     .setAddr(CSRs.menvcfg)
 
-  val mcountinhibit = Module(new CSRModule("Mcountinhibit", new McountinhibitBundle))
+  val mcountinhibit = Module(new CSRModule("Mcountinhibit", new McountinhibitBundle){
+    val fromScntinhibit = IO(Flipped(ValidIO(new McountinhibitBundle)))
+    val toScntinhibit   = IO(Output(new McountinhibitBundle))
+    toScntinhibit := regOut
+    when(wen){
+      reg := wdata
+    }.elsewhen(fromScntinhibit.valid){
+      reg := fromScntinhibit.bits
+    }
+  })
     .setAddr(CSRs.mcountinhibit)
 
   val mhpmevents: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new CSRModule(s"Mhpmevent", new MhpmeventBundle) with HasOfFromPerfCntBundle {
-      when(wen){
-        reg.OF := wdata.OF
+    Module(new CSRModule(s"Mhpmevent", new MhpmeventBundle) with HasOfFromPerfCntBundle with HasSiregCfgBundle {
+      toSireg2 := regOut.asUInt
+      when(wen) {
+        reg := wdata
+      }.elsewhen(fromSireg2.valid) {
+        reg := fromSireg2.bits
       }.elsewhen(ofFromPerfCnt) {
         reg.OF := ofFromPerfCnt
       }
@@ -326,9 +338,12 @@ trait MachineLevel { self: NewCSR =>
     val MML   = RO( 0).withDescription("Machine-mode lock-down control from the Smepmp extension.")
   })).setAddr(CSRs.mseccfg)
 
-  val mcycle = Module(new CSRModule("Mcycle", new CounterValueBundle("Machine cycle counter value.")) with HasMachineCounterControlBundle with SmcntrpmfBundle {
+  val mcycle = Module(new CSRModule("Mcycle", new CounterValueBundle("Machine cycle counter value.")) with HasMachineCounterControlBundle with SmcntrpmfBundle with HasSiregCounterBundle {
+    toSireg := regOut.asUInt
     when(w.wen) {
       reg := w.wdata
+    }.elsewhen(fromSireg.valid) {
+      reg := fromSireg.bits
     }.elsewhen(!this.mcountinhibit.CY.asUInt.asBool && countingEn) {
       reg := reg.ALL.asUInt + 1.U
     }.otherwise {
@@ -337,9 +352,12 @@ trait MachineLevel { self: NewCSR =>
   }).setAddr(CSRs.mcycle)
 
 
-  val minstret = Module(new CSRModule("Minstret", new CounterValueBundle("Machine retired-instruction counter value.")) with HasMachineCounterControlBundle with HasRobCommitBundle with SmcntrpmfBundle {
+  val minstret = Module(new CSRModule("Minstret", new CounterValueBundle("Machine retired-instruction counter value.")) with HasMachineCounterControlBundle with HasRobCommitBundle with SmcntrpmfBundle with HasSiregCounterBundle {
+    toSireg := regOut.asUInt
     when(w.wen) {
       reg := w.wdata
+    }.elsewhen(fromSireg.valid) {
+      reg := fromSireg.bits
     }.elsewhen(!this.mcountinhibit.IR && robCommit.instNum.valid && countingEn) {
       reg := reg.ALL.asUInt + robCommit.instNum.bits
     }.otherwise {
@@ -348,11 +366,14 @@ trait MachineLevel { self: NewCSR =>
   }).setAddr(CSRs.minstret)
 
   val mhpmcounters: Seq[CSRModule[_]] = (3 to 0x1F).map(num =>
-    Module(new CSRModule(s"Mhpmcounter$num", new MhpmcounterBundle) with HasMachineCounterControlBundle with HasPerfCounterBundle {
+    Module(new CSRModule(s"Mhpmcounter$num", new MhpmcounterBundle) with HasMachineCounterControlBundle with HasPerfCounterBundle with HasSiregCounterBundle {
+      toSireg := regOut.asUInt
       val countingInhibit = this.mcountinhibit.asUInt(num) | !countingEn
       val counterAdd = reg.ALL.asUInt +& perf.value
       when (w.wen) {
         reg := w.wdata
+      }.elsewhen(fromSireg.valid) {
+        reg := fromSireg.bits
       }.elsewhen (perf.value =/= 0.U && !countingInhibit) {
         reg := counterAdd.tail(1)
       }.otherwise {
@@ -364,10 +385,24 @@ trait MachineLevel { self: NewCSR =>
     }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
 
-  val mcyclecfg = Module(new CSRModule("Mcyclecfg", new EventInhibitBundle))
+  val mcyclecfg = Module(new CSRModule("Mcyclecfg", new EventInhibitBundle) with HasSiregCfgBundle {
+    toSireg2 := regOut.asUInt
+    when(wen) {
+      reg := wdata
+    }.elsewhen(fromSireg2.valid) {
+      reg := fromSireg2.bits
+    }
+  })
     .setAddr(CSRs.mcyclecfg)
 
-  val minstretcfg = Module(new CSRModule("Minstretcfg", new EventInhibitBundle))
+  val minstretcfg = Module(new CSRModule("Minstretcfg", new EventInhibitBundle) with HasSiregCfgBundle {
+    toSireg2 := regOut.asUInt
+    when(wen) {
+      reg := wdata
+    }.elsewhen(fromSireg2.valid) {
+      reg := fromSireg2.bits
+    }
+  })
     .setAddr(CSRs.minstretcfg)
 
   // JEDEC JEP106 Manufacturer ID:
@@ -686,13 +721,13 @@ class MvienBundle extends InterruptEnableBundle {
   this.SSIE.setRW().withReset(0.U)
   this.SEIE.setRW().withReset(0.U)
   this.getLocal.foreach(_.setRW().withReset(0.U))
-  this.LCOFIE.setRO().withReset(0.U)
+  this.LCOFIE.setRW().withReset(0.U)
 }
 
 class MvipBundle extends InterruptPendingBundle {
   this.getHS.foreach(_.setRW().withReset(0.U))
   this.getLocal.foreach(_.setRW().withReset(0.U))
-  this.LCOFIP.setRO().withReset(0.U)
+  this.LCOFIP.setRW().withReset(0.U)
 }
 
 class Epc extends CSRBundle {
@@ -714,6 +749,7 @@ class MEnvCfg extends EnvCfg {
     this.STCE.setRW().withReset(1.U)
   }
   this.PBMTE.setRW().withReset(0.U)
+  this.CDE.setRW().withReset(0.U)
   if (CSRConfig.EXT_DBLTRP) {
     // software write envcfg to open ssdbltrp if need
     // set 0 to pass ci
@@ -836,6 +872,16 @@ trait HasMachineCounterControlBundle { self: CSRModule[_] =>
   val mcountinhibit = IO(Input(new McountinhibitBundle))
 }
 
+trait HasSiregCounterBundle { self: CSRModule[_] =>
+  val fromSireg = IO(Flipped(ValidIO(UInt(XLEN.W))))
+  val toSireg   = IO(Output(UInt(XLEN.W)))
+}
+
+trait HasSiregCfgBundle { self: CSRModule[_] =>
+  val fromSireg2 = IO(Flipped(ValidIO(UInt(XLEN.W))))
+  val toSireg2   = IO(Output(UInt(XLEN.W)))
+}
+
 trait HasRobCommitBundle { self: CSRModule[_] =>
   val robCommit = IO(Input(new RobCommitCSR))
   val writeFCSR = IO(Input(Bool()))
@@ -845,6 +891,10 @@ trait HasRobCommitBundle { self: CSRModule[_] =>
 
 trait HasMachineEnvBundle { self: CSRModule[_] =>
   val menvcfg = IO(Input(new MEnvCfg))
+}
+
+trait HasMcounterenBundle { self: CSRModule[_] =>
+  val mcounteren = IO(Input(new Counteren))
 }
 
 trait HasPerfCounterBundle { self: CSRModule[_] =>

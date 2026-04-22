@@ -294,8 +294,8 @@ case class XSCoreParameters
     "i", "m", "a", "f", "d", "c", /* "b", */ "v", "h",
     // multi-letter extensions, sorted alphanumerically
     "sdtrig", "sha", "shcounterenw", "shgatpa", "shlcofideleg", "shtvala", "shvsatpa", "shvstvala",
-    "shvstvecd", "smaia", "smcntrpmf", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
-    "ss1p13", "ssaia", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
+    "shvstvecd", "smaia", "smcdeleg", "smcntrpmf", "smcsrind", "smdbltrp", "smmpm", "smnpm", "smrnmi", "smstateen",
+    "ss1p13", "ssaia", "ssccfg", "ssccptr", "sscofpmf", "sscounterenw", "sscsrind", "ssdbltrp", "ssnpm",
     "sspm", "ssstateen", "ssstrict", "sstc", "sstvala", "sstvecd", "ssu64xl", "supm", "sv39",
     "sv48", "svade", "svbare", "svinval", "svnapot", "svpbmt", "za64rs", "zacas", "zawrs", "zba",
     "zbb", "zbc", "zbkb", "zbkc", "zbkx", "zbs", "zcb", "zcmop", "zfa", "zfh", "zfhmin", "zic64b",
@@ -306,7 +306,7 @@ case class XSCoreParameters
 
   def vlWidth = log2Up(VLEN) + 1
 
-  /* 
+  /*
     Top-Down, ExecutionStall used
   */
   def fewUops = 4
@@ -570,7 +570,7 @@ trait HasXSParameter {
 
   def HasBitmapCheck = coreParams.HasBitmapCheck
   def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault
-  
+
   /** prefetch config */
   def prefetcherSeq = coreParams.prefetcher
   def prefetcherNum = max(prefetcherSeq.size, 1) //TODO lyq: 1 for simpler code generation, but it's also ugly
