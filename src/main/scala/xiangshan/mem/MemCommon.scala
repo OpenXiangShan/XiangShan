@@ -138,7 +138,7 @@ object MemorySize {
 
   object Size {
     def width:           Int = 3
-    def ByteOffsetWidth: Int = 5
+    def ByteOffsetWidth: Int = 4
     val all:      List[Size] = List(B, H, W, D, Q)
   }
 
