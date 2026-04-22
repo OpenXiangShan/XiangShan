@@ -256,7 +256,6 @@ object Exu {
       exuInput.vpu.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.oldVType.foreach(_ := this.ctrl.oldVType.get)
       exuInput.vtype.foreach(_ := this.ctrl.vtype.get)
-      exuInput.vialuCtrl.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.flushPipe.foreach(_ := this.ctrl.flushPipe.get)
       exuInput.rasAction.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.pc.foreach(x => x := 0.U.asTypeOf(x))
