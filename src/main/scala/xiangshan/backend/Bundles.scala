@@ -930,15 +930,6 @@ object Bundles {
     }
   }
 
-  class VIAluCtrlSignals(implicit p: Parameters) extends XSBundle {
-    val widenVs2 = Bool()
-    val widen = Bool()
-    val isVf2 = Bool()
-    val isVf4 = Bool()
-    val isVf8 = Bool()
-    val isAddCarry = Bool()
-  }
-
   // [IssueQueue]--> DataPath
   class Og0InUop(
                                   val iqParams: IssueBlockParams,
@@ -1223,7 +1214,6 @@ object Bundles {
     val fflagsWen     = if (params.writeFflags)   Some(Bool())                       else None
     val oldVType      = Option.when(params.writeVType)(VType())
     val vtype         = Option.when(params.readVlRf)(VType())
-    val vialuCtrl     = if (params.needVIaluCtrl) Some(new VIAluCtrlSignals)          else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
     val rasAction     = if (params.hasRasAction)  Some(BranchAttribute.RasAction())   else None
     val pc            = if (params.needPc || params.aluNeedPc)        Some(UInt(VAddrData().dataWidth.W)) else None
@@ -1341,7 +1331,6 @@ object Bundles {
     val frm            = Option.when(params.needSrcFrm)(Frm())
     val oldVType       = Option.when(params.writeVType)(VType())
     val vtype          = Option.when(params.readVlRf)(VType())
-    val vialuCtrl      = Option.when(params.needVIaluCtrl)(new VIAluCtrlSignals)
     val flushPipe      = Option.when(params.flushPipe)(Bool())
     val rasAction      = Option.when(params.hasRasAction)(BranchAttribute.RasAction())
     val isRVC          = Option.when(params.needIsRVC || params.aluNeedPc)(Bool())

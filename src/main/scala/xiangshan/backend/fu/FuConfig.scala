@@ -169,8 +169,6 @@ case class FuConfig (
     Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu, vsha256ms, vsha256c).contains(fuType)
   }
 
-  def needVIaluCtrl: Boolean = Seq(FuType.vialuF).contains(fuType)
-
   def needUncertainWakeup: Boolean = {
     FuConfig.needUncertainWakeupFuConfigs.contains(this)
   }
