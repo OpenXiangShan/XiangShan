@@ -103,7 +103,6 @@ case class ExeUnitParams(
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
   val needSrcVxrm: Boolean = fuConfigs.map(_.needSrcVxrm).reduce(_ || _)
   val needVPUCtrl: Boolean = fuConfigs.map(_.needVecCtrl).reduce(_ || _)
-  val needVIaluCtrl: Boolean = fuConfigs.map(_.needVIaluCtrl).reduce(_ || _)
   val writeVConfig: Boolean = fuConfigs.map(_.writeVlRf).reduce(_ || _)
   val writeVType: Boolean = fuConfigs.map(_.writeVType).reduce(_ || _)
   val needCriticalErrors: Boolean = fuConfigs.map(_.needCriticalErrors).reduce(_ || _)
@@ -352,8 +351,6 @@ case class ExeUnitParams(
   def hasVecFu = fuConfigs.map(x => FuConfig.VecArithFuConfigs.contains(x)).reduce(_ || _)
 
   def hasVStdFu = fuConfigs.map(_.name == "vstd").reduce(_ || _)
-
-  def hasVIAluFu = fuConfigs.map(_.fuType == FuType.vialuF).reduce(_ || _)
 
   def CanCompress = !hasBrhFu || (hasBrhFu && hasi2vFu)
 

@@ -6,7 +6,7 @@ import chisel3.util._
 import utility._
 import utils.OptionWrapper
 import xiangshan._
-import xiangshan.backend.Bundles.{VIAluCtrlSignals, VPUCtrlSignals}
+import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend.datapath.DataConfig._
@@ -70,7 +70,6 @@ class FuncUnitCtrlInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val fflagsWen   = OptionWrapper(cfg.writeFflags, Bool())
   val vpu         = OptionWrapper(cfg.needVecCtrl, new VPUCtrlSignals)
   val oldVType    = Option.when(cfg.writeVType)(VType())
-  val vialuCtrl   = OptionWrapper(cfg.needVIaluCtrl, new VIAluCtrlSignals)
 }
 
 class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
