@@ -50,6 +50,14 @@ class Func(val cfg: VecFuConfig)(implicit p: Parameters) extends XSModule {
     outStage.bits.debug.foreach(_ := inStage.bits.debug.get)
   }
 
+  // Downstream Vec Exu exposes only one aggregated output per cycle.
+  // Mixed-latency uops must therefore be scheduled so this Func never
+  // has more than one output stage valid at the same time.
+  assert(
+    PopCount(out.ex.map(_.valid)) <= 1.U,
+    s"${cfg.name} produced multiple outputs in one cycle"
+  )
+
   val fuOpType = in.ex.head.bits.ctrl.opcode
 }
 

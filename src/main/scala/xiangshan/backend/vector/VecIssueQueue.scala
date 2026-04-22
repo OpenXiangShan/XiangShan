@@ -88,13 +88,12 @@ class VecIssueQueue(
   private val fastEntryV0WbWakeUpMatchVec = in.wakeup.v0WbVec.map(x => Wire(Vec(param.numFastEntry, Vec(x.size, Bool()))))
   private val fastEntryVlWbWakeUpMatchVec: Option[Vec[Vec[Bool]]] = in.wakeup.vlWbVec.map(x => Wire(Vec(param.numFastEntry, Vec(x.size, Bool()))))
 
-  private val enqEntryCanIssue = VecInit(enqEntries.map(ety => ety.valid && ety.bits.status.canIssue))
   private val enqEntryCanIssueVec: Vec[UInt] = VecInit(
-    (0 until param.numDeq).map(deqIdx => enqEntryCanIssue.asUInt & VecInit(enqEntries.map(_.bits.status.deqPortIdx === deqIdx.U)).asUInt)
+    (0 until param.numDeq).map(deqIdx => VecInit(enqEntries.map(ety => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, deqIdx))).asUInt)
   )
   private val fastEntryCanIssue = VecInit(fastEntries.map(ety => ety.valid && ety.bits.status.canIssue))
   private val fastEntryCanIssueVec: Vec[UInt] = VecInit(
-    (0 until param.numDeq).map(deqIdx => fastEntryCanIssue.asUInt & VecInit(fastEntries.map(_.bits.status.deqPortIdx === deqIdx.U)).asUInt)
+    (0 until param.numDeq).map(deqIdx => VecInit(fastEntries.map(ety => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, deqIdx))).asUInt)
   )
 
   private val enqEntryDeqSel = Wire(Vec(param.numEnq, Bool()))
@@ -499,7 +498,41 @@ class VecIssueQueue(
       deqPrevUopIdx(deqIdx) := deq.bits.uopIdx
     }
   }
-
+  connectWbFuBusyTableIn(
+    sink = out.toWbFuBusyTable.intWbFuBusyTableIn,
+    wbPortIds = param.intWbPortIds,
+    deqWbPortIds = param.exuParams.map(_.getGpWbPort.map(_.port)),
+    deqWen = out.deq.map(_.bits.gpWen),
+    deq = out.deq,
+  )
+  connectWbFuBusyTableIn(
+    sink = out.toWbFuBusyTable.fpWbFuBusyTableIn,
+    wbPortIds = param.fpWbPortIds,
+    deqWbPortIds = param.exuParams.map(_.getFpWbPort.map(_.port)),
+    deqWen = out.deq.map(_.bits.fpWen),
+    deq = out.deq,
+  )
+  connectWbFuBusyTableIn(
+    sink = out.toWbFuBusyTable.vpWbFuBusyTableIn,
+    wbPortIds = param.vpWbPortIds,
+    deqWbPortIds = param.exuParams.map(_.getVpWbPort.map(_.port)),
+    deqWen = out.deq.map(_.bits.vpWen),
+    deq = out.deq,
+  )
+  connectWbFuBusyTableIn(
+    sink = out.toWbFuBusyTable.v0WbFuBusyTableIn,
+    wbPortIds = param.v0WbPortIds,
+    deqWbPortIds = param.exuParams.map(_.getV0WbPort.map(_.port)),
+    deqWen = out.deq.map(_.bits.v0Wen),
+    deq = out.deq,
+  )
+  connectWbFuBusyTableIn(
+    sink = out.toWbFuBusyTable.vlWbFuBusyTableIn,
+    wbPortIds = param.vlWbPortIds,
+    deqWbPortIds = param.exuParams.map(_.getVlWbPort.map(_.port)),
+    deqWen = out.deq.map(_.bits.vlWen),
+    deq = out.deq,
+  )
   out.canAccept := PopCount(fastEntries.map(!_.valid)) >= 2.U
   // Todo: optimize it
   out.validNum := PopCount(entries.map(_.valid))
@@ -515,10 +548,58 @@ object VecIssueQueue {
   val IntCrossRegionVecCycle = 1
   val FpCrossRegionVecCycle = 1
 
+  class WbFuBusyTableReadBundle(implicit p: Parameters, param: IssueParam) extends XSBundle {
+    private val intWbPortIds = param.intWbPortIds
+    private val fpWbPortIds = param.fpWbPortIds
+    private val vpWbPortIds = param.vpWbPortIds
+    private val v0WbPortIds = param.v0WbPortIds
+    private val vlWbPortIds = param.vlWbPortIds
+    val intWbFuBusyTableRead = Option.when(intWbPortIds.nonEmpty)(
+      Vec(intWbPortIds.size, UInt(WbFuBusyTable.tableSize().W))
+    )
+    val fpWbFuBusyTableRead = Option.when(fpWbPortIds.nonEmpty)(
+      Vec(fpWbPortIds.size, UInt(WbFuBusyTable.tableSize().W))
+    )
+    val vpWbFuBusyTableRead = Option.when(vpWbPortIds.nonEmpty)(
+      Vec(vpWbPortIds.size, UInt(WbFuBusyTable.tableSize().W))
+    )
+    val v0WbFuBusyTableRead = Option.when(v0WbPortIds.nonEmpty)(
+      Vec(v0WbPortIds.size, UInt(WbFuBusyTable.tableSize().W))
+    )
+    val vlWbFuBusyTableRead = Option.when(vlWbPortIds.nonEmpty)(
+      Vec(vlWbPortIds.size, UInt(WbFuBusyTable.tableSize().W))
+    )
+  }
+
+  class WbFuBusyTableWriteBundle(implicit p: Parameters, param: IssueParam) extends XSBundle {
+    private val intWbPortIds = param.intWbPortIds
+    private val fpWbPortIds = param.fpWbPortIds
+    private val vpWbPortIds = param.vpWbPortIds
+    private val v0WbPortIds = param.v0WbPortIds
+    private val vlWbPortIds = param.vlWbPortIds
+
+    val intWbFuBusyTableIn = Option.when(intWbPortIds.nonEmpty)(
+      new WbFuBusyTable.In(intWbPortIds.size)
+    )
+    val fpWbFuBusyTableIn = Option.when(fpWbPortIds.nonEmpty)(
+      new WbFuBusyTable.In(fpWbPortIds.size)
+    )
+    val vpWbFuBusyTableIn = Option.when(vpWbPortIds.nonEmpty)(
+      new WbFuBusyTable.In(vpWbPortIds.size)
+    )
+    val v0WbFuBusyTableIn = Option.when(v0WbPortIds.nonEmpty)(
+      new WbFuBusyTable.In(v0WbPortIds.size)
+    )
+    val vlWbFuBusyTableIn = Option.when(vlWbPortIds.nonEmpty)(
+      new WbFuBusyTable.In(vlWbPortIds.size)
+    )
+  }
+
   class In(implicit p: Parameters, param: IssueParam) extends XSBundle {
     val flush = ValidIO(new Redirect)
     val enq = Vec(param.numEnq, ValidIO(new Enq))
     val resps = new InResp
+    val fromWbFuBusyTable = new WbFuBusyTableReadBundle()
     val wakeup = new Bundle {
       val gpWbVec = Vec(backendParams.getIntRfWriteSize, new WakeUpBundle(IntPhyRegIdxWidth, IntData()))
       val fpWbVec = Vec(backendParams.getFpRfWriteSize,  new WakeUpBundle(FpPhyRegIdxWidth, FpData()))
@@ -530,11 +611,47 @@ object VecIssueQueue {
   }
 
   class Out(implicit p: Parameters, param: IssueParam) extends XSBundle {
+
+    val toWbFuBusyTable = new WbFuBusyTableWriteBundle()
+ 
     val deq: MixedVec[ValidIO[Deq]] = param.genIssueBundle(ValidIO(_))
 
     val canAccept: Bool = Bool()
 
     val validNum: UInt = UInt(log2Ceil(param.numEntry + 1).W)
+  }
+
+  def connectWbFuBusyTableIn(
+    sink: Option[WbFuBusyTable.In],
+    wbPortIds: Seq[Int],
+    deqWbPortIds: Seq[Option[Int]],
+    deqWen: Seq[Bool],
+    deq: Seq[ValidIO[Deq]],
+  ): Unit = {
+    sink.foreach { in =>
+      in.fromIssueQueue.zip(wbPortIds).foreach { case (portIn, portId) =>
+        val matches = deq.zipWithIndex.collect {
+          case (deqPort, deqIdx) if deqWbPortIds(deqIdx).contains(portId) =>
+            (deqPort.valid && deqWen(deqIdx), deqPort.bits.latency)
+        }
+
+        portIn.valid := false.B
+        portIn.bits := 0.U.asTypeOf(portIn.bits)
+
+        if (matches.nonEmpty) {
+          val matchValid = matches.map(_._1)
+          val matchLatency = matches.map(_._2)
+          portIn.valid := VecInit(matchValid).asUInt.orR
+          when (portIn.valid) {
+            portIn.bits := Mux1H(matchValid zip matchLatency)
+          }
+          assert(
+            PopCount(matchValid) <= 1.U,
+            s"VecIssueQueue drives WB busy table port $portId more than once in one cycle"
+          )
+        }
+      }
+    }
   }
 
   class Enq(implicit p: Parameters, param: IssueParam) extends XSBundle {
@@ -946,6 +1063,19 @@ object VecIssueQueue {
     def init(implicit param: IssueParam): UInt = 0.U(width.W)
 
     def maxValue(implicit param: IssueParam): UInt = 3.U(width.W)
+  }
+
+  def entryCanIssueOnDeq(
+    fromWbFuBusyTable: WbFuBusyTableReadBundle,
+    param: IssueParam,
+    entryValid: Bool,
+    entry: Entry,
+    deqIdx: Int,
+  ): Bool = {
+    entryValid &&
+      entry.status.canIssue &&
+      entry.status.deqPortIdx === deqIdx.U &&
+      !WbFuBusyTable.entryWbConflict(fromWbFuBusyTable, param, entry, deqIdx)
   }
 
   class EnqPolicy(numEntry: Int, numEnq: Int) extends Module {
