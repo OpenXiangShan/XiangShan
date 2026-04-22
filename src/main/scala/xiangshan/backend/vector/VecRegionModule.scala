@@ -107,6 +107,81 @@ class VecRegionImp(
     debugReadData = vlDiffReadData,
   )
 
+  // These ids are global regfile writeback port indices from the active backend
+  // configuration, not a per-region subset.
+  private val intRegfileWbPortIds = backendParams.getWbPortIndices(IntData())
+  private val fpRegfileWbPortIds = backendParams.getWbPortIndices(FpData())
+  private val vpRegfileWbPortIds = backendParams.getWbPortIndices(VecData())
+  private val v0RegfileWbPortIds = backendParams.getWbPortIndices(V0Data())
+  private val vlRegfileWbPortIds = backendParams.getWbPortIndices(VlData())
+
+  private val intWbPortIdxMap = intRegfileWbPortIds.zipWithIndex.toMap
+  private val fpWbPortIdxMap = fpRegfileWbPortIds.zipWithIndex.toMap
+  private val vpWbPortIdxMap = vpRegfileWbPortIds.zipWithIndex.toMap
+  private val v0WbPortIdxMap = v0RegfileWbPortIds.zipWithIndex.toMap
+  private val vlWbPortIdxMap = vlRegfileWbPortIds.zipWithIndex.toMap
+
+  private val intWbFuBusyTableSources = WbFuBusyTable.wbFuBusyTableSources(
+    issueQueues, _.out.toWbFuBusyTable.intWbFuBusyTableIn, _.intWbPortIds
+  )
+  private val fpWbFuBusyTableSources = WbFuBusyTable.wbFuBusyTableSources(
+    issueQueues, _.out.toWbFuBusyTable.fpWbFuBusyTableIn, _.fpWbPortIds
+  )
+  private val vpWbFuBusyTableSources = WbFuBusyTable.wbFuBusyTableSources(
+    issueQueues, _.out.toWbFuBusyTable.vpWbFuBusyTableIn, _.vpWbPortIds
+  )
+  private val v0WbFuBusyTableSources = WbFuBusyTable.wbFuBusyTableSources(
+    issueQueues, _.out.toWbFuBusyTable.v0WbFuBusyTableIn, _.v0WbPortIds
+  )
+  private val vlWbFuBusyTableSources = WbFuBusyTable.wbFuBusyTableSources(
+    issueQueues, _.out.toWbFuBusyTable.vlWbFuBusyTableIn, _.vlWbPortIds
+  )
+
+  private val intWbFuBusyTable: WbFuBusyTable = if (intRegfileWbPortIds.nonEmpty) Module(new WbFuBusyTable(intRegfileWbPortIds.size)) else null
+  private val fpWbFuBusyTable: WbFuBusyTable = if (fpRegfileWbPortIds.nonEmpty) Module(new WbFuBusyTable(fpRegfileWbPortIds.size)) else null
+  private val vpWbFuBusyTable: WbFuBusyTable = if (vpRegfileWbPortIds.nonEmpty) Module(new WbFuBusyTable(vpRegfileWbPortIds.size)) else null
+  private val v0WbFuBusyTable: WbFuBusyTable = if (v0RegfileWbPortIds.nonEmpty) Module(new WbFuBusyTable(v0RegfileWbPortIds.size)) else null
+  private val vlWbFuBusyTable: WbFuBusyTable = if (vlRegfileWbPortIds.nonEmpty) Module(new WbFuBusyTable(vlRegfileWbPortIds.size)) else null
+
+  private val intWbFuBusyTableRead = if (intWbFuBusyTable != null) {
+    intWbFuBusyTable.io.in =#> WbFuBusyTable.ConnectInfo("Int", intRegfileWbPortIds, intWbFuBusyTableSources)
+    intWbFuBusyTable.io.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
+  } else {
+    Map.empty[Int, UInt]
+  }
+  private val fpWbFuBusyTableRead = if (fpWbFuBusyTable != null) {
+    fpWbFuBusyTable.io.in =#> WbFuBusyTable.ConnectInfo("Fp", fpRegfileWbPortIds, fpWbFuBusyTableSources)
+    fpWbFuBusyTable.io.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
+  } else {
+    Map.empty[Int, UInt]
+  }
+  private val vpWbFuBusyTableRead = if (vpWbFuBusyTable != null) {
+    vpWbFuBusyTable.io.in =#> WbFuBusyTable.ConnectInfo("Vp", vpRegfileWbPortIds, vpWbFuBusyTableSources)
+    vpWbFuBusyTable.io.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
+  } else {
+    Map.empty[Int, UInt]
+  }
+  private val v0WbFuBusyTableRead = if (v0WbFuBusyTable != null) {
+    v0WbFuBusyTable.io.in =#> WbFuBusyTable.ConnectInfo("V0", v0RegfileWbPortIds, v0WbFuBusyTableSources)
+    v0WbFuBusyTable.io.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
+  } else {
+    Map.empty[Int, UInt]
+  }
+  private val vlWbFuBusyTableRead = if (vlWbFuBusyTable != null) {
+    vlWbFuBusyTable.io.in =#> WbFuBusyTable.ConnectInfo("Vl", vlRegfileWbPortIds, vlWbFuBusyTableSources)
+    vlWbFuBusyTable.io.out.fuBusyTable.zipWithIndex.map(_.swap).toMap
+  } else {
+    Map.empty[Int, UInt]
+  }
+
+  issueQueues.foreach { iq =>
+    iq.in.fromWbFuBusyTable.intWbFuBusyTableRead.foreach(_.zip(iq.param.intWbPortIds).foreach { case (sink, portId) => sink := intWbFuBusyTableRead(intWbPortIdxMap(portId)) })
+    iq.in.fromWbFuBusyTable.fpWbFuBusyTableRead.foreach(_.zip(iq.param.fpWbPortIds).foreach { case (sink, portId) => sink := fpWbFuBusyTableRead(fpWbPortIdxMap(portId)) })
+    iq.in.fromWbFuBusyTable.vpWbFuBusyTableRead.foreach(_.zip(iq.param.vpWbPortIds).foreach { case (sink, portId) => sink := vpWbFuBusyTableRead(vpWbPortIdxMap(portId)) })
+    iq.in.fromWbFuBusyTable.v0WbFuBusyTableRead.foreach(_.zip(iq.param.v0WbPortIds).foreach { case (sink, portId) => sink := v0WbFuBusyTableRead(v0WbPortIdxMap(portId)) })
+    iq.in.fromWbFuBusyTable.vlWbFuBusyTableRead.foreach(_.zip(iq.param.vlWbPortIds).foreach { case (sink, portId) => sink := vlWbFuBusyTableRead(vlWbPortIdxMap(portId)) })
+  }
+
   issueQueues.filterNot(_.param.hasVStd).zipWithIndex.foreach {
     case (iq, i) =>
       iq.in.flush := in.flush
