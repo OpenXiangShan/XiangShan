@@ -119,7 +119,7 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val data                     = UInt(VLEN.W)
 
   def byteStart: UInt          = vaddr(log2Ceil(VLEN/8) - 1, 0)
-  def byteEnd: UInt            = byteStart + MemorySize.ByteOffset(size)
+  def byteEnd: UInt            = (byteStart +& MemorySize.ByteOffset(size)).ensuring(_.getWidth == (byteStart.getWidth + 1))
 
   val memoryType               = MemoryType()
   val cboType                  = CboType()
@@ -385,7 +385,7 @@ abstract class PhysicalStoreQueueBase(implicit p: Parameters) extends LSQModule 
       // generate load byte start and end
       val s0LoadStart        = s0Req.bits.vaddr(VWordOffset - 1, 0)
       val s0ByteOffset       = MemorySize.ByteOffset(s0Req.bits.size)
-      val s0LoadEnd          = s0LoadStart + s0ByteOffset
+      val s0LoadEnd          = (s0LoadStart +& s0ByteOffset).ensuring(_.getWidth == (s0LoadStart.getWidth + 1))
 
       // mdp info
       val s0LoadWaitStrict = s0Req.bits.loadWaitStrict
@@ -1911,7 +1911,7 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
         dataEntries(stWbIdx).debugPaddr.get := storeAddrIn.bits.paddr
       }
     }
-    XSError(byteStart + byteOffset < byteStart && storeAddrIn.fire &&
+    XSError(byteStart +& byteOffset < byteStart && storeAddrIn.fire &&
     (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross16Byte),
      "ByteStart > ByteEnd! at pipeline ${i}\n")
   }
