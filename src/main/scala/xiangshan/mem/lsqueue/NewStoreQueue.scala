@@ -100,7 +100,7 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val data                     = UInt(VLEN.W)
 
   def byteStart: UInt          = vaddr(log2Ceil(VLEN/8) - 1, 0)
-  def byteEnd: UInt            = byteStart + MemorySize.ByteOffset(size)
+  def byteEnd: UInt            = (byteStart +& MemorySize.ByteOffset(size)).ensuring(_.getWidth == (byteStart.getWidth + 1))
 
   val memoryType               = MemoryType()
   val cboType                  = CboType()
@@ -360,7 +360,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
       // generate load byte start and end
       val s0LoadStart        = s0Req.bits.vaddr(VWordOffset - 1, 0)
       val s0ByteOffset       = MemorySize.ByteOffset(s0Req.bits.size)
-      val s0LoadEnd          = s0LoadStart + s0ByteOffset
+      val s0LoadEnd          = (s0LoadStart +& s0ByteOffset).ensuring(_.getWidth == (s0LoadStart.getWidth + 1))
 
       // mdp mask
       val lfstEnable = Constantin.createRecord("LFSTEnable", LFSTEnable)
@@ -1939,7 +1939,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       // only unit-stride use it, because unit-stride mask is not continue true.
       dataEntries(stWbIdx).byteMask  := Mux(MemorySize.sizeIs(storeAddrIn.bits.size, MemorySize.Q),
         storeAddrIn.bits.mask,
-        UIntToMask(MemorySize.CalculateSelectMask(byteStart, byteStart + byteOffset), VLENB))
+        UIntToMask(MemorySize.CalculateSelectMask(byteStart, byteStart +& byteOffset), VLENB))
       dataEntries(stWbIdx).size      := storeAddrIn.bits.size
 
       // debug singal
@@ -1947,7 +1947,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
         dataEntries(stWbIdx).debugPaddr.get := storeAddrIn.bits.paddr
       }
     }
-    XSError(byteStart + byteOffset < byteStart && storeAddrIn.fire &&
+    XSError(byteStart +& byteOffset < byteStart && storeAddrIn.fire &&
     (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross16Byte),
      "ByteStart > ByteEnd! at pipeline ${i}\n")
   }
