@@ -2,12 +2,12 @@ package xiangshan.backend.vector
 
 import chisel3._
 import chisel3.experimental.BundleLiterals.AddBundleLiteralConstructor
-import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import org.chipsalliance.cde.config.Parameters
 import utility.{PerfCCT, SelectOne}
 import utils.NamedUInt
+import xiangshan._
 import xiangshan.backend.Bundles.{DispatchOutUop, IssueQueueInDebug, RegionInUop, UopIdx}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
@@ -15,9 +15,9 @@ import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.issue.{AgeDetector, NewAgeDetector}
+import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue._
-import xiangshan._
 import xiangshan.mem.SqPtr
 
 
@@ -45,11 +45,42 @@ class VecIssueQueue(
   private val fastEntries = RegInit(VecInit.fill(param.numFastEntry)(ValidIO(new Entry).Lit(_.valid -> false.B)))
   private val entries = enqEntries ++ fastEntries
 
-  private val enqEntriesNext = Wire(chiselTypeOf(enqEntries))
-  private val fastEntriesNext = Wire(chiselTypeOf(fastEntries))
+  // A new uop replace the old one in the entry
+  private val enqEntriesEnqNext: Vec[ValidIO[Entry]] = Wire(chiselTypeOf(enqEntries))
+  private val fastEntriesEnqNext: Vec[ValidIO[Entry]] = Wire(chiselTypeOf(fastEntries))
 
-  enqEntries := enqEntriesNext
-  fastEntries := fastEntriesNext
+  // The uop is not replaced by another one
+  private val enqEntriesKeepNext = Wire(chiselTypeOf(enqEntries))
+  private val fastEntriesKeepNext = Wire(chiselTypeOf(fastEntries))
+
+  /**
+   * In this issue queue, there are two kind of entries named [[enqEntries]] and [[fastEntries]].
+   * And there are two next bundles for each of [[entries]]
+   *
+   * The data flow graph is as follows.
+   *
+   *                                      [[in.enq]] --> [[enqEntriesEnqNext]]
+   *                                                                |
+   *                                                                | enqEntriesEnqNext.valid
+   *                                                                v
+   *                                                          [[enqEntries]]*
+   *                                                           ^          |
+   *      enqEntriesKeepNext.valid && !fastEntryEmptySel.valid |          | !issueSuccess && !flushed
+   *                                                           |          v
+   *                                                      [[enqEntriesKeepNext]]
+   *                                                                |       numEnqEntry -> numFastEntry
+   *                                                                | enqEntriesKeepNext.valid && fastEntryEmptySel.valid
+   *                                                                v
+   *                                                      [[fastEntriesEnqNext]]
+   *                                                                |
+   *                                                                | fastEntriesEnqNext.valid
+   *                                                                v
+   *                                                         [[fastEntries]]*
+   *                                                           ^         |
+   *                                 fastEntriesKeepNext.valid |         | !issueSuccess && !flushed
+   *                                                           |         v
+   *                                                       [[fastEntriesKeepNext]]
+   */
 
   // Wires
   private val enqEntryValid: UInt = VecInit(enqEntries.map(_.valid)).asUInt
@@ -57,7 +88,6 @@ class VecIssueQueue(
 
   private val enqEntryEnqNotFlush = WireInit(VecInit(in.enq.map(enq => enq.valid && !in.flush.valid)))
   private val fastEntryEnqNotFlush = Wire(Vec(param.numFastEntry, Bool()))
-  private val enqTransFastNotFlush = Wire(Vec(param.numEnq, Bool()))
 
   private val enqEntryEnq = Wire(Vec(param.numEnq, ValidIO(new Entry)))
   private val fastEntryEnq = Wire(Vec(param.numFastEntry, ValidIO(new Entry)))
@@ -65,34 +95,73 @@ class VecIssueQueue(
   private val enqEntryFlush   = WireInit(VecInit( enqEntries.map(ety => ety.bits.status.robIdx.needFlush(in.flush))))
   private val fastEntryFlush  = WireInit(VecInit(fastEntries.map(ety => ety.bits.status.robIdx.needFlush(in.flush))))
 
+  private val wakeup = in.wakeup
+  // Delay1 wakeup regs are used to pass the bypass source info to the uops that have not enqueued when wakeup valid.
+  // Comparing use many register in BusyTable to record bypass source info, delaying them has less cost at area.
+  // Since there are 3 stages between vis0 and vex0, the waking up signal should be sent out 3 cycles ahead of it
+  // writing back. The delay1 signal will set the bypassDelay of the psrc of uop to BypassDelay.delay2.
+  private val vpWbM3D1WakeUp: Vec[WakeUpBundle] = Reg(chiselTypeOf(wakeup.vpWbM3Vec))
+  vpWbM3D1WakeUp zip wakeup.vpWbM3Vec foreach {
+    case (delay1, delay0) =>
+      delay1.wen := delay0.wen
+      when (delay0.wen) {
+        delay1.pdest := delay0.pdest
+        delay1.delay := delay0.delay
+      }
+  }
+
   private val enqEntryEnqGpWbWakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.gpWbVec.size, Bool()))))
   private val enqEntryEnqFpWbWakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.fpWbVec.size, Bool()))))
-  private val enqEntryEnqVpWbWakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.vpWbVec.size, Bool()))))
   private val enqEntryEnqV0WbWakeUpMatchVec = in.wakeup.v0WbVec.map(x => Wire(Vec(param.numEnq, Vec(x.size, Bool()))))
-  private val enqEntryEnqVlWbWakeUpMatchVec = in.wakeup.vlWbVec.map(x => Wire(Vec(param.numEnq, Vec(x.size, Bool()))))
+  private val enqEntryEnqVlWbWakeUpMatchVec = in.wakeup.vlWb0Vec.map(x => Wire(Vec(param.numEnq, Vec(x.size, Bool()))))
+  private val enqEntryEnqVpWbM3WakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.vpWbM3Vec.size, Bool()))))
+  private val enqEntryEnqVpWbM3D1WakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.vpWbM3Vec.size, Bool()))))
 
   private val fastEntryEnqGpWbWakeUpMatchVec = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Vec(in.wakeup.gpWbVec.size, Bool()))))
   private val fastEntryEnqFpWbWakeUpMatchVec = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Vec(in.wakeup.fpWbVec.size, Bool()))))
-  private val fastEntryEnqVpWbWakeUpMatchVec = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Vec(in.wakeup.vpWbVec.size, Bool()))))
   private val fastEntryEnqV0WbWakeUpMatchVec = in.wakeup.v0WbVec.map(x => Wire(Vec(param.numFastEntry, Vec(x.size, Bool()))))
-  private val fastEntryEnqVlWbWakeUpMatchVec = in.wakeup.vlWbVec.map(x => Wire(Vec(param.numFastEntry, Vec(x.size, Bool()))))
+  private val fastEntryEnqVlWbWakeUpMatchVec = in.wakeup.vlWb0Vec.map(x => Wire(Vec(param.numFastEntry, Vec(x.size, Bool()))))
+  private val fastEntryEnqVpWbM3WakeUpMatchVec = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Vec(in.wakeup.vpWbM3Vec.size, Bool()))))
 
   private val enqEntryGpWbWakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.gpWbVec.size, Bool()))))
   private val enqEntryFpWbWakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.fpWbVec.size, Bool()))))
-  private val enqEntryVpWbWakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.vpWbVec.size, Bool()))))
   private val enqEntryV0WbWakeUpMatchVec = in.wakeup.v0WbVec.map(x => Wire(Vec(param.numEnq, Vec(x.size, Bool()))))
-  private val enqEntryVlWbWakeUpMatchVec = in.wakeup.vlWbVec.map(x => Wire(Vec(param.numEnq, Vec(x.size, Bool()))))
+  private val enqEntryVlWbWakeUpMatchVec = in.wakeup.vlWb0Vec.map(x => Wire(Vec(param.numEnq, Vec(x.size, Bool()))))
+  private val enqEntryVpWbM3WakeUpMatchVec = Wire(Vec(param.numEnq, Vec(param.numRegSrc, Vec(in.wakeup.vpWbM3Vec.size, Bool()))))
 
-  private val fastEntryGpWbWakeUpMatchVec = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Vec(in.wakeup.gpWbVec.size, Bool()))))
+  private val fastEntryGpWbWakeUpMatchVec: Vec[Vec[Vec[Bool]]] = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Vec(in.wakeup.gpWbVec.size, Bool()))))
   private val fastEntryFpWbWakeUpMatchVec = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Vec(in.wakeup.fpWbVec.size, Bool()))))
-  private val fastEntryVpWbWakeUpMatchVec = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Vec(in.wakeup.vpWbVec.size, Bool()))))
   private val fastEntryV0WbWakeUpMatchVec = in.wakeup.v0WbVec.map(x => Wire(Vec(param.numFastEntry, Vec(x.size, Bool()))))
-  private val fastEntryVlWbWakeUpMatchVec: Option[Vec[Vec[Bool]]] = in.wakeup.vlWbVec.map(x => Wire(Vec(param.numFastEntry, Vec(x.size, Bool()))))
+  private val fastEntryVlWbWakeUpMatchVec: Option[Vec[Vec[Bool]]] = in.wakeup.vlWb0Vec.map(x => Wire(Vec(param.numFastEntry, Vec(x.size, Bool()))))
+  private val fastEntryVpWbM3WakeUpMatchVec = Wire(Vec(param.numFastEntry, Vec(param.numRegSrc, Vec(in.wakeup.vpWbM3Vec.size, Bool()))))
 
+  private val enqEntryCanIssue = VecInit(enqEntries.zipWithIndex.map {
+    case (ety, enqIdx) =>
+      entryCanIssueWithWakeUp(
+        status = ety.bits.status,
+        entryValid = ety.valid,
+        gpWbWakeUpMatchVec = enqEntryGpWbWakeUpMatchVec(enqIdx),
+        fpWbWakeUpMatchVec = enqEntryFpWbWakeUpMatchVec(enqIdx),
+        vpWbM3WakeUpMatchVec = enqEntryVpWbM3WakeUpMatchVec(enqIdx),
+        v0WbWakeUpMatchVec = enqEntryV0WbWakeUpMatchVec.map(_(enqIdx)),
+        vlWbWakeUpMatchVec = enqEntryVlWbWakeUpMatchVec.map(_(enqIdx)),
+      )
+  })
   private val enqEntryCanIssueVec: Vec[UInt] = VecInit(
     (0 until param.numDeq).map(deqIdx => VecInit(enqEntries.map(ety => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, deqIdx))).asUInt)
   )
-  private val fastEntryCanIssue = VecInit(fastEntries.map(ety => ety.valid && ety.bits.status.canIssue))
+  private val fastEntryCanIssue = VecInit(fastEntries.zipWithIndex.map {
+    case (ety, fastIdx) =>
+      entryCanIssueWithWakeUp(
+        status = ety.bits.status,
+        entryValid = ety.valid,
+        gpWbWakeUpMatchVec = fastEntryGpWbWakeUpMatchVec(fastIdx),
+        fpWbWakeUpMatchVec = fastEntryFpWbWakeUpMatchVec(fastIdx),
+        vpWbM3WakeUpMatchVec = fastEntryVpWbM3WakeUpMatchVec(fastIdx),
+        v0WbWakeUpMatchVec = fastEntryV0WbWakeUpMatchVec.map(_(fastIdx)),
+        vlWbWakeUpMatchVec = fastEntryVlWbWakeUpMatchVec.map(_(fastIdx)),
+      )
+  })
   private val fastEntryCanIssueVec: Vec[UInt] = VecInit(
     (0 until param.numDeq).map(deqIdx => VecInit(fastEntries.map(ety => VecIssueQueue.entryCanIssueOnDeq(in.fromWbFuBusyTable, param, ety.valid, ety.bits, deqIdx))).asUInt)
   )
@@ -123,95 +192,24 @@ class VecIssueQueue(
     ))
   }
 
-  private def updateHoldingEntry(
-    entryNext: Entry,
-    entry: Entry,
-    entryValid: Bool,
-    gpWbWakeUpMatchVec: Seq[Seq[Bool]],
-    fpWbWakeUpMatchVec: Seq[Seq[Bool]],
-    vpWbWakeUpMatchVec: Seq[Seq[Bool]],
-    v0WbWakeUpMatchVec: Option[Seq[Bool]],
-    vlWbWakeUpMatchVec: Option[Seq[Bool]],
-    deqSel: Bool,
-    cancel: Bool,
-  ): Unit = {
-    entryNext := entry
-    (entryNext.status, entry.status) match { case (sNext, s) =>
-      (sNext.srcStatus lazyZip s.srcStatus).zipWithIndex.foreach { case ((ssNext, ss), srcIdx) =>
-        val gpWbWakeUpMatch = gpWbWakeUpMatchVec(srcIdx)
-        val fpWbWakeUpMatch = fpWbWakeUpMatchVec(srcIdx)
-        val vpWbWakeUpMatch = vpWbWakeUpMatchVec(srcIdx)
-        val gpWakeUpVec = gpWbWakeUpMatch.map(_ && ss.gpRen)
-        val fpWakeUpVec = fpWbWakeUpMatch.map(_ && ss.fpRen)
-        val vpWakeUpVec = vpWbWakeUpMatch.map(_ && ss.vpRen)
-        val gpWakeUp = ss.gpRen && Cat(gpWbWakeUpMatch).orR
-        val fpWakeUp = ss.fpRen && Cat(fpWbWakeUpMatch).orR
-        val vpWakeUp = ss.vpRen && Cat(vpWbWakeUpMatch).orR
-
-        val wakeUp = gpWakeUp || fpWakeUp || vpWakeUp
-
-        ssNext.srcState := ss.srcState || wakeUp
-        ssNext.bypassDelay := Mux1H(
-          Seq(
-            gpWakeUpVec zip in.wakeup.gpWbVec.map(_.delay),
-            fpWakeUpVec zip in.wakeup.fpWbVec.map(_.delay),
-            vpWakeUpVec zip in.wakeup.vpWbVec.map(_.delay),
-          ).reduce(_ ++ _)
-        )
-        ssNext.bypassSource.idx := Mux1H(
-          Seq(
-            gpWakeUpVec.zipWithIndex,
-            fpWakeUpVec.zipWithIndex,
-            vpWakeUpVec.zipWithIndex,
-          ).reduce(_ ++ _).map { case (wakeUpMath, exuIdx) => wakeUpMath -> exuIdx.U }
-        )
-      }
-
-      (sNext.srcStatusV0 lazyZip s.srcStatusV0).foreach {
-        case (ssNext, ss) =>
-          val wakeUpMatch = v0WbWakeUpMatchVec.get
-          ssNext.srcState := ss.srcState || Cat(wakeUpMatch).orR
-          ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.v0WbVec.get.map(_.delay))
-      }
-
-      (sNext.srcStatusVl lazyZip s.srcStatusVl).foreach {
-        case (ssNext, ss) =>
-          val wakeUpMatch = vlWbWakeUpMatchVec.get
-          ssNext.srcState := ss.srcState || Cat(wakeUpMatch).orR
-          ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.vlWbVec.get.map(_.delay))
-      }
-
-      sNext.issued := MuxCase(
-        s.issued,
-        Seq(
-          deqSel -> true.B,
-          cancel -> false.B,
-        ),
-      )
-      when(entryValid && s.issued) {
-        sNext.issuedTimer := Mux(
-          s.issuedTimer =/= IssuedTimer.maxValue,
-          s.issuedTimer + 1.U,
-          s.issuedTimer,
-        )
-      }.otherwise {
-        sNext.issuedTimer := s.issuedTimer
-      }
-    }
-  }
-
   private val fastEntryEmptySel: Vec[ValidIO[UInt]] = EnqPolicy((~fastEntryValid).asUInt, param.numEnq)
   private val fastEntryEmptyValid = VecInit(fastEntryEmptySel.map(_.valid))
-  private val fastEntryEmptyOH = VecInit(fastEntryEmptySel.map(empty => Mux(empty.valid, empty.bits, 0.U)))
-  private val enqEntryForFast = Wire(Vec(param.numEnq, new Entry))
-  private val enqEntryCanTransfer = Wire(Vec(param.numEnq, Bool()))
-  private val fastEntryEnqNotFlushOH: Vec[UInt] = VecInit(
-    fastEntryEmptySel zip enqEntryCanTransfer map {
-      case (empty, canTransfer) => Mux(empty.valid && canTransfer, empty.bits, 0.U)
+  private val enqEntryCanTransfer = VecInit(
+    enqEntries.zipWithIndex.map {
+      case (ety, enqIdx) =>
+        ety.valid && !enqEntryFlush(enqIdx) && !enqEntrySuccess(enqIdx)
     }
   )
-
-  enqTransFastNotFlush := fastEntryEmptyValid zip enqEntryCanTransfer map { case (fastEmpty, canTransfer) => fastEmpty && canTransfer}
+  private val fastEntryEnqNotFlushOH: Vec[UInt] = VecInit(
+    fastEntryEmptySel zip enqEntryCanTransfer map {
+      case (empty, canTransfer) =>
+        Mux(
+          empty.valid && canTransfer,
+          empty.bits,
+          0.U,
+        )
+    }
+  )
 
   for ((enq, etyIdx) <- enqEntryEnq.zipWithIndex) {
     val inEnq = in.enq(etyIdx)
@@ -219,14 +217,6 @@ class VecIssueQueue(
     enq.valid := inEnq.valid
     enq.bits.payload.fromEnq(inEnqBits)
     enq.bits.status.fromEnq(inEnqBits)
-  }
-
-  for ((enq, etyIdx) <- fastEntryEnq.zipWithIndex) {
-    enq.bits := Mux1H(fastEntryEmptySel.map(x => x.valid && x.bits(etyIdx)), enqEntryForFast)
-    enq.valid := Mux1H(
-      fastEntryEmptySel.map(x => x.valid && x.bits(etyIdx)),
-      enqEntryCanTransfer,
-    )
   }
 
   // NewAgeDetector can be used here, because the 2nd port has uop only if the 1st port has uop.
@@ -248,19 +238,21 @@ class VecIssueQueue(
     for (srcIdx <- enqBits.psrc.indices) {
       enqEntryEnqGpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.gpWbVec.map(x => x.wen && x.pdest === enqBits.psrc(srcIdx))
       enqEntryEnqFpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.fpWbVec.map(x => x.wen && x.pdest === enqBits.psrc(srcIdx))
-      enqEntryEnqVpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.vpWbVec.map(x => x.wen && x.pdest === enqBits.psrc(srcIdx))
+      enqEntryEnqVpWbM3WakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.vpWbM3Vec.map(x => x.wen && x.pdest === enqBits.psrc(srcIdx))
+      enqEntryEnqVpWbM3D1WakeUpMatchVec(etyIdx)(srcIdx) := vpWbM3D1WakeUp.map(x => x.wen && x.pdest === enqBits.psrc(srcIdx))
       enqEntryGpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.gpWbVec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
       enqEntryFpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.fpWbVec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
-      enqEntryVpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.vpWbVec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
+
+      enqEntryVpWbM3WakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.vpWbM3Vec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
     }
     enqEntryEnqV0WbWakeUpMatchVec.foreach(_(etyIdx) := in.wakeup.v0WbVec.get.map(x => x.wen && x.pdest === enqBits.psrcV0))
-    enqEntryEnqVlWbWakeUpMatchVec.foreach(_(etyIdx) := in.wakeup.vlWbVec.get.map(x => x.wen && x.pdest === enqBits.psrcVl))
+    enqEntryEnqVlWbWakeUpMatchVec.foreach(_(etyIdx) := in.wakeup.vlWb0Vec.get.map(x => x.wen && x.pdest === enqBits.psrcVl))
     enqEntryV0WbWakeUpMatchVec.foreach(_(etyIdx) := in.wakeup.v0WbVec.get.map(
       x => etyBits.status.srcStatusV0
         .map(_.psrc === x.pdest && x.wen)
         .getOrElse(false.B)
     ))
-    enqEntryVlWbWakeUpMatchVec.foreach(_(etyIdx) := in.wakeup.vlWbVec.get.map(
+    enqEntryVlWbWakeUpMatchVec.foreach(_(etyIdx) := in.wakeup.vlWb0Vec.get.map(
       x => etyBits.status.srcStatusVl
         .map(_.psrc === x.pdest && x.wen)
         .getOrElse(false.B)
@@ -272,180 +264,150 @@ class VecIssueQueue(
 
     fastEntryEnqGpWbWakeUpMatchVec(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryGpWbWakeUpMatchVec)
     fastEntryEnqFpWbWakeUpMatchVec(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryFpWbWakeUpMatchVec)
-    fastEntryEnqVpWbWakeUpMatchVec(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryVpWbWakeUpMatchVec)
     fastEntryEnqV0WbWakeUpMatchVec.foreach(_(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryV0WbWakeUpMatchVec.get))
     fastEntryEnqVlWbWakeUpMatchVec.foreach(_(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryVlWbWakeUpMatchVec.get))
+
+    fastEntryEnqVpWbM3WakeUpMatchVec(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryVpWbM3WakeUpMatchVec)
+
     fastEntryEnqNotFlush(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryCanTransfer)
 
     for (srcIdx <- etyBits.status.srcStatus.indices) {
       fastEntryGpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.gpWbVec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
       fastEntryFpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.fpWbVec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
-      fastEntryVpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.vpWbVec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
+
+      fastEntryVpWbM3WakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.vpWbM3Vec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
     }
     fastEntryV0WbWakeUpMatchVec.foreach(_(etyIdx) := in.wakeup.v0WbVec.get.map(x => x.wen && x.pdest === etyBits.status.srcStatusV0.get.psrc))
-    fastEntryVlWbWakeUpMatchVec.foreach(_(etyIdx) := in.wakeup.vlWbVec.get.map(x => x.wen && x.pdest === etyBits.status.srcStatusVl.get.psrc))
+    fastEntryVlWbWakeUpMatchVec.foreach(_(etyIdx) := in.wakeup.vlWb0Vec.get.map(x => x.wen && x.pdest === etyBits.status.srcStatusVl.get.psrc))
   }
 
-  for (((entryNext, entry, enq: ValidIO[Entry]), enqIdx) <- (enqEntriesNext lazyZip enqEntries lazyZip enqEntryEnq).zipWithIndex) {
-    enqEntryCanTransfer(enqIdx) := entry.valid && !enqEntryFlush(enqIdx) && !enqEntrySuccess(enqIdx)
-    updateHoldingEntry(
-      entryNext = enqEntryForFast(enqIdx),
-      entry = entry.bits,
-      entryValid = entry.valid,
+  /**
+   * Assignment for [[enqEntries]]
+   */
+  for (((ety, keep, enq), enqIdx) <- (enqEntries lazyZip enqEntriesKeepNext lazyZip enqEntriesEnqNext).zipWithIndex) {
+    ety.valid := Mux1H(Seq(
+      enq.valid -> !in.flush.valid,
+      keep.valid -> !fastEntryEmptyValid(enqIdx),
+    ))
+
+    ety.bits := Mux1H(Seq(
+      enq.valid -> enq.bits,
+      keep.valid -> keep.bits,
+    ))
+  }
+
+  /**
+   * Assignment for [[fastEntries]]
+   */
+  for (((ety, keep, enq), fastIdx) <- (fastEntries lazyZip fastEntriesKeepNext lazyZip fastEntriesEnqNext).zipWithIndex) {
+    ety.valid := enq.valid || keep.valid
+
+    ety.bits := Mux1H(Seq(
+      enq.valid -> enq.bits,
+      keep.valid -> keep.bits,
+    ))
+  }
+
+  /**
+   * Assignment for [[enqEntriesEnqNext]]
+   */
+  for (((etyEnqNext: ValidIO[Entry], enq: ValidIO[Entry]), enqIdx) <- (enqEntriesEnqNext lazyZip enqEntryEnq).zipWithIndex) {
+    // Connect all bundles by default
+    etyEnqNext := enq
+    // Only change the connection of status
+    (etyEnqNext.bits.status, enq.bits.status) match { case (sNext: Status, es: Status) =>
+      enqNextUpdate(
+        statusSink = sNext,
+        statusSource = es,
+        gpWbWakeUpMatchVec = enqEntryEnqGpWbWakeUpMatchVec(enqIdx),
+        fpWbWakeUpMatchVec = enqEntryEnqFpWbWakeUpMatchVec(enqIdx),
+        vpWbM3WakeUpMatchVec = enqEntryEnqVpWbM3WakeUpMatchVec(enqIdx),
+        v0WbWakeUpMatchVec = enqEntryEnqV0WbWakeUpMatchVec.map(_(enqIdx)),
+        vlWbWakeUpMatchVec = enqEntryEnqVlWbWakeUpMatchVec.map(_(enqIdx)),
+        vpWbM3D1WakeUpMatchVec = Some(enqEntryEnqVpWbM3D1WakeUpMatchVec(enqIdx)),
+      )
+    }
+  }
+
+  /**
+   * Assignment for [[enqEntriesKeepNext]]
+   */
+  for (((etyKeepNext: ValidIO[Entry], ety: ValidIO[Entry]), enqIdx) <- (enqEntriesKeepNext lazyZip enqEntries).zipWithIndex) {
+    // Connect all bundles by default
+    etyKeepNext := ety
+    // Invalid the entry if it is issued successfully or is flushed
+    etyKeepNext.valid := ety.valid && !enqEntrySuccess(enqIdx) && !enqEntryFlush(enqIdx) && !fastEntryEmptySel(enqIdx).valid
+    // Change the connection of status
+    keepNextUpdate(
+      statusSink = etyKeepNext.bits.status,
+      statusSource = ety.bits.status,
+      entryValid = ety.valid,
       gpWbWakeUpMatchVec = enqEntryGpWbWakeUpMatchVec(enqIdx),
       fpWbWakeUpMatchVec = enqEntryFpWbWakeUpMatchVec(enqIdx),
-      vpWbWakeUpMatchVec = enqEntryVpWbWakeUpMatchVec(enqIdx),
+      vpWbM3WakeUpMatchVec = enqEntryVpWbM3WakeUpMatchVec(enqIdx),
       v0WbWakeUpMatchVec = enqEntryV0WbWakeUpMatchVec.map(_(enqIdx)),
       vlWbWakeUpMatchVec = enqEntryVlWbWakeUpMatchVec.map(_(enqIdx)),
       deqSel = enqEntryDeqSel(enqIdx),
       cancel = enqEntryCancel(enqIdx),
+      vpWbM3D1WakeUpMatchVec = None,
     )
-    entryNext.valid := Mux(
-      enq.valid && !in.flush.valid,
-      true.B,
-      Mux(
-        enqEntryFlush(enqIdx) || enqEntrySuccess(enqIdx) || fastEntryEmptyValid(enqIdx),
-        false.B,
-        entry.valid,
-      )
+  }
+
+  /**
+   * Assignment for [[fastEntryEnq]]
+   */
+  for ((enq, etyIdx) <- fastEntryEnq.zipWithIndex) {
+    // Todo[timing]: check if can only use x.bits(etyIdx) as select signal
+    enq.bits := Mux1H(fastEntryEmptySel.map(x => x.valid && x.bits(etyIdx)), enqEntriesKeepNext.map(_.bits))
+    enq.valid := Mux1H(
+      fastEntryEmptySel.map(x => x.valid && x.bits(etyIdx)),
+      enqEntryCanTransfer,
     )
-    when (enq.valid) {
-      entryNext.bits.payload := enq.bits.payload
-      entryNext.bits.status := enq.bits.status
-      (entryNext.bits.status, enq.bits.status) match { case (sNext: Status, e: Status) =>
-        (sNext.srcStatus lazyZip e.srcStatus).zipWithIndex.foreach { case ((ssNext, ess), srcIdx) =>
-          val gpWbWakeUpMatch = enqEntryEnqGpWbWakeUpMatchVec(enqIdx)(srcIdx)
-          val fpWbWakeUpMatch = enqEntryEnqFpWbWakeUpMatchVec(enqIdx)(srcIdx)
-          val vpWbWakeUpMatch = enqEntryEnqVpWbWakeUpMatchVec(enqIdx)(srcIdx)
-          val gpWakeUpVec = gpWbWakeUpMatch.map(_ && ess.gpRen)
-          val fpWakeUpVec = fpWbWakeUpMatch.map(_ && ess.fpRen)
-          val vpWakeUpVec = vpWbWakeUpMatch.map(_ && ess.vpRen)
-          val gpWakeUp = ess.gpRen && Cat(gpWbWakeUpMatch).orR
-          val fpWakeUp = ess.fpRen && Cat(fpWbWakeUpMatch).orR
-          val vpWakeUp = ess.vpRen && Cat(vpWbWakeUpMatch).orR
+  }
 
-          val wakeUp = gpWakeUp || fpWakeUp || vpWakeUp
-
-          ssNext.srcState := ess.srcState || wakeUp
-          ssNext.bypassDelay := Mux1H(
-            Seq(
-              gpWakeUpVec zip in.wakeup.gpWbVec.map(_.delay),
-              fpWakeUpVec zip in.wakeup.fpWbVec.map(_.delay),
-              vpWakeUpVec zip in.wakeup.vpWbVec.map(_.delay),
-            ).reduce(_ ++ _)
-          )
-          ssNext.bypassSource.idx := Mux1H(
-            Seq(
-              gpWakeUpVec.zipWithIndex,
-              fpWakeUpVec.zipWithIndex,
-              vpWakeUpVec.zipWithIndex,
-            ).reduce(_ ++ _).map { case (wakeUpMath, exuIdx) => wakeUpMath -> exuIdx.U }
-          )
-        }
-
-        (sNext.srcStatusV0 lazyZip e.srcStatusV0).foreach {
-          case (ssNext, ess) =>
-            val wakeUpMatch = enqEntryEnqV0WbWakeUpMatchVec.get(enqIdx)
-            ssNext.srcState := ess.srcState || Cat(wakeUpMatch).orR
-            ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.v0WbVec.get.map(_.delay))
-        }
-
-        (sNext.srcStatusVl lazyZip e.srcStatusVl).foreach {
-          case (ssNext, ess) =>
-            val wakeUpMatch = enqEntryEnqVlWbWakeUpMatchVec.get(enqIdx)
-            ssNext.srcState := ess.srcState || Cat(wakeUpMatch).orR
-            ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.vlWbVec.get.map(_.delay))
-        }
-      }
-    }.otherwise {
-      updateHoldingEntry(
-        entryNext = entryNext.bits,
-        entry = entry.bits,
-        entryValid = entry.valid,
-        gpWbWakeUpMatchVec = enqEntryGpWbWakeUpMatchVec(enqIdx),
-        fpWbWakeUpMatchVec = enqEntryFpWbWakeUpMatchVec(enqIdx),
-        vpWbWakeUpMatchVec = enqEntryVpWbWakeUpMatchVec(enqIdx),
-        v0WbWakeUpMatchVec = enqEntryV0WbWakeUpMatchVec.map(_(enqIdx)),
-        vlWbWakeUpMatchVec = enqEntryVlWbWakeUpMatchVec.map(_(enqIdx)),
-        deqSel = enqEntryDeqSel(enqIdx),
-        cancel = enqEntryCancel(enqIdx),
+  /**
+   * Assignment for [[fastEntriesEnqNext]]
+   */
+  for (((etyEnqNext: ValidIO[Entry], enq: ValidIO[Entry]), fastIdx) <- (fastEntriesEnqNext lazyZip fastEntryEnq).zipWithIndex) {
+    // Connect all bundles by default
+    etyEnqNext := enq
+    // Only change the connection of status
+    (etyEnqNext.bits.status, enq.bits.status) match { case (sNext: Status, es: Status) =>
+      enqNextUpdate(
+        statusSink = sNext,
+        statusSource = es,
+        gpWbWakeUpMatchVec = fastEntryEnqGpWbWakeUpMatchVec(fastIdx),
+        fpWbWakeUpMatchVec = fastEntryEnqFpWbWakeUpMatchVec(fastIdx),
+        vpWbM3WakeUpMatchVec = fastEntryEnqVpWbM3WakeUpMatchVec(fastIdx),
+        v0WbWakeUpMatchVec = fastEntryEnqV0WbWakeUpMatchVec.map(_(fastIdx)),
+        vlWbWakeUpMatchVec = fastEntryEnqVlWbWakeUpMatchVec.map(_(fastIdx)),
+        vpWbM3D1WakeUpMatchVec = None,
       )
     }
   }
 
-  for (((entryNext: ValidIO[Entry], entry: ValidIO[Entry], enq: ValidIO[Entry]), fastIdx) <- (fastEntriesNext lazyZip fastEntries lazyZip fastEntryEnq).zipWithIndex) {
-    entryNext.valid := Mux(
-      enq.valid && fastEntryEnqNotFlush(fastIdx),
-      true.B,
-      Mux(
-        fastEntryFlush(fastIdx) || fastEntrySuccess(fastIdx),
-        false.B,
-        entry.valid,
-      )
+  /**
+   * Assignment for [[fastEntriesKeepNext]]
+   */
+  for (((etyKeepNext: ValidIO[Entry], ety: ValidIO[Entry]), fastIdx) <- (fastEntriesKeepNext lazyZip fastEntries).zipWithIndex) {
+    // Connect all bundles by default
+    etyKeepNext := ety
+    // Invalid the entry if it is issued successfully
+    etyKeepNext.valid := ety.valid && !fastEntrySuccess(fastIdx) && !fastEntryFlush(fastIdx)
+    // Change the connection of status
+    keepNextUpdate(
+      statusSink = etyKeepNext.bits.status,
+      statusSource = ety.bits.status,
+      entryValid = ety.valid,
+      gpWbWakeUpMatchVec = fastEntryGpWbWakeUpMatchVec(fastIdx),
+      fpWbWakeUpMatchVec = fastEntryFpWbWakeUpMatchVec(fastIdx),
+      vpWbM3WakeUpMatchVec = fastEntryVpWbM3WakeUpMatchVec(fastIdx),
+      v0WbWakeUpMatchVec = fastEntryV0WbWakeUpMatchVec.map(_(fastIdx)),
+      vlWbWakeUpMatchVec = fastEntryVlWbWakeUpMatchVec.map(_(fastIdx)),
+      deqSel = fastEntryDeqSel(fastIdx),
+      cancel = fastEntryCancel(fastIdx),
+      vpWbM3D1WakeUpMatchVec = None,
     )
-
-    when (enq.valid) {
-      entryNext.bits.payload := enq.bits.payload
-      entryNext.bits.status := enq.bits.status
-      (entryNext.bits.status, enq.bits.status) match { case (sNext: Status, e: Status) =>
-        (sNext.srcStatus lazyZip e.srcStatus).zipWithIndex.foreach {  case ((ssNext, ess), srcIdx) =>
-          val gpWbWakeUpMatch = fastEntryEnqGpWbWakeUpMatchVec(fastIdx)(srcIdx)
-          val fpWbWakeUpMatch = fastEntryEnqFpWbWakeUpMatchVec(fastIdx)(srcIdx)
-          val vpWbWakeUpMatch = fastEntryEnqVpWbWakeUpMatchVec(fastIdx)(srcIdx)
-          val gpWakeUpVec = gpWbWakeUpMatch.map(_ && ess.gpRen)
-          val fpWakeUpVec = fpWbWakeUpMatch.map(_ && ess.fpRen)
-          val vpWakeUpVec = vpWbWakeUpMatch.map(_ && ess.vpRen)
-          val gpWakeUp = ess.gpRen && Cat(gpWbWakeUpMatch).orR
-          val fpWakeUp = ess.fpRen && Cat(fpWbWakeUpMatch).orR
-          val vpWakeUp = ess.vpRen && Cat(vpWbWakeUpMatch).orR
-
-          val wakeUp = gpWakeUp || fpWakeUp || vpWakeUp
-
-          ssNext.srcState := ess.srcState || wakeUp
-          ssNext.bypassDelay := Mux1H(
-            Seq(
-              gpWakeUpVec zip in.wakeup.gpWbVec.map(_.delay),
-              fpWakeUpVec zip in.wakeup.fpWbVec.map(_.delay),
-              vpWakeUpVec zip in.wakeup.vpWbVec.map(_.delay),
-            ).reduce(_ ++ _)
-          )
-          ssNext.bypassSource.idx := Mux1H(
-            Seq(
-              gpWakeUpVec.zipWithIndex,
-              fpWakeUpVec.zipWithIndex,
-              vpWakeUpVec.zipWithIndex,
-            ).reduce(_ ++ _).map { case (wakeUpMath, exuIdx) => wakeUpMath -> exuIdx.U }
-          )
-        }
-
-        (sNext.srcStatusV0 lazyZip e.srcStatusV0).foreach {
-          case (ssNext, ess) =>
-            val wakeUpMatch = fastEntryEnqV0WbWakeUpMatchVec.get(fastIdx)
-            ssNext.srcState := ess.srcState || Cat(wakeUpMatch).orR
-            ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.v0WbVec.get.map(_.delay))
-        }
-
-        (sNext.srcStatusVl lazyZip e.srcStatusVl).foreach {
-          case (ssNext, ess) =>
-            val wakeUpMatch = fastEntryEnqVlWbWakeUpMatchVec.get(fastIdx)
-            ssNext.srcState := ess.srcState || Cat(wakeUpMatch).orR
-            ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.vlWbVec.get.map(_.delay))
-        }
-      }
-    }.otherwise {
-      updateHoldingEntry(
-        entryNext = entryNext.bits,
-        entry = entry.bits,
-        entryValid = entry.valid,
-        gpWbWakeUpMatchVec = fastEntryGpWbWakeUpMatchVec(fastIdx),
-        fpWbWakeUpMatchVec = fastEntryFpWbWakeUpMatchVec(fastIdx),
-        vpWbWakeUpMatchVec = fastEntryVpWbWakeUpMatchVec(fastIdx),
-        v0WbWakeUpMatchVec = fastEntryV0WbWakeUpMatchVec.map(_(fastIdx)),
-        vlWbWakeUpMatchVec = fastEntryVlWbWakeUpMatchVec.map(_(fastIdx)),
-        deqSel = fastEntryDeqSel(fastIdx),
-        cancel = fastEntryCancel(fastIdx),
-      )
-    }
   }
 
   private val deqValidVec = WireInit(VecInit(
@@ -469,8 +431,12 @@ class VecIssueQueue(
     sel := VecInit(deqSelOHVec.map(_(i))).asUInt.orR
   }
 
+  /**
+   * Using [[enqEntriesKeepNext]] and [[fastEntriesKeepNext]] to pass updated bypassDelay and bypassSource.
+   * Only these bypass info are from wakeup, the other signals should be read directly from status and payload Reg
+   */
   private val deqEntries: Vec[Entry] = VecInit(deqSelOHVec.map(
-    deqSelOH => Mux1H(deqSelOH, (enqEntries ++ fastEntries).map(_.bits))
+    deqSelOH => Mux1H(deqSelOH, (enqEntriesKeepNext ++ fastEntriesKeepNext).map(_.bits))
   ))
 
   for ((deq: ValidIO[Deq], valid, deqEty) <- out.deq lazyZip deqValidVec lazyZip deqEntries) {
@@ -537,6 +503,207 @@ class VecIssueQueue(
   out.canAccept := PopCount(fastEntries.map(!_.valid)) >= 2.U
   // Todo: optimize it
   out.validNum := PopCount(entries.map(_.valid))
+
+  private def handleSrcWakeUp(
+    isKeep: Boolean,
+  )(
+    statusNext            : SrcStatus,
+    status                : SrcStatus,
+    gpWbWakeUpMatchVec    : Seq[Bool],
+    fpWbWakeUpMatchVec    : Seq[Bool],
+    vpWbM3WakeUpMatchVec  : Seq[Bool],
+    vpWbM3D1WakeUpMatchVec: Option[Seq[Bool]],
+  ): Unit = {
+    val gpWbWakeUpVec = gpWbWakeUpMatchVec.map(_ && status.gpRen)
+    val fpWbWakeUpVec = fpWbWakeUpMatchVec.map(_ && status.fpRen)
+    val vpWbM3WakeUpVec = vpWbM3WakeUpMatchVec.map(_ && status.vpRen)
+    // Only used to set bypassDelay and bypassSource
+    // Only used between enqEntryEnq and enqEntries. Otherwise, this bundle should be None
+    val vpWbM3D1WakeUpVec: Seq[Bool] = vpWbM3D1WakeUpMatchVec.map(_.map(_ && status.vpRen)).getOrElse(Seq())
+    val gpWakeUp = Cat(gpWbWakeUpVec).orR
+    val fpWakeUp = Cat(fpWbWakeUpVec).orR
+    val vpWbM3WakeUp = Cat(vpWbM3WakeUpVec).orR
+    val vpD1WakeUp = vpWbM3D1WakeUpVec.fold(false.B)(_ || _)
+
+    val wakeUp: Bool = gpWakeUp || fpWakeUp || vpWbM3WakeUp
+    val delayWakeUp: Bool = vpD1WakeUp
+
+    statusNext.srcState := status.srcState || wakeUp
+
+    // Only wb wakeup is support for gp and fp, so set it as maximum delay.
+
+    when (!wakeUp && !delayWakeUp) {
+      if (isKeep) {
+        statusNext.bypassDelay := Mux(
+          status.bypassDelay === BypassDelay.delay3,
+          BypassDelay.delay3,
+          status.bypassDelay + 1.U
+        )
+      } else {
+        statusNext.bypassDelay := status.bypassDelay
+      }
+    }.otherwise {
+      statusNext.bypassDelay := Mux1H(
+        Seq(
+          gpWbWakeUpVec zip Iterator.continually(BypassDelay.delay3),
+          fpWbWakeUpVec zip Iterator.continually(BypassDelay.delay3),
+          vpWbM3WakeUpVec zip in.wakeup.vpWbM3Vec.map(_.delay),
+          vpWbM3D1WakeUpVec zip Iterator.continually(BypassDelay.delay2),
+        ).reduce(_ ++ _)
+      )
+    }
+
+    // bypassSource is not needed for waking up from writeback.
+    when (!wakeUp && !delayWakeUp) {
+      statusNext.bypassSource := status.bypassSource
+    }.otherwise {
+      statusNext.bypassSource.idx := Mux1H(
+        Seq(
+          gpWbWakeUpVec.zipWithIndex,
+          fpWbWakeUpVec.zipWithIndex,
+          vpWbM3WakeUpVec.zipWithIndex,
+          vpWbM3D1WakeUpVec.zipWithIndex,
+        ).reduce(_ ++ _).map { case (wakeUpMath, exuIdx) => wakeUpMath -> exuIdx.U }
+      )
+    }
+  }
+
+  private def enqNextUpdate(
+    statusSink            : Status,
+    statusSource          : Status,
+    gpWbWakeUpMatchVec    : Seq[Seq[Bool]],
+    fpWbWakeUpMatchVec    : Seq[Seq[Bool]],
+    vpWbM3WakeUpMatchVec  : Seq[Seq[Bool]],
+    v0WbWakeUpMatchVec    : Option[Seq[Bool]],
+    vlWbWakeUpMatchVec    : Option[Seq[Bool]],
+    vpWbM3D1WakeUpMatchVec: Option[Seq[Seq[Bool]]],
+  ): Unit = {
+    (statusSink.srcStatus zip statusSource.srcStatus).zipWithIndex.foreach {
+      case ((ssSink, ssSource), srcIdx) =>
+        this.handleSrcWakeUp(
+          isKeep = false
+        )(
+          statusNext = ssSink,
+          status = ssSource,
+          gpWbWakeUpMatchVec = gpWbWakeUpMatchVec(srcIdx),
+          fpWbWakeUpMatchVec = fpWbWakeUpMatchVec(srcIdx),
+          vpWbM3WakeUpMatchVec = vpWbM3WakeUpMatchVec(srcIdx),
+          vpWbM3D1WakeUpMatchVec = vpWbM3D1WakeUpMatchVec.map(_(srcIdx)),
+        )
+    }
+
+    (statusSink.srcStatusV0 lazyZip statusSource.srcStatusV0).foreach {
+      case (ssNext, ess) =>
+        val wakeUpMatch = v0WbWakeUpMatchVec.get
+        ssNext.srcState := ess.srcState || Cat(wakeUpMatch).orR
+        ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.v0WbVec.get.map(_.delay))
+    }
+
+    (statusSink.srcStatusVl lazyZip statusSource.srcStatusVl).foreach {
+      case (ssNext, ess) =>
+        val wakeUpMatch = vlWbWakeUpMatchVec.get
+        ssNext.srcState := ess.srcState || Cat(wakeUpMatch).orR
+        ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.vlWb0Vec.get.map(_.delay))
+    }
+  }
+
+  private def keepNextUpdate(
+    statusSink            : Status,
+    statusSource          : Status,
+    entryValid            : Bool,
+    gpWbWakeUpMatchVec    : Seq[Seq[Bool]],
+    fpWbWakeUpMatchVec    : Seq[Seq[Bool]],
+    vpWbM3WakeUpMatchVec  : Seq[Seq[Bool]],
+    v0WbWakeUpMatchVec    : Option[Seq[Bool]],
+    vlWbWakeUpMatchVec    : Option[Seq[Bool]],
+    vpWbM3D1WakeUpMatchVec: Option[Seq[Seq[Bool]]],
+    deqSel                : Bool,
+    cancel                : Bool,
+  ): Unit = {
+    (statusSink.srcStatus zip statusSource.srcStatus).zipWithIndex.foreach {
+      case ((ssSink, ssSource), srcIdx) =>
+        this.handleSrcWakeUp(
+          isKeep = true
+        )(
+          statusNext = ssSink,
+          status = ssSource,
+          gpWbWakeUpMatchVec = gpWbWakeUpMatchVec(srcIdx),
+          fpWbWakeUpMatchVec = fpWbWakeUpMatchVec(srcIdx),
+          vpWbM3WakeUpMatchVec = vpWbM3WakeUpMatchVec(srcIdx),
+          vpWbM3D1WakeUpMatchVec = vpWbM3D1WakeUpMatchVec.map(_(srcIdx)),
+        )
+    }
+
+    (statusSink.srcStatusV0 lazyZip statusSource.srcStatusV0).foreach {
+      case (ssNext, ess) =>
+        val wakeUpMatch = v0WbWakeUpMatchVec.get
+        ssNext.srcState := ess.srcState || Cat(wakeUpMatch).orR
+        ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.v0WbVec.get.map(_.delay))
+    }
+
+    (statusSink.srcStatusVl lazyZip statusSource.srcStatusVl).foreach {
+      case (ssNext, ess) =>
+        val wakeUpMatch = vlWbWakeUpMatchVec.get
+        ssNext.srcState := ess.srcState || Cat(wakeUpMatch).orR
+        ssNext.bypassDelay := Mux1H(wakeUpMatch, in.wakeup.vlWb0Vec.get.map(_.delay))
+    }
+
+    statusSink.issued := Mux1H(Seq(
+      deqSel -> true.B,
+      cancel -> false.B,
+      (!deqSel && !cancel) -> statusSource.issued,
+    ))
+
+    when(entryValid && statusSource.issued) {
+      statusSink.issuedTimer := Mux(
+        statusSource.issuedTimer =/= IssuedTimer.maxValue,
+        statusSource.issuedTimer + 1.U,
+        statusSource.issuedTimer,
+      )
+    }.otherwise {
+      statusSink.issuedTimer := statusSource.issuedTimer
+    }
+  }
+
+  private def entryCanIssueWithWakeUp(
+    status            : Status,
+    entryValid        : Bool,
+    gpWbWakeUpMatchVec: Seq[Seq[Bool]],
+    fpWbWakeUpMatchVec: Seq[Seq[Bool]],
+    vpWbM3WakeUpMatchVec: Seq[Seq[Bool]],
+    v0WbWakeUpMatchVec: Option[Seq[Bool]],
+    vlWbWakeUpMatchVec: Option[Seq[Bool]],
+  ): Bool = {
+    val srcReadyOrWake = VecInit(status.srcStatus.zipWithIndex.map {
+      case (srcStatus, srcIdx) =>
+        val gpWake = gpWbWakeUpMatchVec(srcIdx).map(_ && srcStatus.gpRen).foldLeft(false.B)(_ || _)
+        val fpWake = fpWbWakeUpMatchVec(srcIdx).map(_ && srcStatus.fpRen).foldLeft(false.B)(_ || _)
+        val vpWake = vpWbM3WakeUpMatchVec(srcIdx).map(_ && srcStatus.vpRen).foldLeft(false.B)(_ || _)
+        srcStatus.srcState || gpWake || fpWake || vpWake
+    }).asUInt.andR
+
+    require(
+      status.srcStatusV0.isDefined == v0WbWakeUpMatchVec.isDefined,
+      "status.srcStatusV0 and v0WbWakeUpMatchVec should have the same Option condition"
+    )
+    require(
+      status.srcStatusVl.isDefined == vlWbWakeUpMatchVec.isDefined,
+      "status.srcStatusVl and vlWbWakeUpMatchVec should have the same Option condition"
+    )
+
+    val v0ReadyOrWake = status.srcStatusV0.map { srcStatusV0 =>
+      val v0Wake = v0WbWakeUpMatchVec.get.foldLeft(false.B)(_ || _)
+      srcStatusV0.srcState || (srcStatusV0.ren && v0Wake)
+    }.getOrElse(true.B)
+
+    val vlReadyOrWake = status.srcStatusVl.map { srcStatusVl =>
+      val vlWake = vlWbWakeUpMatchVec.get.foldLeft(false.B)(_ || _)
+      srcStatusVl.srcState || (srcStatusVl.ren && vlWake)
+    }.getOrElse(true.B)
+
+    val srcCanIssue = srcReadyOrWake && v0ReadyOrWake && vlReadyOrWake
+    entryValid && !status.issued && !status.blocked && srcCanIssue
+  }
 }
 
 object VecIssueQueue {
@@ -601,20 +768,13 @@ object VecIssueQueue {
     val enq = Vec(param.numEnq, ValidIO(new Enq))
     val resps = new InResp
     val fromWbFuBusyTable = new WbFuBusyTableReadBundle()
-    val wakeup = new Bundle {
-      val gpWbVec = Vec(backendParams.getIntRfWriteSize, new WakeUpBundle(IntPhyRegIdxWidth, IntData()))
-      val fpWbVec = Vec(backendParams.getFpRfWriteSize,  new WakeUpBundle(FpPhyRegIdxWidth, FpData()))
-      val vpWbVec = Vec(backendParams.getVfRfWriteSize,  new WakeUpBundle(VfPhyRegIdxWidth, VecData()))
-      val v0WbVec = Option.when(param.readV0Rf)(Vec(backendParams.getV0RfWriteSize, new WakeUpBundle(V0PhyRegIdxWidth, V0Data())))
-      val vlWbVec = Option.when(param.readVlRf)(Vec(backendParams.getVlRfWriteSize, new WakeUpBundle(VlPhyRegIdxWidth, VlData())))
-      // Todo: iq wakeup
-    }
+    val wakeup = new InWakeUp()
   }
 
   class Out(implicit p: Parameters, param: IssueParam) extends XSBundle {
 
     val toWbFuBusyTable = new WbFuBusyTableWriteBundle()
- 
+
     val deq: MixedVec[ValidIO[Deq]] = param.genIssueBundle(ValidIO(_))
 
     val canAccept: Bool = Bool()
@@ -893,6 +1053,15 @@ object VecIssueQueue {
     val is1 = Vec(param.numDeq, new RespBundle)
   }
 
+  class InWakeUp(implicit p: Parameters, param: IssueParam) extends XSBundle {
+    val gpWbVec = Vec(backendParams.getIntRfWriteSize, new WakeUpBundle(backendParams.gpPregParams))
+    val fpWbVec = Vec(backendParams.getFpRfWriteSize,  new WakeUpBundle(backendParams.fpPregParams))
+    val v0WbVec = Option.when(param.readV0Rf)(Vec(backendParams.getV0RfWriteSize, new WakeUpBundle(backendParams.v0PregParams)))
+    val vlWb0Vec = Option.when(param.readVlRf)(Vec(backendParams.getVlRfWriteSize, new WakeUpBundle(backendParams.vlPregParams)))
+    // Todo: early wakeup
+    val vpWbM3Vec = Vec(backendParams.getVpWriteSize, new WakeUpBundle(backendParams.vpPregParams))
+  }
+
   class Entry(implicit p: Parameters, param: IssueParam) extends XSBundle {
     val status = new Status()
     val payload = new Payload()
@@ -1040,23 +1209,29 @@ object VecIssueQueue {
   }
 
   object BypassDelay extends NamedUInt(2) {
-    // bypass data with 0 cycle delay
-    val delay0 = "b01".U(width.W)
-    // bypass data with 1 cycle delay
-    val delay1 = "b10".U(width.W)
-    // read from regfile
-    val delay2 = "b11".U(width.W)
+    // get data from wb0
+    val delay0 = "b00".U(width.W)
+    // get data from wb1
+    val delay1 = "b01".U(width.W)
+    // get data from wb2
+    val delay2 = "b10".U(width.W)
+    // get data from wb3
+    val delay3 = "b11".U(width.W)
   }
 
-  class BypassSource(implicit p: Parameters, param: IssueParam) extends XSBundle {
+  class BypassSource(implicit p: Parameters) extends XSBundle {
     // Todo: make it configurable
     val idx = UInt(4.W)
   }
 
-  class WakeUpBundle(pregIdxWidth: Int, dataConfig: DataConfig)(implicit p: Parameters) extends XSBundle {
+  class WakeUpBundle(val pregParams: PregParams)(implicit p: Parameters) extends XSBundle {
     val wen = Bool()
-    val pdest = UInt(pregIdxWidth.W)
+    val pdest = UInt(pregParams.addrWidth.W)
     val delay = BypassDelay()
+
+    def toValidAddr: ValidIO[UInt] = {
+      Pipe(wen, pdest, 0)
+    }
   }
 
   object SrcState {

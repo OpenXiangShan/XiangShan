@@ -114,7 +114,7 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams, schdParams: 
   val toVlPreg = Output(backendParams.genVlWriteBackBundle)
 
   val toCtrlBlock = new Bundle {
-    val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = MixedVec(schdParams.genWriteBackRobValidBundle.flatten)
+    val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = MixedVec(schdParams.genWriteBackRobValidBundle(needExtraVld = false).flatten)
   }
 }
 
