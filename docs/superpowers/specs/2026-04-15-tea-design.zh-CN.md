@@ -68,9 +68,9 @@ TEA 不默认每周期采样，而是使用运行时可配置周期：
 - `ST_L1`：load 的 L1 DCache first miss
 - `ST_TLB`：load 的 DTLB first miss
 
-公共定义新增为一个小型公共文件，例如：
+公共定义放到 `xiangshan` 顶层命名空间，对齐 `TopDownCounters` 的使用方式。这样前端和后端都可以直接引用 TEA 公共类型与 helper，不会形成前端依赖 backend 的方向性问题；同时不直接塞进 `package.scala`，而是放在一个独立顶层文件中：
 
-- [`src/main/scala/xiangshan/backend/trace/Tea.scala`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/backend/trace/Tea.scala)
+- [`src/main/scala/xiangshan/Tea.scala`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/Tea.scala)
 
 其中包含：
 
@@ -84,9 +84,9 @@ TEA 不默认每周期采样，而是使用运行时可配置周期：
 为避免新建并行数据结构，`teaPsv` 直接挂到现有 bundle 链上：
 
 - [`CtrlFlow`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/Bundle.scala)
-- [`StaticInst`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/backend/Bundles.scala)
-- [`DecodedInst`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/backend/Bundles.scala)
-- [`DynInst`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/backend/Bundles.scala)
+- [`DecodeInUop`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/backend/Bundles.scala)
+- [`DecodeOutUop`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/backend/Bundles.scala)
+- [`RenameOutUop` / `EnqRobUop`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/backend/Bundles.scala)
 - [`RobEntryBundle`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/backend/rob/RobBundles.scala)
 
 这样可保证：
@@ -100,7 +100,7 @@ TEA 不默认每周期采样，而是使用运行时可配置周期：
 第一版 `DR_L1` 不新增前端 miss 检测逻辑，直接复用已有 topdown 原因：
 
 - 来源：[`FrontendTopDownBundle`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/frontend/FrontendBundle.scala) 中的 `TopDownCounters.ICacheMissBubble`
-- 绑定点：[`IBuffer.scala`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/frontend/IBuffer.scala)
+- 绑定点：[`IBuffer.scala`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/frontend/ibuffer/IBuffer.scala)
 
 绑定策略：
 
@@ -231,8 +231,8 @@ TEA：
 - [`src/main/scala/xiangshan/backend/rob/RobBundles.scala`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/backend/rob/RobBundles.scala)
 - [`src/main/scala/xiangshan/backend/Bundles.scala`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/backend/Bundles.scala)
 - [`src/main/scala/xiangshan/Bundle.scala`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/Bundle.scala)
-- [`src/main/scala/xiangshan/frontend/IBuffer.scala`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/frontend/IBuffer.scala)
-- [`src/main/scala/xiangshan/backend/trace/Tea.scala`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/backend/trace/Tea.scala)
+- [`src/main/scala/xiangshan/frontend/ibuffer/IBuffer.scala`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/frontend/ibuffer/IBuffer.scala)
+- [`src/main/scala/xiangshan/Tea.scala`](/nfs/home/wujiabin/work/xs-env/XiangShan2/src/main/scala/xiangshan/Tea.scala)
 
 首版不修改：
 
@@ -247,7 +247,7 @@ TEA：
 
 ### 1. 编译与结构验证
 
-- 确认 `teaPsv` 正确贯穿 `CtrlFlow -> StaticInst -> DecodedInst -> DynInst -> ROB`
+- 确认 `teaPsv` 正确贯穿 `CtrlFlow -> DecodeInUop -> DecodeOutUop -> RenameOutUop -> EnqRobUop -> ROB`
 - 确认 `Tea_<hart>` 表能在 ChiselDB 中生成
 - 确认 `enableTea = 0` 时不写表
 

@@ -51,6 +51,18 @@ object TeaBinders {
 }
 
 object TeaFrontend {
+  def selectEnqueued(
+    valids: Seq[Bool],
+    enqEnable: Seq[Bool],
+    enqOffset: Seq[UInt],
+    useBypass: Bool,
+    numBypass: UInt
+  ): Vec[Bool] = {
+    VecInit(valids.indices.map { i =>
+      valids(i) && enqEnable(i) && (!useBypass || enqOffset(i) >= numBypass)
+    })
+  }
+
   def bindPacketPsv(valids: Seq[Bool], packetPsv: UInt): Vec[UInt] = {
     val firstValidOH = PriorityEncoderOH(VecInit(valids))
     VecInit(valids.indices.map { i =>
@@ -109,10 +121,11 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
   val drainCapture = io.sampleFire && !io.oir.valid && io.state === 3.U
 
   val pendingAfterCapture = pendingDrainCount + drainCapture.asUInt
-  val replayFromNewAlloc = !replayActive && io.firstAllocValid && pendingAfterCapture =/= 0.U
-  val replayNow = replayActive && !io.oir.valid
-  val replayDeq = (replayActive || replayFromNewAlloc) && pendingAfterCapture =/= 0.U && !io.oir.valid
-  val pendingAfterReplay = pendingAfterCapture - replayDeq.asUInt
+  val replayFromNewAlloc = !replayActive && io.firstAllocValid && io.firstAllocPsv.orR && pendingAfterCapture =/= 0.U
+  val replaySourcePc = Mux(replayActive, replayPc, io.firstAllocPc)
+  val replaySourcePsv = Mux(replayActive, replayPsv, io.firstAllocPsv)
+  val replayNow = io.sampleFire && replayActive && replaySourcePsv.orR && pendingAfterCapture =/= 0.U && !io.oir.valid
+  val pendingAfterReplay = pendingAfterCapture - replayNow.asUInt
 
   sample.cycle := cycle
   sample.overflow := io.overflow
@@ -127,8 +140,8 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
   }.elsewhen(replayNow) {
     sample.state := 3.U
     sample.validMask := 1.U(CommitWidth.W)
-    sample.pcVec(0) := replayPc
-    sample.psvVec(0) := replayPsv
+    sample.pcVec(0) := replaySourcePc
+    sample.psvVec(0) := replaySourcePsv
     sample.pendingDrain := true.B
     sampleValid := true.B
   }.elsewhen(regularSample) {
@@ -156,7 +169,7 @@ class TeaSampleSelector(implicit val p: Parameters) extends Module with HasXSPar
     replayPc := io.firstAllocPc
     replayPsv := io.firstAllocPsv
     replayActive := true.B
-  }.elsewhen(replayActive && pendingDrainCount === 0.U) {
+  }.elsewhen(replayActive && replayNow && pendingAfterReplay === 0.U) {
     replayActive := false.B
   }
 

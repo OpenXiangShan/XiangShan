@@ -6,10 +6,11 @@ import chiseltest._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan._
 import xiangshan.backend.ctrlblock.DebugLsInfo
-import xiangshan.backend.Bundles.{DecodedInst, DynInst, StaticInst}
+import xiangshan.backend.Bundles.{DecodeInUop, DecodeOutUop, EnqRobUop, RenameOutUop}
 import xiangshan.backend.rob.RobBundles
 import xiangshan.backend.rob.RobBundles.RobEntryBundle
-import xiangshan.frontend.{FetchToIBuffer, FrontendTopDownBundle, IBuffer}
+import xiangshan.frontend.{BackendRedirectTopdown, FetchToIBuffer, HasFrontendParameters}
+import xiangshan.frontend.ibuffer.IBuffer
 import utility.{LogUtilsOptions, LogUtilsOptionsKey, PerfCounterOptions, PerfCounterOptionsKey}
 import xiangshan.{TeaBinders, TeaEntry, TeaEvent, TeaFrontend, TeaOIR, TeaSampleSelector}
 
@@ -20,40 +21,45 @@ class TeaHelperTest extends XSTester {
 
   class TeaFieldSmoke(p: Parameters) extends Module {
     val io = IO(new Bundle {
-      val out = Output(UInt((TeaEvent.width * 5).W))
+      val out = Output(UInt((TeaEvent.width * 6).W))
     })
     val cf = WireInit(0.U.asTypeOf(new CtrlFlow()(p)))
-    val st = WireInit(0.U.asTypeOf(new StaticInst()(p)))
-    val de = WireInit(0.U.asTypeOf(new DecodedInst()(p)))
-    val dy = WireInit(0.U.asTypeOf(new DynInst()(p)))
+    val decodeIn = WireInit(0.U.asTypeOf(new DecodeInUop()(p)))
+    val decodeOut = WireInit(0.U.asTypeOf(new DecodeOutUop()(p)))
+    val renameOut = WireInit(0.U.asTypeOf(new RenameOutUop()(p)))
+    val enqRob = WireInit(0.U.asTypeOf(new EnqRobUop()(p)))
     val rob = WireInit(0.U.asTypeOf(new RobEntryBundle()(p)))
-    io.out := Cat(cf.teaPsv, st.teaPsv, de.teaPsv, dy.teaPsv, rob.teaPsv)
+    io.out := Cat(cf.teaPsv, decodeIn.teaPsv, decodeOut.teaPsv, renameOut.teaPsv, enqRob.teaPsv, rob.teaPsv)
   }
 
   class TeaPropagationSmoke(p: Parameters) extends Module {
     private val ctrlTea = TeaPsvOps.setBit(TeaEvent.bit(TeaEvent.DR_L1), TeaEvent.FL_MB)
-    private val robTea = TeaPsvOps.setBit(TeaEvent.bit(TeaEvent.ST_L1), TeaEvent.ST_TLB)
 
     val io = IO(new Bundle {
-      val staticTea = Output(UInt(TeaEvent.width.W))
-      val decodedTea = Output(UInt(TeaEvent.width.W))
+      val decodeInTea = Output(UInt(TeaEvent.width.W))
+      val decodeOutTea = Output(UInt(TeaEvent.width.W))
+      val renameTea = Output(UInt(TeaEvent.width.W))
+      val enqRobTea = Output(UInt(TeaEvent.width.W))
       val robTea = Output(UInt(TeaEvent.width.W))
     })
 
     val cf = WireInit(0.U.asTypeOf(new CtrlFlow()(p)))
     cf.teaPsv := ctrlTea
-    val st = WireInit(0.U.asTypeOf(new StaticInst()(p)))
-    st.connectCtrlFlow(cf)
-    val de = WireInit(0.U.asTypeOf(new DecodedInst()(p)))
-    de.connectStaticInst(st)
-
-    val dy = WireInit(0.U.asTypeOf(new DynInst()(p)))
-    dy.teaPsv := robTea
+    val decodeIn = WireInit(0.U.asTypeOf(new DecodeInUop()(p)))
+    decodeIn.connectCtrlFlow(cf)
+    val decodeOut = WireInit(0.U.asTypeOf(new DecodeOutUop()(p)))
+    decodeOut.connectDecodeInUop(decodeIn)
+    val renameOut = WireInit(0.U.asTypeOf(new RenameOutUop()(p)))
+    Bundles.connectSamePort(renameOut, decodeOut)
+    val enqRob = WireInit(0.U.asTypeOf(new EnqRobUop()(p)))
+    enqRob.connectEnqRobUop(renameOut)
     val rob = WireInit(0.U.asTypeOf(new RobEntryBundle()(p)))
-    RobBundles.connectEnq(rob, dy)
+    RobBundles.connectEnq(rob, enqRob)
 
-    io.staticTea := st.teaPsv
-    io.decodedTea := de.teaPsv
+    io.decodeInTea := decodeIn.teaPsv
+    io.decodeOutTea := decodeOut.teaPsv
+    io.renameTea := renameOut.teaPsv
+    io.enqRobTea := enqRob.teaPsv
     io.robTea := rob.teaPsv
   }
 
@@ -66,14 +72,31 @@ class TeaHelperTest extends XSTester {
     io.out := TeaFrontend.bindPacketPsv(io.valids, io.packetPsv)
   }
 
-  class IBufferBypassRegressionHarness(implicit val p: Parameters) extends Module with HasXSParameter {
-    require(PredictWidth > DecodeWidth, "IBuffer bypass regression needs PredictWidth > DecodeWidth")
+  class BypassAwarePacketPsvHarness extends Module {
+    val io = IO(new Bundle {
+      val valids = Input(Vec(4, Bool()))
+      val enqEnable = Input(Vec(4, Bool()))
+      val enqOffset = Input(Vec(4, UInt(3.W)))
+      val useBypass = Input(Bool())
+      val numBypass = Input(UInt(3.W))
+      val packetPsv = Input(UInt(TeaEvent.width.W))
+      val out = Output(Vec(4, UInt(TeaEvent.width.W)))
+    })
+
+    io.out := TeaFrontend.bindPacketPsv(
+      TeaFrontend.selectEnqueued(io.valids, io.enqEnable, io.enqOffset, io.useBypass, io.numBypass),
+      io.packetPsv
+    )
+  }
+
+  class IBufferBypassRegressionHarness(implicit val p: Parameters) extends Module with HasFrontendParameters {
+    require(IBufferEnqueueWidth > DecodeWidth, "IBuffer bypass regression needs enqueue width > decode width")
 
     val io = IO(new Bundle {
       val inValid = Input(Bool())
-      val validMask = Input(UInt(PredictWidth.W))
-      val enqEnableMask = Input(UInt(PredictWidth.W))
-      val instrs = Input(Vec(PredictWidth, UInt(32.W)))
+      val validMask = Input(UInt(IBufferEnqueueWidth.W))
+      val enqEnableMask = Input(UInt(IBufferEnqueueWidth.W))
+      val instrs = Input(Vec(IBufferEnqueueWidth, UInt(32.W)))
       val decodeCanAccept = Input(Bool())
       val packetDrL1 = Input(Bool())
       val inReady = Output(Bool())
@@ -88,21 +111,14 @@ class TeaHelperTest extends XSTester {
     inBits.instrs := io.instrs
     inBits.valid := io.validMask
     inBits.enqEnable := io.enqEnableMask
-    inBits.topdown_info.reasons(TopDownCounters.ICacheMissBubble.id) := io.packetDrL1
+    inBits.topdownInfo.reasons(TopDownCounters.ICacheMissBubble.id) := io.packetDrL1
 
     ibuffer.io.flush := false.B
-    ibuffer.io.ControlRedirect := false.B
-    ibuffer.io.ControlBTBMissBubble := false.B
-    ibuffer.io.TAGEMissBubble := false.B
-    ibuffer.io.SCMissBubble := false.B
-    ibuffer.io.ITTAGEMissBubble := false.B
-    ibuffer.io.RASMissBubble := false.B
-    ibuffer.io.MemVioRedirect := false.B
-    ibuffer.io.decodeCanAccept := io.decodeCanAccept
+    ibuffer.io.fromBackend := 0.U.asTypeOf(new BackendToIBufBundle()(p))
+    ibuffer.io.fromBackend.decodeCanAccept := io.decodeCanAccept
+    ibuffer.io.backendRedirectTopdown := 0.U.asTypeOf(new BackendRedirectTopdown()(p))
     ibuffer.io.in.valid := io.inValid
     ibuffer.io.in.bits := inBits
-    ibuffer.io.stallReason.backReason.valid := false.B
-    ibuffer.io.stallReason.backReason.bits := 0.U
     ibuffer.io.out.foreach(_.ready := true.B)
 
     io.inReady := ibuffer.io.in.ready
@@ -188,19 +204,20 @@ class TeaHelperTest extends XSTester {
     TeaEvent.bit(TeaEvent.ST_LLC).getWidth shouldBe TeaEvent.width
     test(new TeaFieldSmoke(config)) { dut =>
       dut.clock.step()
-      dut.io.out.getWidth shouldBe TeaEvent.width * 5
+      dut.io.out.getWidth shouldBe TeaEvent.width * 6
     }
   }
 
-  it should "propagate teaPsv through StaticInst.connectCtrlFlow and RobBundles.connectEnq" in {
+  it should "propagate teaPsv through the decode, rename, enqueue, and ROB bundles" in {
     val ctrlTea = teaBitValue(TeaEvent.DR_L1) | teaBitValue(TeaEvent.FL_MB)
-    val robTea = teaBitValue(TeaEvent.ST_L1) | teaBitValue(TeaEvent.ST_TLB)
 
     test(new TeaPropagationSmoke(config)) { dut =>
       dut.clock.step()
-      dut.io.staticTea.expect(ctrlTea.U(TeaEvent.width.W))
-      dut.io.decodedTea.expect(ctrlTea.U(TeaEvent.width.W))
-      dut.io.robTea.expect(robTea.U(TeaEvent.width.W))
+      dut.io.decodeInTea.expect(ctrlTea.U(TeaEvent.width.W))
+      dut.io.decodeOutTea.expect(ctrlTea.U(TeaEvent.width.W))
+      dut.io.renameTea.expect(ctrlTea.U(TeaEvent.width.W))
+      dut.io.enqRobTea.expect(ctrlTea.U(TeaEvent.width.W))
+      dut.io.robTea.expect(ctrlTea.U(TeaEvent.width.W))
     }
   }
 
@@ -215,6 +232,31 @@ class TeaHelperTest extends XSTester {
       dut.io.out(0).expect(0.U)
       dut.io.out(1).expect(TeaEvent.bit(TeaEvent.DR_L1))
       dut.io.out(2).expect(0.U)
+      dut.io.out(3).expect(0.U)
+    }
+  }
+
+  it should "skip bypassed instructions and bind packet PSV to the first actually enqueued slot" in {
+    test(new BypassAwarePacketPsvHarness) { dut =>
+      dut.io.valids(0).poke(true.B)
+      dut.io.valids(1).poke(true.B)
+      dut.io.valids(2).poke(true.B)
+      dut.io.valids(3).poke(false.B)
+      dut.io.enqEnable(0).poke(true.B)
+      dut.io.enqEnable(1).poke(true.B)
+      dut.io.enqEnable(2).poke(true.B)
+      dut.io.enqEnable(3).poke(false.B)
+      dut.io.enqOffset(0).poke(0.U)
+      dut.io.enqOffset(1).poke(1.U)
+      dut.io.enqOffset(2).poke(2.U)
+      dut.io.enqOffset(3).poke(3.U)
+      dut.io.useBypass.poke(true.B)
+      dut.io.numBypass.poke(2.U)
+      dut.io.packetPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.clock.step()
+      dut.io.out(0).expect(0.U)
+      dut.io.out(1).expect(0.U)
+      dut.io.out(2).expect(TeaEvent.bit(TeaEvent.DR_L1))
       dut.io.out(3).expect(0.U)
     }
   }
@@ -416,16 +458,66 @@ class TeaHelperTest extends XSTester {
       dut.io.sampleValid.expect(false.B)
       dut.io.pendingDrain.expect(true.B)
 
+      dut.io.state.poke(0.U)
       dut.io.sampleFire.poke(false.B)
       dut.io.firstAllocValid.poke(true.B)
       dut.io.firstAllocPc.poke("h80000200".U)
       dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
       dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.io.sampleFire.poke(true.B)
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
       dut.io.sample.pcVec(0).expect("h80000200".U)
       dut.io.sample.pendingDrain.expect(true.B)
       dut.io.pendingDrain.expect(false.B)
+      dut.clock.step()
+    }
+  }
+
+  it should "wait for an eventful allocation before replaying a drained backlog" in {
+    test(new TeaSelectorHarness) { dut =>
+      dut.io.sampleFire.poke(true.B)
+      dut.io.state.poke(3.U)
+      dut.io.overflow.poke(false.B)
+      dut.io.firstAllocValid.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.state.poke(0.U)
+      dut.io.sampleFire.poke(false.B)
+      dut.io.firstAllocValid.poke(true.B)
+      dut.io.firstAllocPc.poke("h80006000".U)
+      dut.io.firstAllocPsv.poke(0.U)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.state.poke(0.U)
+      dut.io.sampleFire.poke(false.B)
+      dut.io.firstAllocValid.poke(true.B)
+      dut.io.firstAllocPc.poke("h80006080".U)
+      dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.io.sampleFire.poke(true.B)
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.pcVec(0).expect("h80006080".U)
+      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.io.pendingDrain.expect(false.B)
+      dut.clock.step()
     }
   }
 
@@ -446,20 +538,25 @@ class TeaHelperTest extends XSTester {
       dut.io.sampleValid.expect(false.B)
       dut.io.pendingDrain.expect(true.B)
 
+      dut.io.state.poke(0.U)
       dut.io.sampleFire.poke(false.B)
       dut.io.firstAllocValid.poke(true.B)
       dut.io.firstAllocPc.poke("h80000300".U)
       dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.FL_MB))
       dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.io.sampleFire.poke(true.B)
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
       dut.io.sample.pcVec(0).expect("h80000300".U)
       dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_MB))
       dut.io.sample.pendingDrain.expect(true.B)
-      dut.io.pendingDrain.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
       val firstReplayCycle = dut.io.sample.cycle.peek().litValue
 
-      dut.io.firstAllocValid.poke(false.B)
       dut.clock.step()
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.validMask.expect(1.U(commitMaskWidth.W))
@@ -470,6 +567,39 @@ class TeaHelperTest extends XSTester {
       val secondReplayCycle = dut.io.sample.cycle.peek().litValue
 
       assert(secondReplayCycle > firstReplayCycle, s"expected deferred replay cycle to advance, got $firstReplayCycle then $secondReplayCycle")
+    }
+  }
+
+  it should "only emit drained replay when sampleFire is asserted" in {
+    test(new TeaSelectorHarness) { dut =>
+      dut.io.sampleFire.poke(true.B)
+      dut.io.state.poke(3.U)
+      dut.io.overflow.poke(false.B)
+      dut.io.firstAllocValid.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.state.poke(0.U)
+      dut.io.sampleFire.poke(false.B)
+      dut.io.firstAllocValid.poke(true.B)
+      dut.io.firstAllocPc.poke("h80006100".U)
+      dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.sampleFire.poke(true.B)
+      dut.io.sampleValid.expect(true.B)
+      dut.io.sample.pcVec(0).expect("h80006100".U)
+      dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_MB))
+      dut.io.pendingDrain.expect(false.B)
+      dut.clock.step()
     }
   }
 
@@ -494,17 +624,22 @@ class TeaHelperTest extends XSTester {
       dut.io.sampleValid.expect(false.B)
       dut.io.pendingDrain.expect(true.B)
 
+      dut.io.state.poke(0.U)
       dut.io.sampleFire.poke(false.B)
       dut.io.firstAllocValid.poke(true.B)
       dut.io.firstAllocPc.poke("h80005000".U)
       dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.ST_L1))
       dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.io.sampleFire.poke(true.B)
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.pcVec(0).expect("h80005000".U)
       dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.ST_L1))
       val firstReplayCycle = dut.io.sample.cycle.peek().litValue
 
-      dut.io.firstAllocValid.poke(false.B)
       dut.clock.step()
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.pcVec(0).expect("h80005000".U)
@@ -531,14 +666,20 @@ class TeaHelperTest extends XSTester {
         dut.io.sampleValid.expect(false.B)
       }
 
+      dut.io.state.poke(0.U)
       dut.io.sampleFire.poke(false.B)
       dut.io.firstAllocValid.poke(true.B)
       dut.io.firstAllocPc.poke("h80005100".U)
       dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
+      dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.io.sampleFire.poke(true.B)
 
       var lastCycle = -1L
       for (i <- 0 until deferredSamples) {
-        dut.clock.step()
         dut.io.sampleValid.expect(true.B)
         dut.io.sample.pcVec(0).expect("h80005100".U)
         dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.DR_L1))
@@ -546,7 +687,7 @@ class TeaHelperTest extends XSTester {
         if (i == 0) assert(currentCycle > 0L, s"expected replay to use current emission time, got $currentCycle")
         if (i > 0) assert(currentCycle == lastCycle + 1L, s"expected consecutive replay cycles, got $lastCycle then $currentCycle")
         lastCycle = currentCycle
-        dut.io.firstAllocValid.poke(false.B)
+        dut.clock.step()
       }
       dut.io.pendingDrain.expect(false.B)
     }
@@ -568,38 +709,44 @@ class TeaHelperTest extends XSTester {
       dut.io.sampleValid.expect(false.B)
       dut.io.pendingDrain.expect(true.B)
 
+      dut.io.state.poke(0.U)
       dut.io.sampleFire.poke(false.B)
       dut.io.firstAllocValid.poke(true.B)
       dut.io.firstAllocPc.poke("h80003000".U)
       dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.DR_L1))
       dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.io.sampleFire.poke(true.B)
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.pcVec(0).expect("h80003000".U)
       dut.io.sample.pendingDrain.expect(true.B)
-      dut.io.pendingDrain.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
       val firstReplayCycle = dut.io.sample.cycle.peek().litValue
+      dut.clock.step()
 
-      dut.io.firstAllocValid.poke(false.B)
       dut.io.sampleFire.poke(true.B)
       dut.io.state.poke(0.U)
       dut.io.oir.valid.poke(true.B)
       dut.io.oir.pc.poke("h80003100".U)
       dut.io.oir.psv.poke(TeaEvent.bit(TeaEvent.FL_MB))
-      dut.clock.step()
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.oirValid.expect(true.B)
       dut.io.sample.pcVec(0).expect("h80003100".U)
       dut.io.pendingDrain.expect(true.B)
-
-      dut.io.sampleFire.poke(false.B)
-      dut.io.oir.valid.poke(false.B)
       dut.clock.step()
+
+      dut.io.sampleFire.poke(true.B)
+      dut.io.oir.valid.poke(false.B)
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.pcVec(0).expect("h80003000".U)
       dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.DR_L1))
       dut.io.sample.pendingDrain.expect(true.B)
       dut.io.pendingDrain.expect(false.B)
       val replayAfterOirCycle = dut.io.sample.cycle.peek().litValue
+      dut.clock.step()
 
       assert(replayAfterOirCycle > firstReplayCycle, s"expected deferred replay after OIR to use a later emission cycle, got $firstReplayCycle then $replayAfterOirCycle")
     }
@@ -642,22 +789,28 @@ class TeaHelperTest extends XSTester {
 
       dut.io.sampleFire.poke(false.B)
       dut.clock.step()
-      dut.clock.step()
 
       dut.io.sampleFire.poke(true.B)
       dut.clock.step()
       dut.io.sampleValid.expect(false.B)
       dut.io.pendingDrain.expect(true.B)
 
+      dut.io.state.poke(0.U)
       dut.io.sampleFire.poke(false.B)
       dut.io.firstAllocValid.poke(true.B)
       dut.io.firstAllocPc.poke("h80005200".U)
       dut.io.firstAllocPsv.poke(TeaEvent.bit(TeaEvent.FL_MB))
       dut.clock.step()
+      dut.io.sampleValid.expect(false.B)
+      dut.io.pendingDrain.expect(true.B)
+
+      dut.io.firstAllocValid.poke(false.B)
+      dut.io.sampleFire.poke(true.B)
       dut.io.sampleValid.expect(true.B)
       dut.io.sample.pcVec(0).expect("h80005200".U)
       dut.io.sample.psvVec(0).expect(TeaEvent.bit(TeaEvent.FL_MB))
       dut.io.sample.overflow.expect(false.B)
+      dut.clock.step()
     }
   }
 }
