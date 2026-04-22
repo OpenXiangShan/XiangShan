@@ -110,7 +110,7 @@ class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePr
       pre_vaddr := new_vaddr
     }
 
-    (can_send_pf, new_stride)
+    (can_send_pf, new_stride, isDecrMode =/= decr_mode, stride_valid)
   }
 
 }
@@ -175,6 +175,8 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s1_decr_mode = array(s1_index).decr_mode
   val s1_new_stride = WireInit(0.U(STRIDE_BITS.W))
   val s1_can_send_pf = WireInit(false.B)
+  val s1_mode_changed = WireInit(false.B)
+  val s1_stride_valid = WireInit(false.B)
   s0_can_accept := !(s1_valid && s1_pc_hash === s0_pc_hash)
 
   val always_update = Constantin.createRecord(s"always_update${p(XSCoreParamsKey).HartId}", initValue = ALWAYS_UPDATE_PRE_VADDR)
@@ -189,6 +191,8 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     val res = array(s1_index).update(s1_vaddr, always_update)
     s1_can_send_pf := res._1
     s1_new_stride := res._2
+    s1_mode_changed := res._3
+    s1_stride_valid := res._4
   }
 
   val l1_stride_ratio_const = Constantin.createRecord(s"l1_stride_ratio${p(XSCoreParamsKey).HartId}", initValue = 2)
@@ -251,17 +255,23 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   XSPerfAccumulate("l1_pf_valid", s3_valid)
   XSPerfAccumulate("l2_pf_valid", s4_valid)
   XSPerfAccumulate("detect_stream", io.stream_lookup_resp)
-  XSPerfHistogram("high_conf_num", PopCount(VecInit(array.map(_.confidence === MAX_CONF.U))).asUInt, true.B, 0, STRIDE_ENTRY_NUM, 1)
+  XSPerfHistogram("high_conf_num", PopCount(VecInit(array.zipWithIndex.map { case (entry, idx) => valids(idx) && entry.confidence >= CONF_THRESHOLD.U })).asUInt, true.B, 0, STRIDE_ENTRY_NUM, 1)
   for(i <- 0 until STRIDE_ENTRY_NUM) {
     XSPerfAccumulate(s"entry_${i}_update", i.U === s1_index && s1_update)
-    for(j <- 0 until 4) {
-      XSPerfAccumulate(s"entry_${i}_disturb_${j}", i.U === s1_index && s1_update &&
-                                                   j.U === s1_new_stride &&
-                                                   array(s1_index).confidence === MAX_CONF.U &&
-                                                   array(s1_index).stride =/= s1_new_stride
-      )
-    }
+    XSPerfAccumulate(s"entry_${i}_alloc", i.U === s1_index && s1_alloc)
+    val active_entry = valids(s1_index) && array(s1_index).confidence >= CONF_THRESHOLD.U
+    XSPerfAccumulate(s"entry_${i}_evict", i.U === s1_index && active_entry && s1_alloc)
+    XSPerfAccumulate(s"entry_${i}_decr", i.U === s1_index && active_entry && array(s1_index).decr_mode)
+    XSPerfAccumulate(s"entry_${i}_incr", i.U === s1_index && active_entry && !array(s1_index).decr_mode)
   }
+  for (j <- 0 until STRIDE_VADDR_BITS) {
+    val highestOne = Reverse(PriorityEncoderOH(Reverse(array(s1_index).stride)))
+    val is_stride_j = highestOne === (1 << j).U
+    XSPerfAccumulate(s"stride_${j}", s1_can_send_pf && array(s1_index).confidence >= CONF_THRESHOLD.U && !array(s1_index).decr_mode && is_stride_j)
+    XSPerfAccumulate(s"negstride_${j}", s1_can_send_pf && array(s1_index).confidence >= CONF_THRESHOLD.U && array(s1_index).decr_mode && is_stride_j)
+  }
+  XSPerfAccumulate("stride_mode_changed", s1_update && s1_mode_changed)
+  XSPerfAccumulate("always_update", s1_update && s1_stride_valid)
 
   for(i <- 0 until STRIDE_ENTRY_NUM) {
     when(GatedValidRegNext(io.flush)) {
