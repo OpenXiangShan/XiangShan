@@ -1,6 +1,7 @@
 package xiangshan.backend.regfile
 
 import chisel3.util._
+import xiangshan.backend.BackendParams
 import xiangshan.backend.datapath.DataConfig._
 
 abstract class PregParams {
@@ -16,6 +17,17 @@ abstract class PregParams {
   def bankRaddrWidth = log2Ceil(numBank)
   // addr for read each bank
   def arbiterAddrWidth = addrWidth - bankRaddrWidth
+
+  def getNumWrite(backendParams: BackendParams): Int = {
+    this match {
+      case _: FpPregParams => backendParams.getFpRfWriteSize
+      case _: IntPregParams => backendParams.getIntRfWriteSize
+      case _: V0PregParams => backendParams.getV0RfWriteSize
+      case _: VfPregParams => backendParams.getVfRfWriteSize
+      case _: VlPregParams => backendParams.getVlRfWriteSize
+      case _ => throw new RuntimeException(s"the type[${this.getClass}] is not permitted to call getNumWrite method")
+    }
+  }
 }
 
 case class IntPregParams(

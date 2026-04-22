@@ -943,7 +943,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val csrToDecode = Option.when(params.hasCSR)(Output(new CSRToDecode))
   val vtype = Option.when(params.writeVConfig)((Valid(new VType)))
   val wbDataPathToCtrlBlock = new Bundle {
-    val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = MixedVec(params.genWriteBackRobValidBundle.flatten)
+    val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = MixedVec(params.genWriteBackRobValidBundle(needExtraVld = false).flatten)
     val delayedOldestExuRedirect = Option.when(params.isIntSchd)(ValidIO(new Redirect))
   }
   // Todo: fix rebase

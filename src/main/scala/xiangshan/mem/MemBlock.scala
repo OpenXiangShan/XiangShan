@@ -41,6 +41,7 @@ import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.Bundles._
+import xiangshan.backend.vector.VecIssueQueue
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
@@ -266,6 +267,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val vlduIqFeedback= Vec(VlduCnt, new MemRSFeedbackIO(isVector = true))
   val ldCancel = Vec(backendParams.LdExuCnt, new LoadCancelIO)
   val wakeup = Vec(backendParams.LdExuCnt, Valid(new MemWakeUpBundle))
+  val vldS3WakeUp = Vec(backendParams.LdExuCnt, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams))
 }
 
 class MemCoreTopDownIO extends Bundle {
@@ -558,7 +560,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   writebackVldu.zipWithIndex.foreach { case (wb, i) =>
-    connectMemDecoupledNewExuOutput(wb, newLoadUnits(i).io.ldout)
+    wb := newLoadUnits(i).io.vldout
   }
 
   writebackStd.zipWithIndex.foreach { case (wb, i) =>
@@ -875,6 +877,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     io.mem_to_ooo.ldCancel(i).ld1Cancel := false.B
     io.mem_to_ooo.ldCancel(i).ld2Cancel := newLoadUnits(i).io.cancel
     io.mem_to_ooo.wakeup(i) := newLoadUnits(i).io.wakeup
+    io.mem_to_ooo.vldS3WakeUp(i) := newLoadUnits(i).io.vldS3WakeUp
 
     // software prefetch to frontend (prefetch.i)
     io.ifetchPrefetch(i) <> newLoadUnits(i).io.swInstrPrefetch
@@ -1155,19 +1158,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     fb.feedbackSlow.bits := DontCare
     fb.feedbackFast := DontCare
   }
-  // init port
-  /**
-   * TODO: splited vsMergebuffer maybe remove, if one RS can accept two feedback, or don't need RS replay uop
-   * for now:
-   *  RS0 -> VsSplit0 -> stu0 -> vsMergebuffer0 -> feedback -> RS0
-   *  RS1 -> VsSplit1 -> stu1 -> vsMergebuffer1 -> feedback -> RS1
-   *
-   * vector load don't need feedback
-   *
-   *  RS0 -> VlSplit0  -> ldu0 -> |
-   *  RS1 -> VlSplit1  -> ldu1 -> |  -> vlMergebuffer
-   *        replayIO   -> ldu3 -> |
-   * */
 
   (0 until VstuCnt).foreach{i =>
     io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow.valid := false.B

@@ -30,6 +30,8 @@ import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.vector.VecIssueQueue
+import xiangshan.backend.vector.VecIssueQueue.BypassDelay
 import xiangshan.mem.Bundles._
 import xiangshan.mem.LoadReplayCauses._
 import xiangshan.mem.LoadStage._
@@ -1215,8 +1217,12 @@ class LoadUnitS3(param: ExeUnitParams)(
     // Unalign head from S4
     val unalignConcat = Flipped(ValidIO(new LoadStageIO))
 
+    // Vector wake up
+    val vldS3WakeUp: VecIssueQueue.WakeUpBundle = new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams)
+
     // Writeback to Backend / LQ / VLMergeBuffer
     val ldout = new MemWriteBack(param)
+    val vldout = new NewExuOutput(param)
     val lqWrite = DecoupledIO(new LqWriteBundle)
 
     // Fast replay
@@ -1394,8 +1400,8 @@ class LoadUnitS3(param: ExeUnitParams)(
   /**
     * Writeback to Backend / LQ / VLMergeBuffer
     */
-  // Writeback to Backend
-  val ldoutValid = pipeIn.valid && shouldWriteback && !isVector && endPipe
+  // Writeback to Backend(int/fp)
+  val ldoutValid = pipeIn.valid && shouldWriteback && !uop.vecWen && endPipe
   val ldout = Wire(new MemWriteBack(param))
   ldout.toIntRf.foreach { case port =>
     port.valid := uop.rfWen && pipeIn.valid && endPipe && shouldWakeup
@@ -1422,6 +1428,19 @@ class LoadUnitS3(param: ExeUnitParams)(
   ldout.toRob.bits.debugInfo.perfDebugInfo.foreach(_ := uop.perfDebugInfo)
   ldout.toRob.bits.debugInfo.debug_seqNum.foreach(_ := uop.debug_seqNum)
 
+  // Writeback to backend(vector)
+  val vldoutValid = pipeIn.valid && shouldWriteback && uop.vecWen && endPipe
+  val vldout = Wire(new NewExuOutput(param))
+  vldout := ldout.toNewExuOutputBundle()
+  vldout.toRob.valid := vldoutValid
+  vldout.toVecRf.foreach { case port =>
+    port.valid := uop.vecWen && pipeIn.valid && endPipe && shouldWakeup
+    port.bits := DontCare
+  }
+  vldout.toV0Rf.foreach { case port =>
+    port.valid := uop.v0Wen && pipeIn.valid && endPipe && shouldWakeup
+    port.bits := DontCare
+  }
   // Writeback to LQ
   val lqWriteValid = pipeIn.valid && !doFastReplay && endPipe
   val lqWriteReady = io.lqWrite.ready
@@ -1461,7 +1480,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.replacementUpdated := DontCare // TODO: remove this
   lqWrite.missDbUpdated := DontCare // TODO: remove this
   lqWrite.schedIndex := in.replayQueueIdx.get
-  lqWrite.updateAddrValid := ldoutValid
+  lqWrite.updateAddrValid := ldoutValid || vldoutValid
   lqWrite.rep_info.mshr_id := lqWriteMshrId
   lqWrite.rep_info.full_fwd := false.B
   lqWrite.rep_info.data_inv_sq_idx := in.dataInvalidSqIdx.get
@@ -1521,8 +1540,13 @@ class LoadUnitS3(param: ExeUnitParams)(
   io_pipeIn.get.ready := !pipeOutValid || kill || endPipe || pipeOut.ready
 
   io.ldout := ldout
+  io.vldout := vldout
   io.lqWrite.valid := lqWriteValid
   io.lqWrite.bits := lqWrite
+
+  io.vldS3WakeUp.wen := vldout.toVecRf.get.valid
+  io.vldS3WakeUp.pdest := vldout.pdest
+  io.vldS3WakeUp.delay := BypassDelay.delay0
 
   io.fastReplay.valid := pipeIn.valid && shouldFastReplay
   io.fastReplay.bits := fastReplay
@@ -1753,6 +1777,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val prefetchReq = Flipped(DecoupledIO(new L1PrefetchReq))
   // Writeback to Backend / LQ / VLMergeBuffer
   val ldout = new MemWriteBack(param)
+  val vldout = new NewExuOutput(param)
   val lqWrite = DecoupledIO(new LqWriteBundle)
   // TLB / PMA / PMP
   val tlb = new TlbRequestIO(2)
@@ -1762,6 +1787,8 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val dcache = new DCacheLoadIO
   // IQ wakeup and load cancel
   val wakeup = ValidIO(new MemWakeUpBundle)
+  // vector load wakeup
+  val vldS3WakeUp = new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams)
   val cancel = Output(Bool())
   // Exception info
   val exceptionInfo = ValidIO(new MemExceptionInfo)
@@ -1886,6 +1913,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s3.io.redirect := io.redirect
   s3.io.dcacheError := io.dcache.resp.bits.error_delayed
   io.ldout <> s3.io.ldout
+  io.vldout := s3.io.vldout
   io.lqWrite <> s3.io.lqWrite
   s3.io.rarNukeQueryResp := io.rarNukeQuery.resp
   io.rarNukeQuery.revokeLastCycle := s3.io.revokeLastCycle
@@ -1896,6 +1924,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.cancel := s3.io.cancel
   io.exceptionInfo := s3.io.exceptionInfo
   s3.io.csrCtrl := io.csrCtrl
+  io.vldS3WakeUp := s3.io.vldS3WakeUp
 
   // Data path
   dataPath.io.s2SqForwardResp := io.sqForward.s2Resp

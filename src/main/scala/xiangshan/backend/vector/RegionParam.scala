@@ -38,6 +38,10 @@ class RegionParam(
   def isFltRegion = region == FltRegion
   def isVecRegion = region == VecRegion
 
+  def sumNumDeq: Int = issueParams.map(_.numDeq).sum
+  def maxIQEntry: Int = issueParams.map(_.numEntry).max
+  def numNonVStdIQ: Int = issueParams.count(x => !x.hasVStd)
+
   def getGpReadCfgs: Seq[RdConfig] = {
     issueParams.flatMap(_.getGpReadCfgs)
   }

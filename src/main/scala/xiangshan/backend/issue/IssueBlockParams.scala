@@ -443,8 +443,17 @@ case class IssueBlockParams(
     MixedVec(this.exuParams.map(x => ValidIO(x.genNewExuOutputBundle)))
   }
 
-  def genWriteBackRobValidBundle(implicit p: Parameters): MixedVec[ValidIO[WriteBackRobBundle]] = {
-    MixedVec(this.exuParams.map(x => ValidIO(x.genWriteBackRobBundle)))
+
+  def genWriteBackRobValidBundle(needExtraVld: Boolean)(implicit p: Parameters): MixedVec[ValidIO[WriteBackRobBundle]] = {
+    MixedVec(
+      this.exuParams.flatMap(
+        x =>
+          if (x.hasLoadExu && x.writeIntRf && x.writeVfRf && needExtraVld)
+            Seq.fill(2)(ValidIO(x.genWriteBackRobBundle))
+          else
+            Seq(ValidIO(x.genWriteBackRobBundle))
+      )
+    )
   }
 
   def genExuBypassValidBundle(implicit p: Parameters): MixedVec[ValidIO[ExuBypassBundle]] = {

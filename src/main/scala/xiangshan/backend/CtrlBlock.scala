@@ -26,7 +26,7 @@ import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.ctrlblock.{DebugLSIO, DebugLsInfoBundle, LsTopdownInfo, MemCtrl, RedirectGenerator}
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, V0Data, VAddrData, VecData, VlData}
-import xiangshan.backend.decode.{FusionDecoder}
+import xiangshan.backend.decode.FusionDecoder
 import xiangshan.backend.dispatch._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
@@ -40,7 +40,7 @@ import xiangshan.backend.trace._
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.Redirect.findOldestRedirect
 import xiangshan.TopDownCounters._
-import xiangshan.backend.vector.Decoder
+import xiangshan.backend.vector.{Decoder, VecIssueQueue}
 import xiangshan.backend.vector.Decoder.DecodeStage
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -161,7 +161,7 @@ class CtrlBlockImp(
     x.valid := GatedValidRegNext(io.fromWB.wbData(i).valid)
     x.bits := delayedNotFlushedWriteBack(i).bits
   }
-  val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
+  val delayedNotFlushedWriteBackNeedFlush = Wire(Vec(params.getWrite2RobSize(_.needExceptionGen), Bool()))
   delayedNotFlushedWriteBackNeedFlush := delayedNotFlushedWriteBack.filter(_.bits.params.needExceptionGen).map{ x =>
     x.bits.exceptionVec.orR || x.bits.flushPipe.getOrElse(false.B) || x.bits.replay.getOrElse(false.B) ||
       (if (x.bits.trigger.nonEmpty) TriggerAction.isDmode(x.bits.trigger.get) else false.B)
@@ -185,7 +185,6 @@ class CtrlBlockImp(
   val storeWbData = io.fromWB.wbData.filter(_.bits.params.hasStoreFu)
   val i2vWbData = intScheWbData.filter(_.bits.params.writeVecRf)
   val f2vWbData = fpScheWbData.filter(_.bits.params.writeVecRf)
-  val memVloadWbData = io.fromWB.wbData.filter(x => x.bits.params.hasVLoadFu)
   private val delayedNotFlushedWriteBackNums = wbData.map(x => {
     val valid = x.valid
     val oldestRedirect = findOldestRedirect(findOldestRedirect(s2_s4_redirect, s3_s5_redirect), s1_s3_redirect)
@@ -195,7 +194,6 @@ class CtrlBlockImp(
     val isIntSche = intScheWbData.contains(x)
     val isFpSche = fpScheWbData.contains(x)
     val isVfSche = vfScheWbData.contains(x)
-    val isMemVload = memVloadWbData.contains(x)
     val isi2v = i2vWbData.contains(x)
     val isf2v = f2vWbData.contains(x)
     val isStore = storeWbData.contains(x)
@@ -212,8 +210,6 @@ class CtrlBlockImp(
       intScheNonStoreWbData ++ fpScheNonStoreWbData
     } else if (isStore) {
       storeWbData
-    } else if (isMemVload) {
-      memVloadWbData
     } else {
       Seq(x)
     }
@@ -776,13 +772,12 @@ class CtrlBlockImp(
   io.toMem.lsqEnqIO <> dispatch.io.toMem.lsqEnqIO
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt
   dispatch.io.wakeUpAll.wakeUpFp  := io.toDispatch.wakeUpFp
-  dispatch.io.wakeUpAll.wakeUpVec := io.toDispatch.wakeUpVec
+  dispatch.io.wakeUpVec := io.toDispatch.wakeUpVec
   dispatch.io.IQValidNumVec := io.toDispatch.IQValidNumVec
   dispatch.io.ldCancel := io.toDispatch.ldCancel
   dispatch.io.og0Cancel := io.toDispatch.og0Cancel
   dispatch.io.wbPregsInt := io.toDispatch.wbPregsInt
   dispatch.io.wbPregsFp := io.toDispatch.wbPregsFp
-  dispatch.io.wbPregsVec := io.toDispatch.wbPregsVec
   dispatch.io.wbPregsV0 := io.toDispatch.wbPregsV0
   dispatch.io.wbPregsVl := io.toDispatch.wbPregsVl
   dispatch.io.vlWriteBackInfo := io.toDispatch.vlWriteBackInfo
@@ -951,7 +946,9 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   val toDispatch = new Bundle {
     val wakeUpInt = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
     val wakeUpFp  = Flipped(backendParams.fpSchdParams.get.genIQWakeUpOutValidBundle)
-    val wakeUpVec = Flipped(backendParams.vecSchdParams.get.genIQWakeUpOutValidBundle)
+    val wakeUpVec: Vec[VecIssueQueue.WakeUpBundle] = Input(
+      Vec(backendParams.getVpWriteSize, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams))
+    )
     val allIssueParams = backendParams.allIssueParams.filter(x => x.StdCnt == 0 && x.VStdCnt == 0)
     val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
     val exuNum = allExuParams.size
@@ -962,7 +959,6 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val ldCancel = Vec(backendParams.LdExuCnt, Flipped(new LoadCancelIO))
     val wbPregsInt = Vec(backendParams.numPregWb(IntData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsFp = Vec(backendParams.numPregWb(FpData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
-    val wbPregsVec = Vec(backendParams.numPregWb(VecData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsV0 = Vec(backendParams.numPregWb(V0Data()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val wbPregsVl = Vec(backendParams.numPregWb(VlData()), Flipped(ValidIO(UInt(PhyRegIdxWidth.W))))
     val vlWriteBackInfo = new Bundle {

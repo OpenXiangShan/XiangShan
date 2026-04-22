@@ -33,7 +33,6 @@ class BusyTableReadIO(implicit p: Parameters) extends XSBundle {
   val loadDependency = Vec(LoadPipelineWidth, Output(UInt(LoadDependencyWidth.W)))
 }
 
-
 class VlBusyTableReadIO(implicit p: Parameters) extends XSBundle {
   val is_nonzero = Output(Bool())
   val is_vlmax = Output(Bool())
@@ -48,7 +47,6 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     // fast wakeup
     val wakeUpInt = Flipped(backendParams.intSchdParams.get.genIQWakeUpOutValidBundle)
     val wakeUpFp = Flipped(backendParams.fpSchdParams.get.genIQWakeUpOutValidBundle)
-    val wakeUpVec = Flipped(backendParams.vecSchdParams.get.genIQWakeUpOutValidBundle)
     // cancelFromDatapath
     val og0Cancel = Input(ExuVec())
     // cancelFromMem
@@ -64,9 +62,6 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val fpBusyTableNeedLoadCancel = allExuParams.map(x =>
     x.needLoadDependency && x.writeFpRf && x.iqWakeUpSourcePairs.map(y => y.sink.getExuParam(allExuParams).readFpRf).foldLeft(false)(_ || _)
   ).reduce(_ || _)
-  val vfBusyTableNeedLoadCancel = allExuParams.map(x =>
-    x.needLoadDependency && x.writeVfRf && x.iqWakeUpSourcePairs.map(y => y.sink.getExuParam(allExuParams).readVecRf).foldLeft(false)(_ || _)
-  ).reduce(_ || _)
   val v0BusyTableNeedLoadCancel = allExuParams.map(x =>
     x.needLoadDependency && x.writeV0Rf && x.iqWakeUpSourcePairs.map(y => y.sink.getExuParam(allExuParams).readVecRf).foldLeft(false)(_ || _)
   ).reduce(_ || _)
@@ -76,18 +71,16 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
   val needLoadCancel = pregWB match {
     case IntWB(_, _) => intBusyTableNeedLoadCancel
     case FpWB(_, _) => fpBusyTableNeedLoadCancel
-    case VfWB(_, _) => vfBusyTableNeedLoadCancel
     case V0WB(_, _) => v0BusyTableNeedLoadCancel
     case VlWB(_, _) => vlBusyTableNeedLoadCancel
     case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
   }
   if (!needLoadCancel) println(s"[BusyTable]: WbConfig ${pregWB} busyTable don't need loadCancel")
   val loadCancel = if (needLoadCancel) io.ldCancel else 0.U.asTypeOf(io.ldCancel)
-  val allWakeUp = io.wakeUpInt ++ io.wakeUpFp ++ io.wakeUpVec
+  val allWakeUp = io.wakeUpInt ++ io.wakeUpFp
   val wakeUpIn = pregWB match {
     case IntWB(_, _) => allWakeUp.filter{x => x.bits.params.writeIntRf && (x.bits.params.hasLoadExu || x.bits.params.hasAluFu)}
     case FpWB(_, _) => allWakeUp.filter{x => x.bits.params.writeFpRf && !x.bits.params.isIntExeUnit}
-    case VfWB(_, _) => allWakeUp.filter(_.bits.params.writeVfRf)
     case V0WB(_, _) => allWakeUp.filter(_.bits.params.writeV0Rf)
     // avoid load fast wakes, since load cancel signal not connected to vlbusytable, may have bug for vsetvli
     case VlWB(_, _) => allWakeUp.filter(x => false)
@@ -120,7 +113,6 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregWB:
     val tmp = pregWB match {
       case IntWB(_, _) => wakeUpIn.map(x => x.valid && x.bits.rfWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), loadCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
       case FpWB(_, _)  => wakeUpIn.map(x => x.valid && x.bits.fpWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), loadCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
-      case VfWB(_, _)  => wakeUpIn.map(x => x.valid && x.bits.vecWen && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), loadCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
       case V0WB(_, _)  => wakeUpIn.map(x => x.valid && x.bits.v0Wen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), loadCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
       case VlWB(_, _)  => wakeUpIn.map(x => x.valid && x.bits.vlWen  && UIntToOH(x.bits.pdest)(idx) && !LoadShouldCancel(Some(x.bits.loadDependency), loadCancel) && !(x.bits.is0Lat && io.og0Cancel(x.bits.params.exuIdx)))
       case _ => throw new IllegalArgumentException(s"WbConfig ${pregWB} is not permitted")
