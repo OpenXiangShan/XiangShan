@@ -325,6 +325,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   }
 
   private val s2_compareMatrix = CompareMatrix(VecInit(mbtb.io.result.map(_.bits.cfiPosition)))
+  private val s2_jumpTakenVec = VecInit(mbtb.io.result.map {
+    entry => entry.valid && (entry.bits.attribute.isDirect || entry.bits.attribute.isIndirect)
+  })
+  private val s2_isBrVec = VecInit(mbtb.io.result.map {
+    entry => entry.valid && entry.bits.attribute.isConditional
+  })
 
   /* *** s3 prediction selection *** */
   private val s3_mbtbResult     = RegEnable(mbtb.io.result, s2_fire)
@@ -333,6 +339,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_scTakenMask    = RegEnable(sc.io.scTakenMask, s2_fire)
   private val s3_compareMatrix  = RegEnable(s2_compareMatrix, s2_fire)
   private val s3_s1Prediction   = RegEnable(s2_s1Prediction, s2_fire)
+  private val s3_jumpTakenVec   = RegEnable(s2_jumpTakenVec, s2_fire)
+  private val s3_isBrVec        = RegEnable(s2_isBrVec, s2_fire)
 
   // timing optimization: The comparison of predictions and the generation of the s3_taken are performed in parallel.
   private val s3_mbtbCfiPositionDiffVec = VecInit(s3_mbtbResult.map(_.bits.cfiPosition =/= s3_s1Prediction.cfiPosition))
@@ -346,19 +354,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     val useSc    = s3_scUsed(i)
     val scTaken  = s3_scTakenMask(i)
 
-    entry.valid && (
-      entry.bits.attribute.isDirect ||
-        entry.bits.attribute.isIndirect ||
-        entry.bits.attribute.isConditional &&
-        MuxCase(
-          entry.bits.taken, // default: base table
-          Seq(
-            useSc                -> scTaken,
-            tagePred.useProvider -> tagePred.providerPred,
-            tagePred.hasAlt      -> tagePred.altPred
-          )
+    s3_jumpTakenVec(i) ||
+    (s3_isBrVec(i) &&
+      MuxCase(
+        entry.bits.taken, // default: base table
+        Seq(
+          useSc                -> scTaken,
+          tagePred.useProvider -> tagePred.providerPred,
+          tagePred.hasAlt      -> tagePred.altPred
         )
-    )
+      ))
   })
   private val s3_taken = s3_takenMask.reduce(_ || _)
 
