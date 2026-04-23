@@ -281,7 +281,7 @@ object VecFuConfig {
   val VfaluCfg = VecFuConfig.fromFuConfig(FuConfig.VfaluCfg)
   val VfmaCfg = VecFuConfig.fromFuConfig(FuConfig.VfmaCfg)
   val VfdivCfg = VecFuConfig.fromFuConfig(FuConfig.VfdivCfg)
-  val VfcvtCfg = VecFuConfig.fromFuConfig(FuConfig.VfcvtCfg)
+  val VfcvtCfg = VecFuConfig.fromFuConfig(FuConfig.VfcvtCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VCVTWrapper(cfg)(p).suggestName("Vfcvt")))
   val VSha256msCfg = VecFuConfig.fromFuConfig(FuConfig.VSha256msCfg)
   val VSha256cCfg = VecFuConfig.fromFuConfig(FuConfig.VSha256cCfg)
   val FaluCfg = VecFuConfig.fromFuConfig(FuConfig.FaluCfg)
