@@ -1040,7 +1040,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     * For timing considerations, violation check requests issued in s2 do not need to be accurate. But MUST ensure that
     * accurate `revoke` signals are given in s3 to withdraw requests that do not require violation check.
     */
-  val nukeQueryReqValid = troubleMaker && !(prevStageNuke || cause(C_BC))
+  val nukeQueryReqValid = troubleMaker && !prevStageNuke
   val nukeQueryReq = Wire(new LoadNukeQueryReq)
   nukeQueryReq.robIdx := robIdx
   nukeQueryReq.paddr := paddr

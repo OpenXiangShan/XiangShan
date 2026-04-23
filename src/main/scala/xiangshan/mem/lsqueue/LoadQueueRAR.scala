@@ -163,7 +163,7 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     enq.ready := Mux(needEnqueue(w), canAccept, true.B)
 
     enqIndexVec(w) := enqIndex
-    when (needEnqueue(w) && enq.ready) {
+    when (needEnqueue(w) && canAccept) {
       acceptedVec(w) := true.B
 
       freeList.io.doAllocate(w) := true.B
