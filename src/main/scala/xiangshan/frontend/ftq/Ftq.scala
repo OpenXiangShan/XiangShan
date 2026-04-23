@@ -110,13 +110,16 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // perfQueue stores information for performance monitoring. These queues should not exist in hardware
   private val perfQueue = Reg(Vec(FtqSize, new PerfMeta))
 
+  // Delay one cycle for timing considerations
   private val specTopAddr = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr.toUInt
-  private val ifuRedirect = receiveIfuRedirect(io.fromIfu.wbRedirect, specTopAddr)
-
-  private val (backendRedirectFtqIdx, backendRedirect) = receiveBackendRedirect(io.fromBackend)
+  private val ifuRedirect = RegNext(receiveIfuRedirect(io.fromIfu.wbRedirect, specTopAddr))
 
   // Delay one cycle for timing considerations
-  private val redirect     = RegNext(Mux(backendRedirect.valid, backendRedirect, ifuRedirect))
+  private val (backendRedirectFtqIdx, backendRedirect) = receiveBackendRedirect(io.fromBackend) match {
+    case (ftqIdx, redirect) => (RegNext(ftqIdx), RegNext(redirect))
+  }
+
+  private val redirect     = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
   private val redirectNext = RegNext(redirect)
 
   // Instruction page fault and instruction access fault are sent from backend with redirect requests.
