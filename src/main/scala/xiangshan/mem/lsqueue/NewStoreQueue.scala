@@ -1178,9 +1178,9 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         // Regarding writing to port 1's Sbuffer, only the following two scenarios permit writing:
         //  1. Port 0 write a unaligned request cross 16 bytes, preempting port 1's write port.
         //  2. Port 0 is ready, and the Sbuffer can process two write requests simultaneously.
-        toSbufferValid(i) := !uncacheStall(i) && !cboStall(i) && ctrlEntry.committed &&
+        toSbufferValid(i) := !uncacheStall(i) && !cboStall(i) && !unalignStall(i) &&  ctrlEntry.committed &&
           !(ctrlEntry.vecMbCommit && !ctrlEntry.allValid || ctrlEntry.vecInactive) && //TODO: vecMbCommit will be remove in the future
-          toSbufferValid(i - 1) || (headCross16B && toSbufferValid(0)) && !unalignStall(i)
+          toSbufferValid(i - 1) || (headCross16B && toSbufferValid(0))
         // [NOTE]: entry.committed contains entry.allocated && entry.allValid && !entry.hasException && isRobHead.
 
         unalignStall(i) := ctrlEntry.cross16Byte && !headCross16B
