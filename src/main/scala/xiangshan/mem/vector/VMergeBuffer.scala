@@ -326,7 +326,7 @@ abstract class BaseVMergeBuffer(isVStore: Boolean=false)(implicit p: Parameters)
         when(!io.fromPipeline(i).bits.hit && !isUnitStride) {
           val replayFlowNumOffset = PopCount(mergePortMatrixMiss(i))
           val replayFlowMask = (0 until pipeWidth).map{case i => (0 until pipeWidth).map{case j =>
-            UIntToOH(io.fromPipeline(i).bits.splitIndx, VLENB) & Fill(VLENB, mergePortMatrix(i)(j))
+            UIntToOH(io.fromPipeline(j).bits.splitIndex, VLENB) & Fill(VLENB, mergePortMatrixMiss(i)(j))
           }.reduce(_ | _)}
 
           entries(latchWbIndex).replayFlowNum := entries(latchWbIndex).replayFlowNum + replayFlowNumOffset

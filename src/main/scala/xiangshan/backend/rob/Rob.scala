@@ -1147,7 +1147,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val allow_interrupts = !CommitType.isLoadStore(io.enq.req(i).bits.commitType) &&
                              !FuType.isFence(io.enq.req(i).bits.fuType) &&
                              !FuType.isCsr(io.enq.req(i).bits.fuType) &&
-                             !FuType.isVset(io.enq.req(i).bits.fuType) &&
+                             !io.enq.req(i).bits.isVset &&
                              !FuType.isAMO(io.enq.req(i).bits.fuType)
       robEntries(allocatePtrVec(i).value).interrupt_safe := allow_interrupts
     }

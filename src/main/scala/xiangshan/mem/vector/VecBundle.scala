@@ -143,7 +143,7 @@ class VecPipelineFeedbackIO(isVStore: Boolean=false) (implicit p: Parameters) ex
   val reg_offset           = OptionWrapper(!isVStore, UInt(vOffsetBits.W))
   val elemIdxInsideVd      = OptionWrapper(!isVStore, UInt(elemIdxBits.W)) // element index in scope of vd
   val vecdata              = OptionWrapper(!isVStore, UInt(VLEN.W))
-  val splitIndx            = UInt(flowIdxBits.W)
+  val splitIndex            = UInt(flowIdxBits.W)
 }
 
 class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle {
@@ -164,7 +164,7 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
   val mBIndex             = if(isVStore) UInt(vsmBindexBits.W) else UInt(vlmBindexBits.W)
   val elemIdx             = UInt(elemIdxBits.W)
   val elemIdxInsideVd     = UInt(elemIdxBits.W) // only use in unit-stride
-  val splitIndx           = UInt(flowIdxBits.W)
+  val splitIndex           = UInt(flowIdxBits.W)
 }
 
 object VecFeedbacks {
