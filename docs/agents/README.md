@@ -16,13 +16,5 @@ Repository-wide background lives outside this directory:
 
 - `README.md` for top-level XiangShan orientation.
 - `docs/testbench/testbench_stages.yaml` for staged testbench guidance and generated workflow templates.
-- `docs/superpowers/plans/` and `docs/superpowers/specs/` for recent local design and execution history.
-- `docs/superpowers/specs/2026-04-13-frontend-backend-agent-semantic-alignment-plan.md`
-  for the concrete implementation plan to align the current env with the
-  normative Backend Agent semantics.
-- `docs/superpowers/specs/2026-04-10-frontend-env-backend-reconstruction-design.md`
-  as historical design background only; if it conflicts with
-  `docs/agents/frontend-backend-agent.md`, the latter is the normative
-  semantic definition.
 
 This doc set is intentionally small. Add durable facts here when they are repo-specific, stable enough to version, and important enough that an agent should be able to discover them without relying on chat history.
