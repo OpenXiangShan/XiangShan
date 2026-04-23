@@ -58,21 +58,21 @@ object Opcode {
   type Opcodes = yunsuan.encoding.Opcode.Opcodes
 
   val Opcodes = yunsuan.encoding.Opcode.Opcodes
-  val VIAluOpcodes  = Opcodes.VIAluOpcode
-  val VMAluOpcodes  = Opcodes.VMAluOpcode
-  val VIMacOpcodes  = Opcodes.VIMacOpcode
-  val VIDivOpcodes  = Opcodes.VIDivOpcode
-  val VIRedOpcodes  = Opcodes.VIRedOpcode
-  val VIPermOpcodes = Opcodes.VIPermOpcode
-  val VMoveOpcodes  = Opcodes.VMoveOpcode
-  val VSha256msOpcodes = Opcodes.VSha256msOpcode
-  val VSha256cOpcodes = Opcodes.VSha256cOpcode
-  val FCvtOpcodes = Opcodes.FCvtOpcode
-  val VFCvtOpcodes = Opcodes.VFCvtOpcode
-  val FMiscOpcodes = Opcodes.FMiscOpcode
-  val VFMiscOpcodes = Opcodes.VFMiscOpcode
-  val FMacOpcodes = Opcodes.FMacOpcode
-  val VFMacOpcodes = Opcodes.VFMacOpcode
+  val VIAluOpcodes      = Opcodes.VIAluOpcode
+  val VMAluOpcodes      = Opcodes.VMAluOpcode
+  val VIMacOpcodes      = Opcodes.VIMacOpcode
+  val VIDivOpcodes      = Opcodes.VIDivOpcode
+  val VIRedOpcodes      = Opcodes.VIRedOpcode
+  val VIPermOpcodes     = Opcodes.VIPermOpcode
+  val VMoveOpcodes      = Opcodes.VMoveOpcode
+  val VSha256msOpcodes  = Opcodes.VSha256msOpcode
+  val VSha256cOpcodes   = Opcodes.VSha256cOpcode
+  val FCvtOpcodes       = Opcodes.FCvtOpcode
+  val FMiscOpcodes      = Opcodes.FMiscOpcode
+  val FMacOpcodes       = Opcodes.FMacOpcode
+  val VFMiscOpcodes     = Opcodes.VFMiscOpcode
+  val VFCvtOpcodes      = Opcodes.VFCvtOpcode
+  val VFMacOpcodes      = Opcodes.VFMacOpcode
 
   // Todo: remove these
   def X = BitPat("b0_0000_0000")
