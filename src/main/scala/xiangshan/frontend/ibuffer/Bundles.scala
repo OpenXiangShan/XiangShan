@@ -134,6 +134,7 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
     cf.instr                                         := inst
     cf.pc                                            := pc.toUInt
     cf.foldpc                                        := foldpc
+    cf.exceptionVec.zeroInit()
     cf.exceptionVec(ExceptionNO.instrPageFault)      := exceptionType.isPf
     cf.exceptionVec(ExceptionNO.instrGuestPageFault) := exceptionType.isGpf
     cf.exceptionVec(ExceptionNO.instrAccessFault)    := exceptionType.isAf
