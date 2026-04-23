@@ -821,7 +821,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   io.stout.toRob.bits.trigger.foreach(_ := sxData.uop.trigger)
   io.stout.toRob.bits.sqIdx.foreach(_ := sxData.uop.sqIdx)
   io.stout.toRob.bits.lqIdx.foreach(_ := sxData.uop.lqIdx)
-  io.stout.toRob.bits.exceptionVec.foreach(_ := ExceptionNO.selectByFu(sxData.uop.exceptionVec, StaCfg))
+  io.stout.toRob.bits.exceptionVec extendFrom sxData.uop.exceptionVec.selectByFu(StaCfg)
   io.stout.toRob.bits.debugInfo.isMMIO.foreach(_ := sxData.mmio.get)
   io.stout.toRob.bits.debugInfo.isNCIO.foreach(_ := sxData.nc.get && !sxData.memBackTypeMM.get)
   io.stout.toRob.bits.debugInfo.isPerfCnt.foreach(_ := false.B)
@@ -832,7 +832,7 @@ class StoreUnitS3(param: ExeUnitParams)(
 
   io.exceptionInfo.valid := sxValid && !sxVector
   io.exceptionInfo.bits.robIdx := sxData.uop.robIdx
-  io.exceptionInfo.bits.exceptionVec := ExceptionNO.selectByFu(sxData.uop.exceptionVec, StaCfg)
+  io.exceptionInfo.bits.exceptionVec extendFrom sxData.uop.exceptionVec.selectByFu(StaCfg)
   io.exceptionInfo.bits.vaddr := sxData.fullva
   io.exceptionInfo.bits.gpaddr := sxData.gpaddr.get
   io.exceptionInfo.bits.isForVSnonLeafPTE := sxData.isForVSnonLeafPTE.get
@@ -851,7 +851,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   io.vecstout.bits.trigger := sxData.uop.trigger
   io.vecstout.bits.nc := sxData.nc.get
   io.vecstout.bits.mmio := sxData.mmio.get
-  io.vecstout.bits.exceptionVec := ExceptionNO.selectByFu(sxData.uop.exceptionVec, VstuCfg)
+  io.vecstout.bits.exceptionVec := sxData.uop.exceptionVec.selectByFu(VstuCfg)
   io.vecstout.bits.hasException := sxData.hasException.get
   io.vecstout.bits.elemIdx := sxData.elemIdx.get
   io.vecstout.bits.alignedType := sxData.size
