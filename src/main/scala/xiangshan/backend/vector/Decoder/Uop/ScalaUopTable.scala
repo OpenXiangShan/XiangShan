@@ -452,8 +452,8 @@ object ScalaUopTable {
       _.FLEQ_S     -> fleq_fp32,
       _.FLI_S      -> fleq_fp32, // todo
       _.FLTQ_S     -> fltq_fp32,
-      _.FMAXM_S    -> fmaxm_fp32,
-      _.FMINM_S    -> fminm_fp32,
+      _.FMAXM_S    -> FAluOpcodes.fmaxm_fp32,
+      _.FMINM_S    -> FAluOpcodes.fminm_fp32,
       _.FROUND_S   -> frnd_fp32,
       _.FROUNDNX_S -> frndnx_fp32,
     )
@@ -466,8 +466,8 @@ object ScalaUopTable {
       _.FLEQ_D      -> fleq_fp64,
       _.FLI_D       -> fleq_fp64, // todo
       _.FLTQ_D      -> fltq_fp64,
-      _.FMAXM_D     -> fmaxm_fp64,
-      _.FMINM_D     -> fminm_fp64,
+      _.FMAXM_D     -> FAluOpcodes.fmaxm_fp64,
+      _.FMINM_D     -> FAluOpcodes.fminm_fp64,
       _.FROUND_D    -> frnd_fp64,
       _.FROUNDNX_D  -> frndnx_fp64,
       _.FCVTMOD_W_D -> fcvtmod_si32_fp64,
@@ -481,8 +481,8 @@ object ScalaUopTable {
       _.FLEQ_H      -> fleq_fp16,
       _.FLI_H       -> fleq_fp16, // todo
       _.FLTQ_H      -> fltq_fp16,
-      _.FMAXM_H     -> fmaxm_fp16,
-      _.FMINM_H     -> fminm_fp16,
+      _.FMAXM_H     -> FAluOpcodes.fmaxm_fp16,
+      _.FMINM_H     -> FAluOpcodes.fminm_fp16,
       _.FROUND_H    -> frnd_fp16,
       _.FROUNDNX_H  -> frndnx_fp16,
     )
