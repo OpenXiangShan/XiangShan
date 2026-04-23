@@ -7,6 +7,9 @@ body:
   - type: markdown
     attributes:
       value: |
+        **NOTICE**: The vector unit of kunminghu-v3 branch is currently under active development. Our primary focus at this stage is on performance rather than functionality. You are still welcome to report vector-related bugs, but please note that we may not be able to review or fix them at this time. We appreciate your understanding.
+        **注意**：kunminghu-v3 分支的向量单元仍处于开发阶段，我们目前的主要关注点是性能而非功能。您仍然可以报告与向量相关的问题，但请注意，我们可能无法及时修复这些问题。感谢您的理解。
+
         You could use English or Chinese to open an issue.
         您可以使用中文或英文提问，我们推荐使用英文。
 
