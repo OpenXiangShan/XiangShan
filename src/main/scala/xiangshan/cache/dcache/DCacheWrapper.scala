@@ -357,7 +357,6 @@ class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
 
 class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWordReqWithVaddr {
   val prefetch = Bool()
-  val vecValid = Bool()
   val sqNeedDeq = Bool()
 
   def toDCacheWordReqWithVaddr() = {
