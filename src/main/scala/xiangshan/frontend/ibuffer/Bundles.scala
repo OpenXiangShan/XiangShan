@@ -131,10 +131,10 @@ class IBufOutEntry(implicit p: Parameters) extends IBufferBundle {
 
   def toCtrlFlow: CtrlFlow = {
     val cf = Wire(new CtrlFlow)
+    cf.exceptionVec.zeroInit()
     cf.instr                                         := inst
     cf.pc                                            := pc.toUInt
     cf.foldpc                                        := foldpc
-    cf.exceptionVec.zeroInit()
     cf.exceptionVec(ExceptionNO.instrPageFault)      := exceptionType.isPf
     cf.exceptionVec(ExceptionNO.instrGuestPageFault) := exceptionType.isGpf
     cf.exceptionVec(ExceptionNO.instrAccessFault)    := exceptionType.isAf
