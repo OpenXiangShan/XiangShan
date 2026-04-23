@@ -46,8 +46,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   /* *** submodules *** */
   private val tables = TableInfos.zipWithIndex.map { case (info, i) => Module(new TageTable(i, info)) }
 
-  // reset usefulCtr of all entries when usefulResetCtr saturated
-  private val usefulResetCtr = RegInit(UsefulResetCounter.Zero)
+  // reset all usefulCtr when usefulResetCtr saturated
+  private val usefulResetCtr      = RegInit(UsefulResetCounter.Zero)
+  private val usefulResetInFlight = RegInit(false.B)
 
   // use the alternate prediction when counter is positive
   private val useAltOnNaVec = RegInit(VecInit.fill(NumUseAltOnNa)(UseAltOnNaCounter.Zero))
@@ -73,9 +74,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val s0_bankMask = UIntToOH(s0_bankIdx, NumBanks)
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
-    table.io.predictReadReq.valid         := s0_fire
-    table.io.predictReadReq.bits.setIdx   := s0_setIdx(tableIdx)
-    table.io.predictReadReq.bits.bankMask := s0_bankMask
+    table.io.readReq(0).valid         := s0_fire
+    table.io.readReq(0).bits.setIdx   := s0_setIdx(tableIdx)
+    table.io.readReq(0).bits.bankMask := s0_bankMask
   }
 
   /* --------------------------------------------------------------------------------------------------------------
@@ -95,7 +96,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     })
   })
 
-  private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.predictReadResp)), RegNext(s0_fire))
+  private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 2
@@ -142,7 +143,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val altTableOH             = getLongestHistTableOH(hitTableMaskNoProvider)
     val alt                    = Mux1H(altTableOH, allTableTagMatchResults)
 
-    val useProvider = hasProvider && (!useAltOnNa || !provider.takenCtr.isWeak)
+    val useProvider = hasProvider && !(useAltOnNa && provider.takenCtr.isWeak)
 
     // get prediction for each branch
     io.prediction(i).useProvider  := useProvider
@@ -219,9 +220,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   dontTouch(t0_setIdx)
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
-    table.io.trainReadReq.valid         := t0_fire && t0_needRead
-    table.io.trainReadReq.bits.setIdx   := t0_setIdx(tableIdx)
-    table.io.trainReadReq.bits.bankMask := t0_bankMask
+    table.io.readReq(1).valid         := t0_fire && t0_needRead
+    table.io.readReq(1).bits.setIdx   := t0_setIdx(tableIdx)
+    table.io.readReq(1).bits.bankMask := t0_bankMask
   }
 
   // only for perf
@@ -280,7 +281,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.getRawTag(t1_startPc, hist.forTag)
   })
 
-  private val t1_readResp = VecInit(tables.map(_.io.trainReadResp))
+  private val t1_readResp = VecInit(tables.map(_.io.readResp(1)))
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 2
@@ -500,6 +501,8 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     entry
   }
 
+  private val t2_usefulResetStart = t2_fire && usefulResetCtr.isSaturatePositive && !usefulResetInFlight
+
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     implicit val info: TageTableInfo = TableInfos(tableIdx) // used by NumWays
 
@@ -561,15 +564,20 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.io.writeReq.bits.entries         := writeEntries
     table.io.writeReq.bits.usefulCtrs      := writeUsefulCtrs
     table.io.writeReq.bits.actualTakenMask := actualTakenMask
-    table.io.resetUseful                   := t2_fire && usefulResetCtr.isSaturatePositive
+
+    table.io.usefulResetStart := t2_usefulResetStart
   }
 
-  when(t2_fire) {
-    when(usefulResetCtr.isSaturatePositive) {
-      usefulResetCtr.resetZero()
-    }.elsewhen(t2_needAllocate && !t2_canAllocate) {
-      usefulResetCtr.selfIncrease()
-    }
+  when(t2_usefulResetStart) {
+    usefulResetInFlight := true.B
+  }.elsewhen(usefulResetInFlight && !tables.map(_.io.usefulResetInFlight).reduce(_ || _)) {
+    usefulResetInFlight := false.B
+  }
+
+  when(t2_usefulResetStart) {
+    usefulResetCtr.resetZero()
+  }.elsewhen(t2_fire && t2_needAllocate && !t2_canAllocate && !usefulResetInFlight) {
+    usefulResetCtr.selfIncrease()
   }
 
   useAltOnNaVec.zipWithIndex.map { case (ctr, i) =>
@@ -662,7 +670,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   XSPerfAccumulate("total_train", io.stageCtrl.t0_fire)
   XSPerfAccumulate("train_has_cond", t0_fire)
   XSPerfAccumulate("read_conflict", debug_readBankConflict)
-  XSPerfAccumulate("reset_useful", t2_fire && usefulResetCtr.isSaturatePositive)
+  XSPerfAccumulate("reset_useful", t2_usefulResetStart)
   XSPerfAccumulate(
     "allocate_not_needed_due_to_already_on_highest_table", {
       val mispredictBranchOH = PriorityEncoderOH(t2_trainInfoVec.map(b => b.valid && b.mispredicted))

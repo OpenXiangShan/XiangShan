@@ -88,15 +88,16 @@ class TableReadResp(implicit p: Parameters, info: TageTableInfo) extends TageBun
   val usefulCtrs: Vec[SaturateCounter] = Vec(NumWays, UsefulCounter())
 }
 
-class EntrySramWriteReq(implicit p: Parameters, info: TageTableInfo) extends WriteReqBundle
-    with HasTageParameters {
-  val setIdx:        UInt                    = UInt(SetIdxWidth.W)
-  val entry:         TageEntry               = new TageEntry
-  val writeEntryEn:  Bool                    = Bool()
-  val writeUsefulEn: Bool                    = Bool()
-  val usefulCtr:     SaturateCounter         = UsefulCounter()
-  override def tag:  Option[UInt]            = Some(entry.tag)
-  override def cnt:  Option[SaturateCounter] = Some(entry.takenCtr)
+class EntrySramWriteReq(implicit p: Parameters, info: TageTableInfo) extends WriteReqBundle with HasTageParameters {
+  val setIdx:       UInt                    = UInt(SetIdxWidth.W)
+  val entry:        TageEntry               = new TageEntry
+  override def tag: Option[UInt]            = Some(entry.tag)
+  override def cnt: Option[SaturateCounter] = Some(entry.takenCtr)
+}
+
+class UsefulCtrSramWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
+  val setIdx:    UInt            = UInt(SetIdxWidth.W)
+  val usefulCtr: SaturateCounter = UsefulCounter()
 }
 
 class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
