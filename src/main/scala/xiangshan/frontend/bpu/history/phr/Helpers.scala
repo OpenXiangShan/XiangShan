@@ -62,6 +62,13 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
     hash(PathHashWidth - 1, 0)
   }
 
+  def getPathHashComponents(pc: PrunedAddr, target: PrunedAddr): (UInt, UInt) = {
+    val hash      = pathHash(pc, target)
+    val shiftBits = hash(Shamt - 1, 0)
+    val hashHigh  = hash(PathHashWidth - 1, Shamt)
+    (shiftBits, hashHigh)
+  }
+
   def computeFoldedHash(hashBits: UInt, compLen: Int)(histLen: Int): UInt =
     if (histLen > 0 && PathHashWidth >= histLen) {
       val effectiveBit = hashBits(histLen - 1, 0)
@@ -73,4 +80,47 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
       val histChunks = (0 until nChunks) map { i => hashBits(min((i + 1) * compLen, PathHashWidth) - 1, i * compLen) }
       ParallelXOR(histChunks)
     } else 0.U
+
+  def getUpdatePtrs(data: PhrUpdateData, hashHigh: UInt): PhrUpdateResult = {
+    val updateResult = WireInit(0.U.asTypeOf(new PhrUpdateResult))
+    when(data.valid) {
+      updateResult.phrPtr     := data.phrMeta.phrPtr
+      updateResult.phrLowBits := data.phrMeta.phrLowBits
+      when(data.taken) {
+        updateResult.phrPtr     := data.phrMeta.phrPtr - Shamt.U
+        updateResult.phrLowBits := hashHigh ^ data.phrMeta.phrLowBits
+      }
+    }
+    updateResult
+  }
+
+  def computeAllFoldedPhr(hist: UInt): PhrAllFoldedHistories = {
+    val foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
+    AllFoldedHistoryInfo.foreach { info =>
+      foldedPhr.getHistWithInfo(info).foldedHist :=
+        computeFoldedHist(hist, info.FoldedLength)(info.HistoryLength)
+    }
+    foldedPhr
+  }
+
+  def getNextFoldedPhr(
+      data:          PhrUpdateData,
+      baseFoldedPhr: PhrAllFoldedHistories,
+      basePhr:       UInt,
+      hashHigh:      UInt,
+      shiftBits:     UInt
+  ): PhrAllFoldedHistories = {
+    val nextFoldedPhr = WireInit(baseFoldedPhr)
+
+    when(data.taken) {
+      nextFoldedPhr := baseFoldedPhr.update(
+        VecInit(basePhr.asBools),
+        data.phrMeta.phrPtr,
+        hashHigh,
+        Shamt,
+        shiftBits
+      )
+    }
+    nextFoldedPhr
+  }
 }

@@ -495,16 +495,32 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_foldedPhr   = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val trainFoldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
 
-  phr.io.train.s0_stall      := s0_stall
-  phr.io.train.stageCtrl     := stageCtrl
-  phr.io.train.redirect      := redirect
-  phr.io.train.s3_override   := s3_override
-  phr.io.train.s3_phrMeta    := s3_phrMeta
-  phr.io.train.s3_prediction := s3_prediction
-  phr.io.train.s3_startPc    := s3_startPc
-  phr.io.train.s1_valid      := s1_fire
-  phr.io.train.s1_prediction := s1_prediction
-  phr.io.train.s1_startPc    := s1_startPc
+  private val s1_ubtbPredWithURas = WireInit(ubtb.io.prediction)
+  when(s1_ubtbPredWithURas.valid && s1_ubtbPredWithURas.bits.attribute.isReturn && uras.io.specOut.isCanUse) {
+    s1_ubtbPredWithURas.bits.target := uras.io.specOut.retTarget
+  }
+
+  private val s1_abtbPredWithURas = WireInit(abtb.io.prediction)
+  s1_abtbPredWithURas.foreach {
+    case p => when(p.valid && p.bits.attribute.isReturn && uras.io.specOut.isCanUse) {
+        p.bits.target := uras.io.specOut.retTarget
+      }
+  }
+
+  phr.io.train.s0_stall             := s0_stall
+  phr.io.train.stageCtrl            := stageCtrl
+  phr.io.train.redirect             := redirect
+  phr.io.train.s3_override          := s3_override
+  phr.io.train.s3_phrMeta           := s3_phrMeta
+  phr.io.train.s3_prediction        := s3_prediction
+  phr.io.train.s3_startPc           := s3_startPc
+  phr.io.s1Train.valid              := s1_fire
+  phr.io.s1Train.taken              := s1_prediction.taken
+  phr.io.s1Train.startPc            := s1_startPc
+  phr.io.s1Train.abtbValid          := s1_abtbValid
+  phr.io.s1Train.abtbFirstTakenBrOH := s1_abtbFirstTakenBrOH
+  phr.io.s1Train.ubtbPrediction     := s1_ubtbPredWithURas
+  phr.io.s1Train.abtbPrediction     := s1_abtbPredWithURas
 
   phr.io.commit.valid := io.fromFtq.train.fire
   phr.io.commit.bits  := train
