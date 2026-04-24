@@ -55,6 +55,7 @@ on:
           - gcc12-spec06-0.8c
           - gcc12-spec06-1.0c
           - custom
+          - dryrun
         default: gcc15-spec06-1.0c
       benchmarks:
         description: Specific benchmarks to run (comma-separated), leave empty to run all
