@@ -754,7 +754,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       val isAf = pte_in.isAf() && (s2xlate === noS2xlate || s2xlate === onlyStage1) && !isPf
       ptw_resp.pf := (if (af_first) !af else true.B) && isPf
       ptw_resp.af := (if (af_first) true.B else !isPf) && (af || isAf)
-      ptw_resp.cf := cfs(ptw_resp.ppn(sectortlbwidth - 1, 0))
+      ptw_resp.cf := cfs(ptw_resp.ppn_low)
       ptw_resp.v := !ptw_resp.pf
       ptw_resp.prefetch := DontCare
       ptw_resp.asid := Mux(hasS2xlate, vsatp.asid, satp.asid)
