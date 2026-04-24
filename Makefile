@@ -295,11 +295,34 @@ FRONTEND_RTL_DIR   = $(FRONTEND_BUILD_DIR)/rtl
 FRONTENDTOP        = top.FrontendTopMain
 FRONTEND_TOP_V     = $(FRONTEND_RTL_DIR)/FrontendTop.$(RTL_SUFFIX)
 FRONTEND_PYLIB     = $(FRONTEND_BUILD_DIR)/pylib/libUTFrontend.so
+FRONTEND_WAVEFORM_FORMAT ?=
+FRONTEND_WAVEFORM_FORMAT_DEFAULT := fst
+FRONTEND_WAVEFORM_FORMAT_FILE = $(FRONTEND_BUILD_DIR)/.waveform_format
 FRONTEND_CCACHE_DIR ?= $(abspath $(FRONTEND_BUILD_DIR)/.ccache)
 FRONTEND_CCACHE_TMP ?= $(abspath $(FRONTEND_BUILD_DIR)/.ccache-tmp)
 FRONTEND_CCACHE_ENV = CCACHE_DIR=$(FRONTEND_CCACHE_DIR) CCACHE_TEMPDIR=$(FRONTEND_CCACHE_TMP)
 
-$(FRONTEND_TOP_V): $(SCALA_FILE)
+ifneq ($(FRONTEND_WAVEFORM_FORMAT),)
+ifeq ($(filter $(FRONTEND_WAVEFORM_FORMAT),fst vcd),)
+$(error FRONTEND_WAVEFORM_FORMAT must be one of: fst vcd)
+endif
+endif
+
+$(FRONTEND_WAVEFORM_FORMAT_FILE): FORCE
+	@mkdir -p $(dir $@)
+	@desired_format="$(FRONTEND_WAVEFORM_FORMAT)"; \
+	if [ -z "$$desired_format" ]; then \
+		if [ -f "$@" ]; then \
+			desired_format="$$(cat "$@")"; \
+		else \
+			desired_format="$(FRONTEND_WAVEFORM_FORMAT_DEFAULT)"; \
+		fi; \
+	fi; \
+	if [ ! -f "$@" ] || [ "$$(cat "$@")" != "$$desired_format" ]; then \
+		printf '%s\n' "$$desired_format" > "$@"; \
+	fi
+
+$(FRONTEND_TOP_V): $(SCALA_FILE) | $(FRONTEND_WAVEFORM_FORMAT_FILE)
 	mkdir -p $(@D) $(dir $(TIMELOG))
 	$(MILL_ENV) $(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.runMain $(FRONTENDTOP) \
 		--target-dir $(@D) --config $(CONFIG) --issue $(ISSUE) \
@@ -309,21 +332,22 @@ ifeq ($(CHISEL_TARGET),systemverilog)
 	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
 endif
 
-$(FRONTEND_PYLIB): $(FRONTEND_TOP_V)
+$(FRONTEND_PYLIB): $(FRONTEND_TOP_V) $(FRONTEND_WAVEFORM_FORMAT_FILE)
 	rm -rf $(FRONTEND_BUILD_DIR)/pylib/Frontend
 	mkdir -p $(FRONTEND_CCACHE_DIR) $(FRONTEND_CCACHE_TMP)
+	@frontend_waveform_format="$$(cat "$(FRONTEND_WAVEFORM_FORMAT_FILE)" 2>/dev/null || printf '%s' '$(FRONTEND_WAVEFORM_FORMAT)')"; \
 	$(FRONTEND_CCACHE_ENV) time picker export $(dir $<)ClockGate.sv --sname Frontend \
 		--filelist $(dir $<)/filelist.f \
 		--lang python --autobuild true --cp_lib true \
 		--sim verilator --access-mode MEM_DIRECT \
 		--tdir $(FRONTEND_BUILD_DIR)/pylib/Frontend \
-		-w $(FRONTEND_BUILD_DIR)/frontend.fst \
+		-w $(FRONTEND_BUILD_DIR)/frontend.$$frontend_waveform_format \
 		--coverage \
 		-V "--output-split;20000;--no-timing"
-frontend: $(FRONTEND_PYLIB)
+frontend: $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND_PYLIB)
 .PHONY: frontend
 
-verilog: $(call docker-deps,$(TOP_V))
+verilog: $(FRONTEND_WAVEFORM_FORMAT_FILE) $(call docker-deps,$(TOP_V))
 
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D) $(dir $(TIMELOG))

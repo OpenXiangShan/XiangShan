@@ -69,6 +69,9 @@
 - `scripts/fst_to_fsdb.sh`
   - 用法: `src/test/python/Frontend/scripts/fst_to_fsdb.sh <input.fst> [output.fsdb]`
   - 若不传 `output.fsdb`，默认在输入文件同目录下生成同名 `.fsdb`
+  - 用于 FST 波形；frontend 默认构建产物是 `.fst`
+  - 若显式执行 `make verilog FRONTEND_WAVEFORM_FORMAT=vcd` 或 `make frontend FRONTEND_WAVEFORM_FORMAT=vcd`，则 frontend pylib 会改为生成 `.vcd`
+  - 一旦 `build-frontend/.waveform_format` 已记录为 `vcd`，后续不带参数的 `make frontend` 会沿用 `vcd`；只有显式指定 `FRONTEND_WAVEFORM_FORMAT=fst` 才会切回 `.fst`
   - 中间 `.vcd` 放在临时目录，脚本结束后自动清理
 - `scripts/gen_coverage_html.sh`
   - 用法: `src/test/python/Frontend/scripts/gen_coverage_html.sh <input.dat> [output_dir]`
@@ -105,7 +108,7 @@ src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/microben
   - 从 bin 生成 NEMU trace
   - 设置 `test_bin_trace_dut.py::test_bin_trace` 所需的 pipeline 环境变量
   - 打开 progress / stall 观测输出
-  - 生成 DUT `.fst` 和配套 `.log`
+  - 生成 DUT 波形和配套 `.log`
 - 只有在 trace 已经准备好，并且以下环境变量都已显式设置时，才允许直接运行 `pytest`：
 
 ```bash
@@ -132,7 +135,7 @@ python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_b
 ## Bin Case 运行要求
 
 - `tests/test_bin_trace_dut.py::test_bin_trace` 这类 bin case，每次运行都必须生成：
-  - 一份 `.fst` 波形
+  - 一份波形文件
   - 一份配套 `.log` 日志
 - 默认应优先落到 `src/test/python/Frontend/data/<YYYYMMDD>/` 这样的日期目录下。
 - bin case 运行时必须有明确的观测机制，例如：

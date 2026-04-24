@@ -367,7 +367,9 @@ Current default implementation details in `env/fixtures.py`:
 - when `TB_BIN_PATH` is unset, artifacts default to `src/test/python/Frontend/data/`
 - when `TB_BIN_PATH` is set, waveform and case log default to a date-stamped
   subdirectory under `data/`
-- default waveform file name is `<bin-stem>_<test-name>.vcd`
+- default waveform file name is `<bin-stem>_<test-name>.<wave-ext>`
+- default `wave-ext` is `fst`
+- if frontend is rebuilt with `FRONTEND_WAVEFORM_FORMAT=vcd`, default `wave-ext` becomes `vcd` and later `make frontend` runs keep using `vcd` until `FRONTEND_WAVEFORM_FORMAT=fst` is specified explicitly
 - default case log file name is `<bin-stem>_<test-name>.log`
 - coverage `.dat` output currently stays under `data/` rather than the
   date-stamped subdirectory

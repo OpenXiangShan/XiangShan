@@ -57,7 +57,21 @@ def _artifact_tag(request) -> str:
     return f"{Path(raw_bin).stem}_{tc_name}"
 
 
-def _waveform_path(request, default_dir: Path) -> Path:
+def _normalize_waveform_format(value: str | None) -> str:
+    normalized = "" if value is None else str(value).strip().lower()
+    return normalized if normalized in {"fst", "vcd"} else "fst"
+
+
+def _waveform_format_from_dut(dut) -> str:
+    if dut is None or not hasattr(dut, "GetWaveFormat"):
+        return "fst"
+    try:
+        return _normalize_waveform_format(dut.GetWaveFormat())
+    except Exception:
+        return "fst"
+
+
+def _waveform_path(request, default_dir: Path, *, waveform_format: str | None = None) -> Path:
     tag = _artifact_tag(request)
     raw = os.getenv("TB_WAVEFORM_PATH", "").strip()
     if raw:
@@ -66,7 +80,7 @@ def _waveform_path(request, default_dir: Path) -> Path:
         return path
     wave_dir = Path(os.getenv("TB_WAVEFORM_DIR", str(_artifact_root_dir(request, default_dir))))
     wave_dir.mkdir(parents=True, exist_ok=True)
-    return wave_dir / f"{tag}.fst"
+    return wave_dir / f"{tag}.{_normalize_waveform_format(waveform_format)}"
 
 
 def _coverage_path(request, default_dir: Path) -> Path:
@@ -108,8 +122,9 @@ def create_dut(request):
         case_log_path = _log_path(request, data_dir)
         case_log_handler = _attach_case_log_handler(case_log_path)
     dut = create_frontend_dut(tc_name=tc_name, dut_logger=logger)
+    waveform_format = _waveform_format_from_dut(dut)
 
-    waveform = _waveform_path(request, data_dir)
+    waveform = _waveform_path(request, data_dir, waveform_format=waveform_format)
     coverage = _coverage_path(request, data_dir)
     try:
         if _is_enabled("TB_ENABLE_FST_DUMP", default="1"):
@@ -167,7 +182,7 @@ def env(dut, request):
     configure_env_logging()
     data_dir = _data_dir()
     tag = _artifact_tag(request)
-    waveform = _waveform_path(request, data_dir)
+    waveform = _waveform_path(request, data_dir, waveform_format=_waveform_format_from_dut(dut))
     coverage = _coverage_path(request, data_dir)
     recorder = FunctionalCoverageRecorder.from_pilot_csv(
         default_pilot_csv_path(),

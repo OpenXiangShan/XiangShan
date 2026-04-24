@@ -37,6 +37,9 @@ class FakeDUTFrontend:
     def SetWaveform(self, _path: str) -> None:
         return None
 
+    def GetWaveFormat(self) -> str:
+        return "fst"
+
     def SetCoverage(self, _path: str) -> None:
         return None
 
