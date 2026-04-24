@@ -3331,6 +3331,54 @@ def test_wrong_path_only_cfvec_queue_does_not_block_fallback_commit() -> None:
     assert (int(bm.commit_ptr_flag), int(bm.commit_ptr_value)) == (0, 13)
 
 
+def test_latest_non_stale_redirect_drive_context_prefers_correct_cfvec_queue_group() -> None:
+    bm = BackendModel()
+    bm._ftq_group_pc_history[(0, 21)] = [(0x80000000, False), (0x80000004, False)]
+    bm._ftq_group_pc_history[(0, 22)] = [(0x80000100, False), (0x80000104, False)]
+    bm._ftq_group_pc_history[(0, 23)] = [(0x80000200, False), (0x80000204, False)]
+    bm._ftq_group_pc_history[(0, 24)] = [(0x80000300, False), (0x80000304, False)]
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=10,
+                slot=0,
+                pc=0x80000004,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=21,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="wrong",
+            ),
+            QueueInstr(
+                cycle=11,
+                slot=0,
+                pc=0x80000104,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=22,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="correct",
+            ),
+        ]
+    )
+    bm._current_ftq_entry = FtqEntry(ftq_flag=0, ftq_value=23)
+    bm.ftq_entries.append(FtqEntry(ftq_flag=0, ftq_value=24))
+
+    context = bm._latest_non_stale_redirect_drive_context()
+
+    assert context is not None
+    assert (int(context["ftq_flag"]), int(context["ftq_value"])) == (0, 22)
+    assert int(context["pc"]) == 0x80000100
+    assert int(context["ftq_offset"]) == 3
+    assert int(context["is_rvc"]) == 0
+
+
 def test_pending_older_redirect_blocks_younger_fallback_commit() -> None:
     bm = BackendModel()
     bm.current_cycle = 100

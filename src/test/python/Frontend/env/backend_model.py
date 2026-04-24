@@ -1710,6 +1710,10 @@ class BackendModel:
 
     def _latest_non_stale_redirect_drive_context(self) -> Optional[dict]:
         candidates: list[tuple[int, int]] = []
+        for entry in reversed(self._cfvec_queue):
+            if entry.path_state == PATH_STATE_WRONG:
+                continue
+            candidates.append((int(entry.ftq_flag), int(entry.ftq_value)))
         if self._current_ftq_entry is not None:
             candidates.append((int(self._current_ftq_entry.ftq_flag), int(self._current_ftq_entry.ftq_value)))
         candidates.extend((int(entry.ftq_flag), int(entry.ftq_value)) for entry in reversed(self.ftq_entries))
