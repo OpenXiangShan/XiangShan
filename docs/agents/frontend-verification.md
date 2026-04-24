@@ -81,6 +81,7 @@ that boundary stable.
 - If the requested path is not minimal, prefer the shorter path and explain the change in direction.
 - Do not add compatibility shims, fallback logic, or speculative extensions.
 - Do not rewrite absolute paths in any `source` command.
+- Never use `git push -f` under any circumstances.
 - Preserve the black-box verification boundary. Interact through DUT-facing
   agents, APIs, traces, and generated artifacts rather than assuming hidden RTL
   state.
