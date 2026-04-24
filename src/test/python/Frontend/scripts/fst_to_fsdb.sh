@@ -12,11 +12,11 @@ LD_LIBRARY_PATH_OVERRIDE_VALUE="/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu"
 usage() {
   cat <<'EOF'
 Usage:
-  ./fst_to_fsdb.sh <input.fst> [output.fsdb]
+  ./scripts/fst_to_fsdb.sh <input.fst> [output.fsdb]
 
 Examples:
-  ./fst_to_fsdb.sh src/test/python/Frontend/data/microbench_test_bin_trace.fst
-  ./fst_to_fsdb.sh in.fst out.fsdb
+  ./scripts/fst_to_fsdb.sh src/test/python/Frontend/data/microbench_test_bin_trace.fst
+  ./scripts/fst_to_fsdb.sh in.fst out.fsdb
 
 Notes:
   - Output defaults to <input_basename>.fsdb next to the input file.

@@ -18,20 +18,6 @@
   - 只负责路径初始化和 `data/` 目录准备。
 - `README.md`
   - 当前文件，作为 Frontend Python 验证目录入口说明。
-- `run_pytest_with_log.sh`
-  - pytest 运行脚本。
-- `run_web_console.sh`
-  - Web UI 启动脚本。
-- `run_dut_with_bin_trace.py`
-  - 结合程序镜像和 golden trace 的 DUT 运行入口。
-- `run_bin_trace_pipeline.sh`
-  - bin + NEMU trace 联动脚本。
-- `fst_to_fsdb.sh`
-  - 将 `.fst` 波形转换为 `.fsdb` 的脚本。
-- `nemu_bin_to_golden_trace.py`
-  - 从二进制触发 NEMU trace 生成。
-- `nemu_log_to_golden_trace.py`
-  - 从 NEMU 日志转换 golden trace。
 
 ### 子目录
 
@@ -44,6 +30,16 @@
   - Web UI 服务端与静态资源。
 - `data/`
   - 波形、覆盖率和测试产物目录。
+- `scripts/`
+  - Frontend 目录下的 shell 脚本入口。
+  - 包含 `run_pytest_with_log.sh`、`run_web_console.sh`、
+    `run_bin_trace_pipeline.sh`、`fst_to_fsdb.sh` 和
+    `gen_coverage_html.sh`。
+- `tools/`
+  - Frontend 目录下的 Python 工具入口。
+  - 包含 `run_dut_with_bin_trace.py`、
+    `nemu_bin_to_golden_trace.py` 和
+    `nemu_log_to_golden_trace.py`。
 
 ## 分层约定
 
@@ -70,10 +66,23 @@
 
 ## 常用脚本
 
-- `fst_to_fsdb.sh`
-  - 用法: `src/test/python/Frontend/fst_to_fsdb.sh <input.fst> [output.fsdb]`
+- `scripts/fst_to_fsdb.sh`
+  - 用法: `src/test/python/Frontend/scripts/fst_to_fsdb.sh <input.fst> [output.fsdb]`
   - 若不传 `output.fsdb`，默认在输入文件同目录下生成同名 `.fsdb`
   - 中间 `.vcd` 放在临时目录，脚本结束后自动清理
+- `scripts/gen_coverage_html.sh`
+  - 用法: `src/test/python/Frontend/scripts/gen_coverage_html.sh <input.dat> [output_dir]`
+  - 默认输出到输入 `.dat` 同目录下的 `<stem>.genhtml/`
+  - 会自动生成 `merged.info` 并调用 `genhtml --ignore-errors range`
+
+## 常用工具
+
+- `tools/nemu_bin_to_golden_trace.py`
+  - 路径: `src/test/python/Frontend/tools/nemu_bin_to_golden_trace.py`
+- `tools/nemu_log_to_golden_trace.py`
+  - 路径: `src/test/python/Frontend/tools/nemu_log_to_golden_trace.py`
+- `tools/run_dut_with_bin_trace.py`
+  - 路径: `src/test/python/Frontend/tools/run_dut_with_bin_trace.py`
 
 ## Bin Case 标准入口
 
@@ -89,7 +98,7 @@ TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000 \
 TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
 TB_PYTEST_TIMEOUT_SECS=900 \
 PYTEST_ADDOPTS='-s -o log_cli=true --log-cli-level=INFO' \
-src/test/python/Frontend/run_bin_trace_pipeline.sh ready-to-run/microbench.bin
+src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/microbench.bin
 ```
 
 - 上面这条命令同时完成：

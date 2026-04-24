@@ -30,7 +30,13 @@ tree. Start here unless the task explicitly says otherwise.
 - `src/test/python/Frontend/env/monitors/`: DUT observation and frontend-monitor logic.
 - `src/test/python/Frontend/env/bundles/`: DUT interface bundle binding and signal contract layer.
 - `src/test/python/Frontend/env/sequences/`: reusable env-side operational sequences.
-- `src/test/python/Frontend/fst_to_fsdb.sh`: convert a frontend `.fst`
+- `src/test/python/Frontend/tools/nemu_bin_to_golden_trace.py`: build golden trace
+  jsonl from a frontend bin through NEMU.
+- `src/test/python/Frontend/tools/nemu_log_to_golden_trace.py`: convert existing
+  NEMU logs into frontend golden trace json/jsonl.
+- `src/test/python/Frontend/tools/run_dut_with_bin_trace.py`: load a bin and
+  golden trace into the frontend DUT environment for bring-up/debug.
+- `src/test/python/Frontend/scripts/fst_to_fsdb.sh`: convert a frontend `.fst`
   waveform to `.fsdb` through a temporary `.vcd`.
 - `src/test/python/Frontend/tests/`: active frontend regressions. Put new tests here.
 - `build-frontend/pylib/Frontend/`: generated Python bindings, shared objects,
@@ -136,7 +142,7 @@ cd "$NOOP_HOME"
 Run the default frontend regression flow from the repo root:
 
 ```bash
-src/test/python/Frontend/run_pytest_with_log.sh
+src/test/python/Frontend/scripts/run_pytest_with_log.sh
 ```
 
 Run a narrower frontend test:
@@ -205,7 +211,7 @@ TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000 \
 TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
 TB_PYTEST_TIMEOUT_SECS=900 \
 PYTEST_ADDOPTS='-s -o log_cli=true --log-cli-level=INFO' \
-src/test/python/Frontend/run_bin_trace_pipeline.sh ready-to-run/microbench.bin
+src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/microbench.bin
 ```
 
 Current checked-in example: use direct `pytest` only when the golden trace has
@@ -243,7 +249,7 @@ not itself a failure; only observed DUT/env misbehavior such as monitor errors
 or stagnant-cycle early-stop should fail the run.
 
 For direct `pytest`, use an outer `timeout` guard explicitly. The
-`TB_PYTEST_TIMEOUT_SECS` knob is consumed by `run_bin_trace_pipeline.sh`; it
+`TB_PYTEST_TIMEOUT_SECS` knob is consumed by `scripts/run_bin_trace_pipeline.sh`; it
 does not add a wall-clock bound by itself when you bypass the pipeline script.
 
 ## Bin-Trace Run Requirements
@@ -267,7 +273,7 @@ This section mixes two kinds of statements:
 - behavior that the current scripts and fixtures already enforce automatically
 
 Do not assume every requirement below is automatically enforced by the current
-implementation. Verify the exact behavior in `run_bin_trace_pipeline.sh`,
+implementation. Verify the exact behavior in `scripts/run_bin_trace_pipeline.sh`,
 `env/fixtures.py`, and `env/api.py` when the distinction matters.
 
 In addition, bin-trace runs must have explicit runtime observability. Do not
@@ -295,13 +301,13 @@ Therefore:
   and prefer wrapping the pipeline command with an outer `timeout` guard
 - when debugging a stuck bin-trace case, prefer enabling progress/stall
   reporting before changing semantic logic
-- for any bin-trace reproduction, prefer `run_bin_trace_pipeline.sh` with the
+- for any bin-trace reproduction, prefer `scripts/run_bin_trace_pipeline.sh` with the
   NEMU executable available in the current tree; do not assume a historical
   `NEMU/build/...` path exists locally unless you have verified it
 
 Current implementation notes:
 
-- `run_bin_trace_pipeline.sh` enforces positive values for
+- `scripts/run_bin_trace_pipeline.sh` enforces positive values for
   `TB_TRACE_STAGNANT_CYCLES_LIMIT` and `TB_PYTEST_TIMEOUT_SECS`
 - waveform dumping is enabled by default, but can still be disabled with
   `TB_ENABLE_FST_DUMP=0`
@@ -314,13 +320,13 @@ Current implementation notes:
 Start the frontend web console:
 
 ```bash
-TB_ENV_LOG_LEVEL=INFO src/test/python/Frontend/run_web_console.sh
+TB_ENV_LOG_LEVEL=INFO src/test/python/Frontend/scripts/run_web_console.sh
 ```
 
 Convert a frontend FST waveform to FSDB:
 
 ```bash
-src/test/python/Frontend/fst_to_fsdb.sh path/to/wave.fst [path/to/wave.fsdb]
+src/test/python/Frontend/scripts/fst_to_fsdb.sh path/to/wave.fst [path/to/wave.fsdb]
 ```
 
 Rebuild the frontend Python DUT artifacts from the repo root:

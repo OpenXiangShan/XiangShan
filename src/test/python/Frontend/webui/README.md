@@ -3,7 +3,7 @@
 ## Start
 
 ```bash
-TB_ENV_LOG_LEVEL=INFO ./run_web_console.sh
+TB_ENV_LOG_LEVEL=INFO ../scripts/run_web_console.sh
 ```
 
 Open: `http://127.0.0.1:8000`

@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./gen_coverage_html.sh <input.dat> [output_dir]
+  ./scripts/gen_coverage_html.sh <input.dat> [output_dir]
 
 Notes:
   - Output defaults to <input_stem>.genhtml/ next to the input .dat file.

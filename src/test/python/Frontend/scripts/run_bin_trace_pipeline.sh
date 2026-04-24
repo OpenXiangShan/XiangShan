@@ -2,12 +2,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_DIR="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
 
 usage() {
   cat <<'EOF'
 Usage:
-  ./run_bin_trace_pipeline.sh <bin_path> [trace_jsonl_path] [nemu_log_path] [pytest_target]
+  ./scripts/run_bin_trace_pipeline.sh <bin_path> [trace_jsonl_path] [nemu_log_path] [pytest_target]
 
 Environment variables:
   TB_NEMU_EXEC         NEMU executable path (default: <repo>/ready-to-run/riscv64-nemu-interpreter)
@@ -44,7 +45,7 @@ NEMU_EXEC="${TB_NEMU_EXEC:-${REPO_DIR}/ready-to-run/riscv64-nemu-interpreter}"
 NEMU_MAX_INSTR="${TB_NEMU_MAX_INSTR:-0}"
 TRACE_LIMIT="${TB_TRACE_LIMIT:-0}"
 RUN_DUT="${TB_RUN_DUT:-1}"
-PYTEST_TARGET_DEFAULT="${SCRIPT_DIR}/tests/test_bin_trace_dut.py::test_bin_trace"
+PYTEST_TARGET_DEFAULT="${FRONTEND_DIR}/tests/test_bin_trace_dut.py::test_bin_trace"
 PYTEST_TARGET="${4:-${TB_PYTEST_TARGET:-${PYTEST_TARGET_DEFAULT}}}"
 BASE_ADDR="${TB_BASE_ADDR:-0x80000000}"
 TRACE_STAGNANT_CYCLES_LIMIT="${TB_TRACE_STAGNANT_CYCLES_LIMIT:-20000}"
@@ -59,7 +60,7 @@ if [[ "${BIN_STEM}" == "microbench" ]]; then
 fi
 
 echo "[frontend] repo: ${REPO_DIR}"
-echo "[frontend] package: ${SCRIPT_DIR}"
+echo "[frontend] package: ${FRONTEND_DIR}"
 echo "[frontend] bin: ${BIN_PATH}"
 echo "[frontend] trace: ${TRACE_PATH}"
 echo "[frontend] nemu_log: ${NEMU_LOG_PATH}"
@@ -95,9 +96,9 @@ if ! [[ "${TRACE_STAGNANT_CYCLES_LIMIT}" =~ ^[0-9]+$ ]] || [[ "${TRACE_STAGNANT_
 fi
 
 mkdir -p "$(dirname "${TRACE_PATH}")" "$(dirname "${NEMU_LOG_PATH}")"
-export PYTHONPATH="${SCRIPT_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-}"
+export PYTHONPATH="${FRONTEND_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-}"
 
-"${PYTHON_BIN}" "${SCRIPT_DIR}/nemu_bin_to_golden_trace.py" \
+"${PYTHON_BIN}" "${FRONTEND_DIR}/tools/nemu_bin_to_golden_trace.py" \
   "${BIN_PATH}" "${TRACE_PATH}" \
   --nemu-exec "${NEMU_EXEC}" \
   --nemu-log "${NEMU_LOG_PATH}" \
@@ -107,8 +108,8 @@ export PYTHONPATH="${SCRIPT_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-
 echo "[frontend] trace done: ${TRACE_PATH}"
 
 if [[ "${RUN_DUT}" != "0" ]]; then
-  if [[ ! -f "${SCRIPT_DIR}/tests/test_bin_trace_dut.py" ]]; then
-    echo "[frontend][error] missing pytest entry test file: ${SCRIPT_DIR}/tests/test_bin_trace_dut.py" >&2
+  if [[ ! -f "${FRONTEND_DIR}/tests/test_bin_trace_dut.py" ]]; then
+    echo "[frontend][error] missing pytest entry test file: ${FRONTEND_DIR}/tests/test_bin_trace_dut.py" >&2
     exit 2
   fi
   if timeout --foreground "${PYTEST_TIMEOUT_SECS}" env \
