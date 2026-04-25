@@ -223,6 +223,13 @@ class ExuParam(
 
   def hasVStd: Boolean = fuConfigs.exists(Seq(VecFuConfig.VStdCfg).contains)
 
+  def genBundle[T <: Bundle](
+    cond: ExuParam => Boolean,
+    gen: => T,
+  ): Option[T] = {
+    Option.when(cond(this))(gen)
+  }
+
   def genRfRdAddrBundle(pregParams: PregParams): MixedVec[RfReadAddrBundle] = MixedVec(
     pregParams match {
       case IntPregParams(_, _, _, _) |
