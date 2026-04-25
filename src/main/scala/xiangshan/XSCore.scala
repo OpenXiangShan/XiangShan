@@ -161,7 +161,6 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.vldS3WakeUp := memBlock.io.mem_to_ooo.vldS3WakeUp
   backend.io.mem.intWriteback <> memBlock.io.mem_to_ooo.intWriteback
   backend.io.mem.vecWriteback := memBlock.io.mem_to_ooo.vecWriteback
-  backend.io.mem.vecStdWriteback <> memBlock.io.mem_to_ooo.vecStdWriteback
   backend.io.mem.robLsqIO.mmioBusy := memBlock.io.mem_to_ooo.lsqio.mmioBusy
 
   backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr
@@ -199,6 +198,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
   memBlock.io.ooo_to_mem.wakeupToLRQ <> backend.io.mem.wakeupToLRQ
   memBlock.io.ooo_to_mem.wakeupToLRQCancel := backend.io.mem.wakeupToLRQCancel
+  memBlock.io.ooo_to_mem.vstdStoreData <> backend.io.mem.vstdStoreData
 
   // By default, instructions do not have exceptions when they enter the function units.
   memBlock.io.ooo_to_mem.intIssue.flatten.foreach { case x => x.bits.flushPipe.foreach(_ := false.B) }

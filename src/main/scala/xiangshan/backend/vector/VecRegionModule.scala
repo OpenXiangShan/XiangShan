@@ -32,8 +32,8 @@ import xiangshan.backend.regfile.{FpRegFile, PregParams, VfRegFile}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, WakeUpBundle}
 import xiangshan.backend.vector.VecRegionModule._
-import xiangshan.backend.vector.util.ScalaTypeExt.toChiselSeqDataExt
 import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
+import xiangshan.mem.StoreQueueDataWrite
 
 class VecRegionModule(val regionParam: RegionParam)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -364,8 +364,8 @@ class VecRegionImp(
     case (sink: ValidIO[Exu.ToRob], source: ValidIO[Exu.ToRob]) => sink := source
   }
 
-  out.toMem.ex0 zip issuePipes.map(_.filter(_.param.hasVStd).map(_.out.ex0)) foreach {
-    case (sink: MixedVec[ValidIO[Exu.InUop]], source: Seq[ValidIO[Exu.InUop]]) => sink := source
+  out.toMem.vstd zip issuePipes.map(_.filter(_.param.hasVStd).map(_.out.sqWbNext.get)) foreach {
+    case (sink: MixedVec[ValidIO[StoreQueueDataWrite]], source: Seq[ValidIO[StoreQueueDataWrite]]) => sink := source
   }
 
   for (i <- out.gpWbNext.indices) {
@@ -467,7 +467,6 @@ object VecRegionModule {
     val vldS3VpWbNext: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.vpPregParams)
     val vldS3RobWb: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = intRegion.genExuToRobBundle(ValidIO(_), _.needVpWen)
     val v0Wb: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.v0PregParams)
-    val vstdWb: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = param.genExuToRobBundle(ValidIO(_), _.hasVStd)
   }
 
   class Out(implicit p: Parameters, param: RegionParam) extends XSBundle {
@@ -501,9 +500,7 @@ object VecRegionModule {
       )
     }
 
-    val toMem = new Bundle {
-      val ex0: MixedVec[MixedVec[ValidIO[Exu.InUop]]] = param.genExuInputBundle(ValidIO(_), _.hasVStd)
-    }
+    val toMem = new OutToMem
 
     val toRob = new Bundle {
       val writeback: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = param.genExuToRobBundle(ValidIO(_))
@@ -538,6 +535,11 @@ object VecRegionModule {
     val toVecExcpMod = new VprfToExcpMod(maxMergeNumPerCycle * 2)
 
     val diff = Option.when(backendParams.basicDebugEn)(new DiffOut)
+  }
+
+  class OutToMem(implicit p: Parameters, param: RegionParam) extends XSBundle {
+    val vstd: MixedVec[MixedVec[ValidIO[StoreQueueDataWrite]]] =
+      param.genExuBundle(_.hasVStd, ValidIO(new StoreQueueDataWrite))
   }
 
   class DiffIn(implicit p: Parameters) extends XSBundle {
