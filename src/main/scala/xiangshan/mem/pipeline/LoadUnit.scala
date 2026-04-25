@@ -1670,6 +1670,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx
   io.rollback.bits.ftqIdx      := s3_out.bits.uop.ftqPtr
   io.rollback.bits.ftqOffset   := s3_out.bits.uop.ftqOffset
+  io.rollback.bits.satpFlush   := false.B
   io.rollback.bits.level       := Mux(s3_rep_frm_fetch || s3_frm_mis_flush, RedirectLevel.flush, RedirectLevel.flushAfter)
   io.rollback.bits.cfiUpdate.target := s3_out.bits.uop.pc
   io.rollback.bits.debug_runahead_checkpoint_id := s3_out.bits.uop.debugInfo.runahead_checkpoint_id

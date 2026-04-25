@@ -382,6 +382,7 @@ class ExeUnitImp(
   io.out.bits.vxsat.foreach(x => x := Mux1H(fuOutValidOH, fuOutresVec.map(_.vxsat.getOrElse(0.U.asTypeOf(io.out.bits.vxsat.get)))))
   io.out.bits.exceptionVec.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.exceptionVec.getOrElse(0.U.asTypeOf(io.out.bits.exceptionVec.get)))))
   io.out.bits.flushPipe.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.flushPipe.getOrElse(0.U.asTypeOf(io.out.bits.flushPipe.get)))))
+  io.out.bits.satpFlushPipe.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.satpFlushPipe.getOrElse(0.U.asTypeOf(io.out.bits.satpFlushPipe.get)))))
   io.out.bits.replay.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.replay.getOrElse(0.U.asTypeOf(io.out.bits.replay.get)))))
   io.out.bits.predecodeInfo.foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.preDecode.getOrElse(0.U.asTypeOf(io.out.bits.predecodeInfo.get)))))
 

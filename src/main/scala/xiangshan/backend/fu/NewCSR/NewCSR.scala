@@ -90,6 +90,8 @@ class NewCSROutput(implicit p: Parameters) extends Bundle {
   val EX_II = Bool()
   val EX_VI = Bool()
   val flushPipe = Bool()
+  val satpFlushPipe = Bool()
+  val satpFlushEpcFixClear = Bool()
   val rData = UInt(64.W)
   val targetPcUpdate = Bool()
   val targetPc = new TargetPCBundle
@@ -227,6 +229,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     val toDecode = new CSRToDecode
 
     val fetchMalTval = Input(UInt(XLEN.W))
+
+    val satpFlushPc = Input(ValidIO(UInt(VAddrBits.W)))
 
     val distributedWenLegal = Output(Bool())
   })
@@ -796,11 +800,15 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
   trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
 
+  val isInstFetchTrap = !trapHandleMod.io.out.causeNO.Interrupt.asBool && ExceptionNO.getInstFetchFault.map(_.U === trapHandleMod.io.out.causeNO.ExceptionCode.asUInt).reduce(_ || _)
+
+  val trapPcForEpc = Mux(io.satpFlushPc.valid && isInstFetchTrap, io.satpFlushPc.bits, trapPC)
+
   Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
       case in: TrapEntryEventInput =>
         in.causeNO := trapHandleMod.io.out.causeNO
-        in.trapPc := trapPC
+        in.trapPc := trapPcForEpc
         in.trapPcGPA := trapPCGPA // only used by trapEntryMEvent & trapEntryHSEvent
         in.trapInst := io.trapInst
         in.fetchMalTval := io.fetchMalTval
@@ -1103,6 +1111,8 @@ class NewCSR(implicit val p: Parameters) extends Module
     waitIMSICValid -> imsic_EX_VI,
   )), false.B, normalCSRValid || waitIMSICValid)
   io.out.bits.flushPipe := flushPipe
+  io.out.bits.satpFlushPipe := resetSatp
+  io.out.bits.satpFlushEpcFixClear := hasTrap && isInstFetchTrap && io.satpFlushPc.valid
 
   /** Prepare read data for output */
   io.out.bits.rData := DataHoldBypass(
@@ -1539,9 +1549,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       (isModeHS || isModeHU) &&  satp.regOut.MODE === SatpMode.Sv48 ||
       (isModeVS || isModeVU) && vsatp.regOut.MODE === SatpMode.Sv48
     val isBare = !isSv39 && !isSv48
-    val sv39PC = SignExt(trapPC.take(39), XLEN)
-    val sv48PC = SignExt(trapPC.take(48), XLEN)
-    val barePC = ZeroExt(trapPC.take(PAddrBits), XLEN)
+    val sv39PC = SignExt(trapPcForEpc.take(39), XLEN)
+    val sv48PC = SignExt(trapPcForEpc.take(48), XLEN)
+    val barePC = ZeroExt(trapPcForEpc.take(PAddrBits), XLEN)
     // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
     val exceptionPC = Mux1H(Seq(
       isSv39 -> sv39PC,

@@ -55,6 +55,7 @@ class IfuToBackendIO(implicit p: Parameters) extends XSBundle {
   // 2 gpaddrs, correspond to startAddr & nextLineAddr in bundle FtqICacheInfo
   // TODO: avoid cross page entry in Ftq
   val gpaddrMem_wdata = Output(new GPAMemEntry)
+  val satpFlushFirstFetchFault = Output(Bool()) // Todo: from frontend satp flush first fetch fault, remove todo when implemented it
 }
 
 class FtqInterface(implicit p: Parameters) extends XSBundle {

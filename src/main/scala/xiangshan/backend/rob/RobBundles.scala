@@ -62,7 +62,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val isHls = Bool()
     val instrSize = UInt(log2Ceil(RenameWidth + 1).W)
     // data end
-    
+
     // trace
     val traceBlockInPipe = new TracePipe(IretireWidthInPipe)
     // status begin
@@ -289,6 +289,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val exceptionVec = ExceptionVec()
   val isFetchMalAddr = Bool()
   val flushPipe = Bool()
+  val satpFlushPipe = Bool()
   val isVset = Bool()
   val replayInst = Bool() // redirect to that inst itself
   val singleStep = Bool() // TODO add frontend hit beneath

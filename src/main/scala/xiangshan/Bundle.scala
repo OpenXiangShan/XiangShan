@@ -308,6 +308,7 @@ class Redirect(implicit p: Parameters) extends XSBundle {
   val interrupt = Bool()
   val cfiUpdate = new CfiUpdateInfo
   val fullTarget = UInt(XLEN.W) // only used for tval storage in backend
+  val satpFlush = Bool()
 
   val stFtqIdx = new FtqPtr // for load violation predict
   val stFtqOffset = UInt(log2Up(PredictWidth).W)
@@ -844,8 +845,8 @@ class TopDownFromL2Top(implicit p: Parameters) extends XSBundle {
 
 class LowPowerIO(implicit p: Parameters) extends Bundle {
   /* i_*: SoC -> CPU   o_*: CPU -> SoC */
-  val o_cpu_no_op = Output(Bool()) 
-  //physical power down 
+  val o_cpu_no_op = Output(Bool())
+  //physical power down
   val i_cpu_pwrdown_req_n = Input(Bool())
   val o_cpu_pwrdown_ack_n = Output(Bool())
   // power on/off sequence control for Core iso/rst
