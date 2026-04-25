@@ -886,8 +886,6 @@ package object xiangshan {
 
     def getStoreFault = Seq(EX_SAM, EX_SAF, EX_SPF, EX_HWE)
 
-    def getInstFetchFault = Seq(EX_IPF, EX_IAF, EX_IGPF)
-
     def priorities = Seq(
       doubleTrap,
       breakPoint, // TODO: different BP has different priority

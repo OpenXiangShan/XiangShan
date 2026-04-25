@@ -8,7 +8,7 @@ import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
 import utility._
 import utils.OptionWrapper
-import xiangshan.backend.fu.NewCSR.CSRBundles.{CSRCustomState, PrivState, RobCommitCSR}
+import xiangshan.backend.fu.NewCSR.CSRBundles._
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSREnumTypeImplicitCast._
 import xiangshan.backend.fu.NewCSR.CSRFunc._
@@ -90,8 +90,6 @@ class NewCSROutput(implicit p: Parameters) extends Bundle {
   val EX_II = Bool()
   val EX_VI = Bool()
   val flushPipe = Bool()
-  val satpFlushPipe = Bool()
-  val satpFlushEpcFixClear = Bool()
   val rData = UInt(64.W)
   val targetPcUpdate = Bool()
   val targetPc = new TargetPCBundle
@@ -151,6 +149,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isHls = Bool()
         val isFetchMalAddr = Bool()
         val isForVSnonLeafPTE = Bool()
+        val satpFlushFirstFetchFault = Bool()
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
@@ -168,6 +167,8 @@ class NewCSR(implicit val p: Parameters) extends Module
       val privState = new PrivState
       val interrupt = Bool()
       val wfiEvent = Bool()
+      val satp  = new SatpInfo
+      val vsatp = new SatpInfo
       // fp
       val fpState = new Bundle {
         val off = Bool()
@@ -230,7 +231,8 @@ class NewCSR(implicit val p: Parameters) extends Module
 
     val fetchMalTval = Input(UInt(XLEN.W))
 
-    val satpFlushPc = Input(ValidIO(UInt(VAddrBits.W)))
+    val oldPrivSate = Input(new PrivState)
+    val oldSatpMode = Input(UInt(SatpMode.getWidth.W))
 
     val distributedWenLegal = Output(Bool())
   })
@@ -268,6 +270,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   val trapIsFetchMalAddr = io.fromRob.trap.bits.isFetchMalAddr
   val trapIsFetchBkpt = io.fromRob.trap.bits.isFetchBkpt
   val trapIsForVSnonLeafPTE = io.fromRob.trap.bits.isForVSnonLeafPTE
+  val trapIsSatpFlushFirstFetchFault = io.fromRob.trap.bits.satpFlushFirstFetchFault
+
+  val oldPrivState = io.oldPrivSate
+  val oldSatpMode = io.oldSatpMode
 
   // debug_intrrupt
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
@@ -800,27 +806,24 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapEntryHSEvent.valid  := hasTrap && entryPrivState.isModeHS && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
   trapEntryVSEvent.valid  := hasTrap && entryPrivState.isModeVS && !entryDebugMode && !debugMode && mnstatus.regOut.NMIE
 
-  val isInstFetchTrap = !trapHandleMod.io.out.causeNO.Interrupt.asBool && ExceptionNO.getInstFetchFault.map(_.U === trapHandleMod.io.out.causeNO.ExceptionCode.asUInt).reduce(_ || _)
-
-  val trapPcForEpc = Mux(io.satpFlushPc.valid && isInstFetchTrap, io.satpFlushPc.bits, trapPC)
-
   Seq(trapEntryMEvent, trapEntryMNEvent, trapEntryHSEvent, trapEntryVSEvent, trapEntryDEvent).foreach { eMod =>
     eMod.in match {
       case in: TrapEntryEventInput =>
         in.causeNO := trapHandleMod.io.out.causeNO
-        in.trapPc := trapPcForEpc
+        in.trapPc := trapPC
         in.trapPcGPA := trapPCGPA // only used by trapEntryMEvent & trapEntryHSEvent
         in.trapInst := io.trapInst
         in.fetchMalTval := io.fetchMalTval
         in.isCrossPageIPF := trapIsCrossPageIPF
         in.isHls := trapIsHls
         in.isFetchMalAddr := trapIsFetchMalAddr
+        in.satpFlushFirstFetchFault := trapIsSatpFlushFirstFetchFault
         in.isFetchBkpt := trapIsFetchBkpt
         in.trapIsForVSnonLeafPTE := trapIsForVSnonLeafPTE
         in.hasDTExcp := hasDTExcp
 
-        in.iMode.PRVM := PRVM
-        in.iMode.V := V
+        in.iMode.PRVM := Mux(trapIsSatpFlushFirstFetchFault, oldPrivState.PRVM, PRVM)
+        in.iMode.V := Mux(trapIsSatpFlushFirstFetchFault, oldPrivState.V, V)
         // when NMIE is zero, force to behave as MPRV is zero
         in.dMode.PRVM := Mux(mstatus.regOut.MPRV.asBool && mnstatus.regOut.NMIE.asBool, mstatus.regOut.MPP, PRVM)
         in.dMode.V := V.asUInt.asBool || mstatus.regOut.MPRV && mnstatus.regOut.NMIE.asBool && (mstatus.regOut.MPP =/= PrivMode.M) && mstatus.regOut.MPV
@@ -838,6 +841,8 @@ class NewCSR(implicit val p: Parameters) extends Module
         in.satp  := satp.regOut
         in.vsatp := vsatp.regOut
         in.hgatp := hgatp.regOut
+        in.oldSatp := Mux(trapIsSatpFlushFirstFetchFault, Mux(oldPrivState.V.asBool, satp.regOut, Cat(oldSatpMode, 0.U((XLEN-SatpMode.getWidth).W)).asTypeOf(in.oldSatp)), satp.regOut)
+        in.oldVsatp := Mux(trapIsSatpFlushFirstFetchFault, Mux(oldPrivState.V.asBool, Cat(oldSatpMode, 0.U((XLEN-SatpMode.getWidth).W)).asTypeOf(in.oldVsatp), vsatp.regOut), vsatp.regOut)
         if (HasBitmapCheck) {
           in.mbmc := mbmc.get.regOut
         } else {
@@ -1111,8 +1116,6 @@ class NewCSR(implicit val p: Parameters) extends Module
     waitIMSICValid -> imsic_EX_VI,
   )), false.B, normalCSRValid || waitIMSICValid)
   io.out.bits.flushPipe := flushPipe
-  io.out.bits.satpFlushPipe := resetSatp
-  io.out.bits.satpFlushEpcFixClear := hasTrap && isInstFetchTrap && io.satpFlushPc.valid
 
   /** Prepare read data for output */
   io.out.bits.rData := DataHoldBypass(
@@ -1154,6 +1157,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.wfiEvent := debugIntr || (mie.rdata.asUInt & mip.rdata.asUInt).orR || nmip.asUInt.orR
   io.status.debugMode := debugMode
   io.status.singleStepFlag := !debugMode && dcsr.regOut.STEP
+  io.status.satp.wen   := satp.w.wen
+  io.status.satp.mode  := satp.regOut.MODE.asUInt
+  io.status.vsatp.wen  := vsatp.w.wen
+  io.status.vsatp.mode := vsatp.regOut.MODE.asUInt
 
   /**
    * debug_begin
@@ -1549,9 +1556,9 @@ class NewCSR(implicit val p: Parameters) extends Module
       (isModeHS || isModeHU) &&  satp.regOut.MODE === SatpMode.Sv48 ||
       (isModeVS || isModeVU) && vsatp.regOut.MODE === SatpMode.Sv48
     val isBare = !isSv39 && !isSv48
-    val sv39PC = SignExt(trapPcForEpc.take(39), XLEN)
-    val sv48PC = SignExt(trapPcForEpc.take(48), XLEN)
-    val barePC = ZeroExt(trapPcForEpc.take(PAddrBits), XLEN)
+    val sv39PC = SignExt(trapPC.take(39), XLEN)
+    val sv48PC = SignExt(trapPC.take(48), XLEN)
+    val barePC = ZeroExt(trapPC.take(PAddrBits), XLEN)
     // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
     val exceptionPC = Mux1H(Seq(
       isSv39 -> sv39PC,

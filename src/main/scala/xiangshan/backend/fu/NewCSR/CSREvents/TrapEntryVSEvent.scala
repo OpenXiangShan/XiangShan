@@ -35,6 +35,8 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val satp = current.satp
   private val vsatp = current.vsatp
   private val hgatp = current.hgatp
+  private val oldSatp   = current.oldSatp
+  private val oldVsatp  = current.oldVsatp
 
   private val trapCode = in.causeNO.ExceptionCode.asUInt
   private val isException = !in.causeNO.Interrupt.asBool
@@ -57,8 +59,8 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
 
   private val trapPC = genTrapVA(
     iMode,
-    satp,
-    vsatp,
+    oldSatp,
+    oldVsatp,
     hgatp,
     in.trapPc,
   )
@@ -80,6 +82,8 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val fetchCrossPage = in.isCrossPageIPF
   private val isFetchMalAddr = in.isFetchMalAddr
   private val isFetchMalAddrExcp = isException && isFetchMalAddr
+  private val satpFlushFirstFetchFault = in.satpFlushFirstFetchFault
+  private val satpFlushFirstFetchFaultExcp = isException && satpFlushFirstFetchFault
   private val isIllegalInst  = isException && (EX_II.U === highPrioTrapNO || EX_VI.U === highPrioTrapNO)
 
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
@@ -124,10 +128,10 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vsstatus.bits.SIE          := 0.U
   out.vsstatus.bits.SDT          := in.henvcfg.DTE.asBool // when DTE open set SDT to 1, else SDT is readonly 0
   // SPVP is not PrivMode enum type, so asUInt and shrink the width
-  out.vsepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
+  out.vsepc.bits.epc             := Mux(satpFlushFirstFetchFault, trapPC(63, 1), Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1)))
   out.vscause.bits.Interrupt     := isInterrupt
   out.vscause.bits.ExceptionCode := Mux(virtualInterruptIsHvictlInject, hvictlIID, highPrioTrapNO)
-  out.vstval.bits.ALL            := Mux(isFetchMalAddrExcp, in.fetchMalTval, tval)
+  out.vstval.bits.ALL            := Mux(satpFlushFirstFetchFaultExcp, tval, Mux(isFetchMalAddrExcp, in.fetchMalTval, tval))
   out.targetPc.bits.pc           := in.pcFromXtvec
   out.targetPc.bits.raiseIPF     := instrAddrTransType.checkPageFault(in.pcFromXtvec)
   out.targetPc.bits.raiseIAF     := instrAddrTransType.checkAccessFault(in.pcFromXtvec)

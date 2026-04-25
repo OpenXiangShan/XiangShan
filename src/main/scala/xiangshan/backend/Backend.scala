@@ -578,9 +578,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.trapInstInfo := ctrlBlock.io.toCSR.trapInstInfo
   csrin.fromVecExcpMod.busy := vecExcpMod.o.status.busy
   csrin.criticalErrorState := backendCriticalError
-  csrin.satpFlushInfo.targetPc.valid := io.frontend.toFtq.redirect.valid && io.frontend.toFtq.redirect.bits.satpFlush
-  csrin.satpFlushInfo.targetPc.bits := io.frontend.toFtq.redirect.bits.cfiUpdate.target
-  csrin.satpFlushInfo.fromIfuSatpFlushFirstFetchFault := false.B // TODO
 
   private val csrio = intExuBlock.io.csrio.get
   csrio.hartId := io.fromTop.hartId

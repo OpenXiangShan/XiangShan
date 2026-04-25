@@ -7,47 +7,46 @@ import xiangshan._
 import system.HasSoCParameter
 import utility.HasCircularQueuePtrHelper
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.fu.NewCSR.CSRDefines._
+import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 
 class SatpFlushMod(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
   val in = IO(Input(new SatpFlushMod.In))
   val out = IO(Output(new SatpFlushMod.Out))
 
-  private val valid = RegInit(false.B)
-  private val epc = Reg(UInt(VAddrBits.W))
-  private val robIdx = Reg(new RobPtr)
+  private val oldPrivState = Reg(new PrivState)
+  private val oldSatpMode  = Reg(UInt(SatpMode.getWidth.W))
 
-  private val flush = in.fromCtrlBlock.flush.valid
+  private val privState = in.privState
 
-  when(in.targetPC.valid) {
-    valid := true.B
-    epc := in.targetPC.bits
-    robIdx := in.fromCtrlBlock.robDeqPtr
-  }.elsewhen(valid) {
-    when(flush && isBefore(in.fromCtrlBlock.flush.bits.robIdx, robIdx) || in.clear) {
-      valid := false.B
-    }
+  private val satpWen   = in.satp.valid
+  private val vsatpWen  = in.vsatp.valid
+  private val satpMode  = in.satp.bits
+  private val vsatpMode = in.vsatp.bits
+
+  private val wen = satpWen || vsatpWen
+
+  when(wen) {
+    oldPrivState := privState
+    oldSatpMode  := Mux1H(Seq(
+      satpWen  -> satpMode,
+      vsatpWen -> vsatpMode,
+    ))
   }
 
-  out.satpFlushPc.valid := valid
-  out.satpFlushPc.bits := epc
-
+  out.oldPrivState := oldPrivState
+  out.oldSatpMode := oldSatpMode
 }
 
 object SatpFlushMod {
   class In(implicit p: Parameters) extends XSBundle with HasXSParameter {
-    val targetPC = ValidIO(UInt(VAddrBits.W))
-    val firstFetchFault = Bool()
-    val clear = Bool()
-    val fromCtrlBlock = new FromCtrlBlockInfo
+    val satp  = ValidIO(UInt(SatpMode.getWidth.W))
+    val vsatp = ValidIO(UInt(SatpMode.getWidth.W))
+    val privState  = new PrivState
   }
 
   class Out(implicit p: Parameters) extends XSBundle with HasXSParameter {
-    val satpFlushPc = ValidIO(UInt(VAddrBits.W))
+    val oldPrivState = new PrivState
+    val oldSatpMode = UInt(SatpMode.getWidth.W)
   }
-
-  class FromCtrlBlockInfo(implicit p: Parameters) extends XSBundle with HasXSParameter {
-    val flush = ValidIO(new Redirect)
-    val robDeqPtr = new RobPtr
-  }
-
 }

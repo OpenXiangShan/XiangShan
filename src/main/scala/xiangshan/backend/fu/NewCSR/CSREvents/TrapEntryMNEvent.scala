@@ -26,16 +26,19 @@ class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSR
   private val satp  = current.satp
   private val vsatp = current.vsatp
   private val hgatp = current.hgatp
+  private val oldSatp   = current.oldSatp
+  private val oldVsatp  = current.oldVsatp
 
   private val highPrioTrapNO = in.causeNO.ExceptionCode.asUInt
   private val isInterrupt = in.causeNO.Interrupt.asBool
 
   private val isFetchMalAddr = in.isFetchMalAddr
+  private val satpFlushFirstFetchFault = in.satpFlushFirstFetchFault
 
   private val trapPC = genTrapVA(
     iMode,
-    satp,
-    vsatp,
+    oldSatp,
+    oldVsatp,
     hgatp,
     in.trapPc,
   )
@@ -51,7 +54,7 @@ class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSR
   out.mnstatus.bits.MNPP         := current.privState.PRVM
   out.mnstatus.bits.MNPV         := current.privState.V
   out.mnstatus.bits.NMIE         := 0.U
-  out.mnepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
+  out.mnepc.bits.epc             := Mux(satpFlushFirstFetchFault, trapPC(63, 1), Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1)))
   out.mncause.bits.Interrupt     := isInterrupt
   out.mncause.bits.ExceptionCode := highPrioTrapNO
   out.targetPc.bits.pc           := in.pcFromXtvec

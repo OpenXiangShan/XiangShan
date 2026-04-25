@@ -288,6 +288,7 @@ class RobExceptionInfo(implicit p: Parameters) extends XSBundle {
   val isEnqExcp = Bool()
   val exceptionVec = ExceptionVec()
   val isFetchMalAddr = Bool()
+  val satpFlushFirstFetchFault = Bool()
   val flushPipe = Bool()
   val satpFlushPipe = Bool()
   val isVset = Bool()

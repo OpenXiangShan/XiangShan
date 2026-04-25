@@ -54,6 +54,7 @@ object Bundles {
     val ftqOffset        = UInt(log2Up(PredictWidth).W)
     val isLastInFtqEntry = Bool()
     val debug_seqNum     = InstSeqNum()
+    val satpFlushFirstFetchFault = Bool()
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       this.instr            := source.instr
@@ -69,6 +70,7 @@ object Bundles {
       this.ftqOffset        := source.ftqOffset
       this.isLastInFtqEntry := source.isLastInFtqEntry
       this.debug_seqNum     := source.debug_seqNum
+      this.satpFlushFirstFetchFault := source.satpFlushFirstFetchFault
     }
   }
 
@@ -87,6 +89,7 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
+    val satpFlushFirstFetchFault = Bool()
     // decoded
     val srcType         = Vec(numSrc, SrcType())
     val lsrc            = Vec(numSrc, UInt(LogicRegsWidth.W))
@@ -171,11 +174,6 @@ object Bundles {
     }
   }
 
-  class SatpFlushInfo(implicit p: Parameters) extends XSBundle {
-    val targetPc = ValidIO(UInt(VAddrBits.W))
-    val fromIfuSatpFlushFirstFetchFault = Bool()
-  }
-
   // DecodedInst --[Rename]--> DynInst
   class DynInst(implicit p: Parameters) extends XSBundle {
     def numSrc          = backendParams.numSrc
@@ -192,6 +190,7 @@ object Bundles {
     val crossPageIPFFix = Bool()
     val ftqPtr          = new FtqPtr
     val ftqOffset       = UInt(log2Up(PredictWidth).W)
+    val satpFlushFirstFetchFault = Bool()
     // passed from DecodedInst
     val srcType         = Vec(numSrc, SrcType())
     val ldest           = UInt(LogicRegsWidth.W)
@@ -884,6 +883,7 @@ object Bundles {
     val exceptionVec = ExceptionVec()
     val isPcBkpt = Bool()
     val isFetchMalAddr = Bool()
+    val satpFlushFirstFetchFault = Bool()
     val gpaddr = UInt(XLEN.W)
     val singleStep = Bool()
     val crossPageIPFFix = Bool()

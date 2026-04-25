@@ -125,6 +125,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val isCrossPageIPF = Input(Bool())
   val isHls = Input(Bool())
   val isFetchMalAddr = Input(Bool())
+  val satpFlushFirstFetchFault = Input(Bool())
   val isFetchBkpt = Input(Bool())
   val trapIsForVSnonLeafPTE = Input(Bool())
   val hasDTExcp = Input(Bool())
@@ -148,6 +149,8 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val satp = Input(new SatpBundle)
   val vsatp = Input(new SatpBundle)
   val hgatp = Input(new HgatpBundle)
+  val oldSatp = Input(new SatpBundle)
+  val oldVsatp = Input(new SatpBundle)
   val mbmc = Input(new MbmcBundle)
   // from mem
   val memExceptionVAddr = Input(UInt(XLEN.W))
