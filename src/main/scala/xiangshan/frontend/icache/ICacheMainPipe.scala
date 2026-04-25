@@ -38,6 +38,7 @@ class ICacheMainPipeResp(implicit p: Parameters) extends ICacheBundle {
   val pmp_mmio:         Vec[Bool] = Vec(PortNumber, Bool())
   val itlb_pbmt:        Vec[UInt] = Vec(PortNumber, UInt(Pbmt.width.W))
   val backendException: Bool      = Bool()
+  val hasSatpFlush:     Bool      = Bool()
   /* NOTE: GPAddrBits(=50bit) is not enough for gpaddr here, refer to PR#3795
    * Sv48*4 only allows 50bit gpaddr, when software violates this requirement
    * it needs to fill the mtval2 register with the full XLEN(=64bit) gpaddr,
@@ -179,6 +180,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   private val s0_doubleline  = s0_doubleline_all.last
 
   private val s0_backendException = fromFtq.bits.backendException
+  private val s0_hasSatpFlush     = fromFtq.bits.hasSatpFlush
 
   /**
     ******************************************************************************
@@ -246,6 +248,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   private val s1_SRAMhits         = RegEnable(s0_hits, 0.U.asTypeOf(s0_hits), s0_fire)
   private val s1_itlb_exception   = RegEnable(s0_itlb_exception, 0.U.asTypeOf(s0_itlb_exception), s0_fire)
   private val s1_backendException = RegEnable(s0_backendException, false.B, s0_fire)
+  private val s1_hasSatpFlush     = RegEnable(s0_hasSatpFlush, false.B, s0_fire)
   private val s1_itlb_pbmt        = RegEnable(s0_itlb_pbmt, 0.U.asTypeOf(s0_itlb_pbmt), s0_fire)
   private val s1_waymasks         = RegEnable(s0_waymasks, 0.U.asTypeOf(s0_waymasks), s0_fire)
   private val s1_meta_codes       = RegEnable(s0_meta_codes, 0.U.asTypeOf(s0_meta_codes), s0_fire)
@@ -351,6 +354,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   private val s2_doubleline       = RegEnable(s1_doubleline, 0.U.asTypeOf(s1_doubleline), s1_fire)
   private val s2_itlb_exception   = RegEnable(s1_itlb_exception, 0.U.asTypeOf(s1_itlb_exception), s1_fire)
   private val s2_backendException = RegEnable(s1_backendException, false.B, s1_fire)
+  private val s2_hasSatpFlush     = RegEnable(s1_hasSatpFlush, false.B, s1_fire)
   private val s2_itlb_pbmt        = RegEnable(s1_itlb_pbmt, 0.U.asTypeOf(s1_itlb_pbmt), s1_fire)
   private val s2_waymasks         = RegEnable(s1_waymasks, 0.U.asTypeOf(s1_waymasks), s1_fire)
 
@@ -556,6 +560,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule with HasICache
   toIFU.bits.doubleline       := s2_doubleline
   toIFU.bits.data             := s2_datas.asTypeOf(UInt(blockBits.W))
   toIFU.bits.backendException := s2_backendException
+  toIFU.bits.hasSatpFlush     := s2_hasSatpFlush
   (0 until PortNumber).foreach { i =>
     toIFU.bits.vaddr(i) := s2_req_vaddr(i)
     toIFU.bits.paddr(i) := s2_req_paddr(i)

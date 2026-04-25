@@ -88,6 +88,7 @@ class FtqToICacheRequestBundle(implicit p: Parameters) extends XSBundle with Has
   val pcMemRead        = Vec(5, new FtqICacheInfo)
   val readValid        = Vec(5, Bool())
   val backendException = Bool()
+  val hasSatpFlush     = Bool() // this is the first fetch block after satp changes
 }
 
 class PredecodeWritebackBundle(implicit p: Parameters) extends XSBundle {
@@ -237,18 +238,19 @@ object ExceptionType {
 }
 
 class FetchToIBuffer(implicit p: Parameters) extends XSBundle {
-  val instrs           = Vec(PredictWidth, UInt(32.W))
-  val valid            = UInt(PredictWidth.W)
-  val enqEnable        = UInt(PredictWidth.W)
-  val pd               = Vec(PredictWidth, new PreDecodeInfo)
-  val foldpc           = Vec(PredictWidth, UInt(MemPredPCWidth.W))
-  val ftqOffset        = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
-  val backendException = Vec(PredictWidth, Bool())
-  val exceptionType    = Vec(PredictWidth, UInt(ExceptionType.width.W))
-  val crossPageIPFFix  = Vec(PredictWidth, Bool())
-  val illegalInstr     = Vec(PredictWidth, Bool())
-  val triggered        = Vec(PredictWidth, TriggerAction())
-  val isLastInFtqEntry = Vec(PredictWidth, Bool())
+  val instrs                   = Vec(PredictWidth, UInt(32.W))
+  val valid                    = UInt(PredictWidth.W)
+  val enqEnable                = UInt(PredictWidth.W)
+  val pd                       = Vec(PredictWidth, new PreDecodeInfo)
+  val foldpc                   = Vec(PredictWidth, UInt(MemPredPCWidth.W))
+  val ftqOffset                = Vec(PredictWidth, ValidUndirectioned(UInt(log2Ceil(PredictWidth).W)))
+  val backendException         = Vec(PredictWidth, Bool())
+  val satpFlushFirstFetchFault = Vec(PredictWidth, Bool())
+  val exceptionType            = Vec(PredictWidth, UInt(ExceptionType.width.W))
+  val crossPageIPFFix          = Vec(PredictWidth, Bool())
+  val illegalInstr             = Vec(PredictWidth, Bool())
+  val triggered                = Vec(PredictWidth, TriggerAction())
+  val isLastInFtqEntry         = Vec(PredictWidth, Bool())
 
   val pc           = Vec(PredictWidth, UInt(VAddrBits.W))
   val debug_seqNum = Vec(PredictWidth, InstSeqNum())

@@ -49,18 +49,19 @@ class IBufferIO(implicit p: Parameters) extends XSBundle {
 }
 
 class IBufEntry(implicit p: Parameters) extends XSBundle {
-  val inst             = UInt(32.W)
-  val pc               = UInt(VAddrBits.W)
-  val foldpc           = UInt(MemPredPCWidth.W)
-  val pd               = new PreDecodeInfo
-  val pred_taken       = Bool()
-  val ftqPtr           = new FtqPtr
-  val ftqOffset        = UInt(log2Ceil(PredictWidth).W)
-  val exceptionType    = IBufferExceptionType()
-  val backendException = Bool()
-  val triggered        = TriggerAction()
-  val isLastInFtqEntry = Bool()
-  val debug_seqNum     = InstSeqNum()
+  val inst                     = UInt(32.W)
+  val pc                       = UInt(VAddrBits.W)
+  val foldpc                   = UInt(MemPredPCWidth.W)
+  val pd                       = new PreDecodeInfo
+  val pred_taken               = Bool()
+  val ftqPtr                   = new FtqPtr
+  val ftqOffset                = UInt(log2Ceil(PredictWidth).W)
+  val exceptionType            = IBufferExceptionType()
+  val backendException         = Bool()
+  val satpFlushFirstFetchFault = Bool()
+  val triggered                = TriggerAction()
+  val isLastInFtqEntry         = Bool()
+  val debug_seqNum             = InstSeqNum()
 
   def fromFetch(fetch: FetchToIBuffer, i: Int): IBufEntry = {
     inst       := fetch.instrs(i)
@@ -75,10 +76,11 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
       fetch.crossPageIPFFix(i),
       fetch.illegalInstr(i)
     )
-    backendException := fetch.backendException(i)
-    triggered        := fetch.triggered(i)
-    isLastInFtqEntry := fetch.isLastInFtqEntry(i)
-    debug_seqNum     := fetch.debug_seqNum(i)
+    backendException         := fetch.backendException(i)
+    satpFlushFirstFetchFault := fetch.satpFlushFirstFetchFault(i)
+    triggered                := fetch.triggered(i)
+    isLastInFtqEntry         := fetch.isLastInFtqEntry(i)
+    debug_seqNum             := fetch.debug_seqNum(i)
     this
   }
 
@@ -93,6 +95,7 @@ class IBufEntry(implicit p: Parameters) extends XSBundle {
     cf.exceptionVec(instrAccessFault)    := IBufferExceptionType.isAF(this.exceptionType)
     cf.exceptionVec(EX_II)               := IBufferExceptionType.isRVCII(this.exceptionType)
     cf.backendException                  := backendException
+    cf.satpFlushFirstFetchFault          := satpFlushFirstFetchFault
     cf.trigger                           := triggered
     cf.pd                                := pd
     cf.pred_taken                        := pred_taken

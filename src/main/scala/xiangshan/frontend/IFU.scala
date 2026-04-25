@@ -55,7 +55,6 @@ class IfuToBackendIO(implicit p: Parameters) extends XSBundle {
   // 2 gpaddrs, correspond to startAddr & nextLineAddr in bundle FtqICacheInfo
   // TODO: avoid cross page entry in Ftq
   val gpaddrMem_wdata = Output(new GPAMemEntry)
-  val satpFlushFirstFetchFault = Output(Bool()) // Todo: from frontend satp flush first fetch fault, remove todo when implemented it
 }
 
 class FtqInterface(implicit p: Parameters) extends XSBundle {
@@ -387,6 +386,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
 
   val f2_exception_in     = fromICache.bits.exception
   val f2_backendException = fromICache.bits.backendException
+  val f2_hasSatpFlush     = fromICache.bits.hasSatpFlush
   // paddr and gpaddr of [startAddr, nextLineAddr]
   val f2_paddrs            = fromICache.bits.paddr
   val f2_gpaddr            = fromICache.bits.gpaddr
@@ -565,6 +565,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
   val f3_pmp_mmio         = RegEnable(f2_pmp_mmio, f2_fire)
   val f3_itlb_pbmt        = RegEnable(f2_itlb_pbmt, f2_fire)
   val f3_backendException = RegEnable(f2_backendException, f2_fire)
+  val f3_hasSatpFlush     = RegEnable(f2_hasSatpFlush, f2_fire)
 
   val f3_instr = RegEnable(f2_instr, f2_fire)
 
@@ -971,6 +972,10 @@ class NewIFU(implicit p: Parameters) extends XSModule
   // which is a side effect of the first instruction and actually not necessary.
   io.toIbuffer.bits.backendException := (0 until PredictWidth).map {
     case 0 => f3_backendException
+    case _ => false.B
+  }
+  io.toIbuffer.bits.satpFlushFirstFetchFault := (0 until PredictWidth).map {
+    case 0 => f3_hasSatpFlush && ExceptionType.hasException(io.toIbuffer.bits.exceptionType(0))
     case _ => false.B
   }
   io.toIbuffer.bits.crossPageIPFFix := f3_crossPage_exception_vec.map(ExceptionType.hasException)

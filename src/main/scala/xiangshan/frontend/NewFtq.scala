@@ -554,27 +554,33 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
   val validEntries = distanceBetween(bpuPtr, commPtr)
   val canCommit    = Wire(Bool())
 
-  // Instruction page fault and instruction access fault are sent from backend with redirect requests.
-  // When IPF and IAF are sent, backendPcFaultIfuPtr points to the FTQ entry whose first instruction
-  // raises IPF or IAF, which is ifuWbPtr_write or IfuPtr_write.
-  // Only when IFU has written back that FTQ entry can backendIpf and backendIaf be false because this
-  // makes sure that IAF and IPF are correctly raised instead of being flushed by redirect requests.
-  val backendException  = RegInit(ExceptionType.none)
-  val backendPcFaultPtr = RegInit(FtqPtr(false.B, 0.U))
+  // Both backendException and hasSatpFlush are flags from backend redirect, and
+  // we need to mark them on the first instruction after redirect (i.e. redirect target).
+  // backendException: itlb pre-check, valid when redirect target violates Sv39/48(x4), used to raise exceptions
+  val backendException = RegInit(ExceptionType.none)
+  // hasSatpFlush: redirect is caused by satp change, used to calculate epc (if exception occurs after satp change)
+  val hasSatpFlush = RegInit(false.B)
+  // When these flags are valid, backendFlagPtr points to the FTQ entry whose first instruction should be marked,
+  // which is ifuWbPtr_write or IfuPtr_write.
+  // Only when IFU has written back that FTQ entry can reset these states because this
+  // makes sure that the flags are correctly marked instead of being flushed by redirect requests.
+  val backendFlagPtr = RegInit(FtqPtr(false.B, 0.U))
   when(fromBackendRedirect.valid) {
     backendException := ExceptionType.fromOH(
       has_pf = fromBackendRedirect.bits.cfiUpdate.backendIPF,
       has_gpf = fromBackendRedirect.bits.cfiUpdate.backendIGPF,
       has_af = fromBackendRedirect.bits.cfiUpdate.backendIAF
     )
+    hasSatpFlush := fromBackendRedirect.bits.satpFlush
     when(
       fromBackendRedirect.bits.cfiUpdate.backendIPF || fromBackendRedirect.bits.cfiUpdate.backendIGPF ||
-        fromBackendRedirect.bits.cfiUpdate.backendIAF
+        fromBackendRedirect.bits.cfiUpdate.backendIAF || fromBackendRedirect.bits.satpFlush
     ) {
-      backendPcFaultPtr := ifuWbPtr_write
+      backendFlagPtr := ifuWbPtr_write
     }
-  }.elsewhen(ifuWbPtr =/= backendPcFaultPtr) {
+  }.elsewhen(ifuWbPtr =/= backendFlagPtr) {
     backendException := ExceptionType.none
+    hasSatpFlush     := false.B
   }
 
   // **********************************************************************
@@ -905,12 +911,13 @@ class Ftq(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelpe
     copy.fromFtqPcBundle(toICachePcBundle(i))
     copy.ftqIdx := ifuPtr
   }
-  io.toICache.req.bits.backendException := ExceptionType.hasException(backendException) && backendPcFaultPtr === ifuPtr
+  io.toICache.req.bits.backendException := ExceptionType.hasException(backendException) && backendFlagPtr === ifuPtr
+  io.toICache.req.bits.hasSatpFlush     := hasSatpFlush && backendFlagPtr === ifuPtr
 
   io.toPrefetch.req.valid := toPrefetchEntryToSend && pfPtr =/= bpuPtr
   io.toPrefetch.req.bits.fromFtqPcBundle(toPrefetchPcBundle)
   io.toPrefetch.req.bits.ftqIdx  := pfPtr
-  io.toPrefetch.backendException := Mux(backendPcFaultPtr === pfPtr, backendException, ExceptionType.none)
+  io.toPrefetch.backendException := Mux(backendFlagPtr === pfPtr, backendException, ExceptionType.none)
   // io.toICache.req.bits.bypassSelect := last_cycle_bpu_in && bpu_in_bypass_ptr === ifuPtr
   // io.toICache.req.bits.bpuBypassWrite.zipWithIndex.map{case(bypassWrtie, i) =>
   //   bypassWrtie.startAddr := bpu_in_bypass_buf.tail(i).startAddr
