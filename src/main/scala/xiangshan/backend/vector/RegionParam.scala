@@ -70,6 +70,13 @@ class RegionParam(
     issueParams.map(_.getVlReadCfgs)
   }
 
+  def genExuBundle[T <: Bundle](
+    cond: ExuParam => Boolean = _ => true,
+    gen: => T,
+  ): MixedVec[MixedVec[T]] = {
+    MixedVec(issueParams.map(_.genExuBundle(cond, gen)))
+  }
+
   def genRfRdAddrBundle(pregParams: PregParams): MixedVec[MixedVec[MixedVec[IssuePipe.RfReadAddrBundle]]] = {
     MixedVec(this.issueParams.map(_.genRfRdAddrBundle(pregParams)))
   }

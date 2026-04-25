@@ -160,6 +160,8 @@ case class VecFuConfig (
 
   def needCriticalErrors: Boolean = Seq(FuType.csr).contains(fuType)
 
+  def needSqIdx: Boolean = Seq(FuType.ldu, FuType.stu).contains(fuType)
+
   def isAlu: Boolean = fuType == FuType.alu
 
   def isMul: Boolean = fuType == FuType.mul
@@ -173,6 +175,8 @@ case class VecFuConfig (
   def isJmp: Boolean = fuType == FuType.jmp
 
   def isFence: Boolean = fuType == FuType.fence
+
+  def isVStd: Boolean = name == "vstd"
 
   def isVecArith: Boolean = fuType == FuType.vialuF || fuType == FuType.vimac ||
                             fuType == FuType.vppu || fuType == FuType.vipu ||
@@ -288,7 +292,7 @@ object VecFuConfig {
   val FmacCfg = VecFuConfig.fromFuConfig(FuConfig.FmacCfg)
   val FdivCfg = VecFuConfig.fromFuConfig(FuConfig.FdivCfg)
   val FcvtCfg = VecFuConfig.fromFuConfig(FuConfig.FcvtCfg)
-  val VStdCfg = VecFuConfig.fromFuConfig(FuConfig.VStdCfg)
+  val VStdCfg = VecFuConfig.fromFuConfig(FuConfig.VStdCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VStdWrapper(cfg)(p).suggestName("Vstd")))
   val VlduCfg = VecFuConfig.fromFuConfig(FuConfig.VlduCfg)
   val VstuCfg = VecFuConfig.fromFuConfig(FuConfig.VstuCfg)
   val VseglduCfg = VecFuConfig.fromFuConfig(FuConfig.VseglduCfg)

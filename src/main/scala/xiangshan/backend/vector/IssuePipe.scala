@@ -13,6 +13,7 @@ import xiangshan.backend.fu.vector.Bundles.Vxrm
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.vector.VecIssueQueue.RespBundle
 import xiangshan.backend.vector.datapath.VecImmExtractor
+import xiangshan.mem.StoreQueueDataWrite
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
 
 class IssuePipe(
@@ -202,52 +203,48 @@ class IssuePipe(
     ex0.bits := ex0Next.bits
   }
 
-  val exu: Option[Exu] = Option.when(!param.hasVStd)(Module(new Exu(param)))
+  val exu: Exu = Module(new Exu(param))
 
-  exu.foreach {
-    exu =>
-      exu.in.flush := in.flush
-      exu.in.uop := ex0Next
-      exu.in.frm.foreach(_ := in.frm.get)
-      exu.in.vxrm.foreach(_ := in.vxrm.get)
-      for ((rdCfgs, srcIdx) <- param.readPortCfgs.zipWithIndex) {
-        if (rdCfgs.exists(_.isInstanceOf[IntRD])) {
-          exu.in.gpRdData(srcIdx) := Mux(
-            ex0Next.bits.bypassCtrl.gpRen(srcIdx),
-            in.ex0GpRdDataNext.find(_.srcIdx == srcIdx).get.data,
-            0.U,
-          )
-        } else {
-          exu.in.gpRdData(srcIdx) := 0.U
-        }
+  exu.in.flush := in.flush
+  exu.in.uop := ex0Next
+  exu.in.frm.zip(in.frm).foreach { case (sink, source) => sink := source }
+  exu.in.vxrm.zip(in.vxrm).foreach { case (sink, source) => sink := source }
+  for ((rdCfgs, srcIdx) <- param.readPortCfgs.zipWithIndex) {
+    if (rdCfgs.exists(_.isInstanceOf[IntRD])) {
+      exu.in.gpRdData(srcIdx) := Mux(
+        ex0Next.bits.bypassCtrl.gpRen(srcIdx),
+        in.ex0GpRdDataNext.find(_.srcIdx == srcIdx).get.data,
+        0.U,
+      )
+    } else {
+      exu.in.gpRdData(srcIdx) := 0.U
+    }
 
-        if (rdCfgs.exists(_.isInstanceOf[FpRD])) {
-          exu.in.fpRdData(srcIdx) := Mux(
-            ex0Next.bits.bypassCtrl.fpRen(srcIdx),
-            in.ex0FpRdDataNext.find(_.srcIdx == srcIdx).get.data,
-            0.U,
-          )
-        } else {
-          exu.in.fpRdData(srcIdx) := 0.U
-        }
-      }
-      exu.in.vpWbM1 := in.vpWbM1
-      exu.in.vpWb0 := in.vpWb0
-      exu.in.vpWb1 := in.vpWb1
-      exu.in.gpWb0 := in.gpWb0
-      exu.in.fpWb0 := in.fpWb0
+    if (rdCfgs.exists(_.isInstanceOf[FpRD])) {
+      exu.in.fpRdData(srcIdx) := Mux(
+        ex0Next.bits.bypassCtrl.fpRen(srcIdx),
+        in.ex0FpRdDataNext.find(_.srcIdx == srcIdx).get.data,
+        0.U,
+      )
+    } else {
+      exu.in.fpRdData(srcIdx) := 0.U
+    }
   }
+  exu.in.vpWbM1 := in.vpWbM1
+  exu.in.vpWb0 := in.vpWb0
+  exu.in.vpWb1 := in.vpWb1
+  exu.in.gpWb0 := in.gpWb0
+  exu.in.fpWb0 := in.fpWb0
 
-  out.gpWbNext.foreach(_ := exu.get.out.uop.bits.toGpRf.get)
-  out.fpWbNext.foreach(_ := exu.get.out.uop.bits.toFpRf.get)
-  out.vpWbNext.foreach(_ := exu.get.out.uop.bits.toVpRf.get)
-  out.v0WbNext.foreach(_ := exu.get.out.uop.bits.toV0Rf.get)
-  if (exu.nonEmpty) {
-    out.robWbNext.valid := exu.get.out.uop.valid
-    out.robWbNext.bits := exu.get.out.uop.bits.toRob
-  } else {
-    out.robWbNext.valid := ex0Next.valid
-    out.robWbNext.bits :<#= ex0Next.bits
+  out.gpWbNext.foreach(_ := exu.out.uop.bits.toGpRf.get)
+  out.fpWbNext.foreach(_ := exu.out.uop.bits.toFpRf.get)
+  out.vpWbNext.foreach(_ := exu.out.uop.bits.toVpRf.get)
+  out.v0WbNext.foreach(_ := exu.out.uop.bits.toV0Rf.get)
+  out.robWbNext.valid := exu.out.uop.valid
+  out.robWbNext.bits := exu.out.uop.bits.toRob
+  out.sqWbNext.foreach { sink =>
+    sink.valid := exu.out.uop.valid
+    sink.bits := exu.out.uop.bits.toSQ.get
   }
 
   out.ex0 := ex0
@@ -327,6 +324,7 @@ object IssuePipe {
     val v0WbNext: Option[Exu.ToRf] = Option.when(param.v0WB != null)(new Exu.ToRf(param.v0WB, backendParams.v0PregParams))
     val vlWb0Next: Option[Exu.ToRf] = Option.when(param.vlWB != null)(new Exu.ToRf(param.vlWB, backendParams.vlPregParams))
     val robWbNext: ValidIO[Exu.ToRob] = ValidIO(new Exu.ToRob(param))
+    val sqWbNext: Option[ValidIO[StoreQueueDataWrite]] = Option.when(param.hasVStd)(ValidIO(new StoreQueueDataWrite))
   }
 
   class RfReadAddrBundle(
