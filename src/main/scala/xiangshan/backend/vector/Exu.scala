@@ -21,6 +21,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, BypassSource}
 import xiangshan.backend.vector.VecRegionModule.DebugBundle
 import xiangshan.backend.vector.fu._
+import xiangshan.mem.StoreQueueDataWrite
 import xiangshan.mem.SqPtr
 import yunsuan.vector.Common.{SewOH, VSew, _}
 import yunsuan.vector.v2.MergeUnit
@@ -60,7 +61,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       }
   }
 
-  bypass.in.sewOH := SewOH(in.uop.ctrl.vtype.get.vsew)
+  bypass.in.sewOH := SewOH(in.uop.ctrl.vtype.map(_.vsew).getOrElse(VSew.e8))
   bypass.in.bypassCtrl := in.uop.bypassCtrl
   bypass.in.gpRdData := in.gpRdData
   bypass.in.fpRdData := in.fpRdData
@@ -289,6 +290,7 @@ object Exu {
       sink.vlWen       .foreach(x => x := this.ctrl.vlWen.get)
       sink.flushPipe   .foreach(x => x := this.ctrl.flushPipe.get)
       sink.fflagsWen   .foreach(x => x := this.ctrl.fflagsWen.get)
+      sink.sqIdx       .foreach(x => x := this.ctrl.sqIdx.get)
       sink.vtype       .foreach(x => x := this.ctrl.vtype.get)
       sink.oldVType    .foreach(x => x := this.ctrl.oldVType.get)
       sink.vm          .foreach(x => x := this.ctrl.vm.get)
@@ -316,6 +318,7 @@ object Exu {
     val toVpRf = param.getVpWriteCfg.map(new ToRf(_, backendParams.vfPregParams))
     val toV0Rf = param.getV0WriteCfg.map(new ToRf(_, backendParams.v0PregParams))
     val toVlRf = param.getVlWriteCfg.map(new ToRf(_, backendParams.vlPregParams))
+    val toSQ = Option.when(param.hasVStd)(new StoreQueueDataWrite)
 
     def :<#=(fuOuts: Seq[ValidIO[Func.OutUop]]): Unit = {
       val fuOutValidOH: Vec[Bool] = VecInit(fuOuts.map(_.valid))
@@ -356,6 +359,10 @@ object Exu {
         x.wen := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.vlWen.getOrElse(false.B)))
         x.pdest := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.pdestVl.getOrElse(0.U)))
         x.data := 0.U
+      }
+
+      this.toSQ.foreach { x =>
+        x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.data.vstd.getOrElse(0.U.asTypeOf(chiselTypeOf(x)))))
       }
     }
   }
