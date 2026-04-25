@@ -11,6 +11,7 @@ import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecRegionModule
+import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
 import yunsuan.vector.Common.Fflags
 
 
@@ -91,6 +92,7 @@ object Func {
     val latency   = Latency()
     val robIdx    = new RobPtr
     val uopIdx    = UopIdx()
+    val sqIdx     = Option.when(cfg.needSqIdx)(new SqPtr)
     val pdest     = UInt(PhyRegIdxWidth.W)
     val pdestV0   = Option.when(cfg.writeV0Rf)(UInt(V0PhyRegIdxWidth.W))
     val pdestVl   = Option.when(cfg.writeVlRf)(UInt(VlPhyRegIdxWidth.W))
@@ -137,6 +139,7 @@ object Func {
     val fflags   = Option.when(cfg.writeFflags && !cfg.isVecArith)(UInt(5.W))
     val redirect = Option.when(cfg.hasRedirect)(ValidIO(new Redirect))
     val vec  = Option.when(cfg.writeVecRf)(new VecSpecialData(cfg, VLEN))
+    val vstd = Option.when(cfg.isVStd)(new StoreQueueDataWrite)
   }
 
   class VecSpecialData(cfg: VecFuConfig, vlen: Int) extends Bundle {

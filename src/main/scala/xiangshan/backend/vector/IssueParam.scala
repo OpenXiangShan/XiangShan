@@ -150,6 +150,13 @@ class IssueParam(
     exuParams.flatMap(_.getFpWriteCfg)
   }
 
+  def genExuBundle[T <: Bundle](
+    cond: ExuParam => Boolean = _ => true,
+    gen: => T,
+  ): MixedVec[T] = {
+    MixedVec(exuParams.map(_.genBundle(cond, gen)).filter(_.nonEmpty).map(_.get))
+  }
+
   def genIssueBundle[T <: Bundle](wrapper: VecIssueQueue.Deq => T)(implicit p: Parameters): MixedVec[T] = {
     MixedVec(this.exuParams.map(x => wrapper(new VecIssueQueue.Deq(x))))
   }
