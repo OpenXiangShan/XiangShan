@@ -168,7 +168,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     TLFilter(TLFilter.mSubtract(mmioFilters)) :=
     TLBuffer() :=
     mmio_xbar
-  
+
   beu_local_int_source_buffer := beu_local_int_source
 
   class Imp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
@@ -178,6 +178,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val fromTile = Input(UInt(PAddrBits.W))
         val toCore = Output(UInt(PAddrBits.W))
       }
+      val reset_mtvec = Option.when(enableResetMtvec)(new Bundle {
+        val fromTile = Input(Valid(UInt(PAddrBits.W)))
+        val toCore = Output(Valid(UInt(PAddrBits.W)))
+      })
       val hartId = new Bundle() {
         val fromTile = Input(UInt(64.W))
         val toCore = Output(UInt(64.W))
@@ -247,6 +251,10 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     io.dft_reset_out.zip(io.dft_reset).foreach({ case(a, b) => a := b })
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
+    io.reset_mtvec.foreach{ mtvec =>
+      mtvec.toCore.valid := RegNext(mtvec.fromTile.valid)
+      mtvec.toCore.bits  := RegEnable(mtvec.fromTile.bits, mtvec.toCore.valid)
+    }
 
     val (beu_int_out, _) = beu_local_int_source.out(0)
     beu_int_out(0) := beu.module.io.interrupt

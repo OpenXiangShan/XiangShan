@@ -126,6 +126,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val hartId = UInt(hartIdLen.W)
       val clintTime = Input(ValidIO(UInt(64.W)))
       val l2FlushDone = Input(Bool())
+      val reset_mtvec = Option.when(enableResetMtvec)(Input(Valid(UInt(PAddrBits.W))))
       val criticalErrorState = Input(Bool())
     })
     val in = Flipped(DecoupledIO(new NewCSRInput))
@@ -550,6 +551,7 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   mhartid.hartid := this.io.fromTop.hartId
   mhartid.dmode  := debugMode
+  mtvec.reset_mtvec.foreach(_ := this.io.fromTop.reset_mtvec.get)
 
   pmpcfgs.zipWithIndex.foreach { case (mod, i) =>
     mod.w.wen   := wenLegalReg && (addr === (CSRs.pmpcfg0 + i / 8 * 2).U)

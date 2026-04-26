@@ -119,7 +119,22 @@ trait MachineLevel { self: NewCSR =>
     }
   }).setAddr(CSRs.mie)
 
-  val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle))
+  val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle){
+    val reset_mtvec = Option.when(enableResetMtvec)(IO(Input(Valid(UInt(PAddrBits.W)))))
+    val resetMtvec = RegInit(true.B)
+    reset_mtvec.foreach{ rst =>
+      when(wen){
+        reg.addr := wdata.addr
+        reg.mode := Mux(XtvecMode.isLegal(wdata.mode), wdata.mode, reg.mode)
+        resetMtvec := false.B
+      }.elsewhen(rst.valid && resetMtvec){
+        reg.addr := rst.bits
+        reg.mode := XtvecMode.Direct
+      }.otherwise{
+        reg := reg
+      }
+    }
+  })
     .setAddr(CSRs.mtvec)
 
   // Todo: support "Stimecmp/Vstimecmp" Extension, Version 1.0.0
@@ -364,7 +379,7 @@ trait MachineLevel { self: NewCSR =>
     }).setAddr(CSRs.mhpmcounter3 - 3 + num)
   )
 
-  // JEDEC JEP106 Manufacturer ID: 
+  // JEDEC JEP106 Manufacturer ID:
   //   Bank 17 (16 continuations), Offset 0x6F (111)
   val mvendorid = Module(new CSRModule("Mvendorid", new MvendoridBundle))
     .setAddr(CSRs.mvendorid)

@@ -77,6 +77,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       val teemsiInfo = Option.when(soc.IMSICParams.HasTEEIMSIC)(Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
       val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
       val reset_vector = Input(UInt(PAddrBits.W))
+      val reset_mtvec  = Option.when(enableResetMtvec)(Input(Valid(UInt(PAddrBits.W))))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
       val hartResetReq = Input(Bool())
@@ -142,6 +143,7 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       tile_teemsiInfo.bits := teemsi_data_cpu
     }
     tile.module.io.reset_vector := io.reset_vector
+    tile.module.io.reset_mtvec.foreach(_ := io.reset_mtvec.get)
     tile.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
     tile.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
     io.cpu_halt := tile.module.io.cpu_halt
@@ -152,9 +154,9 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
     io.hartIsInReset := tile.module.io.hartIsInReset
     withClockAndReset(clock, reset_sync) {
-      tile.module.io.traceCoreInterface.fromEncoder.enable := 
+      tile.module.io.traceCoreInterface.fromEncoder.enable :=
         AsyncResetSynchronizerShiftReg(io.traceCoreInterface.fromEncoder.enable, 3, 0)
-      tile.module.io.traceCoreInterface.fromEncoder.stall := 
+      tile.module.io.traceCoreInterface.fromEncoder.stall :=
         AsyncResetSynchronizerShiftReg(io.traceCoreInterface.fromEncoder.stall, 3, 0)
     }
     io.traceCoreInterface.toEncoder := tile.module.io.traceCoreInterface.toEncoder

@@ -352,6 +352,7 @@ case class XSCoreParameters
   softPTWDelay: Int = 1,
   wfiResume: Boolean = true,
   hartIDDmodeWidth: Int = -1, // only for Customization
+  enableResetMtvec: Boolean = false, // only for Customization
 ){
   def ISABase = "rv64i"
   def ISAExtensions = Seq(
@@ -597,6 +598,7 @@ trait HasXSParameter {
   val fLen = 64
   def hartIdLen = p(MaxHartIdBits)
   def hartIDDmodeWidth = coreParams.hartIDDmodeWidth
+  def enableResetMtvec = coreParams.enableResetMtvec
   val xLen = XLEN
 
   def HasBitmapCheck = coreParams.HasBitmapCheck

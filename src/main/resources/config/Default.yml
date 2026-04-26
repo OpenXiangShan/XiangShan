@@ -97,3 +97,5 @@ CVMParams:
 EnableBitmapCheck: true
 
 EnableBitmapCheckDefault: false
+
+EnableResetMtvec: false

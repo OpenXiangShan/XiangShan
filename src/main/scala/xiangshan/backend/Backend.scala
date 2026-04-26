@@ -575,6 +575,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   csrin.clintTime.valid := RegNext(io.fromTop.clintTime.valid)
   csrin.clintTime.bits := RegEnable(io.fromTop.clintTime.bits, io.fromTop.clintTime.valid)
   csrin.l2FlushDone := RegNext(io.fromTop.l2FlushDone)
+  csrin.reset_mtvec.foreach(_ := io.fromTop.reset_mtvec.get)
   csrin.trapInstInfo := ctrlBlock.io.toCSR.trapInstInfo
   csrin.fromVecExcpMod.busy := vecExcpMod.o.status.busy
   csrin.criticalErrorState := backendCriticalError
@@ -1068,6 +1069,7 @@ class TopToBackendBundle(implicit p: Parameters) extends XSBundle with HasSoCPar
   val teemsiInfo        = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
   val clintTime         = Output(ValidIO(UInt(64.W)))
   val l2FlushDone       = Output(Bool())
+  val reset_mtvec       = Option.when(enableResetMtvec)(Output(Valid(UInt(PAddrBits.W))))
 }
 
 class BackendToTopBundle(implicit p: Parameters) extends XSBundle with HasSoCParameter{

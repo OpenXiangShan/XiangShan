@@ -238,6 +238,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
     val hartResetReq = Input(Bool())
     val hartIsInReset = Output(Bool())
     val riscv_rst_vec = Input(UInt(socParams.soc.PAddrBits.W))
+    val riscv_rst_mtvec = Option.when(socParams.tiles.head.enableResetMtvec)(Input(Valid(UInt(socParams.soc.PAddrBits.W))))
     val nodeID = Input(UInt(socParams.soc.NodeIDWidthList(socParams.issue).W))
   }).suggestName("io")
 
@@ -250,6 +251,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
   core_with_l2.module.io.hartResetReq := tileio.hartResetReq
   tileio.hartIsInReset := core_with_l2.module.io.hartIsInReset
   core_with_l2.module.io.reset_vector := tileio.riscv_rst_vec
+  core_with_l2.module.io.reset_mtvec.foreach(_ := tileio.riscv_rst_mtvec.get)
   core_with_l2.module.io.hartId := tileio.hartId
   core_with_l2.module.io.nodeID.get := tileio.nodeID
 

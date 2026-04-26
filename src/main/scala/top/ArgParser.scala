@@ -99,6 +99,10 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => up(XSTileKey).map(_.copy(hartIDDmodeWidth = width.toInt))
           }), tail)
+        case "--enable-reset-mtvec" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case XSTileKey => up(XSTileKey).map(_.copy(enableResetMtvec = true))
+          }), tail)
         case "--with-dramsim3" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(UseDRAMSim = true)

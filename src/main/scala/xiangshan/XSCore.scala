@@ -90,6 +90,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
     val clintTime = Input(ValidIO(UInt(64.W)))
     val reset_vector = Input(UInt(PAddrBits.W))
+    val reset_mtvec  = Option.when(enableResetMtvec)(Input(Valid(UInt(PAddrBits.W))))
     val cpu_halt = Output(Bool())
     val l2_flush_done = Input(Bool())
     val l2_flush_en = Output(Bool())
@@ -208,6 +209,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.hartId := io.hartId
   memBlock.io.l2_flush_done := io.l2_flush_done
   memBlock.io.outer_reset_vector := io.reset_vector
+  memBlock.io.fromTopToBackend.reset_mtvec.foreach(_ := io.reset_mtvec.get)
   memBlock.io.outer_hc_perfEvents := io.perfEvents
   // frontend -> memBlock
   memBlock.io.inner_beu_errors_icache <> frontend.io.error
