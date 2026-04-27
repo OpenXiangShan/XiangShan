@@ -77,6 +77,10 @@
   - 用法: `src/test/python/Frontend/scripts/gen_coverage_html.sh <input.dat> [output_dir]`
   - 默认输出到输入 `.dat` 同目录下的 `<stem>.genhtml/`
   - 会自动生成 `merged.info` 并调用 `genhtml --ignore-errors range`
+- `scripts/report_raw_code_coverage.py`
+  - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py`
+  - 直接合并 `data/*.dat`，按 raw 覆盖点输出总 `line/branch/expr/toggle` 覆盖率
+  - 同时给出 `ifu_strict`、`ifu_core`、`icache`、`bpu`、`tlb_pmp`、`fault_path` 的 raw line 覆盖率拆分
 
 ## 常用工具
 
