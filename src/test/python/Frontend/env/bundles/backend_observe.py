@@ -16,6 +16,7 @@ class BackendObserveBundle(Bundle):
     cfvec_instr = SignalList("io_backend_cfVec_#_bits_instr", 8)
     cfvec_is_rvc = SignalList("io_backend_cfVec_#_bits_isRvc", 8)
     cfvec_pred_taken = SignalList("io_backend_cfVec_#_bits_predTaken", 8)
+    cfvec_fixed_taken = SignalList("io_backend_cfVec_#_bits_fixedTaken", 8)
     cfvec_ftq_ptr_flag = SignalList("io_backend_cfVec_#_bits_ftqPtr_flag", 8)
     cfvec_ftq_ptr_value = SignalList("io_backend_cfVec_#_bits_ftqPtr_value", 8)
     cfvec_ftq_offset = SignalList("io_backend_cfVec_#_bits_ftqOffset", 8)

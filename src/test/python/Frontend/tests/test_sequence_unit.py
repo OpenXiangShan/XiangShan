@@ -90,6 +90,24 @@ class _StagnantGoldenTraceEnv:
         return 1
 
 
+class _GoldenTraceWithPostTraceTailEnv:
+    def __init__(self) -> None:
+        self.dut = _NoRawDutAccess()
+        self.monitor = SimpleNamespace(get_errors=lambda: [])
+        self.backend_model = SimpleNamespace(
+            golden_trace=SimpleNamespace(entries=[SimpleNamespace(pc=0x80000000)], cursor=0),
+            has_pending_work=lambda: True,
+            pending_work_count=lambda: 7,
+            golden_completion_pending_work_count=lambda: 0,
+            current_golden_pc=lambda: None,
+        )
+
+    def step(self, cycles: int) -> int:
+        assert int(cycles) == 1
+        self.backend_model.golden_trace.cursor = 1
+        return 1
+
+
 def test_check_pc_sequence_uses_monitor_observations_without_raw_dut_peeks():
     env = _CheckPcEnv([0x80000000, 0x80000004])
 
@@ -115,14 +133,23 @@ def test_inject_redirect_sequence_uses_monitor_recent_pcs_without_raw_dut_peeks(
 def test_run_until_golden_trace_complete_uses_monitor_and_backend_model_contracts_only():
     env = _GoldenTraceEnv()
 
-    completed = RunUntilGoldenTraceCompleteSequence(max_cycles=2).run(env)
+    result = RunUntilGoldenTraceCompleteSequence(max_cycles=2).run(env)
 
-    assert completed is True
+    assert result.completed is True
 
 
 def test_run_until_golden_trace_complete_stops_on_stagnant_cursor_limit():
     env = _StagnantGoldenTraceEnv()
 
-    completed = RunUntilGoldenTraceCompleteSequence(max_cycles=100, stagnant_cycles_limit=3).run(env)
+    result = RunUntilGoldenTraceCompleteSequence(max_cycles=100, stagnant_cycles_limit=3).run(env)
 
-    assert completed is False
+    assert result.completed is False
+
+
+def test_run_until_golden_trace_complete_ignores_post_trace_tail_work():
+    env = _GoldenTraceWithPostTraceTailEnv()
+
+    result = RunUntilGoldenTraceCompleteSequence(max_cycles=2).run(env)
+
+    assert result.completed is True
+    assert result.pending_work == 0

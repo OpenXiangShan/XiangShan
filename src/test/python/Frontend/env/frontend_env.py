@@ -212,6 +212,8 @@ class FrontendEnv:
         actions = self.backend_model.plan_cycle_actions()
         self.backend_agent.start_cycle(actions.can_accept)
         self.backend_agent.drive_commit(actions.commit_entry)
+        if hasattr(self.backend_model, "commit_entry_driven"):
+            self.backend_model.commit_entry_driven(actions.commit_entry)
         self.backend_agent.drive_resolves(actions.resolve_entries)
         self.backend_agent.drive_call_ret_commit(actions.call_ret_commit_group)
         if actions.redirect_payload is not None:

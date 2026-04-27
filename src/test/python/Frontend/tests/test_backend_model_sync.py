@@ -35,6 +35,7 @@ def _drive_cfvec_slot(
     instr: int = 0,
     is_rvc: int = 0,
     pred_taken: int = 0,
+    fixed_taken: int | None = None,
     ftq_flag: int = 0,
     ftq_value: int = 0,
     ftq_offset: int = 0,
@@ -46,6 +47,7 @@ def _drive_cfvec_slot(
     getattr(dut, base + "instr").value = int(instr)
     getattr(dut, base + "isRvc").value = int(is_rvc)
     getattr(dut, base + "predTaken").value = int(pred_taken)
+    getattr(dut, base + "fixedTaken").value = int(pred_taken if fixed_taken is None else fixed_taken)
     getattr(dut, base + "ftqPtr_flag").value = int(ftq_flag)
     getattr(dut, base + "ftqPtr_value").value = int(ftq_value)
     getattr(dut, base + "ftqOffset").value = int(ftq_offset)
@@ -55,6 +57,36 @@ def _drive_cfvec_slot(
 def _clear_cfvec(dut) -> None:
     for slot in range(8):
         getattr(dut, f"io_backend_cfVec_{slot}_valid").value = 0
+
+
+def _set_recovery_episode(
+    bm: BackendModel,
+    *,
+    target_pc: int,
+    origin_index: int,
+    redirect_context: dict | None = None,
+    expected_recovery_ftq: tuple[int, int] | None = None,
+) -> None:
+    bm._set_active_wrong_path_episode(  # pylint: disable=protected-access
+        origin_index=int(origin_index),
+        target_pc=int(target_pc),
+        redirect_context=redirect_context,
+        redirect_driven=True,
+        expected_recovery_ftq=expected_recovery_ftq,
+    )
+
+
+def _set_pending_target_ftq(
+    bm: BackendModel,
+    *,
+    ftq_flag: int,
+    ftq_value: int,
+    target_pc: int | None = None,
+) -> None:
+    bm._set_pending_level0_target_ftq(  # pylint: disable=protected-access
+        (int(ftq_flag), int(ftq_value)),
+        target_pc=None if target_pc is None else int(target_pc),
+    )
 
 
 def test_indirect_redirect_is_dropped_after_current_golden_cfi_successor_is_observed():
@@ -154,7 +186,11 @@ def test_inject_redirect_clears_cfvec_queue_state() -> None:
             QueueInstr(cycle=0, slot=1, pc=0x80000004, instr=0x6F, is_rvc=False, pred_taken=True, ftq_flag=0, ftq_value=1, ftq_offset=2, is_last_in_entry=True, is_cfi=True),
         ]
     )
-    bm._pending_redirect_origin_index = 1
+    bm._set_active_wrong_path_episode(
+        origin_index=1,
+        target_pc=None,
+        redirect_context=None,
+    )
     bm._pending_queue_resolve_indices.extend([1])
     bm._pending_queue_call_ret_commit_indices.extend([0, 1])
     bm._scheduled_queue_call_ret_commit_groups.append((10, []))
@@ -179,7 +215,7 @@ def test_inject_redirect_clears_cfvec_queue_state() -> None:
     bm.inject_redirect(target_pc=0x80000100, reason="manual")
 
     assert list(bm._cfvec_queue) == []
-    assert bm._pending_redirect_origin_index is None
+    assert bm._active_wrong_path_origin_index() is None
     assert list(bm._pending_queue_resolve_indices) == []
     assert list(bm._pending_queue_call_ret_commit_indices) == []
     assert list(bm._scheduled_queue_call_ret_commit_groups) == []
@@ -208,6 +244,96 @@ def test_pending_work_count_includes_callret_related_queues() -> None:
 
     assert bm.pending_work_count() == 5
     assert bm.has_pending_work() is True
+
+
+def test_golden_completion_pending_work_ignores_post_trace_unknown_tail() -> None:
+    bm = BackendModel()
+    trace = GoldenTrace([TraceEntry(index=0, pc=0x80000000, instr=0x00000013, size=4)])
+    trace.cursor = 1
+    bm.set_golden_trace(trace)
+    bm._cfvec_queue.append(
+        QueueInstr(
+            cycle=10,
+            slot=0,
+            pc=0x80000004,
+            instr=0x00000013,
+            is_rvc=False,
+            pred_taken=False,
+            ftq_flag=0,
+            ftq_value=2,
+            ftq_offset=0,
+            is_last_in_entry=True,
+            path_state="unknown",
+        )
+    )
+    bm.ftq_entries.append(FtqEntry(ftq_flag=0, ftq_value=2, dispatch_complete=True))
+    bm._current_ftq_entry = FtqEntry(ftq_flag=0, ftq_value=3)
+
+    assert bm.pending_work_count() == 2
+    assert bm.golden_completion_pending_work_count() == 0
+
+
+def test_golden_completion_pending_work_keeps_matched_trace_entry_pending() -> None:
+    bm = BackendModel()
+    trace = GoldenTrace([TraceEntry(index=0, pc=0x80000000, instr=0x00000013, size=4)])
+    trace.cursor = 1
+    bm.set_golden_trace(trace)
+    bm._cfvec_queue.append(
+        QueueInstr(
+            cycle=10,
+            slot=0,
+            pc=0x80000000,
+            instr=0x00000013,
+            is_rvc=False,
+            pred_taken=False,
+            ftq_flag=0,
+            ftq_value=1,
+            ftq_offset=0,
+            is_last_in_entry=True,
+            path_state="correct",
+            golden_match_state="matched",
+            golden_index=0,
+        )
+    )
+
+    assert bm.golden_completion_pending_work_count() == 1
+
+
+def test_golden_trace_queue_blocks_ftq_only_fallback_commit() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([TraceEntry(index=0, pc=0x80000000, instr=0x00000013, size=4)]))
+    bm.current_cycle = 100
+    bm.commit_count = 5
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 4
+    bm._cfvec_queue.append(
+        QueueInstr(
+            cycle=10,
+            slot=0,
+            pc=0x80000010,
+            instr=0x00000013,
+            is_rvc=False,
+            pred_taken=False,
+            ftq_flag=0,
+            ftq_value=5,
+            ftq_offset=0,
+            is_last_in_entry=True,
+            path_state="unknown",
+        )
+    )
+    bm.ftq_entries.append(
+        FtqEntry(
+            ftq_flag=0,
+            ftq_value=8,
+            total_cfi=0,
+            resolved_cfi=0,
+            dispatch_complete=True,
+            commit_ready_cycle=0,
+        )
+    )
+
+    assert bm._plan_commit_entry_for_cycle() is None
+    assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (0, 4)
 
 
 def test_last_packet_sets_commit_ready_cycle_in_commit_delay_range():
@@ -357,7 +483,7 @@ def test_cfvec_queue_marks_first_mismatch_as_wrong_path_start() -> None:
     assert cfvec_queue[0].path_state == "correct"
     assert cfvec_queue[1].golden_match_state == "mismatched"
     assert cfvec_queue[1].path_state == "wrong"
-    assert bm._pending_redirect_origin_index == 1
+    assert bm._active_wrong_path_origin_index() == 1
 
 
 def test_cfvec_queue_marks_younger_packets_wrong_after_redirect_origin() -> None:
@@ -415,7 +541,7 @@ def test_cfvec_queue_marks_younger_packets_wrong_after_redirect_origin() -> None
 
     cfvec_queue = list(bm._cfvec_queue)
     assert [entry.path_state for entry in cfvec_queue] == ["correct", "wrong", "wrong"]
-    assert bm._pending_redirect_origin_index == 1
+    assert bm._active_wrong_path_origin_index() == 1
 
 
 def test_cfvec_queue_non_cfi_first_mismatch_starts_wrong_path() -> None:
@@ -475,13 +601,153 @@ def test_cfvec_queue_non_cfi_first_mismatch_starts_wrong_path() -> None:
     cfvec_queue = list(bm._cfvec_queue)
     assert [entry.path_state for entry in cfvec_queue] == ["correct", "wrong", "wrong"]
     assert [entry.golden_match_state for entry in cfvec_queue] == ["matched", "mismatched", "mismatched"]
-    assert bm._pending_redirect_origin_index == 1
+    assert bm._active_wrong_path_origin_index() == 1
     queued_reasons = [str(evt.payload.get("reason", "")) for evt in bm.pending_events]
     assert queued_reasons == ["golden_first_mismatch_redirect"]
     assert len(bm._pending_resolves) == 1
     assert bm._pending_resolves[0].queue_index == 0
     assert bm._pending_resolves[0].mispredict is True
     assert bm._pending_resolves[0].target == 0x80000004
+
+
+def test_fixed_taken_overrides_bpu_pred_taken_for_branch_redirect() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=0, pc=0x80000000, instr=0x00000063, size=4, kind="branch", taken=False, target_pc=0x80000004),
+                TraceEntry(index=1, pc=0x80000004, instr=0x00000013, size=4),
+            ]
+        )
+    )
+    bm.resolve_min_delay = 0
+    bm.resolve_max_delay = 0
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x80000000,
+        instr=0x00000063,
+        pred_taken=1,
+        fixed_taken=0,
+        ftq_flag=0,
+        ftq_value=3,
+        ftq_offset=0,
+        is_last=0,
+    )
+    _drive_cfvec_slot(
+        dut,
+        1,
+        valid=1,
+        pc=0x80000004,
+        instr=0x00000013,
+        ftq_flag=0,
+        ftq_value=3,
+        ftq_offset=2,
+        is_last=1,
+    )
+
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    assert [entry.path_state for entry in bm._cfvec_queue] == ["correct", "correct"]
+    assert len([evt for evt in bm.pending_events if evt.kind == "redirect"]) == 0
+    assert len(bm._pending_resolves) == 1
+    assert bm._pending_resolves[0].mispredict is False
+    assert bm._pending_resolves[0].target == 0x80000004
+
+
+def test_correct_taken_indirect_jump_target_next_cycle_does_not_queue_redirect() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=0, pc=0x80000068, instr=0x00008067, size=4, kind="jump_indirect", taken=True, target_pc=0x80000014),
+                TraceEntry(index=1, pc=0x80000014, instr=0x00000013, size=4),
+            ]
+        )
+    )
+    bm.resolve_min_delay = 0
+    bm.resolve_max_delay = 0
+
+    _drive_cfvec_slot(
+        dut,
+        7,
+        valid=1,
+        pc=0x80000068,
+        instr=0x00008067,
+        pred_taken=1,
+        fixed_taken=1,
+        ftq_flag=0,
+        ftq_value=38,
+        ftq_offset=15,
+        is_last=1,
+    )
+
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    assert [entry.pc for entry in bm._cfvec_queue] == [0x80000068]
+    assert bm._cfvec_queue[0].path_state == "correct"
+    assert bm._active_wrong_path_origin_index() is None
+    assert len([evt for evt in bm.pending_events if evt.kind == "redirect"]) == 0
+    assert len(bm._pending_resolves) == 1
+    assert bm._pending_resolves[0].mispredict is False
+    assert bm._pending_resolves[0].target == 0x80000014
+
+    _clear_cfvec(dut)
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x80000014,
+        instr=0x00000013,
+        ftq_flag=0,
+        ftq_value=39,
+        ftq_offset=0,
+        is_last=1,
+    )
+
+    bm.current_cycle = 1
+    bm._sample_cfvec()
+
+    assert [entry.path_state for entry in bm._cfvec_queue] == ["correct", "correct"]
+    assert len([evt for evt in bm.pending_events if evt.kind == "redirect"]) == 0
+
+
+def test_first_mismatch_ignores_stale_debug_commit_queue_entry() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([TraceEntry(index=0, pc=0x80000020, instr=0x00000013, size=4)]))
+    bm._cfvec_queue.append(
+        QueueInstr(
+            cycle=0,
+            slot=0,
+            pc=0x80000010,
+            instr=0x0080006F,
+            is_rvc=False,
+            pred_taken=True,
+            ftq_flag=0,
+            ftq_value=1,
+            ftq_offset=0,
+            is_last_in_entry=True,
+            path_state="unknown",
+            resolve_state="pending",
+            is_cfi=True,
+        )
+    )
+    bm._commit_queue.append(0)
+
+    bm._cfvec_queue_note_mismatch(0)
+    committed = bm._plan_instruction_commits_for_cycle()
+
+    assert committed == 0
+    assert bm._cfvec_queue[0].path_state == "wrong"
+    assert list(bm._commit_queue) == []
 
 
 def test_cfvec_queue_redirect_flush_prunes_wrong_path_suffix() -> None:
@@ -537,7 +803,7 @@ def test_cfvec_queue_redirect_flush_prunes_wrong_path_suffix() -> None:
     bm.current_cycle = 0
     bm._sample_cfvec()
     assert len(bm._cfvec_queue) == 3
-    assert bm._pending_redirect_origin_index == 1
+    assert bm._active_wrong_path_origin_index() == 1
 
     payload = bm._plan_redirect_payload(
         {
@@ -556,8 +822,11 @@ def test_cfvec_queue_redirect_flush_prunes_wrong_path_suffix() -> None:
     )
 
     assert payload["target_pc"] == 0x80000004
-    assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [(0x80000000, "correct")]
-    assert bm._pending_redirect_origin_index is None
+    assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [
+        (0x80000000, "correct"),
+    ]
+    assert bm._active_wrong_path_origin_index() == 1
+    assert bm._current_recovery_target_pc() == 0x80000004
 
 
 def test_first_mismatch_without_attributable_cfi_fails_fast() -> None:
@@ -604,7 +873,7 @@ def test_first_mismatch_without_attributable_cfi_fails_fast() -> None:
         bm._sample_cfvec()
 
 
-def test_first_mismatch_without_queue_cfi_uses_last_correct_cfi_context() -> None:
+def test_first_mismatch_without_queue_cfi_fails_when_last_correct_context_unproven() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -642,16 +911,13 @@ def test_first_mismatch_without_queue_cfi_uses_last_correct_cfi_context() -> Non
     )
 
     bm.current_cycle = 0
-    bm._sample_cfvec()
 
-    assert bm._pending_redirect_origin_index == 0
-    queued_redirects = [evt for evt in bm.pending_events if evt.kind == "redirect"]
-    assert len(queued_redirects) == 1
-    payload = queued_redirects[0].payload
-    assert payload["reason"] == "golden_first_mismatch_redirect"
-    assert int(payload["pc"]) == 0x80000010
-    assert int(payload["target_pc"]) == 0x80000000
-    assert int(payload["taken"]) == 1
+    import pytest
+
+    with pytest.raises(AssertionError, match="active redirect context became stale before queue/drive"):
+        bm._sample_cfvec()
+
+    assert len([evt for evt in bm.pending_events if evt.kind == "redirect"]) == 0
 
 
 def test_cfvec_queue_redirect_flush_prunes_wrong_path_pending_resolves() -> None:
@@ -727,6 +993,8 @@ def test_cfvec_queue_redirect_flush_prunes_wrong_path_pending_resolves() -> None
     )
 
     assert len(bm._pending_resolves) == 0
+    assert bm._current_recovery_target_pc() == 0x80000004
+    assert bm._active_wrong_path_origin_index() == 1
 
 
 def test_cfvec_queue_transition_without_last_marks_surviving_prefix_closed() -> None:
@@ -825,7 +1093,7 @@ def test_cfvec_queue_wait_break_marks_current_entry_closed() -> None:
     assert cfvec_queue[1].path_state == "wrong"
 
 
-def test_waiting_target_prefix_last_seals_current_ftq_entry() -> None:
+def test_target_prefix_without_attributable_cfi_fails_fast_even_if_target_ftq_is_known() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -837,8 +1105,7 @@ def test_waiting_target_prefix_last_seals_current_ftq_entry() -> None:
             ]
         )
     )
-    bm._golden_wait_pc = 0x80000020
-    bm._pending_level0_target_ftq = (0, 30)
+    _set_pending_target_ftq(bm, ftq_flag=0, ftq_value=30)
 
     _drive_cfvec_slot(
         dut,
@@ -853,22 +1120,18 @@ def test_waiting_target_prefix_last_seals_current_ftq_entry() -> None:
     )
 
     bm.current_cycle = 0
-    bm._sample_cfvec()
+    import pytest
 
-    assert bm._current_ftq_entry is None
-    assert [(entry.ftq_flag, entry.ftq_value, entry.dispatch_complete, entry.observed_last_in_entry) for entry in bm.ftq_entries] == [
-        (0, 30, True, True)
-    ]
-    assert list(bm._cfvec_queue)[0].is_last_in_entry is True
+    with pytest.raises(AssertionError, match="first mismatch has no attributable CFI"):
+        bm._sample_cfvec()
 
 
-def test_waiting_target_prefix_cfi_is_marked_resolve_skipped() -> None:
+def test_target_prefix_cfi_starts_wrong_path_episode_and_queues_mismatch_redirect() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
     bm.set_golden_trace(GoldenTrace([TraceEntry(index=0, pc=0x80000020, instr=0x00000013, size=4)]))
-    bm._golden_wait_pc = 0x80000020
-    bm._pending_level0_target_ftq = (0, 31)
+    _set_pending_target_ftq(bm, ftq_flag=0, ftq_value=31)
 
     _drive_cfvec_slot(
         dut,
@@ -890,16 +1153,17 @@ def test_waiting_target_prefix_cfi_is_marked_resolve_skipped() -> None:
     assert len(cfvec_queue) == 1
     assert cfvec_queue[0].is_cfi is True
     assert cfvec_queue[0].path_state == "wrong"
-    assert cfvec_queue[0].resolve_state == "skipped"
-    assert list(bm._pending_queue_resolve_indices) == []
-    assert all(
-        str(evt.payload.get("reason", "")) != "golden_first_mismatch_redirect"
-        for evt in bm.pending_events
-        if evt.kind == "redirect"
-    )
+    assert cfvec_queue[0].resolve_state == "pending"
+    assert list(bm._pending_queue_resolve_indices) == [0]
+    assert len(bm._pending_resolves) == 1
+    queued_redirects = [evt for evt in bm.pending_events if evt.kind == "redirect"]
+    assert len(queued_redirects) == 1
+    assert queued_redirects[0].payload["reason"] == "golden_first_mismatch_redirect"
+    assert int(queued_redirects[0].payload["pc"]) == 0x80000010
+    assert int(queued_redirects[0].payload["target_pc"]) == 0x80000020
 
 
-def test_semantic_recovery_residual_prefix_does_not_queue_new_mismatch_redirect() -> None:
+def test_recovery_residual_prefix_does_not_queue_new_mismatch_redirect() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -920,8 +1184,11 @@ def test_semantic_recovery_residual_prefix_does_not_queue_new_mismatch_redirect(
             golden_match_state="matched",
         )
     )
-    bm._semantic_recovery_target_pc = 0x80000020
-    bm._semantic_recovery_queue_start = len(bm._cfvec_queue)
+    _set_recovery_episode(
+        bm,
+        target_pc=0x80000020,
+        origin_index=len(bm._cfvec_queue),
+    )
 
     _drive_cfvec_slot(
         dut,
@@ -939,10 +1206,8 @@ def test_semantic_recovery_residual_prefix_does_not_queue_new_mismatch_redirect(
     bm.current_cycle = 1
     bm._sample_cfvec()
 
-    assert bm._semantic_recovery_target_pc == 0x80000020
-    assert len(bm._cfvec_queue) == 2
-    assert bm._cfvec_queue[-1].path_state == "wrong"
-    assert bm._cfvec_queue[-1].resolve_state == "skipped"
+    assert bm._current_recovery_target_pc() == 0x80000020
+    assert [entry.pc for entry in bm._cfvec_queue] == [0x80000000]
     assert all(
         str(evt.payload.get("reason", "")) != "golden_first_mismatch_redirect"
         for evt in bm.pending_events
@@ -950,7 +1215,305 @@ def test_semantic_recovery_residual_prefix_does_not_queue_new_mismatch_redirect(
     )
 
 
-def test_post_redirect_prefix_before_target_does_not_queue_duplicate_redirect() -> None:
+def test_same_cycle_packets_after_recovery_target_keep_single_active_wrong_path_episode() -> None:
+    dut = _DummyDut()
+    bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0, redirect_min_delay=0, redirect_max_delay=0)
+    bm.bind(dut)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=0, pc=0x8000001A, instr=0x0000147D, size=2, kind="normal", taken=False, target_pc=None),
+                TraceEntry(index=1, pc=0x8000001C, instr=0x0012F393, size=4, kind="normal", taken=False, target_pc=None),
+                TraceEntry(index=2, pc=0x80000020, instr=0x00038463, size=4, kind="branch", taken=True, target_pc=0x80000028),
+                TraceEntry(index=3, pc=0x80000028, instr=0x0000147D, size=2, kind="normal", taken=False, target_pc=None),
+            ]
+        )
+    )
+    _set_recovery_episode(
+        bm,
+        target_pc=0x8000001A,
+        origin_index=0,
+    )
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x8000001A,
+        instr=0x0000147D,
+        is_rvc=1,
+        pred_taken=0,
+        ftq_flag=0,
+        ftq_value=1,
+        ftq_offset=0,
+        is_last=0,
+    )
+    _drive_cfvec_slot(
+        dut,
+        1,
+        valid=1,
+        pc=0x8000001C,
+        instr=0x0012F393,
+        is_rvc=0,
+        pred_taken=0,
+        ftq_flag=0,
+        ftq_value=1,
+        ftq_offset=1,
+        is_last=0,
+    )
+    _drive_cfvec_slot(
+        dut,
+        2,
+        valid=1,
+        pc=0x80000020,
+        instr=0x00038463,
+        is_rvc=0,
+        pred_taken=1,
+        ftq_flag=0,
+        ftq_value=1,
+        ftq_offset=3,
+        is_last=0,
+    )
+    _drive_cfvec_slot(
+        dut,
+        3,
+        valid=1,
+        pc=0x80000024,
+        instr=0x00001405,
+        is_rvc=1,
+        pred_taken=0,
+        ftq_flag=0,
+        ftq_value=1,
+        ftq_offset=4,
+        is_last=1,
+    )
+
+    bm.current_cycle = 1
+    bm._sample_cfvec()
+
+    assert bm._current_recovery_target_pc() is None
+    assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [
+        (0x8000001A, "correct"),
+        (0x8000001C, "correct"),
+        (0x80000020, "correct"),
+        (0x80000024, "wrong"),
+    ]
+    assert bm._current_wrong_path_target_pc() == 0x80000028
+    queued_redirects = [evt for evt in bm.pending_events if evt.kind == "redirect"]
+    assert len(queued_redirects) == 1
+    assert queued_redirects[0].payload["reason"] == "golden_first_mismatch_redirect"
+    assert int(queued_redirects[0].payload["pc"]) == 0x80000020
+    assert int(queued_redirects[0].payload["target_pc"]) == 0x80000028
+    assert len(bm._pending_resolves) == 1
+    assert bm._pending_resolves[0].inst_pc == 0x80000020
+    assert bm._pending_resolves[0].target == 0x80000028
+
+
+def test_recovery_ignores_target_packets_queued_before_recovery_start() -> None:
+    bm = BackendModel()
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x800000FA,
+                instr=0xFFE40413,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=1,
+                ftq_value=11,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="wrong",
+                golden_match_state="mismatched",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x800000FC,
+                instr=0x012000EF,
+                is_rvc=False,
+                pred_taken=True,
+                ftq_flag=1,
+                ftq_value=11,
+                ftq_offset=2,
+                is_last_in_entry=True,
+                path_state="wrong",
+                golden_match_state="mismatched",
+            ),
+        ]
+    )
+    _set_recovery_episode(
+        bm,
+        target_pc=0x800000FA,
+        origin_index=len(bm._cfvec_queue),
+    )
+
+    bm._apply_recovery_if_target_queued()
+
+    assert bm._current_recovery_target_pc() == 0x800000FA
+    assert bm._active_wrong_path_origin_index() == 2
+    assert [entry.pc for entry in bm._cfvec_queue] == [0x800000FA, 0x800000FC]
+
+
+def test_recovery_prunes_only_new_residual_prefix_after_recovery_start() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=0, pc=0x800000F2, instr=0x00039463, size=4, kind="branch", taken=True, target_pc=0x800000FA),
+                TraceEntry(index=1, pc=0x800000FA, instr=0x0000147D, size=2, kind="normal", taken=False, target_pc=None),
+                TraceEntry(index=2, pc=0x800000FC, instr=0x012000EF, size=4, kind="jump", taken=True, target_pc=0x8000011A),
+            ]
+        )
+    )
+    bm.golden_trace.cursor = 1
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x800000F2,
+                instr=0x00039463,
+                is_rvc=False,
+                pred_taken=True,
+                ftq_flag=0,
+                ftq_value=53,
+                ftq_offset=3,
+                is_last_in_entry=True,
+                path_state="correct",
+                golden_match_state="matched",
+                golden_index=0,
+                golden_target_pc=0x800000FA,
+            ),
+            QueueInstr(
+                cycle=1,
+                slot=0,
+                pc=0x80000100,
+                instr=0x00A40433,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=1,
+                ftq_value=14,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="wrong",
+                golden_match_state="mismatched",
+            ),
+            QueueInstr(
+                cycle=1,
+                slot=1,
+                pc=0x800000FA,
+                instr=0x0000147D,
+                is_rvc=True,
+                pred_taken=False,
+                ftq_flag=1,
+                ftq_value=11,
+                ftq_offset=0,
+                is_last_in_entry=False,
+            ),
+            QueueInstr(
+                cycle=1,
+                slot=2,
+                pc=0x800000FC,
+                instr=0x012000EF,
+                is_rvc=False,
+                pred_taken=True,
+                ftq_flag=1,
+                ftq_value=11,
+                ftq_offset=2,
+                is_last_in_entry=True,
+            ),
+        ]
+    )
+    bm._commit_queue.append(0)
+    _set_recovery_episode(
+        bm,
+        target_pc=0x800000FA,
+        origin_index=1,
+    )
+
+    bm._apply_recovery_if_target_queued()
+
+    assert bm._current_recovery_target_pc() is None
+    assert bm._active_wrong_path_origin_index() is None
+    assert [(entry.pc, entry.path_state, entry.golden_match_state) for entry in bm._cfvec_queue] == [
+        (0x800000F2, "correct", "matched"),
+        (0x800000FA, "correct", "matched"),
+        (0x800000FC, "correct", "matched"),
+    ]
+    assert list(bm._commit_queue) == [0, 1, 2]
+
+
+def test_recovery_barrier_fails_when_last_correct_cfi_context_is_unproven() -> None:
+    bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0, redirect_min_delay=0, redirect_max_delay=0)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=136, pc=0x80000112, instr=0x000E0463, size=4, kind="branch", taken=False, target_pc=0x80000116),
+                TraceEntry(index=137, pc=0x80000116, instr=0x00004505, size=2, kind="normal", taken=False, target_pc=None),
+            ]
+        )
+    )
+    bm.golden_trace.cursor = 1
+    _set_recovery_episode(
+        bm,
+        target_pc=0x800000FA,
+        origin_index=0,
+    )
+    bm._last_correct_cfi_context = {
+        "pc": 0x80000112,
+        "instr": 0x000E0463,
+        "is_rvc": 0,
+        "pred_taken": 1,
+        "ftq_flag": 1,
+        "ftq_value": 12,
+        "ftq_offset": 3,
+        "branch_type": 1,
+        "ras_action": 0,
+        "queue_index": 0,
+        "golden_target_pc": 0x80000116,
+    }
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x80000100,
+                instr=0x0000942A,
+                is_rvc=True,
+                pred_taken=False,
+                ftq_flag=1,
+                ftq_value=14,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="wrong",
+                golden_match_state="mismatched",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x800000FA,
+                instr=0x00001479,
+                is_rvc=True,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=54,
+                ftq_offset=0,
+                is_last_in_entry=False,
+            ),
+        ]
+    )
+
+    import pytest
+
+    with pytest.raises(AssertionError, match="active redirect context became stale before queue/drive"):
+        bm._cfvec_queue_note_mismatch(1)
+
+    assert len([evt for evt in bm.pending_events if evt.kind == "redirect"]) == 0
+
+
+def test_recovery_prefix_before_target_does_not_queue_duplicate_redirect() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -961,9 +1524,11 @@ def test_post_redirect_prefix_before_target_does_not_queue_duplicate_redirect() 
             ]
         )
     )
-    bm._golden_wait_pc = 0x80000052
-    bm._golden_wait_requires_redirect = True
-    bm._post_redirect_target_pc = 0x80000052
+    _set_recovery_episode(
+        bm,
+        target_pc=0x80000052,
+        origin_index=0,
+    )
 
     _drive_cfvec_slot(
         dut,
@@ -995,8 +1560,8 @@ def test_post_redirect_prefix_before_target_does_not_queue_duplicate_redirect() 
     bm.current_cycle = 1
     bm._sample_cfvec()
 
-    assert bm._post_redirect_target_pc == 0x80000052
-    assert [entry.path_state for entry in bm._cfvec_queue] == ["wrong", "wrong"]
+    assert bm._current_recovery_target_pc() == 0x80000052
+    assert list(bm._cfvec_queue) == []
     assert all(
         str(evt.payload.get("reason", "")) != "golden_first_mismatch_redirect"
         for evt in bm.pending_events
@@ -1004,11 +1569,56 @@ def test_post_redirect_prefix_before_target_does_not_queue_duplicate_redirect() 
     )
 
 
+def test_recovery_target_mismatch_does_not_requeue_same_redirect() -> None:
+    bm = BackendModel()
+    bm._set_active_wrong_path_episode(
+        origin_index=0,
+        target_pc=0x80000052,
+        redirect_context={
+            "pc": 0x8000004A,
+            "is_rvc": 1,
+            "ftq_flag": 0,
+            "ftq_value": 5,
+            "ftq_offset": 0,
+            "branch_type": 1,
+            "ras_action": 0,
+            "queue_index": 0,
+        },
+        redirect_driven=True,
+    )
+    bm._cfvec_queue.append(
+        QueueInstr(
+            cycle=1,
+            slot=0,
+            pc=0x80000052,
+            instr=0x0000147D,
+            is_rvc=True,
+            pred_taken=False,
+            ftq_flag=0,
+            ftq_value=5,
+            ftq_offset=0,
+            is_last_in_entry=False,
+            path_state="unknown",
+            golden_match_state="unknown",
+        )
+    )
+
+    bm._cfvec_queue_note_mismatch(0)
+
+    assert bm._current_recovery_target_pc() == 0x80000052
+    assert bm._cfvec_queue[0].path_state == "wrong"
+    assert len([evt for evt in bm.pending_events if evt.kind == "redirect"]) == 0
+
+
 def test_observing_redirect_target_drops_stale_pending_same_target_redirects() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
-    bm._post_redirect_target_pc = 0x800000FA
+    _set_recovery_episode(
+        bm,
+        target_pc=0x800000FA,
+        origin_index=0,
+    )
     bm.pending_events.extend(
         [
             BackendEvent(
@@ -1041,11 +1651,11 @@ def test_observing_redirect_target_drops_stale_pending_same_target_redirects() -
     bm.current_cycle = 1
     bm._sample_cfvec()
 
-    assert bm._post_redirect_target_pc is None
+    assert bm._current_recovery_target_pc() is None
     assert len([evt for evt in bm.pending_events if evt.kind == "redirect"]) == 0
 
 
-def test_stale_cfvec_packet_is_sampled_as_wrong_residual() -> None:
+def test_older_ftq_pointer_packet_is_still_sampled_by_queue_order() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -1073,8 +1683,8 @@ def test_stale_cfvec_packet_is_sampled_as_wrong_residual() -> None:
     assert len(bm._cfvec_queue) == 1
     entry = bm._cfvec_queue[0]
     assert int(entry.pc) == 0x800000f6
-    assert entry.path_state == "wrong"
-    assert entry.golden_match_state == "mismatched"
+    assert entry.path_state == "correct"
+    assert entry.golden_match_state == "unknown"
 
 
 def test_cfvec_queue_commit_uses_queue_head_when_ftq_entries_are_out_of_order() -> None:
@@ -1123,12 +1733,10 @@ def test_cfvec_queue_commit_uses_queue_head_when_ftq_entries_are_out_of_order() 
     )
     bm.current_cycle = 1
 
-    committed = bm._plan_commit_entry_for_cycle()
+    import pytest
 
-    assert committed is not None
-    assert (committed.ftq_flag, committed.ftq_value) == (0, 12)
-    assert [(entry.ftq_flag, entry.ftq_value) for entry in bm.ftq_entries] == [(0, 14)]
-    assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (0, 12)
+    with pytest.raises(AssertionError, match="older ftq entry disappeared before commit without redirect/commit"):
+        bm._plan_commit_entry_for_cycle()
 
 
 def test_cfvec_queue_correct_path_cfi_emits_resolve_and_marks_emitted() -> None:
@@ -1166,6 +1774,59 @@ def test_cfvec_queue_correct_path_cfi_emits_resolve_and_marks_emitted() -> None:
     assert int(dut.io_backend_toFtq_resolve_0_valid.value) == 1
     assert bm._cfvec_queue[0].resolve_state == "emitted"
     assert list(bm._pending_queue_resolve_indices) == []
+
+
+def test_recovery_phase_does_not_block_older_correct_path_mispredict_resolve() -> None:
+    bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0)
+    bm.current_cycle = 20
+    bm._cfvec_queue.append(
+        QueueInstr(
+            cycle=10,
+            slot=0,
+            pc=0x800000FC,
+            instr=0x012000EF,
+            is_rvc=False,
+            pred_taken=True,
+            ftq_flag=0,
+            ftq_value=17,
+            ftq_offset=0,
+            is_last_in_entry=True,
+            path_state="correct",
+            resolve_state="pending",
+            golden_match_state="matched",
+            is_cfi=True,
+        )
+    )
+    bm._pending_resolves.append(
+        ResolveEntry(
+            ready_cycle=20,
+            inst_pc=0x800000FC,
+            pc=0x800000EC,
+            target=0x8000010E,
+            taken=True,
+            mispredict=True,
+            ftq_flag=0,
+            ftq_value=17,
+            ftq_offset=0,
+            branch_type=2,
+            ras_action=0,
+            queued_cycle=10,
+            queue_index=0,
+        )
+    )
+    bm._set_active_wrong_path_episode(
+        origin_index=1,
+        target_pc=0x80000116,
+        redirect_context={"queue_index": 0},
+        redirect_driven=True,
+    )
+
+    ready = bm._ready_resolves_for_cycle()
+
+    assert len(ready) == 1
+    assert int(ready[0].ftq_value) == 17
+    assert int(ready[0].target) == 0x8000010E
+    assert bm._cfvec_queue[0].resolve_state == "emitted"
 
 
 def test_cfvec_queue_wrong_path_cfi_resolve_is_skipped() -> None:
@@ -1232,7 +1893,7 @@ def test_cfvec_queue_wrong_path_cfi_resolve_is_skipped() -> None:
 
 def test_cfvec_queue_first_mismatch_cfi_queues_first_mismatch_redirect() -> None:
     dut = _DummyDut()
-    bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0, redirect_min_delay=0, redirect_max_delay=0)
+    bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0, redirect_min_delay=5, redirect_max_delay=8)
     bm.bind(dut)
     bm.set_golden_trace(
         GoldenTrace(
@@ -1275,6 +1936,8 @@ def test_cfvec_queue_first_mismatch_cfi_queues_first_mismatch_redirect() -> None
     reasons = [str(evt.payload.get("reason", "")) for evt in queued_redirects]
     assert "golden_first_mismatch_redirect" in reasons
     mismatch_redirect = next(evt for evt in queued_redirects if evt.payload.get("reason") == "golden_first_mismatch_redirect")
+    assert int(mismatch_redirect.ready_cycle) >= int(bm.current_cycle) + 5
+    assert int(mismatch_redirect.ready_cycle) <= int(bm.current_cycle) + 8
     assert int(mismatch_redirect.payload["target_pc"]) == 0x80000004
     assert int(mismatch_redirect.payload["pc"]) == 0x80000010
 
@@ -1362,7 +2025,7 @@ def test_commit_removes_stale_duplicate_entries_with_same_ftq_ptr():
     assert bm.commit_ptr_value == 50
 
 
-def test_semantic_commit_skips_stale_older_ftq_entry_not_present_in_queue() -> None:
+def test_semantic_commit_stale_older_ftq_entry_not_present_in_queue_fails_fast() -> None:
     bm = BackendModel()
     bm.set_golden_trace(
         GoldenTrace([TraceEntry(index=0, pc=0x80004840, instr=0x00000013, size=4)])
@@ -1397,11 +2060,10 @@ def test_semantic_commit_skips_stale_older_ftq_entry_not_present_in_queue() -> N
         )
     )
 
-    commit_entry = bm._plan_commit_entry_for_cycle()
+    import pytest
 
-    assert commit_entry is not None
-    assert (commit_entry.ftq_flag, commit_entry.ftq_value) == (0, 30)
-    assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (0, 30)
+    with pytest.raises(AssertionError, match="without (commit/redirect|redirect/commit)"):
+        bm._plan_commit_entry_for_cycle()
 
 
 def test_semantic_commit_infers_head_span_close_when_dispatch_complete_and_current_entry_absent() -> None:
@@ -1526,7 +2188,7 @@ def test_level0_redirect_does_not_wait_for_next_target_slot_that_is_already_comm
         }
     )
 
-    assert bm._pending_level0_target_ftq is None
+    assert bm._find_next_commitable_entry() is None
 
 
 def test_level0_redirect_flush_closes_surviving_current_ftq_span_when_current_entry_clears() -> None:
@@ -1735,7 +2397,7 @@ def test_level0_redirect_flush_keeps_next_target_pending_resolve() -> None:
         }
     )
 
-    assert bm._pending_level0_target_ftq == (0, 12)
+    assert bm._find_next_commitable_entry() is None
     assert [(entry.ftq_flag, entry.ftq_value) for entry in bm._pending_resolves] == [(0, 12)]
     assert any(
         (
@@ -1756,28 +2418,24 @@ def test_level0_redirect_flush_keeps_next_target_pending_resolve() -> None:
     )
 
 
-def test_golden_wait_pc_does_not_drop_partially_observed_target_entry_prefix():
+def test_wrong_path_target_prefix_without_attributable_cfi_fails_fast_instead_of_silently_tracking_ftq_entry():
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
     bm.set_golden_trace(GoldenTrace([TraceEntry(index=0, pc=0x80004A28, instr=0x000C3783, size=4)]))
-    bm._golden_wait_pc = 0x80004A28
-
     _drive_cfvec_slot(dut, 0, valid=1, pc=0x80004A00, instr=0x00000013, is_rvc=0, pred_taken=0, ftq_flag=1, ftq_value=51, ftq_offset=0, is_last=0)
     _drive_cfvec_slot(dut, 1, valid=1, pc=0x80004A02, instr=0x00000013, is_rvc=1, pred_taken=0, ftq_flag=1, ftq_value=51, ftq_offset=1, is_last=0)
     _drive_cfvec_slot(dut, 2, valid=1, pc=0x80004A04, instr=0x00000013, is_rvc=1, pred_taken=0, ftq_flag=1, ftq_value=51, ftq_offset=2, is_last=0)
     _drive_cfvec_slot(dut, 3, valid=1, pc=0x80004A06, instr=0x00000013, is_rvc=0, pred_taken=0, ftq_flag=1, ftq_value=51, ftq_offset=4, is_last=1)
 
     bm.current_cycle = 0
-    bm._sample_cfvec()
+    import pytest
 
-    assert bm._current_ftq_entry is None
-    assert [(entry.ftq_flag, entry.ftq_value, entry.dispatch_complete, entry.observed_last_in_entry) for entry in bm.ftq_entries] == [
-        (1, 51, True, True)
-    ]
+    with pytest.raises(AssertionError, match="first mismatch has no attributable CFI"):
+        bm._sample_cfvec()
 
 
-def test_golden_wait_target_entry_suffix_does_not_reset_same_ftq_slot_state() -> None:
+def test_wrong_path_target_entry_suffix_preserves_branch_resolve_and_marks_younger_cfi_wrong() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -1799,13 +2457,13 @@ def test_golden_wait_target_entry_suffix_does_not_reset_same_ftq_slot_state() ->
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    assert bm._golden_wait_pc == 0x800049C2
+    assert bm._current_wrong_path_target_pc() == 0x800049C2
     assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [
         (0x800048FE, "correct"),
         (0x80004902, "correct"),
         (0x80004904, "correct"),
     ]
-    bm._pending_level0_target_ftq = (1, 49)
+    _set_pending_target_ftq(bm, ftq_flag=1, ftq_value=49)
 
     _clear_cfvec(dut)
     _drive_cfvec_slot(dut, 0, valid=1, pc=0x8000491C, instr=0xF2E6E6E3, is_rvc=0, pred_taken=0, ftq_flag=1, ftq_value=49, ftq_offset=16, is_last=1)
@@ -1819,8 +2477,11 @@ def test_golden_wait_target_entry_suffix_does_not_reset_same_ftq_slot_state() ->
         (0x80004904, "correct", True),
         (0x8000491C, "wrong", True),
     ]
-    assert len(bm._pending_resolves) == 1
+    assert len(bm._pending_resolves) in (1, 2)
     assert bm._pending_resolves[0].inst_pc == 0x80004904
+    assert bm._pending_resolves[0].mispredict is True
+    if len(bm._pending_resolves) == 2:
+        assert bm._pending_resolves[1].inst_pc == 0x8000491C
     assert bm.ftq_entries[0].total_cfi == 1
 
 
@@ -1831,7 +2492,6 @@ def test_level0_redirect_keeps_waiting_if_next_target_slot_was_seen_only_on_wron
     bm.commit_count = 64
     bm.commit_ptr_flag = 0
     bm.commit_ptr_value = 34
-    bm._golden_wait_pc = 0x800047FA
     bm._current_ftq_entry = FtqEntry(ftq_flag=0, ftq_value=36)
 
     bm._drive_redirect(
@@ -1850,15 +2510,14 @@ def test_level0_redirect_keeps_waiting_if_next_target_slot_was_seen_only_on_wron
         }
     )
 
-    assert bm._pending_level0_target_ftq == (0, 36)
+    assert bm._find_next_commitable_entry() is None
 
 
-def test_level0_redirect_does_not_clear_waiting_target_slot_on_ptr_match_without_target_pc():
+def test_level0_redirect_does_not_clear_pending_target_ftq_on_ptr_match_without_target_pc():
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
-    bm._golden_wait_pc = 0x800047FA
-    bm._pending_level0_target_ftq = (0, 36)
+    _set_pending_target_ftq(bm, ftq_flag=0, ftq_value=36)
 
     _drive_cfvec_slot(
         dut,
@@ -1876,7 +2535,7 @@ def test_level0_redirect_does_not_clear_waiting_target_slot_on_ptr_match_without
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    assert bm._pending_level0_target_ftq == (0, 36)
+    assert bm._find_next_commitable_entry() is None
 
 
 def test_level0_redirect_keeps_waiting_when_next_target_group_has_only_partial_target_prefix():
@@ -1905,7 +2564,7 @@ def test_level0_redirect_keeps_waiting_when_next_target_group_has_only_partial_t
         }
     )
 
-    assert bm._pending_level0_target_ftq == (0, 36)
+    assert bm._find_next_commitable_entry() is None
 
 
 def test_level0_redirect_keeps_waiting_when_next_target_slot_has_old_dispatch_complete_history():
@@ -1936,15 +2595,14 @@ def test_level0_redirect_keeps_waiting_when_next_target_slot_has_old_dispatch_co
         }
     )
 
-    assert bm._pending_level0_target_ftq == (1, 60)
+    assert bm._find_next_commitable_entry() is None
 
 
-def test_target_ftq_prefix_matching_wait_pc_does_not_clear_wait_until_entry_closes():
+def test_target_ftq_prefix_matching_target_pc_does_not_clear_pending_target_ftq_until_entry_closes():
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
-    bm._golden_wait_pc = 0x80004A82
-    bm._pending_level0_target_ftq = (0, 0)
+    _set_pending_target_ftq(bm, ftq_flag=0, ftq_value=0)
 
     _drive_cfvec_slot(
         dut,
@@ -1962,7 +2620,7 @@ def test_target_ftq_prefix_matching_wait_pc_does_not_clear_wait_until_entry_clos
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    assert bm._pending_level0_target_ftq == (0, 0)
+    assert bm._find_next_commitable_entry() is None
 
     _clear_cfvec(dut)
     _drive_cfvec_slot(
@@ -1981,15 +2639,14 @@ def test_target_ftq_prefix_matching_wait_pc_does_not_clear_wait_until_entry_clos
     bm.current_cycle = 1
     bm._sample_cfvec()
 
-    assert bm._pending_level0_target_ftq is None
+    assert bm._find_next_commitable_entry() is None
 
 
-def test_waiting_target_is_last_without_matching_wait_pc_does_not_clear_pending_slot():
+def test_target_ftq_last_without_matching_target_pc_does_not_clear_pending_target_ftq():
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
-    bm._golden_wait_pc = 0x80004A82
-    bm._pending_level0_target_ftq = (1, 60)
+    _set_pending_target_ftq(bm, ftq_flag=1, ftq_value=60)
 
     _drive_cfvec_slot(
         dut,
@@ -2008,18 +2665,16 @@ def test_waiting_target_is_last_without_matching_wait_pc_does_not_clear_pending_
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    assert bm._pending_level0_target_ftq == (1, 60)
+    assert bm._find_next_commitable_entry() is None
 
 
-def test_stale_cfvec_slot_older_than_commit_ptr_is_tracked_as_recovery_residual() -> None:
+def test_cfvec_slot_older_than_commit_ptr_is_still_sampled_by_queue_order() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
     bm.commit_count = 248
     bm.commit_ptr_flag = 1
     bm.commit_ptr_value = 58
-    bm._golden_wait_pc = 0x80004D1C
-
     _drive_cfvec_slot(
         dut,
         0,
@@ -2040,7 +2695,10 @@ def test_stale_cfvec_slot_older_than_commit_ptr_is_tracked_as_recovery_residual(
     assert bm._current_ftq_entry is not None
     assert (bm._current_ftq_entry.ftq_flag, bm._current_ftq_entry.ftq_value) == (1, 54)
     assert list(bm.ftq_entries) == []
-    assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [(0x80004A82, "wrong")]
+    assert [(entry.pc, entry.path_state, entry.golden_match_state) for entry in bm._cfvec_queue] == [
+        (0x80004A82, "correct", "unknown")
+    ]
+    assert len([evt for evt in bm.pending_events if evt.kind == "redirect"]) == 0
     assert bm._ftq_group_pc_history.get((1, 54)) == [(0x80004A82, True)]
 
 
@@ -2099,7 +2757,7 @@ def test_level0_redirect_override_reusing_observed_group_keeps_waiting_for_real_
         }
     )
 
-    assert bm._pending_level0_target_ftq == (0, 1)
+    assert bm._find_next_commitable_entry() is None
     assert payload["pc"] == 0x80004A80
     assert payload["ftq_value"] == 54
 
@@ -2128,6 +2786,32 @@ def test_plan_redirect_payload_fails_fast_on_stale_drive_ftq_context():
                 "level": 0,
             }
         )
+
+
+def test_plan_redirect_payload_allows_drive_ftq_equal_to_commit_ptr():
+    bm = BackendModel()
+    bm.commit_count = 10
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 4
+
+    payload = bm._plan_redirect_payload(
+        {
+            "target_pc": 0x80000028,
+            "reason": "golden_first_mismatch_redirect",
+            "flush_on_drive": True,
+            "pc": 0x80000020,
+            "taken": 1,
+            "ftq_flag": 0,
+            "ftq_value": 4,
+            "ftq_offset": 0,
+            "branch_type": 1,
+            "ras_action": 0,
+            "level": 0,
+        }
+    )
+
+    assert int(payload["ftq_flag"]) == 0
+    assert int(payload["ftq_value"]) == 4
 
 
 def test_mismatch_redirect_payload_keeps_original_drive_context() -> None:
@@ -2286,7 +2970,7 @@ def test_preceding_correct_cfi_search_does_not_cross_wrong_path_barrier() -> Non
     assert bm._has_wrong_path_barrier_before(2) is True
 
 
-def test_plan_redirect_payload_immediately_recovers_when_target_is_already_queued() -> None:
+def test_plan_redirect_payload_does_not_reuse_target_queued_before_recovery_start() -> None:
     bm = BackendModel()
     bm.set_golden_trace(
         GoldenTrace(
@@ -2311,6 +2995,7 @@ def test_plan_redirect_payload_immediately_recovers_when_target_is_already_queue
                 ftq_offset=0,
                 is_last_in_entry=True,
                 path_state="correct",
+                golden_match_state="matched",
             ),
             QueueInstr(
                 cycle=0,
@@ -2358,23 +3043,110 @@ def test_plan_redirect_payload_immediately_recovers_when_target_is_already_queue
     )
 
     assert payload["target_pc"] == 0x8000001A
-    assert [int(entry.pc) for entry in bm._cfvec_queue] == [0x8000001A, 0x8000001C]
-    assert bm._cfvec_queue[0].golden_match_state == "matched"
-    assert bm._cfvec_queue[1].golden_match_state == "matched"
+    assert [int(entry.pc) for entry in bm._cfvec_queue] == [0x80000010, 0x8000001A, 0x8000001C]
     assert bm._cfvec_queue[0].path_state == "correct"
     assert bm._cfvec_queue[1].path_state == "correct"
-    assert bm._golden_wait_pc is None
-    assert bm._golden_wait_requires_redirect is False
-    assert bm._semantic_recovery_target_pc is None
-    assert bm._semantic_recovery_queue_start is None
+    assert bm._cfvec_queue[2].path_state == "correct"
+    assert bm._current_wrong_path_target_pc() == 0x8000001A
+    assert bm._current_recovery_target_pc() == 0x8000001A
+    assert bm._active_wrong_path_origin_index() == 3
 
 
-def test_commit_clears_waiting_target_slot_when_it_reaches_pending_level0_target():
+def test_redirect_drive_recovery_episode_does_not_remap_synthetic_context() -> None:
+    bm = BackendModel()
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x80000010 + idx * 4,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=idx,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="correct",
+                rob_commit_state="committed",
+            )
+            for idx in range(5)
+        ]
+    )
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=idx,
+                pc=0x8000004C + idx * 4,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=8 + idx,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="wrong",
+            )
+            for idx in range(2)
+        ]
+    )
+    bm._set_active_wrong_path_episode(
+        origin_index=5,
+        target_pc=0x8000004C,
+        redirect_context=None,
+        redirect_driven=False,
+    )
+
+    bm._plan_redirect_payload(
+        {
+            "target_pc": 0x8000004C,
+            "reason": "golden_first_mismatch_redirect",
+            "flush_on_drive": True,
+            "pc": 0x80000010,
+            "taken": 1,
+            "ftq_flag": 0,
+            "ftq_value": 0,
+            "ftq_offset": 0,
+            "branch_type": 1,
+            "ras_action": 0,
+            "level": 0,
+        }
+    )
+
+    episode = bm._active_wrong_path_episode()
+    assert episode is not None
+    assert episode["target_pc"] == 0x8000004C
+    assert episode["redirect_context"] is None
+    assert episode["expected_recovery_ftq"] == (0, 0)
+
+    bm._cfvec_queue_pop_head(1)
+
+    episode = bm._active_wrong_path_episode()
+    assert episode is not None
+    assert episode["origin_index"] == 4
+    assert episode["target_pc"] == 0x8000004C
+    assert episode["redirect_context"] is None
+    assert episode["expected_recovery_ftq"] == (0, 0)
+
+
+def test_offset_one_redirect_recovers_from_next_ftq() -> None:
+    bm = BackendModel()
+
+    assert bm._expected_recovery_ftq_for_redirect(
+        ftq_flag=0,
+        ftq_value=4,
+        ftq_offset=1,
+        is_rvc=False,
+    ) == (0, 5)
+
+
+def test_commit_clears_pending_target_ftq_when_it_reaches_pending_level0_target():
     bm = BackendModel()
     bm.commit_count = 64
     bm.commit_ptr_flag = 1
     bm.commit_ptr_value = 50
-    bm._pending_level0_target_ftq = (1, 51)
+    _set_pending_target_ftq(bm, ftq_flag=1, ftq_value=51)
     bm.ftq_entries.append(
         FtqEntry(ftq_flag=1, ftq_value=51, total_cfi=0, resolved_cfi=0, dispatch_complete=True, commit_ready_cycle=0)
     )
@@ -2383,7 +3155,7 @@ def test_commit_clears_waiting_target_slot_when_it_reaches_pending_level0_target
 
     assert head is not None
     assert (head.ftq_flag, head.ftq_value) == (1, 51)
-    assert bm._pending_level0_target_ftq is None
+    assert bm._find_next_commitable_entry() is None
 
 
 def test_level0_redirect_does_not_keep_waiting_when_target_pc_is_already_visible_on_correct_path() -> None:
@@ -2439,26 +3211,28 @@ def test_level0_redirect_does_not_keep_waiting_when_target_pc_is_already_visible
     )
 
     assert payload["target_pc"] == 0x8000001A
-    assert bm._pending_level0_target_ftq is None
+    assert bm._pending_level0_target_rank() is None
 
 
-def test_clear_stale_wait_states_drops_wrapped_pending_level0_target_when_target_absent() -> None:
+def test_clear_stale_auxiliary_states_drops_wrapped_pending_level0_target_when_target_absent() -> None:
     bm = BackendModel()
     bm.commit_count = 64
     bm.commit_ptr_flag = 0
     bm.commit_ptr_value = 10
-    bm._pending_level0_target_ftq = (1, 10)
+    _set_pending_target_ftq(bm, ftq_flag=1, ftq_value=10)
 
-    bm._clear_stale_wait_states()
+    bm._clear_stale_auxiliary_states()
 
-    assert bm._pending_level0_target_ftq is None
+    assert bm._pending_level0_target_rank() is None
 
 
-def test_clear_stale_wait_states_clears_semantic_recovery_without_pending_redirect_or_wrong_path() -> None:
+def test_clear_stale_auxiliary_states_clears_recovery_without_pending_redirect_or_wrong_path() -> None:
     bm = BackendModel()
-    bm._semantic_recovery_target_pc = 0x80000080
-    bm._semantic_recovery_queue_start = 7
-    bm._pending_redirect_origin_index = None
+    _set_recovery_episode(
+        bm,
+        target_pc=0x80000080,
+        origin_index=7,
+    )
     bm.pending_events.clear()
     bm._cfvec_queue.append(
         QueueInstr(
@@ -2476,19 +3250,516 @@ def test_clear_stale_wait_states_clears_semantic_recovery_without_pending_redire
         )
     )
 
-    bm._clear_stale_wait_states()
+    bm._clear_stale_auxiliary_states()
 
-    assert bm._semantic_recovery_target_pc is None
-    assert bm._semantic_recovery_queue_start is None
+    assert bm._current_recovery_target_pc() is None
+    assert bm._active_wrong_path_origin_index() is None
 
 
-def test_clear_stale_wait_states_clears_orphan_golden_wait_and_flushes_wrong_path_queue() -> None:
+def test_clear_stale_auxiliary_states_keeps_recovery_while_target_is_pending() -> None:
     bm = BackendModel()
-    bm._golden_wait_pc = 0x80000080
-    bm._golden_wait_requires_redirect = True
-    bm._pending_level0_target_ftq = None
-    bm._semantic_recovery_target_pc = None
-    bm._pending_redirect_origin_index = None
+    _set_recovery_episode(
+        bm,
+        target_pc=0x800000FA,
+        origin_index=11,
+    )
+    bm.pending_events.clear()
+    bm._cfvec_queue.append(
+        QueueInstr(
+            cycle=0,
+            slot=0,
+            pc=0x800000F2,
+            instr=0x00039463,
+            is_rvc=False,
+            pred_taken=True,
+            ftq_flag=0,
+            ftq_value=53,
+            ftq_offset=3,
+            is_last_in_entry=False,
+            path_state="correct",
+        )
+    )
+
+    bm._clear_stale_auxiliary_states()
+
+    assert bm._current_recovery_target_pc() == 0x800000FA
+    assert bm._active_wrong_path_origin_index() == 11
+
+
+def test_pending_redirect_on_commit_ptr_blocks_younger_commit_candidates() -> None:
+    bm = BackendModel()
+    bm.commit_count = 1
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 0
+    bm.pending_events.append(
+        BackendEvent(
+            kind="redirect",
+            ready_cycle=10,
+            payload={
+                "target_pc": 0x8000001A,
+                "reason": "golden_first_mismatch_redirect",
+                "ftq_flag": 0,
+                "ftq_value": 0,
+            },
+        )
+    )
+
+    assert bm._pending_redirect_blocks_commit(0, 1) is True
+
+
+def test_pending_older_redirect_blocks_commit_past_redirect_ftq() -> None:
+    bm = BackendModel()
+    bm.commit_count = 4
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 2
+    bm.pending_events.append(
+        BackendEvent(
+            kind="redirect",
+            ready_cycle=10,
+            payload={
+                "target_pc": 0x80000010,
+                "reason": "golden_first_mismatch_redirect",
+                "ftq_flag": 0,
+                "ftq_value": 3,
+            },
+        )
+    )
+
+    assert bm._pending_redirect_blocks_commit(0, 4) is True
+
+
+def test_queue_active_wrong_path_redirect_fails_on_stale_context_ftq() -> None:
+    bm = BackendModel()
+    bm.commit_count = 8
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 4
+    bm._set_active_wrong_path_episode(
+        origin_index=0,
+        target_pc=0x80000010,
+        redirect_context={
+            "pc": 0x8000000C,
+            "is_rvc": 0,
+            "ftq_flag": 0,
+            "ftq_value": 3,
+            "ftq_offset": 0,
+            "branch_type": 1,
+            "ras_action": 0,
+            "queue_index": None,
+        },
+        redirect_driven=False,
+    )
+
+    import pytest
+
+    with pytest.raises(AssertionError, match="active redirect context became stale before queue/drive"):
+        bm._queue_active_wrong_path_redirect()
+
+    assert len(bm.pending_events) == 0
+
+
+def test_queue_active_wrong_path_redirect_fails_when_queue_index_points_to_unrelated_cfi() -> None:
+    bm = BackendModel(redirect_min_delay=0, redirect_max_delay=0)
+    original_entry = QueueInstr(
+        cycle=0,
+        slot=0,
+        pc=0x8000000C,
+        instr=0x0000006F,
+        is_rvc=False,
+        pred_taken=True,
+        ftq_flag=0,
+        ftq_value=3,
+        ftq_offset=0,
+        is_last_in_entry=True,
+        path_state="correct",
+        is_cfi=True,
+    )
+    bm._cfvec_queue.append(original_entry)
+    redirect_context = bm._build_redirect_context_from_queue_entry(0, original_entry)
+    assert redirect_context is not None
+    bm._cfvec_queue[0] = QueueInstr(
+        cycle=1,
+        slot=0,
+        pc=0x8000000C,
+        instr=0x00008082,
+        is_rvc=True,
+        pred_taken=True,
+        ftq_flag=0,
+        ftq_value=3,
+        ftq_offset=0,
+        is_last_in_entry=True,
+        path_state="correct",
+        is_cfi=True,
+    )
+    bm._set_active_wrong_path_episode(
+        origin_index=0,
+        target_pc=0x80000010,
+        redirect_context=redirect_context,
+        redirect_driven=False,
+    )
+
+    import pytest
+
+    with pytest.raises(AssertionError, match="active redirect context became stale before queue/drive"):
+        bm._queue_active_wrong_path_redirect()
+
+    assert len(bm.pending_events) == 0
+
+
+def test_active_redirect_context_queue_index_remaps_after_prefix_pop() -> None:
+    bm = BackendModel()
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x8000003C,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=2,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="correct",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000040,
+                instr=0x0000006F,
+                is_rvc=False,
+                pred_taken=True,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="correct",
+                is_cfi=True,
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=2,
+                pc=0x80000044,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=2,
+                is_last_in_entry=True,
+                path_state="wrong",
+            ),
+        ]
+    )
+    redirect_context = bm._build_redirect_context_from_queue_entry(1, bm._cfvec_queue[1])
+    assert redirect_context is not None
+    bm._set_active_wrong_path_episode(
+        origin_index=2,
+        target_pc=0x80000080,
+        redirect_context=redirect_context,
+        redirect_driven=False,
+    )
+    bm.pending_events.append(
+        BackendEvent(
+            kind="redirect",
+            ready_cycle=10,
+            payload={"target_pc": 0x80000080, "reason": "unit_pending_redirect"},
+        )
+    )
+
+    bm._cfvec_queue_pop_head(1)
+
+    episode = bm._active_wrong_path_episode()
+    assert episode is not None
+    assert episode["origin_index"] == 1
+    assert episode["redirect_context"]["queue_index"] == 0
+    assert bm._redirect_context_queue_index_matches(episode["redirect_context"])
+
+
+def test_last_correct_cfi_context_queue_index_remaps_after_prefix_pop() -> None:
+    bm = BackendModel()
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x8000003C,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=2,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="correct",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000040,
+                instr=0x0000006F,
+                is_rvc=False,
+                pred_taken=True,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="correct",
+                is_cfi=True,
+            ),
+        ]
+    )
+    redirect_context = bm._build_redirect_context_from_queue_entry(1, bm._cfvec_queue[1])
+    assert redirect_context is not None
+    bm._last_correct_cfi_context = redirect_context
+
+    bm._cfvec_queue_pop_head(1)
+
+    assert bm._last_correct_cfi_context is not None
+    assert bm._last_correct_cfi_context["queue_index"] == 0
+    assert bm._redirect_context_queue_index_matches(bm._last_correct_cfi_context)
+
+
+def test_active_redirect_context_queue_index_remaps_after_prefix_remove_range() -> None:
+    bm = BackendModel()
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x8000003C,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=2,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="correct",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000040,
+                instr=0x0000006F,
+                is_rvc=False,
+                pred_taken=True,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="correct",
+                is_cfi=True,
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=2,
+                pc=0x80000044,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=2,
+                is_last_in_entry=True,
+                path_state="wrong",
+            ),
+        ]
+    )
+    redirect_context = bm._build_redirect_context_from_queue_entry(1, bm._cfvec_queue[1])
+    assert redirect_context is not None
+    bm._set_active_wrong_path_episode(
+        origin_index=2,
+        target_pc=0x80000080,
+        redirect_context=redirect_context,
+        redirect_driven=False,
+    )
+    bm.pending_events.append(
+        BackendEvent(
+            kind="redirect",
+            ready_cycle=10,
+            payload={"target_pc": 0x80000080, "reason": "unit_pending_redirect"},
+        )
+    )
+
+    bm._cfvec_queue_remove_range(0, 1)
+
+    episode = bm._active_wrong_path_episode()
+    assert episode is not None
+    assert episode["origin_index"] == 1
+    assert episode["redirect_context"]["queue_index"] == 0
+    assert bm._redirect_context_queue_index_matches(episode["redirect_context"])
+
+
+def test_active_redirect_context_ftq_one_after_commit_ptr_is_not_stale() -> None:
+    bm = BackendModel(redirect_min_delay=0, redirect_max_delay=0)
+    bm.commit_count = 8
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 2
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x80000040,
+                instr=0x0000006F,
+                is_rvc=False,
+                pred_taken=True,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="correct",
+                is_cfi=True,
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000044,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=2,
+                is_last_in_entry=True,
+                path_state="wrong",
+            ),
+        ]
+    )
+    redirect_context = bm._build_redirect_context_from_queue_entry(0, bm._cfvec_queue[0])
+    assert redirect_context is not None
+    bm._set_active_wrong_path_episode(
+        origin_index=1,
+        target_pc=0x80000080,
+        redirect_context=redirect_context,
+        redirect_driven=False,
+    )
+
+    assert bm._queue_active_wrong_path_redirect() is True
+    assert len(bm.pending_events) == 1
+    assert bm.pending_events[0].payload["ftq_value"] == 3
+
+
+def test_active_redirect_context_ftq_equal_commit_ptr_is_not_stale_when_source_matches() -> None:
+    bm = BackendModel(redirect_min_delay=0, redirect_max_delay=0)
+    bm.commit_count = 8
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 3
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x80000040,
+                instr=0x0000006F,
+                is_rvc=False,
+                pred_taken=True,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="correct",
+                is_cfi=True,
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000044,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=2,
+                is_last_in_entry=True,
+                path_state="wrong",
+            ),
+        ]
+    )
+    redirect_context = bm._build_redirect_context_from_queue_entry(0, bm._cfvec_queue[0])
+    assert redirect_context is not None
+    bm._set_active_wrong_path_episode(
+        origin_index=1,
+        target_pc=0x80000080,
+        redirect_context=redirect_context,
+        redirect_driven=False,
+    )
+
+    assert bm._queue_active_wrong_path_redirect() is True
+    assert len(bm.pending_events) == 1
+    assert bm.pending_events[0].payload["ftq_value"] == 3
+
+
+def test_restore_active_wrong_path_episode_fails_on_stale_redirect_context() -> None:
+    bm = BackendModel()
+    bm.commit_count = 8
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 4
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x8000000C,
+                instr=0x0000006F,
+                is_rvc=False,
+                pred_taken=True,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="wrong",
+                is_cfi=True,
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000010,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=4,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="wrong",
+            ),
+        ]
+    )
+    bm._set_active_wrong_path_episode(
+        origin_index=0,
+        target_pc=0x80000010,
+        redirect_context={
+            "pc": 0x8000000C,
+            "is_rvc": 0,
+            "ftq_flag": 0,
+            "ftq_value": 3,
+            "ftq_offset": 0,
+            "branch_type": 2,
+            "ras_action": 0,
+            "queue_index": 0,
+        },
+        redirect_driven=False,
+    )
+    bm.pending_events.append(
+        BackendEvent(
+            kind="redirect",
+            ready_cycle=10,
+            payload={"target_pc": 0x80000010, "reason": "unit_pending_redirect"},
+        )
+    )
+
+    import pytest
+
+    with pytest.raises(AssertionError, match="active redirect context became stale before queue/drive"):
+        bm._cfvec_queue_pop_head(1)
+
+
+def test_clear_stale_auxiliary_states_wrong_path_without_active_recovery_fails_fast() -> None:
+    bm = BackendModel()
+    bm._clear_pending_level0_target_ftq()
+    bm._clear_active_wrong_path_episode()
     bm.pending_events.clear()
     bm.ftq_entries.clear()
     bm._current_ftq_entry = None
@@ -2523,11 +3794,326 @@ def test_clear_stale_wait_states_clears_orphan_golden_wait_and_flushes_wrong_pat
         ]
     )
 
-    bm._clear_stale_wait_states()
+    import pytest
 
-    assert bm._golden_wait_pc is None
-    assert bm._golden_wait_requires_redirect is False
-    assert len(bm._cfvec_queue) == 0
+    with pytest.raises(AssertionError, match="wrong-path residue exists without active redirect/recovery"):
+        bm._clear_stale_auxiliary_states()
+
+
+def test_recovery_requeues_resolve_for_kept_skipped_cfi() -> None:
+    bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0)
+    bm.current_cycle = 100
+    _set_recovery_episode(
+        bm,
+        target_pc=0x80000020,
+        origin_index=1,
+    )
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=10,
+                slot=0,
+                pc=0x8000001C,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=6,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="correct",
+                golden_match_state="matched",
+            ),
+            QueueInstr(
+                cycle=10,
+                slot=1,
+                pc=0x80000020,
+                instr=0x00038463,
+                is_rvc=False,
+                pred_taken=True,
+                ftq_flag=0,
+                ftq_value=7,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="wrong",
+                resolve_state="skipped",
+                golden_match_state="mismatched",
+                is_cfi=True,
+            ),
+        ]
+    )
+
+    bm._apply_recovery_if_target_queued()
+
+    assert bm._cfvec_queue[1].path_state == "unknown"
+    assert bm._cfvec_queue[1].resolve_state == "pending"
+    assert len(bm._pending_resolves) == 1
+    resolve = bm._pending_resolves[0]
+    assert int(resolve.inst_pc) == 0x80000020
+    assert (int(resolve.ftq_flag), int(resolve.ftq_value)) == (0, 7)
+    assert int(resolve.queue_index) == 1
+
+
+def test_recovery_residual_flushes_when_target_ftq_not_queued() -> None:
+    bm = BackendModel()
+    _set_recovery_episode(
+        bm,
+        target_pc=0x8000004C,
+        origin_index=0,
+        expected_recovery_ftq=(0, 4),
+    )
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=10,
+                slot=slot,
+                pc=0x8000004C + slot * 4,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=9,
+                ftq_offset=1 + slot * 2,
+                is_last_in_entry=(slot == 3),
+                path_state="wrong",
+                golden_match_state="mismatched",
+            )
+            for slot in range(4)
+        ]
+    )
+
+    bm._flush_recovery_residuals_if_target_not_queued()
+
+    assert list(bm._cfvec_queue) == []
+    episode = bm._active_wrong_path_episode()
+    assert episode is not None
+    assert episode["target_pc"] == 0x8000004C
+    assert episode["expected_recovery_ftq"] == (0, 4)
+    assert episode["origin_index"] == 0
+
+
+def test_recovery_residual_flush_starts_after_expected_recovery_ftq() -> None:
+    bm = BackendModel()
+    _set_recovery_episode(
+        bm,
+        target_pc=0x8000004C,
+        origin_index=0,
+        expected_recovery_ftq=(0, 5),
+    )
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=10,
+                slot=0,
+                pc=0x80000030,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=5,
+                ftq_offset=1,
+                is_last_in_entry=False,
+                path_state="wrong",
+                golden_match_state="mismatched",
+            ),
+            QueueInstr(
+                cycle=10,
+                slot=1,
+                pc=0x80000040,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=7,
+                ftq_offset=1,
+                is_last_in_entry=True,
+                path_state="wrong",
+                golden_match_state="mismatched",
+            ),
+        ]
+    )
+
+    bm._flush_recovery_residuals_if_target_not_queued()
+
+    assert [entry.pc for entry in bm._cfvec_queue] == [0x80000030]
+    episode = bm._active_wrong_path_episode()
+    assert episode is not None
+    assert episode["origin_index"] == 1
+    assert episode["target_pc"] == 0x8000004C
+    assert episode["expected_recovery_ftq"] == (0, 5)
+
+
+def test_recovery_target_on_committed_ftq_fails_fast() -> None:
+    bm = BackendModel()
+    bm.commit_count = 5
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 2
+    _set_recovery_episode(
+        bm,
+        target_pc=0x80000010,
+        origin_index=0,
+    )
+    bm._cfvec_queue.append(
+        QueueInstr(
+            cycle=10,
+            slot=0,
+            pc=0x80000010,
+            instr=0x00000013,
+            is_rvc=False,
+            pred_taken=False,
+            ftq_flag=0,
+            ftq_value=2,
+            ftq_offset=0,
+            is_last_in_entry=True,
+            path_state="wrong",
+            golden_match_state="mismatched",
+        )
+    )
+
+    import pytest
+
+    with pytest.raises(AssertionError, match="recovery target selected stale committed FTQ"):
+        bm._apply_recovery_if_target_queued()
+
+    assert bm._cfvec_queue[0].path_state == "wrong"
+    assert bm._current_recovery_target_pc() == 0x80000010
+
+
+def test_recovery_queue_start_does_not_skip_older_unknown_prefix() -> None:
+    bm = BackendModel()
+    _set_recovery_episode(
+        bm,
+        target_pc=0x80000034,
+        origin_index=2,
+    )
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x8000004C,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=5,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="unknown",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000050,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=5,
+                ftq_offset=2,
+                is_last_in_entry=False,
+                path_state="unknown",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=2,
+                pc=0x80000034,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=11,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="unknown",
+            ),
+        ]
+    )
+
+    assert bm._current_recovery_queue_start() == 0
+
+
+def test_remove_range_closes_surviving_ftq_prefix() -> None:
+    bm = BackendModel()
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x80000040,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="correct",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000044,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=3,
+                ftq_offset=2,
+                is_last_in_entry=False,
+                path_state="wrong",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=2,
+                pc=0x80000010,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=4,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="wrong",
+            ),
+        ]
+    )
+
+    bm._cfvec_queue_remove_range(1, 2)
+
+    assert bm._cfvec_queue[0].pc == 0x80000040
+    assert bm._cfvec_queue[0].is_last_in_entry is True
+
+
+def test_committed_queue_head_behind_commit_ptr_fails_fast() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([]))
+    bm.current_cycle = 100
+    bm.commit_count = 10
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 10
+    bm._cfvec_queue.append(
+        QueueInstr(
+            cycle=0,
+            slot=0,
+            pc=0x80000040,
+            instr=0x00000013,
+            is_rvc=False,
+            pred_taken=False,
+            ftq_flag=0,
+            ftq_value=6,
+            ftq_offset=0,
+            is_last_in_entry=True,
+            path_state="correct",
+            rob_commit_state="committed",
+        )
+    )
+    bm._commit_queue.append(0)
+
+    import pytest
+
+    with pytest.raises(AssertionError, match="cfvec queue head falls behind commit_ptr"):
+        bm._plan_commit_entry_for_cycle()
 
 
 def test_pending_level0_target_serializes_commit_before_wrap_target_entry() -> None:
@@ -2539,7 +4125,7 @@ def test_pending_level0_target_serializes_commit_before_wrap_target_entry() -> N
     bm.commit_count = 255
     bm.commit_ptr_flag = 1
     bm.commit_ptr_value = 59
-    bm._pending_level0_target_ftq = (0, 0)
+    _set_pending_target_ftq(bm, ftq_flag=0, ftq_value=0)
     bm.ftq_entries.extend(
         [
             FtqEntry(ftq_flag=1, ftq_value=60, total_cfi=1, resolved_cfi=1, dispatch_complete=True, commit_ready_cycle=0),
@@ -2561,10 +4147,10 @@ def test_pending_level0_target_serializes_commit_before_wrap_target_entry() -> N
         (1, 63),
         (0, 0),
     ]
-    assert bm._pending_level0_target_ftq == (0, 0)
+    assert bm._candidate_is_pending_level0_target(0, 0) is True
 
 
-def test_commit_prunes_older_wrap_entries_when_pointer_advances() -> None:
+def test_commit_with_older_wrap_entries_behind_pointer_fails_fast() -> None:
     dut = _DummyDut()
     bm = BackendModel()
     bm.bind(dut)
@@ -2583,13 +4169,10 @@ def test_commit_prunes_older_wrap_entries_when_pointer_advances() -> None:
         ]
     )
 
-    head = bm._plan_commit_entry_for_cycle()
+    import pytest
 
-    assert head is not None
-    assert (head.ftq_flag, head.ftq_value) == (1, 58)
-    assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (1, 58)
-    assert bm.commit_count == 252
-    assert list((entry.ftq_flag, entry.ftq_value) for entry in bm.ftq_entries) == []
+    with pytest.raises(AssertionError, match="stale ftq entry remained behind commit_ptr without commit/redirect"):
+        bm._plan_commit_entry_for_cycle()
 
 
 def test_backend_model_consumes_backend_observation_snapshot() -> None:
@@ -2852,6 +4435,95 @@ def test_cfvec_queue_commit_pops_only_queue_head_ftq_entry() -> None:
     assert bm.commit_count == 1
 
 
+def test_cfvec_unknown_head_blocks_commit_even_with_stale_debug_commit_queue() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([]))
+    bm.current_cycle = 10
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x80000300,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=12,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="unknown",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000304,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=13,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="correct",
+                rob_commit_state="committed",
+            ),
+        ]
+    )
+    bm._commit_queue.append(1)
+
+    assert bm._plan_instruction_commits_for_cycle() == 0
+    assert bm._plan_commit_entry_for_cycle() is None
+    assert [entry.pc for entry in bm._cfvec_queue] == [0x80000300, 0x80000304]
+    assert list(bm._commit_queue) == []
+
+
+def test_cfvec_queue_ftq_commit_ignores_stale_debug_commit_queue() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([]))
+    bm.current_cycle = 10
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x80000320,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=14,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="correct",
+                rob_commit_state="committed",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000324,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=15,
+                ftq_offset=0,
+                is_last_in_entry=True,
+                path_state="correct",
+                rob_commit_state="committed",
+            ),
+        ]
+    )
+    bm._commit_queue.append(1)
+
+    commit_entry = bm._plan_commit_entry_for_cycle()
+
+    assert commit_entry is not None
+    assert (int(commit_entry.ftq_flag), int(commit_entry.ftq_value)) == (0, 14)
+    assert [entry.pc for entry in bm._cfvec_queue] == [0x80000324]
+    assert (int(bm.commit_ptr_flag), int(bm.commit_ptr_value)) == (0, 14)
+
+
 def test_callret_emitted_mark_uses_ftq_offset_identity_after_pop_head() -> None:
     bm = BackendModel()
     bm._cfvec_queue.extend(
@@ -2955,7 +4627,11 @@ def test_cfvec_queue_pop_head_recomputes_wrong_path_origin_when_suffix_survives(
             ),
         ]
     )
-    bm._pending_redirect_origin_index = 1
+    bm._set_active_wrong_path_episode(
+        origin_index=1,
+        target_pc=None,
+        redirect_context=None,
+    )
     bm.pending_events.append(
         BackendEvent(
             kind="redirect",
@@ -2968,7 +4644,7 @@ def test_cfvec_queue_pop_head_recomputes_wrong_path_origin_when_suffix_survives(
 
     assert len(bm._cfvec_queue) == 1
     assert bm._cfvec_queue[0].path_state == "wrong"
-    assert bm._pending_redirect_origin_index == 0
+    assert bm._active_wrong_path_origin_index() == 0
 
 
 def test_cfvec_queue_remove_range_does_not_rebuild_origin_without_pending_redirect() -> None:
@@ -3016,13 +4692,13 @@ def test_cfvec_queue_remove_range_does_not_rebuild_origin_without_pending_redire
             ),
         ]
     )
-    bm._pending_redirect_origin_index = None
+    bm._clear_active_wrong_path_episode()
 
     bm._cfvec_queue_remove_range(0, 1)
 
     assert len(bm._cfvec_queue) == 2
     assert all(entry.path_state == "wrong" for entry in bm._cfvec_queue)
-    assert bm._pending_redirect_origin_index is None
+    assert bm._active_wrong_path_origin_index() is None
 
 
 def test_cfvec_queue_flush_wrong_path_falls_back_to_first_wrong_when_origin_missing() -> None:
@@ -3070,12 +4746,140 @@ def test_cfvec_queue_flush_wrong_path_falls_back_to_first_wrong_when_origin_miss
             ),
         ]
     )
-    bm._pending_redirect_origin_index = None
+    bm._clear_active_wrong_path_episode()
 
     bm._cfvec_queue_flush_wrong_path()
 
     assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [(0x80003000, "correct")]
-    assert bm._pending_redirect_origin_index is None
+    assert bm._active_wrong_path_origin_index() is None
+
+
+def test_wrong_path_flush_closes_surviving_ftq_prefix_for_commit() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([]))
+    bm.current_cycle = 100
+    bm.commit_count = 25
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 25
+    bm.ftq_entries.append(
+        FtqEntry(
+            ftq_flag=0,
+            ftq_value=26,
+            total_cfi=0,
+            resolved_cfi=0,
+            dispatch_complete=False,
+            commit_ready_cycle=0,
+        )
+    )
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x80000014,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=26,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="correct",
+                rob_commit_state="committed",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000018,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=26,
+                ftq_offset=2,
+                is_last_in_entry=False,
+                path_state="correct",
+                rob_commit_state="committed",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=2,
+                pc=0x8000001C,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=26,
+                ftq_offset=4,
+                is_last_in_entry=False,
+                path_state="wrong",
+            ),
+        ]
+    )
+    bm._set_active_wrong_path_episode(
+        origin_index=2,
+        target_pc=0x80000030,
+        redirect_context=None,
+    )
+
+    bm._cfvec_queue_flush_wrong_path()
+
+    assert [entry.pc for entry in bm._cfvec_queue] == [0x80000014, 0x80000018]
+    assert bm._cfvec_queue[-1].is_last_in_entry is True
+    commit_entry = bm._plan_commit_entry_for_cycle()
+    assert commit_entry is not None
+    assert (int(commit_entry.ftq_flag), int(commit_entry.ftq_value)) == (0, 26)
+
+
+def test_redirect_flush_keeps_redirect_ftq_prefix_open() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([]))
+    bm.current_cycle = 100
+    bm.commit_count = 25
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 25
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x8000002C,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=26,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="correct",
+                rob_commit_state="committed",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000030,
+                instr=0x00000013,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=26,
+                ftq_offset=2,
+                is_last_in_entry=False,
+                path_state="wrong",
+            ),
+        ]
+    )
+    bm._set_active_wrong_path_episode(
+        origin_index=1,
+        target_pc=0x80000034,
+        redirect_context=None,
+    )
+
+    bm._cfvec_queue_flush_wrong_path(keep_open_ftqs={(0, 26)})
+
+    assert [entry.pc for entry in bm._cfvec_queue] == [0x8000002C]
+    assert bm._cfvec_queue[0].is_last_in_entry is False
+    assert bm._plan_commit_entry_for_cycle() is None
 
 
 def test_cfvec_queue_commit_waits_for_correct_path_cfi_resolve() -> None:
@@ -3121,7 +4925,7 @@ def test_cfvec_queue_commit_waits_for_correct_path_cfi_resolve() -> None:
     assert list(bm._cfvec_queue) == []
 
 
-def test_cfvec_queue_stale_head_equal_to_commit_ptr_is_dropped() -> None:
+def test_cfvec_queue_stale_head_equal_to_commit_ptr_fails_fast() -> None:
     bm = BackendModel()
     bm.set_golden_trace(
         GoldenTrace([TraceEntry(index=0, pc=0x80000000, instr=0x00000013, size=4)])
@@ -3150,15 +4954,15 @@ def test_cfvec_queue_stale_head_equal_to_commit_ptr_is_dropped() -> None:
         )
     )
 
-    commit_entry = bm._plan_commit_entry_for_cycle()
+    import pytest
 
-    assert commit_entry is None
-    assert len(bm._cfvec_queue) == 0
-
-
+    with pytest.raises(AssertionError, match="cfvec queue head falls behind commit_ptr"):
+        bm._plan_commit_entry_for_cycle()
 
 
-def test_orphan_missing_expected_ftq_is_pruned_and_does_not_block_commit_head() -> None:
+
+
+def test_orphan_missing_expected_ftq_fails_fast_instead_of_silent_prune() -> None:
     bm = BackendModel()
     bm.set_golden_trace(GoldenTrace([TraceEntry(index=0, pc=0x80000000, instr=0x00000013, size=4)]))
     bm.current_cycle = 100
@@ -3225,12 +5029,10 @@ def test_orphan_missing_expected_ftq_is_pruned_and_does_not_block_commit_head() 
         ]
     )
 
-    commit_entry = bm._plan_commit_entry_for_cycle()
+    import pytest
 
-    assert commit_entry is not None
-    assert int(commit_entry.ftq_flag) == 0
-    assert int(commit_entry.ftq_value) == 15
-    assert all((int(entry.ftq_flag), int(entry.ftq_value)) != (0, 14) for entry in bm.ftq_entries)
+    with pytest.raises(AssertionError, match="silent FTQ pruning is forbidden"):
+        bm._plan_commit_entry_for_cycle()
 
 
 def test_golden_trace_zero_instruction_entry_does_not_wait_for_commit_visibility() -> None:
@@ -3256,7 +5058,7 @@ def test_golden_trace_zero_instruction_entry_does_not_wait_for_commit_visibility
     assert (commit_entry.ftq_flag, commit_entry.ftq_value) == (0, 7)
 
 
-def test_semantic_recovery_window_blocks_fallback_commit_when_queue_empty() -> None:
+def test_recovery_window_blocks_fallback_commit_when_queue_empty() -> None:
     bm = BackendModel()
     bm.set_golden_trace(
         GoldenTrace(
@@ -3266,7 +5068,11 @@ def test_semantic_recovery_window_blocks_fallback_commit_when_queue_empty() -> N
         )
     )
     bm.current_cycle = 10
-    bm._semantic_recovery_target_pc = 0x80000000
+    _set_recovery_episode(
+        bm,
+        target_pc=0x80000000,
+        origin_index=0,
+    )
     bm.ftq_entries.append(
         FtqEntry(
             ftq_flag=0,
@@ -3285,7 +5091,7 @@ def test_semantic_recovery_window_blocks_fallback_commit_when_queue_empty() -> N
     assert len(bm.ftq_entries) == 1
 
 
-def test_wrong_path_only_cfvec_queue_does_not_block_fallback_commit() -> None:
+def test_wrong_path_only_cfvec_queue_blocks_fallback_commit() -> None:
     bm = BackendModel()
     bm.set_golden_trace(
         GoldenTrace(
@@ -3326,9 +5132,8 @@ def test_wrong_path_only_cfvec_queue_does_not_block_fallback_commit() -> None:
 
     commit_entry = bm._plan_commit_entry_for_cycle()
 
-    assert commit_entry is not None
-    assert (int(commit_entry.ftq_flag), int(commit_entry.ftq_value)) == (0, 13)
-    assert (int(bm.commit_ptr_flag), int(bm.commit_ptr_value)) == (0, 13)
+    assert commit_entry is None
+    assert (int(bm.commit_ptr_flag), int(bm.commit_ptr_value)) == (0, 12)
 
 
 def test_latest_non_stale_redirect_drive_context_prefers_correct_cfvec_queue_group() -> None:
@@ -3424,7 +5229,7 @@ def test_pending_older_redirect_blocks_younger_fallback_commit() -> None:
     assert (int(bm.commit_ptr_flag), int(bm.commit_ptr_value)) == (0, 0)
 
 
-def test_waiting_target_group_cfi_prefix_queues_new_mismatch_redirect() -> None:
+def test_target_group_cfi_prefix_queues_new_mismatch_redirect() -> None:
     dut = _DummyDut()
     bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0)
     bm.bind(dut)
@@ -3436,9 +5241,7 @@ def test_waiting_target_group_cfi_prefix_queues_new_mismatch_redirect() -> None:
         )
     )
     bm.current_cycle = 100
-    bm._golden_wait_pc = 0x80000028
-    bm._golden_wait_requires_redirect = True
-    bm._pending_level0_target_ftq = (0, 1)
+    _set_pending_target_ftq(bm, ftq_flag=0, ftq_value=1)
 
     _drive_cfvec_slot(
         dut,
@@ -3459,7 +5262,69 @@ def test_waiting_target_group_cfi_prefix_queues_new_mismatch_redirect() -> None:
     assert "golden_first_mismatch_redirect" in reasons
 
 
-def test_same_cycle_wrong_path_slot_after_golden_wait_still_samples_and_queues_redirect() -> None:
+def test_matching_target_packet_stays_wrong_until_pending_redirect_is_driven() -> None:
+    dut = _DummyDut()
+    bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0)
+    bm.bind(dut)
+    bm._set_active_wrong_path_episode(
+        origin_index=0,
+        target_pc=0x800000FA,
+        redirect_context=None,
+        redirect_driven=False,
+    )
+    bm.pending_events.append(
+        BackendEvent(
+            kind="redirect",
+            ready_cycle=10,
+            payload={
+                "target_pc": 0x800000FA,
+                "reason": "golden_first_mismatch_redirect",
+                "flush_on_drive": True,
+                "ftq_flag": 0,
+                "ftq_value": 0x35,
+            },
+        )
+    )
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x800000FA,
+        instr=0xFFE40413,
+        is_rvc=0,
+        pred_taken=0,
+        ftq_flag=1,
+        ftq_value=0x0B,
+        ftq_offset=0,
+        is_last=0,
+    )
+    _drive_cfvec_slot(
+        dut,
+        1,
+        valid=1,
+        pc=0x800000FC,
+        instr=0x012000EF,
+        is_rvc=0,
+        pred_taken=1,
+        ftq_flag=1,
+        ftq_value=0x0B,
+        ftq_offset=2,
+        is_last=1,
+    )
+
+    bm.current_cycle = 9
+    bm._sample_cfvec()
+
+    assert bm._current_wrong_path_target_pc() == 0x800000FA
+    assert [(entry.pc, entry.path_state, entry.resolve_state) for entry in bm._cfvec_queue] == [
+        (0x800000FA, "wrong", "not_needed"),
+        (0x800000FC, "wrong", "pending"),
+    ]
+    assert sum(1 for evt in bm.pending_events if evt.kind == "redirect") == 1
+
+
+def test_same_cycle_wrong_path_slot_after_target_wait_still_samples_without_splitting_episode() -> None:
     dut = _DummyDut()
     bm = BackendModel(resolve_min_delay=0, resolve_max_delay=0, redirect_min_delay=0, redirect_max_delay=0)
     bm.bind(dut)
@@ -3530,7 +5395,7 @@ def test_same_cycle_wrong_path_slot_after_golden_wait_still_samples_and_queues_r
     bm.current_cycle = 0
     bm._sample_cfvec()
 
-    assert bm._golden_wait_pc == 0x80000028
+    assert bm._current_wrong_path_target_pc() == 0x80000028
     assert [(entry.pc, entry.path_state) for entry in bm._cfvec_queue] == [
         (0x8000001A, "correct"),
         (0x8000001C, "correct"),
@@ -3538,12 +5403,13 @@ def test_same_cycle_wrong_path_slot_after_golden_wait_still_samples_and_queues_r
         (0x80000024, "wrong"),
     ]
     queued_redirects = [evt for evt in bm.pending_events if evt.kind == "redirect"]
-    assert any(str(evt.payload.get("reason", "")) == "golden_first_mismatch_redirect" for evt in queued_redirects)
-    mismatch_redirect = next(
-        evt for evt in queued_redirects if str(evt.payload.get("reason", "")) == "golden_first_mismatch_redirect"
-    )
-    assert int(mismatch_redirect.payload["pc"]) == 0x80000020
-    assert int(mismatch_redirect.payload["target_pc"]) == 0x80000028
+    assert len(queued_redirects) == 1
+    assert queued_redirects[0].payload["reason"] == "golden_first_mismatch_redirect"
+    assert int(queued_redirects[0].payload["pc"]) == 0x80000020
+    assert int(queued_redirects[0].payload["target_pc"]) == 0x80000028
+    assert len(bm._pending_resolves) == 1
+    assert bm._pending_resolves[0].inst_pc == 0x80000020
+    assert bm._pending_resolves[0].target == 0x80000028
 
 
 def test_ftq_entry_with_pending_redirect_debt_cannot_commit() -> None:
@@ -3734,7 +5600,7 @@ def test_ready_exception_does_not_block_commit_entry() -> None:
     assert int(commit_entry.ftq_value) == 1
 
 
-def test_commit_queue_fail_fast_on_wrong_path_entry() -> None:
+def test_commit_queue_consistency_prunes_wrong_path_entry_before_planning_commit() -> None:
     bm = BackendModel()
     bm.current_cycle = 10
     bm._cfvec_queue.append(
@@ -3754,7 +5620,33 @@ def test_commit_queue_fail_fast_on_wrong_path_entry() -> None:
     )
     bm._commit_queue.append(0)
 
-    import pytest
+    assert bm._plan_instruction_commits_for_cycle() == 0
+    assert list(bm._commit_queue) == []
 
-    with pytest.raises(AssertionError, match="commit_queue invariant violated: non-correct-path instruction"):
-        bm._plan_instruction_commits_for_cycle()
+
+def test_plan_cycle_actions_defers_commit_ptr_update_until_commit_is_driven() -> None:
+    bm = BackendModel()
+    bm.current_cycle = 10
+    bm.set_can_accept(1)
+    bm.ftq_entries.append(
+        FtqEntry(
+            ftq_flag=0,
+            ftq_value=1,
+            total_cfi=0,
+            resolved_cfi=0,
+            dispatch_complete=True,
+            commit_ready_cycle=0,
+        )
+    )
+
+    actions = bm.plan_cycle_actions()
+
+    assert actions.commit_entry is not None
+    assert (int(actions.commit_entry.ftq_flag), int(actions.commit_entry.ftq_value)) == (0, 1)
+    assert (int(bm.commit_ptr_flag), int(bm.commit_ptr_value)) == (0, 0)
+    assert int(bm.commit_count) == 0
+
+    bm.commit_entry_driven(actions.commit_entry)
+
+    assert (int(bm.commit_ptr_flag), int(bm.commit_ptr_value)) == (0, 1)
+    assert int(bm.commit_count) == 1

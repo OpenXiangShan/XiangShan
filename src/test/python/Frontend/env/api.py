@@ -120,11 +120,22 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
             "commit_ready_cycle": int(getattr(entry, "commit_ready_cycle", 0)),
         }
 
-    pending_level0_target_ftq = getattr(backend_model, "_pending_level0_target_ftq", None)
     cfvec_queue = list(getattr(backend_model, "_cfvec_queue", [])) if backend_model is not None else []
     commit_queue = list(getattr(backend_model, "_commit_queue", [])) if backend_model is not None else []
-    semantic_recovery_target_pc = (
-        getattr(backend_model, "_semantic_recovery_target_pc", None) if backend_model is not None else None
+    recovery_target_pc = (
+        backend_model._current_recovery_target_pc()  # pylint: disable=protected-access
+        if backend_model is not None and hasattr(backend_model, "_current_recovery_target_pc")
+        else None
+    )
+    wrong_path_target_pc = (
+        backend_model._current_wrong_path_target_pc()  # pylint: disable=protected-access
+        if backend_model is not None and hasattr(backend_model, "_current_wrong_path_target_pc")
+        else None
+    )
+    active_wrong_path_episode = (
+        backend_model._active_wrong_path_view()  # pylint: disable=protected-access
+        if backend_model is not None and hasattr(backend_model, "_active_wrong_path_view")
+        else None
     )
     recent_redirect = None
     if backend_model is not None:
@@ -197,8 +208,9 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
         "cursor": (None if trace is None else int(trace.cursor)),
         "total_entries": (0 if trace is None else int(len(trace.entries))),
         "golden_pc": _get_current_golden_pc(trace, env.backend_model) if trace is not None else None,
-        "golden_wait_pc": getattr(env.backend_model, "_golden_wait_pc", None),
-        "semantic_recovery_target_pc": semantic_recovery_target_pc,
+        "wrong_path_target_pc": wrong_path_target_pc,
+        "recovery_target_pc": recovery_target_pc,
+        "active_wrong_path_episode": active_wrong_path_episode,
         "backend_can_accept": _read_sig(dut, "io_backend_canAccept", 0),
         "from_ftq": {
             "wen": _read_sig(dut, "io_backend_fromFtq_wen", 0),
@@ -216,14 +228,7 @@ def api_Frontend_capture_frontend_stall_snapshot(env) -> dict:
                 "flag": int(getattr(backend_model, "commit_ptr_flag", 0)),
                 "value": int(getattr(backend_model, "commit_ptr_value", 0)),
             },
-            "pending_level0_target_ftq": (
-                None
-                if pending_level0_target_ftq is None
-                else {
-                    "flag": int(pending_level0_target_ftq[0]),
-                    "value": int(pending_level0_target_ftq[1]),
-                }
-            ),
+            "active_wrong_path_episode": active_wrong_path_episode,
             "current_ftq_entry": _encode_ftq_entry(getattr(backend_model, "_current_ftq_entry", None)),
             "ftq_entries": [
                 _encode_ftq_entry(entry) for entry in list(getattr(backend_model, "ftq_entries", []))[:4]
@@ -445,12 +450,13 @@ def _format_stall_snapshot(snapshot: dict) -> str:
 
     return (
         "backend_can_accept={backend_can_accept} "
-        "golden_pc={golden_pc} golden_wait_pc={golden_wait_pc} "
-        "semantic_recovery_target_pc={semantic_recovery_target_pc} "
+        "golden_pc={golden_pc} wrong_path_target_pc={wrong_path_target_pc} "
+        "recovery_target_pc={recovery_target_pc} "
+        "active_wrong_path_episode={active_wrong_path_episode} "
         "from_ftq_wen={from_ftq_wen} from_ftq_idx={from_ftq_idx} from_ftq_start={from_ftq_start} "
         "from_ifu_gpaddr=({from_ifu_wen},{from_ifu_waddr},0x{from_ifu_gpaddr:x},vs_nonleaf={from_ifu_vs_nonleaf}) "
         "commit_ptr=({commit_ptr_flag},{commit_ptr_value}) "
-        "pending_level0_target_ftq={pending_level0_target_ftq} "
+        "backend_state_active_wrong_path_episode={backend_state_active_wrong_path_episode} "
         "current_ftq_entry={current_ftq_entry} "
         "ftq_entries_head={ftq_entries_head} "
         "cfvec_queue_len={cfvec_queue_len} cfvec_queue_head={cfvec_queue_head} "
@@ -482,8 +488,36 @@ def _format_stall_snapshot(snapshot: dict) -> str:
     ).format(
         backend_can_accept=int(snapshot["backend_can_accept"]),
         golden_pc=_format_optional_pc(snapshot["golden_pc"]),
-        golden_wait_pc=_format_optional_pc(snapshot["golden_wait_pc"]),
-        semantic_recovery_target_pc=_format_optional_pc(snapshot["semantic_recovery_target_pc"]),
+        wrong_path_target_pc=_format_optional_pc(snapshot["wrong_path_target_pc"]),
+        recovery_target_pc=_format_optional_pc(snapshot["recovery_target_pc"]),
+        active_wrong_path_episode=(
+            "none"
+            if snapshot["active_wrong_path_episode"] is None
+            else "({stage},origin={origin},target={target},ctx={ctx})".format(
+                stage=str(snapshot["active_wrong_path_episode"]["stage"]),
+                origin=(
+                    "none"
+                    if snapshot["active_wrong_path_episode"]["origin_index"] is None
+                    else int(snapshot["active_wrong_path_episode"]["origin_index"])
+                ),
+                target=_format_optional_pc(snapshot["active_wrong_path_episode"]["target_pc"]),
+                ctx=int(bool(snapshot["active_wrong_path_episode"]["has_redirect_context"])),
+            )
+        ),
+        backend_state_active_wrong_path_episode=(
+            "none"
+            if backend_state["active_wrong_path_episode"] is None
+            else "({stage},origin={origin},target={target},ctx={ctx})".format(
+                stage=str(backend_state["active_wrong_path_episode"]["stage"]),
+                origin=(
+                    "none"
+                    if backend_state["active_wrong_path_episode"]["origin_index"] is None
+                    else int(backend_state["active_wrong_path_episode"]["origin_index"])
+                ),
+                target=_format_optional_pc(backend_state["active_wrong_path_episode"]["target_pc"]),
+                ctx=int(bool(backend_state["active_wrong_path_episode"]["has_redirect_context"])),
+            )
+        ),
         from_ftq_wen=int(from_ftq["wen"]),
         from_ftq_idx=int(from_ftq["ftq_idx"]),
         from_ftq_start=_format_optional_pc(from_ftq["start_pc_addr"] << 1),
@@ -493,14 +527,6 @@ def _format_stall_snapshot(snapshot: dict) -> str:
         from_ifu_vs_nonleaf=int(from_ifu_gpaddr["is_for_vs_nonleaf_pte"]),
         commit_ptr_flag=int(backend_state["commit_ptr"]["flag"]),
         commit_ptr_value=int(backend_state["commit_ptr"]["value"]),
-        pending_level0_target_ftq=(
-            "none"
-            if backend_state["pending_level0_target_ftq"] is None
-            else "({flag},{value})".format(
-                flag=int(backend_state["pending_level0_target_ftq"]["flag"]),
-                value=int(backend_state["pending_level0_target_ftq"]["value"]),
-            )
-        ),
         current_ftq_entry=_format_ftq_entry(current_ftq_entry),
         ftq_entries_head="[" + ",".join(_format_ftq_entry(entry) for entry in backend_state["ftq_entries"]) + "]",
         cfvec_queue_len=int(backend_state["cfvec_queue_len"]),
@@ -783,7 +809,7 @@ def api_Frontend_set_bp_ctrl_enable(
 
 
 def api_Frontend_enable_fst_dump(env, fst_path=None, max_cycles=1):
-    """Enable FST waveform dump and optionally set waveform path."""
+    """Enable waveform dump and optionally set the waveform path."""
     path = env.enable_fst_dump(fst_path)
     if int(max_cycles) > 0:
         env.step(1)
@@ -791,7 +817,7 @@ def api_Frontend_enable_fst_dump(env, fst_path=None, max_cycles=1):
 
 
 def api_Frontend_pause_fst_dump(env, max_cycles=1) -> bool:
-    """Pause FST waveform dump."""
+    """Pause waveform dump."""
     ok = env.pause_waveform_dump()
     if int(max_cycles) > 0:
         env.step(1)
@@ -799,7 +825,7 @@ def api_Frontend_pause_fst_dump(env, max_cycles=1) -> bool:
 
 
 def api_Frontend_flush_fst_dump(env, max_cycles=1) -> bool:
-    """Flush FST waveform file buffers to disk."""
+    """Flush waveform file buffers to disk."""
     ok = env.flush_waveform()
     if int(max_cycles) > 0:
         env.step(1)

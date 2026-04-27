@@ -34,6 +34,13 @@ def _pending_work_count(backend_model) -> int:
     return len(pending_events)
 
 
+def _golden_completion_pending_work_count(backend_model) -> int:
+    getter = getattr(backend_model, "golden_completion_pending_work_count", None)
+    if callable(getter):
+        return int(getter())
+    return _pending_work_count(backend_model)
+
+
 @dataclass(frozen=True)
 class LoadGoldenTraceSequence:
     source: GoldenTraceSource
@@ -98,14 +105,29 @@ class RunUntilGoldenTraceCompleteSequence:
                 logger.info(
                     (
                         "run until golden progress checkpoint: cycles=%d cursor=%d/%d "
-                        "golden_pc=%s golden_wait_pc=%s recovery_target_pc=%s pending_work=%d monitor_errors=%d"
+                        "golden_pc=%s wrong_path_target_pc=%s recovery_target_pc=%s "
+                        "wrong_path_origin=%s recovery_stage=%s pending_work=%d monitor_errors=%d"
                     ),
                     cycles_run,
                     int(trace.cursor),
                     total_entries,
                     format_optional_pc(current_golden_pc_getter(trace, env.backend_model)),
-                    format_optional_pc(getattr(env.backend_model, "_golden_wait_pc", None)),
-                    format_optional_pc(getattr(env.backend_model, "_semantic_recovery_target_pc", None)),
+                    format_optional_pc(env.backend_model._current_wrong_path_target_pc()),
+                    format_optional_pc(env.backend_model._current_recovery_target_pc()),
+                    (
+                        "none"
+                        if env.backend_model._active_wrong_path_origin_index() is None
+                        else str(int(env.backend_model._active_wrong_path_origin_index()))
+                    ),
+                    (
+                        "recovery"
+                        if env.backend_model._recovery_phase_active()
+                        else (
+                            "pre_redirect"
+                            if env.backend_model._has_active_wrong_path_episode()
+                            else "none"
+                        )
+                    ),
                     _pending_work_count(env.backend_model),
                     len(monitor_errors),
                 )
@@ -169,13 +191,17 @@ class RunUntilGoldenTraceCompleteSequence:
                     pending_work=_pending_work_count(env.backend_model),
                     monitor_error_count=len(monitor_errors),
                 )
-            if int(trace.cursor) >= total_entries and not env.backend_model.has_pending_work():
+            completion_pending_work = _golden_completion_pending_work_count(env.backend_model)
+            if int(trace.cursor) >= total_entries and completion_pending_work == 0:
                 if logger is not None:
                     logger.info(
-                        "run until golden complete: cursor=%d entries=%d cycles=%d",
+                        "run until golden complete: cursor=%d entries=%d cycles=%d "
+                        "completion_pending_work=%d backend_pending_work=%d",
                         int(trace.cursor),
                         total_entries,
                         cycles_run,
+                        completion_pending_work,
+                        _pending_work_count(env.backend_model),
                     )
                 return RunUntilGoldenTraceResult(
                     ok=True,
@@ -184,7 +210,7 @@ class RunUntilGoldenTraceCompleteSequence:
                     cycles_run=cycles_run,
                     cursor=int(trace.cursor),
                     total_entries=total_entries,
-                    pending_work=_pending_work_count(env.backend_model),
+                    pending_work=completion_pending_work,
                     monitor_error_count=len(monitor_errors),
                 )
 

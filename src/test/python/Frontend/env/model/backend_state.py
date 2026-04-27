@@ -107,6 +107,15 @@ class QueueInstr:
 
 
 @dataclass
+class ActiveWrongPathEpisode:
+    origin_index: int
+    target_pc: Optional[int] = None
+    redirect_context: Optional[dict] = None
+    redirect_driven: bool = False
+    expected_recovery_ftq: Optional[tuple[int, int]] = None
+
+
+@dataclass
 class BackendState:
     ftq_size: int = 64
     current_cycle: int = 0
@@ -128,7 +137,7 @@ class BackendState:
     pending_level0_target_ftq: Optional[tuple[int, int]] = None
     cfvec_queue: Deque[QueueInstr] = field(default_factory=deque)
     commit_queue: Deque[int] = field(default_factory=deque)
-    pending_redirect_origin_index: Optional[int] = None
+    active_wrong_path_episode: Optional[ActiveWrongPathEpisode] = None
     pending_queue_resolve_indices: Deque[int] = field(default_factory=deque)
     pending_queue_call_ret_commit_indices: Deque[int] = field(default_factory=deque)
     scheduled_queue_call_ret_commit_groups: Deque[tuple[int, list[CommitInstruction]]] = field(default_factory=deque)
@@ -202,7 +211,6 @@ class BackendState:
         self.visible_queue_call_ret_commit_group = list(group)
         for inst in self.visible_queue_call_ret_commit_group:
             idx = self._call_ret_queue_index_from_identity(inst)
-            # Backward compatibility: legacy groups without ftq_offset still rely on queue_index.
             if idx is None and getattr(inst, "ftq_offset", None) is None:
                 queue_index = getattr(inst, "queue_index", None)
                 if queue_index is not None:
@@ -237,7 +245,8 @@ class BackendState:
 
     @staticmethod
     def redirect_reuses_same_ftq_slot(ftq_offset: int, is_rvc: bool) -> bool:
-        return int(ftq_offset) == 0 or (int(ftq_offset) == 1 and not bool(is_rvc))
+        del is_rvc
+        return int(ftq_offset) == 0
 
     def ftq_ptr_rank_after_commit(self, flag: int, value: int) -> int:
         modulus = max(1, int(self.ftq_size) * 2)
