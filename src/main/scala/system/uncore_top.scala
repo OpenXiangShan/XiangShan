@@ -981,7 +981,16 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       imsicTop.module.s_aplic <> aplic_top.aplic_m
     }
     // connect io
-    hni_mNode.out.head._1 <> s_noc2msi.viewAs[AXI4Bundle]
+    val noc2msi = s_noc2msi.viewAs[AXI4Bundle]
+    val noc2msiSelfId = self_id.pad(4)
+    def routeNoc2msiAddr(addr: UInt, isLocal: Bool): UInt = {
+      Mux(isLocal, Cat(0.U(4.W), addr(43, 0)), addr)
+    }
+    val noc2msiAwIsLocal = noc2msi.aw.bits.addr(47, 44) === noc2msiSelfId
+    val noc2msiAwAddr = routeNoc2msiAddr(noc2msi.aw.bits.addr, noc2msiAwIsLocal)
+
+    hni_mNode.out.head._1 <> noc2msi
+    hni_mNode.out.head._1.aw.bits.addr := noc2msiAwAddr
     peri_mNode.out.head._1 <> s_noc2cfg.viewAs[AXI4Bundle] // uncore peri cfg slave io
     cpu_mNodes.zip(s_cpu2uncore).foreach { case (node, io) => node.out.head._1 <> io.viewAs[AXI4Bundle] }
     // bypass the read channel
