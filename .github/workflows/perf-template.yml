@@ -101,8 +101,7 @@ jobs:
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
-          # echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
-          echo "SCRIPTS_HOME=/nfs/home/share/liyanqin/temp/env-scripts/" >> $GITHUB_ENV # for temporary test
+          echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "DATE=${DATE}" >> $GITHUB_OUTPUT
           
