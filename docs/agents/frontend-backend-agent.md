@@ -28,9 +28,11 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 
 - 所有有效 `cfVec` 指令按观测顺序入队
 - queue 头与 golden trace 对比；匹配成功表示该指令位于正确路径
-- 首次 mismatch 标记 wrong-path 起点，并在后续某个时刻触发 `redirect`
-- mismatch 之后仍需继续接收并入队后续 `cfVec`，这些指令在语义上属于同一段 wrong-path，直到被 `redirect` 清除
-- `redirect` 生效后，必须 flush `cfVec_queue` 中该段 wrong-path；更老正确路径前缀必须保留
+- 首次 mismatch 标记唯一的 wrong-path 起点，并在后续某个时刻触发 `redirect`
+- 任意时刻只允许存在一段 active wrong-path episode；在该 episode 被 `redirect` 清除之前，不得把后续观测重新切成第二段 wrong-path，也不得因为中途看到某个临时 target、wait 条件或 FTQ pointer 变化而重置 wrong-path 起点
+- mismatch 之后仍需继续接收并入队后续 `cfVec`，这些指令在语义上全部属于同一段 wrong-path，直到被 `redirect` 清除
+- `redirect` 生效后，必须从这段 active wrong-path 的起点开始清除 `cfVec_queue`；更老正确路径前缀必须保留
+- wrong-path 的清除边界必须由“恢复后重新建立 correct-path 对齐”的语义决定，而不是由中途某个临时 `target_pc`、`ftqidx`、等待态命中或类似局部现象决定
 
 ### `commit_queue` 语义
 
@@ -45,6 +47,111 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 - `commit_queue` 不允许通过“golden trace 已前进”直接推进，必须通过独立提交建模推进
 - 任何实现如果等价地违背上述双队列职责边界，都应视为语义错误
 
+## `commit_queue` source-of-truth 重构计划
+
+适用背景：当 backend model 的 `commit` / `recovery` bookkeeping 同时维护
+`_cfvec_queue`、`_commit_queue`、`rob_commit_state`、`commit_ptr`、`ftq_entries`
+等多份可推进状态时，`redirect` 或 recovery 裁剪后容易出现队列头、queue
+索引与 FTQ bookkeeping 漂移。对这类问题，后续实现应收敛到：
+
+- `_cfvec_queue` 是唯一指令流 source-of-truth
+- `commit` 候选每拍都从当前 `_cfvec_queue` 头部连续正确路径前缀现算
+- 头部一旦出现 `wrong` 或 `unknown`，`commit` 必须阻塞，不得越过
+- `redirect` / recovery flush 只裁剪 `_cfvec_queue` 及其配套的 pending
+  `queue_index`
+- `_commit_queue` 应删除，或最多降级为只读 debug view；不得再承担运行时主语义
+
+### 目标语义
+
+- 正确路径前缀的定义只来自当前 `_cfvec_queue` 的实时内容，不来自历史快照
+- `commit`、`callRetCommit`、FTQ entry `commit` 都从这个实时前缀派生
+- `commit` 资格链必须明确分层：instruction commit -> `callRetCommit`
+  pending/scheduled/visible -> FTQ entry `commit`；后层事件不得绕过前层语义直接产生
+- FTQ entry `commit` 只能由 queue head 连续、同 FTQ、全部 `correct`、全部
+  `rob committed`、对应 CFI `resolve` 已 emitted、且 entry 边界已经确定的指令段聚合派生
+- `wrong-path` / recovery 后缀只能通过 `redirect` 语义清除；不能靠旧
+  `commit_ptr`、fallback commit 或 stale cleanup 偷偷跳过
+- queue 裁剪后，所有 `queue_index` 类状态都必须重新解释为“指向当前
+  `_cfvec_queue` 的位置”，不能再依赖已失效的历史位置
+- `_cfvec_queue` 中的 entry 必须继续承载指令级与 FTQ 级语义注解，至少包括：
+  `path_state`、`resolve_state`、`rob_commit_state`、`call_ret_commit_state`、
+  `call_ret_ras_action`、`golden_index` / `target_pc`、`is_last_in_entry`、
+  `ftq flag/value/offset`；不得把 `_cfvec_queue` 简化成“原始 `cfVec` 包队列”
+- 分层必须保持：`_cfvec_queue` 是 instruction truth；`commit_ptr`、
+  `pending_level0_target_ftq`、`ftq_entries` / `current_ftq_entry` 只允许作为
+  FTQ-order / gating metadata，不能删除，也不能拿来绕过 semantic queue
+- golden-trace 模式下 fallback commit 默认禁止；若保留极少数例外，必须同时满足
+  `_cfvec_queue` 为空、无 active wrong-path / recovery、无 pending resolves、
+  无 pending / visible / scheduled `callRetCommit`，且能证明对应语义流已通过
+  redirect / commit 完整清空
+
+### 分步实现计划
+
+1. 收口语义边界
+   验证：列出当前哪些状态真正参与 `commit` 候选、FTQ commit 聚合、recovery
+   裁剪；确认运行时主语义只允许由 `_cfvec_queue` 和少量 pending
+   `queue_index` 承载。
+- 明确 `_commit_queue`、`commit_ptr`、`rob_commit_state`、`ftq_entries`
+  里哪些是主状态，哪些只能保留为派生视图
+- 若某个状态无法从 `_cfvec_queue` 当前内容重建，就先把它视为高风险漂移点
+- 显式盘点 `callRetCommit` 的跨拍状态承载：`_pending_queue_call_ret_commit_indices`、
+  `_scheduled_queue_call_ret_commit_groups`、`_visible_queue_call_ret_commit_group`
+  必须保留，并纳入 flush/remap/invalidate 规则，而不是隐式塞回 `_commit_queue`
+
+2. 把 `commit` 候选改为现算
+   验证：在无 redirect 的正常 case 中，现算结果与旧行为等价；在出现
+   `wrong` / `unknown` 头部时，`commit` 明确停住而不是跳过。
+- 每拍从 `_cfvec_queue` 头部扫描连续正确路径前缀
+- 仅在该前缀内判定 resolve 完成、call/ret 已提交、FTQ entry 是否可聚合
+- 禁止从历史 `_commit_queue` 或旧 `commit_ptr` 直接恢复候选集合
+- 先得到 instruction commit，再派生 `callRetCommit` pending/scheduled/visible，
+  最后再判定 FTQ entry `commit`；不得把 `callRetCommit` 或 FTQ `commit` 当作反向驱动源
+
+3. 把 recovery / redirect 裁剪改为只裁 `_cfvec_queue`
+   验证：发生 flush 后，队列前缀、pending `queue_index`、FTQ commit
+   聚合边界同步收口；不存在“queue 已裁掉，但 commit 侧还保留旧条目”。
+- flush 只按 wrong-path episode 语义裁剪 `_cfvec_queue`
+- 所有仍需保留的 pending `queue_index` 在 flush 后同步重定位或失效
+- 不再维护独立的 `_commit_queue` flush / repair 路径
+- recovery 不是简单 `remove range`：应裁掉 `[queue_start, target)`，把保留下来的
+  wrong suffix 从 `WRONG` 复位为 `UNKNOWN`，必要时重新挂接 `resolve`，然后从
+  queue head 按 golden match 语义 replay
+- `callRetCommit` 相关跨拍状态在 flush 后必须显式处理：指向被删除 queue entry 的
+  group 直接删除；保留 entry 的 `queue_index` 必须重定位；不得向已 flush 指令发出旧 group
+
+4. 删除或降级 `_commit_queue`
+   验证：主流程不再读取 `_commit_queue` 决策；若保留 debug view，它与当前
+   `_cfvec_queue` 前缀可双向核对，但不会反向影响行为。
+- 优先删除运行时读写入口
+- 若短期保留 debug view，只能现算生成，只读输出
+
+5. 收尾并补最小回归验证
+   验证：307-entry `cfi_random_5inst_case` 这类 bin-trace 问题中，
+   不再出现 `_commit_queue` / `commit_ptr` / `_cfvec_queue` 漂移驱动的假性
+   commit 或 recovery bookkeeping 漂移。
+- 检查 commit、callRetCommit、FTQ commit、redirect/recovery 的日志与状态
+  解释都只围绕单一 semantic queue
+- 若仍需额外 bookkeeping，必须证明它可由 `_cfvec_queue` 单向派生
+- 最小回归类别至少覆盖：正常 correct path 的多拍 instruction->FTQ commit、
+  first mismatch 后 redirect flush 与 recovery replay、recovery target 之后
+  suffix `UNKNOWN -> MATCHED`、call/ret commit 后 scheduled/visible 正常发出且
+  flush 后不会重发旧 group、307-entry `cfi_random_5inst_case`
+
+### 禁止事项
+
+- 不得通过修改 bin、裁短运行窗口、跳过问题区间等方式掩盖该漂移问题
+- 不得放宽 completion、monitor 通过条件、stagnant/timeout 判定来换取“跑完”
+- 不得引入 fallback commit、stale cleanup commit、按 pointer 排名补提交通道，
+  绕过 golden semantic queue
+- 不得把 `callRetCommit` 的 pending/scheduled/visible 跨拍状态折叠成“一拍现算即发”
+  或在 flush 后继续复用旧 group
+- 不得把 recovery 实现成只删除一段 queue 而不重置保留 suffix 的路径状态、
+  resolve 挂接和 replay 对齐
+- 不得把 `_cfvec_queue` 降级成仅存原始 `cfVec` 的包缓存，再把主语义搬到其他镜像结构
+- 不得让 `_commit_queue` 继续作为与 `_cfvec_queue` 并列的第二份运行时真相
+- 不得在主链路保留“flush 后再局部修补旧 commit 状态”的兼容逻辑；若现有状态
+  无法自洽，应 fail fast 暴露语义错误
+
 ## 实现一致性最小检查项
 
 下面的检查项按语义覆盖推导，条目数不预设；新增语义边界时应增补相应检查项。
@@ -54,17 +161,23 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 - `cfVec_queue` 入队严格按 DUT 观测顺序，不因等待目标 PC 而暂停或跳过包。
 - 除非该指令在语义上被某次 `redirect` 作为 wrong-path flush 清除，否则任何已观测到的 `cfVec` 包都不得被丢弃、跳过采样或绕过入队。
 - 首次 mismatch 只定义一个 wrong-path 起点，并沿该起点向后标记同一段 wrong-path。
+- 任意时刻只允许存在一个 active wrong-path episode；在该 episode 被 `redirect` 清除之前，不得重新开第二个 wrong-path episode。
 - mismatch 后继续接收 `cfVec`，不得进入“暂停构队列”等待模式。
-- `redirect` 按 wrong-path 起点 flush `cfVec_queue` 后缀，并保留更老 correct-path 前缀。
+- `redirect` 必须从 active wrong-path 起点开始清除 `cfVec_queue`，并保留更老 correct-path 前缀。
+- `redirect` 的 flush 范围不得因为临时 `target_pc` 可见、waiting-target 命中、`ftqidx` 数值变化或类似局部条件而被拆成多段。
 - 某条 CFI 一旦已经与 golden 的某个动态实例匹配，其后续用于 `redirect` 的恢复目标必须绑定到该动态实例自身的 golden 语义，不得从一个可能已经漂移的全局 golden cursor 临时推导。
 - 某条 `redirect` 的 `target`、`pc`、FTQ 上下文必须来自同一个动态实例；不得把 `target` 绑定到当前实例、却把 FTQ idx / offset 绑定到另一条更老或已失效的实例。
 - 已被 earlier `redirect` 在语义上清除的 wrong-path 指令，即使暂时仍残留在内部结构中，也不得再参与后续 `redirect` 的归因、FTQ 上下文选择或 flush 范围计算。
+- `commit_queue` 应由当前 queue 中连续的正确路径前缀重新派生，不应长期保留一个依赖旧 queue 索引的历史快照再靠局部修补维持；当 active wrong-path episode、recovery 或 queue 裁剪改变前缀边界时，`commit_queue` 必须随正确路径前缀同步收口
+- `commit` 的候选范围只允许来自当前正确路径前缀；任何 `unknown` 或 `wrong` 后缀都不得通过“旧索引仍在 commit_queue 中”或类似历史残留的方式参与 commit 计划
 - 进入 `commit_queue` 的仅为 correct-path 指令；wrong-path 指令不得进入 `commit_queue`。
 - `commit_queue` 严格按程序序推进，不跳过更老未提交指令。
 - 正确路径 CFI 在 `resolve` 完成后才允许对应指令进入 committed。
 - `callRetCommit` 从“已提交指令”派生，且保持指令粒度。
 - FTQ-entry `commit` 仅由 `commit_queue` 头部连续、同 FTQ、已提交指令聚合派生。
 - FTQ entry 出队原因仅有两类：被 `commit` 退休，或被 `redirect` 作为 wrong-path 清除。
+- 不得因为 stale cleanup、fallback commit、pointer-rank 裁剪、queue 中暂时不可见或类似内部整理路径，静默删除 wrong-path 指令或 FTQ entry bookkeeping。
+- 若实现检测到这类“只能靠静默清账才能继续推进”的 stale 状态，应优先 fail fast 暴露语义错误，而不是在后台自动修补后继续运行。
 - 禁止“已提交旧 FTQ entry 复活”为 active 来解释后续观测。
 - delay 只作用于“已满足发送资格后的附加延迟”，不替代资格条件。
 
@@ -113,6 +226,7 @@ queue 中的每条指令至少需要具备以下语义信息：
 
 - 若 queue 中仍存在某个 FTQ pointer 对应的旧指令，则后续相同 FTQ pointer 的观测仍属于该 active entry
 - 只有当该 FTQ entry 已经在语义上结束，并且其相关指令已经从 queue 中清除之后，后续再次出现相同 FTQ pointer，才可以被解释为另一条新的 entry
+- `ftqidx` 只能作为“这条指令归属哪个 FTQ entry”的标签，不能被当成 queue 中条目的身份、位置索引或可复用槽位编号；queue 的唯一顺序语义来自 `cfVec` 观测顺序和 active wrong-path / correct-path 边界，而不是 FTQ pointer 数值本身
 
 这里的“已经从 queue 中清除”只允许有两种合法原因：
 
@@ -205,6 +319,56 @@ queue 中的每条指令至少需要具备以下语义信息：
 - 它们不应被再次当成一轮新的错误路径起点
 - 它们也不应推动 golden trace 向前消费
 - 环境应继续等待，直到真正观察到恢复后的 correct-path 再重新进入正常匹配流程
+
+进一步地，`redirect` 的 wrong-path 清除边界是语义边界，不是“只覆盖 redirect 之前已经入 queue 的包”的物理时刻边界。因此：
+
+- `redirect` 发出当拍仍然观测到的旧 wrong-path `cfVec`
+- `redirect` 发出后若干拍内继续观测到的同一段旧 wrong-path residual `cfVec`
+
+都必须继续归属于这一次 active wrong-path episode，并在语义上视为这次 `redirect` 要负责清除的对象。
+
+换句话说：
+
+- `redirect` 不得只清除发出前那一截 wrong-path，而把当拍或后几拍仍属于同一旧 wrong-path 的 `cfVec` 重新解释成新的 episode
+- 这些 residual `cfVec` 可以在实现上先按观测顺序进入 queue，但语义上仍属于同一次 `redirect` 的清除范围
+- 只有真正恢复到 correct-path 后，后续观测才可以重新参与新的 correct-path / wrong-path 判定
+- 若某条正确路径 CFI 已经证明下一条 golden PC 不是其顺序后继，并且同拍后续 slot 中第一个有效 `cfVec` 不是该恢复目标，则 active wrong-path episode 必须在这个“同拍后续的第一个非目标 slot”处立即开始；不得等到下一拍或下一次局部 mismatch 再补记起点
+- 只要系统仍处于“等待恢复目标重新建立对齐”的阶段，queue 中正确路径前缀之后的未知后缀也必须被并入这同一条 active wrong-path episode；不得把它们长期保留为 `unknown`，否则会错误阻塞 commit，并在后续恢复或再次重定向时形成非法中间态
+- active wrong-path episode 的起点必须锚定在“当前正确路径前缀之后的第一个非正确条目”；不得因为更老正确路径仍留在 queue 中，就让 wrong-path 起点在这些更老前缀之前或之中漂移
+- 实现中应优先用一个显式的 active wrong-path episode 状态来承载“起点、归因 CFI、恢复目标、是否仍在等待恢复完成”等主语义；不要再把这些主语义分散寄存在多个松散的 wait/recovery 辅助字段上，再靠条件分支拼接
+- 任何“是否仍在 wrong-path / 是否仍在等待恢复 / 是否允许 commit fallback / 当前 wrong-path 起点在哪里”之类的全局判断，都应优先从这个显式 active episode 状态出发，而不是分别读取若干局部辅助字段再临时拼接
+- 一旦 active wrong-path episode 已经建立，后续属于该 episode 的 mismatch / residual 处理应优先沿用 episode 中已经确定的归因 CFI 与恢复目标；不得在每次局部 mismatch 时重新向前搜索“前一条正确路径 CFI”，否则会在中途残留或恢复窗口中错误改写同一条 episode 的归因
+- 在实现结构上，建议先把“如何为当前 active episode 推导归因 CFI / 恢复目标”的逻辑独立成单独步骤或 helper，再让 queue 状态更新、redirect 排队、recovery 进入等动作消费这个结果；不要把这些步骤混在一次局部 mismatch 处理函数里相互覆盖
+- 对应地，即使“发现需要首次建账”的检测点暂时仍有多处，这些检测点也应尽量只负责发现条件；episode 的 origin/target/context 组装与真正建账动作应集中到统一 helper，而不是在每个检测点各自拼装一套状态
+- 更进一步地，若多个路径本质上都在判断同一条规则，例如“某条正确路径 CFI 的下一条应为 `target_pc`，但实际看到的第一条有效 `cfVec` 不是它”，则这些路径也应尽量共享同一个判定 helper，而不是在 replay、采样、mismatch 等函数里各自实现一份近似逻辑
+- 同样，首次建立 active wrong-path episode 的入口应尽量收敛到“正确路径 replay 发现 control-flow 后继不再顺序一致”的那个检测点；不要同时在多个局部 slot 检查、wait 命中或 residual 入口重复建账，否则同一条 episode 很容易被重复开启或被不同入口写出不一致状态
+- `golden_wait` 一类状态只能辅助表达“恢复目标尚未重新观测到”这一事实，不得再主导 wrong-path episode 的起点选择、切分、扩展或终止；这些主语义必须统一由 active wrong-path episode 状态负责
+- 因此，`golden_wait` 不应再额外携带或隐式承担“source FTQ identity”这类会反向影响主语义切分的职责；它只负责记录恢复目标是否已经重新观测到
+- 同样，waiting-prefix 是否并入 wrong-path episode，应由“当前是否已有 active episode / 当前是否处于恢复阶段”决定，而不应再由 `golden_wait_requires_redirect` 这类单独的 wait 开关直接主导
+- 对应地，未知后缀是否需要被收口进 active episode，也应由“当前是否已有 active episode / 当前是否仍处于恢复阶段”决定；不能再因为某个单独 wait 开关为真或为假而改变 wrong-path episode 的收口时机
+- 同样，wait-target 是否命中这类辅助观测不应继续反向写入 current FTQ 的主 bookkeeping（例如作为决定 episode 边界或恢复完成的附加标志）；主链路应尽量只依赖 active episode 与 recovery target 本身
+- 同理，`pending_redirect_origin_index` 这类字段应逐步降级为 active episode 的内部实现细节；外层逻辑不应继续把它当作对外公开的主状态直接读写，而应通过“当前 active episode 是否存在、其起点在哪里、其恢复目标是什么”这类 helper 访问
+- 更具体地，运行时主状态应优先收敛到一个显式 episode 对象或等价单一承载体；若暂时保留 `_pending_redirect_origin_index` 一类旧字段，也只允许把它们作为镜像/兼容输出存在，而不再作为主读写源
+- 对应地，一旦外围调试/测试/状态同步都已经切到统一的 active episode view，就应继续删除这类旧镜像字段在中间状态结构中的冗余存储，避免它们再次被误用成主状态来源
+- 一旦主链路已经完成切换，禁止继续保留“兼容旧实现/旧状态机/旧字段读法”的运行时代码；后续修改应直接删除旧桥接，而不是再加一层兼容兜底
+- 与此同时，若实现内部仍保留某些旧字段作为过渡期细节，则它们必须与显式 active episode 状态保持同步；不能出现“origin 已更新、但恢复目标或归因上下文还停留在旧值”的分裂状态
+- 更进一步地，外层流程应优先通过统一的 active episode view / helper 读取“当前起点、恢复目标、归因上下文”，而不是在不同函数里分别直接读取多个底层字段后自行拼装；否则同一条 episode 很容易再次被不同入口读成不一致状态
+- 同样，若 `pending_level0_target_ftq` 仍需要保留少量配套观测状态（例如目标 FTQ entry 中是否已经看到恢复目标 PC），这些状态也应收敛到专门 helper 中，且只能服务于 commit-side 辅助约束；不得在采样主链路中散落多处直接写入，再反向影响 episode 边界或恢复主判定
+- active episode 本身还应显式区分至少两个阶段：\n  1. 已归因但尚未 drive redirect\n  2. redirect 已发，正在等待恢复目标重新建立对齐\n  不要再把这两个阶段分别塞给 `golden_wait`、`semantic_recovery`、`post_redirect` 等旧辅助状态去间接表达
+- 一旦 active episode 进入“redirect 已发、等待恢复”阶段，后续流程需要的恢复目标 PC、resolve frontier fallback、是否仍在恢复中的判断，都应优先从 episode 读取；旧的 `golden_wait` / `semantic_recovery` / `post_redirect` 字段只能作为过渡兼容，不应继续成为主读取源
+- 更具体地，若当前 active episode 已处于 recovery 阶段，则 `resolve` frontier、恢复目标读取以及相关 commit/cleanup 判定都应先读取 episode 中的 recovery target；不得先以全局 golden cursor 为主、仅在其缺失时才回退到 recovery target
+- `pending_level0_target_ftq` 这类字段若仍保留，应尽量只服务于 commit 次序或 dispatch 辅助约束，不应再进入 wrong-path episode 的主判定、起点建立、切分或恢复控制流
+- 更具体地，`pending_level0_target_ftq` 若存在，只表示“redirect 之后 commit 不得越过哪一个目标 FTQ entry”；它只能阻塞更年轻的 commit 候选，不能把这个目标 entry 自身也一起挡住
+- 同一恢复阶段在控制流上应只有一个主入口：围绕当前 active episode 的 recovery target 展开。不要再让 `post_redirect`、`semantic_recovery`、`golden_wait` 各自拥有独立的优先分流入口，否则同一条 episode 会再次被多路状态机拆开
+- 与之对应，恢复阶段的主读取入口也应统一：凡是需要回答“当前恢复目标是谁、现在是否仍在恢复中”的逻辑，都应优先通过一个统一 helper / view 从 active episode 读取，而不是直接读取多个旧字段再临时拼接
+- 同样，进入恢复阶段的写入口也应统一：redirect 真正 drive 后，应通过一个集中 helper 一次性写入“恢复目标、恢复起点、阶段切换”等主状态，而不是在多个函数里分别散写 `semantic_recovery` / `post_redirect` / wait 相关字段
+- 进一步地，对外围流程来说，“当前是否处于恢复阶段”也应只有一个统一 helper；commit gating、stale 清理、pending work 统计等外围逻辑不应再分别读取若干旧字段后拼接出恢复状态
+- 对称地，退出恢复阶段的清空路径也应统一：当恢复完成、reset、queue 清空或显式注入重置主链路时，应通过一个集中 helper 一次性清空 recovery 相关旧字段，避免不同调用点只清一部分导致旧兼容状态残留
+- 在过渡期内，旧的 `semantic_recovery` / `post_redirect` / `golden_wait` 字段若仍保留，也应尽量只作为兼容存储存在，而不再被外围流程主动读取；主读路径应优先走统一 helper，再逐步压缩这些旧字段的存在感
+- 对 `golden_wait` 的读取也应遵守同一原则：外围流程应通过统一 helper 读取“当前 wait target 是否存在、其目标 PC 是什么”，而不要在多处直接读取 `_golden_wait_pc` / `_golden_wait_requires_redirect` 后自行组合含义
+- 若实现中仍暂时保留 `_semantic_recovery_target_pc`、`_semantic_recovery_queue_start`、`_golden_wait_requires_redirect` 之类旧字段以服务调试输出、兼容观测或渐进迁移，它们也只能做“镜像/兼容写入”；主链路不得再把它们当成 recovery target、recovery start 或 wrong-path 存在性的主读取源
+- 一旦主链路已经切到 active episode 语义，就不应再继续保留这些旧字段或旧接口作为运行时兼容兜底；后续重构应直接删除旧读写入口，而不是再加一层兼容桥接
+- 当某些局部观测中间量（例如围绕 FTQ 指针是否“stale”或当前 queue 中是否已出现某个 FTQ pointer 的局部布尔量）已经不再参与主决策时，应及时从主流程中删除，避免旧模型的观察视角继续残留在核心路径里
 
 也就是说：
 

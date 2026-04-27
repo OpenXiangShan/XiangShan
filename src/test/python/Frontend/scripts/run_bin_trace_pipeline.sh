@@ -52,6 +52,7 @@ TRACE_STAGNANT_CYCLES_LIMIT="${TB_TRACE_STAGNANT_CYCLES_LIMIT:-20000}"
 TRACE_MAX_CYCLES="${TB_TRACE_MAX_CYCLES:-0}"
 PYTEST_TIMEOUT_SECS="${TB_PYTEST_TIMEOUT_SECS:-900}"
 PYTHON_BIN="${PYTHON:-python3}"
+PYTEST_DISABLE_RERUNFAILURES="${TB_PYTEST_DISABLE_RERUNFAILURES:-1}"
 
 if [[ "${BIN_STEM}" == "microbench" ]]; then
   NEMU_MAX_INSTR=0
@@ -72,6 +73,7 @@ echo "[frontend] base_addr: ${BASE_ADDR}"
 echo "[frontend] trace_stagnant_cycles_limit: ${TRACE_STAGNANT_CYCLES_LIMIT}"
 echo "[frontend] trace_max_cycles: ${TRACE_MAX_CYCLES}"
 echo "[frontend] pytest_timeout_secs: ${PYTEST_TIMEOUT_SECS}"
+echo "[frontend] pytest_disable_rerunfailures: ${PYTEST_DISABLE_RERUNFAILURES}"
 
 cd "${REPO_DIR}"
 
@@ -112,6 +114,11 @@ if [[ "${RUN_DUT}" != "0" ]]; then
     echo "[frontend][error] missing pytest entry test file: ${FRONTEND_DIR}/tests/test_bin_trace_dut.py" >&2
     exit 2
   fi
+  PYTEST_CMD=("${PYTHON_BIN}" -m pytest -v)
+  if [[ "${PYTEST_DISABLE_RERUNFAILURES}" != "0" ]]; then
+    PYTEST_CMD+=(-p no:rerunfailures)
+  fi
+  PYTEST_CMD+=("${PYTEST_TARGET}")
   if timeout --foreground "${PYTEST_TIMEOUT_SECS}" env \
     TB_ENABLE_DUT_TESTS=1 \
     TB_BIN_TRACE_PIPELINE=1 \
@@ -120,7 +127,7 @@ if [[ "${RUN_DUT}" != "0" ]]; then
     TB_BASE_ADDR="${BASE_ADDR}" \
     TB_TRACE_STAGNANT_CYCLES_LIMIT="${TRACE_STAGNANT_CYCLES_LIMIT}" \
     TB_TRACE_MAX_CYCLES="${TRACE_MAX_CYCLES}" \
-    "${PYTHON_BIN}" -m pytest -v "${PYTEST_TARGET}"; then
+    "${PYTEST_CMD[@]}"; then
     :
   else
     status=$?

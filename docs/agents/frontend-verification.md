@@ -82,6 +82,9 @@ that boundary stable.
 - Do not add compatibility shims, fallback logic, or speculative extensions.
 - Do not rewrite absolute paths in any `source` command.
 - Never use `git push -f` under any circumstances.
+- Every log printed by the verification environment must help debug a real
+  failure and be as short as practical. Do not add noisy, redundant, or
+  narrative logging.
 - Preserve the black-box verification boundary. Interact through DUT-facing
   agents, APIs, traces, and generated artifacts rather than assuming hidden RTL
   state.
@@ -92,10 +95,16 @@ that boundary stable.
   cannot pass, identify the true root cause first and only then change code. If
   the cause is still unproven, stop and discuss with the user before
   proceeding.
+- Do not change implementation code merely to satisfy an existing test when the
+  test contradicts the intended frontend behavior. Update or remove the invalid
+  expectation only after proving the semantic contract.
 - Do not turn a minimal reproducer into a permanent frontend regression test
-  unless the user explicitly asks for that. Prefer fixing the root cause first
-  and only keep regression coverage that matches the intended long-term
-  contract.
+  unless it is suitable for continuous regression and carries real frontend
+  semantics. Prefer fixing the root cause first and only keep regression
+  coverage that matches the intended long-term contract.
+- A testcase that only checks whether a code edit behaved as expected must stay
+  temporary. Do not commit it under the regression test files; delete temporary
+  tests once they have served the local validation purpose.
 - Do not frequently add low-signal or redundant cases to
   `src/test/python/Frontend/tests/test_backend_model_sync.py`; only add a test
   there when it captures a distinct semantic contract, blocks a proven
@@ -139,6 +148,13 @@ source /nfs/share/unitychip/activate
 source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
 cd "$NOOP_HOME"
 ```
+
+In sandboxed runs, disable the environment-level `pytest_rerunfailures` plugin
+by default. It opens a local socket during `pytest_configure` and otherwise
+fails before the testcase starts. Frontend helper scripts in this tree already
+do this by passing `-p no:rerunfailures`. If you invoke `pytest` directly,
+include the same flag unless you intentionally need that plugin outside the
+sandbox.
 
 Run the default frontend regression flow from the repo root:
 

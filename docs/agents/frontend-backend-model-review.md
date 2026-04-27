@@ -16,6 +16,8 @@
 - `commit_queue` 保存可提交正确路径指令的程序序，指令级 commit 由 `_plan_instruction_commits_for_cycle()` 推进。
 - FTQ-entry commit 由 `_plan_commit_entry_for_cycle()` 基于 `commit_queue` 头部 span 的语义条件发出。
 - redirect 由 mismatch 路径或显式注入事件进入 `pending_events`，再由 `_ready_redirect_for_cycle()` 选出，经 `_plan_redirect_payload()` 执行 flush/recovery 与对外驱动。
+- golden mismatch redirect 应遵守正常 redirect delay 配置；当前默认区间为 `5-8`，
+  不应再用 `delay=0` 绕过这一时序约束。
 
 ## 状态机关系（文字版）
 
@@ -26,7 +28,8 @@
 - 指令被 committed 后 -> 进入 `pending_queue_call_ret_commit_indices` -> 下一拍激活 callRetCommit 可见组。
 - `commit_queue` 头 FTQ span 满足条件（全部 correct + 全部 committed + 必要 resolve 已满足 + 无冲突 redirect）-> 发 FTQ-entry `commit` 并弹头。
 - 首次 mismatch -> 以该点作为 wrong-path 起点，继续接收 `cfVec` 但冻结 golden 消费，直到后续 redirect flush 清除 wrong-path 后缀。
-- redirect(`flush_on_drive`) -> scoreboard flush + semantic wrong-path flush + recovery 目标建立。
+- redirect(`flush_on_drive`) -> scoreboard flush + 进入 recovery 阶段；
+  `cfvec_queue` 的物理裁剪延后到 recovery target 真正入队后再执行。
 
 ## 当前实现风险与审阅关注点
 

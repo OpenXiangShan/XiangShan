@@ -193,6 +193,102 @@ io.commits.isCommit := state === s_idle && !blockCommit
 - 之后必须在某个时刻发出 `redirect`，把路径恢复到正确路径
 - `redirect` 生效时必须 flush 掉 queue 中所有错误路径指令
 
+## Redirect Flush 实现规则
+
+下面的规则约束的是 env 在 `redirect` drive 与 wrong-path flush 之间必须保持的
+实现语义，用来避免“旧 wrong-path 没清干净”或“把已恢复的新 correct-path 误删”。
+
+### 1. flush 的对象按观测时间划分，不按当前 queue 头部猜测
+
+- 一条 `redirect` 只清除“在它对应的 wrong-path episode 中观测到的指令”
+- 不能因为当前 queue 头已经漂移到更年轻 FTQ，就回头把更早 episode 的 flush
+  边界重新解释
+- 也不能因为看到了某个 `target_pc`，就把更早拍已经采到的 younger `cfVec`
+  自动当作已恢复正确路径
+
+实现上应先回答两个问题：
+
+- 这条 `redirect` 归因到哪一个动态 CFI 实例
+- 在该实例之后、恢复 target 真正重新建立 correct-path 对齐之前，哪些 `cfVec`
+  采样仍属于同一段 wrong-path
+
+### 2. redirect drive 当拍观察到的 `cfVec` 不可能由该拍 redirect 修正得到
+
+当前 env 的时序是：
+
+1. 先采样 DUT / `cfVec`
+2. 再规划 cycle actions
+3. 最后 `drive_redirect`
+
+因此：
+
+- 与某条 `redirect` 同拍观测到的 `cfVec`，不能被解释为“这条 redirect 已生效后的恢复结果”
+- 若同拍观测值的 FTQ / PC 上下文与预期恢复路径不一致，应优先把它视作旧 wrong-path residue
+
+这个规则尤其用于排除一种常见误判：
+
+- 某拍发出 `redirect(pc=A,target=T)`
+- 同拍或下一极近拍看到了 `pc=T`
+- 于是直接把该样本判成“恢复后的正确路径”
+
+若没有额外的 cycle-accurate 证明，这种判法默认不成立。
+
+### 3. recovery target 的首次重新对齐必须同时满足 PC 与 FTQ 语义
+
+看到 `target_pc` 本身还不够；是否已经恢复到 correct-path，至少要同时满足：
+
+- PC 与该动态 CFI 的 golden target 一致
+- 该样本的 FTQ 上下文与当前 redirect 的 flush / reuse 语义一致
+
+不能接受下面这种情况：
+
+- PC 恰好等于 `target_pc`
+- 但 FTQ idx 已经漂移到明显更年轻的 slot
+- 仍把它判成恢复后的正确路径
+
+若 `redirect` 并不允许复用同一 FTQ slot，则恢复 target 的首个正确路径样本必须落在
+预期的 younger FTQ 上，而不是任意更年轻的漂移 slot。
+
+### 4. flush 范围必须覆盖“旧 redirect 已恢复之后，新 wrong-path 再次扩散”的所有 younger 样本
+
+对于 back-to-back redirect / nested recovery 风险，后一个 `redirect` 的 flush 范围不能只看：
+
+- 该拍 queue 里标成 `wrong` 的当前后缀
+
+还必须覆盖：
+
+- 在上一条 redirect 恢复出的 correct-path 起点之后
+- 到当前这条 redirect 真正重新建立 correct-path 对齐之前
+- 所有已采到的 younger wrong-path `cfVec`
+
+否则会出现：
+
+- 老 wrong-path 已被 earlier redirect 清过
+- 新 wrong-path 又在恢复后继续扩散
+- 但 flush 只裁了其中一小段，留下更年轻 residue
+
+### 5. 推荐实现步骤
+
+对每条 ready redirect，推荐按下面顺序做 flush 判定：
+
+1. 绑定触发它的动态 CFI 实例：`pc`、`target`、`ftq idx`、`ftqOffset`
+2. 找到该实例在当前 semantic queue 中的 wrong-path 起点
+3. 以“首次重新建立 correct-path 对齐”为终点求 flush 区间
+4. 终点判定同时检查 PC 与 FTQ 语义，不只看 `target_pc`
+5. 删除该区间全部 younger wrong-path 样本
+6. 对保留下来的 suffix 重新标成 `UNKNOWN` / replay，而不是沿用旧 path_state
+
+### 6. fail-fast 条件
+
+出现下面任一现象时，不应静默继续：
+
+- 同一 redirect 之后，queue 中仍残留比恢复点更年轻的旧 wrong-path 样本
+- 首次命中 `target_pc` 的样本 FTQ 明显过年轻，却仍被接受为恢复点
+- 需要依靠“下一条 redirect 再补清一次”才能收口上一条 redirect 漏掉的 residue
+- flush 之后 `commit` 仍只能通过跳过中间 FTQ hole 才能推进
+
+这些都应视为 redirect flush 语义错误，而不是可接受的中间态。
+
 ## Current Env Mapping
 
 若需要查看当前 Python env 的具体实现，请直接阅读

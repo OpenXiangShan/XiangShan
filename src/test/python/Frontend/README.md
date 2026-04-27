@@ -122,7 +122,7 @@ TB_BIN_PATH=ready-to-run/microbench.bin \
 TB_TRACE_PATH=NEMU/logs/microbench.trace.jsonl \
 TB_BASE_ADDR=0x80000000 \
 TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
-python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
+python -m pytest -p no:rerunfailures -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
 ```
 
 - `tests/test_bin_trace_dut.py::test_bin_trace` 现在统一按 run-to-completion
@@ -135,6 +135,9 @@ python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_b
 - 当前仓库里实际存在的 NEMU 可执行文件路径是
   `ready-to-run/riscv64-nemu-interpreter`。
   不要默认假设 `NEMU/build/riscv64-nemu-interpreter` 已经存在。
+- 当前 frontend 脚本默认禁用环境级 `pytest_rerunfailures` 插件。
+  这个插件会在沙箱里创建本地 socket，并在 `pytest_configure` 阶段直接失败。
+  如果手工运行 `pytest`，也应带上 `-p no:rerunfailures`，除非你明确需要它。
 
 ## Bin Case 运行要求
 

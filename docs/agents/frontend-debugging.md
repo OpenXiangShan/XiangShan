@@ -35,9 +35,14 @@ For every DUT bin-trace failure, treat the following as mandatory:
 1. Use the generated waveform artifact to check whether env-driven `commit`
    and `redirect` were actually sent, and whether their FTQ / PC / target
    context matches the expected failing window.
-2. State the concrete env bug location, suspected function, or unresolved proof
+2. Report the first failing position from both artifacts: the exact log line
+   number and the exact FST waveform timestamp in ps.
+3. Explain the cause at that first failing position before proposing a fix.
+4. If converting FST to VCD for analysis, regenerate the VCD from the current
+   FST for each investigation. Never use an old converted waveform as evidence.
+5. State the concrete env bug location, suspected function, or unresolved proof
    gap before changing behavior.
-3. Fix the root cause directly; do not present a bypass as resolution.
+6. Fix the root cause directly; do not present a bypass as resolution.
 
 ## Ground Truth Rules
 

@@ -29,6 +29,7 @@ Repository-wide background lives outside this directory:
 - `README.md` for top-level XiangShan orientation.
 - `docs/testbench/testbench_stages.yaml` for staged testbench guidance and
   generated workflow templates.
+- Never use `git push -f` under any circumstances.
 
 Keep this file as a doc map rather than a second copy of detailed workflow or
 semantic rules.
