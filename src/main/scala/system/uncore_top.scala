@@ -91,11 +91,24 @@ case class PeriParams(
 )
 
 object Pbus2Params {
+  private val imsicMModeSize = 0x1000L
+  private val imsicSModeStride = 0x10000L
+  private val imsicSModeSize = 0x8000L
+
+  def defaultLocalImsicAddrMap(numHarts: Int, imsicParams: aia.IMSICParams): Seq[AddressSet] = {
+    (0 until numHarts).flatMap { hartId =>
+      Seq(
+        AddressSet(imsicParams.mAddr + hartId * imsicMModeSize, imsicMModeSize - 1),
+        AddressSet(imsicParams.sgAddr + hartId * imsicSModeStride, imsicSModeSize - 1)
+      )
+    }
+  }
+
   def defaultCrsImsicAddrMap(numDies: Int): Seq[AddressSet] = {
     (1 to numDies).flatMap { dieId =>
       Seq(
-        AddressSet((BigInt(dieId) << 44) + 0x1C000000L, 0xFFFF),
-        AddressSet((BigInt(dieId) << 44) + 0x1D000000L, 0xFFFFF)
+        AddressSet((BigInt(dieId) << 44) + 0x1C000000L, 0xFFFF), // bit[11:0] 4KB,bit[15:12] for 16 harts each die
+        AddressSet((BigInt(dieId) << 44) + 0x1D000000L, 0xFFFFF) // bit[15:12] for s+7vs interrupt file,bit[19:16] for 16 harts each die
       )
     }
   }
@@ -140,6 +153,7 @@ case class Pbus2Params(
     MSIOutDataWidth: Int = 32,
     periParams:      PeriParams
 ) {
+  val localImsicAddrMap: Seq[AddressSet] = Pbus2Params.defaultLocalImsicAddrMap(NumHarts, IMSICParams)
   val crsimsicAddrMap: Seq[AddressSet] =
     if (crsimsicAddrMapOverride.nonEmpty) crsimsicAddrMapOverride else Pbus2Params.defaultCrsImsicAddrMap(NumDies)
   val crsdmAddrMap: Seq[AddressSet] =
@@ -148,10 +162,24 @@ case class Pbus2Params(
   lazy val NumIntSrcs = 1 << IMSICParams.imsicIntSrcWidth
 }
 
+object AXIDataBridge {
+  def errorAddrMapFromLegal(legalAddrMap: Seq[AddressSet]): Seq[AddressSet] = {
+    require(legalAddrMap.nonEmpty, "AXIDataBridge requires at least one legal address set")
+    val mergedLegalAddrMap = AddressSet.unify(legalAddrMap) // merge some addrsets into smaller number of addrsets, and also check if they are valid(addr+mask)
+    require(mergedLegalAddrMap.forall(_.finite), "AXIDataBridge legal address sets must be finite")
+    val addrBits = mergedLegalAddrMap.map(_.max.bitLength).max max 1
+    val universe = AddressSet(0, (BigInt(1) << addrBits) - 1)
+    val errorAddrMap = mergedLegalAddrMap.foldLeft(Seq(universe)) { case (remaining, legal) =>
+      remaining.flatMap(_.subtract(legal))
+    }
+    errorAddrMap.distinct.sorted // remove duplicates and sort by address
+  }
+}
+
 /**
  * A configurable hierarchical AXI4 bus interconnect with heterogeneous input widths.
  */
-class AXIDataBridge(SrcDataWidth: Int, DestDataWidth: Int, errorAddrMap: AddressSet)(implicit p: Parameters) extends LazyModule {
+class AXIDataBridge(SrcDataWidth: Int, DestDataWidth: Int, errorAddrMap: Seq[AddressSet])(implicit p: Parameters) extends LazyModule {
   println("=====AXIDataBridge: start define=====")
   private val indexedIdBits = 6
   private val maxInFlightSources = 1 << indexedIdBits
@@ -159,10 +187,14 @@ class AXIDataBridge(SrcDataWidth: Int, DestDataWidth: Int, errorAddrMap: Address
   val axi_xbar_o = AXI4Xbar()
   //  private val tmp_xbar = TLXbar()
   val error_xbar = TLXbar()
-  private val errorMaxTransfer = scala.math.min(4096, (DestDataWidth / 8) * (1 << AXI4Parameters.lenBits))
+  require(errorAddrMap.nonEmpty, "AXIDataBridge requires a non-empty error address map")
+  private val bridgeMaxTransfer = scala.math.min(4096, (DestDataWidth / 8) * (1 << AXI4Parameters.lenBits))
+  private val errorMinAlignment = errorAddrMap.map(_.alignment).min
+  private val errorMaxTransfer =
+    if (errorMinAlignment > bridgeMaxTransfer) bridgeMaxTransfer else errorMinAlignment.toInt
   val error = LazyModule(new TLError(
     params = DevNullParams(
-      address = Seq(errorAddrMap),
+      address = errorAddrMap,
       maxAtomic = 1,
       maxTransfer = errorMaxTransfer),
     beatBytes = DestDataWidth/8
@@ -588,15 +620,17 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
       beatBytes = params.nocDataWidth / 8
     )))
 
-  // instance data width switch bridge for s_noc2cfg (256bit -> 64bit)
+  // instance data width switch bridge for s_noc2msi (256bit -> 64bit)
   val u_hnis_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.nocDataWidth,
-    DestDataWidth = params.MSIOutDataWidth, errorAddrMap = AddressSet(0x1C100000L, 0xfffffL)))
+    DestDataWidth = params.MSIOutDataWidth,
+    errorAddrMap = AXIDataBridge.errorAddrMapFromLegal(params.localImsicAddrMap ++ params.crsimsicAddrMap)))
   u_hnis_DataBridge.axi_xbar_i := hni_s_xbar
   pcie_xbar1to2 := aplic_mNode
   pcie_xbar1to2 := AXI4Buffer() := u_hnis_DataBridge.axi_xbar_o
   // instance data width switch bridge
   val u_cpus_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.cpuDataWidth,
-    DestDataWidth = params.MSIOutDataWidth, errorAddrMap = AddressSet(0x1C200000L, 0xfffffL)))
+    DestDataWidth = params.MSIOutDataWidth,
+    errorAddrMap = AXIDataBridge.errorAddrMapFromLegal(params.localImsicAddrMap ++ params.crsimsicAddrMap :+ params.DebugAddrMap)))
   u_cpus_DataBridge.axi_xbar_i := Cbus.cpum
   pbus_xbar := u_cpus_DataBridge.axi_xbar_o
   pbus_xbar := AXI4Buffer() := pcie_xbar1to2
@@ -604,7 +638,8 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   // imsic for cross-die
   // instance data width switch bridge from 32bit to 256bit
   val u_crsdie_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.MSIOutDataWidth,
-    DestDataWidth = params.nocDataWidth, errorAddrMap = AddressSet(0x800000000000L, 0xfffffffffffL)))
+    DestDataWidth = params.nocDataWidth,
+    errorAddrMap = Seq(AddressSet(0x800000000000L, 0xfffffffffffL))))
   u_crsdie_DataBridge.axi_xbar_i := pbus_xbar // 32bit
   crsdie_msi_sN := u_crsdie_DataBridge.axi_xbar_o // 256bit
   // imsic inside die
@@ -730,7 +765,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     )))
   // data width switch bridge for cross-die debug, 256bit->64bit
   val u_dm_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.nocDataWidth, DestDataWidth = params.dmDataWidth,
-    errorAddrMap = AddressSet(0x1B020000L, 0xffffL))) // dm cfg data must be 64bit
+    errorAddrMap = AXIDataBridge.errorAddrMapFromLegal(Seq(params.DebugAddrMap) ++ dmWcrsAddrMap))) // dm cfg data must be 64bit
   u_dm_DataBridge.axi_xbar_i := dm_fcrs_xbar // 64bit
   dm_wcrs_sNode := dm_fcrs_xbar
   dm_fcrs_xbar := dm_fcrs_mNode
@@ -761,7 +796,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     )))
   // data width switch bridge for cross-die debug from current die, 64bit->256bit
   val u_dm_mDataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.dmDataWidth, DestDataWidth = params.nocDataWidth,
-    errorAddrMap = AddressSet(0x1B010000L, 0xffffL))) // dm cfg data must be 64bit
+    errorAddrMap = AXIDataBridge.errorAddrMapFromLegal(params.crsdmAddrMap ++ dmWcrsAddrMap))) // dm cfg data must be 64bit
   // master Node for accessing to debugModule of other dies, whose addr[47:44] is reqid,based on sNodes
   val dm_tcrs_mNode =
     AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -922,7 +957,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     )))
   // instance data width switch bridge for s_noc2cfg (256bit -> 64bit)
   val u_peri_DataBridge = LazyModule(new AXIDataBridge(SrcDataWidth = params.nocDataWidth, DestDataWidth = params.aplicParams.CFG_DATA_WIDTH,
-    errorAddrMap = AddressSet(0x1E030000L, 0xffffL)))
+    errorAddrMap = AXIDataBridge.errorAddrMapFromLegal(Seq(params.aplicParams.APLICAddrMap, params.SYSCNTAddrMap))))
   u_peri_DataBridge.axi_xbar_i := peri_mNode
   peri_xbar  := u_peri_DataBridge.axi_xbar_o
   peri_sNode := peri_xbar
