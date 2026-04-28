@@ -369,6 +369,11 @@ class LoadUnitS0(param: ExeUnitParams)(
   val uncacheForwardReqValid = replayHiPrio.fire && replayHiPrio.bits.isUncacheReplay()
 
   val dcacheForwardReqValid = replayHiPrio.fire && replayHiPrio.bits.forwardDChannel.get
+  val mshrForwardReqValid = pipeIn.fire && !isPrefetch && !isUncacheReplay
+  val mshrForwardReq = Wire(new DCacheForwardReqS0)
+  mshrForwardReq.vaddr := sink.bits.vaddr
+  mshrForwardReq.size := sink.bits.size
+  mshrForwardReq.mshrId := Mux(dcacheForwardReqValid, sink.bits.mshrId.get, 0.U)
   val dcacheForwardReq = Wire(new DCacheForwardReqS0)
   dcacheForwardReq.vaddr := sink.bits.vaddr
   dcacheForwardReq.size := sink.bits.size
@@ -458,8 +463,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.uncacheForwardReq.valid := uncacheForwardReqValid
   io.uncacheForwardReq.bits := storeForwardReq
 
-  io.mshrForwardReq.valid := dcacheForwardReqValid
-  io.mshrForwardReq.bits := dcacheForwardReq
+  io.mshrForwardReq.valid := mshrForwardReqValid
+  io.mshrForwardReq.bits := mshrForwardReq
   io.tldForwardReq.valid := dcacheForwardReqValid
   io.tldForwardReq.bits := dcacheForwardReq
 
