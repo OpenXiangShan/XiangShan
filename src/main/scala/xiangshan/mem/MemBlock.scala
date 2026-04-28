@@ -412,6 +412,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val msiInfo   = ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))
       val teemsiInfo   = Option.when(soc.IMSICParams.HasTEEIMSIC)(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W)))
       val clintTime = ValidIO(UInt(64.W))
+      val reset_mtvec = Option.when(enableResetMtvec)(Input(Valid(UInt(PAddrBits.W))))
     })
     val inner_hartId = Output(UInt(hartIdLen.W))
     val inner_reset_vector = Output(UInt(PAddrBits.W))
@@ -1275,6 +1276,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       x_teemsiInfo        := DelayNWithValid(io_teemsiInfo, 1)
     }
     x.clintTime         := DelayNWithValid(io.fromTopToBackend.clintTime, 1)
+    x.reset_mtvec.foreach(_ := DelayNWithValid(io.fromTopToBackend.reset_mtvec.get, 1))
   }
 
   io.memInfo.sqFull := RegNext(lsq.io.sqFull)

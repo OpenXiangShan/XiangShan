@@ -63,6 +63,7 @@ case class YamlConfig(
   CHIAddrWidth: Option[Int],
   CVMParams: Option[CVMParameters],
   EnableBitmapCheck: Option[Boolean],
+  EnableResetMtvec: Option[Boolean],
 )
 
 object YamlParser {
@@ -122,6 +123,11 @@ object YamlParser {
     yamlConfig.HartIDDmodeWidth.foreach { width =>
       newConfig = newConfig.alter((site, here, up) => {
         case XSTileKey => up(XSTileKey).map(_.copy(hartIDDmodeWidth = width))
+      })
+    }
+    yamlConfig.EnableResetMtvec.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case XSTileKey => up(XSTileKey).map(_.copy(enableResetMtvec = enable))
       })
     }
     yamlConfig.DebugModuleParams.foreach { params =>
