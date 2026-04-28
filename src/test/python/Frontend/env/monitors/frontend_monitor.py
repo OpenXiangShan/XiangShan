@@ -265,6 +265,9 @@ class FrontendMonitor:
         self.wait_sync_after_redirect = True
         self.redirect_sync_deadline = self.current_cycle + self.redirect_sync_max
         self.redirect_count += 1
+        self._ftq_start_pc_cache.clear()
+        self._ftq_group_closed.clear()
+        self._ftq_group_max_offset.clear()
         self.logger.info(
             "redirect notified: target=0x%x reason=%s grace=%d",
             int(target_pc),

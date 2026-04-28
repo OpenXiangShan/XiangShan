@@ -39,6 +39,20 @@ def test_monitor_skips_zero_instr_compare_for_sv39_translation_aware_gap() -> No
     assert FrontendMonitor._should_skip_instr_compare({"ok": True, "mode": "bare"}, got=0, ex_sum=0) is False
 
 
+def test_monitor_redirect_invalidates_ftq_identity_cache() -> None:
+    monitor = FrontendMonitor()
+    ftq_group = (1, 36)
+    monitor._ftq_start_pc_cache[ftq_group] = 0x80000680
+    monitor._ftq_group_closed[ftq_group] = False
+    monitor._ftq_group_max_offset[ftq_group] = 23
+
+    monitor.notify_redirect(0x800006A4, reason="unit")
+
+    assert monitor._ftq_start_pc_cache == {}
+    assert monitor._ftq_group_closed == {}
+    assert monitor._ftq_group_max_offset == {}
+
+
 def test_create_frontend_dut_raises_when_real_dut_is_required_but_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     real_import = builtins.__import__
 
