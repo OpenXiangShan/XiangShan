@@ -12,6 +12,7 @@ import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.{Fflags, Frm}
+import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
 import xiangshan.backend.fu.vector.Bundles.{V0, VType, Vl, Vxrm, Vxsat}
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
@@ -71,8 +72,11 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
 
   fus.foreach {
     case fu =>
+      val effectiveFrm = ex.head.bits.ctrl.frm.map(instFrm =>
+        Mux(instFrm === VecFrm.DYN, in.frm.get, instFrm)
+      )
       fu.in.flush := in.flush
-      fu.in.frm.foreach(_ := in.frm.get)
+      (fu.in.frm zip effectiveFrm).foreach { case (fuFrm, frm) => fuFrm := frm }
       fu.in.vxrm.foreach(_ := in.vxrm.get)
   }
 
@@ -360,6 +364,7 @@ object Exu {
 
     val sqIdx     = Option.when(param.needSqIdx)(new SqPtr)
 
+    val frm       = Option.when(param.readFrm)(Frm())
     val vm        = Option.when(param.needVM)(Bool())
     val vtype     = Option.when(param.readVType)(VType())
     val oldVType  = Option.when(param.readOldVType)(VType())
@@ -389,6 +394,7 @@ object Exu {
 
       this.sqIdx.foreach(_ := deq.sqIdx.get)
 
+      this.frm.foreach(_ := deq.frm.get)
       this.vm.foreach(_ := deq.vm.get)
       this.vtype.foreach(_ := deq.vtype.get)
       this.oldVType.foreach(_ := deq.oldVType.get)
