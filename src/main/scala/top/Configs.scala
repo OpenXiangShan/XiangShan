@@ -283,7 +283,7 @@ case class L2CacheConfig
   banks: Int = 1,
   tp: Boolean = true,
   enableFlush: Boolean = false,
-  enableCHIAsyncBridge: Option[Boolean] = None
+  enableCHIAsyncBridge: Boolean = true
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
