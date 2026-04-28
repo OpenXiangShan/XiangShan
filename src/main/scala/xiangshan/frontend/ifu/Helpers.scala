@@ -40,6 +40,32 @@ trait PreDecodeHelper extends HasIfuParameters {
   }
 }
 
+trait PredCheckerHelper extends HasIfuParameters {
+  def prefixOr(in: Seq[Bool]): Seq[Bool] = {
+    val n = in.length
+    if (n <= 1) {
+      in
+    } else {
+      val half    = n / 2
+      val leftIn  = in.take(half)
+      val rightIn = in.drop(half)
+
+      // Recursively compute prefix OR on left and right halves
+      val leftPrefix  = prefixOr(leftIn)
+      val rightPrefix = prefixOr(rightIn)
+
+      // Overall OR value of the left half (i.e., the last element of leftPrefix)
+      val leftTotalOr = leftPrefix.last
+
+      // Every element in the right half must be ORed with leftTotalOr
+      val rightPrefixAdjusted = rightPrefix.map(_ || leftTotalOr)
+
+      // Concatenate the results
+      leftPrefix ++ rightPrefixAdjusted
+    }
+  }
+}
+
 trait IfuHelper extends HasIfuParameters {
   private object ShiftType {
     val NoShift     = 0.U(2.W)

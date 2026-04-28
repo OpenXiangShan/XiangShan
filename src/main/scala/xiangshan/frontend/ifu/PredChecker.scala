@@ -27,7 +27,7 @@ import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 
-class PredChecker(implicit p: Parameters) extends IfuModule {
+class PredChecker(implicit p: Parameters) extends IfuModule with PredCheckerHelper {
   class PredCheckerIO extends IfuBundle {
     class PredCheckerReq(implicit p: Parameters) extends IfuBundle {
       // Input data is offset-adjusted for IBuffer enqueue.
@@ -130,20 +130,15 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     VecInit((0 until IBufferEnqueueWidth).map(i =>
       jalFaultVec(i) || jalrFaultVec(i) || retFaultVec(i) || invalidTaken(i) || notCfiTaken(i)
     ))
-  private val remaskIdx  = ParallelPriorityEncoder(remaskFault.asUInt)
-  private val needRemask = ParallelOR(remaskFault)
-  // NOTE: we need a minimal pow2 that greater than IBufferEnqueueWidth, so we do a log2Up then pow(2)
-  private val fixedRange =
-    instrValid.asUInt & (
-      Fill(IBufferEnqueueWidth, !needRemask) |
-        (Fill(pow(2, log2Up(IBufferEnqueueWidth)).toInt, 1.U(1.W)) >> (~remaskIdx).asUInt).asUInt
-    )
-  // Adjust this if one IBuffer input entry is later removed
-  // require(
-  //   isPow2(IBufferEnqueueWidth),
-  //   "If IBufferEnqueueWidth does not satisfy the power of 2," +
-  //     "expression: Fill(IBufferEnqueueWidth, 1.U(1.W)) >> ~remaskIdx is not right !!"
-  // )
+
+  // Timing optimization: prefixOr is implemented as a parallel prefix tree (recursive bisection),
+  // which retains all valid instruction entries before the first fault occurs (including the fault position itself).
+  private val maskFaultOrBefore = false.B +: prefixOr(remaskFault)
+
+  // keep entries before and including the first remask fault
+  private val fixedRange = VecInit((0 until IBufferEnqueueWidth).map {
+    i => instrValid(i) && !maskFaultOrBefore(i)
+  }).asUInt
 
   io.resp.stage1Out.fixedTwoFetchRange := fixedRange.asTypeOf(Vec(IBufferEnqueueWidth, Bool()))
 
