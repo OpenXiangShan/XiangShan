@@ -22,13 +22,9 @@ import xiangshan.frontend.bpu.HasBpuParameters
 case class MainBtbParameters(
     NumEntries: Int = 8192,
     NumWay:     Int = 4,
-    // Lowest level banks, each bank is a physical SRAM
-    // This banking is used to resolve read-write conflicts and reduce SRAM power
+    // Lowest level banks used to resolve read-write conflicts and reduce SRAM power, each bank is a physical SRAM
     NumInternalBanks: Int = 4,
-    // Highest level banks
-    // This banking is used to resolve the alignement restriction of the BTB
-    // When using align banking, the BTB can provide at most banks - 1 / banks * predict width wide prediction
-    NumAlignBanks:   Int = 2,
+    // NumAlignBanks is determined by top-level FetchBlockSize and FetchBlockAlignSize, not adjustable in mbtb
     TagWidth:        Int = 16,
     TargetWidth:     Int = 20,       // 2B aligned
     WriteBufferSize: Int = 4,
@@ -39,7 +35,6 @@ case class MainBtbParameters(
     EnableMainbtbTrace: Boolean = false
 ) {}
 
-// TODO: expose this to Parameters.scala / XSCore.scala
 trait HasMainBtbParameters extends HasBpuParameters {
   def mbtbParameters: MainBtbParameters = bpuParameters.mbtbParameters
 
