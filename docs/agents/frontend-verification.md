@@ -118,7 +118,7 @@ that boundary stable.
   testcase, regression, or bin-trace reproduction until the refactor owner
   judges the new model complete enough for validation; do not use intermediate
   failing runs as a substitute for finishing the rewrite.
-- After every `git commit`, run `git fetch origin <current-branch>` and then
+- Before pushing frontend work, run `proxychains git fetch origin <current-branch>` and then
   `git rebase origin/<current-branch>`.
 - Before changing backend-agent semantics or related logic, run
   `docs/agents/frontend-backend-agent.md` section `实现一致性最小检查项`
