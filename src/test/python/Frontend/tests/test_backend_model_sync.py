@@ -4116,6 +4116,110 @@ def test_committed_queue_head_behind_commit_ptr_fails_fast() -> None:
         bm._plan_commit_entry_for_cycle()
 
 
+def test_recovery_discards_committed_queue_head_equal_to_commit_ptr() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([]))
+    bm.current_cycle = 100
+    bm.commit_count = 10
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 7
+    _set_recovery_episode(
+        bm,
+        target_pc=0x8000007C,
+        origin_index=3,
+        expected_recovery_ftq=(0, 8),
+    )
+    bm._cfvec_queue.extend(
+        [
+            QueueInstr(
+                cycle=0,
+                slot=0,
+                pc=0x8000006E,
+                instr=0x147D,
+                is_rvc=True,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=7,
+                ftq_offset=0,
+                is_last_in_entry=False,
+                path_state="correct",
+                rob_commit_state="committed",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=1,
+                pc=0x80000070,
+                instr=0x0012F393,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=7,
+                ftq_offset=2,
+                is_last_in_entry=False,
+                path_state="correct",
+                rob_commit_state="committed",
+            ),
+            QueueInstr(
+                cycle=0,
+                slot=2,
+                pc=0x80000074,
+                instr=0x00038463,
+                is_rvc=False,
+                pred_taken=False,
+                ftq_flag=0,
+                ftq_value=7,
+                ftq_offset=4,
+                is_last_in_entry=True,
+                path_state="correct",
+                rob_commit_state="committed",
+                resolve_state="emitted",
+                is_cfi=True,
+            ),
+        ]
+    )
+
+    assert bm._plan_commit_entry_for_cycle() is None
+    assert list(bm._cfvec_queue) == []
+    assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (0, 7)
+
+
+def test_pending_redirect_discards_committed_queue_head_equal_to_commit_ptr() -> None:
+    bm = BackendModel()
+    bm.set_golden_trace(GoldenTrace([]))
+    bm.current_cycle = 100
+    bm.commit_count = 10
+    bm.commit_ptr_flag = 0
+    bm.commit_ptr_value = 2
+    bm._set_active_wrong_path_episode(
+        origin_index=1,
+        target_pc=0x80000044,
+        redirect_context=None,
+        redirect_driven=False,
+    )
+    bm._cfvec_queue.append(
+        QueueInstr(
+            cycle=0,
+            slot=0,
+            pc=0x8000002E,
+            instr=0x00038463,
+            is_rvc=False,
+            pred_taken=False,
+            ftq_flag=0,
+            ftq_value=2,
+            ftq_offset=4,
+            is_last_in_entry=True,
+            path_state="correct",
+            rob_commit_state="committed",
+            resolve_state="emitted",
+            is_cfi=True,
+        )
+    )
+
+    assert bm._plan_commit_entry_for_cycle() is None
+    assert list(bm._cfvec_queue) == []
+    assert (bm.commit_ptr_flag, bm.commit_ptr_value) == (0, 2)
+
+
 def test_pending_level0_target_serializes_commit_before_wrap_target_entry() -> None:
     dut = _DummyDut()
     bm = BackendModel()
@@ -4925,7 +5029,7 @@ def test_cfvec_queue_commit_waits_for_correct_path_cfi_resolve() -> None:
     assert list(bm._cfvec_queue) == []
 
 
-def test_cfvec_queue_stale_head_equal_to_commit_ptr_fails_fast() -> None:
+def test_cfvec_queue_stale_head_equal_to_commit_ptr_is_discarded() -> None:
     bm = BackendModel()
     bm.set_golden_trace(
         GoldenTrace([TraceEntry(index=0, pc=0x80000000, instr=0x00000013, size=4)])
@@ -4954,10 +5058,8 @@ def test_cfvec_queue_stale_head_equal_to_commit_ptr_fails_fast() -> None:
         )
     )
 
-    import pytest
-
-    with pytest.raises(AssertionError, match="cfvec queue head falls behind commit_ptr"):
-        bm._plan_commit_entry_for_cycle()
+    assert bm._plan_commit_entry_for_cycle() is None
+    assert list(bm._cfvec_queue) == []
 
 
 

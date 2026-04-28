@@ -3372,6 +3372,9 @@ class BackendModel:
                 if not bool(state.reuse_commit_ptr_once) and (
                     int(head_rank) == 0 or int(head_rank) >= int(state.ftq_size)
                 ):
+                    if int(head_rank) == 0:
+                        self._cfvec_queue_pop_head(int(span_len))
+                        return None
                     raise AssertionError(
                         "cfvec queue head falls behind commit_ptr; "
                         f"head=({int(ftq_flag)},{int(ftq_value)}) "
