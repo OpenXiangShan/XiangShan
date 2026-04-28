@@ -187,6 +187,10 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       case Some(param) =>
         val source = withClockAndReset(clock, reset_sync)(Module(new CHIAsyncBridgeSource(param)))
         source.io.enq <> tile.module.io.chi.get
+        //source.io.lcrdy <> tile.module.io.lcrdy.get
+        tile.module.io.lcrdy.foreach { lcrdy =>
+          source.io.lcrdy <> lcrdy
+        }
         io.chi <> source.io.async
       case None =>
         require(enableCHI)
