@@ -429,6 +429,11 @@ class BackendModel:
         if queue_index is None:
             return
         if int(queue_index) not in queue_index_map:
+            if str(reason) == "cfvec_queue_pop_head":
+                self._last_correct_cfi_context = dict(self._last_correct_cfi_context)
+                self._last_correct_cfi_context["queue_index"] = None
+                self._last_correct_cfi_context["queue_context_optional"] = True
+                return
             self._last_correct_cfi_context = None
             return
         self._last_correct_cfi_context = self._remap_redirect_context_queue_index(
@@ -1126,6 +1131,8 @@ class BackendModel:
             return None
         remapped_context = dict(redirect_context)
         queue_index = remapped_context.get("queue_index")
+        if queue_index is None and bool(remapped_context.get("queue_context_optional", False)):
+            return remapped_context
         if queue_index_map is not None and queue_index is not None:
             old_idx = int(queue_index)
             new_idx = queue_index_map.get(old_idx)
@@ -2674,6 +2681,8 @@ class BackendModel:
         return tuple(self._visible_queue_call_ret_commit_group)
 
     def _predicted_cfi_outcome(self, instr: int, pc: int, pred_taken: bool, is_rvc: bool) -> Optional[tuple]:
+        if bool(is_rvc) and self._is_compressed_indirect_jump(int(instr)):
+            return bool(pred_taken), None
         step = 2 if is_rvc else 4
         opc = instr & 0x7F
         if opc == 0x63:
@@ -2699,6 +2708,10 @@ class BackendModel:
         if entry is None:
             return None
         step = 2 if is_rvc else 4
+        if bool(is_rvc) and self._is_compressed_indirect_jump(int(instr)):
+            if entry.target_pc is None:
+                return True, None
+            return True, int(entry.target_pc) & 0xFFFFFFFFFFFFFFFF
         opc = instr & 0x7F
         if opc == 0x63:
             taken = bool(entry.taken)
@@ -2753,6 +2766,8 @@ class BackendModel:
           - taken branch / unconditional jump : branch/jump destination
           - not-taken branch                  : fall-through (pc + instr_size)
         """
+        if bool(is_rvc) and self._is_compressed_indirect_jump(int(instr)):
+            return 3, self._compressed_indirect_ras_action(int(instr)), 0, True
         opc = instr & 0x7F
         instr_size = 2 if is_rvc else 4
         if opc == 0x63:
@@ -2780,6 +2795,23 @@ class BackendModel:
                 ras_action = 0
             return 3, ras_action, 0, True
         return None
+
+    @staticmethod
+    def _is_compressed_indirect_jump(instr: int) -> bool:
+        if (int(instr) & 0x3) != 0x2:
+            return False
+        funct4 = (int(instr) >> 12) & 0xF
+        rs1 = (int(instr) >> 7) & 0x1F
+        rs2 = (int(instr) >> 2) & 0x1F
+        return funct4 in (0x8, 0x9) and rs1 != 0 and rs2 == 0
+
+    @staticmethod
+    def _compressed_indirect_ras_action(instr: int) -> int:
+        funct4 = (int(instr) >> 12) & 0xF
+        rs1 = (int(instr) >> 7) & 0x1F
+        if funct4 == 0x8:
+            return 1 if rs1 in (1, 5) else 0
+        return 3 if rs1 in (1, 5) else 2
 
     def _update_ftq_start_pc_cache(self, observation: BackendObservationSnapshot) -> None:
         """Cache per-FTQ-entry start PCs reported by DUT's fromFtq interface.

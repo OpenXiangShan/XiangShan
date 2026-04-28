@@ -720,6 +720,127 @@ def test_correct_taken_indirect_jump_target_next_cycle_does_not_queue_redirect()
     assert len([evt for evt in bm.pending_events if evt.kind == "redirect"]) == 0
 
 
+def test_compressed_indirect_jump_attributes_fallthrough_wrong_path_redirect() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=0, pc=0x800027C0, instr=0x00009A02, size=2, kind="jump_indirect", taken=True, target_pc=0x8000276A),
+                TraceEntry(index=1, pc=0x8000276A, instr=0x0000E111, size=2, kind="branch", taken=True, target_pc=0x8000276E),
+            ]
+        )
+    )
+    bm.resolve_min_delay = 0
+    bm.resolve_max_delay = 0
+
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x800027C0,
+        instr=0x00009A02,
+        is_rvc=1,
+        pred_taken=1,
+        fixed_taken=1,
+        ftq_flag=0,
+        ftq_value=38,
+        ftq_offset=0,
+        is_last=0,
+    )
+    _drive_cfvec_slot(
+        dut,
+        1,
+        valid=1,
+        pc=0x800027C2,
+        instr=0x000CC503,
+        is_rvc=0,
+        ftq_flag=0,
+        ftq_value=38,
+        ftq_offset=1,
+        is_last=1,
+    )
+
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+
+    assert [entry.path_state for entry in bm._cfvec_queue] == ["correct", "wrong"]
+    assert bm._cfvec_queue[0].is_cfi is True
+    assert bm._active_wrong_path_origin_index() == 1
+    assert len(bm._pending_resolves) == 1
+    assert bm._pending_resolves[0].queue_index == 0
+    assert bm._pending_resolves[0].target == 0x8000276A
+    assert bm._pending_resolves[0].mispredict is True
+    redirects = [evt for evt in bm.pending_events if evt.kind == "redirect"]
+    assert len(redirects) == 1
+    assert redirects[0].payload["target_pc"] == 0x8000276A
+    assert redirects[0].payload["pc"] == 0x800027C0
+    assert redirects[0].payload["branch_type"] == 3
+
+
+def test_popped_correct_cfi_context_attributes_later_fallthrough_wrong_path() -> None:
+    dut = _DummyDut()
+    bm = BackendModel()
+    bm.bind(dut)
+    bm.set_golden_trace(
+        GoldenTrace(
+            [
+                TraceEntry(index=0, pc=0x800027C0, instr=0x00009A02, size=2, kind="jump_indirect", taken=True, target_pc=0x8000276A),
+                TraceEntry(index=1, pc=0x8000276A, instr=0x0000E111, size=2, kind="branch", taken=True, target_pc=0x8000276E),
+            ]
+        )
+    )
+    bm.resolve_min_delay = 0
+    bm.resolve_max_delay = 0
+
+    _drive_cfvec_slot(
+        dut,
+        7,
+        valid=1,
+        pc=0x800027C0,
+        instr=0x00009A02,
+        is_rvc=1,
+        pred_taken=1,
+        fixed_taken=1,
+        ftq_flag=0,
+        ftq_value=38,
+        ftq_offset=0,
+        is_last=1,
+    )
+
+    bm.current_cycle = 0
+    bm._sample_cfvec()
+    bm._cfvec_queue_pop_head(1)
+
+    assert list(bm._cfvec_queue) == []
+    assert bm._last_correct_cfi_context["queue_index"] is None
+
+    _clear_cfvec(dut)
+    _drive_cfvec_slot(
+        dut,
+        0,
+        valid=1,
+        pc=0x800027C2,
+        instr=0x000CC503,
+        is_rvc=0,
+        ftq_flag=0,
+        ftq_value=38,
+        ftq_offset=1,
+        is_last=1,
+    )
+
+    bm.current_cycle = 1
+    bm._sample_cfvec()
+
+    assert [entry.path_state for entry in bm._cfvec_queue] == ["wrong"]
+    assert bm._active_wrong_path_origin_index() == 0
+    redirects = [evt for evt in bm.pending_events if evt.kind == "redirect"]
+    assert len(redirects) == 1
+    assert redirects[0].payload["target_pc"] == 0x8000276A
+    assert redirects[0].payload["pc"] == 0x800027C0
+
+
 def test_first_mismatch_ignores_stale_debug_commit_queue_entry() -> None:
     bm = BackendModel()
     bm.set_golden_trace(GoldenTrace([TraceEntry(index=0, pc=0x80000020, instr=0x00000013, size=4)]))
