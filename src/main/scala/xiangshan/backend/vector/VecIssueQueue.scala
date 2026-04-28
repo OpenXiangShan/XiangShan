@@ -12,6 +12,7 @@ import xiangshan.backend.Bundles.{DispatchOutUop, IssueQueueInDebug, RegionInUop
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.issue.{AgeDetector, NewAgeDetector}
 import xiangshan.backend.rob.RobPtr
@@ -553,6 +554,7 @@ object VecIssueQueue {
     val vlWen     = Bool()
     val selImm    = SelImm()
     val imm       = UInt(immWidth.W)
+    val frm       = Option.when(param.readFrm)(Frm())
     val fflagsWen = Bool()
     val vxsatWen  = Bool()
     val flushPipe = Bool()
@@ -597,6 +599,7 @@ object VecIssueQueue {
 
       this.selImm := source.selImm
       this.imm := source.imm
+      this.frm.foreach(_ := source.frm)
       this.fflagsWen := source.fflagsWen
       this.vxsatWen := false.B // Todo
       this.flushPipe := false.B // Todo: Check if it is needed
@@ -640,6 +643,7 @@ object VecIssueQueue {
 
       this.selImm := source.selImm.getOrElse(0.U)
       this.imm := source.imm.getOrElse(0.U)
+      this.frm.foreach(_ := source.frm.getOrElse(0.U.asTypeOf(Frm())))
       this.fflagsWen := source.fflagsWen.getOrElse(false.B)
       this.vxsatWen := false.B // Todo
       this.flushPipe := false.B // Todo: Check if it is needed
@@ -702,6 +706,7 @@ object VecIssueQueue {
     val flushPipe    = Option.when(exuParam.needFlushPipe)(Bool())
 
     val vm           = Option.when(exuParam.needVM)(Bool())
+    val frm          = Option.when(exuParam.readFrm)(Frm())
     val vtype        = Option.when(exuParam.readVType)(VType())
     val oldVType     = Option.when(exuParam.readOldVType)(VType())
 
@@ -746,6 +751,7 @@ object VecIssueQueue {
       this.flushPipe.foreach(_ := entry.payload.flushPipe.get)
 
       this.vm.foreach(_ := entry.payload.vm.get)
+      this.frm.foreach(_ := entry.payload.frm.get)
       this.vtype.foreach(_ := entry.payload.vtype.get)
       this.oldVType.foreach(_ := entry.payload.oldVType.get)
 
@@ -830,6 +836,7 @@ object VecIssueQueue {
     val oldVType  = Option.when(param.readOldVType)(VType())
     val immType   = Option.when(param.needImm)(SelImm())
     val imm       = Option.when(param.needImm)(UInt(param.deqImmTypesMaxLen.W))
+    val frm       = Option.when(param.readFrm)(Frm())
     val fflagsWen = Option.when(param.needFflagsWen)(Bool())
     val vxsatWen  = Option.when(param.needVxsatWen)(Bool())
     val latency   = Latency()
@@ -857,6 +864,7 @@ object VecIssueQueue {
       this.oldVType.foreach(_ := enq.oldVType)
       this.immType.foreach(_ := enq.selImm)
       this.imm.foreach(_ := enq.imm)
+      this.frm.foreach(_ := enq.frm.get)
       this.fflagsWen.foreach(_ := enq.fflagsWen)
       this.vxsatWen.foreach(_ := enq.vxsatWen)
       this.latency := enq.latency
