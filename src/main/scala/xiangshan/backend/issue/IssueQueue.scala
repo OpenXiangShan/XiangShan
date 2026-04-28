@@ -225,17 +225,20 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val cancelSourceVec = entries.io.debugCancelSourceVec.get
   val debugSrcReadyVec = entries.io.debugSrcReadyVec.get
   val robIdxVec = entries.io.debugRobIdxVec.get
+  val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
   io.validVec := validVec
   io.issuedVec := issuedVec
   io.canIssueVec := canIssueVec
   io.srcReadyVec := srcReadyVec
   io.debugRobIdxVec.foreach(_ := entries.io.debugRobIdxVec.get)
   io.topdownIQInfoVec.foreach{ case infoVec =>
-    infoVec.zip(cancelSourceVec).zip(validVec).zip(robIdxVec).zip(debugSrcReadyVec).foreach{ case ((((sink, cancel),valid),robIdx), srcReady) =>
+    infoVec.zip(cancelSourceVec).zip(validVec).zip(robIdxVec).zip(debugSrcReadyVec).zip(fuTypeVec).foreach{
+      case (((((sink, cancel),valid),robIdx), srcReady), fuType) =>
       sink.valid := valid
       sink.bits.robIdx := robIdx
       sink.bits.cancelSource := cancel
       sink.bits.srcReady := srcReady
+      sink.bits.fuType := fuType
     }
   }
   dontTouch(canIssueVec)
@@ -248,7 +251,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   // (deqIdx)(srcIdx)
   val finalExuSources: Option[Vec[Vec[ExuSource]]] = exuSources.map(x => VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, x))))
 
-  val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
+
   io.fuTypeVec := fuTypeVec
   val deqEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle(isDeq = true))))
   val canIssueMergeAllBusy = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))

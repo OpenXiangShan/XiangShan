@@ -349,8 +349,13 @@ object Bundles {
   }
   class TopdownIQInfo(implicit p: Parameters) extends XSBundle {
     val robIdx = new RobPtr
+    val fuType = FuType()
     val cancelSource = IQCancelSource()
     val srcReady = Bool()
+  }
+
+  class TopdownIQExtendedInfo(implicit p: Parameters) extends TopdownIQInfo {
+    val idealIssueTime = Bool()
   }
 
   class DispatchOutBaseUop(implicit p: Parameters) extends XSBundle {

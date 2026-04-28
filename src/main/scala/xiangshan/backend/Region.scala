@@ -801,8 +801,47 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   val srcReadyVec = issueQueues.flatMap(_.io.srcReadyVec)
   val robIdxVec = issueQueues.flatMap(_.io.debugRobIdxVec.get)
   val validVec = issueQueues.flatMap(_.io.validVec)
+  val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
+  val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
+  val allFuConfigs = allExuParams.map(_.fuConfigs).flatten.toSet.toSeq
+  val sortedFuConfigs = allFuConfigs.sortBy(_.fuType.id)
+
+  val fuConfigsInIssueParams = allIssueParams.map(_.allExuParams.map(_.fuConfigs).flatten.toSet.toSeq)
+  val fuMapPipelineNum = sortedFuConfigs.map( fu => {
+    val fuInIQIdx = fuConfigsInIssueParams.zipWithIndex.filter { case (f, i) => f.contains(fu) }.map(_._2)
+    var pipeLineNum = fuInIQIdx.length
+    if (fu.fuType == FuType.stu) {
+      pipeLineNum = pipeLineNum * 2
+    }
+    println(s"fu : ${fu.name} pipelinenum: ${pipeLineNum}")
+    pipeLineNum.asUInt
+  })
+
   val topdownIQInfoVec = issueQueues.flatMap(_.io.topdownIQInfoVec.get)
-  io.topdownIQInfoVec.foreach( _ := topdownIQInfoVec)
+
+  io.topdownIQInfoVec.foreach( _.zip(topdownIQInfoVec).foreach{ case (sink, source) =>
+      sink.valid := source.valid
+      // connect base info
+      connectSamePort(sink.bits, source.bits)
+      // generate extend info
+      val currentPipelineNum = Mux1H(source.bits.fuType, fuMapPipelineNum)
+      val currentRobIdx = source.bits.robIdx
+      val robIdxVec = topdownIQInfoVec.map(_.bits.robIdx)
+      val srcReadyVec = topdownIQInfoVec.map(_.bits.srcReady)
+      val validVec = topdownIQInfoVec.map(_.valid)
+      val olderRobIdxVec = robIdxVec.map(_ > currentRobIdx)
+      val olderIdealCanIssueVec = Wire(Vec(io.iqEntryNum, Bool()))
+      olderIdealCanIssueVec := VecInit(olderRobIdxVec.zip(srcReadyVec).zip(validVec).map{ case((older, srcReady), valid) =>
+        older && srcReady && valid
+      })
+      val olderIdealCanIssueNum = PopCount(olderIdealCanIssueVec)
+//      val olderIdealCanIssueNum = PopCount(olderIdealCanIssueVec.take(10))
+      sink.bits.idealIssueTime := (olderIdealCanIssueNum < currentPipelineNum) && source.bits.srcReady
+      if(backendParams.debugEn){
+        dontTouch(olderIdealCanIssueVec)
+      }
+    }
+  )
 
 
   if (params.isIntSchd) {
@@ -970,5 +1009,5 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(UInt(maxIQSize.U.getWidth.W))))
   val debugIQEnqHasIssuedVec = Option.when(backendParams.debugEn)(Vec(IQNum, Output(Bool())))
   val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(iqDeqSum, ValidIO(new RobPtr())))
-  val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(iqEntryNum, ValidIO(new TopdownIQInfo()))))
+  val topdownIQInfoVec = Option.when(backendParams.debugEn)(Output(Vec(iqEntryNum, ValidIO(new TopdownIQExtendedInfo()))))
 }
