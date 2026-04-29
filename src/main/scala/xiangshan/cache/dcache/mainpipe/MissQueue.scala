@@ -1779,8 +1779,6 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       e.io.memSetPattenDetected := memSetPattenDetected
       e.io.nMaxPrefetchEntry := nMaxPrefetchEntry
 
-      e.io.main_pipe_req.ready := io.main_pipe_req.ready
-
       for (j <- 0 until reqNum) {
         e.io.queryME(j).req.valid := io.queryMQ(j).req.valid
         e.io.queryME(j).req.bits  := io.queryMQ(j).req.bits.toMissReqWoStoreData()
@@ -1858,7 +1856,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   // amo's main pipe req out
-  arbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
+  val mainPipeReqArb = Module(new RRArbiterInit(chiselTypeOf(io.main_pipe_req.bits), entries.length))
+  mainPipeReqArb.suggestName("main_pipe_req_arb")
+  for ((arbIn, req) <- mainPipeReqArb.io.in.zip(entries.map(_.io.main_pipe_req))) {
+    arbIn <> req
+  }
+  io.main_pipe_req <> mainPipeReqArb.io.out
 
   io.probe.block := Cat(probe_block_vec).orR
   io.replace.block := Cat(
