@@ -366,6 +366,12 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       core.module.io.dft_reset.foreach(dontTouch(_) := DontCare)
       core.module.io.reset_vector := io.riscv_rst_vec(i)
       core.module.io.reset_mtvec.foreach(_ := io.riscv_rst_mtvec.get(i))
+      core.module.io.lcrdy.foreach { lcrdy =>
+        lcrdy.req.rdy := true.B
+        lcrdy.dat.rdy := true.B
+        lcrdy.rsp.rdy := true.B
+        lcrdy.empty := true.B
+      }
     }
 
     withClockAndReset(io.clock, io.reset) {

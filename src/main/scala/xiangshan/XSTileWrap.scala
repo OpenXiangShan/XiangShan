@@ -196,7 +196,12 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
       case None =>
         require(enableCHI)
         io.chi <> tile.module.io.chi.get
-        tile.module.io.lcrdy.foreach { out => out := true.B }
+        tile.module.io.lcrdy.foreach { lcrdy =>
+          lcrdy.req.rdy := true.B
+          lcrdy.dat.rdy := true.B
+          lcrdy.rsp.rdy := true.B
+          lcrdy.empty := true.B
+        }
     }
 
     withClockAndReset(clock, reset_sync) {
