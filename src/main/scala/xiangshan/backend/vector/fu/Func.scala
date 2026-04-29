@@ -7,6 +7,7 @@ import xiangshan._
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.decode.opcode.Latency
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.rob.RobPtr
@@ -114,6 +115,7 @@ object Func {
     val vl        = Option.when(cfg.readVl)(Vl())
     val imm       = UInt(cfg.destDataBits.W)
     val pc        = Option.when(cfg.needPc)(UInt(VAddrData().dataWidth.W))
+    val vfma      = Option.when(cfg.fuType == FuType.vfma)(new VFMacInfo)
   }
 
   class OutCtrl(cfg: VecFuConfig)(implicit p: Parameters) extends XSBundle {
@@ -159,6 +161,12 @@ object Func {
     val narrowFflagsE8: Option[Vec[UInt]] = Option.when(cfg.writeFflags)(Vec(vlenb, Fflags()))
 
     // Todo: floatpoint data before normalizing
+  }
+
+  class VFMacInfo(implicit p: Parameters) extends XSBundle {
+    val fpAIsFpCanonicalNAN = Vec(VLEN / 64, Bool())
+    val fpBIsFpCanonicalNAN = Vec(VLEN / 64, Bool())
+    val fpCIsFpCanonicalNAN = Vec(VLEN / 64, Bool())
   }
 
   class PipeReg[T <: Data](gen: => T, num: Int) extends Bundle {

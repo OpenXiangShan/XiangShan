@@ -283,7 +283,7 @@ object VecFuConfig {
   val VipuCfg = VecFuConfig.fromFuConfig(FuConfig.VipuCfg)
   val VmoveCfg = VecFuConfig.fromFuConfig(FuConfig.VmoveCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VMove(cfg)(p).suggestName("Vmove")))
   val VfaluCfg = VecFuConfig.fromFuConfig(FuConfig.VfaluCfg)
-  val VfmaCfg = VecFuConfig.fromFuConfig(FuConfig.VfmaCfg)
+  val VfmaCfg  = VecFuConfig.fromFuConfig(FuConfig.VfmaCfg,  (p: Parameters, cfg: VecFuConfig) => Module(new VFMacWrapper(cfg)(p).suggestName("Vfma")))
   val VfdivCfg = VecFuConfig.fromFuConfig(FuConfig.VfdivCfg)
   val VfcvtCfg = VecFuConfig.fromFuConfig(FuConfig.VfcvtCfg, (p: Parameters, cfg: VecFuConfig) => Module(new VCVTWrapper(cfg)(p).suggestName("Vfcvt")))
   val VSha256msCfg = VecFuConfig.fromFuConfig(FuConfig.VSha256msCfg)
