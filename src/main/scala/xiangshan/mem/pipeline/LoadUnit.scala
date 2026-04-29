@@ -1173,6 +1173,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s2_trigger_debug_mode = RegEnable(s1_trigger_debug_mode, false.B, s1_fire)
   val s2_nc_with_data = RegNext(s1_nc_with_data)
   val s2_mmio_req = Wire(Valid(new MemExuOutput))
+  val s2_tlb_hit = RegNext(s1_tlb_hit)
   s2_mmio_req.valid := RegNextN(io.lsq.uncache.fire, 2, Some(false.B))
   s2_mmio_req.bits  := RegNextN(io.lsq.uncache.bits, 2)
 
@@ -1209,6 +1210,10 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   )
   // This real physical address is located in uncache space.
   val s2_actually_uncache = !s2_in.tlbMiss && !s2_un_access_exception && Pbmt.isPMA(s2_pbmt) && (s2_pmp.mmio && !s2_pmp.ld) || s2_in.nc || s2_in.mmio
+  val s2_actually_mmio = !s2_in.tlbMiss && !s2_un_access_exception && Pbmt.isPMA(s2_pbmt) && !s2_pmp.st && s2_pmp.mmio
+  val s2_actually_all_mmio = !s2_in.tlbMiss && !s2_un_access_exception && (Pbmt.isPMA(s2_pbmt) && !s2_pmp.st && s2_pmp.mmio || s2_in.mmio)
+  val s2_actually_pbmt_nc = !s2_in.tlbMiss && !s2_un_access_exception && s2_in.nc
+  val s2_actually_pbmt_mmio = !s2_in.tlbMiss && !s2_un_access_exception && s2_in.mmio
   val s2_uncache = !s2_prf && s2_actually_uncache
   val s2_memBackTypeMM = !s2_pmp.mmio
   when (!s2_in.delayedLoadError) {
@@ -1239,7 +1244,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // * ecc data error is slow to generate, so we will not use it until load stage 3
   // * in load stage 3, an extra signal io.load_error will be used to
   // * if pbmt =/= 0, mmio is up to pbmt; otherwise, it's up to pmp
-  val s2_tlb_hit = RegNext(s1_tlb_hit)
   val s2_mmio = !s2_prf &&
     !s2_exception && !s2_in.tlbMiss &&
     Mux(Pbmt.isUncache(s2_pbmt), s2_in.mmio, s2_tlb_hit && s2_pmp.mmio)
@@ -1334,11 +1338,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // Here a judgement is made as to whether a misaligned exception needs to actually be generated.
   // We will generate misaligned exceptions at mmio.
   val s2_real_exceptionVec = WireInit(s2_exception_vec)
-  s2_real_exceptionVec(loadAddrMisaligned) := (s2_out.isMisalign || s2_out.isFrmMisAlignBuf) && s2_uncache && !s2_isvec && !s2_prf
+  s2_real_exceptionVec(loadAddrMisaligned) := (s2_out.isMisalign || s2_out.isFrmMisAlignBuf) && s2_actually_pbmt_nc && !s2_isvec && !s2_prf
   s2_real_exceptionVec(loadAccessFault) := (s2_exception_vec(loadAccessFault) ||
     s2_fwd_frm_d_chan && s2_d_denied ||
-    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_denied) && !s2_prf
-  s2_real_exceptionVec(hardwareError) := (s2_exception_vec(hardwareError) ||
+    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_denied) && !s2_prf ||
+    (s2_out.isMisalign || s2_out.isFrmMisAlignBuf) && s2_actually_all_mmio
+    s2_real_exceptionVec(hardwareError) := (s2_exception_vec(hardwareError) ||
     s2_fwd_frm_d_chan && s2_d_corrupt && !s2_d_denied ||
     s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_corrupt && !s2_mshr_denied) && !s2_prf
 
