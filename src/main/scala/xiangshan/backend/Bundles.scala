@@ -352,6 +352,7 @@ object Bundles {
     val fuType = FuType()
     val cancelSource = IQCancelSource()
     val srcReady = Bool()
+    val issued = Bool()
   }
 
   class TopdownIQExtendedInfo(implicit p: Parameters) extends TopdownIQInfo {

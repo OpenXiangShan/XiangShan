@@ -232,13 +232,16 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   io.srcReadyVec := srcReadyVec
   io.debugRobIdxVec.foreach(_ := entries.io.debugRobIdxVec.get)
   io.topdownIQInfoVec.foreach{ case infoVec =>
-    infoVec.zip(cancelSourceVec).zip(validVec).zip(robIdxVec).zip(debugSrcReadyVec).zip(fuTypeVec).foreach{
-      case (((((sink, cancel),valid),robIdx), srcReady), fuType) =>
-      sink.valid := valid
-      sink.bits.robIdx := robIdx
-      sink.bits.cancelSource := cancel
-      sink.bits.srcReady := srcReady
-      sink.bits.fuType := fuType
+    infoVec.zip(cancelSourceVec).zip(validVec).zip(robIdxVec)
+      .zip(debugSrcReadyVec).zip(fuTypeVec).zip(issuedVec).foreach{
+      case ((((((sink, cancel),valid),robIdx), srcReady), fuType), issued) =>{
+        sink.valid := valid
+        sink.bits.robIdx := robIdx
+        sink.bits.cancelSource := cancel
+        sink.bits.srcReady := srcReady
+        sink.bits.fuType := fuType
+        sink.bits.issued := issued
+      }
     }
   }
   dontTouch(canIssueVec)

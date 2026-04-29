@@ -449,7 +449,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     entryUpdate.status.issueTimer                     := Mux(validReg && status.issued, updateIssueTimer, 0.U)
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))
     entryUpdate.payload                               := entryReg.payload
-    entryUpdate.payload.debugLastIssueCancelSource.foreach ( _ := MuxCase(IQCancelSource.none, Seq(
+    entryUpdate.payload.debugLastIssueCancelSource.foreach ( _ := MuxCase(entryReg.payload.debugLastIssueCancelSource.get, Seq(
       ldIssueCancel -> IQCancelSource.ld,
       og0IssueCancel -> IQCancelSource.og0,
       og1IssueCancel -> IQCancelSource.og1,
