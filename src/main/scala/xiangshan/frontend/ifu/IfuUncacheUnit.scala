@@ -116,7 +116,9 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
         val crossPage = fromUncache.bits.incomplete
         uncacheState     := UncacheFsmState.Idle
         uncacheException := exception
-        uncacheCrossPage := crossPage
+        // Cross-page exception: only when triggered at the exact page crossing;
+        // exceptions before crossing are normal exceptions
+        uncacheCrossPage := crossPage && !exception.hasException
         uncacheData      := fromUncache.bits.data
       }
     }
