@@ -34,6 +34,8 @@ object CSRConfig {
 
   final val VMIDLEN = 14 // the length of VMID of XS implementation
 
+  final val SDIDLEN = 6
+
   final val VMIDMAX = 14 // the max value of VMIDLEN defined by spec
 
   final val VaddrMaxWidth = 48 + 2 // support Sv39/Sv48/Sv39x4/Sv48x4
@@ -67,6 +69,7 @@ object CSRConfig {
   final val EXT_DBLTRP = true
 
   final val PPNLength = 44
+  final val PPNLengthMpt = 52
   // TODO: as current test not support clean mdt , we set mstatus->mdt = 0 to allow exception in m-mode
   final val mdtInit = 0
 
@@ -199,10 +202,12 @@ class NewCSR(implicit val p: Parameters) extends Module
       val satpASIDChanged = Bool()
       val vsatpASIDChanged = Bool()
       val hgatpVMIDChanged = Bool()
+      val mmptSDIDChanged = Bool()
       val satp = new SatpBundle
       val vsatp = new SatpBundle
       val hgatp = new HgatpBundle
       val mbmc = new MbmcBundle
+      val mmpt = new MmptBundle
       val mxr = Bool()
       val sum = Bool()
       val vmxr = Bool()
@@ -833,6 +838,11 @@ class NewCSR(implicit val p: Parameters) extends Module
           in.mbmc := mbmc.get.regOut
         } else {
           in.mbmc := DontCare
+        }        
+        if (HasMptCheck) {
+          in.mmpt := mmpt.get.regOut
+        } else {
+          in.mmpt:= DontCare
         }
 
         in.memExceptionVAddr := io.fromMem.excpVA
@@ -942,7 +952,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   // flush
   if (HasBitmapCheck) {
     resetSatp := Cat(Seq(satp, vsatp, hgatp, mbmc.get).map(_.addr.U === addr)).orR && wenLegalReg // write to satp will cause the pipeline be flushed
-  } else {
+  } else if(HasMptCheck){
+     resetSatp := Cat(Seq(satp, vsatp, hgatp, mmpt.get).map(_.addr.U === addr)).orR && wenLegalReg //HasMptCheck
+  }else { 
     resetSatp := Cat(Seq(satp, vsatp, hgatp).map(_.addr.U === addr)).orR && wenLegalReg // write to satp will cause the pipeline be flushed
   }
 
@@ -1451,6 +1463,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.tlb.satpASIDChanged  := GatedValidRegNext(satp.w.wen  && satp .regOut.ASID =/=  satp.w.wdataFields.ASID)
   io.tlb.vsatpASIDChanged := GatedValidRegNext(vsatp.w.wen && vsatp.regOut.ASID =/= vsatp.w.wdataFields.ASID)
   io.tlb.hgatpVMIDChanged := GatedValidRegNext(hgatp.w.wen && hgatp.regOut.VMID =/= hgatp.w.wdataFields.VMID)
+  io.tlb.mmptSDIDChanged := (if (HasMptCheck) { GatedValidRegNext(mmpt.get.w.wen && mmpt.get.regOut.SDID =/= mmpt.get.w.wdataFields.SDID)} else DontCare)//HasMptCheck, assign id changed signal 
   io.tlb.satp := satp.rdata
   io.tlb.vsatp := vsatp.rdata
   io.tlb.hgatp := hgatp.rdata
@@ -1459,6 +1472,13 @@ class NewCSR(implicit val p: Parameters) extends Module
   } else {
     io.tlb.mbmc := DontCare
   }
+
+  if (HasMptCheck) {
+    io.tlb.mmpt := mmpt.get.rdata
+  } else {
+    io.tlb.mmpt := DontCare
+  }
+  
   io.tlb.mxr  :=  mstatus.regOut.MXR.asBool
   io.tlb.sum  :=  mstatus.regOut.SUM.asBool
   io.tlb.vmxr := vsstatus.regOut.MXR.asBool
@@ -1484,6 +1504,10 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.tlb.pmm.henvcfg := RegNext(henvcfg.regOut.PMM.asUInt)
   io.tlb.pmm.hstatus := RegNext(hstatus.regOut.HUPMM.asUInt)
   io.tlb.pmm.senvcfg := RegNext(senvcfg.regOut.PMM.asUInt)
+
+  if(HasMptCheck){
+    io.toDecode.illegalInst.mfence.get  := !isModeM
+  }
 
   io.toDecode.illegalInst.sfenceVMA  := isModeHS && mstatus.regOut.TVM  || isModeHU
   io.toDecode.virtualInst.sfenceVMA  := isModeVS && hstatus.regOut.VTVM || isModeVU

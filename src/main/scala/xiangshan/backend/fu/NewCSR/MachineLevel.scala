@@ -17,7 +17,7 @@ import xiangshan.backend.fu.NewCSR.CSRFunc._
 import xiangshan.backend.fu.util.CSRConst._
 import xiangshan.backend.decode.isa.CSRs
 import system.HasSoCParameter
-
+import utility.ZeroExt
 import scala.collection.immutable.SeqMap
 
 trait MachineLevel { self: NewCSR =>
@@ -37,6 +37,29 @@ trait MachineLevel { self: NewCSR =>
     reg.KEYIDEN := Mux(wen, wdata.KEYIDEN, reg.KEYIDEN)
   })
     .setAddr(Mbmc))  else  None
+
+  val mmpt = if (HasMptCheck) Some(Module(new CSRModule("Mmpt", new MmptBundle) {//HasMptCheck 不理解纯抄
+    val ppnMask = ZeroExt(Fill(PPNLengthMpt, 1.U(1.W)).take(PAddrBits - PageOffsetWidth), PPNLengthMpt)
+    if(!HasMptCheckDefault){
+      when (wen) {
+        reg.SDID := wdata.SDID
+        reg.PPN  := wdata.PPN & ppnMask
+        when (wdata.MODE.isLegal) {
+          reg.MODE := wdata.MODE
+        }.otherwise {
+          reg.MODE := reg.MODE
+        }
+      }.otherwise {
+        reg := reg
+      }
+    }else{
+      reg.SDID := 0.U.asTypeOf(reg.SDID)
+      reg.PPN :=  "h802F3".U.asTypeOf(ppnMask)
+      reg.MODE:= 2.U.asTypeOf(reg.MODE)
+    }
+
+  })
+    .setAddr(Mmpt))  else  None
 
   val mstatus = Module(new MstatusModule)
     .setAddr(CSRs.mstatus)
@@ -478,8 +501,7 @@ trait MachineLevel { self: NewCSR =>
     mcyclecfg,
     minstretcfg,
     mcontext,
-  ) ++ mhpmevents ++ mhpmcounters ++ (if (HasBitmapCheck) Seq(mbmc.get) else Seq())
-
+  ) ++ mhpmevents ++ mhpmcounters ++ (if (HasBitmapCheck) Seq(mbmc.get) else if (HasMptCheck) Seq(mmpt.get) else Seq())
 
   val machineLevelCSRMap: SeqMap[Int, (CSRAddrWriteBundle[_], UInt)] = SeqMap.from(
     machineLevelCSRMods.map(csr => (csr.addr -> (csr.w -> csr.rdata))).iterator
@@ -497,6 +519,14 @@ class MbmcBundle extends  CSRBundle {
   val BME     = RW(2).withReset(0.U).withDescription("Enable bitmap checking.")
   val BCLEAR  = RW(1).withReset(0.U).withDescription("Request clearing of bitmap state.")
   val CMODE   = RW(0).withReset(0.U).withDescription("Bitmap checking mode selector.")
+}
+
+class MmptBundle extends  CSRBundle { //HasMptCheck
+  val MODE = MmptMode(63, 60, null).withReset(MmptMode.Bare) //wNoFilter
+  // WARL in privileged spec.
+  // RW, since we support max width of VMID
+  val SDID = RW(54 - 1 + SDIDLEN, 54).withReset(0.U)
+  val PPN = RW(PPNLengthMpt-1, 0).withReset(0.U)
 }
 
 class MstatusBundle extends CSRBundle {

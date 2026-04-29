@@ -53,6 +53,9 @@ case class XSCoreParameters
   VLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
+  HasMptCheck: Boolean = false,
+  HasMptCheckDefault: Boolean = false,
+  HasMptCheckDefault4k: Boolean = false, 
   HasBitmapCheck: Boolean = true,
   HasBitmapCheckDefault: Boolean = false,
   HasMExtension: Boolean = true,
@@ -70,6 +73,7 @@ case class XSCoreParameters
   HasVPU: Boolean = true,
   HasCustomCSRCacheOp: Boolean = true,
   AsidLength: Int = 16,
+  SdidLength: Int = 6,
   VmidLength: Int = 14,
   EnbaleTlbDebug: Boolean = false,
   EnableClockGate: Boolean = true,
@@ -568,6 +572,10 @@ trait HasXSParameter {
   def hartIdLen = p(MaxHartIdBits)
   val xLen = XLEN
 
+  def HasMptCheck = coreParams.HasMptCheck && !coreParams.HasBitmapCheck
+  def HasMptCheckDefault = coreParams.HasMptCheckDefault 
+  def HasMptCheckDefault4k = coreParams.HasMptCheckDefault4k
+
   def HasBitmapCheck = coreParams.HasBitmapCheck
   def HasBitmapCheckDefault = coreParams.HasBitmapCheckDefault
   
@@ -617,7 +625,7 @@ trait HasXSParameter {
       coreParams.VAddrBitsSv39 max coreParams.GPAddrBitsSv39x4
     }
   }
-
+  def SdidLength = coreParams.SdidLength
   def AsidLength = coreParams.AsidLength
   def VmidLength = coreParams.VmidLength
   def ReSelectLen = coreParams.ReSelectLen

@@ -517,11 +517,29 @@ class TlbMbmcBundle(implicit p: Parameters) extends MbmcStruct {
   }
 }
 
+class MmptStruct(implicit p: Parameters) extends XSBundle {//add new mpt csr 
+    val mode = UInt(4.W)
+    val sdid = UInt(6.W)
+    val ppn  = UInt(52.W)
+
+}
+
+class TlbMmptBundle(implicit p: Parameters) extends MmptStruct {
+  val changed = Bool()
+  def apply(mmpt_value: UInt): Unit = {
+    require(mmpt_value.getWidth == XLEN)
+    mode := mmpt_value(63,60)
+    sdid := mmpt_value(59,54)
+    ppn := mmpt_value(51,0)
+  }
+}
+
 class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   val satp = new TlbSatpBundle()
   val vsatp = new TlbSatpBundle()
   val hgatp = new TlbHgatpBundle()
   val mbmc = new TlbMbmcBundle()
+  val mmpt = new TlbMmptBundle()//mpt csr
   val priv = new Bundle {
     val mxr = Bool()
     val sum = Bool()
@@ -555,16 +573,18 @@ class SfenceBundle(implicit p: Parameters) extends XSBundle {
     val rs1 = Bool()
     val rs2 = Bool()
     val addr = UInt(VAddrBits.W)
-    val id = UInt((AsidLength).W) // asid or vmid
+    val id = UInt((AsidLength).W) // asid or vmid or SDID
     val flushPipe = Bool()
     val hv = Bool()
     val hg = Bool()
+    val mfence= Option.when(HasMptCheck)(Bool())
   }
 
   override def toPrintable: Printable = {
     p"valid:0x${Hexadecimal(valid)} rs1:${bits.rs1} rs2:${bits.rs2} addr:${Hexadecimal(bits.addr)}, flushPipe:${bits.flushPipe}"
   }
 }
+
 
 // Bundle for load violation predictor updating
 class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {

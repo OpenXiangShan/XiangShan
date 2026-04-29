@@ -92,9 +92,55 @@ case class L2TLBParameters
   enablePTWECC: Boolean = false
 )
 
+trait MPTCacheParam extends HasTlbConst{ 
+    val SDID_cache_store_en= false 
+    val perms16Len=48   
+    val mptSourceWidth=4  
+    val mptLevelLenOH=4
+    val mptLevelLenUInt=2
+    val MptOff=16 
+    // l3  //8T
+    val l3Size  = 1 
+    val mptL3TagLen=5
+    val l3Associative = "fa"
+    val l3Replacer  = "plru"
+    // l2 // 4G
+    val mptL2TagLen= mptL3TagLen+9
+    val l2Size = 1
+    val l2Associative  = "fa"
+    val l2Replacer = "plru"
+    // l1 // 32M
+    val l1Size = 4
+    val mptL1TagLen=mptL3TagLen+9*2 
+    val l1Associative  = "fa"
+    val l1Replacer = "plru"
+    // l0 64k
+    val l0nSets= 32//5bits
+    val l0nWays = 4
+    val mptL0TagLen=mptL3TagLen+9*3-log2Up(l0nSets)//32-5=27
+    val l0Replacer = "setplru"
+    // sp
+    val spSize = 8 //就算全2M也是256M地址空间，够了？
+    val mptspTagLen=mptL3TagLen+9*2
+    val spAssociative= "fa"
+    val spReplacer  =   "plru"
+
+
+    //get set num from pa def; just some wires, 0 delay
+
+    def getl0set(ppn:UInt): UInt ={
+        require(log2Up(l0nWays) == log2Down(l0nWays),"ways must be scala.math.power of 2")
+        ppn(ppnLen-1-mptL0TagLen,ppnLen-mptL0TagLen-log2Up(l0nSets))//(36-1-27,36-27-5)(8,4)
+    }
+    //
+        def switch0 (switch:Bool,data:UInt, len: Int)={
+        (Fill(len,switch) & data) 
+    }
+}
 trait HasTlbConst extends HasXSParameter {
   val Level = if (EnableSv48) 3 else 2
 
+  val mptLevelLEN = 4//mptCheck param
   val offLen  = 12
   val ppnLen  = PAddrBits - offLen
   val vpnnLen = 9
@@ -269,7 +315,10 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
-  val MemReqWidth = if (HasBitmapCheck) 2 *(l2tlbParams.llptwsize + 1 + 1) else (l2tlbParams.llptwsize + 1 + 1)
+  val MemReqWidth = if (HasBitmapCheck) 2 *(l2tlbParams.llptwsize + 1 + 1) else if(HasMptCheck)( (l2tlbParams.llptwsize + 3)) 
+  else (l2tlbParams.llptwsize + 1 + 1)
+
+  val mptcMemReqID = l2tlbParams.llptwsize + 2
   val HptwReqId = l2tlbParams.llptwsize + 1
   val FsmReqID = l2tlbParams.llptwsize
   val bMemID = log2Up(MemReqWidth)

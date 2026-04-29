@@ -134,6 +134,7 @@ class TLBFA(
     val perm     = entries.map(_.perm)
     val gPerm    = entries.map(_.g_perm)
     val s2xLate  = entries.map(_.s2xlate)
+    val mptperm = Option.when(HasMptCheck) (entries.map(_.mptperm.get))//hasmptcheck
     if (nWays == 1) {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := entries(0).genPPN(saveLevel, resp.valid)(reqVpn)
@@ -142,6 +143,12 @@ class TLBFA(
         resp.bits.perm(d) := perm(0)
         resp.bits.g_perm(d) := gPerm(0)
         resp.bits.s2xlate(d) := s2xLate(0)
+        if(HasMptCheck) {
+          resp.bits.mptperm.get(d).x := mptperm.get(0).x
+          resp.bits.mptperm.get(d).w := mptperm.get(0).w
+          resp.bits.mptperm.get(d).r := mptperm.get(0).r
+          resp.bits.mptperm.get(d).af.get := false.B
+        }//Hasmptcheck
       }
     } else {
       for (d <- 0 until nDups) {
@@ -151,6 +158,15 @@ class TLBFA(
         resp.bits.perm(d) := Mux1H(hitVecReg zip perm)
         resp.bits.g_perm(d) := Mux1H(hitVecReg zip gPerm)
         resp.bits.s2xlate(d) := Mux1H(hitVecReg zip s2xLate)
+        if(HasMptCheck) {
+          val mptpermtmp =Mux1H(hitVecReg zip mptperm.get)
+           if(HasMptCheck) {
+          resp.bits.mptperm.get(d).x := mptpermtmp.x
+          resp.bits.mptperm.get(d).w := mptpermtmp.w
+          resp.bits.mptperm.get(d).r := mptpermtmp.r
+          resp.bits.mptperm.get(d).af.get := false.B
+          }
+        }
       }
     }
 
@@ -185,7 +201,7 @@ class TLBFA(
   }
 
   val sfence = io.sfence
-  val sfence_valid = sfence.valid && !sfence.bits.hg && !sfence.bits.hv
+  val sfence_valid = sfence.valid && !sfence.bits.hg && !sfence.bits.hv && (if(HasMptCheck) !(sfence.bits.mfence.get) else true.B)
   val sfence_vpn = sfence.bits.addr(VAddrBits - 1, offLen)
   val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.vmid, hasS2xlate = io.csr.priv.virt))
   val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.vmid, hasS2xlate = io.csr.priv.virt))
@@ -272,6 +288,15 @@ class TLBFA(
       v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate) }
     }.otherwise {
       v.zipWithIndex.map { case (a, i) => a := a && !(entries(i).s2xlate =/= noS2xlate && entries(i).vmid === sfence.bits.id) }
+    }
+  }
+  if(HasMptCheck){
+    when(sfence.valid && sfence.bits.mfence.get){//HasMptCheck
+      v.zipWithIndex.map { case (a, i) => a := false.B }//mfence reset all
+    }
+    val modechange = DataChanged(io.csr.satp.mode).asBool || DataChanged(io.csr.vsatp.mode).asBool || DataChanged(io.csr.hgatp.mode).asBool
+    when(modechange){
+       v.zipWithIndex.map { case (a, i) => a := false.B }//mptonly to ptw reset all
     }
   }
 
@@ -425,6 +450,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
       rp.bits.g_perm(d) := p.bits.g_perm(d)
       rp.bits.pbmt(d) := p.bits.pbmt(d)
       rp.bits.g_pbmt(d) := p.bits.g_pbmt(d)
+      if(HasMptCheck){rp.bits.mptperm.get(d) := p.bits.mptperm.get(d)}//HasMptCheck
     }
   }
 

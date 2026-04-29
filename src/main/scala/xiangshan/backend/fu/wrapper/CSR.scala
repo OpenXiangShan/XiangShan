@@ -274,6 +274,11 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.mbmc.BCLEAR   := csrMod.io.tlb.mbmc.BCLEAR.asUInt
   tlb.mbmc.BMA      := csrMod.io.tlb.mbmc.BMA.asUInt
 
+  tlb.mmpt.mode := csrMod.io.tlb.mmpt.MODE.asUInt
+  tlb.mmpt.sdid:= csrMod.io.tlb.mmpt.SDID.asUInt
+  tlb.mmpt.ppn:= csrMod.io.tlb.mmpt.PPN.asUInt
+  tlb.mmpt.changed:= csrMod.io.tlb.mmptSDIDChanged
+
   // expose several csr bits for tlb
   tlb.priv.mxr := csrMod.io.tlb.mxr
   tlb.priv.sum := csrMod.io.tlb.sum
@@ -416,6 +421,8 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
 
 class CSRToDecode(implicit p: Parameters) extends XSBundle {
   val illegalInst = new Bundle {
+    
+    val mfence = Option.when(HasMptCheck)(Bool())
     /**
      * illegal sfence.vma, sinval.vma
      * raise EX_II when isModeHS && mstatus.TVM=1 || isModeHU

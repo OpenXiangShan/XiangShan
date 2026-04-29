@@ -179,6 +179,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val sent = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
+  val mptOnly = Option.when(HasMptCheck)(RegInit(Vec(Size, Bool()), 0.U.asTypeOf(Vec(Size, Bool()))))
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
   val getGpa = Reg(Vec(Size, Bool()))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
@@ -241,6 +242,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
       v(enqidx(i)) := true.B
       sent(enqidx(i)) := false.B
       vpn(enqidx(i)) := io.tlb.req(i).bits.vpn
+      if(HasMptCheck){mptOnly.get(enqidx(i)) := io.tlb.req(i).bits.mptOnly.get}
       s2xlate(enqidx(i)) := io.tlb.req(i).bits.s2xlate
       getGpa(enqidx(i)) := io.tlb.req(i).bits.getGpa
       memidx(enqidx(i)) := io.tlb.req(i).bits.memidx
@@ -254,6 +256,7 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     io.ptw.req(0).valid := canissue
     io.ptw.req(0).bits.vpn := vpn(issueindex)
     io.ptw.req(0).bits.s2xlate := s2xlate(issueindex)
+    if(HasMptCheck){io.ptw.req(0).bits.mptOnly.get := mptOnly.get(issueindex)}
   }
   when (io.ptw.req(0).fire) {
     sent(issueindex) := true.B
@@ -367,6 +370,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   io.tlb.resp.bits.data.getGpa := DontCare // not used
   io.tlb.resp.bits.data.s1 := ptwResp.s1
   io.tlb.resp.bits.data.s2 := ptwResp.s2
+  if(HasMptCheck) {io.tlb.resp.bits.data.mpt.get:= ptwResp.mpt.get}
   io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   // vector used to represent different requestors of DTLB
   // (e.g. the store DTLB has StuCnt requestors)
@@ -408,12 +412,14 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
     ptw_arb.io.in(i).valid := filter(i).ptw.req(0).valid
     ptw_arb.io.in(i).bits.vpn := filter(i).ptw.req(0).bits.vpn
     ptw_arb.io.in(i).bits.s2xlate := filter(i).ptw.req(0).bits.s2xlate
+    if(HasMptCheck){ptw_arb.io.in(i).bits.mptOnly.get:= filter(i).ptw.req(0).bits.mptOnly.get}
     filter(i).ptw.req(0).ready := ptw_arb.io.in(i).ready
   }
   ptw_arb.io.out.ready := io.ptw.req(0).ready
   io.ptw.req(0).valid := ptw_arb.io.out.valid
   io.ptw.req(0).bits.vpn := ptw_arb.io.out.bits.vpn
   io.ptw.req(0).bits.s2xlate := ptw_arb.io.out.bits.s2xlate
+  if(HasMptCheck){io.ptw.req(0).bits.mptOnly.get := ptw_arb.io.out.bits.mptOnly.get}
   io.ptw.resp.ready := true.B
 
   io.rob_head_miss_in_tlb := Cat(filter.map(_.rob_head_miss_in_tlb)).orR
@@ -427,6 +433,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val v = RegInit(VecInit(Seq.fill(Size)(false.B)))
   val ports = Reg(Vec(Size, Vec(Width, Bool()))) // record which port(s) the entry come from, may not able to cover all the ports
   val vpn = Reg(Vec(Size, UInt(vpnLen.W)))
+  val mptOnly = Option.when(HasMptCheck)(Reg(Vec(Size,Bool())))
   val s2xlate = Reg(Vec(Size, UInt(2.W)))
   val getGpa = Reg(Vec(Size, Bool()))
   val memidx = Reg(Vec(Size, new MemBlockidxBundle))
@@ -526,6 +533,9 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.tlb.resp.bits.data.s2xlate := ptwResp.s2xlate
   io.tlb.resp.bits.data.s1 := ptwResp.s1
   io.tlb.resp.bits.data.s2 := ptwResp.s2
+  if(HasMptCheck){
+    io.tlb.resp.bits.data.mpt.get := ptwResp.mpt.get 
+  }
   io.tlb.resp.bits.data.memidx := RegNext(PriorityMux(ptwResp_OldMatchVec, memidx))
   io.tlb.resp.bits.vector := resp_vector
   io.tlb.resp.bits.data.getGpa := RegNext(PriorityMux(ptwResp_OldMatchVec, getGpa))
@@ -539,11 +549,15 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.ptw.req(0).bits.s2xlate := s2xlate(issPtr)
   io.ptw.resp.ready := true.B
 
+  if(HasMptCheck){   
+    io.ptw.req(0).bits.mptOnly.get := mptOnly.get(issPtr)//what does this do? what is repeater?
+  }
   reqs.zipWithIndex.map{
     case (req, i) =>
       when (req.valid && canEnqueue) {
         v(enqPtrVec(i)) := !tlb_req_flushed(i)
         vpn(enqPtrVec(i)) := req.bits.vpn
+        if(HasMptCheck){mptOnly.get(enqPtrVec(i)):= req.bits.mptOnly.get}
         s2xlate(enqPtrVec(i)) := req.bits.s2xlate
         getGpa(enqPtrVec(i)) := req.bits.getGpa
         memidx(enqPtrVec(i)) := req.bits.memidx
