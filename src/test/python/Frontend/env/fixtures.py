@@ -35,6 +35,12 @@ def _data_dir() -> Path:
     return p
 
 
+def _funcov_dir() -> Path:
+    p = _data_dir() / "funcov"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def _artifact_root_dir(request, default_dir: Path) -> Path:
     raw_bin = os.getenv("TB_BIN_PATH", "").strip()
     if not raw_bin:
@@ -84,6 +90,7 @@ def _waveform_path(request, default_dir: Path, *, waveform_format: str | None = 
 
 
 def _coverage_path(request, default_dir: Path) -> Path:
+    default_dir.mkdir(parents=True, exist_ok=True)
     return default_dir / f"{_artifact_tag(request)}.dat"
 
 
@@ -181,6 +188,7 @@ def dut(request):
 def env(dut, request):
     configure_env_logging()
     data_dir = _data_dir()
+    funcov_dir = _funcov_dir()
     tag = _artifact_tag(request)
     waveform = _waveform_path(request, data_dir, waveform_format=_waveform_format_from_dut(dut))
     coverage = _coverage_path(request, data_dir)
@@ -188,7 +196,7 @@ def env(dut, request):
         default_pilot_csv_path(),
         testcase_name=request.node.name if request is not None else "frontend",
         artifact_tag=tag,
-        output_dir=data_dir,
+        output_dir=funcov_dir,
         waveform_path=waveform,
         line_coverage_path=coverage,
     )
