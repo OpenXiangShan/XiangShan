@@ -445,6 +445,31 @@ make frontend -j
 - Do not commit transient logs, generated waveforms, or other temporary
   artifacts unless they are intentional fixtures.
 
+### Frontend Testcase Design
+
+Keep frontend testcase design centered on controllable instruction flow rather
+than host-side test scaffolding.
+
+- Each testcase should target one primary frontend behavior such as fetch
+  sequencing, branch direction, target prediction, return prediction,
+  redirect recovery, or a boundary condition. Do not mix multiple unrelated
+  goals into one case when a smaller case can isolate the behavior.
+- When the testcase depends on frontend position semantics, make the PC shape
+  intentional. Use labels, alignment, and padding so fetch-block boundaries,
+  CFI offsets, and redirect targets are predictable from the source.
+- For predictor-training cases, separate the stable training phase from the
+  behavior-check phase. The testcase structure should make it obvious which
+  instructions build predictor state and which instructions validate reuse,
+  mispredict handling, or recovery.
+- Prefer describing the testcase in terms of instruction stream and expected
+  PC/control-flow behavior. Keep environment-side logic focused on load,
+  control, observation, and comparison; do not hide testcase semantics inside
+  custom host-side stimulus when the same behavior can be expressed in the
+  program itself.
+- Any randomized testcase generation must remain reproducible. Record the
+  seed and generation parameters in the checked-in artifact or in a stable
+  regeneration path, so the exact instruction stream can be reproduced later.
+
 ## Artifact Naming
 
 - When you generate debugging waveforms under
