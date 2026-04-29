@@ -32,7 +32,7 @@ class LatDecoder(opcodesSeq: Seq[Opcodes]) extends Module {
 
 object LatDecoder {
   def apply(fuType: UInt, opcode: UInt): UInt = {
-    val mod = Module(new LatDecoder(Seq(VIAluOpcodes, VFMacOpcodes, VMoveOpcodes, VFCvtOpcodes)))
+    val mod = Module(new LatDecoder(Seq(VIAluOpcodes, VFMacOpcodes, VMoveOpcodes, VFCvtOpcodes, VIMacOpcodes)))
     mod.in.fuType := fuType
     mod.in.opcode := opcode
     mod.out.lat
@@ -40,7 +40,7 @@ object LatDecoder {
 
   def main(args: Array[String]): Unit = {
     Verilog.emitVerilog(
-      new LatDecoder(Seq(VIAluOpcodes)),
+      new LatDecoder(Seq(VIAluOpcodes, VMoveOpcodes, VFCvtOpcodes, VIMacOpcodes)),
       Array(
         "--full-stacktrace",
         "--target-dir", "build/LatDecoder",

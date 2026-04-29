@@ -593,6 +593,7 @@ object FuConfig {
     writeVecRf = true,
     writeV0Rf = true,
     writeVxsat = true,
+    needWidenOut = true,
     needSrcVxrm = true,
     latency = CertainLatency(2),
     vlWakeUp = true,
