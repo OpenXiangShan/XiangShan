@@ -139,6 +139,29 @@ that boundary stable.
   similar workarounds. Use `docs/agents/frontend-debugging.md` as the normative
   root-cause workflow before attempting another behavioral change.
 
+## Commit Message Rules
+
+When a frontend change is committed, the commit subject must follow the same
+format used by recent history under `src/test/python/Frontend/`:
+
+- use `type(scope): summary`
+- keep `type` and `scope` lowercase
+- for frontend verification changes, use `frontend` as the default scope
+- choose `type` from the actual change intent, for example:
+  `fix`, `feat`, `refactor`, `docs`, `test`, `chore`
+
+The summary must be derived from the staged file content, not from a vague
+intention. Therefore:
+
+- inspect the staged diff before writing the message
+- describe the concrete behavior or artifact change in the subject
+- do not use generic subjects such as `update frontend`, `misc fixes`, or
+  `tune logic`
+- if the commit mainly removes tests or checks that contradict the documented
+  semantic contract, say so explicitly instead of pretending it is a feature
+  change
+- commit message must be a single line only; do not add a multi-line body
+
 ## Build And Test
 
 Activate the environments before running frontend commands:
@@ -180,71 +203,66 @@ Enable the versioned git hook so staged frontend changes run the smoke guard bef
 git config core.hooksPath .githooks
 ```
 
-For DUT bin-trace work, distinguish between:
+## Bin-Trace Workflow
 
-- general run requirements that apply to any bin/trace reproduction
-- the current checked-in example commands in this tree
+Treat `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh` as the only
+supported bin-trace entrypoint for ready-to-run cases.
 
-The examples below use `microbench.bin` and
-`tests/test_bin_trace_dut.py::test_bin_trace` because those assets exist in the
-current tree. Do not mistake that example pair for the whole frontend
-bin-trace contract.
+### Standard Entry
 
-## Commit Message Rules
-
-When a frontend change is committed, the commit subject must follow the same
-format used by recent history under `src/test/python/Frontend/`:
-
-- use `type(scope): summary`
-- keep `type` and `scope` lowercase
-- for frontend verification changes, use `frontend` as the default scope
-- choose `type` from the actual change intent, for example:
-  `fix`, `feat`, `refactor`, `docs`, `test`, `chore`
-
-The summary must be derived from the staged file content, not from a vague
-intention. Therefore:
-
-- inspect the staged diff before writing the message
-- describe the concrete behavior or artifact change in the subject
-- do not use generic subjects such as `update frontend`, `misc fixes`, or
-  `tune logic`
-- if the commit mainly removes tests or checks that contradict the documented
-  semantic contract, say so explicitly instead of pretending it is a feature
-  change
-- commit message must be a single line only; do not add a multi-line body
-
-## Bin-Trace Examples
-
-Current checked-in example: run the standard DUT bin-trace pipeline for
-`microbench.bin`:
+The script generates the NEMU golden trace first, then runs
+`tests/test_bin_trace_dut.py::test_bin_trace` with the pipeline-only
+environment variables set consistently.
 
 ```bash
 source /nfs/share/unitychip/activate
 source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
-TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter \
-TB_ENV_LOG_LEVEL=INFO \
-TB_TRACE_PROGRESS_INTERVAL=50000 \
-TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000 \
-TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
-TB_PYTEST_TIMEOUT_SECS=900 \
-PYTEST_ADDOPTS='-s -o log_cli=true --log-cli-level=INFO' \
-src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/microbench.bin
+
+BIN_TRACE_ENV=(
+  TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter
+  TB_ENV_LOG_LEVEL=INFO
+  TB_TRACE_PROGRESS_INTERVAL=50000
+  TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000
+  TB_TRACE_STAGNANT_CYCLES_LIMIT=20000
+  TB_PYTEST_TIMEOUT_SECS=900
+  PYTEST_ADDOPTS='-s -o log_cli=true --log-cli-level=INFO'
+)
+
+timeout --foreground 1200 env "${BIN_TRACE_ENV[@]}" \
+src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
 ```
 
-Current checked-in example: use direct `pytest` only when the golden trace has
-already been prepared and the pipeline-only environment variables are set
-explicitly:
+### Variants
+
+The script accepts optional explicit trace and NEMU-log paths after the
+binary:
 
 ```bash
-timeout --foreground 900 env \
+timeout --foreground 1200 env "${BIN_TRACE_ENV[@]}" \
+src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh \
+  ready-to-run/<case>.bin \
+  NEMU/logs/<case>.trace.jsonl \
+  NEMU/logs/<case>.nemu.log
+```
+
+Set `TB_RUN_DUT=0` only when you intentionally want to generate or refresh the
+NEMU trace without running the DUT:
+
+```bash
+timeout --foreground 1200 env "${BIN_TRACE_ENV[@]}" TB_RUN_DUT=0 \
+src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
+```
+
+Use direct `pytest` only when the golden trace has already been prepared and
+the pipeline-only environment variables are set explicitly:
+
+```bash
+timeout --foreground 900 env "${BIN_TRACE_ENV[@]}" \
 TB_ENABLE_DUT_TESTS=1 \
 TB_BIN_TRACE_PIPELINE=1 \
-TB_BIN_PATH=ready-to-run/microbench.bin \
-TB_TRACE_PATH=NEMU/logs/microbench.trace.jsonl \
+TB_BIN_PATH=ready-to-run/<case>.bin \
+TB_TRACE_PATH=NEMU/logs/<case>.trace.jsonl \
 TB_BASE_ADDR=0x80000000 \
-TB_TRACE_PROGRESS_INTERVAL=50000 \
-TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000 \
-TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
 python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
 ```
 
@@ -256,6 +274,13 @@ bin/trace environment above.
 More generally: direct `pytest` is only valid for a bin-trace case when the
 trace input, bin path, runtime bounds, and observability-related environment are
 already set to match that case's run requirements.
+
+### Artifacts
+
+After a run, look for artifacts in the date-stamped frontend data directory,
+for example `src/test/python/Frontend/data/<YYYYMMDD>/`. The per-case `.log`
+and `.fst` filenames include the binary stem and pytest case name:
+`<case>_test_bin_trace.log` and `<case>_test_bin_trace.fst`.
 
 `src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace` is a
 run-to-completion entrypoint. Do not use it as a load-only or partial-step
@@ -269,7 +294,7 @@ For direct `pytest`, use an outer `timeout` guard explicitly. The
 `TB_PYTEST_TIMEOUT_SECS` knob is consumed by `scripts/run_bin_trace_pipeline.sh`; it
 does not add a wall-clock bound by itself when you bypass the pipeline script.
 
-## Bin-Trace Run Requirements
+## Bin-Trace Requirements
 
 Any DUT bin-trace case, especially
 `src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace`, must
@@ -283,15 +308,6 @@ meet the following operational requirements:
   `src/test/python/Frontend/data/` unless an explicit path override is given
 - waveform and log filenames should be logically tied to the binary and test
   case, so the reproduction can be matched back to the exact run
-
-This section mixes two kinds of statements:
-
-- operational policy that frontend bin-trace runs are expected to satisfy
-- behavior that the current scripts and fixtures already enforce automatically
-
-Do not assume every requirement below is automatically enforced by the current
-implementation. Verify the exact behavior in `scripts/run_bin_trace_pipeline.sh`,
-`env/fixtures.py`, and `env/api.py` when the distinction matters.
 
 In addition, bin-trace runs must have explicit runtime observability. Do not
 run them as opaque long-running jobs with no bounded diagnostics. A valid
@@ -322,7 +338,7 @@ Therefore:
   NEMU executable available in the current tree; do not assume a historical
   `NEMU/build/...` path exists locally unless you have verified it
 
-Current implementation notes:
+Implementation Notes:
 
 - `scripts/run_bin_trace_pipeline.sh` enforces positive values for
   `TB_TRACE_STAGNANT_CYCLES_LIMIT` and `TB_PYTEST_TIMEOUT_SECS`
@@ -333,6 +349,8 @@ Current implementation notes:
   set
 - paired per-case log files are created by `env/fixtures.py` when `TB_BIN_PATH`
   is set
+
+## Utilities
 
 Start the frontend web console:
 
