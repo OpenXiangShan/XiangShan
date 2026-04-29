@@ -32,7 +32,7 @@ class LatDecoder(opcodesSeq: Seq[Opcodes]) extends Module {
 
 object LatDecoder {
   def apply(fuType: UInt, opcode: UInt): UInt = {
-    val mod = Module(new LatDecoder(Seq(VIAluOpcodes, VMoveOpcodes, VFCvtOpcodes)))
+    val mod = Module(new LatDecoder(Seq(VIAluOpcodes, VFMacOpcodes, VMoveOpcodes, VFCvtOpcodes)))
     mod.in.fuType := fuType
     mod.in.opcode := opcode
     mod.out.lat
