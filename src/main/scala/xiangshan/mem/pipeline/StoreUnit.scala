@@ -181,9 +181,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     "b10".U -> 3.U,
     "b11".U -> 7.U
   )) + s0_addr_low
-  val s0_rs_corss16Bytes = s0_addr_Up_low(4) =/= s0_addr_low(4)
-  val s0_misalignWith16Byte = !s0_rs_corss16Bytes && !s0_addr_aligned && !s0_use_flow_prf
-  val s0_misalignNeedReplay = s0_rs_corss16Bytes && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
+  val s0_rs_cross16Bytes = s0_addr_Up_low(4) =/= s0_addr_low(4)
+  val s0_misalignWith16Byte = !s0_rs_cross16Bytes && !s0_addr_aligned && !s0_use_flow_prf
+  val s0_misalignNeedReplay = s0_rs_cross16Bytes && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
   s0_is128bit := Mux(s0_use_flow_ma, io.misalign_stin.bits.is128bit, is128Bit(s0_vecstin.alignedType) || s0_misalignWith16Byte)
 
   s0_fullva := Mux(
@@ -251,7 +251,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B
   // For unaligned, we need to generate a base-aligned mask in storeunit and then do a shift split in StoreQueue.
-  s0_out.mask         := Mux(s0_rs_corss16Bytes && !s0_addr_aligned, genBasemask(s0_saddr,s0_alignType(1,0)), s0_mask)
+  s0_out.mask         := Mux(s0_rs_cross16Bytes && !s0_addr_aligned, genBasemask(s0_saddr,s0_alignType(1,0)), s0_mask)
   s0_out.isFirstIssue := s0_isFirstIssue
   s0_out.isHWPrefetch := s0_use_flow_prf
   s0_out.wlineflag    := s0_wlineflag
