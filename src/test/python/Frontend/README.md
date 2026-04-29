@@ -33,8 +33,8 @@
 - `scripts/`
   - Frontend 目录下的 shell 脚本入口。
   - 包含 `run_pytest_with_log.sh`、`run_web_console.sh`、
-    `run_bin_trace_pipeline.sh`、`fst_to_fsdb.sh` 和
-    `gen_coverage_html.sh`。
+    `run_bin_trace_pipeline.sh`、`fst_to_fsdb.sh`、
+    `gen_coverage_html.sh` 和 `report_raw_code_coverage.py`。
 - `tools/`
   - Frontend 目录下的 Python 工具入口。
   - 包含 `run_dut_with_bin_trace.py`、
@@ -46,7 +46,12 @@
 - 根目录负责稳定导入入口，不重复实现 `env/` 内逻辑。
 - `env/fixtures.py` 是 DUT fixture 与环境装配的真实实现位置。
 - `env/api.py` 是公共 `api_Frontend_*` helper 的真实实现位置。
+- `env/request_apis.py` 是 `env/api.py` 下层请求式 helper 的真实实现位置。
 - `env/frontend_env.py` 是 `FrontendEnv` 的真实实现位置。
+- `env/dut_factory.py` 负责真实 DUT 构造。
+- `env/nemu_trace_pipeline.py` 负责从 bin 驱动 NEMU trace 生成。
+- `env/functional_coverage.py` 负责功能覆盖率事件记录与产物输出。
+- `env/monitor.py` 与 `env/monitors/` 共同承担 monitor 侧数据结构和 DUT 观测逻辑。
 - `env/bundles/`、coverage 和启动控制里出现的信号名，必须以当前生成出来的 DUT 接口为准。
   不允许长期保留已经不在 DUT 中出现的历史信号；缺失信号要么从 bundle/coverage 中删除，要么被明确建模为可选信号。
 
@@ -91,64 +96,27 @@
 - `tools/run_dut_with_bin_trace.py`
   - 路径: `src/test/python/Frontend/tools/run_dut_with_bin_trace.py`
 
-## Bin Case 标准入口
+## 运行入口
 
-- `microbench.bin` 的标准运行入口不是裸 `pytest`，而是：
-
-```bash
-source /nfs/share/unitychip/activate
-source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
-TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter \
-TB_ENV_LOG_LEVEL=INFO \
-TB_TRACE_PROGRESS_INTERVAL=50000 \
-TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000 \
-TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
-TB_PYTEST_TIMEOUT_SECS=900 \
-PYTEST_ADDOPTS='-s -o log_cli=true --log-cli-level=INFO' \
-src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/microbench.bin
-```
-
-- 上面这条命令同时完成：
-  - 从 bin 生成 NEMU trace
-  - 设置 `test_bin_trace_dut.py::test_bin_trace` 所需的 pipeline 环境变量
-  - 打开 progress / stall 观测输出
-  - 生成 DUT 波形和配套 `.log`
-- 只有在 trace 已经准备好，并且以下环境变量都已显式设置时，才允许直接运行 `pytest`：
+- 默认回归入口：
 
 ```bash
-TB_ENABLE_DUT_TESTS=1 \
-TB_BIN_TRACE_PIPELINE=1 \
-TB_BIN_PATH=ready-to-run/microbench.bin \
-TB_TRACE_PATH=NEMU/logs/microbench.trace.jsonl \
-TB_BASE_ADDR=0x80000000 \
-TB_TRACE_STAGNANT_CYCLES_LIMIT=20000 \
-python -m pytest -p no:rerunfailures -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
+src/test/python/Frontend/scripts/run_pytest_with_log.sh
 ```
 
-- `tests/test_bin_trace_dut.py::test_bin_trace` 现在统一按 run-to-completion
-  语义执行；不要把它当成“只加载 bin/trace 就退出”的快速入口。
-- 默认会一直运行到 golden trace 完成；只有显式设置
-  `TB_TRACE_MAX_CYCLES>0` 时，才会按 cycle 上限提前停止。
-- 当 `TB_TRACE_MAX_CYCLES>0` 且 DUT 在这段运行里没有 monitor error、
-  stagnation early-stop 或其他不符合预期的行为时，这次部分运行不应报错。
+- bin trace 标准入口：
 
-- 当前仓库里实际存在的 NEMU 可执行文件路径是
-  `ready-to-run/riscv64-nemu-interpreter`。
-  不要默认假设 `NEMU/build/riscv64-nemu-interpreter` 已经存在。
-- 当前 frontend 脚本默认禁用环境级 `pytest_rerunfailures` 插件。
-  这个插件会在沙箱里创建本地 socket，并在 `pytest_configure` 阶段直接失败。
-  如果手工运行 `pytest`，也应带上 `-p no:rerunfailures`，除非你明确需要它。
+```bash
+src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
+```
 
-## Bin Case 运行要求
+- 详细测试参数、bin-trace 环境变量、runtime bound、artifact 规则和
+  direct `pytest` 约束，统一见 `docs/agents/frontend-verification.md`。
 
-- `tests/test_bin_trace_dut.py::test_bin_trace` 这类 bin case，每次运行都必须生成：
-  - 一份波形文件
-  - 一份配套 `.log` 日志
-- 默认应优先落到 `src/test/python/Frontend/data/<YYYYMMDD>/` 这样的日期目录下。
-- bin case 运行时必须有明确的观测机制，例如：
-  - progress checkpoint
-  - stall snapshot
-  - 或等价的运行时诊断输出
-- 不接受“卡死后一直无输出、只能靠外部 timeout/手动中断结束”的 bin case 运行方式。
-- 统一要求设置 `TB_TRACE_STAGNANT_CYCLES_LIMIT`，当 golden cursor 长时间不前进时，
-  在测试内部早停并失败（优先于外部 kill）。
+## 文档分工
+
+- 目录结构、入口分层和当前实现定位，以当前 README 为准。
+- frontend 验证流程、bin-trace 运行要求、artifact 规则和提交约束，统一见
+  `docs/agents/frontend-verification.md`。
+- DUT / monitor / env mismatch 的分析方法，统一见
+  `docs/agents/frontend-debugging.md`。
