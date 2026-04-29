@@ -2234,10 +2234,7 @@ class BackendModel:
             (
                 idx
                 for idx, entry in enumerate(self._cfvec_queue)
-                if (
-                    int(idx) >= int(queue_start)
-                    and self._queue_entry_misses_expected_recovery_ftq(entry)
-                )
+                if int(idx) >= int(queue_start) and entry.path_state == PATH_STATE_WRONG
             ),
             None,
         )
