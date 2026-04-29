@@ -474,7 +474,12 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     s2_in.uop.exceptionVec(storeGuestPageFault)
   )
   // This real physical address is located in uncache space.
-  val s2_actually_uncache = s2_tlb_hit && !s2_un_access_exception && (Pbmt.isPMA(s2_pbmt) && !s2_pmp.st && s2_pmp.mmio || s2_in.nc || s2_in.mmio) && RegNext(s1_feedback.bits.hit)
+  val s2_actually_uncache = s2_tlb_hit && !s2_un_access_exception && (Pbmt.isPMA(s2_pbmt) && !s2_pmp.st && s2_pmp.mmio || s2_in.nc || s2_in.mmio)
+  val s2_actually_mmio = s2_tlb_hit && !s2_un_access_exception && Pbmt.isPMA(s2_pbmt) && !s2_pmp.st && s2_pmp.mmio
+  val s2_actually_all_mmio = s2_tlb_hit && !s2_un_access_exception && (Pbmt.isPMA(s2_pbmt) && !s2_pmp.st && s2_pmp.mmio || s2_in.mmio)
+  val s2_actually_pbmt_nc = s2_tlb_hit && !s2_un_access_exception && s2_in.nc
+  val s2_is_actually_pbmt_mmio = s2_tlb_hit && !s2_un_access_exception && s2_in.mmio
+
   val s2_isCbo  = RegEnable(s1_isCbo, s1_fire) // all cbo instr
   val s2_isCbo_noZero = LSUOpType.isCbo(s2_in.uop.fuOpType)
 
@@ -487,7 +492,8 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s2_out.uop.exceptionVec(storeAccessFault) := (s2_in.uop.exceptionVec(storeAccessFault) ||
                                                 s2_pmp.st ||
                                                 s2_pmp.ld && s2_isCbo_noZero || // cmo need read permission but produce store exception
-                                                ((s2_in.isvec || s2_isCbo) && s2_actually_uncache && RegNext(s1_feedback.bits.hit))
+                                                (s2_in.isvec && s2_actually_uncache) ||
+                                                s2_actually_mmio && s2_isCbo
                                                 ) && s2_vecActive
   s2_out.uop.exceptionVec(storeAddrMisaligned) := s2_actually_uncache && !s2_in.isvec && (s2_in.isMisalign || s2_in.isFrmMisAlignBuf) && !s2_un_misalign_exception
   s2_out.uop.vpu.vstart     := s2_in.vecVaddrOffset >> s2_in.uop.vpu.veew
