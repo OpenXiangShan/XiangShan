@@ -79,8 +79,10 @@
   - 一旦 `build-frontend/.waveform_format` 已记录为 `vcd`，后续不带参数的 `make frontend` 会沿用 `vcd`；只有显式指定 `FRONTEND_WAVEFORM_FORMAT=fst` 才会切回 `.fst`
   - 中间 `.vcd` 放在临时目录，脚本结束后自动清理
 - `scripts/gen_coverage_html.sh`
-  - 用法: `src/test/python/Frontend/scripts/gen_coverage_html.sh <input.dat> [output_dir]`
-  - 默认输出到输入 `.dat` 同目录下的 `<stem>.genhtml/`
+  - 用法: `src/test/python/Frontend/scripts/gen_coverage_html.sh [input.dat ... | input_dir] [output_dir]`
+  - 不传输入时，默认收集 `data/*.dat`
+  - 单个 `.dat` 默认输出到同目录下的 `<stem>.genhtml/`
+  - 多个 `.dat` 或目录输入默认输出到 `coverage.genhtml/`
   - 会自动生成 `merged.info` 并调用 `genhtml --ignore-errors range`
 - `scripts/report_raw_code_coverage.py`
   - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py`
