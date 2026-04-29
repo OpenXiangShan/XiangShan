@@ -19,14 +19,24 @@ tree. Start here unless the task explicitly says otherwise.
 - `src/test/python/Frontend/env/backend_model.py`: backend-side semantic model
   and resolve/redirect behavior.
 - `src/test/python/Frontend/env/api.py`: public helper APIs used by tests and scripts.
+- `src/test/python/Frontend/env/request_apis.py`: lower-level request helpers
+  used by `env/api.py` for program load, redirect, and golden-trace execution.
 - `src/test/python/Frontend/env/fixtures.py`: shared pytest fixtures and
   artifact setup. Prefer these over custom setup.
+- `src/test/python/Frontend/env/dut_factory.py`: DUT construction entry used by
+  fixtures.
+- `src/test/python/Frontend/env/nemu_trace_pipeline.py`: NEMU trace generation
+  helpers used by the API layer.
+- `src/test/python/Frontend/env/functional_coverage.py`: functional coverage
+  recorder and pilot-csv integration.
 - `src/test/python/Frontend/env/coverage_def.py`: coverage definitions. Update
   when behavior changes introduce new scenario classes.
 - `src/test/python/Frontend/env/agents/`: DUT-facing side agents such as
   ICache, PTW, uncache, and backend drive logic.
 - `src/test/python/Frontend/env/model/`: semantic model helpers, golden trace
   state, FTQ scoreboards, and backend runtime state.
+- `src/test/python/Frontend/env/monitor.py`: shared monitor-side data
+  structures and helpers used by the active monitor layer.
 - `src/test/python/Frontend/env/monitors/`: DUT observation and frontend-monitor logic.
 - `src/test/python/Frontend/env/bundles/`: DUT interface bundle binding and signal contract layer.
 - `src/test/python/Frontend/env/sequences/`: reusable env-side operational sequences.
@@ -77,24 +87,13 @@ that boundary stable.
 
 ## Working Rules
 
-- Start from first principles and confirm the real goal before editing code.
 - If the requested path is not minimal, prefer the shorter path and explain the change in direction.
-- Do not add compatibility shims, fallback logic, or speculative extensions.
-- Do not rewrite absolute paths in any `source` command.
 - Never use `git push -f` under any circumstances.
 - Every log printed by the verification environment must help debug a real
   failure and be as short as practical. Do not add noisy, redundant, or
   narrative logging.
-- Preserve the black-box verification boundary. Interact through DUT-facing
-  agents, APIs, traces, and generated artifacts rather than assuming hidden RTL
-  state.
-- Before modifying files, inspect current local changes and avoid overwriting in-progress work.
 - Any user-provided process constraint must be written to the relevant repo
   docs in the same turn; do not keep it only in chat memory.
-- Do not hide or bypass a real failure just to make a test pass. When a test
-  cannot pass, identify the true root cause first and only then change code. If
-  the cause is still unproven, stop and discuss with the user before
-  proceeding.
 - Do not change implementation code merely to satisfy an existing test when the
   test contradicts the intended frontend behavior. Update or remove the invalid
   expectation only after proving the semantic contract.
@@ -188,8 +187,36 @@ src/test/python/Frontend/scripts/run_pytest_with_log.sh
 Run a narrower frontend test:
 
 ```bash
-TB_ENABLE_DUT_TESTS=1 python -m pytest src/test/python/Frontend/tests/test_multi_branch.py -v
+TB_ENABLE_DUT_TESTS=1 python -m pytest -p no:rerunfailures \
+  src/test/python/Frontend/tests/test_multi_branch.py -v
 ```
+
+Common direct-`pytest` arguments worth keeping consistent:
+
+- `-p no:rerunfailures`: disable the environment-level rerun plugin in
+  sandboxed/manual runs unless you intentionally need it.
+- `-s`: keep live stdout/stderr visible while debugging DUT/env interaction.
+- `-o log_cli=true --log-cli-level=INFO`: print env logs to the terminal; raise
+  the level only when the extra noise is justified.
+- `-v`: keep testcase nodeids visible so logs/artifacts can be matched back to
+  the exact run.
+- `TB_ENABLE_DUT_TESTS=1`: required for DUT integration cases guarded by the
+  existing `_RUN_DUT` pattern.
+
+`src/test/python/Frontend/scripts/run_pytest_with_log.sh` already sets the
+logging-related pytest arguments above and disables `rerunfailures` by default.
+Use direct `pytest` mainly when you need a narrower target or explicit env vars.
+
+`src/test/python/Frontend/scripts/run_pytest_with_log.sh` also accepts these
+script-level env vars:
+
+- `TB_LOG_CLI_LEVEL=...`: override the CLI log level; defaults to
+  `TB_ENV_LOG_LEVEL`, then `INFO`.
+- `TB_PYTEST_DISABLE_RERUNFAILURES=0|1`: keep or disable
+  `-p no:rerunfailures`; default is `1` in this tree.
+- `TB_REG_LOG_DIR=...`: override the default regression-log directory.
+- `TB_REG_LOG_FILE=...`: write the tee'd regression log to an explicit file
+  path instead of the timestamped default.
 
 Run the fast frontend smoke guard used by the local change hook:
 
@@ -253,6 +280,21 @@ timeout --foreground 1200 env "${BIN_TRACE_ENV[@]}" TB_RUN_DUT=0 \
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
 ```
 
+Other `run_bin_trace_pipeline.sh` knobs worth recording:
+
+- `TB_NEMU_MAX_INSTR=...`: pass `-I` to NEMU when you intentionally want an
+  instruction cap during trace generation.
+- `TB_TRACE_LIMIT=...`: truncate the converted golden trace when you
+  intentionally want a shorter debug input.
+- `TB_PYTEST_TARGET=...`: replace the default
+  `tests/test_bin_trace_dut.py::test_bin_trace` nodeid.
+- `TB_TRACE_MAX_CYCLES=...`: bound DUT execution cycles for a debug run; `0`
+  keeps the run-to-completion behavior.
+- `TB_PYTEST_TIMEOUT_SECS=...`: set the DUT-stage wall-clock timeout used by
+  the pipeline script.
+- `PYTHON=...`: choose a non-default Python executable for the helper tools and
+  pytest stage.
+
 Use direct `pytest` only when the golden trace has already been prepared and
 the pipeline-only environment variables are set explicitly:
 
@@ -263,8 +305,20 @@ TB_BIN_TRACE_PIPELINE=1 \
 TB_BIN_PATH=ready-to-run/<case>.bin \
 TB_TRACE_PATH=NEMU/logs/<case>.trace.jsonl \
 TB_BASE_ADDR=0x80000000 \
-python -m pytest -v src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
+python -m pytest -p no:rerunfailures -v \
+  src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
 ```
+
+For this direct-`pytest` path, keep the required environment variables explicit:
+
+- `TB_ENABLE_DUT_TESTS=1`: enable DUT integration instead of the fake-DUT path.
+- `TB_BIN_TRACE_PIPELINE=1`: satisfy the pipeline-only gate on
+  `test_bin_trace`.
+- `TB_BIN_PATH=...`: point the testcase at the exact ready-to-run binary.
+- `TB_TRACE_PATH=...`: point the testcase at the prepared golden trace file.
+- `TB_BASE_ADDR=...`: keep the DUT load base consistent with the binary image.
+- `TB_TRACE_STAGNANT_CYCLES_LIMIT=...`: keep stagnant-cycle early-stop enabled
+  so the run fails on real forward-progress stalls instead of hanging silently.
 
 Do not treat the bare command
 `TB_ENABLE_DUT_TESTS=1 python -m pytest ...::test_bin_trace`
@@ -281,6 +335,9 @@ After a run, look for artifacts in the date-stamped frontend data directory,
 for example `src/test/python/Frontend/data/<YYYYMMDD>/`. The per-case `.log`
 and `.fst` filenames include the binary stem and pytest case name:
 `<case>_test_bin_trace.log` and `<case>_test_bin_trace.fst`.
+
+Functional coverage artifacts are written separately under
+`src/test/python/Frontend/data/funcov/`.
 
 `src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace` is a
 run-to-completion entrypoint. Do not use it as a load-only or partial-step
@@ -344,6 +401,8 @@ Implementation Notes:
   `TB_TRACE_STAGNANT_CYCLES_LIMIT` and `TB_PYTEST_TIMEOUT_SECS`
 - waveform dumping is enabled by default, but can still be disabled with
   `TB_ENABLE_FST_DUMP=0`
+- `env/fixtures.py` accepts `TB_WAVEFORM_PATH`, `TB_WAVEFORM_DIR`, and
+  `TB_CASE_LOG_PATH` as explicit artifact-path overrides
 - progress checkpoints are only printed when `TB_TRACE_PROGRESS_INTERVAL` is set
 - stall snapshots are only printed when `TB_TRACE_STALL_SNAPSHOT_INTERVAL` is
   set
@@ -355,7 +414,10 @@ Implementation Notes:
 Start the frontend web console:
 
 ```bash
-TB_ENV_LOG_LEVEL=INFO src/test/python/Frontend/scripts/run_web_console.sh
+TB_ENV_LOG_LEVEL=INFO \
+TB_WEB_HOST=127.0.0.1 \
+TB_WEB_PORT=8000 \
+src/test/python/Frontend/scripts/run_web_console.sh
 ```
 
 Convert a frontend FST waveform to FSDB:
