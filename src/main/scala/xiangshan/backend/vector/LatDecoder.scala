@@ -36,6 +36,7 @@ object LatDecoder {
     VIMacOpcodes,
     VMoveOpcodes,
     VFCvtOpcodes,
+    VFMacOpcodes,
     StuOpcodes,
   )
 
