@@ -111,7 +111,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     })
   })
 
-  private val s1_readResp = DataHoldBypass(VecInit(tables.map(_.io.readResp(0))), RegNext(s0_fire))
+  private val s1_readResp = DataHoldBypass(VecInit(tables.zipWithIndex.map { case (table, tableIdx) =>
+    widenTableReadResp(table.io.readResp(0), tableIdx)
+  }), RegNext(s0_fire))
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 2
@@ -297,7 +299,9 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     table.getRawTag(t1_startPc, hist.forTag)
   })
 
-  private val t1_readResp = VecInit(tables.map(_.io.readResp(1)))
+  private val t1_readResp = VecInit(tables.zipWithIndex.map { case (table, tableIdx) =>
+    widenTableReadResp(table.io.readResp(1), tableIdx)
+  })
 
   /* --------------------------------------------------------------------------------------------------------------
     train pipeline stage 2
