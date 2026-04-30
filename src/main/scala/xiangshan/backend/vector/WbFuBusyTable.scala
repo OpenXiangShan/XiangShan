@@ -133,19 +133,19 @@ object WbFuBusyTable{
     val exuParam = param.exuParams(deqIdx)
     Seq(
       in.intWbFuBusyTableRead.map(tables =>
-        wbBusyTableHit(Some(tables), param.intWbPortIds, exuParam.getGpWbPort.map(_.port), entry.payload.gpWen, entry.payload.latency)
+        wbBusyTableHit(Some(tables), param.intWbPortIds, exuParam.getGpWriteCfg.map(_.port), entry.payload.gpWen, entry.payload.latency)
       ),
       in.fpWbFuBusyTableRead.map(tables =>
-        wbBusyTableHit(Some(tables), param.fpWbPortIds, exuParam.getFpWbPort.map(_.port), entry.payload.fpWen, entry.payload.latency)
+        wbBusyTableHit(Some(tables), param.fpWbPortIds, exuParam.getFpWriteCfg.map(_.port), entry.payload.fpWen, entry.payload.latency)
       ),
       in.vpWbFuBusyTableRead.map(tables =>
-        wbBusyTableHit(Some(tables), param.vpWbPortIds, exuParam.getVpWbPort.map(_.port), entry.payload.vpWen, entry.payload.latency)
+        wbBusyTableHit(Some(tables), param.vpWbPortIds, exuParam.getVpWriteCfg.map(_.port), entry.payload.vpWen, entry.payload.latency)
       ),
       in.v0WbFuBusyTableRead.map(tables =>
-        wbBusyTableHit(Some(tables), param.v0WbPortIds, exuParam.getV0WbPort.map(_.port), entry.payload.v0Wen, entry.payload.latency)
+        wbBusyTableHit(Some(tables), param.v0WbPortIds, exuParam.getV0WriteCfg.map(_.port), entry.payload.v0Wen, entry.payload.latency)
       ),
       in.vlWbFuBusyTableRead.map(tables =>
-        wbBusyTableHit(Some(tables), param.vlWbPortIds, exuParam.getVlWbPort.map(_.port), entry.payload.vlWen, entry.payload.latency)
+        wbBusyTableHit(Some(tables), param.vlWbPortIds, exuParam.getVlWriteCfg.map(_.port), entry.payload.vlWen, entry.payload.latency)
       ),
     ).flatten.reduceOption(_ || _).getOrElse(false.B)
   }

@@ -120,15 +120,15 @@ class IssueParam(
     wbPorts.flatten.distinct.sorted
   }
 
-  def intWbPortIds: Seq[Int] = collectWbPortIds(exuParams.map(_.getGpWbPort.map(_.port)))
+  def intWbPortIds: Seq[Int] = collectWbPortIds(exuParams.map(_.getGpWriteCfg.map(_.port)))
 
-  def fpWbPortIds: Seq[Int] = collectWbPortIds(exuParams.map(_.getFpWbPort.map(_.port)))
+  def fpWbPortIds: Seq[Int] = collectWbPortIds(exuParams.map(_.getFpWriteCfg.map(_.port)))
 
-  def vpWbPortIds: Seq[Int] = collectWbPortIds(exuParams.map(_.getVpWbPort.map(_.port)))
+  def vpWbPortIds: Seq[Int] = collectWbPortIds(exuParams.map(_.getVpWriteCfg.map(_.port)))
 
-  def v0WbPortIds: Seq[Int] = collectWbPortIds(exuParams.map(_.getV0WbPort.map(_.port)))
+  def v0WbPortIds: Seq[Int] = collectWbPortIds(exuParams.map(_.getV0WriteCfg.map(_.port)))
 
-  def vlWbPortIds: Seq[Int] = collectWbPortIds(exuParams.map(_.getVlWbPort.map(_.port)))
+  def vlWbPortIds: Seq[Int] = collectWbPortIds(exuParams.map(_.getVlWriteCfg.map(_.port)))
 
   def getFpReadCfgs: Seq[RdConfig] = {
     exuParams.flatMap(_.getFpReadCfgs)
@@ -147,7 +147,7 @@ class IssueParam(
   }
 
   def getVpWriteCfgs = {
-    exuParams.flatMap(_.getFpWriteCfg)
+    exuParams.flatMap(_.getVpWriteCfg)
   }
 
   def genExuBundle[T <: Bundle](
