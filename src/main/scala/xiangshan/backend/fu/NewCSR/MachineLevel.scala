@@ -120,16 +120,14 @@ trait MachineLevel { self: NewCSR =>
   }).setAddr(CSRs.mie)
 
   val mtvec = Module(new CSRModule("Mtvec", new XtvecBundle){
-    val reset_mtvec = Option.when(enableResetMtvec)(IO(Input(Valid(UInt(PAddrBits.W)))))
-    val resetMtvec = RegInit(true.B)
-    reset_mtvec.foreach{ rst =>
-      when(wen){
+    val reset_mtvec = Option.when(enableResetMtvec)(IO(Input(UInt(PAddrBits.W))))
+    reset_mtvec.foreach{ init =>
+      val should_reset = RegNext(false.B, true.B)
+      when(should_reset){
+        reg := init.asTypeOf(reg)
+      }.elsewhen(wen){
         reg.addr := wdata.addr
         reg.mode := Mux(XtvecMode.isLegal(wdata.mode), wdata.mode, reg.mode)
-        resetMtvec := false.B
-      }.elsewhen(rst.valid && resetMtvec){
-        reg.addr := rst.bits
-        reg.mode := XtvecMode.Direct
       }.otherwise{
         reg := reg
       }

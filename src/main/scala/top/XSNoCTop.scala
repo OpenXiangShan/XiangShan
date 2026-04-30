@@ -238,7 +238,7 @@ trait HasXSTileImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp =
     val hartResetReq = Input(Bool())
     val hartIsInReset = Output(Bool())
     val riscv_rst_vec = Input(UInt(socParams.soc.PAddrBits.W))
-    val riscv_rst_mtvec = Option.when(socParams.tiles.head.enableResetMtvec)(Input(Valid(UInt(socParams.soc.PAddrBits.W))))
+    val riscv_rst_mtvec = Option.when(socParams.tiles.head.enableResetMtvec)(Input(UInt(socParams.soc.PAddrBits.W)))
     val nodeID = Input(UInt(socParams.soc.NodeIDWidthList(socParams.issue).W))
   }).suggestName("io")
 

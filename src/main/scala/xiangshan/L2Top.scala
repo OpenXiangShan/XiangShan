@@ -179,8 +179,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
         val toCore = Output(UInt(PAddrBits.W))
       }
       val reset_mtvec = Option.when(enableResetMtvec)(new Bundle {
-        val fromTile = Input(Valid(UInt(PAddrBits.W)))
-        val toCore = Output(Valid(UInt(PAddrBits.W)))
+        val fromTile = Input(UInt(PAddrBits.W))
+        val toCore = Output(UInt(PAddrBits.W))
       })
       val hartId = new Bundle() {
         val fromTile = Input(UInt(64.W))
@@ -252,8 +252,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
     val resetDelayN = Module(new DelayN(UInt(PAddrBits.W), 5))
     io.reset_mtvec.foreach{ mtvec =>
-      mtvec.toCore.valid := RegNext(mtvec.fromTile.valid)
-      mtvec.toCore.bits  := RegEnable(mtvec.fromTile.bits, mtvec.toCore.valid)
+      mtvec.toCore := mtvec.fromTile
     }
 
     val (beu_int_out, _) = beu_local_int_source.out(0)

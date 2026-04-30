@@ -409,7 +409,7 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   val criticalErrorState = Input(Bool())
   val clintTime = Input(ValidIO(UInt(64.W)))
   val l2FlushDone = Input(Bool())
-  val reset_mtvec = Option.when(enableResetMtvec)(Input(Valid(UInt(PAddrBits.W))))
+  val reset_mtvec = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
   val trapInstInfo = Input(ValidIO(new TrapInstInfo))
   val fromVecExcpMod = Input(new Bundle {
     val busy = Bool()

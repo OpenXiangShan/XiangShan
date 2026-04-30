@@ -280,7 +280,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
       val riscv_halt = Output(Vec(NumCores, Bool()))
       val riscv_critical_error = Output(Vec(NumCores, Bool()))
       val riscv_rst_vec = Input(Vec(NumCores, UInt(soc.PAddrBits.W)))
-      val riscv_rst_mtvec = Option.when(tiles.exists(_.enableResetMtvec))(Input(Vec(NumCores, Valid(UInt(soc.PAddrBits.W)))))
+      val riscv_rst_mtvec = Option.when(tiles.exists(_.enableResetMtvec))(Input(Vec(NumCores, UInt(soc.PAddrBits.W))))
       val traceCoreInterface = Vec(NumCores, new Bundle {
         val fromEncoder = Input(new Bundle {
           val enable = Bool()

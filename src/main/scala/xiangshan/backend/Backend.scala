@@ -1069,7 +1069,7 @@ class TopToBackendBundle(implicit p: Parameters) extends XSBundle with HasSoCPar
   val teemsiInfo        = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
   val clintTime         = Output(ValidIO(UInt(64.W)))
   val l2FlushDone       = Output(Bool())
-  val reset_mtvec       = Option.when(enableResetMtvec)(Output(Valid(UInt(PAddrBits.W))))
+  val reset_mtvec       = Option.when(enableResetMtvec)(Output(UInt(PAddrBits.W)))
 }
 
 class BackendToTopBundle(implicit p: Parameters) extends XSBundle with HasSoCParameter{

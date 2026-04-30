@@ -106,7 +106,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val teemsiInfo = Option.when(soc.IMSICParams.HasTEEIMSIC)(Input(ValidIO(UInt(soc.IMSICParams.MSI_INFO_WIDTH.W))))
       val teemsiAck = Option.when(soc.IMSICParams.HasTEEIMSIC)(Output(Bool()))
       val reset_vector = Input(UInt(PAddrBits.W))
-      val reset_mtvec  = Option.when(enableResetMtvec)(Input(Valid(UInt(PAddrBits.W))))
+      val reset_mtvec  = Option.when(enableResetMtvec)(Input(UInt(PAddrBits.W)))
       val cpu_halt = Output(Bool())
       val cpu_crtical_error = Output(Bool())
       val hartIsInReset = Output(Bool())
