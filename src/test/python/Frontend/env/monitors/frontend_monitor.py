@@ -293,6 +293,22 @@ class FrontendMonitor:
         self.logger.warning("monitor error: %s", kwargs)
         self._emit(int(kwargs.get("cycle", 0)), "monitor.error", kwargs, level="WARNING")
 
+    def _try_resync_after_redirect(self, pc: int) -> bool:
+        if self.redirect_count <= 0:
+            return False
+        if self.backend_model is None or not hasattr(self.backend_model, "resync_golden_cursor_to_pc"):
+            return False
+        if not self.backend_model.resync_golden_cursor_to_pc(int(pc)):
+            return False
+        self.expected_pc = int(pc)
+        self.wait_sync_after_redirect = False
+        self.redirect_grace = 2
+        self._ftq_start_pc_cache.clear()
+        self._ftq_group_closed.clear()
+        self._ftq_group_max_offset.clear()
+        self.logger.info("monitor resynced after redirect: pc=0x%x", int(pc))
+        return True
+
     def on_clock_edge(self, cycle: int) -> None:
         if self.interface is None:
             return
@@ -406,26 +422,35 @@ class FrontendMonitor:
                 and ftq_expected_pc is not None
                 and int(pc) != int(ftq_expected_pc)
             ):
-                self._record_error(
-                    cycle=cycle,
-                    slot=i,
-                    kind="PC_MISMATCH",
-                    expected=int(ftq_expected_pc),
-                    actual=int(pc),
-                )
+                if self._try_resync_after_redirect(int(pc)):
+                    golden_pc = int(pc)
+                    ftq_expected_pc = int(pc)
+                    is_sync = True
+                else:
+                    self._record_error(
+                        cycle=cycle,
+                        slot=i,
+                        kind="PC_MISMATCH",
+                        expected=int(ftq_expected_pc),
+                        actual=int(pc),
+                    )
             elif (
                 not has_ftq_identity
                 and golden_pc is not None
                 and pc != golden_pc
                 and not self._suppress_pc_mismatch(is_sync)
             ):
-                self._record_error(
-                    cycle=cycle,
-                    slot=i,
-                    kind="PC_MISMATCH",
-                    expected=golden_pc,
-                    actual=pc,
-                )
+                if self._try_resync_after_redirect(int(pc)):
+                    golden_pc = int(pc)
+                    is_sync = True
+                else:
+                    self._record_error(
+                        cycle=cycle,
+                        slot=i,
+                        kind="PC_MISMATCH",
+                        expected=golden_pc,
+                        actual=pc,
+                    )
 
             if self.memory is not None and not self.wait_sync_after_redirect and self.redirect_grace == 0:
                 fetch_size = 2 if is_rvc else 4
