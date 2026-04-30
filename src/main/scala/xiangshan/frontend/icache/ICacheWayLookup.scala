@@ -72,6 +72,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   // so the tailing 0 (already bypassed to if1) or 1 (if1 stall, stored here) entries might be flushed by bp3,
   // therefore, when shouldFlushByStage3, we need to move back writePtr by 0 (empty) or 1.
   // If in future we have bp4 (or even more) flush, this might not be enough.
+  // NOTE: With 2-prefetch, writePtr - 2.U still does not need to be flushed,
+  // as we ask the second fetch block to be flushed within Ftq. Refer to `canTwoPrefetch` condition in `class Ftq`
   private val bpuS3FlushValid = io.flushFromBpu.shouldFlushByStage3(tailFtqIdx, true.B)
   private val bpuS3FlushPtr   = writePtr - 1.U
 

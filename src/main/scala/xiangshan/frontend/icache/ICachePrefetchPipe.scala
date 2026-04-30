@@ -354,7 +354,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   // merge pmp mmio and itlb pbmt
   private val s1_isMmio = s1_pmpMmio || Pbmt.isUncache(s1_itlbPbmt)
 
-  io.toFtq.valid                             := s1_fire
+  io.toFtq.valid                             := s1_fire && !s1_isSoftPrefetch
   io.toFtq.bits.ftqIdx                       := s1_ftqIdx
   io.toFtq.bits.twoFetchInfo(0).valid        := true.B
   io.toFtq.bits.twoFetchInfo(0).bits.isMmio  := s1_isMmio
