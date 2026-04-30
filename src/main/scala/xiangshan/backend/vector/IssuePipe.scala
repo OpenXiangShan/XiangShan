@@ -181,6 +181,7 @@ class IssuePipe(
       ).reduce(_ ++ _))
   }
 
+  //to do
   is2Next.bits.data.vfma.foreach { vfma =>
     vfma.fpAIsFpCanonicalNAN.foreach(_ := false.B)
     vfma.fpBIsFpCanonicalNAN.foreach(_ := false.B)

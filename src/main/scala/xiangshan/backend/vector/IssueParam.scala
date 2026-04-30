@@ -147,7 +147,7 @@ class IssueParam(
   }
 
   def getVpWriteCfgs = {
-    exuParams.flatMap(_.getFpWriteCfg)
+    exuParams.flatMap(_.getVpWriteCfg)
   }
 
   def genExuBundle[T <: Bundle](
