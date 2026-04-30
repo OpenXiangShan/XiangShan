@@ -4,8 +4,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
-import xiangshan.backend.vector.fu.util.Func._
-import xiangshan.backend.vector.fu.util.{VecFixLatFunc, VecFuConfig}
+import xiangshan.backend.vector.fu.Func._
+import xiangshan.backend.vector.fu.{VecFixLatFunc, VecFuConfig}
 import yunsuan.encoding.Opcode.Opcodes.FCvtOpcode
 import yunsuan.vector.Common._
 import yunsuan.vector.VectorConvert.VectorCvt

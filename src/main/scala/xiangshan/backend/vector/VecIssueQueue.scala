@@ -468,35 +468,35 @@ class VecIssueQueue(
   connectWbFuBusyTableIn(
     sink = out.toWbFuBusyTable.intWbFuBusyTableIn,
     wbPortIds = param.intWbPortIds,
-    deqWbPortIds = param.exuParams.map(_.getGpWbPort.map(_.port)),
+    deqWbPortIds = param.exuParams.map(_.getGpWriteCfg.map(_.port)),
     deqWen = out.deq.map(_.bits.gpWen),
     deq = out.deq,
   )
   connectWbFuBusyTableIn(
     sink = out.toWbFuBusyTable.fpWbFuBusyTableIn,
     wbPortIds = param.fpWbPortIds,
-    deqWbPortIds = param.exuParams.map(_.getFpWbPort.map(_.port)),
+    deqWbPortIds = param.exuParams.map(_.getFpWriteCfg.map(_.port)),
     deqWen = out.deq.map(_.bits.fpWen),
     deq = out.deq,
   )
   connectWbFuBusyTableIn(
     sink = out.toWbFuBusyTable.vpWbFuBusyTableIn,
     wbPortIds = param.vpWbPortIds,
-    deqWbPortIds = param.exuParams.map(_.getVpWbPort.map(_.port)),
+    deqWbPortIds = param.exuParams.map(_.getVpWriteCfg.map(_.port)),
     deqWen = out.deq.map(_.bits.vpWen),
     deq = out.deq,
   )
   connectWbFuBusyTableIn(
     sink = out.toWbFuBusyTable.v0WbFuBusyTableIn,
     wbPortIds = param.v0WbPortIds,
-    deqWbPortIds = param.exuParams.map(_.getV0WbPort.map(_.port)),
+    deqWbPortIds = param.exuParams.map(_.getV0WriteCfg.map(_.port)),
     deqWen = out.deq.map(_.bits.v0Wen),
     deq = out.deq,
   )
   connectWbFuBusyTableIn(
     sink = out.toWbFuBusyTable.vlWbFuBusyTableIn,
     wbPortIds = param.vlWbPortIds,
-    deqWbPortIds = param.exuParams.map(_.getVlWbPort.map(_.port)),
+    deqWbPortIds = param.exuParams.map(_.getVlWriteCfg.map(_.port)),
     deqWen = out.deq.map(_.bits.vlWen),
     deq = out.deq,
   )
