@@ -969,6 +969,8 @@ class LoadUnitS2(param: ExeUnitParams)(
   val dcacheMiss = io.dcacheResp.bits.miss
   val mshrNack = io.dcacheMSHRNack
   val bankConflict = io.dcacheBankConflict
+  val dcacheMissHandledByMSHR = dcacheMiss && io.dcacheResp.bits.handled
+  val dcacheMissNotHandledByMSHR = dcacheMiss && !io.dcacheResp.bits.handled
 
   /**
     * Nuke query from StoreUnit
@@ -1059,8 +1061,8 @@ class LoadUnitS2(param: ExeUnitParams)(
   cause(C_MA) := troubleMaker && uop.storeSetHit && sqAddrInvalid
   cause(C_TM) := troubleMaker && tlbMiss
   cause(C_FF) := troubleMaker && sqDataInvalid
-  cause(C_DR) := troubleMaker && needDCacheAccess && mshrNack
-  cause(C_DM) := troubleMaker && needDCacheAccess && dcacheMiss
+  cause(C_DR) := troubleMaker && needDCacheAccess && (mshrNack || dcacheMissNotHandledByMSHR)
+  cause(C_DM) := troubleMaker && needDCacheAccess && dcacheMissHandledByMSHR
   cause(C_WF) := false.B
   cause(C_BC) := troubleMaker && (needDCacheAccess && bankConflict || isUnalignHead && in.shouldFastReplay.get)
   cause(C_RAR) := troubleMaker && rarNack
@@ -1107,9 +1109,9 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.pmp.get := pmp
   stageInfo.nc.get := isNC
   stageInfo.mmio.get := isMMIO
-  stageInfo.mshrId.get := io.dcacheResp.bits.mshr_id
+  stageInfo.mshrId.get := Mux(dcacheMissHandledByMSHR, io.dcacheResp.bits.mshr_id, 0.U.asTypeOf(stageInfo.mshrId.get))
   stageInfo.cause.get := cause
-  stageInfo.handledByMSHR.get := io.dcacheResp.bits.handled
+  stageInfo.handledByMSHR.get := dcacheMissHandledByMSHR
   stageInfo.dataInvalidSqIdx.get := sqDataInvalidSqIdx
   stageInfo.addrInvalidSqIdx.get := sqAddrInvalidSqIdx
   stageInfo.tlbId.get := io.tlbHint.id
