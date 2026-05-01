@@ -295,20 +295,23 @@ class LoadUnitS0(param: ExeUnitParams)(
     require(bankOffset.getWidth == DCacheVWordOffset)
     require(size.getWidth == MemorySize.Size.width)
     // 1.1 Align check
-    val align = LookupTree(size, List( // TODO: parameterize this
-      "b00".U -> true.B,
-      "b01".U -> (bankOffset.take(1) === 0.U),
-      "b10".U -> (bankOffset.take(2) === 0.U),
-      "b11".U -> (bankOffset.take(3) === 0.U)
-    ))
-    assert(!MemorySize.sizeIs(_.Q)(size) || bankOffset === 0.U || !valid)
+    val align = Mux(
+      MemorySize.sizeIs(_.Q)(size),
+      bankOffset.take(4) === 0.U,
+      LookupTree(size, List( // TODO: parameterize this
+        "b00".U -> true.B,
+        "b01".U -> (bankOffset.take(1) === 0.U),
+        "b10".U -> (bankOffset.take(2) === 0.U),
+        "b11".U -> (bankOffset.take(3) === 0.U)
+      ))
+    )
     // 1.2 Bank bound check
     // 1.3 Word bound check
     val upBoundBankOffset = MemorySize.ByteOffset(size) +& bankOffset
     val wordIdx = bankOffset(DCacheWordOffset)
     val upBoundWordIdx = upBoundBankOffset(DCacheWordOffset)
     val crossBank = upBoundBankOffset.head(1).asBool
-    val crossWordInsideBank = !crossBank && wordIdx === 0.U && upBoundWordIdx =/= 0.U
+    val crossWordInsideBank = !crossBank && wordIdx === 0.U && upBoundWordIdx =/= 0.U || MemorySize.sizeIs(_.Q)(size)
     (align, crossWordInsideBank, crossBank)
   }
 
@@ -1723,9 +1726,9 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
   val s2RdataSelByOffset = VecInit((0 until VLEN / 8).map(i => bankOffset === i.U))
   // If the load is unaligned, its bank offset must reside in (8, 15]
   val unalignHeadBankOffsetUpperBound = VLEN / 8 - 1 // 15
-  val unalignHeadBankOffsetLowerBound = XLEN / 8 // 8
+  val unalignHeadBankOffsetLowerBound = 1
   val s2TailRdataSelByHeadOffset = VecInit(
-    (unalignHeadBankOffsetUpperBound until unalignHeadBankOffsetLowerBound by -1).map(i =>
+    (unalignHeadBankOffsetUpperBound to unalignHeadBankOffsetLowerBound by -1).map(i =>
       unalignHeadBankOffset === i.U
     )
   )
@@ -1739,7 +1742,7 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
   val s3TailRdataSelByHeadOffset = RegEnable(s2TailRdataSelByHeadOffset, s2Valid)
   // Data shifting
   val s3ShiftHeadList = (0 until VLEN by 8).map(i => (s3Data >> i))
-  val s3ShiftTailList = (1*8 until XLEN by 8).map(i => (s3Data << i).take(VLEN))
+  val s3ShiftTailList = (1 until VLEN / 8).map(i => (s3Data << (i * 8)).take(VLEN))
   val s3ShiftHead = Mux1H(s3RdataSelByOffset, s3ShiftHeadList)
   val s3ShiftTail = Mux1H(s3TailRdataSelByHeadOffset, s3ShiftTailList)
   val s4ShiftHead = RegEnable(s3ShiftHead, s3Valid)
