@@ -199,7 +199,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   scalarIssue.bits.vaddr := ldinVAddr
   scalarIssue.bits.fullva := ldinFullva
   scalarIssue.bits.size := ldinSize
-  scalarIssue.bits.mask := Mux(LSUOpType.isPrefetch(ldin.fuOpType), 0.U, genVWmask(ldinVAddr, ldinSize))
+  scalarIssue.bits.mask := Mux(LSUOpType.isPrefetch(ldin.fuOpType), 0.U, genVWmask128(ldinVAddr, ldinSize))
   scalarIssue.bits.DontCarePAddr()
   scalarIssue.bits.noQuery.get := ldin.fuOpType === LSUOpType.prefetch_i // swInstr
   scalarIssue.bits.DontCareUnalign() // assign later in sink
@@ -642,7 +642,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   unalignTail.vaddr := ((vaddr >> DCacheVWordOffset) + 1.U) << DCacheVWordOffset
   unalignTail.fullva := ((in.fullva >> DCacheVWordOffset) + 1.U) << DCacheVWordOffset
   unalignTail.size := MemorySize.QB.U
-  unalignTail.mask := genVWmask(vaddr, LSUOpType.size(fuOpType)) >> DCacheVWordBytes
+  unalignTail.mask := genVWmask128(vaddr, LSUOpType.size(fuOpType)) >> DCacheVWordBytes
   unalignTail.align.get := false.B
   unalignTail.unalignHead.get := false.B
   unalignTail.readWholeBank.get := true.B
