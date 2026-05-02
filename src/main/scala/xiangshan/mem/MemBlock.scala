@@ -1616,10 +1616,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
 
     vsSplit(i).io.vstdMisalign.get.storeMisalignBufferEmpty  := storeMisalignBuffer.io.toVecSplit.empty
-    vsSplit(i).io.vstdMisalign.get.storeMisalignBufferRobIdx := storeMisalignBuffer.io.toVecSplit.robIdx
-    vsSplit(i).io.vstdMisalign.get.storeMisalignBufferUopIdx := storeMisalignBuffer.io.toVecSplit.uopIdx
-    vsSplit(i).io.vstdMisalign.get.storePipeEmpty := !storeUnits.map(_.io.s0_s1_s2_valid).reduce(_||_)
-    storeUnits(i).io.vecMisalignBlockScalaIssue := vsSplit(i).io.vstdMisalign.get.blockScalaIssue
+    vsSplit(i).io.vstdMisalign.get.scalaIssueValid := storeUnits(i).io.stin.valid
+    vsSplit(i).io.vstdMisalign.get.scalaIssueRobIdx := storeUnits(i).io.stin.bits.uop.robIdx
+    vsSplit(i).io.vstdMisalign.get.storePipeEmpty := !storeUnits.map(_.io.s1_s2_valid).reduce(_||_)
+    storeUnits(i).io.vecMisalignBlockScalaIssue := vsSplit.map(_.io.vstdMisalign.get.blockScalaIssue).reduce(_||_)
 
   }
   (0 until VlduCnt).foreach{i =>

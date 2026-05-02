@@ -834,6 +834,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   val cmoOpCode = uncacheUop.fuOpType(1, 0)
   val mmioDoReq = io.uncache.req.fire && !io.uncache.req.bits.nc
   val cboMmioPAddr = Reg(UInt(PAddrBits.W))
+  val cboZeroOffset = RegInit(0.U(log2Ceil(CacheLineSize/XLEN).W))
+  val mmioIsCboZero = LSUOpType.isCboZero(uop(deqPtr).fuOpType) // pbmt mmio/nc
   switch(mmioState) {
     is(s_idle) {
       when(RegNext(io.rob.pendingst && uop(deqPtr).robIdx === io.rob.pendingPtr && pending(deqPtr) && allocated(deqPtr) && datavalid(deqPtr) && addrvalid(deqPtr) && !hasException(deqPtr))) {
@@ -842,7 +844,8 @@ class StoreQueue(implicit p: Parameters) extends XSModule
         uncacheUop.exceptionVec := 0.U.asTypeOf(ExceptionVec())
         uncacheUop.trigger := 0.U.asTypeOf(TriggerAction())
         cboFlushedSb := false.B
-        cboMmioPAddr := paddrModule.io.rdata(0)
+        cboMmioPAddr := get_block_addr(paddrModule.io.rdata(0))
+        cboZeroOffset := 0.U
       }
     }
     is(s_req) {
@@ -853,16 +856,23 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     }
     is(s_resp) {
       when(io.uncache.resp.fire && !io.uncache.resp.bits.nc) {
-        noPending := true.B
-        mmioState := s_wb
+        when (!mmioIsCboZero) {
+          noPending := true.B
+          mmioState := s_wb
+        }.otherwise {
+          cboZeroOffset := cboZeroOffset + 1.U
+          mmioState := Mux(cboZeroOffset.andR, s_wb, s_req)
+        }
 
         when (io.uncache.resp.bits.denied || io.cmoOpResp.bits.denied) {
           uncacheUop.exceptionVec(storeAccessFault) := true.B
+          mmioState := s_wb
         }
 
         when (io.uncache.resp.bits.corrupt && !io.uncache.resp.bits.denied ||
               io.cmoOpResp.bits.corrupt && !io.cmoOpResp.bits.denied) {
           uncacheUop.exceptionVec(hardwareError) := true.B
+          mmioState := s_wb
         }
       }
     }
@@ -886,10 +896,10 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   mmioReq.valid := mmioState === s_req && !LSUOpType.isCbo(uop(deqPtr).fuOpType) && !io.wfi.wfiReq
   mmioReq.bits := DontCare
   mmioReq.bits.cmd  := MemoryOpConstants.M_XWR
-  mmioReq.bits.addr := paddrModule.io.rdata(0) // data(deqPtr) -> rdata(0)
-  mmioReq.bits.vaddr:= vaddrModule.io.rdata(0)
-  mmioReq.bits.data := shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data)
-  mmioReq.bits.mask := shiftMaskToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).mask)
+  mmioReq.bits.addr := Mux(mmioIsCboZero, cboMmioPAddr + (cboZeroOffset << 3), paddrModule.io.rdata(0)) // data(deqPtr) -> rdata(0)
+  mmioReq.bits.vaddr:= Mux(mmioIsCboZero, get_block_addr(vaddrModule.io.rdata(0)).asUInt + (cboZeroOffset << 3), vaddrModule.io.rdata(0))
+  mmioReq.bits.data := Mux(mmioIsCboZero, 0.U, shiftDataToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).data))
+  mmioReq.bits.mask := Mux(mmioIsCboZero, 0xFF.U, shiftMaskToLow(paddrModule.io.rdata(0), dataModule.io.rdata(0).mask))
   mmioReq.bits.robIdx := uop(GatedRegNext(rdataPtrExtNext(0)).value).robIdx
   mmioReq.bits.memBackTypeMM := memBackTypeMM(GatedRegNext(rdataPtrExtNext(0)).value)
   mmioReq.bits.nc := false.B
@@ -913,7 +923,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     is(nc_idle) {
       when(
         nc(rptr0) && allocated(rptr0) && !completed(rptr0) && committed(rptr0) &&
-        allvalid(rptr0) && !isVec(rptr0) && !hasException(rptr0) && !mmio(rptr0)
+        allvalid(rptr0) && !isVec(rptr0) && !hasException(rptr0) && !mmio(rptr0) && !LSUOpType.isCboAll(uop(rptr0).fuOpType)
       ) {
         ncState := nc_req
         ncWaitRespPtrReg := rptr0
@@ -972,11 +982,11 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // CBO op type check can be delayed for 1 cycle,
   // as uncache op will not start in s_idle
-  val cboMmioAddr = get_block_addr(cboMmioPAddr)
-  val deqCanDoCbo = GatedRegNext(LSUOpType.isCbo(uop(deqPtr).fuOpType) && allocated(deqPtr) && addrvalid(deqPtr) && !hasException(deqPtr))
+  val deqCanDoCbo = GatedRegNext(LSUOpType.isCbo(uop(deqPtr).fuOpType) && allocated(deqPtr) && addrvalid(deqPtr) && !hasException(deqPtr)) && memBackTypeMM(deqPtr)
 
   val isCboZeroToSbVec = (0 until EnsbufferWidth).map{ i =>
-    io.sbuffer(i).fire && io.sbuffer(i).bits.vecValid && io.sbuffer(i).bits.wline && allocated(dataBuffer.io.deq(i).bits.sqPtr.value)
+    io.sbuffer(i).fire && io.sbuffer(i).bits.vecValid && io.sbuffer(i).bits.wline &&
+    allocated(dataBuffer.io.deq(i).bits.sqPtr.value) && memBackTypeMM(dataBuffer.io.deq(i).bits.sqPtr.value)
   }
   val cboZeroToSb        = isCboZeroToSbVec.reduce(_ || _)
   val cboZeroFlushSb     = GatedRegNext(cboZeroToSb)
@@ -1012,7 +1022,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   io.cmoOpReq.valid := deqCanDoCbo && cboFlushedSb && (mmioState === s_req) && !io.wfi.wfiReq
   io.cmoOpReq.bits.opcode  := cmoOpCode
-  io.cmoOpReq.bits.address := cboMmioAddr
+  io.cmoOpReq.bits.address := cboMmioPAddr
 
   io.cmoOpResp.ready := deqCanDoCbo && (mmioState === s_resp)
 
@@ -1398,7 +1408,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val cmoInvalEvent = DifftestModule(new DiffCMOInvalEvent)
     cmoInvalEvent.coreid := io.hartId
     cmoInvalEvent.valid := io.mmioStout.fire && deqCanDoCbo && LSUOpType.isCboInval(uop(deqPtr).fuOpType)
-    cmoInvalEvent.addr := cboMmioAddr
+    cmoInvalEvent.addr := cboMmioPAddr
 
     // DiffStoreEvent happens when rdataPtr moves.
     // That is, pmsStore enter dataBuffer or ncStore enter Ubuffer
