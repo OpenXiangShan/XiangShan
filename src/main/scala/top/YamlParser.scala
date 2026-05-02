@@ -31,6 +31,7 @@ import freechips.rocketchip.diplomacy.AddressSet
 import freechips.rocketchip.tile.MaxHartIdBits
 import freechips.rocketchip.util.AsyncQueueParams
 import device.IMSICBusType
+import coupledL2.L2ParamKey
 
 case class YamlConfig(
   Config: Option[String],
@@ -96,17 +97,16 @@ object YamlParser {
         case SoCParamsKey => up(SoCParamsKey).copy(PMAConfigs = pmaConfigs)
       })
     }
+    yamlConfig.L2CacheConfig.foreach(l2 => newConfig = newConfig.alter(l2))
     yamlConfig.EnableCHIAsyncBridge.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(
           EnableCHIAsyncBridge = Option.when(enable)(AsyncQueueParams(depth = 4, sync = 3, safe = true))
         )
+        case L2ParamKey => up(L2ParamKey).copy(
+          txSourceReady = enable
+        )
       })
-    }
-    yamlConfig.L2CacheConfig.foreach(l2 => newConfig = newConfig.alter(l2))
-    yamlConfig.L2CacheConfig.foreach { l2 =>
-      val updatedL2 = l2.copy( enableCHIAsyncBridge = yamlConfig.EnableCHIAsyncBridge)
-      newConfig = newConfig.alter(updatedL2)
     }
     yamlConfig.L3CacheConfig.foreach(l3 => newConfig = newConfig.alter(l3))
     yamlConfig.DebugAttachProtocals.foreach { protocols =>

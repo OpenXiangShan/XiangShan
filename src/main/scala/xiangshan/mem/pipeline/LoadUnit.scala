@@ -1334,13 +1334,13 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   // Here a judgement is made as to whether a misaligned exception needs to actually be generated.
   // We will generate misaligned exceptions at mmio.
   val s2_real_exceptionVec = WireInit(s2_exception_vec)
-  s2_real_exceptionVec(loadAddrMisaligned) := (s2_out.isMisalign || s2_out.isFrmMisAlignBuf) && s2_uncache && !s2_isvec
-  s2_real_exceptionVec(loadAccessFault) := s2_exception_vec(loadAccessFault) ||
+  s2_real_exceptionVec(loadAddrMisaligned) := (s2_out.isMisalign || s2_out.isFrmMisAlignBuf) && s2_uncache && !s2_isvec && !s2_prf
+  s2_real_exceptionVec(loadAccessFault) := (s2_exception_vec(loadAccessFault) ||
     s2_fwd_frm_d_chan && s2_d_denied ||
-    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_denied
-  s2_real_exceptionVec(hardwareError) := s2_exception_vec(hardwareError) ||
+    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_denied) && !s2_prf
+  s2_real_exceptionVec(hardwareError) := (s2_exception_vec(hardwareError) ||
     s2_fwd_frm_d_chan && s2_d_corrupt && !s2_d_denied ||
-    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_corrupt && !s2_mshr_denied
+    s2_fwd_data_valid && s2_fwd_frm_mshr && s2_mshr_corrupt && !s2_mshr_denied) && !s2_prf
 
   val s2_real_exception = s2_vecActive &&
     (s2_trigger_debug_mode || ExceptionNO.selectByFu(s2_real_exceptionVec, LduCfg).asUInt.orR)
@@ -1626,9 +1626,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s3_out.valid                := s3_valid && s3_safe_writeback && !toMisalignBufferValid
   s3_out.bits.uop             := s3_in.uop
   s3_out.bits.uop.fpWen       := s3_in.uop.fpWen
-  s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_in.uop.exceptionVec(loadAccessFault) || io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive
+  s3_out.bits.uop.exceptionVec(loadAccessFault) := (s3_in.uop.exceptionVec(loadAccessFault) || io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive && !s3_in.isPrefetch
   s3_out.bits.uop.exceptionVec(hardwareError) := (s3_in.uop.exceptionVec(hardwareError) || s3_hw_err ||
-                                                 io.dcache.resp.bits.tl_error_delayed.tl_corrupt && !io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive
+                                                 io.dcache.resp.bits.tl_error_delayed.tl_corrupt && !io.dcache.resp.bits.tl_error_delayed.tl_denied) && s3_vecActive && !s3_in.isPrefetch
   s3_out.bits.uop.flushPipe   := false.B
   s3_out.bits.uop.replayInst  := false.B
   s3_out.bits.data            := s3_in.data

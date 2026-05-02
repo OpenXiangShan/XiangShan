@@ -28,8 +28,8 @@ import system.HasSoCParameter
 import top.{ArgParser, BusPerfMonitor, Generator}
 import utility._
 import utility.sram.SramBroadcastBundle
-import coupledL2.EnableCHI
-import coupledL2.tl2chi.PortIO
+import coupledL2.{EnableCHI, L2ParamKey}
+import coupledL2.tl2chi.{PortIO, LCrdyIn}
 import xiangshan.backend.trace.TraceCoreInterface
 
 class XSTile()(implicit p: Parameters) extends LazyModule
@@ -41,7 +41,8 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   val l2top = LazyModule(new L2Top())
 
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
-  // =========== Public Ports ============
+  val txSourceReady = p(L2ParamKey).txSourceReady
+// =========== Public Ports ============
   val memBlock = core.memBlock.inner
   val core_l3_pf_port = memBlock.l3_pf_sender_opt
   val memory_port = if (enableCHI && enableL2) None else Some(l2top.inner.memory_port.get)
@@ -123,6 +124,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
       val l2_flush_en = Option.when(EnablePowerDown) (Output(Bool()))
       val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
+      val lcrdy = Option.when(txSourceReady) (new LCrdyIn)
     })
 
     dontTouch(io.hartId)
@@ -174,6 +176,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
     io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
     core.module.io.l2_flush_done := l2top.module.io.l2_flush_done.getOrElse(false.B)
     io.l2_flush_done.foreach { _ := l2top.module.io.l2_flush_done.getOrElse(false.B) }
+    io.lcrdy.foreach { in => l2top.module.io.lcrdy.foreach( out => out := in ) }
 
     l2top.module.io.dft.zip(io.dft).foreach({ case (a, b) => a := b })
     l2top.module.io.dft_reset.zip(io.dft_reset).foreach({ case (a, b) => a := b })
