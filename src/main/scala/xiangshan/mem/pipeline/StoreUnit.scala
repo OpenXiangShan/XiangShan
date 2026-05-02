@@ -75,7 +75,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val sqCommitUopIdx = Input(UopIdx())
     val sqCommitRobIdx = Input(new RobPtr)
 
-    val s0_s1_s2_valid = Output(Bool())
+    val s1_s2_valid = Output(Bool())
     val vecMisalignBlockScalaIssue = Input(Bool())
 
   })
@@ -89,7 +89,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // stage 0
   // --------------------------------------------------------------------------------
   // generate addr, use addr to query DCache and DTLB
-  val s0_iss_valid        = io.stin.valid && !io.vecMisalignBlockScalaIssue
+  val s0_iss_valid        = io.stin.valid
   val s0_prf_valid        = io.prefetch_req.valid && io.dcache.req.ready
   val s0_vec_valid        = io.vecstin.valid
   val s0_ma_st_valid      = io.misalign_stin.valid
@@ -135,7 +135,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   val s0_alignedType  = s0_vecstin.alignedType
   val s0_mBIndex      = s0_vecstin.mBIndex
   val s0_vecBaseVaddr = s0_vecstin.basevaddr
-  val s0_vecSplitIdx = s0_vecstin.splitIndx
+  val s0_vecSplitIdex = s0_vecstin.splitIndex
   val s0_isFinalSplit = io.misalign_stin.valid && io.misalign_stin.bits.isFinalSplit
 
   // generate addr
@@ -181,9 +181,9 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     "b10".U -> 3.U,
     "b11".U -> 7.U
   )) + s0_addr_low
-  val s0_rs_corss16Bytes = s0_addr_Up_low(4) =/= s0_addr_low(4)
-  val s0_misalignWith16Byte = !s0_rs_corss16Bytes && !s0_addr_aligned && !s0_use_flow_prf
-  val s0_misalignNeedReplay = (s0_use_flow_vec || s0_rs_corss16Bytes) && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
+  val s0_rs_cross16Bytes = s0_addr_Up_low(4) =/= s0_addr_low(4)
+  val s0_misalignWith16Byte = !s0_rs_cross16Bytes && !s0_addr_aligned && !s0_use_flow_prf
+  val s0_misalignNeedReplay = s0_rs_cross16Bytes && !(s0_uop.sqIdx === io.sqCommitPtr || s0_uop.robIdx === io.sqCommitRobIdx && s0_uop.uopIdx === io.sqCommitUopIdx)
   s0_is128bit := Mux(s0_use_flow_ma, io.misalign_stin.bits.is128bit, is128Bit(s0_vecstin.alignedType) || s0_misalignWith16Byte)
 
   s0_fullva := Mux(
@@ -251,7 +251,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   s0_out.uop          := s0_uop
   s0_out.miss         := false.B
   // For unaligned, we need to generate a base-aligned mask in storeunit and then do a shift split in StoreQueue.
-  s0_out.mask         := Mux(s0_rs_corss16Bytes && !s0_addr_aligned, genBasemask(s0_saddr,s0_alignType(1,0)), s0_mask)
+  s0_out.mask         := Mux(s0_rs_cross16Bytes && !s0_addr_aligned, genBasemask(s0_saddr,s0_alignType(1,0)), s0_mask)
   s0_out.isFirstIssue := s0_isFirstIssue
   s0_out.isHWPrefetch := s0_use_flow_prf
   s0_out.wlineflag    := s0_wlineflag
@@ -270,7 +270,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   }
   s0_out.isFrmMisAlignBuf := s0_use_flow_ma
   s0_out.isFinalSplit := s0_isFinalSplit
-  s0_out.splitIndx := s0_vecSplitIdx
+  s0_out.splitIndex := s0_vecSplitIdex
 //  s0_out.uop.exceptionVec(storeAddrMisaligned) := Mux(s0_use_non_prf_flow, (!s0_addr_aligned || s0_vecstin.uop.exceptionVec(storeAddrMisaligned) && s0_vecActive), false.B) && !s0_misalignWith16Byte
 
   io.st_mask_out.valid       := s0_use_flow_rs || s0_use_flow_vec
@@ -566,7 +566,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.prefetch_train.bits.hasException := false.B
 
   // for misalign in vsMergeBuffer
-  io.s0_s1_s2_valid := s0_valid || s1_valid || s2_valid
+  io.s1_s2_valid := s1_valid || s2_valid
 
   // Pipeline
   // --------------------------------------------------------------------------------
@@ -627,7 +627,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
       sx_in(i).gpaddr      := s3_in.gpaddr
       sx_in(i).isForVSnonLeafPTE     := s3_in.isForVSnonLeafPTE
       sx_in(i).vecTriggerMask := s3_in.vecTriggerMask
-      sx_in(i).splitIndx := s3_in.splitIndx
+      sx_in(i).splitIndx := s3_in.splitIndex
       sx_in(i).hasException := s3_exception
       sx_in_vec(i)         := s3_in.isvec
       sx_ready(i) := !s3_valid(i) || sx_in(i).output.uop.robIdx.needFlush(io.redirect) || (if (RAWTotalDelayCycles == 0) io.stout.ready else sx_ready(i+1))
@@ -678,7 +678,7 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   io.vecstout.bits.isForVSnonLeafPTE     := sx_last_in.isForVSnonLeafPTE
   io.vecstout.bits.vstart      := sx_last_in.output.uop.vpu.vstart
   io.vecstout.bits.vecTriggerMask := sx_last_in.vecTriggerMask
-  io.vecstout.bits.splitIndx := sx_last_in.splitIndx
+  io.vecstout.bits.splitIndex := sx_last_in.splitIndx
   // io.vecstout.bits.reg_offset.map(_ := DontCare)
   // io.vecstout.bits.elemIdx.map(_ := sx_last_in.elemIdx)
   // io.vecstout.bits.elemIdxInsideVd.map(_ := DontCare)

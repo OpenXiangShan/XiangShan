@@ -27,7 +27,7 @@ import freechips.rocketchip.tile.{BusErrorUnit, BusErrorUnitParams, BusErrors, M
 import freechips.rocketchip.tilelink._
 import coupledL2.{EnableCHI, EnableL2ClockGate, L2ParamKey, PrefetchCtrlFromCore}
 import coupledL2.tl2tl.TL2TLCoupledL2
-import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2, CHIAddrWidthKey, NonSecureKey}
+import coupledL2.tl2chi.{CHIIssue, PortIO, TL2CHICoupledL2, CHIAddrWidthKey, NonSecureKey, LCrdyIn}
 import huancun.BankBitsKey
 import system.HasSoCParameter
 import top.BusPerfMonitor
@@ -74,7 +74,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
     (buffers, node)
   }
   val enableL2 = coreParams.L2CacheParamsOpt.isDefined
-  // =========== Components ============
+  val txSourceReady = p(L2ParamKey).txSourceReady
+   // =========== Components ============
   val l1_xbar = TLXbar()
   val mmio_xbar = TLXbar()
   val mmio_port = TLIdentityNode() // to L3
@@ -241,6 +242,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
       val l2_flush_en = Option.when(EnablePowerDown) (Input(Bool()))
       val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
+      val lcrdy = Option.when(txSourceReady) (new LCrdyIn)
       val dft = Option.when(hasDFT)(Input(new SramBroadcastBundle))
       val dft_reset = Option.when(hasMbist)(Input(new DFTResetSignals()))
       val dft_out = Option.when(hasDFT)(Output(new SramBroadcastBundle))
@@ -368,6 +370,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
           l2.io_nodeID := io.nodeID.get
           io.chi.get <> l2.io_chi
           l2.io_cpu_halt.foreach { _:= io.cpu_halt.fromCore }
+          io.lcrdy.foreach { in => l2.io_lcrdy.foreach(out => out := in) }
         case l2cache: TL2TLCoupledL2 =>
       }
 
@@ -383,6 +386,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       io.l2_tlb_req.req_kill := DontCare
       io.l2_tlb_req.resp.ready := true.B
       io.perfEvents := DontCare
+      io.lcrdy.foreach { _ := DontCare }
 
       beu.module.io.errors.l2 := 0.U.asTypeOf(beu.module.io.errors.l2)
     }

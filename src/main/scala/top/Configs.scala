@@ -283,7 +283,7 @@ case class L2CacheConfig
   banks: Int = 1,
   tp: Boolean = true,
   enableFlush: Boolean = false,
-  enableCHIAsyncBridge: Option[Boolean] = None
+  txSourceReady: Boolean = false
 ) extends Config((site, here, up) => {
   case XSTileKey =>
     require(inclusive, "L2 must be inclusive")
@@ -318,7 +318,7 @@ case class L2CacheConfig
           (if (tp) Seq(TPParameters()) else Nil) ++
           (if (p.prefetcher.nonEmpty) Seq(PrefetchReceiverParams()) else Nil),
         enableL2Flush = enableFlush,
-        enableCHIAsyncBridge = enableCHIAsyncBridge,
+        txSourceReady = txSourceReady,
         enablePerf = !site(DebugOptionsKey).FPGAPlatform && site(DebugOptionsKey).EnablePerfDebug,
         enableRollingDB = site(DebugOptionsKey).EnableRollingDB,
         enableMonitor = site(DebugOptionsKey).AlwaysBasicDB,

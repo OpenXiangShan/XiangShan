@@ -597,7 +597,7 @@ class LoadMisalignBuffer(implicit p: Parameters) extends XSModule
   io.vecWriteBack.bits.vstart               := req.uop.vpu.vstart
   io.vecWriteBack.bits.vecTriggerMask       := req.vecTriggerMask
   io.vecWriteBack.bits.nc                   := globalNC
-  io.vecWriteBack.bits.splitIndx            := DontCare
+  io.vecWriteBack.bits.splitIndex            := DontCare
 
 
   val flush = req_valid && req.uop.robIdx.needFlush(io.redirect)

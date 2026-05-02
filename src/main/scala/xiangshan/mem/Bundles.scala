@@ -93,7 +93,7 @@ object Bundles {
     val vecBaseVaddr = UInt(VAddrBits.W)
     val vecVaddrOffset = UInt(VAddrBits.W)
     val vecTriggerMask = UInt((VLEN/8).W)
-    val splitIndx = UInt(flowIdxBits.W)
+    val splitIndex = UInt(flowIdxBits.W)
     // 1: vector active element or scala mem operation, 0: vector not active element
     val vecActive = Bool()
     // val flowPtr             = new VlflowPtr() // VLFlowQueue ptr
