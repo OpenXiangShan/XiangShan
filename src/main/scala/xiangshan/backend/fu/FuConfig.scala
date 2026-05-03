@@ -27,6 +27,7 @@ import xiangshan.mem.{Std, VStd}
   * @param writeVlRf the $fu write vl regfiles
   * @param writeFflags the $fu write fflags csr
   * @param writeVxsat the $fu write vxsat csr
+  * @param needWidenOut the $fu need isWiden in vector output data
   * @param destDataBits the width of output data in the $fu
   * @param srcDataBits the width of input data in the $fu, the default value is destDataBits
   * @param latency the latency of instuction executed in the $fu
@@ -62,6 +63,7 @@ case class FuConfig (
   writeFakeIntRf: Boolean = false,
   writeFflags   : Boolean = false,
   writeVxsat    : Boolean = false,
+  needWidenOut  : Boolean = false,
   destDataBits  : Int = 64,
   srcDataBits   : Option[Int] = None,
   srcNeedCopy   : Boolean = false,
@@ -569,6 +571,7 @@ object FuConfig {
     writeVecRf = true,
     writeV0Rf = true,
     writeVxsat = true,
+    needWidenOut = true,
     needSrcVxrm = true,
     latency = CertainLatency(1),
     vlWakeUp = true,
@@ -723,6 +726,7 @@ object FuConfig {
     writeVecRf = true,
     writeV0Rf = true,
     writeFflags = true,
+    needWidenOut = true,
     latency = CertainLatency(3),
     vlWakeUp = true,
     maskWakeUp = true,
@@ -767,6 +771,7 @@ object FuConfig {
     writeVecRf = true,
     writeV0Rf = true,
     writeFflags = true,
+    needWidenOut = true,
     latency = CertainLatency(2),
     vlWakeUp = true,
     maskWakeUp = true,

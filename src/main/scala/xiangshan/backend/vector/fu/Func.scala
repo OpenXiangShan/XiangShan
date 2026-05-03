@@ -155,6 +155,7 @@ object Func {
     val maskE32  = UInt((vlenb / 4).W)
     val maskE64  = UInt((vlenb / 8).W)
 
+    val isWiden: Option[Bool] = Option.when(cfg.needWidenOut)(Bool())
     val vxsatE8: Option[Vec[UInt]] = Option.when(cfg.writeVxsat)(Vec(vlenb, Vxsat()))
     val narrowVxsatE8: Option[Vec[UInt]] = Option.when(cfg.writeVxsat)(Vec(vlenb / 2, Vxsat()))
     val fflagsE8: Option[Vec[UInt]] = Option.when(cfg.writeFflags)(Vec(vlenb, Fflags()))
