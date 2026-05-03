@@ -26,8 +26,10 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
 
   private val ex0NextInWidth = FCvtOpcode.getInputDataWidth(ex0NextOpcode)
   private val ex0NextOutWidth = FCvtOpcode.getOutputDataWidth(ex0NextOpcode)
+  private val ex0NextIsWiden = ex0NextOutWidth > ex0NextInWidth
   private val exInWidth   = makePipeReg(ex0NextInWidth, pipeRegValids)
   private val exOutWidth  = makePipeReg(ex0NextOutWidth, pipeRegValids)
+  private val isWiden     = makePipeReg(ex0NextIsWiden, pipeRegValids)
 
   private val vfcvts = Seq.fill(numVecModule)(Module(new VectorCvt(dataWidthOfDataModule)))
   private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
@@ -36,7 +38,15 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
   private val outSew1H = Wire(UInt(4.W))
 
   vs2Split.io.inVecData := ex0vs2
-  vs2Vec := vs2Split.io.outVec64b
+  for (i <- 0 until numVecModule) {
+    val e16Low = Mux(ex0uopIdx(0), vs2Split.io.outVec16b(i * 2 + numVecModule * 2), vs2Split.io.outVec16b(i * 2))
+    val e16High = Mux(ex0uopIdx(0), vs2Split.io.outVec16b(i * 2 + numVecModule * 2 + 1), vs2Split.io.outVec16b(i * 2 + 1))
+    val e32Input = Mux(ex0uopIdx(0), vs2Split.io.outVec32b(i + numVecModule), vs2Split.io.outVec32b(i))
+    vs2Vec(i) := MuxCase(vs2Split.io.outVec64b(i), Seq(
+      (inSew1H === SewOH.e16 && outSew1H === SewOH.e32) -> Cat(e16High, e16Low),
+      (inSew1H === SewOH.e32 && outSew1H === SewOH.e64) -> e32Input,
+    ))
+  }
   inSew1H := UIntToOH(exInWidth.ex0)
   outSew1H := UIntToOH(exOutWidth.ex0)
 
@@ -58,6 +68,7 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
       vecData.maskE16 := 0.U
       vecData.maskE32 := 0.U
       vecData.maskE64 := 0.U
+      vecData.isWiden.get := isWiden.ex0
       vecData.fflagsE8.get := zeroFflagsE8
       vecData.narrowFflagsE8.get := zeroFflagsE8
   }
@@ -70,6 +81,7 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
       vecData.maskE16 := 0.U
       vecData.maskE32 := 0.U
       vecData.maskE64 := 0.U
+      vecData.isWiden.get := isWiden.ex1
       vecData.fflagsE8.get := vfcvts.flatMap(_.io.fflagsE8Ex1.toSeq)
       vecData.narrowFflagsE8.get := zeroFflagsE8
   }
@@ -82,6 +94,7 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
       vecData.maskE16 := 0.U
       vecData.maskE32 := 0.U
       vecData.maskE64 := 0.U
+      vecData.isWiden.get := isWiden.ex2
       vecData.fflagsE8.get := vfcvts.flatMap(_.io.fflagsE8Ex2.toSeq)
       vecData.narrowFflagsE8.get := zeroFflagsE8
   }

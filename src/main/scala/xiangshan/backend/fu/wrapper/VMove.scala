@@ -15,7 +15,7 @@ import yunsuan.vector.Common._
 
 class VMove(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg) {
   // XSError(io.in.valid && !VMoveOpcode.isLegal(io.in.bits.ctrl.fuOpType), "VMove OpType not supported")
- 
+
   private implicit val opcode: UInt = fuOpType
   // param alias
   private val dataWidth = cfg.destDataBits
@@ -43,4 +43,3 @@ class VMove(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg)
   out.ex(0).data.vec.foreach(_.maskE32 := 0.U)
   out.ex(0).data.vec.foreach(_.maskE64 := 0.U)
 }
-

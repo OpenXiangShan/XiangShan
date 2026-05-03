@@ -25,19 +25,19 @@ class VFMacWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
   private val ex0NextSew = VFMacOpcodes.getFormat(ex0NextOpcode)
   private val ex0VfmaInfo = ex0data.vfma.get
 
-  private val ex0Sel16 = RegEnable(ex0NextSew === VSew.e16, ex0Next.valid)
-  private val ex0Sel32 = RegEnable(ex0NextSew === VSew.e32, ex0Next.valid)
-  private val ex0Sel64 = RegEnable(ex0NextSew === VSew.e64, ex0Next.valid)
-  private val ex0ResWiden = RegEnable(VFMacOpcodes.isResWiden(ex0NextOpcode), ex0Next.valid)
-  private val ex0IsVfmul = RegEnable(VFMacOpcodes.isFmul(ex0NextOpcode), ex0Next.valid)
-  private val ex0IsVfmacc = RegEnable(VFMacOpcodes.isFmacc(ex0NextOpcode), ex0Next.valid)
-  private val ex0IsVfnmacc = RegEnable(VFMacOpcodes.isFnmacc(ex0NextOpcode), ex0Next.valid)
-  private val ex0IsVfmsac = RegEnable(VFMacOpcodes.isFmsac(ex0NextOpcode), ex0Next.valid)
-  private val ex0IsVfnmsac = RegEnable(VFMacOpcodes.isFnmsac(ex0NextOpcode), ex0Next.valid)
-  private val ex0IsVfmadd = RegEnable(VFMacOpcodes.isFmadd(ex0NextOpcode), ex0Next.valid)
-  private val ex0IsVfnmadd = RegEnable(VFMacOpcodes.isFnmadd(ex0NextOpcode), ex0Next.valid)
-  private val ex0IsVfmsub = RegEnable(VFMacOpcodes.isFmsub(ex0NextOpcode), ex0Next.valid)
-  private val ex0IsVfnmsub = RegEnable(VFMacOpcodes.isFnmsub(ex0NextOpcode), ex0Next.valid)
+  private val sel16 = makePipeReg(ex0NextSew === VSew.e16, pipeRegValids)
+  private val sel32 = makePipeReg(ex0NextSew === VSew.e32, pipeRegValids)
+  private val sel64 = makePipeReg(ex0NextSew === VSew.e64, pipeRegValids)
+  private val isWiden    = makePipeReg(VFMacOpcodes.isResWiden (ex0NextOpcode), pipeRegValids)
+  private val isVfmul    = makePipeReg(VFMacOpcodes.isFmul     (ex0NextOpcode), pipeRegValids)
+  private val isVfmacc   = makePipeReg(VFMacOpcodes.isFmacc    (ex0NextOpcode), pipeRegValids)
+  private val isVfnmacc  = makePipeReg(VFMacOpcodes.isFnmacc   (ex0NextOpcode), pipeRegValids)
+  private val isVfmsac   = makePipeReg(VFMacOpcodes.isFmsac    (ex0NextOpcode), pipeRegValids)
+  private val isVfnmsac  = makePipeReg(VFMacOpcodes.isFnmsac   (ex0NextOpcode), pipeRegValids)
+  private val isVfmadd   = makePipeReg(VFMacOpcodes.isFmadd    (ex0NextOpcode), pipeRegValids)
+  private val isVfnmadd  = makePipeReg(VFMacOpcodes.isFnmadd   (ex0NextOpcode), pipeRegValids)
+  private val isVfmsub   = makePipeReg(VFMacOpcodes.isFmsub    (ex0NextOpcode), pipeRegValids)
+  private val isVfnmsub  = makePipeReg(VFMacOpcodes.isFnmsub   (ex0NextOpcode), pipeRegValids)
 
   private val ex0frm = in.frm.get
 
@@ -64,20 +64,20 @@ class VFMacWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
       mod.in.ex0.valid := ex(0).valid
       mod.in.ex1Valid := ex(1).valid
       mod.in.ex2Valid := ex(2).valid
-      mod.in.ex0.bits.ctrl.isVfmul := ex0IsVfmul
-      mod.in.ex0.bits.ctrl.isVfmacc := ex0IsVfmacc
-      mod.in.ex0.bits.ctrl.isVfnmacc := ex0IsVfnmacc
-      mod.in.ex0.bits.ctrl.isVfmsac := ex0IsVfmsac
-      mod.in.ex0.bits.ctrl.isVfnmsac := ex0IsVfnmsac
-      mod.in.ex0.bits.ctrl.isVfmadd := ex0IsVfmadd
-      mod.in.ex0.bits.ctrl.isVfnmadd := ex0IsVfnmadd
-      mod.in.ex0.bits.ctrl.isVfmsub := ex0IsVfmsub
-      mod.in.ex0.bits.ctrl.isVfnmsub := ex0IsVfnmsub
+      mod.in.ex0.bits.ctrl.isVfmul := isVfmul.ex0
+      mod.in.ex0.bits.ctrl.isVfmacc := isVfmacc.ex0
+      mod.in.ex0.bits.ctrl.isVfnmacc := isVfnmacc.ex0
+      mod.in.ex0.bits.ctrl.isVfmsac := isVfmsac.ex0
+      mod.in.ex0.bits.ctrl.isVfnmsac := isVfnmsac.ex0
+      mod.in.ex0.bits.ctrl.isVfmadd := isVfmadd.ex0
+      mod.in.ex0.bits.ctrl.isVfnmadd := isVfnmadd.ex0
+      mod.in.ex0.bits.ctrl.isVfmsub := isVfmsub.ex0
+      mod.in.ex0.bits.ctrl.isVfnmsub := isVfnmsub.ex0
       mod.in.ex0.bits.ctrl.round_mode := ex0frm
-      mod.in.ex0.bits.ctrl.sel16 := ex0Sel16
-      mod.in.ex0.bits.ctrl.sel32 := ex0Sel32
-      mod.in.ex0.bits.ctrl.sel64 := ex0Sel64
-      mod.in.ex0.bits.ctrl.res_widening := ex0ResWiden
+      mod.in.ex0.bits.ctrl.sel16 := sel16.ex0
+      mod.in.ex0.bits.ctrl.sel32 := sel32.ex0
+      mod.in.ex0.bits.ctrl.sel64 := sel64.ex0
+      mod.in.ex0.bits.ctrl.res_widening := isWiden.ex0
 
       mod.in.ex0.bits.data.fp_a := vs2Vec(i)
       mod.in.ex0.bits.data.fp_b := vs1Vec(i)
@@ -99,6 +99,7 @@ class VFMacWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
         vecData.maskE16 := 0.U.asTypeOf(vecData.maskE16)
         vecData.maskE32 := 0.U.asTypeOf(vecData.maskE32)
         vecData.maskE64 := 0.U.asTypeOf(vecData.maskE64)
+        vecData.isWiden.get := isWiden.ex(stageIdx)
         vecData.vxsatE8.foreach(_ := 0.U.asTypeOf(vecData.vxsatE8.get))
         vecData.narrowVxsatE8.foreach(_ := 0.U.asTypeOf(vecData.narrowVxsatE8.get))
         vecData.fflagsE8.foreach(_ := 0.U.asTypeOf(vecData.fflagsE8.get))
@@ -114,6 +115,7 @@ class VFMacWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
       vecData.maskE16 := 0.U.asTypeOf(vecData.maskE16)
       vecData.maskE32 := 0.U.asTypeOf(vecData.maskE32)
       vecData.maskE64 := 0.U.asTypeOf(vecData.maskE64)
+      vecData.isWiden.get := isWiden.ex3
       vecData.vxsatE8.foreach(_ := 0.U.asTypeOf(vecData.vxsatE8.get))
       vecData.narrowVxsatE8.foreach(_ := 0.U.asTypeOf(vecData.narrowVxsatE8.get))
       vecData.fflagsE8.foreach(_ := VecInit(vfmas.flatMap(_.out.fflags)))

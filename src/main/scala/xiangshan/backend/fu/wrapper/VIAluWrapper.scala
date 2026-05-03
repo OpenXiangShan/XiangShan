@@ -148,6 +148,7 @@ class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
       vecData.maskE16 := Cat(vialus.map(_.out.ex0.mask.e16).reverse)
       vecData.maskE32 := Cat(vialus.map(_.out.ex0.mask.e32).reverse)
       vecData.maskE64 := Cat(vialus.map(_.out.ex0.mask.e64).reverse)
+      vecData.isWiden.get := isWiden.ex0
       vecData.vxsatE8.get := vialus.flatMap(_.out.ex0.vxsat.asBools)
       vecData.narrowVxsatE8.get := vialus.flatMap(_.out.ex0.narrowVxsat.asBools)
   }
@@ -160,6 +161,7 @@ class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
       vecData.maskE16 := Cat(vialus.map(_.out.ex1.mask.e16).reverse)
       vecData.maskE32 := Cat(vialus.map(_.out.ex1.mask.e32).reverse)
       vecData.maskE64 := Cat(vialus.map(_.out.ex1.mask.e64).reverse)
+      vecData.isWiden.get := isWiden.ex1
       vecData.vxsatE8.get := vialus.flatMap(_.out.ex1.vxsat.asBools)
       vecData.narrowVxsatE8.get := vialus.flatMap(_.out.ex1.narrowVxsat.asBools)
   }
