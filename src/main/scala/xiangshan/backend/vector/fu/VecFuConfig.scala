@@ -27,6 +27,8 @@ import scala.beans.BeanProperty
   * @param writeVlRf the $fu write vl regfiles
   * @param writeFflags the $fu write fflags csr
   * @param writeVxsat the $fu write vxsat csr
+  * @param needWidenOut the $fu need isWiden in vector output data
+  * @param needNarrowOut the $fu need isNarrow in vector output data
   * @param destDataBits the width of output data in the $fu
   * @param srcDataBits the width of input data in the $fu, the default value is destDataBits
   * @param latency the latency of instuction executed in the $fu
@@ -61,6 +63,8 @@ case class VecFuConfig (
   writeFakeIntRf: Boolean = false,
   writeFflags   : Boolean = false,
   writeVxsat    : Boolean = false,
+  needWidenOut  : Boolean = false,
+  needNarrowOut : Boolean = false,
   destDataBits  : Int = 64,
   srcDataBits   : Option[Int] = None,
   srcNeedCopy   : Boolean = false,
@@ -226,6 +230,8 @@ object VecFuConfig {
       writeFakeIntRf = cfg.writeFakeIntRf,
       writeFflags = cfg.writeFflags,
       writeVxsat = cfg.writeVxsat,
+      needWidenOut = cfg.needWidenOut,
+      needNarrowOut = cfg.needNarrowOut,
       destDataBits = cfg.destDataBits,
       srcDataBits = cfg.srcDataBits,
       srcNeedCopy = cfg.srcNeedCopy,
