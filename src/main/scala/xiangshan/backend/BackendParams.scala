@@ -38,7 +38,10 @@ case class BackendParams(
   iqWakeUpParams : Seq[WakeUpConfig],
 ) {
 
-  def debugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).EnableDifftest
+  def debugEn(implicit p: Parameters): Boolean = {
+    val debugOpts = p(DebugOptionsKey)
+    debugOpts.EnableDifftest || debugOpts.FullBasicDiff
+  }
 
   def basicDebugEn(implicit p: Parameters): Boolean = p(DebugOptionsKey).AlwaysBasicDiff || debugEn
 

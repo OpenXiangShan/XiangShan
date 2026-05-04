@@ -1559,7 +1559,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffArchEvent.virtualInterruptIsHvictlInject := RegNext(virtualInterruptIsHvictlInject && hasTrap)
     diffArchEvent.irToHS := RegEnable(irToHS, hasTrap)
     diffArchEvent.irToVS := RegEnable(irToVS, hasTrap)
-    if (env.EnableDifftest) {
+    if (env.EnableDifftest || env.FullBasicDiff) {
       diffArchEvent.exceptionInst := RegEnable(io.fromRob.trap.bits.instr, hasTrap)
     }
 

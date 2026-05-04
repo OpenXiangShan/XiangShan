@@ -43,6 +43,7 @@ object ArgParser {
       |--fpga-platform
       |--reset-gen
       |--enable-difftest
+      |--full-basicdiff
       |--enable-log
       |--with-chiseldb
       |--with-rollingdb
@@ -126,6 +127,10 @@ object ArgParser {
         case "--enable-difftest" :: tail =>
           nextOption(config.alter((site, here, up) => {
             case DebugOptionsKey => up(DebugOptionsKey).copy(EnableDifftest = true)
+          }), tail)
+        case "--full-basicdiff" :: tail =>
+          nextOption(config.alter((site, here, up) => {
+            case DebugOptionsKey => up(DebugOptionsKey).copy(FullBasicDiff = true)
           }), tail)
         case "--disable-always-basic-diff" :: tail =>
           nextOption(config.alter((site, here, up) => {

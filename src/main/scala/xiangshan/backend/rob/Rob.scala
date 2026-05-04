@@ -1498,7 +1498,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     // These are the structures used by difftest only and should be optimized after synthesis.
     val dt_eliminatedMove = Mem(RobSize, Bool())
     val dt_isRVC = Mem(RobSize, Bool())
-    val dt_pcTransType = Option.when(env.EnableDifftest)(Mem(RobSize, new AddrTransType))
+    val fullBasicDiff = env.EnableDifftest || env.FullBasicDiff
+    val dt_pcTransType = Option.when(fullBasicDiff)(Mem(RobSize, new AddrTransType))
     val dt_exuDebug = Reg(Vec(RobSize, new DebugBundle))
     for (i <- 0 until RenameWidth) {
       when(canEnqueue(i)) {
@@ -1553,7 +1554,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       when(difftest.valid) {
         assert(CommitType.isFused(commitInfo.commitType).asUInt + commitInfo.instrSize >= 1.U)
       }
-      if (env.EnableDifftest) {
+      if (fullBasicDiff) {
         val pcTransType = dt_pcTransType.get(deqPtrVec(i).value)
         difftest.pc := Mux(pcTransType.shouldBeSext, SignExt(uop.pc, XLEN), uop.pc)
         difftest.instr := uop.instr
@@ -1562,6 +1563,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         difftest.sqIdx := ZeroExt(uop.sqIdx.value, 7)
         difftest.isLoad := io.commits.info(i).commitType === CommitType.LOAD
         difftest.isStore := io.commits.info(i).commitType === CommitType.STORE
+      }
+      if (env.EnableDifftest) {
         // Check LoadEvent only when isAmo or isLoad and skip MMIO
         val difftestLoadEvent = DifftestModule(new DiffLoadEvent, delay = 3)
         difftestLoadEvent.coreid := io.hartId
@@ -1595,7 +1598,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     difftest.instrCnt := instrCnt
     difftest.hasWFI := hasWFI
 
-    if (env.EnableDifftest) {
+    if (env.EnableDifftest || env.FullBasicDiff) {
       val trapCode = PriorityMux(wdata.zip(trapVec).map(x => x._2 -> x._1))
       val trapPC = SignExt(PriorityMux(wpc.zip(trapVec).map(x => x._2 -> x._1)), XLEN)
       difftest.code := trapCode
@@ -1605,7 +1608,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   //store evetn difftest information
   io.storeDebugInfo := DontCare
-  if (env.EnableDifftest) {
+  if (env.EnableDifftest || env.FullBasicDiff) {
     io.storeDebugInfo.map{port =>
       port.pc := debug_microOp(port.robidx.value).pc
     }
@@ -1649,7 +1652,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !deqismmio
   val commitStuckCounter = Module(new CommitStuckCounter(
     width = log2Up(maxCommitStuck),
-    forceEnable = env.EnableDifftest.B
+    forceEnable = (env.EnableDifftest || env.FullBasicDiff).B
   ))
   val commitStuckOverflowEnabled = if (wfiResume) true.B else !hasWFI
   commitStuckCounter.io.stuck := commitStuck
@@ -1706,7 +1709,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     dontTouch(walkFinished)
     dontTouch(changeBankAddrToDeqPtr)
   }
-  if (env.EnableDifftest) {
+  if (env.EnableDifftest || env.FullBasicDiff) {
     io.commits.info.map(info => dontTouch(info.debug_pc.get))
   }
 }
