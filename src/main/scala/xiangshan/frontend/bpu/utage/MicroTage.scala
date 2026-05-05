@@ -40,11 +40,10 @@ import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageParameters with Helpers {
   class MicroTageIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
     val foldedPathHist:         PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val foldedPathHistForTrain: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val prediction:             MicroTagePrediction   = Output(new MicroTagePrediction)
     val meta:                   Valid[MicroTageMeta]  = Output(Valid(new MicroTageMeta))
     // Send ABTB position early, pipeline registers inside the module.
-    // Consideration: improve routing and enhance driving capability.
+    // Consideration: improve routing and enhance driving capablility.
     val abtbPosVec:     Vec[UInt]                  = Input(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
     val abtbPrediction: Vec[Valid[AheadBtbResult]] = Input(Vec(NumAheadBtbPredictionEntries, Valid(new AheadBtbResult)))
     val overrideValid:  Bool                       = Input(Bool())
@@ -129,6 +128,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val a3_readIndex     = RegInit(0.U.asTypeOf(a1_readIndex))
   private val a3_predRead      = RegInit(0.U.asTypeOf(a1_predRead))
   private val a3_posHitVec     = RegInit(0.U.asTypeOf(a1_posHitVec))
+  private val a3_foldedPathHist    = RegInit(0.U.asTypeOf(a1_foldedPathHist))
   private val overridePredRead = Wire(Vec(NumTables, Vec(NumWays, new MicroTageTablePred)))
   for (i <- 0 until NumTables) {
     val predTag = computeHashTag(a1_startPc, a1_foldedPathHist, TableInfos, i)
@@ -148,6 +148,8 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     RegEnable(Mux(overrideValid, overridePredRead, a1_predRead), 0.U.asTypeOf(a1_predRead), a1_fire)
   private val a2_posHitVec =
     RegEnable(Mux(overrideValid, a3_posHitVec, a1_posHitVec), 0.U.asTypeOf(a1_posHitVec), a1_fire)
+  private val a2_foldedPathHist =
+    RegEnable(a1_foldedPathHist, 0.U.asTypeOf(a1_foldedPathHist), a1_fire)
   private val a2_fromAbtbPos     = RegEnable(io.abtbPosVec, a1_fire)
   private val a2_abtbHitVec      = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val a2_abtbTakenVec    = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
@@ -190,6 +192,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     new AbtbResult
   )) // no use, only for placeholder.
   s1_predMeta.bits.readIndex := a2_readIndex
+  s1_predMeta.bits.foldedPathHistForTrain := a2_foldedPathHist
   for (i <- 0 until NumAheadBtbPredictionEntries) {
     s1_predMeta.bits.abtbResult(i).valid :=
       io.abtbPrediction(i).valid && io.abtbPrediction(i).bits.attribute.isConditional
@@ -213,16 +216,18 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     a3_predRead  := a2_predRead
     a3_readIndex := a2_readIndex
     a3_posHitVec := a2_posHitVec
+    a3_foldedPathHist := a2_foldedPathHist
   }
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
-  private val t0_fire                = io.stageCtrl.t0_fire && io.enable
-  private val t0_trainMeta           = io.train.meta.utage
-  private val t0_trainData           = io.train
-  private val t0_trainBranch         = io.train.branches
-  private val t0_abtbResult          = t0_trainMeta.abtbResult
-  private val t0_trainRead           = VecInit(tables.map(_.train.t0_read))
-  private val t0_trainBranchTakenVec = t0_trainBranch.map(x => x.bits.taken)
+  private val t0_train = io.fastTrain.get.bits
+  private val t0_fire           = io.fastTrain.get.valid
+  private val t0_trainMeta      = t0_train.utageMeta
+  private val t0_abtbResult     = t0_trainMeta.abtbResult
+  private val t0_trainRead      = VecInit(tables.map(_.train.t0_read))
+  private val t0_foldedPathHistForTrain = t0_trainMeta.foldedPathHistForTrain
+  private val t0_trainStartPc           = t0_train.startPc
+  private val finalPrediction           = t0_train.finalPrediction
 
   private val t0_hasHitMisPredVec  = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val t0_missHitMisPredVec = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
@@ -232,23 +237,21 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   // Rationale: MicroTage is a correction to ABTB results. ABTB is MicroTage's base table.
   // Important constraint: Do not predict branches not provided by ABTB to avoid over-generalization.
   for (i <- 0 until NumAheadBtbPredictionEntries) {
-    val hitMisPredVec = t0_trainBranch.map(x =>
-      x.valid && t0_abtbResult(i).valid && t0_abtbResult(i).hit &&
-        (x.bits.cfiPosition === t0_abtbResult(i).cfiPosition) && (x.bits.taken =/= t0_abtbResult(i).predTaken)
+    t0_hasHitMisPredVec(i) := t0_abtbResult(i).valid && t0_abtbResult(i).hit && (
+      (finalPrediction.attribute.isConditional && (finalPrediction.cfiPosition === t0_abtbResult(i).cfiPosition) && (t0_abtbResult(i).predTaken =/= finalPrediction.taken)) ||
+      ((finalPrediction.cfiPosition > t0_abtbResult(i).cfiPosition) && t0_abtbResult(i).predTaken)
     )
-    t0_hasHitMisPredVec(i) := hitMisPredVec.reduce(_ || _)
-    val missHitMisPredVec = t0_trainBranch.map(x =>
-      x.valid && t0_abtbResult(i).valid && !t0_abtbResult(i).hit &&
-        (x.bits.cfiPosition === t0_abtbResult(i).cfiPosition) && (x.bits.taken =/= t0_abtbResult(i).baseTaken)
+
+    t0_missHitMisPredVec(i) := t0_abtbResult(i).valid && !t0_abtbResult(i).hit && (
+      (finalPrediction.attribute.isConditional && (finalPrediction.cfiPosition === t0_abtbResult(i).cfiPosition) && (t0_abtbResult(i).baseTaken =/= finalPrediction.taken)) ||
+      ((finalPrediction.cfiPosition > t0_abtbResult(i).cfiPosition) && t0_abtbResult(i).baseTaken)
     )
-    t0_missHitMisPredVec(i) := missHitMisPredVec.reduce(_ || _)
-    val trainHasAbtbBranch = t0_trainBranch.map(x =>
-      x.valid && t0_abtbResult(i).valid && (x.bits.cfiPosition === t0_abtbResult(i).cfiPosition)
-    )
-    t0_trainResult(i).valid            := trainHasAbtbBranch.reduce(_ || _)
+    val trainHasAbtbBranch = t0_abtbResult(i).valid && (finalPrediction.cfiPosition >= t0_abtbResult(i).cfiPosition)
+
+    t0_trainResult(i).valid            := trainHasAbtbBranch
     t0_trainResult(i).hit              := t0_abtbResult(i).hit
     t0_trainResult(i).baseTaken        := t0_abtbResult(i).baseTaken
-    t0_trainResult(i).actualTaken      := Mux1H(trainHasAbtbBranch, t0_trainBranchTakenVec)
+    t0_trainResult(i).actualTaken      := (finalPrediction.cfiPosition === t0_abtbResult(i).cfiPosition) && finalPrediction.taken
     t0_trainResult(i).predTaken        := t0_abtbResult(i).predTaken
     t0_trainResult(i).baseIsStrongBias := t0_abtbResult(i).baseIsStrongBias
     t0_trainResult(i).cfiPosition      := t0_abtbResult(i).cfiPosition
@@ -276,7 +279,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val t0_trainIdx = t0_trainMeta.readIndex
 
   private val t1_fire                   = RegNext(t0_fire, false.B)
-  private val t1_foldedPathHistForTrain = RegEnable(io.foldedPathHistForTrain, t0_fire)
+  private val t1_foldedPathHistForTrain = RegEnable(t0_foldedPathHistForTrain, t0_fire)
   private val t1_trainRead              = RegEnable(t0_trainRead, t0_fire)
   private val t1_trainResult            = RegEnable(t0_trainResult, t0_fire)
   private val t1_misPredProviderOH      = RegEnable(t0_misPredProviderOH, t0_fire)
@@ -292,7 +295,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     Mux(t1_misPredProviderOH === 0.U, 0.U, t1_misPredProviderOH | (t1_misPredProviderOH - 1.U))
   private val t1_allocCandidateMask = ~(t1_lowerFillMask | t1_keepUseMask.asUInt)
   private val t1_normalAllocMask    = PriorityEncoderOH(t1_allocCandidateMask)
-  private val t1_trainStartPc       = RegEnable(t0_trainData.startPc, t0_fire)
+  private val t1_trainStartPc       = RegEnable(t0_trainStartPc, t0_fire)
 
   for (i <- 0 until NumTables) {
     tables(i).train.t0_trainIndex.valid := t0_fire

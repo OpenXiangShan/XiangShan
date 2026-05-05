@@ -49,7 +49,7 @@ class BypassShadowBuffer(
     val numWay:   Int,
     val tableId:  Int,
     val numBanks: Int = 4,
-    val numEntry: Int = 16
+    val numEntry: Int = 8
 )(implicit p: Parameters) extends MicroTageModule with HasCircularQueuePtrHelper with Helpers {
   class BypassBufferIO extends MicroTageBundle {
     class Req extends MicroTageBundle {

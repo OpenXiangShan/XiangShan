@@ -21,6 +21,7 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.SaturateCounterFactory
+import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 object TakenCounter extends SaturateCounterFactory {
   def width(implicit p: Parameters): Int =
@@ -42,6 +43,9 @@ class MicroTagePrediction(implicit p: Parameters) extends MicroTageBundle {
 class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
   val readIndex:  Vec[UInt]       = Vec(NumTables, UInt(log2Ceil(MaxNumSets).W))
   val abtbResult: Vec[AbtbResult] = Vec(NumAheadBtbPredictionEntries, new AbtbResult)
+  // Separate backup for MicroTage history to help with timing.
+  // We'll evaluate redundancy after the timing issue is resolved.
+  val foldedPathHistForTrain: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
 }
 
 class MicroTageDebug(implicit p: Parameters) extends MicroTageBundle {
