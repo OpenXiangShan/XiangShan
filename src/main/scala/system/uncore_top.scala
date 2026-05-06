@@ -1169,9 +1169,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val dmintGlobalNoLocal = dmintGlobal & ~localMask
     val hartResetReqNoLocal = hartResetReqLocal & ~localMask
     val hartIsInResetNoLocal = Mux(isselfid, 0.U, hartIsInResetExternal)
-    u_dm_w2axi.io.dmint := dmintGlobalNoLocal
-    u_dm_w2axi.io.hartResetReq := hartResetReqNoLocal
-
+   
     u_dm_w2axi.io.dmint := dmintGlobalNoLocal
     u_dm_w2axi.io.hartResetReq := hartResetReqNoLocal
     u_dm_w2axi.io.hartIsInReset := hartIsInResetNoLocal
