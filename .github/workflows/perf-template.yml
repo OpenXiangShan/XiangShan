@@ -7,11 +7,6 @@ on:
         description: Branch or commit to run performance test on
         required: true
         type: string
-      recompile:
-        description: Recompile the emu
-        required: false
-        type: string
-        default: false
       emulator:
         description: emulator to use
         required: false
@@ -205,7 +200,7 @@ jobs:
 
       - name: Build EMU with DRAMsim3
         run: |
-          if [ ! -e "$SPEC_DIR/emu" ] || [ "${{ inputs.recompile }}" = "true" ]; then
+          if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
             python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
               --config "${{ inputs.xs_config }}" \
               --dramsim3 /nfs/home/share/ci-workloads/DRAMsim3 --with-dramsim3 \
@@ -215,7 +210,7 @@ jobs:
               --emulator ${{ inputs.emulator }} \
               $CST_COMPILE_OPT
             mkdir -p $SPEC_DIR
-            cp $GITHUB_WORKSPACE/build/emu $SPEC_DIR/emu
+            cp $GITHUB_WORKSPACE/build/emu "$SPEC_DIR/emu-${{ inputs.emulator }}"
           fi
           if [ ! -e "$SPEC_DIR/riscv64-nemu-interpreter-so" ]; then
             cp $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so $SPEC_DIR/riscv64-nemu-interpreter-so
@@ -225,7 +220,7 @@ jobs:
         run: |
           cd $SCRIPTS_HOME/perf_trigger
           python3 main.py --gcpt-path $CKPT_HOME --json-path $CKPT_JSON_PATH \
-            --emu-path $SPEC_DIR/emu --result-path $SPEC_DIR \
+            --emu-path "$SPEC_DIR/emu-${{ inputs.emulator }}" --result-path $SPEC_DIR \
             --threads $([ "${{ inputs.emulator }}" = "gsim" ] && echo 1 || echo 8) \
             --benchmarks "${{ inputs.benchmarks }}" \
             --server-list "$SERVER_LIST" \
