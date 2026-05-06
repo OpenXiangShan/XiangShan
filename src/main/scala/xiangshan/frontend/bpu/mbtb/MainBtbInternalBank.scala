@@ -122,6 +122,7 @@ class MainBtbInternalBank(
     new MainBtbEntrySramWriteReq,
     numEntries = WriteBufferSize,
     numPorts = NumWay,
+    hasCompareBits = true,
     nameSuffix = s"mbtbEntryAlign${alignIdx}_Bank${bankIdx}"
   ))
 
