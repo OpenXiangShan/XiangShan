@@ -355,70 +355,75 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
     // val cpuRouteResets = cpuLMs.map(lm => ResetUtils.stageResetOut(lm.module, reset))
 
     // buffer:=cpu(i), for each cpu, this is bundle, and to xbar for timing.
-    val cpu0ToCx0RouteResets = cpu0ToCx0Bufs.zipWithIndex.map { case (buf, cpuIdx) =>
-      buf.sinkReset(reset)
-    }
-    val cx0RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(0).module, ResetUtils.mergeResets(cpu0ToCx0RouteResets))
+    val cpu0ToCx0RouteReset = cpu0ToCx0Bufs(0).sinkReset(reset)
+    cpu0ToCx0Bufs.drop(1).foreach(_.module.reset := reset)
+    val cx0RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(0).module, cpu0ToCx0RouteReset)
 
     val cpu2ToCx1RouteReset = cpu2ToCx1Buf.sinkReset(reset)
     val cx0ToCx1RouteReset = cx0ToCx1Buf.sinkReset(cx0RouteReset)
     val cx1RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(1).module, ResetUtils.mergeResets(Seq(cpu2ToCx1RouteReset, cx0ToCx1RouteReset)))
+    // Retain: local CPU ingress and upstream staged ingress are two real fan-in reset sources.
 
     val cpu3ToCx2RouteReset = cpu3ToCx2Buf.sinkReset(reset)
     val cx1ToCx2RouteReset = cx1ToCx2Buf.sinkReset(cx1RouteReset)
     val cx2RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(2).module, ResetUtils.mergeResets(Seq(cpu3ToCx2RouteReset, cx1ToCx2RouteReset)))
+    // Retain: local CPU ingress and upstream staged ingress are two real fan-in reset sources.
 
-    val cpu4ToCx3RouteResets = cpu4ToCx3Bufs.zip(Seq(4, 5)).map { case (buf, cpuIdx) =>
-      buf.sinkReset(reset)
-    }
-    val cx3RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(3).module, ResetUtils.mergeResets(cpu4ToCx3RouteResets))
+    val cpu4ToCx3RouteReset = cpu4ToCx3Bufs.head.sinkReset(reset)
+    cpu4ToCx3Bufs.tail.foreach(_.module.reset := reset)
+    val cx3RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(3).module, cpu4ToCx3RouteReset)
 
-    val cpu7ToCx5RouteResets = cpu7ToCx5Bufs.zip(Seq(7, 8)).map { case (buf, cpuIdx) =>
-      buf.sinkReset(reset)
-    }
-    val cx5RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(5).module, ResetUtils.mergeResets(cpu7ToCx5RouteResets))
+    val cpu7ToCx5RouteReset = cpu7ToCx5Bufs.head.sinkReset(reset)
+    cpu7ToCx5Bufs.tail.foreach(_.module.reset := reset)
+    val cx5RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(5).module, cpu7ToCx5RouteReset)
 
-    val cpu10ToCx7RouteResets = cpu10ToCx7Bufs.zip(Seq(10, 11)).map { case (buf, cpuIdx) =>
-      buf.sinkReset(reset)
-    }
-    val cx7RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(7).module, ResetUtils.mergeResets(cpu10ToCx7RouteResets))
+    val cpu10ToCx7RouteReset = cpu10ToCx7Bufs.head.sinkReset(reset)
+    cpu10ToCx7Bufs.tail.foreach(_.module.reset := reset)
+    val cx7RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(7).module, cpu10ToCx7RouteReset)
 
-    val cpu13ToCx9RouteResets = cpu13ToCx9Bufs.zip(Seq(13, 14)).map { case (buf, cpuIdx) =>
-      buf.sinkReset(reset)
-    }
-    val cx9RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(9).module, ResetUtils.mergeResets(cpu13ToCx9RouteResets))
+    val cpu13ToCx9RouteReset = cpu13ToCx9Bufs.head.sinkReset(reset)
+    cpu13ToCx9Bufs.tail.foreach(_.module.reset := reset)
+    val cx9RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(9).module, cpu13ToCx9RouteReset)
 
     val cx3ToCx4RouteReset = cx3ToCx4Buf.sinkReset(cx3RouteReset)
     val cpu6ToCx4RouteReset = cpu6ToCx4Buf.sinkReset(reset)
     val cx4RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(4).module, ResetUtils.mergeResets(Seq(cx3ToCx4RouteReset, cpu6ToCx4RouteReset)))
+    // Retain: local CPU ingress and upstream staged ingress are two real fan-in reset sources.
 
     val cx5ToCx6RouteReset = cx5ToCx6Buf.sinkReset(cx5RouteReset)
     val cpu9ToCx6RouteReset = cpu9ToCx6Buf.sinkReset(reset)
     val cx6RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(6).module, ResetUtils.mergeResets(Seq(cx5ToCx6RouteReset, cpu9ToCx6RouteReset)))
+    // Retain: local CPU ingress and upstream staged ingress are two real fan-in reset sources.
 
     val cx7ToCx8RouteReset = cx7ToCx8Buf.sinkReset(cx7RouteReset)
     val cpu12ToCx8RouteReset = cpu12ToCx8Buf.sinkReset(reset)
     val cx8RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(8).module, ResetUtils.mergeResets(Seq(cx7ToCx8RouteReset, cpu12ToCx8RouteReset)))
+    // Retain: local CPU ingress and upstream staged ingress are two real fan-in reset sources.
 
     val cx9ToCx10RouteReset = cx9ToCx10Buf.sinkReset(cx9RouteReset)
     val cpu15ToCx10RouteReset = cpu15ToCx10Buf.sinkReset(reset)
     val cx10RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(10).module, ResetUtils.mergeResets(Seq(cx9ToCx10RouteReset, cpu15ToCx10RouteReset)))
+    // Retain: local CPU ingress and upstream staged ingress are two real fan-in reset sources.
 
     val cx10ToL1x0RouteReset = cx10ToL1x0Buf.sinkReset(cx10RouteReset)
     val cx8ToL1x0RouteReset = cxToL1Bufs(0).sinkReset(cx8RouteReset)
     val l1x0RouteReset = ResetUtils.stageResetOut(l1xbar2to1LMs(0).module, ResetUtils.mergeResets(Seq(cx10ToL1x0RouteReset, cx8ToL1x0RouteReset)))
+    // Retain: this is a subtree fan-in barrier, so both child branches must release before L1x0.
 
     val l1x0ToL1x1RouteReset = l1x0ToL1x1Buf.sinkReset(l1x0RouteReset)
     val cx6ToL1x1RouteReset = cxToL1Bufs(1).sinkReset(cx6RouteReset)
     val l1x1RouteReset = ResetUtils.stageResetOut(l1xbar2to1LMs(1).module, ResetUtils.mergeResets(Seq(l1x0ToL1x1RouteReset, cx6ToL1x1RouteReset)))
+    // Retain: this is a subtree fan-in barrier, so both child branches must release before L1x1.
 
     val l1x1ToL1x2RouteReset = l1x1ToL1x2Buf.sinkReset(l1x1RouteReset)
     val cx4ToL1x2RouteReset = cxToL1Bufs(2).sinkReset(cx4RouteReset)
     val l1x2RouteReset = ResetUtils.stageResetOut(l1xbar2to1LMs(2).module, ResetUtils.mergeResets(Seq(l1x1ToL1x2RouteReset, cx4ToL1x2RouteReset)))
+    // Retain: this is a subtree fan-in barrier, so both child branches must release before L1x2.
 
     val l1x2ToL1x3RouteReset = l1x2ToL1x3Buf.sinkReset(l1x2RouteReset)
     val cx2ToL1x3RouteReset = cxToL1Bufs(3).sinkReset(cx2RouteReset)
     val l1x3RouteReset = ResetUtils.stageResetOut(l1xbar2to1LMs(3).module, ResetUtils.mergeResets(Seq(l1x2ToL1x3RouteReset, cx2ToL1x3RouteReset)))
+    // Retain: this is a subtree fan-in barrier, so both child branches must release before L1x3.
 
     val l1x3ToCpumRouteReset = l1x3ToCpumBuf.sinkReset(l1x3RouteReset)
     cpumResetOut := ResetUtils.stageResetOut(cpum_LM.module, l1x3ToCpumRouteReset)
@@ -869,13 +874,17 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     // cross-die imsic
     val m_msi2noc = IO(new VerilogAXI4Record(crsdie_msi_sN.in.head._2.bundle))
 
-    hni_s_xbarLM.module.reset := reset
-    u_hnis_DataBridge.module.reset := reset
-    hniBridgeToPcieBuf.module.reset := reset
-    pcie_xbar1to2LM.module.reset := reset
+    Seq(
+      hni_s_xbarLM.module,
+      u_hnis_DataBridge.module,
+      hniBridgeToPcieBuf.module,
+      pcie_xbar1to2LM.module,
+      pcieToPbusBuf.module
+    ).foreach { mod =>
+      mod.reset := reset
+    }
     val cpuBridgeRouteReset = ResetUtils.stageResetOut(u_cpus_DataBridge.module, Cbus.module.cpumResetOut)
-    pcieToPbusBuf.module.reset := reset
-    val pbusRouteReset = ResetUtils.stageResetOut(pbus_xbarLM.module, ResetUtils.mergeResets(Seq(cpuBridgeRouteReset, reset)))
+    val pbusRouteReset = ResetUtils.stageResetOut(pbus_xbarLM.module, cpuBridgeRouteReset)
     u_crsdie_DataBridge.module.reset := pbusRouteReset
 
     val l1x3RouteReset = ResetUtils.stageResetOut(l1xbar1to2LMs(3).module, pbusRouteReset)
