@@ -1983,10 +1983,12 @@ class BackendModel:
             pc = int(entry.pc)
             ftq_flag = int(entry.ftq_flag)
             ftq_value = int(entry.ftq_value)
-            if pc == range_end or pc == range_end + 2 or pc == range_end + 4:
+            if (
+                (pc == range_end or pc == range_end + 2 or pc == range_end + 4)
+                and ftq_flag == range_ftq_flag
+                and ftq_value == range_ftq_value
+            ):
                 range_end = pc
-                range_ftq_flag = ftq_flag
-                range_ftq_value = ftq_value
                 continue
             pc_range = f"0x{range_start:x}" if range_start == range_end else f"0x{range_start:x}-0x{range_end:x}"
             ranges.append(f"{pc_range}({range_ftq_flag},{range_ftq_value})")
