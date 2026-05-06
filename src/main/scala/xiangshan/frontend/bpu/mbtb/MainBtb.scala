@@ -145,11 +145,9 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val t1_fire  = RegNext(t0_fire, init = false.B) && io.enable
   private val t1_train = RegEnable(t0_train, t0_fire)
 
-  private val t1_startPc = t1_train.startPc
-  private val t1_rotator = VecRotate(getAlignBankIndex(t1_startPc))
-  private val t1_startPcVec = t1_rotator.rotate(
-    VecInit.tabulate(NumAlignBanks)(i => getAlignedPc(t1_startPc + (i << FetchBlockAlignWidth).U))
-  )
+  private val t1_rotator    = RegEnable(t0_rotator, t0_fire)
+  private val t1_startPcVec = RegEnable(t0_startPcVec, t0_fire)
+
   private val t1_meta           = t1_train.meta.mbtb
   private val t1_mispredictInfo = t1_train.mispredictBranch
 
