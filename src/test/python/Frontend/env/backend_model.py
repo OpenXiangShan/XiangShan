@@ -300,7 +300,7 @@ class BackendModel:
             return False
         expected_ftq = self._current_expected_recovery_ftq()
         if expected_ftq is None:
-            return True
+            return False
         episode = self._active_wrong_path_episode()
         if episode is not None and episode["redirect_driven_cycle"] is not None:
             if int(entry.cycle) <= int(episode["redirect_driven_cycle"]):
