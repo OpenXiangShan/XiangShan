@@ -92,16 +92,20 @@ object huancun extends ChiselModule {
 }
 
 object coupledL2 extends ChiselModule {
+  def millSourcePath = pwd / "coupledL2" / "CoupledL2"
+
   def moduleDeps = Seq(`rocket-chip`, utility, huancun)
 }
 
 object openNCB extends ChiselModule {
-  def millSourcePath = pwd / "openLLC" / "openNCB"
+  def millSourcePath = pwd / "coupledL2" / "OpenNCB"
 
   def moduleDeps = Seq(`rocket-chip`)
 }
 
 object openLLC extends ChiselModule {
+  def millSourcePath = pwd / "coupledL2" / "OpenLLC"
+
   def moduleDeps = Seq(`rocket-chip`, utility, coupledL2, openNCB)
 }
 
