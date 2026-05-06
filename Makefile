@@ -17,6 +17,10 @@
 
 BUILD_DIR = ./build
 RTL_DIR = $(BUILD_DIR)/rtl
+PYTHON ?= python3
+UNCORE_WRAPPER_CHECK ?= ./scripts/check_uncore_wrapper_interface.py
+UNCORE_WRAPPER_DOC ?= ./doc/uncore_dummy_wrapper.sv
+UNCORE_WRAPPER_RTL ?= $(RTL_DIR)/uncore_uncoreTop.sv
 
 # import docker support
 include scripts/Makefile.docker
@@ -274,6 +278,9 @@ endif
 
 verilog: $(call docker-deps,$(TOP_V))
 
+check-uncore-wrapper-interface:
+	$(PYTHON) $(UNCORE_WRAPPER_CHECK) $(UNCORE_WRAPPER_DOC) $(UNCORE_WRAPPER_RTL)
+
 $(SIM_TOP_V): $(SCALA_FILE) $(TEST_FILE)
 	mkdir -p $(@D)
 	@echo -e "\n[mill] Generating Verilog files..." > $(TIMELOG)
@@ -371,4 +378,4 @@ include Makefile.test
 
 include src/main/scala/device/standalone/standalone_device.mk
 
-.PHONY: FORCE verilog sim-verilog emu clean help init init-force bump bsp $(REF_SO)
+.PHONY: FORCE verilog sim-verilog emu clean help init init-force bump bsp check-uncore-wrapper-interface $(REF_SO)
