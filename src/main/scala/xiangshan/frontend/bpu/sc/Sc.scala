@@ -549,11 +549,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
   dontTouch(t1_writePathEntryVec)
 
-  private val t1_writePathWayMaskVec =
-    t1_oldPathEntries.zip(t1_writePathEntryVec).map { case (oldEntries, newEntries) =>
-      updateWayMask(oldEntries, newEntries, t1_writeValidVec, t1_branchesWayIdxVec)
-    }
-
   // calculate new global table entries
   private val t1_writeGlobalEntryVec = WireInit(
     VecInit.fill(NumGlobalTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
@@ -570,11 +565,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       )
   }
 
-  private val t1_writeGlobalEntryWayMaskVec =
-    t1_oldGlobalEntries.zip(t1_writeGlobalEntryVec).map { case (oldEntries, newEntries) =>
-      updateWayMask(oldEntries, newEntries, t1_writeValidVec, t1_branchesWayIdxVec)
-    }
-
   private val t1_writeBWEntryVec = WireInit(
     VecInit.fill(NumBWTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
   )
@@ -590,11 +580,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       )
   }
 
-  private val t1_writeBWEntryWayMaskVec =
-    t1_oldBWEntries.zip(t1_writeBWEntryVec).map { case (oldEntries, newEntries) =>
-      updateWayMask(oldEntries, newEntries, t1_writeValidVec, t1_branchesWayIdxVec)
-    }
-
   private val t1_writeImliEntryVec = updateEntry(
     t1_oldImliEntries,
     t1_writeValidVec,
@@ -603,19 +588,9 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     t1_branchesScIdxVec,
     t1_meta
   )
-  private val t1_writeImliWayMask =
-    updateWayMask(t1_oldImliEntries, t1_writeImliEntryVec, t1_writeValidVec, t1_branchesWayIdxVec)
 
   // calculate bias table new entries and wayMask
   private val t1_writeBiasEntryVec = WireInit(VecInit.fill(BiasTableNumWays)(0.U.asTypeOf(new ScEntry())))
-  private val t1_writeBiasWayMask  = WireInit(VecInit.fill(BiasTableNumWays)(false.B))
-  t1_branchesWayIdxVec.zip(t1_writeValidVec).zip(t1_branchesScIdxVec).foreach {
-    case ((wayIdx, writeValid), branchIdx) =>
-      val biasWayIdx = Cat(wayIdx, t1_oldBiasLowBits(branchIdx))
-      when(writeValid && t1_oldBiasEntries(biasWayIdx).ctr =/= t1_writeBiasEntryVec(biasWayIdx).ctr) {
-        t1_writeBiasWayMask(biasWayIdx) := true.B
-      }
-  }
 
   // For each reslove branch, record its update direction, whether it has been updated, and which way it has been updated to
   private val writeBiasWayMask =
@@ -651,24 +626,44 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    *  train pipeline stage 2
    */
-  private val t2_writeValid                 = RegNext(t1_writeValid, false.B)
-  private val t2_bankMask                   = RegEnable(t1_bankMask, t1_fire)
-  private val t2_pathSetIdx                 = RegEnable(t1_pathSetIdx, t1_fire)
-  private val t2_globalSetIdx               = RegEnable(t1_globalSetIdx, t1_fire)
-  private val t2_bwSetIdx                   = RegEnable(t1_bwSetIdx, t1_fire)
-  private val t2_imliSetIdx                 = RegEnable(t1_imliSetIdx, t1_fire)
-  private val t2_biasSetIdx                 = RegEnable(t1_biasSetIdx, t1_fire)
-  private val t2_commonHR                   = RegEnable(t1_commonHR, t1_fire)
-  private val t2_writePathWayMaskVec        = RegEnable(VecInit(t1_writePathWayMaskVec), t1_fire)
-  private val t2_writePathEntryVec          = RegEnable(t1_writePathEntryVec, t1_fire)
-  private val t2_writeGlobalEntryWayMaskVec = RegEnable(VecInit(t1_writeGlobalEntryWayMaskVec), t1_fire)
-  private val t2_writeGlobalEntryVec        = RegEnable(t1_writeGlobalEntryVec, t1_fire)
-  private val t2_writeBWEntryWayMaskVec     = RegEnable(VecInit(t1_writeBWEntryWayMaskVec), t1_fire)
-  private val t2_writeBWEntryVec            = RegEnable(t1_writeBWEntryVec, t1_fire)
-  private val t2_writeBiasWayMask           = RegEnable(t1_writeBiasWayMask, t1_fire)
-  private val t2_writeBiasEntryVec          = RegEnable(t1_writeBiasEntryVec, t1_fire)
-  private val t2_writeImliWayMask           = RegEnable(t1_writeImliWayMask, t1_fire)
-  private val t2_writeImliEntryVec          = RegEnable(t1_writeImliEntryVec, t1_fire)
+  private val t2_writeValid          = RegNext(t1_writeValid, false.B)
+  private val t2_bankMask            = RegEnable(t1_bankMask, t1_fire)
+  private val t2_pathSetIdx          = RegEnable(t1_pathSetIdx, t1_fire)
+  private val t2_globalSetIdx        = RegEnable(t1_globalSetIdx, t1_fire)
+  private val t2_bwSetIdx            = RegEnable(t1_bwSetIdx, t1_fire)
+  private val t2_imliSetIdx          = RegEnable(t1_imliSetIdx, t1_fire)
+  private val t2_biasSetIdx          = RegEnable(t1_biasSetIdx, t1_fire)
+  private val t2_commonHR            = RegEnable(t1_commonHR, t1_fire)
+  private val t2_oldPathEntries      = RegEnable(t1_oldPathEntries, t1_fire)
+  private val t2_oldGlobalEntries    = RegEnable(t1_oldGlobalEntries, t1_fire)
+  private val t2_oldBWEntries        = RegEnable(t1_oldBWEntries, t1_fire)
+  private val t2_oldImliEntries      = RegEnable(t1_oldImliEntries, t1_fire)
+  private val t2_oldBiasEntries      = RegEnable(t1_oldBiasEntries, t1_fire)
+  private val t2_writePathEntryVec   = RegEnable(t1_writePathEntryVec, t1_fire)
+  private val t2_writeGlobalEntryVec = RegEnable(t1_writeGlobalEntryVec, t1_fire)
+  private val t2_writeBWEntryVec     = RegEnable(t1_writeBWEntryVec, t1_fire)
+  private val t2_writeBiasEntryVec   = RegEnable(t1_writeBiasEntryVec, t1_fire)
+  private val t2_writeImliEntryVec   = RegEnable(t1_writeImliEntryVec, t1_fire)
+  private val t2_writePathWayMaskVec =
+    t2_oldPathEntries.zip(t2_writePathEntryVec).map { case (oldEntries, newEntries) =>
+      updateWayMask(oldEntries, newEntries)
+    }
+  private val t2_writeGlobalEntryWayMaskVec =
+    t2_oldGlobalEntries.zip(t2_writeGlobalEntryVec).map { case (oldEntries, newEntries) =>
+      updateWayMask(oldEntries, newEntries)
+    }
+  private val t2_writeBWEntryWayMaskVec =
+    t2_oldBWEntries.zip(t2_writeBWEntryVec).map { case (oldEntries, newEntries) =>
+      updateWayMask(oldEntries, newEntries)
+    }
+  private val t2_writeBiasWayMask = WireInit(VecInit.fill(BiasTableNumWays)(false.B))
+  t2_oldBiasEntries.zip(t2_writeBiasEntryVec).zip(t2_writeBiasWayMask).foreach {
+    case ((oldEntry, newEntry), wayMask) =>
+      when(oldEntry.ctr =/= newEntry.ctr) {
+        wayMask := true.B
+      }
+  }
+  private val t2_writeImliWayMask = updateWayMask(t2_oldImliEntries, t2_writeImliEntryVec)
 
   // new entries write back to tables
   pathTable.zip(t2_pathSetIdx).zip(t2_writePathEntryVec).zip(t2_writePathWayMaskVec).foreach {
@@ -767,13 +762,13 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
   // foreach write way
   for (i <- 0 until NumWays) {
-    val pChange = t1_oldPathEntries.zip(t1_writePathEntryVec).zip(t1_writePathWayMaskVec).map {
-      case ((oldEntries, writeEntries), wayMaskVec) =>
-        (oldEntries(i).ctr =/= writeEntries(i).ctr) && wayMaskVec(i)
+    val pChange = t1_oldPathEntries.zip(t1_writePathEntryVec).map {
+      case (oldEntries, writeEntries) =>
+        oldEntries(i).ctr =/= writeEntries(i).ctr
     }.reduce(_ || _) && PathEnable.B
-    val gChange = t1_oldGlobalEntries.zip(t1_writeGlobalEntryVec).zip(t1_writeGlobalEntryWayMaskVec).map {
-      case ((oldEntries, writeEntries), wayMaskVec) =>
-        (oldEntries(i).ctr =/= writeEntries(i).ctr) && wayMaskVec(i)
+    val gChange = t1_oldGlobalEntries.zip(t1_writeGlobalEntryVec).map {
+      case (oldEntries, writeEntries) =>
+        oldEntries(i).ctr =/= writeEntries(i).ctr
     }.reduce(_ || _) && GlobalEnable.B
     // val bChange =
     //   (t1_oldBiasEntries(i).ctr.value =/= t1_writeBiasEntryVec(i).ctr.value) && t1_writeBiasWayMask(i) && BiasEnable.B

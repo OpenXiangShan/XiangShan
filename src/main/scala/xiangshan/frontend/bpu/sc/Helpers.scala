@@ -96,20 +96,18 @@ trait Helpers extends HasScParameters with PhrHelper {
   }
 
   def updateWayMask(
-      oldEntries:    Vec[ScEntry],
-      newEntries:    Vec[ScEntry],
-      writeValidVec: Vec[Bool],
-      wayIdxVec:     Vec[UInt]
+      oldEntries: Vec[ScEntry],
+      newEntries: Vec[ScEntry]
   ): Vec[Bool] = {
     require(
-      writeValidVec.length == wayIdxVec.length,
-      "Length of writeValidVec and wayIdxVec should be the same"
+      oldEntries.length == newEntries.length && newEntries.length == NumWays,
+      "Length of oldEntries and newEntries should be same as NumWays"
     )
     val updateWayMask = WireInit(VecInit.fill(NumWays)(false.B))
-    writeValidVec.zip(wayIdxVec).foreach {
-      case (writeValid, wayIdx) =>
-        when(writeValid && (oldEntries(wayIdx).ctr.value =/= newEntries(wayIdx).ctr.value)) {
-          updateWayMask(wayIdx) := true.B
+    oldEntries.zip(newEntries).zip(updateWayMask).foreach {
+      case ((oldEntry, newEntry), wayMask) =>
+        when(oldEntry.ctr.value =/= newEntry.ctr.value) {
+          wayMask := true.B
         }
     }
     updateWayMask
