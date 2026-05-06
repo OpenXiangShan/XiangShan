@@ -39,15 +39,22 @@ import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
  */
 class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageParameters with Helpers {
   class MicroTageIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
-    val foldedPathHist:         PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
-    val prediction:             MicroTagePrediction   = Output(new MicroTagePrediction)
-    val meta:                   Valid[MicroTageMeta]  = Output(Valid(new MicroTageMeta))
+    val prediction: MicroTagePrediction  = Output(new MicroTagePrediction)
+    val meta:       Valid[MicroTageMeta] = Output(Valid(new MicroTageMeta))
     // Send ABTB position early, pipeline registers inside the module.
     // Consideration: improve routing and enhance driving capablility.
     val abtbPosVec:     Vec[UInt]                  = Input(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
     val abtbPrediction: Vec[Valid[AheadBtbResult]] = Input(Vec(NumAheadBtbPredictionEntries, Valid(new AheadBtbResult)))
     val overrideValid:  Bool                       = Input(Bool())
     val redirectValid:  Bool                       = Input(Bool())
+
+    val normalPathHist:   PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val redirectPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+    val overridePathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
+
+    val normalStartPc:   PrunedAddr = Input(new PrunedAddr(VAddrBits))
+    val redirectStartPc: PrunedAddr = Input(new PrunedAddr(VAddrBits))
+    val overrideStartPc: PrunedAddr = Input(new PrunedAddr(VAddrBits))
   }
   val io: MicroTageIO = IO(new MicroTageIO)
   io.trainReady := true.B
@@ -55,15 +62,19 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   // Ahead pipeline implementation. Advantage: get data one cycle earlier.
   // Disadvantage: multi-position competition for the same entry.
   // Problem scenario: the same entry accessed by different branches in different cycles.
-  private val a0_fire           = io.enable && io.stageCtrl.s0_fire
-  private val a1_fire           = a0_fire
-  private val a2_fire           = io.stageCtrl.s1_fire
-  private val a0_startPc        = io.startPc
-  private val a0_foldedPathHist = io.foldedPathHist
-  private val a1_startPc        = io.startPc
-  private val a1_foldedPathHist = io.foldedPathHist
-
+  private val a0_fire       = io.enable && io.stageCtrl.s0_fire
+  private val a1_fire       = a0_fire
+  private val a2_fire       = io.stageCtrl.s1_fire
   private val overrideValid = io.overrideValid
+  private val redirectValid = io.redirectValid
+  private val a0_indexPc    = io.startPc
+  private val a0_indexFoldedPathHist = MuxCase(
+    io.normalPathHist,
+    Seq(
+      redirectValid -> io.redirectPathHist,
+      overrideValid -> io.overridePathHist
+    )
+  )
 
   /* *** submodules *** */
   private val tables = TableInfos.zipWithIndex.map {
@@ -81,7 +92,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val lowTickCounter  = RegInit(0.U((LowTickWidth + 1).W))
   private val highTickCounter = RegInit(0.U((HighTickWidth + 1).W))
   private val a0_readIndex = VecInit.tabulate(NumTables) {
-    i => computeHashIdx(a0_startPc, a0_foldedPathHist, TableInfos, i)
+    i => computeHashIdx(a0_indexPc, a0_indexFoldedPathHist, TableInfos, i)
   }
   // Predict
   tables.zipWithIndex.foreach {
@@ -100,7 +111,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val a1_readIndex   = RegEnable(a0_readIndex, a0_fire)
   private val a1_predRead    = Wire(Vec(NumTables, Vec(NumWays, new MicroTageTablePred)))
   for (i <- 0 until NumTables) {
-    val predTag = computeHashTag(a1_startPc, a1_foldedPathHist, TableInfos, i)
+    val predTag = computeHashTag(io.normalStartPc, io.normalPathHist, TableInfos, i)
     for (j <- 0 until NumWays) {
       a1_predRead(i)(j).taken := a1_predEntries(i)(j).takenCtr.isPositive
       a1_predRead(i)(j).valid := a1_predEntries(i)(j).valid
@@ -111,6 +122,29 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
       a1_predRead(i)(j).posHit      := false.B
       a1_predRead(i)(j).takenCtr    := a1_predEntries(i)(j).takenCtr
     }
+  }
+
+  private val a1_reverseOHVec = Wire(Vec(NumAheadBtbPredictionEntries, Vec(NumTables, Bool())))
+  private val a1_abtbTakenVec = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
+  private val a1_abtbHitVec   = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
+  for (i <- 0 until NumAheadBtbPredictionEntries) {
+    val tableHitVec   = Wire(Vec(NumTables, Bool()))
+    val tableTakenVec = Wire(Vec(NumTables, Bool()))
+    for (j <- 0 until NumTables) {
+      val predTag   = computeHashTag(io.normalStartPc, io.normalPathHist, TableInfos, j)
+      val wayHitVec = Wire(Vec(NumWays, Bool()))
+      for (k <- 0 until NumWays) {
+        val tagHit = a1_predEntries(j)(k).tag === predTag
+        val posHit = a1_predEntries(j)(k).valid && a1_predEntries(j)(k).cfiPosition === io.abtbPosVec(i)
+        wayHitVec(k) := tagHit && posHit
+      }
+      tableHitVec(j) := wayHitVec.asUInt.orR
+      val priorityWayHitVec = PriorityEncoderOH(wayHitVec)
+      tableTakenVec(j) := Mux1H(priorityWayHitVec, a1_predEntries(j).map(_.takenCtr.isPositive))
+    }
+    a1_reverseOHVec(i) := PriorityEncoderOH(tableHitVec.reverse)
+    a1_abtbHitVec(i)   := tableHitVec.asUInt.orR
+    a1_abtbTakenVec(i) := Mux1H(a1_reverseOHVec(i), tableTakenVec.reverse)
   }
 
   // Prioritize early position comparison at the cost of ABTB SRAM timing margin,
@@ -125,13 +159,13 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     }
   }
 
-  private val a3_readIndex     = RegInit(0.U.asTypeOf(a1_readIndex))
-  private val a3_predRead      = RegInit(0.U.asTypeOf(a1_predRead))
-  private val a3_posHitVec     = RegInit(0.U.asTypeOf(a1_posHitVec))
-  private val a3_foldedPathHist    = RegInit(0.U.asTypeOf(a1_foldedPathHist))
+  private val a3_readIndex = RegInit(0.U.asTypeOf(a1_readIndex))
+  private val a3_predRead  = RegInit(0.U.asTypeOf(a1_predRead))
+  private val a3_posHitVec = RegInit(0.U.asTypeOf(a1_posHitVec))
+  // private val a3_foldedPathHist = RegInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val overridePredRead = Wire(Vec(NumTables, Vec(NumWays, new MicroTageTablePred)))
   for (i <- 0 until NumTables) {
-    val predTag = computeHashTag(a1_startPc, a1_foldedPathHist, TableInfos, i)
+    val predTag = computeHashTag(io.overrideStartPc, io.overridePathHist, TableInfos, i)
     for (j <- 0 until NumWays) {
       overridePredRead(i)(j).taken       := a3_predRead(i)(j).taken
       overridePredRead(i)(j).valid       := a3_predRead(i)(j).valid
@@ -143,20 +177,54 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     }
   }
 
+  private val a3_reverseOHVec = Wire(Vec(NumAheadBtbPredictionEntries, Vec(NumTables, Bool())))
+  private val a3_abtbTakenVec = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
+  private val a3_abtbHitVec   = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
+  for (i <- 0 until NumAheadBtbPredictionEntries) {
+    val tableHitVec   = Wire(Vec(NumTables, Bool()))
+    val tableTakenVec = Wire(Vec(NumTables, Bool()))
+    for (j <- 0 until NumTables) {
+      val predTag   = computeHashTag(io.overrideStartPc, io.overridePathHist, TableInfos, j)
+      val wayHitVec = Wire(Vec(NumWays, Bool()))
+      for (k <- 0 until NumWays) {
+        val tagHit = a3_predRead(j)(k).tag === predTag
+        val posHit = a3_posHitVec(i)(j)(k)
+        wayHitVec(k) := tagHit && posHit
+      }
+      tableHitVec(j) := wayHitVec.asUInt.orR
+      val priorityWayHitVec = PriorityEncoderOH(wayHitVec)
+      tableTakenVec(j) := Mux1H(priorityWayHitVec, a3_predRead(j).map(_.taken))
+    }
+    a3_reverseOHVec(i) := PriorityEncoderOH(tableHitVec.reverse)
+    a3_abtbHitVec(i)   := tableHitVec.asUInt.orR
+    a3_abtbTakenVec(i) := Mux1H(a3_reverseOHVec(i), tableTakenVec.reverse)
+  }
+
   private val a2_readIndex = RegEnable(Mux(overrideValid, a3_readIndex, a1_readIndex), a1_fire)
   private val a2_predRead =
     RegEnable(Mux(overrideValid, overridePredRead, a1_predRead), 0.U.asTypeOf(a1_predRead), a1_fire)
   private val a2_posHitVec =
     RegEnable(Mux(overrideValid, a3_posHitVec, a1_posHitVec), 0.U.asTypeOf(a1_posHitVec), a1_fire)
   private val a2_foldedPathHist =
-    RegEnable(a1_foldedPathHist, 0.U.asTypeOf(a1_foldedPathHist), a1_fire)
+    RegEnable(Mux(overrideValid, io.overridePathHist, io.normalPathHist), a1_fire)
+  private val a2_reverseOHVec =
+    RegEnable(Mux(overrideValid, a3_reverseOHVec, a1_reverseOHVec), 0.U.asTypeOf(a1_reverseOHVec), a1_fire)
+  private val a2_abtbTakenVec =
+    RegEnable(Mux(overrideValid, a3_abtbTakenVec, a1_abtbTakenVec), 0.U.asTypeOf(a1_abtbTakenVec), a1_fire)
   private val a2_fromAbtbPos     = RegEnable(io.abtbPosVec, a1_fire)
-  private val a2_abtbHitVec      = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
-  private val a2_abtbTakenVec    = Wire(Vec(NumAheadBtbPredictionEntries, Bool()))
   private val a2_abtbUseTableId  = Wire(Vec(NumAheadBtbPredictionEntries, UInt(log2Ceil(NumTables).W)))
   private val a2_abtbUseWayId    = Wire(Vec(NumAheadBtbPredictionEntries, UInt(log2Ceil(NumWays).W)))
   private val a2_tableIdVec      = VecInit.tabulate(NumTables)(i => i.U)
   private val a2_abtbTakenCtrVec = Wire(Vec(NumAheadBtbPredictionEntries, TakenCounter()))
+
+  private val a2_abtbHitVec = RegInit(VecInit.fill(NumAheadBtbPredictionEntries)(false.B))
+  when(redirectValid) {
+    a2_abtbHitVec := 0.U.asTypeOf(Vec(NumAheadBtbPredictionEntries, Bool()))
+  }.elsewhen(overrideValid) {
+    a2_abtbHitVec := a3_abtbHitVec
+  }.elsewhen(a1_fire) {
+    a2_abtbHitVec := a1_abtbHitVec
+  }
 
   for (i <- 0 until NumAheadBtbPredictionEntries) {
     val tableHitVec         = Wire(Vec(NumTables, Bool()))
@@ -176,26 +244,29 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
       tableTakenCtrVec(j)    := Mux1H(priorityWayHitVec, a2_predRead(j).map(_.takenCtr))
       tableWayIdVec(j)       := PriorityEncoder(wayHitVec)
     }
-    a2_abtbHitVec(i) := tableHitVec.asUInt.orR
+    // a2_abtbHitVec(i) := tableHitVec.asUInt.orR
     // Find the hit result from the highest-priority table
-    val priorityTableHitVec = PriorityEncoderOH(tableHitVec.reverse)
-    a2_abtbTakenVec(i)    := Mux1H(priorityTableHitVec, tableTakenVec.reverse)
+    val priorityTableHitVec = a2_reverseOHVec(i)
+    // a2_abtbTakenVec(i)    := Mux1H(priorityTableHitVec, tableTakenVec.reverse)
     a2_abtbTakenCtrVec(i) := Mux1H(priorityTableHitVec, tableTakenCtrVec.reverse)
     a2_abtbUseTableId(i)  := Mux1H(priorityTableHitVec, a2_tableIdVec.reverse)
     a2_abtbUseWayId(i)    := Mux1H(priorityTableHitVec, tableWayIdVec.reverse)
   }
 
+  private val a2_notReady = RegNext(redirectValid, false.B)
   private val s1_predMeta = Wire(Valid(new MicroTageMeta))
   s1_predMeta.valid := a2_abtbHitVec.asUInt.orR
   s1_predMeta.bits.abtbResult := 0.U.asTypeOf(Vec(
     NumAheadBtbPredictionEntries,
     new AbtbResult
   )) // no use, only for placeholder.
-  s1_predMeta.bits.readIndex := a2_readIndex
+  s1_predMeta.bits.readIndex              := a2_readIndex
   s1_predMeta.bits.foldedPathHistForTrain := a2_foldedPathHist
   for (i <- 0 until NumAheadBtbPredictionEntries) {
+    // On the cycle following a redirect, MicroTage provides no prediction;
+    // therefore, this cycle is excluded from training.
     s1_predMeta.bits.abtbResult(i).valid :=
-      io.abtbPrediction(i).valid && io.abtbPrediction(i).bits.attribute.isConditional
+      io.abtbPrediction(i).valid && io.abtbPrediction(i).bits.attribute.isConditional && RegNext(!redirectValid)
     s1_predMeta.bits.abtbResult(i).baseTaken        := io.abtbPrediction(i).bits.taken
     s1_predMeta.bits.abtbResult(i).hit              := a2_abtbHitVec(i) && io.abtbPrediction(i).valid
     s1_predMeta.bits.abtbResult(i).predTaken        := a2_abtbTakenVec(i)
@@ -216,15 +287,14 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     a3_predRead  := a2_predRead
     a3_readIndex := a2_readIndex
     a3_posHitVec := a2_posHitVec
-    a3_foldedPathHist := a2_foldedPathHist
   }
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
-  private val t0_train = io.fastTrain.get.bits
-  private val t0_fire           = io.fastTrain.get.valid
-  private val t0_trainMeta      = t0_train.utageMeta
-  private val t0_abtbResult     = t0_trainMeta.abtbResult
-  private val t0_trainRead      = VecInit(tables.map(_.train.t0_read))
+  private val t0_train                  = io.fastTrain.get.bits
+  private val t0_trainMeta              = t0_train.utageMeta
+  private val t0_fire                   = io.fastTrain.get.valid
+  private val t0_abtbResult             = t0_trainMeta.abtbResult
+  private val t0_trainRead              = VecInit(tables.map(_.train.t0_read))
   private val t0_foldedPathHistForTrain = t0_trainMeta.foldedPathHistForTrain
   private val t0_trainStartPc           = t0_train.startPc
   private val finalPrediction           = t0_train.finalPrediction
@@ -238,20 +308,24 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   // Important constraint: Do not predict branches not provided by ABTB to avoid over-generalization.
   for (i <- 0 until NumAheadBtbPredictionEntries) {
     t0_hasHitMisPredVec(i) := t0_abtbResult(i).valid && t0_abtbResult(i).hit && (
-      (finalPrediction.attribute.isConditional && (finalPrediction.cfiPosition === t0_abtbResult(i).cfiPosition) && (t0_abtbResult(i).predTaken =/= finalPrediction.taken)) ||
-      ((finalPrediction.cfiPosition > t0_abtbResult(i).cfiPosition) && t0_abtbResult(i).predTaken)
+      (finalPrediction.attribute.isConditional && (finalPrediction.cfiPosition === t0_abtbResult(i).cfiPosition) &&
+        (t0_abtbResult(i).predTaken =/= finalPrediction.taken)) ||
+        ((finalPrediction.cfiPosition > t0_abtbResult(i).cfiPosition) && t0_abtbResult(i).predTaken)
     )
 
     t0_missHitMisPredVec(i) := t0_abtbResult(i).valid && !t0_abtbResult(i).hit && (
-      (finalPrediction.attribute.isConditional && (finalPrediction.cfiPosition === t0_abtbResult(i).cfiPosition) && (t0_abtbResult(i).baseTaken =/= finalPrediction.taken)) ||
-      ((finalPrediction.cfiPosition > t0_abtbResult(i).cfiPosition) && t0_abtbResult(i).baseTaken)
+      (finalPrediction.attribute.isConditional && (finalPrediction.cfiPosition === t0_abtbResult(i).cfiPosition) &&
+        (t0_abtbResult(i).baseTaken =/= finalPrediction.taken)) ||
+        ((finalPrediction.cfiPosition > t0_abtbResult(i).cfiPosition) && t0_abtbResult(i).baseTaken)
     )
     val trainHasAbtbBranch = t0_abtbResult(i).valid && (finalPrediction.cfiPosition >= t0_abtbResult(i).cfiPosition)
 
-    t0_trainResult(i).valid            := trainHasAbtbBranch
-    t0_trainResult(i).hit              := t0_abtbResult(i).hit
-    t0_trainResult(i).baseTaken        := t0_abtbResult(i).baseTaken
-    t0_trainResult(i).actualTaken      := (finalPrediction.cfiPosition === t0_abtbResult(i).cfiPosition) && finalPrediction.taken
+    t0_trainResult(i).valid     := trainHasAbtbBranch
+    t0_trainResult(i).hit       := t0_abtbResult(i).hit
+    t0_trainResult(i).baseTaken := t0_abtbResult(i).baseTaken
+    t0_trainResult(i).actualTaken := (finalPrediction.cfiPosition === t0_abtbResult(
+      i
+    ).cfiPosition) && finalPrediction.taken
     t0_trainResult(i).predTaken        := t0_abtbResult(i).predTaken
     t0_trainResult(i).baseIsStrongBias := t0_abtbResult(i).baseIsStrongBias
     t0_trainResult(i).cfiPosition      := t0_abtbResult(i).cfiPosition
