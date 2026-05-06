@@ -113,6 +113,7 @@ class ActiveWrongPathEpisode:
     redirect_context: Optional[dict] = None
     redirect_driven: bool = False
     expected_recovery_ftq: Optional[tuple[int, int]] = None
+    redirect_driven_cycle: Optional[int] = None
 
 
 @dataclass

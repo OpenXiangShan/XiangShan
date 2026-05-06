@@ -129,6 +129,7 @@ class BackendModel:
         self._recovery_commit_block_ftq: Optional[tuple[int, int]] = None
         self._recovery_commit_block_cycle = -1
         self._last_driven_redirect_signature: Optional[tuple[int, int, int, int, int, int]] = None
+        self._last_driven_redirect_cycle: Optional[int] = None
 
         self._backend_state = BackendState(ftq_size=self.ftq_size)
         self._ftq_scoreboard = FtqScoreboard(self._backend_state)
@@ -141,6 +142,7 @@ class BackendModel:
         redirect_context: Optional[dict],
         redirect_driven: bool = False,
         expected_recovery_ftq: Optional[tuple[int, int]] = None,
+        redirect_driven_cycle: Optional[int] = None,
     ) -> None:
         normalized_origin = int(origin_index)
         self._active_wrong_path_episode_state = ActiveWrongPathEpisode(
@@ -152,6 +154,9 @@ class BackendModel:
                 None
                 if expected_recovery_ftq is None
                 else (int(expected_recovery_ftq[0]), int(expected_recovery_ftq[1]))
+            ),
+            redirect_driven_cycle=(
+                None if redirect_driven_cycle is None else int(redirect_driven_cycle)
             ),
         )
 
@@ -191,6 +196,11 @@ class BackendModel:
                     int(episode.expected_recovery_ftq[0]),
                     int(episode.expected_recovery_ftq[1]),
                 )
+            ),
+            "redirect_driven_cycle": (
+                None
+                if episode.redirect_driven_cycle is None
+                else int(episode.redirect_driven_cycle)
             ),
         }
 
@@ -241,6 +251,11 @@ class BackendModel:
                     int(episode.expected_recovery_ftq[1]),
                 )
             ),
+            redirect_driven_cycle=(
+                None
+                if episode.redirect_driven_cycle is None
+                else int(episode.redirect_driven_cycle)
+            ),
         )
 
     def _active_wrong_path_in_recovery(self) -> bool:
@@ -286,6 +301,10 @@ class BackendModel:
         expected_ftq = self._current_expected_recovery_ftq()
         if expected_ftq is None:
             return True
+        episode = self._active_wrong_path_episode()
+        if episode is not None and episode["redirect_driven_cycle"] is not None:
+            if int(entry.cycle) <= int(episode["redirect_driven_cycle"]):
+                return False
         return (int(entry.ftq_flag), int(entry.ftq_value)) == expected_ftq
 
     def _queue_entry_is_after_expected_recovery_ftq(self, entry: QueueInstr) -> bool:
@@ -368,6 +387,7 @@ class BackendModel:
             expected_recovery_ftq = episode["expected_recovery_ftq"]
         if redirect_context is None:
             self._last_driven_redirect_signature = None
+            self._last_driven_redirect_cycle = None
         else:
             self._last_driven_redirect_signature = (
                 int(target_pc),
@@ -377,12 +397,14 @@ class BackendModel:
                 int(redirect_context.get("ftq_offset", -1)),
                 int(redirect_context.get("is_rvc", -1)),
             )
+            self._last_driven_redirect_cycle = int(self.current_cycle)
         self._set_active_wrong_path_episode(
             origin_index=int(origin_index),
             target_pc=int(target_pc),
             redirect_context=redirect_context,
             redirect_driven=True,
             expected_recovery_ftq=expected_recovery_ftq,
+            redirect_driven_cycle=int(self.current_cycle),
         )
 
     @staticmethod
@@ -470,6 +492,7 @@ class BackendModel:
             redirect_context=redirect_context,
             redirect_driven=bool(episode["redirect_driven"]),
             expected_recovery_ftq=episode["expected_recovery_ftq"],
+            redirect_driven_cycle=episode["redirect_driven_cycle"],
         )
 
     def _restore_active_wrong_path_episode_after_queue_edit(
@@ -497,6 +520,7 @@ class BackendModel:
                 redirect_context=redirect_context,
                 redirect_driven=bool(episode["redirect_driven"]),
                 expected_recovery_ftq=episode["expected_recovery_ftq"],
+                redirect_driven_cycle=episode["redirect_driven_cycle"],
             )
             return
         if not any(evt.kind == "redirect" for evt in self.pending_events):
@@ -520,6 +544,7 @@ class BackendModel:
             redirect_context=redirect_context,
             redirect_driven=bool(prior_episode["redirect_driven"]),
             expected_recovery_ftq=prior_episode["expected_recovery_ftq"],
+            redirect_driven_cycle=prior_episode["redirect_driven_cycle"],
         )
 
     def _remap_last_correct_cfi_context_after_queue_edit(
@@ -1470,6 +1495,9 @@ class BackendModel:
             redirect_context=redirect_context,
             redirect_driven=bool(redirect_driven),
             expected_recovery_ftq=expected_recovery_ftq,
+            redirect_driven_cycle=(
+                self._last_driven_redirect_cycle if bool(redirect_driven) else None
+            ),
         )
         if redirect_context is not None:
             self._mark_ftq_redirect_pending(
@@ -1487,11 +1515,20 @@ class BackendModel:
         redirect_context: dict,
         redirect_driven: bool,
     ) -> None:
+        expected_recovery_ftq = (
+            self._expected_recovery_ftq_from_context(int(target_pc), redirect_context)
+            if bool(redirect_driven)
+            else None
+        )
         self._set_active_wrong_path_episode(
             origin_index=int(origin_index),
             target_pc=int(target_pc),
             redirect_context=dict(redirect_context),
             redirect_driven=bool(redirect_driven),
+            expected_recovery_ftq=expected_recovery_ftq,
+            redirect_driven_cycle=(
+                self._last_driven_redirect_cycle if bool(redirect_driven) else None
+            ),
         )
 
     def _begin_active_wrong_path_episode_from_redirect_context(
@@ -1940,19 +1977,25 @@ class BackendModel:
         ranges: list[str] = []
         range_start = int(entries[0].pc)
         range_end = int(entries[0].pc)
+        range_ftq_flag = int(entries[0].ftq_flag)
+        range_ftq_value = int(entries[0].ftq_value)
         for entry in entries[1:]:
             pc = int(entry.pc)
+            ftq_flag = int(entry.ftq_flag)
+            ftq_value = int(entry.ftq_value)
             if pc == range_end or pc == range_end + 2 or pc == range_end + 4:
                 range_end = pc
+                range_ftq_flag = ftq_flag
+                range_ftq_value = ftq_value
                 continue
-            ranges.append(
-                f"0x{range_start:x}" if range_start == range_end else f"0x{range_start:x}-0x{range_end:x}"
-            )
+            pc_range = f"0x{range_start:x}" if range_start == range_end else f"0x{range_start:x}-0x{range_end:x}"
+            ranges.append(f"{pc_range}({range_ftq_flag},{range_ftq_value})")
             range_start = pc
             range_end = pc
-        ranges.append(
-            f"0x{range_start:x}" if range_start == range_end else f"0x{range_start:x}-0x{range_end:x}"
-        )
+            range_ftq_flag = ftq_flag
+            range_ftq_value = ftq_value
+        pc_range = f"0x{range_start:x}" if range_start == range_end else f"0x{range_start:x}-0x{range_end:x}"
+        ranges.append(f"{pc_range}({range_ftq_flag},{range_ftq_value})")
         return ",".join(ranges)
 
     def _cfvec_queue_flush_wrong_path(
@@ -2076,6 +2119,7 @@ class BackendModel:
                 ),
                 redirect_driven=bool(episode["redirect_driven"]),
                 expected_recovery_ftq=episode["expected_recovery_ftq"],
+                redirect_driven_cycle=episode["redirect_driven_cycle"],
             )
         else:
             self._clear_active_wrong_path_episode()
@@ -2387,6 +2431,7 @@ class BackendModel:
             redirect_context=episode["redirect_context"],
             redirect_driven=True,
             expected_recovery_ftq=episode["expected_recovery_ftq"],
+            redirect_driven_cycle=episode["redirect_driven_cycle"],
         )
         self.logger.debug(
             "redirect recovery residual flush: target=0x%x removed=%d queue_idx=[%d,%d] queue_pc_ranges=%s",
@@ -2418,6 +2463,7 @@ class BackendModel:
         self._commit_queue.clear()
         self._clear_active_wrong_path_episode()
         self._last_driven_redirect_signature = None
+        self._last_driven_redirect_cycle = None
         self._pending_queue_resolve_indices.clear()
         self._pending_queue_call_ret_commit_indices.clear()
         self._scheduled_queue_call_ret_commit_groups.clear()
