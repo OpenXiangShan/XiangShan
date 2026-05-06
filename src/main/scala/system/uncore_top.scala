@@ -236,6 +236,33 @@ class AXIDataBridge(SrcDataWidth: Int, DestDataWidth: Int, errorAddrMap: Seq[Add
 //  TLWidthWidget(L3OuterBusWidth / 8) :=
 //  TLBuffer.chainNode(2) :=
 //  mem_xbar
+
+// Reset utility functions
+object ResetUtils {
+  def propagateReset(inReset: Reset): AsyncReset = withReset(inReset) {
+    ResetGen(SYNC_NUM = 1)
+  }
+
+  def mergeResets(routeResets: Seq[Reset]): AsyncReset = {
+    require(routeResets.nonEmpty, "Cbus route reset merge requires at least one input")
+    routeResets.map(_.asBool).reduce(_ || _).asAsyncReset
+  }
+
+  def stageResetOut(mod: Module, inReset: Reset): AsyncReset = {
+    mod.reset := inReset
+    ResetUtils.propagateReset(mod.reset)
+  }
+}
+
+final case class BufferedAXI4Connection(buffer: AXI4Buffer) {
+  def module = buffer.module
+
+  def sinkReset(sourceReset: Reset): AsyncReset = {
+    buffer.module.reset := sourceReset
+    ResetUtils.propagateReset(buffer.module.reset)
+  }
+}
+
 class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
   private def newXbar(name: String): AXI4Xbar = {
     val xbar = LazyModule(new AXI4Xbar())
@@ -249,11 +276,11 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
     buffer
   }
 
-  private def connectThroughBuffer(sink: AXI4Node, source: AXI4Node, name: String, star: Boolean = false): AXI4Buffer = {
+  private def connectThroughBuffer(sink: AXI4Node, source: AXI4Node, name: String, star: Boolean = false): BufferedAXI4Connection = {
     val buffer = newBuffer(name)
     if (star) sink :=* buffer.node else sink := buffer.node
     buffer.node := source
-    buffer
+    BufferedAXI4Connection(buffer)
   }
 
   // cpu master: cpus--> cpu_xbarNto1-->cpu2imsic_s/cpu2dm_s
@@ -324,90 +351,77 @@ class Cbus(params: Pbus2Params)(implicit p: Parameters) extends LazyModule {
   class Imp extends LazyModuleImp(this) {
     val cpumResetOut = IO(Output(AsyncReset()))
 
-    private def propagateReset(inReset: Reset): AsyncReset = withReset(inReset) {
-      ResetGen()
-    }
-
-    private def mergeResets(routeResets: Seq[Reset]): AsyncReset = {
-      require(routeResets.nonEmpty, "Cbus route reset merge requires at least one input")
-      routeResets.map(_.asBool).reduce(_ || _).asAsyncReset
-    }
-
-    private def stageResetOut(mod: Module, inReset: Reset): AsyncReset = {
-      mod.reset := inReset
-      propagateReset(mod.reset)
-    }
-
     // Propagate reset along the same fan-in tree as the AXI path.
-    val cpuRouteResets = cpuLMs.map(lm => stageResetOut(lm.module, reset))
+    // val cpuRouteResets = cpuLMs.map(lm => ResetUtils.stageResetOut(lm.module, reset))
 
+    // buffer:=cpu(i), for each cpu, this is bundle, and to xbar for timing.
     val cpu0ToCx0RouteResets = cpu0ToCx0Bufs.zipWithIndex.map { case (buf, cpuIdx) =>
-      stageResetOut(buf.module, cpuRouteResets(cpuIdx))
+      buf.sinkReset(reset)
     }
-    val cx0RouteReset = stageResetOut(xbar2to1LMs(0).module, mergeResets(cpu0ToCx0RouteResets))
+    val cx0RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(0).module, ResetUtils.mergeResets(cpu0ToCx0RouteResets))
 
-    val cpu2ToCx1RouteReset = stageResetOut(cpu2ToCx1Buf.module, cpuRouteResets(2))
-    val cx0ToCx1RouteReset = stageResetOut(cx0ToCx1Buf.module, cx0RouteReset)
-    val cx1RouteReset = stageResetOut(xbar2to1LMs(1).module, mergeResets(Seq(cpu2ToCx1RouteReset, cx0ToCx1RouteReset)))
+    val cpu2ToCx1RouteReset = cpu2ToCx1Buf.sinkReset(reset)
+    val cx0ToCx1RouteReset = cx0ToCx1Buf.sinkReset(cx0RouteReset)
+    val cx1RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(1).module, ResetUtils.mergeResets(Seq(cpu2ToCx1RouteReset, cx0ToCx1RouteReset)))
 
-    val cpu3ToCx2RouteReset = stageResetOut(cpu3ToCx2Buf.module, cpuRouteResets(3))
-    val cx1ToCx2RouteReset = stageResetOut(cx1ToCx2Buf.module, cx1RouteReset)
-    val cx2RouteReset = stageResetOut(xbar2to1LMs(2).module, mergeResets(Seq(cpu3ToCx2RouteReset, cx1ToCx2RouteReset)))
+    val cpu3ToCx2RouteReset = cpu3ToCx2Buf.sinkReset(reset)
+    val cx1ToCx2RouteReset = cx1ToCx2Buf.sinkReset(cx1RouteReset)
+    val cx2RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(2).module, ResetUtils.mergeResets(Seq(cpu3ToCx2RouteReset, cx1ToCx2RouteReset)))
 
     val cpu4ToCx3RouteResets = cpu4ToCx3Bufs.zip(Seq(4, 5)).map { case (buf, cpuIdx) =>
-      stageResetOut(buf.module, cpuRouteResets(cpuIdx))
+      buf.sinkReset(reset)
     }
-    val cx3RouteReset = stageResetOut(xbar2to1LMs(3).module, mergeResets(cpu4ToCx3RouteResets))
+    val cx3RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(3).module, ResetUtils.mergeResets(cpu4ToCx3RouteResets))
 
     val cpu7ToCx5RouteResets = cpu7ToCx5Bufs.zip(Seq(7, 8)).map { case (buf, cpuIdx) =>
-      stageResetOut(buf.module, cpuRouteResets(cpuIdx))
+      buf.sinkReset(reset)
     }
-    val cx5RouteReset = stageResetOut(xbar2to1LMs(5).module, mergeResets(cpu7ToCx5RouteResets))
+    val cx5RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(5).module, ResetUtils.mergeResets(cpu7ToCx5RouteResets))
 
     val cpu10ToCx7RouteResets = cpu10ToCx7Bufs.zip(Seq(10, 11)).map { case (buf, cpuIdx) =>
-      stageResetOut(buf.module, cpuRouteResets(cpuIdx))
+      buf.sinkReset(reset)
     }
-    val cx7RouteReset = stageResetOut(xbar2to1LMs(7).module, mergeResets(cpu10ToCx7RouteResets))
+    val cx7RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(7).module, ResetUtils.mergeResets(cpu10ToCx7RouteResets))
 
     val cpu13ToCx9RouteResets = cpu13ToCx9Bufs.zip(Seq(13, 14)).map { case (buf, cpuIdx) =>
-      stageResetOut(buf.module, cpuRouteResets(cpuIdx))
+      buf.sinkReset(reset)
     }
-    val cx9RouteReset = stageResetOut(xbar2to1LMs(9).module, mergeResets(cpu13ToCx9RouteResets))
+    val cx9RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(9).module, ResetUtils.mergeResets(cpu13ToCx9RouteResets))
 
-    val cx3ToCx4RouteReset = stageResetOut(cx3ToCx4Buf.module, cx3RouteReset)
-    val cpu6ToCx4RouteReset = stageResetOut(cpu6ToCx4Buf.module, cpuRouteResets(6))
-    val cx4RouteReset = stageResetOut(xbar2to1LMs(4).module, mergeResets(Seq(cx3ToCx4RouteReset, cpu6ToCx4RouteReset)))
+    val cx3ToCx4RouteReset = cx3ToCx4Buf.sinkReset(cx3RouteReset)
+    val cpu6ToCx4RouteReset = cpu6ToCx4Buf.sinkReset(reset)
+    val cx4RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(4).module, ResetUtils.mergeResets(Seq(cx3ToCx4RouteReset, cpu6ToCx4RouteReset)))
 
-    val cx5ToCx6RouteReset = stageResetOut(cx5ToCx6Buf.module, cx5RouteReset)
-    val cpu9ToCx6RouteReset = stageResetOut(cpu9ToCx6Buf.module, cpuRouteResets(9))
-    val cx6RouteReset = stageResetOut(xbar2to1LMs(6).module, mergeResets(Seq(cx5ToCx6RouteReset, cpu9ToCx6RouteReset)))
+    val cx5ToCx6RouteReset = cx5ToCx6Buf.sinkReset(cx5RouteReset)
+    val cpu9ToCx6RouteReset = cpu9ToCx6Buf.sinkReset(reset)
+    val cx6RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(6).module, ResetUtils.mergeResets(Seq(cx5ToCx6RouteReset, cpu9ToCx6RouteReset)))
 
-    val cx7ToCx8RouteReset = stageResetOut(cx7ToCx8Buf.module, cx7RouteReset)
-    val cpu12ToCx8RouteReset = stageResetOut(cpu12ToCx8Buf.module, cpuRouteResets(12))
-    val cx8RouteReset = stageResetOut(xbar2to1LMs(8).module, mergeResets(Seq(cx7ToCx8RouteReset, cpu12ToCx8RouteReset)))
+    val cx7ToCx8RouteReset = cx7ToCx8Buf.sinkReset(cx7RouteReset)
+    val cpu12ToCx8RouteReset = cpu12ToCx8Buf.sinkReset(reset)
+    val cx8RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(8).module, ResetUtils.mergeResets(Seq(cx7ToCx8RouteReset, cpu12ToCx8RouteReset)))
 
-    val cx9ToCx10RouteReset = stageResetOut(cx9ToCx10Buf.module, cx9RouteReset)
-    val cpu15ToCx10RouteReset = stageResetOut(cpu15ToCx10Buf.module, cpuRouteResets(15))
-    val cx10RouteReset = stageResetOut(xbar2to1LMs(10).module, mergeResets(Seq(cx9ToCx10RouteReset, cpu15ToCx10RouteReset)))
+    val cx9ToCx10RouteReset = cx9ToCx10Buf.sinkReset(cx9RouteReset)
+    val cpu15ToCx10RouteReset = cpu15ToCx10Buf.sinkReset(reset)
+    val cx10RouteReset = ResetUtils.stageResetOut(xbar2to1LMs(10).module, ResetUtils.mergeResets(Seq(cx9ToCx10RouteReset, cpu15ToCx10RouteReset)))
 
-    val cx10ToL1x0RouteReset = stageResetOut(cx10ToL1x0Buf.module, cx10RouteReset)
-    val cx8ToL1x0RouteReset = stageResetOut(cxToL1Bufs(0).module, cx8RouteReset)
-    val l1x0RouteReset = stageResetOut(l1xbar2to1LMs(0).module, mergeResets(Seq(cx10ToL1x0RouteReset, cx8ToL1x0RouteReset)))
+    val cx10ToL1x0RouteReset = cx10ToL1x0Buf.sinkReset(cx10RouteReset)
+    val cx8ToL1x0RouteReset = cxToL1Bufs(0).sinkReset(cx8RouteReset)
+    val l1x0RouteReset = ResetUtils.stageResetOut(l1xbar2to1LMs(0).module, ResetUtils.mergeResets(Seq(cx10ToL1x0RouteReset, cx8ToL1x0RouteReset)))
 
-    val l1x0ToL1x1RouteReset = stageResetOut(l1x0ToL1x1Buf.module, l1x0RouteReset)
-    val cx6ToL1x1RouteReset = stageResetOut(cxToL1Bufs(1).module, cx6RouteReset)
-    val l1x1RouteReset = stageResetOut(l1xbar2to1LMs(1).module, mergeResets(Seq(l1x0ToL1x1RouteReset, cx6ToL1x1RouteReset)))
+    val l1x0ToL1x1RouteReset = l1x0ToL1x1Buf.sinkReset(l1x0RouteReset)
+    val cx6ToL1x1RouteReset = cxToL1Bufs(1).sinkReset(cx6RouteReset)
+    val l1x1RouteReset = ResetUtils.stageResetOut(l1xbar2to1LMs(1).module, ResetUtils.mergeResets(Seq(l1x0ToL1x1RouteReset, cx6ToL1x1RouteReset)))
 
-    val l1x1ToL1x2RouteReset = stageResetOut(l1x1ToL1x2Buf.module, l1x1RouteReset)
-    val cx4ToL1x2RouteReset = stageResetOut(cxToL1Bufs(2).module, cx4RouteReset)
-    val l1x2RouteReset = stageResetOut(l1xbar2to1LMs(2).module, mergeResets(Seq(l1x1ToL1x2RouteReset, cx4ToL1x2RouteReset)))
+    val l1x1ToL1x2RouteReset = l1x1ToL1x2Buf.sinkReset(l1x1RouteReset)
+    val cx4ToL1x2RouteReset = cxToL1Bufs(2).sinkReset(cx4RouteReset)
+    val l1x2RouteReset = ResetUtils.stageResetOut(l1xbar2to1LMs(2).module, ResetUtils.mergeResets(Seq(l1x1ToL1x2RouteReset, cx4ToL1x2RouteReset)))
 
-    val l1x2ToL1x3RouteReset = stageResetOut(l1x2ToL1x3Buf.module, l1x2RouteReset)
-    val cx2ToL1x3RouteReset = stageResetOut(cxToL1Bufs(3).module, cx2RouteReset)
-    val l1x3RouteReset = stageResetOut(l1xbar2to1LMs(3).module, mergeResets(Seq(l1x2ToL1x3RouteReset, cx2ToL1x3RouteReset)))
+    val l1x2ToL1x3RouteReset = l1x2ToL1x3Buf.sinkReset(l1x2RouteReset)
+    val cx2ToL1x3RouteReset = cxToL1Bufs(3).sinkReset(cx2RouteReset)
+    val l1x3RouteReset = ResetUtils.stageResetOut(l1xbar2to1LMs(3).module, ResetUtils.mergeResets(Seq(l1x2ToL1x3RouteReset, cx2ToL1x3RouteReset)))
 
-    val l1x3ToCpumRouteReset = stageResetOut(l1x3ToCpumBuf.module, l1x3RouteReset)
-    cpumResetOut := stageResetOut(cpum_LM.module, l1x3ToCpumRouteReset)
+    val l1x3ToCpumRouteReset = l1x3ToCpumBuf.sinkReset(l1x3RouteReset)
+    cpumResetOut := ResetUtils.stageResetOut(cpum_LM.module, l1x3ToCpumRouteReset)
   }
 }
 
@@ -704,11 +718,11 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     buffer
   }
 
-  private def connectThroughBuffer(sink: AXI4Node, source: AXI4Node, name: String, star: Boolean = false): AXI4Buffer = {
+  private def connectThroughBuffer(sink: AXI4Node, source: AXI4Node, name: String, star: Boolean = false): BufferedAXI4Connection = {
     val buffer = newBuffer(name)
     if (star) sink :=* buffer.node else sink := buffer.node
     buffer.node := source
-    buffer
+    BufferedAXI4Connection(buffer)
   }
 
   val Cbus = LazyModule(new Cbus(params))
@@ -851,91 +865,76 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     // master to imsic
     val m = IO(Vec(
       params.NumHarts,new VerilogAXI4Record(sNodes.head.in.head._2.bundle)))
-    val m_reset = IO(Vec(params.NumHarts, Output(AsyncReset())))
+    // val m_reset = IO(Vec(params.NumHarts, Output(AsyncReset())))
     // cross-die imsic
     val m_msi2noc = IO(new VerilogAXI4Record(crsdie_msi_sN.in.head._2.bundle))
-    val m_msi2noc_reset = IO(Output(AsyncReset()))
 
-    private def propagateReset(inReset: Reset): AsyncReset = withReset(inReset) {
-      ResetGen()
-    }
+    hni_s_xbarLM.module.reset := reset
+    u_hnis_DataBridge.module.reset := reset
+    hniBridgeToPcieBuf.module.reset := reset
+    pcie_xbar1to2LM.module.reset := reset
+    val cpuBridgeRouteReset = ResetUtils.stageResetOut(u_cpus_DataBridge.module, Cbus.module.cpumResetOut)
+    pcieToPbusBuf.module.reset := reset
+    val pbusRouteReset = ResetUtils.stageResetOut(pbus_xbarLM.module, ResetUtils.mergeResets(Seq(cpuBridgeRouteReset, reset)))
+    u_crsdie_DataBridge.module.reset := pbusRouteReset
 
-    private def mergeResets(routeResets: Seq[Reset]): AsyncReset = {
-      require(routeResets.nonEmpty, "imsicPbusTop route reset merge requires at least one input")
-      routeResets.map(_.asBool).reduce(_ || _).asAsyncReset
-    }
+    val l1x3RouteReset = ResetUtils.stageResetOut(l1xbar1to2LMs(3).module, pbusRouteReset)
+    val l1x3ToL1x2RouteReset = l1x3ToL1x2Buf.sinkReset(l1x3RouteReset)
+    val l1x2RouteReset = ResetUtils.stageResetOut(l1xbar1to2LMs(2).module, l1x3ToL1x2RouteReset)
+    val l1x2ToL1x1RouteReset = l1x2ToL1x1Buf.sinkReset(l1x2RouteReset)
+    val l1x1RouteReset = ResetUtils.stageResetOut(l1xbar1to2LMs(1).module, l1x2ToL1x1RouteReset)
+    val l1x1ToL1x0RouteReset = l1x1ToL1x0Buf.sinkReset(l1x1RouteReset)
+    val l1x0RouteReset = ResetUtils.stageResetOut(l1xbar1to2LMs(0).module, l1x1ToL1x0RouteReset)
 
-    private def stageResetOut(mod: Module, inReset: Reset): AsyncReset = {
-      mod.reset := inReset
-      propagateReset(mod.reset)
-    }
+    val xbar10RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(10).module, l1x0RouteReset)
+    val xbar8RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(8).module, l1x0RouteReset)
+    val xbar6RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(6).module, l1x1RouteReset)
+    val xbar4RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(4).module, l1x2RouteReset)
+    val xbar2RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(2).module, l1x3RouteReset)
 
-    val hniRouteReset = stageResetOut(hni_s_xbarLM.module, reset)
-    val hniBridgeRouteReset = stageResetOut(u_hnis_DataBridge.module, hniRouteReset)
-    val hniBridgeToPcieRouteReset = stageResetOut(hniBridgeToPcieBuf.module, hniBridgeRouteReset)
-    val pcieRouteReset = stageResetOut(pcie_xbar1to2LM.module, mergeResets(Seq(reset, hniBridgeToPcieRouteReset)))
-    val cpuBridgeRouteReset = stageResetOut(u_cpus_DataBridge.module, Cbus.module.cpumResetOut)
-    val pcieToPbusRouteReset = stageResetOut(pcieToPbusBuf.module, pcieRouteReset)
-    val pbusRouteReset = stageResetOut(pbus_xbarLM.module, mergeResets(Seq(cpuBridgeRouteReset, pcieToPbusRouteReset)))
-    val crsdieRouteReset = stageResetOut(u_crsdie_DataBridge.module, pbusRouteReset)
+    val xbar10ToXbar9RouteReset = xbar10ToXbar9Buf.sinkReset(xbar10RouteReset)
+    val xbar9RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(9).module, xbar10ToXbar9RouteReset)
+    val xbar10ToImsic15RouteReset = xbar10ToImsic15Buf.sinkReset(xbar10RouteReset)
+    val imsic15RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(15).module, xbar10ToImsic15RouteReset)
+    val xbar9ToImsicRouteResets = xbar9ToImsicBufs.map(buf => buf.sinkReset(xbar9RouteReset))
+    val imsic13RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(13).module, xbar9ToImsicRouteResets(0))
+    val imsic14RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(14).module, xbar9ToImsicRouteResets(1))
 
-    val l1x3RouteReset = stageResetOut(l1xbar1to2LMs(3).module, pbusRouteReset)
-    val l1x3ToL1x2RouteReset = stageResetOut(l1x3ToL1x2Buf.module, l1x3RouteReset)
-    val l1x2RouteReset = stageResetOut(l1xbar1to2LMs(2).module, l1x3ToL1x2RouteReset)
-    val l1x2ToL1x1RouteReset = stageResetOut(l1x2ToL1x1Buf.module, l1x2RouteReset)
-    val l1x1RouteReset = stageResetOut(l1xbar1to2LMs(1).module, l1x2ToL1x1RouteReset)
-    val l1x1ToL1x0RouteReset = stageResetOut(l1x1ToL1x0Buf.module, l1x1RouteReset)
-    val l1x0RouteReset = stageResetOut(l1xbar1to2LMs(0).module, l1x1ToL1x0RouteReset)
+    val xbar8ToXbar7RouteReset = xbar8ToXbar7Buf.sinkReset(xbar8RouteReset)
+    val xbar7RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(7).module, xbar8ToXbar7RouteReset)
+    val xbar8ToImsic12RouteReset = xbar8ToImsic12Buf.sinkReset(xbar8RouteReset)
+    val imsic12RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(12).module, xbar8ToImsic12RouteReset)
+    val xbar7ToImsicRouteResets = xbar7ToImsicBufs.map(buf => buf.sinkReset(xbar7RouteReset))
+    val imsic10RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(10).module, xbar7ToImsicRouteResets(0))
+    val imsic11RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(11).module, xbar7ToImsicRouteResets(1))
 
-    val xbar10RouteReset = stageResetOut(xbar1to2LMs(10).module, l1x0RouteReset)
-    val xbar8RouteReset = stageResetOut(xbar1to2LMs(8).module, l1x0RouteReset)
-    val xbar6RouteReset = stageResetOut(xbar1to2LMs(6).module, l1x1RouteReset)
-    val xbar4RouteReset = stageResetOut(xbar1to2LMs(4).module, l1x2RouteReset)
-    val xbar2RouteReset = stageResetOut(xbar1to2LMs(2).module, l1x3RouteReset)
+    val xbar6ToXbar5RouteReset = xbar6ToXbar5Buf.sinkReset(xbar6RouteReset)
+    val xbar5RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(5).module, xbar6ToXbar5RouteReset)
+    val xbar6ToImsic9RouteReset = xbar6ToImsic9Buf.sinkReset(xbar6RouteReset)
+    val imsic9RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(9).module, xbar6ToImsic9RouteReset)
+    val xbar5ToImsicRouteResets = xbar5ToImsicBufs.map(buf => buf.sinkReset(xbar5RouteReset))
+    val imsic7RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(7).module, xbar5ToImsicRouteResets(0))
+    val imsic8RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(8).module, xbar5ToImsicRouteResets(1))
 
-    val xbar10ToXbar9RouteReset = stageResetOut(xbar10ToXbar9Buf.module, xbar10RouteReset)
-    val xbar9RouteReset = stageResetOut(xbar1to2LMs(9).module, xbar10ToXbar9RouteReset)
-    val xbar10ToImsic15RouteReset = stageResetOut(xbar10ToImsic15Buf.module, xbar10RouteReset)
-    val imsic15RouteReset = stageResetOut(imsic_l4LMs(15).module, xbar10ToImsic15RouteReset)
-    val xbar9ToImsicRouteResets = xbar9ToImsicBufs.map(buf => stageResetOut(buf.module, xbar9RouteReset))
-    val imsic13RouteReset = stageResetOut(imsic_l4LMs(13).module, xbar9ToImsicRouteResets(0))
-    val imsic14RouteReset = stageResetOut(imsic_l4LMs(14).module, xbar9ToImsicRouteResets(1))
+    val xbar4ToXbar3RouteReset = xbar4ToXbar3Buf.sinkReset(xbar4RouteReset)
+    val xbar3RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(3).module, xbar4ToXbar3RouteReset)
+    val xbar4ToImsic6RouteReset = xbar4ToImsic6Buf.sinkReset(xbar4RouteReset)
+    val imsic6RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(6).module, xbar4ToImsic6RouteReset)
+    val xbar3ToImsicRouteResets = xbar3ToImsicBufs.map(buf => buf.sinkReset(xbar3RouteReset))
+    val imsic4RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(4).module, xbar3ToImsicRouteResets(0))
+    val imsic5RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(5).module, xbar3ToImsicRouteResets(1))
 
-    val xbar8ToXbar7RouteReset = stageResetOut(xbar8ToXbar7Buf.module, xbar8RouteReset)
-    val xbar7RouteReset = stageResetOut(xbar1to2LMs(7).module, xbar8ToXbar7RouteReset)
-    val xbar8ToImsic12RouteReset = stageResetOut(xbar8ToImsic12Buf.module, xbar8RouteReset)
-    val imsic12RouteReset = stageResetOut(imsic_l4LMs(12).module, xbar8ToImsic12RouteReset)
-    val xbar7ToImsicRouteResets = xbar7ToImsicBufs.map(buf => stageResetOut(buf.module, xbar7RouteReset))
-    val imsic10RouteReset = stageResetOut(imsic_l4LMs(10).module, xbar7ToImsicRouteResets(0))
-    val imsic11RouteReset = stageResetOut(imsic_l4LMs(11).module, xbar7ToImsicRouteResets(1))
+    val xbar2ToImsic3RouteReset = xbar2ToImsic3Buf.sinkReset(xbar2RouteReset)
+    val imsic3RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(3).module, xbar2ToImsic3RouteReset)
+    val xbar2ToXbar1RouteReset = xbar2ToXbar1Buf.sinkReset(xbar2RouteReset)
+    val xbar1RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(1).module, xbar2ToXbar1RouteReset)
 
-    val xbar6ToXbar5RouteReset = stageResetOut(xbar6ToXbar5Buf.module, xbar6RouteReset)
-    val xbar5RouteReset = stageResetOut(xbar1to2LMs(5).module, xbar6ToXbar5RouteReset)
-    val xbar6ToImsic9RouteReset = stageResetOut(xbar6ToImsic9Buf.module, xbar6RouteReset)
-    val imsic9RouteReset = stageResetOut(imsic_l4LMs(9).module, xbar6ToImsic9RouteReset)
-    val xbar5ToImsicRouteResets = xbar5ToImsicBufs.map(buf => stageResetOut(buf.module, xbar5RouteReset))
-    val imsic7RouteReset = stageResetOut(imsic_l4LMs(7).module, xbar5ToImsicRouteResets(0))
-    val imsic8RouteReset = stageResetOut(imsic_l4LMs(8).module, xbar5ToImsicRouteResets(1))
-
-    val xbar4ToXbar3RouteReset = stageResetOut(xbar4ToXbar3Buf.module, xbar4RouteReset)
-    val xbar3RouteReset = stageResetOut(xbar1to2LMs(3).module, xbar4ToXbar3RouteReset)
-    val xbar4ToImsic6RouteReset = stageResetOut(xbar4ToImsic6Buf.module, xbar4RouteReset)
-    val imsic6RouteReset = stageResetOut(imsic_l4LMs(6).module, xbar4ToImsic6RouteReset)
-    val xbar3ToImsicRouteResets = xbar3ToImsicBufs.map(buf => stageResetOut(buf.module, xbar3RouteReset))
-    val imsic4RouteReset = stageResetOut(imsic_l4LMs(4).module, xbar3ToImsicRouteResets(0))
-    val imsic5RouteReset = stageResetOut(imsic_l4LMs(5).module, xbar3ToImsicRouteResets(1))
-
-    val xbar2ToImsic3RouteReset = stageResetOut(xbar2ToImsic3Buf.module, xbar2RouteReset)
-    val imsic3RouteReset = stageResetOut(imsic_l4LMs(3).module, xbar2ToImsic3RouteReset)
-    val xbar2ToXbar1RouteReset = stageResetOut(xbar2ToXbar1Buf.module, xbar2RouteReset)
-    val xbar1RouteReset = stageResetOut(xbar1to2LMs(1).module, xbar2ToXbar1RouteReset)
-
-    val xbar1ToImsic2RouteReset = stageResetOut(xbar1ToImsic2Buf.module, xbar1RouteReset)
-    val imsic2RouteReset = stageResetOut(imsic_l4LMs(2).module, xbar1ToImsic2RouteReset)
-    val xbar1ToXbar0RouteReset = stageResetOut(xbar1ToXbar0Buf.module, xbar1RouteReset)
-    val xbar0RouteReset = stageResetOut(xbar1to2LMs(0).module, xbar1ToXbar0RouteReset)
-    val imsic0RouteReset = stageResetOut(imsic_l4LMs(0).module, xbar0RouteReset)
-    val imsic1RouteReset = stageResetOut(imsic_l4LMs(1).module, xbar0RouteReset)
+    val xbar1ToImsic2RouteReset = xbar1ToImsic2Buf.sinkReset(xbar1RouteReset)
+    val imsic2RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(2).module, xbar1ToImsic2RouteReset)
+    val xbar1ToXbar0RouteReset = xbar1ToXbar0Buf.sinkReset(xbar1RouteReset)
+    val xbar0RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(0).module, xbar1ToXbar0RouteReset)
+    val imsic0RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(0).module, xbar0RouteReset)
+    val imsic1RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(1).module, xbar0RouteReset)
 
     val imsicRouteResets = Seq(
       imsic0RouteReset,
@@ -956,16 +955,15 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
       imsic15RouteReset
     )
     val imsicToSNodeRouteResets = imsicL4ToSNodeBufs.zip(imsicRouteResets).map { case (buf, inReset) =>
-      stageResetOut(buf.module, inReset)
+      ResetUtils.stageResetOut(buf.module, inReset)
     }
 
     // connect io
     aplic_mNode.out.head._1 <> s_aplic
     m_msi2noc.viewAs[AXI4Bundle] <> crsdie_msi_sN.in.head._1
-    m_msi2noc_reset := crsdieRouteReset
-    m_reset.zip(imsicToSNodeRouteResets).foreach { case (outReset, routeReset) =>
-      outReset := routeReset
-    }
+    // m_reset.zip(imsicToSNodeRouteResets).foreach { case (outReset, routeReset) =>
+    //   outReset := routeReset
+    // }
     for (i <- 0 until params.NumHarts) {
       m(i).viewAs[AXI4Bundle] <> sNodes(i).in.head._1
       sNodes(i).in.head._1.ar.ready := true.B
@@ -1133,18 +1131,53 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
 
     u_dm_axi2w.io.axi <> dmWcrsIn
     u_dm_w2axi.io.axi <> dmWcrsOut
-    u_dm_w2axi.io.dmint := dmintGlobal
-    u_dm_w2axi.io.hartResetReq := hartResetReqLocal
-    u_dm_w2axi.io.hartIsInReset := hartIsInResetExternal
     u_dm_w2axi.io.reqId := req_id
     u_dm_w2axi.io.selfId := self_id
-
-    dm.module.io.resetCtrl.hartIsInReset := VecInit(u_dm_axi2w.io.hartIsInReset.asBools)
-    dmio.resetCtrl.hartResetReq.foreach { req =>
-      req := VecInit(u_dm_axi2w.io.hartResetReq.asBools)
+    // Debug sideband信号分段OR逻辑
+    // For each die, select the 16-bit segment of StandAloneDebugModule output corresponding to self_id, OR with dm_axi2w output, and output as dmint/hartResetReq
+    // 分段为 Vec，按 self_id 选段
+    // 只将本die段的standaloneDebugModule输出与dm_axi2w输出做OR，且本die段不写入dm_w2axi
+    val dmintVec = Wire(Vec(params.NumDies, UInt(params.NumHarts.W)))
+    val hartResetReqVec = Wire(Vec(params.NumDies, UInt(params.NumHarts.W)))
+    for (i <- 0 until params.NumDies) {
+      dmintVec(i) := dmintGlobal((i+1)*params.NumHarts-1, i*params.NumHarts)
+      hartResetReqVec(i) := hartResetReqLocal((i+1)*params.NumHarts-1, i*params.NumHarts)
     }
-    dmint := u_dm_axi2w.io.dmint
+    val selfIdx = (self_id - 1.U)(params.DieIDWidth-1, 0)
+    val dmintLocal = dmintVec(selfIdx)
+    val hartResetReqLocalSeg = hartResetReqVec(selfIdx)
+    // 只将本die段的standaloneDebugModule输出与dm_axi2w输出做OR
+    val dmintOr = dmintLocal | u_dm_axi2w.io.dmint
+    val hartResetReqOr = hartResetReqLocalSeg | u_dm_axi2w.io.hartResetReq
+    dmint := dmintOr
+    dmio.resetCtrl.hartResetReq.foreach { req =>
+      req := VecInit(hartResetReqOr.asBools)
+    }
+    // dm_w2axi 只输出跨die部分（本die段清零），用mask避免组合环路
+    // 用移位和常量生成mask，彻底消除组合环路
+    val base = selfIdx * params.NumHarts.U
+    val localMask = ((BigInt(1) << params.NumHarts) - 1).U(totalHartCount.W) << base
+    val dmintGlobalNoLocal = dmintGlobal & ~localMask
+    val hartResetReqNoLocal = hartResetReqLocal & ~localMask
+    val hartIsInResetNoLocal = Mux(isselfid, 0.U, hartIsInResetExternal)
+    u_dm_w2axi.io.dmint := dmintGlobalNoLocal
+    u_dm_w2axi.io.hartResetReq := hartResetReqNoLocal
 
+    u_dm_w2axi.io.dmint := dmintGlobalNoLocal
+    u_dm_w2axi.io.hartResetReq := hartResetReqNoLocal
+    u_dm_w2axi.io.hartIsInReset := hartIsInResetNoLocal
+
+    // val dmintLocal = dmintGlobal(base + params.NumHarts.U - 1, base)
+    // val hartResetReqLocalSeg = hartResetReqLocal(base + params.NumHarts.U - 1, base)
+    val hartIsInResetLocal = Mux(isselfid, hartIsInResetExternal, 0.U)
+    // val dmintOr = dmintLocal | u_dm_axi2w.io.dmint
+    // val hartResetReqOr = hartResetReqLocalSeg | u_dm_axi2w.io.hartResetReq
+    val hartIsInResetOr = hartIsInResetLocal | u_dm_axi2w.io.hartIsInReset
+    // dmint := dmintOr
+    // dmio.resetCtrl.hartResetReq.foreach { req =>
+    //   req := VecInit(hartResetReqOr.asBools)
+    // }
+    dm.module.io.resetCtrl.hartIsInReset := VecInit(hartIsInResetOr.asBools)
     // self node control
     dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle].aw.valid := isselfid & dm_sNode.in.head._1.aw.valid)
     dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle].w.valid := isselfid & dm_sNode.in.head._1.w.valid)
@@ -1406,3 +1439,21 @@ object PbusGen extends App {
 //  Seq(chisel3.stage.ChiselGeneratorAnnotation(() => LazyModule(new uncoreTop(params)).module))
 //)
 }
+
+// 计算本die段mask
+// val totalHartCount = params.NumDies * params.NumHarts
+// val selfIdx = (self_id - 1.U)(log2Ceil(params.NumDies)-1, 0)
+// val base = selfIdx * params.NumHarts.U
+// val localMask = ((BigInt(1) << params.NumHarts) - 1).U(totalHartCount.W) << base
+
+// // 只对跨die部分送入dm_w2axi
+// val dmintGlobalNoLocal = dmintGlobal & ~localMask
+// val hartResetReqNoLocal = hartResetReqLocal & ~localMask
+// val hartIsInResetNoLocal = hartIsInResetExternal & ~localMask
+
+// u_dm_w2axi.io.dmint := dmintGlobalNoLocal
+// u_dm_w2axi.io.hartResetReq := hartResetReqNoLocal
+// u_dm_w2axi.io.hartIsInReset := hartIsInResetNoLocal
+
+
+
