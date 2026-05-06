@@ -54,14 +54,13 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   io.trainReady := true.B
 
-  private val s0_fire, s1_fire, s2_fire, s3_fire = Wire(Bool())
+  private val s0_fire, s1_fire, s2_fire, s3_fire, t0_fire = Wire(Bool())
   alignBanks.foreach { b =>
     b.io.stageCtrl.s0_fire := s0_fire
     b.io.stageCtrl.s1_fire := s1_fire
     b.io.stageCtrl.s2_fire := s2_fire
     b.io.stageCtrl.s3_fire := s3_fire
-    // alignBank does not care t0, it's using t1 only
-    b.io.stageCtrl.t0_fire := false.B
+    b.io.stageCtrl.t0_fire := t0_fire
   }
 
   /* *** s0 ***
@@ -124,10 +123,21 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   }
 
   /* *** t0 ***
-   * receive training data and latch
+   * receive training data
+   * send startPc to alignBank for replacer state reading
    */
-  private val t0_fire  = io.stageCtrl.t0_fire && io.enable
+  t0_fire := io.stageCtrl.t0_fire && io.enable
   private val t0_train = io.train
+
+  private val t0_startPc = t0_train.startPc
+  private val t0_rotator = VecRotate(getAlignBankIndex(t0_startPc))
+  private val t0_startPcVec = t0_rotator.rotate(
+    VecInit.tabulate(NumAlignBanks)(i => getAlignedPc(t0_startPc + (i << FetchBlockAlignWidth).U))
+  )
+
+  alignBanks.zipWithIndex.foreach { case (b, i) =>
+    b.io.t0_startPc := t0_startPcVec(i)
+  }
 
   /* *** t1 ***
    * calculate write data and write to alignBanks
