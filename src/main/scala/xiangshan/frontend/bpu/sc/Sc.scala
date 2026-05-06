@@ -232,20 +232,6 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     s1_sumPercsum.length == NumWays,
     s"s1_sumPercsum length ${s1_sumPercsum.length} != NumWays $NumWays"
   )
-  private val s1_totalPercsumAll = VecInit(s1_biasPercsum.zipWithIndex.map {
-    case (biasPercsum, wayIdx) =>
-      val idx = wayIdx >> BiasUseTageBitWidth
-      biasPercsum +& s1_sumPercsum(idx)
-  }.grouped(BiasTableNumWays / NumWays).toSeq.map(group => VecInit(group)))
-
-  private val Seq(s1_sumAboveThresholdShift1All, s1_sumAboveThresholdShift2All, s1_sumAboveThresholdShift3All) =
-    Seq(4, 5, 6).map(shiftRight =>
-      VecInit(s1_totalPercsumAll.zipWithIndex.map { case (vec, idx) =>
-        VecInit(vec.map(percsum =>
-          aboveThreshold(percsum, scThreshold(idx).value >> shiftRight)
-        ))
-      })
-    )
 
   /*
    *  predict pipeline stage 2
@@ -286,10 +272,20 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_imliPred   = s2_wayIdx.map(wayIdx => s2_imliPercsum(wayIdx) >= 0.S)       // for performance counter
   private val s2_biasPred   = s2_biasWayIdx.map(biasIdx => s2_biasPercsum(biasIdx) >= 0.S) // for performance counter
 
-  private val s2_totalPercsumAll            = RegEnable(s1_totalPercsumAll, s1_fire)
-  private val s2_sumAboveThresholdShift1All = RegEnable(s1_sumAboveThresholdShift1All, s1_fire)
-  private val s2_sumAboveThresholdShift2All = RegEnable(s1_sumAboveThresholdShift2All, s1_fire)
-  private val s2_sumAboveThresholdShift3All = RegEnable(s1_sumAboveThresholdShift3All, s1_fire)
+  private val s2_totalPercsumAll = VecInit(s2_biasPercsum.zipWithIndex.map {
+    case (biasPercsum, wayIdx) =>
+      val idx = wayIdx >> BiasUseTageBitWidth
+      biasPercsum +& s2_sumPercsum(idx)
+  }.grouped(BiasTableNumWays / NumWays).toSeq.map(group => VecInit(group)))
+
+  private val Seq(s2_sumAboveThresholdShift1All, s2_sumAboveThresholdShift2All, s2_sumAboveThresholdShift3All) =
+    Seq(4, 5, 6).map(shiftRight =>
+      VecInit(s2_totalPercsumAll.zipWithIndex.map { case (vec, idx) =>
+        VecInit(vec.map(percsum =>
+          aboveThreshold(percsum, scThreshold(idx).value >> shiftRight)
+        ))
+      })
+    )
 
   private val s2_totalPercsum = VecInit(s2_wayIdx.zip(s2_biasIdxLowBits).map { case (wayIdx, lowBits) =>
     s2_totalPercsumAll(wayIdx)(lowBits)
