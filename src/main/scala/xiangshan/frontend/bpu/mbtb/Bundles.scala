@@ -58,6 +58,8 @@ class MainBtbEntrySramWriteReq(implicit p: Parameters) extends WriteReqBundle wi
   val setIdx:       UInt         = UInt(SetIdxLen.W)
   val entry:        MainBtbEntry = new MainBtbEntry
   override def tag: Option[UInt] = Some(Cat(entry.tag, entry.position)) // use entry's tag directly
+  override def compareBits: Option[UInt] =
+    Some(Cat(Cat(entry.attribute.asUInt, entry.targetCarry.asUInt), entry.targetLowerBits))
 }
 
 class MainBtbCounterSramWriteReq(implicit p: Parameters) extends MainBtbBundle {

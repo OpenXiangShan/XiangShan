@@ -53,9 +53,10 @@ trait HasFastTrainIO extends BasePredictorIO {
 // The abstract class is used to abstract the setIdx and tag from write requests for updating write buffer entries
 abstract class WriteReqBundle(implicit p: Parameters) extends BpuBundle {
   val setIdx: UInt
-  val wayMask: Option[Vec[Bool]]       = None
-  val wayData: Option[Vec[UInt]]       = None
-  def tag:     Option[UInt]            = None
-  def cnt:     Option[SaturateCounter] = None
-  def taken:   Option[Bool]            = None
+  val wayMask:     Option[Vec[Bool]]       = None
+  val wayData:     Option[Vec[UInt]]       = None
+  def tag:         Option[UInt]            = None
+  def cnt:         Option[SaturateCounter] = None
+  def taken:       Option[Bool]            = None
+  def compareBits: Option[UInt]            = None
 }

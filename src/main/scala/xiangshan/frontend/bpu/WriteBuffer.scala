@@ -43,14 +43,15 @@ import xiangshan.XSModule
  * @param nameSuffix Suffix of name, used for clearer logging
 */
 class WriteBuffer[T <: WriteReqBundle](
-    gen:        T,
-    numEntries: Int = 1,
-    numPorts:   Int = 1,
-    numWays:    Int = 1,
-    hasCnt:     Boolean = false,
-    hasWayMask: Boolean = false,
-    hasFlush:   Boolean = false,
-    nameSuffix: String = ""
+    gen:            T,
+    numEntries:     Int = 1,
+    numPorts:       Int = 1,
+    numWays:        Int = 1,
+    hasCnt:         Boolean = false,
+    hasCompareBits: Boolean = false,
+    hasWayMask:     Boolean = false,
+    hasFlush:       Boolean = false,
+    nameSuffix:     String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
@@ -196,7 +197,9 @@ class WriteBuffer[T <: WriteReqBundle](
           entries(rowIdx)(hitIdx) := mergedEntry
           valids(rowIdx)(hitIdx)  := true.B
         }.elsewhen(hitWritten) {
-          val entryChange = entries(rowIdx)(hitIdx).asUInt =/= mergedEntry.asUInt
+          val entryChange = if (hasCompareBits) {
+            entries(rowIdx)(hitIdx).compareBits.getOrElse(0.U) =/= mergedEntry.compareBits.getOrElse(0.U)
+          } else { entries(rowIdx)(hitIdx).asUInt =/= mergedEntry.asUInt }
           when(entryChange) {
             needWrite(rowIdx)(hitIdx) := true.B
             entries(rowIdx)(hitIdx)   := mergedEntry
