@@ -69,7 +69,7 @@ on:
         value: ${{ inputs.xs_config }}
       SCORE_FILE:
         description: Path to the score.txt generated in this run
-        value: ${{ jobs.run.outputs.SPEC_DIR }}/score.txt
+        value: ${{ jobs.run.outputs.SCORE_FILE }}
 
 jobs:
   run:
@@ -82,6 +82,7 @@ jobs:
       SHORT_SHA: ${{ steps.set_env.outputs.SHORT_SHA }}
       DATE: ${{ steps.set_env.outputs.DATE }}
       SPEC_DIR: ${{ steps.set_env.outputs.SPEC_DIR }}
+      SCORE_FILE: ${{ steps.set_env.outputs.SCORE_FILE }}
     steps:
       - name: Set test branch or commit
         id: set_test
@@ -104,7 +105,7 @@ jobs:
           echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
           echo "DATE=${DATE}" >> $GITHUB_OUTPUT
-          
+
           if [[ -z "${{ inputs.servers }}" ]]; then
             if [[ "${{ inputs.emulator }}" == "gsim" ]]; then
               echo "SERVER_LIST=node" >> $GITHUB_ENV
@@ -194,6 +195,12 @@ jobs:
 
           echo "SPEC_DIR=${SPEC_DIR}" >> $GITHUB_ENV
           echo "SPEC_DIR=${SPEC_DIR}" >> $GITHUB_OUTPUT
+
+          # append benchmark_type to score.txt filename, to prevent race condition in "python3 xs_autorun_multiServer.py --report"
+          SCORE_FILE="${SPEC_DIR}/score-${{ inputs.benchmark_type }}.txt"
+          echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_ENV
+          echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_OUTPUT
+
           echo "DRY_RUN_OPT=${DRY_RUN_OPT}" >> $GITHUB_ENV
 
       - name: Initialize submodules
@@ -241,23 +248,23 @@ jobs:
           python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
             --benchmarks "${{ inputs.benchmarks }}" \
             --xs $GITHUB_WORKSPACE --threads 16 --dir $SPEC_DIR --report \
-            > $SPEC_DIR/score.txt
+            > "$SCORE_FILE"
 
       - name: Summary result
         if: always()
         run: |
           echo "### :rocket: Performance Test Result" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "$SPEC_DIR/score.txt" >> $GITHUB_STEP_SUMMARY
-          cat $SPEC_DIR/score.txt >> $GITHUB_STEP_SUMMARY
+          echo "$SCORE_FILE" >> $GITHUB_STEP_SUMMARY
+          cat "$SCORE_FILE" >> $GITHUB_STEP_SUMMARY
           echo '' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          
+
           echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
           echo "Estimated SPEC CPU2006 Score per GHz: " >> $GITHUB_STEP_SUMMARY
-          TOTAL_SCORE=$(grep "SPEC2006/GHz:" $SPEC_DIR/score.txt | awk '{print $NF}')
-          INT_SCORE=$(grep "SPECint2006/GHz" $SPEC_DIR/score.txt | awk '{print $(NF-1)}')
-          FP_SCORE=$(grep "SPECfp2006/GHz" $SPEC_DIR/score.txt | awk '{print $(NF-1)}')
+          TOTAL_SCORE=$(grep "SPEC2006/GHz:" "$SCORE_FILE" | awk '{print $NF}')
+          INT_SCORE=$(grep "SPECint2006/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
+          FP_SCORE=$(grep "SPECfp2006/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
           echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY

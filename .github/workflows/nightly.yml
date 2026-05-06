@@ -37,12 +37,32 @@ jobs:
       - name: Diff with previous result
         run: |
           echo "### :bar_chart: Diff with previous run" >> $GITHUB_STEP_SUMMARY
-          if [ -n "$PREV_DIR" ] && [ -f "$PREV_DIR/score.txt" ]; then
-            echo "Comparing with $PREV_DIR" >> $GITHUB_STEP_SUMMARY
-            python3 $GITHUB_WORKSPACE/.github/workflows/nightly_perf_diff.py "${{ needs.run.outputs.SCORE_FILE }}" "$PREV_DIR/score.txt" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "No previous score.txt found" >> $GITHUB_STEP_SUMMARY
+
+          CURR_SCORE_FILE="${{ needs.run.outputs.SCORE_FILE }}"
+          PREV_SCORE_FILE="$PREV_DIR/$(basename ${{ needs.run.outputs.SCORE_FILE }})"
+
+          if [ -z "${PREV_DIR}" ] || [ ! -d "${PREV_DIR}" ]; then
+            echo "${PREV_DIR} does not exist" >> $GITHUB_STEP_SUMMARY
+            exit 0
           fi
+
+          if [ ! -f "${PREV_SCORE_FILE}" ]; then
+            echo "${PREV_SCORE_FILE} not found, falling back"
+            PREV_SCORE_FILE_FALLBACK="$(find "${PREV_DIR}" -type f -name "score*.txt" | head -n1)"
+            if [ -z "${PREV_SCORE_FILE_FALLBACK}" ]; then
+              echo "No previous score file found, tried:" >> $GITHUB_STEP_SUMMARY
+              echo "- ${PREV_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY
+              echo "- find score*.txt in ${PREV_DIR}" >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
+            echo "${PREV_SCORE_FILE} not found, fall back to ${PREV_SCORE_FILE_FALLBACK}" >> $GITHUB_STEP_SUMMARY
+            PREV_SCORE_FILE="${PREV_SCORE_FILE_FALLBACK}"
+          fi
+
+          echo "Current: ${CURR_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY
+          echo "Previous: ${PREV_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY
+          python3 $GITHUB_WORKSPACE/.github/workflows/nightly_perf_diff.py "${CURR_SCORE_FILE}" "${PREV_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY
+
       - name: Upload report
         uses: actions/upload-artifact@v7
         with:
