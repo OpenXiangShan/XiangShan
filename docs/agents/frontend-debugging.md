@@ -43,6 +43,10 @@ For every DUT bin-trace failure, treat the following as mandatory:
 5. State the concrete env bug location, suspected function, or unresolved proof
    gap before changing behavior.
 6. Fix the root cause directly; do not present a bypass as resolution.
+7. Before using a same-name case log as waveform evidence, verify that the
+   waveform and log come from the same run.
+8. If the local case log lacks the needed `INFO`-level events, stop and say so
+   before switching to another log file.
 
 ## Ground Truth Rules
 
@@ -104,6 +108,8 @@ waveforms or monitor output, then consult:
   `build-frontend/pylib/Frontend/signals.json`.
 - Confirm that the waveform, trace, and generated DUT artifacts all come from
   the same current reproduction.
+- Confirm that the paired case log has enough verbosity for the question being
+  answered.
 
 ## Related References
 
