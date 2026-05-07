@@ -1098,20 +1098,20 @@ object VecIssueQueue {
         s.vpRen := SrcType.isVp(enq.srcType(srcIdx))
         s.psrc := enq.psrc(srcIdx)
         s.srcState := enq.srcState(srcIdx)
-        s.bypassDelay := 0.U
+        s.bypassDelay := BypassDelay.delay3
         s.bypassSource.idx := 0.U
       }
       this.srcStatusV0.foreach { case s =>
         s.ren := enq.v0Ren
         s.psrc := enq.psrcV0
         s.srcState := enq.srcStateV0
-        s.bypassDelay := 0.U
+        s.bypassDelay := BypassDelay.delay3
       }
       this.srcStatusVl.foreach { case s =>
         s.ren := enq.vlRen
         s.psrc := enq.psrcVl
         s.srcState := enq.srcStateVl
-        s.bypassDelay := 0.U
+        s.bypassDelay := BypassDelay.delay3
       }
 
       this.blocked := false.B
