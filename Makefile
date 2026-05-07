@@ -74,6 +74,12 @@ JVM_XSS ?= 256m
 # mill arguments for build.sc
 MILL_BUILD_ARGS = -Djvm-xmx=$(JVM_XMX) -Djvm-xss=$(JVM_XSS)
 
+# NOTE: ccache is intentionally disabled by default, as:
+#   1. it does not help XiangShan's build performance in most cases, as slight change in chisel result in significant change in cpp code
+#   2. it introduces too much IO overhead
+# NOTE: use `make emu OBJCACHE=ccache` to enable it
+OBJCACHE ?=
+
 # common chisel args
 MFC_ARGS = --target $(CHISEL_TARGET) \
            --firtool-opt "-O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none"
@@ -342,7 +348,7 @@ emu-mk: sim-verilog
 	$(MAKE) -C ./difftest emu-mk NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
 
 emu: $(call docker-deps,emu-mk)
-	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
+	$(MAKE) -C ./difftest emu NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX) OBJCACHE=$(OBJCACHE)
 
 gsim: sim-verilog
 	$(MAKE) -C ./difftest emu GSIM=1 SIM_TOP=SimTop DESIGN_DIR=$(NOOP_HOME) NUM_CORES=$(NUM_CORES) RTL_SUFFIX=$(RTL_SUFFIX)
