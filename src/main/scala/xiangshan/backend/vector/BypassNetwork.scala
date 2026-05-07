@@ -63,7 +63,8 @@ class BypassNetwork(implicit val param: ExuParam, val p: Parameters) extends Mod
       (vpRen(i) && delay(i) === BypassDelay.delay3) -> in.vpRdData(i),
     )
 
-    out.src(i) := Mux1H(gpSeq ++ fpSeq ++ vpSeq)
+    val isRegSrc = gpRen(i) || fpRen(i) || vpRen(i)
+    out.src(i) := Mux1H((!isRegSrc -> in.vpRdData(i)) +: (gpSeq ++ fpSeq ++ vpSeq))
   }
 }
 
