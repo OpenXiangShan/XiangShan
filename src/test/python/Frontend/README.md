@@ -112,6 +112,9 @@ src/test/python/Frontend/scripts/run_pytest_with_log.sh
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
 ```
 
+- 如果需要在指定 `cursor` 达到时提前通过，可额外设置
+  `TB_TRACE_TARGET_CURSOR=<index>`。
+
 - 详细测试参数、bin-trace 环境变量、runtime bound、artifact 规则和
   direct `pytest` 约束，统一见 `docs/agents/frontend-verification.md`。
 
