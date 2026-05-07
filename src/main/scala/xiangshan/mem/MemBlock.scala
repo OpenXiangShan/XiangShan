@@ -866,6 +866,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         dcache.io.lsu.load(i).s1_paddr_dup_dcache    := vSegmentUnit.io.rdcache.s1_paddr_dup_dcache
         dcache.io.lsu.load(i).s1_kill                := vSegmentUnit.io.rdcache.s1_kill
         dcache.io.lsu.load(i).s2_kill                := vSegmentUnit.io.rdcache.s2_kill
+        dcache.io.lsu.load(i).s2_mshr_or_tld_full_fwd := vSegmentUnit.io.rdcache.s2_mshr_or_tld_full_fwd
         dcache.io.lsu.load(i).s0_pc                  := vSegmentUnit.io.rdcache.s0_pc
         dcache.io.lsu.load(i).s1_pc                  := vSegmentUnit.io.rdcache.s1_pc
         dcache.io.lsu.load(i).s2_pc                  := vSegmentUnit.io.rdcache.s2_pc
@@ -876,6 +877,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         dcache.io.lsu.load(i).s1_paddr_dup_dcache    := newLoadUnits(i).io.dcache.s1_paddr_dup_dcache
         dcache.io.lsu.load(i).s1_kill                := newLoadUnits(i).io.dcache.s1_kill
         dcache.io.lsu.load(i).s2_kill                := newLoadUnits(i).io.dcache.s2_kill
+        dcache.io.lsu.load(i).s2_mshr_or_tld_full_fwd := newLoadUnits(i).io.dcache.s2_mshr_or_tld_full_fwd
         dcache.io.lsu.load(i).s0_pc                  := newLoadUnits(i).io.dcache.s0_pc
         dcache.io.lsu.load(i).s1_pc                  := newLoadUnits(i).io.dcache.s1_pc
         dcache.io.lsu.load(i).s2_pc                  := newLoadUnits(i).io.dcache.s2_pc

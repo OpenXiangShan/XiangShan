@@ -370,9 +370,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   //
   val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
   val s2_can_send_miss_req_dup = RegEnable(s1_will_send_miss_req, s1_fire)
+  val s2_mshr_or_tld_full_fwd = io.lsu.s2_mshr_or_tld_full_fwd
 
-  val s2_miss_req_valid     = s2_valid && s2_can_send_miss_req
-  val s2_miss_req_valid_dup = s2_valid_dup && s2_can_send_miss_req_dup
+  val s2_miss_req_valid     = s2_valid && s2_can_send_miss_req && !s2_mshr_or_tld_full_fwd
+  val s2_miss_req_valid_dup = s2_valid_dup && s2_can_send_miss_req_dup && !s2_mshr_or_tld_full_fwd
   val s2_miss_req_fire      = s2_miss_req_valid_dup && io.miss_req.ready
 
   // when req got nacked, upper levels should replay this request

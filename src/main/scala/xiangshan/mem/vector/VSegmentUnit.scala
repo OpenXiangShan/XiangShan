@@ -710,6 +710,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.rdcache.s1_paddr_dup_dcache    := dcacheReqPaddr
   io.rdcache.s1_kill                := false.B
   io.rdcache.s2_kill                := false.B
+  io.rdcache.s2_mshr_or_tld_full_fwd := false.B
   if (env.FPGAPlatform){
     io.rdcache.s0_pc                := DontCare
     io.rdcache.s1_pc                := DontCare
@@ -1013,4 +1014,3 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.exceptionInfo.bits.isHyper       := false.B
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }
-

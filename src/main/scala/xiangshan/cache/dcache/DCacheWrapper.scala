@@ -135,7 +135,7 @@ trait HasDCacheParameters
   val EnableTagEcc = cacheParams.enableTagEcc
 
   // banked dcache support
-  val DCacheSetDiv = 1
+  val DCacheSetDiv = 2
   val DCacheSets = cacheParams.nSets
   val DCacheWayDiv = 2
   val DCacheWays = cacheParams.nWays
@@ -592,6 +592,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s2_bank_conflict = Input(Bool())
   val s2_wpu_pred_fail = Input(Bool())
   val s2_mq_nack = Input(Bool())
+  val s2_mshr_or_tld_full_fwd = Output(Bool())
 
   // debug
   val debug_s1_hit_way = Input(UInt(nWays.W))
@@ -1344,7 +1345,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // only lsu uses this, replay never kills
   for (w <- 0 until LoadPipelineWidth) {
     ldu(w).io.lsu <> io.lsu.load(w)
-
+    io.lsu.load(w).req.ready := Mux(bankedDataArray.io.write.valid, false.B, ldu(w).io.lsu.req.ready)
     // TODO:when have load128Req
     ldu(w).io.load128Req := io.lsu.load(w).is128Req
 

@@ -124,8 +124,10 @@ class TageMeta(implicit p: Parameters) extends TageBundle {
   val entries: Vec[TageMetaEntry] = Vec(NumBtbResultEntries, new TageMetaEntry)
 }
 
-class TageFoldedHist(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
-  val forIdx: UInt      = UInt(SetIdxWidth.W)
+class TageFoldedHist(implicit p: Parameters) extends TageBundle {
+  // TAGE tables may use different set index widths when table sizes differ.
+  // Use the global max width here so folded histories from all tables can be aggregated in a single Vec.
+  val forIdx: UInt      = UInt(MaxSetIdxWidth.W)
   val forTag: Vec[UInt] = Vec(2, UInt(TagWidth.W))
 }
 

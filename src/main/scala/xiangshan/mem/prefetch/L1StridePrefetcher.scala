@@ -38,34 +38,140 @@ import xiangshan.cache.mmu._
 import scala.collection.SeqLike
 
 trait HasStridePrefetchHelper extends HasL1PrefetchHelper {
-  val STRIDE_FILTER_SIZE = 6
-  val STRIDE_ENTRY_NUM = 10
-  val STRIDE_BITS = 10 + BLOCK_OFFSET
-  val STRIDE_VADDR_BITS = 10 + BLOCK_OFFSET
+  val STRIDE_FILTER_SIZE = 12
+  val STRIDE_ENTRY_NUM = 16
+  val STRIDE_BITS = VAddrBits + 1
+  val STRIDE_VADDR_BITS = VAddrBits
   val STRIDE_CONF_BITS = 2
 
   // detail control
-  val ALWAYS_UPDATE_PRE_VADDR = true
+  val ALWAYS_UPDATE_PRE_VADDR = false
   val AGGRESIVE_POLICY = false // if true, prefetch degree is greater than 1, 1 otherwise
   val STRIDE_LOOK_AHEAD_BLOCKS = 2 // aggressive degree
-  val LOOK_UP_STREAM = false // if true, avoid collision with stream
+  val LOOK_UP_STREAM = true // if true, avoid collision with stream
+
+  // Feature: Ignore short strides when there are long strides
+  val LONG_STRIDE_THRESH = 512 // long strides threshold (Bytes)
+  val LONG_STRIDE_CONF_BITS = 4
+  val LONG_STRIDE_CONF_INIT = 7
+
+  // Feature: multi-step stride
+  val STEP_NUM = 4
+  val ACTIVE_STEP_NUM = 1
 
   val STRIDE_WIDTH_BLOCKS = if(AGGRESIVE_POLICY) STRIDE_LOOK_AHEAD_BLOCKS else 1
 
   def MAX_CONF = (1 << STRIDE_CONF_BITS) - 1
+  def MAX_LONG_STRIDE_CONF = (1 << LONG_STRIDE_CONF_BITS) - 1
+  def block_bytes = dcacheParameters.blockBytes
+}
+
+class StrideStepBundle(val step: Int)(implicit p: Parameters) extends XSBundle with HasStridePrefetchHelper {
+  val pre_vaddr = UInt(STRIDE_VADDR_BITS.W)
+  val stride = SInt(STRIDE_BITS.W)
+  val confidence = UInt(STRIDE_CONF_BITS.W)
+  val long_stride_confidence = UInt(LONG_STRIDE_CONF_BITS.W)
+  private val counter_width = log2Up(step) + 1
+  val step_counter = UInt(counter_width.W)
+
+  // override def cloneType: this.type = new StrideStepBundle(step).asInstanceOf[this.type]
+
+  def resetState(): Unit = {
+    pre_vaddr := 0.U
+    stride := 0.S
+    confidence := 0.U
+    long_stride_confidence := 0.U
+    step_counter := 0.U
+  }
+
+  def alloc(vaddr: UInt): Unit = {
+    pre_vaddr := vaddr
+    stride := 0.S
+    confidence := 0.U
+    long_stride_confidence := LONG_STRIDE_CONF_INIT.U
+    step_counter := 0.U
+  }
+
+  def absStride(x: SInt): UInt = {
+    Mux(x < 0.S, (-x).asUInt, x.asUInt)
+  }
+
+  def update(vaddr: UInt, always_update_pre_vaddr: Bool) = {
+    val new_vaddr = vaddr
+    val stride_delta = Wire(UInt(STRIDE_VADDR_BITS.W))
+    val stride_is_negative = new_vaddr < pre_vaddr
+    stride_delta := Mux(stride_is_negative,
+      (pre_vaddr - new_vaddr)(STRIDE_VADDR_BITS - 1, 0),
+      (new_vaddr - pre_vaddr)(STRIDE_VADDR_BITS - 1, 0)
+    )
+    val new_stride = Wire(SInt(STRIDE_BITS.W))
+    new_stride := Mux(stride_is_negative,
+      -Cat(0.U(1.W), stride_delta).asSInt,
+      Cat(0.U(1.W), stride_delta).asSInt
+    )
+    val abs_new_stride = absStride(new_stride)
+    val stride_valid = new_stride =/= 0.S
+    val stride_match = new_stride === stride
+    val low_confidence = confidence <= 1.U
+    val at_max_step = step_counter === step.U(step_counter.getWidth.W)
+    val do_stride_update = stride_valid && at_max_step
+    val short_stride_filtered =
+      abs_new_stride < block_bytes.U && long_stride_confidence > LONG_STRIDE_CONF_INIT.U
+    val next_confidence = WireDefault(confidence)
+    val next_stride = WireDefault(stride)
+    val next_pre_vaddr = WireDefault(pre_vaddr)
+    val next_long_stride_confidence = WireDefault(long_stride_confidence)
+    val next_step_counter = WireDefault(step_counter)
+
+    when(stride_valid) {
+      val next_counter = step_counter + 1.U
+      next_step_counter := Mux(at_max_step, 0.U, next_counter(counter_width - 1, 0))
+    }
+
+    when(do_stride_update) {
+      when(abs_new_stride > LONG_STRIDE_THRESH.U) {
+        next_long_stride_confidence := MAX_LONG_STRIDE_CONF.U
+      }.otherwise {
+        next_long_stride_confidence := Mux(long_stride_confidence === 0.U,
+                                           long_stride_confidence,
+                                           long_stride_confidence - 1.U)
+      }
+
+      when(!short_stride_filtered) {
+        when(stride_match) {
+          next_confidence := Mux(confidence === MAX_CONF.U, confidence, confidence + 1.U)
+        }.otherwise {
+          next_confidence := Mux(confidence === 0.U, confidence, confidence - 1.U)
+          when(low_confidence) {
+            next_stride := new_stride
+          }
+        }
+        next_pre_vaddr := new_vaddr
+      }
+    }
+    when(always_update_pre_vaddr) {
+      next_pre_vaddr := new_vaddr
+    }
+
+    pre_vaddr := next_pre_vaddr
+    stride := next_stride
+    confidence := next_confidence
+    long_stride_confidence := next_long_stride_confidence
+    step_counter := next_step_counter
+
+    val can_send_pf = stride_valid && next_stride =/= 0.S && next_confidence >= 2.U
+    (can_send_pf, next_stride)
+  }
+
 }
 
 class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePrefetchHelper {
-  val pre_vaddr = UInt(STRIDE_VADDR_BITS.W)
-  val stride = UInt(STRIDE_BITS.W)
-  val confidence = UInt(STRIDE_CONF_BITS.W)
   val hash_pc = UInt(HASH_TAG_WIDTH.W)
+  val steps = MixedVec((0 until STEP_NUM).map(i => new StrideStepBundle(i)))
 
   def reset(index: Int) = {
-    pre_vaddr := 0.U
-    stride := 0.U
-    confidence := 0.U
     hash_pc := index.U
+    steps.foreach(_.resetState())
   }
 
   def tag_match(valid1: Bool, valid2: Bool, new_hash_pc: UInt): Bool = {
@@ -73,38 +179,26 @@ class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePr
   }
 
   def alloc(vaddr: UInt, alloc_hash_pc: UInt) = {
-    pre_vaddr := vaddr(STRIDE_VADDR_BITS - 1, 0)
-    stride := 0.U
-    confidence := 0.U
     hash_pc := alloc_hash_pc
+    steps.foreach(_.alloc(vaddr))
   }
 
   def update(vaddr: UInt, always_update_pre_vaddr: Bool) = {
-    val new_vaddr = vaddr(STRIDE_VADDR_BITS - 1, 0)
-    val new_stride = new_vaddr - pre_vaddr
-    val new_stride_blk = block_addr(new_stride)
-    // NOTE: for now, disable negtive stride
-    val stride_valid = new_stride_blk =/= 0.U && new_stride_blk =/= 1.U && new_stride(STRIDE_VADDR_BITS - 1) === 0.U
-    val stride_match = new_stride === stride
-    val low_confidence = confidence <= 1.U
-    val can_send_pf = stride_valid && stride_match && confidence === MAX_CONF.U
+    val step_can_Send = Wire(Vec(STEP_NUM, Bool()))
+    val step_stride = Wire(Vec(STEP_NUM, SInt(STRIDE_BITS.W)))
 
-    when(stride_valid) {
-      when(stride_match) {
-        confidence := Mux(confidence === MAX_CONF.U, confidence, confidence + 1.U)
-      }.otherwise {
-        confidence := Mux(confidence === 0.U, confidence, confidence - 1.U)
-        when(low_confidence) {
-          stride := new_stride
-        }
+    for ((step, idx) <- steps.zipWithIndex) {
+      if (idx < ACTIVE_STEP_NUM) {
+        val res = step.update(vaddr, always_update_pre_vaddr)
+        step_can_Send(idx) := res._1
+        step_stride(idx) := res._2
+      } else {
+        step_can_Send(idx) := false.B
+        step_stride(idx) := 0.S
       }
-      pre_vaddr := new_vaddr
-    }
-    when(always_update_pre_vaddr) {
-      pre_vaddr := new_vaddr
     }
 
-    (can_send_pf, new_stride)
+    (step_can_Send, step_stride)
   }
 
 }
@@ -165,9 +259,10 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s1_hit = RegEnable(s0_hit, s0_valid)
   val s1_alloc = s1_valid && !s1_hit
   val s1_update = s1_valid && s1_hit
-  val s1_stride = array(s1_index).stride
-  val s1_new_stride = WireInit(0.U(STRIDE_BITS.W))
+  val s1_step_can_send_pf = WireInit(VecInit(Seq.fill(STEP_NUM)(false.B)))
+  val s1_step_new_stride = WireInit(VecInit(Seq.fill(STEP_NUM)(0.S(STRIDE_BITS.W))))
   val s1_can_send_pf = WireInit(false.B)
+  val s1_stride = WireInit(0.S(STRIDE_BITS.W))
   s0_can_accept := !(s1_valid && s1_pc_hash === s0_pc_hash)
 
   val always_update = Constantin.createRecord(s"always_update${p(XSCoreParamsKey).HartId}", initValue = ALWAYS_UPDATE_PRE_VADDR)
@@ -180,9 +275,12 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     )
   }.elsewhen(s1_update) {
     val res = array(s1_index).update(s1_vaddr, always_update)
-    s1_can_send_pf := res._1
-    s1_new_stride := res._2
+    s1_step_can_send_pf := res._1
+    s1_step_new_stride := res._2
   }
+
+  s1_can_send_pf := s1_step_can_send_pf(0)
+  s1_stride := s1_step_new_stride(0)
 
   val l1_stride_ratio_const = Constantin.createRecord(s"l1_stride_ratio${p(XSCoreParamsKey).HartId}", initValue = 2)
   val l1_stride_ratio = l1_stride_ratio_const(3, 0)
@@ -192,15 +290,23 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s2_valid = GatedValidRegNext(s1_valid && s1_can_send_pf)
   val s2_vaddr = RegEnable(s1_vaddr, s1_valid && s1_can_send_pf)
   val s2_stride = RegEnable(s1_stride, s1_valid && s1_can_send_pf)
-  val s2_l1_depth = s2_stride << l1_stride_ratio
-  val s2_l1_pf_vaddr = (s2_vaddr + s2_l1_depth)(VAddrBits - 1, 0)
-  val s2_l2_depth = s2_stride << l2_stride_ratio
-  val s2_l2_pf_vaddr = (s2_vaddr + s2_l2_depth)(VAddrBits - 1, 0)
+  val s2_stride_is_negative = s2_stride < 0.S
+  val s2_stride_abs = Mux(s2_stride_is_negative, (-s2_stride).asUInt, s2_stride.asUInt)
+  val s2_l1_depth = s2_stride_abs << l1_stride_ratio
+  val s2_l1_pf_vaddr = Mux(s2_stride_is_negative,
+    (s2_vaddr - s2_l1_depth)(VAddrBits - 1, 0),
+    (s2_vaddr + s2_l1_depth)(VAddrBits - 1, 0)
+  )
+  val s2_l2_depth = s2_stride_abs << l2_stride_ratio
+  val s2_l2_pf_vaddr = Mux(s2_stride_is_negative,
+    (s2_vaddr - s2_l2_depth)(VAddrBits - 1, 0),
+    (s2_vaddr + s2_l2_depth)(VAddrBits - 1, 0)
+  )
   val s2_l1_pf_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     valid = s2_valid,
     vaddr = s2_l1_pf_vaddr,
     width = STRIDE_WIDTH_BLOCKS,
-    decr_mode = false.B,
+    decr_mode = s2_stride_is_negative,
     sink = SINK_L1,
     source = L1_HW_PREFETCH_STRIDE,
     confidence = io.confidence,
@@ -212,7 +318,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     valid = s2_valid,
     vaddr = s2_l2_pf_vaddr,
     width = STRIDE_WIDTH_BLOCKS,
-    decr_mode = false.B,
+    decr_mode = s2_stride_is_negative,
     sink = SINK_L2,
     source = L1_HW_PREFETCH_STRIDE,
     confidence = io.confidence,
@@ -239,16 +345,11 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   XSPerfAccumulate("l1_pf_valid", s3_valid)
   XSPerfAccumulate("l2_pf_valid", s4_valid)
   XSPerfAccumulate("detect_stream", io.stream_lookup_resp)
-  XSPerfHistogram("high_conf_num", PopCount(VecInit(array.map(_.confidence === MAX_CONF.U))).asUInt, true.B, 0, STRIDE_ENTRY_NUM, 1)
+  XSPerfHistogram("high_conf_num", PopCount(VecInit(array.map(ent =>
+    ent.steps.map(_.confidence === MAX_CONF.U).reduce(_||_)
+  ))).asUInt, true.B, 0, STRIDE_ENTRY_NUM, 1)
   for(i <- 0 until STRIDE_ENTRY_NUM) {
     XSPerfAccumulate(s"entry_${i}_update", i.U === s1_index && s1_update)
-    for(j <- 0 until 4) {
-      XSPerfAccumulate(s"entry_${i}_disturb_${j}", i.U === s1_index && s1_update &&
-                                                   j.U === s1_new_stride &&
-                                                   array(s1_index).confidence === MAX_CONF.U &&
-                                                   array(s1_index).stride =/= s1_new_stride
-      )
-    }
   }
 
   for(i <- 0 until STRIDE_ENTRY_NUM) {
