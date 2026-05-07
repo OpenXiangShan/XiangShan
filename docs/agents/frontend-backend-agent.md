@@ -33,6 +33,7 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 - mismatch 之后仍需继续接收并入队后续 `cfVec`，这些指令在语义上全部属于同一段 wrong-path，直到被 `redirect` 清除
 - `redirect` 生效后，必须从这段 active wrong-path 的起点开始清除 `cfVec_queue`；更老正确路径前缀必须保留
 - wrong-path 的清除边界必须由“恢复后重新建立 correct-path 对齐”的语义决定，而不是由中途某个临时 `target_pc`、`ftqidx`、等待态命中或类似局部现象决定
+- `redirect` 发出后不得立即 flush active wrong-path；必须先等属于该 redirect 的第一条 recovery 指令以匹配的 `target_pc` 和预期 FTQ 身份真正进入 `cfVec_queue`，再从 wrong-path 起点 flush 到 recovery 边界
 
 ### `commit_queue` 语义
 
@@ -165,6 +166,7 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 - mismatch 后继续接收 `cfVec`，不得进入“暂停构队列”等待模式。
 - `redirect` 必须从 active wrong-path 起点开始清除 `cfVec_queue`，并保留更老 correct-path 前缀。
 - `redirect` 的 flush 范围不得因为临时 `target_pc` 可见、waiting-target 命中、`ftqidx` 数值变化或类似局部条件而被拆成多段。
+- `redirect` 发出本身只允许把系统带入 recovery-wait 状态；在 recovery target 真实入队前，不得提前执行 wrong-path queue flush。
 - 某条 CFI 一旦已经与 golden 的某个动态实例匹配，其后续用于 `redirect` 的恢复目标必须绑定到该动态实例自身的 golden 语义，不得从一个可能已经漂移的全局 golden cursor 临时推导。
 - 某条 `redirect` 的 `target`、`pc`、FTQ 上下文必须来自同一个动态实例；不得把 `target` 绑定到当前实例、却把 FTQ idx / offset 绑定到另一条更老或已失效的实例。
 - 已被 earlier `redirect` 在语义上清除的 wrong-path 指令，即使暂时仍残留在内部结构中，也不得再参与后续 `redirect` 的归因、FTQ 上下文选择或 flush 范围计算。

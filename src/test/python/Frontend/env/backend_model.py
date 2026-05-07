@@ -2587,6 +2587,13 @@ class BackendModel:
                 continue
             entry.has_redirect = False
 
+    def _ftq_transition_without_last_is_expected(self) -> bool:
+        if self._current_ftq_entry is None:
+            return False
+        if bool(self._current_ftq_entry.has_redirect):
+            return True
+        return self._has_active_wrong_path_episode() or self._recovery_phase_active()
+
     def _seal_current_ftq_entry(self, *, observed_last_in_entry: bool = False) -> None:
         sealed_ftq = (
             None
@@ -3343,10 +3350,11 @@ class BackendModel:
                     # Redirect/truncation can cut an FTQ entry short before DUT raises
                     # isLastInFtqEntry for the surviving prefix. Close the prefix so
                     # later resolve/commit bookkeeping does not silently lose it.
-                    self.logger.warning(
-                        "FTQ entry transition without isLastInFtqEntry: flag=%d value=%d",
-                        self._current_ftq_entry.ftq_flag, self._current_ftq_entry.ftq_value,
-                    )
+                    if not self._ftq_transition_without_last_is_expected():
+                        self.logger.warning(
+                            "FTQ entry transition without isLastInFtqEntry: flag=%d value=%d",
+                            self._current_ftq_entry.ftq_flag, self._current_ftq_entry.ftq_value,
+                        )
                     self._cfvec_queue_close_current_ftq_span(
                         int(self._current_ftq_entry.ftq_flag),
                         int(self._current_ftq_entry.ftq_value),
@@ -3964,39 +3972,12 @@ class BackendModel:
                 expected_recovery_ftq=expected_recovery_ftq,
             )
             if self._recovery_phase_active():
-                flush_summary = self._cfvec_queue_flush_wrong_path(
-                    keep_open_ftqs={(int(ftq_flag), int(ftq_value))},
-                )
-                if flush_summary is not None:
-                    semantic_start_pc = flush_summary["observed_first_pc"]
-                    if (
-                        not flush_itself
-                        and int(payload.get("taken", 0)) != 0
-                        and "pc" in payload
-                    ):
-                        semantic_start_pc = int(
-                            self._sequential_next_pc(
-                                int(payload["pc"]),
-                                bool(payload.get("is_rvc", 0)),
-                            )
-                        )
-                    self.logger.info(
-                        "redirect queue flush: reason=%s target=0x%x removed=%d queue_idx=[%d,%d] pc_start=%s queue_pc_ranges=%s",
-                        reason,
-                        int(target_pc),
-                        int(flush_summary["removed_count"]),
-                        int(flush_summary["queue_index_start"]),
-                        int(flush_summary["queue_index_end"]),
-                        (
-                            "none"
-                            if semantic_start_pc is None
-                            else f"0x{int(semantic_start_pc):x}"
-                        ),
-                        str(flush_summary["pc_ranges"]),
-                    )
-                self._mark_active_wrong_path_redirect_driven(
+                self.logger.info(
+                    "redirect recovery armed: reason=%s target=0x%x expected_recovery_ftq=(%d,%d)",
+                    reason,
                     int(target_pc),
-                    expected_recovery_ftq=expected_recovery_ftq,
+                    int(expected_recovery_ftq[0]),
+                    int(expected_recovery_ftq[1]),
                 )
             self._sync_backend_state()
             self._apply_backend_state()
