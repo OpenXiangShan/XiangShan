@@ -1336,8 +1336,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   TopDownCounters.values.foreach(ctr => XSPerfAccumulate(ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)), XSPerfLevel.CRITICAL))
 
   val robTrueCommit = io.debugRobTrueCommit.getOrElse(0.U)
-  TopDownCounters.values.foreach(ctr => XSPerfRolling("td_"+ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)),
+  TopDownCounters.values.foreach(ctr => XSPerfRolling("td_inst_"+ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)),
                                                       robTrueCommit, 1000, clock, reset))
+
+  val topDownRollingGranularity = 1000
+  TopDownCounters.values.foreach(ctr => XSPerfRolling("td_cycle_"+ctr.toString(), PopCount(stallReason.map(_ === ctr.id.U)),
+                                                      topDownRollingGranularity, clock, reset))
 
   XSPerfHistogram("slots_fire", PopCount(thisActualOut), true.B, 0, RenameWidth+1, 1)
   // Explaination: when out(0) not fire, PopCount(valid) is not meaningfull
