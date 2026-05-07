@@ -131,6 +131,27 @@ class _GoldenTraceWithPostTraceTailEnv:
         return 1
 
 
+class _GoldenTraceTargetCursorEnv:
+    def __init__(self) -> None:
+        self.dut = _NoRawDutAccess()
+        self.monitor = SimpleNamespace(get_errors=lambda: [])
+        self.backend_model = SimpleNamespace(
+            golden_trace=SimpleNamespace(entries=[SimpleNamespace(pc=0x80000000)] * 4, cursor=0),
+            has_pending_work=lambda: False,
+            current_golden_pc=lambda: 0x80000000,
+        )
+        self.steps = 0
+
+    def step(self, cycles: int) -> int:
+        assert int(cycles) == 1
+        self.steps += 1
+        if self.steps == 1:
+            self.backend_model.golden_trace.cursor = 1
+        elif self.steps == 2:
+            self.backend_model.golden_trace.cursor = 2
+        return 1
+
+
 def test_check_pc_sequence_uses_monitor_observations_without_raw_dut_peeks():
     env = _CheckPcEnv([0x80000000, 0x80000004])
 
@@ -176,6 +197,16 @@ def test_run_until_golden_trace_complete_ignores_post_trace_tail_work():
 
     assert result.completed is True
     assert result.pending_work == 0
+
+
+def test_run_until_golden_trace_complete_passes_at_target_cursor() -> None:
+    env = _GoldenTraceTargetCursorEnv()
+
+    result = RunUntilGoldenTraceCompleteSequence(max_cycles=10, target_cursor=2).run(env)
+
+    assert result.completed is True
+    assert result.status == "cursor_target"
+    assert result.cursor >= 2
 
 
 def test_load_golden_trace_sequence_passes_start_index_through() -> None:

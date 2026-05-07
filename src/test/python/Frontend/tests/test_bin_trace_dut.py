@@ -45,6 +45,13 @@ def _reset_vector() -> int:
     return _parse_int(os.getenv("TB_RESET_VECTOR", os.getenv("TB_BASE_ADDR", "0x80000000")))
 
 
+def _trace_target_cursor() -> int:
+    value = _parse_int(os.getenv("TB_TRACE_TARGET_CURSOR", "0"))
+    if value < 0:
+        raise AssertionError("TB_TRACE_TARGET_CURSOR must be >= 0")
+    return int(value)
+
+
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 @pytest.mark.skipif(not _RUN_PIPELINE_TEST, reason="pipeline-only test")
 def test_bin_trace(env):
@@ -53,6 +60,7 @@ def test_bin_trace(env):
     base_addr = _parse_int(os.getenv("TB_BASE_ADDR", "0x80000000"))
     reset_vector = _reset_vector()
     trace_start_index = _trace_start_index()
+    trace_target_cursor = _trace_target_cursor()
 
     assert bin_path.is_file(), f"bin file not found: {bin_path}"
     assert trace_path.is_file(), f"trace file not found: {trace_path}"
@@ -64,13 +72,14 @@ def test_bin_trace(env):
     result = getattr(env, "_last_run_until_golden_result", None)
     if result is not None:
         logger.info(
-            "bin trace stop reason: status=%s completed=%s ok=%s cycles=%d cursor=%d/%d pending_work=%d monitor_errors=%d",
+            "bin trace stop reason: status=%s completed=%s ok=%s cycles=%d cursor=%d/%d target_cursor=%d pending_work=%d monitor_errors=%d",
             result.status,
             result.completed,
             result.ok,
             result.cycles_run,
             result.cursor,
             result.total_entries,
+            trace_target_cursor,
             result.pending_work,
             result.monitor_error_count,
         )
@@ -85,7 +94,6 @@ def test_bin_trace(env):
             f"monitor_errors={result.monitor_error_count}"
         )
     )
-
     assert bin_size > 0
     assert trace_entries > 0
     assert not env.monitor.get_errors()

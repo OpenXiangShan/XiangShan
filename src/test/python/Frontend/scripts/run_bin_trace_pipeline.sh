@@ -31,6 +31,8 @@ Environment variables:
   TB_RUN_DUT           Run DUT pytest after trace generation (default: 1)
   TB_TRACE_STAGNANT_CYCLES_LIMIT
                        Early-stop DUT run when golden cursor is stagnant for this many cycles (default: 20000)
+  TB_TRACE_TARGET_CURSOR
+                       Treat reaching this trace cursor as pass (default: 0, disabled)
   TB_TRACE_MAX_CYCLES  Optional DUT cycle budget for test_bin_trace; 0 means run until
                        golden completion (default: 0)
   TB_PYTEST_TIMEOUT_SECS
@@ -67,6 +69,7 @@ PYTEST_TARGET="${4:-${TB_PYTEST_TARGET:-${PYTEST_TARGET_DEFAULT}}}"
 BASE_ADDR="${TB_BASE_ADDR:-0x80000000}"
 RESET_VECTOR="${TB_RESET_VECTOR:-${BASE_ADDR}}"
 TRACE_STAGNANT_CYCLES_LIMIT="${TB_TRACE_STAGNANT_CYCLES_LIMIT:-20000}"
+TRACE_TARGET_CURSOR="${TB_TRACE_TARGET_CURSOR:-0}"
 TRACE_MAX_CYCLES="${TB_TRACE_MAX_CYCLES:-0}"
 PYTEST_TIMEOUT_SECS="${TB_PYTEST_TIMEOUT_SECS:-900}"
 PYTHON_BIN="${PYTHON:-python3}"
@@ -90,6 +93,7 @@ echo "[frontend] pytest_target: ${PYTEST_TARGET}"
 echo "[frontend] base_addr: ${BASE_ADDR}"
 echo "[frontend] reset_vector: ${RESET_VECTOR}"
 echo "[frontend] trace_stagnant_cycles_limit: ${TRACE_STAGNANT_CYCLES_LIMIT}"
+echo "[frontend] trace_target_cursor: ${TRACE_TARGET_CURSOR}"
 echo "[frontend] trace_max_cycles: ${TRACE_MAX_CYCLES}"
 echo "[frontend] trace_start_index: ${TRACE_START_INDEX}"
 echo "[frontend] pytest_timeout_secs: ${PYTEST_TIMEOUT_SECS}"
@@ -132,6 +136,13 @@ if ! [[ "${TRACE_START_INDEX}" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
+if ! [[ "${TRACE_TARGET_CURSOR}" =~ ^[0-9]+$ ]]; then
+  PIPELINE_STAGE="validate_inputs"
+  PIPELINE_REASON="invalid_trace_target_cursor"
+  echo "[frontend][error] TB_TRACE_TARGET_CURSOR must be a non-negative integer, got: ${TRACE_TARGET_CURSOR}" >&2
+  exit 2
+fi
+
 mkdir -p "$(dirname "${TRACE_PATH}")" "$(dirname "${NEMU_LOG_PATH}")"
 export PYTHONPATH="${FRONTEND_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-}"
 
@@ -169,6 +180,7 @@ if [[ "${RUN_DUT}" != "0" ]]; then
     TB_BASE_ADDR="${BASE_ADDR}" \
     TB_RESET_VECTOR="${RESET_VECTOR}" \
     TB_TRACE_STAGNANT_CYCLES_LIMIT="${TRACE_STAGNANT_CYCLES_LIMIT}" \
+    TB_TRACE_TARGET_CURSOR="${TRACE_TARGET_CURSOR}" \
     TB_TRACE_MAX_CYCLES="${TRACE_MAX_CYCLES}" \
     TB_TRACE_START_INDEX="${TRACE_START_INDEX}" \
     "${PYTEST_CMD[@]}"; then

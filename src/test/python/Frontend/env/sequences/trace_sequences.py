@@ -67,6 +67,7 @@ class RunUntilGoldenTraceCompleteSequence:
     progress_interval: int = 0
     stall_snapshot_interval: int = 0
     stagnant_cycles_limit: int = 0
+    target_cursor: int = 0
     logger: logging.Logger | None = None
     current_golden_pc_getter: Callable | None = None
     format_optional_pc: Callable | None = None
@@ -86,6 +87,7 @@ class RunUntilGoldenTraceCompleteSequence:
         progress_interval = int(self.progress_interval)
         stall_snapshot_interval = int(self.stall_snapshot_interval)
         stagnant_cycles_limit = int(self.stagnant_cycles_limit)
+        target_cursor = int(self.target_cursor)
         cycles_run = 0
         last_cursor = int(trace.cursor)
         stagnant_cycles = 0
@@ -197,6 +199,25 @@ class RunUntilGoldenTraceCompleteSequence:
                     ok=False,
                     completed=False,
                     status="monitor_error",
+                    cycles_run=cycles_run,
+                    cursor=int(trace.cursor),
+                    total_entries=total_entries,
+                    pending_work=_pending_work_count(env.backend_model),
+                    monitor_error_count=len(monitor_errors),
+                )
+            if target_cursor > 0 and int(trace.cursor) >= target_cursor:
+                if logger is not None:
+                    logger.info(
+                        "run until golden cursor target reached: cursor=%d target=%d cycles=%d pending_work=%d",
+                        int(trace.cursor),
+                        target_cursor,
+                        cycles_run,
+                        _pending_work_count(env.backend_model),
+                    )
+                return RunUntilGoldenTraceResult(
+                    ok=True,
+                    completed=True,
+                    status="cursor_target",
                     cycles_run=cycles_run,
                     cursor=int(trace.cursor),
                     total_entries=total_entries,
