@@ -88,6 +88,7 @@ that boundary stable.
 ## Working Rules
 
 - If the requested path is not minimal, prefer the shorter path and explain the change in direction.
+- When splitting batched commits, prefer `git add -p` first. Do not make direct documentation edits as part of the commit-splitting phase. If `git add -p` cannot express the desired split, stop and ask the user before changing files further.
 - Never use `git push -f` under any circumstances.
 - Every log printed by the verification environment must help debug a real
   failure and be as short as practical. Do not add noisy, redundant, or
