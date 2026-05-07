@@ -308,13 +308,18 @@ class FrontendEnv:
         )
         return int(size)
 
-    def load_golden_trace_file(self, path: str) -> int:
+    def load_golden_trace_file(self, path: str, start_index: int = 0) -> int:
         trace = GoldenTrace.from_file(str(path))
-        self.backend_model.set_golden_trace(trace)
-        self.logger.info("golden trace loaded: path=%s entries=%d", str(path), len(trace.entries))
+        self.backend_model.set_golden_trace(trace, start_cursor=int(start_index))
+        self.logger.info(
+            "golden trace loaded: path=%s start_index=%d entries=%d",
+            str(path),
+            int(start_index),
+            len(trace.entries),
+        )
         self._emit_event(
             "control.load_golden_trace",
-            {"path": str(path), "entries": int(len(trace.entries))},
+            {"path": str(path), "entries": int(len(trace.entries)), "start_index": int(start_index)},
         )
         return int(len(trace.entries))
 

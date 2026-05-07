@@ -171,7 +171,10 @@ class GoldenTrace:
         return cls(entries)
 
     def reset(self, cursor: int = 0) -> None:
-        self.cursor = int(cursor)
+        cursor = int(cursor)
+        if cursor < 0 or cursor > len(self.entries):
+            raise ValueError(f"trace cursor out of range: {cursor}")
+        self.cursor = cursor
 
     def peek(self) -> Optional[TraceEntry]:
         if self.cursor >= len(self.entries):

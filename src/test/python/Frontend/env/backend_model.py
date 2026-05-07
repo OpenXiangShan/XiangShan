@@ -2731,7 +2731,7 @@ class BackendModel:
         agent.bind(self.drive_if)
         return agent
 
-    def set_golden_trace(self, trace: Optional[GoldenTrace]) -> None:
+    def set_golden_trace(self, trace: Optional[GoldenTrace], *, start_cursor: int = 0) -> None:
         self.golden_trace = trace
         self._clear_active_wrong_path_episode()
         self._last_correct_cfi_context = None

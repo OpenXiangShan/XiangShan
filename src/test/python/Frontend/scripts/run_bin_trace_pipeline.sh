@@ -14,6 +14,7 @@ Environment variables:
   TB_NEMU_EXEC         NEMU executable path (default: <repo>/ready-to-run/riscv64-nemu-interpreter)
   TB_NEMU_MAX_INSTR    Pass -I to NEMU when > 0 (default: 0)
   TB_TRACE_LIMIT       Limit converted trace entries when > 0 (default: 0)
+  TB_TRACE_START_INDEX  Start golden comparison from this jsonl index (default: 0)
   TB_RUN_DUT           Run DUT pytest after trace generation (default: 1)
   TB_TRACE_STAGNANT_CYCLES_LIMIT
                        Early-stop DUT run when golden cursor is stagnant for this many cycles (default: 20000)
@@ -23,6 +24,7 @@ Environment variables:
                        Hard timeout in seconds for DUT pytest stage (default: 900)
   TB_PYTEST_TARGET     Pytest target path/nodeid
   TB_BASE_ADDR         Program load base addr for DUT test (default: 0x80000000)
+  TB_RESET_VECTOR      DUT reset/start PC for bin run (default: TB_BASE_ADDR)
   PYTHON               Python executable (default: python3)
 
 Note:
@@ -44,10 +46,12 @@ NEMU_LOG_PATH="${3:-${REPO_DIR}/NEMU/logs/${BIN_STEM}.nemu.log}"
 NEMU_EXEC="${TB_NEMU_EXEC:-${REPO_DIR}/ready-to-run/riscv64-nemu-interpreter}"
 NEMU_MAX_INSTR="${TB_NEMU_MAX_INSTR:-0}"
 TRACE_LIMIT="${TB_TRACE_LIMIT:-0}"
+TRACE_START_INDEX="${TB_TRACE_START_INDEX:-0}"
 RUN_DUT="${TB_RUN_DUT:-1}"
 PYTEST_TARGET_DEFAULT="${FRONTEND_DIR}/tests/test_bin_trace_dut.py::test_bin_trace"
 PYTEST_TARGET="${4:-${TB_PYTEST_TARGET:-${PYTEST_TARGET_DEFAULT}}}"
 BASE_ADDR="${TB_BASE_ADDR:-0x80000000}"
+RESET_VECTOR="${TB_RESET_VECTOR:-${BASE_ADDR}}"
 TRACE_STAGNANT_CYCLES_LIMIT="${TB_TRACE_STAGNANT_CYCLES_LIMIT:-20000}"
 TRACE_MAX_CYCLES="${TB_TRACE_MAX_CYCLES:-0}"
 PYTEST_TIMEOUT_SECS="${TB_PYTEST_TIMEOUT_SECS:-900}"
@@ -70,8 +74,10 @@ echo "[frontend] python: ${PYTHON_BIN}"
 echo "[frontend] run_dut: ${RUN_DUT}"
 echo "[frontend] pytest_target: ${PYTEST_TARGET}"
 echo "[frontend] base_addr: ${BASE_ADDR}"
+echo "[frontend] reset_vector: ${RESET_VECTOR}"
 echo "[frontend] trace_stagnant_cycles_limit: ${TRACE_STAGNANT_CYCLES_LIMIT}"
 echo "[frontend] trace_max_cycles: ${TRACE_MAX_CYCLES}"
+echo "[frontend] trace_start_index: ${TRACE_START_INDEX}"
 echo "[frontend] pytest_timeout_secs: ${PYTEST_TIMEOUT_SECS}"
 echo "[frontend] pytest_disable_rerunfailures: ${PYTEST_DISABLE_RERUNFAILURES}"
 
@@ -94,6 +100,11 @@ fi
 
 if ! [[ "${TRACE_STAGNANT_CYCLES_LIMIT}" =~ ^[0-9]+$ ]] || [[ "${TRACE_STAGNANT_CYCLES_LIMIT}" -le 0 ]]; then
   echo "[frontend][error] TB_TRACE_STAGNANT_CYCLES_LIMIT must be a positive integer, got: ${TRACE_STAGNANT_CYCLES_LIMIT}" >&2
+  exit 2
+fi
+
+if ! [[ "${TRACE_START_INDEX}" =~ ^[0-9]+$ ]]; then
+  echo "[frontend][error] TB_TRACE_START_INDEX must be a non-negative integer, got: ${TRACE_START_INDEX}" >&2
   exit 2
 fi
 
@@ -125,8 +136,10 @@ if [[ "${RUN_DUT}" != "0" ]]; then
     TB_BIN_PATH="${BIN_PATH}" \
     TB_TRACE_PATH="${TRACE_PATH}" \
     TB_BASE_ADDR="${BASE_ADDR}" \
+    TB_RESET_VECTOR="${RESET_VECTOR}" \
     TB_TRACE_STAGNANT_CYCLES_LIMIT="${TRACE_STAGNANT_CYCLES_LIMIT}" \
     TB_TRACE_MAX_CYCLES="${TRACE_MAX_CYCLES}" \
+    TB_TRACE_START_INDEX="${TRACE_START_INDEX}" \
     "${PYTEST_CMD[@]}"; then
     :
   else

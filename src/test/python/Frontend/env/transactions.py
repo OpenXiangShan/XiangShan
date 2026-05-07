@@ -13,6 +13,7 @@ class ProgramImage:
 @dataclass(frozen=True)
 class GoldenTraceSource:
     path: str
+    start_index: int = 0
 
 
 @dataclass(frozen=True)

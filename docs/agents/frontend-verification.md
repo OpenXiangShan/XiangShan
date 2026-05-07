@@ -214,6 +214,10 @@ script-level env vars:
   `TB_ENV_LOG_LEVEL`, then `INFO`.
 - `TB_PYTEST_DISABLE_RERUNFAILURES=0|1`: keep or disable
   `-p no:rerunfailures`; default is `1` in this tree.
+- `TB_TRACE_START_INDEX=...`: start golden comparison from the given jsonl
+  index when loading a bin trace.
+- `TB_RESET_VECTOR=...`: start DUT fetch from the given PC instead of the
+  default `0x80000000`; defaults to `TB_BASE_ADDR` in the bin-trace pipeline.
 - `TB_REG_LOG_DIR=...`: override the default regression-log directory.
 - `TB_REG_LOG_FILE=...`: write the tee'd regression log to an explicit file
   path instead of the timestamped default.

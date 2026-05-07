@@ -39,8 +39,8 @@ def normalize_program_image(bin_data, base_addr) -> ProgramImage:
     return ProgramImage(payload=payload, base_addr=int(base_addr))
 
 
-def normalize_golden_trace_source(path) -> GoldenTraceSource:
-    return GoldenTraceSource(path=str(path))
+def normalize_golden_trace_source(path, start_index=0) -> GoldenTraceSource:
+    return GoldenTraceSource(path=str(path), start_index=int(start_index))
 
 
 def normalize_commit_target(target_count, max_cycles) -> CommitTarget:

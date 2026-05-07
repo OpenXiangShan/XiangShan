@@ -55,6 +55,14 @@ def _is_enabled(name: str, default: str = "1") -> bool:
     return raw not in {"0", "false", "off", "no"}
 
 
+def _read_int_env(name: str, default: str) -> int:
+    raw = os.getenv(name, default).strip()
+    try:
+        return int(raw, 0)
+    except ValueError as exc:
+        raise AssertionError(f"{name} must be a valid integer, got: {raw}") from exc
+
+
 def _artifact_tag(request) -> str:
     tc_name = request.node.name if request is not None else "frontend"
     raw_bin = os.getenv("TB_BIN_PATH", "").strip()
@@ -206,7 +214,11 @@ def env(dut, request):
     tb.functional_coverage = recorder
     recorder.attach(tb)
     dut.StepRis(lambda cycle: recorder.on_cycle(cycle, tb))
-    tb.initialize(reset_vector=0x80000000, bare_mode=True, reset_cycles=20)
+    tb.initialize(
+        reset_vector=_read_int_env("TB_RESET_VECTOR", "0x80000000"),
+        bare_mode=True,
+        reset_cycles=20,
+    )
     yield tb
     recorder.write_artifacts()
 

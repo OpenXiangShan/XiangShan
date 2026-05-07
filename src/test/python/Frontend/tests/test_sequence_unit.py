@@ -3,8 +3,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from env.monitor import Observation
-from env.sequences import CheckPcSequence, InjectRedirectSequence, RunUntilGoldenTraceCompleteSequence
-from env.transactions import PcSequenceExpectation, RedirectTxn
+from env.model.golden_trace import GoldenTrace, TraceEntry
+from env.sequences import CheckPcSequence, InjectRedirectSequence, LoadGoldenTraceSequence, RunUntilGoldenTraceCompleteSequence
+from env.transactions import GoldenTraceSource, PcSequenceExpectation, RedirectTxn
 
 
 class _NoRawDutAccess:
@@ -73,6 +74,28 @@ class _GoldenTraceEnv:
         assert int(cycles) == 1
         self.backend_model.golden_trace.cursor = 1
         return 1
+
+
+class _LoadGoldenTraceEnv:
+    def __init__(self) -> None:
+        self.loaded = None
+
+    def load_golden_trace_file(self, path: str, start_index: int = 0) -> int:
+        self.loaded = (path, int(start_index))
+        return 7
+
+
+def test_golden_trace_reset_rejects_out_of_range_cursor() -> None:
+    trace = GoldenTrace([TraceEntry(index=0, pc=0x80000000, instr=0, size=4)])
+
+    trace.reset(1)
+    assert trace.cursor == 1
+
+    try:
+        trace.reset(2)
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
 
 
 class _StagnantGoldenTraceEnv:
@@ -153,3 +176,14 @@ def test_run_until_golden_trace_complete_ignores_post_trace_tail_work():
 
     assert result.completed is True
     assert result.pending_work == 0
+
+
+def test_load_golden_trace_sequence_passes_start_index_through() -> None:
+    env = _LoadGoldenTraceEnv()
+
+    count = LoadGoldenTraceSequence(
+        source=GoldenTraceSource(path="/tmp/trace.jsonl", start_index=123),
+    ).run(env)
+
+    assert count == 7
+    assert env.loaded == ("/tmp/trace.jsonl", 123)

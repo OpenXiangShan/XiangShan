@@ -622,12 +622,17 @@ def api_Frontend_load_program_file(env, path, base_addr, max_cycles=1000):
     return size
 
 
-def api_Frontend_load_golden_trace(env, path, max_cycles=0) -> int:
+def api_Frontend_load_golden_trace(env, path, max_cycles=0, start_index=0) -> int:
     """Load a golden trace file and attach it to backend model comparison."""
     configure_env_logging()
-    source = normalize_golden_trace_source(path)
+    source = normalize_golden_trace_source(path, start_index=start_index)
     count = int(load_golden_trace(env, source, step_cycles=max_cycles))
-    logger.info("api load golden trace: path=%s entries=%d", source.path, count)
+    logger.info(
+        "api load golden trace: path=%s start_index=%d entries=%d",
+        source.path,
+        int(source.start_index),
+        count,
+    )
     return count
 
 
@@ -642,6 +647,7 @@ def api_Frontend_prepare_program_and_nemu_trace(
     trace_limit=0,
     load_trace=1,
     max_cycles=0,
+    trace_start_index=0,
 ) -> dict:
     """Load real bin into DUT env, run NEMU to build trace json/jsonl, optionally load trace."""
     configure_env_logging()
@@ -666,7 +672,13 @@ def api_Frontend_prepare_program_and_nemu_trace(
 
     loaded_trace_entries = 0
     if int(load_trace):
-        loaded_trace_entries = int(load_golden_trace(env, normalize_golden_trace_source(trace_output_path), step_cycles=0))
+        loaded_trace_entries = int(
+            load_golden_trace(
+                env,
+                normalize_golden_trace_source(trace_output_path, start_index=trace_start_index),
+                step_cycles=0,
+            )
+        )
 
     if int(max_cycles) > 0:
         env.step(int(max_cycles))
@@ -680,14 +692,16 @@ def api_Frontend_prepare_program_and_nemu_trace(
         "trace_output_path": str(trace_out["trace_output_path"]),
         "trace_entries": int(trace_entries),
         "loaded_trace_entries": int(loaded_trace_entries),
+        "trace_start_index": int(trace_start_index),
     }
     logger.info(
-        "api prepare program and nemu trace: bin=%s base=0x%x bin_size=%d trace_entries=%d loaded_trace=%d",
+        "api prepare program and nemu trace: bin=%s base=0x%x bin_size=%d trace_entries=%d loaded_trace=%d start_index=%d",
         str(bin_path),
         int(base_addr),
         int(bin_size),
         int(trace_entries),
         int(loaded_trace_entries),
+        int(trace_start_index),
     )
     return out
 

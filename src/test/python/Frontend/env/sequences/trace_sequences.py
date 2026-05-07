@@ -47,7 +47,7 @@ class LoadGoldenTraceSequence:
     step_cycles: int = 0
 
     def run(self, env) -> int:
-        count = int(env.load_golden_trace_file(self.source.path))
+        count = int(env.load_golden_trace_file(self.source.path, start_index=int(self.source.start_index)))
         if int(self.step_cycles) > 0:
             env.step(int(self.step_cycles))
         return count

@@ -36,10 +36,21 @@ def main(argv: list[str] | None = None) -> int:
         help="Program load base address (default: 0x80000000)",
     )
     parser.add_argument(
+        "--start-pc",
+        default=None,
+        help="Reset PC / start PC for DUT (default: same as --base-addr)",
+    )
+    parser.add_argument(
         "--step-cycles",
         type=int,
         default=0,
         help="Optional extra env.step cycles after load",
+    )
+    parser.add_argument(
+        "--trace-start-index",
+        type=int,
+        default=0,
+        help="Start golden trace comparison from this jsonl index",
     )
     parser.add_argument(
         "--no-dut",
@@ -51,7 +62,9 @@ def main(argv: list[str] | None = None) -> int:
     bin_path = str(args.bin)
     trace_path = str(args.trace_jsonl)
     base_addr = _parse_int(str(args.base_addr))
+    start_pc = base_addr if args.start_pc is None else _parse_int(str(args.start_pc))
     step_cycles = int(args.step_cycles)
+    trace_start_index = int(args.trace_start_index)
     no_dut = bool(args.no_dut)
 
     bin_file = Path(bin_path)
@@ -68,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
             "bin_path": str(bin_file),
             "trace_path": str(trace_file),
             "base_addr": int(base_addr),
+            "start_pc": int(start_pc),
+            "trace_start_index": int(trace_start_index),
             "bin_size": int(bin_file.stat().st_size),
             "trace_entries": int(len(trace.entries)),
             "first_pc": (None if not trace.entries else int(trace.entries[0].pc)),
@@ -82,15 +97,17 @@ def main(argv: list[str] | None = None) -> int:
     dut.InitClock("clock")
     try:
         env = FrontendEnv(dut)
-        env.initialize(reset_vector=base_addr, bare_mode=True, reset_cycles=20)
+        env.initialize(reset_vector=start_pc, bare_mode=True, reset_cycles=20)
         bin_size = int(api_Frontend_load_program_file(env, bin_path, base_addr))
-        trace_entries = int(api_Frontend_load_golden_trace(env, trace_path))
+        trace_entries = int(api_Frontend_load_golden_trace(env, trace_path, start_index=trace_start_index))
         if step_cycles > 0:
             env.step(step_cycles)
         out = {
             "bin_path": bin_path,
             "trace_path": trace_path,
             "base_addr": int(base_addr),
+            "start_pc": int(start_pc),
+            "trace_start_index": int(trace_start_index),
             "bin_size": int(bin_size),
             "trace_entries": int(trace_entries),
             "extra_step_cycles": int(step_cycles),
