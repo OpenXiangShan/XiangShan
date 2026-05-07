@@ -675,6 +675,25 @@ class BackendModel:
         rank = int(state.ftq_ptr_rank_after_commit(int(flag), int(value)))
         return rank > int(state.ftq_size)
 
+    def _assert_commit_ftq_is_contiguous(self, ftq_flag: int, ftq_value: int, *, mode: str) -> None:
+        state = self._sync_backend_state()
+        if (
+            int(state.commit_count) <= 0
+            and int(state.commit_ptr_flag) == 0
+            and int(state.commit_ptr_value) == 0
+        ):
+            return
+        expected = state.increment_ftq_ptr(int(state.commit_ptr_flag), int(state.commit_ptr_value))
+        actual = (int(ftq_flag), int(ftq_value))
+        if actual != expected:
+            raise AssertionError(
+                "commit ftq_idx is not contiguous: "
+                f"mode={str(mode)} "
+                f"expected=({int(expected[0])},{int(expected[1])}) "
+                f"actual=({int(actual[0])},{int(actual[1])}) "
+                f"prev=({int(state.commit_ptr_flag)},{int(state.commit_ptr_value)}) "
+            )
+
     def _cfvec_queue_mode_active(self) -> bool:
         return self.golden_trace is not None and bool(self._cfvec_queue)
 
@@ -2410,39 +2429,8 @@ class BackendModel:
             ),
             None,
         )
-        if target_idx is not None:
+        if target_idx is None:
             return
-        remove_start = next(
-            (
-                idx
-                for idx, entry in enumerate(self._cfvec_queue)
-                if int(idx) >= int(queue_start) and entry.path_state == PATH_STATE_WRONG
-            ),
-            None,
-        )
-        if remove_start is None:
-            return
-        removed_entries = list(self._cfvec_queue)[int(remove_start):]
-        if not removed_entries:
-            return
-        self._cfvec_queue_remove_range(int(remove_start), len(self._cfvec_queue))
-        self._redirect_flush_ftq_entries(removed_entries)
-        self._set_active_wrong_path_episode(
-            origin_index=min(int(remove_start), len(self._cfvec_queue)),
-            target_pc=int(target_pc),
-            redirect_context=episode["redirect_context"],
-            redirect_driven=True,
-            expected_recovery_ftq=episode["expected_recovery_ftq"],
-            redirect_driven_cycle=episode["redirect_driven_cycle"],
-        )
-        self.logger.debug(
-            "redirect recovery residual flush: target=0x%x removed=%d queue_idx=[%d,%d] queue_pc_ranges=%s",
-            int(target_pc),
-            int(len(removed_entries)),
-            int(remove_start),
-            int(remove_start) + int(len(removed_entries)) - 1,
-            self._format_queue_pc_ranges(removed_entries),
-        )
 
     def _cfvec_queue_close_current_ftq_span(self, ftq_flag: int, ftq_value: int) -> None:
         for entry in reversed(self._cfvec_queue):
@@ -2740,8 +2728,13 @@ class BackendModel:
         if self.golden_trace is not None:
             self.resolve_min_delay = _GOLDEN_TRACE_RESOLVE_MIN_DELAY
             self.resolve_max_delay = _GOLDEN_TRACE_RESOLVE_MAX_DELAY
-            self.golden_trace.reset(0)
-            self.logger.info("golden trace attached: entries=%d", len(self.golden_trace.entries))
+            self.golden_trace.reset(int(start_cursor))
+            self._cycle_start_golden_cursor = int(start_cursor)
+            self.logger.info(
+                "golden trace attached: start_index=%d entries=%d",
+                int(start_cursor),
+                len(self.golden_trace.entries),
+            )
         else:
             self.resolve_min_delay = int(self._default_resolve_min_delay)
             self.resolve_max_delay = int(self._default_resolve_max_delay)

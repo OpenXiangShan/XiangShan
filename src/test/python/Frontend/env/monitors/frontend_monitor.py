@@ -242,6 +242,17 @@ class FrontendMonitor:
     def attach_backend_model(self, backend_model) -> None:
         self.backend_model = backend_model
 
+    def _ftq_identity_tracking_active(self) -> bool:
+        if self.backend_model is None:
+            return True
+        recovery_active = getattr(self.backend_model, "_recovery_phase_active", None)
+        if callable(recovery_active) and bool(recovery_active()):
+            return False
+        wrong_path_active = getattr(self.backend_model, "_has_active_wrong_path_episode", None)
+        if callable(wrong_path_active) and bool(wrong_path_active()):
+            return False
+        return True
+
     def _emit(self, cycle: int, event_type: str, payload: Dict, level: str = "INFO") -> None:
         if self.event_sink is None:
             return
@@ -290,7 +301,12 @@ class FrontendMonitor:
 
     def _record_error(self, **kwargs) -> None:
         self.errors.append(kwargs)
-        self.logger.warning("monitor error: %s", kwargs)
+        pretty_kwargs = dict(kwargs)
+        if str(pretty_kwargs.get("kind", "")) == "PC_MISMATCH":
+            for key in ("expected", "actual"):
+                if key in pretty_kwargs:
+                    pretty_kwargs[key] = f"0x{int(pretty_kwargs[key]):x}"
+        self.logger.warning("monitor error: %s", pretty_kwargs)
         self._emit(int(kwargs.get("cycle", 0)), "monitor.error", kwargs, level="WARNING")
 
     def _try_resync_after_redirect(self, pc: int) -> bool:
@@ -327,6 +343,11 @@ class FrontendMonitor:
         cycle_frontend_is_rvc = False
         cycle_frontend_pred_taken = False
         cycle_frontend_slots: List[dict] = []
+        ftq_identity_tracking_active = self._ftq_identity_tracking_active()
+        if not ftq_identity_tracking_active:
+            self._ftq_start_pc_cache.clear()
+            self._ftq_group_closed.clear()
+            self._ftq_group_max_offset.clear()
 
         for i in range(8):
             if self._read(self.interface.cfvec_valid[i], 0) != 1:
@@ -372,7 +393,7 @@ class FrontendMonitor:
             golden_pc = self.expected_pc if self.expected_pc is not None else pc
             has_ftq_identity = self._slot_has_ftq_identity(ftq_flag, ftq_value, ftq_offset, is_last)
             ftq_expected_pc: Optional[int] = None
-            if has_ftq_identity:
+            if has_ftq_identity and ftq_identity_tracking_active:
                 ftq_group = (int(ftq_flag), int(ftq_value))
                 ftq_start_pc = self._derive_ftq_start_pc(int(pc), int(ftq_offset), bool(is_rvc))
                 cached_start_pc = self._ftq_start_pc_cache.get(ftq_group)
@@ -412,12 +433,13 @@ class FrontendMonitor:
             if ex_sum > 0:
                 self.exception_mark_count += 1
 
-            if has_ftq_identity and not self.wait_sync_after_redirect:
+            if has_ftq_identity and ftq_identity_tracking_active and not self.wait_sync_after_redirect:
                 is_sync = (ftq_expected_pc is None) or (int(pc) == int(ftq_expected_pc))
             else:
                 is_sync = (golden_pc is None) or (pc == golden_pc)
             if (
                 has_ftq_identity
+                and ftq_identity_tracking_active
                 and not self.wait_sync_after_redirect
                 and ftq_expected_pc is not None
                 and int(pc) != int(ftq_expected_pc)
@@ -527,13 +549,18 @@ class FrontendMonitor:
                 if self.wait_sync_after_redirect and is_sync:
                     self.wait_sync_after_redirect = False
                     self.redirect_grace = 4 if self.expected_pc is None else 2
-                if has_ftq_identity and not self.wait_sync_after_redirect and ftq_expected_pc is not None:
+                if (
+                    has_ftq_identity
+                    and ftq_identity_tracking_active
+                    and not self.wait_sync_after_redirect
+                    and ftq_expected_pc is not None
+                ):
                     ref_pc = int(ftq_expected_pc)
                 else:
                     ref_pc = int(golden_pc) if golden_pc is not None else int(pc)
                 next_pc = self._golden_next_pc(ref_pc, int(instr), bool(is_rvc), bool(pred_taken))
                 if next_pc is None:
-                    if has_ftq_identity and not self.wait_sync_after_redirect:
+                    if has_ftq_identity and ftq_identity_tracking_active and not self.wait_sync_after_redirect:
                         self.expected_pc = None
                     else:
                         self.wait_sync_after_redirect = True
@@ -547,9 +574,9 @@ class FrontendMonitor:
                         self.wait_sync_after_redirect = True
                         self.redirect_sync_deadline = self.current_cycle + self.redirect_sync_max
                     self.expected_pc = next_pc
-            if has_ftq_identity and bool(is_last):
+            if has_ftq_identity and ftq_identity_tracking_active and bool(is_last):
                 self._ftq_group_closed[(int(ftq_flag), int(ftq_value))] = True
-            if has_ftq_identity:
+            if has_ftq_identity and ftq_identity_tracking_active:
                 group = (int(ftq_flag), int(ftq_value))
                 self._ftq_group_max_offset[group] = max(
                     int(self._ftq_group_max_offset.get(group, -1)),

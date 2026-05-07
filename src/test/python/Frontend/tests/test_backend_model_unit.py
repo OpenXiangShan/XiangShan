@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+from collections import deque
+
+import pytest
+
 from env.backend_model import BackendModel
 from env.model.backend_state import ActiveWrongPathEpisode
+from env.model.backend_state import PATH_STATE_CORRECT
+from env.model.backend_state import PATH_STATE_WRONG
 from env.model.backend_state import QueueInstr
 
 
@@ -72,3 +78,59 @@ def test_recovery_target_requires_expected_recovery_ftq() -> None:
     entry.cycle = 11
 
     assert model._queue_entry_matches_recovery_target(entry, 0x1000) is False
+
+
+def test_commit_ftq_idx_must_be_contiguous() -> None:
+    model = BackendModel()
+    model.commit_count = 1
+    model.commit_ptr_flag = 0
+    model.commit_ptr_value = 14
+
+    with pytest.raises(AssertionError, match="commit ftq_idx is not contiguous"):
+        model._assert_commit_ftq_is_contiguous(0, 16, mode="queue")
+
+
+def test_recovery_flush_waits_until_target_is_queued() -> None:
+    model = BackendModel()
+    wrong0 = _queue_instr(0x1010, 0, 22)
+    wrong0.path_state = PATH_STATE_WRONG
+    wrong1 = _queue_instr(0x1014, 0, 23)
+    wrong1.path_state = PATH_STATE_WRONG
+    model._cfvec_queue = deque([wrong0, wrong1])
+    model._active_wrong_path_episode_state = ActiveWrongPathEpisode(
+        origin_index=0,
+        target_pc=0x1000,
+        redirect_context=None,
+        redirect_driven=True,
+        expected_recovery_ftq=(0, 21),
+        redirect_driven_cycle=10,
+    )
+
+    model._flush_recovery_residuals_if_target_not_queued()
+
+    assert [entry.pc for entry in model._cfvec_queue] == [0x1010, 0x1014]
+
+
+def test_recovery_flush_begins_at_first_target_entry() -> None:
+    model = BackendModel()
+    wrong0 = _queue_instr(0x1010, 0, 22)
+    wrong0.path_state = PATH_STATE_WRONG
+    target = _queue_instr(0x1000, 0, 21)
+    target.path_state = PATH_STATE_CORRECT
+    target.cycle = 11
+    wrong1 = _queue_instr(0x1014, 0, 23)
+    wrong1.path_state = PATH_STATE_WRONG
+    model._cfvec_queue = deque([wrong0, target, wrong1])
+    model._active_wrong_path_episode_state = ActiveWrongPathEpisode(
+        origin_index=0,
+        target_pc=0x1000,
+        redirect_context=None,
+        redirect_driven=True,
+        expected_recovery_ftq=(0, 21),
+        redirect_driven_cycle=10,
+    )
+
+    model._apply_recovery_if_target_queued()
+
+    assert len(model._cfvec_queue) == 1
+    assert model._cfvec_queue[0].pc == 0x1000

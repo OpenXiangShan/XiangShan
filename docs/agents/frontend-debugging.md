@@ -47,6 +47,10 @@ For every DUT bin-trace failure, treat the following as mandatory:
    waveform and log come from the same run.
 8. If the local case log lacks the needed `INFO`-level events, stop and say so
    before switching to another log file.
+9. After a redirect is issued, do not start cfVec wrong-path flushing until
+   the first recovery instruction for that redirect is actually present in the
+   queue. Once that recovery instruction appears, flush the full wrong-path
+   interval from the mispredicted next instruction up to the recovery boundary.
 
 ## Ground Truth Rules
 
