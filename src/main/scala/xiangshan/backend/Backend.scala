@@ -553,10 +553,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.ssid.foreach(_ := Mux(enableMdp, source.bits.ssid.get, 0.U(SSIDWidth.W)))
   }
 
-//  require(io.mem.vstdIssue.flatten.size == vecRegion.io.toMemExu.get.flatten.size)
-//  io.mem.vstdIssue.flatten.zip(vecRegion.io.toMemExu.get.flatten).foreach { case (sink, source) =>
-//    connectExuInput(sink, source)
-//  }
 //  require(false, "fix rebase error")
 //  require(io.mem.vstdIssue.flatten.size == vecRegion.io.toMemExu.get.flatten.size)
 //  io.mem.vstdIssue.flatten.zip(vecRegion.io.toMemExu.get.flatten).foreach { case (sink, source) =>
@@ -598,10 +594,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.robio.robHeadLsIssue := io.mem.intIssue.flatten.map(deq =>
     deq.fire && deq.bits.robIdx === ctrlBlock.io.robio.robDeqPtr
   ).reduce(_ || _)
+  // Todo: connect vector region
   ctrlBlock.io.robio.debugIQDeqRobIdxVec.foreach { sink =>
-    sink.foreach(_ := 0.U.asTypeOf(sink.head))
+    sink := 0.U.asTypeOf(sink)
     sink.zip(intRegion.io.debugIQDeqRobIdxVec.get ++ fpRegion.io.debugIQDeqRobIdxVec.get).foreach {
-      case (s, source) => s := source
+      case (dest, source) => dest := source
     }
   }
 
