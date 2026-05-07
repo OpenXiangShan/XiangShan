@@ -584,8 +584,13 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.robio.robHeadLsIssue := io.mem.intIssue.flatten.map(deq =>
     deq.fire && deq.bits.robIdx === ctrlBlock.io.robio.robDeqPtr
   ).reduce(_ || _)
-  ctrlBlock.io.robio.debugIQDeqRobIdxVec.foreach(_ := intRegion.io.debugIQDeqRobIdxVec.get ++
-    fpRegion.io.debugIQDeqRobIdxVec.get ++ vecRegion.io.debugIQDeqRobIdxVec.get)
+  // Todo: connect vector region
+  ctrlBlock.io.robio.debugIQDeqRobIdxVec.foreach { sink =>
+    sink := 0.U.asTypeOf(sink)
+    sink.zip(intRegion.io.debugIQDeqRobIdxVec.get ++ fpRegion.io.debugIQDeqRobIdxVec.get).foreach {
+      case (dest, source) => dest := source
+    }
+  }
 
   // mem io
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq
