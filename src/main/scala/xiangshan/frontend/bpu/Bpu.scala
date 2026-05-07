@@ -507,9 +507,21 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       }
   }
 
+  private val s3_predWithRasAndIttage = WireInit(s3_mbtbResult)
+  s3_predWithRasAndIttage.foreach {
+    case p => when(p.valid && p.bits.attribute.isReturn) {
+        p.bits.target := ras.io.topRetAddr
+      }.elsewhen(p.valid && p.bits.attribute.needIttage && ittage.io.prediction.hit) {
+        p.bits.target := ittage.io.prediction.target
+      }
+  }
+
   phr.io.train.s0_stall             := s0_stall
   phr.io.train.stageCtrl            := stageCtrl
   phr.io.train.redirect             := redirect
+  phr.io.train.s1_valid             := s1_fire
+  phr.io.train.s1_prediction        := s1_prediction
+  phr.io.train.s1_startPc           := s1_startPc
   phr.io.train.s3_override          := s3_override
   phr.io.train.s3_phrMeta           := s3_phrMeta
   phr.io.train.s3_prediction        := s3_prediction
@@ -521,6 +533,12 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.s1Train.abtbFirstTakenBrOH := s1_abtbFirstTakenBrOH
   phr.io.s1Train.ubtbPrediction     := s1_ubtbPredWithURas
   phr.io.s1Train.abtbPrediction     := s1_abtbPredWithURas
+  phr.io.s3Train.valid              := s3_override
+  phr.io.s3Train.taken              := s3_prediction.taken
+  phr.io.s3Train.startPc            := s3_startPc
+  phr.io.s3Train.firstTakenBrOH     := s3_firstTakenBranchOH
+  phr.io.s3Train.phrMeta            := s3_phrMeta
+  phr.io.s3Train.s3Prediction       := s3_predWithRasAndIttage
 
   phr.io.commit.valid := io.fromFtq.train.fire
   phr.io.commit.bits  := train
