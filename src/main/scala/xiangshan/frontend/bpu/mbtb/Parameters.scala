@@ -25,12 +25,13 @@ case class MainBtbParameters(
     // Lowest level banks used to resolve read-write conflicts and reduce SRAM power, each bank is a physical SRAM
     NumInternalBanks: Int = 4,
     // NumAlignBanks is determined by top-level FetchBlockSize and FetchBlockAlignSize, not adjustable in mbtb
-    TagWidth:        Int = 16,
-    TargetWidth:     Int = 20,       // 2B aligned
     WriteBufferSize: Int = 4,
     Replacer:        String = "Lru", // "Lru" or "Plru"
-    // Base table
-    TakenCntWidth: Int = 2,
+    // Entry config
+    TagWidth:        Int = 16,
+    EnableTargetFix: Boolean = true,
+    TargetWidth:     Int = 20, // 2B aligned
+    TakenCntWidth:   Int = 2,
     // Mbtb write trace
     EnableMainbtbTrace: Boolean = false
 ) {}
@@ -38,22 +39,25 @@ case class MainBtbParameters(
 trait HasMainBtbParameters extends HasBpuParameters {
   def mbtbParameters: MainBtbParameters = bpuParameters.mbtbParameters
 
-  def NumEntries:       Int = mbtbParameters.NumEntries
-  def NumWay:           Int = mbtbParameters.NumWay
-  def NumInternalBanks: Int = mbtbParameters.NumInternalBanks
-  def NumAlignBanks:    Int = FetchBlockSize / FetchBlockAlignSize
-  // NumSets is the number of sets in one bank, a bank corresponds to a physical SRAM
-  def NumSets:            Int    = NumEntries / NumWay / NumInternalBanks / NumAlignBanks
-  def TagWidth:           Int    = mbtbParameters.TagWidth
-  def TargetWidth:        Int    = mbtbParameters.TargetWidth
-  def SetIdxLen:          Int    = log2Ceil(NumSets)
-  def InternalBankIdxLen: Int    = log2Ceil(NumInternalBanks)
-  def AlignBankIdxLen:    Int    = log2Ceil(NumAlignBanks)
-  def WriteBufferSize:    Int    = mbtbParameters.WriteBufferSize
-  def Replacer:           String = mbtbParameters.Replacer
+  def NumEntries:       Int    = mbtbParameters.NumEntries
+  def NumWay:           Int    = mbtbParameters.NumWay
+  def NumInternalBanks: Int    = mbtbParameters.NumInternalBanks
+  def WriteBufferSize:  Int    = mbtbParameters.WriteBufferSize
+  def Replacer:         String = mbtbParameters.Replacer
 
-  // Base table
-  def TakenCntWidth: Int = mbtbParameters.TakenCntWidth
+  def NumAlignBanks: Int = FetchBlockSize / FetchBlockAlignSize
+  // NumSets is the number of sets in one bank, a bank corresponds to a physical SRAM
+  def NumSets: Int = NumEntries / NumWay / NumInternalBanks / NumAlignBanks
+
+  def SetIdxLen:          Int = log2Ceil(NumSets)
+  def InternalBankIdxLen: Int = log2Ceil(NumInternalBanks)
+  def AlignBankIdxLen:    Int = log2Ceil(NumAlignBanks)
+
+  // Entry config
+  def TagWidth:        Int     = mbtbParameters.TagWidth
+  def TargetWidth:     Int     = mbtbParameters.TargetWidth
+  def EnableTargetFix: Boolean = mbtbParameters.EnableTargetFix
+  def TakenCntWidth:   Int     = mbtbParameters.TakenCntWidth
 
   // Used in any aligned-addr-indexed predictor, indicates the position relative to the aligned start addr
   def CfiAlignedPositionWidth: Int = CfiPositionWidth - AlignBankIdxLen

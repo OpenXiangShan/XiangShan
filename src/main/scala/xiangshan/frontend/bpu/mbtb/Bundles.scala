@@ -47,9 +47,9 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   // Relative position to the aligned start addr
   val position: UInt = UInt(CfiAlignedPositionWidth.W)
 
-  //  Branch target info
-  val targetCarry:     TargetCarry = new TargetCarry
-  val targetLowerBits: UInt        = UInt(TargetWidth.W)
+  // Branch target info
+  val targetCarry:     Option[TargetCarry] = Option.when(EnableTargetFix)(new TargetCarry)
+  val targetLowerBits: UInt                = UInt(TargetWidth.W)
 
 //  val replaceCnt: UInt = UInt(2.W) // TODO: not used for now
 }

@@ -168,7 +168,7 @@ class MainBtbAlignBank(
     val hit = rawHit && e.position >= s2_alignedInstOffset && !s2_crossPage
     pred.valid            := hit
     pred.bits.cfiPosition := Cat(s2_posHigherBits, e.position)
-    pred.bits.target      := getFullTarget(s2_startPc, e.targetLowerBits, Some(e.targetCarry))
+    pred.bits.target      := getFullTarget(s2_startPc, e.targetLowerBits, e.targetCarry)
     pred.bits.attribute   := e.attribute
     pred.bits.taken       := c.isPositive
 
@@ -241,10 +241,10 @@ class MainBtbAlignBank(
   private val t1_entry = Wire(new MainBtbEntry)
   t1_entry.valid           := true.B
   t1_entry.tag             := getTag(t1_startPc)
+  t1_entry.attribute       := t1_mispredictInfo.bits.attribute
   t1_entry.position        := t1_mispredictInfo.bits.cfiPosition
   t1_entry.targetLowerBits := getTargetLowerBits(t1_mispredictInfo.bits.target)
-  t1_entry.targetCarry     := getTargetCarry(t1_startPc, t1_mispredictInfo.bits.target)
-  t1_entry.attribute       := t1_mispredictInfo.bits.attribute
+  t1_entry.targetCarry.foreach(_ := getTargetCarry(t1_startPc, t1_mispredictInfo.bits.target))
 
   // similar to s0 case
   assert(!t1_fire || t1_alignBankIdx === alignIdx.U, "MainBtbAlignBank alignIdx mismatch")
