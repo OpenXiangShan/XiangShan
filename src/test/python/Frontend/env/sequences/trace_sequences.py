@@ -89,6 +89,7 @@ class RunUntilGoldenTraceCompleteSequence:
         cycles_run = 0
         last_cursor = int(trace.cursor)
         stagnant_cycles = 0
+        next_cursor_report = ((last_cursor // 1000) + 1) * 1000 if last_cursor >= 0 else 1000
 
         while max_cycles <= 0 or cycles_run < max_cycles:
             env.step(1)
@@ -99,6 +100,17 @@ class RunUntilGoldenTraceCompleteSequence:
             else:
                 stagnant_cycles = 0
                 last_cursor = current_cursor
+
+            while current_cursor >= next_cursor_report > 0:
+                print(
+                    "[frontend] golden progress: "
+                    f"cursor={current_cursor}/{total_entries} "
+                    f"cycles={cycles_run} "
+                    f"golden_pc={format_optional_pc(current_golden_pc_getter(trace, env.backend_model))} "
+                    f"pending_work={_pending_work_count(env.backend_model)}",
+                    flush=True,
+                )
+                next_cursor_report += 1000
 
             monitor_errors = env.monitor.get_errors()
             if logger is not None and progress_interval > 0 and (cycles_run % progress_interval) == 0:

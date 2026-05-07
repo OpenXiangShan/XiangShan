@@ -4,6 +4,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
+PIPELINE_STAGE="init"
+PIPELINE_REASON="not_started"
+
+print_exit_reason() {
+  local status=$?
+  if [[ "${status}" -eq 0 ]]; then
+    echo "[frontend] exit: code=${status} stage=${PIPELINE_STAGE} reason=${PIPELINE_REASON}"
+  else
+    echo "[frontend][error] exit: code=${status} stage=${PIPELINE_STAGE} reason=${PIPELINE_REASON}" >&2
+  fi
+}
+
+trap print_exit_reason EXIT
 
 usage() {
   cat <<'EOF'
@@ -33,6 +46,7 @@ EOF
 }
 
 if [[ $# -lt 1 || $# -gt 4 ]]; then
+  PIPELINE_REASON="invalid_arguments"
   usage
   exit 1
 fi
@@ -84,26 +98,36 @@ echo "[frontend] pytest_disable_rerunfailures: ${PYTEST_DISABLE_RERUNFAILURES}"
 cd "${REPO_DIR}"
 
 if [[ ! -f "${BIN_PATH}" ]]; then
+  PIPELINE_STAGE="validate_inputs"
+  PIPELINE_REASON="bin_not_found"
   echo "[frontend][error] bin not found: ${BIN_PATH}" >&2
   exit 2
 fi
 
 if [[ ! -f "${NEMU_EXEC}" ]]; then
+  PIPELINE_STAGE="validate_inputs"
+  PIPELINE_REASON="nemu_exec_not_found"
   echo "[frontend][error] NEMU executable not found: ${NEMU_EXEC}" >&2
   exit 2
 fi
 
 if ! [[ "${PYTEST_TIMEOUT_SECS}" =~ ^[0-9]+$ ]] || [[ "${PYTEST_TIMEOUT_SECS}" -le 0 ]]; then
+  PIPELINE_STAGE="validate_inputs"
+  PIPELINE_REASON="invalid_pytest_timeout"
   echo "[frontend][error] TB_PYTEST_TIMEOUT_SECS must be a positive integer, got: ${PYTEST_TIMEOUT_SECS}" >&2
   exit 2
 fi
 
 if ! [[ "${TRACE_STAGNANT_CYCLES_LIMIT}" =~ ^[0-9]+$ ]] || [[ "${TRACE_STAGNANT_CYCLES_LIMIT}" -le 0 ]]; then
+  PIPELINE_STAGE="validate_inputs"
+  PIPELINE_REASON="invalid_stagnant_cycles_limit"
   echo "[frontend][error] TB_TRACE_STAGNANT_CYCLES_LIMIT must be a positive integer, got: ${TRACE_STAGNANT_CYCLES_LIMIT}" >&2
   exit 2
 fi
 
 if ! [[ "${TRACE_START_INDEX}" =~ ^[0-9]+$ ]]; then
+  PIPELINE_STAGE="validate_inputs"
+  PIPELINE_REASON="invalid_trace_start_index"
   echo "[frontend][error] TB_TRACE_START_INDEX must be a non-negative integer, got: ${TRACE_START_INDEX}" >&2
   exit 2
 fi
@@ -111,6 +135,8 @@ fi
 mkdir -p "$(dirname "${TRACE_PATH}")" "$(dirname "${NEMU_LOG_PATH}")"
 export PYTHONPATH="${FRONTEND_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-}"
 
+PIPELINE_STAGE="trace_generation"
+PIPELINE_REASON="trace_generation_failed"
 "${PYTHON_BIN}" "${FRONTEND_DIR}/tools/nemu_bin_to_golden_trace.py" \
   "${BIN_PATH}" "${TRACE_PATH}" \
   --nemu-exec "${NEMU_EXEC}" \
@@ -118,10 +144,13 @@ export PYTHONPATH="${FRONTEND_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH
   --nemu-max-instr "${NEMU_MAX_INSTR}" \
   --trace-limit "${TRACE_LIMIT}"
 
+PIPELINE_REASON="trace_generated"
 echo "[frontend] trace done: ${TRACE_PATH}"
 
 if [[ "${RUN_DUT}" != "0" ]]; then
   if [[ ! -f "${FRONTEND_DIR}/tests/test_bin_trace_dut.py" ]]; then
+    PIPELINE_STAGE="validate_inputs"
+    PIPELINE_REASON="missing_pytest_entry"
     echo "[frontend][error] missing pytest entry test file: ${FRONTEND_DIR}/tests/test_bin_trace_dut.py" >&2
     exit 2
   fi
@@ -130,6 +159,8 @@ if [[ "${RUN_DUT}" != "0" ]]; then
     PYTEST_CMD+=(-p no:rerunfailures)
   fi
   PYTEST_CMD+=("${PYTEST_TARGET}")
+  PIPELINE_STAGE="dut_pytest"
+  PIPELINE_REASON="dut_pytest_failed"
   if timeout --foreground "${PYTEST_TIMEOUT_SECS}" env \
     TB_ENABLE_DUT_TESTS=1 \
     TB_BIN_TRACE_PIPELINE=1 \
@@ -141,14 +172,24 @@ if [[ "${RUN_DUT}" != "0" ]]; then
     TB_TRACE_MAX_CYCLES="${TRACE_MAX_CYCLES}" \
     TB_TRACE_START_INDEX="${TRACE_START_INDEX}" \
     "${PYTEST_CMD[@]}"; then
-    :
+    PIPELINE_REASON="dut_pytest_passed"
   else
     status=$?
     if [[ "${status}" -eq 124 ]]; then
+      PIPELINE_REASON="dut_pytest_timeout"
       echo "[frontend][error] DUT pytest timed out after ${PYTEST_TIMEOUT_SECS}s" >&2
+    elif [[ "${status}" -gt 128 ]]; then
+      PIPELINE_REASON="dut_pytest_terminated_by_signal"
+    else
+      PIPELINE_REASON="dut_pytest_assertion_or_error"
     fi
     exit "${status}"
   fi
+else
+  PIPELINE_STAGE="trace_generation"
+  PIPELINE_REASON="dut_skipped"
 fi
 
+PIPELINE_STAGE="done"
+PIPELINE_REASON="completed"
 echo "[frontend] done"
