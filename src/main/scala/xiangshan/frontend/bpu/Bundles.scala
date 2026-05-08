@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utils.Duplicate
 import utils.EnumUInt
 import xiangshan.Resolve
 import xiangshan.backend.decode.isa.predecode.PreDecodeInst
@@ -238,12 +239,13 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper 
 
 // Backend & Ftq -> Bpu
 class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
-  val startPcVec: Vec[PrunedAddr]        = Vec(NumBtbAlignBanks, PrunedAddr(VAddrBits))
-  val branches:   Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
-  val meta:       BpuResolveMeta         = new BpuResolveMeta
-  val perfMeta:   BpuPerfMeta            = new BpuPerfMeta
+  val startPcVec: Duplicate[Vec[PrunedAddr]] =
+    Duplicate(NumStartPcDuplicate, Vec(NumBtbAlignBanks, PrunedAddr(VAddrBits)))
+  val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
+  val meta:     BpuResolveMeta         = new BpuResolveMeta
+  val perfMeta: BpuPerfMeta            = new BpuPerfMeta
 
-  def startPc: PrunedAddr = startPcVec.head
+  def startPc: PrunedAddr = startPcVec.get.head // get one duplicate and use its head (startPc for first alignBank)
 
   // we masked out all branches after the first mispredict branch in Bpu top (refer to Bpu.scala t0_firstMispredictMask)
   // so, we can assert that branches.map(b => b.valid && b.bits.mispredict) is at-most-one-hot
@@ -252,8 +254,21 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
     Mux1H(branches.map(b => (b.valid && b.bits.mispredict, b)))
 }
 
+// Bpu top -> predictors
+class Train(NumStartPcVecDup: Int = 1)(implicit p: Parameters) extends BpuTrain {
+  override val startPcVec: Duplicate[Vec[PrunedAddr]] =
+    Duplicate(NumStartPcVecDup, Vec(NumBtbAlignBanks, PrunedAddr(VAddrBits)))
+
+  def fromBpuTrain(that: BpuTrain): Unit = {
+    this.startPcVec := that.startPcVec // NOTE this ':=' is overloaded for fan-out balancing
+    this.branches   := that.branches
+    this.meta       := that.meta
+    this.perfMeta   := that.perfMeta
+  }
+}
+
 // use s3 prediction to train s1 predictors
-class BpuFastTrain(implicit p: Parameters) extends BpuBundle {
+class FastTrain(implicit p: Parameters) extends BpuBundle {
   val startPc:         PrunedAddr    = PrunedAddr(VAddrBits)
   val finalPrediction: Prediction    = new Prediction
   val hasOverride:     Bool          = Bool()

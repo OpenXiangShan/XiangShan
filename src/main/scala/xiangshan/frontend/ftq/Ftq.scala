@@ -376,11 +376,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
     trainCache.valid := false.B
   }.elsewhen(resolveQueue.io.bpuTrain.fire) {
     trainCache.bits.meta := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
-    trainCache.bits.startPcVec.zipWithIndex.foreach { case (startPc, i) =>
-      if (i == 0)
-        startPc := resolveQueue.io.bpuTrain.bits.startPc // do not align startPcVec.head
-      else
-        startPc := getAlignedPc(resolveQueue.io.bpuTrain.bits.startPc + (i << FetchBlockAlignWidth).U)
+    trainCache.bits.startPcVec.foreach { dup =>
+      dup.zipWithIndex.foreach { case (startPc, i) =>
+        if (i == 0)
+          startPc := resolveQueue.io.bpuTrain.bits.startPc // do not align startPcVec.head
+        else
+          startPc := getAlignedPc(resolveQueue.io.bpuTrain.bits.startPc + (i << FetchBlockAlignWidth).U)
+      }
     }
     trainCache.bits.branches := resolveQueue.io.bpuTrain.bits.branches
     trainCache.bits.perfMeta := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf

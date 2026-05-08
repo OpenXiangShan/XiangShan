@@ -34,6 +34,8 @@ import xiangshan.frontend.bpu.utage.MicroTageParameters
 case class BpuParameters(
     // general
     FetchBlockAlignSize: Option[Int] = None, // bytes, if None, use half-align (FetchBLockSize / 2) by default
+    // ppa
+    NumStartPcDuplicate: Int = 3, // duplicate pc-related register to control fan-out
     // debug
     EnableBpTrace: Boolean = false,
     // history
@@ -60,6 +62,9 @@ trait HasBpuParameters extends HasFrontendParameters {
   def FetchBlockAlignSize:    Int = bpuParameters.FetchBlockAlignSize.getOrElse(FetchBlockSize / 2)
   def FetchBlockAlignWidth:   Int = log2Ceil(FetchBlockAlignSize)
   def FetchBlockAlignInstNum: Int = FetchBlockAlignSize / instBytes
+
+  // ppa
+  def NumStartPcDuplicate: Int = bpuParameters.NumStartPcDuplicate
 
   def PhrHistoryLength: Int = frontendParameters.getPhrHistoryLength
 

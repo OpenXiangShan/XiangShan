@@ -22,7 +22,7 @@ import utility.XSPerfAccumulate
 import utility.XSWarn
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.bpu.BpuTrain
+import xiangshan.frontend.bpu.Train
 
 // PHR: Predicted History Register
 class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with Helpers {
@@ -33,9 +33,9 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     val s3_foldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val phr:            Vec[Bool]             = Output(Vec(PhrHistoryLength, Bool()))
     val phrMeta:        PhrMeta               = Output(new PhrMeta)
-    val train:          PhrUpdate             = Input(new PhrUpdate)       // redirect from backend
+    val train:          PhrUpdate             = Input(new PhrUpdate)    // redirect from backend
     val s1Train:        S1Train               = Input(new S1Train)
-    val commit:         Valid[BpuTrain]       = Input(Valid(new BpuTrain)) // trian bp data from reslove
+    val commit:         Valid[Train]          = Input(Valid(new Train)) // trian bp data from reslove
     val oldFoldedPhr:   PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val trainFoldedPhr: PhrAllFoldedHistories = Output(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
   }

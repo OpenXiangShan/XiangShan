@@ -36,8 +36,8 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.SaturateCounter
+import xiangshan.frontend.bpu.Train
 import xiangshan.frontend.bpu.WriteBuffer
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
@@ -115,8 +115,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   private val t0_fire = io.enable && io.stageCtrl.t0_fire
 
-  private val t1_train = Wire(new BpuTrain)
-  t1_train := RegEnable(io.train, 0.U.asTypeOf(new BpuTrain), t0_fire)
+  private val t1_train = Wire(new Train)
+  t1_train := RegEnable(io.train, 0.U.asTypeOf(new Train), t0_fire)
 
   private val t1_meta = Wire(new IttageMeta)
   t1_train.meta.ittage := t1_meta

@@ -38,16 +38,16 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   // predict request
   val startPc: PrunedAddr = Input(PrunedAddr(VAddrBits))
   // resolve train
-  val trainReady: Bool     = Output(Bool())
-  val train:      BpuTrain = Input(new BpuTrain)
+  val trainReady: Bool  = Output(Bool())
+  val train:      Train = Input(new Train)
   // fast train for s1 predictors
-  val fastTrain: Option[Valid[BpuFastTrain]] = None
+  val fastTrain: Option[Valid[FastTrain]] = None
 
   val sramResetDone: Bool = Output(Bool())
 }
 
 trait HasFastTrainIO extends BasePredictorIO {
-  override val fastTrain: Option[Valid[BpuFastTrain]] = Option(Input(Valid(new BpuFastTrain)))
+  override val fastTrain: Option[Valid[FastTrain]] = Option(Input(Valid(new FastTrain)))
 }
 
 // The abstract class is used to abstract the setIdx and tag from write requests for updating write buffer entries

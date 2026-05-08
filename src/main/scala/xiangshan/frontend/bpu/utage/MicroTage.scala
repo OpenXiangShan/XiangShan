@@ -26,9 +26,8 @@ import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
-import xiangshan.frontend.bpu.BpuFastTrain
-import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.CompareMatrix
+import xiangshan.frontend.bpu.FastTrain
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HasFastTrainIO
 import xiangshan.frontend.bpu.Prediction
@@ -243,7 +242,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   }
 
   // ------------ MicroTage is only concerned with conditional branches ---------- //
-  private val t0_train                  = RegNext(io.fastTrain.get.bits, 0.U.asTypeOf(new BpuFastTrain))
+  private val t0_train                  = RegNext(io.fastTrain.get.bits, 0.U.asTypeOf(new FastTrain))
   private val t0_fire                   = RegNext(io.fastTrain.get.valid, false.B)
   private val t0_trainMeta              = t0_train.utageMeta
   private val t0_abtbResult             = t0_trainMeta.abtbResult

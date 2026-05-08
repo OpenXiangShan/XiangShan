@@ -131,7 +131,7 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
 
   private val t0_startPc    = t0_train.startPc
   private val t0_rotator    = VecRotate(getAlignBankIndex(t0_startPc))
-  private val t0_startPcVec = t0_rotator.rotate(t0_train.startPcVec)
+  private val t0_startPcVec = t0_rotator.rotate(t0_train.startPcVec.get)
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
     b.io.t0_startPc := t0_startPcVec(i)
