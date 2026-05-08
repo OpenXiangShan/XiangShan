@@ -147,18 +147,18 @@ case class VecFuConfig (
   }
 
   // csr's redirect also uses redirect bundle
-  def hasRedirect: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr).contains(fuType)
+  def hasRedirect: Boolean = Seq(FuType.jmp, FuType.njmp, FuType.brh, FuType.csr).contains(fuType)
 
-  def hasIsRVC: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr, FuType.ldu).contains(fuType)
+  def hasIsRVC: Boolean = Seq(FuType.jmp, FuType.njmp, FuType.brh, FuType.csr, FuType.ldu).contains(fuType)
 
-  def hasRasAction: Boolean = Seq(FuType.jmp).contains(fuType)
+  def hasRasAction: Boolean = Seq(FuType.jmp, FuType.njmp).contains(fuType)
 
-  def needTargetPc: Boolean = Seq(FuType.jmp, FuType.brh).contains(fuType)
+  def needTargetPc: Boolean = Seq(FuType.jmp, FuType.njmp, FuType.brh).contains(fuType)
 
   // predict info
-  def needPdInfo: Boolean = Seq(FuType.jmp, FuType.brh, FuType.csr).contains(fuType)
+  def needPdInfo: Boolean = Seq(FuType.jmp, FuType.njmp, FuType.brh, FuType.csr).contains(fuType)
 
-  def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.ldu).contains(fuType)
+  def needPc: Boolean = Seq(FuType.jmp, FuType.njmp, FuType.link, FuType.brh, FuType.ldu).contains(fuType)
 
   var aluNeedPc: Boolean = false
 
@@ -177,6 +177,10 @@ case class VecFuConfig (
   def isBrh: Boolean = fuType == FuType.brh
 
   def isJmp: Boolean = fuType == FuType.jmp
+
+  def isNewJmp: Boolean = fuType == FuType.njmp
+
+  def isLink: Boolean = fuType == FuType.link
 
   def isFence: Boolean = fuType == FuType.fence
 
@@ -259,6 +263,8 @@ object VecFuConfig {
   }
 
   val JmpCfg = VecFuConfig.fromFuConfig(FuConfig.JmpCfg)
+  val NJmpCfg = VecFuConfig.fromFuConfig(FuConfig.NJmpCfg)
+  val LinkCfg = VecFuConfig.fromFuConfig(FuConfig.LinkCfg)
   val BrhCfg = VecFuConfig.fromFuConfig(FuConfig.BrhCfg)
   val I2fCfg = VecFuConfig.fromFuConfig(FuConfig.I2fCfg)
   val FcmpCfg = VecFuConfig.fromFuConfig(FuConfig.FcmpCfg)
@@ -306,6 +312,8 @@ object VecFuConfig {
 
   def allConfigs = Seq(
     JmpCfg,
+    NJmpCfg,
+    LinkCfg,
     BrhCfg,
     I2fCfg,
     FcmpCfg,

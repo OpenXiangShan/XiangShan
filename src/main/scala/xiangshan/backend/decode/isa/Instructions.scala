@@ -360,6 +360,18 @@ object Instructions {
   def HSV_W              :BitPat = BitPat("b0110101??????????100000001110011")
   def JAL                :BitPat = BitPat("b?????????????????????????1101111")
   def JALR               :BitPat = BitPat("b?????????????????000?????1100111")
+  def JAL_RD_1XXXX       :BitPat = BitPat("b????????????????????1????1101111") // special case of JAL
+  def JAL_RD_01XXX       :BitPat = BitPat("b????????????????????01???1101111") // special case of JAL
+  def JAL_RD_001XX       :BitPat = BitPat("b????????????????????001??1101111") // special case of JAL
+  def JAL_RD_0001X       :BitPat = BitPat("b????????????????????0001?1101111") // special case of JAL
+  def JAL_RD_00001       :BitPat = BitPat("b????????????????????000011101111") // special case of JAL
+  def JAL_RD_ZERO        :BitPat = BitPat("b????????????????????000001101111") // special case of JAL
+  def JALR_RD_1XXXX      :BitPat = BitPat("b?????????????????0001????1100111") // special case of JALR
+  def JALR_RD_01XXX      :BitPat = BitPat("b?????????????????00001???1100111") // special case of JALR
+  def JALR_RD_001XX      :BitPat = BitPat("b?????????????????000001??1100111") // special case of JALR
+  def JALR_RD_0001X      :BitPat = BitPat("b?????????????????0000001?1100111") // special case of JALR
+  def JALR_RD_00001      :BitPat = BitPat("b?????????????????000000011100111") // special case of JALR
+  def JALR_RD_ZERO       :BitPat = BitPat("b?????????????????000000001100111") // special case of JALR
   def LB                 :BitPat = BitPat("b?????????????????000?????0000011")
   def LBU                :BitPat = BitPat("b?????????????????100?????0000011")
   def LD                 :BitPat = BitPat("b?????????????????011?????0000011")
@@ -897,15 +909,18 @@ object Instructions {
 
     def all: Seq[BitPat] = allWithNames.map(_._1)
 
-    def mapOpcode(kvs: (this.type => (BitPat, Opcode))*): Map[BitPat, Opcode] = {
+    def mapUopcodes(kvs: (this.type => (BitPat, Seq[Opcode]))*): Map[BitPat, Seq[Opcode]] = {
       val res = Map(kvs.map(_(this)): _*)
       val diffSet: Set[BitPat] = this.all.toSet &~ res.keySet
-      require(diffSet.isEmpty, s"These instructions not handled ${diffSet.map(allNameMap)}")
+      require(diffSet.isEmpty, s"mapUopcodes: These instructions not handled ${diffSet.map(allNameMap)}")
       res
     }
 
     def mapUopcode(kvs: (this.type => (BitPat, Opcode))*): Map[BitPat, Seq[Opcode]] = {
-      mapOpcode(kvs: _*).map { case (k, v) => k -> Seq(v) }
+      val res = Map(kvs.map(_(this)): _*).map { case (k, v) => k -> Seq(v) }
+      val diffSet: Set[BitPat] = this.all.toSet &~ res.keySet
+      require(diffSet.isEmpty, s"mapUopcode: These instructions not handled ${diffSet.map(allNameMap)}")
+      res
     }
 
     lazy val allNameMap: SeqMap[BitPat, String] = allWithNames.to(SeqMap)
@@ -1536,8 +1551,6 @@ object Instructions {
     def EBREAK             = outer.EBREAK
     def ECALL              = outer.ECALL
     def FENCE              = outer.FENCE
-    def JAL                = outer.JAL
-    def JALR               = outer.JALR
     def LB                 = outer.LB
     def LBU                = outer.LBU
     def LH                 = outer.LH
@@ -1575,8 +1588,6 @@ object Instructions {
       EBREAK,
       ECALL,
       FENCE,
-      JAL,
-      JALR,
       LB,
       LBU,
       LH,
@@ -1598,6 +1609,40 @@ object Instructions {
       SW,
       XOR,
       XORI,
+    )
+  }
+
+  object JumpLinkType extends InstType {
+    def JAL                = outer.JAL
+    def JALR               = outer.JALR
+    def JAL_RD_1XXXX       = outer.JAL_RD_1XXXX
+    def JAL_RD_01XXX       = outer.JAL_RD_01XXX
+    def JAL_RD_001XX       = outer.JAL_RD_001XX
+    def JAL_RD_0001X       = outer.JAL_RD_0001X
+    def JAL_RD_00001       = outer.JAL_RD_00001
+    def JAL_RD_ZERO        = outer.JAL_RD_ZERO
+    def JALR_RD_1XXXX      = outer.JALR_RD_1XXXX
+    def JALR_RD_01XXX      = outer.JALR_RD_01XXX
+    def JALR_RD_001XX      = outer.JALR_RD_001XX
+    def JALR_RD_0001X      = outer.JALR_RD_0001X
+    def JALR_RD_00001      = outer.JALR_RD_00001
+    def JALR_RD_ZERO       = outer.JALR_RD_ZERO
+
+    val allWithNames = withNameSeq(
+      // JAL,
+      // JALR,
+      JAL_RD_1XXXX,
+      JAL_RD_01XXX,
+      JAL_RD_001XX,
+      JAL_RD_0001X,
+      JAL_RD_00001,
+      JAL_RD_ZERO,
+      JALR_RD_1XXXX,
+      JALR_RD_01XXX,
+      JALR_RD_001XX,
+      JALR_RD_0001X,
+      JALR_RD_00001,
+      JALR_RD_ZERO,
     )
   }
 

@@ -24,7 +24,7 @@ object Extensions {
 
   sealed trait CombExt[T1 <: ExtBase, T2 <: ExtBase] extends ExtBase
 
-  case object I extends UnprivExt(Seq(I64Type, IType), tableI)
+  case object I extends UnprivExt(Seq(I64Type, IType, JumpLinkType), tableI)
 
   case object M extends UnprivExt(Seq(M64Type, MType), tableM)
 

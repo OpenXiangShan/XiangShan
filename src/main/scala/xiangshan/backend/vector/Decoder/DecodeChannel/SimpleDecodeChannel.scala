@@ -7,35 +7,32 @@ import org.chipsalliance.cde.config.Parameters
 import top.ArgParser
 import utility.LookupTree
 import xiangshan.CommitType
+import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel._
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.Frm
 import xiangshan.backend.vector.Decoder.DecodePatterns.RdZeroPattern
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
-import xiangshan.backend.vector.Decoder.{DecodeChannelInput, SrcRenType, NumUopOH}
+import xiangshan.backend.vector.Decoder.{DecodeChannelInput, NumUopOH, SrcRenType}
 import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, NumWB}
 import xiangshan.backend.vector.Decoder.Uop.UopInfoRenameSimple
 import xiangshan.backend.vector.Decoder.util._
 import xiangshan.backend.vector.util.Verilog
+import xiangshan.backend.vector.HasSimpleSettings
 import xiangshan._
 
 @instantiable
-class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters) extends Module with HasXSParameter {
+class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters) extends Module with HasSimpleSettings with HasXSParameter {
   import xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel._
-
-  // For now, we only support 1 uop per instruction, so the maxSplitUopNum is 1. In the future, if we want to support
-  // more uops per instruction, we can increase this number and modify the decode table accordingly.
-  def maxSplitUopNum = 1
+  import SimpleDecodeChannel._
 
   @public val in = IO(Input(new DecodeChannelInput))
-  @public val out = IO(Output(new Bundle {
-    val uop = Vec(maxSplitUopNum, ValidIO(new SimpleDecodeChannelOutput))
-    val uopNumOH = NumUopOH()
-  }))
+  @public val out = IO(Output(new SimpleDecodeChannelOutput(maxSimpleSplitUopNum)))
 
   val rawInst = in.rawInst
   val instFields = rawInst.asTypeOf(new XSInstBitFields)
@@ -47,9 +44,9 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     case p if !p.hasRd => Seq(p ## RdZeroPattern(None))
   }
 
-  val uopInfoFields = Seq.tabulate(maxSplitUopNum)(i => new UopInfoField(i))
-  val opcodeFields = Seq.tabulate(maxSplitUopNum)(i => new OpcodeField(i))
-  val fuTypeFields = Seq.tabulate(maxSplitUopNum)(i => new FuTypeField(i))
+  val uopInfoFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new UopInfoField(i))
+  val opcodeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new OpcodeField(i))
+  val fuTypeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new FuTypeField(i))
 
   val fields = uopInfoFields ++ opcodeFields ++ fuTypeFields ++ Seq(
     FrmRenField,
@@ -57,6 +54,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     SelImmField,
     CommitTypeField,
     CanRobCompressField,
+    NumUopField,
     NumUopOhField,
     NeedFsField,
     PrivExceptionCauseField,
@@ -80,6 +78,11 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     case (sel, enum) =>
       sel -> enum.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == enum.len)
   })
+
+  val numUop = result(NumUopField)
+  val numUopOH = result(NumUopOhField)
+  dontTouch(numUop)
+  dontTouch(numUopOH)
 
   val needFs = result(NeedFsField)
   val privCause = result(PrivExceptionCauseField)
@@ -112,7 +115,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     case (cause, _, virtual) => (privCause === cause) -> virtual
   })
 
-  for (i <- 0 until maxSplitUopNum) {
+  for (i <- 0 until maxSimpleSplitUopNum) {
     val frmExceptionII = out.uop(i).bits.frmRen && (out.uop(i).bits.frmIll || (out.uop(i).bits.frm === Frm.DYN && in.fromCSR.illegalInst.frm))
 
     out.uop(i).valid := uopInfos(i).valid
@@ -133,6 +136,9 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     out.uop(i).bits.commitType := result(CommitTypeField)
     out.uop(i).bits.canRobCompress := result(CanRobCompressField)
     out.uop(i).bits.numWb := resultInstRd(NumWbField)
+    out.uop(i).bits.uopIdx := i.U
+    out.uop(i).bits.isFirstUop := (i == 0).B
+    out.uop(i).bits.isLastUop := i.U === numUop
     out.uop(i).bits.exceptionII := frmExceptionII || fsOffExceptionII || privExceptionII
     out.uop(i).bits.exceptionVI := privExceptionVI
   }
@@ -140,25 +146,35 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
   out.uopNumOH := result(NumUopOhField)
 }
 
-class SimpleDecodeChannelOutput() extends Bundle {
-  val fuType: UInt = FuType()
-  val opcode: UInt = Opcode()
-  val renameInfo = new UopInfoRenameSimple
-  val lsrc1 = UInt(5.W)
-  val lsrc2 = UInt(5.W)
-  val lsrc3 = UInt(5.W)
-  val frmRen = Bool()
-  val fflagsWen = Bool()
-  val ldest = UInt(5.W)
-  val frm = Frm()
-  val frmIll = Bool()
-  val selImm = ValidIO(DecodeSelImm())
-  val imm = UInt(32.W)
-  val commitType = CommitType()
-  val canRobCompress = Bool()
-  val numWb = NumWB()
-  val exceptionII = Bool()
-  val exceptionVI = Bool()
+object SimpleDecodeChannel {
+  class SimpleDecodeChannelOutputUop() extends Bundle {
+    val fuType: UInt = FuType()
+    val opcode: UInt = Opcode()
+    val renameInfo = new UopInfoRenameSimple
+    val lsrc1 = UInt(5.W)
+    val lsrc2 = UInt(5.W)
+    val lsrc3 = UInt(5.W)
+    val frmRen = Bool()
+    val fflagsWen = Bool()
+    val ldest = UInt(5.W)
+    val frm = Frm()
+    val frmIll = Bool()
+    val selImm = ValidIO(DecodeSelImm())
+    val imm = UInt(32.W)
+    val commitType = CommitType()
+    val canRobCompress = Bool()
+    val numWb = NumWB()
+    val uopIdx = UopIdx()
+    val isFirstUop = Bool()
+    val isLastUop = Bool()
+    val exceptionII = Bool()
+    val exceptionVI = Bool()
+  }
+
+  class SimpleDecodeChannelOutput(val uopWidth: Int) extends Bundle {
+    val uop = Vec(uopWidth, ValidIO(new SimpleDecodeChannelOutputUop))
+    val uopNumOH = NumUopOH()
+  }
 }
 
 object SimpleDecodeChannelMain extends App {

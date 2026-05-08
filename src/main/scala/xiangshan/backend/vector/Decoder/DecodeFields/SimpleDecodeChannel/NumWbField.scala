@@ -48,6 +48,8 @@ object NumWbField extends DecodeField[
   }
 
   val numWbIs2IfRdNotZeroInsts: Set[String] = getVariableNameSeq(
-    JAL, JALR, AUIPC,
+    JAL, JALR,
+    JAL_RD_1XXXX, JAL_RD_01XXX, JAL_RD_001XX, JAL_RD_0001X, JAL_RD_00001,
+    JALR_RD_1XXXX, JALR_RD_01XXX, JALR_RD_001XX, JALR_RD_0001X, JALR_RD_00001,
   ).toSet
 }

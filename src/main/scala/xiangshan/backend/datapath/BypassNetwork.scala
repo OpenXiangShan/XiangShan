@@ -223,7 +223,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
         val isJmp = ALUOpType.isJmp(fuOpType)
         when(isAlu && isJmp) {
           // jalr's fuOpType(1) == 0
-          val isAuipc = fuOpType(1)
+          val isAuipc = JumpOpType.jumpUopisAuipc(fuOpType)
           val thisPcOffset = exuInput.bits.getPcOffset()
           val nextPcOffset = exuInput.bits.getNextPcOffset()
           immALU := Mux(isJmp, Mux(isAuipc, imm + SignExt(thisPcOffset, imm.getWidth), ZeroExt(nextPcOffset, imm.getWidth)), imm)
@@ -248,12 +248,14 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     if (exuParm.hasBrhFu || exuParm.hasCSR || exuParm.hasFence) {
       val thisPcOffset = exuInput.bits.getPcOffset()
       val nextPcOffset = exuInput.bits.getNextPcOffset()
-      val isJALR = FuType.isJump(fuType) && JumpOpType.jumpOpisJalr(fuOpType)
-      val immBJU = imm + Mux(isJALR, 0.U, SignExt(thisPcOffset, imm.getWidth))
+      val isJALR = FuType.isJump(fuType) && JumpOpType.jumpUopisJalr(fuOpType)
+      val isJR = FuType.isNewJump(fuType) && NewJumpOpType.jumpUopisjr(fuOpType)
+      val immBJU = imm + Mux(isJALR || isJR, 0.U, SignExt(thisPcOffset, imm.getWidth))
       val immCsrFence = fromDPs(exuIdx).bits.imm.get
-      exuInput.bits.imm := Mux((FuType.isCsr(fuType) || FuType.isFence(fuType))&& exuParm.hasCSR.B, immCsrFence, immBJU)
+      exuInput.bits.imm := Mux((FuType.isCsr(fuType) || FuType.isFence(fuType)) && exuParm.hasCSR.B, immCsrFence, immBJU)
       exuInput.bits.nextPcOffset.foreach(_ := nextPcOffset)
       dontTouch(isJALR)
+      dontTouch(isJR)
       dontTouch(immBJU)
       dontTouch(immCsrFence)
     }

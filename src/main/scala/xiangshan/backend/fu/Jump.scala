@@ -38,23 +38,20 @@ class JumpDataModule(implicit p: Parameters) extends XSModule {
     val imm = Input(UInt(33.W)) // imm-U need 32 bits, highest bit is sign bit
     val nextPcOffset = Input(UInt((FetchBlockInstOffsetWidth + 2).W))
     val func = Input(FuOpType())
-    val isRVC = Input(Bool())
     val result, target = Output(UInt(XLEN.W))
-    val isAuipc = Output(Bool())
   })
-  val (src1, pc, imm, func, isRVC) = (io.src, io.pc, io.imm, io.func, io.isRVC)
+  val (src1, pc, imm, func) = (io.src, io.pc, io.imm, io.func)
 
-  val isJalr = JumpOpType.jumpOpisJalr(func)
-  val isAuipc = JumpOpType.jumpOpisAuipc(func)
+  val isJalr = JumpOpType.jumpUopisJalr(func)
+  val isAuipc = JumpOpType.jumpUopisAuipc(func)
   val offset = SignExt(imm, XLEN)
 
   val snpc = pc + io.nextPcOffset
-  val target = Mux(JumpOpType.jumpOpisJalr(func), src1 + offset, pc + offset) // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
+  val target = Mux(isJalr, src1 + offset, pc + offset) // NOTE: src1 is (pc/rf(rs1)), src2 is (offset)
 
   // RISC-V spec for JALR:
   // The target address is obtained by adding the sign-extended 12-bit I-immediate to the register rs1,
   // then setting the least-significant bit of the result to zero.
   io.target := Cat(target(XLEN - 1, 1), false.B)
-  io.result := Mux(JumpOpType.jumpOpisAuipc(func), target, snpc)
-  io.isAuipc := isAuipc
+  io.result := Mux(isAuipc, target, snpc)
 }

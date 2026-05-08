@@ -94,7 +94,7 @@ class CtrlBlockImp(
     "memPredLoad"   -> 1,
     "memPredStore"  -> 1,
     "robFlush"  -> 1,
-    "bjuPc"     -> params.BrhCnt,
+    "aluBjuPc"  -> params.aluBjuPcPortNum,
     "bjuTarget" -> params.BrhCnt,
     "load"      -> params.LduCnt,
     "hybrid"    -> params.HyuCnt,
@@ -253,7 +253,7 @@ class CtrlBlockImp(
   }
   memCtrl.io.memPredUpdate.valid := RegNext(mdpTrainValid) // pc is ready, 1 cycle later
 
-  for ((pcMemIdx, i) <- pcMemRdIndexes("bjuPc").zipWithIndex) {
+  for ((pcMemIdx, i) <- pcMemRdIndexes("aluBjuPc").zipWithIndex) {
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
     val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value
     val roffset = io.toDataPath.pcToDataPathIO.fromDataPathFtqOffset(i)
@@ -271,7 +271,7 @@ class CtrlBlockImp(
     io.toDataPath.pcToDataPathIO.toDataPathTargetPC(i) := pcMem.io.rdata(pcMemIdx).toUInt
   }
 
-  val baseIdx = params.BrhCnt
+  val baseIdx = params.aluBjuPcPortNum
   for ((pcMemIdx, i) <- pcMemRdIndexes("load").zipWithIndex) {
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(baseIdx+i)

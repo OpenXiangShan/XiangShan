@@ -14,6 +14,8 @@ object FuType extends ChiselOHEnum {
 
   // int
   val jmp = addType(name = "jmp")
+  val njmp = addType(name = "njmp")
+  val link = addType(name = "link")
   val brh = addType(name = "brh")
   val i2f = addType(name = "i2f")
   val i2v = addType(name = "i2v")
@@ -60,7 +62,7 @@ object FuType extends ChiselOHEnum {
   val vsha256ms = addType(name = "vsha256ms")
   val vsha256c = addType(name = "vsha256c")
 
-  val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
+  val intArithAll = Seq(jmp, njmp, link, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
   // dq1 includes int's iq2 and iq3
   def dq0OHTypeSeq(implicit p: Parameters): Seq[Seq[OHType]] = {
@@ -124,7 +126,7 @@ object FuType extends ChiselOHEnum {
   val fpOP = fpArithAll ++ Seq(i2f, i2v)
   val scalaNeedFrm = Seq(i2f, fmac, fDivSqrt)
   val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
-  val blockBackCompress = Seq(brh, jmp)
+  val blockBackCompress = Seq(brh, jmp, njmp)
 
   def X = BitPat.N(num) // Todo: Don't Care
 
@@ -152,7 +154,11 @@ object FuType extends ChiselOHEnum {
 
   def isJump(fuType: UInt): Bool = FuTypeOrR(fuType, jmp)
 
-  def isBJU(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(brh, jmp))
+  def isNewJump(fuType: UInt): Bool = FuTypeOrR(fuType, njmp)
+
+  def isBJU(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(brh, jmp, njmp))
+
+  def isLink(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(link))
 
   def isFArith(fuType: UInt): Bool = FuTypeOrR(fuType, fpArithAll)
 

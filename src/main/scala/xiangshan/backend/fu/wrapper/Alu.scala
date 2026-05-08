@@ -20,12 +20,6 @@ class Alu(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
     sink := source
   }
   aluModule.io.func := in.ctrl.fuOpType
-  aluModule.io.pc := (if (cfg.aluNeedPc) {
-    Mux(io.instrAddrTransType.get.shouldBeSext,
-      SignExt(in.data.pc.get, cfg.destDataBits),
-      ZeroExt(in.data.pc.get, cfg.destDataBits))
-  }
-  else 0.U
-  )
+  aluModule.io.pc := (if (cfg.aluNeedPc) io.instrAddrTransType.get.extend(in.data.pc.get, cfg.destDataBits) else 0.U)
   out.res.data := aluModule.io.result
 }
