@@ -722,21 +722,27 @@ object VecIssueQueue {
     private val vpWbPortIds = param.vpWbPortIds
     private val v0WbPortIds = param.v0WbPortIds
     private val vlWbPortIds = param.vlWbPortIds
-    val intWbFuBusyTableRead = Option.when(intWbPortIds.nonEmpty)(
-      Vec(intWbPortIds.size, UInt(WbFuBusyTable.tableSize().W))
-    )
-    val fpWbFuBusyTableRead = Option.when(fpWbPortIds.nonEmpty)(
-      Vec(fpWbPortIds.size, UInt(WbFuBusyTable.tableSize().W))
-    )
-    val vpWbFuBusyTableRead = Option.when(vpWbPortIds.nonEmpty)(
-      Vec(vpWbPortIds.size, UInt(WbFuBusyTable.tableSize().W))
-    )
-    val v0WbFuBusyTableRead = Option.when(v0WbPortIds.nonEmpty)(
-      Vec(v0WbPortIds.size, UInt(WbFuBusyTable.tableSize().W))
-    )
-    val vlWbFuBusyTableRead = Option.when(vlWbPortIds.nonEmpty)(
-      Vec(vlWbPortIds.size, UInt(WbFuBusyTable.tableSize().W))
-    )
+
+    val intWbFuBusyTableRead = busyTableRead(intWbPortIds)
+    val fpWbFuBusyTableRead = busyTableRead(fpWbPortIds)
+    val vpWbFuBusyTableRead = busyTableRead(vpWbPortIds)
+    val v0WbFuBusyTableRead = busyTableRead(v0WbPortIds)
+    val vlWbFuBusyTableRead = busyTableRead(vlWbPortIds)
+    val intCtrlBlockRead = ctrlBlockRead(intWbPortIds)
+    val fpCtrlBlockRead = ctrlBlockRead(fpWbPortIds)
+    val vpCtrlBlockRead = ctrlBlockRead(vpWbPortIds)
+    val v0CtrlBlockRead = ctrlBlockRead(v0WbPortIds)
+    val vlCtrlBlockRead = ctrlBlockRead(vlWbPortIds)
+
+    private def busyTableRead(wbPortIds: Seq[Int]): Option[Vec[UInt]] =
+      Option.when(wbPortIds.nonEmpty)(
+        Vec(wbPortIds.size, UInt(WbFuBusyTable.fixedLatBusyTableEntries().W))
+      )
+
+    private def ctrlBlockRead(wbPortIds: Seq[Int]): Option[Vec[WbFuBusyTable.CtrlBlockEntry]] =
+      Option.when(wbPortIds.nonEmpty)(
+        Vec(wbPortIds.size, new WbFuBusyTable.CtrlBlockEntry)
+      )
   }
 
   class WbFuBusyTableWriteBundle(implicit p: Parameters, param: IssueParam) extends XSBundle {
@@ -789,28 +795,58 @@ object VecIssueQueue {
     deqWen: Seq[Bool],
     deq: Seq[ValidIO[Deq]],
   ): Unit = {
+    final case class WbIssueMatch(valid: Bool, slot: UInt)
+
+    def matchedDeqOps(portId: Int): Seq[(ValidIO[Deq], Int)] =
+      deq.zipWithIndex.collect {
+        case (deqPort, deqIdx) if deqWbPortIds(deqIdx).contains(portId) => deqPort -> deqIdx
+      }
+
     sink.foreach { in =>
       in.fromIssueQueue.zip(wbPortIds).foreach { case (portIn, portId) =>
-        val matches = deq.zipWithIndex.collect {
-          case (deqPort, deqIdx) if deqWbPortIds(deqIdx).contains(portId) =>
-            (deqPort.valid && deqWen(deqIdx), deqPort.bits.latency)
+        val matches = matchedDeqOps(portId).map { case (deqPort, deqIdx) =>
+          val isNonFixedLatFu = FuType.FuTypeOrR(deqPort.bits.fuType, FuType.vidiv)
+          val valid = deqPort.valid && deqWen(deqIdx) && !isNonFixedLatFu
+          val slot = WbFuBusyTable.writebackSlot(deqPort.bits.latency, busyTableInsertLatencyOffset)
+          WbIssueMatch(valid, slot)
         }
 
         portIn.valid := false.B
         portIn.bits := 0.U.asTypeOf(portIn.bits)
 
         if (matches.nonEmpty) {
-          val matchValid = matches.map(_._1)
-          val matchLatency = matches.map(_._2)
+          val matchValid = matches.map(_.valid)
+          val matchSlot = matches.map(_.slot)
           portIn.valid := VecInit(matchValid).asUInt.orR
           when (portIn.valid) {
-            portIn.bits := Mux1H(matchValid zip matchLatency)
+            portIn.bits := Mux1H(matchValid zip matchSlot)
           }
           assert(
             PopCount(matchValid) <= 1.U,
             s"VecIssueQueue drives WB busy table port $portId more than once in one cycle"
           )
         }
+      }
+
+      in.fromIssueQueueNonFixedLatFu.zip(wbPortIds).foreach { case (portIn, portId) =>
+        val matches = matchedDeqOps(portId).map { case (deqPort, deqIdx) =>
+          val isNonFixedLatFu = FuType.FuTypeOrR(deqPort.bits.fuType, FuType.vidiv)
+          deqPort.valid && deqWen(deqIdx) && isNonFixedLatFu
+        }
+
+        portIn := false.B
+        if (matches.nonEmpty) {
+          portIn := VecInit(matches).asUInt.orR
+          assert(
+            PopCount(matches) <= 1.U,
+            s"VecIssueQueue drives non-fixed-latency WB busy table port $portId more than once in one cycle"
+          )
+        }
+      }
+
+      in.fromNonFixedLatFu.foreach { portIn =>
+        portIn.valid := false.B
+        portIn.bits := 0.U.asTypeOf(portIn.bits)
       }
     }
   }
@@ -1258,7 +1294,13 @@ object VecIssueQueue {
     entryValid &&
       entry.status.canIssue &&
       entry.status.deqPortIdx === deqIdx.U &&
-      !WbFuBusyTable.entryWbConflict(fromWbFuBusyTable, param, entry, deqIdx)
+      !WbFuBusyTable.entryWbConflict(
+        fromWbFuBusyTable,
+        param,
+        entry,
+        deqIdx,
+        WbFuBusyTable.writebackSlot(entry.payload.latency, busyTableConflictLatencyOffset)
+      )
   }
 
   class EnqPolicy(numEntry: Int, numEnq: Int) extends Module {
@@ -1274,6 +1316,10 @@ object VecIssueQueue {
       enqOH.bits := selOH.asUInt
     }
   }
+  
+  private val busyTableConflictLatencyOffset = 4
+  private val busyTableInsertLatencyOffset = busyTableConflictLatencyOffset - 1
+  
 
   object EnqPolicy {
     def apply(canEnq: UInt, numEnq: Int): Vec[ValidIO[UInt]] = {

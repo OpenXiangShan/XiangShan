@@ -274,6 +274,10 @@ class IssuePipe(
     ex0WakeupValid -> ex0.bits.ctrl.pdest,
   ))
 
+  out.outFuLat.zip(exu.out.outFuLat).foreach {
+    case (sink, source) => sink <> source
+  }
+
   // Delay means that the cycle of this uop send wakeup after it should do.
   // It is not needed yet.
   out.vpWbM3Wakeup.delay := 0.U
@@ -323,6 +327,7 @@ object IssuePipe {
     val vpWbM3Wakeup = new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams)
 
     val ex0 = param.genExuInputBundle(ValidIO(_))
+    val outFuLat = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, Valid(UInt(WbFuBusyTable.NonFixedLatencyWidth.W))))
 
     val gpWbNext: Option[Exu.ToRf] = param.writePortCfgs.find(_.writeInt).map(x => new Exu.ToRf(x, backendParams.intPregParams))
     val fpWbNext: Option[Exu.ToRf] = param.writePortCfgs.find(_.writeFp).map(x => new Exu.ToRf(x, backendParams.fpPregParams))

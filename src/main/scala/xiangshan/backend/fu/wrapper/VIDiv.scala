@@ -2,56 +2,46 @@ package xiangshan.backend.fu.wrapper
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.util._
-import utility.XSError
-import xiangshan.backend.fu.FuConfig
-import xiangshan.backend.fu.vector.Bundles.VSew
-import xiangshan.backend.fu.vector.{Mgu, VecNonPipedFuncUnit}
-import xiangshan.backend.rob.RobPtr
-import xiangshan.ExceptionNO
 import yunsuan.vector.VectorIdiv
 import xiangshan.backend.decode.opcode.Opcode.VIDivOpcodes
-import xiangshan.backend.vector.fu.VecNoFixLatFunc
+import xiangshan.backend.vector.fu.VecNonFixedLatFunc
 import xiangshan.backend.vector.fu.VecFuConfig
+import xiangshan.backend.vector.fu.Func.makePipeReg
 
-class VIDiv(cfg: VecFuConfig)(implicit p: Parameters) extends VecNoFixLatFunc(cfg) {
-  // XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VidivType.dummy, "Vfdiv OpType not supported")
-
-  // params alias
-  private val dataWidth = cfg.destDataBits
-
-  // modules
+class VIDiv(cfg: VecFuConfig)(implicit p: Parameters) extends VecNonFixedLatFunc(cfg) {
   private val vidiv = Module(new VectorIdiv)
 
-  private val thisRobIdx = Wire(new RobPtr)
-//  when(vidiv.io.div_in_ready) { //note
-//    thisRobIdx := io.in(0).bits.ctrl.robIdx
-//  }.otherwise {
-//    thisRobIdx := outCtrl.robIdx
-//  }
-//
-//  /**
-//   * [[vidiv]]'s in connection
-//   */
-//  vidiv.io match {
-//    case subIO =>
-//      subIO.div_in_valid := io.in(0).valid
-//      subIO.div_out_ready := io.out(0).ready & io.out(0).valid
-//      subIO.sew := vsew
-//      subIO.sign := VIDivOpcodes.isSigned(fuOpType)
-//      subIO.dividend_v := ex0vs2
-//      subIO.divisor_v := ex0vs1
-//      subIO.flush := thisRobIdx.needFlush(io.flush)
-//  }
-//
-//  // io.in.ready  := vidiv.io.div_in_ready note
-//  io.out(0).valid := vidiv.io.div_out_valid
-//
-//  private val outFuOpType = outCtrl.fuOpType
-//  private val outIsDiv = VIDivOpcodes.isDiv(outFuOpType)
-//  private val resultData = Mux(outIsDiv, vidiv.io.div_out_q_v, vidiv.io.div_out_rem_v)
-//  private val notModifyVd = outVl === 0.U
-//
-//  io.out(0).bits.res.data := Mux(notModifyVd, outOldVd, mgu.io.out.vd)
-//  io.out(0).bits.ctrl.exceptionVec(ExceptionNO.illegalInstr) := mgu.io.out.illegal
+  private val outIsDiv = RegInit(false.B)
+  private val divInFire = ex(0).valid && vidiv.io.div_in_ready
+
+  private val ex0NextOpcode = ex0Next.bits.ctrl.opcode
+  private val sew = makePipeReg(VIDivOpcodes.getDataWidth(ex0NextOpcode), pipeRegValids)
+  private val isDiv = makePipeReg(VIDivOpcodes.isDiv(ex0NextOpcode), pipeRegValids)
+  private val isSigned = makePipeReg(VIDivOpcodes.isSigned(ex0NextOpcode), pipeRegValids)
+
+  when(divInFire) {
+    outIsDiv := isDiv.ex0
+  }
+  latchNonFixedLatOutCtrl(divInFire)
+
+  private val divFlush = nonFixedLatOutCtrl.robIdx.needFlush(in.flush)
+
+  vidiv.io.div_in_valid := ex(0).valid
+  vidiv.io.sew := sew.ex0
+  vidiv.io.sign := isSigned.ex0
+  vidiv.io.dividend_v := ex0vs2
+  vidiv.io.divisor_v := ex0vs1
+  vidiv.io.flush := divFlush
+
+  private val resultData = Mux(outIsDiv, vidiv.io.div_out_q_v, vidiv.io.div_out_rem_v)
+
+  out.ex(0).valid := vidiv.io.div_out_valid
+
+  out.ex(0).bits.data.vec.foreach { vecData =>
+    vecData := 0.U.asTypeOf(vecData)
+    vecData.normal := resultData
+  }
+
+  outFuLat.valid := vidiv.io.div_latency.valid
+  outFuLat.bits := vidiv.io.div_latency.bits
 }
