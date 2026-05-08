@@ -11,6 +11,7 @@ import xiangshan.backend.datapath.RdConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.decode.Imm
 import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.regfile._
 import xiangshan.backend.vector.IssuePipe.{RfReadAddrBundle, RfReadDataBundle}
 import xiangshan.backend.vector.fu.VecFuConfig
@@ -303,6 +304,12 @@ class ExuParam(
 
   @BeanProperty
   var exeUnitParams: ExeUnitParams = _
+
+  def nonFixedLatFuConfigs: Seq[VecFuConfig] = fuConfigs.filter(_.fuType == FuType.vidiv)
+
+  def numNonFixedLatFu: Int = nonFixedLatFuConfigs.size
+
+  def hasNonFixedLatFu: Boolean = numNonFixedLatFu > 0
 }
 
 object ExuParam {
