@@ -12,7 +12,7 @@ class VIDiv(cfg: VecFuConfig)(implicit p: Parameters) extends VecNonFixedLatFunc
   private val vidiv = Module(new VectorIdiv)
 
   private val outIsDiv = RegInit(false.B)
-  private val divInFire = ex(0).valid && vidiv.io.div_in_ready
+  private val divInFire = ex(0).valid && vidiv.in.ex0.ready
 
   private val ex0NextOpcode = ex0Next.bits.ctrl.opcode
   private val sew = makePipeReg(VIDivOpcodes.getDataWidth(ex0NextOpcode), pipeRegValids)
@@ -26,22 +26,28 @@ class VIDiv(cfg: VecFuConfig)(implicit p: Parameters) extends VecNonFixedLatFunc
 
   private val divFlush = nonFixedLatOutCtrl.robIdx.needFlush(in.flush)
 
-  vidiv.io.div_in_valid := ex(0).valid
-  vidiv.io.sew := sew.ex0
-  vidiv.io.sign := isSigned.ex0
-  vidiv.io.dividend_v := ex0vs2
-  vidiv.io.divisor_v := ex0vs1
-  vidiv.io.flush := divFlush
+  vidiv.in.ex0.valid := ex(0).valid
+  vidiv.in.ex0.bits.ctrl.sign := isSigned.ex0
+  vidiv.in.ex0.bits.ctrl.flush := divFlush
+  vidiv.in.ex0.bits.ctrl.sel8 := sew.ex0 === 0.U
+  vidiv.in.ex0.bits.ctrl.sel16 := sew.ex0 === 1.U
+  vidiv.in.ex0.bits.ctrl.sel32 := sew.ex0 === 2.U
+  vidiv.in.ex0.bits.ctrl.sel64 := sew.ex0 === 3.U
+  vidiv.in.ex0.bits.data.dividend_v := ex0vs2
+  vidiv.in.ex0.bits.data.divisor_v := ex0vs1
 
-  private val resultData = Mux(outIsDiv, vidiv.io.div_out_q_v, vidiv.io.div_out_rem_v)
+  vidiv.out.ex0.ready := true.B
 
-  out.ex(0).valid := vidiv.io.div_out_valid
+  private val resultData = Mux(outIsDiv, vidiv.out.ex0.bits.q_v, vidiv.out.ex0.bits.rem_v)
+
+  out.ex(0).valid := vidiv.out.ex0.valid
 
   out.ex(0).bits.data.vec.foreach { vecData =>
     vecData := 0.U.asTypeOf(vecData)
     vecData.normal := resultData
   }
 
-  outFuLat.valid := vidiv.io.div_latency.valid
-  outFuLat.bits := vidiv.io.div_latency.bits
+  outFuLat.valid := vidiv.out.ex0.bits.div_latency.valid
+  outFuLat.bits := vidiv.out.ex0.bits.div_latency.bits
+  connectNonFixedLatWakeUp(vidiv.out.ex0.bits.div_latency, divFlush, vidiv.out.ex0.valid)
 }
