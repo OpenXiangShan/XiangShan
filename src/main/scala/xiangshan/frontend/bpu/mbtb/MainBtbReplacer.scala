@@ -28,16 +28,19 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
       val wayMask: UInt = UInt(NumWay.W)
     }
 
-    class Victim extends Bundle {
-      val setIdx:  UInt = Input(UInt(SetIdxLen.W))
-      val wayMask: UInt = Output(UInt(NumWay.W))
+    class Predict extends Bundle {
+      val touch: Valid[Touch] = Flipped(Valid(new Touch))
     }
 
-    val victim: Victim            = new Victim
-    val touch:  Vec[Valid[Touch]] = Vec(2, Flipped(Valid(new Touch))) // magic number 2: predict and train
+    class Train extends Bundle {
+      val t0_setIdx: UInt         = Input(UInt(SetIdxLen.W))
+      val t0_fire:   Bool         = Input(Bool())
+      val t0_victim: UInt         = Output(UInt(NumWay.W))
+      val t1_touch:  Valid[Touch] = Flipped(Valid(new Touch))
+    }
 
-    def predictTouch: Valid[Touch] = touch(0)
-    def trainTouch:   Valid[Touch] = touch(1)
+    val predict: Predict = new Predict
+    val train:   Train   = new Train
   }
 
   val io: MainBtbReplacerIO = IO(new MainBtbReplacerIO)
@@ -45,17 +48,17 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   private val predictStateGen = Module(ReplacerStateGen(Replacer, NumWay, accessSize = NumWay))
   private val trainStateGen   = Module(ReplacerStateGen(Replacer, NumWay))
   private val victimStateGen  = Module(ReplacerStateGen(Replacer, NumWay))
-  private val stateBank       = Module(new ReplacerState(NumSets, predictStateGen.StateWidth, HasExtraReadPort = true))
+  private val stateBank       = Module(new ReplacerState(NumSets, predictStateGen.StateWidth))
 
   /* *** predict *** */
   // read current state
-  stateBank.io.predictReadSetIdx := io.predictTouch.bits.setIdx
+  stateBank.io.predictReadSetIdx := io.predict.touch.bits.setIdx
   private val predictState = stateBank.io.predictReadState
 
   // compose touch way vec
   private val predictTouchWay = VecInit((0 until NumWay).map { i =>
     val wayValid = Wire(Valid(UInt(log2Up(NumWay).W)))
-    wayValid.valid := io.predictTouch.valid && io.predictTouch.bits.wayMask(i)
+    wayValid.valid := io.predict.touch.valid && io.predict.touch.bits.wayMask(i)
     wayValid.bits  := i.U
     wayValid
   })
@@ -63,46 +66,61 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   // generate next state
   predictStateGen.io.state   := predictState
   predictStateGen.io.touches := predictTouchWay
-  private val predictNextState = Mux(io.predictTouch.valid, predictStateGen.io.nextState, predictState)
+  private val predictNextState = predictStateGen.io.nextState
 
   // write back next state
-  stateBank.io.predictWriteValid  := io.predictTouch.valid
-  stateBank.io.predictWriteSetIdx := io.predictTouch.bits.setIdx
+  stateBank.io.predictWriteValid  := io.predict.touch.valid
+  stateBank.io.predictWriteSetIdx := io.predict.touch.bits.setIdx
   stateBank.io.predictWriteState  := predictNextState
 
-  /* *** train *** */
+  /* *** train t0 *** */
   // read current state
-  stateBank.io.trainReadSetIdx := io.trainTouch.bits.setIdx
-  private val trainState = stateBank.io.trainReadState
+  stateBank.io.trainReadSetIdx := io.train.t0_setIdx
 
+  // if t1 is about to write the same set as t0 read, we need to use the updated state (trainStateGen.io.nextState)
+  private val trainNextState = trainStateGen.io.nextState
+  private val trainSameSet   = io.train.t1_touch.valid && (io.train.t1_touch.bits.setIdx === io.train.t0_setIdx)
+  private val predictSameSet = io.predict.touch.valid && (io.predict.touch.bits.setIdx === io.train.t0_setIdx)
+  private val trainState = MuxCase(
+    stateBank.io.trainReadState,
+    Seq(
+      trainSameSet   -> trainNextState, // trainNextState has higher priority, see ReplacerState.scala
+      predictSameSet -> predictNextState
+    )
+  )
+
+  // generate victim
+  victimStateGen.io.state   := trainState
+  victimStateGen.io.touches := DontCare // we use victimStateGen just to select victim, don't care touch & nextState
+
+  // send back to MainBtbAlignBank
+  io.train.t0_victim := UIntToOH(victimStateGen.io.victim)
+
+  /* *** train t1 *** */
   // compose touch way vec
   private val trainTouchWay = Wire(Valid(UInt(log2Up(NumWay).W)))
-  trainTouchWay.valid := io.trainTouch.valid
-  trainTouchWay.bits  := OHToUInt(io.trainTouch.bits.wayMask) // MainBtbAlignBank ensures this is one-hot
+  trainTouchWay.valid := io.train.t1_touch.valid
+  trainTouchWay.bits  := OHToUInt(io.train.t1_touch.bits.wayMask) // MainBtbAlignBank ensures this is one-hot
   assert(
-    !io.trainTouch.valid || PopCount(io.trainTouch.bits.wayMask) <= 1.U,
+    !io.train.t1_touch.valid || PopCount(io.train.t1_touch.bits.wayMask) <= 1.U,
     "victim wayMask should be at-most-one-hot"
   )
 
   // generate next state
-  trainStateGen.io.state   := trainState
+  trainStateGen.io.state   := RegEnable(trainState, io.train.t0_fire) // RegEnable to sync with t1
   trainStateGen.io.touches := VecInit(Seq(trainTouchWay))
-  private val trainNextState = Mux(io.trainTouch.valid, trainStateGen.io.nextState, trainState)
 
   // write back next state
-  stateBank.io.trainWriteValid  := io.trainTouch.valid
-  stateBank.io.trainWriteSetIdx := io.trainTouch.bits.setIdx
+  stateBank.io.trainWriteValid  := io.train.t1_touch.valid
+  stateBank.io.trainWriteSetIdx := io.train.t1_touch.bits.setIdx
   stateBank.io.trainWriteState  := trainNextState
 
-  /* *** victim *** */
-  stateBank.io.readSetIdx.get := io.victim.setIdx
-  private val victimState = stateBank.io.readState.get
-
-  // NOTE: io.trainTouch is on t1, io.victim.setIdx is on t0,
-  //       if they are accessing the same set, we use the updated state to select victim
-  private val trainVictimConflict = io.trainTouch.valid && (io.trainTouch.bits.setIdx === io.victim.setIdx)
-  victimStateGen.io.state   := Mux(trainVictimConflict, trainNextState, victimState)
-  victimStateGen.io.touches := DontCare // we use victimStateGen just to select victim, don't care touch & nextState
-
-  io.victim.wayMask := UIntToOH(victimStateGen.io.victim)
+  // we use t0_setIdx to pre-read stateBank for better timing, it's a tightly-coupled design,
+  // so we require t1 to touch the same set
+  assert(
+    !(
+      io.train.t1_touch.valid && RegEnable(io.train.t0_setIdx, io.train.t0_fire) =/= io.train.t1_touch.bits.setIdx
+    ),
+    "pipeline mismatch: t1 touch should be for the same set as t0 train"
+  )
 }

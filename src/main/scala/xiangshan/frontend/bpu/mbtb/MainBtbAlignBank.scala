@@ -190,19 +190,20 @@ class MainBtbAlignBank(
   private val s3_takenMask      = io.s3_takenMask
 
   // touch taken entries only: not-taken conditional entries are considered not very useful and should be killed first
-  replacer.io.predictTouch.valid        := s3_fire && s3_takenMask.reduce(_ || _)
-  replacer.io.predictTouch.bits.setIdx  := s3_replacerSetIdx
-  replacer.io.predictTouch.bits.wayMask := s3_takenMask.asUInt
+  replacer.io.predict.touch.valid        := s3_fire && s3_takenMask.reduce(_ || _)
+  replacer.io.predict.touch.bits.setIdx  := s3_replacerSetIdx
+  replacer.io.predict.touch.bits.wayMask := s3_takenMask.asUInt
 
   /* *** t0 ***
    * read replacer in advance for better timing
    */
-  private val t0_fire           = io.stageCtrl.t0_fire
-  private val t0_replacerSetIdx = getReplacerSetIndex(io.t0_startPc)
+  private val t0_fire    = io.stageCtrl.t0_fire
+  private val t0_startPc = io.t0_startPc
 
-  replacer.io.victim.setIdx := t0_replacerSetIdx
+  replacer.io.train.t0_setIdx := getReplacerSetIndex(t0_startPc)
+  replacer.io.train.t0_fire   := t0_fire
 
-  private val t0_victimMask = replacer.io.victim.wayMask
+  private val t0_victimMask = replacer.io.train.t0_victim
 
   /* *** t1 ***
    * send write req to internal banks (srams)
@@ -256,9 +257,9 @@ class MainBtbAlignBank(
   }
 
   // update replacer
-  replacer.io.trainTouch.valid        := t1_fire && t1_entryNeedWrite
-  replacer.io.trainTouch.bits.setIdx  := getReplacerSetIndex(t1_startPc)
-  replacer.io.trainTouch.bits.wayMask := t1_entryWayMask
+  replacer.io.train.t1_touch.valid        := t1_fire && t1_entryNeedWrite
+  replacer.io.train.t1_touch.bits.setIdx  := getReplacerSetIndex(t1_startPc)
+  replacer.io.train.t1_touch.bits.wayMask := t1_entryWayMask
 
   /* *** update counter *** */
   private val t1_newCounters    = Wire(Vec(NumWay, TakenCounter()))
