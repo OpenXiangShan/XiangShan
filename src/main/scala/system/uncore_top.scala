@@ -239,8 +239,18 @@ class AXIDataBridge(SrcDataWidth: Int, DestDataWidth: Int, errorAddrMap: Seq[Add
 
 // Reset utility functions
 object ResetUtils {
-  def propagateReset(inReset: Reset): AsyncReset = withReset(inReset) {
-    ResetGen(SYNC_NUM = 1)
+  private def resetSyncInstanceName(baseName: String): String = {
+    if (baseName == "resetSync" || baseName.matches("resetSync_\\d+") || baseName.endsWith("_resetSync") || baseName.matches(".*_resetSync_\\d+$")) baseName
+    else s"${baseName}_resetSync"
+  }
+
+  def propagateReset(inReset: Reset): AsyncReset = propagateReset(inReset, "resetSync")
+
+  def propagateReset(inReset: Reset, instanceName: String): AsyncReset = withReset(inReset) {
+    val resetGen = Module(new ResetGen(SYNC_NUM = 1))
+    resetGen.suggestName(resetSyncInstanceName(instanceName))
+    resetGen.dft := 0.U.asTypeOf(new utility.DFTResetSignals)
+    resetGen.o_reset
   }
 
   def mergeResets(routeResets: Seq[Reset]): AsyncReset = {
@@ -248,18 +258,22 @@ object ResetUtils {
     routeResets.map(_.asBool).reduce(_ || _).asAsyncReset
   }
 
-  def stageResetOut(mod: Module, inReset: Reset): AsyncReset = {
+  def stageResetOut(mod: Module, inReset: Reset): AsyncReset = stageResetOut(mod, inReset, "resetSync")
+
+  def stageResetOut(mod: Module, inReset: Reset, instanceName: String): AsyncReset = {
     mod.reset := inReset
-    ResetUtils.propagateReset(mod.reset)
+    ResetUtils.propagateReset(mod.reset, instanceName)
   }
 }
 
 final case class BufferedAXI4Connection(buffer: AXI4Buffer) {
   def module = buffer.module
 
-  def sinkReset(sourceReset: Reset): AsyncReset = {
+  def sinkReset(sourceReset: Reset): AsyncReset = sinkReset(sourceReset, "resetSync")
+
+  def sinkReset(sourceReset: Reset, instanceName: String): AsyncReset = {
     buffer.module.reset := sourceReset
-    ResetUtils.propagateReset(buffer.module.reset)
+    ResetUtils.propagateReset(buffer.module.reset, instanceName)
   }
 }
 
@@ -901,7 +915,9 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     val xbar9RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(9).module, xbar10ToXbar9RouteReset)
     val xbar10ToImsic15RouteReset = xbar10ToImsic15Buf.sinkReset(l1x0RouteReset)
     val imsic15RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(15).module, xbar10ToImsic15RouteReset)
-    val xbar9ToImsicRouteResets = xbar9ToImsicBufs.map(buf => buf.sinkReset(xbar10ToXbar9RouteReset))
+    val xbar9ToImsicRouteResets = xbar9ToImsicBufs.zipWithIndex.map { case (buf, idx) =>
+      buf.sinkReset(xbar10ToXbar9RouteReset, if (idx == 0) "resetSync" else s"resetSync_$idx")
+    }
     val imsic13RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(13).module, xbar9ToImsicRouteResets(0))
     val imsic14RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(14).module, xbar9ToImsicRouteResets(1))
 
@@ -909,7 +925,9 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     val xbar7RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(7).module, xbar8ToXbar7RouteReset)
     val xbar8ToImsic12RouteReset = xbar8ToImsic12Buf.sinkReset(l1x0RouteReset)
     val imsic12RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(12).module, xbar8ToImsic12RouteReset)
-    val xbar7ToImsicRouteResets = xbar7ToImsicBufs.map(buf => buf.sinkReset(xbar8ToXbar7RouteReset))
+    val xbar7ToImsicRouteResets = xbar7ToImsicBufs.zipWithIndex.map { case (buf, idx) =>
+      buf.sinkReset(xbar8ToXbar7RouteReset, if (idx == 0) "resetSync" else s"resetSync_$idx")
+    }
     val imsic10RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(10).module, xbar7ToImsicRouteResets(0))
     val imsic11RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(11).module, xbar7ToImsicRouteResets(1))
 
@@ -917,7 +935,9 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     val xbar5RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(5).module, xbar6ToXbar5RouteReset)
     val xbar6ToImsic9RouteReset = xbar6ToImsic9Buf.sinkReset(l1x1RouteReset)
     val imsic9RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(9).module, xbar6ToImsic9RouteReset)
-    val xbar5ToImsicRouteResets = xbar5ToImsicBufs.map(buf => buf.sinkReset(xbar6ToXbar5RouteReset))
+    val xbar5ToImsicRouteResets = xbar5ToImsicBufs.zipWithIndex.map { case (buf, idx) =>
+      buf.sinkReset(xbar6ToXbar5RouteReset, if (idx == 0) "resetSync" else s"resetSync_$idx")
+    }
     val imsic7RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(7).module, xbar5ToImsicRouteResets(0))
     val imsic8RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(8).module, xbar5ToImsicRouteResets(1))
 
@@ -925,7 +945,9 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     val xbar3RouteReset = ResetUtils.stageResetOut(xbar1to2LMs(3).module, xbar4ToXbar3RouteReset)
     val xbar4ToImsic6RouteReset = xbar4ToImsic6Buf.sinkReset(l1x2RouteReset)
     val imsic6RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(6).module, xbar4ToImsic6RouteReset)
-    val xbar3ToImsicRouteResets = xbar3ToImsicBufs.map(buf => buf.sinkReset(xbar4ToXbar3RouteReset))
+    val xbar3ToImsicRouteResets = xbar3ToImsicBufs.zipWithIndex.map { case (buf, idx) =>
+      buf.sinkReset(xbar4ToXbar3RouteReset, if (idx == 0) "resetSync" else s"resetSync_$idx")
+    }
     val imsic4RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(4).module, xbar3ToImsicRouteResets(0))
     val imsic5RouteReset = ResetUtils.stageResetOut(imsic_l4LMs(5).module, xbar3ToImsicRouteResets(1))
 
@@ -977,8 +999,8 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
       xbar9ToImsicRouteResets(1),
       xbar10ToImsic15RouteReset
     )
-    val imsicToSNodeRouteResets = imsicL4ToSNodeBufs.zip(imsicSourceRouteResets).map { case (buf, inReset) =>
-      ResetUtils.stageResetOut(buf.module, inReset)
+    val imsicToSNodeRouteResets = imsicL4ToSNodeBufs.zip(imsicSourceRouteResets).zipWithIndex.map { case ((buf, inReset), idx) =>
+      ResetUtils.stageResetOut(buf.module, inReset, if (idx == 0) "resetSync" else s"resetSync_$idx")
     }
 
     // connect io
