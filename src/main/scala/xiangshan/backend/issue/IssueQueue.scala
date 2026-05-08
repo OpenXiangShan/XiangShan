@@ -96,8 +96,8 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   // Modules
   val entries = Module(new Entries)
-  val fuBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap(param.aluDeqNeedPickJump)))) }
-  val fuBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableRead(x.fuLatencyMap(param.aluDeqNeedPickJump)))) }
+  val fuBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableWrite(x.fuLatencyMap()))) }
+  val fuBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.latencyValMax > 0)(Module(new FuBusyTableRead(x.fuLatencyMap()))) }
   val intWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.intLatencyCertain)(Module(new FuBusyTableWrite(x.intFuLatencyMap))) }
   val intWbBusyTableRead = params.exuBlockParams.map { case x => Option.when(x.intLatencyCertain)(Module(new FuBusyTableRead(x.intFuLatencyMap))) }
   val fpWbBusyTableWrite = params.exuBlockParams.map { case x => Option.when(x.fpLatencyCertain)(Module(new FuBusyTableWrite(x.fpFuLatencyMap))) }
@@ -346,10 +346,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     for(deqIdx <- 0 until params.numDeq) {
       entriesIO.deqReady(deqIdx)                                := deqBeforeDly(deqIdx).ready
       entriesIO.deqSelOH(deqIdx).valid                          := deqSelValidVec(deqIdx)
-      if (params.aluDeqNeedPickJump && (deqIdx == 1)) {
-        val needCancelDeq1 = deqEntryVec(0).valid && FuType.isJump(deqEntryVec(0).bits.payload.fuType)
-        entriesIO.deqSelOH(deqIdx).valid                        := deqSelValidVec(deqIdx) && !needCancelDeq1
-      }
       entriesIO.deqSelOH(deqIdx).bits                           := deqSelOHVec(deqIdx)
       entriesIO.enqEntryOldestSel(deqIdx)                       := enqEntryOldestSel(deqIdx)
       entriesIO.simpEntryOldestSel.foreach(_(deqIdx)            := simpEntryOldestSel.get(deqIdx))
@@ -413,27 +409,16 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   s0_enqSelValidVec := s0_enqValidVec.zip(io.enq).map{ case (enqValid, enq) => enqValid && enq.ready}
 
-  // if deq port can accept the uop
-  protected val canAcceptVec: Seq[UInt] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
-    Cat(fuTypeVec.map(fuType =>
-      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))
-    ).reverse)
-  }
+  // // if deq port can accept the uop
+  // protected val canAcceptVec: Seq[UInt] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
+  //   Cat(fuTypeVec.map(fuType =>
+  //     FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))
+  //   ).reverse)
+  // }
 
-  protected val deqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs: Seq[FuConfig] =>
-    // alu and jmp are not same deq port, alu select intWen uop (include auipc and jalr)
-    val aluDeqNeedPickJump = param.aluDeqNeedPickJump && fuCfgs.contains(AluCfg)
-    val bjuDeqPickCond = param.aluDeqNeedPickJump && fuCfgs.contains(JmpCfg)
-    if (aluDeqNeedPickJump) println(s"${param.getIQName} need select intWen uop")
-    fuTypeVec.zip(rfWenVec).map { case (fuType, rfWen) =>
-      val bjuDeqCanAccept = FuType.isBrh(fuType) || FuType.isJump(fuType) && !rfWen
-      // alu and csr in same exeunit, but csr's rfwen may be false.B
-      // not (branch || jump && !rfWen)
-      val aluDeqCanAccept = !bjuDeqCanAccept
-      val deqCanAccept = if (aluDeqNeedPickJump) aluDeqCanAccept
-                         else if (bjuDeqPickCond) bjuDeqCanAccept
-                         else FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))
-      deqCanAccept
+  protected val deqCanAcceptVec: Seq[IndexedSeq[Bool]] = deqFuCfgs.map { fuCfgs =>
+    fuTypeVec.map { fuType =>
+      FuType.FuTypeOrR(fuType, fuCfgs.map(_.fuType))
     }
   }
 
@@ -866,10 +851,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
 
   deqBeforeDly.zipWithIndex.foreach { case (deq, i) =>
     deq.valid                := finalDeqSelValidVec(i) && !cancelDeqVec(i)
-    // bju deq valid
-    if (params.aluDeqNeedPickJump && (i ==1)) {
-      deq.valid := finalDeqSelValidVec(i) && !cancelDeqVec(i) || entries.io.aluDeqSelectJump.get && deqBeforeDly(0).valid
-    }
     deq.bits.isFirstIssue := deqFirstIssueVec(i)
     deq.bits.iqIdx    := OHToUInt(finalDeqSelOHVec(i))
     deq.bits.fuType   := IQFuType.readFuType(deqEntryVec(i).bits.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt
@@ -897,21 +878,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deq.bits.dataSources.zip(deqDataSources(i)).foreach { case (sink, source) => sink := source}
     deq.bits.exuSources.foreach(_.zip(finalExuSources.get(i)).foreach { case (sink, source) => sink := source})
     deq.bits.loadDependency.foreach(_.zip(finalLoadDependency(i)).foreach { case (sink, source) => sink := source})
-    // when alu select jump uop, src0's refren change to false
-    if (params.aluDeqNeedPickJump && (i == 0)) {
-      val src0IsReadReg = deqDataSources(i)(0).readReg
-      when(entries.io.aluDeqSelectJump.get && src0IsReadReg){
-        deq.bits.rfBankRen.get(0) := 0.U.asTypeOf(deq.bits.rfBankRen.get(0))
-      }
-    }
-    else if (params.aluDeqNeedPickJump && (i == 1)) {
-      // assign jump uop form alu deq
-      when(entries.io.aluDeqSelectJump.get) {
-        deq.bits.dataSources := deqDataSources(0)
-        deq.bits.exuSources.foreach(_ := deqBeforeDly(0).bits.exuSources.get)
-        deq.bits.loadDependency.foreach(_ := deqBeforeDly(0).bits.loadDependency.get)
-      }
-    }
 
     deq.bits.rcIdx.foreach(_ := deqEntryVec(i).bits.status.srcStatus.map(_.regCacheIdx.get))
     deq.bits.ftqIdx.foreach(_ := deqEntryVec(i).bits.payload.ftqPtr.get)
@@ -942,12 +908,6 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       io.wakeupFromExu.foreach(x => {
         deq.ready := !x.head.valid
         deqDly.valid := deq.valid && !x.head.valid
-      })
-    }
-    if (params.aluDeqNeedPickJump && deqFuCfgs(i).contains(JmpCfg)) {
-      io.wakeupFromExu.foreach(x => {
-        deq.ready := !entries.io.aluDeqSelectJump.get
-        deqDly.valid := deq.valid && !(entries.io.aluDeqSelectJump.get && x.head.valid)
       })
     }
   }

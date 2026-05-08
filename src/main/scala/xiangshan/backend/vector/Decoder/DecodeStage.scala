@@ -188,6 +188,8 @@ class DecodeStageImp(
         bits.isVset := uopInfo.isVset
         bits.firstUop := uopInfo.isFirstUop
         bits.lastUop := uopInfo.isLastUop
+        bits.isJ := uopInfo.isJ
+        bits.isJr := uopInfo.isJr
         bits.numWB := uopInfo.numWb +& 1.U
         bits.latency := LatDecoder(bits.fuType, bits.fuOpType)
         bits.debug.foreach{ x =>

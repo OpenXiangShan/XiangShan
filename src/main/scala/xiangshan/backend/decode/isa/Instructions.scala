@@ -1545,8 +1545,6 @@ object Instructions {
     def ECALL              = outer.ECALL
     def FENCE              = outer.FENCE
     def MFENCE             = outer.MFENCE
-    def JAL                = outer.JAL
-    def JALR               = outer.JALR
     def LB                 = outer.LB
     def LBU                = outer.LBU
     def LH                 = outer.LH
@@ -1584,8 +1582,6 @@ object Instructions {
       EBREAK,
       ECALL,
       FENCE,
-      JAL,
-      JALR,
       LB,
       LBU,
       LH,
@@ -1607,6 +1603,16 @@ object Instructions {
       SW,
       XOR,
       XORI,
+    )
+  }
+
+  object JumpLinkType extends InstType {
+    def JAL                = outer.JAL
+    def JALR               = outer.JALR
+
+    val allWithNames = withNameSeq(
+      JAL,
+      JALR,
     )
   }
 

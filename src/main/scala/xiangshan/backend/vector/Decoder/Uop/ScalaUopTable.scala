@@ -13,9 +13,10 @@ import xiangshan.backend.decode.opcode.Opcode.FDivOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FMacOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FMiscOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FenceOpcodes._
-import xiangshan.backend.decode.opcode.Opcode.JmpOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.LinkOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.LduOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.MulOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.NewJmpOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.StuOpcodes._
 import xiangshan.backend.decode.opcode.Opcode._
 import xiangshan.backend.decode.opcode.OpcodeTraits._
@@ -23,7 +24,7 @@ import xiangshan.backend.decode.opcode.OpcodeTraits._
 
 object ScalaUopTable {
   val tableI = {
-    import xiangshan.backend.decode.isa.Instructions.{I64Type, IType}
+    import xiangshan.backend.decode.isa.Instructions.{I64Type, IType, JumpLinkType}
 
     val tableI64Type = I64Type.mapUopcode(
       _.ADDIW -> addw.S2xRemove,
@@ -58,8 +59,6 @@ object ScalaUopTable {
       _.EBREAK  -> jmp, // system i-type
       _.ECALL   -> jmp, // system i-type
       _.FENCE   -> fence,
-      _.JAL     -> jal,
-      _.JALR    -> jalr,
       _.LB      -> lb,
       _.LBU     -> lbu,
       _.LH      -> lh,
@@ -83,7 +82,12 @@ object ScalaUopTable {
       _.XORI    -> xor.S2xRemove,
     )
 
-    tableI64Type ++ tableIType
+    val tableJumpLink = JumpLinkType.mapUopcodes(
+      _.JAL     -> Seq(link, j),
+      _.JALR    -> Seq(link, jr),
+    )
+
+    tableI64Type ++ tableIType ++ tableJumpLink
   }
 
   val tableM = {

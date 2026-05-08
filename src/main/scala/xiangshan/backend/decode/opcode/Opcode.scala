@@ -18,7 +18,8 @@ object Opcode {
     val opcodes = Seq(
       AluOpcodes,
       BruOpcodes,
-      JmpOpcodes,
+      LinkOpcodes,
+      NewJmpOpcodes,
       MulOpcodes,
       DivOpcodes,
       LsuOpcodes,
@@ -354,7 +355,8 @@ object Opcode {
     def isRorw(func: UInt): Bool    = isWiden(func) && func(3, 2) === "b11".U &&  func(0)
 
     def isZicond(func: UInt): Bool  = func(6, 4).andR && !func(3)
-    def isJmp(func: UInt): Bool     = func(6, 3).andR && !func(2)
+    // def isJmp(func: UInt): Bool     = func(6, 3).andR && !func(2)
+    def isNewJmp(func: UInt): Bool  = func(6, 2).andR && !func(1)
   }
 
   object BruOpcodes extends Opcodes {
@@ -370,13 +372,31 @@ object Opcode {
     def isBranchInvert(func: UInt) = func(0)
   }
 
-  object JmpOpcodes extends Opcodes {
-    val jal        = IntUJType(bb"111_1000")
-    val jalr       = IntIType(bb"111_1001")
-    val auipc      = IntUJType(bb"111_1010")
+  // object JmpOpcodes extends Opcodes {
+  //   val jal        = IntUJType(bb"111_1000")
+  //   val jalr       = IntIType(bb"111_1001")
+  //   val auipc      = IntUJType(bb"111_1010")
 
-    def jumpOpisJalr(op: UInt) = op(0)
-    def jumpOpisAuipc(op: UInt) = op(1)
+  //   def jumpUopisJalr(op: UInt) = op(0)
+  //   def jumpUopisAuipc(op: UInt) = op(1)
+  // }
+
+  object LinkOpcodes extends Opcodes {
+    // The link uop does not need Src1Gp, but this flag will be used in rename to get right dest to src bypass pdest.
+    // When uop leaving rename, srcType should set to SrcType.no
+    val link  = Value(bb"001") + GpWen + Src1Gp
+    val auipc = IntUJType(bb"010")
+
+    def linkUopisLink(op: UInt) = op(0)
+    def linkUopisAuipc(op: UInt) = op(1)
+  }
+
+  object NewJmpOpcodes extends Opcodes {
+    val j  = Value(bb"111_1100")          + Src2Imm(DecodeSelImm.UJ) + CannotRobCompress
+    val jr = Value(bb"111_1101") + Src1Gp + Src2Imm(DecodeSelImm.I)  + CannotRobCompress
+
+    def jumpUopisj(op: UInt) = !op(0)
+    def jumpUopisjr(op: UInt) = op(0)
   }
 
   object LinkOpcodes extends Opcodes {
@@ -1169,7 +1189,8 @@ object Opcode {
 
   val ALUOpType = AluOpcodes
   val BRUOpType = BruOpcodes
-  val JumpOpType = JmpOpcodes
+  val LinkOpType = LinkOpcodes
+  val NewJumpOpType = NewJmpOpcodes
   val FenceOpType = FenceOpcodes
   val MULOpType = MulOpcodes
   val DIVOpType = DivOpcodes

@@ -138,11 +138,13 @@ case class IssueBlockParams(
 
   def needPc: Boolean = exuBlockParams.map(_.needPc).reduce(_ || _)
 
+  def needPcRdPortNum: Int = exuBlockParams.map(_.needPc).count(_ == true)
+
   def needRasAction: Boolean = exuBlockParams.map(_.hasRasAction).reduce(_ || _)
 
   def needIsRVC: Boolean = exuBlockParams.map(_.needIsRVC).reduce(_ || _)
 
-  def needTaken: Boolean = JmpCnt + BrhCnt > 0
+  def needTaken: Boolean = NewJmpCnt + BrhCnt > 0
 
   def needFtqPtr: Boolean = exuBlockParams.map(_.needFtqPtr).reduce(_ || _)
 
@@ -178,7 +180,9 @@ case class IssueBlockParams(
 
   def hasCompAndSimp: Boolean = !(isAllComp || isAllSimp)
 
-  def JmpCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.jmp)).sum
+  def NewJmpCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.njmp)).sum
+
+  def LinkCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.link)).sum
 
   def BrhCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.brh)).sum
 
@@ -360,8 +364,6 @@ case class IssueBlockParams(
   def getFuCfgs: Seq[FuConfig] = exuBlockParams.flatMap(_.fuConfigs).distinct
 
   def deqFuCfgs: Seq[Seq[FuConfig]] = exuBlockParams.map(_.fuConfigs)
-
-  def aluDeqNeedPickJump = (deqFuCfgs.size == 2) && deqFuCfgs.flatten.contains(AluCfg) && deqFuCfgs.flatten.contains(JmpCfg)
 
   def deqFuInterSect: Seq[FuConfig] = if (numDeq == 2) deqFuCfgs(0).intersect(deqFuCfgs(1)) else Seq()
 

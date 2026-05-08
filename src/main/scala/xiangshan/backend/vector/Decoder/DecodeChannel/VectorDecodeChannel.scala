@@ -35,10 +35,7 @@ class VectorDecodeChannel(
   import VectorDecodeChannel._
 
   @public val in = IO(Input(new DecodeChannelInput))
-  @public val out = IO(Output(new Bundle {
-    val uop = Vec(maxSplitUopNum, ValidIO(new VecDecodeChannelOutputUop))
-    val uopNumOH = NumUopOH()
-  }))
+  @public val out = IO(Output(new VecDecodeChannelOutput(maxSplitUopNum)))
 
   val rawInst = in.rawInst
   val sew = in.sew
@@ -357,4 +354,11 @@ object VectorDecodeChannel {
 
     val exceptionII = Bool()
   }
+
+  class VecDecodeChannelOutput(val uopWidth: Int) extends Bundle {
+    val uop = Vec(uopWidth, ValidIO(new VecDecodeChannelOutputUop))
+    val uopNumOH = NumUopOH()
+  }
 }
+
+

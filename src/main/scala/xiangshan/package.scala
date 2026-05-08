@@ -416,7 +416,9 @@ package object xiangshan {
 
   val CSROpType = Opcode.CSROpType
 
-  val JumpOpType = Opcode.JumpOpType
+  val NewJumpOpType = Opcode.NewJumpOpType
+
+  val LinkOpType = Opcode.LinkOpType
 
   val FenceOpType = Opcode.FenceOpType
   val ALUOpType = Opcode.ALUOpType
