@@ -13,7 +13,8 @@ object FuType extends ChiselOHEnum {
   val FuTypeOrR: IsOneOf.type = IsOneOf
 
   // int
-  val jmp = addType(name = "jmp")
+  val jmp = addType(name = "njmp")
+  val link = addType(name = "link")
   val brh = addType(name = "brh")
   val i2f = addType(name = "i2f")
   val i2v = addType(name = "i2v")
@@ -56,7 +57,7 @@ object FuType extends ChiselOHEnum {
   val vsha256ms = addType(name = "vsha256ms")
   val vsha256c = addType(name = "vsha256c")
 
-  val intArithAll = Seq(jmp, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
+  val intArithAll = Seq(jmp, link, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
   // dq1 includes int's iq2 and iq3
   def dq0OHTypeSeq(implicit p: Parameters): Seq[Seq[OHType]] = {
@@ -142,6 +143,8 @@ object FuType extends ChiselOHEnum {
 
   def isBJU(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(brh, jmp))
 
+  def isLink(fuType: UInt): Bool = FuTypeOrR(fuType, Seq(link))
+
   def isFArith(fuType: UInt): Bool = FuTypeOrR(fuType, fpArithAll)
 
   def isMem(fuType: UInt): Bool = FuTypeOrR(fuType, scalaMemAll)
@@ -175,7 +178,6 @@ object FuType extends ChiselOHEnum {
   def isBlockBackCompress(fuType: UInt): Bool = FuTypeOrR(fuType, blockBackCompress)
 
   val functionNameMap = Map(
-    jmp -> "jmp",
     brh -> "brh",
     i2f -> "int_to_float",
     i2v -> "int_to_vector",

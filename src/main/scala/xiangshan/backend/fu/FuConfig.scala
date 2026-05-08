@@ -158,9 +158,9 @@ case class FuConfig (
   // predict info
   def needPdInfo: Boolean = Seq(FuType.jmp, FuType.brh).contains(fuType)
 
-  def needPc: Boolean = Seq(FuType.jmp, FuType.brh, FuType.ldu).contains(fuType)
+  def needPc: Boolean = Seq(FuType.jmp, FuType.link, FuType.brh, FuType.ldu).contains(fuType)
 
-  var aluNeedPc: Boolean = false
+  def aluBjuNeedPc: Boolean = Seq(FuType.jmp, FuType.link, FuType.brh).contains(fuType)
 
   def needVecCtrl: Boolean = {
     import FuType._
@@ -194,6 +194,8 @@ case class FuConfig (
   def isBrh: Boolean = fuType == FuType.brh
 
   def isJmp: Boolean = fuType == FuType.jmp
+
+  def isLink: Boolean = fuType == FuType.link
 
   def isFence: Boolean = fuType == FuType.fence
 
@@ -232,15 +234,25 @@ case class FuConfig (
 }
 
 object FuConfig {
-  val JmpCfg: FuConfig = FuConfig (
-    name = "jmp",
+  val NJmpCfg: FuConfig = FuConfig (
+    name = "njmp",
     fuType = FuType.jmp,
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new JumpUnit(cfg)(p)).suggestName("jmp"),
     srcData = Seq(
-      Seq(IntData()), // jal
+      Seq(IntData()), // jal -> Seq(ja, link)
     ),
     piped = true,
-    immType = Set(Imm_I(), Imm_J(), Imm_U()),
+    immType = Set(Imm_I(), Imm_J()),
+  )
+
+  val LinkCfg: FuConfig = FuConfig (
+    name = "link",
+    fuType = FuType.link,
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new LinkUnit(cfg)(p)).suggestName("link"),
+    srcData = Seq(Seq(NoData())), // pc + 4 / pc + imm
+    piped = true,
+    writeIntRf = true,
+    immType = Set(Imm_U()),
   )
 
   val BrhCfg: FuConfig = FuConfig (
@@ -866,7 +878,7 @@ object FuConfig {
   )
 
   def allConfigs = Seq(
-    JmpCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
+    NJmpCfg, LinkCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
     LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg,
     FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
     VialuCfg, VimacCfg,
