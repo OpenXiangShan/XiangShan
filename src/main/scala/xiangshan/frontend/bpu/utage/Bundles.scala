@@ -63,7 +63,6 @@ class AbtbResult(implicit p: Parameters) extends MicroTageBundle {
   val hit:              Bool            = Bool()
   val predTaken:        Bool            = Bool()
   val tableId:          UInt            = UInt(log2Ceil(NumTables).W)
-  val wayId:            UInt            = UInt(log2Ceil(NumWays).W)
   val cfiPosition:      UInt            = UInt(CfiPositionWidth.W)
   val takenCtr:         SaturateCounter = TakenCounter()
 }
@@ -87,7 +86,6 @@ class MicroTageTrainResult(implicit p: Parameters) extends MicroTageBundle {
   val baseIsStrongBias: Bool            = Bool()
   val cfiPosition:      UInt            = UInt(CfiPositionWidth.W)
   val tableId:          UInt            = UInt(log2Ceil(NumTables).W)
-  val wayId:            UInt            = UInt(log2Ceil(NumWays).W)
   val takenCtr:         SaturateCounter = TakenCounter()
 }
 
@@ -101,7 +99,6 @@ class TraceBranch(implicit p: Parameters) extends MicroTageBundle {
   val baseIsStrongBias: Bool = Bool()
   val cfiPosition:      UInt = UInt(CfiPositionWidth.W)
   val tableId:          UInt = UInt(log2Ceil(NumTables).W)
-  val wayId:            UInt = UInt(log2Ceil(NumWays).W)
 }
 
 class MicroTageTrace(implicit p: Parameters) extends MicroTageBundle {
@@ -130,9 +127,8 @@ class MicroTageUpdateInfo(implicit p: Parameters) extends MicroTageBundle {
   val needUseful:        Bool            = Bool()
 }
 
-class MicroTageAllocInfo(numWay: Int)(implicit p: Parameters) extends MicroTageBundle {
+class MicroTageAllocInfo(implicit p: Parameters) extends MicroTageBundle {
   val taken:       Bool = Bool()
-  val wayMask:     UInt = UInt(numWay.W)
   val cfiPosition: UInt = UInt(CfiPositionWidth.W)
   // val tag:         UInt = UInt(MaxTagLen.W)
 }
@@ -143,10 +139,10 @@ class MicroTageTrainRead(implicit p: Parameters) extends MicroTageBundle {
   val useful:         UInt = UInt(UsefulWidth.W)
 }
 
-class MicroTageTrain(numWay: Int, numSets: Int)(implicit p: Parameters) extends MicroTageBundle {
-  val t0_trainIndex: Valid[UInt]                     = Input(Valid(UInt(log2Ceil(numSets).W)))
-  val t0_read:       Vec[MicroTageTrainRead]         = Output(Vec(numWay, new MicroTageTrainRead))
-  val t1_tag:        UInt                            = Input(UInt(MaxTagLen.W))
-  val t1_update:     Vec[Valid[MicroTageUpdateInfo]] = Input(Vec(numWay, Valid(new MicroTageUpdateInfo)))
-  val t1_alloc:      Valid[MicroTageAllocInfo]       = Input(Valid(new MicroTageAllocInfo(numWay)))
+class MicroTageTrain(numSets: Int)(implicit p: Parameters) extends MicroTageBundle {
+  val t0_trainIndex: Valid[UInt]                = Input(Valid(UInt(log2Ceil(numSets).W)))
+  val t0_read:       MicroTageTrainRead         = Output(new MicroTageTrainRead)
+  val t1_tag:        UInt                       = Input(UInt(MaxTagLen.W))
+  val t1_update:     Valid[MicroTageUpdateInfo] = Input(Valid(new MicroTageUpdateInfo))
+  val t1_alloc:      Valid[MicroTageAllocInfo]  = Input(Valid(new MicroTageAllocInfo))
 }

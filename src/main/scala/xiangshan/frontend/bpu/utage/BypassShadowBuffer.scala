@@ -46,7 +46,6 @@ import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
  */
 class BypassShadowBuffer(
     val numSets:  Int,
-    val numWay:   Int,
     val tableId:  Int,
     val numBanks: Int = 4,
     val numEntry: Int = 8
@@ -56,27 +55,26 @@ class BypassShadowBuffer(
       val readIndex: UInt = UInt(log2Ceil(MaxNumSets).W)
     }
     class Resp extends MicroTageBundle {
-      val hit:         Vec[Bool]           = Vec(numWay, Bool())
-      val readEntries: Vec[MicroTageEntry] = Vec(numWay, new MicroTageEntry)
+      val hit:       Bool           = Bool()
+      val readEntry: MicroTageEntry = new MicroTageEntry
     }
     class WriteReq extends MicroTageBundle {
-      val writeIndex: UInt                = UInt(log2Ceil(MaxNumSets).W)
-      val writeData:  Vec[MicroTageEntry] = Vec(numWay, new MicroTageEntry)
-      val forceWrite: Bool                = Bool()
-      val wMask:      UInt                = UInt(numWay.W)
+      val writeIndex: UInt           = UInt(log2Ceil(MaxNumSets).W)
+      val writeData:  MicroTageEntry = new MicroTageEntry
+      val forceWrite: Bool           = Bool()
     }
     val req:          Req             = Input(new Req)
     val resp:         Resp            = Output(new Resp)
-    val train:        MicroTageTrain  = new MicroTageTrain(numWay, numSets)
+    val train:        MicroTageTrain  = new MicroTageTrain(numSets)
     val tryWrite:     Valid[WriteReq] = Output(Valid(new WriteReq))
     val writeSuccess: Bool            = Input(Bool())
     val usefulReset:  Bool            = Input(Bool())
   }
   val io = IO(new BypassBufferIO)
   class BufferEntry extends Bundle {
-    val valid:     Bool                       = Bool()
-    val entryData: Vec[Valid[MicroTageEntry]] = Vec(numWay, Valid(new MicroTageEntry))
-    val index:     UInt                       = UInt(log2Ceil(MaxNumSets).W)
+    val valid:     Bool                  = Bool()
+    val entryData: Valid[MicroTageEntry] = Valid(new MicroTageEntry)
+    val index:     UInt                  = UInt(log2Ceil(MaxNumSets).W)
   }
 
   class ReplaceItem extends Bundle {
@@ -94,7 +92,7 @@ class BypassShadowBuffer(
   // Banked useful registers
   private val usefulEntries = RegInit(VecInit.tabulate(numBanks) { bankIdx =>
     VecInit(Seq.fill(numSets / numBanks)(
-      VecInit(Seq.fill(numWay)(0.U.asTypeOf(new SaturateCounter(UsefulWidth))))
+      0.U.asTypeOf(new SaturateCounter(UsefulWidth))
     ))
   })
 
@@ -109,14 +107,13 @@ class BypassShadowBuffer(
   private val a1_entryHit    = RegInit(VecInit(Seq.fill(numEntry)(false.B)))
   a1_firstHit := (a0_entryHit.asUInt & priorityMask).asBools
   a1_entryHit := a0_entryHit
-  private val a1_firstEntry        = ParallelPriorityMux(a1_firstHit.reverse, entryDataVec.reverse)
-  private val a1_secondEntry       = ParallelPriorityMux(a1_entryHit.reverse, entryDataVec.reverse)
-  private val a1_bufferEntry       = Mux(a1_chosenFirst, a1_firstEntry, a1_secondEntry)
-  private val a1_hasHit            = a1_entryHit.reduce(_ || _)
-  private val a1_microTageHitVec   = a1_bufferEntry.map(e => e.valid && a1_hasHit)
-  private val a1_microTageEntryVec = a1_bufferEntry.map(e => e.bits)
-  io.resp.hit         := a1_microTageHitVec
-  io.resp.readEntries := a1_microTageEntryVec
+  private val a1_firstEntry  = ParallelPriorityMux(a1_firstHit.reverse, entryDataVec.reverse)
+  private val a1_secondEntry = ParallelPriorityMux(a1_entryHit.reverse, entryDataVec.reverse)
+  private val a1_bufferEntry = Mux(a1_chosenFirst, a1_firstEntry, a1_secondEntry)
+  private val a1_hasHit      = a1_entryHit.reduce(_ || _)
+
+  io.resp.hit       := a1_bufferEntry.valid && a1_hasHit
+  io.resp.readEntry := a1_bufferEntry.bits
 
   // Training logic - stage 0
   private val t0_fire       = io.train.t0_trainIndex.valid
@@ -130,129 +127,117 @@ class BypassShadowBuffer(
   private val t0_firstEntry  = ParallelPriorityMux(t0_firstHit.reverse, entryDataVec.reverse)
   private val t0_secondEntry = ParallelPriorityMux(t0_entryHit.reverse, entryDataVec.reverse)
 
-  private val t0_hasHit            = t0_entryHit.reduce(_ || _)
-  private val t0_bufferEntry       = Mux(t0_chosenFirst, t0_firstEntry, t0_secondEntry)
-  private val t0_microTageHitVec   = VecInit(t0_bufferEntry.map(e => e.valid && t0_hasHit))
-  private val t0_microTageEntryVec = VecInit(t0_bufferEntry.map(e => e.bits))
+  private val t0_hasHit         = t0_entryHit.reduce(_ || _)
+  private val t0_bufferEntry    = Mux(t0_chosenFirst, t0_firstEntry, t0_secondEntry)
+  private val t0_microTageHit   = t0_bufferEntry.valid && t0_hasHit
+  private val t0_microTageEntry = t0_bufferEntry.bits
   // Access useful registers for t0 stage
   private val t0_bankIdx         = getBankId(t0_trainIndex, numBanks)
   private val t0_bankOffset      = getBankInnerIndex(t0_trainIndex, numBanks, numSets)
   private val t0_trainReadUseful = usefulEntries(t0_bankIdx)(t0_bankOffset)
   private val t0_cleanId =
     Mux(t0_chosenFirst, ~PriorityEncoder(t0_firstHit.reverse), ~PriorityEncoder(t0_entryHit.reverse))
-  private val t0_trainReadEntries = t0_microTageEntryVec
+  private val t0_trainReadEntry = t0_microTageEntry
 
-  for (way <- 0 until numWay) {
-    val entry  = t0_trainReadEntries(way)
-    val useful = t0_trainReadUseful(way)
-    io.train.t0_read(way).canGetPosition := t0_microTageHitVec(way)
-    io.train.t0_read(way).cfiPosition    := entry.cfiPosition
-    io.train.t0_read(way).useful         := useful.value
-  }
+  io.train.t0_read.canGetPosition := t0_microTageHit
+  io.train.t0_read.cfiPosition    := t0_trainReadEntry.cfiPosition
+  io.train.t0_read.useful         := t0_trainReadUseful.value
 
   // ==========================================================================
   // Bypass Logic: entries with the same readIndex are not allowed
   // ==========================================================================
   // Buffer write logic is pipelined across two cycles,
   // creating potential for writes to the same index in consecutive cycles.
-  private val needBypass        = WireDefault(false.B)
-  private val bypasscleanId     = WireDefault(0.U(log2Ceil(numEntry).W))
-  private val bypassHasHit      = Wire(Bool())
-  private val bypassHitVec      = Wire(Vec(numWay, Bool()))
-  private val bypassReadEntries = Wire(Vec(numWay, new MicroTageEntry))
+  private val needBypass      = WireDefault(false.B)
+  private val bypasscleanId   = WireDefault(0.U(log2Ceil(numEntry).W))
+  private val bypassHasHit    = Wire(Bool())
+  private val bypassHit       = Wire(Bool())
+  private val bypassReadEntry = Wire(new MicroTageEntry)
 
-  private val t1_fire             = RegNext(t0_fire, false.B)
-  private val t1_trainIndex       = RegNext(t0_trainIndex, 0.U(log2Ceil(MaxNumSets).W))
-  private val t1_hasHit           = RegNext(Mux(needBypass, bypassHasHit, t0_hasHit), false.B)
-  private val t1_microTageHitVec  = RegNext(Mux(needBypass, bypassHitVec, t0_microTageHitVec))
-  private val t1_trainReadEntries = RegNext(Mux(needBypass, bypassReadEntries, t0_trainReadEntries))
-  private val t1_cleanId          = RegNext(Mux(needBypass, bypasscleanId, t0_cleanId))
+  private val t1_fire           = RegNext(t0_fire, false.B)
+  private val t1_trainIndex     = RegNext(t0_trainIndex, 0.U(log2Ceil(MaxNumSets).W))
+  private val t1_hasHit         = RegNext(Mux(needBypass, bypassHasHit, t0_hasHit), false.B)
+  private val t1_microTageHit   = RegNext(Mux(needBypass, bypassHit, t0_microTageHit))
+  private val t1_trainReadEntry = RegNext(Mux(needBypass, bypassReadEntry, t0_trainReadEntry))
+  private val t1_cleanId        = RegNext(Mux(needBypass, bypasscleanId, t0_cleanId))
   // Access useful registers for t1 stage
   private val t1_bankIdx         = getBankId(t1_trainIndex, numBanks)
   private val t1_bankOffset      = getBankInnerIndex(t1_trainIndex, numBanks, numSets)
   private val t1_trainReadUseful = usefulEntries(t1_bankIdx)(t1_bankOffset)
 
-  private val writeBufferValid     = WireDefault(VecInit(Seq.fill(numWay)(false.B)))
-  private val newMicroTageEntryVec = WireDefault(VecInit(Seq.fill(numWay)(0.U.asTypeOf(new MicroTageEntry))))
-  for (way <- 0 until numWay) {
-    val oldEntry       = t1_trainReadEntries(way)
-    val oldTakenCtr    = oldEntry.takenCtr
-    val updateTakenCtr = io.train.t1_update(way).bits.updateTakenCtr
+  private val writeBufferValid  = WireDefault(false.B)
+  private val newMicroTageEntry = WireDefault(0.U.asTypeOf(new MicroTageEntry))
 
-    // Update logic: either allocation or update
-    val doAlloc  = io.train.t1_alloc.valid && io.train.t1_alloc.bits.wayMask(way)
-    val doUpdate = io.train.t1_update(way).valid && io.train.t1_update(way).bits.updateValid
-    writeBufferValid(way) := doAlloc || doUpdate
+  // -------------------- Calculate the new entry to be updated -----------------------
+  private val oldEntry       = t1_trainReadEntry
+  private val oldTakenCtr    = oldEntry.takenCtr
+  private val updateTakenCtr = io.train.t1_update.bits.updateTakenCtr
 
-    // New entry values
-    newMicroTageEntryVec(way).valid := true.B
-    newMicroTageEntryVec(way).tag   := io.train.t1_tag
-    newMicroTageEntryVec(way).cfiPosition :=
-      Mux(doAlloc, io.train.t1_alloc.bits.cfiPosition, io.train.t1_update(way).bits.updateCfiPosition)
-    newMicroTageEntryVec(way).takenCtr := Mux(
-      doAlloc,
-      Mux(io.train.t1_alloc.bits.taken, TakenCounter.WeakPositive, TakenCounter.WeakNegative),
-      // updateTakenCtr.getUpdate(io.train.t1_update(way).bits.updateTaken)
-      Mux(
-        t1_microTageHitVec(way) && (oldEntry.tag === io.train.t1_tag),
-        oldTakenCtr.getUpdate(io.train.t1_update(way).bits.updateTaken),
-        updateTakenCtr.getUpdate(io.train.t1_update(way).bits.updateTaken)
-      )
+  // Update logic: either allocation or update
+  private val doAlloc  = io.train.t1_alloc.valid
+  private val doUpdate = io.train.t1_update.valid
+  writeBufferValid := doAlloc || doUpdate
+
+  // New entry values
+  newMicroTageEntry.valid := true.B
+  newMicroTageEntry.tag   := io.train.t1_tag
+  newMicroTageEntry.cfiPosition :=
+    Mux(doAlloc, io.train.t1_alloc.bits.cfiPosition, io.train.t1_update.bits.updateCfiPosition)
+  newMicroTageEntry.takenCtr := Mux(
+    doAlloc,
+    Mux(io.train.t1_alloc.bits.taken, TakenCounter.WeakPositive, TakenCounter.WeakNegative),
+    Mux(
+      t1_microTageHit && (oldEntry.tag === io.train.t1_tag),
+      oldTakenCtr.getUpdate(io.train.t1_update.bits.updateTaken),
+      updateTakenCtr.getUpdate(io.train.t1_update.bits.updateTaken)
     )
-  }
+  )
 
-  for (way <- 0 until numWay) {
-    val doAlloc   = io.train.t1_alloc.valid && io.train.t1_alloc.bits.wayMask(way)
-    val oldUseful = t1_trainReadUseful(way)
-    val newUseful = Mux(
-      doAlloc,
-      // UsefulCounter.WeakPositive,
-      if (tableId < NumTables / 2) UsefulCounter.WeakNegative else UsefulCounter.WeakPositive,
-      oldUseful.getUpdate(io.train.t1_update(way).bits.needUseful)
-    )
-    when(doAlloc || (io.train.t1_update(way).valid && io.train.t1_update(way).bits.usefulValid)) {
-      t1_trainReadUseful(way) := newUseful
-    }
+  // ------------------------ Calculate the new useful entry -----------------------------
+  private val oldUseful = t1_trainReadUseful
+  private val newUseful = Mux(
+    doAlloc,
+    // UsefulCounter.WeakPositive,
+    if (tableId < NumTables / 2) UsefulCounter.WeakNegative else UsefulCounter.WeakPositive,
+    oldUseful.getUpdate(io.train.t1_update.bits.needUseful)
+  )
+  when(doAlloc || (io.train.t1_update.valid && io.train.t1_update.bits.usefulValid)) {
+    t1_trainReadUseful := newUseful
   }
 
   // Useful counter reset logic
   when(io.usefulReset) {
     for (bankIdx <- 0 until numBanks) {
       for (setIdx <- 0 until numSets / numBanks) {
-        for (wayIdx <- 0 until numWay) {
-          val entry = usefulEntries(bankIdx)(setIdx)(wayIdx)
-          if (tableId < NumTables / 2) {
-            usefulEntries(bankIdx)(setIdx)(wayIdx).value :=
-              Mux(entry.value === 0.U, 0.U, entry.value - 1.U)
-          } else {
-            usefulEntries(bankIdx)(setIdx)(wayIdx).value := entry.value >> 1.U
-          }
-          // usefulEntries(bankIdx)(setIdx)(wayIdx).value := entry.value >> 1.U
+        val entry = usefulEntries(bankIdx)(setIdx)
+        if (tableId < NumTables / 2) {
+          usefulEntries(bankIdx)(setIdx).value :=
+            Mux(entry.value === 0.U, 0.U, entry.value - 1.U)
+        } else {
+          usefulEntries(bankIdx)(setIdx).value := entry.value >> 1.U
         }
       }
     }
   }
 
   private val newBufferEntry = Wire(new BufferEntry)
-  newBufferEntry.valid := true.B
-  newBufferEntry.index := t1_trainIndex
-  for (i <- 0 until numWay) {
-    newBufferEntry.entryData(i).valid := writeBufferValid(i)
-    newBufferEntry.entryData(i).bits  := newMicroTageEntryVec(i)
-  }
+  newBufferEntry.valid           := true.B
+  newBufferEntry.index           := t1_trainIndex
+  newBufferEntry.entryData.valid := writeBufferValid
+  newBufferEntry.entryData.bits  := newMicroTageEntry
 
-  private val t1_hasWrite = writeBufferValid.reduce(_ || _)
+  private val t1_hasWrite = writeBufferValid
   when(t1_hasWrite) {
     entries(enqPtr.value) := newBufferEntry
     enqPtr                := enqPtr + 1.U
     priorityMask          := Fill(numEntry, 1.U(1.W)) >> ~enqPtr.value
   }
 
-  needBypass        := (t1_trainIndex === t0_trainIndex) && t1_hasWrite
-  bypassHasHit      := true.B
-  bypasscleanId     := enqPtr.value
-  bypassHitVec      := newBufferEntry.entryData.map(e => e.valid)
-  bypassReadEntries := newBufferEntry.entryData.map(e => e.bits)
+  needBypass      := (t1_trainIndex === t0_trainIndex) && t1_hasWrite
+  bypassHasHit    := true.B
+  bypasscleanId   := enqPtr.value
+  bypassHit       := newBufferEntry.entryData.valid
+  bypassReadEntry := newBufferEntry.entryData.bits
 
   private val isEmpty = deqPtr === enqPtr
   when(io.writeSuccess || (!statusEntries(deqPtr.value).dirty && !isEmpty)) {
@@ -278,9 +263,8 @@ class BypassShadowBuffer(
   forceWrite                  := distanceBetween(enqPtr, deqPtr) > (numEntry - 2).U
   io.tryWrite.valid           := statusEntries(deqPtr.value).valid && statusEntries(deqPtr.value).dirty
   io.tryWrite.bits.writeIndex := entries(deqPtr.value).index
-  io.tryWrite.bits.writeData  := entries(deqPtr.value).entryData.map(_.bits)
+  io.tryWrite.bits.writeData  := entries(deqPtr.value).entryData.bits
   io.tryWrite.bits.forceWrite := forceWrite && statusEntries(deqPtr.value).valid && statusEntries(deqPtr.value).dirty
-  io.tryWrite.bits.wMask      := VecInit(entries(deqPtr.value).entryData.map(_.valid)).asUInt
 
   // ==========================================================================
   // Buffer Performance Diagnostic Counters
