@@ -13,9 +13,10 @@ import xiangshan.backend.decode.opcode.Opcode.FDivOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FMacOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FMiscOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FenceOpcodes._
-import xiangshan.backend.decode.opcode.Opcode.JmpOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.LinkOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.LduOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.MulOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.JmpOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.StuOpcodes._
 import xiangshan.backend.decode.opcode.Opcode._
 import xiangshan.backend.decode.opcode.OpcodeTraits._
@@ -43,44 +44,44 @@ object ScalaUopTable {
       _.SUBW  -> subw,
     )
 
-    val tableIType = IType.mapUopcode(
-      _.ADD     -> add,
-      _.ADDI    -> add.S2xRemove,
-      _.AND     -> and,
-      _.ANDI    -> and.S2xRemove,
-      _.AUIPC   -> auipc,
-      _.BEQ     -> beq,
-      _.BGE     -> bge,
-      _.BGEU    -> bgeu,
-      _.BLT     -> blt,
-      _.BLTU    -> bltu,
-      _.BNE     -> bne,
-      _.EBREAK  -> jmp, // system i-type
-      _.ECALL   -> jmp, // system i-type
-      _.FENCE   -> fence,
-      _.JAL     -> jal,
-      _.JALR    -> jalr,
-      _.LB      -> lb,
-      _.LBU     -> lbu,
-      _.LH      -> lh,
-      _.LHU     -> lhu,
-      _.LUI     -> add.S1xS2xRemove,
-      _.LW      -> lw,
-      _.OR      -> or,
-      _.ORI     -> or.S2xRemove,
-      _.SB      -> sb,
-      _.SH      -> sh,
-      _.SLL     -> sll,
-      _.SLT     -> slt,
-      _.SLTI    -> slt.S2xRemove,
-      _.SLTIU   -> sltu.S2xRemove,
-      _.SLTU    -> sltu,
-      _.SRA     -> sra,
-      _.SRL     -> srl,
-      _.SUB     -> sub,
-      _.SW      -> sw,
-      _.XOR     -> xor,
-      _.XORI    -> xor.S2xRemove,
+    val tableIType = IType.mapUopcodes(
+      _.ADD     -> Seq(add),
+      _.ADDI    -> Seq(add.S2xRemove),
+      _.AND     -> Seq(and),
+      _.ANDI    -> Seq(and.S2xRemove),
+      _.AUIPC   -> Seq(auipc),
+      _.BEQ     -> Seq(beq),
+      _.BGE     -> Seq(bge),
+      _.BGEU    -> Seq(bgeu),
+      _.BLT     -> Seq(blt),
+      _.BLTU    -> Seq(bltu),
+      _.BNE     -> Seq(bne),
+      _.EBREAK  -> Seq(jmp),
+      _.ECALL   -> Seq(jmp),
+      _.FENCE   -> Seq(fence),
+      _.JAL     -> Seq(link, j),
+      _.JALR    -> Seq(link, jr),
+      _.LB      -> Seq(lb),
+      _.LBU     -> Seq(lbu),
+      _.LH      -> Seq(lh),
+      _.LHU     -> Seq(lhu),
+      _.LUI     -> Seq(add.S1xS2xRemove),
+      _.LW      -> Seq(lw),
+      _.OR      -> Seq(or),
+      _.ORI     -> Seq(or.S2xRemove),
+      _.SB      -> Seq(sb),
+      _.SH      -> Seq(sh),
+      _.SLL     -> Seq(sll),
+      _.SLT     -> Seq(slt),
+      _.SLTI    -> Seq(slt.S2xRemove),
+      _.SLTIU   -> Seq(sltu.S2xRemove),
+      _.SLTU    -> Seq(sltu),
+      _.SRA     -> Seq(sra),
+      _.SRL     -> Seq(srl),
+      _.SUB     -> Seq(sub),
+      _.SW      -> Seq(sw),
+      _.XOR     -> Seq(xor),
+      _.XORI    -> Seq(xor.S2xRemove),
     )
 
     tableI64Type ++ tableIType
