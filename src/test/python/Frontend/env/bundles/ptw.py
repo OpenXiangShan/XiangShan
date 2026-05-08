@@ -9,9 +9,32 @@ class PTWBundle(Bundle):
         "req_0_valid": "io_ptw_req_0_valid",
         "req_0_bits_vpn": "io_ptw_req_0_bits_vpn",
         "req_0_bits_s2xlate": "io_ptw_req_0_bits_s2xlate",
+        "req_0_bits_get_gpa": "io_ptw_req_0_bits_getGpa",
+        "req_0_bits_memidx_is_ld": "io_ptw_req_0_bits_memidx_is_ld",
+        "req_0_bits_memidx_is_st": "io_ptw_req_0_bits_memidx_is_st",
+        "req_0_bits_memidx_idx": "io_ptw_req_0_bits_memidx_idx",
         "resp_ready": "io_ptw_resp_ready",
         "resp_valid": "io_ptw_resp_valid",
         "resp_bits_s2xlate": "io_ptw_resp_bits_s2xlate",
+        "resp_bits_get_gpa": "io_ptw_resp_bits_getGpa",
+        "resp_bits_memidx_is_ld": "io_ptw_resp_bits_memidx_is_ld",
+        "resp_bits_memidx_is_st": "io_ptw_resp_bits_memidx_is_st",
+        "resp_bits_memidx_idx": "io_ptw_resp_bits_memidx_idx",
+        "resp_bits_s2_entry_tag": "io_ptw_resp_bits_s2_entry_tag",
+        "resp_bits_s2_entry_vmid": "io_ptw_resp_bits_s2_entry_vmid",
+        "resp_bits_s2_entry_n": "io_ptw_resp_bits_s2_entry_n",
+        "resp_bits_s2_entry_pbmt": "io_ptw_resp_bits_s2_entry_pbmt",
+        "resp_bits_s2_entry_perm_a": "io_ptw_resp_bits_s2_entry_perm_a",
+        "resp_bits_s2_entry_perm_g": "io_ptw_resp_bits_s2_entry_perm_g",
+        "resp_bits_s2_entry_perm_u": "io_ptw_resp_bits_s2_entry_perm_u",
+        "resp_bits_s2_entry_perm_x": "io_ptw_resp_bits_s2_entry_perm_x",
+        "resp_bits_s2_entry_perm_w": "io_ptw_resp_bits_s2_entry_perm_w",
+        "resp_bits_s2_entry_perm_r": "io_ptw_resp_bits_s2_entry_perm_r",
+        "resp_bits_s2_entry_level": "io_ptw_resp_bits_s2_entry_level",
+        "resp_bits_s2_entry_v": "io_ptw_resp_bits_s2_entry_v",
+        "resp_bits_s2_entry_ppn": "io_ptw_resp_bits_s2_entry_ppn",
+        "resp_bits_s2_gpf": "io_ptw_resp_bits_s2_gpf",
+        "resp_bits_s2_gaf": "io_ptw_resp_bits_s2_gaf",
         "resp_bits_s1_entry_tag": "io_ptw_resp_bits_s1_entry_tag",
         "resp_bits_s1_entry_asid": "io_ptw_resp_bits_s1_entry_asid",
         "resp_bits_s1_entry_vmid": "io_ptw_resp_bits_s1_entry_vmid",
@@ -42,9 +65,32 @@ class PTWBundle(Bundle):
     req_0_valid = Signal()
     req_0_bits_vpn = Signal()
     req_0_bits_s2xlate = Signal()
+    req_0_bits_get_gpa = Signal()
+    req_0_bits_memidx_is_ld = Signal()
+    req_0_bits_memidx_is_st = Signal()
+    req_0_bits_memidx_idx = Signal()
     resp_ready = Signal()
     resp_valid = Signal()
     resp_bits_s2xlate = Signal()
+    resp_bits_get_gpa = Signal()
+    resp_bits_memidx_is_ld = Signal()
+    resp_bits_memidx_is_st = Signal()
+    resp_bits_memidx_idx = Signal()
+    resp_bits_s2_entry_tag = Signal()
+    resp_bits_s2_entry_vmid = Signal()
+    resp_bits_s2_entry_n = Signal()
+    resp_bits_s2_entry_pbmt = Signal()
+    resp_bits_s2_entry_perm_a = Signal()
+    resp_bits_s2_entry_perm_g = Signal()
+    resp_bits_s2_entry_perm_u = Signal()
+    resp_bits_s2_entry_perm_x = Signal()
+    resp_bits_s2_entry_perm_w = Signal()
+    resp_bits_s2_entry_perm_r = Signal()
+    resp_bits_s2_entry_level = Signal()
+    resp_bits_s2_entry_v = Signal()
+    resp_bits_s2_entry_ppn = Signal()
+    resp_bits_s2_gpf = Signal()
+    resp_bits_s2_gaf = Signal()
     resp_bits_s1_entry_tag = Signal()
     resp_bits_s1_entry_asid = Signal()
     resp_bits_s1_entry_vmid = Signal()
@@ -77,6 +123,25 @@ class PTWBundle(Bundle):
         self.req_0_ready.value = 0
         self.resp_valid.value = 0
         self.resp_bits_s2xlate.value = 0
+        self.resp_bits_get_gpa.value = 0
+        self.resp_bits_memidx_is_ld.value = 0
+        self.resp_bits_memidx_is_st.value = 0
+        self.resp_bits_memidx_idx.value = 0
+        self.resp_bits_s2_entry_tag.value = 0
+        self.resp_bits_s2_entry_vmid.value = 0
+        self.resp_bits_s2_entry_n.value = 0
+        self.resp_bits_s2_entry_pbmt.value = 0
+        self.resp_bits_s2_entry_perm_a.value = 0
+        self.resp_bits_s2_entry_perm_g.value = 0
+        self.resp_bits_s2_entry_perm_u.value = 0
+        self.resp_bits_s2_entry_perm_x.value = 0
+        self.resp_bits_s2_entry_perm_w.value = 0
+        self.resp_bits_s2_entry_perm_r.value = 0
+        self.resp_bits_s2_entry_level.value = 0
+        self.resp_bits_s2_entry_v.value = 0
+        self.resp_bits_s2_entry_ppn.value = 0
+        self.resp_bits_s2_gpf.value = 0
+        self.resp_bits_s2_gaf.value = 0
         self.resp_bits_s1_entry_tag.value = 0
         self.resp_bits_s1_entry_asid.value = 0
         self.resp_bits_s1_entry_vmid.value = 0

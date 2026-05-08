@@ -20,7 +20,18 @@ class UncacheConfig:
 @dataclass(frozen=True)
 class PTWConfig:
     latency: int = 3
+    latency_max: int = 3
     mode: str = "bare"
+    response_source: str = "nemu"
+    compare_drive_source: str = "nemu"
+    nemu_ptw_adapter: str = "env.nemu_ptw_adapter_template:build_ptw_resp"
+    req_ready_strategy: str = "always"
+    req_ready_probability: float = 1.0
+    req_ready_high_cycles: int = 1
+    req_ready_low_cycles: int = 0
+    seed: int = 1
+    flush_pending_on_sfence: bool = True
+    strict_bare_mode: bool = False
 
 
 @dataclass(frozen=True)

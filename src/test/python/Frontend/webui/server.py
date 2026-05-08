@@ -67,7 +67,18 @@ class UncacheConfigRequest(BaseModel):
 
 class PTWConfigRequest(BaseModel):
     latency: int = 3
+    latency_max: Optional[int] = None
     mode: Optional[str] = None
+    response_source: str = "model"
+    compare_drive_source: str = "nemu"
+    nemu_ptw_adapter: str = ""
+    req_ready_strategy: str = "always"
+    req_ready_probability: float = 1.0
+    req_ready_high_cycles: int = 1
+    req_ready_low_cycles: int = 0
+    seed: int = 1
+    flush_pending_on_sfence: bool = True
+    strict_bare_mode: bool = False
 
 
 class LogLevelRequest(BaseModel):
@@ -188,7 +199,21 @@ async def config_uncache(req: UncacheConfigRequest) -> dict:
 @app.post("/api/agent/ptw/config")
 async def config_ptw(req: PTWConfigRequest) -> dict:
     try:
-        return runner.config_ptw(req.latency, req.mode)
+        return runner.config_ptw(
+            req.latency,
+            req.mode,
+            latency_max=req.latency_max,
+            response_source=req.response_source,
+            compare_drive_source=req.compare_drive_source,
+            nemu_ptw_adapter=req.nemu_ptw_adapter,
+            req_ready_strategy=req.req_ready_strategy,
+            req_ready_probability=req.req_ready_probability,
+            req_ready_high_cycles=req.req_ready_high_cycles,
+            req_ready_low_cycles=req.req_ready_low_cycles,
+            seed=req.seed,
+            flush_pending_on_sfence=req.flush_pending_on_sfence,
+            strict_bare_mode=req.strict_bare_mode,
+        )
     except Exception as ex:
         raise HTTPException(status_code=400, detail=str(ex)) from ex
 

@@ -768,6 +768,7 @@
         if (t.includes("error")) return "error";
         if (t.includes("exception")) return "exception";
         if (t.includes("redirect")) return "redirect";
+        if (t.includes("check.")) return "check";
         if (t.includes("handshake")) return "handshake";
         if (t.includes("control") || t.includes("session")) return "control";
         return "other";
@@ -778,6 +779,7 @@
         if (cat === "error") return "#ff6f73";
         if (cat === "exception") return "#ff8c5a";
         if (cat === "redirect") return "#ffd166";
+        if (cat === "check") return "#b7f171";
         if (cat === "handshake") return "#57c8ff";
         if (cat === "control") return "#4de7be";
         return "#9bb1d4";
@@ -866,6 +868,24 @@
         if (evt.type === "handshake.icache_a") return "ICache req addr=" + toHex(p.address || 0) + " latency=" + String(p.latency || 0);
         if (evt.type === "handshake.uncache_a") return "Uncache req addr=" + toHex(p.address || 0) + " latency=" + String(p.latency || 0);
         if (evt.type === "handshake.ptw_req") return "PTW req vpn=" + toHex(p.vpn || 0) + " mode=" + String(p.mode || "unknown");
+        if (evt.type === "check.ptw_full_ppn_arm") {
+          return "PTW full-PPN arm vpn=" + toHex(p.vpn || 0) + " cand=" + toHex(p.full_ppn_candidate || 0) + " slot=" + String(p.slot_idx || 0);
+        }
+        if (evt.type === "check.ptw_full_ppn_match") {
+          return "PTW full-PPN match vpn=" + toHex(p.vpn || 0) + " ppn=" + toHex(p.actual_ppn || 0);
+        }
+        if (evt.type === "check.ptw_full_ppn_mismatch") {
+          return "PTW full-PPN mismatch vpn=" + toHex(p.vpn || 0) + " expect=" + toHex(p.full_ppn_candidate || 0) + " got=" + toHex(p.actual_ppn || 0);
+        }
+        if (evt.type === "check.ptw_full_ppn_timeout") {
+          return "PTW full-PPN timeout vpn=" + toHex(p.vpn || 0) + " cand=" + toHex(p.full_ppn_candidate || 0);
+        }
+        if (evt.type === "check.ptw_full_ppn_drop") {
+          return "PTW full-PPN drop reason=" + String(p.reason || "unknown") + " dropped=" + String((p.dropped_expectations || 0) + (p.dropped_requests || 0));
+        }
+        if (evt.type === "check.ptw_full_ppn_skip") {
+          return "PTW full-PPN skip reason=" + String(p.reason || "unknown");
+        }
         if (String(evt.type || "").includes("redirect")) return "Redirect target=" + toHex(p.target_pc || p.target || 0) + " reason=" + String(p.reason || "none");
         if (String(evt.type || "").includes("exception")) return "Exception cause=" + String(p.cause || 0) + " pc=" + toHex(p.pc || p.target_pc || 0);
         if (String(evt.type || "").includes("pc_track")) {

@@ -19,7 +19,7 @@ for _path in (str(_PYLIB_PATH), str(_HERE)):
 
 from .api import api_Frontend_load_program
 from .coverage_def import get_coverage_groups
-from .dut_factory import create_frontend_dut
+from .dut_factory import create_frontend_dut, is_fake_frontend_dut
 from .env_config import DEFAULT_ENV_CONFIG
 from .functional_coverage import FunctionalCoverageRecorder, default_pilot_csv_path
 from .frontend_env import FrontendEnv
@@ -137,6 +137,15 @@ def create_dut(request):
         case_log_path = _log_path(request, data_dir)
         case_log_handler = _attach_case_log_handler(case_log_path)
     dut = create_frontend_dut(tc_name=tc_name, dut_logger=logger)
+    if (
+        request is not None
+        and _is_enabled("TB_ENABLE_DUT_TESTS", default="0")
+        and is_fake_frontend_dut(dut)
+    ):
+        pytest.skip(
+            "compiled Frontend DUT not found; run `make frontend` to build "
+            "build-frontend/pylib/Frontend before enabling TB_ENABLE_DUT_TESTS=1"
+        )
     waveform_format = _waveform_format_from_dut(dut)
 
     waveform = _waveform_path(request, data_dir, waveform_format=waveform_format)

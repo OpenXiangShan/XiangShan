@@ -15,6 +15,8 @@ class FakeSignal:
 class FakeDUTFrontend:
     """Fallback DUT used when the compiled Frontend pylib is unavailable."""
 
+    _is_fake_frontend_dut = True
+
     def __init__(self) -> None:
         self._signals = {}
         self._step_ris_callbacks = []
@@ -87,5 +89,16 @@ def create_frontend_dut(tc_name: str = "frontend", dut_logger: Logger | None = N
         active_logger.warning("compiled Frontend DUT not found; using fallback fake DUT for tc=%s", tc_name)
         return FakeDUTFrontend()
     dut = DUTFrontend()
+    setattr(dut, "_is_fake_frontend_dut", False)
     setattr(dut, "_frontend_is_fake_dut", False)
     return dut
+
+
+def is_fake_frontend_dut(dut) -> bool:
+    return bool(
+        getattr(
+            dut,
+            "_is_fake_frontend_dut",
+            getattr(dut, "_frontend_is_fake_dut", False),
+        )
+    )

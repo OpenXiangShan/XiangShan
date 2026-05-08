@@ -292,12 +292,59 @@ class SimulationRunner:
         self._publish("control.config_uncache", {"latency": int(latency), "mmio_latency": mmio_latency})
         return self.snapshot()
 
-    def config_ptw(self, latency: int, mode: Optional[str] = None) -> Dict[str, Any]:
+    def config_ptw(
+        self,
+        latency: int,
+        mode: Optional[str] = None,
+        *,
+        latency_max: Optional[int] = None,
+        response_source: str = "model",
+        compare_drive_source: str = "nemu",
+        nemu_ptw_adapter: str = "",
+        req_ready_strategy: str = "always",
+        req_ready_probability: float = 1.0,
+        req_ready_high_cycles: int = 1,
+        req_ready_low_cycles: int = 0,
+        seed: int = 1,
+        flush_pending_on_sfence: bool = True,
+        strict_bare_mode: bool = False,
+    ) -> Dict[str, Any]:
         with self.lock:
             if self.env is None:
                 raise RuntimeError("session not started")
-            self.env.ptw_agent.configure(latency=int(latency), mode=mode)
-        self._publish("control.config_ptw", {"latency": int(latency), "mode": mode})
+            self.env.ptw_agent.configure(
+                latency=int(latency),
+                latency_max=(None if latency_max is None else int(latency_max)),
+                mode=mode,
+                response_source=str(response_source),
+                compare_drive_source=str(compare_drive_source),
+                nemu_ptw_adapter=str(nemu_ptw_adapter),
+                req_ready_strategy=str(req_ready_strategy),
+                req_ready_probability=float(req_ready_probability),
+                req_ready_high_cycles=int(req_ready_high_cycles),
+                req_ready_low_cycles=int(req_ready_low_cycles),
+                seed=int(seed),
+                flush_pending_on_sfence=bool(flush_pending_on_sfence),
+                strict_bare_mode=bool(strict_bare_mode),
+            )
+        self._publish(
+            "control.config_ptw",
+            {
+                "latency": int(latency),
+                "latency_max": latency_max,
+                "mode": mode,
+                "response_source": str(response_source),
+                "compare_drive_source": str(compare_drive_source),
+                "nemu_ptw_adapter": str(nemu_ptw_adapter),
+                "req_ready_strategy": str(req_ready_strategy),
+                "req_ready_probability": float(req_ready_probability),
+                "req_ready_high_cycles": int(req_ready_high_cycles),
+                "req_ready_low_cycles": int(req_ready_low_cycles),
+                "seed": int(seed),
+                "flush_pending_on_sfence": bool(flush_pending_on_sfence),
+                "strict_bare_mode": bool(strict_bare_mode),
+            },
+        )
         return self.snapshot()
 
     def set_log_level(self, level: str) -> Dict[str, Any]:
