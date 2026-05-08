@@ -108,14 +108,24 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       val isWiden = Mux1H(fus.flatMap(_.out.ex.lift(i)).map(validIO =>
         validIO.valid -> validIO.bits.data.vec.get.isWiden.getOrElse(false.B)
       )).suggestName(s"ex${i}_isWiden")
+      val isNarrow = Mux1H(fus.flatMap(_.out.ex.lift(i)).map(validIO =>
+        validIO.valid -> validIO.bits.data.vec.get.isNarrow.getOrElse(false.B)
+      )).suggestName(s"ex${i}_isNarrow")
       val resSew = Mux(isWiden, vsew + 1.U, vsew).suggestName(s"ex${i}_resSew")
       val eewOH = UIntToOH(resSew, SewOH.width).suggestName(s"ex${i}_eewOH")
-      val vdIdx = ex(i).bits.ctrl.uopIdx // Todo: may by wrong for some kind of uops
+      val vdIdx = Mux(isNarrow, ex(i).bits.ctrl.uopIdx >> 1, ex(i).bits.ctrl.uopIdx)
       val vlMapVdIdx = elemIdxMapVdIdx(vl, eewOH)(3, 0) // 4 bits 0~8
       val end = elemIdxMapElemE8Idx(vl, eewOH)
-      val vd = Mux1H(fus.flatMap(_.out.ex.lift(i)).map(validIO =>
-        validIO.valid -> validIO.bits.data.vec.get.normal
-      )).suggestName(s"ex${i}_vd")
+      val vd = Mux1H(fus.flatMap(_.out.ex.lift(i)).map { validIO =>
+        val vecData = validIO.bits.data.vec.get
+        val oldVd = ex(i).bits.data.src(2)
+        val narrowVd = Mux(
+          ex(i).bits.ctrl.uopIdx(0),
+          Cat(vecData.narrow, oldVd(VLEN / 2 - 1, 0)),
+          Cat(oldVd(VLEN - 1, VLEN / 2), vecData.narrow)
+        )
+        validIO.valid -> Mux(vecData.isNarrow.getOrElse(false.B), narrowVd, vecData.normal)
+      }).suggestName(s"ex${i}_vd")
 
       mgu.in.ctrl.vma := ex(i).bits.ctrl.vtype.get.vma
       mgu.in.ctrl.vta := ex(i).bits.ctrl.vtype.get.vta
@@ -142,9 +152,21 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       out.bits.toRob.vxsat.foreach {
         case x =>
           val vxsat: Vec[UInt] = Mux1H(
-            fus.flatMap(_.out.ex.lift(i)).map(
-              validIO => validIO.valid -> validIO.bits.data.vec.get.vxsatE8.getOrElse(0.U.asTypeOf(Vec(vlenb, Vxsat())))
-            )
+            fus.flatMap(_.out.ex.lift(i)).map { validIO =>
+              val vecData = validIO.bits.data.vec.get
+              val normalVxsat = vecData.vxsatE8.getOrElse(0.U.asTypeOf(Vec(vlenb, Vxsat())))
+              val narrowVxsat = vecData.narrowVxsatE8.getOrElse(0.U.asTypeOf(Vec(vlenb / 2, Vxsat())))
+              val paddedNarrowVxsat = Wire(Vec(vlenb, Vxsat()))
+              val zeroVxsat = 0.U.asTypeOf(Vxsat())
+              for (j <- 0 until vlenb) {
+                if (j < vlenb / 2) {
+                  paddedNarrowVxsat(j) := Mux(ex(i).bits.ctrl.uopIdx(0), zeroVxsat, narrowVxsat(j))
+                } else {
+                  paddedNarrowVxsat(j) := Mux(ex(i).bits.ctrl.uopIdx(0), narrowVxsat(j - vlenb / 2), zeroVxsat)
+                }
+              }
+              validIO.valid -> Mux(vecData.isNarrow.getOrElse(false.B), paddedNarrowVxsat, normalVxsat)
+            }
           ).suggestName(s"ex${i}_vxsat")
 
           x := Mux1H(mgus(i).out.activeEn, vxsat)
@@ -153,9 +175,21 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       out.bits.toRob.fflags.foreach {
         case x =>
           val fflags: Vec[UInt] = Mux1H(
-            fus.flatMap(_.out.ex.lift(i)).map(
-              validIO => validIO.valid -> validIO.bits.data.vec.get.fflagsE8.getOrElse(0.U.asTypeOf(Vec(vlenb, Fflags())))
-            )
+            fus.flatMap(_.out.ex.lift(i)).map { validIO =>
+              val vecData = validIO.bits.data.vec.get
+              val normalFflags = vecData.fflagsE8.getOrElse(0.U.asTypeOf(Vec(vlenb, Fflags())))
+              val narrowFflags = vecData.narrowFflagsE8.getOrElse(0.U.asTypeOf(Vec(vlenb / 2, Fflags())))
+              val paddedNarrowFflags = Wire(Vec(vlenb, Fflags()))
+              val zeroFflags = 0.U.asTypeOf(Fflags())
+              for (j <- 0 until vlenb) {
+                if (j < vlenb / 2) {
+                  paddedNarrowFflags(j) := Mux(ex(i).bits.ctrl.uopIdx(0), zeroFflags, narrowFflags(j))
+                } else {
+                  paddedNarrowFflags(j) := Mux(ex(i).bits.ctrl.uopIdx(0), narrowFflags(j - vlenb / 2), zeroFflags)
+                }
+              }
+              validIO.valid -> Mux(vecData.isNarrow.getOrElse(false.B), paddedNarrowFflags, normalFflags)
+            }
           ).suggestName(s"ex${i}_fflags")
 
           x := Mux1H(mgus(i).out.activeEn, fflags)

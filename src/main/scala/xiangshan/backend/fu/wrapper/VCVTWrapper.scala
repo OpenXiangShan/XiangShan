@@ -21,21 +21,26 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
   private val vlenb = VLEN / 8
   private val zeroFflags = 0.U.asTypeOf(Fflags())
   private val zeroFflagsE8 = VecInit(Seq.fill(vlenb)(zeroFflags))
+  private val zeroNarrowFflagsE8 = VecInit(Seq.fill(vlenb / 2)(zeroFflags))
   private val resStages = cfg.latency + 1
   require(resStages == 3)
 
   private val ex0NextInWidth = FCvtOpcode.getInputDataWidth(ex0NextOpcode)
   private val ex0NextOutWidth = FCvtOpcode.getOutputDataWidth(ex0NextOpcode)
   private val ex0NextIsWiden = ex0NextOutWidth > ex0NextInWidth
+  private val ex0NextIsNarrow = ex0NextInWidth > ex0NextOutWidth
   private val exInWidth   = makePipeReg(ex0NextInWidth, pipeRegValids)
   private val exOutWidth  = makePipeReg(ex0NextOutWidth, pipeRegValids)
   private val isWiden     = makePipeReg(ex0NextIsWiden, pipeRegValids)
+  private val isNarrow    = makePipeReg(ex0NextIsNarrow, pipeRegValids)
 
   private val vfcvts = Seq.fill(numVecModule)(Module(new VectorCvt(dataWidthOfDataModule)))
   private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs2Vec = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
   private val inSew1H = Wire(UInt(4.W))
   private val outSew1H = Wire(UInt(4.W))
+  private val narrowDataWidth = dataWidthOfDataModule / 2
+  private val narrowBytes = narrowDataWidth / 8
 
   vs2Split.io.inVecData := ex0vs2
   for (i <- 0 until numVecModule) {
@@ -69,33 +74,36 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
       vecData.maskE32 := 0.U
       vecData.maskE64 := 0.U
       vecData.isWiden.get := isWiden.ex0
+      vecData.isNarrow.get := isNarrow.ex0
       vecData.fflagsE8.get := zeroFflagsE8
-      vecData.narrowFflagsE8.get := zeroFflagsE8
+      vecData.narrowFflagsE8.get := zeroNarrowFflagsE8
   }
 
   out.ex(1).bits.data.vec.foreach {
     case vecData =>
       vecData.normal := Cat(vfcvts.map(_.io.resEx1).reverse)
-      vecData.narrow := 0.U
+      vecData.narrow := Cat(vfcvts.map(_.io.resEx1.take(narrowDataWidth)).reverse)
       vecData.maskE8 := 0.U
       vecData.maskE16 := 0.U
       vecData.maskE32 := 0.U
       vecData.maskE64 := 0.U
       vecData.isWiden.get := isWiden.ex1
+      vecData.isNarrow.get := isNarrow.ex1
       vecData.fflagsE8.get := vfcvts.flatMap(_.io.fflagsE8Ex1.toSeq)
-      vecData.narrowFflagsE8.get := zeroFflagsE8
+      vecData.narrowFflagsE8.get := VecInit(vfcvts.flatMap(_.io.fflagsE8Ex1.toSeq.take(narrowBytes)))
   }
 
   out.ex(2).bits.data.vec.foreach {
     case vecData =>
       vecData.normal := Cat(vfcvts.map(_.io.resEx2).reverse)
-      vecData.narrow := 0.U
+      vecData.narrow := Cat(vfcvts.map(_.io.resEx2.take(narrowDataWidth)).reverse)
       vecData.maskE8 := 0.U
       vecData.maskE16 := 0.U
       vecData.maskE32 := 0.U
       vecData.maskE64 := 0.U
       vecData.isWiden.get := isWiden.ex2
+      vecData.isNarrow.get := isNarrow.ex2
       vecData.fflagsE8.get := vfcvts.flatMap(_.io.fflagsE8Ex2.toSeq)
-      vecData.narrowFflagsE8.get := zeroFflagsE8
+      vecData.narrowFflagsE8.get := VecInit(vfcvts.flatMap(_.io.fflagsE8Ex2.toSeq.take(narrowBytes)))
   }
 }
