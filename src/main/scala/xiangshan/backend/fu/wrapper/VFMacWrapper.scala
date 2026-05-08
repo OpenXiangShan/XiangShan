@@ -87,7 +87,6 @@ class VFMacWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
       mod.in.ex0.bits.data.fp_aIsFpCanonicalNAN := ex0VfmaInfo.fpAIsFpCanonicalNAN(i)
       mod.in.ex0.bits.data.fp_bIsFpCanonicalNAN := ex0VfmaInfo.fpBIsFpCanonicalNAN(i)
       mod.in.ex0.bits.data.fp_cIsFpCanonicalNAN := ex0VfmaInfo.fpCIsFpCanonicalNAN(i)
-
   }
 
   out.ex.indices.filterNot(stageIdx => stageIdx == 3).foreach { stageIdx =>
