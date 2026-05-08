@@ -14,6 +14,8 @@ import xiangshan.backend.decode.opcode.Opcode.FMacOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FMiscOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FenceOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.JmpOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.NewJmpOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.LinkOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.LduOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.MulOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.StuOpcodes._
@@ -23,7 +25,7 @@ import xiangshan.backend.decode.opcode.OpcodeTraits._
 
 object ScalaUopTable {
   val tableI = {
-    import xiangshan.backend.decode.isa.Instructions.{I64Type, IType}
+    import xiangshan.backend.decode.isa.Instructions.{I64Type, IType, JumpLinkType}
 
     val tableI64Type = I64Type.mapUopcode(
       _.ADDIW -> addw.S2xRemove,
@@ -48,7 +50,7 @@ object ScalaUopTable {
       _.ADDI    -> add.S2xRemove,
       _.AND     -> and,
       _.ANDI    -> and.S2xRemove,
-      _.AUIPC   -> auipc,
+      _.AUIPC   -> auipc_new,
       _.BEQ     -> beq,
       _.BGE     -> bge,
       _.BGEU    -> bgeu,
@@ -58,8 +60,6 @@ object ScalaUopTable {
       _.EBREAK  -> jmp, // system i-type
       _.ECALL   -> jmp, // system i-type
       _.FENCE   -> fence,
-      _.JAL     -> jal,
-      _.JALR    -> jalr,
       _.LB      -> lb,
       _.LBU     -> lbu,
       _.LH      -> lh,
@@ -83,7 +83,24 @@ object ScalaUopTable {
       _.XORI    -> xor.S2xRemove,
     )
 
-    tableI64Type ++ tableIType
+    val tableJumpLink = JumpLinkType.mapUopcodes(
+      // _.JAL     -> Seq(j, link),
+      // _.JALR    -> Seq(jr, link),
+      _.JAL_RD_1XXXX  -> Seq(j, link),
+      _.JAL_RD_01XXX  -> Seq(j, link),
+      _.JAL_RD_001XX  -> Seq(j, link),
+      _.JAL_RD_0001X  -> Seq(j, link),
+      _.JAL_RD_00001  -> Seq(j, link),
+      _.JAL_RD_ZERO   -> Seq(j),
+      _.JALR_RD_1XXXX -> Seq(jr, link),
+      _.JALR_RD_01XXX -> Seq(jr, link),
+      _.JALR_RD_001XX -> Seq(jr, link),
+      _.JALR_RD_0001X -> Seq(jr, link),
+      _.JALR_RD_00001 -> Seq(jr, link),
+      _.JALR_RD_ZERO  -> Seq(jr),
+    )
+
+    tableI64Type ++ tableIType ++ tableJumpLink
   }
 
   val tableM = {

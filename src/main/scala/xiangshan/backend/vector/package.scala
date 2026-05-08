@@ -34,6 +34,10 @@ package object vector {
     def uopBufferLength = 7
   }
 
+  trait HasSimpleSettings {
+    def maxSimpleSplitUopNum = 2
+  }
+
   trait HasVectorParam extends HasVectorSettings {
     implicit val p: P
 

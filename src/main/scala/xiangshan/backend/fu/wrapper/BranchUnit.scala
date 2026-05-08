@@ -37,10 +37,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   dataModule.io.func := io.in.bits.ctrl.fuOpType
   dataModule.io.fixedTaken := io.in.bits.ctrl.predictInfo.get.fixedTaken
 
-  val pcExtend = Mux(io.instrAddrTransType.get.shouldBeSext,
-    SignExt(io.in.bits.data.pc.get, VAddrBits + 1),
-    ZeroExt(io.in.bits.data.pc.get, VAddrBits + 1)
-  )
+  val pcExtend = io.instrAddrTransType.get.extend(io.in.bits.data.pc.get, VAddrBits + 1)
   addModule.io.pcExtend := pcExtend
   addModule.io.imm := io.in.bits.data.imm // imm
   addModule.io.taken := dataModule.io.taken
@@ -82,8 +79,6 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.toFrontendBJUResolve.get.bits.mispredict := isMisPred
   io.toFrontendBJUResolve.get.bits.attribute.branchType := BranchAttribute.BranchType.Conditional
   io.toFrontendBJUResolve.get.bits.attribute.rasAction := 0.U
-  if (io.toFrontendBJUResolve.get.bits.debug_isRVC.isDefined) {
-    io.toFrontendBJUResolve.get.bits.debug_isRVC.get := io.in.bits.ctrl.isRVC.get
-  }
+  io.toFrontendBJUResolve.get.bits.debug_isRVC.foreach(_ := io.in.bits.ctrl.isRVC.get)
   connect0LatencyCtrlSingal
 }

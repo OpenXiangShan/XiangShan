@@ -36,6 +36,10 @@ case class SchdBlockParams(
 
   def JmpCnt: Int = issueBlockParams.map(_.JmpCnt).sum
 
+  def NewJmpCnt: Int = issueBlockParams.map(_.NewJmpCnt).sum
+
+  def LinkCnt: Int = issueBlockParams.map(_.LinkCnt).sum
+
   def BrhCnt: Int = issueBlockParams.map(_.BrhCnt).sum
 
   def I2fCnt: Int = issueBlockParams.map(_.I2fCnt).sum

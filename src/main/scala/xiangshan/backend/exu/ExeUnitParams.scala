@@ -75,8 +75,8 @@ case class ExeUnitParams(
   val needV0Wen: Boolean = fuConfigs.map(_.needV0Wen).reduce(_ || _)
   val needVlWen: Boolean = fuConfigs.map(_.needVlWen).reduce(_ || _)
   val needOg2: Boolean = fuConfigs.map(_.needOg2).reduce(_ || _)
-  val needTaken: Boolean = fuConfigs.map(x => x.isJmp || x.isBrh).reduce(_ || _)
-  val needRasAction: Boolean = fuConfigs.map(x => x.isJmp).reduce(_ || _)
+  val needTaken: Boolean = fuConfigs.map(x => x.isJmp || x.isNewJmp || x.isBrh).reduce(_ || _)
+  val needRasAction: Boolean = fuConfigs.map(x => x.isJmp || x.isNewJmp).reduce(_ || _)
   val needImm: Boolean = fuConfigs.map(x => x.immType.nonEmpty).reduce(_ || _)
   def deqImmTypes: Seq[Imm] = fuConfigs.flatMap(_.immType).distinct
   // set load imm to 32-bit for fused_lui_load
@@ -95,6 +95,7 @@ case class ExeUnitParams(
   val trigger: Boolean = fuConfigs.map(_.trigger).reduce(_ || _)
   val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
   val needPc: Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
+  val aluBjuNeedPc: Boolean = fuConfigs.map(_.aluBjuNeedPc).reduce(_ || _)
   def aluNeedPc: Boolean = issueBlockParam.aluDeqNeedPickJump
   def needFtqPtr: Boolean = this.needPc || this.replayInst || this.hasStoreAddrFu || this.hasCSR || this.hasVLoadFu
   def needFtqPtrOffset: Boolean = needFtqPtr || this.aluNeedPc
@@ -315,6 +316,10 @@ case class ExeUnitParams(
   def hasf2iFu = fuConfigs.map(_.fuType == FuType.fcmp).reduce(_ || _)
 
   def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
+
+  def hasNewJmpFu = fuConfigs.map(_.fuType == FuType.njmp).reduce(_ || _)
+
+  def hasLinkFu = fuConfigs.map(_.fuType == FuType.link).reduce(_ || _)
 
   def hasLoadFu = fuConfigs.map(_.name == "ldu").reduce(_ || _)
 

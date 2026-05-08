@@ -18,13 +18,9 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
 
   // associated with AddrData's position of JmpCfg.srcData
   private val src = io.in.bits.data.src(0)
-  private val pc = Mux(io.instrAddrTransType.get.shouldBeSext,
-    SignExt(io.in.bits.data.pc.get, cfg.destDataBits),
-    ZeroExt(io.in.bits.data.pc.get, cfg.destDataBits)
-  )
+  private val pc = io.instrAddrTransType.get.extend(io.in.bits.data.pc.get, cfg.destDataBits)
   private val imm = io.in.bits.data.imm
   private val func = io.in.bits.ctrl.fuOpType
-  private val isRVC = io.in.bits.ctrl.isRVC.get
   private val rasAction = io.in.bits.ctrl.rasAction.get
 
   jumpDataModule.io.src := src
@@ -32,7 +28,6 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   jumpDataModule.io.imm := imm
   jumpDataModule.io.nextPcOffset := io.in.bits.data.nextPcOffset.get
   jumpDataModule.io.func := func
-  jumpDataModule.io.isRVC := isRVC
 
   val fixedTaken = io.in.bits.ctrl.predictInfo.get.fixedTaken
   val predTaken  = io.in.bits.ctrl.predictInfo.get.predTaken
@@ -45,7 +40,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
 
   val redirect = io.out.bits.res.redirect.get.bits
   val redirectValid = io.out.bits.res.redirect.get.valid
-  redirectValid := io.in.valid && !jumpDataModule.io.isAuipc && (needRedirect || redirect.hasBackendFault)
+  redirectValid := io.in.valid && !JumpOpType.jumpUopisAuipc(func) && (needRedirect || redirect.hasBackendFault)
   redirect := 0.U.asTypeOf(redirect)
   redirect.level := RedirectLevel.flushAfter
   redirect.robIdx := io.in.bits.ctrl.robIdx
@@ -65,7 +60,7 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   io.in.ready := io.out.ready
   io.out.valid := io.in.valid
   io.out.bits.res.data := jumpDataModule.io.result
-  io.toFrontendBJUResolve.get.valid := io.out.valid && !JumpOpType.jumpOpisAuipc(func)
+  io.toFrontendBJUResolve.get.valid := io.out.valid && !JumpOpType.jumpUopisAuipc(func)
   io.toFrontendBJUResolve.get.bits.ftqIdx := io.in.bits.ctrl.ftqIdx.get
   io.toFrontendBJUResolve.get.bits.ftqOffset := io.in.bits.ctrl.ftqOffset.get
   io.toFrontendBJUResolve.get.bits.pc := PrunedAddrInit(pc)
@@ -80,8 +75,6 @@ class JumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
     )
   )
   io.toFrontendBJUResolve.get.bits.attribute.rasAction := rasAction
-  if (io.toFrontendBJUResolve.get.bits.debug_isRVC.isDefined) {
-    io.toFrontendBJUResolve.get.bits.debug_isRVC.get := io.in.bits.ctrl.isRVC.get
-  }
+  io.toFrontendBJUResolve.get.bits.debug_isRVC.foreach(_ := io.in.bits.ctrl.isRVC.get)
   connect0LatencyCtrlSingal
 }

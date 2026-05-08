@@ -729,14 +729,14 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         x => x := s1_v0PregRData(i)(j)
       }
 
-      if (sinkData.exuParams.hasJmpFu || sinkData.exuParams.hasLoadFu) {
+      if (sinkData.exuParams.hasJmpFu || sinkData.exuParams.hasNewJmpFu || sinkData.exuParams.hasLinkFu || sinkData.exuParams.hasLoadFu) {
         val index = pcReadFtqPtrFormIQ.map(_.bits.exuParams).indexOf(sinkData.exuParams)
         sinkData.pc.get := pcRdata(index)
-        val aluSinkData = toExu(i)(0).bits
-        aluSinkData.pc.foreach(_ := pcRdata(index))
+        // val aluSinkData = toExu(i)(0).bits // TOODO: remove old jalr split logic // Deleted for new jump unit
+        // aluSinkData.pc.foreach(_ := pcRdata(index))
       }
       if (sinkData.exuParams.needTarget) {
-        val index = pcReadFtqPtrFormIQ.map(_.bits.exuParams).indexOf(sinkData.exuParams)
+        val index = fromIntIQ.flatten.map(_.bits.exuParams).filter(_.needTarget).indexOf(sinkData.exuParams)
         sinkData.predTarget.get := targetPCRdata(index)
       }
       val s1ExuDataWire = s1_toExuDataWire(i)(j)
