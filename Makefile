@@ -105,7 +105,7 @@ COMMON_EXTRA_ARGS += --dfx false
 endif
 endif
 
-# enable or disable sram ctl maunally
+# enable or disable sram ctl manually
 ifeq ($(SRAM_WITH_CTL),1)
 COMMON_EXTRA_ARGS += --sram-with-ctl
 endif
