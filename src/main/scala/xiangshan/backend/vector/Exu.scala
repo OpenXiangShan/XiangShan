@@ -41,6 +41,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
 
   val bypass: BypassNetwork = Module(new BypassNetwork()(param, p))
   val fus: Seq[Func] = param.fuConfigs.map(cfg => cfg.fuGen2(p, cfg))
+  private val nonFixedLatFus: Seq[VecNonFixedLatFunc] = fus.collect { case fu: VecNonFixedLatFunc => fu }
   val mgus: Seq[MergeUnit] = Seq.fill(numOfMgu)(Module(new MergeUnit()))
 
   val ex: Vec[ValidIO[Exu.ExStage]] = RegInit(
@@ -197,7 +198,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
   }
 
   val fuOutValidOH: Seq[Bool] = fus.flatMap(_.out.ex.map(_.valid))
-  val simultaneousOutCnt = PopCount(outFuUopEx.map(_.valid))
+  val simultaneousOutCnt = PopCount(fuOutValidOH)
 
   assert(
     simultaneousOutCnt <= 1.U,
@@ -206,6 +207,11 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
 
   out.uop.valid := Cat(outFuUopEx.map(_.valid)).orR
   out.uop.bits := Mux1H(outFuUopEx.map(x => x.valid -> x.bits))
+  out.outFuLat.foreach { sink =>
+    sink.zip(nonFixedLatFus).foreach { case (toWbBusyTable, fu) =>
+      toWbBusyTable <> fu.outFuLat
+    }
+  }
 
   def elemIdxMapVdIdx(elemIdx: UInt, eewOH: UInt) = {
     require(elemIdx.getWidth >= log2Up(VLEN))
@@ -238,6 +244,7 @@ object Exu {
 
   class Out(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
     val uop = ValidIO(new Exu.OutUop(param))
+    val outFuLat = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, Valid(UInt(WbFuBusyTable.NonFixedLatencyWidth.W))))
   }
 
   class ExStage(param: ExuParam)(implicit p: Parameters) extends InUop(param) {
