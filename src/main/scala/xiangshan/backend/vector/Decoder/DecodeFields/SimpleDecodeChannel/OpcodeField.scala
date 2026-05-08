@@ -12,7 +12,7 @@ import xiangshan.backend.vector.util.ChiselTypeExt.{BitPatToExt, UIntToUIntField
 
 class OpcodeField(uopIdx: Int) extends DecodeField[InstPattern, UInt] {
 
-  override def name: String = "opcode"
+  override def name: String = s"opcode$uopIdx"
 
   override def chiselType: UInt = Opcode()
 
