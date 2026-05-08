@@ -220,13 +220,17 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   )
 
   redirectPhr := getRedirectPhr(redirectData.phrMeta)
-  redirectS0FoldedPhr := getNextFoldedPhr(
-    redirectData,
-    computeAllFoldedPhr(redirectPhr),
-    redirectPhr,
-    redirectHashHigh,
+  private val redirectTakenPhr = Cat(
+    Cat(redirectPhr(PhrHistoryLength - 1, PathHashHighWidth), redirectHashHigh ^ redirectData.phrMeta.phrLowBits),
     redirectShiftBits
+  )(PhrHistoryLength - 1, 0)
+
+  redirectS0FoldedPhr := Mux(
+    redirectData.valid && redirectData.taken,
+    computeAllFoldedPhr(redirectTakenPhr),
+    computeAllFoldedPhr(redirectPhr)
   )
+
   private val s3S0FoldedPhrAll = s3_predOverrideData.zip(s3HashComponents).map { case (data, hash) =>
     getNextFoldedPhr(
       data,
