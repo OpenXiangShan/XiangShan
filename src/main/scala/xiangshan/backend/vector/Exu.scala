@@ -212,6 +212,11 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       toWbBusyTable <> fu.outFuLat
     }
   }
+  out.outFuWakeUp.foreach { sink =>
+    sink.zip(nonFixedLatFus).foreach { case (wakeup, fu) =>
+      wakeup := fu.outFuWakeUp
+    }
+  }
 
   def elemIdxMapVdIdx(elemIdx: UInt, eewOH: UInt) = {
     require(elemIdx.getWidth >= log2Up(VLEN))
@@ -245,6 +250,7 @@ object Exu {
   class Out(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
     val uop = ValidIO(new Exu.OutUop(param))
     val outFuLat = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, Valid(UInt(WbFuBusyTable.NonFixedLatencyWidth.W))))
+    val outFuWakeUp = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams)))
   }
 
   class ExStage(param: ExuParam)(implicit p: Parameters) extends InUop(param) {

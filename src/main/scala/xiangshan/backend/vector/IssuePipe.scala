@@ -8,6 +8,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility.PerfCCT
 import xiangshan.backend.datapath.DataConfig.{FpData, IntData, VecData}
 import xiangshan.backend.datapath.RdConfig._
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles.Vxrm
 import xiangshan.backend.regfile.PregParams
@@ -255,32 +256,51 @@ class IssuePipe(
 
   out.ex0 := ex0
 
-  private val is0WakeupValid: Bool = is0.valid && is0.bits.vpWen                         && 0.U === is0.bits.latency
-  private val is1WakeupValid: Bool = is1.valid && is1.bits.vpWen                         && 1.U === is1.bits.latency
-  private val is2WakeupValid: Bool = is2.valid && is2.bits.ctrl.vpWen.getOrElse(false.B) && 2.U === is2.bits.ctrl.latency
-  private val ex0WakeupValid: Bool = ex0.valid && ex0.bits.ctrl.vpWen.getOrElse(false.B) && 3.U === ex0.bits.ctrl.latency
+  private val is0FixedLatVpWen = is0.bits.vpWen && !FuType.FuTypeOrR(is0.bits.fuType, FuType.vidiv)
+  private val is1FixedLatVpWen = is1.bits.vpWen && !FuType.FuTypeOrR(is1.bits.fuType, FuType.vidiv)
+  private val is2FixedLatVpWen =
+    is2.bits.ctrl.vpWen.getOrElse(false.B) && !FuType.FuTypeOrR(is2.bits.ctrl.fuType, FuType.vidiv)
+  private val ex0FixedLatVpWen =
+    ex0.bits.ctrl.vpWen.getOrElse(false.B) && !FuType.FuTypeOrR(ex0.bits.ctrl.fuType, FuType.vidiv)
 
-  out.vpWbM3Wakeup.wen := Seq(
+  private val is0WakeupValid: Bool = is0.valid && is0FixedLatVpWen && 0.U === is0.bits.latency
+  private val is1WakeupValid: Bool = is1.valid && is1FixedLatVpWen && 1.U === is1.bits.latency
+  private val is2WakeupValid: Bool = is2.valid && is2FixedLatVpWen && 2.U === is2.bits.ctrl.latency
+  private val ex0WakeupValid: Bool = ex0.valid && ex0FixedLatVpWen && 3.U === ex0.bits.ctrl.latency
+
+  private val nonFixedLatWakeUp = Wire(new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams))
+  nonFixedLatWakeUp.wen := false.B
+  nonFixedLatWakeUp.pdest := 0.U
+  nonFixedLatWakeUp.delay := VecIssueQueue.BypassDelay.delay3
+
+  exu.out.outFuWakeUp.foreach { wakeups =>
+    nonFixedLatWakeUp.wen := wakeups.map(_.wen).reduce(_ || _)
+    nonFixedLatWakeUp.pdest := Mux1H(wakeups.map(wakeup => wakeup.wen -> wakeup.pdest))
+    nonFixedLatWakeUp.delay := Mux1H(wakeups.map(wakeup => wakeup.wen -> wakeup.delay))
+  }
+
+  private val fixedLatWakeupValid = Seq(
     is0WakeupValid,
     is1WakeupValid,
     is2WakeupValid,
     ex0WakeupValid,
   ).reduce(_ || _)
 
-  out.vpWbM3Wakeup.pdest := Mux1H(Seq(
+  out.vpWbM3Wakeup.wen := fixedLatWakeupValid || nonFixedLatWakeUp.wen
+
+  private val fixedLatWakeupPdest = Mux1H(Seq(
     is0WakeupValid -> is0.bits.pdest,
     is1WakeupValid -> is1.bits.pdest,
     is2WakeupValid -> is2.bits.ctrl.pdest,
     ex0WakeupValid -> ex0.bits.ctrl.pdest,
   ))
+  out.vpWbM3Wakeup.pdest := Mux(nonFixedLatWakeUp.wen, nonFixedLatWakeUp.pdest, fixedLatWakeupPdest)
 
   out.outFuLat.zip(exu.out.outFuLat).foreach {
     case (sink, source) => sink <> source
   }
 
-  // Delay means that the cycle of this uop send wakeup after it should do.
-  // It is not needed yet.
-  out.vpWbM3Wakeup.delay := 0.U
+  out.vpWbM3Wakeup.delay := Mux(nonFixedLatWakeUp.wen, nonFixedLatWakeUp.delay, 0.U)
 }
 
 object IssuePipe {

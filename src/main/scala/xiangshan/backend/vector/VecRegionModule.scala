@@ -230,7 +230,7 @@ class VecRegionImp(
         vpWbM3WakeUp.size == iq.in.wakeup.vpWbM3Vec.size,
         s"vpWbM3WakeUp: ${vpWbM3WakeUp.size}, iq.in.wakeup.vpWbM3Vec: ${iq.in.wakeup.vpWbM3Vec.size}"
       )
-      iq.in.wakeup.vpWbM3Vec := vpWbM3WakeUp
+      iq.in.wakeup.vpWbM3Vec := VecInit(vpWbM3WakeUp)
   }
 
 
@@ -356,7 +356,7 @@ class VecRegionImp(
     out.toDispatch.canAccept(i).foreach(_ := iq.out.canAccept)
   }
 
-  out.toDispatch.wakeUpVec := vpWbM3WakeUp
+  out.toDispatch.wakeUpVec := VecInit(vpWbM3WakeUp)
 
   for ((iq, i) <- issueQueues.filter(_.param.hasVStd).zipWithIndex) {
     out.toIntRegion.vstdCanAccept(i).foreach(_ := iq.out.canAccept)
