@@ -1385,7 +1385,8 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     }
 
     (0 until queueSize).map{i =>
-      when(needCancel(i)) { // when redirect, unalignQueue not allow enqueue.
+      val deqCancel = i.U === deqPtr.value && io.toDeqModule.fire
+      when(needCancel(i) || deqCancel) { // when redirect, unalignQueue not allow enqueue.
         allocated(i) := false.B
       }.elsewhen((i.U === enqPtr.value) && doEnq){
         allocated(i) := true.B
