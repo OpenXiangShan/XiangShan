@@ -212,6 +212,40 @@ class IssueParam(
 
   @BeanProperty
   var issueBlockParams: IssueBlockParams = _
+
+  def intNonFixedLatFuWbPortIds: Seq[Int] = collectNonFixedLatFuWbPortIds(
+    exu => exu.getGpWriteCfg.map(_.port),
+    cfg => cfg.writeIntRf,
+  )
+
+  def fpNonFixedLatFuWbPortIds: Seq[Int] = collectNonFixedLatFuWbPortIds(
+    exu => exu.getFpWriteCfg.map(_.port),
+    cfg => cfg.writeFpRf,
+  )
+
+  def vpNonFixedLatFuWbPortIds: Seq[Int] = collectNonFixedLatFuWbPortIds(
+    exu => exu.getVpWriteCfg.map(_.port),
+    cfg => cfg.writeVecRf,
+  )
+
+  def v0NonFixedLatFuWbPortIds: Seq[Int] = collectNonFixedLatFuWbPortIds(
+    exu => exu.getV0WriteCfg.map(_.port),
+    cfg => cfg.writeV0Rf,
+  )
+
+  def vlNonFixedLatFuWbPortIds: Seq[Int] = collectNonFixedLatFuWbPortIds(
+    exu => exu.getVlWriteCfg.map(_.port),
+    cfg => cfg.writeVlRf,
+  )
+
+  private def collectNonFixedLatFuWbPortIds(
+    wbPortSel: ExuParam => Option[Int],
+    writeSel: VecFuConfig => Boolean,
+  ): Seq[Int] = {
+    collectWbPortIds(exuParams.map { exu =>
+      wbPortSel(exu).filter(_ => exu.nonFixedLatFuConfigs.exists(writeSel))
+    })
+  }
 }
 
 object IssueParam {
