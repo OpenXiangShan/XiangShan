@@ -86,7 +86,6 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
 
   dontTouch(privCause)
 
-  val frmExceptionII = out.bits.frmRen && (out.bits.frmIll || (out.bits.frm === Frm.DYN && in.fromCSR.illegalInst.frm))
 
   val fsOffExceptionII = in.fromCSR.illegalInst.fsIsOff && needFs
 
@@ -114,6 +113,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
   })
 
   for (i <- 0 until maxSplitUopNum) {
+    val frmExceptionII = out.uop(i).bits.frmRen && (out.uop(i).bits.frmIll || (out.uop(i).bits.frm === Frm.DYN && in.fromCSR.illegalInst.frm))
+
     out.uop(i).valid := uopInfos(i).valid
     out.uop(i).bits.renameInfo := uopInfos(i).bits
     out.uop(i).bits.renameInfo.gpWen := uopInfos(i).bits.gpWen && instFields.RD =/= 0.U
@@ -135,6 +136,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     out.uop(i).bits.exceptionII := frmExceptionII || fsOffExceptionII || privExceptionII
     out.uop(i).bits.exceptionVI := privExceptionVI
   }
+
   out.uopNumOH := result(NumUopOhField)
 }
 
