@@ -407,7 +407,7 @@ class InterruptFilter extends Module {
     iidC1C5 := iidOnlyC5
     iprioC1C5 := iprioC3C5Tmp
   }
-  
+
   // C2,C4 enable
   when(C4IsZero) {
     iidC2C4 := Mux(C4HighVSEI, iidOnlyC4, iidOnlyC1)
@@ -560,7 +560,7 @@ class InterruptFilter extends Module {
   val delayedIRToHS = DelayN(irToHSReg, 5)
   val delayedIRToVS = DelayN(irToVSReg, 5)
 
-  io.out.interruptVec.valid := delayedIntrVec.orR || delayedDebugIntr || delayedVIIsHvictlInjectReg
+  io.out.interruptVec.valid := delayedIntrVec.orR || delayedDebugIntr
   io.out.interruptVec.bits := delayedIntrVec
   io.out.debug := delayedDebugIntr
   io.out.nmi := delayedNMI
