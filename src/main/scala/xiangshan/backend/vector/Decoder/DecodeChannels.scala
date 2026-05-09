@@ -139,7 +139,7 @@ class DecodeChannels(
   val illegalChannelOut: Seq[ValidIO[DecodeChannelOutput]] = (0 until mopWidth).map { i =>
     val hasDecodedUop = vecChannelOut(i).head.valid ||
                         vsetChannelOut(i).valid ||
-                        simChannelOut(i).valid ||
+                        simChannelOut(i).head.valid ||
                         psdChannelOut(i).valid
     makeValid(instValids(i) && !hasDecodedUop, DecodeChannelOutput.illegalUop())
   }
