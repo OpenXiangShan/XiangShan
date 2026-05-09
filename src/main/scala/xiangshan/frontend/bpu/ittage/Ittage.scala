@@ -67,7 +67,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   // Each ITTAGE table manages its own banking (NumBanks parameter); top-level only supplies PC/history.
   private val tables = TableInfos.zipWithIndex.map {
     case (info, i) =>
-      val t = Module(new IttageTable(info.Size, info.HistoryLength, TagWidth, i))
+      val t = Module(new IttageTable(i, info))
       t
   }
 
