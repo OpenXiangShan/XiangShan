@@ -472,7 +472,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
 
 class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = true){
   lazy val canToMisalignBuffer = io.vstdMisalign.get.storeMisalignBufferEmpty &&
-    (!io.vstdMisalign.get.scalaIssueValid || io.vstdMisalign.get.scalaIssueRobIdx < issueUop.robIdx)
+    (!io.vstdMisalign.get.scalaIssueValid || issueUop.robIdx < io.vstdMisalign.get.scalaIssueRobIdx)
 
   override lazy val misalignedCanGo = io.vstdMisalign.get.storePipeEmpty && canToMisalignBuffer
 
