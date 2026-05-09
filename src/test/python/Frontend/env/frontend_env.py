@@ -626,6 +626,7 @@ class FrontendEnv:
         if bare_mode:
             self.page_table.set_mode("bare")
             self._write(self.csr_ctrl_if.io_tlbCsr_priv_virt, 0)
+            self._write(self.csr_ctrl_if.io_tlbCsr_priv_imode, 1)
             self._write(self.csr_ctrl_if.io_tlbCsr_satp_mode, 0)
             self._write(self.csr_ctrl_if.io_tlbCsr_satp_asid, 0)
             self._write(self.csr_ctrl_if.io_tlbCsr_satp_ppn, 0)

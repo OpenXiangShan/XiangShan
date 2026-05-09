@@ -110,6 +110,8 @@ def test_baremode_seq_icache_basic_pilot(env):
     assert env.functional_coverage.key_hit("reset_boot_path", "seen")
     assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
     assert env.functional_coverage.key_hit("bpu_basic_pred_type", "seq_no_cfi")
+    assert env.functional_coverage.key_hit("ftq_queue_state", "empty")
+    assert env.functional_coverage.key_hit("ibuffer_state", "empty")
     assert not env.monitor.get_errors()
 
 
@@ -210,6 +212,20 @@ def test_baremode_backend_iaf_redirect_pilot(env):
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_baremode_backend_igpf_redirect_pilot(env):
+    _load_nop_program(env, words=128)
+    commits = _warmup_commits(env, target_count=4)
+
+    _queue_backend_fault_redirect(env, target_pc=_BASE + 0x100, backend_igpf=1)
+    env.step(30)
+
+    assert commits >= 4
+    assert env.functional_coverage.key_hit("frontend_exception_type", "gpf")
+    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_baremode_backend_short_backpressure_pilot(env):
     _load_nop_program(env, words=512)
     commits_before = _warmup_commits(env, target_count=4)
@@ -230,11 +246,39 @@ def test_baremode_backend_short_backpressure_pilot(env):
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_baremode_queue_near_full_backpressure_pilot(env):
+    _load_nop_program(env, words=2048)
+    commits_before = _warmup_commits(env, target_count=4)
+
+    env.backend_model.set_can_accept(0)
+    # Backend all-block pressure fills IBuffer; FTQ near/full is covered by redirect/fault scenarios.
+    covered = _step_until_coverage_hits(
+        env,
+        [
+            ("ibuffer_state", "near_full"),
+            ("ibuffer_state_x_backend_mode", "near_full_x_all_block"),
+        ],
+        max_cycles=192,
+    )
+    env.backend_model.set_can_accept(1)
+    commits_after = _warmup_commits(env, target_count=4, max_cycles=6000)
+
+    assert commits_before >= 4
+    assert commits_after >= 4
+    assert covered is True
+    assert env.functional_coverage.key_hit("ibuffer_state", "near_full")
+    assert env.functional_coverage.key_hit("ibuffer_state_x_backend_mode", "near_full_x_all_block")
+    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_baremode_direct_jmp_coverage_pilot(env):
     prog = [_NOP] * 64
     prog[0] = _jal(0, 8)
 
-    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    LoadProgramSequence(image=_program_image(prog), step_cycles=0).run(env)
+    env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
     commits = _warmup_commits(env, target_count=4)
 
     assert commits >= 4
@@ -249,7 +293,8 @@ def test_baremode_cond_nt_coverage_pilot(env):
     prog = [_NOP] * 64
     prog[0] = _bne(0, 0, 8)
 
-    LoadProgramSequence(image=_program_image(prog), step_cycles=1).run(env)
+    LoadProgramSequence(image=_program_image(prog), step_cycles=0).run(env)
+    env.initialize(reset_vector=_BASE, bare_mode=True, reset_cycles=20)
     commits = _warmup_commits(env, target_count=4)
 
     assert commits >= 4

@@ -9,11 +9,19 @@ from pathlib import Path
 
 FIELD_RE = re.compile(r"\x01([^\x02]+)\x02([^\x01]*)")
 
-IFU_STRICT_RE = re.compile(r"(Frontend|ICache|TLB|TLBFA|BTB|Btb|Tage|Ittage|Ras|PMP|Ifu)")
+FRONTEND_TOP_RE = re.compile(r"(Frontend|Frontend_top)")
+IFU_STRICT_RE = re.compile(r"(Frontend|ICache|TLB|TLBFA|BTB|Btb|Tage|Ittage|Ras|PMP|Ifu|IBuffer|Ftq)")
+IFU_RE = re.compile(
+    r"(Ifu|PreDecode|PredChecker|RvcExpander|InstrBoundary|InstrCompact|F3PreDecode|FrontendTrigger)"
+)
 ICACHE_RE = re.compile(r"(ICache|InstrUncache|IfuUncache)")
 BPU_RE = re.compile(
-    r"(Bpu|BTB|Btb|Tage|Ittage|Ras|Phr|Pred|Sc|AheadBtb|MainBtb|MicroBtb|MicroTage|Ftq)"
+    r"(Bpu|BTB|Btb|Tage|Ittage|Ras|Phr|Pred|Sc|AheadBtb|MainBtb|MicroBtb|MicroTage|FallThroughPredictor|SaturateCounter|CompareMatrix|WriteBuffer)"
 )
+FTQ_RE = re.compile(r"(Ftq|CfiQueue|CommitQueue|MetaQueue|ResolveQueue|SpeculationQueue|RedirectReceiver)")
+ITLB_RE = re.compile(r"(TLB|TLBFA|PTW)")
+IBUFFER_RE = re.compile(r"(IBuffer|IBuf)")
+PMP_RE = re.compile(r"(PMP)")
 TLB_PMP_RE = re.compile(r"(TLB|TLBFA|PTW|PMP)")
 FAULT_PATH_RE = re.compile(r"(Ifu|Frontend|ICache|InstrUncache|TLB|TLBFA|PMP)")
 
@@ -25,10 +33,16 @@ IFU_CORE_NAMES = {
     "ICache.sv",
     "ICacheCtrlUnit.sv",
     "ICacheDataArray.sv",
+    "IBuffer.sv",
     "Ifu.sv",
     "IfuPerfAnalysis.sv",
     "InstrCompact.sv",
     "InstrUncacheEntry.sv",
+    "Ftq.sv",
+    "EntryQueue.sv",
+    "CommitQueue.sv",
+    "CfiQueue.sv",
+    "ResolveQueue.sv",
     "Ittage.sv",
     "IttageTable.sv",
     "MainBtb.sv",
@@ -71,6 +85,7 @@ class Counter:
 
 
 def parse_args() -> argparse.Namespace:
+    repo_root = Path(__file__).resolve().parents[5]
     parser = argparse.ArgumentParser(
         description="Merge Frontend verilator .dat files and report raw coverage points."
     )
@@ -79,6 +94,17 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path(__file__).resolve().parent.parent / "data",
         help="Directory containing testcase .dat files",
+    )
+    parser.add_argument(
+        "--source-root",
+        type=Path,
+        default=repo_root / "build-frontend",
+        help="Generated source tree used to report real SV source line counts",
+    )
+    parser.add_argument(
+        "--source-glob",
+        default="*.sv",
+        help="Recursive glob under --source-root for generated source LOC accounting",
     )
     parser.add_argument(
         "--glob",
@@ -124,17 +150,36 @@ def load_merged_points(dat_files: list[Path]) -> dict[str, dict[str, object]]:
 
 def build_stats(
     points: dict[str, dict[str, object]],
+    source_suffix: str | None = None,
 ) -> tuple[dict[str, Counter], dict[str, dict[str, Counter]]]:
     overall: dict[str, Counter] = defaultdict(Counter)
     modules: dict[str, dict[str, Counter]] = defaultdict(lambda: defaultdict(Counter))
     for point in points.values():
         fields = point["fields"]
+        if source_suffix and not fields.get("f", "").endswith(source_suffix):
+            continue
         kind = fields.get("t", "<unknown>")
         module = normalize_module(fields.get("f", ""))
         hit = point["count"] > 0
         overall[kind].add(hit)
         modules[module][kind].add(hit)
     return overall, modules
+
+
+def load_source_line_counts(source_root: Path, source_glob: str) -> tuple[dict[str, int], int]:
+    lines_by_module: dict[str, int] = defaultdict(int)
+    file_count = 0
+    if not source_root.exists():
+        return lines_by_module, file_count
+
+    for source_path in sorted(source_root.rglob(source_glob)):
+        if not source_path.is_file():
+            continue
+        file_count += 1
+        with source_path.open("r", errors="ignore") as fh:
+            line_count = sum(1 for _ in fh)
+        lines_by_module[normalize_module(str(source_path))] += int(line_count)
+    return lines_by_module, file_count
 
 
 def match_all(_: str) -> bool:
@@ -151,10 +196,16 @@ def match_ifu_core(module: str) -> bool:
 
 SCOPE_MATCHERS = {
     "all": match_all,
+    "frontend_top": match_regex(FRONTEND_TOP_RE),
     "ifu_strict": match_regex(IFU_STRICT_RE),
     "ifu_core": match_ifu_core,
+    "ifu": match_regex(IFU_RE),
     "icache": match_regex(ICACHE_RE),
     "bpu": match_regex(BPU_RE),
+    "ftq": match_regex(FTQ_RE),
+    "itlb": match_regex(ITLB_RE),
+    "ibuffer": match_regex(IBUFFER_RE),
+    "pmp": match_regex(PMP_RE),
     "tlb_pmp": match_regex(TLB_PMP_RE),
     "fault_path": match_regex(FAULT_PATH_RE),
 }
@@ -162,13 +213,33 @@ SCOPE_MATCHERS = {
 
 SCOPE_NOTES = {
     "all": "all raw points after de-duplicating coverage keys across testcase .dat files",
-    "ifu_strict": "filename token match: Frontend/ICache/TLB/BTB/Tage/Ittage/Ras/PMP/Ifu",
+    "frontend_top": "Frontend and Frontend_top wrapper files",
+    "ifu_strict": "filename token match: Frontend/ICache/TLB/BTB/Tage/Ittage/Ras/PMP/Ifu/IBuffer/Ftq",
     "ifu_core": "hand-picked IFU core path module set used by the main control agent",
+    "ifu": "IFU pipeline, predecode, pred-checker, RVC expansion and instruction compaction files",
     "icache": "ICache, InstrUncache and IfuUncache related files",
-    "bpu": "BPU, BTB, Tage, Ras, predictor and FTQ related files",
+    "bpu": "BPU, BTB, TAGE/ITTAGE, RAS, predictor tables and predictor helper files",
+    "ftq": "FTQ, entry/commit/resolve/speculation queues and redirect receiver files",
+    "itlb": "ITLB/TLB/PTW translation related files",
+    "ibuffer": "IBuffer and IBuf bundle related files",
+    "pmp": "PMP related files",
     "tlb_pmp": "TLB, PTW and PMP related files",
     "fault_path": "heuristic fault propagation path, based on IFU/Frontend/ICache/TLB/PMP filenames",
 }
+
+SUMMARY_SCOPES = (
+    "all",
+    "frontend_top",
+    "ifu_core",
+    "ifu",
+    "icache",
+    "bpu",
+    "ftq",
+    "itlb",
+    "ibuffer",
+    "pmp",
+    "fault_path",
+)
 
 
 def scope_counter(
@@ -211,6 +282,21 @@ def low_coverage_modules(
     return rows[:top_n]
 
 
+def source_line_scope(
+    source_lines: dict[str, int],
+    scope: str,
+) -> tuple[int, int]:
+    matcher = SCOPE_MATCHERS[scope]
+    total_lines = 0
+    matched_modules = 0
+    for module_name, line_count in source_lines.items():
+        if not matcher(module_name):
+            continue
+        matched_modules += 1
+        total_lines += int(line_count)
+    return total_lines, matched_modules
+
+
 def print_header(title: str) -> None:
     print(title)
     print("-" * len(title))
@@ -236,11 +322,16 @@ def main() -> int:
 
     points = load_merged_points(dat_files)
     overall, modules = build_stats(points)
+    sv_overall, sv_modules = build_stats(points, ".sv")
+    source_lines, source_files = load_source_line_counts(args.source_root, args.source_glob)
 
     print_header("Frontend Raw Coverage Report")
     print(f"data_dir   : {args.data_dir}")
     print(f"dat_files  : {len(dat_files)}")
     print(f"point_keys : {len(points)}")
+    print(f"source_root: {args.source_root}")
+    print(f"source_glob: {args.source_glob}")
+    print(f"source_files: {source_files}")
     print()
 
     overall_rows = []
@@ -249,13 +340,23 @@ def main() -> int:
         overall_rows.append(
             [kind, str(counter.hit), str(counter.total), f"{counter.pct:.2f}%"]
         )
-    print_header("Overall Raw Coverage")
+    print_header("Overall Raw Coverage Points")
     print_table(["kind", "hit", "total", "pct"], overall_rows)
     print()
 
+    sv_overall_rows = []
+    for kind in ("line", "branch", "expr", "toggle"):
+        counter = sv_overall.get(kind, Counter())
+        sv_overall_rows.append(
+            [kind, str(counter.hit), str(counter.total), f"{counter.pct:.2f}%"]
+        )
+    print_header("Overall Raw Coverage Points (.sv only)")
+    print_table(["kind", "hit", "total", "pct"], sv_overall_rows)
+    print()
+
     scope_rows = []
-    for scope in ("all", "ifu_strict", "ifu_core", "icache", "bpu", "tlb_pmp", "fault_path"):
-        counter, matched_modules = scope_counter(modules, scope, "line")
+    for scope in SUMMARY_SCOPES:
+        counter, matched_modules = scope_counter(sv_modules, scope, "line")
         scope_rows.append(
             [
                 scope,
@@ -265,21 +366,62 @@ def main() -> int:
                 str(matched_modules),
             ]
         )
-    print_header("Raw Line Coverage By Scope")
-    print_table(["scope", "hit", "total", "pct", "modules"], scope_rows)
+    print_header("Raw Line Coverage Points By Scope (.sv only)")
+    print_table(["scope", "point_hit", "point_total", "pct", "modules"], scope_rows)
     print()
-    for scope in ("ifu_strict", "ifu_core", "icache", "bpu", "tlb_pmp", "fault_path"):
+
+    scope_kind_rows = []
+    for scope in SUMMARY_SCOPES:
+        branch_counter, _ = scope_counter(sv_modules, scope, "branch")
+        toggle_counter, _ = scope_counter(sv_modules, scope, "toggle")
+        scope_kind_rows.append(
+            [
+                scope,
+                str(branch_counter.hit),
+                str(branch_counter.total),
+                f"{branch_counter.pct:.2f}%",
+                str(toggle_counter.hit),
+                str(toggle_counter.total),
+                f"{toggle_counter.pct:.2f}%",
+            ]
+        )
+    print_header("Raw Branch/Toggle Coverage Points By Scope (.sv only)")
+    print_table(
+        [
+            "scope",
+            "branch_hit",
+            "branch_total",
+            "branch_pct",
+            "toggle_hit",
+            "toggle_total",
+            "toggle_pct",
+        ],
+        scope_kind_rows,
+    )
+    print()
+
+    for scope in SUMMARY_SCOPES:
+        if scope == "all":
+            continue
         print(f"{scope:10s}: {SCOPE_NOTES[scope]}")
     print()
 
+    source_rows = []
+    for scope in SUMMARY_SCOPES:
+        line_count, matched_modules = source_line_scope(source_lines, scope)
+        source_rows.append([scope, str(line_count), str(matched_modules)])
+    print_header("Generated SV Source Lines By Scope")
+    print_table(["scope", "source_lines", "modules"], source_rows)
+    print()
+
     for scope in ("ifu_strict", "all"):
-        rows = low_coverage_modules(modules, scope, "line", args.top_n, args.min_points)
+        rows = low_coverage_modules(sv_modules, scope, "line", args.top_n, args.min_points)
         printable_rows = [
             [module, str(counter.hit), str(counter.total), f"{counter.pct:.2f}%"]
             for module, counter in rows
         ]
         print_header(
-            f"Lowest Raw Line Modules ({scope}, min_points={args.min_points}, top_n={args.top_n})"
+            f"Lowest Raw Line Point Modules ({scope}, min_points={args.min_points}, top_n={args.top_n})"
         )
         if printable_rows:
             print_table(["module", "hit", "total", "pct"], printable_rows)

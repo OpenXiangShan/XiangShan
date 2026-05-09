@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from .rvc_decoder import expand_rvc
+
 
 def _frontend_root() -> Path:
     return Path(__file__).resolve().parents[1]
@@ -96,6 +98,10 @@ class FunctionalCoverageRecorder:
         self._ptw_req_pending = 0
         self._pending_ptw_resp_cycle: Optional[int] = None
         self._backend_block_start_cycle: Optional[int] = None
+        self._last_ibuffer_state: Optional[str] = None
+        self._last_ftq_state: Optional[str] = None
+        self._dut_signal_cache: Dict[str, Any] = {}
+        self._missing_dut_signals: set[str] = set()
 
     @classmethod
     def from_pilot_csv(
@@ -214,6 +220,14 @@ class FunctionalCoverageRecorder:
             instr = int(self._read_dut_signal(dut, base + "bits_instr", 0)) & 0xFFFFFFFF
             is_rvc = bool(self._read_dut_signal(dut, base + "bits_isRvc", 0))
             pred_taken = bool(self._read_dut_signal(dut, base + "bits_predTaken", 0))
+            ex_sum = (
+                self._read_dut_signal(dut, base + "bits_exceptionVec_1", 0)
+                + self._read_dut_signal(dut, base + "bits_exceptionVec_2", 0)
+                + self._read_dut_signal(dut, base + "bits_exceptionVec_12", 0)
+                + self._read_dut_signal(dut, base + "bits_exceptionVec_19", 0)
+                + self._read_dut_signal(dut, base + "bits_exceptionVec_20", 0)
+            )
+            instr = self._recover_unavailable_instr(env, int(pc), int(instr), bool(is_rvc), int(ex_sum))
 
             fetch_path = self._infer_fetch_path(env, pc, cycle)
             self.mark("fetch_path_type", fetch_path, cycle, {"pc": pc})
@@ -256,8 +270,8 @@ class FunctionalCoverageRecorder:
                 },
             )
 
-        if self._read_dut_signal(dut, "io_frontendInfo_ibufFull", 0) == 1:
-            self.mark("ibuffer_state", "full", cycle, {"event": "io_frontendInfo_ibufFull"})
+        self._sample_ibuffer_state(dut, cycle, env)
+        self._sample_ftq_state(dut, cycle, env)
 
         if self._read_dut_signal(dut, "io_backend_toFtq_redirect_valid", 0) == 1:
             self._sample_backend_redirect_faults(env, dut, cycle)
@@ -267,15 +281,95 @@ class FunctionalCoverageRecorder:
         elif self._pending_ptw_resp_cycle == cycle:
             self._sample_ptw_response(dut, cycle)
 
-    @staticmethod
-    def _read_dut_signal(dut, name: str, default: int = 0) -> int:
-        signal = getattr(dut, str(name), None)
+    def _lookup_dut_signal(self, dut, name: str):
+        name = str(name)
+        if name in self._dut_signal_cache:
+            return self._dut_signal_cache[name]
+        if name in self._missing_dut_signals:
+            return None
+
+        signal = getattr(dut, name, None)
+        if signal is None:
+            getter = getattr(dut, "GetInternalSignal", None)
+            if callable(getter):
+                try:
+                    signal = getter(name)
+                except Exception:
+                    signal = None
+        if signal is None:
+            self._missing_dut_signals.add(name)
+            return None
+
+        self._dut_signal_cache[name] = signal
+        return signal
+
+    def _read_dut_signal(self, dut, name: str, default: int = 0) -> int:
+        signal = self._lookup_dut_signal(dut, str(name))
         if signal is None:
             return int(default)
         value = getattr(signal, "value", None)
         if value is None:
             return int(default)
         return int(value)
+
+    def _try_read_dut_signal(self, dut, name: str) -> Optional[int]:
+        signal = self._lookup_dut_signal(dut, str(name))
+        if signal is None:
+            return None
+        value = getattr(signal, "value", None)
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except Exception:
+            return None
+
+    def _read_first_dut_signal(self, dut, names: Iterable[str]) -> Optional[int]:
+        for name in names:
+            value = self._try_read_dut_signal(dut, str(name))
+            if value is not None:
+                return int(value)
+        return None
+
+    def _translate_fetch_addr(self, env, va: int) -> tuple[Optional[int], dict]:
+        if env is None or getattr(env, "page_table", None) is None:
+            return int(va), {"mode": "bare", "va": int(va), "pa": int(va), "ok": True}
+        pa, ok, info = env.page_table.translate(int(va))
+        meta = dict(info or {})
+        meta["va"] = int(va)
+        meta["ok"] = bool(ok)
+        if ok:
+            meta["pa"] = int(pa)
+            return int(pa), meta
+        return None, meta
+
+    def _read_expected_fetch_raw(self, env, pc: int, size: int) -> tuple[Optional[int], dict]:
+        if env is None or getattr(env, "memory", None) is None:
+            return None, {"ok": False, "reason": "no_memory"}
+        value = 0
+        last_meta: dict = {"ok": True, "mode": "bare", "va": int(pc), "pa": int(pc)}
+        for off in range(int(size)):
+            pa, meta = self._translate_fetch_addr(env, int(pc) + int(off))
+            last_meta = meta
+            if pa is None:
+                return None, meta
+            value |= (int(env.memory.read_u8(int(pa))) & 0xFF) << (8 * int(off))
+        return int(value), last_meta
+
+    def _recover_unavailable_instr(self, env, pc: int, instr: int, is_rvc: bool, ex_sum: int) -> int:
+        if int(instr) != 0:
+            return int(instr)
+        fetch_size = 2 if bool(is_rvc) else 4
+        raw_fetch, fetch_meta = self._read_expected_fetch_raw(env, int(pc), fetch_size)
+        if raw_fetch is None or not bool(fetch_meta.get("ok", False)):
+            return int(instr)
+        if bool(is_rvc):
+            raw16 = int(raw_fetch) & 0xFFFF
+            try:
+                return int(expand_rvc(raw16)) & 0xFFFFFFFF
+            except ValueError:
+                return int(instr)
+        return int(raw_fetch) & 0xFFFFFFFF
 
     def write_artifacts(self) -> dict:
         raw = self._raw_dict()
@@ -401,6 +495,140 @@ class FunctionalCoverageRecorder:
                 {"blocked_cycles": blocked_cycles, "event": "backend.can_accept"},
             )
         self._backend_block_start_cycle = None
+
+    def _sample_ibuffer_state(self, dut, cycle: int, env) -> None:
+        if self._reset_release_cycle is None:
+            return
+
+        ibuf_size = 48
+        num_valid = self._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.Frontend.inner_ibuffer.numValid",
+                "Frontend_top.Frontend.inner_ibuffer_numValid",
+                "Frontend_top.Frontend.ibuffer.numValid",
+                "Frontend_top.Frontend.ibuffer_numValid",
+            ),
+        )
+        ibuf_full = self._try_read_dut_signal(dut, "io_frontendInfo_ibufFull")
+        valid_outputs = sum(
+            1 for slot in range(8) if self._read_dut_signal(dut, f"io_backend_cfVec_{slot}_valid", 0) == 1
+        )
+
+        if num_valid is None:
+            evidence = {
+                "event": "ibuffer_cfvec_proxy",
+                "num_valid": None,
+                "valid_outputs": int(valid_outputs),
+                "size": int(ibuf_size),
+            }
+            if self._boot_recorded and valid_outputs == 0:
+                self._mark_ibuffer_state("empty", cycle, evidence)
+            if self._backend_block_start_cycle is not None and valid_outputs >= 6:
+                self._mark_ibuffer_state("near_full", cycle, evidence)
+            if self._backend_block_start_cycle is not None and valid_outputs >= 8:
+                self._mark_ibuffer_state("full", cycle, evidence)
+            if ibuf_full == 1:
+                self._mark_ibuffer_state("near_full", cycle, {"event": "io_frontendInfo_ibufFull"})
+                self._mark_ibuffer_state("full", cycle, {"event": "io_frontendInfo_ibufFull"})
+            return
+
+        evidence = {
+            "event": "ibuffer_num_valid",
+            "num_valid": int(num_valid),
+            "valid_outputs": int(valid_outputs),
+            "size": int(ibuf_size),
+        }
+        if int(num_valid) <= 0:
+            self._mark_ibuffer_state("empty", cycle, evidence)
+        if self._backend_block_start_cycle is not None and int(num_valid) >= 32:
+            self._mark_ibuffer_state("near_full", cycle, evidence)
+        if ibuf_full == 1 or int(num_valid) >= ibuf_size - 1:
+            self._mark_ibuffer_state("full", cycle, {**evidence, "ibuf_full": int(ibuf_full or 0)})
+
+    def _mark_ibuffer_state(self, state: str, cycle: int, evidence: dict) -> None:
+        self._last_ibuffer_state = str(state)
+        self.mark("ibuffer_state", state, cycle, evidence)
+        if state in {"near_full", "full"} and self._backend_block_start_cycle is not None:
+            self.mark(
+                "ibuffer_state_x_backend_mode",
+                "near_full_x_all_block",
+                cycle,
+                {
+                    **evidence,
+                    "backend_block_start_cycle": int(self._backend_block_start_cycle),
+                },
+            )
+
+    def _sample_ftq_state(self, dut, cycle: int, env) -> None:
+        if self._reset_release_cycle is None:
+            return
+
+        backend_cfg = getattr(getattr(env, "config", None), "backend", None)
+        ftq_size = int(getattr(backend_cfg, "ftq_size", 64) or 64)
+        bpu_flag = self._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.Frontend.inner_ftq.bpuPtr_ptrs_0_flag",
+                "Frontend_top.Frontend.ftq.bpuPtr_ptrs_0_flag",
+            ),
+        )
+        bpu_value = self._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.Frontend.inner_ftq.bpuPtr_ptrs_0_value",
+                "Frontend_top.Frontend.ftq.bpuPtr_ptrs_0_value",
+            ),
+        )
+        commit_flag = self._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.Frontend.inner_ftq.commitPtr_ptrs_0_flag",
+                "Frontend_top.Frontend.ftq.commitPtr_ptrs_0_flag",
+            ),
+        )
+        commit_value = self._read_first_dut_signal(
+            dut,
+            (
+                "Frontend_top.Frontend.inner_ftq.commitPtr_ptrs_0_value",
+                "Frontend_top.Frontend.ftq.commitPtr_ptrs_0_value",
+            ),
+        )
+        if None in (bpu_flag, bpu_value, commit_flag, commit_value):
+            return
+
+        occupancy = self._circular_distance(
+            int(bpu_flag),
+            int(bpu_value),
+            int(commit_flag),
+            int(commit_value),
+            int(ftq_size),
+        )
+        evidence = {
+            "event": "ftq_pointer_distance",
+            "occupancy": int(occupancy),
+            "size": int(ftq_size),
+            "bpu_ptr": [int(bpu_flag), int(bpu_value)],
+            "commit_ptr": [int(commit_flag), int(commit_value)],
+        }
+        if occupancy <= 0:
+            self._mark_ftq_state("empty", cycle, evidence)
+        if occupancy >= (ftq_size * 3) // 4:
+            self._mark_ftq_state("near_full", cycle, evidence)
+        if occupancy >= ftq_size - 1:
+            self._mark_ftq_state("full", cycle, evidence)
+
+    def _mark_ftq_state(self, state: str, cycle: int, evidence: dict) -> None:
+        self._last_ftq_state = str(state)
+        self.mark("ftq_queue_state", state, cycle, evidence)
+
+    @staticmethod
+    def _circular_distance(newer_flag: int, newer_value: int, older_flag: int, older_value: int, size: int) -> int:
+        size = max(1, int(size))
+        modulo = size * 2
+        newer = (int(newer_flag) & 1) * size + (int(newer_value) % size)
+        older = (int(older_flag) & 1) * size + (int(older_value) % size)
+        return (newer - older) % modulo
 
     def _sample_exception_slot(self, dut, base: str, slot: int, pc: int, cycle: int, fetch_path: str) -> None:
         for cause, bin_name in self._EXCEPTION_BINS.items():

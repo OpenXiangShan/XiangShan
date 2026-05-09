@@ -98,7 +98,7 @@ class FrontendMonitor:
         return (
             int(ex_sum) == 0
             and int(got) == 0
-            and str(fetch_meta.get("mode", "")) == "sv39"
+            and str(fetch_meta.get("mode", "")) in {"sv39", "bare"}
             and bool(fetch_meta.get("ok", False))
         )
 
@@ -231,6 +231,21 @@ class FrontendMonitor:
         except Exception:
             return int(default)
 
+    def _recover_unavailable_instr(self, pc: int, instr: int, is_rvc: bool, ex_sum: int) -> int:
+        if int(instr) != 0 or self.memory is None:
+            return int(instr)
+        fetch_size = 2 if bool(is_rvc) else 4
+        raw_fetch, fetch_meta = self._read_expected_fetch_raw(int(pc), fetch_size)
+        if raw_fetch is None or not bool(fetch_meta.get("ok", False)):
+            return int(instr)
+        if bool(is_rvc):
+            raw16 = int(raw_fetch) & 0xFFFF
+            try:
+                return int(expand_rvc(raw16)) & 0xFFFFFFFF
+            except ValueError:
+                return int(instr)
+        return int(raw_fetch) & 0xFFFFFFFF
+
     def bind(self, target) -> None:
         if not isinstance(target, BackendObserveBundle):
             raise TypeError("FrontendMonitor requires an explicitly bound BackendObserveBundle")
@@ -361,6 +376,14 @@ class FrontendMonitor:
             ftq_value = self._read(self.interface.cfvec_ftq_ptr_value[i], 0)
             ftq_offset = self._read(self.interface.cfvec_ftq_offset[i], 0)
             is_last = bool(self._read(self.interface.cfvec_is_last_in_ftq_entry[i], 0))
+            ex_sum = (
+                self._read(self.interface.cfvec_exception_vec[i][1], 0)
+                + self._read(self.interface.cfvec_exception_vec[i][2], 0)
+                + self._read(self.interface.cfvec_exception_vec[i][12], 0)
+                + self._read(self.interface.cfvec_exception_vec[i][19], 0)
+                + self._read(self.interface.cfvec_exception_vec[i][20], 0)
+            )
+            instr = self._recover_unavailable_instr(int(pc), int(instr), bool(is_rvc), int(ex_sum))
 
             self.slots_valid += 1
             obs = Observation(
@@ -423,13 +446,6 @@ class FrontendMonitor:
                     self._ftq_group_max_offset[ftq_group] = -1
                 ftq_expected_pc = self._pc_from_ftq_start(int(cached_start_pc), int(ftq_offset), bool(is_rvc))
 
-            ex_sum = (
-                self._read(self.interface.cfvec_exception_vec[i][1], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][2], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][12], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][19], 0)
-                + self._read(self.interface.cfvec_exception_vec[i][20], 0)
-            )
             if ex_sum > 0:
                 self.exception_mark_count += 1
 
