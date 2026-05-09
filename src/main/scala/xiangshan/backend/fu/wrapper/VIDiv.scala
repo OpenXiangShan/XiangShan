@@ -1,12 +1,12 @@
 package xiangshan.backend.fu.wrapper
 
-import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import yunsuan.vector.VectorIdiv
-import xiangshan.backend.decode.opcode.Opcode.VIDivOpcodes
+import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.vector.fu.VecNonFixedLatFunc
 import xiangshan.backend.vector.fu.VecFuConfig
 import xiangshan.backend.vector.fu.Func.makePipeReg
+import yunsuan.encoding.Opcode.Opcodes.VIDivOpcode
+import yunsuan.vector.VectorIdiv
 
 class VIDiv(cfg: VecFuConfig)(implicit p: Parameters) extends VecNonFixedLatFunc(cfg) {
   private val vidiv = Module(new VectorIdiv)
@@ -15,9 +15,13 @@ class VIDiv(cfg: VecFuConfig)(implicit p: Parameters) extends VecNonFixedLatFunc
   private val divInFire = ex(0).valid && vidiv.in.ex0.ready
 
   private val ex0NextOpcode = ex0Next.bits.ctrl.opcode
-  private val sew = makePipeReg(VIDivOpcodes.getDataWidth(ex0NextOpcode), pipeRegValids)
-  private val isDiv = makePipeReg(VIDivOpcodes.isDiv(ex0NextOpcode), pipeRegValids)
-  private val isSigned = makePipeReg(VIDivOpcodes.isSigned(ex0NextOpcode), pipeRegValids)
+
+  private val sel8 = makePipeReg(VIDivOpcode.isSourceE8(ex0NextOpcode), pipeRegValids)
+  private val sel16 = makePipeReg(VIDivOpcode.isSourceE16(ex0NextOpcode), pipeRegValids)
+  private val sel32 = makePipeReg(VIDivOpcode.isSourceE32(ex0NextOpcode), pipeRegValids)
+  private val sel64 = makePipeReg(VIDivOpcode.isSourceE64(ex0NextOpcode), pipeRegValids)
+  private val isDiv = makePipeReg(VIDivOpcode.isDiv(ex0NextOpcode), pipeRegValids)
+  private val isSigned = makePipeReg(VIDivOpcode.isSigned(ex0NextOpcode), pipeRegValids)
 
   when(divInFire) {
     outIsDiv := isDiv.ex0
@@ -29,10 +33,10 @@ class VIDiv(cfg: VecFuConfig)(implicit p: Parameters) extends VecNonFixedLatFunc
   vidiv.in.ex0.valid := ex(0).valid
   vidiv.in.ex0.bits.ctrl.sign := isSigned.ex0
   vidiv.in.ex0.bits.ctrl.flush := divFlush
-  vidiv.in.ex0.bits.ctrl.sel8 := sew.ex0 === 0.U
-  vidiv.in.ex0.bits.ctrl.sel16 := sew.ex0 === 1.U
-  vidiv.in.ex0.bits.ctrl.sel32 := sew.ex0 === 2.U
-  vidiv.in.ex0.bits.ctrl.sel64 := sew.ex0 === 3.U
+  vidiv.in.ex0.bits.ctrl.sel8 := sel8.ex0
+  vidiv.in.ex0.bits.ctrl.sel16 := sel16.ex0
+  vidiv.in.ex0.bits.ctrl.sel32 := sel32.ex0
+  vidiv.in.ex0.bits.ctrl.sel64 := sel64.ex0
   vidiv.in.ex0.bits.data.dividend_v := ex0vs2
   vidiv.in.ex0.bits.data.divisor_v := ex0vs1
 
