@@ -24,6 +24,7 @@ Usage:
   ./scripts/run_bin_trace_pipeline.sh <bin_path> [trace_jsonl_path] [nemu_log_path] [pytest_target]
 
 Environment variables:
+  TB_SKIP_NEMU        Skip NEMU trace generation and use the existing trace_jsonl_path directly (default: 0)
   TB_NEMU_EXEC         NEMU executable path (default: <repo>/ready-to-run/riscv64-nemu-interpreter)
   TB_NEMU_MAX_INSTR    Pass -I to NEMU when > 0 (default: 0)
   TB_TRACE_LIMIT       Limit converted trace entries when > 0 (default: 0)
@@ -63,6 +64,7 @@ NEMU_EXEC="${TB_NEMU_EXEC:-${REPO_DIR}/ready-to-run/riscv64-nemu-interpreter}"
 NEMU_MAX_INSTR="${TB_NEMU_MAX_INSTR:-0}"
 TRACE_LIMIT="${TB_TRACE_LIMIT:-0}"
 TRACE_START_INDEX="${TB_TRACE_START_INDEX:-0}"
+SKIP_NEMU="${TB_SKIP_NEMU:-0}"
 RUN_DUT="${TB_RUN_DUT:-1}"
 PYTEST_TARGET_DEFAULT="${FRONTEND_DIR}/tests/test_bin_trace_dut.py::test_bin_trace"
 PYTEST_TARGET="${4:-${TB_PYTEST_TARGET:-${PYTEST_TARGET_DEFAULT}}}"
@@ -96,6 +98,7 @@ echo "[frontend] trace_stagnant_cycles_limit: ${TRACE_STAGNANT_CYCLES_LIMIT}"
 echo "[frontend] trace_target_cursor: ${TRACE_TARGET_CURSOR}"
 echo "[frontend] trace_max_cycles: ${TRACE_MAX_CYCLES}"
 echo "[frontend] trace_start_index: ${TRACE_START_INDEX}"
+echo "[frontend] skip_nemu: ${SKIP_NEMU}"
 echo "[frontend] pytest_timeout_secs: ${PYTEST_TIMEOUT_SECS}"
 echo "[frontend] pytest_disable_rerunfailures: ${PYTEST_DISABLE_RERUNFAILURES}"
 
@@ -108,11 +111,13 @@ if [[ ! -f "${BIN_PATH}" ]]; then
   exit 2
 fi
 
-if [[ ! -f "${NEMU_EXEC}" ]]; then
-  PIPELINE_STAGE="validate_inputs"
-  PIPELINE_REASON="nemu_exec_not_found"
-  echo "[frontend][error] NEMU executable not found: ${NEMU_EXEC}" >&2
-  exit 2
+if [[ "${SKIP_NEMU}" == "0" ]]; then
+  if [[ ! -f "${NEMU_EXEC}" ]]; then
+    PIPELINE_STAGE="validate_inputs"
+    PIPELINE_REASON="nemu_exec_not_found"
+    echo "[frontend][error] NEMU executable not found: ${NEMU_EXEC}" >&2
+    exit 2
+  fi
 fi
 
 if ! [[ "${PYTEST_TIMEOUT_SECS}" =~ ^[0-9]+$ ]] || [[ "${PYTEST_TIMEOUT_SECS}" -le 0 ]]; then
@@ -143,20 +148,35 @@ if ! [[ "${TRACE_TARGET_CURSOR}" =~ ^[0-9]+$ ]]; then
   exit 2
 fi
 
-mkdir -p "$(dirname "${TRACE_PATH}")" "$(dirname "${NEMU_LOG_PATH}")"
+mkdir -p "$(dirname "${TRACE_PATH}")"
+if [[ "${SKIP_NEMU}" == "0" ]]; then
+  mkdir -p "$(dirname "${NEMU_LOG_PATH}")"
+fi
 export PYTHONPATH="${FRONTEND_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-}"
 
-PIPELINE_STAGE="trace_generation"
-PIPELINE_REASON="trace_generation_failed"
-"${PYTHON_BIN}" "${FRONTEND_DIR}/tools/nemu_bin_to_golden_trace.py" \
-  "${BIN_PATH}" "${TRACE_PATH}" \
-  --nemu-exec "${NEMU_EXEC}" \
-  --nemu-log "${NEMU_LOG_PATH}" \
-  --nemu-max-instr "${NEMU_MAX_INSTR}" \
-  --trace-limit "${TRACE_LIMIT}"
+if [[ "${SKIP_NEMU}" == "0" ]]; then
+  PIPELINE_STAGE="trace_generation"
+  PIPELINE_REASON="trace_generation_failed"
+  "${PYTHON_BIN}" "${FRONTEND_DIR}/tools/nemu_bin_to_golden_trace.py" \
+    "${BIN_PATH}" "${TRACE_PATH}" \
+    --nemu-exec "${NEMU_EXEC}" \
+    --nemu-log "${NEMU_LOG_PATH}" \
+    --nemu-max-instr "${NEMU_MAX_INSTR}" \
+    --trace-limit "${TRACE_LIMIT}"
 
-PIPELINE_REASON="trace_generated"
-echo "[frontend] trace done: ${TRACE_PATH}"
+  PIPELINE_REASON="trace_generated"
+  echo "[frontend] trace done: ${TRACE_PATH}"
+else
+  if [[ ! -f "${TRACE_PATH}" ]]; then
+    PIPELINE_STAGE="validate_inputs"
+    PIPELINE_REASON="trace_not_found"
+    echo "[frontend][error] existing trace file not found: ${TRACE_PATH}" >&2
+    exit 2
+  fi
+  PIPELINE_STAGE="trace_generation"
+  PIPELINE_REASON="trace_reused"
+  echo "[frontend] reuse trace: ${TRACE_PATH}"
+fi
 
 if [[ "${RUN_DUT}" != "0" ]]; then
   if [[ ! -f "${FRONTEND_DIR}/tests/test_bin_trace_dut.py" ]]; then
