@@ -173,6 +173,34 @@ class PhrFoldedHistory(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(impli
   }
 }
 
+class PhrFoldedHistoryOldestBits(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(implicit p: Parameters)
+    extends PhrBundle {
+  val bits: Vec[Bool] = Vec(maxUpdateNum, Bool())
+
+  def oldestBitToGetFromPhr: Seq[Int] = (0 until maxUpdateNum).map(info.HistoryLength - _ - 1)
+
+  def readFromPhr(phr: Vec[Bool], histPtr: PhrPtr): Unit =
+    bits := VecInit(oldestBitToGetFromPhr.map(i => phr(i)))
+}
+
+class PhrAllFoldedHistoryOldestBits(gen: Set[FoldedHistoryInfo])(implicit p: Parameters) extends PhrBundle
+    with HasPhrParameters {
+
+  val hist: MixedVec[PhrFoldedHistoryOldestBits] =
+    MixedVec(gen.toSeq.sortBy(_.asTuple).map(info => new PhrFoldedHistoryOldestBits(info, Shamt)))
+
+  def getHistWithInfo(info: FoldedHistoryInfo): PhrFoldedHistoryOldestBits = {
+    val selected = hist.filter(_.info.equals(info))
+    require(selected.length == 1)
+    selected.head
+  }
+
+  def read(phv: Vec[Bool], ptr: PhrPtr): Unit =
+    for (h <- hist) {
+      h.readFromPhr(phv, ptr)
+    }
+}
+
 // class AheadFoldedHistoryOldestBits(val len: Int, val max_update_num: Int)(implicit p: Parameters) extends XSBundle {
 //   val bits = Vec(max_update_num * 2, Bool())
 //   // def info = (len, compLen)
@@ -236,6 +264,23 @@ class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo])(implicit p: Parameters)
     }
     res
   }
+
+  def update(
+      oldestBits: PhrAllFoldedHistoryOldestBits,
+      hashHigh:   UInt,
+      shift:      Int,
+      shiftBits:  UInt
+  ): PhrAllFoldedHistories = {
+    require(shiftBits.getWidth == shift)
+    require(hist.length == oldestBits.hist.length)
+    val res = WireInit(this)
+    for (i <- this.hist.indices) {
+      val info = this.hist(i).info
+      res.hist(i) := this.hist(i).update(oldestBits.getHistWithInfo(info).bits, shift, shiftBits, hashHigh)
+    }
+    res
+  }
+
   // TODO: Enable ahead logic
   // def update(afhob: AllAheadFoldedHistoryOldestBits, lastBrNumOH: UInt, shift: Int, taken: Bool): AllFoldedHistories = {
   //   val res = WireInit(this)

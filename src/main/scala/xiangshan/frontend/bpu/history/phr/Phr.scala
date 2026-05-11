@@ -18,6 +18,7 @@ package xiangshan.frontend.bpu.history.phr
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSWarn
 import xiangshan.frontend.PrunedAddr
@@ -61,6 +62,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s0_fire  = io.train.stageCtrl.s0_fire
   private val s1_fire  = io.train.stageCtrl.s1_fire
   private val s2_fire  = io.train.stageCtrl.s2_fire
+  private val s3_fire  = io.train.stageCtrl.s3_fire
 
   private val histFoldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo))) // for diff
   private val s0_foldedPhr  = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
@@ -73,8 +75,14 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s3_foldedPhrReg =
     RegEnable(s2_foldedPhrReg, 0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)), s2_fire)
 
-  private val s0_phrPtr = WireInit(0.U.asTypeOf(new PhrPtr))
-  private val s1_phrPtr = RegEnable(s0_phrPtr, 0.U.asTypeOf(new PhrPtr), s0_fire)
+  private val s0_phrPtr  = WireInit(0.U.asTypeOf(new PhrPtr))
+  private val s1_phrPtr  = RegEnable(s0_phrPtr, 0.U.asTypeOf(new PhrPtr), s0_fire)
+  private val s1_phrMeta = WireInit(0.U.asTypeOf(new PhrMeta))
+  s1_phrMeta.phrPtr     := s1_phrPtr
+  s1_phrMeta.phrLowBits := getPhr(s1_phrPtr)(PathHashHighWidth - 1, 0)
+  s1_phrMeta.predFoldedHist.foreach(_ := s1_foldedPhrReg)
+  private val s2_phrMeta = RegEnable(s1_phrMeta, 0.U.asTypeOf(new PhrMeta), s1_fire)
+  private val s3_phrMeta = RegEnable(s2_phrMeta, 0.U.asTypeOf(new PhrMeta), s2_fire)
 
   private val s1_phrValue = getPhr(s1_phrPtr)
   private val phrValue    = getPhr(phrPtr)
@@ -231,7 +239,19 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     computeAllFoldedPhr(redirectPhr)
   )
 
+  private val s2_oldestBits = Wire(new PhrAllFoldedHistoryOldestBits(AllFoldedHistoryInfo))
+  private val s2_phr        = getRedirectPhr(s2_phrMeta)
+  s2_oldestBits.read(VecInit(s2_phr.asBools), s2_phrMeta.phrPtr)
+  private val s3_oldestBits =
+    RegEnable(s2_oldestBits, 0.U.asTypeOf(new PhrAllFoldedHistoryOldestBits(AllFoldedHistoryInfo)), s2_fire)
+
+  XSError(s3_fire && s3_phrMeta.asUInt =/= io.s3Train.phrMeta.asUInt, f"s3_phrMeta mismatch!\n")
+
   private val s3S0FoldedPhrAll = s3_predOverrideData.zip(s3HashComponents).map { case (data, hash) =>
+    getNextFoldedPhr(data, s3_oldestBits, s3_foldedPhrReg, hash._2, hash._1)
+  }
+
+  private val s3S0FoldedPhrAllTest = s3_predOverrideData.zip(s3HashComponents).map { case (data, hash) =>
     getNextFoldedPhr(
       data,
       s3_foldedPhrReg,
@@ -240,15 +260,14 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
       hash._1
     )
   }
+
+  private val s3S0FoldedPhrAllDiff = s3S0FoldedPhrAll.zip(s3S0FoldedPhrAllTest).map { case (a, b) =>
+    a.asUInt =/= b.asUInt
+  }.reduce(_ || _)
+  XSError(s3_fire && s3S0FoldedPhrAllDiff, f"s3 next folded PHR logic has inconsistency between two implementations!")
+
   s3S0FoldedPhr := Mux1H(io.s3Train.firstTakenBrOH, s3S0FoldedPhrAll)
 
-  // s3S0FoldedPhr := getNextFoldedPhr(
-  //   s3_overrideData,
-  //   s3_foldedPhrReg,
-  //   getRedirectPhr(s3_overrideData.phrMeta),
-  //   s3HashHigh,
-  //   s3ShiftBits
-  // )
   private val s1UbtbS0FoldedPhr = getNextFoldedPhr(
     s1UbtbUpdateData,
     s1_foldedPhrReg,

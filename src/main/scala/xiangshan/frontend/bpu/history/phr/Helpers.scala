@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import scala.math.min
 import utility.ParallelXOR
+import utility.XSError
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.FoldedHistoryInfo
@@ -111,7 +112,6 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
       shiftBits:     UInt
   ): PhrAllFoldedHistories = {
     val nextFoldedPhr = WireInit(baseFoldedPhr)
-
     when(data.taken) {
       nextFoldedPhr := baseFoldedPhr.update(
         VecInit(basePhr.asBools),
@@ -120,6 +120,20 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
         Shamt,
         shiftBits
       )
+    }
+    nextFoldedPhr
+  }
+
+  def getNextFoldedPhr(
+      data:          PhrUpdateData,
+      oldestBits:    PhrAllFoldedHistoryOldestBits,
+      baseFoldedPhr: PhrAllFoldedHistories,
+      hashHigh:      UInt,
+      shiftBits:     UInt
+  ): PhrAllFoldedHistories = {
+    val nextFoldedPhr = WireInit(baseFoldedPhr)
+    when(data.taken) {
+      nextFoldedPhr := baseFoldedPhr.update(oldestBits, hashHigh, Shamt, shiftBits)
     }
     nextFoldedPhr
   }
