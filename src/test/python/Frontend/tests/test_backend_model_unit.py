@@ -214,3 +214,71 @@ def test_recovery_flush_begins_at_first_target_entry() -> None:
 
     assert len(model._cfvec_queue) == 1
     assert model._cfvec_queue[0].pc == 0x1000
+
+
+def test_mmio_redirect_does_not_enter_recovery_or_block_commit() -> None:
+    model = BackendModel()
+    model._active_wrong_path_episode_state = ActiveWrongPathEpisode(
+        origin_index=0,
+        target_pc=0x10001000,
+        redirect_context={
+            "pc": 0x10001006,
+            "instr": 0,
+            "is_rvc": 0,
+            "pred_taken": 1,
+            "ftq_flag": 0,
+            "ftq_value": 3,
+            "ftq_offset": 0,
+            "branch_type": 0,
+            "ras_action": 0,
+            "queue_index": None,
+            "queue_context_optional": True,
+        },
+        redirect_driven=True,
+        expected_recovery_ftq=(0, 4),
+        redirect_driven_cycle=10,
+    )
+
+    assert model._wrong_path_target_is_mmio() is True
+    assert model._active_wrong_path_in_recovery() is True
+    assert model._current_recovery_target_pc() == 0x10001000
+    assert model._current_expected_recovery_ftq() == (0, 4)
+    assert model._recovery_commit_block_matches(0, 4) is False
+    assert model._active_redirect_context_blocks_commit(0, 4) is False
+
+
+def test_non_cfi_cannot_begin_wrong_path_after_correct_cfi() -> None:
+    model = BackendModel()
+    entry = _queue_instr(0x8000007c, 0, 18)
+    entry.is_cfi = False
+
+    assert model._maybe_begin_active_wrong_path_after_correct_cfi(
+        queue_index=0,
+        entry=entry,
+        target_pc=0x80000090,
+        target_visible_immediately=False,
+    ) is False
+
+
+def test_indirect_jump_mismatch_attributes_redirect_to_previous_cfi() -> None:
+    model = BackendModel()
+    prev = _queue_instr(0x80000332, 0, 32)
+    prev.instr = 0x00008067
+    prev.is_cfi = True
+    prev.path_state = PATH_STATE_CORRECT
+    prev.golden_target_pc = 0x8000033A
+    wrong = _queue_instr(0x80000336, 0, 34)
+    model._cfvec_queue = deque([prev, wrong])
+    model._active_wrong_path_episode_state = None
+    model.golden_trace = None
+    model._last_correct_cfi_context = None
+
+    redirect_context, target_pc, redirect_queue_index = model._derive_wrong_path_redirect(
+        queue_index=1,
+        queue_entry=wrong,
+    )
+
+    assert redirect_queue_index == 0
+    assert target_pc == 0x8000033A
+    assert redirect_context is not None
+    assert int(redirect_context["pc"]) == 0x80000332

@@ -266,6 +266,15 @@ class BackendModel:
             and episode["target_pc"] is not None
         )
 
+    def _wrong_path_target_is_mmio(self, episode: Optional[dict] = None) -> bool:
+        current = self._active_wrong_path_episode() if episode is None else episode
+        if current is None:
+            return False
+        target_pc = current.get("target_pc")
+        if target_pc is None:
+            return False
+        return int(target_pc) < 0x80000000
+
     def _current_wrong_path_target_pc(self) -> Optional[int]:
         episode = self._active_wrong_path_episode()
         if episode is None or episode["target_pc"] is None:
@@ -769,6 +778,8 @@ class BackendModel:
         )
 
     def _recovery_commit_block_matches(self, ftq_flag: int, ftq_value: int) -> bool:
+        if self._wrong_path_target_is_mmio():
+            return False
         return (
             self._recovery_commit_block_ftq is not None
             and int(self.current_cycle) <= int(self._recovery_commit_block_cycle)
@@ -1600,6 +1611,8 @@ class BackendModel:
     ) -> bool:
         if target_pc is None:
             return False
+        if not bool(entry.is_cfi):
+            return False
         if int(target_pc) == self._sequential_next_pc(int(entry.pc), bool(entry.is_rvc)):
             return False
         golden_taken = True
@@ -1646,8 +1659,13 @@ class BackendModel:
             prev_cfi = self._find_preceding_correct_path_cfi(int(queue_index))
             if prev_cfi is not None:
                 prev_idx, prev_entry = prev_cfi
+                prev_entry_redirects_to_current = (
+                    prev_entry.golden_target_pc is not None
+                    and int(prev_entry.golden_target_pc) == int(queue_entry.pc)
+                )
                 if (
                     not bool(queue_entry.is_cfi)
+                    or not bool(prev_entry_redirects_to_current)
                     or (
                         redirect_target_pc is not None
                         and self._queue_entry_predicted_target_mismatches(prev_entry, int(redirect_target_pc))
@@ -2530,6 +2548,8 @@ class BackendModel:
     def _active_redirect_context_blocks_commit(self, ftq_flag: int, ftq_value: int) -> bool:
         episode = self._active_wrong_path_episode()
         if episode is None or not bool(episode["redirect_driven"]):
+            return False
+        if self._wrong_path_target_is_mmio(episode):
             return False
         redirect_context = episode["redirect_context"]
         if redirect_context is None:
@@ -3809,7 +3829,10 @@ class BackendModel:
                     candidate_ftq = state.increment_ftq_ptr(int(candidate_ftq[0]), int(candidate_ftq[1]))
                 if candidate_ftq != (int(ftq_flag), int(ftq_value)):
                     return None
-            if any(entry.path_state != PATH_STATE_CORRECT for entry in queue_head_entries):
+            if (
+                not self._wrong_path_target_is_mmio()
+                and any(entry.path_state != PATH_STATE_CORRECT for entry in queue_head_entries)
+            ):
                 return None
             if any(entry.rob_commit_state != ROB_COMMIT_STATE_COMMITTED for entry in queue_head_entries):
                 return None
