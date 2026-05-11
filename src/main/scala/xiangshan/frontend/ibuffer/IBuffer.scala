@@ -252,11 +252,15 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   io.in.ready := allowEnq
   // Data
+  // Rebase enqueue pointers to the IFU pre-aligned lane coordinate.
+  private val ifuAlignedEnqPtrVec = VecInit(enqPtrVec.map{ptr =>
+    ptr - enqPtr.value(log2Ceil(NumWriteBank) - 1, 0)
+  })
   for (bank <- 0 until NumWriteBank) {
     bankedIBufWriteWire(bank).zipWithIndex.foreach { case (entry, idx) =>
       // Select
       val validOH = (0 until EnqueueWidth / NumWriteBank).map { j =>
-        val normalMatch = enqPtrVec(enqBankOffset(bank)(j)).value === (bank + idx * NumWriteBank).asUInt
+        val normalMatch = ifuAlignedEnqPtrVec(bank + NumWriteBank * j).value === (bank + idx * NumWriteBank).asUInt
         io.in.bits.valid(bank + NumWriteBank * j) && io.in.bits.enqEnable(bank + NumWriteBank * j) && normalMatch
       } // Should be OneHot
       val useBypassMatch = (0 until DecodeWidth).map(k => enqPtrVec(k).value === (bank + idx * NumWriteBank).U)
