@@ -29,8 +29,9 @@ jobs:
       - name: Set test branch or commit
         id: set_test
         run: |
-          echo "Using checkout ref: ${{ inputs.test_branch != '' && inputs.test_branch || github.ref }}"
-          echo "commit_sha=${{ inputs.test_branch != '' && inputs.test_branch || github.ref }}" >> $GITHUB_OUTPUT
+          REF="${{ inputs.test_branch || github.ref }}"
+          echo "Using checkout ref: ${REF}"
+          echo "commit_sha=${REF}" >> $GITHUB_OUTPUT
 
       - name: Checkout code
         uses: actions/checkout@v6
@@ -75,8 +76,9 @@ jobs:
       - name: Set test branch or commit
         id: set_test
         run: |
-          echo "Using checkout ref: ${{ inputs.test_branch != '' && inputs.test_branch || github.ref }}"
-          echo "commit_sha=${{ inputs.test_branch != '' && inputs.test_branch || github.ref }}" >> $GITHUB_OUTPUT
+          REF="${{ inputs.test_branch || github.ref }}"
+          echo "Using checkout ref: ${REF}"
+          echo "commit_sha=${REF}" >> $GITHUB_OUTPUT
 
       - name: Checkout code
         uses: actions/checkout@v6
@@ -125,8 +127,9 @@ jobs:
       - name: Set test branch or commit
         id: set_test
         run: |
-          echo "Using checkout ref: ${{ inputs.test_branch != '' && inputs.test_branch || github.ref }}"
-          echo "commit_sha=${{ inputs.test_branch != '' && inputs.test_branch || github.ref }}" >> $GITHUB_OUTPUT
+          REF="${{ inputs.test_branch || github.ref }}"
+          echo "Using checkout ref: ${REF}"
+          echo "commit_sha=${REF}" >> $GITHUB_OUTPUT
 
       - name: Checkout code
         uses: actions/checkout@v6
