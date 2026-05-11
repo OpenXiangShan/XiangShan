@@ -593,7 +593,16 @@ class LoadUnitS1(param: ExeUnitParams)(
   val redirectNext = Wire(redirect.cloneType)
   redirectNext.valid := GatedValidRegNext(redirect.valid)
   redirectNext.bits := RegEnable(redirect.bits, redirect.valid)
-  val kill = io.kill || isSwInstrPrefetch || robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) || !pipeIn.valid
+
+  val redirectNextNext = Wire(redirect.cloneType)
+  redirectNextNext.valid := GatedValidRegNext(redirectNext.valid)
+  redirectNextNext.bits := RegEnable(redirectNext.bits, redirectNext.valid)
+  
+  val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
+
+  val kill = !pipeIn.valid || io.kill || isSwInstrPrefetch ||
+             robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) || 
+             (robIdx.needFlush(redirectNextNext) & isUnalignTail)
 
   /**
     * Tlb & DCache
@@ -649,7 +658,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   /**
     * Unalign tail inject to s0
     */
-  val unalignTailInjectValid = pipeIn.valid && !kill && in.unalignHead.get
+  val unalignTailInjectValid = pipeIn.valid && in.unalignHead.get
   val unalignTail = Wire(io.unalignTail.bits.cloneType)
   connectSamePort(unalignTail, in)
   unalignTail.entrance := LoadEntrance.unalignTail.U
