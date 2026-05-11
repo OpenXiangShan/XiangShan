@@ -1655,7 +1655,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // max commit-stuck cycle
   val deqismmio = Mux(robEntries(deqPtr.value).valid, robEntries(deqPtr.value).mmio, false.B)
-  val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !deqismmio
+  val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !deqismmio && (wfiResume.B || !hasWFI)
   val commitStuckCounter = Module(new CommitStuckCounter(
     width = log2Up(maxCommitStuck),
     forceEnable = (env.EnableDifftest || env.FullBasicDiff).B
