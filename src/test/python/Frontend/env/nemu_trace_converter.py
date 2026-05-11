@@ -129,27 +129,41 @@ def _parse_debug_line(raw_line: str) -> Optional[dict]:
 
 def convert_nemu_log_lines(lines: Iterable[str]) -> List[dict]:
     parsed: List[dict] = []
-    pending_exec: Optional[tuple[int, int]] = None
+    pending_execs: List[tuple[int, int]] = []
     for line in lines:
         exec_info = _parse_exec_line(line)
         if exec_info is not None:
-            pending_exec = exec_info
+            pending_execs.append(exec_info)
             continue
 
         item = _parse_debug_line(line)
-        if item is None or pending_exec is None:
+        if item is None:
             continue
 
-        prev_pc, next_pc = pending_exec
-        pending_exec = None
-        if int(item["pc"]) != int(prev_pc):
-            continue
-        item["next_pc"] = int(next_pc)
+        item["next_pc"] = None
+        if pending_execs:
+            match_index = next(
+                (idx for idx, (prev_pc, _next_pc) in enumerate(pending_execs) if int(item["pc"]) == int(prev_pc)),
+                None,
+            )
+            if match_index is not None:
+                _prev_pc, next_pc = pending_execs.pop(int(match_index))
+                item["next_pc"] = int(next_pc)
         parsed.append(item)
+
+    for idx, item in enumerate(parsed):
+        if item["next_pc"] is not None:
+            continue
+        if idx + 1 >= len(parsed):
+            continue
+        item["next_pc"] = int(parsed[idx + 1]["pc"])
 
     out: List[dict] = []
     for i, cur in enumerate(parsed):
-        next_pc = int(cur["next_pc"])
+        next_pc = cur["next_pc"]
+        if next_pc is None:
+            continue
+        next_pc = int(next_pc)
         kind = str(cur["kind"])
         pc = int(cur["pc"])
         size = int(cur["size"])
