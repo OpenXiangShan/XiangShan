@@ -962,7 +962,8 @@ class LoadUnitS2(param: ExeUnitParams)(
   afForwardDenied := mshrForwardDenied || tldForwardDenied
   hweForwardCorrupt := mshrForwardCorrupt || tldForwardCorrupt
 
-  val dcacheFullForward = io.mshrForwardResp.valid || io.tldForwardResp.valid
+  val dcacheFullForward = (~(io.mshrForwardResp.bits.forwardMask.asUInt) & in.mask) === 0.U ||
+                          io.tldForwardResp.valid
   val uncacheFullForward = (~io.uncacheForwardResp.bits.forwardMask.asUInt & in.mask) === 0.U && !sqDataInvalid
   val storeFullForward = (~storeForwardMask & in.mask) === 0.U && !sqDataInvalid
   val fullForward = storeFullForward || dcacheFullForward
@@ -1758,15 +1759,15 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
   val sbufferForwardData = io.s2SbufferForwardResp.bits.forwardData.asUInt
   val tldMask = Fill(VLEN / 8, io.s2TLDForwardResp.valid)
   val tldData = io.s2TLDForwardResp.bits.forwardData.asUInt
-  val mshrMask = Fill(VLEN / 8, io.s2MSHRForwardResp.valid)
+  val mshrMask = io.s2MSHRForwardResp.bits.forwardMask.asUInt
   val mshrData = io.s2MSHRForwardResp.bits.forwardData.asUInt
   val (masks, datas) = Seq(
     // DO NOT change the priority here
     (sqForwardMask, sqForwardData),
     (ncForwardMask, ncForwardData),
     (sbufferForwardMask, sbufferForwardData),
-    (tldMask, tldData),
-    (mshrMask, mshrData)
+    (mshrMask, mshrData),
+    (tldMask, tldData)
   ).unzip
 
   val s2Data = mergeData(rawData, datas, masks)

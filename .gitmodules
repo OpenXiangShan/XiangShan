@@ -16,15 +16,12 @@
 [submodule "yunsuan"]
 	path = yunsuan
 	url = https://github.com/OpenXiangShan/YunSuan.git
-[submodule "coupledL2"]
-	path = coupledL2
-	url = https://github.com/OpenXiangShan/CoupledL2.git
-[submodule "openLLC"]
-	path = openLLC
-	url = https://github.com/OpenXiangShan/OpenLLC.git
 [submodule "ChiselAIA"]
 	path = ChiselAIA
 	url = https://github.com/OpenXiangShan/ChiselAIA.git
 [submodule "ChiselIOPMP"]
 	path = ChiselIOPMP
 	url = https://github.com/OpenXiangShan/ChiselIOPMP.git
+[submodule "XSCache"]
+	path = XSCache
+	url = https://github.com/OpenXiangShan/XSCache.git

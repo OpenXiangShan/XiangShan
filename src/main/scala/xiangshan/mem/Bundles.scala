@@ -275,6 +275,11 @@ object Bundles {
     val s2Resp = Flipped(ValidIO(new SbufferForwardResp))
   }
 
+  class SbufferForwardReq(implicit p: Parameters) extends XSBundle {
+    val s0Req = ValidIO(new StoreForwardReqS0)
+    val s1Req = Output(new StoreForwardReqS1)
+  }
+
   class SQForward(implicit p: Parameters) extends XSBundle {
     val s0Req = ValidIO(new StoreForwardReqS0)
     val s1Req = Output(new StoreForwardReqS1)

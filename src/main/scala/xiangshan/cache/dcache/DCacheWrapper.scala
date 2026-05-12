@@ -31,6 +31,7 @@ import xiangshan._
 import xiangshan.backend.rob.{RobDebugRollingIO, RobPtr}
 import xiangshan.cache.wpu._
 import xiangshan.mem.prefetch._
+import xiangshan.mem.Bundles.SbufferForwardReq
 import xiangshan.mem.{AddPipelineReg, HasL1PrefetchSourceParameter, HasMemBlockParameters, LqPtr, MemorySize}
 
 // DCache specific parameters
@@ -623,6 +624,8 @@ class MissEntryForwardIO(implicit p: Parameters) extends DCacheBundle {
   val inflight = Bool()
   val paddr = UInt(PAddrBits.W)
   val raw_data = Vec(blockRows, UInt(rowBits.W))
+  val isFromStore = Bool()
+  val store_mask = UInt(cfg.blockBytes.W)
   val firstbeat_valid = Bool()
   val lastbeat_valid = Bool()
   val denied = Bool()
@@ -668,6 +671,7 @@ class DCacheForwardReqS1(implicit p: Parameters) extends DCacheBundle {
 class DCacheForwardResp(implicit p: Parameters) extends DCacheBundle {
   val matchInvalid = Bool()
   val forwardData = Vec((VLEN/8), UInt(8.W))
+  val forwardMask = Vec((VLEN/8), Bool())
   // denied and corrupt are only valid when forwarding matches
   val denied = Bool()
   val corrupt = Bool()
@@ -729,6 +733,8 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check
   val forward_D = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
   val forward_mshr = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
+  // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
+  val forward_mshrStData = Flipped(Vec(LoadPipelineWidth, new SbufferForwardReq))
 }
 
 class DCacheTopDownIO(implicit p: Parameters) extends DCacheBundle {
@@ -743,6 +749,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lsu = new DCacheToLsuIO
   val error = ValidIO(new L1CacheErrorInfo)
   val mshrFull = Output(Bool())
+  val mshr_store_empty = Output(Bool())
   val memSetPattenDetected = Output(Bool())
   val lqEmpty = Input(Bool())
   val pf_ctrl = Output(Vec(L1PrefetcherNum, new PrefetchControlBundle))
@@ -973,6 +980,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   mainPipe.io.refill_info := missQueue.io.refill_info
   mainPipe.io.replace <> missQueue.io.replace
   mainPipe.io.sms_agt_evict_req <> io.sms_agt_evict_req
+  io.mshr_store_empty := missQueue.io.mshr_store_empty
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
   io.wfi <> missQueue.io.wfi
   io.refillTrain := missQueue.io.refill_train
@@ -1309,6 +1317,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     s2Resp.valid := RegNext(s1RespValid)
     s2Resp.bits.matchInvalid := false.B
     s2Resp.bits.forwardData := RegEnable(s1RespForwardData.asTypeOf(s2Resp.bits.forwardData), s1ReqValid)
+    s2Resp.bits.forwardMask := VecInit(Seq.fill(VLEN / 8)(RegNext(s1RespValid)))
     s2Resp.bits.denied := RegEnable(bus.d.bits.denied, s1ReqValid)
     s2Resp.bits.corrupt := RegEnable(bus.d.bits.corrupt, s1ReqValid)
   }
@@ -1515,6 +1524,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   // forward missqueue
   missQueue.io.forward <> io.lsu.forward_mshr
+  // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
+  missQueue.io.forward_stData := io.lsu.forward_mshrStData
 
   // refill to load queue
  // io.lsu.lsq <> missQueue.io.refill_to_ldq

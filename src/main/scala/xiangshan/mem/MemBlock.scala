@@ -893,6 +893,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // forward & NC bypass
     lsq.io.forward(i) <> newLoadUnits(i).io.sqForward
     sbuffer.io.forward(i) <> newLoadUnits(i).io.sbufferForward
+    connectSamePort(dcache.io.lsu.forward_mshrStData(i), newLoadUnits(i).io.sbufferForward)
     uncache.io.forward(i) <> newLoadUnits(i).io.uncacheForward
     dcache.io.lsu.forward_D(i) <> newLoadUnits(i).io.tldForward
     dcache.io.lsu.forward_mshr(i) <> newLoadUnits(i).io.mshrForward
@@ -1317,6 +1318,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl
   sbuffer.io.dcache     <> dcache.io.lsu.store
+  sbuffer.io.mshr_store_empty := dcache.io.mshr_store_empty
   sbuffer.io.memSetPattenDetected := dcache.io.memSetPattenDetected
   sbuffer.io.force_write <> lsq.io.force_write
   // flush sbuffer

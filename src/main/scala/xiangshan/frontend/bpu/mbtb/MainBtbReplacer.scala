@@ -29,10 +29,11 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
     }
 
     class Victim extends Bundle {
-      val wayMask: UInt = UInt(NumWay.W)
+      val setIdx:  UInt = Input(UInt(SetIdxLen.W))
+      val wayMask: UInt = Output(UInt(NumWay.W))
     }
 
-    val victim: Victim            = Output(new Victim)
+    val victim: Victim            = new Victim
     val touch:  Vec[Valid[Touch]] = Vec(2, Flipped(Valid(new Touch))) // magic number 2: predict and train
 
     def predictTouch: Valid[Touch] = touch(0)
@@ -42,8 +43,9 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   val io: MainBtbReplacerIO = IO(new MainBtbReplacerIO)
 
   private val predictStateGen = Module(ReplacerStateGen(Replacer, NumWay, accessSize = NumWay))
-  private val trainStateGen   = Module(ReplacerStateGen(Replacer, NumWay, accessSize = 1))
-  private val stateBank       = Module(new ReplacerState(NumSets, predictStateGen.StateWidth))
+  private val trainStateGen   = Module(ReplacerStateGen(Replacer, NumWay))
+  private val victimStateGen  = Module(ReplacerStateGen(Replacer, NumWay))
+  private val stateBank       = Module(new ReplacerState(NumSets, predictStateGen.StateWidth, HasExtraReadPort = true))
 
   /* *** predict *** */
   // read current state
@@ -93,5 +95,14 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   stateBank.io.trainWriteState  := trainNextState
 
   /* *** victim *** */
-  io.victim.wayMask := UIntToOH(trainStateGen.io.victim)
+  stateBank.io.readSetIdx.get := io.victim.setIdx
+  private val victimState = stateBank.io.readState.get
+
+  // NOTE: io.trainTouch is on t1, io.victim.setIdx is on t0,
+  //       if they are accessing the same set, we use the updated state to select victim
+  private val trainVictimConflict = io.trainTouch.valid && (io.trainTouch.bits.setIdx === io.victim.setIdx)
+  victimStateGen.io.state   := Mux(trainVictimConflict, trainNextState, victimState)
+  victimStateGen.io.touches := DontCare // we use victimStateGen just to select victim, don't care touch & nextState
+
+  io.victim.wayMask := UIntToOH(victimStateGen.io.victim)
 }

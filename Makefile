@@ -311,7 +311,7 @@ GIT_FORCE_FLAG := $(if $(GIT_FORCE_INIT),--force)
 init:
 	git submodule update --init $(GIT_FORCE_FLAG)
 	cd rocket-chip && git submodule update --init $(GIT_FORCE_FLAG) cde hardfloat
-	cd openLLC && git submodule update --init $(GIT_FORCE_FLAG) openNCB
+	cd XSCache && git submodule update --init $(GIT_FORCE_FLAG) OpenNCB
 
 # Initialize necessary submodules (force)
 #   This ensure that all submodules files are checked out to the correct commit. Good for CI.

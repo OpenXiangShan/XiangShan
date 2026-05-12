@@ -91,18 +91,16 @@ object huancun extends ChiselModule {
   def moduleDeps = Seq(`rocket-chip`, utility)
 }
 
-object coupledL2 extends ChiselModule {
-  def moduleDeps = Seq(`rocket-chip`, utility, huancun)
+object XSCache extends ChiselModule {
+  def millSourcePath = pwd / "XSCache"
+
+  def moduleDeps = Seq(`rocket-chip`, utility, huancun, openNCB)
 }
 
 object openNCB extends ChiselModule {
-  def millSourcePath = pwd / "openLLC" / "openNCB"
+  def millSourcePath = pwd / "XSCache" / "OpenNCB"
 
   def moduleDeps = Seq(`rocket-chip`)
-}
-
-object openLLC extends ChiselModule {
-  def moduleDeps = Seq(`rocket-chip`, utility, coupledL2, openNCB)
 }
 
 object difftest extends ChiselModule {
@@ -134,8 +132,7 @@ object xiangshan extends ChiselModule {
     `rocket-chip`,
     difftest,
     huancun,
-    coupledL2,
-    openLLC,
+    XSCache,
     yunsuan,
     utility,
     ChiselAIA,

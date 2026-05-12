@@ -36,6 +36,8 @@ import xiangshan._
 import xiangshan.mem.LqPtr
 import xiangshan.mem.prefetch._
 import xiangshan.mem.trace._
+import xiangshan.mem.Bundles.SbufferForwardReq
+import freechips.rocketchip.util.UIntToAugmentedUInt
 
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
@@ -60,8 +62,9 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
 
   /**
     * isBtoT is used to mark whether the current request requires BtoT permission.
-    * If so, other requests for BtoT in the same set are blocked. Otherwise,
-    * they are not blocked.
+    * When the number of BtoT-occupied ways in the same set exceeds nWays-2,
+    * new BtoT requests for that set are blocked (via occupy_fail -> LoadPipe cancel).
+    * Non-BtoT requests are not affected.
     */
   val isBtoT = Bool()
   /**
@@ -69,15 +72,14 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
     */
   val occupy_way = UInt(nWays.W)
 
-  // For now, miss queue entry req is actually valid when req.valid && !cancel
-  // * req.valid is fast to generate
-  // * cancel is slow to generate, it will not be used until the last moment
+  // Enqueue logic uses req.valid && !cancel && !wbq_block_miss_req
   //
-  // cancel may come from the following sources:
-  // 1. miss req blocked by writeback queue:
-  //      a writeback req of the same address is in progress
-  // 2. pmp check failed
-  val cancel = Bool() // cancel is slow to generate, it will cancel missreq.valid
+  // cancel is usually ready later than req.valid and is driven by whoever builds the MissReq:
+  // - LoadPipe: io.lsu.s2_kill (dcacheKill: flush, exceptions incl. PMP-related faults, uncache, ...),
+  //   plus s2_tag_error and s2_btot_occupy_fail
+  // - StorePipe: io.lsu.s2_kill
+  // - MainPipe (miss): s2_grow_perm_fail
+  val cancel = Bool()
 
   // Req source decode
   // Note that req source is NOT cmd type
@@ -426,6 +428,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val req_vaddr = ValidIO(UInt(VAddrBits.W))
     val req_isBtoT = Output(Bool())
 
+    val req_hasStore = Output(Bool())
+
     val req_handled_by_this_entry = Output(Bool())
 
     val forwardInfo = Output(new MissEntryForwardIO)
@@ -476,6 +480,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val req_valid = RegInit(false.B)
   val set = addr_to_dcache_set(req.vaddr)
   val evict_BtoT_way = RegInit(false.B)
+  val alloc_is_store = RegInit(false.B)  // The alloc (first) req is a store req
+  val hasStore = RegInit(false.B)
   // initial keyword
   val isKeyword = RegInit(false.B)
 
@@ -561,6 +567,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
     req_primary_fire := miss_req_pipe_reg_bits.toMissReqWoStoreData()
     evict_BtoT_way := false.B
+    alloc_is_store := miss_req_pipe_reg_bits.isFromStore
+    hasStore := miss_req_pipe_reg_bits.isFromStore
     //only  load miss need keyword
     isKeyword := Mux(miss_req_pipe_reg_bits.isFromLoad, miss_req_pipe_reg_bits.vaddr(5).asBool,false.B)
 
@@ -575,12 +583,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     no_pending := !io.acquire_fired_by_pipe_reg
 
-    when(miss_req_pipe_reg_bits.isFromStore) {
-      req_store_mask := miss_req_pipe_reg_bits.store_mask
-      for (i <- 0 until blockRows) {
-        refill_and_store_data(i) := miss_req_pipe_reg_bits.store_data(rowBits * (i + 1) - 1, rowBits * i)
-      }
-    }
+    req_store_mask := Mux(miss_req_pipe_reg_bits.isFromStore, miss_req_pipe_reg_bits.store_mask, 0.U)
+
     full_overwrite := miss_req_pipe_reg_bits.isFromStore && miss_req_pipe_reg_bits.full_overwrite
 
     when (!miss_req_pipe_reg_bits.isFromAMO) {
@@ -603,6 +607,22 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     refill_start_time := GTimer()
   }
 
+  // Wire to hold updated data that has merged grant data (on grant.fire)
+  val refill_and_store_data_update = Wire(Vec(blockRows, UInt(rowBits.W)))
+  // All the logic of refill_and_store_data. There is a corner case to note: store-merge and grant.fire may happen at the same cycle.
+  when (io.miss_req_pipe_reg.alloc && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore) {
+    refill_and_store_data := VecInit(miss_req_pipe_reg_bits.store_data.grouped(rowBits))
+  }.elsewhen (io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore) {
+    for (i <- 0 until blockRows) {
+      val store_mask_temp = miss_req_pipe_reg_bits.store_mask.grouped(rowBytes)(i).asBools
+      val store_data_temp = (miss_req_pipe_reg_bits.store_data.grouped(8).grouped(rowBytes).toSeq)(i)
+      refill_and_store_data(i) := VecInit((0 until rowBytes).map(k =>
+        Mux(store_mask_temp(k), store_data_temp(k), refill_and_store_data_update(i).grouped(8)(k)))).asUInt
+    }
+  }.elsewhen (io.mem_grant.fire) {
+    refill_and_store_data := refill_and_store_data_update
+  }
+
   when (io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel) {
     assert(RegNext(secondary_fire) || RegNext(RegNext(primary_fire)), "after 1 cycle of secondary_fire or 2 cycle of primary_fire, entry will be merged")
     assert(miss_req_pipe_reg_bits.req_coh.state <= req.req_coh.state || (prefetch && !access))
@@ -622,11 +642,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       req.occupy_way := miss_req_pipe_reg_bits.occupy_way
       evict_BtoT_way := false.B
       req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
-      req_store_mask := miss_req_pipe_reg_bits.store_mask
-      for (i <- 0 until blockRows) {
-        refill_and_store_data(i) := miss_req_pipe_reg_bits.store_data(rowBits * (i + 1) - 1, rowBits * i)
-      }
-      full_overwrite := miss_req_pipe_reg_bits.isFromStore && miss_req_pipe_reg_bits.full_overwrite
+      req_store_mask := req_store_mask | miss_req_pipe_reg_bits.store_mask
+      hasStore := true.B
+      full_overwrite := full_overwrite || miss_req_pipe_reg_bits.full_overwrite
       assert(is_alias_match(req.vaddr, miss_req_pipe_reg_bits.vaddr), "alias bits should be the same when merging store")
     }
 
@@ -643,52 +661,43 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     no_pending := false.B
   }
 
-  // merge data refilled by l2 and store data, update miss queue entry, gen refill_req
-  val new_data = Wire(Vec(blockRows, UInt(rowBits.W)))
-  val new_mask = Wire(Vec(blockRows, UInt(rowBytes.W)))
   // merge refilled data and store data (if needed)
   def mergePutData(old_data: UInt, new_data: UInt, wmask: UInt): UInt = {
     val full_wmask = FillInterleaved(8, wmask)
     (~full_wmask & old_data | full_wmask & new_data)
   }
-  for (i <- 0 until blockRows) {
-    // new_data(i) := req.store_data(rowBits * (i + 1) - 1, rowBits * i)
-    new_data(i) := refill_and_store_data(i)
-    // we only need to merge data for Store
-    new_mask(i) := Mux(req.isFromStore, req_store_mask(rowBytes * (i + 1) - 1, rowBytes * i), 0.U)
+  val new_mask = VecInit(req_store_mask.grouped(rowBytes))
+  val grant_data_grouped = io.mem_grant.bits.data.grouped(rowBits)
+  val lowHalf_refill = refill_count === 0.U && !isKeyword || refill_count =/= 0.U && isKeyword
+  //---- refill_and_store_data_update: see definition above ----
+  require(blockRows == 2 * beatRows, "refill_and_store_data_update: so far, only works for blockRows == 2 * beatRows")
+  for (i <- 0 until beatRows) {
+    refill_and_store_data_update(i) := Mux(
+      io.mem_grant.fire && edge.hasData(io.mem_grant.bits) && lowHalf_refill,
+      mergePutData(grant_data_grouped(i), refill_and_store_data(i), new_mask(i)),
+      refill_and_store_data(i)
+    )
+    refill_and_store_data_update(i + beatRows) := Mux(
+      io.mem_grant.fire && edge.hasData(io.mem_grant.bits) && !lowHalf_refill,
+      mergePutData(grant_data_grouped(i), refill_and_store_data(i + beatRows), new_mask(i + beatRows)),
+      refill_and_store_data(i + beatRows)
+    )
   }
 
   val hasData = RegInit(true.B)
   val isDirty = RegInit(false.B)
   io.wfi.wfiSafe := GatedValidRegNext(no_pending && io.wfi.wfiReq)
+
   when (io.mem_grant.fire) {
     w_grantfirst := true.B
     grant_param := io.mem_grant.bits.param
     when (edge.hasData(io.mem_grant.bits)) {
-      // GrantData
-      when (isKeyword) {
-       for (i <- 0 until beatRows) {
-         val idx = ((refill_count << log2Floor(beatRows)) + i.U) ^ 4.U
-         val grant_row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
-         refill_and_store_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
-        }
-      }
-      .otherwise{
-       for (i <- 0 until beatRows) {
-         val idx = (refill_count << log2Floor(beatRows)) + i.U
-         val grant_row = io.mem_grant.bits.data(rowBits * (i + 1) - 1, rowBits * i)
-         refill_and_store_data(idx) := mergePutData(grant_row, new_data(idx), new_mask(idx))
-        }
-      }
       w_grantlast := w_grantlast || refill_done
       no_pending := no_pending || refill_done
       hasData := true.B
     }.otherwise {
       // Grant
       assert(full_overwrite)
-      for (i <- 0 until blockRows) {
-        refill_and_store_data(i) := new_data(i)
-      }
       w_grantlast := true.B
       no_pending := true.B
       hasData := false.B
@@ -750,7 +759,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   }
 
   def before_data_refill_can_merge(new_req: MissReqWoStoreData): Bool = {
-    data_not_refilled && new_req.isFromLoad
+    data_not_refilled && new_req.isFromLoad ||
+    !io.main_pipe_refill_resp && !w_refill_resp && new_req.isFromStore && alloc_is_store
   }
 
   // Note that late prefetch will be ignored
@@ -779,12 +789,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       )
   }
 
-  // store can be merged before io.mem_acquire.fire
-  // store can not be merged the cycle that io.mem_acquire.fire
   // load can be merged before io.mem_grant.fire
-  //
-  // TODO: merge store if possible? mem_acquire may need to be re-issued,
-  // but sbuffer entry can be freed
+  // Now the store-store merge is supported: if this entry is allocated by store req,
+  // the following same-block store can be merged before refill done.
   def should_reject(new_req: MissReqWoStoreData): Bool = {
     val block_match = get_block(req.addr) === get_block(new_req.addr)
     val set_match = set === addr_to_dcache_set(new_req.vaddr)
@@ -928,6 +935,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.req_vaddr.bits := req.vaddr
   io.req_isBtoT := req.isBtoT
 
+  io.req_hasStore := hasStore && req_valid
+
   io.occupy_way := req.occupy_way
 
   io.refill_info.valid := req_valid && w_grantlast
@@ -962,6 +971,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.forwardInfo.inflight := req_valid
   io.forwardInfo.paddr := req.addr
   io.forwardInfo.raw_data := refill_and_store_data
+  io.forwardInfo.isFromStore := req.isFromStore
+  io.forwardInfo.store_mask := req_store_mask
   io.forwardInfo.firstbeat_valid := w_grantfirst_forward_info
   io.forwardInfo.lastbeat_valid := w_grantlast_forward_info
   io.forwardInfo.denied := denied
@@ -1066,10 +1077,16 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     // forward missqueue
     val forward = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
     val forwardS1PAddrMatch = Output(Vec(LoadPipelineWidth, Bool()))
+    // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
+    // Note: the resp of this st-ld forwarding is merged into io.forward.S2Resp interface
+    val forward_stData = Flipped(Vec(LoadPipelineWidth, new SbufferForwardReq))
     val l2_pf_store_only = Input(Bool())
 
     val memSetPattenDetected = Output(Bool())
     val lqEmpty = Input(Bool())
+
+    // sbuffer-flush must flush all store entries in mshr as well
+    val mshr_store_empty = Output(Bool())
 
     val prefetch_stat = Output(new MissPrefetchStatBundle)
 
@@ -1086,6 +1103,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val miss_req_pipe_reg = RegInit(0.U.asTypeOf(new MissReqPipeRegBundle(edge)))
   val acquire_from_pipereg = Wire(chiselTypeOf(io.mem_acquire))
+
+  // Store misses may reside either in MSHR entries or in the miss_req_pipe_reg.
+  // sbuffer-flush should wait until both places are clear.
+  val mshr_has_store = Cat(entries.map(_.io.req_hasStore) :+ (miss_req_pipe_reg.reg_valid() && miss_req_pipe_reg.req.isFromStore)).orR
+  io.mshr_store_empty := !mshr_has_store
 
   val primary_ready_vec = entries.map(_.io.primary_ready)
   val secondary_ready_vec = entries.map(_.io.secondary_ready)
@@ -1134,6 +1156,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   miss_req_pipe_reg.merge   := merge && io.req.valid && !io.req.bits.cancel && !io.wbq_block_miss_req
   miss_req_pipe_reg.cancel  := io.wbq_block_miss_req
   miss_req_pipe_reg.mshr_id := io.resp.id
+  assert(!(io.req.bits.isFromStore && io.req.valid && miss_req_pipe_reg.req.isFromStore && (miss_req_pipe_reg.alloc || miss_req_pipe_reg.merge) &&
+          get_block(io.req.bits.addr) === get_block(miss_req_pipe_reg.req.addr)), "Two consecutive store reqs to the same block!")
 
   assert(PopCount(Seq(alloc && io.req.valid, merge && io.req.valid)) <= 1.U, "allocate and merge a mshr in same cycle!")
 
@@ -1153,39 +1177,60 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.memSetPattenDetected := memSetPattenDetected
 
   val forwardInfo_vec = VecInit(entries.map(_.io.forwardInfo))
+  val VLENB = VLEN / 8
+  // Forwarding paddr CAM, shared by io.forward and io.forward_stData
+  val paddrFwd = Wire(Vec(LoadPipelineWidth, UInt(PAddrBits.W)))
+  val s1PaddrMatchVec = Wire(Vec(LoadPipelineWidth, Vec(cfg.nMissEntries, Bool())))
+  val s1SelectOH = Wire(Vec(LoadPipelineWidth, UInt((cfg.nMissEntries).W)))
+  val s1ForwardInfo = Wire(Vec(LoadPipelineWidth, new MissEntryForwardIO))
+  val paddrFwd_selOH = Wire(Vec(LoadPipelineWidth, Vec(blockBytes / VLENB, Bool())))
+  val s1RespDataFwd = Wire(Vec(LoadPipelineWidth, UInt(VLEN.W)))
+  for (i <- 0 until LoadPipelineWidth) {
+    paddrFwd(i) := Mux(RegNext(io.forward_stData(i).s0Req.valid), io.forward_stData(i).s1Req.paddr, io.forward(i).s1Req.paddr)
+    s1PaddrMatchVec(i) := VecInit(forwardInfo_vec.map{ case info =>
+      (paddrFwd(i) >> blockOffBits) === (info.paddr >> blockOffBits) && info.inflight})
+    s1SelectOH(i) := s1PaddrMatchVec(i).asUInt
+    s1ForwardInfo(i) := Mux1H(s1SelectOH(i), forwardInfo_vec)
+    // Select VLEN (128-bit) data from cacheline data
+    paddrFwd_selOH(i) := (0 until (blockBytes / VLENB)).map(k => paddrFwd(i)(blockOffBits - 1, log2Up(VLENB)) === k.U)
+    s1RespDataFwd(i) := Mux1H(paddrFwd_selOH(i), s1ForwardInfo(i).raw_data.grouped(VLEN / rowBits).map(VecInit(_).asUInt).toSeq)
+  }
+
   io.forward.zipWithIndex.foreach { case (forward, i) =>
     val s0ReqValid = forward.s0Req.valid
     val s0Req = forward.s0Req.bits
     val s1ReqValid = RegNext(s0ReqValid)
     val s1Req = RegEnable(s0Req, s0ReqValid)
     val mshrIdOH = UIntToOH(s1Req.mshrId)
-    val paddr = forward.s1Req.paddr
-
-    val s1PaddrMatchVec = VecInit(forwardInfo_vec.map{ case info =>
-      paddr(paddr.getWidth - 1, blockOffBits) === info.paddr(paddr.getWidth - 1, blockOffBits) &&
-      info.inflight})
     val s1BeatMatchVec  = VecInit(forwardInfo_vec.map{ case info =>
-      Mux(paddr(log2Up(refillBytes)).asBool,
+      Mux(paddrFwd(i)(log2Up(refillBytes)).asBool,
         info.lastbeat_valid,
         info.firstbeat_valid
     )})
-    val s1SelectOH     = s1PaddrMatchVec.asUInt & s1BeatMatchVec.asUInt
-    val s1MshrForwardInfo = Mux1H(s1SelectOH, forwardInfo_vec)
-    val s1RespData = VecInit(
-      s1MshrForwardInfo.raw_data.grouped(VLEN / rowBits).map(VecInit(_).asUInt).toSeq
-    )(paddr(blockOffBits - 1, log2Up(VLEN / 8)))
-    val s1RespValid = s1ReqValid && s1SelectOH.orR
+    val s1RespValid = s1ReqValid && (s1SelectOH(i) & s1BeatMatchVec.asUInt).orR
 
+    // store-load forwarding (from io.forward_stData)
+    val s1ReqValid_stLdFwd = RegNext(io.forward_stData(i).s0Req.valid)
+    val s1RespMask_stLdFwd = Mux1H(paddrFwd_selOH(i),
+          s1ForwardInfo(i).store_mask.grouped(VLENB).map(x => Mux(s1ForwardInfo(i).isFromStore, x, 0.U)))
+    val s1RespValid_stLdFwd = s1ReqValid_stLdFwd && s1SelectOH(i).orR
 
-    forward.s2Resp.valid := RegNext(s1RespValid)
+    val s2Resp_Valid = RegNext(s1RespValid)
+    val s2Resp_stLdFwd_Valid = RegNext(s1RespValid_stLdFwd)
+
+    forward.s2Resp.valid := s2Resp_Valid || s2Resp_stLdFwd_Valid
     forward.s2Resp.bits.matchInvalid := false.B
-    forward.s2Resp.bits.forwardData := RegEnable(s1RespData.asTypeOf(forward.s2Resp.bits.forwardData), s1ReqValid)
-    forward.s2Resp.bits.denied := RegEnable(s1MshrForwardInfo.denied, s1ReqValid)
-    forward.s2Resp.bits.corrupt := RegEnable(s1MshrForwardInfo.corrupt, s1ReqValid)
-    io.forwardS1PAddrMatch(i) := s1ReqValid && (mshrIdOH & s1PaddrMatchVec.asUInt).orR
-    XSError(((s1SelectOH - 1.U) & s1SelectOH).orR && s1RespValid, "multi mshr hit when forward!\n")
+    forward.s2Resp.bits.forwardData := RegEnable(s1RespDataFwd(i).asTypeOf(forward.s2Resp.bits.forwardData),
+                                                 s1ReqValid || s1ReqValid_stLdFwd)
+    forward.s2Resp.bits.forwardMask := VecInit((0 until VLENB).map(k =>
+      Mux(s2Resp_Valid, true.B, RegEnable(s1RespMask_stLdFwd(k), s1RespValid_stLdFwd) && s2Resp_stLdFwd_Valid)
+    ))
+    forward.s2Resp.bits.denied := RegEnable(s1ForwardInfo(i).denied, s1ReqValid) && s2Resp_Valid
+    forward.s2Resp.bits.corrupt := RegEnable(s1ForwardInfo(i).corrupt, s1ReqValid) && s2Resp_Valid
+    io.forwardS1PAddrMatch(i) := s1ReqValid && (mshrIdOH & s1PaddrMatchVec(i).asUInt).orR
+    XSError(((s1SelectOH(i) - 1.U) & s1SelectOH(i)).orR && s1RespValid, "multi mshr hit when forward!\n")
   }
-
+    
   assert(RegNext(PopCount(secondary_ready_vec) <= 1.U || !io.req.valid))
 //  assert(RegNext(PopCount(secondary_reject_vec) <= 1.U))
   // It is possible that one mshr wants to merge a req, while another mshr wants to reject it.
@@ -1364,6 +1409,21 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     difftest.addr := io.refill_to_ldq.bits.addr
     difftest.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.data)
     difftest.mask := VecInit.fill(difftest.mask.getWidth)(true.B).asUInt
+  }
+
+  if (env.EnableDifftest) {
+    // Store-miss refill completed in MainPipe S3: update difftest (DiffSbufferEvent).
+    val mq_s3_sel_info = Mux1H(
+      entries.map(e => (io.mainpipe_info.s3_miss_id === e.io.id) -> e.io.forwardInfo)
+    )
+    val hasStore = mq_s3_sel_info.store_mask.orR
+    val difftest_store = DifftestModule(new DiffSbufferEvent, delay = 1)
+    difftest_store.coreid := io.hartId
+    difftest_store.index := 0.U
+    difftest_store.valid := io.mainpipe_info.s3_valid && io.mainpipe_info.s3_refill_resp && hasStore
+    difftest_store.addr := mq_s3_sel_info.paddr
+    difftest_store.data := mq_s3_sel_info.raw_data.asUInt.asTypeOf(difftest_store.data)
+    difftest_store.mask := mq_s3_sel_info.store_mask
   }
 
   // Perf count

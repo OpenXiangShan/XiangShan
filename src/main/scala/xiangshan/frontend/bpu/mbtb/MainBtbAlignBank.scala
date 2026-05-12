@@ -76,6 +76,9 @@ class MainBtbAlignBank(
 
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
     val s3_takenMask: Vec[Bool] = Input(Vec(NumWay, Bool()))
+
+    // fast path of train pc, used to read replacer in advance for better timing
+    val t0_startPc: PrunedAddr = Input(new PrunedAddr(VAddrBits))
   }
 
   val io: MainBtbAlignBankIO = IO(new MainBtbAlignBankIO)
@@ -191,6 +194,16 @@ class MainBtbAlignBank(
   replacer.io.predictTouch.bits.setIdx  := s3_replacerSetIdx
   replacer.io.predictTouch.bits.wayMask := s3_takenMask.asUInt
 
+  /* *** t0 ***
+   * read replacer in advance for better timing
+   */
+  private val t0_fire           = io.stageCtrl.t0_fire
+  private val t0_replacerSetIdx = getReplacerSetIndex(io.t0_startPc)
+
+  replacer.io.victim.setIdx := t0_replacerSetIdx
+
+  private val t0_victimMask = replacer.io.victim.wayMask
+
   /* *** t1 ***
    * send write req to internal banks (srams)
    */
@@ -204,6 +217,7 @@ class MainBtbAlignBank(
   private val t1_internalBankIdx  = getInternalBankIndex(t1_startPc)
   private val t1_internalBankMask = UIntToOH(t1_internalBankIdx, NumInternalBanks)
   private val t1_alignBankIdx     = getAlignBankIndex(t1_startPc)
+  private val t1_victimMask       = RegEnable(t0_victimMask, t0_fire)
 
   /* *** update entry *** */
   // NOTE: the original rawHit result can be multi-hit (i.e. multiple rawHit && position match), so PriorityEncoderOH
@@ -221,7 +235,7 @@ class MainBtbAlignBank(
       !(t1_mispredictInfo.bits.attribute === Mux1H(t1_hitMask, t1_meta.map(_.attribute)))
   )
   // Use hit wayMask if hit, else use replacer's victim way
-  private val t1_entryWayMask = Mux(t1_hit, t1_hitMask, replacer.io.victim.wayMask)
+  private val t1_entryWayMask = Mux(t1_hit, t1_hitMask, t1_victimMask)
 
   private val t1_entry = Wire(new MainBtbEntry)
   t1_entry.valid           := true.B

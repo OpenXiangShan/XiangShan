@@ -198,6 +198,7 @@ class Sbuffer(implicit p: Parameters)
     val forward = Vec(LoadPipelineWidth, Flipped(new SbufferForward))
     val sqempty = Input(Bool())
     val sbempty = Output(Bool())
+    val mshr_store_empty = Input(Bool()) // sbuffer-flush must flush all store entries in mshr as well
     val flush = Flipped(new SbufferFlushBundle)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
     val store_prefetch = Vec(StorePipelineWidth, DecoupledIO(new StorePrefetchReq)) // to dcache
@@ -531,11 +532,12 @@ class Sbuffer(implicit p: Parameters)
 
   // ---------------------- Send Dcache Req ---------------------
 
-  val sbuffer_empty = Cat(invalidMask).andR
+  // Flush completion must also wait until store misses in MSHR are drained.
+  val sbuffer_empty = Cat(invalidMask).andR && io.mshr_store_empty
   val sq_empty = !Cat(io.in.req.map(_.valid)).orR
   val empty = sbuffer_empty && sq_empty
   val threshold = Wire(UInt(5.W)) // RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
-  threshold := Constantin.createRecord(s"StoreBufferThreshold_${p(XSCoreParamsKey).HartId}", initValue = 7)
+  threshold := Constantin.createRecord(s"StoreBufferThreshold_${p(XSCoreParamsKey).HartId}", initValue = 9)
   val base = Wire(UInt(5.W))
   base := Constantin.createRecord(s"StoreBufferBase_${p(XSCoreParamsKey).HartId}", initValue = 4)
   val ActiveCount = PopCount(activeMask)
@@ -681,8 +683,8 @@ class Sbuffer(implicit p: Parameters)
   XSDebug(p"sbuffer_out_s0_valid:$sbuffer_out_s0_valid evictIdx:$sbuffer_out_s0_evictionIdx dcache ready:${io.dcache.req.ready}\n")
   // Note: if other dcache req in the same block are inflight,
   // the lru update may not accurate
-  accessIdx(EnsbufferWidth).valid := invalidMask(replaceIdx) || (
-    need_replace && !need_drain && !cohHasTimeOut && !missqReplayHasTimeOut && sbuffer_out_s0_cango && activeMask(replaceIdx))
+  accessIdx(EnsbufferWidth).valid :=
+    need_replace && !need_drain && !cohHasTimeOut && !missqReplayHasTimeOut && sbuffer_out_s0_cango && activeMask(replaceIdx)
   accessIdx(EnsbufferWidth).bits := replaceIdx
   val sbuffer_out_s1_evictionIdx = RegEnable(sbuffer_out_s0_evictionIdx, sbuffer_out_s0_fire)
   val sbuffer_out_s1_evictionPTag = RegEnable(ptag(sbuffer_out_s0_evictionIdx), sbuffer_out_s0_fire)
@@ -715,7 +717,6 @@ class Sbuffer(implicit p: Parameters)
       stateVec(dcache_resp_id).state_inflight := false.B
       stateVec(dcache_resp_id).state_valid := false.B
       assert(!resp.bits.replay)
-      assert(!resp.bits.miss) // not need to resp if miss, to be opted
       assert(stateVec(dcache_resp_id).state_inflight === true.B)
     }
 
@@ -767,8 +768,8 @@ class Sbuffer(implicit p: Parameters)
       val difftest = DifftestModule(new DiffSbufferEvent, delay = 1)
       val dcache_resp_id = resp.bits.id
       difftest.coreid := io.hartId
-      difftest.index  := index.U
-      difftest.valid  := resp.fire
+      difftest.index  := 1.U + index.U
+      difftest.valid  := resp.fire && !resp.bits.miss
       difftest.addr   := getAddr(ptag(dcache_resp_id))
       difftest.data   := data(dcache_resp_id).asTypeOf(Vec(CacheLineBytes, UInt(8.W)))
       difftest.mask   := mask(dcache_resp_id).asUInt
