@@ -36,13 +36,8 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     // control
     val redirect = Flipped(Valid(new Redirect))
 
-    // Allocation from dispatch
-    val alloc = Vec(LSQEnqWidth, Flipped(ValidIO(new DynInst)))
-    val doAlloc = Input(Bool())
-
-    // Completion
-    // Last one is for tl_d refill
-    val complete = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
+    // violation query
+    val query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO))
 
     // release cacheline
     val release = Flipped(Valid(new Release))
@@ -51,31 +46,13 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     val ldWbPtr = Input(new LqPtr)
 
     // global
-    /**
-     * At most one rollback per cycle, because at most one release per cycle
-     */
-    val rollback = Output(Valid(new Redirect))
+    val lqFull = Output(Bool())
 
-    // Check ptr for current probe
-    val check = Valid(new ReleaseCheck)
-
-    // CSR controls (for TSO activation)
+    // CSR controls
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
   })
 
-  // FIXME(meow):
-  // This module may have two problems
-  // 1. nc is not correctly handled. NC should also induce a immediate release at the same cycle, but we don't have
-  //   an extra CAM to detect same-address loads
-  // 2. There might be an extra racing condition if the metadata is read at LDU s0, returned at LDU s1
-  //  but release come in at LDU s1, so latestRelease is at LDU s2.
-  //  Whether this require us to do anything depends on how DCache handles this release. Is it possible?
-  //  - If the release is handled as LATER THAN the load, and the release takes at least two cycle so no loads can enter
-  //    DCache the exact next cycle, then we may be able to just bump the latestRelease delay
-  //  - Otherwise, headaches
-
   private val PartialPAddrStride: Int = 6
-  require(PartialPAddrStride >= log2Up(blockBytes))
   private val PartialPAddrBits: Int = 16
   private val PartialPAddrLowBits: Int = (PartialPAddrBits - PartialPAddrStride) / 2 // avoid overlap
   private val PartialPAddrHighBits: Int = PartialPAddrBits - PartialPAddrLowBits
@@ -118,194 +95,180 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
   //  MicroOp     : Micro-op
   //  PAddr       : physical address.
   //  Released    : DCache released.
-  val tsoActive = RegNext(io.csrCtrl.tso_enable, true.B)
   val allocated = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B))) // The control signals need to explicitly indicate the initial value
-  val pending = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
-  val meow_debug_pending = MarkDebug(WireDefault(pending.asUInt))
-  val meow_debug_allocated = MarkDebug(WireDefault(allocated.asUInt))
   val uop = Reg(Vec(LoadQueueRARSize, new DynInst))
   val paddrModule = Module(new LqPAddrModule(
     gen = UInt(PartialPAddrBits.W),
     numEntries = LoadQueueRARSize,
-    numRead = 0,
+    numRead = LoadPipelineWidth,
     numWrite = LoadPipelineWidth,
     numWBank = LoadQueueNWriteBanks,
-    numWDelay = 2,
-    numCamPort = 1,
+    numWDelay = 1,
+    numCamPort = LoadPipelineWidth,
     enableCacheLineCheck = false, // Now `RARQueue` has no need to check cacheline.
     paddrOffset = 0 // If you need to check cacheline, set the offset relative to the original paddr correctly.
   ))
   paddrModule.io := DontCare
+  val released = RegInit(VecInit(List.fill(LoadQueueRARSize)(false.B)))
 
-  require(VirtualLoadQueueSize == LoadQueueRARSize)
+  // freeliset: store valid entries index.
+  // +---+---+--------------+-----+-----+
+  // | 0 | 1 |      ......  | n-2 | n-1 |
+  // +---+---+--------------+-----+-----+
+  val freeList = Module(new FreeList(
+    size = LoadQueueRARSize,
+    allocWidth = LoadPipelineWidth,
+    freeWidth = 4,
+    enablePreAlloc = false,
+    moduleName = "LoadQueueRAR freelist"
+  ))
+  freeList.io := DontCare
 
   // Real-allocation: load_s2
-  // <del>PAddr write needs 2 cycles, release signal should delay 1 cycle so that</del>
-  // This is now purely for timing optimization
+  // PAddr write needs 2 cycles, release signal should delay 1 cycle so that
   // load enqueue can catch release.
-  var latestRelease = Pipe(io.release, 1)
-
-  /*
   val release1Cycle = io.release
   // val release2Cycle = RegNext(io.release)
   // val release2Cycle_dup_lsu = RegNext(io.release)
   val release2Cycle = RegEnable(io.release, io.release.valid)
   release2Cycle.valid := RegNext(io.release.valid)
   //val release2Cycle_dup_lsu = RegEnable(io.release, io.release.valid)
-  */
 
-  // Deallocation
+  // LoadQueueRAR enqueue condition:
+  // There are still not completed load instructions before the current load instruction.
+  // (e.g. "not completed" means that load instruction get the data or exception).
+  val canEnqueue = io.query.map(_.req.valid)
+  val cancelEnqueue = io.query.map(_.req.bits.uop.robIdx.needFlush(io.redirect))
+  val hasNotWritebackedLoad = io.query.map(_.req.bits.uop.lqIdx).map(lqIdx => isAfter(lqIdx, io.ldWbPtr))
+  val needEnqueue = canEnqueue.zip(hasNotWritebackedLoad).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
+
+  // Allocate logic
+  val acceptedVec = Wire(Vec(LoadPipelineWidth, Bool()))
+  val enqIndexVec = Wire(Vec(LoadPipelineWidth, UInt(log2Up(LoadQueueRARSize).W)))
+
+  for ((enq, w) <- io.query.map(_.req).zipWithIndex) {
+    acceptedVec(w) := false.B
+    paddrModule.io.wen(w) := false.B
+    freeList.io.doAllocate(w) := false.B
+
+    freeList.io.allocateReq(w) := true.B
+
+    //  Allocate ready
+    val offset = PopCount(needEnqueue.take(w))
+    val canAccept = freeList.io.canAllocate(offset)
+    val enqIndex = freeList.io.allocateSlot(offset)
+    enq.ready := Mux(needEnqueue(w), canAccept, true.B)
+
+    enqIndexVec(w) := enqIndex
+    when (needEnqueue(w) && enq.ready) {
+      acceptedVec(w) := true.B
+
+      freeList.io.doAllocate(w) := true.B
+      //  Allocate new entry
+      allocated(enqIndex) := true.B
+
+      //  Write paddr
+      paddrModule.io.wen(w) := true.B
+      paddrModule.io.waddr(w) := enqIndex
+      paddrModule.io.wdata(w) := genPartialPAddr(enq.bits.paddr)
+
+      //  Fill info
+      uop(enqIndex) := enq.bits.uop
+      //  NC is uncachable and will not be explicitly released.
+      //  So NC requests are not allowed to have RAR
+      released(enqIndex) := enq.bits.is_nc || (
+        enq.bits.data_valid &&
+        (release2Cycle.valid && enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release2Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset)
+        || release1Cycle.valid && enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === release1Cycle.bits.paddr(PAddrBits-1, DCacheLineOffset))
+      )
+    }
+    val debug_robIdx = enq.bits.uop.robIdx.asUInt
+    XSError(
+      needEnqueue(w) && enq.ready && allocated(enqIndex),
+      p"LoadQueueRAR: You can not write an valid entry! check: ldu $w, robIdx $debug_robIdx")
+  }
+
+  //  LoadQueueRAR deallocate
+  val freeMaskVec = Wire(Vec(LoadQueueRARSize, Bool()))
+
+  // init
+  freeMaskVec.map(e => e := false.B)
+
   // when the loads that "older than" current load were writebacked,
   // current load will be released.
-  val deallocating = for (i <- 0 until LoadQueueRARSize) yield {
-    val deqNotBlock = isBefore(uop(i).lqIdx, io.ldWbPtr)
-    val needFlush = uop(i).robIdx.needFlush(io.redirect)
-    deqNotBlock || needFlush
-  }
-
-  val allocations = for ((alloc, idx) <- io.alloc.zipWithIndex) yield {
-    // alloc.valid -> !allocated(alloc.bits.value)
-    // because if that lqptr is present in a uop that's being dispatched,
-    // the previous owner of that lqptr has to be committed
-    assert(!(alloc.valid && io.doAlloc) || !allocated(alloc.bits.lqIdx.value) || !deallocating(idx))
-    val canceled = alloc.bits.robIdx.needFlush(io.redirect)
-    val lower = alloc.bits.lqIdx
-    val upper = alloc.bits.lqIdx + alloc.bits.numLsElem
-    (
-      io.doAlloc && alloc.valid && !canceled,
-      alloc.bits,
-      (lower.flag =/= upper.flag, lower, upper),
-    )
-  }
-
-  // Allocation
   for (i <- 0 until LoadQueueRARSize) {
-    val allocationHit = allocations.map({ case (doAlloc, _, (wrapped, lower, upper)) => (
-      doAlloc && Mux(
-        wrapped,
-        lower.value <= i.U || i.U < upper.value,
-        lower.value <= i.U && i.U < upper.value,
-      )
-    )})
-    allocated(i) := allocated(i) && !deallocating(i) || ParallelOR(allocationHit)
-    pending(i) := pending(i) || ParallelOR(allocationHit)
-    uop(i) := MuxCase(uop(i), allocationHit.zip(allocations.map({ case (_, uop, _) => uop })))
-  }
+    val deqNotBlock = !isBefore(io.ldWbPtr, uop(i).lqIdx)
+    val needFlush = uop(i).robIdx.needFlush(io.redirect)
 
-  var sameCycleCompletion = 0.U(LoadQueueRARSize.W)
-
-  // Completions
-  for ((c, w) <- io.complete.zipWithIndex) {
-    // Allocate ready
-    c.req.ready := true.B
-
-    // Write CAM regardless of data_valid
-    val idx = c.req.bits.uop.lqIdx.value
-    paddrModule.io.waddr(w) := idx
-    paddrModule.io.wdata(w) := genPartialPAddr(c.req.bits.paddr)
-    paddrModule.io.wen(w) := c.req.valid
-
-    // Completion, delay by one cycle
-    val commit = RegNext(c.req.valid && c.req.bits.data_valid) && !c.revoke
-    sameCycleCompletion = sameCycleCompletion | (Mux(commit, 1.U(LoadQueueRARSize.W), 0.U(LoadQueueRARSize.W)) << idx).take(LoadQueueRARSize)
-    when(commit) {
-      pending(RegNext(idx)) := false.B
+    when (allocated(i) && (deqNotBlock || needFlush)) {
+      allocated(i) := false.B
+      freeMaskVec(i) := true.B
     }
-
-    // Assert: already allocated
-    assert(!c.req.valid || allocated(idx))
-
-    // NC is uncachable and will not be explicitly released.
-    // So NC requests are not allowed to have RAR
-    // FIXME: uncache gets implicitly released immediately
-    // Find any older susceptible loads
-    /*
-    val justReleased = enq.bits.is_nc || (
-      enq.bits.data_valid && ParallelOR(releases.map(
-        r => r.valid && enq.bits.paddr(PAddrBits-1, DCacheLineOffset) === r.bits.paddr(PAddrBits-1, DCacheLineOffset)
-      ))
-    )
-    */
   }
 
-  val meow_debug_sameCycleCompletion = MarkDebug(WireDefault(sameCycleCompletion))
+  // if need replay revoke entry
+  val lastCanAccept = GatedRegNext(acceptedVec)
+  val lastAllocIndex = GatedRegNext(enqIndexVec)
+
+  for ((revoke, w) <- io.query.map(_.revoke).zipWithIndex) {
+    val revokeValid = revoke && lastCanAccept(w)
+    val revokeIndex = lastAllocIndex(w)
+
+    when (allocated(revokeIndex) && revokeValid) {
+      allocated(revokeIndex) := false.B
+      freeMaskVec(revokeIndex) := true.B
+    }
+  }
+
+  freeList.io.free := freeMaskVec.asUInt
 
   // LoadQueueRAR Query
   // Load-to-Load violation check condition:
-  // 1. Physical address match by CAM port.
+  // 1. Physical address match by CAM port, or we're in TSO mode
   // 2. release or nc_with_data is set.
   // 3. Younger than current load instruction.
+  val ldLdViolation = Wire(Vec(LoadPipelineWidth, Bool()))
+  //val allocatedUInt = RegNext(allocated.asUInt)
+  for ((query, w) <- io.query.zipWithIndex) {
+    ldLdViolation(w) := false.B
+    paddrModule.io.releaseViolationMdata(w) := genPartialPAddr(query.req.bits.paddr)
 
-  val releaseQuery = genPartialPAddr(latestRelease.bits.paddr)
-  paddrModule.io.releaseViolationMdata(0) := releaseQuery
-  val releasedRaw = paddrModule.io.releaseViolationMmask(0).asUInt
-  // Because paddrModule has one cycle latency, also check recent writes
-  val recentWrittenMasks = for((en, addr, data) <- paddrModule.io.wen.lazyZip(paddrModule.io.waddr).lazyZip(paddrModule.io.wdata)) yield {
-    val writeMask = Fill(releasedRaw.getWidth, en) & (1.U(1.W) << addr).take(releasedRaw.getWidth)
-    val dataHit = RegNext(data) === releaseQuery
-    val hitMask = Fill(releasedRaw.getWidth, dataHit)
-    require(writeMask.getWidth == releasedRaw.getWidth)
-    require(hitMask.getWidth == releasedRaw.getWidth)
-    hitMask & RegNext(writeMask)
-  }
-  val recentWrittenMerged = recentWrittenMasks.reduce(_ | _)
-  val released = (releasedRaw | recentWrittenMerged).take(releasedRaw.getWidth)
-
-  // What to check against?
-  val check = dontTouch(allocated.asUInt & Mux(tsoActive, pending.asUInt, released & pending.asUInt))
-
-  // Find oldest check
-  // Use last cycle value of ldWbPtr, because deallocating takes one cycle
-  // In theory, all pending bits should be unset during deallocation
-  // But currently uncached requests are handled differently
-  val lastIdx = RegNext(io.ldWbPtr.value)
-  val checkPresent = check.orR && latestRelease.valid
-  def findOldest(mask: UInt): UInt = {
-    val backMask = dontTouch(((-1).S(mask.getWidth.W).asUInt << lastIdx).take(mask.getWidth))
-    require(backMask.getWidth == mask.getWidth)
-    assert(PopCount(backMask) + lastIdx === (mask.getWidth).U)
-    val front = PriorityEncoderOH(mask)
-    val back = PriorityEncoderOH(mask & backMask)
-    Mux(back.orR, back, front)
-  }
-  val oldestCheck = dontTouch(findOldest(check))
-  val checkRobIdx = Mux1H(oldestCheck, uop.map(_.robIdx))
-  // Sanity check
-  for ((c, i) <- check.asBools.zipWithIndex) {
-    assert(!c || uop(i).robIdx >= checkRobIdx)
+    query.resp.valid := RegNext(query.req.valid)
+    // Generate real violation mask
+    val robIdxMask = VecInit(uop.map(_.robIdx).map(isAfter(_, query.req.bits.uop.robIdx)))
+    val matchMaskReg = Wire(Vec(LoadQueueRARSize, Bool()))
+    for(i <- 0 until LoadQueueRARSize) {
+      matchMaskReg(i) := (allocated(i) &
+                         (io.csrCtrl.tso_enable || paddrModule.io.releaseViolationMmask(w)(i)) &
+                         robIdxMask(i) &&
+                         released(i))
+      }
+    val matchMask = RegEnable(matchMaskReg, query.req.valid)
+    //  Load-to-Load violation check result
+    val ldLdViolationMask = matchMask
+    ldLdViolationMask.suggestName("ldLdViolationMask_" + w)
+    query.resp.bits.rep_frm_fetch := ParallelORR(ldLdViolationMask)
   }
 
-  io.check.bits.older := checkRobIdx
-  io.check.bits.released := latestRelease.bits.paddr
-  io.check.valid := checkPresent
 
-  // Find oldest victim
-  val victim = (
-    allocated.asUInt
-    & ((~pending.asUInt).asUInt | sameCycleCompletion)
-    & released
-    & (VecInit(uop.map(u => isAfter(u.robIdx, checkRobIdx))).asUInt)
-  )
-  val victimPresent = victim.orR
-  val oldestVictim = dontTouch(findOldest(victim))
-  val selectedVictim = Mux1H(oldestVictim, uop)
-  // Sanity check
-  for ((v, i) <- victim.asBools.zipWithIndex) {
-    assert(!v || uop(i).robIdx >= selectedVictim.robIdx)
+  // When io.release.valid (release1cycle.valid), it uses the last ld-ld paddr cam port to
+  // update release flag in 1 cycle
+  val releaseVioMask = Reg(Vec(LoadQueueRARSize, Bool()))
+  when (release1Cycle.valid) {
+    paddrModule.io.releaseMdata.takeRight(1)(0) := genPartialPAddr(release1Cycle.bits.paddr)
   }
 
-  io.rollback.valid := checkPresent && victimPresent
-  io.rollback.bits := DontCare
-  io.rollback.bits.isRVC       := selectedVictim.preDecodeInfo.isRVC
-  io.rollback.bits.robIdx      := selectedVictim.robIdx
-  io.rollback.bits.ftqIdx      := selectedVictim.ftqPtr
-  io.rollback.bits.ftqOffset   := selectedVictim.ftqOffset
-  io.rollback.bits.level       := RedirectLevel.flush
-  io.rollback.bits.cfiUpdate.target := selectedVictim.pc
-  io.rollback.bits.debug_runahead_checkpoint_id := selectedVictim.debugInfo.runahead_checkpoint_id
+  (0 until LoadQueueRARSize).map(i => {
+    when (RegNext((paddrModule.io.releaseMmask.takeRight(1)(0)(i)) && allocated(i) && release1Cycle.valid)) {
+      // Note: if a load has missed in dcache and is waiting for refill in load queue,
+      // its released flag still needs to be set as true if addr matches.
+      released(i) := true.B
+    }
+  })
+
+  io.lqFull := freeList.io.empty
 
   // perf cnt
-  /*
   val canEnqCount = PopCount(io.query.map(_.req.fire))
   val validCount = freeList.io.validCount
   val allowEnqueue = validCount <= (LoadQueueRARSize - LoadPipelineWidth).U
@@ -318,8 +281,6 @@ class LoadQueueRAR(implicit p: Parameters) extends XSModule
     ("enq", canEnqCount),
     ("ld_ld_violation", ldLdViolationCount)
   )
-  */
-  val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
   // End
 }

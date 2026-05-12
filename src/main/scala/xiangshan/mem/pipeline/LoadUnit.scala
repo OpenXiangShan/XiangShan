@@ -94,8 +94,6 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val ldld_nuke_query = new LoadNukeQueryIO
   // lq -> ldu for misalign
   val lqDeqPtr = Input(new LqPtr)
-  // lsq LQRAR -> ldu
-  val ldld_check = Flipped(Valid(new ReleaseCheck))
 }
 
 class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
@@ -205,7 +203,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // to misalign buffer
     val misalign_enq = new MisalignBufferEnqIO
 
-    // rollback, except RAR and RAW, which is given directly in LoadQueue
+    // Load RAR rollback
     val rollback = Valid(new Redirect)
 
     val robDeqIdx = Input(new RobPtr)
@@ -673,12 +671,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     out
   }
 
-  // TSO stuff
-  val matchReleaseOffset = log2Up(blockBytes)
-  def matchReleaseAddr(paddr: UInt): Bool = {
-    paddr(PAddrBits - 1, matchReleaseOffset) === io.lsq.ldld_check.bits.released(PAddrBits - 1, matchReleaseOffset)
-  }
-
   // set default
   val s0_src_selector = WireInit(s0_src_valid_vec)
   if (!EnableLoadToLoadForward) { s0_src_selector(l2l_fwd_idx) := false.B }
@@ -1007,21 +999,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       )
     }
   })
-  val s1_nuke_stld = VecInit((0 until StorePipelineWidth).map(w => {
+  val s1_nuke = VecInit((0 until StorePipelineWidth).map(w => {
                        io.stld_nuke_query(w).valid && // query valid
                        isAfter(s1_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
                        s1_nuke_paddr_match(w) && // paddr match
                        (s1_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
                       })).asUInt.orR && !s1_tlb_miss
-  val s1_nuke_ldld_cur = (
-    io.lsq.ldld_check.valid
-    && isAfter(s1_in.uop.robIdx, io.lsq.ldld_check.bits.older)
-    && matchReleaseAddr(s1_paddr_dup_lsu)
-    && !s1_tlb_miss
-  )
-  val s1_nuke_ldld = Wire(Bool())
-  s1_nuke_ldld := s1_nuke_ldld_cur || RegNext(s1_nuke_ldld && !s1_can_go)
-  val s1_nuke = s1_nuke_stld || s1_nuke_ldld
 
   s1_out                   := s1_in
   s1_out.vaddr             := s1_vaddr
@@ -1319,22 +1302,12 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       )
     }
   })
-  val s2_nuke_stld    = VecInit((0 until StorePipelineWidth).map(w => {
+  val s2_nuke          = VecInit((0 until StorePipelineWidth).map(w => {
                           io.stld_nuke_query(w).valid && // query valid
                           isAfter(s2_in.uop.robIdx, io.stld_nuke_query(w).bits.robIdx) && // older store
                           s2_nuke_paddr_match(w) && // paddr match
                           (s2_in.mask & io.stld_nuke_query(w).bits.mask).orR // data mask contain
-                        })).asUInt.orR && !s2_tlb_miss
-  // FIXME(meow): check s2 really probed
-  val s2_nuke_ldld_cur = (
-    io.lsq.ldld_check.valid
-    && isAfter(s2_in.uop.robIdx, io.lsq.ldld_check.bits.older)
-    && matchReleaseAddr(s2_in.paddr)
-    && !s2_tlb_miss
-  )
-  val s2_nuke_ldld = Wire(Bool())
-  s2_nuke_ldld := s2_nuke_ldld_cur || RegNext(s2_nuke_ldld && !s2_can_go)
-  val s2_nuke = s2_nuke_stld || s2_nuke_ldld || s2_in.rep_info.nuke
+                        })).asUInt.orR && !s2_tlb_miss || s2_in.rep_info.nuke
 
   val s2_cache_handled   = io.dcache.resp.bits.handled
 
@@ -1412,11 +1385,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldld_nuke_query.req.bits.paddr      := s2_in.paddr
   io.lsq.ldld_nuke_query.req.bits.data_valid := Mux(s2_full_fwd || s2_fwd_data_valid || s2_nc_with_data, true.B, !s2_dcache_miss)
   io.lsq.ldld_nuke_query.req.bits.is_nc := s2_nc_with_data
-  val s2_rar_replay_baseline = (s2_nuke || s2_bank_conflict || s2_wpu_pred_fail ||
-    s2_fwd_fail || s2_mem_amb || s2_mq_nack) && s2_troublem
-  // s2_rar_replay_baseline -> s2_out.rep_info.need_rep
-  assert(!s2_rar_replay_baseline || s2_out.rep_info.need_rep)
-
 
   // st-ld violation require
   io.lsq.stld_nuke_query.req.valid           := s2_valid && s2_can_query && !s2_in.isFrmMisAlignBuf
@@ -1647,13 +1615,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   val s3_vp_match_fail = GatedValidRegNext(s2_fwd_vp_match_invalid) && s3_troublem
   val s3_rep_frm_fetch = s3_vp_match_fail
-  /*
   val s3_ldld_rep_inst =
       io.lsq.ldld_nuke_query.resp.valid &&
       io.lsq.ldld_nuke_query.resp.bits.rep_frm_fetch &&
-      GatedValidRegNext(io.csrCtrl.ldld_vio_check_enable) //FIXME: meow!
+      GatedValidRegNext(io.csrCtrl.ldld_vio_check_enable)
   val s3_flushPipe = s3_ldld_rep_inst
-  */
 
   val s3_lrq_rep_info = WireInit(s3_in.rep_info)
   s3_lrq_rep_info.misalign_nack := toMisalignBufferValid && !(io.misalign_enq.req.ready && s3_misalign_can_go)
@@ -1720,7 +1686,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     (io.misalign_ldout.bits.rep_info.fwd_fail || io.misalign_ldout.bits.rep_info.mem_amb || io.misalign_ldout.bits.rep_info.nuke
       || io.misalign_ldout.bits.rep_info.rar_nack || io.misalign_ldout.bits.rep_info.raw_nack)
 
-  io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_frm_mis_flush) && !s3_final_exception
+  io.rollback.valid := s3_valid && (s3_rep_frm_fetch || s3_flushPipe || s3_frm_mis_flush) && !s3_final_exception
   io.rollback.bits             := DontCare
   io.rollback.bits.isRVC       := s3_out.bits.uop.preDecodeInfo.isRVC
   io.rollback.bits.robIdx      := s3_out.bits.uop.robIdx
@@ -1921,7 +1887,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     io.l2l_fwd_out.valid      := s3_valid && !s3_in.mmio && !s3_in.nc && !s3_lrq_rep_info.need_rep
     io.l2l_fwd_out.data       := Mux(s3_in.vaddr(3), s3_merged_data_frm_pipe(127, 64), s3_merged_data_frm_pipe(63, 0))
     io.l2l_fwd_out.dly_ld_err := s3_hw_err || // ecc delayed error
-                                 // s3_ldld_rep_inst ||
+                                 s3_ldld_rep_inst ||
                                  s3_rep_frm_fetch
   } else {
     io.l2l_fwd_out.valid := false.B
@@ -1984,7 +1950,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   XSPerfAccumulate("s3_rollback_total",             io.rollback.valid)
   XSPerfAccumulate("s3_rep_frm_fetch_rollback",     io.rollback.valid && s3_rep_frm_fetch)
-  // XSPerfAccumulate("s3_flushPipe_rollback",         io.rollback.valid && s3_flushPipe)
+  XSPerfAccumulate("s3_flushPipe_rollback",         io.rollback.valid && s3_flushPipe)
   XSPerfAccumulate("s3_frm_mis_flush_rollback",     io.rollback.valid && s3_frm_mis_flush)
 
   XSPerfAccumulate("s1_in_valid",                  s1_valid)
@@ -2026,7 +1992,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   XSPerfAccumulate("nc_ld_writeback", io.ldout.valid && s3_nc_with_data)
   XSPerfAccumulate("nc_ld_exception", s3_valid && s3_nc_with_data && s3_in.uop.exceptionVec.reduce(_ || _))
-  // XSPerfAccumulate("nc_ldld_vio", s3_valid && s3_nc_with_data && s3_ldld_rep_inst)
+  XSPerfAccumulate("nc_ldld_vio", s3_valid && s3_nc_with_data && s3_ldld_rep_inst)
   XSPerfAccumulate("nc_stld_vio", s3_valid && s3_nc_with_data && s3_in.rep_info.nuke)
   XSPerfAccumulate("nc_ldld_vioNack", s3_valid && s3_nc_with_data && s3_in.rep_info.rar_nack)
   XSPerfAccumulate("nc_stld_vioNack", s3_valid && s3_nc_with_data && s3_in.rep_info.raw_nack)

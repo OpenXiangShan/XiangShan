@@ -204,6 +204,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val lqFull  = Output(Bool())
     val ldWbPtr = Input(new LqPtr)
     val robDeqPtr = Input(new RobPtr)
+    val rarFull = Input(Bool())
     val rawFull = Input(Bool())
     val loadMisalignFull = Input(Bool())
     val l2_hint  = Input(Valid(new L2ToL1Hint()))
@@ -336,7 +337,6 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   // update blocking condition
   (0 until LoadQueueReplaySize).map(i => {
-    XSError(cause(i)(LoadReplayCauses.C_RAR), "RAR queue should never blocks")
     // case C_MA
     when (cause(i)(LoadReplayCauses.C_MA)) {
       blocking(i) := Mux(stAddrDeqVec(i), false.B, blocking(i))
@@ -357,9 +357,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
     // case C_RAR
     when (cause(i)(LoadReplayCauses.C_RAR)) {
-      // blocking(i) := Mux((!io.rarFull || !isAfter(uop(i).lqIdx, io.ldWbPtr)), false.B, blocking(i))
-      blocking(i) := false.B
-      // Should never happen!
+      blocking(i) := Mux((!io.rarFull || !isAfter(uop(i).lqIdx, io.ldWbPtr)), false.B, blocking(i))
     }
     // case C_RAW
     when (cause(i)(LoadReplayCauses.C_RAW)) {

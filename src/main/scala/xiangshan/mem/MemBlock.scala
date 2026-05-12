@@ -939,7 +939,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // ld-ld violation check
     loadUnits(i).io.lsq.ldld_nuke_query <> lsq.io.ldu.ldld_nuke_query(i)
     loadUnits(i).io.lsq.stld_nuke_query <> lsq.io.ldu.stld_nuke_query(i)
-    loadUnits(i).io.lsq.ldld_check <> lsq.io.ldu.ldld_check
     // loadqueue old ptr
     loadUnits(i).io.lsq.lqDeqPtr := lsq.io.lqDeqPtr
     loadUnits(i).io.csrCtrl       <> csrCtrl
@@ -1453,7 +1452,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     )).andR))
     resultOnehot
   }
-  val allRedirect = loadUnits.map(_.io.rollback) ++ hybridUnits.map(_.io.ldu_io.rollback) ++ lsq.io.nack_rollback ++ lsq.io.stld_nuke_rollback ++ lsq.io.ldld_nuke_rollback
+  val allRedirect = loadUnits.map(_.io.rollback) ++ hybridUnits.map(_.io.ldu_io.rollback) ++ lsq.io.nack_rollback ++ lsq.io.nuke_rollback
   val oldestOneHot = selectOldestRedirect(allRedirect)
   val oldestRedirect = WireDefault(Mux1H(oldestOneHot, allRedirect))
   // memory replay would not cause IAF/IPF/IGPF
@@ -1538,7 +1537,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.sqDeqPtr := lsq.io.sqDeqPtr
   io.mem_to_ooo.lqDeqPtr := lsq.io.lqDeqPtr
   lsq.io.tl_d_channel <> dcache.io.lsu.tl_d_channel
-  lsq.io.csrCtrl      := csrCtrl
+  lsq.io.csrCtrl      <> csrCtrl
 
   // LSQ to store buffer
   lsq.io.sbuffer        <> sbuffer.io.in
