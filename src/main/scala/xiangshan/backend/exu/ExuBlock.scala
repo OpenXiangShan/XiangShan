@@ -53,6 +53,14 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     val fromBJUResolve = bjuExus.map(_.io.toFrontendBJUResolve.get)
     io.toFrontendBJUResolve.get := fromBJUResolve
   }
+  else if (params.isFpSchd) {
+    val exuBlockOutToFalus = io.outToFalu.get.flatten
+    val exeUnitOutToFalus = exus.filter(_.exuParams.hasFmulFu).map(_.io.outToFalu.get)
+    exeUnitOutToFalus.zip(exuBlockOutToFalus).foreach { case (exeUnitOutToFalu, exuBlockOutToFalu) =>
+      exuBlockOutToFalu.valid := exeUnitOutToFalu.valid
+      exuBlockOutToFalu.bits := exeUnitOutToFalu.bits
+    }
+  }
   io.cross.I2FWakeupOut.foreach{ x =>
     val exuI2FIn = exus.filter(x => x.exuParams.fuConfigs.contains(I2fCfg)).head.io.in
     x := 0.U.asTypeOf(x)
@@ -103,6 +111,8 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   val in: MixedVec[MixedVec[DecoupledIO[NewExuInput]]] = Flipped(params.genNewExuInputCopySrcBundleNoMemBlock)
   // out(i)(j): issueblock(i), exu(j).
   val out: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = params.genNewExuOutputDecoupledBundleNoMemBlock
+  // out(i)(j): fp-issueblock(i), fp-exu(j). Only available in fpExuBlock [fpExeUnit-FMUL] -> [BypassNetwork] -> [fpExeUnit-FALU]
+  val outToFalu = Option.when(params.isFpSchd)(params.genExuOutToFaluBundleNoMemBlock)
   val cross = new ExuCrossRegion(params)
   val uncertainWakeupOut = Option.when(params.issueBlockParams.map(_.needUncertainWakeupFromExu).reduce(_ ||_))(params.genExuWakeUpOutValidBundle)
   val toFrontendBJUResolve = Option.when(params.isIntSchd)(Vec(backendParams.BrhCnt, Valid(new Resolve)))

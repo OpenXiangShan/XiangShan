@@ -54,7 +54,7 @@ case class SchdBlockParams(
 
   def VsetCnt: Int = issueBlockParams.map(_.VsetCnt).sum
 
-  def FmacCnt: Int = issueBlockParams.map(_.FmacCnt).sum
+  def FmulCnt: Int = issueBlockParams.map(_.FmulCnt).sum
 
   def FDivSqrtCnt: Int = issueBlockParams.map(_.fDivSqrtCnt).sum
 
@@ -237,6 +237,10 @@ case class SchdBlockParams(
 
   def genExuOutputDecoupledBundleNoMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = {
     MixedVec(this.issueBlockParams.filterNot(_.isMemBlockIQ).map(_.genExuOutputDecoupledBundle))
+  }
+
+  def genExuOutToFaluBundleNoMemBlock(implicit p: Parameters): MixedVec[MixedVec[ValidIO[NewExuInput]]] = {
+    MixedVec(this.issueBlockParams.filterNot(_.isMemBlockIQ).filter(_.FmulCnt > 0).map(_.genExuOutToFaluValidBundle))
   }
 
   def genNewExuOutputDecoupledBundleNoMemBlock(implicit p: Parameters): MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = {

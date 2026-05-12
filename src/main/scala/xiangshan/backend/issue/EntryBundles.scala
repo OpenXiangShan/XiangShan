@@ -20,6 +20,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     //basic status
     val robIdx                = new RobPtr
     val fuType                = IQFuType()
+    val isFmac                = Option.when(params.FmulCnt > 0)(Bool())
     //src status
     val srcStatus             = Vec(params.numRegSrc, new SrcStatus)
     val srcStatusV0           = Option.when(params.readV0Rf)(new V0SrcStatus)
@@ -356,6 +357,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                           else true.B)
     val respIssueFail                                  = commonIn.issueResp.failed && sqIdxHit
     entryUpdate.status.robIdx                         := status.robIdx
+    entryUpdate.status.isFmac.foreach(_               := status.isFmac.get)
     entryUpdate.status.fuType                         := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType))
     entryUpdate.status.srcStatus.zip(status.srcStatus).zipWithIndex.foreach { case ((srcStatusNext, srcStatus), srcIdx) =>
       val srcLoadCancel = common.srcLoadCancelVec(srcIdx)

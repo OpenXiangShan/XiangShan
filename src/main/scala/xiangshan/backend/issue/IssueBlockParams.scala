@@ -198,7 +198,7 @@ case class IssueBlockParams(
 
   def VsetCnt: Int = exuBlockParams.map(_.fuConfigs.count(x => x.fuType == FuType.vset)).sum
 
-  def FmacCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fmac)).sum
+  def FmulCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fmul)).sum
 
   def fDivSqrtCnt: Int = exuBlockParams.map(_.fuConfigs.count(_.fuType == FuType.fDivSqrt)).sum
 
@@ -420,6 +420,10 @@ case class IssueBlockParams(
 
   def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuOutput]] = {
     MixedVec(this.exuParams.map(x => DecoupledIO(x.genExuOutputBundle)))
+  }
+
+  def genExuOutToFaluValidBundle(implicit p: Parameters): MixedVec[ValidIO[NewExuInput]] = {
+    MixedVec(this.exuParams.filter(_.hasFmulFu).map(x => ValidIO(x.genNewExuInputBundle)))
   }
 
   def genNewExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[NewExuOutput]] = {
