@@ -519,13 +519,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   phr.io.train.s0_stall             := s0_stall
   phr.io.train.stageCtrl            := stageCtrl
   phr.io.train.redirect             := redirect
-  phr.io.train.s1_valid             := s1_fire
-  phr.io.train.s1_prediction        := s1_prediction
-  phr.io.train.s1_startPc           := s1_startPc
-  phr.io.train.s3_override          := s3_override
-  phr.io.train.s3_phrMeta           := s3_phrMeta
-  phr.io.train.s3_prediction        := s3_prediction
-  phr.io.train.s3_startPc           := s3_startPc
   phr.io.s1Train.valid              := s1_fire
   phr.io.s1Train.taken              := s1_prediction.taken
   phr.io.s1Train.startPc            := s1_startPc

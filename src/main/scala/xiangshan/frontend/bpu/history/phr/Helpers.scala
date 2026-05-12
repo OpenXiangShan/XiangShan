@@ -19,9 +19,7 @@ import chisel3._
 import chisel3.util._
 import scala.math.min
 import utility.ParallelXOR
-import utility.XSError
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.PhrHelper
@@ -102,6 +100,26 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
         computeFoldedHist(hist, info.FoldedLength)(info.HistoryLength)
     }
     foldedPhr
+  }
+
+  def getNextPhr(
+      basePhr:        Vec[Bool],
+      basePhrPtr:     PhrPtr,
+      updateTaken:    Bool,
+      nextPhrLowBits: UInt,
+      nextShiftBits:  UInt
+  ): Vec[Bool] = {
+    val nextPhr   = WireInit(basePhr)
+    val updatePtr = Mux(updateTaken, basePhrPtr + Shamt.U, basePhrPtr)
+    for (i <- 1 to PathHashHighWidth) {
+      nextPhr((updatePtr + i.U).value) := nextPhrLowBits(i - 1)
+    }
+    when(updateTaken) {
+      for (i <- 0 until Shamt) {
+        nextPhr((updatePtr - i.U).value) := nextShiftBits(Shamt - 1 - i)
+      }
+    }
+    nextPhr
   }
 
   def getNextFoldedPhr(
