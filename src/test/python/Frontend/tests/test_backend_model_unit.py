@@ -6,6 +6,8 @@ import pytest
 
 from env.backend_model import BackendModel
 from env.model.backend_state import ActiveWrongPathEpisode
+from env.model.backend_state import BackendEvent
+from env.model.backend_state import ROB_COMMIT_STATE_COMMITTED
 from env.model.backend_state import FtqEntry
 from env.model.backend_state import PATH_STATE_CORRECT
 from env.model.backend_state import PATH_STATE_WRONG
@@ -89,6 +91,215 @@ def test_commit_ftq_idx_must_be_contiguous() -> None:
 
     with pytest.raises(AssertionError, match="commit ftq_idx is not contiguous"):
         model._assert_commit_ftq_is_contiguous(0, 16, mode="queue")
+
+
+def test_drop_stale_committed_queue_head_asserts_instead_of_popping() -> None:
+    model = BackendModel()
+    model.commit_count = 1
+    model.commit_ptr_flag = 0
+    model.commit_ptr_value = 14
+    entry = _queue_instr(0x80000020, 0, 14)
+    entry.path_state = PATH_STATE_CORRECT
+    entry.rob_commit_state = ROB_COMMIT_STATE_COMMITTED
+    entry.is_last_in_entry = True
+    model._cfvec_queue = deque([entry])
+    model.ftq_entries = deque([FtqEntry(ftq_flag=0, ftq_value=14, observed_last_in_entry=True)])
+
+    with pytest.raises(AssertionError, match="cfvec queue head references committed ftq entry"):
+        model._drop_stale_committed_queue_head()
+
+
+def test_commit_plan_does_not_mutate_ftq_entries_until_apply() -> None:
+    model = BackendModel()
+    model.golden_trace = object()
+    model.current_cycle = 10
+    entry = _queue_instr(0x80000020, 0, 14)
+    entry.path_state = PATH_STATE_CORRECT
+    entry.rob_commit_state = ROB_COMMIT_STATE_COMMITTED
+    entry.is_last_in_entry = True
+    model._cfvec_queue = deque([entry])
+    model.ftq_entries = deque([FtqEntry(ftq_flag=0, ftq_value=14, observed_last_in_entry=True)])
+
+    planned = model._plan_commit_entry_for_cycle(apply=False)
+
+    assert planned is not None
+    assert list(model.ftq_entries) == [FtqEntry(ftq_flag=0, ftq_value=14, observed_last_in_entry=True)]
+    assert [item.ftq_value for item in model._cfvec_queue] == [14]
+
+    model.commit_entry_driven(planned)
+
+    assert list(model.ftq_entries) == []
+    assert list(model._cfvec_queue) == []
+    assert model.commit_ptr_flag == 0
+    assert model.commit_ptr_value == 14
+
+
+def test_golden_trace_commit_waits_for_cfvec_queue_span() -> None:
+    model = BackendModel()
+    model.golden_trace = object()
+    model.current_cycle = 10
+    model.ftq_entries = deque([FtqEntry(ftq_flag=0, ftq_value=14, observed_last_in_entry=True)])
+
+    planned = model._plan_commit_entry_for_cycle(apply=False)
+
+    assert planned is None
+    assert list(model.ftq_entries) == [FtqEntry(ftq_flag=0, ftq_value=14, observed_last_in_entry=True)]
+    assert model.commit_count == 0
+    assert model.commit_ptr_flag == 0
+    assert model.commit_ptr_value == 0
+
+
+def test_queue_head_commit_span_includes_full_contiguous_ftq() -> None:
+    model = BackendModel()
+    first = _queue_instr(0x80000052, 0, 3)
+    second = _queue_instr(0x80000054, 0, 3)
+    third = _queue_instr(0x80000056, 0, 3)
+    for entry in (first, second, third):
+        entry.path_state = PATH_STATE_CORRECT
+        entry.rob_commit_state = ROB_COMMIT_STATE_COMMITTED
+    first.is_last_in_entry = True
+
+    model._cfvec_queue = deque([first, second, third])
+
+    assert model._queue_head_ftq_commit_span() == ((0, 3), 3)
+
+
+def test_commit_invalidates_last_correct_cfi_context() -> None:
+    model = BackendModel()
+    model.commit_count = 1
+    model.commit_ptr_flag = 0
+    model.commit_ptr_value = 14
+    model._last_correct_cfi_context = {
+        "pc": 0x80000020,
+        "instr": 0x00000063,
+        "is_rvc": 0,
+        "pred_taken": 1,
+        "ftq_flag": 0,
+        "ftq_value": 14,
+        "ftq_offset": 0,
+        "branch_type": 1,
+        "ras_action": 0,
+        "queue_index": 0,
+        "golden_target_pc": 0x80000040,
+    }
+
+    model._invalidate_last_correct_cfi_context_after_commit()
+
+    assert model._last_correct_cfi_context is None
+
+
+def test_stale_last_correct_cfi_context_is_not_reused_for_redirect() -> None:
+    model = BackendModel()
+    model.commit_count = 1
+    model.commit_ptr_flag = 0
+    model.commit_ptr_value = 14
+    model._last_correct_cfi_context = {
+        "pc": 0x80000020,
+        "instr": 0x00000063,
+        "is_rvc": 0,
+        "pred_taken": 1,
+        "ftq_flag": 0,
+        "ftq_value": 14,
+        "ftq_offset": 0,
+        "branch_type": 1,
+        "ras_action": 0,
+        "queue_index": 0,
+        "golden_target_pc": 0x80000040,
+    }
+    wrong = _queue_instr(0x80000044, 0, 15)
+    model._cfvec_queue = deque([wrong])
+
+    redirect_context, target_pc, redirect_queue_index = model._derive_wrong_path_redirect(
+        queue_index=0,
+        queue_entry=wrong,
+    )
+
+    assert redirect_context is None
+    assert target_pc is None
+    assert redirect_queue_index is None
+
+
+def test_queue_head_mismatch_uses_last_committed_cfi_context() -> None:
+    model = BackendModel()
+    wrong = _queue_instr(0x800000cc, 1, 44)
+    model._cfvec_queue = deque([wrong])
+    model._last_committed_correct_cfi_context = {
+        "pc": 0x800000c8,
+        "instr": 0x00008067,
+        "is_rvc": 0,
+        "pred_taken": 1,
+        "ftq_flag": 1,
+        "ftq_value": 43,
+        "ftq_offset": 0,
+        "branch_type": 3,
+        "ras_action": 0,
+        "queue_index": None,
+        "queue_context_optional": True,
+        "golden_target_pc": 0x800000c2,
+    }
+
+    redirect_context, target_pc, redirect_queue_index = model._derive_wrong_path_redirect(
+        queue_index=0,
+        queue_entry=wrong,
+    )
+
+    assert redirect_context is not None
+    assert target_pc == 0x800000c2
+    assert redirect_queue_index is None
+
+
+def test_redirect_to_committed_ftq_entry_asserts() -> None:
+    model = BackendModel()
+    model.commit_count = 1
+    model.commit_ptr_flag = 0
+    model.commit_ptr_value = 14
+
+    with pytest.raises(AssertionError, match="redirect references committed ftq entry"):
+        model._plan_redirect_payload(
+            {
+                "target_pc": 0x80000040,
+                "reason": "golden_first_mismatch_redirect",
+                "pc": 0x80000020,
+                "taken": 1,
+                "ftq_flag": 0,
+                "ftq_value": 14,
+                "ftq_offset": 0,
+                "branch_type": 1,
+                "ras_action": 0,
+                "is_rvc": 0,
+                "level": 0,
+            }
+        )
+
+
+def test_ready_redirect_to_committed_ftq_entry_asserts_instead_of_dropping() -> None:
+    model = BackendModel()
+    model.current_cycle = 10
+    model.commit_count = 1
+    model.commit_ptr_flag = 0
+    model.commit_ptr_value = 14
+    model.pending_events.append(
+        BackendEvent(
+            kind="redirect",
+            ready_cycle=10,
+            payload={
+                "target_pc": 0x80000040,
+                "reason": "golden_first_mismatch_redirect",
+                "pc": 0x80000020,
+                "taken": 1,
+                "ftq_flag": 0,
+                "ftq_value": 14,
+                "ftq_offset": 0,
+                "branch_type": 1,
+                "ras_action": 0,
+                "is_rvc": 0,
+                "level": 0,
+            },
+        )
+    )
+
+    with pytest.raises(AssertionError, match="redirect references committed ftq entry"):
+        model._ready_redirect_for_cycle()
 
 
 def test_ftq_transition_without_last_is_unexpected_on_normal_path() -> None:
