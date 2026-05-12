@@ -461,19 +461,19 @@ case class XSCoreParameters
       IssueBlockParams(Seq(
         ExeUnitParams(
           "FEX0",
-          Seq(FaluCfg, FmacCfg, FcvtCfg, FcmpCfg),
+          Seq(FaluCfg, FmulCfg, FcvtCfg, FcmpCfg),
           Seq(FpWB(port = 0, 0), IntWB(port = 3, 1)),
           Seq(Seq(FpRD(0, 0)), Seq(FpRD(1, 0)), Seq(FpRD(2, 0))),
         ),
       ), numEntries = 20, numEnq = 2, numComp = 16),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX1", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
+        ExeUnitParams("FEX1", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 1, 0)), Seq(Seq(FpRD(3, 0)), Seq(FpRD(4, 0)), Seq(FpRD(5, 0)))),
       ), numEntries = 20, numEnq = 2, numComp = 16),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX2", Seq(FaluCfg, FmacCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
+        ExeUnitParams("FEX2", Seq(FaluCfg, FmulCfg, FdivCfg), Seq(FpWB(port = 2, 0)), Seq(Seq(FpRD(6, 0)), Seq(FpRD(7, 0)), Seq(FpRD(8, 0)))),
       ), numEntries = 20, numEnq = 2, numComp = 16),
       IssueBlockParams(Seq(
-        ExeUnitParams("FEX3", Seq(FaluCfg, FmacCfg), Seq(FpWB(port = 3, 0)), Seq(Seq(FpRD(9, 0)), Seq(FpRD(10, 0)), Seq(FpRD(11, 0)))),
+        ExeUnitParams("FEX3", Seq(FaluCfg, FmulCfg), Seq(FpWB(port = 3, 0)), Seq(Seq(FpRD(9, 0)), Seq(FpRD(10, 0)), Seq(FpRD(11, 0)))),
       ), numEntries = 20, numEnq = 2, numComp = 16),
     ),
       numPregs = fpPreg.numEntries,

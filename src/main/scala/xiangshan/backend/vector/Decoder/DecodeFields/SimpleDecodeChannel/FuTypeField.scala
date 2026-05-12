@@ -39,7 +39,7 @@ class FuTypeField(uopIdx: Int) extends DecodeField[InstPattern, UInt]{
           case _: Opcode.BkuOpcodes.type => FuType.bku.U
           case _: Opcode.CsrOpcodes.type => FuType.csr.U
           case _: Opcode.FenceOpcodes.type => FuType.fence.U
-          case _: Opcode.FMacOpcodes.type => FuType.fmac.U
+          case _: Opcode.FMacOpcodes.type => FuType.fmul.U
           case _: Opcode.FDivOpcodes.type => FuType.fDivSqrt.U
           case _: Opcode.I2fOpcodes.type => FuType.i2f.U
           case _: Opcode.FCvtOpcodes.type => FuType.fcvt.U

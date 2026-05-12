@@ -656,6 +656,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
           og0resp.sqIdx.foreach(_     := 0.U.asTypeOf(new SqPtr))
           og0resp.lqIdx.foreach(_     := 0.U.asTypeOf(new LqPtr))
           og0resp.fuType              := fromIQ(iqIdx)(iuIdx).bits.fuType
+          og0resp.isFmac              := fromIQ(iqIdx)(iuIdx).bits.isFmac.getOrElse(false.B)
 
           val og1resp = toIU.og1resp
           val hasUncertain = s1_toExuData(iqIdx)(iuIdx).exuParams.needUncertainWakeup
@@ -676,6 +677,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
               s1_toExuValid(iqIdx)(iuIdx) && !og1FailedVec2(iqIdx)(iuIdx)
             )
           og1resp.fuType           := s1_toExuData(iqIdx)(iuIdx).fuType
+          og1resp.isFmac           := s1_toExuData(iqIdx)(iuIdx).isFmac.getOrElse(false.B)
       }
   }
 

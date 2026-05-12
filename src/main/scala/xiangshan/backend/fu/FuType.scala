@@ -29,7 +29,7 @@ object FuType extends ChiselOHEnum {
 
   // fp
   val falu = addType(name = "falu")
-  val fmac = addType(name = "fmac")
+  val fmul = addType(name = "fmul")
   val fcvt = addType(name = "fcvt")
   val fDivSqrt = addType(name = "fDivSqrt")
   val fcmp = addType(name = "fcmp")
@@ -113,7 +113,7 @@ object FuType extends ChiselOHEnum {
     val fuTypes = FuConfig.allConfigs.filter(_.latency == CertainLatency(0)).map(_.fuType)
     FuTypeOrR(fuType, fuTypes)
   }
-  val fpArithAll = Seq(falu, fcvt, fmac, fDivSqrt, f2v, fcmp)
+  val fpArithAll = Seq(falu, fcvt, fmul, fDivSqrt, f2v, fcmp)
   val scalaMemAll = Seq(ldu, stu, mou)
   val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
   val vecOPF = Seq(vfalu, vfma, vfdiv, vfcvt)
@@ -124,7 +124,7 @@ object FuType extends ChiselOHEnum {
   val vecMove = Seq(vmove)
   val vecAll = vecVSET ++ vecArithOrMem ++ vecMove
   val fpOP = fpArithAll ++ Seq(i2f, i2v)
-  val scalaNeedFrm = Seq(i2f, fmac, fDivSqrt)
+  val scalaNeedFrm = Seq(i2f, fmul, fDivSqrt)
   val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
   val blockBackCompress = Seq(brh, jmp, njmp)
 
@@ -173,6 +173,8 @@ object FuType extends ChiselOHEnum {
   def isAMO(fuType: UInt): Bool = FuTypeOrR(fuType, mou)
 
   def isFence(fuType: UInt): Bool = FuTypeOrR(fuType, fence)
+
+  def isFmul(fuType: UInt): Bool = FuTypeOrR(fuType, fmul)
 
   def isCsr(fuType: UInt): Bool = FuTypeOrR(fuType, csr)
 
@@ -234,7 +236,7 @@ object FuType extends ChiselOHEnum {
     div -> "div",
     fence -> "fence",
     bku -> "bku",
-    fmac -> "fmac",
+    fmul -> "fmul",
     fDivSqrt -> "fdiv_fsqrt",
     ldu -> "load",
     stu -> "store",

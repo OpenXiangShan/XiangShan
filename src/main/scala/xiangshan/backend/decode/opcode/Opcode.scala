@@ -1008,7 +1008,7 @@ object Opcode {
 
   object FDivOpcodes extends FDivOpcodes
 
-  object FAluOpcodes extends Opcodes.FMiscOpcode
+  object FAluOpcodes extends Opcodes.FMacOpcode
   object VFRedOpcodes extends Opcodes.VFRedOpcode
   object VFDivOpcodes extends Opcodes.VFDivOpcode
 

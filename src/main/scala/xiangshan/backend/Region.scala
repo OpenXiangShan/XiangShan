@@ -177,6 +177,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     imp.io.s2Resp.get.head.failed := feedBack.valid && !feedBack.bits.hit
     imp.io.s2Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
     imp.io.s2Resp.get.head.fuType := 0.U
+    imp.io.s2Resp.get.head.isFmac := false.B
     imp.io.s2Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
     imp.io.s2Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
   }
@@ -195,6 +196,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     imp.io.snResp.get.head.failed := feedBack.valid && !feedBack.bits.hit
     imp.io.snResp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
     imp.io.snResp.get.head.fuType := 0.U
+    imp.io.snResp.get.head.isFmac := false.B
     imp.io.snResp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
     imp.io.snResp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
   }
@@ -544,6 +546,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           thisIQ.io.s0Resp.get(j).failed := toMem(i)(j).valid && !toMem(i)(j).ready
           thisIQ.io.s0Resp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ).B
           thisIQ.io.s0Resp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
+          thisIQ.io.s0Resp.get(j).isFmac := false.B
           thisIQ.io.s0Resp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           thisIQ.io.s0Resp.get(j).lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
         }
@@ -552,6 +555,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           thisIQ.io.snResp.get(j).failed := false.B
           thisIQ.io.snResp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ).B
           thisIQ.io.snResp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
+          thisIQ.io.snResp.get(j).isFmac := false.B
           thisIQ.io.snResp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           thisIQ.io.snResp.get(j).lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
         }
@@ -616,6 +620,10 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       sink.bits.data := source.bits.toFpRf.get.bits
     }
     bypassNetwork.io.fromExus.connectExuOutput(_.fp)(exuBlock.io.out)
+    bypassNetwork.io.fromExus.fpFromFmulToFalu.flatten.zip(exuBlock.io.outToFalu.get.flatten).foreach { case (sink, source) =>
+      sink.valid := source.valid
+      sink.bits := source.bits
+    }
     for (i <- 0 until exuBlock.io.in.length) {
       for (j <- 0 until exuBlock.io.in(i).length) {
         val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.fp(i)(j).bits.ctrl.loadDependency, io.ldCancel)

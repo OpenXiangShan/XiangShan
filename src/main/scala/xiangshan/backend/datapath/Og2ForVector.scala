@@ -64,6 +64,7 @@ class Og2ForVector(params: BackendParams)(implicit p: Parameters) extends XSModu
               s2_toExuValid(iqId)(exuId) && toExuReady(iqId)(exuId)
           )
           og2Resp.fuType := s2_toExuData(iqId)(exuId).fuType
+          og2Resp.isFmac := false.B
           og2Resp.sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           og2Resp.lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
       }
