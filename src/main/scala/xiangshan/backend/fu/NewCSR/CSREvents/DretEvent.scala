@@ -58,6 +58,11 @@ class DretEventModule(implicit p: Parameters) extends Module with CSREventBase {
 
   out.privState.bits.PRVM     := in.dcsr.PRV.asUInt
   out.privState.bits.V        := in.dcsr.V
+  // DRET must preserve dcsr.V and dcsr.PRV (they record the saved debug-entry
+  // privilege).  Pass the input through so the framework's per-field Mux1H
+  // writes the same value back instead of a DontCare.
+  out.dcsr.bits.V             := in.dcsr.V
+  out.dcsr.bits.PRV           := in.dcsr.PRV.asUInt
   out.mstatus.bits.MPRV       := Mux(!out.privState.bits.isModeM, 0.U, in.mstatus.MPRV.asUInt)
   out.debugMode.bits          := false.B
   out.debugIntrEnable.bits    := true.B
