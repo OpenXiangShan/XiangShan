@@ -244,7 +244,10 @@ trait MachineLevel { self: NewCSR =>
     // mip.SEIP is implemented as the alias of mvip.SEIP when mvien=0
     // the read valid of SEIP is ORed by mvip.SEIP and the other source from the interrupt controller.
 
-    toMvip.SEIP.valid := wen && !this.mvien.SSIE
+    // Route `csrw mip` of SEIP to mvip.SEIP iff mvien.SEIE == 0, matching
+    // the readback mux `regOut.SEIP := Mux(!mvien.SEIE, mvip.SEIP, 0.U)`
+    // and the mvip-side counterpart at line 139.
+    toMvip.SEIP.valid := wen && !this.mvien.SEIE
     toMvip.SEIP.bits := wdata.SEIP
     // When mvien.SEIE = 0, mip.SEIP is alias of mvip.SEIP.
     // Otherwise, mip.SEIP is read only 0
