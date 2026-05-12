@@ -122,7 +122,15 @@ class TrapHandleModule extends Module {
     handleTrapUnderVS -> io.in.vstvec,
     handleTrapUnderHS -> io.in.stvec
   ))
-  private val pcFromXtvec = Cat(xtvec.addr.asUInt + Mux(xtvec.mode === XtvecMode.Vectored && hasIR, interruptNO(5, 0), 0.U), 0.U(2.W))
+  // For VS-mode traps, remap host VS interrupt numbers (VSSI=2, VSTI=6, VSEI=10)
+  // to the VS-mode cause numbers (SSI=1, STI=5, SEI=9) before computing the
+  // vectored offset, matching what TrapEntryVSEvent writes into vscause.
+  private val vectoredIRNO = Mux(
+    handleTrapUnderVS && InterruptNO.getVS.map(_.U === interruptNO).reduce(_ || _),
+    interruptNO - 1.U,
+    interruptNO
+  )
+  private val pcFromXtvec = Cat(xtvec.addr.asUInt + Mux(xtvec.mode === XtvecMode.Vectored && hasIR, vectoredIRNO(5, 0), 0.U), 0.U(2.W))
 
   io.out.entryPrivState := MuxCase(default = PrivState.ModeM, mapping = Seq(
     handleTrapUnderVS -> PrivState.ModeVS,
