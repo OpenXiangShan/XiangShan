@@ -32,6 +32,7 @@ class LatDecoder(opcodesSeq: Seq[Opcodes]) extends Module {
 
 object LatDecoder {
   val opcodes = Seq(
+    FMacOpcodes,
     VIAluOpcodes,
     VIMacOpcodes,
     VMoveOpcodes,

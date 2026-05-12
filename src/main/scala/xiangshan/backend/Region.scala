@@ -178,6 +178,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     imp.io.s2Resp.get.head.failed := feedBack.valid && !feedBack.bits.hit
     imp.io.s2Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
     imp.io.s2Resp.get.head.fuType := 0.U
+    imp.io.s2Resp.get.head.isFmac := false.B
     imp.io.s2Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
     imp.io.s2Resp.get.head.isFmac := false.B
   }
@@ -617,6 +618,10 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
       sink.bits.data := source.bits.toFpRf.get.bits
     }
     bypassNetwork.io.fromExus.connectExuOutput(_.fp)(exuBlock.io.out)
+    bypassNetwork.io.fromExus.fpFromFmulToFalu.flatten.zip(exuBlock.io.outToFalu.get.flatten).foreach { case (sink, source) =>
+      sink.valid := source.valid
+      sink.bits := source.bits
+    }
     for (i <- 0 until exuBlock.io.in.length) {
       for (j <- 0 until exuBlock.io.in(i).length) {
         val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.fp(i)(j).bits.ctrl.loadDependency, io.ldCancel)

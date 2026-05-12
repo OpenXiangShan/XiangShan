@@ -309,6 +309,10 @@ case class ExeUnitParams(
 
   def hasAluFu = fuConfigs.map(_.fuType == FuType.alu).reduce(_ || _)
 
+  def hasFaluFu = fuConfigs.map(_.fuType == FuType.falu).reduce(_ || _)
+
+  def hasFmulFu = fuConfigs.map(_.fuType == FuType.fmul).reduce(_ || _)
+
   def hasi2vFu = fuConfigs.map(_.fuType == FuType.i2v).reduce(_ || _)
 
   def hasi2fFu = fuConfigs.map(_.fuType == FuType.i2f).reduce(_ || _)

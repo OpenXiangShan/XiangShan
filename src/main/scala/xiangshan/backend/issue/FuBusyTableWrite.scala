@@ -39,14 +39,20 @@ class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Param
   private val og1RespMatchVec = getMatchVecFromResp(og1Resp)
 
   def getMatchVecFromResp(resp: IssueQueueRespBundle) : Vec[Bool] = {
-    VecInit((0 until tableSize).map {
-      lat =>
-        Cat(
-          latMappedFuTypeSet.getOrElse(lat, Set()).toSeq.sorted.map(
-            fuType => resp.fuType(fuType.id)
-          ).toSeq
-        ).orR
-    })
+    val isFmac = resp.isFmac
+    val fmacLat = if (iqParams.FmulCnt > 0) 8.U else 0.U
+    Mux(
+      isFmac,
+      VecInit((0 until tableSize).map(i => fmacLat(i))),
+      VecInit((0 until tableSize).map {
+        lat =>
+          Cat(
+            latMappedFuTypeSet.getOrElse(lat, Set()).toSeq.sorted.map(
+              fuType => resp.fuType(fuType.id)
+            ).toSeq
+          ).orR
+      })
+    )
   }
 
   private val fuBusyTableShift = (fuBusyTable >> 1).asUInt
