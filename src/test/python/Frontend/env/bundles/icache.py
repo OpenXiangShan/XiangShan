@@ -5,16 +5,16 @@ from toffee import Bundle, Signal
 
 class ICacheBundle(Bundle):
     SIGNAL_BINDINGS = {
-        "a_ready": "icacheMemPort_0_a_ready",
-        "a_valid": "icacheMemPort_0_a_valid",
-        "a_bits_source": "icacheMemPort_0_a_bits_source",
-        "a_bits_address": "icacheMemPort_0_a_bits_address",
-        "d_valid": "icacheMemPort_0_d_valid",
-        "d_bits_opcode": "icacheMemPort_0_d_bits_opcode",
-        "d_bits_source": "icacheMemPort_0_d_bits_source",
-        "d_bits_denied": "icacheMemPort_0_d_bits_denied",
-        "d_bits_data": "icacheMemPort_0_d_bits_data",
-        "d_bits_corrupt": "icacheMemPort_0_d_bits_corrupt",
+        "a_ready": "auto_inner_icache_client_out_a_ready",
+        "a_valid": "auto_inner_icache_client_out_a_valid",
+        "a_bits_source": "auto_inner_icache_client_out_a_bits_source",
+        "a_bits_address": "auto_inner_icache_client_out_a_bits_address",
+        "d_valid": "auto_inner_icache_client_out_d_valid",
+        "d_bits_opcode": "auto_inner_icache_client_out_d_bits_opcode",
+        "d_bits_source": "auto_inner_icache_client_out_d_bits_source",
+        "d_bits_denied": "auto_inner_icache_client_out_d_bits_denied",
+        "d_bits_data": "auto_inner_icache_client_out_d_bits_data",
+        "d_bits_corrupt": "auto_inner_icache_client_out_d_bits_corrupt",
     }
 
     a_ready = Signal()
