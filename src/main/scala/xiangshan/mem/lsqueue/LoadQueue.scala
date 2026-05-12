@@ -48,14 +48,6 @@ object LqPtr {
   }
 }
 
-class ReleaseCheck(implicit p: Parameters) extends XSBundle {
-  // The oldest unfinished load
-  val older = new RobPtr()
-
-  // The released address (aligned to cache line)
-  val released = UInt(PAddrBits.W)
-}
-
 trait HasLoadHelper { this: XSModule =>
   def rdataHelper(uop: DynInst, rdata: UInt): UInt = {
     val fpWen = uop.fpWen
@@ -172,7 +164,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val ldu = new Bundle() {
         val stld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
         val ldld_nuke_query = Vec(LoadPipelineWidth, Flipped(new LoadNukeQueryIO)) // from load_s2
-        val ldld_check = Valid(new ReleaseCheck)
         val ldin         = Vec(LoadPipelineWidth, Flipped(Decoupled(new LqWriteBundle))) // from load_s3
     }
     val sta = new Bundle() {
@@ -196,8 +187,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   //  val refill = Flipped(ValidIO(new Refill))
     val tl_d_channel  = Input(new DcacheToLduForwardIO)
     val release = Flipped(Valid(new Release))
-    val stld_nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
-    val ldld_nuke_rollback = Vec(1, Output(Valid(new Redirect)))
+    val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
     val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncachebuffer
     val rob = Flipped(new RobLsqIO)
     val uncache = new UncacheWordIO
@@ -234,14 +224,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   loadQueueRAR.io.redirect  <> io.redirect
   loadQueueRAR.io.release   <> io.release
-  loadQueueRAR.io.alloc <> io.enq.req
-  loadQueueRAR.io.doAlloc := io.enq.canAccept
   loadQueueRAR.io.ldWbPtr   <> virtualLoadQueue.io.ldWbPtr
-  loadQueueRAR.io.check <> io.ldu.ldld_check
-  loadQueueRAR.io.csrCtrl <> io.csrCtrl
+  loadQueueRAR.io.csrCtrl   <> io.csrCtrl
   for (w <- 0 until LoadPipelineWidth) {
-    loadQueueRAR.io.complete(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s1
-    loadQueueRAR.io.complete(w).revoke := io.ldu.ldld_nuke_query(w).revoke // from load_s3
+    loadQueueRAR.io.query(w).req    <> io.ldu.ldld_nuke_query(w).req // from load_s1
+    loadQueueRAR.io.query(w).resp   <> io.ldu.ldld_nuke_query(w).resp // to load_s2
+    loadQueueRAR.io.query(w).revoke := io.ldu.ldld_nuke_query(w).revoke // from load_s3
   }
 
   /**
@@ -253,6 +241,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAW.io.stIssuePtr       <> io.sq.stIssuePtr
   for (w <- 0 until LoadPipelineWidth) {
     loadQueueRAW.io.query(w).req    <> io.ldu.stld_nuke_query(w).req // from load_s1
+    loadQueueRAW.io.query(w).resp   <> io.ldu.stld_nuke_query(w).resp // to load_s2
     loadQueueRAW.io.query(w).revoke := io.ldu.stld_nuke_query(w).revoke // from load_s3
   }
 
@@ -322,8 +311,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   io.uncache.resp.ready := true.B
 
-  io.ldld_nuke_rollback(0) := loadQueueRAR.io.rollback
-  io.stld_nuke_rollback := loadQueueRAW.io.rollback
+  io.nuke_rollback := loadQueueRAW.io.rollback
   io.nack_rollback(0) := uncacheBuffer.io.rollback
 
   /* <------- DANGEROUS: Don't change sequence here ! -------> */
@@ -346,6 +334,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.lqFull           <> io.lq_rep_full
   loadQueueReplay.io.ldWbPtr          <> virtualLoadQueue.io.ldWbPtr
   loadQueueReplay.io.robDeqPtr        <> io.rob.pendingPtr
+  loadQueueReplay.io.rarFull          <> loadQueueRAR.io.lqFull
   loadQueueReplay.io.rawFull          <> loadQueueRAW.io.lqFull
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
@@ -358,7 +347,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   io.replayAllocate := loadQueueReplay.io.replayAllocate
 
-  val full_mask = Cat(loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
+  val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)
   XSPerfAccumulate("full_mask_001", full_mask === 1.U)
   XSPerfAccumulate("full_mask_010", full_mask === 2.U)
@@ -367,8 +356,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("full_mask_101", full_mask === 5.U)
   XSPerfAccumulate("full_mask_110", full_mask === 6.U)
   XSPerfAccumulate("full_mask_111", full_mask === 7.U)
-  XSPerfAccumulate("ldld_nuke_rollback", io.ldld_nuke_rollback.map(_.valid).reduce(_ || _).asUInt)
-  XSPerfAccumulate("stld_nuke_rollback", io.stld_nuke_rollback.map(_.valid).reduce(_ || _).asUInt)
+  XSPerfAccumulate("nuke_rollback", io.nuke_rollback.map(_.valid).reduce(_ || _).asUInt)
   XSPerfAccumulate("nack_rollabck", io.nack_rollback.map(_.valid).reduce(_ || _).asUInt)
 
   // perf cnt
@@ -382,8 +370,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     ("full_mask_101", full_mask === 5.U),
     ("full_mask_110", full_mask === 6.U),
     ("full_mask_111", full_mask === 7.U),
-    ("ldld_nuke_rollback", io.ldld_nuke_rollback.map(_.valid).reduce(_ || _).asUInt),
-    ("stld_nuke_rollback", io.stld_nuke_rollback.map(_.valid).reduce(_ || _).asUInt),
+    ("nuke_rollback", io.nuke_rollback.map(_.valid).reduce(_ || _).asUInt),
     ("nack_rollback", io.nack_rollback.map(_.valid).reduce(_ || _).asUInt)
   )
   generatePerfEvent()

@@ -256,8 +256,7 @@ object Bundles {
 
   class LoadNukeQueryIO(implicit p: Parameters) extends XSBundle {
     val req    = Decoupled(new LoadNukeQueryReqBundle)
-    // No response directly given in the nuke query
-    // val resp   = Flipped(Valid(new LoadNukeQueryRespBundle))
+    val resp   = Flipped(Valid(new LoadNukeQueryRespBundle))
     val revoke = Output(Bool())
   }
 
