@@ -59,7 +59,7 @@ class ReplacerState(NumSets: Int, StateBits: Int, HasExtraReadPort: Boolean = fa
       states(io.predictWriteSetIdx) := io.predictWriteState
     }
     when(io.trainWriteValid) {
-      states(io.trainReadSetIdx) := io.trainWriteState
+      states(io.trainWriteSetIdx) := io.trainWriteState
     }
   }
   io.predictReadState := states(io.predictReadSetIdx)
