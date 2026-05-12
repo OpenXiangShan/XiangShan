@@ -18,9 +18,10 @@
 8. `05_试点闭环与主线迁移/Frontend_BT_环境补证据需求清单.md`
 9. `07_覆盖率量化与可视化/Frontend_BT_当前覆盖率量化基线_2026-04-17.md`
 10. `07_覆盖率量化与可视化/Frontend_BT_覆盖率量化基线_2026-04-17.csv`
-11. `frontend_bt_functional_coverage_pilot.csv`
-12. `03_功能覆盖率建模/Frontend_BT_功能覆盖率建模方案_V3.md`
-13. `02_测试点分解/Frontend_功能测试点分解_层级版_V3.csv`
+11. `07_覆盖率量化与可视化/Frontend_BT_覆盖率报告命令速查.md`
+12. `frontend_bt_functional_coverage_pilot.csv`
+13. `03_功能覆盖率建模/Frontend_BT_功能覆盖率建模方案_V3.md`
+14. `02_测试点分解/Frontend_功能测试点分解_层级版_V3.csv`
 
 ## 2. 当前目录结构
 
@@ -54,6 +55,7 @@
 - `07_覆盖率量化与可视化/`
   - 当前 Python Frontend BT 环境的覆盖率能力评估、量化口径和可视化缺口。
   - 当前覆盖率量化基线与后续记录方式。
+  - 覆盖率 HTML 报告相关命令速查。
   - 可直接复用的 CSV 量化基线文件。
 
 ## 3. 当前使用约定

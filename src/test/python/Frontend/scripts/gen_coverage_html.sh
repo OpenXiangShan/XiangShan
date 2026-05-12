@@ -13,8 +13,9 @@ Notes:
   - Output defaults to <input_stem>.genhtml/ for a single .dat input, or
     coverage.genhtml/ next to the input directory / default data directory.
   - The script will generate merged.info in the output directory.
-  - genhtml is run with --ignore-errors range because the .dat file and the
-    current build-frontend RTL sources may not be from the exact same build.
+  - genhtml is run with --ignore-errors range and --filter missing because the
+    .dat file and the current build-frontend RTL sources may not be from the
+    exact same build.
 EOF
 }
 
@@ -109,6 +110,6 @@ echo "[frontend] merged_info: ${MERGED_INFO}"
 echo "[frontend] html_dir: ${OUTPUT_DIR}"
 
 verilator_coverage -write-info "${MERGED_INFO}" "${DAT_FILES[@]}"
-genhtml "${MERGED_INFO}" -o "${OUTPUT_DIR}" --ignore-errors range
+genhtml "${MERGED_INFO}" -o "${OUTPUT_DIR}" --ignore-errors range --filter missing
 
 echo "[frontend] index: ${OUTPUT_DIR}/index.html"
