@@ -22,6 +22,9 @@ import chisel3.experimental.hierarchy.{Definition, instantiable}
 import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
+import xiangshan.frontend.ftq
+import xiangshan.frontend.bpu.BranchAttribute
+import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuType, FuncUnitInput, UncertainLatency}
 import xiangshan.backend.Bundles._
 import xiangshan.{AddrTransType, HasXSParameter, Redirect, Resolve, XSBundle, XSModule, ExceptSparseVec}
@@ -29,13 +32,14 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm}
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
-import xiangshan.backend.fu.FuConfig.{AluCfg, I2fCfg, needUncertainWakeupFuConfigs}
+import xiangshan.backend.fu.FuConfig._
 import xiangshan._
 
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
   val in = Flipped(DecoupledIO(new NewExuInput(params)))
   val out = DecoupledIO(new NewExuOutput(params))
+  val outToFalu = Option.when(params.hasFmulFu)(ValidIO(new NewExuInput(params)))
   val uncertainWakeupOut = Option.when(params.needUncertainWakeup)(DecoupledIO(new IssueQueueIQWakeUpBundle(params.exuIdx, params.backendParam, params.copyWakeupOut, params.copyNum)))
   val csrin = Option.when(params.hasCSR)(new CSRInput)
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)
@@ -239,6 +243,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       val sinkData = fu.io.in.bits.dataPipe.get(i)
       val sourceData = inPipe._1(i)
       sinkData.src.zip(sourceData.data.src).foreach { case (fuSrc, exuSrc) => fuSrc := exuSrc }
+      sinkData.FmulToFaluDataInput.foreach(x => x := source.data.FaluInputFromFmul.get)
       sinkData.v0.foreach(_ := sourceData.data.v0.get)
       sinkData.vl.foreach(_ := sourceData.data.vl.get)
       sinkData.pc.foreach(x => x := sourceData.data.pc.get)
@@ -252,6 +257,9 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
     fu.io.in.bits.data.v0.foreach(_ := io.in.bits.data.v0.get)
     fu.io.in.bits.data.vl.foreach(_ := io.in.bits.data.vl.get)
   }
+  funcUnits.filter(_.cfg.isFalu).map { falu => {
+    io.in.bits.data.FaluInputFromFmul.foreach { x => falu.io.in.bits.data.FmulToFaluDataInput.get := x }
+  }}
 
   private val OutresVecs = funcUnits.map { fu =>
     def latDiff :Int = fu.cfg.latency.extraLatencyVal.getOrElse(0)
@@ -427,6 +435,46 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   io.out.bits.toRob.bits.flushPipe.   foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.flushPipe.getOrElse(0.U.asTypeOf(io.out.bits.toRob.bits.flushPipe.get)))))
   io.out.bits.toRob.bits.replay.      foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.replay.getOrElse(0.U.asTypeOf(io.out.bits.toRob.bits.replay.get)))))
   io.out.bits.toRob.bits.isRVC.       foreach(x => x := Mux1H(fuOutValidOH, fuOutBitsVec.map(_.ctrl.isRVC.getOrElse(false.B))))
+
+  io.outToFalu.foreach { exuOutToFalu => {
+    assert(funcUnits.filter(_.cfg.isFmul).size == 1, "ExeUnit should contain FMUL when ExeUnit.outToFalu is available")
+    val fmulOutToFalu = funcUnits.filter(_.cfg.isFmul).head.io.outToFaluFromFmul.get
+    exuOutToFalu.valid := fmulOutToFalu.valid
+
+    // newExuInput ctrl bundle
+    // useful signals
+    connectSamePort(exuOutToFalu.bits.ctrl, fmulOutToFalu.bits.ctrl)
+    exuOutToFalu.bits.ctrl.fuType := fmulOutToFalu.bits.fuType
+    // useless signals, but may exist in some ExeUnits
+    exuOutToFalu.bits.ctrl.rfWen.foreach(_ := false.B)
+    exuOutToFalu.bits.ctrl.vecWen.foreach(_ := false.B)
+    exuOutToFalu.bits.ctrl.v0Wen.foreach(_ := false.B)
+    exuOutToFalu.bits.ctrl.dataSources.foreach(_ := 0.U.asTypeOf(DataSource()))
+    exuOutToFalu.bits.ctrl.exuSources.foreach { exuSourceVec => exuSourceVec.foreach(_ := 0.U.asTypeOf(ExuSource(exuParams))) }
+    exuOutToFalu.bits.ctrl.loadDependency.foreach(_ := RegEnable(io.in.bits.ctrl.loadDependency.get, io.in.fire))
+
+    // newExuInput data bundle
+    exuOutToFalu.bits.data.src.zip(fmulOutToFalu.bits.data.src).foreach { case (exuSrc, fmulSrc) => exuSrc := fmulSrc }
+    // TODO
+    exuOutToFalu.bits.data.src(2) := 0.U
+    exuOutToFalu.bits.data.FaluInputFromFmul.foreach(exuFaluInput => exuFaluInput := fmulOutToFalu.bits.data.FmulToFaluDataInput.get)
+    exuOutToFalu.bits.data.imm := fmulOutToFalu.bits.data.imm
+
+    // other newExuInput signals
+    // useful signals
+    exuOutToFalu.bits.robIdx := fmulOutToFalu.bits.ctrl.robIdx
+    exuOutToFalu.bits.toRF.pdest := fmulOutToFalu.bits.ctrl.pdest
+    exuOutToFalu.bits.perfDebugInfo.foreach(_ := fmulOutToFalu.bits.perfDebugInfo.get)
+    exuOutToFalu.bits.debug_seqNum.foreach(_ := fmulOutToFalu.bits.debug_seqNum.get)
+    // useless signals
+    exuOutToFalu.bits.iqIdx := 0.U
+    exuOutToFalu.bits.isFirstIssue := false.B
+    funcUnits.zip(exuParams.idxCopySrc).map { case (fu, idx) =>
+      if (fu.cfg.isFalu) {
+        exuOutToFalu.bits.data.src.zip(fmulOutToFalu.bits.data.src).foreach { case (faluSrc, fmulSrc) => faluSrc := fmulSrc }
+      }
+    }
+  }}
 
   io.toFrontendBJUResolve.foreach{ case resolve => {
     val bjus = funcUnits.filter(x => x.cfg.isJmp || x.cfg.isNewJmp || x.cfg.isBrh)

@@ -10,7 +10,6 @@ import xiangshan.backend.vector.Decoder.DecodePatterns.InstSewLmulNfPattern
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil.DecodePatternComb
 import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.BitPatToExt
-import yunsuan.encoding.Opcode.OpcodeTraits.ForceVfAlu
 
 import scala.language.implicitConversions
 
@@ -70,7 +69,8 @@ object FuTypeField {
       case _: Opcode.BkuOpcodes.type => FuType.bku
       case _: Opcode.CsrOpcodes.type => FuType.csr
       case _: Opcode.FenceOpcodes.type => FuType.fence
-      case _: Opcode.FMacOpcodes.type => FuType.fmac
+      case _: Opcode.FAluOpcodes.type => FuType.falu
+      case _: Opcode.FMacOpcodes.type => FuType.fmul
       case _: Opcode.FDivOpcodes.type => FuType.fDivSqrt
       case _: Opcode.FCvtOpcodes.type => FuType.fcvt
       case _: Opcode.FMiscOpcodes.type => FuType.fcmp
@@ -93,10 +93,6 @@ object FuTypeField {
   }
 
   def genFuType(uop: Opcode): FuType.OHType = {
-    if (uop.getTraits.contains(ForceVfAlu)) {
-      FuType.vfalu
-    } else {
-      this.genFuType(uop.factory)
-    }
+    this.genFuType(uop.factory)
   }
 }

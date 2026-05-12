@@ -25,6 +25,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.mem.{LqPtr, SqPtr}
 import xiangshan.mem.VecMissalignedDebugBundle
 import utility._
+import xiangshan.backend.fu.FuncUnitFaluInputFromFmul
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 
@@ -962,6 +963,8 @@ object Bundles {
     val dataSources    = Vec(exuParams.numRegSrc, DataSource())
     val exuSources     = Option.when(exuParams.isIQWakeUpSink)(Vec(exuParams.numRegSrc, ExuSource(exuParams)))
     val loadDependency = OptionWrapper(exuParams.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
+    // for fmac
+    val isFmac         = Option.when(exuParams.hasFmulFu)(Bool())
 
     val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
     val debug_seqNum  = OptionWrapper(backendParams.debugEn, InstSeqNum())
@@ -972,6 +975,7 @@ object Bundles {
                   val exuParams: ExeUnitParams,
                 )(implicit p: Parameters) extends XSBundle {
     val fuType         = FuType()
+    val isFmac         = Option.when(exuParams.hasFmulFu)(Bool())
     val robIdx         = new RobPtr
     val iqIdx          = UInt(log2Up(iqParams.numEntries).W)
     val isFirstIssue   = Bool()
@@ -1027,6 +1031,7 @@ object Bundles {
     def fromIssueBundle(source: Og0InUop): Unit = {
       // common fields from s0.bits
       this.fuType       := source.fuType
+      this.isFmac.foreach(_ := source.isFmac.get)
       this.robIdx       := source.robIdx
       this.iqIdx        := source.iqIdx
       this.isFirstIssue := source.isFirstIssue
@@ -1186,6 +1191,7 @@ object Bundles {
     val fuType        = FuType()
     val fuOpType      = Opcode()
     val src           = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
+    val FaluInputFromFmul = Option.when(params.hasFaluFu)(new FuncUnitFaluInputFromFmul)
     val v0            = Option.when(params.readV0Rf)(V0())
     val vl            = Option.when(params.readVlRf)(Vl())
     val is0Lat        = Option.when(params.fuConfigs.map(x => x.latency.latencyVal.getOrElse(1) == 0 && !x.hasNoDataWB).reduce(_ || _))(Bool())
@@ -1346,6 +1352,7 @@ object Bundles {
 
   class ExuInputDataBundle(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
     val src = Vec(params.numRegSrc, UInt(params.srcDataBitsMax.W))
+    val FaluInputFromFmul = Option.when(params.hasFaluFu)(new FuncUnitFaluInputFromFmul)
     val v0  = Option.when(params.readV0Rf)(V0())
     val vl  = Option.when(params.readVlRf)(Vl())
     val imm = UInt(64.W)

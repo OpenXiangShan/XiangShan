@@ -14,7 +14,7 @@ import xiangshan.backend.decode.ImmUnion
 import xiangshan.backend.regcache._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
-import xiangshan.backend.fu.{FuConfig, FuType}
+import xiangshan.backend.fu._
 import xiangshan.backend.fu.vector.Utils.{SplitMask, VecDataToMaskDataVec}
 import yunsuan.VialuFixType
 import xiangshan.backend.vector.datapath.VecImmExtractor
@@ -50,6 +50,7 @@ class BypassNetworkIO()(implicit p: Parameters, params: BackendParams) extends X
     val int: MixedVec[MixedVec[ValidIO[ExuBypassBundle]]] = Flipped(intSchdParams.genExuBypassValidBundle)
     val fp : MixedVec[MixedVec[ValidIO[ExuBypassBundle]]] = Flipped(fpSchdParams.genExuBypassValidBundle)
     val vf : MixedVec[MixedVec[ValidIO[ExuBypassBundle]]] = Flipped(vecSchdParams.genExuBypassValidBundle)
+    val fpFromFmulToFalu : MixedVec[MixedVec[ValidIO[NewExuInput]]] = Flipped(fpSchdParams.genExuOutToFaluBundleNoMemBlock)
 
     def connectExuOutput(
       getSinkVecN: FromExus => MixedVec[MixedVec[ValidIO[ExuBypassBundle]]]
@@ -86,7 +87,10 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
   private val toExusFp: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Wire(params.fpSchdParams.get.genExuInputCopySrcBundle)
   private val toExusVf: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Wire(params.vecSchdParams.get.genExuInputCopySrcBundle)
   private val toExus: Seq[DecoupledIO[ExuInput]] = (toExusInt ++ toExusFp ++ toExusVf).flatten.toSeq
-  private val toNewExus: Seq[DecoupledIO[NewExuInput]] = (io.toExus.int ++ io.toExus.fp ++ io.toExus.vf).flatten.toSeq
+  private val toNewExusIntRelay: MixedVec[MixedVec[DecoupledIO[NewExuInput]]] = Wire(params.intSchdParams.get.genNewExuInputCopySrcBundle)
+  private val toNewExusFpRelay: MixedVec[MixedVec[DecoupledIO[NewExuInput]]] = Wire(params.fpSchdParams.get.genNewExuInputCopySrcBundle)
+  private val toNewExusVfRelay: MixedVec[MixedVec[DecoupledIO[NewExuInput]]] = Wire(params.vecSchdParams.get.genNewExuInputCopySrcBundle)
+  private val toNewExusRelay: Seq[DecoupledIO[NewExuInput]] = (toNewExusIntRelay ++ toNewExusFpRelay ++ toNewExusVfRelay).flatten.toSeq
   private val fromDPsRCData: Seq[Vec[UInt]] = io.fromDataPath.rcData.flatten.toSeq
 
   println(s"[BypassNetwork] RCData num: ${fromDPsRCData.size}")
@@ -150,6 +154,7 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
 
   toExus.zip(fromDPs).foreach { case (sink, source: DecoupledIO[Og1InUop]) =>
     connectSamePort(sink.bits, source.bits)
+    sink.bits.FaluInputFromFmul.foreach(_ := 0.U.asTypeOf(new FuncUnitFaluInputFromFmul))
     sink.bits.imm := source.bits.imm.getOrElse(0.U)
     sink.bits.selImm := source.bits.selImm.getOrElse(0.U)
     // dirty code, is0Lat only be used in wakeupQueue
@@ -291,5 +296,28 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     x.tag.foreach(_ := bypassTagVec(i))
   }
 
-  toNewExus.zip(toExus).foreach { case (sink, source) => connectNewExuInput(sink, source) }
+  toNewExusRelay.zip(toExus).foreach { case (sink, source) => connectNewExuInput(sink, source) }
+  io.toExus.int.flatten.zip(toNewExusIntRelay.flatten).foreach { case (intExuOut, intExuRelay) =>
+    intExuOut.valid := intExuRelay.valid
+    intExuRelay.ready := intExuOut.ready
+    intExuOut.bits := intExuRelay.bits
+  }
+
+  io.toExus.fp.flatten.filter(_.bits.params.hasFmulFu).lazyZip(toNewExusFpRelay.flatten.filter(_.bits.params.hasFmulFu)).lazyZip(io.fromExus.fpFromFmulToFalu.flatten).foreach { case (fpExuOut, fpExuRelay, fmulToFaluBypassInput) =>
+    fpExuOut.valid := fpExuRelay.valid || fmulToFaluBypassInput.valid
+    fpExuRelay.ready := fpExuOut.ready
+    fpExuOut.bits := Mux(fmulToFaluBypassInput.valid, fmulToFaluBypassInput.bits, fpExuRelay.bits)
+  }
+
+  io.toExus.fp.flatten.filterNot(_.bits.params.hasFmulFu).zip(toNewExusFpRelay.flatten.filterNot(_.bits.params.hasFmulFu)).foreach { case (fpExuOut, fpExuRelay) =>
+    fpExuOut.valid := fpExuRelay.valid
+    fpExuRelay.ready := fpExuOut.ready
+    fpExuOut.bits := fpExuRelay.bits
+  }
+
+  io.toExus.vf.flatten.zip(toNewExusVfRelay.flatten).foreach { case (vfExuOut, vfExuRelay) =>
+    vfExuOut.valid := vfExuRelay.valid
+    vfExuRelay.ready := vfExuOut.ready
+    vfExuOut.bits := vfExuRelay.bits
+  }
 }
