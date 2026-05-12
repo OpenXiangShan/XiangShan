@@ -52,8 +52,8 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
 
   /* *** predict *** */
   // read current state
-  stateBank.io.predictReadSetIdx := io.predict.touch.bits.setIdx
-  private val predictState = stateBank.io.predictReadState
+  stateBank.io.predictRead.setIdx := io.predict.touch.bits.setIdx
+  private val predictState = stateBank.io.predictRead.state
 
   // compose touch way vec
   private val predictTouchWay = VecInit((0 until NumWay).map { i =>
@@ -69,20 +69,20 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   private val predictNextState = predictStateGen.io.nextState
 
   // write back next state
-  stateBank.io.predictWriteValid  := io.predict.touch.valid
-  stateBank.io.predictWriteSetIdx := io.predict.touch.bits.setIdx
-  stateBank.io.predictWriteState  := predictNextState
+  stateBank.io.predictWrite.valid       := io.predict.touch.valid
+  stateBank.io.predictWrite.bits.setIdx := io.predict.touch.bits.setIdx
+  stateBank.io.predictWrite.bits.state  := predictNextState
 
   /* *** train t0 *** */
   // read current state
-  stateBank.io.trainReadSetIdx := io.train.t0_setIdx
+  stateBank.io.trainRead.setIdx := io.train.t0_setIdx
 
   // if t1 is about to write the same set as t0 read, we need to use the updated state (trainStateGen.io.nextState)
   private val trainNextState = trainStateGen.io.nextState
   private val trainSameSet   = io.train.t1_touch.valid && (io.train.t1_touch.bits.setIdx === io.train.t0_setIdx)
   private val predictSameSet = io.predict.touch.valid && (io.predict.touch.bits.setIdx === io.train.t0_setIdx)
   private val trainState = MuxCase(
-    stateBank.io.trainReadState,
+    stateBank.io.trainRead.state,
     Seq(
       trainSameSet   -> trainNextState, // trainNextState has higher priority, see ReplacerState.scala
       predictSameSet -> predictNextState
@@ -111,9 +111,9 @@ class MainBtbReplacer(implicit p: Parameters) extends MainBtbModule {
   trainStateGen.io.touches := VecInit(Seq(trainTouchWay))
 
   // write back next state
-  stateBank.io.trainWriteValid  := io.train.t1_touch.valid
-  stateBank.io.trainWriteSetIdx := io.train.t1_touch.bits.setIdx
-  stateBank.io.trainWriteState  := trainNextState
+  stateBank.io.trainWrite.valid       := io.train.t1_touch.valid
+  stateBank.io.trainWrite.bits.setIdx := io.train.t1_touch.bits.setIdx
+  stateBank.io.trainWrite.bits.state  := trainNextState
 
   // we use t0_setIdx to pre-read stateBank for better timing, it's a tightly-coupled design,
   // so we require t1 to touch the same set

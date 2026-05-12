@@ -19,53 +19,55 @@ import chisel3._
 import chisel3.util._
 
 // Independent replacer state management enables finer-grained clock gating
-class ReplacerState(NumSets: Int, StateBits: Int, HasExtraReadPort: Boolean = false) extends Module {
+class ReplacerState(
+    NumSets:           Int,
+    StateBits:         Int,
+    NumExtraReadPort:  Int = 0,
+    NumExtraWritePort: Int = 0
+) extends Module {
   class ReplacerStateIO extends Bundle {
-    // Read and write for the state of the prediction table
-    val predictReadSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
-    val predictReadState:  UInt = Output(UInt(StateBits.W))
-
-    val predictWriteValid:  Bool = Input(Bool())
-    val predictWriteSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
-    val predictWriteState:  UInt = Input(UInt(StateBits.W))
-
-    // Read and write for the state of the training table
-    val trainReadSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
-    val trainReadState:  UInt = Output(UInt(StateBits.W))
-
-    val trainWriteValid:  Bool = Input(Bool())
-    val trainWriteSetIdx: UInt = Input(UInt(log2Ceil(NumSets).W))
-    val trainWriteState:  UInt = Input(UInt(StateBits.W))
-
-    // Optional additional state read port provision
-    val readSetIdx: Option[UInt] = Option.when(HasExtraReadPort) {
-      Input(UInt(log2Ceil(NumSets).W))
+    class Read extends Bundle {
+      val setIdx: UInt = Input(UInt(SetIdxBits.W))
+      val state:  UInt = Output(UInt(StateBits.W))
     }
-    val readState: Option[UInt] = Option.when(HasExtraReadPort) {
-      Output(UInt(StateBits.W))
+
+    class Write extends Bundle { // direction included in Valid() call
+      val setIdx: UInt = UInt(SetIdxBits.W)
+      val state:  UInt = UInt(StateBits.W)
     }
+
+    // magic number 2: we need at least 2 ports for predict/train read/write
+    val read:  Vec[Read]         = Vec(2 + NumExtraReadPort, new Read)
+    val write: Vec[Valid[Write]] = Vec(2 + NumExtraWritePort, Flipped(Valid(new Write)))
+
+    def predictRead: Read      = read.head
+    def trainRead:   Read      = read.last
+    def extraRead:   Seq[Read] = read.init.tail
+
+    def predictWrite: Valid[Write]      = write.head
+    def trainWrite:   Valid[Write]      = write.last
+    def extraWrite:   Seq[Valid[Write]] = write.init.tail
   }
+
+  def SetIdxBits: Int = log2Ceil(NumSets)
+
+  require(NumExtraReadPort >= 0 && NumExtraWritePort >= 0, "NumExtraPort cannot be negative")
 
   val io: ReplacerStateIO = IO(new ReplacerStateIO)
 
   private val states = RegInit(VecInit(Seq.fill(NumSets)(0.U.asTypeOf(UInt(StateBits.W)))))
-  private val readWriteConflict =
-    io.predictWriteValid && io.trainWriteValid && (io.predictWriteSetIdx === io.trainWriteSetIdx)
 
-  when(readWriteConflict) {
-    states(io.trainWriteSetIdx) := io.trainWriteState
-  }.otherwise {
-    when(io.predictWriteValid) {
-      states(io.predictWriteSetIdx) := io.predictWriteState
-    }
-    when(io.trainWriteValid) {
-      states(io.trainWriteSetIdx) := io.trainWriteState
+  /* *** write *** */
+  // NOTE: when write-write conflict (write same setIdx), port with higher physical idx will take effect,
+  //       therefore, with the default parameter (2 ports), trainWrite has higher priority than predictWrite
+  // NOTE: we don't have to explicitly check if there's a conflict, chisel will handle this,
+  //       i.e. for { when(valid(i)) { state := ... } } will become a `if (valid_0) ... else if (valid_1) ...` chain
+  io.write.foreach { port =>
+    when(port.valid) {
+      states(port.bits.setIdx) := port.bits.state
     }
   }
-  io.predictReadState := states(io.predictReadSetIdx)
-  io.trainReadState   := states(io.trainReadSetIdx)
 
-  if (HasExtraReadPort) {
-    io.readState.get := states(io.readSetIdx.getOrElse(0.U))
-  }
+  /* *** read *** */
+  io.read.foreach(port => port.state := states(port.setIdx))
 }
