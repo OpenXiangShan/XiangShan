@@ -22,12 +22,13 @@ import org.chipsalliance.cde.config.Parameters
 import utility.ParallelOR
 import utility.ParallelPriorityEncoder
 import utility.XSPerfAccumulate
+import utils.SeqUtils.prefixOr
 import xiangshan.ValidUndirectioned
 import xiangshan.frontend.PreDecodeInfo
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 
-class PredChecker(implicit p: Parameters) extends IfuModule with PredCheckerHelper {
+class PredChecker(implicit p: Parameters) extends IfuModule {
   class PredCheckerIO extends IfuBundle {
     class PredCheckerReq(implicit p: Parameters) extends IfuBundle {
       // Input data is offset-adjusted for IBuffer enqueue.
