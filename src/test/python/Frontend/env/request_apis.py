@@ -73,10 +73,10 @@ def normalize_bp_ctrl_config(
     )
 
 
-def initialize_frontend(env, reset_vector=0x80000000, bare_mode=True, reset_cycles=20, step_cycles=0):
+def initialize_frontend(env, reset_vector=0x80000000, bare_mode=None, reset_cycles=20, step_cycles=0):
     return InitializeFrontendSequence(
         reset_vector=int(reset_vector),
-        bare_mode=bool(bare_mode),
+        bare_mode=bare_mode,
         reset_cycles=int(reset_cycles),
         step_cycles=int(step_cycles),
     ).run(env)

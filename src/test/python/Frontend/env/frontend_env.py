@@ -27,7 +27,7 @@ from .bundles import (
     bind_bundle_required,
 )
 from .checkers import PTWFullPpnChecker, PTWRespInputChecker
-from .env_config import DEFAULT_ENV_CONFIG, EnvConfig
+from .env_config import BAREMODE_ENV_CONFIG, DEFAULT_ENV_CONFIG, EnvConfig, SV39_ENV_CONFIG
 from .logging_utils import configure_env_logging, parse_log_level
 from .model import GoldenTrace, MemoryModel, PageTableModel
 from .model.branch_checker import BranchChecker
@@ -615,27 +615,38 @@ class FrontendEnv:
         self._write(self.clock_reset.reset, 0)
         self.step(1)
 
-    def initialize(self, reset_vector: int = 0x80000000, bare_mode: bool = True, reset_cycles: int = 20) -> None:
+    def initialize(
+        self,
+        reset_vector: int = 0x80000000,
+        bare_mode: Optional[bool] = None,
+        reset_cycles: int = 20,
+    ) -> None:
+        selected_mode = self.config.ptw.mode if bare_mode is None else ("bare" if bool(bare_mode) else "sv39")
+        if selected_mode not in {"bare", "sv39"}:
+            raise ValueError(f"unsupported frontend init mode: {selected_mode}")
+        ptw_config = self.config.ptw if self.config.ptw.mode == selected_mode else (
+            BAREMODE_ENV_CONFIG.ptw if selected_mode == "bare" else SV39_ENV_CONFIG.ptw
+        )
         self.logger.info(
-            "initialize env: reset_vector=0x%x bare_mode=%s reset_cycles=%d",
+            "initialize env: reset_vector=0x%x bare_mode=%s mode=%s reset_cycles=%d",
             int(reset_vector),
-            bool(bare_mode),
+            None if bare_mode is None else bool(bare_mode),
+            selected_mode,
             int(reset_cycles),
         )
         self._write(self.clock_reset.io_reset_vector_addr, int(reset_vector) >> 1)
-        if bare_mode:
-            self.page_table.set_mode("bare")
-            self._write(self.csr_ctrl_if.io_tlbCsr_priv_virt, 0)
-            self._write(self.csr_ctrl_if.io_tlbCsr_priv_imode, 3)
-            self._write(self.csr_ctrl_if.io_tlbCsr_satp_mode, 0)
-            self._write(self.csr_ctrl_if.io_tlbCsr_satp_asid, 0)
-            self._write(self.csr_ctrl_if.io_tlbCsr_satp_ppn, 0)
-            self._write(self.csr_ctrl_if.io_tlbCsr_vsatp_mode, 0)
-            self._write(self.csr_ctrl_if.io_tlbCsr_vsatp_asid, 0)
-            self._write(self.csr_ctrl_if.io_tlbCsr_vsatp_ppn, 0)
-            self._write(self.csr_ctrl_if.io_tlbCsr_hgatp_mode, 0)
-            self._write(self.csr_ctrl_if.io_tlbCsr_hgatp_vmid, 0)
-            self._write(self.csr_ctrl_if.io_tlbCsr_hgatp_ppn, 0)
+        self.page_table.set_mode(selected_mode)
+        self._write(self.csr_ctrl_if.io_tlbCsr_priv_virt, int(ptw_config.priv_virt))
+        self._write(self.csr_ctrl_if.io_tlbCsr_priv_imode, int(ptw_config.priv_imode))
+        self._write(self.csr_ctrl_if.io_tlbCsr_satp_mode, int(ptw_config.satp_mode))
+        self._write(self.csr_ctrl_if.io_tlbCsr_satp_asid, int(ptw_config.satp_asid))
+        self._write(self.csr_ctrl_if.io_tlbCsr_satp_ppn, int(ptw_config.satp_ppn))
+        self._write(self.csr_ctrl_if.io_tlbCsr_vsatp_mode, int(ptw_config.vsatp_mode))
+        self._write(self.csr_ctrl_if.io_tlbCsr_vsatp_asid, int(ptw_config.vsatp_asid))
+        self._write(self.csr_ctrl_if.io_tlbCsr_vsatp_ppn, int(ptw_config.vsatp_ppn))
+        self._write(self.csr_ctrl_if.io_tlbCsr_hgatp_mode, int(ptw_config.hgatp_mode))
+        self._write(self.csr_ctrl_if.io_tlbCsr_hgatp_vmid, int(ptw_config.hgatp_vmid))
+        self._write(self.csr_ctrl_if.io_tlbCsr_hgatp_ppn, int(ptw_config.hgatp_ppn))
         self.reset(reset_cycles)
         self.monitor.set_expected_pc(int(reset_vector))
 

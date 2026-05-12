@@ -9,7 +9,6 @@ from env.transactions import CommitTarget, PcSequenceExpectation, ProgramImage, 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
 _BASE = 0x80000000
 _PHYS_BASE = 0x90000000
-_SV39_MODE = 8
 _NOP = 0x00000013
 
 
@@ -26,10 +25,6 @@ def _program_image(instructions, base_addr=_BASE) -> ProgramImage:
 
 def _configure_sv39_identity(env, virt_base: int, phys_base: int) -> None:
     env.page_table.clear()
-    env.page_table.set_mode("sv39")
-    env.csr_ctrl_if.io_tlbCsr_priv_imode.value = 1
-    env.csr_ctrl_if.io_tlbCsr_satp_mode.value = _SV39_MODE
-    env.csr_ctrl_if.io_tlbCsr_vsatp_mode.value = 0
     env.page_table.map_page(virt_base >> 12, phys_base >> 12, v=1, x=1, r=1)
     env.initialize(reset_vector=virt_base, bare_mode=False, reset_cycles=20)
     env.dut.io_tlbCsr_satp_changed.value = 1

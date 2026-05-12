@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass(frozen=True)
 class InitializeFrontendSequence:
     reset_vector: int = 0x80000000
-    bare_mode: bool = True
+    bare_mode: Optional[bool] = None
     reset_cycles: int = 20
     step_cycles: int = 0
 
     def run(self, env):
         env.initialize(
             reset_vector=int(self.reset_vector),
-            bare_mode=bool(self.bare_mode),
+            bare_mode=self.bare_mode,
             reset_cycles=int(self.reset_cycles),
         )
         if int(self.step_cycles) > 0:
