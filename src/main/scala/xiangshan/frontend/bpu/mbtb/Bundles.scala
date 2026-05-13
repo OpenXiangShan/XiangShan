@@ -55,6 +55,7 @@ class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
 }
 
 class MainBtbEntrySramWriteReq(implicit p: Parameters) extends WriteReqBundle with HasMainBtbParameters {
+  val hit:          Bool         = Bool()
   val setIdx:       UInt         = UInt(SetIdxLen.W)
   val entry:        MainBtbEntry = new MainBtbEntry
   override def tag: Option[UInt] = Some(Cat(entry.tag, entry.position)) // use entry's tag directly
@@ -64,6 +65,12 @@ class MainBtbCounterSramWriteReq(implicit p: Parameters) extends MainBtbBundle {
   val setIdx:   UInt                 = UInt(SetIdxLen.W)
   val wayMask:  UInt                 = UInt(NumWay.W)
   val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
+}
+
+class VictimBtbEntry(implicit p: Parameters) extends MainBtbBundle {
+  val setIdx:  UInt            = UInt(SetIdxLen.W)
+  val entry:   MainBtbEntry    = new MainBtbEntry
+  val counter: SaturateCounter = TakenCounter()
 }
 
 class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
@@ -76,6 +83,7 @@ class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
 }
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {
+  val lostBankMask: Vec[Bool] = Vec(NumAlignBanks, Bool()) // whether this bank is lost during prediction
   val entries: Vec[Vec[MainBtbMetaEntry]] = Vec(NumAlignBanks, Vec(NumWay, new MainBtbMetaEntry))
 }
 

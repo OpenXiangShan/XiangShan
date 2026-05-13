@@ -46,7 +46,7 @@ import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.bpu.utage.MicroTage
 import xiangshan.frontend.bpu.utage.MicroTageMeta
 
-class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
+class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper with CrossPageHelper {
   class BpuIO extends Bundle {
     val ctrl:        BpuCtrl    = Input(new BpuCtrl)
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
@@ -320,27 +320,86 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     s1_jumpValidVec(i) || (s1_conditonalValidVec(i) && Mux(s1_utageHitMask(i), s1_utageTakenMask(i), pred.bits.taken))
   })
 
-  private val s1_compareMatrix      = CompareMatrix(s1_abtbPosition)
-  private val s1_abtbFirstTakenBrOH = s1_compareMatrix.getLeastElementOH(s1_abtbTakenMask)
-  private val s1_abtbFirstTakenBr   = Mux1H(s1_abtbFirstTakenBrOH, s1_abtbPrediction)
-  private val s1_abtbValid          = abtb.io.prediction.map(_.valid).reduce(_ || _)
+  // victim btb prediction
+  private val s1_mbtbMaxBankIdx = mbtb.io.s1_maxBankIdx
+
+  // filter ubtb prediction
+  private val s1_ubtbTaken = WireInit(s1_ubtbPrediction.taken)
+  s1_ubtbTaken := Mux(
+    mbtb.getAlignBankIndexFromPosition(s1_ubtbPrediction.cfiPosition) <= s1_mbtbMaxBankIdx,
+    s1_ubtbPrediction.taken,
+    false.B
+  )
+
+  // filter fallthrough prediction
+  private val s1_fallthroughPrediction = Wire(new Prediction)
+  private val s1_nextBankAlignedPcVec = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    getNthNextAlignedPc(s1_startPc.get, i + 1)
+  }
+  private val s1_nextBankCfiPositionVec = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    (((i + 1) << log2Ceil(FetchBlockAlignInstNum)) - 1).U(CfiPositionWidth.W)
+  }
+  private val s1_nextBankCrossPageVec = s1_nextBankAlignedPcVec.map(pc => isCrossPage(s1_startPc.get, pc))
+  private val s1_nextPageAlignedPcVec = s1_nextBankAlignedPcVec.map(pc => getPageAlignedAddr(pc))
+  private val s1_fallthroughPositionVec = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    Mux(
+      s1_nextBankCrossPageVec(i),
+      (~getAlignedPc(s1_startPc.get)(CfiPositionWidth + instOffsetBits - 1, instOffsetBits)).asUInt,
+      s1_nextBankCfiPositionVec(i)
+    )
+  }
+  private val s1_fallthroughTargetVec = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    Mux(
+      s1_nextBankCrossPageVec(i),
+      s1_nextPageAlignedPcVec(i),
+      s1_nextBankAlignedPcVec(i)
+    )
+  }
+
+  s1_fallthroughPrediction.taken       := false.B
+  s1_fallthroughPrediction.cfiPosition := s1_fallthroughPositionVec(s1_mbtbMaxBankIdx)
+  s1_fallthroughPrediction.target      := s1_fallthroughTargetVec(s1_mbtbMaxBankIdx)
+  s1_fallthroughPrediction.attribute   := BranchAttribute.None
+
+  // filter abtb prediction
+  private val s1_abtbPosHigherBitsVec = s1_abtbPosition.map(mbtb.getAlignBankIndexFromPosition)
+  private val s1_abtbPositionMaskVec = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    VecInit(s1_abtbPosHigherBitsVec.map(posHigher => posHigher <= i.U))
+  }
+  private val s1_abtbFinalTakenMaskVec = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    VecInit((s1_abtbTakenMask zip s1_abtbPositionMaskVec(i)).map { case (taken, valid) => taken && valid })
+  }
+  // duplicate first taken selection logic to optimize timing
+  private val s1_compareMatrix = CompareMatrix(s1_abtbPosition)
+  private val s1_abtbFirstTakenBrOHVec = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    s1_compareMatrix.getLeastElementOH(s1_abtbFinalTakenMaskVec(i))
+  }
+  private val s1_abtbFirstTakenBrVec = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    Mux1H(s1_abtbFirstTakenBrOHVec(i), s1_abtbPrediction)
+  }
+  private val s1_abtbFirstTakenTargetVec = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    Mux(
+      s1_abtbFirstTakenBrVec(i).attribute.isReturn && uras.io.specOut.isCanUse,
+      uras.io.specOut.retTarget,
+      s1_abtbFirstTakenBrVec(i).target
+    )
+  }
+  private val s1_abtbValidVec = VecInit.tabulate(mbtb.NumAlignBanks) { i =>
+    (abtb.io.prediction zip s1_abtbPositionMaskVec(i)).map { case (p, valid) => p.valid && valid }.reduce(_ || _)
+  }
 
   private val s1_abtbResult = Wire(new Prediction)
-  s1_abtbResult       := s1_abtbFirstTakenBr
-  s1_abtbResult.taken := s1_abtbTakenMask.reduce(_ || _)
-  s1_abtbResult.target := Mux(
-    s1_abtbFirstTakenBr.attribute.isReturn && uras.io.specOut.isCanUse,
-    uras.io.specOut.retTarget,
-    s1_abtbFirstTakenBr.target
-  )
+  s1_abtbResult        := s1_abtbFirstTakenBrVec(s1_mbtbMaxBankIdx)
+  s1_abtbResult.taken  := s1_abtbFinalTakenMaskVec(s1_mbtbMaxBankIdx).reduce(_ || _)
+  s1_abtbResult.target := s1_abtbFirstTakenTargetVec(s1_mbtbMaxBankIdx)
   s1_prediction := Mux(
-    s1_abtbValid,
-    Mux(s1_abtbResult.taken, s1_abtbResult, fallThrough.io.prediction),
-    Mux(s1_ubtbPrediction.taken, s1_ubtbPrediction, fallThrough.io.prediction)
+    s1_abtbValidVec(s1_mbtbMaxBankIdx),
+    Mux(s1_abtbResult.taken, s1_abtbResult, s1_fallthroughPrediction),
+    Mux(s1_ubtbTaken, s1_ubtbPrediction, s1_fallthroughPrediction)
   )
 
   private val s1_taken             = s1_prediction.taken
-  private val useAbtb              = s1_abtbValid && s1_abtbResult.taken
+  private val useAbtb              = s1_abtbValidVec(s1_mbtbMaxBankIdx) && s1_abtbResult.taken
   private val debug_s1UseUbtb      = s1_taken && !useAbtb
   private val debug_s1UseUbtbUtage = s1_taken && !useAbtb
   private val debug_s1UseAbtb      = s1_taken && useAbtb && !s1_utageHitMask.reduce(_ || _)
@@ -404,7 +463,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s3_useRas             = s3_firstTakenBranch.bits.attribute.isReturn
   private val s3_useIttage          = s3_firstTakenBranch.bits.attribute.needIttage && ittage.io.prediction.hit
 
-  private val s2_fallThroughPrediction = RegEnable(fallThrough.io.prediction, s1_fire)
+  private val s2_fallThroughPrediction = RegEnable(s1_fallthroughPrediction, s1_fire)
   private val s3_fallThroughPrediction = RegEnable(s2_fallThroughPrediction, s2_fire)
 
   // used for mainBTB replacer
