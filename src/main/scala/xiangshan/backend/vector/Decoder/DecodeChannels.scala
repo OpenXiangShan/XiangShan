@@ -120,7 +120,7 @@ class DecodeChannels(
 
   val vecUopOuts: Seq[Seq[ValidIO[VecDecodeChannelOutputUop]]] = vectorDecodeChannels.map(_.out.uop)
   val vsetUopOuts: Seq[ValidIO[VsetDecoder.Out]] = vsetDecodeChannels.map(_.out)
-  val simUopOuts: Seq[ValidIO[SimpleDecodeChannelOutput]] = simpleDecodeChannels.map(_.out.uop(0)) // TODO: wait for simple channel supporting multi-uop in one mop
+  val simUopOuts: Seq[ValidIO[SimpleDecodeChannelOutput]] = simpleDecodeChannels.map(_.out.uop(0))
   val psdUopOuts: Seq[ValidIO[PseudoDecodeChannel.Out]] = pseudoDecodeChannels.map(_.out)
 
   val vecUopNumOHs: Seq[NumUopOH.Type] = vectorDecodeChannels.map(_.out.uopNumOH)
