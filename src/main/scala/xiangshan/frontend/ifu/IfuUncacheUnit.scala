@@ -145,8 +145,6 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
   io.resp.bits.uncacheData := uncacheData
   io.resp.bits.crossPage   := uncacheCrossPage
 
-  // When a single MMIO instruction spans pages,
-  // should the second send for confirming the oldest instruction be blocked?
   when(io.flush) {
     uncacheReset()
   }
