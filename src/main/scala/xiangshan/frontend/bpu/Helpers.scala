@@ -43,6 +43,16 @@ trait HalfAlignHelper extends HasBpuParameters {
     nextAlignedPc
   }
 
+  def getNthNextAlignedPc(pc: PrunedAddr, n: Int): PrunedAddr = {
+    val nextAlignedPcUpperBits = getAlignedPcUpper(pc) + n.U
+    PrunedAddrInit(Cat(nextAlignedPcUpperBits, 0.U(FetchBlockAlignWidth.W)))
+  }
+
+  def getNthNextAlignedPc(pc: PrunedAddr, n: Int): PrunedAddr = {
+    val nextAlignedPcUpperBits = getAlignedPcUpper(pc) + n.U
+    PrunedAddrInit(Cat(nextAlignedPcUpperBits, 0.U(FetchBlockAlignWidth.W)))
+  }
+
   def getCfiPcFromPosition[T <: PrunedAddr](startPc: T, position: UInt): T = {
     val cfiPcUpperBits = startPc(startPc.length - 1, FetchBlockAlignWidth) + position(CfiPositionWidth - 1)
     val cfiPc          = Wire(chiselTypeOf(startPc))

@@ -33,7 +33,9 @@ case class MainBtbParameters(
     TargetWidth:     Int = 20, // 2B aligned
     TakenCntWidth:   Int = 2,
     // Mbtb write trace
-    EnableMainbtbTrace: Boolean = false
+    EnableMainbtbTrace: Boolean = false,
+    // Vbtb
+    NumVictimBtbEntries: Int = 128 // 16 entries per internal bank
 ) {}
 
 trait HasMainBtbParameters extends HasBpuParameters {
@@ -63,4 +65,11 @@ trait HasMainBtbParameters extends HasBpuParameters {
   def CfiAlignedPositionWidth: Int = CfiPositionWidth - AlignBankIdxLen
 
   def EnableMainbtbTrace: Boolean = mbtbParameters.EnableMainbtbTrace
+
+  // Victim Btb
+  def NumVictimBtbEntries: Int = mbtbParameters.NumVictimBtbEntries
+  def NumVictimBtbSets:    Int = NumVictimBtbEntries / NumWay / NumInternalBanks / NumAlignBanks
+  def VictimBtbSetIdxLen:  Int = log2Ceil(NumVictimBtbSets)
+
+  require(NumVictimBtbEntries >= (NumWay * NumInternalBanks * NumAlignBanks))
 }
