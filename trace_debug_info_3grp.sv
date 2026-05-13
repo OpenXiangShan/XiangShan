@@ -7,7 +7,9 @@ module trace_debug_info_3grp (
   input      [2:0]   ilastsize_i,
   input      [11:0]  itype_i,
   input      [2:0]   valid_i,
+  /* verilator lint_off UNUSEDSIGNAL */
   input      [63:0]  cause_i,
+  /* verilator lint_on UNUSEDSIGNAL */
   input      [2:0]   priv_i,
   input      [63:0]  status_i,
 
@@ -88,7 +90,7 @@ module trace_debug_info_3grp (
   end
 
   always @(*) begin
-    pc_calc = sel_iaddr + ((sel_iretire - (7'd1 << sel_ilastsize)) << 1);
+    pc_calc = sel_iaddr + ((({43'd0, sel_iretire}) - (({43'd0, 7'd1}) << sel_ilastsize)) << 1);
   end
 
   always @(posedge clk or negedge rst_n) begin
