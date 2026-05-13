@@ -114,9 +114,18 @@ class VectorDecodeChannel(
             }
           case vmi: VecMemInstPattern =>
             vmi match {
-              case _: VecMemWhole | _: VecMemMask =>
-                for (sewlmul <- SewLmulPattern.all) yield {
+              case _: VecMemMask =>
+                for {
+                  sewlmul <- SewLmulPattern.all
+                } yield {
                   vi ## sewlmul ## NfPattern.dontCare
+                }
+              case _: VecMemWhole =>
+                for {
+                  sewlmul <- SewLmulPattern.all
+                  nf <- NfPattern.pot
+                } yield {
+                  vi ## sewlmul ## nf
                 }
               case _ =>
                 for {
