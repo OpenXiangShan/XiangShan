@@ -99,7 +99,7 @@ class VecIssueQueue(
   // Delay1 wakeup regs are used to pass the bypass source info to the uops that have not enqueued when wakeup valid.
   // Comparing use many register in BusyTable to record bypass source info, delaying them has less cost at area.
   // Since there are 3 stages between vis0 and vex0, the waking up signal should be sent out 3 cycles ahead of it
-  // writing back. The delay1 signal will set the bypassDelay of the psrc of uop to BypassDelay.delay2.
+  // writing back. The delay1 signal stores an aged bypassDelay because the entry will be aged again before deq.
   private val vpWbM3D1WakeUp: Vec[WakeUpBundle] = Reg(chiselTypeOf(wakeup.vpWbM3Vec))
   vpWbM3D1WakeUp zip wakeup.vpWbM3Vec foreach {
     case (delay1, delay0) =>
@@ -262,14 +262,14 @@ class VecIssueQueue(
   for (etyIdx <- fastEntries.indices) {
     val etyBits = fastEntries(etyIdx).bits
 
-    fastEntryEnqGpWbWakeUpMatchVec(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryGpWbWakeUpMatchVec)
-    fastEntryEnqFpWbWakeUpMatchVec(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryFpWbWakeUpMatchVec)
-    fastEntryEnqV0WbWakeUpMatchVec.foreach(_(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryV0WbWakeUpMatchVec.get))
-    fastEntryEnqVlWbWakeUpMatchVec.foreach(_(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryVlWbWakeUpMatchVec.get))
+    fastEntryEnqGpWbWakeUpMatchVec(etyIdx) := Mux1H(fastEntryEmptySel.map(sel => sel.valid && sel.bits(etyIdx)), enqEntryGpWbWakeUpMatchVec)
+    fastEntryEnqFpWbWakeUpMatchVec(etyIdx) := Mux1H(fastEntryEmptySel.map(sel => sel.valid && sel.bits(etyIdx)), enqEntryFpWbWakeUpMatchVec)
+    fastEntryEnqV0WbWakeUpMatchVec.foreach(_(etyIdx) := Mux1H(fastEntryEmptySel.map(sel => sel.valid && sel.bits(etyIdx)), enqEntryV0WbWakeUpMatchVec.get))
+    fastEntryEnqVlWbWakeUpMatchVec.foreach(_(etyIdx) := Mux1H(fastEntryEmptySel.map(sel => sel.valid && sel.bits(etyIdx)), enqEntryVlWbWakeUpMatchVec.get))
 
-    fastEntryEnqVpWbM3WakeUpMatchVec(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryVpWbM3WakeUpMatchVec)
+    fastEntryEnqVpWbM3WakeUpMatchVec(etyIdx) := Mux1H(fastEntryEmptySel.map(sel => sel.valid && sel.bits(etyIdx)), enqEntryVpWbM3WakeUpMatchVec)
 
-    fastEntryEnqNotFlush(etyIdx) := Mux1H(fastEntryEmptySel.map(_.bits(etyIdx)), enqEntryCanTransfer)
+    fastEntryEnqNotFlush(etyIdx) := Mux1H(fastEntryEmptySel.map(sel => sel.valid && sel.bits(etyIdx)), enqEntryCanTransfer)
 
     for (srcIdx <- etyBits.status.srcStatus.indices) {
       fastEntryGpWbWakeUpMatchVec(etyIdx)(srcIdx) := in.wakeup.gpWbVec.map(x => x.wen && x.pdest === etyBits.status.srcStatus(srcIdx).psrc)
@@ -548,7 +548,11 @@ class VecIssueQueue(
           gpWbWakeUpVec zip Iterator.continually(BypassDelay.delay3),
           fpWbWakeUpVec zip Iterator.continually(BypassDelay.delay3),
           vpWbM3WakeUpVec zip in.wakeup.vpWbM3Vec.map(_.delay),
-          vpWbM3D1WakeUpVec zip Iterator.continually(BypassDelay.delay2),
+          vpWbM3D1WakeUpVec zip vpWbM3D1WakeUp.map(wakeup => Mux(
+            wakeup.delay === BypassDelay.delay3,
+            BypassDelay.delay3,
+            wakeup.delay + 1.U
+          )),
         ).reduce(_ ++ _)
       )
     }
