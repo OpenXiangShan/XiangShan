@@ -44,7 +44,7 @@ import xiangshan.backend.fu.NewCSR.PFEvent
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
+import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
 
 
 class Backend(val params: BackendParams)(implicit p: Parameters) extends LazyModule
@@ -217,18 +217,14 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.fromMem.stIn <> io.mem.stIn
   ctrlBlock.io.fromMem.violation <> io.mem.memoryViolation
   ctrlBlock.io.fromMem.mdpTrain <> io.mem.mdpTrain
+  ctrlBlock.io.fromMemToLsqEnqCtrl := io.mem.toLsqEnqCtrl
   ctrlBlock.io.lqCanAccept := io.mem.lqCanAccept
   ctrlBlock.io.sqCanAccept := io.mem.sqCanAccept
 
   io.mem.wfi <> ctrlBlock.io.toMem.wfi
 
   io.mem.lsqEnqIO <> ctrlBlock.io.toMem.lsqEnqIO
-  ctrlBlock.io.fromMemToDispatch.scommit := io.mem.sqDeq
-  ctrlBlock.io.fromMemToDispatch.lcommit := io.mem.lqDeq
-  ctrlBlock.io.fromMemToDispatch.sqDeqPtr := io.mem.sqDeqPtr
-  ctrlBlock.io.fromMemToDispatch.lqDeqPtr := io.mem.lqDeqPtr
-  ctrlBlock.io.fromMemToDispatch.sqCancelCnt := io.mem.sqCancelCnt
-  ctrlBlock.io.fromMemToDispatch.lqCancelCnt := io.mem.lqCancelCnt
+  ctrlBlock.io.fromMemToLsqEnqCtrl  <> io.mem.toLsqEnqCtrl
   ctrlBlock.io.toDispatch.wakeUpInt := intRegion.io.wakeUpToDispatch
   ctrlBlock.io.toDispatch.wakeUpFp  := fpRegion.io.wakeUpToDispatch
   ctrlBlock.io.toDispatch.wakeUpVec := vecRegion.io.wakeUpToDispatch
@@ -665,13 +661,10 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
     val gpaddr = UInt(XLEN.W)
     val isForVSnonLeafPTE = Bool()
   })
-  val sqDeq = Input(UInt(log2Ceil(EnsbufferWidth + 1).W))
-  val lqDeq = Input(UInt(log2Up(CommitWidth + 1).W))
+
+  val toLsqEnqCtrl = Flipped(new ToLsqEnqCtrl(params.hasStoreSchd, params.hasLoadSchd))
   val sqDeqPtr = Input(new SqPtr)
   val lqDeqPtr = Input(new LqPtr)
-
-  val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
-  val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
 
   val lqCanAccept = Input(Bool())
   val sqCanAccept = Input(Bool())
