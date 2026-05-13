@@ -64,7 +64,7 @@ object ScalaUopTable {
       _.LBU     -> lbu,
       _.LH      -> lh,
       _.LHU     -> lhu,
-      _.LUI     -> add.S1xS2xRemove, // TODO: U-Type
+      _.LUI     -> add.S1xS2xRemove,
       _.LW      -> lw,
       _.OR      -> or,
       _.ORI     -> or.S2xRemove,
@@ -483,7 +483,7 @@ object ScalaUopTable {
 
     D_ZFAType.mapUopcode(
       _.FLEQ_D      -> fleq_fp64,
-      _.FLI_D       -> fleq_fp64, // todo
+      _.FLI_D       -> fleq_fp64,
       _.FLTQ_D      -> fltq_fp64,
       _.FMAXM_D     -> FAluOpcodes.fmaxm_fp64,
       _.FMINM_D     -> FAluOpcodes.fminm_fp64,
