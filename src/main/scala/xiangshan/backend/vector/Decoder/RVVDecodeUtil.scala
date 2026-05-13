@@ -213,6 +213,13 @@ object RVVDecodeUtil {
       BitPat("b110"),
       BitPat("b111"),
     ).map(NfPattern.apply)
+
+    def pot: Seq[NfPattern] = Seq(
+      BitPat("b000"),
+      BitPat("b001"),
+      BitPat("b011"),
+      BitPat("b111"),
+    ).map(NfPattern.apply)
   }
 
   case class SewPattern(bitpat: BitPat) extends DecodePattern {
