@@ -1214,7 +1214,7 @@ package object xiangshan {
     val IssueCancelStallOg0 = Value("IssueCancelStallOg0")
     val IssueCancelStallOg1 = Value("IssueCancelStallOg1")
     val IssueCancelStallLd = Value("IssueCancelStallLd")
-    val IssueCancelStallSt = Value("issueCancelStallSt")
+    val IssueCancelStallSt = Value("IssueCancelStallSt")
     val IssueCancelStallOther = Value("IssueCancelStallOther")
     val IssueDelayStall = Value("IssueDelayStall")
     val DivStall = Value("DivStall") // int div, float div/sqrt

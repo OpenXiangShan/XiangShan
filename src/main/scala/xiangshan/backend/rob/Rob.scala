@@ -1552,15 +1552,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val writeBackLatency = 1.U
 
 
-//  val candidateTopdownIQInfoVec = Option.when(backendParams.debugEn)(Wire(Vec(RobSize, Vec(io.iqEntryNum, Bool()))))
-//  candidateTopdownIQInfoVec.foreach( _ := VecInit.tabulate(RobSize, io.iqEntryNum){ (index, i) =>
-//    val topdownIQInfo = io.topdownIQInfoVec.get(i)
-//    topdownIQInfo.valid && (topdownIQInfo.bits.robIdx.value === index.U)
-//  })
-//
-//  if (backendParams.debugEn) {
-//    dontTouch(candidateTopdownIQInfoVec.get)
-//  }
   if (backendParams.debugEn) {
     val topdownRobInfoCollect = Module(new TopdownRobInfoCollect(io.iqEntryNum, RobSize))
     topdownRobInfoCollect.io.in.zip(io.topdownIQInfoVec.get).foreach{ case (sink, source) =>
@@ -1593,6 +1584,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         val topdownIdealIssueUpdate = topdownIQIdealIssue || robEntries(i).topdownIdealIssue.get
         val topdownCancelSrcUpdate = Mux(topdownCanceled, topdownIQCancelSource,
           robEntries(i).topdownCancelSource.get)
+        val topdownCancelTimeUpdate = topdownCanceled
         robEntries(i).topdownCanceled.foreach(_ := topdownCanceledUpdate)
         robEntries(i).topdownIssued.foreach(_ := topdownIssuedUpdate)
         robEntries(i).topdownRobHead.foreach(_ := topdownRobHeadUpdate)
@@ -1612,6 +1604,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
             robEntries(i).topdownIdealIssueTime.get +& robEntries(i).topdownIdealIssue.get)
         ))
         robEntries(i).topdownCancelSource.foreach(_ := topdownCancelSrcUpdate)
+        robEntries(i).topdownCancelTimeVec.foreach(_.zipWithIndex.foreach{ case (cancelTime, index) =>
+          val cancelMatch = topdownCancelSrcUpdate === index.asUInt
+          cancelTime := Mux(hasWriteBack, 0.U,
+            Mux(topdownCanceled && cancelMatch, robEntries(i).topdownCancelTimeVec.get(index) + robEntries(i).topdownLastIssueTime.get,
+              robEntries(i).topdownCancelTimeVec.get(index) +& (cancelMatch & topdownCancelTimeUpdate)))
+        })
       }
     }
     io.debugRobHeadStall.foreach{ case stall =>
@@ -1635,7 +1633,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val robHeadExecStall = deqEntry.valid && (lastIssueTime > deqEntryNormalLatency) && (lastIssueTime > waitTime)
       val robHeadNotIssued = deqEntry.valid && (!deqEntry.topdownIssued.get && !issued)
       val robHeadIssueCancel = deqEntry.valid && deqEntry.topdownCanceled.get && (issueTime > deqEntryNormalLatency)
-      // issueDelay priority than cancel only calculate idealWaitTime stall
+      // issueDelay priority than cancel; only calculate idealWaitTime stall
       val robHeadIssueDelay = deqEntry.valid && (idealIssueTime > deqEntryNormalLatency) &&
         (robHeadTime < idealWaitTime)
       val robHeadExecStallReason =  MuxCase(OtherNotReadyStall.id.U, Seq(
@@ -1648,12 +1646,34 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       ))
 
       val robHeadCancelSource = deqEntry.topdownCancelSource.get
+
+      val cancelTimeVec = deqEntry.topdownCancelTimeVec.get
+      val cancelTimeFixVec = deqEntry.topdownCancelTimeFixVec.get
+      val fixedCancelTimeVec = cancelTimeVec.zip(cancelTimeFixVec).map{ case (time, fix) =>
+        Mux(time < fix, 0.U, time - fix)
+      }
+      val maxCancelTime = fixedCancelTimeVec.reduce{ (a,b) => Mux(a > b, a, b)}
+      val maxCancelTimeVec = VecInit(fixedCancelTimeVec.map(_ === maxCancelTime)).asUInt
+      val lastMaxCancelTimeOH = Reverse(PriorityEncoderOH(Reverse(maxCancelTimeVec)))
+      val lastMaxIdx = OHToUInt(lastMaxCancelTimeOH)
+      val cancelTimeFixUpdateVec = VecInit(cancelTimeFixVec.zip(lastMaxCancelTimeOH.asBools).map{
+        case (time, hit) => time +& hit
+      })
+
+      if (backendParams.debugEn){
+        dontTouch(VecInit(lastMaxCancelTimeOH.asBools))
+      }
+
+
       val cancelStallReason = MuxCase(IssueCancelStallOther.id.U, Seq(
-        IQCancelSource.isog0(robHeadCancelSource) -> IssueCancelStallOg0.id.U  ,
-        IQCancelSource.isog1(robHeadCancelSource) -> IssueCancelStallOg1.id.U  ,
-        IQCancelSource.isld(robHeadCancelSource)  -> IssueCancelStallLd.id.U   ,
-        IQCancelSource.isst(robHeadCancelSource)  -> IssueCancelStallSt.id.U   ,
+        IQCancelSource.isog0(lastMaxIdx) -> IssueCancelStallOg0.id.U  ,
+        IQCancelSource.isog1(lastMaxIdx) -> IssueCancelStallOg1.id.U  ,
+        IQCancelSource.isld(lastMaxIdx)  -> IssueCancelStallLd.id.U   ,
+        IQCancelSource.isst(lastMaxIdx)  -> IssueCancelStallSt.id.U   ,
       ))
+      deqEntry.topdownCancelTimeFixVec.foreach(_ := cancelTimeFixUpdateVec)
+
+
       stall.valid := robHeadExecStall || robHeadNotIssued || robHeadIssueCancel || robHeadIssueDelay
       stall.bits := MuxCase(BackendOtherCoreStall.id.U, Seq(
         robHeadNotIssued                    -> RobHeadNotIssued.id.U     ,

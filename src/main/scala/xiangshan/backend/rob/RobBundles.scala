@@ -100,7 +100,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val topdownRobHeadTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
     val topdownIdealIssueTime = OptionWrapper(backendParams.debugEn, UInt(XLEN.W))
     val topdownCancelSource = OptionWrapper(backendParams.debugEn, IQCancelSource())
-
+    val topdownCancelTimeVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
+    val topdownCancelTimeFixVec = OptionWrapper(backendParams.debugEn, Vec(IQCancelSource.num, UInt(XLEN.W)))
     def isWritebacked: Bool = !uopNum.orR
     def isUopWritebacked: Bool = !uopNum.orR
 
@@ -183,6 +184,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.topdownRobHeadTime.foreach(_ := 0.U)
     robEntry.topdownIdealIssueTime.foreach(_ := 0.U)
     robEntry.topdownCancelSource.foreach(_ := IQCancelSource.none)
+    robEntry.topdownCancelTimeVec.foreach(_.foreach(_ := 0.U))
+    robEntry.topdownCancelTimeFixVec.foreach(_.foreach(_ := 0.U))
   }
 
   def connectCommitEntry(robCommitEntry: RobCommitEntryBundle, robEntry: RobEntryBundle): Unit = {
