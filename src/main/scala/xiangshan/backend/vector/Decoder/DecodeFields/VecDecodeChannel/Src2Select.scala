@@ -27,14 +27,15 @@ object Src2SelectEnum extends Enumeration {
   def UInt(): UInt = chisel3.UInt(width.W)
 
   // Todo: if treat CONST and NONE as the same
-  val NONE       = Src2Val("000") // no vs2
-  val INC1       = Src2Val("001") // vs2|0,1,2,3,4,5,6,7
-  val INCF2      = Src2Val("010") // vs2|0,0,1,1,2,2,3,3
-  val INCF4      = Src2Val("011") // vs2|0,0,0,0,1,1,1,1
-  val CONST      = Src2Val("100") // vs2|0
-  val AMOCASQ    = Src2Val("101") // for amocas instruction
-  val INC1x7_S1  = Src2Val("110") // vs2|0,1,2,3,4,5,6,vs1|0
-  val INCF2x7_S1 = Src2Val("111") // vs2|0,0,1,1,2,2,3,vs1|0
+  val NONE       = Src2Val("0000") // no vs2
+  val INC1       = Src2Val("0001") // vs2|0,1,2,3,4,5,6,7
+  val INCF2      = Src2Val("0010") // vs2|0,0,1,1,2,2,3,3
+  val INCF4      = Src2Val("0011") // vs2|0,0,0,0,1,1,1,1
+  val CONST      = Src2Val("0100") // vs2|0
+  val AMOCASQ    = Src2Val("0101") // for amocas instruction
+  val INC1x7_S1  = Src2Val("0110") // vs2|0,1,2,3,4,5,6,vs1|0
+  val INCF2x7_S1 = Src2Val("0111") // vs2|0,0,1,1,2,2,3,vs1|0
+  val INC2       = Src2Val("1000") // vs2|0,2,4,6
 }
 
 object Src2SelectField extends DecodeField[
@@ -113,8 +114,8 @@ object Src2SelectField extends DecodeField[
               case VecFpOp3VVWPattern() => INCF2
               case VecFpS2VPattern() => INC1
               case VecFpS2VVWPattern() => INCF2
-              case VecFpS2WVIntPattern() => INC1
-              case VecFpS2WVFpPattern() => INC1
+              case VecFpS2WVIntPattern() => INC2
+              case VecFpS2WVFpPattern() => INC2
               case VecFpS2APattern() => CONST
               case VecFpS1VPattern() => NONE
             }
