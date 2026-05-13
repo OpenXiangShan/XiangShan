@@ -170,6 +170,7 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 - 某条 CFI 一旦已经与 golden 的某个动态实例匹配，其后续用于 `redirect` 的恢复目标必须绑定到该动态实例自身的 golden 语义，不得从一个可能已经漂移的全局 golden cursor 临时推导。
 - 某条 `redirect` 的 `target`、`pc`、FTQ 上下文必须来自同一个动态实例；不得把 `target` 绑定到当前实例、却把 FTQ idx / offset 绑定到另一条更老或已失效的实例。
 - 已被 earlier `redirect` 在语义上清除的 wrong-path 指令，即使暂时仍残留在内部结构中，也不得再参与后续 `redirect` 的归因、FTQ 上下文选择或 flush 范围计算。
+- 某条已经成功发出过 `redirect` 的正确路径 CFI，在语义上允许随后被 `commit` 正常退休；`commit` 之后若仍需把后续 mismatch 归因到这条 CFI，必须通过“最近一次已 commit 正确路径 CFI”之类的独立回退记录完成，不能再要求该 CFI 继续滞留在 queue 中。
 - `commit_queue` 应由当前 queue 中连续的正确路径前缀重新派生，不应长期保留一个依赖旧 queue 索引的历史快照再靠局部修补维持；当 active wrong-path episode、recovery 或 queue 裁剪改变前缀边界时，`commit_queue` 必须随正确路径前缀同步收口
 - `commit` 的候选范围只允许来自当前正确路径前缀；任何 `unknown` 或 `wrong` 后缀都不得通过“旧索引仍在 commit_queue 中”或类似历史残留的方式参与 commit 计划
 - 进入 `commit_queue` 的仅为 correct-path 指令；wrong-path 指令不得进入 `commit_queue`。

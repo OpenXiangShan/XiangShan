@@ -51,6 +51,9 @@ For every DUT bin-trace failure, treat the following as mandatory:
    the first recovery instruction for that redirect is actually present in the
    queue. Once that recovery instruction appears, flush the full wrong-path
    interval from the mispredicted next instruction up to the recovery boundary.
+10. Any env-side fail-fast assertion used for DUT/bin-trace debugging must log
+    the same failure text at `ERROR` level before raising, and the message must
+    include both the exact `cycle` and the golden-trace `cursor`.
 
 ## Ground Truth Rules
 
@@ -60,6 +63,9 @@ For every DUT bin-trace failure, treat the following as mandatory:
   `build-frontend/pylib/Frontend/`, and trace inputs used by the failing case.
 - Do not infer runtime DUT behavior from host-side implementation files unless
   you have independently proven that the built DUT artifacts include that path.
+- If a mismatch is attributed to a CFI that has already been committed, prove
+  whether the env is correctly using a committed-CFI fallback record or is
+  incorrectly trying to reuse a queue-resident FTQ context after retirement.
 
 ## Bin-Case Runtime Requirements
 
