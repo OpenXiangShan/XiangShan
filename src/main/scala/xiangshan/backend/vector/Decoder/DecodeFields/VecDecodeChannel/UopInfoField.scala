@@ -71,10 +71,7 @@ object UopInfoFieldVec extends DecodeField[
 
       case vmi: VecMemInstPattern if vmi.isInstanceOf[VecMemWhole] =>
         val seg = nfP.segNum
-        val lmul = lmulP.lmulValue
-        val sew = sewP.sewValue
         val eew = vmi.eewValue
-        val emul = (lmul * eew / sew).max(1.0).toInt
         vmi match {
           case pattern: VecLoadInstPattern => Seq.fill(seg)(getIndexMemUop(vlnrUops, eew))
           case pattern: VecStoreInstPattern => Seq.fill(seg)(getIndexMemUop(vsnrUops, eew))
@@ -91,7 +88,8 @@ object UopInfoFieldVec extends DecodeField[
         val lmul = lmulP.lmulValue
         val sew = sewP.sewValue
         val eew = vmi.eewValue
-        val emul = (lmul * eew / sew).max(1.0).toInt
+        val iEmul = (lmul * eew / sew)
+        val emul = iEmul.max(1.0).toInt
 
         vmi.asInstanceOf[VecMemTrait] match {
           case f: VecMemFF if (seg * emul <= 8) =>
@@ -111,7 +109,6 @@ object UopInfoFieldVec extends DecodeField[
 
           case index: VecMemIndex =>
             val dEmul = lmul
-            val iEmul = emul
             val uopNum = (1.0 max iEmul max dEmul).toInt * seg
             if (iEmul >= 0.125 && uopNum <= 8) {
               vmi match {
