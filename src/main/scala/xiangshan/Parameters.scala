@@ -824,9 +824,9 @@ trait HasXSParameter {
   def LWTUse2BitCounter = true
   // store set parameters
   def SSITSize = WaitTableSize
-  def LFSTSize = 32
+  def LFSTSize = 64
   def SSIDWidth = log2Up(LFSTSize)
-  def LFSTWidth = 4
+  def LFSTWidth = 2
   def StoreSetEnable = true // LWT will be disabled if SS is enabled
   def LFSTEnable = true
 

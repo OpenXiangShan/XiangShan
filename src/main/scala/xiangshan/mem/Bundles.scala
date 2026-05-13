@@ -29,6 +29,7 @@ import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.prefetch._
 
 import scala.math._
+import utils.OptionWrapper
 
 object Bundles {
 
@@ -84,7 +85,7 @@ object Bundles {
     val rep_info = new LoadToLsqReplayIO
   }
 
-  class StoreForwardReqS0(implicit p: Parameters) extends XSBundle {
+  class StoreForwardReqS0(implicit p: Parameters) extends MemBlockBundle {
     val vaddr = UInt(VAddrBits.W)
     val sqIdx = new SqPtr
     val size = UInt(MemorySize.Size.width.W)
@@ -97,6 +98,8 @@ object Bundles {
     val ssid = UInt(SSIDWidth.W)
     val storeSetHit = Bool() // inst has been allocated an store set
     val waitForRobIdx = new RobPtr // store set predicted previous store robIdx
+
+    val debug_robIdx = OptionWrapper(debugEn, new RobPtr)
   }
 
   class StoreForwardReqS1(implicit p: Parameters) extends XSBundle {

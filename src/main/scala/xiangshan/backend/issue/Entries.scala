@@ -34,8 +34,9 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     Some(io.og0Resp),
     Some(io.og1Resp),
     io.og2Resp.orElse(io.s0Resp),
-    if (io.og2Resp.nonEmpty) io.s0Resp else fakeS1Resp,
-    io.s2Resp.orElse(io.snResp)
+    if (io.og2Resp.nonEmpty) io.s0Resp else io.s1Resp.orElse(fakeS1Resp),
+    if (io.og2Resp.nonEmpty) io.s1Resp.orElse(fakeS1Resp) else io.s2Resp,
+    io.snResp
   ).filter(_.nonEmpty).map(_.get)
   assert(allResps.length == params.issueTimerMaxValue + 1, "allResps.length == params.issueTimerMaxValue + 1")
   val resps = Wire(Vec(allResps.length, chiselTypeOf(io.og0Resp)))
@@ -538,6 +539,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val og1Resp             = Vec(params.numDeq, Flipped(new IssueQueueRespBundle))
   val og2Resp             = OptionWrapper(params.needOg2Resp, Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   val s0Resp              = OptionWrapper(params.needS0Resp, Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
+  val s1Resp              = OptionWrapper(params.needS1Resp, Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   val s2Resp              = OptionWrapper(params.needS2Resp, Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   val snResp              = OptionWrapper(params.needSnResp, Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   //deq sel

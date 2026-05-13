@@ -22,6 +22,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val og1Resp = Vec(params.numDeq, Flipped(new IssueQueueRespBundle))
   val og2Resp = Option.when(params.needOg2Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   val s0Resp = Option.when(params.needS0Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
+  val s1Resp = Option.when(params.needS1Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   val s2Resp = Option.when(params.needS2Resp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
   // Vec Mem Resp, uncertain
   val snResp = Option.when(params.needSnResp)(Vec(params.numDeq, Flipped(new IssueQueueRespBundle)))
@@ -340,6 +341,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entriesIO.og1Resp                                           := io.og1Resp
     entriesIO.og2Resp.foreach(_                                 := io.og2Resp.get)
     entriesIO.s0Resp.foreach(_                                  := io.s0Resp.get)
+    entriesIO.s1Resp.foreach(_                                  := io.s1Resp.get)
     entriesIO.s2Resp.foreach(_                                  := io.s2Resp.get)
     entriesIO.snResp.foreach(_                                  := io.snResp.get)
     for(deqIdx <- 0 until params.numDeq) {
@@ -1044,10 +1046,11 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   }
   val finalSuccess = if (param.needSnResp) io.snResp.get.map(_.finalSuccess)
                      else if (param.needS2Resp) io.s2Resp.get.map(_.finalSuccess)
+                     else if (param.needS1Resp) io.s1Resp.get.map(_.finalSuccess)
                      else if (param.needS0Resp) io.s0Resp.get.map(_.finalSuccess)
                      else if (param.needOg2Resp) io.og2Resp.get.map(_.finalSuccess)
                      else io.og1Resp.map(_.finalSuccess)
-  val og1RespIsFinal = !param.needSnResp && !param.needS2Resp && !param.needS0Resp && !param.needOg2Resp
+  val og1RespIsFinal = !param.needSnResp && !param.needS2Resp && !param.needS1Resp && !param.needS0Resp && !param.needOg2Resp
   val issuedCnt0 = Mux(entryIssuedCntDeq0 > 3.U, 3.U, entryIssuedCntDeq0)
   val issuedCnt1 = Mux(entryIssuedCntDeq1 > 3.U, 3.U, entryIssuedCntDeq1)
   val finalResp0 = og1RespIsFinal.B & deqBeforeDly.head.valid

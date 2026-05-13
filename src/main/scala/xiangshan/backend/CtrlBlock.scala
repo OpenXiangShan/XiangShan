@@ -750,7 +750,7 @@ class CtrlBlockImp(
   lsqEnqCtrl.io.lqRecoverStall := io.fromMemToLsqEnqCtrl.lqRecoverStall.get
   lsqEnqCtrl.io.sqRecoverStall := io.fromMemToLsqEnqCtrl.sqRecoverStall.get
 
-  dispatch.io.fromLsqEnqCtrl.lsqTailPtr := lsqEnqCtrl.io.toDispatch
+  dispatch.io.fromLsqEnqCtrl.lsqHeadPtr := lsqEnqCtrl.io.toDispatch
   dispatch.io.fromLsqEnqCtrl.lqStall.foreach(_ := lsqEnqCtrl.io.lqStall.get)
   dispatch.io.fromLsqEnqCtrl.sqStall.foreach(_ := lsqEnqCtrl.io.sqStall.get)
   io.toMem.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
