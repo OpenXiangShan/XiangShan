@@ -706,8 +706,17 @@ class BackendModel:
         rank = int(state.ftq_ptr_rank_after_commit(int(ftq_flag), int(ftq_value)))
         if rank != 0 and rank <= int(state.ftq_size):
             return
+        committed_context = self._last_committed_correct_cfi_context
+        if committed_context is not None and (
+            int(committed_context.get("ftq_flag", -1)),
+            int(committed_context.get("ftq_value", -1)),
+        ) == (
+            int(ftq_flag),
+            int(ftq_value),
+        ):
+            return
         self._raise_logged_assertion(
-            "redirect references committed ftq entry; this is an env bug: "
+            "[env bug] redirect references committed ftq entry: "
             f"source={str(source)} reason={str(reason)} "
             f"ftq=({int(ftq_flag)},{int(ftq_value)}) "
             f"commit_ptr=({int(state.commit_ptr_flag)},{int(state.commit_ptr_value)}) "
@@ -1063,7 +1072,7 @@ class BackendModel:
             for entry in head_entries
         )
         self._raise_logged_assertion(
-            "cfvec queue head references committed ftq entry; this is an env bug: "
+            "[env bug] cfvec queue head references committed ftq entry: "
             f"ftq=({int(key[0])},{int(key[1])}) "
             f"commit_ptr=({int(state.commit_ptr_flag)},{int(state.commit_ptr_value)}) "
             f"rank={int(head_rank)} span_len={int(span_len)} "
@@ -3477,6 +3486,15 @@ class BackendModel:
             return
         if not self._redirect_drive_ftq_is_stale_relative_to_commit(int(drive_ftq_flag), int(drive_ftq_value)):
             return
+        committed_context = self._last_committed_correct_cfi_context
+        if committed_context is not None and (
+            int(committed_context.get("ftq_flag", -1)),
+            int(committed_context.get("ftq_value", -1)),
+        ) == (
+            int(drive_ftq_flag),
+            int(drive_ftq_value),
+        ):
+            return
         raise AssertionError(
             "redirect drive selected stale ftq context: "
             f"reason={str(reason)} "
@@ -3939,7 +3957,7 @@ class BackendModel:
                         for entry in head_entries
                     )
                     self._raise_logged_assertion(
-                        "cfvec queue head references committed ftq entry; this is an env bug: "
+                        "[env bug] cfvec queue head references committed ftq entry: "
                         f"ftq=({int(ftq_flag)},{int(ftq_value)}) "
                         f"commit_ptr=({int(state.commit_ptr_flag)},{int(state.commit_ptr_value)}) "
                         f"rank={int(head_rank)} span_len={int(span_len)} "

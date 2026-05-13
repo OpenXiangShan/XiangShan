@@ -272,6 +272,45 @@ def test_redirect_to_committed_ftq_entry_asserts() -> None:
         )
 
 
+def test_redirect_to_committed_ftq_entry_is_allowed_when_last_committed_context_matches() -> None:
+    model = BackendModel()
+    model.commit_count = 1
+    model.commit_ptr_flag = 0
+    model.commit_ptr_value = 14
+    model._last_committed_correct_cfi_context = {
+        "pc": 0x80000020,
+        "instr": 0x00000063,
+        "is_rvc": 0,
+        "pred_taken": 1,
+        "ftq_flag": 0,
+        "ftq_value": 14,
+        "ftq_offset": 0,
+        "branch_type": 1,
+        "ras_action": 0,
+        "queue_index": None,
+        "queue_context_optional": True,
+        "golden_target_pc": 0x80000040,
+    }
+
+    payload = model._plan_redirect_payload(
+        {
+            "target_pc": 0x80000040,
+            "reason": "golden_first_mismatch_redirect",
+            "pc": 0x80000020,
+            "taken": 1,
+            "ftq_flag": 0,
+            "ftq_value": 14,
+            "ftq_offset": 0,
+            "branch_type": 1,
+            "ras_action": 0,
+            "is_rvc": 0,
+            "level": 0,
+        }
+    )
+
+    assert payload["target_pc"] == 0x80000040
+
+
 def test_ready_redirect_to_committed_ftq_entry_asserts_instead_of_dropping() -> None:
     model = BackendModel()
     model.current_cycle = 10
