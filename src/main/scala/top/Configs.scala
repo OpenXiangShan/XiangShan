@@ -91,9 +91,9 @@ class MinimalConfig(n: Int = 1) extends Config(
           LoadUncacheBufferSize = 8,
           LoadQueueNWriteBanks = 4, // NOTE: make sure that LoadQueue{RAR, RAW, Replay}Size is divided by LoadQueueNWriteBanks.
           RollbackGroupSize = 8,
-          StoreQueueSize = 20,
-          StoreQueueNWriteBanks = 4, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
-          StoreQueueForwardWithMask = true,
+          StoreQueuePhysicalSize = 16, // preferably a power of 2
+          StoreQueueMultiple = 2, // preferably a power of 2
+          StoreQueueSnapshotInterval = 1, // must a power of 2
           // ============ VLSU ============
           VlMergeBufferSize = 16,
           VsMergeBufferSize = 8,
@@ -300,7 +300,7 @@ case class L2CacheConfig
   inclusive: Boolean = true,
   banks: Int = 1,
   tp: Boolean = true,
-  nl: Boolean = false, 
+  nl: Boolean = false,
   enablePC: Boolean = false, // Enable PC field for L1Param
   enableFlush: Boolean = false
 ) extends Config((site, here, up) => {

@@ -31,15 +31,43 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.{DCacheWordReqWithVaddrAndPfFlag, MemoryOpConstants, UncacheWordIO}
 import xiangshan.mem.Bundles.SQForward
 
-class SqPtr(implicit p: Parameters) extends CircularQueuePtr[SqPtr](
-  p => p(XSCoreParamsKey).StoreQueueSize
-){
+class SqPtr(PhysicalSize: Int, Multiple: Int)(implicit p: Parameters) extends MultiFlagCircularQueuePtr[SqPtr](
+  PhysicalSize,
+  Multiple
+) with HasMultiFlagCircularQueuePtrHelper{
+
+  val entrySize = PhysicalSize * Multiple
+  def this()(implicit p: Parameters) = this(p(XSCoreParamsKey).StoreQueuePhysicalSize, p(XSCoreParamsKey).StoreQueueMultiple)
+
+  def withInPhysicalQueue[T <: SqPtr](startPtr: SqPtr): Bool = {
+    withInPhysicalQueue(startPtr, this, PhysicalSize)
+  }
+
+  def needFlush(redirect: Valid[SqPtr]): Bool = {
+    redirect.valid && isNotBefore(this, redirect.bits)
+  }
+
+  def distanceBetween[T <: SqPtr](right: T): UInt = distanceBetween(this, right)
+
+  def isAfter[T <: SqPtr](right: T): Bool = isAfter(this, right)
+
+  def isBefore[T <: SqPtr](right: T): Bool = isBefore(this, right)
+
+  def isNotAfter[T <: SqPtr](right: T): Bool = isNotAfter(this, right)
+
+  def isNotBefore[T <: SqPtr](right: T): Bool = isNotBefore(this, right)
+
+  // `>` or `<` can't solve the rotate situation.
+  // when rightPtr = first_flag: 1, secode_flag: 0, value: 0, thisPtr = first_flag: 0, secode_flag: 0, value: 0
+  // thisPtr `>` rightPtr result is 1, does not make sense.
+  def isRotateBy[T <: SqPtr](right: T): Bool = (this.first_flag ^ right.first_flag) && this.operation_value === right.operation_value
 }
 
 object SqPtr {
-  def apply(f: Bool, v: UInt)(implicit p: Parameters): SqPtr = {
+  def apply(first_f: Bool, second_f: UInt, v: UInt)(implicit p: Parameters): SqPtr = {
     val ptr = Wire(new SqPtr)
-    ptr.flag := f
+    ptr.first_flag := first_f
+    ptr.second_flag := second_f
     ptr.value := v
     ptr
   }
@@ -78,20 +106,11 @@ object DataQueuePtr {
 // don't need to initial
 class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   class UopInfo(implicit p: Parameters) extends MemBlockBundle {
-    // load inst will not be executed until former store (predicted by mdp) addr calcuated
-    val loadWaitBit      = Bool()
-    // If (loadWaitBit && loadWaitStrict), strict load wait is needed
-    // load inst will not be executed until ALL former store addr calcuated
-    val loadWaitStrict   = Bool()
-    val ssid             = UInt(SSIDWidth.W)
-    val storeSetHit      = Bool() // inst has been allocated an store set
-
-    val robIdx           = new RobPtr
     val uopIdx           = UopIdx()
-
   }
-  val uop                = new UopInfo
-  val size               = UInt(MemorySize.Size.width.W)
+  val uop                      = new UopInfo
+
+  val size                     = UInt(MemorySize.Size.width.W)
   // data storage
   val vaddr                    = UInt(VAddrBits.W)
   val paddrHigh                = UInt((PAddrBits - pageOffset).W) //don't need to storage low 12 bit, which is same as vaddr(11, 0)
@@ -124,17 +143,14 @@ class SQCtrlEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val addrValid          = Bool()
 
   val waitStoreS2        = Bool() //TODO: will be remove in the feature
-  val isVec              = Bool() // TODO: need it ?
   // vecInactive indicate storage a inactive vector element, it will not write to Sbuffer. written when vector split.
   val vecInactive        = Bool()
   val cross16Byte        = Bool()
   val hasException       = Bool()
   val committed          = Bool()
-  val allocated          = Bool()
   val handleFinish       = Bool() // this signal is for deqPtr move, true.B indicate NC/MMIO/cbo request can deq
 
   val isCbo              = Bool() // Indicate if is cbo request, true is cbo request
-  val vecMbCommit        = Bool() //TODO: request was committed by MergeBuffer, will be remove in the future.
 
   //debug information
   val unalignWithin16Byte = Option.when(debugEn)(Bool())
@@ -145,8 +161,9 @@ class SQCtrlEntryBundle(implicit p: Parameters) extends MemBlockBundle {
 class UnalignBufferEntry(implicit p: Parameters) extends MemBlockBundle {
   val paddrHigh          = UInt((PAddrBits - pageOffset).W)
   def paddr :UInt        = Cat(paddrHigh, 0.U(pageOffset.W))
-  val robIdx             = new RobPtr
   val sqIdx              = new SqPtr
+
+  val debugRobIdx        = new RobPtr
 }
 
 class WriteToSbufferReqEntry(implicit p: Parameters) extends MemBlockBundle {
@@ -217,8 +234,11 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
   val param = staParams.head
   param.bindBackendParam(backendParams)
 
-//  val DCacheVWordBytes  = VLEN / 8
-//  val DCacheVWordOffset = log2Up(DCacheVWordBytes)
+  val IssuePtrMoveStride = 4
+  require(IssuePtrMoveStride >= 2)
+
+  val PhysicalStoreQueueCommitSize = 4
+
   val DCacheLineBytes   = CacheLineSize / 8
   val DCacheLineVWords  = DCacheLineBytes / DCacheVWordBytes
   val DCacheLineVWordsOffset = log2Up(DCacheLineVWords)
