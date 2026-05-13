@@ -256,6 +256,37 @@ object SplitTable {
       })
   }
 
+  private def dupF2Ncvt(
+    sewFunc: SewPattern.type => SewPattern,
+  )(
+    uop: => Opcode,
+  )(
+    func: Opcode => Opcode,
+  ): SeqMap[SewLmulPattern, Seq[Opcode]] = {
+    val uop1Src = Option(uop).map(_.copy()).map(func).orNull
+    val uop2Src = Option(uop).map(_.copy()).map(func).map(_ + Src1Vp).orNull
+
+    val sew = sewFunc(SewPattern)
+    SeqMap(
+      sew ## m8 -> Seq.empty,
+      sew ## m4 -> Seq.fill(4)(uop2Src),
+      sew ## m2 -> Seq.fill(2)(uop2Src),
+      sew ## m1 -> Seq.fill(1)(uop2Src),
+    ) ++
+      SeqMap(sew.sewValue match {
+        case 8 | 16 | 32 => sew ## mf2 -> Seq.fill(1)(uop1Src)
+        case _ => sew ## mf2 -> Seq.empty
+      }) ++
+      SeqMap(sew.sewValue match {
+        case 8 | 16  => sew ## mf4 -> Seq.fill(1)(uop1Src)
+        case _ => sew ## mf4 -> Seq.empty
+      }) ++
+      SeqMap(sew.sewValue match {
+        case 8 => sew ## mf8 -> Seq.fill(1)(uop1Src)
+        case _ => sew ## mf8 -> Seq.empty
+      })
+  }
+
   private def dupF2N(
     e8uop : => Opcode,
     e16uop: => Opcode,
@@ -266,6 +297,20 @@ object SplitTable {
     val e8SeqMap  = dupF2N(_. e8)( e8uop)(func)
     val e16SeqMap = dupF2N(_.e16)(e16uop)(func)
     val e32SeqMap = dupF2N(_.e32)(e32uop)(func)
+
+    e8SeqMap ++ e16SeqMap ++ e32SeqMap
+  }
+
+  private def dupF2Ncvt(
+    e8uop : => Opcode,
+    e16uop: => Opcode,
+    e32uop: => Opcode,
+  )(
+    func: Opcode => Opcode,
+  ): SeqMap[SewLmulPattern, Seq[Opcode]] = {
+    val e8SeqMap  = dupF2Ncvt(_.e8)(e8uop)(func)
+    val e16SeqMap = dupF2Ncvt(_.e16)(e16uop)(func)
+    val e32SeqMap = dupF2Ncvt(_.e32)(e32uop)(func)
 
     e8SeqMap ++ e16SeqMap ++ e32SeqMap
   }
@@ -993,14 +1038,14 @@ object SplitTable {
       VFWCVT_RTZ_XU_F_V -> dupF2W(null, vfcvt_ui32_fp16, vfcvt_ui64_fp32)(_ + Src2Vp),
       VFWCVT_RTZ_X_F_V  -> dupF2W(null, vfcvt_si32_fp16, vfcvt_si64_fp32)(_ + Src2Vp),
 
-      VFNCVT_XU_F_W     -> dupF2N(vfcvt_ui8_fp16, vfcvt_ui16_fp32, vfcvt_ui32_fp64)(_ + Src2Vp),
-      VFNCVT_X_F_W      -> dupF2N(vfcvt_si8_fp16, vfcvt_si16_fp32, vfcvt_si32_fp64)(_ + Src2Vp),
-      VFNCVT_F_XU_W     -> dupF2N(null, vfcvt_fp16_ui32, vfcvt_fp32_ui64)(_ + Src2Vp),
-      VFNCVT_F_X_W      -> dupF2N(null, vfcvt_fp16_si32, vfcvt_fp32_si64)(_ + Src2Vp),
-      VFNCVT_F_F_W      -> dupF2N(null, vfcvt_fp16_fp32, vfcvt_fp32_fp64)(_ + Src2Vp),
-      VFNCVT_ROD_F_F_W  -> dupF2N(null, vfcvt_fp16_fp32, vfcvt_fp32_fp64)(_ + Src2Vp),
-      VFNCVT_RTZ_XU_F_W -> dupF2N(vfcvt_ui8_fp16, vfcvt_ui16_fp32, vfcvt_ui32_fp64)(_ + Src2Vp),
-      VFNCVT_RTZ_X_F_W  -> dupF2N(vfcvt_si8_fp16, vfcvt_si16_fp32, vfcvt_si32_fp64)(_ + Src2Vp),
+      VFNCVT_XU_F_W     -> dupF2Ncvt(vfcvt_ui8_fp16, vfcvt_ui16_fp32, vfcvt_ui32_fp64)(_ + Src2Vp),
+      VFNCVT_X_F_W      -> dupF2Ncvt(vfcvt_si8_fp16, vfcvt_si16_fp32, vfcvt_si32_fp64)(_ + Src2Vp),
+      VFNCVT_F_XU_W     -> dupF2Ncvt(null, vfcvt_fp16_ui32, vfcvt_fp32_ui64)(_ + Src2Vp),
+      VFNCVT_F_X_W      -> dupF2Ncvt(null, vfcvt_fp16_si32, vfcvt_fp32_si64)(_ + Src2Vp),
+      VFNCVT_F_F_W      -> dupF2Ncvt(null, vfcvt_fp16_fp32, vfcvt_fp32_fp64)(_ + Src2Vp),
+      VFNCVT_ROD_F_F_W  -> dupF2Ncvt(null, vfcvt_fp16_fp32, vfcvt_fp32_fp64)(_ + Src2Vp),
+      VFNCVT_RTZ_XU_F_W -> dupF2Ncvt(vfcvt_ui8_fp16, vfcvt_ui16_fp32, vfcvt_ui32_fp64)(_ + Src2Vp),
+      VFNCVT_RTZ_X_F_W  -> dupF2Ncvt(vfcvt_si8_fp16, vfcvt_si16_fp32, vfcvt_si32_fp64)(_ + Src2Vp),
 
       // VFUNARY1
       VFSQRT_V          -> dup(null, vfsqrt_fp16, vfsqrt_fp32, vfsqrt_fp64)(_ + Src2Vp),
