@@ -103,6 +103,8 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   private val enqPtrVec = RegInit(VecInit.tabulate(EnqueueWidth)(_.U.asTypeOf(new IBufPtr)))
   private val enqPtr    = enqPtrVec(0)
+  // Use the IFU-IBuffer interaction to pre-determine the queue position for each instruction output by IFU.
+  private val ifuAlignedEnqPtrVec = RegInit(VecInit.tabulate(EnqueueWidth)(_.U.asTypeOf(new IBufPtr)))
 
   // No bubble for ibuffer.out, so head.valid is enough
   io.empty := enqPtr === deqPtr && !io.out.head.valid
@@ -170,11 +172,15 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val outputEntriesIsNotFull = !outputEntries(DecodeWidth - 1).valid
   private val numBypass              = Wire(UInt(DecodeWidth.U.getWidth.W))
   // when using bypass, bypassed entries do not enqueue
+  // Timing optimization: only count enqEnable up to MaxBypassNum.
+  // - Higher-index enqEnable bits arrive later (longer datapath).
+  // - Reducing PopCount width improves timing
+  private val maybeBypassNum = Mux(io.in.valid, PopCount(io.in.bits.enqEnable.take(MaxBypassNum)), 0.U)
   when(useBypass) {
-    when(numFromFetch >= DecodeWidth.U) {
+    when(maybeBypassNum >= DecodeWidth.U) {
       numBypass := DecodeWidth.U
     }.otherwise {
-      numBypass := numFromFetch
+      numBypass := maybeBypassNum
     }
   }.otherwise {
     numBypass := 0.U
@@ -253,9 +259,6 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   io.in.ready := allowEnq
   // Data
   // Rebase enqueue pointers to the IFU pre-aligned lane coordinate.
-  private val ifuAlignedEnqPtrVec = VecInit(enqPtrVec.map{ptr =>
-    ptr - enqPtr.value(log2Ceil(NumWriteBank) - 1, 0)
-  })
   for (bank <- 0 until NumWriteBank) {
     bankedIBufWriteWire(bank).zipWithIndex.foreach { case (entry, idx) =>
       // Select
@@ -276,8 +279,18 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   }
 
   // Pointer maintenance
+  // IBuffer enqueue pointers advance sequentially. Therefore the low bits used as
+  // the write-bank index cycle as 0, 1, ..., NumWriteBank-1, then wrap.
+  // IFU output lanes are aligned to the same write-bank partitioning, so each IFU
+  // lane's target enqueue pointer can be precomputed from the current enqPtr.
+  //
+  // This assumes the IBuffer size is compatible with NumWriteBank, so the pointer
+  // low-bit bank cycle is preserved across wrap-around.
+
+  private val predAlignedNum = (enqPtr + numTryEnq).value(log2Ceil(NumWriteBank) - 1, 0)
   when(io.in.fire && !io.flush) {
-    enqPtrVec := VecInit(enqPtrVec.map(_ + numTryEnq))
+    enqPtrVec           := VecInit(enqPtrVec.map(_ + numTryEnq))
+    ifuAlignedEnqPtrVec := VecInit(enqPtrVec.map(_ + numTryEnq - predAlignedNum))
   }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -336,7 +349,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   when(!firstException.valid) {
     firstException.bits := currentException
-    firstExceptionIdx   := enqPtrVec(currentExceptionOffset)
+    firstExceptionIdx   := ifuAlignedEnqPtrVec(io.in.bits.exceptionOffset)
   }
 
   // Dequeue the first encountered exceptions to outputEntries.
@@ -363,11 +376,12 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   // Flush
   when(io.flush) {
-    allowEnq      := true.B
-    enqPtrVec     := enqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
-    deqBankPtrVec := deqBankPtrVec.indices.map(_.U.asTypeOf(new IBufBankPtr))
-    deqInBankPtr  := VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr))
-    deqPtrVec     := deqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
+    allowEnq            := true.B
+    enqPtrVec           := enqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
+    ifuAlignedEnqPtrVec := ifuAlignedEnqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
+    deqBankPtrVec       := deqBankPtrVec.indices.map(_.U.asTypeOf(new IBufBankPtr))
+    deqInBankPtr        := VecInit.fill(NumReadBank)(0.U.asTypeOf(new IBufInBankPtr))
+    deqPtrVec           := deqPtrVec.indices.map(_.U.asTypeOf(new IBufPtr))
     outputEntries.foreach(_.valid := false.B)
     firstException.valid := false.B
   }.otherwise {
