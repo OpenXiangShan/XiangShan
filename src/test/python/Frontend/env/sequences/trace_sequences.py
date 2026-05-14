@@ -112,7 +112,7 @@ class RunUntilGoldenTraceCompleteSequence:
                     f"pending_work={_pending_work_count(env.backend_model)}",
                     flush=True,
                 )
-                next_cursor_report += 1000
+                next_cursor_report += 5000
 
             monitor_errors = env.monitor.get_errors()
             if logger is not None and progress_interval > 0 and (cycles_run % progress_interval) == 0:
