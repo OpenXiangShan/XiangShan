@@ -181,7 +181,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   private val s1_itlbExceptionRaw =
     DataHoldBypass(ExceptionType.fromTlbResp(fromItlb.bits), ExceptionType.None, tlbValidPulse)
-  private val s1_itlbPbmt = DataHoldBypass(fromItlb.bits.pbmt.head, Pbmt.pma, tlbValidPulse)
+  private val s1_itlbPbmt = DataHoldBypass(fromItlb.bits.pbmt.head, 0.U(Pbmt.width.W), tlbValidPulse)
 
   // Guest page fault related: save tlb raw response, select later
   // NOTE: we don't use GPAddrBits or XLEN here, refer to ICacheMainPipe.scala L43-48 and PR#3795
