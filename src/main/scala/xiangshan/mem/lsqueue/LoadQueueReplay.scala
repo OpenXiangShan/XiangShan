@@ -654,6 +654,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       allocated(enqIndex) && !enq.bits.isLoadReplay,
       p"LoadQueueReplay: can not accept more load, check: ldu $w, robIdx $debug_robIdx!")
 
+    val enqFireBase = enq.valid && enq.ready && !cancelEnq(w)
+    val replayInfo = enq.bits.rep_info
+    val isMA = replayInfo.cause(LoadReplayCauses.C_MA)
+    val isFF = replayInfo.cause(LoadReplayCauses.C_FF)
+    val nextBlockSqIdx = Mux(isMA, replayInfo.addr_inv_sq_idx, replayInfo.data_inv_sq_idx)
+
     when (needEnqueue(w) && enq.ready) {
       freeList.io.doAllocate(w) := !enq.bits.isLoadReplay
 
@@ -720,14 +726,13 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       }
 
       // special case: st-ld violation
-      when (replayInfo.cause(LoadReplayCauses.C_MA)) {
-        blockSqIdx(enqIndex) := replayInfo.addr_inv_sq_idx
-        strict(enqIndex) := enq.bits.uop.loadWaitStrict
+      when (isMA || isFF) {
+        blockSqIdx(enqIndex) := nextBlockSqIdx
       }
 
       // special case: data forward fail
-      when (replayInfo.cause(LoadReplayCauses.C_FF)) {
-        blockSqIdx(enqIndex) := replayInfo.data_inv_sq_idx
+      when (isMA) {
+        strict(enqIndex) := enq.bits.uop.loadWaitStrict
       }
       // extra info
       replayCarryReg(enqIndex) := replayInfo.rep_carry
