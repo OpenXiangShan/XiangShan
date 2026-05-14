@@ -544,7 +544,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
 
   uncacheUnit.io.req.valid       := s3_valid && s3_useUncacheFetch && !uncacheBusy
-  uncacheUnit.io.req.bits.ftqIdx := s3_alignFetchBlock(0).ftqIdx
   uncacheUnit.io.req.bits.pbmt   := s3_icacheMeta(0).itlbPbmt
   uncacheUnit.io.req.bits.isMmio := s3_icacheMeta(0).pmpMmio
   uncacheUnit.io.req.bits.paddr  := s3_icacheMeta(0).pAddr

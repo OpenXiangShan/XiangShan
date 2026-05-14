@@ -22,15 +22,12 @@ import xiangshan.cache.mmu.Pbmt
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.IfuToInstrUncacheIO
 import xiangshan.frontend.InstrUncacheToIfuIO
-import xiangshan.frontend.MmioCommitRead
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
-import xiangshan.frontend.ftq.FtqPtr
 
 class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
   class IfuUncacheIO extends IfuBundle {
     class IfuUncacheReq(implicit p: Parameters) extends IfuBundle {
-      val ftqIdx: FtqPtr     = new FtqPtr
       val pbmt:   UInt       = UInt(Pbmt.width.W)
       val isMmio: Bool       = Bool()
       val paddr:  PrunedAddr = PrunedAddr(PAddrBits)
