@@ -62,6 +62,19 @@
 - `add_watch_point(dut, bins, name=...)` 定义功能点。
 - `mark_function` 将关键测试映射到功能点。
 
+当前主线同时维护 Python 侧事务/行为功能覆盖率。为降低 RTL 变动对建模的冲击，BPU_FTQ 旧功能覆盖率迁移先收敛到 `src/test/python/Frontend/env/funcov/`：
+
+- `funcov/bpu.py`：放从旧 `BPU_FTQ_funcov.sv` 映射到当前 `Frontend.inner_bpu` 的 BPU 覆盖项
+- `funcov/backend.py`：放从旧 backend redirect covergroup 映射到顶层 redirect 输入的覆盖项
+- `funcov/ftq.py`：放 FTQ 指针/边界等稳定覆盖项
+
+建模原则：
+
+- 优先使用 `Frontend top` 已导出、语义稳定的信号
+- BPU 覆盖项优先采 `Frontend.inner_bpu` 内部信号，不使用 `cfVec` 归因到 BPU
+- BPU 内部信号采样必须有明确门控：输出链路用 `prediction.valid && prediction.ready`，s3 子预测器用 `s3_valid && prediction.ready`，uBTB 用自身 `s1_fire`
+- 当旧 `BPU_FTQ_funcov.sv` 中的 RTL 内部信号不存在或语义漂移较大时，先保留可映射的顶层行为覆盖，不强行补历史内部 bins
+
 ## 4. 数据来源
 
 - 总线握手：来自 ICache/Uncache/PTW 接口。

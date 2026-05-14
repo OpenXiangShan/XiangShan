@@ -240,6 +240,12 @@ git config core.hooksPath .githooks
 Treat `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh` as the only
 supported bin-trace entrypoint for ready-to-run cases.
 
+When preparing binaries for the frontend_bt NEMU configuration whose memory
+image starts at `0x10000000` while the frontend reset vector is `0x10001000`,
+the runnable `.bin` must include the leading `0x1000` zero-byte padding. Name
+the final runnable file as the case `.bin`; do not add `_padded` to the
+filename. Keep ELF/map artifacts only for address inspection and disassembly.
+
 ### Standard Entry
 
 The script generates the NEMU golden trace first, then runs
