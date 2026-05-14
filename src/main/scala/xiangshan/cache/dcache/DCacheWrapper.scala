@@ -142,14 +142,13 @@ trait HasDCacheParameters
   val DCacheSets = cacheParams.nSets
   val DCacheWayDiv = 2
   val DCacheWays = cacheParams.nWays
-  val DCacheBanks = 8 // hardcoded
+  val DCacheBanks = 32
   val DCacheDupNum = 16
-  val DCacheSRAMRowBits = cacheParams.rowBits // hardcoded
+  val DCacheSRAMRowBits = 16
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
   val MaxPrefetchEntry = cacheParams.nMaxPrefetchEntry
   def DCacheVWordBytes = VLEN / 8
-  require(DCacheSRAMRowBits == 64)
 
   val DCacheSetDivBits = log2Ceil(DCacheSetDiv)
   val DCacheSetBits = log2Ceil(DCacheSets)
