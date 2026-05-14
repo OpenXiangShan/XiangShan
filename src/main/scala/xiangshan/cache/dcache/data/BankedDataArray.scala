@@ -755,8 +755,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val rrl_bank_conflict = Wire(Vec(LoadPipelineWidth, Bool()))
   val rrl_bank_conflict_intend = Wire(Vec(LoadPipelineWidth, Bool()))
   (0 until LoadPipelineWidth).foreach { i =>
-    val judge = if (ReduceReadlineConflict) io.read(i).valid && (io.readline.bits.rmask & io.read(i).bits.bankMask) =/= 0.U && div_addrs(i) === line_div_addr
-                else io.read(i).valid && div_addrs(i)===line_div_addr
+    val readline_bank_overlap = (io.readline.bits.rmask & io.read(i).bits.bankMask) =/= 0.U
+    val judge = io.read(i).valid &&
+      div_addrs(i) === line_div_addr &&
+      set_addrs(i) =/= line_set_addr &&
+      readline_bank_overlap
     rrl_bank_conflict(i) := judge && io.readline.valid
     rrl_bank_conflict_intend(i) := judge && io.readline_intend
   }
@@ -764,9 +767,12 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     io.read(x).valid &&
     write_valid_reg &&
     div_addrs(x) === write_div_addr_dup_reg.head &&
-    (write_bank_mask_reg(bank_addrs(x)(0)) || write_bank_mask_reg(bank_addrs(x)(1)) && io.is128Req(x))
+    (write_bank_mask_reg & io.read(x).bits.bankMask) =/= 0.U
   )
-  val wrl_bank_conflict = io.readline.valid && write_valid_reg && line_div_addr === write_div_addr_dup_reg.head
+  val wrl_bank_conflict = io.readline.valid &&
+    write_valid_reg &&
+    line_div_addr === write_div_addr_dup_reg.head &&
+    (write_bank_mask_reg & io.readline.bits.rmask) =/= 0.U
   // ready
   io.readline.ready := !(wrl_bank_conflict)
   io.read.zipWithIndex.map{case(x, i) => x.ready := !(wr_bank_conflict(i) || rrhazard)}
@@ -835,12 +841,9 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         io.read(i).valid && div_addrs_dup(i) === div_index.U &&
           io.read(i).bits.bankMask(bank_index) && !rr_bank_conflict_oldest(i)
       })))
-      val readline_match = Wire(Bool())
-      if (ReduceReadlineConflict) {
-        readline_match := io.readline.valid && io.readline.bits.rmask(bank_index) && line_div_addr === div_index.U
-      } else {
-        readline_match := io.readline.valid && line_div_addr === div_index.U
-      }
+      val readline_match = io.readline.valid &&
+        io.readline.bits.rmask(bank_index) &&
+        line_div_addr === div_index.U
 
       val bank_set_addr = Mux(readline_match,
         line_set_addr,
