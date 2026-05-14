@@ -556,6 +556,44 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val full_wmask = FillInterleaved(8, wmask)
     ((~full_wmask & old_data) | (full_wmask & new_data))
   }
+
+  private def bankMaskFromBase(baseBank: UInt, bankCount: Int): UInt = {
+    val baseOH = UIntToOH(baseBank, DCacheBanks)
+    (0 until bankCount).map(i => (baseOH << i)(DCacheBanks - 1, 0)).reduce(_ | _)
+  }
+
+  private def wordBankBase(wordIdx: UInt): UInt = {
+    (wordIdx << log2Ceil(DCacheWordBytes / DCacheSRAMRowBytes))(log2Up(DCacheBanks) - 1, 0)
+  }
+
+  private def quadWordBankBase(quadWordIdx: UInt): UInt = {
+    (quadWordIdx << log2Ceil(QuadWordBytes / DCacheSRAMRowBytes))(log2Up(DCacheBanks) - 1, 0)
+  }
+
+  private def bankMaskForWord(wordIdx: UInt): UInt = {
+    bankMaskFromBase(wordBankBase(wordIdx), DCacheWordBytes / DCacheSRAMRowBytes)
+  }
+
+  private def bankMaskForQuadWord(quadWordIdx: UInt): UInt = {
+    bankMaskFromBase(quadWordBankBase(quadWordIdx), QuadWordBytes / DCacheSRAMRowBytes)
+  }
+
+  private def assembleBankData(data: Vec[UInt], baseBank: UInt, bankCount: Int): UInt = {
+    Cat((0 until bankCount).reverse.map(i => data((baseBank + i.U)(log2Up(DCacheBanks) - 1, 0))))
+  }
+
+  private def selectDataPiece(data: UInt, sel: Seq[Bool], bankCount: Int): UInt = {
+    Mux1H((0 until bankCount).map(i => sel(i) -> data(DCacheSRAMRowBits * (i + 1) - 1, DCacheSRAMRowBits * i)))
+  }
+
+  private def selectMaskPiece(mask: UInt, sel: Seq[Bool], bankCount: Int): UInt = {
+    Mux1H((0 until bankCount).map(i => sel(i) -> mask(DCacheSRAMRowBytes * (i + 1) - 1, DCacheSRAMRowBytes * i)))
+  }
+
+  private def selectFullMask(sel: Seq[Bool]): UInt = {
+    Mux(sel.reduce(_ || _), ~0.U(DCacheSRAMRowBytes.W), 0.U(DCacheSRAMRowBytes.W))
+  }
+
   val s2_merge_mask = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBytes.W)))
   val s2_store_data_merged_without_cache = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
   for (i <- 0 until DCacheBanks) {
@@ -601,11 +639,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s3_store_data_merged(i) := mergePutData(s3_store_data_merged_without_cache(i), s3_data(i), s3_merge_mask(i))
   }
 
-  val s3_data_word = s3_store_data_merged(s3_req.word_idx)
-  val s3_data_quad_word = VecInit((0 until DCacheBanks).map(i => {
-    if (i == (DCacheBanks - 1)) s3_store_data_merged(i)
-    else Cat(s3_store_data_merged(i + 1), s3_store_data_merged(i))
-  }))(s3_req.word_idx)
+  val s3_word_bank_base = wordBankBase(s3_req.word_idx)
+  val s3_quad_word_bank_base = quadWordBankBase(s3_req.quad_word_idx)
+  val s3_data_word = assembleBankData(
+    s3_store_data_merged,
+    s3_word_bank_base,
+    DCacheWordBytes / DCacheSRAMRowBytes
+  )
+  val s3_data_quad_word = assembleBankData(
+    s3_store_data_merged,
+    s3_quad_word_bank_base,
+    QuadWordBytes / DCacheSRAMRowBytes
+  )
+  val s3_data_line = Cat((0 until DCacheBanks).reverse.map(i => s3_data(i)))
+  val s3_amo_resp_data = Mux(isAMOCASQ(s3_req.cmd), s3_data_quad_word, s3_data_word.pad(QuadWordBits))
 
   val s3_refill_latency = RegEnable(s2_refill_latency, s2_fire_to_s3)
   val s3_sc_fail  = Wire(Bool()) // miss or lr mismatch
@@ -672,7 +719,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val debug_s3_sc_fail_addr_match = s3_sc && lrsc_addr === get_block_addr(s3_req.addr) && !lrsc_valid
 
   s3_sc_fail  := s3_sc && (!s3_lrsc_addr_match || !s3_hit)
-  val s3_cas_fail = s3_cas && (FillInterleaved(8, s3_req.amo_mask) & (s3_req.amo_cmp ^ s3_data_quad_word)) =/= 0.U
+  val s3_cas_fail = s3_cas && (FillInterleaved(8, s3_req.amo_mask) & (s3_req.amo_cmp ^ s3_amo_resp_data)) =/= 0.U
 
   val s3_can_do_amo = (s3_req.miss && !s3_req.probe && s3_req.isAMO) || s3_amo_hit
   val s3_can_do_amo_write = s3_can_do_amo && isWrite(s3_req.cmd) && !s3_sc_fail && !s3_cas_fail
@@ -734,7 +781,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSError(debug_sc_addr_match_fail_cnt > 100.U, "L1DCache failed too many SCs in a row, resv set addr always match")
 
 
-  val banked_amo_wmask = UIntToOH(s3_req.word_idx)
   val update_data = s3_req.miss || s3_store_hit || s3_can_do_amo_write
 
   // generate write data
@@ -752,28 +798,37 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_cas_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
   for (i <- 0 until DCacheBanks) {
     val old_data = s3_store_data_merged(i)
-    val new_data = amoalu.io.out
-    val wmask = Mux(
-      s3_req.word_idx === i.U,
-      ~0.U(wordBytes.W),
-      0.U(wordBytes.W)
+    val wordPieceSel = (0 until DCacheWordBytes / DCacheSRAMRowBytes).map { offset =>
+      i.U === s3_word_bank_base + offset.U
+    }
+    val quadPieceSel = (0 until QuadWordBytes / DCacheSRAMRowBytes).map { offset =>
+      i.U === s3_quad_word_bank_base + offset.U
+    }
+    s3_amo_data_merged(i) := mergePutData(
+      old_data,
+      selectDataPiece(amoalu.io.out, wordPieceSel, DCacheWordBytes / DCacheSRAMRowBytes),
+      selectFullMask(wordPieceSel)
     )
-    s3_amo_data_merged(i) := mergePutData(old_data, new_data, wmask)
-    s3_sc_data_merged(i) := mergePutData(old_data, s3_req.amo_data, s3_req.amo_mask)
-    val l_select = !s3_cas_fail && s3_req.word_idx === i.U
-    val h_select = !s3_cas_fail && s3_req.cmd === M_XA_CASQ &&
-      (if (i % 2 == 1) s3_req.word_idx === (i - 1).U else false.B)
+    s3_sc_data_merged(i) := mergePutData(
+      old_data,
+      selectDataPiece(s3_req.amo_data, wordPieceSel, DCacheWordBytes / DCacheSRAMRowBytes),
+      selectMaskPiece(s3_req.amo_mask, wordPieceSel, DCacheWordBytes / DCacheSRAMRowBytes)
+    )
     s3_cas_data_merged(i) := mergePutData(
       old_data = old_data,
-      new_data = Mux(h_select, s3_req.amo_data >> DataBits, s3_req.amo_data.take(DataBits)),
+      new_data = Mux(
+        isAMOCASQ(s3_req.cmd),
+        selectDataPiece(s3_req.amo_data, quadPieceSel, QuadWordBytes / DCacheSRAMRowBytes),
+        selectDataPiece(s3_req.amo_data, wordPieceSel, DCacheWordBytes / DCacheSRAMRowBytes)
+      ),
       wmask = Mux(
-        h_select,
-        s3_req.amo_mask >> wordBytes,
+        !s3_cas_fail,
         Mux(
-          l_select,
-          s3_req.amo_mask.take(wordBytes),
-          0.U(wordBytes.W)
-        )
+          isAMOCASQ(s3_req.cmd),
+          selectMaskPiece(s3_req.amo_mask, quadPieceSel, QuadWordBytes / DCacheSRAMRowBytes),
+          selectMaskPiece(s3_req.amo_mask, wordPieceSel, DCacheWordBytes / DCacheSRAMRowBytes)
+        ),
+        0.U(DCacheSRAMRowBytes.W)
       )
     )
   }
@@ -838,8 +893,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
         s3_can_do_amo_write,
         Mux(
           isAMOCASQ(s3_req.cmd),
-          FillInterleaved(2, UIntToOH(s3_req.quad_word_idx)),
-          UIntToOH(s3_req.word_idx)
+          bankMaskForQuadWord(s3_req.quad_word_idx),
+          bankMaskForWord(s3_req.word_idx)
         ),
         banked_none_wmask
       )
@@ -924,7 +979,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val atomic_hit_resp = Wire(new MainPipeResp)
   atomic_hit_resp.source := s3_req.source
-  atomic_hit_resp.data := Mux(s3_sc, s3_sc_fail.asUInt, s3_data_quad_word)
+  atomic_hit_resp.data := Mux(s3_sc, s3_sc_fail.asUInt, s3_amo_resp_data)
   atomic_hit_resp.miss := false.B
   atomic_hit_resp.miss_id := s3_req.miss_id
   atomic_hit_resp.error := s3_error_wb
@@ -1068,7 +1123,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.wb.bits.voluntary := s3_req.miss || s3_req.replace
   io.wb.bits.hasData := writeback_data && !s3_tag_error_wb
   io.wb.bits.dirty := s3_coh === ClientStates.Dirty
-  io.wb.bits.data := s3_data.asUInt
+  io.wb.bits.data := s3_data_line
   io.wb.bits.corrupt := s3_tag_error_wb || s3_data_error_wb
   io.wb.bits.delay_release := s3_req.replace
   io.wb.bits.miss_id := s3_req.miss_id
