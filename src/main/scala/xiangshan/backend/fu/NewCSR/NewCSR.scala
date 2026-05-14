@@ -117,6 +117,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   with CSRDocDump
   with HasCriticalErrors
   with IpIeAliasConnect
+  with DebugMMIO
 {
 
   import CSRConfig._
@@ -290,7 +291,9 @@ class NewCSR(implicit val p: Parameters) extends Module
   // error will result in an immediate re-entry into Debug Mode due to the critical error.
   // Ensure that dpc remains unchanged when criticalErrorState causes a re-entry into dmode,
   // since the PC fetched from pcmem for updating dpc is random in this case.
-  val holdDpc = RegEnable(criticalErrorState && dcsr.regOut.CETRIG, false.B, dretEvent.valid)
+  // This re-entry into Debug Mode will preempts the normal dret redirect.
+  val ceReEntryDmode = criticalErrorState && dcsr.regOut.CETRIG
+  val holdDpc = RegEnable(ceReEntryDmode, false.B, dretEvent.valid)
 
   private val privState = Wire(new PrivState)
   privState.PRVM := PRVM
@@ -1178,13 +1181,18 @@ class NewCSR(implicit val p: Parameters) extends Module
 
   private val xretTargetUpdate = mnretEvent.out.targetPc.valid || mretEvent.out.targetPc.valid || sretEvent.out.targetPc.valid || dretEvent.out.targetPc.valid
   io.xretTargetPc.valid := xretTargetUpdate
+  private val targetCeReEntryDmode = WireInit(0.U.asTypeOf(trapEntryDEvent.out.targetPc.bits))
+  targetCeReEntryDmode.pc := DebugEntry.U
+
   io.xretTargetPc.bits := DataHoldBypass(
-    Mux1H(Seq(
-      mnretEvent.out.targetPc.valid -> mnretEvent.out.targetPc.bits,
-      mretEvent.out.targetPc.valid  -> mretEvent.out.targetPc.bits,
-      sretEvent.out.targetPc.valid  -> sretEvent.out.targetPc.bits,
-      dretEvent.out.targetPc.valid  -> dretEvent.out.targetPc.bits,
-    )),
+    Mux(ceReEntryDmode,
+      targetCeReEntryDmode,
+      Mux1H(Seq(
+        mnretEvent.out.targetPc.valid -> mnretEvent.out.targetPc.bits,
+        mretEvent.out.targetPc.valid  -> mretEvent.out.targetPc.bits,
+        sretEvent.out.targetPc.valid  -> sretEvent.out.targetPc.bits,
+        dretEvent.out.targetPc.valid  -> dretEvent.out.targetPc.bits,
+      ))),
     xretTargetUpdate
   )
 

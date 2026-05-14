@@ -57,9 +57,7 @@ trait DebugLevel { self: NewCSR =>
     .setAddr(CSRs.tinfo)
 
   val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle with HasNmipBundle {
-    when(nmip){
-      reg.NMIP := nmip
-    }
+    regOut.NMIP := nmip
   })
     .setAddr(CSRs.dcsr)
 
@@ -292,10 +290,15 @@ class Tdata2Bundle extends CSRBundle {
 
 // Tinfo
 class TinfoBundle extends CSRBundle{
-  val VERSION     = RO(31, 24).withReset(0.U)
-    .withDescription("Trigger-information format version field. XiangShan reports version 0, matching the Debug Spec 0.13-style encoding.")
+  val VERSION     = TriggerVer(31, 24).withReset(TriggerVer.Spec_1dot0)
+    .withDescription("Trigger-information format version field. XiangShan reports version 1, matching the ratified Debug Spec 1.0 trigger encoding.")
   val MCONTROL6EN = RO(6).withReset(1.U)
     .withDescription("Indicates that the mcontrol6 trigger format is supported.")
+}
+
+object TriggerVer extends CSREnum with ROApply {
+  val Spec_2302  = Value(0.U)
+  val Spec_1dot0 = Value(1.U)
 }
 
 // Dscratch

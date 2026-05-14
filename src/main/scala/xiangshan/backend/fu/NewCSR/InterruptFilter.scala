@@ -548,7 +548,7 @@ class InterruptFilter extends Module {
                          C1C5EnableReg && (iprioC1 === iprioC2C5 && !hvictlReg.DPR.asBool || iprioC1 > iprioC2C5)
   val viIsHvictlInjectReg = RegNext(vsIRModeCond && SelectCandidate5 && io.in.mnstatusNMIE, false.B)
 
-  io.out.interruptVec.valid := intrVecReg.orR || debugIntrReg || viIsHvictlInjectReg
+  io.out.interruptVec.valid := intrVecReg.orR || debugIntrReg
   io.out.interruptVec.bits := intrVecReg
   io.out.debug := debugIntrReg
   io.out.nmi := nmiReg
