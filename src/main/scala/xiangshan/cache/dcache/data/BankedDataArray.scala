@@ -178,36 +178,39 @@ class DataSRAMBank(index: Int)(implicit p: Parameters) extends DCacheModule {
   val w_info = io.w
   // val rw_bypass = RegNext(io.w.addr === io.r.addr && io.w.way_en === io.r.way_en && io.w.en)
 
-  // multiway data bank
-  val data_bank = Seq.fill(DCacheWays) {
-    Module(new SRAMTemplate(
-      Bits(encDataBits.W),
-      set = DCacheSets / DCacheSetDiv,
-      way = 1,
-      shouldReset = false,
-      holdRead = false,
-      singlePort = true,
-      withClockGate = true,
-      hasMbist = hasMbist,
-      hasSramCtl = hasSramCtl,
-      suffix = Some("dcsh_dat")
-    ))
-  }
+  private val packedRowBits = DCacheWays * encDataBits
+  private val data_bank = Module(new SRAMTemplate(
+    Bits(packedRowBits.W),
+    set = DCacheSets / DCacheSetDiv,
+    way = 1,
+    shouldReset = false,
+    holdRead = false,
+    singlePort = true,
+    useBitmask = true,
+    withClockGate = true,
+    hasMbist = hasMbist,
+    hasSramCtl = hasSramCtl,
+    suffix = Some("dcsh_dat")
+  ))
 
-  for (w <- 0 until DCacheWays) {
-    val wen = w_info.en && w_info.way_en(w)
-    data_bank(w).io.w.req.valid := wen
-    data_bank(w).io.w.req.bits.apply(
-      setIdx = w_info.addr,
-      data = w_info.data,
-      waymask = 1.U
-    )
-    data_bank(w).io.r.req.valid := io.r.en
-    data_bank(w).io.r.req.bits.apply(setIdx = io.r.addr)
-  }
-  XSPerfAccumulate("part_data_read_counter", PopCount(Cat(data_bank.map(_.io.r.req.valid))))
+  val packedWriteData = Cat((0 until DCacheWays).reverse.map(_ => w_info.data))
+  val packedWriteMask = Cat((0 until DCacheWays).reverse.map(w => Fill(encDataBits, w_info.way_en(w))))
 
-  io.r.data := data_bank.map(_.io.r.resp.data(0))
+  data_bank.io.w.req.valid := w_info.en
+  data_bank.io.w.req.bits.apply(
+    setIdx = w_info.addr,
+    data = packedWriteData,
+    waymask = 1.U,
+    bitmask = packedWriteMask
+  )
+  data_bank.io.r.req.valid := io.r.en
+  data_bank.io.r.req.bits.apply(setIdx = io.r.addr)
+  XSPerfAccumulate("part_data_read_counter", data_bank.io.r.req.valid)
+
+  val packedReadData = data_bank.io.r.resp.data(0).asUInt
+  io.r.data := VecInit((0 until DCacheWays).map(w => {
+    packedReadData(encDataBits * (w + 1) - 1, encDataBits * w)
+  }))
 
   def dump_r() = {
     XSDebug(RegNext(io.r.en),
