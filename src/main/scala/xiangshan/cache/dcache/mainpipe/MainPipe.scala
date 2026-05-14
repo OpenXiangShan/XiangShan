@@ -651,8 +651,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     s3_quad_word_bank_base,
     QuadWordBytes / DCacheSRAMRowBytes
   )
+  val s3_data_selected_quad_word = assembleBankData(
+    s3_store_data_merged,
+    s3_word_bank_base,
+    QuadWordBytes / DCacheSRAMRowBytes
+  )
   val s3_data_line = Cat((0 until DCacheBanks).reverse.map(i => s3_data(i)))
-  val s3_amo_resp_data = Mux(isAMOCASQ(s3_req.cmd), s3_data_quad_word, s3_data_word.pad(QuadWordBits))
+  val s3_amo_resp_data = Mux(isAMOCASQ(s3_req.cmd), s3_data_quad_word, s3_data_selected_quad_word)
 
   val s3_refill_latency = RegEnable(s2_refill_latency, s2_fire_to_s3)
   val s3_sc_fail  = Wire(Bool()) // miss or lr mismatch
