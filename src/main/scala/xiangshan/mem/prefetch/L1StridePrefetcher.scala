@@ -49,7 +49,13 @@ trait HasStridePrefetchHelper extends HasL1PrefetchHelper {
   val STRIDE_LOOK_AHEAD_BLOCKS = 2 // aggressive degree
   val LOOK_UP_STREAM = false // if true, avoid collision with stream
 
-  val STRIDE_WIDTH_BLOCKS = if(AGGRESIVE_POLICY) STRIDE_LOOK_AHEAD_BLOCKS else 1
+  val STRIDE_WIDTH_BLOCKS_BASE = if(AGGRESIVE_POLICY) STRIDE_LOOK_AHEAD_BLOCKS else 1
+  def STRIDE_WIDTH_BLOCKS(degree: UInt = 1.U): UInt = Mux(
+    degree <= 1.U,
+    STRIDE_WIDTH_BLOCKS_BASE.U,
+    Mux(degree === 2.U, (STRIDE_WIDTH_BLOCKS_BASE * 2).U, (STRIDE_WIDTH_BLOCKS_BASE * 3).U)
+  )
+
 
   def MAX_CONF = (1 << STRIDE_CONF_BITS) - 1
   def CONF_THRESHOLD = (1 << (STRIDE_CONF_BITS-1)) - 1
@@ -135,9 +141,10 @@ class StrideMetaBundle(implicit p: Parameters) extends XSBundle with HasStridePr
 
 }
 
-class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePrefetchHelper {
+class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePrefetchHelper with HasPrefetcherParams {
   val io = IO(new XSBundle {
     val enable = Input(Bool())
+    val fdbkDegree = Input(UInt(DEGREE_WIDTH.W))
     // TODO: flush all entry when process changing happens, or disable stream prefetch for a while
     val flush = Input(Bool())
     val dynamic_depth = Input(UInt(32.W)) // TODO: enable dynamic stride depth
@@ -238,7 +245,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s2_l1_pf_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
     valid = s2_valid,
     vaddr = s2_l1_pf_vaddr,
-    width = STRIDE_WIDTH_BLOCKS,
+    width = STRIDE_WIDTH_BLOCKS(),
     decr_mode = s2_decr_mode,
     sink = SINK_L1,
     source = L1_HW_PREFETCH_STRIDE,
@@ -248,9 +255,9 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     t_va = 0xdeadbeefL.U
     )
   val s2_l2_pf_req_bits = (new StreamPrefetchReqBundle).getStreamPrefetchReqBundle(
-    valid = s2_valid,
+    valid = s2_valid && io.fdbkDegree > 0.U,
     vaddr = s2_l2_pf_vaddr,
-    width = STRIDE_WIDTH_BLOCKS,
+    width = STRIDE_WIDTH_BLOCKS(io.fdbkDegree),
     decr_mode = s2_decr_mode,
     sink = SINK_L2,
     source = L1_HW_PREFETCH_STRIDE,
@@ -309,6 +316,8 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   XSPerfAccumulate("s1_stat_valid_confirm_sendpf", s1_stat.valid_confirm_sendpf)
   XSPerfAccumulate("s1_stat_valid_mismatch", s1_stat.valid_mismatch)
   XSPerfAccumulate("s1_stat_valid_mismatch_replace", s1_stat.valid_mismatch_replace)
+  XSPerfAccumulate("stride_l2_feedback_control_drop", s2_valid && io.fdbkDegree === 0.U)
+
   class StrideLearn extends Bundle {
     val stat = new StatStrideBundle()
     val pc = UInt(VAddrBits.W)
