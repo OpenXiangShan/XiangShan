@@ -107,6 +107,22 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val not_nacked_ready = io.meta_read.ready && io.tag_read.ready && s1_ready
   val nacked_ready     = true.B
 
+  private def bankMaskFromBase(baseBank: UInt, bankCount: Int): UInt = {
+    val baseOH = UIntToOH(baseBank, DCacheBanks)
+    (0 until bankCount).map(i => (baseOH << i)(DCacheBanks - 1, 0)).reduce(_ | _)
+  }
+
+  private def byteMaskToBankMask(vaddr: UInt, byteMask: UInt): UInt = {
+    val bankMaskInVWord = VecInit((0 until VLEN / DCacheSRAMRowBits).map(i => {
+      byteMask(DCacheSRAMRowBytes * (i + 1) - 1, DCacheSRAMRowBytes * i).orR
+    })).asUInt
+    val bankOffsetInLine = Cat(
+      vaddr(DCacheLineOffset - 1, DCacheVWordOffset),
+      0.U(log2Ceil(VLEN / DCacheSRAMRowBits).W)
+    )
+    (bankMaskInVWord << bankOffsetInLine)(DCacheBanks - 1, 0)
+  }
+
   // Pipeline
   // --------------------------------------------------------------------------------
   // stage 0
@@ -126,9 +142,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_vaddr = s0_req.vaddr
   val s0_replayCarry = s0_req.replayCarry
   val s0_load128Req = io.load128Req
-  val s0_bank_oh_64 = UIntToOH(addr_to_dcache_bank(s0_vaddr))
-  val s0_bank_oh_128 = (s0_bank_oh_64 << 1.U).asUInt | s0_bank_oh_64.asUInt
-  val s0_bank_oh = Mux(s0_load128Req, s0_bank_oh_128, s0_bank_oh_64)
+  val s0_base_bank = addr_to_dcache_bank(s0_vaddr)
+  val s0_bank_mask_128b = bankMaskFromBase(s0_base_bank, VLEN / DCacheSRAMRowBits)
+  val s0_bank_mask_normal = byteMaskToBankMask(s0_vaddr, s0_req.mask)
+  val s0_bank_oh = Mux(s0_load128Req, s0_bank_mask_128b, s0_bank_mask_normal)
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
   dump_pipeline_reqs("LoadPipe s0", s0_valid, s0_req)
 
@@ -402,7 +419,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh && !s2_wpu_pred_fail
 
-  val s2_data128bit = Cat(io.banked_data_resp(1).raw_data, io.banked_data_resp(0).raw_data)
+  val s2_data128bit = Cat(
+    (0 until VLEN / DCacheSRAMRowBits).reverse.map(i => io.banked_data_resp(i).raw_data)
+  )
   val s2_resp_data  = s2_data128bit
 
   val s2_is_prefetch = s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U

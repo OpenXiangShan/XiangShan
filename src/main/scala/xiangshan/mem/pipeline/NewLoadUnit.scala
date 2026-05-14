@@ -437,7 +437,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.dcacheReq.bits.vaddr := dcacheVAddr
   io.dcacheReq.bits.vaddr_dup := dcacheVAddr
   io.dcacheReq.bits.data := DontCare
-  io.dcacheReq.bits.mask := DontCare
+  io.dcacheReq.bits.mask := sink.bits.mask
   io.dcacheReq.bits.id := DontCare
   io.dcacheReq.bits.instrtype := Mux(isPrefetch, DCACHE_PREFETCH_SOURCE.U, LOAD_SOURCE.U)
   io.dcacheReq.bits.isFirstIssue := firstIssue
