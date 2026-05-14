@@ -97,11 +97,13 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
   private val respDeniedReg  = RegInit(false.B)
 
   // send response to InstrUncache
-  io.resp.valid           := state === State.SendResp && !needFlush
-  io.resp.bits.data       := respDataReg.asUInt
-  io.resp.bits.corrupt    := respCorruptReg
-  io.resp.bits.denied     := respDeniedReg
-  io.resp.bits.incomplete := crossPageBoundary
+  io.resp.valid        := state === State.SendResp && !needFlush
+  io.resp.bits.data    := respDataReg.asUInt
+  io.resp.bits.corrupt := respCorruptReg
+  io.resp.bits.denied  := respDeniedReg
+  // if crossing page boundary, we need Ifu sending a frontend redirect to Ftq to re-check itlb and pmp
+  // NOTE: tile-link asked that if denied=true, corrupt must be true too, so here we don't need check respDeniedReg
+  io.resp.bits.needResend := crossPageBoundary && !respCorruptReg && !isRVC(respDataReg.asUInt)
 
   // state transfer
   switch(state) {
@@ -134,11 +136,12 @@ class InstrUncacheEntry(edge: TLEdgeOut)(implicit p: Parameters) extends InstrUn
           )
         )
 
-        // if is corrupted, we need to raise an exception anyway, so no need to resend request
+        // if crossing bus boundary, but not page boundary, we can automatically re-send request, except:
+        // 1. if has exception, we need to raise an exception anyway, so no need to resend request
         val respCorrupt = io.mmioGrant.bits.corrupt
-        // if response is rvc, we need only 2B, so no need to resend request
+        // 2. if response is rvc, we need only 2B, so no need to resend request
         val respIsRvc = isRVC(shiftedBusData)
-        // also, if we are already resending, we should not resend again
+        // 3. also, if we are already resending, we should not resend again
         val needResend = crossBusBoundary && !crossPageBoundary && !respCorrupt && !respIsRvc && !resending
 
         state     := Mux(needResend, State.RefillReq, State.SendResp)

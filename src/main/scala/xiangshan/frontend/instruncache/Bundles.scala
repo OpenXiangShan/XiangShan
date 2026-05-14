@@ -30,5 +30,5 @@ class InstrUncacheResp(implicit p: Parameters) extends InstrUncacheBundle {
   val data:       UInt = UInt(32.W)
   val corrupt:    Bool = Bool()
   val denied:     Bool = Bool()
-  val incomplete: Bool = Bool() // whether this.data is incomplete (e.g. crossing a page boundary)
+  val needResend: Bool = Bool() // not RVC, no exception, crossing page boundary
 }

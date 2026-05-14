@@ -38,7 +38,7 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
     class IfuUncacheResp(implicit p: Parameters) extends IfuBundle {
       val uncacheData: UInt          = UInt(32.W)
       val exception:   ExceptionType = new ExceptionType
-      val crossPage:   Bool          = Bool()
+      val needResend:  Bool          = Bool() // not RVC, no exception, crossing page boundary, see InstrUncacheResp
     }
     val req            = Flipped(DecoupledIO(new IfuUncacheReq))
     val resp           = Output(ValidIO(new IfuUncacheResp))
@@ -68,21 +68,21 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
   def uncacheReady: Bool = uncacheState === UncacheFsmState.Idle
   def uncacheValid: Bool = uncacheState =/= UncacheFsmState.Idle
 
-  private val uncacheData      = RegInit(0.U(32.W))
-  private val uncacheException = RegInit(ExceptionType.None)
-  private val uncacheCrossPage = RegInit(false.B)
-  private val uncacheFinish    = RegInit(false.B)
-  private val uncachePAddr     = RegInit(PrunedAddrInit(0.U(PAddrBits.W)))
-  private val isMmio           = RegInit(false.B)
-  private val itlbPbmt         = RegInit(0.U(Pbmt.width.W))
+  private val uncacheData       = RegInit(0.U(32.W))
+  private val uncacheException  = RegInit(ExceptionType.None)
+  private val uncacheNeedResend = RegInit(false.B)
+  private val uncacheFinish     = RegInit(false.B)
+  private val uncachePAddr      = RegInit(PrunedAddrInit(0.U(PAddrBits.W)))
+  private val isMmio            = RegInit(false.B)
+  private val itlbPbmt          = RegInit(0.U(Pbmt.width.W))
 
   private def uncacheReset(): Unit = {
-    uncacheState     := UncacheFsmState.Idle
-    uncacheData      := 0.U
-    uncacheException := ExceptionType.None
-    uncacheCrossPage := false.B
-    uncachePAddr     := PrunedAddrInit(0.U(PAddrBits.W))
-    uncacheFinish    := false.B
+    uncacheState      := UncacheFsmState.Idle
+    uncacheData       := 0.U
+    uncacheException  := ExceptionType.None
+    uncacheNeedResend := false.B
+    uncachePAddr      := PrunedAddrInit(0.U(PAddrBits.W))
+    uncacheFinish     := false.B
   }
 
   // last instruction finish
@@ -113,13 +113,10 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
     is(UncacheFsmState.WaitResp) {
       when(fromUncache.fire) {
         val exception = ExceptionType.fromTileLink(fromUncache.bits.corrupt, fromUncache.bits.denied)
-        val crossPage = fromUncache.bits.incomplete
-        uncacheState     := UncacheFsmState.Idle
-        uncacheException := exception
-        // Cross-page exception: only when triggered at the exact page crossing;
-        // exceptions before crossing are normal exceptions
-        uncacheCrossPage := crossPage && !exception.hasException
-        uncacheData      := fromUncache.bits.data
+        uncacheState      := UncacheFsmState.Idle
+        uncacheException  := exception
+        uncacheNeedResend := fromUncache.bits.needResend
+        uncacheData       := fromUncache.bits.data
       }
     }
   }
@@ -143,7 +140,7 @@ class IfuUncacheUnit(implicit p: Parameters) extends IfuModule with IfuHelper {
   io.resp.valid            := uncacheFinish
   io.resp.bits.exception   := uncacheException
   io.resp.bits.uncacheData := uncacheData
-  io.resp.bits.crossPage   := uncacheCrossPage
+  io.resp.bits.needResend  := uncacheNeedResend
 
   // When a single MMIO instruction spans pages,
   // should the second send for confirming the oldest instruction be blocked?

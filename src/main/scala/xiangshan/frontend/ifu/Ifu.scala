@@ -511,8 +511,8 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s3_reqIsUncache    = RegEnable(s2_reqIsUncache, s2_fire)
   private val s3_useUncacheFetch = RegEnable(s2_useUncacheFetch, s2_fire)
   private val s3_uncacheCanGo =
-    (uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.crossPage) || !s3_useUncacheFetch
-  private val s3_uncacheCrossPageMask = s3_valid && uncacheUnit.io.resp.valid && uncacheUnit.io.resp.bits.crossPage
+    (uncacheUnit.io.resp.valid && !uncacheUnit.io.resp.bits.needResend) || !s3_useUncacheFetch
+  private val s3_uncacheCrossPageMask = s3_valid && uncacheUnit.io.resp.valid && uncacheUnit.io.resp.bits.needResend
   private val s3_toIBufferValid =
     s3_valid && (!s3_reqIsUncache || (s3_uncacheCanGo && s3_reqIsUncache)) && !s3_flush
   private val s3_shiftNum = s3_prevIBufEnqPtr.value(1, 0)
@@ -521,24 +521,24 @@ class Ifu(implicit p: Parameters) extends IfuModule
   /* ** unache state handle ** */
   private val uncacheBusy = RegInit(false.B)
   // Uncache cross-page across two fetch blocks, store the prev block’s cross-page flag and data.
-  private val prevUncacheCrossPage = RegInit(false.B)
-  private val prevUncacheData      = RegInit(0.U(16.W))
+  private val prevUncacheNeedResend = RegInit(false.B)
+  private val prevUncacheData       = RegInit(0.U(16.W))
   // For uncache cross-page instr, the real PC is in the prev fetch block.
   private val uncachePc = RegInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
   // Uncache cross-page may hit seq fetch or mispred, check required.
-  private val uncacheCrossPageCheck = RegInit(false.B)
+  private val uncacheResendCheck = RegInit(false.B)
   when(s3_flush) {
-    uncacheBusy           := false.B
-    uncachePc             := 0.U.asTypeOf(PrunedAddr(VAddrBits))
-    uncacheCrossPageCheck := false.B
+    uncacheBusy        := false.B
+    uncachePc          := 0.U.asTypeOf(PrunedAddr(VAddrBits))
+    uncacheResendCheck := false.B
   }.elsewhen(uncacheUnit.io.req.fire) {
-    uncacheBusy           := true.B
-    uncachePc             := Mux(prevUncacheCrossPage, uncachePc, s3_alignPc(s3_shiftNum))
-    uncacheCrossPageCheck := (s3_alignFetchBlock(0).startVAddr + 2.U) === s3_alignFetchBlock(0).target
+    uncacheBusy        := true.B
+    uncachePc          := Mux(prevUncacheNeedResend, uncachePc, s3_alignPc(s3_shiftNum))
+    uncacheResendCheck := (s3_alignFetchBlock(0).startVAddr + 2.U) === s3_alignFetchBlock(0).target
   }.elsewhen(uncacheUnit.io.resp.valid) {
     uncacheBusy := false.B
     // uncachePc := uncachePc
-    uncacheCrossPageCheck := false.B
+    uncacheResendCheck := false.B
   }
 
   uncacheUnit.io.req.valid       := s3_valid && s3_useUncacheFetch && !uncacheBusy
@@ -555,15 +555,15 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val uncacheData       = uncacheUnit.io.resp.bits.uncacheData
   private val uncacheException  = uncacheUnit.io.resp.bits.exception
-  private val uncacheCrossPage  = uncacheUnit.io.resp.bits.crossPage
-  private val uncacheCheckFault = uncacheCrossPage && !uncacheCrossPageCheck && uncacheUnit.io.resp.valid
+  private val uncacheNeedResend = uncacheUnit.io.resp.bits.needResend // not RVC, no exception, crossing page boundary
+  private val uncacheCheckFault = uncacheNeedResend && !uncacheResendCheck && uncacheUnit.io.resp.valid
 
   when(uncacheUnit.io.resp.valid) {
-    prevUncacheCrossPage := uncacheCrossPage
-    prevUncacheData      := uncacheData
+    prevUncacheNeedResend := uncacheNeedResend
+    prevUncacheData       := uncacheData
   }
 
-  private val s3_uncacheData = Mux(prevUncacheCrossPage, Cat(uncacheData(15, 0), prevUncacheData), uncacheData)
+  private val s3_uncacheData = Mux(prevUncacheNeedResend, Cat(uncacheData(15, 0), prevUncacheData), uncacheData)
   private val uncacheIsRvc   = s3_uncacheData(1, 0) =/= "b11".U
   uncacheRvcExpander.io.in      := Mux(s3_reqIsUncache, s3_uncacheData, 0.U)
   uncacheRvcExpander.io.fsIsOff := io.csrFsIsOff
@@ -692,14 +692,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val uncachePd           = 0.U.asTypeOf(Vec(FetchBlockInstNum, new PreDecodeInfo))
   private val uncacheMisEndOffset = Wire(Valid(UInt(FetchBlockInstOffsetWidth.W)))
   uncacheMisEndOffset.valid := s3_reqIsUncache
-  uncacheMisEndOffset.bits  := Mux(prevUncacheCrossPage || uncacheIsRvc || uncacheCheckFault, 0.U, 1.U)
+  uncacheMisEndOffset.bits  := Mux(prevUncacheNeedResend || uncacheIsRvc || uncacheCheckFault, 0.U, 1.U)
 
   // Send mmioFlushWb back to FTQ 1 cycle after uncache fetch return
   // When backend redirect, mmioState reset after 1 cycle.
   // In this case, mask .valid to avoid overriding backend redirect
   private val uncacheTarget =
     Mux(
-      uncacheIsRvc || prevUncacheCrossPage || uncacheCheckFault,
+      uncacheIsRvc || prevUncacheNeedResend || uncacheCheckFault,
       s3_alignFetchBlock(0).startVAddr + 2.U,
       s3_alignFetchBlock(0).startVAddr + 4.U
     )
@@ -727,11 +727,11 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     io.toIBuffer.bits.pc(s3_shiftNum)                    := uncachePc
     io.toIBuffer.bits.isRvc(s3_shiftNum)                 := uncacheIsRvc
-    io.toIBuffer.bits.instrEndOffset(s3_shiftNum).offset := Mux(prevUncacheCrossPage || uncacheIsRvc, 0.U, 1.U)
+    io.toIBuffer.bits.instrEndOffset(s3_shiftNum).offset := Mux(prevUncacheNeedResend || uncacheIsRvc, 0.U, 1.U)
 
     io.toIBuffer.bits.exceptionType := s3_icacheMeta(0).exception || uncacheException || uncacheRvcException
     // execption can happen in next page only when cross page.
-    io.toIBuffer.bits.exceptionCrossPage := prevUncacheCrossPage && uncacheException.hasException
+    io.toIBuffer.bits.exceptionCrossPage := prevUncacheNeedResend && uncacheException.hasException
     io.toIBuffer.bits.exceptionOffset    := 0.U
 
     // The s3_alignBlockStartPos vector marks the position of the first instruction.
