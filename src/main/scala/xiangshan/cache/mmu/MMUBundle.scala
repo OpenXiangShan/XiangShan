@@ -1040,10 +1040,14 @@ class PtwEntries(num: Int, tagLen: Int, level: Int, hasPerm: Boolean, ReservedBi
     ps.prefetch := prefetch
     for (i <- 0 until num) {
       val pte = data((i+1)*XLEN-1, i*XLEN).asTypeOf(new PteBundle)
+      val denyNapotInSector = if (hasPerm && level == 0) pte.isNapot(levelUInt) else false.B
+      val isRefillEntry = pte.canRefill(levelUInt, s2xlate, pbmte, mode) &&
+        (if (hasPerm) pte.isLeaf() else !pte.isLeaf())
+      val onlyPf = (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)
       ps.pbmts(i) := pte.pbmt
       ps.ppns(i) := pte.getPPN()
-      ps.vs(i)   := (pte.canRefill(levelUInt, s2xlate, pbmte, mode) && (if (hasPerm) pte.isLeaf() else !pte.isLeaf())) || (if (hasPerm) pte.onlyPf(levelUInt, s2xlate, pbmte) else false.B)
-      ps.onlypf(i) := pte.onlyPf(levelUInt, s2xlate, pbmte)
+      ps.vs(i)   := (isRefillEntry || onlyPf) && !denyNapotInSector
+      ps.onlypf(i) := onlyPf && !denyNapotInSector
       ps.perms.map(_(i) := pte.perm)
       when (s2xlate === onlyStage2) {
         // g bit in G-stage PTEs should be ignored by hardware
