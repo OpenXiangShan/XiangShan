@@ -7,6 +7,14 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from .funcov import (
+    sample_backend_redirect_coverage,
+    sample_bpu_subpredictor_coverage,
+    sample_bpu_to_ftq_coverage,
+    sample_bpu_v3_basic_prediction_coverage,
+    sample_cfvec_coverage,
+    sample_ftq_coverage,
+)
 from .rvc_decoder import expand_rvc
 
 
@@ -208,52 +216,10 @@ class FunctionalCoverageRecorder:
         elif self._reset_seen_high and self._reset_release_cycle is None:
             self._reset_release_cycle = cycle
 
-        valid_slots: List[int] = []
-        saw_cfi = False
-        for slot in range(8):
-            base = f"io_backend_cfVec_{slot}_"
-            if self._read_dut_signal(dut, base + "valid", 0) != 1:
-                continue
-
-            valid_slots.append(slot)
-            pc = int(self._read_dut_signal(dut, base + "bits_pc", 0))
-            instr = int(self._read_dut_signal(dut, base + "bits_instr", 0)) & 0xFFFFFFFF
-            is_rvc = bool(self._read_dut_signal(dut, base + "bits_isRvc", 0))
-            pred_taken = bool(self._read_dut_signal(dut, base + "bits_predTaken", 0))
-            ex_sum = (
-                self._read_dut_signal(dut, base + "bits_exceptionVec_1", 0)
-                + self._read_dut_signal(dut, base + "bits_exceptionVec_2", 0)
-                + self._read_dut_signal(dut, base + "bits_exceptionVec_12", 0)
-                + self._read_dut_signal(dut, base + "bits_exceptionVec_19", 0)
-                + self._read_dut_signal(dut, base + "bits_exceptionVec_20", 0)
-            )
-            instr = self._recover_unavailable_instr(env, int(pc), int(instr), bool(is_rvc), int(ex_sum))
-
-            fetch_path = self._infer_fetch_path(env, pc, cycle)
-            self.mark("fetch_path_type", fetch_path, cycle, {"pc": pc})
-
-            opcode = instr & 0x7F
-            if not is_rvc and opcode == 0x6F:
-                saw_cfi = True
-                self.mark("bpu_basic_pred_type", "direct_jmp", cycle, {"pc": pc, "instr": instr})
-            elif not is_rvc and opcode == 0x63:
-                saw_cfi = True
-                branch_bin = "cond_taken" if pred_taken else "cond_nt"
-                self.mark("bpu_basic_pred_type", branch_bin, cycle, {"pc": pc, "instr": instr, "pred_taken": pred_taken})
-
-            self._sample_exception_slot(dut, base, slot, pc, cycle, fetch_path)
-
-        if valid_slots and not saw_cfi:
-            self.mark("bpu_basic_pred_type", "seq_no_cfi", cycle, {"slot_count": len(valid_slots)})
-
-        if valid_slots and self._reset_release_cycle is not None and not self._boot_recorded:
-            self.mark(
-                "reset_boot_path",
-                "seen",
-                cycle,
-                {"reset_release_cycle": self._reset_release_cycle, "slot_count": len(valid_slots)},
-            )
-            self._boot_recorded = True
+        sample_cfvec_coverage(self, env, cycle)
+        sample_bpu_subpredictor_coverage(self, env, cycle)
+        sample_bpu_v3_basic_prediction_coverage(self, env, cycle)
+        sample_bpu_to_ftq_coverage(self, env, cycle)
 
         if (
             self._read_dut_signal(dut, "io_ptw_req_0_valid", 0) == 1
@@ -271,9 +237,10 @@ class FunctionalCoverageRecorder:
             )
 
         self._sample_ibuffer_state(dut, cycle, env)
-        self._sample_ftq_state(dut, cycle, env)
+        sample_ftq_coverage(self, env, cycle)
 
         if self._read_dut_signal(dut, "io_backend_toFtq_redirect_valid", 0) == 1:
+            sample_backend_redirect_coverage(self, env, cycle)
             self._sample_backend_redirect_faults(env, dut, cycle)
 
         if self._read_dut_signal(dut, "io_ptw_resp_valid", 0) == 1:
@@ -559,64 +526,6 @@ class FunctionalCoverageRecorder:
                     "backend_block_start_cycle": int(self._backend_block_start_cycle),
                 },
             )
-
-    def _sample_ftq_state(self, dut, cycle: int, env) -> None:
-        if self._reset_release_cycle is None:
-            return
-
-        backend_cfg = getattr(getattr(env, "config", None), "backend", None)
-        ftq_size = int(getattr(backend_cfg, "ftq_size", 64) or 64)
-        bpu_flag = self._read_first_dut_signal(
-            dut,
-            (
-                "Frontend_top.Frontend.inner_ftq.bpuPtr_ptrs_0_flag",
-                "Frontend_top.Frontend.ftq.bpuPtr_ptrs_0_flag",
-            ),
-        )
-        bpu_value = self._read_first_dut_signal(
-            dut,
-            (
-                "Frontend_top.Frontend.inner_ftq.bpuPtr_ptrs_0_value",
-                "Frontend_top.Frontend.ftq.bpuPtr_ptrs_0_value",
-            ),
-        )
-        commit_flag = self._read_first_dut_signal(
-            dut,
-            (
-                "Frontend_top.Frontend.inner_ftq.commitPtr_ptrs_0_flag",
-                "Frontend_top.Frontend.ftq.commitPtr_ptrs_0_flag",
-            ),
-        )
-        commit_value = self._read_first_dut_signal(
-            dut,
-            (
-                "Frontend_top.Frontend.inner_ftq.commitPtr_ptrs_0_value",
-                "Frontend_top.Frontend.ftq.commitPtr_ptrs_0_value",
-            ),
-        )
-        if None in (bpu_flag, bpu_value, commit_flag, commit_value):
-            return
-
-        occupancy = self._circular_distance(
-            int(bpu_flag),
-            int(bpu_value),
-            int(commit_flag),
-            int(commit_value),
-            int(ftq_size),
-        )
-        evidence = {
-            "event": "ftq_pointer_distance",
-            "occupancy": int(occupancy),
-            "size": int(ftq_size),
-            "bpu_ptr": [int(bpu_flag), int(bpu_value)],
-            "commit_ptr": [int(commit_flag), int(commit_value)],
-        }
-        if occupancy <= 0:
-            self._mark_ftq_state("empty", cycle, evidence)
-        if occupancy >= (ftq_size * 3) // 4:
-            self._mark_ftq_state("near_full", cycle, evidence)
-        if occupancy >= ftq_size - 1:
-            self._mark_ftq_state("full", cycle, evidence)
 
     def _mark_ftq_state(self, state: str, cycle: int, evidence: dict) -> None:
         self._last_ftq_state = str(state)
