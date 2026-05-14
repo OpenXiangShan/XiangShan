@@ -78,8 +78,7 @@ class UncacheAgent:
         self._write(self.interface.a_ready, 1)
         if self._read(self.interface.a_valid, 0) == 1:
             addr = self._read(self.interface.a_bits_address, 0)
-            base = addr & ~0x1F
-            blk = self.memory.read_block(base, 32)
+            blk = self.memory.read_block(addr, 32)
             data = int.from_bytes(blk, "little")
             latency = self.mmio_latency if self.memory.is_mmio(addr) else self.latency
             self.pending.append(_PendingData(data=data, ready_cycle=cycle + latency))

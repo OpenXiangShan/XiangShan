@@ -7,6 +7,7 @@ from ..exceptions import AddressError
 
 DEFAULT_MMIO_RANGES: Tuple[Tuple[int, int], ...] = (
     (0x00000000, 0x10000000),
+    (0x10000000, 0x20000000),
 )
 
 
