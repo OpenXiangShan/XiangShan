@@ -42,9 +42,6 @@ def _funcov_dir() -> Path:
 
 
 def _artifact_root_dir(request, default_dir: Path) -> Path:
-    raw_bin = os.getenv("TB_BIN_PATH", "").strip()
-    if not raw_bin:
-        return default_dir
     date_dir = default_dir / datetime.now().strftime("%Y%m%d")
     date_dir.mkdir(parents=True, exist_ok=True)
     return date_dir
@@ -98,8 +95,9 @@ def _waveform_path(request, default_dir: Path, *, waveform_format: str | None = 
 
 
 def _coverage_path(request, default_dir: Path) -> Path:
-    default_dir.mkdir(parents=True, exist_ok=True)
-    return default_dir / f"{_artifact_tag(request)}.dat"
+    coverage_dir = Path(os.getenv("TB_COVERAGE_DIR", str(_artifact_root_dir(request, default_dir))))
+    coverage_dir.mkdir(parents=True, exist_ok=True)
+    return coverage_dir / f"{_artifact_tag(request)}.dat"
 
 
 def _log_path(request, default_dir: Path) -> Path:
@@ -133,7 +131,7 @@ def create_dut(request):
     data_dir = _data_dir()
     case_log_handler = None
     case_log_path = None
-    if os.getenv("TB_BIN_PATH", "").strip():
+    if _is_enabled("TB_ENABLE_CASE_LOG", default="1"):
         case_log_path = _log_path(request, data_dir)
         case_log_handler = _attach_case_log_handler(case_log_path)
     dut = create_frontend_dut(tc_name=tc_name, dut_logger=logger)

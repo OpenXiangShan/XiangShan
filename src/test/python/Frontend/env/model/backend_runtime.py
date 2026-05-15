@@ -15,6 +15,7 @@ class BackendObservationSnapshot:
 @dataclass(frozen=True)
 class BackendCycleActions:
     can_accept: int = 1
+    wfi_req: int = 0
     commit_entry: Optional[Any] = None
     resolve_entries: tuple = ()
     call_ret_commit_group: tuple = ()

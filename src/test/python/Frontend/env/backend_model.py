@@ -75,6 +75,7 @@ class BackendModel:
         if not 1 <= self.instruction_commit_width <= 8:
             raise ValueError("instruction_commit_width must be within [1, 8]")
         self.can_accept = 1
+        self.wfi_req = 0
 
         self.resolve_min_delay = int(resolve_min_delay)
         self.resolve_max_delay = int(resolve_max_delay)
@@ -2915,6 +2916,11 @@ class BackendModel:
         self.logger.info("backend can_accept=%d", self.can_accept)
         self._publish("backend.can_accept", {"value": self.can_accept}, level="DEBUG")
 
+    def set_wfi_req(self, value: int) -> None:
+        self.wfi_req = 1 if int(value) else 0
+        self.logger.info("backend wfi_req=%d", self.wfi_req)
+        self._publish("backend.wfi_req", {"value": self.wfi_req}, level="DEBUG")
+
     def set_explicit_injection_enabled(self, enabled: bool, reason: str = "") -> None:
         self._explicit_injection_enabled = bool(enabled)
         self._explicit_injection_block_reason = "" if bool(enabled) else str(reason)
@@ -4375,6 +4381,7 @@ class BackendModel:
         self._schedule_next_queue_call_ret_commit_group()
         return BackendCycleActions(
             can_accept=self.can_accept,
+            wfi_req=self.wfi_req,
             commit_entry=commit_entry,
             resolve_entries=resolve_entries,
             call_ret_commit_group=call_ret_commit_group,
@@ -4386,7 +4393,7 @@ class BackendModel:
             return
         self.begin_cycle(cycle)
         agent = self._bound_backend_agent()
-        agent.start_cycle(self.can_accept)
+        agent.start_cycle(self.can_accept, self.wfi_req)
         self.consume_backend_observation(self._snapshot_bound_observation())
         actions = self.plan_cycle_actions()
         agent.drive_resolves(actions.resolve_entries)
