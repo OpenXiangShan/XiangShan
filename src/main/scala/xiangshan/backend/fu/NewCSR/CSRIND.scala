@@ -120,7 +120,7 @@ trait CSRIND { self: NewCSR with HypervisorLevel =>
     .setAddr(CSRs.vsiselect)
 
   val vsireg = Module(new CSRModule("VSireg", new ZeroFieldBundle("Virtual supervisor indirect data register selected by vsiselect.")) with HasIregSink {
-    regOut := iregRead.sireg
+    regOut := iregRead.vsireg
   })
     .setAddr(CSRs.vsireg)
 
