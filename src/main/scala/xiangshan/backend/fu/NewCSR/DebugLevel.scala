@@ -56,7 +56,7 @@ trait DebugLevel { self: NewCSR =>
   val tinfo = Module(new CSRModule("Tinfo", new TinfoBundle))
     .setAddr(CSRs.tinfo)
 
-  val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle with HasNmipBundle {
+  val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with HasNmipBundle {
     regOut.NMIP := nmip
   })
     .setAddr(CSRs.dcsr)
