@@ -100,8 +100,8 @@ class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle 
   val vl        = Option.when(cfg.readVl)(Vl())
   val v0        = Option.when(cfg.readV0)(V0())
   val imm       = UInt(cfg.destDataBits.W)
-  val pc        = OptionWrapper(cfg.needPc || cfg.aluNeedPc, UInt(VAddrData().dataWidth.W))
-  val nextPcOffset = OptionWrapper(cfg.isBrh || cfg.isJmp || cfg.isLink, UInt((FetchBlockInstOffsetWidth + 2).W))
+  val pc        = OptionWrapper(cfg.needPc, UInt(VAddrData().dataWidth.W))
+  val nextPcOffset = OptionWrapper(cfg.isBrh || cfg.isNewJmp || cfg.isLink, UInt((FetchBlockInstOffsetWidth + 2).W))
 }
 
 class FuncUnitDataOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
@@ -156,14 +156,14 @@ class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val csrin = OptionWrapper(cfg.isCsr, new CSRInput)
   val csrio = OptionWrapper(cfg.isCsr, new CSRFileIO)
   val csrToDecode = OptionWrapper(cfg.isCsr, Output(new CSRToDecode))
-  val toFrontendBJUResolve = OptionWrapper(cfg.isBrh || cfg.isJmp || cfg.isNewJmp, Output(Valid(new Resolve)))
+  val toFrontendBJUResolve = OptionWrapper(cfg.isBrh || cfg.isNewJmp, Output(Valid(new Resolve)))
   val fenceio = OptionWrapper(cfg.isFence, new FenceIO)
   val frm = OptionWrapper(cfg.needSrcFrm, Input(Frm()))
   val vxrm = OptionWrapper(cfg.needSrcVxrm, Input(UInt(2.W)))
   val vtype = OptionWrapper(cfg.writeVlRf, (Valid(new VType)))
   val vlIsZero = OptionWrapper(cfg.writeVlRf, Output(Bool()))
   val vlIsVlmax = OptionWrapper(cfg.writeVlRf, Output(Bool()))
-  val instrAddrTransType = Option.when(cfg.isJmp || cfg.isNewJmp || cfg.isLink || cfg.isBrh || cfg.isAlu)(Input(new AddrTransType))
+  val instrAddrTransType = Option.when(cfg.isNewJmp || cfg.isLink || cfg.isBrh)(Input(new AddrTransType))
 }
 
 abstract class FuncUnit(val cfg: FuConfig)(implicit p: Parameters) extends XSModule with HasCriticalErrors {

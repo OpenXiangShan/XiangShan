@@ -11,7 +11,7 @@ import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.{DataConfig, WakeUpConfig}
 import xiangshan.backend.decode.Imm
 import xiangshan.backend.fu.{FuConfig, FuType}
-import xiangshan.backend.fu.FuConfig.{BrhCfg, JmpCfg, needUncertainWakeupFuConfigs}
+import xiangshan.backend.fu.FuConfig.needUncertainWakeupFuConfigs
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, IssueBlockParams, SchedulerType, VecScheduler}
 
 import scala.collection.mutable
@@ -75,8 +75,8 @@ case class ExeUnitParams(
   val needV0Wen: Boolean = fuConfigs.map(_.needV0Wen).reduce(_ || _)
   val needVlWen: Boolean = fuConfigs.map(_.needVlWen).reduce(_ || _)
   val needOg2: Boolean = fuConfigs.map(_.needOg2).reduce(_ || _)
-  val needTaken: Boolean = fuConfigs.map(x => x.isJmp || x.isNewJmp || x.isBrh).reduce(_ || _)
-  val needRasAction: Boolean = fuConfigs.map(x => x.isJmp || x.isNewJmp).reduce(_ || _)
+  val needTaken: Boolean = fuConfigs.map(x => x.isNewJmp || x.isBrh).reduce(_ || _)
+  val needRasAction: Boolean = fuConfigs.map(_.isNewJmp).reduce(_ || _)
   val needImm: Boolean = fuConfigs.map(x => x.immType.nonEmpty).reduce(_ || _)
   def deqImmTypes: Seq[Imm] = fuConfigs.flatMap(_.immType).distinct
   // set load imm to 32-bit for fused_lui_load
@@ -96,9 +96,8 @@ case class ExeUnitParams(
   val needExceptionGen: Boolean = exceptionOut.nonEmpty || flushPipe || replayInst || trigger
   val needPc: Boolean = fuConfigs.map(_.needPc).reduce(_ || _)
   val aluBjuNeedPc: Boolean = fuConfigs.map(_.aluBjuNeedPc).reduce(_ || _)
-  def aluNeedPc: Boolean = issueBlockParam.aluDeqNeedPickJump
   def needFtqPtr: Boolean = this.needPc || this.replayInst || this.hasStoreAddrFu || this.hasCSR || this.hasVLoadFu
-  def needFtqPtrOffset: Boolean = needFtqPtr || this.aluNeedPc
+  def needFtqPtrOffset: Boolean = needFtqPtr
   val needTarget: Boolean = fuConfigs.map(_.needTargetPc).reduce(_ || _)
   val needPdInfo: Boolean = fuConfigs.map(_.needPdInfo).reduce(_ || _)
   val needSrcFrm: Boolean = fuConfigs.map(_.needSrcFrm).reduce(_ || _)
@@ -207,16 +206,14 @@ case class ExeUnitParams(
     *
     * @return Map[ [[BigInt]], Latency]
     */
-  def fuLatencyMap(addJump: Boolean = false): Map[FuType.OHType, Int] = {
-    val addBJUFuConfigs = if (addJump) fuConfigs :+ JmpCfg else fuConfigs
+  def fuLatencyMap(): Map[FuType.OHType, Int] = {
     if (latencyCertain)
-      if(needOg2) addBJUFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else addBJUFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      if(needOg2) fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else fuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else if (hasUncertainLatencyVal)
-      addBJUFuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
+      fuConfigs.map(x => (x.fuType, x.latency.uncertainLatencyVal)).toMap.filter(_._2.nonEmpty).map(x => (x._1, x._2.get))
     else {
-      val latencyCertainFuConfigsAddJump = if (addJump) latencyCertainFuConfigs :+ JmpCfg else latencyCertainFuConfigs
-      println(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigsAddJump")
-      latencyCertainFuConfigsAddJump.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      println(s"${this.name}: latencyCertainFuConfigs = $latencyCertainFuConfigs")
+      latencyCertainFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     }
   }
   def wakeUpFuLatencyMap: Map[FuType.OHType, Int] = {
@@ -318,8 +315,6 @@ case class ExeUnitParams(
   def hasi2fFu = fuConfigs.map(_.fuType == FuType.i2f).reduce(_ || _)
 
   def hasf2iFu = fuConfigs.map(_.fuType == FuType.fcmp).reduce(_ || _)
-
-  def hasJmpFu = fuConfigs.map(_.fuType == FuType.jmp).reduce(_ || _)
 
   def hasNewJmpFu = fuConfigs.map(_.fuType == FuType.njmp).reduce(_ || _)
 

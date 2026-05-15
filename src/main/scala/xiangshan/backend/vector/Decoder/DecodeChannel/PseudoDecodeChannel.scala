@@ -162,7 +162,6 @@ object PseudoDecodeChannel {
       val fuType = uopTable(op).factory match {
         case _: Opcode.AluOpcodes.type => FuType.alu.U
         case _: Opcode.BruOpcodes.type => ???
-        case _: Opcode.JmpOpcodes.type => ???
         case _: Opcode.MulOpcodes.type => ???
         case _: Opcode.DivOpcodes.type => ???
         case _: Opcode.LduOpcodes.type => ???

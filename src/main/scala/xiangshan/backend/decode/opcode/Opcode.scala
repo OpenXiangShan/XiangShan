@@ -18,7 +18,6 @@ object Opcode {
     val opcodes = Seq(
       AluOpcodes,
       BruOpcodes,
-      JmpOpcodes,
       MulOpcodes,
       DivOpcodes,
       LsuOpcodes,
@@ -354,7 +353,7 @@ object Opcode {
     def isRorw(func: UInt): Bool    = isWiden(func) && func(3, 2) === "b11".U &&  func(0)
 
     def isZicond(func: UInt): Bool  = func(6, 4).andR && !func(3)
-    def isJmp(func: UInt): Bool     = func(6, 3).andR && !func(2)
+    // def isJmp(func: UInt): Bool     = func(6, 3).andR && !func(2)
     def isNewJmp(func: UInt): Bool  = func(6, 2).andR && !func(1)
   }
 
@@ -371,18 +370,18 @@ object Opcode {
     def isBranchInvert(func: UInt) = func(0)
   }
 
-  object JmpOpcodes extends Opcodes {
-    val jal        = IntUJType(bb"111_1000")
-    val jalr       = IntIType(bb"111_1001")
-    val auipc      = IntUJType(bb"111_1010")
+  // object JmpOpcodes extends Opcodes {
+  //   val jal        = IntUJType(bb"111_1000")
+  //   val jalr       = IntIType(bb"111_1001")
+  //   val auipc      = IntUJType(bb"111_1010")
 
-    def jumpUopisJalr(op: UInt) = op(0)
-    def jumpUopisAuipc(op: UInt) = op(1)
-  }
+  //   def jumpUopisJalr(op: UInt) = op(0)
+  //   def jumpUopisAuipc(op: UInt) = op(1)
+  // }
 
   object LinkOpcodes extends Opcodes {
-    val link      = Value(bb"001") + GpWen
-    val auipc_new = IntUJType(bb"010")
+    val link  = Value(bb"001") + GpWen
+    val auipc = IntUJType(bb"010")
 
     def linkUopisLink(op: UInt) = op(0)
     def linkUopisAuipc(op: UInt) = op(1)
@@ -1077,7 +1076,6 @@ object Opcode {
 
   val ALUOpType = AluOpcodes
   val BRUOpType = BruOpcodes
-  val JumpOpType = JmpOpcodes
   val NewJumpOpType = NewJmpOpcodes
   val LinkOpType = LinkOpcodes
   val FenceOpType = FenceOpcodes

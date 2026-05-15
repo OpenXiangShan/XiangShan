@@ -11,7 +11,7 @@ import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.BranchAttribute.BranchType
 
 class NewJumpUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg) {
-  // associated with AddrData's position of JmpCfg.srcData
+  // associated with AddrData's position of NJmpCfg.srcData
   private val src = io.in.bits.data.src(0)
   private val pc = io.instrAddrTransType.get.extend(io.in.bits.data.pc.get, cfg.destDataBits)
   private val imm = io.in.bits.data.imm
