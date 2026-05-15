@@ -853,7 +853,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         line_set_addr,
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs_dup(i) -> set_addrs_dup(i)))
       )
-      val read_enable = bank_addr_matchs.asUInt.orR || readline_match
+      val read_enable =
+        bank_addr_matchs.asUInt.orR ||
+          bank_addr_matchs_dup.asUInt.orR ||
+          readline_match
 
       // read raw data
       val data_bank = data_banks(div_index)(bank_index)

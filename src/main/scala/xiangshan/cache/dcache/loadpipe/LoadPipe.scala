@@ -120,7 +120,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
       vaddr(DCacheLineOffset - 1, DCacheVWordOffset),
       0.U(log2Ceil(VLEN / DCacheSRAMRowBits).W)
     )
-    (bankMaskInVWord << bankOffsetInLine)(DCacheBanks - 1, 0)
+    val bankMaskInLine = Cat(
+      0.U((DCacheBanks - VLEN / DCacheSRAMRowBits).W),
+      bankMaskInVWord
+    )
+    (bankMaskInLine << bankOffsetInLine)(DCacheBanks - 1, 0)
   }
 
   // Pipeline
