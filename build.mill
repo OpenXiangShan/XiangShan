@@ -158,6 +158,7 @@ object xiangshan extends ChiselModule {
 
   def scalacOptions: T[Seq[String]] = super.scalacOptions() ++ Agg("-deprecation", "-feature")
 
+  private def publishLocale: Locale = new Locale.Builder().setLanguage("en").build()
   private def publishVersion: T[String] = VcsVersion.vcsState().format(
     revHashDigits = 8,
     dirtyHashDigits = 0,
@@ -166,7 +167,7 @@ object xiangshan extends ChiselModule {
     tagModifier = (tag: String) =>
       "[Rr]elease.*".r.findFirstMatchIn(tag) match {
         case Some(_) => "KunminghuV3-Release-" + LocalDateTime.now().format(
-            DateTimeFormatter.ofPattern("MMM-dd-yyyy").withLocale(new Locale("en"))
+            DateTimeFormatter.ofPattern("MMM-dd-yyyy").withLocale(publishLocale)
           )
         case None => "KunminghuV3-dev"
       },
@@ -174,7 +175,7 @@ object xiangshan extends ChiselModule {
     untaggedSuffix = " (%s@%s) # %s".format(
       System.getProperty("user.name"),
       java.net.InetAddress.getLocalHost.getHostName,
-      LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(new Locale("en")))
+      LocalDateTime.now().format(DateTimeFormatter.ofPattern("MMM dd hh:mm:ss yyyy").withLocale(publishLocale))
     )
   )
 
