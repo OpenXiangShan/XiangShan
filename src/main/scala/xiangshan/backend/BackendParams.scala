@@ -113,7 +113,6 @@ case class BackendParams(
   def LsExuCnt = StaCnt + LduCnt + HyuCnt
   val LdExuCnt = LduCnt + HyuCnt
   val StaExuCnt = StaCnt + HyuCnt
-  def JmpCnt = allSchdParams.map(_.JmpCnt).sum
   def NewJmpCnt = allSchdParams.map(_.NewJmpCnt).sum
   def LinkCnt = allSchdParams.map(_.LinkCnt).sum
   def BrhCnt = allSchdParams.map(_.BrhCnt).sum

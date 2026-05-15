@@ -58,7 +58,6 @@ object FuTypeField {
     opcodes match {
       case _: Opcode.AluOpcodes.type => FuType.alu
       case _: Opcode.BruOpcodes.type => FuType.brh
-      case _: Opcode.JmpOpcodes.type => FuType.jmp
       case _: Opcode.NewJmpOpcodes.type => FuType.njmp
       case _: Opcode.LinkOpcodes.type => FuType.link
       case _: Opcode.MulOpcodes.type => FuType.mul

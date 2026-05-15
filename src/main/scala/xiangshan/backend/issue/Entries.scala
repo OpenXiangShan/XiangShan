@@ -362,41 +362,12 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
                                Mux(simpSel.valid, simpEntryOldestCancel.get(i), enqEntryOldestCancel(i)))
         io.deqEntry(i)     := deqEntry
         io.cancelDeqVec(i) := cancelDeqVec
-        if (params.aluDeqNeedPickJump) {
-          val aluDeqSelectJump = io.deqEntry(0).valid && io.deqEntry(0).bits.payload.rfWen.get && FuType.isJump(io.deqEntry(0).bits.payload.fuType)
-          io.aluDeqSelectJump.get := aluDeqSelectJump
-          if (params.deqFuCfgs(i).contains(AluCfg)) {
-            assert(i == 0, "IQ needPickRfWen ALU must in deq 0")
-            // alu uop fuType change to alu
-            io.deqEntry(i).bits.status.fuType := Mux(aluDeqSelectJump, FuType.alu.U.asTypeOf(deqEntry.bits.status.fuType), deqEntry.bits.status.fuType)
-          }
-          else if (params.deqFuCfgs(i).contains(JmpCfg)) {
-            val deqEntry0 = Mux(io.compEntryOldestSel.get(0).valid,
-                                compEntryOldest.get(0),
-                                Mux(io.simpEntryOldestSel.get(0).valid, simpEntryOldest.get(0), enqEntryOldest(0)))
-            assert(i == 1, "IQ needPickRfWen BJU must in deq 1")
-            // jump uop use alu uop before change
-            io.deqEntry(i) := Mux(aluDeqSelectJump, deqEntry0, deqEntry)
-            dontTouch(io.deqEntry(i))
-            io.cancelDeqVec(i) := Mux(aluDeqSelectJump, io.cancelDeqVec(0), cancelDeqVec)
-          }
-        }
       }
       io.compEntryOldestSelDelay.get.zip(io.simpEntryOldestSelDelay.get).zipWithIndex.foreach { case ((compSel, simpSel), i) =>
         val deqOg1Payload = Mux(compSel.valid,
                            compEntryOldestDelay.get(i),
                            Mux(simpSel.valid, simpEntryOldestDelay.get(i), enqEntryOldestDelay(i))).bits.toDeqOg1Payload(i)
         io.deqOg1Payload(i) := deqOg1Payload
-        if (params.aluDeqNeedPickJump) {
-          val aluDeqSelectJump = RegNext(io.deqEntry(0).valid && io.deqEntry(0).bits.payload.rfWen.get && FuType.isJump(io.deqEntry(0).bits.payload.fuType))
-          if (params.deqFuCfgs(i).contains(JmpCfg)) {
-            val deqOg1Payload0 = Mux(io.compEntryOldestSelDelay.get(0).valid,
-                                compEntryOldestDelay.get(0),
-                                Mux(io.simpEntryOldestSelDelay.get(0).valid, simpEntryOldestDelay.get(0), enqEntryOldestDelay(0))).bits.toDeqOg1Payload(i)
-            // jump uop use alu uop before change
-            io.deqOg1Payload(i) := Mux(aluDeqSelectJump, deqOg1Payload0, deqOg1Payload)
-          }
-        }
       }
     }
   }
@@ -578,7 +549,6 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val deqEntry            = Vec(params.numDeq, ValidIO(new EntryBundle(isDeq = true)))
   val deqOg1Payload       = Output(MixedVec(params.exuBlockParams.map(x => new IssueQueueDeqOg1Payload(x))))
   val cancelDeqVec        = Vec(params.numDeq, Output(Bool()))
-  val aluDeqSelectJump    = Option.when(params.aluDeqNeedPickJump)(Output(Bool()))
 
   // vec mem only
   val vecMemIn = OptionWrapper(params.isVecMemIQ, new Bundle {

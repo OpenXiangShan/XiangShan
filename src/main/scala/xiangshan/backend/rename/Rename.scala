@@ -769,7 +769,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // notInSameSnpt: 1.robidxHead - snapLastEnq >= sameSnptDistance 2.no snap
   val notInSameSnpt = GatedValidRegNext(distanceBetween(robIdxHeadNext, io.snptLastEnq.bits) >= sameSnptDistance || !io.snptLastEnq.valid)
   val allowSnpt = if (EnableRenameSnapshot) notInSameSnpt && !lastCycleCreateSnpt && io.in.head.bits.firstUop else false.B
-  uops.zip(io.in).foreach{ case (uop, in) => uop.snapshot := allowSnpt && (FuType.isJump(in.bits.fuType) || FuType.isNewJump(in.bits.fuType)) && in.fire } // TODO: auipc is also Jump FuType?
+  uops.zip(io.in).foreach{ case (uop, in) => uop.snapshot := allowSnpt && FuType.isNewJump(in.bits.fuType) && in.fire }
   uops.map{ x =>
     x.hasException := x.exceptionVec.orR || TriggerAction.isDmode(x.trigger)
   }

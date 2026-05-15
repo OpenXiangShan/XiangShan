@@ -194,9 +194,9 @@ object XDecode extends DecodeConstants {
     REMW    -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, DIVOpType.remw  , SelImm.X, xWen = T, canRobCompress = T),
     REMUW   -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.div, DIVOpType.remuw , SelImm.X, xWen = T, canRobCompress = T),
 
-    AUIPC   -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.auipc, SelImm.IMM_U , xWen = T),
-    JAL     -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jal  , SelImm.IMM_UJ, xWen = T),
-    JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , xWen = T),
+    // AUIPC   -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.auipc, SelImm.IMM_U , xWen = T),
+    // JAL     -> XSDecode(SrcType.pc , SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jal  , SelImm.IMM_UJ, xWen = T),
+    // JALR    -> XSDecode(SrcType.reg, SrcType.imm, SrcType.X, FuType.jmp, JumpOpType.jalr , SelImm.IMM_I , xWen = T),
     BEQ     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.beq   , SelImm.IMM_SB          ),
     BNE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bne   , SelImm.IMM_SB          ),
     BGE     -> XSDecode(SrcType.reg, SrcType.reg, SrcType.X, FuType.brh, BRUOpType.bge   , SelImm.IMM_SB          ),
@@ -794,7 +794,7 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   decodedInst.uopIdx := 0.U
   decodedInst.firstUop := true.B
   decodedInst.lastUop := true.B
-  val numWBIs2 = FuType.isStore(decodedInst.fuType) || FuType.isJump(decodedInst.fuType) && (decodedInst.ldest =/= 0.U)
+  val numWBIs2 = FuType.isStore(decodedInst.fuType) // || FuType.isJump(decodedInst.fuType) && (decodedInst.ldest =/= 0.U)
   decodedInst.numWB   := Mux(numWBIs2, 2.U, 1.U)
 
   val isZimop = (BitPat("b1?00??0111??_?????_100_?????_1110011") === ctrl_flow.instr) ||

@@ -151,22 +151,20 @@ case class FuConfig (
   }
 
   // csr's redirect also uses redirect bundle
-  def hasRedirect: Boolean = Seq(FuType.jmp, FuType.njmp, FuType.brh, FuType.csr).contains(fuType)
+  def hasRedirect: Boolean = Seq(FuType.njmp, FuType.brh, FuType.csr).contains(fuType)
 
-  def hasIsRVC: Boolean = Seq(FuType.jmp, FuType.njmp, FuType.brh, FuType.csr, FuType.ldu, FuType.stu).contains(fuType)
+  def hasIsRVC: Boolean = Seq(FuType.njmp, FuType.brh, FuType.csr, FuType.ldu, FuType.stu).contains(fuType)
 
-  def hasRasAction: Boolean = Seq(FuType.jmp, FuType.njmp).contains(fuType)
+  def hasRasAction: Boolean = Seq(FuType.njmp).contains(fuType)
 
-  def needTargetPc: Boolean = Seq(FuType.jmp, FuType.njmp, FuType.brh).contains(fuType)
+  def needTargetPc: Boolean = Seq(FuType.njmp, FuType.brh).contains(fuType)
 
   // predict info
-  def needPdInfo: Boolean = Seq(FuType.jmp, FuType.njmp, FuType.brh).contains(fuType)
+  def needPdInfo: Boolean = Seq(FuType.njmp, FuType.brh).contains(fuType)
 
-  def needPc: Boolean = Seq(FuType.jmp, FuType.njmp, FuType.link, FuType.brh, FuType.ldu).contains(fuType)
+  def needPc: Boolean = Seq(FuType.njmp, FuType.link, FuType.brh, FuType.ldu).contains(fuType)
 
-  def aluBjuNeedPc: Boolean = Seq(FuType.jmp, FuType.njmp, FuType.link, FuType.brh).contains(fuType)
-
-  var aluNeedPc: Boolean = false
+  def aluBjuNeedPc: Boolean = Seq(FuType.njmp, FuType.link, FuType.brh).contains(fuType)
 
   def needVecCtrl: Boolean = {
     import FuType._
@@ -191,8 +189,6 @@ case class FuConfig (
   def isCsr: Boolean = fuType == FuType.csr
 
   def isBrh: Boolean = fuType == FuType.brh
-
-  def isJmp: Boolean = fuType == FuType.jmp
 
   def isNewJmp: Boolean = fuType == FuType.njmp
 
@@ -230,17 +226,6 @@ case class FuConfig (
 }
 
 object FuConfig {
-  val JmpCfg: FuConfig = FuConfig (
-    name = "jmp",
-    fuType = FuType.jmp,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new JumpUnit(cfg)(p)).suggestName("jmp"),
-    srcData = Seq(
-      Seq(IntData()), // jal
-    ),
-    piped = true,
-    immType = Set(Imm_I(), Imm_J(), Imm_U()),
-  )
-
   val NJmpCfg: FuConfig = FuConfig (
     name = "njmp",
     fuType = FuType.njmp,
@@ -1030,7 +1015,7 @@ object FuConfig {
   )
 
   def allConfigs = Seq(
-    JmpCfg, NJmpCfg, LinkCfg, BrhCfg, I2fCfg, FcmpCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg,
+    NJmpCfg, LinkCfg, BrhCfg, I2fCfg, FcmpCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg,
     VSetCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
     LduCfg, StaCfg, StdCfg, HyldaCfg, HystaCfg, FakeHystaCfg, MouCfg, MoudCfg,
     VialuCfg, VimacCfg, VidivCfg, VppuCfg, VipuCfg, VmoveCfg, VfaluCfg, VfmaCfg, VfdivCfg, VfcvtCfg, VSha256msCfg, VSha256cCfg,

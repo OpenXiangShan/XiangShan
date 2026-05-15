@@ -34,8 +34,6 @@ case class SchdBlockParams(
 
   def getName: String = if (isIntSchd) "Int" else if (isFpSchd) "Fp" else "Vec"
 
-  def JmpCnt: Int = issueBlockParams.map(_.JmpCnt).sum
-
   def NewJmpCnt: Int = issueBlockParams.map(_.NewJmpCnt).sum
 
   def LinkCnt: Int = issueBlockParams.map(_.LinkCnt).sum

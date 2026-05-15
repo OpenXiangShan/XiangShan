@@ -151,7 +151,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
   val vxsatWBs = io.exuWriteback.filter(x => x.bits.vxsat.nonEmpty).toSeq
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
-  val isBrhOrJmpWBs = io.exuWriteback.filter(x => (x.bits.params.hasBrhFu || x.bits.params.hasJmpFu || x.bits.params.hasNewJmpFu)).toSeq
+  val isBrhOrJmpWBs = io.exuWriteback.filter(x => (x.bits.params.hasBrhFu || x.bits.params.hasNewJmpFu)).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
 
   if (backendParams.debugEn){
@@ -1360,7 +1360,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("waitMulCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.mul.U)
   XSPerfAccumulate("waitDivCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.div.U)
   XSPerfAccumulate("waitBrhCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.brh.U)
-  XSPerfAccumulate("waitJmpCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.jmp.U)
   XSPerfAccumulate("waitNewJmpCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.njmp.U)
   XSPerfAccumulate("waitLinkCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.link.U)
   XSPerfAccumulate("waitCsrCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.csr.U)

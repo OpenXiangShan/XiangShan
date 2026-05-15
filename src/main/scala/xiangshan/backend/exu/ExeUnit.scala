@@ -53,7 +53,7 @@ class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle 
   val vtype = Option.when(params.writeVlRf)((Valid(new VType)))
   val vlIsZero = Option.when(params.writeVlRf)(Output(Bool()))
   val vlIsVlmax = Option.when(params.writeVlRf)(Output(Bool()))
-  val instrAddrTransType = Option.when(params.hasJmpFu || params.hasNewJmpFu || params.hasBrhFu || params.hasAluFu)(Input(new AddrTransType))
+  val instrAddrTransType = Option.when(params.hasNewJmpFu || params.hasLinkFu || params.hasBrhFu)(Input(new AddrTransType))
 }
 
 class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends XSModule with HasXSParameter with HasCriticalErrors {
@@ -63,12 +63,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
 
   val funcUnits = fuCfgs.map(cfg => {
     assert(cfg.fuGen != null, cfg.name + "Cfg'fuGen is null !!!")
-    if (exuParams.aluNeedPc && cfg.isAlu) {
-      AluCfg.aluNeedPc = true
-      println(s"[ExeUnit] ${exuParams.name}'s alu need pc")
-    }
     val module = cfg.fuGen(p, cfg)
-    AluCfg.aluNeedPc = false
     module
   })
 
@@ -477,7 +472,7 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
   }}
 
   io.toFrontendBJUResolve.foreach{ case resolve => {
-    val bjus = funcUnits.filter(x => x.cfg.isJmp || x.cfg.isNewJmp || x.cfg.isBrh)
+    val bjus = funcUnits.filter(x => x.cfg.isNewJmp || x.cfg.isBrh)
     val resolveVec = VecInit(bjus.map(_.io.toFrontendBJUResolve.get))
     resolve.valid := resolveVec.map(_.valid).reduce(_ || _)
     resolve.bits := Mux1H(resolveVec.map(_.valid), resolveVec.map(_.bits))

@@ -13,7 +13,6 @@ import xiangshan.backend.decode.opcode.Opcode.FDivOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FMacOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FMiscOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FenceOpcodes._
-import xiangshan.backend.decode.opcode.Opcode.JmpOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.NewJmpOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.LinkOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.LduOpcodes._
@@ -50,7 +49,7 @@ object ScalaUopTable {
       _.ADDI    -> add.S2xRemove,
       _.AND     -> and,
       _.ANDI    -> and.S2xRemove,
-      _.AUIPC   -> auipc_new,
+      _.AUIPC   -> auipc,
       _.BEQ     -> beq,
       _.BGE     -> bge,
       _.BGEU    -> bgeu,
