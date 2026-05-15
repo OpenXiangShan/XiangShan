@@ -32,15 +32,22 @@ Environment variables:
   TB_RUN_DUT           Run DUT pytest after trace generation (default: 1)
   TB_TRACE_STAGNANT_CYCLES_LIMIT
                        Early-stop DUT run when golden cursor is stagnant for this many cycles (default: 20000)
+  TB_TRACE_STALL_SNAPSHOT_INTERVAL
+                       Print stall snapshots every N stagnant cycles when > 0 (default: 5000)
   TB_TRACE_TARGET_CURSOR
                        Treat reaching this trace cursor as pass (default: 0, disabled)
   TB_TRACE_MAX_CYCLES  Optional DUT cycle budget for test_bin_trace; 0 means run until
                        golden completion (default: 0)
   TB_PYTEST_TIMEOUT_SECS
-                       Hard timeout in seconds for DUT pytest stage (default: 900)
+                       Hard timeout in seconds for DUT pytest stage (default: 6400)
   TB_PYTEST_TARGET     Pytest target path/nodeid
   TB_BASE_ADDR         Program load base addr for DUT test (default: 0x80000000)
   TB_RESET_VECTOR      DUT reset/start PC for bin run (default: TB_BASE_ADDR)
+  TB_LOG_LEVEL         Default env and pytest CLI log level (default: INFO)
+  TB_LOG_CLI_LEVEL     Pytest CLI log level; overrides TB_LOG_LEVEL for pytest only
+  TB_ENV_LOG_LEVEL     Environment logger level; overrides TB_LOG_LEVEL for env only
+  PYTEST_ADDOPTS       Extra pytest args
+                       default: -s -o log_cli=true --log-cli-level=<TB_LOG_CLI_LEVEL/TB_LOG_LEVEL>
   PYTHON               Python executable (default: python3)
 
 Note:
@@ -71,11 +78,17 @@ PYTEST_TARGET="${4:-${TB_PYTEST_TARGET:-${PYTEST_TARGET_DEFAULT}}}"
 BASE_ADDR="${TB_BASE_ADDR:-0x80000000}"
 RESET_VECTOR="${TB_RESET_VECTOR:-${BASE_ADDR}}"
 TRACE_STAGNANT_CYCLES_LIMIT="${TB_TRACE_STAGNANT_CYCLES_LIMIT:-20000}"
+TRACE_STALL_SNAPSHOT_INTERVAL="${TB_TRACE_STALL_SNAPSHOT_INTERVAL:-5000}"
 TRACE_TARGET_CURSOR="${TB_TRACE_TARGET_CURSOR:-0}"
 TRACE_MAX_CYCLES="${TB_TRACE_MAX_CYCLES:-0}"
-PYTEST_TIMEOUT_SECS="${TB_PYTEST_TIMEOUT_SECS:-900}"
+PYTEST_TIMEOUT_SECS="${TB_PYTEST_TIMEOUT_SECS:-6400}"
 PYTHON_BIN="${PYTHON:-python3}"
 PYTEST_DISABLE_RERUNFAILURES="${TB_PYTEST_DISABLE_RERUNFAILURES:-1}"
+LOG_LEVEL="${TB_LOG_LEVEL:-INFO}"
+ENV_LOG_LEVEL="${TB_ENV_LOG_LEVEL:-${LOG_LEVEL}}"
+CLI_LOG_LEVEL="${TB_LOG_CLI_LEVEL:-${LOG_LEVEL}}"
+export TB_ENV_LOG_LEVEL="${ENV_LOG_LEVEL}"
+export PYTEST_ADDOPTS="${PYTEST_ADDOPTS:--s -o log_cli=true --log-cli-level=${CLI_LOG_LEVEL}}"
 
 if [[ "${BIN_STEM}" == "microbench" ]]; then
   NEMU_MAX_INSTR=0
@@ -95,12 +108,16 @@ echo "[frontend] pytest_target: ${PYTEST_TARGET}"
 echo "[frontend] base_addr: ${BASE_ADDR}"
 echo "[frontend] reset_vector: ${RESET_VECTOR}"
 echo "[frontend] trace_stagnant_cycles_limit: ${TRACE_STAGNANT_CYCLES_LIMIT}"
+echo "[frontend] trace_stall_snapshot_interval: ${TRACE_STALL_SNAPSHOT_INTERVAL}"
 echo "[frontend] trace_target_cursor: ${TRACE_TARGET_CURSOR}"
 echo "[frontend] trace_max_cycles: ${TRACE_MAX_CYCLES}"
 echo "[frontend] trace_start_index: ${TRACE_START_INDEX}"
 echo "[frontend] skip_nemu: ${SKIP_NEMU}"
 echo "[frontend] pytest_timeout_secs: ${PYTEST_TIMEOUT_SECS}"
 echo "[frontend] pytest_disable_rerunfailures: ${PYTEST_DISABLE_RERUNFAILURES}"
+echo "[frontend] env_log_level: ${TB_ENV_LOG_LEVEL}"
+echo "[frontend] cli_log_level: ${CLI_LOG_LEVEL}"
+echo "[frontend] pytest_addopts: ${PYTEST_ADDOPTS}"
 
 cd "${REPO_DIR}"
 
@@ -131,6 +148,13 @@ if ! [[ "${TRACE_STAGNANT_CYCLES_LIMIT}" =~ ^[0-9]+$ ]] || [[ "${TRACE_STAGNANT_
   PIPELINE_STAGE="validate_inputs"
   PIPELINE_REASON="invalid_stagnant_cycles_limit"
   echo "[frontend][error] TB_TRACE_STAGNANT_CYCLES_LIMIT must be a positive integer, got: ${TRACE_STAGNANT_CYCLES_LIMIT}" >&2
+  exit 2
+fi
+
+if ! [[ "${TRACE_STALL_SNAPSHOT_INTERVAL}" =~ ^[0-9]+$ ]]; then
+  PIPELINE_STAGE="validate_inputs"
+  PIPELINE_REASON="invalid_stall_snapshot_interval"
+  echo "[frontend][error] TB_TRACE_STALL_SNAPSHOT_INTERVAL must be a non-negative integer, got: ${TRACE_STALL_SNAPSHOT_INTERVAL}" >&2
   exit 2
 fi
 
@@ -200,6 +224,7 @@ if [[ "${RUN_DUT}" != "0" ]]; then
     TB_BASE_ADDR="${BASE_ADDR}" \
     TB_RESET_VECTOR="${RESET_VECTOR}" \
     TB_TRACE_STAGNANT_CYCLES_LIMIT="${TRACE_STAGNANT_CYCLES_LIMIT}" \
+    TB_TRACE_STALL_SNAPSHOT_INTERVAL="${TRACE_STALL_SNAPSHOT_INTERVAL}" \
     TB_TRACE_TARGET_CURSOR="${TRACE_TARGET_CURSOR}" \
     TB_TRACE_MAX_CYCLES="${TRACE_MAX_CYCLES}" \
     TB_TRACE_START_INDEX="${TRACE_START_INDEX}" \

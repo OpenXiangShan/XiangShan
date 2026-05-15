@@ -90,6 +90,18 @@
   - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py`
   - 直接合并 `data/*.dat`，按 raw 覆盖点输出总 `line/branch/expr/toggle` 覆盖率
   - 同时给出 `ifu_strict`、`ifu_core`、`icache`、`bpu`、`tlb_pmp`、`fault_path` 的 raw line 覆盖率拆分
+- `scripts/asm_to_jsonl.sh`
+  - 用法: `src/test/python/Frontend/scripts/asm_to_jsonl.sh <case.S> [bin_path] [trace_jsonl_path]`
+  - 默认把 `.S` 链接到 `0x10001000`，按 NEMU memory base `0x10000000`
+    在最终 `.bin` 前补 `0x1000` 字节 0
+  - 默认输出 `.bin` 到 `tests/asm_cases/generated/<case>.bin`，输出 golden trace 到
+    `NEMU/logs/<case>.trace.jsonl`
+  - 通过现有 `tools/nemu_bin_to_golden_trace.py` 调用 NEMU 并转换 trace；
+    raw NEMU log 默认写到 `NEMU/logs/<case>.nemu.log`
+  - 调用前需要先激活 frontend Python/runtime 环境；脚本本身不写死 venv 路径
+  - 可用 `NEMU_EXEC=/path/to/riscv64-nemu-interpreter` 手动指定 NEMU；
+    默认使用 `ready-to-run/riscv64-nemu-interpreter`
+  - 最终 `.bin` 已经是 NEMU 可跑格式，不生成 `_padded` 文件名
 
 ## 常用工具
 

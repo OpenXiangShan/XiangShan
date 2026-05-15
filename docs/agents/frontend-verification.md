@@ -258,18 +258,21 @@ source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
 
 BIN_TRACE_ENV=(
   TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter
-  TB_ENV_LOG_LEVEL=INFO
-  TB_TRACE_PROGRESS_INTERVAL=50000
-  TB_TRACE_STALL_SNAPSHOT_INTERVAL=5000
-  TB_TRACE_STAGNANT_CYCLES_LIMIT=20000
-  TB_TRACE_TARGET_CURSOR=0
-  TB_PYTEST_TIMEOUT_SECS=900
-  PYTEST_ADDOPTS='-s -o log_cli=true --log-cli-level=INFO'
 )
 
 timeout --foreground 1200 env "${BIN_TRACE_ENV[@]}" \
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
 ```
+
+`run_bin_trace_pipeline.sh` defaults both env logging and pytest CLI logging to
+`INFO`, and defaults `PYTEST_ADDOPTS` to
+`-s -o log_cli=true --log-cli-level=<cli-level>`. Use `TB_LOG_LEVEL=WARNING`
+to quiet both env and pytest CLI logs, or use `TB_ENV_LOG_LEVEL` /
+`TB_LOG_CLI_LEVEL` to override them separately.
+It also defaults `TB_TRACE_STAGNANT_CYCLES_LIMIT` to `20000`,
+`TB_TRACE_STALL_SNAPSHOT_INTERVAL` to `5000`, `TB_TRACE_TARGET_CURSOR` to `0`,
+and `TB_PYTEST_TIMEOUT_SECS` to `6400`; set them explicitly only when a case
+needs different observability, stop, or wall-clock timeout behavior.
 
 ### Variants
 
@@ -298,6 +301,13 @@ Other `run_bin_trace_pipeline.sh` knobs worth recording:
   instruction cap during trace generation.
 - `TB_TRACE_LIMIT=...`: truncate the converted golden trace when you
   intentionally want a shorter debug input.
+- `TB_SKIP_NEMU=1`: skip NEMU trace generation and reuse the explicit or
+  default JSONL trace path. Required when the trace was generated separately.
+- `TB_LOG_LEVEL=...`: set both env and pytest CLI log levels; defaults to
+  `INFO`. `INFO` prints `INFO`/`WARNING`/`ERROR`; `WARNING` prints only
+  `WARNING`/`ERROR`.
+- `TB_ENV_LOG_LEVEL=...`: override only the environment logger level.
+- `TB_LOG_CLI_LEVEL=...`: override only pytest CLI log level.
 - `TB_PYTEST_TARGET=...`: replace the default
   `tests/test_bin_trace_dut.py::test_bin_trace` nodeid.
 - `TB_TRACE_MAX_CYCLES=...`: bound DUT execution cycles for a debug run; `0`
@@ -306,7 +316,11 @@ Other `run_bin_trace_pipeline.sh` knobs worth recording:
   Use `0` to disable (default). When set to a positive integer, run stops with
   pass as soon as `cursor >= target`.
 - `TB_PYTEST_TIMEOUT_SECS=...`: set the DUT-stage wall-clock timeout used by
-  the pipeline script.
+  the pipeline script; default is `6400`.
+- `TB_TRACE_STALL_SNAPSHOT_INTERVAL=...`: print stall snapshots every N
+  stagnant cycles; default is `5000`, and `0` disables snapshot printing.
+- `TB_TRACE_STAGNANT_CYCLES_LIMIT=...`: fail when the golden cursor is stagnant
+  for this many cycles; default is `20000`.
 - `PYTHON=...`: choose a non-default Python executable for the helper tools and
   pytest stage.
 
@@ -350,9 +364,11 @@ already set to match that case's run requirements.
 ### Artifacts
 
 After a run, look for artifacts in the date-stamped frontend data directory,
-for example `src/test/python/Frontend/data/<YYYYMMDD>/`. The per-case `.log`
-and `.fst` filenames include the binary stem and pytest case name:
-`<case>_test_bin_trace.log` and `<case>_test_bin_trace.fst`.
+for example `src/test/python/Frontend/data/<YYYYMMDD>/`. Bin-trace per-case
+`.log` and `.fst` filenames include the binary stem and pytest case name:
+`<case>_test_bin_trace.log` and `<case>_test_bin_trace.fst`. Non-bin DUT cases
+also use the same date directory; their filenames are based on the pytest case
+name.
 
 Functional coverage artifacts are written separately under
 `src/test/python/Frontend/data/funcov/`.
@@ -418,14 +434,17 @@ Implementation Notes:
 
 - `scripts/run_bin_trace_pipeline.sh` enforces positive values for
   `TB_TRACE_STAGNANT_CYCLES_LIMIT` and `TB_PYTEST_TIMEOUT_SECS`, and enforces
-  non-negative values for `TB_TRACE_TARGET_CURSOR`
+  non-negative values for `TB_TRACE_TARGET_CURSOR` and
+  `TB_TRACE_STALL_SNAPSHOT_INTERVAL`
 - waveform dumping is enabled by default, but can still be disabled with
   `TB_ENABLE_FST_DUMP=0`
 - `env/fixtures.py` accepts `TB_WAVEFORM_PATH`, `TB_WAVEFORM_DIR`, and
   `TB_CASE_LOG_PATH` as explicit artifact-path overrides
-- progress checkpoints are only printed when `TB_TRACE_PROGRESS_INTERVAL` is set
-- stall snapshots are only printed when `TB_TRACE_STALL_SNAPSHOT_INTERVAL` is
-  set
+- golden progress is printed by the Python golden-trace runner as the cursor
+  advances; `TB_TRACE_PROGRESS_INTERVAL` only enables additional logger
+  checkpoints and is not required for normal progress visibility
+- stall snapshots are printed every `TB_TRACE_STALL_SNAPSHOT_INTERVAL`
+  stagnant cycles; the script default is `5000`, and `0` disables snapshots
 - paired per-case log files are created by `env/fixtures.py` when `TB_BIN_PATH`
   is set
 
@@ -506,15 +525,22 @@ than host-side test scaffolding.
 
 Current default implementation details in `env/fixtures.py`:
 
-- when `TB_BIN_PATH` is unset, artifacts default to `src/test/python/Frontend/data/`
-- when `TB_BIN_PATH` is set, waveform and case log default to a date-stamped
-  subdirectory under `data/`
+- waveform, case log, and coverage `.dat` default to a date-stamped
+  subdirectory under `src/test/python/Frontend/data/`, regardless of whether
+  `TB_BIN_PATH` is set
+- non-bin DUT tests follow the same dated artifact layout as bin-trace tests;
+  do not leave their `.fst`, `.log`, or `.dat` files directly under `data/`
 - default waveform file name is `<bin-stem>_<test-name>.<wave-ext>`
 - default `wave-ext` is `fst`
 - if frontend is rebuilt with `FRONTEND_WAVEFORM_FORMAT=vcd`, default `wave-ext` becomes `vcd` and later `make frontend` runs keep using `vcd` until `FRONTEND_WAVEFORM_FORMAT=fst` is specified explicitly
 - default case log file name is `<bin-stem>_<test-name>.log`
-- coverage `.dat` output currently stays under `data/` rather than the
-  date-stamped subdirectory
+- when `TB_BIN_PATH` is unset, the artifact stem is the pytest case name
+- when `TB_BIN_PATH` is set, the artifact stem is
+  `<bin-stem>_<test-name>`
+- case logs are enabled by default through `TB_ENABLE_CASE_LOG=1`; set it to
+  `0` only when intentionally suppressing per-case logs
+- `TB_WAVEFORM_PATH`, `TB_WAVEFORM_DIR`, `TB_CASE_LOG_PATH`, and
+  `TB_COVERAGE_DIR` still override the default locations when explicitly set
 
 ## Deeper References
 
