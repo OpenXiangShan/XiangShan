@@ -20,10 +20,12 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfRolling
 import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.GuardedPc
 import xiangshan.frontend.Pc
 import xiangshan.frontend.bpu.BranchInfo
+import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.Prediction
 import xiangshan.frontend.bpu.StageCtrl
 
@@ -41,24 +43,32 @@ class MainBtbAlignBank(
       }
 
       class Resp extends Bundle {
+        // s1 response
+        val positions: Vec[UInt] = Vec(NumWay, UInt(CfiPositionWidth.W))
+        // s2 response
         val predictions: Vec[Valid[Prediction]] = Vec(NumWay, Valid(new Prediction))
         val metas:       Vec[MainBtbMetaEntry]  = Vec(NumWay, new MainBtbMetaEntry)
       }
       // don't need Valid or Decoupled here, AlignBank's pipeline is coupled with top, so we use stageCtrl to control
       val req: Req = Input(new Req)
 
-      val resp: Resp = Output(new Resp)
-
-      val s1_positions: Vec[UInt] = Output(Vec(NumWay, UInt(CfiPositionWidth.W)))
+      val mbtbResp: Resp = Output(new Resp)
+      class VbtbResp extends Bundle {
+        val position:   UInt              = UInt(CfiPositionWidth.W)
+        val prediction: Valid[Prediction] = Valid(new Prediction)
+        val meta:       MainBtbMetaEntry  = new MainBtbMetaEntry
+      }
+      val vbtbResp: VbtbResp = Output(new VbtbResp)
     }
 
     class Write extends Bundle {
       class Req extends Bundle {
         val needWrite: Bool = Bool()
         // similar to Read.Req.startPc, calculated in MainBtb top
-        val startPc:  Pc                     = new Pc
-        val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
-        val meta:     Vec[MainBtbMetaEntry]  = Vec(NumWay, new MainBtbMetaEntry)
+        val startPc:       Pc                     = new Pc
+        val branches:      Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
+        val meta:          Vec[MainBtbMetaEntry]  = Vec(NumWay, new MainBtbMetaEntry)
+        val posHigherBits: UInt                   = UInt(AlignBankIdxLen.W)
         // mispredictBranch is actually Mux1H(branches.map(b => b.valid && b.mispredict), b.bits),
         // but we still pass it through a port anyway,
         // perhaps in the future we can move this Mux1H to prior stages for better timing.
@@ -76,7 +86,7 @@ class MainBtbAlignBank(
     val trace: MainBtbAlignBankTrace = Output(new MainBtbAlignBankTrace)
 
     // final s3_takenMask (mbtb + tage + sc), used to touch replacer accurately
-    val s3_takenMask: Vec[Bool] = Input(Vec(NumWay, Bool()))
+    val s3_vbtbTaken: Bool = Input(Bool())
 
     // fast path of train pc, used to read replacer in advance for better timing
     val t0_startPc: Pc = Input(new Pc)
@@ -93,6 +103,12 @@ class MainBtbAlignBank(
   }
 
   private val replacer = Module(new MainBtbReplacer)
+
+  // One fully-associative VBTB and replacer is shared by all internal banks of
+  // this align bank. Each entry carries the originating internal-bank index.
+  private val victimBtb         = Module(new VictimBtb)
+  private val victimBtbReplacer = Module(new VictimBtbReplacer)
+  victimBtbReplacer.io.valids := VecInit(victimBtb.io.read.resp.entries.map(_.entry.valid))
 
   io.sramResetDone := internalBanks.map(_.io.sramResetDone).reduce(_ && _)
 
@@ -123,11 +139,14 @@ class MainBtbAlignBank(
    * check entries hit
    * filter-out unneeded entries
    */
-  private val s1_fire             = io.stageCtrl.s1_fire
-  private val s1_startPc          = RegEnable(s0_startPc, s0_fire)
-  private val s1_posHigherBits    = RegEnable(s0_posHigherBits, s0_fire)
-  private val s1_crossPage        = RegEnable(s0_crossPage, s0_fire)
-  private val s1_internalBankMask = RegEnable(s0_internalBankMask, s0_fire)
+  private val s1_fire              = io.stageCtrl.s1_fire
+  private val s1_startPc           = RegEnable(s0_startPc, s0_fire)
+  private val s1_posHigherBits     = RegEnable(s0_posHigherBits, s0_fire)
+  private val s1_crossPage         = RegEnable(s0_crossPage, s0_fire)
+  private val s1_internalBankMask  = RegEnable(s0_internalBankMask, s0_fire)
+  private val s1_tag               = getTag(s1_startPc)
+  private val s1_setIdx            = getSetIndex(s1_startPc)
+  private val s1_alignedInstOffset = getAlignedInstOffset(s1_startPc)
 
   private val s1_rawEntries = Mux1H(
     s1_internalBankMask,
@@ -138,8 +157,6 @@ class MainBtbAlignBank(
     internalBanks.map(_.io.read.resp.counters)
   )
 
-  private val s1_tag = getTag(s1_startPc)
-
   // send rawHit for training
   private val s1_rawHitMask = VecInit(s1_rawEntries.map(e => e.valid && e.tag === s1_tag))
 
@@ -147,8 +164,6 @@ class MainBtbAlignBank(
   //       (see s0_startPcVec)
   //       so here, if this alignBank is not the first alignBank of the fetch block, we'll get s1_alignedInstOffset = 0
   //       and, we'll do a (e.position >= 0) check later, which is always true
-  private val s1_alignedInstOffset = getAlignedInstOffset(s1_startPc)
-
   private val s1_predictions = VecInit((s1_rawEntries zip s1_rawCounters zip s1_rawHitMask).map {
     case ((e, c), rawHit) =>
       val pred = Wire(Valid(new Prediction))
@@ -163,7 +178,36 @@ class MainBtbAlignBank(
       pred
   })
 
-  io.read.s1_positions := s1_predictions.map(_.bits.cfiPosition)
+  private val s1_vbtbEntries = victimBtb.io.read.resp.entries
+  private val s1_vbtbRawHitMask = VecInit(s1_vbtbEntries.map { e =>
+    e.entry.valid && e.internalBankIdx === OHToUInt(s1_internalBankMask) &&
+    e.setIdx === s1_setIdx && e.entry.tag === s1_tag // TODO: optimize this
+  })
+  private val s1_vbtbHitMask = VecInit((s1_vbtbRawHitMask zip s1_vbtbEntries).map { case (rawHit, e) =>
+    rawHit && e.entry.position >= s1_alignedInstOffset && !s1_crossPage
+  })
+
+  // A fully-associative VBTB exposes only the earliest matching entry. The
+  // non-strict order makes a lower physical way win when positions are equal.
+  private val s1_vbtbPositionMatrix = CompareMatrix(
+    VecInit(s1_vbtbEntries.map(_.entry.position)),
+    order = (a: UInt, b: UInt) => a <= b
+  )
+  private val s1_vbtbSelectOH    = s1_vbtbPositionMatrix.getLeastElementOH(s1_vbtbHitMask).asUInt
+  private val s1_vbtbSelectEntry = Mux1H(s1_vbtbSelectOH, s1_vbtbEntries)
+  private val s1_vbtbPrediction  = Wire(Valid(new Prediction))
+  s1_vbtbPrediction.valid            := s1_vbtbSelectOH.orR
+  s1_vbtbPrediction.bits.cfiPosition := Cat(s1_posHigherBits, s1_vbtbSelectEntry.entry.position)
+  s1_vbtbPrediction.bits.target := getFullTarget(
+    s1_startPc,
+    s1_vbtbSelectEntry.entry.targetLowerBits,
+    s1_vbtbSelectEntry.entry.targetCarry
+  )
+  s1_vbtbPrediction.bits.attribute := s1_vbtbSelectEntry.entry.attribute
+  s1_vbtbPrediction.bits.taken     := s1_vbtbSelectEntry.counter.isPositive
+
+  r.mbtbResp.positions := VecInit(s1_predictions.map(_.bits.cfiPosition))
+  r.vbtbResp.position  := s1_vbtbPrediction.bits.cfiPosition
 
   /* *** s2 ***
    * send resp to top
@@ -172,32 +216,50 @@ class MainBtbAlignBank(
   private val s2_fire             = io.stageCtrl.s2_fire
   private val s2_startPc          = RegEnable(s1_startPc, s1_fire)
   private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
+  private val s2_rawEntries       = RegEnable(s1_rawEntries, s1_fire)
   private val s2_rawCounters      = RegEnable(s1_rawCounters, s1_fire)
+  private val s2_vbtbEntries      = RegEnable(s1_vbtbEntries, s1_fire)
+  private val s2_vbtbHitMask      = RegEnable(s1_vbtbHitMask, s1_fire)
   private val s2_rawHitMask       = RegEnable(s1_rawHitMask, s1_fire)
   private val s2_predictions      = RegEnable(s1_predictions, s1_fire)
+  private val s2_vbtbSelectOH     = RegEnable(s1_vbtbSelectOH, s1_fire)
+  private val s2_vbtbSelectEntry  = RegEnable(s1_vbtbSelectEntry, s1_fire)
+  private val s2_vbtbPrediction   = RegEnable(s1_vbtbPrediction, s1_fire)
 
   private val s2_setIdx = getSetIndex(s2_startPc)
 
   // send resp
-  r.resp.predictions := s2_predictions
+  r.mbtbResp.predictions := s2_predictions
 
-  r.resp.metas.zipWithIndex.foreach { case (meta, i) =>
+  r.mbtbResp.metas.zipWithIndex.foreach { case (meta, i) =>
     meta.rawHit    := s2_rawHitMask(i)
     meta.attribute := s2_predictions(i).bits.attribute
     meta.position  := s2_predictions(i).bits.cfiPosition
     meta.counter   := s2_rawCounters(i)
   }
+  private val s2_vbtbSelected = s2_vbtbSelectOH.orR
+  private val s2_vbtbMeta     = r.vbtbResp.meta
+  private val s2_vbtbEntry    = s2_vbtbSelectEntry
+  r.vbtbResp.prediction := s2_vbtbPrediction
+
+  s2_vbtbMeta.rawHit    := s2_vbtbSelected
+  s2_vbtbMeta.attribute := s2_vbtbEntry.entry.attribute
+  s2_vbtbMeta.position  := s2_vbtbPrediction.bits.cfiPosition
+  s2_vbtbMeta.counter   := s2_vbtbEntry.counter
 
   // add an alias for hitMask for later use & debug purpose
-  private val s2_hitMask = VecInit(r.resp.predictions.map(_.valid))
+  private val s2_hitMask = VecInit(r.mbtbResp.predictions.map(_.valid))
   dontTouch(s2_hitMask)
 
   /* *** s3 ***
    * touch replacer using final takenMask (mbtb + tage + sc)
    */
-  private val s3_fire           = io.stageCtrl.s3_fire
-  private val s3_replacerSetIdx = RegEnable(getReplacerSetIndex(s2_startPc), s2_fire)
-  private val s3_takenMask      = io.s3_takenMask
+  private val s3_fire         = io.stageCtrl.s3_fire
+  private val s3_vbtbTaken    = io.s3_vbtbTaken
+  private val s3_vbtbSelectOH = RegEnable(s2_vbtbSelectOH, s2_fire)
+
+  victimBtbReplacer.io.predTouch.valid := s3_fire && s3_vbtbTaken && s3_vbtbSelectOH.orR
+  victimBtbReplacer.io.predTouch.bits  := OHToUInt(s3_vbtbSelectOH)
 
   /* *** t0 ***
    * read replacer in advance for better timing
@@ -218,6 +280,7 @@ class MainBtbAlignBank(
   private val t1_startPc          = w.req.bits.startPc
   private val t1_branches         = w.req.bits.branches
   private val t1_meta             = w.req.bits.meta
+  private val t1_posHigherBits    = w.req.bits.posHigherBits
   private val t1_mispredictInfo   = w.req.bits.mispredictInfo
   private val t1_setIdx           = getSetIndex(t1_startPc)
   private val t1_internalBankIdx  = getInternalBankIndex(t1_startPc)
@@ -230,8 +293,24 @@ class MainBtbAlignBank(
   private val t1_hitMask = PriorityEncoderOH(VecInit(t1_meta.map(_.hit(t1_mispredictInfo.bits))).asUInt)
   private val t1_hit     = t1_hitMask.orR
 
+  private val t1_vbtbEntries = victimBtb.io.trainEntryRead.resp.entries
+  private val t1_vbtbHitMask = VecInit(t1_vbtbEntries.map { e =>
+    e.internalBankIdx === t1_internalBankIdx &&
+    e.setIdx === t1_setIdx &&
+    e.entry.valid && e.entry.tag === getTag(t1_startPc) && // TODO: optimize this
+    Cat(t1_posHigherBits, e.entry.position) === t1_mispredictInfo.bits.cfiPosition
+  }).asUInt
+  // A VBTB identity (internalBankIdx + setIdx + tag + position) must be unique.
+  // The hit mask is used directly so the normal path does not pay for priority-encoder logic;
+  // assert reports any duplicated physical entries before downstream Mux1H users consume it.
+  assert(
+    !t1_fire || !t1_mispredictInfo.valid || PopCount(t1_vbtbHitMask) <= 1.U,
+    "VBTB exact match should be one-hot"
+  )
+  private val t1_vbtbHit = t1_vbtbHitMask.orR
+
   // Write entry only when there's a mispredict, and if:
-  private val t1_entryNeedWrite = t1_needWrite && t1_mispredictInfo.valid && (
+  private val t1_entryNeedWrite = t1_needWrite && !t1_vbtbHit && t1_mispredictInfo.valid && (
     // 1. not hit, always write a new entry, use mbtb replacer's victim way.
     !t1_hit ||
       // 2. hit, do write only if:
@@ -258,7 +337,15 @@ class MainBtbAlignBank(
     b.io.writeEntry.req.bits.setIdx  := t1_setIdx
     b.io.writeEntry.req.bits.wayMask := t1_entryWayMask
     b.io.writeEntry.req.bits.entry   := t1_entry
+    b.io.writeEntry.req.bits.hit     := t1_hit
   }
+
+  // write vbtb entry
+  private val t1_vbtbEntryNeedWrite = t1_needWrite && t1_vbtbHit && t1_mispredictInfo.valid && (
+    t1_mispredictInfo.bits.attribute.needIttage ||
+      !(t1_mispredictInfo.bits.attribute === Mux1H(t1_vbtbHitMask, t1_vbtbEntries.map(_.entry.attribute)))
+  )
+  private val t1_vbtbEntryWayMask = t1_vbtbHitMask
 
   /* *** update counter *** */
   private val t1_newCounters    = Wire(Vec(NumWay, TakenCounter()))
@@ -275,7 +362,7 @@ class MainBtbAlignBank(
     t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
     t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
   }
-  private val t1_actualTakenMask = VecInit(t1_meta.zipWithIndex.map { case (meta, i) =>
+  private val t1_actualTakenMask = VecInit(t1_meta.map { meta =>
     val hitMask = t1_branches.map(branch =>
       branch.valid && meta.position === branch.bits.cfiPosition && meta.rawHit && branch.bits.taken
     )
@@ -299,6 +386,106 @@ class MainBtbAlignBank(
     b.io.writeCounter.req.bits.counters := t1_newCounters
   }
 
+  // update vbtb counters
+  private val t1_vbtbNewCounters      = Wire(Vec(NumVictimBtbWays, TakenCounter()))
+  private val t1_vbtbCounterWayMask   = Wire(Vec(NumVictimBtbWays, Bool()))
+  private val t1_vbtbCounterNeedWrite = t1_vbtbCounterWayMask.reduce(_ || _)
+
+  t1_vbtbEntries.zipWithIndex.foreach { case (e, i) =>
+    val entryMatchesBlock = e.internalBankIdx === t1_internalBankIdx && e.setIdx === t1_setIdx &&
+      e.entry.valid && e.entry.tag === getTag(t1_startPc)
+    val hitMask = t1_branches.map { branch =>
+      entryMatchesBlock && branch.valid && branch.bits.attribute.isConditional &&
+      Cat(t1_posHigherBits, e.entry.position) === branch.bits.cfiPosition
+    }
+    val actualTaken     = Mux1H(hitMask, t1_branches.map(_.bits.taken))
+    val entryOverridden = t1_vbtbEntryNeedWrite && t1_vbtbEntryWayMask(i)
+    t1_vbtbCounterWayMask(i) := hitMask.reduce(_ || _) || entryOverridden
+    t1_vbtbNewCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, e.counter.getUpdate(actualTaken))
+
+  }
+
+  /* *** victim btb train and snapshot insertion *** */
+  private val snapshotArbiter = Module(new RRArbiter(new MainBtbSnapshotResp, NumInternalBanks))
+  snapshotArbiter.io.in.zip(internalBanks).foreach { case (in, bank) => in <> bank.io.snapshot.resp }
+  snapshotArbiter.io.out.ready := true.B
+  private val snapshotWriteReqCount = PopCount(snapshotArbiter.io.in.map(_.valid))
+  (1 to NumInternalBanks).foreach { count =>
+    XSPerfAccumulate(s"vbtb_snapshot_${count}_banks_write", snapshotWriteReqCount === count.U)
+  }
+  private val snapshotValid   = snapshotArbiter.io.out.valid
+  private val snapshotResp    = snapshotArbiter.io.out.bits
+  private val snapshotBankIdx = snapshotArbiter.io.chosen
+  private val victimEntries   = victimBtb.io.writeEntryRead.resp.entries
+
+  // Train the single VBTB with the selected internal-bank prediction metadata.
+  private val t1_victimNeedTrain = t1_vbtbEntryNeedWrite || t1_vbtbCounterNeedWrite
+  victimBtb.io.trainEntry.req.valid := t1_fire && t1_victimNeedTrain
+  victimBtb.io.trainEntry.req.bits.entryWayMask := Mux(
+    t1_vbtbEntryNeedWrite,
+    t1_vbtbEntryWayMask,
+    0.U(NumVictimBtbWays.W)
+  )
+  victimBtb.io.trainEntry.req.bits.counterWayMask := Mux(
+    t1_vbtbCounterNeedWrite,
+    t1_vbtbCounterWayMask.asUInt,
+    0.U(NumVictimBtbWays.W)
+  )
+  victimBtb.io.trainEntry.req.bits.entry    := t1_entry
+  victimBtb.io.trainEntry.req.bits.counters := t1_vbtbNewCounters
+
+  val evictedValid = snapshotResp.evicted.valid
+  val evictedHitMask = victimEntries.map { e =>
+    snapshotValid && evictedValid && e.entry.valid &&
+    e.internalBankIdx === snapshotBankIdx && e.setIdx === snapshotResp.setIdx &&
+    e.entry.tag === snapshotResp.evicted.tag && e.entry.position === snapshotResp.evicted.position
+  }
+  val evictedHit    = evictedHitMask.reduce(_ || _)
+  val incomingValid = snapshotResp.incoming.valid
+  val incomingHitMask = victimEntries.map { e =>
+    snapshotValid && incomingValid && e.entry.valid &&
+    e.internalBankIdx === snapshotBankIdx && e.setIdx === snapshotResp.setIdx &&
+    e.entry.tag === snapshotResp.incoming.tag && e.entry.position === snapshotResp.incoming.position
+  }
+  val incomingHit = incomingHitMask.reduce(_ || _)
+  val evictedHitIncoming = evictedValid && incomingValid &&
+    snapshotResp.evicted.tag === snapshotResp.incoming.tag &&
+    snapshotResp.evicted.position === snapshotResp.incoming.position
+  val entryWayMask = PriorityMux(Seq(
+    evictedHit  -> VecInit(evictedHitMask).asUInt,
+    incomingHit -> VecInit(incomingHitMask).asUInt,
+    true.B      -> UIntToOH(victimBtbReplacer.io.victim, NumVictimBtbWays)
+  ))
+  val writeEvicted  = snapshotValid && evictedValid && !evictedHitIncoming
+  val flushIncoming = snapshotValid && incomingHit
+
+  victimBtb.io.writeEntry.req.valid                := writeEvicted || flushIncoming
+  victimBtb.io.writeEntry.req.bits.setIdx          := snapshotResp.setIdx
+  victimBtb.io.writeEntry.req.bits.internalBankIdx := snapshotBankIdx
+  victimBtb.io.writeEntry.req.bits.entry           := snapshotResp.evicted
+  victimBtb.io.writeEntry.req.bits.wayMask         := Mux(writeEvicted, entryWayMask, 0.U(NumVictimBtbWays.W))
+  victimBtb.io.writeEntry.req.bits.flushMask := Mux(
+    flushIncoming,
+    VecInit(incomingHitMask).asUInt,
+    0.U(NumVictimBtbWays.W)
+  )
+
+  // A snapshot allocation is the newest access and wins if it coincides with
+  // ordinary VBTB training. Otherwise touch one trained entry, as uBTB does.
+  private val t1_vbtbTrainTouch = t1_fire && t1_victimNeedTrain
+  victimBtbReplacer.io.trainTouch.valid := writeEvicted || t1_vbtbTrainTouch
+  victimBtbReplacer.io.trainTouch.bits := Mux(
+    writeEvicted,
+    OHToUInt(entryWayMask),
+    Mux(
+      t1_vbtbEntryNeedWrite,
+      OHToUInt(t1_vbtbEntryWayMask),
+      PriorityEncoder(t1_vbtbCounterWayMask)
+    )
+  )
+  assert(PopCount(VecInit(incomingHitMask)) <= 1.U, "incoming hit mask should be one-hot")
+  assert(PopCount(VecInit(evictedHitMask)) <= 1.U, "evicted hit mask should be one-hot")
+
   /* *** multi-hit detection & flush *** */
   private val s2_multiHitMask = detectMultiHit(s2_hitMask, s2_predictions.map(_.bits.cfiPosition))
 
@@ -307,6 +494,20 @@ class MainBtbAlignBank(
     b.io.flush.req.bits.setIdx  := s2_setIdx
     b.io.flush.req.bits.wayMask := s2_multiHitMask
   }
+
+  // Remove VBTB entries that duplicate a MainBtb hit at the same position. Once
+  // MainBtb can provide the prediction directly, the victim copy is stale.
+  private val s2_vbtbMultiHitMask = Wire(Vec(NumVictimBtbWays, Bool()))
+  private val s2_vbtbPositions    = s2_vbtbEntries.map(_.entry.position)
+  private val s2_positions        = s2_rawEntries.map(_.position)
+  for (i <- 0 until NumVictimBtbWays) {
+    val multiHitVec =
+      VecInit.tabulate(NumWay)(j => s2_vbtbHitMask(i) && s2_hitMask(j) && s2_vbtbPositions(i) === s2_positions(j))
+    s2_vbtbMultiHitMask(i) := multiHitVec.reduce(_ || _)
+  }
+
+  victimBtb.io.flush.req.valid        := s2_fire && s2_vbtbMultiHitMask.reduce(_ || _)
+  victimBtb.io.flush.req.bits.wayMask := s2_vbtbMultiHitMask.asUInt
 
   // mainBTB trace bundle
   io.trace.needWrite := t1_fire && t1_entryNeedWrite
@@ -325,6 +526,8 @@ class MainBtbAlignBank(
       ("fixAttribute", t1_hit && !(t1_mispredictInfo.bits.attribute === Mux1H(t1_hitMask, t1_meta.map(_.attribute))))
     )
   )
+
+  XSPerfRolling("rolling_allocate", t1_fire && t1_mispredictInfo.valid && t1_entryNeedWrite, 10000, clock, reset)
 
   XSPerfAccumulate("updateCounter", Mux(t1_fire, PopCount(t1_counterWayMask), 0.U))
 }
