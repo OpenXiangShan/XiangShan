@@ -55,6 +55,8 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   val rep_carry       = new ReplayCarry(nWays)
   // data in last beat
   val last_beat       = Bool()
+  // whether any replay cause is active for this request
+  val need_rep        = Bool()
   // replay cause
   val cause           = Vec(LoadReplayCauses.allCauses, Bool())
   // performance debug information
@@ -77,5 +79,4 @@ class LoadToLsqReplayIO(implicit p: Parameters) extends XSBundle
   def nuke          = cause(LoadReplayCauses.C_NK)
   def mmioOrNc      = cause(LoadReplayCauses.C_UNCACHE)
   def storeMultiFwd = cause(LoadReplayCauses.C_SMF)
-  def need_rep      = cause.asUInt.orR
 }

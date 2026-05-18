@@ -277,6 +277,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
    */
   val canEnqueue = io.enq.map(_.valid)
   val cancelEnq = io.enq.map(enq => enq.bits.uop.robIdx.needFlush(io.redirect))
+  // Use the producer-side need_rep directly so replay admission does not
+  // need to re-derive "has any replay cause" from rep_info.cause on this path.
   val needReplay = io.enq.map(enq => enq.bits.rep_info.need_rep)
   val loadReplay = io.enq.map(enq => enq.bits.isLoadReplay)
   val needEnqueue = VecInit((0 until LoadPipelineWidth).map(w => {

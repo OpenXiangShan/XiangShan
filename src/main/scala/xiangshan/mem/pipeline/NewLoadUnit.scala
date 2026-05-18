@@ -1453,6 +1453,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   val lqWriteValid = pipeIn.valid && !doFastReplay && endPipe
   val lqWriteReady = io.lqWrite.ready
   val lqWriteCause = Mux(s4HeadValid && s4HeadShouldReplay, s4HeadReplayCause, cause)
+  val lqWriteNeedReplay = lqWriteCause.asUInt.orR
   val lqWriteCauseOH = PriorityEncoderOH(lqWriteCause)
   val lqWrite = Wire(new LqWriteBundle)
   val lqWriteMshrId = Mux(s4HeadCacheMiss && s4HeadValid, s4HeadMshrId, in.mshrId.get)
@@ -1494,6 +1495,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.addr_inv_sq_idx := in.addrInvalidSqIdx.get
   lqWrite.rep_info.rep_carry := DontCare
   lqWrite.rep_info.last_beat := paddr(log2Up(refillBytes))
+  lqWrite.rep_info.need_rep := lqWriteNeedReplay
   lqWrite.rep_info.cause := lqWriteCauseOH
   lqWrite.rep_info.debug := uop.perfDebugInfo
   lqWrite.rep_info.tlb_id := in.tlbId.get
