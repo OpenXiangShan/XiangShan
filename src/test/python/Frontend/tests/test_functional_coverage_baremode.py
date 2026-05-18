@@ -5,7 +5,8 @@ from typing import Iterable
 
 import pytest
 
-from env.sequences import InjectRedirectSequence, LoadProgramSequence, RunUntilCommitSequence
+from env.model.ifu_reference_model import IFUFetchMonitorAdapter, SequentialIFUReferenceModel
+from env.sequences import BaremodeSequentialIFUScenario, InjectRedirectSequence, LoadProgramSequence, RunUntilCommitSequence
 from env.transactions import CommitTarget, ProgramImage, RedirectTxn
 
 
@@ -85,28 +86,36 @@ def _step_until_coverage_hits(env, expected_keys, max_cycles: int = 32) -> bool:
 
 
 def _queue_backend_fault_redirect(env, *, target_pc: int, **fault_bits: int) -> None:
-    last_pc = env.monitor.recent_pcs(1)[-1]
+    redirect_context = env.backend_model._latest_non_stale_redirect_drive_context()
+    if redirect_context is None:
+        raise AssertionError("backend-fault redirect requires a non-stale FTQ drive context")
+    payload_extra = {
+        "pc": int(redirect_context["pc"]),
+        "ftq_flag": int(redirect_context["ftq_flag"]),
+        "ftq_value": int(redirect_context["ftq_value"]),
+        "ftq_offset": int(redirect_context["ftq_offset"]),
+        "is_rvc": int(redirect_context.get("is_rvc", 0)),
+        **fault_bits,
+    }
     env.backend_model._queue_redirect_event(
         target_pc=int(target_pc),
         reason="backend_fault",
         delay_cycles=1,
         flush_on_drive=False,
-        payload_extra={
-            "pc": int(last_pc),
-            "ftq_flag": int(env.backend_model.commit_ptr_flag),
-            "ftq_value": int(env.backend_model.commit_ptr_value),
-            "ftq_offset": 0,
-            **fault_bits,
-        },
+        payload_extra=payload_extra,
     )
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_baremode_seq_icache_basic_pilot(env):
-    _load_nop_program(env, words=128)
+    scenario = BaremodeSequentialIFUScenario(base_addr=_BASE, words=128, expected_fetches=4)
+    LoadProgramSequence(image=scenario.program_image(), step_cycles=1).run(env)
     commits = _warmup_commits(env, target_count=4)
+    txns = IFUFetchMonitorAdapter().from_env(env)
+    ifu_result = SequentialIFUReferenceModel(expected_pcs=scenario.expected_pcs()).compare(txns)
 
     assert commits >= 4
+    ifu_result.assert_passed()
     assert env.functional_coverage.key_hit("reset_boot_path", "seen")
     assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
     assert env.functional_coverage.key_hit("bpu_basic_pred_type", "seq_no_cfi")

@@ -164,11 +164,12 @@ class FunctionalCoverageRecorder:
         return self.output_dir / f"{self.artifact_tag}.funcov.unhit.csv"
 
     def key_hit(self, coverage_group: str, bin_name: str) -> bool:
-        hit = self.hits.get((str(coverage_group), str(bin_name)))
+        key = self._coverage_key(str(coverage_group), str(bin_name))
+        hit = self.hits.get(key)
         return bool(hit and hit.hits > 0)
 
     def mark(self, coverage_group: str, bin_name: str, cycle: int, evidence: Optional[dict] = None) -> bool:
-        key = (str(coverage_group), str(bin_name))
+        key = self._coverage_key(str(coverage_group), str(bin_name))
         if key not in self.definition_by_key:
             return False
         hit = self.hits.setdefault(key, CoverageHit())
@@ -179,6 +180,17 @@ class FunctionalCoverageRecorder:
         if evidence is not None and len(hit.evidence) < 8:
             hit.evidence.append(_sanitize(evidence))
         return True
+
+    def _coverage_key(self, coverage_group: str, bin_name: str) -> Tuple[str, str]:
+        key = (str(coverage_group), str(bin_name))
+        if key in self.definition_by_key:
+            return key
+        if str(coverage_group) == "bpu_basic_pred_type":
+            if str(bin_name) == "seq_no_cfi":
+                return ("bpu_v3_basic_flow", "no_cfi")
+            if str(bin_name) in {"direct_jmp", "cond_taken", "cond_nt"}:
+                return ("bpu_v3_basic_flow", "has_cfi")
+        return key
 
     def handle_event(self, event: Dict[str, Any]) -> None:
         evt = _sanitize(event)
