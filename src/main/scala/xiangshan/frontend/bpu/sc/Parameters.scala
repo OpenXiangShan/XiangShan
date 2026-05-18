@@ -35,6 +35,7 @@ case class ScParameters(
     ),
     ImliTableInfo:       ScTableInfo = new ScTableInfo(128, 8),
     BiasTableInfo:       ScTableInfo = new ScTableInfo(128, 0),
+    NumWays:             Int = 8,
     BiasUseTageBitWidth: Int = 2,    // use tage_taken as index bits
     PathEnable:          Boolean = true,
     GlobalEnable:        Boolean = true,
@@ -60,7 +61,7 @@ trait HasScParameters extends HasBpuParameters {
 
   def TageTakenCtrWidth: Int = bpuParameters.tageParameters.TakenCtrWidth
   def CtrWidth:          Int = scParameters.CtrWidth
-  def NumWays:           Int = NumBtbResultEntries
+  def NumWays:           Int = scParameters.NumWays
   def NumBanks:          Int = scParameters.NumBanks
   def BankWidth:         Int = log2Ceil(NumBanks)
   def ThresholdWidth:    Int = scParameters.ThresholdWidth
@@ -98,4 +99,6 @@ trait HasScParameters extends HasBpuParameters {
   def WriteBufferSize: Int = scParameters.WriteBufferSize
 
   def EnableScTrace: Boolean = scParameters.EnableScTrace
+
+  require(NumWays > 0 && isPow2(NumWays), s"SC NumWays($NumWays) must be a positive power of two")
 }
