@@ -42,6 +42,11 @@ trait DebugLevel { self: NewCSR =>
   })
     .setAddr(CSRs.tdata2)
 
+  val tdata3 = Module(new CSRModule("Tdata3", new Tdata3Bundle) with HasTdataSink {
+    regOut := tdataRead.tdata3
+  })
+    .setAddr(CSRs.tdata3)
+
   val tdata1RegVec: Seq[CSRModule[_]] = Range(0, TriggerNum).map(i =>
     Module(new CSRModule(s"Trigger$i" + s"_Tdata1", new Tdata1Bundle) with HasTriggerBundle {
       when(wen){
@@ -51,6 +56,9 @@ trait DebugLevel { self: NewCSR =>
   )
   val tdata2RegVec: Seq[CSRModule[_]] = Range(0, TriggerNum).map(i =>
     Module(new CSRModule(s"Trigger$i" + s"_Tdata2", new Tdata2Bundle))
+  )
+  val tdata3RegVec: Seq[CSRModule[_]] = Range(0, TriggerNum).map(i =>
+    Module(new CSRModule(s"Trigger$i" + s"_Tdata3", new Tdata3Bundle))
   )
 
   val tinfo = Module(new CSRModule("Tinfo", new TinfoBundle))
@@ -73,6 +81,7 @@ trait DebugLevel { self: NewCSR =>
   val debugCSRMods = Seq(
     tdata1,
     tdata2,
+    tdata3,
     tselect,
     tinfo,
     dcsr,
@@ -97,11 +106,16 @@ trait DebugLevel { self: NewCSR =>
     tdata2RegVec.zipWithIndex.map{case (mod, idx) => (tselect.rdata === idx.U) -> mod.rdata}
   )
 
+  private val tdata3Rdata = Mux1H(
+    tdata3RegVec.zipWithIndex.map{case (mod, idx) => (tselect.rdata === idx.U) -> mod.rdata}
+  )
+
   debugCSRMods.foreach { mod =>
     mod match {
       case m: HasTdataSink =>
         m.tdataRead.tdata1 := tdata1Rdata
         m.tdataRead.tdata2 := tdata2Rdata
+        m.tdataRead.tdata3 := tdata3Rdata
       case _ =>
     }
   }
@@ -288,6 +302,36 @@ class Tdata2Bundle extends CSRBundle {
   val ALL = RW(63, 0).withDescription("Second trigger data register.")
 }
 
+object Tdata3Sselect extends CSREnum with WARLApply {
+  val Ignore   = Value(0.U)
+  val Scontext = Value(1.U)
+  val Asid     = Value(2.U)
+
+  override protected def legalValues: Seq[EnumType] = Seq(Ignore, Scontext, Asid)
+}
+
+object Tdata3Mhselect extends CSREnum with WARLApply {
+  val Ignore           = Value(0.U)
+  val McontextSelectLo = Value(1.U)
+  val VmidSelectLo     = Value(2.U)
+  val Mcontext         = Value(4.U)
+  val McontextSelectHi = Value(5.U)
+  val VmidSelectHi     = Value(6.U)
+  override protected def legalValues: Seq[EnumType] =
+    Seq(Ignore, McontextSelectLo, VmidSelectLo, Mcontext, McontextSelectHi, VmidSelectHi)
+}
+
+class Tdata3Bundle extends CSRBundle {
+  val SSELECT   = Tdata3Sselect(1, 0, wNoFilter).withReset(Tdata3Sselect.Ignore)
+    .withDescription("Supervisor-side context selector: 0=ignore, 1=scontext, 2=asid, 3=reserved.")
+  val SVALUE    = RW(33, 2).withReset(0.U).withDescription("Data used together with sselect.")
+  val SBYTEMASK = RW(39, 36).withReset(0.U)
+    .withDescription("Per-byte ignore mask for scontext matching. Bit i masks byte i of scontext when sselect=scontext.")
+  val MHSELECT  = Tdata3Mhselect(50, 48, wNoFilter).withReset(Tdata3Mhselect.Ignore)
+    .withDescription("Machine/hypervisor-side context selector: 0=ignore, 1/5=mcontext_select, 2/6=vmid_select, 3/7=reserved, 4=mcontext.")
+  val MHVALUE   = RW(63, 51).withReset(0.U).withDescription("Data used together with mhselect.")
+}
+
 // Tinfo
 class TinfoBundle extends CSRBundle{
   val VERSION     = TriggerVer(31, 24).withReset(TriggerVer.Spec_1dot0)
@@ -347,6 +391,7 @@ trait HasTdataSink { self: CSRModule[_] =>
   val tdataRead = IO(Input(new Bundle {
     val tdata1 = UInt(XLEN.W)
     val tdata2 = UInt(XLEN.W)
+    val tdata3 = UInt(XLEN.W)
   }))
 }
 trait HasTriggerBundle { self: CSRModule[_] =>
@@ -417,5 +462,35 @@ object TriggerUtil {
       fireDebugMode -> TriggerAction.DebugMode,
       breakPointExp -> TriggerAction.BreakpointExp,
     ))
+  }
+
+  def textraSMatch(sselect: UInt, svalue: UInt, sbytemask: UInt, scontext: UInt, asid: UInt): Bool = {
+    val scontextWire = WireInit(0.U.asTypeOf(Vec(4, UInt(8.W))))
+    val scontextEq = (scontext.asTypeOf(scontextWire)).zip(svalue.asTypeOf(scontextWire)).zip(sbytemask.asBools).map{
+      case((scon, sval), mask) => (scon === sval || mask)
+    }.reduce(_ && _)
+
+    MuxLookup(sselect, false.B)(Seq(
+      Tdata3Sselect.Ignore.asUInt -> true.B,
+      Tdata3Sselect.Scontext.asUInt -> scontextEq,
+      Tdata3Sselect.Asid.asUInt -> (asid === svalue(ASIDLEN - 1, 0))
+    ))
+  }
+
+  def textraMhMatch(mhselect: UInt, mhvalue: UInt, mhcontext: UInt, vmid: UInt): Bool = {
+    val highSelValue = Cat(mhvalue, mhselect(2))
+    MuxLookup(mhselect, false.B)(Seq(
+      Tdata3Mhselect.Ignore.asUInt -> true.B,
+      Tdata3Mhselect.Mcontext.asUInt -> (mhcontext(12, 0) === mhvalue),
+      Tdata3Mhselect.McontextSelectLo.asUInt -> (mhcontext === highSelValue),
+      Tdata3Mhselect.McontextSelectHi.asUInt -> (mhcontext === highSelValue),
+      Tdata3Mhselect.VmidSelectLo.asUInt -> (vmid === highSelValue),
+      Tdata3Mhselect.VmidSelectHi.asUInt -> (vmid === highSelValue),
+    ))
+  }
+
+  def textraMatch(tdata3: Tdata3Bundle, scontext: UInt, asid: UInt, mhcontext: UInt, vmid: UInt): Bool = {
+    textraSMatch(tdata3.SSELECT.asUInt, tdata3.SVALUE.asUInt, tdata3.SBYTEMASK.asUInt, scontext, asid) &&
+    textraMhMatch(tdata3.MHSELECT.asUInt, tdata3.MHVALUE.asUInt, mhcontext, vmid)
   }
 }

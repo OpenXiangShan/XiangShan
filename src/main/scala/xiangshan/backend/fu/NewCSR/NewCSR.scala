@@ -1016,9 +1016,12 @@ class NewCSR(implicit val p: Parameters) extends Module
   val frmChange = fcsr.wAliasFfm.wen && (!frmIsReserved && frmWdataReserved || frmIsReserved && !frmWdataReserved) ||
     fcsr.w.wen && (!frmIsReserved && fcsrWdataReserved || frmIsReserved && !fcsrWdataReserved)
 
+  // flush pipe when write xcontext.
+  val writeContext = Cat(Seq(mcontext, hcontext, scontext).map(_.addr.U === addr)).orR && wenLegalReg
+
   val flushPipe = resetSatp ||
     triggerFrontendChange || floatStatusOnOff || vectorStatusOnOff ||
-    vstartChange || frmChange
+    vstartChange || frmChange || writeContext
 
   /**
    * Look up id in vsMapS and sMapVS.
@@ -1204,10 +1207,16 @@ class NewCSR(implicit val p: Parameters) extends Module
   val triggerCanWrite = dmodeInSelectedTrigger && debugMode || !dmodeInSelectedTrigger
   val tdata1Update  = tdata1.w.wen && triggerCanWrite
   val tdata2Update  = tdata2.w.wen && triggerCanWrite
+  val tdata3Update  = tdata3.w.wen && triggerCanWrite
   val tdata1Vec = tdata1RegVec.map{ mod => {
     val tdata1Wire = Wire(new Tdata1Bundle)
     tdata1Wire := mod.rdata
     tdata1Wire
+  }}
+  val tdata3Vec = tdata3RegVec.map{ mod => {
+    val tdata3Wire = Wire(new Tdata3Bundle)
+    tdata3Wire := mod.rdata
+    tdata3Wire
   }}
 
   val triggerCanRaiseBpExp = !(privState.isModeM && !mstatus.regOut.MIE ||
@@ -1227,10 +1236,17 @@ class NewCSR(implicit val p: Parameters) extends Module
   debugMod.io.in.dcsr                      := dcsr.regOut
   debugMod.io.in.tselect                   := tselect.regOut
   debugMod.io.in.tdata1Vec                 := tdata1Vec
+  debugMod.io.in.tdata3Vec                 := tdata3Vec
   debugMod.io.in.tdata1Selected            := tdata1.rdata
   debugMod.io.in.tdata2Selected            := tdata2.rdata
+  debugMod.io.in.scontext                  := scontext.regOut.ALL.asUInt
+  debugMod.io.in.mhcontext                 := mcontext.regOut.HCONTEXT.asUInt
+  debugMod.io.in.satpAsid                  := satp.regOut.ASID.asUInt
+  debugMod.io.in.vsatpAsid                 := vsatp.regOut.ASID.asUInt
+  debugMod.io.in.hgatpVmid                 := hgatp.regOut.VMID.asUInt
   debugMod.io.in.tdata1Update              := tdata1Update
   debugMod.io.in.tdata2Update              := tdata2Update
+  debugMod.io.in.tdata3Update              := tdata3Update
   debugMod.io.in.tdata1Wdata               := wdata
   debugMod.io.in.triggerCanRaiseBpExp      := triggerCanRaiseBpExp
 
@@ -1269,11 +1285,13 @@ class NewCSR(implicit val p: Parameters) extends Module
     }
   }
 
-  tdata1RegVec.zip(tdata2RegVec).zipWithIndex.map { case ((mod1, mod2), idx) => {
+  tdata1RegVec.zip(tdata2RegVec).zip(tdata3RegVec).zipWithIndex.map { case (((mod1, mod2), mod3), idx) => {
     mod1.w.wen    := tdata1Update && (tselect.rdata === idx.U)
     mod1.w.wdata  := wdata
     mod2.w.wen    := tdata2Update && (tselect.rdata === idx.U)
     mod2.w.wdata  := wdata
+    mod3.w.wen    := tdata3Update && (tselect.rdata === idx.U)
+    mod3.w.wdata  := wdata
   }}
 
   triggerFrontendChange := debugMod.io.out.triggerFrontendChange
