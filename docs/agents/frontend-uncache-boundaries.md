@@ -382,6 +382,127 @@ auto_inner_instrUncache_client_out_a_bits_address = <MMIO fetch address>
 `WFI` directed case 应在 `io_backend_wfi_wfiReq = 1` 期间确认没有新的 uncache
 A channel request handshake；释放为 `0` 后应能观察到新的 request。
 
+### Functional Coverage
+
+uncache 通路的 functional coverage 定义在
+`src/test/python/Frontend/docs/frontend_bt_functional_coverage_pilot.csv`，由
+`FunctionalCoverageRecorder` 从 env event 和 DUT-visible 端口采样。
+
+当前 uncache covergroup：
+
+- `uncache_req_state`
+  - `normal_fire`：uncache A 通道完成一次 request handshake。
+  - `a_ready_backpressure`：A 通道 `valid=1` 且 `ready=0`。
+  - `wfi_blocked`：`backend.wfi_req=1` 窗口内没有新增 uncache A request。
+- `uncache_resp_type`
+  - `clean`：D 通道返回时 `corrupt=0` 且 `denied=0`。
+  - `corrupt`：D 通道返回 `corrupt=1`。
+  - `denied`：D 通道返回 `denied=1`。
+- `uncache_resend_flow`
+  - `first_denied_resend`：首拍注入 `denied=1` 后仍观察到下一 8B beat
+    request。
+  - `second_beat_fault`：resend 后第二拍返回 `corrupt` 或 `denied`。
+- `uncache_flush_flow`
+  - `redirect_flush_pending`：backend redirect 到来时 uncache agent 仍有
+    pending response。
+  - `redirect_flush_fault`：redirect 后短窗口内收到 stale fault response，且不
+    应形成前端异常。
+  - `consecutive_redirect_pending`：pending uncache 上连续 backend redirect。
+
+这些 coverpoint 的目标是覆盖端口级通路行为，不替代 `.S/bin` 对正常指令流地址
+边界的覆盖。`.S/bin` 仍负责 8B beat、RVC/RVI、fetch-block、page-near-tail 等
+自然取指场景。
+
+### MMIO / Non-MMIO 双区域 Bin
+
+`src/test/python/Frontend/tests/asm_cases/fe_mmio_nonmmio_toggle.S` 是一个双地址
+区域 case：
+
+- `_start` 位于 MMIO fetch 区域 `0x10001000`。
+- 第一跳转目标是 non-MMIO 区域 `0x80000000`。
+- 后续在 `0x100010xx` 和 `0x800000xx` 之间多次 `jalr` 切换。
+- 最终在 `0x80000054` 命中 good trap。
+
+这个 case 不能按普通单段 `.S -> padded .bin` 处理。它使用两个显式 section：
+
+```text
+.mmio_text    -> 0x10001000
+.normal_text  -> 0x80000000
+```
+
+示例链接参数：
+
+```bash
+-Wl,--section-start=.mmio_text=0x10001000
+-Wl,--section-start=.normal_text=0x80000000
+-Wl,-e,_start
+```
+
+当前生成的 runnable bin 是：
+
+```text
+src/test/python/Frontend/tests/asm_cases/generated/fe_mmio_nonmmio_toggle.bin
+```
+
+它是稀疏文件：
+
+```text
+logical size = 1879048284 bytes
+disk usage   = about 72K
+```
+
+原因是 raw bin 需要同时覆盖 NEMU memory base `0x10000000`、MMIO 入口
+`0x10001000` 和 normal 目标 `0x80000000`，逻辑跨度约 `0x7000005c`。
+
+frontend_bt NEMU 配置确认：
+
+```text
+CONFIG_MBASE=0x10000000
+CONFIG_PC_RESET_OFFSET=0x1000
+CONFIG_MSIZE=0x7ff80000000
+CONFIG_USE_SPARSEMM is not set
+```
+
+因此该 bin 可以由
+`~/project/frontend_bt/NEMU/build/riscv64-nemu-interpreter -b` 跑到 good trap，
+但 NEMU raw loader 会按逻辑大小读取整个文件。已确认 NEMU 运行结果：
+
+```text
+NEMU will start from pc 0x10001000
+HIT GOOD TRAP at pc = 0x0000000080000054
+total guest instructions = 38
+```
+
+对应 jsonl：
+
+```text
+NEMU/logs/fe_mmio_nonmmio_toggle.trace.jsonl
+```
+
+bin-trace pipeline 运行要求：
+
+```bash
+TB_LOG_LEVEL=INFO \
+TB_SKIP_NEMU=1 \
+TB_BASE_ADDR=0x10000000 \
+TB_RESET_VECTOR=0x10001000 \
+TB_PYTEST_TIMEOUT_SECS=600 \
+src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh \
+src/test/python/Frontend/tests/asm_cases/generated/fe_mmio_nonmmio_toggle.bin \
+NEMU/logs/fe_mmio_nonmmio_toggle.trace.jsonl
+```
+
+已确认该命令通过：
+
+```text
+cursor=38 entries=38 cycles=1008 monitor_errors=0
+1 passed in about 340s
+```
+
+耗时主要来自 Python env 加载逻辑大小 1.8G 的稀疏 bin。终端在加载阶段可能长时间
+没有输出；这不是 DUT 死锁。`TB_PYTEST_TIMEOUT_SECS=600` 对当前机器足够，但余量
+不大。
+
 ## Debug 检查清单
 
 调试 uncache 失败时：
