@@ -844,22 +844,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vSegmentFlag := false.B
   }
 
-  val misalign_allow_spec = RegInit(true.B)
-  val ldu_rollback_with_misalign_nack = loadUnits.map(ldu =>
-    ldu.io.lsq.ldin.bits.isFrmMisAlignBuf && ldu.io.lsq.ldin.bits.rep_info.rar_nack && ldu.io.rollback.valid
-  ).reduce(_ || _)
-  when (ldu_rollback_with_misalign_nack) {
-    misalign_allow_spec := false.B
-  } .elsewhen(lsq.io.rarValidCount < (LoadQueueRARSize - 4).U) {
-    misalign_allow_spec := true.B
-  }
-
   // LoadUnit
   val correctMissTrain = Constantin.createRecord(s"CorrectMissTrain$hartId", initValue = false)
 
   for (i <- 0 until LduCnt) {
     loadUnits(i).io.redirect <> redirect
-    loadUnits(i).io.misalign_allow_spec := misalign_allow_spec
 
     // get input form dispatch
     loadUnits(i).io.ldin <> io.ooo_to_mem.issueLda(i)
@@ -1198,7 +1187,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   loadMisalignBuffer.io.rob.pendingPtrNext      := io.ooo_to_mem.lsqio.pendingPtrNext
 
   lsq.io.loadMisalignFull                       := loadMisalignBuffer.io.loadMisalignFull
-  lsq.io.misalignAllowSpec                      := misalign_allow_spec
 
   storeMisalignBuffer.io.redirect               <> redirect
   storeMisalignBuffer.io.rob.lcommit            := io.ooo_to_mem.lsqio.lcommit

@@ -202,7 +202,6 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
     // to misalign buffer
     val misalign_enq = new MisalignBufferEnqIO
-    val misalign_allow_spec = Input(Bool())
 
     // Load RAR rollback
     val rollback = Valid(new Redirect)
@@ -1561,7 +1560,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_safe_writeback = RegEnable(s2_safe_writeback, s2_fire) || s3_hw_err
   val s3_exception = RegEnable(s2_real_exception, s2_fire)
   val s3_mis_align = RegEnable(s2_mis_align, s2_fire) && !s3_exception
-  val s3_misalign_can_go = RegEnable(!isAfter(s2_out.uop.lqIdx, io.lsq.lqDeqPtr) || io.misalign_allow_spec, s2_fire)
+  val s3_misalign_can_go = RegEnable(!isAfter(s2_out.uop.lqIdx, io.lsq.lqDeqPtr), s2_fire)
   val s3_trigger_debug_mode = RegEnable(s2_trigger_debug_mode, false.B, s2_fire)
 
   // TODO: Fix vector load merge buffer nack
