@@ -597,12 +597,7 @@ object DecodeChannelOutput {
     uop.blockBack := puop.blockBack
     uop.flushPipe := puop.flushPipe
     uop.selImm := puop.selImm
-    uop.imm := Mux1HLookUp(
-      puop.selImm.bits,
-      Seq(
-        DecodeSelImm.CSRRVLENB -> (VLEN / 8).U,
-      ),
-    )
+    uop.imm := puop.imm
     uop.commitType := CommitType.NORMAL
     uop.vdDepElim := VdDepElim.Always // never used
     uop.isWritePartVd := false.B

@@ -9,8 +9,7 @@ import sourcecode.{Name => SourceName}
 import xiangshan.backend.decode.isa.PseudoInstructions
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.decode.opcode.Opcode
-import xiangshan.backend.decode.opcode.Opcode.Opcode
-import xiangshan.backend.decode.opcode.Opcode.{AluOpcodes, VSetOpcodes}
+import xiangshan.backend.decode.opcode.Opcode.{AluOpcodes, NewJmpOpcodes, Opcode, VSetOpcodes}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.vector.Decoder.InstPattern._
@@ -21,12 +20,14 @@ import xiangshan.backend.vector.util.ChiselTypeExt.{BitPatToExt, UIntToUIntField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.Verilog
+import xiangshan.backend.vector.HasVectorSettings
+import xiangshan.backend.decode.ImmUnion
 
 import scala.collection.SeqMap
 import scala.language.implicitConversions
 
 @instantiable
-class PseudoDecodeChannel(instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTable.keys.toSeq) extends Module {
+class PseudoDecodeChannel(instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTable.keys.toSeq) extends Module with HasVectorSettings {
   import PseudoDecodeChannel._
 
   @public
@@ -58,6 +59,19 @@ class PseudoDecodeChannel(instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTab
 
   val bundle = table.decode(in.rawInst)
 
+  val selImm = Wire(ValidIO(DecodeSelImm()))
+  val imm = Wire(UInt(32.W))
+
+  selImm := bundle(selImmField)
+  imm := Mux1HLookUp(
+    selImm.bits,
+    Seq(
+      DecodeSelImm.I         -> ImmUnion.I.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.I.len),
+      DecodeSelImm.UJ        -> ImmUnion.J.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == ImmUnion.J.len),
+      DecodeSelImm.CSRRVLENB -> (VLEN / 8).U,
+    )
+  )
+
   out.valid := bundle(legalField)
   out.bits.fuType := bundle(fuTypeField)
   out.bits.opcode := bundle(opcodeField)
@@ -71,7 +85,8 @@ class PseudoDecodeChannel(instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTab
   out.bits.noSpec := bundle(noSpecField)
   out.bits.blockBack := bundle(blockBackField)
   out.bits.flushPipe := bundle(flushPipeField)
-  out.bits.selImm := bundle(selImmField)
+  out.bits.selImm := selImm
+  out.bits.imm := imm
   out.bits.canRobCompress := !bundle(canRobCompressField)
   out.bits.exceptionII := bundle(needVecEnableField) && in.fromCSR.illegalInst.vsIsOff
 }
@@ -107,18 +122,22 @@ object PseudoDecodeChannel {
     val blockBack = Bool()
     val flushPipe = Bool()
     val selImm = ValidIO(DecodeSelImm())
+    val imm = UInt(32.W)
     val canRobCompress = Bool()
     val exceptionII = Bool()
   }
 
   object InstPatterns {
-    val CSRRVL     = PseudoInstPattern(makeCSRRBitPat(CSRs.vl))
+    val CSRRVL       = PseudoInstPattern(makeCSRRBitPat(CSRs.vl))
 
-    val CSRRVLENB  = PseudoInstPattern(makeCSRRBitPat(CSRs.vlenb))
+    val CSRRVLENB    = PseudoInstPattern(makeCSRRBitPat(CSRs.vlenb))
 
-    val PREFETCH_I = PseudoInstPattern(PseudoInstructions.PREFETCH_I)
-    val PREFETCH_R = PseudoInstPattern(PseudoInstructions.PREFETCH_R)
-    val PREFETCH_W = PseudoInstPattern(PseudoInstructions.PREFETCH_W)
+    val PREFETCH_I   = PseudoInstPattern(PseudoInstructions.PREFETCH_I)
+    val PREFETCH_R   = PseudoInstPattern(PseudoInstructions.PREFETCH_R)
+    val PREFETCH_W   = PseudoInstPattern(PseudoInstructions.PREFETCH_W)
+
+    def J            = PseudoInstPattern(PseudoInstructions.J)
+    def JALR_RD_ZERO = PseudoInstPattern(PseudoInstructions.JALR_RD_ZERO)
   }
 
   class DecodeFieldGen[-T <: InstPattern, +D <: Data](
@@ -144,8 +163,10 @@ object PseudoDecodeChannel {
   }
 
   val uopTable: SeqMap[InstPattern, Opcode] = SeqMap(
-    CSRRVL    -> (VSetOpcodes.readvl + NeedVecEnable),
-    CSRRVLENB -> (AluOpcodes.add.copy() - Src1Gp - Src2En - Src2Gp + Src2Imm(DecodeSelImm.I) + NeedVecEnable),
+    CSRRVL        -> (VSetOpcodes.readvl + NeedVecEnable),
+    CSRRVLENB     -> (AluOpcodes.add.copy() - Src1Gp - Src2En - Src2Gp + Src2Imm(DecodeSelImm.CSRRVLENB) + NeedVecEnable),
+    J             -> (NewJmpOpcodes.j),
+    JALR_RD_ZERO  -> (NewJmpOpcodes.jr),
   )
 
   uopTable.foreach(println)
@@ -162,6 +183,8 @@ object PseudoDecodeChannel {
       val fuType = uopTable(op).factory match {
         case _: Opcode.AluOpcodes.type => FuType.alu.U
         case _: Opcode.BruOpcodes.type => ???
+        case _: Opcode.LinkOpcodes.type => ???
+        case _: Opcode.NewJmpOpcodes.type => FuType.njmp.U
         case _: Opcode.MulOpcodes.type => ???
         case _: Opcode.DivOpcodes.type => ???
         case _: Opcode.LduOpcodes.type => ???

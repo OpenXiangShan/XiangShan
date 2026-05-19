@@ -11,17 +11,13 @@ import xiangshan.backend.vector.Decoder.util.DecodeField
 import xiangshan.backend.vector.util.ChiselTypeExt.UIntToUIntField
 import xiangshan.macros.InstanceNameMacro.getVariableNameSeq
 
-object NumWbField extends DecodeField[
-  DecodePatternComb2[InstPattern, RdZeroPattern],
-  UInt,
-] {
+object NumWbField extends DecodeField[InstPattern, UInt] {
 
-  override def name: String = "numUop"
+  override def name: String = "numWb"
 
   override def chiselType: UInt = NumWB()
 
-  override def genTable(op: DecodePatternComb2[InstPattern, RdZeroPattern]): BitPat = {
-    val DecodePatternComb(instP, rdZeroP) = op
+  override def genTable(instP: InstPattern): BitPat = {
     val numWb = instP match {
       case int: IntInstPattern =>
         int match {
@@ -31,8 +27,8 @@ object NumWbField extends DecodeField[
             // HSV_B, HSV_H, HSV_W, HSV_D,
             case HyperStoreInstPattern() => 2
           }
-          // JAL, JALR, AUIPC if rd not zero
-          case inst if numWbIs2IfRdNotZeroInsts.contains(inst.name) && !rdZeroP.rdZero.get => 2
+          // JAL, JALR, AUIPC if rd not zero (RD==0 is in PseudoDecodeChannel, not here)
+          case inst if numWbIs2IfRdNotZeroInsts.contains(inst.name) => 2
           case _ => 1
         }
       case fp: FpInstPattern =>
@@ -49,7 +45,5 @@ object NumWbField extends DecodeField[
 
   val numWbIs2IfRdNotZeroInsts: Set[String] = getVariableNameSeq(
     JAL, JALR,
-    JAL_RD_1XXXX, JAL_RD_01XXX, JAL_RD_001XX, JAL_RD_0001X, JAL_RD_00001,
-    JALR_RD_1XXXX, JALR_RD_01XXX, JALR_RD_001XX, JALR_RD_0001X, JALR_RD_00001,
   ).toSet
 }
