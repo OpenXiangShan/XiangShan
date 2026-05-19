@@ -27,10 +27,21 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
 
   private val ex0NextInWidth = FCvtOpcode.getInputDataWidth(ex0NextOpcode)
   private val ex0NextOutWidth = FCvtOpcode.getOutputDataWidth(ex0NextOpcode)
-  private val ex0NextIsWiden = ex0NextOutWidth > ex0NextInWidth
-  private val ex0NextIsNarrow = ex0NextInWidth > ex0NextOutWidth
-  private val exInWidth   = makePipeReg(ex0NextInWidth, pipeRegValids)
-  private val exOutWidth  = makePipeReg(ex0NextOutWidth, pipeRegValids)
+  private val ex0NextInSew1H = UIntToOH(ex0NextInWidth, SewOH.width)
+  private val ex0NextOutSew1H = UIntToOH(ex0NextOutWidth, SewOH.width)
+  private val ex0NextIsWiden =
+      (ex0NextInSew1H(1) && ex0NextOutSew1H(2)) || // 16 -> 32
+      (ex0NextInSew1H(2) && ex0NextOutSew1H(3))    // 32 -> 64
+  private val ex0NextIsNarrow =
+      (ex0NextInSew1H(1) && ex0NextOutSew1H(0)) || // 16 -> 8
+      (ex0NextInSew1H(2) && ex0NextOutSew1H(1)) || // 32 -> 16
+      (ex0NextInSew1H(3) && ex0NextOutSew1H(2))    // 64 -> 32
+  private val opType = makePipeReg(ex0NextOpcode, pipeRegValids)
+  private val cvtInSew1H = Seq.fill(numVecModule)(makePipeReg(ex0NextInSew1H, pipeRegValids))
+  private val cvtOutSew1H = Seq.fill(numVecModule)(makePipeReg(ex0NextOutSew1H, pipeRegValids))
+  private val cvt64UseWidenSrc2 = Seq.fill(numVecModule)(makePipeReg(ex0NextIsWiden, pipeRegValids))
+  private val cvt32UseWidenSrc2 = Seq.fill(numVecModule)(makePipeReg(ex0NextInSew1H(1) && ex0NextOutSew1H(2), pipeRegValids))
+  private val widenSrcUpperSel = Seq.fill(numVecModule)(makePipeReg(ex0Next.bits.ctrl.uopIdx(0), pipeRegValids))
   private val isWiden     = makePipeReg(ex0NextIsWiden, pipeRegValids)
   private val isNarrow    = makePipeReg(ex0NextIsNarrow, pipeRegValids)
 
@@ -38,38 +49,35 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
   private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs2Vec = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
+  private val widenVs2Vec = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
   private val narrowVs2Vec = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
-  private val pairedVs2HiVec = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
-  private val inSew1H = Wire(UInt(4.W))
-  private val outSew1H = Wire(UInt(4.W))
+  private val narrowVs1Vec = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
   private val narrowDataWidth = dataWidthOfDataModule / 2
 
   vs2Split.io.inVecData := ex0vs2
   vs1Split.io.inVecData := ex0vs1 // vs1 = vs2 + 1
   val narrowSrcChunks = vs2Split.io.outVec64b.toSeq ++ vs1Split.io.outVec64b.toSeq
   for (i <- 0 until numVecModule) {
-    val e16Low = Mux(ex0uopIdx(0), vs2Split.io.outVec16b(i * 2 + numVecModule * 2), vs2Split.io.outVec16b(i * 2))
-    val e16High = Mux(ex0uopIdx(0), vs2Split.io.outVec16b(i * 2 + numVecModule * 2 + 1), vs2Split.io.outVec16b(i * 2 + 1))
-    val e32Input = Mux(ex0uopIdx(0), vs2Split.io.outVec32b(i + numVecModule), vs2Split.io.outVec32b(i))
-    vs2Vec(i) := MuxCase(vs2Split.io.outVec64b(i), Seq(
-      (inSew1H === SewOH.e16 && outSew1H === SewOH.e32) -> Cat(e16High, e16Low),
-      (inSew1H === SewOH.e32 && outSew1H === SewOH.e64) -> e32Input,
-    ))
+    val widenVs2Low32 = Mux(widenSrcUpperSel(i).ex0, vs2Split.io.outVec32b(i + numVecModule), vs2Split.io.outVec32b(i))
+    vs2Vec(i) := vs2Split.io.outVec64b(i)
+    widenVs2Vec(i) := Cat(0.U(32.W), widenVs2Low32)
     narrowVs2Vec(i) := narrowSrcChunks(2 * i)
-    pairedVs2HiVec(i) := narrowSrcChunks(2 * i + 1)
+    narrowVs1Vec(i) := narrowSrcChunks(2 * i + 1)
   }
-  inSew1H := UIntToOH(exInWidth.ex0)
-  outSew1H := UIntToOH(exOutWidth.ex0)
 
   vfcvts.zipWithIndex.foreach {
     case (mod, i) =>
       mod.fire := ex0.valid
-      mod.src2 := Mux(isNarrow.ex0, narrowVs2Vec(i), vs2Vec(i))
-      mod.src1 := pairedVs2HiVec(i)
-      mod.opType := ex0opcode
+      mod.src2 := vs2Vec(i)
+      mod.widenSrc2 := widenVs2Vec(i)
+      mod.narrowSrc2 := narrowVs2Vec(i)
+      mod.narrowSrc1 := narrowVs1Vec(i)
+      mod.opType := opType.ex0
       mod.rm := in.frm.get
-      mod.inSew1H := inSew1H
-      mod.outSew1H := outSew1H
+      mod.inSew1H := cvtInSew1H(i).ex0
+      mod.outSew1H := cvtOutSew1H(i).ex0
+      mod.cvt64UseWidenSrc2 := cvt64UseWidenSrc2(i).ex0
+      mod.cvt32UseWidenSrc2 := cvt32UseWidenSrc2(i).ex0
   }
 
   out.ex(0).bits.data.vec.foreach {
