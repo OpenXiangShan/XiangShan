@@ -22,8 +22,11 @@ import utility.XSPerfAccumulate
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
+import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HasFastTrainIO
 import xiangshan.frontend.bpu.Prediction
+import scala.math.min
+import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
 
 /**
  * This module is the implementation of the ahead BTB (Branch Target Buffer).
@@ -39,6 +42,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
     val abtbPos:       Vec[UInt]                  = Output(Vec(NumAheadBtbPredictionEntries, UInt(CfiPositionWidth.W)))
     val meta:          AheadBtbMeta               = Output(new AheadBtbMeta)
     val debug_startPc: PrunedAddr                 = Output(PrunedAddr(VAddrBits))
+    val normalPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
   }
   val io: AheadBtbIO = IO(new AheadBtbIO)
 
@@ -106,9 +110,15 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val s0_previousStartPc = io.startPc
 
-  private val s0_setIdx   = getSetIndex(s0_previousStartPc)
-  private val s0_bankIdx  = getBankIndex(s0_previousStartPc)
-  private val s0_bankMask = UIntToOH(s0_bankIdx)
+  private val microTageHistLen = bpuParameters.utageParameters.TableInfos(0).HistoryLength
+  private val microTageNumSets = bpuParameters.utageParameters.TableInfos(0).NumSets
+  private val microTageIdxFhInfo =
+    new FoldedHistoryInfo(microTageHistLen, min(log2Ceil(microTageNumSets), microTageHistLen))
+  private val s0_simpleHash = io.normalPathHist.getHistWithInfo(microTageIdxFhInfo).foldedHist(3, 0)
+  private val s0_hashIndex  = s0_previousStartPc(log2Ceil(NumEntries / NumWays) - 1, 0) ^ s0_simpleHash
+  private val s0_setIdx     = s0_hashIndex(log2Ceil(NumEntries / NumWays) - 1, log2Ceil(NumBanks))
+  private val s0_bankIdx    = s0_hashIndex(log2Ceil(NumBanks) - 1, 0)
+  private val s0_bankMask   = UIntToOH(s0_bankIdx)
 
   banks.zipWithIndex.foreach { case (b, i) =>
     b.io.readReq.valid       := predictReqValid && s0_bankMask(i)

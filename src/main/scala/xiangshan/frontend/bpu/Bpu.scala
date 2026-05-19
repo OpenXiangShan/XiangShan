@@ -199,8 +199,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
 
   /* *** predictor specific inputs *** */
-  abtb.io.redirectValid := redirect.valid
-  abtb.io.overrideValid := s3_override
+  abtb.io.redirectValid  := redirect.valid
+  abtb.io.overrideValid  := s3_override
+  abtb.io.normalPathHist := phr.io.oldFoldedPhr
 
   // utage.io.foldedPathHist         := phr.io.oldFoldedPhr
   // utage.io.foldedPathHistForTrain := phr.io.trainFoldedPhr
