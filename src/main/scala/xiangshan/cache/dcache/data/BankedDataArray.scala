@@ -327,9 +327,9 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
   def dumpResp = {
     XSDebug(s"DataArray ReadeResp channel:\n")
     (0 until LoadPipelineWidth) map { r =>
-      XSDebug(s"cycle: $r data: %x\n", Mux(io.is128Req(r),
-        Cat(io.read_resp(r)(1).raw_data,io.read_resp(r)(0).raw_data),
-        io.read_resp(r)(0).raw_data))
+      val req128Data = Cat((0 until VLEN / DCacheSRAMRowBits).reverse.map(i => io.read_resp(r)(i).raw_data))
+      val data = Cat((0 until VLEN / DCacheSRAMRowBits / 2).reverse.map(i => io.read_resp(r)(i).raw_data))
+      XSDebug(s"cycle: $r data: %x\n", Mux(io.is128Req(r), req128Data, data))
     }
   }
 
@@ -690,6 +690,14 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val div_addrs_dup = Wire(Vec(LoadPipelineWidth, UInt()))
   val bank_addrs = Wire(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, UInt(log2Up(DCacheBanks).W))))
   val bank_addrs_dup = Wire(Vec(LoadPipelineWidth, Vec(VLEN/DCacheSRAMRowBits, UInt(log2Up(DCacheBanks).W))))
+  private def addrToVWordBankBase(addr: UInt): UInt = {
+    val bank = addr_to_dcache_bank(addr)
+    val vwordBankOffsetBits = log2Ceil(VLEN / DCacheSRAMRowBits)
+    Cat(
+      bank(log2Up(DCacheBanks) - 1, vwordBankOffsetBits),
+      0.U(vwordBankOffsetBits.W)
+    )
+  }
   val way_en_reg = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))
   val set_addrs_reg = Wire(Vec(LoadPipelineWidth, UInt()))
   val set_addrs_dup_reg = Wire(Vec(LoadPipelineWidth, UInt()))
@@ -713,13 +721,13 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   (0 until LoadPipelineWidth).map(rport_index => {
     div_addrs(rport_index) := addr_to_dcache_div(io.read(rport_index).bits.addr)
     div_addrs_dup(rport_index) := addr_to_dcache_div(io.read(rport_index).bits.addr_dup)
-    val bank_addr_base = addr_to_dcache_bank(io.read(rport_index).bits.addr)
-    val bank_addr_dup_base = addr_to_dcache_bank(io.read(rport_index).bits.addr_dup)
+    val bank_addr_vword_base = addrToVWordBankBase(io.read(rport_index).bits.addr)
+    val bank_addr_dup_vword_base = addrToVWordBankBase(io.read(rport_index).bits.addr_dup)
     (0 until VLEN/DCacheSRAMRowBits).foreach { bank_offset =>
       bank_addrs(rport_index)(bank_offset) :=
-        (bank_addr_base + bank_offset.U)(log2Up(DCacheBanks) - 1, 0)
+        (bank_addr_vword_base + bank_offset.U)(log2Up(DCacheBanks) - 1, 0)
       bank_addrs_dup(rport_index)(bank_offset) :=
-        (bank_addr_dup_base + bank_offset.U)(log2Up(DCacheBanks) - 1, 0)
+        (bank_addr_dup_vword_base + bank_offset.U)(log2Up(DCacheBanks) - 1, 0)
     }
     set_addrs(rport_index) := addr_to_dcache_div_set(io.read(rport_index).bits.addr)
     set_addrs_dup(rport_index) := addr_to_dcache_div_set(io.read(rport_index).bits.addr_dup)
