@@ -45,6 +45,7 @@ class PageTableModel:
         level: int = 0,
         asid: int = 0,
         vmid: int = 0,
+        pbmt: int = 0,
     ) -> None:
         self.pte_map[int(vpn)] = PTE(
             ppn=int(ppn),
@@ -59,6 +60,7 @@ class PageTableModel:
             level=int(level),
             asid=int(asid),
             vmid=int(vmid),
+            pbmt=int(pbmt),
         )
 
     def map_stage2_page(
@@ -76,6 +78,7 @@ class PageTableModel:
         d: int = 0,
         level: int = 0,
         vmid: int = 0,
+        pbmt: int = 0,
     ) -> None:
         self.stage2_pte_map[int(gvpn)] = PTE(
             ppn=int(ppn),
@@ -90,6 +93,7 @@ class PageTableModel:
             level=int(level),
             asid=0,
             vmid=int(vmid),
+            pbmt=int(pbmt),
         )
 
     def translate(self, va: int) -> Tuple[int, bool, dict]:
@@ -226,7 +230,7 @@ class PageTableModel:
             "s2_entry_tag": gvpn,
             "s2_entry_vmid": pte.vmid,
             "s2_entry_n": 0,
-            "s2_entry_pbmt": 0,
+            "s2_entry_pbmt": pte.pbmt,
             "s2_entry_perm_a": pte.a,
             "s2_entry_perm_g": pte.g,
             "s2_entry_perm_u": pte.u,
@@ -280,7 +284,7 @@ class PageTableModel:
             "s1_entry_asid": pte.asid,
             "s1_entry_vmid": pte.vmid,
             "s1_entry_n": 0,
-            "s1_entry_pbmt": 0,
+            "s1_entry_pbmt": pte.pbmt,
             "s1_entry_perm_a": pte.a,
             "s1_entry_perm_g": pte.g,
             "s1_entry_perm_u": pte.u,

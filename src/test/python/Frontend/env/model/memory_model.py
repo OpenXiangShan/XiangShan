@@ -29,6 +29,7 @@ class PTE:
     level: int = 0
     asid: int = 0
     vmid: int = 0
+    pbmt: int = 0
 
 
 class MemoryModel:
