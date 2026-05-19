@@ -118,13 +118,23 @@ class Ftq(implicit p: Parameters) extends FtqModule
   // perfQueue stores information for performance monitoring. These queues should not exist in hardware
   private val perfQueue = Reg(Vec(FtqSize, new PerfMeta))
 
+  private val (backendRedirectFtqIdxInAdvance, backendRedirect) = receiveBackendRedirect(io.fromBackend)
+
   private val specTopAddr = metaQueueRedirect(io.fromIfu.wbRedirect.bits.ftqIdx.value).ras.topRetAddr.toUInt
-  private val ifuRedirect = receiveIfuRedirect(io.fromIfu.wbRedirect, specTopAddr)
+  private val (ifuRedirectFtqIdxInAdvance, ifuRedirect) = receiveIfuRedirect(
+    io.fromIfu.wbRedirect,
+    specTopAddr,
+    backendRedirect.valid
+  )
 
-  private val (backendRedirectFtqIdx, backendRedirect) = receiveBackendRedirect(io.fromBackend)
+  // redirectFtqIdxInAdvance is always one cycle ahead of redirect
+  private val redirectFtqIdxInAdvance = Mux(
+    backendRedirectFtqIdxInAdvance.valid,
+    backendRedirectFtqIdxInAdvance.bits,
+    ifuRedirectFtqIdxInAdvance.bits
+  )
 
-  // Delay one cycle for timing considerations
-  private val redirect     = RegNext(Mux(backendRedirect.valid, backendRedirect, ifuRedirect))
+  private val redirect     = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
   private val redirectNext = RegNext(redirect)
 
   // Instruction page fault and instruction access fault are sent from backend with redirect requests.
@@ -354,7 +364,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.target    := redirect.bits.target
   io.toBpu.redirect.bits.taken     := redirect.bits.taken
   io.toBpu.redirect.bits.attribute := redirect.bits.attribute
-  io.toBpu.redirect.bits.meta      := metaQueueRedirect(redirect.bits.ftqIdx.value)
+  io.toBpu.redirect.bits.meta      := RegNext(metaQueueRedirect(redirectFtqIdxInAdvance.value))
   io.toBpu.redirectFromIFU         := ifuRedirect.valid
 
   resolveQueue.io.backendRedirect    := backendRedirect.valid
@@ -457,7 +467,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     PrunedAddrInit(redirect.bits.pc),
     redirect.bits.ftqOffset
   )._1
-  private val redirectPerfMeta = perfQueue(backendRedirectFtqIdx.bits.value).bpuPerf
+  private val redirectPerfMeta = perfQueue(backendRedirect.bits.ftqIdx.value).bpuPerf
   private val commitPerfMeta   = perfQueue(commitPtr(0).value)
 
   XSPerfSeqAccumulate(

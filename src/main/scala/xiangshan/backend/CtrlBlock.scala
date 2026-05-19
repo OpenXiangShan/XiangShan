@@ -44,8 +44,7 @@ import xiangshan.TopDownCounters._
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
   val redirect = Valid(new Redirect)
-  val ftqIdxAhead = Vec(BackendRedirectNum, Valid(new FtqPtr))
-  val ftqIdxSelOH = Valid(UInt((BackendRedirectNum).W))
+  val ftqIdxAhead = Valid(new FtqPtr)
 
   val resolve = Vec(backendParams.BrhCnt, Valid(new Resolve))
 
@@ -373,18 +372,10 @@ class CtrlBlockImp(
 
   io.frontend.toFtq.redirect.valid := s5_flushFromRobValid || s3_redirectGen.valid
   io.frontend.toFtq.redirect.bits := Mux(s5_flushFromRobValid, frontendFlushBits, s3_redirectGen.bits)
-  io.frontend.toFtq.ftqIdxSelOH.valid := s5_flushFromRobValid || redirectGen.io.stage2Redirect.valid
-  io.frontend.toFtq.ftqIdxSelOH.bits := Cat(s5_flushFromRobValid, redirectGen.io.stage2oldestOH & Fill(NumRedirect + 1, !s5_flushFromRobValid))
 
-  //jmp/brh, sel oldest first, only use one read port
-  io.frontend.toFtq.ftqIdxAhead(0).valid := oldestExuRedirect.valid && !s1_robFlushRedirect.valid && !s4_flushFromRobValidAhead
-  io.frontend.toFtq.ftqIdxAhead(0).bits := oldestExuRedirect.bits.ftqIdx
-  //loadreplay
-  io.frontend.toFtq.ftqIdxAhead(NumRedirect).valid := loadReplay.valid && !s1_robFlushRedirect.valid && !s4_flushFromRobValidAhead
-  io.frontend.toFtq.ftqIdxAhead(NumRedirect).bits := loadReplay.bits.ftqIdx
-  //exception
-  io.frontend.toFtq.ftqIdxAhead.last.valid := s4_flushFromRobValidAhead
-  io.frontend.toFtq.ftqIdxAhead.last.bits := frontendFlushBits.ftqIdx
+  // jmp/brh, sel oldest first
+  io.frontend.toFtq.ftqIdxAhead.valid := oldestExuRedirect.valid && !s1_robFlushRedirect.valid && !s4_flushFromRobValidAhead
+  io.frontend.toFtq.ftqIdxAhead.bits := oldestExuRedirect.bits.ftqIdx
 
   for (i <- 0 until CommitWidth) {
     val crc = io.frontend.toFtq.callRetCommit(i)

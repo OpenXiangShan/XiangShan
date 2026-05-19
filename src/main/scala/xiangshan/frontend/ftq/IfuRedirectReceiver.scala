@@ -23,12 +23,13 @@ import xiangshan.frontend.FrontendRedirect
 
 trait IfuRedirectReceiver extends HasFtqParameters {
   def receiveIfuRedirect(
-      wbRedirect:  Valid[FrontendRedirect],
-      specTopAddr: UInt
-  ): Valid[Redirect] = {
+      wbRedirect:      Valid[FrontendRedirect],
+      specTopAddr:     UInt,
+      backendRedirect: Bool
+  ): (Valid[FtqPtr], Valid[Redirect]) = {
     val redirect = WireInit(0.U.asTypeOf(Valid(new Redirect)))
 
-    redirect.valid          := wbRedirect.valid
+    redirect.valid          := wbRedirect.valid && !backendRedirect
     redirect.bits.ftqIdx    := wbRedirect.bits.ftqIdx
     redirect.bits.ftqOffset := wbRedirect.bits.ftqOffset
     redirect.bits.level     := RedirectLevel.flushAfter
@@ -37,6 +38,12 @@ trait IfuRedirectReceiver extends HasFtqParameters {
     redirect.bits.pc        := wbRedirect.bits.pc
     redirect.bits.target    := Mux(wbRedirect.bits.attribute.isReturn, specTopAddr, wbRedirect.bits.target)
     redirect.bits.taken     := wbRedirect.bits.taken
-    redirect
+    redirect.bits.isMisPred := true.B
+
+    val ftqIdx = Wire(Valid(new FtqPtr))
+    ftqIdx.valid := redirect.valid
+    ftqIdx.bits  := redirect.bits.ftqIdx
+
+    (ftqIdx, RegNext(redirect))
   }
 }
