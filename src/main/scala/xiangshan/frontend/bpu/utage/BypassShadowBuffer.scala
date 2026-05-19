@@ -101,10 +101,11 @@ class BypassShadowBuffer(
   private val a0_entryHit  = Wire(Vec(numEntry, Bool()))
   a0_entryHit := entries.map(e => (e.index === io.req.readIndex) && e.valid)
 
-  private val a0_chosenFirst = (a0_entryHit.asUInt & priorityMask).orR
-  private val a1_chosenFirst = RegNext(a0_chosenFirst, false.B)
-  private val a1_firstHit    = RegInit(VecInit(Seq.fill(numEntry)(false.B)))
-  private val a1_entryHit    = RegInit(VecInit(Seq.fill(numEntry)(false.B)))
+  private val a0_chosenFirstMask = a0_entryHit.asUInt & priorityMask
+  private val a1_chosenFirstMask = RegNext(a0_chosenFirstMask, 0.U(numEntry.W))
+  private val a1_chosenFirst     = a1_chosenFirstMask.orR
+  private val a1_firstHit        = RegInit(VecInit(Seq.fill(numEntry)(false.B)))
+  private val a1_entryHit        = RegInit(VecInit(Seq.fill(numEntry)(false.B)))
   a1_firstHit := (a0_entryHit.asUInt & priorityMask).asBools
   a1_entryHit := a0_entryHit
   private val a1_firstEntry  = ParallelPriorityMux(a1_firstHit.reverse, entryDataVec.reverse)

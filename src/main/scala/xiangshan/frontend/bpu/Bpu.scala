@@ -209,12 +209,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   utage.io.overrideValid  := s3_override
   utage.io.redirectValid  := redirect.valid
 
-  utage.io.normalPathHist   := phr.io.s1_foldedPhr
-  utage.io.redirectPathHist := phr.io.redirectOldFoldedPhr
+  utage.io.normalPathHist   := phr.io.oldFoldedPhr
+  utage.io.s1PathHist       := phr.io.s1_foldedPhr
   utage.io.overridePathHist := phr.io.s3_foldedPhr
 
-  utage.io.normalStartPc   := s1_prediction.target
-  utage.io.redirectStartPc := redirect.bits.target
+  utage.io.s1StartPc       := s1_prediction.target
   utage.io.overrideStartPc := s3_prediction.target
 
   // uras
