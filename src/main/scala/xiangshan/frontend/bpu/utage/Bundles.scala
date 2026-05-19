@@ -116,6 +116,8 @@ class MicroTageEntry(implicit p: Parameters) extends MicroTageBundle {
   val tag:         UInt            = UInt(MaxTagLen.W)
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
   val takenCtr:    SaturateCounter = TakenCounter()
+  // Placeholder, tied to 0.U, only for padding to even bit width.
+  val dummy: UInt = UInt(1.W)
 }
 
 class MicroTageUpdateInfo(implicit p: Parameters) extends MicroTageBundle {

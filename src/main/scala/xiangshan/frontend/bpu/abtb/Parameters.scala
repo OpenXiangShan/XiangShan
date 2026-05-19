@@ -16,6 +16,8 @@
 package xiangshan.frontend.bpu.abtb
 
 import chisel3.util._
+import scala.math.min
+import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HasBpuParameters
 
 case class AheadBtbParameters(
@@ -47,4 +49,17 @@ trait HasAheadBtbParameters extends HasBpuParameters {
   def TakenCounterWidth:    Int = abtbParameters.TakenCounterWidth
 
   def EnableTargetFix: Boolean = abtbParameters.EnableTargetFix
+
+  // Bit width participating in the index hash, used to disperse hot branches and bias bank conflicts.
+  def AheadBtbHashBitWidth: Int = 4
+
+  // Reuse the folded PHR component already maintained for MicroTage table 0.
+  // ABTB only uses it for index dispersion.
+  def AbtbHashFhInfo: FoldedHistoryInfo = {
+    val tableInfo     = bpuParameters.utageParameters.TableInfos.head
+    val historyLength = tableInfo.HistoryLength
+    val foldedLength  = min(log2Ceil(tableInfo.NumSets), historyLength)
+    require(AheadBtbHashBitWidth <= foldedLength)
+    new FoldedHistoryInfo(historyLength, foldedLength)
+  }
 }
