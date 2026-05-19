@@ -215,23 +215,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     VecInit.tabulate(NumWays)(w => s1_bwResp.map(entry => getPercsum(entry(w).ctr.value)).reduce(_ +& _))
 
   private val s1_imliPercsum = VecInit(s1_imliResp.map(entry => getPercsum(entry.ctr.value)))
-
   private val s1_biasPercsum = VecInit(s1_biasResp.map(entry => getPercsum(entry.ctr.value)))
-
-  private val s1_mergePercsum = VecInit(s1_mergeResp.map(entries =>
-    VecInit(entries.map(entry => getPercsum(entry.ctr.value)))
-  ))
-  require(
-    s1_mergePercsum.length == NumPathTables + NumGlobalTables + NumBWTables + NumImliTable,
-    s"s1_mergePercsum length ${s1_mergePercsum.length} != " +
-      s"NumPathTables + NumGlobalTables + NumBWTable +NumImliTable ${NumPathTables + NumGlobalTables + NumBWTables + NumImliTable}"
-  )
-  // Calculate sumPercsum without bias in advance
-  private val s1_sumPercsum = VecInit.tabulate(NumWays)(j => ParallelSingedExpandingAdd(s1_mergePercsum.map(_(j))))
-  require(
-    s1_sumPercsum.length == NumWays,
-    s"s1_sumPercsum length ${s1_sumPercsum.length} != NumWays $NumWays"
-  )
 
   /*
    *  predict pipeline stage 2
@@ -240,12 +224,14 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_startPc = RegEnable(s1_startPc, s1_fire)
 
   private val s2_biasPercsum = VecInit(s1_biasPercsum.map(RegEnable(_, s1_fire)))
-  private val s2_sumPercsum  = VecInit(s1_sumPercsum.map(RegEnable(_, s1_fire)))
 
-  private val s2_bwPercsum     = VecInit(s1_bwPercsum.map(RegEnable(_, s1_fire)))     // for performance counter
-  private val s2_imliPercsum   = VecInit(s1_imliPercsum.map(RegEnable(_, s1_fire)))   // for performance counter
-  private val s2_pathPercsum   = VecInit(s1_pathPercsum.map(RegEnable(_, s1_fire)))   // for performance counter
-  private val s2_globalPercsum = VecInit(s1_globalPercsum.map(RegEnable(_, s1_fire))) // for performance counter
+  private val s2_bwPercsum     = VecInit(s1_bwPercsum.map(RegEnable(_, s1_fire)))
+  private val s2_imliPercsum   = VecInit(s1_imliPercsum.map(RegEnable(_, s1_fire)))
+  private val s2_pathPercsum   = VecInit(s1_pathPercsum.map(RegEnable(_, s1_fire)))
+  private val s2_globalPercsum = VecInit(s1_globalPercsum.map(RegEnable(_, s1_fire)))
+
+  private val s2_mergePercsum = Seq(s2_pathPercsum, s2_globalPercsum, s2_bwPercsum, s2_imliPercsum)
+  private val s2_sumPercsum   = VecInit.tabulate(NumWays)(j => ParallelSingedExpandingAdd(s2_mergePercsum.map(_(j))))
 
   private val s2_mbtbResult        = io.mbtbResult
   private val s2_providerTakenMask = VecInit(io.providerTakenCtrs.map(_.bits.isPositive))
