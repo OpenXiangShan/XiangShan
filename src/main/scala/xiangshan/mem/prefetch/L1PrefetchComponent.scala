@@ -366,7 +366,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     val req = new L1PrefetchReq
     val debug_vaddr = UInt(VAddrBits.W)
   }, MLP_L1_SIZE))
-  val l2_pf_req_arb = Module(new RRArbiterInit(new Bundle {
+  val l2_pf_req_arb = Module(new TwoLevelRRArbiter(new Bundle {
     val req = new L2PrefetchReq
     val debug_vaddr = UInt(VAddrBits.W)
   }, MLP_L2L3_SIZE))
