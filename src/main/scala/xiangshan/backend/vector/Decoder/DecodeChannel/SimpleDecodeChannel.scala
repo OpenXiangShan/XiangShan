@@ -36,13 +36,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
 
   val rawInst = in.rawInst
   val instFields = rawInst.asTypeOf(new XSInstBitFields)
-  val rdZero = instFields.RD === 0.U
 
   val patterns = instSeq
-  val patternsRd: Seq[DecodePatternComb2[InstPattern, RdZeroPattern]] = instSeq.flatMap {
-    case p if p.hasRd => Seq(true, false).map(b => p ## RdZeroPattern(Some(b)))
-    case p if !p.hasRd => Seq(p ## RdZeroPattern(None))
-  }
 
   val uopInfoFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new UopInfoField(i))
   val opcodeFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new OpcodeField(i))
@@ -58,37 +53,36 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     NumUopOhField,
     NeedFsField,
     PrivExceptionCauseField,
+    NumWbField,
   )
 
   println(s"The length of DecodeTable in SimpleDecodeChannel: ${patterns.length}")
   val table = new DecodeTable(patterns, fields)
-  val instRdTable = new DecodeTable(patternsRd, Seq(NumWbField))
 
   // Get the decode result by generating a decode table by programming logic array (pla)
   val result = table.decode(in.rawInst)
-  val resultInstRd = instRdTable.decode(in.rawInst ## rdZero)
 
   val uopInfos = uopInfoFields.map(field => result(field))
   val opcodes = opcodeFields.map(field => result(field))
   val fuTypes = fuTypeFields.map(field => result(field))
 
-  val selImm = result(SelImmField)
+  val frmRen         = result(FrmRenField)
+  val fflagsWen      = result(FFlagsWenField)
+  val selImm         = result(SelImmField)
+  val commitType     = result(CommitTypeField)
+  val canRobCompress = result(CanRobCompressField)
+  val numUop         = result(NumUopField)
+  val numUopOH       = result(NumUopOhField)
+  val needFs         = result(NeedFsField)
+  val privCause      = result(PrivExceptionCauseField)
+  val numWb          = result(NumWbField)
+
+  dontTouch(privCause)
 
   val imm = LookupTree(selImm.bits, ImmUnion.immSelMap.map {
     case (sel, enum) =>
       sel -> enum.minBitsFromInstr(in.rawInst).ensuring(_.getWidth == enum.len)
   })
-
-  val numUop = result(NumUopField)
-  val numUopOH = result(NumUopOhField)
-  dontTouch(numUop)
-  dontTouch(numUopOH)
-
-  val needFs = result(NeedFsField)
-  val privCause = result(PrivExceptionCauseField)
-
-  dontTouch(privCause)
-
 
   val fsOffExceptionII = in.fromCSR.illegalInst.fsIsOff && needFs
 
@@ -126,16 +120,16 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     out.uop(i).bits.lsrc1 := instFields.RS1
     out.uop(i).bits.lsrc2 := instFields.RS2
     out.uop(i).bits.lsrc3 := instFields.FS3
-    out.uop(i).bits.frmRen := result(FrmRenField)
-    out.uop(i).bits.fflagsWen := result(FFlagsWenField)
+    out.uop(i).bits.frmRen := frmRen
+    out.uop(i).bits.fflagsWen := fflagsWen
     out.uop(i).bits.ldest := instFields.RD
     out.uop(i).bits.frm := instFields.RM
     out.uop(i).bits.frmIll := instFields.RM === 5.U || instFields.RM === 6.U
     out.uop(i).bits.selImm := selImm
     out.uop(i).bits.imm := imm
-    out.uop(i).bits.commitType := result(CommitTypeField)
-    out.uop(i).bits.canRobCompress := result(CanRobCompressField)
-    out.uop(i).bits.numWb := resultInstRd(NumWbField)
+    out.uop(i).bits.commitType := commitType
+    out.uop(i).bits.canRobCompress := canRobCompress
+    out.uop(i).bits.numWb := numWb
     out.uop(i).bits.uopIdx := i.U
     out.uop(i).bits.isFirstUop := (i == 0).B
     out.uop(i).bits.isLastUop := i.U === numUop
@@ -143,7 +137,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     out.uop(i).bits.exceptionVI := privExceptionVI
   }
 
-  out.uopNumOH := result(NumUopOhField)
+  out.uopNumOH := numUopOH
 }
 
 object SimpleDecodeChannel {

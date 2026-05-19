@@ -13,10 +13,10 @@ import xiangshan.backend.decode.opcode.Opcode.FDivOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FMacOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FMiscOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.FenceOpcodes._
-import xiangshan.backend.decode.opcode.Opcode.NewJmpOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.LinkOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.LduOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.MulOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.NewJmpOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.StuOpcodes._
 import xiangshan.backend.decode.opcode.Opcode._
 import xiangshan.backend.decode.opcode.OpcodeTraits._
@@ -83,20 +83,8 @@ object ScalaUopTable {
     )
 
     val tableJumpLink = JumpLinkType.mapUopcodes(
-      // _.JAL     -> Seq(j, link),
-      // _.JALR    -> Seq(jr, link),
-      _.JAL_RD_1XXXX  -> Seq(j, link),
-      _.JAL_RD_01XXX  -> Seq(j, link),
-      _.JAL_RD_001XX  -> Seq(j, link),
-      _.JAL_RD_0001X  -> Seq(j, link),
-      _.JAL_RD_00001  -> Seq(j, link),
-      _.JAL_RD_ZERO   -> Seq(j),
-      _.JALR_RD_1XXXX -> Seq(jr, link),
-      _.JALR_RD_01XXX -> Seq(jr, link),
-      _.JALR_RD_001XX -> Seq(jr, link),
-      _.JALR_RD_0001X -> Seq(jr, link),
-      _.JALR_RD_00001 -> Seq(jr, link),
-      _.JALR_RD_ZERO  -> Seq(jr),
+      _.JAL     -> Seq(j, link),
+      _.JALR    -> Seq(jr, link),
     )
 
     tableI64Type ++ tableIType ++ tableJumpLink

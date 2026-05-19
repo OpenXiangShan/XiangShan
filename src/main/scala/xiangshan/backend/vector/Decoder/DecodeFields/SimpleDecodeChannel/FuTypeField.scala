@@ -28,8 +28,8 @@ class FuTypeField(uopIdx: Int) extends DecodeField[InstPattern, UInt]{
         uop.factory match {
           case _: Opcode.AluOpcodes.type => FuType.alu.U
           case _: Opcode.BruOpcodes.type => FuType.brh.U
-          case _: Opcode.NewJmpOpcodes.type => FuType.njmp.U
           case _: Opcode.LinkOpcodes.type => FuType.link.U
+          case _: Opcode.NewJmpOpcodes.type => FuType.njmp.U
           case _: Opcode.MulOpcodes.type => FuType.mul.U
           case _: Opcode.DivOpcodes.type => FuType.div.U
           case _: Opcode.LduOpcodes.type => FuType.ldu.U

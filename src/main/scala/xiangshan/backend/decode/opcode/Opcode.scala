@@ -18,6 +18,8 @@ object Opcode {
     val opcodes = Seq(
       AluOpcodes,
       BruOpcodes,
+      LinkOpcodes,
+      NewJmpOpcodes,
       MulOpcodes,
       DivOpcodes,
       LsuOpcodes,
@@ -388,8 +390,8 @@ object Opcode {
   }
 
   object NewJmpOpcodes extends Opcodes {
-    val j  = Value(bb"111_1100")
-    val jr = Value(bb"111_1101") + Src1Gp
+    val j  = Value(bb"111_1100")          + Src2Imm(DecodeSelImm.UJ) + CannotRobCompress
+    val jr = Value(bb"111_1101") + Src1Gp + Src2Imm(DecodeSelImm.I)  + CannotRobCompress
 
     def jumpUopisjr(op: UInt) = op(0)
   }
@@ -1076,8 +1078,8 @@ object Opcode {
 
   val ALUOpType = AluOpcodes
   val BRUOpType = BruOpcodes
-  val NewJumpOpType = NewJmpOpcodes
   val LinkOpType = LinkOpcodes
+  val NewJumpOpType = NewJmpOpcodes
   val FenceOpType = FenceOpcodes
   val MULOpType = MulOpcodes
   val DIVOpType = DivOpcodes
