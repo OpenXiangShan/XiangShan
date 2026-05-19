@@ -2682,8 +2682,8 @@ class BackendModel:
         if context_rank < 0 or context_rank >= int(self.ftq_size):
             return False
         if context_rank == 0:
-            return True
-        return context_rank <= candidate_rank
+            return False
+        return context_rank < candidate_rank
 
     def _pending_target_redirect_blocks_commit(self, ftq_flag: int, ftq_value: int) -> bool:
         if (
@@ -2698,7 +2698,7 @@ class BackendModel:
         if pending_rank is None:
             return False
         if self._candidate_is_pending_level0_target(int(ftq_flag), int(ftq_value)):
-            return True
+            return False
         return candidate_rank >= int(pending_rank)
 
     def _mark_ftq_redirect_pending(self, ftq_flag: int, ftq_value: int) -> None:
