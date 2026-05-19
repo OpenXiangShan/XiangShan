@@ -162,6 +162,7 @@ class UncacheAgent:
                 cycle,
                 "handshake.uncache_d",
                 {
+                    "address": int(item.addr),
                     "response_count": int(self.resp_count),
                     "denied": int(item.denied),
                     "corrupt": int(item.corrupt),

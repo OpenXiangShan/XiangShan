@@ -108,6 +108,10 @@ class FunctionalCoverageRecorder:
         self._backend_block_start_cycle: Optional[int] = None
         self._last_ibuffer_state: Optional[str] = None
         self._last_ftq_state: Optional[str] = None
+        self._uncache_last_a: Optional[dict] = None
+        self._uncache_recent_a_events: deque[dict] = deque(maxlen=16)
+        self._uncache_last_pending_redirect_cycle: Optional[int] = None
+        self._uncache_wfi_start_req_count: Optional[int] = None
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
 
@@ -208,6 +212,9 @@ class FunctionalCoverageRecorder:
             self._last_fetch_path = "mmio_uncache"
             self._last_fetch_cycle = cycle
             self.mark("fetch_path_type", "mmio_uncache", cycle, {"event": event_type, "payload": payload})
+            self._sample_uncache_a_event(cycle, payload)
+        elif event_type == "handshake.uncache_d":
+            self._sample_uncache_d_event(cycle, payload)
         elif event_type == "handshake.ptw_req":
             self._ptw_req_pending += 1
             self.mark("itlb_result_type", "miss", cycle, {"event": event_type, "payload": payload})
@@ -216,8 +223,11 @@ class FunctionalCoverageRecorder:
         elif event_type == "backend.redirect":
             redirect_bin = self._classify_redirect_reason(str(payload.get("reason", "")))
             self.mark("redirect_type", redirect_bin, cycle, {"event": event_type, "payload": payload})
+            self._sample_uncache_redirect_event(cycle, payload)
         elif event_type == "backend.can_accept":
             self._handle_can_accept_event(cycle, payload)
+        elif event_type == "backend.wfi_req":
+            self._handle_wfi_req_event(cycle, payload)
 
     def on_cycle(self, cycle: int, env) -> None:
         dut = env.dut
@@ -249,6 +259,7 @@ class FunctionalCoverageRecorder:
             )
 
         self._sample_ibuffer_state(dut, cycle, env)
+        self._sample_uncache_cycle_state(dut, cycle, env)
         sample_ftq_coverage(self, env, cycle)
 
         if self._read_dut_signal(dut, "io_backend_toFtq_redirect_valid", 0) == 1:
@@ -474,6 +485,112 @@ class FunctionalCoverageRecorder:
                 {"blocked_cycles": blocked_cycles, "event": "backend.can_accept"},
             )
         self._backend_block_start_cycle = None
+
+    def _sample_uncache_a_event(self, cycle: int, payload: Dict[str, Any]) -> None:
+        addr = int(payload.get("address", 0))
+        corrupt = int(payload.get("corrupt", 0))
+        denied = int(payload.get("denied", 0))
+        evidence = {"event": "handshake.uncache_a", "address": addr, "corrupt": corrupt, "denied": denied}
+
+        self.mark("uncache_req_state", "normal_fire", cycle, evidence)
+
+        last = self._uncache_last_a
+        if last is not None and addr == int(last.get("address", -16)) + 8 and int(last.get("denied", 0)) == 1:
+            self.mark(
+                "uncache_resend_flow",
+                "first_denied_resend",
+                cycle,
+                {**evidence, "first_address": int(last.get("address", 0))},
+            )
+
+        self._uncache_last_a = evidence
+        self._uncache_recent_a_events.append(evidence)
+
+    def _sample_uncache_d_event(self, cycle: int, payload: Dict[str, Any]) -> None:
+        addr = int(payload.get("address", 0))
+        corrupt = int(payload.get("corrupt", 0))
+        denied = int(payload.get("denied", 0))
+        evidence = {"event": "handshake.uncache_d", "address": addr, "corrupt": corrupt, "denied": denied}
+
+        if corrupt == 1:
+            self.mark("uncache_resp_type", "corrupt", cycle, evidence)
+        elif denied == 1:
+            self.mark("uncache_resp_type", "denied", cycle, evidence)
+        else:
+            self.mark("uncache_resp_type", "clean", cycle, evidence)
+
+        first = next(
+            (item for item in reversed(self._uncache_recent_a_events) if addr == int(item.get("address", -16)) + 8),
+            None,
+        )
+        if (corrupt == 1 or denied == 1) and first is not None:
+            self.mark(
+                "uncache_resend_flow",
+                "second_beat_fault",
+                cycle,
+                {**evidence, "first_address": int(first.get("address", 0))},
+            )
+
+        if (corrupt == 1 or denied == 1) and self._uncache_last_pending_redirect_cycle is not None:
+            if 0 <= cycle - int(self._uncache_last_pending_redirect_cycle) <= 128:
+                self.mark(
+                    "uncache_flush_flow",
+                    "redirect_flush_fault",
+                    cycle,
+                    {**evidence, "redirect_cycle": int(self._uncache_last_pending_redirect_cycle)},
+                )
+
+    def _sample_uncache_redirect_event(self, cycle: int, payload: Dict[str, Any]) -> None:
+        if self.env is None or getattr(self.env, "uncache_agent", None) is None:
+            return
+        stats = self.env.uncache_agent.get_stats()
+        pending = int(stats.get("pending", 0))
+        if pending <= 0:
+            return
+
+        evidence = {"event": "backend.redirect", "pending": pending, "payload": payload}
+        self.mark("uncache_flush_flow", "redirect_flush_pending", cycle, evidence)
+        if self._uncache_last_pending_redirect_cycle is not None:
+            if 0 <= cycle - int(self._uncache_last_pending_redirect_cycle) <= 16:
+                self.mark(
+                    "uncache_flush_flow",
+                    "consecutive_redirect_pending",
+                    cycle,
+                    {**evidence, "previous_redirect_cycle": int(self._uncache_last_pending_redirect_cycle)},
+                )
+        self._uncache_last_pending_redirect_cycle = cycle
+
+    def _handle_wfi_req_event(self, cycle: int, payload: Dict[str, Any]) -> None:
+        value = int(payload.get("value", 0))
+        if self.env is None or getattr(self.env, "uncache_agent", None) is None:
+            return
+
+        req_count = int(self.env.uncache_agent.get_stats().get("req_count", 0))
+        if value == 1:
+            self._uncache_wfi_start_req_count = req_count
+            return
+
+        if self._uncache_wfi_start_req_count is None:
+            return
+        if req_count == int(self._uncache_wfi_start_req_count):
+            self.mark(
+                "uncache_req_state",
+                "wfi_blocked",
+                cycle,
+                {"event": "backend.wfi_req", "start_req_count": int(self._uncache_wfi_start_req_count)},
+            )
+        self._uncache_wfi_start_req_count = None
+
+    def _sample_uncache_cycle_state(self, dut, cycle: int, env) -> None:
+        if getattr(env, "uncache_if", None) is None:
+            return
+        try:
+            a_valid = int(env.uncache_if.a_valid.value)
+            a_ready = int(env.uncache_if.a_ready.value)
+        except Exception:
+            return
+        if a_valid == 1 and a_ready == 0:
+            self.mark("uncache_req_state", "a_ready_backpressure", cycle, {"event": "cycle.uncache_a_stall"})
 
     def _sample_ibuffer_state(self, dut, cycle: int, env) -> None:
         if self._reset_release_cycle is None:
