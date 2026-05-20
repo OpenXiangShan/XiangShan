@@ -1864,7 +1864,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // max commit-stuck cycle
   val mmioBusy = io.lsq.mmioBusy // lsq know uncache request is rob head
-  val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !mmioBusy
+  val commitStuck = (!io.commits.commitValid.reduce(_ || _) || !io.commits.isCommit) && !mmioBusy && (wfiResume.B || !hasWFI)
   val commitStuckCounter = Module(new CommitStuckCounter(
     width = log2Up(maxCommitStuck),
     forceEnable = (env.EnableDifftest || env.FullBasicDiff).B
