@@ -28,6 +28,10 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   class CommonHRIO extends CommonHRBundle {
     val stageCtrl:     StageCtrl           = Input(new StageCtrl)
     val s1_imliTaken:  Bool                = Input(Bool())
+    val s2StartPc:     PrunedAddr          = Input(PrunedAddr(VAddrBits))
+    val s2CondHitMask: Vec[Bool]           = Input(Vec(NumBtbResultEntries, Bool()))
+    val s2Position:    Vec[UInt]           = Input(Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)))
+    val s2Targets:     Vec[PrunedAddr]     = Input(Vec(NumBtbResultEntries, PrunedAddr(VAddrBits)))
     val update:        CommonHRUpdate      = Input(new CommonHRUpdate)
     val redirect:      CommonHRRedirect    = Input(new CommonHRRedirect)
     val s0_imli:       UInt                = Output(UInt(ImliHistoryLength.W))
@@ -87,31 +91,73 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val s3_update = io.update // bp pipeline s3 level update
   private val s3_taken  = s3_update.taken
 
+  private val s2_hitMask          = dedupHitPositions(io.s2CondHitMask, io.s2Position)
+  private val s2_numHit           = PopCount(s2_hitMask)
+  private val s2_bwTakenCandidate = Wire(Vec(NumBtbResultEntries, Bool()))
+  private val s2_numLessCandidate = Wire(Vec(NumBtbResultEntries, UInt(log2Ceil(NumBtbResultEntries + 1).W)))
+
+  for (i <- 0 until NumBtbResultEntries) {
+    val pos    = io.s2Position(i)
+    val target = io.s2Targets(i)
+    val lessThanCurrent = VecInit(io.s2Position.zip(s2_hitMask).map { case (otherPos, hit) =>
+      hit && (otherPos < pos)
+    })
+    val currentCfiPc = getCfiPcFromPosition(io.s2StartPc, pos)
+
+    s2_numLessCandidate(i) := PopCount(lessThanCurrent)
+    s2_bwTakenCandidate(i) := isBackwardBranch(currentCfiPc, target)
+  }
+
   // deduplicate hit positions
-  private val s3_hitMask          = dedupHitPositions(s3_update.condHitMask, s3_update.position)
+  private val s3_hitMask          = RegEnable(s2_hitMask, s2_fire)
   private val s3_firstTakenPos    = s3_update.firstTakenBranch.bits.cfiPosition
   private val s3_firstTakenIsCond = s3_update.firstTakenBranch.bits.attribute.isConditional
   private val s3_cfiPc            = getCfiPcFromPosition(s3_update.startPc, s3_firstTakenPos)
+  private val s3_bwTakenDiff      = WireInit(false.B)
   private val s3_bwTaken          = isBackwardBranch(s3_cfiPc, s3_update.target)
-  private val s3_lessThanFirstTaken = s3_update.position.zip(s3_hitMask).map {
-    case (pos, hit) => hit && (pos < s3_firstTakenPos)
-  }
-  // NOTE: Usually, the maximum value of GhrShamt is NumBtbResultEntries, but in reality, the maximum value is NumBtbResultEntries+ 1
-  private val s3_numLess     = PopCount(s3_lessThanFirstTaken)
-  private val s3_numHit      = PopCount(s3_hitMask)
-  private val s3_newCommonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
 
-  s3_newCommonHR.valid           := s3_fire
-  s3_newCommonHR.predStartPc.get := s3_update.startPc
-  s3_newCommonHR.ghr := getNewHR(commonHR.ghr, s3_numLess, s3_numHit, s3_taken, s3_firstTakenIsCond)(GhrHistoryLength)
-  s3_newCommonHR.bw := getNewHR(
-    commonHR.bw,
-    s3_numLess,
-    s3_numHit,
-    s3_taken,
-    s3_firstTakenIsCond,
-    Option(s3_taken && s3_bwTaken)
-  )(BWHistoryLength)
+  // NOTE: Usually, the maximum value of GhrShamt is NumBtbResultEntries, but in reality, the maximum value is NumBtbResultEntries+ 1
+  private val s3_numLessCandidate = RegEnable(s2_numLessCandidate, s2_fire)
+  private val s3_numHit           = RegEnable(s2_numHit, s2_fire)
+  private val s3_newCommonHR      = WireInit(0.U.asTypeOf(new CommonHREntry))
+
+  private val s3_defaultCommonHR  = WireInit(0.U.asTypeOf(new CommonHREntry))
+  private val s3_takenCommonHR    = Wire(Vec(NumBtbResultEntries, new CommonHREntry))
+  private val s3_bwTakenCandidate = RegEnable(s2_bwTakenCandidate, s2_fire)
+
+  private val s3_selectedTakenCommonHR = Mux1H(s3_update.firstTakenBranchOH, s3_takenCommonHR)
+  s3_bwTakenDiff := Mux1H(s3_update.firstTakenBranchOH, s3_bwTakenCandidate)
+  XSError(
+    s3_override && s3_taken && s3_firstTakenIsCond && s3_bwTaken =/= s3_bwTakenDiff,
+    "s3_bwTaken is not equal s3_bwTakenDiff"
+  )
+
+  s3_takenCommonHR.foreach(_ := 0.U.asTypeOf(new CommonHREntry))
+  for (i <- 0 until NumBtbResultEntries) {
+    val candidate      = s3_takenCommonHR(i)
+    val isCond         = s3_update.attributes(i).isConditional
+    val numLessCurrent = s3_numLessCandidate(i)
+    val currentBwTaken = s3_bwTakenCandidate(i)
+    candidate.valid           := s3_fire
+    candidate.predStartPc.get := s3_update.startPc
+    candidate.ghr             := getNewHR(commonHR.ghr, numLessCurrent, s3_numHit, s3_taken, isCond)(GhrHistoryLength)
+    candidate.bw := getNewHR(
+      commonHR.bw,
+      numLessCurrent,
+      s3_numHit,
+      s3_taken,
+      isCond,
+      Option(s3_taken && isCond && currentBwTaken)
+    )(BWHistoryLength)
+  }
+
+  s3_defaultCommonHR.valid           := s3_fire
+  s3_defaultCommonHR.predStartPc.get := s3_update.startPc
+  s3_defaultCommonHR.ghr             := (commonHR.ghr << s3_numHit)(GhrHistoryLength - 1, 0)
+  s3_defaultCommonHR.bw              := (commonHR.bw << s3_numHit)(BWHistoryLength - 1, 0)
+
+  XSError(s3_fire && s3_taken && !s3_update.firstTakenBranchOH.reduce(_ || _), "taken but no firstTakenBranchOH")
+  s3_newCommonHR := Mux(s3_taken, s3_selectedTakenCommonHR, s3_defaultCommonHR)
 
   /*
    * Directly resume and update commonHR after redirection for debugging
@@ -325,13 +371,10 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   dontTouch(recoverInc)
 
   if (EnableCommitGHistDiff) {
-    val s3_lessThanFirstTakenUInt = s3_lessThanFirstTaken.asUInt
-    val r1_lessThanPcUInt         = r1_lessThanPc.asUInt
-    val ghrUInt                   = commonHR.ghr.asUInt
-    val bwUInt                    = commonHR.bw.asUInt
-    dontTouch(s3_numLess)
+    val r1_lessThanPcUInt = r1_lessThanPc.asUInt
+    val ghrUInt           = commonHR.ghr.asUInt
+    val bwUInt            = commonHR.bw.asUInt
     dontTouch(s3_newCommonHR)
-    dontTouch(s3_lessThanFirstTakenUInt)
     dontTouch(r1_numLess)
     dontTouch(r1_commonHR)
     dontTouch(r1_lessThanPcUInt)

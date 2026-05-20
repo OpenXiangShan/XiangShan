@@ -540,22 +540,29 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     s1_prediction.taken && s1_prediction.attribute.isConditional &&
       (s1_cfiPc.addr(CompareAddrLowWidth - 1, 0) > s1_prediction.target.addr(CompareAddrLowWidth - 1, 0))
 
-  commonHR.io.stageCtrl               := stageCtrl
-  commonHR.io.s0_startPc.get          := s0_startPc
-  commonHR.io.s1_imliTaken            := s1_imliTaken
-  commonHR.io.update.startPc          := s3_startPc
-  commonHR.io.update.target           := s3_prediction.target
-  commonHR.io.update.taken            := s3_taken
-  commonHR.io.update.s3Override       := s3_override
-  commonHR.io.update.firstTakenBranch := s3_firstTakenBranch
-  commonHR.io.update.position         := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
-  commonHR.io.update.condHitMask      := s3_condHitMask
-  commonHR.io.redirect.valid          := redirect.valid
-  commonHR.io.redirect.cfiPc          := redirect.bits.cfiPc
-  commonHR.io.redirect.target         := redirect.bits.target
-  commonHR.io.redirect.taken          := redirect.bits.taken
-  commonHR.io.redirect.attribute      := redirect.bits.attribute
-  commonHR.io.redirect.meta           := redirect.bits.meta.commonHRMeta
+  commonHR.io.stageCtrl                 := stageCtrl
+  commonHR.io.s0_startPc.get            := s0_startPc
+  commonHR.io.s1_imliTaken              := s1_imliTaken
+  commonHR.io.s2StartPc                 := s2_startPc
+  commonHR.io.s2CondHitMask             := VecInit(mbtb.io.result.map(e => e.valid && e.bits.attribute.isConditional))
+  commonHR.io.s2Position                := VecInit(mbtb.io.result.map(_.bits.cfiPosition))
+  commonHR.io.s2Targets                 := VecInit(mbtb.io.result.map(_.bits.target))
+  commonHR.io.update.startPc            := s3_startPc
+  commonHR.io.update.target             := s3_prediction.target
+  commonHR.io.update.taken              := s3_taken
+  commonHR.io.update.s3Override         := s3_override
+  commonHR.io.update.attributes         := VecInit(s3_mbtbResult.map(_.bits.attribute))
+  commonHR.io.update.targets            := VecInit(s3_mbtbResult.map(_.bits.target))
+  commonHR.io.update.firstTakenBranchOH := s3_firstTakenBranchOH
+  commonHR.io.update.firstTakenBranch   := s3_firstTakenBranch
+  commonHR.io.update.position           := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
+  commonHR.io.update.condHitMask        := s3_condHitMask
+  commonHR.io.redirect.valid            := redirect.valid
+  commonHR.io.redirect.cfiPc            := redirect.bits.cfiPc
+  commonHR.io.redirect.target           := redirect.bits.target
+  commonHR.io.redirect.taken            := redirect.bits.taken
+  commonHR.io.redirect.attribute        := redirect.bits.attribute
+  commonHR.io.redirect.meta             := redirect.bits.meta.commonHRMeta
 
   // Power-on reset
   private val powerOnResetState = RegInit(true.B)
