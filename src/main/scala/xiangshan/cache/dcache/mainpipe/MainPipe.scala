@@ -641,33 +641,23 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s3_word_bank_base = wordBankBase(s3_req.word_idx)
   val s3_quad_word_bank_base = quadWordBankBase(s3_req.quad_word_idx)
-  val s3_data_word = assembleBankData(
-    s3_store_data_merged,
-    s3_word_bank_base,
-    DCacheWordBytes / DCacheSRAMRowBytes
-  )
-  val s3_data_quad_word = assembleBankData(
-    s3_store_data_merged,
-    s3_quad_word_bank_base,
-    QuadWordBytes / DCacheSRAMRowBytes
-  )
-  val s3_data_quad_low_word = assembleBankData(
-    s3_store_data_merged,
-    s3_quad_word_bank_base,
-    DCacheWordBytes / DCacheSRAMRowBytes
-  )
-  val s3_data_quad_high_word = assembleBankData(
-    s3_store_data_merged,
-    (s3_quad_word_bank_base + (DCacheWordBytes / DCacheSRAMRowBytes).U)(log2Up(DCacheBanks) - 1, 0),
-    DCacheWordBytes / DCacheSRAMRowBytes
-  )
-  val s3_data_non_casq_resp = Mux(
-    s3_req.word_idx(0),
-    Cat(s3_data_word, s3_data_quad_low_word),
-    Cat(s3_data_quad_high_word, s3_data_word)
-  )
+  val s3_data_words = VecInit((0 until blockWords).map(i => {
+    assembleBankData(
+      s3_store_data_merged,
+      wordBankBase(i.U(log2Up(blockWords).W)),
+      DCacheWordBytes / DCacheSRAMRowBytes
+    )
+  }))
+  val s3_data_word = s3_data_words(s3_req.word_idx)
+  val s3_data_quad_word = VecInit((0 until blockWords).map(i => {
+    if (i == blockWords - 1) {
+      Cat(0.U(DCacheWordBits.W), s3_data_words(i))
+    } else {
+      Cat(s3_data_words(i + 1), s3_data_words(i))
+    }
+  }))(s3_req.word_idx)
+  val s3_amo_resp_data = s3_data_quad_word
   val s3_data_line = Cat((0 until DCacheBanks).reverse.map(i => s3_data(i)))
-  val s3_amo_resp_data = Mux(isAMOCASQ(s3_req.cmd), s3_data_quad_word, s3_data_non_casq_resp)
 
   val s3_refill_latency = RegEnable(s2_refill_latency, s2_fire_to_s3)
   val s3_sc_fail  = Wire(Bool()) // miss or lr mismatch
