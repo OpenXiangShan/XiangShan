@@ -387,7 +387,7 @@ class LoadQueueUncache(implicit p: Parameters) extends XSModule
   val mmioSelect = entries.map(e => e.io.mmioSelect).reduce(_ || _)
   val mmioReq = Wire(DecoupledIO(io.uncache.req.bits.cloneType))
   // TODO lyq: It's best to choose in robIdx order / the order in which they enter
-  val ncReqArb = Module(new RRArbiterInit(io.uncache.req.bits.cloneType, LoadUncacheBufferSize))
+  val ncReqArb = Module(new TwoLevelRRArbiter(io.uncache.req.bits.cloneType, LoadUncacheBufferSize))
 
   val ncOutValidVec = VecInit(entries.map(e => e.io.ncOut.valid))
   val ncOutValidVecRem = SubVec.getMaskRem(ncOutValidVec, NC_WB_MOD)
