@@ -318,6 +318,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_pf_source = RegEnable(s1_pf_source, s1_fire)
   val s2_load128Req = RegEnable(s1_load128Req, s1_fire)
   val s2_paddr = RegEnable(s1_paddr_dup_dcache, s1_fire)
+  val s2_is_prefetch = RegEnable(s1_is_prefetch, s1_fire)
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
   val s2_bank_oh = RegEnable(s1_bank_oh, s1_fire)
   val s2_bank_oh_dup_0 = RegEnable(s1_bank_oh, s1_fire)
@@ -371,7 +372,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   //
   val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
   val s2_can_send_miss_req_dup = RegEnable(s1_will_send_miss_req, s1_fire)
-  val s2_mshr_or_tld_full_fwd = io.lsu.s2_mshr_or_tld_full_fwd
+  val s2_mshr_or_tld_full_fwd = io.lsu.s2_mshr_or_tld_full_fwd && !s2_is_prefetch
 
   val s2_miss_req_valid     = s2_valid && s2_can_send_miss_req && !s2_mshr_or_tld_full_fwd
   val s2_miss_req_valid_dup = s2_valid_dup && s2_can_send_miss_req_dup && !s2_mshr_or_tld_full_fwd
@@ -407,7 +408,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_data128bit = Cat((0 until DCacheVWordBankCount).reverse.map(i => io.banked_data_resp(i).raw_data))
   val s2_resp_data  = s2_data128bit
 
-  val s2_is_prefetch = s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U
   // only dump these signals when they are actually valid
   dump_pipeline_valids("LoadPipe s2", "s2_hit", s2_valid && s2_hit)
   dump_pipeline_valids("LoadPipe s2", "s2_nack", s2_valid && s2_nack)
