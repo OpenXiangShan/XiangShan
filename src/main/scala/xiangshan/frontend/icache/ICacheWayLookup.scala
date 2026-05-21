@@ -23,8 +23,10 @@ import utility.HasCircularQueuePtrHelper
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.ftq.BpuFlushInfo
 import xiangshan.frontend.ftq.FtqPtr
+import xiangshan.frontend.ftq.FtqToWayLookupBundle
 
 class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     with ICacheMissUpdateHelper
@@ -34,7 +36,10 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     val flush:        Bool         = Input(Bool())
     val flushFromBpu: BpuFlushInfo = Input(new BpuFlushInfo)
 
-    val read: DecoupledIO[WayLookupBundle] = DecoupledIO(new WayLookupBundle)
+    val fromFtq: DecoupledIO[FtqToWayLookupBundle] = Flipped(Decoupled(new FtqToWayLookupBundle))
+    val toFtq:   WayLookupToFtqBundle              = Output(new WayLookupToFtqBundle)
+
+    val toMainPipe: DecoupledIO[WayLookupToMainPipeBundle] = DecoupledIO(new WayLookupToMainPipeBundle)
 
     val write: Vec[DecoupledIO[WayLookupWriteBundle]] = Vec(FetchPorts, Flipped(DecoupledIO(new WayLookupWriteBundle)))
 
@@ -91,8 +96,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   when(io.flush) {
     readPtr.value := 0.U
     readPtr.flag  := false.B
-  }.elsewhen(io.read.fire) {
-    readPtr := readPtr + 1.U
+  }.elsewhen(io.toMainPipe.fire) {
+    readPtr := readPtr + Mux(io.toFtq.realTwoFetchValid, 2.U, 1.U)
   }
 
   when(io.flush) {
@@ -105,7 +110,9 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   // we can store only the first exception encountered, as exceptions must trigger a redirection (and thus a flush)
   private val exceptionEntry = RegInit(0.U.asTypeOf(Valid(new WayLookupExceptionEntry)))
   private val exceptionPtr   = RegInit(ICacheWayLookupPtr(false.B, 0.U))
-  private val exceptionHit   = exceptionPtr === readPtr && exceptionEntry.valid
+  private val exceptionHit = VecInit((0 until MaxFetchReqNum).map { i =>
+    exceptionPtr === (readPtr + i.U) && exceptionEntry.valid
+  })
 
   when(io.flush || bpuS3FlushValid && exceptionPtr === bpuS3FlushPtr) {
     // When flushed by bp3
@@ -129,18 +136,80 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     }.reduce(_ || _)
   })
   // if the entry is being updated, we should not read it (i.e. read.valid should be false)
-  private val updateStall = entryUpdate(readPtr.value)
+  private val updateStall = VecInit((0 until MaxFetchReqNum).map(i => entryUpdate((readPtr + i.U).value)))
 
   /* *** read *** */
-  // if the entry is empty, but there is a valid write, we can bypass it to read port (maybe timing critical)
-  private val canBypass = empty && io.write.head.valid && !exceptionEntry.valid
-  private val canRead   = !empty && !updateStall
-  io.read.valid := canRead || canBypass
-  when(canBypass) {
-    io.read.bits := io.write.head.bits
-  }.otherwise {
-    io.read.bits.entry          := entries(readPtr.value)
-    io.read.bits.exceptionEntry := Mux(exceptionHit, exceptionEntry.bits, 0.U.asTypeOf(new WayLookupExceptionEntry))
+  private val secondWriteValid = if (FetchPorts == 1) false.B else io.write(1).valid
+  private val fetchReq         = io.fromFtq.bits.req
+
+  // if WayLookup is empty, but there is a valid write, we can bypass one to read port (maybe timing critical)
+  private val canBypass =
+    empty && io.write(0).valid && !secondWriteValid && !fetchReq(1).valid && !exceptionEntry.valid
+
+  private val canDeq       = !empty && !updateStall(0)
+  private val canDeqSecond = numValidEntries > 1.U && !updateStall(0) && !updateStall(1)
+
+  private val canServe = canBypass || canDeq
+
+  private val fetchReqEntry = VecInit((0 until MaxFetchReqNum).map(i => entries((readPtr + i.U).value)))
+  private val fetchReqExceptionEntry = VecInit((0 until MaxFetchReqNum).map { i =>
+    Mux(exceptionHit(i), exceptionEntry.bits, 0.U.asTypeOf(new WayLookupExceptionEntry))
+  })
+
+  private val isDataSramReadConflict = (0 until DataBanks).map { bankIdx =>
+    val reqReadInfo = (0 until MaxFetchReqNum).map { i =>
+      val lineSelOH = Cat(fetchReq(i).bankSel(1)(bankIdx), fetchReq(i).bankSel(0)(bankIdx))
+      val readValid = lineSelOH.orR && fetchReq(i).valid
+      val wayMask   = Mux1H(lineSelOH, fetchReqEntry(i).waymask) & Fill(nWays, readValid)
+      val setIdx    = Mux1H(lineSelOH, fetchReq(i).vSetIdx)
+      (readValid, wayMask, setIdx)
+    }
+
+    reqReadInfo.map(_._1).reduce(_ && _) &&    // read same bank
+    reqReadInfo(0)._2 === reqReadInfo(1)._2 && // read same way
+    reqReadInfo(0)._3 =/= reqReadInfo(1)._3    // read different set
+  }.reduce(_ || _)
+
+  private val hasMmio          = fetchReqEntry.map(_.isMmio).reduce(_ || _)
+  private val hasItlbException = exceptionHit.reduce(_ || _)
+
+  private val realTwoFetchValid = fetchReq(1).valid && canDeqSecond &&
+    !isDataSramReadConflict && !hasMmio && !hasItlbException
+
+  io.toFtq.realTwoFetchValid         := realTwoFetchValid
+  io.toFtq.perf_canNotServeTwoMeta   := !canDeqSecond
+  io.toFtq.perf_dataSramReadConflict := isDataSramReadConflict
+  io.toFtq.perf_hasMmio              := hasMmio
+  io.toFtq.perf_hasItlbException     := hasItlbException
+
+  io.fromFtq.ready := io.toMainPipe.ready && canServe && !io.flush
+
+  io.toMainPipe.valid             := io.fromFtq.valid && canServe && !io.flush
+  io.toMainPipe.bits.req          := fetchReq
+  io.toMainPipe.bits.req(1).valid := realTwoFetchValid
+
+  io.toMainPipe.bits.wayLookupInfo(0).entry := Mux(
+    canBypass,
+    io.write(0).bits.entry,
+    fetchReqEntry(0)
+  )
+  io.toMainPipe.bits.wayLookupInfo(0).exceptionEntry := Mux(
+    canBypass,
+    io.write(0).bits.exceptionEntry,
+    fetchReqExceptionEntry(0)
+  )
+  io.toMainPipe.bits.wayLookupInfo(1).entry          := fetchReqEntry(1)
+  io.toMainPipe.bits.wayLookupInfo(1).exceptionEntry := fetchReqExceptionEntry(1)
+
+  if (!env.FPGAPlatform) {
+    when(io.toMainPipe.fire) {
+      assert(io.toMainPipe.bits.wayLookupInfo(0).entry.debug_ftqIdx.get === fetchReq(0).ftqIdx)
+      assert(io.toMainPipe.bits.wayLookupInfo(0).entry.debug_startVAddr.get === fetchReq(0).startVAddr)
+      when(realTwoFetchValid) {
+        assert(io.toMainPipe.bits.wayLookupInfo(1).entry.debug_ftqIdx.get === fetchReq(1).ftqIdx)
+        assert(io.toMainPipe.bits.wayLookupInfo(1).entry.debug_startVAddr.get === fetchReq(1).startVAddr)
+      }
+    }
   }
 
   /**
@@ -182,8 +251,9 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     0,
     WayLookupSize
   )
-  XSPerfAccumulate("emptyHasBypass", empty && io.write.head.valid)
-  XSPerfAccumulate("emptyNoBypass", empty && !io.write.head.valid)
+  XSPerfAccumulate("write", io.write.head.fire)
+  XSPerfAccumulate("empty_when_write", empty && io.write.head.fire)
+  XSPerfAccumulate("bypass", empty && io.write.head.fire && canBypass && io.toMainPipe.fire)
   // exception stall cycles
   XSPerfAccumulate("waitingForExceptionRead", exceptionEntry.valid && !empty)
   XSPerfAccumulate("waitingForExceptionFlush", exceptionEntry.valid && empty)
