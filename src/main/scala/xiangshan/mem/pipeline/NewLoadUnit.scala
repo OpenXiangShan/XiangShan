@@ -1453,27 +1453,14 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.uop.exceptionVec extendFrom exceptionVec
   lqWrite.vaddr := vaddr
   lqWrite.fullva := exceptionFullva
-  lqWrite.vaNeedExt := exceptionVaNeedExt
   lqWrite.paddr := paddr
   lqWrite.gpaddr := exceptionGpaddr
   lqWrite.mask := mask
-  lqWrite.data := DontCare // TODO: remove this
-  lqWrite.wlineflag := false.B // TODO: remove this
-  lqWrite.miss := cause(C_DM) // TODO: remove this
-  lqWrite.tlbMiss := TlbAccessResult.isMiss(in.tlbAccessResult.get)// TODO: remove this
-  lqWrite.ptwBack := false.B // TODO: remove this
-  lqWrite.af := exceptionVec(loadAccessFault) // TODO: remove this
   lqWrite.nc := in.nc.get || in.isNCReplay()
   lqWrite.mmio := in.mmio.get
   lqWrite.memBackTypeMM := !in.pmp.get.mmio
-  lqWrite.hasException := false.B // LQ is no longer responsible for handling exception for timing reason
   lqWrite.isHyper := in.tlbException.get.isHyper
   lqWrite.isForVSnonLeafPTE := exceptionIsForVSnonLeafPTE
-  lqWrite.isPrefetch := false.B // TODO: remove this
-  lqWrite.isHWPrefetch := false.B // TODO: remove this
-  lqWrite.forwardMask := DontCare // TODO: remove this
-  lqWrite.forwardData := DontCare // TODO: remove this
-  lqWrite.ldCancel := DontCare // TODO: remove this
   lqWrite.isvec := isVector
   lqWrite.isLastElem := DontCare // TODO: remove this
   lqWrite.is128bit := in.size === MemorySize.Q.U
@@ -1485,32 +1472,12 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.reg_offset := in.regOffset.get
   lqWrite.elemIdxInsideVd := in.elemIdxInsideVd.get
   lqWrite.is_first_ele := DontCare // TODO: remove this
-  lqWrite.vecBaseVaddr := DontCare
-  lqWrite.vecVaddrOffset := DontCare
-  lqWrite.vecTriggerMask := DontCare
   lqWrite.vecActive := true.B // TODO: remove this
   lqWrite.isLoadReplay := LoadEntrance.isReplay(entrance) || s4HeadIsReplay && s4HeadValid
-  lqWrite.isFastPath := DontCare // TODO: remove this
-  lqWrite.isFastReplay := DontCare // TODO: remove this
-  lqWrite.replayCarry := DontCare // TODO: remove this
-  lqWrite.isFirstIssue := DontCare // TODO: remove this
-  lqWrite.hasROBEntry := DontCare // TODO: remove this
-  lqWrite.mshrid := DontCare // TODO: remove this
   lqWrite.handledByMSHR := lqWriteHandledByMSHR
   lqWrite.replacementUpdated := DontCare // TODO: remove this
   lqWrite.missDbUpdated := DontCare // TODO: remove this
-  lqWrite.forward_tlDchannel := DontCare // TODO: remove this
-  lqWrite.dcacheRequireReplay := DontCare // TODO: remove this
-  lqWrite.delayedLoadError := DontCare // TODO: remove this
-  lqWrite.lateKill := DontCare // TODO: remove this
-  lqWrite.feedbacked := DontCare // TODO: remove this
   lqWrite.schedIndex := in.replayQueueIdx.get
-  lqWrite.tlbNoQuery := DontCare // TODO: remove this
-  lqWrite.isFrmMisAlignBuf := false.B // TODO: remove this
-  lqWrite.isMisalign := DontCare // TODO: remove this
-  lqWrite.isFinalSplit := DontCare // TODO: remove this
-  lqWrite.misalignWith16Byte := DontCare // TODO: remove this
-  lqWrite.misalignNeedWakeUp := DontCare // TODO: remove this
   lqWrite.updateAddrValid := ldoutValid
   lqWrite.rep_info.mshr_id := lqWriteMshrId
   lqWrite.rep_info.full_fwd := false.B
@@ -1522,8 +1489,6 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.debug := uop.perfDebugInfo
   lqWrite.rep_info.tlb_id := in.tlbId.get
   lqWrite.rep_info.tlb_full := in.tlbFull.get
-  lqWrite.nc_with_data := in.isNCReplay() && !cause(C_UNCACHE)
-  lqWrite.data_wen_dup := DontCare // TODO: remove this
 
   // Writeback to VLMergeBuffer
   val vecldoutValid = pipeIn.valid && !kill && shouldWriteback && isVector && endPipe
