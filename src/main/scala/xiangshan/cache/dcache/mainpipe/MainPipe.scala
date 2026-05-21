@@ -320,17 +320,30 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val store_need_data = !s0_req.probe && s0_req.isStore && banked_store_rmask.orR
   val probe_need_data = s0_req.probe
-  val amo_need_data = !s0_req.probe && s0_req.isAMO
+  val amo_need_data = !s0_req.probe && s0_req.isAMO && !s0_req.miss
   val miss_need_data = s0_req.miss
   val replace_need_data = s0_req.replace
 
   val banked_need_data = store_need_data || probe_need_data || amo_need_data || miss_need_data || replace_need_data
+  val banked_amo_rmask = Mux(
+    isAMOCASQ(s0_req.cmd),
+    bankMaskForQuadWord(s0_req.quad_word_idx),
+    bankMaskForWord(s0_req.word_idx)
+  )
 
-  val s0_banked_rmask = Mux(store_need_data, banked_store_rmask,
-    Mux(probe_need_data || amo_need_data || miss_need_data || replace_need_data,
-      banked_full_rmask,
-      banked_none_rmask
-    ))
+  val s0_banked_rmask = Mux(
+    store_need_data,
+    banked_store_rmask,
+    Mux(
+      amo_need_data,
+      banked_amo_rmask,
+      Mux(
+        probe_need_data || miss_need_data || replace_need_data,
+        banked_full_rmask,
+        banked_none_rmask
+      )
+    )
+  )
 
   // generate wmask here and use it in stage 2
   val banked_store_wmask = bank_write
