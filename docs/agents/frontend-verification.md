@@ -95,6 +95,11 @@ that boundary stable.
   narrative logging.
 - Any user-provided process constraint must be written to the relevant repo
   docs in the same turn; do not keep it only in chat memory.
+- Before constructing coverage for a new scenario, first check whether an
+  existing regression case can be extended without weakening its semantic
+  contract. If it can, extend or merge into that existing case; adding a new
+  testcase is forbidden. Add a new testcase only when no existing case can
+  encode the scenario cleanly.
 - Do not change implementation code merely to satisfy an existing test when the
   test contradicts the intended frontend behavior. Update or remove the invalid
   expectation only after proving the semantic contract.
@@ -105,6 +110,23 @@ that boundary stable.
 - A testcase that only checks whether a code edit behaved as expected must stay
   temporary. Do not commit it under the regression test files; delete temporary
   tests once they have served the local validation purpose.
+- Do not endlessly add minimal testcases to the regression suite. Any testcase
+  written into versioned regression files or documented as an official case must
+  be suitable for sustainable regression and must encode real frontend
+  semantics. Tests that exist only to check whether a local code edit behaves as
+  expected may be written as temporary tests, but they must not be placed in
+  long-lived regression files and must be deleted periodically.
+- Keep only functionally complete regression cases with clear pass/fail
+  assertions. Delete or merge development-only tests, generated exploratory
+  cases, cases that only send a few requests without proving DUT-visible
+  behavior, and cases whose assertions do not encode a stable semantic
+  contract.
+- Long-lived regression tests must not merely prove that one request can pass.
+  A kept testcase should cover a multi-request stream, a full multi-beat fetch
+  block, or a multi-stage boundary such as request/response/flush/backpressure
+  recovery. Exception cases that intentionally terminate early are acceptable
+  only when they assert DUT-visible exception behavior and, when relevant, that
+  an illegal resend or follow-up request does not occur.
 - Do not frequently add low-signal or redundant cases to
   `src/test/python/Frontend/tests/test_backend_model_sync.py`; only add a test
   there when it captures a distinct semantic contract, blocks a proven

@@ -342,6 +342,20 @@ frontend Python uncache agent 必须匹配 RTL contract：
 - 用 `BackendModel.set_wfi_req(1/0)` 覆盖 WFI pending 对 Acquire 的阻塞。
 - 用 `BackendModel.set_can_accept(0/1)` 覆盖 backend/IBuffer backpressure。
 
+长期 regression 的 uncache case 不能仅局限于“一笔请求通过”。保留到
+`src/test/python/Frontend/tests/` 的 case 至少应满足以下之一：
+
+- 覆盖多笔 request/response 或一个完整 64B fetch block 的多 beat 行为。
+- 覆盖 request、response、flush、backpressure、WFI、commit gating 中至少两个阶段的
+  组合边界，并验证恢复后还能继续发起后续请求。
+- fault/exception 类 case 如果语义上必须提前终止，应断言 DUT-visible exception，
+  并在 resend/incomplete 等场景中断言是否允许后续 beat request，而不是只看第一笔
+  agent 统计。
+
+构造新的 uncache 覆盖前，必须先检查现有 regression case 是否可以承载该场景。
+如果可以在不削弱原有语义和断言强度的前提下改造现有 case，禁止新增测试用例；
+只有现有 case 无法清晰表达该边界行为时，才允许新增 case。
+
 ### 已确认的端口 directed 语义
 
 `a_ready` backpressure case 必须先让 DUT 完成至少一笔真实 MMIO uncache
