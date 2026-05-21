@@ -26,17 +26,17 @@ import xiangshan.frontend.bpu.StageCtrl
 
 class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with HasCircularQueuePtrHelper {
   class CommonHRIO extends CommonHRBundle {
-    val stageCtrl:     StageCtrl           = Input(new StageCtrl)
-    val s1_imliTaken:  Bool                = Input(Bool())
-    val s2StartPc:     PrunedAddr          = Input(PrunedAddr(VAddrBits))
-    val s2CondHitMask: Vec[Bool]           = Input(Vec(NumBtbResultEntries, Bool()))
-    val s2Position:    Vec[UInt]           = Input(Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)))
-    val s2Targets:     Vec[PrunedAddr]     = Input(Vec(NumBtbResultEntries, PrunedAddr(VAddrBits)))
-    val update:        CommonHRUpdate      = Input(new CommonHRUpdate)
-    val redirect:      CommonHRRedirect    = Input(new CommonHRRedirect)
-    val s0_imli:       UInt                = Output(UInt(ImliHistoryLength.W))
-    val s0_commonHR:   CommonHREntry       = Output(new CommonHREntry)
-    val s3ResolveMeta: CommonHRResolveMeta = Output(new CommonHRResolveMeta)
+    val stageCtrl:      StageCtrl           = Input(new StageCtrl)
+    val s1_imliTaken:   Bool                = Input(Bool())
+    val s2StartPc:      PrunedAddr          = Input(PrunedAddr(VAddrBits))
+    val s2CondHitMask:  Vec[Bool]           = Input(Vec(NumBtbResultEntries, Bool()))
+    val s2CfiPositions: Vec[UInt]           = Input(Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)))
+    val s2CfiTargets:   Vec[PrunedAddr]     = Input(Vec(NumBtbResultEntries, PrunedAddr(VAddrBits)))
+    val update:         CommonHRUpdate      = Input(new CommonHRUpdate)
+    val redirect:       CommonHRRedirect    = Input(new CommonHRRedirect)
+    val s0_imli:        UInt                = Output(UInt(ImliHistoryLength.W))
+    val s0_commonHR:    CommonHREntry       = Output(new CommonHREntry)
+    val s3ResolveMeta:  CommonHRResolveMeta = Output(new CommonHRResolveMeta)
 
     val s0_startPc: Option[PrunedAddr] = Some(Input(PrunedAddr(VAddrBits))) // for debug
   }
@@ -86,20 +86,18 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   io.s0_commonHR   := s0_commonHR
 
   /*
-   * s3_fire update CommonHR
+   * Precompute per-CFI candidate information in s2 for the s3 CommonHR update.
    */
-  private val s3_update = io.update // bp pipeline s3 level update
-  private val s3_taken  = s3_update.taken
-
-  private val s2_hitMask          = dedupHitPositions(io.s2CondHitMask, io.s2Position)
+  // Deduplicate conditional hits by position before counting older conditional branches.
+  private val s2_hitMask          = dedupHitPositions(io.s2CondHitMask, io.s2CfiPositions)
   private val s2_numHit           = PopCount(s2_hitMask)
   private val s2_bwTakenCandidate = Wire(Vec(NumBtbResultEntries, Bool()))
   private val s2_numLessCandidate = Wire(Vec(NumBtbResultEntries, UInt(log2Ceil(NumBtbResultEntries + 1).W)))
 
   for (i <- 0 until NumBtbResultEntries) {
-    val pos    = io.s2Position(i)
-    val target = io.s2Targets(i)
-    val lessThanCurrent = VecInit(io.s2Position.zip(s2_hitMask).map { case (otherPos, hit) =>
+    val pos    = io.s2CfiPositions(i)
+    val target = io.s2CfiTargets(i)
+    val lessThanCurrent = VecInit(io.s2CfiPositions.zip(s2_hitMask).map { case (otherPos, hit) =>
       hit && (otherPos < pos)
     })
     val currentCfiPc = getCfiPcFromPosition(io.s2StartPc, pos)
@@ -108,8 +106,11 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     s2_bwTakenCandidate(i) := isBackwardBranch(currentCfiPc, target)
   }
 
-  // deduplicate hit positions
-  private val s3_hitMask          = RegEnable(s2_hitMask, s2_fire)
+  /*
+   * Use the latched s2 candidate information to update CommonHR when s3 fires.
+   */
+  private val s3_update           = io.update // bp pipeline s3 level update
+  private val s3_taken            = s3_update.taken
   private val s3_firstTakenPos    = s3_update.firstTakenBranch.bits.cfiPosition
   private val s3_firstTakenIsCond = s3_update.firstTakenBranch.bits.attribute.isConditional
   private val s3_cfiPc            = getCfiPcFromPosition(s3_update.startPc, s3_firstTakenPos)
@@ -160,42 +161,6 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   s3_newCommonHR := Mux(s3_taken, s3_selectedTakenCommonHR, s3_defaultCommonHR)
 
   /*
-   * Directly resume and update commonHR after redirection for debugging
-   */
-  private val debug_metaGhr      = io.redirect.meta.ghr
-  private val debug_metaBW       = io.redirect.meta.bw
-  private val debug_oldPositions = io.redirect.meta.position
-  private val debug_oldCondHits = VecInit(io.redirect.meta.hitMask.zip(io.redirect.meta.attribute).map {
-    case (hit, attr) => hit && attr.isConditional
-  })
-  private val debug_oldHits       = dedupHitPositions(debug_oldCondHits, debug_oldPositions)
-  private val debug_taken         = io.redirect.taken
-  private val debug_isCond        = io.redirect.attribute.isConditional
-  private val debug_bwTaken       = isBackwardBranch(io.redirect.cfiPc, io.redirect.target)
-  private val debug_takenPosition = getAlignedInstOffset(io.redirect.cfiPc)
-  private val debug_lessThanPc = debug_oldPositions.zip(debug_oldHits).map {
-    case (pos, hit) => hit && (pos < debug_takenPosition)
-  } // positions less than redirect branch pc
-  private val debug_numLess  = PopCount(debug_lessThanPc)
-  private val debug_numHit   = PopCount(debug_oldHits)
-  private val debug_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
-  debug_commonHR.valid           := false.B
-  debug_commonHR.predStartPc.get := io.s0_startPc.get
-  debug_commonHR.ghr := getNewHR(debug_metaGhr, debug_numLess, debug_numHit, debug_taken, debug_isCond)(
-    GhrHistoryLength
-  )
-  debug_commonHR.bw := getNewHR(
-    debug_metaBW,
-    debug_numLess,
-    debug_numHit,
-    debug_taken,
-    debug_isCond,
-    Option(debug_bwTaken && debug_taken)
-  )(
-    BWHistoryLength
-  )
-
-  /*
    * ghr/bw is not involved in prediction during redirect; used here as a placeholder
    */
   private val r0_valid    = io.redirect.valid
@@ -240,6 +205,42 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
 
   dontTouch(r1_valid)
   dontTouch(r1_commonHR)
+
+  /*
+   * Directly resume and update commonHR after redirection for debugging
+   */
+  private val debug_metaGhr      = io.redirect.meta.ghr
+  private val debug_metaBW       = io.redirect.meta.bw
+  private val debug_oldPositions = io.redirect.meta.position
+  private val debug_oldCondHits = VecInit(io.redirect.meta.hitMask.zip(io.redirect.meta.attribute).map {
+    case (hit, attr) => hit && attr.isConditional
+  })
+  private val debug_oldHits       = dedupHitPositions(debug_oldCondHits, debug_oldPositions)
+  private val debug_taken         = io.redirect.taken
+  private val debug_isCond        = io.redirect.attribute.isConditional
+  private val debug_bwTaken       = isBackwardBranch(io.redirect.cfiPc, io.redirect.target)
+  private val debug_takenPosition = getAlignedInstOffset(io.redirect.cfiPc)
+  private val debug_lessThanPc = debug_oldPositions.zip(debug_oldHits).map {
+    case (pos, hit) => hit && (pos < debug_takenPosition)
+  } // positions less than redirect branch pc
+  private val debug_numLess  = PopCount(debug_lessThanPc)
+  private val debug_numHit   = PopCount(debug_oldHits)
+  private val debug_commonHR = WireInit(0.U.asTypeOf(new CommonHREntry))
+  debug_commonHR.valid           := false.B
+  debug_commonHR.predStartPc.get := io.s0_startPc.get
+  debug_commonHR.ghr := getNewHR(debug_metaGhr, debug_numLess, debug_numHit, debug_taken, debug_isCond)(
+    GhrHistoryLength
+  )
+  debug_commonHR.bw := getNewHR(
+    debug_metaBW,
+    debug_numLess,
+    debug_numHit,
+    debug_taken,
+    debug_isCond,
+    Option(debug_bwTaken && debug_taken)
+  )(
+    BWHistoryLength
+  )
 
   /*
    * History register update and recovery logic

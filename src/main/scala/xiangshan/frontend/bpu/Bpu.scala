@@ -545,8 +545,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   commonHR.io.s1_imliTaken              := s1_imliTaken
   commonHR.io.s2StartPc                 := s2_startPc
   commonHR.io.s2CondHitMask             := VecInit(mbtb.io.result.map(e => e.valid && e.bits.attribute.isConditional))
-  commonHR.io.s2Position                := VecInit(mbtb.io.result.map(_.bits.cfiPosition))
-  commonHR.io.s2Targets                 := VecInit(mbtb.io.result.map(_.bits.target))
+  commonHR.io.s2CfiPositions            := VecInit(mbtb.io.result.map(_.bits.cfiPosition))
+  commonHR.io.s2CfiTargets              := VecInit(mbtb.io.result.map(_.bits.target))
   commonHR.io.update.startPc            := s3_startPc
   commonHR.io.update.target             := s3_prediction.target
   commonHR.io.update.taken              := s3_taken
