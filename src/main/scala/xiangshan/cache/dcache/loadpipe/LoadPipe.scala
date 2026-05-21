@@ -46,7 +46,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
-    val hash_tag_resp = Input(Vec(nWays, UInt(HashTagBits.W)))
+    val htag_resp = Input(Vec(nWays, UInt(HashTagBits.W)))
     val vtag_update = Flipped(DecoupledIO(new TagWriteReq))
 
     val banked_data_read = DecoupledIO(new L1BankedDataReadReqWithMask)
@@ -188,12 +188,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // tag check
   def wayMap[T <: Data](f: Int => T) = VecInit((0 until nWays).map(f))
-  def foldXorHash(tag: UInt): UInt = {
-    val chunks = (tagBits + HashTagBits - 1) / HashTagBits
-    val paddedBits = chunks * HashTagBits
-    val paddedTag = if (paddedBits == tagBits) tag else Cat(0.U((paddedBits - tagBits).W), tag)
-    (0 until chunks).map(i => paddedTag((i + 1) * HashTagBits - 1, i * HashTagBits)).reduce(_ ^ _)
-  }
   val meta_resp = io.meta_resp
   // pseudo enc ecc tag
   val pseudo_tag_toggle_mask = Mux(
@@ -218,9 +212,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_tag_errors = wayMap((w: Int) => meta_resp(w).coh.isValid() && dcacheParameters.tagCode.decode(s1_enctag_resp(w)).error).asUInt
   val s1_tag_match_way_dup_dc = wayMap((w: Int) => s1_tag_resp(w) === get_tag(s1_paddr_dup_dcache) && meta_resp(w).coh.isValid()).asUInt
   val s1_tag_match_way_dup_lsu = wayMap((w: Int) => s1_tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt
-  val s1_hash_tag = foldXorHash(get_tag(s1_paddr_dup_dcache))
-  val s1_hash_match_way = wayMap((w: Int) => io.hash_tag_resp(w) === s1_hash_tag && meta_resp(w).coh.isValid()).asUInt
-  val s1_hash_miss = if (EnableHashTagPrefilter) !s1_hash_match_way.orR else false.B
+  val s1_hash_tag = XORFoldTA(get_tag(s1_paddr_dup_dcache), HashTagBits)
+  val s1_hash_match_way = wayMap((w: Int) => io.htag_resp(w) === s1_hash_tag && meta_resp(w).coh.isValid()).asUInt
+  val s1_htag_miss = if (EnableDCacheHashTagArray) !s1_hash_match_way.orR else false.B
   val s1_wpu_pred_valid = RegEnable(io.dwpu.resp(0).valid, s0_fire)
   val s1_wpu_pred_way_en = RegEnable(io.dwpu.resp(0).bits.s0_pred_way_en, s0_fire)
 
@@ -271,9 +265,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s1_tag_match_dup_dc = ParallelORR(s1_tag_match_way_dup_dc)
   val s1_tag_match_dup_lsu = ParallelORR(s1_tag_match_way_dup_lsu)
-  if (EnableHashTagPrefilter) {
-    XSError(s1_valid && !io.pseudo_error.valid && s1_tag_match_way_dup_dc.orR && s1_hash_miss,
-      "hash prefilter false negative in LoadPipe\n")
+  if (EnableDCacheHashTagArray) {
+    XSError(s1_valid && !io.pseudo_error.valid && s1_tag_match_way_dup_dc.orR && s1_htag_miss, "hash-tag-array indicates miss but there is tag match")
   }
   assert(RegNext(!s1_valid || PopCount(s1_tag_match_way_dup_dc) <= 1.U), "tag should not match with more than 1 way")
   io.pseudo_tag_error_inj_done := s1_fire && wayMap((w: Int) => meta_resp(w).coh.isValid()).asUInt.orR
@@ -313,7 +306,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.addr_dup := s1_vaddr_dup
   io.banked_data_read.bits.way_en := s1_pred_tag_match_way_dup_dc
-  io.banked_data_read.bits.htag_miss := s1_hash_miss
+  io.banked_data_read.bits.htag_miss := s1_htag_miss
   io.banked_data_read.bits.bankMask := s1_bank_oh
   io.banked_data_read.bits.lqIdx := s1_req.lqIdx
   io.is128Req := s1_load128Req
