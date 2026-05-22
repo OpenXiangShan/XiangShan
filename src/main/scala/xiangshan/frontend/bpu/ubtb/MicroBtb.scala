@@ -53,14 +53,25 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   /* *** predict stage 0 ***
    * - io.startPc timing might be bad, simply cache it
+   * - read entries
+   * - check if it's hit
    */
   private val s0_fire = io.stageCtrl.s0_fire && io.enable
 
+  // we need these to determine s0_hitT1Victim, so declare first
+  private val t1_fire     = Wire(Bool())
+  private val t1_allocate = Wire(Bool())
+
   private val s0_startPc = io.startPc
+  private val s0_tag     = getTag(s0_startPc)
+
+  private val s0_hitOH = VecInit(entries.map(e => e.valid && e.tag === s0_tag)).asUInt
+  assert(!s0_fire || PopCount(s0_hitOH) <= 1.U, "MicroBtb hitOH should be one-hot")
+
+  private val s0_hitIdx      = OHToUInt(s0_hitOH)
+  private val s0_hitT1Victim = t1_fire && t1_allocate && replacer.io.victim === s0_hitIdx
 
   /* *** predict stage 1 ***
-   * - read entries
-   * - check if it's hit
    * - generate prediction
    * - update replacer
    */
@@ -68,15 +79,16 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
 
   private val s1_startPc = RegEnable(s0_startPc, s0_fire)
 
-  private val s0_tag   = getTag(s0_startPc)
-  private val s0_hitOH = VecInit(entries.map(e => e.valid && e.tag === s0_tag)).asUInt
-  private val s1_hitOH = RegEnable(s0_hitOH, 0.U(NumEntries.W), s0_fire)
-  assert(PopCount(s1_hitOH) <= 1.U, "MicroBtb s1_hitOH should be one-hot")
-  private val s1_hit      = s1_hitOH.orR
-  private val s1_hitIdx   = OHToUInt(s1_hitOH)
-  private val s1_hitEntry = entries(s1_hitIdx)
+  private val s1_hitOH       = RegEnable(s0_hitOH, s0_fire)
+  private val s1_hitT1Victim = RegEnable(s0_hitT1Victim, s0_fire)
+
+  // if hit t1 victim, the original entry pointed by s1_hitOH is overwritten in this cycle, treat as a miss
+  private val s1_hit = s1_hitOH.orR && !s1_hitT1Victim
   // Count wrong hits due to the hit entry being replaced by fastTrain in the same cycle.
-  XSPerfAccumulate("false_hit", s1_hit && s1_hitEntry.tag =/= getTag(s1_startPc))
+  XSPerfAccumulate("false_hit", s1_hitOH.orR && s1_hitT1Victim)
+
+  private val s1_hitIdx   = OHToUInt(s1_hitOH)
+  private val s1_hitEntry = Mux1H(s1_hitOH, entries)
 
   // we do always-taken prediction in ubtb
   io.prediction.valid            := s1_hit
@@ -132,12 +144,10 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   // the second train might be a false "not hit" and allocate a new entry, causing a multi-hit;
   // or, the first may replace the entry, causing a false "hit" in the second train, causing wrong update.
   // So, we define some of the t1 signals in advance, and use them to check if the contiguous trains are hit.
-  private val t1_fire         = Wire(Bool())
   private val t1_tag          = Wire(UInt(TagWidth.W))
   private val t1_updateIdx    = Wire(UInt(log2Up(NumEntries).W))
   private val t1_hitEntry     = Wire(new MicroBtbEntry)
   private val t1_updatedEntry = WireDefault(t1_hitEntry) // will be updated in t1, then write back to entries
-  private val t1_allocate     = Wire(Bool())
 
   // if t0_tag === t1_tag, t1 must be updating the entry, so we can see it as a hit, and use t1_updateIdx as hitIdx
   private val t0_hitT1Update = Wire(Bool())
@@ -148,7 +158,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t0_hit = t0_realHit && !t0_hitT1Victim || t0_hitT1Update
   // select hit entry: use t1_updatedEntry if t0_hitT1Update, otherwise use real hit entry
   private val t0_hitIdx   = Mux(t0_hitT1Update, t1_updateIdx, t0_realHitIdx)
-  private val t0_hitEntry = Mux(t0_hitT1Update, t1_updatedEntry, entries(t0_realHitIdx))
+  private val t0_hitEntry = Mux(t0_hitT1Update, t1_updatedEntry, Mux1H(t0_hitOH, entries))
 
   // calculate hit flags, valid only when t0_hit
   private val t0_hitNotUseful     = t0_hitEntry.usefulCnt.isSaturateNegative
