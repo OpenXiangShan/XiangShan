@@ -32,6 +32,7 @@ object DestSelectEnum extends Enumeration {
   val INCF2      = DestVal("010") // vd|0,0,1,1,2,2,3,3
   val INCF4      = DestVal("011") // vd|0,0,0,0,1,1,1,1
   val CONST      = DestVal("100") // vd|0
+  val AMOCASQ    = DestVal("101") // for amocas instruction, rd|0,0,1,1
 }
 
 object DestSelectField extends DecodeField[
@@ -133,6 +134,11 @@ object DestSelectField extends DecodeField[
             }
           case _: VecMemWhole => INC1
           case _: VecMemMask => CONST
+        }
+      case vii: VecIntInstPattern =>
+        vii match {
+          case _: AmocasInstPattern => AMOCASQ
+          case _ => CONST
         }
     }
     destSel.toBitPat

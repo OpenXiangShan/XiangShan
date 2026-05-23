@@ -431,12 +431,12 @@ object ScalaUopTable {
   val tableZacas = {
     import xiangshan.backend.decode.isa.Instructions.{ZACAS64Type,ZACASType}
 
-    val tableZacas64 = ZACAS64Type.mapUopcode(
-      _.AMOCAS_Q -> amocas_q,
+    val tableZacas64 = ZACAS64Type.mapUopcodes(
+      _.AMOCAS_Q -> Seq(amocas_q_0, amocas_q_1, amocas_q_2, amocas_q_3),
     )
-    val tableZacas = ZACASType.mapUopcode(
-      _.AMOCAS_D -> amocas_d,
-      _.AMOCAS_W -> amocas_w,
+    val tableZacas = ZACASType.mapUopcodes(
+      _.AMOCAS_D -> Seq(amocas_d_0, amocas_d_1),
+      _.AMOCAS_W -> Seq(amocas_w_0, amocas_w_1),
     )
 
     tableZacas ++ tableZacas64
@@ -445,9 +445,9 @@ object ScalaUopTable {
   val tableZabhaZacas = {
     import xiangshan.backend.decode.isa.Instructions.ZABHA_ZACASType
 
-    ZABHA_ZACASType.mapUopcode(
-      _.AMOCAS_B -> amocas_b,
-      _.AMOCAS_H -> amocas_h,
+    ZABHA_ZACASType.mapUopcodes(
+      _.AMOCAS_B -> Seq(amocas_b_0, amocas_b_1),
+      _.AMOCAS_H -> Seq(amocas_h_0, amocas_h_1),
     )
   }
 

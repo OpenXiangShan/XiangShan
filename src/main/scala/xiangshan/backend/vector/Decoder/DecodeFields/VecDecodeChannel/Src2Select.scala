@@ -32,6 +32,7 @@ object Src2SelectEnum extends Enumeration {
   val INCF2      = Src2Val("010") // vs2|0,0,1,1,2,2,3,3
   val INCF4      = Src2Val("011") // vs2|0,0,0,0,1,1,1,1
   val CONST      = Src2Val("100") // vs2|0
+  val AMOCASQ    = Src2Val("101") // for amocas instruction
   val INC1x7_S1  = Src2Val("110") // vs2|0,1,2,3,4,5,6,vs1|0
   val INCF2x7_S1 = Src2Val("111") // vs2|0,0,1,1,2,2,3,vs1|0
 }
@@ -141,6 +142,11 @@ object Src2SelectField extends DecodeField[
             }
           case _: VecMemWhole => NONE
           case _: VecMemMask => NONE
+        }
+      case vii: VecIntInstPattern =>
+        vii match {
+          case _: AmocasInstPattern => AMOCASQ
+          case _ => CONST
         }
     }
 

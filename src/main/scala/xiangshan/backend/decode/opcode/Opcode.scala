@@ -467,6 +467,12 @@ object Opcode {
 
     def getVecLSMop(fuOpType: UInt): UInt = fuOpType(6, 5)
 
+    val idxDC = bb"00" // Don't care
+    val idx0 = bb"00"
+    val idx1 = bb"01"
+    val idx2 = bb"10"
+    val idx3 = bb"11"
+
     val unsign = bb"1"
     val sign = bb"0"
 
@@ -478,28 +484,33 @@ object Opcode {
     protected val isX = bb"1"
     protected val nonX = bb"0"
 
-    protected val SCALA  = bb"0000"
-    protected val US     = bb"0100" // Unit-Stride
-    protected val CS     = bb"0101" // Const-Strided
-    protected val WHOLE  = bb"0110"
-    protected val MASK   = bb"0111"
-    protected val IUEI8  = bb"1000" // Index-Unordered
-    protected val IUEI16 = bb"1001" // Index-Unordered
-    protected val IUEI32 = bb"1010" // Index-Unordered
-    protected val IUEI64 = bb"1011" // Index-Unordered
-    protected val IOEI8  = bb"1100" // Index-Ordered
-    protected val IOEI16 = bb"1101" // Index-Ordered
-    protected val IOEI32 = bb"1110" // Index-Ordered
-    protected val IOEI64 = bb"1111" // Index-Ordered
+    protected val SCALAR_PREFIX = bb"00"
+    protected val SCALAR0 = SCALAR_PREFIX ## bb"00"
+    protected val SCALAR1 = SCALAR_PREFIX ## bb"01"
+    protected val SCALAR2 = SCALAR_PREFIX ## bb"10"
+    protected val SCALAR3 = SCALAR_PREFIX ## bb"11"
+    protected val SCALAR  = SCALAR0
+    protected val US      = bb"0100" // Unit-Stride
+    protected val CS      = bb"0101" // Const-Strided
+    protected val WHOLE   = bb"0110"
+    protected val MASK    = bb"0111"
+    protected val IUEI8   = bb"1000" // Index-Unordered
+    protected val IUEI16  = bb"1001" // Index-Unordered
+    protected val IUEI32  = bb"1010" // Index-Unordered
+    protected val IUEI64  = bb"1011" // Index-Unordered
+    protected val IOEI8   = bb"1100" // Index-Ordered
+    protected val IOEI16  = bb"1101" // Index-Ordered
+    protected val IOEI32  = bb"1110" // Index-Ordered
+    protected val IOEI64  = bb"1111" // Index-Ordered
 
     protected val isFof = bb"1"
     protected val nonFof = bb"0"
 
     protected def getMemOpType(op: UInt): UInt = op(10, 7)
 
-    def isScalaOp(op: UInt): Bool = getMemOpType(op) === SCALA
+    def isScalaOp(op: UInt): Bool = getMemOpType(op)(3, 2) === SCALAR_PREFIX
 
-    def isVecMemOp(op: UInt): Bool = getMemOpType(op) =/= SCALA
+    def isVecMemOp(op: UInt): Bool = getMemOpType(op)(3, 2) =/= SCALAR_PREFIX
 
     def isVecMemContinousOp(op: UInt): Bool = Cat(Seq(US, WHOLE, MASK).map(_ === getMemOpType(op))).orR
     // vle, vlr, vlm, vleff
@@ -523,24 +534,24 @@ object Opcode {
     protected val uopLoad = bb"0"
 
     // normal load
-    val lb     = IntIType(SCALA, nonH, nonX, sign  , B, uopLoad)
-    val lh     = IntIType(SCALA, nonH, nonX, sign  , H, uopLoad)
-    val lw     = IntIType(SCALA, nonH, nonX, sign  , W, uopLoad)
-    val ld     = IntIType(SCALA, nonH, nonX, sign  , D, uopLoad)
-    val lq     = IntIType(SCALA, nonH, nonX, sign  , Q, uopLoad) // TODO: no corresponding store instruction
-    val lbu    = IntIType(SCALA, nonH, nonX, unsign, B, uopLoad)
-    val lhu    = IntIType(SCALA, nonH, nonX, unsign, H, uopLoad)
-    val lwu    = IntIType(SCALA, nonH, nonX, unsign, W, uopLoad)
+    val lb     = IntIType(SCALAR, nonH, nonX, sign  , B, uopLoad)
+    val lh     = IntIType(SCALAR, nonH, nonX, sign  , H, uopLoad)
+    val lw     = IntIType(SCALAR, nonH, nonX, sign  , W, uopLoad)
+    val ld     = IntIType(SCALAR, nonH, nonX, sign  , D, uopLoad)
+    val lq     = IntIType(SCALAR, nonH, nonX, sign  , Q, uopLoad) // TODO: no corresponding store instruction
+    val lbu    = IntIType(SCALAR, nonH, nonX, unsign, B, uopLoad)
+    val lhu    = IntIType(SCALAR, nonH, nonX, unsign, H, uopLoad)
+    val lwu    = IntIType(SCALAR, nonH, nonX, unsign, W, uopLoad)
     // hypervior load
-    val hlvb   = IntIType(SCALA, isH, nonX, sign  , B, uopLoad)
-    val hlvh   = IntIType(SCALA, isH, nonX, sign  , H, uopLoad)
-    val hlvw   = IntIType(SCALA, isH, nonX, sign  , W, uopLoad)
-    val hlvd   = IntIType(SCALA, isH, nonX, sign  , D, uopLoad)
-    val hlvbu  = IntIType(SCALA, isH, nonX, unsign, B, uopLoad)
-    val hlvhu  = IntIType(SCALA, isH, nonX, unsign, H, uopLoad)
-    val hlvwu  = IntIType(SCALA, isH, nonX, unsign, W, uopLoad)
-    val hlvxhu = IntIType(SCALA, isH, isX , unsign, H, uopLoad)
-    val hlvxwu = IntIType(SCALA, isH, isX , unsign, W, uopLoad)
+    val hlvb   = IntIType(SCALAR, isH, nonX, sign  , B, uopLoad)
+    val hlvh   = IntIType(SCALAR, isH, nonX, sign  , H, uopLoad)
+    val hlvw   = IntIType(SCALAR, isH, nonX, sign  , W, uopLoad)
+    val hlvd   = IntIType(SCALAR, isH, nonX, sign  , D, uopLoad)
+    val hlvbu  = IntIType(SCALAR, isH, nonX, unsign, B, uopLoad)
+    val hlvhu  = IntIType(SCALAR, isH, nonX, unsign, H, uopLoad)
+    val hlvwu  = IntIType(SCALAR, isH, nonX, unsign, W, uopLoad)
+    val hlvxhu = IntIType(SCALAR, isH, isX , unsign, H, uopLoad)
+    val hlvxwu = IntIType(SCALAR, isH, isX , unsign, W, uopLoad)
 
     def isHlv(op: UInt): Bool = op(6) === isH && op(0) === uopLoad
     def isHlvx(op: UInt): Bool = (op(6, 5) === (isH ## isX)) && op(0) === uopLoad
@@ -611,9 +622,9 @@ object Opcode {
     private val prefetchW = bb"0010"
 
     // Zicbop software prefetch
-    val prefetch_i = Value(SCALA, nonH, nonX, prefetchI, uopPrefetch)
-    val prefetch_r = Value(SCALA, nonH, nonX, prefetchR, uopPrefetch)
-    val prefetch_w = Value(SCALA, nonH, nonX, prefetchW, uopPrefetch)
+    val prefetch_i = Value(SCALAR, nonH, nonX, prefetchI, uopPrefetch)
+    val prefetch_r = Value(SCALAR, nonH, nonX, prefetchR, uopPrefetch)
+    val prefetch_w = Value(SCALAR, nonH, nonX, prefetchW, uopPrefetch)
 
     def getUopType(op: UInt): UInt = op(0)
 
@@ -634,17 +645,17 @@ object Opcode {
 
     // store pipeline
     // normal store
-    val sb = IntBSType(SCALA, nonH, nonX, sign, B, uopStore)
-    val sh = IntBSType(SCALA, nonH, nonX, sign, H, uopStore)
-    val sw = IntBSType(SCALA, nonH, nonX, sign, W, uopStore)
-    val sd = IntBSType(SCALA, nonH, nonX, sign, D, uopStore)
-    val sq = IntBSType(SCALA, nonH, nonX, sign, Q, uopStore) // TODO: no corresponding store instruction
+    val sb = IntBSType(SCALAR, nonH, nonX, sign, B, uopStore)
+    val sh = IntBSType(SCALAR, nonH, nonX, sign, H, uopStore)
+    val sw = IntBSType(SCALAR, nonH, nonX, sign, W, uopStore)
+    val sd = IntBSType(SCALAR, nonH, nonX, sign, D, uopStore)
+    val sq = IntBSType(SCALAR, nonH, nonX, sign, Q, uopStore) // TODO: no corresponding store instruction
 
     //hypervisor store
-    val hsvb = IntBSType(SCALA, isH, nonX, sign, B, uopStore)
-    val hsvh = IntBSType(SCALA, isH, nonX, sign, H, uopStore)
-    val hsvw = IntBSType(SCALA, isH, nonX, sign, W, uopStore)
-    val hsvd = IntBSType(SCALA, isH, nonX, sign, D, uopStore)
+    val hsvb = IntBSType(SCALAR, isH, nonX, sign, B, uopStore)
+    val hsvh = IntBSType(SCALAR, isH, nonX, sign, H, uopStore)
+    val hsvw = IntBSType(SCALAR, isH, nonX, sign, W, uopStore)
+    val hsvd = IntBSType(SCALAR, isH, nonX, sign, D, uopStore)
 
     def isHsv(op: UInt): Bool = op(6) === isH && op(0) === uopStore
 
@@ -710,11 +721,11 @@ object Opcode {
     val vsoxei64e64 = Value(IOEI64, nonH, nonX, nonFof, VD, uopStore) + Src1Gp + Src3Vp + Src2Vp
 
     // l1 cache op
-    val cbo_zero  = IntIType(SCALA, nonH, nonX, sign, CBO.zero , uopCbo) + NoSpec + BlockBack
+    val cbo_zero  = IntIType(SCALAR, nonH, nonX, sign, CBO.zero , uopCbo) + NoSpec + BlockBack
     // llc op
-    val cbo_clean = IntIType(SCALA, nonH, nonX, sign, CBO.clean, uopCbo) + NoSpec + BlockBack
-    val cbo_flush = IntIType(SCALA, nonH, nonX, sign, CBO.flush, uopCbo) + NoSpec + BlockBack
-    val cbo_inval = IntIType(SCALA, nonH, nonX, sign, CBO.inval, uopCbo) + NoSpec + BlockBack
+    val cbo_clean = IntIType(SCALAR, nonH, nonX, sign, CBO.clean, uopCbo) + NoSpec + BlockBack
+    val cbo_flush = IntIType(SCALAR, nonH, nonX, sign, CBO.flush, uopCbo) + NoSpec + BlockBack
+    val cbo_inval = IntIType(SCALAR, nonH, nonX, sign, CBO.inval, uopCbo) + NoSpec + BlockBack
 
     def getCmoOpcode(op: UInt): UInt = op(3, 1)
     def isCbo(op: UInt): Bool = op(0) === uopCbo && getCmoOpcode(op) === CBO.zero
@@ -748,65 +759,138 @@ object Opcode {
       val maxu = bb"111"
     }
 
-
     // atomics
-    // bit(1, 0) are size
-    // since atomics use a different fu type
-    // so we can safely reuse other load/store's encodings
-    // bit encoding: | optype (3bit) | size (3bit) | alu (1bit) |
-    def AMOFuOpWidth = 7
-    //                    4b     3b             3b 1b
-    val amoswap_b = IntRType(SCALA, NoALU.swap   , B, noALU)   + NoSpec + BlockBack
-    val amoadd_b  = IntRType(SCALA, WithALU.add  , B, withALU) + NoSpec + BlockBack
-    val amoxor_b  = IntRType(SCALA, WithALU.xor  , B, withALU) + NoSpec + BlockBack
-    val amoand_b  = IntRType(SCALA, WithALU.and  , B, withALU) + NoSpec + BlockBack
-    val amoor_b   = IntRType(SCALA, WithALU.or   , B, withALU) + NoSpec + BlockBack
-    val amomin_b  = IntRType(SCALA, WithALU.min  , B, withALU) + NoSpec + BlockBack
-    val amomax_b  = IntRType(SCALA, WithALU.max  , B, withALU) + NoSpec + BlockBack
-    val amominu_b = IntRType(SCALA, WithALU.minu , B, withALU) + NoSpec + BlockBack
-    val amomaxu_b = IntRType(SCALA, WithALU.maxu , B, withALU) + NoSpec + BlockBack
+    //                       4b        3b        3b   1b
+    val amoswap_b = IntRType(SCALAR, NoALU.swap  , B, noALU)   + NoSpec + BlockBack
+    val amoadd_b  = IntRType(SCALAR, WithALU.add , B, withALU) + NoSpec + BlockBack
+    val amoxor_b  = IntRType(SCALAR, WithALU.xor , B, withALU) + NoSpec + BlockBack
+    val amoand_b  = IntRType(SCALAR, WithALU.and , B, withALU) + NoSpec + BlockBack
+    val amoor_b   = IntRType(SCALAR, WithALU.or  , B, withALU) + NoSpec + BlockBack
+    val amomin_b  = IntRType(SCALAR, WithALU.min , B, withALU) + NoSpec + BlockBack
+    val amomax_b  = IntRType(SCALAR, WithALU.max , B, withALU) + NoSpec + BlockBack
+    val amominu_b = IntRType(SCALAR, WithALU.minu, B, withALU) + NoSpec + BlockBack
+    val amomaxu_b = IntRType(SCALAR, WithALU.maxu, B, withALU) + NoSpec + BlockBack
 
-    val amoswap_h = IntRType(SCALA, NoALU.swap   , H, noALU)   + NoSpec + BlockBack
-    val amoadd_h  = IntRType(SCALA, WithALU.add  , H, withALU) + NoSpec + BlockBack
-    val amoxor_h  = IntRType(SCALA, WithALU.xor  , H, withALU) + NoSpec + BlockBack
-    val amoand_h  = IntRType(SCALA, WithALU.and  , H, withALU) + NoSpec + BlockBack
-    val amoor_h   = IntRType(SCALA, WithALU.or   , H, withALU) + NoSpec + BlockBack
-    val amomin_h  = IntRType(SCALA, WithALU.min  , H, withALU) + NoSpec + BlockBack
-    val amomax_h  = IntRType(SCALA, WithALU.max  , H, withALU) + NoSpec + BlockBack
-    val amominu_h = IntRType(SCALA, WithALU.minu , H, withALU) + NoSpec + BlockBack
-    val amomaxu_h = IntRType(SCALA, WithALU.maxu , H, withALU) + NoSpec + BlockBack
+    val amoswap_h = IntRType(SCALAR, NoALU.swap  , H, noALU)   + NoSpec + BlockBack
+    val amoadd_h  = IntRType(SCALAR, WithALU.add , H, withALU) + NoSpec + BlockBack
+    val amoxor_h  = IntRType(SCALAR, WithALU.xor , H, withALU) + NoSpec + BlockBack
+    val amoand_h  = IntRType(SCALAR, WithALU.and , H, withALU) + NoSpec + BlockBack
+    val amoor_h   = IntRType(SCALAR, WithALU.or  , H, withALU) + NoSpec + BlockBack
+    val amomin_h  = IntRType(SCALAR, WithALU.min , H, withALU) + NoSpec + BlockBack
+    val amomax_h  = IntRType(SCALAR, WithALU.max , H, withALU) + NoSpec + BlockBack
+    val amominu_h = IntRType(SCALAR, WithALU.minu, H, withALU) + NoSpec + BlockBack
+    val amomaxu_h = IntRType(SCALAR, WithALU.maxu, H, withALU) + NoSpec + BlockBack
 
-    val lr_w      = IntIType(SCALA, NoALU.lr     , W, noALU) + NoSpec + BlockBack
-    val sc_w      = IntRType(SCALA, NoALU.sc     , W, noALU)   + NoSpec + BlockBack
-    val amoswap_w = IntRType(SCALA, NoALU.swap   , W, noALU)   + NoSpec + BlockBack
-    val amocas_w  = IntRType(SCALA, NoALU.cas    , W, noALU)   + NoSpec + BlockBack
-    val amoadd_w  = IntRType(SCALA, WithALU.add  , W, withALU) + NoSpec + BlockBack
-    val amoxor_w  = IntRType(SCALA, WithALU.xor  , W, withALU) + NoSpec + BlockBack
-    val amoand_w  = IntRType(SCALA, WithALU.and  , W, withALU) + NoSpec + BlockBack
-    val amoor_w   = IntRType(SCALA, WithALU.or   , W, withALU) + NoSpec + BlockBack
-    val amomin_w  = IntRType(SCALA, WithALU.min  , W, withALU) + NoSpec + BlockBack
-    val amomax_w  = IntRType(SCALA, WithALU.max  , W, withALU) + NoSpec + BlockBack
-    val amominu_w = IntRType(SCALA, WithALU.minu , W, withALU) + NoSpec + BlockBack
-    val amomaxu_w = IntRType(SCALA, WithALU.maxu , W, withALU) + NoSpec + BlockBack
+    val lr_w      = IntIType(SCALAR, NoALU.lr    , W, noALU)   + NoSpec + BlockBack
+    val sc_w      = IntRType(SCALAR, NoALU.sc    , W, noALU)   + NoSpec + BlockBack
+    val amoswap_w = IntRType(SCALAR, NoALU.swap  , W, noALU)   + NoSpec + BlockBack
+    val amoadd_w  = IntRType(SCALAR, WithALU.add , W, withALU) + NoSpec + BlockBack
+    val amoxor_w  = IntRType(SCALAR, WithALU.xor , W, withALU) + NoSpec + BlockBack
+    val amoand_w  = IntRType(SCALAR, WithALU.and , W, withALU) + NoSpec + BlockBack
+    val amoor_w   = IntRType(SCALAR, WithALU.or  , W, withALU) + NoSpec + BlockBack
+    val amomin_w  = IntRType(SCALAR, WithALU.min , W, withALU) + NoSpec + BlockBack
+    val amomax_w  = IntRType(SCALAR, WithALU.max , W, withALU) + NoSpec + BlockBack
+    val amominu_w = IntRType(SCALAR, WithALU.minu, W, withALU) + NoSpec + BlockBack
+    val amomaxu_w = IntRType(SCALAR, WithALU.maxu, W, withALU) + NoSpec + BlockBack
 
-    val lr_d      = IntIType(SCALA, NoALU.lr     , D, noALU) + NoSpec + BlockBack
-    val sc_d      = IntRType(SCALA, NoALU.sc     , D, noALU)   + NoSpec + BlockBack
-    val amoswap_d = IntRType(SCALA, NoALU.swap   , D, noALU)   + NoSpec + BlockBack
-    val amoadd_d  = IntRType(SCALA, WithALU.add  , D, withALU) + NoSpec + BlockBack
-    val amoxor_d  = IntRType(SCALA, WithALU.xor  , D, withALU) + NoSpec + BlockBack
-    val amoand_d  = IntRType(SCALA, WithALU.and  , D, withALU) + NoSpec + BlockBack
-    val amoor_d   = IntRType(SCALA, WithALU.or   , D, withALU) + NoSpec + BlockBack
-    val amomin_d  = IntRType(SCALA, WithALU.min  , D, withALU) + NoSpec + BlockBack
-    val amomax_d  = IntRType(SCALA, WithALU.max  , D, withALU) + NoSpec + BlockBack
-    val amominu_d = IntRType(SCALA, WithALU.minu , D, withALU) + NoSpec + BlockBack
-    val amomaxu_d = IntRType(SCALA, WithALU.maxu , D, withALU) + NoSpec + BlockBack
+    val lr_d      = IntIType(SCALAR, NoALU.lr    , D, noALU)   + NoSpec + BlockBack
+    val sc_d      = IntRType(SCALAR, NoALU.sc    , D, noALU)   + NoSpec + BlockBack
+    val amoswap_d = IntRType(SCALAR, NoALU.swap  , D, noALU)   + NoSpec + BlockBack
+    val amoadd_d  = IntRType(SCALAR, WithALU.add , D, withALU) + NoSpec + BlockBack
+    val amoxor_d  = IntRType(SCALAR, WithALU.xor , D, withALU) + NoSpec + BlockBack
+    val amoand_d  = IntRType(SCALAR, WithALU.and , D, withALU) + NoSpec + BlockBack
+    val amoor_d   = IntRType(SCALAR, WithALU.or  , D, withALU) + NoSpec + BlockBack
+    val amomin_d  = IntRType(SCALAR, WithALU.min , D, withALU) + NoSpec + BlockBack
+    val amomax_d  = IntRType(SCALAR, WithALU.max , D, withALU) + NoSpec + BlockBack
+    val amominu_d = IntRType(SCALAR, WithALU.minu, D, withALU) + NoSpec + BlockBack
+    val amomaxu_d = IntRType(SCALAR, WithALU.maxu, D, withALU) + NoSpec + BlockBack
 
-    val amocas_b  = IntRType(SCALA, NoALU.cas, B, noALU) + NoSpec + BlockBack
-    val amocas_h  = IntRType(SCALA, NoALU.cas, H, noALU) + NoSpec + BlockBack
-    val amocas_d  = IntRType(SCALA, NoALU.cas, D, noALU) + NoSpec + BlockBack
-    val amocas_q  = IntRType(SCALA, NoALU.cas, Q, noALU) + NoSpec + BlockBack
+    val amocas_b_0 = Value(SCALAR1, NoALU.cas, B, noALU)                  + Src2Gp + NoSpec
+    val amocas_b_1 = Value(SCALAR0, NoALU.cas, B, noALU) + GpWen + Src1Gp + Src2Gp          + BlockBack
+    val amocas_h_0 = Value(SCALAR1, NoALU.cas, H, noALU)                  + Src2Gp + NoSpec
+    val amocas_h_1 = Value(SCALAR0, NoALU.cas, H, noALU) + GpWen + Src1Gp + Src2Gp          + BlockBack
+    val amocas_w_0 = Value(SCALAR1, NoALU.cas, W, noALU)                  + Src2Gp + NoSpec
+    val amocas_w_1 = Value(SCALAR0, NoALU.cas, W, noALU) + GpWen + Src1Gp + Src2Gp          + BlockBack
+    val amocas_d_0 = Value(SCALAR1, NoALU.cas, D, noALU)                  + Src2Gp + NoSpec
+    val amocas_d_1 = Value(SCALAR0, NoALU.cas, D, noALU) + GpWen + Src1Gp + Src2Gp          + BlockBack
+    val amocas_q_0 = Value(SCALAR1, NoALU.cas, Q, noALU)                  + Src2Gp + NoSpec
+    val amocas_q_1 = Value(SCALAR0, NoALU.cas, Q, noALU) + GpWen + Src1Gp + Src2Gp
+    val amocas_q_2 = Value(SCALAR3, NoALU.cas, Q, noALU)                  + Src2Gp
+    val amocas_q_3 = Value(SCALAR2, NoALU.cas, Q, noALU) + GpWen          + Src2Gp          + BlockBack
 
-    def getAmocasUopIdx(opType: UInt): UInt = (opType >> this.AMOFuOpWidth).asUInt
+    /**
+     is(UopSplitType.AMO_CAS_W) {
+     csBundle(0).uopIdx := 0.U
+     csBundle(0).fuOpType := Cat(1.U(3.W), LSUOpType.amocas_w)
+     csBundle(0).lsrc(0) := 0.U
+     csBundle(0).lsrc(1) := src2
+     csBundle(0).rfWen := false.B
+     csBundle(0).waitForward := true.B
+     csBundle(0).blockBackward := false.B
+     csBundle(0).flushPipe := false.B
+
+     csBundle(1).uopIdx := 1.U
+     csBundle(1).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_w)
+     csBundle(1).lsrc(0) := src1
+     csBundle(1).lsrc(1) := dest
+     csBundle(1).waitForward := false.B
+     csBundle(1).blockBackward := true.B
+     }
+     is(UopSplitType.AMO_CAS_D) {
+     csBundle(0).uopIdx := 0.U
+     csBundle(0).fuOpType := Cat(1.U(3.W), LSUOpType.amocas_d)
+     csBundle(0).lsrc(0) := 0.U
+     csBundle(0).lsrc(1) := src2
+     csBundle(0).rfWen := false.B
+     csBundle(0).waitForward := true.B
+     csBundle(0).blockBackward := false.B
+     csBundle(0).flushPipe := false.B
+
+     csBundle(1).uopIdx := 1.U
+     csBundle(1).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_d)
+     csBundle(1).lsrc(0) := src1
+     csBundle(1).lsrc(1) := dest
+     csBundle(1).waitForward := false.B
+     csBundle(1).blockBackward := true.B
+     }
+     is(UopSplitType.AMO_CAS_Q) {
+     csBundle(0).uopIdx := 0.U
+     csBundle(0).fuOpType := Cat(1.U(3.W), LSUOpType.amocas_q)
+     csBundle(0).lsrc(0) := 0.U
+     csBundle(0).lsrc(1) := src2
+     csBundle(0).rfWen := false.B
+     csBundle(0).waitForward := true.B
+     csBundle(0).blockBackward := false.B
+     csBundle(0).flushPipe := false.B
+
+     csBundle(1).uopIdx := 1.U
+     csBundle(1).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_q)
+     csBundle(1).lsrc(0) := src1
+     csBundle(1).lsrc(1) := dest
+     csBundle(1).waitForward := false.B
+     csBundle(1).blockBackward := false.B
+
+     csBundle(2).uopIdx := 2.U
+     csBundle(2).fuOpType := Cat(3.U(3.W), LSUOpType.amocas_q)
+     csBundle(2).lsrc(0) := 0.U
+     csBundle(2).lsrc(1) := Mux(src2 === 0.U, 0.U, src2 + 1.U)
+     csBundle(2).rfWen := false.B
+     csBundle(2).waitForward := false.B
+     csBundle(2).blockBackward := false.B
+
+     csBundle(3).uopIdx := 3.U
+     csBundle(3).fuOpType := Cat(2.U(3.W), LSUOpType.amocas_q)
+     csBundle(3).lsrc(0) := 0.U
+     csBundle(3).lsrc(1) := Mux(dest === 0.U, 0.U, dest + 1.U)
+     csBundle(3).ldest := Mux(dest === 0.U, 0.U, dest + 1.U)
+     csBundle(3).waitForward := false.B
+     csBundle(3).blockBackward := true.B
+     }
+
+     */
+
+    // Note: Amo instructions all have SCALAR MemOptype
+    def getAmocasUopIdx(op: UInt): UInt = getMemOpType(op)(1, 0)
 
     def getAmoOp(op: UInt): UInt = op(6, 4) ## op(0)
     def getAmoOpAndSize(op: UInt): UInt = op(6, 0)
@@ -864,33 +948,38 @@ object Opcode {
     }
 
     val difftestAmoOpMap: Seq[(BitPat, UInt)] = Seq(
-      lr_w      -> DifftestOpcode.lr_w,
-      sc_w      -> DifftestOpcode.sc_w,
-      amoswap_w -> DifftestOpcode.amoswap_w,
-      amocas_w  -> DifftestOpcode.amocas_w,
-      amoadd_w  -> DifftestOpcode.amoadd_w,
-      amoxor_w  -> DifftestOpcode.amoxor_w,
-      amoand_w  -> DifftestOpcode.amoand_w,
-      amoor_w   -> DifftestOpcode.amoor_w,
-      amomin_w  -> DifftestOpcode.amomin_w,
-      amomax_w  -> DifftestOpcode.amomax_w,
-      amominu_w -> DifftestOpcode.amominu_w,
-      amomaxu_w -> DifftestOpcode.amomaxu_w,
+      lr_w       -> DifftestOpcode.lr_w,
+      sc_w       -> DifftestOpcode.sc_w,
+      amoswap_w  -> DifftestOpcode.amoswap_w,
+      amocas_w_0 -> DifftestOpcode.amocas_w,
+      amocas_w_1 -> DifftestOpcode.amocas_w,
+      amoadd_w   -> DifftestOpcode.amoadd_w,
+      amoxor_w   -> DifftestOpcode.amoxor_w,
+      amoand_w   -> DifftestOpcode.amoand_w,
+      amoor_w    -> DifftestOpcode.amoor_w,
+      amomin_w   -> DifftestOpcode.amomin_w,
+      amomax_w   -> DifftestOpcode.amomax_w,
+      amominu_w  -> DifftestOpcode.amominu_w,
+      amomaxu_w  -> DifftestOpcode.amomaxu_w,
 
-      lr_d -> DifftestOpcode.lr_d,
-      sc_d -> DifftestOpcode.sc_d,
-      amoswap_d -> DifftestOpcode.amoswap_d,
-      amocas_d  -> DifftestOpcode.amocas_d,
-      amoadd_d  -> DifftestOpcode.amoadd_d,
-      amoxor_d  -> DifftestOpcode.amoxor_d,
-      amoand_d  -> DifftestOpcode.amoand_d,
-      amoor_d   -> DifftestOpcode.amoor_d,
-      amomin_d  -> DifftestOpcode.amomin_d,
-      amomax_d  -> DifftestOpcode.amomax_d,
-      amominu_d -> DifftestOpcode.amominu_d,
-      amomaxu_d -> DifftestOpcode.amomaxu_d,
+      lr_d       -> DifftestOpcode.lr_d,
+      sc_d       -> DifftestOpcode.sc_d,
+      amoswap_d  -> DifftestOpcode.amoswap_d,
+      amocas_d_0 -> DifftestOpcode.amocas_d,
+      amocas_d_1 -> DifftestOpcode.amocas_d,
+      amoadd_d   -> DifftestOpcode.amoadd_d,
+      amoxor_d   -> DifftestOpcode.amoxor_d,
+      amoand_d   -> DifftestOpcode.amoand_d,
+      amoor_d    -> DifftestOpcode.amoor_d,
+      amomin_d   -> DifftestOpcode.amomin_d,
+      amomax_d   -> DifftestOpcode.amomax_d,
+      amominu_d  -> DifftestOpcode.amominu_d,
+      amomaxu_d  -> DifftestOpcode.amomaxu_d,
 
-      amocas_q  -> DifftestOpcode.amocas_q,
+      amocas_q_0 -> DifftestOpcode.amocas_q,
+      amocas_q_1 -> DifftestOpcode.amocas_q,
+      amocas_q_2 -> DifftestOpcode.amocas_q,
+      amocas_q_3 -> DifftestOpcode.amocas_q,
     ).map{ case (k, v) => k.encode -> v }
   }
 
@@ -1124,6 +1213,8 @@ object Opcode {
         vpWen = traits.exists(_.isInstanceOf[VecWenTrait]),
         vlWen = traits.contains(VlWen),
         vxsatWen = traits.contains(VxsatWen),
+        noSpec = traits.contains(NoSpec),
+        blockBack = traits.contains(BlockBack),
         vdAlloc = !traits.contains(NoDestAlloc),
       )
     }
