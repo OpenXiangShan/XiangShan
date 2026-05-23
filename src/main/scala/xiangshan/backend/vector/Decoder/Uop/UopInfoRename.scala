@@ -77,6 +77,9 @@ class UopInfoRename extends Bundle {
   val vlWen = Bool()
   val vxsatWen = Bool()
 
+  val noSpec = Bool()
+  val blockBack = Bool()
+
   /**
    * If need alloc vd at rename stage
    */
@@ -98,6 +101,8 @@ object UopInfoRename extends InfoToString {
     vpWen      : Boolean,
     vlWen      : Boolean,
     vxsatWen   : Boolean,
+    noSpec     : Boolean,
+    blockBack  : Boolean,
     vdAlloc    : Boolean,
   ): BitPat = {
     val src1: String = operandTypeToString(src1Type)
@@ -111,9 +116,11 @@ object UopInfoRename extends InfoToString {
     val vpW = booleanToString(vpWen)
     val vlW = booleanToString(vlWen)
     val vxsatW = booleanToString(vxsatWen)
+    val noS = booleanToString(noSpec)
+    val blockB = booleanToString(blockBack)
     val vdAllocStr = booleanToString(vdAlloc)
 
-    val bp = BitPat(s"b$src1$src2$vlR$maskTy$intRmR$rdAsSrc$gpW$fpW$vpW$vlW$vxsatW$vdAllocStr")
+    val bp = BitPat(s"b$src1$src2$vlR$maskTy$intRmR$rdAsSrc$gpW$fpW$vpW$vlW$vxsatW$noS$blockB$vdAllocStr")
     require(
       bp.width == width,
       s"bitpat width is ${bp.width}, but ${width} is expected"

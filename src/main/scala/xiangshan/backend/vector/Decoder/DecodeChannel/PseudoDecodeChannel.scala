@@ -9,6 +9,7 @@ import xiangshan.backend.decode.opcode.OpcodeTraits._
 import sourcecode.{Name => SourceName}
 import top.ArgParser
 import xiangshan.{XSCoreParameters, XSCoreParamsKey}
+import xiangshan.CommitType
 import xiangshan.backend.decode.isa.PseudoInstructions
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.decode.opcode.Opcode
@@ -56,6 +57,7 @@ class PseudoDecodeChannel(
     src1Field,
     src2Field,
     needVecEnableField,
+    commitTypeField,
     canRobCompressField,
   )
 
@@ -77,7 +79,8 @@ class PseudoDecodeChannel(
   out.bits.blockBack := bundle(blockBackField)
   out.bits.flushPipe := bundle(flushPipeField)
   out.bits.selImm := bundle(selImmField)
-  out.bits.canRobCompress := !bundle(canRobCompressField)
+  out.bits.commitType := bundle(commitTypeField)
+  out.bits.canRobCompress := bundle(canRobCompressField)
   out.bits.exceptionII := bundle(needVecEnableField) && in.fromCSR.illegalInst.vsIsOff
 }
 
@@ -119,6 +122,7 @@ object PseudoDecodeChannel {
     val blockBack = Bool()
     val flushPipe = Bool()
     val selImm = ValidIO(DecodeSelImm())
+    val commitType = CommitType()
     val canRobCompress = Bool()
     val exceptionII = Bool()
   }
@@ -268,6 +272,15 @@ object PseudoDecodeChannel {
       .headOption
       .map(BitPat.Y() ## _)
       .getOrElse(BitPat.N() ## BitPat.dontCare(DecodeSelImm.width))
+  )
+
+  val commitTypeField = new DecodeFieldGen(
+    CommitType(),
+    (op: InstPattern) => (op match {
+      case _: IntJTypePattern => CommitType.BRANCH
+      case _: JalrPattern => CommitType.BRANCH
+      case _ => CommitType.NORMAL
+    }).toBitPat
   )
 
   val canRobCompressField = new DecodeFieldGen(

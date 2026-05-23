@@ -115,6 +115,8 @@ abstract class UopBase(baseTraits: UopTrait*) {
       vpWen = vpWen,
       vlWen = vlWen,
       vxsatWen = vxsatWen,
+      noSpec = this.getTraits.contains(NoSpec),
+      blockBack = this.getTraits.contains(BlockBack),
       vdAlloc = vdAlloc
     )
   }
