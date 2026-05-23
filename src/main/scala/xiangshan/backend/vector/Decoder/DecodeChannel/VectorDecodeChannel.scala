@@ -6,6 +6,7 @@ import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import top.ArgParser
 import utils.BundleUtils.makeValid
+import xiangshan._
 import xiangshan.backend.Bundles.UopIdx
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
 import xiangshan.backend.decode.opcode.Opcode
@@ -135,6 +136,8 @@ class VectorDecodeChannel(
             }
           case vci: VecConfigInstPattern =>
             Seq()
+          case vii: VecIntInstPattern =>
+            Seq(vi ## SewLmulPattern.dontCare ## NfPattern.dontCare)
         }
     }
   }
@@ -152,6 +155,7 @@ class VectorDecodeChannel(
     IsVecMemContinousField,
     ImmIsSign5b,
     ImmIsUnsign5b,
+    ExceptionIIField,
   )
 
   // Generate decode tables, using both instruction bits and sew as decode pattern.
@@ -281,6 +285,8 @@ class VectorDecodeChannel(
       (immIsUnsign5b || immIsSign5b) -> instFields.IMM5_OPIVI
     ))
     out.uop(i).bits.vm := instFields.VM
+
+    out.uop(i).bits.exceptionII := instBundle(ExceptionIIField)
   }
   out.uopNumOH := numUopOH
 
@@ -342,6 +348,8 @@ object VectorDecodeChannel {
     val selImm = ValidIO(DecodeSelImm())
     val imm = UInt(32.W)
     val vm = Bool() // if vm is 0, need mask
+
+    val exceptionII = Bool()
   }
 
   class VecDecodeChannelOutput(val uopWidth: Int) extends Bundle {

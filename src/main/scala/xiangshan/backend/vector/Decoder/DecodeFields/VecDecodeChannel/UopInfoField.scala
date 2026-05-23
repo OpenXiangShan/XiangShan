@@ -4,13 +4,18 @@ import chisel3._
 import chisel3.util._
 import xiangshan.backend.decode.opcode.Opcode.LduOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.StuOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.AmoOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.LinkOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.NewJmpOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.{Opcode, toOpcodeUtil}
-import xiangshan.backend.vector.Decoder.InstPattern._
+import xiangshan.backend.vector.Decoder.InstPattern.{VecIntInstPattern, _}
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
 import xiangshan.backend.vector.Decoder.Split.SplitTable
+import xiangshan.backend.vector.Decoder.Uop.ScalaUopTable.{tableZacas, tableZabhaZacas}
 import xiangshan.backend.vector.Decoder.Uop.UopInfoRename
 import xiangshan.backend.vector.Decoder.Uop.UopTrait.{UopBase, VecLoadUop}
 import xiangshan.backend.vector.Decoder.util.DecodeField
+import xiangshan.backend.vector.util.BString.BinaryStringHelper
 
 /**
  * UopInfoField generates the uop information for each micro-op of a vector instruction based on the instruction
@@ -138,6 +143,11 @@ object UopInfoFieldVec extends DecodeField[
 
           case _ =>
             Seq()
+        }
+      case vii: VecIntInstPattern =>
+        vii match {
+          // case jump: VecJumpInstPattern => tableISplit(jump.rawInst)
+          case amocas: AmocasInstPattern => (tableZacas ++ tableZabhaZacas)(amocas.rawInst)
         }
     }
   }
