@@ -905,6 +905,13 @@ object Instructions {
       res
     }
 
+    def mapUopcodes(kvs: (this.type => (BitPat, Seq[Opcode]))*): Map[BitPat, Seq[Opcode]] = {
+      val res = Map(kvs.map(_(this)): _*)
+      val diffSet: Set[BitPat] = this.all.toSet &~ res.keySet
+      require(diffSet.isEmpty, s"mapUopcodes: These instructions not handled ${diffSet.map(allNameMap)}")
+      res
+    }
+
     def mapUopcode(kvs: (this.type => (BitPat, Opcode))*): Map[BitPat, Seq[Opcode]] = {
       mapOpcode(kvs: _*).map { case (k, v) => k -> Seq(v) }
     }

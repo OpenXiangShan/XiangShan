@@ -64,6 +64,7 @@ object WritePartVdField extends BoolDecodeField[
           }
           case _: VecStoreInstPattern => n
         }
+      case _: VecIntInstPattern => dc
     }
   }
 }

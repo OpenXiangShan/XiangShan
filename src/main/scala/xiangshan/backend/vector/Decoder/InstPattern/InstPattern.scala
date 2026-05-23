@@ -24,6 +24,7 @@ sealed trait InstPattern extends DecodePattern {
   @BeanProperty var name: String = ""
 
   def rd : BitPat = this.rawInst(11, 7)
+  def func3: BitPat = this.rawInst(14, 12)
   def rs1: BitPat = this.rawInst(19, 15)
   def rs2: BitPat = this.rawInst(24, 20)
 
@@ -156,13 +157,15 @@ case class FenceInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
 
 case class FenceiInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
 
-sealed class AmoInstPattern()(implicit rawInst: BitPat) extends IntRTypePattern
+case class AmoInstPattern()(implicit rawInst: BitPat) extends IntRTypePattern
 
-object AmoInstPattern {
-  def apply()(implicit rawInst: BitPat): AmoInstPattern = new AmoInstPattern
+sealed class AmocasInstPattern()(implicit rawInst: BitPat) extends VecIntInstPattern
+
+object AmocasInstPattern {
+  def apply()(implicit rawInst: BitPat): AmocasInstPattern = new AmocasInstPattern
 }
 
-case class AmocasQIllInstPattern()(implicit rawInst: BitPat) extends AmoInstPattern
+case class AmocasQIllInstPattern()(implicit rawInst: BitPat) extends AmocasInstPattern
 
 case class IntStoreInstPattern()(implicit rawInst: BitPat) extends IntSTypePattern
 
@@ -199,6 +202,10 @@ case class FpRTypeFpDestInstPattern()(implicit rawInst: BitPat) extends FpRTypeI
 case class FpR4TypeInstPattern()(implicit rawInst: BitPat) extends FpInstPattern
 
 case class FpSTypeInstPattern()(implicit rawInst: BitPat) extends FpInstPattern
+
+sealed abstract class VecIntInstPattern()(implicit rawInst: BitPat) extends VecInstPattern()
+
+sealed abstract class VecJumpInstPattern()(implicit rawInst: BitPat) extends VecIntInstPattern()
 
 sealed abstract class VecMemInstPattern(
   implicit rawInst: BitPat,
@@ -269,7 +276,6 @@ case class VecConfigInstPattern()(
   implicit rawInst: BitPat,
 ) extends VecInstPattern() {
   def bit31_20 = rawInst(31, 20)
-  def func3 = b"111"
   def zimm10_0 = rawInst(30, 20)
   def zimm9_0 = rawInst(29, 20)
 
@@ -422,9 +428,9 @@ object InstPattern {
               case "100" =>
                 (rs2(0).rawString, rd(0).rawString) match {
                   case ("1", _) | (_, "1") => AmocasQIllInstPattern()
-                  case _ => AmoInstPattern()
+                  case _ => AmocasInstPattern()
                 }
-              case _ => AmoInstPattern()
+              case _ => AmocasInstPattern()
             }
           case _ => AmoInstPattern()
         }
