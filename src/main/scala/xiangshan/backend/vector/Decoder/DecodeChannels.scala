@@ -50,11 +50,11 @@ class DecodeChannels(
     s"_M2x${MaxM2UopIdx}_M4x${MaxM4UopIdx}_M8x${MaxM8UopIdx}"
 
   require(extensions.distinct.size == extensions.size, "Duplicate extensions are not allowed")
-  val simpleExts: Seq[ExtBase] = extensions.diff(Seq(V, Zvbb, Zvknha))
+  val simpleExts: Seq[ExtBase] = extensions.diff(Seq(V, Zvbb, Zvknha, Zacas, ZacasZabha))
   val simpleInsts = InstPattern.extensionInsts(simpleExts: _*)
 
   // Get vector instruction bits pattern by extensions
-  val vectorExts = extensions.intersect(Seq(V, Zvbb, Zvknha))
+  val vectorExts = extensions.intersect(Seq(V, Zvbb, Zvknha, Zacas, ZacasZabha))
   val vectorInsts = InstPattern.extensionInsts(vectorExts: _*).map(_.asInstanceOf[VecInstPattern])
 
   val uopBufferSize = maxSplitUopNum - 1
@@ -407,8 +407,9 @@ object DecodeChannelOutput {
 
     uop.vm := vuop.vm
 
-    uop.noSpec := false.B
-    uop.blockBack := false.B
+    uop.noSpec := vuop.renameInfo.uop.noSpec
+    uop.blockBack := vuop.renameInfo.uop.blockBack
+
     uop.flushPipe := false.B
     uop.selImm := vuop.selImm
     uop.imm := vuop.imm
@@ -424,7 +425,7 @@ object DecodeChannelOutput {
     uop.isLastUop := vuop.isLastUop
     uop.src12Rev := vuop.src12Rev
 
-    uop.exceptionII := false.B
+    uop.exceptionII := vuop.exceptionII
     uop.exceptionVI := false.B
 
     uop
@@ -594,7 +595,7 @@ object DecodeChannelOutput {
         DecodeSelImm.CSRRVLENB -> (VLEN / 8).U,
       ),
     )
-    uop.commitType := CommitType.NORMAL
+    uop.commitType := puop.commitType
     uop.vdDepElim := VdDepElim.Always // never used
     uop.isWritePartVd := false.B
     uop.canRobCompress := puop.canRobCompress
