@@ -29,7 +29,6 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.wpu.ReplayCarry
-import xiangshan.mem.prefetch.PrefetchReqBundle
 import math._
 
 object genWmask {

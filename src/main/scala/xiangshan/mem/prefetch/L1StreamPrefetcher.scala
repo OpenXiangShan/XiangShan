@@ -174,12 +174,12 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
     val flush = Input(Bool())
     val dynamic_depth = Input(UInt(DEPTH_BITS.W))
     val confidence = Input(UInt(1.W))
-    val train_req = Flipped(DecoupledIO(new PrefetchReqBundle))
+    val train_req = Flipped(DecoupledIO(new TrainReqBundle))
     val l1_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
     val l2_l3_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
 
     // Stride send lookup req here
-    val stream_lookup_req  = Flipped(ValidIO(new PrefetchReqBundle))
+    val stream_lookup_req  = Flipped(ValidIO(UInt(VAddrBits.W)))
     val stream_lookup_resp = Output(Bool())
   })
 
@@ -200,7 +200,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   val s0_pc    = io.train_req.bits.pc
   val s0_vaddr = io.train_req.bits.vaddr
   val s0_miss  = io.train_req.bits.miss
-  val s0_pfHit = io.train_req.bits.pfHitStream
+  val s0_pfHit = isFromStream(io.train_req.bits.metaSource)
   val s0_valid = s0_fire && (s0_miss || s0_pfHit)
   val s0_region_bits = get_region_bits(s0_vaddr)
   val s0_region_tag = get_region_tag(s0_vaddr)
@@ -448,7 +448,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
   // Stride lookup starts here
   // S0: Stride send req
   val s0_lookup_valid = io.stream_lookup_req.valid
-  val s0_lookup_vaddr = io.stream_lookup_req.bits.vaddr
+  val s0_lookup_vaddr = io.stream_lookup_req.bits
   val s0_lookup_tag = get_region_tag(s0_lookup_vaddr)
   // S1: match
   val s1_lookup_valid = GatedValidRegNext(s0_lookup_valid)

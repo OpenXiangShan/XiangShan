@@ -937,7 +937,7 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
 class BertiPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasBertiHelper {
   override lazy val io = IO(new BertiPrefetcherIO)
 
-  val trainFilter = Module(new NewTrainFilter(TRAIN_FILTER_SIZE, name, true, true))
+  val trainFilter = Module(new TrainFilter(TRAIN_FILTER_SIZE, name, true, true))
   val historyTable = Module(new HistoryTable())
   val detlaTable = Module(new DeltaTable())
   val prefetchBuffer = Module(new DeltaPrefetchBuffer(PREFETCH_FILTER_SIZE, name))

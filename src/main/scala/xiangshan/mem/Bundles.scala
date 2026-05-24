@@ -28,7 +28,7 @@ import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.PreDecodeInfo
-import xiangshan.mem.prefetch.{PrefetchReqBundle, TrainReqBundle}
+import xiangshan.mem.prefetch._
 import xiangshan.backend.exu.ExeUnitParams
 
 import scala.math._
@@ -178,16 +178,6 @@ object Bundles {
       }
       connectSamePort(this, inputReg)
       // The remaining variables must be assigned outside the function to ensure correctness
-    }
-
-    def toPrefetchReqBundle(): PrefetchReqBundle = {
-      val res = Wire(new PrefetchReqBundle)
-      res.vaddr := this.vaddr
-      res.paddr := this.paddr
-      res.pc := this.uop.pc
-      res.miss := this.miss
-      res.pfHitStream := isFromStream(this.meta_prefetch)
-      res
     }
 
     def toTrainReqBundle(): TrainReqBundle = {

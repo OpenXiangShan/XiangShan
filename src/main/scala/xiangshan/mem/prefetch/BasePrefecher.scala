@@ -105,14 +105,6 @@ class BertiPrefetcherIO()(implicit p: Parameters) extends PrefetcherIO {
   val refillTrain = Flipped(ValidIO(new TrainReqBundle()))
 }
 
-class PrefetchReqBundle()(implicit p: Parameters) extends XSBundle {
-  val vaddr       = UInt(VAddrBits.W)
-  val paddr       = UInt(PAddrBits.W)
-  val pc          = UInt(VAddrBits.W)
-  val miss        = Bool()
-  val pfHitStream = Bool()
-}
-
 abstract class BasePrefecher()(implicit p: Parameters) extends XSModule
   with PrefetcherParams
   with HasDCacheParameters

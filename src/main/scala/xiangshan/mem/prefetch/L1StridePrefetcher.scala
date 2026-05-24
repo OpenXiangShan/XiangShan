@@ -116,11 +116,11 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     val flush = Input(Bool())
     val dynamic_depth = Input(UInt(32.W)) // TODO: enable dynamic stride depth
     val confidence = Input(UInt(1.W))
-    val train_req = Flipped(DecoupledIO(new PrefetchReqBundle))
+    val train_req = Flipped(DecoupledIO(new TrainReqBundle))
     val l1_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
     val l2_l3_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
     // query Stream component to see if a stream pattern has already been detected
-    val stream_lookup_req  = ValidIO(new PrefetchReqBundle)
+    val stream_lookup_req  = ValidIO(UInt(VAddrBits.W))
     val stream_lookup_resp = Input(Bool())
   })
 
@@ -146,7 +146,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
   val s0_index = Mux(s0_hit, OHToUInt(s0_pc_match_vec), replacement.way)
   io.train_req.ready := s0_can_accept
   io.stream_lookup_req.valid := s0_valid
-  io.stream_lookup_req.bits  := io.train_req.bits
+  io.stream_lookup_req.bits := io.train_req.bits.vaddr
 
   when(s0_valid) {
     replacement.access(s0_index)
