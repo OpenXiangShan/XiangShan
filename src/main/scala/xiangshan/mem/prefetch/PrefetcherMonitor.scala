@@ -7,7 +7,6 @@ import utils._
 import utility._
 import xiangshan._
 import xiangshan.mem.L1PrefetchReq
-import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.backend.rob.RobDebugRollingIO
 

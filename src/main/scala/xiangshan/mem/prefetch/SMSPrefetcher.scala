@@ -34,7 +34,6 @@ import utility._
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.mem.L1PrefetchReq
-import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 import xiangshan.mem.trace._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.cache.HasDCacheParameters
@@ -1247,7 +1246,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
 
   for((train, i) <- io.ld_in.zipWithIndex){
     XSPerfAccumulate(s"pf_train_miss_${i}", train.valid && train.bits.miss)
-    XSPerfAccumulate(s"pf_train_prefetched_${i}", train.valid && isFromL1Prefetch(train.bits.meta_prefetch))
+    XSPerfAccumulate(s"pf_train_prefetched_${i}", train.valid && isFromL1Prefetch(train.bits.metaSource))
   }
   val trace = Wire(new L1MissTrace)
   trace.vaddr := 0.U

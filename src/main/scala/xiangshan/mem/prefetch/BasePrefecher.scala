@@ -23,9 +23,9 @@ import org.chipsalliance.cde.config.Parameters
 import utility.MemReqSource
 import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
+import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.cache.mmu.TlbRequestIO
-import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 import xiangshan.mem.L1PrefetchReq
 
 object PrefetchTarget extends Enumeration{
@@ -75,11 +75,14 @@ class L2PrefetchReq(implicit p: Parameters) extends XSBundle {
 class L3PrefetchReq(implicit p: Parameters) extends L2PrefetchReq
 
 class TrainReqBundle()(implicit p: Parameters) extends DCacheBundle {
+  val robIdx = new RobPtr
   val vaddr = UInt(VAddrBits.W)
   val paddr = UInt(PAddrBits.W)
   val pc = UInt(VAddrBits.W)
   val miss = Bool()
   val metaSource = UInt(L1PfSourceBits.W)
+  val isFirstIssue = Bool()
+  val isHwPrefetch = Bool()
   val refillLatency = UInt(LATENCY_WIDTH.W)
 }
 
@@ -92,8 +95,8 @@ class SourcePrefetchReq()(implicit p: Parameters) extends DCacheBundle {
 
 class PrefetcherIO()(implicit p: Parameters) extends XSBundle {
   val enable = Input(Bool())
-  val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LsPrefetchTrainBundle())))
-  val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new LsPrefetchTrainBundle())))
+  val ld_in = Flipped(Vec(backendParams.LdExuCnt, ValidIO(new TrainReqBundle())))
+  val st_in = Flipped(Vec(backendParams.StaExuCnt, ValidIO(new TrainReqBundle())))
   val tlb_req = new TlbRequestIO(nRespDups = 2)
   val pmp_resp = Flipped(new PMPRespBundle())
   val l1_req = DecoupledIO(new L1PrefetchReq())

@@ -32,6 +32,7 @@ import xiangshan.cache.mmu._
 import xiangshan.ExceptionNO._
 import xiangshan.mem.Bundles._
 import xiangshan.mem.StoreStage._
+import xiangshan.mem.prefetch._
 
 class StoreUnitS0(param: ExeUnitParams)(
   implicit p: Parameters,
@@ -574,7 +575,7 @@ class StoreUnitS2(param: ExeUnitParams)(
 
     // Prefetch Train
     val prefetchTrainHint = Output(Bool())
-    val prefetchTrain = ValidIO(new LsPrefetchTrainBundle())
+    val prefetchTrain = ValidIO(new TrainReqBundle())
   })
 
   val pipeIn = io_pipeIn.get
@@ -694,15 +695,14 @@ class StoreUnitS2(param: ExeUnitParams)(
   val prefetchTrainValid = fire && io.dcacheResp.fire && tlbHit && tlbAccessible && !hasException && !isUncache
   io.prefetchTrainHint := prefetchTrainValid
   io.prefetchTrain.valid := prefetchTrainValid
-  io.prefetchTrain.bits := DontCare
-  io.prefetchTrain.bits.uop := uop
+  io.prefetchTrain.bits.robIdx := uop.robIdx
+  io.prefetchTrain.bits.pc := uop.pc
   io.prefetchTrain.bits.vaddr := in.vaddr
   io.prefetchTrain.bits.paddr := in.paddr.get
   io.prefetchTrain.bits.miss := cacheMiss
   io.prefetchTrain.bits.isFirstIssue := in.isFirstIssue
-  io.prefetchTrain.bits.meta_prefetch := false.B
-  io.prefetchTrain.bits.meta_access := false.B
-  io.prefetchTrain.bits.is_from_hw_pf := isHWPrefetch
+  io.prefetchTrain.bits.metaSource := L1_HW_PREFETCH_NULL
+  io.prefetchTrain.bits.isHwPrefetch := isHWPrefetch
   io.prefetchTrain.bits.refillLatency := 0.U // TODO: store not for berti, so there is no refillLatency
 
   io.unalignHeadTlbHit := fire && isUnalignHead && tlbHit
@@ -905,7 +905,7 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   // Prefetch Train
   val prefetchTrainHintS1 = Output(Bool())
   val prefetchTrainHintS2 = Output(Bool())
-  val prefetchTrain = ValidIO(new LsPrefetchTrainBundle())
+  val prefetchTrain = ValidIO(new TrainReqBundle())
   // Feedback to RS in s2, for store issue control
   val feedBackSlow = ValidIO(new RSFeedback)
   // Writeback

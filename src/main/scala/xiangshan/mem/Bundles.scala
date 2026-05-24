@@ -165,33 +165,6 @@ object Bundles {
     }
   }
 
-  class LsPrefetchTrainBundle(implicit p: Parameters) extends LsPipelineBundle {
-    val meta_prefetch = UInt(L1PfSourceBits.W)
-    val meta_access = Bool()
-    val is_from_hw_pf = Bool() // s0 source is from prefetch
-    val refillLatency = UInt(LATENCY_WIDTH.W)
-
-    def fromLsPipelineBundle(input: LsPipelineBundle, latch: Boolean = false, enable: Bool = true.B) = {
-      val inputReg = latch match {
-        case true   => RegEnable(input, enable)
-        case false  => input
-      }
-      connectSamePort(this, inputReg)
-      // The remaining variables must be assigned outside the function to ensure correctness
-    }
-
-    def toTrainReqBundle(): TrainReqBundle = {
-      val res = Wire(new TrainReqBundle)
-      res.vaddr := this.vaddr
-      res.paddr := this.paddr
-      res.pc := this.uop.pc
-      res.miss := this.miss
-      res.metaSource := this.meta_prefetch
-      res.refillLatency := this.refillLatency
-      res
-    }
-  }
-
   class LqWriteBundle(implicit p: Parameters) extends LsPipelineBundle {
     // load inst replay informations
     val rep_info = new LoadToLsqReplayIO

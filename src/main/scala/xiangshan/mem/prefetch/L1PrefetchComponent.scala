@@ -9,7 +9,6 @@ import xiangshan._
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.cache.mmu._
-import xiangshan.mem.Bundles.LsPrefetchTrainBundle
 import xiangshan.mem.{L1PrefetchReq, L1PrefetchSource}
 
 case class StreamStrideParams() extends PrefetcherParams{
@@ -114,10 +113,10 @@ class TrainFilter(size: Int, name: String, hasLoadTrain: Boolean=true, hasStoreT
     // train input: from ldu, stu
 
     val ldTrainOpt = if (hasLoadTrain) {
-      Some(Flipped(Vec(backendParams.LdExuCnt, ValidIO(new LsPrefetchTrainBundle()))))
+      Some(Flipped(Vec(backendParams.LdExuCnt, ValidIO(new TrainReqBundle()))))
     } else None
     val stTrainOpt = if (hasStoreTrain) {
-       Some(Flipped(Vec(backendParams.StaExuCnt, ValidIO(new LsPrefetchTrainBundle()))))
+       Some(Flipped(Vec(backendParams.StaExuCnt, ValidIO(new TrainReqBundle()))))
     } else None
     // filter output
     val trainReq = DecoupledIO(new TrainReqBundle())
@@ -137,13 +136,13 @@ class TrainFilter(size: Int, name: String, hasLoadTrain: Boolean=true, hasStoreT
   val deqPtr = WireInit(deqPtrExt.value)
 
   val ldReorderOpt = io.ldTrainOpt.map { ldTrain =>
-    HwSort(VecInit(ldTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.uop.robIdx) }))
+    HwSort(VecInit(ldTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.robIdx) }))
   }
   val stReorderOpt = io.stTrainOpt.map { stTrain =>
-    HwSort(VecInit(stTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.uop.robIdx) }))
+    HwSort(VecInit(stTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.robIdx) }))
   }
-  val reqs = ldReorderOpt.map(_.map(_.bits.toTrainReqBundle())).getOrElse(Seq.empty) ++
-    stReorderOpt.map(_.map(_.bits.toTrainReqBundle())).getOrElse(Seq.empty)
+  val reqs = ldReorderOpt.map(_.map(_.bits)).getOrElse(Seq.empty) ++
+    stReorderOpt.map(_.map(_.bits)).getOrElse(Seq.empty)
   val reqsValid = ldReorderOpt.map(_.map(_.valid)).getOrElse(Seq.empty) ++
     stReorderOpt.map(_.map(_.valid)).getOrElse(Seq.empty)
 
@@ -784,7 +783,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
 class L1Prefetcher(implicit p: Parameters) extends BasePrefecher with HasStreamPrefetchHelper with HasStridePrefetchHelper {
   val pf_ctrl = IO(Input(Vec(L1PrefetcherNum, new PrefetchControlBundle)))
-  val stride_train = IO(Flipped(Vec(backendParams.LduCnt + backendParams.HyuCnt, ValidIO(new LsPrefetchTrainBundle()))))
+  val stride_train = IO(Flipped(Vec(backendParams.LduCnt + backendParams.HyuCnt, ValidIO(new TrainReqBundle()))))
   val l2PfqBusy = IO(Input(Bool()))
   val strideEnable = IO(Input(Bool()))
 

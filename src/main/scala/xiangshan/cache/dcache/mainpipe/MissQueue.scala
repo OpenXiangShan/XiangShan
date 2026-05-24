@@ -960,6 +960,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // FIXME lyq: when mshr entry merges, req.pf_source may be cleaned.
   io.refill_train.bits.metaSource := req.pf_source
   io.refill_train.bits.refillLatency := refill_latency
+  io.refill_train.bits.robIdx := DontCare
+  io.refill_train.bits.isFirstIssue := DontCare
+  io.refill_train.bits.isHwPrefetch := DontCare
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
   XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)

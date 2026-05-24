@@ -33,6 +33,7 @@ import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.mem.Bundles._
 import xiangshan.mem.LoadReplayCauses._
 import xiangshan.mem.LoadStage._
+import xiangshan.mem.prefetch._
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 
@@ -838,7 +839,7 @@ class LoadUnitS2(param: ExeUnitParams)(
 
     // Prefetch train
     // TODO: this bundle is tooooooo big, define a smaller one
-    val prefetchTrain = ValidIO(new LsPrefetchTrainBundle)
+    val prefetchTrain = ValidIO(new TrainReqBundle)
 
     // CSR control signals
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
@@ -1151,17 +1152,17 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.rawNukeQueryReq.bits := nukeQueryReq
 
   // TODO: Currently, we don't train prefetcher on vector request, because vector instruction PC is incorrect.
+  // TODO: `isFirstIssue` is Fake First Issue according to prefetcher !!!
   io.prefetchTrain.valid := pipeIn.valid && tlbHit && !exception && !isUncache && !isUncacheReplay &&
     in.isFirstIssue() && !isVector
-  io.prefetchTrain.bits := DontCare
-  io.prefetchTrain.bits.uop := uop
+  io.prefetchTrain.bits.robIdx := uop.robIdx
+  io.prefetchTrain.bits.pc := uop.pc
   io.prefetchTrain.bits.vaddr := in.vaddr
   io.prefetchTrain.bits.paddr := paddr
   io.prefetchTrain.bits.miss := io.dcacheResp.bits.miss
   io.prefetchTrain.bits.isFirstIssue := in.isFirstIssue()
-  io.prefetchTrain.bits.meta_prefetch := io.dcacheResp.bits.meta_prefetch
-  io.prefetchTrain.bits.meta_access := io.dcacheResp.bits.meta_access
-  io.prefetchTrain.bits.is_from_hw_pf := accessType.isHwPrefetch()
+  io.prefetchTrain.bits.metaSource := io.dcacheResp.bits.meta_prefetch
+  io.prefetchTrain.bits.isHwPrefetch := accessType.isHwPrefetch()
   io.prefetchTrain.bits.refillLatency := io.dcacheResp.bits.refill_latency
 
   io.debugInfo.isBankConflict := pipeIn.valid && !kill && cause(C_BC)
@@ -1859,7 +1860,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   // Prefetch Train
   val prefetchTrainHintS1 = Output(Bool())
   val prefetchTrainHintS2 = Output(Bool())
-  val prefetchTrain = ValidIO(new LsPrefetchTrainBundle)
+  val prefetchTrain = ValidIO(new TrainReqBundle)
   // Software instruction prefetch
   val swInstrPrefetch = ValidIO(new SoftIfetchPrefetchBundle)
   // CSR control signals and load trigger
