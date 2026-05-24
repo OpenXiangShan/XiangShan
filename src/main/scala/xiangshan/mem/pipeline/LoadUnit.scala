@@ -752,9 +752,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s0_src_valid_vec(super_rep_idx) || s0_src_valid_vec(lsq_rep_idx),
       LSUOpType.isHlv(io.replay.bits.uop.fuOpType),
       Mux(
-        s0_src_valid_vec(int_iss_idx),
-        LSUOpType.isHlv(io.ldin.bits.uop.fuOpType),
-        false.B
+        s0_src_valid_vec(vec_iss_idx),
+        false.B,
+        LSUOpType.isHlv(io.ldin.bits.uop.fuOpType)
       )
     )
   )
@@ -765,9 +765,9 @@ class LoadUnit(implicit p: Parameters) extends XSModule
       s0_src_valid_vec(super_rep_idx) || s0_src_valid_vec(lsq_rep_idx),
       LSUOpType.isHlvx(io.replay.bits.uop.fuOpType),
       Mux(
-        s0_src_valid_vec(int_iss_idx),
-        LSUOpType.isHlvx(io.ldin.bits.uop.fuOpType),
-        false.B
+        s0_src_valid_vec(vec_iss_idx),
+        false.B,
+        LSUOpType.isHlvx(io.ldin.bits.uop.fuOpType)
       )
     )
   )
