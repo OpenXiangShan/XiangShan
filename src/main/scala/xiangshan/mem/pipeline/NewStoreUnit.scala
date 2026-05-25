@@ -139,7 +139,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
   val isVector = accessType.isVector()
   val isScalar = accessType.isScalar()
-  val isHWPrefetch = accessType.isPrefetch()
+  val isHwPrefetch = accessType.isPrefetch()
   val isCbo = accessType.isCbo
   val isCboNoZero = accessType.isCboNoZero
 
@@ -182,9 +182,9 @@ class StoreUnitS0(param: ExeUnitParams)(
   val align = alignCheckResults._1
   val cross16Byte = alignCheckResults._2
   val cross4KPage = alignCheckResults._3
-  sink.bits.align.get := Mux(isCbo || isHWPrefetch, true.B, Mux(isUnalignTail, false.B, align))
-  sink.bits.unalignHead.get := Mux(isCbo || isHWPrefetch || isUnalignTail, false.B, cross4KPage)
-  sink.bits.cross16Byte.get := Mux(isCbo || isHWPrefetch, false.B, Mux(isUnalignTail, true.B, cross16Byte))
+  sink.bits.align.get := Mux(isCbo || isHwPrefetch, true.B, Mux(isUnalignTail, false.B, align))
+  sink.bits.unalignHead.get := Mux(isCbo || isHwPrefetch || isUnalignTail, false.B, cross4KPage)
+  sink.bits.cross16Byte.get := Mux(isCbo || isHwPrefetch, false.B, Mux(isUnalignTail, true.B, cross16Byte))
 
   def alignCheck(vaddr: UInt, size: UInt, valid: Bool): (Bool, Bool, Bool) = {
     require(size.getWidth == MemorySize.Size.width)
@@ -226,7 +226,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   io.tlbReq.bits.cmd := Mux(isCboNoZero, TlbCmd.read, TlbCmd.write)
   io.tlbReq.bits.hyperinst := LSUOpType.isHsv(uop.fuOpType)
   io.tlbReq.bits.hlvx := false.B
-  io.tlbReq.bits.isPrefetch := isHWPrefetch
+  io.tlbReq.bits.isPrefetch := isHwPrefetch
   io.tlbReq.bits.size := sink.bits.size
   io.tlbReq.bits.kill := false.B
   io.tlbReq.bits.memidx.is_ld := false.B
@@ -242,7 +242,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   io.dcacheReq.valid := pipeIn.fire
   io.dcacheReq.bits.cmd := MemoryOpConstants.M_PFW
   io.dcacheReq.bits.vaddr := sink.bits.vaddr
-  io.dcacheReq.bits.instrtype := Mux(isHWPrefetch, DCACHE_PREFETCH_SOURCE.U, STORE_SOURCE.U)
+  io.dcacheReq.bits.instrtype := Mux(isHwPrefetch, DCACHE_PREFETCH_SOURCE.U, STORE_SOURCE.U)
 
   // Perf counters
   val fire = pipeIn.fire && !kill
@@ -251,7 +251,7 @@ class StoreUnitS0(param: ExeUnitParams)(
   XSPerfAccumulate("s0_unalignTail", fire && isUnalignTail)
   XSPerfAccumulate("s0_vector", fire && isVector)
   XSPerfAccumulate("s0_scalar", fire && isScalar)
-  XSPerfAccumulate("s0_prefetch", fire && isHWPrefetch)
+  XSPerfAccumulate("s0_prefetch", fire && isHwPrefetch)
   XSPerfAccumulate("s0_isFirstIssue", fire && pipeIn.bits.isFirstIssue)
   XSPerfAccumulate("s0_isCbo", fire && isCbo)
   XSPerfAccumulate("s0_isCboNoZero", fire && isCboNoZero)
@@ -321,7 +321,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
   val isVector = accessType.isVector()
   val isScalar = accessType.isScalar()
-  val isHWPrefetch = accessType.isPrefetch()
+  val isHwPrefetch = accessType.isPrefetch()
   val isCbo = accessType.isCbo
   val isCboNoZero = accessType.isCboNoZero
   val align = in.align.get
@@ -399,7 +399,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   assert(!(unalignTailInjectValid && (isCbo || isCboNoZero)))
 
   // Nuke check to LoadUnit
-  val nukeQueryReqValid = fire && tlbHit && !isHWPrefetch
+  val nukeQueryReqValid = fire && tlbHit && !isHwPrefetch
   val nukeQueryReq = Wire(new StoreNukeQueryReq)
   nukeQueryReq.robIdx := robIdx
   nukeQueryReq.paddr := paddr
@@ -440,7 +440,7 @@ class StoreUnitS1(param: ExeUnitParams)(
     *
     * [NOTE]: the normal request is also the last request,
     */
-  val toSqAddrValid = fire && !isHWPrefetch
+  val toSqAddrValid = fire && !isHwPrefetch
   val toSqAddr = Wire(io.toSqAddr.bits.cloneType)
   def alignVWordAddr(addr: UInt) = {
     Cat(addr(addr.getWidth - 1, DCacheVWordOffset), 0.U(DCacheVWordOffset.W))
@@ -542,7 +542,7 @@ class StoreUnitS1(param: ExeUnitParams)(
 
   io.debugInfo := DontCare
   io.debugInfo.s1_robIdx := robIdx.value
-  io.debugInfo.s1_isTlbFirstMiss := tlbMiss && !isHWPrefetch && isFirstIssue
+  io.debugInfo.s1_isTlbFirstMiss := tlbMiss && !isHwPrefetch && isFirstIssue
 
   // Perf counters
   XSPerfAccumulate("s1_valid", pipeIn.valid)
@@ -591,7 +591,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
   val isVector = accessType.isVector()
   val isScalar = accessType.isScalar()
-  val isHWPrefetch = accessType.isPrefetch()
+  val isHwPrefetch = accessType.isPrefetch()
   val isCbo = accessType.isCbo
   val isCboNoZero = accessType.isCboNoZero
   val tlbException = in.tlbException.get
@@ -702,7 +702,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   io.prefetchTrain.bits.miss := cacheMiss
   io.prefetchTrain.bits.isFirstIssue := in.isFirstIssue
   io.prefetchTrain.bits.metaSource := L1_HW_PREFETCH_NULL
-  io.prefetchTrain.bits.isHwPrefetch := isHWPrefetch
+  io.prefetchTrain.bits.isHwPrefetch := isHwPrefetch
   io.prefetchTrain.bits.refillLatency := 0.U // TODO: store not for berti, so there is no refillLatency
 
   io.unalignHeadTlbHit := fire && isUnalignHead && tlbHit
@@ -742,7 +742,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   val isUnalignTail = StoreEntrance.isUnalignTail(entrance)
   val isVector = accessType.isVector()
   val isScalar = accessType.isScalar()
-  val isHWPrefetch = accessType.isPrefetch()
+  val isHwPrefetch = accessType.isPrefetch()
   val isCbo = accessType.isCbo
   val isMMIO = in.mmio.get
   val hasException = in.hasException.get
@@ -754,7 +754,7 @@ class StoreUnitS3(param: ExeUnitParams)(
   val endPipe = !isUnalignHead
 
   // Scalar/vector store write back
-  val wbType = !isUnalignHead && !isHWPrefetch && !in.needRSReplay.get
+  val wbType = !isUnalignHead && !isHwPrefetch && !in.needRSReplay.get
   val wbValid = fire && ((!isMMIO && !isCbo) || hasException) && wbType
   val wbData = Wire(in.cloneType)
   wbData := in
