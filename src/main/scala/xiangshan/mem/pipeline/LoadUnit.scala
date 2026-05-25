@@ -206,6 +206,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     // Load RAR rollback
     val rollback = Valid(new Redirect)
 
+    val robDeqIdx = Input(new RobPtr)
+
     // perf
     val debug_ls         = Output(new DebugLsInfoBundle)
     val lsTopdownInfo    = Output(new LsTopdownInfo)
@@ -1360,10 +1362,11 @@ class LoadUnit(implicit p: Parameters) extends XSModule
     *   * if LoadQueueRARSize == VirtualLoadQueueSize, just need to exclude prefetching.
     *   * if LoadQueueRARSize < VirtualLoadQueueSize, need to consider the situation of s2_can_query
     */
+  // Only the oldest instructions can enter the misalign buffer, so do not enter the RAR or RAW queues.
   if (LoadQueueRARSize == VirtualLoadQueueSize) {
-    io.lsq.ldld_nuke_query.req.valid           := s2_valid && !s2_prf
+    io.lsq.ldld_nuke_query.req.valid           := s2_valid && !s2_prf && !s2_in.isFrmMisAlignBuf
   } else {
-    io.lsq.ldld_nuke_query.req.valid           := s2_valid && s2_can_query
+    io.lsq.ldld_nuke_query.req.valid           := s2_valid && s2_can_query && !s2_in.isFrmMisAlignBuf
   }
   io.lsq.ldld_nuke_query.req.bits.uop        := s2_in.uop
   io.lsq.ldld_nuke_query.req.bits.mask       := s2_in.mask
@@ -1372,7 +1375,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   io.lsq.ldld_nuke_query.req.bits.is_nc := s2_nc_with_data
 
   // st-ld violation require
-  io.lsq.stld_nuke_query.req.valid           := s2_valid && s2_can_query
+  io.lsq.stld_nuke_query.req.valid           := s2_valid && s2_can_query && !s2_in.isFrmMisAlignBuf
   io.lsq.stld_nuke_query.req.bits.uop        := s2_in.uop
   io.lsq.stld_nuke_query.req.bits.mask       := s2_in.mask
   io.lsq.stld_nuke_query.req.bits.paddr      := s2_in.paddr
@@ -1560,7 +1563,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s3_safe_writeback = RegEnable(s2_safe_writeback, s2_fire) || s3_hw_err
   val s3_exception = RegEnable(s2_real_exception, s2_fire)
   val s3_mis_align = RegEnable(s2_mis_align, s2_fire) && !s3_exception
-  val s3_misalign_can_go = RegEnable(!isAfter(s2_out.uop.lqIdx, io.lsq.lqDeqPtr), s2_fire)
+  val s3_misalign_can_go = RegEnable(!isAfter(s2_out.uop.robIdx, io.robDeqIdx), s2_fire)
   val s3_trigger_debug_mode = RegEnable(s2_trigger_debug_mode, false.B, s2_fire)
 
   // TODO: Fix vector load merge buffer nack
