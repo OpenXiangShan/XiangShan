@@ -415,7 +415,7 @@ class StoreUnitS1(param: ExeUnitParams)(
     */
   val canFeedBack = isScalar && !isUnalignHead // unalign head should not feed back.
   val feedBackValid = fire && canFeedBack
-  val unalignTailHit = tlbHit && io.unalignHeadTlbHit && io.toUnalignQueue.ready
+  val unalignTailHit = tlbHit && io.unalignHeadTlbHit && (!cross4KPage || io.toUnalignQueue.ready)
   val feedBackHit = Mux(isUnalignTail, unalignTailHit, tlbHit)
   val needRSReplay = feedBackValid && !feedBackHit
 
