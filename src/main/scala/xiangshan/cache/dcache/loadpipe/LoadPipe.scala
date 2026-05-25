@@ -51,6 +51,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     val banked_data_read = DecoupledIO(new L1BankedDataReadReqWithMask)
     val is128Req = Output(Bool())
+    val s2_tag_match_way = Output(UInt(nWays.W))
     val banked_data_resp = Input(Vec(VLEN/DCacheSRAMRowBits, new L1BankedDataReadResult()))
     val read_error_delayed = Input(Vec(VLEN/DCacheSRAMRowBits, Bool()))
 
@@ -214,8 +215,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_tag_match_way_dup_dc = wayMap((w: Int) => s1_tag_resp(w) === get_tag(s1_paddr_dup_dcache) && meta_resp(w).coh.isValid()).asUInt
   val s1_tag_match_way_dup_lsu = wayMap((w: Int) => s1_tag_resp(w) === get_tag(s1_paddr_dup_lsu) && meta_resp(w).coh.isValid()).asUInt
   val s1_hash_tag = XORFoldTA(get_tag(s1_paddr_dup_dcache), HashTagBits)
-  val s1_hash_match_way = wayMap((w: Int) => io.htag_resp(w) === s1_hash_tag && meta_resp(w).coh.isValid()).asUInt
-  val s1_htag_miss = if (EnableDCacheHashTagArray) !s1_hash_match_way.orR else false.B
+  val s1_htag_match_way = wayMap((w: Int) => io.htag_resp(w) === s1_hash_tag && meta_resp(w).coh.isValid()).asUInt
+  val s1_htag_miss = if (EnableDCacheHashTagArray) !s1_htag_match_way.orR else false.B
   val s1_wpu_pred_valid = RegEnable(io.dwpu.resp(0).valid, s0_fire)
   val s1_wpu_pred_way_en = RegEnable(io.dwpu.resp(0).bits.s0_pred_way_en, s0_fire)
 
@@ -306,7 +307,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.banked_data_read.valid := s1_fire && !s1_nack && !s1_is_prefetch
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.addr_dup := s1_vaddr_dup
-  io.banked_data_read.bits.way_en := s1_pred_tag_match_way_dup_dc
+  io.banked_data_read.bits.way_en := { if (EnableDCacheHashTagArray) s1_htag_match_way else s1_pred_tag_match_way_dup_dc }
   io.banked_data_read.bits.htag_miss := s1_htag_miss
   io.banked_data_read.bits.bankMask := s1_bank_oh
   io.banked_data_read.bits.lqIdx := s1_req.lqIdx
@@ -360,6 +361,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_tag_errors = RegEnable(s1_tag_errors, s1_fire)
   val s2_tag_match_way = RegEnable(s1_tag_match_way_dup_dc, s1_fire)
   val s2_tag_match = RegEnable(s1_tag_match_dup_dc, s1_fire)
+  io.s2_tag_match_way := s2_tag_match_way
 
   // lsu side tag match
   val s2_hit_dup_lsu = RegNext(s1_tag_match_dup_lsu)

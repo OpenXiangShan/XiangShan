@@ -1063,7 +1063,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // core data structures
-  val bankedDataArray = if(dwpuParam.enWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
+  // val bankedDataArray = if(dwpuParam.enWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
+  val bankedDataArray = Module(new HTADataArray) //if(dwpuParam.enWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
   val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1))
   val errorArray = Module(new L1ErrorMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1, enableBypass = true))
   val prefetchArray = Module(new L1PrefetchSourceArray(
@@ -1373,6 +1374,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   (0 until LoadPipelineWidth).map(i => {
     bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
     bankedDataArray.io.is128Req(i) <> ldu(i).io.is128Req
+    bankedDataArray.io.s2_tag_match_way(i) := ldu(i).io.s2_tag_match_way
     bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
     ldu(i).io.banked_data_resp := bankedDataArray.io.read_resp(i)
