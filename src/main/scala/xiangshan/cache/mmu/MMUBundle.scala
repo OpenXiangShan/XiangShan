@@ -420,11 +420,13 @@ object TlbCmd {
 
   def atom_read  = "b100".U // lr
   def atom_write = "b101".U // sc / amo
+  def read_exec  = "b111".U // HLVX final physical permission check
 
   def apply() = UInt(3.W)
   def isRead(a: UInt) = a(1,0)===read
   def isWrite(a: UInt) = a(1,0)===write
   def isExec(a: UInt) = a(1,0)===exec
+  def isReadExec(a: UInt) = a===read_exec
 
   def isAmo(a: UInt) = a===atom_write // NOTE: sc mixed
 }
