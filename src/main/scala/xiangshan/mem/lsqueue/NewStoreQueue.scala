@@ -1638,7 +1638,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       port.bits.isLastRequest && !port.bits.tlbMiss && staValidSetVec(j)
     }.reduce(_ || _)
     val cross16ByteSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
-      port.bits.isUnalign && !port.bits.unalignWithin16Byte && staValidSetVec(j)
+      port.bits.isUnalign && port.bits.cross16Byte && staValidSetVec(j)
     }.reduce(_ || _)
     val cboSetVec = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
       LSUOpType.isCboAll(port.bits.uop.fuOpType) && staValidSetVec(j)
@@ -1679,7 +1679,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 
     if(debugEn) {
       val unalignWithin16BSet = io.fromStoreUnit.storeAddrIn.zipWithIndex.map { case (port, j) =>
-        port.bits.isUnalign && port.bits.unalignWithin16Byte && staValidSetVec(j)
+        port.bits.isUnalign && !port.bits.cross16Byte && staValidSetVec(j)
       }.reduce(_ || _)
       when(staSetValid) {
         ctrlEntries(i).unalignWithin16Byte.foreach(_ := unalignWithin16BSet)
@@ -1928,11 +1928,11 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val byteStart     = storeAddrIn.bits.vaddr(VWordOffset - 1, 0)
     val byteOffset    = MemorySize.ByteOffset(storeAddrIn.bits.size)
 
-    // !isLastRequest && cross4KPage means it is first request of cross page unalign  --> save paddr
-    //  isLastRequest && cross4KPage means it is second request of cross page unalign --> not save paddr
-    // isLastRequest && !cross4KPage means it is normal request                       --> save paddr
-    when(storeAddrIn.fire && (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross4KPage)){
-      // the second paddr of cross4KPage request will be write to unalign queue
+    // !isLastRequest && cross16Byte means it is first request of cross page unalign  --> save paddr
+    //  isLastRequest && cross16Byte means it is second request of cross page unalign --> not save paddr
+    // isLastRequest && !cross16Byte means it is normal request                       --> save paddr
+    when(storeAddrIn.fire && (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross16Byte)){
+      // the second paddr of cross16Byte request will be write to unalign queue
       dataEntries(stWbIdx).vaddr     := storeAddrIn.bits.vaddr
       dataEntries(stWbIdx).paddrHigh := storeAddrIn.bits.paddr(PAddrBits - 1, PageOffsetWidth)
       // only unit-stride use it, because unit-stride mask is not continue true.
@@ -1947,7 +1947,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       }
     }
     XSError(byteStart + byteOffset < byteStart && storeAddrIn.fire &&
-    (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross4KPage),
+    (!storeAddrIn.bits.isLastRequest || !storeAddrIn.bits.cross16Byte),
      "ByteStart > ByteEnd! at pipeline ${i}\n")
   }
 

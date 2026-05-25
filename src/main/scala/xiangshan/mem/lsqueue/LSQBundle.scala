@@ -114,13 +114,12 @@ class StoreAddrIO(implicit p: Parameters) extends MemBlockBundle {
   val wlineflag          = Bool() // store write the whole cache line.
   
   // misalign
-  val isUnalign           = Bool()
-  val unalignWithin16Byte = Bool()
+  val isUnalign   = Bool()
+  val cross16Byte = Bool()
 
   // ctrl signal
   val isLastRequest      = Bool() /* It's last request to write to storeQueue. if is normal request, it will be true,
                                       if it was unalign splited, first request will be false, second will be true. */
-  val cross4KPage        = Bool() // this unalign request is cross 4KPage
 }
 
 class StoreQueueDataWrite(implicit p: Parameters) extends MemBlockBundle {

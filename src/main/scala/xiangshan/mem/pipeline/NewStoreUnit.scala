@@ -165,13 +165,10 @@ class StoreUnitS0(param: ExeUnitParams)(
     *   CBO instructions may have unaligned addresses, but they operate on a whole cache line, so we also set align to true for them.
     *
     * 2. Cross16Byte
-    *   For unaligned requests that cross a 16-byte boundary but do not cross a 4K page boundary,
-    *     the StoreQueue is responsible for splitting them into two writes to the store buffer.
-    *   Prefetch must be within 16 bytes, unalign tail must be cross16Byte
+    *   For unalign req that cross 16-byte boundary, an unaligned tail will be injected in the next stage.
     *
-    * 3. Cross4KPage
-    *   Check whether this address crosses an 4K page boundary, which is used to inject
-    *     an unalign tail in the next stage.
+    * 3. Cross4KPage (Inevitably Cross16Byte)
+    *   Check whether this address crosses a 4K page boundary. If it does, a second physical address needs to be provided to the store queue.
     *
     * Some terminology explanations:
     * - **align** indicates whether the addr is aligned with the operation size. `!align` does not necessary mean
@@ -183,8 +180,12 @@ class StoreUnitS0(param: ExeUnitParams)(
   val cross16Byte = alignCheckResults._2
   val cross4KPage = alignCheckResults._3
   sink.bits.align.get := Mux(isCbo || isHwPrefetch, true.B, Mux(isUnalignTail, false.B, align))
-  sink.bits.unalignHead.get := Mux(isCbo || isHwPrefetch || isUnalignTail, false.B, cross4KPage)
-  sink.bits.cross16Byte.get := Mux(isCbo || isHwPrefetch, false.B, Mux(isUnalignTail, true.B, cross16Byte))
+  sink.bits.unalignHead.get := Mux(isCbo || isHwPrefetch || isUnalignTail, false.B, cross16Byte)
+  sink.bits.cross4KPage.get := Mux(
+    isCbo || isHwPrefetch,
+    false.B,
+    Mux(isUnalignTail, unalignTail.bits.cross4KPage.get, cross4KPage)
+  )
 
   def alignCheck(vaddr: UInt, size: UInt, valid: Bool): (Bool, Bool, Bool) = {
     require(size.getWidth == MemorySize.Size.width)
@@ -256,8 +257,8 @@ class StoreUnitS0(param: ExeUnitParams)(
   XSPerfAccumulate("s0_isCbo", fire && isCbo)
   XSPerfAccumulate("s0_isCboNoZero", fire && isCboNoZero)
   XSPerfAccumulate("s0_unalign", fire && !pipeIn.bits.align.get)
-  XSPerfAccumulate("s0_cross16Byte", fire && pipeIn.bits.cross16Byte.get)
-  XSPerfAccumulate("s0_cross4KPage", fire && pipeIn.bits.unalignHead.get)
+  XSPerfAccumulate("s0_cross16Byte", fire && pipeIn.bits.unalignHead.get)
+  XSPerfAccumulate("s0_cross4KPage", fire && !isUnalignTail && pipeIn.bits.cross4KPage.get)
 }
 
 class StoreUnitS1(param: ExeUnitParams)(
@@ -326,8 +327,8 @@ class StoreUnitS1(param: ExeUnitParams)(
   val isCboNoZero = accessType.isCboNoZero
   val align = in.align.get
   val isUnalignHead = in.unalignHead.get
-  val cross4KPage = isUnalignTail || isUnalignHead
-  val cross16Byte = in.cross16Byte.get
+  val cross4KPage = in.cross4KPage.get
+  val cross16Byte = isUnalignTail || isUnalignHead
   val vecBaseVaddr = in.vecBaseVaddr.get
 
   val kill = robIdx.needFlush(io.redirect)
@@ -394,7 +395,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   unalignTail.mask := genVWmask(vaddr, LSUOpType.size(fuOpType)) >> DCacheVWordBytes
   unalignTail.align.get := false.B
   unalignTail.unalignHead.get := false.B
-  unalignTail.cross16Byte.get := true.B
+  unalignTail.cross4KPage.get := cross4KPage
   unalignTail.DontCareStoreSet()
   assert(!(unalignTailInjectValid && (isCbo || isCboNoZero)))
 
@@ -404,15 +405,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   nukeQueryReq.robIdx := robIdx
   nukeQueryReq.paddr := paddr
   nukeQueryReq.mask := mask
-  nukeQueryReq.matchType := Mux(
-    isCbo,
-    StLdNukeMatchType.CacheLine,
-    Mux(
-      cross16Byte && !cross4KPage,
-      StLdNukeMatchType.OctaWord,
-      StLdNukeMatchType.Normal
-    )
-  )
+  nukeQueryReq.matchType := Mux(isCbo, StLdNukeMatchType.CacheLine, StLdNukeMatchType.Normal)
 
   val updateLFSTValid = fire && tlbHit && isScalar && !isUnalignTail
 
@@ -459,8 +452,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   toSqAddr.isHyper := isHyper
   // Unalign info
   toSqAddr.isLastRequest := !isUnalignHead
-  toSqAddr.cross4KPage := cross4KPage
-  toSqAddr.unalignWithin16Byte := !align && !cross16Byte
+  toSqAddr.cross16Byte := cross16Byte
   toSqAddr.isUnalign := !align
   // The following will be set in stage 2
   toSqAddr.nc := DontCare
@@ -524,7 +516,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   io.toSqAddr.valid := toSqAddrValid
   io.toSqAddr.bits := toSqAddr
 
-  io.toUnalignQueue.valid := fire && isUnalignTail
+  io.toUnalignQueue.valid := fire && isUnalignTail && cross4KPage
   io.toUnalignQueue.bits.sqIdx := uop.sqIdx
   io.toUnalignQueue.bits.paddr := paddr
   io.toUnalignQueue.bits.robIdx := robIdx
@@ -598,8 +590,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   val tlbHit = pipeIn.valid && in.tlbHit.get
   val tlbMiss = pipeIn.valid && !in.tlbHit.get
   val isUnalignHead = in.unalignHead.get
-  val cross4KPage = isUnalignTail || isUnalignHead
-  val cross16Byte = in.cross16Byte.get
+  val cross16Byte = isUnalignTail || isUnalignHead
 
   val kill = robIdx.needFlush(io.redirect)
   val fire = pipeIn.fire && !kill
@@ -680,8 +671,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   io.toSqAddrRe.cacheMiss := cacheMiss
   io.toSqAddrRe.hasException := fire && hasException
   io.toSqAddrRe.isLastRequest := !isUnalignHead
-  io.toSqAddrRe.cross4KPage := cross4KPage
-  io.toSqAddrRe.unalignWithin16Byte := !align && !cross16Byte
+  io.toSqAddrRe.cross16Byte := cross16Byte
   io.toSqAddrRe.isUnalign := !align
   io.toSqAddrRe.wlineflag := DontCare
   io.toSqAddrRe.paddr := DontCare

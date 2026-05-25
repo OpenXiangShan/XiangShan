@@ -245,7 +245,7 @@ class StorePipeBundle(
   // Unalign handling
   val align = Option.when(param.hasUnalignHandling)(Bool())
   val unalignHead = Option.when(param.hasUnalignHandling)(Bool())
-  val cross16Byte = Option.when(param.hasUnalignHandling)(Bool())
+  val cross4KPage = Option.when(param.hasUnalignHandling)(Bool())
 
   // MMU & exception handling
   val tlbHit = Option.when(param.hasAddrTrans)(Bool())
@@ -272,7 +272,7 @@ class StorePipeBundle(
   def DontCareUnalign(): Unit = {
     align.get := DontCare
     unalignHead.get := DontCare
-    cross16Byte.get := DontCare
+    cross4KPage.get := DontCare
   }
   def DontCareVectorFields(): Unit = {
     vecBaseVaddr.get := 0.U

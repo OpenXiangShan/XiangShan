@@ -2048,16 +2048,10 @@ abstract class LoadUnitStage(val param: ExeUnitParams)(
 
 trait HasNukePAddrMatch { this: LoadUnitStage =>
   def nukePAddrMatch(storePAddr: UInt, storeMatchType: UInt, loadPAddr: UInt): Bool = {
-    val storeVWordAddr = storePAddr >> DCacheVWordOffset
-    val loadVWordAddr = loadPAddr >> DCacheVWordOffset
     Mux(
       StLdNukeMatchType.isCacheLine(storeMatchType),
       (storePAddr >> blockOffBits) === (loadPAddr >> blockOffBits),
-      Mux(
-        StLdNukeMatchType.isOctaWord(storeMatchType),
-        storeVWordAddr === loadVWordAddr || (storeVWordAddr + 1.U) === loadVWordAddr,
-        storeVWordAddr === loadVWordAddr
-      )
+      (storePAddr >> DCacheVWordOffset) === (loadPAddr >> DCacheVWordOffset)
     )
   }
 }
