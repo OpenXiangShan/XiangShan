@@ -254,6 +254,7 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // load pipeline read word req
     val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1BankedDataReadReqWithMask)))
     val is128Req = Input(Vec(LoadPipelineWidth, Bool()))
+    val s2_tag_match_way = Input(Vec(LoadPipelineWidth, UInt(DCacheWays.W)))
     // main pipeline read / write line req
     val readline_intend = Input(Bool())
     val readline = Flipped(DecoupledIO(new L1BankedDataReadLineReq))
