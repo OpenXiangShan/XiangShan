@@ -261,6 +261,8 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val readline_can_go = Input(Bool())
     val readline_stall = Input(Bool())
     val readline_can_resp = Input(Bool())
+    val repl_dirty = Input(Bool())
+    val repl_way_en = Input(UInt(DCacheWays.W))
     val write = Flipped(DecoupledIO(new L1BankedDataWriteReq))
     val write_dup = Vec(DCacheBanks, Flipped(Decoupled(new L1BankedDataWriteReqCtrl)))
     // data for readline and loadpipe
