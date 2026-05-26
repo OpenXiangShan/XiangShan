@@ -30,6 +30,7 @@ import chisel3.util._
 import chisel3.experimental.BundleLiterals._
 import difftest._
 import difftest.common._
+import difftest.plugin.topdown._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils._
