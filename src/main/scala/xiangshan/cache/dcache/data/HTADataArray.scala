@@ -38,7 +38,6 @@ import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 // For Dcache with Hash Tag Array
 class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   println("  DCache Data Array Type: HTADataArray")
-  require(LoadPipelineWidth == 3, "So far, HTADataArray only supports LoadPipelineWidth = 3")
 
   io.write.ready := true.B
   io.write_dup.foreach(_.ready := true.B)
@@ -98,6 +97,15 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val load_req_lqIdx = io.read.map(_.bits.lqIdx)
 //   val load_req_index = (0 until LoadPipelineWidth).map(_.asUInt)
 
+  
+  // Age matrix of lqIdx: if i < j and matrix(i, j) == true, then i is older than j
+  val lqIdx_age_matrix = Seq.tabulate(LoadPipelineWidth)(i => Seq.tabulate(LoadPipelineWidth)(j => {
+    if (i >= j) {
+      false.B
+    } else {
+      io.read(i).bits.lqIdx < io.read(j).bits.lqIdx
+    }
+  }))
 
 //   val load_req_bank_conflict_selcet = selcetOldestPort(load_req_with_bank_conflict, load_req_lqIdx, load_req_index)
 //   val load_req_bank_select_port  = UIntToOH(load_req_bank_conflict_selcet._2).asBools
@@ -147,12 +155,17 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     }
   }))
   val rr_conflict_evict = (0 until LoadPipelineWidth).map(i => {
-    if (i == 0) {
-      false.B
-    } else {
-      (0 until i).map(j => rr_bank_overlap(j)(i) && rr_way_overlap(j)(i)).reduce(_ || _)
-    }
+    (0 until LoadPipelineWidth).map(j => {
+      if (i > j) {
+        lqIdx_age_matrix(j)(i) && rr_bank_overlap(j)(i) && rr_way_overlap(j)(i)
+      } else if (i < j) {
+        !lqIdx_age_matrix(i)(j) && rr_bank_overlap(i)(j) && rr_way_overlap(i)(j)
+      } else {
+        false.B
+      }
+    }).reduce(_ || _)
   })
+  
   // rr_bank_conflict_oldest --> rr_conflict_evict
   val rr_bank_conflict = rr_bank_overlap
 
