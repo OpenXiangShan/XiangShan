@@ -487,7 +487,7 @@ class SramedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   val pseudo_data_toggle_mask = io.pseudo_error.bits.map {
     case bank =>
-      Mux(io.pseudo_error.valid && bank.valid, bank.mask, 0.U)
+      Mux(io.pseudo_error.valid && bank.valid, bank.mask(DCacheSRAMRowBits - 1, 0), 0.U)
   }
   val readline_hit = io.readline.fire &&
                      (io.readline.bits.rmask & VecInit(io.pseudo_error.bits.map(_.valid)).asUInt).orR

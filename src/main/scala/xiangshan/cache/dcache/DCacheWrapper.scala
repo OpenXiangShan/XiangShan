@@ -177,11 +177,16 @@ trait HasDCacheParameters
 
   def encDataBits = if (EnableDataEcc) cacheParams.dataCode.width(DCacheSRAMRowBits) else DCacheSRAMRowBits
   def dataECCBits = encDataBits - DCacheSRAMRowBits
+  def pseudoErrorMaskBits = ((tagBits + 7) / 8) * 8
 
   // L1 DCache controller
   val cacheCtrlParamsOpt  = OptionWrapper(
                               cacheParams.cacheCtrlAddressOpt.nonEmpty,
-                              L1CacheCtrlParams(cacheParams.cacheCtrlAddressOpt.get)
+                              L1CacheCtrlParams(
+                                address = cacheParams.cacheCtrlAddressOpt.get,
+                                tagMaskRegWidth = pseudoErrorMaskBits,
+                                dataMaskRegWidth = DCacheSRAMRowBits
+                              )
                             )
   // uncache
   val uncacheIdxBits = log2Up(VirtualLoadQueueMaxStoreQueueSize + 1)
@@ -891,6 +896,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val io = IO(new DCacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
+  require(pseudoErrorMaskBits >= tagBits, "pseudo-error masks must cover tagBits")
+  require(pseudoErrorMaskBits >= DCacheSRAMRowBits, "pseudo-error masks must cover data-bank row width")
   require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
 
   println("DCache:")
