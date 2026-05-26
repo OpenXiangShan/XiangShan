@@ -147,6 +147,7 @@ class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSP
   val vsatp = Input(new SatpBundle)
   val hgatp = Input(new HgatpBundle)
   val mbmc = Input(new MbmcBundle)
+  val mmpt = Option.when(HasMptCheck) (Input(new MmptBundle)) //HasMptCheck
   // from mem
   val memExceptionVAddr = Input(UInt(XLEN.W))
   val memExceptionGPAddr = Input(UInt(XLEN.W))

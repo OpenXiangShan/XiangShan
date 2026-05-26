@@ -459,6 +459,7 @@ package object xiangshan {
     def hfence_v = "b10011".U
     def hfence_g = "b10100".U
     def nofence= "b00000".U
+    def mfence = "b10111".U // HasMptCheck self defined instruction
   }
 
   object ALUOpType {

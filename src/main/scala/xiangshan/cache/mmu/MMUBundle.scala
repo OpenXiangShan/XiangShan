@@ -199,6 +199,7 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
   val pteidx = Vec(tlbcontiguous, Bool())
   val ppn_low = Vec(tlbcontiguous, UInt(sectortlbwidth.W))
 
+  val mptperm = Option.when(HasMptCheck) (new MptPermBundle(isTlbPort = false))
   val g_perm = new TlbPermBundle
   val vmid = UInt(vmidLen.W)
   val s2xlate = UInt(2.W)
@@ -328,23 +329,39 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       Mux(s1_exception || (s2_exception && !s1_leaf), item.s1.entry.level.getOrElse(0.U),
         Mux(s2_exception && !s1_valid, 3.U, merge_level))
     val inner_level = Mux(item.s2xlate =/= allStage, merge_level, allStage_level)
-    this.level.map(_ := inner_level)
+
+    val mpt_level =Option.when(HasMptCheck) (inner_level min item.mpt.get.mptLevel)
+
+    this.level.map(_ := (if (HasMptCheck) (mpt_level.get) else (inner_level)))
+
     this.perm.apply(item.s1)
     this.pbmt := item.s1.entry.pbmt
+    
+    if (HasMptCheck) {this.mptperm.get.resp_apply(item.mpt.get)}
 
     val s1tag = item.s1.entry.tag
     val s2tag = item.s2.entry.tag(gvpnLen - 1, sectortlbwidth)
     this.tag := Mux(item.s2xlate === onlyStage2, s2tag, s1tag)
     // if stage2 page is larger than stage1 page, need to merge s2tag and s2ppn to get a new s2ppn.
-    val s1ppn = item.s1.entry.ppn(sectorppnLen - 1, 0)
-    val s1ppn_low = item.s1.ppn_low
+    val s1ppn = if (!HasMptCheck) (item.s1.entry.ppn(sectorppnLen - 1, 0))
+      else(MuxLookup(item.s1.entry.level.getOrElse(0.U),item.s1.entry.ppn(sectorppnLen - 1, 0)) (Seq(
+        3.U -> Cat(item.s1.entry.ppn(sectorppnLen - 1, vpnnLen * 3 - sectortlbwidth), item.s1.entry.tag(vpnnLen * 3 - 1- sectortlbwidth, 0)),
+        2.U -> Cat(item.s1.entry.ppn(sectorppnLen - 1, vpnnLen * 2 - sectortlbwidth), item.s1.entry.tag(vpnnLen * 2 - 1 -sectortlbwidth, 0)),
+        1.U -> Cat(item.s1.entry.ppn(sectorppnLen - 1, vpnnLen - sectortlbwidth), item.s1.entry.tag(vpnnLen - 1 - sectortlbwidth, 0)),
+        0.U -> Mux(item.s1.entry.n.getOrElse(0.U) === 0.U, item.s1.entry.ppn(sectorppnLen - 1, 0), 
+          Cat(item.s1.entry.ppn(sectorppnLen - 1, pteNapotBits- sectortlbwidth), item.s1.entry.tag(pteNapotBits - 1 - sectortlbwidth, 0)))
+        ))
+      )
+    val s1ppn_low = if (!HasMptCheck) (item.s1.ppn_low) else (Mux((item.s1.entry.level.getOrElse(0.U) > 0.U) 
+      || item.s1.entry.n.getOrElse(0.U) > 0.U, VecInit(Seq.fill(tlbcontiguous)(item.s1.addr_low)), item.s1.ppn_low))
+
     val s2ppn = MuxLookup(item.s2.entry.level.getOrElse(0.U), item.s2.entry.ppn(ppnLen - 1, sectortlbwidth))(Seq(
       3.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen * 3), item.s2.entry.tag(vpnnLen * 3 - 1, sectortlbwidth)),
       2.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen * 2), item.s2.entry.tag(vpnnLen * 2 - 1, sectortlbwidth)),
       1.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen), item.s2.entry.tag(vpnnLen - 1, sectortlbwidth)),
       0.U -> Mux(item.s2.entry.n.getOrElse(0.U) === 0.U, item.s2.entry.ppn(ppnLen - 1, sectortlbwidth), Cat(item.s2.entry.ppn(ppnLen - 1, pteNapotBits), item.s2.entry.tag(pteNapotBits - 1, sectortlbwidth)))
     ))
-    val s2ppn_tmp = MuxLookup(item.s2.entry.level.getOrElse(0.U), item.s2.entry.ppn(ppnLen - 1, 0))(Seq(
+    val s2ppn_tmp = MuxLookup(item.s2.entry.level.getOrElse(0.U), item.s2.entry.ppn(ppnLen - 1, 0)) (Seq(
       3.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen * 3), item.s2.entry.tag(vpnnLen * 3 - 1, 0)),
       2.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen * 2), item.s2.entry.tag(vpnnLen * 2 - 1, 0)),
       1.U -> Cat(item.s2.entry.ppn(ppnLen - 1, vpnnLen), item.s2.entry.tag(vpnnLen - 1, 0)),
@@ -367,10 +384,15 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
       allStage -> allStage_n,
       noS2xlate -> item.s1.entry.n.getOrElse(0.U)
     ))
-    this.n := inner_n
-    val isSuperPage = inner_level =/= 0.U || inner_n =/= 0.U
+    
+    val inner_n_mpt = Option.when(HasMptCheck)(mpt_merge_n(inner_level,inner_n,item.mpt.get.mptLevel,item.mpt.get.permIsNAPOT)) 
+ 
+    if (HasMptCheck) {this.n :=  inner_n_mpt.get} else {this.n :=  inner_n}
+
+    val isSuperPage = if (HasMptCheck) (inner_n_mpt.get =/= 0.U || mpt_level.get =/= 0.U) else (inner_level =/= 0.U || inner_n =/= 0.U)
     this.valididx := Mux(isSuperPage, VecInit(Seq.fill(tlbcontiguous)(true.B)),
-      Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), item.s1.valididx))
+      Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), Mux((if (HasMptCheck) item.mpt.get.contigousPerm else true.B),
+      Mux(if (HasMptCheck) (inner_level === 0.U) else true.B, item.s1.valididx,VecInit(Seq.fill(tlbcontiguous)(true.B))),item.s1.pteidx)))
     this.pteidx := Mux(item.s2xlate === onlyStage2, VecInit(UIntToOH(item.s2.entry.tag(sectortlbwidth - 1, 0)).asBools), item.s1.pteidx)
     this.vmid := Mux(item.s2xlate === onlyStage2, item.s2.entry.vmid.getOrElse(0.U), item.s1.entry.vmid.getOrElse(0.U))
     this.g_pbmt := item.s2.entry.pbmt
@@ -378,7 +400,6 @@ class TlbSectorEntry(pageNormal: Boolean, pageSuper: Boolean)(implicit p: Parame
     this.s2xlate := item.s2xlate
     this
   }
-
   // 4KB is normal entry, 2MB/1GB is considered as super entry
   def is_normalentry(): Bool = {
     if (!pageSuper) { true.B }
@@ -458,6 +479,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
       val perm = Vec(nDups, Output(new TlbSectorPermBundle()))
       val g_perm = Vec(nDups, Output(new TlbPermBundle()))
       val s2xlate = Vec(nDups, Output(UInt(2.W)))
+      val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle(isTlbPort = true)))) // add mptperm
     }))
   }
   val w = Flipped(ValidIO(new Bundle {
@@ -485,6 +507,21 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
 
 }
 
+class MptPermBundle(isTlbPort: Boolean = true) (implicit p: Parameters) extends TlbBundle {
+  val af = Option.when(isTlbPort) (Bool()) // NOTE: if this is true, just raise af
+  val x = Bool()
+  val w = Bool()
+  val r = Bool()
+
+  def resp_apply(mptResp:MptTlbRespBundle) = {
+    this.x := mptResp.mptPerm(2) === 1.U
+    this.w := mptResp.mptPerm(1) === 1.U
+    this.r := mptResp.mptPerm(0) === 1.U
+    if (isTlbPort) (
+      this.af.get := mptResp.accessFault
+    )
+  }
+}
 class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p: Parameters) extends MMUIOBaseBundle {
   val r = new Bundle {
     val req = Vec(ports, Flipped(DecoupledIO(new Bundle {
@@ -498,6 +535,8 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
       val g_pbmt = Vec(nDups, Output(UInt(ptePbmtLen.W)))
       val perm = Vec(nDups, Output(new TlbPermBundle()))
       val g_perm = Vec(nDups, Output(new TlbPermBundle()))
+      val mptperm = Option.when(HasMptCheck)(Vec(nDups, Output(new MptPermBundle(isTlbPort = true))))
+      // HasMptCheck,add mptperm
       val s2xlate = Vec(nDups, Output(UInt(2.W)))
     }))
   }
@@ -512,8 +551,9 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
     this.r.req(i).bits.s2xlate := s2xlate
   }
 
-  def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.s2xlate, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
+  def r_resp_apply(i: Int) = { // HasMptCheck,add mptperm
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, 
+      this.r.resp(i).bits.s2xlate, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt,this.r.resp(i).bits.mptperm)
   }
 
   def w_apply(valid: Bool, data: PtwRespS2): Unit = {
@@ -1122,6 +1162,7 @@ class PTWEntriesWithEcc(eccCode: Code, num: Int, tagLen: Int, level: Int, hasPer
 
 class PtwReq(implicit p: Parameters) extends PtwBundle {
   val vpn = UInt(vpnLen.W) //vpn or gvpn
+  val mptOnly = Option.when(HasMptCheck){Bool()}
   val s2xlate = UInt(2.W)
   def hasS2xlate(): Bool = {
     this.s2xlate =/= noS2xlate
@@ -1192,10 +1233,17 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     ))
   }
 
-  def hit(gvpn: UInt, vmid: UInt): Bool = {
+
+
+  def hit(gvpn: UInt, vmid: UInt, mergeMptLevel: Boolean = false, mptTlbResp:MptTlbRespBundle = 0.U.asTypeOf(new MptTlbRespBundle)): Bool = {
+
     val vmid_hit = this.entry.vmid.getOrElse(0.U) === vmid
+
+    val mptNapot = Option.when(mergeMptLevel) (mpt_merge_n(this.entry.level.get, this.entry.n.getOrElse(0.U), mptTlbResp.mptLevel, mptTlbResp.permIsNAPOT))
+    val mpt_level = Option.when(mergeMptLevel) (mptTlbResp.mptLevel min this.entry.level.get)
+
     val tag_match = Wire(Vec(Level + 1, Bool()))
-    tag_match(0) := Mux(entry.n.getOrElse(0.U) === 0.U,
+    tag_match(0) := Mux((if (mergeMptLevel) mptNapot.get else entry.n.getOrElse(0.U)) === 0.U,
       entry.tag(vpnnLen - 1, 0) === gvpn(vpnnLen - 1, 0),
       entry.tag(vpnnLen - 1, pteNapotBits) === gvpn(vpnnLen - 1, pteNapotBits))
     for (i <- 1 until Level) {
@@ -1203,7 +1251,7 @@ class HptwResp(implicit p: Parameters) extends PtwBundle {
     }
     tag_match(Level) := entry.tag(gvpnLen - 1, vpnnLen * Level) === gvpn(gvpnLen - 1, vpnnLen * Level)
 
-    val level_match = MuxLookup(entry.level.getOrElse(0.U), false.B)(Seq(
+    val level_match = MuxLookup(if(mergeMptLevel) (mpt_level.get) else (entry.level.getOrElse(0.U)), false.B) (Seq(
       3.U -> tag_match(3),
       2.U -> (tag_match(3) && tag_match(2)),
       1.U -> (tag_match(3) && tag_match(2) && tag_match(1)),
@@ -1223,6 +1271,33 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
   val pf = Bool()
   val af = Bool()
 
+  def FakeMptOnlyResp(ppn: UInt, asid: UInt, vmid: UInt ) = {
+    this.entry.tag := 0.U
+    this.entry.tag :=  ppn(ppnLen-1, sectortlbwidth)
+    this.entry.ppn := ppn(ppnLen-1, sectortlbwidth) 
+    this.entry.vmid.map(_ := vmid)
+    this.entry.asid := asid
+    this.entry.level.get := 3.U
+    this.entry.v := true.B
+    this.entry.pbmt := 0.U
+    this.entry.n.get := false.B
+    this.entry.perm.get.d := true.B
+    this.entry.perm.get.a := true.B
+    this.entry.perm.get.g := false.B
+    this.entry.perm.get.u := true.B
+    this.entry.perm.get.x := true.B
+    this.entry.perm.get.w := true.B
+    this.entry.perm.get.r := true.B
+    this.addr_low :=ppn(sectortlbwidth-1,0)
+    for (j <- 0 until tlbcontiguous) {
+      this.ppn_low(j) := j.U
+      this.valididx(j) := true.B
+    }
+    this.pteidx := UIntToOH(ppn(sectortlbwidth - 1, 0)).asBools
+    this.entry.prefetch := DontCare
+    this.pf := false.B
+    this.af := false.B
+  }
 
   def genPPN(vpn: UInt): UInt = {
     MuxLookup(entry.level.get, 0.U)(Seq(
@@ -1246,14 +1321,19 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     !pf && !entry.v && !af
   }
 
-  def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false): Bool = {
+  def hit(vpn: UInt, asid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false, mptIgnoreAsid: Bool = false.B,
+    mergeMptLevel: Boolean = false, mptTlbResp:MptTlbRespBundle = 0.U.asTypeOf(new MptTlbRespBundle)): Bool = {
     require(vpn.getWidth == vpnLen)
     require(allType)
     // require(this.asid.getWidth <= asid.getWidth)
-    val asid_hit = if (ignoreAsid) true.B else (this.entry.asid === asid || this.entry.perm.get.g)
+    val asid_hit = if (HasMptCheck) (Mux(mptIgnoreAsid, true.B, if (ignoreAsid) true.B else (this.entry.asid === asid || this.entry.perm.get.g))) else 
+      (if (ignoreAsid) true.B else (this.entry.asid === asid || this.entry.perm.get.g))
+
+    val mptNapot = Option.when(mergeMptLevel) (mpt_merge_n(this.entry.level.get, this.entry.n.getOrElse(0.U), mptTlbResp.mptLevel, mptTlbResp.permIsNAPOT))
+    val mpt_level = Option.when(mergeMptLevel) (mptTlbResp.mptLevel min this.entry.level.get)
 
     val tag_match = Wire(Vec(Level + 1, Bool()))
-    tag_match(0) := Mux(entry.n.getOrElse(0.U) === 0.U,
+    tag_match(0) := Mux((if(mergeMptLevel) mptNapot.get else entry.n.getOrElse(0.U)) === 0.U,
       entry.tag(vpnnLen - sectortlbwidth - 1, 0) === vpn(vpnnLen - 1, sectortlbwidth),
       entry.tag(vpnnLen - sectortlbwidth - 1, pteNapotBits - sectortlbwidth) === vpn(vpnnLen - 1, pteNapotBits))
     for (i <- 1 until Level) {
@@ -1261,14 +1341,14 @@ class PtwSectorResp(implicit p: Parameters) extends PtwBundle {
     }
     tag_match(Level) := entry.tag(sectorvpnLen - 1, vpnnLen * Level - sectortlbwidth) === vpn(vpnLen - 1, vpnnLen * Level)
 
-    val level_match = MuxLookup(entry.level.getOrElse(0.U), false.B)(Seq(
+    val level_match = MuxLookup(if(mergeMptLevel) (mpt_level.get) else (entry.level.getOrElse(0.U)), false.B) (Seq(
       3.U -> tag_match(3),
       2.U -> (tag_match(3) && tag_match(2)),
       1.U -> (tag_match(3) && tag_match(2) && tag_match(1)),
       0.U -> (tag_match(3) && tag_match(2) && tag_match(1) && tag_match(0)))
     )
 
-    val isSuperPage = entry.level.getOrElse(0.U) =/= 0.U || entry.n.getOrElse(0.U) =/= 0.U
+    val isSuperPage = if (mergeMptLevel) (mpt_level.get=/= 0.U || mptNapot.get=/= 0.U) else (entry.level.getOrElse(0.U) =/= 0.U || entry.n.getOrElse(0.U) =/= 0.U)
     val addr_low_hit = Mux(isSuperPage, true.B, valididx(vpn(sectortlbwidth - 1, 0)))
 
     asid_hit && level_match && addr_low_hit
@@ -1326,6 +1406,7 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   val s2xlate = UInt(2.W)
   val s1 = new PtwSectorResp()
   val s2 = new HptwResp()
+  val mpt = Option.when(HasMptCheck) (new MptTlbRespBundle())
 
   def hasS2xlate: Bool = {
     this.s2xlate =/= noS2xlate
@@ -1369,8 +1450,9 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   }
 
   def hit(vpn: UInt, asid: UInt, vasid: UInt, vmid: UInt, allType: Boolean = false, ignoreAsid: Boolean = false): Bool = {
-    val noS2_hit = s1.hit(vpn, asid, vmid, allType, ignoreAsid)
-    val onlyS2_hit = s2.hit(vpn, vmid)
+    val noS2_hit = s1.hit(vpn, asid, vmid, allType, ignoreAsid, 
+      (if (HasMptCheck) (this.mpt.get.mptOnly) else false.B), HasMptCheck, this.mpt.getOrElse(0.U.asTypeOf(new MptTlbRespBundle)))
+    val onlyS2_hit = s2.hit(vpn, vmid, HasMptCheck, this.mpt.getOrElse(0.U.asTypeOf(new MptTlbRespBundle)))
     // allstage and onlys1 hit
     val s1vpn = Cat(s1.entry.tag, s1.addr_low)
     val level = Mux(this.s2xlate === onlyStage1,
@@ -1386,7 +1468,14 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     val allStage_n = (s1.entry.n.getOrElse(0.U) =/= 0.U && s2.entry.level.getOrElse(0.U) =/= 0.U) ||
       (s2.entry.n.getOrElse(0.U) =/= 0.U && s1.entry.level.getOrElse(0.U) =/= 0.U) ||
       (s1.entry.n.getOrElse(0.U) =/= 0.U && s2.entry.n.getOrElse(0.U) =/= 0.U)
-    val n = Mux(this.s2xlate === onlyStage1, s1.entry.n.getOrElse(0.U), allStage_n)
+    
+    val mptNapot = Option.when(HasMptCheck) (mpt_merge_n(level, allStage_n, mpt.get.mptLevel, mpt.get.permIsNAPOT))
+    val mptNapot_onlys1 = Option.when(HasMptCheck) (
+      mpt_merge_n(s1.entry.level.getOrElse(0.U), s1.entry.n.getOrElse(0.U), mpt.get.mptLevel, mpt.get.permIsNAPOT)
+    )
+    val mpt_level = Option.when(HasMptCheck) (level min mpt.get.mptLevel)  
+    val n = if (HasMptCheck) (Mux(this.s2xlate === onlyStage1, mptNapot_onlys1.get,mptNapot.get)) else
+      (Mux(this.s2xlate === onlyStage1, s1.entry.n.getOrElse(0.U), allStage_n))
 
     val tag_match = Wire(Vec(Level + 1, Bool()))
     tag_match(0) := Mux(n === 0.U,
@@ -1397,7 +1486,7 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
     }
     tag_match(Level) := vpn(vpnLen - 1, vpnnLen * Level) === s1vpn(vpnLen - 1, vpnnLen * Level)
 
-    val level_match = MuxLookup(level, false.B)(Seq(
+    val level_match = MuxLookup(if (HasMptCheck) mpt_level.getOrElse(0.U) else level, false.B) (Seq(
       3.U -> tag_match(3),
       2.U -> (tag_match(3) && tag_match(2)),
       1.U -> (tag_match(3) && tag_match(2) && tag_match(1)),

@@ -63,7 +63,7 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   // NOTE: icache & tlb & sbuffer must receive flush signal at any time
   sbuffer      := state === s_wait
   fencei       := state === s_icache
-  sfence.valid := state === s_tlb && (func === FenceOpType.sfence || func === FenceOpType.hfence_v || func === FenceOpType.hfence_g)
+  sfence.valid := state === s_tlb && (func === FenceOpType.sfence || func === FenceOpType.hfence_v || func === FenceOpType.hfence_g || (if (HasMptCheck) (func === FenceOpType.mfence) else false.B))
   sfence.bits.rs1  := uop.data.imm(4, 0) === 0.U
   sfence.bits.rs2  := uop.data.imm(9, 5) === 0.U
   sfence.bits.flushPipe := uop.ctrl.flushPipe.get
@@ -71,10 +71,14 @@ class Fence(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   sfence.bits.hg := func === FenceOpType.hfence_g
   sfence.bits.addr := RegEnable(io.in.bits.data.src(0), io.in.fire)
   sfence.bits.id   := RegEnable(io.in.bits.data.src(1), io.in.fire)
+  
+  if (HasMptCheck) {
+    sfence.bits.mfence.get := func === FenceOpType.mfence
+  } // TODO:implement remaining mfence functionality, not yet finished!!!
 
   when (state === s_idle && io.in.valid) { state := s_wait }
   when (state === s_wait && func === FenceOpType.fencei && sbEmpty) { state := s_icache }
-  when (state === s_wait && ((func === FenceOpType.sfence || func === FenceOpType.hfence_g || func === FenceOpType.hfence_v) && sbEmpty)) { state := s_tlb }
+  when (state === s_wait && ((func === FenceOpType.sfence || func === FenceOpType.hfence_g || func === FenceOpType.hfence_v || (if (HasMptCheck) (func === FenceOpType.mfence) else false.B)) && sbEmpty)) { state := s_tlb }
   when (state === s_wait && func === FenceOpType.fence  && sbEmpty) { state := s_fence }
   when (state === s_wait && func === FenceOpType.nofence  && sbEmpty) { state := s_nofence }
   when (state =/= s_idle && state =/= s_wait) { state := s_idle }

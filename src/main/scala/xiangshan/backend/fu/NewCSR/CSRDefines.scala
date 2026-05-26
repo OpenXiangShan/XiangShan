@@ -183,6 +183,15 @@ object CSRDefines {
     override protected def legalValues: Seq[EnumType] = Seq(Bare, Sv39x4, Sv48x4)
   }
 
+  object MmptMode extends CSREnum with WARLApply {
+    val Bare   = Value(0.U)
+    val Smmpt43 = Value(1.U)
+    val Smmpt52 = Value(2.U)
+    val smmpt64 = Value(3.U)
+    // XiangShan only support Sv39 & Sv48 Page
+    override def isLegal(enumeration: CSREnumType): Bool = enumeration.isOneOf(Bare, Smmpt43, Smmpt52)
+  }
+
   object EnvCBIE extends CSREnum with WARLApply {
     val Off   = Value("b00".U)
     val Flush = Value("b01".U)

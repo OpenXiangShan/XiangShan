@@ -35,6 +35,8 @@ trait HasCSRConst {
 
   // Machine level Bitmap Check(Custom Read/Write)
   val Mbmc = 0xBC2
+  val Mmpt = 0x382 // HasMptCheck!!! temp place holder, needs to change later,changed
+  
 
   def privEcall  = 0x000.U
   def privEbreak = 0x001.U
