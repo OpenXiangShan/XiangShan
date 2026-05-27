@@ -51,6 +51,13 @@ object Src1SelectField extends DecodeField[
     if (pattern.category.rawString == VecInstPattern.Category.OPFVF.str) CONST else INCF2
   }
 
+  private def intSrc1Sel(pattern: VecIntArithInstPattern, default: Src1Val): Src1Val = {
+    pattern.category.rawString match {
+      case VecInstPattern.Category.OPIVX.str | VecInstPattern.Category.OPMVX.str => CONST
+      case _ => default
+    }
+  }
+
   override def name: String = "src1Sel"
 
   override def chiselType: UInt = Src1SelectEnum.UInt()
@@ -63,19 +70,19 @@ object Src1SelectField extends DecodeField[
         vai match {
           case vii: VecIntArithInstPattern =>
             vii match {
-              case VecIntVVVPattern() => INC1
-              case VecIntVVVVPattern() | VecCryptoVVVVPattern() => INC1
-              case VecIntVVMPattern() => INC1
+              case VecIntVVVPattern() => intSrc1Sel(vii, INC1)
+              case VecIntVVVVPattern() | VecCryptoVVVVPattern() => intSrc1Sel(vii, INC1)
+              case VecIntVVMPattern() => intSrc1Sel(vii, INC1)
               case VecIntMMMPattern() => CONST
-              case VecIntVVWPattern() => INCF2
-              case VecIntVVWWPattern() => INCF2
-              case VecIntWVWPattern() => INCF2
-              case VecIntSatVVVPattern() => INC1
-              case VecIntSatMulVVVPattern() => INC1
-              case VecIntScaleShiftVVVPattern() => INC1
-              case VecIntNarrowShiftWVVPattern() => INCF2
-              case VecIntClipWVVPattern() => INCF2
-              case VecIntAvgVVVPattern() => INC1
+              case VecIntVVWPattern() => intSrc1Sel(vii, INCF2)
+              case VecIntVVWWPattern() => intSrc1Sel(vii, INCF2)
+              case VecIntWVWPattern() => intSrc1Sel(vii, INCF2)
+              case VecIntSatVVVPattern() => intSrc1Sel(vii, INC1)
+              case VecIntSatMulVVVPattern() => intSrc1Sel(vii, INC1)
+              case VecIntScaleShiftVVVPattern() => intSrc1Sel(vii, INC1)
+              case VecIntNarrowShiftWVVPattern() => intSrc1Sel(vii, INCF2)
+              case VecIntClipWVVPattern() => intSrc1Sel(vii, INCF2)
+              case VecIntAvgVVVPattern() => intSrc1Sel(vii, INC1)
               case VecGatherVPattern() => INC1
               case VecGatherXPattern() => CONST
               case VecGatherIPattern() => NONE
@@ -91,8 +98,8 @@ object Src1SelectField extends DecodeField[
               case VecSlideXPattern() => CONST
               case VecSlideIPattern() => NONE
               case VecSlide1Pattern() => CONST
-              case VecCarryPattern() => INC1
-              case VecCarryMPattern() => INC1
+              case VecCarryPattern() => intSrc1Sel(vii, INC1)
+              case VecCarryMPattern() => intSrc1Sel(vii, INC1)
               case VecIntS1VDVPattern() => INC1
               case VecIntS1XDVPattern() => CONST
               case VecS1XDAPattern() => CONST

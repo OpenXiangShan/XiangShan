@@ -426,7 +426,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       sink.data := source.bits.toVlRf.get.bits
   }
   vecRegion.in.fromIntRegion.is0GpRdDataFail.foreach(_.foreach(_.foreach(_ := false.B))) // Todo: vec read gp
-  vecRegion.in.fromIntRegion.is1GpRdDataNext.foreach(_.foreach(_.foreach(_ := 0.U))) // Todo: vec read gp
+  intRegion.io.fromVecGpRdAddr.get := vecRegion.out.toIntRegion.is1GpRdAddrNext
+  vecRegion.in.fromIntRegion.is1GpRdDataNext := intRegion.io.toVecGpRdData.get
 
   vecRegion.in.fromFltRegion.fpWbWakeUp zip fpRegion.io.toFpPreg foreach {
     case (sink: VecIssueQueue.WakeUpBundle, source: RfWritePortBundle) =>

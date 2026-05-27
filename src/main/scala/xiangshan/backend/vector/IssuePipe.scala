@@ -87,8 +87,12 @@ class IssuePipe(
 
   out.is1GpRdAddrNext.zip(is1GpRdAddrReqSrcIdx).foreach {
     case (readBundle, srcIdx) =>
-      readBundle.ren := is0Next.valid && is0Next.bits.gpRen(srcIdx)
-      readBundle.addr := is0Next.bits.psrc(srcIdx)
+      readBundle.ren := is1Next.valid && is1Next.bits.gpRen(srcIdx)
+      readBundle.addr := is1Next.bits.psrc(srcIdx)
+      readBundle.bankRen.foreach(_.zipWithIndex.foreach {
+        case (bankRen, bank) =>
+          bankRen := readBundle.ren && readBundle.addr.head(log2Ceil(readBundle.pregParams.numBank)) === bank.U
+      })
   }
 
   out.is1FpRdAddrNext.zip(is1FpRdAddrReqSrcIdx).foreach {
@@ -365,6 +369,7 @@ object IssuePipe {
   ) extends Bundle {
     val ren = Bool()
     val addr = UInt(pregParams.addrWidth.W)
+    val bankRen = Option.when(pregParams.numBank > 1)(Vec(pregParams.numBank, Bool()))
   }
 
   class RfReadDataBundle(
