@@ -1088,7 +1088,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     private val writeSbufferVaddr = Wire(Vec(EnsbufferWidth , UInt(VAddrBits.W)))
     private val headCross16B      = headCtrlEntry.cross16Byte
     private val headCrossPage     = headrdataPtr === io.fromUnalignQueue.bits.sqIdx && io.fromUnalignQueue.valid
-    private val diffIsHighPart    = Wire(Vec(EnsbufferWidth, Bool())) //only for difftest
 
     // paddrHigh and vaddrHigh only for cross16Byte split
     private val paddrLow          = Cat(headDataEntry.paddr(headDataEntry.paddr.getWidth - 1, 4), 0.U(4.W))
@@ -1105,7 +1104,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         writeSbufferMask(i)  := outMask(i) & unalignMask(i)
         writeSbufferPaddr(i) := paddrLow
         writeSbufferVaddr(i) := vaddrLow
-        diffIsHighPart(i)    := dataEntries(i).paddr(3) && !unalignWithin16Byte //TODO: will be fix in thefuture
       } else if (i == 1) {
         writeSbufferData(i)  := Mux(headCross16B, outData(0), outData(i))
         writeSbufferMask(i)  := Mux(headCross16B, outMask(0) & (~unalignMask(0)).asUInt, outMask(i))
@@ -1116,17 +1114,12 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         writeSbufferVaddr(i) := Mux(headCross16B,
           vaddrHigh,
           Cat(dataEntries(i).vaddr(dataEntries(i).vaddr.getWidth - 1, 4), 0.U(4.W)))
-        diffIsHighPart(i)    := Mux(headCross16B,
-                                      false.B,
-                                      dataEntries(i).paddr(3) && !unalignWithin16Byte //TODO: will be fix in thefuture
-                                    ) // if cross 16B, port 1 must low part
       }
       else {
         writeSbufferData(i)  := outData(i)
         writeSbufferMask(i)  := outMask(i)
         writeSbufferPaddr(i) := Cat(dataEntries(i).paddr(dataEntries(i).paddr.getWidth - 1, 4), 0.U(4.W)) //align 128-bit
         writeSbufferVaddr(i) := Cat(dataEntries(i).vaddr(dataEntries(i).vaddr.getWidth - 1, 4), 0.U(4.W)) //align 128-bit
-        diffIsHighPart(i)    := dataEntries(i).paddr(3) && !unalignWithin16Byte //TODO: will be fix in thefuture
       }
     }
 
@@ -1317,7 +1310,6 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
           diffStore.cacheableStore(i).bits.mask           := writeSbufferWire(i).bits.mask
           diffStore.cacheableStore(i).bits.wline          := writeSbufferWire(i).bits.wline
           diffStore.cacheableStore(i).bits.vecValid       := writeSbufferWire(i).bits.vecValid
-          diffStore.cacheableStore(i).bits.diffIsHighPart := diffIsHighPart(i) // indicate whether valid data in high 64-bit, only for scalar store event!
       }
       diffStore.ncStore.valid := io.toUncacheBuffer.req.fire && io.toUncacheBuffer.req.bits.nc
       diffStore.ncStore.bits := io.toUncacheBuffer.req.bits

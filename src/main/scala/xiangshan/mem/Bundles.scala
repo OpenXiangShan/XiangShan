@@ -428,7 +428,6 @@ class DifftestPmaStoreIO(implicit p: Parameters) extends XSBundle {
   val addr           = UInt(PAddrBits.W)
   val wline          = Bool()
   val vecValid       = Bool()
-  val diffIsHighPart = Bool() // indicate whether valid data in high 64-bit, only for scalar store event!
 }
 
 class DiffStoreIO(implicit p: Parameters) extends XSBundle{

@@ -896,21 +896,6 @@ class Sbuffer(implicit p: Parameters)
     val VecMemFLOWMaxNumber = 16
     val WlineMaxNumber = blockWords
 
-    def UIntSlice(in: UInt, High: UInt, Low: UInt): UInt = {
-      val maxNum = in.getWidth
-      val result = Wire(Vec(maxNum, Bool()))
-
-      for (i <- 0 until maxNum) {
-        when (Low + i.U <= High) {
-          result(i) := in(Low + i.U)
-        }.otherwise{
-          result(i) := 0.U
-        }
-      }
-
-      result.asUInt
-    }
-
     // To align with 'nemu', we need:
     //  For 'unit-store' and 'whole' vector store instr, we re-split here,
     //  and for the res, we do nothing.
@@ -919,7 +904,6 @@ class Sbuffer(implicit p: Parameters)
 
       val uop              = io.diffStore.diffInfo(i).uop
 
-      val isVecMemContinousOp = LSUOpType.isVecMemContinousOp(uop.fuOpType)
       val isVse           = LSUOpType.isUStride(uop.fuOpType)
       val isVsm           = LSUOpType.isMasked(uop.fuOpType)
       val isVsr           = LSUOpType.isWhole(uop.fuOpType)
@@ -965,34 +949,12 @@ class Sbuffer(implicit p: Parameters)
       difftestCommon.pc           := io.diffStore.diffInfo(i).uop.pc
       difftestCommon.robidx       := io.diffStore.diffInfo(i).uop.robIdx.value
 
-      // Except for normal scalar stores, all other address and data operations are handled within difftest.
-      when (isVSLine) {
-        difftestCommon.addr     := rawAddr
-        difftestCommon.data  := rawData(63, 0)
-        difftestCommon.highData := rawData(127, 64)
-        difftestCommon.mask     := rawMask
-      }.elsewhen (isWline) {
-        difftestCommon.addr     := rawAddr
-        difftestCommon.data  := rawData(63, 0)
-        difftestCommon.highData := rawData(127, 64)
-        difftestCommon.mask     := rawMask
-        assert(!storeCommitValid || rawData === 0.U, "wline only supports whole zero write now")
-      }.otherwise { // Normal scalar store
-        val isHighPart        = io.diffStore.cacheableStore(i).bits.diffIsHighPart
-        val waddr             = ZeroExt(Cat(io.diffStore.cacheableStore(i).bits.addr(PAddrBits - 1, 4), isHighPart, 0.U(3.W)), 64)
-        val sbufferMask       = Mux(isHighPart,
-          io.diffStore.cacheableStore(i).bits.mask(io.diffStore.cacheableStore(i).bits.mask.getWidth - 1, 8),
-          io.diffStore.cacheableStore(i).bits.mask(7, 0))
-        val sbufferData       = Mux(isHighPart,
-          io.diffStore.cacheableStore(i).bits.data(io.diffStore.cacheableStore(i).bits.data.getWidth - 1, 64),
-          io.diffStore.cacheableStore(i).bits.data(63, 0))
-        val wmask = sbufferMask
-        val wdata = sbufferData & MaskExpand(sbufferMask)
-        difftestCommon.addr     := waddr
-        difftestCommon.data  := wdata
-        difftestCommon.highData := 0.U
-        difftestCommon.mask     := wmask
-      }
+      difftestCommon.addr     := rawAddr
+      difftestCommon.data     := rawData(63, 0)
+      difftestCommon.highData := rawData(127, 64)
+      difftestCommon.mask     := rawMask
+
+      assert(!storeCommitValid || rawData === 0.U || !isWline, "wline only supports whole zero write now")
     }
     println("PMA Store: diffStoreEventCount = " + diffStoreEventCount)
 
