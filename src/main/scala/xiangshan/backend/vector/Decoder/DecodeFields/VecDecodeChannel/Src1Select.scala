@@ -43,12 +43,11 @@ object Src1SelectField extends DecodeField[
 ] {
   import Src1SelectEnum._
 
-  private def fpSrc1Sel(pattern: VecFpArithInstPattern): Src1Val = {
-    if (pattern.category.rawString == VecInstPattern.Category.OPFVF.str) CONST else INC1
-  }
-
-  private def fpWideSrc1Sel(pattern: VecFpArithInstPattern): Src1Val = {
-    if (pattern.category.rawString == VecInstPattern.Category.OPFVF.str) CONST else INCF2
+  private def fpSrc1Sel(pattern: VecFpArithInstPattern, default: Src1Val): Src1Val = {
+    pattern.category.rawString match {
+      case VecInstPattern.Category.OPFVF.str => CONST
+      case _ => default
+    }
   }
 
   private def intSrc1Sel(pattern: VecIntArithInstPattern, default: Src1Val): Src1Val = {
@@ -118,14 +117,14 @@ object Src1SelectField extends DecodeField[
             }
           case vfi: VecFpArithInstPattern =>
             vfi match {
-              case VecFpOp2VVPattern() => fpSrc1Sel(vfi)
-              case VecFpOp2VMPattern() => fpSrc1Sel(vfi)
-              case VecFpOp3VVVPattern() => fpSrc1Sel(vfi)
+              case VecFpOp2VVPattern() => fpSrc1Sel(vfi, INC1)
+              case VecFpOp2VMPattern() => fpSrc1Sel(vfi, INC1)
+              case VecFpOp3VVVPattern() => fpSrc1Sel(vfi, INC1)
               case VecFpRedPattern() => S2MAXx1_DCONST
               case VecFpWRedPattern() => S2MAXF2x1_DCONST
-              case VecFpOp2VVWPattern() => fpWideSrc1Sel(vfi)
-              case VecFpOp2WVWPattern() => fpWideSrc1Sel(vfi)
-              case VecFpOp3VVWPattern() => fpWideSrc1Sel(vfi)
+              case VecFpOp2VVWPattern() => fpSrc1Sel(vfi, INCF2)
+              case VecFpOp2WVWPattern() => fpSrc1Sel(vfi, INCF2)
+              case VecFpOp3VVWPattern() => fpSrc1Sel(vfi, INCF2)
               case VecFpS2VPattern() => NONE
               case VecFpS2VVWPattern() => NONE
               case VecFpS2WVIntPattern() => NONE

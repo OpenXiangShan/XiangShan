@@ -248,6 +248,7 @@ class VecRegionImp(
         rdata.data := vlRdata(rdata.rdConfig.port)
       }
       out.toIntRegion.is1GpRdAddrNext(iqIdx)(pipeIdx) := pipe.out.is1GpRdAddrNext
+      out.toFltRegion.is1FpRdAddrNext(iqIdx)(pipeIdx) := pipe.out.is1FpRdAddrNext
       pipe.in.ex0GpRdDataNext := RegNext(in.fromIntRegion.is1GpRdDataNext(iqIdx)(pipeIdx))
       pipe.in.ex0FpRdDataNext := RegNext(in.fromFltRegion.is1FpRdDataNext(iqIdx)(pipeIdx))
       pipe.in.is2GpRdFailNext := in.fromIntRegion.is0GpRdDataFail(iqIdx)(pipeIdx)
@@ -573,6 +574,11 @@ object VecRegionModule {
       )
       val is1GpRdAddrNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadAddrBundle]]] =
         param.genRfRdAddrBundle(backendParams.intPregParams)
+    }
+
+    val toFltRegion = new Bundle {
+      val is1FpRdAddrNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadAddrBundle]]] =
+        param.genRfRdAddrBundle(backendParams.fpPregParams)
     }
 
     val toMem = new OutToMem

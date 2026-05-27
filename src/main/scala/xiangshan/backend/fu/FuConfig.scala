@@ -757,6 +757,7 @@ object FuConfig {
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFMA(cfg)(p).suggestName("Vfma")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
+      Seq(FpData(),  VecData(), VecData()), // fs1, vs2, vd_old
     ),
     piped = true,
     writeVecRf = true,
