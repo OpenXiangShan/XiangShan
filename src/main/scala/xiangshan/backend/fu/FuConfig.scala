@@ -570,6 +570,7 @@ object FuConfig {
     fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
+      Seq(IntData(), VecData(), VecData()),  // rs1, vs2, vd_old
     ),
     piped = true,
     writeVecRf = true,
@@ -595,6 +596,7 @@ object FuConfig {
     fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
+      Seq(IntData(), VecData(), VecData()), // rs1, vs2, vd_old
     ),
     piped = true,
     writeVecRf = true,
@@ -619,6 +621,7 @@ object FuConfig {
     fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
+      Seq(IntData(), VecData(), VecData()), // rs1, vs2, vd_old
     ),
     piped = false,
     writeVecRf = true,

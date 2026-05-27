@@ -247,6 +247,7 @@ class VecRegionImp(
       pipe.in.is2VlRdDataNext.foreach { case rdata =>
         rdata.data := vlRdata(rdata.rdConfig.port)
       }
+      out.toIntRegion.is1GpRdAddrNext(iqIdx)(pipeIdx) := pipe.out.is1GpRdAddrNext
       pipe.in.ex0GpRdDataNext := RegNext(in.fromIntRegion.is1GpRdDataNext(iqIdx)(pipeIdx))
       pipe.in.ex0FpRdDataNext := RegNext(in.fromFltRegion.is1FpRdDataNext(iqIdx)(pipeIdx))
       pipe.in.is2GpRdFailNext := in.fromIntRegion.is0GpRdDataFail(iqIdx)(pipeIdx)
@@ -570,6 +571,8 @@ object VecRegionModule {
       val vstdCanAccept: MixedVec[Vec[Bool]] = MixedVec(
         param.issueParams.filter(_.hasVStd).map(x => Vec(x.numEnq, Bool()))
       )
+      val is1GpRdAddrNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadAddrBundle]]] =
+        param.genRfRdAddrBundle(backendParams.intPregParams)
     }
 
     val toMem = new OutToMem

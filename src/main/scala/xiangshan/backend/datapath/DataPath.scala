@@ -302,6 +302,10 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       else
         intRfRaddr(portIdx) := 0.U
     }
+    io.fromVecGpRdAddr.foreach(_.flatten.flatten.foreach { raddr =>
+      intRfRaddr(raddr.rdConfig.port) :=
+        VecInit(Seq.fill(intPregNumBank)(raddr.addr.take(intArbiterAddrWidth)))
+    })
     vlRfWaddr := io.fromVlWb.get.map(x => RegEnable(x.pdest, x.wen)).toSeq
     vlRfWdata := io.fromVlWb.get.map(x => RegEnable(x.data, x.wen)).toSeq
     vlRfWen := io.fromVlWb.get.map(x => RegNext(x.wen)).toSeq
@@ -521,6 +525,18 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   val s1_toExuReady = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.ready.cloneType).toSeq))))
   val s1_intRfBankRaddr: MixedVec[MixedVec[Vec[UInt]]] = MixedVecInit(fromIntIQ.map(x => MixedVecInit(x.map(xx => VecInit(xx.bits.rfBankRen.get.map(xxx =>
       RegNext(xxx.asUInt)))))))
+  val s1_vecGpRdRen = io.fromVecGpRdAddr.map(vecAddr => MixedVecInit(vecAddr.map(iqAddr =>
+    MixedVecInit(iqAddr.map(pipeAddr =>
+      MixedVecInit(pipeAddr.map(raddr => RegNext(raddr.ren)))
+    ))
+  )))
+  val s1_vecGpRfBankRen = io.fromVecGpRdAddr.map(vecAddr => MixedVecInit(vecAddr.map(iqAddr =>
+    MixedVecInit(iqAddr.map(pipeAddr =>
+      MixedVecInit(pipeAddr.map(raddr =>
+        RegNext(raddr.bankRen.getOrElse(VecInit(Seq(true.B))).asUInt)
+      ))
+    ))
+  )))
   val s1_intPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_fpPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_vfPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
@@ -537,6 +553,20 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   val allRData = (s1_intPregRData ++ s1_fpPregRData ++ s1_vfPregRData)
   allRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   if (param.isIntSchd) {
+    io.toVecGpRdData.foreach { vecRdata =>
+      vecRdata.lazyZip(s1_vecGpRdRen.get).lazyZip(s1_vecGpRfBankRen.get).foreach { case (iqRdata, iqRen, iqBankRen) =>
+        iqRdata.lazyZip(iqRen).lazyZip(iqBankRen).foreach { case (pipeRdata, pipeRen, pipeBankRen) =>
+          pipeRdata.lazyZip(pipeRen).lazyZip(pipeBankRen).foreach { case (rdata, ren, bankRen) =>
+            rdata.data := Mux(
+              ren,
+              Mux1H(bankRen, intRfRdata.get(rdata.rdConfig.port)),
+              0.U,
+            )
+          }
+        }
+      }
+    }
+
     s1_intPregRData.lazyZip(rfrPortConfigs).lazyZip(s1_intRfBankRaddr).foreach { case (iqRdata, iqCfg, bankAddrs) =>
       iqRdata.lazyZip(iqCfg).lazyZip(bankAddrs).foreach { case (iuRdata, iuCfg, bankAddr) =>
         iuRdata.zip(iuCfg).zip(bankAddr)
@@ -862,6 +892,14 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
   val fpRfRdataIn = Option.when(param.isIntSchd)(Input(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.rfDataWidth.W))))
 
   val fpRfRdataOut = Option.when(param.isFpSchd)(Output(Vec(params.numPregRd(FpData()), UInt(fpSchdParams.rfDataWidth.W))))
+
+  val fromVecGpRdAddr = Option.when(param.isIntSchd)(
+    Input(params.getVecRegionParam.genRfRdAddrBundle(params.intPregParams))
+  )
+
+  val toVecGpRdData = Option.when(param.isIntSchd)(
+    Output(params.getVecRegionParam.genRfRdDataBundle(params.intPregParams))
+  )
 
   val og0Cancel = Output(ExuVec())
 
