@@ -89,20 +89,20 @@ jobs:
           - name: misc-tests
           - name: rvh-tests
           - name: microbench
-            report: true
+            report-perf: true
           - name: coremark
-            report: true
+            report-perf: true
           - name: linux-hello-opensbi
-            report: true
+            report-perf: true
           - name: iopmp-test
             extra: --no-diff
           - name: povray
             extra: --max-instr 5000000 --gcpt-restore-bin /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin
-            report: true
+            report-perf: true
           - name: copy_and_run
             extra: --flash ${GITHUB_WORKSPACE}/ready-to-run/copy_and_run.bin
             workload: ${GITHUB_WORKSPACE}/ready-to-run/microbench.bin
-            report: true
+            report-perf: true
           # Vector-related workloads are temporarily disabled in CI due to the ongoing vector refactor.
           # - name: rvv-bench
           - name: f16_test
@@ -123,6 +123,7 @@ jobs:
           echo "Getting EMU binary from ${PERF_HOME}/emu"
           cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
       - name: Run Basic Test - ${{ matrix.name }}
+        id: run
         shell: bash
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
@@ -130,17 +131,27 @@ jobs:
             --numa --threads 8 \
             ${{ matrix.workload || format('--ci {0}', matrix.name) }} \
             ${{ matrix.extra }} \
-            2> ${{ matrix.report && 'stderr.log' || '/dev/null' }} | tee stdout.log
+            2> ${{ matrix.report-perf && 'stderr.log' || '/dev/null' }} | tee stdout.log
 
-            if [[ -n "${{ matrix.report }}" ]]; then
-              cat stderr.log | sort | tee stderr-sorted.log
-              grep -oP 'IPC = \K\d+\.\d+' stdout.log > "${PERF_HOME}/ipc-basics-${{ matrix.name }}"
-              echo "IPC: $(cat "${PERF_HOME}/ipc-basics-${{ matrix.name }}")"
-            fi
+          if [[ -n "${{ matrix.report-perf }}" ]]; then
+            grep -oP 'IPC = \K\d+\.\d+' stdout.log > "${PERF_HOME}/ipc-basics-${{ matrix.name }}"
+            echo "IPC: $(cat "${PERF_HOME}/ipc-basics-${{ matrix.name }}")"
+          fi
       - name: Archive log
-        if: always() && matrix.report
+        if: ${{ always() && steps.run.outcome != 'skipped' }}
         run: |
-          tar -czvf "${PERF_HOME}/${{ matrix.name }}.tar.gz" stdout.log stderr-sorted.log
+          if [[ -n "${{ matrix.report-perf }}" ]]; then
+            # if run step failed, do not sort
+            if [[ "${{ steps.run.outcome }}" == "failure" ]]; then
+              cat stderr.log
+            else
+              mv stderr.log stderr.log.raw
+              cat stderr.log.raw | sort | tee stderr.log
+            fi
+            tar -czvf "${PERF_HOME}/${{ matrix.name }}.tar.gz" stdout.log stderr.log
+          else
+            tar -czvf "${PERF_HOME}/${{ matrix.name }}.tar.gz" stdout.log
+          fi
 
   upload:
     name: EMU - Basics - Upload

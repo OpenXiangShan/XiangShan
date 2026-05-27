@@ -121,6 +121,7 @@ jobs:
           echo "Getting EMU binary from ${PERF_HOME}/emu"
           cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
       - name: Run Legacy CI Test - ${{ matrix.name }}
+        id: run
         shell: bash
         run: |
           # TODO: remove --disable-fork to enable lightSSS when gsim supports it
@@ -132,13 +133,19 @@ jobs:
             --ci ${{ matrix.name }} \
             ${{ matrix.with-restore-bin && '--gcpt-restore-bin /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin' || '' }} \
             2> stderr.log | tee stdout.log
-          cat stderr.log | sort | tee stderr-sorted.log
           grep -oP 'IPC = \K\d+\.\d+' stdout.log > "${PERF_HOME}/ipc-legacy-${{ matrix.name }}"
           echo "IPC: $(cat "${PERF_HOME}/ipc-legacy-${{ matrix.name }}")"
       - name: Archive log
-        if: always()
+        if: ${{ always() && steps.run.outcome != 'skipped' }}
         run: |
-          tar -czvf "${PERF_HOME}/legacy_${{ matrix.name }}.tar.gz" stdout.log stderr-sorted.log
+          # if run step failed, do not sort
+          if [[ "${{ steps.run.outcome }}" == "failure" ]]; then
+            cat stderr.log
+          else
+            mv stderr.log stderr.log.raw
+            cat stderr.log.raw | sort | tee stderr.log
+          fi
+          tar -czvf "${PERF_HOME}/legacy_${{ matrix.name }}.tar.gz" stdout.log stderr.log
 
   run:
     name: EMU - Performance - Run
@@ -225,6 +232,7 @@ jobs:
           echo "Getting EMU binary from ${PERF_HOME}/emu"
           cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
       - name: Run SPEC06 Test - ${{ matrix.name }}
+        id: run
         shell: bash
         run: |
           export CKPT=$(find "${CKPT_HOME}/${{ matrix.name }}/${{ matrix.ckpt }}" -type f \( -name "*.gz" -o -name "*.zstd" \) | head -n 1)
@@ -237,13 +245,19 @@ jobs:
             --disable-fork \
             ${CKPT} \
             2> stderr.log | tee stdout.log
-          cat stderr.log | sort | tee stderr-sorted.log
           grep -oP 'IPC = \K\d+\.\d+' stdout.log > "${PERF_HOME}/ipc-${{ matrix.name }}_${{ matrix.ckpt }}"
           echo "IPC: $(cat "${PERF_HOME}/ipc-${{ matrix.name }}_${{ matrix.ckpt }}")"
       - name: Archive log
-        if: always()
+        if: ${{ always() && steps.run.outcome != 'skipped' }}
         run: |
-          tar -czvf "${PERF_HOME}/${{ matrix.name }}_${{ matrix.ckpt }}.tar.gz" stdout.log stderr-sorted.log
+          # if run step failed, do not sort
+          if [[ "${{ steps.run.outcome }}" == "failure" ]]; then
+            cat stderr.log
+          else
+            mv stderr.log stderr.log.raw
+            cat stderr.log.raw | sort | tee stderr.log
+          fi
+          tar -czvf "${PERF_HOME}/${{ matrix.name }}_${{ matrix.ckpt }}.tar.gz" stdout.log stderr.log
 
   upload:
     name: EMU - Performance - Upload
