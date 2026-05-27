@@ -1294,14 +1294,28 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
         // when i = 0, the sqPtr is rdataPtr(0), which is rdataPtrExt(0), so it applies to NC as well.
         val ptr = io.rdataPtrExt(i).value
           if(i == 1) {
-            diffStore.diffInfo(i).uop                     := Mux(headCross16B, dataEntries.head.debugUop.get, dataEntries(i).debugUop.get)
+            val selectedUop = Mux(headCross16B, dataEntries.head.debugUop.get, dataEntries(i).debugUop.get)
+            val selectedVaddr = Mux(headCross16B, dataEntries.head.vaddr, dataEntries(i).vaddr)
+            diffStore.diffInfo(i).uop                     := selectedUop
             diffStore.diffInfo(i).start                   := Mux(headCross16B, dataEntries.head.debugVecUnalignedStart.get, dataEntries(i).debugVecUnalignedStart.get)
-            diffStore.diffInfo(i).offset                  := Mux(headCross16B, dataEntries.head.debugVecUnalignedOffset.get, dataEntries(i).debugVecUnalignedOffset.get)
+            val eew = LSUOpType.vecElemSize(selectedUop.fuOpType)
+            diffStore.diffInfo(i).offset                  := MuxLookup(eew, 0.U(log2Up(XLEN).W))(Seq(
+              0.U -> 0.U,
+              1.U -> selectedVaddr(0),
+              2.U -> selectedVaddr(1, 0),
+              3.U -> selectedVaddr(2, 0)
+            ))
           }
           else {
             diffStore.diffInfo(i).uop                     := dataEntries(i).debugUop.get
             diffStore.diffInfo(i).start                   := dataEntries(i).debugVecUnalignedStart.get
-            diffStore.diffInfo(i).offset                  := dataEntries(i).debugVecUnalignedOffset.get
+            val eew = LSUOpType.vecElemSize(dataEntries(i).debugUop.get.fuOpType)
+            diffStore.diffInfo(i).offset                  := MuxLookup(eew, 0.U(log2Up(XLEN).W))(Seq(
+              0.U -> 0.U,
+              1.U -> dataEntries(i).vaddr(0),
+              2.U -> dataEntries(i).vaddr(1, 0),
+              3.U -> dataEntries(i).vaddr(2, 0)
+            ))
           }
 
           diffStore.cacheableStore(i).valid               := writeSbufferWire(i).fire
