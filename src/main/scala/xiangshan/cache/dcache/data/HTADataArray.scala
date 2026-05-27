@@ -100,11 +100,7 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   
   // Age matrix of lqIdx: if i < j and matrix(i, j) == true, then i is older than j
   val lqIdx_age_matrix = Seq.tabulate(LoadPipelineWidth)(i => Seq.tabulate(LoadPipelineWidth)(j => {
-    if (i >= j) {
-      false.B
-    } else {
-      io.read(i).bits.lqIdx < io.read(j).bits.lqIdx
-    }
+    if (i >= j) false.B else (io.read(i).bits.lqIdx < io.read(j).bits.lqIdx)
   }))
 
 //   val load_req_bank_conflict_selcet = selcetOldestPort(load_req_with_bank_conflict, load_req_lqIdx, load_req_index)
@@ -124,12 +120,12 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     rrl_bank_conflict(i) := judge && io.readline.valid
     rrl_bank_conflict_intend(i) := judge && io.readline_intend
   }
-  val wr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(x =>
-    io.read(x).valid && write_valid_reg &&
-    div_addrs(x) === write_div_addr_dup_reg.head &&
+  val wr_bank_conflict = Seq.tabulate(LoadPipelineWidth)(i =>
+    io.read(i).valid && write_valid_reg &&
+    div_addrs(i) === write_div_addr_dup_reg.head &&
     // way_en(x) === write_wayen_dup_reg.head &&
-    (write_bank_mask_reg(bank_addrs(x)(0)) || write_bank_mask_reg(bank_addrs(x)(1)) && io.is128Req(x)) &&
-    (way_en_htag(x) & write_wayen_dup_reg.head) =/= 0.U
+    (write_bank_mask_reg(bank_addrs(i)(0)) || write_bank_mask_reg(bank_addrs(i)(1)) && io.is128Req(i)) &&
+    (way_en_htag(i) & write_wayen_dup_reg.head) =/= 0.U
   )
   val wrl_bank_conflict = io.readline.valid && write_valid_reg && line_div_addr === write_div_addr_dup_reg.head &&
                           Mux(io.repl_dirty, (io.repl_way_en & write_wayen_dup_reg.head) =/= 0.U, true.B)
@@ -137,23 +133,26 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   io.readline.ready := !(wrl_bank_conflict)
   io.read.zipWithIndex.map { case (x, i) => x.ready := !(wr_bank_conflict(i) || rrhazard) }
 
-  val rr_bank_overlap = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y => {
-    if (x == y) {
+  val rr_bank_overlap = Seq.tabulate(LoadPipelineWidth)(i => Seq.tabulate(LoadPipelineWidth)(j => {
+    if (i == j) {
       false.B
     } else {
-      io.read(x).valid && io.read(y).valid &&
-        div_addrs(x) === div_addrs(y) &&
-        (io.read(x).bits.bankMask & io.read(y).bits.bankMask) =/= 0.U &&
-        set_addrs(x) =/= set_addrs(y)
+      io.read(i).valid && io.read(j).valid &&
+      div_addrs(i) === div_addrs(j) &&
+      (io.read(i).bits.bankMask & io.read(j).bits.bankMask) =/= 0.U &&
+      set_addrs(i) =/= set_addrs(j)
     }
   }))
-  val rr_way_overlap = Seq.tabulate(LoadPipelineWidth)(x => Seq.tabulate(LoadPipelineWidth)(y => {
-    if (x == y) {
-      false.B
-    } else {
-      (way_en_htag(x).asUInt & way_en_htag(y).asUInt) =/= 0.U
-    }
+  val rr_way_overlap = Seq.tabulate(LoadPipelineWidth)(i => Seq.tabulate(LoadPipelineWidth)(j => {
+    if (i == j) false.B else (way_en_htag(i) & way_en_htag(j)) =/= 0.U
   }))
+//   val rr_conflict_evict = (0 until LoadPipelineWidth).map(i => {
+//     if (i == 0) {
+//       false.B
+//     } else {
+//       (0 until i).map(j => rr_bank_overlap(j)(i) && rr_way_overlap(j)(i)).reduce(_ || _)
+//     }
+//   })
   val rr_conflict_evict = (0 until LoadPipelineWidth).map(i => {
     (0 until LoadPipelineWidth).map(j => {
       if (i > j) {
@@ -165,7 +164,7 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       }
     }).reduce(_ || _)
   })
-  
+
   // rr_bank_conflict_oldest --> rr_conflict_evict
   val rr_bank_conflict = rr_bank_overlap
 
@@ -229,19 +228,18 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         //     +--------+--------+
         //     |    Data Bank    |
         //     +-----------------+
-        val loadpipe_en = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
+        val loadpipe_en = VecInit(Seq.tabulate(LoadPipelineWidth)(i => {
           io.read(i).valid && div_addrs(i) === div_index.U && (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U && io.is128Req(i)) &&
         //   way_en(i)(way_index) &&
         //   !rr_bank_conflict_oldest(i)
           !rr_conflict_evict(i) &&
           way_en_htag(i)(way_index)
-        })))
-        val readline_en = Wire(Bool())
+        }))
+        val readline_en = io.readline.valid && div_index.U === line_div_addr && Mux(io.repl_dirty, io.repl_way_en(way_index), true.B)
         // if (ReduceReadlineConflict) {
         //   readline_en := io.readline.valid && io.readline.bits.rmask(bank_index) && line_way_en(way_index) && div_index.U === line_div_addr
         // } else {
         //   readline_en := io.readline.valid && line_way_en(way_index) && div_index.U === line_div_addr
-          readline_en := io.readline.valid && div_index.U === line_div_addr && Mux(io.repl_dirty, io.repl_way_en(way_index), true.B)
         // }
         val sram_set_addr = Mux(readline_en,
           addr_to_dcache_div_set(io.readline.bits.addr),
@@ -289,9 +287,9 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     val r_div_addr  = RegEnable(div_addrs(i), io.read(i).fire)
     val r_bank_addr = RegEnable(bank_addrs(i), io.read(i).fire)
     val r_way_addr = OHToUInt(io.s2_tag_match_way(i))
-    val rr_read_fire = RegNext(RegNext(io.read(i).fire))
-    val rr_div_addr = RegEnable(RegEnable(div_addrs(i), io.read(i).fire), r_read_fire)
-    val rr_bank_addr = RegEnable(RegEnable(bank_addrs(i), io.read(i).fire), r_read_fire)
+    val rr_read_fire = RegNext(r_read_fire)
+    val rr_div_addr = RegEnable(r_div_addr, r_read_fire)
+    val rr_bank_addr = RegEnable(r_bank_addr, r_read_fire)
     val rr_way_addr = RegEnable(r_way_addr, r_read_fire)
     (0 until VLEN/DCacheSRAMRowBits).map( j =>{
     //   io.read_resp(i)(j) := read_result(r_div_addr)(r_bank_addr(j))(r_way_addr)
@@ -305,6 +303,8 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   // readline port: latch read data at readline_can_go (one cycle after readline.fire) and
   // expose at readline_can_resp, matching SramedDataArray / MainPipe timing.
   val readline_error_delayed = Wire(Vec(DCacheBanks, Bool()))
+  val readline_r_way_en = RegEnable(io.readline.bits.way_en, io.readline.fire)
+  assert(PopCount(readline_r_way_en) <= 1.U, "HTADataArray: more than one readline_r_way_en is true")
   val readline_r_way_addr = RegEnable(OHToUInt(io.readline.bits.way_en), io.readline.fire)
   val readline_rr_way_addr = RegEnable(readline_r_way_addr, RegNext(io.readline.fire))
   val readline_r_div_addr = RegEnable(line_div_addr, io.readline.fire)
@@ -313,7 +313,8 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   (0 until DCacheBanks).map(i => {
     readline_resp_hold(i) := Mux(
       io.readline_can_go,
-      read_result(readline_r_div_addr)(i)(readline_r_way_addr),
+    //   read_result(readline_r_div_addr)(i)(readline_r_way_addr),
+      Mux1H(readline_r_way_en, read_result(readline_r_div_addr)(i)),
       RegEnable(readline_resp_hold(i), io.readline_stall)
     )
     readline_error_delayed(i) := read_result(readline_rr_div_addr)(i)(readline_rr_way_addr).error_delayed
@@ -328,9 +329,9 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       for (way_index <- 0 until DCacheWays) {
         // data write
         val wen_reg = write_bank_mask_reg(bank_index) &&
-          write_valid_dup_reg(bank_index) &&
-          write_div_addr_dup_reg(bank_index) === div_index.U &&
-          write_wayen_dup_reg(bank_index)(way_index)
+                      write_valid_dup_reg(bank_index) &&
+                      write_div_addr_dup_reg(bank_index) === div_index.U &&
+                      write_wayen_dup_reg(bank_index)(way_index)
         val write_ecc_reg = RegEnable(getECCFromEncWord(cacheParams.dataCode.encode(io.write.bits.data(bank_index))), io.write.valid)
         val data_bank = data_banks(div_index)(bank_index)(way_index)
         data_bank.io.w.en := wen_reg
