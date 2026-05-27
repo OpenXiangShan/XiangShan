@@ -297,7 +297,7 @@ class InterruptFilter extends Module {
   // Candidate2,Candidate5 不可能同时成立
   val onlyC1Enable = Candidate1 & !Candidate45
   val onlyC2Enable = Candidate2 & !Candidate45
-  val onlyC3Enable = Candidate3 & !Candidate123
+  val onlyC3Enable = Candidate3 & !Candidate45
   val onlyC4Enable = Candidate4 & !Candidate123
   val onlyC5Enable = Candidate5 & !Candidate123
   val C1C4Enable   = Candidate1 & Candidate4
