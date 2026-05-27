@@ -41,7 +41,7 @@ case class DCacheParameters
 (
   nSets: Int = 128,
   nWays: Int = 8,
-  rowBits: Int = 64,
+  rowBits: Int = 16,
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
   replacer: Option[String] = Some("setplru"),
@@ -177,6 +177,10 @@ trait HasDCacheParameters
 
   def encDataBits = if (EnableDataEcc) cacheParams.dataCode.width(DCacheSRAMRowBits) else DCacheSRAMRowBits
   def dataECCBits = encDataBits - DCacheSRAMRowBits
+  def dataSRAMBankRawBits = DCacheWays * DCacheSRAMRowBits
+  def encDataSRAMBankBits =
+    if (EnableDataEcc) cacheParams.dataCode.width(dataSRAMBankRawBits) else dataSRAMBankRawBits
+  def dataSRAMBankECCBits = encDataSRAMBankBits - dataSRAMBankRawBits
   def pseudoErrorMaskBits = ((tagBits + 7) / 8) * 8
 
   // L1 DCache controller
@@ -285,7 +289,6 @@ trait HasDCacheParameters
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
-  require(full_divide(rowBits, wordBits), s"rowBits($rowBits) must be multiple of wordBits($wordBits)")
   require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
 }
 
