@@ -393,6 +393,9 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       else
         fpRfRaddr(portIdx) := 0.U
     }
+    io.fromVecFpRdAddr.foreach(_.flatten.flatten.foreach { raddr =>
+      fpRfRaddr(raddr.rdConfig.port) := raddr.addr
+    })
     if (env.AlwaysBasicDiff || env.EnableDifftest) {
       val difftest = DifftestModule(new DiffPhyFpRegState(fpSchdParams.numPregs), delay = 2)
       difftest.coreid := io.hartId
@@ -537,6 +540,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       ))
     ))
   )))
+  val s1_vecFpRdRen = io.fromVecFpRdAddr.map(vecAddr => MixedVecInit(vecAddr.map(iqAddr =>
+    MixedVecInit(iqAddr.map(pipeAddr =>
+      MixedVecInit(pipeAddr.map(raddr => RegNext(raddr.ren)))
+    ))
+  )))
   val s1_intPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_fpPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_vfPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
@@ -578,6 +586,19 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   if (param.isIntSchd || param.isFpSchd) {
     val fpRfRdataFinal = if (param.isIntSchd) io.fpRfRdataIn.get else fpRfRdata.get
     io.fpRfRdataOut.foreach(_ := fpRfRdata.get)
+    io.toVecFpRdData.foreach { vecRdata =>
+      vecRdata.lazyZip(s1_vecFpRdRen.get).foreach { case (iqRdata, iqRen) =>
+        iqRdata.lazyZip(iqRen).foreach { case (pipeRdata, pipeRen) =>
+          pipeRdata.lazyZip(pipeRen).foreach { case (rdata, ren) =>
+            rdata.data := Mux(
+              ren,
+              fpRfRdata.get(rdata.rdConfig.port),
+              0.U,
+            )
+          }
+        }
+      }
+    }
     s1_fpPregRData.foreach(_.foreach(_.foreach(_ := 0.U)))
     s1_fpPregRData.zip(rfrPortConfigs).foreach { case (iqRdata, iqCfg) =>
       iqRdata.zip(iqCfg).foreach { case (iuRdata, iuCfg) =>
@@ -899,6 +920,14 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
 
   val toVecGpRdData = Option.when(param.isIntSchd)(
     Output(params.getVecRegionParam.genRfRdDataBundle(params.intPregParams))
+  )
+
+  val fromVecFpRdAddr = Option.when(param.isFpSchd)(
+    Input(params.getVecRegionParam.genRfRdAddrBundle(params.fpPregParams))
+  )
+
+  val toVecFpRdData = Option.when(param.isFpSchd)(
+    Output(params.getVecRegionParam.genRfRdDataBundle(params.fpPregParams))
   )
 
   val og0Cancel = Output(ExuVec())

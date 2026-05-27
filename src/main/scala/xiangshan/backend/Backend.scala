@@ -434,7 +434,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   }
 
   vecRegion.in.fromFltRegion.is0FpRdDataFail.foreach(_.foreach(_.foreach(_ := false.B))) // Todo: vec read fp
-  vecRegion.in.fromFltRegion.is1FpRdDataNext.foreach(_.foreach(_.foreach(_ := 0.U))) // Todo: vec read fp
+  fpRegion.io.fromVecFpRdAddr.get := vecRegion.out.toFltRegion.is1FpRdAddrNext
+  vecRegion.in.fromFltRegion.is1FpRdDataNext := fpRegion.io.toVecFpRdData.get
 
   vecRegion.in.fromMem.vldS3VpWbNext.flatten lazyZip io.mem.vecWriteback.flatten foreach {
     case (sink: Exu.ToRf, source: NewExuOutput) =>

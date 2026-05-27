@@ -827,6 +827,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   dataPath.io.fpRfRdataIn.foreach(_ := io.fpRfRdataIn.get)
   dataPath.io.fromVecGpRdAddr.foreach(_ := io.fromVecGpRdAddr.get)
   io.toVecGpRdData.foreach(_ := dataPath.io.toVecGpRdData.get)
+  dataPath.io.fromVecFpRdAddr.foreach(_ := io.fromVecFpRdAddr.get)
+  io.toVecFpRdData.foreach(_ := dataPath.io.toVecFpRdData.get)
 
   io.uopTopDown.uopsIssued := dataPath.io.uopTopDown.uopsIssued
   io.uopTopDown.uopsIssuedCnt := dataPath.io.uopTopDown.uopsIssuedCnt
