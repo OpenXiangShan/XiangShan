@@ -820,6 +820,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   io.memFpWriteback.foreach(_.flatten.foreach(_.ready := true.B))
   io.fpRfRdataOut.foreach(_ := dataPath.io.fpRfRdataOut.get)
   dataPath.io.fpRfRdataIn.foreach(_ := io.fpRfRdataIn.get)
+  dataPath.io.fromVecGpRdAddr.foreach(_ := io.fromVecGpRdAddr.get)
+  io.toVecGpRdData.foreach(_ := dataPath.io.toVecGpRdData.get)
 
   io.uopTopDown.uopsIssued := dataPath.io.uopTopDown.uopsIssued
   io.uopTopDown.uopsIssuedCnt := dataPath.io.uopTopDown.uopsIssuedCnt
@@ -1039,6 +1041,11 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   // to write int regfile
   val fpIQOut = Option.when(params.isFpSchd)(MixedVec(params.issueBlockParams.map(_.genIssueDecoupledBundle)))
   val fromFpIQ = Option.when(params.isIntSchd || params.isVecSchd)(Flipped(MixedVec(fpSchdParam.issueBlockParams.map(_.genIssueDecoupledBundle))))
+  // vector cross-region scalar regfile read
+  val fromVecGpRdAddr = Option.when(params.isIntSchd)(Input(backendParams.getVecRegionParam.genRfRdAddrBundle(backendParams.intPregParams)))
+  val toVecGpRdData = Option.when(params.isIntSchd)(Output(backendParams.getVecRegionParam.genRfRdDataBundle(backendParams.intPregParams)))
+  val fromVecFpRdAddr = Option.when(params.isFpSchd)(Input(backendParams.getVecRegionParam.genRfRdAddrBundle(backendParams.fpPregParams)))
+  val toVecFpRdData = Option.when(params.isFpSchd)(Output(backendParams.getVecRegionParam.genRfRdDataBundle(backendParams.fpPregParams)))
 
   // DeqOg1Payload
   val fromIntIQDeqOg1Payload: Option[MixedVec[MixedVec[IssueQueueDeqOg1Payload]]] =
