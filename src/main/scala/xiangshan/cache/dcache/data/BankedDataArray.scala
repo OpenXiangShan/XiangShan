@@ -65,6 +65,7 @@ class L1BankedDataReadLineReq(implicit p: Parameters) extends L1BankedDataReadRe
 {
   val rmask = Bits(DCacheBanks.W)
   val way = Bits(log2Up(DCacheWays).W) // UInt format of way_en for better timing
+  val way_en_htag = Bits(DCacheWays.W)
 }
 
 // Now, we can write a cache-block in a single cycle
@@ -261,8 +262,6 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val readline_can_go = Input(Bool())
     val readline_stall = Input(Bool())
     val readline_can_resp = Input(Bool())
-    val repl_dirty = Input(Bool())
-    val repl_way_en = Input(UInt(DCacheWays.W))
     val write = Flipped(DecoupledIO(new L1BankedDataWriteReq))
     val write_dup = Vec(DCacheBanks, Flipped(Decoupled(new L1BankedDataWriteReqCtrl)))
     // data for readline and loadpipe
