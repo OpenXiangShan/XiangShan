@@ -102,6 +102,7 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   private val vecRFRen: Seq2[Option[Vec[Bool]]] = fromIQ.map(x => x.map(xx => xx.bits.vecRen).toSeq)
   private val v0RFRen : Seq2[Option[Bool]]      = fromIQ.map(x => x.map(xx => xx.bits.v0Ren)).toSeq
   private val vlRFRen : Seq2[Option[Bool]]      = fromIQ.map(x => x.map(xx => xx.bits.vlRen)).toSeq
+  private val vecIqStart = fromIntIQ.size + fromFpIQ.size
 
   intRFReadArbiter.io.in.zipWithIndex.foreach { case (arbInSeq2, iqIdx) =>
     arbInSeq2.zipWithIndex.foreach { case (arbInSeq, exuIdx) =>
@@ -120,6 +121,19 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       }
     }
   }
+  io.fromVecGpRdAddr.foreach { vecAddr =>
+    intRFReadArbiter.io.in.drop(vecIqStart).zip(vecAddr).foreach { case (arbInSeq2, iqAddr) =>
+      arbInSeq2.zip(iqAddr).foreach { case (arbInSeq, pipeAddr) =>
+        pipeAddr.foreach { raddr =>
+          arbInSeq(raddr.srcIdx).valid := raddr.ren
+          arbInSeq(raddr.srcIdx).bits.bankValidVec.foreach(_ := raddr.bankRen.get)
+          arbInSeq(raddr.srcIdx).bits.addr := raddr.addr
+          arbInSeq(raddr.srcIdx).bits.robIdx := raddr.robIdx
+          arbInSeq(raddr.srcIdx).bits.issueValid := raddr.issueValid
+        }
+      }
+    }
+  }
   fpRFReadArbiter.io.in.zipWithIndex.foreach { case (arbInSeq2, iqIdx) =>
     arbInSeq2.zipWithIndex.foreach { case (arbInSeq, exuIdx) =>
       val srcIndices: Seq[Int] = FpRegSrcDataSet.flatMap(data => fromIQ(iqIdx)(exuIdx).bits.exuParams.getRfReadSrcIdx(data)).toSeq.sorted
@@ -132,6 +146,18 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
         } else {
           arbInSeq(srcIdx).valid := false.B
           arbInSeq(srcIdx).bits := 0.U.asTypeOf(arbInSeq(srcIdx).bits)
+        }
+      }
+    }
+  }
+  io.fromVecFpRdAddr.foreach { vecAddr =>
+    fpRFReadArbiter.io.in.drop(vecIqStart).zip(vecAddr).foreach { case (arbInSeq2, iqAddr) =>
+      arbInSeq2.zip(iqAddr).foreach { case (arbInSeq, pipeAddr) =>
+        pipeAddr.foreach { raddr =>
+          arbInSeq(raddr.srcIdx).valid := raddr.ren
+          arbInSeq(raddr.srcIdx).bits.addr := raddr.addr
+          arbInSeq(raddr.srcIdx).bits.robIdx := raddr.robIdx
+          arbInSeq(raddr.srcIdx).bits.issueValid := raddr.issueValid
         }
       }
     }
@@ -302,10 +328,6 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       else
         intRfRaddr(portIdx) := 0.U
     }
-    io.fromVecGpRdAddr.foreach(_.flatten.flatten.foreach { raddr =>
-      intRfRaddr(raddr.rdConfig.port) :=
-        VecInit(Seq.fill(intPregNumBank)(raddr.addr.take(intArbiterAddrWidth)))
-    })
     vlRfWaddr := io.fromVlWb.get.map(x => RegEnable(x.pdest, x.wen)).toSeq
     vlRfWdata := io.fromVlWb.get.map(x => RegEnable(x.data, x.wen)).toSeq
     vlRfWen := io.fromVlWb.get.map(x => RegNext(x.wen)).toSeq
@@ -393,9 +415,6 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       else
         fpRfRaddr(portIdx) := 0.U
     }
-    io.fromVecFpRdAddr.foreach(_.flatten.flatten.foreach { raddr =>
-      fpRfRaddr(raddr.rdConfig.port) := raddr.addr
-    })
     if (env.AlwaysBasicDiff || env.EnableDifftest) {
       val difftest = DifftestModule(new DiffPhyFpRegState(fpSchdParams.numPregs), delay = 2)
       difftest.coreid := io.hartId
@@ -533,6 +552,12 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       MixedVecInit(pipeAddr.map(raddr => RegNext(raddr.ren)))
     ))
   )))
+  val s1_vecGpRdGrant = io.fromVecGpRdAddr.map(vecAddr => MixedVecInit(vecAddr.zip(intRdArbWinner.drop(vecIqStart)).map {
+    case (iqAddr, iqWinner) =>
+      MixedVecInit(iqAddr.zip(iqWinner).map { case (pipeAddr, pipeWinner) =>
+        MixedVecInit(pipeAddr.map(raddr => RegNext(pipeWinner(raddr.srcIdx))))
+      })
+  }))
   val s1_vecGpRfBankRen = io.fromVecGpRdAddr.map(vecAddr => MixedVecInit(vecAddr.map(iqAddr =>
     MixedVecInit(iqAddr.map(pipeAddr =>
       MixedVecInit(pipeAddr.map(raddr =>
@@ -545,6 +570,12 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
       MixedVecInit(pipeAddr.map(raddr => RegNext(raddr.ren)))
     ))
   )))
+  val s1_vecFpRdGrant = io.fromVecFpRdAddr.map(vecAddr => MixedVecInit(vecAddr.zip(fpRdArbWinner.drop(vecIqStart)).map {
+    case (iqAddr, iqWinner) =>
+      MixedVecInit(iqAddr.zip(iqWinner).map { case (pipeAddr, pipeWinner) =>
+        MixedVecInit(pipeAddr.map(raddr => RegNext(pipeWinner(raddr.srcIdx))))
+      })
+  }))
   val s1_intPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_fpPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   val s1_vfPregRData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
@@ -562,14 +593,24 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
   allRData.foreach(_.foreach(_.foreach(_ := 0.U)))
   if (param.isIntSchd) {
     io.toVecGpRdData.foreach { vecRdata =>
-      vecRdata.lazyZip(s1_vecGpRdRen.get).lazyZip(s1_vecGpRfBankRen.get).foreach { case (iqRdata, iqRen, iqBankRen) =>
-        iqRdata.lazyZip(iqRen).lazyZip(iqBankRen).foreach { case (pipeRdata, pipeRen, pipeBankRen) =>
-          pipeRdata.lazyZip(pipeRen).lazyZip(pipeBankRen).foreach { case (rdata, ren, bankRen) =>
+      vecRdata.lazyZip(s1_vecGpRdRen.get).lazyZip(s1_vecGpRdGrant.get).lazyZip(s1_vecGpRfBankRen.get).foreach { case (iqRdata, iqRen, iqGrant, iqBankRen) =>
+        iqRdata.lazyZip(iqRen).lazyZip(iqGrant).lazyZip(iqBankRen).foreach { case (pipeRdata, pipeRen, pipeGrant, pipeBankRen) =>
+          pipeRdata.lazyZip(pipeRen).lazyZip(pipeGrant).lazyZip(pipeBankRen).foreach { case (rdata, ren, grant, bankRen) =>
             rdata.data := Mux(
-              ren,
+              ren && grant,
               Mux1H(bankRen, intRfRdata.get(rdata.rdConfig.port)),
               0.U,
             )
+          }
+        }
+      }
+    }
+
+    io.toVecGpRdFail.foreach { vecFail =>
+      vecFail.lazyZip(s1_vecGpRdRen.get).lazyZip(s1_vecGpRdGrant.get).foreach { case (iqFail, iqRen, iqGrant) =>
+        iqFail.lazyZip(iqRen).lazyZip(iqGrant).foreach { case (pipeFail, pipeRen, pipeGrant) =>
+          pipeFail.lazyZip(pipeRen).lazyZip(pipeGrant).foreach { case (fail, ren, grant) =>
+            fail := ren && !grant
           }
         }
       }
@@ -587,14 +628,23 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     val fpRfRdataFinal = if (param.isIntSchd) io.fpRfRdataIn.get else fpRfRdata.get
     io.fpRfRdataOut.foreach(_ := fpRfRdata.get)
     io.toVecFpRdData.foreach { vecRdata =>
-      vecRdata.lazyZip(s1_vecFpRdRen.get).foreach { case (iqRdata, iqRen) =>
-        iqRdata.lazyZip(iqRen).foreach { case (pipeRdata, pipeRen) =>
-          pipeRdata.lazyZip(pipeRen).foreach { case (rdata, ren) =>
+      vecRdata.lazyZip(s1_vecFpRdRen.get).lazyZip(s1_vecFpRdGrant.get).foreach { case (iqRdata, iqRen, iqGrant) =>
+        iqRdata.lazyZip(iqRen).lazyZip(iqGrant).foreach { case (pipeRdata, pipeRen, pipeGrant) =>
+          pipeRdata.lazyZip(pipeRen).lazyZip(pipeGrant).foreach { case (rdata, ren, grant) =>
             rdata.data := Mux(
-              ren,
+              ren && grant,
               fpRfRdata.get(rdata.rdConfig.port),
               0.U,
             )
+          }
+        }
+      }
+    }
+    io.toVecFpRdFail.foreach { vecFail =>
+      vecFail.lazyZip(s1_vecFpRdRen.get).lazyZip(s1_vecFpRdGrant.get).foreach { case (iqFail, iqRen, iqGrant) =>
+        iqFail.lazyZip(iqRen).lazyZip(iqGrant).foreach { case (pipeFail, pipeRen, pipeGrant) =>
+          pipeFail.lazyZip(pipeRen).lazyZip(pipeGrant).foreach { case (fail, ren, grant) =>
+            fail := ren && !grant
           }
         }
       }
@@ -922,12 +972,20 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams, param: SchdBlo
     Output(params.getVecRegionParam.genRfRdDataBundle(params.intPregParams))
   )
 
+  val toVecGpRdFail = Option.when(param.isIntSchd)(
+    Output(params.getVecRegionParam.genRfRdFailBundle(params.intPregParams))
+  )
+
   val fromVecFpRdAddr = Option.when(param.isFpSchd)(
     Input(params.getVecRegionParam.genRfRdAddrBundle(params.fpPregParams))
   )
 
   val toVecFpRdData = Option.when(param.isFpSchd)(
     Output(params.getVecRegionParam.genRfRdDataBundle(params.fpPregParams))
+  )
+
+  val toVecFpRdFail = Option.when(param.isFpSchd)(
+    Output(params.getVecRegionParam.genRfRdFailBundle(params.fpPregParams))
   )
 
   val og0Cancel = Output(ExuVec())

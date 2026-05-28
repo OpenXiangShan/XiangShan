@@ -161,7 +161,7 @@ class IssueParam(
     MixedVec(this.exuParams.map(x => wrapper(new VecIssueQueue.Deq(x))))
   }
 
-  def genRfRdAddrBundle(pregParams: PregParams): MixedVec[MixedVec[IssuePipe.RfReadAddrBundle]] = {
+  def genRfRdAddrBundle(pregParams: PregParams)(implicit p: Parameters): MixedVec[MixedVec[IssuePipe.RfReadAddrBundle]] = {
     MixedVec(this.exuParams.map(_.genRfRdAddrBundle(pregParams)))
   }
 
