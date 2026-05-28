@@ -36,6 +36,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val miss_dirty = Bool()
   val occupy_way = UInt(nWays.W)
   val miss_fail_cause_evict_btot = Bool()
+  val isBtoT = Bool()
 
   val probe = Bool()
   val probe_param = UInt(TLPermissions.bdWidth.W)
@@ -99,6 +100,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.error := false.B
     req.id := store.id
     req.miss_fail_cause_evict_btot := false.B
+    req.isBtoT := false.B
     req
   }
 
@@ -358,10 +360,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val meta_resp = Wire(Vec(nWays, (new Meta).asUInt))
   val s1_repl_way_en = WireInit(0.U(nWays.W))
   val s1_repl_coh = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => meta_resp(w))).asTypeOf(new ClientMetadata)
+  val s1_miss_need_data = s1_repl_coh.state === ClientStates.Dirty &&
+    (!s1_req.isBtoT || s1_req.miss_fail_cause_evict_btot)
   val s1_need_data = if (dcacheParameters.alwaysReleaseData) {
     RegEnable(banked_need_data, s0_fire)
   } else {
-    Mux(!s1_req.miss, RegEnable(banked_need_data, s0_fire), s1_repl_coh.state === ClientStates.Dirty)
+    Mux(!s1_req.miss, RegEnable(banked_need_data, s0_fire), s1_miss_need_data)
   }
 
   val s1_banked_rmask = RegEnable(s0_banked_rmask, s0_fire)
@@ -418,7 +422,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val htag_resp = Wire(io.htag_resp.cloneType)
   htag_resp := Mux(GatedValidRegNext(s0_fire), io.htag_resp, RegEnable(htag_resp, s1_valid))
   val s1_htag_match_way = wayMap((w: Int) => htag_resp(w) === s1_hash_tag && s1_meta_valids(w)).asUInt
-  // TODO: add BtoT field in miss-req, which indicates no need to readline (improve performance)
   val s1_way_en_htag = Mux(s1_req.miss, s1_repl_way_en, s1_htag_match_way)
 
   val s1_hit_tag = get_tag(s1_req.addr)
