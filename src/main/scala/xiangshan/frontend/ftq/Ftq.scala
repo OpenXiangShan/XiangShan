@@ -365,21 +365,27 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   resolveQueue.io.backendResolve := io.fromBackend.resolve
 
-  private val trainCache = RegInit(0.U.asTypeOf(Valid(new BpuTrain)))
+  private val trainCache      = RegInit(0.U.asTypeOf(Valid(new BpuTrain)))
+  private val trainIndexCache = RegInit(0.U.asTypeOf(new FtqPtr))
 
   resolveQueue.io.bpuTrain.ready := !trainCache.valid || io.toBpu.train.fire
 
-  when(resolveQueue.io.bpuTrain.fire) {
+  private val flushTrain = backendRedirect.valid && trainIndexCache > backendRedirect.bits.ftqIdx
+
+  when(flushTrain) {
+    trainCache.valid := false.B
+  }.elsewhen(resolveQueue.io.bpuTrain.fire) {
     trainCache.bits.meta     := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
     trainCache.bits.startPc  := resolveQueue.io.bpuTrain.bits.startPc
     trainCache.bits.branches := resolveQueue.io.bpuTrain.bits.branches
     trainCache.bits.perfMeta := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
     trainCache.valid         := true.B
+    trainIndexCache          := resolveQueue.io.bpuTrain.bits.ftqIdx
   }.elsewhen(io.toBpu.train.fire) {
     trainCache.valid := false.B
   }
 
-  io.toBpu.train.valid := trainCache.valid
+  io.toBpu.train.valid := trainCache.valid && !flushTrain
   io.toBpu.train.bits  := trainCache.bits
 
   io.fromBackend.resolve.foreach { branch =>
