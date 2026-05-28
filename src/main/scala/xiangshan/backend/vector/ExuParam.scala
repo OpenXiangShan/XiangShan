@@ -231,7 +231,7 @@ class ExuParam(
     Option.when(cond(this))(gen)
   }
 
-  def genRfRdAddrBundle(pregParams: PregParams): MixedVec[RfReadAddrBundle] = MixedVec(
+  def genRfRdAddrBundle(pregParams: PregParams)(implicit p: Parameters): MixedVec[RfReadAddrBundle] = MixedVec(
     pregParams match {
       case IntPregParams(_, _, _, _) |
            FpPregParams(_, _, _, _) |

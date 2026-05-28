@@ -422,7 +422,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       sink.pdest := source.bits.pdestVl.get
       sink.data := source.bits.toVlRf.get.bits
   }
-  vecRegion.in.fromIntRegion.is0GpRdDataFail.foreach(_.foreach(_.foreach(_ := false.B))) // Todo: vec read gp
+  vecRegion.in.fromIntRegion.is0GpRdDataFail := intRegion.io.toVecGpRdFail.get
   intRegion.io.fromVecGpRdAddr.get := vecRegion.out.toIntRegion.is1GpRdAddrNext
   vecRegion.in.fromIntRegion.is1GpRdDataNext := intRegion.io.toVecGpRdData.get
 
@@ -433,7 +433,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
       sink.delay := 0.U // Todo
   }
 
-  vecRegion.in.fromFltRegion.is0FpRdDataFail.foreach(_.foreach(_.foreach(_ := false.B))) // Todo: vec read fp
+  vecRegion.in.fromFltRegion.is0FpRdDataFail := fpRegion.io.toVecFpRdFail.get
   fpRegion.io.fromVecFpRdAddr.get := vecRegion.out.toFltRegion.is1FpRdAddrNext
   vecRegion.in.fromFltRegion.is1FpRdDataNext := fpRegion.io.toVecFpRdData.get
 
