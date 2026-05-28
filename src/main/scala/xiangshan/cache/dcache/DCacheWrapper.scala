@@ -243,7 +243,6 @@ trait HasDCacheParameters
   val wbPort = errWritePort + 1
   val HashTagBits = 4
   val EnableDCacheHashTagArray = true
-  val EnableHashTagMainPipe = false
 
   def set_to_dcache_div(set: UInt) = {
     require(set.getWidth >= DCacheSetBits)
@@ -1076,8 +1075,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val accessArray = Module(new L1FlagMetaArray(readPorts = AccessArrayReadPort, writePorts = LoadPipelineWidth + 1))
   val tagArray = Module(new DuplicatedTagArray(readPorts = TagReadPort))
-  val hashTagReadPort = LoadPipelineWidth + (if (EnableHashTagMainPipe) 1 else 0)
-  val htagArray = Module(new HashTagArray(readPorts = hashTagReadPort, hashBits = HashTagBits))
+  val htagArray = Module(new HashTagArray(readPorts = TagReadPort, hashBits = HashTagBits))
   val prefetcherMonitor = Module(new PrefetcherMonitor)
   val bloomFilter =  Module(new BloomFilter(BLOOM_FILTER_ENTRY_NUM, true))
   val counterFilter = Module(new CounterFilter)
@@ -1320,10 +1318,9 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   tagArray.io.read.last <> mainPipe.io.tag_read
   mainPipe.io.tag_resp := tagArray.io.resp.last
-  if (EnableHashTagMainPipe) {
-    htagArray.io.read.last.valid := mainPipe.io.tag_read.fire
-    htagArray.io.read.last.bits := mainPipe.io.tag_read.bits
-  }
+  htagArray.io.read.last.valid := mainPipe.io.tag_read.fire
+  htagArray.io.read.last.bits := mainPipe.io.tag_read.bits
+  mainPipe.io.htag_resp := htagArray.io.resp.last
 
   val fake_tag_read_conflict_this_cycle = PopCount(ldu.map(ld=> ld.io.tag_read.valid))
   XSPerfAccumulate("fake_tag_read_conflict", fake_tag_read_conflict_this_cycle)
@@ -1367,8 +1364,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   bankedDataArray.io.readline_stall := mainPipe.io.data_readline_stall
   bankedDataArray.io.readline_can_resp := mainPipe.io.data_readline_can_resp
   bankedDataArray.io.readline_intend := mainPipe.io.data_read_intend
-  bankedDataArray.io.repl_dirty := mainPipe.io.repl_dirty
-  bankedDataArray.io.repl_way_en := mainPipe.io.repl_way_en
   mainPipe.io.readline_error := bankedDataArray.io.readline_error
   mainPipe.io.readline_error_delayed := bankedDataArray.io.readline_error_delayed
   mainPipe.io.data_resp := bankedDataArray.io.readline_resp

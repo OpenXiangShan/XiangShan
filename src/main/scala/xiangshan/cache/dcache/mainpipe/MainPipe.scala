@@ -176,8 +176,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val data_readline_can_go = Output(Bool())
     val data_readline_stall = Output(Bool())
     val data_readline_can_resp = Output(Bool())
-    val repl_dirty = Output(Bool())
-    val repl_way_en = Output(UInt(DCacheWays.W))
     val data_resp = Input(Vec(DCacheBanks, new L1BankedDataReadResult()))
     val readline_error = Input(Bool())
     val readline_error_delayed = Input(Bool())
@@ -198,6 +196,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     // tag sram
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
+    val htag_resp = Input(Vec(nWays, UInt(HashTagBits.W)))
     val tag_write = DecoupledIO(new TagWriteReq)
     val tag_write_ready_dup = Vec(nDupTagWriteReady, Input(Bool()))
     val tag_write_intend = Output(new Bool())
@@ -414,6 +413,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_has_real_tag_eq_way = ParallelORR(s1_real_tag_eq_way)
   val s1_real_tag_match_way_en = PriorityEncoderOH(s1_real_tag_eq_way)
   val s1_real_tag_match_way = PriorityEncoder(s1_real_tag_eq_way)
+
+  val s1_hash_tag = XORFoldTA(get_tag(s1_req.addr), HashTagBits)
+  val htag_resp = Wire(io.htag_resp.cloneType)
+  htag_resp := Mux(GatedValidRegNext(s0_fire), io.htag_resp, RegEnable(htag_resp, s1_valid))
+  val s1_htag_match_way = wayMap((w: Int) => htag_resp(w) === s1_hash_tag && s1_meta_valids(w)).asUInt
+  // TODO: add BtoT field in miss-req, which indicates no need to readline (improve performance)
+  val s1_way_en_htag = Mux(s1_req.miss, s1_repl_way_en, s1_htag_match_way)
 
   val s1_hit_tag = get_tag(s1_req.addr)
   val s1_hit_coh = ClientMetadata(ParallelMux(s1_tag_ecc_match_way.asBools, (0 until nWays).map(w => meta_resp(w))))
@@ -907,11 +913,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.data_read_intend := s1_valid && s1_need_data
   io.data_readline.valid := s1_valid && s1_need_data
   io.data_readline.bits.rmask := s1_banked_rmask
+  io.data_readline.bits.way_en_htag := s1_way_en_htag
   io.data_readline.bits.way_en := s1_way_en
   io.data_readline.bits.way := s1_way
   io.data_readline.bits.addr := s1_req.vaddr
-  io.repl_dirty := s1_valid && s1_need_replacement && (s1_repl_coh.state === ClientStates.Dirty)
-  io.repl_way_en := s1_repl_way_en
 
   io.miss_req.valid := s2_valid && s2_can_go_to_mq
   val miss_req = io.miss_req.bits
