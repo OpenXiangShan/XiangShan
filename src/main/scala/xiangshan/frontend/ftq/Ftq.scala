@@ -134,8 +134,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     ifuRedirectFtqIdxInAdvance.bits
   )
 
-  private val redirect     = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
-  private val redirectNext = RegNext(redirect)
+  private val redirect = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
 
   // Instruction page fault and instruction access fault are sent from backend with redirect requests.
   // When IPF and IAF are sent, backendPcFaultIfuPtr points to the FTQ entry whose first instruction
@@ -285,21 +284,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val twoPrefetchCase = TwoPrefetchCase(prefetchReq, io.toICache.toPrefetch.fire && canTwoPrefetch)
 
   // FIXME: backend redirect delay should be more than ITLB csr delay
-  io.toICache.toPrefetch.valid := (bpuPtr(0) > pfPtr(0) || redirectNext.valid) && !redirect.valid
+  io.toICache.toPrefetch.valid := bpuPtr(0) > pfPtr(0) && !redirect.valid
   io.toICache.toPrefetch.bits.req.zipWithIndex.foreach { case (req, i) =>
-    req.startVAddr := {
-      if (i == 0)
-        Mux(redirectNext.valid, PrunedAddrInit(redirectNext.bits.target), prefetchReq(i).startVAddr)
-      else
-        prefetchReq(i).startVAddr
-    }
-    req.nextLineVAddr := req.startVAddr + blockBytes.U
-    req.isCrossLine := {
-      if (i == 0)
-        Mux(redirectNext.valid, true.B, prefetchReq(i).isCrossLine)
-      else
-        prefetchReq(i).isCrossLine
-    }
+    req.startVAddr       := prefetchReq(i).startVAddr
+    req.nextLineVAddr    := req.startVAddr + blockBytes.U
+    req.isCrossLine      := prefetchReq(i).isCrossLine
     req.ftqIdx           := pfPtr(i)
     req.backendException := Mux(backendExceptionPtr === pfPtr(i), backendException, ExceptionType.None)
     req.isSoftPrefetch   := false.B
