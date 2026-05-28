@@ -460,6 +460,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val redirectPerfMeta = perfQueue(backendRedirectFtqIdx.bits.value).bpuPerf
   private val commitPerfMeta   = perfQueue(commitPtr(0).value)
 
+  private val commitPerfMetaView = WireInit(commitPerfMeta)
+  dontTouch(commitPerfMetaView)
+
   XSPerfSeqAccumulate(
     "squash_cycles_bp_wrong_redirect",
     backendRedirect.valid && backendRedirect.bits.isMisPred,
@@ -511,7 +514,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     commit,
     Seq(
       ("num", true.B, PopCount(commitPerfMeta.isCfi)),
-      ("mispredicts", true.B, commitPerfMeta.mispredict)
+      ("mispredicts", true.B, commitPerfMeta.mispredict),
+      ("mispredicts_scUsed", true.B, commitPerfMeta.mispredict && (commitPerfMeta.bpuPerf.scUsed =/= 0.U))
     )
   )
   XSPerfSeqAccumulate(

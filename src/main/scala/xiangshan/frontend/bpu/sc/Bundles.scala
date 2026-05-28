@@ -69,7 +69,11 @@ class ScTableTrain(val numSets: Int, val numWays: Int)(implicit p: Parameters) e
 class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   // NOTE: Seems ChiselDB has problem dealing with SInt, so we do not use ScEntry for scResp here
   // FIXME: is there a better way to do this?
-  private def ScEntryWidth = (new ScEntry).getWidth
+  private def scEntryWidth = (new ScEntry).getWidth
+  private def reducedPercsumWidth(numTables: Int) = Counter.width + 1 + log2Ceil(scala.math.max(numTables, 1))
+  private def imliPercsumWidth = Counter.width + 1
+  private def biasPercsumWidth = Counter.width + 1
+  private def totalPercsumWidth = reducedPercsumWidth(NumPathTables + NumGlobalTables + NumBWTables + NumImliTable + 1)
   val scBiasLowerBits: Vec[UInt] = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
   val scPred:          Vec[Bool] = Vec(NumWays, Bool())
   val tagePred:        Vec[Bool] = Vec(NumBtbResultEntries, Bool())
@@ -82,8 +86,20 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val debug_scPathTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
   val debug_scGlobalTakenVec: Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
   val debug_scBWTakenVec:     Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_scPathRespVec: Option[Vec[Vec[UInt]]] = Some(Vec(NumPathTables, Vec(NumWays, UInt(scEntryWidth.W))))
+  val debug_scGlobalRespVec: Option[Vec[Vec[UInt]]] = Some(Vec(NumGlobalTables, Vec(NumWays, UInt(scEntryWidth.W))))
+  val debug_scBWRespVec: Option[Vec[Vec[UInt]]] = Some(Vec(NumBWTables, Vec(NumWays, UInt(scEntryWidth.W))))
+  val debug_scPathPercsumVec: Option[Vec[UInt]] = Some(Vec(NumWays, UInt(reducedPercsumWidth(NumPathTables).W)))
+  val debug_scGlobalPercsumVec: Option[Vec[UInt]] =
+    Some(Vec(NumWays, UInt(reducedPercsumWidth(NumGlobalTables).W)))
+  val debug_scBWPercsumVec: Option[Vec[UInt]] = Some(Vec(NumWays, UInt(reducedPercsumWidth(NumBWTables).W)))
+  val debug_scImliRespVec: Option[Vec[UInt]] = Some(Vec(NumWays, UInt(scEntryWidth.W)))
   val debug_scImliTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_scImliPercsumVec: Option[Vec[UInt]] = Some(Vec(NumWays, UInt(imliPercsumWidth.W)))
+  val debug_scBiasRespVec: Option[Vec[UInt]] = Some(Vec(BiasTableNumWays, UInt(scEntryWidth.W)))
   val debug_scBiasTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_scBiasPercsumVec: Option[Vec[UInt]] = Some(Vec(BiasTableNumWays, UInt(biasPercsumWidth.W)))
+  val debug_scTotalPercsumVec: Option[Vec[UInt]] = Some(Vec(NumWays, UInt(totalPercsumWidth.W)))
   val debug_predPathIdx: Option[MixedVec[UInt]] =
     Some(MixedVec(PathTableInfos.map(info => UInt(log2Ceil(info.NumSets).W))))
   val debug_predGlobalIdx: Option[MixedVec[UInt]] =
@@ -95,9 +111,24 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
 }
 
 class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with HasScParameters {
-  private def ScEntryWidth = (new ScEntry).getWidth
-  val startPc: PrunedAddr = PrunedAddr(VAddrBits)
-  val cfiPc:   UInt       = UInt(VAddrBits.W)
+  private def ScEntryWidth      = (new ScEntry).getWidth
+  private def PathSetIdxWidth   = PathTableInfos.map(info => log2Ceil(info.NumSets)).foldLeft(0)(scala.math.max)
+  private def GlobalSetIdxWidth = GlobalTableInfos.map(info => log2Ceil(info.NumSets)).foldLeft(0)(scala.math.max)
+  private def BWSetIdxWidth     = BackwardTableInfos.map(info => log2Ceil(info.NumSets)).foldLeft(0)(scala.math.max)
+  private def reducedPercsumWidth(numTables: Int) = Counter.width + 1 + log2Ceil(scala.math.max(numTables, 1))
+  private def ImliPercsumWidth = Counter.width + 1
+  private def BiasPercsumWidth = Counter.width + 1
+  private def TotalPercsumWidth = reducedPercsumWidth(NumPathTables + NumGlobalTables + NumBWTables + NumImliTable + 1)
+  val startPc:     PrunedAddr = PrunedAddr(VAddrBits)
+  val cfiPc:       UInt       = UInt(VAddrBits.W)
+  val predSlotIdx: UInt       = UInt(log2Ceil(NumWays).W)
+  val cfiWayIdx:   UInt       = UInt(log2Ceil(NumWays).W)
+  val pathIdx:     Vec[UInt]  = Vec(NumPathTables, UInt(PathSetIdxWidth.W))
+  val globalIdx:   Vec[UInt]  = Vec(NumGlobalTables, UInt(GlobalSetIdxWidth.W))
+  val bwIdx:       Vec[UInt]  = Vec(NumBWTables, UInt(BWSetIdxWidth.W))
+  val imliIdx:     UInt       = UInt(log2Ceil(ImliTableInfo.NumSets).W)
+  val biasIdx:     UInt       = UInt(log2Ceil(BiasTableInfo.NumSets).W)
+  val biasWayIdx:  UInt       = UInt(log2Ceil(BiasTableNumWays).W)
   // tage provider info
   val providerValid: Bool = Bool()
   val providerTaken: Bool = Bool()
@@ -105,7 +136,15 @@ class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with Has
   // sc resp
   val pathResp:   Vec[UInt] = Vec(NumPathTables, UInt(ScEntryWidth.W))
   val globalResp: Vec[UInt] = Vec(NumGlobalTables, UInt(ScEntryWidth.W))
+  val bwResp:     Vec[UInt] = Vec(NumBWTables, UInt(ScEntryWidth.W))
+  val imliResp:   UInt      = UInt(ScEntryWidth.W)
   val biasResp:   UInt      = UInt(ScEntryWidth.W)
+  val pathPercsum:   UInt = UInt(reducedPercsumWidth(NumPathTables).W)
+  val globalPercsum: UInt = UInt(reducedPercsumWidth(NumGlobalTables).W)
+  val bwPercsum:     UInt = UInt(reducedPercsumWidth(NumBWTables).W)
+  val imliPercsum:   UInt = UInt(ImliPercsumWidth.W)
+  val biasPercsum:   UInt = UInt(BiasPercsumWidth.W)
+  val totalPercsum:  UInt = UInt(TotalPercsumWidth.W)
   // sc pred
   val sumAboveThres: Bool = Bool()
   val scPred:        Bool = Bool()
