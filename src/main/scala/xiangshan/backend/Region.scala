@@ -822,8 +822,10 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
   dataPath.io.fpRfRdataIn.foreach(_ := io.fpRfRdataIn.get)
   dataPath.io.fromVecGpRdAddr.foreach(_ := io.fromVecGpRdAddr.get)
   io.toVecGpRdData.foreach(_ := dataPath.io.toVecGpRdData.get)
+  io.toVecGpRdFail.foreach(_ := dataPath.io.toVecGpRdFail.get)
   dataPath.io.fromVecFpRdAddr.foreach(_ := io.fromVecFpRdAddr.get)
   io.toVecFpRdData.foreach(_ := dataPath.io.toVecFpRdData.get)
+  io.toVecFpRdFail.foreach(_ := dataPath.io.toVecFpRdFail.get)
 
   io.uopTopDown.uopsIssued := dataPath.io.uopTopDown.uopsIssued
   io.uopTopDown.uopsIssuedCnt := dataPath.io.uopTopDown.uopsIssuedCnt
@@ -1046,8 +1048,10 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   // vector cross-region scalar regfile read
   val fromVecGpRdAddr = Option.when(params.isIntSchd)(Input(backendParams.getVecRegionParam.genRfRdAddrBundle(backendParams.intPregParams)))
   val toVecGpRdData = Option.when(params.isIntSchd)(Output(backendParams.getVecRegionParam.genRfRdDataBundle(backendParams.intPregParams)))
+  val toVecGpRdFail = Option.when(params.isIntSchd)(Output(backendParams.getVecRegionParam.genRfRdFailBundle(backendParams.intPregParams)))
   val fromVecFpRdAddr = Option.when(params.isFpSchd)(Input(backendParams.getVecRegionParam.genRfRdAddrBundle(backendParams.fpPregParams)))
   val toVecFpRdData = Option.when(params.isFpSchd)(Output(backendParams.getVecRegionParam.genRfRdDataBundle(backendParams.fpPregParams)))
+  val toVecFpRdFail = Option.when(params.isFpSchd)(Output(backendParams.getVecRegionParam.genRfRdFailBundle(backendParams.fpPregParams)))
 
   // DeqOg1Payload
   val fromIntIQDeqOg1Payload: Option[MixedVec[MixedVec[IssueQueueDeqOg1Payload]]] =
