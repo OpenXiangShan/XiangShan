@@ -12,7 +12,6 @@ env:
   NEMU_HOME: /nfs/home/share/ci-workloads/NEMU
   AM_HOME: /nfs/home/share/ci-workloads/nexus-am
   PERF_HOME: /nfs/home/ci-runner/emu-basics/${{ github.run_number }}
-  WAVE_HOME: /nfs/home/ci-runner/emu-basics/${{ github.run_number }}/wave
 
 jobs:
   changes:
@@ -49,7 +48,7 @@ jobs:
           submodules: true
       - name: Init
         run: |
-          mkdir -p ${PERF_HOME} ${WAVE_HOME}
+          mkdir -p ${PERF_HOME}
           make init-force
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
       - name: Build EMU
@@ -127,7 +126,7 @@ jobs:
         shell: bash
         run: |
           python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
-            --wave-dump ${WAVE_HOME} \
+            --wave-dump ${PERF_HOME} \
             --numa --threads 8 \
             ${{ matrix.workload || format('--ci {0}', matrix.name) }} \
             ${{ matrix.extra }} \
