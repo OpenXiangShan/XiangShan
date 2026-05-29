@@ -121,8 +121,10 @@ class DataSRAM(bankIdx: Int, wayIdx: Int)(implicit p: Parameters) extends DCache
     shouldReset = false,
     holdRead = false,
     singlePort = true,
+    withClockGate = true,
     hasMbist = hasMbist,
-    hasSramCtl = hasSramCtl
+    hasSramCtl = hasSramCtl,
+    suffix = Some("dcsh_dat")
   ))
 
   data_sram.io.w.req.valid := io.w.en
