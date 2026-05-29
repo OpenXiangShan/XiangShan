@@ -73,18 +73,8 @@ class MemoryRequestHelper(requestType: Int)
     "  output            io_response",
     ");",
     "",
-    "always @(negedge clock or posedge reset) begin",
-    "  if (reset) begin",
-    "    io_response <= 1'b0;",
-    "  end",
-    "  else if (io_req_valid) begin",
-    "    io_response <= memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE);",
-    "  end" +
-    "  else begin",
-    "    io_response <= 1'b0;",
-    "  end",
-    "end",
-    "",
+    " assign io_response = (reset ? 1'b0 :",
+    "               (io_req_valid ? memory_request(io_req_bits_addr, io_req_bits_id, REQUEST_TYPE) : 1'b0));",
     "endmodule"
   )
   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
@@ -129,18 +119,8 @@ class MemoryResponseHelper(requestType: Int)
     "  output [63:0]     response",
     ");",
     "",
-    "always @(negedge clock or posedge reset) begin",
-    "  if (reset) begin",
-    "    response <= 64'b0;",
-    "  end",
-    "  else if (!reset && enable) begin",
-    "    response <= memory_response(REQUEST_TYPE);",
-    "  end",
-    " else begin",
-    "    response <= 64'b0;",
-    "  end",
-    "end",
-    "",
+    "assign response = reset ? 64'b0 :",
+    "((!reset && enable) ? memory_response(REQUEST_TYPE) : 64'b0);",
     "endmodule"
   )
   setInline(s"$desiredName.v", verilogLines.mkString("\n"))
@@ -155,7 +135,7 @@ trait MemoryHelper { this: Module =>
     helper.io.req.valid := valid
     helper.io.req.bits.addr := addr
     helper.io.req.bits.id := id
-    val responseReg = RegNext(helper.io.response, false.B)
+    val responseReg = withClock((~clock.asBool).asClock) { RegNext(helper.io.response, false.B) }
     responseReg
   }
   protected def readRequest(valid: Bool, addr: UInt, id: UInt): Bool =
@@ -167,8 +147,8 @@ trait MemoryHelper { this: Module =>
     helper.clock := clock
     helper.reset := reset
     helper.enable := enable
-    val response32 = RegNext(helper.response(32), false.B)
-    val response31_0 = RegNext(helper.response(31, 0), 0.U(32.W))
+    val response32 = withClock((~clock.asBool).asClock) { RegNext(helper.response(32), false.B) }
+    val response31_0 = withClock((~clock.asBool).asClock) { RegNext(helper.response(31, 0), 0.U(32.W)) }
     (response32, response31_0)
   }
   protected def readResponse(enable: Bool): (Bool, UInt) =
