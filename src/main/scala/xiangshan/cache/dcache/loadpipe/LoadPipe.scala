@@ -307,7 +307,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_will_send_miss_req = s1_valid && !s1_nack && !s1_hit
 
   // data read
-  io.banked_data_read.valid := s1_fire && !s1_nack && !s1_is_prefetch
+  io.banked_data_read.valid := s1_fire && !s1_nack && !s1_is_prefetch && !io.lsu.s1_kill_data_read
   io.banked_data_read.bits.addr := s1_vaddr
   io.banked_data_read.bits.addr_dup := s1_vaddr_dup
   io.banked_data_read.bits.kill := io.lsu.s1_kill_data_read

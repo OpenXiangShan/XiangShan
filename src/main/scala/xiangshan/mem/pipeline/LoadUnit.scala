@@ -936,6 +936,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   val s1_hw_prf           = s1_in.isHWPrefetch
   val s1_sw_prf           = s1_prf && !s1_hw_prf
   val s1_tlb_memidx       = io.tlb.resp.bits.memidx
+  val s1_misalign_kill    = RegEnable(s0_rs_cross16Bytes && !s0_addr_aligned && !s0_hw_prf_select, false.B, s0_fire)
 
   s1_vaddr_hi         := s1_in.vaddr(VAddrBits - 1, 6)
   s1_vaddr_lo         := s1_in.vaddr(5, 0)
@@ -955,8 +956,8 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   io.dcache.s1_paddr_dup_lsu    <> s1_paddr_dup_lsu
   io.dcache.s1_paddr_dup_dcache <> s1_paddr_dup_dcache
-  io.dcache.s1_kill             := s1_kill || s1_dly_err || s1_tlb_miss || s1_exception
-  io.dcache.s1_kill_data_read   := s1_kill || s1_dly_err || s1_tlb_fast_miss
+  io.dcache.s1_kill             := s1_kill || s1_dly_err || s1_tlb_miss || s1_exception || s1_misalign_kill
+  io.dcache.s1_kill_data_read   := s1_misalign_kill
 
   // store to load forwarding
   io.sbuffer.valid := s1_valid && !(s1_exception || s1_tlb_miss || s1_kill || s1_dly_err || s1_prf)
