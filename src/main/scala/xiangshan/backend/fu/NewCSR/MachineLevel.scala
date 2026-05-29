@@ -55,7 +55,7 @@ trait MachineLevel { self: NewCSR =>
       }
     } else {
       reg.SDID := 0.U.asTypeOf(reg.SDID)
-      reg.PPN := "h802F3".U.asTypeOf(ppnMask)
+      reg.PPN := "h00000080000".U(PPNLengthMpt.W) & ppnMask //for testing, will be removed later
       if (HasMptInodeOpt) {
         reg.optOutInNode := 1.U.asTypeOf(reg.optOutInNode)
       } else {
@@ -566,9 +566,9 @@ class MmptBundle extends CSRBundle { //HasMptCheck
   val MODE = MmptMode(63, 60, null).withReset(MmptMode.Bare) //wNoFilter
   // WARL in privileged spec.
   // RW, since we support max width of VMID
-  val optOutInNode = RW(59).withReset(0.U)
-  val SDID = RW(52 - 1 + SDIDLEN, 52).withReset(0.U)
-  val PPN = RW(PPNLengthMpt-1, 0).withReset(0.U)
+  val optOutInNode = RW(59).withReset(0.U).withDescription("Skip non-leaf node check")
+  val SDID = RW(52 - 1 + SDIDLEN, 52).withReset(0.U).withDescription("ID for security domain")
+  val PPN = RW(PPNLengthMpt-1, 0).withReset(0.U).withDescription("Mpt level3 talble adress.")
 }
 
 class MstatusBundle extends CSRBundle {

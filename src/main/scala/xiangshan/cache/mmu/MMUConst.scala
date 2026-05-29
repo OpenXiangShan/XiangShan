@@ -92,32 +92,31 @@ case class L2TLBParameters
   enablePTWECC: Boolean = false
 )
 
-trait MPTCacheParam extends HasTlbConst { 
-  val sdidCacheStoreEn = false 
-  val perms16Len = 48   
-  val mptSourceWidth = 4  
-  val mptLevelLenOH = 4
-  val mptLevelLenUInt = 2
-  val mptOff = 16 
-  // l3  //8T
-  val l3Size  = 1 
+trait MPTCacheParam extends HasTlbConst {
+  val perms16Len = 48 // length of the perms
+  val mptSourceWidth = 4 // id len of the source
+  val mptLevelLenOH = 4 // level number 4 length in OH
+  val mptLevelLenUInt = 2 // level number 4 length in int
+  val mptOff = 16 // mpt offset of PA
+  // l3 8T
+  val l3Size  = 1
   val mptL3TagLen = 5
   val l3Associative = "fa"
   val l3Replacer = "plru"
-  // l2 // 4G
+  // l2 4G
   val mptL2TagLen = mptL3TagLen + 9
   val l2Size = 1
   val l2Associative = "fa"
   val l2Replacer = "plru"
-  // l1 // 32M
+  // l1 32M
   val l1Size = 4
-  val mptL1TagLen = mptL3TagLen + 9 * 2 
+  val mptL1TagLen = mptL3TagLen + 9 * 2
   val l1Associative = "fa"
   val l1Replacer = "plru"
   // l0 64k
-  val l0nSets = 32//5bits
+  val l0nSets = 32 // 5bits
   val l0nWays = 4
-  val mptL0TagLen = mptL3TagLen + 9 * 3 - log2Up(l0nSets)//32-5=27
+  val mptL0TagLen = mptL3TagLen + 9 * 3 - log2Up(l0nSets) // 32-5=27
   val l0Replacer = "setplru"
   // sp
   val spSize = 8
@@ -126,7 +125,7 @@ trait MPTCacheParam extends HasTlbConst {
   val spReplacer = "plru"
 
 
-  //get set num from pa def; just some wires, 0 delay
+  // get set num from pa def; just some wires, 0 delay
 
   def geL0Set(ppn: UInt): UInt = {
     require(log2Up(l0nWays) == log2Down(l0nWays), "ways must be scala.math.power of 2")
@@ -320,7 +319,7 @@ trait HasPtwConst extends HasTlbConst with MemoryOpConstants{
 
   // miss queue
   val MissQueueSize = l2tlbParams.ifilterSize + l2tlbParams.dfilterSize
-  val MemReqWidth = if (HasBitmapCheck) 2 * (l2tlbParams.llptwsize + 1 + 1) else if (HasMptCheck) ((l2tlbParams.llptwsize + 3)) 
+  val MemReqWidth = if (HasBitmapCheck) 2 * (l2tlbParams.llptwsize + 1 + 1) else if (HasMptCheck) ((l2tlbParams.llptwsize + 3))
   else (l2tlbParams.llptwsize + 1 + 1)
 
   val mptcMemReqID = l2tlbParams.llptwsize + 2

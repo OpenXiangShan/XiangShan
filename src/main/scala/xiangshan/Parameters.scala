@@ -53,11 +53,11 @@ case class XSCoreParameters
   VLEN: Int = 128,
   ELEN: Int = 64,
   HSXLEN: Int = 64,
-  HasMptCheck: Boolean = false,
-  HasMptCheckDefault: Boolean = false,
-  HasMptCheckDefault4k: Boolean = false, 
-  HasMptInodeOpt: Boolean = false,
-  HasBitmapCheck: Boolean = true,
+  HasMptCheck: Boolean = false, //enable mpt
+  HasMptCheckDefault: Boolean = false, // hardwired testing code: fake 2M MPT table
+  HasMptCheckDefault4k: Boolean = false, // hardwired testing code: fake 4k MPT table
+  HasMptInodeOpt: Boolean = false, // hardwired testing code: skip mpt check for non-leaf ptw nodes
+  HasBitmapCheck: Boolean = false,
   HasBitmapCheckDefault: Boolean = false,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
@@ -574,7 +574,7 @@ trait HasXSParameter {
   val xLen = XLEN
   assert(!(HasMptCheck == true && HasBitmapCheck == true), "Conflicts: MPT and Bitmap can't be used together")
   def HasMptCheck = coreParams.HasMptCheck && !coreParams.HasBitmapCheck
-  def HasMptCheckDefault = coreParams.HasMptCheckDefault 
+  def HasMptCheckDefault = coreParams.HasMptCheckDefault
   def HasMptCheckDefault4k = coreParams.HasMptCheckDefault4k
   def HasMptInodeOpt = coreParams.HasMptInodeOpt
   def HasBitmapCheck = coreParams.HasBitmapCheck

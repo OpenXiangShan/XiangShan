@@ -261,11 +261,11 @@ class TLBFA(
      *  sfence addr ---> |        |
      *  try to flush     |        |
      *                   +--------+
-     * 
-     * In this case, the VS-stage is a large page, while the G-stage is a small page. L1TLB stores them as a small page. 
-     * When hfence.vvma comes with an address in that VS large page but outside the small page, it should flush the VS page. 
+     *
+     * In this case, the VS-stage is a large page, while the G-stage is a small page. L1TLB stores them as a small page.
+     * When hfence.vvma comes with an address in that VS large page but outside the small page, it should flush the VS page.
      * However, since L1TLB always treats this entry as a small page, it cannot match this address, thus cannot flush this entry.
-     * 
+     *
     ***/
     // when (hfencev.bits.rs1) {
     //   // all addr
@@ -297,7 +297,7 @@ class TLBFA(
     val modechange = DataChanged(io.csr.satp.mode).asBool || DataChanged(io.csr.vsatp.mode).asBool ||
       DataChanged(io.csr.hgatp.mode).asBool
     when(modechange) {
-       v.zipWithIndex.map { case (a, i) => a := false.B } // mptonly to ptw reset all
+      v.zipWithIndex.map { case (a, i) => a := false.B } // mptonly to ptw reset all
     }
   }
 

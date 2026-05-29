@@ -871,7 +871,7 @@ class NewCSR(implicit val p: Parameters) extends Module
           in.mbmc := mbmc.get.regOut
         } else {
           in.mbmc := DontCare
-        }        
+        }
         in.mmpt.foreach(_ := mmpt.get.regOut)
 
         in.memExceptionVAddr := io.fromMem.excpVA
@@ -984,7 +984,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     resetSatp := Cat(Seq(satp, vsatp, hgatp, mbmc.get).map(_.addr.U === addr)).orR && wenLegalReg // write to satp will cause the pipeline be flushed
   } else if (HasMptCheck) {
      resetSatp := Cat(Seq(satp, vsatp, hgatp, mmpt.get).map(_.addr.U === addr)).orR && wenLegalReg
-  } else { 
+  } else {
     resetSatp := Cat(Seq(satp, vsatp, hgatp).map(_.addr.U === addr)).orR && wenLegalReg // write to satp will cause the pipeline be flushed
   }
 
@@ -1499,7 +1499,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.tlb.vsatpASIDChanged := GatedValidRegNext(vsatp.w.wen && vsatp.regOut.ASID =/= vsatp.w.wdataFields.ASID)
   io.tlb.hgatpVMIDChanged := GatedValidRegNext(hgatp.w.wen && hgatp.regOut.VMID =/= hgatp.w.wdataFields.VMID)
   io.tlb.mmptSDIDChanged := (if (HasMptCheck) GatedValidRegNext(mmpt.get.w.wen && mmpt.get.regOut.SDID =/= mmpt.get.w.wdataFields.SDID) else DontCare)
-  // HasMptCheck, assign id changed signal 
   io.tlb.satp := satp.rdata
   io.tlb.vsatp := vsatp.rdata
   io.tlb.hgatp := hgatp.rdata
@@ -1509,7 +1508,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     io.tlb.mbmc := DontCare
   }
   io.tlb.mmpt.foreach(_ := mmpt.get.rdata)
-  
+
   io.tlb.mxr  :=  mstatus.regOut.MXR.asBool
   io.tlb.sum  :=  mstatus.regOut.SUM.asBool
   io.tlb.vmxr := vsstatus.regOut.MXR.asBool
@@ -1536,7 +1535,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.tlb.pmm.hstatus := RegNext(hstatus.regOut.HUPMM.asUInt)
   io.tlb.pmm.senvcfg := RegNext(senvcfg.regOut.PMM.asUInt)
 
-  io.toDecode.illegalInst.mfence.foreach(_ := !isModeM)  
+  io.toDecode.illegalInst.mfence.foreach(_ := !isModeM)
 
   io.toDecode.illegalInst.sfenceVMA  := isModeHS && mstatus.regOut.TVM  || isModeHU
   io.toDecode.virtualInst.sfenceVMA  := isModeVS && hstatus.regOut.VTVM || isModeVU

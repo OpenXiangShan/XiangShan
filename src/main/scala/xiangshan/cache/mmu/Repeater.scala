@@ -544,7 +544,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.tlb.resp.bits.data.s1 := ptwResp.s1
   io.tlb.resp.bits.data.s2 := ptwResp.s2
   if (HasMptCheck) {
-    io.tlb.resp.bits.data.mpt.get := ptwResp.mpt.get 
+    io.tlb.resp.bits.data.mpt.get := ptwResp.mpt.get
   }
   io.tlb.resp.bits.data.memidx := RegNext(PriorityMux(ptwResp_OldMatchVec, memidx))
   io.tlb.resp.bits.vector := resp_vector
@@ -558,8 +558,8 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.ptw.req(0).bits.vpn := vpn(issPtr)
   io.ptw.req(0).bits.s2xlate := s2xlate(issPtr)
   io.ptw.resp.ready := true.B
-  if (HasMptCheck) {   
-    io.ptw.req(0).bits.mptOnly.get := mptOnly.get(issPtr) // what does this do? what is repeater?
+  if (HasMptCheck) {
+    io.ptw.req(0).bits.mptOnly.get := mptOnly.get(issPtr)
   }
   reqs.zipWithIndex.map{
     case (req, i) =>

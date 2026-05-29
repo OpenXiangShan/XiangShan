@@ -128,11 +128,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     }
   }
 
-  val mptc = Option.when(HasMptCheck) (Module(new mptChecker))
+  val mptc = Option.when(HasMptCheck) (Module(new MptChecker))
   if (HasMptCheck) {
     mptc.get.io.csr := csr_dup(3)
     pmp_check(4).req <> mptc.get.io.pmp.req
-    mptc.get.io.pmp.resp <> pmp_check(4).resp 
+    mptc.get.io.pmp.resp <> pmp_check(4).resp
     mptc.get.io.sfence <> sfence_dup(3)
   }
   val missQueue = Module(new L2TlbMissQueue)
@@ -143,18 +143,18 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val blockmq = Module(new BlockHelper(3))
   val arb1 = Module(new Arbiter(new PtwReq, PtwWidth))
   val arb2 = Module(new Arbiter(new L2TlbWithHptwIdBundle, ((if (l2tlbParams.enablePrefetch) 4 else 3) + (if (HasHExtension) 1 else 0))))
-  
+
   val mpt_arb = Option.when (HasMptCheck) (Module(new Arbiter(new MptReqBundle, 4+PtwWidth)))
-  val mptOnlyPort = 5 
-  // req directly from l1tlb. in this situation, adress translation is disabled and the reqVPN is the actuall PA waiting to be mpt checked. 
+  val mptOnlyPort = 5
+  // req directly from l1tlb. in this situation, adress translation is disabled and the reqVPN is the actuall PA waiting to be mpt checked.
   val lastMptPort2 = 4
-  val lastMptPort = 3 // 3 -> 3+ptw width-1, last mpt check before send to l1ltb 
+  val lastMptPort = 3 // 3 -> 3+ptw width-1, last mpt check before send to l1ltb
   val llptwMptPort = 2
   val hptwMptPort = 1
   val ptwMptPort = 0
   if (HasMptCheck) {
     mptc.get.io.req.valid := mpt_arb.get.io.out.valid
-    mpt_arb.get.io.out.ready := mptc.get.io.req.ready 
+    mpt_arb.get.io.out.ready := mptc.get.io.req.ready
     mptc.get.io.req.bits.reqPA := mpt_arb.get.io.out.bits.reqPA
     mptc.get.io.req.bits.id := mpt_arb.get.io.out.bits.id
     mptc.get.io.req.bits.mptOnly :=  mpt_arb.get.io.out.bits.mptOnly && mpt_arb.get.io.out.valid
@@ -232,12 +232,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     tlbCounter := tlbCounter + PopCount(reqVec) - PopCount(respVec)
   }
   XSError(!(tlbCounter >= 0.U && tlbCounter <= MissQueueSize.U), s"l2tlb full!")
-  
+
   if (HasMptCheck) { // assign arb1 out to mptc for mptOnly mode check
-    mpt_arb.get.io.in(mptOnlyPort).bits.id := arb1.io.chosen // b101 + bx //tlb id to mptc id 
+    mpt_arb.get.io.in(mptOnlyPort).bits.id := arb1.io.chosen // b101 + bx //tlb id to mptc id
     mpt_arb.get.io.in(mptOnlyPort).bits.mptOnly := true.B // used for l2tlb return control logic
     mpt_arb.get.io.in(mptOnlyPort).bits.reqPA := arb1.io.out.bits.vpn // for mpt only vpn is ppn
-    mpt_arb.get.io.in(mptOnlyPort).valid := arb1.io.out.fire && (arb1.io.out.bits.mptOnly.get) // valid when mptOnly and 
+    mpt_arb.get.io.in(mptOnlyPort).valid := arb1.io.out.fire && (arb1.io.out.bits.mptOnly.get) // valid when mptOnly and
     // s2xlate is dont care, it has nothing to do with mpt
   }
 
@@ -355,9 +355,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
 
   if (HasMptCheck) {
-    mpt_arb.get.io.in(llptwMptPort).bits.mptOnly := false.B // llptw is never mpt only mode 
+    mpt_arb.get.io.in(llptwMptPort).bits.mptOnly := false.B // llptw is never mpt only mode
     mpt_arb.get.io.in(llptwMptPort).bits.id := llptw.io.mptCheck.get.req.bits.id
-    mpt_arb.get.io.in(llptwMptPort).bits.reqPA := llptw.io.mptCheck.get.req.bits.reqPA 
+    mpt_arb.get.io.in(llptwMptPort).bits.reqPA := llptw.io.mptCheck.get.req.bits.reqPA
     mpt_arb.get.io.in(llptwMptPort).valid := llptw.io.mptCheck.get.req.valid
     llptw.io.mptCheck.get.req.ready := mpt_arb.get.io.in(llptwMptPort).ready
 
@@ -392,7 +392,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     !cache.io.resp.bits.isFirst &&
     !cache.io.resp.bits.isHptwReq
   ptw.io.req.bits.req_info := cache.io.resp.bits.req_info
-     
+
   if (HasMptCheck) {
     ptw.io.req.bits.req_info.mptOnly.get := DontCare
   }
@@ -414,14 +414,14 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.resp.ready := outReady(ptw.io.resp.bits.source, outArbFsmPort)
 
   if (HasMptCheck) {
-    mpt_arb.get.io.in(ptwMptPort).bits.mptOnly := false.B // llptw is never mpt only mode 
+    mpt_arb.get.io.in(ptwMptPort).bits.mptOnly := false.B // llptw is never mpt only mode
     mpt_arb.get.io.in(ptwMptPort).bits.id := ptw.io.mptCheck.get.req.bits.id
-    mpt_arb.get.io.in(ptwMptPort).bits.reqPA := ptw.io.mptCheck.get.req.bits.reqPA 
+    mpt_arb.get.io.in(ptwMptPort).bits.reqPA := ptw.io.mptCheck.get.req.bits.reqPA
     mpt_arb.get.io.in(ptwMptPort).valid := ptw.io.mptCheck.get.req.valid
     ptw.io.mptCheck.get.req.ready := mpt_arb.get.io.in(ptwMptPort).ready
 
     ptw.io.mptCheck.get.resp.bits <> mptc.get.io.resp.bits
-    ptw.io.mptCheck.get.resp.valid := mptc.get.io.resp.valid && from_ptw(mptc.get.io.resp.bits.id) 
+    ptw.io.mptCheck.get.resp.valid := mptc.get.io.resp.valid && from_ptw(mptc.get.io.resp.bits.id)
   }
 
   hptw.io.req.valid := cache.io.resp.valid && !cache.io.resp.bits.hit && cache.io.resp.bits.isHptwReq
@@ -440,11 +440,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   }
   hptw.io.sfence := sfence_dup(8)
   hptw.io.csr := csr_dup(7)
-  
+
   if (HasMptCheck) {
     mpt_arb.get.io.in(hptwMptPort).bits.mptOnly := false.B
     mpt_arb.get.io.in(hptwMptPort).bits.id := hptw.io.mptCheck.get.req.bits.id
-    mpt_arb.get.io.in(hptwMptPort).bits.reqPA := hptw.io.mptCheck.get.req.bits.reqPA 
+    mpt_arb.get.io.in(hptwMptPort).bits.reqPA := hptw.io.mptCheck.get.req.bits.reqPA
     mpt_arb.get.io.in(hptwMptPort).valid := hptw.io.mptCheck.get.req.valid
     hptw.io.mptCheck.get.req.ready := mpt_arb.get.io.in(hptwMptPort).ready
 
@@ -537,8 +537,8 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   when (mem_arb.io.out.fire) {
     req_addr_low(mem_arb.io.out.bits.id) := addr_low_from_paddr(mem_arb.io.out.bits.addr)
     waiting_resp(mem_arb.io.out.bits.id) := true.B
-    hptw_bypassed := from_hptw(mem_arb.io.out.bits.id) && mem_arb.io.out.bits.hptw_bypassed || (if (HasMptCheck) from_mptc(mem_arb.io.out.bits.id) else false.B)
-    //mtpc resp never refill to page cache 
+    hptw_bypassed := from_hptw(mem_arb.io.out.bits.id) && mem_arb.io.out.bits.hptw_bypassed ||
+      (if (HasMptCheck) from_mptc(mem_arb.io.out.bits.id) else false.B)
   }
   // mem read
   val memRead =  edge.Get(
@@ -559,7 +559,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val mem_resp_from_ptw = from_ptw(mem.d.bits.source)
   val mem_resp_from_hptw = from_hptw(mem.d.bits.source)
   val mem_resp_from_bitmap = from_bitmap(mem.d.bits.source)
-  
+
   val mem_resp_from_mptc = from_mptc(mem.d.bits.source)
 
   when (mem.d.valid) {
@@ -638,7 +638,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // mem -> hptw
   hptw.io.mem.resp.valid := mem_resp_done && mem_resp_from_hptw
   hptw.io.mem.resp.bits := resp_pte.apply(l2tlbParams.llptwsize + 1)
-  
+
   if (HasMptCheck) {
     mptc.get.io.mem.resp.valid := RegNext(mem_resp_done && mem_resp_from_mptc) // fix later extra delay reg which is unnecessary
     mptc.get.io.mem.resp.bits := resp_pte.apply(l2tlbParams.llptwsize + 2)
@@ -740,7 +740,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
 
   val cfsValue = Option.when(HasBitmapCheck)(llptw_out.bits.bitmapCheck.get.cfs)
 
-  val MptSwitchBox = Option.when(HasMptCheck) (Seq.fill(PtwWidth)(Module(new MptOutputSwitchBox))) // Put all conversion logic into one module. 
+  val MptSwitchBox = Option.when(HasMptCheck) (Seq.fill(PtwWidth)(Module(new MptOutputSwitchBox))) // Put all conversion logic into one module.
   if (HasMptCheck) {
     for (i <- 0 until PtwWidth) {
       MptSwitchBox.get(i).io.csr <> csr_dup(8+i)
@@ -774,31 +774,31 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mergeArb(i).out.ready := (if (HasMptCheck) MptSwitchBox.get(i).io.mergeArb.ready else outArb(i).in(0).ready)
     // mptfin and outarb.ready,outArb(i).in(0).fire，ready only high for 1 clk
   }
-  
-  // connect to the switch box  
+
+  // connect to the switch box
    if (HasMptCheck) {
     for (i <- 0 until PtwWidth) {
-      // connect to the switch box 
+      // connect to the switch box
       MptSwitchBox.get(i).io.mergeArb.valid := mergeArb(i).out.valid
       mergeArb(i).out.ready := MptSwitchBox.get(i).io.mergeArb.ready
       MptSwitchBox.get(i).io.mergeArb.bits.fault := merge_ptwResp_to_sector_ptwResp(mergeArb(i).out.bits.s1).af || merge_ptwResp_to_sector_ptwResp(mergeArb(i).out.bits.s1).pf ||
         mergeArb(i).out.bits.s2.gpf || mergeArb(i).out.bits.s2.gaf
 
       mpt_arb.get.io.in(lastMptPort+i).valid := MptSwitchBox.get(i).io.mptIn.valid
-      mpt_arb.get.io.in(lastMptPort+i).bits.reqPA := Mux(mergeArb(i).out.bits.s2xlate === onlyStage1 || mergeArb(i).out.bits.s2xlate === noS2xlate, 
+      mpt_arb.get.io.in(lastMptPort+i).bits.reqPA := Mux(mergeArb(i).out.bits.s2xlate === onlyStage1 || mergeArb(i).out.bits.s2xlate === noS2xlate,
           mergeArb(i).out.bits.s1.genPPN(),//gpa
           mergeArb(i).out.bits.s2.genPPNS2(mergeArb(i).out.bits.s2.entry.tag)
-      ) // hpa tag or gpa? for better timing, use tag 
+      ) // hpa tag or gpa? for better timing, use tag
       mpt_arb.get.io.in(lastMptPort+i).bits.mptOnly := false.B
-      mpt_arb.get.io.in(lastMptPort+i).bits.id := (8+i).U      
+      mpt_arb.get.io.in(lastMptPort+i).bits.id := (8+i).U
       MptSwitchBox.get(i).io.mptIn.ready := mpt_arb.get.io.in(lastMptPort+i).ready
 
       MptSwitchBox.get(i).io.mptOut.bits := mptc.get.io.resp.bits
-      MptSwitchBox.get(i).io.mptOut.valid := (mptc.get.io.resp.valid && 
+      MptSwitchBox.get(i).io.mptOut.valid := (mptc.get.io.resp.valid &&
         (mptc.get.io.resp.bits.id === (8+i).U || (mptc.get.io.resp.bits.mptOnly && (mptc.get.io.resp.bits.id === i.U))))
       // switch box also receives mpt only request
     }
-  }  
+  }
 
   for (i <- 0 until PtwWidth) {
     outArb(i).in(0).valid := mergeArb(i).out.valid
@@ -826,25 +826,25 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       outArb(i).in(0).bits.s1 := merge_ptwResp_to_sector_ptwResp(mergeArb(i).out.bits.s1)
       outArb(i).in(0).bits.s2 := mergeArb(i).out.bits.s2
     }
-    
-    if (HasMptCheck) { 
+
+    if (HasMptCheck) {
       MptSwitchBox.get(i).io.l1TLB.ready := outArb(i).in(0).ready
       outArb(i).in(0).valid := MptSwitchBox.get(i).io.l1TLB.valid
-      outArb(i).in(0).bits.mpt.get := MptSwitchBox.get(i).io.l1TLB.bits.outData 
-      when(MptSwitchBox.get(i).io.l1TLB.valid && MptSwitchBox.get(i).io.l1TLB.bits.outMptOnly) { 
+      outArb(i).in(0).bits.mpt.get := MptSwitchBox.get(i).io.l1TLB.bits.outData
+      when(MptSwitchBox.get(i).io.l1TLB.valid && MptSwitchBox.get(i).io.l1TLB.bits.outMptOnly) {
         // maybe redundent,need to change L1TLB structure later
         outArb(i).in(0).bits.s2xlate := noS2xlate // actually it is don't care,but i want to assign it to 0
-        // fake output s1. s2 will not be used in mponly mode , its value  is dont care. in future release. niether will s1 be used(hopefully) 
- 
-        val fakeMptS1 = Wire(new PtwSectorResp()) 
+        // fake output s1. s2 will not be used in mponly mode , its value  is dont care. in future release. niether will s1 be used(hopefully)
+
+        val fakeMptS1 = Wire(new PtwSectorResp())
         fakeMptS1.FakeMptOnlyResp(MptSwitchBox.get(i).io.l1TLB.bits.reqPA, satp.asid, hgatp.vmid)
-        outArb(i).in(0).bits.s1 := fakeMptS1 
+        outArb(i).in(0).bits.s1 := fakeMptS1
       }
       when(!mptEn.get) {
         outArb(i).in(0).bits.mpt.get.genFakeResp() // if mpt is disable as baremode, generate a fake one for the L1TLB
       }
-    }  
-    
+    }
+
   }
 
   // io.tlb.map(_.resp) <> outArb.map(_.out)
