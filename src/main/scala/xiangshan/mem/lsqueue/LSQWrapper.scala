@@ -22,7 +22,7 @@ import chisel3.util._
 import utils._
 import utility._
 import xiangshan._
-import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, MemToRob, UopIdx, connectSamePort}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, IssueQueueLRQWakeUpBundle, MemExuOutput, MemToRob, UopIdx, connectSamePort}
 import xiangshan.backend._
 import xiangshan.backend.rob.{RobLsqIO, RobPtr}
 import xiangshan.backend.fu.FuType
@@ -117,6 +117,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val issuePtrExt = Output(new SqPtr)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
+    val wakeupToLRQ = Vec(StaCnt + StdCnt, Flipped(ValidIO(new IssueQueueLRQWakeUpBundle)))
+    val wakeupToLRQCancel = Input(Vec(StaCnt + StdCnt, new LRQWakeUpCancelBundle))
     val cmoOpReq  = DecoupledIO(new CMOReq)
     val cmoOpResp = Flipped(DecoupledIO(new CMOResp))
     val flushSbuffer = new SbufferFlushBundle
@@ -233,6 +235,8 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   loadQueue.io.lqDeq               <> io.lqDeq
   loadQueue.io.l2_hint             <> io.l2_hint
   loadQueue.io.tlb_hint            <> io.tlb_hint
+  loadQueue.io.wakeupToLRQ         <> io.wakeupToLRQ
+  loadQueue.io.wakeupToLRQCancel   := io.wakeupToLRQCancel
   loadQueue.io.lqEmpty             <> io.lqEmpty
   io.mdpTrain                      := loadQueue.io.mdpTrain
 

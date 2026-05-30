@@ -194,6 +194,8 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
 
   val intIssue: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(intSchdParams.genExuInputCopySrcBundleMemBlock)
   val vecIssue: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(vecSchdParams.genExuInputCopySrcBundleMemBlock)
+  val wakeupToLRQ = Flipped(Vec(StaCnt + StdCnt, ValidIO(new IssueQueueLRQWakeUpBundle)))
+  val wakeupToLRQCancel = Input(Vec(StaCnt + StdCnt, new IssueQueueLRQWakeUpCancelBundle))
 }
 
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
@@ -439,6 +441,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   val intIssue: Seq[DecoupledIO[ExuInput]] = io.ooo_to_mem.intIssue.flatten
   val vecIssue: Seq[DecoupledIO[ExuInput]] = io.ooo_to_mem.vecIssue.flatten
+  val wakeupToLRQCancel = Wire(Vec(StaCnt + StdCnt, new LRQWakeUpCancelBundle))
   val issueLda = intIssue.filter(_.bits.params.hasLoadFu)
   val issueSta = intIssue.filter(_.bits.params.hasStoreAddrFu)
   val issueStd = intIssue.filter(_.bits.params.hasStdFu)
@@ -492,6 +495,21 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val newLoadUnits = Seq.tabulate(LduCnt)(i => Module(new NewLoadUnit(ldaParams(i))))
   val storeUnits = Seq.tabulate(StaCnt)(i => Module(new NewStoreUnit(staParams(i))))
   val stdExeUnits = Seq.tabulate(StdCnt)(i => Module(new StdExeUnit(stdParams(i))))
+
+  wakeupToLRQCancel.take(StaCnt).zip(storeUnits).zip(io.ooo_to_mem.wakeupToLRQCancel.take(StaCnt)).foreach {
+    case ((sink, stu), source) =>
+      sink.og0Cancel := source.og0Cancel
+      sink.og1Cancel := source.og1Cancel
+      sink.s0Cancel := RegNext(!stu.io.stin.ready)
+      sink.s1Cancel := stu.io.feedBackSlow.valid && !stu.io.feedBackSlow.bits.hit
+  }
+  wakeupToLRQCancel.drop(StaCnt).take(StdCnt).zip(stdExeUnits).zip(io.ooo_to_mem.wakeupToLRQCancel.drop(StaCnt).take(StdCnt)).foreach {
+    case ((sink, std), source) =>
+      sink.og0Cancel := source.og0Cancel
+      sink.og1Cancel := source.og1Cancel
+      sink.s0Cancel := RegNext(!std.io.in.ready)
+      sink.s1Cancel := false.B // TODO: will be used in the future.
+  }
   val atomicsUnit = Module(new AtomicsUnit(mouParam))
 
   // The number of vector load/store units is decoupled with the number of load/store units
@@ -1028,6 +1046,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   //  lsq.io.rob            <> io.lsqio.rob
   lsq.io.enq            <> io.ooo_to_mem.enqLsq
+  lsq.io.wakeupToLRQ <> io.ooo_to_mem.wakeupToLRQ
+  lsq.io.wakeupToLRQCancel := wakeupToLRQCancel
   lsq.io.brqRedirect    <> redirect
 
   //  violation rollback

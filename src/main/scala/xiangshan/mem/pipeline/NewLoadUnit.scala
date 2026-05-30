@@ -129,7 +129,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   replay.noQuery.get := io.replay.bits.uncacheReplay.get
   replay.DontCarePAddr()
   replay.DontCareUnalign() // assign later in sink
-  val replayIsHiPrio = io.replay.bits.forwardDChannel.get || io.replay.bits.isUncacheReplay()
+  val replayIsHiPrio = io.replay.bits.isReplayHiPrioEntrance()
   replayHiPrio.valid := io.replay.valid && replayIsHiPrio
   replayHiPrio.bits := replay
   replayHiPrio.bits.entrance := LoadEntrance.replayHiPrio.U
@@ -146,7 +146,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   // 3. low-priority replay from LRQ
   val replayStall = io.ldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.ldin.bits.lqIdx.get) ||
     io.vecldin.valid && isAfter(io.replay.bits.uop.lqIdx, io.vecldin.bits.uop.lqIdx)
-  val replayIsLoPrio = !io.replay.bits.forwardDChannel.get && !io.replay.bits.isUncacheReplay() && !replayStall
+  val replayIsLoPrio = !io.replay.bits.isReplayHiPrioEntrance() && !replayStall
   replayLoPrio.valid := io.replay.valid && replayIsLoPrio
   replayLoPrio.bits := replay
   replayLoPrio.bits.entrance := LoadEntrance.replayLoPrio.U

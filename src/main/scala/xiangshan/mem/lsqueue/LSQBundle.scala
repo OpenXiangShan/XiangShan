@@ -28,6 +28,13 @@ import xiangshan.cache.{CMOReq, CMOResp, DCacheWordReqWithVaddrAndPfFlag, Uncach
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.Bundles.{SQForward, StoreMaskBundle}
 
+  class LRQWakeUpCancelBundle(implicit p: Parameters) extends XSBundle {
+    val og0Cancel = Bool()
+    val og1Cancel = Bool()
+    val s0Cancel  = Bool()
+    val s1Cancel  = Bool()
+  }
+
 class StoreQueueEnqIO(implicit p: Parameters) extends MemBlockBundle {
   // Bundle define
 
@@ -112,7 +119,7 @@ class StoreAddrIO(implicit p: Parameters) extends MemBlockBundle {
   * means this write request need to write whole cacheline.
   * */
   val wlineflag          = Bool() // store write the whole cache line.
-  
+
   // misalign
   val isUnalign   = Bool()
   val cross16Byte = Bool()

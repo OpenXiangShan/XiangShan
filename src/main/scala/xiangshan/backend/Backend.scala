@@ -315,6 +315,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   fpRegion.io.wakeupFromI2F. foreach(x => x := intRegion.io.cross.I2FWakeupOut.get)
   intRegion.io.F2IWakeupIn.  foreach(x => x := fpRegion.io.cross.F2IWakeupOut.get)
   intRegion.io.wakeupFromLDU.foreach(x => x := io.mem.wakeup)
+  intRegion.io.wakeupToLRQ.foreach(x => io.mem.wakeupToLRQ.zip(x.flatten).foreach { case (sink, source) => sink := source })
+  intRegion.io.wakeupToLRQCancel.foreach(x => io.mem.wakeupToLRQCancel.zip(x.flatten).foreach { case (sink, source) => sink := source })
   intRegion.io.staFeedback.  foreach(x => x := io.mem.staIqFeedback)
   vecRegion.io.vstuFeedback. foreach(x => x := io.mem.vstuIqFeedback)
   intRegion.io.ldCancel := io.mem.ldCancel
@@ -692,6 +694,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val intIssue = intSchdParams.genExuInputCopySrcBundleMemBlock
   val vecIssue = vecSchdParams.genExuInputCopySrcBundleMemBlock
+  val wakeupToLRQ = Vec(params.StaCnt + params.StdCnt, ValidIO(new IssueQueueLRQWakeUpBundle))
+  val wakeupToLRQCancel = Vec(params.StaCnt + params.StdCnt, new IssueQueueLRQWakeUpCancelBundle)
 
   // store event difftest information
   val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
