@@ -135,8 +135,7 @@ trait MemoryHelper { this: Module =>
     helper.io.req.valid := valid
     helper.io.req.bits.addr := addr
     helper.io.req.bits.id := id
-    val responseReg = withClock((~clock.asBool).asClock) { RegNext(helper.io.response, false.B) }
-    responseReg
+    helper.io.response
   }
   protected def readRequest(valid: Bool, addr: UInt, id: UInt): Bool =
     request(valid, addr, id, false)
@@ -147,9 +146,7 @@ trait MemoryHelper { this: Module =>
     helper.clock := clock
     helper.reset := reset
     helper.enable := enable
-    val response32 = withClock((~clock.asBool).asClock) { RegNext(helper.response(32), false.B) }
-    val response31_0 = withClock((~clock.asBool).asClock) { RegNext(helper.response(31, 0), 0.U(32.W)) }
-    (response32, response31_0)
+    (helper.response(32), helper.response(31, 0))
   }
   protected def readResponse(enable: Bool): (Bool, UInt) =
     response(enable, false)
