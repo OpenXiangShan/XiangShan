@@ -59,6 +59,8 @@ case class IssueBlockParams(
 
   def isStdIQ: Boolean = StdCnt > 0
 
+  def isStoreIQ: Boolean = isStAddrIQ || isStdIQ
+
   def isHyAddrIQ: Boolean = HyuCnt > 0
 
   def isVecLduIQ: Boolean = (VlduCnt + VseglduCnt) > 0
@@ -406,6 +408,14 @@ case class IssueBlockParams(
     MixedVec(this.exuBlockParams.map(x => DecoupledIO(x.genNewExuInputCopySrcBundle)))
   }
 
+  def genMemWakeupLRQBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueLRQWakeUpBundle]] = {
+    MixedVec(this.exuBlockParams.filter(_.hasStoreFu).map(x => ValidIO(new IssueQueueLRQWakeUpBundle)))
+  }
+
+  def genMemWakeupCancelBundle(implicit p: Parameters): MixedVec[IssueQueueLRQWakeUpCancelBundle] = {
+    MixedVec(this.exuBlockParams.filter(_.hasStoreFu).map(x => new IssueQueueLRQWakeUpCancelBundle))
+  }
+
   def genExuOutputDecoupledBundle(implicit p: Parameters): MixedVec[DecoupledIO[ExuOutput]] = {
     MixedVec(this.exuParams.map(x => DecoupledIO(x.genExuOutputBundle)))
   }
@@ -485,6 +495,14 @@ case class IssueBlockParams(
 
   def genIQWakeUpSinkValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = {
     MixedVec(this.wakeUpInExuSources.map(x => ValidIO(new IssueQueueIQWakeUpBundle(backendParam.getExuIdx(x.name), backendParam))))
+  }
+
+  def genIOWakeUpLRQValidBundle(implicit p: Parameters): MixedVec[ValidIO[IssueQueueLRQWakeUpBundle]] = {
+    MixedVec(exuBlockParams.filter(_.hasStoreFu).map(x => ValidIO(new IssueQueueLRQWakeUpBundle)))
+  }
+
+  def genIOWakeUpCancelBundle(implicit p: Parameters): MixedVec[IssueQueueLRQWakeUpCancelBundle] = {
+    MixedVec(exuBlockParams.filter(_.hasStoreFu).map(x => Output(new IssueQueueLRQWakeUpCancelBundle)))
   }
 
   def genOGRespBundle(implicit p: Parameters) = {

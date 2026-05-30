@@ -26,7 +26,7 @@ import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.backend._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput}
+import xiangshan.backend.Bundles.{DynInst, ExuOutput, IssueQueueLRQWakeUpBundle, MemExuOutput}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.mdp._
 import xiangshan.mem.Bundles._
@@ -199,6 +199,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val tlb_hint = Flipped(new TlbHintIO)
+    val wakeupToLRQ = Vec(StaCnt + StdCnt, Flipped(ValidIO(new IssueQueueLRQWakeUpBundle)))
+    val wakeupToLRQCancel = Input(Vec(StaCnt + StdCnt, new LRQWakeUpCancelBundle))
     val lqEmpty = Output(Bool())
 
     // mdp train io
@@ -278,8 +280,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    */
   loadQueueReplay.io.redirect         <> io.redirect
   loadQueueReplay.io.enq              <> io.ldu.ldin // from load_s3
-  loadQueueReplay.io.storeAddrIn      <> io.sta.storeAddrIn // from store_s1
-  loadQueueReplay.io.storeDataIn      <> io.std.storeDataIn // from store_s0
   loadQueueReplay.io.replay           <> io.replay
   loadQueueReplay.io.loadWakeup       <> io.loadWakeup
   loadQueueReplay.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
@@ -295,6 +295,10 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.l2_hint          <> io.l2_hint
   loadQueueReplay.io.tlb_hint         <> io.tlb_hint
   loadQueueReplay.io.tlbReplayDelayCycleCtrl <> io.tlbReplayDelayCycleCtrl
+  loadQueueReplay.io.storeAddrWakeup.zip(io.wakeupToLRQ.take(StaCnt)).foreach { case (sink, source) => sink := source }
+  loadQueueReplay.io.storeDataWakeup.zip(io.wakeupToLRQ.drop(StaCnt).take(StdCnt)).foreach { case (sink, source) => sink := source }
+  loadQueueReplay.io.storeAddrWakeupCancel.zip(io.wakeupToLRQCancel.take(StaCnt)).foreach { case (sink, source) => sink := source }
+  loadQueueReplay.io.storeDataWakeupCancel.zip(io.wakeupToLRQCancel.drop(StaCnt).take(StdCnt)).foreach { case (sink, source) => sink := source }
 
   loadQueueReplay.io.mmioWakeup := uncacheBuffer.io.mmioWakeup
   loadQueueReplay.io.ncWakeup := uncacheBuffer.io.ncWakeup

@@ -106,6 +106,7 @@ case class XSCoreParameters
   LoadQueueRAWSize: Int = 56, // NOTE: make sure that LoadQueueRAWSize is power of 2.
   RollbackGroupSize: Int = 8,
   LoadQueueReplaySize: Int = 120,
+  LoadDependenceScoreBoardWidth: Int = 4,
   LoadUncacheBufferSize: Int = 16,
   LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
   StoreQueueSize: Int = 64,
@@ -714,6 +715,7 @@ trait HasXSParameter {
   val RAWlgSelectGroupSize = log2Ceil(RollbackGroupSize)
   val RAWTotalDelayCycles = scala.math.ceil(log2Ceil(LoadQueueRAWSize).toFloat / RAWlgSelectGroupSize).toInt + 1 - 2
   def LoadQueueReplaySize = coreParams.LoadQueueReplaySize
+  def LoadDependenceScoreBoardWidth = coreParams.LoadDependenceScoreBoardWidth
   def LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
   def LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
   def StoreQueueSize = coreParams.StoreQueueSize
