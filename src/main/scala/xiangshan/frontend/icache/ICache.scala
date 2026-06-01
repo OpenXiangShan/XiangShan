@@ -39,7 +39,7 @@ class ICache()(implicit p: Parameters) extends LazyModule with HasICacheParamete
   val clientParameters: TLMasterPortParameters = TLMasterPortParameters.v1(
     Seq(TLMasterParameters.v1(
       name = "icache",
-      sourceId = IdRange(0, NumFetchMshr + NumPrefetchMshr + 1)
+      sourceId = IdRange(0, NumAllMshr) // [start, end)
     )),
     requestFields = Seq(
       // distinguish between i/d cache
