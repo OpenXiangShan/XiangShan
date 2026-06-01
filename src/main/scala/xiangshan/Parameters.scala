@@ -276,7 +276,7 @@ case class XSCoreParameters
     nReleaseEntries = 18,
     nMaxPrefetchEntry = 6,
     enableTagEcc = true,
-    enableDataEcc = false,
+    enableDataEcc = true,
     cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
   )),
   L2CacheParamsOpt: Option[L2Param] = Some(L2Param(
