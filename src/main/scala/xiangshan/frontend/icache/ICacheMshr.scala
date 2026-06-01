@@ -21,12 +21,11 @@ import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
 import utility.MemReqSource
 import utility.ReqSourceKey
-import utility.XSPerfHistogram
 import xiangshan.WfiReqBundle
 import xscache.common.AliasKey
 import xscache.coupledL2.MemBackTypeMM
 
-class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Parameters) extends ICacheModule {
+class ICacheMshr(edge: TLEdgeOut, val id: Int)(implicit p: Parameters) extends ICacheModule {
   class ICacheMshrIO(edge: TLEdgeOut)(implicit p: Parameters) extends ICacheBundle {
     val fencei: Bool         = Input(Bool())
     val flush:  Bool         = Input(Bool())
@@ -46,12 +45,14 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
     // offer the information needed by responding to requester
     val info: Valid[MshrInfoBundle] = ValidIO(new MshrInfoBundle)
     // after respond to requester, invalid the MSHR
-    val invalid: Bool = Input(Bool())
+    val finish: Bool = Input(Bool())
 
     val perf_latency: UInt = Output(UInt(16.W)) // magic number: latency should less than 65536 cycles
   }
 
   val io: ICacheMshrIO = IO(new ICacheMshrIO(edge))
+
+  def isFetch: Boolean = id < NumFetchMshr
 
   private val valid = RegInit(false.B)
   // this MSHR doesn't respond to fetch and sram
@@ -107,7 +108,7 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   // send request to L2
   io.acquire.valid := valid && !issue && !io.flush && !io.fencei && !io.wfi.wfiReq
   private val getBlock = edge.Get(
-    fromSource = ID.U,
+    fromSource = id.U,
     toAddress = Cat(blkPAddr, 0.U(blockOffBits.W)),
     lgSize = log2Up(blockBytes).U
   )._2
@@ -130,7 +131,7 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   }
 
   // invalid request when grant finish
-  when(io.invalid) {
+  when(io.finish) {
     valid := false.B
   }
 
@@ -144,13 +145,4 @@ class ICacheMshr(edge: TLEdgeOut, isFetch: Boolean, ID: Int)(implicit p: Paramet
   io.wfi.wfiSafe := !(valid && issue)
 
   io.perf_latency := perf_latency
-
-  XSPerfHistogram(
-    "responseLatency",
-    perf_latency,
-    io.invalid,
-    0,
-    200,
-    10
-  )
 }
