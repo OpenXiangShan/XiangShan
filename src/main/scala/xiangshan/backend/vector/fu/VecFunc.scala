@@ -70,7 +70,7 @@ class VecNonFixedLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(
   nonFixedLatOutCtrlNext.vecWen.zip(ex0ctrl.vecWen).foreach { case (sink, source) => sink := source }
   nonFixedLatOutCtrlNext.v0Wen.zip(ex0ctrl.v0Wen).foreach { case (sink, source) => sink := source }
   nonFixedLatOutCtrlNext.vlWen.zip(ex0ctrl.vlWen).foreach { case (sink, source) => sink := source }
-  nonFixedLatOutCtrlNext.exceptionVec.foreach { sink => sink := 0.U.asTypeOf(sink) }
+  nonFixedLatOutCtrlNext.exceptionVec.zeroInit()
   nonFixedLatOutCtrlNext.flushPipe.zip(ex0ctrl.flushPipe).foreach { case (sink, source) => sink := source }
   nonFixedLatOutCtrlNext.replay.foreach(_ := false.B)
   nonFixedLatOutCtrlNext.isRVC.foreach(_ := false.B)

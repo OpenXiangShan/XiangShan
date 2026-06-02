@@ -1934,6 +1934,8 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
     val stWbIdx       = storeAddrIn.bits.uop.sqIdx.value
     val byteStart     = storeAddrIn.bits.vaddr(VWordOffset - 1, 0)
     val byteOffset    = MemorySize.ByteOffset(storeAddrIn.bits.size)
+    val scalarVectorStore = LSUOpType.isVecMemContinousOp(storeAddrIn.bits.uop.fuOpType)
+    val byteMaskFromSize = UIntToMask(MemorySize.CalculateSelectMask(0.U, byteOffset), VLENB)
 
     // !isLastRequest && cross16Byte means it is first request of cross page unalign  --> save paddr
     //  isLastRequest && cross16Byte means it is second request of cross page unalign --> not save paddr
@@ -1942,10 +1944,15 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
       // the second paddr of cross16Byte request will be write to unalign queue
       dataEntries(stWbIdx).vaddr     := storeAddrIn.bits.vaddr
       dataEntries(stWbIdx).paddrHigh := storeAddrIn.bits.paddr(PAddrBits - 1, PageOffsetWidth)
-      // only unit-stride use it, because unit-stride mask is not continue true.
-      dataEntries(stWbIdx).byteMask  := Mux(MemorySize.sizeIs(storeAddrIn.bits.size, MemorySize.Q),
-        storeAddrIn.bits.mask,
-        UIntToMask(MemorySize.CalculateSelectMask(byteStart, byteStart +& byteOffset), VLENB))
+      // StoreQueue later rotates byteMask by address offset, so vector continuous stores keep it offset-free here.
+      dataEntries(stWbIdx).byteMask  := Mux(
+        scalarVectorStore,
+        byteMaskFromSize,
+        Mux(MemorySize.sizeIs(storeAddrIn.bits.size, MemorySize.Q),
+          storeAddrIn.bits.mask,
+          UIntToMask(MemorySize.CalculateSelectMask(byteStart, byteStart +& byteOffset), VLENB)
+        )
+      )
       dataEntries(stWbIdx).size      := storeAddrIn.bits.size
 
       // debug singal

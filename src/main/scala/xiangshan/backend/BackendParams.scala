@@ -174,8 +174,12 @@ case class BackendParams(
     MixedVec(allSchdParams.map(_.genWriteBackRobValidBundle(needExtraVld = true).flatten).flatten)
   }
 
+  def getWrite2RobParams(needExtraVld: Boolean = true): Seq[ExeUnitParams] = {
+    allIssueParams.flatMap(_.getWriteBackRobParams(needExtraVld))
+  }
+
   def getWrite2RobSize(cond: ExeUnitParams => Boolean = _ => true)(implicit p: Parameters): Int =
-    genWrite2RobBundles.count(x => cond(x.bits.params))
+    getWrite2RobParams().count(cond)
 
   def genNewExuOutputBundle[T <: Bundle](
     builder: NewExuOutput => T,
