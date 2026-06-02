@@ -612,7 +612,7 @@ object Exu {
       this.redirect    .foreach(x => x := 0.U.asTypeOf(x))
       this.fflags      .foreach(x => x := 0.U.asTypeOf(x))
       this.vxsat       .foreach(x => x := 0.U.asTypeOf(x))
-      this.exceptionVec.foreach(x => x := 0.U.asTypeOf(x))
+      this.exceptionVec.zeroInit()
       this.trigger     .foreach(x => x := 0.U.asTypeOf(x))
       this.debug       .foreach(x => x := source.ctrl.debug.get)
     }

@@ -47,7 +47,7 @@ class VecFixLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(cfg) 
 }
 
 
-class VecNoFixLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(cfg) 
+class VecNoFixLatFunc(cfg: VecFuConfig)(implicit p: Parameters) extends Func(cfg)
   with VecFuncAlias {
 
 }
