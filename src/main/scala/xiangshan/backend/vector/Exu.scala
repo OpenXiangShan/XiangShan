@@ -382,7 +382,7 @@ object Exu {
       this.toRob.redirect.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.data.redirect.getOrElse(0.U.asTypeOf(x)))))
 //      this.toRob.fflags.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.data.fflags.getOrElse(0.U.asTypeOf(x)))))
 //      this.toRob.vxsat.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.data.vxsat.getOrElse(0.U.asTypeOf(x)))))
-      this.toRob.exceptionVec.foreach(x => x := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.exceptionVec.getOrElse(0.U.asTypeOf(x)))))
+      this.toRob.exceptionVec := ExceptSparseVec.mux1h(fuOutValidOH, fuOuts.map(_.bits.ctrl.exceptionVec))
       this.toRob.debug.foreach(_ := Mux1H(fuOutValidOH, fuOuts.map(_.bits.debug.get)))
 
       this.toGpRf.foreach { case x =>
@@ -532,7 +532,7 @@ object Exu {
     val redirect      = Option.when(param.needRedirect)(ValidIO(new Redirect))
     val fflags        = Option.when(param.needFFlagsWen)(Fflags())
     val vxsat         = Option.when(param.needVxsatWen)(Bool())
-    val exceptionVec  = Option.when(param.exceptionOut.nonEmpty)(ExceptionVec())
+    val exceptionVec  = ExceptSparseVec(param.exceptionOut)
     val trigger       = Option.when(param.needTrigger)(TriggerAction())
     val debug         = Option.when(backendParams.debugEn)(new DebugBundle)
 
@@ -553,7 +553,7 @@ object Exu {
       exuOutput.fflagsWen.foreach(_ := this.fflags.get.orR)
       exuOutput.fflags.foreach(_ := this.fflags.get)
       exuOutput.vxsat.foreach(_ := this.vxsat.get)
-      exuOutput.exceptionVec.foreach(_ := this.exceptionVec.get)
+      exuOutput.exceptionVec := this.exceptionVec
       exuOutput.flushPipe.foreach(_ := this.flushPipe.get)
       exuOutput.replay.foreach(_ := this.replay.get)
       exuOutput.lqIdx.foreach(x => x := 0.U.asTypeOf(x))
@@ -577,7 +577,7 @@ object Exu {
       exuOutput.toRob.bits.fflags      .foreach(_ := this.fflags.get)
       exuOutput.toRob.bits.fflagsWen   .foreach(_ := this.fflags.get.orR)
       exuOutput.toRob.bits.vxsat       .foreach(_ := this.vxsat.get)
-      exuOutput.toRob.bits.exceptionVec.foreach(_ := this.exceptionVec.get)
+      exuOutput.toRob.bits.exceptionVec := this.exceptionVec
       exuOutput.toRob.bits.flushPipe   .foreach(_ := this.flushPipe.get)
       exuOutput.toRob.bits.trigger     .foreach(_ := this.trigger.get)
       exuOutput.toRob.bits.vxsat       .foreach(_ := this.vxsat.get)
@@ -611,7 +611,7 @@ object Exu {
       toRob.fflags        .foreach(_ := this.fflags.get)
       toRob.fflagsWen     .foreach(_ := this.fflags.get.orR)
       toRob.vxsat         .foreach(_ := this.vxsat.get)
-      toRob.exceptionVec  .foreach(_ := this.exceptionVec.get)
+      toRob.exceptionVec  := this.exceptionVec
       toRob.lqIdx         .foreach(x => x := 0.U.asTypeOf(x))
       toRob.sqIdx         .foreach(x => x := 0.U.asTypeOf(x))
       toRob.trigger       .foreach(x => x := 0.U.asTypeOf(x))
@@ -634,7 +634,7 @@ object Exu {
       this.redirect    .foreach(_ := source.redirect    .get)
       this.fflags      .foreach(_ := source.fflags      .get)
       this.vxsat       .foreach(_ := source.vxsat       .get)
-      this.exceptionVec.foreach(_ := source.exceptionVec.get)
+      this.exceptionVec := source.exceptionVec
       this.trigger     .foreach(_ := source.trigger     .get)
       this.debug.foreach { case x =>
         x.debug         := source.debug
@@ -650,7 +650,7 @@ object Exu {
       this.redirect    .foreach(_ := source.redirect               .get)
       this.fflags      .foreach(_ := source.toRob.bits.fflags      .get)
       this.vxsat       .foreach(_ := source.toRob.bits.vxsat       .get)
-      this.exceptionVec.foreach(_ := source.toRob.bits.exceptionVec.get)
+      this.exceptionVec := source.toRob.bits.exceptionVec
       this.trigger     .foreach(_ := source.toRob.bits.trigger     .get)
       this.debug.foreach { case x =>
         x.debug         := source.debug
@@ -666,7 +666,7 @@ object Exu {
       this.redirect    .foreach(x => x := 0.U.asTypeOf(x))
       this.fflags      .foreach(x => x := 0.U.asTypeOf(x))
       this.vxsat       .foreach(x => x := 0.U.asTypeOf(x))
-      this.exceptionVec.foreach(x => x := 0.U.asTypeOf(x))
+      this.exceptionVec.zeroInit()
       this.trigger     .foreach(x => x := 0.U.asTypeOf(x))
       this.debug       .foreach(x => x := source.ctrl.debug.get)
     }

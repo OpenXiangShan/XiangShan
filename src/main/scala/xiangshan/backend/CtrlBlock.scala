@@ -546,7 +546,9 @@ class CtrlBlockImp(
     decodeIn.bits := Mux(decodeBufValid(i), decodeBufBits(i), decodeConnectFromFrontend(i))
   }
   /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
-  io.frontend.toIBuf.decodeCanAccept := !decodeBufValid(0) || !decodeFromFrontend(0).valid
+  val frontendDecodeCanAccept = !decodeBufValid(0) || !decodeFromFrontend(0).valid
+  io.frontend.toIBuf.decodeCanAccept := frontendDecodeCanAccept
+  io.frontend.canAccept := frontendDecodeCanAccept
 
   Seq(
     rename.io.intReadPorts -> decode.out.intRat,
