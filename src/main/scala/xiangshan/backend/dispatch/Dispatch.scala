@@ -32,7 +32,6 @@ import xiangshan.backend.rename.{BusyTable, VlBusyTable}
 import xiangshan.backend.vector.{VecIssueQueue, BusyTable => VpBusyTable}
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig._
-import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.datapath.WbConfig.VfWB
 import xiangshan.backend.fu
 import xiangshan.backend.fu.FuType.FuTypeOrR
