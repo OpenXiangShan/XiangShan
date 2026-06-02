@@ -260,8 +260,8 @@ class VecRegionImp(
       pipe.in.vpWbM1 := vpWbDataPath.in.fromExus.flatten.flatten.sortBy(_.wbCfg.port).map(_.data)
       pipe.in.vpWb0 := vpWbDataPath.out.wb0.map(_.data)
       pipe.in.vpWb1 := vpWbDataPath.out.wb1.map(_.data)
-      pipe.in.gpWb0 := 0.U.asTypeOf(pipe.in.gpWb0) // TODO: vec read gp bypass
-      pipe.in.fpWb0 := 0.U.asTypeOf(pipe.in.fpWb0) // TODO: vec read fp bypass
+      pipe.in.gpWb0 := ShiftRegister(in.fromIntRegion.gpWb0, 3)
+      pipe.in.fpWb0 := ShiftRegister(in.fromFltRegion.fpWb0, 3)
     }
   }
 
@@ -512,14 +512,14 @@ object VecRegionModule {
       val vlWb0Next: MixedVec[Exu.ToRf] = MixedVec(intRegion.genExuToRfBundle(backendParams.vlPregParams).flatten)
       val is0GpRdDataFail: MixedVec[MixedVec[Vec[Bool]]] = param.genRfRdFailBundle(backendParams.intPregParams)
       val is1GpRdDataNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadDataBundle]]] = param.genRfRdDataBundle(backendParams.intPregParams)
-      // Todo: bypass data
+      val gpWb0 = Vec(backendParams.getIntRfWriteSize, UInt(XLEN.W))
     }
 
     val fromFltRegion = new Bundle {
       val is0FpRdDataFail: MixedVec[MixedVec[Vec[Bool]]] = param.genRfRdFailBundle(backendParams.fpPregParams)
       val is1FpRdDataNext: MixedVec[MixedVec[MixedVec[IssuePipe.RfReadDataBundle]]] = param.genRfRdDataBundle(backendParams.fpPregParams)
       val fpWbWakeUp = Vec(backendParams.getFpRfWriteSize, new WakeUpBundle(backendParams.fpPregParams))
-      // Todo: bypass data
+      val fpWb0 = Vec(backendParams.getFpRfWriteSize, UInt(XLEN.W))
     }
 
     val fromCSR = new Bundle {

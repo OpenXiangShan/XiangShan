@@ -24,8 +24,6 @@ import utils._
 import utility._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.WbConfig._
-import xiangshan.backend.issue.SchdBlockParams
-import xiangshan.backend.datapath.{DataSource}
 
 class BusyTableReadIO(implicit p: Parameters) extends XSBundle {
   val req = Input(UInt(PhyRegIdxWidth.W))
@@ -240,4 +238,3 @@ class VlBusyTable(numReadPorts: Int, numWritePorts: Int, numPhyPregs: Int, pregW
     vlRes.is_vlmax := !vlmaxTable(res.req)
   }
 }
-

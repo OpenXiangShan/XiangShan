@@ -410,11 +410,15 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
         sink.bits.fromRegionInUop(source.bits)
         source.ready := sinkCanAccept
     }
-  vecRegion.in.fromIntRegion.gpWbWakeUp zip intRegion.io.exuOut.flatten.filter(_.bits.toIntRf.nonEmpty) foreach {
-    case (sink: VecIssueQueue.WakeUpBundle, source: ValidIO[NewExuOutput]) =>
-      sink.wen := source.valid && source.bits.toIntRf.get.valid
-      sink.pdest := source.bits.pdest
-      sink.delay := 0.U // Todo
+  vecRegion.in.fromIntRegion.gpWbWakeUp zip intRegion.io.toIntPreg foreach {
+    case (sink: VecIssueQueue.WakeUpBundle, source: RfWritePortBundle) =>
+      sink.wen := source.wen
+      sink.pdest := source.pdest
+      sink.delay := VecIssueQueue.BypassDelay.delay1
+  }
+  vecRegion.in.fromIntRegion.gpWb0 zip intRegion.io.toIntPreg foreach {
+    case (sink: UInt, source: RfWritePortBundle) =>
+      sink := source.data
   }
   vecRegion.in.fromIntRegion.vlWb0Next zip intRegion.io.exuOut.flatten.filter(_.bits.toVlRf.nonEmpty) foreach {
     case (sink: Exu.ToRf, source: ValidIO[NewExuOutput]) =>
@@ -430,7 +434,11 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     case (sink: VecIssueQueue.WakeUpBundle, source: RfWritePortBundle) =>
       sink.wen := source.wen
       sink.pdest := source.pdest
-      sink.delay := 0.U // Todo
+      sink.delay := VecIssueQueue.BypassDelay.delay1
+  }
+  vecRegion.in.fromFltRegion.fpWb0 zip fpRegion.io.toFpPreg foreach {
+    case (sink: UInt, source: RfWritePortBundle) =>
+      sink := source.data
   }
 
   vecRegion.in.fromFltRegion.is0FpRdDataFail := fpRegion.io.toVecFpRdFail.get
