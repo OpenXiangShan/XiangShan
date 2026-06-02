@@ -30,8 +30,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.cache._
 import xiangshan.backend.fu.FenceToSbuffer
 import xiangshan.cache.wpu.ReplayCarry
-// FIXME: PrefetchReqBundle moved - not in mem.prefetch
-// import xiangshan.mem.prefetch.PrefetchReqBundle
+import xiangshan.frontend.icache.PrefetchReqBundle
 
 import math._
 

@@ -179,7 +179,7 @@ case class BackendParams(
   }
 
   def getWrite2RobSize(cond: ExeUnitParams => Boolean = _ => true)(implicit p: Parameters): Int =
-    genWrite2RobBundles.count(x => cond(x.bits.params))
+    getWrite2RobParams().count(cond)
 
   def genNewExuOutputBundle[T <: Bundle](
     builder: NewExuOutput => T,
