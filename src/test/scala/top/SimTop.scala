@@ -57,8 +57,11 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
     dynamicLatency = debugOpts.UseDRAMSim
   )
   val simAXIMem = Module(l_simAXIMem.module)
-  val memIO = DifftestMemCtrl.exposeIO(soc.memory.viewAs[AXI4Bundle], l_simAXIMem.io_axi4.elements.head._2)
-  override def difftestMemIO: Option[DifftestMemIO] = Some(memIO)
+  l_simAXIMem.io_axi4.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
+  val memIO = Option.when(DifftestModule.isFPGA) {
+    DifftestMemCtrl.exposeIO(soc.memory.viewAs[AXI4Bundle], l_simAXIMem.io_axi4.elements.head._2)
+  }
+  override def difftestMemIO: Option[DifftestMemIO] = memIO
 
   soc.io.clock := clock
   soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
