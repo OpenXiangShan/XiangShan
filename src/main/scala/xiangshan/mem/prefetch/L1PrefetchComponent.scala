@@ -141,10 +141,12 @@ class TrainFilter(size: Int, name: String, hasLoadTrain: Boolean=true, hasStoreT
   val stReorderOpt = io.stTrainOpt.map { stTrain =>
     HwSort(VecInit(stTrain.map { case x => DataWithPtr(x.valid, x.bits, x.bits.robIdx) }))
   }
-  val reqs = ldReorderOpt.map(_.map(_.bits)).getOrElse(Seq.empty) ++
-    stReorderOpt.map(_.map(_.bits)).getOrElse(Seq.empty)
-  val reqsValid = ldReorderOpt.map(_.map(_.valid)).getOrElse(Seq.empty) ++
-    stReorderOpt.map(_.map(_.valid)).getOrElse(Seq.empty)
+  val ldReorderBufferedOpt = ldReorderOpt.map(reorder => RegNext(reorder, 0.U.asTypeOf(reorder)))
+  val stReorderBufferedOpt = stReorderOpt.map(reorder => RegNext(reorder, 0.U.asTypeOf(reorder)))
+  val reqs = ldReorderBufferedOpt.map(_.map(_.bits)).getOrElse(Seq.empty) ++
+    stReorderBufferedOpt.map(_.map(_.bits)).getOrElse(Seq.empty)
+  val reqsValid = ldReorderBufferedOpt.map(_.map(_.valid)).getOrElse(Seq.empty) ++
+    stReorderBufferedOpt.map(_.map(_.valid)).getOrElse(Seq.empty)
 
   val needAlloc = Wire(Vec(enqLen, Bool()))
   val canAlloc = Wire(Vec(enqLen, Bool()))
