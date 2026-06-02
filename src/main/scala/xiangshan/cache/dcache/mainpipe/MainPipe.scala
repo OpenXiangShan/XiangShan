@@ -363,15 +363,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_htag_match_way = Wire(UInt(nWays.W))
   val s1_miss_need_data = s1_repl_coh.state === ClientStates.Dirty &&
     (!s1_req.isBtoT || s1_req.miss_fail_cause_evict_btot)
-  // val s1_probe_might_need_data = meta_resp.map(m => (m.asTypeOf(new ClientMetadata) === ClientStates.Dirty)).reduce(_ || _)
   val s1_way_dirty = wayMap(w => Meta(meta_resp(w)).coh.state === ClientStates.Dirty).asUInt
   val s1_probe_might_need_data = (s1_htag_match_way & s1_way_dirty).orR
   val s1_need_data = if (dcacheParameters.alwaysReleaseData) {
     RegEnable(banked_need_data, s0_fire)
   } else {
     Mux(s1_req.miss, s1_miss_need_data,
-    Mux(s1_req.probe, s1_probe_might_need_data,
-        RegEnable(banked_need_data, s0_fire)))
+    // Mux(s1_req.probe, s1_probe_might_need_data,
+        RegEnable(banked_need_data, s0_fire))
   }
 
   val s1_banked_rmask = RegEnable(s0_banked_rmask, s0_fire)
