@@ -32,7 +32,6 @@ class RFArbiterBundle(var rdCfg: Option[RdConfig], pregWidth: Int, numBank: Int 
   val bankValidVec = Option.when(numBank > 1)(Vec(numBank, Bool()))
   val addr       = UInt(pregWidth.W)
   val robIdx     = new RobPtr
-  val issueValid = Bool()
 
   def this(rdCfg_ : RdConfig, pregWidth_ : Int, numBank_ : Int)(implicit p: Parameters) = this(Some(rdCfg_), pregWidth_,  numBank_)
 
