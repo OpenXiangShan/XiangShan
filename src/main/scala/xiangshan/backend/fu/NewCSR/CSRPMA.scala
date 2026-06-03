@@ -30,8 +30,7 @@ trait CSRPMA { self: NewCSR =>
   val pmaaddr: Seq[CSRModule[_]] = Range(0, p(PMParameKey).NumPMAReal).map(num =>
     Module(new CSRModule(s"Pmaaddr$num") with HasPMAAddrSink {
       // read condition
-      regOut := addrRegOut(num)
-      rdata := addrRData(num)
+      regOut := addrRData(num)
     })
       .setAddr(CSRConst.PmaaddrBase + num)
   )
@@ -78,7 +77,6 @@ trait HasPMACfgRSink { self: CSRModule[_] =>
 
 trait HasPMAAddrSink { self: CSRModule[_] =>
   val addrRData = IO(Input(Vec(p(PMParameKey).NumPMAReal, UInt(64.W))))
-  val addrRegOut = IO(Input(Vec(p(PMParameKey).NumPMAReal, UInt(64.W))))
 }
 
 trait PMAInit extends HasPMParameters with PMAReadWrite {

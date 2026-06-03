@@ -92,7 +92,6 @@ class PMAEntryHandleModule(implicit p: Parameters) extends PMAModule with PMAIni
   }
 
   io.out.pmaAddrRData := pmaAddrR
-  io.out.pmaAddrRegOut := pmaAddr
 
 }
 
@@ -108,7 +107,6 @@ class PMAEntryHandleIOBundle(implicit p: Parameters) extends PMABundle {
   val out = Output(new Bundle {
     val pmaCfgWdata = UInt(PMXLEN.W)
     val pmaAddrRData = Vec(NumPMAReal, UInt(64.W))
-    val pmaAddrRegOut = Vec(NumPMAReal, UInt(64.W))
   })
 }
 

@@ -446,7 +446,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   // PMP
   val pmpEntryMod = Module(new PMPEntryHandleModule)
   pmpEntryMod.io.in.pmpCfg  := pmpcfgs.map(_.regOut.asInstanceOf[PMPCfgBundle])
-  pmpEntryMod.io.in.pmpAddr := pmpaddr.take(NumPMPReal).map(_.regOut.asInstanceOf[PMPAddrBundle])
   pmpEntryMod.io.in.ren   := ren
   pmpEntryMod.io.in.wen   := wenLegalReg
   pmpEntryMod.io.in.addr  := addr
@@ -566,13 +565,6 @@ class NewCSR(implicit val p: Parameters) extends Module
   pmpcfgs.zipWithIndex.foreach { case (mod, i) =>
     mod.w.wen   := wenLegalReg && (addr === (CSRs.pmpcfg0 + i / 8 * 2).U)
     mod.w.wdata := pmpEntryMod.io.out.pmpCfgWData(8*((i%8)+1)-1,8*(i%8))
-  }
-
-  pmpaddr.zipWithIndex.foreach { case (mod, i) =>
-    if (i < NumPMPReal) {
-      mod.w.wen   := wenLegalReg && (addr === (CSRs.pmpaddr0 + i).U)
-      mod.w.wdata := pmpEntryMod.io.out.pmpAddrWData(i)
-    }
   }
 
   pmacfgs.zipWithIndex.foreach { case (mod, i) =>
@@ -705,7 +697,6 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod match {
       case m: HasPMAAddrSink =>
         m.addrRData := pmaEntryMod.io.out.pmaAddrRData
-        m.addrRegOut := pmaEntryMod.io.out.pmaAddrRegOut
       case _ =>
     }
     mod match {
