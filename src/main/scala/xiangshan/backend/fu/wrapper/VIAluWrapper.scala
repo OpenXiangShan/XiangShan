@@ -22,6 +22,8 @@ class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
   // modules
   private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
+  private val vs2Ex1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
+  private val vs1Ex1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vialus = Seq.fill(numVecModule)(Module(new VIAlu))
 
   private val resultStages = cfg.latency + 1
@@ -60,6 +62,8 @@ class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
 
   vs2Split.io.inVecData := ex0vs2
   vs1Split.io.inVecData := ex0vs1
+  vs2Ex1Split.io.inVecData := vs2Ex(1)
+  vs1Ex1Split.io.inVecData := vs1Ex(1)
 
   private val vs2Vec: Vec[UInt] = Wire(Vec(numVecModule, UInt(XLEN.W)))
   private val vs1Vec: Vec[UInt] = Wire(Vec(numVecModule, UInt(XLEN.W)))
@@ -136,8 +140,8 @@ class VIAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
         fixPointCtrl.isMax    := isMax.ex1
         fixPointCtrl.isNClip  := isNClip.ex1
       }
-      mod.in.ex1.bits.data.vs2 := vs2Ex(1)
-      mod.in.ex1.bits.data.vs1 := vs1Ex(1)
+      mod.in.ex1.bits.data.vs2 := vs2Ex1Split.io.outVec64b(i)
+      mod.in.ex1.bits.data.vs1 := vs1Ex1Split.io.outVec64b(i)
   }
 
   out.ex(0).bits.data.vec.foreach {
