@@ -361,10 +361,11 @@ class Sbuffer(implicit p: Parameters)
   val evenInsertVec = GetEvenBits.reverse(evenRawInsertVec)
   val oddInsertVec = GetOddBits.reverse(oddRawInsertVec)
 
-  val enbufferSelReg = RegInit(false.B)
-  when(io.in.req(0).valid) {
-    enbufferSelReg := ~enbufferSelReg
-  }
+  // val enbufferSelReg = RegInit(false.B)
+  // when(io.in.req(0).valid) {
+  //   enbufferSelReg := ~enbufferSelReg
+  // }
+  val enbufferSelReg = PopCount(evenInvalidMask) >= PopCount(oddInvalidMask)
 
   val firstInsertIdx = Mux(enbufferSelReg, evenInsertIdx, oddInsertIdx) // slow to generate, for debug only
   val secondInsertIdx = Mux(sameTag,
