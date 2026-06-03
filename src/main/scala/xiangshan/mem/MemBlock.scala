@@ -766,18 +766,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // Therefore, there is no need to distinguish among ldu0, ldu1, and ldu2 if **prefetch-request outstanding <= 1**.
 
   // move hw prefetch from newLoadUnits to mainPipe, but keep the interface incase further considering
-  // val canAcceptPrefetch = newLoadUnits.map(_.io.prefetchReq.ready)
   val canAcceptPrefetch = newLoadUnits.map(i => false.B)
 
   val toPrefetchValidVec = (0 until LduCnt + HyuCnt).map{ case i =>
     if(i==0) l1_pf_req.valid
     else l1_pf_req.valid && !canAcceptPrefetch.take(i).reduce(_ || _)
   }
-  // l1_pf_req.ready := Cat(canAcceptPrefetch).orR
+
   l1_pf_req.ready := dcache.io.prefetch_req.ready
   newLoadUnits.zipWithIndex.foreach { case(u, i) => {
-    // u.io.prefetchReq.valid <> toPrefetchValidVec(i)
-    // u.io.prefetchReq.bits <> l1_pf_req.bits
     u.io.prefetchReq.valid <> false.B
     u.io.prefetchReq.bits <> DontCare
   }}
@@ -793,12 +790,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val fuzzer = Module(new L1PrefetchFuzzer())
     fuzzer.io.vaddr := DontCare
     fuzzer.io.paddr := DontCare
-
-    // override load_unit prefetch_req
-    // newLoadUnits.foreach( ldu => {
-    //    ldu.io.prefetchReq.valid <> fuzzer.io.req.valid
-    //    ldu.io.prefetchReq.bits <> fuzzer.io.req.bits
-    // })
 
     // move hw prefetch to mainpipe
     dcache.io.prefetch_req.valid <> fuzzer.io.req.valid
