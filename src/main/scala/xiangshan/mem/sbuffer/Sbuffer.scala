@@ -362,7 +362,7 @@ class Sbuffer(implicit p: Parameters)
   val oddInsertVec = GetOddBits.reverse(oddRawInsertVec)
 
   val firstInsertEven = PopCount(evenInvalidMask) >= PopCount(oddInvalidMask)
-  val secondInsertEven = !firstInsertEven || canMerge(0)
+  val secondInsertEven = Mux(canMerge(0), firstInsertEven, !firstInsertEven)
 
   val firstInsertIdx = Mux(firstInsertEven, evenInsertIdx, oddInsertIdx) // slow to generate, for debug only
   val secondInsertIdx = Mux(sameTag,
