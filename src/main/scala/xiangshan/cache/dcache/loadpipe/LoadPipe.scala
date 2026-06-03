@@ -127,6 +127,22 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     (bankMaskInLine << bankOffsetInLine)(DCacheBanks - 1, 0)
   }
 
+  private def addrToVWordBankBase(addr: UInt): UInt = {
+    val bank = addr_to_dcache_bank(addr)
+    val vwordBankOffsetBits = log2Ceil(VLEN / DCacheSRAMRowBits)
+    Cat(
+      bank(log2Up(DCacheBanks) - 1, vwordBankOffsetBits),
+      0.U(vwordBankOffsetBits.W)
+    )
+  }
+
+  private def bankMaskToReadErrorLaneMask(bankMask: UInt, vwordBankBase: UInt): UInt = {
+    VecInit((0 until VLEN / DCacheSRAMRowBits).map { i =>
+      val bank = (vwordBankBase + i.U)(log2Up(DCacheBanks) - 1, 0)
+      bankMask(bank)
+    }).asUInt
+  }
+
   // Pipeline
   // --------------------------------------------------------------------------------
   // stage 0
@@ -546,6 +562,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s3_valid = RegNext(s2_valid)
   val s3_load128Req = RegEnable(s2_load128Req, s2_fire)
+  val s3_read_error_lane_mask = RegEnable(
+    bankMaskToReadErrorLaneMask(s2_bank_oh, addrToVWordBankBase(s2_vaddr)),
+    s2_fire
+  )
   val s3_vaddr = RegEnable(s2_vaddr, s2_fire)
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
   val s3_hit = RegEnable(s2_hit, s2_fire)
@@ -554,7 +574,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_is_prefetch = s3_req_instrtype === DCACHE_PREFETCH_SOURCE.U
 
   val s3_banked_data_resp_word = RegEnable(s2_resp_data, s2_fire)
-  val s3_data_error = Mux(s3_load128Req, io.read_error_delayed.asUInt.orR, io.read_error_delayed(0)) && s3_hit
+  val s3_data_error = Mux(
+    s3_load128Req,
+    io.read_error_delayed.asUInt.orR,
+    (io.read_error_delayed.asUInt & s3_read_error_lane_mask).orR
+  ) && s3_hit
   val s3_tag_error = RegEnable(s2_tag_error, s2_fire)
   val s3_tl_error = RegEnable(s2_tl_error, s2_fire)
   val s3_flag_error = s3_tl_error.asUInt.orR
