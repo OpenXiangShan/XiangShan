@@ -230,13 +230,10 @@ class FeedbackToLsqIO(implicit p: Parameters) extends VLSUBundle{
   def isLast = feedback(VecFeedbacks.LAST)
 }
 
-class storeMisaignIO(implicit p: Parameters) extends Bundle{
-  val storePipeEmpty            = Input(Bool())
+class storeMisalignIO(implicit p: Parameters) extends Bundle{
   val storeMisalignBufferEmpty  = Input(Bool())
   val scalaIssueValid           = Input(Bool())
   val scalaIssueRobIdx          = Input(new RobPtr)
-  val blockScalaIssue           = Output(Bool())
-
 }
 
 class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
@@ -245,7 +242,7 @@ class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBund
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) //to merge buffer req mergebuffer entry
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
   val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput(isVector = true)))
-  val vstdMisalign        = OptionWrapper(isVStore, new storeMisaignIO)
+  val vstdMisalign        = OptionWrapper(isVStore, new storeMisalignIO)
   val threshold           = if(isVStore) Flipped(ValidIO(new SqPtr)) else Flipped(ValidIO(new LqPtr))
   val fromPipeline        = OptionWrapper(!isVStore, Vec(LoadPipelineWidth, Flipped(ValidIO(new VecPipelineFeedbackIO(isVStore)))))
 }
@@ -263,7 +260,7 @@ class VSplitBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VL
   val in                  = Flipped(Decoupled(new VLSBundle()))
   val out                 = Decoupled(new VecPipeBundle(isVStore))//to scala pipeline
   val vstd                = OptionWrapper(isVStore, ValidIO(new MemExuOutput(isVector = true)))
-  val vstdMisalign        = OptionWrapper(isVStore, new storeMisaignIO)
+  val vstdMisalign        = OptionWrapper(isVStore, new storeMisalignIO)
   val fromPipeline        = OptionWrapper(!isVStore, Vec(LoadPipelineWidth, Flipped(ValidIO(new VecPipelineFeedbackIO(isVStore)))))
 }
 

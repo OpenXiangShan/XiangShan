@@ -1607,9 +1607,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vsSplit(i).io.vstdMisalign.get.storeMisalignBufferEmpty  := storeMisalignBuffer.io.toVecSplit.empty
     vsSplit(i).io.vstdMisalign.get.scalaIssueValid := storeUnits(i).io.stin.valid
     vsSplit(i).io.vstdMisalign.get.scalaIssueRobIdx := storeUnits(i).io.stin.bits.uop.robIdx
-    vsSplit(i).io.vstdMisalign.get.storePipeEmpty := !storeUnits.map(_.io.s1_s2_valid).reduce(_||_)
-    storeUnits(i).io.vecMisalignBlockScalaIssue := vsSplit.map(_.io.vstdMisalign.get.blockScalaIssue).reduce(_||_)
-
   }
   (0 until VlduCnt).foreach{i =>
     vlSplit(i).io.redirect <> redirect

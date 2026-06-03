@@ -477,7 +477,7 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
   lazy val canToMisalignBuffer = io.vstdMisalign.get.storeMisalignBufferEmpty &&
     (!io.vstdMisalign.get.scalaIssueValid || issueUop.robIdx < io.vstdMisalign.get.scalaIssueRobIdx)
 
-  override lazy val misalignedCanGo = io.vstdMisalign.get.storePipeEmpty && canToMisalignBuffer
+  override lazy val misalignedCanGo = canToMisalignBuffer
 
   // split data
   val splitData = genVSData(
@@ -517,8 +517,6 @@ class VSSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = t
     vstd.bits.vecDebug.get.start  := Mux(splitIdx === 0.U, usVaddrOffset, 0.U)// for unaligned store event
     vstd.bits.vecDebug.get.offset := usVaddrOffset
   }
-
-  io.vstdMisalign.get.blockScalaIssue := RegNext(issueValid && canToMisalignBuffer && !addrAligned)
 }
 
 class VLSplitBufferImp(implicit p: Parameters) extends VSplitBuffer(isVStore = false){

@@ -76,7 +76,6 @@ class StoreUnit(implicit p: Parameters) extends XSModule
     val sqCommitRobIdx = Input(new RobPtr)
 
     val s1_s2_valid = Output(Bool())
-    val vecMisalignBlockScalaIssue = Input(Bool())
 
   })
 
