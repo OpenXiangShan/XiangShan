@@ -361,26 +361,23 @@ class Sbuffer(implicit p: Parameters)
   val evenInsertVec = GetEvenBits.reverse(evenRawInsertVec)
   val oddInsertVec = GetOddBits.reverse(oddRawInsertVec)
 
-  // val enbufferSelReg = RegInit(false.B)
-  // when(io.in.req(0).valid) {
-  //   enbufferSelReg := ~enbufferSelReg
-  // }
-  val enbufferSelReg = PopCount(evenInvalidMask) >= PopCount(oddInvalidMask)
+  val firstInsertEven = PopCount(evenInvalidMask) >= PopCount(oddInvalidMask)
+  val secondInsertEven = !firstInsertEven || canMerge(0)
 
-  val firstInsertIdx = Mux(enbufferSelReg, evenInsertIdx, oddInsertIdx) // slow to generate, for debug only
+  val firstInsertIdx = Mux(firstInsertEven, evenInsertIdx, oddInsertIdx) // slow to generate, for debug only
   val secondInsertIdx = Mux(sameTag,
     firstInsertIdx,
-    Mux(~enbufferSelReg, evenInsertIdx, oddInsertIdx)
+    Mux(secondInsertEven, evenInsertIdx, oddInsertIdx)
   ) // slow to generate, for debug only
-  val firstInsertVec = Mux(enbufferSelReg, evenInsertVec, oddInsertVec)
+  val firstInsertVec = Mux(firstInsertEven, evenInsertVec, oddInsertVec)
   val secondInsertVec = Mux(sameTag,
     firstInsertVec,
-    Mux(~enbufferSelReg, evenInsertVec, oddInsertVec)
+    Mux(secondInsertEven, evenInsertVec, oddInsertVec)
   )
-  val firstCanInsert = sbuffer_state =/= x_drain_sbuffer && Mux(enbufferSelReg, evenCanInsert, oddCanInsert)
+  val firstCanInsert = sbuffer_state =/= x_drain_sbuffer && Mux(firstInsertEven, evenCanInsert, oddCanInsert)
   val secondCanInsert = sbuffer_state =/= x_drain_sbuffer && Mux(sameTag,
     firstCanInsert,
-    Mux(~enbufferSelReg, evenCanInsert, oddCanInsert)
+    Mux(secondInsertEven, evenCanInsert, oddCanInsert)
   ) && (EnsbufferWidth >= 1).B
   val enqAllowed = sbuffer_state =/= x_drain_sbuffer
   val forward_need_uarch_drain = WireInit(false.B)
