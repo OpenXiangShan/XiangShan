@@ -285,7 +285,9 @@ class Sbuffer(implicit p: Parameters)
   // insert and merge: cohCount=0
   // every cycle cohCount+=1
   // if cohCount(EvictCountBits-1)==1, evict
-  val cohTimeOutMask = VecInit(widthMap(i => cohCount(i) >= io.csrCtrl.sbuffer_timeout && stateVec(i).isActive()))
+  val cohTimeOutMask_wire = VecInit(widthMap(i => cohCount(i) >= io.csrCtrl.sbuffer_timeout && stateVec(i).isActive()))
+  val cohTimeOutMask = RegInit(VecInit(Seq.fill(StoreBufferSize)(false.B)))
+  cohTimeOutMask := cohTimeOutMask_wire
   val (cohTimeOutIdx, cohHasTimeOut) = PriorityEncoderWithFlag(cohTimeOutMask)
   val cohTimeOutOH = PriorityEncoderOH(cohTimeOutMask)
   val missqReplayTimeOutMask = VecInit(widthMap(i => missqReplayCount(i)(MissqReplayCountBits - 1) && stateVec(i).w_timeout))
@@ -335,10 +337,11 @@ class Sbuffer(implicit p: Parameters)
     assert(!(PopCount(mergeMask(i).asUInt) > 1.U && io.in.req(i).fire && io.in.req(i).bits.vecValid))
   }
 
-  // insert condition
-  // firstInsert: the first invalid entry
-  // if first entry canMerge or second entry has the same ptag with the first entry,
-  // secondInsert equal the first invalid entry, otherwise, the second invalid entry
+  // insert (enqueue) scenario:
+  // -- if even bank is more empty, the first req inserted into even bank, the second inserted into odd bank
+  // -- if the first or second req can be merged into an existing line, it is merged
+  // -- if the first and second req are in the same line, they can be inserted or merged into the same entry
+  // -- if the first can be merged and the second cannot be merged, the second req is inserted into the more empty bank
   val invalidMask = VecInit(stateVec.map(s => s.isInvalid()))
   val evenInvalidMask = GetEvenBits(invalidMask.asUInt)
   val oddInvalidMask = GetOddBits(invalidMask.asUInt)
@@ -364,17 +367,10 @@ class Sbuffer(implicit p: Parameters)
   val firstInsertEven = PopCount(evenInvalidMask) >= PopCount(oddInvalidMask)
   val secondInsertEven = Mux(canMerge(0), firstInsertEven, !firstInsertEven)
   val firstInsertVec = Mux(firstInsertEven, evenInsertVec, oddInsertVec)
-  val secondInsertVec = Mux(sameTag,
-    firstInsertVec,
-    Mux(secondInsertEven, evenInsertVec, oddInsertVec)
-  )
+  val secondInsertVec = Mux(sameTag, firstInsertVec, Mux(secondInsertEven, evenInsertVec, oddInsertVec))
   val firstCanInsert = Mux(firstInsertEven, evenCanInsert, oddCanInsert)
   val secondCanInsert = Mux(sameTag, firstCanInsert, Mux(secondInsertEven, evenCanInsert, oddCanInsert)) &&
                        (EnsbufferWidth >= 2).B
-  val forward_need_uarch_drain = WireInit(false.B)
-  val merge_need_uarch_drain = WireInit(false.B)
-  val do_uarch_drain = GatedValidRegNext(forward_need_uarch_drain) || GatedValidRegNext(GatedValidRegNext(merge_need_uarch_drain))
-  XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
   val enqAllowed = sbuffer_state =/= x_drain_sbuffer
   io.in.req(0).ready := (firstCanInsert || canMerge(0)) && enqAllowed
@@ -383,10 +379,15 @@ class Sbuffer(implicit p: Parameters)
   // this group of signals are only for debug or assert
   val evenRawInsertIdx = PriorityEncoderWithFlag(evenInvalidMask)._1
   val oddRawInsertIdx = PriorityEncoderWithFlag(oddInvalidMask)._1
-  val evenInsertIdx = Cat(evenRawInsertIdx, 0.U(1.W)) 
-  val oddInsertIdx = Cat(oddRawInsertIdx, 1.U(1.W)) 
-  val firstInsertIdx = Mux(firstInsertEven, evenInsertIdx, oddInsertIdx) 
-  val secondInsertIdx = Mux(sameTag, firstInsertIdx, Mux(secondInsertEven, evenInsertIdx, oddInsertIdx)) 
+  val evenInsertIdx = Cat(evenRawInsertIdx, 0.U(1.W))
+  val oddInsertIdx = Cat(oddRawInsertIdx, 1.U(1.W))
+  val firstInsertIdx = Mux(firstInsertEven, evenInsertIdx, oddInsertIdx)
+  val secondInsertIdx = Mux(sameTag, firstInsertIdx, Mux(secondInsertEven, evenInsertIdx, oddInsertIdx))
+
+  val forward_need_uarch_drain = WireInit(false.B)
+  val merge_need_uarch_drain = WireInit(false.B)
+  val do_uarch_drain = GatedValidRegNext(forward_need_uarch_drain) || GatedValidRegNext(GatedValidRegNext(merge_need_uarch_drain))
+  XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
   for (i <- 0 until EnsbufferWidth) {
     // train
