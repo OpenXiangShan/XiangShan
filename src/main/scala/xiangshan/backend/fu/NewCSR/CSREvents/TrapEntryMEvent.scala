@@ -86,10 +86,9 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val tvalFillPcPlus2  = (isFetchExcp || isFetchGuestExcp) && fetchCrossPage
   private val tvalFillMemVaddr = isMemExcp || isMemBkpt
   private val tvalFillGVA      =
-    isHlsExcp && isMemExcp ||
     isLSGuestExcp|| isFetchGuestExcp ||
     (isFetchExcp || isFetchBkpt) && fetchIsVirt ||
-    (isMemExcp || isMemBkpt) && memIsVirt
+    (isMemExcp || isMemBkpt) && (memIsVirt || isHlsExcp)
   private val tvalFillInst     = isIllegalInst
 
   private val tval = Mux1H(Seq(
