@@ -196,6 +196,7 @@ class DecodeChannels(
   val vsetDecodeChannelsIn: Seq[VsetDecoder.In] = vsetDecodeChannels.map(_.in)
   vsetDecodeChannelsIn.zipWithIndex.foreach { case (modIn, i) =>
     modIn.rawInst := in.mops(i).bits.info.rawInst
+    modIn.vsIsOff := in.mops(i).bits.info.fromCSR.illegalInst.vsIsOff
   }
 
   val simDecodeChannelsIn: Seq[DecodeChannelInput] = simpleDecodeChannels.map(_.in)
@@ -491,7 +492,7 @@ object DecodeChannelOutput {
     uop.src12Rev := false.B
 
     uop.isMove := false.B
-    uop.exceptionII := false.B
+    uop.exceptionII := vuop.illegal
     uop.exceptionVI := false.B
 
     uop
