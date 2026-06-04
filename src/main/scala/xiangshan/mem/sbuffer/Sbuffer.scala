@@ -343,32 +343,26 @@ class Sbuffer(implicit p: Parameters)
   val evenInvalidMask = GetEvenBits(invalidMask.asUInt)
   val oddInvalidMask = GetOddBits(invalidMask.asUInt)
 
-  def getFirstOneOH(input: UInt): UInt = {
-    assert(input.getWidth > 1)
-    val output = WireInit(VecInit(input.asBools))
-    (1 until input.getWidth).map(i => {
-      output(i) := !input(i - 1, 0).orR && input(i)
-    })
-    output.asUInt
+  // set only the first one to one, example: 10011010 -> 00000010
+  def setFirstOneOH(in: UInt):(UInt, Bool) = { // return (result, isAllZero)
+    val size = in.getWidth
+    if (size == 1) { (in, !in(0)) } else {
+      val hi = setFirstOneOH(in(size - 1, size / 2))
+      val lo = setFirstOneOH(in(size / 2 - 1, 0))
+      val outHi = Mux(lo._2, hi._1, 0.U)
+      (Cat(outHi, lo._1), hi._2 && lo._2)
+    }
   }
 
-  val evenRawInsertVec = getFirstOneOH(evenInvalidMask)
-  val oddRawInsertVec = getFirstOneOH(oddInvalidMask)
-  val (evenRawInsertIdx, evenCanInsert) = PriorityEncoderWithFlag(evenInvalidMask)
-  val (oddRawInsertIdx, oddCanInsert) = PriorityEncoderWithFlag(oddInvalidMask)
-  val evenInsertIdx = Cat(evenRawInsertIdx, 0.U(1.W)) // slow to generate, for debug only
-  val oddInsertIdx = Cat(oddRawInsertIdx, 1.U(1.W)) // slow to generate, for debug only
+  val setFirstOneEven = setFirstOneOH(evenInvalidMask)
+  val setFirstOneOdd = setFirstOneOH(oddInvalidMask)
+  val (evenRawInsertVec, evenCanInsert) = (setFirstOneEven._1, !setFirstOneEven._2)
+  val (oddRawInsertVec, oddCanInsert) = (setFirstOneOdd._1, !setFirstOneOdd._2)
   val evenInsertVec = GetEvenBits.reverse(evenRawInsertVec)
   val oddInsertVec = GetOddBits.reverse(oddRawInsertVec)
 
   val firstInsertEven = PopCount(evenInvalidMask) >= PopCount(oddInvalidMask)
   val secondInsertEven = Mux(canMerge(0), firstInsertEven, !firstInsertEven)
-
-  val firstInsertIdx = Mux(firstInsertEven, evenInsertIdx, oddInsertIdx) // slow to generate, for debug only
-  val secondInsertIdx = Mux(sameTag,
-    firstInsertIdx,
-    Mux(secondInsertEven, evenInsertIdx, oddInsertIdx)
-  ) // slow to generate, for debug only
   val firstInsertVec = Mux(firstInsertEven, evenInsertVec, oddInsertVec)
   val secondInsertVec = Mux(sameTag,
     firstInsertVec,
@@ -385,6 +379,14 @@ class Sbuffer(implicit p: Parameters)
   val enqAllowed = sbuffer_state =/= x_drain_sbuffer
   io.in.req(0).ready := (firstCanInsert || canMerge(0)) && enqAllowed
   io.in.req(1).ready := (secondCanInsert || canMerge(1)) && enqAllowed && io.in.req(0).ready
+
+  // this group of signals are only for debug or assert
+  val evenRawInsertIdx = PriorityEncoderWithFlag(evenInvalidMask)._1
+  val oddRawInsertIdx = PriorityEncoderWithFlag(oddInvalidMask)._1
+  val evenInsertIdx = Cat(evenRawInsertIdx, 0.U(1.W)) 
+  val oddInsertIdx = Cat(oddRawInsertIdx, 1.U(1.W)) 
+  val firstInsertIdx = Mux(firstInsertEven, evenInsertIdx, oddInsertIdx) 
+  val secondInsertIdx = Mux(sameTag, firstInsertIdx, Mux(secondInsertEven, evenInsertIdx, oddInsertIdx)) 
 
   for (i <- 0 until EnsbufferWidth) {
     // train
