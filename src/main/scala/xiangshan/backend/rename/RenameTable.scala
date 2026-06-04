@@ -240,7 +240,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val debug_vl_rat  = Option.when(backendParams.debugEn)(Vec(VlLogicRegs, Output(UInt(PhyRegIdxWidth.W))))
 
     // for difftest
-    val diff_vl_rat  = Option.when(backendParams.debugEn)(Vec(VlLogicRegs,Output(UInt(PhyRegIdxWidth.W))))
+    val diff_vl_rat  = Option.when(backendParams.basicDebugEn)(Vec(VlLogicRegs,Output(UInt(PhyRegIdxWidth.W))))
   })
 
   val intRat = Module(new RenameTable(Reg_I, RabCommitWidth * MaxUopSize))
