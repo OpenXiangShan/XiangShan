@@ -374,20 +374,17 @@ class Sbuffer(implicit p: Parameters)
     firstInsertVec,
     Mux(secondInsertEven, evenInsertVec, oddInsertVec)
   )
-  val firstCanInsert = sbuffer_state =/= x_drain_sbuffer && Mux(firstInsertEven, evenCanInsert, oddCanInsert)
-  val secondCanInsert = sbuffer_state =/= x_drain_sbuffer && Mux(sameTag,
-    firstCanInsert,
-    Mux(secondInsertEven, evenCanInsert, oddCanInsert)
-  ) && (EnsbufferWidth >= 1).B
-  val enqAllowed = sbuffer_state =/= x_drain_sbuffer
+  val firstCanInsert = Mux(firstInsertEven, evenCanInsert, oddCanInsert)
+  val secondCanInsert = Mux(sameTag, firstCanInsert, Mux(secondInsertEven, evenCanInsert, oddCanInsert)) &&
+                       (EnsbufferWidth >= 2).B
   val forward_need_uarch_drain = WireInit(false.B)
   val merge_need_uarch_drain = WireInit(false.B)
   val do_uarch_drain = GatedValidRegNext(forward_need_uarch_drain) || GatedValidRegNext(GatedValidRegNext(merge_need_uarch_drain))
   XSPerfAccumulate("do_uarch_drain", do_uarch_drain)
 
-  // Allow merge when assigned insert bank is full; still block all enq during x_drain_sbuffer.
-  io.in.req(0).ready := firstCanInsert || (enqAllowed && canMerge(0))
-  io.in.req(1).ready := (secondCanInsert || (enqAllowed && canMerge(1))) && io.in.req(0).ready
+  val enqAllowed = sbuffer_state =/= x_drain_sbuffer
+  io.in.req(0).ready := (firstCanInsert || canMerge(0)) && enqAllowed
+  io.in.req(1).ready := (secondCanInsert || canMerge(1)) && enqAllowed && io.in.req(0).ready
 
   for (i <- 0 until EnsbufferWidth) {
     // train
