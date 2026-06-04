@@ -130,7 +130,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   // SPVP is not PrivMode enum type, so asUInt and shrink the width
   out.vsepc.bits.epc             := Mux(satpFlushFirstFetchFault, trapPC(63, 1), Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1)))
   out.vscause.bits.Interrupt     := isInterrupt
-  out.vscause.bits.ExceptionCode := Mux(virtualInterruptIsHvictlInject, hvictlIID, highPrioTrapNO)
+  out.vscause.bits.ExceptionCode := Mux(virtualInterruptIsHvictlInject && isInterrupt, hvictlIID, highPrioTrapNO)
   out.vstval.bits.ALL            := Mux(satpFlushFirstFetchFaultExcp, tval, Mux(isFetchMalAddrExcp, in.fetchMalTval, tval))
   out.targetPc.bits.pc           := in.pcFromXtvec
   out.targetPc.bits.raiseIPF     := instrAddrTransType.checkPageFault(in.pcFromXtvec)
