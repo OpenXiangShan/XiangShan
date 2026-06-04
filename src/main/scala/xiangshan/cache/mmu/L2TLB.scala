@@ -771,7 +771,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       )
     )
     mergeArb(i).in(outArbMqPort).bits.s2 := llptw_out.bits.h_resp
-    mergeArb(i).out.ready := (if (HasMptCheck) MptSwitchBox.get(i).io.mergeArb.ready else outArb(i).in(0).ready)
+    mergeArb(i).out.ready := outArb(i).in(0).ready
     // mptfin and outarb.ready,outArb(i).in(0).fire，ready only high for 1 clk
   }
 

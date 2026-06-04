@@ -108,13 +108,13 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
   io.l1TLB.bits.reqPA := Mux(io.mptOut.valid, io.mptOut.bits.reqPA, mptOutReqPA)
 
   object MptSwitchState extends ChiselEnum {
-    val sIDLE, sSEND_MPT, sSEND_l1TLB = Value
+    val s_idle, s_send_mpt, s_send_l1_tlb = Value
   }
   import MptSwitchState._
-  val curState  = RegInit(sIDLE)
-  val nextState = WireDefault(sIDLE)
+  val curState  = RegInit(s_idle)
+  val nextState = WireDefault(s_idle)
   when(flush) {
-    curState := sIDLE
+    curState := s_idle
   }.otherwise {
     curState := nextState // 2 proc FSM
   }
@@ -124,53 +124,52 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
   io.l1TLB.valid    := false.B
   nextState         := curState
   switch(curState) {
-    is(sIDLE) {
-      when(io.mergeArb.valid) {
-        when(io.mergeArb.bits.fault) {
-          io.l1TLB.valid := true.B
-          when(io.l1TLB.ready) {
-            io.mergeArb.ready := true.B
-            nextState         := sIDLE
-          }.otherwise {
-            nextState := sSEND_l1TLB
-          }
-        }.otherwise {
-          io.mptIn.valid := true.B
-          when(io.mptIn.ready) {
-            nextState := sSEND_MPT
-          }
-        }
-      }
-      when(io.mptOut.valid && io.mptOut.bits.mptOnly) {
+    is(s_idle) {
+      when(io.mptOut.valid && io.mptOut.bits.mptOnly) { //mptonly mode
         // mpt valid without merge arb first implies that it is mpt only request.try change later
         io.l1TLB.valid := true.B
         when(io.l1TLB.ready) {
           io.mergeArb.ready := true.B
-          nextState         := sIDLE
+          nextState         := s_idle
         }.otherwise {
-          nextState := sSEND_l1TLB
+          nextState := s_send_l1_tlb
+        }
+      }.elsewhen(io.mergeArb.valid) { // normal mode, two modes are mutually exclusive
+        when(io.mergeArb.bits.fault) {
+          io.l1TLB.valid := true.B
+          when(io.l1TLB.ready) {
+            io.mergeArb.ready := true.B
+            nextState         := s_idle
+          }.otherwise {
+            nextState := s_send_l1_tlb
+          }
+        }.otherwise {
+          io.mptIn.valid := true.B
+          when(io.mptIn.ready) {
+            nextState := s_send_mpt
+          }
         }
       }
     }
 
-    is(sSEND_MPT) { // delay+1+mptclk
+    is(s_send_mpt) { // delay+1+mptclk
       io.mptIn.valid := false.B
       when(io.mptOut.valid) {
         io.l1TLB.valid := true.B
         when(io.l1TLB.ready) {
           io.mergeArb.ready := true.B
-          nextState         := sIDLE
+          nextState         := s_idle
         }.otherwise {
-          nextState := sSEND_l1TLB
+          nextState := s_send_l1_tlb
         }
       }
     }
 
-    is(sSEND_l1TLB) {
+    is(s_send_l1_tlb) {
       io.l1TLB.valid := true.B
       when(io.l1TLB.ready) {
         io.mergeArb.ready := true.B
-        nextState         := sIDLE
+        nextState         := s_idle
       }
     }
   }
@@ -1155,11 +1154,11 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
 
   // // // FSM // // //
   object mystate extends ChiselEnum {
-    val sIDLE, sMEM_REQ, sMEM_RESP, sADDR_PROC = Value
+    val s_idle, s_mem_req, s_mem_resp, s_addr_proc = Value
   }
   import mystate._
-  val curState  = RegInit(sIDLE)
-  val nextState = WireDefault(sIDLE)
+  val curState  = RegInit(s_idle)
+  val nextState = WireDefault(s_idle)
   curState := nextState // 2 proc FSM, no need to specify the flush, it is global
   // fsm start
   mem.req.valid     := false.B
@@ -1172,39 +1171,39 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   io.refill.valid   := false.B
   // default val
   switch(curState) {
-    is(sIDLE) {
+    is(s_idle) {
       io.req.ready := true.B
       when(io.req.fire) {
         setPmpCheckLevel  := true.B
         nextLevel         := io.req.bits.hitLevel
         nextPmpCheckLevel := io.req.bits.hitLevel
-        nextState         := sMEM_REQ // to mem req if fire
+        nextState         := s_mem_req // to mem req if fire
         setLevel          := true.B
       }
     }
-    is(sMEM_REQ) {
+    is(s_mem_req) {
       mem.req.valid := true.B // req valid when not fire
 
       when(io.mem.req.fire) { // just waiting, timing safe
-        nextState := sMEM_RESP // to wait resp
+        nextState := s_mem_resp // to wait resp
       }.otherwise {}
     }
-    is(sMEM_RESP) {             // unknown in delay,timing?
+    is(s_mem_resp) {             // unknown in delay,timing?
       when(io.mem.resp.valid) { // do nothing,delay one cycle OPTPOINT*
-        nextState        := sADDR_PROC
+        nextState        := s_addr_proc
         setPmpCheckLevel := true.B
       }
     }
-    is(sADDR_PROC) { // known delay
+    is(s_addr_proc) { // known delay
       // process return
       when(accessFault || isLeafMpte) { // out delay unknown
         // when(isLeafMpte) {io.refill.valid := true.B}
         io.refill.valid := true.B
-        nextState       := sIDLE // OPTPOINT*
+        nextState       := s_idle // OPTPOINT*
       }.otherwise {
         io.refill.valid := true.B   // start refill
         setLevel        := true.B
-        nextState       := sMEM_REQ // OPTPOINT*
+        nextState       := s_mem_req // OPTPOINT*
       }
     }
 
@@ -1217,7 +1216,7 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
     mpteInvalid := false.B
     rsvZeroError0 := false.B
     rsvZeroError1 := false.B
-    curState := sIDLE
+    curState := s_idle
   }
   // fsm end
 }

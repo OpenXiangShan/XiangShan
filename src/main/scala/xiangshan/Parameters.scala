@@ -57,7 +57,7 @@ case class XSCoreParameters
   HasMptCheckDefault: Boolean = false, // hardwired testing code: fake 2M MPT table
   HasMptCheckDefault4k: Boolean = false, // hardwired testing code: fake 4k MPT table
   HasMptInodeOpt: Boolean = false, // hardwired testing code: skip mpt check for non-leaf ptw nodes
-  HasBitmapCheck: Boolean = false,
+  HasBitmapCheck: Boolean = true,
   HasBitmapCheckDefault: Boolean = false,
   HasMExtension: Boolean = true,
   HasCExtension: Boolean = true,
