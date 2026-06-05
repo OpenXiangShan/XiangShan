@@ -23,10 +23,10 @@ Chisel 源码：
   - `InstrUncacheResp.data`
   - `InstrUncacheResp.corrupt`
   - `InstrUncacheResp.denied`
-  - `InstrUncacheResp.incomplete`
+  - `InstrUncacheResp.needResend`
 - `instruncache/InstrUncacheEntry.scala`
   - 单个 entry 处理一个 uncache request
-  - 负责 TileLink Get、返回数据抽取、resend、`incomplete`
+  - 负责 TileLink Get、返回数据抽取、8B beat resend、跨页 `needResend`
 - `instruncache/InstrUncacheImp.scala`
   - 分配 entry 并仲裁 response
 - `ifu/IfuUncacheUnit.scala`
@@ -37,11 +37,12 @@ Chisel 源码：
 ## 地址单位
 
 `InstrUncacheReq.addr` 是 pruned physical address 类型。在当前生成 RTL 中，
-`InstrUncacheEntry` 将它保存为 `reqReg_addr_addr`。`incomplete` 判断使用的是
-半字地址单位：
+`InstrUncacheEntry` 将它保存为 `reqReg_addr_addr`。跨页判断使用的是半字地址
+单位：
 
 ```verilog
-assign io_resp_bits_incomplete = &(reqReg_addr_addr[10:0]);
+assign io_resp_bits_needResend =
+  (&(reqReg_addr_addr[10:0])) & ~respCorruptReg & (&(respDataReg_0[1:0]));
 ```
 
 例如 byte PC 为 `0x10002ffe` 时，对应 halfword address 是：
@@ -50,8 +51,8 @@ assign io_resp_bits_incomplete = &(reqReg_addr_addr[10:0]);
 0x10002ffe >> 1 = 0x80017ff
 ```
 
-`0x80017ff` 的低 11 位全为 1，所以 uncache response 会标记
-`incomplete`。
+`0x80017ff` 的低 11 位全为 1。如果该地址返回的低半字是 32-bit 指令前半且
+没有 corrupt，uncache response 会标记 `needResend`，交给 IFU 重新检查下一页。
 
 调试时要区分三类地址：
 
@@ -86,19 +87,19 @@ InstrUncache 还会计算 page 边界：
 
 ```scala
 crossPageBoundary = reqReg.addr(PageOffsetWidth - 1, 1).andR
-io.resp.bits.incomplete := crossPageBoundary
+io.resp.bits.needResend := crossPageBoundary && !respCorruptReg && !isRVC(respDataReg.asUInt)
 ```
 
-这是一个保守标记：当指令窗口从一个 page 的最后一个 halfword 开始时，如果该
-指令是 32-bit，它需要访问下一页。由于下一页物理地址未必连续，entry 不会
-自行跨页发第二次请求。
+当指令窗口从一个 page 的最后一个 halfword 开始且该指令是 32-bit 时，它需要
+访问下一页。由于下一页物理地址未必连续，entry 不会自行跨页发第二次请求；
+它返回 `needResend`，由 IFU 触发 redirect/recheck，再从下一页取高半字。
 
 重要结论：
 
-- RVC 位于 page 最后一个 halfword 时，仍然会产生
-  `resp.bits.incomplete = 1`。
-- IFU 后续会结合实际指令长度和异常状态处理这个标记。
-- RVC 放在 `...2ffe` 这类地址时，`incomplete` 拉高是预期行为，本身不是 bug。
+- RVC 位于 page 最后一个 halfword 时，`resp.bits.needResend = 0`。
+- 32-bit 指令位于 page 最后一个 halfword 时，`resp.bits.needResend = 1`，
+  IFU 后续会保存低半字并重新检查下一页。
+- RVC 放在 `...2ffe` 这类地址时不应触发跨页补半。
 
 ## Resend 条件
 
@@ -231,23 +232,16 @@ s3_uncacheData =
 ```
 
 所以跨页指令不会从单个 uncache response 中完整消费。第一次 response 标记
-cross-page/incomplete 并保存低半部分，后续 response 提供下一半。
+`needResend` 并保存低半部分，后续 response 提供下一半。
 
-## Cross-Page Fault 边界
+## Cross-Page NeedResend 边界
 
-IFU 计算：
-
-```scala
-uncacheCheckFault =
-  uncacheCrossPage && !uncacheCrossPageCheck && uncacheUnit.io.resp.valid
-```
-
-如果 frontend 看到 incomplete uncache response，但预期的跨页序列检查不匹配，
-则进入 check fault 路径。此时：
+如果 frontend 看到 `needResend` uncache response，则通过内部 redirect 保存低半字
+并重新检查下一页。此时：
 
 - `uncacheRedirect.instrCount` 为 `0`
-- 仍然可能发出 redirect/writeback 来恢复控制流
-- 该指令不会作为正常完成的 uncache instruction 计数
+- `uncacheRedirect.isHalfInstr` 为 `1`
+- 该指令不会在第一拍作为正常完成的 uncache instruction 计数
 
 ## RVC 边界
 
@@ -311,9 +305,8 @@ frontend Python uncache agent 必须匹配 RTL contract：
 定向用例建议：
 
 - byte offset `...xxx6` 可覆盖 8B bus-beat resend 的 32-bit 指令场景。
-- byte offset `...xffe` 可覆盖 page-boundary `incomplete`。
-- RVC 位于 `...xffe` 时仍应设置 `incomplete`；IFU 应把它解析为合法 2B 指令路径，
-  不应直接当成错误。
+- byte offset `...xffe` 可覆盖 page-boundary `needResend`。
+- RVC 位于 `...xffe` 时不应设置 `needResend`；IFU 应把它解析为合法 2B 指令路径。
 - 32-bit 指令位于 `...xffe` 时需要跨页处理，行为还取决于下一页的 exception 情况。
 - 第一拍 corrupt 应 suppress resend 并产生 `hwe`。
 - 第一拍 denied 当前不会 suppress resend；第二拍正常时不产生 `af`。
@@ -330,7 +323,7 @@ frontend Python uncache agent 必须匹配 RTL contract：
   flush、IBuffer/backend backpressure 这类场景应使用 Python env 直接控制端口
   或 agent 行为，不需要生成 `.S`。
 - 当前 `...xffe` 取指路径有独立风险时，通过型 case 应先避开真实执行
-  `...xffe` 起点；该类 incomplete 行为单独用端口/waveform directed case 分析。
+  `...xffe` 起点；该类 `needResend` 行为单独用端口/waveform directed case 分析。
 
 端口 directed 覆盖建议：
 
@@ -349,7 +342,7 @@ frontend Python uncache agent 必须匹配 RTL contract：
 - 覆盖 request、response、flush、backpressure、WFI、commit gating 中至少两个阶段的
   组合边界，并验证恢复后还能继续发起后续请求。
 - fault/exception 类 case 如果语义上必须提前终止，应断言 DUT-visible exception，
-  并在 resend/incomplete 等场景中断言是否允许后续 beat request，而不是只看第一笔
+  并在 resend/needResend 等场景中断言是否允许后续 beat request，而不是只看第一笔
   agent 统计。
 
 构造新的 uncache 覆盖前，必须先检查现有 regression case 是否可以承载该场景。
@@ -525,9 +518,9 @@ cursor=38 entries=38 cycles=1008 monitor_errors=0
 2. 检查 `auto_inner_instrUncache_client_out_a_bits_address`。
 3. 检查 `auto_inner_instrUncache_client_out_d_bits_data`。
 4. 检查 `inner_instrUncache` 的 `reqReg_addr_addr`、`resending`、
-   `io_toIfu_resp_bits_incomplete`。
-5. 检查 IFU 的 `uncacheCrossPage`、`prevUncacheCrossPage`、
-   `uncacheCheckFault`、`uncacheIsRvc`、`s3_uncacheData`。
+   `io_toIfu_resp_bits_needResend`。
+5. 检查 IFU 的 `uncacheNeedResend`、`s3_prevLastIsHalfRvi`、
+   `uncacheIsRvc`、`s3_uncacheData`。
 6. 检查 backend 可见的 `cfVec` PC、instruction、`isRvc`。
 7. 仔细对齐地址单位：byte PC、halfword request address、bus-aligned
    TileLink address 不是同一个量。
