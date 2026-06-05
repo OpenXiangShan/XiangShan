@@ -1160,7 +1160,6 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     dm_fcrs_mNode.out.head._1 <> s_noc2dm
     dm_tcrs_sNode.in.head._1 <> m_dm2noc.viewAs[AXI4Bundle]
     m_sba2noc.foreach(_ <> dm.axi4masternode.get)
-    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> dm_sNode.in.head._1)
     dm.module.io.debugIO <> dmio.debugIO
     dm.module.io.clock := dmio.clock
     dm.module.io.reset := dmio.reset
@@ -1221,16 +1220,65 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     //   req := VecInit(hartResetReqOr.asBools)
     // }
     dm.module.io.resetCtrl.hartIsInReset := VecInit(hartIsInResetOr.asBools)
-    // self node control
-    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle].aw.valid := isselfid & dm_sNode.in.head._1.aw.valid)
-    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle].w.valid := isselfid & dm_sNode.in.head._1.w.valid)
-    dm.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle].ar.valid := isselfid & dm_sNode.in.head._1.ar.valid)
-    dm_tcrs_mNode.out.head._1 <> dm_sNode.in.head._1
-    dm_tcrs_mNode.out.head._1.aw.valid := !isselfid & dm_sNode.in.head._1.aw.valid
-    dm_tcrs_mNode.out.head._1.aw.bits.addr := (req_id << 44) + dm_sNode.in.head._1.aw.bits.addr //bit[47:44] is req_id
-    dm_tcrs_mNode.out.head._1.w.valid := !isselfid & dm_sNode.in.head._1.w.valid
-    dm_tcrs_mNode.out.head._1.ar.valid := !isselfid & dm_sNode.in.head._1.ar.valid
-    dm_tcrs_mNode.out.head._1.ar.bits.addr := (req_id << 44) + dm_sNode.in.head._1.ar.bits.addr
+    // Keep dm_sNode as the shared request source, then steer it to the local debug
+    // module or to the cross-die debug path just like the original self/cross split.
+    dm.axi4node.foreach { dmNode =>
+      val dmReqAxi = dm_sNode.in.head._1
+      val dmSelfAxi = dmNode.getWrappedValue.viewAs[AXI4Bundle]
+      val dmCrossAxi = dm_tcrs_mNode.out.head._1
+
+      def routeCrossAddr(addr: UInt, outWidth: Int): UInt = {
+        require(outWidth >= params.DieIDWidth,
+          s"cross-die debug address width $outWidth is smaller than die id width ${params.DieIDWidth}")
+        val lowWidth = outWidth - params.DieIDWidth
+        val lowBits =
+          if (lowWidth == 0) 0.U(0.W)
+          else if (addr.getWidth >= lowWidth) addr(lowWidth - 1, 0)
+          else Cat(0.U((lowWidth - addr.getWidth).W), addr)
+        Cat(req_id, lowBits)
+      }
+
+      val crossAwAddr = routeCrossAddr(dmReqAxi.aw.bits.addr, dmCrossAxi.aw.bits.addr.getWidth)
+      val crossArAddr = routeCrossAddr(dmReqAxi.ar.bits.addr, dmCrossAxi.ar.bits.addr.getWidth)
+
+      // Local debug path.
+      dmSelfAxi.aw.bits := dmReqAxi.aw.bits
+      dmSelfAxi.aw.valid := isselfid && dmReqAxi.aw.valid
+      dmSelfAxi.w.bits := dmReqAxi.w.bits
+      dmSelfAxi.w.valid := isselfid && dmReqAxi.w.valid
+      dmSelfAxi.ar.bits := dmReqAxi.ar.bits
+      dmSelfAxi.ar.valid := isselfid && dmReqAxi.ar.valid
+      dmSelfAxi.b.ready := isselfid && dmReqAxi.b.ready
+      dmSelfAxi.r.ready := isselfid && dmReqAxi.r.ready
+
+      // Cross-die debug path.
+      dmCrossAxi.aw.bits := dmReqAxi.aw.bits
+      dmCrossAxi.aw.bits.addr := crossAwAddr
+      dmCrossAxi.aw.valid := !isselfid && dmReqAxi.aw.valid
+      dmCrossAxi.w.bits := dmReqAxi.w.bits
+      dmCrossAxi.w.valid := !isselfid && dmReqAxi.w.valid
+      dmCrossAxi.ar.bits := dmReqAxi.ar.bits
+      dmCrossAxi.ar.bits.addr := crossArAddr
+      dmCrossAxi.ar.valid := !isselfid && dmReqAxi.ar.valid
+      dmCrossAxi.b.ready := !isselfid && dmReqAxi.b.ready
+      dmCrossAxi.r.ready := !isselfid && dmReqAxi.r.ready
+
+      // Return ready/response from the selected path back to dm_sNode.
+      dmReqAxi.aw.ready := Mux(isselfid, dmSelfAxi.aw.ready, dmCrossAxi.aw.ready)
+      dmReqAxi.w.ready := Mux(isselfid, dmSelfAxi.w.ready, dmCrossAxi.w.ready)
+      dmReqAxi.ar.ready := Mux(isselfid, dmSelfAxi.ar.ready, dmCrossAxi.ar.ready)
+      when (isselfid) {
+        dmReqAxi.b.bits := dmSelfAxi.b.bits
+        dmReqAxi.b.valid := dmSelfAxi.b.valid
+        dmReqAxi.r.bits := dmSelfAxi.r.bits
+        dmReqAxi.r.valid := dmSelfAxi.r.valid
+      }.otherwise {
+        dmReqAxi.b.bits := dmCrossAxi.b.bits
+        dmReqAxi.b.valid := dmCrossAxi.b.valid
+        dmReqAxi.r.bits := dmCrossAxi.r.bits
+        dmReqAxi.r.valid := dmCrossAxi.r.valid
+      }
+    }
   }
   override lazy val module = new Imp(this)
 }
@@ -1361,22 +1409,29 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     val noc2msiAwIsLocal = noc2msi.aw.bits.addr(47, 44) === noc2msiSelfId
     val noc2msiAwAddr = routeNoc2msiAddr(noc2msi.aw.bits.addr, noc2msiAwIsLocal)
 
-    hni_mNode.out.head._1 <> noc2msi
+    def connectWriteOnlyWithZeroReadResponse(master: AXI4Bundle, slave: AXI4Bundle): Unit = {
+      master.aw <> slave.aw
+      master.w <> slave.w
+      slave.b <> master.b
+
+      val arFireD = withClockAndReset(clock, reset) { RegNext(slave.ar.fire, false.B) }
+      val readIdD = withClockAndReset(clock, reset) {
+        RegEnable(slave.ar.bits.id, 0.U.asTypeOf(slave.ar.bits.id), slave.ar.fire)
+      }
+      slave.ar.ready := true.B
+      slave.r.valid := arFireD
+      slave.r.bits.id := readIdD
+      slave.r.bits.data := 0.U
+      slave.r.bits.resp := AXI4Parameters.RESP_OKAY
+      slave.r.bits.last := true.B
+    }
+
+    connectWriteOnlyWithZeroReadResponse(hni_mNode.out.head._1, noc2msi)
     hni_mNode.out.head._1.aw.bits.addr := noc2msiAwAddr
     peri_mNode.out.head._1 <> s_noc2cfg.viewAs[AXI4Bundle] // uncore peri cfg slave io
-    cpu_mNodes.zip(s_cpu2uncore).foreach { case (node, io) => node.out.head._1 <> io.viewAs[AXI4Bundle] }
-    // bypass the read channel
-    hni_mNode.out.head._1.ar.bits.addr := 0.U
-    hni_mNode.out.head._1.ar.bits.id   := 0.U
-    hni_mNode.out.head._1.ar.bits.prot := 0.U
-    hni_mNode.out.head._1.ar.bits.size := 2.U
-    hni_mNode.out.head._1.ar.bits.len := 0.U
-    hni_mNode.out.head._1.ar.bits.burst := 0.U
-    hni_mNode.out.head._1.ar.bits.lock := 0.U
-    hni_mNode.out.head._1.ar.bits.cache := 0.U
-    hni_mNode.out.head._1.ar.bits.qos := 0.U
-    hni_mNode.out.head._1.ar.valid := false.B
-    hni_mNode.out.head._1.r.ready := true.B
+    cpu_mNodes.zip(s_cpu2uncore).foreach { case (node, io) =>
+      connectWriteOnlyWithZeroReadResponse(node.out.head._1, io.viewAs[AXI4Bundle])
+    }
     // connection about cross-die access ports for debug
     syscnt.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> peri_s1Node.in.head._1)
     // cpu2msi_sNodes -> imsicTop
