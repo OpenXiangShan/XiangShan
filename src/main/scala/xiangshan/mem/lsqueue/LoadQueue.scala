@@ -53,7 +53,7 @@ trait HasLoadHelper { this: XSModule =>
     val fpWen = uop.fpWen
     LookupTree(uop.fuOpType, List(
       LSUOpType.lb   -> SignExt(rdata(7, 0) , XLEN),
-      LSUOpType.lh   -> SignExt(rdata(15, 0), XLEN),
+      LSUOpType.lh   -> Mux(fpWen,FPU.box(rdata, FPU.H), SignExt(rdata(15, 0), XLEN)),
       /*
           riscv-spec-20191213: 12.2 NaN Boxing of Narrower Values
           Any operation that writes a narrower result to an f register must write
