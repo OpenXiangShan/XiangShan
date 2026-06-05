@@ -495,6 +495,7 @@ def test_mmio_redirect_does_not_enter_recovery_or_block_commit() -> None:
     assert model._current_expected_recovery_ftq() == (0, 4)
     assert model._recovery_commit_block_matches(0, 4) is False
     assert model._active_redirect_context_blocks_commit(0, 4) is False
+    assert model.backend_empty_for_dut() == 1
 
 
 def test_non_cfi_cannot_begin_wrong_path_after_correct_cfi() -> None:

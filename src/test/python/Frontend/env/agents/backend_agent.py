@@ -45,10 +45,11 @@ class BackendAgent:
             self._write(self._drive_if.call_ret_commit_bits_ftq_ptr_value[lane], 0)
         self._write(self._drive_if.ftq_idx_ahead_0_valid, 0)
 
-    def start_cycle(self, can_accept: int, wfi_req: int = 0) -> None:
+    def start_cycle(self, can_accept: int, wfi_req: int = 0, backend_empty: int = 1) -> None:
         assert self._drive_if is not None
         self._assert_ftq_idx_ahead_unused()
         self._write(self._drive_if.can_accept, int(can_accept))
+        self._write(self._drive_if.backend_empty, 1 if int(backend_empty) else 0)
         self.clear_one_shot_signals()
         self._write(self._drive_if.wfi_req, 1 if int(wfi_req) else 0)
 

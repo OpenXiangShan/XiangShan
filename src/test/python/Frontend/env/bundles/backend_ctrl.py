@@ -6,6 +6,7 @@ from toffee import Bundle, Signal, SignalList
 class BackendCtrlBundle(Bundle):
     SIGNAL_BINDINGS = {
         "can_accept": "io_backend_canAccept",
+        "backend_empty": "io_backend_backendEmpty",
         "commit_valid": "io_backend_toFtq_commit_valid",
         "commit_bits_flag": "io_backend_toFtq_commit_bits_flag",
         "commit_bits_value": "io_backend_toFtq_commit_bits_value",
@@ -30,6 +31,7 @@ class BackendCtrlBundle(Bundle):
     }
 
     can_accept = Signal()
+    backend_empty = Signal()
     commit_valid = Signal()
     commit_bits_flag = Signal()
     commit_bits_value = Signal()
@@ -67,6 +69,7 @@ class BackendCtrlBundle(Bundle):
 
     def drive_idle(self) -> None:
         self.can_accept.value = 1
+        self.backend_empty.value = 1
         self.commit_valid.value = 0
         self.redirect_valid.value = 0
         self.redirect_bits_pc.value = 0

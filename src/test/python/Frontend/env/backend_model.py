@@ -4381,6 +4381,7 @@ class BackendModel:
         self._schedule_next_queue_call_ret_commit_group()
         return BackendCycleActions(
             can_accept=self.can_accept,
+            backend_empty=self.backend_empty_for_dut(),
             wfi_req=self.wfi_req,
             commit_entry=commit_entry,
             resolve_entries=resolve_entries,
@@ -4393,7 +4394,7 @@ class BackendModel:
             return
         self.begin_cycle(cycle)
         agent = self._bound_backend_agent()
-        agent.start_cycle(self.can_accept, self.wfi_req)
+        agent.start_cycle(self.can_accept, self.wfi_req, self.backend_empty_for_dut())
         self.consume_backend_observation(self._snapshot_bound_observation())
         actions = self.plan_cycle_actions()
         agent.drive_resolves(actions.resolve_entries)
@@ -4428,6 +4429,22 @@ class BackendModel:
             + (1 if self._pending_level0_target_ftq is not None else 0)
             + (1 if self._has_active_wrong_path_episode() else 0)
         )
+
+    def backend_empty_for_dut(self) -> int:
+        scheduled_call_ret_count = sum(
+            len(group)
+            for _ready_cycle, group in self._scheduled_queue_call_ret_commit_groups
+        )
+        pending_work = (
+            len(self.ftq_entries)
+            + len(self._pending_resolves)
+            + len(self.pending_events)
+            + len(self._pending_queue_call_ret_commit_indices)
+            + int(scheduled_call_ret_count)
+            + len(self._visible_queue_call_ret_commit_group)
+            + (1 if self._current_ftq_entry is not None else 0)
+        )
+        return 0 if pending_work > 0 else 1
 
     def golden_completion_pending_work_count(self) -> int:
         matched_queue_indices = {

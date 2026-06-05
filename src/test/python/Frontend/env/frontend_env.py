@@ -428,7 +428,7 @@ class FrontendEnv:
         observation = self.backend_observe_monitor.snapshot()
         self.backend_model.consume_backend_observation(observation)
         actions = self.backend_model.plan_cycle_actions()
-        self.backend_agent.start_cycle(actions.can_accept, actions.wfi_req)
+        self.backend_agent.start_cycle(actions.can_accept, actions.wfi_req, actions.backend_empty)
         self.backend_agent.drive_commit(actions.commit_entry)
         if hasattr(self.backend_model, "commit_entry_driven"):
             self.backend_model.commit_entry_driven(actions.commit_entry)
