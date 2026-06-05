@@ -16,6 +16,7 @@ class SatpFlushMod(implicit p: Parameters) extends XSModule with HasCircularQueu
 
   private val oldPrivState = Reg(new PrivState)
   private val oldSatpMode  = Reg(UInt(SatpMode.getWidth.W))
+  private val oldVsatpMode = Reg(UInt(SatpMode.getWidth.W))
 
   private val privState = in.privState
 
@@ -28,14 +29,13 @@ class SatpFlushMod(implicit p: Parameters) extends XSModule with HasCircularQueu
 
   when(wen) {
     oldPrivState := privState
-    oldSatpMode  := Mux1H(Seq(
-      satpWen  -> satpMode,
-      vsatpWen -> vsatpMode,
-    ))
+    oldSatpMode  := satpMode
+    oldVsatpMode := vsatpMode
   }
 
   out.oldPrivState := oldPrivState
-  out.oldSatpMode := oldSatpMode
+  out.oldSatpMode  := oldSatpMode
+  out.oldVsatpMode := oldVsatpMode
 }
 
 object SatpFlushMod {
@@ -48,5 +48,6 @@ object SatpFlushMod {
   class Out(implicit p: Parameters) extends XSBundle with HasXSParameter {
     val oldPrivState = new PrivState
     val oldSatpMode = UInt(SatpMode.getWidth.W)
+    val oldVsatpMode = UInt(SatpMode.getWidth.W)
   }
 }
