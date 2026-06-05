@@ -39,8 +39,10 @@ _PMPADDR0 = 0x3B0
 _PMACFG0 = 0x7C0
 _PMAADDR0 = 0x7C8
 _RWX_NAPOT_4K = 0x1F
+_PMA_RWX_MMIO_NAPOT_4K = _RWX_NAPOT_4K
 _PMA_RWX_CACHEABLE_NAPOT_4K = 0x7F
 _SV39_PAGE_SIZE = 0x1000
+_CROSS_PAGE_PC = _MMIO_BASE + _SV39_PAGE_SIZE - 2
 _SV39_RANDOM_VADDR_MIN = 0x40000000
 _SV39_RANDOM_VADDR_MAX = 0x7FFF0000
 _SV39_RANDOM_PADDR_MIN = 0x80000000
@@ -69,6 +71,14 @@ def _prepare_cross_beat_rvi_stream(env) -> None:
     payload.extend(int(_CNOP).to_bytes(2, "little"))
     payload.extend(int(_ADDI_X0_X0_0).to_bytes(4, "little"))
     payload.extend(int(_CNOP).to_bytes(2, "little") * 128)
+    env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
+    LoadProgramSequence(image=ProgramImage(payload=bytes(payload), base_addr=_MMIO_BASE), step_cycles=0).run(env)
+
+
+def _prepare_cross_page_rvi_stream(env) -> None:
+    payload = bytearray(int(_CNOP).to_bytes(2, "little") * (_SV39_PAGE_SIZE // 2 + 128))
+    tail_offset = _CROSS_PAGE_PC - _MMIO_BASE
+    payload[tail_offset:tail_offset + 4] = int(_ADDI_X0_X0_0).to_bytes(4, "little")
     env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
     LoadProgramSequence(image=ProgramImage(payload=bytes(payload), base_addr=_MMIO_BASE), step_cycles=0).run(env)
 
@@ -314,6 +324,12 @@ def _configure_exec_cacheable_pma(env, *, base_addr: int, size: int) -> None:
     _write_distributed_csr(env, addr=_PMAADDR0, data=napot_addr)
 
 
+def _configure_exec_mmio_pma(env, *, base_addr: int, size: int) -> None:
+    napot_addr = _napot_addr(base_addr=int(base_addr), size=int(size))
+    _write_distributed_csr(env, addr=_PMACFG0, data=_PMA_RWX_MMIO_NAPOT_4K)
+    _write_distributed_csr(env, addr=_PMAADDR0, data=napot_addr)
+
+
 def _configure_exec_pmp(env, *, base_addr: int, size: int) -> None:
     napot_addr = _napot_addr(base_addr=int(base_addr), size=int(size))
     _write_distributed_csr(env, addr=_PMPCFG0, data=_RWX_NAPOT_4K)
@@ -322,6 +338,10 @@ def _configure_exec_pmp(env, *, base_addr: int, size: int) -> None:
 
 def _configure_exec_cacheable_pma_4k(env, *, base_addr: int) -> None:
     _configure_exec_cacheable_pma(env, base_addr=int(base_addr), size=0x1000)
+
+
+def _configure_exec_mmio_pma_4k(env, *, base_addr: int) -> None:
+    _configure_exec_mmio_pma(env, base_addr=int(base_addr), size=0x1000)
 
 
 def _configure_exec_pmp_4k(env, *, base_addr: int) -> None:
@@ -954,7 +974,24 @@ def test_uncache_pbmt_nc_after_ibuffer_backpressure_can_output_multiple_cfvec_la
     assert _wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
     assert _wait_for_request_addr(env, mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
     assert _wait_for_resp_count(env, 1, max_cycles=6000), env.uncache_agent.get_stats()
-    assert _wait_for_uncache_req_count(env, _FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES, max_cycles=12000), {
+    target_req_count = _FETCH_BLOCK_SIZE // _UNCACHE_BEAT_BYTES
+    commit_count_before = int(env.backend_model.commit_count)
+    saw_req_progress_without_commit = False
+    for _ in range(12000):
+        assert int(env.backend_ctrl_if.commit_valid.value) == 0
+        req_count_before = int(env.uncache_agent.get_stats().get("req_count", 0))
+        if req_count_before >= target_req_count:
+            break
+        env.step(1)
+        assert int(env.backend_ctrl_if.commit_valid.value) == 0
+        req_count_after = int(env.uncache_agent.get_stats().get("req_count", 0))
+        saw_req_progress_without_commit |= req_count_after > req_count_before
+        if req_count_after >= target_req_count:
+            break
+
+    assert int(env.backend_model.commit_count) == commit_count_before
+    assert saw_req_progress_without_commit
+    assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= target_req_count, {
         "uncache": env.uncache_agent.get_stats(),
         "mapping": mapping,
     }
@@ -1005,6 +1042,44 @@ def test_uncache_pbmt_nc_after_ibuffer_backpressure_can_output_multiple_cfvec_la
         instr, is_rvc = expected_by_pc[pc]
         assert int(slot["instr"]) == int(instr), slot
         assert bool(slot["is_rvc"]) == bool(is_rvc), slot
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_pbmt_nc_mmio_pma_second_fetch_waits_commit(env):
+    _expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=_NORMAL_BASE,
+        paddr=_NORMAL_PHYS_BASE,
+    )
+    env.backend_model.set_can_accept(0)
+    _initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
+    _configure_exec_pmp_4k(env, base_addr=mapping.paddr)
+    _configure_exec_mmio_pma_4k(env, base_addr=mapping.paddr)
+    _force_redirect_to(env, mapping.vaddr)
+
+    assert _wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    ptw_resp = env.ptw_agent.get_last_drive_expectation()
+    assert ptw_resp is not None
+    assert int(ptw_resp["resp"].get("s1_entry_pbmt", 0)) == _PBMT_NC, ptw_resp
+    assert _wait_for_request_addr(env, mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
+    assert _wait_for_resp_count(env, 1, max_cycles=6000), env.uncache_agent.get_stats()
+    req_before_commit = int(env.uncache_agent.get_stats().get("req_count", 0))
+    commit_count_before = int(env.backend_model.commit_count)
+    env.step(128)
+    req_without_commit = int(env.uncache_agent.get_stats().get("req_count", 0))
+
+    assert int(env.backend_ctrl_if.commit_valid.value) == 0
+    assert int(env.backend_model.commit_count) == commit_count_before
+    assert req_without_commit == req_before_commit
+
+    env.backend_model.set_can_accept(1)
+    req_after_commit = _wait_for_uncache_req(env, max_cycles=6000)
+
+    assert req_after_commit > req_without_commit, {
+        "uncache": env.uncache_agent.get_stats(),
+        "mapping": mapping,
+    }
     assert not env.monitor.get_errors()
 
 
@@ -1235,6 +1310,29 @@ def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exceptio
     assert (_MMIO_BASE + 8) in stats.get("request_addrs", [])
     assert env.functional_coverage.key_hit("uncache_resend_flow", "second_beat_fault")
     assert env.monitor.exception_mark_count > 0
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
+    _prepare_cross_page_rvi_stream(env)
+    _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
+
+    first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
+    next_page = _MMIO_BASE + _SV39_PAGE_SIZE
+    assert _wait_for_request_addr(env, first_beat, max_cycles=5000), env.uncache_agent.get_stats()
+    assert _wait_for_request_addr(env, next_page, max_cycles=5000), env.uncache_agent.get_stats()
+    assert _wait_for_observed_pc(env, _CROSS_PAGE_PC, max_cycles=8000), {
+        "observed": [(int(obs.pc), int(obs.instr), bool(obs.is_rvc)) for obs in env.monitor.observations[-16:]],
+        "uncache": env.uncache_agent.get_stats(),
+    }
+    stats = env.uncache_agent.get_stats()
+    observed = next(obs for obs in env.monitor.observations if int(obs.pc) == _CROSS_PAGE_PC)
+
+    assert stats.get("request_addrs", []).count(first_beat) == 1
+    assert stats.get("request_addrs", []).count(next_page) == 1
+    assert int(observed.instr) == _ADDI_X0_X0_0
+    assert not bool(observed.is_rvc)
     assert not env.monitor.get_errors()
 
 
