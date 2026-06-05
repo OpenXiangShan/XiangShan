@@ -562,10 +562,24 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
       exceptionVec := ExceptionNO.selectByFu(0.U.asTypeOf(exceptionVec.cloneType), StaCfg)
       // delegate to software
       exceptionVec(storeAddrMisaligned) := true.B
+      req.vaddr := resp.vaddr
+      req.fullva := resp.fullva
+      req.vaNeedExt := resp.vaNeedExt
+      req.paddr := resp.paddr
+      req.gpaddr := resp.gpaddr
+      req.isForVSnonLeafPTE := resp.isForVSnonLeafPTE
+      req.isHyper := resp.isHyper
     } .elsewhen (hasException) {
       unWriteStores := 0.U
       unSentStores := 0.U
       StaCfg.exceptionOut.map(no => exceptionVec(no) := exceptionVec(no) || resp.uop.exceptionVec(no))
+      req.vaddr := resp.vaddr
+      req.fullva := resp.fullva
+      req.vaNeedExt := resp.vaNeedExt
+      req.paddr := resp.paddr
+      req.gpaddr := resp.gpaddr
+      req.isForVSnonLeafPTE := resp.isForVSnonLeafPTE
+      req.isHyper := resp.isHyper
     } .elsewhen (!io.splitStoreResp.bits.need_rep) {
       unSentStores := unSentStores & (~UIntToOH(curPtr)).asUInt
       curPtr := curPtr + 1.U
