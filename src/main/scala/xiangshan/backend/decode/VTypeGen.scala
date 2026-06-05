@@ -55,6 +55,7 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
     vsetModule.in.vlFromImm.bits := instFieldVec(i).UIMM_VSETIVLI
     vsetModule.in.vlFromVl.valid := false.B
     vsetModule.in.vlFromVl.bits := DontCare
+    vsetModule.in.vill := false.B
   }
 
   private val vtypeNewVec = vsetModuleVec.map(_.out.vtype)
