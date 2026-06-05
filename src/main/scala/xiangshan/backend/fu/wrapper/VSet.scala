@@ -150,6 +150,7 @@ class VSetUnit(cfg: FuConfig)(implicit p: Parameters) extends PipedFuncUnit(cfg)
   vsetFu.in.vlFromVl.bits := in.data.vl.get // vl
   vsetFu.in.vlFromImm.valid := VSetOpcodes.vlIsImm(op)
   vsetFu.in.vlFromImm.bits := Imm_VSETIVLI().getAvl(imm)
+  vsetFu.in.vill := VSetOpcodes.isIll(op)
 
   private val vl = vsetFu.out.vl
   private val vlmax = vsetFu.out.vlmax

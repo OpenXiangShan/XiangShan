@@ -58,9 +58,9 @@ class VSetFuncUnit(
   private val villFromVTypeImm = newVTypeDecodeBundle(villField)
 
   // vlmax is OH, use |(a&b) will be cheaper than =/=
-  private val vlmaxChange = (vlmax & oldVlmax).orR && oldVType.valid
+  private val vlmaxChange = !((vlmax & oldVlmax).orR) && oldVType.valid
 
-  private val vill = vtype.illegal || villFromVTypeImm || in.rdIsZero && in.rs1IsZero && vlmaxChange
+  private val vill = in.vill || vtype.illegal || villFromVTypeImm || in.rdIsZero && in.rs1IsZero && vlmaxChange
 
   private val vl =
     Mux(
@@ -103,6 +103,7 @@ object VSetFuncUnit {
     val vlFromImm = ValidIO(UInt(5.W))
     // vl from vl regfile
     val vlFromVl = ValidIO(Vl(vlen))
+    val vill = Bool()
   }
 
   class Out(vlen: Int) extends Bundle {
