@@ -210,7 +210,7 @@ trait PMAMethod extends PMAConst {
 trait PMACheckMethod extends PMPConst {
   def pma_check(cmd: UInt, cfg: PMPConfig) = {
     val resp = Wire(new PMPRespBundle)
-    resp.ld := (TlbCmd.isRead(cmd) || TlbCmd.isReadExec(cmd)) && !cfg.r
+    resp.ld := (TlbCmd.isRead(cmd) || TlbCmd.isReadExec(cmd)) && !cfg.r || cmd === TlbCmd.atom_read && !cfg.atomic
     resp.st := Mux(TlbCmd.isAmo(cmd), !cfg.atomic || !cfg.w, Mux(TlbCmd.isWrite(cmd), !cfg.w, false.B))
     resp.instr := (TlbCmd.isExec(cmd) || TlbCmd.isReadExec(cmd)) && !cfg.x
     resp.mmio := !cfg.c
