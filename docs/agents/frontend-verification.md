@@ -95,6 +95,32 @@ that boundary stable.
   narrative logging.
 - Any user-provided process constraint must be written to the relevant repo
   docs in the same turn; do not keep it only in chat memory.
+- When maintaining frontend testpoint CSVs, keep the hierarchy meaningful:
+  first-level testpoints are fixed by the source scope and must not be added
+  casually; fourth-level testpoints should group a mechanism, path, state, or
+  scenario class; fifth-level testpoints should be executable leaf cases with a
+  concrete input combination, timing relation, boundary, or expected behavior.
+  Do not leave a fourth-level and fifth-level testpoint identical after
+  inherited CSV hierarchy is expanded. If an existing fourth-level name is
+  already the leaf case, move it to the fifth level and rename the fourth level
+  to a real category.
+- Do not translate established frontend testpoint terms just to make the CSV
+  read as Chinese prose. Keep domain terms such as `backend`, `redirect`,
+  `flush`, `commit`, `fence.i`, `sfence`, `hit`, `miss`, `refill`, `MSHR`,
+  `SRAM`, `BPU`, `FTQ`, `ICache`, `IBuffer`, and `InstrUncache` in English
+  when that is the normal project vocabulary. This does not permit Chisel code
+  snippets, signal-field expressions, or source references inside the testpoint
+  text.
+- When writing frontend testpoint descriptions, use natural language that is
+  easy to understand. Do not invent awkward shorthand terms such as "clean
+  return"; describe the observable behavior directly, for example "the uncache
+  response returns instruction data without `corrupt` or `denied`".
+- When filling a frontend testpoint CSV `Condition` column, write the trigger
+  condition, input state, timing relation, or boundary setup needed to exercise
+  the fifth-level testpoint. Derive that condition from the Chisel behavior
+  under `src/main/scala/xiangshan/frontend` and frontend architecture knowledge,
+  but do not put source paths, code snippets, or signal-field expressions in the
+  CSV cell.
 - Before constructing coverage for a new scenario, first check whether an
   existing regression case can be extended without weakening its semantic
   contract. If it can, extend or merge into that existing case; adding a new
