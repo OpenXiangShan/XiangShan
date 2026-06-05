@@ -48,7 +48,9 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
     in.trapPc,
   )
 
-  private val trapPCGPA = genTrapVA(
+  private val trapPCGPA = in.trapPcGPA
+
+  private val trapPCGPAFromSatpFlush = genTrapVA(
     iMode,
     oldSatp,
     oldVsatp,
@@ -75,7 +77,6 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   private val isFetchMalAddr = in.isFetchMalAddr
   private val isFetchMalAddrExcp = isException && isFetchMalAddr
   private val satpFlushFirstFetchFault = in.satpFlushFirstFetchFault
-  private val satpFlushFirstFetchFaultExcp = isException && satpFlushFirstFetchFault
   private val isIllegalInst  = isException && (ExceptionNO.EX_II.U === highPrioTrapNO || ExceptionNO.EX_VI.U === highPrioTrapNO)
 
   private val isLSGuestExcp    = isException && ExceptionNO.getLSGuestPageFault.map(_.U === highPrioTrapNO).reduce(_ || _)
@@ -105,6 +106,13 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
     (isLSGuestExcp                                         ) -> trapMemGPA,
   ))
 
+  private val tval2FromSatpFlush = Mux1H(Seq(
+    (isFetchGuestExcp && isFetchMalAddr                    ) -> in.fetchMalTval,
+    (isFetchGuestExcp && !isFetchMalAddr && !fetchCrossPage) -> trapPCGPAFromSatpFlush,
+    (isFetchGuestExcp && !isFetchMalAddr && fetchCrossPage ) -> (trapPCGPAFromSatpFlush + 2.U),
+    (isLSGuestExcp                                         ) -> trapMemGPA,
+  ))
+
   private val precause = Cat(isInterrupt, highPrioTrapNO)
 
   out := DontCare
@@ -128,8 +136,8 @@ class TrapEntryMEventModule(implicit val p: Parameters) extends Module with CSRE
   out.mepc.bits.epc             := Mux(satpFlushFirstFetchFault, trapPC(63, 1), Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1)))
   out.mcause.bits.Interrupt     := isInterrupt && !isDTExcp
   out.mcause.bits.ExceptionCode := Mux(isDTExcp, ExceptionNO.EX_DT.U, highPrioTrapNO)
-  out.mtval.bits.ALL            := Mux(satpFlushFirstFetchFaultExcp, tval, Mux(isFetchMalAddrExcp, in.fetchMalTval, tval))
-  out.mtval2.bits.ALL           := Mux(isDTExcp, precause, tval2 >> 2)
+  out.mtval.bits.ALL            := Mux(satpFlushFirstFetchFault, tval, Mux(isFetchMalAddrExcp, in.fetchMalTval, tval))
+  out.mtval2.bits.ALL           := Mux(isDTExcp, precause, Mux(satpFlushFirstFetchFault, tval2FromSatpFlush >> 2,tval2 >> 2))
   out.mtinst.bits.ALL           := Mux(isFetchGuestExcp && in.trapIsForVSnonLeafPTE || isLSGuestExcp && in.memExceptionIsForVSnonLeafPTE, 0x3000.U, 0.U)
   out.targetPc.bits.pc          := in.pcFromXtvec
   out.targetPc.bits.raiseIPF    := false.B

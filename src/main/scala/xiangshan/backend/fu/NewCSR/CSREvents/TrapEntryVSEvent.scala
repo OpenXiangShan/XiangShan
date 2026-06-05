@@ -83,7 +83,6 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   private val isFetchMalAddr = in.isFetchMalAddr
   private val isFetchMalAddrExcp = isException && isFetchMalAddr
   private val satpFlushFirstFetchFault = in.satpFlushFirstFetchFault
-  private val satpFlushFirstFetchFaultExcp = isException && satpFlushFirstFetchFault
   private val isIllegalInst  = isException && (EX_II.U === highPrioTrapNO || EX_VI.U === highPrioTrapNO)
 
   // Software breakpoint exceptions are permitted to write either 0 or the pc to xtval
@@ -131,7 +130,7 @@ class TrapEntryVSEventModule(implicit val p: Parameters) extends Module with CSR
   out.vsepc.bits.epc             := Mux(satpFlushFirstFetchFault, trapPC(63, 1), Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1)))
   out.vscause.bits.Interrupt     := isInterrupt
   out.vscause.bits.ExceptionCode := Mux(virtualInterruptIsHvictlInject && isInterrupt, hvictlIID, highPrioTrapNO)
-  out.vstval.bits.ALL            := Mux(satpFlushFirstFetchFaultExcp, tval, Mux(isFetchMalAddrExcp, in.fetchMalTval, tval))
+  out.vstval.bits.ALL            := Mux(satpFlushFirstFetchFault, tval, Mux(isFetchMalAddrExcp, in.fetchMalTval, tval))
   out.targetPc.bits.pc           := in.pcFromXtvec
   out.targetPc.bits.raiseIPF     := instrAddrTransType.checkPageFault(in.pcFromXtvec)
   out.targetPc.bits.raiseIAF     := instrAddrTransType.checkAccessFault(in.pcFromXtvec)
