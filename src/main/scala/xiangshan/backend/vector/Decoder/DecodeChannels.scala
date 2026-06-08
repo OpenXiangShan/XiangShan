@@ -619,7 +619,7 @@ object DecodeChannelOutput {
 
 class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
   val foldpc           = UInt(MemPredPCWidth.W)
-  val exceptionVec     = ExceptSparseVec()
+  val exceptionVec     = ExceptSparseVec(ExceptionNO.fromFrontendSet)
   val isFetchMalAddr   = Bool()
   val trigger          = TriggerAction()
   val isRVC            = Bool()
