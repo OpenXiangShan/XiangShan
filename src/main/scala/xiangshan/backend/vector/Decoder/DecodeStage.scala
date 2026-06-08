@@ -78,7 +78,7 @@ class DecodeStageImp(
     decodeChannels.in.mops(i).bits.ctrl match {
       case ctrl =>
         ctrl.foldpc           := inMopBits.foldpc
-        ctrl.exceptionVec.extendFrom(inMopBits.exceptionVec)
+        ctrl.exceptionVec     := inMopBits.exceptionVec
         ctrl.isFetchMalAddr   := inMopBits.isFetchMalAddr
         ctrl.trigger          := inMopBits.trigger
         ctrl.isRVC            := inMopBits.isRVC
@@ -109,7 +109,7 @@ class DecodeStageImp(
     uop.bits match {
       case bits =>
         bits.foldpc := mopInfo.foldpc
-        bits.exceptionVec.extendFrom(mopInfo.exceptionVec)
+        bits.exceptionVec := mopInfo.exceptionVec
         bits.exceptionVec(illegalInstr) := mopInfo.exceptionVec(illegalInstr) || uopInfo.exceptionII
         bits.exceptionVec(virtualInstr) := uopInfo.exceptionVI
         bits.exceptionVec(breakPoint)   := TriggerAction.isExp(mopInfo.trigger)
