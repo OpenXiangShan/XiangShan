@@ -393,6 +393,7 @@ object Opcode {
     val j  = Value(bb"111_1100")          + Src2Imm(DecodeSelImm.UJ) + CannotRobCompress
     val jr = Value(bb"111_1101") + Src1Gp + Src2Imm(DecodeSelImm.I)  + CannotRobCompress
 
+    def jumpUopisj(op: UInt) = !op(0)
     def jumpUopisjr(op: UInt) = op(0)
   }
 

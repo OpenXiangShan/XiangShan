@@ -82,8 +82,8 @@ object Itype extends NamedUInt(4) {
   def jumpTypeGen(fuType: UInt, fuoptype: UInt, rd: OpRegType, rs: OpRegType): UInt = {
 
     val isEqualRdRs = rd === rs
-    val isJ         = FuType.isNewJump(fuType) && fuoptype === NewJumpOpType.j
-    val isJr        = FuType.isNewJump(fuType) && fuoptype === NewJumpOpType.jr
+    val isJ         = FuType.isNewJump(fuType) && NewJumpOpType.jumpUopisj(fuoptype)
+    val isJr        = FuType.isNewJump(fuType) && NewJumpOpType.jumpUopisjr(fuoptype)
     val isBranch    = FuType.isBrh(fuType)
 
     // push to RAS when rd is link, pop from RAS when rs is link

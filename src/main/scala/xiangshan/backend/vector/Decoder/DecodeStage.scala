@@ -78,7 +78,7 @@ class DecodeStageImp(
     decodeChannels.in.mops(i).bits.ctrl match {
       case ctrl =>
         ctrl.foldpc           := inMopBits.foldpc
-        ctrl.exceptionVec extendFrom inMopBits.exceptionVec
+        ctrl.exceptionVec     := inMopBits.exceptionVec
         ctrl.isFetchMalAddr   := inMopBits.isFetchMalAddr
         ctrl.trigger          := inMopBits.trigger
         ctrl.isRVC            := inMopBits.isRVC
