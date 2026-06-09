@@ -109,7 +109,7 @@ class DecodeStageImp(
     uop.bits match {
       case bits =>
         bits.foldpc := mopInfo.foldpc
-        bits.exceptionVec := mopInfo.exceptionVec
+        bits.exceptionVec extendFrom mopInfo.exceptionVec
         bits.exceptionVec(illegalInstr) := mopInfo.exceptionVec(illegalInstr) || uopInfo.exceptionII
         bits.exceptionVec(virtualInstr) := uopInfo.exceptionVI
         bits.exceptionVec(breakPoint)   := TriggerAction.isExp(mopInfo.trigger)
