@@ -263,10 +263,20 @@ class CtrlBlockImp(
     io.toDataPath.pcToDataPathIO.toDataPathPC(i) := pcMem.io.rdata(pcMemIdx).toUInt
   }
 
+  private val pcReadExuParams = params.allExuParams.filter(_.needPc)
+  private val targetReadPcPortIndexes = params.allRealExuParams.filter(_.needTarget).map { targetExu =>
+    val pcPortIdx = pcReadExuParams.indexOf(targetExu)
+    require(pcPortIdx >= 0, s"${targetExu.name} needs target PC but has no matching pcMem read port")
+    pcPortIdx
+  }
+  require(targetReadPcPortIndexes.size == params.numTargetReadPort)
+  println(s"targetReadPcPortIndexes list: $targetReadPcPortIndexes")
+
   for ((pcMemIdx, i) <- pcMemRdIndexes("bjuTarget").zipWithIndex) {
-    val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
-    val baseAddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value
-    val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value + 1.U
+    val pcPortIdx = targetReadPcPortIndexes(i)
+    println(s"pcMem read port for bjuTarget index $i: $pcMemIdx. pcReadExuParams index: $pcPortIdx")
+    val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(pcPortIdx)
+    val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(pcPortIdx).value + 1.U
     pcMem.io.ren.get(pcMemIdx) := ren
     pcMem.io.raddr(pcMemIdx) := raddr
     io.toDataPath.pcToDataPathIO.toDataPathTargetPC(i) := pcMem.io.rdata(pcMemIdx).toUInt
