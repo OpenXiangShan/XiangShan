@@ -154,7 +154,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     val debugWaitForward   = Option.when(backendParams.debugEn)(Input(Bool()))
     val debugIQValidNumVec = Option.when(backendParams.debugEn)(Vec(issueQueueNum, Input(UInt(maxIQSize.U.getWidth.W))))
     val debugIQEnqHasIssuedVec = Option.when(backendParams.debugEn)(Vec(issueQueueNum, Input(Bool())))
-    val debugRobHeadStall = Option.when(backendParams.debugEn)(Flipped(ValidIO(Input(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))))
+    val debugRobHeadStall = Option.when(backendParams.debugEn)(Flipped(Valid(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W))))
     val debugRobTrueCommit = Option.when(backendParams.debugEn)(Input(UInt(64.W)))
   })
   // Deq for std's IQ is not assigned in Dispatch2Iq, so add one more src for it.

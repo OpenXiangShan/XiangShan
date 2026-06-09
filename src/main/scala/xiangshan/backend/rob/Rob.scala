@@ -1369,6 +1369,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("waitStuCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.stu.U)
   XSPerfAccumulate("waitAtmCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.mou.U)
 
+  XSPerfAccumulate("waitfaluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.falu.U)
+  XSPerfAccumulate("waitfmacCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fmac.U)
+  XSPerfAccumulate("waitfcvtCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fcvt.U)
+  XSPerfAccumulate("waitfDivSqrtCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fDivSqrt.U)
+  XSPerfAccumulate("waitfcmpCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.fcmp.U)
+
   XSPerfAccumulate("waitVfaluCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfalu.U)
   XSPerfAccumulate("waitVfmaCycle" , deqNotWritebacked && deqHeadInfoFuType === FuType.vfma.U)
   XSPerfAccumulate("waitVfdivCycle", deqNotWritebacked && deqHeadInfoFuType === FuType.vfdiv.U)
