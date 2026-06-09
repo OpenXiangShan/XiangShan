@@ -128,6 +128,7 @@ class CtrlBlockImp(
   s1_robFlushRedirect.valid := GatedValidRegNext(s0_robFlushRedirect.valid, false.B)
   s1_robFlushRedirect.bits := RegEnable(s0_robFlushRedirect.bits, s0_robFlushRedirect.valid)
 
+  println(s"[CtrlBlock] pcMem read port for \"robFlush\": ${pcMemRdIndexes("robFlush").head}.")
   pcMem.io.ren.get(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.valid
   pcMem.io.raddr(pcMemRdIndexes("robFlush").head) := s0_robFlushRedirect.bits.ftqIdx.value
   val robFlushPCOffset = Reg(UInt(VAddrBits.W))
@@ -229,10 +230,12 @@ class CtrlBlockImp(
   loadReplay.bits.debugIsCtrl := false.B
   loadReplay.bits.debugIsMemVio := true.B
 
+  println(s"[CtrlBlock] pcMem read port for \"redirect\": ${pcMemRdIndexes("redirect").head}.")
   pcMem.io.ren.get(pcMemRdIndexes("redirect").head) := memViolation.valid
   pcMem.io.raddr(pcMemRdIndexes("redirect").head) := memViolation.bits.ftqIdx.value
   val mdpTrainValid = io.fromMem.mdpTrain.valid
   for ((pcMemIdx, i) <- pcMemRdIndexes("memPredLoad").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"memPredLoad\" index $i: $pcMemIdx")
     val ren   = mdpTrainValid
     val raddr = io.fromMem.mdpTrain.bits.ftqIdx.value
     val offset = RegEnable(io.fromMem.mdpTrain.bits.getPcOffset, mdpTrainValid)
@@ -245,6 +248,7 @@ class CtrlBlockImp(
     memCtrl.io.memPredUpdate.wdata := true.B
   }
   for ((pcMemIdx, i) <- pcMemRdIndexes("memPredStore").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"memPredStore\" index $i: $pcMemIdx")
     val ren   = mdpTrainValid
     val raddr = io.fromMem.mdpTrain.bits.stFtqIdx.value
     val offset = RegEnable(io.fromMem.mdpTrain.bits.getStPcOffset, mdpTrainValid)
@@ -255,6 +259,7 @@ class CtrlBlockImp(
   memCtrl.io.memPredUpdate.valid := RegNext(mdpTrainValid) // pc is ready, 1 cycle later
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("aluBjuPc").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"aluBjuPc\" index $i: $pcMemIdx. EXU index: $i")
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
     val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value
     val roffset = io.toDataPath.pcToDataPathIO.fromDataPathFtqOffset(i)
@@ -274,7 +279,7 @@ class CtrlBlockImp(
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("bjuTarget").zipWithIndex) {
     val pcPortIdx = targetReadPcPortIndexes(i)
-    println(s"pcMem read port for bjuTarget index $i: $pcMemIdx. pcReadExuParams index: $pcPortIdx")
+    println(s"[CtrlBlock] pcMem read port for \"bjuTarget\" index $i: $pcMemIdx. EXU index: $pcPortIdx")
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(pcPortIdx)
     val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(pcPortIdx).value + 1.U
     pcMem.io.ren.get(pcMemIdx) := ren
@@ -284,6 +289,7 @@ class CtrlBlockImp(
 
   val baseIdx = params.aluBjuPcPortNum
   for ((pcMemIdx, i) <- pcMemRdIndexes("load").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"load\" index $i: $pcMemIdx. EXU index: ${baseIdx + i}")
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(baseIdx+i)
     val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(baseIdx+i).value
@@ -294,6 +300,7 @@ class CtrlBlockImp(
   }
 
   for ((pcMemIdx, i) <- pcMemRdIndexes("hybrid").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"hybrid\" index $i: $pcMemIdx.")
     // load read pcMem (s0) -> get rdata (s1) -> reg next in Memblock (s2) -> reg next in Memblock (s3) -> consumed by pf (s3)
     pcMem.io.ren.get(pcMemIdx) := io.memHyPcRead(i).valid
     pcMem.io.raddr(pcMemIdx) := io.memHyPcRead(i).ptr.value
@@ -302,6 +309,7 @@ class CtrlBlockImp(
 
   if (EnableStorePrefetchSMS) {
     for ((pcMemIdx, i) <- pcMemRdIndexes("store").zipWithIndex) {
+      println(s"[CtrlBlock] pcMem read port for \"store\" index $i: $pcMemIdx.")
       pcMem.io.ren.get(pcMemIdx) := io.memStPcRead(i).valid
       pcMem.io.raddr(pcMemIdx) := io.memStPcRead(i).ptr.value
       // memStPcRead.data is not right bucasue memStPcRead don't have isRVC
@@ -321,6 +329,7 @@ class CtrlBlockImp(
   rob.io.trace.blockCommit       := trace.io.out.blockRobCommit
   val tracePcStart = Wire(Vec(TraceGroupNum, UInt(IaddrWidth.W)))
   for ((pcMemIdx, i) <- pcMemRdIndexes("trace").zipWithIndex) {
+    println(s"[CtrlBlock] pcMem read port for \"trace\" index $i: $pcMemIdx.")
     val traceValid = trace.toPcMem.blocks(i).valid
     pcMem.io.ren.get(pcMemIdx) := traceValid
     pcMem.io.raddr(pcMemIdx) := trace.toPcMem.blocks(i).bits.ftqIdx.get.value
