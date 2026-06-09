@@ -8,6 +8,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.Extensions._
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
@@ -197,6 +198,10 @@ class DecodeStageImp(
         bits.vtype := mopInfo.vtype
         bits.oldVType := mopInfo.oldVType
         bits.vlsInstr := false.B // Todo: remove
+        val isMemUop = FuType.isLoadStore(bits.fuType) || FuType.isVls(bits.fuType)
+        val isVecMem = isMemUop && LSUOpType.isVecMemOp(bits.fuOpType)
+        bits.useVAGQ := isVecMem && (LSUOpType.isStrided(bits.fuOpType) || LSUOpType.isIndexed(bits.fuOpType))
+        bits.useGather := uopInfo.useGather
         bits.fflagsWen := uopInfo.fflagsWen
         bits.isMove := false.B // Todo
         bits.uopIdx := uopInfo.uopIdx

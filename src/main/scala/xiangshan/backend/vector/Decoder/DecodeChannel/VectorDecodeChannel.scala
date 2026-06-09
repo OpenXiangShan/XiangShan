@@ -142,6 +142,7 @@ class VectorDecodeChannel(
     NumUopField,
     IllegalField,
     NumUopOhField,
+    UseGatherField,
     WritePartVdField,
     IsSegmentField,
     VRegTypesField,
@@ -181,6 +182,7 @@ class VectorDecodeChannel(
   val uopIllegal = instSewLmulNfBundle(IllegalField)
   val numUopOH = instSewLmulNfBundle(NumUopOhField)
   val isWritePartVd = instSewLmulNfBundle(WritePartVdField)
+  val useGather = instSewLmulNfBundle(UseGatherField)
 
   // Drive the source register select signals of `SrcSelectModule` from decode table output.
   srcSelectModule.in match {
@@ -259,6 +261,7 @@ class VectorDecodeChannel(
     out.uop(i).bits.commitType := instBundle(CommitTypeField)
     out.uop(i).bits.vdDepElim := vdDepElim
     out.uop(i).bits.isWritePartVd := isWritePartVd
+    out.uop(i).bits.useGather := useGather
     out.uop(i).bits.isVset := false.B
     out.uop(i).bits.selImm.valid := Cat(
       isVecMemContinous,
@@ -346,6 +349,7 @@ object VectorDecodeChannel {
     val commitType = CommitType()
     val vdDepElim = VdDepElim()
     val isWritePartVd = Bool()
+    val useGather = Bool()
     val isVset = Bool()
     val selImm = ValidIO(DecodeSelImm())
     val imm = UInt(32.W)
@@ -359,5 +363,3 @@ object VectorDecodeChannel {
     val uopNumOH = NumUopOH()
   }
 }
-
-

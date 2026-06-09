@@ -360,6 +360,7 @@ class DecodeChannelOutput extends Bundle {
   val commitType = CommitType()
   val vdDepElim = VdDepElim()
   val isWritePartVd = Bool()
+  val useGather = Bool()
 
   val canRobCompress = Bool()
 
@@ -429,6 +430,7 @@ object DecodeChannelOutput {
     uop.commitType := vuop.commitType
     uop.vdDepElim := vuop.vdDepElim
     uop.isWritePartVd := vuop.isWritePartVd
+    uop.useGather := vuop.useGather
 
     uop.canRobCompress := false.B
 
@@ -488,6 +490,7 @@ object DecodeChannelOutput {
     uop.commitType := CommitType.NORMAL
     uop.vdDepElim := VdDepElim.Always // never used
     uop.isWritePartVd := false.B
+    uop.useGather := false.B
 
     // maybe true in the future
     uop.canRobCompress := false.B
@@ -547,6 +550,7 @@ object DecodeChannelOutput {
     uop.commitType := suop.commitType
     uop.vdDepElim := VdDepElim.Always // never used
     uop.isWritePartVd := false.B
+    uop.useGather := false.B
 
     uop.canRobCompress := suop.canRobCompress
 
@@ -606,6 +610,7 @@ object DecodeChannelOutput {
     uop.commitType := puop.commitType
     uop.vdDepElim := VdDepElim.Always // never used
     uop.isWritePartVd := false.B
+    uop.useGather := false.B
     uop.canRobCompress := puop.canRobCompress
 
     uop.numWb := NumWB.$1
