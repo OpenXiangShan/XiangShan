@@ -433,7 +433,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   s3_commonHRMeta.ghr       := commonHR.io.s3ResolveMeta.ghr
   s3_commonHRMeta.bw        := commonHR.io.s3ResolveMeta.bw
   s3_commonHRMeta.imli      := commonHR.io.s3ResolveMeta.imli
-  s3_commonHRMeta.hitMask   := VecInit(s3_mbtbResult.map(_.valid))
+  s3_commonHRMeta.hitMask   := commonHR.io.s3DedupHitMask
   s3_commonHRMeta.attribute := VecInit(s3_mbtbResult.map(_.bits.attribute))
   s3_commonHRMeta.position  := VecInit(s3_mbtbResult.map(_.bits.cfiPosition))
 

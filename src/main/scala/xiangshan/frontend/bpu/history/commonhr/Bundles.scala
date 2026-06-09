@@ -32,16 +32,16 @@ class CommonHREntry(implicit p: Parameters) extends CommonHRBundle {
   val predStartPc: Option[PrunedAddr] = Some(PrunedAddr(VAddrBits)) // for debug
 }
 class CommonHRUpdate(implicit p: Parameters) extends CommonHRBundle {
-  val taken:            Bool              = Bool()
-  val s3Override:       Bool              = Bool()
-  val condHitMask:      Vec[Bool]         = Vec(NumBtbResultEntries, Bool())
-  val position:         Vec[UInt]         = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
-  val attributes:       Vec[BranchAttribute] = Vec(NumBtbResultEntries, new BranchAttribute)
-  val targets:          Vec[PrunedAddr]   = Vec(NumBtbResultEntries, PrunedAddr(VAddrBits))
-  val firstTakenBranchOH: Vec[Bool]       = Vec(NumBtbResultEntries, Bool())
-  val firstTakenBranch: Valid[Prediction] = Valid(new Prediction)
-  val startPc:          PrunedAddr        = PrunedAddr(VAddrBits)
-  val target:           PrunedAddr        = PrunedAddr(VAddrBits)
+  val taken:              Bool                 = Bool()
+  val s3Override:         Bool                 = Bool()
+  val condHitMask:        Vec[Bool]            = Vec(NumBtbResultEntries, Bool())
+  val position:           Vec[UInt]            = Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W))
+  val attributes:         Vec[BranchAttribute] = Vec(NumBtbResultEntries, new BranchAttribute)
+  val targets:            Vec[PrunedAddr]      = Vec(NumBtbResultEntries, PrunedAddr(VAddrBits))
+  val firstTakenBranchOH: Vec[Bool]            = Vec(NumBtbResultEntries, Bool())
+  val firstTakenBranch:   Valid[Prediction]    = Valid(new Prediction)
+  val startPc:            PrunedAddr           = PrunedAddr(VAddrBits)
+  val target:             PrunedAddr           = PrunedAddr(VAddrBits)
 }
 
 class CommonHRResolveMeta(implicit p: Parameters) extends CommonHRBundle {

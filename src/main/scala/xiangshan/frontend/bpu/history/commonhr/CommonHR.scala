@@ -36,6 +36,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
     val redirect:       CommonHRRedirect    = Input(new CommonHRRedirect)
     val s0_imli:        UInt                = Output(UInt(ImliHistoryLength.W))
     val s0_commonHR:    CommonHREntry       = Output(new CommonHREntry)
+    val s3DedupHitMask: Vec[Bool]           = Output(Vec(NumBtbResultEntries, Bool()))
     val s3ResolveMeta:  CommonHRResolveMeta = Output(new CommonHRResolveMeta)
 
     val s0_startPc: Option[PrunedAddr] = Some(Input(PrunedAddr(VAddrBits))) // for debug
@@ -110,6 +111,7 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
    * Use the latched s2 candidate information to update CommonHR when s3 fires.
    */
   private val s3_update           = io.update // bp pipeline s3 level update
+  private val s3_hitMask          = RegEnable(s2_hitMask, s2_fire)
   private val s3_taken            = s3_update.taken
   private val s3_firstTakenPos    = s3_update.firstTakenBranch.bits.cfiPosition
   private val s3_firstTakenIsCond = s3_update.firstTakenBranch.bits.attribute.isConditional
@@ -185,7 +187,8 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   private val r1_oldCondHits = VecInit(r1_redirect.meta.hitMask.zip(r1_redirect.meta.attribute).map {
     case (hit, attr) => hit && attr.isConditional
   })
-  private val r1_oldHits       = dedupHitPositions(r1_oldCondHits, r1_oldPositions)
+  // TODO:Need pipeline stage for redirect update CommonHR if dedup calc skipped?
+  private val r1_oldHits       = r1_redirect.meta.hitMask
   private val r1_taken         = r1_redirect.taken
   private val r1_isCond        = r1_redirect.attribute.isConditional
   private val r1_bwTaken       = isBackwardBranch(r1_redirect.cfiPc, r1_redirect.target)
@@ -331,6 +334,8 @@ class CommonHR(implicit p: Parameters) extends CommonHRModule with Helpers with 
   when(r1_valid) {
     histQueue(recoverPtr.value) := r1_commonHR
   }
+
+  io.s3DedupHitMask := s3_hitMask
 
   // Use distance-based checks for circular pointers to avoid wrap-around ordering ambiguity.
   private val writeToPredDist   = distanceBetween(writePtr, predPtr)
