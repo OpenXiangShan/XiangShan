@@ -941,7 +941,7 @@ class PrefetchFilter()(implicit p: Parameters) extends XSModule with HasSMSModul
   val prev_valid = GatedValidRegNext(io.gen_req.valid, false.B)
   val prev_gen_req = RegEnable(io.gen_req.bits, io.gen_req.valid)
 
-  val tlb_req_arb = Module(new RRArbiterInit(new TlbReq, smsParams.pf_filter_size))
+  val tlb_req_arb = Module(new TwoLevelRRArbiter(new TlbReq, smsParams.pf_filter_size))
   val pf_req_arb = Module(new TwoLevelRRArbiter(UInt(PAddrBits.W), smsParams.pf_filter_size))
 
   io.l2_pf_addr <> pf_req_arb.io.out
