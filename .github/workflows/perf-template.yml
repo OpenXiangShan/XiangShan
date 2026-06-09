@@ -35,11 +35,11 @@ on:
         required: false
         type: string
       checkpoint_path:
-        description: Directory for SPEC06 checkpoints. Ignore this unless benchmark_type is set to custom
+        description: Directory for SPEC checkpoints. Ignore this unless benchmark_type is set to custom
         required: false
         type: string
       json_path:
-        description: JSON file path for SPEC06 checkpoints. Ignore this unless benchmark_type is set to custom
+        description: JSON file path for SPEC checkpoints. Ignore this unless benchmark_type is set to custom
         required: false
         type: string
       perf_report_dir:
@@ -131,50 +131,71 @@ jobs:
           SPEC_DIR="${{ inputs.perf_report_dir }}/cr${DATE}-${SHORT_SHA}${SPEC_TAG}"
 
           DRY_RUN_OPT=""
+
+          # set CKPT_HOME
           case "${{ inputs.benchmark_type }}" in
-            "gcc15-spec06-0.3c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc15-spec06-0.3.json" >> $GITHUB_ENV
+            gcc15-spec06*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
               ;;
-            "gcc15-spec06-0.8c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc15-spec06-0.8.json" >> $GITHUB_ENV
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
-              ;;
-            "gcc15-spec06-1.0c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
-              ;;
-            "xscc-spec06-0.3c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/xscc-spec06-0.3.json" >> $GITHUB_ENV
+            xscc-spec06*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
               ;;
-            "xscc-spec06-0.8c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/xscc-spec06-0.8.json" >> $GITHUB_ENV
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
+            gcc15-rv64gc-spec26*)
+              echo "Warning: The current spec26 checkpoint is compiled without b extension, performance may not be ideal" >> $GITHUB_STEP_SUMMARY
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec26_gcc15_rv64gc_base_260517/checkpoint" >> $GITHUB_ENV
               ;;
-            "xscc-spec06-1.0c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
-              ;;
-            "gcc12-spec06-0.3c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.3.json" >> $GITHUB_ENV
+            gcc12-spec06*)
+              echo "Warning: gcc12 checkpoints are being deprecated, consider using gcc15-spec06*" >> $GITHUB_STEP_SUMMARY
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
               ;;
-            "gcc12-spec06-0.8c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.8.json" >> $GITHUB_ENV
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
-              ;;
-            "gcc12-spec06-1.0c")
-              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
-              ;;
-            "custom")
-              echo "CKPT_JSON_PATH=${{ inputs.json_path }}" >> $GITHUB_ENV
+            custom)
               echo "CKPT_HOME=${{ inputs.checkpoint_path }}" >> $GITHUB_ENV
               ;;
-            "dryrun")
-              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/dryrun.json" >> $GITHUB_ENV
+            dryrun)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0" >> $GITHUB_ENV
+              ;;
+          esac
+
+          # set CKPT_JSON_PATH
+          case "${{ inputs.benchmark_type }}" in
+            gcc15-spec06-0.3c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc15-spec06-0.3.json" >> $GITHUB_ENV
+              ;;
+            gcc15-spec06-0.8c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc15-spec06-0.8.json" >> $GITHUB_ENV
+              ;;
+            gcc15-spec06-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
+              ;;
+            xscc-spec06-0.3c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/xscc-spec06-0.3.json" >> $GITHUB_ENV
+              ;;
+            xscc-spec06-0.8c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/xscc-spec06-0.8.json" >> $GITHUB_ENV
+              ;;
+            xscc-spec06-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
+              ;;
+            gcc15-rv64gc-spec26-0.3c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_gcc15_rv64gc_base_260517/json/checkpoints_cov0.3.json" >> $GITHUB_ENV
+              ;;
+            gcc15-rv64gc-spec26-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec26_gcc15_rv64gc_base_260517/json/checkpoints_all.json" >> $GITHUB_ENV
+              ;;
+            gcc12-spec06-0.3c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.3.json" >> $GITHUB_ENV
+              ;;
+            gcc12-spec06-0.8c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/gcc12o3-incFpcOff-jeMalloc-0.8.json" >> $GITHUB_ENV
+              ;;
+            gcc12-spec06-1.0c)
+              echo "CKPT_JSON_PATH=/nfs/home/share/checkpoints_profiles/spec06_rv64gcb_O3_20m_gcc12.2.0-intFpcOff-jeMalloc/checkpoint-0-0-0/cluster-0-0.json" >> $GITHUB_ENV
+              ;;
+            custom)
+              echo "CKPT_JSON_PATH=${{ inputs.json_path }}" >> $GITHUB_ENV
+              ;;
+            dryrun)
+              echo "CKPT_JSON_PATH=/nfs/home/share/ci-workloads/json/dryrun.json" >> $GITHUB_ENV
 
               echo "dryrun testing:"
               echo "    default SPEC_DIR: ${SPEC_DIR}"
@@ -191,7 +212,7 @@ jobs:
           echo "SPEC_DIR=${SPEC_DIR}" >> $GITHUB_ENV
           echo "SPEC_DIR=${SPEC_DIR}" >> $GITHUB_OUTPUT
 
-          # append benchmark_type to score.txt filename, to prevent race condition in "python3 xs_autorun_multiServer.py --report"
+          # append benchmark_type to score.txt filename, to prevent race condition in "python3 main.py --report"
           SCORE_FILE="${SPEC_DIR}/score-${{ inputs.benchmark_type }}.txt"
           echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_ENV
           echo "SCORE_FILE=${SCORE_FILE}" >> $GITHUB_OUTPUT
@@ -223,7 +244,7 @@ jobs:
             cp $GITHUB_WORKSPACE/ready-to-run/riscv64-nemu-interpreter-so $SPEC_DIR/riscv64-nemu-interpreter-so
           fi
 
-      - name: Run SPEC CPU2006 checkpoints
+      - name: Run SPEC CPU checkpoints
         run: |
           cd $SCRIPTS_HOME/perf_trigger
           python3 main.py --gcpt-path $CKPT_HOME --json-path $CKPT_JSON_PATH \
@@ -236,13 +257,16 @@ jobs:
             --run \
             $CST_RUN_OPT $DRY_RUN_OPT
 
-      - name: Report SPEC CPU2006 score
+      - name: Report SPEC CPU score
         if: always()
         run: |
-          cd $SCRIPTS_HOME/perf
-          python3 xs_autorun_multiServer.py $CKPT_HOME $CKPT_JSON_PATH \
+          cd $SCRIPTS_HOME/perf_trigger
+          python3 main.py \
+            --gcpt-path $CKPT_HOME \
+            --json-path $CKPT_JSON_PATH \
+            --result-path $SPEC_DIR \
             --benchmarks "${{ inputs.benchmarks }}" \
-            --xs $GITHUB_WORKSPACE --threads 16 --dir $SPEC_DIR --report \
+            --report \
             > "$SCORE_FILE"
 
       - name: Summary result
@@ -256,10 +280,10 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
 
           echo "### :rainbow: Key Indicators" >> $GITHUB_STEP_SUMMARY
-          echo "Estimated SPEC CPU2006 Score per GHz: " >> $GITHUB_STEP_SUMMARY
-          TOTAL_SCORE=$(grep "SPEC2006/GHz:" "$SCORE_FILE" | awk '{print $NF}')
-          INT_SCORE=$(grep "SPECint2006/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
-          FP_SCORE=$(grep "SPECfp2006/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
+          echo "Estimated SPEC CPU Score per GHz: " >> $GITHUB_STEP_SUMMARY
+          TOTAL_SCORE=$(grep "SPEC[0-9]\+/GHz:" "$SCORE_FILE" | awk '{print $NF}')
+          INT_SCORE=$(grep "SPECint\(rate\)\?[0-9]\+/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
+          FP_SCORE=$(grep "SPECfp\(rate\)\?[0-9]\+/GHz" "$SCORE_FILE" | awk '{print $(NF-1)}')
           echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY

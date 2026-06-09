@@ -91,7 +91,15 @@ def main():
     print("```")
 
     # summary for SPEC metrics
-    for key in ["SPECint2006/GHz", "SPECfp2006/GHz", "SPEC2006/GHz"]:
+    if "SPEC2006/GHz" in curr or "SPEC2006/GHz" in prev:
+        key_candidates = ["SPEC2006/GHz", "SPECint2006/GHz", "SPECfp2006/GHz"]
+    elif "SPECrate2017/GHz" in curr or "SPECrate2017/GHz" in prev:
+        key_candidates = ["SPECrate2017/GHz", "SPECintrate2017/GHz", "SPECfprate2017/GHz"]
+    elif "SPECrate2026/GHz" in curr or "SPECrate2026/GHz" in prev:
+        key_candidates = ["SPECrate2026/GHz", "SPECintrate2026/GHz", "SPECfprate2026/GHz"]
+    else:
+        key_candidates = []
+    for key in key_candidates:
         if key in curr or key in prev:
             cs = curr.get(key, ("", ""))[0]
             ps = prev.get(key, ("", ""))[0]

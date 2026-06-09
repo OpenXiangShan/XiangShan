@@ -42,6 +42,8 @@ on:
           - xscc-spec06-0.3c
           - xscc-spec06-0.8c
           - xscc-spec06-1.0c
+          - gcc15-rv64gc-spec26-0.3c
+          - gcc15-rv64gc-spec26-1.0c
           - gcc12-spec06-0.3c
           - gcc12-spec06-0.8c
           - gcc12-spec06-1.0c
@@ -61,11 +63,11 @@ on:
         required: false
         type: string
       checkpoint_path:
-        description: Directory for SPEC06 checkpoints. Ignore this unless benchmark_type is set to custom
+        description: Directory for SPEC checkpoints. Ignore this unless benchmark_type is set to custom
         required: false
         type: string
       json_path:
-        description: JSON file path for SPEC06 checkpoints. Ignore this unless benchmark_type is set to custom
+        description: JSON file path for SPEC checkpoints. Ignore this unless benchmark_type is set to custom
         required: false
         type: string
 
