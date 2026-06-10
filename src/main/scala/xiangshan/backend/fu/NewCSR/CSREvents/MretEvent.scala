@@ -58,6 +58,7 @@ class MretEventModule(implicit p: Parameters) extends Module with CSREventBase {
 
   out.privState.valid := valid
   out.mstatus  .valid := valid
+  out.vsstatus .valid := valid
   out.targetPc .valid := valid
 
   out.privState.bits          := outPrivState
