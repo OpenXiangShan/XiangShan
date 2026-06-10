@@ -23,11 +23,12 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
   ))
   params.issueBlockParams.filter(x => !x.isMemBlockIQ).flatMap(_.exuBlockParams.map(xx => println(s"[ExuBlock] ${xx.name}")))
   private val ins: collection.IndexedSeq[DecoupledIO[NewExuInput]] = io.in.flatten
+  private val faluIns = io.faluIn.map(_.flatten)
   private val outs: collection.IndexedSeq[DecoupledIO[NewExuOutput]] = io.out.flatten
   println(s"[ExuBlock] ins.size = ${ins.size}")
   println(s"[ExuBlock] exus.size = ${exus.size}")
   println(s"[ExuBlock] outs.size = ${outs.size}")
-  (ins zip exus zip outs).foreach { case ((input, exu), output) =>
+  (ins zip exus zip outs).zipWithIndex.foreach { case (((input, exu), output), idx) =>
     exu.io.flush <> io.flush
     exu.io.csrio.foreach(exuio => io.csrio.get <> exuio)
     exu.io.csrin.foreach(exuio => io.csrin.get <> exuio)
@@ -40,6 +41,11 @@ class ExuBlock(implicit p: Parameters, params: SchdBlockParams) extends XSModule
     exu.io.vlIsVlmax.foreach(exuio => io.vlIsVlmax.get := exuio)
     exu.io.vtype.foreach(exuio => io.vtype.get := exuio)
     exu.io.in <> input
+    faluIns.foreach { allFaluIns =>
+      exu.io.faluIn.foreach {
+        exuFaluIn => exuFaluIn <> allFaluIns(idx)
+      }
+    }
     output <> exu.io.out
     io.csrToDecode.foreach(toDecode => exu.io.csrToDecode.foreach(exuOut => toDecode := exuOut))
 //    if (exu.wrapper.exuParams.fuConfigs.contains(AluCfg) || exu.wrapper.exuParams.fuConfigs.contains(BrhCfg)){
@@ -109,6 +115,7 @@ class ExuBlockIO(implicit p: Parameters, params: SchdBlockParams) extends XSBund
   val flush = Flipped(ValidIO(new Redirect))
   // in(i)(j): issueblock(i), exu(j)
   val in: MixedVec[MixedVec[DecoupledIO[NewExuInput]]] = Flipped(params.genNewExuInputCopySrcBundleNoMemBlock)
+  val faluIn: Option[MixedVec[MixedVec[DecoupledIO[NewExuInput]]]] = Option.when(params.isFpSchd)(Flipped(params.genNewExuInputCopySrcBundleNoMemBlock))
   // out(i)(j): issueblock(i), exu(j).
   val out: MixedVec[MixedVec[DecoupledIO[NewExuOutput]]] = params.genNewExuOutputDecoupledBundleNoMemBlock
   // out(i)(j): fp-issueblock(i), fp-exu(j). Only available in fpExuBlock [fpExeUnit-FMUL] -> [BypassNetwork] -> [fpExeUnit-FALU]
