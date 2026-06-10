@@ -893,7 +893,7 @@ abstract class NewStoreQueueBase(implicit p: Parameters) extends LSQModule {
     cboState := cboStateNext
 
     private val cboCanHandle = headCtrlEntry.allValid && !headCtrlEntry.hasException && headCtrlEntry.allocated &&
-      headCtrlEntry.isCbo
+      headCtrlEntry.isCbo && headCtrlEntry.committed
 
     switch(cboState) {
       is(CboState.idle) {
