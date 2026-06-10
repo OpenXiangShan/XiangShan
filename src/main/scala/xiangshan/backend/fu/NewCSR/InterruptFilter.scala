@@ -36,8 +36,11 @@ class InterruptFilter extends Module {
   val miprios = io.in.miprios
   val hsiprios = io.in.hsiprios
   val hviprios = Cat(hviprio2.asUInt, hviprio1.asUInt)
-  val fromAIAValid = io.in.fromAIA.meip || io.in.fromAIA.seip || io.in.fromAIA.notice_pending
   val platformValid = io.in.platform.meip || io.in.platform.seip
+  val mvienSEIE = io.in.mvienSEIE
+  val mvipSEIP = io.in.mvipSEIP
+  val midelegSEI = io.in.mideleg.SEI.asBool
+  val SEIfromEIC = io.in.platform.seip || io.in.fromAIA.seip
 
   /**
    * Sort by implemented interrupt default priority
@@ -59,12 +62,7 @@ class InterruptFilter extends Module {
   val hstopigather = hsip & hsie & (~hideleg).asUInt
   val vstopigather = vsip & vsie & NoSEIMask
 
-  val flag = RegInit(false.B)
-  when (platformValid) {
-    flag := true.B
-  }.elsewhen(fromAIAValid) {
-    flag := false.B
-  }
+  val injectSEI = !(midelegSEI === mvienSEIE) && mvipSEIP
 
   val mipriosSort = Wire(Vec(InterruptNO.interruptDefaultPrio.size, new IpriosSort))
   mipriosSort.zip(InterruptNO.interruptDefaultPrio).zipWithIndex.foreach { case ((iprio, defaultPrio), i) =>
@@ -72,7 +70,7 @@ class InterruptFilter extends Module {
     when (mtopigather(defaultPrio)) {
       iprio.enable := true.B
       when (defaultPrio.U === InterruptNO.MEI.U) {
-        iprio.isZero := platformValid || flag
+        iprio.isZero := platformValid
         val mtopeiGreaterThan255 = mtopei.IPRIO.asUInt(10, 8).orR
         iprio.greaterThan255 := mtopeiGreaterThan255
         iprio.prioNum := mtopei.IPRIO.asUInt(7, 0)
@@ -94,9 +92,9 @@ class InterruptFilter extends Module {
     when (hstopigather(defaultPrio)) {
       iprio.enable := true.B
       when (defaultPrio.U === InterruptNO.SEI.U) {
-        iprio.isZero := platformValid || flag
+        iprio.isZero := platformValid
         val stopeiGreaterThan255 = stopei.IPRIO.asUInt(10, 8).orR
-        iprio.greaterThan255 := stopeiGreaterThan255
+        iprio.greaterThan255 := (injectSEI && !SEIfromEIC) || stopeiGreaterThan255
         iprio.prioNum := stopei.IPRIO.asUInt(7, 0)
       }.otherwise {
         iprio.isZero := !hsiprios(7 + 8 * defaultPrio, 8 * defaultPrio).orR
@@ -604,6 +602,8 @@ class InterruptFilterIO extends Bundle {
       val seip = Bool()
       val notice_pending = Bool()
     }
+    val mvienSEIE = Bool()
+    val mvipSEIP = Bool()
   })
 
   val out = Output(new Bundle {

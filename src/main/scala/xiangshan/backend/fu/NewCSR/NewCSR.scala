@@ -403,6 +403,8 @@ class NewCSR(implicit val p: Parameters) extends Module
   intrMod.io.in.fromAIA.meip := fromAIA.meip
   intrMod.io.in.fromAIA.seip := fromAIA.seip
   intrMod.io.in.fromAIA.notice_pending := fromAIA.notice_pending
+  intrMod.io.in.mvienSEIE := mvien.regOut.SEIE.asBool
+  intrMod.io.in.mvipSEIP := mvip.regOut.SEIP.asBool
 
   val intrVec = RegEnable(intrMod.io.out.interruptVec.bits, 0.U, intrMod.io.out.interruptVec.valid)
   val debug = RegEnable(intrMod.io.out.debug, false.B, intrMod.io.out.interruptVec.valid)
