@@ -25,7 +25,7 @@ import utility._
 import xiangshan.frontend.ftq
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.backend.datapath.DataSource
-import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuType, FuncUnitInput, UncertainLatency}
+import xiangshan.backend.fu.{CSRFileIO, FenceIO, FuType, FuncUnit, FuncUnitInput, UncertainLatency}
 import xiangshan.backend.Bundles._
 import xiangshan.{AddrTransType, HasXSParameter, Redirect, Resolve, XSBundle, XSModule, ExceptSparseVec}
 import xiangshan.backend.datapath.WbConfig._
@@ -38,6 +38,7 @@ import xiangshan._
 class ExeUnitIO(params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect()))
   val in = Flipped(DecoupledIO(new NewExuInput(params)))
+  val faluIn = Option.when(params.hasFaluFu)(Flipped(DecoupledIO(new NewExuInput(params))))
   val out = DecoupledIO(new NewExuOutput(params))
   val outToFalu = Option.when(params.hasFmulFu)(ValidIO(new NewExuInput(params)))
   val uncertainWakeupOut = Option.when(params.needUncertainWakeup)(DecoupledIO(new IssueQueueIQWakeUpBundle(params.exuIdx, params.backendParam, params.copyWakeupOut, params.copyNum)))
@@ -66,6 +67,10 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
     val module = cfg.fuGen(p, cfg)
     module
   })
+  private val faluFuncUnit = funcUnits.find(_.cfg.isFalu)
+  io.faluIn.foreach { _ =>
+    assert(funcUnits.count(_.cfg.isFalu) == 1, "ExeUnit should contain exactly one FALU when ExeUnit.faluIn is available")
+  }
 
   if (EnableClockGate) {
     fuCfgs.zip(funcUnits).foreach { case (cfg, fu) =>
@@ -146,71 +151,46 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
     input.params.fuConfigs.map(_.fuSel(input))
   }
 
-  val in1ToN = Module(new Dispatcher(new NewExuInput(exuParams), funcUnits.length, acceptCond))
+  def connectFuInput(source: DecoupledIO[NewExuInput], sink: DecoupledIO[FuncUnitInput]): Unit = {
+    sink.valid := source.valid
+    source.ready := sink.ready
 
-  // ExeUnit.in <---> Dispatcher.in
-  in1ToN.io.in.valid := io.in.valid
-  in1ToN.io.in.bits := io.in.bits
-  io.in.ready := in1ToN.io.in.ready
-
-  def pipelineReg(init: NewExuInput, valid: Bool, latency: Int, flush: ValidIO[Redirect]): (Seq[NewExuInput], Seq[Bool]) = {
-    val validVec = valid +: Seq.fill(latency)(RegInit(false.B))
-    val inVec = init +: Seq.fill(latency)(Reg(new NewExuInput(exuParams)))
-    val robIdxVec = inVec.map(_.robIdx)
-    // if flush(0), valid 0 will not given, so set flushVec(0) to false.B
-    val flushVec = validVec.zip(robIdxVec).map(x => x._1 && x._2.needFlush(flush))
-    for (i <- 1 to latency) {
-      validVec(i) := validVec(i - 1) && !flushVec(i - 1)
-      inVec(i) := inVec(i - 1)
-    }
-    (inVec, validVec)
+    sink.bits.data.pc          .foreach(x => x := source.bits.data.pc.get)
+    sink.bits.data.nextPcOffset.foreach(x => x := source.bits.data.nextPcOffset.get)
+    sink.bits.data.imm         := source.bits.data.imm
+    sink.bits.ctrl.fuOpType    := source.bits.ctrl.fuOpType
+    sink.bits.ctrl.robIdx      := source.bits.robIdx
+    sink.bits.ctrl.pdest       := source.bits.toRF.pdest
+    sink.bits.ctrl.pdestV0     .foreach(x => x := source.bits.toRF.pdestV0.get)
+    sink.bits.ctrl.pdestVl     .foreach(x => x := source.bits.toRF.pdestVl.get)
+    sink.bits.ctrl.rfWen       .foreach(x => x := source.bits.ctrl.rfWen.get)
+    sink.bits.ctrl.fpWen       .foreach(x => x := source.bits.ctrl.fpWen.get)
+    sink.bits.ctrl.vecWen      .foreach(x => x := source.bits.ctrl.vecWen.get)
+    sink.bits.ctrl.v0Wen       .foreach(x => x := source.bits.ctrl.v0Wen.get)
+    sink.bits.ctrl.vlWen       .foreach(x => x := source.bits.ctrl.vlWen.get)
+    sink.bits.ctrl.flushPipe   .foreach(x => x := source.bits.ctrl.flushPipe.get)
+    sink.bits.ctrl.isRVC       .foreach(x => x := source.bits.ctrl.isRVC.get)
+    sink.bits.ctrl.rasAction   .foreach(x => x := source.bits.ctrl.rasAction.get)
+    sink.bits.ctrl.ftqIdx      .foreach(x => x := source.bits.ctrl.ftqIdx.get)
+    sink.bits.ctrl.ftqOffset   .foreach(x => x := source.bits.ctrl.ftqOffset.get)
+    sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.ctrl.predictInfo.get)
+    sink.bits.ctrl.fflagsWen   .foreach(x => x := source.bits.ctrl.fflagsWen.get)
+    sink.bits.ctrl.vpu         .foreach(x => x := source.bits.ctrl.vpu.get)
+    sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFpToVecInst := 0.U)
+    sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
+    sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
+    sink.bits.ctrl.frm         .foreach(x => x := source.bits.ctrl.frm.get)
+    sink.bits.ctrl.oldVType    .foreach(x => x := source.bits.ctrl.oldVType.get)
+    sink.bits.perfDebugInfo    .foreach(_ := source.bits.perfDebugInfo.get)
+    sink.bits.debug_seqNum     .foreach(_ := source.bits.debug_seqNum.get)
   }
-  val latencyMax = fuCfgs.map(_.latency.latencyVal.getOrElse(0)).max
-  val inPipe = pipelineReg(io.in.bits, io.in.valid, latencyMax, io.flush)
-  // Dispatcher.out <---> FunctionUnits
-  in1ToN.io.out.zip(funcUnits.map(_.io.in)).foreach {
-    case (source: DecoupledIO[NewExuInput], sink: DecoupledIO[FuncUnitInput]) =>
-      sink.valid := source.valid
-      source.ready := sink.ready
 
-      sink.bits.data.pc          .foreach(x => x := source.bits.data.pc.get)
-      sink.bits.data.nextPcOffset.foreach(x => x := source.bits.data.nextPcOffset.get)
-      sink.bits.data.imm         := source.bits.data.imm
-      sink.bits.ctrl.fuOpType    := source.bits.ctrl.fuOpType
-      sink.bits.ctrl.robIdx      := source.bits.robIdx
-      sink.bits.ctrl.pdest       := source.bits.toRF.pdest
-      sink.bits.ctrl.pdestV0     .foreach(x => x := source.bits.toRF.pdestV0.get)
-      sink.bits.ctrl.pdestVl     .foreach(x => x := source.bits.toRF.pdestVl.get)
-      sink.bits.ctrl.rfWen       .foreach(x => x := source.bits.ctrl.rfWen.get)
-      sink.bits.ctrl.fpWen       .foreach(x => x := source.bits.ctrl.fpWen.get)
-      sink.bits.ctrl.vecWen      .foreach(x => x := source.bits.ctrl.vecWen.get)
-      sink.bits.ctrl.v0Wen       .foreach(x => x := source.bits.ctrl.v0Wen.get)
-      sink.bits.ctrl.vlWen       .foreach(x => x := source.bits.ctrl.vlWen.get)
-      sink.bits.ctrl.flushPipe   .foreach(x => x := source.bits.ctrl.flushPipe.get)
-      sink.bits.ctrl.isRVC       .foreach(x => x := source.bits.ctrl.isRVC.get)
-      sink.bits.ctrl.rasAction   .foreach(x => x := source.bits.ctrl.rasAction.get)
-      sink.bits.ctrl.ftqIdx      .foreach(x => x := source.bits.ctrl.ftqIdx.get)
-      sink.bits.ctrl.ftqOffset   .foreach(x => x := source.bits.ctrl.ftqOffset.get)
-      sink.bits.ctrl.predictInfo .foreach(x => x := source.bits.ctrl.predictInfo.get)
-      sink.bits.ctrl.fflagsWen   .foreach(x => x := source.bits.ctrl.fflagsWen.get)
-      sink.bits.ctrl.vpu         .foreach(x => x := source.bits.ctrl.vpu.get)
-      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFpToVecInst := 0.U)
-      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP32Instr   := 0.U)
-      sink.bits.ctrl.vpu         .foreach(x => x.fpu.isFP64Instr   := 0.U)
-      sink.bits.ctrl.frm         .foreach(x => x := source.bits.ctrl.frm.get)
-      sink.bits.ctrl.oldVType    .foreach(x => x := source.bits.ctrl.oldVType.get)
-      sink.bits.perfDebugInfo    .foreach(_ := source.bits.perfDebugInfo.get)
-      sink.bits.debug_seqNum     .foreach(_ := source.bits.debug_seqNum.get)
-  }
-  funcUnits.filter(_.cfg.latency.latencyVal.nonEmpty).map{ fu =>
+  def connectFuPipe(sourcePipe: (Seq[NewExuInput], Seq[Bool]), fu: FuncUnit): Unit = {
     val latency = fu.cfg.latency.latencyVal.getOrElse(0)
-    if (fu.cfg == I2fCfg){
-      println(s"I2fCfg latency = $latency")
-    }
-    for (i <- 0 until (latency+1)) {
+    for (i <- 0 until (latency + 1)) {
       val sink = fu.io.in.bits.ctrlPipe.get(i)
-      val source = inPipe._1(i)
-      fu.io.in.bits.validPipe.get(i) := inPipe._2(i)
+      val source = sourcePipe._1(i)
+      fu.io.in.bits.validPipe.get(i) := sourcePipe._2(i)
       sink.fuOpType := source.ctrl.fuOpType
       sink.robIdx := source.robIdx
       sink.pdest := source.toRF.pdest
@@ -236,25 +216,68 @@ class ExeUnitImp(implicit p: Parameters, val exuParams: ExeUnitParams) extends X
       sink.oldVType.foreach(x => x := source.ctrl.oldVType.get)
       sink.frm.foreach(_ := source.ctrl.frm.get)
       val sinkData = fu.io.in.bits.dataPipe.get(i)
-      val sourceData = inPipe._1(i)
-      sinkData.src.zip(sourceData.data.src).foreach { case (fuSrc, exuSrc) => fuSrc := exuSrc }
+      sinkData.src.zip(source.data.src).foreach { case (fuSrc, exuSrc) => fuSrc := exuSrc }
       sinkData.FmulToFaluDataInput.foreach(x => x := source.data.FaluInputFromFmul.get)
-      sinkData.v0.foreach(_ := sourceData.data.v0.get)
-      sinkData.vl.foreach(_ := sourceData.data.vl.get)
-      sinkData.pc.foreach(x => x := sourceData.data.pc.get)
-      sinkData.nextPcOffset.foreach(x => x := sourceData.data.nextPcOffset.get)
-      sinkData.imm := sourceData.data.imm
+      sinkData.v0.foreach(_ := source.data.v0.get)
+      sinkData.vl.foreach(_ := source.data.vl.get)
+      sinkData.pc.foreach(x => x := source.data.pc.get)
+      sinkData.nextPcOffset.foreach(x => x := source.data.nextPcOffset.get)
+      sinkData.imm := source.data.imm
     }
   }
 
-  funcUnits.zip(exuParams.idxCopySrc).map{ case(fu, idx) =>
-    (fu.io.in.bits.data.src).zip(io.in.bits.data.src).foreach { case(fuSrc, exuSrc) => fuSrc := exuSrc }
-    fu.io.in.bits.data.v0.foreach(_ := io.in.bits.data.v0.get)
-    fu.io.in.bits.data.vl.foreach(_ := io.in.bits.data.vl.get)
+  def connectFuCopySrc(source: NewExuInput, fu: FuncUnit): Unit = {
+    fu.io.in.bits.data.src.zip(source.data.src).foreach { case (fuSrc, exuSrc) => fuSrc := exuSrc }
+    fu.io.in.bits.data.FmulToFaluDataInput.foreach(x => x := source.data.FaluInputFromFmul.get)
+    fu.io.in.bits.data.v0.foreach(_ := source.data.v0.get)
+    fu.io.in.bits.data.vl.foreach(_ := source.data.vl.get)
   }
-  funcUnits.filter(_.cfg.isFalu).map { falu => {
-    io.in.bits.data.FaluInputFromFmul.foreach { x => falu.io.in.bits.data.FmulToFaluDataInput.get := x }
-  }}
+
+  val in1ToN = Module(new Dispatcher(new NewExuInput(exuParams), funcUnits.length, acceptCond))
+
+  // ExeUnit.in <---> Dispatcher.in
+  in1ToN.io.in.valid := io.in.valid
+  in1ToN.io.in.bits := io.in.bits
+  io.in.ready := in1ToN.io.in.ready
+
+  def pipelineReg(init: NewExuInput, valid: Bool, latency: Int, flush: ValidIO[Redirect]): (Seq[NewExuInput], Seq[Bool]) = {
+    val validVec = valid +: Seq.fill(latency)(RegInit(false.B))
+    val inVec = init +: Seq.fill(latency)(Reg(new NewExuInput(exuParams)))
+    val robIdxVec = inVec.map(_.robIdx)
+    // if flush(0), valid 0 will not given, so set flushVec(0) to false.B
+    val flushVec = validVec.zip(robIdxVec).map(x => x._1 && x._2.needFlush(flush))
+    for (i <- 1 to latency) {
+      validVec(i) := validVec(i - 1) && !flushVec(i - 1)
+      inVec(i) := inVec(i - 1)
+    }
+    (inVec, validVec)
+  }
+  val latencyMax = fuCfgs.map(_.latency.latencyVal.getOrElse(0)).max
+  val inPipe = pipelineReg(io.in.bits, io.in.valid, latencyMax, io.flush)
+  val faluPipe = io.faluIn.map(faluIn => pipelineReg(faluIn.bits, faluIn.valid, faluFuncUnit.get.cfg.latency.latencyVal.getOrElse(0), io.flush))
+  // Dispatcher.out <---> FunctionUnits
+  in1ToN.io.out.zip(funcUnits).foreach {
+    case (source: DecoupledIO[NewExuInput], fu) if io.faluIn.nonEmpty && fu.cfg.isFalu =>
+      source.ready := true.B
+    case (source: DecoupledIO[NewExuInput], fu) =>
+      connectFuInput(source, fu.io.in)
+  }
+  io.faluIn.foreach { faluIn =>
+    XSError(io.in.valid && io.in.bits.ctrl.fuType === FuType.falu.U, "[ExeUnit] FALU input should use dedicated io.faluIn")
+    connectFuInput(faluIn, faluFuncUnit.get.io.in)
+  }
+  funcUnits.filter(_.cfg.latency.latencyVal.nonEmpty).map{ fu =>
+    if (fu.cfg == I2fCfg){
+      println(s"I2fCfg latency = ${fu.cfg.latency.latencyVal.getOrElse(0)}")
+    }
+    val sourcePipe = if (io.faluIn.nonEmpty && fu.cfg.isFalu) faluPipe.get else inPipe
+    connectFuPipe(sourcePipe, fu)
+  }
+
+  funcUnits.zip(exuParams.idxCopySrc).map{ case(fu, idx) =>
+    val source = if (io.faluIn.nonEmpty && fu.cfg.isFalu) io.faluIn.get.bits else io.in.bits
+    connectFuCopySrc(source, fu)
+  }
 
   private val OutresVecs = funcUnits.map { fu =>
     def latDiff :Int = fu.cfg.latency.extraLatencyVal.getOrElse(0)

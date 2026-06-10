@@ -289,10 +289,10 @@ class BypassNetwork()(implicit p: Parameters, params: BackendParams) extends XSM
     intExuOut.bits := intExuRelay.bits
   }
 
-  io.toExus.fp.flatten.filter(_.bits.params.hasFmulFu).lazyZip(toNewExusFpRelay.flatten.filter(_.bits.params.hasFmulFu)).lazyZip(io.fromExus.fpFromFmulToFalu.flatten).foreach { case (fpExuOut, fpExuRelay, fmulToFaluBypassInput) =>
-    fpExuOut.valid := fpExuRelay.valid || fmulToFaluBypassInput.valid
+  io.toExus.fp.flatten.zip(toNewExusFpRelay.flatten).foreach { case (fpExuOut, fpExuRelay) =>
+    fpExuOut.valid := fpExuRelay.valid
     fpExuRelay.ready := fpExuOut.ready
-    fpExuOut.bits := Mux(fmulToFaluBypassInput.valid, fmulToFaluBypassInput.bits, fpExuRelay.bits)
+    fpExuOut.bits := fpExuRelay.bits
   }
 
   io.toExus.fp.flatten.filterNot(_.bits.params.hasFmulFu).zip(toNewExusFpRelay.flatten.filterNot(_.bits.params.hasFmulFu)).foreach { case (fpExuOut, fpExuRelay) =>

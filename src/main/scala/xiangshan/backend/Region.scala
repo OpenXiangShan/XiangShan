@@ -626,22 +626,47 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     }
     for (i <- 0 until exuBlock.io.in.length) {
       for (j <- 0 until exuBlock.io.in(i).length) {
-        val shouldLdCancel = LoadShouldCancel(bypassNetwork.io.toExus.fp(i)(j).bits.ctrl.loadDependency, io.ldCancel)
+        val fpExuIn = bypassNetwork.io.toExus.fp(i)(j)
+        val shouldLdCancel = LoadShouldCancel(fpExuIn.bits.ctrl.loadDependency, io.ldCancel)
+        val isFaluOp = fpExuIn.bits.params.hasFaluFu.B && fpExuIn.bits.ctrl.fuType === FuType.falu.U
+        val pipeToExu = Wire(chiselTypeOf(fpExuIn))
+        pipeToExu.valid := fpExuIn.valid && !isFaluOp
+        pipeToExu.bits := fpExuIn.bits
+        val pipeToFalu = Wire(chiselTypeOf(fpExuIn))
+        val fromFmulValid = exuBlock.io.outToFalu.get(i).head.valid
+        assert(PopCount(VecInit(fpExuIn.valid && isFaluOp, fromFmulValid)) < 2.U, s"fpExuIn.valid && isFaluOp and fromFmulValid conflict")
+        pipeToFalu.valid := fpExuIn.valid && isFaluOp || fromFmulValid
+        pipeToFalu.bits := Mux(fromFmulValid, exuBlock.io.outToFalu.get(i).head.bits, fpExuIn.bits)
+
         val rightOut = Wire(chiselTypeOf(exuBlock.io.in(i)(j)))
+        val rightFaluOut = Wire(chiselTypeOf(exuBlock.io.faluIn.get(i)(j)))
         rightOut.ready := true.B
+        rightFaluOut.ready := true.B
+
         NewPipelineConnect(
-          bypassNetwork.io.toExus.fp(i)(j), rightOut, rightOut.fire,
+          pipeToExu, rightOut, rightOut.fire,
           Mux(
-            bypassNetwork.io.toExus.fp(i)(j).valid,
-            bypassNetwork.io.toExus.fp(i)(j).bits.robIdx.needFlush(flushCopyRegVec.last) || shouldLdCancel,
+            pipeToExu.valid,
+            pipeToExu.bits.robIdx.needFlush(flushCopyRegVec.last) || shouldLdCancel,
             false.B
           ),
           Option(s"pipeTo${rightOut.bits.params.name}")
         )
+        NewPipelineConnect(
+          pipeToFalu, rightFaluOut, rightFaluOut.fire,
+          Mux(
+            pipeToFalu.valid,
+            pipeToFalu.bits.robIdx.needFlush(flushCopyRegVec.last),
+            false.B
+          ),
+          Option(s"pipeFaluTo${rightFaluOut.bits.params.name}")
+        )
+
         exuBlock.io.in(i)(j).valid := rightOut.valid
         exuBlock.io.in(i)(j).bits := rightOut.bits
-        val ldCancelResp = !exuBlock.io.in(i)(j).bits.params.needUncertainWakeup.B || !shouldLdCancel
-        bypassNetwork.io.toExus.fp(i)(j).ready := exuBlock.io.in(i)(j).ready && ldCancelResp
+        exuBlock.io.faluIn.get(i)(j).valid := rightFaluOut.valid
+        exuBlock.io.faluIn.get(i)(j).bits := rightFaluOut.bits
+        fpExuIn.ready := Mux(isFaluOp, pipeToFalu.ready, pipeToExu.ready)
       }
     }
     io.exuOut.flatten.zip((exuBlock.io.out).flatten).map { case (sink, source) =>
