@@ -1207,10 +1207,10 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val l2vmidhit = VecInit(l2vmids.map(_.getOrElse(0.U) === sfence_dup(2).bits.id)).asUInt
     val spvmidhit = VecInit(spvmids.map(_.getOrElse(0.U) === sfence_dup(0).bits.id)).asUInt
 
-    val l0hhit = VecInit(l0h.flatMap(_.map(_ === onlyStage2))).asUInt
-    val l1hhit = VecInit(l1h.flatMap(_.map(_ === onlyStage2))).asUInt
-    val l2hhit = VecInit(l2h.map(_ === onlyStage2)).asUInt
-    val sphhit = VecInit(sph.map(_ === onlyStage2)).asUInt
+    val l0hhit = VecInit(l0h.flatMap(_.map(h => h === onlyStage1 || h === onlyStage2))).asUInt
+    val l1hhit = VecInit(l1h.flatMap(_.map(h => h === onlyStage1 || h === onlyStage2))).asUInt
+    val l2hhit = VecInit(l2h.map(h => h === onlyStage1 || h === onlyStage2)).asUInt
+    val sphhit = VecInit(sph.map(h => h === onlyStage1 || h === onlyStage2)).asUInt
 
     val hfenceg_gvpn = (sfence_dup(0).bits.addr << 2)(sfence_dup(0).bits.addr.getWidth - 1, offLen)
     val l0hashVpn = XORFold(hfenceg_gvpn(vpnLen - 1, vpnLen - PtwL0TagLen), l2tlbParams.hashVpnWidth)
@@ -1232,11 +1232,26 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
       }
     }.otherwise {
       when(sfence_dup(0).bits.rs2) {
-        l0v := l0v & ~(l0hhit & l0vpnhit & l0flushMask)
-        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, allType = true, ignoreID = true.B, sfence = isGSfence))).asUInt)
+        l0v := l0v & ~(VecInit(l0h.flatMap(_.map(_ === onlyStage2))).asUInt & l0vpnhit & l0flushMask)
+        spv := spv & ~(VecInit(sph.map(_ === onlyStage2)).asUInt & VecInit(sp.map(_.hit(
+          hfenceg_gvpn,
+          0.U,
+          0.U,
+          sfence_dup(0).bits.id,
+          allType = true,
+          ignoreID = true.B,
+          sfence = isGSfence
+        ))).asUInt)
       }.otherwise {
-        l0v := l0v & ~(l0hhit & l0vmidhit & l0vpnhit & l0flushMask)
-        spv := spv & ~(sphhit & VecInit(sp.map(_.hit(hfenceg_gvpn, 0.U, 0.U, sfence_dup(0).bits.id, allType = true, sfence = isGSfence))).asUInt)
+        l0v := l0v & ~(VecInit(l0h.flatMap(_.map(_ === onlyStage2))).asUInt & l0vmidhit & l0vpnhit & l0flushMask)
+        spv := spv & ~(VecInit(sph.map(_ === onlyStage2)).asUInt & VecInit(sp.map(_.hit(
+          hfenceg_gvpn,
+          0.U,
+          0.U,
+          sfence_dup(0).bits.id,
+          allType = true,
+          sfence = isGSfence
+        ))).asUInt)
       }
     }
   }
@@ -1277,8 +1292,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
     when (hfenceg_valid) {
       val l3vmidhit = VecInit(l3vmids.get.map(_.getOrElse(0.U) === sfence_dup(2).bits.id)).asUInt
-      val l3hhit = VecInit(l3h.get.map(_ === onlyStage2)).asUInt
-      val hfenceg_gvpn = (sfence_dup(2).bits.addr << 2)(sfence_dup(2).bits.addr.getWidth - 1, offLen)
+      val l3hhit = VecInit(l3h.get.map(h => h === onlyStage1 || h === onlyStage2)).asUInt
       when(sfence_dup(2).bits.rs1) {
         when(sfence_dup(2).bits.rs2) {
           l3v.map(_ := l3v.get & ~l3hhit)
