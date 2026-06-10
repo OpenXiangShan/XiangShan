@@ -1188,6 +1188,10 @@ object Opcode {
       opcode + Src1Imm(DecodeSelImm.OPIVIU)
     }
 
+    def vri: Opcode = {
+      opcode + Src1Imm(DecodeSelImm.VRORVI)
+    }
+
     def dx: Opcode = {
       opcode + GpWen
     }

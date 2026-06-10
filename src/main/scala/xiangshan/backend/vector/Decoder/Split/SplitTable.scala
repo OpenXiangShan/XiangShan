@@ -504,7 +504,8 @@ object SplitTable {
       VADD_VV  -> dup(vadd_e8, vadd_e16, vadd_e32, vadd_e64)(_.S1v),
       VADD_VX  -> dup(vadd_e8, vadd_e16, vadd_e32, vadd_e64)(_.S2x),
       VADD_VI  -> dup(vadd_e8, vadd_e16, vadd_e32, vadd_e64)(_.vsi),
-      // Todo: VANDN
+      VANDN_VV  -> dup(vandn_e8, vandn_e16, vandn_e32, vandn_e64)(_.S1v),
+      VANDN_VX  -> dup(vandn_e8, vandn_e16, vandn_e32, vandn_e64)(_.S2x),
       VSUB_VV  -> dup(vsub_e8, vsub_e16, vsub_e32, vsub_e64)(_.S1v),
       VSUB_VX  -> dup(vsub_e8, vsub_e16, vsub_e32, vsub_e64)(_.S2x),
       VRSUB_VX -> dup(vsub_e8, vsub_e16, vsub_e32, vsub_e64)(_.S2x.rev),
@@ -552,7 +553,11 @@ object SplitTable {
       VMSBC_VX   -> dupM(vmsbc_e8, vmsbc_e16, vmsbc_e32, vmsbc_e64)(_.S2x),
       VMSBC_VVM  -> dupM(vmsbc_e8, vmsbc_e16, vmsbc_e32, vmsbc_e64)(_.S1v),
       VMSBC_VXM  -> dupM(vmsbc_e8, vmsbc_e16, vmsbc_e32, vmsbc_e64)(_.S2x),
-      // Todo: vror, vrol
+      VROR_VV    -> dup(vror_e8, vror_e16, vror_e32, vror_e64)(_.S1v),
+      VROR_VX    -> dup(vror_e8, vror_e16, vror_e32, vror_e64)(_.S2x),
+      VROR_VI    -> dup(vror_e8, vror_e16, vror_e32, vror_e64)(_.vri),
+      VROL_VV    -> dup(vrol_e8, vrol_e16, vrol_e32, vrol_e64)(_.S1v),
+      VROL_VX    -> dup(vrol_e8, vrol_e16, vrol_e32, vrol_e64)(_.S2x),
       VMERGE_VVM -> dup(vmerge_vv_e8, vmerge_vv_e16, vmerge_vv_e32, vmerge_vv_e64)(_.S1v),
       VMERGE_VXM -> dup(vmerge_vx_e8, vmerge_vx_e16, vmerge_vx_e32, vmerge_vx_e64)(_.S2x),
       VMERGE_VIM -> dup(vmerge_vx_e8, vmerge_vx_e16, vmerge_vx_e32, vmerge_vx_e64)(_.vsi),
