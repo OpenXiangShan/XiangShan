@@ -83,8 +83,8 @@ object ScalaUopTable {
     )
 
     val tableJumpLink = JumpLinkType.mapUopcodes(
-      _.JAL     -> Seq(link, j),
-      _.JALR    -> Seq(link, jr),
+      _.JAL     -> Seq(j, link),
+      _.JALR    -> Seq(jr, link),
     )
 
     tableI64Type ++ tableIType ++ tableJumpLink
