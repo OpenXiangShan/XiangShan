@@ -1063,7 +1063,13 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }.elsewhen(robEntries(i).valid) {
       // update by writing back
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
-      assert(!(robEntries(i).uopNum - wbCnt > robEntries(i).uopNum), s"robEntries $i uopNum is overflow!")
+      val wbOverflow = robEntries(i).uopNum - wbCnt > robEntries(i).uopNum
+      assert(!wbOverflow, s"robEntries $i uopNum is overflow!")
+      when(wbOverflow && backendParams.debugEn.B) {
+        printf(s"robidx.value = 0x${i.toHexString}\n")
+        printf(s"pc = %x\n", robEntries(i).debug_pc.get)
+        printf(s"instr = %x\n", robEntries(i).debug_instr.get)
+      }
     }
 
     val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.fflagsWen.getOrElse(false.B))
