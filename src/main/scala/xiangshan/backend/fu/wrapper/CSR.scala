@@ -208,10 +208,10 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   trapTvalMod.io.fromCtrlBlock.flush := io.flush
   trapTvalMod.io.fromCtrlBlock.robDeqPtr := io.csrio.get.robDeqPtr
 
-  satpFlushMod.in.satp.valid  := csrMod.io.status.satp.wen
-  satpFlushMod.in.vsatp.valid := csrMod.io.status.vsatp.wen
-  satpFlushMod.in.satp.bits   := csrMod.io.status.satp.mode
-  satpFlushMod.in.vsatp.bits  := csrMod.io.status.vsatp.mode
+  satpFlushMod.in.satp.valid  := csrMod.io.status.satp.valid
+  satpFlushMod.in.vsatp.valid := csrMod.io.status.vsatp.valid
+  satpFlushMod.in.satp.bits   := csrMod.io.status.satp.bits
+  satpFlushMod.in.vsatp.bits  := csrMod.io.status.vsatp.bits
   satpFlushMod.in.privState   := csrMod.io.status.privState
 
   val imsic = Module(new aia.IMSIC_WRAP(soc.IMSICParams))
@@ -309,7 +309,7 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   io.out.valid := csrModOutValid
   io.out.bits.ctrl.exceptionVec.get := exceptionVec
   io.out.bits.ctrl.flushPipe.get := flushPipe
-  io.out.bits.ctrl.satpFlushPipe.get := csrMod.io.status.satp.wen || csrMod.io.status.vsatp.wen
+  io.out.bits.ctrl.satpFlushPipe.get := csrMod.io.status.satp.valid || csrMod.io.status.vsatp.valid
   io.out.bits.res.data := csrMod.io.out.bits.rData
 
   /** initialize NewCSR's io_out_ready from wrapper's io */

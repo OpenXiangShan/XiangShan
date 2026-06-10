@@ -2,15 +2,10 @@ package xiangshan.backend.fu.NewCSR
 
 import chisel3._
 import chisel3.util._
-import org.chipsalliance.cde.config.Parameters
-import xiangshan._
-import system.HasSoCParameter
-import utility.HasCircularQueuePtrHelper
-import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu.NewCSR.CSRDefines._
 import xiangshan.backend.fu.NewCSR.CSRBundles.PrivState
 
-class SatpFlushMod(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
+class SatpFlushMod extends Module {
   val in = IO(Input(new SatpFlushMod.In))
   val out = IO(Output(new SatpFlushMod.Out))
 
@@ -39,13 +34,13 @@ class SatpFlushMod(implicit p: Parameters) extends XSModule with HasCircularQueu
 }
 
 object SatpFlushMod {
-  class In(implicit p: Parameters) extends XSBundle with HasXSParameter {
+  class In extends Bundle {
     val satp  = ValidIO(UInt(SatpMode.getWidth.W))
     val vsatp = ValidIO(UInt(SatpMode.getWidth.W))
     val privState  = new PrivState
   }
 
-  class Out(implicit p: Parameters) extends XSBundle with HasXSParameter {
+  class Out extends Bundle {
     val oldPrivState = new PrivState
     val oldSatpMode = UInt(SatpMode.getWidth.W)
   }

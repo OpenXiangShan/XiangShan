@@ -219,8 +219,4 @@ object CSRBundles {
     val wfi_enable = Output(Bool())
   }
 
-  class SatpInfo(implicit p: Parameters) extends Bundle {
-    val wen  = Bool()
-    val mode = UInt(SatpMode.getWidth.W)
-  }
 }
