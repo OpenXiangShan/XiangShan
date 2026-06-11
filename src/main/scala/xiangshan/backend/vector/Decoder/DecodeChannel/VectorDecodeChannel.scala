@@ -12,6 +12,7 @@ import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
 import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.fu.vector.Bundles._
 import xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel.{CommitTypeField, FFlagsWenField, FrmRenField}
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel._
 import xiangshan.backend.vector.Decoder.DecodePatterns.SewLmulPattern
@@ -49,98 +50,58 @@ class VectorDecodeChannel(
 
   val instPats: Seq[VecInstPattern] = instSeq
 
-  val instSewPats: Seq[DecodePatternComb2[VecInstPattern, SewPattern]] =
-    VecInstPattern.withSew(instSeq.filterNot(_.isInstanceOf[VecCryptoVVVVPattern])) ++
-      instSeq.filter(_.isInstanceOf[VecCryptoVVVVPattern]).map(_ ## SewPattern.e32)
-
   val instSewLmulNfPats: Seq[DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern]] = {
     instSeq.flatMap {
       vi =>
         vi match {
           case vai: VecArithInstPattern =>
-            vai match {
-              case viai: VecIntArithInstPattern =>
-                viai match {
-                  case VecIntVVWPattern() |
-                       VecIntVVWWPattern() |
-                       VecIntClipWVVPattern() |
-                       VecIntNarrowShiftWVVPattern() |
-                       VecIntWVWPattern() |
-                       VecIntWRedPattern() |
-                       VecIntS2DVExtF2Pattern() =>
-                    for (sewlmul <- SewLmulPattern.widenAll) yield {
-                      vi ## sewlmul ## NfPattern.dontCare
-                    }
-                  case VecIntS2DVExtF8Pattern() =>
-                    for (sewlmul <- SewLmulPattern.e8All) yield {
-                      vi ## sewlmul ## NfPattern.dontCare
-                    }
-                  case VecIntS2DVExtF4Pattern() =>
-                    for (sewlmul <- SewLmulPattern.e8All ++ SewLmulPattern.e16All) yield {
-                      vi ## sewlmul ## NfPattern.dontCare
-                    }
-                  case VecCryptoVVVVPattern() =>
-                    for (sewlmul <- SewLmulPattern.e32All) yield {
-                      vi ## sewlmul ## NfPattern.dontCare
-                    }
-                  case _ =>
-                    for (sewlmul <- SewLmulPattern.all) yield {
-                      vi ## sewlmul ## NfPattern.dontCare
-                    }
-                }
-              case vfai: VecFpArithInstPattern =>
-                vfai match {
-                  case VecFpWRedPattern() |
-                       VecFpOp2VVWPattern() |
-                       VecFpOp2WVWPattern() |
-                       VecFpOp3VVWPattern() |
-                       VecFpS2VVWPattern() |
-                       VecFpS2WVFpPattern() =>
-                    for (sewlmul <- SewLmulPattern.fpWidenAll) yield {
-                      vi ## sewlmul ## NfPattern.dontCare
-                    }
-                  case VecFpS2WVIntPattern() =>
-                    for (sewlmul <- SewLmulPattern.widenAll) yield {
-                      vi ## sewlmul ## NfPattern.dontCare
-                    }
-                  case _ =>
-                    for (sewlmul <- SewLmulPattern.fpAll) yield {
-                      vi ## sewlmul ## NfPattern.dontCare
-                    }
-                }
-              case _ =>
-                throw new IllegalArgumentException(s"Unsupported vector arith pattern $vai in VectorDecodeChannel")
+            val withTraits = VecArithInstPattern.apply()(vai.rawInst)
+            for {
+              (sewV: Int, lmulV: Double) <- SewLmulRangeField.validPairs(withTraits).toSeq
+              sewlmul = SewPattern.apply(sewV) ## LmulPattern.apply(lmulV)
+            } yield {
+              vi ## sewlmul ## NfPattern.dontCare
             }
           case vmi: VecMemInstPattern =>
             vmi match {
               case _: VecMemMask =>
-                for {
-                  sewlmul <- SewLmulPattern.all
-                } yield {
-                  vi ## sewlmul ## NfPattern.dontCare
-                }
+                for { sewlmul <- SewLmulPattern.all } yield vi ## sewlmul ## NfPattern.dontCare
               case _: VecMemWhole =>
-                for {
-                  sewlmul <- SewLmulPattern.all
-                  nf <- NfPattern.pot
-                } yield {
-                  vi ## sewlmul ## nf
-                }
-              case _ =>
+                for { sewlmul <- SewLmulPattern.all; nf <- NfPattern.pot } yield vi ## sewlmul ## nf
+              case _ if vmi.isInstanceOf[VecMemFF] || vmi.isInstanceOf[VecMemUnitStride] || vmi.isInstanceOf[VecMemStrided] =>
+                val eew = vmi.eewValue
                 for {
                   sewlmul <- SewLmulPattern.all
                   nf <- NfPattern.all
-                } yield {
-                  vi ## sewlmul ## nf
-                }
+                  sew = sewlmul.p1.sewValue
+                  lmul = sewlmul.p2.lmulValue
+                  emul = eew * lmul / sew
+                  uopNum = (emul max 1.0).toInt * nf.segNum
+                  if uopNum <= 8 && emul >= 0.125
+                } yield { vi ## sewlmul ## nf }
+
+              case _ if vmi.isInstanceOf[VecMemIndex] =>
+                val eew = vmi.eewValue
+                for {
+                  sewlmul <- SewLmulPattern.all
+                  nf <- NfPattern.all
+                  sew = sewlmul.p1.sewValue
+                  lmul = sewlmul.p2.lmulValue
+                  iEmul = lmul * eew / sew
+                  uopNum = ((iEmul max lmul) max 1.0).toInt * nf.segNum
+                  if iEmul >= 0.125 && uopNum <= 8
+                } yield { vi ## sewlmul ## nf }
+
+              case _ => Seq()
             }
-          case vci: VecConfigInstPattern =>
-            Seq()
-          case smui: ScaMultUopInstPattern =>
-            Seq(vi ## SewLmulPattern.dontCare ## NfPattern.dontCare)
+          case _: VecConfigInstPattern => Seq()
+          case _: ScaMultUopInstPattern => Seq(vi ## SewLmulPattern.dontCare ## NfPattern.dontCare)
         }
     }
   }
+
+  val instSewPats: Seq[DecodePatternComb2[VecInstPattern, SewPattern]] =
+    instSewLmulNfPats.map(p => p.p1 ## p.p2).distinctBy(_.bitPat)
 
   // Generate decode tables. A decode field is a signal bundle that can be directly generated
   // from the instruction bits, with the the instruction bits itself as decode pattern.
@@ -298,6 +259,7 @@ object VectorDecodeChannel {
     val instSeq = VecInstPattern.all.collect {
       case x: VecArithInstPattern => x
       case x: VecMemInstPattern => x
+      case x: ScaMultUopInstPattern => x
     }
 
     val targetDir = "build/decoderOld"

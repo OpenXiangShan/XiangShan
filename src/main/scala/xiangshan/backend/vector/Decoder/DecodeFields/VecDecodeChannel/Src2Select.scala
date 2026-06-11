@@ -53,10 +53,11 @@ object Src2SelectField extends DecodeField[
     val src2Sel: Src2Val = instP match {
       case vai: VecArithInstPattern =>
         vai match {
+          case vci: VecCryptoInstPattern => INC1
           case vii: VecIntArithInstPattern =>
             vii match {
               case VecIntVVVPattern() => INC1
-              case VecIntVVVVPattern() | VecCryptoVVVVPattern() => INC1
+              case VecIntVVVVPattern() => INC1
               case VecIntVVMPattern() => INC1
               case VecIntMMMPattern() => CONST
               case VecIntVVWPattern() => INCF2
