@@ -38,8 +38,17 @@ class UopInfoField(uopIdx: Int) extends DecodeField[
   override def default: BitPat = BitPat.N() ## BitPat.dontCare(UopInfoRename.width)
 
   override def genTable(op: DecodePatternComb4[VecInstPattern, SewPattern, LmulPattern, NfPattern]): BitPat = {
-    if (UopInfoFieldVec.genUopSeq(op).isDefinedAt(uopIdx)) {
-      BitPat.Y(1) ## UopInfoFieldVec.genUopSeq(op)(uopIdx).genUopInfoRenameBitPat
+    val seq = UopInfoFieldVec.genUopSeq(op)
+    if (seq.isDefinedAt(uopIdx)) {
+      val uop = seq(uopIdx)
+      if (uop == null) {
+        val DecodePatternComb(instP, sewP, lmulP, nfP) = op
+        println(s"[UopInfoField] [Warning] NULL Opcode at uopIdx=$uopIdx for instP=${instP.getClass.getSimpleName} rawInst=${instP.rawInst} sew=${sewP.dumpString} lmul=${lmulP.dumpString} nf=${nfP.dumpString}")
+        println(s"[UopInfoField] [Warning] Full seq: ${seq.mkString(", ")}")
+        default
+      } else {
+        BitPat.Y(1) ## uop.genUopInfoRenameBitPat
+      }
     } else {
       default
     }
@@ -88,62 +97,71 @@ object UopInfoFieldVec extends DecodeField[
       case vci: VecConfigInstPattern =>
         throw new IllegalArgumentException(s"inst ${vci} pattern is not supported in UopInfoField")
 
-      case vmi: VecMemInstPattern if vmi.isInstanceOf[VecMemWhole] =>
-        val seg = nfP.segNum
-        val eew = vmi.eewValue
+      case vmi: VecMemInstPattern => {
         vmi match {
-          case pattern: VecLoadInstPattern => Seq.fill(seg)(getIndexMemUop(vlnrUops, eew))
-          case pattern: VecStoreInstPattern => Seq.fill(seg)(getIndexMemUop(vsnrUops, eew))
-        }
-
-      case vmi: VecMemInstPattern if vmi.isInstanceOf[VecMemMask] =>
-        vmi match {
-          case pattern: VecLoadInstPattern => Seq(vlm)
-          case pattern: VecStoreInstPattern => Seq(vsm)
-        }
-
-      case vmi: VecMemInstPattern =>
-        val seg = nfP.segNum
-        val lmul = lmulP.lmulValue
-        val sew = sewP.sewValue
-        val eew = vmi.eewValue
-        val iEmul = (lmul * eew / sew)
-        val emul = iEmul.max(1.0).toInt
-
-        vmi.asInstanceOf[VecMemTrait] match {
-          case f: VecMemFF if (seg * emul <= 8) =>
-            Seq.fill(seg * emul)(getIndexMemUop(vleffUops, eew))
-
-          case stride: VecMemUnitStride if (seg * emul <= 8) =>
+          case _ if vmi.isInstanceOf[VecMemWhole] =>
+            val seg = nfP.segNum
+            val eew = vmi.eewValue
             vmi match {
-              case pattern: VecLoadInstPattern => Seq.fill(seg * emul)(getIndexMemUop(vleUops, eew))
-              case pattern: VecStoreInstPattern => Seq.fill(seg * emul)(getIndexMemUop(vseUops, eew))
+              case VecLoadWhole()  => Seq.fill(seg)(getIndexMemUop(vlnrUops, eew))
+              case VecStoreWhole() => Seq.fill(seg)(getIndexMemUop(vsnrUops, eew))
+              case _               => Seq()
             }
 
-          case strided: VecMemStrided if (seg * emul <= 8) =>
+          case _ if vmi.isInstanceOf[VecMemMask] =>
             vmi match {
-              case pattern: VecLoadInstPattern => Seq.fill(seg * emul)(getIndexMemUop(vlseUops, eew))
-              case pattern: VecStoreInstPattern => Seq.fill(seg * emul)(getIndexMemUop(vsseUops, eew))
+              case VecLoadMask()  => Seq(vlm)
+              case VecStoreMask() => Seq(vsm)
+              case _              => Seq()
             }
 
-          case index: VecMemIndex =>
+          case _ if vmi.isInstanceOf[VecMemFF] || vmi.isInstanceOf[VecMemUnitStride] || vmi.isInstanceOf[VecMemStrided] => {
+            val seg = nfP.segNum
+            val lmul = lmulP.lmulValue
+            val sew = sewP.sewValue
+            val eew = vmi.eewValue
+            val emul = lmul * eew / sew
+            val dEmul = emul
+            val uopNum = (emul max 1.0).toInt * seg
+            if (emul >= 0.125 && uopNum <= 8) {
+              vmi match {
+                case VecLoadUnitStrideFF() => Seq.fill(uopNum)(getIndexMemUop(vleffUops, eew))
+                case VecLoadUnitStride()   => Seq.fill(uopNum)(getIndexMemUop(vleUops, eew))
+                case VecLoadStrided()      => Seq.fill(uopNum)(getIndexMemUop(vlseUops, eew))
+                case VecStoreUnitStride()  => Seq.fill(uopNum)(getIndexMemUop(vseUops, eew))
+                case VecStoreStrided()     => Seq.fill(uopNum)(getIndexMemUop(vsseUops, eew))
+                case _                     => Seq()
+              }
+            } else {
+              Seq()
+            }
+          }
+
+          case _ if vmi.isInstanceOf[VecMemIndex] => {
+            val seg = nfP.segNum
+            val lmul = lmulP.lmulValue
+            val sew = sewP.sewValue
+            val eew = vmi.eewValue
+            val emul = lmul * eew / sew
+            val iEmul = emul
             val dEmul = lmul
-            val uopNum = (1.0 max iEmul max dEmul).toInt * seg
-            if (iEmul >= 0.125 && uopNum <= 8) {
+            val uopNum = (emul max lmul max 1.0).toInt * seg
+            if (emul >= 0.125 && uopNum <= 8) {
               vmi match {
                 case _: VecLoadUnorderIndex  => Seq.fill(uopNum)(getIndexMemUop(vluxeiUops, sew, eew))
                 case _: VecLoadOrderIndex    => Seq.fill(uopNum)(getIndexMemUop(vloxeiUops, sew, eew))
                 case _: VecStoreUnorderIndex => Seq.fill(uopNum)(getIndexMemUop(vsuxeiUops, sew, eew))
                 case _: VecStoreOrderIndex   => Seq.fill(uopNum)(getIndexMemUop(vsoxeiUops, sew, eew))
-                case _ => Seq()
+                case _                       => Seq()
               }
             } else {
               Seq()
             }
+          } 
 
-          case _ =>
-            Seq()
+          case _ => Seq()
         }
+      }
       case smui: ScaMultUopInstPattern =>
         smui match {
           // case jump: VecJumpInstPattern => tableISplit(jump.rawInst)
@@ -152,13 +170,13 @@ object UopInfoFieldVec extends DecodeField[
     }
   }
 
-  val vleUops = Seq(vle8, vle16, vle32, vle64)
+  val vleUops   = Seq(vle8  , vle16  , vle32  , vle64  )
   val vleffUops = Seq(vle8ff, vle16ff, vle32ff, vle64ff)
-  val vseUops = Seq(vse8, vse16, vse32, vse64)
-  val vlseUops = Seq(vlse8, vlse16, vlse32, vlse64)
-  val vsseUops = Seq(vsse8, vsse16, vsse32, vsse64)
-  val vlnrUops = Seq(vlnre8, vlnre16, vlnre32, vlnre64)
-  val vsnrUops = Seq(vsnre8, vsnre16, vsnre32, vsnre64)
+  val vseUops   = Seq(vse8  , vse16  , vse32  , vse64  )
+  val vlseUops  = Seq(vlse8 , vlse16 , vlse32 , vlse64 )
+  val vsseUops  = Seq(vsse8 , vsse16 , vsse32 , vsse64 )
+  val vlnrUops  = Seq(vlnre8, vlnre16, vlnre32, vlnre64)
+  val vsnrUops  = Seq(vsnre8, vsnre16, vsnre32, vsnre64)
 
   val vluxeiUops: Seq[Seq[Opcode]] = Seq(
     Seq(vluxei8e8 , vluxei8e16 , vluxei8e32 , vluxei8e64 ),
