@@ -58,9 +58,25 @@ class DecodeStageImp(
   val debug_globalCounter = RegInit(0.U(XLEN.W))
 
   /** whether instruction decoded are illegal */
-  val isIllegalInstVec = VecInit(out.uop.map(x => x.fire && (x.bits.exceptionVec(illegalInstr) || x.bits.exceptionVec(virtualInstr))))
+  // Register uop fire/exception/uopBits to cut timing path before trapInstInfo output
+  val uopFire_reg   = RegNext(VecInit(out.uop.map(_.fire)))
+  val uopExcII_reg  = RegNext(VecInit(out.uop.map(_.bits.exceptionVec(illegalInstr))))
+  val uopExcVI_reg  = RegNext(VecInit(out.uop.map(_.bits.exceptionVec(virtualInstr))))
+  val uopBits_reg   = RegNext(VecInit(out.uop.map(_.bits)))
+
+  val isIllegalInstVec = VecInit(uopFire_reg.zip(uopExcII_reg).zip(uopExcVI_reg).map {
+    case ((fire, excII), excVI) => fire && (excII || excVI)
+  })
   val hasIllegalInst = isIllegalInstVec.reduce(_ || _)
-  val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(out.uop.map(_.bits)), 0.U.asTypeOf(new DecodeOutUop))
+  val illegalInst = PriorityMuxDefault(isIllegalInstVec.zip(uopBits_reg), 0.U.asTypeOf(new DecodeOutUop))
+
+  val illegalTrapInstInfo = Wire(chiselTypeOf(out.toCSR.trapInstInfo.bits))
+  illegalTrapInstInfo := DontCare
+  illegalTrapInstInfo.fromDecodedInst(illegalInst)
+
+  val redirect_reg = RegNext(in.redirect.valid)
+  out.toCSR.trapInstInfo.valid := !redirect_reg && hasIllegalInst
+  out.toCSR.trapInstInfo.bits  := illegalTrapInstInfo
 
 
   for (i <- decodeChannels.in.mops.indices) {
@@ -220,13 +236,6 @@ class DecodeStageImp(
   }
 
   out.toFrontend.canAccept := !in.redirect.valid && out.uop.head.ready
-
-  val illegalTrapInstInfo = Wire(chiselTypeOf(out.toCSR.trapInstInfo.bits))
-  illegalTrapInstInfo := DontCare
-  illegalTrapInstInfo.fromDecodedInst(illegalInst)
-
-  out.toCSR.trapInstInfo.valid := RegNext(!in.redirect.valid && hasIllegalInst)
-  out.toCSR.trapInstInfo.bits  := RegNext(illegalTrapInstInfo)
 
   stallReason.out.reason := stallReason.in.reason
 
