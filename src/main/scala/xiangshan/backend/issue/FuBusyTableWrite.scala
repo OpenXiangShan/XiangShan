@@ -5,12 +5,15 @@ import chisel3._
 import chisel3.util._
 import utils.MapUtils
 import xiangshan._
+import xiangshan.backend.fu.FuConfig.FmulCfg
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Utils
 import xiangshan.backend.issue.EntryBundles.IssueQueueRespBundle
 
 class FuBusyTableWrite(fuLatencyMap: Map[FuType.OHType, Int]) (implicit p: Parameters, iqParams: IssueBlockParams) extends XSModule {
-  private val latencyValMax: Int = fuLatencyMap.values.fold(0)(_ max _)
+
+  private val fmaLat = if (iqParams.getFuCfgs.contains(FmulCfg)) 3 else 0
+  private val latencyValMax: Int = fuLatencyMap.values.fold(fmaLat)(_ max _)
   private val tableSize = latencyValMax + 1
   val io = IO(new FuBusyTableWriteIO(latencyValMax))
 
