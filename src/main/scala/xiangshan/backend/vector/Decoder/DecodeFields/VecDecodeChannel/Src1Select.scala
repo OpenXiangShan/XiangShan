@@ -137,7 +137,7 @@ object Src1SelectField extends DecodeField[
         }
       case VecConfigInstPattern() => CONST
       case vmi: VecMemInstPattern => CONST
-      case vii: VecIntInstPattern => CONST
+      case smui: ScaMultUopInstPattern => CONST
     }
     src1Sel.toBitPat
   }

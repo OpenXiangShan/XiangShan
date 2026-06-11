@@ -3,7 +3,7 @@ package xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel
 import chisel3.util.BitPat
 import xiangshan.backend.decode.isa.Instructions._
 import xiangshan.backend.vector.Decoder.InstPattern.VecInstPattern.Category
-import xiangshan.backend.vector.Decoder.InstPattern.{VecArithInstPattern, VecConfigInstPattern, VecInstPattern, VecIntInstPattern, VecMemInstPattern}
+import xiangshan.backend.vector.Decoder.InstPattern.{VecArithInstPattern, VecConfigInstPattern, VecInstPattern, ScaMultUopInstPattern, VecMemInstPattern}
 import xiangshan.backend.vector.Decoder.util.BoolDecodeField
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
 import xiangshan.macros.InstanceNameMacro.{getVariableName, getVariableNameSeq}
@@ -19,7 +19,7 @@ object ImmIsSign5b extends BoolDecodeField[VecInstPattern] {
       ).toBitPat
       case VecConfigInstPattern() => n
       case _: VecMemInstPattern => n
-      case _: VecIntInstPattern => n
+      case _: ScaMultUopInstPattern => n
     }
   }
 }
