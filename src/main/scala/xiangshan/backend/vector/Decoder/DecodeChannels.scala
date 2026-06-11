@@ -14,7 +14,7 @@ import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.wrapper.CSRToDecode
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{VType, Vstart}
 import xiangshan.backend.vector.Decoder.DecodeChannel.VectorDecodeChannel.VecDecodeChannelOutputUop
 import xiangshan.backend.vector.Decoder.DecodeChannel.SimpleDecodeChannel.SimpleDecodeChannelOutputUop
 import xiangshan.backend.vector.Decoder.DecodeChannel._
@@ -192,6 +192,7 @@ class DecodeChannels(
     modIn.rawInst := in.mops(i).bits.info.rawInst
     modIn.vtype   := in.mops(i).bits.info.vtype
     modIn.fromCSR := in.mops(i).bits.info.fromCSR
+    modIn.vstart  := in.mops(i).bits.info.vstart
   }
 
   val vsetDecodeChannelsIn: Seq[VsetDecoder.In] = vsetDecodeChannels.map(_.in)
@@ -205,6 +206,7 @@ class DecodeChannels(
     modIn.rawInst := in.mops(i).bits.info.rawInst
     modIn.vtype   := in.mops(i).bits.info.vtype
     modIn.fromCSR := in.mops(i).bits.info.fromCSR
+    modIn.vstart  := in.mops(i).bits.info.vstart
   }
 
   val psdDecodeChannelsIn: Seq[PseudoDecodeChannel.In] = pseudoDecodeChannels.map(_.in)
@@ -305,10 +307,11 @@ class DecodeChannels(
   }
 }
 
-class DecodeChannelInput extends Bundle {
+class DecodeChannelInput(implicit p: Parameters) extends Bundle {
   val rawInst = UInt(32.W)
   val vtype = VType()
   val fromCSR = new CSRToDecode
+  val vstart = Vstart()
   def sew: UInt = vtype.vsew
   def lmul: UInt = vtype.vlmul
   def ma: Bool = vtype.vma
@@ -389,26 +392,26 @@ object DecodeChannelOutput {
     uop.opcode := vuop.opcode
     uop.isVset := vuop.isVset
 
-    uop.src1Ren := Mux(vuop.src12Rev, vuop.renameInfo.uop.src2Ren, vuop.renameInfo.uop.src1Ren)
-    uop.src1Type := Mux(vuop.src12Rev, vuop.renameInfo.uop.src2Type, vuop.renameInfo.uop.src1Type)
-    uop.src2Ren := Mux(vuop.src12Rev, vuop.renameInfo.uop.src1Ren,vuop.renameInfo.uop.src2Ren)
-    uop.src2Type := Mux(vuop.src12Rev, vuop.renameInfo.uop.src1Type,vuop.renameInfo.uop.src2Type)
-    uop.src3Ren := vuop.renameInfo.uop.readVdAsSrc || vuop.vdDepElim =/= VdDepElim.Always
+    uop.src1Ren := Mux(vuop.src12Rev, vuop.renameInfo.src2Ren, vuop.renameInfo.src1Ren)
+    uop.src1Type := Mux(vuop.src12Rev, vuop.renameInfo.src2Type, vuop.renameInfo.src1Type)
+    uop.src2Ren := Mux(vuop.src12Rev, vuop.renameInfo.src1Ren,vuop.renameInfo.src2Ren)
+    uop.src2Type := Mux(vuop.src12Rev, vuop.renameInfo.src1Type,vuop.renameInfo.src2Type)
+    uop.src3Ren := vuop.renameInfo.readVdAsSrc || vuop.vdDepElim =/= VdDepElim.Always
     uop.src3Type.value := DecodeSrcType.VP
     uop.lsrc1 := Mux(vuop.src12Rev, vuop.src.src2, vuop.src.src1)
     uop.lsrc2 := Mux(vuop.src12Rev, vuop.src.src1, vuop.src.src2)
     uop.lsrc3 := vuop.src.dest
-    uop.vlRen := vuop.renameInfo.uop.vlRen
+    uop.vlRen := vuop.renameInfo.vlRen
     uop.v0Ren := vuop.v0Ren
     uop.frmRen := vuop.frmRen
-    uop.maskType := vuop.renameInfo.uop.maskType
-    uop.intRmRen := vuop.renameInfo.uop.intRmRen
-    uop.gpWen := vuop.renameInfo.uop.gpWen
-    uop.fpWen := vuop.renameInfo.uop.fpWen
-    uop.vpWen := vuop.renameInfo.uop.vpWen
+    uop.maskType := vuop.renameInfo.maskType
+    uop.intRmRen := vuop.renameInfo.intRmRen
+    uop.gpWen := vuop.renameInfo.gpWen
+    uop.fpWen := vuop.renameInfo.fpWen
+    uop.vpWen := vuop.renameInfo.vpWen
 
-    uop.vlWen := vuop.renameInfo.uop.vlWen
-    uop.vxsatWen := vuop.renameInfo.uop.vxsatWen
+    uop.vlWen := vuop.renameInfo.vlWen
+    uop.vxsatWen := vuop.renameInfo.vxsatWen
     uop.fflagsWen := vuop.fflagsWen
     uop.ldest := vuop.src.dest
 
@@ -417,8 +420,8 @@ object DecodeChannelOutput {
 
     uop.vm := vuop.vm
 
-    uop.noSpec := vuop.renameInfo.uop.noSpec
-    uop.blockBack := vuop.renameInfo.uop.blockBack
+    uop.noSpec := vuop.renameInfo.noSpec
+    uop.blockBack := vuop.renameInfo.blockBack
 
     uop.flushPipe := false.B
     uop.selImm := vuop.selImm

@@ -19,7 +19,7 @@ import xiangshan.backend.vector.Decoder.DecodePatterns.SewLmulPattern
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
 import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, NumWB, VdDepElim}
-import xiangshan.backend.vector.Decoder.Uop.UopInfoRenameWithIllegal
+import xiangshan.backend.vector.Decoder.Uop.UopInfoRename
 import xiangshan.backend.vector.Decoder._
 import xiangshan.backend.vector.Decoder.util._
 import xiangshan.backend.vector._
@@ -204,8 +204,7 @@ class VectorDecodeChannel(
   // Drive output signals
   for (i <- 0 until maxSplitUopNum) {
     out.uop(i).valid := uopInfos(i).valid
-    out.uop(i).bits.renameInfo.uop := uopInfos(i).bits
-    out.uop(i).bits.renameInfo.illegal := uopIllegal
+    out.uop(i).bits.renameInfo := uopInfos(i).bits
     out.uop(i).bits.fuType := fuTypes(i)
     out.uop(i).bits.opcode := opcodes(i)
     out.uop(i).bits.src := srcSelectModule.out.src(i)
@@ -289,7 +288,7 @@ object VectorDecodeChannel {
   class VecDecodeChannelOutputUop extends Bundle with HasVectorSettings {
     val fuType: UInt = FuType()
     val opcode: UInt = Opcode()
-    val renameInfo = new UopInfoRenameWithIllegal
+    val renameInfo = new UopInfoRename
     val src = new UopSrcBundle
     val v0Ren = Bool()
     val frmRen = Bool()
