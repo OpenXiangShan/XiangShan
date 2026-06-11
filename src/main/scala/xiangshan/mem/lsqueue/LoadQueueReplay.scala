@@ -656,7 +656,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
       allocated(enqIndex) && !enq.bits.isLoadReplay,
       p"LoadQueueReplay: can not accept more load, check: ldu $w, robIdx $debug_robIdx!")
 
-    val enqFireBase = enq.valid && enq.ready && !cancelEnq(w)
+    val enqFireBase = enq.fire && !cancelEnq(w)
     val replayInfo = enq.bits.rep_info
     val isMA = replayInfo.cause(LoadReplayCauses.C_MA)
     val isFF = replayInfo.cause(LoadReplayCauses.C_FF)

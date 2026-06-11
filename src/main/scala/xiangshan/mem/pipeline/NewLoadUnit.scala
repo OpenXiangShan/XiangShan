@@ -602,7 +602,7 @@ class LoadUnitS1(param: ExeUnitParams)(
 
   val kill = !pipeIn.valid || io.kill || isSwInstrPrefetch ||
              robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) || 
-             (robIdx.needFlush(redirectNextNext) & isUnalignTail)
+             (robIdx.needFlush(redirectNextNext) && isUnalignTail)
 
   /**
     * Tlb & DCache
