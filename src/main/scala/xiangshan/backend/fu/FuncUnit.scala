@@ -318,7 +318,7 @@ trait HasPipelineReg { this: FuncUnit =>
     outToFaluFromFmul.bits.ctrl := fmulTofaluCtrl
     outToFaluFromFmul.bits.perfDebugInfo.foreach(_ := fmulTofaluPerfVec.last.get)
     outToFaluFromFmul.bits.debug_seqNum.foreach(_ := fmulTofaluSeqNumVec.last.get)
-    io.out.valid := fixValidVec.last && !RegNext(RegNext(io.in.valid && FuOpType.FMacOpcodes.isOP3(io.in.bits.ctrl.fuOpType)))
+    io.out.valid := fixValidVec.last && !RegNextN(io.in.valid && FuOpType.FMacOpcodes.isOP3(io.in.bits.ctrl.fuOpType), cfg.latency.latencyVal.get)
   } else {
     io.out.valid := fixValidVec.last
     io.in.ready := fixRdyVec.head

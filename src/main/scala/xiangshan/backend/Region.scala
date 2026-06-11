@@ -656,7 +656,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           pipeToFalu, rightFaluOut, rightFaluOut.fire,
           Mux(
             pipeToFalu.valid,
-            pipeToFalu.bits.robIdx.needFlush(flushCopyRegVec.last),
+            pipeToFalu.bits.robIdx.needFlush(flushCopyRegVec.last) || shouldLdCancel && fpExuIn.valid && isFaluOp,
             false.B
           ),
           Option(s"pipeFaluTo${rightFaluOut.bits.params.name}")
@@ -666,7 +666,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         exuBlock.io.in(i)(j).bits := rightOut.bits
         exuBlock.io.faluIn.get(i)(j).valid := rightFaluOut.valid
         exuBlock.io.faluIn.get(i)(j).bits := rightFaluOut.bits
-        fpExuIn.ready := Mux(isFaluOp, pipeToFalu.ready, pipeToExu.ready)
+        val ldCancelResp = !exuBlock.io.in(i)(j).bits.params.needUncertainWakeup.B || !shouldLdCancel
+        bypassNetwork.io.toExus.fp(i)(j).ready := exuBlock.io.in(i)(j).ready && ldCancelResp
       }
     }
     io.exuOut.flatten.zip((exuBlock.io.out).flatten).map { case (sink, source) =>
