@@ -139,7 +139,7 @@ class VectorDecodeChannel(
             }
           case vci: VecConfigInstPattern =>
             Seq()
-          case vii: VecIntInstPattern =>
+          case smui: ScaMultUopInstPattern =>
             Seq(vi ## SewLmulPattern.dontCare ## NfPattern.dontCare)
         }
     }

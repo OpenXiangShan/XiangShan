@@ -159,7 +159,7 @@ case class FenceiInstPattern()(implicit rawInst: BitPat) extends IntITypePattern
 
 case class AmoInstPattern()(implicit rawInst: BitPat) extends IntRTypePattern
 
-sealed class AmocasInstPattern()(implicit rawInst: BitPat) extends VecIntInstPattern
+sealed class AmocasInstPattern()(implicit rawInst: BitPat) extends ScaMultUopInstPattern
 
 object AmocasInstPattern {
   def apply()(implicit rawInst: BitPat): AmocasInstPattern = new AmocasInstPattern
@@ -203,9 +203,9 @@ case class FpR4TypeInstPattern()(implicit rawInst: BitPat) extends FpInstPattern
 
 case class FpSTypeInstPattern()(implicit rawInst: BitPat) extends FpInstPattern
 
-sealed abstract class VecIntInstPattern()(implicit rawInst: BitPat) extends VecInstPattern()
+sealed abstract class ScaMultUopInstPattern()(implicit rawInst: BitPat) extends VecInstPattern()
 
-sealed abstract class VecJumpInstPattern()(implicit rawInst: BitPat) extends VecIntInstPattern()
+sealed abstract class VecJumpInstPattern()(implicit rawInst: BitPat) extends ScaMultUopInstPattern()
 
 sealed abstract class VecMemInstPattern(
   implicit rawInst: BitPat,
