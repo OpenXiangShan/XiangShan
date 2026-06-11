@@ -425,7 +425,7 @@ class InterruptFilter extends Module {
   iidC3C4 := Mux(C4IsZero, Mux(C4HighVSEI, iidOnlyC4, iidOnlyC1), iidOnlyC4)
   iprioC3C4 := iprioC4Tmp
   // C3,C5 enable
-  iidC3C5 := Mux(C2C5IsZero, Mux(hvictlReg.DPR.asBool, iidOnlyC5, iidOnlyC1), iidOnlyC5)
+  iidC3C5 := Mux(C2C5IsZero, Mux(hvictlReg.DPR.asBool, iidOnlyC1, iidOnlyC5), iidOnlyC5)
   iprioC3C5 := iprioC3C5Tmp
 
   // update vstopi
