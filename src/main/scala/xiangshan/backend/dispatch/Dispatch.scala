@@ -696,9 +696,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     val lqDeqIdx = io.fromLsqEnqCtrl.lsqHeadPtr.lqIdx
     val sqDeqIdx = io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx
     val allowDispatchPrevious = if (index == 0) true.B else allowDispatch(index - 1)
-    when(isStoreVec(index) || isVStoreVec(index)) {
+    when((isStoreVec(index) || isVStoreVec(index)) && !isSegment(index) && !isfofFixVlUop(index)) {
       allowDispatch(index) := (sqIdxEnd > sqDeqIdx) && allowDispatchPrevious
-    }.elsewhen(isLoadVec(index) || isVLoadVec(index)) {
+    }.elsewhen((isLoadVec(index) || isVLoadVec(index)) && !isSegment(index) && !isfofFixVlUop(index)) {
       allowDispatch(index) := (lqIdxEnd > lqDeqIdx) && allowDispatchPrevious
     }.elsewhen(isAMOVec(index)) {
       allowDispatch(index) := allowDispatchPrevious

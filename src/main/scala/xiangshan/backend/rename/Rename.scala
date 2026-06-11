@@ -383,6 +383,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   }
   private val isfofFixVlUop   = uops.map{x => x.vpu.isVleff && x.lastUop}
   private val instType = isSegment.zip(mop).map { case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
+  private val isAMOVec      = fuType.map(fuTypeItem => FuType.isAMO(fuTypeItem))
   // There is no way to calculate the 'flow' for 'unit-stride' exactly:
   //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
   // For scalar instructions, this is not handled here, and different assignments are done later according to the situation.
@@ -399,7 +400,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   // speculatively assign the sqIdx/lqIdx
   io.toLsqEnqCtrl.req.zipWithIndex.map{ case (port, i) =>
-    port.valid := io.out(i).valid && io.out.head.ready
+    port.valid := io.out(i).valid && io.out.head.ready && !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i) //TODO: !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i) will be remove in the future.
     port.bits.num := uops(i).numLsElem // here will be change to io.in.bits in the future, this port need `numLsElem`
     port.bits.fuType := uops(i).fuType
   }

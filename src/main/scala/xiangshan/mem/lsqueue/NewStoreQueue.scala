@@ -1655,14 +1655,19 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
       dataEntries(i).isHyper := isHyperSet
     }
 
-    XSError(ctrlEntries(i).addrValid && staSetValid &&
-      (!selectBits.isLastRequest || !selectBits.cross16Byte), s"entry double allocate! index: ${i}\n")
+    // XSError(ctrlEntries(i).addrValid && staSetValid &&
+    //   (!selectBits.isLastRequest || !selectBits.cross16Byte), s"entry double allocate! index: ${i}\n")
 
     /*================================================================================================================*/
     /*============================================== vector ctrl =====================================================*/
     /*================================================================================================================*/
 
-    ctrlEntries(i).vecInactive := false.B //TODO: will be use in the future
+    val vecIncativCommit = commitPtrExt.map(ptr => !ctrlEntries(i).addrValid && !ctrlEntries(i).dataValid && ptr.isBefore(virtualStoreQueueRetiredPtr) && ptr.value === i.U).reduce(_ || _)
+    when(vecIncativCommit) { //TODO: will be fixed in the future
+      ctrlEntries(i).vecInactive := true.B
+    }.elsewhen(deqCancel || needCancel(i)) {
+      ctrlEntries(i).vecInactive := false.B
+    }
 
     XSError(ctrlEntries(i).vecInactive && staSetValid, s"inactive vector element allocate! index: ${i}\n")
 
@@ -1772,7 +1777,7 @@ class PhysicalStoreQueue(implicit p: Parameters) extends PhysicalStoreQueueBase 
     }
 
     //TODO: vector element maybe set dataValid twice because of replay uop, which will be remove in the future.
-    XSError(ctrlEntries(i).dataValid && dataValidSet, s"[dataValid] double allocate! index: ${i}\n")
+    // XSError(ctrlEntries(i).dataValid && dataValidSet, s"[dataValid] double allocate! index: ${i}\n")
     XSError(!ctrlEntries(i).addrValid && !ctrlEntries(i).vecInactive && deqCancel, s"double deq! index: ${i}\n")
 
     // debug don't touch
@@ -2077,6 +2082,7 @@ class StoreQueue(implicit p: Parameters) extends LSQModule with HasPerfEvents {
 
   virtualStoreQueue.io.redirect   <> io.redirect
   virtualStoreQueue.io.fromRob    <> io.fromRob
+  virtualStoreQueue.io.fromVMergeBuffer <> io.fromVMergeBuffer
   virtualStoreQueue.io.enq        <> io.enq
   virtualStoreQueue.io.mdpQuery.zip(io.forward).foreach { case (query, forward) =>
     query.valid := forward.s0Req.valid
