@@ -117,6 +117,12 @@ class VectorDecodeChannel(
     ImmIsSign5b,
     ImmIsUnsign5b,
     ExceptionIIField,
+    IsVecIntInstField,
+    IsVecFPField,
+    IsVtypeIgnoreField,
+    IsVstartForceZeroField,
+    IsSrcDstOverlapIgnoreField,
+    IsSrcdstOverlapStrictField,
   )
 
   // Generate decode tables, using both instruction bits and sew as decode pattern.
@@ -137,6 +143,8 @@ class VectorDecodeChannel(
     IllegalField,
     NumUopOhField,
     WritePartVdField,
+    IsSegmentField,
+    VRegTypesField,
   )
 
   println(s"instPats.length: ${instPats.length}")
@@ -186,10 +194,39 @@ class VectorDecodeChannel(
       in.uopNum := numUopOH
   }
 
+  val vecExDecodes = Wire(new VecExceptionDecodes)
+  vecExDecodes.isIllInst := uopIllegal
+  vecExDecodes.isVtypeIgnore := instBundle(IsVtypeIgnoreField)
+  vecExDecodes.isVecFPInst := instBundle(IsVecFPField)
+  vecExDecodes.isVstartForceZero := instBundle(IsVstartForceZeroField)
+  vecExDecodes.maskUsed := instFields.VM === 0.U
+  vecExDecodes.vregTypes := instSewLmulNfBundle(VRegTypesField)
+  vecExDecodes.isSegment := instSewLmulNfBundle(IsSegmentField)
+  vecExDecodes.nffield := nf
+  vecExDecodes.isSrcDstOverlapIgnore := instBundle(IsSrcDstOverlapIgnoreField)
+  vecExDecodes.isSrcdstOverlapStrict := instBundle(IsSrcdstOverlapStrictField)
+
+  val vecExContexts = Wire(new VecExceptionContexts)
+  vecExContexts.isVsOff := in.fromCSR.illegalInst.vsIsOff
+  vecExContexts.isFSOff := in.fromCSR.illegalInst.fsIsOff
+  vecExContexts.isfrmIll := in.fromCSR.illegalInst.frm
+  vecExContexts.vill := in.vtype.illegal
+  vecExContexts.vstart := in.vstart
+  vecExContexts.csrAllowSrcDstOverlap := false.B // Reserved
+
+  val vecExceptionGen = Module(new VecExceptionGen)
+  vecExceptionGen.in.rawInst := rawInst
+  vecExceptionGen.in.Decodes := vecExDecodes
+  vecExceptionGen.in.Contexts := vecExContexts
+
+  val vecException = vecExceptionGen.out.exception
+  val vecOverlapAgnostic = vecExceptionGen.out.mtAgnostic
+  dontTouch(vecExceptionGen.out)
+
   val alwaysTa = instBundle(AlwaysTaField)
 
-  val ma = in.ma
-  val ta = in.ta || alwaysTa
+  val ma = in.ma || vecOverlapAgnostic
+  val ta = in.ta || vecOverlapAgnostic || alwaysTa
   val vm = instFields.VM.asBool
   val mu = !ma
   val tu = !ta
@@ -246,7 +283,11 @@ class VectorDecodeChannel(
     ))
     out.uop(i).bits.vm := instFields.VM
 
-    out.uop(i).bits.exceptionII := instBundle(ExceptionIIField)
+    out.uop(i).bits.exceptionII := Mux(
+      instBundle(IsVecIntInstField),
+      instBundle(ExceptionIIField),
+      vecException,
+    )
   }
   out.uopNumOH := numUopOH
 
