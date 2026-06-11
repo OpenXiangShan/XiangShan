@@ -8,7 +8,7 @@ import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.Extensions._
-import xiangshan.backend.fu.vector.Bundles.Vl
+import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
 import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
@@ -74,6 +74,7 @@ class DecodeStageImp(
         info.rawInst := inMopBits.instr
         info.vtype   := inMopBits.vtype
         info.fromCSR := in.fromCSR
+        info.vstart  := in.vstart
     }
     decodeChannels.in.mops(i).bits.ctrl match {
       case ctrl =>
@@ -246,7 +247,7 @@ object DecodeStage {
 
     // from CSR
     val fromCSR = Input(new CSRToDecode)
-    val vstart = Input(Vl())
+    val vstart = Input(Vstart())
   }
 
   class Out(implicit p: Parameters) extends XSBundle {
