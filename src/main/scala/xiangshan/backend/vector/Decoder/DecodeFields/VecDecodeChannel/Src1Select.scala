@@ -43,6 +43,20 @@ object Src1SelectField extends DecodeField[
 ] {
   import Src1SelectEnum._
 
+  private def fpSrc1Sel(pattern: VecFpArithInstPattern, default: Src1Val): Src1Val = {
+    pattern.category.rawString match {
+      case VecInstPattern.Category.OPFVF => CONST
+      case _ => default
+    }
+  }
+
+  private def intSrc1Sel(pattern: VecIntArithInstPattern, default: Src1Val): Src1Val = {
+    pattern.category.rawString match {
+      case VecInstPattern.Category.OPIVX | VecInstPattern.Category.OPMVX => CONST
+      case _ => default
+    }
+  }
+
   override def name: String = "src1Sel"
 
   override def chiselType: UInt = Src1SelectEnum.UInt()
@@ -53,11 +67,12 @@ object Src1SelectField extends DecodeField[
     val src1Sel: Src1Val = instP match {
       case vai: VecArithInstPattern =>
         vai match {
+          case vci: VecCryptoInstPattern => INC1
           case vii: VecIntArithInstPattern =>
             vii match {
-              case VecIntVVVPattern() => INC1
-              case VecIntVVVVPattern() | VecCryptoVVVVPattern() => INC1
-              case VecIntVVMPattern() => INC1
+              case VecIntVVVPattern() => intSrc1Sel(vii, INC1)
+              case VecIntVVVVPattern() => intSrc1Sel(vii, INC1)
+              case VecIntVVMPattern() => intSrc1Sel(vii, INC1)
               case VecIntMMMPattern() => CONST
               case VecIntVVWPattern() => INCF2
               case VecIntVVWWPattern() => INCF2
