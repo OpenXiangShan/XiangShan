@@ -158,6 +158,9 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   private val s2_realUtageMeta = Wire(new MicroTageMeta)
   private val s3_utageMeta     = RegEnable(s2_realUtageMeta, s2_fire)
 
+  private val s2_phrMeta = RegEnable(phr.io.phrMeta, s1_fire)
+  private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
+
   /* *** common inputs *** */
   private val stageCtrl = Wire(new StageCtrl)
   stageCtrl.s0_fire := s0_fire
@@ -200,7 +203,10 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   /* *** predictor specific inputs *** */
   abtb.io.redirectValid := redirect.valid
+  abtb.io.redirectHash  := redirect.bits.meta.phr.phrLowBits(AheadBtbHashBitWidth - 1, 0)
   abtb.io.overrideValid := s3_override
+  abtb.io.overrideHash  := s3_phrMeta.phrLowBits(AheadBtbHashBitWidth - 1, 0)
+  abtb.io.normalHash    := phr.io.phrMeta.phrLowBits(AheadBtbHashBitWidth - 1, 0)
 
   utage.io.foldedPathHist         := phr.io.s0_foldedPhr
   utage.io.foldedPathHistForTrain := phr.io.trainFoldedPhr
@@ -425,9 +431,6 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
     s3_valid && (takenDiff || cfiPositionDiff || attributeDiff || targetDiff)
   }
-
-  private val s2_phrMeta = RegEnable(phr.io.phrMeta, s1_fire)
-  private val s3_phrMeta = RegEnable(s2_phrMeta, s2_fire)
 
   private val s3_commonHRMeta = WireInit(0.U.asTypeOf(new CommonHRMeta))
   s3_commonHRMeta.ghr       := commonHR.io.s3ResolveMeta.ghr

@@ -64,6 +64,8 @@ trait HasBpuParameters extends HasFrontendParameters {
   def PhrHistoryLength: Int = frontendParameters.getPhrHistoryLength
 
   def NumAheadBtbPredictionEntries: Int = bpuParameters.abtbParameters.NumWays
+  // Bit width participating in the index hash, used to disperse hot branches and bias bank conflicts.
+  def AheadBtbHashBitWidth: Int = 4
 
   def NumBtbAlignBanks:    Int = FetchBlockSize / FetchBlockAlignSize
   def NumBtbResultEntries: Int = bpuParameters.mbtbParameters.NumWay * NumBtbAlignBanks
