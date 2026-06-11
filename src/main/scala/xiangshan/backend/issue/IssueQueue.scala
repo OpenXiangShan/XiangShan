@@ -236,6 +236,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   val finalExuSources: Option[Vec[Vec[ExuSource]]] = exuSources.map(x => VecInit(finalDeqSelOHVec.map(oh => Mux1H(oh, x))))
 
   val fuTypeVec = Wire(Vec(params.numEntries, FuType()))
+  val isFmaVec  = Wire(Vec(params.numEntries, Bool()))
   io.fuTypeVec := fuTypeVec
   val deqEntryVec = Wire(Vec(params.numDeq, ValidIO(new EntryBundle(isDeq = true))))
   val canIssueMergeAllBusy = Wire(Vec(params.numDeq, UInt(params.numEntries.W)))
@@ -397,6 +398,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     entries.io.vecMemIn.foreach(_.lqDeqPtr := io.memIO.get.lqDeqPtr.get)
     //output
     fuTypeVec                                                   := entriesIO.fuType
+    isFmaVec                                                    := entriesIO.isFma
     deqEntryVec                                                 := entriesIO.deqEntry
     cancelDeqVec                                                := entriesIO.cancelDeqVec
     simpEntryEnqSelVec.foreach(_                                := entriesIO.simpEntryEnqSelVec.get)
@@ -606,6 +608,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       btwr.io.in.og1Resp := io.og1Resp(i)
       btrd.io.in.fuBusyTable := btwr.io.out.fuBusyTable
       btrd.io.in.fuTypeRegVec := fuTypeVec
+      btrd.io.in.isFmaVec := isFmaVec
       fuBusyTableMask(i) := btrd.io.out.fuBusyTableMask
     }
     else {
@@ -691,6 +694,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       val bt = busyTable.get
       btrd.io.in.fuBusyTable := bt
       btrd.io.in.fuTypeRegVec := fuTypeVec
+      btrd.io.in.isFmaVec := 0.U.asTypeOf(btrd.io.in.isFmaVec)
       intWbBusyTableMask(i) := btrd.io.out.fuBusyTableMask
     }
     else {
@@ -703,6 +707,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       val bt = busyTable.get
       btrd.io.in.fuBusyTable := bt
       btrd.io.in.fuTypeRegVec := fuTypeVec
+      btrd.io.in.isFmaVec := isFmaVec
       fpWbBusyTableMask(i) := btrd.io.out.fuBusyTableMask
     }
     else {
@@ -715,6 +720,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       val bt = busyTable.get
       btrd.io.in.fuBusyTable := bt
       btrd.io.in.fuTypeRegVec := fuTypeVec
+      btrd.io.in.isFmaVec := 0.U.asTypeOf(btrd.io.in.isFmaVec)
       vfWbBusyTableMask(i) := btrd.io.out.fuBusyTableMask
     }
     else {
@@ -727,6 +733,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       val bt = busyTable.get
       btrd.io.in.fuBusyTable := bt
       btrd.io.in.fuTypeRegVec := fuTypeVec
+      btrd.io.in.isFmaVec := 0.U.asTypeOf(btrd.io.in.isFmaVec)
       v0WbBusyTableMask(i) := btrd.io.out.fuBusyTableMask
     }
     else {
@@ -739,6 +746,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
       val bt = busyTable.get
       btrd.io.in.fuBusyTable := bt
       btrd.io.in.fuTypeRegVec := fuTypeVec
+      btrd.io.in.isFmaVec := 0.U.asTypeOf(btrd.io.in.isFmaVec)
       vlWbBusyTableMask(i) := btrd.io.out.fuBusyTableMask
     }
     else {
