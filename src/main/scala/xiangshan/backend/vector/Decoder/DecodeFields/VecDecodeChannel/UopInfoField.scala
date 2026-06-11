@@ -6,7 +6,7 @@ import xiangshan.backend.decode.opcode.Opcode.LduOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.StuOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.AmoOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.{Opcode, toOpcodeUtil}
-import xiangshan.backend.vector.Decoder.InstPattern.{VecIntInstPattern, _}
+import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil._
 import xiangshan.backend.vector.Decoder.Split.SplitTable
 import xiangshan.backend.vector.Decoder.Uop.ScalaUopTable.{tableZacas, tableZabhaZacas}
@@ -141,8 +141,8 @@ object UopInfoFieldVec extends DecodeField[
           case _ =>
             Seq()
         }
-      case vii: VecIntInstPattern =>
-        vii match {
+      case smui: ScaMultUopInstPattern =>
+        smui match {
           // case jump: VecJumpInstPattern => tableISplit(jump.rawInst)
           case amocas: AmocasInstPattern => (tableZacas ++ tableZabhaZacas)(amocas.rawInst)
         }

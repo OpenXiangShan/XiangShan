@@ -126,8 +126,8 @@ object Src2SelectField extends DecodeField[
           case _: VecMemMask => NONE
           case _: VecMemFF => NONE
         }
-      case vii: VecIntInstPattern =>
-        vii match {
+      case smui: ScaMultUopInstPattern =>
+        smui match {
           case _: AmocasInstPattern => AMOCASQ
           case _ => CONST
         }
