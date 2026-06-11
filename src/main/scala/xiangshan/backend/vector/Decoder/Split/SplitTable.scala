@@ -982,8 +982,8 @@ object SplitTable {
 
       VFWCVT_XU_F_V     -> dupF2W(null, vfcvt_ui32_fp16, vfcvt_ui64_fp32)(_ + Src2Vp),
       VFWCVT_X_F_V      -> dupF2W(null, vfcvt_si32_fp16, vfcvt_si64_fp32)(_ + Src2Vp),
-      VFWCVT_F_XU_V     -> dupF2W(null, vfcvt_fp32_ui16, vfcvt_fp64_ui32)(_ + Src2Vp),
-      VFWCVT_F_X_V      -> dupF2W(null, vfcvt_fp32_si16, vfcvt_fp64_si32)(_ + Src2Vp),
+      VFWCVT_F_XU_V     -> dupF2W(vfcvt_fp16_ui8, vfcvt_fp32_ui16, vfcvt_fp64_ui32)(_ + Src2Vp),
+      VFWCVT_F_X_V      -> dupF2W(vfcvt_fp16_si8, vfcvt_fp32_si16, vfcvt_fp64_si32)(_ + Src2Vp),
       VFWCVT_F_F_V      -> dupF2W(null, vfcvt_fp32_fp16, vfcvt_fp64_fp32)(_ + Src2Vp),
       VFWCVT_RTZ_XU_F_V -> dupF2W(null, vfcvt_ui32_fp16, vfcvt_ui64_fp32)(_ + Src2Vp),
       VFWCVT_RTZ_X_F_V  -> dupF2W(null, vfcvt_si32_fp16, vfcvt_si64_fp32)(_ + Src2Vp),
