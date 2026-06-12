@@ -38,8 +38,8 @@ class FMul(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
 
   // fma results to falu
   val outToFaluFromFmul = io.outToFaluFromFmul.get
-  //dirty code fuOpType
-  outToFaluFromFmul.bits.ctrl.fuOpType := FMacOpcode.getCtrlOpcode(fuOpType)
+  //dirty code fuOpType, in valid next cycle outToFaluFromFmul valid
+  outToFaluFromFmul.bits.ctrl.fuOpType := FMacOpcode.getCtrlOpcode(RegNext(fuOpType))
   outToFaluFromFmul.bits.data.src(0) := fmul.io.outToFADD.fpA
   outToFaluFromFmul.bits.data.src(1) := src2S1
   outToFaluFromFmul.bits.data.FmulToFaluDataInput.get.FMULToFALUCtrl := fmul.io.outToFADD.FMULToFADDCtrl
