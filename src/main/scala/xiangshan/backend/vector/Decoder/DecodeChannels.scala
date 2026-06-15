@@ -337,6 +337,7 @@ class DecodeChannelOutput extends Bundle {
   val vlWen = Bool()
   val vxsatWen = Bool()
   val fflagsWen = Bool()
+  val dirtyVs = Bool()
 
   val frm = Frm()
   val frmIll = Bool()
@@ -405,6 +406,7 @@ object DecodeChannelOutput {
     uop.vlWen := vuop.renameInfo.vlWen
     uop.vxsatWen := vuop.renameInfo.vxsatWen
     uop.fflagsWen := vuop.fflagsWen
+    uop.dirtyVs := vuop.dirtyVs
     uop.ldest := vuop.src.dest
 
     uop.frm := vuop.frm
@@ -465,6 +467,7 @@ object DecodeChannelOutput {
     uop.vlWen := vuop.renameInfo.bits.vlWen
     uop.vxsatWen := vuop.renameInfo.bits.vxsatWen
     uop.fflagsWen := false.B
+    uop.dirtyVs := true.B
 
     uop.ldest := vuop.src.dest
 
@@ -525,6 +528,7 @@ object DecodeChannelOutput {
     uop.vlWen := false.B
     uop.vxsatWen := false.B
     uop.fflagsWen := suop.fflagsWen
+    uop.dirtyVs := false.B
 
     uop.ldest := suop.ldest
 
@@ -586,6 +590,7 @@ object DecodeChannelOutput {
     uop.vlWen := false.B
     uop.vxsatWen := false.B
     uop.fflagsWen := false.B
+    uop.dirtyVs := false.B
 
     uop.ldest := puop.ldest
 

@@ -528,7 +528,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     }
     uops(i).fflagsWen := (compressMasksVec(i) & Cat(io.in.map(_.bits.fflagsWen).reverse)).orR
     uops(i).dirtyFs := (compressMasksVec(i) & Cat(io.in.map(_.bits.fpWen).reverse)).orR
-    uops(i).dirtyVs := false.B // Todo: handle this in some DecodeField
+    uops(i).dirtyVs := (compressMasksVec(i) & Cat(io.in.map(_.bits.dirtyVs).reverse)).orR
     // psrc0,psrc1,psrc2 don't require v0ReadPorts because their srcType can distinguish whether they are V0 or not
     uops(i).psrc(0) := Mux1H(uops(i).srcType(0)(2, 0), Seq(intReadPortsData(i)(0), fpReadPortsData(i)(0), vecReadPortsData(i)(0)))
     uops(i).psrc(1) := Mux1H(uops(i).srcType(1)(2, 0), Seq(intReadPortsData(i)(1), fpReadPortsData(i)(1), vecReadPortsData(i)(1)))
