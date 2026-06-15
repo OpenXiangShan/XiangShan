@@ -1022,12 +1022,12 @@ object Opcode {
   }
 
   object FenceOpcodes extends Opcodes {
-    val fence    = IntIType(bb"10000") - Src1Gp + NoSpec + BlockBack + FlushPipe // FENCE           / PAUSE
-    val sfence   = IntIType(bb"10001") - Src1Gp + NoSpec + BlockBack + FlushPipe // SFENCE_VMA      / SINVAL_VMA (no flushpipe)
-    val fencei   = IntIType(bb"10010") - Src1Gp + NoSpec + BlockBack + FlushPipe // FENCE_I
-    val hfence_v = IntIType(bb"10011") - Src1Gp + NoSpec + BlockBack + FlushPipe // HFENCE_VVMA     / HINVAL_VVMA (no flushpipe)
-    val hfence_g = IntIType(bb"10100") - Src1Gp + NoSpec + BlockBack + FlushPipe // HFENCE_GVMA     / HINVAL_GVMA (no flushpipe)
-    val nofence  = IntIType(bb"00000") - Src1Gp + NoSpec + BlockBack + FlushPipe // SFENCE_INVAL_IR / SFENCE_W_INVAL (no flushpipe)
+    val fence    = Value    (bb"10000") + NoSpec + BlockBack + FlushPipe // FENCE           / PAUSE
+    val sfence   = IntBSType(bb"10001") + NoSpec + BlockBack + FlushPipe // SFENCE_VMA      / SINVAL_VMA (no flushpipe)
+    val fencei   = Value    (bb"10010") + NoSpec + BlockBack + FlushPipe // FENCE_I
+    val hfence_v = IntBSType(bb"10011") + NoSpec + BlockBack + FlushPipe // HFENCE_VVMA     / HINVAL_VVMA (no flushpipe)
+    val hfence_g = IntBSType(bb"10100") + NoSpec + BlockBack + FlushPipe // HFENCE_GVMA     / HINVAL_GVMA (no flushpipe)
+    val nofence  = Value    (bb"00000") + NoSpec + BlockBack + FlushPipe // SFENCE_INVAL_IR / SFENCE_W_INVAL (no flushpipe)
   }
 
   object BkuOpcodes extends Opcodes {
