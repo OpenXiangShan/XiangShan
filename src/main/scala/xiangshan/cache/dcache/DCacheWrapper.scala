@@ -159,6 +159,9 @@ trait HasDCacheParameters
   val DCacheSameVPAddrLength = 12
 
   val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
+  val DCacheWordBankCount = DCacheWordBytes / DCacheSRAMRowBytes
+  val DCacheVWordBankCount = VLEN / DCacheSRAMRowBits
+  val DCacheQuadWordBankCount = QuadWordBytes / DCacheSRAMRowBytes
   val DCacheWordOffset = log2Up(DCacheWordBytes)
   def DCacheVWordOffset = log2Up(DCacheVWordBytes)
 
@@ -177,10 +180,6 @@ trait HasDCacheParameters
 
   def encDataBits = if (EnableDataEcc) cacheParams.dataCode.width(DCacheSRAMRowBits) else DCacheSRAMRowBits
   def dataECCBits = encDataBits - DCacheSRAMRowBits
-  def dataSRAMBankRawBits = DCacheWays * DCacheSRAMRowBits
-  def encDataSRAMBankBits =
-    if (EnableDataEcc) cacheParams.dataCode.width(dataSRAMBankRawBits) else dataSRAMBankRawBits
-  def dataSRAMBankECCBits = encDataSRAMBankBits - dataSRAMBankRawBits
   def pseudoErrorMaskBits = ((tagBits + 7) / 8) * 8
 
   // L1 DCache controller

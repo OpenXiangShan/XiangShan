@@ -113,15 +113,15 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }
 
   private def byteMaskToBankMask(vaddr: UInt, byteMask: UInt): UInt = {
-    val bankMaskInVWord = VecInit((0 until VLEN / DCacheSRAMRowBits).map(i => {
+    val bankMaskInVWord = VecInit((0 until DCacheVWordBankCount).map(i => {
       byteMask(DCacheSRAMRowBytes * (i + 1) - 1, DCacheSRAMRowBytes * i).orR
     })).asUInt
     val bankOffsetInLine = Cat(
       vaddr(DCacheLineOffset - 1, DCacheVWordOffset),
-      0.U(log2Ceil(VLEN / DCacheSRAMRowBits).W)
+      0.U(log2Ceil(DCacheVWordBankCount).W)
     )
     val bankMaskInLine = Cat(
-      0.U((DCacheBanks - VLEN / DCacheSRAMRowBits).W),
+      0.U((DCacheBanks - DCacheVWordBankCount).W),
       bankMaskInVWord
     )
     (bankMaskInLine << bankOffsetInLine)(DCacheBanks - 1, 0)
@@ -129,7 +129,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   private def addrToVWordBankBase(addr: UInt): UInt = {
     val bank = addr_to_dcache_bank(addr)
-    val vwordBankOffsetBits = log2Ceil(VLEN / DCacheSRAMRowBits)
+    val vwordBankOffsetBits = log2Ceil(DCacheVWordBankCount)
     Cat(
       bank(log2Up(DCacheBanks) - 1, vwordBankOffsetBits),
       0.U(vwordBankOffsetBits.W)
@@ -137,7 +137,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   }
 
   private def bankMaskToReadErrorLaneMask(bankMask: UInt, vwordBankBase: UInt): UInt = {
-    VecInit((0 until VLEN / DCacheSRAMRowBits).map { i =>
+    VecInit((0 until DCacheVWordBankCount).map { i =>
       val bank = (vwordBankBase + i.U)(log2Up(DCacheBanks) - 1, 0)
       bankMask(bank)
     }).asUInt
@@ -163,7 +163,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_replayCarry = s0_req.replayCarry
   val s0_load128Req = io.load128Req
   val s0_base_bank = addr_to_dcache_bank(s0_vaddr)
-  val s0_bank_mask_128b = bankMaskFromBase(s0_base_bank, VLEN / DCacheSRAMRowBits)
+  val s0_bank_mask_128b = bankMaskFromBase(s0_base_bank, DCacheVWordBankCount)
   val s0_bank_mask_normal = byteMaskToBankMask(s0_vaddr, s0_req.mask)
   val s0_bank_oh = Mux(s0_load128Req, s0_bank_mask_128b, s0_bank_mask_normal)
   assert(RegNext(!(s0_valid && (s0_req.cmd =/= MemoryOpConstants.M_XRD && s0_req.cmd =/= MemoryOpConstants.M_PFR && s0_req.cmd =/= MemoryOpConstants.M_PFW))), "LoadPipe only accepts load req / softprefetch read or write!")
@@ -440,7 +440,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh && !s2_wpu_pred_fail
 
   val s2_data128bit = Cat(
-    (0 until VLEN / DCacheSRAMRowBits).reverse.map(i => io.banked_data_resp(i).raw_data)
+    (0 until DCacheVWordBankCount).reverse.map(i => io.banked_data_resp(i).raw_data)
   )
   val s2_resp_data  = s2_data128bit
 

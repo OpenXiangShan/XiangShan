@@ -327,8 +327,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val banked_need_data = store_need_data || probe_need_data || amo_need_data || miss_need_data || replace_need_data
   val banked_amo_rmask = Mux(
     isAMOCASQ(s0_req.cmd),
-    bankMaskForQuadWord(s0_req.quad_word_idx),
-    bankMaskForWord(s0_req.word_idx)
+    bankMaskFromBase(quadWordBankBase(s0_req.quad_word_idx), DCacheQuadWordBankCount),
+    bankMaskFromBase(wordBankBase(s0_req.word_idx), DCacheWordBankCount)
   )
 
   val s0_banked_rmask = Mux(
@@ -576,19 +576,11 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   }
 
   private def wordBankBase(wordIdx: UInt): UInt = {
-    (wordIdx << log2Ceil(DCacheWordBytes / DCacheSRAMRowBytes))(log2Up(DCacheBanks) - 1, 0)
+    (wordIdx << log2Ceil(DCacheWordBankCount))(log2Up(DCacheBanks) - 1, 0)
   }
 
   private def quadWordBankBase(quadWordIdx: UInt): UInt = {
-    (quadWordIdx << log2Ceil(QuadWordBytes / DCacheSRAMRowBytes))(log2Up(DCacheBanks) - 1, 0)
-  }
-
-  private def bankMaskForWord(wordIdx: UInt): UInt = {
-    bankMaskFromBase(wordBankBase(wordIdx), DCacheWordBytes / DCacheSRAMRowBytes)
-  }
-
-  private def bankMaskForQuadWord(quadWordIdx: UInt): UInt = {
-    bankMaskFromBase(quadWordBankBase(quadWordIdx), QuadWordBytes / DCacheSRAMRowBytes)
+    (quadWordIdx << log2Ceil(DCacheQuadWordBankCount))(log2Up(DCacheBanks) - 1, 0)
   }
 
   private def assembleBankData(data: Vec[UInt], baseBank: UInt, bankCount: Int): UInt = {
@@ -658,7 +650,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     assembleBankData(
       s3_store_data_merged,
       wordBankBase(i.U(log2Up(blockWords).W)),
-      DCacheWordBytes / DCacheSRAMRowBytes
+      DCacheWordBankCount
     )
   }))
   val s3_data_word = s3_data_words(s3_req.word_idx)
@@ -816,35 +808,35 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_cas_data_merged = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
   for (i <- 0 until DCacheBanks) {
     val old_data = s3_store_data_merged(i)
-    val wordPieceSel = (0 until DCacheWordBytes / DCacheSRAMRowBytes).map { offset =>
+    val wordPieceSel = (0 until DCacheWordBankCount).map { offset =>
       i.U === s3_word_bank_base + offset.U
     }
-    val quadPieceSel = (0 until QuadWordBytes / DCacheSRAMRowBytes).map { offset =>
+    val quadPieceSel = (0 until DCacheQuadWordBankCount).map { offset =>
       i.U === s3_quad_word_bank_base + offset.U
     }
     s3_amo_data_merged(i) := mergePutData(
       old_data,
-      selectDataPiece(amoalu.io.out, wordPieceSel, DCacheWordBytes / DCacheSRAMRowBytes),
+      selectDataPiece(amoalu.io.out, wordPieceSel, DCacheWordBankCount),
       selectFullMask(wordPieceSel)
     )
     s3_sc_data_merged(i) := mergePutData(
       old_data,
-      selectDataPiece(s3_req.amo_data, wordPieceSel, DCacheWordBytes / DCacheSRAMRowBytes),
-      selectMaskPiece(s3_req.amo_mask, wordPieceSel, DCacheWordBytes / DCacheSRAMRowBytes)
+      selectDataPiece(s3_req.amo_data, wordPieceSel, DCacheWordBankCount),
+      selectMaskPiece(s3_req.amo_mask, wordPieceSel, DCacheWordBankCount)
     )
     s3_cas_data_merged(i) := mergePutData(
       old_data = old_data,
       new_data = Mux(
         isAMOCASQ(s3_req.cmd),
-        selectDataPiece(s3_req.amo_data, quadPieceSel, QuadWordBytes / DCacheSRAMRowBytes),
-        selectDataPiece(s3_req.amo_data, wordPieceSel, DCacheWordBytes / DCacheSRAMRowBytes)
+        selectDataPiece(s3_req.amo_data, quadPieceSel, DCacheQuadWordBankCount),
+        selectDataPiece(s3_req.amo_data, wordPieceSel, DCacheWordBankCount)
       ),
       wmask = Mux(
         !s3_cas_fail,
         Mux(
           isAMOCASQ(s3_req.cmd),
-          selectMaskPiece(s3_req.amo_mask, quadPieceSel, QuadWordBytes / DCacheSRAMRowBytes),
-          selectMaskPiece(s3_req.amo_mask, wordPieceSel, DCacheWordBytes / DCacheSRAMRowBytes)
+          selectMaskPiece(s3_req.amo_mask, quadPieceSel, DCacheQuadWordBankCount),
+          selectMaskPiece(s3_req.amo_mask, wordPieceSel, DCacheWordBankCount)
         ),
         0.U(DCacheSRAMRowBytes.W)
       )
@@ -911,8 +903,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
         s3_can_do_amo_write,
         Mux(
           isAMOCASQ(s3_req.cmd),
-          bankMaskForQuadWord(s3_req.quad_word_idx),
-          bankMaskForWord(s3_req.word_idx)
+          bankMaskFromBase(quadWordBankBase(s3_req.quad_word_idx), DCacheQuadWordBankCount),
+          bankMaskFromBase(wordBankBase(s3_req.word_idx), DCacheWordBankCount)
         ),
         banked_none_wmask
       )

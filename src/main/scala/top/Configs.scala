@@ -186,7 +186,7 @@ class MinimalConfig(n: Int = 1) extends Config(
             nReleaseEntries = 8,
             nMaxPrefetchEntry = 2,
             enableTagEcc = true,
-            enableDataEcc = false,
+            enableDataEcc = true,
             cacheCtrlAddressOpt = Some(AddressSet(0x38022000, 0x7f))
           )),
           itlbParameters = TLBParameters(
