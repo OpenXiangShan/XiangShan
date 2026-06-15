@@ -23,6 +23,7 @@ import chisel3.util._
 import chisel3.experimental.dataview._
 import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
+import difftest.fpga.DifftestMemCtrl
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util.HeterogeneousBag
@@ -43,7 +44,7 @@ class MemXbar(implicit p: Parameters) extends LazyModule
       aligned = true
     ))
   )))
-  
+
   val devNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
     Seq(AXI4MasterParameters(
       name = "device_node",
@@ -83,7 +84,7 @@ class MemXbar(implicit p: Parameters) extends LazyModule
   val io_memNode = InModuleBody {memNode.makeIOs()}
 
   lazy val module = new Imp
-  class Imp extends LazyModuleImp(this) 
+  class Imp extends LazyModuleImp(this)
 }
 
 class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterfaces {
@@ -114,11 +115,16 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
     useBlackBox = true,
     dynamicLatency = debugOpts.UseDRAMSim
   )
-  val simAXIMem = Module(l_simAXIMem.module) 
+  val simAXIMem = Module(l_simAXIMem.module)
 
   l_memXbar.io_cpuNode.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
   l_memXbar.io_devNode.elements.head._2 <> l_simMMIO.io_mem.elements.head._2
   l_simAXIMem.io_axi4.elements.head._2 <> l_memXbar.io_memNode.elements.head._2
+
+  val memIO = Option.when(DifftestModule.isFPGA) {
+    DifftestMemCtrl.exposeIO(soc.memory.viewAs[AXI4Bundle], l_simAXIMem.io_axi4.elements.head._2)
+  }
+  override def difftestMemIO: Option[DifftestMemIO] = memIO
 
   soc.io.clock := clock
   soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
