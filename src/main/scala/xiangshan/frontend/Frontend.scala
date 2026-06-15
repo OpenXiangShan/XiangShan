@@ -147,15 +147,23 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
           tlbCsr.mbmc.KEYIDEN.asBool,
           tlbCsr.mbmc.CMODE.asBool,
           tlbCsr.priv.imode,
+          tlbCsr.priv.debug,
           pmp.io.pmp,
           pmp.io.pma,
           pmp_req_vec(i)
         )
       } else {
-        pmp_check(i).apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+        pmp_check(i).apply(
+          tlbCsr.mbmc.CMODE.asBool,
+          tlbCsr.priv.imode,
+          tlbCsr.priv.debug,
+          pmp.io.pmp,
+          pmp.io.pma,
+          pmp_req_vec(i)
+        )
       }
     } else {
-      pmp_check(i).apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
+      pmp_check(i).apply(tlbCsr.priv.imode, tlbCsr.priv.debug, pmp.io.pmp, pmp.io.pma, pmp_req_vec(i))
     }
   }
   (0 until 2 * PortNumber).foreach(i => icache.io.pmp(i).resp <> pmp_check(i).resp)

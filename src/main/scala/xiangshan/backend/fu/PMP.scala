@@ -417,6 +417,7 @@ trait PMPCheckMethod extends PMPConst {
     size: UInt,
     pmpEntries: Vec[PMPEntry],
     mode: UInt,
+    debug: Bool,
     lgMaxSize: Int
   ) = {
     val num = pmpEntries.size
@@ -432,7 +433,8 @@ trait PMPCheckMethod extends PMPConst {
     val cfg_vec = Wire(Vec(num+1, new PMPEntry()))
 
     pmpEntries.zip(pmpDefault +: pmpEntries.take(num-1)).zipWithIndex.foreach{ case ((pmp, last_pmp), i) =>
-      val is_match = pmp.is_match(addr, size, lgMaxSize, last_pmp)
+      val is_match = pmp.is_match(addr, size, lgMaxSize, last_pmp) &&
+                     Mux(addr >= debugStart.U && addr <= debugEnd.U, debug, true.B)
       val ignore = passThrough && !pmp.cfg.l
       val aligned = pmp.aligned(addr, size, lgMaxSize, last_pmp)
 
@@ -462,29 +464,33 @@ class PMPCheckerEnv(implicit p: Parameters) extends PMPBundle {
   val keyIDen = Bool()
   val cmode = Bool()
   val mode = UInt(2.W)
+  val debug = Bool()
   val pmp = Vec(NumPMPReal, new PMPEntry())
   val pma = Vec(NumPMAReal, new PMPEntry())
 
-  def apply(keyIDen: Bool, cmode: Bool, mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
+  def apply(keyIDen: Bool, cmode: Bool, mode: UInt, debug: Bool, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
     this.keyIDen := keyIDen
     this.cmode := cmode
     this.mode := mode
+    this.debug := debug
     this.pmp := pmp
     this.pma := pma
   }
 
-  def apply(cmode: Bool, mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
+  def apply(cmode: Bool, mode: UInt, debug: Bool, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
     this.keyIDen := false.B
     this.cmode := cmode
     this.mode := mode
+    this.debug := debug
     this.pmp := pmp
     this.pma := pma
   }
 
-  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
+  def apply(mode: UInt, debug: Bool, pmp: Vec[PMPEntry], pma: Vec[PMPEntry]): Unit = {
     this.keyIDen := false.B
     this.cmode := true.B
     this.mode := mode
+    this.debug := debug
     this.pmp := pmp
     this.pma := pma
   }
@@ -495,20 +501,20 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
   val resp = new PMPRespBundle()
 
-  def apply(keyIDen: Bool, cmode: Bool, mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
-    check_env.apply(keyIDen, cmode, mode, pmp, pma)
+  def apply(keyIDen: Bool, cmode: Bool, mode: UInt, debug: Bool, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
+    check_env.apply(keyIDen, cmode, mode, debug, pmp, pma)
     this.req := req
     resp
   }
 
-  def apply(cmode: Bool, mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
-    check_env.apply(cmode, mode, pmp, pma)
+  def apply(cmode: Bool, mode: UInt, debug: Bool, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
+    check_env.apply(cmode, mode, debug, pmp, pma)
     this.req := req
     resp
   }
 
-  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
-    check_env.apply(mode, pmp, pma)
+  def apply(mode: UInt, debug: Bool, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
+    check_env.apply(mode, debug, pmp, pma)
     this.req := req
     resp
   }
@@ -518,8 +524,8 @@ class PMPCheckIO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
     this.req.bits.apply(addr)
   }
 
-  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
-    check_env.apply(mode, pmp, pma)
+  def apply(mode: UInt, debug: Bool, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
+    check_env.apply(mode, debug, pmp, pma)
     req_apply(valid, addr)
     resp
   }
@@ -530,14 +536,14 @@ class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
   val req = Flipped(Valid(new PMPReqBundle(lgMaxSize))) // usage: assign the valid to fire signal
   val resp = Output(new PMPConfig())
 
-  def apply(cmode: Bool, mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
-    check_env.apply(cmode, mode, pmp, pma)
+  def apply(cmode: Bool, mode: UInt, debug: Bool, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
+    check_env.apply(cmode, mode, debug, pmp, pma)
     req_apply(valid, addr)
     resp
   }
 
-  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
-    check_env.apply(mode, pmp, pma)
+  def apply(mode: UInt, debug: Bool, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], req: Valid[PMPReqBundle]) = {
+    check_env.apply(mode, debug, pmp, pma)
     this.req := req
     resp
   }
@@ -547,8 +553,8 @@ class PMPCheckv2IO(lgMaxSize: Int)(implicit p: Parameters) extends PMPBundle {
     this.req.bits.apply(addr)
   }
 
-  def apply(mode: UInt, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
-    check_env.apply(mode, pmp, pma)
+  def apply(mode: UInt, debug: Bool, pmp: Vec[PMPEntry], pma: Vec[PMPEntry], valid: Bool, addr: UInt) = {
+    check_env.apply(mode, debug, pmp, pma)
     req_apply(valid, addr)
     resp
   }
@@ -584,13 +590,13 @@ class PMPChecker
    */
 
   val check_addr = Mux(io.check_env.keyIDen, req.addr(PMPAddrBits-PMPKeyIDBits-1, 0), req.addr)
-  val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(check_addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
-  val res_pma = pma_match_res(leaveHitMux, io.req.valid)(check_addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
+  val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(check_addr, req.size, io.check_env.pmp, io.check_env.mode, io.check_env.debug, lgMaxSize)
+  val res_pma = pma_match_res(leaveHitMux, io.req.valid)(check_addr, req.size, io.check_env.pma, io.check_env.mode, io.check_env.debug, lgMaxSize)
 
   val cmd = if(leaveHitMux) RegEnable(req.cmd, io.req.valid) else req.cmd
   val resp_pmp = pmp_check(cmd, res_pmp.cfg)
   val resp_pma = pma_check(cmd, res_pma.cfg)
-  
+
   def keyid_check(leaveHitMux: Boolean = false, valid: Bool = true.B, addr: UInt) = {
     val resp = Wire(new PMPRespBundle)
     val keyid_nz = if (PMPKeyIDBits > 0) addr(PMPAddrBits-1, PMPAddrBits-PMPKeyIDBits) =/= 0.U else false.B
@@ -632,8 +638,8 @@ class PMPCheckerv2
 
   val req = io.req.bits
 
-  val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, lgMaxSize)
-  val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, lgMaxSize)
+  val res_pmp = pmp_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pmp, io.check_env.mode, io.check_env.debug, lgMaxSize)
+  val res_pma = pma_match_res(leaveHitMux, io.req.valid)(req.addr, req.size, io.check_env.pma, io.check_env.mode, io.check_env.debug, lgMaxSize)
 
   val resp = and(res_pmp, res_pma)
 

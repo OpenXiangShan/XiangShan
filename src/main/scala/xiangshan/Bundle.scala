@@ -576,6 +576,7 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
     val spvp = UInt(1.W)
     val imode = UInt(2.W)
     val dmode = UInt(2.W)
+    val debug = Bool()
   }
   val mPBMTE = Bool()
   val hPBMTE = Bool()
