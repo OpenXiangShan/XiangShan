@@ -70,11 +70,12 @@ class IssuePipe(
   /**
    * is0 stage
    */
+  val is0FlushNext: Bool = is0Next.bits.robIdx.needFlush(in.flush)
   val is0Failed: Bool = in.is0RdFail && in.is0LdCancel
   is0Resp.fail := is0.valid && is0Failed
   is0Resp.success := false.B // Todo
 
-  is0.valid := is0Next.valid
+  is0.valid := is0Next.valid && !is0FlushNext
   when (is0Next.valid) {
     is0.bits := is0Next.bits
   }
