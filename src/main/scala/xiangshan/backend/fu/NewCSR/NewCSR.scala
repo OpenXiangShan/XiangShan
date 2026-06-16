@@ -67,8 +67,6 @@ object CSRConfig {
   final val EXT_DBLTRP = true
 
   final val PPNLength = 44
-  // TODO: as current test not support clean mdt , we set mstatus->mdt = 0 to allow exception in m-mode
-  final val mdtInit = 0
 
 }
 
