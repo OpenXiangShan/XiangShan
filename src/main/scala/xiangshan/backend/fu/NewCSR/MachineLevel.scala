@@ -427,11 +427,9 @@ trait MachineLevel { self: NewCSR =>
     with TrapEntryMNEventSinkBundle
     with MNretEventSinkBundle{
     // NMIE write 0 with no effect
-    // as opensbi not support smrnmi, we init nmie with 1,and allow software to set nmie close for testing
-    // Attension, when set nmie to zero ,do not cause double trap when nmi interrupt has triggered
-//    when(!wdata.NMIE.asBool) {
-//      reg.NMIE := reg.NMIE
-//    }
+    when(wen && !wdata.NMIE.asBool) {
+      reg.NMIE := reg.NMIE
+    }
   }).setAddr(CSRs.mnstatus)
   val mnscratch = Module(new CSRModule("Mnscratch", new ScratchBundle("Scratch register for resumable NMI handlers.")))
     .setAddr(CSRs.mnscratch)
@@ -530,7 +528,7 @@ class MstatusBundle extends CSRBundle {
   val MBE  = CSRROField     (37).withReset(0.U).withDescription("M-mode endianness selector.")
   val GVA  = CSRRWField     (38).withReset(0.U).withDescription("Indicates that trap information was derived from a guest virtual address.")
   val MPV  = VirtMode       (39).withReset(0.U).withDescription("Saved virtualization mode from before trap entry to M-mode.")
-  val MDT  = CSRRWField     (42).withReset(mdtInit.U).withDescription("M-mode disable-trap bit used by the Smdbltrp extension.")
+  val MDT  = CSRRWField     (42).withReset(1.U).withDescription("M-mode disable-trap bit used by the Smdbltrp extension.")
   val SD   = CSRROField     (63,
     (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty
   ).withDescription("Dirty summary bit for the floating-point or vector context.")
@@ -602,8 +600,7 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
 }
 
 class MnstatusBundle extends CSRBundle {
-  // OpenSBI does not support Smrnmi yet, so NMIE resets enabled for bring-up.
-  val NMIE   = CSRRWField  (3).withReset(1.U).withDescription("Enable non-maskable interrupt handling.")
+  val NMIE   = CSRRWField  (3).withReset(0.U).withDescription("Enable non-maskable interrupt handling.")
   val MNPV   = VirtMode    (7).withReset(0.U).withDescription("Saved virtualization mode for resumable NMI handling.")
   val MNPELP = RO          (9).withReset(0.U).withDescription("Saved landing-pad state for resumable NMI handling.")
   val MNPP   = PrivMode    (12, 11).withReset(PrivMode.U).withDescription("Saved privilege level for resumable NMI handling.")
