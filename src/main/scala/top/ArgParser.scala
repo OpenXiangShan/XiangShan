@@ -52,6 +52,7 @@ object ArgParser {
       |--disable-clockgate
       |--enable-dfx
       |--dump-csr
+      |--imsic-bus-type <NONE|TL|AXI>
       |""".stripMargin
 
   def getConfigByName(confString: String): Parameters = {

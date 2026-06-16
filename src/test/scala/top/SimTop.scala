@@ -43,6 +43,14 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   if (!l_soc.module.dma.isEmpty) {
     l_soc.module.dma.get <> WireDefault(0.U.asTypeOf(l_soc.module.dma.get))
   }
+  l_soc.module.imsic_axi4.foreach { port =>
+    port <> WireDefault(0.U.asTypeOf(port))
+  }
+  l_soc.module.imsic_axi4s.foreach { ports =>
+    ports.foreach { port =>
+      port <> WireDefault(0.U.asTypeOf(port))
+    }
+  }
 
   val l_simMMIO = LazyModule(new SimMMIO(l_soc.misc.peripheralNode.in.head._2)(p.alter((site, here, up) => {
     case SoCParamsKey => up(SoCParamsKey).copy(UARTLiteForDTS = false)

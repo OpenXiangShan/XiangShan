@@ -54,9 +54,15 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
   val tl_s = tl.map(x => InModuleBody(x(1).makeIOs()))
 
   // AXI4 Bus
-  val axi_reg_imsic = Option.when(soc.IMSICBusType == device.IMSICBusType.AXI)(LazyModule(new aia.AXIRegIMSIC_WRAP(soc.IMSICParams, seperateBus = false)))
+  val axi_reg_imsic = Option.when(soc.IMSICBusType == device.IMSICBusType.AXI)(LazyModule(new aia.AXIRegIMSIC_WRAP(soc.IMSICParams, beatBytes = 8, seperateBus = false)))
 
-  val axi = axi_reg_imsic.map { axi_reg_imsic =>
+  val axi_mem_xbar = axi_reg_imsic.map { axi_reg_imsic =>
+    val imsic_mem_xbar = AXI4Xbar()
+    axi_reg_imsic.imsic_xbar1to2 := imsic_mem_xbar
+    imsic_mem_xbar
+  }
+
+  val axi = axi_mem_xbar.map { imsic_mem_xbar =>
     val axinode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
       Seq(AXI4MasterParameters(
         name = "s_axi_",
@@ -64,11 +70,12 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
         maxFlight = Some(0)
       ))
     )))
-    axi_reg_imsic.imsic_xbar1to2 := AXI4Buffer() := axinode
+    imsic_mem_xbar := AXI4Buffer() := axinode
     axinode
   }
 
   val axi4 = axi.map(x => InModuleBody(x.makeIOs()))
+  val aplic_axi4 = axi_mem_xbar
 
   class imsic_bus_top_imp(wrapper: imsic_bus_top) extends LazyModuleImp(wrapper) {
     val msiio = IO(Flipped(new aia.MSITransBundle(soc.IMSICParams)))
