@@ -233,6 +233,14 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper 
     this.cfiPosition := getAlignedPosition(resolve.pc, resolve.ftqOffset)._1
     this.attribute   := resolve.attribute
     this.mispredict  := resolve.mispredict
+
+    if (!env.FPGAPlatform) {
+      this.debug_realCfiPc.get := getRealCfiPcFromOffset(
+        resolve.pc,
+        resolve.ftqOffset,
+        resolve.debug_isRVC.get
+      )
+    }
   }
 }
 

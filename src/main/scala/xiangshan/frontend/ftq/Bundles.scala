@@ -25,6 +25,7 @@ import xiangshan.frontend.TwoFetchInfo
 import xiangshan.frontend.TwoPrefetchCase
 import xiangshan.frontend.bpu.BpuMeta
 import xiangshan.frontend.bpu.BpuPerfMeta
+import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICacheDataHelper
@@ -88,7 +89,8 @@ class PerfMeta(implicit p: Parameters) extends FtqBundle {
   val bpuPerf: BpuPerfMeta = new BpuPerfMeta
 
   // Whether a position is a Control-Flow Instruction
-  val isCfi: Vec[Bool] = Vec(FetchBlockInstNum, Bool())
+  val isCfi:   Vec[Bool]            = Vec(FetchBlockInstNum, Bool())
+  val cfiAttr: Vec[BranchAttribute] = Vec(FetchBlockInstNum, new BranchAttribute)
 
   // This block mispredicted
   // no matter how many mispredictions happened before, count correct-path only
