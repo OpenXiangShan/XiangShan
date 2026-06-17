@@ -59,6 +59,7 @@ import xiangshan.frontend.bpu.CompareMatrix
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.ICacheToFtqIO
+import xiangshan.frontend.icache.PrefetchSource
 import xiangshan.frontend.icache.TwoFetchFailReason
 
 class Ftq(implicit p: Parameters) extends FtqModule
@@ -310,7 +311,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     } else { // we can do 2-prefetch only when !hasBackendFlag, so setting backendException on i != 0 is useless
       req.backendException := ExceptionType.None
     }
-    req.isSoftPrefetch := false.B
+    req.source := PrefetchSource.Fdip
   }
   io.toICache.toPrefetch.bits.twoPrefetchCase := Mux(canTwoPrefetch, twoPrefetchCase, TwoPrefetchCase.Conflict)
 

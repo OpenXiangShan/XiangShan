@@ -288,14 +288,41 @@ class MainPipeToWayLookupBundle(implicit p: Parameters) extends ICacheBundle {
 }
 
 /* ***** PrefetchPipe ***** */
+class PrefetchSource extends Bundle {
+  val value: UInt = PrefetchSource.Value()
+
+  def isFdip: Bool = value === PrefetchSource.Value.Fdip
+  def isSw:   Bool = value === PrefetchSource.Value.Sw
+
+  def inStream: Bool = isFdip // in instruction stream, i.e. should be sent to mainPipe\ifu\backend
+
+  def getValidSeq: Seq[(String, Bool)] = PrefetchSource.Value.getValidSeq(value)
+}
+
+object PrefetchSource {
+  object Value extends EnumUInt(2) {
+    def Fdip: UInt = 0.U(width.W) // Fetch-directed instruction prefetch
+    def Sw:   UInt = 1.U(width.W) // Zicbop prefetch.i
+  }
+
+  def apply(that: UInt): PrefetchSource = {
+    val source = Wire(new PrefetchSource)
+    source.value := that
+    source
+  }
+
+  def Fdip: PrefetchSource = apply(Value.Fdip)
+  def Sw:   PrefetchSource = apply(Value.Sw)
+}
+
 class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
-  val startVAddr:       GuardedPc     = GuardedPc()
-  val nextLineVAddr:    GuardedPc     = GuardedPc()
-  val vSetIdx:          Vec[UInt]     = Vec(PortNumber, UInt(idxBits.W))
-  val isCrossLine:      Bool          = Bool()
-  val ftqIdx:           FtqPtr        = new FtqPtr
-  val backendException: ExceptionType = new ExceptionType
-  val isSoftPrefetch:   Bool          = Bool()
+  val startVAddr:       GuardedPc      = GuardedPc()
+  val nextLineVAddr:    GuardedPc      = GuardedPc()
+  val vSetIdx:          Vec[UInt]      = Vec(PortNumber, UInt(idxBits.W))
+  val isCrossLine:      Bool           = Bool()
+  val ftqIdx:           FtqPtr         = new FtqPtr
+  val backendException: ExceptionType  = new ExceptionType
+  val source:           PrefetchSource = new PrefetchSource
 
   def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): PrefetchReqBundle = {
     startVAddr       := PcInit(req.vaddr).signGuard
@@ -304,7 +331,7 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
     isCrossLine      := false.B
     ftqIdx           := DontCare
     backendException := ExceptionType.None
-    isSoftPrefetch   := true.B
+    source           := PrefetchSource.Sw
     this
   }
 }
