@@ -44,7 +44,7 @@ trait CSRPMP { self: NewCSR =>
     if (num < p(PMParameKey).NumPMPReal) {
       Module(new CSRModule(s"Pmpaddr$num", new PMPAddrBundle) with HasPMPAddrSink {
         // read condition
-        rdata := addrRData(num)
+        regOut := addrRData(num)
       })
         .setAddr(CSRs.pmpaddr0 + num)
     } else {
