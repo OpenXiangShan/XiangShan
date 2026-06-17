@@ -35,6 +35,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.vagq._
 import xiangshan.backend.issue.EntryBundles.RespType
 import xiangshan.backend.issue._
+import xiangshan.backend.vector.VecOrderQueue
 
 
 class Region(val params: SchdBlockParams)(implicit p: Parameters)
@@ -133,10 +134,12 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters)
       sinks.io.vlFromIntIsVlmax := false.B
       source.ready := sink.ready
     }}
+    sinks.io.wakeupFromVoq.foreach(_ := io.wakeupFromVoq.get)
   }}
   issueQueues.filterNot(_.param.StdCnt == 0).map { case stdiq => {
     stdiq.io.vlFromIntIsZero := false.B
     stdiq.io.vlFromIntIsVlmax := false.B
+    stdiq.io.wakeupFromVoq.foreach(_ := io.wakeupFromVoq.get)
     }
   }
   issueQueues.filter(_.param.needUncertainWakeupFromExu).map(_.io.wakeupFromExu.get).flatten.zip(exuBlock.io.uncertainWakeupOut.get).map { case (iq, exuWakeUpIn) =>
@@ -326,6 +329,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters)
     vstdEnq.bits.uopIdx.foreach(_ := staEnq.bits.uopIdx.get)
     vstdEnq.bits.lastUop.foreach(_ := staEnq.bits.lastUop.get)
     vstdEnq.bits.sqIdx.get := staEnq.bits.sqIdx.get
+    vstdEnq.bits.useVAGQ.foreach(_ := isVagqIndexData)
+    vstdEnq.bits.useGather.foreach(_ := false.B)
 
     vstdEnq.bits.debug.foreach(_ := staEnq.bits.debug.get)
     val indexSrcIdx = 1 // indexed data side reads vs2 as op2Data
@@ -1019,6 +1024,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val wakeUpFromInt = Option.when(params.isFpSchd)(Flipped(intSchdParam.genIQWakeUpOutValidBundle))
   val wakeupFromI2F = Option.when(params.isFpSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam))))
   val wakeupFromF2I = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
+  val wakeupFromVoq = Option.when(params.issueBlockParams.exists(_.needVoQ))(Input(new VecOrderQueue.Wake))
   val cross = new ExuCrossRegion(params)
   val toMemExu = Option.when(params.isIntSchd || params.isVecSchd)(params.genNewExuInputBundle(DecoupledIO(_), _.hasMemFu))
   val vagqAddrUop = Option.when(params.isIntSchd)(Vec(VAGQConstants.AddrIssueWidth, Decoupled(new VAGQAddrSideUop)))

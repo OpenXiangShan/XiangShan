@@ -245,6 +245,7 @@ class VecRegionImp(
         s"vpWbM3WakeUp: ${vpWbM3WakeUp.size}, iq.in.wakeup.vpWbM3Vec: ${iq.in.wakeup.vpWbM3Vec.size}"
       )
       iq.in.wakeup.vpWbM3Vec := VecInit(vpWbM3WakeUp)
+      iq.in.wakeup.voqWake.foreach(_ := in.fromCtrlBlock.voqWake)
   }
 
 
@@ -547,6 +548,9 @@ object VecRegionModule {
       val hartId = UInt(8.W)
     }
     val flush = ValidIO(new Redirect)
+    val fromCtrlBlock = new Bundle {
+      val voqWake = new VecOrderQueue.Wake
+    }
     val fromDispatch = new Bundle {
       val uops: MixedVec[Vec[ValidIO[VecIssueQueue.Enq]]] = MixedVec(
         param.issueParams.filterNot(_.hasVStd).map(x => Vec(x.numEnq, ValidIO(new VecIssueQueue.Enq()(p, x))))

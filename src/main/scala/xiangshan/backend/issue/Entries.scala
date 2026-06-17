@@ -13,6 +13,7 @@ import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.vector.Utils.NOnes
+import xiangshan.backend.vector.VecOrderQueue
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.issue.EntryBundles._
 import xiangshan.mem.{LqPtr, SqPtr}
@@ -117,6 +118,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     enqEntry.io.commonIn.transSel             := (if (params.isAllComp || params.isAllSimp) enqCanTrans2Others.get && othersTransSelVec.get(entryIdx).valid
                                                   else enqCanTrans2Simp.get && simpTransSelVec.get(entryIdx).valid || enqCanTrans2Comp.get && compTransSelVec.get(entryIdx).valid)
     EntriesConnect(enqEntry.io.commonIn, enqEntry.io.commonOut, entryIdx)
+    enqEntry.io.commonIn.wakeupFromVoq.foreach(_ := io.wakeupFromVoq.get)
     enqEntry.io.enqDelayIn1.wakeUpFromWB := io.wakeUpFromWBDelayed
     enqEntry.io.enqDelayIn1.wakeUpFromIQ := io.wakeUpFromIQDelayed
     enqEntry.io.enqDelayIn1.srcLoadDependency := RegEnable(VecInit(io.enq(entryIdx).bits.payload.srcLoadDependency.take(params.numRegSrc)), io.enq(entryIdx).valid)
@@ -137,6 +139,7 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
                                                     io.simpEntryDeqSelVec.get.zip(simpCanTrans2Comp.get).map(x => x._1(entryIdx) && x._2).reduce(_ | _)
                                                   else false.B)
     EntriesConnect(othersEntry.io.commonIn, othersEntry.io.commonOut, entryIdx + EnqEntryNum)
+    othersEntry.io.commonIn.wakeupFromVoq.foreach(_ := io.wakeupFromVoq.get)
     othersEntryEnqReadyVec(entryIdx)          := othersEntry.io.commonOut.enqReady
     if (params.hasCompAndSimp && (entryIdx < SimpEntryNum)) {
       simpEntryTransVec.get(entryIdx)         := othersEntry.io.commonOut.transEntry
@@ -528,6 +531,7 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   // wakeup
   val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
+  val wakeupFromVoq       = Option.when(params.needVoQ)(Input(new VecOrderQueue.Wake))
   val wakeUpFromWBDelayed: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeUpFromIQDelayed: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val vlFromIntIsZero     = Input(Bool())

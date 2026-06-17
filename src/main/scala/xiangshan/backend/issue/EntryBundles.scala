@@ -10,6 +10,7 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.datapath.DataConfig.{V0Data, VlData}
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.FuType
+import xiangshan.backend.vector.VecOrderQueue
 import xiangshan.backend.fu.vector.Bundles.NumLsElem
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.{LqPtr, SqPtr}
@@ -25,6 +26,10 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val srcStatus             = Vec(params.numRegSrc, new SrcStatus)
     val srcStatusV0           = Option.when(params.readV0Rf)(new V0SrcStatus)
     val srcStatusVl           = Option.when(params.readVlRf)(new VlSrcStatus)
+    val useVAGQ               = Option.when(params.needVoQ)(Bool())
+    val useGather             = Option.when(params.needVoQ)(Bool())
+    val vagqEntryIdx          = Option.when(params.needVoQ)(UInt(log2Ceil(VecOrderQueue.VAGQSize).W))
+    val voqReady              = Option.when(params.needVoQ)(Bool())
     //issue status
     val blocked               = Bool()
     val issued                = Bool()
@@ -39,7 +44,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     }
 
     def canIssue: Bool        = {
-      srcReady && !issued && !blocked
+      srcReady && !issued && !blocked && voqReady.getOrElse(true.B)
     }
 
     def mergedLoadDependency: Vec[UInt] = {
@@ -121,6 +126,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       deqOg1Payload.psrc.zipWithIndex.foreach{case(pl, idx) => pl := status.srcStatus(idx).psrc}
       deqOg1Payload.psrcVl.foreach{_ := status.srcStatusVl.get.psrc}
       deqOg1Payload.psrcV0.foreach{_ := status.srcStatusV0.get.psrc}
+      deqOg1Payload.vagqEntryIdx.foreach(_ := status.vagqEntryIdx.get)
       deqOg1Payload
     }
     def genXrfRen(entry: EntryBundle): Unit = {
@@ -142,6 +148,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     //wakeup
     val wakeUpFromWB: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
     val wakeUpFromIQ: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
+    val wakeupFromVoq         = Option.when(params.needVoQ)(Input(new VecOrderQueue.Wake))
     // vl
     val vlFromIntIsZero       = Input(Bool())
     val vlFromIntIsVlmax      = Input(Bool())
@@ -321,6 +328,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     hasIQWakeupGet.srcWakeupByIQWithoutCancel       := wakeupVec.map(x => VecInit(x))
     hasIQWakeupGet.wakeupLoadDependencyByIQVec      := commonIn.wakeUpFromIQ.map(_.bits.loadDependency).toSeq
     hasIQWakeupGet.canIssueBypass                   := validReg && !status.issued && !status.blocked &&
+      status.voqReady.getOrElse(true.B) &&
       VecInit(status.srcStatus.map(_.srcState).zip(hasIQWakeupGet.srcWakeupByIQWithoutCancel).zipWithIndex.map { case ((state, wakeupVec), srcIdx) =>
         wakeupVec.asUInt.orR | state
       }).asUInt.andR
@@ -360,6 +368,19 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     entryUpdate.status.robIdx                         := status.robIdx
     entryUpdate.status.isFmac.foreach(_               := status.isFmac.get)
     entryUpdate.status.fuType                         := IQFuType.readFuType(status.fuType, params.getFuCfgs.map(_.fuType))
+    entryUpdate.status.useVAGQ.foreach(_              := status.useVAGQ.get)
+    entryUpdate.status.useGather.foreach(_            := status.useGather.get)
+    entryUpdate.status.vagqEntryIdx.foreach(_         := Mux(
+                                                            commonIn.wakeupFromVoq.get.valid && commonIn.wakeupFromVoq.get.robIdx === status.robIdx && status.useVAGQ.get,
+                                                            (commonIn.wakeupFromVoq.get.entryIdx + entryReg.payload.og1Payload.uopIdx.get)(log2Ceil(VecOrderQueue.VAGQSize) - 1, 0),
+                                                            status.vagqEntryIdx.get
+                                                          ))
+    entryUpdate.status.voqReady.foreach { voqReady =>
+      val needVoQWake                                 = status.useVAGQ.get || status.useGather.get
+      voqReady                                       := status.voqReady.get ||
+                                                            !needVoQWake ||
+                                                            commonIn.wakeupFromVoq.get.valid && commonIn.wakeupFromVoq.get.robIdx === status.robIdx
+    }
     entryUpdate.status.srcStatus.zip(status.srcStatus).zipWithIndex.foreach { case ((srcStatusNext, srcStatus), srcIdx) =>
       val srcLoadCancel = common.srcLoadCancelVec(srcIdx)
       val loadTransCancel = common.srcLoadTransCancelVec(srcIdx)

@@ -10,6 +10,7 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.fu.FuConfig._
+import xiangshan.backend.vector.VecOrderQueue
 import xiangshan.mem.{LqPtr, SqPtr}
 import utility.PerfCCT
 
@@ -32,6 +33,7 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wakeupFromExu: Option[MixedVec[DecoupledIO[IssueQueueIQWakeUpBundle]]] = Option.when(params.needUncertainWakeupFromExu)(Flipped(params.genExuWakeUpOutValidBundle))
   val wakeupFromI2F: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromI2F)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxI2F, params.backendParam))))
   val wakeupFromF2I: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromF2I)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
+  val wakeupFromVoq = Option.when(params.needVoQ)(Input(new VecOrderQueue.Wake))
   val wakeupFromWBDelayed: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeupFromIQDelayed: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
   val vlFromIntIsZero = Input(Bool())
@@ -320,6 +322,19 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
           v0SrcStatus.dataSource.value                          := DataSource.reg // Todo: update when support vl wake up
       }
       enq.bits.status.blocked                                   := false.B
+      enq.bits.status.useVAGQ.foreach(_                         := s0_enqBits(enqIdx).useVAGQ.get)
+      enq.bits.status.useGather.foreach(_                       := s0_enqBits(enqIdx).useGather.get)
+      enq.bits.status.vagqEntryIdx.foreach(_                    := Mux(
+        io.wakeupFromVoq.get.valid && io.wakeupFromVoq.get.robIdx === s0_enqBits(enqIdx).robIdx && s0_enqBits(enqIdx).useVAGQ.get,
+        (io.wakeupFromVoq.get.entryIdx + s0_enqBits(enqIdx).uopIdx.get)(log2Ceil(VecOrderQueue.VAGQSize) - 1, 0),
+        0.U
+      ))
+      enq.bits.status.voqReady.foreach { voqReady =>
+        val needVoQWake = s0_enqBits(enqIdx).useVAGQ.get || s0_enqBits(enqIdx).useGather.get
+        voqReady                                                :=
+          !needVoQWake ||
+            io.wakeupFromVoq.get.valid && io.wakeupFromVoq.get.robIdx === s0_enqBits(enqIdx).robIdx
+      }
       enq.bits.status.issued                                    := false.B
       enq.bits.status.firstIssue                                := true.B
       enq.bits.status.issueTimer                                := 0.U
@@ -355,6 +370,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     }
     entriesIO.wakeUpFromWB                                      := 0.U.asTypeOf(io.wakeupFromWB)
     entriesIO.wakeUpFromIQ                                      := wakeupFromIQ
+    entriesIO.wakeupFromVoq.foreach(_                           := io.wakeupFromVoq.get)
     entriesIO.wakeUpFromWBDelayed                               := 0.U.asTypeOf(io.wakeupFromWBDelayed)
     println(s"[issueQueue] name = ${params.getIQName}")
     val wakeupFromWBExuName = io.wakeupFromWB.map(x => x.bits.exuIndices).map(i => i.map(backendParams.allExuParams(_).name))

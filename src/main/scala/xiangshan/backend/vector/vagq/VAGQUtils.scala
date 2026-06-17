@@ -193,7 +193,7 @@ trait HasVAGQHelper extends HasCircularQueuePtrHelper { this: HasVAGQParameters 
   protected def buildVagqStrideDataUop(source: ExuInput): VAGQDataSideUop = {
     val data = Wire(new VAGQDataSideUop)
     data := 0.U.asTypeOf(data)
-    data.entryIdx := 0.U // TODO: replace with VOQ-provided entryIdx together with addr side.
+    data.entryIdx := source.vagqEntryIdx.get
     data.robIdx := source.robIdx
     data.op2Data := fitUInt(source.src(0), VLEN)
     data.psrc2 := 0.U // Todo
@@ -203,7 +203,7 @@ trait HasVAGQHelper extends HasCircularQueuePtrHelper { this: HasVAGQParameters 
   protected def buildVagqIndexedDataUop(source: xiangshan.backend.vector.Exu.InUop): VAGQDataSideUop = {
     val data = Wire(new VAGQDataSideUop)
     data := 0.U.asTypeOf(data)
-    data.entryIdx := 0.U // TODO: replace with VOQ-provided entryIdx together with addr side.
+    data.entryIdx := source.ctrl.vagqEntryIdx.get
     data.robIdx := source.ctrl.robIdx
     data.op2Data := fitUInt(source.data.src(0), VLEN)
     data.psrc2 := 0.U // Todo
@@ -229,7 +229,7 @@ trait HasVAGQHelper extends HasCircularQueuePtrHelper { this: HasVAGQParameters 
     addr.meta.trigger := TriggerAction.None
     addr.meta.perfDebugInfo := source.perfDebugInfo.getOrElse(0.U.asTypeOf(addr.meta.perfDebugInfo))
     addr.meta.debug_seqNum := source.debug_seqNum.getOrElse(0.U.asTypeOf(addr.meta.debug_seqNum))
-    addr.entryIdx := 0.U // TODO
+    addr.entryIdx := source.vagqEntryIdx.get
     addr.uopType := Mux(
       isLoad,
       Mux(isStride, VAGQUopType.strideLoad, Mux(isOrdered, VAGQUopType.indexedOrderedLoad, VAGQUopType.indexedUnorderedLoad)),

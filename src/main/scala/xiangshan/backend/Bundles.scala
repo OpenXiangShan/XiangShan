@@ -20,6 +20,7 @@ import xiangshan.backend.issue.EntryBundles._
 import xiangshan.backend.regfile._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.trace._
+import xiangshan.backend.vector.VecOrderQueue
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.mem.{LqPtr, SqPtr}
@@ -439,8 +440,8 @@ object Bundles {
     val selImm   = Option.when(params.needImm)(SelImm())
     val imm      = Option.when(params.needImm)(UInt(32.W))
     val vpu      = Option.when(params.inVfSchd)(new VPUCtrlSignals)
-    val useVAGQ  = Option.when(params.inVfSchd)(Bool())
-    val useGather = Option.when(params.inVfSchd)(Bool())
+    val useVAGQ  = Option.when(params.needVoQ)(Bool())
+    val useGather = Option.when(params.needVoQ)(Bool())
     val frm      = Option.when(params.needSrcFrm)(Frm())
     val vm       = Option.when(params.readV0Rf)(Bool())
     val oldVType = Option.when(params.writeVType)(VType())
@@ -495,8 +496,8 @@ object Bundles {
     val oldVType = Option.when(params.writeVType)(VType())
     val vtype    = Option.when(params.readVlRf)(VType())
     val fflagsWen = Option.when(params.writeFflags)(Bool())
-    val uopIdx   = Option.when(params.inVfSchd)(UopIdx())
-    val lastUop  = Option.when(params.inVfSchd)(Bool())
+    val uopIdx   = Option.when(params.inVfSchd || params.isMemAddrIQ)(UopIdx())
+    val lastUop  = Option.when(params.inVfSchd || params.isMemAddrIQ)(Bool())
     // from rename
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
@@ -524,8 +525,8 @@ object Bundles {
     val frm      = Option.when(params.needSrcFrm)(Frm())
     val vpu      = Option.when(params.issueBlockParam.inVfSchd)(new VPUCtrlSignals)
     val fflagsWen = Option.when(params.writeFflags)(Bool())
-    val uopIdx   = Option.when(params.issueBlockParam.inVfSchd)(UopIdx())
-    val lastUop  = Option.when(params.issueBlockParam.inVfSchd)(Bool())
+    val uopIdx   = Option.when(params.issueBlockParam.inVfSchd || params.issueBlockParam.isMemAddrIQ)(UopIdx())
+    val lastUop  = Option.when(params.issueBlockParam.inVfSchd || params.issueBlockParam.isMemAddrIQ)(Bool())
     // from rename
     val numLsElem = Option.when(params.issueBlockParam.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
@@ -542,6 +543,7 @@ object Bundles {
     // from dispatch
     val lqIdx = Option.when(params.issueBlockParam.needLqIdx)(new LqPtr)
     val sqIdx = Option.when(params.issueBlockParam.needSqIdx)(new SqPtr) // load unit need sqIdx
+    val vagqEntryIdx = Option.when(params.issueBlockParam.needVoQ)(UInt(log2Ceil(VecOrderQueue.VAGQSize).W))
   }
 
   class IssueQueuePayload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
@@ -1016,6 +1018,7 @@ object Bundles {
     val ssid           = Option.when(iqParams.isLdAddrIQ || iqParams.isStAddrIQ)(UInt(SSIDWidth.W))
     val lqIdx          = Option.when(iqParams.needLqIdx)(new LqPtr)
     val sqIdx          = Option.when(iqParams.needSqIdx)(new SqPtr)
+    val vagqEntryIdx   = Option.when(iqParams.needVoQ)(UInt(log2Ceil(VecOrderQueue.VAGQSize).W))
 
     val src = Vec(exuParams.numRegSrc, UInt(exuParams.srcDataBitsMax.W))
     val v0  = Option.when(exuParams.readV0Rf)(V0())
@@ -1113,6 +1116,7 @@ object Bundles {
 
       this.lqIdx.foreach(_ := source.lqIdx.get)
       this.sqIdx.foreach(_ := source.sqIdx.get)
+      this.vagqEntryIdx.foreach(_ := source.vagqEntryIdx.get)
     }
   }
 
@@ -1236,6 +1240,7 @@ object Bundles {
     val numLsElem      = OptionWrapper(params.hasVecLsFu, NumLsElem())
     val lqIdx = OptionWrapper(params.hasLoadFu || params.hasStoreAddrFu || params.hasVecLsFu, new LqPtr)
     val sqIdx = OptionWrapper(params.hasLoadFu || params.hasStoreAddrFu || params.hasStdFu || params.hasVecLsFu || params.hasVStdFu, new SqPtr)
+    val vagqEntryIdx = Option.when(params.issueBlockParam.needVoQ)(UInt(log2Ceil(VecOrderQueue.VAGQSize).W))
     val dataSources = Vec(params.numRegSrc, DataSource())
     val exuSources = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuSource(params)))
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
@@ -1390,6 +1395,7 @@ object Bundles {
     val numLsElem      = Option.when(params.hasVecLsFu)(NumLsElem())
     val lqIdx          = Option.when(params.hasLoadExu || params.hasStoreAddrExu || params.hasVecLsFu)(new LqPtr)
     val sqIdx          = Option.when(params.hasLoadExu || params.hasStoreAddrFu || params.hasStdFu || params.hasVecLsFu || params.hasVStdFu)(new SqPtr)
+    val vagqEntryIdx   = Option.when(params.issueBlockParam.needVoQ)(UInt(log2Ceil(VecOrderQueue.VAGQSize).W))
     val perfDebugInfo  = Option.when(backendParams.debugEn)(new PerfDebugInfo())
     val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
   }

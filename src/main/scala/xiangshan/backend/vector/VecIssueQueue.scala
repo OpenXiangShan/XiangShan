@@ -240,7 +240,7 @@ class VecIssueQueue(
     val inEnqBits = inEnq.bits
     enq.valid := inEnq.valid
     enq.bits.payload.fromEnq(inEnqBits)
-    enq.bits.status.fromEnq(inEnqBits)
+    enq.bits.status.fromEnq(inEnqBits, in.wakeup.voqWake)
   }
 
   // NewAgeDetector can be used here, because the 2nd port has uop only if the 1st port has uop.
@@ -354,6 +354,7 @@ class VecIssueQueue(
         fpWbD1WakeUpMatchVec = Some(enqEntryEnqFpWbD1WakeUpMatchVec(enqIdx)),
         vpWbM3D1WakeUpMatchVec = Some(enqEntryEnqVpWbM3D1WakeUpMatchVec(enqIdx)),
       )
+      updateVoqStatus(sNext, es)
     }
   }
 
@@ -381,6 +382,7 @@ class VecIssueQueue(
       fpWbD1WakeUpMatchVec = None,
       vpWbM3D1WakeUpMatchVec = None,
     )
+    updateVoqStatus(etyKeepNext.bits.status, ety.bits.status)
   }
 
   /**
@@ -415,6 +417,7 @@ class VecIssueQueue(
         fpWbD1WakeUpMatchVec = None,
         vpWbM3D1WakeUpMatchVec = None,
       )
+      updateVoqStatus(sNext, es)
     }
   }
 
@@ -442,6 +445,7 @@ class VecIssueQueue(
       fpWbD1WakeUpMatchVec = None,
       vpWbM3D1WakeUpMatchVec = None,
     )
+    updateVoqStatus(etyKeepNext.bits.status, ety.bits.status)
   }
 
   private val deqValidVec = WireInit(VecInit(
@@ -722,6 +726,20 @@ class VecIssueQueue(
     }
   }
 
+  private def updateVoqStatus(statusSink: Status, statusSource: Status): Unit = {
+    statusSink.useVAGQ.foreach { useVAGQ =>
+      val wake = in.wakeup.voqWake.get
+      val wakeMatches = wake.valid && wake.robIdx === statusSource.robIdx && statusSource.useVAGQ.get
+      useVAGQ := statusSource.useVAGQ.get
+      statusSink.vagqEntryIdx.get := Mux(
+        wakeMatches,
+        (wake.entryIdx + statusSource.uopIdx)(log2Ceil(VecOrderQueue.VAGQSize) - 1, 0),
+        statusSource.vagqEntryIdx.get
+      )
+      statusSink.voqReady.get := statusSource.voqReady.get || !statusSource.useVAGQ.get || wakeMatches
+    }
+  }
+
   private def entryCanIssueWithWakeUp(
     status            : Status,
     entryValid        : Bool,
@@ -759,7 +777,12 @@ class VecIssueQueue(
     }.getOrElse(true.B)
 
     val srcCanIssue = srcReadyOrWake && v0ReadyOrWake && vlReadyOrWake
-    entryValid && !status.issued && !status.blocked && srcCanIssue
+    val voqReadyOrWake = status.voqReady.map { voqReady =>
+      val wake = in.wakeup.voqWake.get
+      voqReady || !status.useVAGQ.get ||
+        (wake.valid && wake.robIdx === status.robIdx && status.useVAGQ.get)
+    }.getOrElse(true.B)
+    entryValid && !status.issued && !status.blocked && srcCanIssue && voqReadyOrWake
   }
 }
 
@@ -915,6 +938,7 @@ object VecIssueQueue {
     // from decode
     val fuType    = FuType()
     val opcode    = FuOpType()
+    val useVAGQ   = Option.when(param.hasVStd)(Bool())
 
     val vm        = Bool()
     val vtype     = VType()
@@ -982,6 +1006,7 @@ object VecIssueQueue {
       this.vxsatWen := false.B // Todo
       this.flushPipe := false.B // Todo: Check if it is needed
       this.latency := source.latency
+      this.useVAGQ.foreach(_ := source.useVAGQ)
       this.robIdx := source.robIdx
       this.psrc := source.psrc
       this.psrcV0 := source.psrcV0
@@ -1026,6 +1051,7 @@ object VecIssueQueue {
       this.vxsatWen := false.B // Todo
       this.flushPipe := false.B // Todo: Check if it is needed
       this.latency := source.latency
+      this.useVAGQ.foreach(_ := source.useVAGQ.get)
       this.robIdx := source.robIdx
       this.psrc := source.psrc
       this.psrcV0 := source.psrcV0.getOrElse(0.U)
@@ -1080,6 +1106,7 @@ object VecIssueQueue {
     val latency      = Latency()
 
     val sqIdx        = Option.when(exuParam.needSqIdx)(new SqPtr)
+    val vagqEntryIdx = Option.when(exuParam.hasVStd)(UInt(log2Ceil(VecOrderQueue.VAGQSize).W))
 
     val flushPipe    = Option.when(exuParam.needFlushPipe)(Bool())
 
@@ -1125,6 +1152,7 @@ object VecIssueQueue {
       this.latency := entry.payload.latency
 
       this.sqIdx.foreach(_ := entry.payload.sqIdx.get)
+      this.vagqEntryIdx.foreach(_ := entry.status.vagqEntryIdx.get)
 
       this.flushPipe.foreach(_ := entry.payload.flushPipe.get)
 
@@ -1153,6 +1181,7 @@ object VecIssueQueue {
     val vlWb0Vec = Option.when(param.readVlRf)(Vec(backendParams.getVlRfWriteSize, new WakeUpBundle(backendParams.vlPregParams)))
     // Todo: early wakeup
     val vpWbM3Vec = Vec(backendParams.getVpWriteSize, new WakeUpBundle(backendParams.vpPregParams))
+    val voqWake = Option.when(param.hasVStd)(new VecOrderQueue.Wake)
   }
 
   class Entry(implicit p: Parameters, param: IssueParam) extends XSBundle {
@@ -1167,6 +1196,9 @@ object VecIssueQueue {
     val srcStatus   = Vec(param.numRegSrc, new SrcStatus())
     val srcStatusV0 = Option.when(param.readV0Rf)(new V0SrcStatus)
     val srcStatusVl = Option.when(param.readVlRf)(new VlSrcStatus)
+    val useVAGQ     = Option.when(param.hasVStd)(Bool())
+    val vagqEntryIdx = Option.when(param.hasVStd)(UInt(log2Ceil(VecOrderQueue.VAGQSize).W))
+    val voqReady    = Option.when(param.hasVStd)(Bool())
 
     //issue status
     val blocked     = Bool()
@@ -1179,9 +1211,9 @@ object VecIssueQueue {
       srcStatusV0.map(_.srcState).getOrElse(true.B) &&
       srcStatusVl.map(_.srcState).getOrElse(true.B)
 
-    def canIssue: Bool = this.srcReady && !this.issued && !this.blocked
+    def canIssue: Bool = this.srcReady && !this.issued && !this.blocked && voqReady.getOrElse(true.B)
 
-    def fromEnq(enq: Enq): Unit = {
+    def fromEnq(enq: Enq, voqWake: Option[VecOrderQueue.Wake]): Unit = {
       this.robIdx := enq.robIdx
       this.uopIdx := enq.uopIdx
       this.fuType := enq.fuType
@@ -1212,6 +1244,17 @@ object VecIssueQueue {
       this.firstIssue := true.B
       this.issuedTimer := IssuedTimer.init
       this.deqPortIdx := 0.U // Todo
+      this.useVAGQ.foreach { useVAGQ =>
+        val wake = voqWake.get
+        val wakeMatches = wake.valid && wake.robIdx === enq.robIdx && enq.useVAGQ.get
+        useVAGQ := enq.useVAGQ.get
+        this.vagqEntryIdx.get := Mux(
+          wakeMatches,
+          (wake.entryIdx + enq.uopIdx)(log2Ceil(VecOrderQueue.VAGQSize) - 1, 0),
+          0.U
+        )
+        this.voqReady.get := !enq.useVAGQ.get || wakeMatches
+      }
     }
   }
 

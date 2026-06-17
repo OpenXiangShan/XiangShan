@@ -56,6 +56,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val isRVC = Bool()
     // VTypeBuffer
     val needVTB = Bool()
+    val needVoQ = Bool()
     val isHls = Bool()
     // data end
     // trace
@@ -109,6 +110,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val vxsat = Bool()
     val isRVC = Bool()
     val needVTB = Bool()
+    val needVoQ = Bool()
+    val voqCommitSize = UInt(log2Up(CommitWidth + 1).W)
     val isHls = Bool()
     val isVls = Bool()
     val vls = Bool()
@@ -142,6 +145,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.isRVC := robEnq.isRVC
     // robEntry.needVTB will be asserted by the first uop, so set it false here
     robEntry.needVTB := robEnq.isVset || robEnq.vpu.isVleff
+    robEntry.needVoQ := robEnq.useVAGQ || robEnq.useGather
     robEntry.isHls := robEnq.isHls
     robEntry.rfWen := robEnq.rfWen
     robEntry.fpWen := robEnq.dirtyFs
@@ -183,6 +187,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.vxsat := robEntry.vxsat
     robCommitEntry.isRVC := robEntry.isRVC
     robCommitEntry.needVTB := robEntry.needVTB
+    robCommitEntry.needVoQ := robEntry.needVoQ
+    robCommitEntry.voqCommitSize := 0.U
     robCommitEntry.isHls := robEntry.isHls
     robCommitEntry.isVls := robEntry.vls
     robCommitEntry.vls := robEntry.vls

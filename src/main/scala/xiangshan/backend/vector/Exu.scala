@@ -318,6 +318,7 @@ object Exu {
       exuInput.numLsElem.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.lqIdx.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.sqIdx.foreach(x => x := this.ctrl.sqIdx.get)
+      exuInput.vagqEntryIdx.foreach(_ := this.ctrl.vagqEntryIdx.get)
       exuInput.dataSources.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.exuSources.foreach(x => x := 0.U.asTypeOf(x))
       exuInput.loadDependency.foreach(x => x := 0.U.asTypeOf(x))
@@ -445,6 +446,7 @@ object Exu {
     val flushPipe = Option.when(param.needFlushPipe)(Bool())
 
     val sqIdx     = Option.when(param.needSqIdx)(new SqPtr)
+    val vagqEntryIdx = Option.when(param.hasVStd)(UInt(log2Ceil(VecOrderQueue.VAGQSize).W))
 
     val frm       = Option.when(param.readFrm)(Frm())
     val vm        = Option.when(param.needVM)(Bool())
@@ -475,6 +477,7 @@ object Exu {
       this.flushPipe.foreach(_ := deq.flushPipe.get)
 
       this.sqIdx.foreach(_ := deq.sqIdx.get)
+      this.vagqEntryIdx.foreach(_ := deq.vagqEntryIdx.get)
 
       this.frm.foreach(_ := deq.frm.get)
       this.vm.foreach(_ := deq.vm.get)

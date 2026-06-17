@@ -864,6 +864,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     )
   }
 
+  private val commitNeedsVoQVec = VecInit(io.commits.commitValid.zip(io.commits.info).map {
+    case (valid, info) => io.commits.isCommit && valid && info.needVoQ
+  })
+  io.commits.info.foreach(_.voqCommitSize := PopCount(commitNeedsVoQVec))
+
   // sync fflags/dirty_fs/vxsat to csr
   io.csr.fflags   := RegNextWithEnable(fflags)
   io.csr.dirty_fs := GatedValidRegNext(dirty_fs)

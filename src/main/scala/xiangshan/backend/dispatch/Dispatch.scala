@@ -29,7 +29,8 @@ import xiangshan.backend.rob.{RobDispatchTopDownIO, RobEnqIO}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.rename.{BusyTable, VlBusyTable}
-import xiangshan.backend.vector.{VecIssueQueue, BusyTable => VpBusyTable}
+import xiangshan.backend.vector.{VecIssueQueue, VecOrderQueue, BusyTable => VpBusyTable}
+import xiangshan.backend.vector.VecOrderQueue.VoQEnqIO
 import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.WbConfig._
 import xiangshan.backend.datapath.WbConfig.VfWB
@@ -106,6 +107,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     val toRenameAllFire = Output(Bool())
     // enq Rob
     val enqRob = Flipped(new RobEnqIO)
+    // enq VoQ
+    val enqVoQ = Vec(RenameWidth, Output(new VoQEnqIO))
+    val voqCanAccept = Input(Bool())
     // IssueQueues
     val IQValidNumVec = Vec(exuNum, Input(UInt(maxIQSize.U.getWidth.W)))
     val toIssueQueues = Vec(IQEnqSum, DecoupledIO(new DispatchOutUop))
@@ -931,7 +935,11 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     fromRename(i).fire && fromRenameUpdate(i).bits.loadWaitBit && isStore(i)
   )))
 
-  val allResourceReady = io.enqRob.canAccept
+  val voqReq = VecInit(fromRename.map { uop =>
+    uop.valid && uop.bits.lastUop && (uop.bits.useVAGQ || uop.bits.useGather)
+  }).asUInt.orR
+  val robVoqCanAccept = io.enqRob.canAccept && (!voqReq || io.voqCanAccept)
+  val allResourceReady = robVoqCanAccept
 
   // Instructions should enter issue queues in order.
   // blockedByWaitForward: this instruction is blocked by itself (based on waitForward)
@@ -966,8 +974,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
   // this instruction can actually dequeue: 3 conditions
   // (1) resources are ready
   // (2) previous instructions are ready
-  thisCanActualOut := VecInit((0 until RenameWidth).map(i => !blockedByWaitForward(i) && notBlockedByPrevious(i) && io.enqRob.canAccept))
-  val thisActualOut = (0 until RenameWidth).map(i => io.enqRob.req(i).valid && io.enqRob.canAccept)
+  thisCanActualOut := VecInit((0 until RenameWidth).map(i => !blockedByWaitForward(i) && notBlockedByPrevious(i) && robVoqCanAccept))
+  val thisActualOut = (0 until RenameWidth).map(i => io.enqRob.req(i).valid && robVoqCanAccept)
 
   // input for ROB, LSQ
   for (i <- 0 until RenameWidth) {
@@ -975,17 +983,24 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
     io.enqRob.needAlloc(i) := fromRename(i).valid
     io.enqRob.req(i).valid := fromRename(i).fire
     io.enqRob.req(i).bits.connectEnqRobUop(updatedUop(i))
+    io.enqVoQ(i).valid := fromRename(i).fire &&
+      updatedUop(i).lastUop &&
+      (updatedUop(i).useVAGQ || updatedUop(i).useGather)
+    io.enqVoQ(i).robIdx := updatedUop(i).robIdx
+    io.enqVoQ(i).uopIdx := updatedUop(i).uopIdx
+    io.enqVoQ(i).useVAGQ := updatedUop(i).useVAGQ
+    io.enqVoQ(i).useGather := updatedUop(i).useGather
   }
   val hasValidInstr = VecInit(fromRename.map(_.valid)).asUInt.orR
   val hasSpecialInstr = Cat((0 until RenameWidth).map(i => isBlockBackward(i))).orR
 
-  private val canAccept = !hasValidInstr || !hasSpecialInstr && io.enqRob.canAccept
+  private val canAccept = !hasValidInstr || !hasSpecialInstr && robVoqCanAccept
 
   val isWaitForwardOrBlockBackward = isWaitForward.asUInt.orR || isBlockBackward.asUInt.orR
   val hasSpecialInst = io.debugBlockBackward.getOrElse(false.B) || io.debugWaitForward.getOrElse(false.B)
   val renameFireCnt = PopCount(fromRename.map(_.fire))
 
-  val stall_rob = hasValidInstr && !io.enqRob.canAccept
+  val stall_rob = hasValidInstr && !robVoqCanAccept
 
   XSPerfAccumulate("in_valid_count", PopCount(fromRename.map(_.valid)))
   XSPerfAccumulate("in_fire_count", PopCount(fromRename.map(_.fire)))

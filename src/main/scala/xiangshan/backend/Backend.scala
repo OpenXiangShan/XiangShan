@@ -290,6 +290,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   intRegion.io.hartId := io.fromTop.hartId
   intRegion.io.flush := ctrlBlock.io.toIssueBlock.flush
+  intRegion.io.wakeupFromVoq.foreach(_ := ctrlBlock.io.toIssueBlock.voqWake)
   intRegion.io.fromDispatch.flatten.zip(ctrlBlock.io.toIssueBlock.intUops).map { case (sink, source) => {
     sink.valid := source.valid
     connectSamePort(sink.bits, source.bits)
@@ -388,6 +389,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 
   vecRegion.in.fromTop.hartId := io.fromTop.hartId
   vecRegion.in.flush := ctrlBlock.io.toIssueBlock.flush
+  vecRegion.in.fromCtrlBlock.voqWake := ctrlBlock.io.toIssueBlock.voqWake
   vecRegion.in.fromDispatch.uops.flatten
     .lazyZip(vecRegion.out.toDispatch.canAccept.flatten)
     .lazyZip(ctrlBlock.io.toIssueBlock.vfUops)

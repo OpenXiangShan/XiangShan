@@ -40,7 +40,7 @@ import xiangshan.backend.trace._
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.Redirect.findOldestRedirect
 import xiangshan.TopDownCounters._
-import xiangshan.backend.vector.{Decoder, VecIssueQueue}
+import xiangshan.backend.vector.{Decoder, VecIssueQueue, VecOrderQueue}
 import xiangshan.backend.vector.Decoder.DecodeStage
 
 class CtrlToFtqIO(implicit p: Parameters) extends XSBundle {
@@ -111,6 +111,7 @@ class CtrlBlockImp(
   val io = IO(new CtrlBlockIO())
 
   val dispatch = Module(new Dispatch)
+  val voq = Module(new VecOrderQueue)
   val gpaMem = wrapper.gpaMem.module
   val decode = wrapper.decode.module
   val fusionDecoder = Module(new FusionDecoder)
@@ -828,6 +829,11 @@ class CtrlBlockImp(
   dispatch.io.debugIQValidNumVec.foreach(_ := io.toDispatch.debugIQValidNumVec.get)
   dispatch.io.debugIQEnqHasIssuedVec.foreach(_ := io.toDispatch.debugIQEnqHasIssuedVec.get)
   dispatch.io.debugRobHeadStall.foreach(_ := rob.io.debugRobHeadStall.get)
+  voq.in.enq := dispatch.io.enqVoQ
+  voq.in.commit := rob.io.commits
+  voq.in.redirect := s1_s3_redirect
+  dispatch.io.voqCanAccept := voq.out.canAccept
+  io.toIssueBlock.voqWake := voq.out.wake
   val toIssueBlockUops = Seq(io.toIssueBlock.intUops, io.toIssueBlock.fpUops, io.toIssueBlock.vfUops).flatten
   println(s"[CtrlBlock] toIssueBlockUops.size = ${toIssueBlockUops.size}")
   println(s"[CtrlBlock] io.toIssueBlock.intUops.size = ${io.toIssueBlock.intUops.size}")
@@ -970,6 +976,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val intUops = Vec(intUopsNum, DecoupledIO(new DispatchOutUop))
     val fpUops = Vec(fpUopsNum, DecoupledIO(new DispatchOutUop))
     val vfUops = Vec(vfUopsNum, DecoupledIO(new DispatchOutUop))
+    val voqWake = Output(new VecOrderQueue.Wake)
   }
   val fromMemToDispatch = new Bundle {
     val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
