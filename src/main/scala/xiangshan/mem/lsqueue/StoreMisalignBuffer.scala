@@ -220,11 +220,15 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     ExceptionNO.selectByFu(io.splitStoreResp.bits.uop.exceptionVec, StaCfg).asUInt.orR || TriggerAction.isDmode(io.splitStoreResp.bits.uop.trigger)
   val isUncache = (io.splitStoreResp.bits.mmio || io.splitStoreResp.bits.nc) && !io.splitStoreResp.bits.need_rep
 
-  io.sqControl.toStoreQueue.crossPageWithHit := io.sqControl.toStoreMisalignBuffer.sqPtr === req.uop.sqIdx && isCrossPage
-  io.sqControl.toStoreQueue.crossPageCanDeq := !isCrossPage || bufferState === s_block
+  val sameSqPtr = io.sqControl.toStoreMisalignBuffer.sqPtr === req.uop.sqIdx
+  val sameUop = io.sqControl.toStoreMisalignBuffer.uop.robIdx === req.uop.robIdx &&
+    io.sqControl.toStoreMisalignBuffer.uop.uopIdx === req.uop.uopIdx
+
+  io.sqControl.toStoreQueue.crossPageWithHit := sameSqPtr && isCrossPage
+  io.sqControl.toStoreQueue.crossPageCanDeq := !isCrossPage || bufferState === s_block || (req.isvec && bufferState === s_wb)
   io.sqControl.toStoreQueue.paddr := Cat(splitStoreResp(1).paddr(splitStoreResp(1).paddr.getWidth - 1, 3), 0.U(3.W))
 
-  io.sqControl.toStoreQueue.withSameUop := io.sqControl.toStoreMisalignBuffer.uop.robIdx === req.uop.robIdx && io.sqControl.toStoreMisalignBuffer.uop.uopIdx === req.uop.uopIdx && req.isvec && robMatch && isCrossPage
+  io.sqControl.toStoreQueue.withSamePtr := sameSqPtr && sameUop && req.isvec && robMatch && isCrossPage
 
   //state transition
   switch(bufferState) {

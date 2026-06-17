@@ -283,7 +283,7 @@ object Bundles {
       // High page Paddr
       val paddr = UInt(PAddrBits.W)
 
-      val withSameUop = Bool()
+      val withSamePtr = Bool()
     })
     // from storeQueue to storeMisalignBuffer, provide detail info of this store
     val toStoreMisalignBuffer = Input(new XSBundle {

@@ -1468,7 +1468,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
 
   // For vector, when there is a store across pages with the same uop in storeMisalignBuffer, storequeue needs to mark this item as committed.
   // TODO FIXME Can vecMbCommit be removed?
-  when(io.maControl.toStoreQueue.withSameUop && allvalid(rdataPtrExt(0).value)) {
+  when(io.maControl.toStoreQueue.withSamePtr && allvalid(rdataPtrExt(0).value)) {
     vecMbCommit(rdataPtrExt(0).value) := true.B
   }
 
