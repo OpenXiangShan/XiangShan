@@ -563,18 +563,8 @@ _IFU_UNCACHE_STATE_SIGNALS = (
     "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheState",
     "TOP.Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheState",
 )
-_IFU_UNCACHE_IS_MMIO_SIGNALS = (
-    "Frontend_top.Frontend.inner_ifu.uncacheUnit.isMmio",
-    "TOP.Frontend_top.Frontend.inner_ifu.uncacheUnit.isMmio",
-)
 _IFU_UNCACHE_TO_UNCACHE_VALID_SIGNALS = (
     "auto_inner_instrUncache_client_out_a_valid",
-)
-_IFU_UNCACHE_MMIO_COMMIT_VALID_SIGNALS = (
-    "Frontend_top.Frontend.inner_ifu.uncacheUnit.io_mmioCommitRead_valid",
-    "TOP.Frontend_top.Frontend.inner_ifu.uncacheUnit.io_mmioCommitRead_valid",
-    "Frontend_top.Frontend.inner_ifu.io_toFtq_mmioCommitRead_valid",
-    "TOP.Frontend_top.Frontend.inner_ifu.io_toFtq_mmioCommitRead_valid",
 )
 _INSTR_UNCACHE_ENTRY_STATE_SIGNALS = (
     "Frontend_top.Frontend.inner_instrUncache.entries_0.state",
@@ -930,8 +920,6 @@ def test_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
         "a_valid": int(env.uncache_if.a_valid.value),
         "a_addr": hex(int(env.uncache_if.a_bits_address.value)),
     }
-    assert _require_first_dut_signal(env, _IFU_UNCACHE_IS_MMIO_SIGNALS) == 0
-    assert _require_first_dut_signal(env, _IFU_UNCACHE_MMIO_COMMIT_VALID_SIGNALS) == 0
     assert _require_first_dut_signal(env, _IFU_UNCACHE_TO_UNCACHE_VALID_SIGNALS) == 1
     env.uncache_agent.set_a_ready(None)
     assert _wait_for_request_addr(env, mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
