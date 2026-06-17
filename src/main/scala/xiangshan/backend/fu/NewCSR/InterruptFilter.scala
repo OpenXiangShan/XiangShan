@@ -535,8 +535,10 @@ class InterruptFilter extends Module {
 
   // virtual interrupt with hvictl injection
   val vsIRModeCond = privState.isModeVS && vsstatusSIE || privState < PrivState.ModeVS
-  val SelectCandidate5 = onlyC5EnableReg || C3C5EnableReg ||
-                         C1C5EnableReg && (iprioC1 === iprioC2C5 && !hvictlReg.DPR.asBool || iprioC1 > iprioC2C5)
+  val SelectCandidate5 = onlyC5EnableReg ||
+                         C1C5EnableReg && ((!C2C5IsZero && (iprioC1 > iprioC2C5 || (iprioC1 === iprioC2C5) && !hvictlReg.DPR.asBool)) ||
+                                           (C2C5IsZero && !hvictlReg.DPR.asBool)) ||
+                         C3C5EnableReg && (!C2C5IsZero || !hvictlReg.DPR.asBool)
   // delay at least 6 cycles to maintain the atomic of sret/mret
   // 65bit indict current interrupt is NMI
   val intrVecReg = RegInit(0.U(8.W))
