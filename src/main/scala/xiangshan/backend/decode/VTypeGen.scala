@@ -8,8 +8,9 @@ import utility.PriorityMuxDefault
 import xiangshan._
 import xiangshan.backend.decode.isa.Instructions
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
-import xiangshan.backend.fu.vector.Bundles.VType
+import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.vector.Decoder.VSetFuncUnit
+import xiangshan.backend.vector.Decoder.util.DecodeTable
 import xiangshan.backend.vector.util.Verilog
 
 
@@ -47,7 +48,9 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
     vsetModule.in.readVl.bits := DontCare
     vsetModule.in.rdIsZero := instFieldVec(i).RD === 0.U
     vsetModule.in.rs1IsZero := instFieldVec(i).RS1 === 0.U
-    vsetModule.in.oldVType.valid := true.B
+    // only used for vill generation, set it false
+    // vlmax comparison will be done in VTypeGen not in VSetFuncUnit
+    vsetModule.in.oldVType.valid := false.B
     vsetModule.in.oldVType.bits := oldVTypeVec(i)
     vsetModule.in.vlFromGp.valid := false.B
     vsetModule.in.vlFromGp.bits := DontCare
@@ -62,12 +65,57 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
 
   private val specvtype = vtypeSpec +: out.vtype
   out.specvtype := specvtype.take(out.specvtype.length)
-  // select vtype for each instruction in a priority manner
-  for(i <- 0 until DecodeWidth) {
-    out.vtype(i) := PriorityMuxDefault((isVsetiVec zip vtypeNewVec).take(i + 1).reverse, vtypeSpec)
+  // Break the oldVType chain: all VSetFuncUnits use vtypeSpec in parallel
+  oldVTypeVec := VecInit(Seq.fill(DecodeWidth)(vtypeSpec))
+
+  // === Lightweight vlmax chain for keepVl vill correction ===
+  // Decode vlmax from vtypeSpec (parallel, no chain dependency)
+  private val vlmaxField = new VSetFuncUnit.VlmaxField(VLEN, ELEN)
+  private val vlmaxDecode = new DecodeTable(VSetFuncUnit.sewLmulPatterns, Seq(vlmaxField))
+  private val specVlmax = vlmaxDecode.decode(vtypeSpec.vsew ## vtypeSpec.vlmul)(vlmaxField)
+
+  // Candidate vlmax from each VSetFuncUnit (all parallel, based on vtypeSpec as oldVType)
+  private val candVlmaxVec = vsetModuleVec.map(_.out.vlmax)
+
+  // Lightweight Mux chain: cumulative vlmax after processing vsets up to position i
+  private val cumVlmax = Wire(Vec(DecodeWidth, Vl(VLEN)))
+  cumVlmax(0) := Mux(isVsetiVec(0), candVlmaxVec(0), specVlmax)
+  for (i <- 1 until DecodeWidth) {
+    cumVlmax(i) := Mux(isVsetiVec(i), candVlmaxVec(i), cumVlmax(i - 1))
   }
 
-  oldVTypeVec := specvtype.take(oldVTypeVec.length)
+  // prevVlmax(i) = vlmax BEFORE instruction i (i.e., after all vsets before i)
+  private val prevVlmax = specVlmax +: cumVlmax.take(DecodeWidth - 1)
+
+  // Detect keepVl vsets: rd == 0 && rs1 == 0
+  private val keepVlMask = VecInit((0 until DecodeWidth).map { i =>
+    isVsetiVec(i) && instFieldVec(i).RD === 0.U && instFieldVec(i).RS1 === 0.U
+  })
+
+  // For keepVl vsets, compute the correct vlmaxChange against the true prevVlmax
+  // (vlmax values are one-hot encoded; (a & b).orR is true iff a == b)
+  private val vlmaxChange = Wire(Vec(DecodeWidth, Bool()))
+  for (i <- 0 until DecodeWidth) {
+    vlmaxChange(i) := keepVlMask(i) && !(candVlmaxVec(i) & prevVlmax(i)).orR
+  }
+
+  // Patch vill for keepVl slots where vlmax actually changed compared to prevVlmax.
+  // Since oldVType.valid=0, VSetFuncUnit's vill = vill_imm only (no vlmaxChange).
+  // We compute vlmaxChange against the nearest preceding vset via the cumVlmax chain,
+  // and OR it with vill_imm — this yields the exact correct vill value.
+  private val correctedVtype = Wire(Vec(DecodeWidth, new VType))
+  for (i <- 0 until DecodeWidth) {
+    correctedVtype(i) := vtypeNewVec(i)
+    when (vlmaxChange(i)) {
+      correctedVtype(i).illegal := true.B
+    }
+  }
+
+  // === Lightweight cumulative vtype chain (Mux only, no decode table on chain path) ===
+  out.vtype(0) := Mux(isVsetiVec(0), correctedVtype(0), vtypeSpec)
+  for (i <- 1 until DecodeWidth) {
+    out.vtype(i) := Mux(isVsetiVec(i), correctedVtype(i), out.vtype(i - 1))
+  }
 
   // assign the last vtype to vtypeSpec
   private val vtypeNew = out.vtype(DecodeWidth - 1)
