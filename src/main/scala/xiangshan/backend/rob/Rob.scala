@@ -1065,10 +1065,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
       val wbOverflow = robEntries(i).uopNum - wbCnt > robEntries(i).uopNum
       assert(!wbOverflow, s"robEntries $i uopNum is overflow!")
-      when(wbOverflow && backendParams.debugEn.B) {
+      when(wbOverflow) {
         printf(s"robidx.value = 0x${i.toHexString}\n")
-        printf(s"pc = %x\n", robEntries(i).debug_pc.get)
-        printf(s"instr = %x\n", robEntries(i).debug_instr.get)
+        if (backendParams.debugEn) {
+          printf(s"pc = %x\n", robEntries(i).debug_pc.get)
+          printf(s"instr = %x\n", robEntries(i).debug_instr.get)
+        }
       }
     }
 
