@@ -27,7 +27,7 @@ class BackendCtrlBundle(Bundle):
         "redirect_bits_debug_is_ctrl": "io_backend_toFtq_redirect_bits_debugIsCtrl",
         "redirect_bits_debug_is_mem_vio": "io_backend_toFtq_redirect_bits_debugIsMemVio",
         "wfi_req": "io_backend_wfi_wfiReq",
-        "ftq_idx_ahead_0_valid": "io_backend_toFtq_ftqIdxAhead_0_valid",
+        "ftq_idx_ahead_0_valid": "io_backend_toFtq_ftqIdxAhead_valid",
     }
 
     can_accept = Signal()
