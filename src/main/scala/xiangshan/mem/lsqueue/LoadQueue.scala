@@ -27,7 +27,7 @@ import xiangshan.frontend.FtqPtr
 import xiangshan.backend._
 import xiangshan.backend.fu.fpu._
 import xiangshan.backend.rob.RobLsqIO
-import xiangshan.backend.Bundles.{DynInst, MemExuOutput, MemMicroOpRbExt}
+import xiangshan.backend.Bundles.{DynInst, MemExuOutput, MemMicroOpRbExt, UopIdx}
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.mdp._
 import xiangshan.mem.Bundles._
@@ -206,6 +206,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
     val debugTopDown = new LoadQueueTopDownIO
     val noUopsIssed = Input(Bool())
+
+    val lqDeqRobIdx = Output(new RobPtr)
+    val lqDeqUopIdx = Output(UopIdx())
   })
 
   val loadQueueRAR = Module(new LoadQueueRAR)  //  read-after-read violation
@@ -251,6 +254,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   virtualLoadQueue.io.lqCancelCnt   <> io.lqCancelCnt
   virtualLoadQueue.io.lqEmpty       <> io.lqEmpty
   virtualLoadQueue.io.ldWbPtr       <> io.lqDeqPtr
+  virtualLoadQueue.io.lqDeqRobIdx   <> io.lqDeqRobIdx
+  virtualLoadQueue.io.lqDeqUopIdx   <> io.lqDeqUopIdx
 
   /**
    * Load queue exception buffer

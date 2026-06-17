@@ -1598,7 +1598,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
                               vStoreCanAccept(i) && !isSegment
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
     vsSplit(i).io.threshold.valid := vsMergeBuffer(i).io.toSplit.threshold
-    vsSplit(i).io.threshold.bits  := lsq.io.sqDeqPtr
+    vsSplit(i).io.threshold.bits.robIdx  := lsq.io.sqCommitRobIdx
+    vsSplit(i).io.threshold.bits.uopIdx  := lsq.io.sqCommitUopIdx
     NewPipelineConnect(
       vsSplit(i).io.out, storeUnits(i).io.vecstin, storeUnits(i).io.vecstin.fire,
       Mux(vsSplit(i).io.out.fire, vsSplit(i).io.out.bits.uop.robIdx.needFlush(io.redirect), storeUnits(i).io.vecstin.bits.uop.robIdx.needFlush(io.redirect)),
@@ -1617,7 +1618,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
                               vLoadCanAccept(i) && !isSegment && !isFixVlUop(i)
     vlSplit(i).io.toMergeBuffer <> vlMergeBuffer.io.fromSplit(i)
     vlSplit(i).io.threshold.valid := vlMergeBuffer.io.toSplit.threshold
-    vlSplit(i).io.threshold.bits  := lsq.io.lqDeqPtr
+    vlSplit(i).io.threshold.bits.robIdx  := lsq.io.lqDeqRobIdx
+    vlSplit(i).io.threshold.bits.uopIdx  := lsq.io.lqDeqUopIdx
     vlSplit(i).io.fromPipeline.foreach { case port =>
       port.zipWithIndex.map{case (sink, j) =>
         if(j == MisalignWBPort) {

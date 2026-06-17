@@ -42,13 +42,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
 
   //                                           Ensure the sequence of vec index order uop.
   val mergeBufferNack = (io.threshold.valid || isOrderIndexed(io.in.bits.uop.fuOpType(6,5)) && !isVStore.B) &&
-   ({
-    (isVStore, io.threshold.bits) match {
-      case (true,  p: SqPtr) => p =/= io.in.bits.uop.sqIdx
-      case (false, p: LqPtr) => p =/= io.in.bits.uop.lqIdx
-      case _ => throw new Exception("Pointer type mismatch!")
-    }
-  })
+    !(io.threshold.bits.robIdx === io.in.bits.uop.robIdx && io.threshold.bits.uopIdx === io.in.bits.uop.uopIdx)
 
   val s1_ready = WireInit(false.B)
   io.in.ready := s1_ready && !mergeBufferNack

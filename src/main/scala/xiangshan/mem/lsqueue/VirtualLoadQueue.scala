@@ -55,6 +55,9 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
     // for topdown
     val noUopsIssued = Input(Bool())
+
+    val lqDeqRobIdx = Output(new RobPtr)
+    val lqDeqUopIdx = Output(UopIdx())
   })
 
   println("VirtualLoadQueue: size: " + VirtualLoadQueueSize)
@@ -153,6 +156,9 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   io.lqCancelCnt := redirectCancelCount
   io.ldWbPtr := deqPtr
   io.lqEmpty := RegNext(validCount === 0.U)
+
+  io.lqDeqRobIdx := robIdx(deqPtr.value)
+  io.lqDeqUopIdx := uopIdx(deqPtr.value)
 
   /**
    * Enqueue at dispatch

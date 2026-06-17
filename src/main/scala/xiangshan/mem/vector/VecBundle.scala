@@ -236,6 +236,11 @@ class storeMisalignIO(implicit p: Parameters) extends Bundle{
   val scalaIssueRobIdx          = Input(new RobPtr)
 }
 
+class mergebufferThresholdIO(implicit p: Parameters) extends Bundle{
+  val robIdx = Input(new RobPtr)
+  val uopIdx = Input(UopIdx())
+}
+
 class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
   val redirect            = Flipped(ValidIO(new Redirect))
   val in                  = Flipped(Decoupled(new MemExuInput(isVector = true))) // from iq
@@ -243,7 +248,7 @@ class VSplitIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBund
   val out                 = Decoupled(new VecPipeBundle(isVStore))// to scala pipeline
   val vstd                = OptionWrapper(isVStore, Valid(new MemExuOutput(isVector = true)))
   val vstdMisalign        = OptionWrapper(isVStore, new storeMisalignIO)
-  val threshold           = if(isVStore) Flipped(ValidIO(new SqPtr)) else Flipped(ValidIO(new LqPtr))
+  val threshold           = Flipped(ValidIO(new mergebufferThresholdIO))
   val fromPipeline        = OptionWrapper(!isVStore, Vec(LoadPipelineWidth, Flipped(ValidIO(new VecPipelineFeedbackIO(isVStore)))))
 }
 
@@ -252,7 +257,7 @@ class VSplitPipelineIO(isVStore: Boolean=false)(implicit p: Parameters) extends 
   val in                  = Flipped(Decoupled(new MemExuInput(isVector = true)))
   val toMergeBuffer       = new ToMergeBufferIO(isVStore) // req mergebuffer entry, inactive elem issue
   val out                 = Decoupled(new VLSBundle())// to split buffer
-  val threshold           = if(isVStore) Flipped(ValidIO(new SqPtr)) else Flipped(ValidIO(new LqPtr))
+  val threshold           = Flipped(ValidIO(new mergebufferThresholdIO))
 }
 
 class VSplitBufferIO(isVStore: Boolean=false)(implicit p: Parameters) extends VLSUBundle{
