@@ -365,7 +365,7 @@ class Sbuffer(implicit p: Parameters)
   val oddInsertVec = GetOddBits.reverse(oddRawInsertVec)
 
   val firstInsertEven = PopCount(evenInvalidMask) >= PopCount(oddInvalidMask)
-  val secondInsertEven = Mux(canMerge(0), firstInsertEven, !firstInsertEven)
+  val secondInsertEven = !firstInsertEven
   val firstInsertVec = Mux(firstInsertEven, evenInsertVec, oddInsertVec)
   val secondInsertVec = Mux(sameTag, firstInsertVec, Mux(secondInsertEven, evenInsertVec, oddInsertVec))
   val firstCanInsert = Mux(firstInsertEven, evenCanInsert, oddCanInsert)
@@ -374,7 +374,7 @@ class Sbuffer(implicit p: Parameters)
 
   val enqAllowed = sbuffer_state =/= x_drain_sbuffer
   io.in.req(0).ready := (firstCanInsert || canMerge(0)) && enqAllowed
-  io.in.req(1).ready := (secondCanInsert || canMerge(1)) && enqAllowed && io.in.req(0).ready
+  io.in.req(1).ready := (secondCanInsert || canMerge(1)) && io.in.req(0).ready
 
   // this group of signals are only for debug or assert
   val evenRawInsertIdx = PriorityEncoderWithFlag(evenInvalidMask)._1
