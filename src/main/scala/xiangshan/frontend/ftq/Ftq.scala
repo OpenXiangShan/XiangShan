@@ -373,11 +373,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   resolveQueue.io.bpuTrain.ready := !trainCache.valid || io.toBpu.train.fire
 
-  private val flushTrain = backendRedirect.valid && trainIndexCache > backendRedirect.bits.ftqIdx
+  private val flushTrainCache =
+    backendRedirect.valid && trainCache.valid && trainIndexCache > backendRedirect.bits.ftqIdx
 
-  when(flushTrain) {
+  when(flushTrainCache) {
     trainCache.valid := false.B
   }.elsewhen(resolveQueue.io.bpuTrain.fire) {
+    val needFlush = backendRedirect.valid && resolveQueue.io.bpuTrain.bits.ftqIdx > backendRedirect.bits.ftqIdx
+    trainCache.valid     := !needFlush
     trainCache.bits.meta := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
     trainCache.bits.startPcVec.foreach { dup =>
       dup.zipWithIndex.foreach { case (startPc, i) =>
@@ -389,13 +392,12 @@ class Ftq(implicit p: Parameters) extends FtqModule
     }
     trainCache.bits.branches := resolveQueue.io.bpuTrain.bits.branches
     trainCache.bits.perfMeta := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
-    trainCache.valid         := true.B
     trainIndexCache          := resolveQueue.io.bpuTrain.bits.ftqIdx
   }.elsewhen(io.toBpu.train.fire) {
     trainCache.valid := false.B
   }
 
-  io.toBpu.train.valid := trainCache.valid && !flushTrain
+  io.toBpu.train.valid := trainCache.valid && !flushTrainCache
   io.toBpu.train.bits  := trainCache.bits
 
   // default next state receives s3 prediction meta
