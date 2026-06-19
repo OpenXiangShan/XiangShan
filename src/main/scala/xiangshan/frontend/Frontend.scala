@@ -169,15 +169,23 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
           tlbCsr.mbmc.KEYIDEN.asBool,
           tlbCsr.mbmc.CMODE.asBool,
           tlbCsr.priv.imode,
+          tlbCsr.priv.debug,
           pmp.io.pmp,
           pmp.io.pma,
           requestor.req
         )
       } else {
-        checker.apply(tlbCsr.mbmc.CMODE.asBool, tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, requestor.req)
+        checker.apply(
+          tlbCsr.mbmc.CMODE.asBool,
+          tlbCsr.priv.imode,
+          tlbCsr.priv.debug,
+          pmp.io.pmp,
+          pmp.io.pma,
+          requestor.req
+        )
       }
     } else {
-      checker.apply(tlbCsr.priv.imode, pmp.io.pmp, pmp.io.pma, requestor.req)
+      checker.apply(tlbCsr.priv.imode, tlbCsr.priv.debug, pmp.io.pmp, pmp.io.pma, requestor.req)
     }
     requestor.resp := checker.resp
   }
