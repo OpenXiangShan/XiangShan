@@ -26,7 +26,7 @@ jobs:
     needs: run
     runs-on: perf
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Upload report
         uses: actions/upload-artifact@v7
         with:

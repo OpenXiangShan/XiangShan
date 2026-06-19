@@ -25,7 +25,7 @@ jobs:
     outputs:
       core: ${{ steps.filter.outputs.core }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -54,7 +54,7 @@ jobs:
       - name: Cleanup orphan EMU
         run: |
           pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -94,7 +94,7 @@ jobs:
       - name: Cleanup orphan EMU
         run: |
           pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -175,7 +175,7 @@ jobs:
       - name: Cleanup orphan EMU
         run: |
           pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -219,7 +219,7 @@ jobs:
       - name: Remote Connection Test
         run: |
           ssh -tt eda01 "echo test-ok"
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -264,7 +264,7 @@ jobs:
     timeout-minutes: 30
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Build docker image
         run: make image
       - name: Compile generator JAR
@@ -282,7 +282,7 @@ jobs:
       - name: Cleanup orphan EMU
         run: |
           pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -361,7 +361,7 @@ jobs:
     timeout-minutes: 30
     continue-on-error: false
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: 'true'
           fetch-depth: '0'
@@ -389,7 +389,7 @@ jobs:
     timeout-minutes: 30
     continue-on-error: false
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Install Java
         uses: actions/setup-java@v5
         with:

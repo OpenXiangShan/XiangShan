@@ -34,7 +34,7 @@ jobs:
           echo "commit_sha=${REF}" >> $GITHUB_OUTPUT
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.set_test.outputs.commit_sha }}
 
@@ -81,7 +81,7 @@ jobs:
           echo "commit_sha=${REF}" >> $GITHUB_OUTPUT
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.set_test.outputs.commit_sha }}
           fetch-depth: 0
@@ -132,7 +132,7 @@ jobs:
           echo "commit_sha=${REF}" >> $GITHUB_OUTPUT
 
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ steps.set_test.outputs.commit_sha }}
       - name: Install deps

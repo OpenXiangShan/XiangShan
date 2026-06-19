@@ -22,7 +22,7 @@ jobs:
     outputs:
       core: ${{ steps.filter.outputs.core }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: dorny/paths-filter@v4
         id: filter
         with:
@@ -42,7 +42,7 @@ jobs:
       - name: Cleanup orphan EMU
         run: |
           pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           submodules: true
@@ -112,7 +112,7 @@ jobs:
       - name: Cleanup orphan EMU
         run: |
           pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Get artifact
