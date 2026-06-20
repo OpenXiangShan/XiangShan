@@ -185,7 +185,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     }
     val bypass = Flipped(Vec(LoadPipelineWidth, new UncacheBypass))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LoadReplayIO))
-    val loadWakeup  = Flipped(ValidIO(new DCacheLoadWakeup()))
+    val loadWakeup  = Flipped(Vec(cfg.numMemChannels, ValidIO(new DCacheLoadWakeup())))
     val release = Flipped(Valid(new Release))
     val nuke_rollback = Vec(StorePipelineWidth, Output(Valid(new Redirect)))
     val nack_rollback = Vec(1, Output(Valid(new Redirect))) // uncachebuffer
@@ -197,7 +197,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
     val lq_rep_full = Output(Bool())
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
-    val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val l2_hint = Input(Vec(cfg.numMemChannels, Valid(new L2ToL1Hint())))
     val tlb_hint = Flipped(new TlbHintIO)
     val lqEmpty = Output(Bool())
 

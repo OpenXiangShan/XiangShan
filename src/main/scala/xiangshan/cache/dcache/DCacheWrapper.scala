@@ -58,6 +58,17 @@ case class DCacheParameters
   enableDataEcc: Boolean = false,
   enableTagEcc: Boolean = false,
   cacheCtrlAddressOpt: Option[AddressSet] = None,
+
+  // ========== Dual-channel support ==========
+  // Number of memory channels for L1-L2 interface
+  // 1 = single channel (default)
+  // 2 = dual channel (2x bandwidth potential)
+  numMemChannels: Int = 1,
+
+  // Channel selection strategy
+  // true = select by address set低位
+  // false = select by MSHR ID
+  channelSelByAddr: Boolean = true
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -136,6 +147,13 @@ trait HasDCacheParameters
   val releaseIdBase = cfg.nMissEntries + 1
   val EnableDataEcc = cacheParams.enableDataEcc
   val EnableTagEcc = cacheParams.enableTagEcc
+
+  // ========== Dual-channel support ==========
+  val numMemChannels = cacheParams.numMemChannels
+  val memChannelBits = log2Up(numMemChannels max 2)
+  val channelSelByAddr = cacheParams.channelSelByAddr
+  val hasDualChannel = numMemChannels > 1
+  require(numMemChannels <= 2, s"DCache currently supports at most 2 memory channels, got $numMemChannels")
 
   // banked dcache support
   val DCacheSetDiv = 1
@@ -729,11 +747,11 @@ class StorePrefetchReq(implicit p: Parameters) extends DCacheBundle {
 class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
   val load  = Vec(LoadPipelineWidth, Flipped(new DCacheLoadIO)) // for speculative load
   val sta   = Vec(StorePipelineWidth, Flipped(new DCacheStoreIO)) // for non-blocking store
-  val loadWakeup = ValidIO(new DCacheLoadWakeup())
+  val loadWakeup = Vec(cfg.numMemChannels, ValidIO(new DCacheLoadWakeup()))
   val store = new DCacheToSbufferIO // for sbuffer
   val atomics  = Flipped(new AtomicWordIO)  // atomics reqs
   val release = ValidIO(new Release) // cacheline release hint for ld-ld violation check
-  val forward_D = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
+  val forward_D = Flipped(Vec(LoadPipelineWidth, Vec(cfg.numMemChannels, new DCacheForward)))
   val forward_mshr = Flipped(Vec(LoadPipelineWidth, new DCacheForward))
   // If a store is miss and accepted by mshr, Sbuffer releases the entry and mshr provides corresponding st-ld forwarding data.
   val forward_mshrStData = Flipped(Vec(LoadPipelineWidth, new SbufferForwardReq))
@@ -760,7 +778,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
   val debugTopDown = new DCacheTopDownIO
   val debugRolling = Flipped(new RobDebugRollingIO)
-  val l2_hint = Input(Valid(new L2ToL1Hint()))
+  val l2_hint = Vec(cfg.numMemChannels, Input(Valid(new L2ToL1Hint())))
   val cmoOpReq = Flipped(DecoupledIO(new CMOReq))
   val cmoOpResp = DecoupledIO(new CMOResp)
   val l1Miss = Output(Bool())
@@ -869,6 +887,11 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
     Seq(TLMasterParameters.v1(
       name = "dcache",
       sourceId = IdRange(0, nEntries + 1),
+      visibility =
+        if (numMemChannels == 2 && channelSelByAddr)
+          Seq(AddressSet(0x0, ~BigInt(cfg.blockBytes)))
+        else
+          Seq(AddressSet.everything),
       supportsProbe = TransferSizes(cfg.blockBytes)
     )),
     requestFields = reqFields,
@@ -876,6 +899,25 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
   )
 
   val clientNode = TLClientNode(Seq(clientParameters))
+
+  // ========== Dual-channel support ==========
+  // Second clientNode for dual-channel L1-L2 interface
+  val clientNode_1 = if (numMemChannels > 1) {
+    Some(TLClientNode(Seq(clientParameters.v1copy(
+      clients = Seq(TLMasterParameters.v1(
+        name = "dcache_ch1",
+        // node_1 is an independent TL input, so source IDs remain local to the channel.
+        sourceId = IdRange(0, nEntries + 1),
+        visibility =
+          if (channelSelByAddr)
+            Seq(AddressSet(cfg.blockBytes, ~BigInt(cfg.blockBytes)))
+          else
+            Seq(AddressSet.everything),
+        supportsProbe = TransferSizes(cfg.blockBytes)
+      ))
+    ))))
+  } else None
+
   val cacheCtrlOpt = cacheCtrlParamsOpt.map(params => LazyModule(new CtrlUnit(params)))
 
   lazy val module = new DCacheImp(this)
@@ -889,6 +931,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   val (bus, edge) = outer.clientNode.out.head
   require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
+
+  // ========== Dual-channel support ==========
+  val (bus_ch1, edge_ch1) = if (numMemChannels > 1 && outer.clientNode_1.isDefined) {
+    val (bus, edge) = outer.clientNode_1.get.out.head
+    (Some(bus), Some(edge))
+  } else (None, None)
+
 
   println("DCache:")
   println("  DCacheSets: " + DCacheSets)
@@ -1228,7 +1277,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
   })
 
-  io.lsu.forward_D.zipWithIndex.foreach { case (forward, i) =>
+  def processChannel(forward: DCacheForward, bus: TLBundle, i: Int): Unit = {
     val s0ReqValid = forward.s0Req.valid
     val s0Req = forward.s0Req.bits
     val s1ReqValid = RegNext(s0ReqValid)
@@ -1254,10 +1303,33 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     s2Resp.bits.denied := RegEnable(bus.d.bits.denied, s1ReqValid)
     s2Resp.bits.corrupt := RegEnable(bus.d.bits.corrupt, s1ReqValid)
   }
+
+  io.lsu.forward_D.zipWithIndex.foreach { case (forwards, i) =>
+    processChannel(forwards(0), bus, i)
+  
+    if (hasDualChannel && bus_ch1.isDefined) {
+      processChannel(forwards(1), bus_ch1.get, i)
+    }
+  }
+
   // tl D channel wakeup
-  io.lsu.loadWakeup.valid := (bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.Grant) &&
-    bus.d.valid
-  io.lsu.loadWakeup.bits.mshrId := bus.d.bits.source
+  val loadWakeups = Wire(chiselTypeOf(io.lsu.loadWakeup))
+  loadWakeups.foreach { wakeup =>
+    wakeup.valid := false.B
+    wakeup.bits := 0.U.asTypeOf(wakeup.bits)
+  }
+
+  when (bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.Grant) {
+    loadWakeups(0).valid := bus.d.valid
+    loadWakeups(0).bits.mshrId := bus.d.bits.source(log2Up(cfg.nMissEntries) - 1, 0)
+  }
+  if (hasDualChannel && bus_ch1.isDefined) {
+    when (bus_ch1.get.d.bits.opcode === TLMessages.GrantData || bus_ch1.get.d.bits.opcode === TLMessages.Grant) {
+      loadWakeups(1).valid := bus_ch1.get.d.valid
+      loadWakeups(1).bits.mshrId := bus_ch1.get.d.bits.source(log2Up(cfg.nMissEntries) - 1, 0)
+    }
+  }
+  io.lsu.loadWakeup := loadWakeups
   mainPipe.io.force_write <> io.force_write
 
   /** dwpu */
@@ -1446,21 +1518,34 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // tilelink stuff
   bus.a <> missQueue.io.mem_acquire
   bus.e <> missQueue.io.mem_finish
+
+  // ========== Dual-channel support ==========
+  // Connect second TL interface when dual-channel is enabled
+  if (hasDualChannel && bus_ch1.isDefined) {
+    bus_ch1.get.a <> missQueue.io.mem_acquire_1.get
+    bus_ch1.get.e <> missQueue.io.mem_finish_1.get
+  }
+
   missQueue.io.evict_set := mainPipe.io.evict_set
   missQueue.io.btot_ways_for_set <> mainPipe.io.btot_ways_for_set
   missQueue.io.replace <> mainPipe.io.replace
-  missQueue.io.probe.req.valid := bus.b.valid
-  missQueue.io.probe.req.bits.addr := bus.b.bits.address
+  val probeArb = Module(new RRArbiter(new TLBundleB(edge.bundle), if (hasDualChannel) 2 else 1))
+  probeArb.io.in.head <> bus.b
+  if (hasDualChannel && bus_ch1.isDefined) {
+    probeArb.io.in(1) <> bus_ch1.get.b
+  }
+  missQueue.io.probe.req.valid := probeArb.io.out.valid
+  missQueue.io.probe.req.bits.addr := probeArb.io.out.bits.address
   if(DCacheAboveIndexOffset > DCacheTagOffset) {
     // have alias problem, extra alias bits needed for index
-    val alias_addr_frag = bus.b.bits.data(2, 1)
+    val alias_addr_frag = probeArb.io.out.bits.data(2, 1)
     missQueue.io.probe.req.bits.vaddr := Cat(
-      bus.b.bits.address(PAddrBits - 1, DCacheAboveIndexOffset), // dontcare
+      probeArb.io.out.bits.address(PAddrBits - 1, DCacheAboveIndexOffset), // dontcare
       alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0), // index
-      bus.b.bits.address(DCacheTagOffset - 1, 0)                 // index & others
+      probeArb.io.out.bits.address(DCacheTagOffset - 1, 0)                 // index & others
     )
   } else { // no alias problem
-    missQueue.io.probe.req.bits.vaddr := bus.b.bits.address
+    missQueue.io.probe.req.bits.vaddr := probeArb.io.out.bits.address
   }
 
   missQueue.io.main_pipe_resp.valid := RegNext(mainPipe.io.atomic_resp.valid)
@@ -1469,7 +1554,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // probe
   // probeQueue.io.mem_probe <> bus.b
-  block_decoupled(bus.b, probeQueue.io.mem_probe, missQueue.io.probe.block)
+  block_decoupled(probeArb.io.out, probeQueue.io.mem_probe, missQueue.io.probe.block)
   probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
   probeQueue.io.update_resv_set <> mainPipe.io.update_resv_set
 
@@ -1506,7 +1591,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
   wb.io.req <> mainPipe.io.wb
-  bus.c     <> wb.io.mem_release
+  if (hasDualChannel && bus_ch1.isDefined) {
+    bus.c <> wb.io.mem_release
+    bus_ch1.get.c <> wb.io.mem_release_1.get
+  } else {
+    bus.c <> wb.io.mem_release
+  }
   // wb.io.release_wakeup := refillPipe.io.release_wakeup
   // wb.io.release_update := mainPipe.io.release_update
   //wb.io.probe_ttob_check_req <> mainPipe.io.probe_ttob_check_req
@@ -1527,14 +1617,45 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   wb.io.mem_grant.valid := false.B
   wb.io.mem_grant.bits  := DontCare
 
-  // in L1DCache, we ony expect Grant[Data] and ReleaseAck
-  bus.d.ready := false.B
-  when (bus.d.bits.opcode === TLMessages.Grant || bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.CBOAck) {
-    missQueue.io.mem_grant <> bus.d
-  } .elsewhen (bus.d.bits.opcode === TLMessages.ReleaseAck) {
-    wb.io.mem_grant <> bus.d
-  } .otherwise {
-    assert (!bus.d.fire)
+  // ========== Dual-channel support ==========
+  if (hasDualChannel && bus_ch1.isDefined) {
+    missQueue.io.mem_grant_1.get.valid := false.B
+    missQueue.io.mem_grant_1.get.bits := DontCare
+    wb.io.mem_grant_1.get.valid := false.B
+    wb.io.mem_grant_1.get.bits := DontCare
+
+    val busGrant = bus.d.valid && (bus.d.bits.opcode === TLMessages.Grant ||
+      bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.CBOAck)
+    val busReleaseAck = bus.d.valid && bus.d.bits.opcode === TLMessages.ReleaseAck
+    val busCh1Grant = bus_ch1.get.d.valid && (bus_ch1.get.d.bits.opcode === TLMessages.Grant ||
+      bus_ch1.get.d.bits.opcode === TLMessages.GrantData || bus_ch1.get.d.bits.opcode === TLMessages.CBOAck)
+    val busCh1ReleaseAck = bus_ch1.get.d.valid && bus_ch1.get.d.bits.opcode === TLMessages.ReleaseAck
+
+    missQueue.io.mem_grant.valid := busGrant
+    missQueue.io.mem_grant.bits := bus.d.bits
+    missQueue.io.mem_grant_1.get.valid := busCh1Grant
+    missQueue.io.mem_grant_1.get.bits := bus_ch1.get.d.bits
+
+    wb.io.mem_grant.valid := busReleaseAck
+    wb.io.mem_grant.bits := bus.d.bits
+    wb.io.mem_grant_1.get.valid := busCh1ReleaseAck
+    wb.io.mem_grant_1.get.bits := bus_ch1.get.d.bits
+
+    bus.d.ready := Mux(busGrant, missQueue.io.mem_grant.ready, Mux(busReleaseAck, wb.io.mem_grant.ready, false.B))
+    bus_ch1.get.d.ready := Mux(busCh1Grant, missQueue.io.mem_grant_1.get.ready, Mux(busCh1ReleaseAck, wb.io.mem_grant_1.get.ready, false.B))
+
+    assert(!(bus.d.fire && !busGrant && !busReleaseAck))
+    assert(!(bus_ch1.get.d.fire && !busCh1Grant && !busCh1ReleaseAck))
+  } else {
+    // in L1DCache, we ony expect Grant[Data] and ReleaseAck
+    bus.d.ready := false.B
+    when (bus.d.bits.opcode === TLMessages.Grant || bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.CBOAck) {
+      missQueue.io.mem_grant <> bus.d
+    } .elsewhen (bus.d.bits.opcode === TLMessages.ReleaseAck) {
+      wb.io.mem_grant <> bus.d
+    } .otherwise {
+      assert (!bus.d.fire)
+    }
   }
 
   //----------------------------------------
@@ -1649,17 +1770,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   }
   XSPerfAccumulate("grant_data_fire", grant_data_fire)
 
-  val hint_source = io.l2_hint.bits.sourceId
+  val hint_source = io.l2_hint(0).bits.sourceId
 
   val grant_data_source = bus.d.bits.source
 
   val hintPipe2 = Module(new Pipeline(UInt(32.W), 3))
-  hintPipe2.io.in.valid := io.l2_hint.valid
+  hintPipe2.io.in.valid := io.l2_hint(0).valid
   hintPipe2.io.in.bits := hint_source
   hintPipe2.io.out.ready := true.B
 
   val hintPipe1 = Module(new Pipeline(UInt(32.W), 2))
-  hintPipe1.io.in.valid := io.l2_hint.valid
+  hintPipe1.io.in.valid := io.l2_hint(0).valid
   hintPipe1.io.in.bits := hint_source
   hintPipe1.io.out.ready := true.B
 
@@ -1675,6 +1796,40 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   XSPerfAccumulate("grant_without_hint", grant_without_hint)
   XSPerfAccumulate("hint_grant_unmatch", hint_grant_unmatch)
 
+  // dual-port has another bus
+  if(hasDualChannel) {
+    val grant_data_fire_1 = {
+      val (first, last, done, count) = edge.count(bus_ch1.get.d)
+      bus_ch1.get.d.fire && first && bus_ch1.get.d.bits.opcode === GrantData
+    }
+    XSPerfAccumulate("grant_data_fire_1", grant_data_fire_1)
+
+    val hint_source_1 = io.l2_hint(1).bits.sourceId
+
+    val grant_data_source_1 = bus_ch1.get.d.bits.source
+
+    val hintPipe2_1 = Module(new Pipeline(UInt(32.W), 3))
+    hintPipe2_1.io.in.valid := io.l2_hint(1).valid
+    hintPipe2_1.io.in.bits := hint_source_1
+    hintPipe2_1.io.out.ready := true.B
+
+    val hintPipe1_1 = Module(new Pipeline(UInt(32.W), 2))
+    hintPipe1_1.io.in.valid := io.l2_hint(1).valid
+    hintPipe1_1.io.in.bits := hint_source_1
+    hintPipe1_1.io.out.ready := true.B
+
+    val accurateHint_1 = grant_data_fire_1 && hintPipe2_1.io.out.valid && hintPipe2_1.io.out.bits === grant_data_source_1
+    XSPerfAccumulate("accurate3Hints_1", accurateHint_1)
+
+    val okHint_1 = grant_data_fire_1 && hintPipe1_1.io.out.valid && hintPipe1_1.io.out.bits === grant_data_source_1
+    XSPerfAccumulate("ok2Hints_1", okHint_1)
+    val hint_without_grant_1 = hintPipe2_1.io.out.valid && !grant_data_fire_1
+    val grant_without_hint_1 = !hintPipe2_1.io.out.valid && grant_data_fire_1
+    val hint_grant_unmatch_1 = hintPipe2_1.io.out.valid && grant_data_fire_1 && (hintPipe2_1.io.out.bits =/= grant_data_source_1)
+    XSPerfAccumulate("hint_without_grant_1", hint_without_grant_1)
+    XSPerfAccumulate("grant_without_hint_1", grant_without_hint_1)
+    XSPerfAccumulate("hint_grant_unmatch_1", hint_grant_unmatch_1)
+  }
 
   val perfEvents = (Seq(wb, mainPipe, missQueue, probeQueue) ++ ldu).flatMap(_.getPerfEvents)
   generatePerfEvent()
@@ -1698,9 +1853,15 @@ class DCacheWrapper()(implicit p: Parameters) extends LazyModule
 
   val useDcache = coreParams.dcacheParametersOpt.nonEmpty
   val clientNode = if (useDcache) TLIdentityNode() else null
+  // ========== Dual-channel support ==========
+  // Second TLIdentityNode for dual-channel L1-L2 interface
+  val clientNode_1 = if (useDcache && numMemChannels > 1) Some(TLIdentityNode()) else None
+
   val dcache = if (useDcache) LazyModule(new DCache()) else null
   if (useDcache) {
     clientNode := dcache.clientNode
+    // Connect second clientNode to DCache's second clientNode
+    clientNode_1.foreach(_ := dcache.clientNode_1.get)
   }
   val uncacheNode = OptionWrapper(cacheCtrlParamsOpt.isDefined, TLIdentityNode())
   require(

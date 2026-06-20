@@ -322,6 +322,16 @@ class MemBlockInlined()(implicit p: Parameters) extends LazyModule
   val ptw_to_l2_buffer = if (!coreParams.softPTW) LazyModule(new TLBuffer) else null
   val l1d_to_l2_buffer = if (coreParams.dcacheParametersOpt.nonEmpty) LazyModule(new TLBuffer) else null
   val dcache_port = TLNameNode("dcache_client") // to keep dcache-L2 port name
+
+  // ========== Dual-channel support ==========
+  // Second buffer and port for dual-channel L1-L2 interface
+  val l1d_to_l2_buffer_1 = if (numMemChannelsFromDcache > 1)
+    Some(LazyModule(new TLBuffer))
+  else None
+  val dcache_port_1 = if (numMemChannelsFromDcache > 1)
+    Some(TLNameNode("dcache_client_ch1"))
+  else None
+
   // NOTE: we currently only use one output port to L2 and L3 prefetch sender respectively
   val l2_pf_sender_opt = if (coreParams.prefetcher.nonEmpty)
     Some(BundleBridgeSource(() => new PrefetchRecv)) else None
@@ -375,7 +385,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       val dcacheMSHRFull = Output(Bool())
     }
     val debug_ls = new DebugLSIO
-    val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val l2_hint = Input(Vec(numMemChannelsFromDcache, Valid(new L2ToL1Hint())))
     val l2PfqBusy = Input(Bool())
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
     val l2_pmp_resp = new PMPRespBundle
@@ -931,9 +941,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
     // passdown to lsq (load s3)
     lsq.io.ldu.ldin(i) <> newLoadUnits(i).io.lqWrite
-    lsq.io.l2_hint.valid := l2_hint.valid
-    lsq.io.l2_hint.bits.sourceId := l2_hint.bits.sourceId
-    lsq.io.l2_hint.bits.isKeyword := l2_hint.bits.isKeyword
+    lsq.io.l2_hint <> l2_hint
 
     lsq.io.tlb_hint <> dtlbRepeater.io.hint.get
 
