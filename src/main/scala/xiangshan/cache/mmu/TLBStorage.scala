@@ -342,9 +342,9 @@ class TLBFakeFA(
   val sv39x4Enable = io.csr.hgatp.mode === Sv39x4
   val sv48x4Enable = io.csr.hgatp.mode === Sv48x4
 
-  val vmEnable = if (EnbaleTlbDebug) (sv39Enable || sv48Enable)
+  val vmEnable = if (EnableTlbDebug) (sv39Enable || sv48Enable)
     else ((sv39Enable || sv48Enable) && (mode < ModeM))
-  val s2xlateEnable = if (EnbaleTlbDebug) {
+  val s2xlateEnable = if (EnableTlbDebug) {
     sv39vsEnable || sv48vsEnable || sv39x4Enable || sv48x4Enable
   } else {
     (sv39vsEnable || sv48vsEnable || sv39x4Enable || sv48x4Enable) && (mode < ModeM)
