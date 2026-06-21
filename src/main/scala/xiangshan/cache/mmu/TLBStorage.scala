@@ -321,54 +321,70 @@ class TLBFA(
   println(s"${parentName} tlb_fa: nSets${nSets} nWays:${nWays}")
 }
 
+// TLBFakeFA: Software TLB implementation using DPI-C PteHelper for debug/simulation
+// This module bypasses hardware page table walk and uses C++ reference model instead
 class TLBFakeFA(
-             ports: Int,
-             nDups: Int,
-             nSets: Int,
-             nWays: Int,
-             useDmode: Boolean = false
-           )(implicit p: Parameters) extends TlbModule with HasCSRConst{
+  ports: Int,
+  nDups: Int,
+  nSets: Int,
+  nWays: Int,
+  useDmode: Boolean = false
+)(implicit p: Parameters) extends TlbModule with HasCSRConst {
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports, nDups))
   io.r.req.map(_.ready := true.B)
+
   val mode = if (useDmode) io.csr.priv.dmode else io.csr.priv.imode
-  val vmEnable = if (EnbaleTlbDebug) (io.csr.satp.mode === 8.U)
-    else (io.csr.satp.mode === 8.U && (mode < ModeM))
+  val sv39Enable = io.csr.satp.mode === Sv39
+  val sv48Enable = io.csr.satp.mode === Sv48
+  val sv39vsEnable = io.csr.vsatp.mode === Sv39
+  val sv48vsEnable = io.csr.vsatp.mode === Sv48
+  val sv39x4Enable = io.csr.hgatp.mode === Sv39x4
+  val sv48x4Enable = io.csr.hgatp.mode === Sv48x4
+
+  val vmEnable = if (EnbaleTlbDebug) (sv39Enable || sv48Enable)
+    else ((sv39Enable || sv48Enable) && (mode < ModeM))
+  val s2xlateEnable = if (EnbaleTlbDebug) {
+    sv39vsEnable || sv48vsEnable || sv39x4Enable || sv48x4Enable
+  } else {
+    (sv39vsEnable || sv48vsEnable || sv39x4Enable || sv48x4Enable) && (mode < ModeM)
+  }
 
   for (i <- 0 until ports) {
     val req = io.r.req(i)
     val resp = io.r.resp(i)
 
-    val helper = Module(new PTEHelper())
+    val helper = Module(new PteHelper())
     helper.clock := clock
-    helper.satp := io.csr.satp.ppn
-    helper.enable := req.fire && vmEnable
-    helper.vpn := req.bits.vpn
+    helper.connectCsr(io.csr)
 
-    val pte = helper.pte.asTypeOf(new PteBundle)
-    val ppn = pte.ppn
-    val vpn_reg = RegEnable(req.bits.vpn, req.valid)
-    val pf = helper.pf
-    val level = helper.level
+    val helperEnable = req.fire &&
+      Mux(req.bits.s2xlate === noS2xlate, vmEnable, s2xlateEnable) &&
+      !reset.asBool
+    helper.connectReq(req.bits.vpn, req.bits.s2xlate, helperEnable)
+
+    val helperResult = PteHelperResult.fromHelper(helper, helperEnable)
+    val pte = helperResult.pte
+    val s1Pte = helperResult.s1.pte
+    val s2Pte = helperResult.s2.pte
+
+    val vpnReg = RegEnable(req.bits.vpn, req.valid)
+    val s2xlateReg = RegEnable(req.bits.s2xlate, req.valid)
+    val isAllStage = s2xlateReg === allStage
+    val finalPPN = helperResult.finalPPN(vpnReg, s2xlateReg)
+    val s1RespPte = helperResult.s1RespPte(s2xlateReg)
+    val s2RespPte = helperResult.s2RespPte(s2xlateReg)
 
     resp.valid := RegNext(req.valid)
-    resp.bits.hit := true.B
+    resp.bits.hit := RegNext(helperEnable, false.B)
+
     for (d <- 0 until nDups) {
-      resp.bits.perm(d).pf := pf
-      resp.bits.perm(d).af := false.B
-      resp.bits.perm(d).d := pte.perm.d
-      resp.bits.perm(d).a := pte.perm.a
-      resp.bits.perm(d).g := pte.perm.g
-      resp.bits.perm(d).u := pte.perm.u
-      resp.bits.perm(d).x := pte.perm.x
-      resp.bits.perm(d).w := pte.perm.w
-      resp.bits.perm(d).r := pte.perm.r
-      resp.bits.pbmt(d) := pte.pbmt
-      resp.bits.ppn(d) := MuxLookup(level, 0.U)(Seq(
-        0.U -> Cat(ppn(ppn.getWidth-1, vpnnLen*2), vpn_reg(vpnnLen*2-1, 0)),
-        1.U -> Cat(ppn(ppn.getWidth-1, vpnnLen), vpn_reg(vpnnLen-1, 0)),
-        2.U -> ppn)
-      )
+      resp.bits.perm(d)(s1RespPte, helperResult.hasPf, false.B, Mux(isAllStage, s1Pte.perm.v, helperResult.hasNoPf))
+      resp.bits.pbmt(d) := s1RespPte.pbmt
+      resp.bits.ppn(d) := finalPPN
+      resp.bits.g_perm(d)(s2RespPte, helperResult.hasGpf, false.B, Mux(isAllStage, s2Pte.perm.v, helperResult.hasNoPf))
+      resp.bits.g_pbmt(d) := s2RespPte.pbmt
+      resp.bits.s2xlate(d) := s2xlateReg
     }
   }
 
