@@ -139,30 +139,31 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     out
   }
 
-  def compact(in: Vec[Instruction]): (Vec[Instruction], UInt) = {
+  def compact(in: Vec[Instruction], fire: Bool): (Vec[Instruction], UInt) = {
     val n = in.length
     require(n > 0)
 
     val out = WireDefault(0.U.asTypeOf(in))
 
+    val inReg = RegEnable(in, fire)
     // rank(i) = number of valid elements in [0, i)
-    val rank = Wire(Vec(n, UInt(log2Ceil(n + 1).W)))
-    rank(0) := 0.U
-    for (i <- 1 until n) {
-      rank(i) := rank(i - 1) + in(i - 1).valid
-    }
+    val validVec = VecInit(in.map(_.valid))
 
-    val count = PopCount(in.map(_.valid))
+    val rank = VecInit((0 until n).map { i =>
+      if (i == 0) 0.U
+      else PopCount(validVec.take(i))
+    })
+    val hitMaskVec = VecInit((0 until n).map { i =>
+      VecInit((0 until n).map(j => validVec(j) && rank(j) === i.U)).asUInt
+    })
+    val hitMaskVecReg = RegEnable(hitMaskVec, fire)
+    val count         = PopCount(validVec)
+    val countReg      = RegEnable(count, fire)
 
     for (j <- 0 until n) {
-      val hitMask = (0 until n).map(i => in(i).valid && (rank(i) === j.U))
-      when(hitMask.reduce(_ || _)) {
-        out(j) := Mux1H(hitMask, in)
-      }
-      out(j).valid := j.U < count
+      out(j) := Mux1H(hitMaskVecReg(j), inReg)
     }
-
-    (out, count)
+    (out, countReg)
   }
 
   def align[T <: Data](in: Vec[T], shamt: UInt): Vec[T] = {
