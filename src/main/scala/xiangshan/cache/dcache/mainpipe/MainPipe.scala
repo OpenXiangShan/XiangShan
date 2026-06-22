@@ -569,36 +569,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val full_wmask = FillInterleaved(8, wmask)
     ((~full_wmask & old_data) | (full_wmask & new_data))
   }
-
-  private def bankMaskFromBase(baseBank: UInt, bankCount: Int): UInt = {
-    val baseOH = UIntToOH(baseBank, DCacheBanks)
-    (0 until bankCount).map(i => (baseOH << i)(DCacheBanks - 1, 0)).reduce(_ | _)
-  }
-
-  private def wordBankBase(wordIdx: UInt): UInt = {
-    (wordIdx << log2Ceil(DCacheWordBankCount))(log2Up(DCacheBanks) - 1, 0)
-  }
-
-  private def quadWordBankBase(quadWordIdx: UInt): UInt = {
-    (quadWordIdx << log2Ceil(DCacheQuadWordBankCount))(log2Up(DCacheBanks) - 1, 0)
-  }
-
-  private def assembleBankData(data: Vec[UInt], baseBank: UInt, bankCount: Int): UInt = {
-    Cat((0 until bankCount).reverse.map(i => data((baseBank + i.U)(log2Up(DCacheBanks) - 1, 0))))
-  }
-
-  private def selectDataPiece(data: UInt, sel: Seq[Bool], bankCount: Int): UInt = {
-    Mux1H((0 until bankCount).map(i => sel(i) -> data(DCacheSRAMRowBits * (i + 1) - 1, DCacheSRAMRowBits * i)))
-  }
-
-  private def selectMaskPiece(mask: UInt, sel: Seq[Bool], bankCount: Int): UInt = {
-    Mux1H((0 until bankCount).map(i => sel(i) -> mask(DCacheSRAMRowBytes * (i + 1) - 1, DCacheSRAMRowBytes * i)))
-  }
-
-  private def selectFullMask(sel: Seq[Bool]): UInt = {
-    Mux(sel.reduce(_ || _), ~0.U(DCacheSRAMRowBytes.W), 0.U(DCacheSRAMRowBytes.W))
-  }
-
   val s2_merge_mask = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBytes.W)))
   val s2_store_data_merged_without_cache = Wire(Vec(DCacheBanks, UInt(DCacheSRAMRowBits.W)))
   for (i <- 0 until DCacheBanks) {

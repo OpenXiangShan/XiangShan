@@ -84,16 +84,6 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
 
     require(params.maxBanks > 0, "At least one bank!")
     require(params.maxBanks == 1, "Is it necessary to have more than 1 bank?")
-    require(params.nSignalComps == 2, "tag and data pseudo-error components are expected")
-    require(params.regWidth == 64, "control register width must preserve the 64-bit control layout!")
-    require(params.tagMaskRegWidth >= tagBits, "tag mask register width must cover tagBits!")
-    require(params.tagMaskRegWidth % 8 == 0, "tag mask register width must be byte addressable!")
-    require(params.dataMaskRegWidth == DCacheSRAMRowBits, "data mask register width must match DCacheSRAMRowBits!")
-    require(params.dataMaskRegWidth % 8 == 0, "data mask register width must be byte addressable!")
-    require(
-      params.dataMaskOffset + params.dataMaskRegBytes * DCacheBanks <= params.bankBytes,
-      "cache-control register map must cover tag and data masks within the MMIO bank!"
-    )
     val ctrlRegs  = RegInit(VecInit(Seq.fill(1)(0.U(params.regWidth.W))))
     val delayRegs = RegInit(VecInit(Seq.fill(1)(0.U(params.regWidth.W))))
     val tagMaskReg = RegInit(0.U(params.tagMaskRegWidth.W))

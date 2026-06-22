@@ -144,7 +144,8 @@ trait HasDCacheParameters
   val DCacheWays = cacheParams.nWays
   val DCacheBanks = 32
   val DCacheDupNum = 16
-  val DCacheSRAMRowBits = 16
+  val DCacheSRAMRealRowBits = DCacheSRAMRowBits * DCacheWays // 1 real Bank = vitural_bank * way_nums
+  val DCacheSRAMRowBits = 16 
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
   val MaxPrefetchEntry = cacheParams.nMaxPrefetchEntry
@@ -284,6 +285,55 @@ trait HasDCacheParameters
     addr(DCacheAboveIndexOffset + log2Up(DCacheWays) - 1, DCacheAboveIndexOffset)
   }
 
+  def bankMaskFromBase(baseBank: UInt, bankCount: Int): UInt = {
+    val baseOH = UIntToOH(baseBank, DCacheBanks)
+    (0 until bankCount).map(i => (baseOH << i)(DCacheBanks - 1, 0)).reduce(_ | _)
+  }
+
+  def byteMaskToBankMask(vaddr: UInt, byteMask: UInt): UInt = {
+    val bankMaskInVWord = VecInit((0 until DCacheVWordBankCount).map(i => {
+      byteMask(DCacheSRAMRowBytes * (i + 1) - 1, DCacheSRAMRowBytes * i).orR
+    })).asUInt
+    val bankOffsetInLine = Cat(vaddr(DCacheLineOffset - 1, DCacheVWordOffset), 0.U(log2Ceil(DCacheVWordBankCount).W))
+    val bankMaskInLine = Cat(0.U((DCacheBanks - DCacheVWordBankCount).W), bankMaskInVWord)
+    (bankMaskInLine << bankOffsetInLine)(DCacheBanks - 1, 0)
+  }
+  def addrToVWordBankBase(addr: UInt): UInt = {
+    val bank = addr_to_dcache_bank(addr)
+    val vwordBankOffsetBits = log2Ceil(DCacheVWordBankCount)
+    Cat(bank(log2Up(DCacheBanks) - 1, vwordBankOffsetBits), 0.U(vwordBankOffsetBits.W))
+  }
+
+  def bankMaskToReadErrorLaneMask(bankMask: UInt, vwordBankBase: UInt): UInt = {
+    VecInit((0 until DCacheVWordBankCount).map { i =>
+      val bank = (vwordBankBase + i.U)(log2Up(DCacheBanks) - 1, 0)
+      bankMask(bank)
+    }).asUInt
+  }
+
+  def wordBankBase(wordIdx: UInt): UInt = {
+    (wordIdx << log2Ceil(DCacheWordBankCount))(log2Up(DCacheBanks) - 1, 0)
+  }
+
+  def quadWordBankBase(quadWordIdx: UInt): UInt = {
+    (quadWordIdx << log2Ceil(DCacheQuadWordBankCount))(log2Up(DCacheBanks) - 1, 0)
+  }
+
+  def assembleBankData(data: Vec[UInt], baseBank: UInt, bankCount: Int): UInt = {
+    Cat((0 until bankCount).reverse.map(i => data((baseBank + i.U)(log2Up(DCacheBanks) - 1, 0))))
+  }
+
+  def selectDataPiece(data: UInt, sel: Seq[Bool], bankCount: Int): UInt = {
+    Mux1H((0 until bankCount).map(i => sel(i) -> data(DCacheSRAMRowBits * (i + 1) - 1, DCacheSRAMRowBits * i)))
+  }
+
+  def selectMaskPiece(mask: UInt, sel: Seq[Bool], bankCount: Int): UInt = {
+    Mux1H((0 until bankCount).map(i => sel(i) -> mask(DCacheSRAMRowBytes * (i + 1) - 1, DCacheSRAMRowBytes * i)))
+  }
+
+  def selectFullMask(sel: Seq[Bool]): UInt = {
+    Mux(sel.reduce(_ || _), ~0.U(DCacheSRAMRowBytes.W), 0.U(DCacheSRAMRowBytes.W))
+  }
   val numReplaceRespPorts = 2
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")

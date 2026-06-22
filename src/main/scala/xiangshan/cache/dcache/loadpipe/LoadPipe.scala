@@ -107,42 +107,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val not_nacked_ready = io.meta_read.ready && io.tag_read.ready && s1_ready
   val nacked_ready     = true.B
 
-  private def bankMaskFromBase(baseBank: UInt, bankCount: Int): UInt = {
-    val baseOH = UIntToOH(baseBank, DCacheBanks)
-    (0 until bankCount).map(i => (baseOH << i)(DCacheBanks - 1, 0)).reduce(_ | _)
-  }
-
-  private def byteMaskToBankMask(vaddr: UInt, byteMask: UInt): UInt = {
-    val bankMaskInVWord = VecInit((0 until DCacheVWordBankCount).map(i => {
-      byteMask(DCacheSRAMRowBytes * (i + 1) - 1, DCacheSRAMRowBytes * i).orR
-    })).asUInt
-    val bankOffsetInLine = Cat(
-      vaddr(DCacheLineOffset - 1, DCacheVWordOffset),
-      0.U(log2Ceil(DCacheVWordBankCount).W)
-    )
-    val bankMaskInLine = Cat(
-      0.U((DCacheBanks - DCacheVWordBankCount).W),
-      bankMaskInVWord
-    )
-    (bankMaskInLine << bankOffsetInLine)(DCacheBanks - 1, 0)
-  }
-
-  private def addrToVWordBankBase(addr: UInt): UInt = {
-    val bank = addr_to_dcache_bank(addr)
-    val vwordBankOffsetBits = log2Ceil(DCacheVWordBankCount)
-    Cat(
-      bank(log2Up(DCacheBanks) - 1, vwordBankOffsetBits),
-      0.U(vwordBankOffsetBits.W)
-    )
-  }
-
-  private def bankMaskToReadErrorLaneMask(bankMask: UInt, vwordBankBase: UInt): UInt = {
-    VecInit((0 until DCacheVWordBankCount).map { i =>
-      val bank = (vwordBankBase + i.U)(log2Up(DCacheBanks) - 1, 0)
-      bankMask(bank)
-    }).asUInt
-  }
-
   // Pipeline
   // --------------------------------------------------------------------------------
   // stage 0
@@ -439,9 +403,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s2_hit = s2_tag_match && s2_has_permission && s2_hit_coh === s2_new_hit_coh && !s2_wpu_pred_fail
 
-  val s2_data128bit = Cat(
-    (0 until DCacheVWordBankCount).reverse.map(i => io.banked_data_resp(i).raw_data)
-  )
+  val s2_data128bit = Cat((0 until DCacheVWordBankCount).reverse.map(i => io.banked_data_resp(i).raw_data))
   val s2_resp_data  = s2_data128bit
 
   val s2_is_prefetch = s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U
@@ -562,10 +524,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   val s3_valid = RegNext(s2_valid)
   val s3_load128Req = RegEnable(s2_load128Req, s2_fire)
-  val s3_read_error_lane_mask = RegEnable(
-    bankMaskToReadErrorLaneMask(s2_bank_oh, addrToVWordBankBase(s2_vaddr)),
-    s2_fire
-  )
+  val s3_read_error_lane_mask = RegEnable(bankMaskToReadErrorLaneMask(s2_bank_oh, addrToVWordBankBase(s2_vaddr)), s2_fire)
   val s3_vaddr = RegEnable(s2_vaddr, s2_fire)
   val s3_paddr = RegEnable(s2_paddr, s2_fire)
   val s3_hit = RegEnable(s2_hit, s2_fire)
