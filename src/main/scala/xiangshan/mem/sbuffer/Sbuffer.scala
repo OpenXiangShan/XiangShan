@@ -341,7 +341,6 @@ class Sbuffer(implicit p: Parameters)
   // -- if even bank is more empty, the first req inserted into even bank, the second inserted into odd bank
   // -- if the first or second req can be merged into an existing line, it is merged
   // -- if the first and second req are in the same line, they can be inserted or merged into the same entry
-  // -- if the first can be merged and the second cannot be merged, the second req is inserted into the more empty bank
   val invalidMask = VecInit(stateVec.map(s => s.isInvalid()))
   val evenInvalidMask = GetEvenBits(invalidMask.asUInt)
   val oddInvalidMask = GetOddBits(invalidMask.asUInt)
