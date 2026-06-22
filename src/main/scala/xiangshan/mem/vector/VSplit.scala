@@ -42,7 +42,7 @@ class VSplitPipeline(isVStore: Boolean = false)(implicit p: Parameters) extends 
 
   //                                           Ensure the sequence of vec index order uop.
   val mergeBufferNack = (io.threshold.valid || isOrderIndexed(io.in.bits.uop.fuOpType(6,5)) && !isVStore.B) &&
-    !(io.threshold.bits.robIdx === io.in.bits.uop.robIdx && io.threshold.bits.uopIdx === io.in.bits.uop.uopIdx)
+    !(io.threshold.bits.robIdx === io.in.bits.uop.robIdx && io.threshold.bits.uopIdx === io.in.bits.uop.vpu.vuopIdx)
 
   val s1_ready = WireInit(false.B)
   io.in.ready := s1_ready && !mergeBufferNack
