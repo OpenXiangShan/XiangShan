@@ -677,8 +677,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val mbistSramPorts = mbistPl.map(pl => Seq.tabulate(DCacheSetDiv, DCacheBanks) { (i, j) =>
     pl.toSRAM(i * DCacheBanks + j)
   })
-
-  // read result: expose banked read result
   private val mbist_ack = mbistPl.map(_.mbist.ack).getOrElse(false.B)
 
   data_banks.map(_.map(_.dump()))
@@ -869,7 +867,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       // read raw data
       val data_bank = data_banks(div_index)(bank_index)
       data_bank.io.r.en := read_enable
-      mbistSramPorts.foreach(_(div_index)(bank_index).rdata := Cat(data_bank.io.r.data.reverse))
 
       if (DuplicatedQueryBankSeq.contains(bank_index)) {
         data_bank.io.r.addr := bank_set_addr_dup
@@ -930,6 +927,28 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   val readline_r_div_addr = RegEnable(line_div_addr, io.readline.fire)
   val readline_rr_div_addr = RegEnable(readline_r_div_addr, RegNext(io.readline.fire))
   val readline_resp = Wire(io.readline_resp.cloneType)
+  val mbistPackedResp = Wire(Vec(DCacheSetDiv, Vec(DCacheBanks, UInt((DCacheWays * encDataBits).W))))
+  for (div <- 0 until DCacheSetDiv; bank <- 0 until DCacheBanks) {
+    val packedBankResult = Cat((0 until DCacheWays).reverse.map { way =>
+      bank_result(div)(bank)(way).asECCData()
+    })
+    mbistPackedResp(div)(bank) := Mux(
+      io.readline_can_go | mbist_ack,
+      packedBankResult,
+      RegEnable(mbistPackedResp(div)(bank), io.readline_stall | mbist_ack)
+    )
+  }
+  mbistSramPorts.foreach { ports =>
+    for (div <- 0 until DCacheSetDiv; bank <- 0 until DCacheBanks) {
+      val port = ports(div)(bank)
+      val row = mbistPackedResp(div)(bank)
+      require(port.params.dataWidth * port.params.nodeNum == row.getWidth)
+      port.rdata := RegEnable(
+        Mux1H(port.selectedOH, row.asTypeOf(Vec(port.params.nodeNum, UInt(port.params.dataWidth.W)))),
+        io.readline_stall | mbist_ack
+      )
+    }
+  }
   (0 until DCacheBanks).foreach(i => {
     readline_resp(i) := Mux(
       io.readline_can_go,
@@ -947,7 +966,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       readline_error_delayed(i) := false.B
     }
   })
-  io.readline_resp := RegEnable(readline_resp, io.readline_can_resp | mbist_ack)
+  io.readline_resp := RegEnable(readline_resp, io.readline_can_resp)
   io.readline_error := readline_error.asUInt.orR
   io.readline_error_delayed := readline_error_delayed.asUInt.orR
 
