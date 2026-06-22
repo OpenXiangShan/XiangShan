@@ -278,29 +278,21 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     io.bits  := reg.bits.toCtrlFlow
   }
 
-  // assign outputEntries except vtype field is assigned to DontCare
-  (outputEntriesNext lazyZip outputEntries lazyZip bypassEntries).zipWithIndex.foreach {
-    case ((outNext, outReg, bypass), i) =>
-
+  // Non-bypass path: deqEntries → outputEntriesFromDeqNext
+  // VTypeGen is fed from this path to keep bypass out of the vtype timing path.
+  private val outputEntriesFromDeqNext = Wire(outputEntriesNext.cloneType)
+  (outputEntriesFromDeqNext lazyZip outputEntries lazyZip deqEntries).zipWithIndex.foreach {
+    case ((outFromDeq, outReg, deq), i) =>
     when(decodeCanAccept && !resumingVType) {
-      when(useBypass && io.in.valid) {
-        outNext.valid := bypass.valid
-        outNext.bits := Mux(
-          bypassExceptionMask(i),
-          bypass.bits.toIBufOutEntry(currentException),
-          bypass.bits.toIBufOutEntry(0.U.asTypeOf(currentException))
-        )
-      }.otherwise {
-        outNext.valid := deqEntries(i).valid
-        outNext.bits := Mux(
-          deqHasException && i.U === deqExceptionOffset,
-          deqEntries(i).bits.toIBufOutEntry(firstException.bits),
-          deqEntries(i).bits.toIBufOutEntry(0.U.asTypeOf(firstException.bits))
-        )
-      }
+      outFromDeq.valid := deq.valid
+      outFromDeq.bits := Mux(
+        deqHasException && i.U === deqExceptionOffset,
+        deq.bits.toIBufOutEntry(firstException.bits),
+        deq.bits.toIBufOutEntry(0.U.asTypeOf(firstException.bits))
+      )
     }.elsewhen(outputEntriesIsNotFull && !resumingVType) {
-      outNext.valid := deqEntries(i).valid
-      outNext.bits := Mux(
+      outFromDeq.valid := deq.valid
+      outFromDeq.bits := Mux(
         i.U < outputEntriesValidNum,
         outReg.bits,
         Mux(
@@ -314,7 +306,22 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
         )
       )
     }.otherwise {
-      outNext := outReg
+      outFromDeq := outReg
+    }
+  }
+
+  // Final outputEntriesNext: bypass overrides the deq-based output
+  (outputEntriesNext lazyZip outputEntriesFromDeqNext lazyZip bypassEntries).zipWithIndex.foreach {
+    case ((outNext, outFromDeq, bypass), i) =>
+    when(decodeCanAccept && !resumingVType && useBypass && io.in.valid) {
+      outNext.valid := bypass.valid
+      outNext.bits := Mux(
+        bypassExceptionMask(i),
+        bypass.bits.toIBufOutEntry(currentException),
+        bypass.bits.toIBufOutEntry(0.U.asTypeOf(currentException))
+      )
+    }.otherwise {
+      outNext := outFromDeq
     }
   }
 
@@ -331,13 +338,13 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
     when(resumingVType) {
       vtypeGen.in.insts(i).valid := false.B
     }.elsewhen(decodeCanAccept) {
-      vtypeGen.in.insts(i).valid := outputEntriesNext(i).valid
+      vtypeGen.in.insts(i).valid := outputEntriesFromDeqNext(i).valid
     }.elsewhen(outputEntriesIsNotFull) {
       vtypeGen.in.insts(i).valid := Mux(i.U < outputEntriesValidNum, false.B, true.B)
     }.otherwise {
       vtypeGen.in.insts(i).valid := false.B
     }
-    vtypeGen.in.insts(i).bits := outputEntriesNext(i).bits.inst
+    vtypeGen.in.insts(i).bits := outputEntriesFromDeqNext(i).bits.inst
   }
 
   // update vtype field, overwrite the assignment of outputEntriesNext above
