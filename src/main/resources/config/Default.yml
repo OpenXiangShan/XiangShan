@@ -17,9 +17,13 @@ PMAConfigs:
 
 EnableCHIAsyncBridge: true
 
+LLC: OpenLLC
+
 L2CacheConfig: { size: 2 MB, ways: 8, inclusive: true, banks: 4, tp: false, enableFlush: false }
 
 OpenLLCConfig: { size: 16 MB, ways: 16, banks: 4 }
+
+ZhuJiangConfig: { size: 16 MB, ways: 16 }
 
 HartIDBits: 6
 
