@@ -50,11 +50,21 @@ TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 ISSUE ?= E.b
+LLC ?= OpenLLC
 CHISEL_TARGET ?= systemverilog
 
 SUPPORT_CHI_ISSUE = B C E.b
 ifeq ($(findstring $(ISSUE), $(SUPPORT_CHI_ISSUE)),)
 $(error "Unsupported CHI issue: $(ISSUE)")
+endif
+SUPPORT_LLC = OpenLLC ZhuJiang
+ifeq ($(findstring $(LLC), $(SUPPORT_LLC)),)
+$(error "Unknown LLC: $(LLC)")
+endif
+ifeq ($(LLC),ZhuJiang)
+ifneq ($(ISSUE),E.b)
+$(error "LLC=ZhuJiang only supports ISSUE=E.b or newer")
+endif
 endif
 
 ifneq ($(shell echo "$(MAKECMDGOALS)" | grep ' '),)
@@ -126,6 +136,9 @@ endif
 ifneq ($(CHI_ADDR_WIDTH),)
 COMMON_EXTRA_ARGS += --chi-addr-width $(CHI_ADDR_WIDTH)
 endif
+
+# LLC backend selection
+COMMON_EXTRA_ARGS += --llc $(LLC)
 
 # L2 cache size in KB
 ifneq ($(L2_CACHE_SIZE),)
@@ -317,7 +330,7 @@ GIT_FORCE_FLAG := $(if $(GIT_FORCE_INIT),--force)
 init:
 	git submodule update --init $(GIT_FORCE_FLAG)
 	cd rocket-chip && git submodule update --init $(GIT_FORCE_FLAG) cde hardfloat
-	cd XSCache && git submodule update --init $(GIT_FORCE_FLAG) OpenNCB
+	cd XSCache && git submodule update --init $(GIT_FORCE_FLAG) OpenNCB ZhuJiang
 
 # Initialize necessary submodules (force)
 #   This ensure that all submodules files are checked out to the correct commit. Good for CI.
