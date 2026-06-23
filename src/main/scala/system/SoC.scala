@@ -546,7 +546,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
 
   val plic = LazyModule(new TLPLIC(PLICParams(soc.PLICRange.base), 8))
   val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr))
-  val aplic = LazyModule(new aia.AXI4APLIC(soc.APLICParams, 8))
+  val aplic = LazyModule(new aia.AXI4APLIC(soc.APLICParams))
 
   plic.intnode := plicSource.sourceNode
   if (enableCHI) { plic.node := device_xbar.get }
@@ -554,10 +554,14 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   if (enableCHI) {
     aplic.fromCPU :=
       TLToAXI4() :=
+      TLFragmenter(4, 8, holdFirstDeny = true) :=
+      TLWidthWidget(8) :=
       device_xbar.get
   } else {
     aplic.fromCPU :=
       TLToAXI4() :=
+      TLFragmenter(4, 8, holdFirstDeny = true) :=
+      TLWidthWidget(8) :=
       peripheralXbar.get
   }
 

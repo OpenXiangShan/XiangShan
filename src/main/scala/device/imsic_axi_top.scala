@@ -54,7 +54,7 @@ class imsic_bus_top(implicit p: Parameters) extends LazyModule with HasSoCParame
   val tl_s = tl.map(x => InModuleBody(x(1).makeIOs()))
 
   // AXI4 Bus
-  val axi_reg_imsic = Option.when(soc.IMSICBusType == device.IMSICBusType.AXI)(LazyModule(new aia.AXIRegIMSIC_WRAP(soc.IMSICParams, beatBytes = 8, seperateBus = false)))
+  val axi_reg_imsic = Option.when(soc.IMSICBusType == device.IMSICBusType.AXI)(LazyModule(new aia.AXIRegIMSIC_WRAP(soc.IMSICParams, seperateBus = false)))
 
   val axi_mem_xbar = axi_reg_imsic.map { axi_reg_imsic =>
     val imsic_mem_xbar = AXI4Xbar()

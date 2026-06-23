@@ -200,6 +200,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
           AXI4Buffer() :=
           AXI4UserYanker() :=
           TLToAXI4() :=
+          TLFragmenter(4, 8, holdFirstDeny = true) :=
           TLWidthWidget(8) :=
           misc.device_xbar.get
       } else {
@@ -207,6 +208,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
           AXI4Buffer() :=
           AXI4UserYanker() :=
           TLToAXI4() :=
+          TLFragmenter(4, 8, holdFirstDeny = true) :=
           TLWidthWidget(8) :=
           misc.peripheralXbar.get
       }
