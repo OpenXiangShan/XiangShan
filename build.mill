@@ -90,13 +90,32 @@ object yunsuan extends ChiselModule {}
 object XSCache extends ChiselModule {
   def millSourcePath = pwd / "XSCache"
 
-  def moduleDeps = Seq(`rocket-chip`, utility, openNCB)
+  def moduleDeps = Seq(`rocket-chip`, utility, openNCB, zhujiangCompat)
+
+  override def sources: T[Seq[PathRef]] = Task.Sources {
+    super.sources() ++ Seq(
+      PathRef(millSourcePath / "src" / "test" / "scala" / "ZhuJiangBridge.scala")
+    )
+  }
 }
 
 object openNCB extends ChiselModule {
   def millSourcePath = pwd / "XSCache" / "OpenNCB"
 
   def moduleDeps = Seq(`rocket-chip`)
+}
+
+object zhujiangCompat extends ChiselModule {
+  def millSourcePath = pwd / "XSCache" / "ZhuJiang"
+
+  def moduleDeps = Seq(`rocket-chip`, utility)
+
+  override def sources: T[Seq[PathRef]] = Task.Sources {
+    Seq(
+      PathRef(millSourcePath / "src" / "main" / "scala"),
+      PathRef(millSourcePath / "xs-utils" / "src" / "main" / "scala")
+    )
+  }
 }
 
 object difftest extends ChiselModule {
@@ -128,6 +147,7 @@ object xiangshan extends ChiselModule {
     `rocket-chip`,
     difftest,
     XSCache,
+    zhujiangCompat,
     yunsuan,
     utility,
     ChiselAIA,

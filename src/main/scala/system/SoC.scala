@@ -32,7 +32,8 @@ import freechips.rocketchip.interrupts.{IntSourceNode, IntSourcePortSimple}
 import freechips.rocketchip.regmapper.{RegField, RegFieldDesc, RegFieldGroup}
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSource, AsyncBundle}
-import top.BusPerfMonitor
+import top.{BusPerfMonitor, LLCType}
+import zhujiang.ZJParameters
 import xiangshan.backend.fu.{MemoryRange, PMAConfigEntry, PMAConst}
 import xiangshan.{DebugOptionsKey, PMParameKey, XSTileKey}
 import device.SYSCNTConsts.timeWidth
@@ -78,7 +79,9 @@ case class SoCParameters
   UARTLiteForDTS: Boolean = true, // should be false in SimMMIO
   extIntrs: Int = 64,
   L3NBanks: Int = 4,
+  LLC: LLCType.Value = LLCType.OpenLLC,
   OpenLLCParamsOpt: Option[OpenLLCParam] = None,
+  ZhuJiangParams: ZJParameters = ZJParameters(),
   XSTopPrefix: Option[String] = None,
   NodeIDWidthList: Map[String, Int] = Map(
     "B" -> 7,
@@ -139,8 +142,27 @@ trait HasSoCParameter {
   val cvm = p(CVMParamsKey)
   val debugOpts = p(DebugOptionsKey)
   val tiles = p(XSTileKey)
-  val enableCHI = true
   val issue = p(CHIIssue)
+  val isOpenLLC = soc.LLC == LLCType.OpenLLC
+  val isZhuJiang = soc.LLC == LLCType.ZhuJiang
+
+  if (isZhuJiang) {
+    require(issue == xscache.chi.Issue.Eb, "LLC=ZhuJiang only supports CHI issue E.b or newer")
+    require(
+      soc.EnableCHIAsyncBridge.isEmpty,
+      "LLC=ZhuJiang does not support EnableCHIAsyncBridge"
+    )
+    require(!soc.EnablePowerDown, "LLC=ZhuJiang does not support power-down flows")
+    require(!soc.WFIClockGate, "LLC=ZhuJiang does not support WFI clock gating")
+    require(
+      !tiles.exists(_.L2CacheParamsOpt.exists(_.enableL2Flush)),
+      "LLC=ZhuJiang does not support flushL2"
+    )
+    require(
+      !tiles.exists(_.L2CacheParamsOpt.exists(l2 => l2.dataCheck.nonEmpty || l2.enablePoison)),
+      "LLC=ZhuJiang requires CoupledL2 DataCheck and Poison disabled"
+    )
+  }
 
   val NumCores = tiles.size
   val EnableILA = soc.EnableILA
@@ -174,8 +196,7 @@ trait HasSoCParameter {
   val SeperateBus = soc.SeperateBus
   val SeperateBusRanges = soc.SeperateBusRanges
 
-  val EnableCHIAsyncBridge = if (enableCHI && soc.EnableCHIAsyncBridge.isDefined)
-    soc.EnableCHIAsyncBridge else None
+  val EnableCHIAsyncBridge = soc.EnableCHIAsyncBridge
   val EnableClintAsyncBridge = soc.EnableClintAsyncBridge
   val SeperateBusAsyncBridge = soc.SeperateBusAsyncBridge
 
@@ -196,7 +217,6 @@ trait HasPeripheralRanges {
 
   private def cvm = p(CVMParamsKey)
   private def soc = p(SoCParamsKey)
-  private def enableCHI = true
   private def dm = p(DebugModuleKey)
   private def pmParams = p(PMParameKey)
 
@@ -228,12 +248,12 @@ class ILABundle extends Bundle {}
 
 
 abstract class BaseSoC()(implicit p: Parameters) extends LazyModule with HasSoCParameter with HasPeripheralRanges {
-  val bankedNode = Option.when(!enableCHI)(BankBinder(L3NBanks, L3BlockSize))
-  val peripheralXbar = Option.when(!enableCHI)(TLXbar())
-  val l3_xbar = Option.when(!enableCHI)(TLXbar())
-  val l3_banked_xbar = Option.when(!enableCHI)(TLXbar())
+  val bankedNode: Option[TLNode] = None
+  val peripheralXbar: Option[TLXbar] = None
+  val l3_xbar: Option[TLXbar] = None
+  val l3_banked_xbar: Option[TLXbar] = None
 
-  val soc_xbar = Option.when(enableCHI)(AXI4Xbar())
+  val soc_xbar = Some(AXI4Xbar())
 }
 
 // We adapt the following three traits from rocket-chip.
@@ -250,26 +270,6 @@ trait HaveSlaveAXI4Port {
     ))
   )))
 
-  if (l3_xbar.isDefined) {
-    val errorDevice = LazyModule(new TLError(
-      params = DevNullParams(
-        address = Seq(AddressSet(0x0, 0x7fffffffL)),
-        maxAtomic = 8,
-        maxTransfer = 64),
-      beatBytes = L3InnerBusWidth / 8
-    ))
-    errorDevice.node :=
-      l3_xbar.get :=
-      TLFIFOFixer() :=
-      TLWidthWidget(32) :=
-      AXI4ToTL() :=
-      AXI4UserYanker(Some(1)) :=
-      AXI4Fragmenter() :=
-      AXI4Buffer() :=
-      AXI4Buffer() :=
-      AXI4IdIndexer(1) :=
-      l3FrontendAXI4Node
-  }
 
   val dma = InModuleBody {
     l3FrontendAXI4Node.makeIOs()
@@ -300,33 +300,11 @@ trait HaveAXI4MemPort {
   ))
 
   val mem_xbar = TLXbar()
-  val l3_mem_pmu = BusPerfMonitor(name = "L3_Mem", enable = !debugOpts.FPGAPlatform && !enableCHI, stat_latency = true)
+  val l3_mem_pmu = BusPerfMonitor(name = "L3_Mem", enable = false, stat_latency = true)
   val axi4mem_node = AXI4IdentityNode()
 
-  if (enableCHI) {
-    axi4mem_node :=
-      soc_xbar.get
-  } else {
-    mem_xbar :=*
-      TLBuffer.chainNode(2) :=
-      TLCacheCork() :=
-      l3_mem_pmu :=
-      TLClientsMerger() :=
-      TLXbar() :=*
-      bankedNode.get
-
-    mem_xbar :=
-      TLWidthWidget(8) :=
-      TLBuffer.chainNode(3, name = Some("PeripheralXbar_to_MemXbar_buffer")) :=
-      peripheralXbar.get
-
-    axi4mem_node :=
-      TLToAXI4() :=
-      TLSourceShrinker(64) :=
-      TLWidthWidget(L3OuterBusWidth / 8) :=
-      TLBuffer.chainNode(2) :=
-      mem_xbar
-  }
+  axi4mem_node :=
+    soc_xbar.get
   val axi4memencrpty = Option.when(HasMEMencryption)(LazyModule(new AXI4MemEncrypt(cvm.MEMENCRange)))
   if (HasMEMencryption) {
     memAXI4SlaveNode :=
@@ -386,7 +364,7 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
   )))
 
   val axi4peripheral_node = AXI4IdentityNode()
-  val error_xbar = Option.when(enableCHI)(TLXbar())
+  val error_xbar = Some(TLXbar())
 
   peripheralNode :=
     AXI4UserYanker() :=
@@ -399,32 +377,24 @@ trait HaveAXI4PeripheralPort { this: BaseSoC =>
     // AXI4Deinterleaver(8) :=
     axi4peripheral_node
 
-  if (enableCHI) {
-    val error = LazyModule(new TLError(
-      params = DevNullParams(
-        address = Seq(AddressSet(0x1000000000000L, 0xffffffffffffL)),
-        maxAtomic = 8,
-        maxTransfer = 64),
-      beatBytes = 8
-    ))
-    error.node := error_xbar.get
-    axi4peripheral_node :=
-      AXI4Deinterleaver(8) :=
-      TLToAXI4() :=
-      error_xbar.get :=
-      TLBuffer.chainNode(2, Some("llc_to_peripheral_buffer")) :=
-      TLFIFOFixer() :=
-      TLWidthWidget(L3OuterBusWidth / 8) :=
-      AXI4ToTL() :=
-      AXI4UserYanker() :=
-      soc_xbar.get
-  } else {
-    axi4peripheral_node :=
-      AXI4Deinterleaver(8) :=
-      TLToAXI4() :=
-      TLBuffer.chainNode(3) :=
-      peripheralXbar.get
-  }
+  val error = LazyModule(new TLError(
+    params = DevNullParams(
+      address = Seq(AddressSet(0x1000000000000L, 0xffffffffffffL)),
+      maxAtomic = 8,
+      maxTransfer = 64),
+    beatBytes = 8
+  ))
+  error.node := error_xbar.get
+  axi4peripheral_node :=
+    AXI4Deinterleaver(8) :=
+    TLToAXI4() :=
+    error_xbar.get :=
+    TLBuffer.chainNode(2, Some("llc_to_peripheral_buffer")) :=
+    TLFIFOFixer() :=
+    TLWidthWidget(L3OuterBusWidth / 8) :=
+    AXI4ToTL() :=
+    AXI4UserYanker() :=
+    soc_xbar.get
 
   val peripheral = InModuleBody {
     peripheralNode.makeIOs()
@@ -438,53 +408,16 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   with HaveAXI4PeripheralPort
 {
 
-  val peripheral_ports = Option.when(!enableCHI)(Array.fill(NumCores) { TLTempNode() })
-  val core_to_l3_ports = Option.when(!enableCHI)(Array.fill(NumCores) { TLTempNode() })
-
-  val l3_in = TLTempNode()
-  val l3_out = TLTempNode()
-
-  val device_xbar = Option.when(enableCHI)(TLXbar())
+  val device_xbar = Some(TLXbar())
   device_xbar.foreach(_ := error_xbar.get)
-
-  if (l3_banked_xbar.isDefined) {
-    l3_in :*= TLEdgeBuffer(_ => true, Some("L3_in_buffer")) :*= l3_banked_xbar.get
-    l3_banked_xbar.get := TLBuffer.chainNode(2) := l3_xbar.get
-  }
-  bankedNode match {
-    case Some(bankBinder) =>
-      bankBinder :*= TLLogger("MEM_L3", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) :*= l3_out
-    case None =>
-  }
-
-  if(!enableCHI){
-    l3_out :*= l3_in
-  }
-
-  if (!enableCHI) {
-    for (port <- peripheral_ports.get) {
-      peripheralXbar.get := TLBuffer.chainNode(2, Some("L2_to_L3_peripheral_buffer")) := port
-    }
-  }
-
-  core_to_l3_ports.foreach { case _ =>
-    for ((core_out, i) <- core_to_l3_ports.get.zipWithIndex){
-      l3_banked_xbar.get :=*
-        TLLogger(s"L3_L2_$i", !debugOpts.FPGAPlatform && debugOpts.AlwaysBasicDB) :=*
-        TLBuffer() :=
-        core_out
-    }
-  }
 
   // instant syscnt
   val syscnt = (LazyModule(new SYSCNT(SYSCNTParams(soc.SYSCNTRange.base), 8)))
   //  val clint = LazyModule(new CLINT(CLINTParams(soc.CLINTRange.base), 8))
 
-  if (enableCHI) { syscnt.node := device_xbar.get }
-  else { syscnt.node := peripheralXbar.get }
+  syscnt.node := device_xbar.get
 
-//  if (enableCHI) { clint.node := device_xbar.get }
-//  else { clint.node := peripheralXbar.get }
+//  clint.node := device_xbar.get
 
   class IntSourceNodeToModule(val num: Int)(implicit p: Parameters) extends LazyModule {
     val sourceNode = IntSourceNode(IntSourcePortSimple(num, ports = 1, sources = 1))
@@ -499,8 +432,7 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
   val plicSource = LazyModule(new IntSourceNodeToModule(NrExtIntr))
 
   plic.intnode := plicSource.sourceNode
-  if (enableCHI) { plic.node := device_xbar.get }
-  else { plic.node := peripheralXbar.get }
+  plic.node := device_xbar.get
 
   val pll_node = TLRegisterNode(
     address = Seq(soc.PLLRange),
@@ -508,55 +440,31 @@ class MemMisc()(implicit p: Parameters) extends BaseSoC
     beatBytes = 8,
     concurrency = 1
   )
-  if (enableCHI) { pll_node := device_xbar.get }
-  else { pll_node := peripheralXbar.get }
+  pll_node := device_xbar.get
 
   // instance timer
   val timer = LazyModule(new TIMER(TIMERParams(IsSelfTest = true, soc.TIMERRange.base), 8))
   val debugModule = LazyModule(new DebugModule(NumCores)(p))
   private val hasSeperateBus = SeperateBus != top.SeperatedBusType.NONE
   val SepTLXbarOpt = Option.when(hasSeperateBus)(TLXbar())
-  if (enableCHI) {
-    if (SeperateDM) {
-      debugModule.debug.node := SepTLXbarOpt.get
-    } else {
-      debugModule.debug.node := device_xbar.get
-    }
-    debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl =>
-      error_xbar.get := sb2tl.node
-    }
-    if(hasSeperateBus){
-      timer.node := SepTLXbarOpt.get
-    } else{
-      timer.node := device_xbar.get
-    }
+  if (SeperateDM) {
+    debugModule.debug.node := SepTLXbarOpt.get
   } else {
-    if (SeperateDM) {
-      debugModule.debug.node := SepTLXbarOpt.get
-    } else {
-      debugModule.debug.node := peripheralXbar.get
-    }
-    debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl  =>
-      l3_xbar.get := TLBuffer() := TLWidthWidget(1) := sb2tl.node
-    }
-    if(hasSeperateBus){
-      timer.node := SepTLXbarOpt.get
-    } else{
-      timer.node := peripheralXbar.get
-    }
+    debugModule.debug.node := device_xbar.get
+  }
+  debugModule.debug.dmInner.dmInner.sb2tlOpt.foreach { sb2tl =>
+    error_xbar.get := sb2tl.node
+  }
+  if(hasSeperateBus){
+    timer.node := SepTLXbarOpt.get
+  } else{
+    timer.node := device_xbar.get
   }
 
   val pma = LazyModule(new TLPMA)
-  if (enableCHI) {
-    pma.node := TLBuffer.chainNode(4) := device_xbar.get
-    if (HasMEMencryption) {
-      axi4memencrpty.get.ctrl_node := TLToAPB() := device_xbar.get
-    }
-  } else {
-    pma.node := TLBuffer.chainNode(4) := peripheralXbar.get
-    if (HasMEMencryption) {
-      axi4memencrpty.get.ctrl_node := TLToAPB() := peripheralXbar.get
-    }
+  pma.node := TLBuffer.chainNode(4) := device_xbar.get
+  if (HasMEMencryption) {
+    axi4memencrpty.get.ctrl_node := TLToAPB() := device_xbar.get
   }
 
   class SoCMiscImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) {
