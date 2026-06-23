@@ -246,11 +246,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_mshrDatas       = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))
   private val s1_mshrMaybeRvcMap = fromMiss.bits.maybeRvcMap.asTypeOf(Vec(DataBanks, UInt(MaxInstNumPerBank.W)))
 
+  private val s1_mshrValidReg       = RegNext(s1_mshrValid)
+  private val s1_bankMshrValidReg   = RegNext(s1_bankMshrValid)
+  private val s1_mshrDatasReg       = RegNext(s1_mshrDatas)
+  private val s1_mshrMaybeRvcMapReg = RegNext(s1_mshrMaybeRvcMap)
+
   private val s1_hits = VecInit((0 until MaxFetchReqNum).map { reqIdx =>
     VecInit((0 until PortNumber).map { portIdx =>
       DataHoldBypass(
-        s1_mshrValid(reqIdx)(portIdx) || s1_sramHits(reqIdx)(portIdx),
-        s1_mshrValid(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
+        s1_mshrValidReg(reqIdx)(portIdx) || s1_sramHits(reqIdx)(portIdx),
+        s1_mshrValidReg(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
       )
     })
   })
@@ -259,11 +264,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     VecInit((0 until DataBanks).map { bankIdx =>
       DataHoldBypass(
         Mux(
-          s1_bankMshrValid(reqIdx)(bankIdx),
-          s1_mshrDatas(bankIdx),
+          s1_bankMshrValidReg(reqIdx)(bankIdx),
+          s1_mshrDatasReg(bankIdx),
           s1_sramDatas(reqIdx)(bankIdx)
         ),
-        s1_bankMshrValid(reqIdx)(bankIdx) || s1_bankSramValid(reqIdx)(bankIdx)
+        s1_bankMshrValidReg(reqIdx)(bankIdx) || s1_bankSramValid(reqIdx)(bankIdx)
       )
     }).asUInt
   })
@@ -275,15 +280,15 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     VecInit((0 until DataBanks).map { bankIdx =>
       DataHoldBypass(
         Mux(
-          s1_bankMshrValid(reqIdx)(bankIdx),
-          s1_mshrMaybeRvcMap(bankIdx),
+          s1_bankMshrValidReg(reqIdx)(bankIdx),
+          s1_mshrMaybeRvcMapReg(bankIdx),
           Mux(
             s1_lineSel(reqIdx)(bankIdx),
             sramMaybeRvcMap(1)(bankIdx),
             sramMaybeRvcMap(0)(bankIdx)
           )
         ),
-        s1_bankMshrValid(reqIdx)(bankIdx) || s1_bankSramValid(reqIdx)(bankIdx)
+        s1_bankMshrValidReg(reqIdx)(bankIdx) || s1_bankSramValid(reqIdx)(bankIdx)
       )
     }).asUInt
   })
@@ -291,8 +296,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_tlCorrupt = VecInit((0 until MaxFetchReqNum).map { reqIdx =>
     VecInit((0 until PortNumber).map { portIdx =>
       DataHoldBypass(
-        s1_mshrValid(reqIdx)(portIdx) && fromMiss.bits.corrupt,
-        s1_mshrValid(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
+        s1_mshrValidReg(reqIdx)(portIdx) && RegNext(fromMiss.bits.corrupt),
+        s1_mshrValidReg(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
       )
     })
   })
@@ -300,8 +305,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_tlDenied = VecInit((0 until MaxFetchReqNum).map { reqIdx =>
     VecInit((0 until PortNumber).map { portIdx =>
       DataHoldBypass(
-        s1_mshrValid(reqIdx)(portIdx) && fromMiss.bits.denied,
-        s1_mshrValid(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
+        s1_mshrValidReg(reqIdx)(portIdx) && RegNext(fromMiss.bits.denied),
+        s1_mshrValidReg(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
       )
     })
   })
