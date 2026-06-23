@@ -37,6 +37,7 @@ object ArgParser {
       |--xs-help                  print this help message
       |--version                  print version info
       |--config <ConfigClassName>
+      |--llc <OpenLLC|ZhuJiang>
       |--num-cores <Int>
       |--hartidbits <Int>
       |--with-dramsim3
@@ -83,6 +84,8 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case xscache.chi.CHIIssue => issueString
           }), tail)
+        case "--llc" :: llcString :: tail =>
+          nextOption(config.alter(LLCConfig(llcString)), tail)
         case "--num-cores" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
             case XSTileKey => (0 until value.toInt) map { i =>
