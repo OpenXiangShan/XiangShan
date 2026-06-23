@@ -96,9 +96,6 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   // so that we can re-use this XiangShanSim for any generated Verilog RTL.
   dontTouch(soc.io)
 
-  if (!l_soc.module.dma.isEmpty) {
-    l_soc.module.dma.get <> WireDefault(0.U.asTypeOf(l_soc.module.dma.get))
-  }
   l_soc.module.imsic_axi4.foreach { port =>
     port <> WireDefault(0.U.asTypeOf(port))
   }
