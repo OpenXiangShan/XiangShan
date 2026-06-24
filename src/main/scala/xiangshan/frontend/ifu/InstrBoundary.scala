@@ -42,7 +42,7 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
 
   private val data     = io.req.icacheData.data
   private val range    = io.req.icacheData.range
-  private val mayBeRvc = io.req.icacheData.maybeRvcMap
+  private val maybeRvc = io.req.icacheData.maybeRvcMap
   private val blockSel = io.req.icacheData.blockSel
 
   // We compute the boundaries of instructions in the first half of the fetch block directly, and compute the boundaries
@@ -61,7 +61,7 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
     require(HasCExtension, "C Extension can not be disabled in XiangShan")
     for (i <- start until end) {
       boundary(i) := {
-        if (i == start) !firstInstrIsHalfRvi else !boundary(i - 1) || mayBeRvc(i - 1)
+        if (i == start) !firstInstrIsHalfRvi else !boundary(i - 1) || maybeRvc(i - 1)
       }
     }
   }
@@ -72,7 +72,7 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
 
   for (i <- FetchBlockInstNum / 2 until FetchBlockInstNum) {
     boundary(i) := Mux(
-      boundary(FetchBlockInstNum / 2 - 1) && !mayBeRvc(FetchBlockInstNum / 2 - 1),
+      boundary(FetchBlockInstNum / 2 - 1) && !maybeRvc(FetchBlockInstNum / 2 - 1),
       latterHalfBoundary1(i),
       latterHalfBoundary2(i)
     )
@@ -90,23 +90,10 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
         (i.U === io.req.fetchBlock(0).takenCfiOffset.bits) &&
         !blockSel(i) && blockSel(i + 1)
       }
-
-    val canUseNextHalf =
-      if (i == FetchBlockInstNum - 1) {
-        false.B
-      } else {
-        val sameBlock = blockSel(i) === blockSel(i + 1)
-
-        range(i + 1) && (sameBlock || crossBlockFallThrough)
-      }
-
     instr.valid := {
       if (i == 0)
-        io.req.firstInstrIsHalfRvi || (isStart && (mayBeRvc(i) || canUseNextHalf))
-      else if (i == FetchBlockInstNum - 1)
-        isStart && mayBeRvc(i)
-      else
-        isStart && (mayBeRvc(i) || canUseNextHalf)
+        io.req.firstInstrIsHalfRvi || isStart
+      else isStart
     } && range(i)
 
     instr.data := {
@@ -116,15 +103,15 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
         Cat(data(i + 1), data(i))
     }
 
-    instr.isRvc := isStart && mayBeRvc(i)
-
-    val fixedBlockSel = blockSel(i) || (crossBlockFallThrough && !mayBeRvc(i))
+    instr.isRvc := isStart && maybeRvc(i)
+    // Not involved in the instruction delimiting logic; timing impact should be controllable.
+    val fixedBlockSel = blockSel(i) || (crossBlockFallThrough && !maybeRvc(i))
     instr.blockSel := fixedBlockSel
 
     instr.isPredTaken       := false.B
     instr.invalidTaken      := false.B
     instr.isPrevEndHalfRvi  := false.B
-    instr.isCrossBlockInstr := crossBlockFallThrough && !mayBeRvc(i)
+    instr.isCrossBlockInstr := crossBlockFallThrough && !maybeRvc(i)
 
     val startOffset = Mux(
       fixedBlockSel,
@@ -132,20 +119,20 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
       i.U(FetchBlockInstOffsetWidth.W)
     )
     instr.startOffset := startOffset
-    instr.endOffset   := Mux(mayBeRvc(i), startOffset, startOffset + 1.U)
+    instr.endOffset   := Mux(maybeRvc(i), startOffset, startOffset + 1.U)
 
     instr
   }
 
-  io.resp.instrEndMask := boundary.zip(mayBeRvc.asBools).zip(range.asBools).map { case ((boundary, isRvc), range) =>
+  io.resp.instrEndMask := boundary.zip(maybeRvc.asBools).zip(range.asBools).map { case ((boundary, isRvc), range) =>
     (!boundary || (boundary && isRvc)) && range
   }
 
   private val firstEndPos = io.req.fetchBlock(0).takenCfiOffset.bits
-  io.resp.firstEndIsHalfRvi := range(firstEndPos) && boundary(firstEndPos) && !mayBeRvc(firstEndPos)
+  io.resp.firstEndIsHalfRvi := range(firstEndPos) && boundary(firstEndPos) && !maybeRvc(firstEndPos)
 
   private val totalEndPos = io.req.totalEndPos
-  io.resp.totalEndIsHalfRvi := range(totalEndPos) && boundary(totalEndPos) && !mayBeRvc(totalEndPos)
+  io.resp.totalEndIsHalfRvi := range(totalEndPos) && boundary(totalEndPos) && !maybeRvc(totalEndPos)
 
   // For differential test only. Will be optimized out in release
   private val boundDiff = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))

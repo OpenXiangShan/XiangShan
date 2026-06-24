@@ -139,31 +139,35 @@ trait IfuHelper extends HasIfuParameters with PreDecodeHelper {
     out
   }
 
-  def compact(in: Vec[Instruction], fire: Bool): (Vec[Instruction], UInt) = {
+  def compact(in: Vec[Instruction], fire: Bool): Vec[Instruction] = {
     val n = in.length
     require(n > 0)
 
-    val out = WireDefault(0.U.asTypeOf(in))
-
-    val inReg = RegEnable(in, fire)
-    // rank(i) = number of valid elements in [0, i)
+    // 1. Valid flag vector
     val validVec = VecInit(in.map(_.valid))
 
+    // rank(i) = number of valid elements in [0, i)
     val rank = VecInit((0 until n).map { i =>
       if (i == 0) 0.U
       else PopCount(validVec.take(i))
     })
-    val hitMaskVec = VecInit((0 until n).map { i =>
-      VecInit((0 until n).map(j => validVec(j) && rank(j) === i.U)).asUInt
-    })
-    val hitMaskVecReg = RegEnable(hitMaskVec, fire)
-    val count         = PopCount(validVec)
-    val countReg      = RegEnable(count, fire)
 
-    for (j <- 0 until n) {
-      out(j) := Mux1H(hitMaskVecReg(j), inReg)
+    val inReg = RegEnable(in, fire)
+
+    // 3. Output vector, default all zeros
+    val out = WireDefault(0.U.asTypeOf(in))
+
+    for (idx <- 0 until n) {
+      val instrRange = idx until Math.min(2 * idx + 2, FetchBlockInstNum)
+      val validOH = instrRange.map {
+        i => validVec(i) && rank(i) === idx.U
+      }
+      val validOHReg   = RegEnable(VecInit(validOH), fire)
+      val candidateReg = instrRange.map(inReg(_))
+      out(idx)       := Mux1H(validOHReg, candidateReg)
+      out(idx).valid := validOHReg.reduce(_ || _)
     }
-    (out, countReg)
+    out
   }
 
   def align[T <: Data](in: Vec[T], shamt: UInt): Vec[T] = {
