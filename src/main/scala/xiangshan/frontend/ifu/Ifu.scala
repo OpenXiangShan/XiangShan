@@ -329,6 +329,18 @@ class Ifu(implicit p: Parameters) extends IfuModule
   // useUncacheFetch controls whether the instruction fetch operation follows the uncache control logic.
   private val s1_useUncacheFetch = s1_valid && s1_icacheMeta(0).isUncache && s1_icacheMeta(0).exception.isNone
 
+  private val s1_alignedPdInfoVec     = Wire(Vec(IBufferEnqueueWidth, new PreDecodeInfo))
+  private val s1_alignedJumpOffsetVec = Wire(Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits)))
+  for (i <- 0 until IBufferEnqueueWidth) {
+    val alignedInstr = s1_alignedInstrVec(i)
+    val alignedValid = s1_alignedInstrValid(i)
+    val jalOffset    = getJalOffset(alignedInstr.data, alignedInstr.isRvc)
+    val brOffset     = getBrOffset(alignedInstr.data, alignedInstr.isRvc)
+    s1_alignedPdInfoVec(i).valid       := alignedValid
+    s1_alignedPdInfoVec(i).isRVC       := alignedInstr.isRvc
+    s1_alignedPdInfoVec(i).brAttribute := BranchAttribute.decode(alignedInstr.data, alignedValid && s1_valid)
+    s1_alignedJumpOffsetVec(i)         := Mux(s1_alignedPdInfoVec(i).isBr, brOffset, jalOffset)
+  }
   /* --------------------------------------------------------------------------------------------------------------
      stage 2
      - expand instructions
@@ -357,12 +369,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_totalEndHalfRviPc   = RegEnable(s1_totalEndHalfRviPc, s1_fire)
   private val s2_totalEndHalfRviData = RegEnable(s1_totalEndHalfRviData, s1_fire)
 
-  private val s2_instrCount        = RegEnable(s1_instrCount, s1_fire)
-  private val s2_alignedInstrValid = RegEnable(s1_alignedInstrValid, s1_fire)
-  private val s2_icacheMeta        = RegEnable(s1_icacheMeta, s1_fire)
-  private val s2_alignedInstrVec   = RegEnable(s1_alignedInstrVec, s1_fire)
-  private val s2_alignedInstrPcVec = RegEnable(s1_alignedInstrPcVec, s1_fire)
-  private val s2_alignedFoldPc     = RegEnable(s1_alignedFoldPc, s1_fire)
+  private val s2_instrCount           = RegEnable(s1_instrCount, s1_fire)
+  private val s2_alignedInstrValid    = RegEnable(s1_alignedInstrValid, s1_fire)
+  private val s2_icacheMeta           = RegEnable(s1_icacheMeta, s1_fire)
+  private val s2_alignedInstrVec      = RegEnable(s1_alignedInstrVec, s1_fire)
+  private val s2_alignedInstrPcVec    = RegEnable(s1_alignedInstrPcVec, s1_fire)
+  private val s2_alignedFoldPc        = RegEnable(s1_alignedFoldPc, s1_fire)
+  private val s2_alignedPdInfoVec     = RegEnable(s1_alignedPdInfoVec, s1_fire)
+  private val s2_alignedJumpOffsetVec = RegEnable(s1_alignedJumpOffsetVec, s1_fire)
 
   s2_fire := io.toIBuffer.fire
   dontTouch(s2_fire)
@@ -388,17 +402,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_blockSel     = VecInit(s2_expandedInstrVec.map(_.blockSel))
   private val s2_endOffsetVec = VecInit(s2_expandedInstrVec.map(_.endOffset))
   dontTouch(s2_blockSel)
-
-  private val s2_alignedPdInfoVec     = Wire(Vec(IBufferEnqueueWidth, new PreDecodeInfo))
-  private val s2_alignedJumpOffsetVec = Wire(Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits)))
-  s2_alignedInstrVec.zipWithIndex.foreach { case (instr, i) =>
-    val jalOffset = getJalOffset(instr.data, instr.isRvc)
-    val brOffset  = getBrOffset(instr.data, instr.isRvc)
-    s2_alignedPdInfoVec(i).valid       := instr.valid
-    s2_alignedPdInfoVec(i).isRVC       := instr.isRvc
-    s2_alignedPdInfoVec(i).brAttribute := BranchAttribute.decode(instr.data, instr.valid && s2_valid)
-    s2_alignedJumpOffsetVec(i)         := Mux(s2_alignedPdInfoVec(i).isBr, brOffset, jalOffset)
-  }
 
   private val s2_reqIsUncache    = RegEnable(s1_reqIsUncache, false.B, s1_fire)
   private val s2_useUncacheFetch = RegEnable(s1_useUncacheFetch, s1_fire)
