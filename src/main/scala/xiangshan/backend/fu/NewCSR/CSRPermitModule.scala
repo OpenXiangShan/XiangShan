@@ -547,7 +547,6 @@ class IndirectCSRPermitModule extends Module {
       ) ||
       privState.isVirtual && (
         Iselect.isInOthers(vsiselect) ||
-        !mstateen0.AIA.asBool && Iselect.isInAIA(vsiselect) ||
         !mstateen0.IMSIC.asBool && Iselect.isInImsic(vsiselect)
       )
     ) && addr === CSRs.sireg.U
