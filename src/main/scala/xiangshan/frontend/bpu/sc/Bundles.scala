@@ -110,6 +110,11 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val debug_predBiasIdx: Option[UInt] = Some(UInt(log2Ceil(BiasTableInfo.NumSets).W))
 }
 
+class ScTraceSignedValue(width: Int) extends Bundle {
+  val negative:  Bool = Bool()
+  val magnitude: UInt = UInt(width.W)
+}
+
 class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with HasScParameters {
   private def ScEntryWidth      = (new ScEntry).getWidth
   private def PathSetIdxWidth   = PathTableInfos.map(info => log2Ceil(info.NumSets)).foldLeft(0)(scala.math.max)
@@ -134,17 +139,17 @@ class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with Has
   val providerTaken: Bool = Bool()
   val providerCtr:   UInt = UInt(TageTakenCtrWidth.W)
   // sc resp
-  val pathResp:   Vec[UInt] = Vec(NumPathTables, UInt(ScEntryWidth.W))
-  val globalResp: Vec[UInt] = Vec(NumGlobalTables, UInt(ScEntryWidth.W))
-  val bwResp:     Vec[UInt] = Vec(NumBWTables, UInt(ScEntryWidth.W))
-  val imliResp:   UInt      = UInt(ScEntryWidth.W)
-  val biasResp:   UInt      = UInt(ScEntryWidth.W)
-  val pathPercsum:   UInt = UInt(reducedPercsumWidth(NumPathTables).W)
-  val globalPercsum: UInt = UInt(reducedPercsumWidth(NumGlobalTables).W)
-  val bwPercsum:     UInt = UInt(reducedPercsumWidth(NumBWTables).W)
-  val imliPercsum:   UInt = UInt(ImliPercsumWidth.W)
-  val biasPercsum:   UInt = UInt(BiasPercsumWidth.W)
-  val totalPercsum:  UInt = UInt(TotalPercsumWidth.W)
+  val pathResp:   Vec[ScTraceSignedValue] = Vec(NumPathTables, new ScTraceSignedValue(ScEntryWidth))
+  val globalResp: Vec[ScTraceSignedValue] = Vec(NumGlobalTables, new ScTraceSignedValue(ScEntryWidth))
+  val bwResp:     Vec[ScTraceSignedValue] = Vec(NumBWTables, new ScTraceSignedValue(ScEntryWidth))
+  val imliResp:   ScTraceSignedValue      = new ScTraceSignedValue(ScEntryWidth)
+  val biasResp:   ScTraceSignedValue      = new ScTraceSignedValue(ScEntryWidth)
+  val pathPercsum:   ScTraceSignedValue = new ScTraceSignedValue(reducedPercsumWidth(NumPathTables))
+  val globalPercsum: ScTraceSignedValue = new ScTraceSignedValue(reducedPercsumWidth(NumGlobalTables))
+  val bwPercsum:     ScTraceSignedValue = new ScTraceSignedValue(reducedPercsumWidth(NumBWTables))
+  val imliPercsum:   ScTraceSignedValue = new ScTraceSignedValue(ImliPercsumWidth)
+  val biasPercsum:   ScTraceSignedValue = new ScTraceSignedValue(BiasPercsumWidth)
+  val totalPercsum:  ScTraceSignedValue = new ScTraceSignedValue(TotalPercsumWidth)
   // sc pred
   val sumAboveThres: Bool = Bool()
   val scPred:        Bool = Bool()

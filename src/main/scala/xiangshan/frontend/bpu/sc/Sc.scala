@@ -424,7 +424,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       }
     }
   }
-  private val t0_branchesWayIdxVec = VecInit(t0_branches.map(b => getWayIdx(b.bits.cfiPosition)))
+  dontTouch(t0_branchesScIdxVec)
   private val t0_branchesWayIdxVec = VecInit(t0_branches.map(b => getWayIdx(b.bits.cfiPosition)))
   private val t0_writeTakenVec =
     VecInit(t0_branches.map(b => b.valid && b.bits.taken && b.bits.attribute.isConditional))
@@ -900,37 +900,49 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   XSPerfAccumulate("sc_bias_predIdx_diff_trainIdx", sc_bias_predIdx_diff_trainIdx)
 
   /* *** Sc Trace *** */
+  private def traceSignedValue(raw: UInt): ScTraceSignedValue = {
+    val width     = raw.getWidth
+    val value     = Wire(new ScTraceSignedValue(width))
+    val truncated = raw(width - 1, 0)
+    val negative  = truncated(width - 1)
+    val magnitude = Mux(negative, (~truncated).asUInt + 1.U, truncated)
+    value.negative  := negative
+    value.magnitude := magnitude(width - 1, 0)
+    value
+  }
+
   private val scTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ScConditionalBranchTrace)))
   scTraceVec.zipWithIndex.foreach { case (trace, i) =>
-    val predWayIdx = t0_branchesScIdxVec(i)
-    val biasWayIdx = Cat(t0_branchesWayIdxVec(i), t0_meta.scBiasLowerBits(predWayIdx))
+    val predWayIdx  = t0_branchesScIdxVec(i)
+    val writeWayIdx = t0_branchesWayIdxVec(i)
+    val biasWayIdx  = Cat(writeWayIdx, t0_meta.scBiasLowerBits(predWayIdx))
     trace.valid            := t0_writeValidVec(i)
     trace.bits.startPc     := t0_startPc
     trace.bits.cfiPc       := t0_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
     trace.bits.predSlotIdx := predWayIdx
-    trace.bits.cfiWayIdx   := t0_branchesWayIdxVec(i)
+    trace.bits.cfiWayIdx   := writeWayIdx
     trace.bits.pathIdx     := VecInit(t0_meta.debug_predPathIdx.get.map(_.asUInt))
     trace.bits.globalIdx   := VecInit(t0_meta.debug_predGlobalIdx.get.map(_.asUInt))
     trace.bits.bwIdx       := VecInit(t0_meta.debug_predBWIdx.get.map(_.asUInt))
     trace.bits.imliIdx     := t0_meta.debug_predImliIdx.get
     trace.bits.biasIdx     := t0_meta.debug_predBiasIdx.get
-    trace.bits.biasWayIdx  := biasWayIdx
+    trace.bits.biasWayIdx  := biasWayIdx // pred bias way idxs
 
     trace.bits.providerValid := t0_meta.tagePredValid(predWayIdx)
     trace.bits.providerTaken := t0_meta.tagePred(predWayIdx)
     trace.bits.providerCtr   := t0_meta.tageCtr(predWayIdx)
 
-    trace.bits.pathResp      := VecInit(t0_meta.debug_scPathRespVec.get.map(v => v(predWayIdx)))
-    trace.bits.globalResp    := VecInit(t0_meta.debug_scGlobalRespVec.get.map(v => v(predWayIdx)))
-    trace.bits.bwResp        := VecInit(t0_meta.debug_scBWRespVec.get.map(v => v(predWayIdx)))
-    trace.bits.imliResp      := t0_meta.debug_scImliRespVec.get(predWayIdx)
-    trace.bits.biasResp      := t0_meta.debug_scBiasRespVec.get(biasWayIdx)
-    trace.bits.pathPercsum   := t0_meta.debug_scPathPercsumVec.get(predWayIdx)
-    trace.bits.globalPercsum := t0_meta.debug_scGlobalPercsumVec.get(predWayIdx)
-    trace.bits.bwPercsum     := t0_meta.debug_scBWPercsumVec.get(predWayIdx)
-    trace.bits.imliPercsum   := t0_meta.debug_scImliPercsumVec.get(predWayIdx)
-    trace.bits.biasPercsum   := t0_meta.debug_scBiasPercsumVec.get(biasWayIdx)
-    trace.bits.totalPercsum  := t0_meta.debug_scTotalPercsumVec.get(predWayIdx)
+    trace.bits.pathResp      := VecInit(t0_meta.debug_scPathRespVec.get.map(v => traceSignedValue(v(writeWayIdx))))
+    trace.bits.globalResp    := VecInit(t0_meta.debug_scGlobalRespVec.get.map(v => traceSignedValue(v(writeWayIdx))))
+    trace.bits.bwResp        := VecInit(t0_meta.debug_scBWRespVec.get.map(v => traceSignedValue(v(writeWayIdx))))
+    trace.bits.imliResp      := traceSignedValue(t0_meta.debug_scImliRespVec.get(writeWayIdx))
+    trace.bits.biasResp      := traceSignedValue(t0_meta.debug_scBiasRespVec.get(biasWayIdx))
+    trace.bits.pathPercsum   := traceSignedValue(t0_meta.debug_scPathPercsumVec.get(writeWayIdx))
+    trace.bits.globalPercsum := traceSignedValue(t0_meta.debug_scGlobalPercsumVec.get(writeWayIdx))
+    trace.bits.bwPercsum     := traceSignedValue(t0_meta.debug_scBWPercsumVec.get(writeWayIdx))
+    trace.bits.imliPercsum   := traceSignedValue(t0_meta.debug_scImliPercsumVec.get(writeWayIdx))
+    trace.bits.biasPercsum   := traceSignedValue(t0_meta.debug_scBiasPercsumVec.get(biasWayIdx))
+    trace.bits.totalPercsum  := traceSignedValue(t0_meta.debug_scTotalPercsumVec.get(predWayIdx))
 
     trace.bits.sumAboveThres := t0_meta.sumAboveThres(predWayIdx)
     trace.bits.scPred        := t0_meta.scPred(predWayIdx)

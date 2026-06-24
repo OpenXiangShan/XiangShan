@@ -367,6 +367,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     )
     val predictFHist_diff_trainFHist = io.commit.valid && debug_predFoldedHist.asUInt =/= metaPhrFolded.asUInt
     XSPerfAccumulate(f"predictFHist_diff_trainFHist", predictFHist_diff_trainFHist)
+    // XSError(predictFHist_diff_trainFHist, "predictFoldedHist is  not equal trainFoldedHist")
   }
 
   // TODO: remove dontTouch
