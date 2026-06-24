@@ -28,11 +28,10 @@ import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.Prediction
-import xiangshan.frontend.bpu.SaturateCounter
 import xiangshan.frontend.bpu.ScTableInfo
 import xiangshan.frontend.bpu.history.commonhr.CommonHREntry
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
-import xiangshan.frontend.bpu.tage.{TakenCounter => TageTakenCounter}
+import xiangshan.frontend.bpu.tage.TageToScCtrs
 
 /**
  * This module is the implementation of the Statistical Corrector.
@@ -41,8 +40,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
 
   class ScIO(implicit p: Parameters) extends BasePredictorIO with HasScParameters {
     val mbtbResult: Vec[Valid[Prediction]] = Input(Vec(NumBtbResultEntries, Valid(new Prediction)))
-    val providerTakenCtrs: Vec[Valid[SaturateCounter]] =
-      Input(Vec(NumBtbResultEntries, Valid(TageTakenCounter()))) // s2 stage tage info
+    val providerTakenCtrs: Vec[TageToScCtrs] =
+      Input(Vec(NumBtbResultEntries, new TageToScCtrs)) // s2 stage tage info
     val foldedPathHist:      PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val imli:                UInt                  = Input(UInt(ImliHistoryLength.W))
     val commonHR:            CommonHREntry         = Input(new CommonHREntry())
@@ -234,9 +233,12 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_sumPercsum   = VecInit.tabulate(NumWays)(j => ParallelSingedExpandingAdd(s2_mergePercsum.map(_(j))))
 
   private val s2_mbtbResult        = io.mbtbResult
-  private val s2_providerTakenMask = VecInit(io.providerTakenCtrs.map(_.bits.isPositive))
-  private val s2_providerValid     = VecInit(io.providerTakenCtrs.map(_.valid))
-  private val s2_providerCtr       = VecInit(io.providerTakenCtrs.map(_.bits))
+  private val s2_providerTakenMask = VecInit(io.providerTakenCtrs.map(_.provider.bits.isPositive))
+  private val s2_providerValid     = VecInit(io.providerTakenCtrs.map(_.provider.valid))
+  private val s2_providerCtr       = VecInit(io.providerTakenCtrs.map(_.provider.bits))
+  private val s2_selectedTakenMask = VecInit(io.providerTakenCtrs.map(_.selected.bits.isPositive))
+  private val s2_selectedValid     = VecInit(io.providerTakenCtrs.map(_.selected.valid))
+  private val s2_selectedCtr       = VecInit(io.providerTakenCtrs.map(_.selected.bits))
 
   private val s2_hitMask = VecInit(s2_mbtbResult.map { mbtbResult =>
     mbtbResult.valid && mbtbResult.bits.attribute.isConditional
@@ -295,12 +297,12 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s2_sumAboveThres = WireInit(VecInit.fill(NumWays)(false.B))
 
   for (i <- 0 until NumWays) {
-    val predValid    = s2_hitMask(i) && s2_providerValid(i)
+    val predValid    = s2_hitMask(i) && s2_selectedValid(i)
     val sum          = s2_totalPercsum(i)
     val thres        = s2_thresholds(s2_wayIdx(i))
-    val tageConfHigh = s2_providerCtr(i).isSaturatePositive || s2_providerCtr(i).isSaturateNegative
-    val tageConfMid  = s2_providerCtr(i).isMid
-    val tageConfLow  = s2_providerCtr(i).isWeak
+    val tageConfHigh = s2_selectedCtr(i).isSaturatePositive || s2_selectedCtr(i).isSaturateNegative
+    val tageConfMid  = s2_selectedCtr(i).isMid
+    val tageConfLow  = s2_selectedCtr(i).isWeak
 
     val conf = MuxCase(
       false.B,
@@ -321,16 +323,16 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   io.scTakenMask := s2_scPred
   io.scUsed      := s2_useScPred
 
-  s2_useScPred.zip(s2_providerValid).foreach { case (use, valid) =>
+  s2_useScPred.zip(s2_selectedValid).foreach { case (use, valid) =>
     XSError(s2_fire && use && !valid, "SC useScPred is true but tage provider is invalid!\n")
   }
 
   io.meta.scBiasLowerBits := RegEnable(s2_biasIdxLowBits, s2_fire)
 
   io.meta.scPred        := RegEnable(s2_scPred, s2_fire)
-  io.meta.tagePred      := RegEnable(s2_providerTakenMask, s2_fire)
-  io.meta.tageCtr       := RegEnable(VecInit(s2_providerCtr.map(_.value)), s2_fire)
-  io.meta.tagePredValid := RegEnable(s2_providerValid, s2_fire)
+  io.meta.tagePred      := RegEnable(s2_selectedTakenMask, s2_fire)
+  io.meta.tageCtr       := RegEnable(VecInit(s2_selectedCtr.map(_.value)), s2_fire)
+  io.meta.tagePredValid := RegEnable(s2_selectedValid, s2_fire)
   io.meta.useScPred     := RegEnable(s2_useScPred, s2_fire)
   io.meta.sumAboveThres := RegEnable(s2_sumAboveThres, s2_fire)
 

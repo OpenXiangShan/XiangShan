@@ -74,8 +74,13 @@ class MainBtbToTageIO(implicit p: Parameters) extends TageBundle {
   val s1_positions: Vec[UInt]              = Input(Vec(NumBtbResultEntries, UInt(CfiPositionWidth.W)))
 }
 
+class TageToScCtrs(implicit p: Parameters) extends TageBundle {
+  val provider: Valid[SaturateCounter] = Valid(TakenCounter())
+  val selected: Valid[SaturateCounter] = Valid(TakenCounter())
+}
+
 class TageToScIO(implicit p: Parameters) extends TageBundle {
-  val providerTakenCtrVec: Vec[Valid[SaturateCounter]] = Output(Vec(NumBtbResultEntries, Valid(TakenCounter())))
+  val providerTakenCtrVec: Vec[TageToScCtrs] = Output(Vec(NumBtbResultEntries, new TageToScCtrs))
 }
 
 class TableReadReq(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
