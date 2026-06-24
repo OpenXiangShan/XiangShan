@@ -222,7 +222,9 @@ class MLevelPermitModule extends Module {
 
   private val fpVec_EX_II = fpOff_EX_II || vecOff_EX_II
 
-  private val rwStimecmp_EX_II = !privState.isModeM && (!mcounterenTM || !menvcfgSTCE) && (addr === CSRs.vstimecmp.U || addr === CSRs.stimecmp.U)
+  private val rwStimecmp_EX_II = !privState.isModeM &&
+                                (!mcounterenTM && (addr === CSRs.vstimecmp.U || addr === CSRs.stimecmp.U) ||
+                                 !menvcfgSTCE && (addr === CSRs.stimecmp.U))
 
   private val accessHPM_EX_II = csrIsHPM && !privState.isModeM && !mcounteren(counterAddr)
 
@@ -611,7 +613,7 @@ class xcounterenIO extends Bundle {
 
 class xenvcfgIO extends Bundle {
   // Machine environment configuration register.
-  // Accessing stimecmp or vstimecmp from **Non-M level** will trap EX_II, if menvcfg.STCE=0
+  // Accessing stimecmp from **Non-M level** will trap EX_II, if menvcfg.STCE=0
   val menvcfg = UInt(64.W)
   // Hypervisor environment configuration register.
   // Accessing vstimecmp from ** V level** will trap EX_VI, if menvcfg.STCE=1 && henvcfg.STCE=0
