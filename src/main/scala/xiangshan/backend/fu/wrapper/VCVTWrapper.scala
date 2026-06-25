@@ -30,6 +30,7 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
   private val ex0NextInSew1H = UIntToOH(ex0NextInWidth, SewOH.width)
   private val ex0NextOutSew1H = UIntToOH(ex0NextOutWidth, SewOH.width)
   private val ex0NextIsWiden =
+      (ex0NextInSew1H(0) && ex0NextOutSew1H(1)) || // 8  -> 16
       (ex0NextInSew1H(1) && ex0NextOutSew1H(2)) || // 16 -> 32
       (ex0NextInSew1H(2) && ex0NextOutSew1H(3))    // 32 -> 64
   private val ex0NextIsNarrow =
