@@ -572,6 +572,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     io.out(i).valid := io.in(i).valid && intFreeList.io.canAllocate && fpFreeList.io.canAllocate && vecFreeList.io.canAllocate && v0FreeList.io.canAllocate && vlFreeList.io.canAllocate && !io.rabCommits.isWalk
     io.out(i).bits := uops(i)
+
+    // set link uop's src1Type to SrcType.no
+    when (io.in(i).bits.isJR && io.in(i).bits.firstUop) {
+      io.out(i).bits.srcType(0) := SrcType.no
+    }
+
     // dirty code
     if (i == 0) {
       val jrFollowsLink = io.in(0).bits.isJR && io.in(0).bits.lastUop
@@ -610,18 +616,6 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     } else {
       walkPdest(i) := io.out(i).bits.pdest
     }
-  }
-
-  // Capture psrc(0) for cross-cycle JALR/JAL forwarding:
-  // When the last uop in this rename group is a link uop, record the RAT value
-  // for its lsrc(0) (= RS1 from the original instruction), so the jr uop at
-  // position 0 in the next cycle can use it instead of reading the speculatively
-  // updated RAT (which would give link's pdest when rd == rs1).
-  when (io.in(RenameWidth - 1).bits.isJR && io.in(RenameWidth - 1).bits.firstUop) {
-    linkPsrc0Reg   := intReadPortsData(RenameWidth - 1)(0)
-    linkPsrc0Valid := true.B
-  }.otherwise {
-    linkPsrc0Valid := false.B
   }
 
   /**
@@ -785,6 +779,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       io.out(i).bits.srcType(0) := SrcType.imm
       io.out(i).bits.imm := Cat(lui_imm, ld_imm)
     }
+  }
+
+  // Capture psrc(0) for cross-cycle JALR/JAL forwarding:
+  // Link uop now has Src1Gp (for correct bypass in Rename), cleared to SrcType.no
+  // on output, so uops(i).psrc(0) and the bypass chain are both correct.
+  when (io.in.last.valid && io.in.last.bits.isJR && io.in.last.bits.firstUop) {
+    linkPsrc0Reg   := io.out.last.bits.psrc(0)
+    linkPsrc0Valid := true.B
+  }.otherwise {
+    linkPsrc0Valid := false.B
   }
 
   val genSnapshot = Cat(io.out.map(out => out.fire && out.bits.snapshot)).orR
