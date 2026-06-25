@@ -431,6 +431,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val instrSize = Wire(Vec(RenameWidth, UInt((log2Ceil(RenameWidth + 1)).W)))
 
+  // Cross-cycle psrc(0) forwarding for JALR/JAL:
+  // When link uop is at RenameWidth-1, capture its lsrc(0) RAT value.
+  // In the next cycle, jr uop at position 0 uses this captured value instead of
+  // reading the RAT (which was speculatively updated by the link uop).
+  val linkPsrc0Reg = RegInit(0.U(PhyRegIdxWidth.W))
+  val linkPsrc0Valid = RegInit(false.B)
+
   // uop calculation
   for (i <- 0 until RenameWidth) {
     (uops(i): Data).waiveAll :<= (io.in(i).bits: Data).waiveAll
@@ -567,7 +574,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     io.out(i).bits := uops(i)
     // dirty code
     if (i == 0) {
-      io.out(i).bits.psrc(0) := Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrc(0))
+      val jrFollowsLink = io.in(0).bits.isJR && io.in(0).bits.lastUop
+      io.out(i).bits.psrc(0) := Mux(jrFollowsLink,
+        linkPsrc0Reg,
+        Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrc(0))
+      )
       io.out(i).bits.psrcIntForMove := Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrcIntForMove)
     }
     // Todo: move these shit in decode stage
@@ -599,6 +610,18 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     } else {
       walkPdest(i) := io.out(i).bits.pdest
     }
+  }
+
+  // Capture psrc(0) for cross-cycle JALR/JAL forwarding:
+  // When the last uop in this rename group is a link uop, record the RAT value
+  // for its lsrc(0) (= RS1 from the original instruction), so the jr uop at
+  // position 0 in the next cycle can use it instead of reading the speculatively
+  // updated RAT (which would give link's pdest when rd == rs1).
+  when (io.in(RenameWidth - 1).bits.isJR && io.in(RenameWidth - 1).bits.firstUop) {
+    linkPsrc0Reg   := intReadPortsData(RenameWidth - 1)(0)
+    linkPsrc0Valid := true.B
+  }.otherwise {
+    linkPsrc0Valid := false.B
   }
 
   /**
@@ -712,14 +735,16 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
     for ((
       intRen, fpRen, vecRen,
-      (lsrc, j)
+      (lsrc, srcIdx)
     ) <- (intCond lazyZip fpCond lazyZip vecCond) lazyZip lsrcVec.zipWithIndex) {
-      val destToSrc = io.in.take(i).zipWithIndex.map { case (in, j) =>
+      val destToSrc = io.in.take(i).zipWithIndex.map { case (in, k) =>
         val indexMatch = in.bits.ldest === lsrc
-        val writeMatch = intRen && needIntDest(j) || fpRen && needFpDest(j) || vecRen && needVecDest(j)
-        indexMatch && writeMatch
+        val writeMatch = intRen && needIntDest(k) || fpRen && needFpDest(k) || vecRen && needVecDest(k)
+        // Break false dependency: link uop's dest should not bypass to jr uop's psrc(0)
+        val linkToJrFalseDep = (srcIdx == 0).B && (k == i - 1).B && in.bits.isJR && in.bits.firstUop && io.in(i).bits.isJR && io.in(i).bits.lastUop
+        indexMatch && writeMatch && !linkToJrFalseDep
       }
-      bypassCond(j)(i - 1) := VecInit(destToSrc).asUInt
+      bypassCond(srcIdx)(i - 1) := VecInit(destToSrc).asUInt
     }
     bypassCondV0(i - 1) := VecInit(io.in.take(i).map(_.bits.v0Wen && io.in(i).bits.v0Ren)).asUInt
     bypassCondVl(i - 1) := VecInit(io.in.take(i).map(_.bits.vlWen && io.in(i).bits.vlRen)).asUInt
@@ -777,6 +802,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     dontTouch(robIdxHeadNext)
     dontTouch(notInSameSnpt)
     dontTouch(genSnapshot)
+    dontTouch(linkPsrc0Valid)
     fusionValidVec.foreach{ fusionValid =>
       dontTouch(fusionValid)
     }

@@ -185,6 +185,7 @@ object Bundles {
     val isVset = Bool()
     val firstUop = Bool()
     val lastUop = Bool()
+    val isJR = Bool()
     val numWB = NumWB() // rob need this
     val latency = Latency()
 
