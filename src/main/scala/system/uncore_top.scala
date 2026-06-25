@@ -1201,9 +1201,11 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     // 用移位和常量生成mask，彻底消除组合环路
     val base = selfIdx * params.NumHarts.U
     val localMask = ((BigInt(1) << params.NumHarts) - 1).U(totalHartCount.W) << base
+    val hartIsInResetLocalExpanded =
+      ((hartIsInResetExternal.pad(totalHartCount) << base)(totalHartCount - 1, 0))
     val dmintGlobalNoLocal = dmintGlobal & ~localMask
     val hartResetReqNoLocal = hartResetReqLocal & ~localMask
-    val hartIsInResetNoLocal = Mux(isselfid, 0.U, hartIsInResetExternal)
+    val hartIsInResetNoLocal = Mux(isselfid, 0.U(params.NumHarts.W), hartIsInResetExternal)
    
     u_dm_w2axi.io.dmint := dmintGlobalNoLocal
     u_dm_w2axi.io.hartResetReq := hartResetReqNoLocal
@@ -1211,7 +1213,7 @@ class dmPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
 
     // val dmintLocal = dmintGlobal(base + params.NumHarts.U - 1, base)
     // val hartResetReqLocalSeg = hartResetReqLocal(base + params.NumHarts.U - 1, base)
-    val hartIsInResetLocal = Mux(isselfid, hartIsInResetExternal, 0.U)
+    val hartIsInResetLocal = hartIsInResetLocalExpanded
     // val dmintOr = dmintLocal | u_dm_axi2w.io.dmint
     // val hartResetReqOr = hartResetReqLocalSeg | u_dm_axi2w.io.hartResetReq
     val hartIsInResetOr = hartIsInResetLocal | u_dm_axi2w.io.hartIsInReset
