@@ -382,7 +382,9 @@ object Opcode {
   // }
 
   object LinkOpcodes extends Opcodes {
-    val link  = Value(bb"001") + GpWen
+    // The link uop does not need Src1Gp, but this flag will be used in rename to get right dest to src bypass pdest.
+    // When uop leaving rename, srcType should set to SrcType.no
+    val link  = Value(bb"001") + GpWen + Src1Gp
     val auipc = IntUJType(bb"010")
 
     def linkUopisLink(op: UInt) = op(0)
