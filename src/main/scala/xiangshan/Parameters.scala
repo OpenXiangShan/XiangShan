@@ -163,7 +163,6 @@ case class XSCoreParameters
     *      TODO: separate Stream and Stride prefetcher in the future.
     */
   prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams()),
-  // prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), BertiParams(), SMSParams()),
   IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,
