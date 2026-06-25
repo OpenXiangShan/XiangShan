@@ -582,8 +582,8 @@ class dm_w2axi(
   require(dieIdWidth > 0, s"dm_w2axi expects dieIdWidth > 0, got $dieIdWidth")
   require(numDies <= ((1 << dieIdWidth) - 1),
     s"dm_w2axi expects dieIdWidth to encode die ids 1..$numDies, got dieIdWidth=$dieIdWidth")
-  require(nocDataWidth >= packedPayloadWidth + dieIdFieldWidth,
-    s"dm_w2axi expects nocDataWidth >= ${packedPayloadWidth + dieIdFieldWidth}, got $nocDataWidth")
+  require(nocDataWidth >= packedPayloadWidth,
+    s"dm_w2axi expects nocDataWidth >= ${packedPayloadWidth}, got $nocDataWidth")
 
   val dmIntAddr = baseAddr.U(io.axi.aw.bits.addr.getWidth.W)
   val dmintByDie = Wire(Vec(numDies, UInt(localHartCount.W)))
