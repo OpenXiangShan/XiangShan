@@ -756,7 +756,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   val regSize = (0x1000, 0x8000)
   val sNodes = Seq.tabulate(params.NumHarts)(n => {
     val m_mode = (params.IMSICParams.mAddr + n * regSize._1, regSize._1 - 1)
-    val s_mode = (params.IMSICParams.sgAddr + n * 0x10000, regSize._2 - 1)
+    val s_mode = (params.IMSICParams.sgAddr + n * regSize._2, regSize._2 - 1)
 //    val m_mode = (params.IMSICParams.mAddr + n * 0x1000, 0x1000 - 1)
 //    val s_mode = (params.IMSICParams.sgAddr + n * 0x1000 * (params.IMSICParams.geilen +1), 0x1000 * (params.IMSICParams.geilen +1) - 1)
     println(f"IMSICXbar: #${n}%-2d    M-mode [0x${m_mode._1}%x, 0x${m_mode._2}%x]")
