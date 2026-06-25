@@ -23,6 +23,7 @@ import chisel3.util._
 import chisel3.experimental.dataview._
 import device.{AXI4MemorySlave, SimJTAG}
 import difftest._
+import difftest.fpga.DifftestMemCtrl
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.util.HeterogeneousBag
@@ -119,6 +120,11 @@ class XiangShanSim(implicit p: Parameters) extends Module with HasDiffTestInterf
   l_memXbar.io_cpuNode.elements.head._2 :<>= soc.memory.viewAs[AXI4Bundle].waiveAll
   l_memXbar.io_devNode.elements.head._2 <> l_simMMIO.io_mem.elements.head._2
   l_simAXIMem.io_axi4.elements.head._2 <> l_memXbar.io_memNode.elements.head._2
+
+  val memIO = Option.when(DifftestModule.isFPGA) {
+    DifftestMemCtrl.exposeIO(soc.memory.viewAs[AXI4Bundle], l_simAXIMem.io_axi4.elements.head._2)
+  }
+  override def difftestMemIO: Option[DifftestMemIO] = memIO
 
   soc.io.clock := clock
   soc.io.reset := (reset.asBool || soc.io.debug_reset).asAsyncReset
