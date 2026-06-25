@@ -20,7 +20,7 @@ package top
 import chisel3._
 import chisel3.util._
 import chisel3.experimental.dataview._
-import difftest.{DifftestMemIO, DifftestModule, HasDiffTestInterfaces}
+import difftest.{DifftestModule, HasDiffTestInterfaces}
 import xiangshan._
 import utils._
 import utility._
@@ -401,7 +401,6 @@ class XSTileDiffTop(implicit p: Parameters) extends XSTop {
     override def cpuName: Option[String] = Some("XiangShan")
     override protected def implicitClock: Clock = io.clock
     override protected def implicitReset: Reset = io.reset
-    override def difftestMemIO: Option[DifftestMemIO] = Some(DifftestMemIO(memory))
   }
   override lazy val module = new XSTileDiffTopImp(this)
 }
