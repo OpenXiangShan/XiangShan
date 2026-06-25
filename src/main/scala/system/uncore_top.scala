@@ -626,7 +626,6 @@ class dm_w2axi(
   val txHartResetReqNow = hartResetReqByDie(txGroupIdx)
   val txHartIsInResetNow = io.hartIsInReset
   val txAddrNow = (txAddrDieId << 44) | dmIntAddr
-  val txDieIdField = txDieId
   val txHartIsInResetExpandedNow = WireDefault(0.U(totalHartCount.W))
   when (io.selfId >= 1.U && io.selfId <= numDies.U) {
     val hartIsInResetShift = (io.selfId - 1.U) * localHartCount.U
@@ -647,9 +646,8 @@ class dm_w2axi(
   val wValidReg = RegInit(false.B)
   val bReadyReg = RegInit(false.B)
 
-  val txPayloadPaddingWidth = nocDataWidth - packedPayloadWidth - dieIdFieldWidth
+  val txPayloadPaddingWidth = nocDataWidth - packedPayloadWidth
   val txPayload = Cat(
-    txDieIdField,
     0.U(txPayloadPaddingWidth.W),
     txHartIsInResetExpandedNow,
     txHartResetReqNow,
@@ -1554,6 +1552,5 @@ object PbusGen extends App {
 // u_dm_w2axi.io.dmint := dmintGlobalNoLocal
 // u_dm_w2axi.io.hartResetReq := hartResetReqNoLocal
 // u_dm_w2axi.io.hartIsInReset := hartIsInResetNoLocal
-
 
 
