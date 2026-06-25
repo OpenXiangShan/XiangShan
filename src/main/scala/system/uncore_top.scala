@@ -93,7 +93,7 @@ case class PeriParams(
 
 object Pbus2Params {
   private val imsicMModeSize = 0x1000L
-  private val imsicSModeStride = 0x10000L
+  private val imsicSModeStride = 0x8000L
   private val imsicSModeSize = 0x8000L
 
   def defaultLocalImsicAddrMap(numHarts: Int, imsicParams: aia.IMSICParams): Seq[AddressSet] = {
@@ -109,7 +109,7 @@ object Pbus2Params {
     (1 to numDies).flatMap { dieId =>
       Seq(
         AddressSet((BigInt(dieId) << 44) + 0x1C000000L, 0xFFFF), // bit[11:0] 4KB,bit[15:12] for 16 harts each die
-        AddressSet((BigInt(dieId) << 44) + 0x1D000000L, 0xFFFFF) // bit[15:12] for s+7vs interrupt file,bit[19:16] for 16 harts each die
+        AddressSet((BigInt(dieId) << 44) + 0x1D000000L, 0xFFFFF) // bit[14:12] for s+7vs interrupt file,bit[18:15] for 16 harts each die
       )
     }
   }
@@ -126,10 +126,10 @@ case class Pbus2Params(
     NumDies:        Int = 4,
     CPUidBits:      Int = 3,
     APLICidBits:    Int = 0,
-    NOCidBits:    Int = 11,
+    NOCidBits:      Int = 11,
     cpuAddrWidth:   Int = 32,
     cpuDataWidth:   Int = 64,
-    dmDataWidth:   Int = 64,
+    dmDataWidth:    Int = 64,
     nocDataWidth:   Int = 256,
     dmHasBusMaster: Boolean = true,
     SYSCNTAddrMap: AddressSet = AddressSet(0x1E000000L, 0x10000 - 1), // SYSCNTConsts.size - 1), 0x10000
@@ -460,8 +460,7 @@ class dm_axi2w(
     val hartResetReq = Output(UInt(localHartCount.W))
     val hartIsInReset = Output(UInt(totalHartCount.W))
   })
-  private val dieIdFieldWidth = 4
-  private val writePayloadWidth = 2 * localHartCount + totalHartCount + dieIdFieldWidth
+  private val writePayloadWidth = 2 * localHartCount + totalHartCount
   private val readPayloadWidth = 2 * localHartCount + totalHartCount
   require(localHartCount > 0, s"dm_axi2w expects localHartCount > 0, got $localHartCount")
   require(totalHartCount > 0, s"dm_axi2w expects totalHartCount > 0, got $totalHartCount")
@@ -647,6 +646,7 @@ class dm_w2axi(
   val bReadyReg = RegInit(false.B)
 
   val txPayloadPaddingWidth = nocDataWidth - packedPayloadWidth
+  // Die id is encoded in AW address bits [47:44], not in WDATA payload.
   val txPayload = Cat(
     0.U(txPayloadPaddingWidth.W),
     txHartIsInResetExpandedNow,
@@ -1552,5 +1552,4 @@ object PbusGen extends App {
 // u_dm_w2axi.io.dmint := dmintGlobalNoLocal
 // u_dm_w2axi.io.hartResetReq := hartResetReqNoLocal
 // u_dm_w2axi.io.hartIsInReset := hartIsInResetNoLocal
-
 
