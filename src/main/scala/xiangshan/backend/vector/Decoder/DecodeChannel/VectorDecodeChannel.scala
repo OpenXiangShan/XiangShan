@@ -225,8 +225,9 @@ class VectorDecodeChannel(
 
   val alwaysTa = instBundle(AlwaysTaField)
 
-  val ma = in.ma || vecOverlapAgnostic
-  val ta = in.ta || vecOverlapAgnostic || alwaysTa
+  // TODO: temporarily remove vecOverlapAgnostic from ma/ta for difftest
+  val ma = in.ma
+  val ta = in.ta || alwaysTa
   val vm = instFields.VM.asBool
   val mu = !ma
   val tu = !ta
