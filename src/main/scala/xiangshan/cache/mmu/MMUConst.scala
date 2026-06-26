@@ -116,12 +116,12 @@ trait MPTCacheParam extends HasTlbConst {
   val l1Associative = "fa"
   val l1Replacer = "plru"
   // l0 64k
-  val l0nSets = 32 // 5bits
-  val l0nWays = 4
+  val l0nSets = 16 // 5bits
+  val l0nWays = 8
   val mptL0TagLen = mptL3TagLen + 9 * 3 - log2Up(l0nSets) // 32-5=27
   val l0Replacer = "setplru"
   // sp
-  val spSize = 8
+  val spSize = 16
   val mptspTagLen = mptL3TagLen + 9 * 2
   val spAssociative = "fa"
   val spReplacer = "plru"
