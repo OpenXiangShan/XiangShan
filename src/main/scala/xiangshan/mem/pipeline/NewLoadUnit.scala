@@ -160,8 +160,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   prefetch.accessType.pftType := PrefetchType.hwData
   prefetch.accessType.pftCoh := Mux(io.prefetchReq.bits.is_store, PrefetchCoh.write, PrefetchCoh.read)
   prefetch.uop := DontCare
-  prefetch.vaddr := io.prefetchReq.bits.getVaddr() // not actual vaddr, but Cat(alias, page offset)
-  prefetch.fullva := io.prefetchReq.bits.getVaddr()
+  prefetch.vaddr := io.prefetchReq.bits.vaddr
+  prefetch.fullva := io.prefetchReq.bits.vaddr
   prefetch.size := DontCare
   prefetch.mask := 0.U
   prefetch.paddr.get := io.prefetchReq.bits.paddr

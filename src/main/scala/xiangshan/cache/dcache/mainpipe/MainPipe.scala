@@ -112,7 +112,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.source := DCACHE_PREFETCH_SOURCE.U
     req.cmd := MemoryOpConstants.M_PFR
     req.addr := prefetch.paddr
-    req.vaddr := prefetch.getVaddr()
+    req.vaddr := prefetch.vaddr
     req.replace := false.B
     req.error := false.B
     req.miss_fail_cause_evict_btot := false.B
