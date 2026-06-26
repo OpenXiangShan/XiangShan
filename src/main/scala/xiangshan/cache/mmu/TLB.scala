@@ -660,6 +660,9 @@ class TlbRequestPrepare(q: TLBParameters)(implicit p: Parameters) extends TlbMod
     (Sv39vsEnable || Sv48vsEnable || Sv39x4Enable || Sv48x4Enable) && (premode < ModeM)
   io.resp.query.vpn := get_pn(req.vaddr)
   io.resp.query.s2xlate := getS2xlate(virt_in || req.hyperinst, csr.vsatp.mode, csr.hgatp.mode)
+  if (HasMptCheck) {
+    io.resp.query.matchMpt.get := csr.mmpt.mode =/= 0.U
+  }
   io.resp.preFault := 0.U.asTypeOf(new TlbPreFault)
   val pmm = WireInit(0.U(2.W))
 
