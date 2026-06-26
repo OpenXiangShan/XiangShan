@@ -202,6 +202,7 @@ case class XSCoreParameters
   HasCMO: Boolean = true,
   MMUAsidLen: Int = 16, // max is 16, 0 is not supported now
   MMUVmidLen: Int = 14,
+  MMUSdidLen: Int = 6,
   ReSelectLen: Int = 7, // load replay queue replay select counter len
   iwpuParameters: WPUParameters = WPUParameters(
     enWPU = false,
@@ -773,6 +774,7 @@ trait HasXSParameter {
   def Enable3Load3Store = (LoadPipelineWidth == 3 && StorePipelineWidth == 3)
   def asidLen = coreParams.MMUAsidLen
   def vmidLen = coreParams.MMUVmidLen
+  def sdidLen = coreParams.MMUSdidLen
   def BTLBWidth = coreParams.LoadPipelineWidth + coreParams.StorePipelineWidth
   def refillBothTlb = coreParams.refillBothTlb
   def iwpuParam = coreParams.iwpuParameters
