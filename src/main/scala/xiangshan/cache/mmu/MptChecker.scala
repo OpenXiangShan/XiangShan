@@ -1052,7 +1052,6 @@ class MptMissQueueToTWReqBundle(implicit p: Parameters) extends XSBundle with MP
   val hitAddr  = UInt(ppnLen.W)
   val reqPA    = UInt((PAddrBits - mptOff).W)
   val hitLevel = UInt(mptLevelLenOH.W)
-  val sdid     = UInt(sdidLen.W)
 }
 
 class MissCacheBundle(implicit p: Parameters) extends XSBundle with MPTCacheParam {
@@ -1160,6 +1159,7 @@ class MptMissQueue(implicit p: Parameters) extends XSModule with MPTCacheParam {
   io.resp.bits.reqPA := reqFIFO.deq.bits.pa // reqPA is the PA of the request, used to generate the refill address
   io.resp.bits.source  := reqFIFO.deq.bits.source // source is the source
   io.resp.bits.mptOnly := reqFIFO.deq.bits.mptOnly && io.resp.valid
+  io.resp.bits.sdid := reqFIFO.deq.bits.sdid
 
   val permsAsVec = Wire(Vec(16, UInt(3.W))) // perm xwr bits, total 16 xwrs in one mpte
   for (i <- 0 until 16) { permsAsVec(i) := refillReg.refillData.data(2 + i * 3, i * 3) }
