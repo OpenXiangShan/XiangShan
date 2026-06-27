@@ -787,7 +787,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   when (io.in.last.valid && io.in.last.bits.isJR && io.in.last.bits.firstUop && canOut) {
     linkPsrc0Reg   := io.out.last.bits.psrc(0)
     linkPsrc0Valid := true.B
-  }.otherwise {
+  }.elsewhen (io.in.head.valid && io.in.head.bits.isJR && io.in.head.bits.lastUop && canOut) {
     linkPsrc0Valid := false.B
   }
 
