@@ -784,7 +784,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // Capture psrc(0) for cross-cycle JALR/JAL forwarding:
   // Link uop now has Src1Gp (for correct bypass in Rename), cleared to SrcType.no
   // on output, so uops(i).psrc(0) and the bypass chain are both correct.
-  when (io.in.last.valid && io.in.last.bits.isJR && io.in.last.bits.firstUop && dispatchCanAcc) {
+  when (io.in.last.valid && io.in.last.bits.isJR && io.in.last.bits.firstUop && canOut) {
     linkPsrc0Reg   := io.out.last.bits.psrc(0)
     linkPsrc0Valid := true.B
   }.otherwise {
