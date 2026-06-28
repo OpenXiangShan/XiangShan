@@ -89,6 +89,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val ifetch = if (q.fetchi) true.B else false.B
   val mode_tmp = if (q.useDmode) csr.priv.dmode else csr.priv.imode
   val mode = (0 until Width).map(i => Mux(isHyperInst(i), csr.priv.spvp, mode_tmp))
+  val pmpMode = (0 until Width).map(i => Mux(req_out(i).isPrefetch, mode_tmp, mode(i)))
   val virt_in = csr.priv.virt
   val virt_out = req.map(a => RegEnable(csr.priv.virt, a.fire))
   val sum = (0 until Width).map(i => Mux(virt_out(i) || isHyperInst(i), csr.priv.vsum, csr.priv.sum))
@@ -270,6 +271,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   (0 until Width).foreach{i =>
     val noTranslateReg = RegNext(req(i).bits.no_translate)
     val addr = Mux(noTranslateReg, req(i).bits.pmp_addr, pmp_addr(i))
+    io.pmpMode(i) := pmpMode(i)
     pmp_check(addr, req_out(i).size, req_out(i).cmd, noTranslateReg, i)
     for (d <- 0 until nRespDups) {
       pbmt_check(i, d, pbmt(i)(d), g_pbmt(i)(d), req_out_s2xlate(i))
