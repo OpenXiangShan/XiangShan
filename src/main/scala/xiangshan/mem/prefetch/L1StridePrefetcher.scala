@@ -309,22 +309,6 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     }
   }
 
-  XSPerfAccumulate("s1_stat_dissatisfy", s1_stat.dissatisfy)
-  XSPerfAccumulate("s1_stat_overflow", s1_stat.overflow)
-  XSPerfAccumulate("s1_stat_valid", s1_stat.valid)
-  XSPerfAccumulate("s1_stat_valid_confirm", s1_stat.valid_confirm)
-  XSPerfAccumulate("s1_stat_valid_confirm_sendpf", s1_stat.valid_confirm_sendpf)
-  XSPerfAccumulate("s1_stat_valid_mismatch", s1_stat.valid_mismatch)
-  XSPerfAccumulate("s1_stat_valid_mismatch_replace", s1_stat.valid_mismatch_replace)
   XSPerfAccumulate("stride_l2_feedback_control_drop", s2_valid && io.fdbkDegree === 0.U)
 
-  class StrideLearn extends Bundle {
-    val stat = new StatStrideBundle()
-    val pc = UInt(VAddrBits.W)
-  }
-  val strideLearn = Wire(new StrideLearn())
-  strideLearn.stat := s1_stat
-  strideLearn.pc := RegEnable(s0_pc, s0_valid)
-  val strideLearnDb = ChiselDB.createTable(s"StrideLearnTable${p(XSCoreParamsKey).HartId}", new StrideLearn, basicDB = true)
-  strideLearnDb.log(data = strideLearn, en = s1_update, clock = clock, reset = reset)
 }
