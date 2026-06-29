@@ -340,7 +340,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   vtypeGen.in.vsetvlVType     := io.fromBackend.vsetvlVType
   vtypeGen.in.commitVType     := io.fromBackend.commitVType
   for (i <- 0 until DecodeWidth) {
-    when(resumingVType) {
+    when(resumingVType || useBypass) {
       vtypeGen.in.insts(i).valid := false.B
     }.elsewhen(decodeCanAccept) {
       vtypeGen.in.insts(i).valid := outputEntriesFromDeqNext(i).valid
