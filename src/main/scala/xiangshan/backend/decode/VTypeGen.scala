@@ -4,13 +4,10 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import top.ArgParser
-import utility.PriorityMuxDefault
 import xiangshan._
 import xiangshan.backend.decode.isa.Instructions
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
-import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
-import xiangshan.backend.vector.Decoder.VSetFuncUnit
-import xiangshan.backend.vector.Decoder.util.DecodeTable
+import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.vector.util.Verilog
 
 
@@ -27,95 +24,68 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
   private val vtypeSpecNext = WireInit(vtypeSpec)
 
   private val vtypeArchNext = WireInit(vtypeArch)
-  /** instructions code */
-  private val instFieldVec = in.insts.map(_.bits.asTypeOf(new XSInstBitFields))
-
-  private val isVsetivli = VecInit(in.insts.map { inst => inst.valid && Instructions.VSETIVLI === inst.bits })
-  private val isVsetvli = VecInit(in.insts.map { inst => inst.valid && Instructions.VSETVLI === inst.bits })
-
-  private val isVsetiVec: Vec[Bool] = VecInit(isVsetivli zip isVsetvli map { case(l, r) => l || r })
-
-  private val vsetModuleVec = Seq.fill(DecodeWidth)(Module(new VSetFuncUnit(vlen = VLEN, elen = ELEN, xlen = XLEN)))
-  private val oldVTypeVec = Wire(Vec(DecodeWidth, chiselTypeOf(vsetModuleVec.head.in.oldVType.bits)))
-  for ((vsetModule, i) <- vsetModuleVec.zipWithIndex) {
-    vsetModule.in.vsetvlVType.valid := false.B // don't handle vsetvl in VTypeGen
-    vsetModule.in.vsetvliVType.valid := isVsetvli(i)
-    vsetModule.in.vsetivliVType.valid := isVsetivli(i)
-    vsetModule.in.vsetvlVType.bits := DontCare
-    vsetModule.in.vsetvliVType.bits := instFieldVec(i).ZIMM_VSETVLI
-    vsetModule.in.vsetivliVType.bits := instFieldVec(i).ZIMM_VSETIVLI
-    vsetModule.in.readVl.valid := false.B
-    vsetModule.in.readVl.bits := DontCare
-    vsetModule.in.rdIsZero := instFieldVec(i).RD === 0.U
-    vsetModule.in.rs1IsZero := instFieldVec(i).RS1 === 0.U
-    // only used for vill generation, set it false
-    // vlmax comparison will be done in VTypeGen not in VSetFuncUnit
-    vsetModule.in.oldVType.valid := false.B
-    vsetModule.in.oldVType.bits := oldVTypeVec(i)
-    vsetModule.in.vlFromGp.valid := false.B
-    vsetModule.in.vlFromGp.bits := DontCare
-    vsetModule.in.vlFromImm.valid := isVsetivli(i)
-    vsetModule.in.vlFromImm.bits := instFieldVec(i).UIMM_VSETIVLI
-    vsetModule.in.vlFromVl.valid := false.B
-    vsetModule.in.vlFromVl.bits := DontCare
-    vsetModule.in.vill := false.B
-  }
-
-  private val vtypeNewVec = vsetModuleVec.map(_.out.vtype)
-
-  private val specvtype = vtypeSpec +: out.vtype
-  out.specvtype := specvtype.take(out.specvtype.length)
-  // Break the oldVType chain: all VSetFuncUnits use vtypeSpec in parallel
-  oldVTypeVec := VecInit(Seq.fill(DecodeWidth)(vtypeSpec))
-
-  // === Lightweight vlmax chain for keepVl vill correction ===
-  // Decode vlmax from vtypeSpec (parallel, no chain dependency)
-  private val vlmaxField = new VSetFuncUnit.VlmaxField(VLEN, ELEN)
-  private val vlmaxDecode = new DecodeTable(VSetFuncUnit.sewLmulPatterns, Seq(vlmaxField))
-  private val specVlmax = vlmaxDecode.decode(vtypeSpec.vsew ## vtypeSpec.vlmul)(vlmaxField)
-
-  // Candidate vlmax from each VSetFuncUnit (all parallel, based on vtypeSpec as oldVType)
-  private val candVlmaxVec = vsetModuleVec.map(_.out.vlmax)
-
-  // Lightweight Mux chain: cumulative vlmax after processing vsets up to position i
-  private val cumVlmax = Wire(Vec(DecodeWidth, Vl(VLEN)))
-  cumVlmax(0) := Mux(isVsetiVec(0), candVlmaxVec(0), specVlmax)
-  for (i <- 1 until DecodeWidth) {
-    cumVlmax(i) := Mux(isVsetiVec(i), candVlmaxVec(i), cumVlmax(i - 1))
-  }
-
-  // prevVlmax(i) = vlmax BEFORE instruction i (i.e., after all vsets before i)
-  private val prevVlmax = specVlmax +: cumVlmax.take(DecodeWidth - 1)
-
-  // Detect keepVl vsets: rd == 0 && rs1 == 0
-  private val keepVlMask = VecInit((0 until DecodeWidth).map { i =>
-    isVsetiVec(i) && instFieldVec(i).RD === 0.U && instFieldVec(i).RS1 === 0.U
+  private val vtypeNewVec: Vec[VTypeNewEntry] = VecInit((0 until DecodeWidth).map { i =>
+    val inst  = in.insts(i)
+    val entry = VTypeNewEntry.fromInst(inst.bits, inst.valid)
+    entry
   })
 
-  // For keepVl vsets, compute the correct vlmaxChange against the true prevVlmax
-  // (vlmax values are one-hot encoded; (a & b).orR is true iff a == b)
-  private val vlmaxChange = Wire(Vec(DecodeWidth, Bool()))
+  /**
+   * Binary-tree parallel-prefix inclusive scan over 9 elements (seed + 8 slots).
+   *
+   * s0---------------------------(0) vtypePrefix(0)
+   *    \
+   * s1-m01-----------------------(1) vtypePrefix(1)
+   *      \   \
+   * s2----\--m02-----------------(2) vtypePrefix(2)
+   *    \   \
+   * s3-m23-m03-------------------(2) vtypePrefix(3)
+   *          \   \   \   \
+   * s4--------\---\---\--m04-----(3) vtypePrefix(4)
+   *    \       \   \   \
+   * s5-m45------\---\--m05-------(3) vtypePrefix(5)
+   *      \   \   \   \
+   * s6----\--m46--\--m06---------(3) vtypePrefix(6)
+   *    \   \       \
+   * s7-m67-m47-----m07-----------(3) vtypePrefix(7)
+   *                  \
+   * s8---------------m08---------(4) vtypePrefix(8)
+   */
+  assert(DecodeWidth == 8, "VTypeGen: hardcoded binary-tree prefix requires DecodeWidth == 8")
+  private val s0 = VTypeNewEntry.fromVType(vtypeSpec)
+  private val Seq(s1, s2, s3, s4, s5, s6, s7, s8) = (0 until 8).map(vtypeNewVec(_))
+
+  // Step 1: merge adjacent pairs
+  private val m01 = s0.merge(s1)   // -> pref[1]
+  private val m23 = s2.merge(s3)
+  private val m45 = s4.merge(s5)
+  private val m67 = s6.merge(s7)
+
+  // Step 2: extend left edge downward
+  private val m02 = m01.merge(s2)  // -> pref[2]
+  private val m03 = m01.merge(m23) // -> pref[3]
+  private val m46 = m45.merge(s6)
+  private val m47 = m45.merge(m67)
+
+  // Step 3: cross halves
+  private val m04 = m03.merge(s4)  // -> pref[4]
+  private val m05 = m03.merge(m45) // -> pref[5]
+  private val m06 = m03.merge(m46) // -> pref[6]
+  private val m07 = m03.merge(m47) // -> pref[7]
+
+  // Step 4: final element
+  private val m08 = m07.merge(s8)  // -> pref[8]
+
+  private val vtypePrefix = IndexedSeq(s0, m01, m02, m03, m04, m05, m06, m07, m08)
+
   for (i <- 0 until DecodeWidth) {
-    vlmaxChange(i) := keepVlMask(i) && !(candVlmaxVec(i) & prevVlmax(i)).orR
+    out.vtype(i) := vtypePrefix(i + 1).toVType
   }
 
-  // Patch vill for keepVl slots where vlmax actually changed compared to prevVlmax.
-  // Since oldVType.valid=0, VSetFuncUnit's vill = vill_imm only (no vlmaxChange).
-  // We compute vlmaxChange against the nearest preceding vset via the cumVlmax chain,
-  // and OR it with vill_imm — this yields the exact correct vill value.
-  private val correctedVtype = Wire(Vec(DecodeWidth, new VType))
-  for (i <- 0 until DecodeWidth) {
-    correctedVtype(i) := vtypeNewVec(i)
-    when (vlmaxChange(i)) {
-      correctedVtype(i).illegal := true.B
-    }
-  }
-
-  // === Lightweight cumulative vtype chain (Mux only, no decode table on chain path) ===
-  out.vtype(0) := Mux(isVsetiVec(0), correctedVtype(0), vtypeSpec)
-  for (i <- 1 until DecodeWidth) {
-    out.vtype(i) := Mux(isVsetiVec(i), correctedVtype(i), out.vtype(i - 1))
-  }
+  // oldVType(i) = speculative vtype before instruction i executes.
+  // Build as [vtypeSpec, out.vtype(0..7)], then drop the extra tail element (out.vtype(7)).
+  private val oldVType = vtypeSpec +: out.vtype
+  out.oldVType := VecInit(oldVType.init)
 
   // assign the last vtype to vtypeSpec
   private val vtypeNew = out.vtype(DecodeWidth - 1)
@@ -129,13 +99,6 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
     vtypeArchNext := in.commitVType.vtype.bits
   }
 
-  /**
-   * Set the source of vtypeSpec from the following sources:
-   * 1. committed vsetvl instruction, which flushes the pipeline.
-   * 2. walk-vtype, which is used to update vtype when walking.
-   * 3. walking to architectural vtype
-   * 4. new vset instruction
-   */
   when(in.commitVType.hasVsetvl) {
     // when vsetvl instruction commit, also update vtypeSpec, because vsetvl flush pipe
     vtypeSpecNext := in.vsetvlVType
@@ -179,11 +142,84 @@ object VTypeGen {
   }
 
   class Out()(implicit p: Parameters) extends XSBundle {
-    val vtype = Output(Vec(DecodeWidth, new VType))
-    /**
-     *  Speculated vtype, for snapshot, different from vtype when the instruction is vset.
-     *  However, there's no need for every instruction to take a specvtype. Should be modified in the future.
-     */
-    val specvtype = Output(Vec(DecodeWidth, new VType))
+    val vtype    = Output(Vec(DecodeWidth, new VType))
+    val oldVType = Output(Vec(DecodeWidth, new VType))
+  }
+}
+
+// Per-slot decoded vtype info
+class VTypeNewEntry extends Bundle {
+  val replVl  = Bool() // this vset replaces the VL ratio (i.e. not keepVl x0,x0)
+  val isVset  = Bool() // this entry is a valid vset-family instruction
+  val vtype   = new VType
+  val vlratio = UInt(7.W)
+
+  /** Merge two entries: this is in1 (older), in2 is the newer one. */
+  def merge(in2: VTypeNewEntry): VTypeNewEntry = {
+    val in1 = this
+    val out = Wire(new VTypeNewEntry)
+
+    out.replVl  := in2.replVl || in1.replVl
+    out.isVset  := in2.isVset || in1.isVset
+    out.vtype   := Mux(in2.isVset, in2.vtype, in1.vtype)
+    out.vlratio := Mux(in2.replVl, in2.vlratio, in2.vlratio & in1.vlratio)
+    out
+  }
+
+  /** Convert to VType: OR `vill` with `vlratio == 0`; zero all fields when illegal. */
+  def toVType: VType = {
+    val res = WireInit(this.vtype)
+    val isIllegal = this.vtype.illegal || !this.vlratio.orR
+    res.illegal := isIllegal
+    when (isIllegal) {
+      res.vma := 0.U
+      res.vta := 0.U
+      res.vsew := 0.U
+      res.vlmul := 0.U
+    }
+    res
+  }
+}
+
+object VTypeNewEntry {
+
+  // Compute a 7-bit one-hot vlratio as vlmul/vsew * 16.
+  def calVlratio(vtype: VType) : UInt = {
+    Mux(vtype.illegal || vtype.vsew(2) , 0.U, 1.U << ((vtype.vlmul ^ 4.U) -& vtype.vsew))(7,1)
+  }
+
+  def fromVType(vtype: VType): VTypeNewEntry = {
+    val out = Wire(new VTypeNewEntry)
+    out.replVl  := true.B
+    out.isVset  := false.B
+    out.vtype   := vtype
+    out.vlratio := calVlratio(vtype)
+    out
+  }
+
+  def fromInst(inst: UInt, valid: Bool): VTypeNewEntry = {
+    val instField  = inst.asTypeOf(new XSInstBitFields)
+    val isVsetivli = Instructions.VSETIVLI === inst
+    val isVsetvli  = Instructions.VSETVLI  === inst
+    val isVseti    = isVsetivli || isVsetvli
+
+    val out = Wire(new VTypeNewEntry)
+    val vtype = out.vtype
+    vtype.vlmul   := instField.ZIMM_VSETVLI(2, 0)
+    vtype.vsew    := instField.ZIMM_VSETVLI(5, 3)
+    vtype.vta     := instField.ZIMM_VSETVLI(6)
+    vtype.vma     := instField.ZIMM_VSETVLI(7)
+    vtype.illegal := Mux(
+      isVsetivli,
+      instField.ZIMM_VSETIVLI(9, 8) =/= 0.U,
+      instField.ZIMM_VSETVLI(10, 8) =/= 0.U
+    )
+
+    val isKeepVl = isVsetvli && instField.RD === 0.U && instField.RS1 === 0.U
+    val isVset   = isVseti && valid
+    out.isVset  := isVset
+    out.replVl  := isVset && !isKeepVl
+    out.vlratio := Mux(isVset, calVlratio(vtype), 127.U)
+    out
   }
 }
