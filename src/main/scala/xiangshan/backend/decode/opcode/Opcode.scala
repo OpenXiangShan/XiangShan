@@ -385,10 +385,13 @@ object Opcode {
     // The link uop does not need Src1Gp, but this flag will be used in rename to get right dest to src bypass pdest.
     // When uop leaving rename, srcType should set to SrcType.no
     val link  = Value(bb"001") + GpWen + Src1Gp
+    val linkjr = Value(bb"101") + GpWen + Src1Gp
     val auipc = IntUJType(bb"010")
 
     def linkUopisLink(op: UInt) = op(0)
     def linkUopisAuipc(op: UInt) = op(1)
+    def linkUopisJ(op: UInt) = op(0) && !op(2)
+    def linkUopisJr(op: UInt) = op(0) && op(2)
   }
 
   object NewJmpOpcodes extends Opcodes {
