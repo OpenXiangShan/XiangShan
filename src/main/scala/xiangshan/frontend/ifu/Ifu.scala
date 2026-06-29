@@ -26,6 +26,7 @@ import utility.UIntToMask
 import utility.ValidHold
 import utility.XORFold
 import utility.XSPerfAccumulate
+import utils.DuplicateInit
 import xiangshan.FrontendTdataDistributeIO
 import xiangshan.cache.mmu.HasTlbConst
 import xiangshan.cache.mmu.TlbRequestIO
@@ -214,7 +215,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   )
   private val s1_instrValid =
     Mux(s1_instrCount === FetchBlockInstNum.U, ~0.U(FetchBlockInstNum.W), UIntToMask(s1_instrCount, FetchBlockInstNum))
-  private val s1_prevIBufEnqPtr     = RegInit(0.U.asTypeOf(new IBufPtr))
+  private val s1_prevIBufEnqPtrDup  = RegInit(DuplicateInit(Seq("instr", "valid"), 0.U.asTypeOf(new IBufPtr)))
   private val s1_prevEndIsHalfRvi   = RegEnable(s0_prevEndIsHalfRvi, s0_fire)
   private val s1_prevEndHalfRviData = RegInit(0.U(16.W))
   private val s1_prevEndHalfRviPc   = RegInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
@@ -256,12 +257,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_mergedInvalidTakenMask = s1_invalidTakenMask(0) | s1_invalidTakenMask(1)
   dontTouch(s1_mergedInvalidTakenMask)
 
-  private val s1_alignShiftNum         = s1_prevIBufEnqPtr.value(1, 0)
-  private val s1_baseAlignedInstrVec   = align(s1_instrVec, s1_alignShiftNum)
+  private val s1_alignShiftInstrNum    = s1_prevIBufEnqPtrDup("instr").value(1, 0)
+  private val s1_alignShiftValidNum    = s1_prevIBufEnqPtrDup("valid").value(1, 0)
+  private val s1_baseAlignedInstrVec   = align(s1_instrVec, s1_alignShiftInstrNum)
   private val s1_baseAlignedInstrPcVec = VecInit(s1_baseAlignedInstrVec.map(instr => getInstrPc(instr, s1_fetchBlock)))
-  private val s1_alignedInstrValid     = (s1_instrValid << s1_alignShiftNum).pad(IBufferEnqueueWidth)
-  private val s1_alignedPredTakenMask  = (s1_mergedPredTakenMask << s1_alignShiftNum).pad(IBufferEnqueueWidth)
-  private val s1_alignedInvalidTakenMask = (s1_mergedInvalidTakenMask << s1_alignShiftNum).pad(IBufferEnqueueWidth)
+  private val s1_alignedInstrValid     = (s1_instrValid << s1_alignShiftValidNum).pad(IBufferEnqueueWidth)
+  private val s1_alignedPredTakenMask  = (s1_mergedPredTakenMask << s1_alignShiftValidNum).pad(IBufferEnqueueWidth)
+  private val s1_alignedInvalidTakenMask = (s1_mergedInvalidTakenMask << s1_alignShiftValidNum).pad(IBufferEnqueueWidth)
 
   private val s1_firstEndPos       = s1_fetchBlock(0).takenCfiOffset.bits
   private val s1_firstEndHalfRviPc = s1_fetchBlock(0).startVAddr + (s1_firstEndPos << 1)
@@ -278,7 +280,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_alignedInstrPcVec = WireDefault(s1_baseAlignedInstrPcVec)
   private val s1_alignedInstrVec   = WireDefault(s1_baseAlignedInstrVec)
   for (i <- 0 until IfuAlignWidth) {
-    when(s1_alignShiftNum === i.U) {
+    when(s1_alignShiftInstrNum === i.U) {
       s1_alignedInstrPcVec(i) := Mux(s1_prevEndIsHalfRvi, s1_prevEndHalfRviPc, s1_baseAlignedInstrPcVec(i))
       s1_alignedInstrVec(i).data := Mux(
         s1_prevEndIsHalfRvi,
@@ -315,13 +317,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
 
   when(backendRedirect) {
-    s1_prevIBufEnqPtr := 0.U.asTypeOf(new IBufPtr)
+    s1_prevIBufEnqPtrDup := 0.U.asTypeOf(new IBufPtr)
   }.elsewhen(wbRedirect.valid) {
-    s1_prevIBufEnqPtr := wbRedirect.prevIBufEnqPtr + wbRedirect.instrCount
+    s1_prevIBufEnqPtrDup := wbRedirect.prevIBufEnqPtr + wbRedirect.instrCount
   }.elsewhen(uncacheRedirect.valid) {
-    s1_prevIBufEnqPtr := uncacheRedirect.prevIBufEnqPtr + uncacheRedirect.instrCount
+    s1_prevIBufEnqPtrDup := uncacheRedirect.prevIBufEnqPtr + uncacheRedirect.instrCount
   }.elsewhen(s1_fire && !s1_icacheMeta(0).isUncache) {
-    s1_prevIBufEnqPtr := s1_prevIBufEnqPtr + s1_specInstrCount
+    s1_prevIBufEnqPtrDup := s1_prevIBufEnqPtrDup.head + s1_instrCount
   }
 
   // reqIsUncache is used to limit the number of fetch requests and enable special pre-decode configurations.
@@ -356,7 +358,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_fetchBlock  = RegEnable(s1_fetchBlock, s1_fire)
   dontTouch(s2_fetchBlock)
 
-  private val s2_prevIBufEnqPtr = RegEnable(s1_prevIBufEnqPtr, s1_fire)
+  private val s2_prevIBufEnqPtr = RegEnable(s1_prevIBufEnqPtrDup.head, s1_fire)
 
   private val s2_prevEndIsHalfRvi   = RegEnable(s1_prevEndIsHalfRvi, false.B, s1_fire)
   private val s2_prevEndHalfPc      = RegEnable(s1_prevEndHalfRviPc, s1_fire)
