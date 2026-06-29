@@ -171,7 +171,8 @@ class IPrefetchPipe(implicit p: Parameters) extends IPrefetchModule with HasICac
   private val itlb_finish = tlb_valid_latch(0) && (!s1_doubleline || tlb_valid_latch(1))
 
   (0 until PortNumber).foreach { i =>
-    toITLB(i).valid               := s1_need_itlb(i) || (s0_valid && (if (i == 0) true.B else s0_doubleline))
+    val s0_need_itlb = s0_valid && s1_ready && (if (i == 0) true.B else s0_doubleline)
+    toITLB(i).valid               := s1_need_itlb(i) || s0_need_itlb
     toITLB(i).bits                := DontCare
     toITLB(i).bits.size           := 3.U
     toITLB(i).bits.vaddr          := Mux(s1_need_itlb(i), s1_req_vaddr(i), s0_req_vaddr(i))
