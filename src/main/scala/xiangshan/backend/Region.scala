@@ -795,7 +795,6 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
 
 
   val srcReadyVec = issueQueues.flatMap(_.io.srcReadyVec)
-  val robIdxVec = issueQueues.flatMap(_.io.debugRobIdxVec.get)
   val validVec = issueQueues.flatMap(_.io.validVec)
   val allIssueParams = backendParams.allIssueParams.filter(_.StdCnt == 0)
   val allExuParams = allIssueParams.map(_.exuBlockParams).flatten
@@ -813,8 +812,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     pipeLineNum.asUInt
   })
 
-  val topdownIQInfoVec = issueQueues.flatMap(_.io.topdownIQInfoVec.get)
   if(backendParams.debugEn) {
+    val topdownIQInfoVec = issueQueues.flatMap(_.io.topdownIQInfoVec.get)
     val topdownIQInfoCollect = Module(new TopdownIQInfoCollect(io.iqEntryNum))
     topdownIQInfoCollect.io.in.zip(topdownIQInfoVec).foreach{ case (sink, source) =>
       sink.valid := source.valid

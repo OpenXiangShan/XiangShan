@@ -14,6 +14,8 @@ BACKEND_ANALYSE = True
 FRONTEND_ANALYSE = True
 MEM_ANALYSE = True
 CUSTOM_ANALYSE = True
+INTEL_TOPDOWN_ANALYSE = True
+ROBHEAD_ANALYSE = True
 
 # Not benchmark_list canbe add here to specify benchmark to draw, use like:
 # benchmark_list = {'libquantum','h264ref','namd', 'gamess'}
@@ -323,7 +325,11 @@ xs_fine_grain_rename_map = {
 XS_CORE_PREFIX = r'\[PERF\s*\]\[time=\s*\d+\].*?\.core'
 
 targets = {
+    'if_fetch_bubble': fr'{XS_CORE_PREFIX}.frontend.*?ibuffer: if_fetch_bubble,\s+(\d+)',
+    'if_fetch_bubble_eq_max': fr'{XS_CORE_PREFIX}.frontend.*?ibuffer: if_fetch_bubble_eq_max,\s+(\d+)',
+
     'NoStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: NoStall,\s+(\d+)',
+
     'OverrideBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: OverrideBubble,\s+(\d+)',
     'FtqUpdateBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FtqUpdateBubble,\s+(\d+)',
     'TAGEMissBubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: TAGEMissBubble,\s+(\d+)',
@@ -414,6 +420,34 @@ targets = {
     'FlushedInsts': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: FlushedInsts,\s+(\d+)',
     'SpecialInsts': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: SpecialInsts,\s+(\d+)',
     'BackendOtherCoreStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: BackendOtherCoreStall,\s+(\d+)',
+
+    'inst_spec': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.decode: inst_spec,\s+(\d+)',
+    'recovery_bubble': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.decode: recovery_bubble,\s+(\d+)',
+    'br_mis_pred': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: br_mis_pred,\s+(\d+)',
+    'total_flush': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: total_flush,\s+(\d+)',
+    'exec_stall_cycle': fr'{XS_CORE_PREFIX}.backend.*?topDownMod: exec_stall_cycle,\s+(\d+)',
+    'mem_stall_store': fr'{XS_CORE_PREFIX}.backend.*?topDownMod: mem_stall_store,\s+(\d+)',
+    'mem_stall_l1miss': fr'{XS_CORE_PREFIX}.backend.*?topDownMod: mem_stall_l1miss,\s+(\d+)',
+    'mem_stall_l2miss': fr'{XS_CORE_PREFIX}.backend.*?topDownMod: mem_stall_l2miss,\s+(\d+)',
+    'mem_stall_l3miss': fr'{XS_CORE_PREFIX}.backend.*?topDownMod: mem_stall_l3miss,\s+(\d+)',
+    'mem_stall_anyload': fr'{XS_CORE_PREFIX}.backend.*?topDownMod: mem_stall_anyload,\s+(\d+)',
+
+    'waitAluCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitAluCycle,\s+(\d+)',
+    'waitMulCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitMulCycle,\s+(\d+)',
+    'waitDivCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitDivCycle,\s+(\d+)',
+    'waitBrhCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitBrhCycle,\s+(\d+)',
+    'waitJmpCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitJmpCycle,\s+(\d+)',
+    'waitCsrCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitCsrCycle,\s+(\d+)',
+    'waitFenCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitFenCycle,\s+(\d+)',
+    'waitBkuCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitBkuCycle,\s+(\d+)',
+    'waitLduCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitLduCycle,\s+(\d+)',
+    'waitStuCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitStuCycle,\s+(\d+)',
+    'waitAtmCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitAtmCycle,\s+(\d+)',
+    'waitfaluCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitfaluCycle,\s+(\d+)',
+    'waitfmacCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitfmacCycle,\s+(\d+)',
+    'waitfcvtCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitfcvtCycle,\s+(\d+)',
+    'waitfDivSqrtCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitfDivSqrtCycle,\s+(\d+)',
+    'waitfcmpCycle': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: waitfcmpCycle,\s+(\d+)',
 
     "commitInstr": fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: commitInstr,\s+(\d+)',
     "total_cycles": fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock.rob: clock_cycle,\s+(\d+)'
