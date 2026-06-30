@@ -15,6 +15,9 @@ import scala.collection.immutable.SeqMap
 
 trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
 
+  // Zicfiss: ssp CSR address.
+  private val sspCSRAddr = 0x011
+
   val fcsr = Module(new CSRModule("Fcsr", new CSRBundle {
     val NX = WARL(0, wNoFilter)
     val UF = WARL(1, wNoFilter)
@@ -129,6 +132,13 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
   }))
     .setAddr(CSRs.vlenb)
 
+  // Zicfiss: shadow stack pointer CSR.
+  val ssp = Module(new CSRModule("Ssp", new CSRBundle {
+    // XiangShan is RV64-only here, so ssp[2:0] are read-only zero.
+    val ssp = RW(63, 3).withReset(0.U)
+  }))
+    .setAddr(sspCSRAddr)
+
   val cycle = Module(new CSRModule("cycle", new CSRBundle {
     val cycle = RO(63, 0)
   }) with HasMHPMSink with HasDebugStopBundle {
@@ -203,6 +213,8 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     CSRs.vl     -> (vl.w              -> vl.rdata),
     CSRs.vtype  -> (vtype.w           -> vtype.rdata),
     CSRs.vlenb  -> (vlenb.w           -> vlenb.rdata),
+    // Zicfiss: ssp CSR read/write mapping.
+    sspCSRAddr  -> (ssp.w             -> ssp.rdata),
     CSRs.cycle  -> (cycle.w           -> cycle.rdata),
     CSRs.time   -> (time.w            -> time.rdata),
     CSRs.instret -> (instret.w        -> instret.rdata),
@@ -215,6 +227,8 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     vl,
     vtype,
     vlenb,
+    // Zicfiss: include ssp in unprivileged CSR modules.
+    ssp,
     cycle,
     time,
     instret,
@@ -231,6 +245,8 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     CSRs.vl      -> vl.rdata.asUInt,
     CSRs.vtype   -> vtype.rdata.asUInt,
     CSRs.vlenb   -> vlenb.rdata.asUInt,
+    // Zicfiss: ssp CSR architectural output.
+    sspCSRAddr   -> ssp.rdata.asUInt,
     CSRs.cycle   -> cycle.rdata,
     CSRs.time    -> time.rdata,
     CSRs.instret -> instret.rdata,

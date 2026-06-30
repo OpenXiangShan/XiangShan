@@ -53,7 +53,7 @@ object CSRBundles {
     val CBZE  =      RW(     7)           .withReset(1.U) // Zicboz extension
     val CBCFE =      RW(     6)           .withReset(1.U) // Zicbom extension
     val CBIE  = EnvCBIE( 5,  4, wNoEffect).withReset(EnvCBIE.Inval) // Zicbom extension
-    val SSE   =      RO(     3)           .withReset(0.U) // Zicfiss extension Enable in S mode
+    val SSE   =      RW(     3)           .withReset(0.U) // Zicfiss extension Enable in S mode
     val LPE   =      RO(     2)           .withReset(0.U) // Zicfilp extension
     val FIOM  =      RO(     0)           .withReset(0.U) // Fence of I/O implies Memory
   }

@@ -613,6 +613,10 @@ package object xiangshan {
     def amomaxu_w = "b101010".U
     def amocas_w  = "b101110".U
 
+    // Zicfiss
+    def ssamoswap_w = "b110010".U
+
+
     def lr_d      = "b000011".U
     def sc_d      = "b000111".U
     def amoswap_d = "b001011".U
@@ -625,6 +629,11 @@ package object xiangshan {
     def amominu_d = "b100111".U
     def amomaxu_d = "b101011".U
     def amocas_d  = "b101111".U
+
+    // Zicfiss
+    def ssamoswap_d = "b110011".U
+    def sspush    = "b111011".U 
+    def sspopchk  = "b111111".U 
 
     def amocas_q  = "b101100".U
 
@@ -643,6 +652,9 @@ package object xiangshan {
     def isAMOCASQ (fuOpType: UInt): Bool = fuOpType === amocas_q
     def isAMOCASWD(fuOpType: UInt): Bool = fuOpType === amocas_w || fuOpType === amocas_d
     def isAMOCAS  (fuOpType: UInt): Bool = fuOpType(5, 2) === "b1011".U
+
+    // Zicfiss
+    def isZicfiss(fuOpType: UInt): Bool = fuOpType === ssamoswap_w || fuOpType === ssamoswap_d || fuOpType === sspush || fuOpType === sspopchk
   }
 
   object BKUOpType {
@@ -809,6 +821,12 @@ package object xiangshan {
     def AMO_CAS_W        = "b110101".U // amocas_w
     def AMO_CAS_D        = "b110110".U // amocas_d
     def AMO_CAS_Q        = "b110111".U // amocas_q
+
+    // Zicfiss: split SSPUSH into shadow-stack memory and ssp update uops.
+    def ZICFISS_SSPUSH   = "b100110".U
+    // Zicfiss: split SSPOPCHK into shadow-stack check and ssp update uops.
+    def ZICFISS_SSPOPCHK = "b101000".U
+
     // dummy means that the instruction is a complex instruction but uop number is 1
     def dummy     = "b111111".U
 
@@ -818,6 +836,8 @@ package object xiangshan {
     def needSplit(UopSplitType: UInt) = UopSplitType(4) || UopSplitType(5)
 
     def isAMOCAS(UopSplitType: UInt): Bool = UopSplitType === AMO_CAS_W || UopSplitType === AMO_CAS_D || UopSplitType === AMO_CAS_Q
+    // Zicfiss: helper for shadow-stack split instructions.
+    def isZicfiss(UopSplitType: UInt): Bool = UopSplitType === ZICFISS_SSPUSH || UopSplitType === ZICFISS_SSPOPCHK
   }
 
   object ExceptionNO {

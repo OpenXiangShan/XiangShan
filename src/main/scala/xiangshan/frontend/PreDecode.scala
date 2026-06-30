@@ -289,9 +289,41 @@ class RVCExpander(implicit p: Parameters) extends XSModule {
 
   val decoder = new RVCDecoder(io.in, io.fsIsOff, XLEN, fLen, useAddiForMv = true)
 
+  // Zicfiss: C.SSPUSH/C.SSPOPCHK are Zcmop encodings redefined by Zicfiss.
+  private val isCSSPUSH = io.in(15, 0) === "b0110000010000001".U(16.W)
+  private val isCSSPOPCHK = io.in(15, 0) === "b0110001010000001".U(16.W)
+
+  // Zicfiss: expand compressed shadow-stack instructions to their 32-bit MOP forms.
+  private def zicfissExpandedInst(bits: UInt, rd: UInt, rs1: UInt, rs2: UInt): ExpandedInstruction = {
+    val expanded = Wire(new ExpandedInstruction)
+    expanded.bits := bits
+    expanded.rd := rd
+    expanded.rs1 := rs1
+    expanded.rs2 := rs2
+    expanded.rs3 := 0.U
+    expanded
+  }
+
+  // Zicfiss: C.SSPUSH expands to SSPUSH x1.
+  private val zicfissSSPUSH = zicfissExpandedInst(
+    Cat("b1100111".U(7.W), 1.U(5.W), 0.U(5.W), "b100".U(3.W), 0.U(5.W), "b1110011".U(7.W)),
+    rd = 0.U(5.W),
+    rs1 = 0.U(5.W),
+    rs2 = 1.U(5.W),
+  )
+
+  // Zicfiss: C.SSPOPCHK expands to SSPOPCHK x5.
+  private val zicfissSSPOPCHK = zicfissExpandedInst(
+    Cat("b110011011100".U(12.W), 5.U(5.W), "b100".U(3.W), 0.U(5.W), "b1110011".U(7.W)),
+    rd = 0.U(5.W),
+    rs1 = 5.U(5.W),
+    rs2 = 0.U(5.W),
+  )
+
   if (HasCExtension) {
-    io.out := decoder.decode
-    io.ill := decoder.ill
+    // Zicfiss: keep these two C.MOP encodings visible to Decode instead of generic Zcmop nop expansion.
+    io.out := Mux(isCSSPUSH, zicfissSSPUSH, Mux(isCSSPOPCHK, zicfissSSPOPCHK, decoder.decode))
+    io.ill := decoder.ill && !(isCSSPUSH || isCSSPOPCHK)
   } else {
     io.out := decoder.passthrough
     io.ill := false.B

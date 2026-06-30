@@ -239,13 +239,18 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.AMO_CAS_W -> 2.U,
     UopSplitType.AMO_CAS_D -> 2.U,
     UopSplitType.AMO_CAS_Q -> 4.U,
+    // Zicfiss: SSPUSH/SSPOPCHK split into memory/check and ssp update uops.
+    UopSplitType.ZICFISS_SSPUSH -> 4.U,
+    UopSplitType.ZICFISS_SSPOPCHK -> 4.U,
   ))
 
   // number of writeback num
   val numOfWB = Mux(UopSplitType.isAMOCAS(typeOfSplit), numOfUop >> 1, numOfUop)
 
   // vector instruction's uop UopSplitType are not SCA_SIM, and when the number of uop is 1, we can regard it as a simple instruction
-  isComplex := io.in.preInfo.isVecArith || io.in.preInfo.isVecMem || io.in.preInfo.isAmoCAS
+  // Zicfiss: shadow-stack push/pop-check use the complex decode path.
+  val isZicfissComplex = UopSplitType.isZicfiss(typeOfSplit)
+  isComplex := io.in.preInfo.isVecArith || io.in.preInfo.isVecMem || io.in.preInfo.isAmoCAS || isZicfissComplex
   io.out.uopInfo.numOfUop := numOfUop
   io.out.uopInfo.numOfWB := numOfWB
   io.out.uopInfo.lmul := lmul
