@@ -6,8 +6,6 @@ import org.chipsalliance.cde.config.Parameters
 import utils.NamedUInt
 import xiangshan.HasXSParameter
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.backend.fu.FuType
-import xiangshan.{NewJumpOpType, LinkOpType}
 
 class TraceCSR(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val cause = UInt(CauseWidth.W)
@@ -79,7 +77,7 @@ object Itype extends NamedUInt(4) {
   def OtherUninferableJump = 14.U   //rename
   def OtherInferableJump   = 15.U   //rename
 
-  private def jumpTypeGenImpl(isJ: Bool, isJr: Bool, isBranch: Bool, rd: OpRegType, rs: OpRegType): UInt = {
+  def jumpTypeGen(isJ: Bool, isJr: Bool, isBranch: Bool, rd: OpRegType, rs: OpRegType): UInt = {
 
     val isEqualRdRs = rd === rs
 
@@ -119,26 +117,6 @@ object Itype extends NamedUInt(4) {
     )
 
     Mux(isBranch || isJ || isJr, jumpType, 0.U)
-  }
-
-  def linkJumpTypeGen(fuType: UInt, fuoptype: UInt, rd: OpRegType, rs: OpRegType): UInt = {
-    val isJ  = FuType.isLink(fuType) && LinkOpType.linkUopisJ(fuoptype)
-    val isJr = FuType.isLink(fuType) && LinkOpType.linkUopisJr(fuoptype)
-    jumpTypeGenImpl(isJ, isJr, false.B, rd, rs)
-  }
-
-  def newJumpTypeGen(fuType: UInt, fuoptype: UInt, rd: OpRegType, rs: OpRegType): UInt = {
-    val isJ  = FuType.isNewJump(fuType) && NewJumpOpType.jumpUopisj(fuoptype)
-    val isJr = FuType.isNewJump(fuType) && NewJumpOpType.jumpUopisjr(fuoptype)
-    jumpTypeGenImpl(isJ, isJr, false.B, rd, rs)
-  }
-
-  def jumpTypeGen(fuType: UInt, fuoptype: UInt, rd: OpRegType, rs: OpRegType): UInt = {
-    Mux1H(Seq(
-      FuType.isBrh(fuType)     -> jumpTypeGenImpl(false.B, false.B, true.B, rd, rs),
-      FuType.isLink(fuType)    -> linkJumpTypeGen(fuType, fuoptype, rd, rs),
-      FuType.isNewJump(fuType) -> newJumpTypeGen(fuType, fuoptype, rd, rs),
-    ))
   }
 
   def isTrap(itype: UInt) = Seq(Exception, Interrupt).map(_ === itype).reduce(_ || _)
