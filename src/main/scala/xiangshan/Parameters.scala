@@ -429,7 +429,9 @@ case class XSCoreParameters
         ExeUnitParams(
           "VFEX0",
           Seq(VialuCfg, VfaluCfg, VfmaCfg, VimacCfg, VppuCfg, VipuCfg, VfcvtCfg, VSetRvfWvfCfg, VmoveCfg),
-          Seq(VfWB(port = 0, 0), V0WB(port = 0, 0), IntWB(port = 4, 1), FpWB(port = 6, 0)),
+          // VFEX0 has fixed latency and cannot stall on writeback, so give it a
+          // private FP port 8 instead of sharing port 6 with the load unit LDU2.
+          Seq(VfWB(port = 0, 0), V0WB(port = 0, 0), IntWB(port = 4, 1), FpWB(port = 8, 0)),
           Seq(Seq(VfRD(0, 0)), Seq(VfRD(1, 0)), Seq(VfRD(2, 0)), Seq(V0RD(0, 0))),
           vlWB = VlWB(port = vfSchdVlWbPort, 0),
           vlRD = VlRD(0, 0),
