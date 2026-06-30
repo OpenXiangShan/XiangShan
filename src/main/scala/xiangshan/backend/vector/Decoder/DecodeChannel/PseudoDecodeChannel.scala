@@ -55,6 +55,8 @@ class PseudoDecodeChannel(instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTab
     needVecEnableField,
     commitTypeField,
     canRobCompressField,
+    isJField,
+    isJrField,
   )
 
   val table = new DecodeTable(patterns, fields)
@@ -91,6 +93,8 @@ class PseudoDecodeChannel(instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTab
   out.bits.imm := imm
   out.bits.commitType := bundle(commitTypeField)
   out.bits.canRobCompress := bundle(canRobCompressField)
+  out.bits.isJ := bundle(isJField)
+  out.bits.isJr := bundle(isJrField)
   out.bits.exceptionII := bundle(needVecEnableField) && in.fromCSR.illegalInst.vsIsOff
 }
 
@@ -128,6 +132,8 @@ object PseudoDecodeChannel {
     val imm = UInt(32.W)
     val commitType = CommitType()
     val canRobCompress = Bool()
+    val isJ = Bool()
+    val isJr = Bool()
     val exceptionII = Bool()
   }
 
@@ -140,8 +146,8 @@ object PseudoDecodeChannel {
     val PREFETCH_R   = PseudoInstPattern(PseudoInstructions.PREFETCH_R)
     val PREFETCH_W   = PseudoInstPattern(PseudoInstructions.PREFETCH_W)
 
-    def J            = PseudoInstPattern(PseudoInstructions.J)
-    def JALR_RD_ZERO = PseudoInstPattern(PseudoInstructions.JALR_RD_ZERO)
+    val J            = PseudoInstPattern(PseudoInstructions.J)
+    val JALR_RD_ZERO = PseudoInstPattern(PseudoInstructions.JALR_RD_ZERO)
   }
 
   class DecodeFieldGen[-T <: InstPattern, +D <: Data](
@@ -298,6 +304,16 @@ object PseudoDecodeChannel {
   val canRobCompressField = new DecodeFieldGen(
     Bool(),
     (op: InstPattern) => (!uopTable(op).getTraits.contains(CannotRobCompress)).toBitPat
+  )
+
+  val isJField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => (op == J).toBitPat
+  )
+
+  val isJrField = new DecodeFieldGen(
+    Bool(),
+    (op: InstPattern) => (op == JALR_RD_ZERO).toBitPat
   )
 
   def makeCSRRBitPat(csrno: Int): BitPat = {

@@ -21,3 +21,25 @@ class IsJRField(uopIdx: Int) extends BoolDecodeField[InstPattern] {
     }
   }
 }
+
+class IsJField(uopIdx: Int) extends BoolDecodeField[InstPattern] {
+  override def name: String = s"isJ$uopIdx"
+
+  override def genTable(op: InstPattern): BitPat = {
+    op match {
+      case IntJTypePattern() => y
+      case _                 => n
+    }
+  }
+}
+
+class IsJrField(uopIdx: Int) extends BoolDecodeField[InstPattern] {
+  override def name: String = s"isJr$uopIdx"
+
+  override def genTable(op: InstPattern): BitPat = {
+    op match {
+      case _: JalrPattern => y
+      case _              => n
+    }
+  }
+}
