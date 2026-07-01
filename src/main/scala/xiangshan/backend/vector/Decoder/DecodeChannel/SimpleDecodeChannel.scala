@@ -34,6 +34,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
   @public val in = IO(Input(new DecodeChannelInput))
   @public val out = IO(Output(new SimpleDecodeChannelOutput(maxSimpleSplitUopNum)))
 
+  val isMove = BitPat("b000000000000_?????_000_?????_0010011")
+
   val rawInst = in.rawInst
   val instFields = rawInst.asTypeOf(new XSInstBitFields)
 
@@ -48,6 +50,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
   val isJrFields = Seq.tabulate(maxSimpleSplitUopNum)(i => new IsJrField(i))
 
   val fields = uopInfoFields ++ opcodeFields ++ fuTypeFields ++ isJRFields ++ isJFields ++ isJrFields ++ Seq(
+    IsMopField,
     FrmRenField,
     FFlagsWenField,
     SelImmField,
@@ -73,6 +76,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
   val isJRs         = isJRFields.map(field => result(field))
   val isJs          = isJFields.map(field => result(field))
   val isJrs         = isJrFields.map(field => result(field))
+  val isMop         = result(IsMopField)
   val frmRen         = result(FrmRenField)
   val fflagsWen      = result(FFlagsWenField)
   val selImm         = result(SelImmField)
@@ -143,6 +147,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
     out.uop(i).bits.isJR := isJRs(i)
     out.uop(i).bits.isJ := isJs(i)
     out.uop(i).bits.isJr := isJrs(i)
+    out.uop(i).bits.isMove := (isMop || rawInst === isMove) && instFields.RD =/= 0.U && !in.fromCSR.singlestep
     out.uop(i).bits.exceptionII := frmExceptionII || fsOffExceptionII || privExceptionII
     out.uop(i).bits.exceptionVI := privExceptionVI
   }
@@ -174,6 +179,7 @@ object SimpleDecodeChannel {
     val isJR = Bool()
     val isJ = Bool()
     val isJr = Bool()
+    val isMove = Bool()
     val exceptionII = Bool()
     val exceptionVI = Bool()
   }
