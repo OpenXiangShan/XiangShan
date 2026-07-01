@@ -142,6 +142,13 @@ class IntEarlyReleaseDataPathTest extends AnyFlatSpec with Matchers with ChiselS
     })
   }
 
+  private def optimizedReadDoneParams: IntEarlyReleaseParams = IntEarlyReleaseParams(
+    enable = true,
+    trackEntries = 2,
+    enableForwardReadDone = true,
+    enableBypassReadDone = true
+  )
+
   private def setRobPtr(ptr: rob.RobPtr, value: Int): Unit = {
     ptr.flag.poke(false.B)
     ptr.value.poke(value.U)
@@ -333,13 +340,7 @@ class IntEarlyReleaseDataPathTest extends AnyFlatSpec with Matchers with ChiselS
   }
 
   it should "optionally emit readDone for forward and bypass reads after final success" in {
-    val optimizedParams = IntEarlyReleaseParams(
-      enable = true,
-      trackEntries = 2,
-      enableForwardReadDone = true,
-      enableBypassReadDone = true
-    )
-    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = false)(configWith(optimizedParams))) { dut =>
+    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = false)(configWith(optimizedReadDoneParams))) { dut =>
       clearProbe(dut)
       dut.io.s1Valid.poke(true.B)
       setRobPtr(dut.io.robIdx, 15)
@@ -387,13 +388,7 @@ class IntEarlyReleaseDataPathTest extends AnyFlatSpec with Matchers with ChiselS
       dut.io.status.unsupportedBypassSourceCount.expect(1.U)
     }
 
-    val optimizedParams = IntEarlyReleaseParams(
-      enable = true,
-      trackEntries = 2,
-      enableForwardReadDone = true,
-      enableBypassReadDone = true
-    )
-    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = false)(configWith(optimizedParams))) { dut =>
+    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = false)(configWith(optimizedReadDoneParams))) { dut =>
       clearProbe(dut)
       dut.io.s1Valid.poke(true.B)
       dut.io.isWakeupSink.poke(false.B)
@@ -408,14 +403,7 @@ class IntEarlyReleaseDataPathTest extends AnyFlatSpec with Matchers with ChiselS
   }
 
   it should "keep bypass2 unsupported in the default optimized phase" in {
-    val optimizedParams = IntEarlyReleaseParams(
-      enable = true,
-      trackEntries = 2,
-      enableForwardReadDone = true,
-      enableBypassReadDone = true,
-      enableBypass2ReadDone = false
-    )
-    simulate(new IntERDataPathReadDoneProbe(localSrc = 1, replayProne = false)(configWith(optimizedParams))) { dut =>
+    simulate(new IntERDataPathReadDoneProbe(localSrc = 1, replayProne = false)(configWith(optimizedReadDoneParams))) { dut =>
       clearProbe(dut)
       dut.io.s1Valid.poke(true.B)
       setTrackedSource(dut, localSrc = 0, logicalSrc = 0, trackId = 1, trackGen = 3, psrc = 21, dataSource = DataSource.bypass2)
@@ -536,13 +524,7 @@ class IntEarlyReleaseDataPathTest extends AnyFlatSpec with Matchers with ChiselS
   }
 
   it should "fallback forward and bypass reads on replay-prone or uncertain paths" in {
-    val optimizedParams = IntEarlyReleaseParams(
-      enable = true,
-      trackEntries = 2,
-      enableForwardReadDone = true,
-      enableBypassReadDone = true
-    )
-    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = true)(configWith(optimizedParams))) { dut =>
+    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = true)(configWith(optimizedReadDoneParams))) { dut =>
       clearProbe(dut)
       dut.io.s1Valid.poke(true.B)
       setTrackedSource(dut, localSrc = 0, logicalSrc = 0, trackId = 1, trackGen = 3, psrc = 21, dataSource = DataSource.forward)
@@ -557,7 +539,7 @@ class IntEarlyReleaseDataPathTest extends AnyFlatSpec with Matchers with ChiselS
       dut.io.status.fallbackBypassSourceCount.expect(1.U)
     }
 
-    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = false)(configWith(optimizedParams))) { dut =>
+    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = false)(configWith(optimizedReadDoneParams))) { dut =>
       clearProbe(dut)
       dut.io.s1Valid.poke(true.B)
       dut.io.uncertainReadPath.poke(true.B)

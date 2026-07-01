@@ -172,8 +172,18 @@ class IntSparseUCATest extends AnyFlatSpec with Matchers with ChiselSim {
     dut.io.debug.entries(entryIdx).state.expect(IntEREntryState.releasedWaitCommit)
   }
 
-  private def readDone(dut: IntSparseUCA, trackId: Int = 0, gen: Int = 1, srcSlot: Int = 0, psrc: Int = 5): Unit = {
+  private def readDone(
+    dut: IntSparseUCA,
+    trackId: Int = 0,
+    gen: Int = 1,
+    srcSlot: Int = 0,
+    psrc: Int = 5,
+    fallback: Boolean = false,
+    reason: UInt = IntERFallbackReason.none
+  ): Unit = {
     dut.io.readDone(0).valid.poke(true.B)
+    dut.io.readDone(0).bits.fallback.poke(fallback.B)
+    dut.io.readDone(0).bits.reason.poke(reason)
     dut.io.readDone(0).bits.src(srcSlot).valid.poke(true.B)
     dut.io.readDone(0).bits.src(srcSlot).trackId.poke(trackId.U)
     dut.io.readDone(0).bits.src(srcSlot).trackGen.poke(gen.U)
@@ -389,14 +399,15 @@ class IntSparseUCATest extends AnyFlatSpec with Matchers with ChiselSim {
       dut.io.debug.entries(0).userCounter.expect(2.U)
       dut.io.debug.squashDecCount.expect(0.U)
 
-      dut.io.readDone(0).valid.poke(true.B)
-      dut.io.readDone(0).bits.fallback.poke(true.B)
-      dut.io.readDone(0).bits.reason.poke(IntERFallbackReason.unsupportedReadPath)
-      dut.io.readDone(0).bits.src(0).valid.poke(true.B)
-      dut.io.readDone(0).bits.src(0).trackId.poke(0.U)
-      dut.io.readDone(0).bits.src(0).trackGen.poke(1.U)
-      dut.io.readDone(0).bits.src(0).srcIdx.poke(0.U)
-      dut.io.readDone(0).bits.src(0).psrc.poke(99.U)
+      readDone(
+        dut,
+        trackId = 0,
+        gen = 1,
+        srcSlot = 0,
+        psrc = 99,
+        fallback = true,
+        reason = IntERFallbackReason.unsupportedReadPath
+      )
       dut.clock.step()
       clearInputs(dut)
       dut.io.debug.entries(0).state.expect(IntEREntryState.counting)

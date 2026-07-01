@@ -556,13 +556,13 @@ object RobIntEROps {
     val duplicateSource = Wire(Vec(raw.length, Vec(logicalSrcWidth, Bool())))
     duplicateSource := 0.U.asTypeOf(duplicateSource)
     val accepted = Seq.tabulate(raw.length) { lane =>
+      val entryIdxWidth = log2Ceil(entries.length max 2)
+      val entryIdx = raw(lane).bits.robIdx.value(entryIdxWidth - 1, 0)
+      val robEntry = entries(entryIdx)
+      val entryIdxInRange = raw(lane).bits.robIdx.value < entries.length.U
+      val killedByRedirect = raw(lane).bits.robIdx.needFlush(redirect)
       Seq.tabulate(logicalSrcWidth) { slot =>
         val srcEvent = raw(lane).bits.src(slot)
-        val entryIdxWidth = log2Ceil(entries.length max 2)
-        val entryIdx = raw(lane).bits.robIdx.value(entryIdxWidth - 1, 0)
-        val robEntry = entries(entryIdx)
-        val entryIdxInRange = raw(lane).bits.robIdx.value < entries.length.U
-        val killedByRedirect = raw(lane).bits.robIdx.needFlush(redirect)
         val srcIdxInRange = srcEvent.srcIdx < logicalSrcWidth.U
         val validLiveSource = raw(lane).valid && srcEvent.valid && !killedByRedirect
         assert(!validLiveSource || srcIdxInRange, "ROB ER readDone source index out of range")

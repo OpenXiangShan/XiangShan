@@ -239,6 +239,12 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
   private val commitClearByEntry = Wire(Vec(entryCount, Bool()))
 
   for (e <- 0 until entryCount) {
+    val entry = entries(e)
+    def matchesCurrentSource(trackId: UInt, trackGen: UInt, psrc: UInt): Bool =
+      trackId === e.U && trackGen === entry.gen && psrc === entry.pdest
+    def matchesCurrentPdest(trackId: UInt, psrc: UInt): Bool =
+      trackId === e.U && psrc === entry.pdest
+
     val sourceIncHits = (0 until RenameWidth).flatMap(i =>
       (0 until IntERLogicalSrcWidth).map(s => sourceCounted(i)(s) && sourceMatchOH(i)(s)(e))
     )
@@ -262,35 +268,32 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
     val readDecHits = io.readDone.flatMap { event =>
       event.bits.src.map { src =>
         event.valid && !event.bits.fallback && src.valid &&
-          src.trackId === e.U && src.trackGen === entries(e).gen &&
-          src.psrc === entries(e).pdest && isCounting(entries(e))
+          matchesCurrentSource(src.trackId, src.trackGen, src.psrc) && isCounting(entry)
       }
     }
     val readFallbackHits = io.readDone.flatMap { event =>
       event.bits.src.map { src =>
         event.valid && event.bits.fallback && src.valid &&
-          src.trackId === e.U && src.trackGen === entries(e).gen &&
-          src.psrc === entries(e).pdest && isCounting(entries(e))
+          matchesCurrentSource(src.trackId, src.trackGen, src.psrc) && isCounting(entry)
       }
     }
     val readGenMismatchHits = io.readDone.flatMap { event =>
       event.bits.src.map { src =>
-        event.valid && src.valid && src.trackId === e.U && src.trackGen =/= entries(e).gen &&
-          src.psrc === entries(e).pdest && isActive(entries(e))
+        event.valid && src.valid && matchesCurrentPdest(src.trackId, src.psrc) &&
+          src.trackGen =/= entry.gen && isActive(entry)
       }
     }
 
     val squashDecHits = io.squash.flatMap { event =>
       event.bits.src.map { src =>
         event.valid && src.valid &&
-          src.trackId === e.U && src.trackGen === entries(e).gen &&
-          src.psrc === entries(e).pdest && isCounting(entries(e))
+          matchesCurrentSource(src.trackId, src.trackGen, src.psrc) && isCounting(entry)
       }
     }
     val squashGenMismatchHits = io.squash.flatMap { event =>
       event.bits.src.map { src =>
-        event.valid && src.valid && src.trackId === e.U && src.trackGen =/= entries(e).gen &&
-          src.psrc === entries(e).pdest && isActive(entries(e))
+        event.valid && src.valid && matchesCurrentPdest(src.trackId, src.psrc) &&
+          src.trackGen =/= entry.gen && isActive(entry)
       }
     }
 
