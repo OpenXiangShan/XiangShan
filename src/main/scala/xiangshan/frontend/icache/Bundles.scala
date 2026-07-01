@@ -221,27 +221,41 @@ class ICacheMeta(implicit p: Parameters) extends ICacheBundle {
   def isUncache: Bool = pmpMmio || Pbmt.isUncache(itlbPbmt)
 }
 
-class MainPipeToIfuReq(implicit p: Parameters) extends ICacheBundle {
+class FetchBlocktoIfuReq(implicit p: Parameters) extends ICacheBundle {
   val valid:          Bool        = Bool()
   val startVAddr:     GuardedPc   = GuardedPc()
   val ftqIdx:         FtqPtr      = new FtqPtr
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
-  val range:          UInt        = UInt(FetchBlockInstNum.W)
+  // val range:          UInt        = UInt(FetchBlockInstNum.W)
   val size:           UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
 
   val data:        UInt = UInt(blockBits.W)
-  val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
+  // val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
 
   val icacheMeta: ICacheMeta = new ICacheMeta
 
   val perf_isCrossLine: Bool = Bool()
 }
 
+class MainPipeToIfuReq(implicit p: Parameters) extends ICacheBundle {
+  val range:       UInt = UInt(FetchBlockInstNum.W)
+  val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
+  val info: Vec[FetchBlocktoIfuReq] = Vec(FetchPorts, new FetchBlocktoIfuReq)
+}
+
 class MainPipeToIfuIO(implicit p: Parameters) extends ICacheBundle {
-  val req: DecoupledIO[Vec[MainPipeToIfuReq]] = DecoupledIO(Vec(FetchPorts, new MainPipeToIfuReq))
+  val req: DecoupledIO[MainPipeToIfuReq] = DecoupledIO(new MainPipeToIfuReq)
   // for timing fix, sent 1 cycle after req is fired
   val corrupt: Vec[Vec[Bool]] = Vec(FetchPorts, Vec(PortNumber, Bool()))
 }
+
+// class MainPipeToIfuIO(implicit p: Parameters) extends ICacheBundle {
+//   class Req(implicit p: Parameters) extends ICacheBundle {
+//     val info: Vec[MainPipeToIfuReq] = Vec(FetchPorts, new MainPipeToIfuReq)
+//     val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
+//   }
+//   val req: DecoupledIO[Req] = DecoupledIO(new Req)
+// }
 
 class WayLookupToMainPipeBundle(implicit p: Parameters) extends ICacheBundle {
   val wayLookupInfo: Vec[Valid[WayLookupBundle]] = Vec(FetchPorts, Valid(new WayLookupBundle))
