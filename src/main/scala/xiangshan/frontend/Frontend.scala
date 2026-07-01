@@ -362,7 +362,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
     "fetchedCacheLines",
     Mux(
       icache.io.toIfu.req.valid && icache.io.toIfu.req.ready,
-      Mux(icache.io.toIfu.req.bits(0).perf_isCrossLine, 2.U, 1.U),
+      Mux(icache.io.toIfu.req.bits.info(0).perf_isCrossLine, 2.U, 1.U),
       0.U
     )
   )

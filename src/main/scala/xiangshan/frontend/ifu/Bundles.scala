@@ -28,6 +28,7 @@ import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ibuffer.IBufPtr
 import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.MainPipeToIfuReq
+import xiangshan.frontend.icache.FetchBlocktoIfuReq
 
 /* ***
  * Naming:
@@ -67,19 +68,19 @@ class FetchBlock(implicit p: Parameters) extends IfuBundle {
   val ftqIdx:         FtqPtr      = new FtqPtr
   val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
   val takenCfiOffset: Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
-  val range:          UInt        = UInt(FetchBlockInstNum.W)
+  // val range:          UInt        = UInt(FetchBlockInstNum.W)
   val size:           UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
 
   val pcUpperBitsPlus1: UInt = UInt((VAddrBits - PcCutPoint).W)
 
   def pcUpperBits: UInt = startVAddr(VAddrBits - 1, PcCutPoint)
 
-  def fromICacheReq(req: MainPipeToIfuReq): FetchBlock = {
+  def fromICacheReq(req: FetchBlocktoIfuReq): FetchBlock = {
     valid            := req.valid
     ftqIdx           := req.ftqIdx
     startVAddr       := req.startVAddr
     takenCfiOffset   := req.takenCfiOffset
-    range            := req.range
+    // range            := req.range
     size             := req.size
     pcUpperBitsPlus1 := req.startVAddr(VAddrBits - 1, PcCutPoint) + 1.U
     this
@@ -91,38 +92,67 @@ class IfuData(implicit p: Parameters) extends IfuBundle with HasICacheParameters
   val range:       UInt      = UInt(FetchBlockInstNum.W)
   val blockSel:    UInt      = UInt(FetchBlockInstNum.W)
 
-  def fromICacheReq(req: Vec[MainPipeToIfuReq]): IfuData = {
-    val reqStartOffset = req.map(_.startVAddr(5, 1))
+  def fromICacheReq(req: MainPipeToIfuReq): IfuData = {
+    val reqStartOffset = req.info.map(_.startVAddr(5, 1))
 
-    val totalSize = req(0).size +& Mux(req(1).valid, req(1).size, 0.U.asTypeOf(req(1).size))
+    val totalSize = req.info(0).size +& Mux(req.info(1).valid, req.info(1).size, 0.U.asTypeOf(req.info(1).size))
 
     val dupData = VecInit((0 until MaxFetchReqNum).map { i =>
-      Cat(req(i).data, req(i).data).asTypeOf(Vec(FetchBlockInstNum * 2, UInt(16.W)))
+      Cat(req.info(i).data, req.info(i).data).asTypeOf(Vec(FetchBlockInstNum * 2, UInt(16.W)))
     })
-    val dupMaybeRvcMap = VecInit((0 until MaxFetchReqNum).map(i => Cat(req(i).maybeRvcMap, req(i).maybeRvcMap)))
 
     def getDataIndex(i: Int): (Bool, UInt, UInt) = {
-      val fromReq0 = i.U < req(0).size
+      val fromReq0 = i.U < req.info(0).size
       val req0Idx  = (reqStartOffset(0) +& i.U)(log2Ceil(FetchBlockInstNum * 2) - 1, 0)
-      val req1Idx  = (reqStartOffset(1) +& (i.U - req(0).size))(log2Ceil(FetchBlockInstNum * 2) - 1, 0)
+      val req1Idx  = (reqStartOffset(1) +& (i.U - req.info(0).size))(log2Ceil(FetchBlockInstNum * 2) - 1, 0)
       (fromReq0, req0Idx, req1Idx)
     }
 
     this.data := VecInit((0 until FetchBlockInstNum).map { i =>
       val (fromReq0, req0Idx, req1Idx) = getDataIndex(i)
-      Mux(fromReq0, dupData(0)(req0Idx), Mux(req(1).valid, dupData(1)(req1Idx), 0.U.asTypeOf(dupData(1)(req1Idx))))
+      Mux(fromReq0, dupData(0)(req0Idx), Mux(req.info(1).valid, dupData(1)(req1Idx), 0.U.asTypeOf(dupData(1)(req1Idx))))
     })
 
-    this.maybeRvcMap := VecInit((0 until FetchBlockInstNum).map { i =>
-      val (fromReq0, req0Idx, req1Idx) = getDataIndex(i)
-      Mux(fromReq0, dupMaybeRvcMap(0)(req0Idx), Mux(req(1).valid, dupMaybeRvcMap(1)(req1Idx), 0.U(1.W)))
-    }).asUInt
-
-    this.range    := VecInit((0 until FetchBlockInstNum).map(i => i.U < totalSize)).asUInt
-    this.blockSel := VecInit((0 until FetchBlockInstNum).map(i => req(1).valid && i.U >= req(0).size)).asUInt
+    this.maybeRvcMap := req.maybeRvcMap
+    this.range       := req.range
+    this.blockSel    :=
+      VecInit((0 until FetchBlockInstNum).map(i => req.info(1).valid && i.U >= req.info(0).size)).asUInt
 
     this
   }
+
+  // def fromICacheReq(req: Vec[MainPipeToIfuReq]): IfuData = {
+  //   val reqStartOffset = req.map(_.startVAddr(5, 1))
+  //
+  //   val totalSize = req(0).size +& Mux(req(1).valid, req(1).size, 0.U.asTypeOf(req(1).size))
+  //
+  //   val dupData = VecInit((0 until MaxFetchReqNum).map { i =>
+  //     Cat(req(i).data, req(i).data).asTypeOf(Vec(FetchBlockInstNum * 2, UInt(16.W)))
+  //   })
+  //   val dupMaybeRvcMap = VecInit((0 until MaxFetchReqNum).map(i => Cat(req(i).maybeRvcMap, req(i).maybeRvcMap)))
+  //
+  //   def getDataIndex(i: Int): (Bool, UInt, UInt) = {
+  //     val fromReq0 = i.U < req(0).size
+  //     val req0Idx  = (reqStartOffset(0) +& i.U)(log2Ceil(FetchBlockInstNum * 2) - 1, 0)
+  //     val req1Idx  = (reqStartOffset(1) +& (i.U - req(0).size))(log2Ceil(FetchBlockInstNum * 2) - 1, 0)
+  //     (fromReq0, req0Idx, req1Idx)
+  //   }
+  //
+  //   this.data := VecInit((0 until FetchBlockInstNum).map { i =>
+  //     val (fromReq0, req0Idx, req1Idx) = getDataIndex(i)
+  //     Mux(fromReq0, dupData(0)(req0Idx), Mux(req(1).valid, dupData(1)(req1Idx), 0.U.asTypeOf(dupData(1)(req1Idx))))
+  //   })
+  //
+  //   this.maybeRvcMap := VecInit((0 until FetchBlockInstNum).map { i =>
+  //     val (fromReq0, req0Idx, req1Idx) = getDataIndex(i)
+  //     Mux(fromReq0, dupMaybeRvcMap(0)(req0Idx), Mux(req(1).valid, dupMaybeRvcMap(1)(req1Idx), 0.U(1.W)))
+  //   }).asUInt
+  //
+  //   this.range    := VecInit((0 until FetchBlockInstNum).map(i => i.U < totalSize)).asUInt
+  //   this.blockSel := VecInit((0 until FetchBlockInstNum).map(i => req(1).valid && i.U >= req(0).size)).asUInt
+  //
+  //   this
+  // }
 }
 
 class InstSlot extends Bundle {
