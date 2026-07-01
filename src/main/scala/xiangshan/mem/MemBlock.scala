@@ -948,7 +948,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // load replay
     newLoadUnits(i).io.replay <> lsq.io.replay(i)
 
-    val l2_hint = RegNext(io.l2_hint)
+    val l2_hint = RegNext(io.l2_hint, 0.U.asTypeOf(io.l2_hint))
 
     // L2 Hint for DCache
     dcache.io.l2_hint <> l2_hint

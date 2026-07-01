@@ -1573,21 +1573,27 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
    */
   // Update parallel pipeline registers
   for (i <- 0 until reqNum) {
-    when (io.queryMQ(i).req.valid) {
+    when (query_fire(i)) {
       parallel_pipe_regs(i).req := io.queryMQ(i).req.bits
+      parallel_pipe_regs(i).alloc := ((analysis.strategy(i) & 1.U) =/= 0.U) &&
+                                      (analysis.compress_group(i) === i.U) &&
+                                      !io.queryMQ(i).req.bits.cancel &&
+                                      !io.wbq_block_miss_req(i)
+
+      parallel_pipe_regs(i).merge := ((analysis.strategy(i) & 2.U) =/= 0.U) &&
+                                      (analysis.compress_group(i) === i.U) &&
+                                      !io.queryMQ(i).req.bits.cancel &&
+                                      !io.wbq_block_miss_req(i)
+
+      parallel_pipe_regs(i).mshr_id := analysis.target_mshr(i)
+      parallel_pipe_regs(i).cancel := io.wbq_block_miss_req(i)
+    }.otherwise {
+      // These regs form a one-cycle s0->s1 handoff. If no request fired this cycle,
+      // the handoff must be empty; otherwise stale alloc/merge intents leak forward.
+      parallel_pipe_regs(i).alloc := false.B
+      parallel_pipe_regs(i).merge := false.B
+      parallel_pipe_regs(i).cancel := false.B
     }
-    parallel_pipe_regs(i).alloc := ((analysis.strategy(i) & 1.U) =/= 0.U) &&
-                                    (analysis.compress_group(i) === i.U) &&
-                                    !io.queryMQ(i).req.bits.cancel &&
-                                    !io.wbq_block_miss_req(i)
-
-    parallel_pipe_regs(i).merge := ((analysis.strategy(i) & 2.U) =/= 0.U) &&
-                                    (analysis.compress_group(i) === i.U) &&
-                                    !io.queryMQ(i).req.bits.cancel &&
-                                    !io.wbq_block_miss_req(i)
-
-    parallel_pipe_regs(i).mshr_id := analysis.target_mshr(i)
-    parallel_pipe_regs(i).cancel := io.wbq_block_miss_req(i)
   }
 
   val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry)
