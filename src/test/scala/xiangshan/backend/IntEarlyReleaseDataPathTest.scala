@@ -48,6 +48,7 @@ class IntERDataPathReadDoneProbe(localSrc: Int, replayProne: Boolean)(implicit p
     val s1Valid = Input(Bool())
     val og1Failed = Input(Bool())
     val uncertainReadPath = Input(Bool())
+    val isWakeupSink = Input(Bool())
     val robIdx = Input(new rob.RobPtr)
     val srcValid = Input(Vec(localSrc, Bool()))
     val srcTrackId = Input(Vec(localSrc, UInt(IntERTrackIdWidth.W)))
@@ -79,6 +80,10 @@ class IntERDataPathReadDoneProbe(localSrc: Int, replayProne: Boolean)(implicit p
     og1Failed = io.og1Failed,
     replayPronePath = replayProne.B,
     uncertainReadPath = io.uncertainReadPath,
+    isWakeupSink = io.isWakeupSink,
+    enableForwardReadDone = IntEREnableForwardReadDone.B,
+    enableBypassReadDone = IntEREnableBypassReadDone.B,
+    enableBypass2ReadDone = IntEREnableBypass2ReadDone.B,
     status = Some(io.status)
   )
 }
@@ -146,6 +151,7 @@ class IntEarlyReleaseDataPathTest extends AnyFlatSpec with Matchers with ChiselS
     dut.io.s1Valid.poke(false.B)
     dut.io.og1Failed.poke(false.B)
     dut.io.uncertainReadPath.poke(false.B)
+    dut.io.isWakeupSink.poke(true.B)
     setRobPtr(dut.io.robIdx, 0)
     for (src <- dut.io.srcValid.indices) {
       dut.io.srcValid(src).poke(false.B)
@@ -326,6 +332,100 @@ class IntEarlyReleaseDataPathTest extends AnyFlatSpec with Matchers with ChiselS
     }
   }
 
+  it should "optionally emit readDone for forward and bypass reads after final success" in {
+    val optimizedParams = IntEarlyReleaseParams(
+      enable = true,
+      trackEntries = 2,
+      enableForwardReadDone = true,
+      enableBypassReadDone = true
+    )
+    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = false)(configWith(optimizedParams))) { dut =>
+      clearProbe(dut)
+      dut.io.s1Valid.poke(true.B)
+      setRobPtr(dut.io.robIdx, 15)
+      setTrackedSource(dut, localSrc = 0, logicalSrc = 0, trackId = 1, trackGen = 3, psrc = 21, dataSource = DataSource.forward)
+      dut.io.out.valid.expect(true.B)
+      dut.io.out.bits.fallback.expect(false.B)
+      dut.io.out.bits.reason.expect(IntERFallbackReason.none)
+      dut.io.out.bits.src(0).valid.expect(true.B)
+      dut.io.out.bits.src(0).psrc.expect(21.U)
+      dut.io.status.accepted.expect(true.B)
+      dut.io.status.acceptedForwardSourceCount.expect(1.U)
+      dut.io.status.fallbackForwardSourceCount.expect(0.U)
+
+      clearProbe(dut)
+      dut.io.s1Valid.poke(true.B)
+      setRobPtr(dut.io.robIdx, 16)
+      setTrackedSource(dut, localSrc = 1, logicalSrc = 1, trackId = 0, trackGen = 4, psrc = 22, dataSource = DataSource.bypass)
+      dut.io.out.valid.expect(true.B)
+      dut.io.out.bits.fallback.expect(false.B)
+      dut.io.out.bits.reason.expect(IntERFallbackReason.none)
+      dut.io.out.bits.src(1).valid.expect(true.B)
+      dut.io.out.bits.src(1).psrc.expect(22.U)
+      dut.io.status.accepted.expect(true.B)
+      dut.io.status.acceptedBypassSourceCount.expect(1.U)
+      dut.io.status.fallbackBypassSourceCount.expect(0.U)
+    }
+  }
+
+  it should "keep forward and bypass reads conservative when disabled or not wakeup sinks" in {
+    simulate(new IntERDataPathReadDoneProbe(localSrc = 1, replayProne = false)(configWith(IntEarlyReleaseParams(enable = true, trackEntries = 2)))) { dut =>
+      clearProbe(dut)
+      dut.io.s1Valid.poke(true.B)
+      setTrackedSource(dut, localSrc = 0, logicalSrc = 0, trackId = 1, trackGen = 3, psrc = 21, dataSource = DataSource.forward)
+      dut.io.out.valid.expect(true.B)
+      dut.io.out.bits.fallback.expect(true.B)
+      dut.io.status.unsupportedReadPath.expect(true.B)
+      dut.io.status.unsupportedForwardSourceCount.expect(1.U)
+
+      clearProbe(dut)
+      dut.io.s1Valid.poke(true.B)
+      setTrackedSource(dut, localSrc = 0, logicalSrc = 0, trackId = 1, trackGen = 3, psrc = 22, dataSource = DataSource.bypass)
+      dut.io.out.valid.expect(true.B)
+      dut.io.out.bits.fallback.expect(true.B)
+      dut.io.status.unsupportedReadPath.expect(true.B)
+      dut.io.status.unsupportedBypassSourceCount.expect(1.U)
+    }
+
+    val optimizedParams = IntEarlyReleaseParams(
+      enable = true,
+      trackEntries = 2,
+      enableForwardReadDone = true,
+      enableBypassReadDone = true
+    )
+    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = false)(configWith(optimizedParams))) { dut =>
+      clearProbe(dut)
+      dut.io.s1Valid.poke(true.B)
+      dut.io.isWakeupSink.poke(false.B)
+      setTrackedSource(dut, localSrc = 0, logicalSrc = 0, trackId = 1, trackGen = 3, psrc = 21, dataSource = DataSource.forward)
+      setTrackedSource(dut, localSrc = 1, logicalSrc = 1, trackId = 0, trackGen = 4, psrc = 22, dataSource = DataSource.bypass)
+      dut.io.out.valid.expect(true.B)
+      dut.io.out.bits.fallback.expect(true.B)
+      dut.io.status.unsupportedReadPath.expect(true.B)
+      dut.io.status.unsupportedForwardSourceCount.expect(1.U)
+      dut.io.status.unsupportedBypassSourceCount.expect(1.U)
+    }
+  }
+
+  it should "keep bypass2 unsupported in the default optimized phase" in {
+    val optimizedParams = IntEarlyReleaseParams(
+      enable = true,
+      trackEntries = 2,
+      enableForwardReadDone = true,
+      enableBypassReadDone = true,
+      enableBypass2ReadDone = false
+    )
+    simulate(new IntERDataPathReadDoneProbe(localSrc = 1, replayProne = false)(configWith(optimizedParams))) { dut =>
+      clearProbe(dut)
+      dut.io.s1Valid.poke(true.B)
+      setTrackedSource(dut, localSrc = 0, logicalSrc = 0, trackId = 1, trackGen = 3, psrc = 21, dataSource = DataSource.bypass2)
+      dut.io.out.valid.expect(true.B)
+      dut.io.out.bits.fallback.expect(true.B)
+      dut.io.status.trackedBypass2SourceCount.expect(1.U)
+      dut.io.status.unsupportedReadPath.expect(true.B)
+    }
+  }
+
   it should "suppress observations for cancelled admissions and og1 failures" in {
     simulate(new IntERDataPathReadDoneProbe(localSrc = 1, replayProne = false)(configWith(IntEarlyReleaseParams(enable = true, trackEntries = 2)))) { dut =>
       clearProbe(dut)
@@ -432,6 +532,45 @@ class IntEarlyReleaseDataPathTest extends AnyFlatSpec with Matchers with ChiselS
       dut.io.out.bits.src(1).trackGen.expect(6.U)
       dut.io.out.bits.src(1).srcIdx.expect(1.U)
       dut.io.out.bits.src(1).psrc.expect(25.U)
+    }
+  }
+
+  it should "fallback forward and bypass reads on replay-prone or uncertain paths" in {
+    val optimizedParams = IntEarlyReleaseParams(
+      enable = true,
+      trackEntries = 2,
+      enableForwardReadDone = true,
+      enableBypassReadDone = true
+    )
+    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = true)(configWith(optimizedParams))) { dut =>
+      clearProbe(dut)
+      dut.io.s1Valid.poke(true.B)
+      setTrackedSource(dut, localSrc = 0, logicalSrc = 0, trackId = 1, trackGen = 3, psrc = 21, dataSource = DataSource.forward)
+      setTrackedSource(dut, localSrc = 1, logicalSrc = 1, trackId = 0, trackGen = 4, psrc = 22, dataSource = DataSource.bypass)
+      dut.io.out.valid.expect(true.B)
+      dut.io.out.bits.fallback.expect(true.B)
+      dut.io.status.accepted.expect(false.B)
+      dut.io.status.replayProne.expect(true.B)
+      dut.io.status.replayForwardSourceCount.expect(1.U)
+      dut.io.status.replayBypassSourceCount.expect(1.U)
+      dut.io.status.fallbackForwardSourceCount.expect(1.U)
+      dut.io.status.fallbackBypassSourceCount.expect(1.U)
+    }
+
+    simulate(new IntERDataPathReadDoneProbe(localSrc = 2, replayProne = false)(configWith(optimizedParams))) { dut =>
+      clearProbe(dut)
+      dut.io.s1Valid.poke(true.B)
+      dut.io.uncertainReadPath.poke(true.B)
+      setTrackedSource(dut, localSrc = 0, logicalSrc = 0, trackId = 1, trackGen = 3, psrc = 23, dataSource = DataSource.forward)
+      setTrackedSource(dut, localSrc = 1, logicalSrc = 1, trackId = 0, trackGen = 4, psrc = 24, dataSource = DataSource.bypass)
+      dut.io.out.valid.expect(true.B)
+      dut.io.out.bits.fallback.expect(true.B)
+      dut.io.status.accepted.expect(false.B)
+      dut.io.status.uncertain.expect(true.B)
+      dut.io.status.uncertainForwardSourceCount.expect(1.U)
+      dut.io.status.uncertainBypassSourceCount.expect(1.U)
+      dut.io.status.fallbackForwardSourceCount.expect(1.U)
+      dut.io.status.fallbackBypassSourceCount.expect(1.U)
     }
   }
 

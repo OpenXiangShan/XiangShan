@@ -588,7 +588,10 @@ private class WithIntEarlyReleaseFunctional extends Config((site, here, up) => {
       observeOnly = false,
       trackEntries = 64,
       earlyFreeWidth = 8,
-      stWalkWidth = 4
+      stWalkWidth = 4,
+      enableForwardReadDone = true,
+      enableBypassReadDone = true,
+      enableBypass2ReadDone = false
     )
   ))
 })

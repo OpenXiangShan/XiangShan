@@ -152,6 +152,22 @@ class IntERDataPathReadDoneStatus extends Bundle {
   val unsupportedReadPath = Bool()
   val replayProne = Bool()
   val uncertain = Bool()
+  val trackedRegOHSourceCount = UInt(4.W)
+  val trackedRegCacheSourceCount = UInt(4.W)
+  val trackedForwardSourceCount = UInt(4.W)
+  val trackedBypassSourceCount = UInt(4.W)
+  val trackedBypass2SourceCount = UInt(4.W)
+  val trackedOtherSourceCount = UInt(4.W)
+  val acceptedForwardSourceCount = UInt(4.W)
+  val acceptedBypassSourceCount = UInt(4.W)
+  val fallbackForwardSourceCount = UInt(4.W)
+  val fallbackBypassSourceCount = UInt(4.W)
+  val unsupportedForwardSourceCount = UInt(4.W)
+  val unsupportedBypassSourceCount = UInt(4.W)
+  val replayForwardSourceCount = UInt(4.W)
+  val replayBypassSourceCount = UInt(4.W)
+  val uncertainForwardSourceCount = UInt(4.W)
+  val uncertainBypassSourceCount = UInt(4.W)
 }
 
 class IntERRobReadDoneStatus extends Bundle {

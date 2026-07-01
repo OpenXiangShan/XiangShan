@@ -40,8 +40,18 @@ object DataPathIntEROps {
     issueParams.take(iqIdx).map(_.numDeq).sum + deqIdx
   }
 
-  def isSupportedValueRead(source: DataSource): Bool = {
-    source.readRegOH || source.readRegCache
+  def isSupportedValueRead(
+    source: DataSource,
+    isWakeupSink: Bool,
+    enableForwardReadDone: Bool,
+    enableBypassReadDone: Bool,
+    enableBypass2ReadDone: Bool
+  ): Bool = {
+    source.readRegOH ||
+      source.readRegCache ||
+      (enableForwardReadDone && isWakeupSink && source.readForward) ||
+      (enableBypassReadDone && isWakeupSink && source.readBypass) ||
+      (enableBypass2ReadDone && isWakeupSink && source.readBypass2)
   }
 
   def emitReadDoneObservation(
@@ -54,6 +64,10 @@ object DataPathIntEROps {
     og1Failed: Bool,
     replayPronePath: Bool,
     uncertainReadPath: Bool,
+    isWakeupSink: Bool,
+    enableForwardReadDone: Bool,
+    enableBypassReadDone: Bool,
+    enableBypass2ReadDone: Bool,
     status: Option[IntERDataPathReadDoneStatus] = None
   ): Unit = {
     require(srcShadow.length == dataSources.length, "read observation source vectors must have matching widths")
@@ -64,8 +78,29 @@ object DataPathIntEROps {
 
     val completed = s1Valid && !og1Failed
     val trackedSources = srcShadow.zip(intReadSources).map { case (src, intRead) => src.valid && intRead }
+    val activeTrackedSources = trackedSources.map(tracked => s1Valid && tracked)
     val supportedSources = dataSources.zip(intReadSources).map { case (source, intRead) =>
-      intRead && isSupportedValueRead(source)
+      intRead && isSupportedValueRead(
+        source,
+        isWakeupSink,
+        enableForwardReadDone,
+        enableBypassReadDone,
+        enableBypass2ReadDone
+      )
+    }
+    val trackedRegOHSources = activeTrackedSources.zip(dataSources).map { case (tracked, source) => tracked && source.readRegOH }
+    val trackedRegCacheSources = activeTrackedSources.zip(dataSources).map { case (tracked, source) => tracked && source.readRegCache }
+    val trackedForwardSources = activeTrackedSources.zip(dataSources).map { case (tracked, source) => tracked && source.readForward }
+    val trackedBypassSources = activeTrackedSources.zip(dataSources).map { case (tracked, source) => tracked && source.readBypass }
+    val trackedBypass2Sources = activeTrackedSources.zip(dataSources).map { case (tracked, source) => tracked && source.readBypass2 }
+    val trackedOtherSources = activeTrackedSources.zip(dataSources).map { case (tracked, source) =>
+      tracked && !(source.readRegOH || source.readRegCache || source.readForward || source.readBypass || source.readBypass2)
+    }
+    val unsupportedForwardSources = trackedForwardSources.zip(supportedSources).map { case (tracked, supported) =>
+      tracked && !supported
+    }
+    val unsupportedBypassSources = trackedBypassSources.zip(supportedSources).map { case (tracked, supported) =>
+      tracked && !supported
     }
     val anyTracked = VecInit(trackedSources).asUInt.orR
     val anyUnsupported = VecInit(srcShadow.zip(intReadSources).zip(supportedSources).map { case ((src, intRead), supported) =>
@@ -87,6 +122,22 @@ object DataPathIntEROps {
       s.unsupportedReadPath := completed && anyTracked && anyUnsupported
       s.replayProne := completed && anyTracked && replayPronePath
       s.uncertain := completed && anyTracked && uncertainReadPath
+      s.trackedRegOHSourceCount := PopCount(trackedRegOHSources)
+      s.trackedRegCacheSourceCount := PopCount(trackedRegCacheSources)
+      s.trackedForwardSourceCount := PopCount(trackedForwardSources)
+      s.trackedBypassSourceCount := PopCount(trackedBypassSources)
+      s.trackedBypass2SourceCount := PopCount(trackedBypass2Sources)
+      s.trackedOtherSourceCount := PopCount(trackedOtherSources)
+      s.acceptedForwardSourceCount := Mux(readDone, PopCount(trackedForwardSources), 0.U)
+      s.acceptedBypassSourceCount := Mux(readDone, PopCount(trackedBypassSources), 0.U)
+      s.fallbackForwardSourceCount := Mux(fallback, PopCount(trackedForwardSources), 0.U)
+      s.fallbackBypassSourceCount := Mux(fallback, PopCount(trackedBypassSources), 0.U)
+      s.unsupportedForwardSourceCount := Mux(completed && anyTracked && anyUnsupported, PopCount(unsupportedForwardSources), 0.U)
+      s.unsupportedBypassSourceCount := Mux(completed && anyTracked && anyUnsupported, PopCount(unsupportedBypassSources), 0.U)
+      s.replayForwardSourceCount := Mux(completed && anyTracked && replayPronePath, PopCount(trackedForwardSources), 0.U)
+      s.replayBypassSourceCount := Mux(completed && anyTracked && replayPronePath, PopCount(trackedBypassSources), 0.U)
+      s.uncertainForwardSourceCount := Mux(completed && anyTracked && uncertainReadPath, PopCount(trackedForwardSources), 0.U)
+      s.uncertainBypassSourceCount := Mux(completed && anyTracked && uncertainReadPath, PopCount(trackedBypassSources), 0.U)
     }
 
     for (logicalSrc <- out.bits.src.indices) {
@@ -766,6 +817,10 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
               og1Failed = og1FailedVec2(iqIdx)(iuIdx),
               replayPronePath = replayPronePath.B,
               uncertainReadPath = uncertainReadPath,
+              isWakeupSink = s1_toExuData(iqIdx)(iuIdx).exuParams.isIQWakeUpSink.B,
+              enableForwardReadDone = IntEREnableForwardReadDone.B,
+              enableBypassReadDone = IntEREnableBypassReadDone.B,
+              enableBypass2ReadDone = IntEREnableBypass2ReadDone.B,
               status = intERReadDoneStatus.map(_(readDoneIdx))
             )
           }
@@ -869,6 +924,24 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     XSPerfAccumulate("int_er_datapath_suppressed_read_obs", PopCount(status.map(_.suppressed)))
     XSPerfAccumulate("int_er_datapath_replay_prone_fallback", PopCount(status.map(_.replayProne)))
     XSPerfAccumulate("int_er_datapath_uncertain_fallback", PopCount(status.map(_.uncertain)))
+    if (IntEREnableWakeupAlignedReadDoneCounters) {
+      XSPerfAccumulate("int_er_datapath_tracked_source_reg_oh", status.map(_.trackedRegOHSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_tracked_source_regcache", status.map(_.trackedRegCacheSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_tracked_source_forward", status.map(_.trackedForwardSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_tracked_source_bypass", status.map(_.trackedBypassSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_tracked_source_bypass2", status.map(_.trackedBypass2SourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_tracked_source_other", status.map(_.trackedOtherSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_read_done_source_forward", status.map(_.acceptedForwardSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_read_done_source_bypass", status.map(_.acceptedBypassSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_fallback_source_forward", status.map(_.fallbackForwardSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_fallback_source_bypass", status.map(_.fallbackBypassSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_unsupported_source_forward", status.map(_.unsupportedForwardSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_unsupported_source_bypass", status.map(_.unsupportedBypassSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_replay_prone_source_forward", status.map(_.replayForwardSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_replay_prone_source_bypass", status.map(_.replayBypassSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_uncertain_source_forward", status.map(_.uncertainForwardSourceCount).reduce(_ +& _))
+      XSPerfAccumulate("int_er_datapath_uncertain_source_bypass", status.map(_.uncertainBypassSourceCount).reduce(_ +& _))
+    }
   }
 
   XSPerfHistogram(s"IntRFReadBeforeArb_hist", PopCount(intRFReadArbiter.io.in.flatten.flatten.map(_.valid)), true.B, 0, 16, 2)
