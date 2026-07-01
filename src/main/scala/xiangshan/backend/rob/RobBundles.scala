@@ -585,6 +585,7 @@ object RobIntEROps {
             stored.valid &&
             stored.trackId === srcEvent.trackId &&
             stored.trackGen === srcEvent.trackGen &&
+            stored.psrc === srcEvent.psrc &&
             !stored.readDone
         val acceptedSource = raw(lane).valid && srcEvent.valid && storedMatches && !duplicate
         duplicateSource(lane)(slot) := raw(lane).valid && srcEvent.valid && duplicate

@@ -172,20 +172,22 @@ class IntSparseUCATest extends AnyFlatSpec with Matchers with ChiselSim {
     dut.io.debug.entries(entryIdx).state.expect(IntEREntryState.releasedWaitCommit)
   }
 
-  private def readDone(dut: IntSparseUCA, trackId: Int = 0, gen: Int = 1, srcSlot: Int = 0): Unit = {
+  private def readDone(dut: IntSparseUCA, trackId: Int = 0, gen: Int = 1, srcSlot: Int = 0, psrc: Int = 5): Unit = {
     dut.io.readDone(0).valid.poke(true.B)
     dut.io.readDone(0).bits.src(srcSlot).valid.poke(true.B)
     dut.io.readDone(0).bits.src(srcSlot).trackId.poke(trackId.U)
     dut.io.readDone(0).bits.src(srcSlot).trackGen.poke(gen.U)
     dut.io.readDone(0).bits.src(srcSlot).srcIdx.poke(srcSlot.U)
+    dut.io.readDone(0).bits.src(srcSlot).psrc.poke(psrc.U)
   }
 
-  private def squash(dut: IntSparseUCA, trackId: Int = 0, gen: Int = 1, srcSlot: Int = 0): Unit = {
+  private def squash(dut: IntSparseUCA, trackId: Int = 0, gen: Int = 1, srcSlot: Int = 0, psrc: Int = 5): Unit = {
     dut.io.squash(0).valid.poke(true.B)
     dut.io.squash(0).bits.src(srcSlot).valid.poke(true.B)
     dut.io.squash(0).bits.src(srcSlot).trackId.poke(trackId.U)
     dut.io.squash(0).bits.src(srcSlot).trackGen.poke(gen.U)
     dut.io.squash(0).bits.src(srcSlot).srcIdx.poke(srcSlot.U)
+    dut.io.squash(0).bits.src(srcSlot).psrc.poke(psrc.U)
   }
 
   private def commitRedef(
@@ -354,6 +356,58 @@ class IntSparseUCATest extends AnyFlatSpec with Matchers with ChiselSim {
       clearInputs(dut)
       dut.io.debug.entries(0).userCounter.expect(1.U)
       dut.io.debug.squashDecCount.expect(1.U)
+    }
+  }
+
+  it should "ignore readDone and squash events with stale psrc identity" in {
+    val config = configWith(IntEarlyReleaseParams(trackEntries = 2))
+    simulate(new IntSparseUCA()(config)) { dut =>
+      resetDut(dut)
+
+      allocate(dut, pdest = 5, robIdx = 1)
+      dut.clock.step()
+      clearInputs(dut)
+
+      dut.io.rename.source(0)(0).valid.poke(true.B)
+      dut.io.rename.source(0)(0).psrc.poke(5.U)
+      dut.io.rename.source(0)(0).srcIdx.poke(0.U)
+      dut.clock.step()
+      clearInputs(dut)
+      dut.io.debug.entries(0).userCounter.expect(2.U)
+
+      readDone(dut, trackId = 0, gen = 1, srcSlot = 0, psrc = 99)
+      dut.clock.step()
+      clearInputs(dut)
+      dut.io.debug.entries(0).state.expect(IntEREntryState.counting)
+      dut.io.debug.entries(0).userCounter.expect(2.U)
+      dut.io.debug.readDoneDecCount.expect(0.U)
+
+      squash(dut, trackId = 0, gen = 1, srcSlot = 0, psrc = 99)
+      dut.clock.step()
+      clearInputs(dut)
+      dut.io.debug.entries(0).state.expect(IntEREntryState.counting)
+      dut.io.debug.entries(0).userCounter.expect(2.U)
+      dut.io.debug.squashDecCount.expect(0.U)
+
+      dut.io.readDone(0).valid.poke(true.B)
+      dut.io.readDone(0).bits.fallback.poke(true.B)
+      dut.io.readDone(0).bits.reason.poke(IntERFallbackReason.unsupportedReadPath)
+      dut.io.readDone(0).bits.src(0).valid.poke(true.B)
+      dut.io.readDone(0).bits.src(0).trackId.poke(0.U)
+      dut.io.readDone(0).bits.src(0).trackGen.poke(1.U)
+      dut.io.readDone(0).bits.src(0).srcIdx.poke(0.U)
+      dut.io.readDone(0).bits.src(0).psrc.poke(99.U)
+      dut.clock.step()
+      clearInputs(dut)
+      dut.io.debug.entries(0).state.expect(IntEREntryState.counting)
+      dut.io.debug.entries(0).fallback.expect(false.B)
+      dut.io.debug.entries(0).userCounter.expect(2.U)
+      dut.io.debug.fallbackCount.expect(0.U)
+
+      readDone(dut, trackId = 0, gen = 2, srcSlot = 0, psrc = 99)
+      dut.clock.step()
+      clearInputs(dut)
+      dut.io.debug.genMismatchCount.expect(0.U)
     }
   }
 

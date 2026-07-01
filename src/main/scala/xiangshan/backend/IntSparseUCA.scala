@@ -262,30 +262,35 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
     val readDecHits = io.readDone.flatMap { event =>
       event.bits.src.map { src =>
         event.valid && !event.bits.fallback && src.valid &&
-          src.trackId === e.U && src.trackGen === entries(e).gen && isCounting(entries(e))
+          src.trackId === e.U && src.trackGen === entries(e).gen &&
+          src.psrc === entries(e).pdest && isCounting(entries(e))
       }
     }
     val readFallbackHits = io.readDone.flatMap { event =>
       event.bits.src.map { src =>
         event.valid && event.bits.fallback && src.valid &&
-          src.trackId === e.U && src.trackGen === entries(e).gen && isCounting(entries(e))
+          src.trackId === e.U && src.trackGen === entries(e).gen &&
+          src.psrc === entries(e).pdest && isCounting(entries(e))
       }
     }
     val readGenMismatchHits = io.readDone.flatMap { event =>
       event.bits.src.map { src =>
-        event.valid && src.valid && src.trackId === e.U && src.trackGen =/= entries(e).gen && isActive(entries(e))
+        event.valid && src.valid && src.trackId === e.U && src.trackGen =/= entries(e).gen &&
+          src.psrc === entries(e).pdest && isActive(entries(e))
       }
     }
 
     val squashDecHits = io.squash.flatMap { event =>
       event.bits.src.map { src =>
         event.valid && src.valid &&
-          src.trackId === e.U && src.trackGen === entries(e).gen && isCounting(entries(e))
+          src.trackId === e.U && src.trackGen === entries(e).gen &&
+          src.psrc === entries(e).pdest && isCounting(entries(e))
       }
     }
     val squashGenMismatchHits = io.squash.flatMap { event =>
       event.bits.src.map { src =>
-        event.valid && src.valid && src.trackId === e.U && src.trackGen =/= entries(e).gen && isActive(entries(e))
+        event.valid && src.valid && src.trackId === e.U && src.trackGen =/= entries(e).gen &&
+          src.psrc === entries(e).pdest && isActive(entries(e))
       }
     }
 

@@ -690,6 +690,11 @@ class IntEarlyReleaseRobTest extends AnyFlatSpec with Matchers with ChiselSim {
       dut.io.dec(0).valid.expect(false.B)
       dut.clock.step()
 
+      loadTrackedSource(dut, psrc = 21)
+      driveReadDone(dut, lane = 0, psrc = 22)
+      dut.io.dec(0).valid.expect(false.B)
+      dut.clock.step()
+
       loadTrackedSource(dut)
       driveReadDone(dut, lane = 0, srcSlot = 0)
       dut.io.dec(0).valid.expect(false.B)
