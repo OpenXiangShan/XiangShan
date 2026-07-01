@@ -140,6 +140,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.dtlb.resp.ready   := true.B
 
   io.flush_sbuffer.valid := false.B
+  io.flush_sbuffer.isCmo := false.B
 
   when (state === s_invalid) {
     when (io.in.fire) {
