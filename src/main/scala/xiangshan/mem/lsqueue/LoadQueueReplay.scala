@@ -212,6 +212,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
 
     val debugTopDown = new LoadQueueTopDownIO
+    val replayAllocate = Output(Bool())
   })
 
   println("LoadQueueReplay size: " + LoadQueueReplaySize)
@@ -803,6 +804,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   io.debugTopDown.robHeadLoadVio := rob_head_vio_replay
   io.debugTopDown.robHeadLoadMSHR := rob_head_mshrfull_replay
   io.debugTopDown.robHeadOtherReplay := rob_head_other_replay
+  io.replayAllocate := allocated.asUInt.orR
   val perfValidCount = RegNext(PopCount(allocated))
 
   //  perf cnt
@@ -833,6 +835,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_dcache_miss", replayDCacheMissCount)
   XSPerfAccumulate("replay_hint_wakeup", s0_hintSelValid)
   XSPerfAccumulate("replay_hint_priority_beat1", io.l2_hint.valid && io.l2_hint.bits.isKeyword)
+  XSPerfAccumulate("replay_allocate", io.replayAllocate)
 
   val perfEvents: Seq[(String, UInt)] = Seq(
     ("enq", enqNumber),

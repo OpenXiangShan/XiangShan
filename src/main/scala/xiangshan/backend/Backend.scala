@@ -495,8 +495,9 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   dataPath.io.fromBypassNetwork := bypassNetwork.io.toDataPath
   dataPath.io.fromVecExcpMod.r := vecExcpMod.o.toVPRF.r
   dataPath.io.fromVecExcpMod.w := vecExcpMod.o.toVPRF.w
-  dataPath.io.topDownInfo.lqEmpty := DelayN(io.topDownInfo.lqEmpty, 2)
-  dataPath.io.topDownInfo.sqEmpty := DelayN(io.topDownInfo.sqEmpty, 2)
+  dataPath.io.topDownInfo.replayAllocate := DelayN(io.topDownInfo.replayAllocate, 2)
+  dataPath.io.topDownInfo.sqFull := DelayN(io.topDownInfo.sqFull, 2)
+  dataPath.io.topDownInfo.sbFull := DelayN(io.topDownInfo.sbFull, 2)
   dataPath.io.topDownInfo.l1Miss := RegNext(io.topDownInfo.l1Miss)
   dataPath.io.topDownInfo.l2TopMiss.l2Miss := io.topDownInfo.l2TopMiss.l2Miss
   dataPath.io.topDownInfo.l2TopMiss.l3Miss := io.topDownInfo.l2TopMiss.l3Miss
@@ -873,8 +874,6 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.debugTopDown.fromCore := io.debugTopDown.fromCore
 
   io.debugRolling := ctrlBlock.io.debugRolling
-
-  io.topDownInfo.noUopsIssued := RegNext(dataPath.io.topDownInfo.noUopsIssued)
 
   private val cg = ClockGate.genTeSrc
   dontTouch(cg)
