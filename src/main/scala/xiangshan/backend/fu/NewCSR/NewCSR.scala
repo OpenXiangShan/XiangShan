@@ -573,11 +573,11 @@ class NewCSR(implicit val p: Parameters) extends Module
     mod.w.wdata := wdata
   }
 
-  iregiprios.foreach { mod =>
+  siregiprios.foreach { mod =>
     mod match {
-      case m: HasIeBundle =>
-        m.mie := mie.regOut
-        m.sie := sie.regOut
+      case m: HasSiprios =>
+        m.mideleg := mideleg.regOut
+        m.mvien   := mvien.regOut
       case _ =>
     }
   }
