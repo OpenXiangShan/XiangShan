@@ -26,6 +26,8 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], opcodeTable: Map[BitPat, Op
   @public val in = IO(Input(new DecodeChannelInput))
   @public val out = IO(Output(ValidIO(new SimpleDecodeChannelOutput)))
 
+  val isMove = BitPat("b000000000000_?????_000_?????_0010011")
+
   val rawInst = in.rawInst
   val instFields = rawInst.asTypeOf(new XSInstBitFields)
   val rdZero = instFields.RD === 0.U
@@ -46,6 +48,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], opcodeTable: Map[BitPat, Op
     Src1Field,
     Src2Field,
     Src3Field,
+    IsMopField,
     FrmRenField,
     GpWenField,
     FpWenField,
@@ -65,6 +68,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], opcodeTable: Map[BitPat, Op
   val result = table.decode(in.rawInst)
   val resultInstRd = instRdTable.decode(in.rawInst ## rdZero)
 
+  val isMop  = result(IsMopField)
   val selImm = result(SelImmField)
 
   val imm = LookupTree(selImm.bits, ImmUnion.immSelMap.map {
@@ -96,6 +100,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern], opcodeTable: Map[BitPat, Op
   out.bits.commitType := result(CommitTypeField)
   out.bits.canRobCompress := result(CanRobCompressField)
   out.bits.numWb := resultInstRd(NumWbField)
+  out.bits.isMove := (isMop || rawInst === isMove) && instFields.RD =/= 0.U
 }
 
 class SimpleDecodeChannelOutput() extends Bundle {
@@ -122,6 +127,7 @@ class SimpleDecodeChannelOutput() extends Bundle {
   val commitType = CommitType()
   val canRobCompress = Bool()
   val numWb = NumWB()
+  val isMove = Bool()
 }
 
 object SimpleDecodeChannelMain extends App {
