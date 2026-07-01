@@ -13,7 +13,63 @@ import xiangshan.XSBundle
 
 import scala.collection.immutable.SeqMap
 
-trait CSRAIA { self: NewCSR with HypervisorLevel =>
+trait CSRAIA extends HasSoCParameter { self: NewCSR with HypervisorLevel =>
+  private def fieldWritableMap(fields: Seq[CSREnumType]): Map[Int, Boolean] =
+    fields.map(f => f.lsb -> !f.isRO).toMap
+
+  private def validFieldWritableMap(fields: Seq[Valid[CSREnumType]]): Map[Int, Boolean] =
+    fields.map(f => f.bits.lsb -> !f.bits.isRO).toMap
+
+  private def iprioMask(base: Int, writableMaps: Seq[Map[Int, Boolean]]): UInt = {
+    val mask = (0 until 8).foldLeft(BigInt(0)) { case (m, i) =>
+      val intNo = base + i
+      val writable = writableMaps.exists(_.getOrElse(intNo, false))
+      if (writable) m | (BigInt(0xff) << (8 * i)) else m
+    }
+    mask.U(64.W)
+  }
+
+  private lazy val mieFieldWritable: Map[Int, Boolean] = {
+    val m = fieldWritableMap(new MieBundle().getFields)
+    if (soc.IMSICParams.HasTEEIMSIC) m else m.updated(InterruptNO.ASNI, false)
+  }
+
+  /*
+    For a given interrupt number, if the corresponding bit in mie is read-only zero,
+    then the interrupt’s priority number in the iprio array must be read-only zero as well.
+    static mask
+  */
+  private def miprioMask(base: Int): UInt =
+    iprioMask(base, Seq(mieFieldWritable))
+
+  private def gatedWritable(writableMap: Map[Int, Boolean], intNo: Int, gate: Bool): Bool =
+    if (writableMap.getOrElse(intNo, false)) gate else false.B
+
+  /*
+    For a given interrupt number, if the corresponding bit is not writable either in sie or,
+    if the H extension is implemented, in hie,
+    then the interrupt’s priority number in the supervisor-level iprio array must be read-only zero as well.
+    Dynamic mask
+  */
+  private def siprioMask(base: Int, midelegBits: UInt, mvienBits: UInt): UInt = {
+    val sieRegWritable = fieldWritableMap(new SieBundle().getFields)
+    val sieToMieWritable = validFieldWritableMap(new SieToMie().getAll)
+    val hieToMieWritable = validFieldWritableMap(new HieToMie().getAll)
+
+    Cat((0 until 8).reverse.map { i =>
+      val intNo = base + i
+      val delegated = midelegBits(intNo)
+      val virtualized = mvienBits(intNo)
+      val writableInSie =
+        gatedWritable(sieToMieWritable, intNo, delegated) ||
+        gatedWritable(sieRegWritable, intNo, !delegated && virtualized)
+      val writableInHie =
+        gatedWritable(hieToMieWritable, intNo, delegated)
+
+      Fill(8, writableInSie || writableInHie)
+    })
+  }
+
   val miselect = Module(new CSRModule("Miselect", new MISelectBundle) with HasISelectBundle {
     private val value = reg.ALL.asUInt
     inIMSICRange := value >= 0x70.U && value < 0x100.U
@@ -93,60 +149,36 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   })
     .setAddr(CSRs.vstopi)
 
-  val miprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle) with HasIeBundle {
-    val mask = Wire(Vec(8, UInt(8.W)))
-    for (i <- 0 until 8) {
-      mask(i) := Fill(8, mie.asUInt(i))
-    }
-    regOut := reg & mask.asUInt
+  val miprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle) {
+    regOut := reg & miprioMask(0)
   })
     .setAddr(0x30)
 
-  val miprio2 = Module(new CSRModule(s"Iprio2", new MIprio2Bundle) with HasIeBundle {
-    val mask = Wire(Vec(8, UInt(8.W)))
-    for (i <- 0 until 8) {
-      mask(i) := Fill(8, mie.asUInt(i+8))
-    }
-    regOut := reg & mask.asUInt
+  val miprio2 = Module(new CSRModule(s"Iprio2", new MIprio2Bundle) {
+    regOut := reg & miprioMask(8)
   })
     .setAddr(0x32)
 
   val miprios: Seq[CSRModule[_]] = (4 to (0xF, 2)).map(num =>
-    Module(new CSRModule(s"Iprio$num", new IprioBundle) with HasIeBundle {
-      val mask = Wire(Vec(8, UInt(8.W)))
-      for (i <- 0 until 8) {
-        mask(i) := Fill(8, mie.asUInt(num*4+i))
-      }
-      regOut := reg & mask.asUInt
+    Module(new CSRModule(s"Iprio$num", new IprioBundle) {
+      regOut := reg & miprioMask(num * 4)
     })
       .setAddr(0x30 + num)
   )
 
-  val siprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle) with HasIeBundle {
-    val mask = Wire(Vec(8, UInt(8.W)))
-    for (i <- 0 until 8) {
-      mask(i) := Fill(8, sie.asUInt(i))
-    }
-    regOut := reg & mask.asUInt
+  val siprio0 = Module(new CSRModule(s"Iprio0", new Iprio0Bundle) with HasSiprios {
+    regOut := reg & siprioMask(0, mideleg.asUInt, mvien.asUInt)
   })
     .setAddr(0x30)
 
-  val siprio2 = Module(new CSRModule(s"Iprio2", new SIprio2Bundle) with HasIeBundle {
-    val mask = Wire(Vec(8, UInt(8.W)))
-    for (i <- 0 until 8) {
-      mask(i) := Fill(8, sie.asUInt(i+8))
-    }
-    regOut := reg & mask.asUInt
+  val siprio2 = Module(new CSRModule(s"Iprio2", new SIprio2Bundle) with HasSiprios {
+    regOut := reg & siprioMask(8, mideleg.asUInt, mvien.asUInt)
   })
     .setAddr(0x32)
 
   val siprios: Seq[CSRModule[_]] = (4 to (0xF, 2)).map(num =>
-    Module(new CSRModule(s"Iprio$num", new IprioBundle) with HasIeBundle{
-      val mask = Wire(Vec(8, UInt(8.W)))
-      for (i <- 0 until 8) {
-        mask(i) := Fill(8, sie.asUInt(num*4+i))
-      }
-      regOut := reg & mask.asUInt
+    Module(new CSRModule(s"Iprio$num", new IprioBundle) with HasSiprios {
+      regOut := reg & siprioMask(num * 4, mideleg.asUInt, mvien.asUInt)
     })
     .setAddr(0x30 + num)
   )
@@ -154,8 +186,6 @@ trait CSRAIA { self: NewCSR with HypervisorLevel =>
   val miregiprios: Seq[CSRModule[_]] = Seq(miprio0, miprio2) ++: miprios
 
   val siregiprios: Seq[CSRModule[_]] = Seq(siprio0, siprio2) ++: siprios
-
-  val iregiprios = miregiprios ++ siregiprios
 
   val aiaCSRMods = Seq(
     miselect,
@@ -353,7 +383,7 @@ trait HasIregSink { self: CSRModule[_] =>
   }))
 }
 
-trait HasIeBundle { self: CSRModule[_] =>
-  val mie = IO(Input(new MieBundle))
-  val sie = IO(Input(new SieBundle))
+trait HasSiprios { self: CSRModule[_] =>
+  val mideleg = IO(Input(new MidelegBundle))
+  val mvien = IO(Input(new MvienBundle))
 }
