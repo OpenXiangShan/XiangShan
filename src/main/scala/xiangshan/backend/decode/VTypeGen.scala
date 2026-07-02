@@ -24,10 +24,9 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
   private val vtypeSpecNext = WireInit(vtypeSpec)
 
   private val vtypeArchNext = WireInit(vtypeArch)
+
   private val vtypeNewVec: Vec[VTypeNewEntry] = VecInit((0 until DecodeWidth).map { i =>
-    val inst  = in.insts(i)
-    val entry = VTypeNewEntry.fromInst(inst.bits, inst.valid)
-    entry
+     VTypeNewEntry.fromInst(in.insts(i))
   })
 
   /**
@@ -76,7 +75,9 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
   // Step 4: final element
   private val m08 = m07.merge(s8)  // -> pref[8]
 
-  private val vtypePrefix = IndexedSeq(s0, m01, m02, m03, m04, m05, m06, m07, m08)
+  private val vtypePrefix = VecInit(s0, m01, m02, m03, m04, m05, m06, m07, m08)
+
+  dontTouch(vtypePrefix)
 
   for (i <- 0 until DecodeWidth) {
     out.vtype(i) := vtypePrefix(i + 1).toVType
@@ -88,7 +89,7 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
   out.oldVType := VecInit(oldVType.init)
 
   // assign the last vtype to vtypeSpec
-  private val vtypeNew = out.vtype(DecodeWidth - 1)
+  private val vtypeNew = vtypePrefix(in.validNum).toVType
 
   vtypeSpec := vtypeSpecNext
   vtypeArch := vtypeArchNext
@@ -130,7 +131,8 @@ object VTypeGen {
   }
 
   class In()(implicit p: Parameters) extends XSBundle {
-    val insts = Flipped(Vec(DecodeWidth, ValidIO(UInt(32.W))))
+    val insts = Input(Vec(DecodeWidth, UInt(32.W)))
+    val validNum = Input(UInt(DecodeWidth.U.getWidth.W))
     val walkToArchVType = Input(Bool())
     val walkVType   = Flipped(Valid(new VType))
     val canUpdateVType = Input(Bool())
@@ -196,8 +198,7 @@ object VTypeNewEntry {
     out.vlratio := calVlratio(vtype)
     out
   }
-
-  def fromInst(inst: UInt, valid: Bool): VTypeNewEntry = {
+  def fromInst(inst: UInt): VTypeNewEntry = {
     val instField  = inst.asTypeOf(new XSInstBitFields)
     val isVsetivli = Instructions.VSETIVLI === inst
     val isVsetvli  = Instructions.VSETVLI  === inst
@@ -216,10 +217,9 @@ object VTypeNewEntry {
     )
 
     val isKeepVl = isVsetvli && instField.RD === 0.U && instField.RS1 === 0.U
-    val isVset   = isVseti && valid
-    out.isVset  := isVset
-    out.replVl  := isVset && !isKeepVl
-    out.vlratio := Mux(isVset, calVlratio(vtype), 127.U)
+    out.isVset  := isVseti
+    out.replVl  := isVseti && !isKeepVl
+    out.vlratio := Mux(isVseti, calVlratio(vtype), 127.U)
     out
   }
 }

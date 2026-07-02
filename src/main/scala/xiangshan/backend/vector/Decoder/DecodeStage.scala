@@ -11,7 +11,8 @@ import xiangshan.backend.decode.isa.Extensions._
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.RatReadPort
-import xiangshan.backend.vector.Decoder.Types.DecodeSelImm
+import xiangshan.backend.vector.Decoder.Types.{DecodeSelImm, UopBufferNum}
+import xiangshan.backend.vector.Decoder.NumUopOH
 import xiangshan.backend.vector.LatDecoder
 import xiangshan.ExceptionNO._
 
@@ -240,6 +241,12 @@ class DecodeStageImp(
 
   out.toFrontend.canAccept := !in.redirect.valid && out.uop.head.ready
 
+  if (backendParams.debugEn) {
+    out.toFrontend.uopBufferNum.get := decodeChannels.out.uopBufferNum.get
+    out.toFrontend.channelUopNum.get := decodeChannels.out.channelUopNum.get
+    out.toFrontend.accNum.get := decodeChannels.out.accNum.get
+  }
+
   stallReason.out.reason := stallReason.in.reason
 
   val perfEvents = Seq()
@@ -281,6 +288,9 @@ object DecodeStage {
 
     val toFrontend = Output(new Bundle {
       val canAccept = Bool()
+      val uopBufferNum = Option.when(backendParams.debugEn)(UopBufferNum())
+      val channelUopNum = Option.when(backendParams.debugEn)(Vec(DecodeWidth, NumUopOH()))
+      val accNum = Option.when(backendParams.debugEn)(UInt(DecodeWidth.U.getWidth.W))
     })
 
     val toCSR = new Bundle {

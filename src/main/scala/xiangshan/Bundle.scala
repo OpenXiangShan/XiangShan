@@ -428,7 +428,7 @@ class WfiReqBundle extends Bundle {
 
 class FrontendToCtrlIO(implicit p: Parameters) extends XSBundle {
   // to backend end
-  val cfVec = Vec(DecodeWidth, DecoupledIO(new CtrlFlow))
+  val cfVec = Vec(DecodeWidth, ValidIO(new CtrlFlow))
   val stallReason = new StallReasonIO(DecodeWidth)
   val fromFtq = new FtqToCtrlIO
   val fromIfu = new IfuToBackendIO
