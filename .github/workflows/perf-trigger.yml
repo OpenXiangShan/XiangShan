@@ -37,8 +37,10 @@ on:
         type: choice
         options:
           - gcc15-spec06-0.3c
-          - gcc15-spec06-0.8c
           - gcc15-spec06-1.0c
+          - gcc15-spec06-legacy-0.3c
+          - gcc15-spec06-legacy-0.8c
+          - gcc15-spec06-legacy-1.0c
           - xscc-spec06-0.3c
           - xscc-spec06-0.8c
           - xscc-spec06-1.0c
