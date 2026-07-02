@@ -24,8 +24,9 @@ import utils._
 import utility._
 
 
-class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) with HasPerfEvents {
+class MEFreeList(size: Int, numLogicRegs: Int = 32)(implicit p: Parameters) extends BaseFreeList(size, numLogicRegs) with HasPerfEvents {
   val freeList = RegInit(VecInit(
+    // Zicfiss: internal integer logical registers are also initially mapped to x0.
     // originally {1, 2, ..., size - 1} are free. Register 0-31 are mapped to x0.
     Seq.tabulate(size - 1)(i => (i + 1).U(PhyRegIdxWidth.W)) :+ 0.U(PhyRegIdxWidth.W)))
 
@@ -84,8 +85,9 @@ class MEFreeList(size: Int)(implicit p: Parameters) extends BaseFreeList(size) w
 
   if(backendParams.debugEn){
     val debugArchHeadPtr = RegNext(RegNext(archHeadPtr, FreeListPtr(false, 0)), FreeListPtr(false, 0)) // two-cycle delay from refCounter
-    val debugArchRAT = RegNext(RegNext(io.debug_rat.get, VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W)))), VecInit(Seq.fill(32)(0.U(PhyRegIdxWidth.W))))
-    val debugUniqPR = Seq.tabulate(32)(i => i match {
+    // Zicfiss: include architecture-invisible int logical registers in the internal freelist check.
+    val debugArchRAT = RegNext(RegNext(io.debug_rat.get, VecInit(Seq.fill(numLogicRegs)(0.U(PhyRegIdxWidth.W)))), VecInit(Seq.fill(numLogicRegs)(0.U(PhyRegIdxWidth.W))))
+    val debugUniqPR = Seq.tabulate(numLogicRegs)(i => i match {
       case 0 => true.B
       case _ => !debugArchRAT.take(i).map(_ === debugArchRAT(i)).reduce(_ || _)
     })

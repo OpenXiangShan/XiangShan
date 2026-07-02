@@ -83,6 +83,13 @@ trait VectorConstants {
   val MAX_INDEXED_LS_UOPNUM = 64
 }
 
+trait ZicfissConstants {
+  // Zicfiss: integer logical register id used to carry SSP-derived values inside split uops.
+  val IntSSPTmpReg = 32
+  // Zicfiss: SSP CSR address.
+  val ZicfissSSPCSRAddr = 0x011
+}
+
 class DecodeUnitCompInput(implicit p: Parameters) extends XSBundle {
   val simpleDecodedInst = new DecodedInst
   val uopInfo = new UopInfo
@@ -105,7 +112,7 @@ class DecodeUnitCompIO(implicit p: Parameters) extends XSBundle {
 /**
  * @author zly
  */
-class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnitConstants with VectorConstants {
+class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnitConstants with VectorConstants with ZicfissConstants {
   val io = IO(new DecodeUnitCompIO)
 
   // alias
@@ -136,6 +143,15 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   val src1 = Cat(0.U(1.W), instFields.RS1)
   val src2 = Cat(0.U(1.W), instFields.RS2)
   val dest = Cat(0.U(1.W), instFields.RD)
+  // Zicfiss: synthetic CSR encodings used by split SSP uops.
+  private val zicfissSSPCSRAddr = ZicfissSSPCSRAddr.U(12.W)
+  private val zicfissSSPReadInstr = Cat(zicfissSSPCSRAddr, 0.U(5.W), "b010".U(3.W), 1.U(5.W), "b1110011".U(7.W))
+  private val zicfissSSPWriteInstr = Cat(zicfissSSPCSRAddr, 1.U(5.W), "b001".U(3.W), 0.U(5.W), "b1110011".U(7.W))
+  // Zicfiss: SSPUSH decrements SSP and SSPOPCHK increments SSP by one XLEN slot.
+  private val zicfissSSPDecImm = (-(XLEN / 8)).S(12.W).asUInt
+  private val zicfissSSPIncImm = (XLEN / 8).S(12.W).asUInt
+  private val zicfissSSPReadImm = Cat(1.U(5.W), 0.U(5.W), zicfissSSPCSRAddr)
+  private val zicfissSSPWriteImm = Cat(0.U(5.W), 1.U(5.W), zicfissSSPCSRAddr)
 
   val nf    = instFields.NF
   val width = instFields.WIDTH(1, 0)
@@ -273,6 +289,197 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(3).ldest := Mux(dest === 0.U, 0.U, dest + 1.U)
       csBundle(3).waitForward := false.B
       csBundle(3).blockBackward := true.B
+    }
+    is(UopSplitType.ZICFISS_SSPUSH) {
+      // Zicfiss: uop0 reads SSP into the internal integer temporary register.
+      csBundle(0).uopIdx := 0.U
+      csBundle(0).instr := zicfissSSPReadInstr
+      csBundle(0).imm := zicfissSSPReadImm
+      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(1) := SrcType.imm
+      csBundle(0).srcType(2) := SrcType.no
+      csBundle(0).srcType(3) := SrcType.no
+      csBundle(0).srcType(4) := SrcType.no
+      csBundle(0).lsrc(0) := 0.U
+      csBundle(0).lsrc(1) := 0.U
+      csBundle(0).ldest := IntSSPTmpReg.U
+      csBundle(0).fuType := FuType.csr.U
+      csBundle(0).fuOpType := CSROpType.set
+      csBundle(0).selImm := SelImm.IMM_Z
+      csBundle(0).rfWen := true.B
+      csBundle(0).fpWen := false.B
+      csBundle(0).vecWen := false.B
+      csBundle(0).v0Wen := false.B
+      csBundle(0).vlWen := false.B
+      csBundle(0).waitForward := true.B
+      csBundle(0).blockBackward := false.B
+      csBundle(0).canRobCompress := false.B
+
+      // Zicfiss: uop1 is a store-like shadow-stack push. STA should use
+      // Zicfiss: IntSSPTmpReg + (-XLEN/8) for address generation and checks.
+      csBundle(1).uopIdx := 1.U
+      csBundle(1).imm := zicfissSSPDecImm
+      csBundle(1).srcType(0) := SrcType.reg
+      csBundle(1).srcType(1) := SrcType.reg
+      csBundle(1).srcType(2) := SrcType.no
+      csBundle(1).srcType(3) := SrcType.no
+      csBundle(1).srcType(4) := SrcType.no
+      csBundle(1).lsrc(0) := IntSSPTmpReg.U
+      csBundle(1).lsrc(1) := src2
+      csBundle(1).ldest := 0.U
+      csBundle(1).fuType := FuType.stu.U
+      csBundle(1).fuOpType := LSUOpType.sspush
+      csBundle(1).selImm := SelImm.IMM_S
+      csBundle(1).rfWen := false.B
+      csBundle(1).fpWen := false.B
+      csBundle(1).vecWen := false.B
+      csBundle(1).v0Wen := false.B
+      csBundle(1).vlWen := false.B
+      csBundle(1).waitForward := false.B
+      csBundle(1).blockBackward := false.B
+      csBundle(1).canRobCompress := false.B
+
+      // Zicfiss: uop2 updates the temporary SSP value after the store uop.
+      csBundle(2).uopIdx := 2.U
+      csBundle(2).imm := zicfissSSPDecImm
+      csBundle(2).srcType(0) := SrcType.reg
+      csBundle(2).srcType(1) := SrcType.imm
+      csBundle(2).srcType(2) := SrcType.no
+      csBundle(2).srcType(3) := SrcType.no
+      csBundle(2).srcType(4) := SrcType.no
+      csBundle(2).lsrc(0) := IntSSPTmpReg.U
+      csBundle(2).lsrc(1) := 0.U
+      csBundle(2).ldest := IntSSPTmpReg.U
+      csBundle(2).fuType := FuType.alu.U
+      csBundle(2).fuOpType := ALUOpType.add
+      csBundle(2).selImm := SelImm.IMM_I
+      csBundle(2).rfWen := true.B
+      csBundle(2).fpWen := false.B
+      csBundle(2).vecWen := false.B
+      csBundle(2).v0Wen := false.B
+      csBundle(2).vlWen := false.B
+      csBundle(2).waitForward := false.B
+      csBundle(2).blockBackward := false.B
+      csBundle(2).canRobCompress := false.B
+
+      // Zicfiss: uop3 writes the updated temporary value back to SSP.
+      csBundle(3).uopIdx := 3.U
+      csBundle(3).instr := zicfissSSPWriteInstr
+      csBundle(3).imm := zicfissSSPWriteImm
+      csBundle(3).srcType(0) := SrcType.reg
+      csBundle(3).srcType(1) := SrcType.imm
+      csBundle(3).srcType(2) := SrcType.no
+      csBundle(3).srcType(3) := SrcType.no
+      csBundle(3).srcType(4) := SrcType.no
+      csBundle(3).lsrc(0) := IntSSPTmpReg.U
+      csBundle(3).lsrc(1) := 0.U
+      csBundle(3).ldest := 0.U
+      csBundle(3).fuType := FuType.csr.U
+      csBundle(3).fuOpType := CSROpType.wrt
+      csBundle(3).selImm := SelImm.IMM_Z
+      csBundle(3).rfWen := false.B
+      csBundle(3).fpWen := false.B
+      csBundle(3).vecWen := false.B
+      csBundle(3).v0Wen := false.B
+      csBundle(3).vlWen := false.B
+      csBundle(3).waitForward := false.B
+      csBundle(3).blockBackward := true.B
+      csBundle(3).canRobCompress := false.B
+    }
+    is(UopSplitType.ZICFISS_SSPOPCHK) {
+      // Zicfiss: uop0 reads SSP into the internal integer temporary register.
+      csBundle(0).uopIdx := 0.U
+      csBundle(0).instr := zicfissSSPReadInstr
+      csBundle(0).imm := zicfissSSPReadImm
+      csBundle(0).srcType(0) := SrcType.reg
+      csBundle(0).srcType(1) := SrcType.imm
+      csBundle(0).srcType(2) := SrcType.no
+      csBundle(0).srcType(3) := SrcType.no
+      csBundle(0).srcType(4) := SrcType.no
+      csBundle(0).lsrc(0) := 0.U
+      csBundle(0).lsrc(1) := 0.U
+      csBundle(0).ldest := IntSSPTmpReg.U
+      csBundle(0).fuType := FuType.csr.U
+      csBundle(0).fuOpType := CSROpType.set
+      csBundle(0).selImm := SelImm.IMM_Z
+      csBundle(0).rfWen := true.B
+      csBundle(0).fpWen := false.B
+      csBundle(0).vecWen := false.B
+      csBundle(0).v0Wen := false.B
+      csBundle(0).vlWen := false.B
+      csBundle(0).waitForward := true.B
+      csBundle(0).blockBackward := false.B
+      csBundle(0).canRobCompress := false.B
+
+      // Zicfiss: uop1 checks the value at the current SSP address against rs1.
+      csBundle(1).uopIdx := 1.U
+      csBundle(1).imm := 0.U
+      csBundle(1).srcType(0) := SrcType.reg
+      csBundle(1).srcType(1) := SrcType.reg
+      csBundle(1).srcType(2) := SrcType.no
+      csBundle(1).srcType(3) := SrcType.no
+      csBundle(1).srcType(4) := SrcType.no
+      csBundle(1).lsrc(0) := IntSSPTmpReg.U
+      csBundle(1).lsrc(1) := src1
+      csBundle(1).ldest := 0.U
+      csBundle(1).fuType := FuType.ldu.U
+      csBundle(1).fuOpType := LSUOpType.sspopchk
+      csBundle(1).selImm := SelImm.IMM_I
+      csBundle(1).rfWen := false.B
+      csBundle(1).fpWen := false.B
+      csBundle(1).vecWen := false.B
+      csBundle(1).v0Wen := false.B
+      csBundle(1).vlWen := false.B
+      csBundle(1).waitForward := false.B
+      csBundle(1).blockBackward := false.B
+      csBundle(1).canRobCompress := false.B
+
+      // Zicfiss: uop2 updates the temporary SSP value after the check uop.
+      csBundle(2).uopIdx := 2.U
+      csBundle(2).imm := zicfissSSPIncImm
+      csBundle(2).srcType(0) := SrcType.reg
+      csBundle(2).srcType(1) := SrcType.imm
+      csBundle(2).srcType(2) := SrcType.no
+      csBundle(2).srcType(3) := SrcType.no
+      csBundle(2).srcType(4) := SrcType.no
+      csBundle(2).lsrc(0) := IntSSPTmpReg.U
+      csBundle(2).lsrc(1) := 0.U
+      csBundle(2).ldest := IntSSPTmpReg.U
+      csBundle(2).fuType := FuType.alu.U
+      csBundle(2).fuOpType := ALUOpType.add
+      csBundle(2).selImm := SelImm.IMM_I
+      csBundle(2).rfWen := true.B
+      csBundle(2).fpWen := false.B
+      csBundle(2).vecWen := false.B
+      csBundle(2).v0Wen := false.B
+      csBundle(2).vlWen := false.B
+      csBundle(2).waitForward := false.B
+      csBundle(2).blockBackward := false.B
+      csBundle(2).canRobCompress := false.B
+
+      // Zicfiss: uop3 writes the updated temporary value back to SSP.
+      csBundle(3).uopIdx := 3.U
+      csBundle(3).instr := zicfissSSPWriteInstr
+      csBundle(3).imm := zicfissSSPWriteImm
+      csBundle(3).srcType(0) := SrcType.reg
+      csBundle(3).srcType(1) := SrcType.imm
+      csBundle(3).srcType(2) := SrcType.no
+      csBundle(3).srcType(3) := SrcType.no
+      csBundle(3).srcType(4) := SrcType.no
+      csBundle(3).lsrc(0) := IntSSPTmpReg.U
+      csBundle(3).lsrc(1) := 0.U
+      csBundle(3).ldest := 0.U
+      csBundle(3).fuType := FuType.csr.U
+      csBundle(3).fuOpType := CSROpType.wrt
+      csBundle(3).selImm := SelImm.IMM_Z
+      csBundle(3).rfWen := false.B
+      csBundle(3).fpWen := false.B
+      csBundle(3).vecWen := false.B
+      csBundle(3).v0Wen := false.B
+      csBundle(3).vlWen := false.B
+      csBundle(3).waitForward := false.B
+      csBundle(3).blockBackward := true.B
+      csBundle(3).canRobCompress := false.B
     }
     is(UopSplitType.VSET) {
       // In simple decoder, rfWen and vecWen are not set

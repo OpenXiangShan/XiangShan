@@ -767,7 +767,8 @@ class CtrlBlockImp(
   // rob to mem block
   io.robio.lsq <> rob.io.lsq
 
-  io.diff_int_rat.foreach(_ := rat.io.diff_int_rat.get)
+  // Zicfiss: export only architectural x0-x31; keep the internal ssp tmp hidden.
+  io.diff_int_rat.foreach(_ := VecInit(rat.io.diff_int_rat.get.take(32)))
   io.diff_fp_rat .foreach(_ := rat.io.diff_fp_rat.get)
   io.diff_vec_rat.foreach(_ := rat.io.diff_vec_rat.get)
   io.diff_v0_rat .foreach(_ := rat.io.diff_v0_rat.get)

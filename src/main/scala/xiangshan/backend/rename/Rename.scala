@@ -83,7 +83,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val snptLastEnq = Flipped(ValidIO(new RobPtr))
     val snptIsFull= Input(Bool())
     // debug arch ports
-    val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
+    // Zicfiss: internal int RAT debug path includes the architecture-invisible ssp tmp register.
+    val debug_int_rat = if (backendParams.debugEn) Some(Vec(IntLogicRegs, Input(UInt(PhyRegIdxWidth.W)))) else None
     val debug_fp_rat  = if (backendParams.debugEn) Some(Vec(32, Input(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vec_rat = if (backendParams.debugEn) Some(Vec(31, Input(UInt(PhyRegIdxWidth.W)))) else None
     val debug_v0_rat  = if (backendParams.debugEn) Some(Vec(1, Input(UInt(PhyRegIdxWidth.W)))) else None
@@ -100,7 +101,8 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
 
   val compressUnit = Module(new CompressUnit())
   // create free list and rat
-  val intFreeList = Module(new MEFreeList(IntPhyRegs))
+  // Zicfiss: pass IntLogicRegs so MEFreeList debug checks include the ssp tmp register.
+  val intFreeList = Module(new MEFreeList(IntPhyRegs, IntLogicRegs))
   val fpFreeList = Module(new StdFreeList(FpPhyRegs - FpLogicRegs, FpLogicRegs, Reg_F))
   val vecFreeList = Module(new StdFreeList(VfPhyRegs - VecLogicRegs, VecLogicRegs, Reg_V, 31))
   val v0FreeList = Module(new StdFreeList(V0PhyRegs - V0LogicRegs, V0LogicRegs, Reg_V0, 1))

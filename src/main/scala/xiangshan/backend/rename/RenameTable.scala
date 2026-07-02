@@ -58,7 +58,8 @@ class RenameTable(reg_t: RegType)(implicit p: Parameters) extends XSModule with 
     case Reg_Vl => 1
   }
   val rdataNums = reg_t match {
-    case Reg_I => 32
+    // Zicfiss: include the architecture-invisible int tmp register for internal RAT checks.
+    case Reg_I => IntLogicRegs
     case Reg_F => 32
     case Reg_V => 31 // no v0
     case Reg_V0 => 1 // v0
@@ -237,14 +238,16 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val snpt = Input(new SnapshotPort)
 
     // for debug assertions
-    val debug_int_rat = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    // Zicfiss: internal int RAT debug path includes the ssp tmp logical register.
+    val debug_int_rat = if (backendParams.debugEn) Some(Vec(IntLogicRegs, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_fp_rat  = if (backendParams.debugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vec_rat = if (backendParams.debugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_v0_rat  = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
     val debug_vl_rat  = if (backendParams.debugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None
 
     // for difftest
-    val diff_int_rat = if (backendParams.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
+    // Zicfiss: keep the internal diff RAT width aligned with IntLogicRegs; CtrlBlock exports only x0-x31.
+    val diff_int_rat = if (backendParams.basicDebugEn) Some(Vec(IntLogicRegs, Output(UInt(PhyRegIdxWidth.W)))) else None
     val diff_fp_rat  = if (backendParams.basicDebugEn) Some(Vec(32, Output(UInt(PhyRegIdxWidth.W)))) else None
     val diff_vec_rat = if (backendParams.basicDebugEn) Some(Vec(31, Output(UInt(PhyRegIdxWidth.W)))) else None
     val diff_v0_rat  = if (backendParams.basicDebugEn) Some(Vec(1,Output(UInt(PhyRegIdxWidth.W)))) else None

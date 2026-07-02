@@ -239,7 +239,7 @@ class UopInfoGen (implicit p: Parameters) extends XSModule {
     UopSplitType.AMO_CAS_W -> 2.U,
     UopSplitType.AMO_CAS_D -> 2.U,
     UopSplitType.AMO_CAS_Q -> 4.U,
-    // Zicfiss: SSPUSH/SSPOPCHK split into memory/check and ssp update uops.
+    // Zicfiss: SSPUSH/SSPOPCHK are split into csrr, shadow-stack memory/check, addi, and csrw uops.
     UopSplitType.ZICFISS_SSPUSH -> 4.U,
     UopSplitType.ZICFISS_SSPOPCHK -> 4.U,
   ))

@@ -157,7 +157,8 @@ case class XSCoreParameters
   RenameSnapshotNum: Int = 4,
   FtqSize: Int = 64,
   EnableLoadFastWakeUp: Boolean = true, // NOTE: not supported now, make it false
-  IntLogicRegs: Int = 32,
+  // Zicfiss: one architecture-invisible integer logical register for shadow-stack uops.
+  IntLogicRegs: Int = 32 + 1,
   FpLogicRegs: Int = 32 + 1 + 1, // 1: I2F, 1: stride
   VecLogicRegs: Int = 32 + 15, // 15: tmp
   V0LogicRegs: Int = 1, // V0
