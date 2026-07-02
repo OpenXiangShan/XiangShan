@@ -586,7 +586,7 @@ private class WithIntEarlyReleaseFunctional extends Config((site, here, up) => {
     intEarlyRelease = IntEarlyReleaseParams(
       enable = true,
       observeOnly = false,
-      trackEntries = 64,
+      trackEntries = 128,
       earlyFreeWidth = 8,
       stWalkWidth = 4,
       enableForwardReadDone = true,
@@ -594,6 +594,19 @@ private class WithIntEarlyReleaseFunctional extends Config((site, here, up) => {
       enableBypass2ReadDone = false
     )
   ))
+})
+
+private class WithIntPreg128 extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map { p =>
+    p.copy(
+      intPreg = IntPregParams(
+        numEntries = 128,
+        numBank = p.intPreg.numBank,
+        numRead = p.intPreg.numRead,
+        numWrite = p.intPreg.numWrite,
+      )
+    )
+  }
 })
 
 class IntERObserveOnlyConfig(n: Int = 1) extends Config(
@@ -608,6 +621,11 @@ class IntERObserveOnlyMinimalConfig(n: Int = 1) extends Config(
 
 class IntERFunctionalConfig(n: Int = 1) extends Config(
   new WithIntEarlyReleaseFunctional
+    ++ new DefaultConfig(n)
+)
+
+class IntERFunctionalIntPreg128Config(n: Int = 1) extends Config(
+  new WithIntPreg128
     ++ new DefaultConfig(n)
 )
 
