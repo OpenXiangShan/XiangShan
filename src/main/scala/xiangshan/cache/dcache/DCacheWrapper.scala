@@ -1605,7 +1605,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.evict_set := mainPipe.io.evict_set
   missQueue.io.btot_ways_for_set <> mainPipe.io.btot_ways_for_set
   missQueue.io.replace <> mainPipe.io.replace
-  val probeArb = Module(new RRArbiter(new TLBundleB(edge.bundle), if (hasDualChannel) 2 else 1))
+  val probeArb = Module(new RRArbiter(new TLBundleB(edge.bundle), if (hasDualChannel) 2 else 1, true))
   probeArb.io.in.head <> bus.b
   if (hasDualChannel && bus_ch1.isDefined) {
     probeArb.io.in(1) <> bus_ch1.get.b
