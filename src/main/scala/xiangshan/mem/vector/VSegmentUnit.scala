@@ -456,6 +456,7 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.dtlb.req.bits.fullva             := tlbReqVaddr
   io.dtlb.req.bits.checkfullva        := true.B
   io.dtlb.req.bits.size               := instMicroOp.alignedType(2,0)
+  io.dtlb.req.bits.fromHwPrefetch     := false.B
   io.dtlb.req.bits.memidx.is_ld       := isVSegLoad
   io.dtlb.req.bits.memidx.is_st       := isVSegStore
   io.dtlb.req.bits.debug.robIdx       := instMicroOp.uop.robIdx
@@ -960,4 +961,3 @@ class VSegmentUnit (implicit p: Parameters) extends VLSUModule
   io.exceptionInfo.bits.vl            := instMicroOp.exceptionVl.bits
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.asUInt.orR && !isEmpty(enqPtr, deqPtr)
 }
-
