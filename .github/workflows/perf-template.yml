@@ -134,11 +134,11 @@ jobs:
 
           # set CKPT_HOME
           case "${{ inputs.benchmark_type }}" in
-            gcc15-spec06*)
-              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/checkpoint" >> $GITHUB_ENV
-              ;;
             gcc15-spec06-legacy*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
+              ;;
+            gcc15-spec06*)
+              echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_gcc15_rv64gcb_base_260604/checkpoint" >> $GITHUB_ENV
               ;;
             xscc-spec06*)
               echo "CKPT_HOME=/nfs/home/share/checkpoints_profiles/spec06_xscc_v1_rv64gcb_base_260122/checkpoint-0-0-0" >> $GITHUB_ENV
