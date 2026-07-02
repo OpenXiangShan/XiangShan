@@ -349,7 +349,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   val s_idle :: s_sreq :: s_wresp :: s_lsq_resp :: Nil = Enum(4)
   val state = RegInit(s_idle)
   val state_next = WireInit(state)
-  val req = RegEnable(io.req.bits, io.req.fire)
+  val req = RegEnable(io.req.bits, 0.U.asTypeOf(io.req.bits), io.req.fire)
   val nderr = RegInit(false.B)
   val denied = RegInit(false.B)
   val corrupt = RegInit(false.B)
