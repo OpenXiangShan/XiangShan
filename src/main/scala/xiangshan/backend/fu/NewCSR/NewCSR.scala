@@ -218,6 +218,7 @@ class NewCSR(implicit val p: Parameters) extends Module
       val dvirt = Bool()
       val mPBMTE = Bool()
       val hPBMTE = Bool()
+      val pfRefreshEnable = Bool()
       val pmm = new Bundle {
         val mseccfg = UInt(2.W)
         val menvcfg = UInt(2.W)
@@ -1466,6 +1467,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.tlb.debug := debugMode
   io.tlb.mPBMTE := RegNext(menvcfg.regOut.PBMTE.asBool)
   io.tlb.hPBMTE := RegNext(henvcfg.regOut.PBMTE.asBool)
+  io.tlb.pfRefreshEnable := RegNext(smblockctl.regOut.PF_REFRESH_ENABLE.asBool)
   io.tlb.pmm.mseccfg := RegNext(mseccfg.regOut.PMM.asUInt)
   io.tlb.pmm.menvcfg := RegNext(menvcfg.regOut.PMM.asUInt)
   io.tlb.pmm.henvcfg := RegNext(henvcfg.regOut.PMM.asUInt)

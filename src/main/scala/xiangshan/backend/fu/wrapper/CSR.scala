@@ -303,6 +303,9 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   tlb.mPBMTE := csrMod.io.tlb.mPBMTE
   tlb.hPBMTE := csrMod.io.tlb.hPBMTE
 
+  // custom TLB behavior controls
+  tlb.pfRefresh.enable := csrMod.io.tlb.pfRefreshEnable
+
   // pointer masking extension
   tlb.pmm := csrMod.io.tlb.pmm
 

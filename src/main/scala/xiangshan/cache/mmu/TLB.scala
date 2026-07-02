@@ -88,7 +88,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val ifetch = if (q.fetchi) true.B else false.B
   val mode_tmp = if (q.useDmode) csr.priv.dmode else csr.priv.imode
   val mode = (0 until Width).map(i => Mux(isHyperInst(i), csr.priv.spvp, mode_tmp))
-  val pmpMode = (0 until Width).map(i => Mux(req_out(i).isPrefetch, mode_tmp, mode(i)))
+  val pmpMode = (0 until Width).map(i => Mux(req_out(i).fromHwPrefetch, mode_tmp, mode(i)))
   val virt_in = csr.priv.virt
   val virt_out = req.map(a => RegEnable(csr.priv.virt, a.fire))
   val sum = (0 until Width).map(i => Mux(virt_out(i) || isHyperInst(i), csr.priv.vsum, csr.priv.sum))
@@ -254,8 +254,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val entries = Module(new TlbStorageWrapper(Width, q, nRespDups))
   entries.io.base_connect(sfence, csr, csr.satp)
   if (q.outReplace) { io.replace <> entries.io.replace }
+  val pfClear = if (q.fetchi) Cat(flush_pipe).orR else Mux(need_gpa, need_gpa_robidx.needFlush(redirect), redirect.valid && !need_gpa_wire)
+  entries.io.pfClear := pfClear
   for (i <- 0 until Width) {
-    entries.io.r_req_apply(io.requestor(i).req.valid, get_pn(req_in(i).bits.vaddr), i, req_in_s2xlate(i))
+    val reqVpn = get_pn(req_in(i).bits.vaddr)
+    entries.io.r_req_apply(io.requestor(i).req.valid, reqVpn, i, req_in_s2xlate(i), req_in(i).bits.fromHwPrefetch)
     entries.io.w_apply(refill, ptw.resp.bits)
     // TODO: RegNext enable:req.valid
     resp(i).bits.debug.isFirstIssue := RegEnable(req(i).bits.debug.isFirstIssue, req(i).valid)
@@ -304,7 +307,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val isOnlys2xlate = req_out_s2xlate(i) === onlyStage2
     val need_gpa_req_match = need_gpa_vpn === get_pn(req_out(i).vaddr) && need_gpa_s2xlate === req_out_s2xlate(i)
     val isitlb = TlbCmd.isExec(req_out(i).cmd)
-    val isPrefetch = req_out(i).isPrefetch
+    val fromHwPrefetch = req_out(i).fromHwPrefetch
     val currentRedirect = req_out(i).debug.robIdx.needFlush(redirect)
     val lastCycleRedirect = req_out(i).debug.robIdx.needFlush(RegNext(redirect))
 
@@ -320,7 +323,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }.elsewhen (
       req_out_v(i) && !p_hit && !(resp_gpa_refill && need_gpa_req_match) &&
         !isOnlys2xlate && hasGpf(i) && need_gpa === false.B &&
-        !io.requestor(i).req_kill && !isPrefetch && !currentRedirect && !lastCycleRedirect
+        !io.requestor(i).req_kill && !fromHwPrefetch && !currentRedirect && !lastCycleRedirect
     ) {
       when(canGetGpa(i)) {
         maybe_need_gpa_not_allow_refill := true.B
@@ -356,7 +359,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val hit = e_hit || p_hit
     val miss = (!hit && enable) || hasGpf(i) && !p_hit &&
       !(resp_gpa_refill && need_gpa_req_match) && !isOnlys2xlate &&
-      !isPrefetch && !lastCycleRedirect
+      !fromHwPrefetch && !lastCycleRedirect
     hit.suggestName(s"hit_read_${i}")
     miss.suggestName(s"miss_read_${i}")
 
@@ -586,6 +589,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     io.ptw.req(idx).bits.s2xlate := req_s2xlate
     io.ptw.req(idx).bits.getGpa := ptw_getGpa
     io.ptw.req(idx).bits.memidx := req_out(idx).memidx
+    io.ptw.req(idx).bits.fromHwPrefetch := req_out(idx).fromHwPrefetch
   }
 
   def handle_block(idx: Int): Unit = {
@@ -662,6 +666,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     ptw_req.bits.s2xlate := miss_req_s2xlate
     ptw_req.bits.getGpa := req_need_gpa && hitVec(idx)
     ptw_req.bits.memidx := miss_req_memidx
+    ptw_req.bits.fromHwPrefetch := req_out(idx).fromHwPrefetch
 
     io.tlbreplay(idx) := false.B
 

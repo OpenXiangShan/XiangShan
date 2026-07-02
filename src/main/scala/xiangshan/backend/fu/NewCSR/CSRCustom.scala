@@ -104,6 +104,7 @@ class SlvpredctlBundle extends CSRBundle {
 }
 
 class SmblockctlBundle extends CSRBundle {
+  val PF_REFRESH_ENABLE                = RW(  32).withReset(true.B).withDescription("Enable clearing page-fault entries on L1 TLB hits.")
   val SBUFFER_TIMEOUT                  = SbufferTimeout(31, 10).withReset(SbufferTimeout.initValue).withDescription("Store-buffer flush timeout.")
   val HD_MISALIGN_LD_ENABLE            = RW(   9).withReset(true.B).withDescription("Enable hardware handling of misaligned loads.")
   val HD_MISALIGN_ST_ENABLE            = RW(   8).withReset(true.B).withDescription("Enable hardware handling of misaligned stores.")
