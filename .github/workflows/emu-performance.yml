@@ -76,76 +76,6 @@ jobs:
             echo "cluster=open" >> ${GITHUB_OUTPUT}
           fi
 
-  run-legacy: # TODO: drop this after most of the dev branches are migrated to the new workflow
-    name: EMU - Performance - Run (legacy)
-    needs: build
-    runs-on:
-      - ${{ needs.build.outputs.cluster }} # use same cluster as builder to avoid cross-cluster network copy & pgo issue
-      - runner
-    timeout-minutes: 300
-    continue-on-error: false
-    strategy:
-      matrix:
-        name:
-          # Vector-related workloads are temporarily disabled in CI due to the ongoing vector refactor.
-          # - hmmer-Vector
-          - mcf
-          - xalancbmk
-          - gcc
-          - namd
-          - milc
-          - lbm
-          - gromacs
-          - wrf
-          - astar
-        with-restore-bin: [true]
-        # exclude:
-        #   - name: hmmer-Vector
-        # include:
-        #   - name: hmmer-Vector
-        #     with-restore-bin: false
-      fail-fast: false
-      max-parallel: 4
-    steps:
-      - name: Cleanup orphan EMU
-        run: |
-          pkill -9 -e -f ${GITHUB_WORKSPACE}/build/emu || true
-      - uses: actions/checkout@v7
-        with:
-          submodules: true
-      - name: Get artifact
-        run: |
-          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py --clean
-          mkdir -p build
-          echo "Getting EMU binary from ${PERF_HOME}/emu"
-          cp -L ${PERF_HOME}/emu ${GITHUB_WORKSPACE}/build/emu
-      - name: Run Legacy CI Test - ${{ matrix.name }}
-        id: run
-        shell: bash
-        run: |
-          # TODO: remove --disable-fork to enable lightSSS when gsim supports it
-          python3 ${GITHUB_WORKSPACE}/scripts/xiangshan.py \
-            --wave-dump ${PERF_HOME} \
-            --numa --threads 1 \
-            --max-instr 5000000 \
-            --disable-fork \
-            --ci ${{ matrix.name }} \
-            ${{ matrix.with-restore-bin && '--gcpt-restore-bin /nfs/home/share/ci-workloads/fix-gcpt/gcpt.bin' || '' }} \
-            2> stderr.log | tee stdout.log
-          grep -oP 'IPC = \K\d+\.\d+' stdout.log > "${PERF_HOME}/ipc-legacy-${{ matrix.name }}"
-          echo "IPC: $(cat "${PERF_HOME}/ipc-legacy-${{ matrix.name }}")"
-      - name: Archive log
-        if: ${{ always() && steps.run.outcome != 'skipped' }}
-        run: |
-          # if run step failed, do not sort
-          if [[ "${{ steps.run.outcome }}" == "failure" ]]; then
-            cat stderr.log
-          else
-            mv stderr.log stderr.log.raw
-            cat stderr.log.raw | sort | tee stderr.log
-          fi
-          tar -czvf "${PERF_HOME}/legacy_${{ matrix.name }}.tar.gz" stdout.log stderr.log
-
   run:
     name: EMU - Performance - Run
     needs: build
@@ -263,7 +193,6 @@ jobs:
     needs:
       - build # needed to get the cluster info
       - run
-      - run-legacy # TODO: drop this
     runs-on:
       - ${{ needs.build.outputs.cluster }} # use same cluster as builder/runner to access NFS
       - runner
