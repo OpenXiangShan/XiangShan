@@ -932,7 +932,13 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   val memSchedulerPerf = memScheduler.asInstanceOf[SchedulerMemImp].getPerfEvents
   val dataPathPerf = dataPath.getPerfEvents
 
-  val perfBackend  = Seq()
+  XSPerfAccumulate("cpu_cycle", true.B)
+  XSPerfAccumulate("ref_cpu_cycle", io.fromTop.clintTime.valid)
+
+  val perfBackend  = Seq(
+    ("cpu_cycle",     true.B),
+    ("ref_cpu_cycle", io.fromTop.clintTime.valid)
+  )
   // let index = 0 be no event
   val allPerfEvents = Seq(("noEvent", 0.U)) ++ ctrlBlockPerf  ++ dataPathPerf ++
     intSchedulerPerf ++ fpSchedulerPerf ++ vecSchedulerPerf ++ memSchedulerPerf ++ perfBackend
