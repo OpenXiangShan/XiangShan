@@ -532,10 +532,11 @@ class Sbuffer(implicit p: Parameters)
 
   // ---------------------- Send Dcache Req ---------------------
 
-  // Flush completion must also wait until store misses in MSHR are drained.
-  val sbuffer_empty = Cat(invalidMask).andR && io.mshr_store_empty
+  val sbuffer_empty = Cat(invalidMask).andR
+  // All_flush completion must also wait until store misses in MSHR are drained.
+  val sbuffer_mshr_empty = sbuffer_empty && io.mshr_store_empty
   val inReq_empty = !Cat(io.in.req.map(_.valid)).orR
-  val cmo_empty = sbuffer_empty && inReq_empty
+  val cmo_empty = sbuffer_mshr_empty && inReq_empty
   val all_empty = cmo_empty && io.sqempty
   val threshold = Wire(UInt(5.W)) // RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
   threshold := Constantin.createRecord(s"StoreBufferThreshold_${p(XSCoreParamsKey).HartId}", initValue = 9)
