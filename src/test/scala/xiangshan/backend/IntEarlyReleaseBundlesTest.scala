@@ -15,6 +15,7 @@ import xiangshan._
 import xiangshan.TopDownCounters._
 import xiangshan.backend.Bundles.{DecodeOutUop, DispatchOutUop, DynInst, EnqRobUop, IssueQueueDeqOg1Payload, IssueQueuePayload, RegionInUop, RenameOutUop, connectSamePort}
 import xiangshan.backend.decode.{DecodeStage, DecodeStageIO, FusionDecodeInfo}
+import xiangshan.backend.datapath.DataSource
 import xiangshan.backend.issue.{EnqEntry, EntryBundles, IssueBlockParams, OthersEntry}
 import xiangshan.backend.rename.{RatReadPort, Reg_I, Rename, RenameIntEROps, RenameTable, RenameTableWrapper}
 import xiangshan.backend.regfile.{FpPregParams, IntPregParams, V0PregParams, VfPregParams, VlPregParams}
@@ -573,6 +574,40 @@ class IntERStaToStdCopyProbe(implicit p: Parameters) extends XSModule {
   io.deqPsrc := deqER(0).psrc
 }
 
+class IntERIntRfBankSelectProbe(implicit p: Parameters) extends XSModule {
+  private val issueParams = backendParams.allIssueParams
+  issueParams.flatMap(_.exuBlockParams).foreach(_.bindBackendParam(backendParams))
+  issueParams.foreach { issue =>
+    issue.bindBackendParam(backendParams)
+    issue.exuBlockParams.foreach(_.bindIssueBlockParam(issue))
+  }
+  private val issueParam = issueParams.find { issue =>
+    issue.readIntRf && issue.numRegSrc > 0 && issue.rdPregIdxWidth > coreParams.intPreg.addrWidth
+  }.getOrElse(throw new IllegalArgumentException("probe requires a mixed-width integer RF reader"))
+  private implicit val implicitIssueParam: IssueBlockParams = issueParam
+
+  require(coreParams.intPreg.numEntries == 128, "probe is specific to the 128-entry integer RF configuration")
+  require(coreParams.intPreg.numBank == 4, "probe expects four integer RF banks")
+  require(coreParams.intPreg.addrWidth == 7, "128-entry integer RF must use a 7-bit physical address")
+
+  val io = IO(new Bundle {
+    val psrc = Input(UInt(PhyRegIdxWidth.W))
+    val bankRen = Output(Vec(coreParams.intPreg.numBank, Bool()))
+  })
+
+  val entry = Wire(new EntryBundles.EntryBundle)
+  val deqEntry = Wire(new EntryBundles.EntryBundle(isDeq = true))
+  entry := 0.U.asTypeOf(entry)
+  deqEntry := 0.U.asTypeOf(deqEntry)
+
+  entry.payload.srcType(0) := SrcType.xp
+  entry.status.srcStatus(0).dataSources.value := DataSource.reg
+  entry.status.srcStatus(0).psrc := io.psrc
+
+  deqEntry.genXrfRen(entry)
+  io.bankRen := deqEntry.rfBankRen.get(0)
+}
+
 class RenameOldDestBypassProbe(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
     val base = Input(Vec(RenameWidth, UInt(PhyRegIdxWidth.W)))
@@ -1010,6 +1045,41 @@ class IntEarlyReleaseBundlesTest extends AnyFlatSpec with Matchers with ChiselSi
     configWith(params, fastSim = true)
   }
 
+  private def intPreg128ConfigWith(params: IntEarlyReleaseParams): Parameters = {
+    val defaultConfig = new DefaultConfig
+    val baseTile = defaultConfig(XSTileKey).head
+    defaultConfig.alterPartial({
+      case XSCoreParamsKey => baseTile.copy(
+        intPreg = IntPregParams(
+          numEntries = 128,
+          numBank = baseTile.intPreg.numBank,
+          numRead = baseTile.intPreg.numRead,
+          numWrite = baseTile.intPreg.numWrite
+        ),
+        intEarlyRelease = params
+      )
+    }).alter((site, here, up) => {
+      case DebugOptionsKey => up(DebugOptionsKey).copy(
+        AlwaysBasicDiff = false,
+        EnableDifftest = false,
+        EnablePerfDebug = false,
+        EnableDebug = false
+      )
+      case LogUtilsOptionsKey => LogUtilsOptions(
+        here(DebugOptionsKey).EnableDebug,
+        here(DebugOptionsKey).EnablePerfDebug,
+        here(DebugOptionsKey).FPGAPlatform,
+        here(DebugOptionsKey).EnableXMR
+      )
+      case PerfCounterOptionsKey => PerfCounterOptions(
+        enablePerfPrint = here(DebugOptionsKey).EnablePerfDebug && !here(DebugOptionsKey).FPGAPlatform,
+        enablePerfDB = here(DebugOptionsKey).EnableRollingDB && !here(DebugOptionsKey).FPGAPlatform,
+        perfLevel = XSPerfLevel.withName(here(DebugOptionsKey).PerfLevel),
+        perfDBHartID = 0
+      )
+    })
+  }
+
   private def smallRenameConfigWith(params: IntEarlyReleaseParams): Parameters = {
     val defaultConfig = new DefaultConfig
     defaultConfig.alterPartial({
@@ -1399,23 +1469,30 @@ class IntEarlyReleaseBundlesTest extends AnyFlatSpec with Matchers with ChiselSi
     elaborateProbe(IntEarlyReleaseParams(), localSrc = 1, expectedTrackIdWidth = 4)
   }
 
-  it should "keep baseline configs disabled and enable functional Int ER only in explicit configs" in {
+  it should "enable functional Int ER in default and explicit functional configs" in {
     val defaultParams = (new DefaultConfig)(XSTileKey).head.intEarlyRelease
     val mediumParams = (new MediumConfig)(XSTileKey).head.intEarlyRelease
     val functionalParams = (new IntERFunctionalConfig)(XSTileKey).head.intEarlyRelease
     val minimalFunctionalParams = (new IntERFunctionalMinimalConfig)(XSTileKey).head.intEarlyRelease
 
-    defaultParams.enable shouldBe false
-    mediumParams.enable shouldBe false
+    defaultParams.enable shouldBe true
+    defaultParams.observeOnly shouldBe false
+    defaultParams.trackEntries shouldBe 128
+    defaultParams.earlyFreeWidth shouldBe 8
+
+    mediumParams.enable shouldBe true
+    mediumParams.observeOnly shouldBe false
+    mediumParams.trackEntries shouldBe 128
+    mediumParams.earlyFreeWidth shouldBe 8
 
     functionalParams.enable shouldBe true
     functionalParams.observeOnly shouldBe false
-    functionalParams.trackEntries shouldBe 64
+    functionalParams.trackEntries shouldBe 128
     functionalParams.earlyFreeWidth shouldBe 8
 
     minimalFunctionalParams.enable shouldBe true
     minimalFunctionalParams.observeOnly shouldBe false
-    minimalFunctionalParams.trackEntries shouldBe 64
+    minimalFunctionalParams.trackEntries shouldBe 128
     minimalFunctionalParams.earlyFreeWidth shouldBe 8
   }
 
@@ -1441,7 +1518,7 @@ class IntEarlyReleaseBundlesTest extends AnyFlatSpec with Matchers with ChiselSi
 
     params.enable shouldBe true
     params.observeOnly shouldBe false
-    params.trackEntries shouldBe 64
+    params.trackEntries shouldBe 128
     params.earlyFreeWidth shouldBe 8
   }
 
@@ -1528,6 +1605,19 @@ class IntEarlyReleaseBundlesTest extends AnyFlatSpec with Matchers with ChiselSi
       dut.io.deqTrackGen.expect(1.U)
       dut.io.deqSrcIdx.expect(1.U)
       dut.io.deqPsrc.expect(23.U)
+    }
+  }
+
+  it should "select integer RF bank using the active 128-entry integer physical address width" in {
+    val config = intPreg128ConfigWith(IntEarlyReleaseParams(enable = true, trackEntries = 2))
+
+    simulate(new IntERIntRfBankSelectProbe()(config)) { dut =>
+      dut.io.psrc.poke(47.U)
+
+      dut.io.bankRen(0).expect(false.B)
+      dut.io.bankRen(1).expect(true.B)
+      dut.io.bankRen(2).expect(false.B)
+      dut.io.bankRen(3).expect(false.B)
     }
   }
 

@@ -118,10 +118,16 @@ object EntryBundles extends HasCircularQueuePtrHelper {
       deqOg1Payload
     }
     def genXrfRen(entry: EntryBundle): Unit = {
+      def intRfBank(psrc: UInt): UInt = {
+        val bankBits = log2Ceil(coreParams.intPreg.numBank)
+        val intPsrc = psrc(coreParams.intPreg.addrWidth - 1, 0)
+        if (bankBits == 0) 0.U else intPsrc.head(bankBits)
+      }
+
       this.rfBankRen.foreach{x => x.zipWithIndex.map{case(xx, idx) => xx.zipWithIndex.map{case(xxx, bank) => xxx :=
         SrcType.isXp(entry.payload.srcType(idx)) &&
         entry.status.srcStatus(idx).dataSources.readReg &&
-        entry.status.srcStatus(idx).psrc.head(log2Ceil(coreParams.intPreg.numBank)) === bank.U
+        intRfBank(entry.status.srcStatus(idx).psrc) === bank.U
       }}}
       this.fpRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := SrcType.isFp(entry.payload.srcType(idx)) && entry.status.srcStatus(idx).dataSources.readReg})
       this.vecRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx := SrcType.isVp(entry.payload.srcType(idx)) && entry.status.srcStatus(idx).dataSources.readReg})
