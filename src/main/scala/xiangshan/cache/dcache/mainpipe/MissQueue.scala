@@ -554,7 +554,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       0.U(memChannelBits.W)
     }
   }
-  val channel_sel = selectChannel(req.addr, io.id)
+  val channel_sel = Mux(req_valid, selectChannel(req.addr, io.id), 0.U)
 
   // Output channel selection
   io.channel_sel := channel_sel
