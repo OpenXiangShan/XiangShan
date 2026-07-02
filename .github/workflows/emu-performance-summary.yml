@@ -98,6 +98,88 @@ jobs:
             python3 -c "print(f'{(float($1) - float($2)) / float($2) * 100:.2f}')" "$@"
           }
 
+          print_report_table() {
+            title="$1"
+            current_pattern="$2"
+            base_mode="$3"
+            collapsible="$4"
+
+            current_values=()
+            base_values=()
+            has_na=false
+
+            if [ "${collapsible}" = "true" ]; then
+              echo "<details>"
+              echo "<summary>${title}</summary>"
+            else
+              echo "### ${title}"
+            fi
+            echo
+
+            echo "| Testcase | Current | Base | Diff |"
+            echo "| -------- | ------- | ---- | ---- |"
+
+            for file in ${current_pattern}; do
+              if [ ! -f "${file}" ]; then
+                continue
+              fi
+
+              name=$(basename "${file}" | cut -d '-' -f 2-)
+              ipc=$(cat "${file}")
+
+              if [ "${base_mode}" = "default" ] && [[ "${name}" == legacy-* ]]; then
+                continue
+              fi
+
+              base_file=""
+              if [ -f "base/ipc-${name}" ]; then
+                base_file="base/ipc-${name}"
+              elif [ "${base_mode}" = "legacy" ]; then
+                actual_name="${name#legacy-}"
+                if [ -f "base/ipc-${actual_name}" ]; then
+                  base_file="base/ipc-${actual_name}"
+                fi
+              fi
+
+              if [ -n "${base_file}" ]; then
+                base_ipc=$(cat "${base_file}")
+                current_values+=("${ipc}")
+                base_values+=("${base_ipc}")
+                echo "| ${name} | ${ipc} | ${base_ipc} | $(diff "${ipc}" "${base_ipc}")% |"
+              else
+                echo "| ${name} | ${ipc} | N/A | N/A |"
+                has_na=true
+              fi
+            done
+
+            if [ ${#current_values[@]} -gt 0 ]; then
+              current_geomean=$(geomean "${current_values[@]}")
+              base_geomean=$(geomean "${base_values[@]}")
+              geomean_diff=$(diff "${current_geomean}" "${base_geomean}")
+            else
+              current_geomean="N/A"
+              base_geomean="N/A"
+              geomean_diff="N/A"
+            fi
+
+            echo "| **GEOMEAN** | **${current_geomean}** | **${base_geomean}** | **${geomean_diff}%** |"
+            echo
+            if [ "${has_na}" = true ]; then
+              echo "**NOTE**: Some testcases do not have base data, diff is shown as N/A and GEOMEAN is calculated only from matched pairs."
+              echo
+            fi
+
+            if [ "${base_mode}" = "legacy" ]; then
+              echo "**NOTE**: We're migrating to new checkpoints (see #6181), legacy testcases and reports are going to be removed. Please use the new IPC reports for future comparisons."
+              echo
+            fi
+
+            if [ "${collapsible}" = "true" ]; then
+              echo "</details>"
+              echo
+            fi
+          }
+
           {
             echo "## Emu - Performance Summary"
             echo
@@ -114,31 +196,10 @@ jobs:
             fi
             echo "| Current | ${HEAD_SHA} | ${{ steps.runs.outputs.head_run_id }} |"
             echo
-            echo "### IPC Report"
-            echo "| Testcase | Current | Base | Diff |"
-            echo "| -------- | ------- | ---- | ---- |"
-
-            has_na=false
-            for file in current/ipc-*; do
-              name=$(basename "${file}" | cut -d '-' -f 2-)
-              ipc=$(cat "${file}")
-              if [ -f "base/ipc-${name}" ]; then
-                base_ipc=$(cat "base/ipc-${name}")
-                echo "| ${name} | ${ipc} | ${base_ipc} | $(diff "${ipc}" "${base_ipc}")% |"
-              else
-                echo "| ${name} | ${ipc} | N/A | N/A |"
-                has_na=true
-              fi
-            done
-
-            current_geomean=$(geomean $(cat current/ipc-* | xargs))
-            base_geomean=$(geomean $(cat base/ipc-* | xargs) 2>/dev/null || echo "N/A")
-            geomean_diff=$(diff "${current_geomean}" "${base_geomean}" 2>/dev/null || echo "N/A")
-            echo "| **GEOMEAN** | **${current_geomean}** | **${base_geomean}** | **${geomean_diff}%** |"
-            echo
-            if [ "${has_na}" = true ]; then
-              echo "**NOTE**: Some testcases do not have base data, diff is shown as N/A and GEOMEAN diff may not be accurate."
+            if [ -n "$(ls current/ipc-legacy-* 2>/dev/null)" ]; then
+              print_report_table "IPC Report (Legacy)" "current/ipc-legacy-*" "legacy" "true"
             fi
+            print_report_table "IPC Report" "current/ipc-*" "default" "false"
           } > report.md
 
           cat report.md >> "$GITHUB_STEP_SUMMARY"
