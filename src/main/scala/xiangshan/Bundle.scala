@@ -580,6 +580,9 @@ class TlbCsrBundle(implicit p: Parameters) extends XSBundle {
   }
   val mPBMTE = Bool()
   val hPBMTE = Bool()
+  val pfRefresh = new Bundle {
+    val enable = Bool()
+  }
   val pmm = new Bundle {
     val mseccfg = UInt(2.W)
     val menvcfg = UInt(2.W)
