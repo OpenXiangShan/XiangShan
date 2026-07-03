@@ -107,6 +107,7 @@ class TLBFA(
     (e.s2xlate =/= onlyStage2 && e.perm.pf) ||
       (e.s2xlate =/= onlyStage1 && e.s2xlate =/= noS2xlate && e.g_perm.pf)
   }
+  val redirectPfClearVec = VecInit(entries.map(e => pfClearEnable && io.pfClear && hasPf(e)))
 
   for (i <- 0 until ports) {
     val req = io.r.req(i)
@@ -132,8 +133,9 @@ class TLBFA(
       hit && hasPf(e) && e.entryFromHwPrefetch
     })
     // Hide those entries from normal requests so the request misses and walks again
-    val hitVec = VecInit(rawHitVec.zip(hwPrefetchPfHitVec).map { case (hit, hwPrefetchPfHit) =>
-      hit && !(clearHwPrefetchPfHit && hwPrefetchPfHit)
+    val hitVec = VecInit((rawHitVec zip hwPrefetchPfHitVec zip redirectPfClearVec).map {
+      case ((hit, hwPrefetchPfHit), redirectPfClear) =>
+        hit && !(clearHwPrefetchPfHit && hwPrefetchPfHit) && !redirectPfClear
     })
     pfHitClearMasks(i) := Mux(clearHwPrefetchPfHit, hwPrefetchPfHitVec.asUInt, 0.U(nWays.W))
 
@@ -189,8 +191,7 @@ class TLBFA(
   }
   // write assert, should not duplicate with the existing entries
   val pfHitClearMask = pfHitClearMasks.reduce(_ | _)
-  val redirectPfClearVec = VecInit(entries.map(hasPf))
-  val redirectPfClearMask = Mux(pfClearEnable && io.pfClear, redirectPfClearVec.asUInt, 0.U(nWays.W))
+  val redirectPfClearMask = redirectPfClearVec.asUInt
   val clearMask = pfHitClearMask | redirectPfClearMask
   val w_hit_vec = VecInit(entries.zip(v).zipWithIndex.map{case ((e, vi), i) =>
     e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, s2xlate = io.w.bits.data.s2xlate) && vi && !clearMask(i)
