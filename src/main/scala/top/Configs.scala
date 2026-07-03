@@ -531,8 +531,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 ) with DeprecatedConfigWarning
 
 class DefaultConfig(n: Int = 1) extends Config(
-  new WithIntEarlyReleaseFunctional
-    ++ OpenLLCConfig("16MB", ways = 16, banks = 4)
+  OpenLLCConfig("16MB", ways = 16, banks = 4)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
@@ -625,6 +624,12 @@ class IntERFunctionalConfig(n: Int = 1) extends Config(
 )
 
 class IntERFunctionalIntPreg128Config(n: Int = 1) extends Config(
+  new WithIntEarlyReleaseFunctional
+    ++ new WithIntPreg128
+    ++ new DefaultConfig(n)
+)
+
+class IntPreg128Config(n: Int = 1) extends Config(
   new WithIntPreg128
     ++ new DefaultConfig(n)
 )
