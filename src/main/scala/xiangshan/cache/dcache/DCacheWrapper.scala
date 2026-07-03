@@ -1605,23 +1605,24 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   missQueue.io.evict_set := mainPipe.io.evict_set
   missQueue.io.btot_ways_for_set <> mainPipe.io.btot_ways_for_set
   missQueue.io.replace <> mainPipe.io.replace
-  val probeArb = Module(new RRArbiter(new TLBundleB(edge.bundle), if (hasDualChannel) 2 else 1, true))
-  probeArb.io.in.head <> bus.b
+  val probeArb = Wire(Decoupled(new TLBundleB(edge.bundle)))
   if (hasDualChannel && bus_ch1.isDefined) {
-    probeArb.io.in(1) <> bus_ch1.get.b
+    TLArbiter.lowest(edge, probeArb, bus.b, bus_ch1.get.b)
+  } else {
+    TLArbiter.lowest(edge, probeArb, bus.b)
   }
-  missQueue.io.probe.req.valid := probeArb.io.out.valid
-  missQueue.io.probe.req.bits.addr := probeArb.io.out.bits.address
+  missQueue.io.probe.req.valid := probeArb.valid
+  missQueue.io.probe.req.bits.addr := probeArb.bits.address
   if(DCacheAboveIndexOffset > DCacheTagOffset) {
     // have alias problem, extra alias bits needed for index
-    val alias_addr_frag = probeArb.io.out.bits.data(2, 1)
+    val alias_addr_frag = probeArb.bits.data(2, 1)
     missQueue.io.probe.req.bits.vaddr := Cat(
       0.U(PAddrBits - 1, DCacheAboveIndexOffset), // dontcare
       alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0), // index
-      probeArb.io.out.bits.address(DCacheTagOffset - 1, 0)                 // index & others
+      probeArb.bits.address(DCacheTagOffset - 1, 0)                 // index & others
     )
   } else { // no alias problem
-    missQueue.io.probe.req.bits.vaddr := probeArb.io.out.bits.address
+    missQueue.io.probe.req.bits.vaddr := probeArb.bits.address
   }
 
   missQueue.io.main_pipe_resp.valid := RegNext(mainPipe.io.atomic_resp.valid)
@@ -1630,7 +1631,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //----------------------------------------
   // probe
   // probeQueue.io.mem_probe <> bus.b
-  block_decoupled(probeArb.io.out, probeQueue.io.mem_probe, missQueue.io.probe.block)
+  block_decoupled(probeArb, probeQueue.io.mem_probe, missQueue.io.probe.block)
   probeQueue.io.lrsc_locked_block <> mainPipe.io.lrsc_locked_block
   probeQueue.io.update_resv_set <> mainPipe.io.update_resv_set
 
