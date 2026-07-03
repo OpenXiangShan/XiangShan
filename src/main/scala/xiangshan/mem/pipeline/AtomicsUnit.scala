@@ -373,7 +373,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
       }.otherwise {
         dcache_resp_data := io.dcache.resp.bits.data
         dcache_resp_id := io.dcache.resp.bits.id
-        dcache_resp_tl_error := io.dcache.resp.bits.tl_error
+        dcache_resp_tl_error := io.dcache.resp.bits.tlError
         state := s_cache_resp_latch
       }
     }
@@ -399,9 +399,9 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     )
 
     when (dcache_resp_tl_error.asUInt.orR && io.csrCtrl.cache_error_enable) {
-      exceptionVec(loadAccessFault)  := isLr && dcache_resp_tl_error.tl_denied
-      exceptionVec(storeAccessFault) := !isLr && dcache_resp_tl_error.tl_denied
-      exceptionVec(hardwareError)    := dcache_resp_tl_error.tl_corrupt && !dcache_resp_tl_error.tl_denied
+      exceptionVec(loadAccessFault)  := isLr && dcache_resp_tl_error.tlDenied
+      exceptionVec(storeAccessFault) := !isLr && dcache_resp_tl_error.tlDenied
+      exceptionVec(hardwareError)    := dcache_resp_tl_error.tlCorrupt && !dcache_resp_tl_error.tlDenied
     }
 
     resp_data := resp_data_wire
@@ -539,7 +539,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   io.dcache.req.valid := Mux(
     io.dcache.req.bits.cmd === M_XLR,
-    !io.dcache.block_lr, // block lr to survive in lr storm
+    !io.dcache.blockLr, // block lr to survive in lr storm
     data_valid // wait until src(1) is ready
   ) && state === s_cache_req
   val pipe_req = io.dcache.req.bits
@@ -576,15 +576,15 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   ))
   pipe_req.miss := false.B
   pipe_req.probe := false.B
-  pipe_req.probe_need_data := false.B
+  pipe_req.probeNeedData := false.B
   pipe_req.source := AMO_SOURCE.U
   pipe_req.addr   := get_block_addr(paddr)
   pipe_req.vaddr  := get_block_addr(vaddr)
-  pipe_req.word_idx  := get_word(paddr)
-  pipe_req.amo_data := genWdataAMO(rs2, LSUOpType.size(uop.fuOpType))
-  pipe_req.amo_mask := genWmaskAMO(paddr, LSUOpType.size(uop.fuOpType))
-  pipe_req.amo_cmp  := genWdataAMO(rd, LSUOpType.size(uop.fuOpType))
-  pipe_req.miss_fail_cause_evict_btot := false.B
+  pipe_req.wordIdx  := get_word(paddr)
+  pipe_req.amoData := genWdataAMO(rs2, LSUOpType.size(uop.fuOpType))
+  pipe_req.amoMask := genWmaskAMO(paddr, LSUOpType.size(uop.fuOpType))
+  pipe_req.amoCmp  := genWdataAMO(rd, LSUOpType.size(uop.fuOpType))
+  pipe_req.missFailCauseEvictBtot := false.B
 
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)
@@ -592,9 +592,9 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
     difftest.coreid := io.hartId
     difftest.valid  := state === s_cache_resp_latch
     difftest.addr   := RegEnable(paddr, en)
-    difftest.data   := RegEnable(io.dcache.req.bits.amo_data.asTypeOf(difftest.data), en)
-    difftest.mask   := RegEnable(io.dcache.req.bits.amo_mask, en)
-    difftest.cmp    := RegEnable(io.dcache.req.bits.amo_cmp.asTypeOf(difftest.cmp), en)
+    difftest.data   := RegEnable(io.dcache.req.bits.amoData.asTypeOf(difftest.data), en)
+    difftest.mask   := RegEnable(io.dcache.req.bits.amoMask, en)
+    difftest.cmp    := RegEnable(io.dcache.req.bits.amoCmp.asTypeOf(difftest.cmp), en)
     difftest.fuop   := RegEnable(uop.fuOpType, en)
     difftest.out    := resp_data_wire.asTypeOf(difftest.out)
   }

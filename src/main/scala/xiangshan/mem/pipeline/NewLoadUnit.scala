@@ -439,7 +439,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.dcacheReq.valid := dcacheReqValid && !noDCacheAccess
   io.dcacheReq.bits.cmd := Mux(isPrefetch, MemoryOpConstants.M_PFR, MemoryOpConstants.M_XRD)
   io.dcacheReq.bits.vaddr := dcacheVAddr
-  io.dcacheReq.bits.vaddr_dup := dcacheVAddr
+  io.dcacheReq.bits.vaddrDup := dcacheVAddr
   io.dcacheReq.bits.data := DontCare
   io.dcacheReq.bits.mask := sink.bits.mask
   io.dcacheReq.bits.id := DontCare
@@ -447,7 +447,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.dcacheReq.bits.isFirstIssue := firstIssue
   io.dcacheReq.bits.replayCarry := DontCare
   io.dcacheReq.bits.lqIdx := uop.lqIdx
-  io.dcacheReq.bits.debug_robIdx := uop.robIdx.value
+  io.dcacheReq.bits.debugRobIdx := uop.robIdx.value
   io.is128Req := readWholeBank
   io.replacementUpdated := DontCare
   io.pfSource := Mux(isHwPrefetch, io.prefetchReq.bits.pf_source.value, L1_HW_PREFETCH_NULL)
@@ -932,7 +932,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val afUnaccessable = uop.exceptionVec(loadAccessFault) || pmpUnaccessable
   val afVectorUncache = accessType.isVector() && isUncache
   val afUnalignMMIO = !in.align.get && isMMIO
-  val afTagError = io.dcacheResp.bits.tag_error && tlbHit && io.csrCtrl.cache_error_enable
+  val afTagError = io.dcacheResp.bits.tagError && tlbHit && io.csrCtrl.cache_error_enable
   val afForwardDenied = Wire(Bool())
   val afBypassDenied = Wire(Bool())
   val af = afUnaccessable || afVectorUncache || afUnalignMMIO || afTagError || afForwardDenied || afBypassDenied
@@ -1131,7 +1131,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.pmp.get := pmp
   stageInfo.nc.get := isNC
   stageInfo.mmio.get := isMMIO
-  stageInfo.mshrId.get := io.dcacheResp.bits.mshr_id
+  stageInfo.mshrId.get := io.dcacheResp.bits.mshrId
   stageInfo.cause.get := cause
   stageInfo.handledByMSHR.get := io.dcacheResp.bits.handled
   stageInfo.dataInvalidSqIdx.get := sqDataInvalidSqIdx
@@ -1174,14 +1174,14 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.prefetchTrain.bits.paddr := paddr
   io.prefetchTrain.bits.miss := io.dcacheResp.bits.miss
   io.prefetchTrain.bits.isFirstIssue := in.isFirstIssue()
-  io.prefetchTrain.bits.metaSource := io.dcacheResp.bits.meta_prefetch
+  io.prefetchTrain.bits.metaSource := io.dcacheResp.bits.metaPrefetch
   io.prefetchTrain.bits.isHwPrefetch := accessType.isHwPrefetch()
-  io.prefetchTrain.bits.refillLatency := io.dcacheResp.bits.refill_latency
+  io.prefetchTrain.bits.refillLatency := io.dcacheResp.bits.refillLatency
 
   io.debugInfo.isBankConflict := pipeIn.valid && !kill && cause(C_BC)
   io.debugInfo.isDCacheMiss := pipeIn.valid && !kill && cause(C_DM)
   io.debugInfo.isDCacheFirstMiss := pipeIn.valid && !kill && cause(C_DM) && in.isFirstIssue()
-  io.debugInfo.isDCacheRealMiss := pipeIn.valid && !kill && io.dcacheResp.bits.real_miss
+  io.debugInfo.isDCacheRealMiss := pipeIn.valid && !kill && io.dcacheResp.bits.realMiss
   io.debugInfo.isForwardFail := pipeIn.valid && !kill && cause(C_FF)
   io.debugInfo.isTlbNotMiss := pipeIn.valid && !kill && tlbNotMiss
   io.debugInfo.robIdx := robIdx.value
@@ -1888,12 +1888,12 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.dcache.req <> s0.io.dcacheReq
   io.dcache.is128Req := s0.io.is128Req
   io.dcache.replacementUpdated := s0.io.replacementUpdated
-  io.dcache.pf_source := s0.io.pfSource
+  io.dcache.pfSource := s0.io.pfSource
   io.sqForward.s0Req := s0.io.sqSbForwardReq
   io.sbufferForward.s0Req := s0.io.sqSbForwardReq
   io.uncacheForward.s0Req := s0.io.uncacheForwardReq
-  io.mshrForward.s0Req := s0.io.mshrForwardReq
-  io.tldForward.s0Req := s0.io.tldForwardReq
+  io.mshrForward.s0_req := s0.io.mshrForwardReq
+  io.tldForward.s0_req := s0.io.tldForwardReq
   io.uncacheBypass.s0Req := s0.io.uncacheBypassReq
   io.wakeup := s0.io.wakeup
 
@@ -1912,10 +1912,10 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.sbufferForward.s1Kill := s1.io.sbufferForwardKill
   io.uncacheForward.s1Req := s1.io.storeForwardReq
   io.uncacheForward.s1Kill := s1.io.uncacheForwardKill
-  io.mshrForward.s1Req := s1.io.mshrForwardReq
-  io.mshrForward.s1Kill := s1.io.mshrForwardKill
-  io.tldForward.s1Req := s1.io.tldForwardReq
-  io.tldForward.s1Kill := s1.io.tldForwardKill
+  io.mshrForward.s1_req := s1.io.mshrForwardReq
+  io.mshrForward.s1_kill := s1.io.mshrForwardKill
+  io.tldForward.s1_req := s1.io.tldForwardReq
+  io.tldForward.s1_kill := s1.io.tldForwardKill
   s1.io.uncacheBypassResp := io.uncacheBypass.s1Resp
   s1.io.staNukeQueryReq := io.staNukeQueryReq
   io.prefetchTrainHintS1 := s1.io.prefetchTrainHint
@@ -1933,8 +1933,8 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s2.io.sqForwardResp := io.sqForward.s2Resp
   s2.io.sbufferForwardResp := io.sbufferForward.s2Resp
   s2.io.uncacheForwardResp := io.uncacheForward.s2Resp
-  s2.io.mshrForwardResp := io.mshrForward.s2Resp
-  s2.io.tldForwardResp := io.tldForward.s2Resp
+  s2.io.mshrForwardResp := io.mshrForward.s2_resp
+  s2.io.tldForwardResp := io.tldForward.s2_resp
   s2.io.uncacheBypassResp := io.uncacheBypass.s2Resp
   s2.io.staNukeQueryReq := io.staNukeQueryReq
   io.rarNukeQuery.req <> s2.io.rarNukeQueryReq
@@ -1946,7 +1946,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
 
   // S3
   s3.io.redirect := io.redirect
-  s3.io.dcacheError := io.dcache.resp.bits.error_delayed
+  s3.io.dcacheError := io.dcache.resp.bits.errorDelayed
   io.ldout <> s3.io.ldout
   io.lqWrite <> s3.io.lqWrite
   io.vecldout <> s3.io.vecldout
@@ -1964,8 +1964,8 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   dataPath.io.s2SqForwardResp := io.sqForward.s2Resp
   dataPath.io.s2SbufferForwardResp := io.sbufferForward.s2Resp
   dataPath.io.s2UncacheForwardResp := io.uncacheForward.s2Resp
-  dataPath.io.s2MSHRForwardResp := io.mshrForward.s2Resp
-  dataPath.io.s2TLDForwardResp := io.tldForward.s2Resp
+  dataPath.io.s2MSHRForwardResp := io.mshrForward.s2_resp
+  dataPath.io.s2TLDForwardResp := io.tldForward.s2_resp
   dataPath.io.s2UncacheBypassResp := io.uncacheBypass.s2Resp
   dataPath.io.s2DCacheResp.valid := io.dcache.resp.valid
   dataPath.io.s2DCacheResp.bits := io.dcache.resp.bits

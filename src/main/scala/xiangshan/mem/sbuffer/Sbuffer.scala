@@ -714,7 +714,7 @@ class Sbuffer(implicit p: Parameters)
   }
 
   // hit resp
-  io.dcache.hit_resps.map(resp => {
+  io.dcache.hitResps.map(resp => {
     val dcache_resp_id = resp.bits.id
     when (resp.fire) {
       stateVec(dcache_resp_id).state_inflight := false.B
@@ -740,18 +740,18 @@ class Sbuffer(implicit p: Parameters)
     })
   })
 
-  io.dcache.hit_resps.zip(dataModule.io.maskFlushReq).map{case (resp, maskFlush) => {
+  io.dcache.hitResps.zip(dataModule.io.maskFlushReq).map{case (resp, maskFlush) => {
     maskFlush.valid := resp.fire
     maskFlush.bits.wvec := UIntToOH(resp.bits.id)
   }}
 
   // replay resp
-  val replay_resp_id = io.dcache.replay_resp.bits.id
-  when (io.dcache.replay_resp.fire) {
+  val replay_resp_id = io.dcache.replayResp.bits.id
+  when (io.dcache.replayResp.fire) {
     missqReplayCount(replay_resp_id) := 0.U
     stateVec(replay_resp_id).w_timeout := true.B
     // waiting for timeout
-    assert(io.dcache.replay_resp.bits.replay)
+    assert(io.dcache.replayResp.bits.replay)
     assert(stateVec(replay_resp_id).state_inflight === true.B)
   }
 
@@ -767,7 +767,7 @@ class Sbuffer(implicit p: Parameters)
 
   if (env.EnableDifftest) {
     // hit resp
-    io.dcache.hit_resps.zipWithIndex.map{case (resp, index) => {
+    io.dcache.hitResps.zipWithIndex.map{case (resp, index) => {
       val difftest = DifftestModule(new DiffSbufferEvent, delay = 1)
       val dcache_resp_id = resp.bits.id
       difftest.coreid := io.hartId
@@ -1027,9 +1027,9 @@ class Sbuffer(implicit p: Parameters)
   XSPerfAccumulate("sbuffer_replace", sbuffer_state === x_replace)
   XSPerfAccumulate("evenCanInsert", evenCanInsert)
   XSPerfAccumulate("oddCanInsert", oddCanInsert)
-  XSPerfAccumulate("mainpipe_resp_valid", io.dcache.main_pipe_hit_resp.fire)
+  XSPerfAccumulate("mainpipe_resp_valid", io.dcache.mainPipeHitResp.fire)
   //XSPerfAccumulate("refill_resp_valid", io.dcache.refill_hit_resp.fire)
-  XSPerfAccumulate("replay_resp_valid", io.dcache.replay_resp.fire)
+  XSPerfAccumulate("replay_resp_valid", io.dcache.replayResp.fire)
   XSPerfAccumulate("coh_timeout", cohHasTimeOut)
   XSPerfAccumulate("sbuffer_imbalanced_stall", io.in.req.head.valid && !firstCanInsert && secondCanInsert && io.physicalStoreQueueFull)
 
@@ -1047,9 +1047,9 @@ class Sbuffer(implicit p: Parameters)
     ("sbuffer_idle      ", sbuffer_state === x_idle                                                                                    ),
     ("sbuffer_flush     ", sbuffer_state === x_drain_sbuffer                                                                           ),
     ("sbuffer_replace   ", sbuffer_state === x_replace                                                                                 ),
-    ("mpipe_resp_valid  ", io.dcache.main_pipe_hit_resp.fire                                                                         ),
+    ("mpipe_resp_valid  ", io.dcache.mainPipeHitResp.fire                                                                         ),
     //("refill_resp_valid ", io.dcache.refill_hit_resp.fire                                                                            ),
-    ("replay_resp_valid ", io.dcache.replay_resp.fire                                                                                ),
+    ("replay_resp_valid ", io.dcache.replayResp.fire                                                                                ),
     ("coh_timeout       ", cohHasTimeOut                                                                                               ),
     ("sbuffer_1_4_valid ", (perf_valid_entry_count < (StoreBufferSize.U/4.U))                                                          ),
     ("sbuffer_2_4_valid ", (perf_valid_entry_count > (StoreBufferSize.U/4.U)) & (perf_valid_entry_count <= (StoreBufferSize.U/2.U))    ),

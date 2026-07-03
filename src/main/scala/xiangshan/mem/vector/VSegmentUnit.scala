@@ -597,7 +597,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
 
 
   // HardwareError response will be one beat late
-  val rdcache_resp_error = if (EnableAccurateLoadError) io.rdcache.resp.bits.error_delayed else io.rdcache.resp.bits.tl_error_delayed.asUInt.orR
+  val rdcache_resp_error = if (EnableAccurateLoadError) io.rdcache.resp.bits.errorDelayed else io.rdcache.resp.bits.tlErrorDelayed.asUInt.orR
   when(
     (state === s_latch_and_merge_data || state === s_misalign_merge_data) &&
       rdcache_resp_error && GatedValidRegNext(io.csrCtrl.cache_error_enable) &&
@@ -607,8 +607,8 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
     instMicroOp.exception_pa := true.B
 
     when(canTriggerException) {
-      exceptionVec(hardwareError) := io.rdcache.resp.bits.tl_error_delayed.tl_corrupt && !io.rdcache.resp.bits.tl_error_delayed.tl_denied || EnableAccurateLoadError.B
-      exceptionVec(loadAccessFault)  := io.rdcache.resp.bits.tl_error_delayed.tl_denied && isVSegLoad
+      exceptionVec(hardwareError) := io.rdcache.resp.bits.tlErrorDelayed.tlCorrupt && !io.rdcache.resp.bits.tlErrorDelayed.tlDenied || EnableAccurateLoadError.B
+      exceptionVec(loadAccessFault)  := io.rdcache.resp.bits.tlErrorDelayed.tlDenied && isVSegLoad
       instMicroOp.exceptionVstart := segmentIdx // for exception
     }.otherwise {
       instMicroOp.exceptionVl.valid := true.B
@@ -620,42 +620,42 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
    * merge data for load
    */
   val cacheData = LookupTree(latchVaddr(3,0), List(
-    "b0000".U -> io.rdcache.resp.bits.data_delayed(63,    0),
-    "b0001".U -> io.rdcache.resp.bits.data_delayed(63,    8),
-    "b0010".U -> io.rdcache.resp.bits.data_delayed(63,   16),
-    "b0011".U -> io.rdcache.resp.bits.data_delayed(63,   24),
-    "b0100".U -> io.rdcache.resp.bits.data_delayed(63,   32),
-    "b0101".U -> io.rdcache.resp.bits.data_delayed(63,   40),
-    "b0110".U -> io.rdcache.resp.bits.data_delayed(63,   48),
-    "b0111".U -> io.rdcache.resp.bits.data_delayed(63,   56),
-    "b1000".U -> io.rdcache.resp.bits.data_delayed(127,  64),
-    "b1001".U -> io.rdcache.resp.bits.data_delayed(127,  72),
-    "b1010".U -> io.rdcache.resp.bits.data_delayed(127,  80),
-    "b1011".U -> io.rdcache.resp.bits.data_delayed(127,  88),
-    "b1100".U -> io.rdcache.resp.bits.data_delayed(127,  96),
-    "b1101".U -> io.rdcache.resp.bits.data_delayed(127, 104),
-    "b1110".U -> io.rdcache.resp.bits.data_delayed(127, 112),
-    "b1111".U -> io.rdcache.resp.bits.data_delayed(127, 120)
+    "b0000".U -> io.rdcache.resp.bits.dataDelayed(63,    0),
+    "b0001".U -> io.rdcache.resp.bits.dataDelayed(63,    8),
+    "b0010".U -> io.rdcache.resp.bits.dataDelayed(63,   16),
+    "b0011".U -> io.rdcache.resp.bits.dataDelayed(63,   24),
+    "b0100".U -> io.rdcache.resp.bits.dataDelayed(63,   32),
+    "b0101".U -> io.rdcache.resp.bits.dataDelayed(63,   40),
+    "b0110".U -> io.rdcache.resp.bits.dataDelayed(63,   48),
+    "b0111".U -> io.rdcache.resp.bits.dataDelayed(63,   56),
+    "b1000".U -> io.rdcache.resp.bits.dataDelayed(127,  64),
+    "b1001".U -> io.rdcache.resp.bits.dataDelayed(127,  72),
+    "b1010".U -> io.rdcache.resp.bits.dataDelayed(127,  80),
+    "b1011".U -> io.rdcache.resp.bits.dataDelayed(127,  88),
+    "b1100".U -> io.rdcache.resp.bits.dataDelayed(127,  96),
+    "b1101".U -> io.rdcache.resp.bits.dataDelayed(127, 104),
+    "b1110".U -> io.rdcache.resp.bits.dataDelayed(127, 112),
+    "b1111".U -> io.rdcache.resp.bits.dataDelayed(127, 120)
   ))
 
   val misalignLowData  = LookupTree(latchVaddr(3,0), List(
-    "b1001".U -> io.rdcache.resp.bits.data_delayed(127,  72),
-    "b1010".U -> io.rdcache.resp.bits.data_delayed(127,  80),
-    "b1011".U -> io.rdcache.resp.bits.data_delayed(127,  88),
-    "b1100".U -> io.rdcache.resp.bits.data_delayed(127,  96),
-    "b1101".U -> io.rdcache.resp.bits.data_delayed(127, 104),
-    "b1110".U -> io.rdcache.resp.bits.data_delayed(127, 112),
-    "b1111".U -> io.rdcache.resp.bits.data_delayed(127, 120)
+    "b1001".U -> io.rdcache.resp.bits.dataDelayed(127,  72),
+    "b1010".U -> io.rdcache.resp.bits.dataDelayed(127,  80),
+    "b1011".U -> io.rdcache.resp.bits.dataDelayed(127,  88),
+    "b1100".U -> io.rdcache.resp.bits.dataDelayed(127,  96),
+    "b1101".U -> io.rdcache.resp.bits.dataDelayed(127, 104),
+    "b1110".U -> io.rdcache.resp.bits.dataDelayed(127, 112),
+    "b1111".U -> io.rdcache.resp.bits.dataDelayed(127, 120)
   ))
 
   val misalignCombinedData = LookupTree(latchVaddr(3,0), List(
-    "b1001".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(55,    0))(63, 0),
-    "b1010".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(47,    0))(63, 0),
-    "b1011".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(39,    0))(63, 0),
-    "b1100".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(31,    0))(63, 0),
-    "b1101".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(23,    0))(63, 0),
-    "b1110".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(15,    0))(63, 0),
-    "b1111".U -> Cat(io.rdcache.resp.bits.data_delayed, combinedData(7,     0))(63, 0)
+    "b1001".U -> Cat(io.rdcache.resp.bits.dataDelayed, combinedData(55,    0))(63, 0),
+    "b1010".U -> Cat(io.rdcache.resp.bits.dataDelayed, combinedData(47,    0))(63, 0),
+    "b1011".U -> Cat(io.rdcache.resp.bits.dataDelayed, combinedData(39,    0))(63, 0),
+    "b1100".U -> Cat(io.rdcache.resp.bits.dataDelayed, combinedData(31,    0))(63, 0),
+    "b1101".U -> Cat(io.rdcache.resp.bits.dataDelayed, combinedData(23,    0))(63, 0),
+    "b1110".U -> Cat(io.rdcache.resp.bits.dataDelayed, combinedData(15,    0))(63, 0),
+    "b1111".U -> Cat(io.rdcache.resp.bits.dataDelayed, combinedData(7,     0))(63, 0)
   ))
   when(state === s_misalign_merge_data && segmentActive){
     when(!curPtr) {
@@ -665,7 +665,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
     }
   }
 
-  val shiftData    = (io.rdcache.resp.bits.data_delayed >> (latchVaddr(3, 0) << 3)).asUInt(63, 0)
+  val shiftData    = (io.rdcache.resp.bits.dataDelayed >> (latchVaddr(3, 0) << 3)).asUInt(63, 0)
   val mergemisalignData = Mux(notCross16ByteReg, shiftData, combinedData)
   val pickData  = rdataVecHelper(alignedType(1,0), Mux(isMisalignReg, mergemisalignData, cacheData))
   val mergedData = mergeDataWithElemIdx(
@@ -701,10 +701,10 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.rdcache.req.valid              := state === s_cache_req && isVSegLoad
   io.rdcache.req.bits.cmd           := MemoryOpConstants.M_XRD
   io.rdcache.req.bits.vaddr         := dcacheReqVaddr
-  io.rdcache.req.bits.vaddr_dup     := dcacheReqVaddrDup
+  io.rdcache.req.bits.vaddrDup      := dcacheReqVaddrDup
   io.rdcache.req.bits.mask          := mask
   io.rdcache.req.bits.data          := flowData
-  io.rdcache.pf_source              := LOAD_SOURCE.U
+  io.rdcache.pfSource               := LOAD_SOURCE.U
   io.rdcache.req.bits.id            := DontCare
   io.rdcache.resp.ready             := true.B
   io.rdcache.s1_paddr_dup_lsu       := dcacheReqPaddr
@@ -1014,4 +1014,3 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.exceptionInfo.bits.isHyper       := false.B
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.orR && !isEmpty(enqPtr, deqPtr)
 }
-
