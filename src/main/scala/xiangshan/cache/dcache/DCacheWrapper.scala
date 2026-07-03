@@ -1395,12 +1395,12 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     wakeup.bits := 0.U.asTypeOf(wakeup.bits)
   }
 
-  when (bus.d.valid && (bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.Grant)) {
+  when (bus.d.bits.opcode === TLMessages.GrantData || bus.d.bits.opcode === TLMessages.Grant) {
     loadWakeups(0).valid := bus.d.valid
     loadWakeups(0).bits.mshrId := bus.d.bits.source(log2Up(cfg.nMissEntries) - 1, 0)
   }
   if (hasDualChannel && bus_ch1.isDefined) {
-    when (bus_ch1.get.d.valid && (bus_ch1.get.d.bits.opcode === TLMessages.GrantData || bus_ch1.get.d.bits.opcode === TLMessages.Grant)) {
+    when (bus_ch1.get.d.bits.opcode === TLMessages.GrantData || bus_ch1.get.d.bits.opcode === TLMessages.Grant) {
       loadWakeups(1).valid := bus_ch1.get.d.valid
       loadWakeups(1).bits.mshrId := bus_ch1.get.d.bits.source(log2Up(cfg.nMissEntries) - 1, 0)
     }

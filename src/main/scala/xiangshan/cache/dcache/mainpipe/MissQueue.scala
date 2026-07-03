@@ -1573,7 +1573,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
    */
   // Update parallel pipeline registers
   for (i <- 0 until reqNum) {
-    when (query_fire(i)) {
+    when (io.queryMQ(i).req.valid) {
       parallel_pipe_regs(i).req := io.queryMQ(i).req.bits
       parallel_pipe_regs(i).alloc := ((analysis.strategy(i) & 1.U) =/= 0.U) &&
                                       (analysis.compress_group(i) === i.U) &&
