@@ -141,10 +141,11 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val finalIsRVC        = instrVec(mispredIdx.bits).isRvc
   private val finalInvalidTaken = invalidTaken(mispredIdx.bits)
   private val finalNotCfiTaken  = notCfiTaken(mispredIdx.bits)
-  private val finalSelectBlock  = instrVec(mispredIdx.bits).blockSel
+  private val finalBlockSel     = instrVec(mispredIdx.bits).blockSel
   private val finalPc           = instrPcVec(mispredIdx.bits)
   private val finalAttribute    = pdInfoVec(mispredIdx.bits).brAttribute
   private val fixedTaken        = fixedTakenVec(mispredIdx.bits)
+  private val finalIsCrossBlockInstr = instrVec(mispredIdx.bits).isCrossBlockInstr
 
   // The actual end of the prediction block is the instruction before invalidTaken.
   private val endOffset = endOffsetVec(mispredIdx.bits)
@@ -161,7 +162,9 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val endOffsetNext        = RegEnable(endOffset, io.req.valid)
   private val finalPcNext          = RegEnable(finalPc, io.req.valid)
   private val fixedTakenNext       = RegEnable(fixedTaken, io.req.valid)
-  private val wbValid              = RegNext(io.req.valid, init = false.B)
+  private val finalBlockSelNext    = RegEnable(finalBlockSel, io.req.valid)
+  private val finalIsCrossBlockInstrNext = RegEnable(finalIsCrossBlockInstr, io.req.valid)
+  private val wbValid                    = RegNext(io.req.valid, init = false.B)
 
   private val fixedTarget = Mux(
     fixedIsJumpNext,
@@ -175,7 +178,8 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   io.resp.stage2Out.checkerRedirect.bits.taken        := fixedTakenNext
   io.resp.stage2Out.checkerRedirect.bits.isRVC        := finalIsRVCNext
   io.resp.stage2Out.checkerRedirect.bits.attribute    := Mux(invalidTakenNext, BranchAttribute.None, finalAttributeNext)
-  io.resp.stage2Out.checkerRedirect.bits.selectBlock  := finalSelectBlockNext
+  io.resp.stage2Out.checkerRedirect.bits.blockSel          := finalBlockSelNext
+  io.resp.stage2Out.checkerRedirect.bits.isCrossBlockInstr := finalIsCrossBlockInstrNext
   io.resp.stage2Out.checkerRedirect.bits.invalidTaken := invalidTakenNext
   io.resp.stage2Out.checkerRedirect.bits.notCfiTaken  := notCfiTakenNext
   io.resp.stage2Out.checkerRedirect.bits.mispredPc    := finalPcNext.unGuard
@@ -199,6 +203,6 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     )
   )
 
-  io.resp.stage2Out.perfFaultType(0) := Mux(!finalSelectBlockNext, faultType, PreDecodeFaultType.NoFault)
-  io.resp.stage2Out.perfFaultType(1) := Mux(finalSelectBlockNext, faultType, PreDecodeFaultType.NoFault)
+  io.resp.stage2Out.perfFaultType(0) := Mux(!finalBlockSelNext, faultType, PreDecodeFaultType.NoFault)
+  io.resp.stage2Out.perfFaultType(1) := Mux(finalBlockSelNext, faultType, PreDecodeFaultType.NoFault)
 }

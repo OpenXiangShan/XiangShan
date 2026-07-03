@@ -88,7 +88,7 @@ class FetchBlock(implicit p: Parameters) extends IfuBundle {
   }
 }
 class IfuData(implicit p: Parameters) extends IfuBundle with HasICacheParameters {
-  val data:        Vec[UInt] = Vec(FetchBlockInstNum, UInt(16.W))
+  val index:       Vec[UInt] = Vec(FetchBlockInstNum, UInt(log2Ceil(FetchBlockInstNum).W))
   val maybeRvcMap: UInt      = UInt(FetchBlockInstNum.W)
   val range:       UInt      = UInt(FetchBlockInstNum.W)
   val blockSel:    UInt      = UInt(FetchBlockInstNum.W)
@@ -109,9 +109,13 @@ class IfuData(implicit p: Parameters) extends IfuBundle with HasICacheParameters
       (fromReq0, req0Idx, req1Idx)
     }
 
-    this.data := VecInit((0 until FetchBlockInstNum).map { i =>
+    // this.data := VecInit((0 until FetchBlockInstNum).map { i =>
+    //   val (fromReq0, req0Idx, req1Idx) = getDataIndex(i)
+    //   Mux(fromReq0, dupData(0)(req0Idx), Mux(req.info(1).valid, dupData(1)(req1Idx), 0.U.asTypeOf(dupData(1)(req1Idx))))
+    // })
+    this.index := VecInit((0 until FetchBlockInstNum).map { i =>
       val (fromReq0, req0Idx, req1Idx) = getDataIndex(i)
-      Mux(fromReq0, dupData(0)(req0Idx), Mux(req.info(1).valid, dupData(1)(req1Idx), 0.U.asTypeOf(dupData(1)(req1Idx))))
+      Mux(fromReq0, req0Idx, req1Idx)
     })
 
     this.maybeRvcMap := req.maybeRvcMap
@@ -172,6 +176,7 @@ class Instruction(implicit p: Parameters) extends IfuBundle with HasICacheParame
   val endOffset:         UInt = UInt(FetchBlockInstOffsetWidth.W)
   val isPrevEndHalfRvi:  Bool = Bool()
   val isCrossBlockInstr: Bool = Bool()
+  val index:             UInt = UInt(FetchBlockInstOffsetWidth.W)
 }
 
 class PredCheckRedirect(implicit p: Parameters) extends IfuBundle {
@@ -181,10 +186,11 @@ class PredCheckRedirect(implicit p: Parameters) extends IfuBundle {
   val invalidTaken: Bool            = Bool()
   val notCfiTaken:  Bool            = Bool()
   val isRVC:        Bool            = Bool()
-  val selectBlock:  Bool            = Bool()
+  val blockSel:     Bool            = Bool()
   val attribute:    BranchAttribute = new BranchAttribute
   val mispredPc:    Pc              = Pc()
   val endOffset:    UInt            = UInt(FetchBlockInstOffsetWidth.W)
+  val isCrossBlockInstr: Bool       = Bool()
 }
 
 /* ***** DB ***** */

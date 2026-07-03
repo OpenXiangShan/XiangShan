@@ -26,7 +26,7 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
       val valid:               Bool            = Bool()
       val firstInstrIsHalfRvi: Bool            = Bool()
       val fetchBlock:          Vec[FetchBlock] = Vec(MaxFetchReqNum, new FetchBlock)
-      val icacheData:          IfuData         = new IfuData
+      val ifuData:             IfuData         = new IfuData
       val totalEndPos:         UInt            = UInt(FetchBlockInstOffsetWidth.W)
     }
     class Resp(implicit p: Parameters) extends IfuBundle {
@@ -40,15 +40,15 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
   }
   val io: InstrBoundaryIO = IO(new InstrBoundaryIO)
 
-  private val data     = io.req.icacheData.data
-  private val range    = io.req.icacheData.range
-  private val maybeRvc = io.req.icacheData.maybeRvcMap
-  private val blockSel = io.req.icacheData.blockSel
+  private val index    = io.req.ifuData.index
+  private val range    = io.req.ifuData.range
+  private val maybeRvc = io.req.ifuData.maybeRvcMap
+  private val blockSel = io.req.ifuData.blockSel
 
   // We compute the boundaries of instructions in the first half of the fetch block directly, and compute the boundaries
   // of instructions in the latter half in two cases in parallel. Then we can choose the correct case according to
   // whether the last instruction in the first half is a 16-bit instruction or not.
-  private val boundary            = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
+  private val boundary = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
   private val latterHalfBoundary1 = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
   private val latterHalfBoundary2 = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
 
@@ -96,17 +96,18 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
       else isStart
     } && range(i)
 
-    instr.data := {
-      if (i == FetchBlockInstNum - 1)
-        Cat(0.U(16.W), data(i))
-      else
-        Cat(data(i + 1), data(i))
-    }
+    instr.index := index(i)
+    instr.data  := 0.U
 
     instr.isRvc := isStart && maybeRvc(i)
-    // Not involved in the instruction delimiting logic; timing impact should be controllable.
-    val fixedBlockSel = blockSel(i) || (crossBlockFallThrough && !maybeRvc(i))
-    instr.blockSel := fixedBlockSel
+    // After repeated and careful trade-offs, we decided to postpone the blockSel judgment for instructions that cross a FetchBlock.
+    // 1: If we set blockSel to 1 for such a crossing instruction here, we would need to adjust startOffset and endOffset accordingly – that is fine.
+    // 2: We need to fetch the corresponding instruction from the FetchBlock by index. The fetch logic reads 4 bytes sequentially.
+    // Even if we change blockSel to 1, no matter how we adjust the index, we would still have to combine isCrossBlockInstr and
+    // take data from FetchBlock0 and FetchBlock1 separately to assemble the instruction that spans two FetchBlocks.
+    // Why not extract the instruction data directly inside InstrBoundary? Logically it is possible, but hard to meet timing constraints.
+    // 3: Since we cannot resolve this cleanly in one place, we might as well compute the final result at the point of use by combining isCrossBlockInstr and blockSel.
+    instr.blockSel := blockSel(i)
 
     instr.isPredTaken       := false.B
     instr.invalidTaken      := false.B
@@ -114,7 +115,7 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
     instr.isCrossBlockInstr := crossBlockFallThrough && !maybeRvc(i)
 
     val startOffset = Mux(
-      fixedBlockSel,
+      blockSel(i),
       i.U(FetchBlockInstOffsetWidth.W) - io.req.fetchBlock(0).size,
       i.U(FetchBlockInstOffsetWidth.W)
     )
