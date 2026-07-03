@@ -159,7 +159,7 @@ trait HasDCacheParameters
     s"channelSelByAddr requires numMemChannels to be a power of 2, got $numMemChannels")
 
   // banked dcache support
-  val DCacheSetDiv = 1
+  val DCacheSetDiv = 2
   val DCacheSets = cacheParams.nSets
   val DCacheTagBanks = cacheParams.tagBanks
   val DCacheWayDiv = 2
