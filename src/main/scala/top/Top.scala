@@ -40,6 +40,7 @@ import freechips.rocketchip.tilelink._
 import freechips.rocketchip.interrupts._
 import freechips.rocketchip.amba.axi4._
 import freechips.rocketchip.jtag.JTAGIO
+import freechips.rocketchip.util.{AsyncQueueParams, AsyncQueueSink}
 import chisel3.experimental.annotate
 
 import scala.collection.mutable.Map
@@ -275,13 +276,23 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
     misc.module.bus_clock := io.clock
     misc.module.bus_reset := io.reset
 
-
+    val clintTime = WireInit(0.U.asTypeOf(ValidIO(UInt(64.W))))
+    EnableClintAsyncBridge match {
+      case Some(param) =>
+        val time_sink = withClockAndReset(core_with_l2.head.module.clock, core_with_l2.head.module.reset)(Module(new AsyncQueueSink(UInt(64.W), param)))
+        time_sink.io.async <> misc.module.clintTime
+        time_sink.io.deq.ready := true.B
+        clintTime.valid := time_sink.io.deq.valid
+        clintTime.bits  := time_sink.io.deq.bits
+      case None =>
+       clintTime := misc.module.clintTime
+    }
 
     for ((core, i) <- core_with_l2.zipWithIndex) {
       core.module.io.hartId := i.U
       core.module.io.msiInfo := msiInfo
       core.module.io.teemsiInfo.foreach(_ := msiInfo)
-      core.module.io.clintTime := misc.module.clintTime
+      core.module.io.clintTime := clintTime
       io.riscv_wfi(i) := core.module.io.cpu_wfi
       io.riscv_critical_error(i) := core.module.io.cpu_crtical_error
       // trace Interface
