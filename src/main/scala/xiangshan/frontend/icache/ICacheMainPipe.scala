@@ -116,7 +116,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s0_firstBlockRange = Wire(UInt(MaxInstNumPerBlock.W))
   private val s0_totalBlockRange = Wire(UInt(MaxInstNumPerBlock.W))
   private val s0_shiftFlag      = Wire(Bool())
-  private val s0_firstFetchSize = s0_req(0).takenCfiOffset.bits + 1.U(log2Ceil(MaxInstNumPerBlock).W)
+  private val s0_firstFetchSize = s0_req(0).takenCfiOffset.bits +& 1.U
+  private val s0_totalFetchSize = s0_req(1).takenCfiOffset.bits +& 1.U +& s0_firstFetchSize
   // 我将移位分为两次进行
   // shiftMaybeRvcMap(0)  := maybeRvcMap(0) >> s0_shiftNum(0)
   s0_shiftNum(0)  := s0_req(0).startVAddr(log2Ceil(MaxInstNumPerBlock), 1)
@@ -131,10 +132,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   )
   // shiftMaybeRvcMap(3)  := Cat(maybeRvcMap(3), 0.U(2.W)) << s0_shiftNum(3)
   s0_shiftNum(3) := ~s0_req(1).startVAddr(log2Ceil(MaxInstNumPerBlock), 1) + s0_req(0).takenCfiOffset.bits
-  s0_firstBlockRange := UIntToMask(s0_firstFetchSize, MaxInstNumPerBlock)
+  s0_firstBlockRange := Mux(s0_firstFetchSize === MaxInstNumPerBlock.U, (~0.U(MaxInstNumPerBlock.W)), UIntToMask(s0_firstFetchSize, MaxInstNumPerBlock))
   s0_totalBlockRange := Mux(
     s0_req(1).valid,
-    UIntToMask(s0_req(1).takenCfiOffset.bits + 1.U + s0_firstFetchSize, MaxInstNumPerBlock),
+    Mux(s0_totalFetchSize === MaxInstNumPerBlock.U, (~0.U(MaxInstNumPerBlock.W)), UIntToMask(s0_totalFetchSize, MaxInstNumPerBlock)),
     s0_firstBlockRange
   )
   s0_shiftMaybeRvcMap(0) := s0_wayLookupEntry(0).maybeRvcMap(0) >> s0_shiftNum(0)(1, 0)
