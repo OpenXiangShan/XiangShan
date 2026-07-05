@@ -75,6 +75,13 @@ class MetaInfo(implicit p: Parameters) extends ICacheBundle {
   val metaCodes:   UInt = UInt(MetaEccBits.W)
 }
 
+class MaybeRvcShiftInfo(implicit p: Parameters) extends ICacheBundle {
+  val shiftNum:         Vec[UInt] = Vec(MaxFetchLineNum, UInt(log2Ceil(MaxInstNumPerBlock).W))
+  val shiftFlag:        Bool      = Bool()
+  val shiftMaybeRvcMap: Vec[UInt] = Vec(MaxFetchLineNum, UInt(MaxInstNumPerBlock.W))
+  val rangeVec:         Vec[UInt] = Vec(MaxFetchLineNum, UInt(MaxInstNumPerBlock.W))
+}
+
 /* ***** Array write ***** */
 // ICacheMissUnit <-> ICacheMetaArray
 class MetaWriteBundle(implicit p: Parameters) extends ICacheBundle {
