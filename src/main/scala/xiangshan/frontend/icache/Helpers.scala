@@ -17,6 +17,8 @@ package xiangshan.frontend.icache
 
 import chisel3._
 import chisel3.util._
+import utility.UIntToMask
+import xiangshan.frontend.FtqFetchRequest
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 
@@ -111,6 +113,110 @@ trait ICacheMetaHelper extends HasICacheParameters {
 }
 
 trait ICacheDataHelper extends HasICacheParameters {
+  def shiftSramMaybeRvc(
+      maybeRvcMap: UInt,
+      shiftNum: UInt,
+      leftShift: Bool,
+      secondShift: Boolean
+  ): UInt = {
+    val realShiftNum =
+      if (secondShift) Cat(shiftNum(log2Ceil(MaxInstNumPerBlock) - 1, 2), 0.U(2.W)) else shiftNum(1, 0)
+    val shifted = Mux(leftShift, maybeRvcMap << realShiftNum, maybeRvcMap >> realShiftNum)
+    if (secondShift) shifted else shifted(MaxInstNumPerBlock - 1, 0)
+  }
+
+  def shiftSramMaybeRvcVec(
+      maybeRvcMap: Vec[UInt],
+      shiftNum: Vec[UInt],
+      shiftFlag: Bool,
+      secondShift: Boolean
+  ): Vec[Vec[UInt]] = VecInit(
+    VecInit(
+      shiftSramMaybeRvc(maybeRvcMap(0), shiftNum(0), leftShift = false.B, secondShift = secondShift),
+      shiftSramMaybeRvc(maybeRvcMap(1), shiftNum(1), leftShift = true.B, secondShift = secondShift)
+    ),
+    VecInit(
+      shiftSramMaybeRvc(maybeRvcMap(2), shiftNum(2), leftShift = !shiftFlag, secondShift = secondShift),
+      shiftSramMaybeRvc(maybeRvcMap(3), shiftNum(3), leftShift = true.B, secondShift = secondShift)
+    )
+  )
+
+  def genMaybeRvcShiftInfo(
+      req: Vec[FtqFetchRequest],
+      wayLookupEntry: Vec[WayLookupEntry],
+      firstFetchSize: UInt
+  ): MaybeRvcShiftInfo = {
+    val info = Wire(new MaybeRvcShiftInfo)
+
+    val req0Start = req(0).startVAddr(log2Ceil(MaxInstNumPerBlock), 1)
+    val req1Start = req(1).startVAddr(log2Ceil(MaxInstNumPerBlock), 1)
+    val secondFetchSize = req(1).takenCfiOffset.bits +& 1.U
+    val totalFetchSize  = secondFetchSize +& firstFetchSize
+    val firstBlockRange = genInstRange(firstFetchSize)
+    val totalBlockRange = Mux(req(1).valid, genInstRange(totalFetchSize), firstBlockRange)
+
+    info.shiftNum(0)  := req0Start
+    info.shiftNum(1)  := ~info.shiftNum(0)
+    info.shiftFlag    := req1Start > firstFetchSize
+    info.shiftNum(2)  := Mux(info.shiftFlag, req1Start - firstFetchSize, firstFetchSize - req1Start)
+    info.shiftNum(3)  := ~req1Start + req(0).takenCfiOffset.bits
+
+    info.shiftMaybeRvcMap(0) :=
+      shiftSramMaybeRvc(
+        wayLookupEntry(0).maybeRvcMap(0),
+        info.shiftNum(0),
+        leftShift = false.B,
+        secondShift = false
+      )
+    info.shiftMaybeRvcMap(1) :=
+      shiftSramMaybeRvc(
+        Cat(wayLookupEntry(0).maybeRvcMap(1), 0.U(1.W)),
+        info.shiftNum(1),
+        leftShift = true.B,
+        secondShift = false
+      )
+    info.shiftMaybeRvcMap(2) :=
+      shiftSramMaybeRvc(
+        wayLookupEntry(1).maybeRvcMap(0),
+        info.shiftNum(2),
+        leftShift = !info.shiftFlag,
+        secondShift = false
+      )
+    info.shiftMaybeRvcMap(3) :=
+      shiftSramMaybeRvc(
+        Cat(wayLookupEntry(1).maybeRvcMap(1), 0.U(2.W)),
+        info.shiftNum(3),
+        leftShift = true.B,
+        secondShift = false
+      )
+
+    info.rangeVec(0) := genInstRange(
+      Mux(
+        req(0).isCrossLine,
+        MaxInstNumPerBlock.U - info.shiftNum(0),
+        firstFetchSize
+      )
+    )
+    info.rangeVec(1) := firstBlockRange & ~info.rangeVec(0)
+    info.rangeVec(2) := Mux(
+      req(1).valid,
+      genInstRange(
+        firstFetchSize +& Mux(
+          req(1).isCrossLine,
+          MaxInstNumPerBlock.U - req1Start,
+          secondFetchSize
+        )
+      ) & ~firstBlockRange,
+      0.U
+    )
+    info.rangeVec(3) := Mux(req(1).valid, totalBlockRange & ~(firstBlockRange | info.rangeVec(2)), 0.U)
+
+    info
+  }
+
+  def genInstRange(size: UInt): UInt =
+    Mux(size >= MaxInstNumPerBlock.U, (~0.U(MaxInstNumPerBlock.W)), UIntToMask(size, MaxInstNumPerBlock))
+
   def getBankIdx(blkOffset: UInt): UInt =
     (blkOffset >> rowOffBits).asUInt
 
