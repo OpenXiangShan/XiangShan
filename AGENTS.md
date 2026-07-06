@@ -235,18 +235,23 @@ cd mem_ut/ver/ut/memblock/sim
 如果再次出现 `vcs: command not found`，优先检查远端 `module` 初始化与
 工具版本，不要直接回退到本地 `make compile`。
 
-## MEMBLOCK_PROJECT 规则
+## MEMBLOCK_XS_HOME / MEMBLOCK_PROJECT 规则
 
 必须保证：
 
 ```text
-$MEMBLOCK_PROJECT/XiangShan/build_memblock/rtl/filelist.f
+$MEMBLOCK_XS_HOME/build_memblock/rtl/filelist.f
 ```
 
 路径有效。
 
-因此 `MEMBLOCK_PROJECT` 必须指向 `XiangShan` 的上一级目录，而不是
-`XiangShan` 本身。
+V2 独立 worktree 默认由 `eda01_entry.sh` 自动导出：
+
+- `MEMBLOCK_XS_HOME`：当前 XiangShan worktree 根目录。
+- `MEMBLOCK_PROJECT`：当前 XiangShan worktree 的上一级目录，保留给旧脚本兼容。
+
+不要在 V2 分支中硬编码 `$MEMBLOCK_PROJECT/XiangShan/...`，否则会误读同级旧
+`XiangShan` worktree 的 RTL。
 
 ## memblock RTL 生成规则
 

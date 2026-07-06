@@ -14,14 +14,33 @@ Scala source is only used to understand valid/ready, index and bundle semantics.
 
 ## Current Status
 
-At profile creation time, V2 Verilog had not been generated yet in this worktree.
-Full DUT agent/interface adaptation is intentionally out of scope for the
-branch migration plan.
+V2 Verilog has been generated successfully in this worktree. Full DUT
+agent/interface adaptation is intentionally out of scope for the branch
+migration plan.
+
+Observed generated top-level facts:
+
+```text
+build_memblock/rtl/MemBlockTop.sv
+  module MemBlockTop
+  outer_cpu_halt
+  l2_tlb_req_*
+  l2_pmp_resp_*
+```
+
+Known follow-up mismatch example:
+
+```text
+Generated V2 top: outer_cpu_halt
+Current UVM connect: cpuWfi / io_outer_cpu_wfi
+```
+
+This mismatch must be handled by the later V2 DUT adaptation plan, not by
+silently changing generated V2 design RTL.
 
 ## Follow-up Checklist
 
-After V2 RTL generation succeeds, compare these testbench entry points against
-the generated Verilog:
+Compare these testbench entry points against the generated Verilog:
 
 ```text
 mem_ut/ver/ut/memblock/tb/top_tb.sv

@@ -67,6 +67,8 @@ FORWARD_VARS=(
     time_mem_chk
     gui_on
     SIM_TOOLS
+    MEMBLOCK_XS_HOME
+    MEMBLOCK_PROJECT
 )
 
 build_make_assignments() {
@@ -74,6 +76,9 @@ build_make_assignments() {
     local name value quoted
     for name in "${FORWARD_VARS[@]}"; do
         value="${!name-}"
+        if [[ ("$name" == "MEMBLOCK_XS_HOME" || "$name" == "MEMBLOCK_PROJECT") && -z "$value" ]]; then
+            continue
+        fi
         quoted="$(printf "%q" "$value")"
         result+=("${name}=${quoted}")
     done

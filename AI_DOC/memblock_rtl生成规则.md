@@ -65,17 +65,19 @@ build_memblock/rtl/MemBlockTop.sv
 如果某版本使用等价产物或生成路径不同，必须在对应 profile 中明确记录，并同步
 `mem_ut/ver/ut/memblock/cfg/rtl.f` 的引用规则。
 
-## MEMBLOCK_PROJECT 规则
+## MEMBLOCK_XS_HOME / MEMBLOCK_PROJECT 规则
 
-`mem_ut/ver/ut/memblock/cfg/rtl.f` 通常引用：
+`mem_ut/ver/ut/memblock/cfg/rtl.f` 应引用当前工作树的 RTL：
 
 ```text
--F $MEMBLOCK_PROJECT/XiangShan/build_memblock/rtl/filelist.f
+-F $MEMBLOCK_XS_HOME/build_memblock/rtl/filelist.f
 ```
 
-因此默认 `MEMBLOCK_PROJECT` 必须指向 `XiangShan` 的上一级目录，而不是
-`XiangShan` 本身。如果 V2 worktree 使用不同目录名或 symlink，必须在 V2 profile
-中明确本地和 eda01 看到的路径。
+`MEMBLOCK_XS_HOME` 必须指向当前 XiangShan worktree 根目录。`MEMBLOCK_PROJECT`
+可继续指向 worktree 的上一级目录，用于兼容旧脚本或历史文档。
+
+如果某版本仍使用 `$MEMBLOCK_PROJECT/<worktree-name>/...` 形式，必须在对应
+profile 中明确 `<worktree-name>`，避免 V2/V3 多 worktree 共存时误读其他版本 RTL。
 
 ## 与远端编译仿真的关系
 
