@@ -35,10 +35,13 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
 
   // val uartRange = AddressSet(0x40600000, 0x3f) // ?
   val flashRange = AddressSet(0x10000000L, 0xfffffff)
+  private val useExternalLLC = p(UseExternalLLCKey)
+  private val externalLLCBootSramRange = ExternalLLCAddressMap.BootSram
+  private val externalLLCBootRanges = Option.when(useExternalLLC)(externalLLCBootSramRange).toSeq
   val sdRange = AddressSet(0x40002000L, 0xfff)
   val intrGenRange = AddressSet(0x40070000L, 0x0000ffffL)
 
-  val illegalRange = (onChipPeripheralRanges.values ++ Seq(
+  val illegalRange = (onChipPeripheralRanges.values ++ externalLLCBootRanges ++ Seq(
     soc.UARTLiteRange,
     soc.UART16550Range,
     flashRange,
@@ -47,6 +50,9 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   )).foldLeft(Seq(AddressSet(0x0, 0x7fffffffL)))((acc, x) => acc.flatMap(_.subtract(x)))
 
   val flash = LazyModule(new AXI4Flash(Seq(AddressSet(0x10000000L, 0xfffffff))))
+  val bootSram = Option.when(useExternalLLC) {
+    LazyModule(new AXI4RAM(Seq(externalLLCBootSramRange), memByte = ExternalLLCAddressMap.BootSramBytes))
+  }
   val uartLite = LazyModule(new AXI4UART(Seq(soc.UARTLiteRange)))
   private val uart16550Params = UART16550Params(address = soc.UART16550Range.base)
   val uart16550 = LazyModule(new AXI4UART16550(uart16550Params))
@@ -68,6 +74,7 @@ class SimMMIO(edge: AXI4EdgeParameters)(implicit p: Parameters) extends LazyModu
   uart16550.controlXing() := axiBus
   // vga.node :*= axiBus
   flash.node := axiBus
+  bootSram.foreach(_.node := axiBus)
   sd.node := axiBus
   intrGen.node := axiBus
   error.node := axiBus
