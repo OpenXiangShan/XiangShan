@@ -545,7 +545,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val sfence = RegNext(RegNext(io.ooo_to_mem.sfence))
   val tlbcsr = RegNext(RegNext(io.ooo_to_mem.tlbCsr))
   private val ptw = outer.ptw.module
-  private val ptw_to_l2_buffer = outer.ptw_to_l2_buffer.module
+  private val ptw_to_l2_buffer = if (!coreParams.softPTW) outer.ptw_to_l2_buffer.module else null
   private val l1d_to_l2_buffer = outer.l1d_to_l2_buffer.module
   ptw.io.hartId := io.hartId
   ptw.io.sfence <> sfence
@@ -1469,8 +1469,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   if (p(DebugOptionsKey).ResetGen) {
     val leftResetTree = ResetGenNode(
       Seq(
-        ModuleNode(ptw),
-        ModuleNode(ptw_to_l2_buffer),
+        ModuleNode(ptw)
+      )
+      ++ (if (!coreParams.softPTW) Seq(ModuleNode(ptw_to_l2_buffer)) else Seq())
+      ++ Seq(
         ModuleNode(lsq),
         ModuleNode(dtlb_st_tlb_st),
         ModuleNode(dtlb_prefetch_tlb_prefetch),

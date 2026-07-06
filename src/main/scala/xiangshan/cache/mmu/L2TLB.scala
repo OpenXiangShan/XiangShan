@@ -20,7 +20,6 @@ package xiangshan.cache.mmu
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
-import chisel3.experimental.ExtModule
 import chisel3.util._
 import xiangshan._
 import xiangshan.cache.{HasDCacheParameters, MemoryOpConstants}
@@ -1118,16 +1117,6 @@ class BlockHelper(latency: Int)(implicit p: Parameters) extends XSModule {
   }
 }
 
-class PTEHelper() extends ExtModule {
-  val clock  = IO(Input(Clock()))
-  val enable = IO(Input(Bool()))
-  val satp   = IO(Input(UInt(64.W)))
-  val vpn    = IO(Input(UInt(64.W)))
-  val pte    = IO(Output(UInt(64.W)))
-  val level  = IO(Output(UInt(8.W)))
-  val pf     = IO(Output(UInt(8.W)))
-}
-
 class PTWDelayN[T <: Data](gen: T, n: Int, flush: Bool) extends Module {
   val io = IO(new Bundle() {
     val in = Input(gen)
@@ -1138,7 +1127,12 @@ class PTWDelayN[T <: Data](gen: T, n: Int, flush: Bool) extends Module {
   val t = RegInit(VecInit(Seq.fill(n)(0.U.asTypeOf(gen))))
   out(0) := io.in
   if (n == 1) {
-    io.out := out(0)
+    when (io.ptwflush) {
+      out(0) := 0.U.asTypeOf(gen)
+      io.out := 0.U.asTypeOf(gen)
+    }.otherwise {
+      io.out := out(0)
+    }
   } else {
     when (io.ptwflush) {
       for (i <- 0 until n) {
@@ -1165,48 +1159,73 @@ object PTWDelayN {
   }
 }
 
+// FakePTW: Software PTW implementation using DPI-C PteHelper
+// Used when coreParams.softPTW is enabled for debug/simulation
+// Supports H-extension two-stage address translation
 class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
   val io = IO(new L2TLBIO)
+
   val flush = VecInit(Seq.fill(PtwWidth)(false.B))
-  flush(0) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed || io.csr.tlb.vsatp.changed || io.csr.tlb.hgatp.changed || io.csr.tlb.priv.virt_changed, itlbParams.fenceDelay)
-  flush(1) := DelayN(io.sfence.valid || io.csr.tlb.satp.changed || io.csr.tlb.vsatp.changed || io.csr.tlb.hgatp.changed || io.csr.tlb.priv.virt_changed, ldtlbParams.fenceDelay)
+  val flushCond = io.sfence.valid ||
+    io.csr.tlb.satp.changed ||
+    io.csr.tlb.vsatp.changed ||
+    io.csr.tlb.hgatp.changed ||
+    io.csr.tlb.priv.virt_changed
+  flush(0) := DelayN(flushCond, itlbParams.fenceDelay)
+  flush(1) := DelayN(flushCond, ldtlbParams.fenceDelay)
+
   for (i <- 0 until PtwWidth) {
-    val helper = Module(new PTEHelper())
+    val helper = Module(new PteHelper())
     helper.clock := clock
-    helper.satp := io.csr.tlb.satp.ppn
+    helper.connectCsr(io.csr.tlb)
 
     if (coreParams.softPTWDelay == 1) {
-      helper.enable := io.tlb(i).req(0).fire
-      helper.vpn := io.tlb(i).req(0).bits.vpn
+      helper.connectReq(
+        reqVpn = io.tlb(i).req(0).bits.vpn,
+        reqS2xlate = io.tlb(i).req(0).bits.s2xlate,
+        reqEnable = io.tlb(i).req(0).fire && !reset.asBool
+      )
     } else {
-      helper.enable := PTWDelayN(io.tlb(i).req(0).fire, coreParams.softPTWDelay - 1, flush(i))
-      helper.vpn := PTWDelayN(io.tlb(i).req(0).bits.vpn, coreParams.softPTWDelay - 1, flush(i))
+      helper.connectReq(
+        reqVpn = PTWDelayN(io.tlb(i).req(0).bits.vpn, coreParams.softPTWDelay - 1, flush(i)),
+        reqS2xlate = PTWDelayN(io.tlb(i).req(0).bits.s2xlate, coreParams.softPTWDelay - 1, flush(i)),
+        reqEnable = PTWDelayN(io.tlb(i).req(0).fire, coreParams.softPTWDelay - 1, flush(i)) && !reset.asBool
+      )
     }
 
-    val pte = helper.pte.asTypeOf(new PteBundle)
-    val level = helper.level
-    val pf = helper.pf
+    val helperResult = PteHelperResult.fromHelper(helper, helper.enable)
+    val vpnDelayed = PTWDelayN(io.tlb(i).req(0).bits.vpn, coreParams.softPTWDelay, flush(i))
+    val s2xlateReg = if (coreParams.softPTWDelay == 1) {
+      RegEnable(io.tlb(i).req(0).bits.s2xlate, io.tlb(i).req(0).fire)
+    } else {
+      PTWDelayN(io.tlb(i).req(0).bits.s2xlate, coreParams.softPTWDelay, flush(i))
+    }
+
+    // Request/response handshake logic
     val empty = RegInit(true.B)
-    when (io.tlb(i).req(0).fire) {
+    when (flush(i)) {
+      empty := true.B
+    }.elsewhen (io.tlb(i).req(0).fire) {
       empty := false.B
-    } .elsewhen (io.tlb(i).resp.fire || flush(i)) {
+    }.elsewhen (io.tlb(i).resp.fire) {
       empty := true.B
     }
-
-    io.tlb(i).req(0).ready := empty || io.tlb(i).resp.fire
+    io.tlb(i).req(0).ready := !flush(i) && (empty || io.tlb(i).resp.fire)
     io.tlb(i).resp.valid := PTWDelayN(io.tlb(i).req(0).fire, coreParams.softPTWDelay, flush(i))
     assert(!io.tlb(i).resp.valid || io.tlb(i).resp.ready)
-    io.tlb(i).resp.bits.s1.entry.tag := PTWDelayN(io.tlb(i).req(0).bits.vpn, coreParams.softPTWDelay, flush(i))
-    io.tlb(i).resp.bits.s1.entry.pbmt := pte.pbmt
-    io.tlb(i).resp.bits.s1.entry.ppn := pte.ppn
-    io.tlb(i).resp.bits.s1.entry.perm.map(_ := pte.getPerm())
-    io.tlb(i).resp.bits.s1.entry.level.map(_ := level)
-    io.tlb(i).resp.bits.s1.pf := pf
-    io.tlb(i).resp.bits.s1.af := DontCare // TODO: implement it
-    io.tlb(i).resp.bits.s1.entry.v := !pf
-    io.tlb(i).resp.bits.s1.entry.prefetch := DontCare
-    io.tlb(i).resp.bits.s1.entry.asid := io.csr.tlb.satp.asid
+
+    helperResult.fillS1Resp(
+      resp = io.tlb(i).resp.bits.s1,
+      vpn = vpnDelayed,
+      s2xlate = s2xlateReg,
+      asid = io.csr.tlb.satp.asid,
+      vsasid = io.csr.tlb.vsatp.asid,
+      vmid = io.csr.tlb.hgatp.vmid
+    )
+    helperResult.fillS2Resp(io.tlb(i).resp.bits.s2, vpnDelayed, s2xlateReg, io.csr.tlb.hgatp.vmid)
+    io.tlb(i).resp.bits.s2xlate := s2xlateReg
   }
+  io.wfi.wfiSafe := true.B
 }
 
 class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParameter {
@@ -1221,13 +1240,12 @@ class L2TLBWrapper()(implicit p: Parameters) extends LazyModule with HasXSParame
   class L2TLBWrapperImp(wrapper: LazyModule) extends LazyModuleImp(wrapper) with HasPerfEvents {
     val io = IO(new L2TLBIO)
     val perfEvents = if (useSoftPTW) {
-      val fake_ptw = Module(new FakePTW())
-      io <> fake_ptw.io
+      val fakePtw = Module(new FakePTW())
+      io <> fakePtw.io
       Seq()
-    }
-    else {
-        io <> ptw.module.io
-        ptw.module.getPerfEvents
+    } else {
+      io <> ptw.module.io
+      ptw.module.getPerfEvents
     }
     generatePerfEvent()
   }

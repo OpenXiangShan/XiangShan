@@ -76,7 +76,7 @@ case class XSCoreParameters
   AsidLength: Int = 16,
   SdidLength: Int = 6,
   VmidLength: Int = 14,
-  EnbaleTlbDebug: Boolean = false,
+  EnableTlbDebug: Boolean = false,
   EnableClockGate: Boolean = true,
   EnableJal: Boolean = false,
   EnableSv48: Boolean = true,
@@ -647,7 +647,7 @@ trait HasXSParameter {
   def HasFPU = coreParams.HasFPU
   def HasVPU = coreParams.HasVPU
   def HasCustomCSRCacheOp = coreParams.HasCustomCSRCacheOp
-  def EnbaleTlbDebug = coreParams.EnbaleTlbDebug
+  def EnableTlbDebug = coreParams.EnableTlbDebug
   def EnableCommitGHistDiff = coreParams.EnableCommitGHistDiff
   def EnableClockGate = coreParams.EnableClockGate
 
