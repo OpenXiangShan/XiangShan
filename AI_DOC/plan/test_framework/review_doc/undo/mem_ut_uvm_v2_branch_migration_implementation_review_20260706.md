@@ -1,6 +1,6 @@
-# mem_ut_uvm_v2 branch migration implementation review
+# mem_ut_uvm_v2 分支迁移实现 Review
 
-## 1. Review Scope
+## 1. Review 范围
 
 关联 plan：
 
@@ -8,9 +8,7 @@
 AI_DOC/plan/test_framework/plan/undo/mem_ut_uvm_v2_branch_migration_plan_20260706.md
 ```
 
-本 review 覆盖 `mem_ut_uvm_v2` 分支当前 5 个本地提交的实现状态，以及本轮收尾文档对
-RTL 生成结果的真实状态更新。本 review 不新增源码修改，不移动 plan，不执行 push。
-本 review 文档和 profile 状态更新作为独立收尾 commit 提交，便于 review。
+本 review 覆盖 `mem_ut_uvm_v2` 分支当前 5 个迁移提交的实现状态，以及收尾文档对 RTL 生成结果真实状态的更新。本 review 不新增源码修改，不移动 plan，不执行 push。本 review 文档和 profile 状态更新作为独立收尾 commit 提交，便于 review。
 
 工作区与分支：
 
@@ -23,63 +21,64 @@ reviewed HEAD: d555ee14a8418264c79a1e5f014cb5a040f6a46b
 branch status before this document: ahead of origin/kunminghu-v2 by 5 commits
 ```
 
-## 2. Commit Chain
+## 2. 提交链
 
-| Order | Commit | Subject | Stage |
+| 顺序 | Commit | 提交说明 | 阶段 |
 |---|---|---|---|
-| 1 | `f6d94eea7eaee0aecc55eec5a77d7c50e145b930` | `docs(mem_ut): record v3 baseline before v2 migration` | V3 baseline record |
-| 2 | `8003cc08417858b3f74042d1ab26591ec7d3c095` | `docs(mem_ut): add versioned v2 v3 rule profiles` | Rule/profile versioning |
-| 3 | `e11e15b6a28c8be5b8372d005d07ceefe89195a6` | `chore(mem_ut): align v2 branch to kunminghu-v2 baseline` | V2 baseline marker |
-| 4 | `cead7d6fc6d4dc9888bd3352a5a8cf6493cd673a` | `build(memblock): add v2 rtl generation flow` | V2 RTL generation entry |
-| 5 | `d555ee14a8418264c79a1e5f014cb5a040f6a46b` | `mem_ut: port base environment to v2 rtl path` | Base mem_ut environment port |
+| 1 | `f6d94eea7eaee0aecc55eec5a77d7c50e145b930` | `docs(mem_ut): record v3 baseline before v2 migration` | V3 基线记录 |
+| 2 | `8003cc08417858b3f74042d1ab26591ec7d3c095` | `docs(mem_ut): add versioned v2 v3 rule profiles` | 规则/profile 版本化 |
+| 3 | `e11e15b6a28c8be5b8372d005d07ceefe89195a6` | `chore(mem_ut): align v2 branch to kunminghu-v2 baseline` | V2 基线阶段标记 |
+| 4 | `cead7d6fc6d4dc9888bd3352a5a8cf6493cd673a` | `build(memblock): add v2 rtl generation flow` | V2 RTL 生成入口 |
+| 5 | `d555ee14a8418264c79a1e5f014cb5a040f6a46b` | `mem_ut: port base environment to v2 rtl path` | mem_ut 基础环境搬迁 |
 
-## 3. Stage Review
+## 3. 阶段 Review
 
-### 3.1 V3 baseline record
+### 3.1 V3 基线记录
 
-Commit `f6d94eea7` added:
+提交 `f6d94eea7` 新增：
 
 ```text
 AI_DOC/analysis/rtl/v2/mem_ut_uvm_v2_migration_v3_baseline_20260706.md
 ```
 
-This satisfies the plan requirement to leave a traceable V3 baseline before V2
-migration work. The document records the source V3 worktree, V3 commit, V2 base
-commit, and the fact that this V2 migration is executed in an independent
-worktree.
+该提交满足 plan 中“切到 `mem_ut_uvm_v2` 后先记录 V3 修改前基线”的要求。文档记录了 V3 来源 worktree、V3 commit、V2 base commit，以及本次 V2 迁移在独立 worktree 中执行的事实。
 
-### 3.2 Rule and profile versioning
+Review 结论：第一笔提交只做基线记录，没有混入 RTL 生成脚本、V2 harness 或 mem_ut UVM 环境搬迁，阶段边界清楚。
 
-Commit `8003cc084` added the common AI/project rules, updated `AGENTS.md`, and
-created V2/V3 version profiles under:
+### 3.2 规则和 profile 版本化
+
+提交 `8003cc084` 新增通用 AI/project 规则、更新 `AGENTS.md`，并在以下目录建立 V2/V3 版本 profile：
 
 ```text
 mem_ut/ver/ut/memblock/rule/version/v2
 mem_ut/ver/ut/memblock/rule/version/v3
 ```
 
-The implementation matches the plan direction: common rules remain single-copy,
-while branch-dependent policy, RTL generation profile, DUT interface baseline,
-L2TLB profile, and verified status are separated by version. This reduces the
-risk that later V2 work accidentally reuses V3 DUT or tool assumptions.
+实现方式符合 plan 方向：通用规则保持单份，分支策略、RTL 生成 profile、DUT interface 基线、L2TLB profile 和 verified status 按版本拆分。这样后续 V2 工作不会误用 V3 DUT、V3 上游分支或 V3 工具链假设。
 
-### 3.3 V2 baseline alignment
+Review 结论：规则/profile 拆分满足“通用规则 + V2/V3 profile”的要求。
 
-Commit `e11e15b6` is an empty stage marker named
-`chore(mem_ut): align v2 branch to kunminghu-v2 baseline`. It records that the
-branch is based on:
+### 3.3 V2 基线对齐
+
+提交 `e11e15b6` 是空提交阶段标记，提交名为：
+
+```text
+chore(mem_ut): align v2 branch to kunminghu-v2 baseline
+```
+
+该阶段记录当前分支基于：
 
 ```text
 origin/kunminghu-v2: 2acbf327cf7fb514593acc00d4c41117ec499e08
 ```
 
-This is consistent with the plan's request for a separate V2 baseline switch
-stage. Because the current branch history is `origin/kunminghu-v2` plus the 5
-local migration commits, the reviewed branch shape is traceable.
+这符合 plan 中“规则版本化提交之后，再独立记录 V2 基线切换结果”的要求。当前分支历史是 `origin/kunminghu-v2` 加 5 个迁移提交，因此分支形态可追溯。
 
-### 3.4 V2 RTL generation entry
+Review 结论：空提交用于阶段隔离是可接受的，后续 RTL 生成脚本和 mem_ut 搬迁没有混入 V2 base 标记提交。
 
-Commit `cead7d6fc` added:
+### 3.4 V2 RTL 生成入口
+
+提交 `cead7d6fc` 新增：
 
 ```text
 scripts/generate_memblock_rtl.sh
@@ -87,12 +86,9 @@ src/main/scala/top/MemBlockTop.scala
 AI_DOC/analysis/rtl/v2/memblock_rtl_generation_result_20260706.md
 ```
 
-The script locates the repository root, sets `MEMBLOCK_PROJECT` to the parent of
-the XiangShan worktree by default, checks recursive submodule initialization,
-uses `build.sc` through `mill xiangshan.runMain`, and expects V2 RTL outputs in
-`build_memblock/rtl`.
+脚本会定位仓库根目录，默认把 `MEMBLOCK_PROJECT` 设置为 XiangShan worktree 的上一级目录，检查 recursive submodule 初始化状态，通过 `build.sc` 对应的 `mill xiangshan.runMain` 调用 V2 生成入口，并期望 V2 RTL 输出到 `build_memblock/rtl`。
 
-Source support:
+源码支撑：
 
 ```text
 scripts/generate_memblock_rtl.sh
@@ -107,28 +103,17 @@ src/main/scala/top/MemBlockTop.scala
 
 中文伪代码：
 
-这段逻辑在 V2 RTL 生成 flow 中提供独立入口。脚本先确定仓库根目录和输出目录，再检查
-submodule 是否完整；如果依赖未初始化，直接报错退出，避免进入不完整 build。依赖满足后，
-脚本通过 `mill` 调用 `top.MemBlockTopMain`，用 `KunminghuV2Config` 生成 MemBlock 顶层
-SystemVerilog，并在命令完成后检查 `filelist.f`、`MemBlock.sv`、`MemBlockTop.sv` 是否非空。
-Scala 入口则实例化 `xiangshan.mem.MemBlock`，把 MemBlock 的 `io` 和 `io_perf` 暴露到
-standalone 顶层，供生成脚本作为独立 RTL 顶层使用。
+这段逻辑在 V2 RTL 生成 flow 中提供独立入口。脚本先确定仓库根目录和输出目录，再检查 submodule 是否完整；如果依赖未初始化，直接报错退出，避免进入不完整 build。依赖满足后，脚本通过 `mill` 调用 `top.MemBlockTopMain`，用 `KunminghuV2Config` 生成 MemBlock 顶层 SystemVerilog，并在命令完成后检查 `filelist.f`、`MemBlock.sv`、`MemBlockTop.sv` 是否非空。Scala 入口则实例化 `xiangshan.mem.MemBlock`，把 MemBlock 的 `io` 和 `io_perf` 暴露到 standalone 顶层，供生成脚本作为独立 RTL 顶层使用。
 
-Review 结论：V2 RTL generation flow 已迁移，但当前失败点证明 V2 RTL 未生成成功，不能把
-该阶段记为 RTL 生成验收通过。
+Review 结论：V2 RTL generation flow 已迁移，但当前失败点证明 V2 RTL 未生成成功，不能把该阶段记为 RTL 生成验收通过。
 
-### 3.5 Base mem_ut environment port
+### 3.5 mem_ut 基础环境搬迁
 
-Commit `d555ee14a` added the base `mem_ut/ver/ut/memblock` UVM environment,
-including agent directories, cfg/filelist, common package, env, sequences,
-testbench connect files, testcase files, and remote EDA make entries.
+提交 `d555ee14a` 新增基础 `mem_ut/ver/ut/memblock` UVM 环境，包括 agent 目录、cfg/filelist、common package、env、sequence、testbench connect 文件、testcase 文件和远端 EDA make 入口。
 
-The plan allowed base environment migration as a preparation stage, but explicitly
-required V2 RTL as the authority before real V2 DUT interface adaptation. Current
-state should therefore be read as "environment ported to V2 worktree and wired to
-the expected V2 RTL path", not as "V2 DUT adaptation completed".
+plan 允许把基础环境搬到 V2 worktree 作为准备阶段，但明确要求真实 V2 DUT interface 适配必须以生成后的 V2 RTL 为权威输入。因此当前状态应理解为“环境已搬到 V2 worktree，并接到预期 V2 RTL 路径”，不能理解为“V2 DUT 已完成适配”。
 
-Important path check:
+关键路径检查：
 
 ```text
 mem_ut/ver/ut/memblock/cfg/rtl.f
@@ -141,39 +126,35 @@ mem_ut/ver/ut/memblock/sim/Makefile
 
 中文伪代码：
 
-`rtl.f` 仍把 RTL 权威输入定义为 `$MEMBLOCK_PROJECT/XiangShan/build_memblock/rtl/filelist.f`。
-远端 Makefile 目标负责把本地 mem_ut 仿真请求转交给 `eda01` 执行。由于当前 V2
-`filelist.f` 没有被成功生成，这条远端编译链路的入口存在，但还没有可用于编译的 V2 RTL
-输入。
+`rtl.f` 仍把 RTL 权威输入定义为 `$MEMBLOCK_PROJECT/XiangShan/build_memblock/rtl/filelist.f`。远端 Makefile 目标负责把本地 mem_ut 仿真请求转交给 `eda01` 执行。由于当前 V2 `filelist.f` 没有被成功生成，这条远端编译链路的入口存在，但还没有可用于编译的 V2 RTL 输入。
+
+Review 结论：基础环境搬迁作为后续 V2 DUT 适配准备是合理的，但当前不能宣称 testbench、agent、driver、monitor 已和 V2 RTL 接口闭环。
 
 ## 4. Plan 对齐检查
 
-| Plan item | Reviewed status |
+| Plan 项 | Review 状态 |
 |---|---|
-| Create independent `mem_ut_uvm_v2` branch based on `kunminghu-v2` | Done. Current branch is `mem_ut_uvm_v2`, ahead of `origin/kunminghu-v2` by 5 commits. |
-| Record V3 baseline before migration | Done in `f6d94eea7`. |
-| Add common rule routing and V2/V3 profiles | Done in `8003cc084`. |
-| Align V2 branch to `origin/kunminghu-v2` | Stage marker done in `e11e15b6`; reviewed base is `2acbf327c`. |
-| Add V2 RTL generation entry | Done in `cead7d6fc`. |
-| Generate V2 RTL | Not done. Generation failed because V2 submodule/build-source state is incomplete. |
-| Port base mem_ut environment to V2 RTL path | Done in `d555ee14a` as preparation. |
-| Complete V2 DUT interface/agent adaptation | Not done and not claimed. Requires generated V2 Verilog first. |
-| Run remote `eda_compile` | Not run by design, because V2 RTL generation did not succeed. |
+| 基于 `kunminghu-v2` 创建独立 `mem_ut_uvm_v2` 分支 | 已完成。当前分支是 `mem_ut_uvm_v2`，相对 `origin/kunminghu-v2` ahead 5 个迁移提交。 |
+| 迁移前记录 V3 基线 | 已在 `f6d94eea7` 完成。 |
+| 建立通用规则路由和 V2/V3 profile | 已在 `8003cc084` 完成。 |
+| 将 V2 分支对齐到 `origin/kunminghu-v2` | 已由 `e11e15b6` 阶段标记记录；review base 是 `2acbf327c`。 |
+| 新增 V2 RTL 生成入口 | 已在 `cead7d6fc` 完成。 |
+| 生成 V2 RTL | 未完成。生成失败，原因是 V2 submodule/build-source 状态不完整。 |
+| 将 mem_ut 基础环境接到 V2 RTL 路径 | 已在 `d555ee14a` 作为准备工作完成。 |
+| 完成 V2 DUT interface/agent 适配 | 未完成，也未声称完成；必须先有生成后的 V2 Verilog。 |
+| 运行远端 `eda_compile` | 未运行；V2 RTL 生成失败后不应继续远端编译。 |
 
 ## 5. 实现与 Plan 不一致项
 
-### 5.1 V2 RTL generation did not pass
+### 5.1 V2 RTL 生成未通过
 
-Plan original logic:
+Plan 原有逻辑：
 
-The plan expected `scripts/generate_memblock_rtl.sh` to generate V2 RTL and
-produce non-empty `filelist.f`, `MemBlock.sv`, and `MemBlockTop.sv` or a
-documented V2 equivalent.
+plan 期望 `scripts/generate_memblock_rtl.sh` 能生成 V2 RTL，并产出非空的 `filelist.f`、`MemBlock.sv`、`MemBlockTop.sv`，或在 V2 profile 中记录明确等价产物。
 
-Current implementation result:
+当前实现结果：
 
-The generation entry exists, but generation failed in dependency/build-source
-setup:
+生成入口已经存在，但生成在依赖/build-source 准备阶段失败：
 
 ```text
 first run: required submodules were not initialized
@@ -182,60 +163,49 @@ second run: entered mill, then failed because ready-to-run/.../modules/ready-to-
 second run also reported missing rocket-chip/cde/common.sc, rocket-chip/hardfloat/common.sc, rocket-chip/common.sc
 ```
 
-Reason:
+不一致原因：
 
-The V2 dependency tree is not closed in this worktree. The failure happened
-before a trustworthy V2 RTL artifact could be produced.
+当前 V2 worktree 的依赖树没有闭合。失败发生在可信 V2 RTL 产物生成之前。
 
-Treatment:
+处理结论：
 
-Keep the plan in `undo`; do not run `eda_compile`; close V2 submodules/build
-sources before continuing.
+plan 继续留在 `undo`；不运行 `eda_compile`；后续必须先修复 V2 submodule/build-source 状态，再重新执行 RTL 生成。
 
-### 5.2 Base mem_ut port happened before V2 RTL success
+### 5.2 mem_ut 基础环境早于 V2 RTL 成功生成完成搬迁
 
-Plan original logic:
+Plan 原有逻辑：
 
-The plan says V2 DUT interface adaptation must wait until V2 Verilog exists as
-the authority. It also has a base environment migration milestone.
+plan 说明 V2 DUT interface 适配必须等待 V2 Verilog 作为权威输入，同时也包含基础环境迁移里程碑。
 
-Current implementation result:
+当前实现结果：
 
-The base environment was ported into `mem_ut/ver/ut/memblock` and connected to
-the expected RTL filelist path, but the generated V2 RTL is missing.
+基础环境已经搬到 `mem_ut/ver/ut/memblock`，并连接到预期 RTL filelist 路径，但 V2 RTL 还没有成功生成。
 
-Reason:
+不一致原因：
 
-This is acceptable as environment preparation, but it is not evidence that DUT
-ports or internal paths are adapted to V2.
+这作为环境准备可以接受，但不能证明 DUT 端口或内部路径已经适配到 V2。
 
-Treatment:
+处理结论：
 
-Do not describe the current testbench/agent state as V2 DUT adapted. A later
-dedicated V2 DUT adaptation plan remains required after RTL generation succeeds.
+不得把当前 testbench/agent 状态描述成 V2 DUT 已适配。RTL 生成成功后，仍需要单独的 V2 DUT 适配 plan。
 
 ## 6. Plan 未说明但 Coding 落实的细节
 
-### 6.1 Script-level submodule guard
+### 6.1 脚本级 submodule 防护
 
-The plan required the flow to classify generation failures, but did not spell out
-a pre-mill recursive submodule guard.
+plan 要求 RTL 生成 flow 能归类失败原因，但没有明确要求在进入 `mill` 前做 recursive submodule 防护。
 
-Implemented detail:
+已实现细节：
 
-`scripts/generate_memblock_rtl.sh` checks `git submodule status --recursive` and
-exits before `mill` if any submodule is uninitialized or missing a `.git`
-directory.
+`scripts/generate_memblock_rtl.sh` 会检查 `git submodule status --recursive`，如果任何 submodule 未初始化或缺少 `.git` 目录，就在调用 `mill` 前退出。
 
-Why it matters:
+作用：
 
-This prevents a noisy build from hiding the real dependency issue. The guard
-correctly caught the first failure and pointed to submodule initialization.
+该防护避免不完整依赖树触发更难读的 build 报错。第一次失败中，它正确指出需要先初始化 submodule。
 
-### 6.2 Environment-variable overrides
+### 6.2 环境变量覆盖入口
 
-The plan required configurable target dir, config, firtool, and JVM settings.
-The script implements overrides for:
+plan 要求 config、target dir、firtool 和 JVM 参数可覆盖。脚本实现了以下覆盖入口：
 
 ```text
 MILL
@@ -249,34 +219,31 @@ MEMBLOCK_FIRTOOL / FIRTOOL
 MEMBLOCK_PROJECT
 ```
 
-Why it matters:
+作用：
 
-This keeps the V2 flow usable for later tool or output-path experiments without
-editing the script.
+后续如果需要切换 V2 config、输出路径或 firtool，不需要直接修改脚本，降低后续调试成本。
 
-### 6.3 Empty V2 baseline marker commit
+### 6.3 V2 基线空提交阶段标记
 
-The plan allowed an empty commit if the V2 baseline switch needed a reviewable
-stage marker. Commit `e11e15b6` is that marker.
+plan 允许在没有实际文件变化时使用空提交留下 V2 基线切换阶段记录。提交 `e11e15b6` 即为该阶段标记。
 
-Why it matters:
+作用：
 
-It separates branch/baseline history from later RTL script and mem_ut environment
-port commits.
+它把分支/base 记录与后续 RTL 脚本、mem_ut 环境搬迁分开，便于 review 提交边界。
 
-## 7. Verification Results
+## 7. 验证结果
 
-Completed checks reviewed for this document:
+本 review 检查过以下命令或结果：
 
 ```text
 git log --oneline --decorate --max-count=12
 git rev-parse HEAD origin/kunminghu-v2
 git show --stat --oneline f6d94eea7 8003cc084 e11e15b6 cead7d6fc d555ee14a
 git diff --name-status origin/kunminghu-v2...HEAD
-rg -n "ready-to-run|common\\.sc|submodule|generate_memblock_rtl|V2|MemBlockTopMain|KunminghuV2Config" AI_DOC scripts src/main/scala/top mem_ut/ver/ut/memblock/rule AGENTS.md
+rg -n "ready-to-run|common\.sc|submodule|generate_memblock_rtl|V2|MemBlockTopMain|KunminghuV2Config" AI_DOC scripts src/main/scala/top mem_ut/ver/ut/memblock/rule AGENTS.md
 ```
 
-Main-agent final checks:
+主 agent 最终检查：
 
 ```text
 git diff --check origin/kunminghu-v2..HEAD -- AGENTS.md AI_DOC mem_ut/ver/ut/memblock scripts src/main/scala/top
@@ -285,88 +252,69 @@ git diff --name-only origin/kunminghu-v2..HEAD -- src build.sc build.mill depend
 git status --short --branch --ignore-submodules=all
 ```
 
-Main-agent review result:
+主 agent review 结果：
 
 ```text
 git diff --check: pass
-version keyword check: only route/profile/plan/baseline hits observed
-design-side diff check: only scripts/generate_memblock_rtl.sh and src/main/scala/top/MemBlockTop.scala
-superproject status check: usable only with --ignore-submodules=all because ready-to-run gitdir is broken
+version keyword check: 只观察到 route/profile/plan/baseline 相关命中
+design-side diff check: 只包含 scripts/generate_memblock_rtl.sh 和 src/main/scala/top/MemBlockTop.scala
+superproject status check: 需要使用 --ignore-submodules=all，因为 ready-to-run gitdir 当前损坏
 ```
 
-RTL generation verification:
+RTL 生成验证：
 
 ```text
 ./scripts/generate_memblock_rtl.sh
 ```
 
-did not complete successfully. The final recorded failure is incomplete
-submodule/build-source state around `ready-to-run` and missing `rocket-chip`
-build files.
+未成功完成。最终记录的失败原因是 `ready-to-run` 相关 submodule/build-source 状态不完整，以及缺少 `rocket-chip` build 文件。
 
-Remote EDA compile:
+远端 EDA 编译：
 
 ```text
 cd mem_ut/ver/ut/memblock/sim
 make eda_compile ...
 ```
 
-was intentionally not run after RTL generation failed. Running VCS now would use
-an absent or stale `build_memblock/rtl/filelist.f` and would not verify V2 RTL.
+未运行。RTL 生成失败后继续运行 VCS 会使用缺失或过期的 `build_memblock/rtl/filelist.f`，不能证明 V2 RTL 正确。
 
-## 8. Unfinished Items And Risks
+## 8. 未完成项和风险
 
-1. V2 submodule/build-source closure is incomplete. `ready-to-run` and
-   `rocket-chip` build files must be fixed before rerunning RTL generation.
-2. V2 RTL has not been generated successfully. `build_memblock/rtl/filelist.f`,
-   `MemBlock.sv`, and `MemBlockTop.sv` are not proven valid V2 outputs.
-3. V2 DUT interface adaptation is not complete. Current `dut_inst.sv`,
-   `*_agent_connect.sv`, agent interfaces, xactions, drivers, monitors, env, RM,
-   sequences, and cfg still require verification against generated V2 Verilog.
-4. Remote `eda_compile` has not been run for this V2 branch because the RTL input
-   prerequisite is missing.
-5. The base mem_ut environment port is large and should receive a separate
-   source-level review after V2 RTL is available, especially for DUT top ports,
-   internal hierarchy paths, and L2TLB request/response semantics.
+1. V2 submodule/build-source 尚未闭合。必须先修复 `ready-to-run` 和 `rocket-chip` build 文件问题，再重新运行 RTL 生成。
+2. V2 RTL 还没有成功生成。`build_memblock/rtl/filelist.f`、`MemBlock.sv`、`MemBlockTop.sv` 尚未被证明是有效 V2 产物。
+3. V2 DUT interface 适配还未完成。当前 `dut_inst.sv`、`*_agent_connect.sv`、agent interface、xaction、driver、monitor、env、RM、sequence 和 cfg 都需要在 V2 RTL 生成后重新对照。
+4. 本 V2 分支还没有运行远端 `eda_compile`，因为 RTL 输入前置条件缺失。
+5. mem_ut 基础环境搬迁范围很大，V2 RTL 生成后需要单独做源码级 review，重点检查 DUT 顶层端口、内部层级路径和 L2TLB request/response 语义。
 
-## 9. Non-current-worktree State
+## 9. 非当前 worktree 状态
 
-This review is scoped to the V2 worktree above. It does not attempt to clean,
-revert, commit, or push anything.
+本 review 只针对上述 V2 worktree，不清理、不回滚、不 push 其他工作区内容。
 
-The subagent generated the RTL result update and this implementation review
-document. Main-agent review then updated the V2 verified-status profile and
-normalized this review document to the required plan-alignment section names.
+subagent 生成了 RTL 结果更新和本 implementation review 文档。主 agent review 后更新了 V2 verified-status profile，并把 review 文档调整为项目规则要求的 plan 对齐章节名称。
 
-Known status from this review:
+本 review 观察到的状态：
 
 ```text
 mem_ut_uvm_v2 is ahead of origin/kunminghu-v2 by 5 commits before this document update.
 ```
 
-Non-source/generated areas such as `build_memblock/` or simulator outputs are
-not treated as completed deliverables in this review.
+`build_memblock/` 或仿真输出等非源码/生成目录不作为本 review 的完成交付物。
 
-## 10. Plan Archive Decision
+## 10. Plan 归档决定
 
-The plan remains in:
+plan 仍保留在：
 
 ```text
 AI_DOC/plan/test_framework/plan/undo/mem_ut_uvm_v2_branch_migration_plan_20260706.md
 ```
 
-It is not moved to `do` because two key closure conditions are missing:
+不移动到 `do`，原因是两个关键收敛条件缺失：
 
-1. V2 RTL generation has not completed successfully.
-2. Remote compile has not been run and should not be run until generated V2 RTL
-   exists.
+1. V2 RTL 生成尚未成功完成。
+2. 远端编译尚未运行，并且在 V2 RTL 生成前不应运行。
 
-## 11. Review Conclusion
+## 11. Review 结论
 
-The migration branch has a traceable 5-commit local chain. Rule versioning,
-V2 RTL generation entry, and base mem_ut environment port are present.
+迁移分支已经形成可追溯的本地提交链。规则版本化、V2 RTL 生成入口、mem_ut 基础环境搬迁都已存在。
 
-The branch is not fully closed. The V2 RTL generation flow has been migrated, but
-V2 RTL generation itself failed due to incomplete V2 submodule/build-source
-state. No downstream V2 DUT adaptation or `eda_compile` success should be
-claimed from the current state.
+该分支尚未完全收敛。V2 RTL generation flow 已迁移，但 V2 RTL 生成本身因 V2 submodule/build-source 状态不完整而失败。当前状态不能宣称 V2 DUT 已适配，也不能宣称 `eda_compile` 已通过。
