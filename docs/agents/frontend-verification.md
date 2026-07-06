@@ -532,6 +532,12 @@ make frontend -j
 - Name tests `test_*.py`.
 - Gate DUT-only cases with `TB_ENABLE_DUT_TESTS=1` and existing `_RUN_DUT` patterns.
 - Reuse fixtures from `src/test/python/Frontend/env/fixtures.py`.
+- Frontend line coverage `.dat` files are registered with
+  `toffee_test.reporter.set_line_coverage` during DUT fixture teardown by
+  default. Reviewed line/file waives belong in
+  `src/test/python/Frontend/Frontend.ignore`; override with
+  `TB_LINE_COVERAGE_IGNORE=...` or disable reporter registration with
+  `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` for debugging.
 - Update `src/test/python/Frontend/env/coverage_def.py` when introducing new
   fetch, branch, redirect, exception, or performance scenario coverage.
 - Do not commit transient logs, generated waveforms, or other temporary

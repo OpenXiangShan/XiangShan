@@ -86,6 +86,11 @@
   - 会自动生成 `merged.info` 并调用 `genhtml --ignore-errors range --filter missing`
   - 若要把指定 `.dat` 合并到已有 `coverage.genhtml/`，可直接执行：
     `source /nfs/share/unitychip/activate && PATH=/nfs/share/unitychip/bin:$PATH src/test/python/Frontend/scripts/gen_coverage_html.sh src/test/python/Frontend/data/<case>.dat src/test/python/Frontend/data/coverage.genhtml`
+- `Frontend.ignore`
+  - 用于 `toffee_test.reporter.set_line_coverage` 的 line coverage waive。
+  - 默认不 waive 任何行；只有经过评审的文件或行范围才写入该文件。
+  - 可用 `TB_LINE_COVERAGE_IGNORE=/path/to/file.ignore` 覆盖默认 ignore 文件。
+  - 可用 `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` 关闭 pytest teardown 阶段的 toffee line coverage 上报。
 - `scripts/report_raw_code_coverage.py`
   - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py`
   - 直接合并 `data/*.dat`，按 raw 覆盖点输出总 `line/branch/expr/toggle` 覆盖率

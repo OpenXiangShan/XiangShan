@@ -1,0 +1,7 @@
+# Frontend line coverage waive file for toffee_test.reporter.set_line_coverage.
+#
+# Keep this file empty unless a line or file has a reviewed waive reason.
+# Supported examples:
+#   SomeModule.sv
+#   SomeModule.sv:10-20,35-40
+#   build/**/*.sv

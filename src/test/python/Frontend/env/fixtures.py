@@ -8,6 +8,7 @@ from logging import getLogger
 from pathlib import Path
 
 import pytest
+from toffee_test.reporter import set_line_coverage
 
 _HERE = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _HERE.parents[3]
@@ -100,6 +101,14 @@ def _coverage_path(request, default_dir: Path) -> Path:
     return coverage_dir / f"{_artifact_tag(request)}.dat"
 
 
+def _coverage_ignore_path() -> str | None:
+    raw = os.getenv("TB_LINE_COVERAGE_IGNORE", "").strip()
+    if raw:
+        return raw
+    path = _HERE / "Frontend.ignore"
+    return str(path) if path.is_file() else None
+
+
 def _log_path(request, default_dir: Path) -> Path:
     tag = _artifact_tag(request)
     raw = os.getenv("TB_CASE_LOG_PATH", "").strip()
@@ -173,6 +182,7 @@ def create_dut(request):
 @pytest.fixture(scope="function")
 def dut(request):
     dut = create_dut(request)
+    coverage = _coverage_path(request, _data_dir())
     dut.InitClock("clock")
     groups = get_coverage_groups(dut)
     if groups:
@@ -188,6 +198,9 @@ def dut(request):
             g.clear()
         except Exception:
             pass
+    if _is_enabled("TB_ENABLE_TOFFEE_LINE_COVERAGE", default="1") and coverage.is_file():
+        ignore = _coverage_ignore_path()
+        set_line_coverage(request, str(coverage), ignore=ignore)
     handler = getattr(dut, "_frontend_case_log_handler", None)
     if handler is not None:
         try:
