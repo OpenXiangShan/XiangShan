@@ -125,8 +125,8 @@ trait HasICacheParameters extends HasFrontendParameters // scalastyle:ignore num
   def MetaEcc:       String = icacheParameters.MetaEcc
   def MetaCode:      Code   = Code.fromString(MetaEcc)
   def MetaBits:      Int    = (new ICacheMetadata).getWidth
-  def MetaEntryBits: Int    = MetaCode.width(MetaBits)
-  def MetaEccBits:   Int    = MetaEntryBits - MetaBits
+  def MetaSramWidth: Int    = MetaCode.width(MetaBits)
+  def MetaEccBits:   Int    = MetaSramWidth - MetaBits
 
   def NumInterleavedBank:     Int = icacheParameters.NumInterleavedBank
   def NumInterleavedSet:      Int = nSets / NumInterleavedBank

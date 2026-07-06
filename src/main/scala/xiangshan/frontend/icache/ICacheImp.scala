@@ -74,6 +74,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   println(s"  DataBanks: $DataBanks banks")
   println(s"  DataEccUnit: $DataEccUnit bits")
   println(s"  DataSramWidth(data + ecc + padding): $ICacheDataBits + $DataEccBits + $DataPaddingBits = $DataSramWidth")
+  println(s"  MetaSramWidth(meta + ecc): $MetaBits + $MetaEccBits = $MetaSramWidth")
   println(s"  Ecc(meta, data): $MetaEcc, $DataEcc")
   println(s"  AliasTagBits: $AliasTagBits")
   println(s"  CtrlUnit:")
