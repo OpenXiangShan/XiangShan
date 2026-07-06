@@ -104,6 +104,11 @@ that boundary stable.
   inherited CSV hierarchy is expanded. If an existing fourth-level name is
   already the leaf case, move it to the fifth level and rename the fourth level
   to a real category.
+- Do not split frontend testpoints merely because a parameter value, position,
+  width, or legal combination changes. Split a leaf only when that change
+  creates a different observable correctness condition at the frontend/backend
+  boundary, exception behavior, flush/redirect behavior, or flow-control
+  behavior. Otherwise keep the value or position variation in `Condition`.
 - Do not translate established frontend testpoint terms just to make the CSV
   read as Chinese prose. Keep domain terms such as `backend`, `redirect`,
   `flush`, `commit`, `fence.i`, `sfence`, `hit`, `miss`, `refill`, `MSHR`,

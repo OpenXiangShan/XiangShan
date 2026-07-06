@@ -25,11 +25,7 @@ Use these documents in order for frontend verification work:
    `src/test/python/Frontend/env/backend_model.py`.
 7. `docs/agents/frontend-backend-controlflow/README.md` for RTL/control-flow
    background around `resolve`, `redirect`, `commit`, and `callRetCommit`.
-8. `docs/agents/frontend-bpu-predictors.md` for BPU predictor structure,
-   generated RTL signal orientation, and predictor-specific reading notes.
-9. `docs/agents/frontend-bpu-branch-prediction-testpoints.md` for frontend
-   BT-level branch-prediction testpoint decomposition.
-10. `docs/testbench/Guide_Doc/` for broader testbench reference on fixtures,
+8. `docs/testbench/Guide_Doc/` for broader testbench reference on fixtures,
    APIs, coverage, and test authoring.
 
 Repository-wide background lives outside this directory:
