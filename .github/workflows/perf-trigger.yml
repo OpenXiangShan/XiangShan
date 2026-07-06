@@ -60,6 +60,16 @@ on:
         description: Constantin file path (empty for default init setting, or file path for specific file)
         required: false
         type: string
+      enable_db:
+        description: Enable ChiselDB dump
+        required: false
+        type: boolean
+        default: false
+      enable_rolling:
+        description: Enable rolling DB dump. This implies enable_db
+        required: false
+        type: boolean
+        default: false
       servers:
         description: Servers to run emulation on, leave empty to let the script select
         required: false
@@ -83,6 +93,8 @@ jobs:
         benchmark_type: ${{ github.event.inputs.benchmark_type }}
         benchmarks: ${{ github.event.inputs.benchmarks }}
         cst_file: ${{ github.event.inputs.cst_file }}
+        enable_db: ${{ fromJSON(github.event.inputs.enable_db) }}
+        enable_rolling: ${{ fromJSON(github.event.inputs.enable_rolling) }}
         servers: ${{ github.event.inputs.servers }}
         checkpoint_path: ${{ github.event.inputs.checkpoint_path }}
         json_path: ${{ github.event.inputs.json_path }}

@@ -30,6 +30,16 @@ on:
           description: Constantin file path (empty for default init setting, or file path for specific file)
           required: false
           type: string
+      enable_db:
+        description: Enable ChiselDB dump (high disk usage, 4~16G/ckpt, use with caution!)
+        required: false
+        type: boolean
+        default: false
+      enable_rolling:
+        description: Enable rolling DB dump. This implies enable_db (high disk usage, 4~16G/ckpt, use with caution!)
+        required: false
+        type: boolean
+        default: false
       servers:
         description: Servers to run emulation on, leave empty to let the script select
         required: false
@@ -237,6 +247,14 @@ jobs:
 
       - name: Build EMU with DRAMsim3
         run: |
+          DB_OPTS=()
+          if [[ "${{ inputs.enable_db }}" == "true" ]]; then
+            DB_OPTS+=(--enable-db)
+          fi
+          if [[ "${{ inputs.enable_rolling }}" == "true" ]]; then
+            DB_OPTS+=(--enable-rolling)
+          fi
+
           if [ ! -e "$SPEC_DIR/emu-${{ inputs.emulator }}" ]; then
             python3 $GITHUB_WORKSPACE/scripts/xiangshan.py --build \
               --config "${{ inputs.xs_config }}" \
@@ -245,6 +263,7 @@ jobs:
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
               --llvm-profdata llvm-profdata --trace-fst \
               --emulator ${{ inputs.emulator }} \
+              $DB_OPTS \
               $CST_COMPILE_OPT
             mkdir -p $SPEC_DIR
             cp $GITHUB_WORKSPACE/build/emu "$SPEC_DIR/emu-${{ inputs.emulator }}"
@@ -255,6 +274,11 @@ jobs:
 
       - name: Run SPEC CPU checkpoints
         run: |
+          DUMP_DB_OPT=""
+          if [[ "${{ inputs.enable_db }}" == "true" || "${{ inputs.enable_rolling }}" == "true" ]]; then
+            DUMP_DB_OPT="--dump-db"
+          fi
+
           cd $SCRIPTS_HOME/perf_trigger
           python3 main.py --gcpt-path $CKPT_HOME --json-path $CKPT_JSON_PATH \
             --emu-path "$SPEC_DIR/emu-${{ inputs.emulator }}" --result-path $SPEC_DIR \
@@ -263,6 +287,7 @@ jobs:
             --server-list "$SERVER_LIST" \
             --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
+            $DUMP_DB_OPT \
             --run \
             $CST_RUN_OPT $DRY_RUN_OPT
 
