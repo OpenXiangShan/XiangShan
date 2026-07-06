@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>$pagetitle$</title>
+  <link rel="stylesheet" href="web_assets/memblock_dispatch_doc.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-title">MemBlock Dispatch 控制流</div>
+        <div class="brand-subtitle">源码级调用关系 / 状态机 / replay / redirect</div>
+      </div>
+      <div class="toolbar">
+        <input id="doc-search" class="search" type="search" placeholder="搜索函数、字段、阶段">
+        <div class="button-row">
+          <button id="clear-search" type="button">清除搜索</button>
+          <button id="show-all" type="button">显示全部</button>
+        </div>
+        <div id="result-count" class="result-count"></div>
+      </div>
+      <nav class="toc">
+        $toc$
+      </nav>
+    </aside>
+    <main class="content-wrap">
+      <article class="content">
+        <section class="doc-topbar" aria-label="文档控制面板">
+          <div class="doc-meta-row">
+            <div>
+              <div class="doc-kicker">MEM_UT DISPATCH FLOW</div>
+              <div>源码文档：<code>memblock_dispatch_control_flow_callgraph.md</code></div>
+            </div>
+            <div class="doc-actions">
+              <a class="doc-link-button" href="memblock_dispatch_control_flow_callgraph.md">查看 Markdown</a>
+              <button id="back-top-inline" class="doc-link-button" type="button" onclick="window.scrollTo({top:0,behavior:'smooth'})">回到顶部</button>
+            </div>
+          </div>
+          <div class="overview-grid" aria-label="文档概览">
+            <div class="overview-item">
+              <div class="overview-value">A-J</div>
+              <div class="overview-label">端到端控制阶段</div>
+            </div>
+            <div class="overview-item">
+              <div class="overview-value">LOAD/STA/STD</div>
+              <div class="overview-label">发射队列与 pipe 路由</div>
+            </div>
+            <div class="overview-item">
+              <div class="overview-value">raw event</div>
+              <div class="overview-label">monitor 到 handler 状态流</div>
+            </div>
+            <div class="overview-item">
+              <div class="overview-value">replay/redirect</div>
+              <div class="overview-label">异常恢复与重发路径</div>
+            </div>
+          </div>
+          <div class="filter-panel">
+            <div class="filter-label">按流程筛选</div>
+            <div class="phase-filter" role="group" aria-label="按流程筛选章节">
+              <button class="active" type="button" data-filter="all">全部</button>
+              <button type="button" data-filter="init">初始化</button>
+              <button type="button" data-filter="stimulus">激励生成</button>
+              <button type="button" data-filter="admission">入队/TLB</button>
+              <button type="button" data-filter="issue">调度发射</button>
+              <button type="button" data-filter="monitor">监测输出</button>
+              <button type="button" data-filter="commit">提交出队</button>
+              <button type="button" data-filter="recovery">异常恢复</button>
+              <button type="button" data-filter="state">状态字段</button>
+            </div>
+          </div>
+        </section>
+        <section class="flow-explorer" aria-label="测试用例构建发射流程图">
+          <div class="flow-header">
+            <div>
+              <div class="doc-kicker">INTERACTIVE FLOW GRAPH</div>
+              <h2 class="flow-title">测试用例构建与发射流程图</h2>
+              <p class="flow-summary" id="flow-summary">选择一个场景查看函数调用关系，点击函数节点查看输入、输出和功能描述。</p>
+            </div>
+            <label class="flow-select-wrap">
+              <span>场景</span>
+              <select id="flow-scenario" class="flow-select"></select>
+            </label>
+          </div>
+          <div class="flow-layout">
+            <div class="flow-graph-wrap" aria-label="函数调用关系图">
+              <div class="flow-legend" aria-label="流程图图例">
+                <span><i class="legend-dot active"></i>当前函数</span>
+                <span><i class="legend-dot caller"></i>调用当前函数</span>
+                <span><i class="legend-dot callee"></i>当前函数继续调用</span>
+              </div>
+              <div id="flow-graph" class="flow-graph"></div>
+            </div>
+            <aside id="function-detail" class="function-detail" aria-live="polite">
+              <div class="function-detail-kicker">FUNCTION DETAIL</div>
+              <h3>选择一个函数节点</h3>
+              <p>右侧会展示该函数的输入、输出/副作用、功能，以及它继续调用的子函数。</p>
+            </aside>
+          </div>
+        </section>
+        <section class="content-body">
+          <div id="empty-state" class="empty-state">当前筛选和搜索条件下没有匹配章节。</div>
+          $body$
+        </section>
+      </article>
+    </main>
+  </div>
+  <button id="back-top" class="back-top" type="button" aria-label="回到顶部">Top</button>
+  <script src="web_assets/memblock_dispatch_doc.js"></script>
+</body>
+</html>

@@ -1,8 +1,8 @@
-# V3 DUT interface baseline
+# V3 DUT 接口基线
 
-## Authority
+## 权威来源
 
-V3 DUT interface adaptation uses generated V3 Verilog as the authority:
+V3 DUT 接口适配以生成后的 V3 Verilog 为权威来源：
 
 ```text
 build_memblock/rtl/filelist.f
@@ -10,13 +10,13 @@ build_memblock/rtl/MemBlock.sv
 build_memblock/rtl/MemBlockTop.sv
 ```
 
-## Current Status
+## 当前状态
 
-The recorded V3 mem_ut baseline is:
+已记录的 V3 mem_ut 基线为：
 
 ```text
 1f96d06acbd75f00d619885ca27155810f72d922
 ```
 
-That baseline is the reference for the existing V3 mem_ut environment. Do not
-reuse this profile as proof that V2 ports or internal hierarchy match V3.
+该基线是现有 V3 mem_ut 环境的参考。不得把本 profile 当作 V2 端口或内部层级
+与 V3 一致的证明。

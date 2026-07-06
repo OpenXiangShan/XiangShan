@@ -1,18 +1,18 @@
-# V3 memblock RTL profile
+# V3 memblock RTL 规则 profile
 
-## Version Facts
+## 版本事实
 
-| Item | V3 value |
+| 项目 | V3 取值 |
 |---|---|
-| Build system | `build.mill` |
-| Chisel version | `7.3.0` |
-| Verified firtool | `/nfs/home/lixiangrui/.cache/llvm-firtool/1.135.0/bin/firtool` |
-| Main class | `top.MemBlockTopMain` |
-| Default config | `TLConfig` |
-| Default issue | `E.b` |
-| Default output | `build_memblock/rtl` |
+| 构建系统 | `build.mill` |
+| Chisel 版本 | `7.3.0` |
+| 已验证 firtool | `/nfs/home/lixiangrui/.cache/llvm-firtool/1.135.0/bin/firtool` |
+| main class | `top.MemBlockTopMain` |
+| 默认 config | `TLConfig` |
+| 默认 issue | `E.b` |
+| 默认输出目录 | `build_memblock/rtl` |
 
-## Expected Output
+## 期望产物
 
 ```text
 build_memblock/rtl/filelist.f
@@ -21,16 +21,15 @@ build_memblock/rtl/MemBlock.sv
 build_memblock/rtl/MemBlockTop.sv
 ```
 
-The V3 script may patch `filelist.f` to include `ClockGate.sv` before
-`MbistClockGateCell.sv` when needed.
+必要时，V3 脚本可以修补 `filelist.f`，将 `ClockGate.sv` 插入到
+`MbistClockGateCell.sv` 之前。
 
-## Known Failure Pattern
+## 已知失败模式
 
-Do not use the shared old firtool:
+不要使用共享旧版 firtool：
 
 ```text
 /nfs/home/share/firtool-1.56.1/bin/firtool
 ```
 
-It is too old for Chisel 7.3 generated FIRRTL and can fail on verification layer
-syntax.
+该版本对 Chisel 7.3 生成的 FIRRTL 过旧，可能在 verification layer 语法处失败。

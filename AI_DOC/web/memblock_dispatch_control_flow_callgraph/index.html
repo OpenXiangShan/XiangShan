@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MemBlock Dispatch 测试用例构建与发射流程图</title>
+  <link rel="stylesheet" href="assets/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">MEM_UT DISPATCH CALLGRAPH</p>
+      <h1>MemBlock Dispatch 测试用例构建与发射流程图</h1>
+      <p class="subtitle">按函数调用关系拆分 testcase/env 启动、主表构建、LSQ admission、TLB/L2TLB、issue route/select/fire、monitor/writeback、commit/deq、replay/redirect 和 final check。</p>
+    </div>
+    <div class="header-meta">
+      <span>静态页面</span>
+      <span>全局函数目录</span>
+      <span>可复制浏览</span>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="control-panel" aria-label="流程控制">
+      <section class="panel-section">
+        <label for="flow-select">选择流程</label>
+        <select id="flow-select"></select>
+      </section>
+
+      <section class="panel-section">
+        <label for="depth-select">显示深度</label>
+        <select id="depth-select">
+          <option value="all">全部调用</option>
+          <option value="1">入口 + 1 层</option>
+          <option value="2">入口 + 2 层</option>
+          <option value="3">入口 + 3 层</option>
+          <option value="4">入口 + 4 层</option>
+        </select>
+      </section>
+
+      <section class="panel-section">
+        <label for="search-input">搜索 / 聚焦函数</label>
+        <input id="search-input" type="search" placeholder="函数名、模块、LSQ、replay">
+        <div class="button-row">
+          <button id="focus-neighborhood" type="button">聚焦所选</button>
+          <button id="reset-view" type="button">清除</button>
+        </div>
+        <p id="search-count" class="hint"></p>
+      </section>
+
+      <section class="panel-section legend">
+        <h2>图例</h2>
+        <div><span class="legend-dot active"></span>当前函数</div>
+        <div><span class="legend-dot caller"></span>调用方</div>
+        <div><span class="legend-dot callee"></span>子调用</div>
+        <div><span class="legend-dot external"></span>UVM/DUT 外部边界</div>
+      </section>
+
+      <section class="panel-section">
+        <h2>流程说明</h2>
+        <p id="flow-summary" class="flow-summary"></p>
+      </section>
+    </aside>
+
+    <section class="graph-workspace" aria-label="流程图">
+      <div class="workspace-toolbar">
+        <div>
+          <p class="eyebrow">FLOW LANES</p>
+          <h2 id="flow-title">流程图</h2>
+        </div>
+        <div id="flow-stats" class="flow-stats"></div>
+      </div>
+
+      <div id="flow-graph" class="flow-graph"></div>
+    </section>
+
+    <aside class="detail-panel" aria-label="函数详情">
+      <section class="detail-card">
+        <p class="eyebrow">FUNCTION DETAIL</p>
+        <div id="function-detail"></div>
+      </section>
+      <section class="detail-card">
+        <p class="eyebrow">INTERNAL CALL CHAIN</p>
+        <div id="call-chain"></div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="assets/app.js"></script>
+</body>
+</html>

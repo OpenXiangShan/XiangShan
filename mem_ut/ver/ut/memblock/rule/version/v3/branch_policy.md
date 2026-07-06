@@ -1,30 +1,29 @@
-# mem_ut V3 branch policy
+# mem_ut V3 分支策略
 
-## Scope
+## 适用范围
 
-This profile applies to the `mem_ut_uvm` branch and V3 design work based on
-`kunminghu-v3`.
+本 profile 适用于 `mem_ut_uvm` 分支，以及基于 `kunminghu-v3` 的 V3 设计同步工作。
 
-## Branch Mapping
+## 分支映射
 
-| Item | Value |
+| 项目 | 取值 |
 |---|---|
-| mem_ut branch | `mem_ut_uvm` |
-| upstream design branch | `origin/kunminghu-v3` |
-| recorded V3 mem_ut baseline | `1f96d06acbd75f00d619885ca27155810f72d922` |
-| baseline commit message | `feat: add memblock virtual sequence dispatch` |
+| mem_ut 工作分支 | `mem_ut_uvm` |
+| 上游设计分支 | `origin/kunminghu-v3` |
+| 已记录 V3 mem_ut 基线 | `1f96d06acbd75f00d619885ca27155810f72d922` |
+| 基线 commit message | `feat: add memblock virtual sequence dispatch` |
 
-## Update Flow
+## 更新流程
 
-After confirming `git status` is clean:
+确认 `git status` 干净后，按以下命令更新：
 
 ```bash
 git fetch origin kunminghu-v3
 git rebase FETCH_HEAD
 ```
 
-## Non-goals
+## 非目标
 
-- Do not rebase `mem_ut_uvm` to `origin/kunminghu-v2`.
-- Do not mix unrelated XiangShan dirty changes into mem_ut commits.
-- Do not push automatically.
+- 不要把 `mem_ut_uvm` rebase 到 `origin/kunminghu-v2`。
+- 不要把无关 XiangShan 脏改动混入 mem_ut commit。
+- 不要自动 push。

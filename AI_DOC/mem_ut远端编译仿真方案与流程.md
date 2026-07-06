@@ -2,7 +2,7 @@
 
 ## 1. 文档目的
 
-本文档用于说明 `XiangShan/mem_ut` 环境下的远端编译与仿真机制，明确：
+本文档用于说明当前 XiangShan worktree 中 `mem_ut` 环境下的远端编译与仿真机制，明确：
 
 - 工程目录位置
 - 本地节点与 `eda01` 的职责划分
@@ -16,17 +16,17 @@
 
 ## 2. 环境位置
 
-`mem_ut` 当前已经迁移到：
+`mem_ut` 当前位于：
 
-- [mem_ut](/nfs/home/lixiangrui/work/memblock_ut/XiangShan/mem_ut)
+- `mem_ut`
 
 memblock UVM 环境位于：
 
-- [memblock](/nfs/home/lixiangrui/work/memblock_ut/XiangShan/mem_ut/ver/ut/memblock)
+- `mem_ut/ver/ut/memblock`
 
 主仿真目录位于：
 
-- [sim](/nfs/home/lixiangrui/work/memblock_ut/XiangShan/mem_ut/ver/ut/memblock/sim)
+- `mem_ut/ver/ut/memblock/sim`
 
 ## 3. 方案概述
 
@@ -51,9 +51,9 @@ memblock UVM 环境位于：
 
 该方案由以下文件实现：
 
-- [Makefile](/nfs/home/lixiangrui/work/memblock_ut/XiangShan/mem_ut/ver/ut/memblock/sim/Makefile)
-- [remote_eda_make.sh](/nfs/home/lixiangrui/work/memblock_ut/XiangShan/mem_ut/ver/ut/memblock/sim/remote_eda_make.sh)
-- [eda01_entry.sh](/nfs/home/lixiangrui/work/memblock_ut/XiangShan/mem_ut/ver/ut/memblock/sim/eda01_entry.sh)
+- `mem_ut/ver/ut/memblock/sim/Makefile`
+- `mem_ut/ver/ut/memblock/sim/remote_eda_make.sh`
+- `mem_ut/ver/ut/memblock/sim/eda01_entry.sh`
 
 职责分别如下：
 
@@ -66,7 +66,7 @@ memblock UVM 环境位于：
 - `eda01_entry.sh`
   - 在 `eda01` 上执行
   - 进入正确的 `sim` 目录
-  - 设置 `MEMBLOCK_PROJECT`
+  - 设置 `MEMBLOCK_XS_HOME` 和 `MEMBLOCK_PROJECT`
   - 真正执行 `make compile` / `make run`
 
 ## 5. 编译仿真 Flow
@@ -76,7 +76,7 @@ memblock UVM 环境位于：
 推荐从以下目录执行：
 
 ```bash
-cd /nfs/home/lixiangrui/work/memblock_ut/XiangShan/mem_ut/ver/ut/memblock/sim
+cd mem_ut/ver/ut/memblock/sim
 ```
 
 执行命令：
@@ -92,7 +92,7 @@ make eda_compile tc=tc_sanity mode=base_fun
 3. `remote_eda_make.sh` 通过 ssh 连接 `eda01`
 4. 在 `eda01` 上执行 `eda01_entry.sh compile ...`
 5. `eda01_entry.sh` 基于自身路径进入正确的 `sim` 目录
-6. `eda01_entry.sh` 导出 `MEMBLOCK_PROJECT`
+6. `eda01_entry.sh` 导出 `MEMBLOCK_XS_HOME` 和 `MEMBLOCK_PROJECT`
 7. `eda01` 上实际执行 `make compile`
 8. `vcs` 在 `eda01` 上启动
 9. 编译日志写回共享目录
@@ -164,7 +164,7 @@ $MEMBLOCK_XS_HOME/build_memblock/rtl/filelist.f
 - `MEMBLOCK_XS_HOME` 必须指向当前 XiangShan worktree 根目录。
 - `MEMBLOCK_PROJECT` 保留为当前 XiangShan worktree 的上一级目录，兼容旧脚本。
 
-当前该规则已经在 `mem_ut/ver/ut/memblock/sim/eda01_entry.sh` 中通过脚本相对路径自动处理。
+当前该规则已经在 `mem_ut/ver/ut/memblock/sim/eda01_entry.sh` 中通过脚本相对路径自动处理，避免 V2/V3 多 worktree 共存时误读其他 worktree 的 RTL。
 
 ## 8. 当前已验证结论
 
@@ -175,7 +175,7 @@ $MEMBLOCK_XS_HOME/build_memblock/rtl/filelist.f
 3. 正常加载 `vcs` 和 `verdi`
 4. `eda01` 上真实启动 `vcs`
 5. 共享目录生成编译日志
-6. 搬迁到 `XiangShan/mem_ut` 后仍然可用
+6. 搬迁到当前 worktree 的 `mem_ut` 后仍然可用
 
 这说明当前“本地控制 + `eda01` 实际编译”的方案已经打通。
 
@@ -185,7 +185,7 @@ $MEMBLOCK_XS_HOME/build_memblock/rtl/filelist.f
 
 已知阻塞点为：
 
-- 文件：[dut_inst.sv](/nfs/home/lixiangrui/work/memblock_ut/XiangShan/mem_ut/ver/ut/memblock/tb/dut_inst.sv#L2531)
+- 文件：`mem_ut/ver/ut/memblock/tb/dut_inst.sv`
 - 错误类型：VCS 语法错误
 - 报错 token：`.`
 - 相关信号：
@@ -201,7 +201,7 @@ $MEMBLOCK_XS_HOME/build_memblock/rtl/filelist.f
 默认验证命令：
 
 ```bash
-cd /nfs/home/lixiangrui/work/memblock_ut/XiangShan/mem_ut/ver/ut/memblock/sim
+cd mem_ut/ver/ut/memblock/sim
 make eda_compile tc=tc_sanity mode=base_fun
 ```
 

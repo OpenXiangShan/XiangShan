@@ -81,6 +81,10 @@ cd mem_ut/ver/ut/memblock/sim
 
 - [ai_doc_file_management_rule.md](AI_DOC/project_management/ai_doc_file_management_rule.md)
 
+当前 `AI_DOC` 文档语言规则为：
+
+- [ai_doc_language_rule.md](AI_DOC/project_management/ai_doc_language_rule.md)
+
 当前 `mem_ut` 测试环境逻辑构建规则为：
 
 - [mem_ut_test_framework_logic_build_rule.md](AI_DOC/project_management/mem_ut_test_framework_logic_build_rule.md)
@@ -144,6 +148,10 @@ testcase preset 的 Makefile `cfg=` 入口、编译期宏参数或 connect-time 
 后续新增、移动、整理、归档或 review `AI_DOC` 下的设计文档、plan、review、flow、
 网页文档、分析文档或项目管理规则时，必须先阅读
 `AI_DOC/project_management/ai_doc_file_management_rule.md`。
+
+后续新增、修改或复查任何项目内文档，包括 `AI_DOC`、`mem_ut/ver/ut/memblock/rule`
+和 `AGENTS.md` 中的说明性内容时，必须先阅读
+`AI_DOC/project_management/ai_doc_language_rule.md`，并默认使用中文编写文档正文。
 
 后续新增、修改或 review `mem_ut` 测试框架运行期逻辑、测试用例构建逻辑、
 sequence 主循环、monitor service loop、handler、adapter、scheduler 或公共状态维护逻辑时，
