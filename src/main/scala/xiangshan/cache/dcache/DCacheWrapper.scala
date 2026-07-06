@@ -41,7 +41,7 @@ case class DCacheParameters
 (
   nSets: Int = 128,
   nWays: Int = 8,
-  rowBits: Int = 64,
+  rowBits: Int = 16,
   tagECC: Option[String] = None,
   dataECC: Option[String] = None,
   replacer: Option[String] = Some("setplru"),
@@ -142,14 +142,14 @@ trait HasDCacheParameters
   val DCacheSets = cacheParams.nSets
   val DCacheWayDiv = 2
   val DCacheWays = cacheParams.nWays
-  val DCacheBanks = 8 // hardcoded
+  val DCacheBanks = 32
   val DCacheDupNum = 16
-  val DCacheSRAMRowBits = cacheParams.rowBits // hardcoded
+  val DCacheSRAMRealRowBits = DCacheSRAMRowBits * DCacheWays // 1 real Bank = vitural_bank * way_nums
+  val DCacheSRAMRowBits = 16 
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
   val MaxPrefetchEntry = cacheParams.nMaxPrefetchEntry
   def DCacheVWordBytes = VLEN / 8
-  require(DCacheSRAMRowBits == 64)
 
   val DCacheSetDivBits = log2Ceil(DCacheSetDiv)
   val DCacheSetBits = log2Ceil(DCacheSets)
@@ -160,6 +160,9 @@ trait HasDCacheParameters
   val DCacheSameVPAddrLength = 12
 
   val DCacheSRAMRowBytes = DCacheSRAMRowBits / 8
+  val DCacheWordBankCount = DCacheWordBytes / DCacheSRAMRowBytes
+  val DCacheVWordBankCount = VLEN / DCacheSRAMRowBits
+  val DCacheQuadWordBankCount = QuadWordBytes / DCacheSRAMRowBytes
   val DCacheWordOffset = log2Up(DCacheWordBytes)
   def DCacheVWordOffset = log2Up(DCacheVWordBytes)
 
@@ -178,11 +181,16 @@ trait HasDCacheParameters
 
   def encDataBits = if (EnableDataEcc) cacheParams.dataCode.width(DCacheSRAMRowBits) else DCacheSRAMRowBits
   def dataECCBits = encDataBits - DCacheSRAMRowBits
+  def pseudoErrorMaskBits = ((tagBits + 7) / 8) * 8
 
   // L1 DCache controller
   val cacheCtrlParamsOpt  = OptionWrapper(
                               cacheParams.cacheCtrlAddressOpt.nonEmpty,
-                              L1CacheCtrlParams(cacheParams.cacheCtrlAddressOpt.get)
+                              L1CacheCtrlParams(
+                                address = cacheParams.cacheCtrlAddressOpt.get,
+                                tagMaskRegWidth = pseudoErrorMaskBits,
+                                dataMaskRegWidth = DCacheSRAMRowBits
+                              )
                             )
   // uncache
   val uncacheIdxBits = log2Up(VirtualLoadQueueMaxStoreQueueSize + 1)
@@ -234,14 +242,28 @@ trait HasDCacheParameters
     if(DCacheSetDivBits == 0) 0.U else addr(DCacheSetOffset + DCacheSetDivBits - 1, DCacheSetOffset)
   }
 
-  def addr_to_dcache_div_set(addr: UInt) = {
+  def addr_to_dcache_div_set(addr: UInt, modeId: Int = modeId) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
-    addr(DCacheAboveIndexOffset - 1, DCacheSetOffset + DCacheSetDivBits)
+    modeId match {
+      case 1 => Cat(
+                 hashBitPairs(addr, PAddrBits - 1, pgIdxBits),
+                 addr(DCacheAboveIndexOffset- 1 - (untagBits-pgUntagBits), DCacheSetOffset + DCacheSetDivBits)
+                )(idxBits - DCacheSetDivBits - 1, 0)
+      case 2 => addr(DCacheAboveIndexOffset - 1, DCacheSetOffset + DCacheSetDivBits)
+      case _ => throw new IllegalArgumentException(s"Invalid L1DCache index modeId: $modeId")
+    }
   }
 
-  def addr_to_dcache_set(addr: UInt) = {
+  def addr_to_dcache_set(addr: UInt, modeId: Int = modeId) = {
     require(addr.getWidth >= DCacheAboveIndexOffset)
-    addr(DCacheAboveIndexOffset-1, DCacheSetOffset)
+    modeId match {
+      case 1 => Cat(
+                 hashBitPairs(addr, PAddrBits - 1, pgIdxBits),
+                 addr(DCacheAboveIndexOffset- 1 - (untagBits-pgUntagBits), DCacheSetOffset)
+                )(DCacheAboveIndexOffset - DCacheSetOffset - 1, 0)
+      case 2 => addr(DCacheAboveIndexOffset - 1, DCacheSetOffset)
+      case _ => throw new IllegalArgumentException(s"Invalid L1DCache index modeId: $modeId")
+    }
   }
 
   def get_data_of_bank(bank: Int, data: UInt) = {
@@ -254,19 +276,23 @@ trait HasDCacheParameters
     data(DCacheSRAMRowBytes * (bank + 1) - 1, DCacheSRAMRowBytes * bank)
   }
 
-  def get_alias(vaddr: UInt): UInt ={
+  def get_alias(vaddr: UInt, modeId: Int = modeId): UInt ={
     // require(blockOffBits + idxBits > pgIdxBits)
     if(blockOffBits + idxBits > pgIdxBits){
-      vaddr(blockOffBits + idxBits - 1, pgIdxBits)
+      modeId match {
+        case 1 => hashBitPairs(vaddr, PAddrBits - 1, pgIdxBits)(blockOffBits + idxBits - pgIdxBits - 1, 0)
+        case 2 => vaddr(blockOffBits + idxBits - 1, pgIdxBits)
+        case _ => throw new IllegalArgumentException(s"Invalid L1DCache alias modeId: $modeId")
+      }
     }else{
       0.U
     }
   }
 
-  def is_alias_match(vaddr0: UInt, vaddr1: UInt): Bool = {
+  def is_alias_match(vaddr0: UInt, vaddr1: UInt, modeId: Int = modeId): Bool = {
     require(vaddr0.getWidth == VAddrBits && vaddr1.getWidth == VAddrBits)
     if(blockOffBits + idxBits > pgIdxBits) {
-      vaddr0(blockOffBits + idxBits - 1, pgIdxBits) === vaddr1(blockOffBits + idxBits - 1, pgIdxBits)
+      get_alias(vaddr0, modeId) === get_alias(vaddr1, modeId)
     }else {
       // no alias problem
       true.B
@@ -277,11 +303,59 @@ trait HasDCacheParameters
     addr(DCacheAboveIndexOffset + log2Up(DCacheWays) - 1, DCacheAboveIndexOffset)
   }
 
+  def bankMaskFromBase(baseBank: UInt, bankCount: Int): UInt = {
+    val baseOH = UIntToOH(baseBank, DCacheBanks)
+    (0 until bankCount).map(i => (baseOH << i)(DCacheBanks - 1, 0)).reduce(_ | _)
+  }
+
+  def byteMaskToBankMask(vaddr: UInt, byteMask: UInt): UInt = {
+    val bankMaskInVWord = VecInit((0 until DCacheVWordBankCount).map(i => {
+      byteMask(DCacheSRAMRowBytes * (i + 1) - 1, DCacheSRAMRowBytes * i).orR
+    })).asUInt
+    val bankOffsetInLine = Cat(vaddr(DCacheLineOffset - 1, DCacheVWordOffset), 0.U(log2Ceil(DCacheVWordBankCount).W))
+    val bankMaskInLine = Cat(0.U((DCacheBanks - DCacheVWordBankCount).W), bankMaskInVWord)
+    (bankMaskInLine << bankOffsetInLine)(DCacheBanks - 1, 0)
+  }
+  def addrToVWordBankBase(addr: UInt): UInt = {
+    val bank = addr_to_dcache_bank(addr)
+    val vwordBankOffsetBits = log2Ceil(DCacheVWordBankCount)
+    Cat(bank(log2Up(DCacheBanks) - 1, vwordBankOffsetBits), 0.U(vwordBankOffsetBits.W))
+  }
+
+  def bankMaskToReadErrorLaneMask(bankMask: UInt, vwordBankBase: UInt): UInt = {
+    VecInit((0 until DCacheVWordBankCount).map { i =>
+      val bank = (vwordBankBase + i.U)(log2Up(DCacheBanks) - 1, 0)
+      bankMask(bank)
+    }).asUInt
+  }
+
+  def wordBankBase(wordIdx: UInt): UInt = {
+    (wordIdx << log2Ceil(DCacheWordBankCount))(log2Up(DCacheBanks) - 1, 0)
+  }
+
+  def quadWordBankBase(quadWordIdx: UInt): UInt = {
+    (quadWordIdx << log2Ceil(DCacheQuadWordBankCount))(log2Up(DCacheBanks) - 1, 0)
+  }
+
+  def assembleBankData(data: Vec[UInt], baseBank: UInt, bankCount: Int): UInt = {
+    Cat((0 until bankCount).reverse.map(i => data((baseBank + i.U)(log2Up(DCacheBanks) - 1, 0))))
+  }
+
+  def selectDataPiece(data: UInt, sel: Seq[Bool], bankCount: Int): UInt = {
+    Mux1H((0 until bankCount).map(i => sel(i) -> data(DCacheSRAMRowBits * (i + 1) - 1, DCacheSRAMRowBits * i)))
+  }
+
+  def selectMaskPiece(mask: UInt, sel: Seq[Bool], bankCount: Int): UInt = {
+    Mux1H((0 until bankCount).map(i => sel(i) -> mask(DCacheSRAMRowBytes * (i + 1) - 1, DCacheSRAMRowBytes * i)))
+  }
+
+  def selectFullMask(sel: Seq[Bool]): UInt = {
+    Mux(sel.reduce(_ || _), ~0.U(DCacheSRAMRowBytes.W), 0.U(DCacheSRAMRowBytes.W))
+  }
   val numReplaceRespPorts = 2
 
   require(isPow2(nSets), s"nSets($nSets) must be pow2")
   require(isPow2(nWays), s"nWays($nWays) must be pow2")
-  require(full_divide(rowBits, wordBits), s"rowBits($rowBits) must be multiple of wordBits($wordBits)")
   require(full_divide(beatBits, rowBits), s"beatBits($beatBits) must be multiple of rowBits($rowBits)")
 }
 
@@ -350,7 +424,7 @@ class DCacheLineReq(implicit p: Parameters) extends DCacheBundle
     XSDebug(cond, "DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
   }
-  def idx: UInt = get_idx(vaddr)
+  def idx: UInt = get_dcache_idx(vaddr)
 }
 
 class DCacheWordReqWithVaddr(implicit p: Parameters) extends DCacheWordReq {
@@ -888,6 +962,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val io = IO(new DCacheIO)
 
   val (bus, edge) = outer.clientNode.out.head
+  require(pseudoErrorMaskBits >= tagBits, "pseudo-error masks must cover tagBits")
+  require(pseudoErrorMaskBits >= DCacheSRAMRowBits, "pseudo-error masks must cover data-bank row width")
   require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
 
   println("DCache:")
@@ -1455,7 +1531,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // have alias problem, extra alias bits needed for index
     val alias_addr_frag = bus.b.bits.data(2, 1)
     missQueue.io.probe.req.bits.vaddr := Cat(
-      bus.b.bits.address(PAddrBits - 1, DCacheAboveIndexOffset), // dontcare
+      0.U(PAddrBits - 1, DCacheAboveIndexOffset), // dontcare
       alias_addr_frag(DCacheAboveIndexOffset - DCacheTagOffset - 1, 0), // index
       bus.b.bits.address(DCacheTagOffset - 1, 0)                 // index & others
     )

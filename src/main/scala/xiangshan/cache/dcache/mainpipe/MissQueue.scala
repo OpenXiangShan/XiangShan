@@ -301,7 +301,7 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     )._2
     acquire := Mux(req.full_overwrite, acquirePerm, acquireBlock)
     // resolve cache alias by L2
-    acquire.user.lift(AliasKey).foreach(_ := req.vaddr(13, 12))
+    acquire.user.lift(AliasKey).foreach(_ :=  get_alias(req.vaddr))
     // pass vaddr to l2
     acquire.user.lift(VaddrKey).foreach(_ := req.vaddr(VAddrBits - 1, blockOffBits))
     // pass pc to l2
@@ -953,7 +953,7 @@ for(i <- 0 until reqNum) {
   )._2
   io.mem_acquire.bits := Mux(full_overwrite, acquirePerm, acquireBlock)
   // resolve cache alias by L2
-  io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := req.vaddr(13, 12))
+  io.mem_acquire.bits.user.lift(AliasKey).foreach( _ := get_alias(req.vaddr))
   // pass vaddr to l2
   io.mem_acquire.bits.user.lift(VaddrKey).foreach( _ := req.vaddr(VAddrBits-1, blockOffBits))
   // pass pc to l2

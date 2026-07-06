@@ -159,7 +159,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val IdxBerti = prefetcherSeq.indexWhere(_.isInstanceOf[BertiParams])
 
   private val Seq(bothOff, strideOnBertiOff, strideOffBertiOn, bothOn) = Seq(0, 1, 2, 3)
-  val modeStrideBerti = Constantin.createRecord(s"pf_modeStrideBerti$hartId", initValue = strideOnBertiOff)
+  // strideOffBertiOn: if you enable Berti, Stride will be closed by default.
+  val modeStrideBerti = Constantin.createRecord(s"pf_modeStrideBerti$hartId", initValue = strideOffBertiOn)
   val strideModeEnable = modeStrideBerti =/= bothOff.U && !(modeStrideBerti === strideOffBertiOn.U && HasBerti.B)
   val bertiModeEnable = modeStrideBerti =/= bothOff.U && !(modeStrideBerti === strideOnBertiOff.U && HasStreamStride.B)
 
@@ -183,7 +184,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       pf.io.ld_in(i).valid := Mux(
         pf_train_on_hit,
         primaryValid,
-        primaryValid && source.bits.isFirstIssue && source.bits.miss
+        primaryValid && source.bits.isFirstIssue && (source.bits.miss || isFromL1Prefetch(source.bits.metaSource))
       ) // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
       pf.io.ld_in(i).bits.pc := Mux(
@@ -199,7 +200,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       pf.io.st_in(i).valid := Mux(
         pf_train_on_hit,
         primaryValid,
-        primaryValid && source.bits.isFirstIssue && source.bits.miss
+        primaryValid && source.bits.isFirstIssue && (source.bits.miss || isFromL1Prefetch(source.bits.metaSource))
       ) // && isStoreAccess(source.bits.uop)
       pf.io.st_in(i).bits := source.bits
       pf.io.st_in(i).bits.pc := s3_storePcVec(i)
@@ -226,6 +227,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
 
     // stride will train on miss or prefetch hit
     for(i <- 0 until LD_TRAIN_WIDTH){
+      // for stride
       val source = io.trainSource.s3_load(i)
       pf.stride_train(i).valid := source.valid && source.bits.isFirstIssue && (
         source.bits.miss || isFromStride(source.bits.metaSource)
@@ -236,6 +238,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
         s2_loadPcVec(i),
         s3_loadPcVec(i)
       )
+      // for stream
       pf.io.ld_in(i).valid := source.valid && source.bits.isFirstIssue && !source.bits.isHwPrefetch
       // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits

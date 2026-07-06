@@ -25,11 +25,11 @@ class ICacheDataBank(bankIdx: Int)(implicit p: Parameters) extends ICacheModule 
   class ICacheDataBankIO extends Bundle {
     class Read extends Bundle {
       class Req extends Bundle {
-        val setIdx:  UInt = UInt(idxBits.W)
-        val waymask: UInt = UInt(nWays.W)
+        val setIdx:  Vec[UInt] = Vec(nWays, UInt(idxBits.W))
+        val waymask: UInt      = UInt(nWays.W)
       }
       class Resp extends Bundle {
-        val entry: ICacheDataEntry = new ICacheDataEntry
+        val entries: Vec[ICacheDataEntry] = Vec(nWays, new ICacheDataEntry)
       }
       val req:  DecoupledIO[Req] = Flipped(Decoupled(new Req))
       val resp: Resp             = Output(new Resp)
@@ -75,13 +75,11 @@ class ICacheDataBank(bankIdx: Int)(implicit p: Parameters) extends ICacheModule 
   ways.zipWithIndex.foreach { case (w, i) =>
     w.io.r.req.valid := io.read.req.valid && io.read.req.bits.waymask(i)
     w.io.r.req.bits.apply(
-      setIdx = io.read.req.bits.setIdx
+      setIdx = io.read.req.bits.setIdx(i)
     )
   }
 
-  private val readReqReg = RegEnable(io.read.req.bits, 0.U.asTypeOf(io.read.req.bits), io.read.req.fire)
-
-  io.read.resp.entry := Mux1H(readReqReg.waymask, ways.map(_.io.r.resp.data.head))
+  io.read.resp.entries := ways.map(_.io.r.resp.data.head)
 
   /* *** write *** */
   io.write.req.ready := ways.map(_.io.w.req.ready).reduce(_ && _)

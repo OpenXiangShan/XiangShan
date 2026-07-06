@@ -215,7 +215,6 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   // IFU-Ftq
   ifu.io.fromFtq <> ftq.io.toIfu
-  ftq.io.toIfu.req.ready := ifu.io.fromFtq.req.ready && icache.io.fromFtq.fetchReq.ready
   ftq.io.fromIfu <> ifu.io.toFtq
 
   bpu.io.fromFtq <> ftq.io.toBpu
@@ -223,14 +222,12 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   // ICache-Ftq
   icache.io.fromFtq <> ftq.io.toICache
-  // override fetchReq.ready to sync with Ifu
-  ftq.io.toICache.fetchReq.ready := ifu.io.fromFtq.req.ready && icache.io.fromFtq.fetchReq.ready
-  ftq.io.fromICache.fromPrefetch := icache.io.toFtq.fromPrefetch
-  icache.io.flush                := DontCare
+  ftq.io.fromICache.fromPrefetch  := icache.io.toFtq.fromPrefetch
+  ftq.io.fromICache.fromWayLookup := icache.io.toFtq.fromWayLookup
+  icache.io.flush                 := DontCare
 
   // Ifu-ICache
   ifu.io.fromICache <> icache.io.toIfu
-  ifu.io.toICache <> icache.io.fromIfu
 
   // ICache-Backend
   icache.io.csrPfEnable := RegNext(csrCtrl.pf_ctrl.l1I_pf_enable)
@@ -365,8 +362,8 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   XSPerfAccumulate(
     "fetchedCacheLines",
     Mux(
-      icache.io.toIfu.fetchResp.fire,
-      Mux(icache.io.toIfu.fetchResp.bits.doubleline, 2.U, 1.U),
+      icache.io.toIfu.req.valid && icache.io.toIfu.req.ready,
+      Mux(icache.io.toIfu.req.bits(0).perf_isCrossLine, 2.U, 1.U),
       0.U
     )
   )
@@ -374,15 +371,15 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
   // XSPerfCounters: Frontend Invalid
   XSPerfAccumulate(
     "stallCycles_fetch",
-    !ftq.io.toIfu.req.fire
+    !(icache.io.toIfu.req.valid && icache.io.toIfu.req.ready)
   )
   XSPerfAccumulate(
     "stallCycles_fetch_ftqNotvalid",
-    !ftq.io.toIfu.req.valid
+    !icache.io.toIfu.req.valid
   )
   XSPerfAccumulate(
     "stallCycles_fetch_ifuNotReady",
-    !ifu.io.fromFtq.req.ready
+    !icache.io.toIfu.req.ready
   )
   XSPerfAccumulate(
     "stallCycles_decodeFull",
