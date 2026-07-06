@@ -355,7 +355,10 @@ class FrontendMonitor:
             "debug_is_mem_vio": int(self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsMemVio", 0)),
         }
         self._dut_redirect_cfvec_target = {
-            "cycle": int(cycle),
+            # The backend agent drives redirect in the StepRis callback before
+            # the DUT samples it. Treat the next cycle as the DUT-visible
+            # redirect cycle for cfVec recovery checking.
+            "cycle": int(cycle) + 1,
             "target_pc": int(target_pc),
         }
         self._emit(
