@@ -1,5 +1,5 @@
 
--F ../../../common/tcnt_base/tcnt_base.f
+-F $MEMBLOCK_XS_HOME/mem_ut/ver/common/tcnt_base/tcnt_base.f
 +incdir+../cfg
 ../env/plus_pkg.sv
 ../common/memblock_common/src/memblock_sync_pkg.sv

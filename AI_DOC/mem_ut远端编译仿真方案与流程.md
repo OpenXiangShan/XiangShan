@@ -151,20 +151,20 @@ vcs: command not found
 - `synopsys/vcs/Q-2020.03-SP2` 是否仍可用
 - `synopsys/verdi/R-2020.12-SP1` 是否仍可用
 
-## 7. MEMBLOCK_PROJECT 规则
+## 7. MEMBLOCK_XS_HOME / MEMBLOCK_PROJECT 规则
 
 `rtl.f` 中依赖如下路径：
 
 ```text
-$MEMBLOCK_PROJECT/XiangShan/build_memblock/rtl/filelist.f
+$MEMBLOCK_XS_HOME/build_memblock/rtl/filelist.f
 ```
 
 因此：
 
-- `MEMBLOCK_PROJECT` 不能指向 `XiangShan`
-- `MEMBLOCK_PROJECT` 必须指向 `XiangShan` 的上一级目录
+- `MEMBLOCK_XS_HOME` 必须指向当前 XiangShan worktree 根目录。
+- `MEMBLOCK_PROJECT` 保留为当前 XiangShan worktree 的上一级目录，兼容旧脚本。
 
-当前该规则已经在 [eda01_entry.sh](/nfs/home/lixiangrui/work/memblock_ut/XiangShan/mem_ut/ver/ut/memblock/sim/eda01_entry.sh) 中通过脚本相对路径自动处理。
+当前该规则已经在 `mem_ut/ver/ut/memblock/sim/eda01_entry.sh` 中通过脚本相对路径自动处理。
 
 ## 8. 当前已验证结论
 

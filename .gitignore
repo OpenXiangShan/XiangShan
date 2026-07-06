@@ -372,3 +372,11 @@ simulator_err.txt
 simulator_out.txt
 *.log
 *.err
+
+# Generated RTL snapshots
+/build_memblock/
+/mem_ut/ver/ut/memblock/sim/*/exec/
+/mem_ut/ver/ut/memblock/sim/*/log/
+/mem_ut/ver/ut/memblock/sim/*/wave/
+/mem_ut/ver/ut/memblock/sim/*/cov/
+/mem_ut/ver/ut/memblock/sim/*/partitionlib/

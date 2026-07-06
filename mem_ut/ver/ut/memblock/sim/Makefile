@@ -6,8 +6,8 @@
 ##Date         : 2026-04-12
 ##=========================================================
 
-include ../../../../scr/verif/project_cfg.mk
-#include ../cfg/verif/project_cfg.mk
+#include ../../../../scr/verif/project_cfg.mk
+include ../cfg/verif/project_cfg.mk
 
 USER_CFG_LOCAL ?= ../cfg/user_cfg.local.sv
 USER_CFG_LOCAL_TEMPLATE ?= ../cfg/user_cfg.local.default.sv
@@ -20,6 +20,7 @@ REMOTE_PID_FILE ?= $(REMOTE_STATE_DIR)/$(tc)_$(ts)_$(mode).pid
 REMOTE_LAUNCH_LOG ?= $(REMOTE_STATE_DIR)/$(tc)_$(ts)_$(mode).launch.log
 REMOTE_BOOTSTRAP ?= source /usr/share/Modules/init/bash >/dev/null 2>&1 || true; module load synopsys/vcs/Q-2020.03-SP2 license; module load synopsys/verdi/R-2020.12-SP1 license
 REMOTE_WRAPPER := $(CURR_DIR)/remote_eda_make.sh
+REMOTE_SIM_TOOLS ?= vcs
 
 .PHONY: eda_compile eda_batch_run eda_run eda_run_bg eda_status eda_tail eda_kill ensure_user_cfg_local
 
@@ -41,7 +42,7 @@ eda_compile:
 	cfg='$(cfg)' plus_file='$(plus_file)' plus_arg='$(plus_arg)' \
 	timeout_ns='$(timeout_ns)' simv_by_tc='$(simv_by_tc)' xprop='$(xprop)' \
 	partcmp_op='$(partcmp_op)' initreg='$(initreg)' regr_ini='$(regr_ini)' \
-	time_mem_chk='$(time_mem_chk)' gui_on='$(gui_on)' SIM_TOOLS='$(SIM_TOOLS)' \
+	time_mem_chk='$(time_mem_chk)' gui_on='$(gui_on)' SIM_TOOLS='$(REMOTE_SIM_TOOLS)' \
 	'$(REMOTE_WRAPPER)' sync compile
 
 eda_batch_run:
@@ -54,7 +55,7 @@ eda_batch_run:
 	cfg='$(cfg)' plus_file='$(plus_file)' plus_arg='$(plus_arg)' \
 	timeout_ns='$(timeout_ns)' simv_by_tc='$(simv_by_tc)' xprop='$(xprop)' \
 	partcmp_op='$(partcmp_op)' initreg='$(initreg)' regr_ini='$(regr_ini)' \
-	time_mem_chk='$(time_mem_chk)' gui_on='$(gui_on)' SIM_TOOLS='$(SIM_TOOLS)' \
+	time_mem_chk='$(time_mem_chk)' gui_on='$(gui_on)' SIM_TOOLS='$(REMOTE_SIM_TOOLS)' \
 	'$(REMOTE_WRAPPER)' sync batch_run
 
 eda_run:
@@ -67,7 +68,7 @@ eda_run:
 	cfg='$(cfg)' plus_file='$(plus_file)' plus_arg='$(plus_arg)' \
 	timeout_ns='$(timeout_ns)' simv_by_tc='$(simv_by_tc)' xprop='$(xprop)' \
 	partcmp_op='$(partcmp_op)' initreg='$(initreg)' regr_ini='$(regr_ini)' \
-	time_mem_chk='$(time_mem_chk)' gui_on='$(gui_on)' SIM_TOOLS='$(SIM_TOOLS)' \
+	time_mem_chk='$(time_mem_chk)' gui_on='$(gui_on)' SIM_TOOLS='$(REMOTE_SIM_TOOLS)' \
 	'$(REMOTE_WRAPPER)' sync run
 
 eda_run_bg:
@@ -80,7 +81,7 @@ eda_run_bg:
 	cfg='$(cfg)' plus_file='$(plus_file)' plus_arg='$(plus_arg)' \
 	timeout_ns='$(timeout_ns)' simv_by_tc='$(simv_by_tc)' xprop='$(xprop)' \
 	partcmp_op='$(partcmp_op)' initreg='$(initreg)' regr_ini='$(regr_ini)' \
-	time_mem_chk='$(time_mem_chk)' gui_on='$(gui_on)' SIM_TOOLS='$(SIM_TOOLS)' \
+	time_mem_chk='$(time_mem_chk)' gui_on='$(gui_on)' SIM_TOOLS='$(REMOTE_SIM_TOOLS)' \
 	'$(REMOTE_WRAPPER)' async run
 
 eda_status:

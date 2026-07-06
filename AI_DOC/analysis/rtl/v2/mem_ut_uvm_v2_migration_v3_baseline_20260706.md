@@ -34,7 +34,7 @@ The source worktree had untracked local files or directories before migration:
 
 ```text
 .codex
-AI_DOC/plan/test_framework/plan/undo/mem_ut_uvm_v2_branch_migration_plan_20260706.md
+AI_DOC/plan/test_framework/plan/do/mem_ut_uvm_v2_branch_migration_plan_20260706.md
 build_memblock/
 coupledL2/
 novas.conf
@@ -70,8 +70,8 @@ snapshot.
 Associated plan:
 
 ```text
-AI_DOC/plan/test_framework/plan/undo/mem_ut_uvm_v2_branch_migration_plan_20260706.md
+AI_DOC/plan/test_framework/plan/do/mem_ut_uvm_v2_branch_migration_plan_20260706.md
 ```
 
-The plan file was copied into this V2 worktree so the final implementation
-review can reference a path that exists on the `mem_ut_uvm_v2` branch.
+The plan file was copied into this V2 worktree and later archived to `do` after
+the migration and RTL generation preparation completed.

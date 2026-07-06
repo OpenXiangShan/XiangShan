@@ -12,6 +12,7 @@ CHISEL_TARGET="${CHISEL_TARGET:-systemverilog}"
 TARGET_DIR="${TARGET_DIR:-build_memblock/rtl}"
 FIRTOOL_OPT="${FIRTOOL_OPT:--O=release --disable-annotation-unknown --lowering-options=explicitBitcast,disallowLocalVariables,disallowPortDeclSharing,locationInfoStyle=none}"
 
+export MEMBLOCK_XS_HOME="${MEMBLOCK_XS_HOME:-${XS_HOME}}"
 export MEMBLOCK_PROJECT="${MEMBLOCK_PROJECT:-$(dirname "${XS_HOME}")}"
 
 cd "${XS_HOME}"
@@ -31,6 +32,7 @@ if (( ${#missing_submodules[@]} > 0 )); then
 fi
 
 echo "[memblock-rtl-v2] XS_HOME=${XS_HOME}"
+echo "[memblock-rtl-v2] MEMBLOCK_XS_HOME=${MEMBLOCK_XS_HOME}"
 echo "[memblock-rtl-v2] MEMBLOCK_PROJECT=${MEMBLOCK_PROJECT}"
 echo "[memblock-rtl-v2] config=${CONFIG}"
 echo "[memblock-rtl-v2] target=${TARGET_DIR}"
