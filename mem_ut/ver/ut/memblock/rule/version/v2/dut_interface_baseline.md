@@ -1,8 +1,8 @@
-# V2 DUT interface baseline
+# V2 DUT 接口基线
 
-## Authority
+## 权威来源
 
-V2 DUT interface adaptation must use generated V2 Verilog as the authority:
+V2 DUT 接口适配必须以生成后的 V2 Verilog 为权威来源：
 
 ```text
 build_memblock/rtl/filelist.f
@@ -10,15 +10,15 @@ build_memblock/rtl/MemBlock.sv
 build_memblock/rtl/MemBlockTop.sv
 ```
 
-Scala source is only used to understand valid/ready, index and bundle semantics.
+Scala 源码只用于理解 `valid/ready`、index 和 bundle 语义，不能替代生成后 Verilog
+作为接口基线。
 
-## Current Status
+## 当前状态
 
-V2 Verilog has been generated successfully in this worktree. Full DUT
-agent/interface adaptation is intentionally out of scope for the branch
-migration plan.
+当前 worktree 已成功生成 V2 Verilog。完整 DUT agent/interface 适配不属于分支迁移
+plan 的范围，应由后续 V2 DUT 适配 plan 单独处理。
 
-Observed generated top-level facts:
+已观察到的生成后顶层事实：
 
 ```text
 build_memblock/rtl/MemBlockTop.sv
@@ -28,19 +28,19 @@ build_memblock/rtl/MemBlockTop.sv
   l2_pmp_resp_*
 ```
 
-Known follow-up mismatch example:
+已知后续需要处理的不匹配示例：
 
 ```text
 Generated V2 top: outer_cpu_halt
 Current UVM connect: cpuWfi / io_outer_cpu_wfi
 ```
 
-This mismatch must be handled by the later V2 DUT adaptation plan, not by
-silently changing generated V2 design RTL.
+该不匹配必须在后续 V2 DUT 适配 plan 中处理，不能通过静默修改生成后的 V2 设计
+RTL 来绕过。
 
-## Follow-up Checklist
+## 后续检查清单
 
-Compare these testbench entry points against the generated Verilog:
+后续应将以下 testbench 入口与生成后 Verilog 对比：
 
 ```text
 mem_ut/ver/ut/memblock/tb/top_tb.sv
@@ -50,5 +50,5 @@ mem_ut/ver/ut/memblock/tb/memblock_connect.sv
 mem_ut/ver/ut/memblock/tb/*_agent_connect.sv
 ```
 
-Every interface delta must be tracked in a later V2 DUT adaptation plan before
-agent interface/xaction/driver/monitor changes are made.
+每一项 interface delta 都必须先记录到后续 V2 DUT 适配 plan，再修改 agent
+interface、xaction、driver 或 monitor。

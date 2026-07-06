@@ -1,33 +1,32 @@
-# mem_ut V2 branch policy
+# mem_ut V2 分支策略
 
-## Scope
+## 适用范围
 
-This profile applies to the `mem_ut_uvm_v2` branch and V2 design work based on
-`kunminghu-v2`.
+本 profile 适用于 `mem_ut_uvm_v2` 分支，以及基于 `kunminghu-v2` 的 V2 设计同步工作。
 
-## Branch Mapping
+## 分支映射
 
-| Item | Value |
+| 项目 | 取值 |
 |---|---|
-| mem_ut branch | `mem_ut_uvm_v2` |
-| upstream design branch | `origin/kunminghu-v2` |
-| current V2 base commit | `2acbf327cf7fb514593acc00d4c41117ec499e08` |
-| base commit message | ``fix(MemBlock): `vSegmentUnit` needs to connect `ready` to `IQ` (#6123)`` |
+| mem_ut 工作分支 | `mem_ut_uvm_v2` |
+| 上游设计分支 | `origin/kunminghu-v2` |
+| 当前 V2 基线 commit | `2acbf327cf7fb514593acc00d4c41117ec499e08` |
+| 基线 commit message | ``fix(MemBlock): `vSegmentUnit` needs to connect `ready` to `IQ` (#6123)`` |
 
-## Update Flow
+## 更新流程
 
-After confirming `git status` is clean:
+确认 `git status` 干净后，按以下命令更新：
 
 ```bash
 git fetch origin kunminghu-v2
 git rebase FETCH_HEAD
 ```
 
-Design source, RTL source and build source conflicts must be resolved to the V2
-side unless a later V2-specific mem_ut plan explicitly documents the exception.
+如果设计源码、RTL 生成源码或构建源码发生冲突，默认按 V2 侧语义解决；只有后续
+V2 专项 mem_ut plan 明确记录例外时，才允许采用其他处理方式。
 
-## Non-goals
+## 非目标
 
-- Do not rebase this branch to `origin/kunminghu-v3`.
-- Do not use V3 design source to resolve V2 design conflicts.
-- Do not push automatically.
+- 不要把本分支 rebase 到 `origin/kunminghu-v3`。
+- 不要使用 V3 设计源码解决 V2 设计冲突。
+- 不要自动 push。

@@ -1,20 +1,20 @@
-# V3 verified status
+# V3 已验证状态
 
-## Current Status
+## 当前状态
 
-The V3 mem_ut environment has been verified with the remote eda flow:
+V3 mem_ut 环境已经通过远端 EDA flow 验证：
 
 ```text
 tc_sanity/base_fun
 ```
 
-Recorded pass log:
+已记录通过日志：
 
 ```text
 mem_ut/ver/ut/memblock/sim/base_fun/log/tc_sanity_666666_rtl_.log
 ```
 
-Pass standard:
+通过标准：
 
 ```text
 TEST CASE PASSED
@@ -22,4 +22,4 @@ UVM_ERROR = 0
 UVM_FATAL = 0
 ```
 
-This V3 status must not be treated as V2 verification evidence.
+该 V3 状态不能作为 V2 验证证据。
