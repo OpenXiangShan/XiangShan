@@ -187,9 +187,9 @@ The implementation of XiangShan is inspired by several key papers. We list these
 
 ## LICENSE
 
-Copyright © 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences.
+Copyright © 2020-2026 Institute of Computing Technology, Chinese Academy of Sciences.
 
-Copyright © 2021-2025 Beijing Institute of Open Source Chip
+Copyright © 2021-2026 Beijing Institute of Open Source Chip
 
 Copyright © 2020-2022 by Peng Cheng Laboratory.
 
