@@ -240,7 +240,42 @@ class DecodeStageImp(
 
   stallReason.out.reason := stallReason.in.reason
 
-  val perfEvents = Seq()
+  val inFires = in.mop.map(_.fire)
+  val outFires = out.uop.map(_.fire)
+  val recoveryFlag = RegInit(false.B)
+  when (in.redirect.valid) {
+    recoveryFlag := true.B
+  }.elsewhen(VecInit(inFires).asUInt.orR) {
+    recoveryFlag := false.B
+  }
+
+  XSPerfAccumulate("in_valid_count", PopCount(inValids))
+  XSPerfAccumulate("in_fire_count", PopCount(inFires))
+  XSPerfAccumulate("in_valid_not_ready_count", PopCount(in.mop.map(x => x.valid && !x.ready)))
+  XSPerfAccumulate("stall_cycle", in.mop.head.valid && !in.mop.head.ready)
+  XSPerfAccumulate("wait_cycle", !in.mop.head.valid && out.uop.head.ready)
+  XSPerfAccumulate("inst_spec", PopCount(inFires))
+  XSPerfAccumulate("recovery_bubble", recoveryFlag)
+
+  XSPerfHistogram("in_valid_range", PopCount(inValids), true.B, 0, DecodeWidth + 1, 1)
+  XSPerfHistogram("in_fire_range", PopCount(inFires), true.B, 0, DecodeWidth + 1, 1)
+  XSPerfHistogram("out_valid_range", PopCount(outValids), true.B, 0, DecodeWidth + 1, 1)
+  XSPerfHistogram("out_fire_range", PopCount(outFires), true.B, 0, DecodeWidth + 1, 1)
+
+  val fusionValid = VecInit(in.fusion.map(x => GatedValidRegNext(x)))
+  val inValidNotReady = in.mop.map(in => GatedValidRegNext(in.valid && !in.ready))
+  val frontendStallReg = GatedValidRegNext(!in.mop.head.valid && in.mop.head.ready)
+  val backendStall = GatedValidRegNext(in.mop.head.valid && !in.mop.head.ready)
+  val perfEvents = Seq(
+    ("decoder_fused_instr",  PopCount(fusionValid)),
+    ("decoder_wait_instr",   PopCount(inValidNotReady)),
+    ("decoder_stall_cycle",  inValid && !out.uop.head.ready),
+    ("decoder_utilization",  PopCount(inValids)),
+    ("frontend_stall_cycle", frontendStallReg),
+    ("backend_stall_cycle",  backendStall),
+    ("INST_SPEC",            PopCount(inFires)),
+    ("RECOVERY_BUBBLE",      recoveryFlag)
+  )
   generatePerfEvent()
 }
 
