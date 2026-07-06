@@ -365,6 +365,21 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   resolveQueue.io.bpuTrain.ready := !trainCache.valid || io.toBpu.train.fire
 
+  private def isHighConfidenceBranch(branch: BranchInfo, meta: BpuResolveMeta): Bool = {
+    val mbtbEntries = meta.mbtb.entries.flatten
+    val hitVec      = mbtbEntries.map(_.hit(branch))
+    val hit         = hitVec.reduce(_ || _)
+    val hitEntry    = Mux1H(PriorityEncoderOH(hitVec), mbtbEntries)
+    hit && hitEntry.highConfidence
+  }
+
+  private val resolveTrainBits      = resolveQueue.io.bpuTrain.bits
+  private val resolveTrainMeta      = metaQueueResolve(resolveTrainBits.ftqIdx.value)
+  private val resolveTrainHasBranch = resolveTrainBits.branches.map(_.valid).reduce(_ || _)
+  private val resolveTrainAllHighConfidence = resolveTrainHasBranch && resolveTrainBits.branches.map { branch =>
+    !branch.valid || (!branch.bits.mispredict && isHighConfidenceBranch(branch.bits, resolveTrainMeta))
+  }.reduce(_ && _)
+
   private val flushTrainCache =
     backendRedirect.valid && trainCache.valid && trainIndexCache > backendRedirect.bits.ftqIdx
 
@@ -372,8 +387,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     trainCache.valid := false.B
   }.elsewhen(resolveQueue.io.bpuTrain.fire) {
     val needFlush = backendRedirect.valid && resolveQueue.io.bpuTrain.bits.ftqIdx > backendRedirect.bits.ftqIdx
-    trainCache.valid     := !needFlush
-    trainCache.bits.meta := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
+    trainCache.valid     := !needFlush && !resolveTrainAllHighConfidence
+    trainCache.bits.meta := resolveTrainMeta
     trainCache.bits.startPcVec.foreach { dup =>
       dup.zipWithIndex.foreach { case (startPc, i) =>
         if (i == 0)
@@ -389,6 +404,11 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }.elsewhen(io.toBpu.train.fire) {
     trainCache.valid := false.B
   }
+
+  XSPerfAccumulate(
+    "dropHighConfidenceTrain",
+    resolveQueue.io.bpuTrain.fire && !flushTrainCache && resolveTrainAllHighConfidence
+  )
 
   io.toBpu.train.valid := trainCache.valid && !flushTrainCache
   io.toBpu.train.bits  := trainCache.bits

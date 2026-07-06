@@ -170,12 +170,13 @@ class MainBtbAlignBank(
     pred.bits.cfiPosition := Cat(s2_posHigherBits, e.position)
     pred.bits.target      := getFullTarget(s2_startPc, e.targetLowerBits, e.targetCarry)
     pred.bits.attribute   := e.attribute
-    pred.bits.taken       := c.isPositive
+    pred.bits.taken       := c.taken.isPositive
 
-    meta.rawHit    := rawHit
-    meta.attribute := e.attribute
-    meta.position  := Cat(s2_posHigherBits, e.position)
-    meta.counter   := c
+    meta.rawHit     := rawHit
+    meta.attribute  := e.attribute
+    meta.position   := Cat(s2_posHigherBits, e.position)
+    meta.counter    := c.taken
+    meta.confidence := c.confidence
   }
 
   // add an alias for hitMask for later use & debug purpose
@@ -262,19 +263,33 @@ class MainBtbAlignBank(
   replacer.io.train.t1_touch.bits.wayMask := t1_entryWayMask
 
   /* *** update counter *** */
-  private val t1_newCounters    = Wire(Vec(NumWay, TakenCounter()))
+  private val t1_newCounters    = Wire(Vec(NumWay, new MainBtbCounterEntry))
   private val t1_counterWayMask = Wire(Vec(NumWay, Bool()))
 
   t1_meta.zipWithIndex.foreach { case (meta, i) =>
-    val hitMask = t1_branches.map { branch =>
+    val confidenceHitMask = t1_branches.map(branch => branch.valid && meta.hit(branch.bits))
+    val condHitMask = t1_branches.map { branch =>
       branch.valid && branch.bits.attribute.isConditional && meta.position === branch.bits.cfiPosition
     }
-    val actualTaken = Mux1H(hitMask, t1_branches.map(_.bits.taken))
+    val hasConfidenceHit = confidenceHitMask.reduce(_ || _)
+    val hasCondHit       = condHitMask.reduce(_ || _)
+    val actualTaken      = Mux1H(condHitMask, t1_branches.map(_.bits.taken))
+    val correct          = Mux1H(confidenceHitMask, t1_branches.map(branch => !branch.bits.mispredict))
 
     val entryOverridden = t1_entryNeedWrite && t1_entryWayMask(i)
+    val initConfidence  = Mux(t1_entry.attribute.isDirect, ConfidenceCounter.SaturatePositive, ConfidenceCounter.Zero)
 
-    t1_counterWayMask(i) := entryOverridden || hitMask.reduce(_ || _)
-    t1_newCounters(i)    := Mux(entryOverridden, TakenCounter.WeakPositive, meta.counter.getUpdate(actualTaken))
+    t1_counterWayMask(i) := entryOverridden || hasCondHit || hasConfidenceHit
+    t1_newCounters(i).taken := Mux(
+      entryOverridden,
+      TakenCounter.WeakPositive,
+      Mux(hasCondHit, meta.counter.getUpdate(actualTaken), meta.counter)
+    )
+    t1_newCounters(i).confidence := Mux(
+      entryOverridden,
+      initConfidence,
+      Mux(hasConfidenceHit, Mux(correct, meta.confidence.getIncrease(), ConfidenceCounter.Zero), meta.confidence)
+    )
   }
 
   // write counter anytime when needed

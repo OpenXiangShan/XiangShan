@@ -32,6 +32,16 @@ object TakenCounter extends SaturateCounterFactory {
     p(XSCoreParamsKey).frontendParameters.bpuParameters.mbtbParameters.TakenCntWidth
 }
 
+object ConfidenceCounter extends SaturateCounterFactory {
+  def width(implicit p: Parameters): Int =
+    p(XSCoreParamsKey).frontendParameters.bpuParameters.mbtbParameters.ConfidenceCntWidth
+}
+
+class MainBtbCounterEntry(implicit p: Parameters) extends MainBtbBundle {
+  val taken:      SaturateCounter = TakenCounter()
+  val confidence: SaturateCounter = ConfidenceCounter()
+}
+
 class MainBtbEntry(implicit p: Parameters) extends MainBtbBundle {
   // whether the entry is valid
   val valid: Bool = Bool()
@@ -61,18 +71,20 @@ class MainBtbEntrySramWriteReq(implicit p: Parameters) extends WriteReqBundle wi
 }
 
 class MainBtbCounterSramWriteReq(implicit p: Parameters) extends MainBtbBundle {
-  val setIdx:   UInt                 = UInt(SetIdxLen.W)
-  val wayMask:  UInt                 = UInt(NumWay.W)
-  val counters: Vec[SaturateCounter] = Vec(NumWay, TakenCounter())
+  val setIdx:   UInt                     = UInt(SetIdxLen.W)
+  val wayMask:  UInt                     = UInt(NumWay.W)
+  val counters: Vec[MainBtbCounterEntry] = Vec(NumWay, new MainBtbCounterEntry)
 }
 
 class MainBtbMetaEntry(implicit p: Parameters) extends MainBtbBundle {
-  val rawHit:    Bool            = Bool()
-  val position:  UInt            = UInt(CfiPositionWidth.W)
-  val attribute: BranchAttribute = new BranchAttribute
-  val counter:   SaturateCounter = TakenCounter()
+  val rawHit:     Bool            = Bool()
+  val position:   UInt            = UInt(CfiPositionWidth.W)
+  val attribute:  BranchAttribute = new BranchAttribute
+  val counter:    SaturateCounter = TakenCounter()
+  val confidence: SaturateCounter = ConfidenceCounter()
 
   def hit(branch: BranchInfo): Bool = rawHit && position === branch.cfiPosition
+  def highConfidence: Bool = confidence.isSaturatePositive
 }
 
 class MainBtbMeta(implicit p: Parameters) extends MainBtbBundle {

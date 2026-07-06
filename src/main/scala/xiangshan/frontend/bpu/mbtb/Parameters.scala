@@ -28,10 +28,11 @@ case class MainBtbParameters(
     WriteBufferSize: Int = 4,
     Replacer:        String = "Lru", // "Lru" or "Plru"
     // Entry config
-    TagWidth:        Int = 16,
-    EnableTargetFix: Boolean = true,
-    TargetWidth:     Int = 20, // 2B aligned
-    TakenCntWidth:   Int = 2,
+    TagWidth:           Int = 16,
+    EnableTargetFix:    Boolean = true,
+    TargetWidth:        Int = 20, // 2B aligned
+    TakenCntWidth:      Int = 2,
+    ConfidenceCntWidth: Int = 3,
     // Mbtb write trace
     EnableMainbtbTrace: Boolean = false
 ) {}
@@ -54,10 +55,11 @@ trait HasMainBtbParameters extends HasBpuParameters {
   def AlignBankIdxLen:    Int = log2Ceil(NumAlignBanks)
 
   // Entry config
-  def TagWidth:        Int     = mbtbParameters.TagWidth
-  def TargetWidth:     Int     = mbtbParameters.TargetWidth
-  def EnableTargetFix: Boolean = mbtbParameters.EnableTargetFix
-  def TakenCntWidth:   Int     = mbtbParameters.TakenCntWidth
+  def TagWidth:           Int     = mbtbParameters.TagWidth
+  def TargetWidth:        Int     = mbtbParameters.TargetWidth
+  def EnableTargetFix:    Boolean = mbtbParameters.EnableTargetFix
+  def TakenCntWidth:      Int     = mbtbParameters.TakenCntWidth
+  def ConfidenceCntWidth: Int     = mbtbParameters.ConfidenceCntWidth
 
   // Used in any aligned-addr-indexed predictor, indicates the position relative to the aligned start addr
   def CfiAlignedPositionWidth: Int = CfiPositionWidth - AlignBankIdxLen
