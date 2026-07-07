@@ -109,20 +109,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   private val s0_wayLookupEntry = VecInit(io.fromWayLookup.bits.wayLookupInfo.map(_.bits.entry))
   private val s0_exceptionInfo  = VecInit(io.fromWayLookup.bits.wayLookupInfo.map(_.bits.exceptionEntry))
-  private val s0_wayMask        = VecInit(s0_wayLookupEntry.map(_.waymask))
-  private val s0_firstBlockRange = Wire(UInt(MaxInstNumPerBlock.W))
-  private val s0_totalBlockRange = Wire(UInt(MaxInstNumPerBlock.W))
-  private val s0_firstFetchSize  = s0_req(0).takenCfiOffset.bits +& 1.U
-  private val s0_secondFetchSize = s0_req(1).takenCfiOffset.bits +& 1.U
-  private val s0_totalFetchSize  = s0_secondFetchSize +& s0_firstFetchSize
-  private val s0_maybeRvcShiftInfo = genMaybeRvcShiftInfo(s0_req, s0_wayLookupEntry, s0_firstFetchSize)
-
-  s0_firstBlockRange := genInstRange(s0_firstFetchSize)
-  s0_totalBlockRange := Mux(
-    s0_req(1).valid,
-    genInstRange(s0_totalFetchSize),
-    s0_firstBlockRange
-  )
+  private val s0_wayMask           = VecInit(s0_wayLookupEntry.map(_.waymask))
+  private val s0_maybeRvcShiftInfo = genMaybeRvcShiftInfo(s0_req, s0_wayLookupEntry)
 
   private val s0_dataSramReadConflict = {
     val reqValid = io.fromFtq.bits.req.map(_.valid).reduce(_ && _)
@@ -212,15 +200,13 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_exceptionInfo  = RegEnable(s0_exceptionInfo, s0_fire)
   private val s1_twoFetchValid  = RegEnable(s0_req(1).valid, s0_fire)
   private val s1_maybeRvcShiftInfo = RegEnable(s0_maybeRvcShiftInfo, s0_fire)
-  private val s1_firstBlockRange   = RegEnable(s0_firstBlockRange, s0_fire)
-  private val s1_totalBlockRange   = RegEnable(s0_totalBlockRange, s0_fire)
+  private val s1_firstBlockRange   = s1_maybeRvcShiftInfo.firstBlockRange
+  private val s1_totalBlockRange   = s1_maybeRvcShiftInfo.totalBlockRange
   private val s1_shiftNum          = s1_maybeRvcShiftInfo.shiftNum
   private val s1_shiftFlag         = s1_maybeRvcShiftInfo.shiftFlag
-  private val s1_shiftMaybeRvcMap  = s1_maybeRvcShiftInfo.shiftMaybeRvcMap
-  private val s1_rangeVec          = s1_maybeRvcShiftInfo.rangeVec
-  private val s1_sramShiftMaybeRvc =
-    shiftSramMaybeRvcVec(s1_shiftMaybeRvcMap, s1_shiftNum, s1_shiftFlag, secondShift = true)
-
+  // rangeVec is used to mask the range for every cache line
+  private val s1_maybeRvcMaskVec   = s1_maybeRvcShiftInfo.maybeRvcMaskVec
+  private val s1_sramShiftMaybeRvc = s1_maybeRvcShiftInfo.sramShiftMaybeRvc
 
   private val s1_wayMask     = VecInit(s1_wayLookupEntry.map(_.waymask))
   private val s1_isCrossLine = VecInit(s1_wayLookupEntry.map(_.isCrossLine))
@@ -269,6 +255,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   })
   private val s1_mshrDatas       = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))
   private val s1_mshrMaybeRvcMap = fromMiss.bits.maybeRvcMap
+
+  // MSHR returns one raw cache-line maybeRvcMap, so align it in one step according to
+  // the hit request and line. This mirrors the four SRAM alignment cases without the
+  // s0/s1 fine/coarse split.
   private val s1_shiftMshrMaybeRvc = Wire(UInt(MaxInstNumPerBlock.W))
   s1_shiftMshrMaybeRvc := Mux(
     s1_mshrValid(0).reduce(_ || _),
@@ -423,17 +413,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   io.toIfu.req.valid := s1_valid && s1_fetchFinish && !s1_flush
   io.toIfu.req.bits.maybeRvcMap :=
-    (s1_maybeRvcMapVec(0)(0) & s1_rangeVec(0)) |
-      (s1_maybeRvcMapVec(0)(1) & s1_rangeVec(1)) |
-      (s1_maybeRvcMapVec(1)(0) & s1_rangeVec(2)) |
-      (s1_maybeRvcMapVec(1)(1) & s1_rangeVec(3))
-  io.toIfu.req.bits.range  := s1_totalBlockRange
+    s1_maybeRvcMapVec.flatten.zip(s1_maybeRvcMaskVec.flatten).map { case (a, b) => a & b }.reduce(_ | _)
+  io.toIfu.req.bits.firstRange := s1_firstBlockRange
+  io.toIfu.req.bits.totalRange := s1_totalBlockRange
   io.toIfu.req.bits.info.zipWithIndex.foreach { case (req, i) =>
     req.valid            := s1_req(i).valid
     req.startVAddr       := s1_req(i).startVAddr
     req.ftqIdx           := s1_req(i).ftqIdx
     req.takenCfiOffset   := s1_req(i).takenCfiOffset
-    // req.range            := s1_totalBlockRange
     req.size             := s1_req(i).takenCfiOffset.bits +& 1.U
     req.data             := s1_data(i)
     req.maybeRvcMap      := s1_maybeRvcMap(i)
