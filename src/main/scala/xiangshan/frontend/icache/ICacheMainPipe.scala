@@ -28,9 +28,8 @@ import utility.XSPerfHistogram
 import xiangshan.L1CacheErrorInfo
 import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
-import xiangshan.cache.mmu.ValidHoldBypass
 import xiangshan.frontend.ExceptionType
-import xiangshan.frontend.FetchRequestBundle
+import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.BpuFlushInfo
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
@@ -59,7 +58,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     // Ifu
     val toIfu: MainPipeToIfuIO = new MainPipeToIfuIO
     // backend/Beu
-    val errors: Vec[Valid[L1CacheErrorInfo]] = Output(Vec(PortNumber, ValidIO(new L1CacheErrorInfo)))
+    val error: Valid[L1CacheErrorInfo] = Output(ValidIO(new L1CacheErrorInfo))
 
     val perf: MainPipePerfInfo = Output(new MainPipePerfInfo)
   }
@@ -89,9 +88,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   )
 
   /* *** pipeline control signal *** */
-  private val s1_ready           = Wire(Bool())
-  private val s0_fire, s1_fire   = Wire(Bool())
-  private val s0_flush, s1_flush = Wire(Bool())
+  private val s1_ready                     = Wire(Bool())
+  private val s0_fire, s1_fire             = Wire(Bool())
+  private val s0_flush, s1_flush, s2_flush = Wire(Bool())
 
   /* ICache Stage 0
    * - send req to data SRAM
@@ -132,7 +131,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
    * - Pmp check (to be removed)
    * - get Data Sram read responses (latched for pipeline stop)
    * - monitor missUnit response port
-   * - Ecc check
    * - send request to Mshr if ICache miss
    * - response to Ifu
    */
@@ -157,8 +155,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   private val s1_sramHits = VecInit((0 until MaxFetchReqNum).map(i => VecInit(s1_wayMask(i).map(_.orR))))
 
-  private val s1_sramDatas = fromData.map(_.datas)
-  private val s1_sramCodes = fromData.map(_.codes)
+  private val s1_sramDatas = VecInit(fromData.map(_.datas))
+  private val s1_sramCodes = VecInit(fromData.map(_.codes))
 
   private val s1_sramRespValid = RegNext(s0_fire)
   private val s1_lineValid = VecInit((0 until MaxFetchReqNum).map { i =>
@@ -272,88 +270,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   // merge s1 itlb/pmp exceptions, itlb has the highest priority, pmp next, note this `||` is overloaded
   private val s1_exception = s1_exceptionInfo(0).itlbException || s1_pmpException
 
-  /* *** Ecc check *** */
-  private val s1_metaCorrupt =
-    checkMetaEcc(
-      VecInit(s1_wayLookupEntry(0).maybeRvcMap.map(rvc => ICacheMetadata(s1_pTag, rvc))),
-      s1_wayLookupEntry(0).metaCodes,
-      s1_wayMask(0),
-      eccEnable,
-      s1_req(0).isCrossLine
-    )
-
-  // valid only when RegNext(s0_fire)
-  // check data error
-  private val s1_dataCorrupt = checkDataEcc(
-    s1_sramDatas(0),
-    s1_sramCodes(0),
-    eccEnable,
-    getBankSel(s1_offset(0), s1_valid, s1_req(0).isCrossLine),
-    s1_bankSramValid(0),
-    s1_sramHits(0)
-  )
-
-  /* NOTE: if !s1_doubleline:
-   * - s1_meta_corrupt(1) should be false.B (as waymask(1) is invalid, and meta ecc is not checked)
-   * - s1_data_corrupt(1) should also be false.B, as getLineSel() should not select line(1)
-   * so we don't need to check s2_doubleline in the following io.errors and toMetaFlush ports
-   * we add a sanity check to make sure the above assumption holds
-   */
-  when(s1_valid) {
-    assert(
-      !(!s1_req(0).isCrossLine && (s1_metaCorrupt(1) || s1_dataCorrupt(1))),
-      "meta or data corrupt detected on line 1 but s2_doubleline is false.B"
-    )
-  }
-
-  private val s1_vAddr = VecInit(s1_req.flatMap(req => Seq(req.startVAddr, req.nextLineVAddr)))
+  private val s1_vAddr = VecInit(s1_req.flatMap(req => req.vAddr))
   dontTouch(s1_vAddr)
-
-  // send errors to top
-  // TODO: support RERI spec standard interface
-  (0 until PortNumber).foreach { i =>
-    io.errors(i).valid              := (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire)
-    io.errors(i).bits.report_to_beu := (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire)
-    io.errors(i).bits.paddr         := getPAddrFromPTag(s1_vAddr(i), s1_pTag).toUInt // FIXME
-    io.errors(i).bits.source        := DontCare
-    io.errors(i).bits.source.tag    := s1_metaCorrupt(i)
-    io.errors(i).bits.source.data   := s1_dataCorrupt(i)
-    io.errors(i).bits.source.l2     := false.B
-    io.errors(i).bits.opType        := DontCare
-    io.errors(i).bits.opType.fetch  := true.B
-  }
-
-  // If EnableCorruptRefetch, flush metaArray to prepare for re-fetch
-  toMetaFlush.zipWithIndex.foreach { case (flush, i) =>
-    if (EnableCorruptRefetch) {
-      flush.valid        := (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire)
-      flush.bits.vSetIdx := s1_req(0).vSetIdx(i) // FIXME
-      // if is meta corrupt, clear all way (since waymask may be unreliable)
-      // if is data corrupt, only clear the way that has error
-      flush.bits.waymask := Mux(s1_metaCorrupt(i), Fill(nWays, true.B), s1_wayMask(0)(i))
-    } else {
-      flush.valid := false.B
-      flush.bits  := DontCare
-    }
-  }
-
-  // PERF: count the number of data parity errors
-  XSPerfAccumulate("data_corrupt_0", s1_dataCorrupt(0) && RegNext(s0_fire))
-  XSPerfAccumulate("data_corrupt_1", s1_dataCorrupt(1) && RegNext(s0_fire))
-  XSPerfAccumulate("meta_corrupt_0", s1_metaCorrupt(0) && RegNext(s0_fire))
-  XSPerfAccumulate("meta_corrupt_1", s1_metaCorrupt(1) && RegNext(s0_fire))
-
-  // If enable CorruptRefetch, set s1_shouldFetch flag according to ecc check result, otherwise always false
-  private val s1_corruptRefetch = VecInit((0 until PortNumber).map { i =>
-    if (EnableCorruptRefetch)
-      ValidHoldBypass(
-        (s1_metaCorrupt(i) || s1_dataCorrupt(i)) && RegNext(s0_fire),
-        s1_mshrValid(0)(i), // clear re-fetch flag when re-fetched from mshr
-        s1_flush
-      )
-    else
-      false.B
-  })
 
   /* *** Fetch when miss or corrupt *** */
   // do not fetch if is mmio
@@ -361,8 +279,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   private val s1_shouldFetch = VecInit((0 until MaxFetchReqNum).flatMap { reqIdx =>
     (0 until PortNumber).map { portIdx =>
-      val needCorruptRefetch = if (reqIdx == 0) s1_corruptRefetch(portIdx) else false.B
-      (!s1_hits(reqIdx)(portIdx) || needCorruptRefetch) &&
+      !s1_hits(reqIdx)(portIdx) &&
       s1_lineValid(reqIdx)(portIdx) &&
       s1_exception.isNone && !s1_isMmio
     }
@@ -407,16 +324,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       ExceptionType.fromTileLink(realCorrupt, realDenied, canAssert)
     }.reduce(_ || _)
 
-  // If EnableCorruptRefetch, no need to raise exception as it's been auto-recovered by re-fetching from L2
-  // otherwise, raise Hardware Error Exception
-  private val s1_eccException =
-    if (EnableCorruptRefetch)
-      ExceptionType.None
-    else
-      ExceptionType.fromEcc(s1_metaCorrupt.reduce(_ || _) || s1_dataCorrupt.reduce(_ || _), s1_valid)
-
   // merge all exceptions, itlb/pmp has the highest priority, then l2/ecc
-  private val s1_exceptionOut = s1_exception || s1_tlException || s1_eccException
+  private val s1_exceptionOut = s1_exception || s1_tlException
 
   io.toIfu.req.valid := s1_valid && s1_fetchFinish && !s1_flush
   io.toIfu.req.bits.zipWithIndex.foreach { case (req, i) =>
@@ -441,6 +350,116 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   s1_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s1_ftqIdx, s1_valid)
   s1_ready := (s1_fetchFinish && io.toIfu.req.ready) || !s1_valid
   s1_fire  := s1_valid && s1_fetchFinish && io.toIfu.req.ready && !s1_flush
+
+  /* ICache Stage 2
+   * - Ecc check
+   * - response to Ifu
+   * - redirect if EnableCorruptRefetch (TODO)
+   */
+  // NOTE: s2 is used only for parity check, this s2_valid is used for assertion etc.,
+  //       the actual s2_valid is controlled in Ifu, so we don't need an accurate s2_fire here.
+  //       also, s1_fire does not need to consider s2_ready, the actual s2_ready is io.toIfu.req.ready.
+  private val s2_valid          = ValidHold(s1_fire, false.B, s2_flush)
+  private val s2_wayLookupEntry = RegEnable(s1_wayLookupEntry, s1_fire)
+  private val s2_pTag           = RegEnable(s1_pTag, s1_fire)
+  private val s2_wayMask        = RegEnable(s1_wayMask, s1_fire)
+  private val s2_req            = RegEnable(s1_req, s1_fire)
+  private val s2_sramDatas      = RegEnable(s1_sramDatas, s1_fire)
+  private val s2_sramCodes      = RegEnable(s1_sramCodes, s1_fire)
+  private val s2_offset         = RegEnable(s1_offset, s1_fire)
+  private val s2_bankSramValid  = RegEnable(s1_bankSramValid, s1_fire)
+  private val s2_sramHits       = RegEnable(s1_sramHits, s1_fire)
+
+  // make corrupt-related info as a bundle for easier selection
+  private class CorruptedInfo extends Bundle {
+    val vAddr:   PrunedAddr = PrunedAddr(VAddrBits)
+    val wayMask: UInt       = UInt(wayBits.W)
+    val isMeta:  Bool       = Bool()
+    val isData:  Bool       = Bool()
+
+    def vSetIdx: UInt = get_idx(vAddr)
+  }
+  private val s2_corruptInfo = VecInit((0 until MaxFetchReqNum).map { reqIdx =>
+    val metaCorrupt = checkMetaEcc(
+      VecInit(s2_wayLookupEntry(reqIdx).maybeRvcMap.map(rvc => ICacheMetadata(s2_pTag, rvc))),
+      s2_wayLookupEntry(reqIdx).metaCodes,
+      s2_wayMask(reqIdx),
+      eccEnable,
+      s2_req(reqIdx).isCrossLine
+    )
+
+    val dataCorrupt = checkDataEcc(
+      s2_sramDatas(reqIdx),
+      s2_sramCodes(reqIdx),
+      eccEnable,
+      getBankSel(s2_offset(reqIdx), s2_valid, s2_req(reqIdx).isCrossLine),
+      s2_bankSramValid(reqIdx),
+      s2_sramHits(reqIdx)
+    )
+
+    /* NOTE: if !s2_isCrossLine:
+     * - s2_metaCorrupt(1) should be false.B (as waymask(1) is invalid, and meta ecc is not checked)
+     * - s2_dataCorrupt(1) should also be false.B, as getLineSel() should not select line(1)
+     * so we don't need to check s2_isCrossLine in the following io.errors and toMetaFlush ports
+     * we add a sanity check to make sure the above assumption holds
+     */
+    when(s2_valid) {
+      assert(
+        !(!s2_req(reqIdx).isCrossLine && (metaCorrupt(1) || dataCorrupt(1))),
+        "meta or data corrupt detected on line 1 but s2_isCrossLine is false.B"
+      )
+    }
+
+    VecInit((0 until PortNumber).map { portIdx =>
+      // send result to Ifu, Ifu only use this 1 cycle after toIfu.req.fire, no need for a valid control
+      io.toIfu.corrupt(reqIdx)(portIdx) := metaCorrupt(portIdx) || dataCorrupt(portIdx)
+
+      val info = Wire(Valid(new CorruptedInfo))
+      info.valid        := metaCorrupt(portIdx) || dataCorrupt(portIdx)
+      info.bits.vAddr   := s2_req(reqIdx).vAddr(portIdx)
+      info.bits.wayMask := s2_wayMask(reqIdx)(portIdx)
+      info.bits.isMeta  := metaCorrupt(portIdx)
+      info.bits.isData  := dataCorrupt(portIdx)
+      info
+    })
+  })
+
+  // If EnableCorruptRefetch, flush metaArray to prepare for re-fetch
+  // metaArray supports 2 interleaved flush req, so here we select the first corrupted req and flush its 2 ports
+  private val s2_firstCorruptReqInfo = PriorityMux(s2_corruptInfo.map { info =>
+    info.map(_.valid).reduce(_ || _) -> info
+  })
+  (toMetaFlush zip s2_firstCorruptReqInfo).foreach { case (flush, info) =>
+    if (EnableCorruptRefetch) {
+      flush.valid        := info.valid && RegNext(s1_fire)
+      flush.bits.vSetIdx := info.bits.vSetIdx
+      // if is meta corrupt, clear all way (since waymask may be unreliable)
+      // if is data corrupt, only clear the way that has error
+      flush.bits.waymask := Mux(info.bits.isMeta, Fill(nWays, true.B), info.bits.wayMask)
+    } else {
+      flush.valid := false.B
+      flush.bits  := DontCare
+    }
+  }
+
+  // TODO: send frontend redirect to do re-fetch
+  if (EnableCorruptRefetch) {
+    println("Warn: ICache corrupt re-fetch is being rewritten, not working now")
+  }
+
+  // BEU supports only 1 error report per cycle, so here we just select the first port in the first req
+  private val s2_firstCorruptPortInfo = PriorityMux(s2_firstCorruptReqInfo.map(info => info.valid -> info))
+  io.error.valid              := s2_firstCorruptPortInfo.valid && RegNext(s1_fire)
+  io.error.bits.report_to_beu := s2_firstCorruptPortInfo.valid && RegNext(s1_fire)
+  io.error.bits.paddr         := getPAddrFromPTag(s2_firstCorruptPortInfo.bits.vAddr, s2_pTag).toUInt
+  io.error.bits.source        := DontCare
+  io.error.bits.source.tag    := s2_firstCorruptPortInfo.bits.isMeta
+  io.error.bits.source.data   := s2_firstCorruptPortInfo.bits.isData
+  io.error.bits.source.l2     := false.B
+  io.error.bits.opType        := DontCare
+  io.error.bits.opType.fetch  := true.B
+
+  s2_flush := io.flush
 
   /* *** perf *** */
   // when fired, tell ifu raw hit state of each cache line

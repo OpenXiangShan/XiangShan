@@ -95,9 +95,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val uncacheRvcExpander = Module(new RvcExpander)
 
   // alias
-  private val (toFtq, fromFtq)         = (io.toFtq, io.fromFtq)
-  private val fromICache               = io.fromICache.req
-  private val (toUncache, fromUncache) = (io.toUncache.req, io.fromUncache.resp)
+  private val (toFtq, fromFtq) = (io.toFtq, io.fromFtq)
   private val (checkerIn, checkerOutStage1, checkerOutStage2) =
     (predChecker.io.req, predChecker.io.resp.stage1Out, predChecker.io.resp.stage2Out)
 
@@ -127,7 +125,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   s0_fire := s0_valid && s1_ready && !s0_flush
 
-  fromICache.ready := s1_ready || s0_flush
+  io.fromICache.req.ready := s1_ready || s0_flush
 
   private val s0_fetchBlock = VecInit(io.fromICache.req.bits.map(req => Wire(new FetchBlock).fromICacheReq(req)))
 
@@ -261,10 +259,20 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_firstEndIsHalfRvi = RegEnable(s0_firstEndIsHalfRvi, s0_fire)
   private val s1_totalEndIsHalfRvi = RegEnable(s0_fixedTotalEndIsHalfRvi, s0_fire)
 
-  private val s1_instrData   = RegEnable(s0_icacheData.data, s0_fire)
-  private val s1_totalEndPos = RegEnable(s0_fixedTotalEndPos, s0_fire)
-  private val s1_icacheMeta  = RegEnable(s0_icacheMeta, s0_fire)
-  private val s1_instrVec    = RegEnable(s0_realInstrVec, s0_fire)
+  private val s1_instrData    = RegEnable(s0_icacheData.data, s0_fire)
+  private val s1_totalEndPos  = RegEnable(s0_fixedTotalEndPos, s0_fire)
+  private val s1_icacheMetaIn = RegEnable(s0_icacheMeta, s0_fire)
+  private val s1_instrVec     = RegEnable(s0_realInstrVec, s0_fire)
+
+  // ICache mainPipe send parity check result 1 cycle after io.fromICache.req.fire, here merge into icacheMeta.
+  // for better timing.
+  private val s1_icacheMeta = WireDefault(s1_icacheMetaIn)
+  s1_icacheMeta.zipWithIndex.foreach { case (meta, i) =>
+    meta.exception := s1_icacheMetaIn(i).exception || ExceptionType.fromEcc(
+      io.fromICache.corrupt(i).reduce(_ || _), // FIXME: consider which cacheline is corrupted, and modify exceptionMask
+      s1_valid
+    )
+  }
 
   private val s1_predTakenMask = VecInit((0 until FetchPorts).map { i =>
     Mux(
@@ -757,7 +765,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     ("miss_0_miss_1                ", io.toIBuffer.fire && s2_icachePerfInfo.miss0Miss1)
   )
   generatePerfEvent()
-  perfAnalyzer.io.ifuPerfCtrl.fromFtqBubble    := !fromICache.valid && fromICache.ready
+  perfAnalyzer.io.ifuPerfCtrl.fromFtqBubble    := !io.fromICache.req.valid && io.fromICache.req.ready
   perfAnalyzer.io.ifuPerfCtrl.backendRedirect  := backendRedirect
   perfAnalyzer.io.ifuPerfCtrl.ifuWbRedirect    := wbRedirect.valid
   perfAnalyzer.io.ifuPerfCtrl.fromBpuFlush     := s0_flushFromBpu
