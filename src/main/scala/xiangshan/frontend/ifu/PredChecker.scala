@@ -138,31 +138,30 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
       mispredIdx.valid &&
       (pdInfoVec(mispredIdx.bits).isJal || pdInfoVec(mispredIdx.bits).isBr)
 
-  private val finalIsRVC        = instrVec(mispredIdx.bits).isRvc
-  private val finalInvalidTaken = invalidTaken(mispredIdx.bits)
-  private val finalNotCfiTaken  = notCfiTaken(mispredIdx.bits)
-  private val finalBlockSel     = instrVec(mispredIdx.bits).blockSel
-  private val finalPc           = instrPcVec(mispredIdx.bits)
-  private val finalAttribute    = pdInfoVec(mispredIdx.bits).brAttribute
-  private val fixedTaken        = fixedTakenVec(mispredIdx.bits)
+  private val finalIsRVC             = instrVec(mispredIdx.bits).isRvc
+  private val finalInvalidTaken      = invalidTaken(mispredIdx.bits)
+  private val finalNotCfiTaken       = notCfiTaken(mispredIdx.bits)
+  private val finalBlockSel          = instrVec(mispredIdx.bits).blockSel
+  private val finalPc                = instrPcVec(mispredIdx.bits)
+  private val finalAttribute         = pdInfoVec(mispredIdx.bits).brAttribute
+  private val fixedTaken             = fixedTakenVec(mispredIdx.bits)
   private val finalIsCrossBlockInstr = instrVec(mispredIdx.bits).isCrossBlockInstr
 
   // The actual end of the prediction block is the instruction before invalidTaken.
   private val endOffset = endOffsetVec(mispredIdx.bits)
 
-  private val mispredIdxNext       = RegEnable(mispredIdx, io.req.valid)
-  private val finalIsRVCNext       = RegEnable(finalIsRVC, io.req.valid)
-  private val finalAttributeNext   = RegEnable(finalAttribute, io.req.valid)
-  private val invalidTakenNext     = RegEnable(finalInvalidTaken, io.req.valid)
-  private val notCfiTakenNext      = RegEnable(finalNotCfiTaken, io.req.valid)
-  private val finalSelectBlockNext = RegEnable(finalSelectBlock, io.req.valid)
-  private val jumpTargetsNext      = RegEnable(jumpTargets, io.req.valid)
-  private val seqTargetsNext       = RegEnable(seqTargets, io.req.valid)
-  private val fixedIsJumpNext      = RegEnable(fixedIsJump, io.req.valid)
-  private val endOffsetNext        = RegEnable(endOffset, io.req.valid)
-  private val finalPcNext          = RegEnable(finalPc, io.req.valid)
-  private val fixedTakenNext       = RegEnable(fixedTaken, io.req.valid)
-  private val finalBlockSelNext    = RegEnable(finalBlockSel, io.req.valid)
+  private val mispredIdxNext             = RegEnable(mispredIdx, io.req.valid)
+  private val finalIsRVCNext             = RegEnable(finalIsRVC, io.req.valid)
+  private val finalAttributeNext         = RegEnable(finalAttribute, io.req.valid)
+  private val invalidTakenNext           = RegEnable(finalInvalidTaken, io.req.valid)
+  private val notCfiTakenNext            = RegEnable(finalNotCfiTaken, io.req.valid)
+  private val jumpTargetsNext            = RegEnable(jumpTargets, io.req.valid)
+  private val seqTargetsNext             = RegEnable(seqTargets, io.req.valid)
+  private val fixedIsJumpNext            = RegEnable(fixedIsJump, io.req.valid)
+  private val endOffsetNext              = RegEnable(endOffset, io.req.valid)
+  private val finalPcNext                = RegEnable(finalPc, io.req.valid)
+  private val fixedTakenNext             = RegEnable(fixedTaken, io.req.valid)
+  private val finalBlockSelNext          = RegEnable(finalBlockSel, io.req.valid)
   private val finalIsCrossBlockInstrNext = RegEnable(finalIsCrossBlockInstr, io.req.valid)
   private val wbValid                    = RegNext(io.req.valid, init = false.B)
 
@@ -172,13 +171,13 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
     seqTargetsNext(mispredIdxNext.bits)
   )
 
-  io.resp.stage2Out.checkerRedirect.valid             := mispredIdxNext.valid && wbValid
-  io.resp.stage2Out.checkerRedirect.bits.target       := fixedTarget
-  io.resp.stage2Out.checkerRedirect.bits.misIdx       := mispredIdxNext
-  io.resp.stage2Out.checkerRedirect.bits.taken        := fixedTakenNext
-  io.resp.stage2Out.checkerRedirect.bits.isRVC        := finalIsRVCNext
-  io.resp.stage2Out.checkerRedirect.bits.attribute    := Mux(invalidTakenNext, BranchAttribute.None, finalAttributeNext)
-  io.resp.stage2Out.checkerRedirect.bits.blockSel          := finalBlockSelNext
+  io.resp.stage2Out.checkerRedirect.valid          := mispredIdxNext.valid && wbValid
+  io.resp.stage2Out.checkerRedirect.bits.target    := fixedTarget
+  io.resp.stage2Out.checkerRedirect.bits.misIdx    := mispredIdxNext
+  io.resp.stage2Out.checkerRedirect.bits.taken     := fixedTakenNext
+  io.resp.stage2Out.checkerRedirect.bits.isRVC     := finalIsRVCNext
+  io.resp.stage2Out.checkerRedirect.bits.attribute := Mux(invalidTakenNext, BranchAttribute.None, finalAttributeNext)
+  io.resp.stage2Out.checkerRedirect.bits.blockSel  := finalBlockSelNext
   io.resp.stage2Out.checkerRedirect.bits.isCrossBlockInstr := finalIsCrossBlockInstrNext
   io.resp.stage2Out.checkerRedirect.bits.invalidTaken := invalidTakenNext
   io.resp.stage2Out.checkerRedirect.bits.notCfiTaken  := notCfiTakenNext
