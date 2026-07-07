@@ -42,7 +42,7 @@ import xiangshan.backend.trace.{Itype, TraceCoreInterface}
 import xiangshan.backend.{BackendToTopBundle, TopToBackendBundle}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.vector.VecIssueQueue
-import xiangshan.backend.vector.vagq.VAGQ
+import xiangshan.backend.vector.vagq._
 import xiangshan.cache._
 import xiangshan.cache.mmu._
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
@@ -512,7 +512,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val stdExeUnits = Seq.tabulate(StdCnt)(i => Module(new StdExeUnit(stdParams(i))))
   val atomicsUnit = Module(new AtomicsUnit(mouParam))
   val vagq = Module(new VAGQ)
-  val vagqDownstream = Module(new VAGQDownstreamAdapter(ldaParams))
+  val vagqDownstream = Module(new VAGQDownstreamAdapter(ldaParams, staParams, stdParams))
 
   // exceptionInfoGen
   val exceptionInfoGen = Module(new ExceptionInfoGen)
@@ -946,7 +946,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   for (i <- 0 until StdCnt) {
     stdExeUnits(i).io.flush <> redirect
     stdExeUnits(i).io.in <> issueStd(i)
-    stdExeUnits(i).io.vstdIn := vstdStoreData(i)
+    vagqDownstream.io.stdDataBusy(i) := vstdStoreData(i).valid
+    stdExeUnits(i).io.vstdIn := Mux(vagqDownstream.io.vagqStdData(i).valid, vagqDownstream.io.vagqStdData(i), vstdStoreData(i))
     lsq.io.std.storeDataIn(i) := stdExeUnits(i).io.sqData
   }
 
@@ -956,8 +957,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stu.io.redirect      <> redirect
     stu.io.dcache        <> dcache.io.lsu.sta(i)
     stu.io.feedBackSlow  <> io.mem_to_ooo.staIqFeedback(i).feedbackSlow
-    stu.io.stin          <> issueSta(i)
-    stu.io.vagqReqMeta   := 0.U.asTypeOf(stu.io.vagqReqMeta)
+    vagqDownstream.io.issueSta(i) <> issueSta(i)
+    stu.io.stin          <> vagqDownstream.io.staReq(i)
+    stu.io.vagqReqMeta   := vagqDownstream.io.staReqMeta(i)
+    if (i < VAGQConstants.StaRespWidth) {
+      vagqDownstream.io.staResp(i) := stu.io.vagqResp
+    }
     stu.io.toSqAddr      <> lsq.io.sta.storeAddrIn(i)
     stu.io.toSqAddrRe    <> lsq.io.sta.storeAddrInRe(i)
     stu.io.toUnalignQueue <> lsq.io.sta.unalignQueueReq(i)
