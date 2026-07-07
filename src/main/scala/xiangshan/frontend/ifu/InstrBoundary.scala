@@ -41,14 +41,13 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
   val io: InstrBoundaryIO = IO(new InstrBoundaryIO)
 
   private val index    = io.req.ifuData.index
-  private val range    = io.req.ifuData.range
   private val maybeRvc = io.req.ifuData.maybeRvcMap
   private val blockSel = io.req.ifuData.blockSel
 
   // We compute the boundaries of instructions in the first half of the fetch block directly, and compute the boundaries
   // of instructions in the latter half in two cases in parallel. Then we can choose the correct case according to
   // whether the last instruction in the first half is a 16-bit instruction or not.
-  private val boundary = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
+  private val boundary            = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
   private val latterHalfBoundary1 = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
   private val latterHalfBoundary2 = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))
 
@@ -94,7 +93,7 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
       if (i == 0)
         io.req.firstInstrIsHalfRvi || isStart
       else isStart
-    } && range(i)
+    }
 
     instr.index := index(i)
     instr.data  := 0.U
@@ -125,15 +124,15 @@ class InstrBoundary(implicit p: Parameters) extends IfuModule with PreDecodeHelp
     instr
   }
 
-  io.resp.instrEndMask := boundary.zip(maybeRvc.asBools).zip(range.asBools).map { case ((boundary, isRvc), range) =>
-    (!boundary || (boundary && isRvc)) && range
+  io.resp.instrEndMask := boundary.zip(maybeRvc.asBools).map { case (boundary, isRvc) =>
+    !boundary || (boundary && isRvc)
   }
 
   private val firstEndPos = io.req.fetchBlock(0).takenCfiOffset.bits
-  io.resp.firstEndIsHalfRvi := range(firstEndPos) && boundary(firstEndPos) && !maybeRvc(firstEndPos)
+  io.resp.firstEndIsHalfRvi := boundary(firstEndPos) && !maybeRvc(firstEndPos)
 
   private val totalEndPos = io.req.totalEndPos
-  io.resp.totalEndIsHalfRvi := range(totalEndPos) && boundary(totalEndPos) && !maybeRvc(totalEndPos)
+  io.resp.totalEndIsHalfRvi := boundary(totalEndPos) && !maybeRvc(totalEndPos)
 
   // For differential test only. Will be optimized out in release
   private val boundDiff = WireInit(VecInit(Seq.fill(FetchBlockInstNum)(false.B)))

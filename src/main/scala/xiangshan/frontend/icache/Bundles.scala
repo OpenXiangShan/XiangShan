@@ -76,10 +76,13 @@ class MetaInfo(implicit p: Parameters) extends ICacheBundle {
 }
 
 class MaybeRvcShiftInfo(implicit p: Parameters) extends ICacheBundle {
-  val shiftNum:         Vec[UInt] = Vec(MaxFetchLineNum, UInt(log2Ceil(MaxInstNumPerBlock).W))
-  val shiftFlag:        Bool      = Bool()
-  val shiftMaybeRvcMap: Vec[UInt] = Vec(MaxFetchLineNum, UInt(MaxInstNumPerBlock.W))
-  val rangeVec:         Vec[UInt] = Vec(MaxFetchLineNum, UInt(MaxInstNumPerBlock.W))
+  val shiftNum:          Vec[UInt]      = Vec(MaxFetchLineNum, UInt(log2Ceil(MaxInstNumPerBlock).W))
+  val shiftFlag:         Bool           = Bool()
+  val firstBlockRange:   UInt           = UInt(MaxInstNumPerBlock.W)
+  val totalBlockRange:   UInt           = UInt(MaxInstNumPerBlock.W)
+  val sramShiftMaybeRvc: Vec[Vec[UInt]] = Vec(MaxFetchReqNum, Vec(PortNumber, UInt(MaxInstNumPerBlock.W)))
+  val maybeRvcMaskVec:   Vec[Vec[UInt]] = Vec(MaxFetchReqNum, Vec(PortNumber, UInt(MaxInstNumPerBlock.W)))
+  val takenCfiOffset:    Vec[UInt]      = Vec(MaxFetchReqNum, UInt(CfiPositionWidth.W))
 }
 
 /* ***** Array write ***** */
@@ -230,9 +233,9 @@ class FetchBlocktoIfuReq(implicit p: Parameters) extends ICacheBundle {
   val ftqIdx:         FtqPtr      = new FtqPtr
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
   // val range:          UInt        = UInt(FetchBlockInstNum.W)
-  val size:           UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
+  val size: UInt = UInt(log2Ceil(FetchBlockInstNum + 1).W)
 
-  val data:        UInt = UInt(blockBits.W)
+  val data: UInt = UInt(blockBits.W)
   // val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
 
   val icacheMeta: ICacheMeta = new ICacheMeta
@@ -241,9 +244,10 @@ class FetchBlocktoIfuReq(implicit p: Parameters) extends ICacheBundle {
 }
 
 class MainPipeToIfuReq(implicit p: Parameters) extends ICacheBundle {
-  val range:       UInt = UInt(FetchBlockInstNum.W)
-  val maybeRvcMap: UInt = UInt(MaxInstNumPerBlock.W)
-  val info: Vec[FetchBlocktoIfuReq] = Vec(FetchPorts, new FetchBlocktoIfuReq)
+  val firstRange:  UInt                    = UInt(FetchBlockInstNum.W)
+  val totalRange:  UInt                    = UInt(FetchBlockInstNum.W)
+  val maybeRvcMap: UInt                    = UInt(MaxInstNumPerBlock.W)
+  val info:        Vec[FetchBlocktoIfuReq] = Vec(FetchPorts, new FetchBlocktoIfuReq)
 }
 
 class MainPipeToIfuIO(implicit p: Parameters) extends ICacheBundle {

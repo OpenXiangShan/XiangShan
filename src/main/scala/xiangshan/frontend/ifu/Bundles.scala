@@ -26,9 +26,9 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ibuffer.IBufPtr
+import xiangshan.frontend.icache.FetchBlocktoIfuReq
 import xiangshan.frontend.icache.HasICacheParameters
 import xiangshan.frontend.icache.MainPipeToIfuReq
-import xiangshan.frontend.icache.FetchBlocktoIfuReq
 
 /* ***
  * Naming:
@@ -58,6 +58,12 @@ class LastHalfEntry(implicit p: Parameters) extends IfuBundle {
   val middlePC: PrunedAddr = PrunedAddr(VAddrBits)
 }
 
+class EndHalfRviInfo(implicit p: Parameters) extends IfuBundle {
+  val isHalfRvi: Bool       = Bool()
+  val pc:        PrunedAddr = PrunedAddr(VAddrBits)
+  val data:      UInt       = UInt(16.W)
+}
+
 class InstrIndexEntry(implicit p: Parameters) extends IfuBundle {
   val valid: Bool = Bool()
   val value: UInt = UInt(log2Ceil(ICacheLineBytes / 2).W)
@@ -69,17 +75,17 @@ class FetchBlock(implicit p: Parameters) extends IfuBundle {
   val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
   val takenCfiOffset: Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
   // val range:          UInt        = UInt(FetchBlockInstNum.W)
-  val size:           UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
+  val size: UInt = UInt(log2Ceil(FetchBlockInstNum + 1).W)
 
   val pcUpperBitsPlus1: UInt = UInt((VAddrBits - PcCutPoint).W)
 
   def pcUpperBits: UInt = startVAddr(VAddrBits - 1, PcCutPoint)
 
   def fromICacheReq(req: FetchBlocktoIfuReq): FetchBlock = {
-    valid            := req.valid
-    ftqIdx           := req.ftqIdx
-    startVAddr       := req.startVAddr
-    takenCfiOffset   := req.takenCfiOffset
+    valid          := req.valid
+    ftqIdx         := req.ftqIdx
+    startVAddr     := req.startVAddr
+    takenCfiOffset := req.takenCfiOffset
     // range            := req.range
     size             := req.size
     pcUpperBitsPlus1 := req.startVAddr(VAddrBits - 1, PcCutPoint) + 1.U
@@ -89,13 +95,12 @@ class FetchBlock(implicit p: Parameters) extends IfuBundle {
 class IfuData(implicit p: Parameters) extends IfuBundle with HasICacheParameters {
   val index:       Vec[UInt] = Vec(FetchBlockInstNum, UInt(log2Ceil(FetchBlockInstNum).W))
   val maybeRvcMap: UInt      = UInt(FetchBlockInstNum.W)
-  val range:       UInt      = UInt(FetchBlockInstNum.W)
+  val firstRange:  UInt      = UInt(FetchBlockInstNum.W)
+  val totalRange:  UInt      = UInt(FetchBlockInstNum.W)
   val blockSel:    UInt      = UInt(FetchBlockInstNum.W)
 
   def fromICacheReq(req: MainPipeToIfuReq): IfuData = {
     val reqStartOffset = req.info.map(_.startVAddr(5, 1))
-
-    val totalSize = req.info(0).size +& Mux(req.info(1).valid, req.info(1).size, 0.U.asTypeOf(req.info(1).size))
 
     val dupData = VecInit((0 until MaxFetchReqNum).map { i =>
       Cat(req.info(i).data, req.info(i).data).asTypeOf(Vec(FetchBlockInstNum * 2, UInt(16.W)))
@@ -108,55 +113,20 @@ class IfuData(implicit p: Parameters) extends IfuBundle with HasICacheParameters
       (fromReq0, req0Idx, req1Idx)
     }
 
-    // this.data := VecInit((0 until FetchBlockInstNum).map { i =>
-    //   val (fromReq0, req0Idx, req1Idx) = getDataIndex(i)
-    //   Mux(fromReq0, dupData(0)(req0Idx), Mux(req.info(1).valid, dupData(1)(req1Idx), 0.U.asTypeOf(dupData(1)(req1Idx))))
-    // })
     this.index := VecInit((0 until FetchBlockInstNum).map { i =>
       val (fromReq0, req0Idx, req1Idx) = getDataIndex(i)
       Mux(fromReq0, req0Idx, req1Idx)
     })
 
     this.maybeRvcMap := req.maybeRvcMap
-    this.range       := req.range
-    this.blockSel    :=
-      VecInit((0 until FetchBlockInstNum).map(i => req.info(1).valid && i.U >= req.info(0).size)).asUInt
+    this.firstRange  := req.firstRange
+    this.totalRange  := req.totalRange
+    this.blockSel :=
+      VecInit((0 until FetchBlockInstNum).map(i => req.info(1).valid && !firstRange(i))).asUInt
 
     this
   }
 
-  // def fromICacheReq(req: Vec[MainPipeToIfuReq]): IfuData = {
-  //   val reqStartOffset = req.map(_.startVAddr(5, 1))
-  //
-  //   val totalSize = req(0).size +& Mux(req(1).valid, req(1).size, 0.U.asTypeOf(req(1).size))
-  //
-  //   val dupData = VecInit((0 until MaxFetchReqNum).map { i =>
-  //     Cat(req(i).data, req(i).data).asTypeOf(Vec(FetchBlockInstNum * 2, UInt(16.W)))
-  //   })
-  //   val dupMaybeRvcMap = VecInit((0 until MaxFetchReqNum).map(i => Cat(req(i).maybeRvcMap, req(i).maybeRvcMap)))
-  //
-  //   def getDataIndex(i: Int): (Bool, UInt, UInt) = {
-  //     val fromReq0 = i.U < req(0).size
-  //     val req0Idx  = (reqStartOffset(0) +& i.U)(log2Ceil(FetchBlockInstNum * 2) - 1, 0)
-  //     val req1Idx  = (reqStartOffset(1) +& (i.U - req(0).size))(log2Ceil(FetchBlockInstNum * 2) - 1, 0)
-  //     (fromReq0, req0Idx, req1Idx)
-  //   }
-  //
-  //   this.data := VecInit((0 until FetchBlockInstNum).map { i =>
-  //     val (fromReq0, req0Idx, req1Idx) = getDataIndex(i)
-  //     Mux(fromReq0, dupData(0)(req0Idx), Mux(req(1).valid, dupData(1)(req1Idx), 0.U.asTypeOf(dupData(1)(req1Idx))))
-  //   })
-  //
-  //   this.maybeRvcMap := VecInit((0 until FetchBlockInstNum).map { i =>
-  //     val (fromReq0, req0Idx, req1Idx) = getDataIndex(i)
-  //     Mux(fromReq0, dupMaybeRvcMap(0)(req0Idx), Mux(req(1).valid, dupMaybeRvcMap(1)(req1Idx), 0.U(1.W)))
-  //   }).asUInt
-  //
-  //   this.range    := VecInit((0 until FetchBlockInstNum).map(i => i.U < totalSize)).asUInt
-  //   this.blockSel := VecInit((0 until FetchBlockInstNum).map(i => req(1).valid && i.U >= req(0).size)).asUInt
-  //
-  //   this
-  // }
 }
 
 class InstSlot extends Bundle {
@@ -175,20 +145,21 @@ class Instruction(implicit p: Parameters) extends IfuBundle with HasICacheParame
   val endOffset:         UInt = UInt(FetchBlockInstOffsetWidth.W)
   val isPrevEndHalfRvi:  Bool = Bool()
   val isCrossBlockInstr: Bool = Bool()
-  val index:             UInt = UInt(FetchBlockInstOffsetWidth.W)
+  // Compatible with miniConfig
+  val index: UInt = UInt(log2Ceil(ICacheLineBytes / 2).W)
 }
 
 class PredCheckRedirect(implicit p: Parameters) extends IfuBundle {
-  val target:       PrunedAddr      = PrunedAddr(VAddrBits)
-  val misIdx:       Valid[UInt]     = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
-  val taken:        Bool            = Bool()
-  val invalidTaken: Bool            = Bool()
-  val isRVC:        Bool            = Bool()
-  val blockSel:     Bool            = Bool()
-  val attribute:    BranchAttribute = new BranchAttribute
-  val mispredPc:    PrunedAddr      = PrunedAddr(VAddrBits)
-  val endOffset:    UInt            = UInt(FetchBlockInstOffsetWidth.W)
-  val isCrossBlockInstr: Bool       = Bool()
+  val target:            PrunedAddr      = PrunedAddr(VAddrBits)
+  val misIdx:            Valid[UInt]     = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
+  val taken:             Bool            = Bool()
+  val invalidTaken:      Bool            = Bool()
+  val isRVC:             Bool            = Bool()
+  val blockSel:          Bool            = Bool()
+  val attribute:         BranchAttribute = new BranchAttribute
+  val mispredPc:         PrunedAddr      = PrunedAddr(VAddrBits)
+  val endOffset:         UInt            = UInt(FetchBlockInstOffsetWidth.W)
+  val isCrossBlockInstr: Bool            = Bool()
 }
 
 /* ***** DB ***** */
