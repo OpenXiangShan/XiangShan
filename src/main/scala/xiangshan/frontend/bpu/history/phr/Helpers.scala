@@ -23,9 +23,9 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.HalfAlignHelper
-import xiangshan.frontend.bpu.PhrHelper
+import xiangshan.frontend.bpu.history.FoldedHistoryMaintenance
 
-trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
+trait Helpers extends HasPhrParameters with HalfAlignHelper with FoldedHistoryMaintenance {
   // folded History
   def circularShiftLeft(src: UInt, shamt: Int): UInt = {
     val srcLen     = src.getWidth
@@ -94,14 +94,10 @@ trait Helpers extends HasPhrParameters with HalfAlignHelper with PhrHelper {
     updateResult
   }
 
-  def computeAllFoldedPhr(hist: UInt): PhrAllFoldedHistories = {
-    val foldedPhr = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
-    AllFoldedHistoryInfo.foreach { info =>
-      foldedPhr.getHistWithInfo(info).foldedHist :=
-        computeFoldedHist(hist, info.FoldedLength)(info.HistoryLength)
-    }
-    foldedPhr
-  }
+  // maxUpdateNum defaults to Shamt here, matching the default used by the 1-arg
+  // PhrAllFoldedHistories constructor that this used to build directly
+  def computeAllFoldedPhr(hist: UInt): PhrAllFoldedHistories =
+    computeAllFoldedPhr(hist, AllFoldedHistoryInfo, Shamt)
 
   def getNextFoldedPhr(
       data:          PhrUpdateData,

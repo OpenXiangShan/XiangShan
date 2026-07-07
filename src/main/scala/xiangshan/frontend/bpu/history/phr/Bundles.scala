@@ -110,7 +110,10 @@ class PhrFoldedHistory(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(impli
   }
 
   // fast path, use pre-read oldest bits
+  // num is the actual advance amount for this update, and may be less than maxUpdateNum
+  // (the width the folded history is constructed to support)
   def update(ob: Vec[Bool], num: Int, shiftBits: UInt, hashHigh: UInt): PhrFoldedHistory = {
+    require(num >= 1 && num <= maxUpdateNum, s"num must be in [1, maxUpdateNum=$maxUpdateNum], got num=$num")
     val newFoldedHist = if (needOldestBits) {
       val oldestBits = ob
       require(oldestBits.length == maxUpdateNum)
@@ -129,7 +132,10 @@ class PhrFoldedHistory(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(impli
       val newestBitsMasked = shiftBits
       // val newestBitsMasked = VecInit((0 until maxUpdateNum).map(i => taken && ((i + 1) == num).B)).asUInt
       // if a bit does not wrap around, newest bits should not be xored onto it either
-      val newestBitsSet = (0 until maxUpdateNum).map(i => (info.FoldedLength - 1 - i, newestBitsMasked(num - i - 1)))
+      // positions i >= num are not part of this update (num can be less than maxUpdateNum), so they get no newest bit
+      val newestBitsSet = (0 until maxUpdateNum).map(i =>
+        (info.FoldedLength - 1 - i, if (i < num) newestBitsMasked(num - i - 1) else false.B)
+      )
 
       // println(f"new bits set ${newestBitsSet.map(_._1)}")
       //
@@ -181,11 +187,15 @@ class PhrAllFoldedHistoryOldestBits(gen: Set[FoldedHistoryInfo])(implicit p: Par
     }
 }
 
-class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo])(implicit p: Parameters) extends PhrBundle
+class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo], maxUpdateNum: Int)(implicit p: Parameters) extends PhrBundle
     with HasPhrParameters with Helpers {
 
+  // maxUpdateNum defaults to Shamt, matching the single-slot advance every existing predictor uses
+  def this(gen: Set[FoldedHistoryInfo])(implicit p: Parameters) =
+    this(gen, p(XSCoreParamsKey).frontendParameters.bpuParameters.phrParameters.Shamt)
+
   val hist: MixedVec[PhrFoldedHistory] =
-    MixedVec(gen.toSeq.sortBy(_.asTuple).map(info => new PhrFoldedHistory(info, Shamt)))
+    MixedVec(gen.toSeq.sortBy(_.asTuple).map(info => new PhrFoldedHistory(info, maxUpdateNum)))
 
   def getHistWithInfo(info: FoldedHistoryInfo): PhrFoldedHistory = {
     val selected = hist.filter(_.info.equals(info))
