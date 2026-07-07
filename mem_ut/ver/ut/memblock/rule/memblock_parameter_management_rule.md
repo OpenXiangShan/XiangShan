@@ -136,7 +136,8 @@ mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh
 
 - `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN` 默认值为 1，表示 mem_ut 默认由 `L2TLB_agent` 接管 DTLB/L2TLB response 通路。
 - `MEMBLOCK_L2TLB_SEQ_EN` 是 runtime sequence enable，默认值为 1；默认主动响应 request。
-- 如果需要只观察 DUT 原始 PTW/L2TLB response，编译期覆盖 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN=0`。
+- 编译期覆盖 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN=0` 表示关闭 `L2TLB_agent` 接管，agent interface 保持非激活默认值；该模式不是只观察 DUT 原始 PTW/L2TLB response。
+- 如果后续需要只观察 DUT 原始 PTW/L2TLB response，必须另建 passive monitor 或 mirror 方案，不能复用当前 takeover 关闭模式。
 - 如果编译期关闭 takeover 又 runtime 打开 `MEMBLOCK_L2TLB_SEQ_EN=1`，sequence 应 fatal。
 
 ## 运行期状态规则

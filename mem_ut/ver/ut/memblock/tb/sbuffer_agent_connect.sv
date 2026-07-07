@@ -22,8 +22,8 @@
         force U_IF_NAME.auto_inner_buffers_out_a_bits_size = RTL_PATH.auto_inner_buffers_out_a_bits_size; \
         force U_IF_NAME.auto_inner_buffers_out_a_bits_source = RTL_PATH.auto_inner_buffers_out_a_bits_source; \
         force U_IF_NAME.auto_inner_buffers_out_a_bits_address = RTL_PATH.auto_inner_buffers_out_a_bits_address; \
-        force U_IF_NAME.auto_inner_buffers_out_a_bits_user_memBackType_MM = RTL_PATH.auto_inner_buffers_out_a_bits_user_memBackType_MM; \
-        force U_IF_NAME.auto_inner_buffers_out_a_bits_user_memPageType_NC = RTL_PATH.auto_inner_buffers_out_a_bits_user_memPageType_NC; \
+        force U_IF_NAME.auto_inner_buffers_out_a_bits_user_memBackType_MM = '0; \
+        force U_IF_NAME.auto_inner_buffers_out_a_bits_user_memPageType_NC = '0; \
         force U_IF_NAME.auto_inner_buffers_out_a_bits_mask = RTL_PATH.auto_inner_buffers_out_a_bits_mask; \
         force U_IF_NAME.auto_inner_buffers_out_a_bits_data = RTL_PATH.auto_inner_buffers_out_a_bits_data; \
         force U_IF_NAME.auto_inner_buffers_out_a_bits_corrupt = RTL_PATH.auto_inner_buffers_out_a_bits_corrupt; \
@@ -47,8 +47,8 @@
         force U_IF_NAME.auto_inner_buffers_out_a_bits_size = RTL_PATH.auto_inner_buffers_out_a_bits_size; \
         force U_IF_NAME.auto_inner_buffers_out_a_bits_source = RTL_PATH.auto_inner_buffers_out_a_bits_source; \
         force U_IF_NAME.auto_inner_buffers_out_a_bits_address = RTL_PATH.auto_inner_buffers_out_a_bits_address; \
-        force U_IF_NAME.auto_inner_buffers_out_a_bits_user_memBackType_MM = RTL_PATH.auto_inner_buffers_out_a_bits_user_memBackType_MM; \
-        force U_IF_NAME.auto_inner_buffers_out_a_bits_user_memPageType_NC = RTL_PATH.auto_inner_buffers_out_a_bits_user_memPageType_NC; \
+        force U_IF_NAME.auto_inner_buffers_out_a_bits_user_memBackType_MM = '0; \
+        force U_IF_NAME.auto_inner_buffers_out_a_bits_user_memPageType_NC = '0; \
         force U_IF_NAME.auto_inner_buffers_out_a_bits_mask = RTL_PATH.auto_inner_buffers_out_a_bits_mask; \
         force U_IF_NAME.auto_inner_buffers_out_a_bits_data = RTL_PATH.auto_inner_buffers_out_a_bits_data; \
         force U_IF_NAME.auto_inner_buffers_out_a_bits_corrupt = RTL_PATH.auto_inner_buffers_out_a_bits_corrupt; \

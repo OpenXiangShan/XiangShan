@@ -73,9 +73,10 @@ mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh
 
 该宏默认值为 1，表示默认由 `L2TLB_agent` 接管 DTLB/L2TLB response 通路。
 runtime `MEMBLOCK_L2TLB_SEQ_EN` 只表示 responder sequence 是否运行，不再控制
-connect 是否接管，也不应在 connect 文件中解析。若某个调试场景需要保留 DUT
-原始 PTW/L2TLB response，只观察不接管，应在编译期覆盖
-`MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN=0`。
+connect 是否接管，也不应在 connect 文件中解析。若编译期覆盖
+`MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN=0`，当前实现表示 `L2TLB_agent` 完全不接管，
+agent interface 保持非激活默认值；该模式不是 passive observation 连接，不能依赖它观察
+DUT 原始 PTW/L2TLB response。
 
 ## sequence 规则
 
