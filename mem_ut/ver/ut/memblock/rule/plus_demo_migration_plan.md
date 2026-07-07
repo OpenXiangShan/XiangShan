@@ -188,8 +188,10 @@ connect 是否接管由编译期宏 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN` 控制�
 `MEMBLOCK_L2TLB_SEQ_EN=1` 时，由 agent driver 模拟 L2TLB 侧 ready/response；
 显式设置 `MEMBLOCK_L2TLB_SEQ_EN=0` 时，driver idle 会保持 `ready=0/resp_valid=0`，
 不会主动响应 request。
-如果需要保留 DUT 原始 L2TLB/PTW response 通路，只观察不接管，应在编译期覆盖
-`MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN=0`。`MEMBLOCK_L2TLB_MIN_LATENCY` 和
+编译期覆盖 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN=0` 表示关闭 L2TLB agent 接管，
+agent interface 保持非激活默认值；该模式不是只观察 DUT 原始 L2TLB/PTW response。
+如后续需要保留并观察 DUT 原始 response 通路，应另建 passive monitor 或 mirror 方案。
+`MEMBLOCK_L2TLB_MIN_LATENCY` 和
 `MEMBLOCK_L2TLB_MAX_LATENCY` 控制 response 延迟范围；查不到表项时由
 `get_or_create_tlb_entry_by_req()` 自动创建 by-key TLB entry，不再提供额外的
 fault/fatal/idle 缺项策略参数。

@@ -46,7 +46,7 @@
 
 - `tlb_map_builder` 已按 uid 生成 TLB entry，设置 vaddr/paddr、PTE bits、CSR runtime state 并注册 lookup key，见 `mem_ut/ver/ut/memblock/seq/base_seq/tlb_map_builder.sv:22`。
 - `memblock_l2tlb_base_sequence` 已实现 L2TLB/PTW responder：等待主表、采样 DUT DTLB/L2TLB request 的 `vpn/s2xlate`，查公共 TLB 表并返回 response，见 `mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_l2tlb_base_sequence.sv:81` 和 `memblock_l2tlb_base_sequence.sv:123`。
-- `L2tlb_agent_connect.sv` 当前由编译期宏 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN` 控制 DTLB/L2TLB response 通路是否接管，默认值为 1；`MEMBLOCK_L2TLB_SEQ_EN` 只控制 responder sequence 是否主动回包，不再控制 connect force/takeover。需要纯观察 DUT 原始 response 时，必须编译期覆盖 takeover 宏为 0。
+- `L2tlb_agent_connect.sv` 当前由编译期宏 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN` 控制 DTLB/L2TLB response 通路是否接管，默认值为 1；`MEMBLOCK_L2TLB_SEQ_EN` 只控制 responder sequence 是否主动回包，不再控制 connect force/takeover。覆盖 takeover 宏为 0 只表示关闭 `L2TLB_agent` 接管，agent interface 保持非激活默认值；如需纯观察 DUT 原始 response，需要另建 passive monitor 或 mirror 方案。
 
 ### 发射队列和字段赋值
 

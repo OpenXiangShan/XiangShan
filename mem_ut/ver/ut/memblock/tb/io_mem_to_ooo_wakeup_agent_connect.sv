@@ -18,23 +18,23 @@
         force U_IF_NAME.io_mem_to_ooo_wakeup_0_valid = RTL_PATH.io_mem_to_ooo_wakeup_0_valid; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_rfWen = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_rfWen; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_fpWen = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_fpWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_vecWen = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_vecWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_v0Wen = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_v0Wen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_vlWen = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_vlWen; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_vecWen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_v0Wen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_vlWen = '0; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_pdest = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_pdest; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_1_valid = RTL_PATH.io_mem_to_ooo_wakeup_1_valid; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_rfWen = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_rfWen; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_fpWen = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_fpWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_vecWen = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_vecWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_v0Wen = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_v0Wen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_vlWen = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_vlWen; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_vecWen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_v0Wen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_vlWen = '0; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_pdest = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_pdest; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_2_valid = RTL_PATH.io_mem_to_ooo_wakeup_2_valid; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_rfWen = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_rfWen; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_fpWen = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_fpWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_vecWen = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_vecWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_v0Wen = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_v0Wen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_vlWen = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_vlWen; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_vecWen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_v0Wen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_vlWen = '0; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_pdest = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_pdest; \
     end \
     `else \
@@ -42,23 +42,23 @@
         force U_IF_NAME.io_mem_to_ooo_wakeup_0_valid = RTL_PATH.io_mem_to_ooo_wakeup_0_valid; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_rfWen = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_rfWen; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_fpWen = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_fpWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_vecWen = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_vecWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_v0Wen = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_v0Wen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_vlWen = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_vlWen; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_vecWen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_v0Wen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_vlWen = '0; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_0_bits_pdest = RTL_PATH.io_mem_to_ooo_wakeup_0_bits_pdest; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_1_valid = RTL_PATH.io_mem_to_ooo_wakeup_1_valid; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_rfWen = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_rfWen; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_fpWen = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_fpWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_vecWen = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_vecWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_v0Wen = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_v0Wen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_vlWen = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_vlWen; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_vecWen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_v0Wen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_vlWen = '0; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_1_bits_pdest = RTL_PATH.io_mem_to_ooo_wakeup_1_bits_pdest; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_2_valid = RTL_PATH.io_mem_to_ooo_wakeup_2_valid; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_rfWen = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_rfWen; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_fpWen = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_fpWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_vecWen = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_vecWen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_v0Wen = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_v0Wen; \
-        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_vlWen = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_vlWen; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_vecWen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_v0Wen = '0; \
+        force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_vlWen = '0; \
         force U_IF_NAME.io_mem_to_ooo_wakeup_2_bits_pdest = RTL_PATH.io_mem_to_ooo_wakeup_2_bits_pdest; \
     end \
     `endif

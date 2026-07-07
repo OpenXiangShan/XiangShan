@@ -17,11 +17,11 @@
     initial begin \
         force U_IF_NAME.auto_inner_l3_pf_sender_out_addr = RTL_PATH.auto_inner_l3_pf_sender_out_addr; \
         force U_IF_NAME.auto_inner_l3_pf_sender_out_addr_valid = RTL_PATH.auto_inner_l3_pf_sender_out_addr_valid; \
-        force U_IF_NAME.auto_inner_l3_pf_sender_out_l2_pf_en = RTL_PATH.auto_inner_l3_pf_sender_out_l2_pf_en; \
+        force U_IF_NAME.auto_inner_l3_pf_sender_out_l2_pf_en = '0; \
         force U_IF_NAME.auto_inner_l2_pf_sender_out_addr = RTL_PATH.auto_inner_l2_pf_sender_out_addr; \
         force U_IF_NAME.auto_inner_l2_pf_sender_out_pf_source = RTL_PATH.auto_inner_l2_pf_sender_out_pf_source; \
         force U_IF_NAME.auto_inner_l2_pf_sender_out_addr_valid = RTL_PATH.auto_inner_l2_pf_sender_out_addr_valid; \
-        force U_IF_NAME.auto_inner_l2_pf_sender_out_l2_pf_en = RTL_PATH.auto_inner_l2_pf_sender_out_l2_pf_en; \
+        force U_IF_NAME.auto_inner_l2_pf_sender_out_l2_pf_en = '0; \
         force U_IF_NAME.io_ifetchPrefetch_0_valid = RTL_PATH.io_ifetchPrefetch_0_valid; \
         force U_IF_NAME.io_ifetchPrefetch_0_bits_vaddr = RTL_PATH.io_ifetchPrefetch_0_bits_vaddr; \
         force U_IF_NAME.io_ifetchPrefetch_1_valid = RTL_PATH.io_ifetchPrefetch_1_valid; \
@@ -33,11 +33,11 @@
     initial begin \
         force U_IF_NAME.auto_inner_l3_pf_sender_out_addr = RTL_PATH.auto_inner_l3_pf_sender_out_addr; \
         force U_IF_NAME.auto_inner_l3_pf_sender_out_addr_valid = RTL_PATH.auto_inner_l3_pf_sender_out_addr_valid; \
-        force U_IF_NAME.auto_inner_l3_pf_sender_out_l2_pf_en = RTL_PATH.auto_inner_l3_pf_sender_out_l2_pf_en; \
+        force U_IF_NAME.auto_inner_l3_pf_sender_out_l2_pf_en = '0; \
         force U_IF_NAME.auto_inner_l2_pf_sender_out_addr = RTL_PATH.auto_inner_l2_pf_sender_out_addr; \
         force U_IF_NAME.auto_inner_l2_pf_sender_out_pf_source = RTL_PATH.auto_inner_l2_pf_sender_out_pf_source; \
         force U_IF_NAME.auto_inner_l2_pf_sender_out_addr_valid = RTL_PATH.auto_inner_l2_pf_sender_out_addr_valid; \
-        force U_IF_NAME.auto_inner_l2_pf_sender_out_l2_pf_en = RTL_PATH.auto_inner_l2_pf_sender_out_l2_pf_en; \
+        force U_IF_NAME.auto_inner_l2_pf_sender_out_l2_pf_en = '0; \
         force U_IF_NAME.io_ifetchPrefetch_0_valid = RTL_PATH.io_ifetchPrefetch_0_valid; \
         force U_IF_NAME.io_ifetchPrefetch_0_bits_vaddr = RTL_PATH.io_ifetchPrefetch_0_bits_vaddr; \
         force U_IF_NAME.io_ifetchPrefetch_1_valid = RTL_PATH.io_ifetchPrefetch_1_valid; \

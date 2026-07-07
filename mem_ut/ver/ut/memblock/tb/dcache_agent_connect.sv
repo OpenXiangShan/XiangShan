@@ -23,8 +23,8 @@
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_source = RTL_PATH.auto_inner_dcache_client_out_a_bits_source; \
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_address = RTL_PATH.auto_inner_dcache_client_out_a_bits_address; \
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_alias = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_alias; \
-        force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_memPageType_NC = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_memPageType_NC; \
-        force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_memBackType_MM = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_memBackType_MM; \
+        force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_memPageType_NC = '0; \
+        force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_memBackType_MM = '0; \
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_vaddr = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_vaddr; \
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_reqSource = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_reqSource; \
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_needHint = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_needHint; \
@@ -50,8 +50,8 @@
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_source = RTL_PATH.auto_inner_dcache_client_out_c_bits_source; \
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_address = RTL_PATH.auto_inner_dcache_client_out_c_bits_address; \
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_alias = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_alias; \
-        force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_memPageType_NC = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_memPageType_NC; \
-        force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_memBackType_MM = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_memBackType_MM; \
+        force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_memPageType_NC = '0; \
+        force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_memBackType_MM = '0; \
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_vaddr = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_vaddr; \
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_reqSource = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_reqSource; \
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_needHint = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_needHint; \
@@ -83,8 +83,8 @@
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_source = RTL_PATH.auto_inner_dcache_client_out_a_bits_source; \
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_address = RTL_PATH.auto_inner_dcache_client_out_a_bits_address; \
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_alias = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_alias; \
-        force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_memPageType_NC = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_memPageType_NC; \
-        force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_memBackType_MM = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_memBackType_MM; \
+        force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_memPageType_NC = '0; \
+        force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_memBackType_MM = '0; \
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_vaddr = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_vaddr; \
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_reqSource = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_reqSource; \
         force U_IF_NAME.auto_inner_dcache_client_out_a_bits_user_needHint = RTL_PATH.auto_inner_dcache_client_out_a_bits_user_needHint; \
@@ -110,8 +110,8 @@
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_source = RTL_PATH.auto_inner_dcache_client_out_c_bits_source; \
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_address = RTL_PATH.auto_inner_dcache_client_out_c_bits_address; \
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_alias = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_alias; \
-        force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_memPageType_NC = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_memPageType_NC; \
-        force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_memBackType_MM = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_memBackType_MM; \
+        force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_memPageType_NC = '0; \
+        force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_memBackType_MM = '0; \
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_vaddr = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_vaddr; \
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_reqSource = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_reqSource; \
         force U_IF_NAME.auto_inner_dcache_client_out_c_bits_user_needHint = RTL_PATH.auto_inner_dcache_client_out_c_bits_user_needHint; \

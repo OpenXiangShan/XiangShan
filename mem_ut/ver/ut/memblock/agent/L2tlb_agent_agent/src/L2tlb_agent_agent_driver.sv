@@ -146,7 +146,9 @@ endtask:send_pkt
 task L2tlb_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 
     if(drv_mode==tcnt_dec_base::DRV_0) begin
-        vif.drv_mp.drv_cb.io_ptw_req_0_ready <= memblock_sync_pkg::l2tlb_responder_active ? '0 : '1;
+        // 中文注释：L2TLB responder 接管时，idle 周期也保持 ready=1，
+        // 让 V2 内部 dtlbRepeater -> inner_ptw 请求能被默认接收；未接管时保持非激活。
+        vif.drv_mp.drv_cb.io_ptw_req_0_ready <= memblock_sync_pkg::l2tlb_responder_active ? '1 : '0;
         vif.drv_mp.drv_cb.io_ptw_resp_valid <= '0;
         vif.drv_mp.drv_cb.io_ptw_resp_bits_s2xlate <= '0;
         vif.drv_mp.drv_cb.io_ptw_resp_bits_s1_entry_tag <= '0;
