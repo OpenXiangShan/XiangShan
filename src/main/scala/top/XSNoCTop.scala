@@ -73,7 +73,10 @@ abstract class BaseXSSocImp(wrapper: BaseXSSoc) extends LazyRawModuleImp(wrapper
    2. SoC initialize reset during Power on/off flow
    */
   val cpuReset = reset.asBool || !soc_rst_n
-  val cpuReset_sync = withClockAndReset(clock, cpuReset.asAsyncReset)(ResetGen(io.dft_reset))
+  private val cpuResetGen = withClockAndReset(clock, cpuReset.asAsyncReset)(Module(new ResetGen))
+  cpuResetGen.dft := io.dft_reset.getOrElse(0.U.asTypeOf(new DFTResetSignals))
+  val cpuReset_sync = cpuResetGen.o_reset
+  val cpuReset_raw_sync = cpuResetGen.o_raw_reset
 }
 
 trait HasAsyncClockImp { this: BaseXSSocImp =>
@@ -186,7 +189,7 @@ trait HasCoreLowPowerImp[+L <: HasXSTile] { this: BaseXSSocImp with HasXSTileCHI
      2. Gate clock when SoC is enable clock (Core+L2 in normal state) and core is in wfi state
      3. Disable clock gate at the cycle of Flitpend valid in rx.snp channel
      */
-    val cpuClockEn = !wfiGateClock && !(cpuReset_sync.asBool)
+    val cpuClockEn = !wfiGateClock && !(cpuReset_raw_sync.asBool)
 
     dontTouch(wfiGateClock)
     dontTouch(pwrdownGateClock)
