@@ -544,6 +544,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_hit_prefetch = RegEnable(s2_hit_prefetch, s2_fire)
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error
 
+  // Register the S2 kill (includes load breakpoint trigger exception) so that
+  // hit-side replacement/access-flag metadata updates in S3 can be suppressed
+  // for loads that are architecturally killed by an exception.
+  val s3_kill = RegEnable(io.lsu.s2_kill, s2_fire)
+
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
   resp.bits.error_delayed := s3_error && (s3_hit || s3_tag_error) && s3_valid
   resp.bits.tl_error_delayed.tl_denied := s3_tl_error.tl_denied & s3_valid
@@ -562,12 +567,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report tag error / l2 corrupted to CACHE_ERROR csr
   io.error.valid := s3_error && s3_valid
 
-  io.replace_access.valid := s3_valid && s3_hit
+  io.replace_access.valid := s3_valid && s3_hit && !s3_kill
   io.replace_access.bits.set := RegNext(RegNext(get_dcache_idx(s1_req.vaddr)))
   io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_tag_match_way_dup_dc)))
 
   // update access bit
-  io.access_flag_write.valid := s3_valid && s3_hit && !s3_is_prefetch
+  io.access_flag_write.valid := s3_valid && s3_hit && !s3_is_prefetch && !s3_kill
   io.access_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.access_flag_write.bits.way_en := s3_tag_match_way
   io.access_flag_write.bits.flag := true.B
@@ -575,7 +580,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // clear prefetch source when prefetch hit
   // so that next load to the same line won't be considered as prefetch hit
   // A prefetch block will only be counted once
-  val s3_clear_pf_flag_en = s3_valid && s3_hit && !s3_is_prefetch && isFromL1Prefetch(s3_hit_prefetch)
+  val s3_clear_pf_flag_en = s3_valid && s3_hit && !s3_is_prefetch && !s3_kill && isFromL1Prefetch(s3_hit_prefetch)
   io.prefetch_flag_write.valid := s3_clear_pf_flag_en && !io.counter_filter_query.resp
   io.prefetch_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.prefetch_flag_write.bits.way_en := s3_tag_match_way
