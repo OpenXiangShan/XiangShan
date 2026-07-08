@@ -226,8 +226,19 @@ class VAGQ(implicit p: Parameters) extends VAGQModule {
     mergeCtrl.io.entry(i).entry := entryTable.io.entries(i)
   }
 
-  io.lsuReq <> splitCtrl.io.lsuReq
-  io.lsqEmptyReq <> splitCtrl.io.lsqEmptyReq
+  val lsqReqReg = RegInit(0.U.asTypeOf(Vec(VAGQConstants.ActiveIssueWidth, DecoupledIO(new VAGQLsqEmptyReq))))
+  val lsqEmptyReqReg = RegInit(0.U.asTypeOf(DecoupledIO(new VAGQLsqEmptyReq)))
+  lsqReqReg.zip(splitCtrl.io.lsuReq).map { case (out, in) =>
+      out.valid := in.valid
+      out.bits  := in.bits
+      in.ready  := out.ready
+  }
+  lsqEmptyReqReg.valid := splitCtrl.io.lsqEmptyReq.valid
+  lsqEmptyReqReg.bits  := splitCtrl.io.lsqEmptyReq.bits
+  splitCtrl.io.lsqEmptyReq.ready := lsqEmptyReqReg.ready
+
+  io.lsuReq <> lsqReqReg
+  io.lsqEmptyReq <> lsqEmptyReqReg
 
   entryTable.io.splitUpdate := splitCtrl.io.update
 
