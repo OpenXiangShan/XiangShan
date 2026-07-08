@@ -20,23 +20,14 @@ interface io_mem_to_ooo_wakeup_agent_agent_interface  (input bit clk,input bit r
     logic io_mem_to_ooo_wakeup_0_valid ;
     logic io_mem_to_ooo_wakeup_0_bits_rfWen;
     logic io_mem_to_ooo_wakeup_0_bits_fpWen;
-    logic io_mem_to_ooo_wakeup_0_bits_vecWen;
-    logic io_mem_to_ooo_wakeup_0_bits_v0Wen;
-    logic io_mem_to_ooo_wakeup_0_bits_vlWen;
     logic [7:0] io_mem_to_ooo_wakeup_0_bits_pdest;
     logic io_mem_to_ooo_wakeup_1_valid ;
     logic io_mem_to_ooo_wakeup_1_bits_rfWen;
     logic io_mem_to_ooo_wakeup_1_bits_fpWen;
-    logic io_mem_to_ooo_wakeup_1_bits_vecWen;
-    logic io_mem_to_ooo_wakeup_1_bits_v0Wen;
-    logic io_mem_to_ooo_wakeup_1_bits_vlWen;
     logic [7:0] io_mem_to_ooo_wakeup_1_bits_pdest;
     logic io_mem_to_ooo_wakeup_2_valid ;
     logic io_mem_to_ooo_wakeup_2_bits_rfWen;
     logic io_mem_to_ooo_wakeup_2_bits_fpWen;
-    logic io_mem_to_ooo_wakeup_2_bits_vecWen;
-    logic io_mem_to_ooo_wakeup_2_bits_v0Wen;
-    logic io_mem_to_ooo_wakeup_2_bits_vlWen;
     logic [7:0] io_mem_to_ooo_wakeup_2_bits_pdest;
 
     clocking drv_cb @(posedge clk);
@@ -46,23 +37,14 @@ interface io_mem_to_ooo_wakeup_agent_agent_interface  (input bit clk,input bit r
         input  io_mem_to_ooo_wakeup_0_valid;
         input  io_mem_to_ooo_wakeup_0_bits_rfWen;
         input  io_mem_to_ooo_wakeup_0_bits_fpWen;
-        input  io_mem_to_ooo_wakeup_0_bits_vecWen;
-        input  io_mem_to_ooo_wakeup_0_bits_v0Wen;
-        input  io_mem_to_ooo_wakeup_0_bits_vlWen;
         input  io_mem_to_ooo_wakeup_0_bits_pdest;
         input  io_mem_to_ooo_wakeup_1_valid;
         input  io_mem_to_ooo_wakeup_1_bits_rfWen;
         input  io_mem_to_ooo_wakeup_1_bits_fpWen;
-        input  io_mem_to_ooo_wakeup_1_bits_vecWen;
-        input  io_mem_to_ooo_wakeup_1_bits_v0Wen;
-        input  io_mem_to_ooo_wakeup_1_bits_vlWen;
         input  io_mem_to_ooo_wakeup_1_bits_pdest;
         input  io_mem_to_ooo_wakeup_2_valid;
         input  io_mem_to_ooo_wakeup_2_bits_rfWen;
         input  io_mem_to_ooo_wakeup_2_bits_fpWen;
-        input  io_mem_to_ooo_wakeup_2_bits_vecWen;
-        input  io_mem_to_ooo_wakeup_2_bits_v0Wen;
-        input  io_mem_to_ooo_wakeup_2_bits_vlWen;
         input  io_mem_to_ooo_wakeup_2_bits_pdest;
 
     endclocking:drv_cb
@@ -74,23 +56,14 @@ interface io_mem_to_ooo_wakeup_agent_agent_interface  (input bit clk,input bit r
         input  io_mem_to_ooo_wakeup_0_valid;
         input  io_mem_to_ooo_wakeup_0_bits_rfWen;
         input  io_mem_to_ooo_wakeup_0_bits_fpWen;
-        input  io_mem_to_ooo_wakeup_0_bits_vecWen;
-        input  io_mem_to_ooo_wakeup_0_bits_v0Wen;
-        input  io_mem_to_ooo_wakeup_0_bits_vlWen;
         input  io_mem_to_ooo_wakeup_0_bits_pdest;
         input  io_mem_to_ooo_wakeup_1_valid;
         input  io_mem_to_ooo_wakeup_1_bits_rfWen;
         input  io_mem_to_ooo_wakeup_1_bits_fpWen;
-        input  io_mem_to_ooo_wakeup_1_bits_vecWen;
-        input  io_mem_to_ooo_wakeup_1_bits_v0Wen;
-        input  io_mem_to_ooo_wakeup_1_bits_vlWen;
         input  io_mem_to_ooo_wakeup_1_bits_pdest;
         input  io_mem_to_ooo_wakeup_2_valid;
         input  io_mem_to_ooo_wakeup_2_bits_rfWen;
         input  io_mem_to_ooo_wakeup_2_bits_fpWen;
-        input  io_mem_to_ooo_wakeup_2_bits_vecWen;
-        input  io_mem_to_ooo_wakeup_2_bits_v0Wen;
-        input  io_mem_to_ooo_wakeup_2_bits_vlWen;
         input  io_mem_to_ooo_wakeup_2_bits_pdest;
 
     endclocking:mon_cb

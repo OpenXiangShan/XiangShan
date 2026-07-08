@@ -27,6 +27,21 @@ response:
   _inner_ptw_io_tlb_1_resp_*
 ```
 
+其中 `_inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_g/u` 必须由
+`L2TLB_agent` 的 transaction/sequence 真实驱动。当前实现链路为：
+
+```text
+memblock_tlb_entry.pte_g/pte_u
+  -> memblock_l2tlb_base_sequence::fill_dtlb_resp_from_entry()
+  -> L2tlb_agent_agent_xaction.io_ptw_resp_bits_s2_entry_perm_g/u
+  -> L2tlb_agent_agent_driver / L2tlb_agent_agent_interface
+  -> L2tlb_agent_connect.sv active 分支
+  -> _inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_g/u
+```
+
+不得在 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN=1` 的 active 接管路径中把
+`s2_entry_perm_g/u` 固定为常量 0。
+
 这些是生成后 Verilog 的内部 wire 名，随 RTL 重新生成可能变化。后续更新 V2
 RTL 后必须重新检查 `build/rtl/MemBlock.sv` 中这些内部信号是否仍存在。
 

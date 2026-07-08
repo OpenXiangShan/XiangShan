@@ -62,9 +62,6 @@
         force RTL_PATH.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable; \
         force RTL_PATH.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable; \
         force RTL_PATH.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency = U_IF_NAME.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency; \
-        force RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtb_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable; \
-        force RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_tage_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable; \
-        force RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_sc_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable; \
         force RTL_PATH.io_ooo_to_mem_csrCtrl_sbuffer_timeout = U_IF_NAME.io_ooo_to_mem_csrCtrl_sbuffer_timeout; \
         force RTL_PATH.io_ooo_to_mem_csrCtrl_ldld_vio_check_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_ldld_vio_check_enable; \
         force RTL_PATH.io_ooo_to_mem_csrCtrl_cache_error_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_cache_error_enable; \
@@ -101,6 +98,16 @@
         force RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_3 = U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_3; \
         force RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp = U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp; \
         force RTL_PATH.io_ooo_to_mem_csrCtrl_fsIsOff = U_IF_NAME.io_ooo_to_mem_csrCtrl_fsIsOff; \
+        force RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_btb_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_btb_enable; \
+        force RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_ras_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_ras_enable; \
+        force RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_sc_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_sc_enable; \
+        force RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_tage_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_tage_enable; \
+        force RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtb_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtb_enable; \
+        force RTL_PATH.io_ooo_to_mem_csrCtrl_frontend_trigger_debugMode = U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_debugMode; \
+        force RTL_PATH.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable; \
+        force RTL_PATH.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable = U_IF_NAME.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable; \
+        force RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_debugMode = U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_debugMode; \
+        force RTL_PATH.io_ooo_to_mem_tlbCsr_priv_debug = U_IF_NAME.io_ooo_to_mem_tlbCsr_priv_debug; \
     end \
     `else \
     initial begin \
@@ -151,12 +158,6 @@
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable = RTL_PATH.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable = RTL_PATH.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency = RTL_PATH.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency; \
-        force U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable = RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtb_enable; \
-        force U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable = '0; \
-        force U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable = '0; \
-        force U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable = RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_tage_enable; \
-        force U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable = RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_sc_enable; \
-        force U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable = '0; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_sbuffer_timeout = RTL_PATH.io_ooo_to_mem_csrCtrl_sbuffer_timeout; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_ldld_vio_check_enable = RTL_PATH.io_ooo_to_mem_csrCtrl_ldld_vio_check_enable; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_cache_error_enable = RTL_PATH.io_ooo_to_mem_csrCtrl_cache_error_enable; \
@@ -170,12 +171,8 @@
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_addr = RTL_PATH.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_addr; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_matchType = RTL_PATH.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_matchType; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select = RTL_PATH.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select; \
-        force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing = '0; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action = RTL_PATH.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain = RTL_PATH.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain; \
-        force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute = '0; \
-        force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store = '0; \
-        force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load = '0; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_tdata2 = RTL_PATH.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_tdata2; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_0 = RTL_PATH.io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_0; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_1 = RTL_PATH.io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_1; \
@@ -186,7 +183,6 @@
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_addr = RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_addr; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType = RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select = RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select; \
-        force U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing = '0; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action = RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain = RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_store = RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_store; \
@@ -198,6 +194,16 @@
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_3 = RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_3; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp = RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp; \
         force U_IF_NAME.io_ooo_to_mem_csrCtrl_fsIsOff = RTL_PATH.io_ooo_to_mem_csrCtrl_fsIsOff; \
+        force U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_btb_enable = RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_btb_enable; \
+        force U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_ras_enable = RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_ras_enable; \
+        force U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_sc_enable = RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_sc_enable; \
+        force U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_tage_enable = RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_tage_enable; \
+        force U_IF_NAME.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtb_enable = RTL_PATH.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtb_enable; \
+        force U_IF_NAME.io_ooo_to_mem_csrCtrl_frontend_trigger_debugMode = RTL_PATH.io_ooo_to_mem_csrCtrl_frontend_trigger_debugMode; \
+        force U_IF_NAME.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable = RTL_PATH.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable; \
+        force U_IF_NAME.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable = RTL_PATH.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable; \
+        force U_IF_NAME.io_ooo_to_mem_csrCtrl_mem_trigger_debugMode = RTL_PATH.io_ooo_to_mem_csrCtrl_mem_trigger_debugMode; \
+        force U_IF_NAME.io_ooo_to_mem_tlbCsr_priv_debug = RTL_PATH.io_ooo_to_mem_tlbCsr_priv_debug; \
     end \
     `endif
 

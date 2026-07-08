@@ -13,11 +13,9 @@ class prefetch_agent_agent_xaction  extends tcnt_data_base;
     // only keep the payload values inside obvious width/source bounds.
     rand bit [63:0] auto_inner_l3_pf_sender_out_addr;
     rand bit auto_inner_l3_pf_sender_out_addr_valid;
-    rand bit auto_inner_l3_pf_sender_out_l2_pf_en;
     rand bit [63:0] auto_inner_l2_pf_sender_out_addr;
     rand bit [4:0] auto_inner_l2_pf_sender_out_pf_source;
     rand bit auto_inner_l2_pf_sender_out_addr_valid;
-    rand bit auto_inner_l2_pf_sender_out_l2_pf_en;
     rand bit io_ifetchPrefetch_0_valid ;
     rand bit [49:0] io_ifetchPrefetch_0_bits_vaddr;
     rand bit io_ifetchPrefetch_1_valid ;
@@ -27,11 +25,9 @@ class prefetch_agent_agent_xaction  extends tcnt_data_base;
 
     extern constraint default_auto_inner_l3_pf_sender_out_addr_cons;
     extern constraint default_auto_inner_l3_pf_sender_out_addr_valid_cons;
-    extern constraint default_auto_inner_l3_pf_sender_out_l2_pf_en_cons;
     extern constraint default_auto_inner_l2_pf_sender_out_addr_cons;
     extern constraint default_auto_inner_l2_pf_sender_out_pf_source_cons;
     extern constraint default_auto_inner_l2_pf_sender_out_addr_valid_cons;
-    extern constraint default_auto_inner_l2_pf_sender_out_l2_pf_en_cons;
     extern constraint default_io_ifetchPrefetch_0_valid_cons;
     extern constraint default_io_ifetchPrefetch_0_bits_vaddr_cons;
     extern constraint default_io_ifetchPrefetch_1_valid_cons;
@@ -50,11 +46,9 @@ class prefetch_agent_agent_xaction  extends tcnt_data_base;
     `uvm_object_utils_begin(prefetch_agent_agent_xaction)
         `uvm_field_int(auto_inner_l3_pf_sender_out_addr, UVM_ALL_ON);
         `uvm_field_int(auto_inner_l3_pf_sender_out_addr_valid, UVM_ALL_ON);
-        `uvm_field_int(auto_inner_l3_pf_sender_out_l2_pf_en, UVM_ALL_ON);
         `uvm_field_int(auto_inner_l2_pf_sender_out_addr, UVM_ALL_ON);
         `uvm_field_int(auto_inner_l2_pf_sender_out_pf_source, UVM_ALL_ON);
         `uvm_field_int(auto_inner_l2_pf_sender_out_addr_valid, UVM_ALL_ON);
-        `uvm_field_int(auto_inner_l2_pf_sender_out_l2_pf_en, UVM_ALL_ON);
         `uvm_field_int(io_ifetchPrefetch_0_valid, UVM_ALL_ON);
         `uvm_field_int(io_ifetchPrefetch_0_bits_vaddr, UVM_ALL_ON);
         `uvm_field_int(io_ifetchPrefetch_1_valid, UVM_ALL_ON);
@@ -73,8 +67,6 @@ constraint prefetch_agent_agent_xaction::default_auto_inner_l3_pf_sender_out_add
 constraint prefetch_agent_agent_xaction::default_auto_inner_l3_pf_sender_out_addr_valid_cons{
 }
 
-constraint prefetch_agent_agent_xaction::default_auto_inner_l3_pf_sender_out_l2_pf_en_cons{
-}
 
 constraint prefetch_agent_agent_xaction::default_auto_inner_l2_pf_sender_out_addr_cons{
 
@@ -86,8 +78,6 @@ constraint prefetch_agent_agent_xaction::default_auto_inner_l2_pf_sender_out_pf_
 constraint prefetch_agent_agent_xaction::default_auto_inner_l2_pf_sender_out_addr_valid_cons{
 }
 
-constraint prefetch_agent_agent_xaction::default_auto_inner_l2_pf_sender_out_l2_pf_en_cons{
-}
 
 constraint prefetch_agent_agent_xaction::default_io_ifetchPrefetch_0_valid_cons{
 }
@@ -140,11 +130,9 @@ function string prefetch_agent_agent_xaction::psdisplay(string prefix = "");
     //end
     pkt_str = $sformatf("%sauto_inner_l3_pf_sender_out_addr = 0x%0h ",pkt_str,this.auto_inner_l3_pf_sender_out_addr);
     pkt_str = $sformatf("%sauto_inner_l3_pf_sender_out_addr_valid = 0x%0h ",pkt_str,this.auto_inner_l3_pf_sender_out_addr_valid);
-    pkt_str = $sformatf("%sauto_inner_l3_pf_sender_out_l2_pf_en = 0x%0h ",pkt_str,this.auto_inner_l3_pf_sender_out_l2_pf_en);
     pkt_str = $sformatf("%sauto_inner_l2_pf_sender_out_addr = 0x%0h ",pkt_str,this.auto_inner_l2_pf_sender_out_addr);
     pkt_str = $sformatf("%sauto_inner_l2_pf_sender_out_pf_source = 0x%0h ",pkt_str,this.auto_inner_l2_pf_sender_out_pf_source);
     pkt_str = $sformatf("%sauto_inner_l2_pf_sender_out_addr_valid = 0x%0h ",pkt_str,this.auto_inner_l2_pf_sender_out_addr_valid);
-    pkt_str = $sformatf("%sauto_inner_l2_pf_sender_out_l2_pf_en = 0x%0h ",pkt_str,this.auto_inner_l2_pf_sender_out_l2_pf_en);
     pkt_str = $sformatf("%sio_ifetchPrefetch_0_valid = 0x%0h ",pkt_str,this.io_ifetchPrefetch_0_valid);
     pkt_str = $sformatf("%sio_ifetchPrefetch_0_bits_vaddr = 0x%0h ",pkt_str,this.io_ifetchPrefetch_0_bits_vaddr);
     pkt_str = $sformatf("%sio_ifetchPrefetch_1_valid = 0x%0h ",pkt_str,this.io_ifetchPrefetch_1_valid);
@@ -181,10 +169,6 @@ function bit prefetch_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer 
             `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_l3_pf_sender_out_addr_valid=0x%0h while the rhs_.auto_inner_l3_pf_sender_out_addr_valid=0x%0h",this.auto_inner_l3_pf_sender_out_addr_valid,rhs_.auto_inner_l3_pf_sender_out_addr_valid),UVM_NONE)
         end
 
-        if(this.auto_inner_l3_pf_sender_out_l2_pf_en!=rhs_.auto_inner_l3_pf_sender_out_l2_pf_en) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_l3_pf_sender_out_l2_pf_en=0x%0h while the rhs_.auto_inner_l3_pf_sender_out_l2_pf_en=0x%0h",this.auto_inner_l3_pf_sender_out_l2_pf_en,rhs_.auto_inner_l3_pf_sender_out_l2_pf_en),UVM_NONE)
-        end
 
         if(this.auto_inner_l2_pf_sender_out_addr!=rhs_.auto_inner_l2_pf_sender_out_addr) begin
             super_result = 0;
@@ -201,10 +185,6 @@ function bit prefetch_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer 
             `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_l2_pf_sender_out_addr_valid=0x%0h while the rhs_.auto_inner_l2_pf_sender_out_addr_valid=0x%0h",this.auto_inner_l2_pf_sender_out_addr_valid,rhs_.auto_inner_l2_pf_sender_out_addr_valid),UVM_NONE)
         end
 
-        if(this.auto_inner_l2_pf_sender_out_l2_pf_en!=rhs_.auto_inner_l2_pf_sender_out_l2_pf_en) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_l2_pf_sender_out_l2_pf_en=0x%0h while the rhs_.auto_inner_l2_pf_sender_out_l2_pf_en=0x%0h",this.auto_inner_l2_pf_sender_out_l2_pf_en,rhs_.auto_inner_l2_pf_sender_out_l2_pf_en),UVM_NONE)
-        end
 
         if(this.io_ifetchPrefetch_0_valid!=rhs_.io_ifetchPrefetch_0_valid) begin
             super_result = 0;

@@ -19,11 +19,9 @@ interface prefetch_agent_agent_interface  (input bit clk,input bit rst_n);
 
     logic [63:0] auto_inner_l3_pf_sender_out_addr;
     logic auto_inner_l3_pf_sender_out_addr_valid;
-    logic auto_inner_l3_pf_sender_out_l2_pf_en;
     logic [63:0] auto_inner_l2_pf_sender_out_addr;
     logic [4:0] auto_inner_l2_pf_sender_out_pf_source;
     logic auto_inner_l2_pf_sender_out_addr_valid;
-    logic auto_inner_l2_pf_sender_out_l2_pf_en;
     logic io_ifetchPrefetch_0_valid    ;
     logic [49:0] io_ifetchPrefetch_0_bits_vaddr;
     logic io_ifetchPrefetch_1_valid    ;
@@ -37,11 +35,9 @@ interface prefetch_agent_agent_interface  (input bit clk,input bit rst_n);
         `endif
         input  auto_inner_l3_pf_sender_out_addr;
         input  auto_inner_l3_pf_sender_out_addr_valid;
-        input  auto_inner_l3_pf_sender_out_l2_pf_en;
         input  auto_inner_l2_pf_sender_out_addr;
         input  auto_inner_l2_pf_sender_out_pf_source;
         input  auto_inner_l2_pf_sender_out_addr_valid;
-        input  auto_inner_l2_pf_sender_out_l2_pf_en;
         input  io_ifetchPrefetch_0_valid;
         input  io_ifetchPrefetch_0_bits_vaddr;
         input  io_ifetchPrefetch_1_valid;
@@ -57,11 +53,9 @@ interface prefetch_agent_agent_interface  (input bit clk,input bit rst_n);
         `endif
         input  auto_inner_l3_pf_sender_out_addr;
         input  auto_inner_l3_pf_sender_out_addr_valid;
-        input  auto_inner_l3_pf_sender_out_l2_pf_en;
         input  auto_inner_l2_pf_sender_out_addr;
         input  auto_inner_l2_pf_sender_out_pf_source;
         input  auto_inner_l2_pf_sender_out_addr_valid;
-        input  auto_inner_l2_pf_sender_out_l2_pf_en;
         input  io_ifetchPrefetch_0_valid;
         input  io_ifetchPrefetch_0_bits_vaddr;
         input  io_ifetchPrefetch_1_valid;

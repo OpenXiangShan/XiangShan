@@ -20,8 +20,6 @@ class dcache_agent_agent_xaction  extends tcnt_data_base;
     rand bit [5:0] auto_inner_dcache_client_out_a_bits_source;
     rand bit [47:0] auto_inner_dcache_client_out_a_bits_address;
     rand bit [1:0] auto_inner_dcache_client_out_a_bits_user_alias;
-    rand bit auto_inner_dcache_client_out_a_bits_user_memPageType_NC;
-    rand bit auto_inner_dcache_client_out_a_bits_user_memBackType_MM;
     rand bit [43:0] auto_inner_dcache_client_out_a_bits_user_vaddr;
     rand bit [4:0] auto_inner_dcache_client_out_a_bits_user_reqSource;
     rand bit auto_inner_dcache_client_out_a_bits_user_needHint;
@@ -47,8 +45,6 @@ class dcache_agent_agent_xaction  extends tcnt_data_base;
     rand bit [5:0] auto_inner_dcache_client_out_c_bits_source;
     rand bit [47:0] auto_inner_dcache_client_out_c_bits_address;
     rand bit [1:0] auto_inner_dcache_client_out_c_bits_user_alias;
-    rand bit auto_inner_dcache_client_out_c_bits_user_memPageType_NC;
-    rand bit auto_inner_dcache_client_out_c_bits_user_memBackType_MM;
     rand bit [43:0] auto_inner_dcache_client_out_c_bits_user_vaddr;
     rand bit [4:0] auto_inner_dcache_client_out_c_bits_user_reqSource;
     rand bit auto_inner_dcache_client_out_c_bits_user_needHint;
@@ -78,8 +74,6 @@ class dcache_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_auto_inner_dcache_client_out_a_bits_source_cons;
     extern constraint default_auto_inner_dcache_client_out_a_bits_address_cons;
     extern constraint default_auto_inner_dcache_client_out_a_bits_user_alias_cons;
-    extern constraint default_auto_inner_dcache_client_out_a_bits_user_memPageType_NC_cons;
-    extern constraint default_auto_inner_dcache_client_out_a_bits_user_memBackType_MM_cons;
     extern constraint default_auto_inner_dcache_client_out_a_bits_user_vaddr_cons;
     extern constraint default_auto_inner_dcache_client_out_a_bits_user_reqSource_cons;
     extern constraint default_auto_inner_dcache_client_out_a_bits_user_needHint_cons;
@@ -105,8 +99,6 @@ class dcache_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_auto_inner_dcache_client_out_c_bits_source_cons;
     extern constraint default_auto_inner_dcache_client_out_c_bits_address_cons;
     extern constraint default_auto_inner_dcache_client_out_c_bits_user_alias_cons;
-    extern constraint default_auto_inner_dcache_client_out_c_bits_user_memPageType_NC_cons;
-    extern constraint default_auto_inner_dcache_client_out_c_bits_user_memBackType_MM_cons;
     extern constraint default_auto_inner_dcache_client_out_c_bits_user_vaddr_cons;
     extern constraint default_auto_inner_dcache_client_out_c_bits_user_reqSource_cons;
     extern constraint default_auto_inner_dcache_client_out_c_bits_user_needHint_cons;
@@ -145,8 +137,6 @@ class dcache_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(auto_inner_dcache_client_out_a_bits_source, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_a_bits_address, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_a_bits_user_alias, UVM_ALL_ON);
-        `uvm_field_int(auto_inner_dcache_client_out_a_bits_user_memPageType_NC, UVM_ALL_ON);
-        `uvm_field_int(auto_inner_dcache_client_out_a_bits_user_memBackType_MM, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_a_bits_user_vaddr, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_a_bits_user_reqSource, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_a_bits_user_needHint, UVM_ALL_ON);
@@ -172,8 +162,6 @@ class dcache_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(auto_inner_dcache_client_out_c_bits_source, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_c_bits_address, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_c_bits_user_alias, UVM_ALL_ON);
-        `uvm_field_int(auto_inner_dcache_client_out_c_bits_user_memPageType_NC, UVM_ALL_ON);
-        `uvm_field_int(auto_inner_dcache_client_out_c_bits_user_memBackType_MM, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_c_bits_user_vaddr, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_c_bits_user_reqSource, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_c_bits_user_needHint, UVM_ALL_ON);
@@ -231,13 +219,7 @@ constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_a_bi
 
 }
 
-constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_a_bits_user_memPageType_NC_cons{
 
-}
-
-constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_a_bits_user_memBackType_MM_cons{
-
-}
 
 constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_a_bits_user_vaddr_cons{
 
@@ -339,13 +321,7 @@ constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_c_bi
 
 }
 
-constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_c_bits_user_memPageType_NC_cons{
 
-}
-
-constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_c_bits_user_memBackType_MM_cons{
-
-}
 
 constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_c_bits_user_vaddr_cons{
 
@@ -461,8 +437,6 @@ function string dcache_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_a_bits_source = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_a_bits_source);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_a_bits_address = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_a_bits_address);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_a_bits_user_alias = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_a_bits_user_alias);
-    pkt_str = $sformatf("%sauto_inner_dcache_client_out_a_bits_user_memPageType_NC = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_a_bits_user_memPageType_NC);
-    pkt_str = $sformatf("%sauto_inner_dcache_client_out_a_bits_user_memBackType_MM = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_a_bits_user_memBackType_MM);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_a_bits_user_vaddr = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_a_bits_user_vaddr);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_a_bits_user_reqSource = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_a_bits_user_reqSource);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_a_bits_user_needHint = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_a_bits_user_needHint);
@@ -488,8 +462,6 @@ function string dcache_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_c_bits_source = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_c_bits_source);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_c_bits_address = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_c_bits_address);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_c_bits_user_alias = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_c_bits_user_alias);
-    pkt_str = $sformatf("%sauto_inner_dcache_client_out_c_bits_user_memPageType_NC = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_c_bits_user_memPageType_NC);
-    pkt_str = $sformatf("%sauto_inner_dcache_client_out_c_bits_user_memBackType_MM = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_c_bits_user_memBackType_MM);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_c_bits_user_vaddr = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_c_bits_user_vaddr);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_c_bits_user_reqSource = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_c_bits_user_reqSource);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_c_bits_user_needHint = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_c_bits_user_needHint);
@@ -570,15 +542,7 @@ function bit dcache_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer co
             `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_dcache_client_out_a_bits_user_alias=0x%0h while the rhs_.auto_inner_dcache_client_out_a_bits_user_alias=0x%0h",this.auto_inner_dcache_client_out_a_bits_user_alias,rhs_.auto_inner_dcache_client_out_a_bits_user_alias),UVM_NONE)
         end
 
-        if(this.auto_inner_dcache_client_out_a_bits_user_memPageType_NC!=rhs_.auto_inner_dcache_client_out_a_bits_user_memPageType_NC) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_dcache_client_out_a_bits_user_memPageType_NC=0x%0h while the rhs_.auto_inner_dcache_client_out_a_bits_user_memPageType_NC=0x%0h",this.auto_inner_dcache_client_out_a_bits_user_memPageType_NC,rhs_.auto_inner_dcache_client_out_a_bits_user_memPageType_NC),UVM_NONE)
-        end
 
-        if(this.auto_inner_dcache_client_out_a_bits_user_memBackType_MM!=rhs_.auto_inner_dcache_client_out_a_bits_user_memBackType_MM) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_dcache_client_out_a_bits_user_memBackType_MM=0x%0h while the rhs_.auto_inner_dcache_client_out_a_bits_user_memBackType_MM=0x%0h",this.auto_inner_dcache_client_out_a_bits_user_memBackType_MM,rhs_.auto_inner_dcache_client_out_a_bits_user_memBackType_MM),UVM_NONE)
-        end
 
         if(this.auto_inner_dcache_client_out_a_bits_user_vaddr!=rhs_.auto_inner_dcache_client_out_a_bits_user_vaddr) begin
             super_result = 0;
@@ -705,15 +669,7 @@ function bit dcache_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer co
             `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_dcache_client_out_c_bits_user_alias=0x%0h while the rhs_.auto_inner_dcache_client_out_c_bits_user_alias=0x%0h",this.auto_inner_dcache_client_out_c_bits_user_alias,rhs_.auto_inner_dcache_client_out_c_bits_user_alias),UVM_NONE)
         end
 
-        if(this.auto_inner_dcache_client_out_c_bits_user_memPageType_NC!=rhs_.auto_inner_dcache_client_out_c_bits_user_memPageType_NC) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_dcache_client_out_c_bits_user_memPageType_NC=0x%0h while the rhs_.auto_inner_dcache_client_out_c_bits_user_memPageType_NC=0x%0h",this.auto_inner_dcache_client_out_c_bits_user_memPageType_NC,rhs_.auto_inner_dcache_client_out_c_bits_user_memPageType_NC),UVM_NONE)
-        end
 
-        if(this.auto_inner_dcache_client_out_c_bits_user_memBackType_MM!=rhs_.auto_inner_dcache_client_out_c_bits_user_memBackType_MM) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_dcache_client_out_c_bits_user_memBackType_MM=0x%0h while the rhs_.auto_inner_dcache_client_out_c_bits_user_memBackType_MM=0x%0h",this.auto_inner_dcache_client_out_c_bits_user_memBackType_MM,rhs_.auto_inner_dcache_client_out_c_bits_user_memBackType_MM),UVM_NONE)
-        end
 
         if(this.auto_inner_dcache_client_out_c_bits_user_vaddr!=rhs_.auto_inner_dcache_client_out_c_bits_user_vaddr) begin
             super_result = 0;

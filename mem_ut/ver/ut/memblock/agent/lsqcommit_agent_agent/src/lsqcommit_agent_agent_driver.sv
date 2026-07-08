@@ -86,11 +86,18 @@ task lsqcommit_agent_agent_driver::send_pkt(lsqcommit_agent_agent_xaction tr);
     vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_value <= tr.io_ooo_to_mem_lsqio_pendingPtr_value;
     vif.drv_mp.drv_cb.io_ooo_to_mem_flushSb <= tr.io_ooo_to_mem_flushSb;
 
+    vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingMMIOld <= tr.io_ooo_to_mem_lsqio_pendingMMIOld;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingst <= tr.io_ooo_to_mem_lsqio_pendingst;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_scommit <= tr.io_ooo_to_mem_lsqio_scommit;
+
 endtask:send_pkt
 
 task lsqcommit_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 
     if(drv_mode==tcnt_dec_base::DRV_0) begin
+        vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingMMIOld <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingst <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_scommit <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_flag <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_lsqio_pendingPtr_value <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_flushSb <= '0;

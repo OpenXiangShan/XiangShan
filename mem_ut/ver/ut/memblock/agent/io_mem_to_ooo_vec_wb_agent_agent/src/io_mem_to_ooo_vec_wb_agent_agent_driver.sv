@@ -82,36 +82,24 @@ task io_mem_to_ooo_vec_wb_agent_agent_driver::main_phase(uvm_phase phase);
 endtask:main_phase
 
 task io_mem_to_ooo_vec_wb_agent_agent_driver::send_pkt(io_mem_to_ooo_vec_wb_agent_agent_xaction tr);
-    vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_1_0_ready <= tr.io_mem_to_ooo_vecWriteback_1_0_ready;
-    vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_0_0_ready <= tr.io_mem_to_ooo_vecWriteback_0_0_ready;
 
 endtask:send_pkt
 
 task io_mem_to_ooo_vec_wb_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 
     if(drv_mode==tcnt_dec_base::DRV_0) begin
-        vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_1_0_ready <= '0;
-        vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_0_0_ready <= '0;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_1) begin
-        vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_1_0_ready <= '1;
-        vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_0_0_ready <= '1;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_X) begin
-        vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_1_0_ready <= 'x;
-        vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_0_0_ready <= 'x;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_RAND) begin
-        vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_1_0_ready <= $urandom;
-        vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_0_0_ready <= $urandom;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_LST) begin
-        vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_1_0_ready <= '0;
-        vif.drv_mp.drv_cb.io_mem_to_ooo_vecWriteback_0_0_ready <= '0;
 
     end
 

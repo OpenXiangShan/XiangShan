@@ -18,8 +18,8 @@ class seq_csr_common;
     static int unsigned enq_per_cycle = 4;
     // 控制 get_enq_per_cycle() 是否每次在 [1:real_enq_width] 内均匀随机。
     static bit          enq_per_cycle_rand_en = 1'b0;
-    // 当前DUT每拍LSQ enqueue总slot上限；route阶段每拍从连续success前缀后最多扫描该数量的uid，默认按8-wide配置设置。
-    static int unsigned real_lsq_enq_max = 8;
+    // 当前V2 DUT每拍LSQ enqueue总slot上限；route阶段每拍从连续success前缀后最多扫描该数量的uid。
+    static int unsigned real_lsq_enq_max = 6;
     // LOAD/STA/STD issue pipe配置上限；由plus加载并被真实pipe数clamp。
     // 调度路径不直接把它当本拍发射数，必须通过sample_*_pip_num()按随机开关采样。
     static int unsigned load_pip_num_limit = 3;
@@ -31,7 +31,7 @@ class seq_csr_common;
     static bit          std_pip_num_random_en = 1'b0;
 
     // LSQ enqueue真实slot宽度兼容字段，必须与real_lsq_enq_max保持一致。
-    static int unsigned real_enq_width = 8;
+    static int unsigned real_enq_width = 6;
     static int unsigned real_load_pipe_num = 3;
     static int unsigned real_sta_pipe_num = 2;
     static int unsigned real_std_pipe_num = 2;
@@ -395,8 +395,8 @@ class seq_csr_common;
         fatal_if_zero("real_sta_pipe_num", real_sta_pipe_num);
         fatal_if_zero("real_std_pipe_num", real_std_pipe_num);
         fatal_if_zero("real_lsq_enq_max", real_lsq_enq_max);
-        clamp_int("real_enq_width", real_enq_width, 1, 8);
-        clamp_int("real_lsq_enq_max", real_lsq_enq_max, 1, 8);
+        clamp_int("real_enq_width", real_enq_width, 1, 6);
+        clamp_int("real_lsq_enq_max", real_lsq_enq_max, 1, 6);
         if (real_enq_width != real_lsq_enq_max) begin
             `uvm_fatal("SEQ_CSR_CFG",
                        $sformatf("MEMBLOCK_REAL_ENQ_WIDTH=%0d must equal MEMBLOCK_REAL_LSQ_ENQ_MAX=%0d",

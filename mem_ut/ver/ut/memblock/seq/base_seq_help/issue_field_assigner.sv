@@ -161,138 +161,117 @@ class issue_field_assigner extends uvm_object;
         if (tr == null) begin
             `uvm_fatal("ISSUE_FIELD", "clear_lintsissue_xaction got null xaction")
         end
-        tr.io_ooo_to_mem_intIssue_6_0_ready = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_valid = 1'b0;
-        tr.io_ooo_to_mem_intIssue_1_0_valid = 1'b0;
-        tr.io_ooo_to_mem_intIssue_2_0_valid = 1'b0;
-        tr.io_ooo_to_mem_intIssue_3_0_valid = 1'b0;
-        tr.io_ooo_to_mem_intIssue_4_0_valid = 1'b0;
-        tr.io_ooo_to_mem_intIssue_5_0_valid = 1'b0;
-        tr.io_ooo_to_mem_intIssue_6_0_valid = 1'b0;
-        tr.io_ooo_to_mem_intIssue_6_0_bits_fuType = '0;
-        tr.io_ooo_to_mem_intIssue_6_0_bits_fuOpType = '0;
-        tr.io_ooo_to_mem_intIssue_6_0_bits_src_0 = '0;
-        tr.io_ooo_to_mem_intIssue_6_0_bits_robIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_6_0_bits_robIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_0_valid = 1'b0;
+        tr.io_ooo_to_mem_issueLda_0_bits_src_0 = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_fpWen = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqOffset = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_flag = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_value = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_fuOpType = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_imm = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_loadWaitBit = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_loadWaitStrict = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_pc = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_pdest = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_preDecodeInfo_isRVC = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_rfWen = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_storeSetHit = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_waitForRobIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_0_bits_uop_waitForRobIdx_value = '0;
 
-        tr.io_ooo_to_mem_intIssue_5_0_ready = '0;
-        tr.io_ooo_to_mem_intIssue_5_0_bits_fuType = '0;
-        tr.io_ooo_to_mem_intIssue_5_0_bits_fuOpType = '0;
-        tr.io_ooo_to_mem_intIssue_5_0_bits_src_0 = '0;
-        tr.io_ooo_to_mem_intIssue_5_0_bits_robIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_5_0_bits_robIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_1_valid = 1'b0;
+        tr.io_ooo_to_mem_issueLda_1_bits_src_0 = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_fpWen = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqOffset = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_flag = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_value = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_fuOpType = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_imm = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_loadWaitBit = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_loadWaitStrict = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_lqIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_lqIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_pc = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_pdest = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_preDecodeInfo_isRVC = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_rfWen = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_robIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_robIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_sqIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_sqIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_storeSetHit = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_waitForRobIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_1_bits_uop_waitForRobIdx_value = '0;
 
-        tr.io_ooo_to_mem_intIssue_4_0_ready = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_fuType = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_fuOpType = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_src_0 = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_imm = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_robIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_robIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_isFirstIssue = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_pdest = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_isRVC = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_ftqOffset = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_storeSetHit = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_ssid = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_2_valid = 1'b0;
+        tr.io_ooo_to_mem_issueLda_2_bits_src_0 = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_fpWen = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqOffset = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_flag = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_value = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_fuOpType = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_imm = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_loadWaitBit = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_loadWaitStrict = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_lqIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_lqIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_pc = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_pdest = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_preDecodeInfo_isRVC = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_rfWen = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_robIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_robIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_sqIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_sqIdx_value = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_storeSetHit = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_waitForRobIdx_flag = '0;
+        tr.io_ooo_to_mem_issueLda_2_bits_uop_waitForRobIdx_value = '0;
 
-        tr.io_ooo_to_mem_intIssue_3_0_ready = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_fuType = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_fuOpType = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_src_0 = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_imm = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_robIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_robIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_isFirstIssue = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_pdest = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_isRVC = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_ftqOffset = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_storeSetHit = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_ssid = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_value = '0;
+        tr.io_ooo_to_mem_issueSta_0_valid = 1'b0;
+        tr.io_ooo_to_mem_issueSta_0_bits_src_0 = '0;
+        tr.io_ooo_to_mem_issueSta_0_bits_uop_fuOpType = '0;
+        tr.io_ooo_to_mem_issueSta_0_bits_uop_fuType = '0;
+        tr.io_ooo_to_mem_issueSta_0_bits_uop_imm = '0;
+        tr.io_ooo_to_mem_issueSta_0_bits_uop_pdest = '0;
+        tr.io_ooo_to_mem_issueSta_0_bits_uop_rfWen = '0;
+        tr.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_flag = '0;
+        tr.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_value = '0;
+        tr.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_flag = '0;
+        tr.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_value = '0;
 
-        tr.io_ooo_to_mem_intIssue_2_0_ready = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_fuOpType = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_src_0 = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_imm = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_robIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_robIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_pdest = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_rfWen = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_fpWen = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_pc = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_isRVC = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_ftqOffset = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_loadWaitBit = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_storeSetHit = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_loadWaitStrict = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_value = '0;
+        tr.io_ooo_to_mem_issueSta_1_valid = 1'b0;
+        tr.io_ooo_to_mem_issueSta_1_bits_src_0 = '0;
+        tr.io_ooo_to_mem_issueSta_1_bits_uop_fuOpType = '0;
+        tr.io_ooo_to_mem_issueSta_1_bits_uop_fuType = '0;
+        tr.io_ooo_to_mem_issueSta_1_bits_uop_imm = '0;
+        tr.io_ooo_to_mem_issueSta_1_bits_uop_pdest = '0;
+        tr.io_ooo_to_mem_issueSta_1_bits_uop_rfWen = '0;
+        tr.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_flag = '0;
+        tr.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_value = '0;
+        tr.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_flag = '0;
+        tr.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_value = '0;
 
-        tr.io_ooo_to_mem_intIssue_1_0_ready = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_fuOpType = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_src_0 = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_imm = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_robIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_robIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_pdest = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_rfWen = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_fpWen = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_pc = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_isRVC = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_ftqOffset = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_loadWaitBit = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_storeSetHit = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_loadWaitStrict = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_value = '0;
+        tr.io_ooo_to_mem_issueStd_0_valid = 1'b0;
+        tr.io_ooo_to_mem_issueStd_0_bits_src_0 = '0;
+        tr.io_ooo_to_mem_issueStd_0_bits_uop_fuOpType = '0;
+        tr.io_ooo_to_mem_issueStd_0_bits_uop_fuType = '0;
+        tr.io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value = '0;
+        tr.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_flag = '0;
+        tr.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_value = '0;
 
-        tr.io_ooo_to_mem_intIssue_0_0_ready = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_fuOpType = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_src_0 = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_imm = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_robIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_pdest = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_rfWen = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_fpWen = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_pc = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_isRVC = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_ftqOffset = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_loadWaitBit = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_storeSetHit = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_loadWaitStrict = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_flag = '0;
-        tr.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value = '0;
+        tr.io_ooo_to_mem_issueStd_1_valid = 1'b0;
+        tr.io_ooo_to_mem_issueStd_1_bits_src_0 = '0;
+        tr.io_ooo_to_mem_issueStd_1_bits_uop_fuOpType = '0;
+        tr.io_ooo_to_mem_issueStd_1_bits_uop_fuType = '0;
+        tr.io_ooo_to_mem_issueStd_1_bits_uop_robIdx_value = '0;
+        tr.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_flag = '0;
+        tr.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_value = '0;
     endfunction:clear_lintsissue_xaction
 
     function void assign_load_main_fields(input lintsissue_agent_agent_xaction tr,
@@ -301,40 +280,40 @@ class issue_field_assigner extends uvm_object;
                                           input int unsigned pipe_idx);
         case (pipe_idx)
             0: begin
-                tr.io_ooo_to_mem_intIssue_0_0_valid = 1'b1;
-                tr.io_ooo_to_mem_intIssue_0_0_bits_fuOpType = main_tr.fuOpType;
-                tr.io_ooo_to_mem_intIssue_0_0_bits_src_0 = main_tr.src_0;
-                tr.io_ooo_to_mem_intIssue_0_0_bits_imm = main_tr.imm;
-                tr.io_ooo_to_mem_intIssue_0_0_bits_robIdx_flag = main_tr.robIdx_flag;
-                tr.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value = main_tr.robIdx_value;
-                tr.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_flag = item.lq_key.flag;
-                tr.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value = item.lq_key.value;
-                tr.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_flag = item.sq_key.flag;
-                tr.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value = item.sq_key.value;
+                tr.io_ooo_to_mem_issueLda_0_valid = 1'b1;
+                tr.io_ooo_to_mem_issueLda_0_bits_uop_fuOpType = main_tr.fuOpType;
+                tr.io_ooo_to_mem_issueLda_0_bits_src_0 = main_tr.src_0;
+                tr.io_ooo_to_mem_issueLda_0_bits_uop_imm = main_tr.imm;
+                tr.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_flag = main_tr.robIdx_flag;
+                tr.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_value = main_tr.robIdx_value;
+                tr.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_flag = item.lq_key.flag;
+                tr.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_value = item.lq_key.value;
+                tr.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_flag = item.sq_key.flag;
+                tr.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_value = item.sq_key.value;
             end
             1: begin
-                tr.io_ooo_to_mem_intIssue_1_0_valid = 1'b1;
-                tr.io_ooo_to_mem_intIssue_1_0_bits_fuOpType = main_tr.fuOpType;
-                tr.io_ooo_to_mem_intIssue_1_0_bits_src_0 = main_tr.src_0;
-                tr.io_ooo_to_mem_intIssue_1_0_bits_imm = main_tr.imm;
-                tr.io_ooo_to_mem_intIssue_1_0_bits_robIdx_flag = main_tr.robIdx_flag;
-                tr.io_ooo_to_mem_intIssue_1_0_bits_robIdx_value = main_tr.robIdx_value;
-                tr.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_flag = item.lq_key.flag;
-                tr.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_value = item.lq_key.value;
-                tr.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_flag = item.sq_key.flag;
-                tr.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_value = item.sq_key.value;
+                tr.io_ooo_to_mem_issueLda_1_valid = 1'b1;
+                tr.io_ooo_to_mem_issueLda_1_bits_uop_fuOpType = main_tr.fuOpType;
+                tr.io_ooo_to_mem_issueLda_1_bits_src_0 = main_tr.src_0;
+                tr.io_ooo_to_mem_issueLda_1_bits_uop_imm = main_tr.imm;
+                tr.io_ooo_to_mem_issueLda_1_bits_uop_robIdx_flag = main_tr.robIdx_flag;
+                tr.io_ooo_to_mem_issueLda_1_bits_uop_robIdx_value = main_tr.robIdx_value;
+                tr.io_ooo_to_mem_issueLda_1_bits_uop_lqIdx_flag = item.lq_key.flag;
+                tr.io_ooo_to_mem_issueLda_1_bits_uop_lqIdx_value = item.lq_key.value;
+                tr.io_ooo_to_mem_issueLda_1_bits_uop_sqIdx_flag = item.sq_key.flag;
+                tr.io_ooo_to_mem_issueLda_1_bits_uop_sqIdx_value = item.sq_key.value;
             end
             2: begin
-                tr.io_ooo_to_mem_intIssue_2_0_valid = 1'b1;
-                tr.io_ooo_to_mem_intIssue_2_0_bits_fuOpType = main_tr.fuOpType;
-                tr.io_ooo_to_mem_intIssue_2_0_bits_src_0 = main_tr.src_0;
-                tr.io_ooo_to_mem_intIssue_2_0_bits_imm = main_tr.imm;
-                tr.io_ooo_to_mem_intIssue_2_0_bits_robIdx_flag = main_tr.robIdx_flag;
-                tr.io_ooo_to_mem_intIssue_2_0_bits_robIdx_value = main_tr.robIdx_value;
-                tr.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_flag = item.lq_key.flag;
-                tr.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_value = item.lq_key.value;
-                tr.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_flag = item.sq_key.flag;
-                tr.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_value = item.sq_key.value;
+                tr.io_ooo_to_mem_issueLda_2_valid = 1'b1;
+                tr.io_ooo_to_mem_issueLda_2_bits_uop_fuOpType = main_tr.fuOpType;
+                tr.io_ooo_to_mem_issueLda_2_bits_src_0 = main_tr.src_0;
+                tr.io_ooo_to_mem_issueLda_2_bits_uop_imm = main_tr.imm;
+                tr.io_ooo_to_mem_issueLda_2_bits_uop_robIdx_flag = main_tr.robIdx_flag;
+                tr.io_ooo_to_mem_issueLda_2_bits_uop_robIdx_value = main_tr.robIdx_value;
+                tr.io_ooo_to_mem_issueLda_2_bits_uop_lqIdx_flag = item.lq_key.flag;
+                tr.io_ooo_to_mem_issueLda_2_bits_uop_lqIdx_value = item.lq_key.value;
+                tr.io_ooo_to_mem_issueLda_2_bits_uop_sqIdx_flag = item.sq_key.flag;
+                tr.io_ooo_to_mem_issueLda_2_bits_uop_sqIdx_value = item.sq_key.value;
             end
             default: `uvm_fatal("ISSUE_FIELD", $sformatf("load pipe_idx=%0d out of range", pipe_idx))
         endcase
@@ -346,26 +325,26 @@ class issue_field_assigner extends uvm_object;
                                          input int unsigned pipe_idx);
         case (pipe_idx)
             0: begin
-                tr.io_ooo_to_mem_intIssue_3_0_valid = 1'b1;
-                tr.io_ooo_to_mem_intIssue_3_0_bits_fuType = main_tr.fuType;
-                tr.io_ooo_to_mem_intIssue_3_0_bits_fuOpType = main_tr.fuOpType;
-                tr.io_ooo_to_mem_intIssue_3_0_bits_src_0 = main_tr.src_0;
-                tr.io_ooo_to_mem_intIssue_3_0_bits_imm = main_tr.imm;
-                tr.io_ooo_to_mem_intIssue_3_0_bits_robIdx_flag = main_tr.robIdx_flag;
-                tr.io_ooo_to_mem_intIssue_3_0_bits_robIdx_value = main_tr.robIdx_value;
-                tr.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_flag = item.sq_key.flag;
-                tr.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_value = item.sq_key.value;
+                tr.io_ooo_to_mem_issueSta_0_valid = 1'b1;
+                tr.io_ooo_to_mem_issueSta_0_bits_uop_fuType = main_tr.fuType;
+                tr.io_ooo_to_mem_issueSta_0_bits_uop_fuOpType = main_tr.fuOpType;
+                tr.io_ooo_to_mem_issueSta_0_bits_src_0 = main_tr.src_0;
+                tr.io_ooo_to_mem_issueSta_0_bits_uop_imm = main_tr.imm;
+                tr.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_flag = main_tr.robIdx_flag;
+                tr.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_value = main_tr.robIdx_value;
+                tr.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_flag = item.sq_key.flag;
+                tr.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_value = item.sq_key.value;
             end
             1: begin
-                tr.io_ooo_to_mem_intIssue_4_0_valid = 1'b1;
-                tr.io_ooo_to_mem_intIssue_4_0_bits_fuType = main_tr.fuType;
-                tr.io_ooo_to_mem_intIssue_4_0_bits_fuOpType = main_tr.fuOpType;
-                tr.io_ooo_to_mem_intIssue_4_0_bits_src_0 = main_tr.src_0;
-                tr.io_ooo_to_mem_intIssue_4_0_bits_imm = main_tr.imm;
-                tr.io_ooo_to_mem_intIssue_4_0_bits_robIdx_flag = main_tr.robIdx_flag;
-                tr.io_ooo_to_mem_intIssue_4_0_bits_robIdx_value = main_tr.robIdx_value;
-                tr.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_flag = item.sq_key.flag;
-                tr.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_value = item.sq_key.value;
+                tr.io_ooo_to_mem_issueSta_1_valid = 1'b1;
+                tr.io_ooo_to_mem_issueSta_1_bits_uop_fuType = main_tr.fuType;
+                tr.io_ooo_to_mem_issueSta_1_bits_uop_fuOpType = main_tr.fuOpType;
+                tr.io_ooo_to_mem_issueSta_1_bits_src_0 = main_tr.src_0;
+                tr.io_ooo_to_mem_issueSta_1_bits_uop_imm = main_tr.imm;
+                tr.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_flag = main_tr.robIdx_flag;
+                tr.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_value = main_tr.robIdx_value;
+                tr.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_flag = item.sq_key.flag;
+                tr.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_value = item.sq_key.value;
             end
             default: `uvm_fatal("ISSUE_FIELD", $sformatf("STA pipe_idx=%0d out of range", pipe_idx))
         endcase
@@ -377,24 +356,22 @@ class issue_field_assigner extends uvm_object;
                                          input int unsigned pipe_idx);
         case (pipe_idx)
             0: begin
-                tr.io_ooo_to_mem_intIssue_5_0_valid = 1'b1;
-                tr.io_ooo_to_mem_intIssue_5_0_bits_fuType = main_tr.fuType;
-                tr.io_ooo_to_mem_intIssue_5_0_bits_fuOpType = main_tr.fuOpType;
-                tr.io_ooo_to_mem_intIssue_5_0_bits_src_0 = main_tr.src_0;
-                tr.io_ooo_to_mem_intIssue_5_0_bits_robIdx_flag = main_tr.robIdx_flag;
-                tr.io_ooo_to_mem_intIssue_5_0_bits_robIdx_value = main_tr.robIdx_value;
-                tr.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_flag = item.sq_key.flag;
-                tr.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_value = item.sq_key.value;
+                tr.io_ooo_to_mem_issueStd_0_valid = 1'b1;
+                tr.io_ooo_to_mem_issueStd_0_bits_uop_fuType = main_tr.fuType;
+                tr.io_ooo_to_mem_issueStd_0_bits_uop_fuOpType = main_tr.fuOpType;
+                tr.io_ooo_to_mem_issueStd_0_bits_src_0 = main_tr.src_0;
+                tr.io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value = main_tr.robIdx_value;
+                tr.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_flag = item.sq_key.flag;
+                tr.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_value = item.sq_key.value;
             end
             1: begin
-                tr.io_ooo_to_mem_intIssue_6_0_valid = 1'b1;
-                tr.io_ooo_to_mem_intIssue_6_0_bits_fuType = main_tr.fuType;
-                tr.io_ooo_to_mem_intIssue_6_0_bits_fuOpType = main_tr.fuOpType;
-                tr.io_ooo_to_mem_intIssue_6_0_bits_src_0 = main_tr.src_0;
-                tr.io_ooo_to_mem_intIssue_6_0_bits_robIdx_flag = main_tr.robIdx_flag;
-                tr.io_ooo_to_mem_intIssue_6_0_bits_robIdx_value = main_tr.robIdx_value;
-                tr.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_flag = item.sq_key.flag;
-                tr.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_value = item.sq_key.value;
+                tr.io_ooo_to_mem_issueStd_1_valid = 1'b1;
+                tr.io_ooo_to_mem_issueStd_1_bits_uop_fuType = main_tr.fuType;
+                tr.io_ooo_to_mem_issueStd_1_bits_uop_fuOpType = main_tr.fuOpType;
+                tr.io_ooo_to_mem_issueStd_1_bits_src_0 = main_tr.src_0;
+                tr.io_ooo_to_mem_issueStd_1_bits_uop_robIdx_value = main_tr.robIdx_value;
+                tr.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_flag = item.sq_key.flag;
+                tr.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_value = item.sq_key.value;
             end
             default: `uvm_fatal("ISSUE_FIELD", $sformatf("STD pipe_idx=%0d out of range", pipe_idx))
         endcase
@@ -453,41 +430,30 @@ class issue_field_assigner extends uvm_object;
             MEMBLOCK_ISSUE_TARGET_LOAD: begin
                 case (pipe_idx)
                     0: begin
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_loadWaitBit = wait_valid;
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_flag = wait_rob_key.flag;
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_value = wait_rob_key.value;
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_storeSetHit = store_set_hit;
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_loadWaitStrict = load_wait_strict;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_loadWaitBit = wait_valid;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_waitForRobIdx_flag = wait_rob_key.flag;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_waitForRobIdx_value = wait_rob_key.value;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_storeSetHit = store_set_hit;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_loadWaitStrict = load_wait_strict;
                     end
                     1: begin
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_loadWaitBit = wait_valid;
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_flag = wait_rob_key.flag;
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_value = wait_rob_key.value;
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_storeSetHit = store_set_hit;
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_loadWaitStrict = load_wait_strict;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_loadWaitBit = wait_valid;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_waitForRobIdx_flag = wait_rob_key.flag;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_waitForRobIdx_value = wait_rob_key.value;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_storeSetHit = store_set_hit;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_loadWaitStrict = load_wait_strict;
                     end
                     2: begin
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_loadWaitBit = wait_valid;
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_flag = wait_rob_key.flag;
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_value = wait_rob_key.value;
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_storeSetHit = store_set_hit;
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_loadWaitStrict = load_wait_strict;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_loadWaitBit = wait_valid;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_waitForRobIdx_flag = wait_rob_key.flag;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_waitForRobIdx_value = wait_rob_key.value;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_storeSetHit = store_set_hit;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_loadWaitStrict = load_wait_strict;
                     end
                 endcase
             end
             MEMBLOCK_ISSUE_TARGET_STA: begin
-                case (pipe_idx)
-                    0: begin
-                        tr.io_ooo_to_mem_intIssue_3_0_bits_isFirstIssue = is_first_issue;
-                        tr.io_ooo_to_mem_intIssue_3_0_bits_storeSetHit = store_set_hit;
-                        tr.io_ooo_to_mem_intIssue_3_0_bits_ssid = ssid;
-                    end
-                    1: begin
-                        tr.io_ooo_to_mem_intIssue_4_0_bits_isFirstIssue = is_first_issue;
-                        tr.io_ooo_to_mem_intIssue_4_0_bits_storeSetHit = store_set_hit;
-                        tr.io_ooo_to_mem_intIssue_4_0_bits_ssid = ssid;
-                    end
-                endcase
+                return;
             end
             MEMBLOCK_ISSUE_TARGET_STD: begin
                 return;
@@ -529,52 +495,46 @@ class issue_field_assigner extends uvm_object;
             MEMBLOCK_ISSUE_TARGET_LOAD: begin
                 case (pipe_idx)
                     0: begin
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_pdest = pdest;
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_rfWen = rfWen;
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_fpWen = fpWen;
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_pc = pc;
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_isRVC = is_rvc;
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_flag = ftq_flag;
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_value = ftq_value;
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_ftqOffset = ftq_offset;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_pdest = pdest;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_rfWen = rfWen;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_fpWen = fpWen;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_pc = pc;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_preDecodeInfo_isRVC = is_rvc;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_flag = ftq_flag;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_value = ftq_value;
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqOffset = ftq_offset[3:0];
                     end
                     1: begin
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_pdest = pdest;
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_rfWen = rfWen;
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_fpWen = fpWen;
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_pc = pc;
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_isRVC = is_rvc;
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_flag = ftq_flag;
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_value = ftq_value;
-                        tr.io_ooo_to_mem_intIssue_1_0_bits_ftqOffset = ftq_offset;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_pdest = pdest;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_rfWen = rfWen;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_fpWen = fpWen;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_pc = pc;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_preDecodeInfo_isRVC = is_rvc;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_flag = ftq_flag;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_value = ftq_value;
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqOffset = ftq_offset[3:0];
                     end
                     2: begin
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_pdest = pdest;
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_rfWen = rfWen;
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_fpWen = fpWen;
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_pc = pc;
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_isRVC = is_rvc;
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_flag = ftq_flag;
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_value = ftq_value;
-                        tr.io_ooo_to_mem_intIssue_2_0_bits_ftqOffset = ftq_offset;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_pdest = pdest;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_rfWen = rfWen;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_fpWen = fpWen;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_pc = pc;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_preDecodeInfo_isRVC = is_rvc;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_flag = ftq_flag;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_value = ftq_value;
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqOffset = ftq_offset[3:0];
                     end
                 endcase
             end
             MEMBLOCK_ISSUE_TARGET_STA: begin
                 case (pipe_idx)
                     0: begin
-                        tr.io_ooo_to_mem_intIssue_3_0_bits_pdest = pdest;
-                        tr.io_ooo_to_mem_intIssue_3_0_bits_isRVC = is_rvc;
-                        tr.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_flag = ftq_flag;
-                        tr.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_value = ftq_value;
-                        tr.io_ooo_to_mem_intIssue_3_0_bits_ftqOffset = ftq_offset;
+                        tr.io_ooo_to_mem_issueSta_0_bits_uop_pdest = pdest;
+                        tr.io_ooo_to_mem_issueSta_0_bits_uop_rfWen = rfWen;
                     end
                     1: begin
-                        tr.io_ooo_to_mem_intIssue_4_0_bits_pdest = pdest;
-                        tr.io_ooo_to_mem_intIssue_4_0_bits_isRVC = is_rvc;
-                        tr.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_flag = ftq_flag;
-                        tr.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_value = ftq_value;
-                        tr.io_ooo_to_mem_intIssue_4_0_bits_ftqOffset = ftq_offset;
+                        tr.io_ooo_to_mem_issueSta_1_bits_uop_pdest = pdest;
+                        tr.io_ooo_to_mem_issueSta_1_bits_uop_rfWen = rfWen;
                     end
                 endcase
             end

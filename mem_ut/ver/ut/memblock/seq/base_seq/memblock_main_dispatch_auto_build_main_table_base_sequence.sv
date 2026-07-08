@@ -154,16 +154,16 @@ function void memblock_main_dispatch_auto_build_main_table_base_sequence::report
                         data.active_redirect.valid,
                         data.issue_freeze_ack),
               UVM_LOW)
-    report_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_valid");
-    report_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_ready");
-    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_bits_fuOpType");
-    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_bits_src_0");
-    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_bits_imm");
-    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value");
-    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value");
-    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value");
-    report_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_1_0_ready");
-    report_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_2_0_ready");
+    report_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_issueLda_0_valid");
+    report_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_issueLda_0_ready");
+    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_issueLda_0_bits_uop_fuOpType");
+    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_issueLda_0_bits_src_0");
+    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_issueLda_0_bits_uop_imm");
+    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_value");
+    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_value");
+    report_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_value");
+    report_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_issueLda_1_ready");
+    report_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_issueLda_2_ready");
     report_hdl_bit("top_tb.U_MEMBLOCK._inner_LoadUnit_0_io_tlb_req_valid");
     report_hdl_value("top_tb.U_MEMBLOCK._inner_LoadUnit_0_io_tlb_req_bits_vaddr");
     report_hdl_bit("top_tb.U_MEMBLOCK._inner_LoadUnit_0_io_dcache_req_valid");

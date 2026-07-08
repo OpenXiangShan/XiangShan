@@ -66,6 +66,11 @@ class L2tlb_agent_agent_xaction  extends tcnt_data_base;
     rand bit [37:0] io_ptw_resp_bits_s2_entry_ppn;
     rand bit io_ptw_resp_bits_s2_entry_perm_d;
     rand bit io_ptw_resp_bits_s2_entry_perm_a;
+    // 中文注释：二级页表 entry 的 global/user 权限位。
+    // 置位来源：L2TLB responder sequence 根据 memblock_tlb_entry.pte_g/pte_u 填入 transaction。
+    // 作用：driver 通过 interface 真实驱动到 V2 DTLB/L2TLB response 内部连线，避免权限语义被固定为 0。
+    rand bit io_ptw_resp_bits_s2_entry_perm_g;
+    rand bit io_ptw_resp_bits_s2_entry_perm_u;
     rand bit io_ptw_resp_bits_s2_entry_perm_x;
     rand bit io_ptw_resp_bits_s2_entry_perm_w;
     rand bit io_ptw_resp_bits_s2_entry_perm_r;
@@ -128,6 +133,8 @@ class L2tlb_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_ptw_resp_bits_s2_entry_ppn_cons;
     extern constraint default_io_ptw_resp_bits_s2_entry_perm_d_cons;
     extern constraint default_io_ptw_resp_bits_s2_entry_perm_a_cons;
+    extern constraint default_io_ptw_resp_bits_s2_entry_perm_g_cons;
+    extern constraint default_io_ptw_resp_bits_s2_entry_perm_u_cons;
     extern constraint default_io_ptw_resp_bits_s2_entry_perm_x_cons;
     extern constraint default_io_ptw_resp_bits_s2_entry_perm_w_cons;
     extern constraint default_io_ptw_resp_bits_s2_entry_perm_r_cons;
@@ -199,6 +206,8 @@ class L2tlb_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_ptw_resp_bits_s2_entry_ppn, UVM_ALL_ON);
         `uvm_field_int(io_ptw_resp_bits_s2_entry_perm_d, UVM_ALL_ON);
         `uvm_field_int(io_ptw_resp_bits_s2_entry_perm_a, UVM_ALL_ON);
+        `uvm_field_int(io_ptw_resp_bits_s2_entry_perm_g, UVM_ALL_ON);
+        `uvm_field_int(io_ptw_resp_bits_s2_entry_perm_u, UVM_ALL_ON);
         `uvm_field_int(io_ptw_resp_bits_s2_entry_perm_x, UVM_ALL_ON);
         `uvm_field_int(io_ptw_resp_bits_s2_entry_perm_w, UVM_ALL_ON);
         `uvm_field_int(io_ptw_resp_bits_s2_entry_perm_r, UVM_ALL_ON);
@@ -430,6 +439,14 @@ constraint L2tlb_agent_agent_xaction::default_io_ptw_resp_bits_s2_entry_perm_a_c
 
 }
 
+constraint L2tlb_agent_agent_xaction::default_io_ptw_resp_bits_s2_entry_perm_g_cons{
+
+}
+
+constraint L2tlb_agent_agent_xaction::default_io_ptw_resp_bits_s2_entry_perm_u_cons{
+
+}
+
 constraint L2tlb_agent_agent_xaction::default_io_ptw_resp_bits_s2_entry_perm_x_cons{
 
 }
@@ -535,6 +552,8 @@ function string L2tlb_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_ptw_resp_bits_s2_entry_ppn = 0x%0h ",pkt_str,this.io_ptw_resp_bits_s2_entry_ppn);
     pkt_str = $sformatf("%sio_ptw_resp_bits_s2_entry_perm_d = 0x%0h ",pkt_str,this.io_ptw_resp_bits_s2_entry_perm_d);
     pkt_str = $sformatf("%sio_ptw_resp_bits_s2_entry_perm_a = 0x%0h ",pkt_str,this.io_ptw_resp_bits_s2_entry_perm_a);
+    pkt_str = $sformatf("%sio_ptw_resp_bits_s2_entry_perm_g = 0x%0h ",pkt_str,this.io_ptw_resp_bits_s2_entry_perm_g);
+    pkt_str = $sformatf("%sio_ptw_resp_bits_s2_entry_perm_u = 0x%0h ",pkt_str,this.io_ptw_resp_bits_s2_entry_perm_u);
     pkt_str = $sformatf("%sio_ptw_resp_bits_s2_entry_perm_x = 0x%0h ",pkt_str,this.io_ptw_resp_bits_s2_entry_perm_x);
     pkt_str = $sformatf("%sio_ptw_resp_bits_s2_entry_perm_w = 0x%0h ",pkt_str,this.io_ptw_resp_bits_s2_entry_perm_w);
     pkt_str = $sformatf("%sio_ptw_resp_bits_s2_entry_perm_r = 0x%0h ",pkt_str,this.io_ptw_resp_bits_s2_entry_perm_r);
@@ -834,6 +853,16 @@ function bit L2tlb_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer com
         if(this.io_ptw_resp_bits_s2_entry_perm_a!=rhs_.io_ptw_resp_bits_s2_entry_perm_a) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ptw_resp_bits_s2_entry_perm_a=0x%0h while the rhs_.io_ptw_resp_bits_s2_entry_perm_a=0x%0h",this.io_ptw_resp_bits_s2_entry_perm_a,rhs_.io_ptw_resp_bits_s2_entry_perm_a),UVM_NONE)
+        end
+
+        if(this.io_ptw_resp_bits_s2_entry_perm_g!=rhs_.io_ptw_resp_bits_s2_entry_perm_g) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ptw_resp_bits_s2_entry_perm_g=0x%0h while the rhs_.io_ptw_resp_bits_s2_entry_perm_g=0x%0h",this.io_ptw_resp_bits_s2_entry_perm_g,rhs_.io_ptw_resp_bits_s2_entry_perm_g),UVM_NONE)
+        end
+
+        if(this.io_ptw_resp_bits_s2_entry_perm_u!=rhs_.io_ptw_resp_bits_s2_entry_perm_u) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ptw_resp_bits_s2_entry_perm_u=0x%0h while the rhs_.io_ptw_resp_bits_s2_entry_perm_u=0x%0h",this.io_ptw_resp_bits_s2_entry_perm_u,rhs_.io_ptw_resp_bits_s2_entry_perm_u),UVM_NONE)
         end
 
         if(this.io_ptw_resp_bits_s2_entry_perm_x!=rhs_.io_ptw_resp_bits_s2_entry_perm_x) begin

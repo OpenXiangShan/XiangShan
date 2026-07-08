@@ -12,122 +12,52 @@ class io_mem_to_ooo_iq_feedback_agent_agent_xaction  extends tcnt_data_base;
     // DUT IQ feedback monitor transaction. Keep only structural legality for
     // valid/index/source fields; protocol meaning is owned by DUT.
     rand bit io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid;
-    rand bit io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag;
-    rand bit [8:0] io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value;
     rand bit io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit;
-    rand bit io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState;
-    rand bit [3:0] io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType;
     rand bit io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_flag;
     rand bit [5:0] io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value;
-    rand bit io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag;
-    rand bit [6:0] io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value;
     rand bit io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid;
-    rand bit io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag;
-    rand bit [8:0] io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value;
     rand bit io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit;
-    rand bit io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState;
-    rand bit [3:0] io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType;
     rand bit io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_flag;
     rand bit [5:0] io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value;
-    rand bit io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag;
-    rand bit [6:0] io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value;
     rand bit io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid;
-    rand bit io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag;
-    rand bit [8:0] io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value;
     rand bit io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit;
-    rand bit [3:0] io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType;
     rand bit io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_flag;
     rand bit [5:0] io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_value;
     rand bit io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_flag;
     rand bit [6:0] io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_value;
     rand bit io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid;
-    rand bit io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag;
-    rand bit [8:0] io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value;
     rand bit io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit;
-    rand bit [3:0] io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType;
     rand bit io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_flag;
     rand bit [5:0] io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_value;
     rand bit io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_flag;
     rand bit [6:0] io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value;
-    rand bit io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid;
-    rand bit io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag;
-    rand bit [8:0] io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value;
-    rand bit io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit;
-    rand bit io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState;
-    rand bit [3:0] io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType;
-    rand bit io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag;
-    rand bit [5:0] io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value;
-    rand bit io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag;
-    rand bit [6:0] io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value;
-    rand bit io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid;
-    rand bit io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag;
-    rand bit [8:0] io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value;
-    rand bit io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit;
-    rand bit io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState;
-    rand bit [3:0] io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType;
-    rand bit io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag;
-    rand bit [5:0] io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value;
-    rand bit io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag;
-    rand bit [6:0] io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value;
 
+    rand bit io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_isVecPartReplay;
+    rand bit [15:0] io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_vecReplayMask;
+    rand bit [3:0] io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_vecReplayMbIdx;
+    rand bit io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_isVecPartReplay;
+    rand bit [15:0] io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMask;
+    rand bit [3:0] io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMbIdx;
     extern constraint default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value_cons;
     extern constraint default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType_cons;
     extern constraint default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_flag_cons;
     extern constraint default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value_cons;
     extern constraint default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value_cons;
     extern constraint default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType_cons;
     extern constraint default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_flag_cons;
     extern constraint default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid_cons;
-    extern constraint default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit_cons;
-    extern constraint default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_flag_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_value_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_flag_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_value_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid_cons;
-    extern constraint default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit_cons;
-    extern constraint default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_flag_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_value_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_flag_cons;
     extern constraint default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag_cons;
-    extern constraint default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value_cons;
 
     extern function new(string name="io_mem_to_ooo_iq_feedback_agent_agent_xaction");
     extern function void pack();
@@ -139,64 +69,32 @@ class io_mem_to_ooo_iq_feedback_agent_agent_xaction  extends tcnt_data_base;
 
     `uvm_object_utils_begin(io_mem_to_ooo_iq_feedback_agent_agent_xaction)
         `uvm_field_int(io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value, UVM_ALL_ON);
 
+        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_isVecPartReplay, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_vecReplayMask, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_vecReplayMbIdx, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_isVecPartReplay, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMask, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMbIdx, UVM_ALL_ON);
     `uvm_object_utils_end
 
 endclass:io_mem_to_ooo_iq_feedback_agent_agent_xaction
@@ -204,23 +102,13 @@ endclass:io_mem_to_ooo_iq_feedback_agent_agent_xaction
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid_cons{
 }
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag_cons{
 
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value_cons{
-}
 
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit_cons{
 
 }
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState_cons{
 
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType_cons{
-}
 
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_flag_cons{
 
@@ -229,36 +117,19 @@ constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value_cons{
 }
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag_cons{
 
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value_cons{
-}
 
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid_cons{
 
 }
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag_cons{
 
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value_cons{
-
-}
 
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit_cons{
 
 }
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState_cons{
 
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType_cons{
-
-}
 
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_flag_cons{
 
@@ -268,33 +139,18 @@ constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_
 
 }
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag_cons{
 
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value_cons{
-
-}
 
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid_cons{
 
 }
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag_cons{
 
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value_cons{
-    io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value inside {[9'd0:9'd351]};
-}
 
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit_cons{
 
 }
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType_cons{
-    io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType inside {[4'd0:4'd15]};
-}
 
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_flag_cons{
 
@@ -316,21 +172,12 @@ constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_
 
 }
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag_cons{
 
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value_cons{
-
-}
 
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit_cons{
 
 }
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType_cons{
-
-}
 
 constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_flag_cons{
 
@@ -348,85 +195,25 @@ constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_
 
 }
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid_cons{
 
-}
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag_cons{
 
-}
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value_cons{
-    io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value inside {[9'd0:9'd351]};
-}
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit_cons{
 
-}
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState_cons{
 
-}
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType_cons{
-    io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType inside {[4'd0:4'd15]};
-}
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag_cons{
 
-}
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value_cons{
-    io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value inside {[6'd0:6'd55]};
-}
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag_cons{
 
-}
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value_cons{
-    io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value inside {[7'd0:7'd71]};
-}
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid_cons{
 
-}
 
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag_cons{
 
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value_cons{
-
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit_cons{
-
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState_cons{
-
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType_cons{
-
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag_cons{
-
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value_cons{
-
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag_cons{
-
-}
-
-constraint io_mem_to_ooo_iq_feedback_agent_agent_xaction::default_io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value_cons{
-
-}
 
 function io_mem_to_ooo_iq_feedback_agent_agent_xaction::new(string name = "io_mem_to_ooo_iq_feedback_agent_agent_xaction");
     super.new();
@@ -455,63 +242,25 @@ function string io_mem_to_ooo_iq_feedback_agent_agent_xaction::psdisplay(string 
     //    pkt_str = $sformatf("%spload_q[%0d]=0x%2h  ",pkt_str,i,this.pload_q[i]);
     //end
     pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType);
     pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_flag);
     pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType);
     pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_flag);
     pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_flag);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_flag);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_lqIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_flag);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_flag);
     pkt_str = $sformatf("%sio_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag);
-    pkt_str = $sformatf("%sio_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value);
 
     return pkt_str;
 endfunction:psdisplay
@@ -537,30 +286,14 @@ function bit io_mem_to_ooo_iq_feedback_agent_agent_xaction::compare(uvm_object r
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid=0x%0h",this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid,rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid),UVM_NONE)
         end
 
-        if(this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag!=rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag=0x%0h",this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag,rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value!=rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value=0x%0h",this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value,rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_robIdx_value),UVM_NONE)
-        end
 
         if(this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit!=rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit=0x%0h",this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit,rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit),UVM_NONE)
         end
 
-        if(this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState!=rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState=0x%0h",this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState,rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_flushState),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType!=rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType=0x%0h",this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType,rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sourceType),UVM_NONE)
-        end
 
         if(this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_flag!=rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_flag) begin
             super_result = 0;
@@ -572,45 +305,21 @@ function bit io_mem_to_ooo_iq_feedback_agent_agent_xaction::compare(uvm_object r
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value=0x%0h",this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value,rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value),UVM_NONE)
         end
 
-        if(this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag!=rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag=0x%0h",this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag,rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value!=rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value=0x%0h",this.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value,rhs_.io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_lqIdx_value),UVM_NONE)
-        end
 
         if(this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid!=rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid=0x%0h",this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid,rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_valid),UVM_NONE)
         end
 
-        if(this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag!=rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag=0x%0h",this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag,rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value!=rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value=0x%0h",this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value,rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_robIdx_value),UVM_NONE)
-        end
 
         if(this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit!=rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit=0x%0h",this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit,rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit),UVM_NONE)
         end
 
-        if(this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState!=rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState=0x%0h",this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState,rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_flushState),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType!=rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType=0x%0h",this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType,rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sourceType),UVM_NONE)
-        end
 
         if(this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_flag!=rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_flag) begin
             super_result = 0;
@@ -622,40 +331,20 @@ function bit io_mem_to_ooo_iq_feedback_agent_agent_xaction::compare(uvm_object r
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value=0x%0h",this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value,rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value),UVM_NONE)
         end
 
-        if(this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag!=rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag=0x%0h",this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag,rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value!=rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value=0x%0h while the rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value=0x%0h",this.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value,rhs_.io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_lqIdx_value),UVM_NONE)
-        end
 
         if(this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid!=rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid=0x%0h while the rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid=0x%0h",this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid,rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid),UVM_NONE)
         end
 
-        if(this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag!=rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag=0x%0h",this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag,rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value!=rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value=0x%0h while the rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value=0x%0h",this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value,rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_robIdx_value),UVM_NONE)
-        end
 
         if(this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit!=rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit=0x%0h while the rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit=0x%0h",this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit,rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_hit),UVM_NONE)
         end
 
-        if(this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType!=rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType=0x%0h while the rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType=0x%0h",this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType,rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sourceType),UVM_NONE)
-        end
 
         if(this.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_flag!=rhs_.io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_bits_sqIdx_flag) begin
             super_result = 0;
@@ -682,25 +371,13 @@ function bit io_mem_to_ooo_iq_feedback_agent_agent_xaction::compare(uvm_object r
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid=0x%0h while the rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid=0x%0h",this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid,rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid),UVM_NONE)
         end
 
-        if(this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag!=rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag=0x%0h",this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag,rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value!=rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value=0x%0h while the rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value=0x%0h",this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value,rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_robIdx_value),UVM_NONE)
-        end
 
         if(this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit!=rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit=0x%0h while the rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit=0x%0h",this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit,rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_hit),UVM_NONE)
         end
 
-        if(this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType!=rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType=0x%0h while the rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType=0x%0h",this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType,rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sourceType),UVM_NONE)
-        end
 
         if(this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_flag!=rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_sqIdx_flag) begin
             super_result = 0;
@@ -722,105 +399,25 @@ function bit io_mem_to_ooo_iq_feedback_agent_agent_xaction::compare(uvm_object r
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value=0x%0h while the rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value=0x%0h",this.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value,rhs_.io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_lqIdx_value),UVM_NONE)
         end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid!=rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid,rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_valid),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag!=rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag,rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value!=rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value,rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_robIdx_value),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit!=rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit,rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_hit),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState!=rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState,rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_flushState),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType!=rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType,rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sourceType),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag!=rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag,rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value!=rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value,rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_sqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag!=rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag,rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value!=rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value,rhs_.io_mem_to_ooo_vlduIqFeedback_0_feedbackSlow_bits_lqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid!=rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid,rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_valid),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag!=rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag,rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value!=rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value,rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_robIdx_value),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit!=rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit,rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_hit),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState!=rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState,rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_flushState),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType!=rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType,rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sourceType),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag!=rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag,rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value!=rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value,rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_sqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag!=rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag,rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value!=rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value=0x%0h while the rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value=0x%0h",this.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value,rhs_.io_mem_to_ooo_vlduIqFeedback_1_feedbackSlow_bits_lqIdx_value),UVM_NONE)
-        end
 
     end
     return super_result;

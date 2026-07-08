@@ -17,28 +17,26 @@
 
 interface backendToTopBypass_agent_agent_interface  (input bit clk,input bit rst_n);
 
-    logic io_ooo_to_mem_backendToTopBypass_cpuWfi;
     logic io_ooo_to_mem_backendToTopBypass_cpuCriticalError;
-    logic io_ooo_to_mem_backendToTopBypass_msiAck;
+
+    logic io_ooo_to_mem_backendToTopBypass_cpuHalted;
 
     clocking drv_cb @(posedge clk);
         `ifdef INTERFACE_ADD_DELAY
             default input #`DEF_SETUP_TIME output #`DEF_HOLD_TIME;
         `endif
-        output io_ooo_to_mem_backendToTopBypass_cpuWfi;
         output io_ooo_to_mem_backendToTopBypass_cpuCriticalError;
-        output io_ooo_to_mem_backendToTopBypass_msiAck;
 
+        output io_ooo_to_mem_backendToTopBypass_cpuHalted;
     endclocking:drv_cb
 
     clocking mon_cb @(posedge clk);
         `ifdef INTERFACE_ADD_DELAY
             default input #`DEF_SETUP_TIME output #`DEF_HOLD_TIME;
         `endif
-        input  io_ooo_to_mem_backendToTopBypass_cpuWfi;
         input  io_ooo_to_mem_backendToTopBypass_cpuCriticalError;
-        input  io_ooo_to_mem_backendToTopBypass_msiAck;
 
+        input  io_ooo_to_mem_backendToTopBypass_cpuHalted;
     endclocking:mon_cb
 
     modport drv_mp (clocking drv_cb);

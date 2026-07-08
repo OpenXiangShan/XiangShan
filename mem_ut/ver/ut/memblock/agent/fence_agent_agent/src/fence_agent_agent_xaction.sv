@@ -19,6 +19,7 @@ class fence_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_ooo_to_mem_sfence_bits_hv;
     rand bit io_ooo_to_mem_sfence_bits_hg;
 
+    rand bit io_ooo_to_mem_sfence_bits_flushPipe;
     extern constraint default_io_ooo_to_mem_sfence_valid_cons;
     extern constraint default_io_ooo_to_mem_sfence_bits_rs1_cons;
     extern constraint default_io_ooo_to_mem_sfence_bits_rs2_cons;
@@ -44,6 +45,7 @@ class fence_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_ooo_to_mem_sfence_bits_hv, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_sfence_bits_hg, UVM_ALL_ON);
 
+        `uvm_field_int(io_ooo_to_mem_sfence_bits_flushPipe, UVM_ALL_ON);
     `uvm_object_utils_end
 
 endclass:fence_agent_agent_xaction

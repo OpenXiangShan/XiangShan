@@ -14,39 +14,28 @@ class other_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit [47:0] io_dcacheError_ecc_error_bits;
     rand bit io_uncacheError_ecc_error_valid;
     rand bit [47:0] io_uncacheError_ecc_error_bits;
-    rand bit io_memInfo_sqFull         ;
-    rand bit io_memInfo_lqFull         ;
-    rand bit io_memInfo_dcacheMSHRFull ;
-    rand bit [5:0] io_inner_hartId     ;
     rand bit [47:0] io_inner_reset_vector;
     rand bit [47:0] io_outer_reset_vector;
-    rand bit io_outer_cpu_wfi          ;
     rand bit io_outer_l2_flush_en      ;
     rand bit io_outer_power_down_en    ;
     rand bit io_outer_cpu_critical_error;
-    rand bit io_outer_msi_ack          ;
     rand bit io_inner_beu_errors_icache_ecc_error_valid;
     rand bit [47:0] io_inner_beu_errors_icache_ecc_error_bits;
     rand bit io_outer_beu_errors_icache_ecc_error_valid;
     rand bit [47:0] io_outer_beu_errors_icache_ecc_error_bits;
     rand bit io_reset_backend          ;
 
+    rand bit io_outer_cpu_halt;
     extern constraint default_io_hartId_cons;
     extern constraint default_io_dcacheError_ecc_error_valid_cons;
     extern constraint default_io_dcacheError_ecc_error_bits_cons;
     extern constraint default_io_uncacheError_ecc_error_valid_cons;
     extern constraint default_io_uncacheError_ecc_error_bits_cons;
-    extern constraint default_io_memInfo_sqFull_cons;
-    extern constraint default_io_memInfo_lqFull_cons;
-    extern constraint default_io_memInfo_dcacheMSHRFull_cons;
-    extern constraint default_io_inner_hartId_cons;
     extern constraint default_io_inner_reset_vector_cons;
     extern constraint default_io_outer_reset_vector_cons;
-    extern constraint default_io_outer_cpu_wfi_cons;
     extern constraint default_io_outer_l2_flush_en_cons;
     extern constraint default_io_outer_power_down_en_cons;
     extern constraint default_io_outer_cpu_critical_error_cons;
-    extern constraint default_io_outer_msi_ack_cons;
     extern constraint default_io_inner_beu_errors_icache_ecc_error_valid_cons;
     extern constraint default_io_inner_beu_errors_icache_ecc_error_bits_cons;
     extern constraint default_io_outer_beu_errors_icache_ecc_error_valid_cons;
@@ -67,23 +56,18 @@ class other_ctrl_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_dcacheError_ecc_error_bits, UVM_ALL_ON);
         `uvm_field_int(io_uncacheError_ecc_error_valid, UVM_ALL_ON);
         `uvm_field_int(io_uncacheError_ecc_error_bits, UVM_ALL_ON);
-        `uvm_field_int(io_memInfo_sqFull, UVM_ALL_ON);
-        `uvm_field_int(io_memInfo_lqFull, UVM_ALL_ON);
-        `uvm_field_int(io_memInfo_dcacheMSHRFull, UVM_ALL_ON);
-        `uvm_field_int(io_inner_hartId, UVM_ALL_ON);
         `uvm_field_int(io_inner_reset_vector, UVM_ALL_ON);
         `uvm_field_int(io_outer_reset_vector, UVM_ALL_ON);
-        `uvm_field_int(io_outer_cpu_wfi, UVM_ALL_ON);
         `uvm_field_int(io_outer_l2_flush_en, UVM_ALL_ON);
         `uvm_field_int(io_outer_power_down_en, UVM_ALL_ON);
         `uvm_field_int(io_outer_cpu_critical_error, UVM_ALL_ON);
-        `uvm_field_int(io_outer_msi_ack, UVM_ALL_ON);
         `uvm_field_int(io_inner_beu_errors_icache_ecc_error_valid, UVM_ALL_ON);
         `uvm_field_int(io_inner_beu_errors_icache_ecc_error_bits, UVM_ALL_ON);
         `uvm_field_int(io_outer_beu_errors_icache_ecc_error_valid, UVM_ALL_ON);
         `uvm_field_int(io_outer_beu_errors_icache_ecc_error_bits, UVM_ALL_ON);
         `uvm_field_int(io_reset_backend, UVM_ALL_ON);
 
+        `uvm_field_int(io_outer_cpu_halt, UVM_ALL_ON);
     `uvm_object_utils_end
 
 endclass:other_ctrl_agent_agent_xaction
@@ -108,21 +92,9 @@ constraint other_ctrl_agent_agent_xaction::default_io_uncacheError_ecc_error_bit
 
 }
 
-constraint other_ctrl_agent_agent_xaction::default_io_memInfo_sqFull_cons{
 
-}
 
-constraint other_ctrl_agent_agent_xaction::default_io_memInfo_lqFull_cons{
 
-}
-
-constraint other_ctrl_agent_agent_xaction::default_io_memInfo_dcacheMSHRFull_cons{
-
-}
-
-constraint other_ctrl_agent_agent_xaction::default_io_inner_hartId_cons{
-
-}
 
 constraint other_ctrl_agent_agent_xaction::default_io_inner_reset_vector_cons{
 
@@ -132,9 +104,6 @@ constraint other_ctrl_agent_agent_xaction::default_io_outer_reset_vector_cons{
 
 }
 
-constraint other_ctrl_agent_agent_xaction::default_io_outer_cpu_wfi_cons{
-
-}
 
 constraint other_ctrl_agent_agent_xaction::default_io_outer_l2_flush_en_cons{
 
@@ -148,9 +117,6 @@ constraint other_ctrl_agent_agent_xaction::default_io_outer_cpu_critical_error_c
 
 }
 
-constraint other_ctrl_agent_agent_xaction::default_io_outer_msi_ack_cons{
-
-}
 
 constraint other_ctrl_agent_agent_xaction::default_io_inner_beu_errors_icache_ecc_error_valid_cons{
 
@@ -203,17 +169,11 @@ function string other_ctrl_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_dcacheError_ecc_error_bits = 0x%0h ",pkt_str,this.io_dcacheError_ecc_error_bits);
     pkt_str = $sformatf("%sio_uncacheError_ecc_error_valid = 0x%0h ",pkt_str,this.io_uncacheError_ecc_error_valid);
     pkt_str = $sformatf("%sio_uncacheError_ecc_error_bits = 0x%0h ",pkt_str,this.io_uncacheError_ecc_error_bits);
-    pkt_str = $sformatf("%sio_memInfo_sqFull = 0x%0h ",pkt_str,this.io_memInfo_sqFull);
-    pkt_str = $sformatf("%sio_memInfo_lqFull = 0x%0h ",pkt_str,this.io_memInfo_lqFull);
-    pkt_str = $sformatf("%sio_memInfo_dcacheMSHRFull = 0x%0h ",pkt_str,this.io_memInfo_dcacheMSHRFull);
-    pkt_str = $sformatf("%sio_inner_hartId = 0x%0h ",pkt_str,this.io_inner_hartId);
     pkt_str = $sformatf("%sio_inner_reset_vector = 0x%0h ",pkt_str,this.io_inner_reset_vector);
     pkt_str = $sformatf("%sio_outer_reset_vector = 0x%0h ",pkt_str,this.io_outer_reset_vector);
-    pkt_str = $sformatf("%sio_outer_cpu_wfi = 0x%0h ",pkt_str,this.io_outer_cpu_wfi);
     pkt_str = $sformatf("%sio_outer_l2_flush_en = 0x%0h ",pkt_str,this.io_outer_l2_flush_en);
     pkt_str = $sformatf("%sio_outer_power_down_en = 0x%0h ",pkt_str,this.io_outer_power_down_en);
     pkt_str = $sformatf("%sio_outer_cpu_critical_error = 0x%0h ",pkt_str,this.io_outer_cpu_critical_error);
-    pkt_str = $sformatf("%sio_outer_msi_ack = 0x%0h ",pkt_str,this.io_outer_msi_ack);
     pkt_str = $sformatf("%sio_inner_beu_errors_icache_ecc_error_valid = 0x%0h ",pkt_str,this.io_inner_beu_errors_icache_ecc_error_valid);
     pkt_str = $sformatf("%sio_inner_beu_errors_icache_ecc_error_bits = 0x%0h ",pkt_str,this.io_inner_beu_errors_icache_ecc_error_bits);
     pkt_str = $sformatf("%sio_outer_beu_errors_icache_ecc_error_valid = 0x%0h ",pkt_str,this.io_outer_beu_errors_icache_ecc_error_valid);
@@ -264,25 +224,9 @@ function bit other_ctrl_agent_agent_xaction::compare(uvm_object rhs, uvm_compare
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_uncacheError_ecc_error_bits=0x%0h while the rhs_.io_uncacheError_ecc_error_bits=0x%0h",this.io_uncacheError_ecc_error_bits,rhs_.io_uncacheError_ecc_error_bits),UVM_NONE)
         end
 
-        if(this.io_memInfo_sqFull!=rhs_.io_memInfo_sqFull) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_memInfo_sqFull=0x%0h while the rhs_.io_memInfo_sqFull=0x%0h",this.io_memInfo_sqFull,rhs_.io_memInfo_sqFull),UVM_NONE)
-        end
 
-        if(this.io_memInfo_lqFull!=rhs_.io_memInfo_lqFull) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_memInfo_lqFull=0x%0h while the rhs_.io_memInfo_lqFull=0x%0h",this.io_memInfo_lqFull,rhs_.io_memInfo_lqFull),UVM_NONE)
-        end
 
-        if(this.io_memInfo_dcacheMSHRFull!=rhs_.io_memInfo_dcacheMSHRFull) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_memInfo_dcacheMSHRFull=0x%0h while the rhs_.io_memInfo_dcacheMSHRFull=0x%0h",this.io_memInfo_dcacheMSHRFull,rhs_.io_memInfo_dcacheMSHRFull),UVM_NONE)
-        end
 
-        if(this.io_inner_hartId!=rhs_.io_inner_hartId) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_inner_hartId=0x%0h while the rhs_.io_inner_hartId=0x%0h",this.io_inner_hartId,rhs_.io_inner_hartId),UVM_NONE)
-        end
 
         if(this.io_inner_reset_vector!=rhs_.io_inner_reset_vector) begin
             super_result = 0;
@@ -294,10 +238,6 @@ function bit other_ctrl_agent_agent_xaction::compare(uvm_object rhs, uvm_compare
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_outer_reset_vector=0x%0h while the rhs_.io_outer_reset_vector=0x%0h",this.io_outer_reset_vector,rhs_.io_outer_reset_vector),UVM_NONE)
         end
 
-        if(this.io_outer_cpu_wfi!=rhs_.io_outer_cpu_wfi) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_outer_cpu_wfi=0x%0h while the rhs_.io_outer_cpu_wfi=0x%0h",this.io_outer_cpu_wfi,rhs_.io_outer_cpu_wfi),UVM_NONE)
-        end
 
         if(this.io_outer_l2_flush_en!=rhs_.io_outer_l2_flush_en) begin
             super_result = 0;
@@ -314,10 +254,6 @@ function bit other_ctrl_agent_agent_xaction::compare(uvm_object rhs, uvm_compare
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_outer_cpu_critical_error=0x%0h while the rhs_.io_outer_cpu_critical_error=0x%0h",this.io_outer_cpu_critical_error,rhs_.io_outer_cpu_critical_error),UVM_NONE)
         end
 
-        if(this.io_outer_msi_ack!=rhs_.io_outer_msi_ack) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_outer_msi_ack=0x%0h while the rhs_.io_outer_msi_ack=0x%0h",this.io_outer_msi_ack,rhs_.io_outer_msi_ack),UVM_NONE)
-        end
 
         if(this.io_inner_beu_errors_icache_ecc_error_valid!=rhs_.io_inner_beu_errors_icache_ecc_error_valid) begin
             super_result = 0;

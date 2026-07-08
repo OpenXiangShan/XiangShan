@@ -16,15 +16,12 @@ class lsqenq_agent_agent_xaction  extends tcnt_data_base;
     int unsigned memblock_dispatch_ready_timeout;
     bit memblock_dispatch_aborted_by_redirect;
     int unsigned memblock_dispatch_flush_epoch;
-    rand bit io_ooo_to_mem_enqLsq_canAccept;
     rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_0;
     rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_1;
     rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_2;
     rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_3;
     rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_4;
     rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_5;
-    rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_6;
-    rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_7;
     rand bit io_ooo_to_mem_enqLsq_req_0_valid;
     rand bit [35:0] io_ooo_to_mem_enqLsq_req_0_bits_fuType;
     rand bit [6:0] io_ooo_to_mem_enqLsq_req_0_bits_uopIdx;
@@ -85,68 +82,181 @@ class lsqenq_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_flag;
     rand bit [5:0] io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_value;
     rand bit [4:0] io_ooo_to_mem_enqLsq_req_5_bits_numLsElem;
-    rand bit io_ooo_to_mem_enqLsq_req_6_valid;
-    rand bit [35:0] io_ooo_to_mem_enqLsq_req_6_bits_fuType;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_req_6_bits_uopIdx;
-    rand bit io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag;
-    rand bit [8:0] io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value;
-    rand bit [4:0] io_ooo_to_mem_enqLsq_req_6_bits_numLsElem;
-    rand bit io_ooo_to_mem_enqLsq_req_7_valid;
-    rand bit [35:0] io_ooo_to_mem_enqLsq_req_7_bits_fuType;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_req_7_bits_uopIdx;
-    rand bit io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag;
-    rand bit [8:0] io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value;
-    rand bit [4:0] io_ooo_to_mem_enqLsq_req_7_bits_numLsElem;
-    rand bit io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_resp_0_lqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_resp_0_sqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_resp_1_lqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_resp_1_sqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_resp_2_lqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_resp_2_sqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_resp_3_lqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_resp_3_sqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_resp_4_lqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_resp_4_sqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_resp_5_lqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_resp_5_sqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_resp_6_lqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_resp_6_sqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_resp_7_lqIdx_value;
-    rand bit io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_resp_7_sqIdx_value;
 
-    extern constraint default_io_ooo_to_mem_enqLsq_canAccept_cons;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_0;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_1;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_10;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_11;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_12;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_13;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_14;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_15;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_16;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_17;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_18;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_19;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_2;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_20;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_21;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_22;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_23;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_3;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_4;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_5;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_6;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_7;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_8;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_9;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_flushPipe;
+    rand bit [8:0] io_ooo_to_mem_enqLsq_req_0_bits_fuOpType;
+    rand bit io_ooo_to_mem_enqLsq_req_0_bits_lastUop;
+    rand bit [3:0] io_ooo_to_mem_enqLsq_req_0_bits_trigger;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_0;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_1;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_10;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_11;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_12;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_13;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_14;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_15;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_16;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_17;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_18;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_19;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_2;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_20;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_21;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_22;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_23;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_3;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_4;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_5;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_6;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_7;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_8;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_9;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_flushPipe;
+    rand bit [8:0] io_ooo_to_mem_enqLsq_req_1_bits_fuOpType;
+    rand bit io_ooo_to_mem_enqLsq_req_1_bits_lastUop;
+    rand bit [3:0] io_ooo_to_mem_enqLsq_req_1_bits_trigger;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_0;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_1;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_10;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_11;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_12;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_13;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_14;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_15;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_16;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_17;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_18;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_19;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_2;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_20;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_21;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_22;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_23;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_3;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_4;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_5;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_6;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_7;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_8;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_9;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_flushPipe;
+    rand bit [8:0] io_ooo_to_mem_enqLsq_req_2_bits_fuOpType;
+    rand bit io_ooo_to_mem_enqLsq_req_2_bits_lastUop;
+    rand bit [3:0] io_ooo_to_mem_enqLsq_req_2_bits_trigger;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_0;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_1;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_10;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_11;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_12;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_13;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_14;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_15;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_16;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_17;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_18;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_19;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_2;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_20;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_21;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_22;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_23;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_3;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_4;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_5;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_6;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_7;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_8;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_9;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_flushPipe;
+    rand bit [8:0] io_ooo_to_mem_enqLsq_req_3_bits_fuOpType;
+    rand bit io_ooo_to_mem_enqLsq_req_3_bits_lastUop;
+    rand bit [3:0] io_ooo_to_mem_enqLsq_req_3_bits_trigger;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_0;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_1;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_10;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_11;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_12;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_13;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_14;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_15;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_16;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_17;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_18;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_19;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_2;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_20;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_21;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_22;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_23;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_3;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_4;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_5;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_6;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_7;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_8;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_9;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_flushPipe;
+    rand bit [8:0] io_ooo_to_mem_enqLsq_req_4_bits_fuOpType;
+    rand bit io_ooo_to_mem_enqLsq_req_4_bits_lastUop;
+    rand bit [3:0] io_ooo_to_mem_enqLsq_req_4_bits_trigger;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_0;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_1;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_10;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_11;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_12;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_13;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_14;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_15;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_16;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_17;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_18;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_19;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_2;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_20;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_21;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_22;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_23;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_3;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_4;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_5;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_6;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_7;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_8;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_9;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_flushPipe;
+    rand bit [8:0] io_ooo_to_mem_enqLsq_req_5_bits_fuOpType;
+    rand bit io_ooo_to_mem_enqLsq_req_5_bits_lastUop;
+    rand bit [3:0] io_ooo_to_mem_enqLsq_req_5_bits_trigger;
     extern constraint default_io_ooo_to_mem_enqLsq_needAlloc_0_cons;
     extern constraint default_io_ooo_to_mem_enqLsq_needAlloc_1_cons;
     extern constraint default_io_ooo_to_mem_enqLsq_needAlloc_2_cons;
     extern constraint default_io_ooo_to_mem_enqLsq_needAlloc_3_cons;
     extern constraint default_io_ooo_to_mem_enqLsq_needAlloc_4_cons;
     extern constraint default_io_ooo_to_mem_enqLsq_needAlloc_5_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_needAlloc_6_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_needAlloc_7_cons;
     extern constraint default_io_ooo_to_mem_enqLsq_req_0_valid_cons;
     extern constraint default_io_ooo_to_mem_enqLsq_req_0_bits_fuType_cons;
     extern constraint default_io_ooo_to_mem_enqLsq_req_0_bits_uopIdx_cons;
@@ -207,58 +317,6 @@ class lsqenq_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_flag_cons;
     extern constraint default_io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_value_cons;
     extern constraint default_io_ooo_to_mem_enqLsq_req_5_bits_numLsElem_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_6_valid_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_6_bits_fuType_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_6_bits_uopIdx_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_6_bits_numLsElem_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_7_valid_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_7_bits_fuType_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_7_bits_uopIdx_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_req_7_bits_numLsElem_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_0_lqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_0_sqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_1_lqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_1_sqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_2_lqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_2_sqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_3_lqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_3_sqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_4_lqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_4_sqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_5_lqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_5_sqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_6_lqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_6_sqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_7_lqIdx_value_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag_cons;
-    extern constraint default_io_ooo_to_mem_enqLsq_resp_7_sqIdx_value_cons;
 
     extern function new(string name="lsqenq_agent_agent_xaction");
     extern function void pack();
@@ -273,15 +331,12 @@ class lsqenq_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(memblock_dispatch_ready_timeout, UVM_ALL_ON);
         `uvm_field_int(memblock_dispatch_aborted_by_redirect, UVM_ALL_ON);
         `uvm_field_int(memblock_dispatch_flush_epoch, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_canAccept, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_needAlloc_0, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_needAlloc_1, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_needAlloc_2, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_needAlloc_3, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_needAlloc_4, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_needAlloc_5, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_needAlloc_6, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_needAlloc_7, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_valid, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_fuType, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_uopIdx, UVM_ALL_ON);
@@ -342,66 +397,179 @@ class lsqenq_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_numLsElem, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_6_valid, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_6_bits_fuType, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_6_bits_uopIdx, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_6_bits_numLsElem, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_7_valid, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_7_bits_fuType, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_7_bits_uopIdx, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_req_7_bits_numLsElem, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_0_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_0_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_1_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_1_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_2_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_2_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_3_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_3_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_4_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_4_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_5_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_5_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_6_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_6_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_7_lqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_enqLsq_resp_7_sqIdx_value, UVM_ALL_ON);
 
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_0, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_1, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_10, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_11, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_12, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_13, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_14, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_15, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_16, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_17, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_18, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_19, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_2, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_20, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_21, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_22, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_23, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_3, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_4, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_5, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_6, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_7, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_8, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_9, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_flushPipe, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_fuOpType, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_lastUop, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_0_bits_trigger, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_0, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_1, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_10, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_11, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_12, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_13, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_14, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_15, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_16, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_17, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_18, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_19, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_2, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_20, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_21, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_22, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_23, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_3, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_4, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_5, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_6, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_7, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_8, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_exceptionVec_9, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_flushPipe, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_fuOpType, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_lastUop, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_1_bits_trigger, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_0, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_1, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_10, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_11, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_12, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_13, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_14, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_15, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_16, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_17, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_18, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_19, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_2, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_20, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_21, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_22, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_23, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_3, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_4, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_5, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_6, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_7, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_8, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_exceptionVec_9, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_flushPipe, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_fuOpType, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_lastUop, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_2_bits_trigger, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_0, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_1, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_10, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_11, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_12, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_13, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_14, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_15, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_16, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_17, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_18, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_19, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_2, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_20, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_21, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_22, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_23, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_3, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_4, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_5, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_6, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_7, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_8, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_exceptionVec_9, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_flushPipe, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_fuOpType, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_lastUop, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_3_bits_trigger, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_0, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_1, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_10, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_11, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_12, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_13, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_14, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_15, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_16, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_17, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_18, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_19, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_2, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_20, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_21, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_22, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_23, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_3, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_4, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_5, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_6, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_7, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_8, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_exceptionVec_9, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_flushPipe, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_fuOpType, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_lastUop, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_4_bits_trigger, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_0, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_1, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_10, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_11, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_12, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_13, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_14, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_15, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_16, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_17, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_18, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_19, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_2, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_20, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_21, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_22, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_23, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_3, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_4, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_5, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_6, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_7, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_8, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_exceptionVec_9, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_flushPipe, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_fuOpType, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_lastUop, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_enqLsq_req_5_bits_trigger, UVM_ALL_ON);
     `uvm_object_utils_end
 
 endclass:lsqenq_agent_agent_xaction
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_canAccept_cons{
-    io_ooo_to_mem_enqLsq_canAccept inside {1'b0, 1'b1};
-}
 
 constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_needAlloc_0_cons{
     io_ooo_to_mem_enqLsq_needAlloc_0 inside {2'b00, 2'b01, 2'b10};
@@ -427,13 +595,7 @@ constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_needAlloc_5_
     io_ooo_to_mem_enqLsq_needAlloc_5 inside {2'b00, 2'b01, 2'b10};
 }
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_needAlloc_6_cons{
-    io_ooo_to_mem_enqLsq_needAlloc_6 inside {2'b00, 2'b01, 2'b10};
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_needAlloc_7_cons{
-    io_ooo_to_mem_enqLsq_needAlloc_7 inside {2'b00, 2'b01, 2'b10};
-}
 
 constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_0_valid_cons{
     io_ooo_to_mem_enqLsq_req_0_valid inside {1'b0, 1'b1};
@@ -675,213 +837,57 @@ constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_5_bits_n
 
 }
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_6_valid_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_6_bits_fuType_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_6_bits_uopIdx_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_6_bits_numLsElem_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_7_valid_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_7_bits_fuType_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_7_bits_uopIdx_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_7_bits_numLsElem_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_0_lqIdx_value_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_0_sqIdx_value_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag_cons{
 
-}
 
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_1_lqIdx_value_cons{
 
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_1_sqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_2_lqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_2_sqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_3_lqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_3_sqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_4_lqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_4_sqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_5_lqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_5_sqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_6_lqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_6_sqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_7_lqIdx_value_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag_cons{
-
-}
-
-constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_resp_7_sqIdx_value_cons{
-
-}
 
 function lsqenq_agent_agent_xaction::new(string name = "lsqenq_agent_agent_xaction");
     super.new();
@@ -913,15 +919,12 @@ function string lsqenq_agent_agent_xaction::psdisplay(string prefix = "");
     //foreach(this.pload_q[i]) begin
     //    pkt_str = $sformatf("%spload_q[%0d]=0x%2h  ",pkt_str,i,this.pload_q[i]);
     //end
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_canAccept = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_canAccept);
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_needAlloc_0 = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_needAlloc_0);
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_needAlloc_1 = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_needAlloc_1);
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_needAlloc_2 = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_needAlloc_2);
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_needAlloc_3 = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_needAlloc_3);
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_needAlloc_4 = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_needAlloc_4);
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_needAlloc_5 = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_needAlloc_5);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_needAlloc_6 = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_needAlloc_6);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_needAlloc_7 = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_needAlloc_7);
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_0_valid = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_0_valid);
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_0_bits_fuType = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_0_bits_fuType);
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_0_bits_uopIdx = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_0_bits_uopIdx);
@@ -982,58 +985,6 @@ function string lsqenq_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_5_bits_sqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_flag);
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_5_bits_sqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_value);
     pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_5_bits_numLsElem = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_5_bits_numLsElem);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_6_valid = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_6_valid);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_6_bits_fuType = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_6_bits_fuType);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_6_bits_uopIdx = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_6_bits_uopIdx);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_6_bits_robIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_6_bits_numLsElem = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_6_bits_numLsElem);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_7_valid = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_7_valid);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_7_bits_fuType = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_7_bits_fuType);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_7_bits_uopIdx = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_7_bits_uopIdx);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_7_bits_robIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_req_7_bits_numLsElem = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_req_7_bits_numLsElem);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_0_lqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_0_lqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_0_lqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_0_sqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_0_sqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_0_sqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_1_lqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_1_lqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_1_lqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_1_sqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_1_sqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_1_sqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_2_lqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_2_lqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_2_lqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_2_sqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_2_sqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_2_sqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_3_lqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_3_lqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_3_lqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_3_sqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_3_sqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_3_sqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_4_lqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_4_lqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_4_lqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_4_sqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_4_sqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_4_sqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_5_lqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_5_lqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_5_lqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_5_sqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_5_sqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_5_sqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_6_lqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_6_lqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_6_lqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_6_sqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_6_sqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_6_sqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_7_lqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_7_lqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_7_lqIdx_value);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_7_sqIdx_flag = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag);
-    pkt_str = $sformatf("%sio_ooo_to_mem_enqLsq_resp_7_sqIdx_value = 0x%0h ",pkt_str,this.io_ooo_to_mem_enqLsq_resp_7_sqIdx_value);
 
     return pkt_str;
 endfunction:psdisplay
@@ -1054,10 +1005,6 @@ function bit lsqenq_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer co
         //    end
         //end
 
-        if(this.io_ooo_to_mem_enqLsq_canAccept!=rhs_.io_ooo_to_mem_enqLsq_canAccept) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_canAccept=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_canAccept=0x%0h",this.io_ooo_to_mem_enqLsq_canAccept,rhs_.io_ooo_to_mem_enqLsq_canAccept),UVM_NONE)
-        end
 
         if(this.io_ooo_to_mem_enqLsq_needAlloc_0!=rhs_.io_ooo_to_mem_enqLsq_needAlloc_0) begin
             super_result = 0;
@@ -1089,15 +1036,7 @@ function bit lsqenq_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer co
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_needAlloc_5=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_needAlloc_5=0x%0h",this.io_ooo_to_mem_enqLsq_needAlloc_5,rhs_.io_ooo_to_mem_enqLsq_needAlloc_5),UVM_NONE)
         end
 
-        if(this.io_ooo_to_mem_enqLsq_needAlloc_6!=rhs_.io_ooo_to_mem_enqLsq_needAlloc_6) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_needAlloc_6=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_needAlloc_6=0x%0h",this.io_ooo_to_mem_enqLsq_needAlloc_6,rhs_.io_ooo_to_mem_enqLsq_needAlloc_6),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_needAlloc_7!=rhs_.io_ooo_to_mem_enqLsq_needAlloc_7) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_needAlloc_7=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_needAlloc_7=0x%0h",this.io_ooo_to_mem_enqLsq_needAlloc_7,rhs_.io_ooo_to_mem_enqLsq_needAlloc_7),UVM_NONE)
-        end
 
         if(this.io_ooo_to_mem_enqLsq_req_0_valid!=rhs_.io_ooo_to_mem_enqLsq_req_0_valid) begin
             super_result = 0;
@@ -1399,265 +1338,57 @@ function bit lsqenq_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer co
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_5_bits_numLsElem=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_5_bits_numLsElem=0x%0h",this.io_ooo_to_mem_enqLsq_req_5_bits_numLsElem,rhs_.io_ooo_to_mem_enqLsq_req_5_bits_numLsElem),UVM_NONE)
         end
 
-        if(this.io_ooo_to_mem_enqLsq_req_6_valid!=rhs_.io_ooo_to_mem_enqLsq_req_6_valid) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_6_valid=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_6_valid=0x%0h",this.io_ooo_to_mem_enqLsq_req_6_valid,rhs_.io_ooo_to_mem_enqLsq_req_6_valid),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_6_bits_fuType!=rhs_.io_ooo_to_mem_enqLsq_req_6_bits_fuType) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_6_bits_fuType=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_6_bits_fuType=0x%0h",this.io_ooo_to_mem_enqLsq_req_6_bits_fuType,rhs_.io_ooo_to_mem_enqLsq_req_6_bits_fuType),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_6_bits_uopIdx!=rhs_.io_ooo_to_mem_enqLsq_req_6_bits_uopIdx) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_6_bits_uopIdx=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_6_bits_uopIdx=0x%0h",this.io_ooo_to_mem_enqLsq_req_6_bits_uopIdx,rhs_.io_ooo_to_mem_enqLsq_req_6_bits_uopIdx),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag,rhs_.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value!=rhs_.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value,rhs_.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value,rhs_.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value,rhs_.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_6_bits_numLsElem!=rhs_.io_ooo_to_mem_enqLsq_req_6_bits_numLsElem) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_6_bits_numLsElem=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_6_bits_numLsElem=0x%0h",this.io_ooo_to_mem_enqLsq_req_6_bits_numLsElem,rhs_.io_ooo_to_mem_enqLsq_req_6_bits_numLsElem),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_7_valid!=rhs_.io_ooo_to_mem_enqLsq_req_7_valid) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_7_valid=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_7_valid=0x%0h",this.io_ooo_to_mem_enqLsq_req_7_valid,rhs_.io_ooo_to_mem_enqLsq_req_7_valid),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_7_bits_fuType!=rhs_.io_ooo_to_mem_enqLsq_req_7_bits_fuType) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_7_bits_fuType=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_7_bits_fuType=0x%0h",this.io_ooo_to_mem_enqLsq_req_7_bits_fuType,rhs_.io_ooo_to_mem_enqLsq_req_7_bits_fuType),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_7_bits_uopIdx!=rhs_.io_ooo_to_mem_enqLsq_req_7_bits_uopIdx) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_7_bits_uopIdx=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_7_bits_uopIdx=0x%0h",this.io_ooo_to_mem_enqLsq_req_7_bits_uopIdx,rhs_.io_ooo_to_mem_enqLsq_req_7_bits_uopIdx),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag,rhs_.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value!=rhs_.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value,rhs_.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value,rhs_.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value,rhs_.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_req_7_bits_numLsElem!=rhs_.io_ooo_to_mem_enqLsq_req_7_bits_numLsElem) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_req_7_bits_numLsElem=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_req_7_bits_numLsElem=0x%0h",this.io_ooo_to_mem_enqLsq_req_7_bits_numLsElem,rhs_.io_ooo_to_mem_enqLsq_req_7_bits_numLsElem),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_0_lqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_0_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_0_lqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_0_lqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_0_lqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_0_lqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_0_sqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_0_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_0_sqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_0_sqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_0_sqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_0_sqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_1_lqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_1_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_1_lqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_1_lqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_1_lqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_1_lqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_1_sqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_1_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_1_sqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_1_sqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_1_sqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_1_sqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_2_lqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_2_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_2_lqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_2_lqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_2_lqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_2_lqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_2_sqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_2_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_2_sqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_2_sqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_2_sqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_2_sqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_3_lqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_3_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_3_lqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_3_lqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_3_lqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_3_lqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_3_sqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_3_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_3_sqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_3_sqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_3_sqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_3_sqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_4_lqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_4_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_4_lqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_4_lqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_4_lqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_4_lqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_4_sqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_4_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_4_sqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_4_sqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_4_sqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_4_sqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_5_lqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_5_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_5_lqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_5_lqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_5_lqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_5_lqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_5_sqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_5_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_5_sqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_5_sqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_5_sqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_5_sqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_6_lqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_6_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_6_lqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_6_lqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_6_lqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_6_lqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_6_sqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_6_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_6_sqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_6_sqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_6_sqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_6_sqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_7_lqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_7_lqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_7_lqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_7_lqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_7_lqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_7_lqIdx_value),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag!=rhs_.io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag=0x%0h",this.io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag,rhs_.io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_enqLsq_resp_7_sqIdx_value!=rhs_.io_ooo_to_mem_enqLsq_resp_7_sqIdx_value) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_enqLsq_resp_7_sqIdx_value=0x%0h while the rhs_.io_ooo_to_mem_enqLsq_resp_7_sqIdx_value=0x%0h",this.io_ooo_to_mem_enqLsq_resp_7_sqIdx_value,rhs_.io_ooo_to_mem_enqLsq_resp_7_sqIdx_value),UVM_NONE)
-        end
 
     end
     return super_result;

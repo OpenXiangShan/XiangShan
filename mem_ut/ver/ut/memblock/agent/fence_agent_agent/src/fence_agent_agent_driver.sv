@@ -90,11 +90,14 @@ task fence_agent_agent_driver::send_pkt(fence_agent_agent_xaction tr);
     vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_hv <= tr.io_ooo_to_mem_sfence_bits_hv;
     vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_hg <= tr.io_ooo_to_mem_sfence_bits_hg;
 
+    vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_flushPipe <= tr.io_ooo_to_mem_sfence_bits_flushPipe;
+
 endtask:send_pkt
 
 task fence_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 
     if(drv_mode==tcnt_dec_base::DRV_0) begin
+        vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_flushPipe <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_valid <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_rs1 <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_rs2 <= '0;

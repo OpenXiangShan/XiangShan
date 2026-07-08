@@ -69,6 +69,8 @@
         U_IF_NAME.io_ptw_resp_bits_s2_entry_ppn = '0; \
         U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_d = '0; \
         U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_a = '0; \
+        U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_g = '0; \
+        U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_u = '0; \
         U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_x = '0; \
         U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_w = '0; \
         U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_r = '0; \
@@ -134,8 +136,8 @@
             force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2_entry_ppn = U_IF_NAME.io_ptw_resp_bits_s2_entry_ppn; \
             force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_d = U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_d; \
             force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_a = U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_a; \
-            force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_g = '0; \
-            force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_u = '0; \
+            force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_g = U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_g; \
+            force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_u = U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_u; \
             force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_x = U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_x; \
             force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_w = U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_w; \
             force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_r = U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_r; \
@@ -198,6 +200,8 @@
             force U_IF_NAME.io_ptw_resp_bits_s2_entry_ppn = '0; \
             force U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_d = '0; \
             force U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_a = '0; \
+            force U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_g = '0; \
+            force U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_u = '0; \
             force U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_x = '0; \
             force U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_w = '0; \
             force U_IF_NAME.io_ptw_resp_bits_s2_entry_perm_r = '0; \

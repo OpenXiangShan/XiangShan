@@ -100,125 +100,112 @@ task lintsissue_agent_agent_driver::main_phase(uvm_phase phase);
 endtask:main_phase
 
 task lintsissue_agent_agent_driver::send_pkt(lintsissue_agent_agent_xaction tr);
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_valid <= tr.io_ooo_to_mem_intIssue_6_0_valid;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuType <= tr.io_ooo_to_mem_intIssue_6_0_bits_fuType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuOpType <= tr.io_ooo_to_mem_intIssue_6_0_bits_fuOpType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_src_0 <= tr.io_ooo_to_mem_intIssue_6_0_bits_src_0;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_flag <= tr.io_ooo_to_mem_intIssue_6_0_bits_robIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_value <= tr.io_ooo_to_mem_intIssue_6_0_bits_robIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_flag <= tr.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_value <= tr.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_valid <= tr.io_ooo_to_mem_intIssue_5_0_valid;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuType <= tr.io_ooo_to_mem_intIssue_5_0_bits_fuType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuOpType <= tr.io_ooo_to_mem_intIssue_5_0_bits_fuOpType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_src_0 <= tr.io_ooo_to_mem_intIssue_5_0_bits_src_0;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_flag <= tr.io_ooo_to_mem_intIssue_5_0_bits_robIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_value <= tr.io_ooo_to_mem_intIssue_5_0_bits_robIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_flag <= tr.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_value <= tr.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_valid <= tr.io_ooo_to_mem_intIssue_4_0_valid;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuType <= tr.io_ooo_to_mem_intIssue_4_0_bits_fuType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuOpType <= tr.io_ooo_to_mem_intIssue_4_0_bits_fuOpType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_src_0 <= tr.io_ooo_to_mem_intIssue_4_0_bits_src_0;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_imm <= tr.io_ooo_to_mem_intIssue_4_0_bits_imm;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_flag <= tr.io_ooo_to_mem_intIssue_4_0_bits_robIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_value <= tr.io_ooo_to_mem_intIssue_4_0_bits_robIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isFirstIssue <= tr.io_ooo_to_mem_intIssue_4_0_bits_isFirstIssue;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_pdest <= tr.io_ooo_to_mem_intIssue_4_0_bits_pdest;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isRVC <= tr.io_ooo_to_mem_intIssue_4_0_bits_isRVC;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_flag <= tr.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_value <= tr.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqOffset <= tr.io_ooo_to_mem_intIssue_4_0_bits_ftqOffset;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_storeSetHit <= tr.io_ooo_to_mem_intIssue_4_0_bits_storeSetHit;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ssid <= tr.io_ooo_to_mem_intIssue_4_0_bits_ssid;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_flag <= tr.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_value <= tr.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_valid <= tr.io_ooo_to_mem_intIssue_3_0_valid;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuType <= tr.io_ooo_to_mem_intIssue_3_0_bits_fuType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuOpType <= tr.io_ooo_to_mem_intIssue_3_0_bits_fuOpType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_src_0 <= tr.io_ooo_to_mem_intIssue_3_0_bits_src_0;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_imm <= tr.io_ooo_to_mem_intIssue_3_0_bits_imm;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_flag <= tr.io_ooo_to_mem_intIssue_3_0_bits_robIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_value <= tr.io_ooo_to_mem_intIssue_3_0_bits_robIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isFirstIssue <= tr.io_ooo_to_mem_intIssue_3_0_bits_isFirstIssue;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_pdest <= tr.io_ooo_to_mem_intIssue_3_0_bits_pdest;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isRVC <= tr.io_ooo_to_mem_intIssue_3_0_bits_isRVC;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_flag <= tr.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_value <= tr.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqOffset <= tr.io_ooo_to_mem_intIssue_3_0_bits_ftqOffset;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_storeSetHit <= tr.io_ooo_to_mem_intIssue_3_0_bits_storeSetHit;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ssid <= tr.io_ooo_to_mem_intIssue_3_0_bits_ssid;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_flag <= tr.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_value <= tr.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_valid <= tr.io_ooo_to_mem_intIssue_2_0_valid;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fuOpType <= tr.io_ooo_to_mem_intIssue_2_0_bits_fuOpType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_src_0 <= tr.io_ooo_to_mem_intIssue_2_0_bits_src_0;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_imm <= tr.io_ooo_to_mem_intIssue_2_0_bits_imm;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_flag <= tr.io_ooo_to_mem_intIssue_2_0_bits_robIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_value <= tr.io_ooo_to_mem_intIssue_2_0_bits_robIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pdest <= tr.io_ooo_to_mem_intIssue_2_0_bits_pdest;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_rfWen <= tr.io_ooo_to_mem_intIssue_2_0_bits_rfWen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fpWen <= tr.io_ooo_to_mem_intIssue_2_0_bits_fpWen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pc <= tr.io_ooo_to_mem_intIssue_2_0_bits_pc;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_isRVC <= tr.io_ooo_to_mem_intIssue_2_0_bits_isRVC;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_flag <= tr.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_value <= tr.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqOffset <= tr.io_ooo_to_mem_intIssue_2_0_bits_ftqOffset;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitBit <= tr.io_ooo_to_mem_intIssue_2_0_bits_loadWaitBit;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_flag <= tr.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_value <= tr.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_storeSetHit <= tr.io_ooo_to_mem_intIssue_2_0_bits_storeSetHit;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitStrict <= tr.io_ooo_to_mem_intIssue_2_0_bits_loadWaitStrict;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_flag <= tr.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_value <= tr.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_flag <= tr.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_value <= tr.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_valid <= tr.io_ooo_to_mem_intIssue_1_0_valid;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fuOpType <= tr.io_ooo_to_mem_intIssue_1_0_bits_fuOpType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_src_0 <= tr.io_ooo_to_mem_intIssue_1_0_bits_src_0;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_imm <= tr.io_ooo_to_mem_intIssue_1_0_bits_imm;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_flag <= tr.io_ooo_to_mem_intIssue_1_0_bits_robIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_value <= tr.io_ooo_to_mem_intIssue_1_0_bits_robIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pdest <= tr.io_ooo_to_mem_intIssue_1_0_bits_pdest;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_rfWen <= tr.io_ooo_to_mem_intIssue_1_0_bits_rfWen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fpWen <= tr.io_ooo_to_mem_intIssue_1_0_bits_fpWen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pc <= tr.io_ooo_to_mem_intIssue_1_0_bits_pc;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_isRVC <= tr.io_ooo_to_mem_intIssue_1_0_bits_isRVC;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_flag <= tr.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_value <= tr.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqOffset <= tr.io_ooo_to_mem_intIssue_1_0_bits_ftqOffset;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitBit <= tr.io_ooo_to_mem_intIssue_1_0_bits_loadWaitBit;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_flag <= tr.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_value <= tr.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_storeSetHit <= tr.io_ooo_to_mem_intIssue_1_0_bits_storeSetHit;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitStrict <= tr.io_ooo_to_mem_intIssue_1_0_bits_loadWaitStrict;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_flag <= tr.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_value <= tr.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_flag <= tr.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_value <= tr.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_valid <= tr.io_ooo_to_mem_intIssue_0_0_valid;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fuOpType <= tr.io_ooo_to_mem_intIssue_0_0_bits_fuOpType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_src_0 <= tr.io_ooo_to_mem_intIssue_0_0_bits_src_0;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_imm <= tr.io_ooo_to_mem_intIssue_0_0_bits_imm;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_flag <= tr.io_ooo_to_mem_intIssue_0_0_bits_robIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value <= tr.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pdest <= tr.io_ooo_to_mem_intIssue_0_0_bits_pdest;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_rfWen <= tr.io_ooo_to_mem_intIssue_0_0_bits_rfWen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fpWen <= tr.io_ooo_to_mem_intIssue_0_0_bits_fpWen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pc <= tr.io_ooo_to_mem_intIssue_0_0_bits_pc;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_isRVC <= tr.io_ooo_to_mem_intIssue_0_0_bits_isRVC;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_flag <= tr.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_value <= tr.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqOffset <= tr.io_ooo_to_mem_intIssue_0_0_bits_ftqOffset;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitBit <= tr.io_ooo_to_mem_intIssue_0_0_bits_loadWaitBit;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_flag <= tr.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_value <= tr.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_storeSetHit <= tr.io_ooo_to_mem_intIssue_0_0_bits_storeSetHit;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitStrict <= tr.io_ooo_to_mem_intIssue_0_0_bits_loadWaitStrict;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_flag <= tr.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value <= tr.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_flag <= tr.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value <= tr.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value;
+
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_src_0 <= tr.io_ooo_to_mem_issueLda_0_bits_src_0;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_fpWen <= tr.io_ooo_to_mem_issueLda_0_bits_uop_fpWen;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_ftqOffset <= tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqOffset;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_flag <= tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_value <= tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_fuOpType <= tr.io_ooo_to_mem_issueLda_0_bits_uop_fuOpType;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_imm <= tr.io_ooo_to_mem_issueLda_0_bits_uop_imm;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_loadWaitBit <= tr.io_ooo_to_mem_issueLda_0_bits_uop_loadWaitBit;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_loadWaitStrict <= tr.io_ooo_to_mem_issueLda_0_bits_uop_loadWaitStrict;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_flag <= tr.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_value <= tr.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_pc <= tr.io_ooo_to_mem_issueLda_0_bits_uop_pc;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_pdest <= tr.io_ooo_to_mem_issueLda_0_bits_uop_pdest;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_preDecodeInfo_isRVC <= tr.io_ooo_to_mem_issueLda_0_bits_uop_preDecodeInfo_isRVC;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_rfWen <= tr.io_ooo_to_mem_issueLda_0_bits_uop_rfWen;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_flag <= tr.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_value <= tr.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_flag <= tr.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_value <= tr.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_storeSetHit <= tr.io_ooo_to_mem_issueLda_0_bits_uop_storeSetHit;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_waitForRobIdx_flag <= tr.io_ooo_to_mem_issueLda_0_bits_uop_waitForRobIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_waitForRobIdx_value <= tr.io_ooo_to_mem_issueLda_0_bits_uop_waitForRobIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_valid <= tr.io_ooo_to_mem_issueLda_0_valid;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_src_0 <= tr.io_ooo_to_mem_issueLda_1_bits_src_0;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_fpWen <= tr.io_ooo_to_mem_issueLda_1_bits_uop_fpWen;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_ftqOffset <= tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqOffset;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_flag <= tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_value <= tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_fuOpType <= tr.io_ooo_to_mem_issueLda_1_bits_uop_fuOpType;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_imm <= tr.io_ooo_to_mem_issueLda_1_bits_uop_imm;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_loadWaitBit <= tr.io_ooo_to_mem_issueLda_1_bits_uop_loadWaitBit;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_loadWaitStrict <= tr.io_ooo_to_mem_issueLda_1_bits_uop_loadWaitStrict;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_lqIdx_flag <= tr.io_ooo_to_mem_issueLda_1_bits_uop_lqIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_lqIdx_value <= tr.io_ooo_to_mem_issueLda_1_bits_uop_lqIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_pc <= tr.io_ooo_to_mem_issueLda_1_bits_uop_pc;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_pdest <= tr.io_ooo_to_mem_issueLda_1_bits_uop_pdest;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_preDecodeInfo_isRVC <= tr.io_ooo_to_mem_issueLda_1_bits_uop_preDecodeInfo_isRVC;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_rfWen <= tr.io_ooo_to_mem_issueLda_1_bits_uop_rfWen;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_robIdx_flag <= tr.io_ooo_to_mem_issueLda_1_bits_uop_robIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_robIdx_value <= tr.io_ooo_to_mem_issueLda_1_bits_uop_robIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_sqIdx_flag <= tr.io_ooo_to_mem_issueLda_1_bits_uop_sqIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_sqIdx_value <= tr.io_ooo_to_mem_issueLda_1_bits_uop_sqIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_storeSetHit <= tr.io_ooo_to_mem_issueLda_1_bits_uop_storeSetHit;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_waitForRobIdx_flag <= tr.io_ooo_to_mem_issueLda_1_bits_uop_waitForRobIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_waitForRobIdx_value <= tr.io_ooo_to_mem_issueLda_1_bits_uop_waitForRobIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_valid <= tr.io_ooo_to_mem_issueLda_1_valid;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_src_0 <= tr.io_ooo_to_mem_issueLda_2_bits_src_0;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_fpWen <= tr.io_ooo_to_mem_issueLda_2_bits_uop_fpWen;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_ftqOffset <= tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqOffset;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_flag <= tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_value <= tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_fuOpType <= tr.io_ooo_to_mem_issueLda_2_bits_uop_fuOpType;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_imm <= tr.io_ooo_to_mem_issueLda_2_bits_uop_imm;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_loadWaitBit <= tr.io_ooo_to_mem_issueLda_2_bits_uop_loadWaitBit;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_loadWaitStrict <= tr.io_ooo_to_mem_issueLda_2_bits_uop_loadWaitStrict;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_lqIdx_flag <= tr.io_ooo_to_mem_issueLda_2_bits_uop_lqIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_lqIdx_value <= tr.io_ooo_to_mem_issueLda_2_bits_uop_lqIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_pc <= tr.io_ooo_to_mem_issueLda_2_bits_uop_pc;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_pdest <= tr.io_ooo_to_mem_issueLda_2_bits_uop_pdest;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_preDecodeInfo_isRVC <= tr.io_ooo_to_mem_issueLda_2_bits_uop_preDecodeInfo_isRVC;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_rfWen <= tr.io_ooo_to_mem_issueLda_2_bits_uop_rfWen;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_robIdx_flag <= tr.io_ooo_to_mem_issueLda_2_bits_uop_robIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_robIdx_value <= tr.io_ooo_to_mem_issueLda_2_bits_uop_robIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_sqIdx_flag <= tr.io_ooo_to_mem_issueLda_2_bits_uop_sqIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_sqIdx_value <= tr.io_ooo_to_mem_issueLda_2_bits_uop_sqIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_storeSetHit <= tr.io_ooo_to_mem_issueLda_2_bits_uop_storeSetHit;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_waitForRobIdx_flag <= tr.io_ooo_to_mem_issueLda_2_bits_uop_waitForRobIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_waitForRobIdx_value <= tr.io_ooo_to_mem_issueLda_2_bits_uop_waitForRobIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_valid <= tr.io_ooo_to_mem_issueLda_2_valid;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_src_0 <= tr.io_ooo_to_mem_issueSta_0_bits_src_0;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_fuOpType <= tr.io_ooo_to_mem_issueSta_0_bits_uop_fuOpType;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_fuType <= tr.io_ooo_to_mem_issueSta_0_bits_uop_fuType;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_imm <= tr.io_ooo_to_mem_issueSta_0_bits_uop_imm;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_pdest <= tr.io_ooo_to_mem_issueSta_0_bits_uop_pdest;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_rfWen <= tr.io_ooo_to_mem_issueSta_0_bits_uop_rfWen;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_flag <= tr.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_value <= tr.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_flag <= tr.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_value <= tr.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_valid <= tr.io_ooo_to_mem_issueSta_0_valid;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_src_0 <= tr.io_ooo_to_mem_issueSta_1_bits_src_0;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_fuOpType <= tr.io_ooo_to_mem_issueSta_1_bits_uop_fuOpType;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_fuType <= tr.io_ooo_to_mem_issueSta_1_bits_uop_fuType;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_imm <= tr.io_ooo_to_mem_issueSta_1_bits_uop_imm;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_pdest <= tr.io_ooo_to_mem_issueSta_1_bits_uop_pdest;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_rfWen <= tr.io_ooo_to_mem_issueSta_1_bits_uop_rfWen;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_flag <= tr.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_value <= tr.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_flag <= tr.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_value <= tr.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_valid <= tr.io_ooo_to_mem_issueSta_1_valid;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_src_0 <= tr.io_ooo_to_mem_issueStd_0_bits_src_0;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_uop_fuOpType <= tr.io_ooo_to_mem_issueStd_0_bits_uop_fuOpType;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_uop_fuType <= tr.io_ooo_to_mem_issueStd_0_bits_uop_fuType;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value <= tr.io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_flag <= tr.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_value <= tr.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_valid <= tr.io_ooo_to_mem_issueStd_0_valid;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_src_0 <= tr.io_ooo_to_mem_issueStd_1_bits_src_0;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_uop_fuOpType <= tr.io_ooo_to_mem_issueStd_1_bits_uop_fuOpType;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_uop_fuType <= tr.io_ooo_to_mem_issueStd_1_bits_uop_fuType;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_uop_robIdx_value <= tr.io_ooo_to_mem_issueStd_1_bits_uop_robIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_flag <= tr.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_flag;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_value <= tr.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_value;
+    vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_valid <= tr.io_ooo_to_mem_issueStd_1_valid;
 
 endtask:send_pkt
 
@@ -287,66 +274,66 @@ function bit lintsissue_agent_agent_driver::has_dispatch_issue_pending(lintsissu
     if (tr == null) begin
         `uvm_fatal(get_type_name(), "has_dispatch_issue_pending got null xaction")
     end
-    return tr.io_ooo_to_mem_intIssue_6_0_valid ||
-           tr.io_ooo_to_mem_intIssue_5_0_valid ||
-           tr.io_ooo_to_mem_intIssue_4_0_valid ||
-           tr.io_ooo_to_mem_intIssue_3_0_valid ||
-           tr.io_ooo_to_mem_intIssue_2_0_valid ||
-           tr.io_ooo_to_mem_intIssue_1_0_valid ||
-           tr.io_ooo_to_mem_intIssue_0_0_valid;
+    return tr.io_ooo_to_mem_issueLda_0_valid ||
+           tr.io_ooo_to_mem_issueLda_1_valid ||
+           tr.io_ooo_to_mem_issueLda_2_valid ||
+           tr.io_ooo_to_mem_issueSta_0_valid ||
+           tr.io_ooo_to_mem_issueSta_1_valid ||
+           tr.io_ooo_to_mem_issueStd_0_valid ||
+           tr.io_ooo_to_mem_issueStd_1_valid;
 endfunction:has_dispatch_issue_pending
 
 function void lintsissue_agent_agent_driver::clear_dispatch_issue_ports(lintsissue_agent_agent_xaction tr);
     if (tr == null) begin
         `uvm_fatal(get_type_name(), "clear_dispatch_issue_ports got null xaction")
     end
-    tr.io_ooo_to_mem_intIssue_6_0_valid = 1'b0;
-    tr.io_ooo_to_mem_intIssue_5_0_valid = 1'b0;
-    tr.io_ooo_to_mem_intIssue_4_0_valid = 1'b0;
-    tr.io_ooo_to_mem_intIssue_3_0_valid = 1'b0;
-    tr.io_ooo_to_mem_intIssue_2_0_valid = 1'b0;
-    tr.io_ooo_to_mem_intIssue_1_0_valid = 1'b0;
-    tr.io_ooo_to_mem_intIssue_0_0_valid = 1'b0;
+    tr.io_ooo_to_mem_issueLda_0_valid = 1'b0;
+    tr.io_ooo_to_mem_issueLda_1_valid = 1'b0;
+    tr.io_ooo_to_mem_issueLda_2_valid = 1'b0;
+    tr.io_ooo_to_mem_issueSta_0_valid = 1'b0;
+    tr.io_ooo_to_mem_issueSta_1_valid = 1'b0;
+    tr.io_ooo_to_mem_issueStd_0_valid = 1'b0;
+    tr.io_ooo_to_mem_issueStd_1_valid = 1'b0;
 endfunction:clear_dispatch_issue_ports
 
 function void lintsissue_agent_agent_driver::clear_ready_dispatch_issue_ports(lintsissue_agent_agent_xaction tr);
     if (tr == null) begin
         `uvm_fatal(get_type_name(), "clear_ready_dispatch_issue_ports got null xaction")
     end
-    if (tr.io_ooo_to_mem_intIssue_6_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_ready) begin
-        report_dispatch_issue_fire(6, tr);
-        tr.memblock_dispatch_fired_mask[6] = 1'b1;
-        tr.io_ooo_to_mem_intIssue_6_0_valid = 1'b0;
-    end
-    if (tr.io_ooo_to_mem_intIssue_5_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_ready) begin
-        report_dispatch_issue_fire(5, tr);
-        tr.memblock_dispatch_fired_mask[5] = 1'b1;
-        tr.io_ooo_to_mem_intIssue_5_0_valid = 1'b0;
-    end
-    if (tr.io_ooo_to_mem_intIssue_4_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_ready) begin
-        report_dispatch_issue_fire(4, tr);
-        tr.memblock_dispatch_fired_mask[4] = 1'b1;
-        tr.io_ooo_to_mem_intIssue_4_0_valid = 1'b0;
-    end
-    if (tr.io_ooo_to_mem_intIssue_3_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_ready) begin
-        report_dispatch_issue_fire(3, tr);
-        tr.memblock_dispatch_fired_mask[3] = 1'b1;
-        tr.io_ooo_to_mem_intIssue_3_0_valid = 1'b0;
-    end
-    if (tr.io_ooo_to_mem_intIssue_2_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_ready) begin
-        report_dispatch_issue_fire(2, tr);
-        tr.memblock_dispatch_fired_mask[2] = 1'b1;
-        tr.io_ooo_to_mem_intIssue_2_0_valid = 1'b0;
-    end
-    if (tr.io_ooo_to_mem_intIssue_1_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_ready) begin
-        report_dispatch_issue_fire(1, tr);
-        tr.memblock_dispatch_fired_mask[1] = 1'b1;
-        tr.io_ooo_to_mem_intIssue_1_0_valid = 1'b0;
-    end
-    if (tr.io_ooo_to_mem_intIssue_0_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_ready) begin
-        report_dispatch_issue_fire(0, tr);
+    if (tr.io_ooo_to_mem_issueLda_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_ready) begin
+        tr.io_ooo_to_mem_issueLda_0_valid = 1'b0;
         tr.memblock_dispatch_fired_mask[0] = 1'b1;
-        tr.io_ooo_to_mem_intIssue_0_0_valid = 1'b0;
+        report_dispatch_issue_fire(0, tr);
+    end
+    if (tr.io_ooo_to_mem_issueLda_1_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_ready) begin
+        tr.io_ooo_to_mem_issueLda_1_valid = 1'b0;
+        tr.memblock_dispatch_fired_mask[1] = 1'b1;
+        report_dispatch_issue_fire(1, tr);
+    end
+    if (tr.io_ooo_to_mem_issueLda_2_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_ready) begin
+        tr.io_ooo_to_mem_issueLda_2_valid = 1'b0;
+        tr.memblock_dispatch_fired_mask[2] = 1'b1;
+        report_dispatch_issue_fire(2, tr);
+    end
+    if (tr.io_ooo_to_mem_issueSta_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_ready) begin
+        tr.io_ooo_to_mem_issueSta_0_valid = 1'b0;
+        tr.memblock_dispatch_fired_mask[3] = 1'b1;
+        report_dispatch_issue_fire(3, tr);
+    end
+    if (tr.io_ooo_to_mem_issueSta_1_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_ready) begin
+        tr.io_ooo_to_mem_issueSta_1_valid = 1'b0;
+        tr.memblock_dispatch_fired_mask[4] = 1'b1;
+        report_dispatch_issue_fire(4, tr);
+    end
+    if (tr.io_ooo_to_mem_issueStd_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_ready) begin
+        tr.io_ooo_to_mem_issueStd_0_valid = 1'b0;
+        tr.memblock_dispatch_fired_mask[5] = 1'b1;
+        report_dispatch_issue_fire(5, tr);
+    end
+    if (tr.io_ooo_to_mem_issueStd_1_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_ready) begin
+        tr.io_ooo_to_mem_issueStd_1_valid = 1'b0;
+        tr.memblock_dispatch_fired_mask[6] = 1'b1;
+        report_dispatch_issue_fire(6, tr);
     end
 endfunction:clear_ready_dispatch_issue_ports
 
@@ -355,33 +342,20 @@ function void lintsissue_agent_agent_driver::report_dispatch_issue_fire(input in
     if (tr == null) begin
         return;
     end
-    if (port_idx == 0) begin
+    if (port_idx <= 2) begin
         `uvm_info(get_type_name(),
-                  $sformatf("dispatch issue fire port=%0d fuOpType=0x%0h src=0x%0h imm=0x%0h rob=%0d:%0d lq=%0d:%0d sq=%0d:%0d rf/fp=%0d/%0d",
-                            port_idx,
-                            tr.io_ooo_to_mem_intIssue_0_0_bits_fuOpType,
-                            tr.io_ooo_to_mem_intIssue_0_0_bits_src_0,
-                            tr.io_ooo_to_mem_intIssue_0_0_bits_imm,
-                            tr.io_ooo_to_mem_intIssue_0_0_bits_robIdx_flag,
-                            tr.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value,
-                            tr.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_flag,
-                            tr.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value,
-                            tr.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_flag,
-                            tr.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value,
-                            tr.io_ooo_to_mem_intIssue_0_0_bits_rfWen,
-                            tr.io_ooo_to_mem_intIssue_0_0_bits_fpWen),
+                  $sformatf("dispatch issue fire lda_port=%0d", port_idx),
                   UVM_LOW)
-        report_dispatch_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_valid");
-        report_dispatch_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_ready");
-        report_dispatch_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_bits_fuOpType");
-        report_dispatch_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_bits_src_0");
-        report_dispatch_hdl_value("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_bits_imm");
         report_dispatch_hdl_bit("top_tb.U_MEMBLOCK._inner_LoadUnit_0_io_tlb_req_valid");
         report_dispatch_hdl_bit("top_tb.U_MEMBLOCK._inner_LoadUnit_0_io_dcache_req_valid");
         report_dispatch_hdl_bit("top_tb.U_MEMBLOCK._inner_dcache_io_lsu_load_0_req_ready");
+    end else if (port_idx <= 4) begin
+        `uvm_info(get_type_name(),
+                  $sformatf("dispatch issue fire sta_port=%0d", port_idx - 3),
+                  UVM_LOW)
     end else begin
         `uvm_info(get_type_name(),
-                  $sformatf("dispatch issue fire port=%0d", port_idx),
+                  $sformatf("dispatch issue fire std_port=%0d", port_idx - 5),
                   UVM_LOW)
     end
 endfunction:report_dispatch_issue_fire
@@ -394,40 +368,27 @@ function void lintsissue_agent_agent_driver::report_dispatch_issue_timeout(lints
     end
 
     `uvm_info(get_type_name(),
-              $sformatf("dispatch timeout wait_cycles=%0d vld[6:0]=%0b%0b%0b%0b%0b%0b%0b rdy[6:0]=%0b%0b%0b%0b%0b%0b%0b",
+              $sformatf("dispatch timeout wait_cycles=%0d vld[6:0]=%0b%0b%0b%0b%0b%0b%0b",
                         wait_cycles,
-                        tr.io_ooo_to_mem_intIssue_6_0_valid,
-                        tr.io_ooo_to_mem_intIssue_5_0_valid,
-                        tr.io_ooo_to_mem_intIssue_4_0_valid,
-                        tr.io_ooo_to_mem_intIssue_3_0_valid,
-                        tr.io_ooo_to_mem_intIssue_2_0_valid,
-                        tr.io_ooo_to_mem_intIssue_1_0_valid,
-                        tr.io_ooo_to_mem_intIssue_0_0_valid,
-                        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_ready,
-                        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_ready,
-                        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_ready,
-                        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_ready,
-                        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_ready,
-                        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_ready,
-                        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_ready),
+                        tr.io_ooo_to_mem_issueStd_1_valid,
+                        tr.io_ooo_to_mem_issueStd_0_valid,
+                        tr.io_ooo_to_mem_issueSta_1_valid,
+                        tr.io_ooo_to_mem_issueSta_0_valid,
+                        tr.io_ooo_to_mem_issueLda_2_valid,
+                        tr.io_ooo_to_mem_issueLda_1_valid,
+                        tr.io_ooo_to_mem_issueLda_0_valid),
               UVM_LOW)
     `uvm_info(get_type_name(),
-              $sformatf("load0 payload fuOpType=0x%0h src=0x%0h imm=0x%0h rob=%0d:%0d lq=%0d:%0d sq=%0d:%0d rf/fp=%0d/%0d",
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_fuOpType,
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_src_0,
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_imm,
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_robIdx_flag,
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value,
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_flag,
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value,
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_flag,
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value,
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_rfWen,
-                        tr.io_ooo_to_mem_intIssue_0_0_bits_fpWen),
+              $sformatf("load0 payload fuOpType=0x%0h src=0x%0h rob=%0d:%0d lq=%0d:%0d sq=%0d:%0d",
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_fuOpType,
+                        tr.io_ooo_to_mem_issueLda_0_bits_src_0,
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_flag,
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_value,
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_flag,
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_value,
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_flag,
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_value),
               UVM_LOW)
-    report_dispatch_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_0_0_ready");
-    report_dispatch_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_1_0_ready");
-    report_dispatch_hdl_bit("top_tb.U_MEMBLOCK.io_ooo_to_mem_intIssue_2_0_ready");
     report_dispatch_hdl_bit("top_tb.U_MEMBLOCK._inner_dcache_io_lsu_load_0_req_ready");
     report_dispatch_hdl_bit("top_tb.U_MEMBLOCK._inner_dcache_io_lsu_load_1_req_ready");
     report_dispatch_hdl_bit("top_tb.U_MEMBLOCK._inner_dcache_io_lsu_load_2_req_ready");
@@ -468,613 +429,123 @@ endfunction:report_dispatch_hdl_value
 task lintsissue_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 
     if(drv_mode==tcnt_dec_base::DRV_0) begin
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_imm <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isFirstIssue <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_pdest <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isRVC <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqOffset <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_storeSetHit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ssid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_imm <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isFirstIssue <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_pdest <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isRVC <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqOffset <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_storeSetHit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ssid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_imm <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pdest <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_rfWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fpWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pc <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_isRVC <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqOffset <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitBit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_storeSetHit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitStrict <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_imm <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pdest <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_rfWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fpWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pc <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_isRVC <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqOffset <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitBit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_storeSetHit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitStrict <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_imm <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pdest <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_rfWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fpWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pc <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_isRVC <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqOffset <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitBit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_storeSetHit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitStrict <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_src_0 <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_fpWen <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_ftqOffset <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_fuOpType <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_imm <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_loadWaitBit <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_loadWaitStrict <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_lqIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_pc <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_pdest <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_preDecodeInfo_isRVC <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_rfWen <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_robIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_sqIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_storeSetHit <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_waitForRobIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_bits_uop_waitForRobIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_valid <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_src_0 <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_fpWen <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_ftqOffset <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_fuOpType <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_imm <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_loadWaitBit <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_loadWaitStrict <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_lqIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_lqIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_pc <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_pdest <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_preDecodeInfo_isRVC <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_rfWen <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_robIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_robIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_sqIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_sqIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_storeSetHit <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_waitForRobIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_bits_uop_waitForRobIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_valid <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_src_0 <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_fpWen <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_ftqOffset <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_fuOpType <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_imm <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_loadWaitBit <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_loadWaitStrict <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_lqIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_lqIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_pc <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_pdest <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_preDecodeInfo_isRVC <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_rfWen <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_robIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_robIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_sqIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_sqIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_storeSetHit <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_waitForRobIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_bits_uop_waitForRobIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_valid <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_src_0 <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_fuOpType <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_fuType <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_imm <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_pdest <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_rfWen <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_robIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_bits_uop_sqIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_valid <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_src_0 <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_fuOpType <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_fuType <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_imm <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_pdest <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_rfWen <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_robIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_bits_uop_sqIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_valid <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_src_0 <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_uop_fuOpType <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_uop_fuType <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_bits_uop_sqIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_valid <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_src_0 <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_uop_fuOpType <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_uop_fuType <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_uop_robIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_flag <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_bits_uop_sqIdx_value <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_valid <= '0;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_1) begin
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_valid <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuType <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuOpType <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_src_0 <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_valid <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuType <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuOpType <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_src_0 <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_valid <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuType <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuOpType <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_src_0 <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_imm <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isFirstIssue <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_pdest <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isRVC <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqOffset <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_storeSetHit <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ssid <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_valid <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuType <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuOpType <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_src_0 <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_imm <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isFirstIssue <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_pdest <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isRVC <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqOffset <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_storeSetHit <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ssid <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_valid <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fuOpType <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_src_0 <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_imm <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pdest <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_rfWen <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fpWen <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pc <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_isRVC <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqOffset <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitBit <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_storeSetHit <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitStrict <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_valid <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fuOpType <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_src_0 <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_imm <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pdest <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_rfWen <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fpWen <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pc <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_isRVC <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqOffset <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitBit <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_storeSetHit <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitStrict <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_valid <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fuOpType <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_src_0 <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_imm <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pdest <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_rfWen <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fpWen <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pc <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_isRVC <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqOffset <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitBit <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_storeSetHit <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitStrict <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_flag <= '1;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value <= '1;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_X) begin
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_valid <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuType <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuOpType <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_src_0 <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_valid <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuType <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuOpType <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_src_0 <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_valid <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuType <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuOpType <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_src_0 <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_imm <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isFirstIssue <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_pdest <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isRVC <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqOffset <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_storeSetHit <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ssid <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_valid <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuType <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuOpType <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_src_0 <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_imm <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isFirstIssue <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_pdest <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isRVC <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqOffset <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_storeSetHit <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ssid <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_valid <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fuOpType <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_src_0 <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_imm <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pdest <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_rfWen <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fpWen <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pc <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_isRVC <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqOffset <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitBit <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_storeSetHit <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitStrict <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_valid <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fuOpType <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_src_0 <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_imm <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pdest <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_rfWen <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fpWen <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pc <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_isRVC <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqOffset <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitBit <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_storeSetHit <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitStrict <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_valid <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fuOpType <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_src_0 <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_imm <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pdest <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_rfWen <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fpWen <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pc <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_isRVC <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqOffset <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitBit <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_storeSetHit <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitStrict <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_flag <= 'x;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value <= 'x;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_RAND) begin
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_valid <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuType <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuOpType <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_src_0 <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_valid <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuType <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuOpType <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_src_0 <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_valid <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuType <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuOpType <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_src_0 <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_imm <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isFirstIssue <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_pdest <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isRVC <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqOffset <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_storeSetHit <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ssid <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_valid <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuType <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuOpType <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_src_0 <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_imm <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isFirstIssue <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_pdest <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isRVC <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqOffset <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_storeSetHit <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ssid <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_valid <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fuOpType <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_src_0 <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_imm <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pdest <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_rfWen <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fpWen <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pc <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_isRVC <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqOffset <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitBit <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_storeSetHit <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitStrict <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_valid <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fuOpType <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_src_0 <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_imm <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pdest <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_rfWen <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fpWen <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pc <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_isRVC <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqOffset <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitBit <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_storeSetHit <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitStrict <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_valid <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fuOpType <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_src_0 <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_imm <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pdest <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_rfWen <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fpWen <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pc <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_isRVC <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqOffset <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitBit <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_storeSetHit <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitStrict <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_flag <= $urandom;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value <= $urandom;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_LST) begin
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_5_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_imm <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isFirstIssue <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_pdest <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_isRVC <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ftqOffset <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_storeSetHit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_ssid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_4_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_imm <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isFirstIssue <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_pdest <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_isRVC <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ftqOffset <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_storeSetHit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_ssid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_3_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_imm <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pdest <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_rfWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_fpWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_pc <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_isRVC <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_ftqOffset <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitBit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_waitForRobIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_storeSetHit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_loadWaitStrict <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_lqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_2_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_imm <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pdest <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_rfWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_fpWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_pc <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_isRVC <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_ftqOffset <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitBit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_waitForRobIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_storeSetHit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_loadWaitStrict <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_lqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_1_0_bits_sqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_valid <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fuOpType <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_src_0 <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_imm <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_robIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pdest <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_rfWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_fpWen <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_pc <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_isRVC <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_ftqOffset <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitBit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_waitForRobIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_storeSetHit <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_loadWaitStrict <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_lqIdx_value <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_flag <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_bits_sqIdx_value <= '0;
 
     end
 

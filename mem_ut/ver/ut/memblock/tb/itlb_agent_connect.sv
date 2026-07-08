@@ -35,7 +35,6 @@
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_w = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_w; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_r = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_r; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_level = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_entry_level; \
-        force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_prefetch = '0; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_v = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_entry_v; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_ppn = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_entry_ppn; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_addr_low = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_addr_low; \
@@ -66,8 +65,6 @@
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_pf = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_pf; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_af = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_af; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag; \
-        force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_asid = '0; \
-        force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_n = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_n; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_pbmt = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_pbmt; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_ppn = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_ppn; \
@@ -79,8 +76,6 @@
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_w = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_w; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_r = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_r; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_level = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_level; \
-        force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_prefetch = '0; \
-        force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_v = '0; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_gpf = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_gpf; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_gaf = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_gaf; \
     end \
@@ -106,7 +101,6 @@
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_w = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_w; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_r = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_entry_perm_r; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_level = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_entry_level; \
-        force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_prefetch = '0; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_v = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_entry_v; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_entry_ppn = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_entry_ppn; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_addr_low = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_addr_low; \
@@ -137,8 +131,6 @@
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_pf = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_pf; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s1_af = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s1_af; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag; \
-        force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_asid = '0; \
-        force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_n = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_n; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_pbmt = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_pbmt; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_ppn = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_ppn; \
@@ -150,8 +142,6 @@
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_w = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_w; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_r = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_perm_r; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_level = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_level; \
-        force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_prefetch = '0; \
-        force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_v = '0; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_gpf = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_gpf; \
         force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_gaf = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_gaf; \
     end \
