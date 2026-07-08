@@ -216,6 +216,7 @@ class TLBFA(
   val sfence_valid = sfence.valid && !sfence.bits.hg && !sfence.bits.hv && (if (HasMptCheck) !(sfence.bits.mfence.get) else true.B)
   val sfence_vpn = sfence.bits.addr(VAddrBits - 1, offLen)
   // when mpt is enabled, sfence only clear entries with current sdid
+  val sfence_sdid_hit = entries.map(e => if (HasMptCheck) Mux(io.csr.mmpt.mode =/= 0.U, e.sdid.get === io.csr.mmpt.sdid, true.B) else true.B)
   val sfenceHit = entries.map(_.hit(sfence_vpn, sfence.bits.id, vmid = io.csr.hgatp.vmid, sdid = if(HasMptCheck) io.csr.mmpt.sdid else 0.U,
     matchMpt = if(HasMptCheck) io.csr.mmpt.mode =/= 0.U else false.B, hasS2xlate = io.csr.priv.virt))
   val sfenceHit_noasid = entries.map(_.hit(sfence_vpn, sfence.bits.id, ignoreAsid = true, vmid = io.csr.hgatp.vmid, sdid = if(HasMptCheck) io.csr.mmpt.sdid else 0.U,
@@ -226,11 +227,11 @@ class TLBFA(
       // Note: when virt=1, always flush all addr. See hfence.vvma comment.
       when (sfence.bits.rs2) { // asid, but i do not want to support asid, *.rs2 <- (rs2===0.U)
         // all addr and all asid
-        v.zipWithIndex.map{ case(a, i) => a := a && !((io.csr.priv.virt === false.B && entries(i).s2xlate === noS2xlate) ||
-          (io.csr.priv.virt && entries(i).s2xlate =/= noS2xlate && entries(i).vmid === io.csr.hgatp.vmid))}
+        v.zipWithIndex.map{ case(a, i) => a := a && !(sfence_sdid_hit(i) && ((io.csr.priv.virt === false.B && entries(i).s2xlate === noS2xlate) ||
+          (io.csr.priv.virt && entries(i).s2xlate =/= noS2xlate && entries(i).vmid === io.csr.hgatp.vmid)))}
       }.otherwise {
         // all addr but specific asid
-        v.zipWithIndex.map{ case (a, i) => a := a && !(!g(i) && ((!io.csr.priv.virt && entries(i).s2xlate === noS2xlate && entries(i).asid === sfence.bits.id) ||
+        v.zipWithIndex.map{ case (a, i) => a := a && !(sfence_sdid_hit(i) && !g(i) && ((!io.csr.priv.virt && entries(i).s2xlate === noS2xlate && entries(i).asid === sfence.bits.id) ||
           (io.csr.priv.virt && entries(i).s2xlate =/= noS2xlate && entries(i).asid === sfence.bits.id && entries(i).vmid === io.csr.hgatp.vmid)))}
       }
     }.otherwise {

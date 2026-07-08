@@ -573,10 +573,20 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       (csr.hgatp.mode === 0.U) -> onlyStage1
     ))
 
-    val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
+    val ptw_just_back = ptw.resp.fire && req_s2xlate === ptw.resp.bits.s2xlate && ptw.resp.bits.hit(
+      get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid,
+      allType = true,
+      sdid = if (HasMptCheck) csr.mmpt.sdid else 0.U,
+      matchMpt = if (HasMptCheck) mptEn.get else false.B
+    )
     // TODO: RegNext enable: ptw.resp.valid ? req.valid
     val ptw_resp_bits_reg = RegEnable(ptw.resp.bits, ptw.resp.valid)
-    val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && req_s2xlate === ptw_resp_bits_reg.s2xlate && ptw_resp_bits_reg.hit(get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
+    val ptw_already_back = GatedValidRegNext(ptw.resp.fire) && req_s2xlate === ptw_resp_bits_reg.s2xlate && ptw_resp_bits_reg.hit(
+      get_pn(req_out(idx).vaddr), csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid,
+      allType = true,
+      sdid = if (HasMptCheck) csr.mmpt.sdid else 0.U,
+      matchMpt = if (HasMptCheck) mptEn.get else false.B
+    )
     val ptw_getGpa = req_need_gpa && hitVec(idx)
     val need_gpa_vpn_hit = need_gpa_vpn === get_pn(req_out(idx).vaddr)
 
@@ -623,7 +633,13 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       (csr.hgatp.mode === 0.U) -> onlyStage1
     ))
     val miss_req_s2xlate_reg = RegEnable(miss_req_s2xlate, io.ptw.req(idx).fire)
-    val hit = io.ptw.resp.bits.hit(miss_req_vpn, csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true, ignoreAsid = false) && io.ptw.resp.valid && miss_req_s2xlate_reg === io.ptw.resp.bits.s2xlate
+    val hit = io.ptw.resp.bits.hit(
+      miss_req_vpn, csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid,
+      allType = true,
+      ignoreAsid = false,
+      sdid = if (HasMptCheck) csr.mmpt.sdid else 0.U,
+      matchMpt = if (HasMptCheck) mptEn.get else false.B
+    ) && io.ptw.resp.valid && miss_req_s2xlate_reg === io.ptw.resp.bits.s2xlate
 
     val new_coming_valid = WireInit(false.B)
     new_coming_valid := req_in(idx).fire && !req_in(idx).bits.kill && !flush_pipe(idx)
@@ -712,7 +728,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val onlyS2 = s2xlate === onlyStage2
     val onlyS1 = s2xlate === onlyStage1
     val s2xlate_hit = s2xlate === ptw.resp.bits.s2xlate
-    val resp_hit = ptw.resp.bits.hit(vpn, csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid, allType = true)
+    val resp_hit = ptw.resp.bits.hit(
+      vpn, csr.satp.asid, csr.vsatp.asid, csr.hgatp.vmid,
+      allType = true,
+      sdid = if (HasMptCheck) csr.mmpt.sdid else 0.U,
+      matchMpt = if (HasMptCheck) mptEn.get else false.B
+    )
     val p_hit_fast = resp_hit && io.ptw.resp.fire && s2xlate_hit    // valid in the same cycle as tlb_req and ptw_resp
     val p_hit = GatedValidRegNext(p_hit_fast)                       // valid in the next cycle after tlb_req and ptw_resp
     val ppn_s1 = ptw.resp.bits.s1.genPPN(vpn)(ppnLen - 1, 0)
