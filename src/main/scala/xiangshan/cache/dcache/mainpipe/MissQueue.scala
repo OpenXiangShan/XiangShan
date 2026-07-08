@@ -884,7 +884,8 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     io.primary_ready := !req_valid && !GatedValidRegNext(primary_fire)
   }.otherwise {
     // cannot accept prefetch req except when a memset patten is detected
-    io.primary_ready := !req_valid && (!io.queryME.map(_.req.bits.isFromPrefetch).reduce(_&&_) || io.memSetPattenDetected) && !GatedValidRegNext(primary_fire)
+    // prefetch only in mainpipe, now
+    io.primary_ready := !req_valid && (!(io.queryME(0).req.valid && io.queryME(0).req.bits.isFromPrefetch) || io.memSetPattenDetected) && !GatedValidRegNext(primary_fire)
   }
 
   // Generate vectorized secondary_ready and secondary_reject for parallel enqueue
