@@ -263,7 +263,7 @@ jobs:
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
               --llvm-profdata llvm-profdata --trace-fst \
               --emulator ${{ inputs.emulator }} \
-              ${DB_OPTS[@]} \
+              "${DB_OPTS[@]}" \
               $CST_COMPILE_OPT
             mkdir -p $SPEC_DIR
             cp $GITHUB_WORKSPACE/build/emu "$SPEC_DIR/emu-${{ inputs.emulator }}"
