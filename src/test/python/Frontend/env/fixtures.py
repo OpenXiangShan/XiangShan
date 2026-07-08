@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
+import tempfile
 from datetime import datetime
 from logging import getLogger
 from pathlib import Path
@@ -109,6 +111,63 @@ def _coverage_ignore_path() -> str | None:
     return str(path) if path.is_file() else None
 
 
+def _coverage_omit_path() -> Path | None:
+    raw = os.getenv("TB_LINE_COVERAGE_OMIT", "").strip()
+    path = Path(raw) if raw else _HERE / "Frontend.omit"
+    return path if path.is_file() else None
+
+
+def _line_ranges(lines: list[int]) -> list[str]:
+    if not lines:
+        return []
+    ranges = []
+    start = prev = lines[0]
+    for line in lines[1:]:
+        if line == prev + 1:
+            prev = line
+            continue
+        ranges.append(str(start) if start == prev else f"{start}-{prev}")
+        start = prev = line
+    ranges.append(str(start) if start == prev else f"{start}-{prev}")
+    return ranges
+
+
+def _expanded_coverage_ignore_path() -> str | None:
+    ignore = _coverage_ignore_path()
+    omit = _coverage_omit_path()
+    if omit is None:
+        return ignore
+
+    patterns = [
+        line.strip()
+        for line in omit.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+    if not patterns:
+        return ignore
+
+    regexes = [re.compile(pattern) for pattern in patterns]
+    lines = []
+    if ignore:
+        lines.extend(Path(ignore).read_text(encoding="utf-8").splitlines())
+    for source in sorted((_REPO_ROOT / "build-frontend" / "rtl").glob("*.sv")):
+        matched = []
+        for lineno, text in enumerate(source.read_text(errors="ignore").splitlines(), 1):
+            if any(regex.search(text) for regex in regexes):
+                matched.append(lineno)
+        ranges = _line_ranges(matched)
+        if ranges:
+            lines.append(f"*/build-frontend/rtl/{source.name}:{','.join(ranges)}")
+
+    tmp = tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", suffix=".ignore", prefix="frontend-line-coverage-", delete=False
+    )
+    with tmp:
+        tmp.write("\n".join(line for line in lines if line))
+        tmp.write("\n")
+    return tmp.name
+
+
 def _log_path(request, default_dir: Path) -> Path:
     tag = _artifact_tag(request)
     raw = os.getenv("TB_CASE_LOG_PATH", "").strip()
@@ -161,7 +220,8 @@ def create_dut(request):
         if _is_enabled("TB_ENABLE_FST_DUMP", default="1"):
             waveform.parent.mkdir(parents=True, exist_ok=True)
             dut.SetWaveform(str(waveform))
-        dut.SetCoverage(str(coverage))
+        if _is_enabled("TB_ENABLE_DUT_COVERAGE", default="1"):
+            dut.SetCoverage(str(coverage))
         logger.info(
             "dut created: tc=%s waveform=%s coverage=%s case_log=%s",
             tc_name,
@@ -184,7 +244,7 @@ def dut(request):
     dut = create_dut(request)
     coverage = _coverage_path(request, _data_dir())
     dut.InitClock("clock")
-    groups = get_coverage_groups(dut)
+    groups = get_coverage_groups(dut) if _is_enabled("TB_ENABLE_TOFFEE_FUNCOV", default="1") else []
     if groups:
         dut.StepRis(lambda _: [g.sample() for g in groups])
     yield dut
@@ -199,7 +259,7 @@ def dut(request):
         except Exception:
             pass
     if _is_enabled("TB_ENABLE_TOFFEE_LINE_COVERAGE", default="1") and coverage.is_file():
-        ignore = _coverage_ignore_path()
+        ignore = _expanded_coverage_ignore_path()
         set_line_coverage(request, str(coverage), ignore=ignore)
     handler = getattr(dut, "_frontend_case_log_handler", None)
     if handler is not None:
@@ -220,27 +280,31 @@ def env(dut, request):
     tag = _artifact_tag(request)
     waveform = _waveform_path(request, data_dir, waveform_format=_waveform_format_from_dut(dut))
     coverage = _coverage_path(request, data_dir)
-    recorder = FunctionalCoverageRecorder.from_pilot_csv(
-        default_pilot_csv_path(),
-        testcase_name=request.node.name if request is not None else "frontend",
-        artifact_tag=tag,
-        output_dir=funcov_dir,
-        waveform_path=waveform,
-        line_coverage_path=coverage,
-    )
-    tb = FrontendEnv(dut, event_sink=recorder.handle_event, config=DEFAULT_ENV_CONFIG)
+    recorder = None
+    if _is_enabled("TB_ENABLE_FUNCTIONAL_COVERAGE", default="1"):
+        recorder = FunctionalCoverageRecorder.from_pilot_csv(
+            default_pilot_csv_path(),
+            testcase_name=request.node.name if request is not None else "frontend",
+            artifact_tag=tag,
+            output_dir=funcov_dir,
+            waveform_path=waveform,
+            line_coverage_path=coverage,
+        )
+    tb = FrontendEnv(dut, event_sink=None if recorder is None else recorder.handle_event, config=DEFAULT_ENV_CONFIG)
     tb.waveform_path = str(waveform)
     tb.line_coverage_path = str(coverage)
     tb.functional_coverage = recorder
-    recorder.attach(tb)
-    dut.StepRis(lambda cycle: recorder.on_cycle(cycle, tb))
+    if recorder is not None:
+        recorder.attach(tb)
+        dut.StepRis(lambda cycle: recorder.on_cycle(cycle, tb))
     tb.initialize(
         reset_vector=_read_int_env("TB_RESET_VECTOR", "0x80000000"),
         bare_mode=True,
         reset_cycles=20,
     )
     yield tb
-    recorder.write_artifacts()
+    if recorder is not None:
+        recorder.write_artifacts()
 
 
 @pytest.fixture(scope="function")

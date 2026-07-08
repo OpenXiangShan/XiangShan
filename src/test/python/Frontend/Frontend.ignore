@@ -1,7 +1,12 @@
-# Frontend line coverage waive file for toffee_test.reporter.set_line_coverage.
+# Frontend line coverage waive file.
 #
-# Keep this file empty unless a line or file has a reviewed waive reason.
-# Supported examples:
-#   SomeModule.sv
-#   SomeModule.sv:10-20,35-40
-#   build/**/*.sv
+# Consumers:
+# - toffee_test.reporter.set_line_coverage reads this as a .ignore pattern file.
+# - scripts/gen_coverage_html.sh maps file-level patterns to genhtml --exclude.
+#
+# Waive policy:
+# - Keep frontend functional RTL visible in coverage reports.
+# - Waive only reviewed non-functional support logic.
+
+# MBIST/DFT support logic.
+*/build-frontend/rtl/Mbist*.sv

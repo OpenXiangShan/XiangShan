@@ -79,7 +79,7 @@
   - 一旦 `build-frontend/.waveform_format` 已记录为 `vcd`，后续不带参数的 `make frontend` 会沿用 `vcd`；只有显式指定 `FRONTEND_WAVEFORM_FORMAT=fst` 才会切回 `.fst`
   - 中间 `.vcd` 放在临时目录，脚本结束后自动清理
 - `scripts/gen_coverage_html.sh`
-  - 用法: `src/test/python/Frontend/scripts/gen_coverage_html.sh [input.dat ... | input_dir] [output_dir]`
+  - 用法: `src/test/python/Frontend/scripts/gen_coverage_html.sh [--ignore-file FILE] [--omit-file FILE] [input.dat ... | input_dir] [output_dir]`
   - 不传输入时，默认收集 `data/*.dat`
   - 单个 `.dat` 默认输出到同目录下的 `<stem>.genhtml/`
   - 多个 `.dat` 或目录输入默认输出到 `coverage.genhtml/`
@@ -88,8 +88,15 @@
     `source /nfs/share/unitychip/activate && PATH=/nfs/share/unitychip/bin:$PATH src/test/python/Frontend/scripts/gen_coverage_html.sh src/test/python/Frontend/data/<case>.dat src/test/python/Frontend/data/coverage.genhtml`
 - `Frontend.ignore`
   - 用于 `toffee_test.reporter.set_line_coverage` 的 line coverage waive。
-  - 默认不 waive 任何行；只有经过评审的文件或行范围才写入该文件。
+  - `scripts/gen_coverage_html.sh` 也会默认读取该文件，并把文件级 pattern 转成 `genhtml --exclude`。
+  - 当前只 waive 已评审的 MBIST/DFT 文件，保留 SRAM 和 frontend 功能 RTL。
   - 可用 `TB_LINE_COVERAGE_IGNORE=/path/to/file.ignore` 覆盖默认 ignore 文件。
+- `Frontend.omit`
+  - 用于按源码文本正则 waive 行级覆盖率。
+  - `scripts/gen_coverage_html.sh` 默认按每行正则过滤 `lcov` 记录后生成 HTML。
+  - pytest teardown 阶段会把每行正则展开成当前 `build-frontend/rtl/*.sv` 的行号范围，再传给 toffee。
+  - 当前只 waive 已评审的 MBIST/DFT wiring 行，包括 `io_dft`、`inner_bd`、`inner_childBd`、`childBd`、`boreChildrenBd`、`sigFromSrams`。
+  - 可用 `TB_LINE_COVERAGE_OMIT=/path/to/file.omit` 覆盖默认 omit 文件。
   - 可用 `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` 关闭 pytest teardown 阶段的 toffee line coverage 上报。
 - `scripts/report_raw_code_coverage.py`
   - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py`
