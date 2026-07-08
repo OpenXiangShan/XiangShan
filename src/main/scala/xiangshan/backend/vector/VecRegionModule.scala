@@ -294,6 +294,9 @@ class VecRegionImp(
       when (source.wen) {
         sink.pdest := source.pdest
         sink.data := source.data
+        sink.mask.foreach { mask =>
+          mask := source.mask.get
+        }
       }
     }
   }
@@ -345,9 +348,9 @@ class VecRegionImp(
     ).flatten.flatten)
     .foreach { case (sink, source) => sink := source }
 
-  vpWen.foreach { wenLane =>
+  vpWen.zipWithIndex.foreach { case (wenLane, byteIdx) =>
     wenLane.take(numVpNormalWritePort).zip(vpWbDataPath.out.wb0).foreach { case (wen, wb) =>
-      wen := wb.wen
+      wen := wb.wen && wb.mask(byteIdx)
     }
     wenLane(vagqVpWritePort) := false.B
   }
@@ -677,6 +680,7 @@ object VecRegionModule {
     val wen = Bool()
     val pdest = UInt(addrWidth.W)
     val data = UInt(dataWidth.W)
+    val mask = UInt((dataWidth / 8).W)
   }
 
   class RfArbiterBundle(val rdConfig: RdConfig)(implicit p: Parameters) extends XSBundle {

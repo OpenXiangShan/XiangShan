@@ -253,6 +253,11 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     exu => exu.writeVecRf && exu.hasMemAddrFu,
     Seq(VecData(), V0Data()),
   )
+  val vagqActiveLoadMask: MixedVec[MixedVec[ValidIO[UInt]]] = backendParams.genNewExuOutputBundle(
+    _ => Valid(UInt(VAGQConstants.FlowBytes.W)),
+    exu => exu.writeVecRf && exu.hasMemAddrFu,
+    Seq(VecData(), V0Data()),
+  )
   val vagqRobWriteback = backendParams.genVagqWriteBackRobBundle
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
   val hyuIqFeedback = Vec(HyuCnt, new MemRSFeedbackIO)
@@ -473,6 +478,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val writebackSta = intWriteback.filter(_.params.hasStoreAddrFu)
   val writebackStd = intWriteback.filter(_.params.hasStdFu)
   val writebackVldu = vecWriteback
+  val vagqActiveLoadMasks = io.mem_to_ooo.vagqActiveLoadMask.flatten
 
   intWriteback.zipWithIndex.foreach{ case (wb, i) =>
     wb.toRob.bits.debugInfo.debug_seqNum.foreach(x => PerfCCT.updateInstPos(x, PerfCCT.InstPos.AtBypassVal.id.U, wb.toRob.valid, clock, reset))
@@ -560,6 +566,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   writebackVldu.zipWithIndex.foreach { case (wb, i) =>
     wb := newLoadUnits(i).io.vldout
+    val vagqResp = newLoadUnits(i).io.vagqResp
+    vagqActiveLoadMasks(i).valid := vagqResp.valid && vagqResp.bits.isLoad &&
+      !vagqResp.bits.isNACK && !vagqResp.bits.exception
+    vagqActiveLoadMasks(i).bits := vagqResp.bits.mask
   }
 
   writebackStd.zipWithIndex.foreach { case (wb, i) =>

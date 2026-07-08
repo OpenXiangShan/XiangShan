@@ -448,11 +448,14 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   fpRegion.io.fromVecFpRdAddr.get := vecRegion.out.toFltRegion.is1FpRdAddrNext
   vecRegion.in.fromFltRegion.is1FpRdDataNext := fpRegion.io.toVecFpRdData.get
 
-  vecRegion.in.fromMem.vldS3VpWbNext.flatten lazyZip io.mem.vecWriteback.flatten foreach {
-    case (sink: Exu.ToRf, source: NewExuOutput) =>
+  (vecRegion.in.fromMem.vldS3VpWbNext.flatten lazyZip io.mem.vecWriteback.flatten lazyZip io.mem.vagqActiveLoadMask.flatten).foreach {
+    case (sink: Exu.ToRf, source: NewExuOutput, vagqMask: ValidIO[UInt]) =>
       sink.wen := source.toVecRf.map(_.valid).getOrElse(false.B)
       sink.pdest := source.pdest
       sink.data := source.toVecRf.map(_.bits).getOrElse(0.U)
+      sink.mask.foreach { mask =>
+        mask := Mux(vagqMask.valid, vagqMask.bits, Fill(mask.getWidth, 1.U(1.W)))
+      }
   }
   vecRegion.in.fromMem.vldS3RobWb.flatten zip io.mem.vecWriteback.flatten foreach {
     case (sink: ValidIO[Exu.ToRob], source: NewExuOutput) =>
@@ -748,6 +751,13 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val vecWriteback: MixedVec[MixedVec[NewExuOutput]] = Flipped(
     params.genNewExuOutputBundle(
       identity,
+      exu => exu.writeVecRf && exu.hasMemAddrFu,
+      Seq(VecData(), V0Data()),
+    )
+  )
+  val vagqActiveLoadMask: MixedVec[MixedVec[ValidIO[UInt]]] = Flipped(
+    params.genNewExuOutputBundle(
+      _ => Valid(UInt(VAGQConstants.FlowBytes.W)),
       exu => exu.writeVecRf && exu.hasMemAddrFu,
       Seq(VecData(), V0Data()),
     )

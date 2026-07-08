@@ -400,6 +400,7 @@ object Exu {
       this.toVpRf.foreach { case x =>
         x.wen := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.vecWen.getOrElse(false.B)))
         x.pdest := Mux1H(fuOutValidOH, fuOuts.map(_.bits.ctrl.pdest))
+        x.mask.foreach(_ := Fill(VLEN / 8, 1.U(1.W)))
       }
 
       this.toV0Rf.foreach { case x =>
@@ -523,6 +524,7 @@ object Exu {
     val wen = Bool()
     val pdest = UInt(addrWidth.W)
     val data = UInt(dataWidth.W)
+    val mask = Option.when(pregParams.dataCfg == VecData())(UInt((dataWidth / 8).W))
   }
 
   class ToRob(val param: ExuParam)(implicit p: Parameters) extends XSBundle {

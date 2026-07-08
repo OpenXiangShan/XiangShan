@@ -6,6 +6,7 @@ import chisel3.experimental.VecLiterals.AddVecLiteralConstructor
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.{HasXSParameter, XSBundle}
+import xiangshan.backend.datapath.DataConfig.VecData
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.vector.VecRegionModule.RfWriteBundle
 
@@ -26,6 +27,13 @@ class WbDataPath(pregParams: PregParams)(implicit val p: Parameters) extends Mod
     wbNext.wen := VecInit(groupedExuToRf(i).map(x => x.wen)).asUInt.orR
     wbNext.pdest := Mux1H(groupedExuToRf(i).map(x => x.wen -> x.pdest))
     wbNext.data := Mux1H(groupedExuToRf(i).map(x => x.wen -> x.data))
+    wbNext.mask := {
+      if (pregParams.dataCfg == VecData()) {
+        Mux1H(groupedExuToRf(i).map(x => x.wen -> x.mask.get))
+      } else {
+        Fill(wbNext.mask.getWidth, 1.U(1.W))
+      }
+    }
   }
 
   connectWbWithWbNext(wb0, wb0Next)
@@ -43,6 +51,7 @@ class WbDataPath(pregParams: PregParams)(implicit val p: Parameters) extends Mod
       when (wbNext.wen) {
         wb.pdest := wbNext.pdest
         wb.data := wbNext.data
+        wb.mask := wbNext.mask
       }
     }
   }
