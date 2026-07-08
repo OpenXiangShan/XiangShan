@@ -262,6 +262,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val wakeup = Vec(backendParams.LdExuCnt, Valid(new MemWakeUpBundle))
   val vldS3WakeUp = Vec(backendParams.LdExuCnt, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams))
   val vagqVrfReadReq = Valid(new VAGQVRFReadReq)
+  val vagqVrfWriteReq = Valid(new VAGQVRFWriteReq)
 }
 
 class MemCoreTopDownIO extends Bundle {
@@ -530,6 +531,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   vagq.io.dataUop.bits  := 0.U.asTypeOf(vagq.io.dataUop.bits)
   io.mem_to_ooo.vagqVrfReadReq.valid := vagq.io.vrfReadReq.valid
   io.mem_to_ooo.vagqVrfReadReq.bits  := vagq.io.vrfReadReq.bits
+  io.mem_to_ooo.vagqVrfWriteReq.valid := vagq.io.vrfWriteReq.valid
+  io.mem_to_ooo.vagqVrfWriteReq.bits  := vagq.io.vrfWriteReq.bits
   vagq.io.vrfReadResp := io.ooo_to_mem.vagqVrfReadResp
   io.mem_to_ooo.vagqRobWriteback.valid := vagq.io.robWriteback.valid
   VAGQWritebackConnect.toRob(io.mem_to_ooo.vagqRobWriteback.bits, vagq.io.robWriteback.bits)

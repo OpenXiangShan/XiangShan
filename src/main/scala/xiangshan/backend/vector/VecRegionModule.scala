@@ -33,7 +33,7 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.{BypassDelay, WakeUpBundle}
 import xiangshan.backend.vector.VecRegionModule._
 import xiangshan.backend.vector.fu.VecFuConfig
-import xiangshan.backend.vector.vagq.{VAGQVRFReadReq, VAGQVRFReadResp}
+import xiangshan.backend.vector.vagq._
 import xiangshan.backend.{ExcpModToVprf, VprfToExcpMod}
 import xiangshan.mem.StoreQueueDataWrite
 
@@ -65,10 +65,13 @@ class VecRegionImp(
   val basicDebugEn = backendParams.basicDebugEn
 
   val numVp = backendParams.vfPregParams.numEntries
-  val numVpWritePort = backendParams.getVfRfWriteSize
-  val numVpIssueReadPort = backendParams.getVfRfReadSize
-  val vagqVpReadPort = numVpIssueReadPort
-  val numVpReadPort = numVpIssueReadPort + 1
+  val numVpNormalWritePort = backendParams.getVfRfWriteSize
+  val vagqVpWritePort = numVpNormalWritePort
+  val numVpWritePort = numVpNormalWritePort + 1
+  val vpWriteSplitNum = VLEN / 8
+  val numVpNormalReadPort = backendParams.getVfRfReadSize
+  val vagqVpReadPort = numVpNormalReadPort
+  val numVpReadPort = numVpNormalReadPort + 1
   val numVl = backendParams.vlPregParams.numEntries
   val numVlWritePort = backendParams.getVlRfWriteSize
   val numVlReadPort = param.getVlReadCfgs.flatten.count(_ != null)
@@ -89,7 +92,7 @@ class VecRegionImp(
 
   val vpRaddr = Wire(Vec(numVpReadPort, UInt(VfPhyRegIdxWidth.W)))
   val vpRdata = Wire(Vec(numVpReadPort, UInt(VLEN.W)))
-  val vpWen   = Wire(Vec(numVpWritePort, Bool()))
+  val vpWen   = Wire(Vec(vpWriteSplitNum, Vec(numVpWritePort, Bool())))
   val vpWaddr = Wire(Vec(numVpWritePort, UInt(VfPhyRegIdxWidth.W)))
   val vpWdata = Wire(Vec(numVpWritePort, UInt(VLEN.W)))
   val vpDiffReadData: Option[Vec[UInt]] = Option.when(basicDebugEn)(Wire(Vec(numVp, UInt(VLEN.W))))
@@ -102,7 +105,7 @@ class VecRegionImp(
   val vlDiffReadAddr: Option[Vec[UInt]] = Option.when(basicDebugEn)(Wire(Vec(1, UInt(VlPhyRegIdxWidth.W))))
   val vlDiffReadData: Option[Vec[UInt]] = Option.when(basicDebugEn)(Wire(Vec(1, UInt(vlWidth.W))))
 
-  VfRegFile("VfRegFile", VfPhyRegs, 1, vpRaddr, vpRdata, Seq(vpWen), vpWaddr, vpWdata,
+  VfRegFile("VfRegFile", VfPhyRegs, vpWriteSplitNum, vpRaddr, vpRdata, vpWen, vpWaddr, vpWdata,
     debugAllRData = vpDiffReadData
   )
 
@@ -342,9 +345,23 @@ class VecRegionImp(
     ).flatten.flatten)
     .foreach { case (sink, source) => sink := source }
 
-  vpWen := vpWbDataPath.out.wb0.map(_.wen)
-  vpWaddr := vpWbDataPath.out.wb0.map(_.pdest)
-  vpWdata := vpWbDataPath.out.wb0.map(_.data)
+  vpWen.foreach { wenLane =>
+    wenLane.take(numVpNormalWritePort).zip(vpWbDataPath.out.wb0).foreach { case (wen, wb) =>
+      wen := wb.wen
+    }
+    wenLane(vagqVpWritePort) := false.B
+  }
+  vpWaddr.take(numVpNormalWritePort).zip(vpWbDataPath.out.wb0).foreach { case (addr, wb) =>
+    addr := wb.pdest
+  }
+  vpWdata.take(numVpNormalWritePort).zip(vpWbDataPath.out.wb0).foreach { case (data, wb) =>
+    data := wb.data
+  }
+  vpWaddr(vagqVpWritePort) := in.fromMem.vagqVrfWriteReq.bits.pdest
+  vpWdata(vagqVpWritePort) := in.fromMem.vagqVrfWriteReq.bits.data
+  for (byteIdx <- 0 until vpWriteSplitNum) {
+    vpWen(byteIdx)(vagqVpWritePort) := in.fromMem.vagqVrfWriteReq.valid && in.fromMem.vagqVrfWriteReq.bits.mask(byteIdx)
+  }
   private val issueVpRaddr = issuePipes
     .flatMap(_.flatMap(_.out.is1VpRdAddrNext))
     .groupBy(_.rdConfig.port)
@@ -352,10 +369,10 @@ class VecRegionImp(
     .sortBy { case (port, raddr) => port }
     .map { case (port, raddrSeq) => raddrSeq.ensuring(_.size == 1).head.addr }
   require(
-    issueVpRaddr.size == numVpIssueReadPort,
-    s"issueVpRaddr.size=${issueVpRaddr.size}, numVpIssueReadPort=$numVpIssueReadPort"
+    issueVpRaddr.size == numVpNormalReadPort,
+    s"issueVpRaddr.size=${issueVpRaddr.size}, numVpNormalReadPort=$numVpNormalReadPort"
   )
-  for (i <- 0 until numVpIssueReadPort) {
+  for (i <- 0 until numVpNormalReadPort) {
     vpRaddr(i) := issueVpRaddr(i)
   }
   vpRaddr(vagqVpReadPort) := Mux(in.fromMem.vagqVrfReadReq.valid, in.fromMem.vagqVrfReadReq.bits.psrc, 0.U)
@@ -561,6 +578,7 @@ object VecRegionModule {
     val vldS3RobWb: MixedVec[MixedVec[ValidIO[Exu.ToRob]]] = intRegion.genExuToRobBundle(ValidIO(_), _.needVpWen)
     val v0Wb: MixedVec[MixedVec[Exu.ToRf]] = intRegion.genExuToRfBundle(backendParams.v0PregParams)
     val vagqVrfReadReq = Valid(new VAGQVRFReadReq)
+    val vagqVrfWriteReq = Valid(new VAGQVRFWriteReq)
   }
 
   class Out(implicit p: Parameters, param: RegionParam) extends XSBundle {

@@ -45,7 +45,7 @@ import xiangshan.backend.regfile.RfWritePortBundle
 import xiangshan.backend.rob.{RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.backend.trace.TraceCoreInterface
 import xiangshan.backend.vector.{Exu, VecIssueQueue, VecRegionImp, VecRegionModule}
-import xiangshan.backend.vector.vagq.{VAGQVRFReadReq, VAGQVRFReadResp}
+import xiangshan.backend.vector.vagq._
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr, StoreQueueDataWrite}
 
@@ -470,6 +470,8 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   vecRegion.in.fromMem.vldS3WakeUp := io.mem.vldS3WakeUp
   vecRegion.in.fromMem.vagqVrfReadReq.valid := io.mem.vagqVrfReadReq.valid
   vecRegion.in.fromMem.vagqVrfReadReq.bits  := io.mem.vagqVrfReadReq.bits
+  vecRegion.in.fromMem.vagqVrfWriteReq.valid := io.mem.vagqVrfWriteReq.valid
+  vecRegion.in.fromMem.vagqVrfWriteReq.bits  := io.mem.vagqVrfWriteReq.bits
   io.mem.vagqVrfReadResp := vecRegion.out.toMem.vagqVrfReadResp
 
   vecRegion.in.diff.foreach(_.diffVlRat := ctrlBlock.io.diff_vl_rat.get)
@@ -736,6 +738,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val wakeup = Vec(params.LdExuCnt, Flipped(Valid(new MemWakeUpBundle)))
   val vldS3WakeUp = Vec(params.LdExuCnt, Flipped(new VecIssueQueue.WakeUpBundle(params.vpPregParams)))
   val vagqVrfReadReq = Flipped(Valid(new VAGQVRFReadReq))
+  val vagqVrfWriteReq = Flipped(Valid(new VAGQVRFWriteReq))
   val vagqVrfReadResp = Valid(new VAGQVRFReadResp)
   val storePcRead = Vec(params.StaCnt, Output(UInt(VAddrBits.W)))
   val hyuPcRead = Vec(params.HyuCnt, Output(UInt(VAddrBits.W)))
