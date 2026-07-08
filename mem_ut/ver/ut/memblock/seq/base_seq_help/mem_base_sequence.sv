@@ -316,8 +316,6 @@ function void dcache_mem__access_base_sequence::capture_dcache_a_xaction(output 
     req_xact.auto_inner_dcache_client_out_a_bits_source               = dcache_vif.auto_inner_dcache_client_out_a_bits_source;
     req_xact.auto_inner_dcache_client_out_a_bits_address              = dcache_vif.auto_inner_dcache_client_out_a_bits_address;
     req_xact.auto_inner_dcache_client_out_a_bits_user_alias           = dcache_vif.auto_inner_dcache_client_out_a_bits_user_alias;
-    req_xact.auto_inner_dcache_client_out_a_bits_user_memPageType_NC  = dcache_vif.auto_inner_dcache_client_out_a_bits_user_memPageType_NC;
-    req_xact.auto_inner_dcache_client_out_a_bits_user_memBackType_MM  = dcache_vif.auto_inner_dcache_client_out_a_bits_user_memBackType_MM;
     req_xact.auto_inner_dcache_client_out_a_bits_user_vaddr           = dcache_vif.auto_inner_dcache_client_out_a_bits_user_vaddr;
     req_xact.auto_inner_dcache_client_out_a_bits_user_reqSource       = dcache_vif.auto_inner_dcache_client_out_a_bits_user_reqSource;
     req_xact.auto_inner_dcache_client_out_a_bits_user_needHint        = dcache_vif.auto_inner_dcache_client_out_a_bits_user_needHint;
@@ -571,8 +569,6 @@ function void sbuffer_mem_access_base_sequence::capture_sbuffer_a_xaction(output
     req_xact.auto_inner_buffers_out_a_bits_size                = sbuffer_vif.auto_inner_buffers_out_a_bits_size;
     req_xact.auto_inner_buffers_out_a_bits_source              = sbuffer_vif.auto_inner_buffers_out_a_bits_source;
     req_xact.auto_inner_buffers_out_a_bits_address             = sbuffer_vif.auto_inner_buffers_out_a_bits_address;
-    req_xact.auto_inner_buffers_out_a_bits_user_memBackType_MM = sbuffer_vif.auto_inner_buffers_out_a_bits_user_memBackType_MM;
-    req_xact.auto_inner_buffers_out_a_bits_user_memPageType_NC = sbuffer_vif.auto_inner_buffers_out_a_bits_user_memPageType_NC;
     req_xact.auto_inner_buffers_out_a_bits_mask                = sbuffer_vif.auto_inner_buffers_out_a_bits_mask;
     req_xact.auto_inner_buffers_out_a_bits_data                = sbuffer_vif.auto_inner_buffers_out_a_bits_data;
     req_xact.auto_inner_buffers_out_a_bits_corrupt             = sbuffer_vif.auto_inner_buffers_out_a_bits_corrupt;

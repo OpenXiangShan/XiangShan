@@ -22,6 +22,7 @@
         force RTL_PATH.io_ooo_to_mem_sfence_bits_id = U_IF_NAME.io_ooo_to_mem_sfence_bits_id; \
         force RTL_PATH.io_ooo_to_mem_sfence_bits_hv = U_IF_NAME.io_ooo_to_mem_sfence_bits_hv; \
         force RTL_PATH.io_ooo_to_mem_sfence_bits_hg = U_IF_NAME.io_ooo_to_mem_sfence_bits_hg; \
+        force RTL_PATH.io_ooo_to_mem_sfence_bits_flushPipe = U_IF_NAME.io_ooo_to_mem_sfence_bits_flushPipe; \
     end \
     `else \
     initial begin \
@@ -32,6 +33,7 @@
         force U_IF_NAME.io_ooo_to_mem_sfence_bits_id = RTL_PATH.io_ooo_to_mem_sfence_bits_id; \
         force U_IF_NAME.io_ooo_to_mem_sfence_bits_hv = RTL_PATH.io_ooo_to_mem_sfence_bits_hv; \
         force U_IF_NAME.io_ooo_to_mem_sfence_bits_hg = RTL_PATH.io_ooo_to_mem_sfence_bits_hg; \
+        force U_IF_NAME.io_ooo_to_mem_sfence_bits_flushPipe = RTL_PATH.io_ooo_to_mem_sfence_bits_flushPipe; \
     end \
     `endif
 

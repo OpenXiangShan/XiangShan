@@ -61,14 +61,12 @@ class memblock_lsqenq_dispatch_base_sequence extends lsqenq_agent_agent_default_
                                         input memblock_lq_key_t lq_key,
                                         input memblock_sq_key_t sq_key,
                                         input bit [4:0] numLsElem);
-    extern function void get_resp_keys(input lsqenq_agent_agent_xaction tr,
-                                       input int unsigned slot,
-                                       output memblock_lq_key_t lq_key,
-                                       output memblock_sq_key_t sq_key);
     extern function void confirm_lsq_candidates(input lsqenq_agent_agent_xaction tr,
                                                 input memblock_uid_t uids[$],
                                                 input main_control_transaction trs[$],
                                                 input memblock_op_behavior_t behaviors[$],
+                                                input memblock_lq_key_t lq_keys[$],
+                                                input memblock_sq_key_t sq_keys[$],
                                                 output bit has_progress);
     extern function void complete_admission(input memblock_uid_t uid);
     extern function bit admit_non_lsq_if_ready(output bit has_progress);
@@ -182,7 +180,7 @@ task memblock_lsqenq_dispatch_base_sequence::send_lsqenq_cycle(input int unsigne
 
     start_item(tr);
     finish_item(tr);
-    confirm_lsq_candidates(tr, uids, trs, behaviors, has_progress);
+    confirm_lsq_candidates(tr, uids, trs, behaviors, lq_keys, sq_keys, has_progress);
 endtask:send_lsqenq_cycle
 
 function void memblock_lsqenq_dispatch_base_sequence::configure_from_plus();
@@ -356,7 +354,6 @@ function void memblock_lsqenq_dispatch_base_sequence::clear_lsqenq_xaction(input
     if (tr == null) begin
         `uvm_fatal(get_type_name(), "clear_lsqenq_xaction got null xaction")
     end
-    tr.io_ooo_to_mem_enqLsq_canAccept = 1'b0;
     for (int unsigned slot = 0; slot < seq_csr_common::get_real_enq_width(); slot++) begin
         set_need_alloc(tr, slot, 2'b00);
         set_req_fields(tr,
@@ -403,8 +400,6 @@ function void memblock_lsqenq_dispatch_base_sequence::set_need_alloc(input lsqen
         3: tr.io_ooo_to_mem_enqLsq_needAlloc_3 = need_alloc;
         4: tr.io_ooo_to_mem_enqLsq_needAlloc_4 = need_alloc;
         5: tr.io_ooo_to_mem_enqLsq_needAlloc_5 = need_alloc;
-        6: tr.io_ooo_to_mem_enqLsq_needAlloc_6 = need_alloc;
-        7: tr.io_ooo_to_mem_enqLsq_needAlloc_7 = need_alloc;
         default: begin
             `uvm_fatal(get_type_name(), $sformatf("set_need_alloc got unsupported slot=%0d", slot))
         end
@@ -493,101 +488,18 @@ function void memblock_lsqenq_dispatch_base_sequence::set_req_fields(input lsqen
             tr.io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_value = sq_key.value;
             tr.io_ooo_to_mem_enqLsq_req_5_bits_numLsElem = numLsElem;
         end
-        6: begin
-            tr.io_ooo_to_mem_enqLsq_req_6_valid = valid;
-            tr.io_ooo_to_mem_enqLsq_req_6_bits_fuType = fuType;
-            tr.io_ooo_to_mem_enqLsq_req_6_bits_uopIdx = uopIdx;
-            tr.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_flag = rob_key.flag;
-            tr.io_ooo_to_mem_enqLsq_req_6_bits_robIdx_value = rob_key.value;
-            tr.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_flag = lq_key.flag;
-            tr.io_ooo_to_mem_enqLsq_req_6_bits_lqIdx_value = lq_key.value;
-            tr.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_flag = sq_key.flag;
-            tr.io_ooo_to_mem_enqLsq_req_6_bits_sqIdx_value = sq_key.value;
-            tr.io_ooo_to_mem_enqLsq_req_6_bits_numLsElem = numLsElem;
-        end
-        7: begin
-            tr.io_ooo_to_mem_enqLsq_req_7_valid = valid;
-            tr.io_ooo_to_mem_enqLsq_req_7_bits_fuType = fuType;
-            tr.io_ooo_to_mem_enqLsq_req_7_bits_uopIdx = uopIdx;
-            tr.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_flag = rob_key.flag;
-            tr.io_ooo_to_mem_enqLsq_req_7_bits_robIdx_value = rob_key.value;
-            tr.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_flag = lq_key.flag;
-            tr.io_ooo_to_mem_enqLsq_req_7_bits_lqIdx_value = lq_key.value;
-            tr.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_flag = sq_key.flag;
-            tr.io_ooo_to_mem_enqLsq_req_7_bits_sqIdx_value = sq_key.value;
-            tr.io_ooo_to_mem_enqLsq_req_7_bits_numLsElem = numLsElem;
-        end
         default: begin
             `uvm_fatal(get_type_name(), $sformatf("set_req_fields got unsupported slot=%0d", slot))
         end
     endcase
 endfunction:set_req_fields
 
-function void memblock_lsqenq_dispatch_base_sequence::get_resp_keys(input lsqenq_agent_agent_xaction tr,
-                                                               input int unsigned slot,
-                                                               output memblock_lq_key_t lq_key,
-                                                               output memblock_sq_key_t sq_key);
-    lq_key = '{default:'0};
-    sq_key = '{default:'0};
-    case (slot)
-        0: begin
-            lq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_0_lqIdx_flag;
-            lq_key.value = tr.io_ooo_to_mem_enqLsq_resp_0_lqIdx_value;
-            sq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_0_sqIdx_flag;
-            sq_key.value = tr.io_ooo_to_mem_enqLsq_resp_0_sqIdx_value;
-        end
-        1: begin
-            lq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_1_lqIdx_flag;
-            lq_key.value = tr.io_ooo_to_mem_enqLsq_resp_1_lqIdx_value;
-            sq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_1_sqIdx_flag;
-            sq_key.value = tr.io_ooo_to_mem_enqLsq_resp_1_sqIdx_value;
-        end
-        2: begin
-            lq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_2_lqIdx_flag;
-            lq_key.value = tr.io_ooo_to_mem_enqLsq_resp_2_lqIdx_value;
-            sq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_2_sqIdx_flag;
-            sq_key.value = tr.io_ooo_to_mem_enqLsq_resp_2_sqIdx_value;
-        end
-        3: begin
-            lq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_3_lqIdx_flag;
-            lq_key.value = tr.io_ooo_to_mem_enqLsq_resp_3_lqIdx_value;
-            sq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_3_sqIdx_flag;
-            sq_key.value = tr.io_ooo_to_mem_enqLsq_resp_3_sqIdx_value;
-        end
-        4: begin
-            lq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_4_lqIdx_flag;
-            lq_key.value = tr.io_ooo_to_mem_enqLsq_resp_4_lqIdx_value;
-            sq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_4_sqIdx_flag;
-            sq_key.value = tr.io_ooo_to_mem_enqLsq_resp_4_sqIdx_value;
-        end
-        5: begin
-            lq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_5_lqIdx_flag;
-            lq_key.value = tr.io_ooo_to_mem_enqLsq_resp_5_lqIdx_value;
-            sq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_5_sqIdx_flag;
-            sq_key.value = tr.io_ooo_to_mem_enqLsq_resp_5_sqIdx_value;
-        end
-        6: begin
-            lq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_6_lqIdx_flag;
-            lq_key.value = tr.io_ooo_to_mem_enqLsq_resp_6_lqIdx_value;
-            sq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_6_sqIdx_flag;
-            sq_key.value = tr.io_ooo_to_mem_enqLsq_resp_6_sqIdx_value;
-        end
-        7: begin
-            lq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_7_lqIdx_flag;
-            lq_key.value = tr.io_ooo_to_mem_enqLsq_resp_7_lqIdx_value;
-            sq_key.flag  = tr.io_ooo_to_mem_enqLsq_resp_7_sqIdx_flag;
-            sq_key.value = tr.io_ooo_to_mem_enqLsq_resp_7_sqIdx_value;
-        end
-        default: begin
-            `uvm_fatal(get_type_name(), $sformatf("get_resp_keys got unsupported slot=%0d", slot))
-        end
-    endcase
-endfunction:get_resp_keys
-
 function void memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates(input lsqenq_agent_agent_xaction tr,
                                                                         input memblock_uid_t uids[$],
                                                                         input main_control_transaction trs[$],
                                                                         input memblock_op_behavior_t behaviors[$],
+                                                                        input memblock_lq_key_t lq_keys[$],
+                                                                        input memblock_sq_key_t sq_keys[$],
                                                                         output bit has_progress);
     has_progress = 1'b0;
     if (tr.memblock_dispatch_aborted_by_redirect ||
@@ -597,11 +509,7 @@ function void memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates(inp
         return;
     end
     foreach (uids[idx]) begin
-        memblock_lq_key_t dut_lq_key;
-        memblock_sq_key_t dut_sq_key;
-
-        get_resp_keys(tr, idx, dut_lq_key, dut_sq_key);
-        lsq_ctrl.commit_allocate_with_resp(uids[idx], behaviors[idx], trs[idx], dut_lq_key, dut_sq_key);
+        lsq_ctrl.commit_allocate_with_resp(uids[idx], behaviors[idx], trs[idx], lq_keys[idx], sq_keys[idx]);
         complete_admission(uids[idx]);
         has_progress = 1'b1;
     end

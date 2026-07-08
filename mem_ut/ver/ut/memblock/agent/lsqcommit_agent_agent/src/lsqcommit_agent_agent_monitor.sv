@@ -37,12 +37,19 @@ task lsqcommit_agent_agent_monitor::mon_data();
     logic [8:0] io_ooo_to_mem_lsqio_pendingPtr_value;
     logic io_ooo_to_mem_flushSb        ;
 
+    logic io_ooo_to_mem_lsqio_pendingMMIOld;
+    logic io_ooo_to_mem_lsqio_pendingst;
+    logic [3:0] io_ooo_to_mem_lsqio_scommit;
     lsqcommit_agent_agent_xaction  mon_tr;
     while(1) begin
         @this.vif.mon_mp.mon_cb;
         io_ooo_to_mem_lsqio_pendingPtr_flag = this.vif.mon_mp.mon_cb.io_ooo_to_mem_lsqio_pendingPtr_flag;
         io_ooo_to_mem_lsqio_pendingPtr_value = this.vif.mon_mp.mon_cb.io_ooo_to_mem_lsqio_pendingPtr_value;
         io_ooo_to_mem_flushSb = this.vif.mon_mp.mon_cb.io_ooo_to_mem_flushSb;
+
+        io_ooo_to_mem_lsqio_pendingMMIOld = this.vif.mon_mp.mon_cb.io_ooo_to_mem_lsqio_pendingMMIOld;
+        io_ooo_to_mem_lsqio_pendingst = this.vif.mon_mp.mon_cb.io_ooo_to_mem_lsqio_pendingst;
+        io_ooo_to_mem_lsqio_scommit = this.vif.mon_mp.mon_cb.io_ooo_to_mem_lsqio_scommit;
 
         if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_lsqio_pendingPtr_flag,io_ooo_to_mem_lsqio_pendingPtr_flag,1);

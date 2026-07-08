@@ -15,6 +15,9 @@ class lsqcommit_agent_agent_xaction  extends tcnt_data_base;
     rand bit [8:0] io_ooo_to_mem_lsqio_pendingPtr_value;
     rand bit io_ooo_to_mem_flushSb     ;
 
+    rand bit io_ooo_to_mem_lsqio_pendingMMIOld;
+    rand bit io_ooo_to_mem_lsqio_pendingst;
+    rand bit [3:0] io_ooo_to_mem_lsqio_scommit;
     extern constraint default_io_ooo_to_mem_lsqio_pendingPtr_flag_cons;
     extern constraint default_io_ooo_to_mem_lsqio_pendingPtr_value_cons;
     extern constraint default_io_ooo_to_mem_flushSb_cons;
@@ -32,6 +35,9 @@ class lsqcommit_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_ooo_to_mem_lsqio_pendingPtr_value, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_flushSb, UVM_ALL_ON);
 
+        `uvm_field_int(io_ooo_to_mem_lsqio_pendingMMIOld, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_lsqio_pendingst, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_lsqio_scommit, UVM_ALL_ON);
     `uvm_object_utils_end
 
 endclass:lsqcommit_agent_agent_xaction

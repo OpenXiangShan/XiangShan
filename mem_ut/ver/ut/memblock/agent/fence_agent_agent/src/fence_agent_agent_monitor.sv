@@ -41,6 +41,7 @@ task fence_agent_agent_monitor::mon_data();
     logic io_ooo_to_mem_sfence_bits_hv ;
     logic io_ooo_to_mem_sfence_bits_hg ;
 
+    logic io_ooo_to_mem_sfence_bits_flushPipe;
     fence_agent_agent_xaction  mon_tr;
     memblock_sync_pkg::dispatch_raw_sfence_t raw_sfence;
     while(1) begin
@@ -52,6 +53,8 @@ task fence_agent_agent_monitor::mon_data();
         io_ooo_to_mem_sfence_bits_id = this.vif.mon_mp.mon_cb.io_ooo_to_mem_sfence_bits_id;
         io_ooo_to_mem_sfence_bits_hv = this.vif.mon_mp.mon_cb.io_ooo_to_mem_sfence_bits_hv;
         io_ooo_to_mem_sfence_bits_hg = this.vif.mon_mp.mon_cb.io_ooo_to_mem_sfence_bits_hg;
+
+        io_ooo_to_mem_sfence_bits_flushPipe = this.vif.mon_mp.mon_cb.io_ooo_to_mem_sfence_bits_flushPipe;
 
         if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_valid,io_ooo_to_mem_sfence_valid,1);

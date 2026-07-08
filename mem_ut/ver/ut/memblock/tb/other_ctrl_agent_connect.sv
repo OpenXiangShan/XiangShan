@@ -20,22 +20,17 @@
         force U_IF_NAME.io_dcacheError_ecc_error_bits = RTL_PATH.io_dcacheError_ecc_error_bits; \
         force U_IF_NAME.io_uncacheError_ecc_error_valid = RTL_PATH.io_uncacheError_ecc_error_valid; \
         force U_IF_NAME.io_uncacheError_ecc_error_bits = RTL_PATH.io_uncacheError_ecc_error_bits; \
-        force U_IF_NAME.io_memInfo_sqFull = '0; \
-        force U_IF_NAME.io_memInfo_lqFull = '0; \
-        force U_IF_NAME.io_memInfo_dcacheMSHRFull = '0; \
-        force U_IF_NAME.io_inner_hartId = RTL_PATH.io_mem_to_ooo_topToBackendBypass_hartId; \
         force U_IF_NAME.io_inner_reset_vector = RTL_PATH.io_inner_reset_vector; \
         force RTL_PATH.io_outer_reset_vector = U_IF_NAME.io_outer_reset_vector; \
-        force U_IF_NAME.io_outer_cpu_wfi = RTL_PATH.io_outer_cpu_halt; \
         force U_IF_NAME.io_outer_l2_flush_en = RTL_PATH.io_outer_l2_flush_en; \
         force U_IF_NAME.io_outer_power_down_en = RTL_PATH.io_outer_power_down_en; \
         force U_IF_NAME.io_outer_cpu_critical_error = RTL_PATH.io_outer_cpu_critical_error; \
-        force U_IF_NAME.io_outer_msi_ack = '0; \
         force RTL_PATH.io_inner_beu_errors_icache_ecc_error_valid = U_IF_NAME.io_inner_beu_errors_icache_ecc_error_valid; \
         force RTL_PATH.io_inner_beu_errors_icache_ecc_error_bits = U_IF_NAME.io_inner_beu_errors_icache_ecc_error_bits; \
         force U_IF_NAME.io_outer_beu_errors_icache_ecc_error_valid = RTL_PATH.io_outer_beu_errors_icache_ecc_error_valid; \
         force U_IF_NAME.io_outer_beu_errors_icache_ecc_error_bits = RTL_PATH.io_outer_beu_errors_icache_ecc_error_bits; \
-        force U_IF_NAME.io_reset_backend = tc_if.rst_n; \
+        force U_IF_NAME.io_reset_backend = RTL_PATH.io_reset_backend; \
+        force U_IF_NAME.io_outer_cpu_halt = RTL_PATH.io_outer_cpu_halt; \
     end \
     `else \
     initial begin \
@@ -44,22 +39,17 @@
         force U_IF_NAME.io_dcacheError_ecc_error_bits = RTL_PATH.io_dcacheError_ecc_error_bits; \
         force U_IF_NAME.io_uncacheError_ecc_error_valid = RTL_PATH.io_uncacheError_ecc_error_valid; \
         force U_IF_NAME.io_uncacheError_ecc_error_bits = RTL_PATH.io_uncacheError_ecc_error_bits; \
-        force U_IF_NAME.io_memInfo_sqFull = '0; \
-        force U_IF_NAME.io_memInfo_lqFull = '0; \
-        force U_IF_NAME.io_memInfo_dcacheMSHRFull = '0; \
-        force U_IF_NAME.io_inner_hartId = RTL_PATH.io_mem_to_ooo_topToBackendBypass_hartId; \
         force U_IF_NAME.io_inner_reset_vector = RTL_PATH.io_inner_reset_vector; \
         force U_IF_NAME.io_outer_reset_vector = RTL_PATH.io_outer_reset_vector; \
-        force U_IF_NAME.io_outer_cpu_wfi = RTL_PATH.io_outer_cpu_halt; \
         force U_IF_NAME.io_outer_l2_flush_en = RTL_PATH.io_outer_l2_flush_en; \
         force U_IF_NAME.io_outer_power_down_en = RTL_PATH.io_outer_power_down_en; \
         force U_IF_NAME.io_outer_cpu_critical_error = RTL_PATH.io_outer_cpu_critical_error; \
-        force U_IF_NAME.io_outer_msi_ack = '0; \
         force U_IF_NAME.io_inner_beu_errors_icache_ecc_error_valid = RTL_PATH.io_inner_beu_errors_icache_ecc_error_valid; \
         force U_IF_NAME.io_inner_beu_errors_icache_ecc_error_bits = RTL_PATH.io_inner_beu_errors_icache_ecc_error_bits; \
         force U_IF_NAME.io_outer_beu_errors_icache_ecc_error_valid = RTL_PATH.io_outer_beu_errors_icache_ecc_error_valid; \
         force U_IF_NAME.io_outer_beu_errors_icache_ecc_error_bits = RTL_PATH.io_outer_beu_errors_icache_ecc_error_bits; \
-        force U_IF_NAME.io_reset_backend = tc_if.rst_n; \
+        force U_IF_NAME.io_reset_backend = RTL_PATH.io_reset_backend; \
+        force U_IF_NAME.io_outer_cpu_halt = RTL_PATH.io_outer_cpu_halt; \
     end \
     `endif
 

@@ -32,10 +32,8 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_19;
     rand bit io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_23;
     rand bit [3:0] io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger;
-    rand bit io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC;
     rand bit io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag;
     rand bit [5:0] io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_value;
-    rand bit io_mem_to_ooo_intWriteback_3_0_ready;
     rand bit io_mem_to_ooo_intWriteback_3_0_valid;
     rand bit io_mem_to_ooo_intWriteback_3_0_bits_toRob_valid;
     rand bit io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_robIdx_flag;
@@ -47,10 +45,8 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_19;
     rand bit io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_23;
     rand bit [3:0] io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_trigger;
-    rand bit io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC;
     rand bit io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag;
     rand bit [5:0] io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_value;
-    rand bit [7:0] io_mem_to_ooo_intWriteback_3_0_bits_pdest;
     rand bit io_mem_to_ooo_intWriteback_2_0_valid;
     rand bit io_mem_to_ooo_intWriteback_2_0_bits_toRob_valid;
     rand bit io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_robIdx_flag;
@@ -80,7 +76,6 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_22;
     rand bit io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_23;
     rand bit [3:0] io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_trigger;
-    rand bit io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC;
     rand bit io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_flag;
     rand bit [6:0] io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_value;
     rand bit [7:0] io_mem_to_ooo_intWriteback_2_0_bits_pdest;
@@ -117,7 +112,6 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_22;
     rand bit io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_23;
     rand bit [3:0] io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_trigger;
-    rand bit io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC;
     rand bit io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag;
     rand bit [6:0] io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_value;
     rand bit [7:0] io_mem_to_ooo_intWriteback_1_0_bits_pdest;
@@ -154,7 +148,6 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_22;
     rand bit io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_23;
     rand bit [3:0] io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_trigger;
-    rand bit io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC;
     rand bit io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag;
     rand bit [6:0] io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_value;
     rand bit [7:0] io_mem_to_ooo_intWriteback_0_0_bits_pdest;
@@ -164,6 +157,50 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
     rand bit [63:0] io_mem_to_ooo_intWriteback_0_0_bits_toFpRf_bits;
     rand bit io_mem_to_ooo_intWriteback_0_0_bits_isFromLoadUnit;
 
+    rand bit io_mem_to_ooo_writebackLda_0_bits_debug_isMMIO;
+    rand bit io_mem_to_ooo_writebackLda_0_bits_debug_isNCIO;
+    rand bit io_mem_to_ooo_writebackLda_0_bits_debug_isPerfCnt;
+    rand bit io_mem_to_ooo_writebackLda_0_bits_uop_flushPipe;
+    rand bit io_mem_to_ooo_writebackLda_0_bits_uop_replayInst;
+    rand bit io_mem_to_ooo_writebackLda_1_bits_debug_isMMIO;
+    rand bit io_mem_to_ooo_writebackLda_1_bits_debug_isNCIO;
+    rand bit io_mem_to_ooo_writebackLda_1_bits_debug_isPerfCnt;
+    rand bit io_mem_to_ooo_writebackLda_1_bits_uop_flushPipe;
+    rand bit io_mem_to_ooo_writebackLda_1_bits_uop_replayInst;
+    rand bit io_mem_to_ooo_writebackLda_2_bits_debug_isMMIO;
+    rand bit io_mem_to_ooo_writebackLda_2_bits_debug_isNCIO;
+    rand bit io_mem_to_ooo_writebackLda_2_bits_debug_isPerfCnt;
+    rand bit io_mem_to_ooo_writebackLda_2_bits_uop_flushPipe;
+    rand bit io_mem_to_ooo_writebackLda_2_bits_uop_replayInst;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_debug_isMMIO;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_debug_isNCIO;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_0;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_1;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_2;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_3;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_4;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_5;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_6;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_7;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_8;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_9;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_10;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_11;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_12;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_13;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_14;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_15;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_16;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_17;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_18;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_19;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_20;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_21;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_22;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_23;
+    rand bit io_mem_to_ooo_writebackSta_0_bits_uop_flushPipe;
+    rand bit io_mem_to_ooo_writebackSta_1_bits_debug_isMMIO;
+    rand bit io_mem_to_ooo_writebackSta_1_bits_debug_isNCIO;
     extern constraint default_io_mem_to_ooo_intWriteback_6_0_valid_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_6_0_bits_toRob_valid_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_6_0_bits_toRob_bits_robIdx_flag_cons;
@@ -187,10 +224,8 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_19_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_23_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger_cons;
-    extern constraint default_io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_value_cons;
-    extern constraint default_io_mem_to_ooo_intWriteback_3_0_ready_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_3_0_valid_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_3_0_bits_toRob_valid_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_robIdx_flag_cons;
@@ -202,10 +237,8 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_19_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_23_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_trigger_cons;
-    extern constraint default_io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_value_cons;
-    extern constraint default_io_mem_to_ooo_intWriteback_3_0_bits_pdest_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_2_0_valid_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_2_0_bits_toRob_valid_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_robIdx_flag_cons;
@@ -235,7 +268,6 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_22_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_23_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_trigger_cons;
-    extern constraint default_io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_flag_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_value_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_2_0_bits_pdest_cons;
@@ -272,7 +304,6 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_22_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_23_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_trigger_cons;
-    extern constraint default_io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_value_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_1_0_bits_pdest_cons;
@@ -309,7 +340,6 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_22_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_23_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_trigger_cons;
-    extern constraint default_io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_value_cons;
     extern constraint default_io_mem_to_ooo_intWriteback_0_0_bits_pdest_cons;
@@ -351,10 +381,8 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_19, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_23, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_intWriteback_3_0_ready, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_3_0_valid, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_3_0_bits_toRob_valid, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_robIdx_flag, UVM_ALL_ON);
@@ -366,10 +394,8 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_19, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_23, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_trigger, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_value, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_intWriteback_3_0_bits_pdest, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_2_0_valid, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_2_0_bits_toRob_valid, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_robIdx_flag, UVM_ALL_ON);
@@ -399,7 +425,6 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_22, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_23, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_trigger, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_2_0_bits_pdest, UVM_ALL_ON);
@@ -436,7 +461,6 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_22, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_23, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_trigger, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_1_0_bits_pdest, UVM_ALL_ON);
@@ -473,7 +497,6 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_22, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_23, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_trigger, UVM_ALL_ON);
-        `uvm_field_int(io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_value, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_0_0_bits_pdest, UVM_ALL_ON);
@@ -483,6 +506,50 @@ class io_mem_to_ooo_int_wb_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_mem_to_ooo_intWriteback_0_0_bits_toFpRf_bits, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_intWriteback_0_0_bits_isFromLoadUnit, UVM_ALL_ON);
 
+        `uvm_field_int(io_mem_to_ooo_writebackLda_0_bits_debug_isMMIO, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_0_bits_debug_isNCIO, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_0_bits_debug_isPerfCnt, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_0_bits_uop_flushPipe, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_0_bits_uop_replayInst, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_1_bits_debug_isMMIO, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_1_bits_debug_isNCIO, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_1_bits_debug_isPerfCnt, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_1_bits_uop_flushPipe, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_1_bits_uop_replayInst, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_2_bits_debug_isMMIO, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_2_bits_debug_isNCIO, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_2_bits_debug_isPerfCnt, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_2_bits_uop_flushPipe, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackLda_2_bits_uop_replayInst, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_debug_isMMIO, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_debug_isNCIO, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_0, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_1, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_2, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_3, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_4, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_5, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_6, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_7, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_8, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_9, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_10, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_11, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_12, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_13, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_14, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_15, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_16, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_17, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_18, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_19, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_20, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_21, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_22, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_23, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_0_bits_uop_flushPipe, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_1_bits_debug_isMMIO, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_writebackSta_1_bits_debug_isNCIO, UVM_ALL_ON);
     `uvm_object_utils_end
 
 endclass:io_mem_to_ooo_int_wb_agent_agent_xaction
@@ -579,19 +646,11 @@ constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWr
 
 }
 
-constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC_cons{
-
-}
-
 constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag_cons{
 
 }
 
 constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_value_cons{
-
-}
-
-constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_3_0_ready_cons{
 
 }
 
@@ -639,19 +698,11 @@ constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWr
 
 }
 
-constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC_cons{
-
-}
-
 constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag_cons{
 
 }
 
 constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_value_cons{
-
-}
-
-constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_3_0_bits_pdest_cons{
 
 }
 
@@ -768,10 +819,6 @@ constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWr
 }
 
 constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_trigger_cons{
-
-}
-
-constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC_cons{
 
 }
 
@@ -919,10 +966,6 @@ constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWr
 
 }
 
-constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC_cons{
-
-}
-
 constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag_cons{
 
 }
@@ -1067,10 +1110,6 @@ constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWr
 
 }
 
-constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC_cons{
-
-}
-
 constraint io_mem_to_ooo_int_wb_agent_agent_xaction::default_io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag_cons{
 
 }
@@ -1152,10 +1191,8 @@ function string io_mem_to_ooo_int_wb_agent_agent_xaction::psdisplay(string prefi
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_19 = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_19);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_23 = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_23);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger);
-    pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_value);
-    pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_3_0_ready = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_3_0_ready);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_3_0_valid = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_3_0_valid);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_3_0_bits_toRob_valid = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_valid);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_robIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_robIdx_flag);
@@ -1167,10 +1204,8 @@ function string io_mem_to_ooo_int_wb_agent_agent_xaction::psdisplay(string prefi
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_19 = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_19);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_23 = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_23);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_trigger = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_trigger);
-    pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_value);
-    pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_3_0_bits_pdest = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_3_0_bits_pdest);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_2_0_valid = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_2_0_valid);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_2_0_bits_toRob_valid = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_valid);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_robIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_robIdx_flag);
@@ -1200,7 +1235,6 @@ function string io_mem_to_ooo_int_wb_agent_agent_xaction::psdisplay(string prefi
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_22 = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_22);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_23 = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_23);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_trigger = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_trigger);
-    pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_flag);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_2_0_bits_pdest = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_2_0_bits_pdest);
@@ -1237,7 +1271,6 @@ function string io_mem_to_ooo_int_wb_agent_agent_xaction::psdisplay(string prefi
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_22 = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_22);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_23 = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_23);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_trigger = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_trigger);
-    pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_1_0_bits_pdest = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_1_0_bits_pdest);
@@ -1274,7 +1307,6 @@ function string io_mem_to_ooo_int_wb_agent_agent_xaction::psdisplay(string prefi
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_22 = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_22);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_23 = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_23);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_trigger = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_trigger);
-    pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_value = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_value);
     pkt_str = $sformatf("%sio_mem_to_ooo_intWriteback_0_0_bits_pdest = 0x%0h ",pkt_str,this.io_mem_to_ooo_intWriteback_0_0_bits_pdest);
@@ -1417,12 +1449,6 @@ function bit io_mem_to_ooo_int_wb_agent_agent_xaction::compare(uvm_object rhs, u
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger=0x%0h",this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger,rhs_.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger),UVM_NONE)
         end
-
-        if(this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC!=rhs_.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC=0x%0h",this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC,rhs_.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC),UVM_NONE)
-        end
-
         if(this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag!=rhs_.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag=0x%0h",this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag,rhs_.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_flag),UVM_NONE)
@@ -1432,12 +1458,6 @@ function bit io_mem_to_ooo_int_wb_agent_agent_xaction::compare(uvm_object rhs, u
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_value=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_value=0x%0h",this.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_value,rhs_.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_sqIdx_value),UVM_NONE)
         end
-
-        if(this.io_mem_to_ooo_intWriteback_3_0_ready!=rhs_.io_mem_to_ooo_intWriteback_3_0_ready) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_3_0_ready=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_3_0_ready=0x%0h",this.io_mem_to_ooo_intWriteback_3_0_ready,rhs_.io_mem_to_ooo_intWriteback_3_0_ready),UVM_NONE)
-        end
-
         if(this.io_mem_to_ooo_intWriteback_3_0_valid!=rhs_.io_mem_to_ooo_intWriteback_3_0_valid) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_3_0_valid=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_3_0_valid=0x%0h",this.io_mem_to_ooo_intWriteback_3_0_valid,rhs_.io_mem_to_ooo_intWriteback_3_0_valid),UVM_NONE)
@@ -1492,12 +1512,6 @@ function bit io_mem_to_ooo_int_wb_agent_agent_xaction::compare(uvm_object rhs, u
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_trigger=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_trigger=0x%0h",this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_trigger,rhs_.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_trigger),UVM_NONE)
         end
-
-        if(this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC!=rhs_.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC=0x%0h",this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC,rhs_.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC),UVM_NONE)
-        end
-
         if(this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag!=rhs_.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag=0x%0h",this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag,rhs_.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_flag),UVM_NONE)
@@ -1507,12 +1521,6 @@ function bit io_mem_to_ooo_int_wb_agent_agent_xaction::compare(uvm_object rhs, u
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_value=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_value=0x%0h",this.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_value,rhs_.io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_sqIdx_value),UVM_NONE)
         end
-
-        if(this.io_mem_to_ooo_intWriteback_3_0_bits_pdest!=rhs_.io_mem_to_ooo_intWriteback_3_0_bits_pdest) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_3_0_bits_pdest=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_3_0_bits_pdest=0x%0h",this.io_mem_to_ooo_intWriteback_3_0_bits_pdest,rhs_.io_mem_to_ooo_intWriteback_3_0_bits_pdest),UVM_NONE)
-        end
-
         if(this.io_mem_to_ooo_intWriteback_2_0_valid!=rhs_.io_mem_to_ooo_intWriteback_2_0_valid) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_2_0_valid=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_2_0_valid=0x%0h",this.io_mem_to_ooo_intWriteback_2_0_valid,rhs_.io_mem_to_ooo_intWriteback_2_0_valid),UVM_NONE)
@@ -1657,12 +1665,6 @@ function bit io_mem_to_ooo_int_wb_agent_agent_xaction::compare(uvm_object rhs, u
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_trigger=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_trigger=0x%0h",this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_trigger,rhs_.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_trigger),UVM_NONE)
         end
-
-        if(this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC!=rhs_.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC=0x%0h",this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC,rhs_.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC),UVM_NONE)
-        end
-
         if(this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_flag!=rhs_.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_flag) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_flag=0x%0h",this.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_flag,rhs_.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_lqIdx_flag),UVM_NONE)
@@ -1842,12 +1844,6 @@ function bit io_mem_to_ooo_int_wb_agent_agent_xaction::compare(uvm_object rhs, u
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_trigger=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_trigger=0x%0h",this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_trigger,rhs_.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_trigger),UVM_NONE)
         end
-
-        if(this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC!=rhs_.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC=0x%0h",this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC,rhs_.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC),UVM_NONE)
-        end
-
         if(this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag!=rhs_.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag=0x%0h",this.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag,rhs_.io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_lqIdx_flag),UVM_NONE)
@@ -2027,12 +2023,6 @@ function bit io_mem_to_ooo_int_wb_agent_agent_xaction::compare(uvm_object rhs, u
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_trigger=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_trigger=0x%0h",this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_trigger,rhs_.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_trigger),UVM_NONE)
         end
-
-        if(this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC!=rhs_.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC=0x%0h",this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC,rhs_.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC),UVM_NONE)
-        end
-
         if(this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag!=rhs_.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag=0x%0h while the rhs_.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag=0x%0h",this.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag,rhs_.io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_lqIdx_flag),UVM_NONE)

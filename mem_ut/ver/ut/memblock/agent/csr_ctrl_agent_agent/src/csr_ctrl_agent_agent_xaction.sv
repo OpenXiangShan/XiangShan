@@ -56,12 +56,6 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable;
     rand bit io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable;
     rand bit [9:0] io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency;
-    rand bit io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable;
-    rand bit io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable;
-    rand bit io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable;
-    rand bit io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable;
-    rand bit io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable;
-    rand bit io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable;
     rand bit [21:0] io_ooo_to_mem_csrCtrl_sbuffer_timeout;
     rand bit io_ooo_to_mem_csrCtrl_ldld_vio_check_enable;
     rand bit io_ooo_to_mem_csrCtrl_cache_error_enable;
@@ -75,12 +69,8 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit [1:0] io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_addr;
     rand bit [1:0] io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_matchType;
     rand bit io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select;
-    rand bit io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing;
     rand bit [3:0] io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action;
     rand bit io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain;
-    rand bit io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute;
-    rand bit io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store;
-    rand bit io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load;
     rand bit [63:0] io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_tdata2;
     rand bit io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_0;
     rand bit io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_1;
@@ -91,7 +81,6 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit [1:0] io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_addr;
     rand bit [1:0] io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType;
     rand bit io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select;
-    rand bit io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing;
     rand bit [3:0] io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action;
     rand bit io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain;
     rand bit io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_store;
@@ -104,6 +93,16 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp;
     rand bit io_ooo_to_mem_csrCtrl_fsIsOff;
 
+    rand bit io_ooo_to_mem_csrCtrl_bp_ctrl_btb_enable;
+    rand bit io_ooo_to_mem_csrCtrl_bp_ctrl_ras_enable;
+    rand bit io_ooo_to_mem_csrCtrl_bp_ctrl_sc_enable;
+    rand bit io_ooo_to_mem_csrCtrl_bp_ctrl_tage_enable;
+    rand bit io_ooo_to_mem_csrCtrl_bp_ctrl_ubtb_enable;
+    rand bit io_ooo_to_mem_csrCtrl_frontend_trigger_debugMode;
+    rand bit io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable;
+    rand bit io_ooo_to_mem_csrCtrl_hd_misalign_st_enable;
+    rand bit io_ooo_to_mem_csrCtrl_mem_trigger_debugMode;
+    rand bit io_ooo_to_mem_tlbCsr_priv_debug;
     extern constraint default_io_ooo_to_mem_tlbCsr_satp_mode_cons;
     extern constraint default_io_ooo_to_mem_tlbCsr_satp_asid_cons;
     extern constraint default_io_ooo_to_mem_tlbCsr_satp_ppn_cons;
@@ -151,12 +150,6 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency_cons;
-    extern constraint default_io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable_cons;
-    extern constraint default_io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable_cons;
-    extern constraint default_io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable_cons;
-    extern constraint default_io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable_cons;
-    extern constraint default_io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable_cons;
-    extern constraint default_io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_sbuffer_timeout_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_ldld_vio_check_enable_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_cache_error_enable_cons;
@@ -170,12 +163,8 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_addr_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_matchType_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select_cons;
-    extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain_cons;
-    extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute_cons;
-    extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store_cons;
-    extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_tdata2_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_0_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_1_cons;
@@ -186,7 +175,6 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_addr_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select_cons;
-    extern constraint default_io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain_cons;
     extern constraint default_io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_store_cons;
@@ -255,12 +243,6 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_sbuffer_timeout, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_ldld_vio_check_enable, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_cache_error_enable, UVM_ALL_ON);
@@ -274,12 +256,8 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_addr, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_matchType, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_tdata2, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_0, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_1, UVM_ALL_ON);
@@ -290,7 +268,6 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_addr, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select, UVM_ALL_ON);
-        `uvm_field_int(io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_store, UVM_ALL_ON);
@@ -303,6 +280,16 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp, UVM_ALL_ON);
         `uvm_field_int(io_ooo_to_mem_csrCtrl_fsIsOff, UVM_ALL_ON);
 
+        `uvm_field_int(io_ooo_to_mem_csrCtrl_bp_ctrl_btb_enable, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_csrCtrl_bp_ctrl_ras_enable, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_csrCtrl_bp_ctrl_sc_enable, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_csrCtrl_bp_ctrl_tage_enable, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_csrCtrl_bp_ctrl_ubtb_enable, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_csrCtrl_frontend_trigger_debugMode, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_csrCtrl_hd_misalign_st_enable, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_csrCtrl_mem_trigger_debugMode, UVM_ALL_ON);
+        `uvm_field_int(io_ooo_to_mem_tlbCsr_priv_debug, UVM_ALL_ON);
     `uvm_object_utils_end
 
 endclass:csr_ctrl_agent_agent_xaction
@@ -495,29 +482,11 @@ constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_pf_ctrl_l
 
 }
 
-constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable_cons{
 
-}
 
-constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable_cons{
 
-}
 
-constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable_cons{
 
-}
-
-constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable_cons{
-
-}
-
-constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable_cons{
-
-}
-
-constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable_cons{
-
-}
 
 constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_sbuffer_timeout_cons{
 
@@ -571,9 +540,6 @@ constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_frontend_
 
 }
 
-constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing_cons{
-
-}
 
 constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action_cons{
 
@@ -583,17 +549,8 @@ constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_frontend_
 
 }
 
-constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute_cons{
 
-}
 
-constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store_cons{
-
-}
-
-constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load_cons{
-
-}
 
 constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_tdata2_cons{
 
@@ -635,9 +592,6 @@ constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_mem_trigg
 
 }
 
-constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing_cons{
-
-}
 
 constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action_cons{
 
@@ -756,12 +710,6 @@ function string csr_ctrl_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_vbop_enable);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_tp_enable);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency);
-    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable);
-    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable);
-    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable);
-    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable);
-    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_bp_ctrl_scEnable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable);
-    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_sbuffer_timeout = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_sbuffer_timeout);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_ldld_vio_check_enable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_ldld_vio_check_enable);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_cache_error_enable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_cache_error_enable);
@@ -775,12 +723,8 @@ function string csr_ctrl_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_addr = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_addr);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_matchType = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_matchType);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select);
-    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain);
-    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute);
-    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store);
-    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_tdata2 = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_tdata2);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_0 = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_0);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_1 = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_frontend_trigger_tEnableVec_1);
@@ -791,7 +735,6 @@ function string csr_ctrl_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_addr = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_addr);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_matchType);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select);
-    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_chain);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_store = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_store);
@@ -1058,35 +1001,11 @@ function bit csr_ctrl_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer 
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency=0x%0h",this.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency,rhs_.io_ooo_to_mem_csrCtrl_pf_ctrl_l2_pf_delay_latency),UVM_NONE)
         end
 
-        if(this.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable!=rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable=0x%0h",this.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable,rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtbEnable),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable!=rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable=0x%0h",this.io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable,rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_abtbEnable),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable!=rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable=0x%0h",this.io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable,rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_mbtbEnable),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable!=rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable=0x%0h",this.io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable,rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_tageEnable),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable!=rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable=0x%0h",this.io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable,rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_scEnable),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable!=rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable=0x%0h",this.io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable,rhs_.io_ooo_to_mem_csrCtrl_bp_ctrl_ittageEnable),UVM_NONE)
-        end
 
         if(this.io_ooo_to_mem_csrCtrl_sbuffer_timeout!=rhs_.io_ooo_to_mem_csrCtrl_sbuffer_timeout) begin
             super_result = 0;
@@ -1153,10 +1072,6 @@ function bit csr_ctrl_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer 
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select=0x%0h",this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select,rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_select),UVM_NONE)
         end
 
-        if(this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing!=rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing=0x%0h",this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing,rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_timing),UVM_NONE)
-        end
 
         if(this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action!=rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_action) begin
             super_result = 0;
@@ -1168,20 +1083,8 @@ function bit csr_ctrl_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer 
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain=0x%0h",this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain,rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_chain),UVM_NONE)
         end
 
-        if(this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute!=rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute=0x%0h",this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute,rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_execute),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store!=rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store=0x%0h",this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store,rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_store),UVM_NONE)
-        end
 
-        if(this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load!=rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load=0x%0h",this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load,rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_load),UVM_NONE)
-        end
 
         if(this.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_tdata2!=rhs_.io_ooo_to_mem_csrCtrl_frontend_trigger_tUpdate_bits_tdata_tdata2) begin
             super_result = 0;
@@ -1233,10 +1136,6 @@ function bit csr_ctrl_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer 
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select=0x%0h",this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select,rhs_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_select),UVM_NONE)
         end
 
-        if(this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing!=rhs_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing=0x%0h",this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing,rhs_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_timing),UVM_NONE)
-        end
 
         if(this.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action!=rhs_.io_ooo_to_mem_csrCtrl_mem_trigger_tUpdate_bits_tdata_action) begin
             super_result = 0;

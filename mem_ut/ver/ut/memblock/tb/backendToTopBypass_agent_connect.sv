@@ -15,14 +15,13 @@
     end \
     `ifdef MEMBLOCK_UT \
     initial begin \
-        force RTL_PATH.io_ooo_to_mem_backendToTopBypass_cpuHalted = U_IF_NAME.io_ooo_to_mem_backendToTopBypass_cpuWfi; \
         force RTL_PATH.io_ooo_to_mem_backendToTopBypass_cpuCriticalError = U_IF_NAME.io_ooo_to_mem_backendToTopBypass_cpuCriticalError; \
+        force RTL_PATH.io_ooo_to_mem_backendToTopBypass_cpuHalted = U_IF_NAME.io_ooo_to_mem_backendToTopBypass_cpuHalted; \
     end \
     `else \
     initial begin \
-        force U_IF_NAME.io_ooo_to_mem_backendToTopBypass_cpuWfi = RTL_PATH.io_ooo_to_mem_backendToTopBypass_cpuHalted; \
         force U_IF_NAME.io_ooo_to_mem_backendToTopBypass_cpuCriticalError = RTL_PATH.io_ooo_to_mem_backendToTopBypass_cpuCriticalError; \
-        force U_IF_NAME.io_ooo_to_mem_backendToTopBypass_msiAck = '0; \
+        force U_IF_NAME.io_ooo_to_mem_backendToTopBypass_cpuHalted = RTL_PATH.io_ooo_to_mem_backendToTopBypass_cpuHalted; \
     end \
     `endif
 

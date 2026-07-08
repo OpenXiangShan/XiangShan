@@ -22,22 +22,18 @@ interface other_ctrl_agent_agent_interface  (input bit clk,input bit rst_n);
     logic [47:0] io_dcacheError_ecc_error_bits;
     logic io_uncacheError_ecc_error_valid;
     logic [47:0] io_uncacheError_ecc_error_bits;
-    logic io_memInfo_sqFull            ;
-    logic io_memInfo_lqFull            ;
-    logic io_memInfo_dcacheMSHRFull    ;
-    logic [5:0] io_inner_hartId        ;
     logic [47:0] io_inner_reset_vector ;
     logic [47:0] io_outer_reset_vector ;
-    logic io_outer_cpu_wfi             ;
     logic io_outer_l2_flush_en         ;
     logic io_outer_power_down_en       ;
     logic io_outer_cpu_critical_error  ;
-    logic io_outer_msi_ack             ;
     logic io_inner_beu_errors_icache_ecc_error_valid;
     logic [47:0] io_inner_beu_errors_icache_ecc_error_bits;
     logic io_outer_beu_errors_icache_ecc_error_valid;
     logic [47:0] io_outer_beu_errors_icache_ecc_error_bits;
     logic io_reset_backend             ;
+
+    logic io_outer_cpu_halt;
 
     clocking drv_cb @(posedge clk);
         `ifdef INTERFACE_ADD_DELAY
@@ -48,23 +44,18 @@ interface other_ctrl_agent_agent_interface  (input bit clk,input bit rst_n);
         input  io_dcacheError_ecc_error_bits;
         input  io_uncacheError_ecc_error_valid;
         input  io_uncacheError_ecc_error_bits;
-        input  io_memInfo_sqFull;
-        input  io_memInfo_lqFull;
-        input  io_memInfo_dcacheMSHRFull;
-        input  io_inner_hartId;
         input  io_inner_reset_vector;
         output io_outer_reset_vector;
-        input  io_outer_cpu_wfi;
         input  io_outer_l2_flush_en;
         input  io_outer_power_down_en;
         input  io_outer_cpu_critical_error;
-        input  io_outer_msi_ack;
         output io_inner_beu_errors_icache_ecc_error_valid;
         output io_inner_beu_errors_icache_ecc_error_bits;
         input  io_outer_beu_errors_icache_ecc_error_valid;
         input  io_outer_beu_errors_icache_ecc_error_bits;
         input  io_reset_backend;
 
+        input  io_outer_cpu_halt;
     endclocking:drv_cb
 
     clocking mon_cb @(posedge clk);
@@ -76,23 +67,18 @@ interface other_ctrl_agent_agent_interface  (input bit clk,input bit rst_n);
         input  io_dcacheError_ecc_error_bits;
         input  io_uncacheError_ecc_error_valid;
         input  io_uncacheError_ecc_error_bits;
-        input  io_memInfo_sqFull;
-        input  io_memInfo_lqFull;
-        input  io_memInfo_dcacheMSHRFull;
-        input  io_inner_hartId;
         input  io_inner_reset_vector;
         input  io_outer_reset_vector;
-        input  io_outer_cpu_wfi;
         input  io_outer_l2_flush_en;
         input  io_outer_power_down_en;
         input  io_outer_cpu_critical_error;
-        input  io_outer_msi_ack;
         input  io_inner_beu_errors_icache_ecc_error_valid;
         input  io_inner_beu_errors_icache_ecc_error_bits;
         input  io_outer_beu_errors_icache_ecc_error_valid;
         input  io_outer_beu_errors_icache_ecc_error_bits;
         input  io_reset_backend;
 
+        input  io_outer_cpu_halt;
     endclocking:mon_cb
 
     modport drv_mp (clocking drv_cb);

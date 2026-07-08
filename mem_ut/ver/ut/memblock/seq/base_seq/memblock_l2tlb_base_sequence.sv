@@ -270,6 +270,8 @@ function void memblock_l2tlb_base_sequence::clear_l2tlb_xaction(input L2tlb_agen
     tr.io_ptw_resp_bits_s2_entry_ppn = '0;
     tr.io_ptw_resp_bits_s2_entry_perm_d = '0;
     tr.io_ptw_resp_bits_s2_entry_perm_a = '0;
+    tr.io_ptw_resp_bits_s2_entry_perm_g = '0;
+    tr.io_ptw_resp_bits_s2_entry_perm_u = '0;
     tr.io_ptw_resp_bits_s2_entry_perm_x = '0;
     tr.io_ptw_resp_bits_s2_entry_perm_w = '0;
     tr.io_ptw_resp_bits_s2_entry_perm_r = '0;
@@ -343,6 +345,8 @@ function void memblock_l2tlb_base_sequence::fill_dtlb_resp_from_entry(input memb
     resp.io_ptw_resp_bits_s2_entry_ppn = entry.ppn[37:0];
     resp.io_ptw_resp_bits_s2_entry_perm_d = entry.pte_d;
     resp.io_ptw_resp_bits_s2_entry_perm_a = entry.pte_a;
+    resp.io_ptw_resp_bits_s2_entry_perm_g = entry.pte_g;
+    resp.io_ptw_resp_bits_s2_entry_perm_u = entry.pte_u;
     resp.io_ptw_resp_bits_s2_entry_perm_x = entry.pte_x;
     resp.io_ptw_resp_bits_s2_entry_perm_w = entry.pte_w;
     resp.io_ptw_resp_bits_s2_entry_perm_r = entry.pte_r;

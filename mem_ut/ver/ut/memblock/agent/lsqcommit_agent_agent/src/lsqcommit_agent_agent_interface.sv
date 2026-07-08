@@ -21,6 +21,10 @@ interface lsqcommit_agent_agent_interface  (input bit clk,input bit rst_n);
     logic [8:0] io_ooo_to_mem_lsqio_pendingPtr_value;
     logic io_ooo_to_mem_flushSb        ;
 
+    logic io_ooo_to_mem_lsqio_pendingMMIOld;
+    logic io_ooo_to_mem_lsqio_pendingst;
+    logic [3:0] io_ooo_to_mem_lsqio_scommit;
+
     clocking drv_cb @(posedge clk);
         `ifdef INTERFACE_ADD_DELAY
             default input #`DEF_SETUP_TIME output #`DEF_HOLD_TIME;
@@ -29,6 +33,9 @@ interface lsqcommit_agent_agent_interface  (input bit clk,input bit rst_n);
         output io_ooo_to_mem_lsqio_pendingPtr_value;
         output io_ooo_to_mem_flushSb;
 
+        output io_ooo_to_mem_lsqio_pendingMMIOld;
+        output io_ooo_to_mem_lsqio_pendingst;
+        output io_ooo_to_mem_lsqio_scommit;
     endclocking:drv_cb
 
     clocking mon_cb @(posedge clk);
@@ -39,6 +46,9 @@ interface lsqcommit_agent_agent_interface  (input bit clk,input bit rst_n);
         input  io_ooo_to_mem_lsqio_pendingPtr_value;
         input  io_ooo_to_mem_flushSb;
 
+        input  io_ooo_to_mem_lsqio_pendingMMIOld;
+        input  io_ooo_to_mem_lsqio_pendingst;
+        input  io_ooo_to_mem_lsqio_scommit;
     endclocking:mon_cb
 
     modport drv_mp (clocking drv_cb);

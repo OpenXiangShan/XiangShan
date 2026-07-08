@@ -25,6 +25,8 @@ interface fence_agent_agent_interface  (input bit clk,input bit rst_n);
     logic io_ooo_to_mem_sfence_bits_hv ;
     logic io_ooo_to_mem_sfence_bits_hg ;
 
+    logic io_ooo_to_mem_sfence_bits_flushPipe;
+
     clocking drv_cb @(posedge clk);
         `ifdef INTERFACE_ADD_DELAY
             default input #`DEF_SETUP_TIME output #`DEF_HOLD_TIME;
@@ -37,6 +39,7 @@ interface fence_agent_agent_interface  (input bit clk,input bit rst_n);
         output io_ooo_to_mem_sfence_bits_hv;
         output io_ooo_to_mem_sfence_bits_hg;
 
+        output io_ooo_to_mem_sfence_bits_flushPipe;
     endclocking:drv_cb
 
     clocking mon_cb @(posedge clk);
@@ -51,6 +54,7 @@ interface fence_agent_agent_interface  (input bit clk,input bit rst_n);
         input  io_ooo_to_mem_sfence_bits_hv;
         input  io_ooo_to_mem_sfence_bits_hg;
 
+        input  io_ooo_to_mem_sfence_bits_flushPipe;
     endclocking:mon_cb
 
     modport drv_mp (clocking drv_cb);

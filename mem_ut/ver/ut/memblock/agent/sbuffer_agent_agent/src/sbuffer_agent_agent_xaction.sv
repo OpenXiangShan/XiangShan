@@ -19,8 +19,6 @@ class sbuffer_agent_agent_xaction  extends tcnt_data_base;
     rand bit [2:0] auto_inner_buffers_out_a_bits_size;
     rand bit [3:0] auto_inner_buffers_out_a_bits_source;
     rand bit [47:0] auto_inner_buffers_out_a_bits_address;
-    rand bit auto_inner_buffers_out_a_bits_user_memBackType_MM;
-    rand bit auto_inner_buffers_out_a_bits_user_memPageType_NC;
     rand bit [7:0] auto_inner_buffers_out_a_bits_mask;
     rand bit [63:0] auto_inner_buffers_out_a_bits_data;
     rand bit auto_inner_buffers_out_a_bits_corrupt;
@@ -42,8 +40,6 @@ class sbuffer_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_auto_inner_buffers_out_a_bits_size_cons;
     extern constraint default_auto_inner_buffers_out_a_bits_source_cons;
     extern constraint default_auto_inner_buffers_out_a_bits_address_cons;
-    extern constraint default_auto_inner_buffers_out_a_bits_user_memBackType_MM_cons;
-    extern constraint default_auto_inner_buffers_out_a_bits_user_memPageType_NC_cons;
     extern constraint default_auto_inner_buffers_out_a_bits_mask_cons;
     extern constraint default_auto_inner_buffers_out_a_bits_data_cons;
     extern constraint default_auto_inner_buffers_out_a_bits_corrupt_cons;
@@ -74,8 +70,6 @@ class sbuffer_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(auto_inner_buffers_out_a_bits_size, UVM_ALL_ON);
         `uvm_field_int(auto_inner_buffers_out_a_bits_source, UVM_ALL_ON);
         `uvm_field_int(auto_inner_buffers_out_a_bits_address, UVM_ALL_ON);
-        `uvm_field_int(auto_inner_buffers_out_a_bits_user_memBackType_MM, UVM_ALL_ON);
-        `uvm_field_int(auto_inner_buffers_out_a_bits_user_memPageType_NC, UVM_ALL_ON);
         `uvm_field_int(auto_inner_buffers_out_a_bits_mask, UVM_ALL_ON);
         `uvm_field_int(auto_inner_buffers_out_a_bits_data, UVM_ALL_ON);
         `uvm_field_int(auto_inner_buffers_out_a_bits_corrupt, UVM_ALL_ON);
@@ -122,13 +116,7 @@ constraint sbuffer_agent_agent_xaction::default_auto_inner_buffers_out_a_bits_ad
 
 }
 
-constraint sbuffer_agent_agent_xaction::default_auto_inner_buffers_out_a_bits_user_memBackType_MM_cons{
 
-}
-
-constraint sbuffer_agent_agent_xaction::default_auto_inner_buffers_out_a_bits_user_memPageType_NC_cons{
-
-}
 
 constraint sbuffer_agent_agent_xaction::default_auto_inner_buffers_out_a_bits_mask_cons{
 
@@ -215,8 +203,6 @@ function string sbuffer_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sauto_inner_buffers_out_a_bits_size = 0x%0h ",pkt_str,this.auto_inner_buffers_out_a_bits_size);
     pkt_str = $sformatf("%sauto_inner_buffers_out_a_bits_source = 0x%0h ",pkt_str,this.auto_inner_buffers_out_a_bits_source);
     pkt_str = $sformatf("%sauto_inner_buffers_out_a_bits_address = 0x%0h ",pkt_str,this.auto_inner_buffers_out_a_bits_address);
-    pkt_str = $sformatf("%sauto_inner_buffers_out_a_bits_user_memBackType_MM = 0x%0h ",pkt_str,this.auto_inner_buffers_out_a_bits_user_memBackType_MM);
-    pkt_str = $sformatf("%sauto_inner_buffers_out_a_bits_user_memPageType_NC = 0x%0h ",pkt_str,this.auto_inner_buffers_out_a_bits_user_memPageType_NC);
     pkt_str = $sformatf("%sauto_inner_buffers_out_a_bits_mask = 0x%0h ",pkt_str,this.auto_inner_buffers_out_a_bits_mask);
     pkt_str = $sformatf("%sauto_inner_buffers_out_a_bits_data = 0x%0h ",pkt_str,this.auto_inner_buffers_out_a_bits_data);
     pkt_str = $sformatf("%sauto_inner_buffers_out_a_bits_corrupt = 0x%0h ",pkt_str,this.auto_inner_buffers_out_a_bits_corrupt);
@@ -285,15 +271,7 @@ function bit sbuffer_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer c
             `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_buffers_out_a_bits_address=0x%0h while the rhs_.auto_inner_buffers_out_a_bits_address=0x%0h",this.auto_inner_buffers_out_a_bits_address,rhs_.auto_inner_buffers_out_a_bits_address),UVM_NONE)
         end
 
-        if(this.auto_inner_buffers_out_a_bits_user_memBackType_MM!=rhs_.auto_inner_buffers_out_a_bits_user_memBackType_MM) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_buffers_out_a_bits_user_memBackType_MM=0x%0h while the rhs_.auto_inner_buffers_out_a_bits_user_memBackType_MM=0x%0h",this.auto_inner_buffers_out_a_bits_user_memBackType_MM,rhs_.auto_inner_buffers_out_a_bits_user_memBackType_MM),UVM_NONE)
-        end
 
-        if(this.auto_inner_buffers_out_a_bits_user_memPageType_NC!=rhs_.auto_inner_buffers_out_a_bits_user_memPageType_NC) begin
-            super_result = 0;
-            `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_buffers_out_a_bits_user_memPageType_NC=0x%0h while the rhs_.auto_inner_buffers_out_a_bits_user_memPageType_NC=0x%0h",this.auto_inner_buffers_out_a_bits_user_memPageType_NC,rhs_.auto_inner_buffers_out_a_bits_user_memPageType_NC),UVM_NONE)
-        end
 
         if(this.auto_inner_buffers_out_a_bits_mask!=rhs_.auto_inner_buffers_out_a_bits_mask) begin
             super_result = 0;

@@ -18,12 +18,18 @@
         force RTL_PATH.io_ooo_to_mem_lsqio_pendingPtr_flag = U_IF_NAME.io_ooo_to_mem_lsqio_pendingPtr_flag; \
         force RTL_PATH.io_ooo_to_mem_lsqio_pendingPtr_value = U_IF_NAME.io_ooo_to_mem_lsqio_pendingPtr_value; \
         force RTL_PATH.io_ooo_to_mem_flushSb = U_IF_NAME.io_ooo_to_mem_flushSb; \
+        force RTL_PATH.io_ooo_to_mem_lsqio_pendingMMIOld = U_IF_NAME.io_ooo_to_mem_lsqio_pendingMMIOld; \
+        force RTL_PATH.io_ooo_to_mem_lsqio_pendingst = U_IF_NAME.io_ooo_to_mem_lsqio_pendingst; \
+        force RTL_PATH.io_ooo_to_mem_lsqio_scommit = U_IF_NAME.io_ooo_to_mem_lsqio_scommit; \
     end \
     `else \
     initial begin \
         force U_IF_NAME.io_ooo_to_mem_lsqio_pendingPtr_flag = RTL_PATH.io_ooo_to_mem_lsqio_pendingPtr_flag; \
         force U_IF_NAME.io_ooo_to_mem_lsqio_pendingPtr_value = RTL_PATH.io_ooo_to_mem_lsqio_pendingPtr_value; \
         force U_IF_NAME.io_ooo_to_mem_flushSb = RTL_PATH.io_ooo_to_mem_flushSb; \
+        force U_IF_NAME.io_ooo_to_mem_lsqio_pendingMMIOld = RTL_PATH.io_ooo_to_mem_lsqio_pendingMMIOld; \
+        force U_IF_NAME.io_ooo_to_mem_lsqio_pendingst = RTL_PATH.io_ooo_to_mem_lsqio_pendingst; \
+        force U_IF_NAME.io_ooo_to_mem_lsqio_scommit = RTL_PATH.io_ooo_to_mem_lsqio_scommit; \
     end \
     `endif
 
