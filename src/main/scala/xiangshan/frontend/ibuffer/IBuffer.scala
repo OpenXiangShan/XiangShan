@@ -368,12 +368,11 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   // Register the first encountered exceptions into the IBuffer.
   private val receiveExceptionFire = io.in.fire && !io.flush && !firstException.valid
   private val nextFirstHasException =
-    currentException.exceptionType.hasException && (!useBypass || useBypass && !bypassExceptionMask.reduce(_ || _))
+    currentException.exceptionType.hasException &&
+      (io.in.bits.exceptionMask & io.in.bits.enqEnable).orR &&
+      (!useBypass || useBypass && !bypassExceptionMask.reduce(_ || _))
 
-  // When exceptions are registered in IBuffer, set firstHasExceptionExcludingRVCII.
-  // We require numEnq to be non-zero to avoid the case when io.in.fire and numEnq is zero,
-  // i.e. current last instruction is half RVI
-  when(receiveExceptionFire && nextFirstHasException && numEnq =/= 0.U) {
+  when(receiveExceptionFire && nextFirstHasException) {
     firstException.valid := true.B
   }
 
