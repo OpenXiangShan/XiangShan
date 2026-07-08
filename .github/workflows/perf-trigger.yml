@@ -61,12 +61,12 @@ on:
         required: false
         type: string
       enable_db:
-        description: Enable ChiselDB dump
+        description: Enable ChiselDB dump (High disk usage, 4~16G/ckpt, use with caution!)
         required: false
         type: boolean
         default: false
       enable_rolling:
-        description: Enable rolling DB dump. This implies enable_db
+        description: Enable rolling DB dump, which implies enable_db (High disk usage, 4~16G/ckpt, use with caution!)
         required: false
         type: boolean
         default: false
