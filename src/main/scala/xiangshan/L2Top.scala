@@ -108,12 +108,20 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
 
   println(s"enableCHI: ${enableCHI}")
   val l2cache = if (enableL2) {
+    val sliceCoherentClientMap =
+      if (coreParams.dcacheParametersOpt.exists(p => p.numMemChannels == 2 && p.channelSelByAddr) &&
+          coreParams.L2NBanks % 2 == 0) {
+        Some(Seq.tabulate(coreParams.L2NBanks)(i => i % 2))
+      } else {
+        None
+      }
     val config = new Config((_, _, _) => {
       case L2ParamKey => coreParams.L2CacheParamsOpt.get.copy(
         hartId = p(XSCoreParamsKey).HartId,
         FPGAPlatform = debugOpts.FPGAPlatform,
         hasMbist = hasMbist,
-        PrivateClintRange = if(UsePrivateClint) Some(TIMERRange) else None
+        PrivateClintRange = if(UsePrivateClint) Some(TIMERRange) else None,
+        sliceCoherentClientMap = sliceCoherentClientMap
       )
       case CHIIssue => p(CHIIssue)
       case CHIAddrWidthKey => p(CHIAddrWidthKey)
@@ -223,7 +231,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val pfCtrlFromCore = Input(new PrefetchCtrlFromCore)
       val l2_tlb_req = new TlbRequestIO(nRespDups = 2)
       val l2_pmp_resp = Flipped(new PMPRespBundle)
-      val l2_hint = ValidIO(new L2ToL1Hint())
+      val l2_hint = Vec(numMemChannelsFromDcache, ValidIO(new L2ToL1Hint()))
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
       val l2_flush_en = Option.when(EnablePowerDown) (Input(Bool()))
       val l2_flush_done = Option.when(EnablePowerDown) (Output(Bool()))
