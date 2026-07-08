@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import Callable
 
@@ -39,6 +40,17 @@ def _golden_completion_pending_work_count(backend_model) -> int:
     if callable(getter):
         return int(getter())
     return _pending_work_count(backend_model)
+
+
+def _read_nonnegative_int_env(name: str) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return 0
+    try:
+        value = int(raw, 0)
+    except ValueError:
+        return 0
+    return max(0, int(value))
 
 
 @dataclass(frozen=True)
@@ -92,11 +104,23 @@ class RunUntilGoldenTraceCompleteSequence:
         last_cursor = int(trace.cursor)
         stagnant_cycles = 0
         next_cursor_report = ((last_cursor // 1000) + 1) * 1000 if last_cursor >= 0 else 1000
+        waveform_start_cursor = _read_nonnegative_int_env("TB_WAVEFORM_START_CURSOR")
+        waveform_resumed = waveform_start_cursor <= 0 or int(trace.cursor) >= waveform_start_cursor
+        if not waveform_resumed and hasattr(env, "pause_waveform_dump"):
+            env.pause_waveform_dump()
 
         while max_cycles <= 0 or cycles_run < max_cycles:
             env.step(1)
             cycles_run += 1
             current_cursor = int(trace.cursor)
+            if (
+                not waveform_resumed
+                and waveform_start_cursor > 0
+                and current_cursor >= waveform_start_cursor
+                and hasattr(env, "resume_waveform_dump")
+            ):
+                env.resume_waveform_dump()
+                waveform_resumed = True
             if current_cursor == last_cursor:
                 stagnant_cycles += 1
             else:
