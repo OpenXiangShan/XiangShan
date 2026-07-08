@@ -82,12 +82,14 @@ class VAGQDownstreamAdapter(
   val vagqLoadReady = WireInit(VecInit(Seq.fill(VAGQConstants.ActiveIssueWidth)(false.B)))
   val vagqStoreReady = WireInit(VecInit(Seq.fill(VAGQConstants.ActiveIssueWidth)(false.B)))
 
+  val activeLoadValid = VecInit((0 until VAGQConstants.ActiveIssueWidth).map { i =>
+    io.vagqLsuReq(i).valid && io.vagqLsuReq(i).bits.isLoad
+  })
+
   for (i <- loadParams.indices) {
     if (i < VAGQConstants.ActiveIssueWidth) {
       val activeReq = io.vagqLsuReq(i)
-      val activeLoadValid = activeReq.valid && activeReq.bits.isLoad
-      val selectActive = activeLoadValid &&
-        (!io.issueLda(i).valid || isAfter(io.issueLda(i).bits.robIdx, activeReq.bits.robIdx))
+      val selectActive = activeLoadValid(i) && !io.issueLda(i).valid
 
       val activeLdin = Wire(chiselTypeOf(io.lduReq(i).bits))
       activeLdin := 0.U.asTypeOf(activeLdin)
@@ -106,12 +108,12 @@ class VAGQDownstreamAdapter(
       activeMeta.valid      := true.B
       activeMeta.entryIdx   := activeReq.bits.entryIdx
       activeMeta.robIdx     := activeReq.bits.robIdx
-      activeMeta.isLoad     := activeReq.bits.isLoad
+      activeMeta.isLoad     := true.B
       activeMeta.isStore    := false.B
       activeMeta.byteOffset := activeReq.bits.byteOffset
       activeMeta.mask       := activeReq.bits.mask
 
-      io.lduReq(i).valid := Mux(selectActive, activeLoadValid, io.issueLda(i).valid)
+      io.lduReq(i).valid := io.issueLda(i).valid || selectActive
       io.lduReq(i).bits  := Mux(selectActive, activeLdin, io.issueLda(i).bits)
       io.issueLda(i).ready := !selectActive && io.lduReq(i).ready
       vagqLoadReady(i) := selectActive && io.lduReq(i).ready
