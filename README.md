@@ -2,7 +2,7 @@
 
 XiangShan (香山) is an open-source high-performance RISC-V processor project.
 
-中文说明[在此](readme.zh-cn.md)。
+English | [中文](README.zh-cn.md)
 
 ## Documentation
 
@@ -48,13 +48,28 @@ The first stable micro-architecture of XiangShan is called Yanqihu (雁栖湖) a
 
 The second stable micro-architecture of XiangShan is called Nanhu (南湖) and is [on the nanhu branch](https://github.com/OpenXiangShan/XiangShan/tree/nanhu).
 
-The current version of XiangShan, also known as Kunminghu (昆明湖), is still under development on the master branch.
+The third-generation XiangShan microarchitecture, Kunminghu (昆明湖), is under active development on the `kunminghu-v2` and `kunminghu-v3` branches.
 
-The micro-architecture overview of Kunminghu (昆明湖) is shown below.
+The micro-architecture overview of Kunminghu-V2 is shown below.
 
 ![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
 
+## Branch Maintenance Status
 
+| Generation-Version | Branch                                                                                  | Maintained?  | Active Development? |
+| ------------------ | --------------------------------------------------------------------------------------- | ------------ | ------------------- |
+| Yanqihu            | [yanqihu](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)                      | ✅ (minimum) |                     |
+| Nanhu-V2           | [nanhu](https://github.com/OpenXiangShan/XiangShan/tree/nanhu)                          | ✅ (minimum) |                     |
+| Nanhu-V3           | [Siudya/Nanhu](https://github.com/Siudya/Nanhu/tree/main)                               |              |                     |
+| Nanhu-V5           | [OpenXiangShan-Nanhu/OpenNanhu-V5](https://github.com/OpenXiangShan-Nanhu/OpenNanhu-V5) | ✅           | ✅                  |
+| Kunminghu-V2       | [kunminghu-v2](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v2)            | ✅           |                     |
+| Kunminghu-V3       | [kunminghu-v3](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v3)            | ✅           | ✅                  |
+
+At the moment, `kunminghu-v3` is still evolving rapidly and its functionality may not yet be stable. If you plan to use XiangShan for research, verification, or downstream applications, we recommend prioritizing `kunminghu-v2`.
+
+This section is time-sensitive. If you believe any information here is outdated, please let us know in an issue and we will update it as soon as possible.
+
+Last updated: 2026/06/30
 
 ## Sub-directories Overview
 
@@ -172,9 +187,9 @@ The implementation of XiangShan is inspired by several key papers. We list these
 
 ## LICENSE
 
-Copyright © 2020-2025 Institute of Computing Technology, Chinese Academy of Sciences.
+Copyright © 2020-2026 Institute of Computing Technology, Chinese Academy of Sciences.
 
-Copyright © 2021-2025 Beijing Institute of Open Source Chip
+Copyright © 2021-2026 Beijing Institute of Open Source Chip
 
 Copyright © 2020-2022 by Peng Cheng Laboratory.
 

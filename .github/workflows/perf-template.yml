@@ -30,6 +30,16 @@ on:
           description: Constantin file path (empty for default init setting, or file path for specific file)
           required: false
           type: string
+      enable_db:
+        description: Enable ChiselDB dump
+        required: false
+        type: boolean
+        default: false
+      enable_rolling:
+        description: Enable rolling DB dump, which implies enable_db
+        required: false
+        type: boolean
+        default: false
       servers:
         description: Servers to run emulation on, leave empty to let the script select
         required: false
@@ -245,6 +255,8 @@ jobs:
               --pgo $GITHUB_WORKSPACE/ready-to-run/coremark-2-iteration.bin \
               --llvm-profdata llvm-profdata --trace-fst \
               --emulator ${{ inputs.emulator }} \
+              ${{ inputs.enable_db && '--enable-db' || '' }} \
+              ${{ inputs.enable_rolling && '--enable-rolling' || '' }} \
               $CST_COMPILE_OPT
             mkdir -p $SPEC_DIR
             cp $GITHUB_WORKSPACE/build/emu "$SPEC_DIR/emu-${{ inputs.emulator }}"
@@ -263,6 +275,7 @@ jobs:
             --server-list "$SERVER_LIST" \
             --nemu-so-path $SPEC_DIR/riscv64-nemu-interpreter-so \
             --log-level ${{ runner.debug && 'DEBUG' || 'INFO' }} \
+            ${{ ( inputs.enable_db || inputs.enable_rolling ) && '--dump-db' || '' }} \
             --run \
             $CST_RUN_OPT $DRY_RUN_OPT
 

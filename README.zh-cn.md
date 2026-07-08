@@ -2,7 +2,7 @@
 
 香山（XiangShan）是一款开源的高性能 RISC-V 处理器。
 
-English Readme is [here](README.md).
+[English](README.md) | 中文
 
 ## 文档和报告
 
@@ -47,10 +47,27 @@ Weibo/微博：[香山开源处理器](https://weibo.com/u/7706264932)
 
 香山的第二代微架构被命名为[南湖](https://github.com/OpenXiangShan/XiangShan/tree/nanhu)。
 
-香山的第三代微架构（昆明湖）正在 master 分支上不断开发中。
+香山的第三代微架构（昆明湖）正在 kunminghu-v2 和 kunminghu-v3 分支上不断开发中。
 
-昆明湖微架构概览：
+昆明湖 V2 微架构概览：
 ![xs-arch-kunminghu](images/xs-arch-kunminghu.svg)
+
+## 分支维护情况
+
+| 代际-版本 | 分支                                                                                    | 维护?        | 开发?        |
+| --------- | --------------------------------------------------------------------------------------- | ------------ | ------------ |
+| 雁栖湖    | [yanqihu](https://github.com/OpenXiangShan/XiangShan/tree/yanqihu)                      | ✅(minimum)  |              |
+| 南湖-V2   | [nanhu](https://github.com/OpenXiangShan/XiangShan/tree/nanhu)                          | ✅(minimum)  |              |
+| 南湖-V3   | [Siudya/Nanhu](https://github.com/Siudya/Nanhu/tree/main)                               |              |              |
+| 南湖-V5   | [OpenXiangShan-Nanhu/OpenNanhu-V5](https://github.com/OpenXiangShan-Nanhu/OpenNanhu-V5) | ✅           | ✅           |
+| 昆明湖-V2 | [kunminghu-v2](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v2)            | ✅           |              |
+| 昆明湖-V3 | [kunminghu-v3](https://github.com/OpenXiangShan/XiangShan/tree/kunminghu-v3)            | ✅           | ✅           |
+
+目前昆明湖 V3 仍处于快速迭代阶段，功能不稳定，如您希望基于香山进行研究、验证或应用，建议优先考虑昆明湖 V2。
+
+本节内容时效性较强，如果您认为内容可能过时，欢迎在 issue 中提出，我们会尽快更新。
+
+更新日期：2026/06/30
 
 ## 目录概览
 
@@ -159,9 +176,9 @@ HIT GOOD LOOP at pc = 0xf0001cb0
 
 ## 许可证
 
-版权所有 © 2020-2025 中国科学院计算技术研究所
+版权所有 © 2020-2026 中国科学院计算技术研究所
 
-版权所有 © 2021-2025 北京开源芯片研究院
+版权所有 © 2021-2026 北京开源芯片研究院
 
 版权所有 © 2020-2022 鹏城实验室
 

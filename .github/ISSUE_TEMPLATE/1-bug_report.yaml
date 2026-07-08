@@ -7,47 +7,40 @@ body:
   - type: markdown
     attributes:
       value: |
-        **NOTICE**: The vector unit of kunminghu-v3 branch is currently under active development. Our primary focus at this stage is on performance rather than functionality. You are still welcome to report vector-related bugs, but please note that we may not be able to review or fix them at this time. We appreciate your understanding.
-        **注意**：kunminghu-v3 分支的向量单元仍处于开发阶段，我们目前的主要关注点是性能而非功能。您仍然可以报告与向量相关的问题，但请注意，我们可能无法及时修复这些问题。感谢您的理解。
+        **NOTE**: The `kunminghu-v3` branch is under active development, and some known issues (including vector and security related issues) are temporarily deprioritized. Please read [Known issues](https://github.com/OpenXiangShan/XiangShan/blob/kunminghu-v3/CONTRIBUTING.md#known-issues).
 
-        You could use English or Chinese to open an issue.
-        您可以使用中文或英文提问，我们推荐使用英文。
+        **注意**：kunminghu-v3 分支正处于快速迭代阶段，有一些已知问题（包括向量、安全等）暂缓处理，请阅读 [部分已知内容说明](https://github.com/OpenXiangShan/XiangShan/blob/kunminghu-v3/CONTRIBUTING.zh-cn.md#部分已知问题说明)。
 
         This template is only used for reporting a bug (incorrect behaviors) of XiangShan Processor Cores. If this doesn't look right, please back and choose another template.
+
         这个 issue 模板仅用于提报香山不正确的行为。如果您遇到的不是此类问题，请回退并选择其他模板。
-
-        Please make sure that the incorrect behaviors can still be reproduced on the latest commit of the master branch.
-        请确保不正确的行为在 master 分支最新的 commit 仍能复现。
-
-        Please fill in the following information so we can better understand and address your issue. Thank you!
-        请填写以下内容，以便我们更好地理解和处理您的问题。谢谢！
   - type: checkboxes
     id: before-start
     attributes:
       label: Before start
       description: |
-        Before start, PLEASE MAKE SURE you have done these:
-        开始之前，请确保您已经做过以下事情：
+        Before you start, please read the [Before contributing](https://github.com/OpenXiangShan/XiangShan/blob/kunminghu-v3/CONTRIBUTING.md#before-contributing) section, and confirm the following items:
+
+        开始之前，请阅读[贡献前须知](https://github.com/OpenXiangShan/XiangShan/blob/kunminghu-v3/CONTRIBUTING.zh-cn.md#贡献前须知)，并确认以下事项：
       options:
-        - label: I have read the [RISC-V ISA Manual](https://github.com/riscv/riscv-isa-manual) and this is not a RISC-V ISA question. 我已经阅读过 RISC-V 指令集手册，这不是一个指令集本身的问题。
+        - label: I have read the [RISC-V ISA Manual](https://github.com/riscv/riscv-isa-manual) and [XiangShan Documents](https://docs.xiangshan.cc/zh-cn/latest), and I believe this is a XiangShan RTL issue. 我已经阅读过 [RISC-V 指令集手册](https://github.com/riscv/riscv-isa-manual) 和 [香山文档](https://docs.xiangshan.cc/zh-cn/latest)，确认这应该是香山 RTL 的问题。
           required: true
-        - label: I have read the [XiangShan Documents](https://xiangshan-doc.readthedocs.io/zh_CN/latest). 我已经阅读过香山文档。
+        - label: I have searched previous issues and PRs and did not find anything relevant. 我已经搜索过之前的 issue 和 PR，并没有找到相关的。
           required: true
-        - label: I have searched the previous issues and did not find anything relevant. 我已经搜索过之前的 issue，并没有找到相关的。
+        - label: I have reproduced the issue using the latest commit on the default branch. 我已经使用默认分支最新的 commit 复现了问题。
           required: true
-        - label: I have reviewed the commit messages from the relevant commit history. 我已经浏览过相关的提交历史和提交信息。
-          required: true
-        - label: I have reproduced the incorrect behaviors using the latest commit on the master branch. 我已经使用 master 分支最新的 commit 复现了不正确的行为。
-          required: true
+        - label: If this report was generated with AI assistance (otherwise leave unchecked), I have verified the correctness of its content. 如果这是由 AI 生成的（否则请不要勾选），我已经验证了内容的正确性。
+          required: false
   - type: dropdown
     id: branch
     attributes:
       label: Branch
       description: |
         Please select the branch you are using.
+
         请选择您使用的分支。
       options:
-        - master (kunminghu-v2)
+        - kunminghu-v2
         - kunminghu-v3
         - nanhu
         - yanqihu
@@ -60,12 +53,15 @@ body:
       label: Describe the bug
       description: |
         A clear and concise description of what the bug is.
+
         请清晰、准确地描述这一缺陷。
 
         If applicable, add screenshots / logs to help explain the bug.
+
         如果可能，请提供有助于您描述问题的屏幕截图和日志。
 
         Please upload logs as attachments, do not paste them directly into the text box.
+
         请使用附件的形式上传日志，不要直接粘贴到文本框中。
       placeholder:
     validations:
@@ -76,6 +72,7 @@ body:
       label: Expected behavior
       description: |
         A clear and concise description of what you expected to happen.
+
         请清晰、准确地描述期望的行为。
       placeholder:
     validations:
@@ -86,12 +83,15 @@ body:
       label: Environment
       description: |
         Please provide your environment information.
+
         请提供您的环境信息。
 
         You can use `./scripts/bug-report.sh` to collect the environment information and generate a report file, and then upload the report file as an attachment.
+
         您可以使用 `./scripts/bug-report.sh` 来收集环境信息并生成报告文件，然后将报告文件作为附件上传。
 
         If you cannot upload the report file, please fill in the form as much as possible.
+
         如果不便上传报告文件，请尽可能填写此表单。
       placeholder:
       value: |
@@ -121,6 +121,7 @@ body:
       label: To Reproduce
       description: |
         Steps to reproduce the bug. Also a corresponding minimal workload (source code and bin) along with a description.
+
         复现这一缺陷的步骤，以及相关的最小测试用例（包含源码、二进制文件和说明）。
       placeholder:
     validations:
@@ -131,10 +132,16 @@ body:
       label: Additional context
       description: |
         Add any other context about the problem here.
+
         可在此处附上其他相关信息。
 
         For example, your guess about the cause of the bug, or the modules that may be related.
+
         例如，您对 bug 可能原因的猜测，或者可能与 bug 相关的模块。
+
+        If this report is generated by AI, please provide the model / framework information.
+
+        如果该报告是由 AI 生成的，请提供模型/框架信息。
       placeholder:
     validations:
       required: false

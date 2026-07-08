@@ -18,8 +18,25 @@ env:
   UNITYCHIP_ENV: /nfs/home/share/ci-workloads/unitychip
 
 jobs:
+  changes:
+    name: Changes Detection
+    permissions:
+      pull-requests: read
+    runs-on: ubuntu-latest
+    outputs:
+      core: ${{ steps.filter.outputs.core }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          predicate-quantifier: 'every'
+          filters: .github/filters.yaml
+
   build-xsdev-image:
     name: Build XSDev Docker Image
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -69,6 +86,8 @@ jobs:
 
   build-xspdb:
     name: Build XSPdb
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on:
       - builder
       - open # use open servers only, keep node servers for emu jobs
@@ -122,6 +141,8 @@ jobs:
 
   artifacts-uploading:
     name: Upload Artifacts
+    needs: changes
+    if: ${{ needs.changes.outputs.core == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Set test branch or commit
