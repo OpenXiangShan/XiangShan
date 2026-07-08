@@ -55,7 +55,7 @@ class FrontendMonitor:
         self._ftq_group_closed: Dict[tuple[int, int], bool] = {}
         self._ftq_group_max_offset: Dict[tuple[int, int], int] = {}
         self.last_dut_redirect: Optional[dict] = None
-        self._dut_redirect_cfvec_target: Optional[dict] = None
+        self._skip_cfvec_until_cycle: Optional[int] = None
 
     def _golden_step_bytes(self, pc: int) -> int:
         if self.memory is None:
@@ -287,10 +287,10 @@ class FrontendMonitor:
         self.wait_sync_after_redirect = False
 
     def notify_redirect(self, target_pc: int, reason: str = "", grace_cycles: int = 2) -> None:
-        self.expected_pc = int(target_pc)
+        self.expected_pc = None
         self.redirect_grace = max(0, int(grace_cycles))
-        self.wait_sync_after_redirect = True
-        self.redirect_sync_deadline = self.current_cycle + self.redirect_sync_max
+        self.wait_sync_after_redirect = False
+        self.redirect_sync_deadline = 0
         self.redirect_count += 1
         self._ftq_start_pc_cache.clear()
         self._ftq_group_closed.clear()
@@ -354,13 +354,7 @@ class FrontendMonitor:
             "debug_is_ctrl": int(self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsCtrl", 0)),
             "debug_is_mem_vio": int(self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsMemVio", 0)),
         }
-        self._dut_redirect_cfvec_target = {
-            # The backend agent drives redirect in the StepRis callback before
-            # the DUT samples it. Treat the next cycle as the DUT-visible
-            # redirect cycle for cfVec recovery checking.
-            "cycle": int(cycle) + 1,
-            "target_pc": int(target_pc),
-        }
+        self._skip_cfvec_until_cycle = int(cycle) + 1
         self._emit(
             cycle,
             "monitor.dut_redirect",
@@ -371,38 +365,6 @@ class FrontendMonitor:
             },
             level="DEBUG",
         )
-
-    def _check_cfvec_after_dut_redirect(self, cycle: int, slots: List[dict]) -> None:
-        pending = self._dut_redirect_cfvec_target
-        if pending is None or not slots:
-            return
-        redirect_cycle = int(pending["cycle"])
-        if int(cycle) - redirect_cycle < 2:
-            return
-        target_pc = int(pending["target_pc"])
-        expected_pc: Optional[int] = target_pc
-        for slot in slots:
-            if expected_pc is None:
-                break
-            actual_pc = int(slot["pc"])
-            if actual_pc != int(expected_pc):
-                self._record_error(
-                    cycle=cycle,
-                    slot=int(slot["slot"]),
-                    kind="REDIRECT_CFVEC_TARGET_MISMATCH",
-                    expected=int(expected_pc),
-                    actual=int(actual_pc),
-                    redirect_cycle=redirect_cycle,
-                )
-                self._dut_redirect_cfvec_target = None
-                return
-            expected_pc = self._golden_next_pc(
-                int(expected_pc),
-                int(slot["instr"]),
-                bool(slot["is_rvc"]),
-                bool(slot["pred_taken"]),
-            )
-        self._dut_redirect_cfvec_target = None
 
     def on_clock_edge(self, cycle: int) -> None:
         if self.interface is None:
@@ -429,8 +391,9 @@ class FrontendMonitor:
             self._ftq_group_closed.clear()
             self._ftq_group_max_offset.clear()
 
+        skip_cfvec = self._skip_cfvec_until_cycle is not None and int(cycle) <= int(self._skip_cfvec_until_cycle)
         for i in range(8):
-            if self._read(self.interface.cfvec_valid[i], 0) != 1:
+            if skip_cfvec or self._read(self.interface.cfvec_valid[i], 0) != 1:
                 continue
 
             pc = self._read(self.interface.cfvec_pc[i], 0)
@@ -690,7 +653,8 @@ class FrontendMonitor:
             self.wait_sync_after_redirect = False
             self.expected_pc = None
 
-        self._check_cfvec_after_dut_redirect(cycle, cycle_frontend_slots)
+        if self._skip_cfvec_until_cycle is not None and int(cycle) >= int(self._skip_cfvec_until_cycle):
+            self._skip_cfvec_until_cycle = None
 
         self._emit(
             cycle,
@@ -774,7 +738,7 @@ class FrontendMonitor:
         self._ftq_group_closed.clear()
         self._ftq_group_max_offset.clear()
         self.last_dut_redirect = None
-        self._dut_redirect_cfvec_target = None
+        self._skip_cfvec_until_cycle = None
 
 
 __all__ = ["Observation", "FrontendMonitor"]

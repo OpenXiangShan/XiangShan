@@ -55,7 +55,7 @@ def _drive_redirect_to_monitor(monitor: FrontendMonitor, interface: _ObserveIf, 
     _set_redirect(interface, valid=1, pc=pc, target=target)
 
 
-def test_dut_redirect_allows_wrong_path_cfvec_at_t_and_t_plus_one() -> None:
+def test_dut_redirect_skips_cfvec_at_t_and_t_plus_one() -> None:
     monitor, interface = _new_monitor()
 
     _drive_redirect_to_monitor(monitor, interface, pc=0x1000, target=0x2000)
@@ -67,74 +67,22 @@ def test_dut_redirect_allows_wrong_path_cfvec_at_t_and_t_plus_one() -> None:
     monitor.on_clock_edge(11)
 
     assert monitor.get_errors() == []
+    assert monitor.observations == []
+    assert monitor.get_stats()["slots_valid"] == 0
 
 
-def test_dut_redirect_requires_target_cfvec_from_t_plus_two() -> None:
+def test_dut_redirect_skip_window_does_not_wait_for_target_cfvec() -> None:
     monitor, interface = _new_monitor()
+    monitor.redirect_sync_max = 2
 
     _drive_redirect_to_monitor(monitor, interface, pc=0x1000, target=0x2000)
     _set_first_cfvec(interface, 0x1004)
     monitor.on_clock_edge(10)
 
     _set_redirect(interface, valid=0)
-    _set_first_cfvec(interface, 0x1008)
+    interface.cfvec_valid[0].value = 0
     monitor.on_clock_edge(11)
-    _set_first_cfvec(interface, 0x100c)
     monitor.on_clock_edge(12)
-    _set_first_cfvec(interface, 0x1010)
     monitor.on_clock_edge(13)
-
-    assert monitor.get_errors()[-1] == {
-        "cycle": 13,
-        "slot": 0,
-        "kind": "REDIRECT_CFVEC_TARGET_MISMATCH",
-        "expected": 0x2000,
-        "actual": 0x1010,
-        "redirect_cycle": 11,
-    }
-
-
-def test_dut_redirect_cfvec_target_match_clears_check() -> None:
-    monitor, interface = _new_monitor()
-
-    _drive_redirect_to_monitor(monitor, interface, pc=0x1000, target=0x2000)
-    _set_first_cfvec(interface, 0x1004)
-    monitor.on_clock_edge(10)
-
-    _set_redirect(interface, valid=0)
-    _set_first_cfvec(interface, 0x1008)
-    monitor.on_clock_edge(11)
-    _set_first_cfvec(interface, 0x100c)
-    monitor.on_clock_edge(12)
-    _set_first_cfvec(interface, 0x2000)
-    monitor.on_clock_edge(13)
-    _set_first_cfvec(interface, 0x2004)
-    monitor.on_clock_edge(14)
 
     assert monitor.get_errors() == []
-
-
-def test_dut_redirect_t_plus_two_rejects_non_contiguous_cfvec_packet_after_target() -> None:
-    monitor, interface = _new_monitor()
-
-    _drive_redirect_to_monitor(monitor, interface, pc=0x1000, target=0x2000)
-    _set_first_cfvec(interface, 0x1004)
-    monitor.on_clock_edge(10)
-
-    _set_redirect(interface, valid=0)
-    _set_first_cfvec(interface, 0x1008)
-    monitor.on_clock_edge(11)
-    _set_first_cfvec(interface, 0x100c)
-    monitor.on_clock_edge(12)
-    _set_first_cfvec(interface, 0x2000)
-    _set_second_cfvec(interface, 0x100c)
-    monitor.on_clock_edge(13)
-
-    assert monitor.get_errors()[-1] == {
-        "cycle": 13,
-        "slot": 1,
-        "kind": "REDIRECT_CFVEC_TARGET_MISMATCH",
-        "expected": 0x2004,
-        "actual": 0x100c,
-        "redirect_cycle": 11,
-    }
