@@ -28,8 +28,6 @@ class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
   private val emptyEntry = 0.U.asTypeOf(new VAGQEntry)
   private val entries = RegInit(VecInit(Seq.fill(vagqSize)(emptyEntry)))
 
-  private val entriesNext = WireInit(entries)
-
   private val addrEntry = entryAt(entries, io.addrUop.bits.entryIdx)
   private val dataEntry = entryAt(entries, io.dataUop.bits.entryIdx)
   private val addrIdxValid = idxValid(io.addrUop.bits.entryIdx)
@@ -44,77 +42,107 @@ class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
 
   private val addrFire = io.addrUop.fire && !io.addrUop.bits.robIdx.needFlush(io.redirect)
   private val dataFire = io.dataUop.fire && !io.dataUop.bits.robIdx.needFlush(io.redirect)
+  private val reqBitmapUpdates = io.splitUpdate.toSeq ++ io.mergeReqUpdate.toSeq
 
-  for (i <- 0 until vagqSize) {
-    val idx = i.U(vagqEntryIdxWidth.W)
-    val updateVec = io.splitUpdate.toSeq ++ io.mergeReqUpdate.toSeq
-    val updateHits = updateVec.map(update => update.valid && update.bits.entryIdx === idx)
-    val setReqSent = updateVec.zip(updateHits).map { case (update, hit) =>
-      Mux(hit, update.bits.setReqSent, 0.U)
+  private def mergedUpdateMask(updateHits: Seq[Bool], select: VAGQReqBitmapUpdate => UInt): UInt = {
+    reqBitmapUpdates.zip(updateHits).map { case (update, hit) =>
+      Mux(hit, select(update.bits), 0.U(vagqFlowBytes.W))
     }.reduce(_ | _)
-    val clearReqSent = updateVec.zip(updateHits).map { case (update, hit) =>
-      Mux(hit, update.bits.clearReqSent, 0.U)
-    }.reduce(_ | _)
-    val setReqAck = updateVec.zip(updateHits).map { case (update, hit) =>
-      Mux(hit, update.bits.setReqAck, 0.U)
-    }.reduce(_ | _)
-    val exceptionHits = updateVec.zip(updateHits).map { case (update, hit) =>
+  }
+
+  private def selectFirstFaultException(exceptionHits: Seq[Bool]): VAGQReqBitmapUpdate = {
+    val maxFaultElemIdx = (vagqFlowBytes - 1).U(vagqFlowByteWidth.W)
+    val minFaultElemIdx = reqBitmapUpdates.zip(exceptionHits).map { case (update, hit) =>
+      Mux(hit, update.bits.faultElemIdx, maxFaultElemIdx)
+    }.reduce((left, right) => Mux(left <= right, left, right))
+    val firstFaultHits = reqBitmapUpdates.zip(exceptionHits).map { case (update, hit) =>
+      hit && update.bits.faultElemIdx === minFaultElemIdx
+    }
+
+    // Tie-break equal fault offsets by lane order for deterministic hardware.
+    PriorityMux(firstFaultHits.zip(reqBitmapUpdates.map(_.bits)))
+  }
+
+  private def applyReqBitmapUpdate(next: VAGQEntry, curr: VAGQEntry, idx: UInt): Unit = {
+    val updateHits = reqBitmapUpdates.map(update => update.valid && update.bits.entryIdx === idx)
+    val setReqSent = mergedUpdateMask(updateHits, _.setReqSent)
+    val clearReqSent = mergedUpdateMask(updateHits, _.clearReqSent)
+    val setReqAck = mergedUpdateMask(updateHits, _.setReqAck)
+    val exceptionHits = reqBitmapUpdates.zip(updateHits).map { case (update, hit) =>
       hit && update.bits.exception
     }
+    val hasUpdate = updateHits.reduce(_ || _)
     val hasExceptionUpdate = exceptionHits.reduce(_ || _)
-    val exceptionUpdate = Mux1H(exceptionHits, updateVec.map(_.bits))
+    val exceptionUpdate = selectFirstFaultException(exceptionHits)
 
-    when(updateHits.reduce(_ || _)) {
-      entriesNext(i).reqSent := (entries(i).reqSent | setReqSent) & ~clearReqSent
-      entriesNext(i).reqAck  := entries(i).reqAck | setReqAck
+    when(hasUpdate) {
+      next.reqSent := (curr.reqSent | setReqSent) & ~clearReqSent
+      next.reqAck  := curr.reqAck | setReqAck
     }
     when(hasExceptionUpdate) {
-      entriesNext(i).exceptionNumber := exceptionUpdate.exceptionNumber
-      entriesNext(i).faultElemIdx    := exceptionUpdate.faultElemIdx
-      entriesNext(i).state           := VAGQEntryState.excp
+      next.exceptionNumber := exceptionUpdate.exceptionNumber
+      next.faultElemIdx    := exceptionUpdate.faultElemIdx
+      next.state           := VAGQEntryState.excp
     }
+  }
 
+  private def applyMergeStateUpdate(next: VAGQEntry, idx: UInt): Unit = {
     when(io.mergeStateUpdate.valid && io.mergeStateUpdate.bits.entryIdx === idx) {
       when(io.mergeStateUpdate.bits.clearValid) {
-        entriesNext(i).valid := false.B
+        next.valid := false.B
       }.otherwise {
-        entriesNext(i).state := io.mergeStateUpdate.bits.stateNext
+        next.state := io.mergeStateUpdate.bits.stateNext
       }
     }
+  }
 
+  private def applyEnqueueUpdate(next: VAGQEntry, curr: VAGQEntry, idx: UInt): Unit = {
     val addrFireThis = addrFire && io.addrUop.bits.entryIdx === idx
     val dataFireThis = dataFire && io.dataUop.bits.entryIdx === idx
 
     when(addrFireThis) {
-      connectSamePort(entriesNext(i), io.addrUop.bits)
-      connectSamePort(entriesNext(i), addrMaskGen.out)
+      connectSamePort(next, io.addrUop.bits)
+      connectSamePort(next, addrMaskGen.out)
     }
     when(dataFireThis) {
-      connectSamePort(entriesNext(i), io.dataUop.bits)
+      connectSamePort(next, io.dataUop.bits)
     }
 
     when(addrFireThis && dataFireThis) {
-      enterSplit(entriesNext(i))
+      enterSplit(next)
     }.elsewhen(addrFireThis) {
-      when(entries(i).valid && entries(i).state === VAGQEntryState.waitA) {
-        enterSplit(entriesNext(i))
+      when(curr.valid && curr.state === VAGQEntryState.waitA) {
+        enterSplit(next)
       }.otherwise {
-        initPending(entriesNext(i), VAGQEntryState.waitSI)
+        initPending(next, VAGQEntryState.waitSI)
       }
     }.elsewhen(dataFireThis) {
-      when(entries(i).valid && entries(i).state === VAGQEntryState.waitSI) {
-        enterSplit(entriesNext(i))
+      when(curr.valid && curr.state === VAGQEntryState.waitSI) {
+        enterSplit(next)
       }.otherwise {
-        initPending(entriesNext(i), VAGQEntryState.waitA)
+        initPending(next, VAGQEntryState.waitA)
       }
-    }
-
-    when(entries(i).valid && entries(i).robIdx.needFlush(io.redirect)) {
-      entriesNext(i) := emptyEntry
     }
   }
 
-  entries := entriesNext
+  private def applyFlushUpdate(next: VAGQEntry, curr: VAGQEntry): Unit = {
+    when(curr.valid && curr.robIdx.needFlush(io.redirect)) {
+      next := emptyEntry
+    }
+  }
+
+  for (i <- 0 until vagqSize) {
+    val idx = i.U(vagqEntryIdxWidth.W)
+    val next = WireInit(entries(i))
+
+    applyReqBitmapUpdate(next, entries(i), idx)
+    applyMergeStateUpdate(next, idx)
+    applyEnqueueUpdate(next, entries(i), idx)
+    applyFlushUpdate(next, entries(i))
+
+    entries(i) := next
+  }
+
   io.entries := entries
 }
 
