@@ -23,6 +23,10 @@ def _count_truthy(values) -> int:
     return sum(1 for value in values if int(value or 0) != 0)
 
 
+def _slot_half_region(slot: int) -> str:
+    return "front" if int(slot) < 4 else "back"
+
+
 def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
     dut = getattr(env, "dut", None)
     if dut is None:
@@ -225,25 +229,34 @@ def sample_bpu_v3_basic_prediction_coverage(recorder, env, cycle: int) -> None:
     if s3_valid != 1:
         return
 
-    taken_bits = [
-        _read_first(
-            recorder,
-            (
-                f"Frontend_top.Frontend.inner_bpu.s3_firstTakenBranchOH_{idx}",
-                f"Frontend_top.Frontend.bpu.s3_firstTakenBranchOH_{idx}",
-            ),
-        )
-        for idx in range(8)
-    ]
-    taken_count = _count_truthy(taken_bits)
-    evidence = {"event": "bpu_v3_s3", "taken_bits": [int(v or 0) for v in taken_bits]}
-    recorder.mark("bpu_v3_basic_flow", "has_cfi" if taken_count else "no_cfi", cycle, evidence)
-    if taken_count:
-        first_idx = next(idx for idx, value in enumerate(taken_bits) if int(value or 0) != 0)
-        recorder.mark("bpu_v3_taken_slot_half", "front" if first_idx < 4 else "back", cycle, evidence)
+    taken = _read_first(
+        recorder,
+        (
+            "Frontend_top.Frontend.inner_bpu.s3_s1Prediction_taken",
+            "Frontend_top.Frontend.bpu.s3_s1Prediction_taken",
+        ),
+    )
+    cfi_pos = _read_first(
+        recorder,
+        (
+            "Frontend_top.Frontend.inner_bpu.s3_prediction_cfiPosition",
+            "Frontend_top.Frontend.bpu.s3_prediction_cfiPosition",
+        ),
+    )
+    if taken is None:
+        return
+
+    evidence = {"event": "bpu_v3_s3", "taken": int(taken)}
+    if int(taken) == 0:
+        recorder.mark("bpu_v3_basic_flow", "no_cfi", cycle, evidence)
+    elif cfi_pos is not None:
+        cfi_slot = int(cfi_pos) >> 2
+        evidence = {**evidence, "cfi_pos": int(cfi_pos), "cfi_slot": cfi_slot}
+        recorder.mark("bpu_v3_basic_flow", "has_cfi", cycle, evidence)
+        recorder.mark("bpu_v3_taken_slot_half", _slot_half_region(cfi_slot), cycle, evidence)
         recorder.mark(
             "bpu_v3_cfi_offset_region",
-            "head" if first_idx == 0 else "tail" if first_idx >= 7 else "mid",
+            "head" if int(cfi_pos) == 0 else "tail" if int(cfi_pos) >= 15 else "mid",
             cycle,
             evidence,
         )
@@ -259,4 +272,3 @@ def sample_bpu_subpredictor_coverage(recorder, env, cycle: int) -> None:
     )
     if ubtb_hit is not None:
         recorder.mark("bpu_subpred_ubtb_hit", "hit" if int(ubtb_hit) else "miss", cycle, {"event": "ubtb_t1"})
-

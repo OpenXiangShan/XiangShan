@@ -4,6 +4,7 @@ import csv
 import json
 from collections import deque
 from dataclasses import asdict, dataclass, field
+from functools import cached_property
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -279,7 +280,7 @@ class FunctionalCoverageRecorder:
             return None
 
         signal = getattr(dut, name, None)
-        if signal is None:
+        if signal is None and self._is_registered_internal_signal(name):
             getter = getattr(dut, "GetInternalSignal", None)
             if callable(getter):
                 try:
@@ -292,6 +293,27 @@ class FunctionalCoverageRecorder:
 
         self._dut_signal_cache[name] = signal
         return signal
+
+    @cached_property
+    def _registered_internal_signals(self) -> Optional[set[str]]:
+        offset_yaml = _frontend_root().parents[3] / "build-frontend" / "pylib" / "Frontend" / "Frontend_offset.yaml"
+        if not offset_yaml.exists():
+            return None
+
+        signals: set[str] = set()
+        prefix = "  - name: "
+        try:
+            with offset_yaml.open("r", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith(prefix):
+                        signals.add(line[len(prefix) :].strip())
+        except OSError:
+            return None
+        return signals
+
+    def _is_registered_internal_signal(self, name: str) -> bool:
+        registered = self._registered_internal_signals
+        return registered is None or str(name) in registered
 
     def _read_dut_signal(self, dut, name: str, default: int = 0) -> int:
         signal = self._lookup_dut_signal(dut, str(name))
