@@ -164,6 +164,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.vagqVrfReadReq <> memBlock.io.mem_to_ooo.vagqVrfReadReq
   backend.io.mem.intWriteback <> memBlock.io.mem_to_ooo.intWriteback
   backend.io.mem.vecWriteback := memBlock.io.mem_to_ooo.vecWriteback
+  backend.io.mem.vagqRobWriteback := memBlock.io.mem_to_ooo.vagqRobWriteback
   backend.io.mem.robLsqIO.mmioBusy := memBlock.io.mem_to_ooo.lsqio.mmioBusy
 
   backend.io.mem.exceptionAddr.vaddr  := memBlock.io.mem_to_ooo.lsqio.vaddr

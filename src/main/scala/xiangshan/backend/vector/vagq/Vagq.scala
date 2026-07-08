@@ -174,6 +174,10 @@ class VAGQWritebackReq(implicit p: Parameters) extends VAGQBundle {
   val exceptionNumber = UInt(ExceptionNumberWidth.W)
   val faultElemIdx = UInt(vagqFlowByteWidth.W)
   val faultVstart = UInt(VAGQConstants.FaultVstartWidth.W)
+  val uopType = UInt(3.W)
+  val uopIdx = UInt(UopIdxWidth.W)
+  val deew = UInt(EewWidth.W)
+  val nf = UInt(NfWidth.W)
 }
 
 class CtrlInput(implicit p: Parameters) extends VAGQBundle {
@@ -226,19 +230,16 @@ class VAGQ(implicit p: Parameters) extends VAGQModule {
     mergeCtrl.io.entry(i).entry := entryTable.io.entries(i)
   }
 
-  val lsqReqReg = RegInit(0.U.asTypeOf(Vec(VAGQConstants.ActiveIssueWidth, DecoupledIO(new VAGQLsqEmptyReq))))
-  val lsqEmptyReqReg = RegInit(0.U.asTypeOf(DecoupledIO(new VAGQLsqEmptyReq)))
-  lsqReqReg.zip(splitCtrl.io.lsuReq).map { case (out, in) =>
-      out.valid := in.valid
-      out.bits  := in.bits
-      in.ready  := out.ready
+  val lsuReqQueue = Seq.fill(VAGQConstants.ActiveIssueWidth)(Module(new Queue(new VAGQLsuReq, 1)))
+  lsuReqQueue.zip(splitCtrl.io.lsuReq).map { case (out, in) =>
+    out.io.enq <> in
   }
-  lsqEmptyReqReg.valid := splitCtrl.io.lsqEmptyReq.valid
-  lsqEmptyReqReg.bits  := splitCtrl.io.lsqEmptyReq.bits
-  splitCtrl.io.lsqEmptyReq.ready := lsqEmptyReqReg.ready
 
-  io.lsuReq <> lsqReqReg
-  io.lsqEmptyReq <> lsqEmptyReqReg
+  val lsqEmptyReqQueue = Module(new Queue(new VAGQLsqEmptyReq, 1))
+  lsqEmptyReqQueue.io.enq <> splitCtrl.io.lsqEmptyReq
+
+  io.lsuReq.zip(lsuReqQueue).foreach { case (out, in) => out <> in.io.deq }
+  io.lsqEmptyReq <> lsqEmptyReqQueue.io.deq
 
   entryTable.io.splitUpdate := splitCtrl.io.update
 

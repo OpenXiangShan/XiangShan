@@ -28,6 +28,7 @@ import utility._
 import xiangshan.backend.fu.FuncUnitFaluInputFromFmul
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.decode.opcode.Opcode.Opcode
+import xiangshan.backend.vector.vagq.VAGQConstants._
 
 
 object Bundles {
@@ -1494,7 +1495,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val perfDebugInfo  = Option.when(backendParams.debugEn)(new PerfDebugInfo())
     val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
   }
-  
+
   class MemDebugBundle(implicit p: Parameters) extends XSBundle {
     val isMMIO = Option.when(backendParams.basicDebugEn)(Bool())
     val isNCIO = Option.when(backendParams.basicDebugEn)(Bool())
@@ -1760,6 +1761,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val pdest         = UInt(params.wbPregIdxWidth.W)
     val vecWen        = Option.when(params.writeVecRf)(Bool())
     val v0Wen         = Option.when(params.writeV0Rf)(Bool())
+    val entryIdx      = Option.when(params.hasLoadFu || params.hasStoreAddrFu)(UInt(VAGQEntryIdxWidth.W))
     val debug         = new DebugBundle
     val perfDebugInfo = Option.when(backendParams.debugEn)(new PerfDebugInfo())
     val debug_seqNum  = Option.when(backendParams.debugEn)(InstSeqNum())

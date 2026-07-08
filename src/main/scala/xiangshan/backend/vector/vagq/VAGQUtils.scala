@@ -4,7 +4,8 @@ import chisel3._
 import chisel3.util._
 import utility.HasCircularQueuePtrHelper
 import xiangshan._
-import xiangshan.mem.{genVSData, genVWdata}
+import xiangshan.mem._
+import xiangshan.backend.Bundles._
 
 trait HasVAGQHelper extends HasCircularQueuePtrHelper { this: HasVAGQParameters =>
   protected def entryAt(entries: Vec[VAGQEntry], idx: UInt): VAGQEntry = {
@@ -130,5 +131,42 @@ trait HasVAGQHelper extends HasCircularQueuePtrHelper { this: HasVAGQParameters 
     entry.reqAck  := 0.U
     entry.exceptionNumber := 0.U
     entry.faultElemIdx    := 0.U
+  }
+}
+
+object VAGQWritebackConnect {
+  def toRob(sink: WriteBackRobBundle, source: VAGQWritebackReq): Unit = {
+    sink := 0.U.asTypeOf(sink)
+    sink.robIdx := source.robIdx
+    sink.exceptionVec.zeroInit()
+    sink.exceptionVec.indices.foreach { num =>
+      sink.exceptionVec(num) := source.exception && source.exceptionNumber === num.U
+    }
+    sink.trigger.foreach(_ := source.meta.trigger)
+    sink.lqIdx.foreach(_ := source.meta.lqIdx)
+    sink.sqIdx.foreach(_ := source.meta.sqIdx)
+    sink.entryIdx.foreach(_ := source.entryIdx)
+    sink.vls.foreach { vls =>
+      vls := 0.U.asTypeOf(vls)
+      vls.vpu.vstart := source.faultVstart
+      vls.vpu.vuopIdx := source.uopIdx
+      vls.vpu.nf := source.nf
+      vls.vpu.vsew := 0.U
+      vls.vpu.veew := source.deew
+      vls.vpu.vlmul := 0.U
+      vls.isIndexed := VAGQUopType.isIndexed(source.uopType)
+      vls.isStrided := VAGQUopType.isStride(source.uopType)
+      vls.isWhole := false.B
+      vls.isVecLoad := VAGQUopType.isLoad(source.uopType)
+      vls.isVlm := false.B
+      vls.isMasked := false.B
+    }
+    sink.debug.isMMIO := false.B
+    sink.debug.isNCIO := false.B
+    sink.debug.isPerfCnt := false.B
+    sink.debug.paddr := 0.U
+    sink.debug.vaddr := 0.U
+    sink.perfDebugInfo.foreach(_ := source.meta.perfDebugInfo)
+    sink.debug_seqNum.foreach(_ := source.meta.debug_seqNum)
   }
 }

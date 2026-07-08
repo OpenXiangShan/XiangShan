@@ -253,6 +253,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     exu => exu.writeVecRf && exu.hasMemAddrFu,
     Seq(VecData(), V0Data()),
   )
+  val vagqRobWriteback = backendParams.genVagqWriteBackRobBundle
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
   val hyuIqFeedback = Vec(HyuCnt, new MemRSFeedbackIO)
   val vstuIqFeedback= Vec(VstuCnt, new MemRSFeedbackIO(isVector = true))
@@ -530,7 +531,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.vagqVrfReadReq.valid := vagq.io.vrfReadReq.valid
   io.mem_to_ooo.vagqVrfReadReq.bits  := vagq.io.vrfReadReq.bits
   vagq.io.vrfReadResp := io.ooo_to_mem.vagqVrfReadResp
-  vagq.io.robWriteback.ready := false.B
+  io.mem_to_ooo.vagqRobWriteback.valid := vagq.io.robWriteback.valid
+  VAGQWritebackConnect.toRob(io.mem_to_ooo.vagqRobWriteback.bits, vagq.io.robWriteback.bits)
+  vagq.io.robWriteback.ready := true.B
 
   vagqDownstream.io.vagqLsuReq <> vagq.io.lsuReq
   vagq.io.lduResp := vagqDownstream.io.vagqLduResp

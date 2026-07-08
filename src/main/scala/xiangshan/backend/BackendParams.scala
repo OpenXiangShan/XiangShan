@@ -173,6 +173,23 @@ case class BackendParams(
     MixedVec(allSchdParams.map(_.genWriteBackRobValidBundle(needExtraVld = true).flatten).flatten)
   }
 
+  lazy val vagqWritebackParam: ExeUnitParams = {
+    val param = ExeUnitParams(
+      "VAGQ",
+      Seq(LduCfg, StaCfg, VlduCfg),
+      Seq(),
+      Seq(Seq()),
+      fakeUnit = true,
+    )(IntScheduler())
+    param.backendParam = this
+    param.exuIdx = allExuParams.map(_.exuIdx).maxOption.getOrElse(-1) + 1
+    param
+  }
+
+  def genVagqWriteBackRobBundle(implicit p: Parameters): ValidIO[WriteBackRobBundle] = {
+    ValidIO(vagqWritebackParam.genWriteBackRobBundle)
+  }
+
   def getWrite2RobParams(needExtraVld: Boolean = true): Seq[ExeUnitParams] = {
     allIssueParams.flatMap(_.getWriteBackRobParams(needExtraVld))
   }

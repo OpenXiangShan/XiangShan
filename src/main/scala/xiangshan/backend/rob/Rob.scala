@@ -71,6 +71,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val exception = ValidIO(new ExceptionInfo)
     // exu + brq
     val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
+    val vagqWriteback = Flipped(params.genVagqWriteBackRobBundle)
     val exuWriteback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
     val writebackNums = Flipped(Vec(writeback.size, ValidIO(UInt(writeback.size.U.getWidth.W))))
     val writebackNeedFlush = Input(Vec(params.getWrite2RobSize(_.needExceptionGen), Bool()))
@@ -144,10 +145,22 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     })
   })
 
-  val exuWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback
+  val vagqWritebackNum = Wire(Valid(UInt(io.writebackNums.head.bits.getWidth.W)))
+  vagqWritebackNum.valid := io.vagqWriteback.valid
+  vagqWritebackNum.bits := 1.U
+  val writebackNums = io.writebackNums.toSeq ++ Seq(vagqWritebackNum)
+  val vagqWritebackNeedFlush =
+    io.vagqWriteback.bits.exceptionVec.orR ||
+    io.vagqWriteback.bits.flushPipe.getOrElse(false.B) ||
+    io.vagqWriteback.bits.replay.getOrElse(false.B) ||
+    io.vagqWriteback.bits.trigger.map(TriggerAction.isDmode).getOrElse(false.B)
+  val writebackNeedFlush = io.writebackNeedFlush.toSeq ++ Seq(vagqWritebackNeedFlush)
+
+  val exuWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback.toSeq ++ Seq(io.vagqWriteback)
   val vldWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback.filter(_.bits.params.hasVLoadFu).toSeq
   val fflagsWBs = io.exuWriteback.filter(x => x.bits.fflags.nonEmpty).toSeq
-  val exceptionWBs = io.writeback.filter(x => x.bits.params.needExceptionGen).toSeq
+  val regularExceptionWBs = io.writeback.filter(x => x.bits.params.needExceptionGen).toSeq
+  val exceptionWBs = regularExceptionWBs ++ Seq(io.vagqWriteback).filter(_.bits.params.needExceptionGen)
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
   val vxsatWBs = io.exuWriteback.filter(x => x.bits.vxsat.nonEmpty).toSeq
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
@@ -1044,12 +1057,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     // [[wbCnt]] is the number of writebacks that can update this entry. [[canWbSeq]] is 1-hot writeback valid signal
     // with corresponding robIdx value. all exuWBs must have distinct robIdx value
-    val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
+    val wbCnt = Mux1H(canWbSeq, writebackNums.map(_.bits))
 
     val canWbExceptionSeq = exceptionWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
     val needFlush = robEntries(i).needFlush
     val needFlushWriteBack = Wire(Bool())
-    needFlushWriteBack := Mux1H(canWbExceptionSeq, io.writebackNeedFlush)
+    needFlushWriteBack := Mux1H(canWbExceptionSeq, writebackNeedFlush)
     when(robEntries(i).valid){
       needFlush := needFlush || needFlushWriteBack
     }
@@ -1116,12 +1129,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val enqWriteStd = PriorityMux(instCanEnqSeq, enqWriteStdVec)
 
     val canWbSeq = exuWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
-    val wbCnt = Mux1H(canWbSeq, io.writebackNums.map(_.bits))
+    val wbCnt = Mux1H(canWbSeq, writebackNums.map(_.bits))
 
     val canWbExceptionSeq = exceptionWBs.map(writeback => writeback.valid && (writeback.bits.robIdx.value === needUpdateRobIdx(i)))
     val needFlush = robBanksRdata(i).needFlush
     val needFlushWriteBack = Wire(Bool())
-    needFlushWriteBack := Mux1H(canWbExceptionSeq, io.writebackNeedFlush)
+    needFlushWriteBack := Mux1H(canWbExceptionSeq, writebackNeedFlush)
     when(needUpdate(i).valid) {
       needUpdate(i).needFlush := needFlush || needFlushWriteBack
     }
@@ -1218,10 +1231,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   println(s"ExceptionGen:")
   println(s"num of exceptions: ${params.numException}")
-  require(exceptionWBs.length == exceptionGen.io.wb.length,
-    f"exceptionWBs.length: ${exceptionWBs.length}, " +
+  require(regularExceptionWBs.length == exceptionGen.io.wb.length,
+    f"regularExceptionWBs.length: ${regularExceptionWBs.length}, " +
       f"exceptionGen.io.wb.length: ${exceptionGen.io.wb.length}")
-  for (((wb, exc_wb), i) <- exceptionWBs.zip(exceptionGen.io.wb).zipWithIndex) {
+  for (((wb, exc_wb), i) <- regularExceptionWBs.zip(exceptionGen.io.wb).zipWithIndex) {
     exc_wb.valid       := wb.valid
     exc_wb.bits.robIdx := wb.bits.robIdx
     // only enq inst use ftqPtr to read gpa
@@ -1251,6 +1264,35 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.veew := wb.bits.vls.map(_.vpu.veew).getOrElse(0.U)
     exc_wb.bits.vlmul := wb.bits.vls.map(_.vpu.vlmul).getOrElse(0.U)
   }
+  exceptionGen.io.vagqWb.valid       := io.vagqWriteback.valid
+  exceptionGen.io.vagqWb.bits.robIdx := io.vagqWriteback.bits.robIdx
+  exceptionGen.io.vagqWb.bits.ftqPtr          := 0.U.asTypeOf(exceptionGen.io.vagqWb.bits.ftqPtr)
+  exceptionGen.io.vagqWb.bits.ftqOffset       := 0.U.asTypeOf(exceptionGen.io.vagqWb.bits.ftqOffset)
+  exceptionGen.io.vagqWb.bits.exceptionVec    extendFrom io.vagqWriteback.bits.exceptionVec
+  exceptionGen.io.vagqWb.bits.hasException    := io.vagqWriteback.bits.exceptionVec.orR
+  exceptionGen.io.vagqWb.bits.isEnqExcp       := false.B
+  exceptionGen.io.vagqWb.bits.isFetchMalAddr  := false.B
+  exceptionGen.io.vagqWb.bits.flushPipe       := io.vagqWriteback.bits.flushPipe.getOrElse(false.B)
+  exceptionGen.io.vagqWb.bits.isVset          := false.B
+  exceptionGen.io.vagqWb.bits.replayInst      := io.vagqWriteback.bits.replay.getOrElse(false.B)
+  exceptionGen.io.vagqWb.bits.singleStep      := false.B
+  exceptionGen.io.vagqWb.bits.crossPageIPFFix := false.B
+  val vagqTrigger = io.vagqWriteback.bits.trigger.getOrElse(TriggerAction.None).asTypeOf(exceptionGen.io.vagqWb.bits.trigger)
+  exceptionGen.io.vagqWb.bits.trigger := vagqTrigger
+  exceptionGen.io.vagqWb.bits.vstartEn := io.vagqWriteback.bits.vls
+    .map(_ => io.vagqWriteback.bits.exceptionVec.orR || TriggerAction.isDmode(vagqTrigger))
+    .getOrElse(false.B)
+  exceptionGen.io.vagqWb.bits.vstart := io.vagqWriteback.bits.vls.map(_.vpu.vstart).getOrElse(0.U)
+  exceptionGen.io.vagqWb.bits.vuopIdx := io.vagqWriteback.bits.vls.map(_.vpu.vuopIdx).getOrElse(0.U)
+  exceptionGen.io.vagqWb.bits.isVecLoad := io.vagqWriteback.bits.vls.map(_.isVecLoad).getOrElse(false.B)
+  exceptionGen.io.vagqWb.bits.isVlm := io.vagqWriteback.bits.vls.map(_.isVlm).getOrElse(false.B)
+  exceptionGen.io.vagqWb.bits.isStrided := io.vagqWriteback.bits.vls.map(_.isStrided).getOrElse(false.B)
+  exceptionGen.io.vagqWb.bits.isIndexed := io.vagqWriteback.bits.vls.map(_.isIndexed).getOrElse(false.B)
+  exceptionGen.io.vagqWb.bits.isWhole := io.vagqWriteback.bits.vls.map(_.isWhole).getOrElse(false.B)
+  exceptionGen.io.vagqWb.bits.nf := io.vagqWriteback.bits.vls.map(_.vpu.nf).getOrElse(0.U)
+  exceptionGen.io.vagqWb.bits.vsew := io.vagqWriteback.bits.vls.map(_.vpu.vsew).getOrElse(0.U)
+  exceptionGen.io.vagqWb.bits.veew := io.vagqWriteback.bits.vls.map(_.vpu.veew).getOrElse(0.U)
+  exceptionGen.io.vagqWb.bits.vlmul := io.vagqWriteback.bits.vls.map(_.vpu.vlmul).getOrElse(0.U)
 
   fflagsDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).fflags)
   vxsatDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).vxsat)

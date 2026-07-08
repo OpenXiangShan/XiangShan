@@ -44,6 +44,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
         Flipped(ValidIO(new RobExceptionInfo(x.exceptionOut)))
       }
     )
+    val vagqWb = Flipped(ValidIO(new RobExceptionInfo(allExceptions)))
     val out = ValidIO(new RobExceptionInfo(allExceptions))
     val state = ValidIO(new RobExceptionInfo(allExceptions))
   })
@@ -82,6 +83,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
 
   val enqAllExcept = Wire(Vec(RenameWidth, Valid(new RobExceptionInfo(allExceptions))))
   val wbAllExcept = Wire(Vec(params.numException, Valid(new RobExceptionInfo(allExceptions))))
+  val vagqWbAllExcept = Wire(Valid(new RobExceptionInfo(allExceptions)))
 
   enqAllExcept.zip(io.enq) foreach { case (sink, source) =>
     (sink: Data).waiveAll :<= (source: Data).waiveAll
@@ -92,6 +94,8 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
     (sink: Data).waiveAll :<= (source: Data).waiveAll
     sink.bits.exceptionVec extendFrom source.bits.exceptionVec
   }
+  (vagqWbAllExcept: Data).waiveAll :<= (io.vagqWb: Data).waiveAll
+  vagqWbAllExcept.bits.exceptionVec extendFrom io.vagqWb.bits.exceptionVec
 
   // orR the exceptionVec
   val lastCycleFlush = RegNext(io.flush)
@@ -105,7 +109,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val varith_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.isVecArith).nonEmpty).map(_._1)
   val vls_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.exists(x => FuType.FuTypeOrR(x.fuType, FuType.vecMem))).map(_._1)
 
-  val writebacks = Seq(csr_wb, load_wb, store_wb, varith_wb, vls_wb).filter(_.nonEmpty)
+  val writebacks = Seq(csr_wb, load_wb, store_wb, varith_wb, vls_wb, Seq(vagqWbAllExcept)).filter(_.nonEmpty)
   val in_wb_valids = writebacks.map(_.map(w => w.valid && w.bits.has_exception && !lastCycleFlush))
   val wb_valid = in_wb_valids.zip(writebacks).map { case (valid, wb) =>
     valid.zip(wb.map(_.bits)).map { case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) }.reduce(_ || _)

@@ -158,6 +158,16 @@ class CtrlBlockImp(
     delayed.bits.perfDebugInfo.foreach(_.writebackTime := GTimer())
     delayed
   }).toSeq
+  private val delayedNotFlushedVagqWriteBack = {
+    val x = io.fromWB.vagqWriteback
+    val valid = x.valid
+    val killedByOlder = x.bits.robIdx.needFlush(Seq(s1_s3_redirect, s2_s4_redirect))
+    val delayed = Wire(Valid(new WriteBackRobBundle(x.bits.params, backendParams)))
+    delayed.valid := GatedValidRegNext(valid && !killedByOlder)
+    delayed.bits := RegEnable(x.bits, x.valid)
+    delayed.bits.perfDebugInfo.foreach(_.writebackTime := GTimer())
+    delayed
+  }
   private val delayedWriteBack = Wire(chiselTypeOf(io.fromWB.wbData))
   delayedWriteBack.zipWithIndex.map{ case (x,i) =>
     x.valid := GatedValidRegNext(io.fromWB.wbData(i).valid)
@@ -842,6 +852,7 @@ class CtrlBlockImp(
   rob.io.hartId := io.fromTop.hartId
   rob.io.redirect := s1_s3_redirect
   rob.io.writeback := delayedNotFlushedWriteBack
+  rob.io.vagqWriteback := delayedNotFlushedVagqWriteBack
   rob.io.exuWriteback := delayedWriteBack
   rob.io.writebackNums := VecInit(delayedNotFlushedWriteBackNums)
   rob.io.writebackNeedFlush := delayedNotFlushedWriteBackNeedFlush
@@ -1011,6 +1022,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
   }
   val fromWB = new Bundle {
     val wbData = Flipped(MixedVec(params.genWrite2RobBundles))
+    val vagqWriteback = Flipped(params.genVagqWriteBackRobBundle)
     val delayedOldestExuRedirect = Flipped(ValidIO(new Redirect))
   }
   val redirect = ValidIO(new Redirect)

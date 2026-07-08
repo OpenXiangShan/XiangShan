@@ -131,6 +131,10 @@ class MergeCtrl(numEntries: Int)(implicit p: Parameters) extends VAGQModule {
   io.robWriteback.bits.exceptionNumber := Mux(hasExcp, excpEntry.entry.exceptionNumber, 0.U)
   io.robWriteback.bits.faultElemIdx    := Mux(hasExcp, excpEntry.entry.faultElemIdx, 0.U)
   io.robWriteback.bits.faultVstart     := Mux(hasExcp, faultVstart(excpEntry.entry), 0.U)
+  io.robWriteback.bits.uopType         := Mux(hasExcp, excpEntry.entry.uopType, wbEntry.entry.uopType)
+  io.robWriteback.bits.uopIdx          := Mux(hasExcp, excpEntry.entry.uopIdx, wbEntry.entry.uopIdx)
+  io.robWriteback.bits.deew            := Mux(hasExcp, excpEntry.entry.deew, wbEntry.entry.deew)
+  io.robWriteback.bits.nf              := Mux(hasExcp, excpEntry.entry.nf, wbEntry.entry.nf)
 
   when(mergeReadValid) {
     when(!mergeReadAlive || vrfReadRespAlive) {

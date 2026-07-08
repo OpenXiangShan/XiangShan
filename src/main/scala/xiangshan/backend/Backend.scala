@@ -222,6 +222,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   println(s"[Backend] ctrlBlock.io.fromWB.wbData.size = ${ctrlBlock.io.fromWB.wbData.size}, wbDataPathToCtrlBlock.size = ${wbDataPathToCtrlBlock.size}")
   assert(ctrlBlock.io.fromWB.wbData.size == wbDataPathToCtrlBlock.size, "ctrlBlock.io.fromWB.wbData.size == wbDataPathToCtrlBlock.size")
   ctrlBlock.io.fromWB.wbData.zip(wbDataPathToCtrlBlock.sortBy(_.bits.params.exuIdx)).map(x => x._1 := x._2)
+  ctrlBlock.io.fromWB.vagqWriteback := io.mem.vagqRobWriteback
   ctrlBlock.io.fromWB.delayedOldestExuRedirect := intRegion.io.wbDataPathToCtrlBlock.delayedOldestExuRedirect.get
   ctrlBlock.io.fromMem.stIn <> io.mem.stIn
   ctrlBlock.io.fromMem.violation <> io.mem.memoryViolation
@@ -748,6 +749,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
       Seq(VecData(), V0Data()),
     )
   )
+  val vagqRobWriteback = Flipped(params.genVagqWriteBackRobBundle)
   val stIn = Input(Vec(params.StaExuCnt, ValidIO(new StoreUnitToLFST)))
 
   val memoryViolation = Flipped(ValidIO(new Redirect))
