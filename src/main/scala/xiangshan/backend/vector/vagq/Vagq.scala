@@ -193,7 +193,7 @@ class VAGQIO(implicit p: Parameters) extends VAGQBundle {
   val lsqEmptyReq = Decoupled(new VAGQLsqEmptyReq)
   val lsqEmptyResp = Flipped(Valid(new VAGQLsqEmptyResp))
   // load read oldvd, store read storeData
-  val vrfReadReq = Decoupled(new VAGQVRFReadReq)
+  val vrfReadReq = Valid(new VAGQVRFReadReq)
   val vrfReadResp = Flipped(Valid(new VAGQVRFReadResp))
   // write vrf with mask
   val vrfWriteReq = ValidIO(new VAGQVRFWriteReq)
@@ -258,10 +258,10 @@ class VAGQ(implicit p: Parameters) extends VAGQModule {
 
   io.vrfReadReq.valid := grantSplitVrfRead || grantMergeVrfRead
   io.vrfReadReq.bits := Mux(grantSplitVrfRead, splitCtrl.io.vrfReadReq.bits, mergeCtrl.io.vrfReadReq.bits)
-  splitCtrl.io.vrfReadReq.ready := io.vrfReadReq.ready && grantSplitVrfRead
-  mergeCtrl.io.vrfReadReq.ready := io.vrfReadReq.ready && grantMergeVrfRead
+  splitCtrl.io.vrfReadReq.ready := grantSplitVrfRead
+  mergeCtrl.io.vrfReadReq.ready := grantMergeVrfRead
 
-  when(io.vrfReadReq.fire) {
+  when(io.vrfReadReq.valid) {
     lastVrfReadGrantSplit := grantSplitVrfRead
   }
 

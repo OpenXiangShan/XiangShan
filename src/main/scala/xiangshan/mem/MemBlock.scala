@@ -208,6 +208,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val intIssue: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(intSchdParams.genExuInputBundle(DecoupledIO(_), _.hasMemFu))
   val vstdStoreData: MixedVec[MixedVec[ValidIO[StoreQueueDataWrite]]] =
     Flipped(backendParams.getVecRegionParam.genExuBundle(_.hasVStd, ValidIO(new StoreQueueDataWrite)))
+  val vagqVrfReadResp = Flipped(Valid(new VAGQVRFReadResp))
 }
 
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
@@ -259,6 +260,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val ldCancel = Vec(backendParams.LdExuCnt, new LoadCancelIO)
   val wakeup = Vec(backendParams.LdExuCnt, Valid(new MemWakeUpBundle))
   val vldS3WakeUp = Vec(backendParams.LdExuCnt, new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams))
+  val vagqVrfReadReq = Valid(new VAGQVRFReadReq)
 }
 
 class MemCoreTopDownIO extends Bundle {
@@ -525,9 +527,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   vagq.io.addrUop.bits  := 0.U.asTypeOf(vagq.io.addrUop.bits)
   vagq.io.dataUop.valid := false.B
   vagq.io.dataUop.bits  := 0.U.asTypeOf(vagq.io.dataUop.bits)
-  vagq.io.vrfReadReq.ready := false.B
-  vagq.io.vrfReadResp.valid := false.B
-  vagq.io.vrfReadResp.bits  := 0.U.asTypeOf(vagq.io.vrfReadResp.bits)
+  io.mem_to_ooo.vagqVrfReadReq.valid := vagq.io.vrfReadReq.valid
+  io.mem_to_ooo.vagqVrfReadReq.bits  := vagq.io.vrfReadReq.bits
+  vagq.io.vrfReadResp := io.ooo_to_mem.vagqVrfReadResp
   vagq.io.robWriteback.ready := false.B
 
   vagqDownstream.io.vagqLsuReq <> vagq.io.lsuReq
