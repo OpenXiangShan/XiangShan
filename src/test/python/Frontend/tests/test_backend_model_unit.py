@@ -14,6 +14,30 @@ from env.model.backend_state import PATH_STATE_WRONG
 from env.model.backend_state import QueueInstr
 
 
+class _Signal:
+    def __init__(self, value: int = 0) -> None:
+        self.value = int(value)
+
+
+class _ObserveIf:
+    def __init__(self) -> None:
+        self.cfvec_valid = [_Signal() for _ in range(8)]
+        self.cfvec_pc = [_Signal() for _ in range(8)]
+        self.cfvec_instr = [_Signal(0x13) for _ in range(8)]
+        self.cfvec_is_rvc = [_Signal() for _ in range(8)]
+        self.cfvec_fixed_taken = [_Signal() for _ in range(8)]
+        self.cfvec_ftq_ptr_flag = [_Signal() for _ in range(8)]
+        self.cfvec_ftq_ptr_value = [_Signal() for _ in range(8)]
+        self.cfvec_ftq_offset = [_Signal() for _ in range(8)]
+        self.cfvec_is_last_in_ftq_entry = [_Signal() for _ in range(8)]
+
+
+def _set_first_cfvec(interface: _ObserveIf, pc: int, *, ftq_value: int = 0) -> None:
+    interface.cfvec_valid[0].value = 1
+    interface.cfvec_pc[0].value = int(pc)
+    interface.cfvec_ftq_ptr_value[0].value = int(ftq_value)
+
+
 def _queue_instr(pc: int, ftq_flag: int, ftq_value: int) -> QueueInstr:
     return QueueInstr(
         cycle=0,
@@ -81,6 +105,48 @@ def test_recovery_target_requires_expected_recovery_ftq() -> None:
     entry.cycle = 11
 
     assert model._queue_entry_matches_recovery_target(entry, 0x1000) is False
+
+
+def test_ready_redirect_skips_cfvec_queue_sampling_at_t_and_t_plus_one() -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.observe_if = interface
+    model.current_cycle = 10
+    model.pending_events.append(
+        BackendEvent(
+            kind="redirect",
+            ready_cycle=10,
+            payload={
+                "target_pc": 0x2000,
+                "reason": "unit_redirect",
+                "pc": 0x1000,
+                "taken": 1,
+                "ftq_flag": 0,
+                "ftq_value": 0,
+                "ftq_offset": 0,
+                "is_rvc": 0,
+                "flush_on_drive": False,
+            },
+        )
+    )
+
+    _set_first_cfvec(interface, 0x1004)
+    actions = model.plan_cycle_actions()
+
+    assert actions.redirect_payload is not None
+    assert list(model._cfvec_queue) == []
+
+    model.current_cycle = 11
+    _set_first_cfvec(interface, 0x1008)
+    model.plan_cycle_actions()
+
+    assert list(model._cfvec_queue) == []
+
+    model.current_cycle = 12
+    _set_first_cfvec(interface, 0x2000, ftq_value=1)
+    model.plan_cycle_actions()
+
+    assert [entry.pc for entry in model._cfvec_queue] == [0x2000]
 
 
 def test_commit_ftq_idx_must_be_contiguous() -> None:

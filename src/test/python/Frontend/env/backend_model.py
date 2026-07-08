@@ -132,6 +132,7 @@ class BackendModel:
         self._recovery_commit_block_cycle = -1
         self._last_driven_redirect_signature: Optional[tuple[int, int, int, int, int, int]] = None
         self._last_driven_redirect_cycle: Optional[int] = None
+        self._skip_cfvec_until_cycle: Optional[int] = None
 
         self._backend_state = BackendState(ftq_size=self.ftq_size)
         self._ftq_scoreboard = FtqScoreboard(self._backend_state)
@@ -2587,6 +2588,7 @@ class BackendModel:
         self._clear_active_wrong_path_episode()
         self._last_driven_redirect_signature = None
         self._last_driven_redirect_cycle = None
+        self._skip_cfvec_until_cycle = None
         self._pending_queue_resolve_indices.clear()
         self._pending_queue_call_ret_commit_indices.clear()
         self._scheduled_queue_call_ret_commit_groups.clear()
@@ -3512,6 +3514,10 @@ class BackendModel:
 
     def _sample_cfvec(self) -> None:
         assert self.observe_if is not None
+        if self._skip_cfvec_until_cycle is not None:
+            if int(self.current_cycle) <= int(self._skip_cfvec_until_cycle):
+                return
+            self._skip_cfvec_until_cycle = None
         recovery_target_seen_this_cycle = False
 
         def _ensure_current_ftq_entry(ftq_flag: int, ftq_value: int) -> None:
@@ -4371,12 +4377,14 @@ class BackendModel:
         self._clear_stale_auxiliary_states()
         self._update_ftq_start_pc_cache(observation)
         self._watchdog(observation)
+        redirect_payload = self._ready_redirect_for_cycle()
+        if redirect_payload is not None:
+            self._skip_cfvec_until_cycle = int(self.current_cycle) + 1
         if self.observe_if is not None:
             self._sample_cfvec()
         resolve_entries = self._ready_resolves_for_cycle()
         self._plan_instruction_commits_for_cycle()
         commit_entry = self._plan_commit_entry_for_cycle(apply=False)
-        redirect_payload = self._ready_redirect_for_cycle()
         call_ret_commit_group = self._current_semantic_call_ret_commit_group()
         self._schedule_next_queue_call_ret_commit_group()
         return BackendCycleActions(
