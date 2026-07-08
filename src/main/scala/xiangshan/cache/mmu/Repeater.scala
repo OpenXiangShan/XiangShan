@@ -55,8 +55,7 @@ class PTWRepeater(Width: Int = 1, FenceDelay: Int)(implicit p: Parameters) exten
     arb.io.in <> io.tlb.req
     arb.io.out
   }
-  val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed ||
-    io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed ||
+  val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed ||
     (if (HasMptCheck) io.csr.mmpt.changed else false.B), FenceDelay))
   val req = RegEnable(req_in.bits, req_in.fire)
   val resp = RegEnable(ptw.resp.bits, ptw.resp.fire)
@@ -99,8 +98,7 @@ class PTWRepeaterNB(Width: Int = 1, passReady: Boolean = false, FenceDelay: Int)
     arb.io.in <> io.tlb.req
     arb.io.out
   }
-  val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed ||
-    io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed ||
+  val (tlb, ptw, flush) = (io.tlb, io.ptw, DelayN(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed ||
     (if (HasMptCheck) io.csr.mmpt.changed else false.B), FenceDelay))
   /* sent: tlb -> repeater -> ptw
    * recv: ptw -> repeater -> tlb
@@ -157,17 +155,11 @@ class PTWFilterIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) 
 
 }
 
-class PTWNewFilterIO(Width: Int)(implicit p: Parameters) extends PTWFilterIO(Width, hasHint = true) {
-  val fastHint = ValidIO(new TLBHintResp)
-}
-
 class PTWFilterEntryIO(Width: Int, hasHint: Boolean = false)(implicit p: Parameters) extends PTWFilterIO(Width, hasHint){
   val flush = Input(Bool())
   val refill = Output(Bool())
   val getGpa = Output(Bool())
   val memidx = Output(new MemBlockidxBundle)
-  val fastResp = if (hasHint) Some(Flipped(ValidIO(new PtwRespS2))) else None
-  val fastHint = if (hasHint) Some(ValidIO(new TLBHintResp)) else None
 }
 
 class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p: Parameters) extends XSModule with HasPtwConst {
@@ -202,9 +194,21 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   val entryIsMatchVec = WireInit(VecInit(Seq.fill(Width)(false.B)))
   val entryMatchIndexVec = WireInit(VecInit(Seq.fill(Width)(0.U(log2Up(Size).W))))
-  val ptwResp_EntryMatchVec = vpn.zip(v).zip(s2xlate).map{ case ((pi, vi), s2xlatei) => vi && s2xlatei === io.ptw.resp.bits.s2xlate && io.ptw.resp.bits.hit(pi, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, allType = true)}
+  val ptwResp_EntryMatchVec = vpn.zip(v).zip(s2xlate).map { case ((pi, vi), s2xlatei) =>
+    vi && s2xlatei === io.ptw.resp.bits.s2xlate && io.ptw.resp.bits.hit(
+      pi, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid,
+      allType = true,
+      sdid = if (HasMptCheck) io.csr.mmpt.sdid else 0.U,
+      matchMpt = if (HasMptCheck) io.csr.mmpt.mode =/= 0.U else false.B
+    )
+  }
   val ptwResp_EntryMatchFirst = firstValidIndex(ptwResp_EntryMatchVec, true.B)
-  val ptwResp_ReqMatchVec = io.tlb.req.map(a => io.ptw.resp.valid && a.bits.s2xlate === io.ptw.resp.bits.s2xlate && io.ptw.resp.bits.hit(a.bits.vpn, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, allType = true))
+  val ptwResp_ReqMatchVec = io.tlb.req.map(a => io.ptw.resp.valid && a.bits.s2xlate === io.ptw.resp.bits.s2xlate && io.ptw.resp.bits.hit(
+    a.bits.vpn, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid,
+    allType = true,
+    sdid = if (HasMptCheck) io.csr.mmpt.sdid else 0.U,
+    matchMpt = if (HasMptCheck) io.csr.mmpt.mode =/= 0.U else false.B
+  ))
 
   io.refill := Cat(ptwResp_EntryMatchVec).orR && io.ptw.resp.fire
   io.ptw.resp.ready := true.B
@@ -288,8 +292,6 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
 
   if (hasHint) {
     val hintIO = io.hint.getOrElse(new TlbHintIO)
-    val fastResp = io.fastResp.getOrElse(Flipped(ValidIO(new PtwRespS2)))
-    val fastHint = io.fastHint.getOrElse(ValidIO(new TLBHintResp))
     for (i <- 0 until LdExuCnt) {
       hintIO.req(i).id := enqidx(i)
       hintIO.req(i).full := !canenq(i) || ptwResp_ReqMatchVec(i)
@@ -297,30 +299,6 @@ class PTWFilterEntry(Width: Int, Size: Int, hasHint: Boolean = false)(implicit p
     hintIO.resp.valid := io.refill
     hintIO.resp.bits.id := ptwResp_EntryMatchFirst
     hintIO.resp.bits.replay_all := PopCount(ptwResp_EntryMatchVec) > 1.U
-
-    // Keep the L2 response path short: match only the originating vpn/s2xlate,
-    // register the one-hot result, and encode the id from the registered bits.
-    val fastRespVpn = Mux(
-      fastResp.bits.s2xlate === onlyStage2,
-      fastResp.bits.s2.entry.tag(vpnLen - 1, 0),
-      Cat(fastResp.bits.s1.entry.tag, fastResp.bits.s1.addr_low)
-    )
-    val fastMatchVec = VecInit(vpn.zip(v).zip(s2xlate).map { case ((entryVpn, entryValid), entryS2xlate) =>
-      entryValid && entryS2xlate === fastResp.bits.s2xlate && entryVpn === fastRespVpn
-    }).asUInt
-    val fastMatchReg = RegEnable(fastMatchVec, 0.U(Size.W), fastResp.valid)
-    val fastRespValidReg = RegNext(fastResp.valid && !io.flush, init = false.B)
-    val fastHintId = Cat((0 until log2Up(Size)).reverse.map { bit =>
-      val idMask = (0 until Size).foldLeft(BigInt(0)) { case (mask, index) =>
-        if (((index >> bit) & 1) == 1) mask.setBit(index) else mask
-      }
-      (fastMatchReg & idMask.U(Size.W)).orR
-    })
-
-    // Multiple matching entries are handled by the original replay_all hint.
-    fastHint.valid := fastRespValidReg && fastMatchReg.orR && !io.flush
-    fastHint.bits.id := fastHintId
-    fastHint.bits.replay_all := false.B
   }
 
   io.rob_head_miss_in_tlb := VecInit(v.zip(vpn).map{case (vi, vpni) => {
@@ -360,7 +338,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   // all store address execute units, including sta and hyu
   private val StaExuCnt = backendParams.StaExuCnt
 
-  val io = IO(new PTWNewFilterIO(Width))
+  val io = IO(new PTWFilterIO(Width, hasHint = true))
 
   val load_filter = VecInit(Seq.fill(1) {
     val load_entry = Module(new PTWFilterEntry(Width = LdExuCnt + PfNumInDtlbLD, Size = loadfiltersize, hasHint = true))
@@ -383,8 +361,8 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   store_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + PfNumInDtlbLD).take(StaCnt))
   prefetch_filter.map(_.tlb.req := io.tlb.req.drop(LdExuCnt + PfNumInDtlbLD + StaCnt))
 
-  val flush = DelayN(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
-    io.csr.priv.virt_changed || (if (HasMptCheck) io.csr.mmpt.changed else false.B), FenceDelay)
+  val flush = DelayN(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed ||
+    (if (HasMptCheck) io.csr.mmpt.changed else false.B), FenceDelay)
   val ptwResp = RegEnable(io.ptw.resp.bits, io.ptw.resp.fire)
   val ptwResp_valid = Cat(filter.map(_.refill)).orR
   filter.map(_.tlb.resp.ready := true.B)
@@ -421,11 +399,6 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
 
   val hintIO = io.hint.getOrElse(new TlbHintIO)
   val load_hintIO = load_filter(0).hint.getOrElse(new TlbHintIO)
-  val load_fastResp = load_filter(0).fastResp.getOrElse(Flipped(ValidIO(new PtwRespS2)))
-  val load_fastHint = load_filter(0).fastHint.getOrElse(ValidIO(new TLBHintResp))
-  load_fastResp.valid := io.ptw.resp.fire
-  load_fastResp.bits := io.ptw.resp.bits
-  io.fastHint := load_fastHint
   for (i <- 0 until LdExuCnt) {
     hintIO.req(i) := RegNext(load_hintIO.req(i))
   }
@@ -485,8 +458,8 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val mayFullDeq = RegInit(false.B)
   val mayFullIss = RegInit(false.B)
   val counter = RegInit(0.U(log2Up(Size+1).W))
-  val flush = DelayN(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
-    io.csr.priv.virt_changed || (if (HasMptCheck) io.csr.mmpt.changed else false.B), FenceDelay)
+  val flush = DelayN(io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed ||
+    (if (HasMptCheck) io.csr.mmpt.changed else false.B), FenceDelay)
   val tlb_req = WireInit(io.tlb.req) // NOTE: tlb_req is not io.tlb.req, see below codes, just use cloneType
   tlb_req.suggestName("tlb_req")
 
@@ -494,7 +467,12 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   val inflight_full = inflight_counter === Size.U
 
   def ptwResp_hit(vpn: UInt, s2xlate: UInt, resp: PtwRespS2): Bool = {
-    s2xlate === resp.s2xlate && resp.hit(vpn, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid, allType = true)
+    s2xlate === resp.s2xlate && resp.hit(
+      vpn, io.csr.satp.asid, io.csr.vsatp.asid, io.csr.hgatp.vmid,
+      allType = true,
+      sdid = if (HasMptCheck) io.csr.mmpt.sdid else 0.U,
+      matchMpt = if (HasMptCheck) io.csr.mmpt.mode =/= 0.U else false.B
+    )
   }
 
   when (io.ptw.req(0).fire =/= io.ptw.resp.fire) {
