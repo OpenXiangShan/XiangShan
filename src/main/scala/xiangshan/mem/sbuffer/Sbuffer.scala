@@ -198,6 +198,7 @@ class Sbuffer(implicit p: Parameters)
     val forward = Vec(LoadPipelineWidth, Flipped(new SbufferForward))
     val sqempty = Input(Bool())
     val sbempty = Output(Bool())
+    val sbFull  = Output(Bool())
     val mshr_store_empty = Input(Bool()) // sbuffer-flush must flush all store entries in mshr as well
     val flush = Flipped(new SbufferFlushBundle)
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
@@ -548,6 +549,7 @@ class Sbuffer(implicit p: Parameters)
   XSDebug(p"ActiveCount[$ActiveCount]\n")
 
   io.sbempty := GatedValidRegNext(empty)
+  io.sbFull  := GatedValidRegNext(ValidCount === (StoreBufferSize).U)
   io.flush.empty := GatedValidRegNext(empty && io.sqempty)
   // lru.io.flush := sbuffer_state === x_drain_all && empty
   switch(sbuffer_state){

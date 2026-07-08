@@ -1536,9 +1536,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dcache.io.debugTopDown.robHeadOtherReplay := lsq.io.debugTopDown.robHeadOtherReplay
   dcache.io.debugRolling := io.debugRolling
 
-  lsq.io.noUopsIssued := io.topDownInfo.toBackend.noUopsIssued
-  io.topDownInfo.toBackend.lqEmpty := lsq.io.lqEmpty
-  io.topDownInfo.toBackend.sqEmpty := lsq.io.sqEmpty
+  io.topDownInfo.toBackend.replayAllocate := lsq.io.replayAllocate
+  io.topDownInfo.toBackend.sqFull  := lsq.io.sqFull
+  io.topDownInfo.toBackend.sbFull  := sbuffer.io.sbFull
   io.topDownInfo.toBackend.l1Miss := dcache.io.l1Miss
   io.topDownInfo.toBackend.l2TopMiss.l2Miss := RegNext(io.topDownInfo.fromL2Top.l2Miss)
   io.topDownInfo.toBackend.l2TopMiss.l3Miss := RegNext(io.topDownInfo.fromL2Top.l3Miss)

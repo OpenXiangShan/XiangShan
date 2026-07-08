@@ -801,10 +801,10 @@ class L2ToL1Hint(implicit p: Parameters) extends XSBundle with HasDCacheParamete
 }
 
 class TopDownInfo(implicit p: Parameters) extends XSBundle {
-  val lqEmpty = Input(Bool())
-  val sqEmpty = Input(Bool())
+  val replayAllocate = Input(Bool())
+  val sqFull  = Input(Bool())
+  val sbFull  = Input(Bool())
   val l1Miss = Input(Bool())
-  val noUopsIssued = Output(Bool())
   val l2TopMiss = Input(new TopDownFromL2Top)
 }
 
