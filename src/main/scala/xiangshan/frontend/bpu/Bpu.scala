@@ -82,6 +82,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     ittage,
     ras
   )
+  private def normalTrainPredictors: Seq[BasePredictor] = Seq(fallThrough, ubtb, abtb, utage, uras, mbtb, ittage, ras)
+  private def condTrainPredictors:   Seq[BasePredictor] = Seq(tage, sc)
 
   /* *** aliases *** */
   private val commit   = io.fromFtq.commit
@@ -168,20 +170,27 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   stageCtrl.s3_fire := s3_fire
   stageCtrl.t0_fire := io.fromFtq.train.fire
 
-  private val t0_compareMatrix = CompareMatrix(VecInit(io.fromFtq.train.bits.branches.map(_.bits.cfiPosition)))
-  // mark all branches after the first mispredict as invalid
-  // i.e. we have (valid, position, mispredict) for each branch:
-  // (1, 2, 0), (1, 5, 1), (1, 8, 0)
-  // then the first mispredict branch is @5, so mask should be (1, 1, 0)
-  private val t0_firstMispredictMask = t0_compareMatrix.getLowerElementMask(
-    VecInit(io.fromFtq.train.bits.branches.map(b => b.valid && b.bits.mispredict))
-  )
+  private val condStageCtrl = Wire(new StageCtrl)
+  condStageCtrl         := stageCtrl
+  condStageCtrl.t0_fire := io.fromFtq.condTrain.fire
 
-  private val train = Wire(new BpuTrain)
-  train := io.fromFtq.train.bits
-  train.branches.zipWithIndex.foreach { case (b, i) =>
-    b.valid := io.fromFtq.train.bits.branches(i).valid && t0_firstMispredictMask(i)
+  private def maskAfterFirstMispredict(rawTrain: BpuTrain): BpuTrain = {
+    val compareMatrix = CompareMatrix(VecInit(rawTrain.branches.map(_.bits.cfiPosition)))
+    // Mark all branches after the first mispredict as invalid.
+    // e.g. (valid, pos, mispredict): (1, 2, 0), (1, 5, 1), (1, 8, 0) => mask (1, 1, 0).
+    val firstMispredictMask = compareMatrix.getLowerElementMask(
+      VecInit(rawTrain.branches.map(b => b.valid && b.bits.mispredict))
+    )
+    val maskedTrain = Wire(new BpuTrain)
+    maskedTrain := rawTrain
+    maskedTrain.branches.zipWithIndex.foreach { case (b, i) =>
+      b.valid := rawTrain.branches(i).valid && firstMispredictMask(i)
+    }
+    maskedTrain
   }
+
+  private val train     = maskAfterFirstMispredict(io.fromFtq.train.bits)
+  private val condTrain = maskAfterFirstMispredict(io.fromFtq.condTrain.bits)
 
   private val fastTrain = Wire(Valid(new FastTrain))
   fastTrain.valid                := s3_valid
@@ -192,19 +201,21 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   fastTrain.bits.hasOverride     := s3_override
 
   predictors.foreach { p =>
-    p.io.startPc   := s0_startPc.get
-    p.io.stageCtrl := stageCtrl
-    // in this fromBpuTrain, we get a duplicated startPcVec, so this cannot be moved outside "predictors.foreach"
-    // i.e. this is wrong: ```
-    //   private val train = Wire(new Train)
-    //   train.fromBpuTrain(io.fromFtq.train.bits)
-    //   predictors.foreach { p => p.io.train := train }
-    // ```
-    p.io.train.fromBpuTrain(train)
+    p.io.startPc := s0_startPc.get
     // fastTrain is an Option[Valid[BpuFastTrain]], we need .foreach
     p.io.fastTrain.foreach(_ := fastTrain)
   }
-  io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
+  normalTrainPredictors.foreach { p =>
+    p.io.stageCtrl := stageCtrl
+    // in this fromBpuTrain, we get a duplicated startPcVec, so this cannot be moved outside "foreach"
+    p.io.train.fromBpuTrain(train)
+  }
+  condTrainPredictors.foreach { p =>
+    p.io.stageCtrl := condStageCtrl
+    p.io.train.fromBpuTrain(condTrain)
+  }
+  io.fromFtq.train.ready     := normalTrainPredictors.map(_.io.trainReady).reduce(_ && _)
+  io.fromFtq.condTrain.ready := condTrainPredictors.map(_.io.trainReady).reduce(_ && _)
 
   /* *** predictor specific inputs *** */
   abtb.io.redirectValid  := redirect.valid
@@ -246,8 +257,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromMainBtb.s1_positions       := mbtb.io.s1_positions
   tage.io.fromPhr.foldedPathHist         := phr.io.s0_foldedPhr
-  tage.io.fromPhr.foldedPathHistForTrain := phr.io.trainFoldedPhr
-  tage.io.debug_trainValid               := io.fromFtq.train.valid // for perf counters
+  tage.io.fromPhr.foldedPathHistForTrain := phr.io.condTrainFoldedPhr
+  tage.io.debug_trainValid               := io.fromFtq.condTrain.valid // for perf counters
 
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr
   ittage.io.trainFoldedPhr := phr.io.trainFoldedPhr
@@ -256,7 +267,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   sc.io.providerTakenCtrs   := tage.io.toSc.providerTakenCtrVec
   sc.io.foldedPathHist      := phr.io.s0_foldedPhr
   sc.io.imli                := commonHR.io.s0_imli
-  sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
+  sc.io.trainFoldedPathHist := phr.io.condTrainFoldedPhr
   sc.io.commonHR            := commonHR.io.s0_commonHR
 
   s3_flush := redirect.valid
@@ -540,6 +551,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
 
   phr.io.commit.valid := io.fromFtq.train.fire
   phr.io.commit.bits.fromBpuTrain(train)
+  phr.io.condCommit.valid := io.fromFtq.condTrain.fire
+  phr.io.condCommit.bits.fromBpuTrain(condTrain)
 
   s0_foldedPhr   := phr.io.s0_foldedPhr
   s1_foldedPhr   := phr.io.s1_foldedPhr

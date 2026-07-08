@@ -109,7 +109,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val metaQueueCommit  = Reg(Vec(FtqSize, new BpuCommitMeta))
 
   // resolveQueue caches branch resolve information from backend.
-  private val resolveQueue = Module(new ResolveQueue)
+  private val resolveQueue     = Module(new ResolveQueue)
+  private val condResolveQueue = Module(new ResolveQueue(forCondTrain = true))
 
   // commitQueue caches branch commit information from backend.
   private val commitQueue = Module(new CommitQueue)
@@ -207,8 +208,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
     s3PerfQueue(s3BpuPtr).mispredict := false.B
   }
 
-  resolveQueue.io.bpuEnqueue    := bpuEnqueue
-  resolveQueue.io.bpuEnqueuePtr := predictionPtr
+  Seq(resolveQueue, condResolveQueue).foreach { q =>
+    q.io.bpuEnqueue    := bpuEnqueue
+    q.io.bpuEnqueuePtr := predictionPtr
+  }
 
   // --------------------------------------------------------------------------------
   // Interaction with ICache and IFU
@@ -344,48 +347,74 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toBpu.redirect.bits.meta      := RegNext(metaQueueRedirect(redirectFtqIdxInAdvance.value))
   io.toBpu.redirectFromIFU         := ifuRedirect.valid
 
-  resolveQueue.io.backendRedirect    := backendRedirect.valid
-  resolveQueue.io.backendRedirectPtr := backendRedirect.bits.ftqIdx
+  Seq(resolveQueue, condResolveQueue).foreach { q =>
+    q.io.backendRedirect    := backendRedirect.valid
+    q.io.backendRedirectPtr := backendRedirect.bits.ftqIdx
+  }
 
   // --------------------------------------------------------------------------------
   // Resolve and train BPU
   // --------------------------------------------------------------------------------
 
-  resolveQueue.io.backendResolve := io.fromBackend.resolve
-  resolveQueue.io.ifuResolve     := ifuResolve
+  Seq(resolveQueue, condResolveQueue).foreach { q =>
+    q.io.backendResolve := io.fromBackend.resolve
+    q.io.ifuResolve     := ifuResolve
+  }
 
-  private val trainCache      = RegInit(0.U.asTypeOf(Valid(new BpuTrain)))
-  private val trainIndexCache = RegInit(0.U.asTypeOf(new FtqPtr))
+  private def fillTrainFromResolveEntry(train: BpuTrain, entry: ResolveEntry): Unit = {
+    train.meta := metaQueueResolve(entry.ftqIdx.value)
+    train.startPcVec.foreach { dup =>
+      dup.zipWithIndex.foreach { case (startPc, i) =>
+        if (i == 0)
+          startPc := entry.startPc // do not align startPcVec.head
+        else
+          startPc := getAlignedPc(entry.startPc + (i << FetchBlockAlignWidth).U)
+      }
+    }
+    train.branches     := entry.branches
+    train.perfMeta     := perfQueue(entry.ftqIdx.value).bpuPerf
+    train.debug_source := entry.debug_source
+  }
 
-  resolveQueue.io.bpuTrain.ready := !trainCache.valid || io.toBpu.train.fire
+  private val trainCache          = RegInit(0.U.asTypeOf(Valid(new BpuTrain)))
+  private val trainIndexCache     = RegInit(0.U.asTypeOf(new FtqPtr))
+  private val condTrainCache      = RegInit(0.U.asTypeOf(Valid(new BpuTrain)))
+  private val condTrainIndexCache = RegInit(0.U.asTypeOf(new FtqPtr))
+
+  resolveQueue.io.bpuTrain.ready     := !trainCache.valid || io.toBpu.train.fire
+  condResolveQueue.io.bpuTrain.ready := !condTrainCache.valid || io.toBpu.condTrain.fire
 
   private val flushTrainCache =
     backendRedirect.valid && trainCache.valid && trainIndexCache > backendRedirect.bits.ftqIdx
+  private val flushCondTrainCache =
+    backendRedirect.valid && condTrainCache.valid && condTrainIndexCache > backendRedirect.bits.ftqIdx
 
   when(flushTrainCache) {
     trainCache.valid := false.B
   }.elsewhen(resolveQueue.io.bpuTrain.fire) {
     val needFlush = backendRedirect.valid && resolveQueue.io.bpuTrain.bits.ftqIdx > backendRedirect.bits.ftqIdx
-    trainCache.valid     := !needFlush
-    trainCache.bits.meta := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
-    trainCache.bits.startPcVec.foreach { dup =>
-      dup.zipWithIndex.foreach { case (startPc, i) =>
-        if (i == 0)
-          startPc := resolveQueue.io.bpuTrain.bits.startPc // do not align startPcVec.head
-        else
-          startPc := getAlignedPc(resolveQueue.io.bpuTrain.bits.startPc + (i << FetchBlockAlignWidth).U)
-      }
-    }
-    trainCache.bits.branches     := resolveQueue.io.bpuTrain.bits.branches
-    trainCache.bits.perfMeta     := perfQueue(resolveQueue.io.bpuTrain.bits.ftqIdx.value).bpuPerf
-    trainCache.bits.debug_source := resolveQueue.io.bpuTrain.bits.debug_source
-    trainIndexCache              := resolveQueue.io.bpuTrain.bits.ftqIdx
+    trainCache.valid := !needFlush
+    fillTrainFromResolveEntry(trainCache.bits, resolveQueue.io.bpuTrain.bits)
+    trainIndexCache := resolveQueue.io.bpuTrain.bits.ftqIdx
   }.elsewhen(io.toBpu.train.fire) {
     trainCache.valid := false.B
   }
 
-  io.toBpu.train.valid := trainCache.valid && !flushTrainCache
-  io.toBpu.train.bits  := trainCache.bits
+  when(flushCondTrainCache) {
+    condTrainCache.valid := false.B
+  }.elsewhen(condResolveQueue.io.bpuTrain.fire) {
+    val needFlush = backendRedirect.valid && condResolveQueue.io.bpuTrain.bits.ftqIdx > backendRedirect.bits.ftqIdx
+    condTrainCache.valid := !needFlush
+    fillTrainFromResolveEntry(condTrainCache.bits, condResolveQueue.io.bpuTrain.bits)
+    condTrainIndexCache := condResolveQueue.io.bpuTrain.bits.ftqIdx
+  }.elsewhen(io.toBpu.condTrain.fire) {
+    condTrainCache.valid := false.B
+  }
+
+  io.toBpu.train.valid     := trainCache.valid && !flushTrainCache
+  io.toBpu.train.bits      := trainCache.bits
+  io.toBpu.condTrain.valid := condTrainCache.valid && !flushCondTrainCache
+  io.toBpu.condTrain.bits  := condTrainCache.bits
 
   // default next state receives s3 prediction meta
   perfQueue := s3PerfQueue

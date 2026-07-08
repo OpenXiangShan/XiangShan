@@ -26,7 +26,8 @@ import xiangshan.Resolve
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.SaturateCounter
 
-class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelper with HasCircularQueuePtrHelper {
+class ResolveQueue(forCondTrain: Boolean = false)(implicit p: Parameters)
+    extends FtqModule with HalfAlignHelper with HasCircularQueuePtrHelper {
 
   class ResolveQueueIO extends Bundle {
     val backendResolve: Vec[Valid[Resolve]]       = Input(Vec(backendParams.BrhCnt, Valid(new Resolve)))
@@ -83,15 +84,30 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     }
   }
 
+  private def keepBackendResolve(resolve: Resolve): Bool =
+    if (forCondTrain) {
+      // Keep non-conditional mispredicts as sentinels so TAGE/SC can still mask younger conditional branches.
+      resolve.attribute.isConditional
+    } else {
+      resolve.attribute.isIndirect || resolve.attribute.isConditional || resolve.mispredict
+    }
+
+  private def keepIfuResolve: Bool =
+    if (forCondTrain) {
+      false.B
+    } else {
+      true.B
+    }
+
   private val backendFilteredResolve = io.backendResolve.map { backendResolve =>
     val filteredResolve = Wire(Valid(new ResolveWithSource))
-    filteredResolve.valid := backendResolve.valid && !(backendResolve.bits.attribute.isDirect || backendResolve.bits.attribute.isReturn) &&
+    filteredResolve.valid := backendResolve.valid && keepBackendResolve(backendResolve.bits) &&
       !(backendRedirect.reduce(_ || _) && backendResolve.bits.ftqIdx > backendRedirectPtr)
     filteredResolve.bits.fromResolve(ResolveSource.Backend, backendResolve.bits)
     filteredResolve
   }
   private val ifuFilteredResolve = Wire(Valid(new ResolveWithSource))
-  ifuFilteredResolve.valid := io.ifuResolve.valid && !backendRedirect.reduce(_ || _)
+  ifuFilteredResolve.valid := io.ifuResolve.valid && keepIfuResolve && !backendRedirect.reduce(_ || _)
   ifuFilteredResolve.bits.fromResolve(ResolveSource.Ifu, io.ifuResolve.bits)
 
   private val resolve = backendFilteredResolve ++ Seq(ifuFilteredResolve)
@@ -180,9 +196,10 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   // We currently do not want resolve queue to be full as it has already been unacceptably large. Now it can be full
   // because it is a sequential queue, which results in multiple flushed entries staying in the queue and blocking new
   // entries from being enqueued. More sophisticated designs should be considered.
-  XSPerfAccumulate("resolveQueueFull", full)
-  XSPerfAccumulate("resolveQueueFullDropResolve", PopCount(resolve.map(_.valid && full)))
-  XSPerfAccumulate("backendResolve", PopCount(backendFilteredResolve.map(_.valid)))
-  XSPerfAccumulate("ifuResolve", ifuFilteredResolve.valid)
-  XSPerfAccumulate("bpuTrain", io.bpuTrain.valid)
+  private val perfPrefix = if (forCondTrain) "cond_" else ""
+  XSPerfAccumulate(perfPrefix + "resolveQueueFull", full)
+  XSPerfAccumulate(perfPrefix + "resolveQueueFullDropResolve", PopCount(resolve.map(_.valid && full)))
+  XSPerfAccumulate(perfPrefix + "backendResolve", PopCount(backendFilteredResolve.map(_.valid)))
+  XSPerfAccumulate(perfPrefix + "ifuResolve", ifuFilteredResolve.valid)
+  XSPerfAccumulate(perfPrefix + "bpuTrain", io.bpuTrain.valid)
 }
