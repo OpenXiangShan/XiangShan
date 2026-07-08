@@ -88,11 +88,11 @@ class DecodeStageImp(
     decodeChannels.in.mops(i).valid := in.mop(i).valid
     decodeChannels.in.mops(i).bits.info match {
       case info =>
-        info.rawInst := inMopBits.instr
-        info.vtype   := inMopBits.vtype
-        info.fromCSR := in.fromCSR
-        info.vstart  := in.vstart
-    }
+        info.rawInst   := inMopBits.instr
+        info.vtype     := inMopBits.vtype
+        info.fromCSR   := in.fromCSR
+        info.vstart    := in.vstart
+      }
     decodeChannels.in.mops(i).bits.ctrl match {
       case ctrl =>
         ctrl.foldpc           := inMopBits.foldpc
@@ -107,8 +107,9 @@ class DecodeStageImp(
         ctrl.ftqOffset        := inMopBits.ftqOffset
         ctrl.isLastInFtqEntry := inMopBits.isLastInFtqEntry
         ctrl.vtype            := inMopBits.vtype
-        ctrl.oldVType         := inMopBits.specvtype
+        ctrl.oldVType         := inMopBits.oldVType
         ctrl.rawInst          := inMopBits.instr
+        ctrl.uopNumOH         := inMopBits.uopNumOH
         ctrl.debug.foreach(_  := inMopBits.debug.get)
     }
   }
@@ -213,7 +214,6 @@ class DecodeStageImp(
 
   if (backendParams.debugEn) {
     out.toFrontend.uopBufferNum.get := decodeChannels.out.uopBufferNum.get
-    out.toFrontend.channelUopNum.get := decodeChannels.out.channelUopNum.get
     out.toFrontend.accNum.get := decodeChannels.out.accNum.get
   }
 
@@ -229,7 +229,7 @@ object DecodeStage {
 
     // The ready of mop means this mop is accepted by DecodeStage
     // Ready signal depends on valid
-    val mop = Vec(DecodeWidth, Flipped(DecoupledIO(new DecodeInUop)))
+    val mop = Vec(DecodeWidth, Flipped(DecoupledIO(new DecodeInMop)))
     // from FusionDecoder
     val fusion = Vec(DecodeWidth - 1, Input(Bool()))
 
@@ -259,7 +259,6 @@ object DecodeStage {
     val toFrontend = Output(new Bundle {
       val canAccept = Bool()
       val uopBufferNum = Option.when(backendParams.debugEn)(UopBufferNum())
-      val channelUopNum = Option.when(backendParams.debugEn)(Vec(DecodeWidth, NumUopOH()))
       val accNum = Option.when(backendParams.debugEn)(UInt(DecodeWidth.U.getWidth.W))
     })
 

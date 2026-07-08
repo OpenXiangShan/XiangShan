@@ -25,9 +25,7 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
 
   private val vtypeArchNext = WireInit(vtypeArch)
 
-  private val vtypeNewVec: Vec[VTypeNewEntry] = VecInit((0 until DecodeWidth).map { i =>
-     VTypeNewEntry.fromInst(in.insts(i))
-  })
+  private val vtypeNewVec   = in.vtypeEntries
 
   /**
    * Binary-tree parallel-prefix inclusive scan over 9 elements (seed + 8 slots).
@@ -51,7 +49,7 @@ class VTypeGen(implicit p: Parameters) extends XSModule {
    * s8---------------m08---------(4) vtypePrefix(8)
    */
   assert(DecodeWidth == 8, "VTypeGen: hardcoded binary-tree prefix requires DecodeWidth == 8")
-  private val s0 = VTypeNewEntry.fromVType(vtypeSpec)
+  private val s0 = Entry.fromVType(vtypeSpec)
   private val Seq(s1, s2, s3, s4, s5, s6, s7, s8) = (0 until 8).map(vtypeNewVec(_))
 
   // Step 1: merge adjacent pairs
@@ -131,7 +129,7 @@ object VTypeGen {
   }
 
   class In()(implicit p: Parameters) extends XSBundle {
-    val insts = Input(Vec(DecodeWidth, UInt(32.W)))
+    val vtypeEntries = Input(Vec(DecodeWidth, new Entry))
     val validNum = Input(UInt(DecodeWidth.U.getWidth.W))
     val walkToArchVType = Input(Bool())
     val walkVType   = Flipped(Valid(new VType))
@@ -147,79 +145,81 @@ object VTypeGen {
     val vtype    = Output(Vec(DecodeWidth, new VType))
     val oldVType = Output(Vec(DecodeWidth, new VType))
   }
-}
 
-// Per-slot decoded vtype info
-class VTypeNewEntry extends Bundle {
-  val replVl  = Bool() // this vset replaces the VL ratio (i.e. not keepVl x0,x0)
-  val isVset  = Bool() // this entry is a valid vset-family instruction
-  val vtype   = new VType
-  val vlratio = UInt(7.W)
+  class Entry extends Bundle {
+    val replVl  = Bool() // this vset replaces the VL ratio (i.e. not keepVl x0,x0)
+    val isVset  = Bool() // this entry is a valid vset-family instruction
+    val vtype   = new VType
+    val vlratio = UInt(7.W)
 
-  /** Merge two entries: this is in1 (older), in2 is the newer one. */
-  def merge(in2: VTypeNewEntry): VTypeNewEntry = {
-    val in1 = this
-    val out = Wire(new VTypeNewEntry)
+    /** Merge two entries: this is in1 (older), in2 is the newer one. */
+    def merge(in2: Entry): Entry = {
+      val in1 = this
+      val out = Wire(new Entry)
 
-    out.replVl  := in2.replVl || in1.replVl
-    out.isVset  := in2.isVset || in1.isVset
-    out.vtype   := Mux(in2.isVset, in2.vtype, in1.vtype)
-    out.vlratio := Mux(in2.replVl, in2.vlratio, in2.vlratio & in1.vlratio)
-    out
-  }
-
-  /** Convert to VType: OR `vill` with `vlratio == 0`; zero all fields when illegal. */
-  def toVType: VType = {
-    val res = WireInit(this.vtype)
-    val isIllegal = this.vtype.illegal || !this.vlratio.orR
-    res.illegal := isIllegal
-    when (isIllegal) {
-      res.vma := 0.U
-      res.vta := 0.U
-      res.vsew := 0.U
-      res.vlmul := 0.U
+      out.replVl  := in2.replVl || in1.replVl
+      out.isVset  := in2.isVset || in1.isVset
+      out.vtype   := Mux(in2.isVset, in2.vtype, in1.vtype)
+      out.vlratio := Mux(in2.replVl, in2.vlratio, in2.vlratio & in1.vlratio)
+      out
     }
-    res
+
+    /** Convert to VType: OR `vill` with `vlratio == 0`; zero all fields when illegal. */
+    def toVType: VType = {
+      val res = WireInit(this.vtype)
+      val isIllegal = this.vtype.illegal || !this.vlratio.orR
+      res.illegal := isIllegal
+      when (isIllegal) {
+        res.vma := 0.U
+        res.vta := 0.U
+        res.vsew := 0.U
+        res.vlmul := 0.U
+      }
+      res
+    }
+  }
+
+  // Per-slot decoded vtype info
+  object Entry {
+    def apply(): Entry = new Entry
+
+    // Compute a 7-bit one-hot vlratio as vlmul/vsew * 16.
+    def calVlratio(vtype: VType) : UInt = {
+      Mux(vtype.illegal || vtype.vsew(2) , 0.U, 1.U << ((vtype.vlmul ^ 4.U) -& vtype.vsew))(7,1)
+    }
+
+    def fromVType(vtype: VType): Entry = {
+      val out = Wire(new Entry)
+      out.replVl  := true.B
+      out.isVset  := false.B
+      out.vtype   := vtype
+      out.vlratio := calVlratio(vtype)
+      out
+    }
+    def fromInst(inst: UInt): Entry = {
+      val instField  = inst.asTypeOf(new XSInstBitFields)
+      val isVsetivli = Instructions.VSETIVLI === inst
+      val isVsetvli  = Instructions.VSETVLI  === inst
+      val isVseti    = isVsetivli || isVsetvli
+
+      val out = Wire(new Entry)
+      val vtype = out.vtype
+      vtype.vlmul   := instField.ZIMM_VSETVLI(2, 0)
+      vtype.vsew    := instField.ZIMM_VSETVLI(5, 3)
+      vtype.vta     := instField.ZIMM_VSETVLI(6)
+      vtype.vma     := instField.ZIMM_VSETVLI(7)
+      vtype.illegal := Mux(
+        isVsetivli,
+        instField.ZIMM_VSETIVLI(9, 8) =/= 0.U,
+        instField.ZIMM_VSETVLI(10, 8) =/= 0.U
+      )
+
+      val isKeepVl = isVsetvli && instField.RD === 0.U && instField.RS1 === 0.U
+      out.isVset  := isVseti
+      out.replVl  := isVseti && !isKeepVl
+      out.vlratio := Mux(isVseti, calVlratio(vtype), 127.U)
+      out
+    }
   }
 }
 
-object VTypeNewEntry {
-
-  // Compute a 7-bit one-hot vlratio as vlmul/vsew * 16.
-  def calVlratio(vtype: VType) : UInt = {
-    Mux(vtype.illegal || vtype.vsew(2) , 0.U, 1.U << ((vtype.vlmul ^ 4.U) -& vtype.vsew))(7,1)
-  }
-
-  def fromVType(vtype: VType): VTypeNewEntry = {
-    val out = Wire(new VTypeNewEntry)
-    out.replVl  := true.B
-    out.isVset  := false.B
-    out.vtype   := vtype
-    out.vlratio := calVlratio(vtype)
-    out
-  }
-  def fromInst(inst: UInt): VTypeNewEntry = {
-    val instField  = inst.asTypeOf(new XSInstBitFields)
-    val isVsetivli = Instructions.VSETIVLI === inst
-    val isVsetvli  = Instructions.VSETVLI  === inst
-    val isVseti    = isVsetivli || isVsetvli
-
-    val out = Wire(new VTypeNewEntry)
-    val vtype = out.vtype
-    vtype.vlmul   := instField.ZIMM_VSETVLI(2, 0)
-    vtype.vsew    := instField.ZIMM_VSETVLI(5, 3)
-    vtype.vta     := instField.ZIMM_VSETVLI(6)
-    vtype.vma     := instField.ZIMM_VSETVLI(7)
-    vtype.illegal := Mux(
-      isVsetivli,
-      instField.ZIMM_VSETIVLI(9, 8) =/= 0.U,
-      instField.ZIMM_VSETVLI(10, 8) =/= 0.U
-    )
-
-    val isKeepVl = isVsetvli && instField.RD === 0.U && instField.RS1 === 0.U
-    out.isVset  := isVseti
-    out.replVl  := isVseti && !isKeepVl
-    out.vlratio := Mux(isVseti, calVlratio(vtype), 127.U)
-    out
-  }
-}
