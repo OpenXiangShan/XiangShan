@@ -80,6 +80,7 @@ object LoadEntrance extends ChiselOHEnum {
   def isHWPrefetch(source: UInt): Bool = IsOneOf(source, prefetchHiConf, prefetchLoConf)
   def isVectorIssue(source: UInt): Bool = IsOneOf(source, vectorIssue)
   def isScalarIssue(source: UInt): Bool = IsOneOf(source, scalarIssue)
+  def isReplayHiPrio(source: UInt): Bool = IsOneOf(source, replayHiPrio)
 
   def findNameById(id: Int): String = {
     values.find(_.id == id).map(_.getName).getOrElse("UNKNOWN")
@@ -88,7 +89,7 @@ object LoadEntrance extends ChiselOHEnum {
 
 class LoadAccessType extends Bundle {
   val instrType = InstrType()
-  val pftType = PrefetchType() // only 
+  val pftType = PrefetchType() // only
   val pftCoh = PrefetchCoh()
 
   import InstrType._
@@ -164,7 +165,7 @@ object StoreStage extends Enumeration {
 trait OnStoreStage {
   import StoreStage._
   implicit val s: StoreStage
-  
+
   def is(sn: StoreStage): Boolean = s.id == sn.id
   def after(s1: StoreStage, s2: StoreStage): Boolean = s1.id >= s2.id
   def isS0: Boolean = is(StoreS0())

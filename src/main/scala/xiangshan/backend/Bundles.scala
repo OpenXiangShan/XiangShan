@@ -810,6 +810,15 @@ object Bundles {
     }
   }
 
+  class IssueQueueLRQWakeUpBundle(implicit p: Parameters) extends XSBundle {
+    val sqIdx = new SqPtr
+  }
+
+  class IssueQueueLRQWakeUpCancelBundle(implicit p: Parameters) extends XSBundle {
+    val og0Cancel = Bool()
+    val og1Cancel = Bool()
+  }
+
   class VPUCtrlSignals(implicit p: Parameters) extends XSBundle {
     // vtype
     val vill      = Bool()
@@ -1378,7 +1387,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val perfDebugInfo  = Option.when(backendParams.debugEn)(new PerfDebugInfo())
     val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
   }
-  
+
   class MemDebugBundle(implicit p: Parameters) extends XSBundle {
     val isMMIO = Option.when(backendParams.basicDebugEn)(Bool())
     val isNCIO = Option.when(backendParams.basicDebugEn)(Bool())

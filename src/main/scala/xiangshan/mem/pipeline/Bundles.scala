@@ -103,6 +103,7 @@ class LoadPipeBundle(
   def isNCReplay(): Bool = uncacheReplay.getOrElse(false.B) && ncReplay.getOrElse(false.B)
   def isMMIOReplay(): Bool = uncacheReplay.getOrElse(false.B) && !ncReplay.getOrElse(false.B)
   def isUncacheReplay(): Bool = uncacheReplay.getOrElse(false.B)
+  def isReplayHiPrioEntrance(): Bool = LoadEntrance.isReplayHiPrio(entrance)
 
   // vector
   val elemIdx = Option.when(param.hasVector)(UInt(elemIdxBits.W))
@@ -241,7 +242,7 @@ class StorePipeBundle(
   // StoreSet
   val ssid = Option.when(param.hasStoreSet)(UInt(SSIDWidth.W))
   val storeSetHit = Option.when(param.hasStoreSet)(Bool())
-  
+
   // Unalign handling
   val align = Option.when(param.hasUnalignHandling)(Bool())
   val unalignHead = Option.when(param.hasUnalignHandling)(Bool())
@@ -268,7 +269,7 @@ class StorePipeBundle(
   val mbIndex = Option.when(param.hasVector)(UInt(vlmBindexBits.W))
   val vecTriggerMask = Option.when(param.hasVector)(UInt((VLEN/8).W))
   val vecVaddrOffset = Option.when(param.hasVector)(UInt(VAddrBits.W))
-  
+
   def DontCareUnalign(): Unit = {
     align.get := DontCare
     unalignHead.get := DontCare

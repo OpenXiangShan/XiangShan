@@ -34,6 +34,9 @@ class IssueQueueIO()(implicit p: Parameters, params: IssueBlockParams) extends X
   val wakeupFromF2I: Option[ValidIO[IssueQueueIQWakeUpBundle]] = Option.when(params.needWakeupFromF2I)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val wakeupFromWBDelayed: MixedVec[ValidIO[IssueQueueWBWakeUpBundle]] = Flipped(params.genWBWakeUpSinkValidBundle)
   val wakeupFromIQDelayed: MixedVec[ValidIO[IssueQueueIQWakeUpBundle]] = Flipped(params.genIQWakeUpSinkValidBundle)
+  //to Mem, wake up LoadQueueReplay
+  val wakeupToLRQ = Option.when(params.isStAddrIQ || params.isStdIQ)(params.genIOWakeUpLRQValidBundle)
+  val wakeupToLRQCancel = Option.when(params.isStAddrIQ || params.isStdIQ)(params.genIOWakeUpCancelBundle)
   val vlFromIntIsZero = Input(Bool())
   val vlFromIntIsVlmax = Input(Bool())
   val vlFromVfIsZero = Input(Bool())
@@ -948,6 +951,41 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     dontTouch(io.deqDelay)
     dontTouch(deqBeforeDly)
   }
+  // sta wake up LRQ in og1, std wake up LRQ in og0.
+  io.wakeupToLRQ.foreach { case wakeupOption =>
+    wakeupOption.zipWithIndex.foreach { case (wakeup, i) =>
+      if (param.isStAddrIQ) { // sta iq
+        val wakeupValid = io.deqDelay(i).fire
+        wakeup.valid := RegNext(wakeupValid) // next cycle is og1
+        wakeup.bits.sqIdx := RegNext(entries.io.deqOg1Payload(i).sqIdx.get)
+      }
+      else { // std iq
+        val wakeupValid = deqBeforeDly(i).fire
+        wakeup.valid := RegNext(wakeupValid) // next cycle is og0
+        wakeup.bits.sqIdx := entries.io.deqOg1Payload(i).sqIdx.get
+      }
+
+    }
+  }
+  io.wakeupToLRQCancel.foreach { case wakeupCancelOption =>
+    wakeupCancelOption.zip(param.exuBlockParams.filter(_.hasStoreFu)).zipWithIndex.foreach { case ((wakeupCancel, exuParam), i) =>
+      if (param.isStAddrIQ) { // sta iq: wakeup reaches LRQ in og1; cancel can happen in og1/s0/s1.
+        val og0Fire = io.deqDelay(i).fire
+        val og1Fire = RegNext(og0Fire)
+        val og1LoadDependency = RegEnable(io.deqDelay(i).bits.loadDependency.get, og0Fire)
+        val og1LoadCancel = LoadShouldCancel(Some(og1LoadDependency), io.ldCancel)
+        wakeupCancel.og0Cancel := false.B
+        wakeupCancel.og1Cancel := RegNext(og1Fire && (io.og1Cancel(exuParam.exuIdx) || og1LoadCancel))
+      }
+      else { // std iq: wakeup reaches LRQ in og0; cancel can happen in og0/og1/s0/s1.
+        val og0Fire = RegNext(deqBeforeDly(i).fire)
+        val og1Fire = RegNext(og0Fire)
+        wakeupCancel.og0Cancel := RegNext(og0Fire && io.og0Cancel(exuParam.exuIdx))
+        wakeupCancel.og1Cancel := RegNext(og1Fire && io.og1Cancel(exuParam.exuIdx))
+      }
+    }
+  }
+
   io.wakeupToIQ.zipWithIndex.foreach { case (wakeup, i) =>
     if (wakeUpQueues(i).nonEmpty) {
       wakeup.valid := wakeUpQueues(i).get.io.deq.valid
