@@ -197,6 +197,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   storeQueue.io.toDCache.req                  <> io.cmoOpReq
   storeQueue.io.toDCache.resp                 <> io.cmoOpResp
   io.flushSbuffer.valid                       := storeQueue.io.sbufferCtrl.req.flush
+  io.flushSbuffer.isCmo                       := storeQueue.io.sbufferCtrl.req.flush
   storeQueue.io.sbufferCtrl.resp.empty        := io.flushSbuffer.empty
   io.diffStore.foreach{ case sink =>
     storeQueue.io.diffStore.foreach(sink := _)

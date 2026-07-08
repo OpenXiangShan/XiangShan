@@ -1350,6 +1350,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // something must have gone wrong
   assert(!(fenceFlush && atomicsFlush && cmoFlush))
   sbuffer.io.flush.valid := RegNext(fenceFlush || atomicsFlush || cmoFlush)
+  sbuffer.io.flush.isCmo := RegNext(cmoFlush)
   uncache.io.flush.valid := sbuffer.io.flush.valid
 
   // AtomicsUnit: AtomicsUnit will override other control signials,

@@ -570,6 +570,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
    * flush sbuffer IO Assign
    */
   io.flush_sbuffer.valid           := !sbufferEmpty && (state === s_flush_sbuffer_req || state === s_wait_flush_sbuffer_resp)
+  io.flush_sbuffer.isCmo           := false.B
 
   /**
   * update curPtr

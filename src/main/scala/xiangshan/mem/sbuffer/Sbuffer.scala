@@ -32,6 +32,7 @@ import difftest._
 
 class SbufferFlushBundle extends Bundle {
   val valid = Output(Bool())
+  val isCmo = Output(Bool())
   val empty = Input(Bool())
 }
 
@@ -531,10 +532,12 @@ class Sbuffer(implicit p: Parameters)
 
   // ---------------------- Send Dcache Req ---------------------
 
-  // Flush completion must also wait until store misses in MSHR are drained.
-  val sbuffer_empty = Cat(invalidMask).andR && io.mshr_store_empty
-  val sq_empty = !Cat(io.in.req.map(_.valid)).orR
-  val empty = sbuffer_empty && sq_empty
+  val sbuffer_empty = Cat(invalidMask).andR
+  // All_flush completion must also wait until store misses in MSHR are drained.
+  val sbuffer_mshr_empty = sbuffer_empty && io.mshr_store_empty
+  val inReq_empty = !Cat(io.in.req.map(_.valid)).orR
+  val cmo_empty = sbuffer_mshr_empty && inReq_empty
+  val all_empty = cmo_empty && io.sqempty
   val threshold = Wire(UInt(5.W)) // RegNext(io.csrCtrl.sbuffer_threshold +& 1.U)
   threshold := Constantin.createRecord(s"StoreBufferThreshold_${p(XSCoreParamsKey).HartId}", initValue = 9)
   val base = Wire(UInt(5.W))
@@ -547,8 +550,8 @@ class Sbuffer(implicit p: Parameters)
 
   XSDebug(p"ActiveCount[$ActiveCount]\n")
 
-  io.sbempty := GatedValidRegNext(empty)
-  io.flush.empty := GatedValidRegNext(empty && io.sqempty)
+  io.sbempty := GatedValidRegNext(cmo_empty)
+  io.flush.empty := GatedValidRegNext(all_empty)
   // lru.io.flush := sbuffer_state === x_drain_all && empty
   switch(sbuffer_state){
     is(x_idle){
@@ -561,7 +564,7 @@ class Sbuffer(implicit p: Parameters)
       }
     }
     is(x_drain_all){
-      when(empty){
+      when(Mux(io.flush.isCmo, cmo_empty, all_empty)){
         sbuffer_state := x_idle
       }
     }
@@ -582,7 +585,7 @@ class Sbuffer(implicit p: Parameters)
       }
     }
   }
-  XSDebug(p"sbuffer state:${sbuffer_state} do eviction:${do_eviction} empty:${empty}\n")
+  XSDebug(p"sbuffer state:${sbuffer_state} do eviction:${do_eviction} empty:${all_empty} cmo_empty:${cmo_empty}\n")
 
   def noSameBlockInflight(idx: UInt): Bool = {
     // stateVec(idx) itself must not be s_inflight
