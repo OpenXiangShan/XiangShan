@@ -136,7 +136,7 @@ class MergeCtrl(numEntries: Int)(implicit p: Parameters) extends VAGQModule {
     when(!mergeReadAlive || vrfReadRespAlive) {
       mergeReadValid := false.B
     }
-  }.elsewhen(io.vrfReadReq.fire) {
+  }.elsewhen(io.vrfReadReq.valid) {
     mergeReadValid    := true.B
     mergeReadEntryIdx := io.vrfReadReq.bits.entryIdx
     mergeReadRobIdx   := io.vrfReadReq.bits.robIdx
@@ -175,7 +175,7 @@ class MergeCtrlIO(numEntries: Int)(implicit p: Parameters) extends VAGQBundle {
   val lsqEmptyResp = Flipped(Valid(new VAGQResp))
   val reqUpdate    = Vec(VAGQConstants.MergeRespWidth, Valid(new VAGQReqBitmapUpdate))
   val stateUpdate  = Valid(new VAGQEntryStateUpdate)
-  val vrfReadReq   = Decoupled(new VAGQVRFReadReq)
+  val vrfReadReq   = Valid(new VAGQVRFReadReq)
   val vrfReadResp  = Flipped(Valid(new VAGQVRFReadResp))
   val vrfWriteReq  = ValidIO(new VAGQVRFWriteReq)
   val robWriteback = Decoupled(new VAGQWritebackReq)

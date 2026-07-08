@@ -70,66 +70,6 @@ class SplitCtrl(numEntries: Int)(implicit p: Parameters) extends VAGQModule {
 
   private val activeOffsets = Seq(activeLowOffset, activeHighOffset)
 
-
-  private val storeReadValid    = RegInit(false.B)
-  private val storeReadEntryIdx = RegInit(0.U(vagqEntryIdxWidth.W))
-  private val storeReadRobIdx   = RegInit(0.U.asTypeOf(new RobPtr))
-  private val storeReadEntry    = io.in(storeReadEntryIdx)
-  private val storeReadAlive    = storeReadValid &&
-                                  storeReadEntry.entry.state === VAGQEntryState.split &&
-                                  storeReadEntry.entry.isStore &&
-                                  storeReadEntry.entry.robIdx === storeReadRobIdx &&
-                                  entryAlive(storeReadEntry.entry, io.redirect)
-
-  private val storeDataValid    = RegInit(false.B)
-  private val storeDataEntryIdx = RegInit(0.U(vagqEntryIdxWidth.W))
-  private val storeDataRobIdx   = RegInit(0.U.asTypeOf(new RobPtr))
-  private val storeData         = Reg(UInt(VLEN.W))
-  private val storeDataEntry    = io.in(storeDataEntryIdx)
-  private val storeDataAlive    = storeDataValid &&
-                                  storeDataEntry.entry.state === VAGQEntryState.split &&
-                                  storeDataEntry.entry.isStore &&
-                                  storeDataEntry.entry.robIdx === storeDataRobIdx &&
-                                  entryAlive(storeDataEntry.entry, io.redirect)
-  private val selectedStoreDataReady = storeDataAlive &&
-                                      storeDataEntryIdx === activeInput.entryIdx &&
-                                      storeDataRobIdx === activeInput.entry.robIdx
-
-  private val activeNeedsStoreData = hasActiveReq && activeInput.entry.isStore && !selectedStoreDataReady
-  private val activeReqDataReady = !activeInput.entry.isStore || selectedStoreDataReady
-
-  io.vrfReadReq.valid         := activeNeedsStoreData && !storeReadValid
-  io.vrfReadReq.bits          := 0.U.asTypeOf(io.vrfReadReq.bits)
-  io.vrfReadReq.bits.entryIdx := activeInput.entryIdx
-  io.vrfReadReq.bits.robIdx   := activeInput.entry.robIdx
-  io.vrfReadReq.bits.psrc     := activeInput.entry.psrc2
-
-  private val storeReadRespAlive = io.vrfReadResp.valid &&
-    storeReadAlive &&
-    io.vrfReadResp.bits.entryIdx === storeReadEntryIdx &&
-    io.vrfReadResp.bits.robIdx === storeReadRobIdx
-
-  when(storeReadValid) {
-    when(!storeReadAlive || storeReadRespAlive) {
-      storeReadValid := false.B
-    }
-  }.elsewhen(io.vrfReadReq.fire) {
-    storeReadValid    := true.B
-    storeReadEntryIdx := io.vrfReadReq.bits.entryIdx
-    storeReadRobIdx   := io.vrfReadReq.bits.robIdx
-  }
-
-  when(storeDataValid && !storeDataAlive) {
-    storeDataValid := false.B
-  }
-
-  when(storeReadRespAlive) {
-    storeDataValid    := true.B
-    storeDataEntryIdx := io.vrfReadResp.bits.entryIdx
-    storeDataRobIdx   := io.vrfReadResp.bits.robIdx
-    storeData         := io.vrfReadResp.bits.data
-  }
-
   private val activeIssueMasks = Wire(Vec(VAGQConstants.ActiveIssueWidth, UInt(vagqFlowBytes.W)))
   activeIssueMasks(0) := activeLowIssueMask
   activeIssueMasks(1) := Mux(
@@ -139,8 +79,8 @@ class SplitCtrl(numEntries: Int)(implicit p: Parameters) extends VAGQModule {
   )
 
   private val activeLaneValids = Seq(
-    hasActiveReq && activeReqDataReady,
-    hasActiveReq && activeCanIssueSecond && activeReqDataReady
+    hasActiveReq,
+    hasActiveReq && activeCanIssueSecond
   )
 
   for (lane <- 0 until VAGQConstants.ActiveIssueWidth) {
@@ -160,7 +100,7 @@ class SplitCtrl(numEntries: Int)(implicit p: Parameters) extends VAGQModule {
     io.lsuReq(lane).bits.lqIdx       := activeInput.entry.meta.lqIdx + activeElemIdx
     io.lsuReq(lane).bits.sqIdx       := activeInput.entry.meta.sqIdx + activeElemIdx
     io.lsuReq(lane).bits.vaddr := activeAddrGen(lane).out.vaddr
-    io.lsuReq(lane).bits.data  := Mux(selectedStoreDataReady, storeFlowData(storeData, activeElemIdx, activeAlignedType), 0.U(VLEN.W))
+    io.lsuReq(lane).bits.data  := 0.U(VLEN.W)
     io.lsuReq(lane).bits.pdest := activeInput.entry.pdest
     io.lsuReq(lane).bits.nf    := activeInput.entry.nf
   }
@@ -199,8 +139,6 @@ class SplitCtrlIO(numEntries: Int)(implicit p: Parameters) extends VAGQBundle {
   val redirect    = Flipped(Valid(new Redirect))
   val lsuReq      = Vec(VAGQConstants.ActiveIssueWidth, Decoupled(new VAGQLsuReq))
   val lsqEmptyReq = Decoupled(new VAGQLsqEmptyReq)
-  val vrfReadReq  = Decoupled(new VAGQVRFReadReq)
-  val vrfReadResp = Flipped(Valid(new VAGQVRFReadResp))
   val update      = Vec(VAGQConstants.SplitUpdateWidth, Valid(new VAGQReqBitmapUpdate))
 }
 
