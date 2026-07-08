@@ -70,7 +70,6 @@ class BackendToIBufBundle(implicit p: Parameters) extends XSBundle {
   val fromCSR = new CSRToDecode
   val vstart = Vstart()
   val uopBufferNum = Option.when(p(DebugOptionsKey).EnableDifftest)(UopBufferNum())
-  val channelUopNum = Option.when(p(DebugOptionsKey).EnableDifftest)(Vec(DecodeWidth, NumUopOH()))
   val accNum = Option.when(p(DebugOptionsKey).EnableDifftest)(UInt(log2Up(DecodeWidth + 1).W))
 }
 
@@ -499,7 +498,6 @@ class CtrlBlockImp(
 
   if (debugEn) {
     io.frontend.toIBuf.uopBufferNum.get := decode.out.toFrontend.uopBufferNum.get
-    io.frontend.toIBuf.channelUopNum.get := decode.out.toFrontend.channelUopNum.get
     io.frontend.toIBuf.accNum.get := decode.out.toFrontend.accNum.get
   }
 

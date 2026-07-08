@@ -8,7 +8,7 @@ import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.decode.opcode.OpcodeTraits._
 import sourcecode.{Name => SourceName}
 import top.ArgParser
-import xiangshan.{XSCoreParameters, XSCoreParamsKey}
+import xiangshan.{HasXSParameter, XSCoreParameters, XSCoreParamsKey}
 import xiangshan.CommitType
 import xiangshan.backend.decode.isa.PseudoInstructions
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
@@ -33,7 +33,7 @@ import scala.language.implicitConversions
 @instantiable
 class PseudoDecodeChannel(
   instSeq: Seq[InstPattern] = PseudoDecodeChannel.uopTable.keys.toSeq
-)(implicit val p: Parameters) extends Module with HasVectorSettings {
+)(implicit val p: Parameters) extends Module with HasVectorSettings with HasXSParameter {
   import PseudoDecodeChannel._
 
   @public

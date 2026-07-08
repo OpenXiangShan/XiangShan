@@ -40,6 +40,7 @@ import xiangshan.backend.fu.NewCSR.Tdata1Bundle
 import xiangshan.backend.fu.NewCSR.Tdata2Bundle
 import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rob.RobBundles.RobCommitEntryBundle
+import xiangshan.backend.vector.Decoder.NumUopOH
 import xiangshan.backend.rob.RobPtr
 import xiangshan.cache.HasDCacheParameters
 import xiangshan.mem.LqPtr
@@ -110,7 +111,8 @@ class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
   val isLastInFtqEntry = Bool()
   val vtype            = VType()
-  val specvtype        = VType()
+  val oldVType         = VType()
+  val uopNumOH         = NumUopOH()
   val debug_seqNum = InstSeqNum()
 }
 

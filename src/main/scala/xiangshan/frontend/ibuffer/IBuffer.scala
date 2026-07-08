@@ -102,7 +102,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val outputEntries     = RegInit(VecInit.fill(DecodeWidth)(0.U.asTypeOf(Valid(new IBufOutEntry))))
   private val outputEntriesNext = Wire(outputEntries.cloneType)
 
-  private val OEValidNum =
+  private val OutputEntriesValidNum =
     PriorityMuxDefault(outputEntries.map(_.valid).zip(Seq.range(1, DecodeWidth + 1).map(_.U)).reverse, 0.U)
 
   // Between Bank
@@ -140,24 +140,15 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   predInstAccept.io.outputEntries := outputEntries
   predInstAccept.io.flush         := io.flush
   predInstAccept.io.decodeAccept  := decodeCanAccept
-  predInstAccept.io.fromCSR       := io.fromBackend.fromCSR
-  predInstAccept.io.vstart        := io.fromBackend.vstart
 
   private val predAccNum   = predInstAccept.io.predAccNum
 
-  private val OEOutNum = Mux(decodeCanAccept, predAccNum.min(OEValidNum), 0.U)
-  private val OEValidNumKeep = OEValidNum - OEOutNum
+  private val OutputEntriesOutNum = Mux(decodeCanAccept, predAccNum.min(OutputEntriesValidNum), 0.U)
+  private val OutputEntriesValidNumKeep = OutputEntriesValidNum - OutputEntriesOutNum
 
-  private val OEInCapacity = DecodeWidth.U - OEValidNumKeep
+  private val OutputEntriesInCapacity = DecodeWidth.U - OutputEntriesValidNumKeep
 
   if (backendParams.debugEn) {
-    XSError(
-      decodeCanAccept &&
-      predInstAccept.io.predUopNumOH.asUInt =/= io.fromBackend.channelUopNum.get.asUInt,
-      "PredInstAccept predUopNumOH mismatch: pred=%b backend=%b\n",
-      predInstAccept.io.predUopNumOH.asUInt,
-      io.fromBackend.channelUopNum.get.asUInt
-    )
     XSError(
       decodeCanAccept && predInstAccept.io.predAccNum =/= io.fromBackend.accNum.get,
       "PredInstAccept predAccNum mismatch: pred=%d backend=%d\n",
@@ -182,7 +173,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       (io.in.bits.valid.asBools lazyZip io.in.bits.enqEnable.asBools lazyZip io.in.bits.instrs).map {
         case (valid, enqEnable, inst) =>
           valid && enqEnable && Seq(VSETIVLI, VSETVL, VSETVLI).map(_ === inst).reduce(_ || _)
-      }.reduce(_ || _)
+      }.take(MaxBypassNum).reduce(_ || _)
 
   private val numTryEnq = WireDefault(0.U)
   private val numEnq    = Mux(io.in.fire, numTryEnq, 0.U)
@@ -235,7 +226,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   private val currentException  = Wire(new IBufExceptionEntry).fromFetch(io.in.bits)
   private val enqExceptionIndex = PriorityEncoder(io.in.bits.exceptionMask)
 
-  private val OEWillNotFull = OEValidNumKeep =/= DecodeWidth.U
+  private val OutputEntriesWillNotFull = OutputEntriesValidNumKeep =/= DecodeWidth.U
   // when using bypass, bypassed entries do not enqueue
   // Timing optimization: only count enqEnable up to MaxBypassNum.
   // - Higher-index enqEnable bits arrive later (longer datapath).
@@ -249,7 +240,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       useBypass,
       maybeBypassNum,
       numValid
-    ).min(OEInCapacity),
+    ).min(OutputEntriesInCapacity),
     0.U
   )
 
@@ -305,6 +296,17 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
 
   // Non-bypass path: deqEntries → deqOutEntries
   // VTypeGen is fed from this path to keep bypass out of the vtype timing path.
+
+  private val predUopNumMod = Module(new PredUopNum)
+  for (i <- 0 until DecodeWidth) {
+    predUopNumMod.io.valid(i) := Mux(useBypass, bypassEntries(i).valid, deqEntries(i).valid)
+    predUopNumMod.io.inst(i)  := Mux(useBypass, bypassEntries(i).bits.inst, deqEntries(i).bits.inst)
+    predUopNumMod.io.vtype(i) := Mux(useBypass, vtypeGen.out.oldVType(0), vtypeGen.out.vtype(i))
+  }
+  predUopNumMod.io.fromCSR := io.fromBackend.fromCSR
+  predUopNumMod.io.vstart  := io.fromBackend.vstart
+  val predUopNumOH = predUopNumMod.io.uopNumOH
+
   private val deqOutEntries = Wire(outputEntriesNext.cloneType)
   for (i <- 0 until DecodeWidth) {
     deqOutEntries(i).valid := deqEntries(i).valid
@@ -316,6 +318,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       ),
       vtypeGen.out.vtype(i),
       vtypeGen.out.oldVType(i),
+      predUopNumOH(i),
     )
   }
 
@@ -329,21 +332,22 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
       ),
       vtypeGen.out.oldVType(0),
       vtypeGen.out.oldVType(0),
+      predUopNumOH(i),
     )
   }
 
   private val toOutputEntries = Mux(useBypass, bypassOutEntries, deqOutEntries)
 
   for (i <- 0 until DecodeWidth) {
-    when(OEWillNotFull && !resumingVType) {
+    when(OutputEntriesWillNotFull && !resumingVType) {
       outputEntriesNext(i) := Mux(
-        i.U < OEValidNumKeep,
-        outputEntries(i.U + OEOutNum),
-        toOutputEntries(i.U - OEValidNumKeep)
-        )
-      }.otherwise {
-        outputEntriesNext(i) := outputEntries(i)
-      }
+        i.U < OutputEntriesValidNumKeep,
+        outputEntries(i.U + OutputEntriesOutNum),
+        toOutputEntries(i.U - OutputEntriesValidNumKeep)
+      )
+    }.otherwise {
+      outputEntriesNext(i) := outputEntries(i)
+    }
   }
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -357,7 +361,7 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   vtypeGen.in.commitVType     := io.fromBackend.commitVType
   vtypeGen.in.validNum        := Mux(useBypass, 0.U, numDeq)
   for (i <- 0 until DecodeWidth) {
-    vtypeGen.in.insts(i) := deqEntries(i).bits.inst
+    vtypeGen.in.vtypeEntries(i) := deqEntries(i).bits.vtypeEntry
   }
 
   outputEntries := outputEntriesNext
@@ -499,10 +503,10 @@ class IBuffer(implicit p: Parameters) extends IBufferModule with HasCircularQueu
   dontTouch(enqPtr)
   dontTouch(deqPtr)
 
-  dontTouch(OEValidNum)
-  dontTouch(OEOutNum)
-  dontTouch(OEValidNumKeep)
-  dontTouch(OEInCapacity)
+  dontTouch(OutputEntriesValidNum)
+  dontTouch(OutputEntriesOutNum)
+  dontTouch(OutputEntriesValidNumKeep)
+  dontTouch(OutputEntriesInCapacity)
 
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // TopDown

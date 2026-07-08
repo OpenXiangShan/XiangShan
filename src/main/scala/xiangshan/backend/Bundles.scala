@@ -10,6 +10,7 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.datapath.{DataSource, WakeUpConfig}
 import xiangshan.backend.datapath.WbConfig.PregWB
 import xiangshan.backend.decode.ImmUnion
+import xiangshan.backend.vector.Decoder.NumUopOH
 import xiangshan.backend.exu.ExeUnitParams
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
@@ -101,8 +102,8 @@ object Bundles {
     sink.v0Wen.  foreach(_ := source.toV0Rf.map(_.valid).getOrElse(false.B))
   }
 
-  // Frontend --[CtrlBlock]--> DecodeInUop
-  class DecodeInUop(implicit p: Parameters) extends XSBundle {
+  // Frontend --[CtrlBlock]--> DecodeInMop
+  class DecodeInMop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.fromFrontendSet)
     val satpFlushFirstFetchFault = Bool()
@@ -116,26 +117,28 @@ object Bundles {
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val isLastInFtqEntry = Bool()
     val vtype            = new VType()
-    val specvtype        = new VType()
+    val oldVType        = new VType()
     val instr = UInt(32.W)
-    val debug = OptionWrapper(backendParams.debugEn, new DecodeInUopDebug())
+    val uopNumOH = NumUopOH()
+    val debug = OptionWrapper(backendParams.debugEn, new DecodeInMopDebug())
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       connectSamePort(this, source)
       this.isRVC := source.isRvc
       this.isFetchMalAddr := source.backendException
       this.vtype            := source.vtype
-      this.specvtype        := source.specvtype
+      this.oldVType         := source.oldVType
+      this.uopNumOH         := source.uopNumOH
       this.debug.foreach(_.pc := source.pc)
       this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
     }
   }
-  class DecodeInUopDebug(implicit p: Parameters) extends XSBundle {
+  class DecodeInMopDebug(implicit p: Parameters) extends XSBundle {
     val pc = UInt(VAddrBits.W)
     val debug_seqNum = InstSeqNum()
   }
 
-  // DecodeInUop --[Decode]--> DecodeOutUop
+  // DecodeInMop --[Decode]--> DecodeOutUop
   class DecodeOutUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
     val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
@@ -197,7 +200,7 @@ object Bundles {
       fuType === FuType.alu.U && fuOpType === ALUOpType.or && selImm === SelImm.IMM_I && ldest === 0.U
     }
 
-    def connectDecodeInUop(source: DecodeInUop): Unit = {
+    def connectDecodeInMop(source: DecodeInMop): Unit = {
       (this: Data).waiveAll :<= (source: Data).waiveAll
       this.exceptionVec extendFrom source.exceptionVec
       this.debug.foreach(x => connectSamePort(x, source.debug.get))

@@ -12,7 +12,6 @@ import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.fu.vector.Bundles.{VType, Vstart}
 import xiangshan.backend.vector.Decoder.DecodeChannel.SimpleDecodeChannel.SimpleDecodeChannelOutputUop
 import xiangshan.backend.vector.Decoder.DecodeChannel.VectorDecodeChannel.VecDecodeChannelOutputUop
-import xiangshan.backend.vector.Decoder.DecodeChannel.SimpleDecodeChannel.SimpleDecodeChannelOutputUop
 import xiangshan.backend.vector.Decoder.DecodeChannel._
 import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.Types._
@@ -25,8 +24,10 @@ class DecodeChannelsCore(
   numM2M4M8Channel: (Int, Int, Int) = (8, 8, 8),
   postfix: String = "",
 )(
-  implicit p: Parameters
-) extends Module with HasVectorSettings with HasSimpleSettings {
+  implicit val p: Parameters
+) extends Module with HasVectorSettings with HasXSParameter {
+  private val maxSimpleSplitUopNum = 2
+
   val MaxM2UopIdx = numM2M4M8Channel._1
   val MaxM4UopIdx = numM2M4M8Channel._2
   val MaxM8UopIdx = numM2M4M8Channel._3
@@ -54,7 +55,6 @@ class DecodeChannelsCore(
   val in = IO(new Bundle {
     val mops = Input(Vec(mopWidth, Valid(new Bundle {
       val info = new DecodeChannelInput
-      val ctrl = new MopCtrlBundle
     } )))
   })
 
@@ -151,5 +151,19 @@ class DecodeChannelsCore(
     out.illegalChannel(i) := illegalChannelOut(i)
     out.vecUopNumOH(i) := vecUopNumOHs(i)
     out.simUopNumOH(i) := simpleUopNumOHs(i)
+  }
+
+  // Channel exclusivity invariants (relied on by uopNumOH selection):
+  // - at most one of {vset, vector, simple} channels is valid for a valid mop
+  // - if the pseudo channel is valid, the simple channel must also be valid
+  for (i <- 0 until mopWidth) {
+    val vecValid  = vecChannelOut(i).head.valid
+    val vsetValid = vsetChannelOut(i).valid
+    val simValid  = simChannelOut(i).head.valid
+    val psdValid  = psdChannelOut(i).valid
+    assert(!instValids(i) || PopCount(Seq(vsetValid, vecValid, simValid)) <= 1.U,
+      "DecodeChannelsCore: at most one of vset/vector/simple channels may be valid")
+    assert(!instValids(i) || !psdValid || simValid,
+      "DecodeChannelsCore: pseudo channel valid implies simple channel valid")
   }
 }

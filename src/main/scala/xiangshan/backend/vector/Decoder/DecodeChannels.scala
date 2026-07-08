@@ -6,7 +6,7 @@ import org.chipsalliance.cde.config.Parameters
 import top.{ArgParser, Generator}
 import utils.BundleUtils.makeValid
 import xiangshan._
-import xiangshan.backend.Bundles.{DecodeInUopDebug, UopIdx}
+import xiangshan.backend.Bundles.{DecodeInMopDebug, UopIdx}
 import xiangshan.backend.decode.isa.Extensions._
 import xiangshan.backend.decode.isa.bitfield.{BitFieldsVec, Riscv32BitInst}
 import xiangshan.backend.decode.opcode.Opcode
@@ -24,6 +24,7 @@ import xiangshan.backend.vector.Decoder.Split.VecUopSplitModule
 import xiangshan.backend.vector.Decoder.Types._
 import xiangshan.backend.vector._
 import xiangshan.backend.vector.util.ScalaTypeExt.BooleanToExt
+import xiangshan.backend.vector.util.Select.Mux1HLookUp
 import xiangshan.backend.vector.util.Verilog
 import xiangshan.frontend.ftq.FtqPtr
 
@@ -75,7 +76,6 @@ class DecodeChannels(
       val ctrl = new MopCtrlBundle
     }))
     val uopBufferNum = Option.when(p(DebugOptionsKey).EnableDifftest)(UopBufferNum())
-    val channelUopNum = Option.when(p(DebugOptionsKey).EnableDifftest)(Vec(mopWidth, NumUopOH()))
     val accNum = Option.when(p(DebugOptionsKey).EnableDifftest)(UInt(log2Up(mopWidth + 1).W))
   }))
 
@@ -85,16 +85,15 @@ class DecodeChannels(
   decodeChannelsCore.in.mops.zip(in.mops).foreach { case (corePort, extPort) =>
     corePort.valid := extPort.valid
     corePort.bits.info := extPort.bits.info
-    corePort.bits.ctrl := extPort.bits.ctrl
   }
 
-  val vecChannelOut     = (0 until mopWidth).map(i => decodeChannelsCore.out.vecChannel(i))
+  val vecChannelOut: Seq[Vec[ValidIO[DecodeChannelOutput]]] = (0 until mopWidth).map(i => decodeChannelsCore.out.vecChannel(i))
   val vsetChannelOut    = (0 until mopWidth).map(i => decodeChannelsCore.out.vsetChannel(i))
-  val simChannelOut     = (0 until mopWidth).map(i => decodeChannelsCore.out.simChannel(i))
+  val simChannelOut: Seq[Vec[ValidIO[DecodeChannelOutput]]] = (0 until mopWidth).map(i => decodeChannelsCore.out.simChannel(i))
   val psdChannelOut     = (0 until mopWidth).map(i => decodeChannelsCore.out.psdChannel(i))
   val illegalChannelOut = (0 until mopWidth).map(i => decodeChannelsCore.out.illegalChannel(i))
   val vecUopNumOHs      = (0 until mopWidth).map(i => decodeChannelsCore.out.vecUopNumOH(i))
-  val simpleUopNumOHs = (0 until mopWidth).map(i => decodeChannelsCore.out.simUopNumOH(i))
+  val simpleUopNumOHs   = (0 until mopWidth).map(i => decodeChannelsCore.out.simUopNumOH(i))
 
   val uopBufferUpdateVec = Wire(Vec(uopBufferLength, Bool()))
   val uopBufferUpdate = Cat(uopBufferUpdateVec).orR
@@ -143,8 +142,12 @@ class DecodeChannels(
    */
 
   uopBufferCtrlDecoder.in.uopBufferNum := uopBufferNum
-  uopBufferCtrlDecoder.in.channelUopNum := {
-    for (i <- 0 until mopWidth) yield {
+
+  val gatedChannelUopNum = VecInit(in.mops.map(m => Mux(m.valid, m.bits.ctrl.uopNumOH, NumUopOH.N0)))
+  uopBufferCtrlDecoder.in.channelUopNum := gatedChannelUopNum
+
+  if (p(XSCoreParamsKey).backendParams.debugEn) {
+    val recomputedChannelUopNum = (0 until mopWidth).map { i =>
       Mux(
         !instValids(i),
         NumUopOH.N0,
@@ -156,11 +159,20 @@ class DecodeChannels(
             NumUopOH.N1,
             Mux1H(Seq(
               vecChannelOut(i).head.valid -> vecUopNumOHs(i),
-              vsetChannelOut(i).valid -> NumUopOH.N1,
+              vsetChannelOut(i).valid     -> NumUopOH.N1,
               simChannelOut(i).head.valid -> simpleUopNumOHs(i),
             )),
           ),
         ),
+      )
+    }
+    for (i <- 0 until mopWidth) {
+      assert(
+        gatedChannelUopNum(i) === recomputedChannelUopNum(i),
+        "channelUopNum mismatch at mop %d: fromInput=%b recomputed=%b\n",
+        i.U,
+        gatedChannelUopNum(i),
+        recomputedChannelUopNum(i),
       )
     }
   }
@@ -231,7 +243,6 @@ class DecodeChannels(
 
   if (p(DebugOptionsKey).EnableDifftest) {
     out.uopBufferNum.get := uopBufferNum
-    out.channelUopNum.get := uopBufferCtrlDecoder.in.channelUopNum
     out.accNum.get := uopBufferCtrlDecoder.out.accNum
   }
 }
@@ -595,7 +606,8 @@ class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
   val vtype            = VType()
   val oldVType         = VType()
   val rawInst          = UInt(32.W)
-  val debug            = Option.when(backendParams.debugEn)(new DecodeInUopDebug())
+  val uopNumOH         = NumUopOH()
+  val debug            = Option.when(backendParams.debugEn)(new DecodeInMopDebug())
 }
 
 class SrcInfo extends Bundle {

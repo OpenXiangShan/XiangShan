@@ -21,8 +21,6 @@ package object vector {
   }
 
   trait HasVectorSettings {
-    def VLEN = 128
-    def VLENB: Int = VLEN / 8
     // non-configurable parameters
     def nVecLogReg = 32
     def maxSrc = 5

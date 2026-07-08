@@ -29,7 +29,11 @@ import xiangshan._
 @instantiable
 class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters) extends Module with HasSimpleSettings with HasXSParameter {
   import xiangshan.backend.vector.Decoder.DecodeFields.SimpleDecodeChannel._
-  import SimpleDecodeChannel._
+  import xiangshan.backend.vector.Decoder.DecodeChannel.SimpleDecodeChannel._
+
+  // For now, we only support 2 uop per instruction, so set the maxSplitUopNum to 2. In the future, if we want to support
+  // more uops per instruction, we can increase this number and modify the decode table accordingly.
+  def maxSplitUopNum = 2
 
   @public val in = IO(Input(new DecodeChannelInput))
   @public val out = IO(Output(new SimpleDecodeChannelOutput(maxSimpleSplitUopNum)))
