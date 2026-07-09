@@ -61,6 +61,7 @@ class itlb_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_fetch_to_mem_itlb_resp_bits_s1_pf;
     rand bit io_fetch_to_mem_itlb_resp_bits_s1_af;
     rand bit [37:0] io_fetch_to_mem_itlb_resp_bits_s2_entry_tag;
+    rand bit [13:0] io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid;
     rand bit io_fetch_to_mem_itlb_resp_bits_s2_entry_n;
     rand bit [1:0] io_fetch_to_mem_itlb_resp_bits_s2_entry_pbmt;
     rand bit [37:0] io_fetch_to_mem_itlb_resp_bits_s2_entry_ppn;
@@ -125,6 +126,7 @@ class itlb_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_fetch_to_mem_itlb_resp_bits_s1_pf_cons;
     extern constraint default_io_fetch_to_mem_itlb_resp_bits_s1_af_cons;
     extern constraint default_io_fetch_to_mem_itlb_resp_bits_s2_entry_tag_cons;
+    extern constraint default_io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid_cons;
     extern constraint default_io_fetch_to_mem_itlb_resp_bits_s2_entry_n_cons;
     extern constraint default_io_fetch_to_mem_itlb_resp_bits_s2_entry_pbmt_cons;
     extern constraint default_io_fetch_to_mem_itlb_resp_bits_s2_entry_ppn_cons;
@@ -198,6 +200,7 @@ class itlb_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_fetch_to_mem_itlb_resp_bits_s1_pf, UVM_ALL_ON);
         `uvm_field_int(io_fetch_to_mem_itlb_resp_bits_s1_af, UVM_ALL_ON);
         `uvm_field_int(io_fetch_to_mem_itlb_resp_bits_s2_entry_tag, UVM_ALL_ON);
+        `uvm_field_int(io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid, UVM_ALL_ON);
         `uvm_field_int(io_fetch_to_mem_itlb_resp_bits_s2_entry_n, UVM_ALL_ON);
         `uvm_field_int(io_fetch_to_mem_itlb_resp_bits_s2_entry_pbmt, UVM_ALL_ON);
         `uvm_field_int(io_fetch_to_mem_itlb_resp_bits_s2_entry_ppn, UVM_ALL_ON);
@@ -417,6 +420,10 @@ constraint itlb_agent_agent_xaction::default_io_fetch_to_mem_itlb_resp_bits_s2_e
 
 }
 
+constraint itlb_agent_agent_xaction::default_io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid_cons{
+
+}
+
 
 
 constraint itlb_agent_agent_xaction::default_io_fetch_to_mem_itlb_resp_bits_s2_entry_n_cons{
@@ -549,6 +556,7 @@ function string itlb_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_fetch_to_mem_itlb_resp_bits_s1_pf = 0x%0h ",pkt_str,this.io_fetch_to_mem_itlb_resp_bits_s1_pf);
     pkt_str = $sformatf("%sio_fetch_to_mem_itlb_resp_bits_s1_af = 0x%0h ",pkt_str,this.io_fetch_to_mem_itlb_resp_bits_s1_af);
     pkt_str = $sformatf("%sio_fetch_to_mem_itlb_resp_bits_s2_entry_tag = 0x%0h ",pkt_str,this.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag);
+    pkt_str = $sformatf("%sio_fetch_to_mem_itlb_resp_bits_s2_entry_vmid = 0x%0h ",pkt_str,this.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid);
     pkt_str = $sformatf("%sio_fetch_to_mem_itlb_resp_bits_s2_entry_n = 0x%0h ",pkt_str,this.io_fetch_to_mem_itlb_resp_bits_s2_entry_n);
     pkt_str = $sformatf("%sio_fetch_to_mem_itlb_resp_bits_s2_entry_pbmt = 0x%0h ",pkt_str,this.io_fetch_to_mem_itlb_resp_bits_s2_entry_pbmt);
     pkt_str = $sformatf("%sio_fetch_to_mem_itlb_resp_bits_s2_entry_ppn = 0x%0h ",pkt_str,this.io_fetch_to_mem_itlb_resp_bits_s2_entry_ppn);
@@ -831,6 +839,11 @@ function bit itlb_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer comp
         if(this.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag!=rhs_.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag=0x%0h while the rhs_.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag=0x%0h",this.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag,rhs_.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag),UVM_NONE)
+        end
+
+        if(this.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid!=rhs_.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid=0x%0h while the rhs_.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid=0x%0h",this.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid,rhs_.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid),UVM_NONE)
         end
 
 

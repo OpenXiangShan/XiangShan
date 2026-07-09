@@ -643,6 +643,113 @@ rg -n "io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC|io_mem_to_ooo_intWri
 
 中文伪代码：该命令在 int writeback agent 源码目录和对应 connect 文件中查找本轮已删除的 7 个无 V2 来源字段。命令没有命中时，说明 interface、xaction、monitor、driver 和 connect 中已经没有这些字段的残留引用。该检查只验证本轮删除项闭合，不验证进入公共状态流的字段语义。
 
+### 7.10 `io_mem_to_ooo_int_wb_agent` V2 字段集合收敛
+
+功能特性：本轮根据用户要求“旧的 V3 信号需要删除，不要保留”，继续收敛 `io_mem_to_ooo_int_wb_agent_agent` 的 V2 字段集合。目标是让 interface、xaction、monitor 和 connect 只保留 V2 顶层真实输出对应字段；除 L2TLB 专项接管外，其他 agent 不再通过内部 wire 补旧 V3 聚合字段。
+
+修改前逻辑：上一轮为了闭合 connect 覆盖，`io_mem_to_ooo_int_wb_agent_agent_interface.sv` 中保留 191 个 interface 信号。此前已删除 73 个旧 `intWriteback_*` 聚合字段，其中包含常量占位字段和旧 V3 聚合别名字段。随后又发现 `intWriteback_5/6 sqIdx_flag/value` 虽然能追溯到 V2 内部 `_inner_stdExeUnits_0/1_io_out_bits_uop_sqIdx_*` wire，但它们不是 V2 `MemBlock` 顶层端口，字段名仍属于旧 `intWriteback_*` 聚合命名。
+
+修改后逻辑：本轮继续删除 `intWriteback_5/6 sqIdx_flag/value` 4 个旧 V3 聚合字段，不再从 `_inner_stdExeUnits_0/1_io_out_bits_uop_sqIdx_*` 内部 wire 取值。`io_mem_to_ooo_int_wb_agent_agent_interface.sv`、`io_mem_to_ooo_int_wb_agent_agent_xaction.sv`、`io_mem_to_ooo_int_wb_agent_agent_monitor.sv` 和 `tb/io_mem_to_ooo_int_wb_agent_connect.sv` 已同步收敛到 114 个字段；connect 只保留当前 V2 顶层端口可直接提供的写回字段。driver 本身没有主动驱动该被动采样 agent，本轮不需要改 driver。
+
+| 字段类别 | 修改后处理策略 | 说明 |
+|---|---|---|
+| `intWriteback_5/6 sqIdx_flag/value` | 删除 | 不是 V2 `MemBlock` 顶层端口；此前接到 `_inner_stdExeUnits_0/1_io_out_bits_uop_sqIdx_*` 属于非 L2TLB agent 内部层级引用，按本轮规则删除。 |
+| `intWriteback_5/6 robIdx_flag` | 删除 | V2 `writebackStd_0/1` 顶层只导出 `robIdx_value`，没有 `robIdx_flag`。 |
+| `intWriteback_3/4 sqIdx_flag/value` | 删除 | V2 `writebackSta_0/1` 写回输出未导出旧聚合 `sqIdx` 字段。 |
+| `intWriteback_0/1/2` 当前保留的 `exceptionVec` 位 | 保留并连接 `io_mem_to_ooo_writebackLda_0/1/2_bits_uop_exceptionVec_*` | 这些字段仍在当前 V2 interface 中存在，并有 V2 顶层真实输出。 |
+| `intWriteback_0/1/2` 其余旧聚合 `exceptionVec` 位 | 删除 | 包括原常量占位字段，以及原先映射到 V2 `exceptionVec_13/15/19/21/23` 的旧 `intWriteback_*` 别名。后续如需这些 V2 真实位，应通过 V2 命名接口或测试框架适配 plan 重新接入。 |
+| `intWriteback_0/1/2 lqIdx_flag/value` | 删除 | V2 写回输出没有旧聚合 `lqIdx` 字段。 |
+
+源码位置：`mem_ut/ver/ut/memblock/tb/io_mem_to_ooo_int_wb_agent_connect.sv`，宏：`MEMBLOCK__IO_MEM_TO_OOO_INT_WB_AGENT_CONNECT`。
+该宏现在只负责把 V2 `MemBlock` 顶层写回真实输出接到 `io_mem_to_ooo_int_wb_agent_agent` interface，不再包含旧 V3-only 字段的常量占位，也不再从非 L2TLB 内部层级 wire 补旧字段。
+
+```systemverilog
+force U_IF_NAME.io_mem_to_ooo_intWriteback_6_0_bits_toRob_bits_robIdx_value = RTL_PATH.io_mem_to_ooo_writebackStd_1_bits_uop_robIdx_value;
+force U_IF_NAME.io_mem_to_ooo_intWriteback_5_0_bits_toRob_bits_robIdx_value = RTL_PATH.io_mem_to_ooo_writebackStd_0_bits_uop_robIdx_value;
+force U_IF_NAME.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger = RTL_PATH.io_mem_to_ooo_writebackSta_1_bits_uop_trigger;
+force U_IF_NAME.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_3 = RTL_PATH.io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_3;
+force U_IF_NAME.io_mem_to_ooo_intWriteback_2_0_bits_pdest = RTL_PATH.io_mem_to_ooo_writebackLda_2_bits_uop_pdest;
+```
+
+中文伪代码：该 connect 逻辑在本 agent 中承担“把 V2 顶层写回真实输出映射到被动采样 interface”的功能。执行时宏逐项把 V2 `writebackStd`、`writebackSta` 和 `writebackLda` 中存在的顶层端口 force 到 interface，monitor 后续只采集这些真实来源字段。对于 V2 顶层没有导出的旧 V3 聚合字段，本轮不再生成 force 语句，也不再在 interface、xaction 和 monitor 中保留同名字段。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_xaction.sv`，逻辑对象：字段声明、UVM field 注册、空约束、`psdisplay()` 和 `compare()`。
+该 xaction 文件按当前 V2 interface 的 114 个字段重新生成重复性模板段，避免删除旧字段后残留空约束块或 compare 碎片。
+
+```systemverilog
+rand bit io_mem_to_ooo_intWriteback_6_0_valid;
+rand bit io_mem_to_ooo_intWriteback_6_0_bits_toRob_valid;
+rand bit [8:0] io_mem_to_ooo_intWriteback_6_0_bits_toRob_bits_robIdx_value;
+rand bit io_mem_to_ooo_intWriteback_5_0_valid;
+rand bit io_mem_to_ooo_intWriteback_5_0_bits_toRob_valid;
+rand bit [8:0] io_mem_to_ooo_intWriteback_5_0_bits_toRob_bits_robIdx_value;
+```
+
+中文伪代码：该字段定义逻辑在 transaction 中保存 monitor 采样后的 V2 写回字段。xaction 只声明当前 interface 中存在的字段，并为每个字段生成对应的 UVM 注册、默认空约束、打印和比较逻辑；被删除的旧 V3-only 字段不会再进入 transaction，也不会被后续 monitor 或 compare 访问。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_monitor.sv`，逻辑对象：port 5/6 raw writeback 写入。
+该 monitor 负责把写回采样转成 `memblock_sync_pkg::dispatch_raw_int_wb_t`。本轮删除 `sqIdx` 来源后，port 5/6 不再把 `sq_valid` 置 1，避免公共状态误以为存在真实 SQ 索引。
+
+```systemverilog
+raw_int_wb.port_id = 5;
+raw_int_wb.rob_valid = 1'b1;
+raw_int_wb.rob_value = io_mem_to_ooo_intWriteback_5_0_bits_toRob_bits_robIdx_value;
+raw_int_wb.cycle = $time;
+memblock_sync_pkg::push_raw_int_wb(raw_int_wb);
+```
+
+中文伪代码：该逻辑在 port 5 写回有效时创建一条 raw int writeback 事件。事件只携带 V2 顶层真实导出的 ROB value 和周期信息，不再声明 SQ 信息有效；`make_empty_raw_int_wb()` 提供默认空值，后续公共状态如果需要 std writeback 的 SQ 语义，必须在测试框架适配 plan 中定义新的 V2 语义来源。
+
+文档同步：`AI_DOC/analysis/interface/v2/mem_ut_v2_agent_interface_signal_matrix_20260709.md` 已同步更新。`io_mem_to_ooo_int_wb_agent_agent` 汇总行改为 `interface=114`、`xaction=114`、`connect=114`、`monitor=114`、`driver=0`；4.8 逐信号矩阵已删除 `intWriteback_5/6 sqIdx_flag/value` 行，不再出现 `_inner_stdExeUnits_*` 内部 wire 映射。
+
+正确性检查：
+
+- 已用脚本扫描 interface、connect、xaction 和 monitor，结果为 `interface=114`、`connect=114`、`xaction=114`、`monitor=114`，`missing_connect/missing_xaction/missing_monitor/extra_*` 均为空。
+- 已扫描 `intWriteback_5/6 sqIdx_flag/value` 和 `_inner_stdExeUnits_0/1_io_out_bits_uop_sqIdx_*`，在 `tb` 和该 agent 源码中没有残留引用。
+- 已扫描所有非 L2TLB `tb/*_agent_connect.sv` 的 `RTL_PATH.*` 引用，疑似内部层级或非 V2 顶层端口连接数量为 0。L2TLB agent 是专项内部 responder 接管，按规则排除。
+- `xaction` 静态检查结果为 `brace_delta=0`、`fields=114`、`cons_decl=114`、`cons_body=114`、`uvm=114`、`compare=114`。
+
+风险边界：本轮只删除旧 V3 聚合字段和非 L2TLB 内部 wire 补接，不修改测试激励框架主流程。后续如果 `dispatch_raw_int_wb_t`、scoreboard 或 sequence 仍需要 std writeback 的 SQ 语义，必须在 V2 测试框架适配 plan 中定义真实 V2 语义来源或删除框架依赖，不能在 DUT interface 层保留旧字段占位。
+
+
+### 7.11 `itlb_agent` S2 entry VMID 字段补齐
+
+功能特性：本轮把 V2 顶层 output `io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid` 并入 `itlb_agent_agent`。该端口属于 `io_fetch_to_mem_itlb_resp_bits_s2_entry_*` 同一组 response bundle，和已接入的 `tag/n/pbmt/ppn/perm/level` 字段语义一致，应由 itlb agent 统一采样。
+
+修改前逻辑：V2 `MemBlock` 顶层和 `dut_inst.sv` 已存在 `io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid`，但 `itlb_agent_agent_interface.sv`、`itlb_agent_connect.sv`、`itlb_agent_agent_xaction.sv` 和 `itlb_agent_agent_monitor.sv` 没有该字段。接口矩阵文档因此把它列入未归属端口，并建议扩展 itlb agent。
+
+修改后逻辑：本轮将该字段补到 itlb agent 的 interface、connect、xaction 和 monitor。字段方向保持 `input`，由 V2 顶层 RTL output 通过 connect force 到 interface，再由 monitor 采样；driver 不驱动该字段。
+
+源码位置：`mem_ut/ver/ut/memblock/tb/itlb_agent_connect.sv`，宏：`MEMBLOCK__ITLB_AGENT_CONNECT`。
+该宏负责把 V2 顶层 Fetch/ITLB response 端口接入 itlb agent interface。
+
+```systemverilog
+force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_tag;
+force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid;
+force U_IF_NAME.io_fetch_to_mem_itlb_resp_bits_s2_entry_n = RTL_PATH.io_fetch_to_mem_itlb_resp_bits_s2_entry_n;
+```
+
+中文伪代码：该 connect 逻辑在 itlb agent 中承担“把 V2 顶层 itlb response 的 S2 entry 字段送入 interface”的功能。执行时先连接 `tag`，再连接本轮新增的 `vmid`，随后继续连接 `n/pbmt/ppn/perm/level`。这样 monitor 采样到的 S2 entry bundle 不再缺少 VMID 字段。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/itlb_agent_agent/src/itlb_agent_agent_monitor.sv`，函数/task：`mon_data()`。
+该 monitor 每拍从 `mon_cb` 采样 itlb interface 字段，并在 XZ 检查打开时检查字段是否为未知态。
+
+```systemverilog
+io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid = this.vif.mon_mp.mon_cb.io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid;
+`TCNT_CHECK_SIG_XZ(io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid,io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid,14);
+```
+
+中文伪代码：该逻辑在 monitor 中承担“采样并检查 S2 entry VMID”的功能。每拍 monitor 从 interface 的 `mon_cb` 读取 VMID 到本地变量；当 reset 已释放且 XZ 检查开启时，按 14 位宽检查该字段没有未知态。该字段目前只进入 agent transaction/日志/比较闭合，是否进入测试框架公共状态由后续测试框架适配 plan 决定。
+
+文档同步：`AI_DOC/analysis/interface/v2/mem_ut_v2_agent_interface_signal_matrix_20260709.md` 已同步更新，`itlb_agent_agent` 汇总从 63 项改为 64 项，并从未归属端口列表移除 `io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid`。
+
+正确性检查：
+
+- V2 `build/rtl/MemBlock.sv`、`dut_inst.sv` 均存在 `io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid`，位宽为 `[13:0]`。
+- itlb agent 的 interface、connect、xaction、monitor 静态字段集合已补齐该字段。
+- 该字段是 DUT output，被动采样，不需要 driver 驱动。
+
+
 ## 8. Review 结论
 
 当前代码已经满足 V2 整核 `MemBlock` 顶层端口闭合、connect/interface/xaction/driver/monitor 结构闭合、活动 `MEMBLOCK_UT` 分支 DUT output 方向闭合、L2TLB internal wire 存在性检查和远端 VCS 编译通过三个结构性标准。后续需要按测试框架行为适配 plan 继续处理 issue/writeback/L2TLB 的语义级适配、V2 新增顶层 output 主功能影响分析和 runtime 仿真问题。
