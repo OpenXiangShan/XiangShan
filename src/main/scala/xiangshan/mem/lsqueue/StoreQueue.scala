@@ -189,6 +189,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
     val sqFull = Output(Bool())
     val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
     val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+    val sqDeqIsVec = Output(Bool())
     val force_write = Output(Bool())
     val maControl   = Flipped(new StoreMaBufToSqControlIO)
     val wfi = Flipped(new WfiReqBundle)
@@ -1165,6 +1166,7 @@ class StoreQueue(implicit p: Parameters) extends XSModule
   io.sqCommitPtr := cmtPtrExt(0)
   io.sqCommitUopIdx := uop(cmtPtrExt(0).value).uopIdx
   io.sqCommitRobIdx := uop(cmtPtrExt(0).value).robIdx
+  io.sqDeqIsVec := isVec(deqPtr)
 
   /**
    * committed stores will not be cancelled and can be sent to lower level.
