@@ -30,7 +30,9 @@ import utility.UIntToMask
 import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
+import utility.XSPerfRolling
 import utility.XSPerfSeqAccumulate
+import utility.XSPerfSeqRolling
 import xiangshan.RedirectLevel
 import xiangshan.TopDownCounters
 import xiangshan.backend.CtrlToFtqIO
@@ -615,22 +617,38 @@ class Ftq(implicit p: Parameters) extends FtqModule
       commitPerfMeta.mispredictBranchInfo
     ))
   )
+
+  private val mispredictAttr = commitPerfMeta.mispredictBranchInfo.attribute
   XSPerfSeqAccumulate(
     "commit_branch_mispredicts_type",
     perf_commitHasMispredict,
     Seq(
-      ("conditional", commitPerfMeta.mispredictBranchInfo.attribute.isConditional),
-      ("direct", commitPerfMeta.mispredictBranchInfo.attribute.isDirect),
-      ("indirect", commitPerfMeta.mispredictBranchInfo.attribute.isIndirect),
-      (
-        "indirect_retcall",
-        commitPerfMeta.mispredictBranchInfo.attribute.isReturnAndCall
-          && commitPerfMeta.mispredictBranchInfo.attribute.isIndirect
-      ),
-      ("call", commitPerfMeta.mispredictBranchInfo.attribute.isCall),
-      ("ret", commitPerfMeta.mispredictBranchInfo.attribute.isReturn)
+      ("conditional", mispredictAttr.isConditional),
+      ("direct", mispredictAttr.isDirect),
+      ("indirect", mispredictAttr.isIndirect),
+      ("indirect_retcall", mispredictAttr.isReturnAndCall && mispredictAttr.isIndirect),
+      ("call", mispredictAttr.isCall),
+      ("ret", mispredictAttr.isReturn)
     )
   )
+
+  XSPerfSeqRolling(
+    "rolling_commit_mispredict",
+    perf_commitHasMispredict,
+    Seq(
+      ("conditional", mispredictAttr.isConditional),
+      ("direct", mispredictAttr.isDirect),
+      ("indirect", mispredictAttr.isIndirect),
+      ("indirect_retcall", mispredictAttr.isReturnAndCall && mispredictAttr.isIndirect),
+      ("call", mispredictAttr.isCall),
+      ("ret", mispredictAttr.isReturn)
+    ),
+    10000,
+    clock,
+    reset
+  )
+
+  XSPerfRolling("rolling_ifu_redirect", io.fromIfu.wbRedirect.valid, 10000, clock, reset)
 
   XSPerfHistogram(
     "distance_between_bpu_commit",
