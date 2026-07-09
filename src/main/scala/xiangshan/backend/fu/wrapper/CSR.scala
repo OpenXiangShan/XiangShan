@@ -421,10 +421,10 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   })
 }
 
-class CSRToDecode extends Bundle {
+class CSRToDecode(implicit p: Parameters) extends XSBundle {
   val illegalInst = new Bundle {
-    
-    val mfence = Option.when(false) (Bool()) // HasMptCheck defaults false; restored by later fix commit 2d917072b5
+
+    val mfence = Option.when(HasMptCheck) (Bool())
     /**
      * illegal sfence.vma, sinval.vma
      * raise EX_II when isModeHS && mstatus.TVM=1 || isModeHU
