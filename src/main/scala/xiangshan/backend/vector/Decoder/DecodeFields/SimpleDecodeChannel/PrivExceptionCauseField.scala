@@ -6,7 +6,7 @@ import xiangshan.backend.vector.Decoder.InstPattern._
 import xiangshan.backend.vector.Decoder.util.DecodeField
 
 object PrivExceptionCause extends ChiselEnum {
-  val none, sfenceVMA, sfencePart, hfenceGVMA, hfenceVVMA, hlsv, wfi, wrsNto, cboZ, cboCF, cboI, aes64ks1i, amocasQ = Value
+  val none, sfenceVMA, sfencePart, hfenceGVMA, hfenceVVMA, mfence, hlsv, wfi, wrsNto, cboZ, cboCF, cboI, aes64ks1i, amocasQ = Value
 }
 
 object PrivExceptionCauseField extends DecodeField[InstPattern, PrivExceptionCause.Type] {
@@ -22,6 +22,7 @@ object PrivExceptionCauseField extends DecodeField[InstPattern, PrivExceptionCau
       case _: SfenceOtherInstPattern      => PrivExceptionCause.sfencePart
       case _: HfenceGVMAInstPattern       => PrivExceptionCause.hfenceGVMA
       case _: HfenceVVMAInstPattern       => PrivExceptionCause.hfenceVVMA
+      case _: MfenceInstPattern           => PrivExceptionCause.mfence
       case _: WaitForInterruptInstPattern => PrivExceptionCause.wfi
       case _: ZawrsNtoPattern             => PrivExceptionCause.wrsNto
       case _: HyperLoadInstPattern        => PrivExceptionCause.hlsv
