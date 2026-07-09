@@ -420,9 +420,9 @@ class CSRInput(implicit p: Parameters) extends XSBundle with HasSoCParameter {
   })
 }
 
-class CSRToDecode extends Bundle {
+class CSRToDecode(implicit p: Parameters) extends XSBundle {
   val illegalInst = new Bundle {
-    
+
     val mfence = Option.when(HasMptCheck) (Bool())
     /**
      * illegal sfence.vma, sinval.vma
