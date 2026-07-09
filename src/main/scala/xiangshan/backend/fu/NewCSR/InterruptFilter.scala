@@ -207,7 +207,7 @@ class InterruptFilter extends Module {
 
   private val meiPrioIdx = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.MEI).U
   private val seiPrioIdx = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
-  private val vseiPrioIdx = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.VSEI).U
+  private val vseiPrioIdx = InterruptNO.getPrioIdxInGroup(_.interruptDefaultPrio)(_.SEI).U
 
   private val mipriosTmp = Wire(Vec(8, new IpriosSort))
   mipriosSortTmp.zipWithIndex.foreach { case (iprios, i) =>
@@ -358,8 +358,9 @@ class InterruptFilter extends Module {
   val C1GreaterThan255 = vstopeiReg.IPRIO.asUInt(10, 8).orR
   val C4IsZero = !hvipriosRegTmp.prioNum.orR
   val C2C5IsZero = !hvictlReg.IPRIO.asUInt.orR
-  val C4HighVSEI = iidC4Idx < findIndex(InterruptNO.VSEI.U)
-  val SEIHighC4 = findIndex(InterruptNO.SEI.U) < iidC4Idx
+  val SEIIdx = findIndex(InterruptNO.SEI.U)
+  val C4HighVSEI = iidC4Idx < SEIIdx
+  val SEIHighC4 = SEIIdx < iidC4Idx
   val iprioC1GreaterThan255 = Mux(C1GreaterThan255, 255.U, iprioC1Tmp)
 
   iprioC1 := vstopeiReg.IPRIO.asUInt
