@@ -8,39 +8,48 @@ import xiangshan.backend.Bundles._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, SqPtr}
+import utility.XSError
 
 import VAGQConstants._
 
 class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
   val io = IO(new VAGQEntryTableIO)
 
-  private val addrMaskGen = Module(new MaskGen)
-  addrMaskGen.in.uopIdx    := io.addrUop.bits.uopIdx
-  addrMaskGen.in.useVstart := io.addrUop.bits.useVstart
-  addrMaskGen.in.vstart    := io.addrUop.bits.vstart
-  addrMaskGen.in.uvlByte   := io.addrUop.bits.uvlByte
-  addrMaskGen.in.vm        := io.addrUop.bits.vm
-  addrMaskGen.in.v0Mask    := io.addrUop.bits.v0Mask
-  addrMaskGen.in.deew      := io.addrUop.bits.deew
-  addrMaskGen.in.vma       := io.addrUop.bits.vma
-  addrMaskGen.in.vta       := io.addrUop.bits.vta
+  private val addrMaskGen = Seq.fill(VAGQConstants.AddrIssueWidth)(Module(new MaskGen))
+  addrMaskGen.zip(io.addrUop).foreach { case (maskGen, addrUop) =>
+    maskGen.in.uopIdx    := addrUop.bits.uopIdx
+    maskGen.in.useVstart := addrUop.bits.useVstart
+    maskGen.in.vstart    := addrUop.bits.vstart
+    maskGen.in.uvlByte   := addrUop.bits.uvlByte
+    maskGen.in.vm        := addrUop.bits.vm
+    maskGen.in.v0Mask    := addrUop.bits.v0Mask
+    maskGen.in.deew      := addrUop.bits.deew
+    maskGen.in.vma       := addrUop.bits.vma
+    maskGen.in.vta       := addrUop.bits.vta
+  }
 
   private val emptyEntry = 0.U.asTypeOf(new VAGQEntry)
   private val entries = RegInit(VecInit(Seq.fill(vagqSize)(emptyEntry)))
 
-  private val addrEntry = entryAt(entries, io.addrUop.bits.entryIdx)
+  private val addrEntry = io.addrUop.map(addrUop => entryAt(entries, addrUop.bits.entryIdx))
   private val dataEntry = entryAt(entries, io.dataUop.bits.entryIdx)
-  private val addrIdxValid = idxValid(io.addrUop.bits.entryIdx)
+  private val addrIdxValid = io.addrUop.map(addrUop => idxValid(addrUop.bits.entryIdx))
   private val dataIdxValid = idxValid(io.dataUop.bits.entryIdx)
-  private val addrEntryFlush = addrEntry.valid && addrEntry.robIdx.needFlush(io.redirect)
+  private val addrEntryFlush = addrEntry.map(entry => entry.valid && entry.robIdx.needFlush(io.redirect))
   private val dataEntryFlush = dataEntry.valid && dataEntry.robIdx.needFlush(io.redirect)
-  private val addrCanAccept = !addrEntry.valid || addrEntry.state === VAGQEntryState.waitA
+  private val addrCanAccept = addrEntry.map(entry => !entry.valid || entry.state === VAGQEntryState.waitA)
   private val dataCanAccept = !dataEntry.valid || dataEntry.state === VAGQEntryState.waitSI
 
-  io.addrUop.ready := addrIdxValid && addrCanAccept && !addrEntryFlush
+  val addrSameEntry = io.addrUop(0).valid && io.addrUop(1).valid &&
+    io.addrUop(0).bits.entryIdx === io.addrUop(1).bits.entryIdx
+  XSError(addrSameEntry, "VAGQ addr uop get same entryIdx in the same cycle\n")
+
+  io.addrUop.zipWithIndex.foreach { case (addrUop, lane) =>
+    addrUop.ready := addrIdxValid(lane) && addrCanAccept(lane) && !addrEntryFlush(lane)
+  }
   io.dataUop.ready := dataIdxValid && dataCanAccept && !dataEntryFlush
 
-  private val addrFire = io.addrUop.fire && !io.addrUop.bits.robIdx.needFlush(io.redirect)
+  private val addrFire = io.addrUop.map(addrUop => addrUop.fire && !addrUop.bits.robIdx.needFlush(io.redirect))
   private val dataFire = io.dataUop.fire && !io.dataUop.bits.robIdx.needFlush(io.redirect)
   private val reqBitmapUpdates = io.splitUpdate.toSeq ++ io.mergeReqUpdate.toSeq
 
@@ -97,12 +106,17 @@ class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
   }
 
   private def applyEnqueueUpdate(next: VAGQEntry, curr: VAGQEntry, idx: UInt): Unit = {
-    val addrFireThis = addrFire && io.addrUop.bits.entryIdx === idx
+    val addrFireThisVec = addrFire.zip(io.addrUop).map { case (fire, addrUop) =>
+      fire && addrUop.bits.entryIdx === idx
+    }
+    val addrFireThis = addrFireThisVec.reduce(_ || _)
     val dataFireThis = dataFire && io.dataUop.bits.entryIdx === idx
 
-    when(addrFireThis) {
-      connectSamePort(next, io.addrUop.bits)
-      connectSamePort(next, addrMaskGen.out)
+    addrFireThisVec.zip(io.addrUop).zip(addrMaskGen).foreach { case ((fireThis, addrUop), maskGen) =>
+      when(fireThis) {
+        connectSamePort(next, addrUop.bits)
+        connectSamePort(next, maskGen.out)
+      }
     }
     when(dataFireThis) {
       connectSamePort(next, io.dataUop.bits)
@@ -147,7 +161,7 @@ class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
 }
 
 class VAGQEntryTableIO(implicit p: Parameters) extends VAGQBundle {
-  val addrUop          = Flipped(Decoupled(new VAGQAddrSideUop))
+  val addrUop          = Flipped(Vec(VAGQConstants.AddrIssueWidth, Decoupled(new VAGQAddrSideUop)))
   val dataUop          = Flipped(Decoupled(new VAGQDataSideUop))
   val entries          = Output(Vec(vagqSize, new VAGQEntry))
   val splitUpdate      = Input(Vec(VAGQConstants.SplitUpdateWidth, Valid(new VAGQReqBitmapUpdate)))

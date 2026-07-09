@@ -32,11 +32,16 @@ import utils.BundleUtils.makeValid
 import xiangshan.backend.fu.vector.Bundles.{VType, Vstart}
 import xiangshan.backend.fu.wrapper.{CSRInput, CSRToDecode}
 import xiangshan.backend.rob.RobPtr
+import xiangshan.backend.vector.vagq._
 import xiangshan.backend.issue.EntryBundles.RespType
 import xiangshan.backend.issue._
 
 
-class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModule with HasCriticalErrors {
+class Region(val params: SchdBlockParams)(implicit p: Parameters)
+  extends XSModule
+  with HasCriticalErrors
+  with HasVAGQParameters
+  with HasVAGQHelper {
   val io = IO(new RegionIO(params))
   val issueQueues = params.issueBlockParams.map { case iqParam =>
      Module(new IssueQueueImp()(p,iqParam)).suggestName("issueQueue" + iqParam.allExuParams.map(_.name).reduce(_ + _) + "_" + iqParam.getIQFuName)
@@ -172,14 +177,22 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     imp.io.memIO.get.loadWakeUp.head := io.wakeupFromLDU.get(i)
   }
   val stAddrIQs = issueQueues.filter(iq => iq.param.StaCnt > 0)
+  require(stAddrIQs.length <= VAGQConstants.AddrIssueWidth)
+  val vagqAddrS0Resp = stAddrIQs.map { imp =>
+    val resp = Wire(chiselTypeOf(imp.io.s2Resp.get.head))
+    resp := 0.U.asTypeOf(resp)
+    resp
+  }
+  val vagqAddrS2Resp = vagqAddrS0Resp.map(resp => RegNext(RegNext(resp)))
   stAddrIQs.zipWithIndex.foreach { case(imp, i) =>
     val feedBack = io.staFeedback.get(i).feedbackSlow
-    imp.io.s2Resp.get.head.failed := feedBack.valid && !feedBack.bits.hit
-    imp.io.s2Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
-    imp.io.s2Resp.get.head.fuType := 0.U
+    imp.io.s2Resp.get.head.failed := (feedBack.valid && !feedBack.bits.hit) || vagqAddrS2Resp(i).failed
+    imp.io.s2Resp.get.head.finalSuccess := (feedBack.valid && feedBack.bits.hit) || vagqAddrS2Resp(i).finalSuccess
+    val vagqRespValid = vagqAddrS2Resp(i).failed || vagqAddrS2Resp(i).finalSuccess
+    imp.io.s2Resp.get.head.fuType := Mux(vagqRespValid, vagqAddrS2Resp(i).fuType, 0.U)
     imp.io.s2Resp.get.head.isFmac := false.B
-    imp.io.s2Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
-    imp.io.s2Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
+    imp.io.s2Resp.get.head.lqIdx.foreach(_ := Mux(vagqRespValid, vagqAddrS2Resp(i).lqIdx.get, feedBack.bits.lqIdx))
+    imp.io.s2Resp.get.head.sqIdx.foreach(_ := Mux(vagqRespValid, vagqAddrS2Resp(i).sqIdx.get, feedBack.bits.sqIdx))
   }
   val vecStuIQs = issueQueues.filter(iq => iq.param.VstuCnt > 0)
   vecStuIQs.zipWithIndex.foreach { case(imp, i) =>
@@ -517,6 +530,15 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     }
     val toMem = Wire(io.toMemExu.get.cloneType)
     io.toMemExu.get <> toMem
+    val vagqAddrReqs = Seq.fill(VAGQConstants.AddrIssueWidth) {
+      val req = Wire(Decoupled(new VAGQAddrSideUop))
+      req.valid := false.B
+      req.bits := 0.U.asTypeOf(req.bits)
+      req
+    }
+    io.vagqAddrUop.get.zip(vagqAddrReqs).foreach { case (out, req) =>
+      out <> req
+    }
     val firstMemExu = bypassNetwork.io.toExus.int.indexWhere(x => x.map(xx => xx.bits.params.isMemExeUnit).reduce(_ || _))
     println(s"[Regin_int] firstMemExu = $firstMemExu")
     for (i <- toMem.indices) {
@@ -536,8 +558,35 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           toMem(i)(j).bits := RegEnable(toMemExuInput.bits, toMemValidAfterCancel && (!toMem(i)(j).valid || toMem(i)(j).fire))
         }
         val thisIQ = issueQueues.filter(x => x.param.allExuParams.contains(toMem(i)(j).bits.params)).head
+        val toMemValidBeforeVagq = Wire(Bool())
+        toMemValidBeforeVagq := toMem(i)(j).valid
+        val canBuildVagqAddr = toMem(i)(j).bits.params.needVPUCtrl &&
+          toMem(i)(j).bits.params.readV0Rf &&
+          toMem(i)(j).bits.params.readVlRf
+        val vagqAddrValid =
+          if (canBuildVagqAddr) toMemValidBeforeVagq && thisIQ.param.isStAddrIQ.B && isVagqAddrUop(toMem(i)(j).bits)
+          else false.B
+        val vagqAddrReady = WireInit(false.B)
+        val vagqAddrFire = WireInit(false.B)
+        toMem(i)(j).valid := toMemValidBeforeVagq && !vagqAddrValid
+        if (thisIQ.param.isStAddrIQ) {
+          val staRespIdx = stAddrIQs.indexWhere(_ == thisIQ)
+          require(staRespIdx >= 0, s"Cannot find ${thisIQ.param.getIQName} in stAddrIQs")
+          require(staRespIdx < VAGQConstants.AddrIssueWidth, s"VAGQ addr issue width is smaller than StaIQ count")
+          if (canBuildVagqAddr) {
+            vagqAddrReqs(staRespIdx).valid := vagqAddrValid
+            vagqAddrReqs(staRespIdx).bits := buildVagqAddrUop(toMem(i)(j).bits)
+          }
+          vagqAddrReady := vagqAddrReqs(staRespIdx).ready
+          vagqAddrFire := vagqAddrReqs(staRespIdx).fire
+          vagqAddrS0Resp(staRespIdx).finalSuccess := vagqAddrFire
+          vagqAddrS0Resp(staRespIdx).fuType := toMem(i)(j).bits.ctrl.fuType
+          vagqAddrS0Resp(staRespIdx).isFmac := false.B
+          vagqAddrS0Resp(staRespIdx).lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.getOrElse(0.U.asTypeOf(new LqPtr)))
+          vagqAddrS0Resp(staRespIdx).sqIdx.foreach(_ := toMem(i)(j).bits.sqIdx.getOrElse(0.U.asTypeOf(new SqPtr)))
+        }
         if (thisIQ.io.s0Resp.nonEmpty) {
-          thisIQ.io.s0Resp.get(j).failed := toMem(i)(j).valid && !toMem(i)(j).ready
+          thisIQ.io.s0Resp.get(j).failed := Mux(vagqAddrValid, !vagqAddrReady, toMem(i)(j).valid && !toMem(i)(j).ready)
           thisIQ.io.s0Resp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ).B
           thisIQ.io.s0Resp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
           thisIQ.io.s0Resp.get(j).isFmac := false.B
@@ -964,6 +1013,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   val wakeupFromF2I = Option.when(params.isIntSchd)(Flipped(ValidIO(new IssueQueueIQWakeUpBundle(params.backendParam.getExuIdxF2I, params.backendParam))))
   val cross = new ExuCrossRegion(params)
   val toMemExu = Option.when(params.isIntSchd || params.isVecSchd)(params.genNewExuInputBundle(DecoupledIO(_), _.hasMemFu))
+  val vagqAddrUop = Option.when(params.isIntSchd)(Vec(VAGQConstants.AddrIssueWidth, Decoupled(new VAGQAddrSideUop)))
   // fromMem
   val wakeupFromLDU = Option.when(params.isIntSchd)(Vec(params.LdExuCnt, Flipped(Valid(new MemWakeUpBundle))))
   val staFeedback = Option.when(params.isIntSchd)(Flipped(Vec(params.StaCnt, new MemRSFeedbackIO)))

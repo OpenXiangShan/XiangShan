@@ -1226,7 +1226,7 @@ object Bundles {
     val ssid           = OptionWrapper(params.hasLoadExu || params.hasStoreAddrExu, UInt(SSIDWidth.W))
     // only vector load store need
     val numLsElem      = OptionWrapper(params.hasVecLsFu, NumLsElem())
-    val lqIdx = OptionWrapper(params.hasLoadFu || params.hasVecLsFu, new LqPtr)
+    val lqIdx = OptionWrapper(params.hasLoadFu || params.hasStoreAddrFu || params.hasVecLsFu, new LqPtr)
     val sqIdx = OptionWrapper(params.hasLoadFu || params.hasStoreAddrFu || params.hasStdFu || params.hasVecLsFu || params.hasVStdFu, new SqPtr)
     val dataSources = Vec(params.numRegSrc, DataSource())
     val exuSources = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuSource(params)))
@@ -1380,7 +1380,7 @@ object Bundles {
     val loadWaitStrict = Option.when(params.hasLoadExu)(Bool())     // load inst will not be executed until ALL former store addr calcuated
     val ssid           = Option.when(params.hasLoadExu || params.hasStoreAddrExu)(UInt(SSIDWidth.W))
     val numLsElem      = Option.when(params.hasVecLsFu)(NumLsElem())
-    val lqIdx          = Option.when(params.hasLoadExu || params.hasVecLsFu)(new LqPtr)
+    val lqIdx          = Option.when(params.hasLoadExu || params.hasStoreAddrExu || params.hasVecLsFu)(new LqPtr)
     val sqIdx          = Option.when(params.hasLoadExu || params.hasStoreAddrFu || params.hasStdFu || params.hasVecLsFu || params.hasVStdFu)(new SqPtr)
     val perfDebugInfo  = Option.when(backendParams.debugEn)(new PerfDebugInfo())
     val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())

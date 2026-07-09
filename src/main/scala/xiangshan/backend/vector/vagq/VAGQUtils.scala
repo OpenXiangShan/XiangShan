@@ -2,7 +2,7 @@ package xiangshan.backend.vector.vagq
 
 import chisel3._
 import chisel3.util._
-import utility.HasCircularQueuePtrHelper
+import utility._
 import xiangshan._
 import xiangshan.mem._
 import xiangshan.backend.Bundles._
@@ -131,6 +131,61 @@ trait HasVAGQHelper extends HasCircularQueuePtrHelper { this: HasVAGQParameters 
     entry.reqAck  := 0.U
     entry.exceptionNumber := 0.U
     entry.faultElemIdx    := 0.U
+  }
+
+  protected def fitUInt(source: UInt, width: Int): UInt = {
+    if (source.getWidth >= width) source(width - 1, 0) else ZeroExt(source, width)
+  }
+
+  protected def isVagqAddrUop(source: NewExuInput): Bool = {
+    val fuOpType = source.ctrl.fuOpType
+    val isVagqLoad = VlduType.isVecLd(fuOpType) &&
+      (VlduType.isStrided(fuOpType) || VlduType.isIndexed(fuOpType))
+    val isVagqStore = VstuType.isVecSt(fuOpType) &&
+      (VstuType.isStrided(fuOpType) || VstuType.isIndexed(fuOpType))
+    isVagqLoad || isVagqStore
+  }
+
+  protected def buildVagqAddrUop(source: NewExuInput): VAGQAddrSideUop = {
+    val addr = Wire(new VAGQAddrSideUop)
+    val vpu = source.ctrl.vpu.get
+    val fuOpType = source.ctrl.fuOpType
+    val isLoad = VlduType.isVecLd(fuOpType)
+    val isStride = VlduType.isStrided(fuOpType) || VstuType.isStrided(fuOpType)
+    val isOrdered = fuOpType(6, 5) === "b11".U
+    val deew = Mux(isStride, vpu.veew(1, 0), vpu.vsew(1, 0))
+
+    addr := 0.U.asTypeOf(addr)
+    addr.meta.pc := source.data.pc.getOrElse(0.U.asTypeOf(addr.meta.pc))
+    addr.meta.isRVC := source.ctrl.isRVC.getOrElse(false.B)
+    addr.meta.ftqPtr := source.ctrl.ftqIdx.getOrElse(0.U.asTypeOf(addr.meta.ftqPtr))
+    addr.meta.ftqOffset := source.ctrl.ftqOffset.getOrElse(0.U.asTypeOf(addr.meta.ftqOffset))
+    addr.meta.lqIdx := source.lqIdx.getOrElse(0.U.asTypeOf(addr.meta.lqIdx))
+    addr.meta.sqIdx := source.sqIdx.getOrElse(0.U.asTypeOf(addr.meta.sqIdx))
+    addr.meta.trigger := TriggerAction.None
+    addr.meta.perfDebugInfo := source.perfDebugInfo.getOrElse(0.U.asTypeOf(addr.meta.perfDebugInfo))
+    addr.meta.debug_seqNum := source.debug_seqNum.getOrElse(0.U.asTypeOf(addr.meta.debug_seqNum))
+    addr.entryIdx := 0.U // TODO
+    addr.uopType := Mux(
+      isLoad,
+      Mux(isStride, VAGQUopType.strideLoad, Mux(isOrdered, VAGQUopType.indexedOrderedLoad, VAGQUopType.indexedUnorderedLoad)),
+      Mux(isStride, VAGQUopType.strideStore, Mux(isOrdered, VAGQUopType.indexedOrderedStore, VAGQUopType.indexedUnorderedStore))
+    )
+    addr.robIdx := source.robIdx
+    addr.pdest := fitUInt(source.toRF.pdest, addr.pdest.getWidth)
+    addr.baseAddr := source.data.src(0)(XLEN - 1, 0)
+    addr.uvlByte := uopByteRangeLen(source.data.vl.get, deew, vpu.vuopIdx)
+    addr.vstart := fitUInt(vpu.vstart, addr.vstart.getWidth)
+    addr.useVstart := vpu.vstart =/= 0.U
+    addr.vm := vpu.vm
+    addr.v0Mask := source.data.v0.get(VAGQConstants.FlowBytes - 1, 0)
+    addr.deew := deew
+    addr.ieew := vpu.veew(1, 0)
+    addr.vma := vpu.vma
+    addr.vta := vpu.vta
+    addr.uopIdx := vpu.vuopIdx
+    addr.nf := fitUInt(vpu.nf, addr.nf.getWidth)
+    addr
   }
 }
 

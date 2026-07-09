@@ -28,6 +28,7 @@ object VAGQConstants {
   val NfWidth = 3
   val ExceptionNumberWidth = 6
 
+  val AddrIssueWidth = 2
   val ActiveIssueWidth = 2
   val LduRespWidth = 3
   val StaRespWidth = 2
@@ -187,7 +188,7 @@ class CtrlInput(implicit p: Parameters) extends VAGQBundle {
 
 class VAGQIO(implicit p: Parameters) extends VAGQBundle {
   // from iq
-  val addrUop = Flipped(Decoupled(new VAGQAddrSideUop))
+  val addrUop = Flipped(Vec(VAGQConstants.AddrIssueWidth, Decoupled(new VAGQAddrSideUop)))
   val dataUop = Flipped(Decoupled(new VAGQDataSideUop))
   // active req to ldu
   val lsuReq = Vec(VAGQConstants.ActiveIssueWidth, Decoupled(new VAGQLsuReq))

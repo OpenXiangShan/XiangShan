@@ -563,6 +563,7 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.loadWaitStrict.foreach(_ := Mux(enableMdp, source.bits.loadWaitStrict.get, false.B))
     sink.bits.ssid.foreach(_ := Mux(enableMdp, source.bits.ssid.get, 0.U(SSIDWidth.W)))
   }
+  io.mem.vagqAddrUop <> intRegion.io.vagqAddrUop.get
 
 //  require(false, "fix rebase error")
 //  require(io.mem.vstdIssue.flatten.size == vecRegion.io.toMemExu.get.flatten.size)
@@ -800,6 +801,7 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val wfi = new WfiReqBundle
 
   val intIssue: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = intSchdParams.genExuInputBundle(DecoupledIO(_), _.hasMemFu)
+  val vagqAddrUop = Vec(VAGQConstants.AddrIssueWidth, Decoupled(new VAGQAddrSideUop))
   val vstdStoreData: MixedVec[MixedVec[ValidIO[StoreQueueDataWrite]]] =
     backendParams.getVecRegionParam.genExuBundle(_.hasVStd, ValidIO(new StoreQueueDataWrite))
 

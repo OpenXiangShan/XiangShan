@@ -202,6 +202,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.inner_beu_errors_icache <> frontend.io.error
   memBlock.io.ooo_to_mem.backendToTopBypass := backend.io.toTop
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
+  memBlock.io.ooo_to_mem.vagqAddrUop <> backend.io.mem.vagqAddrUop
   memBlock.io.ooo_to_mem.vstdStoreData <> backend.io.mem.vstdStoreData
   memBlock.io.ooo_to_mem.vagqVrfReadResp := backend.io.mem.vagqVrfReadResp
 

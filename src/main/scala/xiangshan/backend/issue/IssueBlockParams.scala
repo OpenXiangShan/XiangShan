@@ -69,7 +69,7 @@ case class IssueBlockParams(
 
   def isVecMemIQ: Boolean = isVecLduIQ || isVecStuIQ
 
-  def needLqIdx: Boolean = isLdAddrIQ || isVecMemIQ
+  def needLqIdx: Boolean = isLdAddrIQ || isStAddrIQ || isVecMemIQ
 
   def needSqIdx: Boolean = isStAddrIQ || isStdIQ || isVecMemIQ || isLdAddrIQ || isVecStdIQ
 

@@ -206,6 +206,7 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val hybridPc = Vec(HyuCnt, Input(UInt(VAddrBits.W))) // for hw prefetch
 
   val intIssue: MixedVec[MixedVec[DecoupledIO[ExuInput]]] = Flipped(intSchdParams.genExuInputBundle(DecoupledIO(_), _.hasMemFu))
+  val vagqAddrUop = Flipped(Vec(VAGQConstants.AddrIssueWidth, Decoupled(new VAGQAddrSideUop)))
   val vstdStoreData: MixedVec[MixedVec[ValidIO[StoreQueueDataWrite]]] =
     Flipped(backendParams.getVecRegionParam.genExuBundle(_.hasVStd, ValidIO(new StoreQueueDataWrite)))
   val vagqVrfReadResp = Flipped(Valid(new VAGQVRFReadResp))
@@ -531,8 +532,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   storeUnits.zipWithIndex.map(x => x._1.suggestName("StoreUnit_"+x._2))
 
   vagq.io.redirect := redirect
-  vagq.io.addrUop.valid := false.B
-  vagq.io.addrUop.bits  := 0.U.asTypeOf(vagq.io.addrUop.bits)
+  vagq.io.addrUop <> io.ooo_to_mem.vagqAddrUop
   vagq.io.dataUop.valid := false.B
   vagq.io.dataUop.bits  := 0.U.asTypeOf(vagq.io.dataUop.bits)
   io.mem_to_ooo.vagqVrfReadReq.valid := vagq.io.vrfReadReq.valid
