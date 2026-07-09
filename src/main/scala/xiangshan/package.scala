@@ -717,6 +717,19 @@ package object xiangshan {
     def isH(op: UInt) = op(0)
   }
 
+  // ZihintNTL: non-temporal locality hint variants (add x0,x0,x2~x5)
+  object NtlType {
+    def p1   = "b00".U
+    def pall = "b01".U
+    def s1   = "b10".U
+    def all  = "b11".U
+
+    def apply() = UInt(2.W)
+    def apply(rs2: UInt): UInt = Mux(rs2(2, 0) === 5.U, all,
+                                 Mux(rs2(2, 0) === 4.U, s1,
+                                 Mux(rs2(2, 0) === 3.U, pall, p1)))
+  }
+
   object LSUOpType {
     // The max length is 6 bits
     // load pipeline
