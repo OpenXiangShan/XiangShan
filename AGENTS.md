@@ -101,6 +101,10 @@ cd mem_ut/ver/ut/memblock/sim
 
 - [mem_ut_code_review_document_rule.md](AI_DOC/project_management/mem_ut_code_review_document_rule.md)
 
+当前 `mem_ut` interface 变更总结文档规则为：
+
+- [mem_ut_interface_change_summary_document_rule.md](AI_DOC/project_management/mem_ut_interface_change_summary_document_rule.md)
+
 后续处理 `mem_ut` 环境时，应优先阅读该文档。
 
 后续生成、刷新或检查 `memblock` RTL 时，应优先阅读 `memblock_rtl生成规则.md`。
@@ -170,6 +174,11 @@ sequence 主循环、monitor service loop、handler、adapter、scheduler 或公
 后续生成、修改或复查 `mem_ut` 测试框架源码 review 文档、implementation review、
 code review 或专项源码修改 review 时，必须先阅读
 `AI_DOC/project_management/mem_ut_code_review_document_rule.md`。
+
+后续因 DUT/interface/agent 接口变更而生成、修改或复查 interface 变更总结文档，
+包括按 agent 汇总 interface 信号、检查 transaction/connect/monitor/driver 覆盖、
+统计 `dut_inst.sv` 或 DUT 顶层未归属 agent 端口、提出新增 agent 分类建议时，必须先阅读
+`AI_DOC/project_management/mem_ut_interface_change_summary_document_rule.md`。
 
 后续凡新增或调整 `mem_ut/ver/ut/memblock/rule` 下的 mem_ut 规则文件，必须同步在
 本 `AGENTS.md` 中添加或更新对应入口，包含规则文档链接、触发条件和优先阅读要求。
