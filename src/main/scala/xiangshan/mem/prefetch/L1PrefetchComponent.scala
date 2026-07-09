@@ -608,7 +608,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
       tlb_req_arb.io.in(i).bits.vaddr := l2_array(i - MLP_L1_SIZE).get_tlb_va()
     }
     tlb_req_arb.io.in(i).bits.cmd := TlbCmd.read
-    tlb_req_arb.io.in(i).bits.isPrefetch := true.B
+    tlb_req_arb.io.in(i).bits.fromHwPrefetch := true.B
     tlb_req_arb.io.in(i).bits.size := 3.U
     tlb_req_arb.io.in(i).bits.kill := false.B
     tlb_req_arb.io.in(i).bits.no_translate := false.B
