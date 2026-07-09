@@ -610,14 +610,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val uncachePd           = 0.U.asTypeOf(Vec(FetchBlockInstNum, new PreDecodeInfo))
   private val uncacheMisEndOffset = Wire(Valid(UInt(FetchBlockInstOffsetWidth.W)))
   uncacheMisEndOffset.valid := s2_reqIsUncache
-  uncacheMisEndOffset.bits  := Mux(uncacheIsRvc || uncacheNeedResend, 0.U, 1.U)
+  uncacheMisEndOffset.bits  := Mux(uncacheIsRvc || s2_prevEndIsHalfRvi || uncacheNeedResend, 0.U, 1.U)
 
   // Send mmioFlushWb back to FTQ 1 cycle after uncache fetch return
   // When backend redirect, mmioState reset after 1 cycle.
   // In this case, mask .valid to avoid overriding backend redirect
   private val uncacheTarget =
     Mux(
-      uncacheIsRvc || uncacheNeedResend,
+      uncacheIsRvc || s2_prevEndIsHalfRvi || uncacheNeedResend,
       s2_fetchBlock(0).startVAddr + 2.U,
       s2_fetchBlock(0).startVAddr + 4.U
     )
