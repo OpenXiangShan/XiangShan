@@ -138,6 +138,38 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   /** instructions decoded by simple decoders */
   val simpleDecodedInst = VecInit(decoders.map(_.io.deq.decodedInst))
 
+  /**
+   * NTL (Non-Temporal Locality) hint attach: bind hint at slot i to memory target at slot i+1 (or next cycle slot)
+   */
+  val ntlAddedSimpleDecodedInst = WireDefault(simpleDecodedInst)
+  val inFires = io.in.map(_.fire)
+  for (i <- 0 until DecodeWidth - 1) {
+    when (inFires(i) && simpleDecodedInst(i).isNtlHint && inFires(i + 1) && ntlAddedSimpleDecodedInst(i + 1).isMemAll) {
+      ntlAddedSimpleDecodedInst(i + 1).ntl.valid := true.B
+      ntlAddedSimpleDecodedInst(i + 1).ntl.bits  := NtlType(simpleDecodedInst(i).lsrc(1))
+    }
+  }
+  val pendingNtl = RegInit(0.U.asTypeOf(Valid(NtlType())))
+  when (pendingNtl.valid && inFires(0) && ntlAddedSimpleDecodedInst(0).isMemAll) {
+    ntlAddedSimpleDecodedInst(0).ntl.valid := true.B
+    ntlAddedSimpleDecodedInst(0).ntl.bits  := pendingNtl.bits
+  }
+  val lastFireSlotOH = (0 until DecodeWidth).map { i =>
+    if (i == DecodeWidth - 1) inFires(i) else inFires(i) && !inFires(i + 1)
+  }
+  val lastHintFire = lastFireSlotOH.zip(simpleDecodedInst.map(_.isNtlHint)).map {
+    case (oh, hint) => oh && hint
+  }.reduce(_ || _)
+
+  when (io.redirect.valid) {
+    pendingNtl.valid := false.B
+  }.elsewhen (lastHintFire) {
+    pendingNtl.valid := true.B
+    pendingNtl.bits  := Mux1H(lastFireSlotOH, simpleDecodedInst.map(inst => NtlType(inst.lsrc(1))))
+  }.elsewhen (pendingNtl.valid && inFires(0)) {
+    pendingNtl.valid := false.B
+  }
+
   /** whether instructions decoded by simple decoders are illegal */
   val isIllegalInstVec = VecInit((outValids lazyZip outReadys lazyZip io.out.map(_.bits)).map {
     case (valid, ready, decodedInst) =>
@@ -159,7 +191,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
   /** existance of complex instructions among first few simple decoders' results, which needs decoding */
   val complexValid = VecInit((isComplexVec zip noMoreThanRenameReady).map(x => x._1 & x._2)).asUInt.orR
   /** selected complex instruction for complex decoder */
-  val complexInst = PriorityMuxDefault(isComplexVec.zip(decoders.map(_.io.deq.decodedInst)), 0.U.asTypeOf(new DecodeOutUop))
+  val complexInst = PriorityMuxDefault(isComplexVec.zip(ntlAddedSimpleDecodedInst), 0.U.asTypeOf(new DecodeOutUop))
   /** selected complex micro operation information for complex decoder */
   val complexUopInfo = PriorityMuxDefault(isComplexVec.zip(decoders.map(_.io.deq.uopInfo)), 0.U.asTypeOf(new UopInfo))
 
@@ -233,7 +265,7 @@ class DecodeStage(implicit p: Parameters) extends XSModule
    * use simple decoded insts to fill the rest space in DecodeWidth.
    */
   for (i <- 0 until DecodeWidth) {
-    finalDecodedInst(i) := Mux(complexNum > i.U, complexDecodedInst(i), simpleDecodedInst(i.U - complexNum))
+    finalDecodedInst(i) := Mux(complexNum > i.U, complexDecodedInst(i), ntlAddedSimpleDecodedInst(i.U - complexNum))
     finalDecodedInstValid(i) := Mux(complexNum > i.U, complexDecodedInstValid(i), simplePrefixVec(i.U - complexNum))
   }
 
