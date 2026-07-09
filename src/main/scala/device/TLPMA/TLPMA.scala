@@ -49,7 +49,8 @@ class TLPMA(implicit p: Parameters) extends LazyModule with PMAConst with MMPMAM
         mmpma.sameCycle/* pmaParam.sameCycle*/,
         false)).io
     ))
-    pma_check.map(_.check_env.apply(mmpma.lgMaxSize.U, false.B, pma/*placeHolder*/, pma))
+    val pmpPlaceHolder = WireInit(VecInit(Seq.fill(NumPMPReal)(0.U.asTypeOf(new xiangshan.backend.fu.PMPEntry))))
+    pma_check.map(_.check_env.apply(mmpma.lgMaxSize.U, false.B, pmpPlaceHolder, pma))
     for (i <- 0 until mmpma.num) {
       pma_check(i).req_apply(req(i).valid, req(i).bits.addr)
       resp(i) := pma_check(i).resp

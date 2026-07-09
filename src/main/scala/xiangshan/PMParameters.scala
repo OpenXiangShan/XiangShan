@@ -29,7 +29,7 @@ case class PMParameters
 (
   NumPMP: Int = 64,
   NumPMA: Int = 64,
-  NumPMPReal: Int = 32,
+  NumPMPReal: Int = 64,
   NumPMAReal: Int = 32, // if pmaReal set num > 32, need fix pmaCfgBase
 
   PlatformGrain: Int = log2Ceil(4*1024), // 4KB, a normal page
