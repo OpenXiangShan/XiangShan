@@ -287,42 +287,24 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
     }
 
     is (s_wb) {
-      when (req.isvec) {
-        when (io.vecWriteBack.map(x => x.fire).reduce( _ || _)) {
-          bufferState := s_idle
-          req_valid := false.B
-          curPtr := 0.U
-          unSentStores := 0.U
-          unWriteStores := 0.U
-          globalException := false.B
-          globalUncache := false.B
-          isCrossPage := false.B
+      val writeBack = req.isvec && io.vecWriteBack.map(x => x.fire).reduce( _ || _) || io.writeBack.fire
+      when (writeBack && (!isCrossPage || globalUncache || globalException)) {
+        bufferState := s_idle
+        req_valid := false.B
+        curPtr := 0.U
+        unSentStores := 0.U
+        unWriteStores := 0.U
+        globalException := false.B
+        globalUncache := false.B
+        isCrossPage := false.B
 
-          globalMMIO := false.B
-          globalNC   := false.B
-          globalMemBackTypeMM := false.B
-        }
-
-      }.otherwise {
-        when (io.writeBack.fire && (!isCrossPage || globalUncache || globalException)) {
-          bufferState := s_idle
-          req_valid := false.B
-          curPtr := 0.U
-          unSentStores := 0.U
-          unWriteStores := 0.U
-          globalException := false.B
-          globalUncache := false.B
-          isCrossPage := false.B
-
-          globalMMIO := false.B
-          globalNC   := false.B
-          globalMemBackTypeMM := false.B
-        } .elsewhen(io.writeBack.fire && isCrossPage) {
-          bufferState := s_block
-        } .otherwise {
-          bufferState := s_wb
-        }
-
+        globalMMIO := false.B
+        globalNC   := false.B
+        globalMemBackTypeMM := false.B
+      } .elsewhen(writeBack && isCrossPage) {
+        bufferState := s_block
+      } .otherwise {
+        bufferState := s_wb
       }
     }
 
