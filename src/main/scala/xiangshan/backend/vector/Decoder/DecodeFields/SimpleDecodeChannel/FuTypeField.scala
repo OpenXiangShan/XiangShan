@@ -7,7 +7,6 @@ import xiangshan.backend.decode.opcode.Opcode
 import xiangshan.backend.decode.opcode.Opcode.Opcode
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.vector.Decoder.InstPattern.InstPattern
-import xiangshan.backend.vector.Decoder.Uop.ScalaUopTable
 import xiangshan.backend.vector.Decoder.util.DecodeField
 
 import scala.language.implicitConversions
