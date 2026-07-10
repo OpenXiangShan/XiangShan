@@ -17,12 +17,9 @@ package xiangshan.frontend
 
 import chisel3._
 import chisel3.util._
-import ftq.FtqBundle
 import ftq.FtqPrefetchReq
-import icache.HasICacheParameters
 import icache.MetaInfo
 import icache.PrefetchReqBundle
-import org.chipsalliance.cde.config.Parameters
 import utils.EnumUInt
 
 // As 2-prefetch / 2-fetch support is spread across Ftq/Ifu/ICache,
@@ -148,9 +145,4 @@ object TwoPrefetchCase {
      */
     def Interleave: UInt = 8.U(width.W)
   }
-}
-
-class TwoFetchInfo(implicit p: Parameters) extends FtqBundle with HasICacheParameters {
-  val isMmio:  Bool      = Bool()
-  val wayMask: Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
 }

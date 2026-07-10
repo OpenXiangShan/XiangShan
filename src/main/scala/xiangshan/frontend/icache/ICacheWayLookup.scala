@@ -26,7 +26,6 @@ import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.ftq.BpuFlushInfo
 import xiangshan.frontend.ftq.FtqPtr
-import xiangshan.frontend.ftq.FtqToWayLookupBundle
 
 class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     with ICacheMissUpdateHelper
@@ -36,10 +35,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     val flush:        Bool         = Input(Bool())
     val flushFromBpu: BpuFlushInfo = Input(new BpuFlushInfo)
 
-    val fromFtq: DecoupledIO[FtqToWayLookupBundle] = Flipped(Decoupled(new FtqToWayLookupBundle))
-    val toFtq:   WayLookupToFtqBundle              = Output(new WayLookupToFtqBundle)
-
-    val toMainPipe: DecoupledIO[WayLookupToMainPipeBundle] = DecoupledIO(new WayLookupToMainPipeBundle)
+    val toMainPipe:   DecoupledIO[WayLookupToMainPipeBundle] = DecoupledIO(new WayLookupToMainPipeBundle)
+    val fromMainPipe: MainPipeToWayLookupBundle              = Input(new MainPipeToWayLookupBundle)
 
     val write: Vec[DecoupledIO[WayLookupWriteBundle]] = Vec(FetchPorts, Flipped(DecoupledIO(new WayLookupWriteBundle)))
 
@@ -70,11 +67,9 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
 
   private val numValidEntries = distanceBetween(writePtr, readPtr)
   private val numFreeEntries  = WayLookupSize.U - numValidEntries
-  dontTouch(numValidEntries)
-  dontTouch(numFreeEntries)
 
   // NOTE: May be unportable, we have bp3 == pf2 now, and WayLookup is written in pf1,
-  // so the tailing 0 (already bypassed to if1) or 1 (if1 stall, stored here) entries might be flushed by bp3,
+  // so up to one tail entry still in WayLookup might be flushed by bp3,
   // therefore, when shouldFlushByStage3, we need to move back writePtr by 0 (empty) or 1.
   // If in future we have bp4 (or even more) flush, this might not be enough.
   // NOTE: With 2-prefetch, writePtr - 2.U still does not need to be flushed,
@@ -97,7 +92,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
     readPtr.value := 0.U
     readPtr.flag  := false.B
   }.elsewhen(io.toMainPipe.fire) {
-    readPtr := readPtr + Mux(io.toFtq.realTwoFetchValid, 2.U, 1.U)
+    val deqCnt = Mux(io.fromMainPipe.realTwoFetchValid, 2.U, 1.U)
+    readPtr := readPtr + deqCnt
   }
 
   when(io.flush) {
@@ -110,9 +106,6 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   // we can store only the first exception encountered, as exceptions must trigger a redirection (and thus a flush)
   private val exceptionEntry = RegInit(0.U.asTypeOf(Valid(new WayLookupExceptionEntry)))
   private val exceptionPtr   = RegInit(ICacheWayLookupPtr(false.B, 0.U))
-  private val exceptionHit = VecInit((0 until MaxFetchReqNum).map { i =>
-    exceptionPtr === (readPtr + i.U) && exceptionEntry.valid
-  })
 
   when(io.flush || bpuS3FlushValid && exceptionPtr === bpuS3FlushPtr) {
     // When flushed by bp3
@@ -139,63 +132,23 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   private val updateStall = VecInit((0 until MaxFetchReqNum).map(i => entryUpdate((readPtr + i.U).value)))
 
   /* *** read *** */
-  private val secondWriteValid = if (FetchPorts == 1) false.B else io.write(1).valid
-  private val fetchReq         = io.fromFtq.bits.req
-
-  private val canDeq       = !empty && !updateStall(0)
-  private val canDeqSecond = numValidEntries > 1.U && !updateStall(0) && !updateStall(1)
+  private val canDeq    = !empty && !updateStall(0)
+  private val canDeqTwo = numValidEntries > 1.U && !updateStall(0) && !updateStall(1)
 
   private val fetchReqEntry = VecInit((0 until MaxFetchReqNum).map(i => entries((readPtr + i.U).value)))
   private val fetchReqExceptionEntry = VecInit((0 until MaxFetchReqNum).map { i =>
-    Mux(exceptionHit(i), exceptionEntry.bits, 0.U.asTypeOf(new WayLookupExceptionEntry))
+    Mux(
+      exceptionEntry.valid && exceptionPtr === (readPtr + i.U),
+      exceptionEntry.bits,
+      0.U.asTypeOf(new WayLookupExceptionEntry)
+    )
   })
 
-  private val isDataSramReadConflict = (0 until DataBanks).map { bankIdx =>
-    val reqReadInfo = (0 until MaxFetchReqNum).map { i =>
-      val lineSelOH = Cat(fetchReq(i).bankSel(1)(bankIdx), fetchReq(i).bankSel(0)(bankIdx))
-      val readValid = lineSelOH.orR && fetchReq(i).valid
-      val wayMask   = Mux1H(lineSelOH, fetchReqEntry(i).waymask) & Fill(nWays, readValid)
-      val setIdx    = Mux1H(lineSelOH, fetchReq(i).vSetIdx)
-      (readValid, wayMask, setIdx)
-    }
-
-    reqReadInfo.map(_._1).reduce(_ && _) &&    // read same bank
-    reqReadInfo(0)._2 === reqReadInfo(1)._2 && // read same way
-    reqReadInfo(0)._3 =/= reqReadInfo(1)._3    // read different set
-  }.reduce(_ || _)
-
-  private val hasMmio          = fetchReqEntry.map(_.isMmio).reduce(_ || _)
-  private val hasItlbException = exceptionHit.reduce(_ || _)
-
-  private val realTwoFetchValid = fetchReq(1).valid && canDeqSecond &&
-    !isDataSramReadConflict && !hasMmio && !hasItlbException
-
-  io.toFtq.realTwoFetchValid         := realTwoFetchValid
-  io.toFtq.perf_canNotServeTwoMeta   := !canDeqSecond
-  io.toFtq.perf_dataSramReadConflict := isDataSramReadConflict
-  io.toFtq.perf_hasMmio              := hasMmio
-  io.toFtq.perf_hasItlbException     := hasItlbException
-
-  io.fromFtq.ready := io.toMainPipe.ready && canDeq && !io.flush
-
-  io.toMainPipe.valid             := io.fromFtq.valid && canDeq && !io.flush
-  io.toMainPipe.bits.req          := fetchReq
-  io.toMainPipe.bits.req(1).valid := realTwoFetchValid
-
+  io.toMainPipe.valid := canDeq && !io.flush
   io.toMainPipe.bits.wayLookupInfo.zipWithIndex.foreach { case (info, i) =>
-    info.entry          := fetchReqEntry(i)
-    info.exceptionEntry := fetchReqExceptionEntry(i)
-  }
-
-  if (!env.FPGAPlatform) {
-    when(io.toMainPipe.fire) {
-      assert(io.toMainPipe.bits.wayLookupInfo(0).entry.debug_ftqIdx.get === fetchReq(0).ftqIdx)
-      assert(io.toMainPipe.bits.wayLookupInfo(0).entry.debug_startVAddr.get === fetchReq(0).startVAddr)
-      when(realTwoFetchValid) {
-        assert(io.toMainPipe.bits.wayLookupInfo(1).entry.debug_ftqIdx.get === fetchReq(1).ftqIdx)
-        assert(io.toMainPipe.bits.wayLookupInfo(1).entry.debug_startVAddr.get === fetchReq(1).startVAddr)
-      }
-    }
+    info.valid               := (if (i == 0) true.B else canDeqTwo)
+    info.bits.entry          := fetchReqEntry(i)
+    info.bits.exceptionEntry := fetchReqExceptionEntry(i)
   }
 
   /**
