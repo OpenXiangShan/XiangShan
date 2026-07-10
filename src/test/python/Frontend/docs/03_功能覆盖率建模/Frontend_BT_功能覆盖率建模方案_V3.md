@@ -5,8 +5,30 @@
 当前使用方式如下：
 
 1. 本文件保留 V3 阶段对 Frontend BT funcov 的分层设计原则。
-2. 当前 active 的主线试点 CSV 以顶层文件 `../frontend_bt_functional_coverage_pilot.csv` 为准。
+2. 当前 active 的主线试点 CSV 为同目录的 `frontend_bt_functional_coverage_pilot.csv`。
 3. 当前目录下的 `Frontend_BT_功能覆盖率映射_初版_V3.csv` 和 `Frontend_BT_功能覆盖率试点清单_V3.csv` 作为规划基线继续维护。
+
+## Batch 0: 2-fetch 反标约束
+
+2-fetch 首批 `BIN-501..BIN-541` 使用以下 active 资产：
+
+- 测试点主表：`../02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv`
+- 建仓清单：`frontend_bt_functional_coverage_pilot.csv`
+- 自动回标工具：`../../tools/backannotate_funcov.py`
+
+每个已建仓叶子测试点只能拥有一条 `coverage` 反标，且必须精确到：
+
+`covergroup <group>, coverpoint <point>, bins <bin> (BIN-xxx)`
+
+同一个 BIN 只能由一个叶子测试点占用。多个观察条件共同构成验证目标时，必须建立独立 cross 覆盖项和独立叶子场景，不能把多个普通 coverpoint 并列反标到同一叶子。
+
+pilot CSV 的 `Coverpoint` 列与 `Coverage_Group`、`Bin_Name` 一起构成建仓唯一键。测试点主表额外维护：
+
+- `status`：`UNMAPPED`、`MODELED`、`PARTIAL`、`HIT`、`CLOSED`、`BLOCKED`、`N-A`
+- `testcase`：该 leaf 的计划或实际 testcase
+- `evidence`：模型或真实 DUT artifact 的简短证据索引
+
+自动回标只按 artifact 的运行统计区分模型与真实 DUT：模型/FakeDut 只能维持或提升到 `MODELED`；真实 DUT 命中可提升到 `HIT`；`CLOSED` 只能由人工验收写入，工具会保留该状态而不自动覆盖。
 
 ## 1. 目标
 

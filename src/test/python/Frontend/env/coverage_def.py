@@ -8,7 +8,7 @@ try:
 except Exception:  # pragma: no cover
     fc = None
 
-from .funcov import _TWO_FETCH_SIGNALS
+from .funcov import TWO_FETCH_COVERPOINTS, _TWO_FETCH_SIGNALS
 
 
 @lru_cache(maxsize=1)
@@ -377,7 +377,7 @@ def get_coverage_groups(dut):
             "blocked_cross_page": lambda x: _tf_ftq_blocked_by(x, "cross_page"),
             "blocked_backend_exception": lambda x: _tf_ftq_blocked_by(x, "backend_exception"),
         },
-        name="request_eligibility",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_ftq_eligibility"],
     )
 
     _safe_add_watch_point(
@@ -392,7 +392,7 @@ def get_coverage_groups(dut):
             and _tf_value(x, "way_real_two") == 1
             and (_tf_value(x, "fetch_ptr_value", -1) >= 62),
         },
-        name="fetch_ptr_step",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_pointer_advance"],
     )
 
     _safe_add_watch_point(
@@ -408,7 +408,7 @@ def get_coverage_groups(dut):
             == 1
             and _tf_value(x, "ifu_flush") == 1,
         },
-        name="flush_stage",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_flush_flow"],
     )
 
     _safe_add_watch_point(
@@ -424,7 +424,7 @@ def get_coverage_groups(dut):
             "interleave": lambda x: _tf_fire(x, "prefetch_valid", "prefetch_ready")
             and _tf_value(x, "prefetch_case") == 8,
         },
-        name="address_layout",
+        name=TWO_FETCH_COVERPOINTS["two_prefetch_layout"],
     )
 
     _safe_add_watch_point(
@@ -438,7 +438,7 @@ def get_coverage_groups(dut):
             and _tf_value(x, "way_req1_valid") == 1
             and _tf_value(x, "way_real_two") == 0,
         },
-        name="serve_width",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_waylookup_result"],
     )
 
     _safe_add_watch_point(
@@ -450,7 +450,7 @@ def get_coverage_groups(dut):
             "mmio": lambda x: _tf_waylookup_blocked_by(x, "mmio"),
             "itlb_exception": lambda x: _tf_waylookup_blocked_by(x, "itlb_exception"),
         },
-        name="fallback_reason",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_waylookup_block_reason"],
     )
 
     _safe_add_watch_point(
@@ -462,7 +462,7 @@ def get_coverage_groups(dut):
             "miss_hit": lambda x: _tf_mainpipe_pattern(x, "miss_hit"),
             "miss_miss": lambda x: _tf_mainpipe_pattern(x, "miss_miss"),
         },
-        name="dual_hit_pattern",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_mainpipe_hit_pattern"],
     )
 
     _safe_add_watch_point(
@@ -471,7 +471,7 @@ def get_coverage_groups(dut):
         {
             "wait_refill_then_dual": _tf_refill_then_dual,
         },
-        name="completion_mode",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_mainpipe_completion"],
     )
 
     _safe_add_watch_point(
@@ -481,7 +481,7 @@ def get_coverage_groups(dut):
             "dual_window": lambda x: _tf_fire(x, "ifu_valid", "ifu_ready")
             and _tf_value(x, "ifu_req1_valid") == 1,
         },
-        name="window_width",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_ifu_window"],
     )
 
     _safe_add_watch_point(
@@ -491,7 +491,7 @@ def get_coverage_groups(dut):
             "blocksel_switch": lambda x: _tf_ifu_raw_flag(x, "blockSel", True),
             "two_ftq_sources": _tf_backend_two_sources,
         },
-        name="source_mapping",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_ifu_source"],
     )
 
     _safe_add_watch_point(
@@ -505,7 +505,7 @@ def get_coverage_groups(dut):
             "rvc_independent": _tf_backend_rvc_boundary,
             "mixed_rvc_rvi": _tf_backend_mixed_rvc_rvi,
         },
-        name="boundary_kind",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_cross_block"],
     )
 
     _safe_add_watch_point(
@@ -518,7 +518,7 @@ def get_coverage_groups(dut):
             "second_redirect": lambda x: _tf_checker_selected(x, 1)
             and _tf_value(x, "checker_invalid") == 1,
         },
-        name="invalid_taken_block",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_invalid_taken"],
     )
 
     _safe_add_watch_point(
@@ -528,7 +528,7 @@ def get_coverage_groups(dut):
             "first_masks_second": lambda x: _tf_checker_selected(x, 0),
             "second_after_first_valid": lambda x: _tf_checker_selected(x, 1),
         },
-        name="earliest_fault",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_checker_priority"],
     )
 
     _safe_add_watch_point(
@@ -538,7 +538,7 @@ def get_coverage_groups(dut):
             "first_block": lambda x: _tf_checker_selected(x, 0),
             "second_block": lambda x: _tf_checker_selected(x, 1),
         },
-        name="select_block",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_checker_redirect"],
     )
 
     _safe_add_watch_point(
@@ -552,7 +552,7 @@ def get_coverage_groups(dut):
             and _tf_value(x, "to_ibuffer_valid") == 1
             and _tf_value(x, "to_ibuffer_ready") == 0,
         },
-        name="delivery_state",
+        name=TWO_FETCH_COVERPOINTS["two_fetch_delivery"],
     )
 
     return [

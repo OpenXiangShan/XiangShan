@@ -153,6 +153,74 @@ _TWO_FETCH_SIGNALS = {
 }
 
 
+# Single source of truth for the 2-fetch coverpoint names used by the pilot,
+# Toffee covergroups, raw funcov sampler, and testpoint back-annotation.
+TWO_FETCH_COVERPOINTS = {
+    "two_fetch_ftq_eligibility": "request_eligibility",
+    "two_fetch_pointer_advance": "fetch_ptr_step",
+    "two_fetch_flush_flow": "flush_stage",
+    "two_prefetch_layout": "address_layout",
+    "two_fetch_waylookup_result": "serve_width",
+    "two_fetch_waylookup_block_reason": "fallback_reason",
+    "two_fetch_mainpipe_hit_pattern": "dual_hit_pattern",
+    "two_fetch_mainpipe_completion": "completion_mode",
+    "two_fetch_ifu_window": "window_width",
+    "two_fetch_ifu_source": "source_mapping",
+    "two_fetch_cross_block": "boundary_kind",
+    "two_fetch_invalid_taken": "invalid_taken_block",
+    "two_fetch_checker_priority": "earliest_fault",
+    "two_fetch_checker_redirect": "select_block",
+    "two_fetch_delivery": "delivery_state",
+}
+
+
+TWO_FETCH_SAMPLER_BIN_KEYS = frozenset(
+    {
+        ("two_fetch_ftq_eligibility", "eligible_dual"),
+        ("two_fetch_ftq_eligibility", "blocked_runahead"),
+        ("two_fetch_ftq_eligibility", "blocked_size"),
+        ("two_fetch_ftq_eligibility", "blocked_cross_page"),
+        ("two_fetch_ftq_eligibility", "blocked_backend_exception"),
+        ("two_fetch_pointer_advance", "step_two"),
+        ("two_fetch_pointer_advance", "step_one"),
+        ("two_fetch_pointer_advance", "wrap_step_two"),
+        ("two_fetch_flush_flow", "bpu_s3_drop_before_issue"),
+        ("two_prefetch_layout", "same_line"),
+        ("two_prefetch_layout", "overlap1"),
+        ("two_prefetch_layout", "overlap2"),
+        ("two_prefetch_layout", "interleave"),
+        ("two_fetch_waylookup_result", "dual_served"),
+        ("two_fetch_waylookup_block_reason", "insufficient_meta"),
+        ("two_fetch_waylookup_block_reason", "data_bank_conflict"),
+        ("two_fetch_waylookup_block_reason", "mmio"),
+        ("two_fetch_waylookup_block_reason", "itlb_exception"),
+        ("two_fetch_waylookup_result", "single_fallback"),
+        ("two_fetch_mainpipe_hit_pattern", "hit_hit"),
+        ("two_fetch_mainpipe_hit_pattern", "hit_miss"),
+        ("two_fetch_mainpipe_hit_pattern", "miss_hit"),
+        ("two_fetch_mainpipe_hit_pattern", "miss_miss"),
+        ("two_fetch_mainpipe_completion", "wait_refill_then_dual"),
+        ("two_fetch_ifu_window", "dual_window"),
+        ("two_fetch_ifu_source", "blocksel_switch"),
+        ("two_fetch_cross_block", "taken_separates_blocks"),
+        ("two_fetch_ifu_source", "two_ftq_sources"),
+        ("two_fetch_cross_block", "rvi_stitch"),
+        ("two_fetch_cross_block", "rvc_independent"),
+        ("two_fetch_cross_block", "mixed_rvc_rvi"),
+        ("two_fetch_invalid_taken", "first_masks_second"),
+        ("two_fetch_invalid_taken", "second_redirect"),
+        ("two_fetch_checker_priority", "first_masks_second"),
+        ("two_fetch_checker_redirect", "first_block"),
+        ("two_fetch_checker_redirect", "second_block"),
+        ("two_fetch_delivery", "two_ftq_entries_same_cycle"),
+        ("two_fetch_delivery", "dual_fire"),
+        ("two_fetch_delivery", "dual_stall"),
+        ("two_fetch_flush_flow", "backend_redirect_drops_inflight"),
+        ("two_fetch_checker_priority", "second_after_first_valid"),
+    }
+)
+
+
 def _tf_read(recorder, key: str) -> int | None:
     return _read_first(recorder, _TWO_FETCH_SIGNALS[key])
 

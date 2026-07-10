@@ -3,9 +3,18 @@ import re
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from env import coverage_def as coverage_def_module
-from env.funcov import _TWO_FETCH_SIGNALS, sample_cfvec_coverage, sample_two_fetch_coverage
+from env.funcov import (
+    TWO_FETCH_COVERPOINTS,
+    TWO_FETCH_SAMPLER_BIN_KEYS,
+    _TWO_FETCH_SIGNALS,
+    sample_cfvec_coverage,
+    sample_two_fetch_coverage,
+)
 from env.functional_coverage import FunctionalCoverageRecorder, default_pilot_csv_path
+from tools.backannotate_funcov import backannotate, load_artifacts, load_pilot, validate_mapping
 
 
 class _Signal:
@@ -271,39 +280,80 @@ def test_two_fetch_backannotation_matches_pilot_and_covergroups():
     with pilot_path.open(encoding="utf-8-sig", newline="") as f:
         pilot_rows = [row for row in csv.DictReader(f) if row["Bin_ID"].startswith("BIN-5")]
     assert len(pilot_rows) == 41
-    assert not [
-        row["Bin_ID"]
+    assert all(row["Coverpoint"] for row in pilot_rows)
+    assert all(
+        row["Coverpoint"] == TWO_FETCH_COVERPOINTS[row["Coverage_Group"]]
         for row in pilot_rows
-        if not any(
-            group == row["Coverage_Group"] and bin_name == row["Bin_Name"]
-            for group, _point, bin_name in model
-        )
-    ]
+    )
+    assert {
+        (row["Coverage_Group"], row["Coverpoint"], row["Bin_Name"])
+        for row in pilot_rows
+    } == {
+        item
+        for item in model
+        if item[0] in TWO_FETCH_COVERPOINTS
+    }
+    assert {
+        (row["Coverage_Group"], row["Bin_Name"])
+        for row in pilot_rows
+    } == TWO_FETCH_SAMPLER_BIN_KEYS
 
     testpoint_path = (
         repo_root
         / "src/test/python/Frontend/docs/02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv"
     )
-    reference_re = re.compile(
-        r"covergroup ([^,;]+), coverpoint ([^,;]+), bins ([^ (;]+) \((BIN-\d+)\)"
-    )
-    references = []
-    with testpoint_path.open(encoding="utf-8-sig", newline="") as f:
-        for row in csv.reader(f):
-            if len(row) < 9:
-                continue
-            references.extend(reference_re.findall(row[8]))
+    mapping = validate_mapping(testpoint_path, load_pilot(pilot_path))
+    assert len(mapping) == 41
 
-    two_fetch_references = [ref for ref in references if ref[0].startswith("two_")]
-    assert two_fetch_references
-    assert not [
-        ref
-        for ref in two_fetch_references
-        if (ref[0], ref[1], ref[2]) not in model
-        or not any(
-            pilot["Bin_ID"] == ref[3]
-            and pilot["Coverage_Group"] == ref[0]
-            and pilot["Bin_Name"] == ref[2]
-            for pilot in pilot_rows
+
+def test_backannotation_tool_distinguishes_model_dut_and_manual_close(tmp_path):
+    pilot_path = tmp_path / "pilot.csv"
+    testpoint_path = tmp_path / "testpoints.csv"
+    model_path = tmp_path / "model.funcov.json"
+    dut_path = tmp_path / "dut.funcov.json"
+
+    pilot_path.write_text(
+        "Bin_ID,Coverage_Group,Coverpoint,Bin_Name,建议试点用例\n"
+        "BIN-501,two_fetch_ftq_eligibility,request_eligibility,eligible_dual,case_a\n",
+        encoding="utf-8-sig",
+    )
+    testpoint_path.write_text(
+        "一级测试点,coverage,status,testcase,evidence\n"
+        "leaf,\"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, bins eligible_dual (BIN-501)\",MODELED,,\n",
+        encoding="utf-8-sig",
+    )
+    model_path.write_text(
+        '{"artifact_tag":"case_a_unit","stats":{"monitor":{"cycles_total":0}},'
+        '"hits":{"two_fetch_ftq_eligibility::eligible_dual":{"hits":9}}}',
+        encoding="utf-8",
+    )
+    dut_path.write_text(
+        '{"artifact_tag":"case_a_test_bin_trace","stats":{"monitor":{"cycles_total":10}},'
+        '"hits":{"two_fetch_ftq_eligibility::eligible_dual":{"hits":3}}}',
+        encoding="utf-8",
+    )
+
+    pilot = load_pilot(pilot_path)
+    artifacts = load_artifacts([model_path, dut_path])
+    assert backannotate(testpoint_path, pilot, artifacts, apply=True)["hit"] == 1
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as f:
+        row = next(csv.DictReader(f))
+    assert row["status"] == "HIT"
+    assert "MODEL:case_a_unit" in row["evidence"]
+    assert "DUT:case_a_test_bin_trace:hits=3" in row["evidence"]
+
+    row["status"] = "CLOSED"
+    with testpoint_path.open("w", encoding="utf-8-sig", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=row.keys())
+        writer.writeheader()
+        writer.writerow(row)
+    assert backannotate(testpoint_path, pilot, [], apply=True)["closed_preserved"] == 1
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as f:
+        assert next(csv.DictReader(f))["status"] == "CLOSED"
+
+    with testpoint_path.open("a", encoding="utf-8") as f:
+        f.write(
+            "duplicate,\"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, bins eligible_dual (BIN-501)\",MODELED,,\n"
         )
-    ]
+    with pytest.raises(ValueError, match="already owned"):
+        validate_mapping(testpoint_path, pilot)
