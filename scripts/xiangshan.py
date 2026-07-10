@@ -533,6 +533,7 @@ class XiangShan(object):
         ]
         zcb_test = map(lambda x: os.path.join(base_dir, x), workloads)
         return zcb_test
+
     def __get_ci_iopmptest(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads/iopmp"
         workloads = [
@@ -540,6 +541,23 @@ class XiangShan(object):
         ]
         iopmp_test = map(lambda x: os.path.join(base_dir, x), workloads)
         return iopmp_test
+
+    def __get_ci_crosspage_fetch_test(self, name=None):
+        base_dir = "/nfs/home/share/ci-workloads/crosspage-fetch"
+        workloads = [
+            "crosspage_pad2b_page1_exec_page2_exec-riscv64-xs.bin",       # normal
+            "crosspage_pad2b_page1_exec_page2_exec_io-riscv64-xs.bin",    # normal -> mmio
+            "crosspage_pad2b_page1_exec_page2_none-riscv64-xs.bin",       # normal -> page fault
+            "crosspage_pad2b_page1_exec_page2_io-riscv64-xs.bin",         # normal -> mmio page fault
+            "crosspage_pad2b_page1_exec_io_page2_exec-riscv64-xs.bin",    # mmio -> normal
+            "crosspage_pad2b_page1_exec_io_page2_exec_io-riscv64-xs.bin", # mmio
+            "crosspage_pad2b_page1_exec_io_page2_none-riscv64-xs.bin",    # mmio -> page fault
+            "crosspage_pad2b_page1_exec_io_page2_io-riscv64-xs.bin",      # mmio -> mmio page fault
+            "crosspage_pad2b_page1_none_page2_exec-riscv64-xs.bin",       # page fault
+            "crosspage_pad2b_page1_none_page2_exec_io-riscv64-xs.bin",    # page fault -> mmio
+        ]
+        return map(lambda x: os.path.join(base_dir, x), workloads)
+
     def __get_ci_mc(self, name=None):
         base_dir = "/nfs/home/share/ci-workloads"
         workloads = [
@@ -626,7 +644,8 @@ class XiangShan(object):
             # "rvv-test": self.__get_ci_rvvtest,
             "f16_test": self.__get_ci_F16test,
             "zcb-test": self.__get_ci_zcbtest,
-            "iopmp-test": self.__get_ci_iopmptest
+            "iopmp-test": self.__get_ci_iopmptest,
+            "crosspage-fetch-test": self.__get_ci_crosspage_fetch_test,
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)
@@ -658,7 +677,8 @@ class XiangShan(object):
             # "rvv-test": self.__get_ci_rvvtest,
             "f16_test": self.__get_ci_F16test,
             "zcb-test": self.__get_ci_zcbtest,
-            "iopmp-test": self.__get_ci_iopmptest
+            "iopmp-test": self.__get_ci_iopmptest,
+            "crosspage-fetch-test": self.__get_ci_crosspage_fetch_test,
         }
         for target in all_tests.get(test, self.__get_ci_workloads)(test):
             print(target)

@@ -610,14 +610,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val uncachePd           = 0.U.asTypeOf(Vec(FetchBlockInstNum, new PreDecodeInfo))
   private val uncacheMisEndOffset = Wire(Valid(UInt(FetchBlockInstOffsetWidth.W)))
   uncacheMisEndOffset.valid := s2_reqIsUncache
-  uncacheMisEndOffset.bits  := Mux(uncacheIsRvc || uncacheNeedResend, 0.U, 1.U)
+  uncacheMisEndOffset.bits  := Mux(uncacheIsRvc || s2_prevEndIsHalfRvi || uncacheNeedResend, 0.U, 1.U)
 
   // Send mmioFlushWb back to FTQ 1 cycle after uncache fetch return
   // When backend redirect, mmioState reset after 1 cycle.
   // In this case, mask .valid to avoid overriding backend redirect
   private val uncacheTarget =
     Mux(
-      uncacheIsRvc || uncacheNeedResend,
+      uncacheIsRvc || s2_prevEndIsHalfRvi || uncacheNeedResend,
       s2_fetchBlock(0).startVAddr + 2.U,
       s2_fetchBlock(0).startVAddr + 4.U
     )
@@ -646,7 +646,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
     io.toIBuffer.bits.pc(s2_alignShiftNum)                    := uncachePc
     io.toIBuffer.bits.isRvc(s2_alignShiftNum)                 := uncacheIsRvc
-    io.toIBuffer.bits.instrEndOffset(s2_alignShiftNum).offset := Mux(uncacheIsRvc, 0.U, 1.U)
+    io.toIBuffer.bits.instrEndOffset(s2_alignShiftNum).offset := Mux(uncacheIsRvc || s2_prevEndIsHalfRvi, 0.U, 1.U)
 
     io.toIBuffer.bits.exceptionType := s2_icacheMeta(0).exception || uncacheException || uncacheRvcException
     // execption can happen in next page only when cross page.

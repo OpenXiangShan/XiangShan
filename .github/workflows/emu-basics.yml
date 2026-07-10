@@ -106,6 +106,7 @@ jobs:
           # - name: rvv-bench
           - name: f16_test
           - name: zcb-test
+          - name: crosspage-fetch-test
       fail-fast: false
       max-parallel: 4
     steps:
