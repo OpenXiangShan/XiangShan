@@ -28,7 +28,6 @@ import xiangshan.frontend.bpu.BpuPerfMeta
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.icache.ICacheCacheLineHelper
-import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.PrefetchReqBundle
 
 class FtqEntry(implicit p: Parameters) extends FtqBundle {
@@ -110,7 +109,7 @@ class FtqToPrefetchBundle(implicit p: Parameters) extends FtqBundle {
   val twoPrefetchCase: TwoPrefetchCase        = new TwoPrefetchCase
 }
 
-class FtqToWayLookupBundle(implicit p: Parameters) extends FtqBundle {
+class FtqToMainPipeBundle(implicit p: Parameters) extends FtqBundle {
   val req: Vec[FtqFetchRequest] = Vec(MaxFetchReqNum, new FtqFetchRequest)
 }
 
@@ -133,26 +132,21 @@ class FtqPrefetchReq(implicit p: Parameters) extends FtqBundle with ICacheCacheL
   }
 }
 
-class FtqFetchReq(implicit p: Parameters) extends FtqBundle with ICacheDataHelper with ICacheCacheLineHelper {
-  val startVAddr:     PrunedAddr = PrunedAddr(VAddrBits)
-  val nextLineVAddr:  PrunedAddr = PrunedAddr(VAddrBits)
-  val takenCfiOffset: UInt       = UInt(CfiPositionWidth.W)
-  val isCrossLine:    Bool       = Bool()
-  val bankSel:        Vec[UInt]  = Vec(PortNumber, UInt(DataBanks.W))
-  val vSetIdx:        Vec[UInt]  = Vec(PortNumber, UInt(idxBits.W))
-  val size:           UInt       = UInt((log2Ceil(FetchBlockInstNum) + 1).W)
-  val vPageNumber:    UInt       = UInt((VAddrBits - PageOffsetWidth).W)
+class FtqFetchReq(implicit p: Parameters) extends FtqBundle with ICacheCacheLineHelper {
+  val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
+  val nextLineVAddr:  PrunedAddr  = PrunedAddr(VAddrBits)
+  val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  val vSetIdx:        Vec[UInt]   = Vec(PortNumber, UInt(idxBits.W))
+  val size:           UInt        = UInt((log2Ceil(FetchBlockInstNum) + 1).W)
+  val vPageNumber:    UInt        = UInt((VAddrBits - PageOffsetWidth).W)
 
   def fromFtqEntry(entry: FtqEntry): FtqFetchReq = {
-    val (isCrossLine, bankSel) = getBankSel(startVAddr, takenCfiOffset)
-    startVAddr       := entry.startPc
-    nextLineVAddr    := entry.startPc + blockBytes.U
-    takenCfiOffset   := entry.takenCfiOffset.bits
-    this.isCrossLine := isCrossLine
-    this.bankSel     := bankSel
-    vSetIdx          := VecInit(get_idx(startVAddr), get_idx(nextLineVAddr))
-    size             := entry.takenCfiOffset.bits +& 1.U
-    vPageNumber      := entry.startPc(VAddrBits - 1, PageOffsetWidth)
+    startVAddr     := entry.startPc
+    nextLineVAddr  := entry.startPc + blockBytes.U
+    takenCfiOffset := entry.takenCfiOffset
+    vSetIdx        := VecInit(get_idx(startVAddr), get_idx(startVAddr) + 1.U)
+    size           := entry.takenCfiOffset.bits +& 1.U
+    vPageNumber    := entry.startPc(VAddrBits - 1, PageOffsetWidth)
     this
   }
 }
