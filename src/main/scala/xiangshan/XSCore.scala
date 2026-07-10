@@ -204,6 +204,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.ooo_to_mem.intIssue <> backend.io.mem.intIssue
   memBlock.io.ooo_to_mem.vagqAddrUop <> backend.io.mem.vagqAddrUop
   memBlock.io.ooo_to_mem.vstdStoreData <> backend.io.mem.vstdStoreData
+  memBlock.io.ooo_to_mem.vagqDataUop <> backend.io.mem.vagqDataUop
   memBlock.io.ooo_to_mem.vagqVrfReadResp := backend.io.mem.vagqVrfReadResp
 
   // By default, instructions do not have exceptions when they enter the function units.

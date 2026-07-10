@@ -292,6 +292,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters)
     stdIQEnq.valid := staIQEnq.valid && Mux1H(Seq(
       FuType.isStore(staIQEnq.bits.fuType) -> LSUOpType.isScalaOp(staIQEnq.bits.fuOpType),
       FuType.isAMO(staIQEnq.bits.fuType) -> true.B,
+      isVagqStrideDataUop(staIQEnq.bits.fuType, staIQEnq.bits.fuOpType) -> true.B,
     ))
     connectSamePort(stdIQEnq.bits, staIQEnq.bits)
     // Store data reuses store addr src(1) in dispatch2iq
@@ -310,9 +311,11 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters)
     stdIQEnq.bits.regCacheIdx(0) := staIQEnq.bits.regCacheIdx(stdIdx)
   }
   vstdEnqs.foreach(_ zip staFromDispatch foreach { case (vstdEnq, staEnq) =>
+    val isVagqIndexData = isVagqIndexedDataUop(staEnq.bits.fuType, staEnq.bits.fuOpType)
     vstdEnq.valid := staEnq.valid && Mux1H(Seq(
       FuType.isStore(staEnq.bits.fuType) -> LSUOpType.isVecMemContinousOp(staEnq.bits.fuOpType),
       FuType.isAMO(staEnq.bits.fuType) -> false.B,
+      isVagqIndexData -> true.B,
     ))
 
     vstdEnq.bits.isRVC.foreach(_ := staEnq.bits.isRVC.get)
@@ -325,11 +328,16 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters)
     vstdEnq.bits.sqIdx.get := staEnq.bits.sqIdx.get
 
     vstdEnq.bits.debug.foreach(_ := staEnq.bits.debug.get)
-    val vstdSrcIdx = 2 // vector store data is vs3
-    vstdEnq.bits.srcState(0) := staEnq.bits.srcState(vstdSrcIdx)
-    vstdEnq.bits.srcLoadDependency(0) := staEnq.bits.srcLoadDependency(vstdSrcIdx)
-    vstdEnq.bits.srcType(0) := staEnq.bits.srcType(vstdSrcIdx)
-    vstdEnq.bits.psrc(0) := staEnq.bits.psrc(vstdSrcIdx)
+    val indexSrcIdx = 1 // indexed data side reads vs2 as op2Data
+    val vstdSrcIdx = 2 // continuous vector store data is vs3
+    vstdEnq.bits.srcState(0) := Mux(isVagqIndexData, staEnq.bits.srcState(indexSrcIdx), staEnq.bits.srcState(vstdSrcIdx))
+    vstdEnq.bits.srcLoadDependency(0) := Mux(
+      isVagqIndexData,
+      staEnq.bits.srcLoadDependency(indexSrcIdx),
+      staEnq.bits.srcLoadDependency(vstdSrcIdx)
+    )
+    vstdEnq.bits.srcType(0) := Mux(isVagqIndexData, staEnq.bits.srcType(indexSrcIdx), staEnq.bits.srcType(vstdSrcIdx))
+    vstdEnq.bits.psrc(0) := Mux(isVagqIndexData, staEnq.bits.psrc(indexSrcIdx), staEnq.bits.psrc(vstdSrcIdx))
 
     vstdEnq.bits.vpu.get := 0.U.asTypeOf(vstdEnq.bits.vpu.get)
     vstdEnq.bits.pdest := 0.U

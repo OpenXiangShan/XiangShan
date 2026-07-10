@@ -579,6 +579,15 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     case (sink: ValidIO[StoreQueueDataWrite], source: ValidIO[StoreQueueDataWrite]) =>
       sink := source
   }
+  require(
+    io.mem.vagqDataUop.flatten.size == vecRegion.out.toMem.vagqDataUop.flatten.size,
+    s"sizes are not equal, io.mem.vagqDataUop.flatten.size = ${io.mem.vagqDataUop.flatten.size}, " +
+      s"vecRegion.out.toMem.vagqDataUop.flatten.size = ${vecRegion.out.toMem.vagqDataUop.flatten.size}",
+  )
+  io.mem.vagqDataUop.flatten.zip(vecRegion.out.toMem.vagqDataUop.flatten).foreach {
+    case (sink: DecoupledIO[VAGQDataSideUop], source: DecoupledIO[VAGQDataSideUop]) =>
+      sink <> source
+  }
 
   io.mem.tlbCsr := csrio.tlb
   io.mem.csrCtrl := csrio.customCtrl
@@ -804,6 +813,8 @@ class BackendMemIO(implicit p: Parameters, params: BackendParams) extends XSBund
   val vagqAddrUop = Vec(VAGQConstants.AddrIssueWidth, Decoupled(new VAGQAddrSideUop))
   val vstdStoreData: MixedVec[MixedVec[ValidIO[StoreQueueDataWrite]]] =
     backendParams.getVecRegionParam.genExuBundle(_.hasVStd, ValidIO(new StoreQueueDataWrite))
+  val vagqDataUop: MixedVec[MixedVec[DecoupledIO[VAGQDataSideUop]]] =
+    backendParams.getVecRegionParam.genExuBundle(_.hasVStd, DecoupledIO(new VAGQDataSideUop))
 
   // store event difftest information
   val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {

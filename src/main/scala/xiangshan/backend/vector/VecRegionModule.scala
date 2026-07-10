@@ -417,8 +417,19 @@ class VecRegionImp(
     case (sink: ValidIO[Exu.ToRob], source: ValidIO[Exu.ToRob]) => sink := source
   }
 
+  private val vstdPipes = issuePipes.map(_.filter(_.param.hasVStd))
   out.toMem.vstd zip issuePipes.map(_.filter(_.param.hasVStd).map(_.out.sqWbNext.get)) foreach {
     case (sink: MixedVec[ValidIO[StoreQueueDataWrite]], source: Seq[ValidIO[StoreQueueDataWrite]]) => sink := source
+  }
+
+  out.toMem.vagqDataUop zip vstdPipes foreach {
+    case (sink: MixedVec[DecoupledIO[VAGQDataSideUop]], source: Seq[IssuePipe]) =>
+      sink.zip(source).foreach { case (dataUop, pipe) =>
+        val og2DataUop = pipe.out.vagqDataOg2.get
+        dataUop.valid := og2DataUop.valid
+        dataUop.bits := og2DataUop.bits
+        XSError(og2DataUop.valid && !dataUop.ready, "VAGQ indexed data entry is not ready at og2\n")
+      }
   }
 
   for (i <- out.gpWbNext.indices) {
@@ -662,6 +673,8 @@ object VecRegionModule {
   class OutToMem(implicit p: Parameters, param: RegionParam) extends XSBundle {
     val vstd: MixedVec[MixedVec[ValidIO[StoreQueueDataWrite]]] =
       param.genExuBundle(_.hasVStd, ValidIO(new StoreQueueDataWrite))
+    val vagqDataUop: MixedVec[MixedVec[DecoupledIO[VAGQDataSideUop]]] =
+      param.genExuBundle(_.hasVStd, DecoupledIO(new VAGQDataSideUop))
     val vagqVrfReadResp = Valid(new VAGQVRFReadResp)
   }
 

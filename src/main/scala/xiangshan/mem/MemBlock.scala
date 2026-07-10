@@ -48,7 +48,7 @@ import xiangshan.cache.mmu._
 import xiangshan.frontend.instruncache.HasInstrUncacheConst
 import xiangshan.mem.prefetch.{PrefetcherWrapper, TLBPlace}
 
-trait HasMemBlockParameters extends HasXSParameter {
+trait HasMemBlockParameters extends HasXSParameter with HasVAGQParameters with HasVAGQHelper {
   val intSchdParams = backendParams.intSchdParams.get
   val vecSchdParams = backendParams.vecSchdParams.get
 
@@ -209,6 +209,8 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
   val vagqAddrUop = Flipped(Vec(VAGQConstants.AddrIssueWidth, Decoupled(new VAGQAddrSideUop)))
   val vstdStoreData: MixedVec[MixedVec[ValidIO[StoreQueueDataWrite]]] =
     Flipped(backendParams.getVecRegionParam.genExuBundle(_.hasVStd, ValidIO(new StoreQueueDataWrite)))
+  val vagqDataUop: MixedVec[MixedVec[DecoupledIO[VAGQDataSideUop]]] =
+    Flipped(backendParams.getVecRegionParam.genExuBundle(_.hasVStd, DecoupledIO(new VAGQDataSideUop)))
   val vagqVrfReadResp = Flipped(Valid(new VAGQVRFReadResp))
 }
 
@@ -471,6 +473,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val issueStd = intIssue.filter(_.bits.params.hasStdFu)
   val issueVldu = intIssue.filter(_.bits.params.hasVLoadFu)
   val vstdStoreData: Seq[ValidIO[StoreQueueDataWrite]] = io.ooo_to_mem.vstdStoreData.flatten
+  val vagqIndexedData: Seq[DecoupledIO[VAGQDataSideUop]] = io.ooo_to_mem.vagqDataUop.flatten
 
   val intWriteback: Seq[MemWriteBack] = io.mem_to_ooo.intWriteback.flatten
   val vecWriteback: Seq[NewExuOutput] = io.mem_to_ooo.vecWriteback.flatten
@@ -533,8 +536,31 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   vagq.io.redirect := redirect
   vagq.io.addrUop <> io.ooo_to_mem.vagqAddrUop
-  vagq.io.dataUop.valid := false.B
-  vagq.io.dataUop.bits  := 0.U.asTypeOf(vagq.io.dataUop.bits)
+  require(issueStd.size + vagqIndexedData.size == VAGQConstants.DataIssueWidth)
+  vagq.io.dataUop.foreach { dataUop =>
+    dataUop.valid := false.B
+    dataUop.bits  := 0.U.asTypeOf(dataUop.bits)
+  }
+  val issueStdToExe = issueStd.zipWithIndex.map { case (stdIssue, i) =>
+    val toStd = Wire(Decoupled(chiselTypeOf(stdIssue.bits)))
+    val isVagqStride = isVagqStrideDataUop(stdIssue.bits)
+
+    vagq.io.dataUop(i).valid := stdIssue.valid && isVagqStride
+    vagq.io.dataUop(i).bits  := buildVagqStrideDataUop(stdIssue.bits)
+
+    toStd.valid := stdIssue.valid && !isVagqStride
+    toStd.bits  := stdIssue.bits
+    stdIssue.ready := Mux(isVagqStride, vagq.io.dataUop(i).ready, toStd.ready)
+    toStd
+  }
+  val indexedDataBase = issueStd.size
+  vagqIndexedData.zipWithIndex.foreach { case (indexedData, i) =>
+    val dataLane = indexedDataBase + i
+    require(dataLane < VAGQConstants.DataIssueWidth)
+    vagq.io.dataUop(dataLane).valid := indexedData.valid
+    vagq.io.dataUop(dataLane).bits  := indexedData.bits
+    indexedData.ready := vagq.io.dataUop(dataLane).ready
+  }
   io.mem_to_ooo.vagqVrfReadReq.valid := vagq.io.vrfReadReq.valid
   io.mem_to_ooo.vagqVrfReadReq.bits  := vagq.io.vrfReadReq.bits
   io.mem_to_ooo.vagqVrfWriteReq.valid := vagq.io.vrfWriteReq.valid
@@ -963,7 +989,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // StoreUnit
   for (i <- 0 until StdCnt) {
     stdExeUnits(i).io.flush <> redirect
-    stdExeUnits(i).io.in <> issueStd(i)
+    stdExeUnits(i).io.in <> issueStdToExe(i)
     vagqDownstream.io.stdDataBusy(i) := vstdStoreData(i).valid
     stdExeUnits(i).io.vstdIn := Mux(vagqDownstream.io.vagqStdData(i).valid, vagqDownstream.io.vagqStdData(i), vstdStoreData(i))
     lsq.io.std.storeDataIn(i) := stdExeUnits(i).io.sqData

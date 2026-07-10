@@ -6,6 +6,7 @@ import utility._
 import xiangshan._
 import xiangshan.mem._
 import xiangshan.backend.Bundles._
+import xiangshan.backend.fu.FuType
 
 trait HasVAGQHelper extends HasCircularQueuePtrHelper { this: HasVAGQParameters =>
   protected def entryAt(entries: Vec[VAGQEntry], idx: UInt): VAGQEntry = {
@@ -144,6 +145,50 @@ trait HasVAGQHelper extends HasCircularQueuePtrHelper { this: HasVAGQParameters 
     val isVagqStore = VstuType.isVecSt(fuOpType) &&
       (VstuType.isStrided(fuOpType) || VstuType.isIndexed(fuOpType))
     isVagqLoad || isVagqStore
+  }
+
+  protected def isVagqStrideDataUop(fuType: UInt, fuOpType: UInt): Bool = {
+    val isVLoad = FuType.isLoad(fuType)
+    val isVStore = FuType.isStore(fuType)
+    val isStride = LSUOpType.isStrided(fuOpType)
+    val isVecMemOp = LSUOpType.isVecMemOp(fuOpType)
+    (isVLoad || isVStore) && isStride && isVecMemOp
+  }
+
+  protected def isVagqStrideDataUop(source: ExuInput): Bool = {
+    isVagqStrideDataUop(source.fuType, source.fuOpType)
+  }
+
+  protected def isVagqIndexedDataUop(fuType: UInt, fuOpType: UInt): Bool = {
+    val isVLoad = FuType.isLoad(fuType)
+    val isVStore = FuType.isStore(fuType)
+    val isIndexed = LSUOpType.isIndexed(fuOpType)
+    val isVecMemOp = LSUOpType.isVecMemOp(fuOpType)
+    (isVLoad || isVStore) && isIndexed && isVecMemOp
+  }
+
+  protected def isVagqIndexedDataUop(source: xiangshan.backend.vector.Exu.InUop): Bool = {
+    isVagqIndexedDataUop(source.ctrl.fuType, source.ctrl.opcode)
+  }
+
+  protected def buildVagqStrideDataUop(source: ExuInput): VAGQDataSideUop = {
+    val data = Wire(new VAGQDataSideUop)
+    data := 0.U.asTypeOf(data)
+    data.entryIdx := 0.U // TODO: replace with VOQ-provided entryIdx together with addr side.
+    data.robIdx := source.robIdx
+    data.op2Data := fitUInt(source.src(0), VLEN)
+    data.psrc2 := 0.U // Todo
+    data
+  }
+
+  protected def buildVagqIndexedDataUop(source: xiangshan.backend.vector.Exu.InUop): VAGQDataSideUop = {
+    val data = Wire(new VAGQDataSideUop)
+    data := 0.U.asTypeOf(data)
+    data.entryIdx := 0.U // TODO: replace with VOQ-provided entryIdx together with addr side.
+    data.robIdx := source.ctrl.robIdx
+    data.op2Data := fitUInt(source.data.src(0), VLEN)
+    data.psrc2 := 0.U // Todo
+    data
   }
 
   protected def buildVagqAddrUop(source: NewExuInput): VAGQAddrSideUop = {

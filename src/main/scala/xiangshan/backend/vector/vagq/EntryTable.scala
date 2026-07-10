@@ -32,25 +32,33 @@ class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
   private val entries = RegInit(VecInit(Seq.fill(vagqSize)(emptyEntry)))
 
   private val addrEntry = io.addrUop.map(addrUop => entryAt(entries, addrUop.bits.entryIdx))
-  private val dataEntry = entryAt(entries, io.dataUop.bits.entryIdx)
+  private val dataEntry = io.dataUop.map(dataUop => entryAt(entries, dataUop.bits.entryIdx))
   private val addrIdxValid = io.addrUop.map(addrUop => idxValid(addrUop.bits.entryIdx))
-  private val dataIdxValid = idxValid(io.dataUop.bits.entryIdx)
+  private val dataIdxValid = io.dataUop.map(dataUop => idxValid(dataUop.bits.entryIdx))
   private val addrEntryFlush = addrEntry.map(entry => entry.valid && entry.robIdx.needFlush(io.redirect))
-  private val dataEntryFlush = dataEntry.valid && dataEntry.robIdx.needFlush(io.redirect)
+  private val dataEntryFlush = dataEntry.map(entry => entry.valid && entry.robIdx.needFlush(io.redirect))
   private val addrCanAccept = addrEntry.map(entry => !entry.valid || entry.state === VAGQEntryState.waitA)
-  private val dataCanAccept = !dataEntry.valid || dataEntry.state === VAGQEntryState.waitSI
+  private val dataCanAccept = dataEntry.map(entry => !entry.valid || entry.state === VAGQEntryState.waitSI)
 
   val addrSameEntry = io.addrUop(0).valid && io.addrUop(1).valid &&
     io.addrUop(0).bits.entryIdx === io.addrUop(1).bits.entryIdx
   XSError(addrSameEntry, "VAGQ addr uop get same entryIdx in the same cycle\n")
 
+  val dataSameEntry = io.dataUop.zipWithIndex.combinations(2).map {
+    case Seq((left, _), (right, _)) =>
+      left.valid && right.valid && left.bits.entryIdx === right.bits.entryIdx
+  }.reduce(_ || _)
+  XSError(dataSameEntry, "VAGQ data uop get same entryIdx in the same cycle\n")
+
   io.addrUop.zipWithIndex.foreach { case (addrUop, lane) =>
     addrUop.ready := addrIdxValid(lane) && addrCanAccept(lane) && !addrEntryFlush(lane)
   }
-  io.dataUop.ready := dataIdxValid && dataCanAccept && !dataEntryFlush
+  io.dataUop.zipWithIndex.foreach { case (dataUop, lane) =>
+    dataUop.ready := dataIdxValid(lane) && dataCanAccept(lane) && !dataEntryFlush(lane)
+  }
 
   private val addrFire = io.addrUop.map(addrUop => addrUop.fire && !addrUop.bits.robIdx.needFlush(io.redirect))
-  private val dataFire = io.dataUop.fire && !io.dataUop.bits.robIdx.needFlush(io.redirect)
+  private val dataFire = io.dataUop.map(dataUop => dataUop.fire && !dataUop.bits.robIdx.needFlush(io.redirect))
   private val reqBitmapUpdates = io.splitUpdate.toSeq ++ io.mergeReqUpdate.toSeq
 
   private def mergedUpdateMask(updateHits: Seq[Bool], select: VAGQReqBitmapUpdate => UInt): UInt = {
@@ -110,7 +118,10 @@ class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
       fire && addrUop.bits.entryIdx === idx
     }
     val addrFireThis = addrFireThisVec.reduce(_ || _)
-    val dataFireThis = dataFire && io.dataUop.bits.entryIdx === idx
+    val dataFireThisVec = dataFire.zip(io.dataUop).map { case (fire, dataUop) =>
+      fire && dataUop.bits.entryIdx === idx
+    }
+    val dataFireThis = dataFireThisVec.reduce(_ || _)
 
     addrFireThisVec.zip(io.addrUop).zip(addrMaskGen).foreach { case ((fireThis, addrUop), maskGen) =>
       when(fireThis) {
@@ -118,8 +129,10 @@ class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
         connectSamePort(next, maskGen.out)
       }
     }
-    when(dataFireThis) {
-      connectSamePort(next, io.dataUop.bits)
+    dataFireThisVec.zip(io.dataUop).foreach { case (fireThis, dataUop) =>
+      when(fireThis) {
+        connectSamePort(next, dataUop.bits)
+      }
     }
 
     when(addrFireThis && dataFireThis) {
@@ -162,7 +175,7 @@ class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
 
 class VAGQEntryTableIO(implicit p: Parameters) extends VAGQBundle {
   val addrUop          = Flipped(Vec(VAGQConstants.AddrIssueWidth, Decoupled(new VAGQAddrSideUop)))
-  val dataUop          = Flipped(Decoupled(new VAGQDataSideUop))
+  val dataUop          = Flipped(Vec(VAGQConstants.DataIssueWidth, Decoupled(new VAGQDataSideUop)))
   val entries          = Output(Vec(vagqSize, new VAGQEntry))
   val splitUpdate      = Input(Vec(VAGQConstants.SplitUpdateWidth, Valid(new VAGQReqBitmapUpdate)))
   val mergeReqUpdate   = Flipped(Vec(VAGQConstants.MergeRespWidth, Valid(new VAGQReqBitmapUpdate)))

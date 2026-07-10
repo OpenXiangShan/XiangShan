@@ -15,12 +15,17 @@ import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecIssueQueue.{RespBundle, BypassDelay}
 import xiangshan.backend.vector.datapath.VecImmExtractor
+import xiangshan.backend.vector.vagq.{HasVAGQHelper, HasVAGQParameters, VAGQDataSideUop}
 import xiangshan.mem.StoreQueueDataWrite
 import xiangshan.{HasXSParameter, Redirect, XSBundle}
 
 class IssuePipe(
   override val wrapper: IssuePipe.LazyMod
-)(implicit val param: ExuParam, p: Parameters) extends LazyModuleImp(wrapper) with HasXSParameter {
+)(implicit val param: ExuParam, p: Parameters)
+  extends LazyModuleImp(wrapper)
+  with HasXSParameter
+  with HasVAGQParameters
+  with HasVAGQHelper {
   override def desiredName: String = param.getDefinitionNameOfPipe
 
   val readPortCfgs: Seq[Set[RdConfig]] = param.readPortCfgs.map(_.toSet)
@@ -224,8 +229,9 @@ class IssuePipe(
    * ex0 stage
    */
   val is2Flush: Bool = is2.bits.ctrl.robIdx.needFlush(in.flush)
+  private val bypassVstdForVagq = if (param.hasVStd) isVagqIndexedDataUop(is2.bits) else false.B
 
-  ex0Next.valid := is2.valid && !is2Flush
+  ex0Next.valid := is2.valid && !is2Flush && !bypassVstdForVagq
   ex0Next.bits := is2.bits
 
   // Todo: ExuBypass
@@ -279,6 +285,10 @@ class IssuePipe(
   }
 
   out.ex0 := ex0
+  out.vagqDataOg2.foreach { dataUop =>
+    dataUop.valid := is2.valid && !is2Flush && bypassVstdForVagq
+    dataUop.bits := buildVagqIndexedDataUop(is2.bits)
+  }
 
   private val is0FixedLatVpWen = is0.bits.vpWen && !FuType.FuTypeOrR(is0.bits.fuType, FuType.vidiv)
   private val is1FixedLatVpWen = is1.bits.vpWen && !FuType.FuTypeOrR(is1.bits.fuType, FuType.vidiv)
@@ -390,6 +400,7 @@ object IssuePipe {
     val vpWbM3Wakeup = new VecIssueQueue.WakeUpBundle(backendParams.vpPregParams)
 
     val ex0 = param.genExuInputBundle(ValidIO(_))
+    val vagqDataOg2 = Option.when(param.hasVStd)(ValidIO(new VAGQDataSideUop))
     val outFuLat = Option.when(param.hasNonFixedLatFu)(Vec(param.numNonFixedLatFu, Valid(UInt(WbFuBusyTable.NonFixedLatencyWidth.W))))
 
     val gpWbNext: Option[Exu.ToRf] = param.writePortCfgs.find(_.writeInt).map(x => new Exu.ToRf(x, backendParams.intPregParams))
