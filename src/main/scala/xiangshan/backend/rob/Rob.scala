@@ -122,6 +122,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val IssueQueueDeqSum  = backendParams.allIssueParams.map(_.numDeq).sum
     val debug_ls = Flipped(new DebugLSIO)
     val debugRobHeadFuType = Output(FuType())
+    val debugRobHeadFuOpType = Output(FuOpType())
     val debugBlockBackward = Option.when(backendParams.debugEn)(Output(Bool()))
     val debugWaitForward   = Option.when(backendParams.debugEn)(Output(Bool()))
     val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(IssueQueueDeqSum, Flipped(ValidIO(new RobPtr()))))
@@ -370,6 +371,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // topdown
   io.debugRobHeadFuType := robEntries(deqPtr.value).debug_fuType.getOrElse(0.U.asTypeOf(FuType()))
+  io.debugRobHeadFuOpType := robEntries(deqPtr.value).debug_fuOpType.getOrElse(0.U.asTypeOf(FuOpType()))
 
 
   /**

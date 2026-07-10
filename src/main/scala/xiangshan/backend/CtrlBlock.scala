@@ -723,6 +723,7 @@ class CtrlBlockImp(
   rob.io.enq.needAlloc := enqRob.needAlloc
   rob.io.enq.req := enqRob.req
   dispatch.io.robHeadFuType := rob.io.debugRobHeadFuType
+  dispatch.io.robHeadFuOpType := rob.io.debugRobHeadFuOpType
   dispatch.io.stallReason <> rename.io.stallReason.out
   dispatch.io.fromMem.lcommit := io.fromMemToDispatch.lcommit
   dispatch.io.fromMem.scommit := io.fromMemToDispatch.scommit
@@ -856,6 +857,7 @@ class CtrlBlockImp(
   dispatch.io.debugRobTrueCommit.foreach(_ := rob.io.debugTopDown.toDispatch.robTrueCommit)
   rename.io.debugLoadReason.foreach(_ := ldReason)
   rename.io.debugRobHeadFuType.foreach(_ := rob.io.debugRobHeadFuType)
+  rename.io.debugRobHeadFuOpType.foreach(_ := rob.io.debugRobHeadFuOpType)
   rename.io.debugRobHeadStall.foreach(_ := rob.io.debugRobHeadStall.get)
 
   io.perfInfo.ctrlInfo.robFull := GatedValidRegNext(rob.io.robFull)

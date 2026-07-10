@@ -18,6 +18,21 @@ CUSTOM_ANALYSE = True
 # Not benchmark_list canbe add here to specify benchmark to draw, use like:
 # benchmark_list = {'libquantum','h264ref','namd', 'gamess'}
 
+xs_vector_stall_map = {
+    'VecUnitStrideMemStall': 'MergeVecUnitStrideMem',
+    'VecNonUnitStrideMemStall': 'MergeVecNonUnitStrideMem',
+    'VecFofStall': 'MergeVecFof',
+    'VecSegmentMemStall': 'MergeVecSegmentMem',
+    'VecMaskStall': 'MergeVecMask',
+    'VecFloatStall': 'MergeVecFloat',
+    'VecIntStall': 'MergeVecInt',
+    'VecGatherStall': 'MergeVecGather',
+    'VecCompressStall': 'MergeVecCompress',
+    'VecSlide1UpStall': 'MergeVecSlide1Up',
+    'VecSlide1DownStall': 'MergeVecSlide1Down',
+    'VecSlideStall': 'MergeVecSlide',
+}
+
 xs_custom_rename_map = {
     'IntIQFullStallAlu': 'MergeIQFullStall',
     'IntIQFullStallBrh': 'MergeIQFullStall',
@@ -43,6 +58,8 @@ xs_custom_rename_map = {
     'BalanceDispatchPolicyStallLoad': 'MergeDispatchPolicyBalance',
     'BalanceDispatchPolicyStallStore':'MergeDispatchPolicyBalance',
     'OtherBalanceDispatchPolicyStall':'MergeDispatchPolicyBalance',
+
+    **xs_vector_stall_map,
 
     'NoStall': 'MergeBase',
     'commitInstr': 'Insts',
@@ -82,6 +99,8 @@ xs_backend_rename_map = {
     'IntNotReadyStall': 'MergeExecStall',
     'FPNotReadyStall': 'MergeExecStall',
     'OtherNotReadyStall': 'MergeExecStall',
+
+    **xs_vector_stall_map,
 
     'RobStall': 'MergeRobStall',
 
@@ -153,6 +172,11 @@ xs_mem_rename_map = {
     'LoadMSHRReplayStall': 'MergeMSHRReplayStall',
     'LoadVioReplayStall': 'MergeLoadVioReplay',
 
+    'VecUnitStrideMemStall': 'MergeVecUnitStrideMem',
+    'VecNonUnitStrideMemStall': 'MergeVecNonUnitStrideMem',
+    'VecFofStall': 'MergeVecFof',
+    'VecSegmentMemStall': 'MergeVecSegmentMem',
+
     'MemVioRedirectStall': 'MergeMemVioRedirect',
     'MemVioRedirectBubble': 'MergeMemVioRedirect',
 
@@ -181,7 +205,20 @@ xs_coarse_rename_map = {
     'FPNotReadyStall': 'MergeCore',
     'OtherNotReadyStall': 'MergeCore',
 
+    'VecMaskStall': 'MergeCore',
+    'VecFloatStall': 'MergeCore',
+    'VecIntStall': 'MergeCore',
+    'VecGatherStall': 'MergeCore',
+    'VecCompressStall': 'MergeCore',
+    'VecSlide1UpStall': 'MergeCore',
+    'VecSlide1DownStall': 'MergeCore',
+    'VecSlideStall': 'MergeCore',
+
     'MemNotReadyStall': 'MergeLoad',
+    'VecUnitStrideMemStall': 'MergeLoad',
+    'VecNonUnitStrideMemStall': 'MergeLoad',
+    'VecFofStall': 'MergeLoad',
+    'VecSegmentMemStall': 'MergeLoad',
 
     'RobStall': 'MergeCore',
     'LqStall': 'MergeLoad',
@@ -271,6 +308,14 @@ xs_fine_grain_rename_map = {
     'DivStall': 'LongExecute',
     'IntNotReadyStall': 'MergeInstNotReady',
     'FPNotReadyStall': 'MergeInstNotReady',
+    'VecMaskStall': 'VecMaskStall',
+    'VecFloatStall': 'VecFloatStall',
+    'VecIntStall': 'VecIntStall',
+    'VecGatherStall': 'VecGatherStall',
+    'VecCompressStall': 'VecCompressStall',
+    'VecSlide1UpStall': 'VecSlide1UpStall',
+    'VecSlide1DownStall': 'VecSlide1DownStall',
+    'VecSlideStall': 'VecSlideStall',
 
     'MemNotReadyStall': 'MemNotReady',
 
@@ -283,6 +328,10 @@ xs_fine_grain_rename_map = {
     'LoadL3Stall': 'LoadL3Bound',
     'LoadMemStall': 'LoadMemBound',
     'StoreStall': 'MergeStoreBound',
+    'VecUnitStrideMemStall': 'VecUnitStrideMemStall',
+    'VecNonUnitStrideMemStall': 'VecNonUnitStrideMemStall',
+    'VecFofStall': 'VecFofStall',
+    'VecSegmentMemStall': 'VecSegmentMemStall',
 
     'AtomicStall': 'SerializeStall',
 
@@ -379,6 +428,18 @@ targets = {
     'LoadVioReplayStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: LoadVioReplayStall,\s+(\d+)',
     'LoadMSHRReplayStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: LoadMSHRReplayStall,\s+(\d+)',
 
+    'VecUnitStrideMemStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecUnitStrideMemStall,\s+(\d+)',
+    'VecNonUnitStrideMemStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecNonUnitStrideMemStall,\s+(\d+)',
+    'VecFofStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecFofStall,\s+(\d+)',
+    'VecSegmentMemStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecSegmentMemStall,\s+(\d+)',
+    'VecMaskStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecMaskStall,\s+(\d+)',
+    'VecFloatStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecFloatStall,\s+(\d+)',
+    'VecIntStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecIntStall,\s+(\d+)',
+    'VecGatherStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecGatherStall,\s+(\d+)',
+    'VecCompressStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecCompressStall,\s+(\d+)',
+    'VecSlide1UpStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecSlide1UpStall,\s+(\d+)',
+    'VecSlide1DownStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecSlide1DownStall,\s+(\d+)',
+    'VecSlideStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: VecSlideStall,\s+(\d+)',
 
     'ControlRedirectStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: ControlRedirectStall,\s+(\d+)',
     'MemVioRedirectStall': fr'{XS_CORE_PREFIX}.backend.*?ctrlBlock\.dispatch: MemVioRedirectStall,\s+(\d+)',

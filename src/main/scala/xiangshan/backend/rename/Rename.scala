@@ -95,6 +95,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     val debugDispatchAllFire = OptionWrapper(backendParams.debugEn, Input(Bool()))
     val debugOutValidVec = OptionWrapper(backendParams.debugEn, Vec(RenameWidth, Input(Bool())))
     val debugRobHeadFuType = Option.when(backendParams.debugEn)(Input(FuType()))
+    val debugRobHeadFuOpType = Option.when(backendParams.debugEn)(Input(FuOpType()))
     val debugRobHeadStall = Option.when(backendParams.debugEn)(Input(Bool()))
     val debugLoadReason = Option.when(backendParams.debugEn)(Input(UInt(log2Ceil(TopDownCounters.NumStallReasons.id).W)))
     val stallReason = new Bundle {
@@ -930,9 +931,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // TODO make all stall reason option to remove getorElse
   val robHeadStall = io.debugRobHeadStall.getOrElse(false.B)
   val robHeadFutype = io.debugRobHeadFuType.getOrElse(0.U)
+  val robHeadFuOpType = io.debugRobHeadFuOpType.getOrElse(0.U.asTypeOf(FuOpType()))
   val ldReason = io.debugLoadReason.getOrElse(0.U)
 
-  val robHeadStallReason = MuxCase(OtherNotReadyStall.id.U, Seq(
+  val robHeadBaseStallReason = MuxCase(OtherNotReadyStall.id.U, Seq(
     FuType.isAMO(robHeadFutype)          -> AtomicStall.id.U          ,
     FuType.isStoreVstore(robHeadFutype)  -> StoreStall.id.U           ,
     FuType.isLoadVload(robHeadFutype)    -> ldReason                  ,
@@ -940,6 +942,7 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     FuType.isInt(robHeadFutype)          -> IntNotReadyStall.id.U     ,
     FuType.isFArith(robHeadFutype)       -> FPNotReadyStall.id.U      ,
   ))
+  val robHeadStallReason = VectorStallReason.refine(robHeadFutype, robHeadFuOpType, robHeadBaseStallReason)
   val freelistStall = intFlStall || fpFlStall || vecFlStall || v0FlStall || vlFlStall
   val freelistStallReason = MuxCase(BackendOtherCoreStall.id.U, Seq(
     robHeadStall  -> robHeadStallReason,
