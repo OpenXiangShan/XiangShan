@@ -50,7 +50,7 @@ class MBufferBundle(implicit p: Parameters) extends VLSUBundle{
   val originVl         = UInt(elemIdxBits.W) // for backend merge data
   val vaNeedExt        = Bool()
   val vaddr            = UInt(XLEN.W)
-  val gpaddr           = UInt(GPAddrBits.W)
+  val gpaddr           = UInt(XLEN.W)
   val isForVSnonLeafPTE= Bool()
   val fof              = Bool()
   val vlmax            = UInt(elemIdxBits.W)
