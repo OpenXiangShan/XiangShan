@@ -9,7 +9,6 @@ class AddrGen(implicit p: Parameters) extends VAGQModule {
   val in = IO(Input(new AddrGenInput))
   val out = IO(Output(new AddrGenOutput))
 
-  private val elemBytes = (1.U(vagqUvlByteWidth.W) << in.deew)(vagqUvlByteWidth - 1, 0)
   private val elemIdx = (in.byteOffset >> in.deew)(vagqFlowByteWidth - 1, 0)
 
   private val elemOrdFromInst = (in.uopIdx << elemNum(in.deew)) | elemIdx  // element ordinal from inst
@@ -29,15 +28,9 @@ class AddrGen(implicit p: Parameters) extends VAGQModule {
   ))
 
   private val offset = Mux(VAGQUopType.isStride(in.uopType), strideOffset, indexOffset)
-  private val elemMask = VecInit((0 until VAGQConstants.FlowBytes).map { i =>
-    val byteIdx = i.U(vagqUvlByteWidth.W)
-    byteIdx >= in.byteOffset && byteIdx < in.byteOffset + elemBytes
-  }).asUInt
 
   out.vaddr := in.baseAddr + offset
-  out.byteOffset := in.byteOffset
   out.elemIdx := elemIdx
-  out.elemMask := elemMask
 }
 
 class AddrGenInput(implicit p: Parameters) extends VAGQBundle {
@@ -52,7 +45,5 @@ class AddrGenInput(implicit p: Parameters) extends VAGQBundle {
 
 class AddrGenOutput(implicit p: Parameters) extends VAGQBundle {
   val vaddr = UInt(XLEN.W)
-  val byteOffset = UInt(vagqFlowByteWidth.W)
   val elemIdx = UInt(vagqFlowByteWidth.W)
-  val elemMask = UInt(vagqFlowBytes.W)
 }

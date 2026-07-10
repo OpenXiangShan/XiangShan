@@ -44,7 +44,12 @@ class SplitCtrl(numEntries: Int)(implicit p: Parameters) extends VAGQModule {
   private val activeMask   = activePending(activeSel)
   private val emptyMask    = emptyPending(emptySel)
 
-  private val activeLowOffset = lowBit(activeMask)
+  private val activeLowOffset    = elemStartOffset(lowBit(activeMask), activeInput.entry.deew)
+  private val activeLowIssueMask = elemByteMask(activeLowOffset, activeInput.entry.deew) & activeMask
+  private val activeRemaining    = activeMask & ~activeLowIssueMask
+  private val activeHighOffset   = elemStartOffset(highBit(activeRemaining), activeInput.entry.deew)
+  private val activeHasTwoReq    = activeRemaining.orR
+  private val activeCanIssueSecond = activeHasTwoReq && !activeInput.entry.isOrdered
 
   private val activeAddrGen = Seq.fill(VAGQConstants.ActiveIssueWidth)(Module(new AddrGen))
   activeAddrGen(0).in.uopType    := activeInput.entry.uopType
@@ -55,11 +60,6 @@ class SplitCtrl(numEntries: Int)(implicit p: Parameters) extends VAGQModule {
   activeAddrGen(0).in.deew       := activeInput.entry.deew
   activeAddrGen(0).in.ieew       := activeInput.entry.ieew
 
-  private val activeLowIssueMask = activeAddrGen(0).out.elemMask & activeMask
-  private val activeRemaining    = activeMask & ~activeLowIssueMask
-  private val activeHighOffset   = highBit(activeRemaining)
-  private val activeHasTwoReq    = activeRemaining.orR
-  private val activeCanIssueSecond = activeHasTwoReq && !activeInput.entry.isOrdered
   activeAddrGen(1).in.uopType    := activeInput.entry.uopType
   activeAddrGen(1).in.baseAddr   := activeInput.entry.baseAddr
   activeAddrGen(1).in.op2Data    := activeInput.entry.op2Data
@@ -74,7 +74,7 @@ class SplitCtrl(numEntries: Int)(implicit p: Parameters) extends VAGQModule {
   activeIssueMasks(0) := activeLowIssueMask
   activeIssueMasks(1) := Mux(
     activeCanIssueSecond,
-    activeAddrGen(1).out.elemMask & activeRemaining,
+    elemByteMask(activeHighOffset, activeInput.entry.deew) & activeRemaining,
     0.U(vagqFlowBytes.W)
   )
 

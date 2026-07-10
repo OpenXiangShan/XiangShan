@@ -60,16 +60,35 @@ trait HasVAGQHelper extends HasCircularQueuePtrHelper { this: HasVAGQParameters 
 
   protected def bitMask(idx: UInt): UInt = UIntToOH(idx, vagqFlowBytes)
 
+  protected def elemStartOffset(byteOffset: UInt, deew: UInt): UInt = {
+    (((byteOffset >> deew) << deew)(vagqFlowByteWidth - 1, 0))
+  }
+
+  protected def elemByteMask(byteOffset: UInt, deew: UInt): UInt = {
+    val alignedOffset = elemStartOffset(byteOffset, deew)
+    val baseMask = MuxLookup(deew, "h0001".U(vagqFlowBytes.W))(Seq(
+      0.U -> "h0001".U(vagqFlowBytes.W),
+      1.U -> "h0003".U(vagqFlowBytes.W),
+      2.U -> "h000f".U(vagqFlowBytes.W),
+      3.U -> "h00ff".U(vagqFlowBytes.W),
+    ))
+    (baseMask << alignedOffset)(vagqFlowBytes - 1, 0)
+  }
+
   protected def storeFlowData(data: UInt, elemIdx: UInt, alignedType: UInt): UInt = {
     genVWdata(genVSData(data, elemIdx, alignedType), alignedType)
   }
 
   protected def byteMaskToEntryMask(mask: UInt, deew: UInt): UInt = {
-    VecInit((0 until vagqFlowBytes).map { elem =>
-      VecInit((0 until vagqFlowBytes).map { byte =>
-        mask(byte) && ((byte.U(vagqFlowByteWidth.W) >> deew) === elem.U(vagqFlowByteWidth.W))
-      }).asUInt.orR
-    }).asUInt
+    val e16 = Cat(0.U(8.W), VecInit((0 until 8).map(i => mask(2 * i + 1, 2 * i).orR)).asUInt)
+    val e32 = Cat(0.U(12.W), VecInit((0 until 4).map(i => mask(4 * i + 3, 4 * i).orR)).asUInt)
+    val e64 = Cat(0.U(14.W), VecInit((0 until 2).map(i => mask(8 * i + 7, 8 * i).orR)).asUInt)
+    MuxLookup(deew, mask)(Seq(
+      0.U -> mask,
+      1.U -> e16,
+      2.U -> e32,
+      3.U -> e64,
+    ))
   }
 
   protected def mergeEntryAt(entries: Vec[CtrlInput], idx: UInt, numEntries: Int): CtrlInput = {
