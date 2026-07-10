@@ -19,3 +19,37 @@ def test_convert_nemu_log_lines_keeps_debug_after_interleaved_execute_lines() ->
 
     pcs = [int(row["pc"], 16) for row in rows]
     assert pcs == [0x80000078, 0x8000007C, 0x8000007E, 0x80000082]
+
+
+def test_convert_execute_only_log_decodes_instructions_from_bin() -> None:
+    base = 0x80000000
+    addi = 0x00100093
+    jal = 0x0080006F
+    image = addi.to_bytes(4, "little") + jal.to_bytes(4, "little") + bytes(8)
+    lines = [
+        "[src/cpu/cpu-exec.c:469,execute] prev pc = 0x80000000, pc = 0x80000004",
+        "[src/cpu/cpu-exec.c:469,execute] prev pc = 0x80000004, pc = 0x8000000c",
+    ]
+
+    rows = convert_nemu_log_lines(lines, binary_image=image, memory_base=base)
+
+    assert rows == [
+        {
+            "index": 0,
+            "pc": "0x80000000",
+            "instr": hex(addi),
+            "size": 4,
+            "kind": "normal",
+            "taken": False,
+            "target_pc": None,
+        },
+        {
+            "index": 1,
+            "pc": "0x80000004",
+            "instr": hex(jal),
+            "size": 4,
+            "kind": "jump",
+            "taken": True,
+            "target_pc": "0x8000000c",
+        },
+    ]

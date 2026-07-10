@@ -192,6 +192,7 @@ PYTHONPATH="${FRONTEND_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-}" \
   "${BIN_PATH}" "${TRACE_JSONL_PATH}" \
   --nemu-exec "${NEMU_EXEC}" \
   --nemu-log "${NEMU_LOG_PATH}" \
+  --memory-base "${NEMU_MEM_BASE}" \
   --nemu-max-instr "${NEMU_MAX_INSTR}" \
   --trace-limit "${TRACE_LIMIT}"
 

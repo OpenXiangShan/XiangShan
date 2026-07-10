@@ -81,6 +81,15 @@ def _classify_kind(mnemonic: str, instr: int, size: int) -> str:
             return "jump"
         if opc == 0x67:
             return "jump_indirect"
+    elif size == 2:
+        quadrant = instr & 0x3
+        funct3 = (instr >> 13) & 0x7
+        if quadrant == 0x1 and funct3 in {0x6, 0x7}:
+            return "branch"
+        if quadrant == 0x1 and funct3 in {0x1, 0x5}:
+            return "jump"
+        if quadrant == 0x2 and funct3 == 0x4 and ((instr >> 2) & 0x1F) == 0:
+            return "jump_indirect"
     return "normal"
 
 
@@ -127,7 +136,29 @@ def _parse_debug_line(raw_line: str) -> Optional[dict]:
     }
 
 
-def convert_nemu_log_lines(lines: Iterable[str]) -> List[dict]:
+def _decode_image_instr(binary_image: bytes, pc: int, memory_base: int) -> Optional[dict]:
+    offset = int(pc) - int(memory_base)
+    if offset < 0 or offset + 2 > len(binary_image):
+        return None
+    first_half = int.from_bytes(binary_image[offset : offset + 2], byteorder="little")
+    size = 2 if (first_half & 0x3) != 0x3 else 4
+    if offset + size > len(binary_image):
+        return None
+    instr = int.from_bytes(binary_image[offset : offset + size], byteorder="little")
+    return {
+        "pc": int(pc),
+        "instr": instr,
+        "size": size,
+        "kind": _classify_kind("", instr, size),
+    }
+
+
+def convert_nemu_log_lines(
+    lines: Iterable[str],
+    *,
+    binary_image: Optional[bytes] = None,
+    memory_base: int = 0x80000000,
+) -> List[dict]:
     parsed: List[dict] = []
     pending_execs: List[tuple[int, int]] = []
     for line in lines:
@@ -150,6 +181,14 @@ def convert_nemu_log_lines(lines: Iterable[str]) -> List[dict]:
                 _prev_pc, next_pc = pending_execs.pop(int(match_index))
                 item["next_pc"] = int(next_pc)
         parsed.append(item)
+
+    if not parsed and binary_image is not None:
+        for prev_pc, next_pc in pending_execs:
+            item = _decode_image_instr(binary_image, prev_pc, int(memory_base))
+            if item is None:
+                continue
+            item["next_pc"] = int(next_pc)
+            parsed.append(item)
 
     for idx, item in enumerate(parsed):
         if item["next_pc"] is not None:
@@ -192,9 +231,20 @@ def convert_nemu_log_lines(lines: Iterable[str]) -> List[dict]:
     return out
 
 
-def convert_nemu_log_file(input_path: str, output_path: str, limit: int = 0) -> int:
+def convert_nemu_log_file(
+    input_path: str,
+    output_path: str,
+    limit: int = 0,
+    *,
+    bin_path: Optional[str] = None,
+    memory_base: int = 0x80000000,
+) -> int:
+    binary_image = None
+    if bin_path:
+        with open(bin_path, "rb") as f:
+            binary_image = f.read()
     with open(input_path, "r", encoding="utf-8", errors="ignore") as f:
-        rows = convert_nemu_log_lines(f)
+        rows = convert_nemu_log_lines(f, binary_image=binary_image, memory_base=int(memory_base))
     if int(limit) > 0:
         rows = rows[: int(limit)]
     with open(output_path, "w", encoding="utf-8") as f:
@@ -213,6 +263,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     parser.add_argument("input", help="Path to NEMU log file")
     parser.add_argument("output", help="Path to output JSON/JSONL file")
+    parser.add_argument("--bin", default="", help="Binary image used when the log has execute-only rows")
+    parser.add_argument("--memory-base", type=lambda value: int(value, 0), default=0x80000000)
     parser.add_argument(
         "--limit",
         type=int,
@@ -220,7 +272,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Optional max number of trace entries to emit",
     )
     args = parser.parse_args(argv)
-    count = convert_nemu_log_file(args.input, args.output, limit=args.limit)
+    count = convert_nemu_log_file(
+        args.input,
+        args.output,
+        limit=args.limit,
+        bin_path=(str(args.bin) if args.bin else None),
+        memory_base=int(args.memory_base),
+    )
     print(f"converted {count} entries -> {args.output}")
     return 0
 

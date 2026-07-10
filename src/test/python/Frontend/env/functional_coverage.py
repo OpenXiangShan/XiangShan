@@ -15,6 +15,7 @@ from .funcov import (
     sample_bpu_v3_basic_prediction_coverage,
     sample_cfvec_coverage,
     sample_ftq_coverage,
+    sample_two_fetch_coverage,
 )
 from .rvc_decoder import expand_rvc
 
@@ -116,6 +117,10 @@ class FunctionalCoverageRecorder:
         self._ifu_last_cfvec: Optional[dict] = None
         self._ifu_seen_rvc = False
         self._ifu_seen_rvi = False
+        self._two_fetch_last_fetch_ptr: Optional[tuple[int, int]] = None
+        self._two_fetch_waiting_refill = False
+        self._two_fetch_ftq_pending = False
+        self._two_fetch_last_dual_cycle: Optional[int] = None
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
 
@@ -242,6 +247,7 @@ class FunctionalCoverageRecorder:
         elif self._reset_seen_high and self._reset_release_cycle is None:
             self._reset_release_cycle = cycle
 
+        sample_two_fetch_coverage(self, env, cycle)
         sample_cfvec_coverage(self, env, cycle)
         sample_bpu_subpredictor_coverage(self, env, cycle)
         sample_bpu_v3_basic_prediction_coverage(self, env, cycle)

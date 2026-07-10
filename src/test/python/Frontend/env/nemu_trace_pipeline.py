@@ -88,6 +88,7 @@ def generate_nemu_trace_from_bin(
     nemu_log_path: Optional[str] = None,
     nemu_max_instr: int = 0,
     trace_limit: int = 0,
+    memory_base: int = 0x80000000,
 ) -> Dict:
     trace_file = Path(trace_output_path)
     trace_file.parent.mkdir(parents=True, exist_ok=True)
@@ -104,6 +105,8 @@ def generate_nemu_trace_from_bin(
             input_path=str(log_path),
             output_path=str(trace_file),
             limit=int(trace_limit),
+            bin_path=str(bin_path),
+            memory_base=int(memory_base),
         )
     )
 
@@ -123,6 +126,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--nemu-log", default="", help="Path to NEMU raw log")
     parser.add_argument("--nemu-max-instr", type=int, default=0, help="Pass -I to NEMU when > 0")
     parser.add_argument("--trace-limit", type=int, default=0, help="Max output trace entries")
+    parser.add_argument(
+        "--memory-base",
+        type=lambda value: int(value, 0),
+        default=0x80000000,
+        help="Address represented by byte zero of the binary image",
+    )
     args = parser.parse_args(argv)
 
     out = generate_nemu_trace_from_bin(
@@ -132,6 +141,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         nemu_log_path=(None if not args.nemu_log else str(args.nemu_log)),
         nemu_max_instr=int(args.nemu_max_instr),
         trace_limit=int(args.trace_limit),
+        memory_base=int(args.memory_base),
     )
     print(
         f"trace generated: entries={int(out['trace_entries'])} "
