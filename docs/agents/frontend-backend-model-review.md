@@ -28,8 +28,13 @@
 - 指令被 committed 后 -> 进入 `pending_queue_call_ret_commit_indices` -> 下一拍激活 callRetCommit 可见组。
 - `commit_queue` 头 FTQ span 满足条件（全部 correct + 全部 committed + 必要 resolve 已满足 + 无冲突 redirect）-> 发 FTQ-entry `commit` 并弹头。
 - 首次 mismatch -> 以该点作为 wrong-path 起点，继续接收 `cfVec` 但冻结 golden 消费，直到后续 redirect flush 清除 wrong-path 后缀。
-- redirect(`flush_on_drive`) -> scoreboard flush + 进入 recovery 阶段；
-  `cfvec_queue` 的物理裁剪延后到 recovery target 真正入队后再执行。
+- redirect(`flush_on_drive`) -> scoreboard flush + 立即清除已知 wrong-path
+  `cfvec_queue` 后缀；redirect valid 当拍 `T` 和下一拍 `T+1` 的 `cfVec`
+  不采样入队，之后进入 recovery 阶段，第一条被采样的 recovery `cfVec`
+  必须是 target。
+- exception-marked `cfVec` 仍会入 `_cfvec_queue` 并保存
+  `exception_marked/exception_bits`，但不会作为 CFI 分类或产生 resolve；golden
+  replay 和 instruction commit frontier 在 exception-marked entry 处停止。
 
 ## 当前实现风险与审阅关注点
 
@@ -78,6 +83,9 @@ case-note 或 spec 文档，而不是放在这里。
 - `set_golden_trace()` 会把 resolve delay 覆盖到固定区间（当前默认 `[3,5]`），不是完全沿用构造参数。
 - `resolve` 当前不再自动触发 redirect；redirect 主路径来自 mismatch 或显式注入事件。
 - fallback commit 路径已统一为单-entry commit，但仍是独立分支；阅读时要明确它与 `cfvec_queue/commit_queue` 路径的切换条件。
+- `cfVec.instr` 对 RVC 已是 32-bit 扩展后的指令；`is_rvc` 用于 PC
+  步进、取 expected raw16 并扩展，以及少量等价形式比较，不表示 queue 中保存的是
+  raw 16-bit encoding。
 
 ## 建议修复顺序
 

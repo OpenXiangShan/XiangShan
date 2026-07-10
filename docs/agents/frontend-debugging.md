@@ -47,10 +47,12 @@ For every DUT bin-trace failure, treat the following as mandatory:
    waveform and log come from the same run.
 8. If the local case log lacks the needed `INFO`-level events, stop and say so
    before switching to another log file.
-9. After a redirect is issued, do not start cfVec wrong-path flushing until
-   the first recovery instruction for that redirect is actually present in the
-   queue. Once that recovery instruction appears, flush the full wrong-path
-   interval from the mispredicted next instruction up to the recovery boundary.
+9. After a redirect is issued, the environment must flush the known wrong-path
+   cfVec entries immediately. The cfVec observed on the redirect valid cycle
+   `T` and the following cycle `T+1` must not be sampled into the verification
+   queues. Starting at `T+2`, the environment is in recovery state; the first
+   sampled cfVec for that recovery must be the redirect target. A different
+   first sampled cfVec is a recovery failure.
 10. Any env-side fail-fast assertion used for DUT/bin-trace debugging must log
     the same failure text at `ERROR` level before raising, and the message must
     include both the exact `cycle` and the golden-trace `cursor`.
@@ -84,6 +86,16 @@ These frontend facts are easy to get wrong and should be checked early:
   half-word units.
 - Redirect `bits_pc` and `bits_target` use byte addresses.
 - `resolve.ftqOffset` is the half-word offset within a 64-byte FTQ fetch block.
+- Each valid cfVec `instr` is already the complete 32-bit IFU-decoded
+  instruction. RVC instructions are expanded before cfVec output; `isRvc`
+  describes the original instruction size for PC stepping and expected-memory
+  fetch width. Monitor comparison must compare against the expanded 32-bit
+  expected instruction, not the raw 16-bit RVC encoding.
+- Exception-marked cfVec slots remain observable frontend outputs, but the
+  monitor skips instruction-memory comparison for those slots. In
+  `BackendModel`, exception-marked queue entries record `exception_bits`, are
+  not classified as CFI, do not enqueue resolve, and stop normal golden replay
+  or instruction-commit advancement at that entry.
 
 ## Time-Sensitive Case Notes
 

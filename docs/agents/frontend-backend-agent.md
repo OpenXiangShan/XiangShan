@@ -33,7 +33,7 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 - mismatch 之后仍需继续接收并入队后续 `cfVec`，这些指令在语义上全部属于同一段 wrong-path，直到被 `redirect` 清除
 - `redirect` 生效后，必须从这段 active wrong-path 的起点开始清除 `cfVec_queue`；更老正确路径前缀必须保留
 - wrong-path 的清除边界必须由“恢复后重新建立 correct-path 对齐”的语义决定，而不是由中途某个临时 `target_pc`、`ftqidx`、等待态命中或类似局部现象决定
-- `redirect` 发出后不得立即 flush active wrong-path；必须先等属于该 redirect 的第一条 recovery 指令以匹配的 `target_pc` 和预期 FTQ 身份真正进入 `cfVec_queue`，再从 wrong-path 起点 flush 到 recovery 边界
+- `redirect` 发出后必须立即清除当前 queue 中已知的 active wrong-path；redirect valid 当拍 `T` 和下一拍 `T+1` 观测到的 `cfVec` 不得采样入队，之后进入 recovery 状态，第一条采样到的 recovery `cfVec` 必须是该 redirect 的 target
 
 ### `commit_queue` 语义
 
@@ -77,7 +77,8 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 - `_cfvec_queue` 中的 entry 必须继续承载指令级与 FTQ 级语义注解，至少包括：
   `path_state`、`resolve_state`、`rob_commit_state`、`call_ret_commit_state`、
   `call_ret_ras_action`、`golden_index` / `target_pc`、`is_last_in_entry`、
-  `ftq flag/value/offset`；不得把 `_cfvec_queue` 简化成“原始 `cfVec` 包队列”
+  `ftq flag/value/offset`、`exception_marked` / `exception_bits`；不得把
+  `_cfvec_queue` 简化成“原始 `cfVec` 包队列”
 - 分层必须保持：`_cfvec_queue` 是 instruction truth；`commit_ptr`、
   `pending_level0_target_ftq`、`ftq_entries` / `current_ftq_entry` 只允许作为
   FTQ-order / gating metadata，不能删除，也不能拿来绕过 semantic queue
@@ -160,13 +161,14 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 ### 必须项（违反即语义错误）
 
 - `cfVec_queue` 入队严格按 DUT 观测顺序，不因等待目标 PC 而暂停或跳过包。
-- 除非该指令在语义上被某次 `redirect` 作为 wrong-path flush 清除，否则任何已观测到的 `cfVec` 包都不得被丢弃、跳过采样或绕过入队。
+- 除非该指令位于 redirect valid 当拍 `T` 或下一拍 `T+1` 的 skip 窗口，或在语义上被某次 `redirect` 作为 wrong-path flush 清除，否则任何已观测到的 `cfVec` 包都不得被丢弃、跳过采样或绕过入队。
 - 首次 mismatch 只定义一个 wrong-path 起点，并沿该起点向后标记同一段 wrong-path。
 - 任意时刻只允许存在一个 active wrong-path episode；在该 episode 被 `redirect` 清除之前，不得重新开第二个 wrong-path episode。
 - mismatch 后继续接收 `cfVec`，不得进入“暂停构队列”等待模式。
 - `redirect` 必须从 active wrong-path 起点开始清除 `cfVec_queue`，并保留更老 correct-path 前缀。
 - `redirect` 的 flush 范围不得因为临时 `target_pc` 可见、waiting-target 命中、`ftqidx` 数值变化或类似局部条件而被拆成多段。
-- `redirect` 发出本身只允许把系统带入 recovery-wait 状态；在 recovery target 真实入队前，不得提前执行 wrong-path queue flush。
+- `redirect` 发出本身必须清除已知 wrong-path queue 后缀；redirect valid 当拍 `T` 和下一拍 `T+1` 的 `cfVec` 必须被丢弃，之后进入 recovery-wait 状态，第一条采样到的 recovery `cfVec` 必须是 redirect target。
+- exception-marked `cfVec` entry 必须保留异常标记，但不能按普通指令参与 CFI 分类、resolve 生成、golden replay 或 instruction commit frontier 推进。
 - 某条 CFI 一旦已经与 golden 的某个动态实例匹配，其后续用于 `redirect` 的恢复目标必须绑定到该动态实例自身的 golden 语义，不得从一个可能已经漂移的全局 golden cursor 临时推导。
 - 某条 `redirect` 的 `target`、`pc`、FTQ 上下文必须来自同一个动态实例；不得把 `target` 绑定到当前实例、却把 FTQ idx / offset 绑定到另一条更老或已失效的实例。
 - 已被 earlier `redirect` 在语义上清除的 wrong-path 指令，即使暂时仍残留在内部结构中，也不得再参与后续 `redirect` 的归因、FTQ 上下文选择或 flush 范围计算。
@@ -199,8 +201,10 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 queue 中的每条指令至少需要具备以下语义信息：
 
 - `cfVec` 的完整信息
+- `instr` 为 frontend 输出的完整 32-bit 指令；若原始指令是 RVC，则已经是扩展后的 32-bit 形式，`isRvc` 只描述原始指令宽度和 PC 步进语义
 - 该指令当前位于正确路径还是错误路径
 - 若该指令是 CFI，则标记它是否已经被 `resolve` 过
+- 该指令是否带 frontend exception 标记以及具体 exception bits；带 exception 标记的 entry 不应再被当作普通 CFI 解析
 - 该指令是否已经具有对应的 `callRetCommit`
 - 该指令属于哪个 FTQ entry（例如由 `ftq_flag` / `ftq_value` 标识）
 
@@ -322,25 +326,25 @@ queue 中的每条指令至少需要具备以下语义信息：
 - `redirect` 生效后的下一拍或后续若干拍，`cfVec` 仍然输出旧 wrong-path 的一部分残留内容
 - 再过若干拍后，`cfVec` 才真正回到 correct-path
 
-对于这种场景，环境的语义处理应当是：
+对于这种场景，当前环境的语义处理应当是：
 
-- 这些 post-redirect 的旧 wrong-path 输出，应视为同一次恢复过程中的残留内容
-- 它们不应被再次当成一轮新的错误路径起点
-- 它们也不应推动 golden trace 向前消费
-- 环境应继续等待，直到真正观察到恢复后的 correct-path 再重新进入正常匹配流程
+- redirect drive 时立即 flush 当前 queue 中已知的 wrong-path 后缀
+- redirect valid 当拍 `T` 和下一拍 `T+1` 的 cfVec 处于 skip 窗口，不采样入队，也不推动 golden trace
+- `T+2` 起进入 recovery 状态，第一条被采样的 recovery cfVec 必须是该 redirect 的 target
+- 如果窗口后的第一条采样 cfVec 仍不是 target，应视为 recovery failure，而不是重新开启一轮新的错误路径
 
-进一步地，`redirect` 的 wrong-path 清除边界是语义边界，不是“只覆盖 redirect 之前已经入 queue 的包”的物理时刻边界。因此：
+进一步地，`redirect` 的 wrong-path 清除边界是语义边界，但当前实现不再把 redirect pin 当拍或 skip 窗口内的残留 cfVec 先入队再裁剪。因此：
 
 - `redirect` 发出当拍仍然观测到的旧 wrong-path `cfVec`
-- `redirect` 发出后若干拍内继续观测到的同一段旧 wrong-path residual `cfVec`
+- `redirect` 发出后到下一拍 `T+1` 之间继续观测到的旧 wrong-path residual `cfVec`
 
-都必须继续归属于这一次 active wrong-path episode，并在语义上视为这次 `redirect` 要负责清除的对象。
+都必须继续归属于这一次 active wrong-path episode，但在实现上通过 skip 窗口直接丢弃，不进入 `_cfvec_queue`。
 
 换句话说：
 
-- `redirect` 不得只清除发出前那一截 wrong-path，而把当拍或后几拍仍属于同一旧 wrong-path 的 `cfVec` 重新解释成新的 episode
-- 这些 residual `cfVec` 可以在实现上先按观测顺序进入 queue，但语义上仍属于同一次 `redirect` 的清除范围
-- 只有真正恢复到 correct-path 后，后续观测才可以重新参与新的 correct-path / wrong-path 判定
+- `redirect` 不得只清除发出前那一截 wrong-path，而把 skip 窗口内仍属于同一旧 wrong-path 的 `cfVec` 重新解释成新的 episode
+- skip 窗口内的 residual `cfVec` 不应进入 queue；窗口后第一条采样结果必须证明恢复到了 target
+- 只有 skip 窗口后真正恢复到 target，后续观测才可以重新参与新的 correct-path / wrong-path 判定
 - 若某条正确路径 CFI 已经证明下一条 golden PC 不是其顺序后继，并且同拍后续 slot 中第一个有效 `cfVec` 不是该恢复目标，则 active wrong-path episode 必须在这个“同拍后续的第一个非目标 slot”处立即开始；不得等到下一拍或下一次局部 mismatch 再补记起点
 - 只要系统仍处于“等待恢复目标重新建立对齐”的阶段，queue 中正确路径前缀之后的未知后缀也必须被并入这同一条 active wrong-path episode；不得把它们长期保留为 `unknown`，否则会错误阻塞 commit，并在后续恢复或再次重定向时形成非法中间态
 - active wrong-path episode 的起点必须锚定在“当前正确路径前缀之后的第一个非正确条目”；不得因为更老正确路径仍留在 queue 中，就让 wrong-path 起点在这些更老前缀之前或之中漂移
@@ -382,8 +386,8 @@ queue 中的每条指令至少需要具备以下语义信息：
 也就是说：
 
 - redirect 之前的 wrong-path：正常入 queue，等待本次 `redirect` 清除
-- redirect 之后、恢复完成之前再次出现的旧 wrong-path：属于恢复残留，不应重新开启新的 mismatch / flush 周期
-- 只有当恢复后的 correct-path 真正被观测到时，环境才重新从 queue 头继续与 golden trace 匹配
+- redirect 之后、skip 窗口内再次出现的旧 wrong-path：属于恢复残留，应被丢弃，不应重新开启新的 mismatch / flush 周期
+- 只有当 skip 窗口后恢复 target 真正被观测到时，环境才重新从 queue 头继续与 golden trace 匹配
 
 更具体地说，如果实现已经知道某个恢复目标 PC，但该 PC 在当前 queue 中并不位于 queue 头部，
 则其前面的那些指令应当解释为：
