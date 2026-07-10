@@ -56,6 +56,7 @@ class FrontendMonitor:
         self._ftq_group_max_offset: Dict[tuple[int, int], int] = {}
         self.last_dut_redirect: Optional[dict] = None
         self._skip_cfvec_until_cycle: Optional[int] = None
+        self._recovery_target_pc: Optional[int] = None
 
     def _golden_step_bytes(self, pc: int) -> int:
         if self.memory is None:
@@ -90,18 +91,6 @@ class FrontendMonitor:
                 return None, meta
             value |= (int(self.memory.read_u8(int(pa))) & 0xFF) << (8 * int(off))
         return int(value), last_meta
-
-    @staticmethod
-    def _should_skip_instr_compare(fetch_meta: dict, got: int, ex_sum: int) -> bool:
-        # In the current sv39/PTW pilot path, the DUT-facing observe bundle may expose
-        # zeroed instruction payloads even after PC/PTW progression is correct.
-        # Treat that as "instruction value unavailable" instead of a hard mismatch.
-        return (
-            int(ex_sum) == 0
-            and int(got) == 0
-            and str(fetch_meta.get("mode", "")) in {"sv39", "bare"}
-            and bool(fetch_meta.get("ok", False))
-        )
 
     @staticmethod
     def _decode_b_imm(instr: int) -> int:
@@ -201,6 +190,16 @@ class FrontendMonitor:
             return int(rd), int(rs1)
         return None
 
+    @staticmethod
+    def _is_addi_x0_hint_form(instr: int) -> bool:
+        val = int(instr) & 0xFFFFFFFF
+        if (val & 0x7F) != 0x13:
+            return False
+        funct3 = (val >> 12) & 0x7
+        rs1 = (val >> 15) & 0x1F
+        rd = (val >> 7) & 0x1F
+        return funct3 == 0 and rs1 == 0 and rd == 0
+
     @classmethod
     def _instr_equivalent_for_compare(cls, expected: int, actual: int, is_rvc: bool) -> bool:
         exp = int(expected) & 0xFFFFFFFF
@@ -209,6 +208,8 @@ class FrontendMonitor:
             return True
         if not bool(is_rvc):
             return False
+        if cls._is_addi_x0_hint_form(exp) and cls._is_addi_x0_hint_form(got):
+            return True
         exp_add = cls._is_add_mv_form(exp)
         got_addi = cls._is_addi_mv_form(got)
         if exp_add is not None and got_addi is not None and exp_add == got_addi:
@@ -232,21 +233,6 @@ class FrontendMonitor:
         except Exception:
             return int(default)
 
-    def _recover_unavailable_instr(self, pc: int, instr: int, is_rvc: bool, ex_sum: int) -> int:
-        if int(instr) != 0 or self.memory is None:
-            return int(instr)
-        fetch_size = 2 if bool(is_rvc) else 4
-        raw_fetch, fetch_meta = self._read_expected_fetch_raw(int(pc), fetch_size)
-        if raw_fetch is None or not bool(fetch_meta.get("ok", False)):
-            return int(instr)
-        if bool(is_rvc):
-            raw16 = int(raw_fetch) & 0xFFFF
-            try:
-                return int(expand_rvc(raw16)) & 0xFFFFFFFF
-            except ValueError:
-                return int(instr)
-        return int(raw_fetch) & 0xFFFFFFFF
-
     def bind(self, target) -> None:
         if not isinstance(target, BackendObserveBundle):
             raise TypeError("FrontendMonitor requires an explicitly bound BackendObserveBundle")
@@ -266,6 +252,17 @@ class FrontendMonitor:
             return False
         wrong_path_active = getattr(self.backend_model, "_has_active_wrong_path_episode", None)
         if callable(wrong_path_active) and bool(wrong_path_active()):
+            return False
+        return True
+
+    def _golden_trace_complete(self) -> bool:
+        trace = getattr(self.backend_model, "golden_trace", None) if self.backend_model is not None else None
+        if trace is None:
+            return False
+        return int(getattr(trace, "cursor", 0)) >= len(getattr(trace, "entries", ()))
+
+    def _redirect_target_requires_cfvec(self, target_pc: int) -> bool:
+        if self.memory is not None and self.memory.is_mmio(int(target_pc)):
             return False
         return True
 
@@ -355,6 +352,14 @@ class FrontendMonitor:
             "debug_is_mem_vio": int(self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsMemVio", 0)),
         }
         self._skip_cfvec_until_cycle = int(cycle) + 1
+        self._recovery_target_pc = int(target_pc) if self._redirect_target_requires_cfvec(int(target_pc)) else None
+        self.expected_pc = None
+        self.wait_sync_after_redirect = False
+        self.redirect_grace = 0
+        self.redirect_sync_deadline = 0
+        self._ftq_start_pc_cache.clear()
+        self._ftq_group_closed.clear()
+        self._ftq_group_max_offset.clear()
         self._emit(
             cycle,
             "monitor.dut_redirect",
@@ -374,6 +379,8 @@ class FrontendMonitor:
         self._observe_dut_redirect_for_cfvec_check(cycle)
         self.cycles_total += 1
         self.slots_total += 8
+        if self._golden_trace_complete():
+            return
         cycle_golden_start = self.expected_pc
         if self.backend_model is not None:
             backend_golden_pc = self.backend_model.current_cycle_start_golden_pc()
@@ -392,6 +399,7 @@ class FrontendMonitor:
             self._ftq_group_max_offset.clear()
 
         skip_cfvec = self._skip_cfvec_until_cycle is not None and int(cycle) <= int(self._skip_cfvec_until_cycle)
+        recovery_first_cfvec_seen = False
         for i in range(8):
             if skip_cfvec or self._read(self.interface.cfvec_valid[i], 0) != 1:
                 continue
@@ -411,7 +419,28 @@ class FrontendMonitor:
                 + self._read(self.interface.cfvec_exception_vec[i][19], 0)
                 + self._read(self.interface.cfvec_exception_vec[i][20], 0)
             )
-            instr = self._recover_unavailable_instr(int(pc), int(instr), bool(is_rvc), int(ex_sum))
+            if int(pc) == 0:
+                continue
+            if self._recovery_target_pc is not None and not recovery_first_cfvec_seen:
+                recovery_first_cfvec_seen = True
+                target_pc = int(self._recovery_target_pc)
+                if int(pc) != int(target_pc):
+                    self._record_error(
+                        cycle=cycle,
+                        slot=i,
+                        kind="REDIRECT_RECOVERY_TARGET_MISMATCH",
+                        expected=target_pc,
+                        actual=int(pc),
+                    )
+                    return
+                self._recovery_target_pc = None
+                self.expected_pc = int(pc)
+                self.wait_sync_after_redirect = False
+                self.redirect_grace = 0
+                self.redirect_sync_deadline = 0
+                self._ftq_start_pc_cache.clear()
+                self._ftq_group_closed.clear()
+                self._ftq_group_max_offset.clear()
 
             self.slots_valid += 1
             obs = Observation(
@@ -518,7 +547,12 @@ class FrontendMonitor:
                         actual=pc,
                     )
 
-            if self.memory is not None and not self.wait_sync_after_redirect and self.redirect_grace == 0:
+            if (
+                self.memory is not None
+                and not self.wait_sync_after_redirect
+                and self.redirect_grace == 0
+                and int(ex_sum) == 0
+            ):
                 fetch_size = 2 if is_rvc else 4
                 raw_fetch, fetch_meta = self._read_expected_fetch_raw(int(pc), fetch_size)
                 if raw_fetch is None:
@@ -539,45 +573,16 @@ class FrontendMonitor:
                         self._record_error(
                             cycle=cycle,
                             slot=i,
-                            kind="ILLEGAL_RVC",
+                            kind="CFVEC_PC_SIZE_MEMORY_MISMATCH",
                             pc=pc,
                             raw16=raw16,
+                            instr=int(instr),
                         )
                         exp = None
                 else:
                     exp = int(raw_fetch) & 0xFFFFFFFF
                 got = int(instr) & 0xFFFFFFFF
                 if exp is not None and not self._instr_equivalent_for_compare(exp, got, bool(is_rvc)):
-                    if int(ex_sum) > 0:
-                        self.instr_compare_skipped_count += 1
-                        self._emit(
-                            cycle,
-                            "monitor.instr_compare_skipped",
-                            {
-                                "slot": int(i),
-                                "pc": int(pc),
-                                "expected": int(exp),
-                                "actual": int(got),
-                                "reason": "exception_marked",
-                            },
-                            level="DEBUG",
-                        )
-                        continue
-                    if self._should_skip_instr_compare(fetch_meta, got, ex_sum):
-                        self.instr_compare_skipped_count += 1
-                        self._emit(
-                            cycle,
-                            "monitor.instr_compare_skipped",
-                            {
-                                "slot": int(i),
-                                "pc": int(pc),
-                                "expected": int(exp),
-                                "actual": int(got),
-                                "detail": fetch_meta,
-                            },
-                            level="DEBUG",
-                        )
-                        continue
                     self._record_error(
                         cycle=cycle,
                         slot=i,
@@ -739,6 +744,7 @@ class FrontendMonitor:
         self._ftq_group_max_offset.clear()
         self.last_dut_redirect = None
         self._skip_cfvec_until_cycle = None
+        self._recovery_target_pc = None
 
 
 __all__ = ["Observation", "FrontendMonitor"]

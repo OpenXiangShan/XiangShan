@@ -985,6 +985,8 @@ class BackendModel:
         for idx, entry in enumerate(self._cfvec_queue):
             if entry.path_state != PATH_STATE_CORRECT:
                 break
+            if entry.exception_marked:
+                break
             if entry.rob_commit_state == ROB_COMMIT_STATE_COMMITTED:
                 continue
             if entry.rob_commit_state != ROB_COMMIT_STATE_PENDING:
@@ -1204,8 +1206,10 @@ class BackendModel:
         ftq_value: int,
         ftq_offset: int,
         is_last: bool,
+        exception_bits: int = 0,
     ) -> int:
-        cfi = self._classify_cfi(int(instr), int(pc), bool(pred_taken), bool(is_rvc))
+        exception_marked = int(exception_bits) != 0
+        cfi = None if exception_marked else self._classify_cfi(int(instr), int(pc), bool(pred_taken), bool(is_rvc))
         queue_instr = QueueInstr(
             cycle=int(self.current_cycle),
             slot=int(slot),
@@ -1219,6 +1223,8 @@ class BackendModel:
             is_last_in_entry=bool(is_last),
             resolve_state=RESOLVE_STATE_PENDING if cfi is not None else RESOLVE_STATE_NOT_NEEDED,
             is_cfi=bool(cfi is not None),
+            exception_marked=bool(exception_marked),
+            exception_bits=int(exception_bits),
         )
         if self.golden_trace is None:
             queue_instr.path_state = PATH_STATE_CORRECT
@@ -1258,6 +1264,8 @@ class BackendModel:
         replayed_any = False
         for queue_index, entry in enumerate(list(self._cfvec_queue)):
             if entry.path_state == PATH_STATE_WRONG:
+                break
+            if entry.exception_marked:
                 break
             if entry.golden_match_state == GOLDEN_MATCH_STATE_MATCHED:
                 replayed_any = True
@@ -3518,6 +3526,7 @@ class BackendModel:
             if int(self.current_cycle) <= int(self._skip_cfvec_until_cycle):
                 return
             self._skip_cfvec_until_cycle = None
+        recovery_first_cfvec_seen = False
         recovery_target_seen_this_cycle = False
 
         def _ensure_current_ftq_entry(ftq_flag: int, ftq_value: int) -> None:
@@ -3570,6 +3579,24 @@ class BackendModel:
             ftq_value = self._read(self.observe_if.cfvec_ftq_ptr_value[i], 0)
             ftq_offset = self._read(self.observe_if.cfvec_ftq_offset[i], 0)
             is_last = bool(self._read(self.observe_if.cfvec_is_last_in_ftq_entry[i], 0))
+            exception_bits = 0
+            for bit in (1, 2, 12, 19, 20):
+                if self._read(self.observe_if.cfvec_exception_vec[i][bit], 0) != 0:
+                    exception_bits |= 1 << int(bit)
+
+            recovery_target_pc = self._current_recovery_target_pc()
+            if (
+                recovery_target_pc is not None
+                and self._recovery_phase_active()
+                and not recovery_first_cfvec_seen
+            ):
+                recovery_first_cfvec_seen = True
+                if int(pc) != int(recovery_target_pc):
+                    self._raise_logged_assertion(
+                        "redirect recovery first cfvec is not target: "
+                        f"slot={int(i)} actual_pc=0x{int(pc):x} "
+                        f"target_pc=0x{int(recovery_target_pc):x}"
+                    )
 
             _ensure_current_ftq_entry(int(ftq_flag), int(ftq_value))
             packet_key = _packet_key(
@@ -3593,10 +3620,10 @@ class BackendModel:
                 ftq_value=int(ftq_value),
                 ftq_offset=int(ftq_offset),
                 is_last=bool(is_last),
+                exception_bits=int(exception_bits),
             )
 
             episode = self._active_wrong_path_episode()
-            recovery_target_pc = self._current_recovery_target_pc()
             hit_recovery_target = False
             expected_golden = self.current_golden_pc()
             golden_entry = None
@@ -3615,11 +3642,18 @@ class BackendModel:
                     hit_recovery_target = True
                 else:
                     self._cfvec_queue_mark_recovery_residual(int(queue_index))
-            elif episode is None:
+            elif (
+                int(exception_bits) != 0
+                and episode is None
+                and expected_golden is not None
+                and int(pc) != int(expected_golden)
+            ):
+                self._cfvec_queue_note_mismatch(int(queue_index))
+            elif episode is None and int(exception_bits) == 0:
                 golden_entry = self._consume_golden_entry(int(pc))
             if golden_entry is not None:
                 self._cfvec_queue_mark_matched(int(queue_index), golden_entry)
-            elif expected_golden is not None or episode is not None:
+            elif int(exception_bits) == 0 and (expected_golden is not None or episode is not None):
                 self._cfvec_queue_note_mismatch(int(queue_index))
             self._current_ftq_max_offset = max(int(self._current_ftq_max_offset), int(ftq_offset))
             self._record_ftq_group_pc(int(ftq_flag), int(ftq_value), int(pc), bool(is_rvc))
@@ -3644,7 +3678,7 @@ class BackendModel:
                     ) & 0xFFFFFFFFFFFFFFFF,
                 ),
             )
-            cfi = self._classify_cfi(instr, pc, pred_taken, is_rvc)
+            cfi = None if int(exception_bits) != 0 else self._classify_cfi(instr, pc, pred_taken, is_rvc)
             if cfi is not None:
                 branch_type, ras_action, target, taken = cfi
                 if not self._queue_entry_should_enqueue_resolve(int(queue_index)):
@@ -4161,6 +4195,7 @@ class BackendModel:
                     int(pre_flush_current_ftq[0]),
                     int(pre_flush_current_ftq[1]),
                 )
+            self._cfvec_queue_flush_wrong_path()
             self._mark_active_wrong_path_redirect_driven(
                 int(target_pc),
                 expected_recovery_ftq=expected_recovery_ftq,

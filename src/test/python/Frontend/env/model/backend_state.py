@@ -104,6 +104,8 @@ class QueueInstr:
     golden_index: Optional[int] = None
     golden_target_pc: Optional[int] = None
     is_cfi: bool = False
+    exception_marked: bool = False
+    exception_bits: int = 0
 
 
 @dataclass
