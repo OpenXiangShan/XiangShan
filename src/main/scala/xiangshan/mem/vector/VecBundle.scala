@@ -234,6 +234,7 @@ class storeMisalignIO(implicit p: Parameters) extends Bundle{
   val storeMisalignBufferEmpty  = Input(Bool())
   val scalaIssueValid           = Input(Bool())
   val scalaIssueRobIdx          = Input(new RobPtr)
+  val sqDeqIsVec                = Input(Bool())
 }
 
 class mergebufferThresholdIO(implicit p: Parameters) extends Bundle{
