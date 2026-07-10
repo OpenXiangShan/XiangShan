@@ -67,7 +67,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
 
   if (params.hasIQWakeUp) {
     ShiftLoadDependency(hasWakeupIQ.get)
-    CommonIQWakeupConnect(common, hasWakeupIQ.get, validReg, currentStatus, io.commonIn, true)
+    CommonIQWakeupConnect(common, hasWakeupIQ.get, validReg, currentStatus, io.commonIn, true, isComp)
   }
 
   // enq delay wakeup

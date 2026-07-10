@@ -44,7 +44,7 @@ class OthersEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockPar
 
   if (params.hasIQWakeUp) {
     ShiftLoadDependency(hasWakeupIQ.get)
-    CommonIQWakeupConnect(common, hasWakeupIQ.get, validReg, entryReg.status, io.commonIn, false)
+    CommonIQWakeupConnect(common, hasWakeupIQ.get, validReg, entryReg.status, io.commonIn, false, isComp)
   }
 
   when(io.commonIn.enq.valid) {
