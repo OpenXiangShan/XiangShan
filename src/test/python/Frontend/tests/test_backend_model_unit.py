@@ -12,6 +12,10 @@ from env.model.backend_state import FtqEntry
 from env.model.backend_state import PATH_STATE_CORRECT
 from env.model.backend_state import PATH_STATE_WRONG
 from env.model.backend_state import QueueInstr
+from env.model.backend_state import GOLDEN_MATCH_STATE_UNKNOWN
+from env.model.backend_state import RESOLVE_STATE_NOT_NEEDED
+from env.trace import GoldenTrace
+from env.trace import TraceEntry
 
 
 class _Signal:
@@ -30,6 +34,12 @@ class _ObserveIf:
         self.cfvec_ftq_ptr_value = [_Signal() for _ in range(8)]
         self.cfvec_ftq_offset = [_Signal() for _ in range(8)]
         self.cfvec_is_last_in_ftq_entry = [_Signal() for _ in range(8)]
+        self.cfvec_exception_vec = [[_Signal() for _ in range(24)] for _ in range(8)]
+
+
+class _EmptyTrace:
+    def peek(self):
+        return None
 
 
 def _set_first_cfvec(interface: _ObserveIf, pc: int, *, ftq_value: int = 0) -> None:
@@ -147,6 +157,89 @@ def test_ready_redirect_skips_cfvec_queue_sampling_at_t_and_t_plus_one() -> None
     model.plan_cycle_actions()
 
     assert [entry.pc for entry in model._cfvec_queue] == [0x2000]
+
+
+def test_recovery_first_sampled_cfvec_must_be_target_after_skip_window() -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.observe_if = interface
+    model.current_cycle = 12
+    model._active_wrong_path_episode_state = ActiveWrongPathEpisode(
+        origin_index=0,
+        target_pc=0x2000,
+        redirect_context=None,
+        redirect_driven=True,
+        expected_recovery_ftq=(0, 1),
+        redirect_driven_cycle=10,
+    )
+    _set_first_cfvec(interface, 0x2004, ftq_value=1)
+
+    with pytest.raises(AssertionError, match="redirect recovery first cfvec is not target"):
+        model._sample_cfvec()
+
+    assert list(model._cfvec_queue) == []
+
+
+def test_exception_marked_cfvec_is_queued_without_normal_backend_actions() -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.observe_if = interface
+    model.current_cycle = 20
+    model.golden_trace = _EmptyTrace()
+
+    _set_first_cfvec(interface, 0x80003248, ftq_value=3)
+    interface.cfvec_instr[0].value = 0x05130000
+    interface.cfvec_is_rvc[0].value = 1
+    interface.cfvec_fixed_taken[0].value = 1
+    interface.cfvec_exception_vec[0][2].value = 1
+
+    model._sample_cfvec()
+
+    assert len(model._cfvec_queue) == 1
+    entry = model._cfvec_queue[0]
+    assert entry.exception_marked is True
+    assert entry.exception_bits == (1 << 2)
+    assert entry.is_cfi is False
+    assert entry.resolve_state == RESOLVE_STATE_NOT_NEEDED
+    assert entry.golden_match_state == GOLDEN_MATCH_STATE_UNKNOWN
+    assert model._pending_resolves == deque()
+    assert model._queue_instruction_commit_candidate_indices() == []
+
+
+def test_exception_marked_cfvec_starts_wrong_path_episode() -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.observe_if = interface
+    model.current_cycle = 20
+    model.golden_trace = GoldenTrace(
+        [TraceEntry(index=0, pc=0x80003240, instr=0x10050663, size=4)]
+    )
+
+    prev = _queue_instr(0x80000DC8, 0, 2)
+    prev.instr = 0x00008082
+    prev.is_rvc = True
+    prev.is_cfi = True
+    prev.path_state = PATH_STATE_CORRECT
+    prev.golden_target_pc = 0x80003240
+    model._cfvec_queue = deque([prev])
+
+    _set_first_cfvec(interface, 0x80003248, ftq_value=3)
+    interface.cfvec_instr[0].value = 0x05130000
+    interface.cfvec_is_rvc[0].value = 1
+    interface.cfvec_exception_vec[0][2].value = 1
+
+    model._sample_cfvec()
+
+    assert len(model._cfvec_queue) == 2
+    wrong = model._cfvec_queue[1]
+    assert wrong.exception_marked is True
+    assert wrong.path_state == PATH_STATE_WRONG
+    assert model._active_wrong_path_episode() is not None
+    assert model._active_wrong_path_episode()["origin_index"] == 1
+    assert model._active_wrong_path_episode()["target_pc"] == 0x80003240
+    assert model.pending_events
+    assert model.pending_events[-1].payload["target_pc"] == 0x80003240
+    assert model.golden_trace.peek().pc == 0x80003240
 
 
 def test_commit_ftq_idx_must_be_contiguous() -> None:
@@ -451,13 +544,14 @@ def test_recovery_flush_waits_until_target_is_queued() -> None:
         expected_recovery_ftq=(0, 21),
         redirect_driven_cycle=10,
     )
+    model._skip_cfvec_until_cycle = 11
 
     model._flush_recovery_residuals_if_target_not_queued()
 
     assert [entry.pc for entry in model._cfvec_queue] == [0x1010, 0x1014]
 
 
-def test_redirect_drive_does_not_flush_before_recovery_target_is_queued() -> None:
+def test_redirect_drive_flushes_wrong_path_and_waits_for_recovery_target() -> None:
     model = BackendModel()
     wrong0 = _queue_instr(0x1010, 0, 22)
     wrong0.path_state = PATH_STATE_WRONG
@@ -502,7 +596,7 @@ def test_redirect_drive_does_not_flush_before_recovery_target_is_queued() -> Non
         }
     )
 
-    assert [entry.pc for entry in model._cfvec_queue] == [0x1010, 0x1014]
+    assert list(model._cfvec_queue) == []
     assert model._recovery_phase_active() is True
     assert model._current_recovery_target_pc() == 0x1000
 
