@@ -3,7 +3,6 @@ package xiangshan.mem
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.HasCircularQueuePtrHelper
 import xiangshan._
 import xiangshan.backend.Bundles.ExuInput
 import xiangshan.backend.exu.ExeUnitParams
@@ -44,8 +43,7 @@ class VAGQDownstreamAdapter(
   storeParams: Seq[ExeUnitParams],
   stdParams: Seq[ExeUnitParams]
 )(implicit p: Parameters)
-  extends XSModule
-  with HasCircularQueuePtrHelper {
+  extends XSModule {
   require(loadParams.length >= VAGQConstants.LduRespWidth)
   require(storeParams.length >= VAGQConstants.StaRespWidth)
   require(storeParams.length >= VAGQConstants.ActiveIssueWidth)
@@ -133,10 +131,7 @@ class VAGQDownstreamAdapter(
     if (i < VAGQConstants.ActiveIssueWidth) {
       val activeReq = io.vagqLsuReq(i)
       val activeStoreValid = activeReq.valid && activeReq.bits.isStore
-      val issueStaIsAMO = io.issueSta(i).valid && FuType.storeIsAMO(io.issueSta(i).bits.fuType)
-      val selectActive = activeStoreValid &&
-        !issueStaIsAMO &&
-        (!io.issueSta(i).valid || isAfter(io.issueSta(i).bits.robIdx, activeReq.bits.robIdx))
+      val selectActive = activeStoreValid && !io.issueSta(i).valid
 
       val activeStin = Wire(chiselTypeOf(io.staReq(i).bits))
       activeStin := 0.U.asTypeOf(activeStin)
