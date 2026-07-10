@@ -7,6 +7,7 @@ import top.{ArgParser, Generator}
 import utility._
 import xiangshan._
 import xiangshan.backend.Bundles._
+import xiangshan.backend.datapath.NewPipelineConnect
 import xiangshan.backend.fu.NewCSR.CSRConfig
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.{XSVectorParamKey, XSVectorParameters}
@@ -232,16 +233,31 @@ class VAGQ(implicit p: Parameters) extends VAGQModule {
     mergeCtrl.io.entry(i).entry := entryTable.io.entries(i)
   }
 
-  val lsuReqQueue = Seq.fill(VAGQConstants.ActiveIssueWidth)(Module(new Queue(new VAGQLsuReq, 1)))
-  lsuReqQueue.zip(splitCtrl.io.lsuReq).map { case (out, in) =>
-    out.io.enq <> in
+  private def connectRedirectPipe[T <: Data](
+    in: DecoupledIO[T],
+    out: DecoupledIO[T],
+    robIdxOf: T => RobPtr,
+    name: String
+  ): Unit = {
+    val pipeOut = Wire(Decoupled(chiselTypeOf(in.bits)))
+    val flushPipe = pipeOut.valid && robIdxOf(pipeOut.bits).needFlush(io.redirect)
+
+    out.valid := pipeOut.valid && !flushPipe
+    out.bits := pipeOut.bits
+    pipeOut.ready := out.ready && !flushPipe
+
+    NewPipelineConnect(in, pipeOut, pipeOut.fire, flushPipe, Some(name))
   }
 
-  val lsqEmptyReqQueue = Module(new Queue(new VAGQLsqEmptyReq, 1))
-  lsqEmptyReqQueue.io.enq <> splitCtrl.io.lsqEmptyReq
-
-  io.lsuReq.zip(lsuReqQueue).foreach { case (out, in) => out <> in.io.deq }
-  io.lsqEmptyReq <> lsqEmptyReqQueue.io.deq
+  io.lsuReq.zip(splitCtrl.io.lsuReq).zipWithIndex.foreach { case ((out, in), i) =>
+    connectRedirectPipe(in, out, (req: VAGQLsuReq) => req.robIdx, s"lsuReqPipe_$i")
+  }
+  connectRedirectPipe(
+    splitCtrl.io.lsqEmptyReq,
+    io.lsqEmptyReq,
+    (req: VAGQLsqEmptyReq) => req.robIdx,
+    "lsqEmptyReqPipe"
+  )
 
   entryTable.io.splitUpdate := splitCtrl.io.update
 
