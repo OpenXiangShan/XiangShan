@@ -208,11 +208,6 @@ object YamlParser {
         case XSTileKey => up(XSTileKey).map(_.copy(HasBitmapCheck = enable))
       })
     }
-    yamlConfig.EnableBitmapCheckDefault.foreach { enable =>
-      newConfig = newConfig.alter((site, here, up) => {
-        case XSTileKey => up(XSTileKey).map(_.copy(HasBitmapCheckDefault = enable))
-      })
-    }
     newConfig
   }
 }

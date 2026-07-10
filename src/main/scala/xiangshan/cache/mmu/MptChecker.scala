@@ -269,46 +269,6 @@ class MptEntry(implicit p: Parameters) extends XSBundle with MPTCacheParam {
 
   def getAddr(offset: UInt): UInt =
     this.data.getAddr(offset)
-
-  def genFake(level: UInt): Unit = {
-    this.N         := false.B
-    this.data.data := "h802F4".U
-    this.L         := false.B
-    this.V         := true.B
-    switch(level) {
-      is("b1000".U) {
-        this.N         := false.B
-        this.data.data := "h802F4".U
-        this.L         := false.B
-        this.V         := true.B
-      }
-      is("b0100".U) {
-        this.N         := false.B
-        this.data.data := "h802F5".U
-        this.L         := false.B
-        this.V         := true.B
-      }
-      is("b0010".U) {
-        if (HasMptCheckDefault4k) {
-          this.N         := false.B
-          this.data.data := "h802F6".U
-          this.L         := false.B
-          this.V         := true.B
-        } else {
-          this.N         := false.B
-          this.data.data := "hFFFFFFFFFFFF".U
-          this.L         := true.B
-          this.V         := true.B
-        }
-      }
-      is("b0001".U) {
-        this.N         := false.B
-        this.data.data := "hFFFFFFFFFFFF".U
-        this.L         := true.B
-        this.V         := true.B
-      }
-    }
-  }
 }
 
 class MptCacheTag(tagLen: Int, isSp: Boolean = false)(implicit p: Parameters) extends XSBundle with MPTCacheParam {
@@ -1102,11 +1062,8 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   val pmpCheckLevel = RegEnable(nextPmpCheckLevel, "b1000".U(mptLevelLenOH.W), setPmpCheckLevel)
 
   val mpteResp = Wire(new MptEntry())
-  if (HasMptCheckDefault) {
-    mpteResp.genFake(level)
-  } else {
-    mpteResp.apply(mem.resp.bits) // mem mpte mpteData
-  }
+
+  mpteResp.apply(mem.resp.bits) // mem mpte mpteData
 
   val mpteData = Reg(new MptData())
   // Stores the returned permissions/lower-level address, or the incoming request address entry;
@@ -1141,10 +1098,9 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   // should be safer than just := memAddr
 
   // accessFault logic
-  val pmpFail = if (HasMptCheckDefault) false.B else (!isLeafMpte) && (io.pmp.resp.ld || io.pmp.resp.mmio)
+  val pmpFail = (!isLeafMpte) && (io.pmp.resp.ld || io.pmp.resp.mmio)
   // PMP delay unknown
-  val entryError = if (HasMptCheckDefault) false.B else
-    mpteInvalid || rsvZeroError0 || rsvZeroError1 || rsvZeroError2 || ((!isLeafMpte) && level === 1.U)
+  val entryError = mpteInvalid || rsvZeroError0 || rsvZeroError1 || rsvZeroError2 || ((!isLeafMpte) && level === 1.U)
   // level == 0 non leaf, zero = / = 0,pmp fail,invalid casue accessFault
   val accessFault = entryError || pmpFail // pmp fail also cause accessFault
   io.refill.bits.level := Mux(pmpFail, pmpCheckLevel, level) // pmpFail return next level,else cur level
