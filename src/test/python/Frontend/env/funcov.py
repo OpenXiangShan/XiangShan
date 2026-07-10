@@ -23,6 +23,97 @@ def _count_truthy(values) -> int:
     return sum(1 for value in values if int(value or 0) != 0)
 
 
+def _classify_block_pos(pc: int) -> str:
+    halfword = (int(pc) & 0x3F) >> 1
+    if halfword <= 1:
+        return "head"
+    if halfword >= 30:
+        return "tail"
+    return "mid"
+
+
+def _classify_cfi_kind(instr: int, is_rvc: bool) -> str:
+    instr = int(instr) & 0xFFFFFFFF
+    if bool(is_rvc):
+        raw16 = instr & 0xFFFF
+        quadrant = raw16 & 0x3
+        funct3 = (raw16 >> 13) & 0x7
+        if quadrant == 0x1 and funct3 in {0x5, 0x1}:
+            return "jal"
+        if quadrant == 0x1 and funct3 in {0x6, 0x7}:
+            return "branch"
+        if quadrant == 0x2 and funct3 == 0x4 and ((raw16 >> 2) & 0x1F) == 0:
+            return "jalr"
+        return "non_cfi"
+
+    opcode = instr & 0x7F
+    if opcode == 0x63:
+        return "branch"
+    if opcode == 0x6F:
+        return "jal"
+    if opcode == 0x67:
+        return "jalr"
+    return "non_cfi"
+
+
+def _sample_ifu_cfvec_coverage(recorder, cycle: int, slot: int, pc: int, instr: int, is_rvc: bool) -> None:
+    size_bin = "rvc_seen" if bool(is_rvc) else "rvi_seen"
+    pos_bin = _classify_block_pos(int(pc))
+    cfi_bin = _classify_cfi_kind(int(instr), bool(is_rvc))
+    evidence = {
+        "event": "cfvec",
+        "slot": int(slot),
+        "pc": int(pc),
+        "instr": int(instr) & 0xFFFFFFFF,
+        "is_rvc": int(bool(is_rvc)),
+        "block_pos": pos_bin,
+        "cfi_kind": cfi_bin,
+    }
+
+    recorder.mark("ifu_instr_size_type", size_bin, cycle, evidence)
+    recorder.mark("ifu_fetch_block_position", pos_bin, cycle, evidence)
+    recorder.mark("ifu_cfi_decode_type", cfi_bin, cycle, evidence)
+
+    if bool(is_rvc):
+        recorder._ifu_seen_rvc = True
+        recorder.mark("ifu_boundary_event", "rvc_start", cycle, evidence)
+    else:
+        recorder._ifu_seen_rvi = True
+        recorder.mark("ifu_boundary_event", "rvi_start", cycle, evidence)
+
+    if recorder._ifu_seen_rvc and recorder._ifu_seen_rvi:
+        recorder.mark("ifu_instr_size_type", "mixed_rvi_rvc_seen", cycle, evidence)
+
+    last = getattr(recorder, "_ifu_last_cfvec", None)
+    if last is not None:
+        last_pc = int(last.get("pc", 0))
+        last_is_rvc = bool(last.get("is_rvc", 0))
+        expected_step = 2 if last_is_rvc else 4
+        actual_step = int(pc) - last_pc
+        if 0 < actual_step <= 4:
+            if actual_step == expected_step:
+                recorder.mark(
+                    "ifu_pc_step_type",
+                    "step_2b_rvc" if last_is_rvc else "step_4b_rvi",
+                    cycle,
+                    {**evidence, "last_pc": last_pc, "actual_step": actual_step},
+                )
+                recorder.mark(
+                    "ifu_pc_step_type",
+                    "mixed_no_gap_no_dup",
+                    cycle,
+                    {**evidence, "last_pc": last_pc, "actual_step": actual_step},
+                )
+            if not last_is_rvc and actual_step == 4:
+                recorder.mark(
+                    "ifu_boundary_event",
+                    "rvi_high_half_suppressed",
+                    cycle,
+                    {**evidence, "last_pc": last_pc},
+                )
+    recorder._ifu_last_cfvec = {"pc": int(pc), "is_rvc": int(bool(is_rvc)), "slot": int(slot)}
+
+
 def _slot_half_region(slot: int) -> str:
     return "front" if int(slot) < 4 else "back"
 
@@ -52,6 +143,7 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
             + recorder._read_dut_signal(dut, base + "bits_exceptionVec_20", 0)
         )
         instr = recorder._recover_unavailable_instr(env, int(pc), int(instr), bool(is_rvc), int(ex_sum))
+        _sample_ifu_cfvec_coverage(recorder, cycle, slot, pc, instr, is_rvc)
 
         fetch_path = recorder._infer_fetch_path(env, pc, cycle)
         recorder.mark("fetch_path_type", fetch_path, cycle, {"pc": pc})

@@ -24,7 +24,7 @@ def _frontend_root() -> Path:
 
 
 def default_pilot_csv_path() -> Path:
-    return _frontend_root() / "docs" / "frontend_bt_functional_coverage_pilot.csv"
+    return _frontend_root() / "docs" / "03_功能覆盖率建模" / "frontend_bt_functional_coverage_pilot.csv"
 
 
 def _sanitize(value: Any) -> Any:
@@ -113,6 +113,9 @@ class FunctionalCoverageRecorder:
         self._uncache_recent_a_events: deque[dict] = deque(maxlen=16)
         self._uncache_last_pending_redirect_cycle: Optional[int] = None
         self._uncache_wfi_start_req_count: Optional[int] = None
+        self._ifu_last_cfvec: Optional[dict] = None
+        self._ifu_seen_rvc = False
+        self._ifu_seen_rvi = False
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
 
