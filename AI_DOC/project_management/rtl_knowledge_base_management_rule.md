@@ -1,6 +1,6 @@
 # RTL 分析知识库维护规则
 
-本文约束 XiangShan `mem_ut` 项目中所有 RTL/Scala 接口与功能行为分析。每次分析必须基于明确版本和权威源码，并在回答用户前把结论合并到对应版本的长期知识库。
+本文约束用户明确要求“结合 Scala/Chisel 源码分析 RTL 功能行为”时的知识沉淀。只有满足该显式触发条件的分析，才必须基于明确版本和权威源码，并在回答用户前把结论合并到对应版本的长期知识库。
 
 执行本规则时还必须遵循：
 
@@ -12,14 +12,20 @@
 
 ## 1. 触发条件
 
-用户要求分析、解释、追踪或比较以下任一内容时必须执行本规则：
+只有用户提示词明确要求结合 Scala/Chisel 源码分析、解释、追踪或比较 RTL 功能行为时，才必须执行本规则。典型表达包括：
 
-- RTL、Scala/Chisel 模块、信号、字段、端口、Bundle 或参数。
-- MemBlock/LSQ/DCache/TLB/ROB 等模块的内部行为。
-- pipeline、状态机、queue、仲裁、exception、redirect、replay、flush、writeback 等 flow。
-- V2/V3 接口或行为差异。
+- “结合 Scala 源码分析这个 RTL 信号何时置高”。
+- “从 Chisel 实现追踪 MemBlock/LSQ/DCache/TLB/ROB 的内部 RTL flow”。
+- “结合 V2/V3 Scala 源码比较 pipeline、状态机、queue、exception、redirect、replay、flush 或 writeback 行为”。
 
-即使用户只要求口头解释，也必须在本轮完成知识库检索、校正和更新；不得只在聊天中保留结论。
+以下任务默认不触发本规则，也不得因此更新 RTL 知识库：
+
+- 只分析测试框架、UVM、SystemVerilog 验证代码、sequence、driver、monitor、RM、scoreboard、plan 或项目管理文档。
+- 只解释计划条目、测试策略、验证环境 capability 或软件模型行为，即使其中引用了 RTL 信号名。
+- 只要求查看接口表、日志、波形或仿真结果，但没有要求结合 Scala/Chisel 源码分析 RTL 行为。
+- Codex 为辅助理解自行查看少量 Scala/RTL 源码，但用户没有提出上述显式要求。
+
+非触发任务仍按其对应的测试框架、flow、review 或接口文档规则处理，但不得写入 `AI_DOC/analysis/rtl/<version>/flows`。如果同一提示词同时明确要求测试框架分析和结合 Scala/Chisel 的 RTL 行为分析，只把其中 RTL 行为结论更新到 RTL 知识库。
 
 ## 2. 版本与权威来源
 
@@ -136,7 +142,7 @@ git diff --check -- AI_DOC AGENTS.md
 
 ## 9. 完成标准
 
-单次 RTL/Scala 分析必须同时满足：
+单次已触发的 RTL/Scala 行为分析必须同时满足：
 
 1. 已确认版本、分支、commit 和权威源码。
 2. 已检索并阅读对应版本旧知识。
