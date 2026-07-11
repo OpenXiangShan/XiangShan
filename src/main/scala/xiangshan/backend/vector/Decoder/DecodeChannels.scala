@@ -369,7 +369,6 @@ class DecodeChannelOutput extends Bundle {
   val isLastUop = Bool()
   val src12Rev = Bool()
 
-  val isJR = Bool()
   val isJ = Bool()
   val isJr = Bool()
   val isMove = Bool()
@@ -443,7 +442,6 @@ object DecodeChannelOutput {
     uop.isLastUop := vuop.isLastUop
     uop.src12Rev := vuop.src12Rev
 
-    uop.isJR := false.B
     uop.isJ := false.B
     uop.isJr := false.B
     uop.isMove := false.B
@@ -508,7 +506,6 @@ object DecodeChannelOutput {
     uop.isLastUop := true.B
     uop.src12Rev := false.B
 
-    uop.isJR := false.B
     uop.isJ := false.B
     uop.isJr := false.B
     uop.isMove := false.B
@@ -571,7 +568,6 @@ object DecodeChannelOutput {
     uop.isLastUop := suop.isLastUop
     uop.src12Rev := false.B
 
-    uop.isJR := suop.isJR
     uop.isJ := suop.isJ
     uop.isJr := suop.isJr
     uop.isMove := suop.isMove
@@ -634,7 +630,6 @@ object DecodeChannelOutput {
     uop.isLastUop := true.B
     uop.src12Rev := false.B
 
-    uop.isJR := false.B
     uop.isJ := puop.isJ
     uop.isJr := puop.isJr
     uop.isMove := false.B

@@ -594,13 +594,13 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     io.out(i).bits := uops(i)
 
     // set link uop's src1Type to SrcType.no
-    when (io.in(i).bits.isJR && io.in(i).bits.firstUop) {
+    when ((io.in(i).bits.isJ || io.in(i).bits.isJr) && io.in(i).bits.firstUop && !io.in(i).bits.lastUop) {
       io.out(i).bits.srcType(0) := SrcType.no
     }
 
     // dirty code
     if (i == 0) {
-      val jrFollowsLink = io.in(0).bits.isJR && io.in(0).bits.lastUop
+      val jrFollowsLink = (io.in(0).bits.isJ || io.in(0).bits.isJr) && io.in(0).bits.lastUop && !io.in(0).bits.firstUop
       io.out(i).bits.psrc(0) := Mux(jrFollowsLink,
         linkPsrc0Reg,
         Mux(io.out(i).bits.isLUI, 0.U, uops(i).psrc(0))
@@ -761,7 +761,9 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         val indexMatch = in.bits.ldest === lsrc
         val writeMatch = intRen && needIntDest(k) || fpRen && needFpDest(k) || vecRen && needVecDest(k)
         // Break false dependency: link uop's dest should not bypass to jr uop's psrc(0)
-        val linkToJrFalseDep = (srcIdx == 0).B && (k == i - 1).B && in.bits.isJR && in.bits.firstUop && io.in(i).bits.isJR && io.in(i).bits.lastUop
+        val linkToJrFalseDep = (srcIdx == 0).B && (k == i - 1).B &&
+          (in.bits.isJ || in.bits.isJr) && in.bits.firstUop && !in.bits.lastUop &&
+          (io.in(i).bits.isJ || io.in(i).bits.isJr) && io.in(i).bits.lastUop && !io.in(i).bits.firstUop
         indexMatch && writeMatch && !linkToJrFalseDep
       }
       bypassCond(srcIdx)(i - 1) := VecInit(destToSrc).asUInt
@@ -810,10 +812,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   // Capture psrc(0) for cross-cycle JALR/JAL forwarding:
   // Link uop now has Src1Gp (for correct bypass in Rename), cleared to SrcType.no
   // on output, so uops(i).psrc(0) and the bypass chain are both correct.
-  when (io.in.last.valid && io.in.last.bits.isJR && io.in.last.bits.firstUop && canOut) {
+  when (io.in.last.valid && (io.in.last.bits.isJ || io.in.last.bits.isJr) && io.in.last.bits.firstUop && !io.in.last.bits.lastUop && canOut) {
     linkPsrc0Reg   := io.out.last.bits.psrc(0)
     linkPsrc0Valid := true.B
-  }.elsewhen (io.in.head.valid && io.in.head.bits.isJR && io.in.head.bits.lastUop && canOut) {
+  }.elsewhen (io.in.head.valid && (io.in.head.bits.isJ || io.in.head.bits.isJr) && io.in.head.bits.lastUop && !io.in.head.bits.firstUop && canOut) {
     linkPsrc0Valid := false.B
   }
 

@@ -185,7 +185,6 @@ object Bundles {
     val isVset = Bool()
     val firstUop = Bool()
     val lastUop = Bool()
-    val isJR = Bool()
     val isJ = Bool()
     val isJr = Bool()
     val numWB = NumWB() // rob need this
