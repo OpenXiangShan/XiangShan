@@ -1,0 +1,22 @@
+# V3 顶层 Interface-Agent 知识索引
+
+## 版本范围
+
+- RTL 版本：V3。
+- 版本 profile：`mem_ut/ver/ut/memblock/rule/version/v3`。
+- 长期知识目录：`AI_DOC/analysis/interface/v3/agents`。
+
+本索引只收录经 V3 权威源码核验的 MemBlock 顶层接口与 agent 映射。
+
+## Agent 文档
+
+当前暂无按新规则建立的 V3 agent 长期知识文档。
+
+| Agent 文档 | 关键词 | 覆盖模块/端口 | 入口信号 | 关联 Flow |
+|---|---|---|---|---|
+
+## 维护规则
+
+- 新增 agent 文档后必须补充上表。
+- 一个端口只指定一个主要 agent，跨 agent 观察关系通过交叉引用表达。
+- V2 差异链接到 `../v2/index.md` 或对应 V2 agent 文档，不在本文混写 V2 事实。
