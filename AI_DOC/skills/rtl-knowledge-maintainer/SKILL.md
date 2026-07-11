@@ -1,11 +1,22 @@
 ---
 name: rtl-knowledge-maintainer
-description: 分析并维护 XiangShan mem_ut 项目的版本化 RTL/Scala 知识库。用户要求分析、解释、追踪或比较 RTL、Scala/Chisel 模块、信号、字段、端口、Bundle、pipeline、状态机、队列、异常、redirect、replay、flush、writeback、MemBlock/LSQ/DCache/TLB/ROB 行为或 V2/V3 差异时使用；每次都要核对版本和权威源码，校正已有知识，并按顶层 interface-agent 或内部 rtl-flow 分类更新仓库文档。
+description: 结合 XiangShan Scala/Chisel 源码分析并维护版本化 RTL 功能知识库。仅当用户提示词明确要求“结合 Scala/Chisel 源码”分析、解释、追踪或比较 RTL 信号、模块、pipeline、状态机、队列、异常、redirect、replay、flush、writeback、MemBlock/LSQ/DCache/TLB/ROB 行为或 V2/V3 RTL 差异时使用。不要用于只分析测试框架、UVM/SystemVerilog 验证代码、sequence、driver、monitor、RM、scoreboard、plan、项目管理文档、日志或仿真结果的任务；Codex 自行查看 Scala 源码辅助理解也不构成触发。
 ---
 
 # RTL 知识库维护
 
-把每次 RTL/Scala 分析变成对应版本长期知识的增量更新。不得只回答用户而不维护知识库。
+把用户明确要求结合 Scala/Chisel 源码完成的 RTL 行为分析变成对应版本长期知识的增量更新。
+
+## 触发边界
+
+只有用户提示词同时具备以下两点时执行本 skill：
+
+1. 明确要求结合 Scala/Chisel 源码。
+2. 目标是分析 RTL 功能、信号条件、内部 flow 或版本行为差异。
+
+只分析测试框架、UVM/SystemVerilog 验证实现、plan 或验证 capability 时不要执行，也不要更新 RTL 知识库。用户未明确提出时，不因分析过程中自行读取 Scala/RTL 源码而触发。
+
+同一问题同时包含测试框架和显式 RTL 源码分析时，只沉淀 RTL 行为结论；测试框架结论进入其原有 flow/analysis 体系。
 
 ## 强制读取
 

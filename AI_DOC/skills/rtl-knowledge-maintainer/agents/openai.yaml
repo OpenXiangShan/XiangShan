@@ -1,4 +1,4 @@
 interface:
   display_name: "RTL Knowledge Maintainer"
-  short_description: "按 RTL 版本维护 agent 与 flow 知识库"
-  default_prompt: "Use $rtl-knowledge-maintainer to analyze this RTL or Scala question and update the versioned project knowledge base."
+  short_description: "按版本沉淀 Scala 源码支撑的 RTL 行为知识"
+  default_prompt: "Use $rtl-knowledge-maintainer when I explicitly ask for RTL behavior analysis based on Scala or Chisel source, then update the versioned knowledge base."
