@@ -58,7 +58,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     val blockAddr  = Output(Valid(UInt()))
   })
 
-  val sInvalid :: s_pipe_req :: s_wait_resp :: Nil = Enum(3)
+  val sInvalid :: sPipeReq :: sWaitResp :: Nil = Enum(3)
 
   val state = RegInit(sInvalid)
 
@@ -80,7 +80,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     io.req.ready := true.B
     when (io.req.fire) {
       req := io.req.bits
-      state := s_pipe_req
+      state := sPipeReq
     }
   }
 
@@ -90,7 +90,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     io.lrscLockedBlock.valid && get_block(io.lrscLockedBlock.bits) === get_block(req.addr)
   )
 
-  when (state === s_pipe_req) {
+  when (state === sPipeReq) {
     // Note that probe req will be blocked in the next cycle if a lr updates lrsc_locked_block addr
     // in this way, we can RegNext(lrsc_blocked) for better timing
     io.pipeReq.valid := !RegNext(lrscBlocked)
@@ -108,11 +108,11 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     pipeReq.missFailCauseEvictBtot := false.B
 
     when (io.pipeReq.fire) {
-      state := s_wait_resp
+      state := sWaitResp
     }
   }
 
-  when (state === s_wait_resp) {
+  when (state === sWaitResp) {
     when (io.pipeResp.valid && io.id === io.pipeResp.bits.id) {
       state := sInvalid
     }
@@ -121,8 +121,8 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
   // perfoemance counters
   XSPerfAccumulate("probe_req", state === sInvalid && io.req.fire)
   XSPerfAccumulate("probe_penalty", state =/= sInvalid)
-  XSPerfAccumulate("probe_penalty_blocked_by_lrsc", state === s_pipe_req && io.lrscLockedBlock.valid && get_block(io.lrscLockedBlock.bits) === get_block(req.addr))
-  XSPerfAccumulate("probe_penalty_blocked_by_pipeline", state === s_pipe_req && io.pipeReq.valid && !io.pipeReq.ready)
+  XSPerfAccumulate("probe_penalty_blocked_by_lrsc", state === sPipeReq && io.lrscLockedBlock.valid && get_block(io.lrscLockedBlock.bits) === get_block(req.addr))
+  XSPerfAccumulate("probe_penalty_blocked_by_pipeline", state === sPipeReq && io.pipeReq.valid && !io.pipeReq.ready)
 }
 
 class ProbeQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump with HasPerfEvents

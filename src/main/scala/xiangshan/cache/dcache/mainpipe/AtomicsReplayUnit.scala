@@ -32,7 +32,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     val blockAddr  = Output(Valid(UInt()))
   })
 
-  val sInvalid :: s_pipe_req :: s_pipe_resp :: s_resp :: Nil = Enum(4)
+  val sInvalid :: sPipeReq :: sPipeResp :: sResp :: Nil = Enum(4)
   val state = RegInit(sInvalid)
 
   val req = Reg(new DCacheWordReqWithVaddr)
@@ -56,13 +56,13 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
   when (state === sInvalid) {
     when (io.lsu.req.fire) {
       req   := io.lsu.req.bits
-      state := s_pipe_req
+      state := sPipeReq
     }
   }
 
   // --------------------------------------------
   // replay
-  when (state === s_pipe_req) {
+  when (state === sPipeReq) {
     io.pipeReq.valid := Mux(
       io.pipeReq.bits.cmd === M_XLR,
       !io.blockLr, // block lr to survive in lr storm
@@ -83,7 +83,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     pipeReq.amoMask  := req.mask
 
     when (io.pipeReq.fire) {
-      state := s_pipe_resp
+      state := sPipeResp
       assert(!io.pipeReq.bits.vaddr === 0.U)
     }
   }
@@ -91,7 +91,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
   val respData  = Reg(UInt())
   val respId    = Reg(UInt())
   val respError = Reg(Bool())
-  when (state === s_pipe_resp) {
+  when (state === sPipeResp) {
     // when not miss
     // everything is OK, simply send response back to sbuffer
     // when miss and not replay
@@ -104,19 +104,19 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     when (io.pipeResp.fire) {
       when (io.pipeResp.bits.miss) {
         when (io.pipeResp.bits.replay) {
-          state := s_pipe_req
+          state := sPipeReq
         }
       } .otherwise {
         respData  := io.pipeResp.bits.data
         respId    := io.pipeResp.bits.id
         respError := io.pipeResp.bits.error
-        state := s_resp
+        state := sResp
       }
     }
   }
 
   // --------------------------------------------
-  when (state === s_resp) {
+  when (state === sResp) {
     io.lsu.resp.valid := true.B
     io.lsu.resp.bits  := DontCare
     io.lsu.resp.bits.data  := respData

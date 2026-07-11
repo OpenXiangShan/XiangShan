@@ -345,7 +345,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val wfi = Flipped(new WfiReqBundle)
   })
 
-  val sIdle :: s_sreq :: s_wresp :: s_lsq_resp :: Nil = Enum(4)
+  val sIdle :: sSreq :: sWresp :: sLsqResp :: Nil = Enum(4)
   val state = RegInit(sIdle)
   val stateNext = WireInit(state)
   val req = RegEnable(io.req.bits, io.req.fire)
@@ -359,28 +359,28 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
   switch (state) {
     is(sIdle) {
       when (io.req.fire) {
-        stateNext := s_sreq
+        stateNext := sSreq
         nderr := false.B
         denied := false.B
         corrupt := false.B
       }
     }
-    is(s_sreq) {
+    is(sSreq) {
       when (io.reqChanA.fire) {
-        stateNext := s_wresp
+        stateNext := sWresp
         noPending := false.B
       }
     }
-    is(s_wresp) {
+    is(sWresp) {
       when (io.respChanD.fire) {
-        stateNext := s_lsq_resp
+        stateNext := sLsqResp
         nderr := io.respChanD.bits.denied || io.respChanD.bits.corrupt
         denied := io.respChanD.bits.denied
         corrupt := io.respChanD.bits.corrupt
         noPending := true.B
       }
     }
-    is(s_lsq_resp) {
+    is(sLsqResp) {
       when (io.respToLsq.fire) {
         stateNext := sIdle
       }
@@ -389,7 +389,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
 
   io.req.ready := state === sIdle
 
-  io.reqChanA.valid := state === s_sreq && !io.wfi.wfiReq
+  io.reqChanA.valid := state === sSreq && !io.wfi.wfiReq
   io.reqChanA.bits := edge.CacheBlockOperation(
     fromSource = (cfg.nMissEntries + 1).U,
     toAddress = req.address,
@@ -397,17 +397,17 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     opcode = req.opcode
   )._2
 
-  io.respChanD.ready := state === s_wresp
+  io.respChanD.ready := state === sWresp
   io.wfi.wfiSafe := GatedValidRegNext(noPending && io.wfi.wfiReq)
 
-  io.respToLsq.valid := state === s_lsq_resp
+  io.respToLsq.valid := state === sLsqResp
   io.respToLsq.bits.address := req.address
   io.respToLsq.bits.nderr   := nderr
   io.respToLsq.bits.denied  := denied
   io.respToLsq.bits.corrupt := corrupt
 
   assert(!(state =/= sIdle && io.req.valid))
-  assert(!(state =/= s_wresp && io.respChanD.valid))
+  assert(!(state =/= sWresp && io.respChanD.valid))
 }
 
 class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DCacheModule

@@ -137,7 +137,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     val blockAddr  = Output(Valid(UInt()))
   })
 
-  val sInvalid :: s_release_req :: s_release_resp ::Nil = Enum(3)
+  val sInvalid :: sReleaseReq :: sReleaseResp ::Nil = Enum(3)
   // ProbeAck:               s_invalid ->            s_release_req
   // ProbeAck merge Release: s_invalid ->            s_release_req
   // Release:                s_invalid -> s_sleep -> s_release_req -> s_release_resp
@@ -207,10 +207,10 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     paddrDup2 := io.req.bits.addr
 
     remainSet := Mux(io.req.bits.hasData, ~0.U(refillCycles.W), 1.U(refillCycles.W))
-    state      := s_release_req
-    stateDup0 := s_release_req
-    stateDup1 := s_release_req
-    stateDupForMp.foreach(_ := s_release_req)
+    state      := sReleaseReq
+    stateDup0 := sReleaseReq
+    stateDup1 := sReleaseReq
+    stateDupForMp.foreach(_ := sReleaseReq)
   }
 
   // --------------------------------------------------------------------------------
@@ -272,10 +272,10 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   when (io.memRelease.fire) {remainClr := PriorityEncoderOH(remainDup1)}
 
-  when(state === s_release_req && release_done){
-    state := Mux(req.voluntary, s_release_resp, sInvalid)
+  when(state === sReleaseReq && release_done){
+    state := Mux(req.voluntary, sReleaseResp, sInvalid)
     when(req.voluntary){
-      stateDupForMp.foreach(_ := s_release_resp)
+      stateDupForMp.foreach(_ := sReleaseResp)
     } .otherwise{
       stateDupForMp.foreach(_ := sInvalid)
     }
@@ -285,7 +285,7 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   io.primaryReadyDup.zip(stateDupForMp).foreach { case (rdy, st) => rdy := st === sInvalid }
   // --------------------------------------------------------------------------------
   // receive ReleaseAck for Releases
-  when (state === s_release_resp) {
+  when (state === sReleaseResp) {
     io.memGrant.ready := true.B
     when (io.memGrant.fire) {
       state := sInvalid
@@ -302,10 +302,10 @@ class WritebackEntry(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
   // performance counters
   XSPerfAccumulate("wb_req", io.req.fire)
-  XSPerfAccumulate("wb_release", state === s_release_req && release_done && req.voluntary)
-  XSPerfAccumulate("wb_probe_resp", state === s_release_req && release_done && !req.voluntary)
+  XSPerfAccumulate("wb_release", state === sReleaseReq && release_done && req.voluntary)
+  XSPerfAccumulate("wb_probe_resp", state === sReleaseReq && release_done && !req.voluntary)
   XSPerfAccumulate("penalty_blocked_by_channel_C", io.memRelease.valid && !io.memRelease.ready)
-  XSPerfAccumulate("penalty_waiting_for_channel_D", io.memGrant.ready && !io.memGrant.valid && state === s_release_resp)
+  XSPerfAccumulate("penalty_waiting_for_channel_D", io.memGrant.ready && !io.memGrant.valid && state === sReleaseResp)
 }
 
 class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule with HasTLDump with HasPerfEvents
@@ -415,4 +415,3 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   generatePerfEvent()
 
 }
-

@@ -236,7 +236,7 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
 
   val entries = Reg(Vec(UncacheBufferSize, new UncacheEntry))
   val states = RegInit(VecInit(Seq.fill(UncacheBufferSize)(0.U.asTypeOf(new UncacheEntryState))))
-  val sIdle :: s_inflight :: s_wait_return :: Nil = Enum(3)
+  val sIdle :: sInflight :: sWaitReturn :: Nil = Enum(3)
   val uState = RegInit(sIdle)
   val noPending = RegInit(VecInit(Seq.fill(UncacheBufferSize)(true.B)))
 
@@ -304,15 +304,15 @@ class UncacheImp(outer: Uncache)extends LazyModuleImp(outer)
   switch(uState){
     is(sIdle){
       when(memAcquire.fire){
-        uState := s_inflight
+        uState := sInflight
       }
     }
-    is(s_inflight){
+    is(sInflight){
       when(memGrant.fire){
-        uState := s_wait_return
+        uState := sWaitReturn
       }
     }
-    is(s_wait_return){
+    is(sWaitReturn){
       when(resp.fire){
         uState := sIdle
       }
