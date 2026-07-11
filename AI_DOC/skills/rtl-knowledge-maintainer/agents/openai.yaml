@@ -1,0 +1,4 @@
+interface:
+  display_name: "RTL Knowledge Maintainer"
+  short_description: "按 RTL 版本维护 agent 与 flow 知识库"
+  default_prompt: "Use $rtl-knowledge-maintainer to analyze this RTL or Scala question and update the versioned project knowledge base."
