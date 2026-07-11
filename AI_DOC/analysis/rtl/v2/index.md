@@ -10,10 +10,10 @@
 
 ## Flow 文档
 
-当前暂无按新规则建立的 V2 内部 flow 长期知识文档。
-
 | Flow 文档 | 关键词 | 覆盖模块 | 入口信号/函数 | 关联 Agent/Flow |
 |---|---|---|---|---|
+| [Memory flushPipe flow](flows/memory_flush_pipe_flow.md) | `flushPipe`、SFENCE、HFENCE、CBO、CMO、`flushAfter`、`s3_flushPipe` | Decode、Fence FU、MemBlock、LoadUnit、StoreUnit、StoreQueue、ExceptionGen、ROB、TLB | Decode `flushPipe`、`deqCanDoCbo`、`mmioStout` | mem_ut sfence flow、memory trigger flow |
+| [Memory trigger flow](flows/memory_trigger_flow.md) | `trigger`、`TriggerAction`、breakpoint、Debug Mode、`tdata`、`triggerCanRaiseBpExp` | NewCSR Debug、MemBlock、LoadUnit、StoreUnit、ExceptionGen、ROB | CSR `mem_trigger`、Load/Store S1 vaddr | memory flushPipe flow、V2 interface signal matrix |
 
 ## 维护规则
 
