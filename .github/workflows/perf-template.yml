@@ -52,6 +52,11 @@ on:
         description: JSON file path for SPEC checkpoints. Ignore this unless benchmark_type is set to custom
         required: false
         type: string
+      run_topdown:
+        description: Run TopDown post-analysis after SPEC finishes
+        required: false
+        type: string
+        default: "false"
       perf_report_dir:
         description: Directory for all spec reports
         required: true
@@ -291,6 +296,51 @@ jobs:
             --report \
             > "$SCORE_FILE"
 
+      - name: Run TopDown analysis
+        if: ${{ !cancelled() && inputs.run_topdown == 'true' }}
+        run: |
+          TOPDOWN_OUT="$SPEC_DIR/xs-perf-workflow/topdown"
+          TOPDOWN_PYTHON="/nfs/home/share/xs-perf-workflow/xs-perf-workflow-venv/bin/python"
+
+          if [ ! -f "$TOPDOWN_PYTHON" ] || [ ! -x "$TOPDOWN_PYTHON" ]; then
+            mkdir -p "$TOPDOWN_OUT"
+            TOPDOWN_STATUS="FAILED: missing TopDown Python virtualenv: $TOPDOWN_PYTHON"
+            printf '%s\n' "$TOPDOWN_STATUS" | tee "$TOPDOWN_OUT/topdown_status.txt"
+            {
+              printf 'Output: `%s`\n\n' "$TOPDOWN_OUT"
+              printf 'Python executable: `%s`\n' "$TOPDOWN_PYTHON"
+            } > "$TOPDOWN_OUT/topdown.md"
+            exit 0
+          fi
+
+          echo "Using TopDown Python: $TOPDOWN_PYTHON"
+          set +e
+          "$TOPDOWN_PYTHON" "$GITHUB_WORKSPACE/.github/scripts/perf_topdown_ci.py" \
+            --stat-dir "$SPEC_DIR" \
+            --cluster-json "$CKPT_JSON_PATH" \
+            --xiangshan-root "$GITHUB_WORKSPACE" \
+            --benchmark-type "${{ inputs.benchmark_type }}" \
+            --output "$TOPDOWN_OUT"
+          TOPDOWN_RC=$?
+          set -e
+          if [ "$TOPDOWN_RC" -ne 0 ] && [ ! -f "$TOPDOWN_OUT/topdown_status.txt" ]; then
+            mkdir -p "$TOPDOWN_OUT"
+            TOPDOWN_STATUS="FAILED: TopDown wrapper launch failed with exit code $TOPDOWN_RC"
+            printf '%s\n' "$TOPDOWN_STATUS" | tee "$TOPDOWN_OUT/topdown_status.txt"
+            {
+              printf 'Output: `%s`\n\n' "$TOPDOWN_OUT"
+              printf 'Python executable: `%s`\n' "$TOPDOWN_PYTHON"
+            } > "$TOPDOWN_OUT/topdown.md"
+          fi
+          if [ -f "$TOPDOWN_OUT/topdown_status.txt" ]; then
+            echo "TopDown status:"
+            cat "$TOPDOWN_OUT/topdown_status.txt"
+          fi
+          if [ "$TOPDOWN_RC" -ne 0 ]; then
+            echo "TopDown wrapper exited with code $TOPDOWN_RC; preserving SPEC result per optional post-analysis contract."
+          fi
+          exit 0
+
       - name: Summary result
         if: always()
         run: |
@@ -309,3 +359,15 @@ jobs:
           echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY
+
+          if [ -f "$SPEC_DIR/xs-perf-workflow/topdown/topdown_status.txt" ] || [ -f "$SPEC_DIR/xs-perf-workflow/topdown/topdown.md" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### TopDown Analysis" >> $GITHUB_STEP_SUMMARY
+            if [ -f "$SPEC_DIR/xs-perf-workflow/topdown/topdown_status.txt" ]; then
+              cat "$SPEC_DIR/xs-perf-workflow/topdown/topdown_status.txt" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+            fi
+            if [ -f "$SPEC_DIR/xs-perf-workflow/topdown/topdown.md" ]; then
+              cat "$SPEC_DIR/xs-perf-workflow/topdown/topdown.md" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
