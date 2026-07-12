@@ -27,6 +27,7 @@ import utils._
 import xiangshan._
 import xiangshan.backend.BackendParams
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx}
+import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -42,6 +43,17 @@ import scala.collection.immutable.Nil
 
 
 object RobBundles extends HasCircularQueuePtrHelper {
+
+  class BasicDebugInfo(implicit p: Parameters) extends XSBundle {
+    val ldest = UInt(LogicRegsWidth.W)
+    val pdest = UInt(PhyRegIdxWidth.W)
+    val vd = UInt(LogicRegsWidth.W)
+    val fpWen = Bool()
+    val vecWen = Bool()
+    val v0Wen = Bool()
+    val eliminatedMove = Bool()
+    val isXSTrap = Bool()
+  }
 
   class RobEntryBundle(implicit p: Parameters) extends XSBundle {
 
@@ -80,8 +92,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
-    val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
+    val basicDebug = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
 
@@ -117,8 +128,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // debug_begin
     val debug_pc = OptionWrapper(backendParams.debugEn, UInt(VAddrBits.W))
     val debug_instr = OptionWrapper(backendParams.debugEn, UInt(32.W))
-    val debug_ldest = OptionWrapper(backendParams.basicDebugEn, UInt(LogicRegsWidth.W))
-    val debug_pdest = OptionWrapper(backendParams.basicDebugEn, UInt(PhyRegIdxWidth.W))
+    val basicDebug = OptionWrapper(backendParams.basicDebugEn, new BasicDebugInfo)
     val debug_otherPdest = OptionWrapper(backendParams.basicDebugEn, Vec(7, UInt(PhyRegIdxWidth.W)))
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     // debug_end
@@ -144,8 +154,16 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.traceBlockInPipe := robEnq.traceBlockInPipe
     robEntry.debug_pc.foreach(_ := robEnq.pc)
     robEntry.debug_instr.foreach(_ := robEnq.instr)
-    robEntry.debug_ldest.foreach(_ := robEnq.ldest)
-    robEntry.debug_pdest.foreach(_ := robEnq.pdest)
+    robEntry.basicDebug.foreach { debug =>
+      debug.ldest := robEnq.ldest
+      debug.pdest := robEnq.pdest
+      debug.vd := robEnq.instr.asTypeOf(new XSInstBitFields).VD
+      debug.fpWen := robEnq.fpWen
+      debug.vecWen := robEnq.vecWen
+      debug.v0Wen := robEnq.v0Wen
+      debug.eliminatedMove := robEnq.eliminatedMove
+      debug.isXSTrap := robEnq.isXSTrap
+    }
     robEntry.debug_fuType.foreach(_ := robEnq.fuType)
   }
 
@@ -176,8 +194,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.traceBlockInPipe := robEntry.traceBlockInPipe
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
     robCommitEntry.debug_instr.foreach(_ := robEntry.debug_instr.get)
-    robCommitEntry.debug_ldest.foreach(_ := robEntry.debug_ldest.get)
-    robCommitEntry.debug_pdest.foreach(_ := robEntry.debug_pdest.get)
+    robCommitEntry.basicDebug.foreach(_ := robEntry.basicDebug.get)
     robCommitEntry.debug_fuType.foreach(_ := robEntry.debug_fuType.get)
   }
 }
