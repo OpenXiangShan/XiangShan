@@ -806,7 +806,7 @@ class CtrlBlockImp(
   io.diff_vl_rat .foreach(_ := rename.io.diff_vl_rat.get)
 
   rob.io.debug_ls := io.robio.debug_ls
-  rob.io.debugHeadLsIssue := io.robio.robHeadLsIssue
+  rob.io.debugMemIssueFire.foreach(_ := io.robio.debugMemIssueFire.get)
   rob.io.lsTopdownInfo := io.robio.lsTopdownInfo
   rob.io.csr.criticalErrorState := io.robio.csr.criticalErrorState
   rob.io.debugEnqLsq := io.debugEnqLsq
@@ -834,24 +834,42 @@ class CtrlBlockImp(
 
   io.debugTopDown.fromRob := rob.io.debugTopDown.toCore
   io.debugRolling := rob.io.debugRolling
+
   // mem topdown reason collect
-  val notIssue = !rob.io.debugTopDown.toDispatch.robHeadLsIssue
   val tlbReplay = io.debugTopDown.fromCore.fromMem.robHeadTlbReplay
   val tlbMiss = io.debugTopDown.fromCore.fromMem.robHeadTlbMiss
   val vioReplay = io.debugTopDown.fromCore.fromMem.robHeadLoadVio
   val mshrReplay = io.debugTopDown.fromCore.fromMem.robHeadLoadMSHR
-  val l1Miss = io.debugTopDown.fromCore.fromMem.robHeadMissInDCache
-  val l2Miss = io.debugTopDown.fromCore.l2MissMatch
+  val uncacheReplay = io.debugTopDown.fromCore.fromMem.robHeadUncacheReplay
+  val forwardFailReplay = io.debugTopDown.fromCore.fromMem.robHeadForwardFailReplay
+  val dcacheMissReplay = io.debugTopDown.fromCore.fromMem.robHeadDCacheMissReplay
+  val bankConflictReplay = io.debugTopDown.fromCore.fromMem.robHeadBankConflictReplay
+  val nukeQueryReplay = io.debugTopDown.fromCore.fromMem.robHeadNukeQueryReplay
+  val classifiedReplay = tlbMiss || tlbReplay || mshrReplay || vioReplay || uncacheReplay ||
+                         forwardFailReplay || dcacheMissReplay || bankConflictReplay || nukeQueryReplay
+  val ldReplay = io.debugTopDown.fromCore.fromMem.robHeadLdReplay
+  val otherReplay = ldReplay && !classifiedReplay
+  
   val l3Miss = io.debugTopDown.fromCore.l3MissMatch
+  val l2Miss = io.debugTopDown.fromCore.l2MissMatch
+  val l1Miss = io.debugTopDown.fromCore.fromMem.robHeadMissInDCache
+  val notIssue = !rob.io.debugTopDown.toDispatch.robHeadLsIssued
+
   val ldReason = Mux(l3Miss, LoadMemStall.id.U,
     Mux(l2Miss, LoadL3Stall.id.U,
       Mux(l1Miss, LoadL2Stall.id.U,
         Mux(notIssue, MemNotReadyStall.id.U,
-          Mux(tlbMiss, LoadTLBStall.id.U,
-            Mux(tlbReplay, LoadTLBStall.id.U,
-              Mux(mshrReplay, LoadMSHRReplayStall.id.U,
-                Mux(vioReplay, LoadVioReplayStall.id.U,
-                  LoadL1Stall.id.U))))))))
+          Mux(uncacheReplay, LoadUncacheReplayStall.id.U,
+            Mux(vioReplay, LoadVioReplayStall.id.U,
+              Mux(tlbMiss || tlbReplay, LoadTLBStall.id.U,
+                Mux(forwardFailReplay, LoadForwardFailReplayStall.id.U,
+                  Mux(mshrReplay, LoadMSHRReplayStall.id.U,
+                    Mux(dcacheMissReplay, LoadDCacheMissReplayStall.id.U,
+                      Mux(bankConflictReplay, LoadBankConflictReplayStall.id.U,
+                        Mux(nukeQueryReplay, LoadNukeQueryReplayStall.id.U,
+                          Mux(otherReplay, LoadOtherReplayStall.id.U,
+                              LoadL1Stall.id.U)))))))))))))
+  
   dispatch.io.debugLoadReason.foreach(_ := ldReason)
   dispatch.io.debugRobTrueCommit.foreach(_ := rob.io.debugTopDown.toDispatch.robTrueCommit)
   rename.io.debugLoadReason.foreach(_ := ldReason)
@@ -964,7 +982,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val lsq = new RobLsqIO
     val lsTopdownInfo = Vec(params.LduCnt + params.HyuCnt, Input(new LsTopdownInfo))
     val debug_ls = Input(new DebugLSIO())
-    val robHeadLsIssue = Input(Bool())
+    val debugMemIssueFire = Option.when(backendParams.debugEn)(Vec(params.memIssuePortNum, Flipped(ValidIO(new RobPtr()))))
     val robDeqPtr = Output(new RobPtr)
     val commitVType = new Bundle {
       val vtype = Output(ValidIO(VType()))

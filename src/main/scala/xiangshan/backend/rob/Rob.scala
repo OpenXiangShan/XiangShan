@@ -127,7 +127,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val debugIQDeqRobIdxVec = Option.when(backendParams.debugEn)(Vec(IssueQueueDeqSum, Flipped(ValidIO(new RobPtr()))))
     val debugRobHeadStall = Option.when(backendParams.debugEn)(Output(Bool()))
     val debugEnqLsq = Input(new LsqEnqIO)
-    val debugHeadLsIssue = Input(Bool())
+    val debugMemIssueFire = Option.when(backendParams.debugEn)(Vec(params.memIssuePortNum, Flipped(ValidIO(new RobPtr()))))
     val lsTopdownInfo = Vec(LduCnt + HyuCnt, Input(new LsTopdownInfo))
     val debugTopDown = new Bundle {
       val toCore = new RobCoreTopDownIO
@@ -322,8 +322,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     snapshotPtrVec(i) := snapshotPtrVec(0) + i.U
   }
   val snapshots = SnapshotGenerator(snapshotPtrVec, snptEnq, io.snpt.snptDeq, io.redirect.valid, io.snpt.flushVec)
-  val debug_lsIssue = WireDefault(debug_lsIssued)
-  debug_lsIssue(deqPtr.value) := io.debugHeadLsIssue
 
   /**
    * states of Rob
@@ -562,10 +560,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     }
   }
 
-  // lsIssue
-  when(io.debugHeadLsIssue) {
-    debug_lsIssued(deqPtr.value) := true.B
-  }
+  // Set load/store entry to issued when mem issue fire
+  io.debugMemIssueFire.foreach(_.foreach { v =>
+    when(v.valid) {
+      debug_lsIssued(v.bits.value) := true.B
+    }
+  })
 
   /**
    * Writeback (from execution units)
@@ -1431,7 +1431,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.debugTopDown.toCore.robHeadPaddr.valid := debug_lsTopdownInfo(deqPtr.value).s2.paddr_valid
   io.debugTopDown.toCore.robHeadPaddr.bits := debug_lsTopdownInfo(deqPtr.value).s2.paddr_bits
   io.debugTopDown.toDispatch.robTrueCommit := ifCommitReg(trueCommitCnt)
-  io.debugTopDown.toDispatch.robHeadLsIssue := debug_lsIssue(deqPtr.value)
+  io.debugTopDown.toDispatch.robHeadLsIssued := debug_lsIssued(deqPtr.value)
   io.debugTopDown.robHeadLqIdx.valid := debug_lqIdxValid(deqPtr.value)
   io.debugTopDown.robHeadLqIdx.bits := robEntries(deqPtr.value).debug_lqIdx.getOrElse(0.U.asTypeOf( new LqPtr))
 

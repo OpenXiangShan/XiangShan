@@ -281,7 +281,7 @@ class RobCoreTopDownIO(implicit p: Parameters) extends XSBundle {
 
 class RobDispatchTopDownIO extends Bundle {
   val robTrueCommit = Output(UInt(64.W))
-  val robHeadLsIssue = Output(Bool())
+  val robHeadLsIssued = Output(Bool())
 }
 
 class RobDebugRollingIO extends Bundle {

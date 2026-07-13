@@ -516,9 +516,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     ctrlBlock.io.memHyPcRead(i).offset := issueHya(i).bits.ftqOffset.get
   })
 
-  ctrlBlock.io.robio.robHeadLsIssue := issue.flatten.map(deq =>
-    deq.fire && deq.bits.robIdx === ctrlBlock.io.robio.robDeqPtr
-  ).reduce(_ || _)
+  ctrlBlock.io.robio.debugMemIssueFire.foreach { fires =>
+    issue.flatten.zip(fires).foreach { case (deq, v) =>
+      v.valid := deq.fire
+      v.bits := deq.bits.robIdx
+    }
+  }
   ctrlBlock.io.robio.debugIQDeqRobIdxVec.foreach(_ := intRegion.io.debugIQDeqRobIdxVec.get ++
     fpRegion.io.debugIQDeqRobIdxVec.get ++ vecRegion.io.debugIQDeqRobIdxVec.get)
 

@@ -899,16 +899,21 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val rob_head_dcache_miss     = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_DM)
   val rob_head_rar_nack        = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_RAR)
   val rob_head_raw_nack        = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_RAW)
-  val rob_head_other_replay    = lq_match && (rob_head_rar_nack || rob_head_raw_nack || rob_head_forward_fail)
+  val rob_head_uncache         = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_UNCACHE)
+  val rob_head_smf             = lq_match && cause(lq_match_idx)(LoadReplayCauses.C_SMF)
+  val rob_head_nuke_query      = rob_head_rar_nack || rob_head_raw_nack
 
-  val rob_head_vio_replay = rob_head_nuke || rob_head_mem_amb
-
+  io.debugTopDown.robHeadLdReplay := lq_match
   val rob_head_miss_in_dtlb = io.debugTopDown.robHeadMissInDTlb
   io.debugTopDown.robHeadTlbReplay := rob_head_tlb_miss && !rob_head_miss_in_dtlb
   io.debugTopDown.robHeadTlbMiss := rob_head_tlb_miss && rob_head_miss_in_dtlb
-  io.debugTopDown.robHeadLoadVio := rob_head_vio_replay
+  io.debugTopDown.robHeadLoadVio := rob_head_nuke || rob_head_mem_amb
   io.debugTopDown.robHeadLoadMSHR := rob_head_mshrfull_replay
-  io.debugTopDown.robHeadOtherReplay := rob_head_other_replay
+  io.debugTopDown.robHeadUncacheReplay := rob_head_uncache
+  io.debugTopDown.robHeadForwardFailReplay := rob_head_forward_fail
+  io.debugTopDown.robHeadDCacheMissReplay := rob_head_dcache_miss
+  io.debugTopDown.robHeadBankConflictReplay := rob_head_confilct_replay
+  io.debugTopDown.robHeadNukeQueryReplay := rob_head_nuke_query
   val perfValidCount = RegNext(PopCount(allocated))
 
   //  perf cnt

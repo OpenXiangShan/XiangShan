@@ -117,6 +117,10 @@ case class BackendParams(
   def CsrCnt = allSchdParams.map(_.CsrCnt).sum
   def IqCnt = allSchdParams.map(_.issueBlockParams.length).sum
 
+  def memIssuePortNum: Int =
+    intSchdParams.map(_.issueBlockParams.filter(_.isMemBlockIQ).map(_.numDeq).sum).getOrElse(0) +
+    vecSchdParams.map(_.issueBlockParams.filter(_.isMemBlockIQ).map(_.numDeq).sum).getOrElse(0)
+
   def numPcMemReadPort = allExuParams.filter(_.needPc).size
   def numTargetReadPort = allRealExuParams.count(x => x.needTarget)
 

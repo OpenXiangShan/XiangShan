@@ -251,6 +251,12 @@ class MemCoreTopDownIO extends Bundle {
   val robHeadTlbMiss = Output(Bool())
   val robHeadLoadVio = Output(Bool())
   val robHeadLoadMSHR = Output(Bool())
+  val robHeadLdReplay = Output(Bool())
+  val robHeadUncacheReplay = Output(Bool())
+  val robHeadForwardFailReplay = Output(Bool())
+  val robHeadDCacheMissReplay = Output(Bool())
+  val robHeadBankConflictReplay = Output(Bool())
+  val robHeadNukeQueryReplay = Output(Bool())
 }
 
 class fetch_to_mem(implicit p: Parameters) extends XSBundle{
@@ -1554,7 +1560,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.debugTopDown.toCore.robHeadTlbMiss := lsq.io.debugTopDown.robHeadTlbMiss
   io.debugTopDown.toCore.robHeadLoadVio := lsq.io.debugTopDown.robHeadLoadVio
   io.debugTopDown.toCore.robHeadLoadMSHR := lsq.io.debugTopDown.robHeadLoadMSHR
-  dcache.io.debugTopDown.robHeadOtherReplay := lsq.io.debugTopDown.robHeadOtherReplay
+  io.debugTopDown.toCore.robHeadLdReplay := lsq.io.debugTopDown.robHeadLdReplay
+  io.debugTopDown.toCore.robHeadUncacheReplay := lsq.io.debugTopDown.robHeadUncacheReplay
+  io.debugTopDown.toCore.robHeadForwardFailReplay := lsq.io.debugTopDown.robHeadForwardFailReplay
+  io.debugTopDown.toCore.robHeadDCacheMissReplay := lsq.io.debugTopDown.robHeadDCacheMissReplay
+  io.debugTopDown.toCore.robHeadBankConflictReplay := lsq.io.debugTopDown.robHeadBankConflictReplay
+  io.debugTopDown.toCore.robHeadNukeQueryReplay := lsq.io.debugTopDown.robHeadNukeQueryReplay
   dcache.io.debugRolling := io.debugRolling
 
   lsq.io.noUopsIssued := io.topDownInfo.toBackend.noUopsIssued

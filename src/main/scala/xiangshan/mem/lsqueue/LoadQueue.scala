@@ -148,8 +148,13 @@ class LoadQueueTopDownIO(implicit p: Parameters) extends XSBundle {
   val robHeadTlbMiss = Output(Bool())
   val robHeadLoadVio = Output(Bool())
   val robHeadLoadMSHR = Output(Bool())
+  val robHeadLdReplay = Output(Bool())
+  val robHeadUncacheReplay = Output(Bool())
+  val robHeadForwardFailReplay = Output(Bool())
+  val robHeadDCacheMissReplay = Output(Bool())
+  val robHeadBankConflictReplay = Output(Bool())
+  val robHeadNukeQueryReplay = Output(Bool())
   val robHeadMissInDTlb = Input(Bool())
-  val robHeadOtherReplay = Output(Bool())
 }
 
 class LoadQueue(implicit p: Parameters) extends XSModule

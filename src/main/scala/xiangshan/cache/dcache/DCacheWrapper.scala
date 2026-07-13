@@ -816,7 +816,6 @@ class DCacheToLsuIO(implicit p: Parameters) extends DCacheBundle {
 class DCacheTopDownIO(implicit p: Parameters) extends DCacheBundle {
   val robHeadVaddr = Flipped(Valid(UInt(VAddrBits.W)))
   val robHeadMissInDCache = Output(Bool())
-  val robHeadOtherReplay = Input(Bool())
 }
 
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {

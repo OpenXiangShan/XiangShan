@@ -1233,6 +1233,12 @@ package object xiangshan {
     // xs replay (different to gem5)
     val LoadVioReplayStall = Value("LoadVioReplayStall")
     val LoadMSHRReplayStall = Value("LoadMSHRReplayStall")
+    val LoadUncacheReplayStall = Value("LoadUncacheReplayStall")
+    val LoadForwardFailReplayStall = Value("LoadForwardFailReplayStall")
+    val LoadDCacheMissReplayStall = Value("LoadDCacheMissReplayStall")
+    val LoadBankConflictReplayStall = Value("LoadBankConflictReplayStall")
+    val LoadNukeQueryReplayStall = Value("LoadNukeQueryReplayStall")
+    val LoadOtherReplayStall = Value("LoadOtherReplayStall")
 
     // bad speculation
     val ControlRedirectStall = Value("ControlRedirectStall")
