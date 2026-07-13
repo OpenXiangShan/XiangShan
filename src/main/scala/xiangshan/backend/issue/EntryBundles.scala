@@ -201,6 +201,8 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val perfOg0Cancel         = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Bool())))
     val perfWakeupByWB        = Output(Vec(params.numRegSrc, Bool()))
     val perfWakeupByIQ        = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
+    val perfSrc2LastReadyByFma    = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
+    val perfSrc2LastReadyByNonFma = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
     val earlyFmaSrc2          = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
     val earlyFmaSource        = Option.when(params.needEarlyFmaWakeup)(Output(UInt(backendParams.numExu.W)))
     val earlyFmaSrc2UseBypass = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
@@ -656,6 +658,30 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.entryOutDeqValid                        := validReg && (common.flushed || common.deqSuccess)
     commonOut.entryOutTransValid                      := validReg && commonIn.transSel && !(common.flushed || common.deqSuccess)
     commonOut.perfWakeupByWB                          := common.srcWakeupByWB.zip(status.srcStatus).map{ case (w, s) => w && SrcState.isBusy(s.srcState) && validReg }
+    if (params.needEarlyFmaWakeup) {
+      val src2LastReadyByFma = WireInit(false.B)
+      val src2LastReadyByNonFma = WireInit(false.B)
+      if (isComp && !isEnq) {
+        val src2LastReady = validReg &&
+          SrcState.isBusy(status.srcStatus(2).srcState) &&
+          SrcState.isReady(entryUpdate.status.srcStatus(2).srcState)
+        val src2WakeupByIQFma = hasIQWakeupGet.srcWakeupByIQ(2).zip(commonIn.wakeUpFromIQ).map {
+          case (wakeup, source) => wakeup && source.bits.isFmacWakeup
+        }.fold(false.B)(_ || _)
+        val src2WakeupByIQNonFma = hasIQWakeupGet.srcWakeupByIQ(2).zip(commonIn.wakeUpFromIQ).map {
+          case (wakeup, source) => wakeup && !source.bits.isFmacWakeup
+        }.fold(false.B)(_ || _)
+        val src2WakeupByEarlyFma = hasIQWakeupGet.earlyFmaSrc2Wakeup &&
+          !common.srcLoadTransCancelVec(2) &&
+          !common.srcLoadCancelVec(2)
+        val src2WakeupByFma = src2WakeupByEarlyFma || src2WakeupByIQFma
+        val src2WakeupByNonFma = common.srcWakeupByWB(2) || src2WakeupByIQNonFma
+        src2LastReadyByFma := src2LastReady && src2WakeupByFma
+        src2LastReadyByNonFma := src2LastReady && !src2WakeupByFma && src2WakeupByNonFma
+      }
+      commonOut.perfSrc2LastReadyByFma.get := src2LastReadyByFma
+      commonOut.perfSrc2LastReadyByNonFma.get := src2LastReadyByNonFma
+    }
     commonOut.earlyFmaSrc2.foreach(_                  := entryUpdate.status.earlyFmaSrc2.get)
     commonOut.earlyFmaSource.foreach(_                := entryUpdate.status.earlyFmaSource.get)
     commonOut.earlyFmaSrc2UseBypass.foreach(_         := entryUpdate.status.earlyFmaSrc2UseBypass.get)

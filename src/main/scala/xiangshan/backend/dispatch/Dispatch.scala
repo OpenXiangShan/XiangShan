@@ -989,6 +989,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents {
 
   XSPerfAccumulate("in_valid_count", PopCount(fromRename.map(_.valid)))
   XSPerfAccumulate("in_fire_count", PopCount(fromRename.map(_.fire)))
+  XSPerfAccumulate("dispatch_fma_fire_count", PopCount(fromRename.map(x =>
+    x.fire && FuType.isFmul(x.bits.fuType) && FuOpType.FMacOpcodes.isOP3(x.bits.fuOpType)
+  )))
   XSPerfAccumulate("in_valid_not_ready_count", PopCount(fromRename.map(x => x.valid && !x.ready)))
   XSPerfAccumulate("wait_cycle", !fromRename.head.valid && allResourceReady)
   XSPerfAccumulate("stall_cycle", dispatchBlock)

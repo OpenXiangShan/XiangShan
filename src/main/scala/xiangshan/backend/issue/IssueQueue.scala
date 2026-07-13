@@ -948,6 +948,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
         wakeup.bits.rcDest.foreach(_ := io.replaceRCIdx.get(i))
         wakeup.bits.loadDependency.foreach(_ := 0.U) // this is correct for load only
         wakeup.bits.is0Lat := 0.U
+        wakeup.bits.isFmacWakeup := false.B
         wakeup.bits.rfWenCopy.foreach(_.foreach(_  := (param.writeIntRf).B && RegNext(loadWakeUp.bits.rfWen && loadWakeUp.valid)))
         wakeup.bits.fpWenCopy.foreach(_.foreach(_  := (param.writeFpRf ).B && RegNext(loadWakeUp.bits.fpWen && loadWakeUp.valid)))
         wakeup.bits.vecWenCopy.foreach(_.foreach(_ := (param.writeVecRf).B && RegNext(loadWakeUp.bits.vecWen && loadWakeUp.valid)))

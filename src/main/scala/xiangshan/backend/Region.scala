@@ -657,6 +657,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           isFmac
         earlyFmaWakeups(fpExuFlatIdx).bits := 0.U.asTypeOf(earlyFmaWakeups(fpExuFlatIdx).bits)
         earlyFmaWakeups(fpExuFlatIdx).bits.fpWen := true.B
+        earlyFmaWakeups(fpExuFlatIdx).bits.isFmacWakeup := true.B
         earlyFmaWakeups(fpExuFlatIdx).bits.pdest := fpExuIn.bits.toRF.pdest
         val pipeToExu = Wire(chiselTypeOf(fpExuIn))
         pipeToExu.valid := fpExuIn.valid && !isFaluOp
