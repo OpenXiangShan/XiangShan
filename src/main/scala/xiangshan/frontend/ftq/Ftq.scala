@@ -93,13 +93,10 @@ class Ftq(implicit p: Parameters) extends FtqModule
   private val bpuPtr    = RegInit(FtqPtrVec())
   private val pfPtr     = RegInit(FtqPtrVec(2))
   private val fetchPtr  = RegInit(FtqPtrVec(3))
-  private val ifuWbPtr  = RegInit(FtqPtrVec())
   private val commitPtr = RegInit(FtqPtrVec(2))
 
   XSError(bpuPtr < fetchPtr && !isFull(bpuPtr(0), fetchPtr(0)), "fetchPtr runs ahead of bpuPtr")
-  // TODO: Reconsider this
 //  XSError(bpuPtr < pfPtr && !isFull(bpuPtr(0), pfPtr(0)), "pfPtr runs ahead of bpuPtr")
-//  XSError(ifuWbPtr < commitPtr && !isFull(ifuWbPtr(0), commitPtr(0)), "ifuWbPtr runs ahead of commitPtr")
 
   // entryQueue stores predictions made by BPU.
   private val entryQueue = Reg(Vec(FtqSize, new FtqEntry))
@@ -138,20 +135,20 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   private val redirect = Mux(backendRedirect.valid, backendRedirect, ifuRedirect)
 
-  // Instruction page fault and instruction access fault are sent from backend with redirect requests.
-  // When IPF and IAF are sent, backendPcFaultIfuPtr points to the FTQ entry whose first instruction
-  // raises IPF or IAF, which is ifuWbPtr_write or IfuPtr_write.
-  // Only when IFU has written back that FTQ entry can backendIpf and backendIaf be false because this
-  // makes sure that IAF and IPF are correctly raised instead of being flushed by redirect requests.
+  // Instruction page fault, guest page fault, and access fault are checked by backend and sent with redirect requests.
   private val backendException    = RegInit(ExceptionType.None)
   private val backendExceptionPtr = RegInit(FtqPtr(false.B, 0.U))
   when(backendRedirect.valid) {
     val exception = ExceptionType.fromBackend(backendRedirect.bits)
     backendException := exception
     when(exception.hasException) {
-      backendExceptionPtr := ifuWbPtr(0)
+      backendExceptionPtr := backendRedirect.bits.newFtqIdx
     }
-  }.elsewhen(ifuWbPtr(0) =/= backendExceptionPtr) {
+  }.elsewhen(distanceBetween(fetchPtr(0), backendExceptionPtr) >= 3.U) {
+    // We cannot clear backendException flag too early (e.g. once fetch fire),
+    // bpu may do an override and the flag can be lost in such case.
+    // Here we use a magic number 3 (the length of ifu pipeline):
+    //   if fetchPtr is ahead 3 fetch blocks, the marked block should be in ibuffer and cannot be flushed by bpu.
     backendException := ExceptionType.None
   }
 
@@ -331,13 +328,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   io.toICache.redirectFlush := redirect.valid
   when(redirect.valid) {
-    val newEntryPtr = Mux(
-      RedirectLevel.flushItself(redirect.bits.level) &&
-        (redirect.bits.ftqOffset === 0.U || redirect.bits.ftqOffset === 1.U && !redirect.bits.isRVC),
-      redirect.bits.ftqIdx,
-      redirect.bits.ftqIdx + 1.U
-    )
-    Seq(bpuPtr, pfPtr, fetchPtr).foreach(_ := newEntryPtr)
+    val newFtqIdx = redirect.bits.newFtqIdx // redirect.newFtqIdx is a def, make it a val here to prevent dup logic
+    Seq(bpuPtr, pfPtr, fetchPtr).foreach(_ := newFtqIdx)
   }
 
   io.toIfu.redirect.valid := backendRedirect.valid
