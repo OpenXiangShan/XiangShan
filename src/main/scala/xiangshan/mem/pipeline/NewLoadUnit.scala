@@ -600,8 +600,8 @@ class LoadUnitS1(param: ExeUnitParams)(
   
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
 
-  val kill = !pipeIn.valid || io.kill || isSwInstrPrefetch ||
-             robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) || 
+  val kill = !pipeIn.valid || io.kill ||
+             robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) ||
              (robIdx.needFlush(redirectNextNext) && isUnalignTail)
 
   /**
