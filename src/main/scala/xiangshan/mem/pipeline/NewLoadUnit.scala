@@ -590,7 +590,7 @@ class LoadUnitS1(param: ExeUnitParams)(
 
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
 
-  val kill = !pipeIn.valid || io.kill || isSwInstrPrefetch ||
+  val kill = !pipeIn.valid || io.kill ||
              robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) ||
              (robIdx.needFlush(redirectNextNext) && isUnalignTail)
 
@@ -1547,12 +1547,12 @@ class LoadUnitS3(param: ExeUnitParams)(
   // Writeback to LQ
   val lqWriteValid = pipeIn.valid && !doFastReplay && endPipe
   val lqWriteReady = io.lqWrite.ready
-  
+
   val useS4HeadReplay = s4HeadValid && s4HeadShouldReplay
   val lqWriteCause = Mux(useS4HeadReplay, s4HeadReplayCause, cause)
   val lqWriteTlbId = Mux(useS4HeadReplay, s4Head.tlbId.get, in.tlbId.get)
   val lqWriteTlbFull = Mux(useS4HeadReplay, s4Head.tlbFull.get, in.tlbFull.get)
-  
+
   val lqWriteNeedReplay = useS4HeadReplay || causeOrR
   val lqWriteCauseOH = PriorityEncoderOH(lqWriteCause)
   val lqWrite = Wire(new LqWriteBundle)
