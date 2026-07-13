@@ -30,7 +30,7 @@ class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParame
   for (i <- 0 until LoadPipelineWidth) {
     val ram = DifftestMem(64L * 1024 * 1024 * 1024, 8)
     val ren = RegNext(io.lsu.load(i).req.valid)
-    val raddr = ((io.lsu.load(i).s1_paddr_dup_dcache - "h80000000".U) >> 3).asUInt
+    val raddr = ((io.lsu.load(i).s1_paddr - "h80000000".U) >> 3).asUInt
 
     io.lsu.load(i).req.ready := true.B
     io.lsu.load(i).resp.valid := RegNext(ren && !io.lsu.load(i).s1_kill)

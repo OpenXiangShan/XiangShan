@@ -199,29 +199,6 @@ trait HasDCacheParameters
   val HighConfHWPFLoadPort = LoadPipelineWidth - 1 // use the last load port by default
   val IgnorePrefetchConfidence = false
 
-  // parameters about duplicating regs to solve fanout
-  // In Main Pipe:
-    // tag_write.ready -> data_write.valid * 8 banks
-    // tag_write.ready -> meta_write.valid
-    // tag_write.ready -> tag_write.valid
-    // tag_write.ready -> err_write.valid
-    // tag_write.ready -> wb.valid
-  val nDupTagWriteReady = DCacheBanks + 4
-  // In Main Pipe:
-    // data_write.ready -> data_write.valid * 8 banks
-    // data_write.ready -> meta_write.valid
-    // data_write.ready -> tag_write.valid
-    // data_write.ready -> err_write.valid
-    // data_write.ready -> wb.valid
-  val nDupDataWriteReady = DCacheBanks + 4
-  val nDupWbReady = DCacheBanks + 4
-  val nDupStatus = nDupTagWriteReady + nDupDataWriteReady
-  val dataWritePort = 0
-  val metaWritePort = DCacheBanks
-  val tagWritePort = metaWritePort + 1
-  val errWritePort = tagWritePort + 1
-  val wbPort = errWritePort + 1
-
   def set_to_dcache_div(set: UInt) = {
     require(set.getWidth >= DCacheSetBits)
     if (DCacheSetDivBits == 0) 0.U else set(DCacheSetDivBits-1, 0)
@@ -395,7 +372,6 @@ class DCacheWordReq(implicit p: Parameters) extends DCacheBundle
     */
   val cmd    = UInt(M_SZ.W)
   val vaddr  = UInt(VAddrBits.W)
-  val vaddr_dup = UInt(VAddrBits.W)
   val data   = UInt(VLEN.W)
   val mask   = UInt((VLEN/8).W)
   val id     = UInt(reqIdWidth.W)
@@ -657,11 +633,10 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   // cycle 0: prefetch source bits
   val pf_source = Output(UInt(L1PfSourceBits.W))
   // cycle0: load microop
- // val s0_uop = Output(new MicroOp)
+  // val s0_uop = Output(new MicroOp)
   // cycle 0: virtual address: req.addr
   // cycle 1: physical address: s1_paddr
-  val s1_paddr_dup_lsu = Output(UInt(PAddrBits.W)) // lsu side paddr
-  val s1_paddr_dup_dcache = Output(UInt(PAddrBits.W)) // dcache side paddr
+  val s1_paddr = Output(UInt(PAddrBits.W))
   val s1_disable_fast_wakeup = Input(Bool())
   // cycle 2: hit signal
   val s2_hit = Input(Bool()) // hit signal for lsu,
@@ -1275,16 +1250,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   bankedDataArray.io.write <> dataWriteArb.io.out
 
-  for (bank <- 0 until DCacheBanks) {
-    val dataWriteArb_dup = Module(new Arbiter(new L1BankedDataWriteReqCtrl, 1))
-    // dataWriteArb_dup.io.in(0).valid := refillPipe.io.data_write_dup(bank).valid
-    // dataWriteArb_dup.io.in(0).bits := refillPipe.io.data_write_dup(bank).bits
-    dataWriteArb_dup.io.in(0).valid := mainPipe.io.data_write_dup(bank).valid
-    dataWriteArb_dup.io.in(0).bits := mainPipe.io.data_write_dup(bank).bits
-
-    bankedDataArray.io.write_dup(bank) <> dataWriteArb_dup.io.out
-  }
-
   bankedDataArray.io.readline <> mainPipe.io.data_readline
   bankedDataArray.io.readline_can_go := mainPipe.io.data_readline_can_go
   bankedDataArray.io.readline_stall := mainPipe.io.data_readline_stall
@@ -1574,10 +1539,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val mpStatus = mainPipe.io.status
   mainPipe.io.refill_req <> missQueue.io.main_pipe_req
 
-  mainPipe.io.data_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
-  mainPipe.io.tag_write_ready_dup := VecInit(Seq.fill(nDupDataWriteReady)(true.B))
-  mainPipe.io.wb_ready_dup := wb.io.req_ready_dup
-
   //----------------------------------------
   // wb
   // add a queue between MainPipe and WritebackUnit to reduce MainPipe stalls due to WritebackUnit busy
@@ -1702,7 +1663,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   //   case (a, u) =>
   //     a.valid := RegNext(u.io.lsu.req.fire) && !u.io.lsu.s1_kill
   //     a.bits.idx := RegEnable(get_idx(u.io.lsu.req.bits.vaddr), u.io.lsu.req.fire)
-  //     a.bits.tag := get_tag(u.io.lsu.s1_paddr_dup_dcache)
+  //     a.bits.tag := get_tag(u.io.lsu.s1_paddr)
   // }
   // st_access.valid := RegNext(mainPipe.io.store_req.fire)
   // st_access.bits.idx := RegEnable(get_idx(mainPipe.io.store_req.bits.vaddr), mainPipe.io.store_req.fire)

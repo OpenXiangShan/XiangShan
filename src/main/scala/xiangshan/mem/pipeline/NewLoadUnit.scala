@@ -439,7 +439,6 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.dcacheReq.valid := dcacheReqValid && !noDCacheAccess
   io.dcacheReq.bits.cmd := Mux(isPrefetch, MemoryOpConstants.M_PFR, MemoryOpConstants.M_XRD)
   io.dcacheReq.bits.vaddr := dcacheVAddr
-  io.dcacheReq.bits.vaddr_dup := dcacheVAddr
   io.dcacheReq.bits.data := DontCare
   io.dcacheReq.bits.mask := sink.bits.mask
   io.dcacheReq.bits.id := DontCare
@@ -1902,8 +1901,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s1.io.tlbResp <> io.tlb.resp
   io.tlb.req_kill := s1.io.tlbReqKill
   io.tlb.req.bits.pmp_addr := s1.io.tlbPAddr // TODO
-  io.dcache.s1_paddr_dup_lsu := s1.io.dcachePAddr
-  io.dcache.s1_paddr_dup_dcache := s1.io.dcachePAddr
+  io.dcache.s1_paddr := s1.io.dcachePAddr
   io.dcache.s1_kill := s1.io.dcacheKill
   io.sqForward.s1Req := s1.io.storeForwardReq
   io.sqForward.s1Kill := s1.io.sqForwardKill
