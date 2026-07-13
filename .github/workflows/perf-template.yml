@@ -105,7 +105,7 @@ jobs:
       - name: Set env
         id: set_env
         run: |
-          SHORT_SHA=$(git rev-parse --short HEAD)
+          SHORT_SHA=$(git rev-parse --short=9 HEAD)
           DATE=$(git show -s --format=%cd --date=format:%y%m%d HEAD)
           echo "SCRIPTS_HOME=/nfs/home/share/ci-workloads/env-scripts" >> $GITHUB_ENV
           echo "SHORT_SHA=${SHORT_SHA}" >> $GITHUB_OUTPUT
