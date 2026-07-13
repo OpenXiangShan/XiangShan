@@ -90,7 +90,8 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   io.pf_ctrl(0) := StreamMonitor.io.pf_ctrl
   io.pf_ctrl(1) := StrideMonitor.io.pf_ctrl
 
-  // ldu 0, 1, 2 can only have one prefetch request at a time
+  // LDU 0, 1, 2 can only have one prefetch request at a time.  This aggregate
+  // is source-agnostic, so requests tagged L1_HW_PREFETCH_MDP are included.
   val total_prefetch = io.loadinfo.map(t => t.total_prefetch).reduce(_ || _) || io.maininfo.total_prefetch
   val nack_prefetch_raw = io.loadinfo.map(t => t.nack_prefetch).reduce(_ || _) || io.maininfo.nack_prefetch
   val pf_late_in_cache = io.loadinfo.map(t => t.pf_late_in_cache).reduce(_ || _) || io.maininfo.pf_late_in_cache
@@ -109,6 +110,7 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   val pollution = PopCount(io.loadinfo.map(t => t.pollution))
   
   XSPerfAccumulate("l1DemandMiss", demand_miss_in_ldu)
+  // Overall L1 prefetch statistics, including MDP as well as existing sources.
   XSPerfAccumulate("l1prefetchSent", total_prefetch)
   XSPerfAccumulate("l1prefetchHit", hit_pf)
   XSPerfAccumulate("l1prefetchHitInCache", hit_pf_in_cache)
@@ -345,4 +347,3 @@ class BertiMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceP
   override val name: String = "Berti"
   override def isMyType(value: UInt) = value === L1_HW_PREFETCH_BERTI
 }
-

@@ -92,9 +92,18 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val fromOOO = Flipped(new OOOToPrefetchIO)
     // train
     val trainSource = Flipped(new TrainSourceIO)
+    // MDP-only inputs from LDUs and DCache.  train0/trigger retain one lane per
+    // LDU; pending is the single completed-MSHR stream from DCache.
+    val mdpTrain0 = Flipped(Vec(LD_TRAIN_WIDTH, ValidIO(new MdpTrainReqBundle)))
+    val mdpTrigger = Flipped(Vec(LD_TRAIN_WIDTH, ValidIO(new MdpTriggerReqBundle)))
+    val mdpPfHint = Vec(LD_TRAIN_WIDTH, ValidIO(new MdpL1PfHintBundle))
+    val mdpPending = Flipped(ValidIO(new MdpPendingReqBundle))
     // tlb
     val tlb_req = Vec(prefetcherNum, new TlbRequestIO(nRespDups = 2))
     val pmp_resp = Vec(prefetcherNum, Flipped(new PMPRespBundle()))
+    // Dedicated MDP translation/protection path to MemBlock.
+    val mdpTlbReq = new TlbRequestIO(nRespDups = 2)
+    val mdpPmpResp = Flipped(new PMPRespBundle)
     // prefetch req sender
     val l1_pf_to_l1 = DecoupledIO(new L1PrefetchReq())
     val l1_pf_to_l2 = Output(new xscache.coupledL2.PrefetchRecv())
@@ -119,7 +128,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     RegEnable(s2_storePcVec(i), io.trainSource.s2_storeFireHint(i))
   }
   /* prefetch arbiter */
-  val l1_pf_arb = Module(new Arbiter(new L1PrefetchReq, prefetcherNum))
+  // MDP is not part of prefetcherSeq, so append one explicit L1-only input.
+  val MdpArbIdx = prefetcherNum
+  val l1_pf_arb = Module(new Arbiter(new L1PrefetchReq, prefetcherNum + 1))
   val l2_pf_req = Wire(Decoupled(new L2PrefetchReq()))
   val l2_pf_arb = Module(new Arbiter(new L2PrefetchReq, prefetcherNum))
   val l3_pf_req = Wire(Decoupled(new L3PrefetchReq()))
@@ -144,6 +155,47 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     x.valid := false.B
     x.bits := DontCare
   }
+
+  // MDP integration is independent of existing prefetchers: train0 has a
+  // private filter, train1 taps the existing S3 load train without consuming
+  // it, and trigger remains parallel for one-to-one hint return.
+  val enableMDP = Constantin.createRecord(s"pf_enableMDP$hartId", initValue = true) && l1D_pf_enable
+  val mdpTrain0Filter = Module(new MdpTrainFilter(12))
+  val mdpTrain1Filter = Module(new TrainFilter(6, "mdp"))
+  val mdp = Module(new MemoryDependencePrefetcher)
+
+  for (i <- 0 until LD_TRAIN_WIDTH) {
+    mdpTrain0Filter.io.in(i).valid := io.mdpTrain0(i).valid && enableMDP
+    mdpTrain0Filter.io.in(i).bits := io.mdpTrain0(i).bits
+
+    val source = io.trainSource.s3_load(i)
+    mdpTrain1Filter.io.ldTrainOpt.get(i).valid := source.valid && source.bits.isFirstIssue &&
+      (source.bits.miss || isFromMDP(source.bits.metaSource)) && !source.bits.isHwPrefetch && enableMDP
+    mdpTrain1Filter.io.ldTrainOpt.get(i).bits := source.bits
+    mdpTrain1Filter.io.ldTrainOpt.get(i).bits.pc := Mux(
+      io.trainSource.s3_ptrChasing(i),
+      s2_loadPcVec(i),
+      s3_loadPcVec(i)
+    )
+
+    mdp.io.trigger(i).valid := io.mdpTrigger(i).valid && enableMDP
+    mdp.io.trigger(i).bits := io.mdpTrigger(i).bits
+  }
+  mdpTrain1Filter.io.enable := enableMDP
+  mdpTrain1Filter.io.flush := false.B
+  mdp.io.train0 <> mdpTrain0Filter.io.out
+  mdp.io.train1 <> mdpTrain1Filter.io.trainReq
+  mdp.io.pending.valid := io.mdpPending.valid && enableMDP
+  mdp.io.pending.bits := io.mdpPending.bits
+  // Return per-LDU hints and route translation to the dedicated MemBlock port.
+  io.mdpPfHint := mdp.io.l1PfHint
+  io.mdpTlbReq <> mdp.io.tlbReq
+  mdp.io.pmpResp := io.mdpPmpResp
+  // MDP joins the common L1 arbiter/Pipeline.  Consequently MemBlock's
+  // prefetch_fire_l1 aggregate counter includes accepted MDP requests.
+  l1_pf_arb.io.in(MdpArbIdx).valid := mdp.io.l1PrefetchReq.valid && enableMDP
+  l1_pf_arb.io.in(MdpArbIdx).bits := mdp.io.l1PrefetchReq.bits
+  mdp.io.l1PrefetchReq.ready := l1_pf_arb.io.in(MdpArbIdx).ready && enableMDP
 
 
   /** Prefetchor
@@ -341,5 +393,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       XSPerfAccumulate(s"${pf.name}_block_l${level+1}", arb.io.in(idx).valid && !arb.io.in(idx).ready)
     }
   }
+  // MDP source-specific counters live beside the existing arbiter counters;
+  // the aggregate accepted count is prefetch_fire_l1 in MemBlock.scala.
+  XSPerfAccumulate("mdp_fire_l1", l1_pf_arb.io.in(MdpArbIdx).fire)
+  XSPerfAccumulate("mdp_block_l1", l1_pf_arb.io.in(MdpArbIdx).valid && !l1_pf_arb.io.in(MdpArbIdx).ready)
 
 }

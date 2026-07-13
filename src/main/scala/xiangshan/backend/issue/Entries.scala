@@ -420,6 +420,8 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   io.othersEntryEnqSelVec.foreach(_ := finalOthersTransSelVec.get.zip(enqEntryTransVec).map(x => x._1 & Fill(OthersEntryNum, x._2.valid)))
   io.robIdx.foreach(_               := robIdxVec)
   io.wakeupHitByIQ.foreach(_        := perfWakeupHitByIQVec.get)
+  // Export only src(0) load wakeups for the same-cycle MDP dependency bypass.
+  io.baseWakeupHitByIQ.foreach(_    := perfWakeupByIQVec.get.map(_(0)))
   io.enqDelayLoadWakeupHitByIQ.foreach(_ := perfEnqDelayLoadWakeupHitByIQVec.get)
   io.enqDelayLoadWakeupPCByIQ.foreach(_ := perfEnqDelayLoadWakeupPCByIQVec.get)
   io.entryInfo                      := entries
@@ -587,6 +589,8 @@ class EntriesIO(implicit p: Parameters, params: IssueBlockParams) extends XSBund
   val loadDependency      = Vec(params.numEntries, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
   val exuSources          = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numRegSrc, Output(ExuSource()))))
   val wakeupHitByIQ       = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numWakeupFromIQ, Output(Bool()))))
+  // Per-entry src(0) wakeup hits sent to IssueQueue's same-cycle deq path.
+  val baseWakeupHitByIQ   = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numWakeupFromIQ, Output(Bool()))))
   val enqDelayLoadWakeupHitByIQ = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numWakeupFromIQ, Output(Bool()))))
   val enqDelayLoadWakeupPCByIQ = OptionWrapper(params.hasIQWakeUp, Vec(params.numEntries, Vec(params.numWakeupFromIQ, Output(UInt(VAddrBits.W)))))
   val entryInfo           = Vec(params.numEntries, ValidIO(new EntryBundle(isDeq = true)))

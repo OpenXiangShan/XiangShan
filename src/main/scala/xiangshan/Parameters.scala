@@ -592,7 +592,7 @@ trait HasXSParameter {
   def prefetcherSeq = coreParams.prefetcher
   def prefetcherNum = max(prefetcherSeq.size, 1) //TODO lyq: 1 for simpler code generation, but it's also ugly
   def PfNumInDtlbLD = prefetcherSeq.count(_.tlbPlace == TLBPlace.dtlb_ld)
-  def PfNumInDtlbPF = prefetcherSeq.count(_.tlbPlace == TLBPlace.dtlb_pf) + 1 // 1 for l2 prefetch
+  def PfNumInDtlbPF = prefetcherSeq.count(_.tlbPlace == TLBPlace.dtlb_pf) + 2 // L2 prefetch and MDP
   def hasSMS = coreParams.prefetcher.exists(_.isInstanceOf[SMSParams])
   def hasBerti = coreParams.prefetcher.exists(_.isInstanceOf[BertiParams])
   def hasStreamStride = coreParams.prefetcher.exists(_.isInstanceOf[StreamStrideParams])

@@ -928,6 +928,14 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.id := s2_req.id
   miss_req.cancel := s2_grow_perm_fail
   miss_req.pc := 0.U // MainPipe requests (Store Buffer writeback) don't have a single corresponding PC
+  // MainPipe handles store/writeback traffic, not hinted scalar loads; drive
+  // every MDP field to a safe value before this request reaches MissQueue.
+  miss_req.pfHintMDP := false.B
+  miss_req.mdpImm := 0.U
+  miss_req.mdpVaddr := 0.U
+  miss_req.mdpPC := 0.U
+  miss_req.mdpLoadSize := 0.U
+  miss_req.mdpLoadUnsigned := false.B
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
   miss_req.isBtoT := s2_grow_perm
   miss_req.occupy_way := s2_tag_ecc_match_way

@@ -704,6 +704,12 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.rdcache.req.bits.mask          := mask
   io.rdcache.req.bits.data          := flowData
   io.rdcache.pf_source              := LOAD_SOURCE.U
+  // Vector segment reads share DCacheLoadIO but are not MDP-triggered scalar
+  // loads, so they must not carry stale MDP hint metadata.
+  io.rdcache.mdpPfHint              := false.B
+  io.rdcache.mdpImm                 := 0.U
+  io.rdcache.mdpLoadSize            := 0.U
+  io.rdcache.mdpLoadUnsigned        := false.B
   io.rdcache.req.bits.id            := DontCare
   io.rdcache.resp.ready             := true.B
   io.rdcache.s1_paddr_dup_lsu       := dcacheReqPaddr
@@ -1013,4 +1019,3 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.exceptionInfo.bits.isHyper       := false.B
   io.exceptionInfo.valid              := (state === s_finish) && instMicroOp.uop.exceptionVec.orR && !isEmpty(enqPtr, deqPtr)
 }
-

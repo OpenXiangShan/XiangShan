@@ -350,10 +350,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
         hitOH := 0.U.asTypeOf(hitOH)
       }
     }
-    val loadWakeupHitVec = VecInit(loadWakeupHitOHVec.map(_.asUInt.orR))
-    val loadWakeupHit = loadWakeupHitVec.asUInt.orR
-    val loadWakeupPC = if (params.hasIQWakeUp) {
-      Mux1H(loadWakeupHitOHVec.flatten, Seq.fill(params.numRegSrc)(commonIn.wakeUpFromIQ.map(_.bits.pc)).flatten)
+    // MDP forms the dependent address from src(0) + imm, so only a load
+    // wakeup of the base-address source is a valid dependence observation.
+    val loadBaseWakeupHitOH = if (params.hasIQWakeUp) loadWakeupHitOHVec.head else VecInit(Seq(false.B))
+    val loadBaseWakeupHit = loadBaseWakeupHitOH.asUInt.orR
+    val loadBaseWakeupPC = if (params.hasIQWakeUp) {
+      Mux1H(loadBaseWakeupHitOH, commonIn.wakeUpFromIQ.map(_.bits.pc))
     } else {
       0.U
     }
@@ -459,8 +461,9 @@ object EntryBundles extends HasCircularQueuePtrHelper {
                                                           (srcCancelByLoad || respIssueFail)                -> false.B,
                                                          ))
     entryUpdate.status.firstIssue                     := Mux(status.firstIssue && status.issueTimer === params.issueTimerMaxValue.U, !respIssueFail, status.firstIssue)
-    entryUpdate.status.wakedup                        := status.wakedup || (validReg && isLoadEntry && loadWakeupHit)
-    entryUpdate.status.wakedupPC                      := Mux(validReg && isLoadEntry && loadWakeupHit, loadWakeupPC, status.wakedupPC)
+    val firstLoadWakeup = validReg && isLoadEntry && loadBaseWakeupHit && !status.wakedup
+    entryUpdate.status.wakedup                        := status.wakedup || firstLoadWakeup
+    entryUpdate.status.wakedupPC                      := Mux(firstLoadWakeup, loadBaseWakeupPC, status.wakedupPC)
     val updateIssueTimer = Mux(status.issueTimer === params.issueTimerMaxValue.U, status.issueTimer, status.issueTimer + 1.U)
     entryUpdate.status.issueTimer                     := Mux(validReg && status.issued, updateIssueTimer, 0.U)
     entryUpdate.status.deqPortIdx                     := Mux(commonIn.deqSel, commonIn.deqPortIdxWrite, Mux(status.issued, status.deqPortIdx, 0.U))

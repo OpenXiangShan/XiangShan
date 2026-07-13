@@ -43,6 +43,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   override implicit val s: LoadStage = LoadS0()
 ) extends LoadUnitStage(param)
   with HasL1PrefetchSourceParameter
+  with HasMdpParameters
   with HasPerfEvents {
   val io = IO(new Bundle() {
     /**
@@ -82,6 +83,21 @@ class LoadUnitS0(param: ExeUnitParams)(
     // IQ wakeup
     val wakeup = ValidIO(new MemWakeUpBundle)
 
+    // MDP inputs from MemBlock: the fixed LDU identity and the hint returned by
+    // the matching parallel trigger port in PrefetcherWrapper.
+    val mdpLduId = Input(UInt(log2Up(backendParams.LduCnt).W))
+    val mdpPfHint = Flipped(ValidIO(new MdpL1PfHintBundle))
+    // MDP training outputs to PrefetcherWrapper: train0 reports an awakened
+    // dependent load; trigger reports this LDU's first demand-load issue.
+    val mdpTrain0 = ValidIO(new MdpTrainReqBundle)
+    val mdpTrigger = ValidIO(new MdpTriggerReqBundle)
+    // MDP sideband to this LDU's DCache LoadPipe.  On a miss the MSHR retains
+    // these fields until refill data is returned to MDP.
+    val mdpHint = Output(Bool())
+    val mdpImm = Output(UInt(MDP_IMM_BITS.W))
+    val mdpLoadSize = Output(UInt(2.W))
+    val mdpLoadUnsigned = Output(Bool())
+
     // Debug info
     val debugInfo = Output(new Bundle() {
       val pc = Output(UInt(VAddrBits.W))
@@ -111,9 +127,24 @@ class LoadUnitS0(param: ExeUnitParams)(
     val sqIdx = UInt(log2Up(StoreQueueSize).W)
   }
 
+  class MdpLduDBEntry extends XSBundle {
+    val timeCnt = UInt(64.W)
+    val eventType = UInt(2.W)
+    val pc = UInt(VAddrBits.W)
+    val wakedupPC = UInt(VAddrBits.W)
+    val vaddr = UInt(VAddrBits.W)
+    val imm = UInt(MDP_IMM_BITS.W)
+    val robIdx = UInt(log2Ceil(RobSize).W)
+    val lduId = UInt(log2Up(backendParams.LduCnt).W)
+  }
+
   val hartId = p(XSCoreParamsKey).HartId
-  val wakeupLUTable = ChiselDB.createTable(s"wakeupLU_${param.name}_hart$hartId", new WakeupLUDBEntry, basicDB = true)
-  val wakedupLUTable = ChiselDB.createTable(s"wakedupLU_${param.name}_hart$hartId", new WakedupLUDBEntry, basicDB = true)
+  // The wakeup profiling tables from the 2026-07-09 study are no longer used
+  // by MDP evaluation.  Keep their instrumentation source and counters, but
+  // make the ChiselDB tables non-basic so WITH_CHISELDB builds compile them out.
+  val wakeupLUTable = ChiselDB.createTable(s"wakeupLU_${param.name}_hart$hartId", new WakeupLUDBEntry, basicDB = false)
+  val wakedupLUTable = ChiselDB.createTable(s"wakedupLU_${param.name}_hart$hartId", new WakedupLUDBEntry, basicDB = false)
+  val mdpLduTable = ChiselDB.createTable(s"mdpLDU_${param.name}_hart$hartId", new MdpLduDBEntry, basicDB = true)
 
   /**
     * Request sources arbitration, in order of priority:
@@ -240,6 +271,9 @@ class LoadUnitS0(param: ExeUnitParams)(
     PrefetchCoh.read
   )
   scalarIssue.bits.uop := ldin.toDynInst()
+  // ExuInput.pc is already the complete instruction PC.  Keep that value in
+  // the DynInst so replay wakeups do not add ftqOffset a second time.
+  scalarIssue.bits.uop.pc := ldin.pc.getOrElse(0.U)
   scalarIssue.bits.vaddr := ldinVAddr
   scalarIssue.bits.fullva := ldinFullva
   scalarIssue.bits.size := ldinSize
@@ -418,6 +452,12 @@ class LoadUnitS0(param: ExeUnitParams)(
   val wakeupSource = ParallelPriorityMux(needWakeupValids, needWakeupSources.map(_.bits))
   val wakeup = Wire(new MemWakeUpBundle)
   connectSamePort(wakeup, wakeupSource.uop)
+  // ExuInput.pc already carries the complete PC read from the PC memory.  The
+  // DynInst conversion also applies ftqOffset for its other consumers, so use
+  // the original scalar-issue PC for the loadpipe wakeup observed by the IQ.
+  when(scalarIssue.fire) {
+    wakeup.pc := io.ldin.bits.pc.getOrElse(0.U)
+  }
 
   /**
     * Pipeline connect
@@ -476,6 +516,31 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.replacementUpdated := DontCare
   io.pfSource := Mux(isHwPrefetch, io.prefetchReq.bits.pf_source.value, L1_HW_PREFETCH_NULL)
 
+  // MDP trigger observes only the first request issued by the IQ.  Replays use
+  // the other S0 sources and must not generate another trigger for the load.
+  val mdpDemandLoad = scalarIssue.fire && !LSUOpType.isPrefetch(io.ldin.bits.fuOpType)
+  io.mdpTrigger.valid := mdpDemandLoad
+  io.mdpTrigger.bits.pc := io.ldin.bits.pc.getOrElse(0.U)
+  io.mdpTrigger.bits.vaddr := ldinVAddr
+  io.mdpTrigger.bits.lduId := io.mdpLduId
+
+  val mdpHintMatch = io.mdpPfHint.valid &&
+    io.mdpPfHint.bits.lduId === io.mdpLduId &&
+    io.mdpPfHint.bits.pc === io.ldin.bits.pc.getOrElse(0.U) &&
+    io.mdpPfHint.bits.vaddr === ldinVAddr
+  io.mdpHint := mdpDemandLoad && mdpHintMatch
+  io.mdpImm := Mux(io.mdpHint, io.mdpPfHint.bits.imm, 0.U)
+  io.mdpLoadSize := sink.bits.size
+  io.mdpLoadUnsigned := uop.fuOpType(2)
+
+  val mdpTrain0Valid = io.ldin.fire && io.ldin.bits.wakedup && FuType.isLoad(io.ldin.bits.fuType)
+  io.mdpTrain0.valid := mdpTrain0Valid
+  io.mdpTrain0.bits.wakedup := io.ldin.bits.wakedup
+  io.mdpTrain0.bits.wakedupPC := io.ldin.bits.wakedupPC
+  io.mdpTrain0.bits.pc := io.ldin.bits.pc.getOrElse(0.U)
+  io.mdpTrain0.bits.imm := io.ldin.bits.imm(MDP_IMM_BITS - 1, 0)
+  io.mdpTrain0.bits.robIdx := io.ldin.bits.robIdx
+
   io.sqSbForwardReq.valid := sink.valid
   io.sqSbForwardReq.bits := storeForwardReq
 
@@ -521,6 +586,29 @@ class LoadUnitS0(param: ExeUnitParams)(
   val wakedupLoadReqFire = io.ldin.fire && io.ldin.bits.wakedup && FuType.isLoadVload(io.ldin.bits.fuType)
   wakedupLUTable.log(wakedupLUEntry, wakedupLoadReqFire, param.name, clock, reset)
 
+  // MDP ChiselDB logging is kept beside the existing LoadUnit DB writers.
+  val mdpTrain0Log = Wire(new MdpLduDBEntry)
+  mdpTrain0Log := 0.U.asTypeOf(mdpTrain0Log)
+  mdpTrain0Log.timeCnt := GTimer()
+  mdpTrain0Log.eventType := 0.U
+  mdpTrain0Log.pc := io.mdpTrain0.bits.pc
+  mdpTrain0Log.wakedupPC := io.mdpTrain0.bits.wakedupPC
+  mdpTrain0Log.imm := io.mdpTrain0.bits.imm
+  mdpTrain0Log.robIdx := io.mdpTrain0.bits.robIdx.value
+  mdpTrain0Log.lduId := io.mdpLduId
+  mdpLduTable.log(mdpTrain0Log, io.mdpTrain0.valid, "train0", clock, reset)
+
+  val mdpTriggerLog = Wire(new MdpLduDBEntry)
+  mdpTriggerLog := 0.U.asTypeOf(mdpTriggerLog)
+  mdpTriggerLog.timeCnt := GTimer()
+  mdpTriggerLog.eventType := Mux(io.mdpHint, 2.U, 1.U)
+  mdpTriggerLog.pc := io.mdpTrigger.bits.pc
+  mdpTriggerLog.vaddr := io.mdpTrigger.bits.vaddr
+  mdpTriggerLog.imm := io.mdpPfHint.bits.imm
+  mdpTriggerLog.robIdx := uop.robIdx.value
+  mdpTriggerLog.lduId := io.mdpLduId
+  mdpLduTable.log(mdpTriggerLog, io.mdpTrigger.valid, "trigger", clock, reset)
+
   /**
     *  Perf counters
     */
@@ -543,6 +631,9 @@ class LoadUnitS0(param: ExeUnitParams)(
   XSPerfAccumulate("forward_tld_channel", io.replay.fire && io.replay.bits.forwardDChannel.get)
   XSPerfAccumulate("hardware_prefetch_fire", io.prefetchReq.fire)
   XSPerfAccumulate("software_prefetch_fire", io.ldin.fire && LSUOpType.isPrefetch(io.ldin.bits.fuOpType))
+  XSPerfAccumulate("mdp_train0_valid", io.mdpTrain0.valid)
+  XSPerfAccumulate("mdp_trigger_valid", io.mdpTrigger.valid)
+  XSPerfAccumulate("mdp_hint_valid", io.mdpHint)
   XSPerfAccumulate("hardware_prefetch_block", io.prefetchReq.valid && !io.prefetchReq.ready)
   XSPerfAccumulate("hardware_prefetch_total", io.prefetchReq.valid)
   val perfEvents = Seq(
@@ -1876,6 +1967,13 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   // IQ wakeup and load cancel
   val wakeup = ValidIO(new MemWakeUpBundle)
   val cancel = Output(Bool())
+  // MDP inputs from MemBlock/PrefetcherWrapper.
+  val mdpLduId = Input(UInt(log2Up(backendParams.LduCnt).W))
+  val mdpPfHint = Flipped(ValidIO(new MdpL1PfHintBundle))
+  // MDP outputs to PrefetcherWrapper; they remain separate from the existing
+  // prefetchTrain path so other prefetchers are unaffected.
+  val mdpTrain0 = ValidIO(new MdpTrainReqBundle)
+  val mdpTrigger = ValidIO(new MdpTriggerReqBundle)
   // Exception info
   val exceptionInfo = ValidIO(new MemExceptionInfo)
   // Data forwarding and bypass
@@ -1936,11 +2034,20 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s0.io.prefetchReq <> io.prefetchReq
   s0.io.vecldin <> io.vecldin
   s0.io.ldin <> io.ldin
+  // MemBlock identifies this LDU and returns only this LDU's MDP hint.
+  s0.io.mdpLduId := io.mdpLduId
+  s0.io.mdpPfHint := io.mdpPfHint
   io.tlb.req <> s0.io.tlbReq
   io.dcache.req <> s0.io.dcacheReq
   io.dcache.is128Req := s0.io.is128Req
   io.dcache.replacementUpdated := s0.io.replacementUpdated
   io.dcache.pf_source := s0.io.pfSource
+  // Send the matched hint and load semantics to the corresponding DCache
+  // LoadPipe; MissQueue retains them only when this load misses.
+  io.dcache.mdpPfHint := s0.io.mdpHint
+  io.dcache.mdpImm := s0.io.mdpImm
+  io.dcache.mdpLoadSize := s0.io.mdpLoadSize
+  io.dcache.mdpLoadUnsigned := s0.io.mdpLoadUnsigned
   io.sqForward.s0Req := s0.io.sqSbForwardReq
   io.sbufferForward.s0Req := s0.io.sqSbForwardReq
   io.uncacheForward.s0Req := s0.io.uncacheForwardReq
@@ -1948,6 +2055,9 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.tldForward.s0Req := s0.io.tldForwardReq
   io.uncacheBypass.s0Req := s0.io.uncacheBypassReq
   io.wakeup := s0.io.wakeup
+  // Forward the independent MDP training/trigger channels to MemBlock.
+  io.mdpTrain0 := s0.io.mdpTrain0
+  io.mdpTrigger := s0.io.mdpTrigger
 
   // S1
   s1.io.redirect := io.redirect

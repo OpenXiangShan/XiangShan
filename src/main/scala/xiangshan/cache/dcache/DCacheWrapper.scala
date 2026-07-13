@@ -23,7 +23,7 @@ import xscache.coupledL2.{IsKeywordKey, IsKeywordField, MemBackTypeMMField, MemP
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import xscache.common.{AliasField, PrefetchField}
+import xscache.common.{AliasField, MdpHintField, PrefetchField}
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._
@@ -638,6 +638,12 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val is128Req = Bool()
   // cycle 0: prefetch source bits
   val pf_source = Output(UInt(L1PfSourceBits.W))
+  // MDP sideband from NewLoadUnit S0 to this LDU's LoadPipe.  A hinted miss
+  // stores the immediate and load semantics in its MSHR until refill.
+  val mdpPfHint = Output(Bool())
+  val mdpImm = Output(UInt(12.W))
+  val mdpLoadSize = Output(UInt(2.W))
+  val mdpLoadUnsigned = Output(Bool())
   // cycle0: load microop
  // val s0_uop = Output(new MicroOp)
   // cycle 0: virtual address: req.addr
@@ -812,6 +818,8 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lqEmpty = Input(Bool())
   val pf_ctrl = Output(Vec(L1PrefetcherNum, new PrefetchControlBundle))
   val refillTrain = ValidIO(new TrainReqBundle)
+  // Completed hinted-load data from MissQueue to MemBlock/PrefetcherWrapper.
+  val mdpPending = ValidIO(new MdpPendingReqBundle)
   val force_write = Input(Bool())
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
   val debugTopDown = new DCacheTopDownIO
@@ -911,6 +919,8 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
+    // Carry the L1 hinted-load marker on TileLink A to XSCache/L2.
+    MdpHintField(),
     ReqSourceField(),
     VaddrField(VAddrBits - blockOffBits),
     MemBackTypeMMField(),
@@ -1037,6 +1047,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
   io.wfi <> missQueue.io.wfi
   io.refillTrain := missQueue.io.refill_train
+  // Forward the aggregated MSHR pending event to the MDP input path.
+  io.mdpPending := missQueue.io.mdp_pending
   mainPipe.io.prefetch_req <> io.prefetch_req
 
   // l1 dcache controller

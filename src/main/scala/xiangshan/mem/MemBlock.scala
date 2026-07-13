@@ -576,11 +576,14 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     }
   }
   val (dtlb_ld_idx, dtlb_st_idx, dtlb_pf_idx) = (0, 1, 2)
-  val TlbSubSizeVec = Seq(LduCnt + PfNumInDtlbLD, StaCnt, PfNumInDtlbPF) // (load + hyu + stream pf, store, sms+l2bop)
+  val TlbSubSizeVec = Seq(LduCnt + PfNumInDtlbLD, StaCnt, PfNumInDtlbPF)
   val DTlbSize = TlbSubSizeVec.sum
   val TlbStartVec = TlbSubSizeVec.scanLeft(0)(_ + _).dropRight(1)
   val TlbEndVec = TlbSubSizeVec.scanLeft(0)(_ + _).drop(1)
   val L2toL1DTLBPortIndex = TlbStartVec(dtlb_pf_idx)
+  // MDP owns the last port in the prefetch DTLB partition; Parameters.scala
+  // reserves it in addition to the existing L2 prefetch port.
+  val MDPToL1DTLBPortIndex = TlbStartVec(dtlb_pf_idx) + PfNumInDtlbPF - 1
   println(f"TLB Size:")
   println(f"  size = $DTlbSize = ${TlbSubSizeVec}")
   println(f"TLB Index Vec:")
@@ -591,6 +594,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     println(f"  TLB #$idx%-2d => ${pf.name}")
   }
   println(f"  TLB #$L2toL1DTLBPortIndex%-2d => L2Prefetcher")
+  println(f"  TLB #$MDPToL1DTLBPortIndex%-2d => MemoryDependencePrefetcher")
 
   // dtlb instantiation
   val dtlb_ld_tlb_ld = Module(new TLBNonBlock(TlbSubSizeVec(dtlb_ld_idx), 2, ldtlbParams))
@@ -732,6 +736,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.trainSource.s1_storeFireHint := storeUnits.map(_.io.prefetchTrainHintS1)
   prefetcher.io.trainSource.s2_storeFireHint := storeUnits.map(_.io.prefetchTrainHintS2)
   prefetcher.io.trainSource.s3_store <> storeUnits.map(_.io.prefetchTrain)
+  // Independent MDP paths: LDUs send train0/trigger, DCache sends completed
+  // hinted-load data, and each returned hint goes back to its originating LDU.
+  prefetcher.io.mdpTrain0 := newLoadUnits.map(_.io.mdpTrain0)
+  prefetcher.io.mdpTrigger := newLoadUnits.map(_.io.mdpTrigger)
+  prefetcher.io.mdpPending := dcache.io.mdpPending
+  newLoadUnits.zipWithIndex.foreach { case (u, i) =>
+    u.io.mdpLduId := i.U
+    u.io.mdpPfHint := prefetcher.io.mdpPfHint(i)
+  }
   (0 until prefetcherNum).foreach { i => //NOTE lyq: prefetcherNum minimum is 1 for simpler code generation, which is ugly
     prefetcher.io.tlb_req(i).req.ready := false.B
     prefetcher.io.tlb_req(i).resp.valid := false.B
@@ -742,11 +755,16 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     dtlb_reqs(k) <> prefetcher.io.tlb_req(i)
     prefetcher.io.pmp_resp(i) := pmp_check(k).resp
   }
+  // MDP address translation and protection use the dedicated port above.
+  dtlb_reqs(MDPToL1DTLBPortIndex) <> prefetcher.io.mdpTlbReq
+  prefetcher.io.mdpPmpResp := pmp_check(MDPToL1DTLBPortIndex).resp
   l1_pf_req <> prefetcher.io.l1_pf_to_l1
   outer.l2_pf_sender_opt.foreach(_.out.head._1.addr_valid := prefetcher.io.l1_pf_to_l2.addr_valid)
   outer.l2_pf_sender_opt.foreach(_.out.head._1.addr := prefetcher.io.l1_pf_to_l2.addr)
   outer.l2_pf_sender_opt.foreach(_.out.head._1.pf_source :=  prefetcher.io.l1_pf_to_l2.pf_source)
   outer.l2_pf_sender_opt.foreach(_.out.head._1.l2_pf_en := prefetcher.io.l1_pf_to_l2.l2_pf_en)
+  // Aggregate L1 prefetch counter.  It includes MDP because MDP joins the
+  // common l1_pf_arb before the shared l1_pf_req pipeline.
   XSPerfAccumulate("prefetch_fire_l1", l1_pf_req.fire)
   XSPerfAccumulate("prefetch_fire_l2", outer.l2_pf_sender_opt.map(_.out.head._1.addr_valid).getOrElse(false.B))
 
@@ -868,6 +886,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         dcache.io.lsu.load(i).s1_pc                  := vSegmentUnit.io.rdcache.s1_pc
         dcache.io.lsu.load(i).s2_pc                  := vSegmentUnit.io.rdcache.s2_pc
         dcache.io.lsu.load(i).is128Req               := vSegmentUnit.io.rdcache.is128Req
+        // VSegment owns the port in this branch and never receives an MDP hint.
+        dcache.io.lsu.load(i).mdpPfHint               := false.B
+        dcache.io.lsu.load(i).mdpImm                  := 0.U
+        dcache.io.lsu.load(i).mdpLoadSize             := 0.U
+        dcache.io.lsu.load(i).mdpLoadUnsigned         := false.B
       }.otherwise {
         dcache.io.lsu.load(i).pf_source              := newLoadUnits(i).io.dcache.pf_source
         dcache.io.lsu.load(i).s1_paddr_dup_lsu       := newLoadUnits(i).io.dcache.s1_paddr_dup_lsu
@@ -878,6 +901,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         dcache.io.lsu.load(i).s1_pc                  := newLoadUnits(i).io.dcache.s1_pc
         dcache.io.lsu.load(i).s2_pc                  := newLoadUnits(i).io.dcache.s2_pc
         dcache.io.lsu.load(i).is128Req               := newLoadUnits(i).io.dcache.is128Req
+        // Normal scalar-load branch forwards LDU hint context to LoadPipe.
+        dcache.io.lsu.load(i).mdpPfHint               := newLoadUnits(i).io.dcache.mdpPfHint
+        dcache.io.lsu.load(i).mdpImm                  := newLoadUnits(i).io.dcache.mdpImm
+        dcache.io.lsu.load(i).mdpLoadSize             := newLoadUnits(i).io.dcache.mdpLoadSize
+        dcache.io.lsu.load(i).mdpLoadUnsigned         := newLoadUnits(i).io.dcache.mdpLoadUnsigned
       }
     }
 

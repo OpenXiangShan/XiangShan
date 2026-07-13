@@ -139,33 +139,37 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
       hitOH := 0.U.asTypeOf(hitOH)
     }
   }
-  val enqDelay1LoadWakeupHit = enqDelay1LoadWakeupHitOH.asUInt.orR
-  val enqDelay2LoadWakeupHit = enqDelay2LoadWakeupHitOH.asUInt.orR
+  // Only src(0) contributes to a scalar load address.  Wakeups of the other
+  // issue sources must not train MDP as address-producing load dependencies.
+  val enqDelay1LoadBaseWakeupHitOH = if (params.hasIQWakeUp) enqDelay1LoadWakeupHitOH.head else VecInit(Seq(false.B))
+  val enqDelay2LoadBaseWakeupHitOH = if (params.hasIQWakeUp) enqDelay2LoadWakeupHitOH.head else VecInit(Seq(false.B))
+  val enqDelay1LoadWakeupHit = enqDelay1LoadBaseWakeupHitOH.asUInt.orR
+  val enqDelay2LoadWakeupHit = enqDelay2LoadBaseWakeupHitOH.asUInt.orR
   val enqDelayLoadWakeupHit = enqDelay1LoadWakeupHit || enqDelay2LoadWakeupHit
   val enqDelayIsLoadEntry = FuType.isLoadVload(IQFuType.readFuType(entryReg.status.fuType, params.getFuCfgs.map(_.fuType)).asUInt)
   val enqDelayLoadWakeupHitByIQ = Wire(Vec(params.numWakeupFromIQ, Bool()))
   enqDelayLoadWakeupHitByIQ.zipWithIndex.foreach { case (hit, iqIdx) =>
     hit := enqDelayIsLoadEntry && enqDelayValidReg && (
-      enqDelay1LoadWakeupHitOH.map(_(iqIdx)).reduce(_ || _) ||
-      enqDelay2LoadWakeupHitOH.map(_(iqIdx)).reduce(_ || _)
+      enqDelay1LoadBaseWakeupHitOH(iqIdx) ||
+      enqDelay2LoadBaseWakeupHitOH(iqIdx)
     )
   }
   val enqDelayLoadWakeupPCByIQ = Wire(Vec(params.numWakeupFromIQ, UInt(VAddrBits.W)))
   enqDelayLoadWakeupPCByIQ.zipWithIndex.foreach { case (pc, iqIdx) =>
-    val delay1Hit = enqDelay1LoadWakeupHitOH.map(_(iqIdx)).reduce(_ || _)
-    val delay2Hit = enqDelay2LoadWakeupHitOH.map(_(iqIdx)).reduce(_ || _)
+    val delay1Hit = enqDelay1LoadBaseWakeupHitOH(iqIdx)
+    val delay2Hit = enqDelay2LoadBaseWakeupHitOH(iqIdx)
     pc := MuxCase(0.U(VAddrBits.W), Seq(
       delay1Hit -> io.enqDelayIn1.wakeUpFromIQ(iqIdx).bits.pc,
       delay2Hit -> io.enqDelayIn2.wakeUpFromIQ(iqIdx).bits.pc
     ))
   }
   val enqDelay1LoadWakeupPC = if (params.hasIQWakeUp) {
-    Mux1H(enqDelay1LoadWakeupHitOH.flatten, Seq.fill(params.numRegSrc)(io.enqDelayIn1.wakeUpFromIQ.map(_.bits.pc)).flatten)
+    Mux1H(enqDelay1LoadBaseWakeupHitOH, io.enqDelayIn1.wakeUpFromIQ.map(_.bits.pc))
   } else {
     0.U(VAddrBits.W)
   }
   val enqDelay2LoadWakeupPC = if (params.hasIQWakeUp) {
-    Mux1H(enqDelay2LoadWakeupHitOH.flatten, Seq.fill(params.numRegSrc)(io.enqDelayIn2.wakeUpFromIQ.map(_.bits.pc)).flatten)
+    Mux1H(enqDelay2LoadBaseWakeupHitOH, io.enqDelayIn2.wakeUpFromIQ.map(_.bits.pc))
   } else {
     0.U(VAddrBits.W)
   }
@@ -185,7 +189,7 @@ class EnqEntry(isComp: Boolean)(implicit p: Parameters, params: IssueBlockParams
       srcStatusVl.srcState := entryReg.status.srcStatusVl.get.srcState | enqDelayOut1.srcVlWakeUpByWB.get
       srcStatusVl.dataSource.value := DataSource.reg // change it when support fast wakeup.
     }
-    when (enqDelayIsLoadEntry && enqDelayLoadWakeupHit) {
+    when (enqDelayIsLoadEntry && enqDelayLoadWakeupHit && !entryReg.status.wakedup) {
       currentStatus.wakedup                  := true.B
       currentStatus.wakedupPC                := enqDelayLoadWakeupPC
     }

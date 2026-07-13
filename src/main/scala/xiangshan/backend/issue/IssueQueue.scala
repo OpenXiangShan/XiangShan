@@ -909,7 +909,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     val sameCycleLoadWakeupHitOH = if (params.hasIQWakeUp) {
       VecInit((0 until params.numWakeupFromIQ).map { iqIdx =>
         if (wakeupFromIQ(iqIdx).bits.params.hasLoadExu) {
-          Mux1H(finalDeqSelOHVec(i), entries.io.wakeupHitByIQ.get.map(_(iqIdx)))
+          Mux1H(finalDeqSelOHVec(i), entries.io.baseWakeupHitByIQ.get.map(_(iqIdx)))
         } else {
           false.B
         }
@@ -920,9 +920,10 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     val sameCycleLoadWakeupHit = if (params.hasIQWakeUp) sameCycleLoadWakeupHitOH.asUInt.orR else false.B
     val sameCycleLoadWakeupPC = if (params.hasIQWakeUp) Mux1H(sameCycleLoadWakeupHitOH, wakeupFromIQ.map(_.bits.pc)) else 0.U(VAddrBits.W)
     val sameCycleLoadWakeupLoadDeq = sameCycleLoadWakeupHit && FuType.isLoadVload(deqFuType)
+    val firstSameCycleLoadWakeup = sameCycleLoadWakeupLoadDeq && !deqEntryVec(i).bits.status.wakedup
     deq.bits.fuType   := deqFuType
-    deq.bits.wakedup  := deqEntryVec(i).bits.status.wakedup || sameCycleLoadWakeupLoadDeq
-    deq.bits.wakedupPC := Mux(sameCycleLoadWakeupLoadDeq, sameCycleLoadWakeupPC, deqEntryVec(i).bits.status.wakedupPC)
+    deq.bits.wakedup  := deqEntryVec(i).bits.status.wakedup || firstSameCycleLoadWakeup
+    deq.bits.wakedupPC := Mux(firstSameCycleLoadWakeup, sameCycleLoadWakeupPC, deqEntryVec(i).bits.status.wakedupPC)
     // TODO: entries use Mux1H sel oldest uop, there can remove deq.valid
     deq.bits.rfBankRen.foreach(x => x.zipWithIndex.foreach{case (xx, idx) => xx.zipWithIndex.foreach{case (xxx, bank) => xxx :=
       deq.valid && deqEntryVec(i).bits.rfBankRen.get(idx)(bank)
@@ -1013,9 +1014,12 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
   }
 
   val hartId = p(XSCoreParamsKey).HartId
-  val wakeupIQTable = ChiselDB.createTable(s"wakeupIQ_${params.getIQName}_hart$hartId", new WakeupIQDBEntry, basicDB = true)
-  val wakeupMatchIQTable = ChiselDB.createTable(s"wakeupMatchIQ_${params.getIQName}_hart$hartId", new WakeupMatchIQDBEntry, basicDB = true)
-  val wakedupIQTable = ChiselDB.createTable(s"wakedupIQ_${params.getIQName}_hart$hartId", new WakedupIQDBEntry, basicDB = true)
+  // These three tables were added for the completed 2026-07-09 wakeup profile.
+  // MDP keeps the functional wakeup metadata and perf counters, while making
+  // the high-volume ChiselDB writers non-basic so long tests do not log them.
+  val wakeupIQTable = ChiselDB.createTable(s"wakeupIQ_${params.getIQName}_hart$hartId", new WakeupIQDBEntry, basicDB = false)
+  val wakeupMatchIQTable = ChiselDB.createTable(s"wakeupMatchIQ_${params.getIQName}_hart$hartId", new WakeupMatchIQDBEntry, basicDB = false)
+  val wakedupIQTable = ChiselDB.createTable(s"wakedupIQ_${params.getIQName}_hart$hartId", new WakedupIQDBEntry, basicDB = false)
 
   io.deqDelay.zipWithIndex.foreach { case (deq, deqIdx) =>
     val wakedupIQEntry = Wire(new WakedupIQDBEntry)
