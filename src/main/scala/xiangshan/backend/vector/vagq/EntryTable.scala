@@ -28,8 +28,13 @@ class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
     maskGen.in.vta       := addrUop.bits.vta
   }
 
-  private val emptyEntry = 0.U.asTypeOf(new VAGQEntry)
-  private val entries = RegInit(VecInit(Seq.fill(vagqSize)(emptyEntry)))
+  private val entryValid = RegInit(VecInit(Seq.fill(vagqSize)(false.B)))
+  private val entryReg   = Reg(Vec(vagqSize, new VAGQEntry))
+  private val entries    = Wire(Vec(vagqSize, new VAGQEntry))
+  entries.zip(entryReg).zip(entryValid).foreach { case ((entry, stored), valid) =>
+    entry := stored
+    entry.valid := valid
+  }
 
   private val addrEntry = io.addrUop.map(addrUop => entryAt(entries, addrUop.bits.entryIdx))
   private val dataEntry = io.dataUop.map(dataUop => entryAt(entries, dataUop.bits.entryIdx))
@@ -154,7 +159,7 @@ class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
 
   private def applyFlushUpdate(next: VAGQEntry, curr: VAGQEntry): Unit = {
     when(curr.valid && curr.robIdx.needFlush(io.redirect)) {
-      next := emptyEntry
+      next.valid := false.B
     }
   }
 
@@ -167,7 +172,8 @@ class VAGQEntryTable(implicit p: Parameters) extends VAGQModule {
     applyEnqueueUpdate(next, entries(i), idx)
     applyFlushUpdate(next, entries(i))
 
-    entries(i) := next
+    entryReg(i) := next
+    entryValid(i) := next.valid
   }
 
   io.entries := entries
