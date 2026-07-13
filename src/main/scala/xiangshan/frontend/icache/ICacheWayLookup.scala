@@ -142,14 +142,8 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   private val secondWriteValid = if (FetchPorts == 1) false.B else io.write(1).valid
   private val fetchReq         = io.fromFtq.bits.req
 
-  // if WayLookup is empty, but there is a valid write, we can bypass one to read port (maybe timing critical)
-  private val canBypass =
-    empty && io.write(0).valid && !secondWriteValid && !fetchReq(1).valid && !exceptionEntry.valid
-
   private val canDeq       = !empty && !updateStall(0)
   private val canDeqSecond = numValidEntries > 1.U && !updateStall(0) && !updateStall(1)
-
-  private val canServe = canBypass || canDeq
 
   private val fetchReqEntry = VecInit((0 until MaxFetchReqNum).map(i => entries((readPtr + i.U).value)))
   private val fetchReqExceptionEntry = VecInit((0 until MaxFetchReqNum).map { i =>
@@ -182,24 +176,16 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   io.toFtq.perf_hasMmio              := hasMmio
   io.toFtq.perf_hasItlbException     := hasItlbException
 
-  io.fromFtq.ready := io.toMainPipe.ready && canServe && !io.flush
+  io.fromFtq.ready := io.toMainPipe.ready && canDeq && !io.flush
 
-  io.toMainPipe.valid             := io.fromFtq.valid && canServe && !io.flush
+  io.toMainPipe.valid             := io.fromFtq.valid && canDeq && !io.flush
   io.toMainPipe.bits.req          := fetchReq
   io.toMainPipe.bits.req(1).valid := realTwoFetchValid
 
-  io.toMainPipe.bits.wayLookupInfo(0).entry := Mux(
-    canBypass,
-    io.write(0).bits.entry,
-    fetchReqEntry(0)
-  )
-  io.toMainPipe.bits.wayLookupInfo(0).exceptionEntry := Mux(
-    canBypass,
-    io.write(0).bits.exceptionEntry,
-    fetchReqExceptionEntry(0)
-  )
-  io.toMainPipe.bits.wayLookupInfo(1).entry          := fetchReqEntry(1)
-  io.toMainPipe.bits.wayLookupInfo(1).exceptionEntry := fetchReqExceptionEntry(1)
+  io.toMainPipe.bits.wayLookupInfo.zipWithIndex.foreach { case (info, i) =>
+    info.entry          := fetchReqEntry(i)
+    info.exceptionEntry := fetchReqExceptionEntry(i)
+  }
 
   if (!env.FPGAPlatform) {
     when(io.toMainPipe.fire) {
@@ -253,7 +239,6 @@ class ICacheWayLookup(implicit p: Parameters) extends ICacheModule
   )
   XSPerfAccumulate("write", io.write.head.fire)
   XSPerfAccumulate("empty_when_write", empty && io.write.head.fire)
-  XSPerfAccumulate("bypass", empty && io.write.head.fire && canBypass && io.toMainPipe.fire)
   // exception stall cycles
   XSPerfAccumulate("waitingForExceptionRead", exceptionEntry.valid && !empty)
   XSPerfAccumulate("waitingForExceptionFlush", exceptionEntry.valid && empty)
