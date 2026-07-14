@@ -27,7 +27,6 @@ import xiangshan.cache._
 import xiangshan.cache.wpu.ReplayCarry
 import xiangshan.cache.mmu._
 import math._
-import yunsuan.VectorElementFormat
 
 object LoadReplayCauses {
   // these causes have priority, lower coding has higher priority.
@@ -218,10 +217,11 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
     // from StoreQueue
     val stAddrReadySqPtr = Input(new SqPtr)
-    val stAddrReadyVec   = Input(Vec(StoreQueueSize, Bool()))
+    val stAddrReadyVec   = Input(Vec(StoreQueuePhysicalSize, Bool()))
     val stDataReadySqPtr = Input(new SqPtr)
-    val stDataReadyVec   = Input(Vec(StoreQueueSize, Bool()))
+    val stDataReadyVec   = Input(Vec(StoreQueuePhysicalSize, Bool()))
     val sqDeqPtr         = Input(new SqPtr)
+    val physicalUpperSqIdx = Input(new SqPtr)
 
     // from LoadQueueUncache
     val mmioWakeup = Flipped(ValidIO(new LqPtr()))
@@ -337,8 +337,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   for (i <- 0 until LoadQueueReplaySize) {
     // dequeue
     //  FIXME: store*Ptr is not accurate
-    dataNotBlockVec(i) := isAfter(io.stDataReadySqPtr, blockSqIdx(i)) || stDataReadyVec(blockSqIdx(i).value) || io.sqEmpty // for better timing
-    addrNotBlockVec(i) := isAfter(io.stAddrReadySqPtr, blockSqIdx(i)) || !strict(i) && stAddrReadyVec(blockSqIdx(i).value) || io.sqEmpty // for better timing
+    dataNotBlockVec(i) := io.stDataReadySqPtr.isAfter(blockSqIdx(i)) || stDataReadyVec(blockSqIdx(i).value) || io.sqEmpty // for better timing
+    addrNotBlockVec(i) := io.stAddrReadySqPtr.isAfter(blockSqIdx(i)) ||
+    !strict(i) && stAddrReadyVec(blockSqIdx(i).value) && blockSqIdx(i) < io.physicalUpperSqIdx || io.sqEmpty // for better timing
     // store address execute
     (0 until StorePipelineWidth).map(w => {
       storeAddrWakeupVec(i)(w) := io.storeAddrWakeup(w).valid &&
@@ -412,7 +413,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
     // case C_RAW
     when (cause(i)(LoadReplayCauses.C_RAW)) {
-      blocking(i) := Mux((!io.rawFull || !isAfter(uop(i).sqIdx, io.stAddrReadySqPtr)), false.B, blocking(i))
+      blocking(i) := Mux((!io.rawFull || blockSqIdx(i).isNotAfter(io.stAddrReadySqPtr)), false.B, blocking(i))
     }
     // case C_MF
     when (cause(i)(LoadReplayCauses.C_MF)) {
@@ -425,7 +426,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
     // casue C_SMF
     when (cause(i)(LoadReplayCauses.C_SMF)) {
-      blocking(i) := Mux(!isAfter(uop(i).sqIdx, io.sqDeqPtr), false.B, blocking(i))
+      blocking(i) := Mux(blockSqIdx(i).isNotAfter(io.sqDeqPtr), false.B, blocking(i))
     }
   })
 
@@ -703,7 +704,8 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
   // LoadQueueReplay can't backpressure.
   // We think LoadQueueReplay can always enter, as long as it is the same size as VirtualLoadQueue.
-  assert(freeList.io.canAllocate.reduce(_ || _) || !io.enq.map(_.valid).reduce(_ || _), s"LoadQueueReplay Overflow")
+  XSError(!freeList.io.canAllocate.reduce(_ || _) && io.enq.map{ case port =>
+    port.valid && !port.bits.isLoadReplay}.reduce(_ || _), s"LoadQueueReplay Overflow")
 
   // Allocate logic
   needEnqueue.zip(newEnqueue).zip(io.enq).map {
@@ -733,10 +735,13 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val replayInfo = enq.bits.rep_info
     val isMA = replayInfo.cause(LoadReplayCauses.C_MA)
     val isFF = replayInfo.cause(LoadReplayCauses.C_FF)
-    val nextBlockSqIdx = Mux(isMA, replayInfo.addr_inv_sq_idx, replayInfo.data_inv_sq_idx)
+    val isRAW = replayInfo.cause(LoadReplayCauses.C_RAW)
+    val isSMF = replayInfo.cause(LoadReplayCauses.C_SMF)
+    val nextBlockSqIdx = Mux(isMA, replayInfo.addr_inv_sq_idx,
+    Mux(isFF, replayInfo.data_inv_sq_idx, enq.bits.uop.sqIdx))
 
     // special case: st-ld violation
-    when (enqFireBase && (isMA || isFF)) {
+    when (enqFireBase && (isMA || isFF || isRAW || isSMF)) {
       blockSqIdx(enqIndex) := nextBlockSqIdx
     }
 

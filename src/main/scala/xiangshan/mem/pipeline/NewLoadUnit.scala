@@ -362,6 +362,10 @@ class LoadUnitS0(param: ExeUnitParams)(
   storeForwardReq.storeSetHit := uop.storeSetHit
   storeForwardReq.waitForRobIdx := uop.waitForRobIdx
 
+  if(debugEn) {
+    storeForwardReq.debug_robIdx.get := uop.robIdx
+  }
+
   val uncacheForwardReqValid = replayHiPrio.fire && replayHiPrio.bits.isUncacheReplay()
 
   val dcacheForwardReqValid = replayHiPrio.fire && replayHiPrio.bits.forwardDChannel.get

@@ -36,6 +36,27 @@ import xiangshan.cache.mmu._
 class LqPtr(implicit p: Parameters) extends CircularQueuePtr[LqPtr](
   p => p(XSCoreParamsKey).VirtualLoadQueueSize
 ){
+  def addWrapCircles(v: UInt): LqPtr = {
+    val ptr = Wire(new LqPtr)
+    if (isPow2(entries)) {
+      ptr := (Cat(this.flag, this.value) + v).asTypeOf(new LqPtr)
+    } else {
+      val newValue = this.value +& v
+      val maxWrapCount = ((BigInt(1) << newValue.getWidth) - 1) / entries
+      val wrapWidth = log2Ceil(maxWrapCount + 1)
+      val wrapHit = (0 to maxWrapCount.toInt).map(i =>
+        if (i == maxWrapCount.toInt) true.B else newValue < ((i + 1) * entries).U(newValue.getWidth.W)
+      )
+      val wrapCount = PriorityEncoder(wrapHit)
+      val wrapBase = PriorityMux(wrapHit, (0 to maxWrapCount.toInt).map(i => (i * entries).U(newValue.getWidth.W)))
+      val nextValue = newValue - wrapBase
+      ptr.flag := this.flag ^ wrapCount(0)
+      ptr.value := nextValue(value.getWidth - 1, 0)
+    }
+    ptr
+  }
+
+  def isRotateBy[T <: LqPtr](right: T): Bool = (this.flag ^ right.flag) && this.value === right.value
 }
 
 object LqPtr {
@@ -176,12 +197,12 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     }
     val sq = new Bundle() {
       val stAddrReadySqPtr = Input(new SqPtr)
-      val stAddrReadyVec   = Input(Vec(StoreQueueSize, Bool()))
+      val stAddrReadyVec   = Input(Vec(StoreQueuePhysicalSize, Bool()))
       val stDataReadySqPtr = Input(new SqPtr)
-      val stDataReadyVec   = Input(Vec(StoreQueueSize, Bool()))
-      val stIssuePtr       = Input(new SqPtr)
+      val stDataReadyVec   = Input(Vec(StoreQueuePhysicalSize, Bool()))
       val sqEmpty          = Input(Bool())
       val sqDeqPtr         = Input(new SqPtr)
+      val physicalUpperSqIdx = Input(new SqPtr)
     }
     val bypass = Flipped(Vec(LoadPipelineWidth, new UncacheBypass))
     val replay = Vec(LoadPipelineWidth, Decoupled(new LoadReplayIO))
@@ -193,8 +214,9 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val uncache = new UncacheWordIO
     val exceptionInfo = ValidIO(new MemExceptionInfo())
     val lqFull = Output(Bool())
-    val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
-    val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
+    val lqDeq = ValidIO(UInt(log2Up(CommitWidth + 1).W))
+    val lqRedirect = ValidIO(new LqPtr)
+    val lqRecoverStall = Output(Bool())
     val lq_rep_full = Output(Bool())
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
     val l2_hint = Input(Valid(new L2ToL1Hint()))
@@ -234,7 +256,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueRAW.io.redirect         <> io.redirect
   loadQueueRAW.io.storeIn          <> io.sta.storeAddrIn
   loadQueueRAW.io.stAddrReadySqPtr <> io.sq.stAddrReadySqPtr
-  loadQueueRAW.io.stIssuePtr       <> io.sq.stIssuePtr
   loadQueueRAW.io.query            <> io.ldu.rawNukeQuery
   io.mdpTrain                      := loadQueueRAW.io.mdpTrain
 
@@ -247,7 +268,8 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   virtualLoadQueue.io.ldin          <> io.ldu.ldin // from load_s3
   virtualLoadQueue.io.lqFull        <> io.lqFull
   virtualLoadQueue.io.lqDeq         <> io.lqDeq
-  virtualLoadQueue.io.lqCancelCnt   <> io.lqCancelCnt
+  virtualLoadQueue.io.lqRedirect    <> io.lqRedirect
+  virtualLoadQueue.io.lqRecoverStall<> io.lqRecoverStall
   virtualLoadQueue.io.lqEmpty       <> io.lqEmpty
   virtualLoadQueue.io.ldWbPtr       <> io.lqDeqPtr
 
@@ -299,6 +321,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
   loadQueueReplay.io.storeDataWakeup.zip(io.wakeupToLRQ.drop(StaCnt).take(StdCnt)).foreach { case (sink, source) => sink := source }
   loadQueueReplay.io.storeAddrWakeupCancel.zip(io.wakeupToLRQCancel.take(StaCnt)).foreach { case (sink, source) => sink := source }
   loadQueueReplay.io.storeDataWakeupCancel.zip(io.wakeupToLRQCancel.drop(StaCnt).take(StdCnt)).foreach { case (sink, source) => sink := source }
+  loadQueueReplay.io.physicalUpperSqIdx <> io.sq.physicalUpperSqIdx
 
   loadQueueReplay.io.mmioWakeup := uncacheBuffer.io.mmioWakeup
   loadQueueReplay.io.ncWakeup := uncacheBuffer.io.ncWakeup

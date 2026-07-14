@@ -51,8 +51,10 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     val lqFull      = Output(Bool())
     val lqEmpty     = Output(Bool())
     // to dispatch
-    val lqDeq       = Output(UInt(log2Up(CommitWidth + 1).W))
-    val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
+    val lqDeq       = ValidIO(UInt(log2Up(CommitWidth + 1).W))
+    // tolsqEnqCtrl
+    val lqRedirect  = ValidIO(new LqPtr)
+    val lqRecoverStall = Output(Bool())
     // for topdown
     val noUopsIssued = Input(Bool())
   })
@@ -90,7 +92,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val lastLastCycleRedirect = RegNext(lastCycleRedirect)
 
   val validCount = distanceBetween(enqPtrExt(0), deqPtr)
-  val allowEnqueue = validCount <= (VirtualLoadQueueSize - LSQLdEnqWidth).U
+  val allowEnqueue = enqPtrExt.head >= deqPtr
   val canEnqueue = io.enq.req.map(_.valid)
   val vLoadFlow = io.enq.req.map(_.bits.numLsElem.asTypeOf(UInt(elemIdxBits.W)))
   val needCancel = WireInit(VecInit((0 until VirtualLoadQueueSize).map(i => {
@@ -149,10 +151,14 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   deqPtrNext := deqPtr + lastCommitCount
   deqPtr := RegEnable(deqPtrNext, 0.U.asTypeOf(new LqPtr), deqPtrUpdateEna)
 
-  io.lqDeq := GatedRegNext(lastCommitCount)
-  io.lqCancelCnt := redirectCancelCount
+  io.lqDeq.bits := GatedRegNext(lastCommitCount)
+  io.lqDeq.valid := RegNext(lastCommitCount.orR)
+  io.lqRedirect.valid := RegNext(lastLastCycleRedirect.valid)
+  io.lqRedirect.bits := RegEnable(enqPtrExtNext.head, lastLastCycleRedirect.valid)
   io.ldWbPtr := deqPtr
   io.lqEmpty := RegNext(validCount === 0.U)
+  val lqRecoverStall = io.redirect.valid || lastCycleRedirect.valid || lastLastCycleRedirect.valid
+  io.lqRecoverStall := RegNext(lqRecoverStall) // means loadqueue haven't pending redirect
 
   XSError((enqPtrExt.head < deqPtr) &&
   !(enqPtrExt.head.value === deqPtr.value && enqPtrExt.head.flag ^ deqPtr.flag), s"deqPtr exceed enqptr\n")

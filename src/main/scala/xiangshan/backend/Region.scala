@@ -190,6 +190,16 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     io.wakeupToLRQ.get.flatten.zip(lrqWakeupFromIQ).foreach { case (sink, source) => sink := source }
     io.wakeupToLRQCancel.get.flatten.zip(lrqWakeupCancelFromIQ).foreach { case (sink, source) => sink := source }
   }
+
+  val stdIQs = issueQueues.filter(iq => iq.param.StdCnt > 0)
+  stdIQs.zipWithIndex.foreach { case(imp, i) =>
+    val feedBack = io.stdFeedback.get(i).feedbackSlow
+    imp.io.s1Resp.get.head.failed := feedBack.valid && !feedBack.bits.hit
+    imp.io.s1Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
+    imp.io.s1Resp.get.head.fuType := 0.U
+    imp.io.s1Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
+    imp.io.s1Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
+  }
   val vecStuIQs = issueQueues.filter(iq => iq.param.VstuCnt > 0)
   vecStuIQs.zipWithIndex.foreach { case(imp, i) =>
     imp.io.memIO.get.lqDeqPtr.get := io.lqDeqPtr.get
@@ -508,7 +518,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         val thisIQ = issueQueues.filter(x => x.param.allExuParams.contains(toMem(i)(j).bits.params)).head
         if (thisIQ.io.s0Resp.nonEmpty) {
           thisIQ.io.s0Resp.get(j).failed := toMem(i)(j).valid && !toMem(i)(j).ready
-          thisIQ.io.s0Resp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ).B
+          thisIQ.io.s0Resp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ || thisIQ.param.isStdIQ).B
           thisIQ.io.s0Resp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
           thisIQ.io.s0Resp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           thisIQ.io.s0Resp.get(j).lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
@@ -516,7 +526,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         // for intRegion's loadUnit
         if (thisIQ.io.snResp.nonEmpty) {
           thisIQ.io.snResp.get(j).failed := false.B
-          thisIQ.io.snResp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ).B
+          thisIQ.io.snResp.get(j).finalSuccess := toMem(i)(j).fire && !(thisIQ.param.isStAddrIQ || thisIQ.param.isStdIQ).B
           thisIQ.io.snResp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
           thisIQ.io.snResp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           thisIQ.io.snResp.get(j).lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
@@ -872,6 +882,7 @@ class RegionIO(val params: SchdBlockParams)(implicit p: Parameters) extends XSBu
   // fromMem
   val wakeupFromLDU = Option.when(params.isIntSchd)(Vec(params.LdExuCnt, Flipped(Valid(new MemWakeUpBundle))))
   val staFeedback = Option.when(params.isIntSchd)(Flipped(Vec(params.StaCnt, new MemRSFeedbackIO)))
+  val stdFeedback = Option.when(params.isIntSchd)(Flipped(Vec(params.StdCnt, new MemRSFeedbackIO)))
   val vstuFeedback = Option.when(params.isVecSchd)(Flipped(Vec(params.VstuCnt, new MemRSFeedbackIO(isVector = true))))
   val fromVecExcpMod = Option.when(params.isVecSchd)(Input(new ExcpModToVprf(maxMergeNumPerCycle * 2, maxMergeNumPerCycle)))
   val csrio = Option.when(params.hasCSR)(new CSRFileIO)

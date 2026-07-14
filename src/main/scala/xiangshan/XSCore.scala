@@ -147,14 +147,12 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   backend.io.mem.memoryViolation := memBlock.io.mem_to_ooo.memoryViolation
   backend.io.mem.mdpTrain := memBlock.io.mem_to_ooo.mdpTrain
   backend.io.mem.lsqEnqIO <> memBlock.io.ooo_to_mem.enqLsq
-  backend.io.mem.sqDeq := memBlock.io.mem_to_ooo.sqDeq
-  backend.io.mem.lqDeq := memBlock.io.mem_to_ooo.lqDeq
+  backend.io.mem.toLsqEnqCtrl := memBlock.io.mem_to_ooo.lsqio.toLsqEnqCtrl
   backend.io.mem.sqDeqPtr := memBlock.io.mem_to_ooo.sqDeqPtr
   backend.io.mem.lqDeqPtr := memBlock.io.mem_to_ooo.lqDeqPtr
-  backend.io.mem.lqCancelCnt := memBlock.io.mem_to_ooo.lqCancelCnt
-  backend.io.mem.sqCancelCnt := memBlock.io.mem_to_ooo.sqCancelCnt
   backend.io.mem.stIssuePtr := memBlock.io.mem_to_ooo.stIssuePtr
   backend.io.mem.staIqFeedback := memBlock.io.mem_to_ooo.staIqFeedback
+  backend.io.mem.stdIqFeedback := memBlock.io.mem_to_ooo.stdIqFeedback
   backend.io.mem.hyuIqFeedback := memBlock.io.mem_to_ooo.hyuIqFeedback
   backend.io.mem.vstuIqFeedback := memBlock.io.mem_to_ooo.vstuIqFeedback
   backend.io.mem.vlduIqFeedback := memBlock.io.mem_to_ooo.vlduIqFeedback

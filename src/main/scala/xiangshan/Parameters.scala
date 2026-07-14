@@ -109,10 +109,10 @@ case class XSCoreParameters
   LoadDependenceScoreBoardWidth: Int = 4,
   LoadUncacheBufferSize: Int = 16,
   LoadQueueNWriteBanks: Int = 8, // NOTE: make sure that LoadQueueRARSize/LoadQueueRAWSize is divided by LoadQueueNWriteBanks
-  StoreQueueSize: Int = 64,
+  StoreQueuePhysicalSize: Int = 64, // preferably a power of 2
+  StoreQueueMultiple: Int = 2, // preferably a power of 2
+  StoreQueueSnapshotInterval: Int = 1, // must a power of 2
   SQUnalignQueueSize: Int = 2,
-  StoreQueueNWriteBanks: Int = 8, // NOTE: make sure that StoreQueueSize is divided by StoreQueueNWriteBanks
-  StoreQueueForwardWithMask: Boolean = true,
   VlsQueueSize: Int = 8,
   RobSize: Int = 352,
   RabSize: Int = 352,
@@ -718,13 +718,14 @@ trait HasXSParameter {
   def LoadDependenceScoreBoardWidth = coreParams.LoadDependenceScoreBoardWidth
   def LoadUncacheBufferSize = coreParams.LoadUncacheBufferSize
   def LoadQueueNWriteBanks = coreParams.LoadQueueNWriteBanks
-  def StoreQueueSize = coreParams.StoreQueueSize
+  def StoreQueuePhysicalSize = coreParams.StoreQueuePhysicalSize
+  def StoreQueueMultiple = coreParams.StoreQueueMultiple
+  def StoreQueueSize = StoreQueuePhysicalSize * StoreQueueMultiple
+  def StoreQueueSnapshotInterval = coreParams.StoreQueueSnapshotInterval
   def SQUnalignQueueSize = coreParams.SQUnalignQueueSize
-  def StoreQueueForceWriteSbufferUpper = coreParams.StoreQueueSize - 4
+  def StoreQueueForceWriteSbufferUpper = coreParams.StoreQueuePhysicalSize - 4
   def StoreQueueForceWriteSbufferLower = StoreQueueForceWriteSbufferUpper - 5
-  def VirtualLoadQueueMaxStoreQueueSize = VirtualLoadQueueSize max StoreQueueSize
-  def StoreQueueNWriteBanks = coreParams.StoreQueueNWriteBanks
-  def StoreQueueForwardWithMask = coreParams.StoreQueueForwardWithMask
+  def VirtualLoadQueueMaxStoreQueueSize = VirtualLoadQueueSize max StoreQueuePhysicalSize
   def VlsQueueSize = coreParams.VlsQueueSize
 
   def MemIQSizeMax = backendParams.intSchdParams.get.issueBlockParams.map(_.numEntries).max
@@ -823,9 +824,9 @@ trait HasXSParameter {
   def LWTUse2BitCounter = true
   // store set parameters
   def SSITSize = WaitTableSize
-  def LFSTSize = 32
+  def LFSTSize = 64
   def SSIDWidth = log2Up(LFSTSize)
-  def LFSTWidth = 4
+  def LFSTWidth = 2
   def StoreSetEnable = true // LWT will be disabled if SS is enabled
   def LFSTEnable = true
 

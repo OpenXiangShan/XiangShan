@@ -53,7 +53,6 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
 
     // to LoadQueueReplay
     val stAddrReadySqPtr = Input(new SqPtr)
-    val stIssuePtr       = Input(new SqPtr)
     val lqFull           = Output(Bool())
   })
 
@@ -129,9 +128,8 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   //  LoadQueueRAW enqueue
   val canEnqueue = io.query.map(_.req.valid)
   val cancelEnqueue = io.query.map(_.req.bits.robIdx.needFlush(io.redirect))
-  val allAddrCheck = io.stIssuePtr === io.stAddrReadySqPtr
   val hasAddrInvalidStore = io.query.map(_.req.bits.sqIdx).map(sqIdx => {
-    Mux(!allAddrCheck, isBefore(io.stAddrReadySqPtr, sqIdx), false.B)
+    io.stAddrReadySqPtr.isBefore(sqIdx)
   })
   val needEnqueue = canEnqueue.zip(hasAddrInvalidStore).zip(cancelEnqueue).map { case ((v, r), c) => v && r && !c }
 
@@ -196,7 +194,7 @@ class LoadQueueRAW(implicit p: Parameters) extends XSModule
   // when the stores that "older than" current load address were ready.
   // current load will be released.
   for (i <- 0 until LoadQueueRAWSize) {
-    val deqNotBlock = Mux(!allAddrCheck, !isBefore(io.stAddrReadySqPtr, uop(i).sqIdx), true.B)
+    val deqNotBlock = io.stAddrReadySqPtr.isNotBefore(uop(i).sqIdx)
     val needCancel = uop(i).robIdx.needFlush(io.redirect)
 
     when (allocated(i) && (deqNotBlock || needCancel)) {

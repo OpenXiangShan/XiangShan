@@ -43,9 +43,14 @@ class VSplitPipeline(param: ExeUnitParams, isVStore: Boolean = false)(implicit p
   def us_fof(fuOpType: UInt): Bool = false.B
   //TODO vdIdxReg should no longer be useful, don't delete it for now
   val vdIdxReg = RegInit(0.U(3.W))
+  val illegalIssue = if (isVStore) {
+    !(io.in.bits.sqIdx.get + io.in.bits.numLsElem.get).withInPhysicalQueue(io.sqDeqPtr.get) //TODO: this check will be remove in the future.
+  } else {
+    false.B
+  } // will be remove in the future.
 
   val s1_ready = WireInit(false.B)
-  io.in.ready := s1_ready
+  io.in.ready := s1_ready && !illegalIssue
 
   /**-----------------------------------------------------------
     * s0 stage
@@ -67,7 +72,7 @@ class VSplitPipeline(param: ExeUnitParams, isVStore: Boolean = false)(implicit p
   val s0_nfield        = s0_nf +& 1.U
 
   val s0_valid         = Wire(Bool())
-  val s0_kill          = io.in.bits.robIdx.needFlush(io.redirect)
+  val s0_kill          = io.in.bits.robIdx.needFlush(io.redirect) || illegalIssue
   val s0_can_go        = s1_ready
   val s0_fire          = s0_valid && s0_can_go
   val s0_out           = Wire(new VLSBundle(isVStore))
@@ -550,6 +555,7 @@ class VSSplitImp(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
   val splitBuffer = Module(new VSSplitBufferImp())
   // Split Pipeline
   splitPipeline.io.in <> io.in
+  splitPipeline.io.sqDeqPtr.get := io.sqDeqPtr.get
   splitPipeline.io.redirect <> io.redirect
   io.toMergeBuffer <> splitPipeline.io.toMergeBuffer
 
@@ -565,4 +571,3 @@ class VSSplitImp(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
   io.out <> splitBuffer.io.out
   io.vstd.get <> splitBuffer.io.vstd.get
 }
-

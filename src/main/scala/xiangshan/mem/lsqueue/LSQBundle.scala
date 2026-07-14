@@ -17,7 +17,8 @@ package xiangshan.mem
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
-import utility.InstSeqNum
+import utility.{InstSeqNum, MultiFlagCircularQueuePtr}
+import utils.OptionWrapper
 import xiangshan._
 import xiangshan.backend.Bundles.{DynInst, ExuOutput, MemExuOutput, MemToRob, UopIdx}
 import xiangshan.backend.exu.ExeUnitParams
@@ -127,6 +128,7 @@ class StoreAddrIO(implicit p: Parameters) extends MemBlockBundle {
   // ctrl signal
   val isLastRequest      = Bool() /* It's last request to write to storeQueue. if is normal request, it will be true,
                                       if it was unalign splited, first request will be false, second will be true. */
+  val debugUop           = Option.when(debugEn)(new DynInst())
 }
 
 class StoreQueueDataWrite(implicit p: Parameters) extends MemBlockBundle {
@@ -151,11 +153,6 @@ class ToCacheIO(implicit p: Parameters) extends MemBlockBundle {
   val resp            = Flipped(DecoupledIO(new CMOResp))
 }
 
-class FromRobIO(implicit p: Parameters) extends XSBundle {
-  val pendingPtr         = new RobPtr
-  val pendingPtrNext     = new RobPtr
-}
-
 class toRobIO(implicit p: Parameters) extends XSBundle {
   val mmioBusy      = Bool()
 }
@@ -164,6 +161,7 @@ class SbufferCtrlIO(implicit p: Parameters) extends XSBundle {
   class Req(implicit p: Parameters) extends XSBundle {
     val flush            = Bool() // flush is to empty sbuffer
     val forceWrite       = Bool() // force write is to evict some sbuffer entries.
+    val physicalStoreQueueFull = Bool() // physical store queue full, for perf.
   }
   class Resp(implicit p: Parameters) extends XSBundle {
     val empty            = Bool()
@@ -175,56 +173,162 @@ class SbufferCtrlIO(implicit p: Parameters) extends XSBundle {
 
 class StoreQueueToLoadQueueIO(implicit p: Parameters) extends XSBundle {
   val stAddrReadySqPtr   = new SqPtr
-  val stAddrReadyVec     = Vec(StoreQueueSize, Bool())
+  val stAddrReadyVec     = Vec(StoreQueuePhysicalSize, Bool())
   val stDataReadySqPtr   = new SqPtr
-  val stDataReadyVec     = Vec(StoreQueueSize, Bool())
-
-  val stIssuePtr         = new SqPtr
+  val stDataReadyVec     = Vec(StoreQueuePhysicalSize, Bool())
 }
 
 class SbufferWriteIO(implicit p : Parameters) extends XSBundle {
   val req                = Vec(EnsbufferWidth, DecoupledIO(new DCacheWordReqWithVaddrAndPfFlag))
 }
 
-class StoreQueueIO(val param: ExeUnitParams)(implicit p: Parameters) extends MemBlockBundle {
-  // for mulit Core Difftest
-  val hartId             = Input(UInt(hartIdLen.W))
-  val redirect           = Flipped(ValidIO(new Redirect))
-  // from dispatch
-  val enq                = new StoreQueueEnqIO
+class StoreQueueIO(val param: ExeUnitParams) (implicit p: Parameters) extends MemBlockBundle {
+  val hartId             = Input(UInt(hartIdLen.W)) // for mulit Core Difftest
+  val redirect           = Flipped(ValidIO(new Redirect)) // to VirtualStoreQueue
+  val enq                = new VirtualStoreQueueEnqIO(new SqPtr) // from dispatch to VirtualStoreQueue
+  val fromRob            = new ROBToVirtualStoreQueueIO // from ROB to VirtualStoreQueue
+  val toLsqEnqCtrl       = new ToLsqEnqCtrl(hasStore = true, hasLoad = false) // to lsqEnqCtrl
   // when VStoreMergeBuffer writeback micro-op, storeQueue need to set `vecMbCommit`
   val fromVMergeBuffer   = Vec(VecStorePipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO))) //TODO: will be remove in the feature
-  // from std
   val storeDataIn        = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // store data, send to sq from rs
-  // from storeUnit.
-  val fromStoreUnit      = new StaIO
-  // write committed store to sbuffer
-  val writeToSbuffer     = new SbufferWriteIO
+  val fromStoreUnit      = new StaIO // from storeUnit
+  val writeToSbuffer     = new SbufferWriteIO // write committed store to sbuffer
   // conctrl sbuffer, has two function:
-  // 1. It will evict some entries of sbuffer to dcache; 2. flush sbuffer.
+  // 1. It will evict some entries of sbuffer to dcache; 2. flush sbuffer
   val sbufferCtrl        = new SbufferCtrlIO
-  // cmo handle send clean, invalid, flush to dcache.
-  val toDCache           = new ToCacheIO
-  // from loadUnit, forward query.
-  val forward            = Flipped(Vec(LoadPipelineWidth, new SQForward))
-  val fromRob            = Input(new FromRobIO)
-  val toRob              = Output(new toRobIO)
-  // write store request to uncacheBuffer.
+  val toDCache           = new ToCacheIO // cmo handle send clean, invalid, flush to dcache
+  val forward            = Flipped(Vec(LoadPipelineWidth, new SQForward)) // from loadUnit, forward query
+  val toRob              = Output(new toRobIO) // write store request to uncacheBuffer
   val toUncacheBuffer    = new UncacheWordIO
-  // to backend , used to writeback uop when request is mmio, cmo.
-  val writeBack          = DecoupledIO(new MemToRob(param))
-  // from misalignBuffer, will be remove in the feature
+  val writeBack          = DecoupledIO(new MemToRob(param))// to backend , used to writeback uop when request is mmio, cmo.
   val wfi                = Flipped(new WfiReqBundle)
   val sqEmpty            = Output(Bool())
   val sqFull             = Output(Bool())
   val toLoadQueue        = Output(new StoreQueueToLoadQueueIO)
+  val exceptionInfo      = ValidIO(new MemExceptionInfo)// to exceptionInfoGen, only for mmio/cbo writeback exception gen
+  val sqDeq              = ValidIO(UInt(log2Ceil(EnsbufferWidth + 1).W)) // to backend, dispatch
+  val sqDeqPtr           = Output(new SqPtr) // to store unit
+  val diffStore          = Option.when(debugEn)(Flipped(new DiffStoreIO)) // for store difftest
+  val physicalUpperSqIdx = Output(new SqPtr)
+}
+
+class PhysicalStoreQueueIO(val param: ExeUnitParams) (implicit p: Parameters) extends MemBlockBundle {
+  val hartId             = Input(UInt(hartIdLen.W)) // for mulit Core Difftest
+  val storeDataIn        = Vec(StorePipelineWidth, Flipped(Valid(new StoreQueueDataWrite))) // store data, send to sq from rs
+  val fromStoreUnit      = new StaIO // from storeUnit
+  val writeToSbuffer     = new SbufferWriteIO // write committed store to sbuffer
+  // conctrl sbuffer, has two function:
+  // 1. It will evict some entries of sbuffer to dcache; 2. flush sbuffer.
+  val sbufferCtrl        = new SbufferCtrlIO
+  val toDCache           = new ToCacheIO // cmo handle send clean, invalid, flush to dcache
+  val forward            = Flipped(Vec(LoadPipelineWidth, new SQForward)) // from loadUnit, forward query
+  val fromVirtualStoreQueue = Flipped(new VirtualStoreQueueToPhysicalQueueIO(new SqPtr))
+  val toRob              = Output(new toRobIO)
+  val toUncacheBuffer    = new UncacheWordIO // write store request to uncacheBuffer
+  val writeBack          = DecoupledIO(new MemToRob(param)) // to backend , used to writeback uop when request is mmio, cmo
+  val wfi                = Flipped(new WfiReqBundle)
+  val empty              = Output(Bool())
+  val full               = Output(Bool())
+  val toLoadQueue        = Output(new StoreQueueToLoadQueueIO)
   // to exceptionInfoGen, only for mmio/cbo writeback exception gen
   val exceptionInfo      = ValidIO(new MemExceptionInfo)
   // to backend, dispatch
-  val sqCancelCnt        = Output(UInt(log2Up(StoreQueueSize + 1).W))
-  val sqDeq              = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
+  val sqDeq              = ValidIO(UInt(log2Ceil(EnsbufferWidth + 1).W))
   // to store unit
   val sqDeqPtr           = Output(new SqPtr)
+  val physicalUpperSqIdx = Output(new SqPtr)
   // for store difftest
   val diffStore          = Option.when(debugEn)(Flipped(new DiffStoreIO))
+}
+
+class VirtualStoreQueueEnqIO(PhysicalQueuePtr: MultiFlagCircularQueuePtr[_]) (implicit p: Parameters) extends MemBlockBundle {
+  // from Dispatch
+  class ReqUopInfo (implicit p: Parameters) extends MemBlockBundle {
+    val robIdx          = new RobPtr
+    val numLsElem       = NumLsElem()
+    val uopIdx          = UopIdx()
+    val isVec           = Bool()
+    // debug info
+    val ssid            = UInt(SSIDWidth.W) // maybe not used
+    val storeSetHit     = Bool() // inst has been allocated an store set. maybe not used
+    // debug signal
+    val pc              = Option.when(debugEn)(UInt(VAddrBits.W))
+  }
+  class FromDispatchReq (implicit p: Parameters) extends MemBlockBundle {
+    val needAlloc       = Bool()
+    val uop             = new ReqUopInfo
+    val reqEndPtr       = new LSIdx // uop end lqIdx/sqIdx
+    val reqStartPtr     = new LSIdx // uop start lqIdx/sqIdx
+    // debug signal
+    val debugUop        = Option.when(debugEn)(new DynInst()) // only for difftest
+  }
+  class ToDispatchResp(PhysicalQueuePtr: MultiFlagCircularQueuePtr[_]) (implicit p: Parameters) extends MemBlockBundle {
+    val physicalQueuePtr = Output(PhysicalQueuePtr.cloneType)
+  }
+
+  // IO define
+//  val otherCanAccept    = Input(Bool()) // for storeQueue, is lqCanAccept; for loadQueue, is sqCanAccept
+  // from Dispatch
+  val req               = Vec(LSQEnqWidth, Flipped(ValidIO(new FromDispatchReq)))
+  // to Dispatch
+  val canAccept         = Output(Bool())
+  val resp              = Vec(LSQEnqWidth, new ToDispatchResp(PhysicalQueuePtr))
+}
+
+class VirtualStoreQueueToPhysicalQueueIO(PhysicalQueuePtr: MultiFlagCircularQueuePtr[_])
+                                         (implicit p: Parameters) extends XSBundle {
+
+  val redirectPtr        = ValidIO(PhysicalQueuePtr.cloneType)
+  val preCommitPtr       = ValidIO(PhysicalQueuePtr.cloneType) // uop is rob head, which can be set committed in physicalQueue
+  val retiredPtr         = PhysicalQueuePtr.cloneType
+  val physicalQueueEnqPtr = Output(PhysicalQueuePtr.cloneType)
+  val mdpHitPtr           = Vec(LoadPipelineWidth, ValidIO(PhysicalQueuePtr.cloneType)) // for MDP predict, indicate which entry is hit by load
+  val headRobIdx          = Output(new RobPtr) // for writeback of mmio/cbo
+}
+
+class ROBToVirtualStoreQueueIO(implicit p: Parameters) extends XSBundle {
+  val robHeadPtr         = Input(new RobPtr)
+}
+
+class ToLsqEnqCtrl(hasStore: Boolean, hasLoad: Boolean) (implicit p: Parameters) extends XSBundle {
+
+  val sqDeq              = OptionWrapper(hasStore, ValidIO(UInt(log2Ceil(EnsbufferWidth + 1).W)))
+  val lqDeq              = OptionWrapper(hasLoad, ValidIO(UInt(log2Up(CommitWidth + 1).W)))
+  val lqRedirectPtr      = OptionWrapper(hasLoad, ValidIO(new LqPtr))
+  val sqRedirectPtr      = OptionWrapper(hasStore, ValidIO(new SqPtr))
+  val lqRecoverStall     = OptionWrapper(hasLoad, Bool())
+  val sqRecoverStall     = OptionWrapper(hasStore, Bool())
+}
+
+class PhysicalQueueToVirtualStoreQueueIO[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[PhysicalQueuePtrType]](PhysicalQueuePtr: PhysicalQueuePtrType) (implicit p: Parameters) extends XSBundle {
+  val deqPtr             = Input(PhysicalQueuePtr.cloneType)
+  val deqCount           = Flipped(ValidIO(UInt(log2Ceil(EnsbufferWidth + 1).W)))
+}
+
+class MDPQueryIO (implicit p: Parameters) extends XSBundle {
+  // MDP
+  // load inst will not be executed until former store (predicted by mdp) addr calcuated
+  val loadWaitBit        = Bool()
+  val waitForRobIdx      = new RobPtr // store set predicted previous store robIdx
+}
+
+class VirtualStoreQueueIO[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[PhysicalQueuePtrType]](PhysicalQueuePtr: PhysicalQueuePtrType)
+                         (implicit p: Parameters) extends XSBundle {
+  // for mulit Core Difftest
+  val hartId             = Input(UInt(hartIdLen.W))
+  val redirect           = Flipped(ValidIO(new Redirect))
+  // from dispatch
+  val enq                = new VirtualStoreQueueEnqIO(PhysicalQueuePtr)
+  // from ROB
+  val fromRob            = new ROBToVirtualStoreQueueIO
+  // mdp query, from forward
+  val mdpQuery           = Vec(LoadPipelineWidth, Flipped(ValidIO(new MDPQueryIO)))
+  //to physical queue
+  val toPhysicalQueue    = new VirtualStoreQueueToPhysicalQueueIO(PhysicalQueuePtr)
+  val fromPhysicalQueue  = new PhysicalQueueToVirtualStoreQueueIO(PhysicalQueuePtr)
+  // to lsqEnqCtrl
+  val sqRecoverStall     = Output(Bool())
+  val fromVMergeBuffer   = Vec(VecStorePipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO))) //TODO: will be remove in the feature
+
+  val empty              = Output(Bool())
 }

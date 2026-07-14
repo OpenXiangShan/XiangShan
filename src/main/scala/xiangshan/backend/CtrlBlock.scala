@@ -34,7 +34,7 @@ import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
 import xiangshan.frontend.ftq.{FtqPtr, FtqRead, HasFtqParameters}
 import xiangshan.frontend.PrunedAddr
-import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
+import xiangshan.mem.{LqPtr, LsqEnqCtrl, LsqEnqIO, SqPtr, ToLsqEnqCtrl}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, VecScheduler}
 import xiangshan.backend.trace._
 import xiangshan.frontend.bpu.BranchAttribute
@@ -98,6 +98,7 @@ class CtrlBlockImp(
   val fusionDecoder = Module(new FusionDecoder)
   val rename = Module(new Rename)
   val redirectGen = Module(new RedirectGenerator)
+  val lsqEnqCtrl = Module(new LsqEnqCtrl)
   private def hasRen: Boolean = true
   private val pcMem = Module(new SyncDataModuleTemplate(PrunedAddr(VAddrBits), FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
   private val rob = wrapper.rob.module
@@ -698,6 +699,7 @@ class CtrlBlockImp(
     false.B,
     Cat(rename.io.out.map(out => out.valid && out.bits.snapshot)).orR
   )
+  rename.io.toLsqEnqCtrl <> lsqEnqCtrl.io.fromRename
 
   // pipeline between rename and dispatch
   PipeGroupConnect(renameOut, dispatch.io.fromRename, s1_s3_redirect.valid, dispatch.io.toRenameAllFire, "renamePipeDispatch")
@@ -724,13 +726,6 @@ class CtrlBlockImp(
   rob.io.enq.req := enqRob.req
   dispatch.io.robHeadFuType := rob.io.debugRobHeadFuType
   dispatch.io.stallReason <> rename.io.stallReason.out
-  dispatch.io.fromMem.lcommit := io.fromMemToDispatch.lcommit
-  dispatch.io.fromMem.scommit := io.fromMemToDispatch.scommit
-  dispatch.io.fromMem.lqDeqPtr := io.fromMemToDispatch.lqDeqPtr
-  dispatch.io.fromMem.sqDeqPtr := io.fromMemToDispatch.sqDeqPtr
-  dispatch.io.fromMem.lqCancelCnt := io.fromMemToDispatch.lqCancelCnt
-  dispatch.io.fromMem.sqCancelCnt := io.fromMemToDispatch.sqCancelCnt
-  io.toMem.lsqEnqIO <> dispatch.io.toMem.lsqEnqIO
   dispatch.io.wakeUpAll.wakeUpInt := io.toDispatch.wakeUpInt
   dispatch.io.wakeUpAll.wakeUpFp  := io.toDispatch.wakeUpFp
   dispatch.io.wakeUpAll.wakeUpVec := io.toDispatch.wakeUpVec
@@ -744,6 +739,22 @@ class CtrlBlockImp(
   dispatch.io.wbPregsVl := io.toDispatch.wbPregsVl
   dispatch.io.vlWriteBackInfo := io.toDispatch.vlWriteBackInfo
   dispatch.io.singleStep := GatedValidRegNext(io.csrCtrl.singlestep)
+
+  // lsqEnqCtrl assign
+  lsqEnqCtrl.io.redirect := s1_s3_redirect
+  lsqEnqCtrl.io.fromDispatch <> dispatch.io.toLsqEnqCtrl.lsqEnqIO
+  lsqEnqCtrl.io.lqDeq := io.fromMemToLsqEnqCtrl.lqDeq.get
+  lsqEnqCtrl.io.sqDeq := io.fromMemToLsqEnqCtrl.sqDeq.get
+  lsqEnqCtrl.io.lqRedirectPtr := io.fromMemToLsqEnqCtrl.lqRedirectPtr.get
+  lsqEnqCtrl.io.sqRedirectPtr := io.fromMemToLsqEnqCtrl.sqRedirectPtr.get
+  lsqEnqCtrl.io.lqRecoverStall := io.fromMemToLsqEnqCtrl.lqRecoverStall.get
+  lsqEnqCtrl.io.sqRecoverStall := io.fromMemToLsqEnqCtrl.sqRecoverStall.get
+
+  dispatch.io.fromLsqEnqCtrl.lsqHeadPtr := lsqEnqCtrl.io.toDispatch
+  dispatch.io.fromLsqEnqCtrl.lqStall.foreach(_ := lsqEnqCtrl.io.lqStall.get)
+  dispatch.io.fromLsqEnqCtrl.sqStall.foreach(_ := lsqEnqCtrl.io.sqStall.get)
+  io.toMem.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
+
   dispatch.io.debugBlockBackward.foreach(_ := rob.io.debugBlockBackward.get)
   dispatch.io.debugWaitForward.foreach(_ := rob.io.debugWaitForward.get)
   dispatch.io.debugIQValidNumVec.foreach(_ := io.toDispatch.debugIQValidNumVec.get)
@@ -893,15 +904,7 @@ class CtrlBlockIO()(implicit p: Parameters, params: BackendParams) extends XSBun
     val fpUops = Vec(fpUopsNum, DecoupledIO(new DispatchOutUop))
     val vfUops = Vec(vfUopsNum, DecoupledIO(new DispatchOutUop))
   }
-  val fromMemToDispatch = new Bundle {
-    val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
-    val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
-    val lqDeqPtr = Input(new LqPtr)
-    val sqDeqPtr = Input(new SqPtr)
-    // from lsq
-    val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
-    val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
-  }
+  val fromMemToLsqEnqCtrl = Flipped(new ToLsqEnqCtrl(params.hasStoreSchd, params.hasLoadSchd))
   //toMem
   val toMem = new Bundle {
     val lsqEnqIO = Flipped(new LsqEnqIO)

@@ -19,6 +19,7 @@ package xiangshan.mem
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
+import utility.XSPerfAccumulate
 import xiangshan._
 import xiangshan.backend._
 import xiangshan.backend.Bundles._
@@ -32,16 +33,35 @@ class StdExeUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSB
   val out = new MemWriteBack(param) // std -> wb
   val atomicData = Valid(new ExuInput(param)) // std -> atomicsUnit
   val sqData = Valid(new StoreQueueDataWrite) // std -> sq
+  val feedBack = ValidIO(new RSFeedback)
+  // store queue deqPtr
+  val sqDeqPtr = Input(new SqPtr)
 }
 
 class StdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSModule {
   val io = IO(new StdExeUnitIO(param))
 
+  val s0IllegalIssue = !io.in.bits.sqIdx.get.withInPhysicalQueue(io.sqDeqPtr)
+  val s0LegalIssue = io.in.bits.sqIdx.get.withInPhysicalQueue(io.sqDeqPtr)
   // Arbitrate between scalar std and vector std
   io.in.ready := !io.vstdIn.valid
 
+  // feedback
+  val s1Feedback = Wire(Valid(new RSFeedback))
+  s1Feedback.valid                 := io.in.valid
+  s1Feedback.bits.hit              := s0LegalIssue || FuType.storeIsAMO(io.in.bits.fuType)
+  s1Feedback.bits.flushState       := DontCare
+  s1Feedback.bits.robIdx           := io.in.bits.robIdx
+  s1Feedback.bits.sourceType       := DontCare
+  s1Feedback.bits.dataInvalidSqIdx := DontCare
+  s1Feedback.bits.sqIdx            := io.in.bits.sqIdx.get
+  s1Feedback.bits.lqIdx            := DontCare
+
+  io.feedBack.valid                 := RegNext(s1Feedback.valid)
+  io.feedBack.bits                  := RegEnable(s1Feedback.bits, s1Feedback.valid)
+
   // writeback of scalar stds but not vector stds
-  io.out.toRob.valid := io.in.valid && !io.vstdIn.valid && !FuType.storeIsAMO(io.in.bits.fuType)
+  io.out.toRob.valid := io.in.valid && !io.vstdIn.valid && !FuType.storeIsAMO(io.in.bits.fuType) && !(io.in.valid && s0IllegalIssue) //TODO: ready shouldn't rely on valid
   io.out.toRob.bits.robIdx := io.in.bits.robIdx
   io.out.toRob.bits.isRVC.foreach(_ := DontCare)
   io.out.toRob.bits.sqIdx.foreach(_ := io.in.bits.sqIdx.get)
@@ -59,4 +79,6 @@ class StdExeUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMod
   io.sqData.bits.data := Mux(io.vstdIn.valid, io.vstdIn.bits.data, io.in.bits.src(0))
   io.sqData.bits.sqIdx := Mux(io.vstdIn.valid, io.vstdIn.bits.sqIdx, io.in.bits.sqIdx.get)
   io.sqData.bits.vecDebug.foreach(_ := io.vstdIn.bits.vecDebug.get) // DontCare for scalar stds
+
+  XSPerfAccumulate("STD_out_of_range_issue", !(io.in.valid && s0IllegalIssue))
 }

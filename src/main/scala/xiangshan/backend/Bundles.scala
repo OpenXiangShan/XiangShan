@@ -290,6 +290,8 @@ object Bundles {
     val ssid = UInt(SSIDWidth.W)
     val singleStep = Bool() // debug module
     val numLsElem = NumLsElem()
+    val lsqIdxStart = new LSIdx
+    val lsqIdxEnd = new LSIdx
     val hasException = Bool()
     val ftqLastOffset = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before change in rename
     val lastIsRVC = Bool() // store isrvc before change in rename

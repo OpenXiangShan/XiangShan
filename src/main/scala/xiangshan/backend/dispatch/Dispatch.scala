@@ -131,18 +131,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
       val vlFromVfIsZero   = Input(Bool())
       val vlFromVfIsVlmax  = Input(Bool())
     }
-    // from MemBlock
-    val fromMem = new Bundle {
-      val lcommit = Input(UInt(log2Up(CommitWidth + 1).W))
-      val scommit = Input(UInt(log2Ceil(EnsbufferWidth + 1).W)) // connected to `memBlock.io.sqDeq` instead of ROB
-      val lqDeqPtr = Input(new LqPtr)
-      val sqDeqPtr = Input(new SqPtr)
-      // from lsq
-      val lqCancelCnt = Input(UInt(log2Up(VirtualLoadQueueSize + 1).W))
-      val sqCancelCnt = Input(UInt(log2Up(StoreQueueSize + 1).W))
+    // from LsqEnqCtrl
+    val fromLsqEnqCtrl = new Bundle {
+      val lsqHeadPtr = Input(new LSIdx)
+      val lqStall = Option.when(backendParams.debugEn)(Input(Bool()))
+      val sqStall = Option.when(backendParams.debugEn)(Input(Bool()))
     }
-    //toMem
-    val toMem = new Bundle {
+    // to LsqEnqCtrl
+    val toLsqEnqCtrl = new Bundle {
       val lsqEnqIO = Flipped(new LsqEnqIO)
     }
     // redirect
@@ -572,11 +568,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val allowDispatch = Wire(Vec(renameWidth, Bool()))
   val thisCanActualOut = Wire(Vec(renameWidth, Bool()))
   val lsqCanAccept = Wire(Bool())
+  val lsqRecoverStall = Wire(Bool())
   for (i <- 0 until RenameWidth){
     // update valid logic
     fromRenameUpdate(i).valid := fromRename(i).valid && allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) &&
-      lsqCanAccept && !fromRename(i).bits.isMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
-    fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && lsqCanAccept
+      !lsqRecoverStall && !fromRename(i).bits.isMove && !fromRename(i).bits.hasException && !fromRenameUpdate(i).bits.singleStep
+    fromRename(i).ready := allowDispatch(i) && !uopBlockByIQ(i) && thisCanActualOut(i) && !lsqRecoverStall
     // update src type if eliminate old vd
     fromRenameUpdate(i).bits.srcType(numRegSrcVf - 1) := Mux(ignoreOldVdVec(i), SrcType.no, fromRename(i).bits.srcType(numRegSrcVf - 1))
   }
@@ -642,27 +639,13 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }
   ///////////////////////////////////////////////////////////
 
-  val lsqEnqCtrl = Module(new LsqEnqCtrl)
-
-  // TODO: check lsqEnqCtrl redirect logic
-  // here is RegNext because dispatch2iq use s2_s4_redirect, Dispatch use s1_s3_redirect
-  lsqEnqCtrl.io.redirect := RegNext(io.redirect)
-  lsqEnqCtrl.io.lcommit := io.fromMem.lcommit
-  lsqEnqCtrl.io.scommit := io.fromMem.scommit
-  lsqEnqCtrl.io.lqCancelCnt := io.fromMem.lqCancelCnt
-  lsqEnqCtrl.io.sqCancelCnt := io.fromMem.sqCancelCnt
-  lsqEnqCtrl.io.enq.iqAccept := io.fromRename.map(x => !x.valid || x.fire)
-  io.toMem.lsqEnqIO <> lsqEnqCtrl.io.enqLsq
-
-  private val enqLsqIO = lsqEnqCtrl.io.enq
-  private val lqFreeCount = lsqEnqCtrl.io.lqFreeCount
-  private val sqFreeCount = lsqEnqCtrl.io.sqFreeCount
+  private val enqLsqIO = io.toLsqEnqCtrl.lsqEnqIO
 
   private val numLoadDeq = LSQLdEnqWidth
   private val numStoreAMODeq = LSQStEnqWidth
   private val numVLoadDeq = LoadPipelineWidth
-  private val numDeq = enqLsqIO.req.size
   lsqCanAccept := enqLsqIO.canAccept
+  lsqRecoverStall := enqLsqIO.recoverStall
 
   private val isLoadVec = VecInit(fromRename.map(x => x.valid && FuType.isLoad(x.bits.fuType)))
   private val isStoreVec = VecInit(fromRename.map(x => x.valid && FuType.isStore(x.bits.fuType)))
@@ -675,11 +658,10 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   private val storeAMOCntVec = VecInit(isStoreAMOVec.indices.map(x => PopCount(isStoreAMOVec.slice(0, x + 1))))
   private val vloadCntVec = VecInit(isVLoadVec.indices.map(x => PopCount(isVLoadVec.slice(0, x + 1))))
 
-  private val s0_enqLsq_resp = Wire(enqLsqIO.resp.cloneType)
   for (i <- 0 until RenameWidth) {
     // update lqIdx sqIdx
-    fromRenameUpdate(i).bits.lqIdx := s0_enqLsq_resp(i).lqIdx
-    fromRenameUpdate(i).bits.sqIdx := s0_enqLsq_resp(i).sqIdx
+    fromRenameUpdate(i).bits.lqIdx := fromRename(i).bits.lsqIdxStart.lqIdx
+    fromRenameUpdate(i).bits.sqIdx := fromRename(i).bits.lsqIdxStart.sqIdx
   }
 
   val loadBlockVec = VecInit(loadCntVec.map(_ > numLoadDeq.U))
@@ -698,116 +680,26 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
 
   private val uop = fromRename.map(_.bits)
   private val fuType = uop.map(_.fuType)
-  private val fuOpType = uop.map(_.fuOpType)
-  private val vtype = uop.map(_.vpu.vtype)
-  private val sew = vtype.map(_.vsew)
-  private val lmul = vtype.map(_.vlmul)
-  private val eew = uop.map(_.vpu.veew)
-  private val mop = fuOpType.map(fuOpTypeItem => LSUOpType.getVecLSMop(fuOpTypeItem))
-  private val nf = fuOpType.zip(uop.map(_.vpu.nf)).map { case (fuOpTypeItem, nfItem) => Mux(LSUOpType.isWhole(fuOpTypeItem), 0.U, nfItem) }
-  private val emul = fuOpType.zipWithIndex.map { case (fuOpTypeItem, index) =>
-    Mux(
-      LSUOpType.isWhole(fuOpTypeItem),
-      GenUSWholeEmul(nf(index)),
-      Mux(
-        LSUOpType.isMasked(fuOpTypeItem),
-        0.U(mulBits.W),
-        EewLog2(eew(index)) - sew(index) + lmul(index)
-      )
-    )
-  }
 
-  private val isVlsType = fuType.map(fuTypeItem => FuType.isVls(fuTypeItem)).zip(fromRename.map(_.valid)).map(x => x._1 && x._2)
-  private val isLSType = fuType.map(fuTypeItem => FuType.isLoad(fuTypeItem) || FuType.isStore(fuTypeItem)).zip(fromRename.map(_.valid)).map(x => x._1 && x._2)
   private val isSegment = fuType.map(fuTypeItem => FuType.isVsegls(fuTypeItem)).zip(fromRename.map(_.valid)).map(x => x._1 && x._2)
-  // TODO
-  private val isUnitStride = fuOpType.map(fuOpTypeItem => LSUOpType.isAllUS(fuOpTypeItem))
-  private val isVecUnitType = isVlsType.zip(isUnitStride).map { case (isVlsTypeItme, isUnitStrideItem) =>
-    isVlsTypeItme && isUnitStrideItem
-  }
   private val isfofFixVlUop = uop.map { x => x.vpu.isVleff && x.lastUop }
-  private val instType = isSegment.zip(mop).map { case (isSegementItem, mopItem) => Cat(isSegementItem, mopItem) }
-  // There is no way to calculate the 'flow' for 'unit-stride' exactly:
-  //  Whether 'unit-stride' needs to be split can only be known after obtaining the address.
-  // For scalar instructions, this is not handled here, and different assignments are done later according to the situation.
   private val numLsElem = VecInit(uop.map(_.numLsElem))
 
-  // The maximum 'numLsElem' number that can be emitted per port is:
-  //    16 2 2 2 2 2.
-  // The 'allowDispatch' calculations are done conservatively for timing purposes:
-  //   The Flow of scalar instructions is considered 1,
-  //   The flow of vector 'unit-stride' instructions is considered 2, and the flow of other vector instructions is considered 16.
-  private val conserveFlows = VecInit(isVlsType.zip(isLSType).zipWithIndex.map { case ((isVlsTyepItem, isLSTypeItem), index) =>
-    Mux(
-      isVlsTyepItem,
-      Mux(isUnitStride(index), VecMemUnitStrideMaxFlowNum.U, 16.U),
-      Mux(isLSTypeItem, 1.U, 0.U)
-    )
-  })
-
-  private val conserveFlowsIs16 = VecInit(isVlsType.zipWithIndex.map { case (isVlsTyepItem, index) =>
-    isVlsTyepItem && !isUnitStride(index)
-  })
-  private val conserveFlowsIs2 = VecInit(isVlsType.zipWithIndex.map { case (isVlsTyepItem, index) =>
-    isVlsTyepItem && isUnitStride(index)
-  })
-  private val conserveFlowsIs1 = VecInit(isLSType.zipWithIndex.map { case (isLSTyepItem, index) =>
-    isLSTyepItem
-  })
-  private val flowTotalWidth = (VecMemLSQEnqIteratorNumberSeq.max * RenameWidth).U.getWidth
-  private val conserveFlowTotalDispatch = Wire(Vec(RenameWidth, UInt(flowTotalWidth.W)))
-  private val lowCountMaxWidth = (2 * RenameWidth).U.getWidth
-  conserveFlowTotalDispatch.zipWithIndex.map{ case (flowTotal, idx) =>
-    val highCount = PopCount(conserveFlowsIs16.take(idx + 1))
-    val conserveFlowsIs2Or1 = VecInit(conserveFlowsIs2.zip(conserveFlowsIs1).map(x => Cat(x._1, x._2)))
-    val lowCount = conserveFlowsIs2Or1.take(idx + 1).reduce(_ +& _).asTypeOf(0.U(lowCountMaxWidth.W))
-    flowTotal := (if (RenameWidth == 6) Cat(highCount, lowCount) else ((highCount << 4).asUInt + lowCount))
-  }
-  // renameIn
-  private val isVlsTypeRename = io.renameIn.map(x => x.valid && FuType.isVls(x.bits.fuType))
-  private val isLSTypeRename = io.renameIn.map(x => x.valid && (FuType.isLoad(x.bits.fuType)) || FuType.isStore(x.bits.fuType))
-  private val isUnitStrideRename = io.renameIn.map(x => LSUOpType.isAllUS(x.bits.fuOpType))
-  private val conserveFlowsIs16Rename = VecInit(isVlsTypeRename.zipWithIndex.map { case (isVlsTyepItem, index) =>
-    isVlsTyepItem && !isUnitStrideRename(index)
-  })
-  private val conserveFlowsIs2Rename = VecInit(isVlsTypeRename.zipWithIndex.map { case (isVlsTyepItem, index) =>
-    isVlsTyepItem && isUnitStrideRename(index)
-  })
-  private val conserveFlowsIs1Rename = VecInit(isLSTypeRename.zipWithIndex.map { case (isLSTyepItem, index) =>
-    isLSTyepItem
-  })
-  private val conserveFlowTotalRename = Wire(Vec(RenameWidth, UInt(flowTotalWidth.W)))
-  conserveFlowTotalRename.zipWithIndex.map { case (flowTotal, idx) =>
-    val highCount = PopCount(conserveFlowsIs16Rename.take(idx + 1))
-    val conserveFlowsIs2Or1 = VecInit(conserveFlowsIs2Rename.zip(conserveFlowsIs1Rename).map(x => Cat(x._1, x._2)))
-    val lowCount = conserveFlowsIs2Or1.take(idx + 1).reduce(_ +& _).asTypeOf(0.U(lowCountMaxWidth.W))
-    flowTotal := (if (RenameWidth == 6) Cat(highCount, lowCount) else ((highCount << 4).asUInt + lowCount))
-  }
-
-
-  private val conserveFlowTotal = Reg(Vec(RenameWidth, UInt(flowTotalWidth.W)))
-  when(io.toRenameAllFire){
-    conserveFlowTotal := conserveFlowTotalRename
-  }.otherwise(
-    conserveFlowTotal := conserveFlowTotalDispatch
-  )
-  // A conservative allocation strategy is adopted here.
-  // Vector 'unit-stride' instructions and scalar instructions can be issued from all six ports,
-  // while other vector instructions can only be issued from the first port
-  // if is segment instruction, need disptch it to Vldst_RS0, so, except port 0, stall other.
-  // The allocation needs to meet a few conditions:
-  //  1) The lsq has enough entris.
-  //  2) The number of flows accumulated does not exceed VecMemDispatchMaxNumber.
-  //  3) Vector instructions other than 'unit-stride' can only be issued on the first port.
-
-
+  /*
+  * how to allow dispatch lsu uop:
+  * The sqIdx/lqIdx will be precalculated in rename stage. During the dispatch stage, we will use uop's sqIdxEnd/lqIdxEnd to
+  * determine whether the sq/lq entries require by uop will exceed the storeQueueSize/loadQueueSize.
+  * */
   for (index <- allowDispatch.indices) {
-    val flowTotal = conserveFlowTotal(index)
+    val lqIdxEnd = fromRename(index).bits.lsqIdxEnd.lqIdx
+    val sqIdxEnd = fromRename(index).bits.lsqIdxEnd.sqIdx
+    val lqDeqIdx = io.fromLsqEnqCtrl.lsqHeadPtr.lqIdx
+    val sqDeqIdx = io.fromLsqEnqCtrl.lsqHeadPtr.sqIdx
     val allowDispatchPrevious = if (index == 0) true.B else allowDispatch(index - 1)
-    when(isStoreVec(index) || isVStoreVec(index)) {
-      allowDispatch(index) := (sqFreeCount > flowTotal) && allowDispatchPrevious
-    }.elsewhen(isLoadVec(index) || isVLoadVec(index)) {
-      allowDispatch(index) := (lqFreeCount > flowTotal) && allowDispatchPrevious
+    when((isStoreVec(index) || isVStoreVec(index)) && !isSegment(index) && !isfofFixVlUop(index)) {
+      allowDispatch(index) := (sqIdxEnd > sqDeqIdx) && allowDispatchPrevious
+    }.elsewhen((isLoadVec(index) || isVLoadVec(index)) && !isSegment(index) && !isfofFixVlUop(index)) {
+      allowDispatch(index) := (lqIdxEnd > lqDeqIdx) && allowDispatchPrevious
     }.elsewhen(isAMOVec(index)) {
       allowDispatch(index) := allowDispatchPrevious
     }.otherwise {
@@ -815,9 +707,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     }
   }
 
-
-  // enqLsq io
-  require(enqLsqIO.req.size == enqLsqIO.resp.size)
+  // toEnqLsq io
   for (i <- enqLsqIO.req.indices) {
     when(!io.fromRename(i).fire) {
       enqLsqIO.needAlloc(i) := 0.U
@@ -829,13 +719,12 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
       enqLsqIO.needAlloc(i) := 0.U
     }
     enqLsqIO.req(i).valid := io.fromRename(i).fire && !isAMOVec(i) && !isSegment(i) && !isfofFixVlUop(i)
-    enqLsqIO.req(i).bits.connectRenameOutUop(io.fromRename(i).bits)
+    enqLsqIO.req(i).bits.uop.connectRenameOutUop(io.fromRename(i).bits)
 
-    // This is to make it easier to calculate in LSQ.
-    // Both scalar instructions and vector instructions with FLOW equal to 1 have a NUM value of 1.”
-    // But, the 'numLsElem' that is not a vector is set to 0 when passed to IQ
-    enqLsqIO.req(i).bits.numLsElem := Mux(isVlsType(i), numLsElem(i), 1.U)
-    s0_enqLsq_resp(i) := enqLsqIO.resp(i)
+    enqLsqIO.req(i).bits.reqEndPtr := io.fromRename(i).bits.lsqIdxEnd
+    enqLsqIO.req(i).bits.reqStartPtr := io.fromRename(i).bits.lsqIdxStart
+    enqLsqIO.req(i).bits.uop.numLsElem := numLsElem(i)
+    enqLsqIO.iqAccept(i) := !io.fromRename(i).valid || io.fromRename(i).fire
   }
 
   val isFp = VecInit(fromRename.map(req => FuType.isFArith(req.bits.fuType)))
@@ -931,7 +820,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   }
   if(backendParams.debugEn){
     dontTouch(blockedByWaitForward)
-    dontTouch(conserveFlows)
+    dontTouch(allowDispatch)
   }
 
   // Only the uop with block backward flag will block the next uop
@@ -976,8 +865,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   XSPerfAccumulate("stall_cycle", dispatchBlock)
   XSPerfAccumulate("stall_cycle_rob", stall_rob)
   XSPerfAccumulate("stall_cycle_iq", dispatchBlock && uopBlockByIQ.asUInt.orR)
-  XSPerfAccumulate("stall_cycle_allowDispatch", dispatchBlock && allowDispatch.asUInt.orR)
-  XSPerfAccumulate("stall_cycle_lsqFull", dispatchBlock && lsqCanAccept)
+  XSPerfAccumulate("stall_cycle_allowDispatch", dispatchBlock && !allowDispatch.asUInt.orR)
+  XSPerfAccumulate("stall_cycle_lsqFull", dispatchBlock && !lsqCanAccept)
 
 
   val ldReason = io.debugLoadReason.getOrElse(0.U)
@@ -1110,8 +999,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
   val robStall = !isWaitForwardOrBlockBackward && !hasSpecialInst&& !io.enqRob.canAccept
   val lsqStall = !lsqCanAccept
   val roblsqStall = robStall ||  lsqStall
-  val lqStall  = lsqEnqCtrl.io.lqStall.getOrElse(false.B)
-  val sqStall  = lsqEnqCtrl.io.sqStall.getOrElse(false.B)
+  val lqStall  = io.fromLsqEnqCtrl.lqStall.getOrElse(false.B)
+  val sqStall  = io.fromLsqEnqCtrl.sqStall.getOrElse(false.B)
   val robHeadStallReason = MuxCase(OtherNotReadyStall.id.U, Seq(
     FuType.isAMO(robHeadFutype)          -> AtomicStall.id.U          ,
     FuType.isStoreVstore(robHeadFutype)  -> StoreStall.id.U           ,

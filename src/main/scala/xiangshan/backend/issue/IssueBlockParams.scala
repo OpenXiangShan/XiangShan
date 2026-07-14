@@ -250,12 +250,14 @@ case class IssueBlockParams(
 
   def needFakeS1Resp = this.isStAddrIQ
 
+  def needS1Resp = this.isStdIQ
+
   def needS2Resp = this.isStAddrIQ
 
   def needSnResp = this.isVecStuIQ || this.isLdAddrIQ
 
   // TODO needOg0Resp needOg1Resp
-  def issueTimerMaxValue: Int = 1 + Seq(needOg2Resp, needS0Resp, needFakeS1Resp, needS2Resp, needSnResp).count(_ == true)
+  def issueTimerMaxValue: Int = 1 + Seq(needOg2Resp, needS0Resp, (needFakeS1Resp || needS1Resp), needS2Resp, needSnResp).count(_ == true)
 
   def issueTimerWidth = issueTimerMaxValue.U.getWidth
 

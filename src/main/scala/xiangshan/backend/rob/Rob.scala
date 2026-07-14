@@ -557,8 +557,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // lqEnq
   io.debugEnqLsq.needAlloc.map(_(0)).zip(io.debugEnqLsq.req).foreach { case (alloc, req) =>
     when(io.debugEnqLsq.canAccept && alloc && req.valid) {
-      robEntries(req.bits.robIdx.value).debug_lqIdx.foreach(_ := req.bits.lqIdx)
-      debug_lqIdxValid(req.bits.robIdx.value) := true.B
+      robEntries(req.bits.uop.robIdx.value).debug_lqIdx.foreach(_ := req.bits.uop.lqIdx)
+      debug_lqIdxValid(req.bits.uop.robIdx.value) := true.B
     }
   }
 

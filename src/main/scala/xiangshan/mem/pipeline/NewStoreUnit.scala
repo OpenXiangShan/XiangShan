@@ -300,6 +300,9 @@ class StoreUnitS1(param: ExeUnitParams)(
     // prefetch train hint
     val prefetchTrainHint = Output(Bool())
 
+    // physical storeQueue deqPtr
+    val sqDeqPtr = Input(new SqPtr)
+
     val debugInfo = Output(new DebugLsInfoBundle)
   })
 
@@ -330,8 +333,10 @@ class StoreUnitS1(param: ExeUnitParams)(
   val cross4KPage = in.cross4KPage.get
   val cross16Byte = isUnalignTail || isUnalignHead
   val vecBaseVaddr = in.vecBaseVaddr.get
+  val illegalIssue = pipeIn.valid && !in.uop.sqIdx.withInPhysicalQueue(io.sqDeqPtr)
+  val legalIssue = pipeIn.valid && in.uop.sqIdx.withInPhysicalQueue(io.sqDeqPtr)
 
-  val kill = robIdx.needFlush(io.redirect)
+  val kill = robIdx.needFlush(io.redirect) || illegalIssue
   val fire = pipeIn.fire && !kill
 
   // Tlb & DCache
@@ -385,7 +390,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   )
 
   // Unalign tail inject to s0
-  val unalignTailInjectValid = fire && isUnalignHead
+  val unalignTailInjectValid = fire && isUnalignHead && legalIssue
   val unalignTail = Wire(io.unalignTail.bits.cloneType)
   connectSamePort(unalignTail, in)
   unalignTail.entrance := StoreEntrance.unalignTail.U
@@ -400,23 +405,24 @@ class StoreUnitS1(param: ExeUnitParams)(
   assert(!(unalignTailInjectValid && (isCbo || isCboNoZero)))
 
   // Nuke check to LoadUnit
-  val nukeQueryReqValid = fire && tlbHit && !isHwPrefetch
+  val nukeQueryReqValid = fire && tlbHit && !isHwPrefetch && legalIssue
   val nukeQueryReq = Wire(new StoreNukeQueryReq)
   nukeQueryReq.robIdx := robIdx
   nukeQueryReq.paddr := paddr
   nukeQueryReq.mask := mask
   nukeQueryReq.matchType := Mux(isCbo, StLdNukeMatchType.CacheLine, StLdNukeMatchType.Normal)
 
-  val updateLFSTValid = fire && tlbHit && isScalar && !isUnalignTail
+  val updateLFSTValid = fire && tlbHit && isScalar && !isUnalignTail && legalIssue
 
   /**
     * Generate replay feedback for the RS.
     * A miss here means the request must be replayed after translation ready.
+    * A illegalIssue means the request is out of range and must be replayed by RS.
     */
   val canFeedBack = isScalar && !isUnalignHead // unalign head should not feed back.
-  val feedBackValid = fire && canFeedBack
+  val feedBackValid = (fire || illegalIssue) && canFeedBack
   val unalignTailHit = tlbHit && io.unalignHeadTlbHit && (!cross4KPage || io.toUnalignQueue.ready)
-  val feedBackHit = Mux(isUnalignTail, unalignTailHit, tlbHit)
+  val feedBackHit = Mux(isUnalignTail, unalignTailHit, tlbHit) && legalIssue
   val needRSReplay = feedBackValid && !feedBackHit
 
   /**
@@ -433,7 +439,7 @@ class StoreUnitS1(param: ExeUnitParams)(
     *
     * [NOTE]: the normal request is also the last request,
     */
-  val toSqAddrValid = fire && !isHwPrefetch
+  val toSqAddrValid = fire && !isHwPrefetch && legalIssue
   val toSqAddr = Wire(io.toSqAddr.bits.cloneType)
   def alignVWordAddr(addr: UInt) = {
     Cat(addr(addr.getWidth - 1, DCacheVWordOffset), 0.U(DCacheVWordOffset.W))
@@ -460,6 +466,10 @@ class StoreUnitS1(param: ExeUnitParams)(
   toSqAddr.hasException := DontCare
   toSqAddr.memBackTypeMM := DontCare
   toSqAddr.cacheMiss := false.B
+
+  if(debugEn) {
+    toSqAddr.debugUop.get := uop
+  }
 
   // Pipeline connect
   val pipeOutValid = RegInit(false.B)
@@ -542,6 +552,7 @@ class StoreUnitS1(param: ExeUnitParams)(
   XSPerfAccumulate("s1_tlbHit", fire && tlbHit)
   XSPerfAccumulate("s1_tlbMiss", fire && tlbMiss)
   XSPerfAccumulate("s1_needRSReplay", needRSReplay)
+  XSPerfAccumulate("s1_sta_out_of_range_issue", pipeIn.valid && illegalIssue)
 }
 
 class StoreUnitS2(param: ExeUnitParams)(
@@ -622,7 +633,7 @@ class StoreUnitS2(param: ExeUnitParams)(
   val isNC = tlbHit && tlbAccessible && Pbmt.isNC(pbmt)
   val isMMIO = tlbHit && tlbAccessible && (Pbmt.isIO(pbmt) || Pbmt.isPMA(pbmt) && pmp.mmio)
   val isUncache = isNC || isMMIO
-  val memBackTypeMM = !pmp.mmio
+  val memBackTypeMM = !(pmp.mmio && tlbAccessible) // paddr is valid
 
   val afInaccessible = uop.exceptionVec(storeAccessFault) || pmpInaccessible
   val afVectorUncache = isVector && isUncache
@@ -681,6 +692,10 @@ class StoreUnitS2(param: ExeUnitParams)(
   io.toSqAddrRe.size := DontCare
   io.toSqAddrRe.uop := DontCare
   io.toSqAddrRe.isHyper := DontCare
+
+  if(debugEn) {
+    io.toSqAddrRe.debugUop.get := DontCare //TODO: will be remove in the future.
+  }
 
   val prefetchTrainValid = fire && io.dcacheResp.fire && tlbHit && tlbAccessible && !hasException && !isUncache
   io.prefetchTrainHint := prefetchTrainValid
@@ -896,6 +911,7 @@ class StoreUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBu
   val prefetchTrainHintS1 = Output(Bool())
   val prefetchTrainHintS2 = Output(Bool())
   val prefetchTrain = ValidIO(new TrainReqBundle())
+  val sqDeqPtr = Input(new SqPtr)
   // Feedback to RS in s2, for store issue control
   val feedBackSlow = ValidIO(new RSFeedback)
   // Writeback
@@ -937,6 +953,7 @@ class NewStoreUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSM
   s1.io.redirect := io.redirect
   s1.io.csrTrigger := io.csrTrigger
   s1.io.tlbResp <> io.tlb.resp
+  s1.io.sqDeqPtr := io.sqDeqPtr
   io.dcache.s1_paddr := s1.io.dcachePAddr
   io.dcache.s1_kill := s1.io.dcacheKill
   io.updateLFST := s1.io.updateLFST

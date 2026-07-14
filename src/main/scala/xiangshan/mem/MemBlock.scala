@@ -201,10 +201,6 @@ class ooo_to_mem(implicit p: Parameters) extends MemBlockBundle {
 class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val topToBackendBypass = new TopToBackendBundle
 
-  val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize + 1).W))
-  val sqCancelCnt = Output(UInt(log2Up(StoreQueueSize + 1).W))
-  val sqDeq = Output(UInt(log2Ceil(EnsbufferWidth + 1).W))
-  val lqDeq = Output(UInt(log2Up(CommitWidth + 1).W))
   // used by VLSU issue queue, the vector store would wait all store before it, and the vector load would wait all load
   val sqDeqPtr = Output(new SqPtr)
   val lqDeqPtr = Output(new LqPtr)
@@ -227,6 +223,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     val mmioBusy = Output(Bool())
     val lqCanAccept = Output(Bool())
     val sqCanAccept = Output(Bool())
+
+    val toLsqEnqCtrl = new ToLsqEnqCtrl(hasStore = true, hasLoad = true)
   }
 
   val storeDebugInfo = Vec(EnsbufferWidth, new Bundle {
@@ -238,6 +236,7 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
   val vecWriteback: MixedVec[MixedVec[DecoupledIO[ExuOutput]]] = vecSchdParams.genExuOutputDecoupledBundleMemBlock
 
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
+  val stdIqFeedback = Vec(StdCnt, new MemRSFeedbackIO)
   val hyuIqFeedback = Vec(HyuCnt, new MemRSFeedbackIO)
   val vstuIqFeedback= Vec(VstuCnt, new MemRSFeedbackIO(isVector = true))
   val vlduIqFeedback= Vec(VlduCnt, new MemRSFeedbackIO(isVector = true))
@@ -978,6 +977,12 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       stdExeUnits(i).io.vstdIn.valid := false.B
     }
     lsq.io.std.storeDataIn(i) := stdExeUnits(i).io.sqData
+    stdExeUnits(i).io.sqDeqPtr := lsq.io.sqDeqPtr
+
+    stdExeUnits(i).io.feedBack <> io.mem_to_ooo.stdIqFeedback(i).feedbackSlow
+
+    // std unit does not need fast feedback
+    io.mem_to_ooo.stdIqFeedback(i).feedbackFast := DontCare
   }
 
   for (i <- 0 until StaCnt) {
@@ -1016,6 +1021,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     stu.io.vecstin.valid := false.B
     stu.io.vecstin.bits := DontCare
     stu.io.vecstout.ready := false.B
+    // from storeQueue
+    stu.io.sqDeqPtr := lsq.io.sqDeqPtr
   }
 
   val sqStoutLatch = Wire(DecoupledIO(new MemToRob(staParams.head)))
@@ -1128,10 +1135,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
 
   //lsq.io.refill         := delayedDcacheRefill
   lsq.io.release        := dcache.io.lsu.release
-  lsq.io.lqCancelCnt <> io.mem_to_ooo.lqCancelCnt
-  lsq.io.sqCancelCnt <> io.mem_to_ooo.sqCancelCnt
-  lsq.io.lqDeq <> io.mem_to_ooo.lqDeq
-  lsq.io.sqDeq <> io.mem_to_ooo.sqDeq
+  io.mem_to_ooo.lsqio.toLsqEnqCtrl <> lsq.io.toLsqEnqCtrl
   // Todo: assign these
   io.mem_to_ooo.sqDeqPtr := lsq.io.sqDeqPtr
   io.mem_to_ooo.lqDeqPtr := lsq.io.lqDeqPtr
@@ -1146,6 +1150,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   ))
   vSegmentUnit.io.sbuffer.ready := sbuffer.io.in.req(0).ready
   lsq.io.sqEmpty        <> sbuffer.io.sqempty
+  sbuffer.io.physicalStoreQueueFull := lsq.io.physicalStoreQueueFull
   dcache.io.force_write := lsq.io.force_write
 
   // Initialize when unenabled difftest.
@@ -1213,6 +1218,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   (0 until VstuCnt).foreach{i =>
     vsSplit(i).io.redirect <> redirect
     vsSplit(i).io.in <> issueVldu(i)
+    vsSplit(i).io.sqDeqPtr.get := lsq.io.sqDeqPtr
     vsSplit(i).io.in.valid := issueVldu(i).valid &&
                               vStoreCanAccept(i) && !isSegment
     vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
