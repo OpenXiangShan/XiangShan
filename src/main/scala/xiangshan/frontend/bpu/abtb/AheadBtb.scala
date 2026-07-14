@@ -263,10 +263,10 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   // A taken final prediction can allocate/correct an entry. A not-taken
   // prediction only updates counters of the conditional entries that hit.
-  private val t1_trainTaken           = t1_train.finalPrediction.taken
-  private val t1_trainPosition        = t1_train.finalPrediction.cfiPosition
-  private val t1_trainAttribute       = t1_train.finalPrediction.attribute
-  private val t1_trainTarget          = t1_train.finalPrediction.target
+  private val t1_trainTaken           = t1_train.branch.taken
+  private val t1_trainPosition        = t1_train.branch.cfiPosition
+  private val t1_trainAttribute       = t1_train.branch.attribute
+  private val t1_trainTarget          = t1_train.branch.target
   private val t1_trainTargetLowerBits = getTargetLowerBits(t1_trainTarget)
 
   private val t1_condMask           = t1_meta.entries.map(e => e.hit && e.attribute.isConditional)
