@@ -39,6 +39,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     with ICacheAddrHelper
     with ICacheDataHelper
     with ICacheMissUpdateHelper
+    with ICacheMaybeRvcHelper
     with HalfAlignHelper {
 
   class ICacheMainPipeIO(implicit p: Parameters) extends ICacheBundle {
@@ -210,8 +211,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_maybeRvcMaskVec   = s1_maybeRvcShiftInfo.maybeRvcMaskVec
   private val s1_sramShiftMaybeRvc = s1_maybeRvcShiftInfo.sramShiftMaybeRvc
 
-  private val s1_wayMask     = VecInit(s1_wayLookupEntry.map(_.waymask))
-  private val s1_isCrossLine = VecInit(s1_req.map(req => isCrossLine(req.startVAddr, req.endPosition)))
+  private val s1_wayMask        = VecInit(s1_wayLookupEntry.map(_.waymask))
+  private val s1_isCrossLine    = VecInit(s1_req.map(req => isCrossLine(req.startVAddr, req.endPosition)))
   private val s1_takenCfiOffset = s1_maybeRvcShiftInfo.takenCfiOffset
 
   private val s1_pTag   = s1_wayLookupEntry(0).pTag
@@ -259,26 +260,24 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_mshrDatas       = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))
   private val s1_mshrMaybeRvcMap = fromMiss.bits.maybeRvcMap
 
-  // MSHR returns one raw cache-line maybeRvcMap, so align it in one step according to
-  // the hit request and line. This mirrors the four SRAM alignment cases without the
-  // s0/s1 fine/coarse split.
-  private val s1_shiftMshrMaybeRvc = Wire(UInt(MaxInstNumPerBlock.W))
-  s1_shiftMshrMaybeRvc := Mux(
-    s1_mshrValid(0).reduce(_ || _),
+  // MSHR returns one raw cache-line maybeRvcMap. Two fetch requests may access
+  // the same cache line with different offsets, so generate a per-fetch-request
+  // aligned map in one step. This mirrors the four SRAM alignment cases without
+  // the s0/s1 fine/coarse split.
+  private val s1_shiftMshrMaybeRvc = Wire(Vec(MaxFetchReqNum, UInt(MaxInstNumPerBlock.W)))
+  s1_shiftMshrMaybeRvc(0) := Mux(
+    s1_mshrValid(0)(0),
+    s1_mshrMaybeRvcMap >> s1_shiftNum(0),
+    Cat(s1_mshrMaybeRvcMap, 0.U(1.W)) << s1_shiftNum(1)
+  )
+  s1_shiftMshrMaybeRvc(1) := Mux(
+    s1_mshrValid(1)(0),
     Mux(
-      s1_mshrValid(0)(0),
-      s1_mshrMaybeRvcMap >> s1_shiftNum(0),
-      Cat(s1_mshrMaybeRvcMap, 0.U(1.W)) << s1_shiftNum(1)
+      s1_shiftFlag,
+      s1_mshrMaybeRvcMap >> s1_shiftNum(2),
+      s1_mshrMaybeRvcMap << s1_shiftNum(2)
     ),
-    Mux(
-      s1_mshrValid(1)(0),
-      Mux(
-        s1_shiftFlag,
-        s1_mshrMaybeRvcMap >> s1_shiftNum(2),
-        s1_mshrMaybeRvcMap << s1_shiftNum(2)
-      ),
-      Cat(s1_mshrMaybeRvcMap, 0.U(2.W)) << s1_shiftNum(3)
-    )
+    Cat(s1_mshrMaybeRvcMap, 0.U(2.W)) << s1_shiftNum(3)
   )
 
   private val s1_mshrValidReg       = RegNext(s1_mshrValid)
@@ -313,7 +312,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       DataHoldBypass(
         Mux(
           s1_mshrValidReg(i)(j),
-          s1_mshrMaybeRvcMapReg,
+          s1_mshrMaybeRvcMapReg(i),
           s1_sramShiftMaybeRvc(i)(j)
         ),
         RegNext(s0_fire) || s1_mshrValidReg(i)(j)
@@ -420,14 +419,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   io.toIfu.req.bits.firstRange := s1_firstBlockRange
   io.toIfu.req.bits.totalRange := s1_totalBlockRange
   io.toIfu.req.bits.info.zipWithIndex.foreach { case (req, i) =>
-    req.valid            := s1_req(i).valid
-    req.startVAddr       := s1_req(i).startVAddr
-    req.ftqIdx           := s1_req(i).ftqIdx
+    req.valid                := s1_req(i).valid
+    req.startVAddr           := s1_req(i).startVAddr
+    req.ftqIdx               := s1_req(i).ftqIdx
     req.takenCfiOffset.valid := s1_req(i).taken
     req.takenCfiOffset.bits  := s1_takenCfiOffset(i)
-    req.size             := s1_takenCfiOffset(i) +& 1.U
-    req.data             := s1_data(i)
-    req.perf_isCrossLine := s1_isCrossLine(i)
+    req.size                 := s1_takenCfiOffset(i) +& 1.U
+    req.data                 := s1_data(i)
+    req.perf_isCrossLine     := s1_isCrossLine(i)
 
     req.icacheMeta.exception          := s1_exceptionOut
     req.icacheMeta.pmpMmio            := s1_pmpMmio

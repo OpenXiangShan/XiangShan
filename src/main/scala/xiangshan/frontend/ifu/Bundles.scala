@@ -94,23 +94,19 @@ class FetchBlock(implicit p: Parameters) extends IfuBundle {
   }
 }
 class IfuData(implicit p: Parameters) extends IfuBundle with HasICacheParameters {
-  val index:       Vec[UInt] = Vec(FetchBlockInstNum, UInt(log2Ceil(FetchBlockInstNum).W))
+  val index:       Vec[UInt] = Vec(FetchBlockInstNum, UInt(log2Ceil(ICacheLineBytes / 2).W))
   val maybeRvcMap: UInt      = UInt(FetchBlockInstNum.W)
   val firstRange:  UInt      = UInt(FetchBlockInstNum.W)
   val totalRange:  UInt      = UInt(FetchBlockInstNum.W)
   val blockSel:    UInt      = UInt(FetchBlockInstNum.W)
 
   def fromICacheReq(req: MainPipeToIfuReq): IfuData = {
-    val reqStartOffset = req.info.map(_.startVAddr(5, 1))
-
-    val dupData = VecInit((0 until MaxFetchReqNum).map { i =>
-      Cat(req.info(i).data, req.info(i).data).asTypeOf(Vec(FetchBlockInstNum * 2, UInt(16.W)))
-    })
+    val reqStartOffset = req.info.map(_.startVAddr(log2Ceil(ICacheLineBytes / 2), 1))
 
     def getDataIndex(i: Int): (Bool, UInt, UInt) = {
       val fromReq0 = i.U < req.info(0).size
-      val req0Idx  = (reqStartOffset(0) +& i.U)(log2Ceil(FetchBlockInstNum * 2) - 1, 0)
-      val req1Idx  = (reqStartOffset(1) +& (i.U - req.info(0).size))(log2Ceil(FetchBlockInstNum * 2) - 1, 0)
+      val req0Idx  = (reqStartOffset(0) +& i.U)(log2Ceil(ICacheLineBytes / 2) - 1, 0)
+      val req1Idx  = (reqStartOffset(1) +& (i.U - req.info(0).size))(log2Ceil(ICacheLineBytes / 2) - 1, 0)
       (fromReq0, req0Idx, req1Idx)
     }
 

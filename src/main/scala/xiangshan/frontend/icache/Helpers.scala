@@ -21,6 +21,7 @@ import utility.UIntToMask
 import xiangshan.frontend.FtqFetchRequest
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.HasBpuParameters
 
 trait ICacheEccHelper extends HasICacheParameters {
@@ -114,101 +115,6 @@ trait ICacheMetaHelper extends HasICacheParameters {
 }
 
 trait ICacheDataHelper extends HasICacheParameters with ICacheCacheLineHelper {
-  def shiftMaybeRvc(
-      maybeRvcMap: UInt,
-      shiftNum:    UInt,
-      leftShift:   Bool
-  ): UInt = Mux(leftShift, maybeRvcMap << shiftNum, maybeRvcMap >> shiftNum)(MaxInstNumPerBlock - 1, 0)
-
-  def genMaybeRvcShiftInfo(
-      req:            Vec[FtqFetchRequest],
-      wayLookupEntry: Vec[WayLookupEntry]
-  ): MaybeRvcShiftInfo = {
-    val info = Wire(new MaybeRvcShiftInfo)
-
-    val reqStart        = VecInit(req.map(_.startVAddr(log2Ceil(MaxInstNumPerBlock), 1)))
-    val takenCfiOffset = VecInit(req.map(req => getFtqOffset(req.startVAddr, req.endPosition)))
-    val fetchSize       = VecInit(takenCfiOffset.map(_ +& 1.U))
-    val firstFetchSize  = fetchSize(0)
-    val secondFetchSize = fetchSize(1)
-    val totalFetchSize  = firstFetchSize +& secondFetchSize
-    val firstBlockRange = genInstRange(firstFetchSize)
-    val totalBlockRange = Mux(req(1).valid, genInstRange(totalFetchSize), firstBlockRange)
-
-    info.firstBlockRange := firstBlockRange
-    info.totalBlockRange := totalBlockRange
-    info.takenCfiOffset  := takenCfiOffset
-
-    // Line 0 starts at req0.start, so shift right to align its first valid bit to bit 0.
-    info.shiftNum(0) := reqStart(0)
-
-    // Line 1 is the cross-line tail of req0. Its valid bits start at bit 0 and are placed
-    // after the line-0 fragment. The extra +1 shift is encoded by Cat(map, 0) below.
-    info.shiftNum(1) := ~reqStart(0)
-
-    // Line 2 belongs to req1's first cache line. It may be before or after the end of req0,
-    // so shiftFlag selects whether it should move right or left.
-    info.shiftFlag   := reqStart(1) > firstFetchSize
-    info.shiftNum(2) := Mux(info.shiftFlag, reqStart(1) - firstFetchSize, firstFetchSize - reqStart(1))
-
-    // Line 3 is the cross-line tail of req1. The extra +2 shift is encoded by Cat(map, 0.U(2.W)) below.
-    info.shiftNum(3) := ~reqStart(1) + req(0).takenCfiOffset.bits
-
-    // Apply the low bits in s0 so the registered map only needs coarse shifts in s1.
-    info.sramShiftMaybeRvc(0)(0) := shiftMaybeRvc(
-      wayLookupEntry(0).maybeRvcMap(0),
-      info.shiftNum(0),
-      leftShift = false.B
-    )
-    info.sramShiftMaybeRvc(0)(1) :=
-      shiftMaybeRvc(
-        Cat(wayLookupEntry(0).maybeRvcMap(1), 0.U(1.W)),
-        info.shiftNum(1),
-        leftShift = true.B
-      )
-    info.sramShiftMaybeRvc(1)(0) :=
-      shiftMaybeRvc(
-        wayLookupEntry(1).maybeRvcMap(0),
-        info.shiftNum(2),
-        leftShift = !info.shiftFlag
-      )
-    info.sramShiftMaybeRvc(1)(1) :=
-      shiftMaybeRvc(
-        Cat(wayLookupEntry(1).maybeRvcMap(1), 0.U(2.W)),
-        info.shiftNum(3),
-        leftShift = true.B
-      )
-
-    info.maybeRvcMaskVec(0)(0) := genInstRange(
-      Mux(
-        wayLookupEntry(0).isCrossLine,
-        MaxInstNumPerBlock.U - info.shiftNum(0),
-        firstFetchSize
-      )
-    )
-    info.maybeRvcMaskVec(0)(1) := firstBlockRange & ~info.maybeRvcMaskVec(0)(0)
-    info.maybeRvcMaskVec(1)(0) := Mux(
-      req(1).valid,
-      genInstRange(
-        firstFetchSize +& Mux(
-          wayLookupEntry(1).isCrossLine,
-          MaxInstNumPerBlock.U - reqStart(1),
-          secondFetchSize
-        )
-      ) & ~firstBlockRange,
-      0.U
-    )
-    info.maybeRvcMaskVec(1)(1) := Mux(
-      req(1).valid,
-      totalBlockRange & ~(firstBlockRange | info.maybeRvcMaskVec(1)(0)),
-      0.U
-    )
-    info
-  }
-
-  def genInstRange(size: UInt): UInt =
-    Mux(size >= MaxInstNumPerBlock.U, ~0.U(MaxInstNumPerBlock.W), UIntToMask(size, MaxInstNumPerBlock))
-
   def getBankIdx(blkOffset: UInt): UInt =
     (blkOffset >> rowOffBits).asUInt
 
@@ -368,4 +274,102 @@ trait ICacheCacheLineHelper extends HasICacheParameters with HasBpuParameters {
       // Generic fallback for other align sizes.
       getFetchBlockEndLineOffset(startPc, endPosition)._1
     }
+}
+
+trait ICacheMaybeRvcHelper extends HasICacheParameters with ICacheCacheLineHelper with HalfAlignHelper {
+  def shiftMaybeRvc(
+      maybeRvcMap: UInt,
+      shiftNum:    UInt,
+      leftShift:   Bool
+  ): UInt = Mux(leftShift, maybeRvcMap << shiftNum, maybeRvcMap >> shiftNum)(MaxInstNumPerBlock - 1, 0)
+
+  def genInstRange(size: UInt): UInt =
+    Mux(size >= MaxInstNumPerBlock.U, ~0.U(MaxInstNumPerBlock.W), UIntToMask(size, MaxInstNumPerBlock))
+
+  def genMaybeRvcShiftInfo(
+      req:            Vec[FtqFetchRequest],
+      wayLookupEntry: Vec[WayLookupEntry]
+  ): MaybeRvcShiftInfo = {
+    val info = Wire(new MaybeRvcShiftInfo)
+
+    val reqStart         = VecInit(req.map(_.startVAddr(log2Ceil(MaxInstNumPerBlock), 1)))
+    val takenCfiOffset   = VecInit(req.map(req => getFtqOffset(req.startVAddr, req.endPosition)))
+    val blockIsCrossLine = VecInit(req.map(req => isCrossLine(req.startVAddr, req.endPosition)))
+    val fetchSize        = VecInit(takenCfiOffset.map(_ +& 1.U))
+    val firstFetchSize   = fetchSize(0)
+    val secondFetchSize  = fetchSize(1)
+    val totalFetchSize   = firstFetchSize +& secondFetchSize
+    val firstBlockRange  = genInstRange(firstFetchSize)
+    val totalBlockRange  = Mux(req(1).valid, genInstRange(totalFetchSize), firstBlockRange)
+
+    info.firstBlockRange := firstBlockRange
+    info.totalBlockRange := totalBlockRange
+    info.takenCfiOffset  := takenCfiOffset
+
+    // Line 0 starts at req0.start, so shift right to align its first valid bit to bit 0.
+    info.shiftNum(0) := reqStart(0)
+
+    // Line 1 is the cross-line tail of req0. Its valid bits start at bit 0 and are placed
+    // after the line-0 fragment. The extra +1 shift is encoded by Cat(map, 0) below.
+    info.shiftNum(1) := ~reqStart(0)
+
+    // Line 2 belongs to req1's first cache line. It may be before or after the end of req0,
+    // so shiftFlag selects whether it should move right or left.
+    info.shiftFlag   := reqStart(1) > firstFetchSize
+    info.shiftNum(2) := Mux(info.shiftFlag, reqStart(1) - firstFetchSize, firstFetchSize - reqStart(1))
+
+    // Line 3 is the cross-line tail of req1. The extra +2 shift is encoded by Cat(map, 0.U(2.W)) below.
+    info.shiftNum(3) := ~reqStart(1) + takenCfiOffset(0)
+
+    // Apply the low bits in s0 so the registered map only needs coarse shifts in s1.
+    info.sramShiftMaybeRvc(0)(0) := shiftMaybeRvc(
+      wayLookupEntry(0).maybeRvcMap(0),
+      info.shiftNum(0),
+      leftShift = false.B
+    )
+    info.sramShiftMaybeRvc(0)(1) :=
+      shiftMaybeRvc(
+        Cat(wayLookupEntry(0).maybeRvcMap(1), 0.U(1.W)),
+        info.shiftNum(1),
+        leftShift = true.B
+      )
+    info.sramShiftMaybeRvc(1)(0) :=
+      shiftMaybeRvc(
+        wayLookupEntry(1).maybeRvcMap(0),
+        info.shiftNum(2),
+        leftShift = !info.shiftFlag
+      )
+    info.sramShiftMaybeRvc(1)(1) :=
+      shiftMaybeRvc(
+        Cat(wayLookupEntry(1).maybeRvcMap(1), 0.U(2.W)),
+        info.shiftNum(3),
+        leftShift = true.B
+      )
+
+    info.maybeRvcMaskVec(0)(0) := genInstRange(
+      Mux(
+        blockIsCrossLine(0),
+        MaxInstNumPerBlock.U - info.shiftNum(0),
+        firstFetchSize
+      )
+    )
+    info.maybeRvcMaskVec(0)(1) := firstBlockRange & ~info.maybeRvcMaskVec(0)(0)
+    info.maybeRvcMaskVec(1)(0) := Mux(
+      req(1).valid,
+      genInstRange(
+        firstFetchSize +& Mux(
+          blockIsCrossLine(1),
+          MaxInstNumPerBlock.U - reqStart(1),
+          secondFetchSize
+        )
+      ) & ~firstBlockRange,
+      0.U
+    )
+    info.maybeRvcMaskVec(1)(1) := Mux(
+      req(1).valid,
+      totalBlockRange & ~(firstBlockRange | info.maybeRvcMaskVec(1)(0)),
+      0.U
+    )
+    info
+  }
 }
