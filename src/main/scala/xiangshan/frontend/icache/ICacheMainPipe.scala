@@ -194,11 +194,11 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
    * - send request to Mshr if ICache miss
    * - response to Ifu
    */
-  private val s1_valid          = ValidHold(s0_fire, s1_fire, s1_flush)
-  private val s1_req            = RegEnable(s0_req, s0_fire)
-  private val s1_wayLookupEntry = RegEnable(s0_wayLookupEntry, s0_fire)
-  private val s1_exceptionInfo  = RegEnable(s0_exceptionInfo, s0_fire)
-  private val s1_twoFetchValid  = RegEnable(s0_req(1).valid, s0_fire)
+  private val s1_valid             = ValidHold(s0_fire, s1_fire, s1_flush)
+  private val s1_req               = RegEnable(s0_req, s0_fire)
+  private val s1_wayLookupEntry    = RegEnable(s0_wayLookupEntry, s0_fire)
+  private val s1_exceptionInfo     = RegEnable(s0_exceptionInfo, s0_fire)
+  private val s1_twoFetchValid     = RegEnable(s0_req(1).valid, s0_fire)
   private val s1_maybeRvcShiftInfo = RegEnable(s0_maybeRvcShiftInfo, s0_fire)
   private val s1_firstBlockRange   = s1_maybeRvcShiftInfo.firstBlockRange
   private val s1_totalBlockRange   = s1_maybeRvcShiftInfo.totalBlockRange
@@ -256,26 +256,24 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_mshrDatas       = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))
   private val s1_mshrMaybeRvcMap = fromMiss.bits.maybeRvcMap
 
-  // MSHR returns one raw cache-line maybeRvcMap, so align it in one step according to
-  // the hit request and line. This mirrors the four SRAM alignment cases without the
-  // s0/s1 fine/coarse split.
-  private val s1_shiftMshrMaybeRvc = Wire(UInt(MaxInstNumPerBlock.W))
-  s1_shiftMshrMaybeRvc := Mux(
-    s1_mshrValid(0).reduce(_ || _),
+  // MSHR returns one raw cache-line maybeRvcMap. Two fetch requests may access
+  // the same cache line with different offsets, so generate a per-fetch-request
+  // aligned map in one step. This mirrors the four SRAM alignment cases without
+  // the s0/s1 fine/coarse split.
+  private val s1_shiftMshrMaybeRvc = Wire(Vec(MaxFetchReqNum, UInt(MaxInstNumPerBlock.W)))
+  s1_shiftMshrMaybeRvc(0) := Mux(
+    s1_mshrValid(0)(0),
+    s1_mshrMaybeRvcMap >> s1_shiftNum(0),
+    Cat(s1_mshrMaybeRvcMap, 0.U(1.W)) << s1_shiftNum(1)
+  )
+  s1_shiftMshrMaybeRvc(1) := Mux(
+    s1_mshrValid(1)(0),
     Mux(
-      s1_mshrValid(0)(0),
-      s1_mshrMaybeRvcMap >> s1_shiftNum(0),
-      Cat(s1_mshrMaybeRvcMap, 0.U(1.W)) << s1_shiftNum(1)
+      s1_shiftFlag,
+      s1_mshrMaybeRvcMap >> s1_shiftNum(2),
+      s1_mshrMaybeRvcMap << s1_shiftNum(2)
     ),
-    Mux(
-      s1_mshrValid(1)(0),
-      Mux(
-        s1_shiftFlag,
-        s1_mshrMaybeRvcMap >> s1_shiftNum(2),
-        s1_mshrMaybeRvcMap << s1_shiftNum(2)
-      ),
-      Cat(s1_mshrMaybeRvcMap, 0.U(2.W)) << s1_shiftNum(3)
-    )
+    Cat(s1_mshrMaybeRvcMap, 0.U(2.W)) << s1_shiftNum(3)
   )
 
   private val s1_mshrValidReg       = RegNext(s1_mshrValid)
@@ -310,7 +308,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       DataHoldBypass(
         Mux(
           s1_mshrValidReg(i)(j),
-          s1_mshrMaybeRvcMapReg,
+          s1_mshrMaybeRvcMapReg(i),
           s1_sramShiftMaybeRvc(i)(j)
         ),
         RegNext(s0_fire) || s1_mshrValidReg(i)(j)

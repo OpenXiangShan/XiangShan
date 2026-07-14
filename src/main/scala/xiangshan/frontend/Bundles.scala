@@ -116,9 +116,9 @@ class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
   val redirectFlush: Bool                             = Output(Bool())
 }
 
-class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
+class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
   val req:        DecoupledIO[MainPipeToIfuReq] = DecoupledIO(new MainPipeToIfuReq)
-  val corrupt:    Vec[Vec[Bool]]                     = Vec(FetchPorts, Vec(PortNumber, Bool()))
+  val corrupt:    Vec[Vec[Bool]]                = Vec(FetchPorts, Vec(PortNumber, Bool()))
   val topdown:    ICacheTopdownInfo             = Output(new ICacheTopdownInfo)
   val perf:       ICachePerfInfo                = Output(new ICachePerfInfo)
   val fetchReady: Bool                          = Output(Bool())

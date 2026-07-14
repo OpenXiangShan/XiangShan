@@ -175,18 +175,18 @@ class Ifu(implicit p: Parameters) extends IfuModule
     Mux(s0_hasException, 1.U((log2Ceil(FetchBlockInstNum) + 1).W), PopCount(s0_instrEndMask.asUInt & s0_totalRange))
   private val s0_rawFirstDataDupWire  = VecInit(Seq.fill(NumCacheDataDuplicate)(io.fromICache.req.bits.info(0).data))
   private val s0_rawSecondDataDupWire = VecInit(Seq.fill(NumCacheDataDuplicate)(io.fromICache.req.bits.info(1).data))
-  private val s0_firstEndIndex        = Wire(UInt(FetchBlockInstOffsetWidth.W))
-  private val s0_secondEndIndex       = Wire(UInt(FetchBlockInstOffsetWidth.W))
-  private val s0_secondStartIndex     = Wire(UInt(FetchBlockInstOffsetWidth.W))
+  private val s0_firstEndIndex        = Wire(UInt(log2Ceil(ICacheLineBytes / 2).W))
+  private val s0_secondEndIndex       = Wire(UInt(log2Ceil(ICacheLineBytes / 2).W))
+  private val s0_secondStartIndex     = Wire(UInt(log2Ceil(ICacheLineBytes / 2).W))
   s0_firstEndIndex := io.fromICache.req.bits.info(0).startVAddr(
-    log2Ceil(ICacheLineBytes) - 1,
+    log2Ceil(ICacheLineBytes / 2),
     instOffsetBits
   ) + io.fromICache.req.bits.info(0).takenCfiOffset.bits
   s0_secondEndIndex := io.fromICache.req.bits.info(1).startVAddr(
-    log2Ceil(ICacheLineBytes) - 1,
+    log2Ceil(ICacheLineBytes / 2),
     instOffsetBits
   ) + io.fromICache.req.bits.info(1).takenCfiOffset.bits
-  s0_secondStartIndex := io.fromICache.req.bits.info(1).startVAddr(log2Ceil(ICacheLineBytes) - 1, instOffsetBits)
+  s0_secondStartIndex := io.fromICache.req.bits.info(1).startVAddr(log2Ceil(ICacheLineBytes / 2), instOffsetBits)
   /* --------------------------------------------------------------------------------------------------------------
      stage 1
      - cat half rvi instruction
@@ -227,15 +227,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
     PopCount(s1_firstRawInstrEndMask),
     s1_specInstrCount
   )
-  private val s1_instrValid =
-    Mux(s1_instrCount === FetchBlockInstNum.U, ~0.U(FetchBlockInstNum.W), UIntToMask(s1_instrCount, FetchBlockInstNum))
 
-  dontTouch(s1_fetchBlock)
-  private val s1_instrCount = Mux(
-    s1_invalidTaken(0),
-    PopCount(s1_firstRawInstrEndMask),
-    s1_specInstrCount
-  )
   private val s1_instrValid =
     Mux(s1_instrCount === FetchBlockInstNum.U, ~0.U(FetchBlockInstNum.W), UIntToMask(s1_instrCount, FetchBlockInstNum))
   private val s1_prevIBufEnqPtrDup  = RegInit(DuplicateInit(Seq("instr", "valid"), 0.U.asTypeOf(new IBufPtr)))
