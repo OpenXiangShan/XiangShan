@@ -235,6 +235,8 @@ class MainPipeToIfuReq(implicit p: Parameters) extends ICacheBundle {
 
 class MainPipeToIfuIO(implicit p: Parameters) extends ICacheBundle {
   val req: DecoupledIO[Vec[MainPipeToIfuReq]] = DecoupledIO(Vec(FetchPorts, new MainPipeToIfuReq))
+  // for timing fix, sent 1 cycle after req is fired
+  val corrupt: Vec[Vec[Bool]] = Vec(FetchPorts, Vec(PortNumber, Bool()))
 }
 
 class WayLookupToMainPipeBundle(implicit p: Parameters) extends ICacheBundle {

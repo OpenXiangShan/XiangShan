@@ -32,7 +32,7 @@ class ICacheMetaArray(implicit p: Parameters) extends ICacheModule with ICacheAd
   val io: ICacheMetaArrayIO = IO(new ICacheMetaArrayIO)
 
   // sanity check
-  require(MetaEntryBits == (new ICacheMetaEntry).getWidth)
+  require(MetaSramWidth == (new ICacheMetaEntry).getWidth)
 
   private val banks = Seq.tabulate(PortNumber)(i => Module(new ICacheMetaInterleavedBank(i)))
 

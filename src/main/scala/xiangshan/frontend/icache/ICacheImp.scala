@@ -28,6 +28,7 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.LazyModuleImp
 import org.chipsalliance.cde.config.Parameters
 import utility.HasPerfEvents
+import utility.RegNextWithEnable
 import utility.XSPerfAccumulate
 import utils.AddrField
 import xiangshan.L1CacheErrorInfo
@@ -74,6 +75,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   println(s"  DataBanks: $DataBanks banks")
   println(s"  DataEccUnit: $DataEccUnit bits")
   println(s"  DataSramWidth(data + ecc + padding): $ICacheDataBits + $DataEccBits + $DataPaddingBits = $DataSramWidth")
+  println(s"  MetaSramWidth(meta + ecc): $MetaBits + $MetaEccBits = $MetaSramWidth")
   println(s"  Ecc(meta, data): $MetaEcc, $DataEcc")
   println(s"  AliasTagBits: $AliasTagBits")
   println(s"  CtrlUnit:")
@@ -214,6 +216,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   // send final accepted fetch bundle
   io.toIfu.req <> mainPipe.io.toIfu.req
+  io.toIfu.corrupt := mainPipe.io.toIfu.corrupt
 
   // perf
   io.toIfu.perf.hits         := mainPipe.io.perf.rawHits
@@ -234,15 +237,8 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
 
   bus.a <> missUnit.io.memAcquire
 
-  // Parity error port
-  private val errors      = mainPipe.io.errors
-  private val errorsValid = errors.map(e => e.valid).reduce(_ | _)
-  io.error.bits <> RegEnable(
-    PriorityMux(errors.map(e => e.valid -> e.bits)),
-    0.U.asTypeOf(errors(0).bits),
-    errorsValid
-  )
-  io.error.valid := RegNext(errorsValid, false.B)
+  // send parity error to BEU
+  io.error <> RegNextWithEnable(mainPipe.io.error)
 
   XSPerfAccumulate(
     "softPrefetch_drop_not_ready",

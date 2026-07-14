@@ -98,16 +98,17 @@ class FtqPrefetchRequest(implicit p: Parameters) extends FrontendBundle with ICa
   def crossCacheline: Bool = super.isCrossLine(this.startVAddr, this.takenCfiOffset)
 }
 
-class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with ICacheCacheLineHelper {
-  val valid:               Bool        = Bool()
-  val startVAddr:          PrunedAddr  = PrunedAddr(VAddrBits)
-  val nextLineVAddr:       PrunedAddr  = PrunedAddr(VAddrBits)
-  val takenCfiOffset:      Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
-  val isCrossLine:         Bool        = Bool()
-  val ftqIdx:              FtqPtr      = new FtqPtr
-  val bankSel:             Vec[UInt]   = Vec(PortNumber, UInt(DataBanks.W))
-  val vSetIdx:             Vec[UInt]   = Vec(PortNumber, UInt(idxBits.W))
-  val hasBackendException: Bool        = Bool()
+class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
+  val valid:               Bool            = Bool()
+  val vAddr:               Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
+  def startVAddr:          PrunedAddr      = vAddr(0)
+  def nextLineVAddr:       PrunedAddr      = vAddr(1)
+  val takenCfiOffset:      Valid[UInt]     = Valid(UInt(CfiPositionWidth.W))
+  val isCrossLine:         Bool            = Bool()
+  val ftqIdx:              FtqPtr          = new FtqPtr
+  val bankSel:             Vec[UInt]       = Vec(PortNumber, UInt(DataBanks.W))
+  val vSetIdx:             Vec[UInt]       = Vec(PortNumber, UInt(idxBits.W))
+  val hasBackendException: Bool            = Bool()
 }
 
 class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
@@ -117,8 +118,9 @@ class FtqToICacheIO(implicit p: Parameters) extends FrontendBundle {
   val redirectFlush: Bool                              = Output(Bool())
 }
 
-class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle {
+class ICacheToIfuIO(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
   val req:        DecoupledIO[Vec[MainPipeToIfuReq]] = DecoupledIO(Vec(FetchPorts, new MainPipeToIfuReq))
+  val corrupt:    Vec[Vec[Bool]]                     = Vec(FetchPorts, Vec(PortNumber, Bool()))
   val topdown:    ICacheTopdownInfo                  = Output(new ICacheTopdownInfo)
   val perf:       ICachePerfInfo                     = Output(new ICachePerfInfo)
   val fetchReady: Bool                               = Output(Bool())
