@@ -120,6 +120,8 @@ class TageTable(
       io.readReq(0).valid && io.readReq(0).bits.bankMask(bankIdx),
       io.readReq(1).valid && io.readReq(1).bits.bankMask(bankIdx)
     )
+    val readConflict = readValid(0) && readValid(1) &&
+      io.readReq(0).bits.setIdx =/= io.readReq(1).bits.setIdx
     val readSetIdx = Mux(readValid(0), io.readReq(0).bits.setIdx, io.readReq(1).bits.setIdx)
 
     entryBank.foreach { way =>
@@ -130,7 +132,7 @@ class TageTable(
       way.io.r.req.valid       := readValid.reduce(_ || _) && !usefulResetInFlightMask(bankIdx)
       way.io.r.req.bits.setIdx := readSetIdx
     }
-    assert(!(readValid(0) && readValid(1)), s"read conflict in tage_table_${tableIdx}_bank_${bankIdx}")
+    assert(!readConflict, s"read conflict in tage_table_${tableIdx}_bank_${bankIdx}")
   }
 
   // delay one cycle for better timing

@@ -80,9 +80,11 @@ class ScTable(
   sram.zipWithIndex.foreach { case (bank, bankIdx) =>
     val predictReadValid = io.predictReadReq.valid && io.predictReadReq.bits.bankMask(bankIdx)
     val trainReadValid   = io.trainReadReq.valid && io.trainReadReq.bits.bankMask(bankIdx)
+    val readConflict = predictReadValid && trainReadValid &&
+      io.predictReadReq.bits.setIdx =/= io.trainReadReq.bits.setIdx
     bank.io.r.req.valid       := predictReadValid || trainReadValid
     bank.io.r.req.bits.setIdx := Mux(predictReadValid, io.predictReadReq.bits.setIdx, io.trainReadReq.bits.setIdx)
-    assert(!(predictReadValid && trainReadValid), s"read conflict in sc${tableType}${tableIdx}_${bankIdx}")
+    assert(!readConflict, s"read conflict in sc${tableType}${tableIdx}_${bankIdx}")
   }
 
   io.sramResetDone := sram.map(_.io.resetDone).reduce(_ && _)

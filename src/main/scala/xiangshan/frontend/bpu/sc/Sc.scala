@@ -392,8 +392,24 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
         (!(t0_meta.useScPred(predIdx) && t0_meta.scPred(predIdx) === taken) || !(t0_meta.useScPred(predIdx) &&
           t0_meta.tagePredValid(predIdx) && t0_meta.scPred(predIdx) === t0_meta.tagePred(predIdx)))
     })
-  private val t0_needWrite    = t0_writeValidVec.reduce(_ || _)
-  private val t0_bankConflict = t0_needWrite && s0_fire && t0_bankMask === s0_bankMask
+  private val t0_needWrite = t0_writeValidVec.reduce(_ || _)
+  private val t0_setIdxConflict = (
+    s0_pathIdx.zip(t0_pathIdx).map { case (predictIdx, trainIdx) =>
+      PathEnable.B && predictIdx =/= trainIdx
+    } ++
+      s0_globalIdx.zip(t0_globalIdx).map { case (predictIdx, trainIdx) =>
+        s0_commonHR.valid && t0_commonHR.valid && GlobalEnable.B && predictIdx =/= trainIdx
+      } ++
+      s0_bwIdx.zip(t0_bwIdx).map { case (predictIdx, trainIdx) =>
+        s0_commonHR.valid && t0_commonHR.valid && BWEnable.B && predictIdx =/= trainIdx
+      } ++
+      Seq(
+        ImliEnable.B && s0_imliIdx =/= t0_imliIdx,
+        BiasEnable.B && s0_biasIdx =/= t0_biasIdx
+      )
+  ).reduce(_ || _)
+  private val t0_bankConflict =
+    t0_needWrite && s0_fire && t0_bankMask === s0_bankMask && t0_setIdxConflict
   io.trainReady := !t0_bankConflict
   pathTable.zip(t0_pathIdx).foreach { case (table, idx) =>
     table.io.trainReadReq.valid         := t0_fire && t0_needWrite && PathEnable.B

@@ -180,6 +180,12 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   private val t0_bankIdx  = tables.head.getBankIndex(t0_startPc)
   private val t0_bankMask = UIntToOH(t0_bankIdx, NumBanks)
 
+  private val t0_foldedHist = getFoldedHist(io.fromPhr.foldedPathHistForTrain)
+  private val t0_setIdx = VecInit((tables zip t0_foldedHist).map { case (table, hist) =>
+    table.getSetIndex(t0_startPc, hist.forIdx)
+  })
+  dontTouch(t0_setIdx)
+
   private val t0_condMask = VecInit(t0_branches.map(branch => branch.valid && branch.bits.attribute.isConditional))
   private val t0_hasCond  = t0_condMask.reduce(_ || _)
 
@@ -206,18 +212,13 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
   }.reduce(_ && _)
   private val t0_needRead = !t0_useMeta
 
-  private val t0_readBankConflict = t0_hasCond && t0_needRead && s0_fire && t0_bankIdx === s0_bankIdx
+  private val t0_readBankConflict =
+    t0_hasCond && t0_needRead && s0_fire && t0_bankIdx === s0_bankIdx && !(s0_setIdx === t0_setIdx)
   io.trainReady := !t0_readBankConflict
 
   // t0_readBankConflict can be high even there's no train.valid, causing perf counters to be inaccurate
   // so we use a debug_ signal for perf counters
   private val debug_readBankConflict = io.debug_trainValid && t0_readBankConflict
-
-  private val t0_foldedHist = getFoldedHist(io.fromPhr.foldedPathHistForTrain)
-  private val t0_setIdx = VecInit((tables zip t0_foldedHist).map { case (table, hist) =>
-    table.getSetIndex(t0_startPc, hist.forIdx)
-  })
-  dontTouch(t0_setIdx)
 
   tables.zipWithIndex.foreach { case (table, tableIdx) =>
     table.io.readReq(1).valid         := t0_fire && t0_needRead
