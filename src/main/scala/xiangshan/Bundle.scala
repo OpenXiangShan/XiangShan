@@ -228,6 +228,12 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   val stFtqOffset: UInt = UInt(FetchBlockInstOffsetWidth.W)
   val stIsRVC  = Bool()
 
+  def newFtqIdx: FtqPtr = Mux(
+    RedirectLevel.flushItself(level) && (ftqOffset === 0.U || ftqOffset === 1.U && !isRVC),
+    ftqIdx,
+    ftqIdx + 1.U
+  )
+
   val debug_runahead_checkpoint_id = UInt(64.W)
   val debugIsCtrl = Bool()
   val debugIsMemVio = Bool()
