@@ -45,23 +45,30 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val phr    = RegInit(0.U.asTypeOf(Vec(PhrHistoryLength, Bool())))
   private val phrPtr = RegInit(0.U.asTypeOf(new PhrPtr))
 
-  // s1Train commits to the physical PHR one cycle later. A redirect/s3 override cancels the pending write.
-  private val s1PendingValid     = RegInit(false.B)
-  private val s1PendingLowBits   = RegInit(0.U(PathHashHighWidth.W))
-  private val s1PendingShiftBits = RegInit(0.U(Shamt.W))
-  private val s1PendingWrite     = s1PendingValid && !io.train.redirect.valid && !io.train.s3_override
-  private val s1PendingBits      = Cat(s1PendingLowBits, s1PendingShiftBits)
+  // s1Train and s3 override commit to the physical PHR one cycle later.
+  // A redirect cancels any pending write; s3 override also cancels pending writes from s1.
+  private val pendingValid     = RegInit(false.B)
+  private val pendingTaken     = RegInit(false.B)
+  private val pendingLowBits   = RegInit(0.U(PathHashHighWidth.W))
+  private val pendingShiftBits = RegInit(0.U(Shamt.W))
+  private val pendingBits      = Cat(pendingLowBits, pendingShiftBits)
 
   // Logical PHR view used by same-cycle reads. Add any delayed physical PHR write here if it should be visible
   // before it commits to `phr`.
   private val visiblePhr = WireInit(phr)
-  when(s1PendingValid) {
-    for (i <- 0 until PathHashWidth) {
-      visiblePhr((phrPtr + (i + 1).U).value) := s1PendingBits(i)
+  when(pendingValid) {
+    when(pendingTaken) {
+      for (i <- 0 until PathHashWidth) {
+        visiblePhr((phrPtr + (i + 1).U).value) := pendingBits(i)
+      }
+    }.otherwise {
+      for (i <- 1 to PathHashHighWidth) {
+        visiblePhr((phrPtr + i.U).value) := pendingLowBits(i - 1)
+      }
     }
   }
 
-  // Read committed physical PHR only, without any pending-write bypass.
+  // Read PHR through the logical view, including pending-write bypass.
   private def getPhr(ptr: PhrPtr): UInt =
     (Cat(visiblePhr.asUInt, visiblePhr.asUInt) >> (ptr.value + 1.U))(PhrHistoryLength - 1, 0)
 
@@ -123,7 +130,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s1S0PhrLowBits       = WireInit(0.U(PathHashHighWidth.W))
   private val s1S0FoldedPhr        = WireInit(0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)))
   private val s1Update             = WireInit(0.U.asTypeOf(new PhrUpdateResult))
-  private val updatePhrLowBits     = WireInit(0.U(PathHashHighWidth.W))
   private val redirectPhr          = WireInit(0.U(PhrHistoryLength.W))
 
   // Organize the input data into the structure required for PHR updates
@@ -191,14 +197,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   s1S0PhrPtr           := Mux(io.s1Train.taken, s1Update.phrPtr, s1_phrPtr)
   s1S0PhrLowBits       := Mux(io.s1Train.taken, s1Update.phrLowBits, s1_phrLowBits)
 
-  private val currentShiftBits = MuxCase(
-    0.U(Shamt.W),
-    Seq(
-      redirectData.valid -> redirectShiftBits,
-      s3_override        -> s3ShiftBits
-    )
-  )
-
   phrPtr := MuxCase(
     phrPtr,
     Seq(
@@ -213,13 +211,6 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
       redirectData.valid -> redirectS0PhrPtr,
       s3_override        -> s3S0PhrPtr,
       s1_valid           -> s1S0PhrPtr
-    )
-  )
-  updatePhrLowBits := MuxCase(
-    0.U(PathHashHighWidth.W),
-    Seq(
-      redirectData.valid -> redirectS0PhrLowBits,
-      s3_override        -> s3S0PhrLowBits
     )
   )
 
@@ -284,35 +275,34 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s1AbtbS0FoldedPhr = Mux1H(io.s1Train.abtbFirstTakenBrOH, s1AbtbS0FoldedPhrCandidates)
   s1S0FoldedPhr := Mux(io.s1Train.abtbValid, s1AbtbS0FoldedPhr, s1UbtbS0FoldedPhr)
 
-  private val currentUpdateValid = redirectData.valid || s3_overrideData.valid
-  private val currentUpdateTaken = MuxCase(
-    false.B,
-    Seq(
-      redirectData.valid -> redirectData.taken,
-      s3_override        -> s3_overrideData.taken
-    )
-  )
-  // If this update includes a taken branch, updatePtr should be s0_phrPtr + Shamt.U; otherwise, it should be s0_phrPtr.
-  private val currentUpdatePtr = Mux(currentUpdateTaken, s0_phrPtr + Shamt.U, s0_phrPtr)
+  private val redirectBits = Cat(redirectS0PhrLowBits, redirectShiftBits)
 
   private val s1UpdateWins = s1_valid && io.s1Train.taken && !redirectData.valid && !s3_override
-  s1PendingValid := s1UpdateWins
-  when(s1UpdateWins) {
-    s1PendingLowBits   := s1S0PhrLowBits
-    s1PendingShiftBits := s1ShiftBits
+  private val s3UpdateWins = s3_override && !redirectData.valid
+  pendingValid := s3UpdateWins || s1UpdateWins
+  when(s3UpdateWins) {
+    pendingTaken     := s3_overrideData.taken
+    pendingLowBits   := s3S0PhrLowBits
+    pendingShiftBits := s3ShiftBits
+  }.elsewhen(s1UpdateWins) {
+    pendingTaken     := true.B
+    pendingLowBits   := s1S0PhrLowBits
+    pendingShiftBits := s1ShiftBits
   }
-  when(s1PendingValid) {
-    for (i <- 0 until PathHashWidth) {
-      phr((phrPtr + (i + 1).U).value) := s1PendingBits(i)
-    }
-  }
-  when(currentUpdateValid) {
-    for (i <- 1 to PathHashHighWidth) {
-      phr((currentUpdatePtr + i.U).value) := updatePhrLowBits(i - 1)
-    }
-    when(currentUpdateTaken) {
-      for (i <- 0 until Shamt) {
-        phr((currentUpdatePtr - i.U).value) := currentShiftBits(Shamt - 1 - i)
+
+  private val phrWriteValid   = redirectData.valid || pendingValid
+  private val phrWriteTaken   = Mux(redirectData.valid, redirectData.taken, pendingTaken)
+  private val phrWritePtr     = Mux(redirectData.valid, s0_phrPtr, phrPtr)
+  private val phrWriteBits    = Mux(redirectData.valid, redirectBits, pendingBits)
+  private val phrWriteLowBits = Mux(redirectData.valid, redirectS0PhrLowBits, pendingLowBits)
+  when(phrWriteValid) {
+    when(phrWriteTaken) {
+      for (i <- 0 until PathHashWidth) {
+        phr((phrWritePtr + (i + 1).U).value) := phrWriteBits(i)
+      }
+    }.otherwise {
+      for (i <- 1 to PathHashHighWidth) {
+        phr((phrWritePtr + i.U).value) := phrWriteLowBits(i - 1)
       }
     }
   }
