@@ -1296,6 +1296,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     )))
   }
   val cpu_xbar1to2 = Seq.fill(params.NumHarts)(AXI4Xbar())
+  val cpu_imsic_filter_nodes = Seq.fill(params.NumHarts)(AXI4IdentityNode())
   // instance modules
   val imsicTop = LazyModule(new imsicPbusTop(params))
   val hni_mNode = AXI4MasterNode(Seq(AXI4MasterPortParameters(
@@ -1317,7 +1318,8 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
   ))
   for (i <- 0 until params.NumHarts) {
     cpu_xbar1to2(i) := AXI4Buffer() := cpu_mNodes(i)
-    imsicTop.Cbus.cpus(i) := cpu_xbar1to2(i)
+    imsicTop.Cbus.cpus(i) := cpu_imsic_filter_nodes(i)
+    cpu_imsic_filter_nodes(i) := cpu_xbar1to2(i)
     dmTop.Cbus.cpus(i) := cpu_xbar1to2(i)
   }
   val peri_xbar = AXI4Xbar()
@@ -1414,12 +1416,19 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
       master.w <> slave.w
       slave.b <> master.b
 
-      val arFireD = withClockAndReset(clock, reset) { RegNext(slave.ar.fire, false.B) }
+      val rValidReg = withClockAndReset(clock, reset) { RegInit(false.B) }
       val readIdD = withClockAndReset(clock, reset) {
         RegEnable(slave.ar.bits.id, 0.U.asTypeOf(slave.ar.bits.id), slave.ar.fire)
       }
+      withClockAndReset(clock, reset) {
+        when (slave.ar.fire) {
+          rValidReg := true.B
+        }.elsewhen(slave.r.fire) {
+          rValidReg := false.B
+        }
+      }
       slave.ar.ready := true.B
-      slave.r.valid := arFireD
+      slave.r.valid := rValidReg
       slave.r.bits.id := readIdD
       slave.r.bits.data := 0.U
       slave.r.bits.resp := AXI4Parameters.RESP_OKAY
@@ -1430,7 +1439,10 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
     hni_mNode.out.head._1.aw.bits.addr := noc2msiAwAddr
     peri_mNode.out.head._1 <> s_noc2cfg.viewAs[AXI4Bundle] // uncore peri cfg slave io
     cpu_mNodes.zip(s_cpu2uncore).foreach { case (node, io) =>
-      connectWriteOnlyWithZeroReadResponse(node.out.head._1, io.viewAs[AXI4Bundle])
+      node.out.head._1 <> io.viewAs[AXI4Bundle]
+    }
+    cpu_imsic_filter_nodes.foreach { node =>
+      connectWriteOnlyWithZeroReadResponse(node.out.head._1, node.in.head._1)
     }
     // connection about cross-die access ports for debug
     syscnt.axi4node.foreach(_.getWrappedValue.viewAs[AXI4Bundle] <> peri_s1Node.in.head._1)
@@ -1552,4 +1564,3 @@ object PbusGen extends App {
 // u_dm_w2axi.io.dmint := dmintGlobalNoLocal
 // u_dm_w2axi.io.hartResetReq := hartResetReqNoLocal
 // u_dm_w2axi.io.hartIsInReset := hartIsInResetNoLocal
-
