@@ -632,7 +632,21 @@ class CtrlBlockImp(
   rat.io.hartId := io.fromTop.hartId
   rat.io.redirect := s1_s3_redirect.valid
   rat.io.rabCommits := rob.io.rabCommits
-  rat.io.diffCommits.foreach(_ := rob.io.diffCommits.get)
+  rat.io.diffRatCommitRobIdx.foreach(_ := rob.io.diffRatCommitRobIdx.get)
+  rat.io.renameUpdates.foreach { updates =>
+    updates.zip(rename.io.out).foreach { case (update, renameOut) =>
+      update.valid := renameOut.fire && !s1_s3_redirect.valid
+      update.bits.robIdx := renameOut.bits.robIdx
+      update.bits.lastUop := renameOut.bits.lastUop
+      update.bits.ldest := renameOut.bits.ldest
+      update.bits.pdest := renameOut.bits.pdest
+      update.bits.rfWen := renameOut.bits.rfWen
+      update.bits.fpWen := renameOut.bits.fpWen
+      update.bits.vecWen := renameOut.bits.vecWen
+      update.bits.v0Wen := renameOut.bits.v0Wen
+      update.bits.vlWen := renameOut.bits.vlWen
+    }
+  }
   rat.io.intRenamePorts := rename.io.intRenamePorts
   rat.io.fpRenamePorts := rename.io.fpRenamePorts
   rat.io.vecRenamePorts := rename.io.vecRenamePorts
