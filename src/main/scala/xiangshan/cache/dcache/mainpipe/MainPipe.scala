@@ -179,6 +179,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val readline_error = Input(Bool())
     val readline_error_delayed = Input(Bool())
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
+    val data_write_dup = Vec(DCacheBanks, Valid(new L1BankedDataWriteReqCtrl))
 
     // meta array
     val meta_read = DecoupledIO(new MetaReadReq)
@@ -875,6 +876,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     )
   )
   assert(!(s3_valid && banked_wmask.orR && !update_data))
+
+  for (i <- 0 until DCacheBanks) {
+    io.data_write_dup(i).valid := s3_valid && s3_update_data_cango && update_data
+    io.data_write_dup(i).bits.way_en := s3_way_en
+    io.data_write_dup(i).bits.addr := s3_req.vaddr
+  }
 
   s3_ready := !s3_valid || s3_can_go
   s3_s0_set_conflict := s3_valid && s3_idx === s0_idx && !s3_isPrefetch

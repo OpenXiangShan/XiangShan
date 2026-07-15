@@ -189,6 +189,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   val maxSegIdx         = instMicroOp.vl - 1.U
   val maxNfields        = instMicroOp.uop.vpu.nf
   val latchVaddr        = RegInit(0.U(XLEN.W))
+  val latchVaddrDup     = RegInit(0.U(XLEN.W))
 
   XSError((segmentIdx > maxSegIdx) && instMicroOpValid, s"segmentIdx > vl, something error!\n")
   XSError((fieldIdx > maxNfields) &&  instMicroOpValid, s"fieldIdx > nfields, something error!\n")
@@ -435,12 +436,17 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   val misalignLowVaddr                = Cat(latchVaddr(XLEN - 1, 3), 0.U(3.W))
   val misalignHighVaddr               = Cat(latchVaddr(XLEN - 1, 3) + 1.U, 0.U(3.W))
   val notCross16ByteVaddr             = Cat(latchVaddr(XLEN - 1, 4), 0.U(4.W))
+  val misalignLowVaddrDup             = Cat(latchVaddrDup(XLEN - 1, 3), 0.U(3.W))
+  val misalignHighVaddrDup            = Cat(latchVaddrDup(XLEN - 1, 3) + 1.U, 0.U(3.W))
+  val notCross16ByteVaddrDup          = Cat(latchVaddrDup(XLEN - 1, 4), 0.U(4.W))
  //  val misalignVaddr                   = Mux(notCross16ByteReg, notCross16ByteVaddr, Mux(isFirstSplit, misalignLowVaddr, misalignHighVaddr))
   val misalignVaddr                   = Mux(isFirstSplit, misalignLowVaddr, misalignHighVaddr)
+  val misalignVaddrDup                = Mux(isFirstSplit, misalignLowVaddrDup, misalignHighVaddrDup)
   val tlbReqVaddr                     = Mux(isMisalignReg, misalignVaddr, vaddr)
   //latch vaddr
   when(state === s_tlb_req && !isMisalignReg){
     latchVaddr := vaddr
+    latchVaddrDup := vaddr
   }
   /**
    * tlb req and tlb resq
@@ -686,6 +692,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   val wmask     = genVWmask(latchVaddr, alignedType(1, 0)) & Fill(VLENB, segmentActive)
   val bmask     = genBasemask(latchVaddr, alignedType(1, 0)) & Fill(VLENB, segmentActive)
   val dcacheReqVaddr = Mux(isMisalignReg, misalignVaddr, latchVaddr)
+  val dcacheReqVaddrDup = Mux(isMisalignReg, misalignVaddrDup, latchVaddrDup)
   val dcacheReqPaddr = Mux(isMisalignReg, Cat(instMicroOp.paddr(instMicroOp.paddr.getWidth - 1, PageOffsetWidth), misalignVaddr(PageOffsetWidth - 1, 0)), instMicroOp.paddr)
   /**
    * rdcache req, write request don't need to query dcache, because we write element to sbuffer
@@ -694,12 +701,14 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.rdcache.req.valid              := state === s_cache_req && isVSegLoad
   io.rdcache.req.bits.cmd           := MemoryOpConstants.M_XRD
   io.rdcache.req.bits.vaddr         := dcacheReqVaddr
+  io.rdcache.req.bits.vaddr_dup     := dcacheReqVaddrDup
   io.rdcache.req.bits.mask          := mask
   io.rdcache.req.bits.data          := flowData
   io.rdcache.pf_source              := LOAD_SOURCE.U
   io.rdcache.req.bits.id            := DontCare
   io.rdcache.resp.ready             := true.B
-  io.rdcache.s1_paddr               := dcacheReqPaddr
+  io.rdcache.s1_paddr_dup_lsu       := dcacheReqPaddr
+  io.rdcache.s1_paddr_dup_dcache    := dcacheReqPaddr
   io.rdcache.s1_kill                := false.B
   io.rdcache.s2_kill                := false.B
   if (env.FPGAPlatform){
