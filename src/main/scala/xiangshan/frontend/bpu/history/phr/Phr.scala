@@ -55,27 +55,39 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
 
   // Logical PHR view used by same-cycle reads. Add any delayed physical PHR write here if it should be visible
   // before it commits to `phr`.
-  private val visiblePhr = WireInit(phr)
-  when(pendingValid) {
-    when(pendingTaken) {
-      for (i <- 0 until PathHashWidth) {
-        visiblePhr((phrPtr + (i + 1).U).value) := pendingBits(i)
-      }
-    }.otherwise {
-      for (i <- 1 to PathHashHighWidth) {
-        visiblePhr((phrPtr + i.U).value) := pendingLowBits(i - 1)
-      }
-    }
-  }
+
+  // private val visiblePhr = WireInit(phr)
+  // when(pendingValid) {
+  //   when(pendingTaken) {
+  //     for (i <- 0 until PathHashWidth) {
+  //       visiblePhr((phrPtr + (i + 1).U).value) := pendingBits(i)
+  //     }
+  //   }.otherwise {
+  //     for (i <- 1 to PathHashHighWidth) {
+  //       visiblePhr((phrPtr + i.U).value) := pendingLowBits(i - 1)
+  //     }
+  //   }
+  // }
 
   // Read PHR through the logical view, including pending-write bypass.
   private def getPhr(ptr: PhrPtr): UInt =
-    (Cat(visiblePhr.asUInt, visiblePhr.asUInt) >> (ptr.value + 1.U))(PhrHistoryLength - 1, 0)
+    (Cat(phr.asUInt, phr.asUInt) >> (ptr.value + 1.U))(PhrHistoryLength - 1, 0)
 
   private def getRedirectPhr(phrMeta: PhrMeta): UInt = {
     val redirectErrorPhr = getPhr(phrMeta.phrPtr)
     Cat(redirectErrorPhr(PhrHistoryLength - 1, PathHashHighWidth), phrMeta.phrLowBits)
   }
+
+  private val oldPhrValue = getPhr(phrPtr)
+  private val pendingPhrValue = Mux(
+    pendingValid,
+    Mux(
+      pendingTaken,
+      Cat(oldPhrValue(PhrHistoryLength - 1, PathHashWidth), pendingBits),
+      Cat(oldPhrValue(PhrHistoryLength - 1, PathHashHighWidth), pendingLowBits)
+    ),
+    oldPhrValue
+  )
 
   /*
    * PHR train from redirect/s2_prediction/s3_prediction
@@ -102,9 +114,9 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   private val s0_phrPtr = WireInit(0.U.asTypeOf(new PhrPtr))
   private val s1_phrPtr = RegEnable(s0_phrPtr, 0.U.asTypeOf(new PhrPtr), s0_fire)
 
-  private val s1_phrValue   = getPhr(s1_phrPtr)
-  private val phrValue      = getPhr(phrPtr)
-  private val s1_phrLowBits = s1_phrValue(PathHashHighWidth - 1, 0)
+  // private val s1_phrValue   = getPhr(s1_phrPtr)
+  private val phrValue      = pendingPhrValue
+  private val s1_phrLowBits = pendingPhrValue(PathHashHighWidth - 1, 0)
   private val s1_phrMeta    = WireInit(0.U.asTypeOf(new PhrMeta))
   s1_phrMeta.phrPtr     := s1_phrPtr
   s1_phrMeta.phrLowBits := s1_phrLowBits
@@ -255,7 +267,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   )
 
   private val s1_oldestBits = Wire(new PhrAllFoldedHistoryOldestBits(AllFoldedHistoryInfo))
-  s1_oldestBits.read(VecInit(getPhr(s1_phrPtr).asBools), s1_phrPtr)
+  s1_oldestBits.read(VecInit(pendingPhrValue.asBools), s1_phrPtr)
   private val s1UbtbS0FoldedPhr = getNextFoldedPhr(
     s1UbtbUpdateData,
     s1_oldestBits,
@@ -433,7 +445,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   dontTouch(s0_foldedPhr)
   dontTouch(s1_foldedPhrReg)
   dontTouch(s2_foldedPhrReg)
-  dontTouch(s1_phrValue)
+  dontTouch(pendingPhrValue)
   dontTouch(phrValue)
   dontTouch(histFoldedPhr)
   dontTouch(redirectPhr)
