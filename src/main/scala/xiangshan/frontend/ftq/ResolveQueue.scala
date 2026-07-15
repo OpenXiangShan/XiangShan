@@ -85,13 +85,13 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
 
   private val backendFilteredResolve = io.backendResolve.map { backendResolve =>
     val filteredResolve = Wire(Valid(new ResolveWithSource))
-    filteredResolve.valid := backendResolve.valid && !(backendResolve.bits.attribute.isDirect || backendResolve.bits.attribute.isReturn) &&
-      !(backendRedirect.reduce(_ || _) && backendResolve.bits.ftqIdx > backendRedirectPtr)
+    filteredResolve.valid := backendResolve.valid &&
+      !(backendResolve.bits.attribute.isDirect || backendResolve.bits.attribute.isReturn)
     filteredResolve.bits.fromResolve(ResolveSource.Backend, backendResolve.bits)
     filteredResolve
   }
   private val ifuFilteredResolve = Wire(Valid(new ResolveWithSource))
-  ifuFilteredResolve.valid := io.ifuResolve.valid && !backendRedirect.reduce(_ || _)
+  ifuFilteredResolve.valid := io.ifuResolve.valid
   ifuFilteredResolve.bits.fromResolve(ResolveSource.Ifu, io.ifuResolve.bits)
 
   private val filteredResolve = backendFilteredResolve ++ Seq(ifuFilteredResolve)
@@ -147,7 +147,7 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
     branch.valid && !hit(i) && !hitPrevious(i).fold(false.B)(_ || _)
   }
 
-  // Reslove consists of resolves fromt the backend andd the ifu.
+  // backendParams.BrhCnt backend resolves + 1 IFU resolve.
   private val enqIndex = WireDefault(VecInit.fill(backendParams.BrhCnt + 1)(0.U(log2Ceil(ResolveQueueSize).W)))
   enqIndex := VecInit((0 until backendParams.BrhCnt + 1).map { i =>
     val newIndex = MuxCase(

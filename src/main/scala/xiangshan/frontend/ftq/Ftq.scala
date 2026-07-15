@@ -365,7 +365,13 @@ class Ftq(implicit p: Parameters) extends FtqModule
   when(flushTrainCache) {
     trainCache.valid := false.B
   }.elsewhen(resolveQueue.io.bpuTrain.fire) {
-    val needFlush = backendRedirect.valid && resolveQueue.io.bpuTrain.bits.ftqIdx > backendRedirect.bits.ftqIdx
+    // Due to timing considerations, resolve queue does not flush resolves in the first cycle of a redirect. As a
+    // result, these resolves may be enqueued and flushed in the next cycle. However, they may also be dequeued in the
+    // next cycle without being flushed in time. Therefore, the redirect is propagated one cycle later here to prevent
+    // this case.
+    val needFlush = backendRedirect.valid && resolveQueue.io.bpuTrain.bits.ftqIdx > backendRedirect.bits.ftqIdx ||
+      RegNext(backendRedirect.valid) && resolveQueue.io.bpuTrain.bits.ftqIdx > RegNext(backendRedirect.bits.ftqIdx)
+
     trainCache.valid     := !needFlush
     trainCache.bits.meta := metaQueueResolve(resolveQueue.io.bpuTrain.bits.ftqIdx.value)
     trainCache.bits.startPcVec.foreach { dup =>
