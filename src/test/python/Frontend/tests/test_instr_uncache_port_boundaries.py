@@ -26,6 +26,7 @@ _FETCH_BLOCK_SIZE = 64
 _UNCACHE_BEAT_BYTES = 8
 _PBMT_PMA = 0
 _PBMT_NC = 1
+_PBMT_IO = 2
 _IFU_UNCACHE_INVALID = 0
 _IFU_UNCACHE_WAIT_LAST_COMMIT = 1
 _IFU_UNCACHE_SEND_REQ = 2
@@ -81,6 +82,12 @@ def _prepare_cross_page_rvi_stream(env) -> None:
     payload[tail_offset:tail_offset + 4] = int(_ADDI_X0_X0_0).to_bytes(4, "little")
     env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
     LoadProgramSequence(image=ProgramImage(payload=bytes(payload), base_addr=_MMIO_BASE), step_cycles=0).run(env)
+
+
+def _prepare_cross_page_rvc_stream(env) -> None:
+    payload = int(_CNOP).to_bytes(2, "little") * (_SV39_PAGE_SIZE // 2 + 128)
+    env.memory.mmio_ranges.append((_MMIO_BASE, _MMIO_BASE + len(payload)))
+    LoadProgramSequence(image=ProgramImage(payload=payload, base_addr=_MMIO_BASE), step_cycles=0).run(env)
 
 
 def _prepare_normal_and_mmio_cnop_stream(env, *, instr_count: int = 256) -> None:
@@ -256,6 +263,7 @@ def _prepare_sv39_mapped_pbmt_nc_cfi_stream(
     instr_count: int = 256,
     bin_path: str | os.PathLike[str] | None = None,
     map_seed: int = _SV39_RANDOM_MAP_SEED,
+    pbmt: int = _PBMT_NC,
 ) -> tuple[list[tuple[int, int, bool]], Sv39Mapping]:
     if bin_path is not None:
         payload = Path(bin_path).read_bytes()
@@ -274,7 +282,7 @@ def _prepare_sv39_mapped_pbmt_nc_cfi_stream(
     mapping = _map_random_sv39_program(
         env,
         payload_size=len(payload),
-        pbmt=_PBMT_NC,
+        pbmt=int(pbmt),
         vaddr=vaddr,
         paddr=paddr,
         paddr_pages=paddr_pages,
@@ -868,6 +876,8 @@ def test_uncache_redirect_to_mmio_while_icache_response_pending(env):
 
     assert int(env.icache_agent.get_stats().get("resp_beat_count", 0)) > 0
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) > 0
+    assert not any(int(obs.pc) == _NORMAL_BASE for obs in env.monitor.observations)
+    assert env.functional_coverage.key_hit("fetch_path_switch", "icache_to_mmio_clean")
     assert not env.monitor.get_errors()
 
 
@@ -908,6 +918,7 @@ def test_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
     _initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
     _configure_exec_pmp_4k(env, base_addr=mapping.paddr)
     _configure_exec_cacheable_pma_4k(env, base_addr=mapping.paddr)
+    env.backend_model.set_can_accept(0)
     env.uncache_agent.set_a_ready(0)
     _force_redirect_to(env, mapping.vaddr)
 
@@ -921,9 +932,11 @@ def test_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
         "a_addr": hex(int(env.uncache_if.a_bits_address.value)),
     }
     assert _require_first_dut_signal(env, _IFU_UNCACHE_TO_UNCACHE_VALID_SIGNALS) == 1
+    assert env.functional_coverage.key_hit("uncache_ordering", "pbmt_nc_non_mmio_no_commit_gate")
     env.uncache_agent.set_a_ready(None)
     assert _wait_for_request_addr(env, mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
     assert _wait_for_resp_count(env, 1, max_cycles=6000), env.uncache_agent.get_stats()
+    env.backend_model.set_can_accept(1)
     assert _wait_for_observed_pc_sequence(env, expected_block_pcs, max_cycles=12000), {
         "observed": [(int(obs.pc), int(obs.instr), bool(obs.is_rvc)) for obs in env.monitor.observations[-16:]],
         "ptw": env.ptw_agent.get_stats(),
@@ -941,6 +954,44 @@ def test_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
     assert int(observed_by_pc[cfi_pc].instr) == _JAL_X0_PLUS_4
     assert not bool(observed_by_pc[cfi_pc].is_rvc)
     assert int(env.ptw_agent.get_stats().get("resp_count", 0)) >= 1
+    assert not env.monitor.get_errors()
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_pbmt_io_waits_commit_on_cacheable_pma(env):
+    expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
+        env,
+        vaddr=_NORMAL_BASE,
+        paddr=_NORMAL_PHYS_BASE,
+        pbmt=_PBMT_IO,
+    )
+    expected_block_pcs = [pc for pc, _, _ in expected_block]
+    _initialize_sv39_fetch(env, reset_vector=mapping.vaddr)
+    pbmte = getattr(env.dut, "io_tlbCsr_mPBMTE", None)
+    if pbmte is None:
+        pytest.skip("current generated DUT does not expose io_tlbCsr_mPBMTE required for PBMT.IO")
+    pbmte.value = 1
+    _configure_exec_pmp_4k(env, base_addr=mapping.paddr)
+    _configure_exec_cacheable_pma_4k(env, base_addr=mapping.paddr)
+    env.backend_model.set_can_accept(0)
+    _force_redirect_to(env, mapping.vaddr)
+
+    assert _wait_for_ptw_resp(env, max_cycles=6000), env.ptw_agent.get_stats()
+    assert _wait_for_uncache_a_valid_addr(env, mapping.paddr, max_cycles=6000), {
+        "ptw": env.ptw_agent.get_stats(),
+        "uncache": env.uncache_agent.get_stats(),
+        "mapping": mapping,
+    }
+    assert env.functional_coverage.key_hit("uncache_ordering", "pbmt_io_wait_commit")
+    assert _require_first_dut_signal(env, _IFU_UNCACHE_TO_UNCACHE_VALID_SIGNALS) == 1
+    assert _wait_for_request_addr(env, mapping.paddr, max_cycles=6000), env.uncache_agent.get_stats()
+    assert _wait_for_resp_count(env, 1, max_cycles=6000), env.uncache_agent.get_stats()
+    env.backend_model.set_can_accept(1)
+    assert _wait_for_observed_pc_sequence(env, expected_block_pcs, max_cycles=12000), {
+        "observed": [(int(obs.pc), int(obs.instr), bool(obs.is_rvc)) for obs in env.monitor.observations[-16:]],
+        "ptw": env.ptw_agent.get_stats(),
+        "uncache": env.uncache_agent.get_stats(),
+    }
     assert not env.monitor.get_errors()
 
 
@@ -1068,6 +1119,7 @@ def test_uncache_pbmt_nc_mmio_pma_second_fetch_waits_commit(env):
         "uncache": env.uncache_agent.get_stats(),
         "mapping": mapping,
     }
+    assert env.functional_coverage.key_hit("uncache_ordering", "pbmt_nc_pmp_mmio_wait_commit")
     assert not env.monitor.get_errors()
 
 
@@ -1155,6 +1207,7 @@ def test_uncache_pbmt_nc_pending_redirect_to_cacheable_non_mmio_has_enough_reque
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) == same_page_uncache_req_count, (
         env.uncache_agent.get_stats()
     )
+    assert env.functional_coverage.key_hit("uncache_path_switch", "uncache_to_icache_clean")
     uncache_stats = env.uncache_agent.get_stats()
     icache_stats = env.icache_agent.get_stats()
 
@@ -1205,6 +1258,7 @@ def test_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(env):
     recovery_index = _first_observed_index(env, nc_pcs[0])
     assert recovery_index >= 0
     assert not any(int(obs.pc) in set(cacheable_pcs) for obs in list(env.monitor.observations)[recovery_index:])
+    assert env.functional_coverage.key_hit("uncache_path_switch", "icache_to_nc_clean")
     assert not env.monitor.get_errors()
 
 
@@ -1321,6 +1375,30 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     assert stats.get("request_addrs", []).count(next_page) == 1
     assert int(observed.instr) == _ADDI_X0_X0_0
     assert not bool(observed.is_rvc)
+    assert not env.monitor.get_errors()
+    assert env.functional_coverage.key_hit("uncache_page_boundary", "rvi_tail_resend_next_page")
+
+
+@pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
+def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):
+    _prepare_cross_page_rvc_stream(env)
+    _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
+
+    first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
+    next_page = _MMIO_BASE + _SV39_PAGE_SIZE
+    assert _wait_for_request_addr(env, first_beat, max_cycles=5000), env.uncache_agent.get_stats()
+    assert _wait_for_observed_pc(env, _CROSS_PAGE_PC, max_cycles=8000), {
+        "observed": [(int(obs.pc), int(obs.instr), bool(obs.is_rvc)) for obs in env.monitor.observations[-16:]],
+        "uncache": env.uncache_agent.get_stats(),
+    }
+    observed = next(obs for obs in env.monitor.observations if int(obs.pc) == _CROSS_PAGE_PC)
+    stats = env.uncache_agent.get_stats()
+
+    assert int(observed.instr) == _ADDI_X0_X0_0
+    assert bool(observed.is_rvc)
+    assert stats.get("request_addrs", []).count(first_beat) == 1
+    assert next_page not in stats.get("request_addrs", [])
+    assert env.functional_coverage.key_hit("uncache_page_boundary", "rvc_tail_no_resend_before_delivery")
     assert not env.monitor.get_errors()
 
 

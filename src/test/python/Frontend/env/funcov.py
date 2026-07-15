@@ -604,6 +604,25 @@ def _sample_ifu_cfvec_coverage(recorder, cycle: int, slot: int, pc: int, instr: 
     recorder.mark("ifu_fetch_block_position", pos_bin, cycle, evidence)
     recorder.mark("ifu_cfi_decode_type", cfi_bin, cycle, evidence)
 
+    page = int(pc) & ~0xFFF
+    page_tail = recorder._uncache_page_tail_requests.get(page)
+    if bool(is_rvc) and (int(pc) & 0xFFF) == 0xFFE and page_tail is not None:
+        if not bool(page_tail.get("next_page_requested", False)):
+            recorder.mark(
+                "uncache_page_boundary",
+                "rvc_tail_no_resend_before_delivery",
+                cycle,
+                {**evidence, **page_tail},
+            )
+    if not bool(is_rvc) and (int(pc) & 0xFFF) == 0xFFE and page_tail is not None:
+        if bool(page_tail.get("next_page_requested", False)):
+            recorder.mark(
+                "uncache_page_boundary",
+                "rvi_tail_resend_next_page",
+                cycle,
+                {**evidence, **page_tail},
+            )
+
     if bool(is_rvc):
         recorder._ifu_seen_rvc = True
         recorder.mark("ifu_boundary_event", "rvc_start", cycle, evidence)

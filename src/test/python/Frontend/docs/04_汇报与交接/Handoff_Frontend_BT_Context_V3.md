@@ -40,14 +40,12 @@
 已完成文件：
 
 - `03_功能覆盖率建模/Frontend_BT_功能覆盖率建模方案_V3.md`
-- `03_功能覆盖率建模/Frontend_BT_功能覆盖率映射_初版_V3.csv`
-- `03_功能覆盖率建模/Frontend_BT_功能覆盖率试点清单_V3.csv`
-- `frontend_bt_functional_coverage_pilot.csv`
+- `03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv`
 
 已明确的策略：
 
 - V3 文档保留为建模基线。
-- 当前 active pilot CSV 以 `frontend_bt_functional_coverage_pilot.csv` 为准。
+- `frontend_bt_functional_coverage_pilot.csv` 是唯一 active registry；名称保留兼容性，不再表示试点阶段。
 - 当前 active CSV 已对齐到主线 testcase 名称。
 
 ### 3.4 汇报材料已准备
@@ -109,7 +107,7 @@ V3 阶段建议优先打通以下 6 类基础场景：
 
 如果需要再继续向细节下钻，再补读：
 
--- `03_功能覆盖率建模/Frontend_BT_功能覆盖率映射_初版_V3.csv`
+- `03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv`
 -- `06_测试台设计/`
 
 ## 8. 当前文件清单
@@ -118,9 +116,7 @@ V3 阶段建议优先打通以下 6 类基础场景：
 
 - `02_测试点分解/Frontend_功能测试点分解_层级版_V3.csv`
 - `03_功能覆盖率建模/Frontend_BT_功能覆盖率建模方案_V3.md`
-- `03_功能覆盖率建模/Frontend_BT_功能覆盖率映射_初版_V3.csv`
-- `03_功能覆盖率建模/Frontend_BT_功能覆盖率试点清单_V3.csv`
-- `frontend_bt_functional_coverage_pilot.csv`
+- `03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv`
 - `frontend_bt_pilot_acceptance_status.md`
 - `05_试点闭环与主线迁移/Frontend_BT_首轮覆盖率试点打通总结.md`
 - `05_试点闭环与主线迁移/Frontend_BT_批量覆盖率闭环矩阵.md`

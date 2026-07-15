@@ -4,9 +4,10 @@
 
 当前使用方式如下：
 
-1. 本文件保留 V3 阶段对 Frontend BT funcov 的分层设计原则。
-2. 当前 active 的主线试点 CSV 为同目录的 `frontend_bt_functional_coverage_pilot.csv`。
-3. 当前目录下的 `Frontend_BT_功能覆盖率映射_初版_V3.csv` 和 `Frontend_BT_功能覆盖率试点清单_V3.csv` 作为规划基线继续维护。
+1. 本文件保留 V3 阶段的建模原则和全量推进规则。
+2. `frontend_bt_functional_coverage_pilot.csv` 是唯一 active coverage registry；文件名为兼容现有工具保留 `pilot`，不再表示试点阶段。
+3. `../02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv` 是唯一叶子测试点、状态、testcase 和 evidence 的事实源。
+4. `Frontend_BT_功能覆盖率映射_初版_V3.csv` 与 `Frontend_BT_功能覆盖率试点清单_V3.csv` 已完成历史使命并已移除；其中可执行 bin 已合并到 active registry，粗粒度规划不作为已建仓覆盖项保留。
 
 ## Batch 0: 2-fetch 反标约束
 
@@ -28,49 +29,42 @@ pilot CSV 的 `Coverpoint` 列与 `Coverage_Group`、`Bin_Name` 一起构成建�
 - `testcase`：该 leaf 的计划或实际 testcase
 - `evidence`：模型或真实 DUT artifact 的简短证据索引
 
+`Bin_ID` 在 active registry 中全局唯一。历史 artifact 若使用已退休编号，registry 通过可选的 `Legacy_Bin_ID` 保存其迁移来源；历史 JSON、波形和日志保持只读，新回归只生成当前 `Bin_ID`。
+
 自动回标只按 artifact 的运行统计区分模型与真实 DUT：模型/FakeDut 只能维持或提升到 `MODELED`；真实 DUT 命中可提升到 `HIT`；`CLOSED` 只能由人工验收写入，工具会保留该状态而不自动覆盖。
 
 ## 1. 目标
 
-本文件用于把当前已经完成的 `Frontend_功能测试点分解_层级版_V3.csv` 向下衔接到 Python 验证环境中的功能覆盖率建模，优先解决“验证闭环是否能跑通”的问题，而不是在第一阶段就追求 330 个叶子测试点全部建模完成。
+本文件用于把测试点主表向下衔接到 Python 验证环境中的功能覆盖率建模。基础链路已完成验证；当前目标是按叶子测试点持续扩展建仓、汇编 testcase、真实 DUT 回归和 evidence 回标，而不是维护独立的试点清单。
 
 当前闭环目标为：
 
-1. 基于前端 BT 测试点文档，选取一批具备代表性的功能场景。
-2. 在 Python 验证环境中为这些场景建立可采样的 coverage item。
-3. 用已构建的激励 agent 和前端 DUT 交互，完成 testcase 运行。
-4. 采集 coverage 数据并形成覆盖率报告。
-5. 用 coverage 结果反推测试点缺口、环境观测缺口和激励缺口。
+1. 从测试点主表的叶子场景建立一对一的 coverage item。
+2. 用汇编/bin testcase 或既有环境 testcase 在真实 DUT 上执行。
+3. 保存 JSON、波形和日志 evidence，并自动回标为 `MODELED`、`PARTIAL` 或 `HIT`。
+4. 以未命中 bin 反推 testcase、观测或测试点缺口；`CLOSED` 只在人工验收后写入。
 
 ## 2. 当前输入
 
 当前功能覆盖率建模的主要输入包括：
 
-- `Frontend_功能测试点分解_层级版_V3.csv`
-- `Frontend_测试点分解_V3.csv`
+- `../02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv`
+- `frontend_bt_functional_coverage_pilot.csv`
 - Kunminghu V3 Frontend/IFU/FTQ/BPU/ICache/ITLB/PTW/PMP/IBuffer 相关 Chisel 源码
+- `../../env/coverage_def.py`、`../../env/funcov.py` 和 `../../env/functional_coverage.py`
 
 其中：
 
-- 当前 AI 生成的 Frontend BT 测试点已经能支持做第一版 funcov 映射。
-- 当前 active pilot CSV 已经和主线 pytest testcase 名称完成对齐。
+- 测试点主表决定 leaf 的验证语义和回标状态。
+- active registry 决定唯一的 `Coverage_Group`、`Coverpoint`、`Bin_Name` 和 testcase 对应关系。
 
 ## 3. 建模原则
 
-### 3.1 不一次性覆盖全部叶子测试点
+### 3.1 全量推进，但不伪造建仓
 
-当前功能叶子测试点约 330 个。第一阶段不建议把全部叶子点直接一比一映射成 coverpoint，否则会出现：
+当前工作不再以“先跑通少量试点”为目标。所有叶子测试点都应进入 `UNMAPPED`、`MODELED`、`PARTIAL`、`HIT`、`CLOSED`、`BLOCKED` 或 `N-A` 的明确状态之一，并按模块持续收敛。
 
-- Python 环境观测点不足
-- coverage item 命名混乱
-- 采样逻辑过早复杂化
-- 报告不可读
-
-建议分三层推进：
-
-- `L0 基础闭环覆盖`：先验证环境、采样、统计、报告链路跑通
-- `L1 关键功能覆盖`：覆盖前端主路径、主控制路径、主异常路径
-- `L2 细粒度覆盖`：按测试点表逐步扩充到模块细粒度场景
+新增 coverage item 必须先具备唯一 leaf、可解释的采样条件和独立 bin；环境尚不能可靠观测、或 testcase 尚不能构造时，保留为 `UNMAPPED` 或 `BLOCKED`，不得以粗粒度聚合条目代替叶子建仓。
 
 ### 3.2 功能覆盖率对象不是 RTL 内部所有细节
 
@@ -237,44 +231,29 @@ cov.cross('redirect_type', 'inflight_resp_type', 'ctrl', 'icache_resp')
 
 ## 8. 当前建议的落地顺序
 
-### 第一步：跑通试点覆盖项
+### 第一步：按模块选取未建仓叶子点
 
-直接对接 `Frontend_BT_功能覆盖率试点清单_V3.csv`，优先实现其中的 L0 与首批 L1 覆盖项，不要求第一轮就覆盖全部 330 个叶子测试点。
+从测试点主表筛选当前模块的 `UNMAPPED` 叶子点，先确认设计语义、触发场景、可观测信号和独立 testcase。建立唯一 `covergroup / coverpoint / bin` 后写入 active registry 和建仓代码。
 
-### 第二步：形成 testcase 到 coverage 的映射
+### 第二步：执行 testcase 并回标
 
-每个 testcase 至少回答两个问题：
+每个 testcase 必须记录预期 bin、实际命中 bin、真实 DUT JSON、波形和日志位置。自动工具只能将真实 DUT 命中提升到 `HIT`；模型单测只证明 `MODELED`。
 
-- 它预期命中哪些 coverage group/bin
-- 它实际命中了哪些 coverage group/bin
+### 第三步：回归收敛
 
-### 第三步：打通回归与报告
-
-需要具备：
-
-- 单 testcase coverage dump
-- 多 testcase merge
-- 未命中 bins 列表
-- 从未命中 bins 反推激励缺口/观测缺口/测试点缺口
+按模块汇总 `UNMAPPED/BLOCKED/MODELED/PARTIAL/HIT/CLOSED`，对未命中 bin 分别定位为激励、观测、checker 或测试点缺口。每个模块达到人工定义的验收条件后才将对应叶子置为 `CLOSED`。
 
 ## 9. 与测试点文档的关系
 
-当前建议不是“所有测试点立即建模”，而是：
-
-- 先从测试点文档中选关键叶子点建立 coverage item
-- 跑通环境和报告链路
-- 再按模块逐步扩展 coverage item
-- 用 coverage 反向指导测试点文档补充和 testcase 扩展
-
-因此测试点文档仍是主输入，但 funcov 建模应分阶段实施。
+测试点主表始终是主输入；每个叶子点在建仓后必须拥有唯一 coverage 反标，并以真实 DUT evidence 驱动状态变化。coverage 结果可反向指导测试点、环境观测和 testcase 扩展。
 
 ## 10. 当前建议的下一步
 
-1. 在 Python 环境中先实现 `Frontend_BT_功能覆盖率试点清单_V3.csv` 中的覆盖项。
-2. 先跑通 6 个基本验证场景，不追求首轮高覆盖率。
-3. 补齐 coverage dump / merge / report 流程。
-4. 首轮回归后根据未命中 bins 反推：
+1. 以模块为单位将 `UNMAPPED` 叶子点建仓并补齐 testcase。
+2. 在真实 DUT 上执行回归，生成 coverage JSON、波形和日志 evidence。
+3. 对 `HIT` 以外的状态按原因分类并持续收敛。
+4. 根据未命中 bins 反推：
    - 激励缺口
    - 观测缺口
    - 测试点映射缺口
-5. 再把 BPU、FTQ、ITLB/PTW/PMP、IBuffer 的细粒度覆盖项继续展开。
+5. 逐步完成 BPU、FTQ、IFU、ICache、ITLB/PTW/PMP、IBuffer 的细粒度覆盖和人工验收。

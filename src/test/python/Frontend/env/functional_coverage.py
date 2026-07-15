@@ -105,6 +105,7 @@ class FunctionalCoverageRecorder:
         self._boot_recorded = False
         self._last_fetch_path = "icache_seq"
         self._last_fetch_cycle = -1
+        self._redirected_fetch_path: Optional[dict] = None
         self._ptw_req_pending = 0
         self._pending_ptw_resp_cycle: Optional[int] = None
         self._backend_block_start_cycle: Optional[int] = None
@@ -112,6 +113,9 @@ class FunctionalCoverageRecorder:
         self._last_ftq_state: Optional[str] = None
         self._uncache_last_a: Optional[dict] = None
         self._uncache_recent_a_events: deque[dict] = deque(maxlen=16)
+        self._uncache_page_tail_requests: Dict[int, dict] = {}
+        self._uncache_active_nc = False
+        self._last_uncache_was_nc = False
         self._uncache_last_pending_redirect_cycle: Optional[int] = None
         self._uncache_wfi_start_req_count: Optional[int] = None
         self._ifu_last_cfvec: Optional[dict] = None
@@ -214,10 +218,54 @@ class FunctionalCoverageRecorder:
         payload = evt.get("payload", {}) or {}
 
         if event_type == "handshake.icache_a":
+            if (
+                self._redirected_fetch_path is not None
+                and self._redirected_fetch_path.get("path") == "mmio_uncache"
+                and self._redirected_fetch_path.get("pbmt_nc") is True
+            ):
+                self.mark(
+                    "uncache_path_switch",
+                    "uncache_to_icache_clean",
+                    cycle,
+                    {"event": event_type, **self._redirected_fetch_path},
+                )
+                self._redirected_fetch_path = None
+            if self._redirected_fetch_path is None or self._redirected_fetch_path.get("path") != "icache_seq":
+                self._redirected_fetch_path = None
             self._last_fetch_path = "icache_seq"
             self._last_fetch_cycle = cycle
             self.mark("fetch_path_type", "icache_seq", cycle, {"event": event_type, "payload": payload})
         elif event_type == "handshake.uncache_a":
+            address = int(payload.get("address", 0))
+            if (
+                self._redirected_fetch_path is not None
+                and self._redirected_fetch_path.get("path") == "icache_seq"
+                and self._uncache_active_nc
+            ):
+                self.mark(
+                    "uncache_path_switch",
+                    "icache_to_nc_clean",
+                    cycle,
+                    {
+                        "event": event_type,
+                        "address": address,
+                        "new_pbmt_nc": True,
+                        **self._redirected_fetch_path,
+                    },
+                )
+            if (
+                self._redirected_fetch_path is not None
+                and self._redirected_fetch_path.get("path") == "icache_seq"
+                and self.env is not None
+                and self.env.memory.is_mmio(address)
+            ):
+                self.mark(
+                    "fetch_path_switch",
+                    "icache_to_mmio_clean",
+                    cycle,
+                    {"event": event_type, "address": address, **self._redirected_fetch_path},
+                )
+            self._redirected_fetch_path = None
             self._last_fetch_path = "mmio_uncache"
             self._last_fetch_cycle = cycle
             self.mark("fetch_path_type", "mmio_uncache", cycle, {"event": event_type, "payload": payload})
@@ -230,6 +278,10 @@ class FunctionalCoverageRecorder:
         elif event_type == "handshake.ptw_resp":
             self._pending_ptw_resp_cycle = cycle
         elif event_type == "backend.redirect":
+            self._redirected_fetch_path = {
+                "path": self._last_fetch_path,
+                "pbmt_nc": bool(self._last_uncache_was_nc),
+            }
             redirect_bin = self._classify_redirect_reason(str(payload.get("reason", "")))
             self.mark("redirect_type", redirect_bin, cycle, {"event": event_type, "payload": payload})
             self._sample_uncache_redirect_event(cycle, payload)
@@ -521,7 +573,13 @@ class FunctionalCoverageRecorder:
         addr = int(payload.get("address", 0))
         corrupt = int(payload.get("corrupt", 0))
         denied = int(payload.get("denied", 0))
-        evidence = {"event": "handshake.uncache_a", "address": addr, "corrupt": corrupt, "denied": denied}
+        evidence = {
+            "event": "handshake.uncache_a",
+            "address": addr,
+            "corrupt": corrupt,
+            "denied": denied,
+            "pbmt_nc": int(self._uncache_active_nc),
+        }
 
         self.mark("uncache_req_state", "normal_fire", cycle, evidence)
 
@@ -536,6 +594,18 @@ class FunctionalCoverageRecorder:
 
         self._uncache_last_a = evidence
         self._uncache_recent_a_events.append(evidence)
+        self._last_uncache_was_nc = bool(self._uncache_active_nc)
+        self._uncache_active_nc = False
+
+        for page, tail in self._uncache_page_tail_requests.items():
+            if addr == int(page) + 0x1000:
+                tail["next_page_requested"] = True
+        if addr & 0xFFF == 0xFF8:
+            self._uncache_page_tail_requests[addr & ~0xFFF] = {
+                "request_addr": addr,
+                "request_cycle": cycle,
+                "next_page_requested": False,
+            }
 
     def _sample_uncache_d_event(self, cycle: int, payload: Dict[str, Any]) -> None:
         addr = int(payload.get("address", 0))
@@ -623,6 +693,43 @@ class FunctionalCoverageRecorder:
         if a_valid == 1 and a_ready == 0:
             self.mark("uncache_req_state", "a_ready_backpressure", cycle, {"event": "cycle.uncache_a_stall"})
 
+        pbmt = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMeta_0_itlbPbmt"
+        )
+        pmp_mmio = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMeta_0_pmpMmio"
+        )
+        state = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheState"
+        )
+        latched_pbmt = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.itlbPbmt"
+        )
+        active_pbmt = latched_pbmt if state in {1, 2, 3} and latched_pbmt is not None else pbmt
+        can_accept = self._try_read_dut_signal(dut, "Frontend_top.io_backend_canAccept")
+        if active_pbmt == 1 and pmp_mmio == 0 and state in {2, 3}:
+            self._uncache_active_nc = True
+        if active_pbmt == 1 and pmp_mmio == 1 and state == 1:
+            self.mark(
+                "uncache_ordering",
+                "pbmt_nc_pmp_mmio_wait_commit",
+                cycle,
+                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
+            )
+        if active_pbmt == 2 and pmp_mmio == 0 and state == 1:
+            self.mark(
+                "uncache_ordering",
+                "pbmt_io_wait_commit",
+                cycle,
+                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
+            )
+        if active_pbmt == 1 and pmp_mmio == 0 and state == 2 and can_accept == 0:
+            self.mark(
+                "uncache_ordering",
+                "pbmt_nc_non_mmio_no_commit_gate",
+                cycle,
+                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state, "can_accept": can_accept},
+            )
     def _sample_ibuffer_state(self, dut, cycle: int, env) -> None:
         if self._reset_release_cycle is None:
             return

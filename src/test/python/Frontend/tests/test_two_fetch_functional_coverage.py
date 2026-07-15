@@ -336,6 +336,7 @@ def test_backannotation_tool_distinguishes_model_dut_and_manual_close(tmp_path):
     pilot = load_pilot(pilot_path)
     artifacts = load_artifacts([model_path, dut_path])
     assert backannotate(testpoint_path, pilot, artifacts, apply=True)["hit"] == 1
+    assert b"\r\n" not in testpoint_path.read_bytes()
     with testpoint_path.open(encoding="utf-8-sig", newline="") as f:
         row = next(csv.DictReader(f))
     assert row["status"] == "HIT"

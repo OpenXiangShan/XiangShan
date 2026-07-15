@@ -21,6 +21,7 @@ STATUSES = {"UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED", "BLOCKED", "N-A"}
 REFERENCE_RE = re.compile(
     r"^covergroup ([^,;]+), coverpoint ([^,;]+), bins ([^ (;]+) \((BIN-\d+)\)$"
 )
+BIN_ID_RE = re.compile(r"^BIN-\d+$")
 
 
 @dataclass(frozen=True)
@@ -40,9 +41,57 @@ def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
 
 def _write_csv(path: Path, fields: list[str], rows: Iterable[dict[str, str]]) -> None:
     with path.open("w", encoding="utf-8-sig", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
+        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def validate_pilot_schema(path: Path) -> dict[str, int]:
+    """Validate global pilot identifiers independently of a module batch."""
+    fields, rows = _read_csv(path)
+    required = {"Bin_ID", "Coverage_Group", "Coverpoint", "Bin_Name", "建议试点用例"}
+    missing = required - set(fields)
+    if missing:
+        raise ValueError(f"pilot missing columns: {sorted(missing)}")
+
+    bin_ids: dict[str, int] = {}
+    mapping_keys: dict[tuple[str, str, str], int] = {}
+    legacy_ids: dict[str, int] = {}
+    for line, row in enumerate(rows, start=2):
+        bin_id = str(row["Bin_ID"] or "").strip()
+        group = str(row["Coverage_Group"] or "").strip()
+        point = str(row["Coverpoint"] or "").strip()
+        bin_name = str(row["Bin_Name"] or "").strip()
+        if not BIN_ID_RE.fullmatch(bin_id):
+            raise ValueError(f"line {line}: invalid Bin_ID {bin_id!r}")
+        if not group or not bin_name:
+            raise ValueError(f"line {line}: incomplete coverage mapping for {bin_id}")
+        if bin_id in bin_ids:
+            raise ValueError(f"line {line}: duplicate Bin_ID {bin_id}; first defined at line {bin_ids[bin_id]}")
+        bin_ids[bin_id] = line
+
+        mapping_key = (group, point, bin_name)
+        if mapping_key in mapping_keys:
+            raise ValueError(
+                f"line {line}: duplicate coverage mapping {mapping_key}; "
+                f"first defined at line {mapping_keys[mapping_key]}"
+            )
+        mapping_keys[mapping_key] = line
+
+        legacy_id = str(row.get("Legacy_Bin_ID") or "").strip()
+        if legacy_id:
+            if not BIN_ID_RE.fullmatch(legacy_id):
+                raise ValueError(f"line {line}: invalid Legacy_Bin_ID {legacy_id!r}")
+            if legacy_id == bin_id:
+                raise ValueError(f"line {line}: Legacy_Bin_ID must differ from Bin_ID")
+            if legacy_id in legacy_ids:
+                raise ValueError(
+                    f"line {line}: duplicate Legacy_Bin_ID {legacy_id}; "
+                    f"first defined at line {legacy_ids[legacy_id]}"
+                )
+            legacy_ids[legacy_id] = line
+
+    return {"rows": len(rows), "bin_ids": len(bin_ids), "mapping_keys": len(mapping_keys), "legacy_ids": len(legacy_ids)}
 
 
 def load_pilot(path: Path, *, bin_prefix: str = "BIN-5") -> dict[str, PilotBin]:
@@ -205,10 +254,18 @@ def backannotate(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pilot", type=Path, required=True)
-    parser.add_argument("--testpoints", type=Path, required=True)
+    parser.add_argument("--testpoints", type=Path)
     parser.add_argument("--artifact", type=Path, action="append", default=[])
     parser.add_argument("--check", action="store_true", help="validate only; do not write")
+    parser.add_argument("--schema-check", action="store_true", help="validate global pilot identifiers only")
     args = parser.parse_args()
+
+    schema = validate_pilot_schema(args.pilot)
+    if args.schema_check:
+        print(" ".join(f"{key}={value}" for key, value in sorted(schema.items())))
+        return 0
+    if args.testpoints is None:
+        parser.error("--testpoints is required unless --schema-check is used")
 
     pilot = load_pilot(args.pilot)
     artifacts = load_artifacts(args.artifact)
