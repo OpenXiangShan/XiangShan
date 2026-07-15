@@ -836,9 +836,9 @@ class DecodeUnit(implicit p: Parameters) extends XSModule with DecodeUnitConstan
   // temp decode zimop as move
   decodedInst.isMove := (isMove || isZimop) && ctrl_flow.instr(RD_MSB, RD_LSB) =/= 0.U && !io.csrCtrl.singlestep
 
-  val isNtlAdd = BitPat("b0000000_00000_00000_000_?????_0110011") === ctrl_flow.instr &&
-                 inst.RD === 0.U && inst.RS1 === 0.U &&
-                 (inst.RS2 === 2.U || inst.RS2 === 3.U || inst.RS2 === 4.U || inst.RS2 === 5.U)
+  // ZihintNTL: add x0, x0, x{2,3,4,5}; R-type layout funct7_rs2_rs1_funct3_rd_opcode
+  val isNtlAdd = BitPat("b0000000_00???_00000_000_00000_0110011") === ctrl_flow.instr &&
+                 (inst.RS2(2, 0) === 2.U || inst.RS2(2, 0) === 3.U || inst.RS2(2, 0) === 4.U || inst.RS2(2, 0) === 5.U)
   decodedInst.isNtlHint := isNtlAdd && !io.csrCtrl.singlestep
   decodedInst.ntl.valid := false.B
   decodedInst.ntl.bits  := 0.U

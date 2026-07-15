@@ -656,6 +656,8 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val is128Req = Bool()
   // cycle 0: prefetch source bits
   val pf_source = Output(UInt(L1PfSourceBits.W))
+  // cycle 0: ntl indicator
+  val ntl = Output(Valid(NtlType()))
   // cycle0: load microop
  // val s0_uop = Output(new MicroOp)
   // cycle 0: virtual address: req.addr

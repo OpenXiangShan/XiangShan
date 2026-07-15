@@ -72,6 +72,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   // prefetch
   val pf_source = UInt(L1PfSourceBits.W)
   val access = Bool()
+  val isNtl = Bool()
 
   val id = UInt(reqIdWidth.W)
 
@@ -915,6 +916,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req := DontCare
   miss_req.source := s2_req.source
   miss_req.pf_source := s2_req.pf_source
+  miss_req.isNtl := false.B
   miss_req.cmd := s2_req.cmd
   miss_req.addr := s2_req.addr
   miss_req.vaddr := s2_req.vaddr
@@ -1112,7 +1114,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.wb.bits.miss_id := s3_req.miss_id
 
   // update plru in main pipe s3
-  io.replace_access.valid := GatedValidRegNext(s2_fire_to_s3) && !s3_req.probe && (s3_req.miss || ((s3_req.isAMO || s3_req.isStore) && s3_hit))
+  io.replace_access.valid := GatedValidRegNext(s2_fire_to_s3) && !s3_req.probe &&
+    (s3_req.miss || ((s3_req.isAMO || s3_req.isStore) && s3_hit)) && !(s3_req.miss && s3_req.isNtl)
   io.replace_access.bits.set := s3_idx
   io.replace_access.bits.way := OHToUInt(s3_way_en)
 
