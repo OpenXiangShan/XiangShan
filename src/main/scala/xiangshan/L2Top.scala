@@ -223,6 +223,8 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       val pfCtrlFromCore = Input(new PrefetchCtrlFromCore)
       val l2_tlb_req = new TlbRequestIO(nRespDups = 2)
       val l2_pmp_resp = Flipped(new PMPRespBundle)
+      val l2_mdp_tlb_req = if (hasL2Mdp) Some(new TlbRequestIO(nRespDups = 2)) else None
+      val l2_mdp_pmp_resp = if (hasL2Mdp) Some(Flipped(new PMPRespBundle)) else None
       val l2_hint = ValidIO(new L2ToL1Hint())
       val perfEvents = Output(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
       val l2_flush_en = Option.when(EnablePowerDown) (Input(Bool()))
@@ -345,6 +347,36 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       l2.io.l2_tlb_req.pmp_resp.instr := io.l2_pmp_resp.instr
       l2.io.l2_tlb_req.pmp_resp.mmio := io.l2_pmp_resp.mmio
       l2.io.l2_tlb_req.pmp_resp.atomic := io.l2_pmp_resp.atomic
+
+      // L2 MDP has an independent DTLB/PMP bridge with the same protocol
+      // conversion as the existing L2 prefetcher port.
+      io.l2_mdp_tlb_req.zip(io.l2_mdp_pmp_resp).zip(l2.io.l2_mdp_tlb_req).foreach {
+        case ((tileTlb, tilePmp), mdpTlb) =>
+          tileTlb.req.bits := DontCare
+          tileTlb.req.valid := mdpTlb.req.valid
+          tileTlb.resp.ready := mdpTlb.resp.ready
+          tileTlb.req.bits.vaddr := mdpTlb.req.bits.vaddr
+          tileTlb.req.bits.cmd := mdpTlb.req.bits.cmd
+          tileTlb.req.bits.size := mdpTlb.req.bits.size
+          tileTlb.req.bits.kill := mdpTlb.req.bits.kill
+          tileTlb.req.bits.isPrefetch := mdpTlb.req.bits.isPrefetch
+          tileTlb.req.bits.no_translate := mdpTlb.req.bits.no_translate
+          tileTlb.req_kill := mdpTlb.req_kill
+
+          mdpTlb.resp.valid := tileTlb.resp.valid
+          mdpTlb.req.ready := tileTlb.req.ready
+          mdpTlb.resp.bits.paddr.head := tileTlb.resp.bits.paddr.head
+          mdpTlb.resp.bits.pbmt := tileTlb.resp.bits.pbmt.head
+          mdpTlb.resp.bits.miss := tileTlb.resp.bits.miss
+          mdpTlb.resp.bits.excp.head.gpf := tileTlb.resp.bits.excp.head.gpf
+          mdpTlb.resp.bits.excp.head.pf := tileTlb.resp.bits.excp.head.pf
+          mdpTlb.resp.bits.excp.head.af := tileTlb.resp.bits.excp.head.af
+          mdpTlb.pmp_resp.ld := tilePmp.ld
+          mdpTlb.pmp_resp.st := tilePmp.st
+          mdpTlb.pmp_resp.instr := tilePmp.instr
+          mdpTlb.pmp_resp.mmio := tilePmp.mmio
+          mdpTlb.pmp_resp.atomic := tilePmp.atomic
+      }
       l2cache.get match {
         case l2cache: CoupledL2 =>
           val l2 = l2cache.module

@@ -29,7 +29,8 @@ import chisel3.util._
 import xscache.coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, PCKey, VaddrKey}
 import difftest._
 import freechips.rocketchip.tilelink._
-import xscache.common.{AliasKey, DirtyKey, MdpHintKey, PrefetchKey}
+import xscache.common.{AliasKey, DirtyKey, MdpHintKey, MdpImmKey, MdpLoadSizeKey, MdpLoadUnsignedKey,
+  MdpPCKey, MdpVaddrKey, PrefetchKey}
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
@@ -47,8 +48,8 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
   val pc = UInt(VAddrBits.W)
-  // MDP context originates at the hinted LDU/LoadPipe request and remains in
-  // the MSHR until refill produces MdpPendingReqBundle.
+  // MDP context originates at a hinted demand load or MDP stridePf, enters via
+  // LoadPipe/MainPipe, and remains in the MSHR until refill emits chasingPf.
   val pfHintMDP = Bool()
   val mdpImm = UInt(12.W)
   val mdpVaddr = UInt(VAddrBits.W)
@@ -323,6 +324,12 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire.user.lift(PrefetchKey).foreach(_ := Mux(l2_pf_store_only, req.isFromStore, true.B))
     // Propagate the hinted-load marker through the direct pipe-reg A request.
     acquire.user.lift(MdpHintKey).foreach(_ := req.pfHintMDP)
+    // Preserve the exact hinted load context for a possible L2 miss/refill.
+    acquire.user.lift(MdpImmKey).foreach(_ := req.mdpImm)
+    acquire.user.lift(MdpVaddrKey).foreach(_ := req.mdpVaddr)
+    acquire.user.lift(MdpPCKey).foreach(_ := req.mdpPC)
+    acquire.user.lift(MdpLoadSizeKey).foreach(_ := req.mdpLoadSize)
+    acquire.user.lift(MdpLoadUnsignedKey).foreach(_ := req.mdpLoadUnsigned)
     // req source
     when(req.isFromLoad) {
       acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPULoadData.id.U)
@@ -472,8 +479,9 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     // for main pipe s2
     val refill_info = ValidIO(new MissQueueRefillInfo)
     val refill_train = ValidIO(new TrainReqBundle)
-    // A completed hinted-load refill goes to MissQueue and then DCache/MDP.
-    val mdp_pending = ValidIO(new MdpPendingReqBundle)
+    // A completed hinted-load refill goes to the same-index MissQueue output
+    // lane, then through DCache/MemBlock to MdpChasingPfFilter.
+    val mdp_chasing_pf = ValidIO(new MdpChasingPfReqBundle)
 
     val occupy_way = Output(UInt(nWays.W))
 
@@ -748,7 +756,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     // A hinted load may merge into an already allocated MSHR.  In that case it
     // replaces the pending context so the returned data uses this load's VA,
     // PC, immediate, access width and signedness.
-    when(miss_req_pipe_reg_bits.isFromLoad && miss_req_pipe_reg_bits.pfHintMDP) {
+    when(miss_req_pipe_reg_bits.pfHintMDP) {
       req.pfHintMDP := true.B
       req.mdpImm := miss_req_pipe_reg_bits.mdpImm
       req.mdpVaddr := miss_req_pipe_reg_bits.mdpVaddr
@@ -995,6 +1003,12 @@ for(i <- 0 until reqNum) {
   io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := Mux(io.l2_pf_store_only, req.isFromStore, true.B))
   // Propagate the saved marker through the standard MissEntry A request.
   io.mem_acquire.bits.user.lift(MdpHintKey).foreach(_ := req.pfHintMDP)
+  // The standard MissEntry path carries the same metadata as the direct path.
+  io.mem_acquire.bits.user.lift(MdpImmKey).foreach(_ := req.mdpImm)
+  io.mem_acquire.bits.user.lift(MdpVaddrKey).foreach(_ := req.mdpVaddr)
+  io.mem_acquire.bits.user.lift(MdpPCKey).foreach(_ := req.mdpPC)
+  io.mem_acquire.bits.user.lift(MdpLoadSizeKey).foreach(_ := req.mdpLoadSize)
+  io.mem_acquire.bits.user.lift(MdpLoadUnsignedKey).foreach(_ := req.mdpLoadUnsigned)
   // req source
   when(prefetch && !secondary_fired) {
     io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
@@ -1084,6 +1098,8 @@ for(i <- 0 until reqNum) {
   io.refill_train.bits.robIdx := DontCare
   io.refill_train.bits.isFirstIssue := DontCare
   io.refill_train.bits.isHwPrefetch := DontCare
+  io.refill_train.bits.loadSize := DontCare
+  io.refill_train.bits.loadUnsigned := DontCare
 
   // Select the original load bytes from the completed refill line and apply
   // the request's signed/unsigned extension before sending data back to MDP.
@@ -1095,17 +1111,20 @@ for(i <- 0 until reqNum) {
     2.U -> Mux(req.mdpLoadUnsigned, ZeroExt(mdpRawData(31, 0), XLEN), SignExt(mdpRawData(31, 0), XLEN)),
     3.U -> mdpRawData
   ))
-  io.mdp_pending.valid := refill_to_ldq_en && refill_done && hasData && req.pfHintMDP
-  io.mdp_pending.bits.data := mdpLoadData
-  io.mdp_pending.bits.imm := req.mdpImm
-  io.mdp_pending.bits.pc := req.mdpPC
-  io.mdp_pending.bits.vaddr := req.mdpVaddr
-  io.mdp_pending.bits.mshrId := io.id
+  // Both a hinted demand miss and a hinted MDP stridePf miss must produce one
+  // chasingPf event.  Hardware prefetches have no LDQ refill, so this path must
+  // not be gated by refill_to_ldq_en.
+  io.mdp_chasing_pf.valid := refill_done && hasData && req.pfHintMDP
+  io.mdp_chasing_pf.bits.data := mdpLoadData
+  io.mdp_chasing_pf.bits.imm := req.mdpImm
+  io.mdp_chasing_pf.bits.pc := req.mdpPC
+  io.mdp_chasing_pf.bits.vaddr := req.mdpVaddr
+  io.mdp_chasing_pf.bits.mshrId := io.id
 
   // MDP counters are kept beside the existing MissEntry refill counters.
   XSPerfAccumulate("mdp_hint_mshr_alloc", io.miss_req_pipe_reg.alloc && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.pfHintMDP)
   XSPerfAccumulate("mdp_hint_mshr_merge", io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.pfHintMDP)
-  XSPerfAccumulate("mdp_hint_mshr_refill", io.mdp_pending.valid)
+  XSPerfAccumulate("mdp_hint_mshr_refill", io.mdp_chasing_pf.valid)
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
   XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)
@@ -1212,8 +1231,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val mainpipe_info = Input(new MainPipeInfoToMQ)
     val refill_info = ValidIO(new MissQueueRefillInfo)
     val refill_train = ValidIO(new TrainReqBundle)
-    // Aggregated pending output to DCacheWrapper and PrefetcherWrapper.
-    val mdp_pending = ValidIO(new MdpPendingReqBundle)
+    // One lane per MSHR preserves simultaneous chasingPf refill completions.
+    val mdp_chasing_pf = Vec(cfg.nMissEntries, ValidIO(new MdpChasingPfReqBundle))
 
     // block probe
     val probe = Flipped(new MissQueueBlockIO)
@@ -1815,10 +1834,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.refill_train.valid := VecInit(entries.zipWithIndex.map{ case(e,i) => e.io.refill_train.valid && io.mainpipe_info.s2_valid && io.mainpipe_info.s2_miss_id === i.U}).asUInt.orR
   io.refill_train.bits := Mux1H(entries.zipWithIndex.map{ case(e,i) => (io.mainpipe_info.s2_miss_id === i.U) -> e.io.refill_train.bits })
 
-  // MissEntry refill completions are mutually selected onto the single
-  // pending channel consumed by MDP.
-  io.mdp_pending.valid := VecInit(entries.map(_.io.mdp_pending.valid)).asUInt.orR
-  io.mdp_pending.bits := ParallelMux(entries.map(e => e.io.mdp_pending.valid -> e.io.mdp_pending.bits))
+  // Keep one output lane per MissEntry; PrefetcherWrapper queues all lanes.
+  io.mdp_chasing_pf.zip(entries).foreach { case (out, entry) => out := entry.io.mdp_chasing_pf }
 
   for(i <- 0 until reqNum) {
     acquire_from_pipereg_vec(i).valid := parallel_pipe_regs(i).alloc && !can_merge_store_from_pipe(i) && !io.wfi.wfiReq
@@ -1879,20 +1896,32 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   // compute all miss_req hit prefetch_req or not
   val prefetch_hit_in_reg_vec = Wire(Vec(reqNum, Bool()))
+  val prefetch_hit_in_reg_source_vec = Wire(Vec(reqNum, UInt(L1PfSourceBits.W)))
   val prefetch_hit_in_mshr_vec = Wire(Vec(reqNum, Bool()))
   for(i <- 0 until reqNum) {
     val signals_ = (0 until reqNum).map(j => computeMatchSignals(parallel_pipe_regs(j).req, io.queryMQ(i).req.bits))
     val hit_in_reg = (0 until reqNum).map(j => parallel_pipe_regs(j).prefetch_late_en(signals_(j), io.queryMQ(i).req.bits.toMissReqWoStoreData(), io.queryMQ(i).req.valid))
     
     prefetch_hit_in_reg_vec(i) := hit_in_reg.asUInt.orR
+    // Query lane i can match a prefetch held in any parallel pipe lane j.
+    // Preserve the matched j lane's source; using pipe_regs(i) here would
+    // incorrectly attribute the hit to the demand request's own lane.
+    prefetch_hit_in_reg_source_vec(i) := ParallelMux(
+      hit_in_reg zip parallel_pipe_regs.map(_.req.pf_source)
+    )
     prefetch_hit_in_mshr_vec(i) := io.queryMQ(i).req.valid && !io.queryMQ(i).req.bits.isFromPrefetch && Cat(entries.map(_.io.prefetch_info.hit_prefetch(i))).orR
   }
-  io.prefetch_stat.hit_pf_in_mshr := PopCount((0 until reqNum).map(i => prefetch_hit_in_reg_vec(i) || prefetch_hit_in_mshr_vec(i)))
+  // Keep one hit bit per request port. PrefetcherMonitor uses this same lane
+  // index to pair the hit with hit_pf_in_mshr_source for per-prefetcher
+  // attribution, and separately PopCounts the bitmap for the overall total.
+  io.prefetch_stat.hit_pf_in_mshr := VecInit((0 until reqNum).map(i =>
+    prefetch_hit_in_reg_vec(i) || prefetch_hit_in_mshr_vec(i)
+  )).asUInt
   for(i <- 0 until reqNum) {
     io.prefetch_stat.hit_pf_in_mshr_source(i) := ParallelMux(
       Seq(prefetch_hit_in_reg_vec(i)) ++ entries.map(_.io.prefetch_info.hit_prefetch(i))
       zip
-      Seq(parallel_pipe_regs(i).req.pf_source) ++ entries.map(_.io.prefetch_info.hit_pf_source)
+      Seq(prefetch_hit_in_reg_source_vec(i)) ++ entries.map(_.io.prefetch_info.hit_pf_source)
     )
   }
 
@@ -1940,7 +1969,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // Perf count - adapted for multiple enqueue ports
   // MDP counters are grouped with the existing MissQueue performance counters.
   XSPerfAccumulate("mdp_hint_acquire_l2", io.mem_acquire.fire && io.mem_acquire.bits.user.lift(MdpHintKey).getOrElse(false.B))
-  XSPerfAccumulate("mdp_hint_pending_to_prefetcher", io.mdp_pending.valid)
+  XSPerfAccumulate("mdp_hint_chasing_pf_to_prefetcher", PopCount(io.mdp_chasing_pf.map(_.valid)))
   XSPerfAccumulate("miss_req", PopCount(query_fire))
   XSPerfAccumulate("miss_req_allocate", PopCount(Cat((0 until reqNum).map(i => query_fire(i) && ((analysis.strategy(i) & 1.U) =/= 0.U)))))
   XSPerfAccumulate("miss_req_load_allocate", PopCount(Cat((0 until reqNum).map(i => query_fire(i) && ((analysis.strategy(i) & 1.U) =/= 0.U) && io.queryMQ(i).req.bits.isFromLoad))))

@@ -708,6 +708,8 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   // loads, so they must not carry stale MDP hint metadata.
   io.rdcache.mdpPfHint              := false.B
   io.rdcache.mdpImm                 := 0.U
+  io.rdcache.mdpVaddr               := 0.U
+  io.rdcache.mdpPC                  := 0.U
   io.rdcache.mdpLoadSize            := 0.U
   io.rdcache.mdpLoadUnsigned        := false.B
   io.rdcache.req.bits.id            := DontCare

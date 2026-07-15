@@ -93,17 +93,14 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     // train
     val trainSource = Flipped(new TrainSourceIO)
     // MDP-only inputs from LDUs and DCache.  train0/trigger retain one lane per
-    // LDU; pending is the single completed-MSHR stream from DCache.
+    // LDU; chasingPf retains one lane per MSHR until the local filter queues it.
     val mdpTrain0 = Flipped(Vec(LD_TRAIN_WIDTH, ValidIO(new MdpTrainReqBundle)))
     val mdpTrigger = Flipped(Vec(LD_TRAIN_WIDTH, ValidIO(new MdpTriggerReqBundle)))
     val mdpPfHint = Vec(LD_TRAIN_WIDTH, ValidIO(new MdpL1PfHintBundle))
-    val mdpPending = Flipped(ValidIO(new MdpPendingReqBundle))
+    val mdpChasingPf = Flipped(Vec(cfg.nMissEntries, ValidIO(new MdpChasingPfReqBundle)))
     // tlb
     val tlb_req = Vec(prefetcherNum, new TlbRequestIO(nRespDups = 2))
     val pmp_resp = Vec(prefetcherNum, Flipped(new PMPRespBundle()))
-    // Dedicated MDP translation/protection path to MemBlock.
-    val mdpTlbReq = new TlbRequestIO(nRespDups = 2)
-    val mdpPmpResp = Flipped(new PMPRespBundle)
     // prefetch req sender
     val l1_pf_to_l1 = DecoupledIO(new L1PrefetchReq())
     val l1_pf_to_l2 = Output(new xscache.coupledL2.PrefetchRecv())
@@ -128,9 +125,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     RegEnable(s2_storePcVec(i), io.trainSource.s2_storeFireHint(i))
   }
   /* prefetch arbiter */
-  // MDP is not part of prefetcherSeq, so append one explicit L1-only input.
-  val MdpArbIdx = prefetcherNum
-  val l1_pf_arb = Module(new Arbiter(new L1PrefetchReq, prefetcherNum + 1))
+  val HasMDP = prefetcherSeq.exists(_.isInstanceOf[MdpParams])
+  val MdpArbIdx = prefetcherSeq.indexWhere(_.isInstanceOf[MdpParams])
+  val l1_pf_arb = Module(new Arbiter(new L1PrefetchReq, prefetcherNum))
   val l2_pf_req = Wire(Decoupled(new L2PrefetchReq()))
   val l2_pf_arb = Module(new Arbiter(new L2PrefetchReq, prefetcherNum))
   val l3_pf_req = Wire(Decoupled(new L3PrefetchReq()))
@@ -156,46 +153,54 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     x.bits := DontCare
   }
 
-  // MDP integration is independent of existing prefetchers: train0 has a
-  // private filter, train1 taps the existing S3 load train without consuming
-  // it, and trigger remains parallel for one-to-one hint return.
-  val enableMDP = Constantin.createRecord(s"pf_enableMDP$hartId", initValue = true) && l1D_pf_enable
-  val mdpTrain0Filter = Module(new MdpTrainFilter(12))
-  val mdpTrain1Filter = Module(new TrainFilter(6, "mdp"))
-  val mdp = Module(new MemoryDependencePrefetcher)
+  io.mdpPfHint := 0.U.asTypeOf(io.mdpPfHint)
+  if (HasMDP) {
+    // MDP is selected through MdpParams in prefetcherSeq.  Its private train0
+    // and chasingPf filters preserve concurrent LDU/MSHR events, while trigger
+    // and returned hints remain one-to-one with their originating LDUs.
+    val mdpCfg = prefetcherSeq(MdpArbIdx).asInstanceOf[MdpParams]
+    val enableMDP = Constantin.createRecord(s"pf_enableMDP$hartId", initValue = true) && l1D_pf_enable
+    val mdpTrain0Filter = Module(new MdpTrainFilter(mdpCfg.trainFilterSize))
+    val mdpChasingPfFilter = Module(new MdpChasingPfFilter(mdpCfg.chasingFilterSize))
+    val mdpTrain1Filter = Module(new TrainFilter(mdpCfg.TRAIN_FILTER_SIZE, "mdp"))
+    val mdp = Module(new MemoryDependencePrefetcher)
 
-  for (i <- 0 until LD_TRAIN_WIDTH) {
-    mdpTrain0Filter.io.in(i).valid := io.mdpTrain0(i).valid && enableMDP
-    mdpTrain0Filter.io.in(i).bits := io.mdpTrain0(i).bits
+    for (i <- 0 until LD_TRAIN_WIDTH) {
+      mdpTrain0Filter.io.in(i).valid := io.mdpTrain0(i).valid && enableMDP
+      mdpTrain0Filter.io.in(i).bits := io.mdpTrain0(i).bits
 
-    val source = io.trainSource.s3_load(i)
-    mdpTrain1Filter.io.ldTrainOpt.get(i).valid := source.valid && source.bits.isFirstIssue &&
-      (source.bits.miss || isFromMDP(source.bits.metaSource)) && !source.bits.isHwPrefetch && enableMDP
-    mdpTrain1Filter.io.ldTrainOpt.get(i).bits := source.bits
-    mdpTrain1Filter.io.ldTrainOpt.get(i).bits.pc := Mux(
-      io.trainSource.s3_ptrChasing(i),
-      s2_loadPcVec(i),
-      s3_loadPcVec(i)
-    )
+      val source = io.trainSource.s3_load(i)
+      // Only a demand miss or a demand hit on MDP stridePf trains BST and may
+      // generate another stridePf.  chasingPf hits are deliberately excluded.
+      mdpTrain1Filter.io.ldTrainOpt.get(i).valid := source.valid && source.bits.isFirstIssue &&
+        (source.bits.miss || isFromMdpStride(source.bits.metaSource)) &&
+        !source.bits.isHwPrefetch && enableMDP
+      mdpTrain1Filter.io.ldTrainOpt.get(i).bits := source.bits
+      mdpTrain1Filter.io.ldTrainOpt.get(i).bits.pc := Mux(
+        io.trainSource.s3_ptrChasing(i),
+        s2_loadPcVec(i),
+        s3_loadPcVec(i)
+      )
 
-    mdp.io.trigger(i).valid := io.mdpTrigger(i).valid && enableMDP
-    mdp.io.trigger(i).bits := io.mdpTrigger(i).bits
+      mdp.io.trigger(i).valid := io.mdpTrigger(i).valid && enableMDP
+      mdp.io.trigger(i).bits := io.mdpTrigger(i).bits
+    }
+    mdpTrain1Filter.io.enable := enableMDP
+    mdpTrain1Filter.io.flush := false.B
+    mdp.io.train0 <> mdpTrain0Filter.io.out
+    mdp.io.train1 <> mdpTrain1Filter.io.trainReq
+    mdpChasingPfFilter.io.in.zip(io.mdpChasingPf).foreach { case (filterIn, in) =>
+      filterIn.valid := in.valid && enableMDP
+      filterIn.bits := in.bits
+    }
+    mdp.io.chasingPf <> mdpChasingPfFilter.io.out
+    io.mdpPfHint := mdp.io.l1PfHint
+    io.tlb_req(MdpArbIdx) <> mdp.io.tlbReq
+    mdp.io.pmpResp := io.pmp_resp(MdpArbIdx)
+    l1_pf_arb.io.in(MdpArbIdx).valid := mdp.io.l1PrefetchReq.valid && enableMDP
+    l1_pf_arb.io.in(MdpArbIdx).bits := mdp.io.l1PrefetchReq.bits
+    mdp.io.l1PrefetchReq.ready := l1_pf_arb.io.in(MdpArbIdx).ready && enableMDP
   }
-  mdpTrain1Filter.io.enable := enableMDP
-  mdpTrain1Filter.io.flush := false.B
-  mdp.io.train0 <> mdpTrain0Filter.io.out
-  mdp.io.train1 <> mdpTrain1Filter.io.trainReq
-  mdp.io.pending.valid := io.mdpPending.valid && enableMDP
-  mdp.io.pending.bits := io.mdpPending.bits
-  // Return per-LDU hints and route translation to the dedicated MemBlock port.
-  io.mdpPfHint := mdp.io.l1PfHint
-  io.mdpTlbReq <> mdp.io.tlbReq
-  mdp.io.pmpResp := io.mdpPmpResp
-  // MDP joins the common L1 arbiter/Pipeline.  Consequently MemBlock's
-  // prefetch_fire_l1 aggregate counter includes accepted MDP requests.
-  l1_pf_arb.io.in(MdpArbIdx).valid := mdp.io.l1PrefetchReq.valid && enableMDP
-  l1_pf_arb.io.in(MdpArbIdx).bits := mdp.io.l1PrefetchReq.bits
-  mdp.io.l1PrefetchReq.ready := l1_pf_arb.io.in(MdpArbIdx).ready && enableMDP
 
 
   /** Prefetchor
@@ -393,9 +398,4 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       XSPerfAccumulate(s"${pf.name}_block_l${level+1}", arb.io.in(idx).valid && !arb.io.in(idx).ready)
     }
   }
-  // MDP source-specific counters live beside the existing arbiter counters;
-  // the aggregate accepted count is prefetch_fire_l1 in MemBlock.scala.
-  XSPerfAccumulate("mdp_fire_l1", l1_pf_arb.io.in(MdpArbIdx).fire)
-  XSPerfAccumulate("mdp_block_l1", l1_pf_arb.io.in(MdpArbIdx).valid && !l1_pf_arb.io.in(MdpArbIdx).ready)
-
 }

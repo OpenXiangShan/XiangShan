@@ -45,7 +45,10 @@ class MissPrefetchStatBundle()(implicit p: Parameters) extends XSBundle with Has
   val prefetch_miss = Bool() // from missqueue, pf req allocate a new mshr
   val pf_source = UInt(L1PfSourceBits.W)
 
-  val hit_pf_in_mshr = UInt(MissReqPortCount.W) // from missqueue, demand miss match a existing pf mshr, then clear pf flag
+  // One bit per MissQueue request port.  The aggregate monitor PopCounts this
+  // vector, while source-specific monitors use each bit with the corresponding
+  // hit_pf_in_mshr_source entry to attribute the hit to its prefetcher.
+  val hit_pf_in_mshr = UInt(MissReqPortCount.W) // demand miss matches an existing prefetch MSHR
   val hit_pf_in_mshr_source = Vec(MissReqPortCount, UInt(L1PfSourceBits.W)) // from missqueue, the pf source of demand miss matched
   val load_miss = UInt(MissReqPortCount.W) // from missqueue, load demand miss allocate a new mshr
 }
@@ -81,17 +84,22 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   val StreamMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("stream")))
   val StrideMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("stride")))
   val BertiMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("berti")))
+  val MdpStrideMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("mdpstride")))
+  val MdpChasingMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("mdpchasing")))
 
   StreamMonitor.io.prefetch_info:= prefetch_info
   StrideMonitor.io.prefetch_info := prefetch_info
   BertiMonitor.io.prefetch_info := prefetch_info
+  MdpStrideMonitor.io.prefetch_info := prefetch_info
+  MdpChasingMonitor.io.prefetch_info := prefetch_info
   
   // stream 0, stride 1
   io.pf_ctrl(0) := StreamMonitor.io.pf_ctrl
   io.pf_ctrl(1) := StrideMonitor.io.pf_ctrl
 
-  // LDU 0, 1, 2 can only have one prefetch request at a time.  This aggregate
-  // is source-agnostic, so requests tagged L1_HW_PREFETCH_MDP are included.
+  // All L1 prefetchers, including MDP, enter DCache through the common arbiter.
+  // These source-agnostic signals therefore include both MDP stridePf and
+  // chasingPf in the existing overall L1 counters below.
   val total_prefetch = io.loadinfo.map(t => t.total_prefetch).reduce(_ || _) || io.maininfo.total_prefetch
   val nack_prefetch_raw = io.loadinfo.map(t => t.nack_prefetch).reduce(_ || _) || io.maininfo.nack_prefetch
   val pf_late_in_cache = io.loadinfo.map(t => t.pf_late_in_cache).reduce(_ || _) || io.maininfo.pf_late_in_cache
@@ -100,8 +108,10 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   val pf_late = pf_late_in_cache.asUInt + pf_late_in_mshr.asUInt
   // demand accesses from different ldu may hit different prefetch blocks
   val hit_pf_in_cache = PopCount(prefetch_info.loadinfo.map(t => t.hit_pf_in_cache) ++ Seq(prefetch_info.maininfo.hit_pf_in_cache))
-  val hit_pf_in_mshr = io.missinfo.hit_pf_in_mshr
-  val hit_pf = hit_pf_in_cache + hit_pf_in_mshr.asUInt
+  // MissQueue supplies a per-request-port hit bitmap so the source monitors
+  // can preserve attribution; the overall L1 statistic counts its set bits.
+  val hit_pf_in_mshr = PopCount(io.missinfo.hit_pf_in_mshr)
+  val hit_pf = hit_pf_in_cache + hit_pf_in_mshr
   val pf_useless = io.replinfo.pf_useless
   val prefetch_miss = io.missinfo.prefetch_miss
   val load_miss_to_mshr = io.missinfo.load_miss
@@ -110,7 +120,8 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   val pollution = PopCount(io.loadinfo.map(t => t.pollution))
   
   XSPerfAccumulate("l1DemandMiss", demand_miss_in_ldu)
-  // Overall L1 prefetch statistics, including MDP as well as existing sources.
+  // Overall L1 prefetch statistics.  MDP needs no duplicate aggregate counters:
+  // source-specific MdpStride/MdpChasing counters are emitted in each monitor.
   XSPerfAccumulate("l1prefetchSent", total_prefetch)
   XSPerfAccumulate("l1prefetchHit", hit_pf)
   XSPerfAccumulate("l1prefetchHitInCache", hit_pf_in_cache)
@@ -268,7 +279,9 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     ("Demand", isDemand),
     ("Stream", isFromStream),
     ("Stride", isFromStride),
-    ("Berti", isFromBerti)
+    ("Berti", isFromBerti),
+    ("MdpStride", isFromMdpStride),
+    ("MdpChasing", isFromMdpChasing)
   )
   XSPerfAccumulate(s"l1prefetchSent${param.name}", total_prefetch)
   XSPerfAccumulate(s"l1prefetchHit${param.name}", hit_pf)
@@ -326,6 +339,8 @@ object PrefetcherMonitorParam {
     case "stream" => new StreamMonitorParam()
     case "stride" => new StrideMonitorParam()
     case "berti" => new BertiMonitorParam()
+    case "mdpstride" => new MdpStrideMonitorParam()
+    case "mdpchasing" => new MdpChasingMonitorParam()
     case t => throw new IllegalArgumentException(s"unknown Prefetcher type $t")
   }
 }
@@ -346,4 +361,14 @@ class StrideMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSource
 class BertiMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
   override val name: String = "Berti"
   override def isMyType(value: UInt) = value === L1_HW_PREFETCH_BERTI
+}
+
+class MdpStrideMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
+  override val name: String = "MdpStride"
+  override def isMyType(value: UInt) = isFromMdpStride(value)
+}
+
+class MdpChasingMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
+  override val name: String = "MdpChasing"
+  override def isMyType(value: UInt) = isFromMdpChasing(value)
 }

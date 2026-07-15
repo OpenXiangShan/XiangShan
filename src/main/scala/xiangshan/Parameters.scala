@@ -162,7 +162,7 @@ case class XSCoreParameters
     *      please set constant "modeStrideBerti" in PrefetcherWrapper.scala to "bothOn".
     *      TODO: separate Stream and Stride prefetcher in the future.
     */
-  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams()),
+  prefetcher: Seq[PrefetcherParams] = Seq(StreamStrideParams(), SMSParams(), MdpParams()),
   IfuRedirectNum: Int = 1,
   LoadPipelineWidth: Int = 3,
   StorePipelineWidth: Int = 2,
@@ -592,10 +592,16 @@ trait HasXSParameter {
   def prefetcherSeq = coreParams.prefetcher
   def prefetcherNum = max(prefetcherSeq.size, 1) //TODO lyq: 1 for simpler code generation, but it's also ugly
   def PfNumInDtlbLD = prefetcherSeq.count(_.tlbPlace == TLBPlace.dtlb_ld)
-  def PfNumInDtlbPF = prefetcherSeq.count(_.tlbPlace == TLBPlace.dtlb_pf) + 2 // L2 prefetch and MDP
+  // One common L2 prefetch TLB port is always reserved; parameterized L2 MDP
+  // gets a second independent port to avoid interleaving untagged responses.
+  def PfNumInDtlbPF = prefetcherSeq.count(_.tlbPlace == TLBPlace.dtlb_pf) + 1 + (if (hasL2Mdp) 1 else 0)
   def hasSMS = coreParams.prefetcher.exists(_.isInstanceOf[SMSParams])
   def hasBerti = coreParams.prefetcher.exists(_.isInstanceOf[BertiParams])
   def hasStreamStride = coreParams.prefetcher.exists(_.isInstanceOf[StreamStrideParams])
+  def hasMdp = coreParams.prefetcher.exists(_.isInstanceOf[MdpParams])
+  def hasL2Mdp = coreParams.L2CacheParamsOpt.exists(l2 => l2.prefetch.exists(
+    _.isInstanceOf[xscache.coupledL2.prefetch.L2MdpParameters]
+  ))
 
   def HasMExtension = coreParams.HasMExtension
   def HasCExtension = coreParams.HasCExtension

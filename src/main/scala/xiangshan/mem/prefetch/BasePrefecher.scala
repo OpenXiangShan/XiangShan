@@ -83,6 +83,10 @@ class TrainReqBundle()(implicit p: Parameters) extends DCacheBundle {
   val metaSource = UInt(L1PfSourceBits.W)
   val isFirstIssue = Bool()
   val isHwPrefetch = Bool()
+  // Original load semantics are used when an MDP stridePf miss is converted
+  // into a chasingPf data-dependent address.
+  val loadSize = UInt(2.W)
+  val loadUnsigned = Bool()
   val refillLatency = UInt(LATENCY_WIDTH.W)
 }
 

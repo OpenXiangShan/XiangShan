@@ -91,10 +91,13 @@ class LoadUnitS0(param: ExeUnitParams)(
     // dependent load; trigger reports this LDU's first demand-load issue.
     val mdpTrain0 = ValidIO(new MdpTrainReqBundle)
     val mdpTrigger = ValidIO(new MdpTriggerReqBundle)
-    // MDP sideband to this LDU's DCache LoadPipe.  On a miss the MSHR retains
-    // these fields until refill data is returned to MDP.
+    // MDP sideband to this LDU's DCache LoadPipe.  Demand hints come back from
+    // the matching MDP lane; stridePf metadata comes from the common prefetch
+    // input.  On a miss, LoadPipe writes all fields into the selected MSHR.
     val mdpHint = Output(Bool())
     val mdpImm = Output(UInt(MDP_IMM_BITS.W))
+    val mdpVaddr = Output(UInt(VAddrBits.W))
+    val mdpPC = Output(UInt(VAddrBits.W))
     val mdpLoadSize = Output(UInt(2.W))
     val mdpLoadUnsigned = Output(Bool())
 
@@ -129,6 +132,8 @@ class LoadUnitS0(param: ExeUnitParams)(
 
   class MdpLduDBEntry extends XSBundle {
     val timeCnt = UInt(64.W)
+    // 0: train0 from IQ-issued awakened load; 1: demand trigger entering LDU
+    // s0; 2: matching MDP hint returned to this LDU in s1.
     val eventType = UInt(2.W)
     val pc = UInt(VAddrBits.W)
     val wakedupPC = UInt(VAddrBits.W)
@@ -221,7 +226,9 @@ class LoadUnitS0(param: ExeUnitParams)(
   prefetch.uop := DontCare
   prefetch.vaddr := io.prefetchReq.bits.vaddr
   prefetch.fullva := io.prefetchReq.bits.vaddr
-  prefetch.size := DontCare
+  // MDP stridePf carries the original load semantics because a miss must
+  // extract the correct value before generating chasingPf.
+  prefetch.size := Mux(io.prefetchReq.bits.mdpPfHint, io.prefetchReq.bits.mdpLoadSize, 3.U)
   prefetch.mask := 0.U
   prefetch.paddr.get := io.prefetchReq.bits.paddr
   prefetch.noQuery.get := true.B
@@ -516,22 +523,51 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.replacementUpdated := DontCare
   io.pfSource := Mux(isHwPrefetch, io.prefetchReq.bits.pf_source.value, L1_HW_PREFETCH_NULL)
 
-  // MDP trigger observes only the first request issued by the IQ.  Replays use
-  // the other S0 sources and must not generate another trigger for the load.
-  val mdpDemandLoad = scalarIssue.fire && !LSUOpType.isPrefetch(io.ldin.bits.fuOpType)
-  io.mdpTrigger.valid := mdpDemandLoad
-  io.mdpTrigger.bits.pc := io.ldin.bits.pc.getOrElse(0.U)
-  io.mdpTrigger.bits.vaddr := ldinVAddr
+  // Every scalar demand load that actually enters S0, including replay paths,
+  // queries MDP.  Hardware/software prefetches and vector requests are excluded.
+  val mdpS0Load = pipeIn.fire && sink.bits.accessType.isScalar() && !isPrefetch
+  io.mdpTrigger.valid := mdpS0Load
+  io.mdpTrigger.bits.pc := uop.pc
+  io.mdpTrigger.bits.vaddr := sink.bits.vaddr
   io.mdpTrigger.bits.lduId := io.mdpLduId
+  io.mdpTrigger.bits.robIdx := uop.robIdx
+  io.mdpTrigger.bits.loadSize := sink.bits.size
+  io.mdpTrigger.bits.loadUnsigned := uop.fuOpType(2)
 
-  val mdpHintMatch = io.mdpPfHint.valid &&
+  // MDP queries in s0 and returns the decision in s1.  Register the exact
+  // request identity and assert that a valid hint matches the same LDU request.
+  val s1MdpTriggerValid = RegNext(io.mdpTrigger.valid, false.B)
+  val s1MdpTriggerBits = RegEnable(io.mdpTrigger.bits, io.mdpTrigger.valid)
+  val mdpDemandHintMatch = io.mdpPfHint.valid && s1MdpTriggerValid &&
     io.mdpPfHint.bits.lduId === io.mdpLduId &&
-    io.mdpPfHint.bits.pc === io.ldin.bits.pc.getOrElse(0.U) &&
-    io.mdpPfHint.bits.vaddr === ldinVAddr
-  io.mdpHint := mdpDemandLoad && mdpHintMatch
-  io.mdpImm := Mux(io.mdpHint, io.mdpPfHint.bits.imm, 0.U)
-  io.mdpLoadSize := sink.bits.size
-  io.mdpLoadUnsigned := uop.fuOpType(2)
+    io.mdpPfHint.bits.pc === s1MdpTriggerBits.pc &&
+    io.mdpPfHint.bits.vaddr === s1MdpTriggerBits.vaddr &&
+    io.mdpPfHint.bits.robIdx === s1MdpTriggerBits.robIdx
+  when(io.mdpPfHint.valid) {
+    assert(mdpDemandHintMatch, "MDP hint must match the LDU s1 request identity")
+  }
+
+  // A stridePf request carries its hint metadata from MDP through the common
+  // L1 prefetch arbiter.  Register it with the hardware-prefetch S0 request so
+  // the fields reach LoadPipe in the same s1 cycle as the request itself.
+  val s0MdpStridePf = pipeIn.fire && isHwPrefetch && io.prefetchReq.bits.mdpPfHint
+  val s1MdpStridePf = RegNext(s0MdpStridePf, false.B)
+  val s1MdpStridePfReq = RegEnable(io.prefetchReq.bits, s0MdpStridePf)
+
+  io.mdpHint := mdpDemandHintMatch || s1MdpStridePf
+  io.mdpImm := Mux(mdpDemandHintMatch, io.mdpPfHint.bits.imm, s1MdpStridePfReq.mdpImm)
+  io.mdpVaddr := Mux(mdpDemandHintMatch, s1MdpTriggerBits.vaddr, s1MdpStridePfReq.mdpVaddr)
+  io.mdpPC := Mux(mdpDemandHintMatch, s1MdpTriggerBits.pc, s1MdpStridePfReq.mdpPC)
+  io.mdpLoadSize := Mux(
+    mdpDemandHintMatch,
+    s1MdpTriggerBits.loadSize,
+    s1MdpStridePfReq.mdpLoadSize
+  )
+  io.mdpLoadUnsigned := Mux(
+    mdpDemandHintMatch,
+    s1MdpTriggerBits.loadUnsigned,
+    s1MdpStridePfReq.mdpLoadUnsigned
+  )
 
   val mdpTrain0Valid = io.ldin.fire && io.ldin.bits.wakedup && FuType.isLoad(io.ldin.bits.fuType)
   io.mdpTrain0.valid := mdpTrain0Valid
@@ -601,13 +637,26 @@ class LoadUnitS0(param: ExeUnitParams)(
   val mdpTriggerLog = Wire(new MdpLduDBEntry)
   mdpTriggerLog := 0.U.asTypeOf(mdpTriggerLog)
   mdpTriggerLog.timeCnt := GTimer()
-  mdpTriggerLog.eventType := Mux(io.mdpHint, 2.U, 1.U)
+  mdpTriggerLog.eventType := 1.U
   mdpTriggerLog.pc := io.mdpTrigger.bits.pc
   mdpTriggerLog.vaddr := io.mdpTrigger.bits.vaddr
-  mdpTriggerLog.imm := io.mdpPfHint.bits.imm
-  mdpTriggerLog.robIdx := uop.robIdx.value
+  mdpTriggerLog.robIdx := io.mdpTrigger.bits.robIdx.value
   mdpTriggerLog.lduId := io.mdpLduId
   mdpLduTable.log(mdpTriggerLog, io.mdpTrigger.valid, "trigger", clock, reset)
+
+  // Hint is a one-cycle-later event.  Log the registered s0 identity used by
+  // mdpDemandHintMatch, rather than the unrelated request that may occupy s0
+  // now, so DB rows preserve the trigger-to-hint correspondence.
+  val mdpHintLog = Wire(new MdpLduDBEntry)
+  mdpHintLog := 0.U.asTypeOf(mdpHintLog)
+  mdpHintLog.timeCnt := GTimer()
+  mdpHintLog.eventType := 2.U
+  mdpHintLog.pc := s1MdpTriggerBits.pc
+  mdpHintLog.vaddr := s1MdpTriggerBits.vaddr
+  mdpHintLog.imm := io.mdpPfHint.bits.imm
+  mdpHintLog.robIdx := s1MdpTriggerBits.robIdx.value
+  mdpHintLog.lduId := io.mdpLduId
+  mdpLduTable.log(mdpHintLog, mdpDemandHintMatch, "hint", clock, reset)
 
   /**
     *  Perf counters
@@ -1319,6 +1368,8 @@ class LoadUnitS2(param: ExeUnitParams)(
   io.prefetchTrain.bits.isFirstIssue := in.isFirstIssue()
   io.prefetchTrain.bits.metaSource := io.dcacheResp.bits.meta_prefetch
   io.prefetchTrain.bits.isHwPrefetch := accessType.isHwPrefetch()
+  io.prefetchTrain.bits.loadSize := in.size
+  io.prefetchTrain.bits.loadUnsigned := uop.fuOpType(2)
   io.prefetchTrain.bits.refillLatency := io.dcacheResp.bits.refill_latency
 
   io.debugInfo.isBankConflict := pipeIn.valid && !kill && cause(C_BC)
@@ -2046,6 +2097,8 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   // LoadPipe; MissQueue retains them only when this load misses.
   io.dcache.mdpPfHint := s0.io.mdpHint
   io.dcache.mdpImm := s0.io.mdpImm
+  io.dcache.mdpVaddr := s0.io.mdpVaddr
+  io.dcache.mdpPC := s0.io.mdpPC
   io.dcache.mdpLoadSize := s0.io.mdpLoadSize
   io.dcache.mdpLoadUnsigned := s0.io.mdpLoadUnsigned
   io.sqForward.s0Req := s0.io.sqSbForwardReq

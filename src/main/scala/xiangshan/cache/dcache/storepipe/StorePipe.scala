@@ -185,7 +185,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   io.miss_req.bits.cancel := io.lsu.s2_kill
   io.miss_req.bits.pc := io.lsu.s2_pc
   // Store misses do not participate in the hinted-load data-return workflow.
-  // Explicit zeros prevent a store request from creating an MDP pending event.
+  // Explicit zeros prevent a store request from creating an MDP chasingPf event.
   io.miss_req.bits.pfHintMDP := false.B
   io.miss_req.bits.mdpImm := 0.U
   io.miss_req.bits.mdpVaddr := 0.U

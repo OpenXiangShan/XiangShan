@@ -121,13 +121,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_valid = io.lsu.req.fire
   val s0_req = WireInit(io.lsu.req.bits)
   val s0_pf_source = io.lsu.pf_source
-  // MDP sideband comes from NewLoadUnit S0 with the same scalar load request.
-  // TODO: Pipeline pfHintMDP after hint generation to break the current
-  // combinational MDP -> LDU -> LoadPipe S0 path.
-  val s0_mdp_pf_hint = io.lsu.mdpPfHint
-  val s0_mdp_imm = io.lsu.mdpImm
-  val s0_mdp_load_size = io.lsu.mdpLoadSize
-  val s0_mdp_load_unsigned = io.lsu.mdpLoadUnsigned
   s0_req.vaddr := Mux(io.load128Req, Cat(io.lsu.req.bits.vaddr(io.lsu.req.bits.vaddr.getWidth - 1, 4), 0.U(4.W)), io.lsu.req.bits.vaddr)
   val s0_fire = s0_valid && s1_ready
   val s0_vaddr = s0_req.vaddr
@@ -172,11 +165,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_valid = RegInit(false.B)
   val s1_req = RegEnable(s0_req, s0_fire)
   val s1_pf_source = RegEnable(s0_pf_source, s0_fire)
-  // Keep hint metadata aligned with the request through the DCache pipeline.
-  val s1_mdp_pf_hint = RegEnable(s0_mdp_pf_hint, s0_fire)
-  val s1_mdp_imm = RegEnable(s0_mdp_imm, s0_fire)
-  val s1_mdp_load_size = RegEnable(s0_mdp_load_size, s0_fire)
-  val s1_mdp_load_unsigned = RegEnable(s0_mdp_load_unsigned, s0_fire)
   // in stage 1, load unit gets the physical address
   val s1_paddr_dup_lsu = io.lsu.s1_paddr_dup_lsu
   val s1_paddr_dup_dcache = io.lsu.s1_paddr_dup_dcache
@@ -191,6 +179,38 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_nack = RegNext(io.nack)
   val s1_fire = s1_valid && s2_ready
   s1_ready := !s1_valid || s1_fire
+
+  // MDP queries in LDU/MDP s0 and returns pfHintMDP while this request is in
+  // LoadPipe s1.  Hold the one-cycle hint if s1 stalls before entering s2.
+  // TODO: pfHintMDP needs an additional register after MDP generates it; when
+  // added, delay this LoadPipe alignment point and its request metadata too.
+  val s1_mdp_hint_hold = RegInit(false.B)
+  val s1_mdp_imm_hold = Reg(UInt(12.W))
+  val s1_mdp_vaddr_hold = Reg(UInt(VAddrBits.W))
+  val s1_mdp_pc_hold = Reg(UInt(VAddrBits.W))
+  val s1_mdp_load_size_hold = Reg(UInt(2.W))
+  val s1_mdp_load_unsigned_hold = Reg(Bool())
+  when(s1_valid && !s1_fire && io.lsu.mdpPfHint) {
+    s1_mdp_hint_hold := true.B
+    s1_mdp_imm_hold := io.lsu.mdpImm
+    s1_mdp_vaddr_hold := io.lsu.mdpVaddr
+    s1_mdp_pc_hold := io.lsu.mdpPC
+    s1_mdp_load_size_hold := io.lsu.mdpLoadSize
+    s1_mdp_load_unsigned_hold := io.lsu.mdpLoadUnsigned
+  }
+  when(s1_fire) {
+    s1_mdp_hint_hold := false.B
+  }
+  val s1_mdp_pf_hint = io.lsu.mdpPfHint || s1_mdp_hint_hold
+  val s1_mdp_imm = Mux(io.lsu.mdpPfHint, io.lsu.mdpImm, s1_mdp_imm_hold)
+  val s1_mdp_vaddr = Mux(io.lsu.mdpPfHint, io.lsu.mdpVaddr, s1_mdp_vaddr_hold)
+  val s1_mdp_pc = Mux(io.lsu.mdpPfHint, io.lsu.mdpPC, s1_mdp_pc_hold)
+  val s1_mdp_load_size = Mux(io.lsu.mdpPfHint, io.lsu.mdpLoadSize, s1_mdp_load_size_hold)
+  val s1_mdp_load_unsigned = Mux(
+    io.lsu.mdpPfHint,
+    io.lsu.mdpLoadUnsigned,
+    s1_mdp_load_unsigned_hold
+  )
 
   when (s0_fire) { s1_valid := true.B }
   .elsewhen (s1_fire) { s1_valid := false.B }
@@ -409,6 +429,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // captured by MissQueue when the hinted demand load misses.
   val s2_mdp_pf_hint = RegEnable(s1_mdp_pf_hint, s1_fire)
   val s2_mdp_imm = RegEnable(s1_mdp_imm, s1_fire)
+  val s2_mdp_vaddr = RegEnable(s1_mdp_vaddr, s1_fire)
+  val s2_mdp_pc = RegEnable(s1_mdp_pc, s1_fire)
   val s2_mdp_load_size = RegEnable(s1_mdp_load_size, s1_fire)
   val s2_mdp_load_unsigned = RegEnable(s1_mdp_load_unsigned, s1_fire)
 
@@ -453,8 +475,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // the original load value and return it to MDP after refill.
   io.miss_req.bits.pfHintMDP := s2_mdp_pf_hint
   io.miss_req.bits.mdpImm := s2_mdp_imm
-  io.miss_req.bits.mdpVaddr := s2_vaddr
-  io.miss_req.bits.mdpPC := io.lsu.s2_pc
+  io.miss_req.bits.mdpVaddr := s2_mdp_vaddr
+  io.miss_req.bits.mdpPC := s2_mdp_pc
   io.miss_req.bits.mdpLoadSize := s2_mdp_load_size
   io.miss_req.bits.mdpLoadUnsigned := s2_mdp_load_unsigned
   io.miss_req.bits.isBtoT := s2_grow_perm_btot

@@ -104,6 +104,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val l2_hint = Input(Valid(new L2ToL1Hint()))
     val l2_tlb_req = Flipped(new TlbRequestIO(nRespDups = 2))
     val l2_pmp_resp = new PMPRespBundle
+    val l2_mdp_tlb_req = if (hasL2Mdp) Some(Flipped(new TlbRequestIO(nRespDups = 2))) else None
+    val l2_mdp_pmp_resp = if (hasL2Mdp) Some(new PMPRespBundle) else None
     val l2PfqBusy = Input(Bool())
     val debugTopDown = new Bundle {
       val robTrueCommit = Output(UInt(64.W))
@@ -224,6 +226,8 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   memBlock.io.l2_hint.bits.sourceId := io.l2_hint.bits.sourceId
   memBlock.io.l2_tlb_req <> io.l2_tlb_req
   memBlock.io.l2_pmp_resp <> io.l2_pmp_resp
+  memBlock.io.l2_mdp_tlb_req.zip(io.l2_mdp_tlb_req).foreach { case (memTlb, coreTlb) => memTlb <> coreTlb }
+  memBlock.io.l2_mdp_pmp_resp.zip(io.l2_mdp_pmp_resp).foreach { case (memPmp, corePmp) => memPmp <> corePmp }
   memBlock.io.l2_hint.bits.isKeyword := io.l2_hint.bits.isKeyword
   memBlock.io.l2PfqBusy := io.l2PfqBusy
 

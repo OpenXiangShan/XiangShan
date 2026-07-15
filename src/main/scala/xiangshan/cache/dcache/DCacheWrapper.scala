@@ -23,7 +23,8 @@ import xscache.coupledL2.{IsKeywordKey, IsKeywordField, MemBackTypeMMField, MemP
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import xscache.common.{AliasField, MdpHintField, PrefetchField}
+import xscache.common.{AliasField, MdpHintField, MdpImmField, MdpLoadSizeField, MdpLoadUnsignedField,
+  MdpPCField, MdpVaddrField, PrefetchField}
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import utils._
@@ -638,10 +639,13 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val is128Req = Bool()
   // cycle 0: prefetch source bits
   val pf_source = Output(UInt(L1PfSourceBits.W))
-  // MDP sideband from NewLoadUnit S0 to this LDU's LoadPipe.  A hinted miss
-  // stores the immediate and load semantics in its MSHR until refill.
+  // MDP sideband from NewLoadUnit S1-aligned output to this LDU's LoadPipe.
+  // A hinted miss stores the dependency immediate, exact load VA/PC, access
+  // width and signedness in its MSHR until refill-data extraction.
   val mdpPfHint = Output(Bool())
   val mdpImm = Output(UInt(12.W))
+  val mdpVaddr = Output(UInt(VAddrBits.W))
+  val mdpPC = Output(UInt(VAddrBits.W))
   val mdpLoadSize = Output(UInt(2.W))
   val mdpLoadUnsigned = Output(Bool())
   // cycle0: load microop
@@ -818,8 +822,9 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val lqEmpty = Input(Bool())
   val pf_ctrl = Output(Vec(L1PrefetcherNum, new PrefetchControlBundle))
   val refillTrain = ValidIO(new TrainReqBundle)
-  // Completed hinted-load data from MissQueue to MemBlock/PrefetcherWrapper.
-  val mdpPending = ValidIO(new MdpPendingReqBundle)
+  // Completed hinted-load data from each MissEntry to MemBlock/PrefetcherWrapper;
+  // one lane per MSHR prevents simultaneous refills from being collapsed.
+  val mdpChasingPf = Vec(cfg.nMissEntries, ValidIO(new MdpChasingPfReqBundle))
   val force_write = Input(Bool())
   val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
   val debugTopDown = new DCacheTopDownIO
@@ -919,8 +924,13 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
 
   val reqFields: Seq[BundleFieldBase] = Seq(
     PrefetchField(),
-    // Carry the L1 hinted-load marker on TileLink A to XSCache/L2.
+    // Carry the hinted load context on TileLink A to XSCache/L2 MDP.
     MdpHintField(),
+    MdpImmField(12),
+    MdpVaddrField(VAddrBits),
+    MdpPCField(VAddrBits),
+    MdpLoadSizeField(),
+    MdpLoadUnsignedField(),
     ReqSourceField(),
     VaddrField(VAddrBits - blockOffBits),
     MemBackTypeMMField(),
@@ -1047,8 +1057,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.memSetPattenDetected := missQueue.io.memSetPattenDetected
   io.wfi <> missQueue.io.wfi
   io.refillTrain := missQueue.io.refill_train
-  // Forward the aggregated MSHR pending event to the MDP input path.
-  io.mdpPending := missQueue.io.mdp_pending
+  // Forward all per-MSHR chasingPf lanes toward PrefetcherWrapper's filter.
+  io.mdpChasingPf := missQueue.io.mdp_chasing_pf
   mainPipe.io.prefetch_req <> io.prefetch_req
 
   // l1 dcache controller

@@ -190,6 +190,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       l2top.module.io.debugTopDown.robTrueCommit := core.module.io.debugTopDown.robTrueCommit
       l2top.module.io.l2_pmp_resp := core.module.io.l2_pmp_resp
       core.module.io.l2_tlb_req <> l2top.module.io.l2_tlb_req
+      l2top.module.io.l2_mdp_pmp_resp.zip(core.module.io.l2_mdp_pmp_resp).foreach {
+        case (l2Pmp, corePmp) => l2Pmp := corePmp
+      }
+      core.module.io.l2_mdp_tlb_req.zip(l2top.module.io.l2_mdp_tlb_req).foreach {
+        case (coreTlb, l2Tlb) => coreTlb <> l2Tlb
+      }
       core.module.io.topDownInfo.l2Miss := l2top.module.io.l2Miss
 
       core.module.io.perfEvents <> l2top.module.io.perfEvents
@@ -208,6 +214,12 @@ class XSTile()(implicit p: Parameters) extends LazyModule
       core.module.io.l2_tlb_req.req.bits := DontCare
       core.module.io.l2_tlb_req.req_kill := DontCare
       core.module.io.l2_tlb_req.resp.ready := true.B
+      core.module.io.l2_mdp_tlb_req.foreach { tlb =>
+        tlb.req.valid := false.B
+        tlb.req.bits := DontCare
+        tlb.req_kill := DontCare
+        tlb.resp.ready := true.B
+      }
 
       core.module.io.perfEvents <> DontCare
     }
