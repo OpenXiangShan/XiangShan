@@ -24,7 +24,7 @@ import utility._
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
-import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
+import xiangshan.{L1CacheErrorInfo, NtlType, XSCoreParamsKey}
 
 class LoadPfDbBundle(implicit p: Parameters) extends DCacheBundle {
   val paddr = UInt(PAddrBits.W)
@@ -122,6 +122,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s0_valid = io.lsu.req.fire
   val s0_req = WireInit(io.lsu.req.bits)
   val s0_pf_source = io.lsu.pf_source
+  val s0_ntl = io.lsu.ntl
   s0_req.vaddr := Mux(io.load128Req, Cat(io.lsu.req.bits.vaddr(io.lsu.req.bits.vaddr.getWidth - 1, 4), 0.U(4.W)), io.lsu.req.bits.vaddr)
   val s0_fire = s0_valid && s1_ready
   val s0_vaddr = s0_req.vaddr
@@ -166,6 +167,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_valid = RegInit(false.B)
   val s1_req = RegEnable(s0_req, s0_fire)
   val s1_pf_source = RegEnable(s0_pf_source, s0_fire)
+  val s1_ntl = RegEnable(s0_ntl, s0_fire)
   // in stage 1, load unit gets the physical address
   val s1_paddr_dup_lsu = io.lsu.s1_paddr_dup_lsu
   val s1_paddr_dup_dcache = io.lsu.s1_paddr_dup_dcache
@@ -317,6 +319,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_valid_dup = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
   val s2_pf_source = RegEnable(s1_pf_source, s1_fire)
+  val s2_ntl = RegEnable(s1_ntl, s1_fire)
   val s2_load128Req = RegEnable(s1_load128Req, s1_fire)
   val s2_paddr = RegEnable(s1_paddr_dup_dcache, s1_fire)
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
@@ -425,6 +428,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := s2_instrtype
   io.miss_req.bits.pf_source := RegNext(RegNext(io.lsu.pf_source))  // TODO: clock gate
+  io.miss_req.bits.isNtl := NtlType.isDcacheNtl(s2_ntl)
   io.miss_req.bits.cmd := s2_req.cmd
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_vaddr
@@ -544,6 +548,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_tl_error = RegEnable(s2_tl_error, s2_fire)
   val s3_flag_error = s3_tl_error.asUInt.orR
   val s3_hit_prefetch = RegEnable(s2_hit_prefetch, s2_fire)
+  val s3_ntl = RegEnable(s2_ntl, s2_fire)
+  val s3_is_dcache_ntl = NtlType.isDcacheNtl(s3_ntl)
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error
 
   // Register the S2 kill (includes load breakpoint trigger exception) so that
@@ -569,7 +575,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report tag error / l2 corrupted to CACHE_ERROR csr
   io.error.valid := s3_error && s3_valid
 
-  io.replace_access.valid := s3_valid && s3_hit && !s3_kill
+  io.replace_access.valid := s3_valid && s3_hit && !s3_kill && !s3_is_dcache_ntl
   io.replace_access.bits.set := RegNext(RegNext(get_dcache_idx(s1_req.vaddr)))
   io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_tag_match_way_dup_dc)))
 

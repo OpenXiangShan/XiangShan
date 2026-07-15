@@ -19,7 +19,7 @@ import chisel3.experimental.SourceInfo
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.BackendParams
-import xiangshan.backend.fu.FuConfig
+import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.backend.decode.{Imm, ImmUnion}
 
 package object xiangshan {
@@ -728,6 +728,12 @@ package object xiangshan {
     def apply(rs2: UInt): UInt = Mux(rs2(2, 0) === 5.U, all,
                                  Mux(rs2(2, 0) === 4.U, s1,
                                  Mux(rs2(2, 0) === 3.U, pall, p1)))
+    def isDcacheNtl(ntl: Valid[UInt]): Bool =
+      ntl.valid && (ntl.bits === p1 || ntl.bits === pall || ntl.bits === all)
+
+    // Currently, CMO and atomics ignore NTL for simplicity.
+    def isNtlIgnored(fuType: UInt, fuOpType: UInt): Bool =
+      FuType.isAMO(fuType) || LSUOpType.isCboAll(fuOpType)
   }
 
   object LSUOpType {
