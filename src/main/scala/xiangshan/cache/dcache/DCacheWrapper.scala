@@ -822,6 +822,7 @@ class DCacheTopDownIO(implicit p: Parameters) extends DCacheBundle {
 class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val hartId = Input(UInt(hartIdLen.W))
   val l2_pf_store_only = Input(Bool())
+  val perfClean = Input(Bool())
   val lsu = new DCacheToLsuIO
   val error = ValidIO(new L1CacheErrorInfo)
   val mshrFull = Output(Bool())
@@ -1219,6 +1220,13 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
     // refillPipe.io.access_flag_write
   )
   access_flag_write_ports.zip(accessArray.io.write).foreach { case (p, w) => w <> p }
+
+  val accessStatArray = Module(new L1AccessStatArray(LoadPipelineWidth + 1))
+  accessStatArray.io.access.take(LoadPipelineWidth).zip(ldu.map(_.io.access_stat)).foreach { case (access, stat) => access := stat }
+  accessStatArray.io.access.last := mainPipe.io.access_stat.access
+  accessStatArray.io.refill := mainPipe.io.access_stat.refill
+  accessStatArray.io.clear := mainPipe.io.access_stat.clear
+  accessStatArray.io.perfClean := io.perfClean
 
   //----------------------------------------
   // tag array

@@ -55,6 +55,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
     // access bit update
     val access_flag_write = DecoupledIO(new FlagMetaWriteReq)
+    val access_stat = ValidIO(new L1AccessStatAccess)
     val prefetch_flag_write = DecoupledIO(new SourceMetaWriteReq)
     val latency_flag_write = DecoupledIO(new LatencyMetaWriteReq)
 
@@ -571,6 +572,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.access_flag_write.bits.idx := get_dcache_idx(s3_vaddr)
   io.access_flag_write.bits.way_en := s3_tag_match_way
   io.access_flag_write.bits.flag := true.B
+
+  io.access_stat.valid := io.lsu.resp.fire && s2_hit && !resp.bits.replay && !s2_is_prefetch
+  io.access_stat.bits.set := get_dcache_idx(s2_vaddr)
+  io.access_stat.bits.way_en := s2_tag_match_way
 
   // clear prefetch source when prefetch hit
   // so that next load to the same line won't be considered as prefetch hit

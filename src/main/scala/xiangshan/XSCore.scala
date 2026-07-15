@@ -98,6 +98,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     val cpu_critical_error = Output(Bool())
     val resetInFrontend = Output(Bool())
     val traceCoreInterface = new TraceCoreInterface
+    val perfClean = Input(Bool())
     val l2PfCtrl = Output(new PrefetchCtrlFromCore)
     val perfEvents = Input(Vec(numPCntHc * coreParams.L2NBanks + 1, new PerfEvent))
     val beu_errors = Output(new XSL1BusErrors())
@@ -190,6 +191,7 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
     memBlock_teemsiInfo := io_teemsiInfo
   }
   memBlock.io.hartId := io.hartId
+  memBlock.io.perfClean := io.perfClean
   memBlock.io.l2_flush_done := io.l2_flush_done
   memBlock.io.outer_reset_vector := io.reset_vector
   memBlock.io.outer_hc_perfEvents := io.perfEvents

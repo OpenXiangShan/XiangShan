@@ -367,6 +367,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val ifetchPrefetch = Vec(LduCnt, ValidIO(new SoftIfetchPrefetchBundle))
 
     // misc
+    val perfClean = Input(Bool())
     val dcacheError = Output(new L1BusErrorUnitInfo())
     val uncacheError = Output(new L1BusErrorUnitInfo())
     val memInfo = new Bundle {
@@ -533,6 +534,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   io.mem_to_ooo.stIssuePtr := lsq.io.issuePtrExt
 
   dcache.io.hartId := io.hartId
+  dcache.io.perfClean := io.perfClean
   lsq.io.hartId := io.hartId
   sbuffer.io.hartId := io.hartId
   atomicsUnit.io.hartId := io.hartId

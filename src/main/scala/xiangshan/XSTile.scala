@@ -168,6 +168,7 @@ class XSTile()(implicit p: Parameters) extends LazyModule
 
     l2top.module.io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
     l2top.module.io.perfClean := io.perfClean
+    core.module.io.perfClean := io.perfClean
     io.l2_flush_en.foreach { _ := core.module.io.l2_flush_en }
     core.module.io.l2_flush_done := l2top.module.io.l2_flush_done.getOrElse(false.B)
     io.l2_flush_done.foreach { _ := l2top.module.io.l2_flush_done.getOrElse(false.B) }

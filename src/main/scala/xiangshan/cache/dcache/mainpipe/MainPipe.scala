@@ -211,6 +211,12 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     // writeback addr to be replaced
     val replace = new MissQueueBlockIO
 
+    val access_stat = new Bundle {
+      val access = ValidIO(new L1AccessStatAccess)
+      val refill = ValidIO(new L1AccessStatRefill)
+      val clear = ValidIO(new L1AccessStatClear)
+    }
+
     // sms prefetch
     val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
 
@@ -1115,6 +1121,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.replace_access.valid := GatedValidRegNext(s2_fire_to_s3) && !s3_req.probe && (s3_req.miss || ((s3_req.isAMO || s3_req.isStore) && s3_hit))
   io.replace_access.bits.set := s3_idx
   io.replace_access.bits.way := OHToUInt(s3_way_en)
+
+  io.access_stat.access.valid := s3_fire && !s3_req.probe && !s3_req.replace && !s3_req.miss && !s3_req.isPrefetch &&
+    ((s3_req.isStore && s3_store_hit) || (s3_req.isAMO && s3_amo_hit && !s3_sc_fail))
+  io.access_stat.access.bits.set := s3_idx
+  io.access_stat.access.bits.way_en := s3_way_en
+
+  io.access_stat.refill.valid := s3_fire && s3_req.miss
+  io.access_stat.refill.bits.set := s3_idx
+  io.access_stat.refill.bits.way_en := s3_way_en
+  io.access_stat.refill.bits.prefetch := isFromL1Prefetch(s3_req.pf_source)
+
+  io.access_stat.clear.valid := s3_fire && (s3_req.replace || probe_update_meta && probe_new_coh.state === ClientStates.Nothing)
+  io.access_stat.clear.bits.set := s3_idx
+  io.access_stat.clear.bits.way_en := s3_way_en
 
   io.replace_way.set.valid := GatedValidRegNext(s0_fire)
   io.replace_way.set.bits := s1_idx
