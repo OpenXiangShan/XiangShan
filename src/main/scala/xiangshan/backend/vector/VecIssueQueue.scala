@@ -809,7 +809,7 @@ object VecIssueQueue {
     sink.foreach { in =>
       in.fromIssueQueue.zip(wbPortIds).foreach { case (portIn, portId) =>
         val matches = matchedDeqOps(portId).map { case (deqPort, deqIdx) =>
-          val isNonFixedLatFu = FuType.FuTypeOrR(deqPort.bits.fuType, FuType.vidiv)
+          val isNonFixedLatFu = FuType.FuTypeOrR(deqPort.bits.fuType, FuType.vidiv, FuType.vfdiv)
           val valid = deqPort.valid && deqWen(deqIdx) && !isNonFixedLatFu
           val slot = WbFuBusyTable.writebackSlot(deqPort.bits.latency, busyTableInsertLatencyOffset)
           WbIssueMatch(valid, slot)
@@ -834,7 +834,7 @@ object VecIssueQueue {
 
       in.fromIssueQueueNonFixedLatFu.zip(wbPortIds).foreach { case (portIn, portId) =>
         val matches = matchedDeqOps(portId).map { case (deqPort, deqIdx) =>
-          val isNonFixedLatFu = FuType.FuTypeOrR(deqPort.bits.fuType, FuType.vidiv)
+          val isNonFixedLatFu = FuType.FuTypeOrR(deqPort.bits.fuType, FuType.vidiv, FuType.vfdiv)
           deqPort.valid && deqWen(deqIdx) && isNonFixedLatFu
         }
 
