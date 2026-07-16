@@ -97,6 +97,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val pmp_resp = Vec(prefetcherNum, Flipped(new PMPRespBundle()))
     // prefetch req sender
     val l1_pf_to_l1 = DecoupledIO(new L1PrefetchReq())
+    val l1_pf_nack = Flipped(ValidIO(new L1PrefetchReq))
+    val l1_pf_mshr_full = Input(Bool())
     val l1_pf_to_l2 = Output(new xscache.coupledL2.PrefetchRecv())
   })
 
@@ -119,7 +121,10 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     RegEnable(s2_storePcVec(i), io.trainSource.s2_storeFireHint(i))
   }
   /* prefetch arbiter */
-  val l1_pf_arb = Module(new Arbiter(new L1PrefetchReq, prefetcherNum))
+  val l1_pf_arb = Module(new L1PrefetchRetryArbiter(sourceCount = prefetcherNum))
+  l1_pf_arb.io.nack.valid := RegNext(io.l1_pf_nack.valid, false.B)
+  l1_pf_arb.io.nack.bits := RegEnable(io.l1_pf_nack.bits, io.l1_pf_nack.valid)
+  l1_pf_arb.io.mshrFull := io.l1_pf_mshr_full
   val l2_pf_req = Wire(Decoupled(new L2PrefetchReq()))
   val l2_pf_arb = Module(new Arbiter(new L2PrefetchReq, prefetcherNum))
   val l3_pf_req = Wire(Decoupled(new L3PrefetchReq()))
@@ -334,11 +339,15 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2Unknown", clock, reset)
   }
 
-  val arb_seq = Seq(l1_pf_arb, l2_pf_arb, l3_pf_arb)
-  arb_seq.zipWithIndex.foreach { case (arb, level) =>
-    prefetcherSeq.zipWithIndex.foreach { case (pf, idx) =>
-      XSPerfAccumulate(s"${pf.name}_fire_l${level+1}", arb.io.in(idx).fire)
-      XSPerfAccumulate(s"${pf.name}_block_l${level+1}", arb.io.in(idx).valid && !arb.io.in(idx).ready)
+  prefetcherSeq.zipWithIndex.foreach { case (pf, idx) =>
+    val arbEvents = Seq(
+      l1_pf_arb.io.in(idx).fire -> (l1_pf_arb.io.in(idx).valid && !l1_pf_arb.io.in(idx).ready),
+      l2_pf_arb.io.in(idx).fire -> (l2_pf_arb.io.in(idx).valid && !l2_pf_arb.io.in(idx).ready),
+      l3_pf_arb.io.in(idx).fire -> (l3_pf_arb.io.in(idx).valid && !l3_pf_arb.io.in(idx).ready),
+    )
+    arbEvents.zipWithIndex.foreach { case ((fire, block), level) =>
+      XSPerfAccumulate(s"${pf.name}_fire_l${level+1}", fire)
+      XSPerfAccumulate(s"${pf.name}_block_l${level+1}", block)
     }
   }
 

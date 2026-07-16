@@ -71,6 +71,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
 
   // prefetch
   val pf_source = UInt(L1PfSourceBits.W)
+  val first_issue = Bool()
   val access = Bool()
 
   val id = UInt(reqIdWidth.W)
@@ -117,8 +118,20 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.error := false.B
     req.miss_fail_cause_evict_btot := false.B
     req.pf_source := prefetch.pf_source.value
+    req.first_issue := prefetch.first_issue
     req.access := false.B
     req.id := 0.U
+    req
+  }
+
+  def toL1PrefetchReq(): L1PrefetchReq = {
+    val req = Wire(new L1PrefetchReq)
+    req.paddr := addr
+    req.vaddr := vaddr
+    req.confidence := 0.U
+    req.is_store := false.B
+    req.pf_source.value := pf_source
+    req.first_issue := first_issue
     req
   }
 }
@@ -166,6 +179,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val wb_ready_dup = Vec(nDupWbReady, Input(Bool()))
     // hardware prefetch
     val prefetch_req = Flipped(Decoupled(new L1PrefetchReq()))
+    val prefetch_nack = ValidIO(new L1PrefetchReq)
     // pass to Prefetch Monitor for statistic
     val prefetch_stat = Output(new PipePrefetchStatBundle)
 
@@ -992,7 +1006,10 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.prefetch_stat.total_prefetch := total_prefetch
   io.prefetch_stat.pf_late_in_cache := pf_late_in_cache
   io.prefetch_stat.pf_late_in_cache_source := s2_hit_prefetch
-  io.prefetch_stat.nack_prefetch := s2_valid && s2_can_go_to_mq && !io.miss_req.ready && s2_isPrefetch
+  val nackPrefetch = s2_valid && s2_can_go_to_mq && !io.miss_req.ready && s2_isPrefetch
+  io.prefetch_stat.nack_prefetch := nackPrefetch
+  io.prefetch_nack.valid := nackPrefetch
+  io.prefetch_nack.bits := s2_req.toL1PrefetchReq()
   io.prefetch_stat.pf_source := s2_req.pf_source
   io.prefetch_stat.hit_pf_in_cache := DontCare
   io.prefetch_stat.hit_source := DontCare

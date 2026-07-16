@@ -62,6 +62,7 @@ class L1PrefetchReq(implicit p: Parameters) extends XSBundle with HasDCacheParam
   val confidence = UInt(1.W)
   val is_store = Bool()
   val pf_source = new L1PrefetchSource
+  val first_issue = Bool()
 
   // when l1 cache prefetch req arrives at load unit:
   // if (confidence == 1)
@@ -99,5 +100,6 @@ class L1PrefetchFuzzer(implicit p: Parameters) extends DCacheModule{
   io.req.bits.vaddr := 0.U
   io.req.bits.confidence := LFSR64(seed=Some(789L))(4,0) === 0.U
   io.req.bits.is_store := LFSR64(seed=Some(890L))(4,0) === 0.U
+  io.req.bits.first_issue := true.B
   io.req.valid := LFSR64(seed=Some(901L))(3,0) === 0.U
 }

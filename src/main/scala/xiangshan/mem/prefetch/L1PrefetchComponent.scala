@@ -16,6 +16,84 @@ case class StreamStrideParams() extends PrefetcherParams{
   override def tlbPlace = TLBPlace.dtlb_ld
 }
 
+class L1PrefetchRetryArbiter(
+  sourceCount: Int,
+  depth: Int = 4,
+  retryInterval: Int = 4,
+  fastDrainExit: Int = 2,
+)(implicit p: Parameters) extends XSModule {
+  require(sourceCount > 0)
+  require(depth > 1 && isPow2(depth))
+  require(retryInterval > 0)
+  require(fastDrainExit >= 0 && fastDrainExit < depth)
+
+  val io = IO(new Bundle {
+    val in = Flipped(Vec(sourceCount, Decoupled(new L1PrefetchReq)))
+    val nack = Flipped(Valid(new L1PrefetchReq))
+    val mshrFull = Input(Bool())
+    val out = Decoupled(new L1PrefetchReq)
+  })
+
+  private val queue = Module(new Queue(new L1PrefetchReq, depth, pipe = false, flow = false))
+  private val fastDrain = RegInit(false.B)
+  private val intervalCounter = RegInit(0.U((log2Ceil(retryInterval) max 1).W))
+
+  val firstIssueNack = io.nack.valid && io.nack.bits.first_issue
+  queue.io.enq.valid := firstIssueNack
+  queue.io.enq.bits := io.nack.bits
+
+  val full = !queue.io.enq.ready
+  val fullDrop = firstIssueNack && full
+  val enqueue = queue.io.enq.fire
+
+  val retry = Wire(Decoupled(new L1PrefetchReq))
+  val retryEligible = !io.mshrFull && (fastDrain || intervalCounter === 0.U)
+  retry.valid := queue.io.deq.valid && retryEligible
+  retry.bits := queue.io.deq.bits
+  retry.bits.first_issue := false.B
+  queue.io.deq.ready := retry.ready && retryEligible
+
+  val blockOriginal = io.mshrFull || fastDrain || full
+  val arb = Module(new Arbiter(new L1PrefetchReq, sourceCount + 1))
+  arb.io.in(0) <> retry
+  io.in.zip(arb.io.in.tail).foreach { case (source, sink) =>
+    sink.valid := source.valid && !blockOriginal
+    sink.bits := source.bits
+    source.ready := sink.ready && !blockOriginal
+  }
+  io.out <> arb.io.out
+
+  val dequeue = retry.fire
+  val enterFastDrain = enqueue && !dequeue && queue.io.count === (depth - 1).U
+  val exitFastDrain = !enqueue && dequeue && queue.io.count === (fastDrainExit + 1).U
+
+  when(enterFastDrain) {
+    fastDrain := true.B
+  }.elsewhen(exitFastDrain) {
+    fastDrain := false.B
+  }
+
+  when(io.mshrFull || dequeue) {
+    intervalCounter := (retryInterval - 1).U
+  }.elsewhen(intervalCounter =/= 0.U) {
+    intervalCounter := intervalCounter - 1.U
+  }
+
+  XSPerfAccumulate("l1PfRetryNack", io.nack.valid)
+  XSPerfAccumulate("l1PfRetryEnqueue", enqueue)
+  XSPerfAccumulate("l1PfRetryFullDrop", fullDrop)
+  XSPerfAccumulate("l1PfRetrySecondNackDrop", io.nack.valid && !io.nack.bits.first_issue)
+  XSPerfAccumulate("l1PfRetryNormalFire", dequeue && !fastDrain)
+  XSPerfAccumulate("l1PfRetryFastDrainFire", dequeue && fastDrain)
+  XSPerfAccumulate("l1PfRetryMshrFullCycles", io.mshrFull)
+  XSPerfAccumulate("l1PfRetryBlockOriginalCycles", fastDrain)
+
+  assert(!(retry.fire && io.mshrFull))
+  assert(!retry.valid || !retry.bits.first_issue)
+  when(io.nack.valid && !io.nack.bits.first_issue) { assert(!enqueue) }
+  when(blockOriginal) { io.in.foreach(source => assert(!source.fire)) }
+}
+
 // only for region type of prefetch
 trait HasL1PrefetchHelper extends HasCircularQueuePtrHelper with HasDCacheParameters {
   // region related
@@ -680,6 +758,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_pf_req_arb.io.in(i).bits.req.confidence := l1_array(i).confidence
     l1_pf_req_arb.io.in(i).bits.req.is_store := false.B
     l1_pf_req_arb.io.in(i).bits.req.pf_source := l1_array(i).source
+    l1_pf_req_arb.io.in(i).bits.req.first_issue := true.B
     l1_pf_req_arb.io.in(i).bits.debug_vaddr := l1_array(i).get_pf_vaddr(forward_sent_vec)
   }
 
