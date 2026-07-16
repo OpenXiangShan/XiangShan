@@ -343,6 +343,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     // store address execute
     (0 until StorePipelineWidth).map(w => {
       storeAddrWakeupVec(i)(w) := io.storeAddrWakeup(w).valid &&
+        io.storeAddrWakeup(w).bits.sqIdx.withInPhysicalQueue(io.sqDeqPtr) &&
         blockSqIdx(i) === io.storeAddrWakeup(w).bits.sqIdx
     })
     storeAddrInSameCycleVec(i) := storeAddrWakeupVec(i).asUInt.orR // for better timing
