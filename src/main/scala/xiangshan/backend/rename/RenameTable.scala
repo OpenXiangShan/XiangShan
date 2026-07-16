@@ -198,6 +198,8 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     val renameUpdates =
       if (backendParams.basicDebugEn) Some(Input(Vec(diffRatParams.renameWidth, Valid(new DiffRatRenameUpdate)))) else None
     val diffRatCommitRobIdx = if (backendParams.basicDebugEn) Some(Input(Valid(new RobPtr))) else None
+    val diffRatCommitRobIdxVec =
+      if (backendParams.basicDebugEn) Some(Input(Vec(diffRatParams.commitWidth, Valid(new RobPtr)))) else None
     val intReadPorts = Vec(RenameWidth, Vec(2, new RatReadPort(IntLogicRegs)))
     val intRenamePorts = Vec(RenameWidth, Input(new RatWritePort(IntLogicRegs)))
     val fpReadPorts = Vec(RenameWidth, Vec(3, new RatReadPort(FpLogicRegs)))
@@ -243,6 +245,7 @@ class RenameTableWrapper(implicit p: Parameters) extends XSModule {
     rat.io.diffRatBase.vlRat := vlRat.io.diffRatBase.get
     rat.io.renameUpdates := io.renameUpdates.get
     rat.io.commitRobIdx := io.diffRatCommitRobIdx.get
+    rat.io.commitRobIdxVec := io.diffRatCommitRobIdxVec.get
   }
 
   io.debug_int_rat .foreach(_ := intRat.io.debug_rdata.get)

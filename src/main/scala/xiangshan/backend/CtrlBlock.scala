@@ -633,6 +633,7 @@ class CtrlBlockImp(
   rat.io.redirect := s1_s3_redirect.valid
   rat.io.rabCommits := rob.io.rabCommits
   rat.io.diffRatCommitRobIdx.foreach(_ := rob.io.diffRatCommitRobIdx.get)
+  rat.io.diffRatCommitRobIdxVec.foreach(_ := rob.io.diffRatCommitRobIdxVec.get)
   rat.io.renameUpdates.foreach { updates =>
     updates.zip(rename.io.out).foreach { case (update, renameOut) =>
       update.valid := renameOut.fire && !s1_s3_redirect.valid
