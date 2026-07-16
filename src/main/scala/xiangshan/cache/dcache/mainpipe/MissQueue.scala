@@ -1122,8 +1122,19 @@ for(i <- 0 until reqNum) {
   io.mdp_chasing_pf.bits.mshrId := io.id
 
   // MDP counters are kept beside the existing MissEntry refill counters.
-  XSPerfAccumulate("mdp_hint_mshr_alloc", io.miss_req_pipe_reg.alloc && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.pfHintMDP)
-  XSPerfAccumulate("mdp_hint_mshr_merge", io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.pfHintMDP)
+  val mdpHintMshrAlloc = io.miss_req_pipe_reg.alloc && !io.miss_req_pipe_reg.cancel &&
+    miss_req_pipe_reg_bits.pfHintMDP
+  val mdpHintMshrMerge = io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel &&
+    miss_req_pipe_reg_bits.pfHintMDP
+  // The first merge turns an ordinary MSHR into a hinted MSHR.  A multiple
+  // merge targets an already hinted MSHR and overwrites its one saved context;
+  // counting the two separately explains why several hints yield one refill.
+  val mdpHintMshrFirstMerge = mdpHintMshrMerge && !req.pfHintMDP
+  val mdpHintMshrMultipleMerge = mdpHintMshrMerge && req.pfHintMDP
+  XSPerfAccumulate("mdp_hint_mshr_alloc", mdpHintMshrAlloc)
+  XSPerfAccumulate("mdp_hint_mshr_merge", mdpHintMshrMerge)
+  XSPerfAccumulate("mdp_hint_mshr_first_merge", mdpHintMshrFirstMerge)
+  XSPerfAccumulate("mdp_hint_mshr_multiple_merge", mdpHintMshrMultipleMerge)
   XSPerfAccumulate("mdp_hint_mshr_refill", io.mdp_chasing_pf.valid)
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)

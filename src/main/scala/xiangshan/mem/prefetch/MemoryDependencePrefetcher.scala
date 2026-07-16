@@ -40,7 +40,7 @@ case class MdpParams(
   chasingFilterSize: Int = 32,
   prefetchBufferEntries: Int = 8,
   sourceQueueRows: Int = 4,
-  chasingDepth: Int = 2
+  chasingDepth: Int = 1
 ) extends PrefetcherParams {
   override def name: String = "mdp"
   override def tlbPlace = TLBPlace.dtlb_pf
@@ -210,6 +210,8 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
     val vline = UInt(vlineWidth.W)
     val pline = UInt(plineWidth.W)
     val pvalid = Bool()
+    // Set after a TLB miss so retries can be distinguished from first attempts.
+    val tlbMiss = Bool()
     val triggerPC = UInt(VAddrBits.W)
     val triggerVA = UInt(VAddrBits.W)
     val pfSource = UInt(L1PfSourceBits.W)
@@ -251,6 +253,7 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
     entries(srcIdx).vline := srcLine
     entries(srcIdx).pline := 0.U
     entries(srcIdx).pvalid := false.B
+    entries(srcIdx).tlbMiss := false.B
     entries(srcIdx).triggerPC := io.srcReq.bits.triggerPC
     entries(srcIdx).triggerVA := io.srcReq.bits.triggerVA
     entries(srcIdx).pfSource := io.srcReq.bits.pfSource
@@ -268,6 +271,7 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   val tlbReqArb = Module(new RRArbiterInit(new TlbReq, size))
   val pfIdxArb = Module(new RRArbiterInit(UInt(indexWidth.W), size))
   val s0_tlbFireOH = VecInit(tlbReqArb.io.in.map(_.fire))
+  val s0_tlbRetry = VecInit((0 until size).map(i => s0_tlbFireOH(i) && entries(i).tlbMiss)).asUInt.orR
   // Advance a pulse, not a held index.  Clearing each empty stage is required
   // so notInFlight releases the entry after its s3 response; RegEnable would
   // retain the last one-hot indefinitely and could block a replacement entry.
@@ -299,13 +303,15 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   val s1_tlbReqValid = RegNext(tlbReqArb.io.out.valid, false.B)
   val s1_tlbReqBits = RegEnable(tlbReqArb.io.out.bits, tlbReqArb.io.out.valid)
   val s1_vaddr = RegEnable(tlbReqArb.io.out.bits.vaddr, tlbReqArb.io.out.valid)
+  val s1_tlbRetry = RegNext(s0_tlbRetry, false.B)
   io.tlbReq.req.valid := s1_tlbReqValid
   io.tlbReq.req.bits := s1_tlbReqBits
   io.tlbReq.req_kill := false.B
   io.tlbReq.resp.ready := true.B
 
-  // Reject misses, access faults, MMIO/uncacheable addresses and stale
-  // responses for entries that were replaced while translation was in flight.
+  // A TLB miss retains the virtual entry.  Once the three-cycle in-flight mask
+  // clears, RR arbitration retries it just like MutiLevelPrefetchFilter.  Only
+  // translation/access faults and stale responses prevent a translated send.
   val s2_tlbRespValid = io.tlbReq.resp.valid
   val s2_tlbRespBits = io.tlbReq.resp.bits
   val s2_vaddr = RegEnable(s1_vaddr, s1_tlbReqValid)
@@ -313,22 +319,28 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   val s3_tlbRespBits = RegEnable(s2_tlbRespBits, s2_tlbRespValid)
   val s3_vaddr = RegEnable(s2_vaddr, s2_tlbRespValid)
   val s3_index = OHToUInt(s3_tlbFireOH.asUInt)
-  val s3_tlbHit = s3_tlbRespValid && !s3_tlbRespBits.miss
+  val s3_overwritten = entries(s3_index).vaddr =/= s3_vaddr
+  val s3_sameCycleOverwrite = io.srcReq.valid && srcIdx === s3_index &&
+    srcLine =/= s3_vaddr(VAddrBits - 1, lineOffsetWidth)
+  val s3_stale = s3_overwritten || s3_sameCycleOverwrite
+  val s3_responseMatches = s3_tlbRespValid && s3_tlbFireOH.asUInt.orR && !s3_stale
+  val s3_tlbMiss = s3_responseMatches && s3_tlbRespBits.miss
+  val s3_tlbHit = s3_responseMatches && !s3_tlbRespBits.miss
   val s3_fault = s3_tlbHit && (
     !PmemRanges.map(_.cover(s3_tlbRespBits.paddr.head)).reduce(_ || _) ||
     s3_tlbRespBits.excp.head.pf.ld || s3_tlbRespBits.excp.head.gpf.ld || s3_tlbRespBits.excp.head.af.ld ||
     io.pmpResp.mmio || Pbmt.isUncache(s3_tlbRespBits.pbmt.head) || io.pmpResp.ld
   )
-  val s3_overwritten = entries(s3_index).vaddr =/= s3_vaddr
-  val s3_sameCycleOverwrite = io.srcReq.valid && srcIdx === s3_index &&
-    srcLine =/= s3_vaddr(VAddrBits - 1, lineOffsetWidth)
-  val s3_stale = s3_overwritten || s3_sameCycleOverwrite
 
-  when(s3_tlbRespValid && !s3_stale && (s3_tlbRespBits.miss || s3_fault)) {
+  when(s3_tlbMiss) {
+    entries(s3_index).tlbMiss := true.B
+  }.elsewhen(s3_fault) {
     valids(s3_index) := false.B
-  }.elsewhen(s3_tlbHit && !s3_fault && !s3_stale) {
+    entries(s3_index).tlbMiss := false.B
+  }.elsewhen(s3_tlbHit) {
     entries(s3_index).pline := s3_tlbRespBits.paddr.head(PAddrBits - 1, lineOffsetWidth)
     entries(s3_index).pvalid := true.B
+    entries(s3_index).tlbMiss := false.B
   }
 
   // Translated entries share one L1 request port.  The MDP source tag lets the
@@ -361,6 +373,11 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   assert(PopCount(s0_tlbFireOH) <= 1.U, "L1 MDP TLB request selection must be one-hot")
   assert(!io.tlbReq.req.valid || io.tlbReq.req.ready, "L1 MDP non-blocking TLB request must not be blocked")
   assert(!io.tlbReq.resp.valid || s2_tlbFireOH.asUInt.orR, "L1 MDP TLB response has no matching request")
+  val s4_tlbMiss = RegNext(s3_tlbMiss, false.B)
+  val s4_tlbMissIndex = RegEnable(s3_index, s3_tlbMiss)
+  when(s4_tlbMiss) {
+    assert(valids(s4_tlbMissIndex), "L1 MDP TLB miss must retain its prefetch entry for retry")
+  }
   when(io.tlbReq.req.fire) {
     assert(io.tlbReq.req.bits.vaddr(lineOffsetWidth - 1, 0) === 0.U,
       "L1 MDP TLB request must be line-aligned")
@@ -377,7 +394,8 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   XSPerfAccumulate("mdp_tlb_resp", io.tlbReq.resp.fire)
   XSPerfAccumulate("mdp_tlb_resp_without_req", io.tlbReq.resp.valid && !s2_tlbFireOH.asUInt.orR)
   XSPerfAccumulate("mdp_tlb_req_without_resp", s2_tlbFireOH.asUInt.orR && !io.tlbReq.resp.valid)
-  XSPerfAccumulate("mdp_tlb_miss", s3_tlbRespValid && s3_tlbRespBits.miss)
+  XSPerfAccumulate("mdp_tlb_miss", s3_tlbMiss)
+  XSPerfAccumulate("mdp_tlb_miss_retry", io.tlbReq.req.fire && s1_tlbRetry)
   XSPerfAccumulate("mdp_tlb_fault", s3_fault)
   XSPerfAccumulate("mdp_tlb_stale", s3_tlbRespValid && s3_stale)
   XSPerfAccumulate("mdp_l1_pf_fire", io.l1Req.fire)
@@ -424,6 +442,32 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     val vaddr = UInt(VAddrBits.W)
     val imm = UInt(MDP_IMM_BITS.W)
     val robIdx = UInt(log2Ceil(RobSize).W)
+  }
+
+  /** One row per train1 operation entering the serialized BST update stage.
+    * Fields prefixed with old describe the selected entry before this update;
+    * updated fields describe the state committed when mdtHit is true.
+    */
+  class MdpTrain1DBEntry extends XSBundle {
+    val timeCnt = UInt(64.W)
+    val pc = UInt(VAddrBits.W)
+    val vaddr = UInt(VAddrBits.W)
+    val mdtHit = Bool()
+    val bstHit = Bool()
+    val bstIdx = UInt(log2Up(MDP_BST_ENTRIES).W)
+    val oldPrevVaddr = UInt(VAddrBits.W)
+    val delta = UInt(VAddrBits.W)
+    val decr = Bool()
+    val oldStride = UInt(VAddrBits.W)
+    val oldDecr = Bool()
+    val oldConf = UInt(MDP_COUNTER_BITS.W)
+    val strideValid = Bool()
+    val strideMatch = Bool()
+    val updatedStride = UInt(VAddrBits.W)
+    val updatedDecr = Bool()
+    val updatedConf = UInt(MDP_COUNTER_BITS.W)
+    val allocated = Bool()
+    val generated = Bool()
   }
 
   class MdpChasingPfDBEntry extends XSBundle {
@@ -673,9 +717,10 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     0.U(DCacheLineOffset.W)
   )
 
-  // Depth 2 (parameterized) sends the calculated target and then the adjacent
-  // cache line in the learned immediate direction.  chasingPf requests do not
-  // recursively carry a hint; only stridePf creates the next chasingPf step.
+  // chasingDepth is the total number of generated requests.  V0.3 sets it to
+  // one, so only data + signext(imm) is sent; larger values retain the existing
+  // behavior of adding adjacent lines in the learned immediate direction.
+  // chasingPf requests do not recursively carry a hint.
   val chasingPfReqs = Seq.tabulate(MDP_CHASING_DEPTH) { depth =>
     val req = Wire(Valid(new MdpSourcePrefetchReq))
     val lineDelta = (depth * blockBytes).U(VAddrBits.W)
@@ -743,6 +788,7 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   // ChiselDB instrumentation is grouped at the end of the class.
   val hartId = p(XSCoreParamsKey).HartId
   val train0Table = ChiselDB.createTable(s"mdpTrain0_hart$hartId", new MdpTrain0DBEntry, basicDB = true)
+  val train1Table = ChiselDB.createTable(s"mdpTrain1_hart$hartId", new MdpTrain1DBEntry, basicDB = true)
   val hintTable = ChiselDB.createTable(s"mdpHint_hart$hartId", new MdpHintDBEntry, basicDB = true)
   val chasingPfTable = ChiselDB.createTable(s"mdpChasingPf_hart$hartId", new MdpChasingPfDBEntry, basicDB = true)
   val l1PrefetchTable = ChiselDB.createTable(s"mdpL1Prefetch_hart$hartId", new MdpL1PrefetchDBEntry, basicDB = true)
@@ -758,6 +804,54 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   train0Log.oldImmCnt := s1_train0OldEntry.immCnt
   train0Log.oldConf := s1_train0OldEntry.conf
   train0Table.log(train0Log, s1_train0Valid, "mdp", clock, reset)
+
+  val train1BstConfDec = Mux(
+    s1_train1BstEntry.conf === 0.U,
+    0.U,
+    s1_train1BstEntry.conf - 1.U
+  )
+  val train1ReplaceStride = s1_train1StrideValid && !s1_train1StrideMatch &&
+    s1_train1BstEntry.conf <= 1.U
+  val train1UpdatedStride = Mux(
+    !s1_train1BstHit,
+    0.U,
+    Mux(train1ReplaceStride, s1_train1Delta, s1_train1BstEntry.stride)
+  )
+  val train1UpdatedDecr = Mux(
+    !s1_train1BstHit,
+    false.B,
+    Mux(train1ReplaceStride, s1_train1Decr, s1_train1BstEntry.decr)
+  )
+  val train1UpdatedConf = Mux(
+    !s1_train1BstHit,
+    0.U,
+    Mux(
+      !s1_train1StrideValid,
+      s1_train1BstEntry.conf,
+      Mux(s1_train1StrideMatch, s1_train1BstConfInc, train1BstConfDec)
+    )
+  )
+  val train1Log = Wire(new MdpTrain1DBEntry)
+  train1Log.timeCnt := GTimer()
+  train1Log.pc := s1_train1Bits.pc
+  train1Log.vaddr := s1_train1Bits.vaddr
+  train1Log.mdtHit := s1_train1MdtHit
+  train1Log.bstHit := s1_train1BstHit
+  train1Log.bstIdx := s1_train1BstIdx
+  train1Log.oldPrevVaddr := s1_train1BstEntry.prevVaddr
+  train1Log.delta := s1_train1Delta
+  train1Log.decr := s1_train1Decr
+  train1Log.oldStride := s1_train1BstEntry.stride
+  train1Log.oldDecr := s1_train1BstEntry.decr
+  train1Log.oldConf := s1_train1BstEntry.conf
+  train1Log.strideValid := s1_train1StrideValid
+  train1Log.strideMatch := s1_train1StrideMatch
+  train1Log.updatedStride := train1UpdatedStride
+  train1Log.updatedDecr := train1UpdatedDecr
+  train1Log.updatedConf := train1UpdatedConf
+  train1Log.allocated := s1_train1MdtHit && !s1_train1BstHit
+  train1Log.generated := s1_train1CanPrefetch
+  train1Table.log(train1Log, s1_train1Valid, "mdp", clock, reset)
 
   for (i <- 0 until backendParams.LduCnt) {
     val hintLog = Wire(new MdpHintDBEntry)
