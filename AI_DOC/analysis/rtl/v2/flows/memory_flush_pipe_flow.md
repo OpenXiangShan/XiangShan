@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `5b35ddd8d774b5f11d61333dfbe7638a3f362fad` |
+| 核验 commit | `6e721ccb42bec882b3254062bff003294a507854` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan`；DUT 生成基线见 `mem_ut/ver/ut/memblock/rule/version/v2/memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-07-11` |
+| 最后核验日期 | `2026-07-14` |
 
 ## Flow 范围
 
@@ -32,6 +32,12 @@
 2. CBO/CMO 进入 MemBlock 时并不依赖普通 Store 流水保留该属性，而是 StoreQueue 在 CMO 完成写回时根据 `deqCanDoCbo` 动态设置 `mmioStout.bits.uop.flushPipe`。
 
 两条路径最终都进入 ExceptionGen/ROB；无异常时在当前指令到 ROB 头且可提交后产生 `RedirectLevel.flushAfter`。当前指令可以提交，年轻指令被清除。
+
+`DynInst.flushPipe` 不直接参与 LSQ admission。LsqEnqCtrl、VirtualLoadQueue 和
+StoreQueue 的入队表达式均不检查该字段；它只有在 ROB 头转换成 `flushAfter`
+redirect 后，才通过 redirect gate、同拍取消和已分配 entry 回收间接影响更年轻
+Load/Store 入队。SFENCE/FENCE 同时携带的 `blockBackward` 会更早阻止年轻指令
+Dispatch，但这是独立控制属性，不是 LSQ 对 `flushPipe` 的检查。
 
 ## 主流程图
 
@@ -157,6 +163,23 @@ ExceptionGen 收集写回的 `flushPipe`，并保证异常存在时不再同时�
 
 最终 `flushOut.level` 对纯 `flushPipe` 选择 `RedirectLevel.flushAfter`；exception、interrupt 或 replay 选择 `flush`。
 
+## 6. 与 LSQ 入队和 redirect 的关系
+
+`flushPipe` 指令产生的 `flushAfter` 进入公共 redirect 网络后才影响 LSQ：
+
+1. `LsqEnqCtrl` 使用 `enq.valid && !redirect.valid && enq.canAccept` 产生实际入队请求，redirect 同拍优先。
+2. 已越过 controller 寄存边界的请求，在 LQ/SQ 入口再次用 `robIdx.needFlush(redirect)` 取消。
+3. 已分配的年轻 LQ/SQ entry 被清除，cancel count 用于回退队列指针和 controller 的影子计数。
+4. `flushAfter` 不清 flushPipe 指令自身，只清更年轻指令；`flush` 还可清 redirect 点自身。
+
+Fence 类指令本身是 `FuType.fence`，在普通 LSQ enqueue 生成逻辑中 `needAlloc=0`。
+它们通常还在 Decode 同时设置 `blockBackward=true`，因此年轻 Load/Store 可能在
+flushPipe 指令到 ROB 头之前就停止 Dispatch。这个提前阻塞的直接原因是
+`blockBackward`，不是 `flushPipe`。
+
+完整入队条件和 redirect 恢复时序见
+[V2 LSQ 入队与 Redirect 恢复 flow](lsq_enqueue_redirect_flow.md)。
+
 ## 状态、字段和优先级
 
 | 状态/字段 | 生产者 | 置位条件 | 清除/覆盖条件 | 消费者 | 优先级 |
@@ -170,6 +193,7 @@ ExceptionGen 收集写回的 `flushPipe`，并保证异常存在时不再同时�
 ## 关联文档
 
 - [memory trigger flow](memory_trigger_flow.md)：同一 MemExuOutput 写回中的 trigger 异常路径。
+- [LSQ enqueue redirect flow](lsq_enqueue_redirect_flow.md)：LSQ 三层入队条件、redirect 取消和指针恢复。
 - [mem_ut sfence/hfence flow](../../../../mem_ut_flow_doc/sfence_flow.md)：验证环境采集 sfence 顶层事件后的软件模型 flow，不是本文的 RTL 内部 flow。
 - [V2 RTL flow 索引](../index.md)。
 
@@ -190,12 +214,16 @@ ExceptionGen 收集写回的 `flushPipe`，并保证异常存在时不再同时�
 - `src/main/scala/xiangshan/mem/pipeline/StoreUnit.scala:378-401`：普通 Store 清零。
 - `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:831-850,984-986,1054-1059`：CBO FSM 与动态置位。
 - `src/main/scala/xiangshan/backend/rob/Rob.scala:578-630`：ROB 精确 flushAfter 条件。
+- `src/main/scala/xiangshan/mem/lsqueue/LSQWrapper.scala:335-429`：LSQ admission 不检查 flushPipe，redirect 同拍阻止 controller 输出。
+- `src/main/scala/xiangshan/mem/lsqueue/VirtualLoadQueue.scala:92-134,163-203`、`StoreQueue.scala:357-418,1476-1524`：redirect 取消同拍/已分配 entry 并恢复指针。
+- `src/main/scala/xiangshan/backend/rob/RobBundles.scala:193-198`：`flushAfter` 与 `flush` 的年龄范围。
 
 ## 知识修订记录
 
 | 日期 | commit | 旧结论 | 新结论 | 修订原因 | 影响范围 |
 |---|---|---|---|---|---|
 | 2026-07-11 | `5b35ddd8d774b5f11d61333dfbe7638a3f362fad` | 首次建立，无同版本长期 flow 旧结论 | 建立 SFENCE 静态属性、CBO 动态置位、普通访存清零和 ROB 汇合关系 | 用户要求将本轮源码分析沉淀为 V2 知识 | V2 Memory/Fence/LSQ/ROB |
+| 2026-07-14 | `6e721ccb42bec882b3254062bff003294a507854` | 已说明 flushPipe 在 ROB 产生 flushAfter，但未说明与 LSQ admission 的边界 | 明确 flushPipe 不直接门控入队；由生成的 redirect 间接阻止/取消年轻 LSQ 项，并区分 blockBackward | 用户追问 redirect/flushPipe 何时影响入队 | V2 Dispatch/LSQ/ROB |
 
 ## 待确认项
 

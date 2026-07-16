@@ -40,9 +40,8 @@
 
 - 主表生成规模和生成模式，例如 `main_trans_num`、`use_manual_main_table`
 - op 类型权重，例如 load/store/atomic/prefetch 权重
-- 发射和入队并发上限，例如 `enq_per_cycle`、`load_pip_num`、`sta_pip_num`、`std_pip_num`
-- DUT 真实接口宽度和扫描窗口镜像，例如 `real_enq_width`、`real_lsq_enq_max`、`real_load_pipe_num`
-- 地址范围、PTE 权重、MDP 字段权重
+- runtime发射和入队行为上限，例如`enq_per_cycle`、`load_pip_num_limit`、`sta_pip_num_limit`、`std_pip_num_limit`
+- 自动主表虚拟地址窗口、TLB 物理地址映射窗口、PTE 权重和 MDP 字段权重
 - send priority 相关公共参数
 - replay / redirect / flushSb / L2TLB responder 等公共 sequence 行为参数
 - 公共 timeout / idle stop / max cycle 参数
@@ -54,14 +53,52 @@
 - 公共 helper、公共 sequence、公共 transaction 约束不应长期直接读取 `plus::MEMBLOCK_*`，而应读取 `seq_csr_common::get_*()`。
 - `seq_csr_common` 只保存测试框架参数，不保存 DUT CSR 实时状态、不保存运行期队列状态、不保存 monitor 采样结果。
 
-LSQ enqueue 宽度与每拍入队数量规则：
+主表地址窗口与 TLB 物理映射窗口规则：
 
-- `MEMBLOCK_REAL_LSQ_ENQ_MAX` 是测试框架统一的 LSQ enqueue slot 宽度镜像，默认按当前 8-wide DUT 接口配置。
-- `MEMBLOCK_REAL_ENQ_WIDTH` 作为历史兼容字段保留，但必须与 `MEMBLOCK_REAL_LSQ_ENQ_MAX` 相等；不相等时 `seq_csr_common::validate_and_clamp()` 必须 fatal。
-- 所有 LSQ enqueue candidate、xaction slot 清理、slot 填充和 response 读取逻辑必须通过 `seq_csr_common::get_real_enq_width()` 或同等公共 getter 获取宽度，不允许在 sequence/helper 中写死 4 或 8。
-- `MEMBLOCK_ENQ_PER_CYCLE` 是固定模式下每拍最多尝试 admission 的数量，必须在 `[1:MEMBLOCK_REAL_ENQ_WIDTH]` 内；超过范围直接 fatal，不做 clamp。
-- `MEMBLOCK_ENQ_PER_CYCLE_RAND_EN=1` 时，`seq_csr_common::get_enq_per_cycle()` 每次在 `[1:MEMBLOCK_REAL_ENQ_WIDTH]` 内均匀随机；关闭时返回固定 `MEMBLOCK_ENQ_PER_CYCLE`。
-- 如果后续 DUT 配置改变 LSQ enqueue 宽度，应先更新 `MEMBLOCK_REAL_LSQ_ENQ_MAX`，并同步保持 `MEMBLOCK_REAL_ENQ_WIDTH` 一致，相关队列和随机范围自动跟随公共 getter。
+- `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 只控制自动主表 normal transaction 的 `src_0/imm/vaddr` 生成范围。
+- `MEMBLOCK_PADDR_BASE/RANGE` 只控制 `tlb_map_builder` 为 TLB entry 选择的物理 PPN 范围。
+- 两组参数默认数值可以相同以保持 Bare smoke 兼容，但参数语义和 consumer 必须独立；translated testcase 可以配置不同 VA/PA 窗口。
+- manual directed 和 boundary profile 地址不由 `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 全局拦截，避免破坏异常地址和边界地址构造。
+
+### 2.2.1 DUT物理结构、runtime行为限制和集中收敛规则
+
+参数必须按以下三层建立单一权威：
+
+```text
+编译期物理结构：
+  memblock_compile_params.svh中的MEMBLOCK_DUT_*宏
+  -> memblock_dispatch_types.sv中的同名typed localparam
+  -> interface/driver/scheduler/物理循环直接读取
+
+runtime行为参数：
+  plus.sv -> seq_csr_common快照/getter
+  -> 只表达本testcase使用量、权重、随机模式或时序策略
+
+runtime资源收敛：
+  seq_csr_common::validate_and_clamp()
+  -> apply_runtime_resource_limits()
+  -> 统一按compile localparam执行fatal或warning+clamp
+```
+
+必须遵守：
+
+1. DUT interface数组维度、packed字段宽度、物理slot/pipe/port数量、connect-time capability只能由`memblock_compile_params.svh`配置，不得在`plus.sv`或testcase cfg中建立同义镜像。
+2. `memblock_dispatch_types.sv`可以为`seq_pkg`暴露同名typed localparam，但不得再次写数值；agent package因编译顺序不能依赖`seq_pkg`时直接消费同一宏。
+3. 物理循环、slot越界、fired-mask布局和scheduler物理扫描上限直接读取compile宏/localparam，不经过runtime getter。
+4. runtime plus只保留行为限制。例如`MEMBLOCK_ENQ_PER_CYCLE`控制固定模式每拍候选数，三类`MEMBLOCK_*_PIP_NUM_LIMIT`控制本testcase最多使用多少issue pipe；这些值不能扩大物理资源。
+5. 所有直接受物理资源约束的runtime参数必须集中在`seq_csr_common::apply_runtime_resource_limits()`处理。其它sequence/helper不得再次写固定上限或复制clamp。
+6. `check_*`函数只做纯校验，不修改runtime字段；需要fatal/clamp并写回参数的函数使用`apply_`、`normalize_`或现有`validate_and_clamp()`入口。
+7. 删除硬件结构plus参数时必须同时删除字段定义、加载、default cfg、runtime快照、getter和全部consumer；除非用户明确要求兼容迁移，不为已删除名称保留扫描、warning、fatal或wrapper。
+8. 后续物理参数变化时只修改当前版本profile提供的compile宏；runtime limit、物理循环和文档通过同源localparam自动跟随，不同步维护第二套数值。
+
+当前LSQ enqueue和scalar issue规则：
+
+- `MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM`是LSQ enqueue物理slot数，V2默认6。
+- `MEMBLOCK_DUT_LOAD_PIPE_NUM/MEMBLOCK_DUT_STA_PIPE_NUM/MEMBLOCK_DUT_STD_PIPE_NUM`是scalar issue物理pipe数，V2默认3/2/2。
+- `MEMBLOCK_ENQ_PER_CYCLE`必须位于`[1:MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM]`，越界直接fatal。
+- `MEMBLOCK_ENQ_PER_CYCLE_RAND_EN=1`时，`get_enq_per_cycle()`在完整编译期物理slot范围内随机，保持既有随机模式语义。
+- 三类`*_PIP_NUM_LIMIT`按对应compile pipe数执行warning+clamp；三类随机开关只决定固定返回limit还是在`[1:limit]`采样。
+- `MEMBLOCK_REAL_LSQ_ENQ_MAX`、`MEMBLOCK_REAL_ENQ_WIDTH`和三个`MEMBLOCK_REAL_*_PIPE_NUM`已经退出配置系统，不得重新引入兼容字段或wrapper。
 
 ### 2.3 测试用例个性化参数
 

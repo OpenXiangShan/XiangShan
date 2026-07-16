@@ -3,9 +3,11 @@
 本文整理 mem_ut/memblock 中 ROB commit pendingPtr 驱动和 DUT LQ/SQ deq 采样回收的真实函数调用链。这个 flow 有两条入口：
 
 - `memblock_lsqcommit_dispatch_base_sequence` 周期性选择已 writeback/pass 的连续 uid，驱动 `io_ooo_to_mem_lsqio_pendingPtr_*`，并在软件状态中标记 `rob_commit`。
-- `io_mem_to_ooo_ctrl_agent_agent_monitor` 采样 DUT `lqDeq/sqDeq/*DeqPtr/sbIsEmpty`，写入 `memblock_sync_pkg::raw_ctrl_q`，随后由 service loop drain，释放 `uid_by_lq/uid_by_sq` active map，并触发 `try_retire_committed_uid()`。
+- `io_mem_to_ooo_ctrl_agent_agent_monitor` 采样 DUT `lqDeq/sqDeq/lqDeqPtr/sbIsEmpty`；当前未适配源码还读取 `sqDeqPtr`，但 V2 顶层没有该字段。monitor写入 `raw_ctrl_q` 后由service loop按capability释放active map，并触发`try_retire_committed_uid()`。
 
 `flushSb` 在本 flow 中共享 `lsqcommit` driver 和 ctrl monitor 的 `sbIsEmpty` 采样。当前实现是队列式请求：`memblock_lsqcommit_dispatch_base_sequence` 先构造普通 commit xaction，再在同一个 xaction 上可选附加 `io_ooo_to_mem_flushSb=1`。完整 directed 测试流程见 `flushsb_test_flow.md`。
+
+V2 目标逻辑由两份 execution plan共同定义。当前源码中的 `pendingPtr` 仍写 commit batch tail；目标改为独立 `modeled_rob_deq_ptr`：每拍先按当前head派生`pendingPtr/pendingst/pendingMMIOld`，再独立选择commit batch和normal-only `scommit`。batch发送后先全批预检查，再原子落表并推进到batch后next head；无batch MMIO head只保持sideband，不推进软件状态。V2 SQ deq按count-only处理，不消费默认0 pointer。MMIO raw在同拍deq前先写status tag。上述改动不改变candidate、pass/fail和terminal定义。
 
 ## 1. 函数调用 Flow 图
 
@@ -117,6 +119,12 @@ send_lsqcommit_cycle:
   driver::send_pkt 把 pendingPtr_flag/value 和可选 flushSb pulse 发到 DUT；
   如果 has_commit，mark_rob_commit_batch 在软件状态中逐个标记 rob_commit。
 
+触发条件说明：
+  lsqcommit pendingPtr 发送由 memblock_lsqcommit_dispatch_base_sequence 独立循环触发；
+  该循环每轮都会尝试 build_lsqcommit_xaction 并发送 xaction，不依赖 writeback monitor event 触发；
+  因此最后一笔 writeback/pass 到达后，即使后续没有新的 writeback event，lsqcommit loop 仍会继续扫描 commit cursor 并发送最后一批 pendingPtr；
+  只有所有 uid terminal_done 后 global_stop_requested 置位，且没有 flushSb pending，lsqcommit loop 才退出。
+
 3. commit batch 选择和状态更新
 select_rob_commit_batch:
   advance_commit_cursor_past_done 跳过已 terminal_done 的 uid；
@@ -132,6 +140,19 @@ build_lsqcommit_xaction:
   clear_lsqcommit_xaction 默认沿用 last_pending_ptr，flushSb=0；
   如果选到 commit uid，把最后一个 uid 的 ROB key 写入 pendingPtr，并更新 last_pending_ptr；
   如果没有 commit，pendingPtr 保持上一次值。
+
+V2 适配计划要求：
+  主表ready后从最老未完成uid完整ROB key初始化modeled_rob_deq_ptr，不假定value为0；
+  后续 coding 后，pendingPtr 应由 modeled_rob_deq_ptr 驱动；
+  普通 commit xaction 发送 commit 前 head，并校验该值等于 commit_uids[0] 的 ROB key；
+  mark_rob_commit_batch先全批预检查，再原子落表并推进到batch后next head；
+  idle/default 周期发送推进后的 modeled_rob_deq_ptr；
+  pendingst由当前sideband head是否为scalar store决定，不依赖commit_uids；
+  scommit只统计本拍normal scalar store commit，fault terminal store不计；
+  pendingMMIOld 不从主表推导；默认由 DUT loadMmio/loadMmioUop.robIdx_value monitor 回填 status MMIO load 标签后，在 ROB head load 处驱动；
+  storeMmio/storeMmioUop.robIdx_value 也需要 monitor 回填 status ROB mmio store 标签，但该标签本轮不直接改变 deq、pass/fail 或 terminal；
+  MMIO load未writeback且commit_uids为空时，head sideband仍每拍驱动pendingMMIOld/pendingPtr；
+  该sideband-only分支不设置status.rob_commit，不推进commit cursor/modeled head，也不提前deq、pass/fail或terminal。
 
 mark_rob_commit_uid:
   如果 global flush 正在进行或 uid 不再满足 candidate，info 记录后跳过；
@@ -149,8 +170,9 @@ io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data:
 service_monitor_once:
   collect_monitor_event_batch 先 collect_writeback_events_batch，再 collect_ctrl_redirect_events_batch；
   collect_ctrl_redirect_events_batch 循环 pop_raw_ctrl；
-  对每个 raw_ctrl 先 apply_raw_ctrl_deq，后 convert_raw_memory_violation；
-  因此同一个 raw_ctrl 中的 LQ/SQ deq 和 sbIsEmpty 会先更新，memoryViolation redirect 再进入 batch handler 的 redirect-first 仲裁。
+  当前源码对每个 raw_ctrl 先 apply_raw_ctrl_deq，后 convert_raw_memory_violation；
+  V2目标先apply_raw_ctrl_mmio_tags，再apply_raw_ctrl_deq，最后convert_raw_memory_violation；
+  原因是同拍deq可能删除active ROB map，MMIO value-only tag必须先完成固定双flag key反查。
 
 apply_raw_ctrl_deq:
   update_sb_is_empty 记录 sbIsEmpty，并在 flushSb waiting_empty 且 sb_is_empty=1 时解除 waiting；
@@ -164,6 +186,12 @@ apply_dut_lq_deq / apply_dut_sq_deq:
   对每个 deq slot 用 active LQ/SQ map 查 uid，查不到也是 mismatch；
   所有 slot 都能解析后，release_lq/release_sq 推进软件 deq_ptr 和 free_count；
   对每个 uid 释放对应 active map，并调用 try_retire_committed_uid。
+
+V2 SQ count-only目标：
+  lqDeq仍使用真实lqDeqPtr校验；
+  sqDeq不读取不存在的sqDeqPtr，以软件sq_deq_ptr为start_key；
+  先预检查连续count个active SQ mapping、无重复uid且均已rob_commit；
+  全部成功后一次性release_sq并释放mapping；任何失败不允许部分推进。
 
 5. retire 收敛
 try_retire_committed_uid:
@@ -500,10 +528,12 @@ end
 
 该函数把软件选择出的 commit uid batch 转换成 DUT 输入 `pendingPtr`。`pendingPtr` 指向本拍 batch 的最后一个 ROB key；没有新 commit 时继续沿用 `last_pending_ptr`。
 
+V2 适配计划要求把 `pendingPtr` 改为 `modeled_rob_deq_ptr`，普通 commit xaction 发送 commit 前 head 并校验等于本拍 batch head ROB key，commit 后再推进到 batch 后 next head，以匹配 V2 ROB `deqPtr` 连续推进语义；同时由该 batch 计算 `pendingst/scommit`。这属于 DUT 输入 sideband 字段适配，不改变 `select_rob_commit_batch()` 的候选选择，也不改变后续 `mark_rob_commit_batch()` 和 `try_retire_committed_uid()` 的公共状态推进。
+
 输入/输出：
 
-- 输入：公共 status 表、`commit_cursor_uid`、`last_pending_ptr`。
-- 输出：`lsqcommit_agent_agent_xaction tr`、`commit_uids[$]`、`has_commit`；可能更新 `last_pending_ptr`。
+- 输入：公共 status 表、`commit_cursor_uid`、当前源码的 `last_pending_ptr`。V2 coding 后 `last_pending_ptr` 应重命名或重定义为 `modeled_rob_deq_ptr`。
+- 输出：`lsqcommit_agent_agent_xaction tr`、`commit_uids[$]`、`has_commit`；当前源码可能更新 `last_pending_ptr`。V2 coding 后 `build_lsqcommit_xaction()` 不在普通 commit drive 前推进 `modeled_rob_deq_ptr`，指针推进由普通 commit xaction 发送并标记软件 commit 后完成。
 
 文字伪代码：
 
@@ -1481,11 +1511,14 @@ retire 是 active 生命周期终点。正常 commit/deq 路径进入这里时 L
 - `terminal_done`：由 normal pass retire 或允许退休的 fault/exception retire 设置；`set_status_field(MEMBLOCK_STATUS_TERMINAL_DONE, 1)` 会推进 `terminal_done_uid` 前缀。
 - `active`：由 admission 设置，由 `retire_active_uid()` 清除。
 
-### 22.5 `commit_cursor_uid` / `last_pending_ptr`
+### 22.5 `commit_cursor_uid` / 当前 `last_pending_ptr` / V2 `modeled_rob_deq_ptr`
 
 - `commit_cursor_uid` 属于 `lsq_commit_handler`，只被 commit selection 使用。
 - `advance_commit_cursor_past_done()` 只跳过 `terminal_done` uid，不跳过 `flushed` uid。
 - `last_pending_ptr` 是无新 commit 或 idle transaction 的默认 pendingPtr；有 commit 时更新为 batch 最后一个 uid 的 ROB key。
+- V2 coding必须把`last_pending_ptr`重命名为`modeled_rob_deq_ptr`，避免“最近发送值”和“当前head”继续混用。
+- V2 普通 commit xaction 发送时，`modeled_rob_deq_ptr` 必须等于 batch head uid 的完整 ROB key；发送并完成 `mark_rob_commit_batch()` 后，再推进到 batch 后 next head。无 commit 或 idle transaction 发送当前 `modeled_rob_deq_ptr`。
+- `pendingst/pendingMMIOld`是当前head level sideband；driver active空拍保持它们。`scommit/flushSb`是pulse，空拍清0。
 
 ### 22.6 flushSb 状态
 
@@ -1505,7 +1538,7 @@ retire 是 active 生命周期终点。正常 commit/deq 路径进入这里时 L
 6. 普通 commit 选择严格按 uid 顺序，遇到第一个非 candidate 立即停止。
 7. deq 应用先整批验证起点和 active uid 映射，再 release 软件指针和 active map；任一 mismatch 时本方向返回。
 8. `try_retire_committed_uid()` 中 active/rob_commit 检查先于 LQ/SQ map 检查；active redirect 覆盖先于 success。
-9. ctrl raw drain 中 `apply_raw_ctrl_deq()` 先于 `convert_raw_memory_violation()`，但 memoryViolation 后续仍由 batch handler 按 redirect-first 规则仲裁。
+9. 当前源码中`apply_raw_ctrl_deq()`先于`convert_raw_memory_violation()`；V2 MMIO coding后在二者前新增`apply_raw_ctrl_mmio_tags()`，memoryViolation后续仍由batch handler按redirect-first仲裁。
 
 ## 24. 端到端行为总结
 
@@ -1536,8 +1569,8 @@ retire 是 active 生命周期终点。正常 commit/deq 路径进入这里时 L
   -> build_lsqcommit_xaction 选择 uid
   -> mark_rob_commit_uid 设置 rob_commit
   -> active_sq_mapped=1，try_retire 返回
-  -> ctrl monitor 采到 sqDeq/sqDeqPtr
-  -> apply_dut_sq_deq 验证软件 SQ head
+  -> ctrl monitor 采到sqDeq；V2 raw标记sq_deq_ptr_valid=0
+  -> apply_dut_sq_deq_count_only从软件SQ head预检查连续mapping
   -> release_sq 推进 sq_deq_ptr/free_count
   -> release_uid_sq_mapping 清 active_sq_mapped 并置 lsq_deq
   -> try_retire_committed_uid success/retire
@@ -1577,16 +1610,22 @@ retire 是 active 生命周期终点。正常 commit/deq 路径进入这里时 L
   当 writeback flow 已经把 uid 标成 pass 且所有 required target 完成后，
   lsqcommit sequence 才可能把它作为 commit candidate；
   candidate 必须从 commit_cursor_uid 开始连续，不能越过老 uid；
-  sequence 用 batch 最后一个 uid 的 ROB key 驱动 pendingPtr；
-  驱动后软件立即设置 rob_commit；
+  当前未适配源码用batch最后一个uid的ROB key驱动pendingPtr；
+  V2目标使用modeled_rob_deq_ptr驱动pendingPtr；
+  普通 commit xaction 发送 commit 前 head，并校验该值等于 batch 第一个 uid 的 ROB key；
+  普通 commit 完成后 modeled_rob_deq_ptr 推进到 batch 后 next head；
+  idle/default周期保持pendingPtr/pendingst/pendingMMIOld level sideband，只清scommit/flushSb pulse；
+  pendingst不依赖batch，scommit只统计normal scalar store batch；
+  驱动后mark_rob_commit_batch先全批预检查，再原子设置rob_commit并推进modeled head；
   如果 uid 没有 LQ/SQ 映射，commit 侧同时认为 lsq_deq 完成；
   如果 uid 仍占 LQ/SQ，success 被推迟到 DUT deq monitor 释放 active map。
 
 DUT deq：
   ctrl monitor 只负责采样并把 raw_ctrl 放入 raw_ctrl_q；
   service loop drain raw_ctrl 时先更新 sbIsEmpty，再处理 LQ/SQ deq；
-  deq helper 用 DUT next pointer rewind 出本批起点；
-  起点必须匹配软件 deq_ptr，且每个 key 必须能查到 active uid；
+  LQ和有pointer版本用DUT next pointer rewind本批起点；
+  V2 SQ count-only直接用软件sq_deq_ptr作起点，不读取默认0 pointer；
+  每个key必须能查到active uid，V2 SQ还要求uid已rob_commit；
   只有整批验证通过后才推进软件 deq_ptr/free_count；
   active map 释放后调用 try_retire_committed_uid；
   如果 rob_commit 已到且没有 redirect/fault/replay/flush 阻塞，uid 设置 success 并 retire。

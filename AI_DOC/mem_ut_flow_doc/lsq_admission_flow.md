@@ -9,6 +9,21 @@
 - `mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
 - `mem_ut/ver/ut/memblock/seq/base_seq_help/issue_queue_scheduler.sv`
 
+当前源码仍保留等待`canAccept/response key`的旧确认路径，并把全局uid低位写入
+`uopIdx`。V2目标由
+`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`定义：
+
+- V2顶层6个`enqLsq_req` slot是上游`LsqEnqCtrl`已经接受并分配key后送入
+  MemBlock的一拍`Valid`，没有顶层canAccept/response。
+- scalar LDU/STU固定`uopIdx=0`、`lastUop=1`、`numLsElem=1`；
+  `fuOpType`显式写入，`exceptionVec/flushPipe/trigger`本轮显式0。
+- `clear_lsqenq_xaction()`清全部6个物理slot；runtime enqueue width只限制候选数。
+- driver在E0赋值前检查epoch，合法才drive；E1完成DUT采样边界、abort冻结和`DRV_0`撤销。
+  sequence未abort时重新preview并调用唯一`commit_allocate()`提交软件预测key；有accept/response的
+  版本才采真实response并走对应确认分支。
+- vector、MOU/atomic、multi-uop/multi-element本轮在admission前fatal，不能走
+  `need_alloc=0`简化路径。
+
 ## 1. LSQ Admission 在框架中的位置
 
 LSQ admission 是主表 transaction 进入后续 issue 流程前的第一道门：
@@ -103,6 +118,35 @@ LSQ Admission 主流程：
    route_uid/route_target 根据 op behavior 生成 LOAD/STA/STD issue queue item。
 ```
 
+## 2.2 V2 单拍确认目标 Flow
+
+```mermaid
+flowchart TD
+    A[collect_lsq_candidates] --> B[preview_allocate predicted keys]
+    B --> C[clear all 6 physical slots]
+    C --> D[assign scalar fields uopIdx 0 lastUop 1 numLsElem 1]
+    D --> E[start_item finish_item one drive edge]
+    E --> F{flush epoch/global block changed?}
+    F -->|yes| G[abort all candidates without pointer/map update]
+    F -->|no| H[commit_allocate predicted keys atomically]
+    H --> I[complete_admission]
+    I --> J[prepare_issue_route_for_uid]
+```
+
+V2目标文字伪代码：
+
+```text
+按原cursor和runtime slot上限收集连续scalar LDU/STU候选；
+用preview_allocate计算每个候选的软件LQ/SQ key，但暂不改pointer/map/status；
+清全部6个物理slot，再把候选写入前N个slot；
+每个scalar request固定uopIdx=0、lastUop=1、numLsElem=1并写完整行为字段；
+记录驱动前flush epoch，driver只打一拍request；
+驱动后如果epoch/global block变化，整批abort且不确认任何candidate；
+否则按slot顺序调用commit_allocate提交预测key并建立active map；
+全部提交后调用complete_admission进入原issue route flow；
+任何中途失败必须fatal，不能留下部分pointer/map推进。
+```
+
 ## 3. 两条 Admission 路径
 
 ### 3.1 LSQ allocating 路径
@@ -129,15 +173,15 @@ send_lsqenq_cycle()
 特点：
 
 - 真实驱动 `lsqenq_agent`。
-- 等 driver/DUT 返回 LQ/SQ resp key。
-- `commit_allocate_with_resp()` 会检查 DUT 返回的 key 是否等于软件预测 key。
+- 当前源码等待driver/DUT返回LQ/SQ resp key，并由`commit_allocate_with_resp()`校验。
+- V2目标不读取不存在的response；E1完成后重新preview，并直接调用唯一`commit_allocate()`提交软件预测key。
 
 ### 3.2 non-LSQ admission 路径
 
 适用：
 
 - `behavior.need_alloc == 2'b00`
-- 当前主要是 MOU/atomic 简化 admission。
+- 当前源码主要把MOU/atomic作为简化admission；V2 scalar-only目标明确拒绝该组合，直到atomic专项闭环。
 
 流程：
 
@@ -681,7 +725,7 @@ return uids.size() != 0;
 ```text
 先确认下一条 uid 存在且需要 LSQ 分配。
 读取每拍最大 enqueue 数量。固定模式返回 `MEMBLOCK_ENQ_PER_CYCLE`；随机模式
-`MEMBLOCK_ENQ_PER_CYCLE_RAND_EN=1` 时，在 `[1:MEMBLOCK_REAL_ENQ_WIDTH]`
+`MEMBLOCK_ENQ_PER_CYCLE_RAND_EN=1` 时，在 `[1:MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM]`
 内均匀随机。
 复制当前 LQ/SQ enq 指针和 free count，作为临时预测状态。
 循环收集连续 uid：
@@ -713,8 +757,7 @@ return uids.size() != 0;
 真实逻辑摘要：
 
 ```systemverilog
-tr.io_ooo_to_mem_enqLsq_canAccept = 1'b0;
-for (slot = 0; slot < real_enq_width; slot++) begin
+for (slot = 0; slot < MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM; slot++) begin
     set_need_alloc(tr, slot, 2'b00);
     set_req_fields(tr, slot, 0, 0, 0, zero_rob, zero_lq, zero_sq, 0);
 end
@@ -724,7 +767,7 @@ end
 
 ```text
 把 canAccept 默认清 0。
-遍历所有真实 enqueue slot。
+按compile localparam遍历全部物理 enqueue slot；runtime plus不参与物理循环边界。
 每个 slot 的 needAlloc 清 0。
 每个 slot 的 req valid/fuType/uopIdx/robIdx/lqIdx/sqIdx/numLsElem 全部清空。
 ```
@@ -745,7 +788,7 @@ end
 真实逻辑摘要：
 
 ```systemverilog
-if (slot >= real_enq_width) fatal;
+if (slot >= MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM) fatal;
 set_need_alloc(tr, slot, behavior.need_alloc);
 set_req_fields(tr,
                slot,
@@ -761,11 +804,11 @@ set_req_fields(tr,
 文字伪代码：
 
 ```text
-检查 slot 是否超过真实入队宽度。
+检查 slot 是否超过compile定义的物理入队slot数量。
 写 needAlloc，告诉 DUT 该项需要 LQ 还是 SQ 分配。
 写 req valid。
 写 fuType。
-写 uopIdx，这里使用 uid[6:0]。
+    当前源码把uid低位写入uopIdx；V2目标固定写0，因为uid不是instruction-local uop序号。
 写 robIdx。
 写预测 lqIdx/sqIdx。
 写 numLsElem。
@@ -1614,10 +1657,10 @@ send_lsqenq_cycle:
         按 uid 顺序收集候选。
         清 xaction slot。
         为每个候选填 needAlloc 和 req 字段。
-        start_item/finish_item 交给 driver 等 canAccept。
+        当前源码start_item/finish_item交给driver等canAccept；V2目标只打一拍。
         如果 driver 等待期间发生 redirect/flush，跳过确认。
-        否则读取 DUT resp key。
-        commit_allocate_with_resp 校验并提交 LSQ 分配。
+        V2目标不读取DUT resp key，未abort时原子提交preview key；
+        只有HAS_ACCEPT_RESP版本才读取response并调用commit_allocate_with_resp。
         complete_admission。
 
 complete_admission:
@@ -1827,7 +1870,7 @@ LQ/SQ 资源条件：
 ```text
 collect_lsq_candidates() 返回至少一个 candidate
 xaction 创建成功
-slot < real_enq_width
+slot < MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM
 ```
 
 写入 DUT 请求字段：
@@ -2157,7 +2200,7 @@ redirect 后重新 admission：
 端到端文字伪代码：
 
 ```text
-load/store 这类需要 LSQ 分配的 transaction 必须经过真实 lsqenq drive；测试框架用 lsq_ctrl 预测 LQ/SQ key，并在 DUT 返回 response key 后校验一致，之后才允许该 uid 进入 issue queue。
+load/store这类需要LSQ分配的transaction必须经过真实lsqenq drive。当前源码等待DUT response；V2目标在单拍drive且flush epoch未变化后原子提交软件preview key，再允许uid进入issue queue。
 need_alloc=0 的 transaction 不 drive lsqenq 接口，但仍通过同一 admission 收口设置 active/enq/issue_ready，保证后续 route/issue/status flow 使用统一状态表。
 每条 uid admission 完成后立即 prepare_issue_route_for_uid：根据 op behavior 拆成 load、STA、STD target，并写入对应 issue queue。
 如果 redirect flush 覆盖已经 admission 的 uid，prepare_uid_for_redirect_reissue 会清旧动态实例状态，rollback_max_enqueued_uid 把 admission 边界回退，后续 LSQ admission flow 会重新处理这些 uid。
@@ -2165,4 +2208,4 @@ need_alloc=0 的 transaction 不 drive lsqenq 接口，但仍通过同一 admiss
 
 ## 10. 一句话总结
 
-LSQ admission 的本质是：从主表按 uid 顺序取下一条 transaction，按 `fuType/fuOpType` 判断是否需要 LQ/SQ 分配；需要分配时驱动 DUT LSQ enqueue 并用 response key 确认，不需要分配时直接软件确认；确认后激活 uid、推进 admission 高水位、设置 issue_ready，并立即 route 到后续 issue queue。
+LSQ admission 的本质是：从主表按 uid 顺序取下一条合法 scalar transaction，按 `fuType/fuOpType` 判断 LQ/SQ 分配，预览key后驱动DUT。V2用单拍request和flush-epoch检查确认软件预测key；有response版本才校验DUT response。确认后激活uid、推进admission高水位、设置issue_ready并route到后续issue queue。

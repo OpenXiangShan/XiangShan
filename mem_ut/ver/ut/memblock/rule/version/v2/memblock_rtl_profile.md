@@ -36,11 +36,13 @@ mem_ut 环境仍期望以下产物：
 ```text
 build_memblock/rtl/filelist.f
 build_memblock/rtl/MemBlock.sv
-build_memblock/rtl/MemBlockTop.sv
 ```
 
-如果 V2 生成得到不同但等价的文件名，必须在同一次变更中更新脚本和
-`mem_ut/ver/ut/memblock/cfg/rtl.f`，并在本 profile 记录映射关系。
+当前 V2 独立 harness 的有效 filelist 直接以 `MemBlock.sv` 为 DUT 顶层产物，
+没有生成 `build_memblock/rtl/MemBlockTop.sv`。后续不得把不存在的 wrapper
+列为接口检查或测试框架 plan 的必需输入。如果 V2 生成入口再次改变产物名，
+必须在同一次变更中更新脚本和 `mem_ut/ver/ut/memblock/cfg/rtl.f`，并在本
+profile 记录映射关系。
 
 ## UVM RTL 路径
 
@@ -58,8 +60,10 @@ V2 使用独立 worktree，因此 `mem_ut/ver/ut/memblock/cfg/rtl.f` 不得硬�
 
 ## 当前状态
 
-当前 worktree 在修复 submodule 并迁移独立 `MemBlockTop` wrapper 后，V2 RTL
-生成已通过。生成结果和历史失败细节记录在：
+当前 worktree 的 V2 RTL 生成已通过；mem_ut 实际编译入口使用
+`build_memblock/rtl/filelist.f`，DUT 顶层接口权威文件为
+`build_memblock/rtl/MemBlock.sv`。`build/rtl` 只可用于辅助比对，不是第二权威。
+生成结果和历史失败细节记录在：
 
 ```text
 AI_DOC/analysis/rtl/v2/memblock_rtl_generation_result_20260706.md

@@ -20,12 +20,12 @@ TODO：
 
 ## 2. Atomic/MOU 完整闭环
 
-状态：当前是简化支持，不是完整 atomic 协议支持。
+状态：当前V2 scalar主动主流程不支持，不是简化支持。V2适配执行方案不新增compile capability；默认AMO权重改为0，显式权重和random/boundary/manual/fixed AMO/MOU由运行期参数及主表语义检测在admission前fatal。只有本节闭环全部完成后，才能删除这些运行期拒绝分支并重新开放AMO激励。
 
 现象：
 
 - 当前 AMO/MOU 不分配普通 LQ/SQ。
-- 当前会 route 到 STA/STD。
+- 底层 `derive_op_behavior()` 已具备 route 到 STA/STD 的分类基础，但当前 V2 主动主流程会在 admission 前运行期 fatal，不会实际进入 issue route。
 - `uop_count` 会记录 AMOCAS 等理论需要几个地址侧或数据侧 uop。
 - issue queue 不会按 `uop_count` 展开多个 item，也没有完整 atomic writeback/AMOCAS 多 uop 闭环。
 
@@ -34,6 +34,10 @@ TODO：
 - 明确 AMO/LR/SC/AMOCAS 在 DUT 中是否应分配 LQ/SQ、如何 writeback、如何 commit。
 - 如果 AMOCAS 需要多个 STA/STD uop，issue queue 需要按 `uop_count` 展开或引入可追踪的 multi-uop item。
 - 补齐 `MEMBLOCK_WB_EVENT_SOURCE_ATOMIC_WB` 的真实事件来源和状态转移。
+- 建立AMO/LR/SC从主表生成、LSQ/atomic admission、issue uop展开、真实feedback/writeback、ROB commit、资源释放到terminal的端到端状态生命周期。
+- 明确redirect/replay/flush、异常写回和fault retire时atomic pending uop、ROB映射及任何LQ/SQ/atomic私有资源如何失效、重建或释放。
+- 为普通LR/SC/AMO W/D和AMOCAS W/D/Q分别建立directed testcase；验收不得只看到issue accepted，必须覆盖真实完成事件、两类异常路径、commit/deq或专用资源释放以及最终terminal收敛。
+- 闭环实现完成并通过回归前，不得仅把`MEMBLOCK_OP_CLASS_AMO_WT`改成非0来宣称支持；完成后应删除V2初始化和`validate_main_table_entry()`中的AMO/MOU运行期拒绝，而不是增加compile capability开关。
 
 ### 2.1 AMO 非对齐专项 TODO
 
@@ -132,31 +136,33 @@ Scala 源码依据：
 
 ## 5. FuType/FuOpType 覆盖
 
-状态：当前只支持已建模组合。
+状态：当前 V2 主动主流程只支持已闭环的普通 scalar load/store 和现有 software prefetch 简化路径；AMO/MOU、AMOCAS、CBO 只有编码/分类基础，均在 admission 前运行期 fatal，不能列为已支持组合。
 
 现象：
 
 - 非 LDU/STU/MOU 的 `fuType` 没有 fallback，会 fatal。
 - LDU/STU/MOU 下非法 `fuOpType` 会 fatal。
-- 当前主表随机生成只覆盖普通标量 load/store、software prefetch 和普通 LR/SC/AMO W/D。
-- CBO 可以被 `lsq_ctrl_model::is_cbo_fuoptype()` 识别，但当前随机主表默认不会生成 CBO，且后续按 store-like 简化处理。
+- 当前 V2 主表默认随机权重只开放普通标量 load/store 和 software prefetch；AMO 权重改为 0，显式非零权重或手工 AMO/MOU 会在 admission 前 fatal。
+- CBO 可以被 `lsq_ctrl_model::is_cbo_fuoptype()` 识别，但当前默认权重为 0；显式非零权重或手工 CBO 会在 admission 前 fatal，不再进入 store-like 主流程。
 - AMOCAS 常量和识别逻辑存在，但随机主表默认不会生成 AMOCAS，也没有完整多 uop 闭环。
 
-### 5.1 当前已建模组合
+### 5.1 当前编码/分类基础与本轮支持边界
 
 当前框架围绕 MemBlock LSQ admission、issue、writeback、commit/deq 主流程建模，不覆盖整个后端所有 FU。
 
-已建模范围：
+当前已闭环支持范围：
 
 - `FuType.ldu`
   - 普通 load：`lb/lh/lw/ld/lbu/lhu/lwu`。
   - software prefetch：`prefetch_i/prefetch_r/prefetch_w`。
 - `FuType.stu`
   - 普通 store：`sb/sh/sw/sd`。
-  - CBO：`cbo_zero/cbo_clean/cbo_flush/cbo_inval` 可识别，但按 store-like 简化处理。
-- `FuType.mou`
-  - 普通 LR/SC/AMO W/D：`lr_w/sc_w/amo*_w/lr_d/sc_d/amo*_d`。
-  - AMOCAS W/D/Q：常量和 `is_amocas_*` 判断存在，但随机生成和多 uop 闭环未完整覆盖。
+
+仅具备编码/分类基础、当前不支持进入主动主流程的范围：
+
+- `FuType.stu` 下的 `cbo_zero/cbo_clean/cbo_flush/cbo_inval`。
+- `FuType.mou` 下的普通 LR/SC/AMO W/D，以及 AMOCAS W/D/Q。
+- 上述未支持组合由 V2 运行期参数检查和主表 admission 前语义检查 fail-fast；编码常量或 classifier 存在不代表功能闭环。
 
 ### 5.2 Scala 支持但当前未完整支持的组合
 
@@ -219,7 +225,7 @@ TODO：
 
 ## 6. CBO/Prefetch 专项语义
 
-状态：当前按 load-like/store-like 简化建模。
+状态：Prefetch 当前按 load-like 简化建模；CBO 只有 store-like 分类基础，当前 V2 主动主流程在 admission 前运行期 fatal。
 
 ### 6.1 这个功能怎么理解
 
@@ -234,7 +240,7 @@ CBO 和 Prefetch 都是“访存相关操作”，但它们不是普通 load/sto
 现象：
 
 - prefetch 当前复用 LDU/load-like 路径。
-- CBO 当前复用 STU/store-like 路径。
+- CBO 的底层分类可映射到 STU/store-like 路径，但当前 V2 运行期边界阻止其实际进入该路径。
 - 特殊完成语义、异常语义、commit/deq 专项覆盖还不是完整闭环。
 
 ### 6.2 Prefetch 当前简化点
@@ -259,21 +265,27 @@ Scala 依据：
 - software prefetch.i 到 frontend、hardware prefetch train、L2/L3 prefetch sender 的 monitor 和 scoreboard 闭环。
 - prefetch 专项 testcase 需要区分“仅提示成功”和“普通 load-like pass”两类完成语义，避免把 prefetch 错当成 demand load 验证。
 
-### 6.3 CBO 当前简化点
+### 6.3 CBO当前状态与完整闭环TODO
 
-Scala/DUT 侧已经存在 `cbo_zero/clean/flush/inval` 编码和 cache-line 级路径，但当前框架只做了“合法 op 识别 + store-like route”。
+状态：当前V2 scalar主动主流程不支持CBO完整闭环。V2适配执行方案不新增compile capability；CBO默认权重保持0，显式权重和random/boundary/manual/fixed CBO由独立运行期语义检测在admission前fatal。现有源码中的CBO识别和store-like route只说明能够分类，不表示功能已经支持。
+
+Scala/DUT侧已经存在`cbo_zero/clean/flush/inval`编码和cache-line级路径；当前框架只保留“合法op识别+store-like route”的分类基础，并在主表 admission 前拒绝执行。
 
 当前实现现状：
 
 - `memblock_dispatch_types.sv` 已定义 `MEMBLOCK_LSUOP_CBO_ZERO/CLEAN/FLUSH/INVAL`。
 - `lsq_ctrl_model::is_cbo_fuoptype()` 能识别 CBO，并在 `derive_op_behavior()` 中归类为 `MEMBLOCK_OP_BEHAVIOR_CBO`。
-- 当前随机主表默认 `MEMBLOCK_OP_CLASS_STORE -> random_store_fuoptype()`，不会随机生成 CBO；即使手工指定 CBO，也仍按 STU/store-like 路径处理。
+- 当前随机主表默认不会生成 CBO；显式非零 CBO 权重会在参数校验阶段 fatal，手工/boundary/fixed CBO 会在主表 admission 前 fatal，因此不会继续按 STU/store-like 路径执行。
 
 后续需要补：
 
 - 为 CBO 增加显式 testcase / directed helper，而不是只依赖手工改 `fuOpType`。
 - 区分 `cbo_zero` 与 `cbo_clean/flush/inval` 的完成语义、是否需要普通 store data 路径、是否有特殊异常。
-- 明确 cache-line 粒度、uncache/MMIO、fault/redirect/replay 下 CBO 的期望行为，并补对应 scoreboard。
+- 明确cache-line粒度、uncache/MMIO、fault/redirect/replay下CBO的期望行为，并补对应scoreboard。
+- 建立CBO从主表directed生成、地址翻译/权限、admission、STA或专用issue、DCache/CBO ack或其它真实完成事件、ROB commit、SQ或专用资源释放到terminal的端到端生命周期。
+- 分开定义CBO.ZERO与CBO.CLEAN/FLUSH/INVAL是否需要STD数据侧、是否进入普通SQ、如何与flushSb/SBuffer/uncache交互，禁止继续用普通store的STA+STD pass作为统一完成条件。
+- 明确CBO在redirect/replay/flush及异常路径下的pending状态、ack去重、资源回收和重新发射规则，并建立对应directed testcase。
+- 闭环完成并通过回归前，保持V2初始化和`validate_main_table_entry()`中的CBO运行期拒绝；完成后删除拒绝分支并开放专项激励，不增加compile capability开关。
 
 ### 6.4 CBO/Prefetch 完成语义完整 checker 化
 
@@ -336,9 +348,11 @@ TODO：
 - `CBO/prefetch` 建议保留在 `op_class` 维度；不要混入普通 load/store 地址边界分类里做等价处理。
 - `prefetch_i` 与 data prefetch 的路径差异：`prefetch_i` 可能走到 frontend/ifetch prefetch 相关输出，不应简单等价于 data load。
 
-### 6.3 CBO 当前简化点
+### 7.1 CBO地址场景与完成语义补充
 
-Scala 依据：
+以下内容补充第6.3节。当前源码仍有store-like分类，但V2适配执行方案会在admission前运行期拒绝CBO；这些条目是后续完整闭环的输入，不表示当前允许驱动CBO。
+
+Scala依据：
 
 - `LSUOpType` 定义了 `cbo_zero/cbo_clean/cbo_flush/cbo_inval`。
 - `isCboAll()` 同时覆盖 `cbo_zero` 和 clean/flush/inval。
@@ -364,3 +378,326 @@ TODO：
 - 对照 Scala 源码补 CBO/prefetch 的完成条件、异常来源、是否写回、是否参与普通 load/store commit/deq。
 - 建立专项 testcase，避免只验证普通 load/store 类似路径。
 - 给 CBO 和 Prefetch 分别建立独立 op_class 或至少独立 behavior 分支，避免后续误把专项行为混在普通 load/store pass 条件里。
+
+## 8. V2 `tlbCsr_priv_debug` debug-mode 权限/异常建模 TODO
+
+状态：当前只做 snapshot only，不做完整行为建模。
+
+当前本轮 V2 适配策略：
+
+- `csr_ctrl_agent` monitor 需要采样 `io_ooo_to_mem_tlbCsr_priv_debug`。
+- raw CSR/runtime snapshot 保存 `priv_debug`，默认值为 `1'b0`，表示当前 smoke/main flow 默认不进入 debug mode。
+- 当前 sequence、主表、异常 directed 激励、pass/fault、terminal 和 L2TLB lookup 均不消费 `priv_debug`。
+- 当前测试框架不根据 `priv_debug` 生成、禁止或筛选 debug-mode 权限/异常激励。
+
+源码语义边界：
+
+- CSR 侧 `io.tlb.debug := debugMode`，MemBlock 将该字段作为 `tlbCsr.priv.debug` 下发。
+- DTLB/L2TLB PMP/PMA 检查会消费 `tlbcsr.priv.debug`，例如 `MemBlock.scala` 和 `L2TLB.scala` 中传入 `PMPCheckerEnv.debug`。
+- RTL `PMPChecker` 中 `io_check_env_debug` 参与 PMP/PMA 匹配条件，尤其会影响 debug 地址区间相关判断。
+
+为什么不在本轮实现：
+
+- 完整支持不是单纯字段补齐，而是 debug mode 下 PMP/PMA、debug ROM/debug address、权限异常标签和 directed 激励合法性的专项建模。
+- 测试框架本轮目标是生成自洽激励，不承担完整参考模型职责；当前 smoke/main flow 不构造 debug-mode 访存场景，因此不应把 `priv_debug` 混入普通 pass/fault 判断。
+- 若只把 `priv_debug` 接入 pass/fault，而没有定义 testcase 入口、地址范围、PMP/PMA 配置和 debug-mode 标签，容易把普通权限场景误判成 debug 权限场景。
+
+后续 TODO：
+
+- 新建 `CSR runtime/priv debug` 专项 plan，明确 debug-mode 访存 testcase 的入口和默认关闭策略。
+- 在 raw CSR/runtime snapshot 已保存 `priv_debug` 的基础上，定义哪些 sequence/helper 可以消费该字段。
+- 建立 debug-mode 地址场景标签，例如普通地址、debug ROM/debug address、PMP/PMA 受 debug 影响的地址区间。
+- 明确 `priv_debug=1` 时哪些访问只作为合法激励生成，不由测试框架判断 DUT 正确性；哪些 directed 标签必须保证和 debug-mode CSR 上下文一致。
+- 若需要主动构造 debug-mode PMP/PMA fault/pass 场景，补充 testcase 配置、PMP/PMA 环境准备、主表标签和激励自洽检查。
+- 不在该 TODO 中实现 RM/scoreboard 正确性比较；若后续需要检查 DUT 结果正确性，应另建 RM/checker/coverage 专项。
+
+## 9. V2 `sfence_bits_flushPipe` 全局 pipeline flush 建模 TODO
+
+状态：当前只做 sfence/hfence 的 TLB entry invalidation，不做完整 pipeline flush 行为建模。
+
+当前本轮 V2 适配策略：
+
+- `fence_agent` 可以观察或驱动 `io_ooo_to_mem_sfence_bits_flushPipe` 端口，但 `dispatch_raw_sfence_t` 和 `decode_raw_sfence()` 不消费该字段。
+- 现有 sfence flow 只按 `rs1/rs2/addr/id/hv/hg` 失效 `tlb_entry_by_key`，不删除主表、uid record、pending writeback、issue queue、LQ/SQ mapping 或 terminal 状态。
+- 当前测试框架不把 `flushPipe=1` 当作 MemBlock 本地暂停 LSQ enqueue/issue 的信号。
+- 当前建议 sfence directed 场景在 quiescent 窗口执行，即先让 active load/store 事务收敛，再发 sfence，避免框架等待被完整 core pipeline flush 杀掉的年轻指令事件。
+
+源码语义边界：
+
+- Scala `SfenceBundle.bits.flushPipe` 在 V2/V3 源码语义中都存在；V2 当前生成 `MemBlock.sv` 顶层暴露 `io_ooo_to_mem_sfence_bits_flushPipe`，V3 生成 MemBlock 顶层可能不暴露同名端口。
+- `SFENCE_VMA/HFENCE/FENCE` decode 会给 uop 设置 `flushPipe=1`。
+- Fence 执行单元把 uop 的 `flushPipe` 透传到 sfence bundle 和写回控制信息。
+- ROB 将 `flushPipe` 归为 `needFlush`，但不是 exception；当该 uop 到达 ROB head 并满足提交条件时触发全局 pipeline flush，杀掉年轻指令。
+- MemBlock 内部 DTLB 的独立 `flushPipe` 输入在当前源码中接为 `false.B`，因此不能把 `sfence_bits_flushPipe` 简化理解成 MemBlock 本地 LSQ 暂停控制。
+
+为什么不在本轮实现：
+
+- 完整语义不是单个字段补齐，而是后端全局 flush 的生命周期建模，需要 ROB age、flush epoch、年轻 uid kill、pending event 清理和 terminal 收敛。
+- 若只在测试框架看到 `flushPipe=1` 后暂停 LSQ driver，会引入 DUT MemBlock 本地没有的控制语义，反而扭曲 standalone MemBlock UT 的激励行为。
+- 若只丢弃部分 event 而不更新主表和 terminal，可能导致 active uid 一直等待不会返回的 writeback/commit/replay event。
+
+后续 TODO：
+
+- 新建 `sfence flushPipe` 专项 plan，明确该专项是否要在 MemBlock standalone UT 中复刻完整 core 的 ROB 提交点 flush 行为。
+- 在 raw sfence payload 中增加 `flushPipe` 字段，并说明 monitor 写入、默认值、reset 清理和 debug dump。
+- 增加 flush epoch 或等价状态，记录 sfence flush 的 ROB 边界、触发 cycle 和影响范围。
+- 按 ROB 年龄区分老指令和年轻指令：老于 sfence 的 load/store 继续等待正常完成，年轻于 sfence 的 active uid 标记为 killed 或 flush terminal。
+- 定义 pending writeback、issue/recovery queue、LQ/SQ mapping、main-table active uid 的清理或回滚策略。
+- 定义 `sfence_bits_flushPipe` 与已有 redirect、replay、flushSb、memoryViolation 的优先级，避免同拍事件双重清理或漏清理。
+- 定义 terminal 收敛规则：被 flush kill 的 uid 必须进入明确 terminal/killed 状态，不能继续等待不存在的 DUT event。
+- 若无法可靠获得 ROB age 或 sfence 提交边界，则该专项必须限制 testcase 到 quiescent sfence 场景，或对非 quiescent `flushPipe=1` 场景 `uvm_fatal`。
+- 不在该 TODO 中实现 RM/scoreboard 正确性比较；该专项只解决测试框架激励生命周期和终态闭环。
+
+## 10. DCache/SBuffer `corrupt/denied` response 注入 TODO
+
+状态：当前不支持由主表或 directed 配置稳定控制 DCache/SBuffer TL response 的 `corrupt/denied`。
+
+当前本轮 V2 适配策略：
+
+- DCache/SBuffer agent 只按现有 interface/connect 字段边界适配，保持默认正常 response 行为。
+- 当前不新增 runtime flow，不让主表 transaction 直接控制 DCache/SBuffer D channel 的 `denied/corrupt`。
+- 当前不把 DCache/SBuffer `corrupt/denied` 接入 pass/fault、terminal、writeback 或 commit/deq 主状态判断。
+- `PBMT/permission` 不属于 DCache/SBuffer response 字段，后续仍归 TLB/L2TLB/PTW response 权限属性专项处理。
+
+接口事实边界：
+
+- DCache TL D channel 相关字段是 `auto_inner_dcache_client_out_d_bits_denied` 和 `auto_inner_dcache_client_out_d_bits_corrupt`。
+- SBuffer TL D channel 相关字段是 `auto_inner_buffers_out_d_bits_denied` 和 `auto_inner_buffers_out_d_bits_corrupt`。
+- DCache/SBuffer agent xaction、interface、driver/connect 中没有 `PBMT/permission` response 字段。
+- 历史主表字段中存在 `corrupt/denied`，但字段存在不代表当前 memory responder 已经按 uid 或主表稳定消费。
+
+为什么不在本轮实现：
+
+- DCache/SBuffer request 到主表 uid 的稳定反查来源尚未定义。若直接按主表 uid 驱动 response，可能把错误 response 打到错误 transaction 上。
+- 现有 memory responder 更适合按物理地址或地址范围注入错误属性；是否改成 uid 控制、地址范围控制或二者组合，需要单独设计。
+- `corrupt/denied` 会影响 load data、store memory update、writeback fault、commit/deq 和 terminal 收敛，不能只改 response 字段。
+
+后续 TODO：
+
+- 新建 DCache/SBuffer `corrupt/denied` response 注入专项 plan。
+- 先确认 DCache/SBuffer request 是否能从 active map、transaction source、LQ/SQ key 或 paddr 稳定反查到 uid。
+- 若 uid 反查稳定，定义主表 `corrupt/denied` 到 responder response 的字段链路和生命周期。
+- 若 uid 反查不稳定，优先建立 paddr/range 错误注入表，通过地址范围控制 `corrupt/denied`，避免错误归属不确定。
+- 定义 `corrupt/denied` 对 load writeback、store/sbuffer completion、异常写回、commit/deq、redirect/replay 和 terminal 的影响。
+- 定义默认关闭策略、directed testcase 入口、debug dump 和 fail-fast 条件。
+- 不在该 TODO 中实现 RM/scoreboard 正确性比较；若后续需要判断 DUT 对错误 response 的处理正确性，应另建 RM/checker/coverage 专项。
+
+## 11. V2 MMIO load/store directed 与 `pendingMMIOld` 建模 TODO
+
+状态：已有专项 execution plan 承接 ROB mmio 状态表标签与 `pendingMMIOld` 支持，路径为 `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md`。当前 TODO 继续记录完整 MMIO directed、地址属性、store MMIO 后续 RM/checker 边界；DUT `loadMmio/loadMmioUop.robIdx_value` 和 `storeMmio/storeMmioUop.robIdx_value` monitor 回填已经是该专项的默认第一阶段方案，不再作为待确认项。
+
+当前本轮 V2 适配策略：
+
+- `pendingPtr` 后续 coding 按 `modeled_rob_deq_ptr` 驱动：普通 commit xaction 发送 commit 前 head 并校验等于 commit batch head uid 的完整 ROB key，普通 commit 完成后推进到 batch 后 next head，idle/default 周期发送推进后的 head。
+- `pendingst` 后续 coding 按 head uid 是否为 scalar store 驱动。
+- `scommit` 后续 coding 按本拍 commit batch 中 scalar store 数量驱动。
+- `pendingMMIOld` 由状态表 MMIO load 标签驱动；该标签默认由 DUT `loadMmio/loadMmioUop.robIdx_value` output monitor 回填，不从 `PBMT/pmaAF/corrupt/denied` 直接推导，因为这些字段不等价于 ROB entry 的 `mmio` bit。
+- `loadMmio/loadMmioUop` 进入 raw ctrl 后固定探测 `{flag=0,value}` 和 `{flag=1,value}` 两个完整 active ROB map key，唯一命中并通过生命周期检查后回填 status MMIO load 标签；不得扫描 active window，也不进入 pass/fail、terminal 或 deq 判断。
+- `storeMmio/storeMmioUop` 使用同一固定双 key 方法回填 status MMIO store 标签；本轮不把 store tag 作为 pass/fail、terminal、commit 或 pending 公共状态判断条件。
+
+为什么不在本轮实现完整 MMIO directed：
+
+- 当前 `main_control_transaction` 没有明确的 `is_mmio` 或等价 MMIO load/store 标签。
+- V2 DUT 的 `pendingMMIOld` 源自 ROB head entry 的 `mmio` bit，完整闭环需要先定义 load/store 如何在主表、TLB/PMA/PBMT、writeback/debug 字段和 ROB sideband 之间传递 MMIO 语义。
+- 直接把 `PBMT`、`pmaAF`、`denied/corrupt` 当作 MMIO 会混淆内存属性、access fault 和 response error，可能生成错误激励或错误 sideband。
+- `loadMmioUop/storeMmioUop` output 只有 ROB value，无 flag；二者反查 uid 必须固定探测 `{flag=0,value}` 与 `{flag=1,value}` 两个完整 active ROB map key，并由 ROB mmio tag 专项定义 map 插入/删除、采样 flush epoch、redirect/replay/flush 后动态实例失效及无法唯一命中时的 fail-fast 策略；不得退回 active-window 或主表扫描。
+
+后续 TODO：
+
+- 执行 `mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md`，补齐状态表统一 ROB mmio tag、DUT `loadMmio/loadMmioUop` 与 `storeMmio/storeMmioUop` monitor 回填、固定双 key 反查、setter API和 `lsq_commit_handler` head sideband consumer。
+- 后续若要构造完整 V2 MMIO directed testcase，再新增 MMIO directed stimulus plan，定义地址属性、TLB/PMA/PBMT/responder 配置和 testcase 入口。
+- directed/testcase 显式指定 MMIO 标签只作为后续 debug 或 directed override；默认来源已经固定为 DUT `loadMmio/loadMmioUop` 和 `storeMmio/storeMmioUop` monitor 回填。
+- `pendingMMIOld` 统一按当前 modeled ROB head 每拍派生，与 writeback/pass 和普通 commit batch 是否为空解耦。尚未 writeback 的 tagged MMIO load head 自然形成 sideband-only 周期；该周期不得设置 `rob_commit`、推进 commit cursor/modeled head、deq、pass/fail或terminal，不再建立第二套特殊 commit 状态机。
+- `loadMmio/loadMmioUop` 与 `storeMmio/storeMmioUop` raw ctrl 字段由 ROB mmio tag 专项定义，必须说明 ROB value-only 反查来源、生命周期和 flush/replay/redirect 后失效规则。
+- 定义 MMIO load/store 对 uncache responder、writeback、SQ MMIO FSM、commit/deq、terminal 收敛的影响。
+- 默认关闭 directed MMIO；未开启专项时，不把 MMIO sideband 接入 pass/fail 或 terminal。
+- 不在该 TODO 中实现 RM/scoreboard 正确性比较；若后续要判断 DUT MMIO 顺序或异常处理正确性，应另建 RM/checker/coverage 专项。
+
+## 12. V2 L2 hint 与 L2 flush completion responder 完整闭环 TODO
+
+状态：当前不支持主动非零 L2 hint，也不支持具有 request/in-flight/completion
+关联的 L2 flush/低功耗完成模型。当前安全适配由
+`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_dcache_l2_sideband_responder_adapt_execution_plan_20260712.md`
+定义：以下四个 DUT input 从 time zero 到测试结束必须始终 known-zero，任何 transaction
+非零值在 driver 首次写 vif 前 fatal。
+
+```text
+io_l2_hint_valid
+io_l2_hint_bits_sourceId[3:0]
+io_l2_hint_bits_isKeyword
+io_l2_flush_done
+```
+
+当前 zero-only 策略：
+
+- interface 声明初始化、xaction hard constraint、constructor、idle/response builder、
+  `drive_idle()` 和 `send_pkt()` 共同保证四字段为0。
+- DCache A/B/C/D/E responder、memory model、load/store completion 和现有 replay flow
+  不产生主动 L2 hint。
+- 没有合法 L2 flush request 时不得产生 `l2_flush_done`；不得使用随机 pulse、固定周期
+  pulse或 testcase 直接赋值伪造完成。
+- 不得通过删除 hard-zero constraint、关闭 driver fatal 或把字段改成 soft constraint
+  来宣称支持该功能。
+
+为什么需要独立专项：
+
+- `l2_hint` 会按 `sourceId` 关联 DCache MSHR，并可能在 GrantData 完成前推进 mainpipe；
+  LoadQueueReplay 还会用 hint 提前唤醒 C_DM replay。
+- `isKeyword` 不是普通随机 payload，它会影响 keyword beat 选择和 replay 优先级。
+- `l2_flush_done` 会进入 CSR `L2_FLUSH_DONE` 语义；没有请求来源的完成会制造错误
+  CSR 状态和低功耗/flush 生命周期。
+- 因此两个功能都需要独立 owner、请求关联和完成状态，不能作为 DCache D response 的
+  附属随机字段实现。
+
+### 12.1 L2 hint responder TODO
+
+- 新建 V2 L2 hint responder 专项 plan，明确 responder 所属 agent、唯一驱动 owner、
+  reset/idle行为和与现有 DCache responder 的协作边界。
+- 从实际 DCache/L2 transaction 建立 hint 候选，定义 `sourceId` 的权威来源；不得从
+  主表 uid、LQ/SQ key 或随机数直接伪造 MSHR source。
+- 建立 outstanding MSHR/sourceId 表，记录 request 类型、地址、source、GrantData beat
+  进度、keyword beat 和生命周期 epoch。
+- 只有 sourceId 唯一命中 active outstanding entry 时才允许 `l2_hint_valid=1`；未命中、
+  重复命中、已完成或已取消 source 必须 fail-fast 或按专项定义明确 drop。
+- 定义 hint 相对 GrantData 的合法窗口：最早/最晚周期、是否允许同拍、是否允许多次 hint，
+  以及 transaction 完成后何时删除 outstanding 状态。
+- 定义 `isKeyword` 的生成规则，必须由真实 beat/keyword 语义派生；禁止独立随机。
+- 定义 hint 与 DCache miss、MSHR merge、refill、LoadQueueReplay、redirect/replay 和 reset
+  的优先级及取消规则，避免唤醒已失效的 load。
+- 增加默认关闭的 plus/cfg 或 directed testcase 入口；关闭时继续执行现有 hard-zero合同。
+- directed testcase 至少覆盖：合法 source hint、keyword/non-keyword、hint-before-refill、
+  同拍 hint/refill、重复 hint、未知 source、redirect 后旧 source hint 和 reset 清理。
+- 增加 monitor/debug dump 和 end check，保证没有遗留 outstanding source、重复消费或
+  无归属 hint。
+
+### 12.2 L2 flush/低功耗 completion responder TODO
+
+- 新建 V2 L2 flush completion 专项 plan，确认 MemBlock/系统侧实际 flush request 入口，
+  例如相关 `l2_flush_en`/低功耗请求，以及 `io_l2_flush_done` 的采样和脉冲/电平合同。
+- 建立明确状态机，例如 `IDLE -> REQUESTED -> IN_FLIGHT -> COMPLETE -> IDLE`；只有观察到
+  合法 request 后才能进入 in-flight，只有 in-flight 状态才能驱动 done。
+- 定义 request identity、重复 request、request 保持、多拍 request、完成 latency、timeout、
+  back-to-back flush 和 reset 中断规则。
+- `io_l2_flush_done` 必须由状态机唯一产生，不允许 DCache generic xaction、idle mode、
+  randomize 或 testcase 直接驱动。
+- 定义 flush 完成前需要满足的环境条件，例如 outstanding DCache transaction、MSHR、
+  SBuffer/uncache 活动是否必须排空；不得只等待固定拍数就无条件完成。
+- 定义完成事件与 CSR `L2_FLUSH_DONE`、低功耗握手和后续 request 的可见周期，避免同一
+  completion 被重复消费。
+- 定义 reset、redirect、异常和仿真终止时 in-flight 状态的清理或保留策略；若 redirect
+  与系统级 L2 flush 无关，应明确说明不取消，而不是默认共用 dispatch flush epoch。
+- directed testcase 至少覆盖：无request禁止done、正常request/completion、可配置延迟、
+  timeout、重复request、back-to-back request、reset during in-flight 和 completion去重。
+- end check 必须保证无未完成 flush、无孤立 done、request/completion 计数一致。
+
+### 12.3 开放非零 sideband 的前置条件
+
+只有以下条件全部满足后，才能修改当前 zero-only plan并允许四字段非零：
+
+- 两个专项分别形成已 review 的执行 plan，明确唯一 owner 和状态生命周期。
+- 非零值来自真实 request/outstanding 状态，而不是 random transaction payload。
+- interface/xaction/driver/builder 的 hard-zero合同按 capability 精确拆分，默认普通 smoke
+  仍保持 zero-only。
+- 已补负向 fail-fast、directed testcase、monitor/debug dump、reset和end check。
+- 编译和回归证明原 DCache A/B/C/D/E responder、load/store completion、replay和 CSR
+  普通路径无行为回归。
+- 若后续需要判断 DUT 对 hint/flush 的功能正确性，再建立独立 RM/checker/coverage专项；
+  responder 闭环完成本身不等于正确性检查闭环完成。
+
+## 13. LSQ issue hold、压力模式与 boundary vseq TODO
+
+状态：当前 V2 LSQ enqueue 适配只补齐 scalar request 字段、6 个物理 slot、单拍最多
+6 个 load element/4 个 store element 的 admission gate、V2 E0/E1 发送时序和 redirect 后重试。
+当前不新增 issue hold、LSQ 压力模式或 boundary directed vseq。该边界由
+`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`
+定义。
+
+本节中的“边界”是 LSQ 容量、admission 门限和 enqueue/redirect 时序边界，不是第 7 节的
+misalign、跨 16B 或跨 4K 地址边界。以下三项都是后续测试场景基础设施，不是 V2 DUT
+interface 字段，也不表示当前普通 LSQ enqueue/issue flow 不可用。
+
+当前行为边界：
+
+- LOAD/STA/STD issue sequence 继续按现有 scheduler、DUT ready 和真实 fire 运行，不存在测试专用
+  `force_idle` 或 `issue_start_hold` 分支。
+- 正常 enqueue 可以在 DUT backpressure、issue 延迟或其它真实运行条件下自然形成 LQ/SQ 压力；
+  当前只是不能稳定、定向地把占用推进到指定门限。
+- V2 admission 必须始终保持
+  `load_free >= tentative_load_elements + 6` 和
+  `store_free >= tentative_store_elements + 4`。任何压力或边界场景都不得绕过该 gate、伪造
+  enqueue acceptance 或直接修改软件 LQ/SQ 分配状态。
+- 当前 pass/fail、ROB commit、LSQ deq 和 terminal owner 保持不变；三项专项后续实现也只能控制
+  场景调度，不得建立第二套完成状态机。
+
+### 13.1 Issue hold TODO
+
+Issue hold 是测试框架主动暂停 LOAD/STA/STD issue 发送、让已 enqueue 项暂时留在 LQ/SQ 中的
+测试控制。它不是 DUT backpressure，不是 issue interface 字段，也不得复用
+`sfence_bits_flushPipe` 表达。
+
+后续 TODO：
+
+- 建立独立专项 plan，定义 issue hold 的唯一运行期 owner、置位点、释放条件以及 reset、redirect、
+  replay、global stop 下的清理规则；不得由多个 sequence 或 testcase 直接写同一状态。
+- issue 主循环只允许 O(1) 读取 hold 状态。hold 生效时继续执行现有 uid route 和
+  `advance_issue_queue_delays()`，只抑制新 issue transaction 的发送并保持 interface idle；不得从
+  issue queue 删除 item、标记 fire 或伪造 DUT ready。这样 hold 只增加队列驻留时间，不会在释放后
+  再额外重复 transaction 原有的 `ready_cycle` 延迟。
+- hold 期间 monitor event、redirect/replay handler 和已有状态清理必须继续运行；hold 不能冻结整个
+  dispatch service loop。
+- intentional hold 期间不得把“没有 issue fire”误报为 DUT no-progress。释放后恢复现有 watchdog，
+  但 hold 周期本身也不得计作真实 progress。
+- 所有控制参数默认关闭。若作为公共可配置行为，参数必须走
+  `env/plus.sv -> seq_csr_common.sv -> getter`；动态 active 状态属于运行期状态，不得存入 plus、
+  env cfg 或 transaction 字段。
+- hold 释放后继续使用原 issue scheduler 和 fire 处理，最终仍由既有 terminal/global-stop 合同退出。
+
+### 13.2 LSQ 压力模式 TODO
+
+压力模式用于稳定制造 LQ/SQ 高占用，而不是提高硬件结构上限或强制 DUT 接收非法 batch。最小方案
+应通过“继续合法 enqueue + 暂停 issue”接近 admission 门限，避免同时修改 commit/deq 主逻辑。
+
+后续 TODO：
+
+- 定义默认关闭的 pressure profile，至少包含 load/store 目标、目标 occupancy 或 free-entry 门限、
+  最大场景准备等待时间和 hold 释放策略；公共参数按参数管理规则统一进入公共 runtime 参数链。
+- 场景构建使用普通 scalar load/store，保持每条 scalar transaction 的 `numLsElem=1`；不得为了提高
+  占用引入当前未支持的 vector、AMO、MOU 或 CBO。
+- 压力 controller 只根据参数化 LQ/SQ counter、当前 tentative batch 和 O(1) hold 状态判断是否达到
+  目标，不得每拍扫描完整主表或状态表。
+- 达到目标后必须释放 issue hold，让原 issue、writeback、commit/deq 和 terminal flow 自然排空；
+  不新增 commit hold 或 deq hold 作为默认实现。
+- 场景准备阶段超过明确上限仍未达到 directed 目标时必须报告场景构造失败，不能静默退化成普通
+  smoke。该上限只约束 directed setup，不得替代主动 flow 的正常 terminal 退出条件。
+- 可记录目标 occupancy、最大 occupancy、gate 阻塞次数和 hold 周期等激励有效性统计；这些是 debug
+  统计，不是 DUT 正确性 checker 或功能覆盖率达标条件。
+
+### 13.3 Boundary directed vseq TODO
+
+Boundary vseq 是协调主表生成、LSQ enqueue、issue hold、redirect 和必要 responder sequence 的顶层
+定向场景。它用于稳定命中容量门限和 E0/E1 时序边界，不直接驱动 DUT interface，也不替代各
+agent 的 base sequence/driver。
+
+后续 TODO：
+
+- 新增继承 `virtual_base_sequence` 的 LSQ boundary vseq，通过 `basicTest` 和
+  `ts=<boundary_vseq>` 选择，并只使用 `p_sequencer.<agent>_sqr` 启动所需 child sequence。
+- directed case 至少覆盖：单拍恰好 6 个 scalar load element、超过 6 个 load candidate 时跨拍保留、
+  单拍恰好 4 个 scalar store element、超过 4 个 store candidate 时跨拍保留。
+- 覆盖 load/store admission 的门限两侧：free entry 恰好满足
+  `tentative + 6/4 reserve` 时允许构造 batch，少 1 时不得把该 candidate 放入本拍 request。
+- 覆盖 redirect 位于 launch 前、E0 drive 后到 E1 sample 前以及 E1 sample 边界的场景，沿用 V2
+  enqueue plan 已定义的 abort/retry/epoch 语义，不新增另一套 redirect handler。
+- vseq 需要积累占用时只能使用第 13.1 节定义的 issue hold API；不得层次化 force interface、直接
+  改 issue queue、LQ/SQ counter 或软件 allocation map。
+- 每个 directed case 结束后释放 hold 并等待既有 terminal/global-stop 收敛；early return、reset 或
+  fatal 前必须清理场景 active 状态，不能遗留到下一 case。
+- 后续若需要 RM/checker/coverage，只消费该 vseq 产生的 case 标签、实际 batch 数量、free-entry
+  snapshot 和 redirect phase 标签；本 TODO 不实现 DUT 正确性比较或 covergroup。
+
+### 13.4 后续专项完成边界
+
+只有 issue hold、pressure controller 和 boundary vseq 的 owner、参数、运行期状态、清理与退出合同
+形成独立可 coding plan 并通过 review 后，才能从 V2 LSQ enqueue 适配 plan 的“不支持”列表中移除。
+专项默认关闭时，当前普通 scalar enqueue、issue、writeback、commit/deq、redirect/replay 和 terminal
+行为必须保持完全不变。

@@ -76,6 +76,7 @@ cd mem_ut/ver/ut/memblock/sim
 当前 `memblock` 参数分类管理规则文档为：
 
 - [memblock_parameter_management_rule.md](mem_ut/ver/ut/memblock/rule/memblock_parameter_management_rule.md)
+- [mem_ut_parameter_management.md](AI_DOC/project_management/mem_ut_parameter_management.md)
 
 当前 `AI_DOC` 文件分类管理规则文档为：
 
@@ -152,7 +153,8 @@ L2TLB agent 内部 driver/monitor/sequencer/transaction/default sequence、
 后续新增、迁移、重命名或调整 `mem_ut` 参数，包括 `memblock_env_cfg` 字段、
 `env/plus.sv` 参数、`seq_csr_common.sv` getter、`seq/plus_cfg/*.cfg` preset、
 testcase preset 的 Makefile `cfg=` 入口、编译期宏参数或 connect-time 参数时，必须先阅读
-`mem_ut/ver/ut/memblock/rule/memblock_parameter_management_rule.md`。
+`mem_ut/ver/ut/memblock/rule/memblock_parameter_management_rule.md` 和
+`AI_DOC/project_management/mem_ut_parameter_management.md`。
 
 后续新增、移动、整理、归档或 review `AI_DOC` 下的设计文档、plan、review、flow、
 网页文档、分析文档或项目管理规则时，必须先阅读
@@ -435,6 +437,7 @@ V2 独立 worktree 默认由 `eda01_entry.sh` 自动导出：
 处理以上任务时，必须先阅读：
 
 - `mem_ut/ver/ut/memblock/rule/memblock_parameter_management_rule.md`
+- `AI_DOC/project_management/mem_ut_parameter_management.md`
 
 核心要求：
 
@@ -443,6 +446,8 @@ V2 独立 worktree 默认由 `eda01_entry.sh` 自动导出：
 - 公共测试框架参数走 `env/plus.sv -> seq_csr_common.sv -> getter`
 - testcase preset 使用 `seq/plus_cfg/<cfg>.cfg`，通过 Makefile `cfg=<cfg>` 指定，testcase 源码不散落写 `plus::MEMBLOCK_*`
 - connect-time 静态参数归 `cfg/memblock_compile_params.svh`
+- interface宽度、物理slot/pipe/port数量和connect-time capability不得建立runtime plus镜像；物理consumer直接读取compile宏/localparam
+- runtime只保留testcase行为使用量，受物理资源约束的参数统一由`seq_csr_common::apply_runtime_resource_limits()`收敛
 - 运行期状态、表项、monitor raw queue、CSR runtime snapshot 不归入参数配置系统
 - 新增 cfg key 后必须保持 `env/plus.sv`、`seq_csr_common.sv`、`default.cfg` 和 testcase preset cfg 同步
 

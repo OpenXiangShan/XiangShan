@@ -56,7 +56,8 @@ Soft test / mixed directed flow：
 
 1. soft_test smoke 构造阶段：
    body 先 build_directed_main_table；
-   build_directed_main_table 通过 make_directed_transaction 直接构造 load/store/amo 的主表项；
+   build_directed_main_table 通过 make_directed_transaction 直接构造 uid 0 load和uid 1 store；
+   V2当前未闭环AMO/MOU，因此默认software smoke不再创建第三笔AMO；
    import_manual_main_table 把手工 transaction 导入 common_data；
    这里不是 DUT monitor 采集，而是软件直接构造测试数据。
 
@@ -131,6 +132,11 @@ check_final_status();
 功能解释：
 
 这是软件闭环 smoke 主入口。它不是 DUT monitor 路径，而是直接在测试框架内部模拟 issue/fire/writeback/commit/deq，验证框架状态机能否闭环。
+
+当前V2默认场景固定为两笔transaction：uid 0 load产生LOAD target，uid 1 store产生STA和
+STD target。两个directed builder都先调用package唯一
+`fit_directed_rob_value_or_fatal()`检查完整ROB value，再执行显式宽度转换；不再使用低位
+slice。正常场景应形成两笔ROB commit，并分别完成一笔LQ和一笔SQ出队。
 
 输入/输出：
 
