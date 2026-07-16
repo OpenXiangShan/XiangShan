@@ -491,26 +491,45 @@ function void memblock_dispatch_base_sequence::apply_legal_addr_template(input m
     bit [63:0] range;
     bit [63:0] upper;
     bit [63:0] aligned_base;
+    bit [63:0] aligned_upper;
     bit [63:0] align_mask;
+    bit [63:0] latest_start;
     bit [63:0] slot_count;
     bit [63:0] slot_pick;
+    bit [63:0] selected_vaddr;
+    bit [63:0] access_end;
+    int unsigned size_bytes;
 
     if (tr == null) begin
         `uvm_fatal(get_type_name(), "apply_legal_addr_template got null transaction")
     end
 
-    base       = seq_csr_common::get_paddr_base();
-    range      = seq_csr_common::get_paddr_range();
+    base       = seq_csr_common::get_main_vaddr_base();
+    range      = seq_csr_common::get_main_vaddr_range();
     upper      = base + range - 1;
     align_mask = 64'd63;
+    size_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+
+    if (size_bytes == 0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("apply_legal_addr_template uid=%0d cannot derive access size op_class=%0d fuOpType=0x%0h",
+                             tr.uid, tr.op_class, tr.fuOpType))
+    end
+    if (range < size_bytes) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("main vaddr range=0x%0h is smaller than access size=%0d uid=%0d",
+                             range, size_bytes, tr.uid))
+    end
 
     aligned_base = (base + align_mask) & ~align_mask;
-    if (aligned_base > upper) begin
-        aligned_base = base;
-        slot_count   = 64'd1;
-    end else begin
-        slot_count = ((upper - aligned_base) >> 6) + 1;
+    latest_start  = upper - (size_bytes - 1);
+    aligned_upper = latest_start & ~align_mask;
+    if (aligned_base > aligned_upper) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("main vaddr window has no 64B-aligned slot for uid=%0d base=0x%0h upper=0x%0h size=%0d",
+                             tr.uid, base, upper, size_bytes))
     end
+    slot_count = ((aligned_upper - aligned_base) >> 6) + 1;
 
     if (slot_count <= 1) begin
         slot_pick = 64'd0;
@@ -518,9 +537,23 @@ function void memblock_dispatch_base_sequence::apply_legal_addr_template(input m
         slot_pick = {$urandom(), $urandom()} % slot_count;
     end
 
-    tr.src_0 = aligned_base + (slot_pick << 6);
+    selected_vaddr = aligned_base + (slot_pick << 6);
+    access_end = selected_vaddr + size_bytes - 1;
+    if (selected_vaddr < base || access_end < selected_vaddr || access_end > upper ||
+        (selected_vaddr & align_mask) != 0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("main vaddr generation bug uid=%0d selected=0x%0h end=0x%0h window=[0x%0h,0x%0h] size=%0d",
+                             tr.uid, selected_vaddr, access_end, base, upper, size_bytes))
+    end
+
+    tr.src_0 = selected_vaddr;
     tr.imm   = 64'h0;
     tr.update_vaddr();
+    if (tr.vaddr != selected_vaddr) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("main vaddr update mismatch uid=%0d expected=0x%0h actual=0x%0h",
+                             tr.uid, selected_vaddr, tr.vaddr))
+    end
 endfunction:apply_legal_addr_template
 
 function void memblock_dispatch_base_sequence::build_boundary_candidate_cache();
@@ -1971,6 +2004,16 @@ function void memblock_dispatch_base_sequence::validate_main_table_entry(input m
                                                                          input string caller);
     if (tr == null) begin
         `uvm_fatal(get_type_name(), $sformatf("%s got null transaction", caller))
+    end
+    if (tr.op_class == MEMBLOCK_OP_CLASS_AMO ||
+        tr.fuType == MEMBLOCK_FUTYPE_MOU ||
+        tr.lsq_flow == MEMBLOCK_LSQ_FLOW_ATOMIC) begin
+        `uvm_fatal(get_type_name(), $sformatf("%s requested unsupported scalar atomic uid=%0d", caller, tr.uid))
+    end
+    if (tr.op_class == MEMBLOCK_OP_CLASS_CBO ||
+        tr.lsq_flow == MEMBLOCK_LSQ_FLOW_CBO ||
+        lsq_ctrl_model::is_cbo_fuoptype(tr.fuOpType)) begin
+        `uvm_fatal(get_type_name(), $sformatf("%s requested unsupported scalar CBO uid=%0d", caller, tr.uid))
     end
     if (!tr.validate_main_transaction()) begin
         `uvm_fatal(get_type_name(), $sformatf("%s got invalid derived fields uid=%0d", caller, tr.uid))

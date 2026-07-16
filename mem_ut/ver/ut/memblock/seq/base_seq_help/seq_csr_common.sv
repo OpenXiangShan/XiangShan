@@ -16,11 +16,9 @@ class seq_csr_common;
     static int unsigned main_trans_num = 1;
     static bit          use_manual_main_table = 1'b0;
     static int unsigned enq_per_cycle = 4;
-    // 控制 get_enq_per_cycle() 是否每次在 [1:real_enq_width] 内均匀随机。
+    // 控制get_enq_per_cycle()是否每次在[1:编译期LSQ enqueue物理slot数]内均匀随机。
     static bit          enq_per_cycle_rand_en = 1'b0;
-    // 当前V2 DUT每拍LSQ enqueue总slot上限；route阶段每拍从连续success前缀后最多扫描该数量的uid。
-    static int unsigned real_lsq_enq_max = 6;
-    // LOAD/STA/STD issue pipe配置上限；由plus加载并被真实pipe数clamp。
+    // LOAD/STA/STD issue运行期使用上限；由plus加载并被编译期物理pipe数clamp。
     // 调度路径不直接把它当本拍发射数，必须通过sample_*_pip_num()按随机开关采样。
     static int unsigned load_pip_num_limit = 3;
     static int unsigned sta_pip_num_limit = 2;
@@ -30,17 +28,11 @@ class seq_csr_common;
     static bit          sta_pip_num_random_en = 1'b0;
     static bit          std_pip_num_random_en = 1'b0;
 
-    // LSQ enqueue真实slot宽度兼容字段，必须与real_lsq_enq_max保持一致。
-    static int unsigned real_enq_width = 6;
-    static int unsigned real_load_pipe_num = 3;
-    static int unsigned real_sta_pipe_num = 2;
-    static int unsigned real_std_pipe_num = 2;
-
     static int unsigned op_class_int_load_wt = 8;
     static int unsigned op_class_fp_load_wt = 1;
     static int unsigned op_class_store_wt = 6;
     static int unsigned op_class_prefetch_wt = 1;
-    static int unsigned op_class_amo_wt = 1;
+    static int unsigned op_class_amo_wt = 0;
     static int unsigned op_class_cbo_wt = 0;
     static int unsigned load_fuop_lb_wt = 1;
     static int unsigned load_fuop_lh_wt = 1;
@@ -164,6 +156,12 @@ class seq_csr_common;
     static int unsigned tlb_level_random_high = 2;
     static int unsigned tlb_pte_mode = 0;
 
+    // 中文注释：自动主表 normal transaction 的虚拟地址生成窗口。
+    // 由 plus/default cfg 初始化，apply_legal_addr_template() 只读；默认值保持既有 Bare smoke 分布。
+    static bit [63:0]   main_vaddr_base = 64'h8000_0000;
+    static bit [63:0]   main_vaddr_range = 64'h1000_0000;
+    // 中文注释：TLB entry 的物理地址映射窗口，由 tlb_map_builder 只读消费。
+    // 该窗口与自动主表虚拟地址窗口可独立配置，不再作为 vaddr 生成约束。
     static bit [63:0]   paddr_base = 64'h8000_0000;
     static bit [63:0]   paddr_range = 64'h1000_0000;
     static int unsigned active_seq_no_progress_warn_cycles = 10000;
@@ -226,18 +224,12 @@ class seq_csr_common;
         use_manual_main_table       = plus::MEMBLOCK_USE_MANUAL_MAIN_TABLE;
         enq_per_cycle               = get_non_negative_int("MEMBLOCK_ENQ_PER_CYCLE", plus::MEMBLOCK_ENQ_PER_CYCLE);
         enq_per_cycle_rand_en       = plus::MEMBLOCK_ENQ_PER_CYCLE_RAND_EN;
-        real_lsq_enq_max            = get_non_negative_int("MEMBLOCK_REAL_LSQ_ENQ_MAX", plus::MEMBLOCK_REAL_LSQ_ENQ_MAX);
         load_pip_num_limit          = get_non_negative_int("MEMBLOCK_LOAD_PIP_NUM_LIMIT", plus::MEMBLOCK_LOAD_PIP_NUM_LIMIT);
         sta_pip_num_limit           = get_non_negative_int("MEMBLOCK_STA_PIP_NUM_LIMIT", plus::MEMBLOCK_STA_PIP_NUM_LIMIT);
         std_pip_num_limit           = get_non_negative_int("MEMBLOCK_STD_PIP_NUM_LIMIT", plus::MEMBLOCK_STD_PIP_NUM_LIMIT);
         load_pip_num_random_en      = plus::MEMBLOCK_LOAD_PIP_NUM_RANDOM_EN;
         sta_pip_num_random_en       = plus::MEMBLOCK_STA_PIP_NUM_RANDOM_EN;
         std_pip_num_random_en       = plus::MEMBLOCK_STD_PIP_NUM_RANDOM_EN;
-
-        real_enq_width              = get_non_negative_int("MEMBLOCK_REAL_ENQ_WIDTH", plus::MEMBLOCK_REAL_ENQ_WIDTH);
-        real_load_pipe_num          = get_non_negative_int("MEMBLOCK_REAL_LOAD_PIPE_NUM", plus::MEMBLOCK_REAL_LOAD_PIPE_NUM);
-        real_sta_pipe_num           = get_non_negative_int("MEMBLOCK_REAL_STA_PIPE_NUM", plus::MEMBLOCK_REAL_STA_PIPE_NUM);
-        real_std_pipe_num           = get_non_negative_int("MEMBLOCK_REAL_STD_PIPE_NUM", plus::MEMBLOCK_REAL_STD_PIPE_NUM);
 
         op_class_int_load_wt        = get_non_negative_int("MEMBLOCK_OP_CLASS_INT_LOAD_WT", plus::MEMBLOCK_OP_CLASS_INT_LOAD_WT);
         op_class_fp_load_wt         = get_non_negative_int("MEMBLOCK_OP_CLASS_FP_LOAD_WT", plus::MEMBLOCK_OP_CLASS_FP_LOAD_WT);
@@ -362,6 +354,8 @@ class seq_csr_common;
         tlb_level_random_high       = get_non_negative_int("MEMBLOCK_TLB_LEVEL_RANDOM_HIGH", plus::MEMBLOCK_TLB_LEVEL_RANDOM_HIGH);
         tlb_pte_mode                = get_non_negative_int("MEMBLOCK_TLB_PTE_MODE", plus::MEMBLOCK_TLB_PTE_MODE);
 
+        main_vaddr_base             = plus::MEMBLOCK_MAIN_VADDR_BASE;
+        main_vaddr_range            = plus::MEMBLOCK_MAIN_VADDR_RANGE;
         paddr_base                  = plus::MEMBLOCK_PADDR_BASE;
         paddr_range                 = plus::MEMBLOCK_PADDR_RANGE;
         active_seq_no_progress_warn_cycles = get_non_negative_int("MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES", plus::MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES);
@@ -388,20 +382,30 @@ class seq_csr_common;
     endfunction:load_from_plus
 
     static function void validate_and_clamp();
+        bit [63:0] main_vaddr_upper;
+
+        check_compile_param_consistency();
         fatal_if_zero("main_trans_num", main_trans_num);
+        fatal_if_zero("main_vaddr_range", main_vaddr_range);
         fatal_if_zero("paddr_range", paddr_range);
-        fatal_if_zero("real_enq_width", real_enq_width);
-        fatal_if_zero("real_load_pipe_num", real_load_pipe_num);
-        fatal_if_zero("real_sta_pipe_num", real_sta_pipe_num);
-        fatal_if_zero("real_std_pipe_num", real_std_pipe_num);
-        fatal_if_zero("real_lsq_enq_max", real_lsq_enq_max);
-        clamp_int("real_enq_width", real_enq_width, 1, 6);
-        clamp_int("real_lsq_enq_max", real_lsq_enq_max, 1, 6);
-        if (real_enq_width != real_lsq_enq_max) begin
+        apply_runtime_resource_limits();
+
+        if (op_class_amo_wt != 0) begin
+            `uvm_fatal("SEQ_CSR_CFG", "MEMBLOCK_OP_CLASS_AMO_WT must be 0 until the V2 scalar atomic flow is complete")
+        end
+        if (op_class_cbo_wt != 0) begin
+            `uvm_fatal("SEQ_CSR_CFG", "MEMBLOCK_OP_CLASS_CBO_WT must be 0 until the V2 scalar CBO flow is complete")
+        end
+
+        main_vaddr_upper = main_vaddr_base + main_vaddr_range - 1;
+        if (main_vaddr_upper < main_vaddr_base) begin
+            `uvm_fatal("SEQ_CSR_CFG", "main_vaddr_base + main_vaddr_range - 1 overflows")
+        end
+        if (main_vaddr_base[63:38] != '0 || main_vaddr_upper[63:38] != '0) begin
             `uvm_fatal("SEQ_CSR_CFG",
-                       $sformatf("MEMBLOCK_REAL_ENQ_WIDTH=%0d must equal MEMBLOCK_REAL_LSQ_ENQ_MAX=%0d",
-                                 real_enq_width,
-                                 real_lsq_enq_max))
+                       $sformatf("main vaddr window must stay in Sv39 positive-canonical space: base=0x%0h upper=0x%0h",
+                                 main_vaddr_base,
+                                 main_vaddr_upper))
         end
 
         if ((paddr_base + paddr_range) < paddr_base) begin
@@ -437,15 +441,6 @@ class seq_csr_common;
         clamp_int("load_wait_strict_wt", load_wait_strict_wt, 0, 100);
         clamp_int("rvc_wt", rvc_wt, 0, 100);
 
-        if (enq_per_cycle == 0 || enq_per_cycle > real_enq_width) begin
-            `uvm_fatal("SEQ_CSR_CFG",
-                       $sformatf("MEMBLOCK_ENQ_PER_CYCLE=%0d must be in [1:%0d]",
-                                 enq_per_cycle,
-                                 real_enq_width))
-        end
-        clamp_int("load_pip_num_limit", load_pip_num_limit, 1, real_load_pipe_num);
-        clamp_int("sta_pip_num_limit", sta_pip_num_limit, 1, real_sta_pipe_num);
-        clamp_int("std_pip_num_limit", std_pip_num_limit, 1, real_std_pipe_num);
         if (dispatch_issue_seq_en && dispatch_ready_timeout == 0) begin
             `uvm_warning("SEQ_CSR_CFG", "dispatch_ready_timeout=0 while dispatch issue sequence is enabled, clamp to 1")
             dispatch_ready_timeout = 1;
@@ -484,7 +479,10 @@ class seq_csr_common;
         end
         fatal_if_zero("pc_stride", pc_stride);
         fatal_if_zero("pdest_range", pdest_range);
-        clamp_int("ftq_idx_base", ftq_idx_base, 0, 63);
+        clamp_int("ftq_idx_base",
+                  ftq_idx_base,
+                  0,
+                  int'((64'd1 << MEMBLOCK_FTQ_PTR_VALUE_W) - 1));
         clamp_int("pdest_base", pdest_base, 0, 255);
         clamp_int("pdest_range", pdest_range, 1, 256);
 
@@ -561,6 +559,88 @@ class seq_csr_common;
         end
     endfunction:validate_and_clamp
 
+    // 中文注释：只检查编译期结构常量的可编码关系，不修改任何runtime参数。
+    static function void check_compile_param_consistency();
+        int unsigned fu_bits[$];
+
+        if (MEMBLOCK_ROB_VALUE_W == 0 || MEMBLOCK_LQ_VALUE_W == 0 || MEMBLOCK_SQ_VALUE_W == 0 ||
+            MEMBLOCK_INTERNAL_FUTYPE_W == 0 || MEMBLOCK_DUT_FUTYPE_W == 0 ||
+            MEMBLOCK_FTQ_PTR_VALUE_W == 0 || MEMBLOCK_FTQ_OFFSET_W == 0 ||
+            MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM == 0 || MEMBLOCK_DUT_LOAD_PIPE_NUM == 0 ||
+            MEMBLOCK_DUT_STA_PIPE_NUM == 0 || MEMBLOCK_DUT_STD_PIPE_NUM == 0 ||
+            MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM == 0) begin
+            `uvm_fatal("SEQ_COMPILE_CFG", "compile-time width/count values must be non-zero")
+        end
+        if (MEMBLOCK_DUT_FUTYPE_W > MEMBLOCK_INTERNAL_FUTYPE_W) begin
+            `uvm_fatal("SEQ_COMPILE_CFG",
+                       $sformatf("DUT FuType width=%0d exceeds internal width=%0d",
+                                 MEMBLOCK_DUT_FUTYPE_W,
+                                 MEMBLOCK_INTERNAL_FUTYPE_W))
+        end
+        if (MEMBLOCK_DUT_STA_PORT_BASE != MEMBLOCK_DUT_LOAD_PORT_BASE + MEMBLOCK_DUT_LOAD_PIPE_NUM ||
+            MEMBLOCK_DUT_STD_PORT_BASE != MEMBLOCK_DUT_STA_PORT_BASE + MEMBLOCK_DUT_STA_PIPE_NUM ||
+            MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM != MEMBLOCK_DUT_STD_PORT_BASE + MEMBLOCK_DUT_STD_PIPE_NUM ||
+            MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W != MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM ||
+            MEMBLOCK_DUT_LOAD_PORT_BASE >= MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM) begin
+            `uvm_fatal("SEQ_COMPILE_CFG", "scalar issue PORT_BASE/PORT_NUM/MASK_W constants are inconsistent")
+        end
+        for (int unsigned port_idx = MEMBLOCK_DUT_LOAD_PORT_BASE;
+             port_idx < MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM;
+             port_idx++) begin
+            int unsigned membership;
+            membership = 0;
+            if (port_idx >= MEMBLOCK_DUT_LOAD_PORT_BASE && port_idx < MEMBLOCK_DUT_STA_PORT_BASE) membership++;
+            if (port_idx >= MEMBLOCK_DUT_STA_PORT_BASE && port_idx < MEMBLOCK_DUT_STD_PORT_BASE) membership++;
+            if (port_idx >= MEMBLOCK_DUT_STD_PORT_BASE && port_idx < MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM) membership++;
+            if (membership != 1) begin
+                `uvm_fatal("SEQ_COMPILE_CFG", $sformatf("scalar issue port=%0d has membership=%0d", port_idx, membership))
+            end
+        end
+
+        fu_bits.push_back(MEMBLOCK_DUT_FUTYPE_LDU_BIT);
+        fu_bits.push_back(MEMBLOCK_DUT_FUTYPE_STU_BIT);
+        fu_bits.push_back(MEMBLOCK_DUT_FUTYPE_MOU_BIT);
+        fu_bits.push_back(MEMBLOCK_DUT_FUTYPE_VLDU_BIT);
+        fu_bits.push_back(MEMBLOCK_DUT_FUTYPE_VSTU_BIT);
+        fu_bits.push_back(MEMBLOCK_DUT_FUTYPE_VSEGLDU_BIT);
+        fu_bits.push_back(MEMBLOCK_DUT_FUTYPE_VSEGSTU_BIT);
+        foreach (fu_bits[i]) begin
+            if (fu_bits[i] >= MEMBLOCK_INTERNAL_FUTYPE_W) begin
+                `uvm_fatal("SEQ_COMPILE_CFG", $sformatf("FUTYPE bit=%0d exceeds internal width=%0d", fu_bits[i], MEMBLOCK_INTERNAL_FUTYPE_W))
+            end
+            if (fu_bits[i] >= MEMBLOCK_DUT_FUTYPE_W) begin
+                `uvm_fatal("SEQ_COMPILE_CFG", $sformatf("FUTYPE bit=%0d exceeds DUT width=%0d", fu_bits[i], MEMBLOCK_DUT_FUTYPE_W))
+            end
+            for (int unsigned j = 0; j < i; j++) begin
+                if (fu_bits[i] == fu_bits[j]) begin
+                    `uvm_fatal("SEQ_COMPILE_CFG", $sformatf("duplicate FUTYPE bit=%0d", fu_bits[i]))
+                end
+            end
+        end
+    endfunction:check_compile_param_consistency
+
+    // 中文注释：runtime资源参数只控制本次testcase使用量，物理上限统一取编译期DUT常量。
+    // 本函数是enqueue/issue资源限制的唯一修改点；interface尺寸和driver物理循环不读取plus。
+    static function void apply_runtime_resource_limits();
+        if (MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM == 0 ||
+            MEMBLOCK_DUT_LOAD_PIPE_NUM == 0 ||
+            MEMBLOCK_DUT_STA_PIPE_NUM == 0 ||
+            MEMBLOCK_DUT_STD_PIPE_NUM == 0) begin
+            `uvm_fatal("SEQ_CSR_CFG", "compile-time LSQ enqueue/issue resource counts must be non-zero")
+        end
+
+        if (enq_per_cycle == 0 || enq_per_cycle > MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       $sformatf("MEMBLOCK_ENQ_PER_CYCLE=%0d must be in [1:%0d]",
+                                 enq_per_cycle,
+                                 MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM))
+        end
+
+        clamp_int("load_pip_num_limit", load_pip_num_limit, 1, MEMBLOCK_DUT_LOAD_PIPE_NUM);
+        clamp_int("sta_pip_num_limit", sta_pip_num_limit, 1, MEMBLOCK_DUT_STA_PIPE_NUM);
+        clamp_int("std_pip_num_limit", std_pip_num_limit, 1, MEMBLOCK_DUT_STD_PIPE_NUM);
+    endfunction:apply_runtime_resource_limits
+
     static function int unsigned get_non_negative_int(string name, int value);
         if (value < 0) begin
             `uvm_fatal("SEQ_CSR_CFG", $sformatf("%s must not be negative, got %0d", name, value))
@@ -633,15 +713,10 @@ class seq_csr_common;
     static function int unsigned get_enq_per_cycle();
         check_initialized("get_enq_per_cycle");
         if (enq_per_cycle_rand_en) begin
-            return $urandom_range(real_enq_width, 1);
+            return $urandom_range(MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM, 1);
         end
         return enq_per_cycle;
     endfunction:get_enq_per_cycle
-
-    static function int unsigned get_real_lsq_enq_max();
-        check_initialized("get_real_lsq_enq_max");
-        return real_lsq_enq_max;
-    endfunction:get_real_lsq_enq_max
 
     static function int unsigned get_load_pip_num_limit();
         check_initialized("get_load_pip_num_limit");
@@ -696,26 +771,6 @@ class seq_csr_common;
         end
         return std_pip_num_limit;
     endfunction:sample_std_pip_num
-
-    static function int unsigned get_real_enq_width();
-        check_initialized("get_real_enq_width");
-        return real_enq_width;
-    endfunction:get_real_enq_width
-
-    static function int unsigned get_real_load_pipe_num();
-        check_initialized("get_real_load_pipe_num");
-        return real_load_pipe_num;
-    endfunction:get_real_load_pipe_num
-
-    static function int unsigned get_real_sta_pipe_num();
-        check_initialized("get_real_sta_pipe_num");
-        return real_sta_pipe_num;
-    endfunction:get_real_sta_pipe_num
-
-    static function int unsigned get_real_std_pipe_num();
-        check_initialized("get_real_std_pipe_num");
-        return real_std_pipe_num;
-    endfunction:get_real_std_pipe_num
 
     static function int unsigned get_op_class_int_load_wt();
         check_initialized("get_op_class_int_load_wt");
@@ -1175,6 +1230,16 @@ class seq_csr_common;
         check_initialized("get_tlb_pte_mode");
         return tlb_pte_mode;
     endfunction:get_tlb_pte_mode
+
+    static function bit [63:0] get_main_vaddr_base();
+        check_initialized("get_main_vaddr_base");
+        return main_vaddr_base;
+    endfunction:get_main_vaddr_base
+
+    static function bit [63:0] get_main_vaddr_range();
+        check_initialized("get_main_vaddr_range");
+        return main_vaddr_range;
+    endfunction:get_main_vaddr_range
 
     static function bit [63:0] get_paddr_base();
         check_initialized("get_paddr_base");

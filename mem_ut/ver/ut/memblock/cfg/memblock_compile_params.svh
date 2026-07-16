@@ -8,6 +8,104 @@
 `ifndef MEMBLOCK_COMPILE_PARAMS__SVH
 `define MEMBLOCK_COMPILE_PARAMS__SVH
 
+// V2默认参数：当前worktree生成的MemBlock顶层ROB value为8 bit，
+// XSCoreParameters.RobSize为160；LQ/SQ value分别为7/6 bit。
+// 这些宏描述DUT接口与公共状态表宽度，V3环境如需复用可在编译期覆盖。
+`ifndef MEMBLOCK_DUT_ROB_SIZE
+    `define MEMBLOCK_DUT_ROB_SIZE 160
+`endif
+`ifndef MEMBLOCK_DUT_LQ_SIZE
+    `define MEMBLOCK_DUT_LQ_SIZE 72
+`endif
+`ifndef MEMBLOCK_DUT_SQ_SIZE
+    `define MEMBLOCK_DUT_SQ_SIZE 56
+`endif
+`ifndef MEMBLOCK_DUT_COMMIT_WIDTH
+    `define MEMBLOCK_DUT_COMMIT_WIDTH 8
+`endif
+
+// V2默认物理资源数量：LSQ enqueue为6个slot，scalar issue为3/2/2条LOAD/STA/STD pipe。
+// 这些值决定interface数组、driver清零范围和scheduler物理扫描上限，只能在编译期覆盖。
+`ifndef MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM
+    `define MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM 6
+`endif
+`ifndef MEMBLOCK_DUT_LOAD_PIPE_NUM
+    `define MEMBLOCK_DUT_LOAD_PIPE_NUM 3
+`endif
+`ifndef MEMBLOCK_DUT_STA_PIPE_NUM
+    `define MEMBLOCK_DUT_STA_PIPE_NUM 2
+`endif
+`ifndef MEMBLOCK_DUT_STD_PIPE_NUM
+    `define MEMBLOCK_DUT_STD_PIPE_NUM 2
+`endif
+
+`ifndef MEMBLOCK_DUT_ROB_VALUE_W
+    `define MEMBLOCK_DUT_ROB_VALUE_W 8
+`endif
+`ifndef MEMBLOCK_DUT_LQ_VALUE_W
+    `define MEMBLOCK_DUT_LQ_VALUE_W 7
+`endif
+`ifndef MEMBLOCK_DUT_SQ_VALUE_W
+    `define MEMBLOCK_DUT_SQ_VALUE_W 6
+`endif
+
+// V2默认FuType编码与DUT端口宽度。内部容器保留跨V2/V3最大36 bit，
+// DUT-facing端口宽度和one-hot位置只能由当前版本profile在编译期覆盖。
+`ifndef MEMBLOCK_INTERNAL_FUTYPE_W
+    `define MEMBLOCK_INTERNAL_FUTYPE_W 36
+`endif
+`ifndef MEMBLOCK_DUT_FUTYPE_W
+    `define MEMBLOCK_DUT_FUTYPE_W 35
+`endif
+`ifndef MEMBLOCK_DUT_FUTYPE_LDU_BIT
+    `define MEMBLOCK_DUT_FUTYPE_LDU_BIT 15
+`endif
+`ifndef MEMBLOCK_DUT_FUTYPE_STU_BIT
+    `define MEMBLOCK_DUT_FUTYPE_STU_BIT 16
+`endif
+`ifndef MEMBLOCK_DUT_FUTYPE_MOU_BIT
+    `define MEMBLOCK_DUT_FUTYPE_MOU_BIT 17
+`endif
+`ifndef MEMBLOCK_DUT_FUTYPE_VLDU_BIT
+    `define MEMBLOCK_DUT_FUTYPE_VLDU_BIT 31
+`endif
+`ifndef MEMBLOCK_DUT_FUTYPE_VSTU_BIT
+    `define MEMBLOCK_DUT_FUTYPE_VSTU_BIT 32
+`endif
+`ifndef MEMBLOCK_DUT_FUTYPE_VSEGLDU_BIT
+    `define MEMBLOCK_DUT_FUTYPE_VSEGLDU_BIT 33
+`endif
+`ifndef MEMBLOCK_DUT_FUTYPE_VSEGSTU_BIT
+    `define MEMBLOCK_DUT_FUTYPE_VSEGSTU_BIT 34
+`endif
+
+// V2默认FTQ字段、MMIO load输出数量和scalar issue端口布局。
+// 这些值决定packed字段或物理端口解释，runtime plus不得修改。
+`ifndef MEMBLOCK_DUT_FTQ_PTR_VALUE_W
+    `define MEMBLOCK_DUT_FTQ_PTR_VALUE_W 6
+`endif
+`ifndef MEMBLOCK_DUT_FTQ_OFFSET_W
+    `define MEMBLOCK_DUT_FTQ_OFFSET_W 4
+`endif
+`ifndef MEMBLOCK_DUT_LOAD_PORT_BASE
+`define MEMBLOCK_DUT_LOAD_PORT_BASE 0
+`endif
+`ifndef MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM
+    `define MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM 3
+`endif
+`ifndef MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT
+    `define MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT 1
+`endif
+
+// V2顶层没有LSQ enqueue accept response，也没有SQ deq pointer。
+// 后续专项只能按该编译期能力选择字段，禁止runtime探测不存在端口。
+`ifndef MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP
+    `define MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP 0
+`endif
+`ifndef MEMBLOCK_DUT_HAS_SQ_DEQ_PTR
+    `define MEMBLOCK_DUT_HAS_SQ_DEQ_PTR 0
+`endif
+
 // L2TLB connect-time takeover switch.
 // 1: mem_ut L2TLB_agent owns the DTLB <-> L2TLB response path.
 //    V2 takes over the internal dtlbRepeater <-> inner_ptw/L2TLB path by default.

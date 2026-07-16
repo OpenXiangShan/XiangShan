@@ -33,7 +33,7 @@ class memblock_issue_dispatch_base_sequence extends lintsissue_agent_agent_defau
                                             input memblock_issue_q_item_t items[$],
                                             ref memblock_issue_q_item_t fired_items[$]);
     extern function void mark_fired_items(input memblock_issue_q_item_t fired_items[$],
-                                          input bit [6:0] fired_mask);
+                                          input bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] fired_mask);
     extern function bit item_needs_issue_accept_pass(input memblock_issue_q_item_t item);
     extern function memblock_wb_event_t make_issue_accept_pass_event(input memblock_issue_q_item_t item);
     extern function void submit_issue_accept_pass(input memblock_issue_q_item_t item);
@@ -167,12 +167,12 @@ task memblock_issue_dispatch_base_sequence::send_issue_cycle(input int unsigned 
     end
 
     if (fired_items.size() != 0) begin
-        bit [6:0] effective_fired_mask;
+        bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] effective_fired_mask;
 
         if (tr.memblock_dispatch_nonblocking_issue) begin
             effective_fired_mask = tr.memblock_dispatch_fired_mask;
         end else begin
-            effective_fired_mask = 7'h7f;
+            effective_fired_mask = {MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W{1'b1}};
         end
 
         if (effective_fired_mask != '0) begin
@@ -238,16 +238,16 @@ function void memblock_issue_dispatch_base_sequence::assign_issue_items(input li
 endfunction:assign_issue_items
 
 function void memblock_issue_dispatch_base_sequence::mark_fired_items(input memblock_issue_q_item_t fired_items[$],
-                                                                      input bit [6:0] fired_mask);
+                                                                      input bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] fired_mask);
     foreach (fired_items[idx]) begin
         int unsigned port_idx;
         bit          fire_marked;
 
         port_idx = fired_items[idx].uop_index;
         case (fired_items[idx].target)
-            MEMBLOCK_ISSUE_TARGET_LOAD: port_idx = fired_items[idx].uop_index;
-            MEMBLOCK_ISSUE_TARGET_STA:  port_idx = fired_items[idx].uop_index + 3;
-            MEMBLOCK_ISSUE_TARGET_STD:  port_idx = fired_items[idx].uop_index + 5;
+            MEMBLOCK_ISSUE_TARGET_LOAD: port_idx = MEMBLOCK_DUT_LOAD_PORT_BASE + fired_items[idx].uop_index;
+            MEMBLOCK_ISSUE_TARGET_STA:  port_idx = MEMBLOCK_DUT_STA_PORT_BASE + fired_items[idx].uop_index;
+            MEMBLOCK_ISSUE_TARGET_STD:  port_idx = MEMBLOCK_DUT_STD_PORT_BASE + fired_items[idx].uop_index;
             default: begin
                 `uvm_fatal(get_type_name(),
                            $sformatf("mark_fired_items got unsupported target=%0d",

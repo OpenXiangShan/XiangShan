@@ -16,18 +16,18 @@ class main_control_transaction extends uvm_object;
     memblock_boundary_profile_e boundary_profile;
     int unsigned             boundary_size_bytes;
     rand memblock_lsq_flow_e lsq_flow;
-    rand bit [35:0]          fuType;
+    rand bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] fuType;
     rand bit [8:0]           fuOpType;
     rand bit [63:0]          src_0;
     rand bit [63:0]          imm;
     bit [63:0]               vaddr;
 
     rand bit                 robIdx_flag;
-    rand bit [8:0]           robIdx_value;
+    rand bit [MEMBLOCK_ROB_VALUE_W-1:0] robIdx_value;
     rand bit                 lqIdx_flag;
-    rand bit [6:0]           lqIdx_value;
+    rand bit [MEMBLOCK_LQ_VALUE_W-1:0] lqIdx_value;
     rand bit                 sqIdx_flag;
-    rand bit [5:0]           sqIdx_value;
+    rand bit [MEMBLOCK_SQ_VALUE_W-1:0] sqIdx_value;
     rand bit [4:0]           numLsElem;
 
     rand bit                 tlbAF;

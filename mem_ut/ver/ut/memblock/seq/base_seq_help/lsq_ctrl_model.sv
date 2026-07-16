@@ -45,7 +45,7 @@ class lsq_ctrl_model extends uvm_object;
         sq_free_count = MEMBLOCK_SQ_SIZE;
     endfunction:reset
 
-    static function bit is_vector_ls_futype(input bit [35:0] fuType);
+    static function bit is_vector_ls_futype(input bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] fuType);
         return fuType == MEMBLOCK_FUTYPE_VLDU    ||
                fuType == MEMBLOCK_FUTYPE_VSTU    ||
                fuType == MEMBLOCK_FUTYPE_VSEGLDU ||

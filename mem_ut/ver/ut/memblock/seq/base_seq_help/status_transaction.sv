@@ -55,11 +55,11 @@ class status_transaction extends uvm_object;
     bit active_sq_mapped;
 
     bit                 robIdx_flag;
-    bit [8:0]           robIdx_value;
+    bit [MEMBLOCK_ROB_VALUE_W-1:0] robIdx_value;
     bit                 lqIdx_flag;
-    bit [6:0]           lqIdx_value;
+    bit [MEMBLOCK_LQ_VALUE_W-1:0] lqIdx_value;
     bit                 sqIdx_flag;
-    bit [5:0]           sqIdx_value;
+    bit [MEMBLOCK_SQ_VALUE_W-1:0] sqIdx_value;
     int unsigned        load_issue_epoch;
     int unsigned        sta_issue_epoch;
     int unsigned        std_issue_epoch;

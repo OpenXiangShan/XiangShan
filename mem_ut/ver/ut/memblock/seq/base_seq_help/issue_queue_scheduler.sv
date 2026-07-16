@@ -217,7 +217,7 @@ class issue_queue_scheduler extends uvm_object;
         data.advance_terminal_done_uid();
         begin_uid = data.get_active_scan_begin_uid();
         end_uid   = data.get_active_scan_end_uid();
-        scan_limit = seq_csr_common::get_real_lsq_enq_max();
+        scan_limit = MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM;
         scanned = 0;
         // route只在公共活跃窗口内做有限扫描，避免10万笔请求每拍全表遍历。
         for (uid = begin_uid;

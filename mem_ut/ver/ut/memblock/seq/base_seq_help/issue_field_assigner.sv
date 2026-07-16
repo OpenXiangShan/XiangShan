@@ -43,9 +43,9 @@ class issue_field_assigner extends uvm_object;
     function bit is_valid_pipe_idx(input memblock_issue_target_e target,
                                    input int unsigned pipe_idx);
         case (target)
-            MEMBLOCK_ISSUE_TARGET_LOAD: return pipe_idx < 3;
-            MEMBLOCK_ISSUE_TARGET_STA:  return pipe_idx < 2;
-            MEMBLOCK_ISSUE_TARGET_STD:  return pipe_idx < 2;
+            MEMBLOCK_ISSUE_TARGET_LOAD: return pipe_idx < MEMBLOCK_DUT_LOAD_PIPE_NUM;
+            MEMBLOCK_ISSUE_TARGET_STA:  return pipe_idx < MEMBLOCK_DUT_STA_PIPE_NUM;
+            MEMBLOCK_ISSUE_TARGET_STD:  return pipe_idx < MEMBLOCK_DUT_STD_PIPE_NUM;
             default: return 1'b0;
         endcase
     endfunction:is_valid_pipe_idx
@@ -104,15 +104,15 @@ class issue_field_assigner extends uvm_object;
         return 1'b1;
     endfunction:compute_ftq_flag
 
-    function bit [5:0] compute_ftq_value(input memblock_uid_t uid);
+    function bit [MEMBLOCK_FTQ_PTR_VALUE_W-1:0] compute_ftq_value(input memblock_uid_t uid);
         int unsigned ftq_value;
 
         ftq_value = seq_csr_common::get_ftq_idx_base() + uid;
-        return ftq_value[5:0];
+        return MEMBLOCK_FTQ_PTR_VALUE_W'(ftq_value);
     endfunction:compute_ftq_value
 
-    function bit [4:0] compute_ftq_offset(input memblock_uid_t uid);
-        return uid[4:0];
+    function bit [MEMBLOCK_FTQ_OFFSET_W-1:0] compute_ftq_offset(input memblock_uid_t uid);
+        return MEMBLOCK_FTQ_OFFSET_W'(uid);
     endfunction:compute_ftq_offset
 
     function bit [7:0] compute_pdest(input memblock_uid_t uid,
@@ -323,10 +323,14 @@ class issue_field_assigner extends uvm_object;
                                          input main_control_transaction main_tr,
                                          input memblock_issue_q_item_t item,
                                          input int unsigned pipe_idx);
+        bit [MEMBLOCK_DUT_FUTYPE_W-1:0] dut_futype;
+        dut_futype = encode_and_fit_dut_futype(
+            main_tr.fuType,
+            $sformatf("issue_field_assigner::assign_sta_main_fields(pipe=%0d)", pipe_idx));
         case (pipe_idx)
             0: begin
                 tr.io_ooo_to_mem_issueSta_0_valid = 1'b1;
-                tr.io_ooo_to_mem_issueSta_0_bits_uop_fuType = main_tr.fuType;
+                tr.io_ooo_to_mem_issueSta_0_bits_uop_fuType = dut_futype;
                 tr.io_ooo_to_mem_issueSta_0_bits_uop_fuOpType = main_tr.fuOpType;
                 tr.io_ooo_to_mem_issueSta_0_bits_src_0 = main_tr.src_0;
                 tr.io_ooo_to_mem_issueSta_0_bits_uop_imm = main_tr.imm;
@@ -337,7 +341,7 @@ class issue_field_assigner extends uvm_object;
             end
             1: begin
                 tr.io_ooo_to_mem_issueSta_1_valid = 1'b1;
-                tr.io_ooo_to_mem_issueSta_1_bits_uop_fuType = main_tr.fuType;
+                tr.io_ooo_to_mem_issueSta_1_bits_uop_fuType = dut_futype;
                 tr.io_ooo_to_mem_issueSta_1_bits_uop_fuOpType = main_tr.fuOpType;
                 tr.io_ooo_to_mem_issueSta_1_bits_src_0 = main_tr.src_0;
                 tr.io_ooo_to_mem_issueSta_1_bits_uop_imm = main_tr.imm;
@@ -354,10 +358,14 @@ class issue_field_assigner extends uvm_object;
                                          input main_control_transaction main_tr,
                                          input memblock_issue_q_item_t item,
                                          input int unsigned pipe_idx);
+        bit [MEMBLOCK_DUT_FUTYPE_W-1:0] dut_futype;
+        dut_futype = encode_and_fit_dut_futype(
+            main_tr.fuType,
+            $sformatf("issue_field_assigner::assign_std_main_fields(pipe=%0d)", pipe_idx));
         case (pipe_idx)
             0: begin
                 tr.io_ooo_to_mem_issueStd_0_valid = 1'b1;
-                tr.io_ooo_to_mem_issueStd_0_bits_uop_fuType = main_tr.fuType;
+                tr.io_ooo_to_mem_issueStd_0_bits_uop_fuType = dut_futype;
                 tr.io_ooo_to_mem_issueStd_0_bits_uop_fuOpType = main_tr.fuOpType;
                 tr.io_ooo_to_mem_issueStd_0_bits_src_0 = main_tr.src_0;
                 tr.io_ooo_to_mem_issueStd_0_bits_uop_robIdx_value = main_tr.robIdx_value;
@@ -366,7 +374,7 @@ class issue_field_assigner extends uvm_object;
             end
             1: begin
                 tr.io_ooo_to_mem_issueStd_1_valid = 1'b1;
-                tr.io_ooo_to_mem_issueStd_1_bits_uop_fuType = main_tr.fuType;
+                tr.io_ooo_to_mem_issueStd_1_bits_uop_fuType = dut_futype;
                 tr.io_ooo_to_mem_issueStd_1_bits_uop_fuOpType = main_tr.fuOpType;
                 tr.io_ooo_to_mem_issueStd_1_bits_src_0 = main_tr.src_0;
                 tr.io_ooo_to_mem_issueStd_1_bits_uop_robIdx_value = main_tr.robIdx_value;
@@ -473,8 +481,8 @@ class issue_field_assigner extends uvm_object;
         bit [49:0] pc;
         bit is_rvc;
         bit ftq_flag;
-        bit [5:0] ftq_value;
-        bit [4:0] ftq_offset;
+        bit [MEMBLOCK_FTQ_PTR_VALUE_W-1:0] ftq_value;
+        bit [MEMBLOCK_FTQ_OFFSET_W-1:0] ftq_offset;
 
         ensure_data();
         if (tr == null) begin
