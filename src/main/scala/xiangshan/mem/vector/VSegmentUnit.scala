@@ -434,10 +434,10 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   val vaddr                           = nextBaseVaddr + realSegmentOffset
 
   val misalignLowVaddr                = Cat(latchVaddr(XLEN - 1, 3), 0.U(3.W))
-  val misalignHighVaddr               = Cat(latchVaddr(XLEN - 1, 3) + 1.U, 0.U(3.W))
-  val notCross16ByteVaddr             = Cat(latchVaddr(XLEN - 1, 4), 0.U(4.W))
   val misalignLowVaddrDup             = Cat(latchVaddrDup(XLEN - 1, 3), 0.U(3.W))
+  val misalignHighVaddr               = Cat(latchVaddr(XLEN - 1, 3) + 1.U, 0.U(3.W))
   val misalignHighVaddrDup            = Cat(latchVaddrDup(XLEN - 1, 3) + 1.U, 0.U(3.W))
+  val notCross16ByteVaddr             = Cat(latchVaddr(XLEN - 1, 4), 0.U(4.W))
   val notCross16ByteVaddrDup          = Cat(latchVaddrDup(XLEN - 1, 4), 0.U(4.W))
  //  val misalignVaddr                   = Mux(notCross16ByteReg, notCross16ByteVaddr, Mux(isFirstSplit, misalignLowVaddr, misalignHighVaddr))
   val misalignVaddr                   = Mux(isFirstSplit, misalignLowVaddr, misalignHighVaddr)

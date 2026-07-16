@@ -852,6 +852,10 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         io.read(i).valid && div_addrs(i) === div_index.U &&
           io.read(i).bits.bankMask(bank_index) && !rr_bank_conflict_oldest(i)
       })))
+      val bank_addr_matchs_dup = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
+        io.read(i).valid && div_addrs_dup(i) === div_index.U &&
+          io.read(i).bits.bankMask(bank_index) && !rr_bank_conflict_oldest(i)
+      })))
       val readline_match = Wire(Bool())
       if (ReduceReadlineConflict) {
         readline_match := io.readline.valid && io.readline.bits.rmask(bank_index) && line_div_addr === div_index.U
@@ -862,10 +866,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         line_set_addr,
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs(i) -> set_addrs(i)))
       )
-      val bank_addr_matchs_dup = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
-        io.read(i).valid && div_addrs_dup(i) === div_index.U &&
-          io.read(i).bits.bankMask(bank_index) && !rr_bank_conflict_oldest(i)
-      })))
       val bank_set_addr_dup = Mux(readline_match,
         line_set_addr,
         PriorityMux(Seq.tabulate(LoadPipelineWidth)(i => bank_addr_matchs_dup(i) -> set_addrs_dup(i)))
@@ -875,6 +875,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       // read raw data
       val data_bank = data_banks(div_index)(bank_index)
       data_bank.io.r.en := read_enable
+
       if (DuplicatedQueryBankSeq.contains(bank_index)) {
         data_bank.io.r.addr := bank_set_addr_dup
       } else {

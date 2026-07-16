@@ -66,3 +66,4 @@ class FakeDCache()(implicit p: Parameters) extends XSModule with HasDCacheParame
   io.lsu.atomics.resp.bits.replay := false.B
   io.lsu.atomics.resp.bits.id := 1.U
 }
+
