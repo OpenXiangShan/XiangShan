@@ -368,6 +368,7 @@ abstract class DCacheBundle(implicit p: Parameters) extends L1CacheBundle
 class ReplacementAccessBundle(implicit p: Parameters) extends DCacheBundle {
   val set = UInt(log2Up(nSets).W)
   val way = UInt(log2Up(nWays).W)
+  val ntl = Bool() // true: mark hit way as PLRU victim; false: normal touch
 }
 
 class ReplacementWayReqIO(implicit p: Parameters) extends DCacheBundle {
@@ -1630,7 +1631,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // replacement algorithm
-  val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
+  val replacer = new NtlSetAssocLRU(nSets, nWays) // PLRU that supports NTL (zihintntl) access
+  // val replacer = ReplacementPolicy.fromString(cacheParams.replacer, nWays, nSets)
   val replWayReqs = ldu.map(_.io.replace_way) ++ Seq(mainPipe.io.replace_way) ++ stu.map(_.io.replace_way)
 
   if (dwpuParam.enCfPred) {
@@ -1666,7 +1668,8 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
       w.bits := req.bits.way
   }
   val touchSets = replAccessReqs.map(_.bits.set)
-  replacer.access(touchSets, touchWays)
+  val touchNtls = replAccessReqs.map(_.bits.ntl)
+  replacer.access(touchSets, touchWays, touchNtls)
 
   //----------------------------------------
   // assertions

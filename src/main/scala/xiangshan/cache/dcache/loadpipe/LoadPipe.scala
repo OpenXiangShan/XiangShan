@@ -568,9 +568,10 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   // report tag error / l2 corrupted to CACHE_ERROR csr
   io.error.valid := s3_error && s3_valid
 
-  io.replace_access.valid := s3_valid && s3_hit && !s3_is_dcache_ntl
+  io.replace_access.valid := s3_valid && s3_hit
   io.replace_access.bits.set := RegNext(RegNext(get_dcache_idx(s1_req.vaddr)))
   io.replace_access.bits.way := RegNext(RegNext(OHToUInt(s1_tag_match_way_dup_dc)))
+  io.replace_access.bits.ntl := s3_is_dcache_ntl
 
   // update access bit
   io.access_flag_write.valid := s3_valid && s3_hit && !s3_is_prefetch
