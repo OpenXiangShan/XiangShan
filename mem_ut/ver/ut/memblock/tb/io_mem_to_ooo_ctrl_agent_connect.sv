@@ -20,6 +20,7 @@
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip; \
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip; \
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip; \
+        force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug; \
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31 = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31; \
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43 = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43; \
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_msiInfo_valid = RTL_PATH.io_mem_to_ooo_topToBackendBypass_msiInfo_valid; \
@@ -64,6 +65,7 @@
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip; \
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip; \
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip; \
+        force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug; \
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31 = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31; \
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43 = RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43; \
         force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_msiInfo_valid = RTL_PATH.io_mem_to_ooo_topToBackendBypass_msiInfo_valid; \

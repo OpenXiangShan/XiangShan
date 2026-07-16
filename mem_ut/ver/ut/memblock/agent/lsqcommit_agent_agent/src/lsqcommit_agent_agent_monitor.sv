@@ -8,6 +8,8 @@
 `ifndef LSQCOMMIT_AGENT_AGENT_MONITOR__SV
 `define LSQCOMMIT_AGENT_AGENT_MONITOR__SV
 
+`include "memblock_compile_params.svh"
+
 class lsqcommit_agent_agent_monitor  extends tcnt_monitor_base#(virtual lsqcommit_agent_agent_interface,lsqcommit_agent_agent_cfg,lsqcommit_agent_agent_xaction);
 
     `uvm_component_utils(lsqcommit_agent_agent_monitor)
@@ -34,7 +36,7 @@ endtask:run_phase
 task lsqcommit_agent_agent_monitor::mon_data();
 
     logic io_ooo_to_mem_lsqio_pendingPtr_flag;
-    logic [8:0] io_ooo_to_mem_lsqio_pendingPtr_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_lsqio_pendingPtr_value;
     logic io_ooo_to_mem_flushSb        ;
 
     logic io_ooo_to_mem_lsqio_pendingMMIOld;
@@ -53,7 +55,7 @@ task lsqcommit_agent_agent_monitor::mon_data();
 
         if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_lsqio_pendingPtr_flag,io_ooo_to_mem_lsqio_pendingPtr_flag,1);
-            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_lsqio_pendingPtr_value,io_ooo_to_mem_lsqio_pendingPtr_value,9);
+            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_lsqio_pendingPtr_value,io_ooo_to_mem_lsqio_pendingPtr_value,`MEMBLOCK_DUT_ROB_VALUE_W);
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_flushSb,io_ooo_to_mem_flushSb,1);
 
         end

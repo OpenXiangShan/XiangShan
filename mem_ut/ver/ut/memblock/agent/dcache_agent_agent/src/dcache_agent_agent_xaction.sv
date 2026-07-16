@@ -65,6 +65,10 @@ class dcache_agent_agent_xaction  extends tcnt_data_base;
     rand bit auto_inner_dcache_client_out_e_ready;
     rand bit auto_inner_dcache_client_out_e_valid;
     rand bit [9:0] auto_inner_dcache_client_out_e_bits_sink;
+    rand bit io_l2_hint_valid;
+    rand bit [3:0] io_l2_hint_bits_sourceId;
+    rand bit io_l2_hint_bits_isKeyword;
+    rand bit io_l2_flush_done;
 
     extern constraint default_auto_inner_dcache_client_out_a_ready_cons;
     extern constraint default_auto_inner_dcache_client_out_a_valid_cons;
@@ -119,6 +123,10 @@ class dcache_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_auto_inner_dcache_client_out_e_ready_cons;
     extern constraint default_auto_inner_dcache_client_out_e_valid_cons;
     extern constraint default_auto_inner_dcache_client_out_e_bits_sink_cons;
+    extern constraint default_io_l2_hint_valid_cons;
+    extern constraint default_io_l2_hint_bits_sourceId_cons;
+    extern constraint default_io_l2_hint_bits_isKeyword_cons;
+    extern constraint default_io_l2_flush_done_cons;
 
     extern function new(string name="dcache_agent_agent_xaction");
     extern function void pack();
@@ -182,6 +190,10 @@ class dcache_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(auto_inner_dcache_client_out_e_ready, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_e_valid, UVM_ALL_ON);
         `uvm_field_int(auto_inner_dcache_client_out_e_bits_sink, UVM_ALL_ON);
+        `uvm_field_int(io_l2_hint_valid, UVM_ALL_ON);
+        `uvm_field_int(io_l2_hint_bits_sourceId, UVM_ALL_ON);
+        `uvm_field_int(io_l2_hint_bits_isKeyword, UVM_ALL_ON);
+        `uvm_field_int(io_l2_flush_done, UVM_ALL_ON);
 
     `uvm_object_utils_end
 
@@ -403,6 +415,22 @@ constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_e_bi
 
 }
 
+constraint dcache_agent_agent_xaction::default_io_l2_hint_valid_cons{
+    io_l2_hint_valid inside {1'b0, 1'b1};
+}
+
+constraint dcache_agent_agent_xaction::default_io_l2_hint_bits_sourceId_cons{
+    io_l2_hint_bits_sourceId inside {[4'd0:4'd15]};
+}
+
+constraint dcache_agent_agent_xaction::default_io_l2_hint_bits_isKeyword_cons{
+    io_l2_hint_bits_isKeyword inside {1'b0, 1'b1};
+}
+
+constraint dcache_agent_agent_xaction::default_io_l2_flush_done_cons{
+    io_l2_flush_done inside {1'b0, 1'b1};
+}
+
 function dcache_agent_agent_xaction::new(string name = "dcache_agent_agent_xaction");
     super.new();
 endfunction:new
@@ -482,6 +510,10 @@ function string dcache_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_e_ready = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_e_ready);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_e_valid = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_e_valid);
     pkt_str = $sformatf("%sauto_inner_dcache_client_out_e_bits_sink = 0x%0h ",pkt_str,this.auto_inner_dcache_client_out_e_bits_sink);
+    pkt_str = $sformatf("%sio_l2_hint_valid = 0x%0h ",pkt_str,this.io_l2_hint_valid);
+    pkt_str = $sformatf("%sio_l2_hint_bits_sourceId = 0x%0h ",pkt_str,this.io_l2_hint_bits_sourceId);
+    pkt_str = $sformatf("%sio_l2_hint_bits_isKeyword = 0x%0h ",pkt_str,this.io_l2_hint_bits_isKeyword);
+    pkt_str = $sformatf("%sio_l2_flush_done = 0x%0h ",pkt_str,this.io_l2_flush_done);
 
     return pkt_str;
 endfunction:psdisplay
@@ -769,6 +801,26 @@ function bit dcache_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer co
         if(this.auto_inner_dcache_client_out_e_bits_sink!=rhs_.auto_inner_dcache_client_out_e_bits_sink) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_dcache_client_out_e_bits_sink=0x%0h while the rhs_.auto_inner_dcache_client_out_e_bits_sink=0x%0h",this.auto_inner_dcache_client_out_e_bits_sink,rhs_.auto_inner_dcache_client_out_e_bits_sink),UVM_NONE)
+        end
+
+        if(this.io_l2_hint_valid!=rhs_.io_l2_hint_valid) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_l2_hint_valid=0x%0h while the rhs_.io_l2_hint_valid=0x%0h",this.io_l2_hint_valid,rhs_.io_l2_hint_valid),UVM_NONE)
+        end
+
+        if(this.io_l2_hint_bits_sourceId!=rhs_.io_l2_hint_bits_sourceId) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_l2_hint_bits_sourceId=0x%0h while the rhs_.io_l2_hint_bits_sourceId=0x%0h",this.io_l2_hint_bits_sourceId,rhs_.io_l2_hint_bits_sourceId),UVM_NONE)
+        end
+
+        if(this.io_l2_hint_bits_isKeyword!=rhs_.io_l2_hint_bits_isKeyword) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_l2_hint_bits_isKeyword=0x%0h while the rhs_.io_l2_hint_bits_isKeyword=0x%0h",this.io_l2_hint_bits_isKeyword,rhs_.io_l2_hint_bits_isKeyword),UVM_NONE)
+        end
+
+        if(this.io_l2_flush_done!=rhs_.io_l2_flush_done) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_l2_flush_done=0x%0h while the rhs_.io_l2_flush_done=0x%0h",this.io_l2_flush_done,rhs_.io_l2_flush_done),UVM_NONE)
         end
 
     end

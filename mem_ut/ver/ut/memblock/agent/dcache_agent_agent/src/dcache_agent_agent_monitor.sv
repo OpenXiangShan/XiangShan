@@ -86,6 +86,10 @@ task dcache_agent_agent_monitor::mon_data();
     logic auto_inner_dcache_client_out_e_ready;
     logic auto_inner_dcache_client_out_e_valid;
     logic [9:0] auto_inner_dcache_client_out_e_bits_sink;
+    logic io_l2_hint_valid;
+    logic [3:0] io_l2_hint_bits_sourceId;
+    logic io_l2_hint_bits_isKeyword;
+    logic io_l2_flush_done;
 
     dcache_agent_agent_xaction  mon_tr;
     while(1) begin
@@ -143,6 +147,10 @@ task dcache_agent_agent_monitor::mon_data();
         auto_inner_dcache_client_out_e_ready = this.vif.mon_mp.mon_cb.auto_inner_dcache_client_out_e_ready;
         auto_inner_dcache_client_out_e_valid = this.vif.mon_mp.mon_cb.auto_inner_dcache_client_out_e_valid;
         auto_inner_dcache_client_out_e_bits_sink = this.vif.mon_mp.mon_cb.auto_inner_dcache_client_out_e_bits_sink;
+        io_l2_hint_valid = this.vif.mon_mp.mon_cb.io_l2_hint_valid;
+        io_l2_hint_bits_sourceId = this.vif.mon_mp.mon_cb.io_l2_hint_bits_sourceId;
+        io_l2_hint_bits_isKeyword = this.vif.mon_mp.mon_cb.io_l2_hint_bits_isKeyword;
+        io_l2_flush_done = this.vif.mon_mp.mon_cb.io_l2_flush_done;
 
         if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
             `TCNT_CHECK_SIG_XZ(auto_inner_dcache_client_out_a_ready,auto_inner_dcache_client_out_a_ready,1);
@@ -198,6 +206,10 @@ task dcache_agent_agent_monitor::mon_data();
             `TCNT_CHECK_SIG_XZ(auto_inner_dcache_client_out_e_ready,auto_inner_dcache_client_out_e_ready,1);
             `TCNT_CHECK_SIG_XZ(auto_inner_dcache_client_out_e_valid,auto_inner_dcache_client_out_e_valid,1);
             `TCNT_CHECK_SIG_XZ(auto_inner_dcache_client_out_e_bits_sink,auto_inner_dcache_client_out_e_bits_sink,10);
+            `TCNT_CHECK_SIG_XZ(io_l2_hint_valid,io_l2_hint_valid,1);
+            `TCNT_CHECK_SIG_XZ(io_l2_hint_bits_sourceId,io_l2_hint_bits_sourceId,4);
+            `TCNT_CHECK_SIG_XZ(io_l2_hint_bits_isKeyword,io_l2_hint_bits_isKeyword,1);
+            `TCNT_CHECK_SIG_XZ(io_l2_flush_done,io_l2_flush_done,1);
 
         end
         //if(xxxTODOxxx==1'b1) begin
