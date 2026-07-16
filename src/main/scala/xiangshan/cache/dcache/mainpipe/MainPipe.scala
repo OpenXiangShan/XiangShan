@@ -1117,6 +1117,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     (s3_req.miss || ((s3_req.isAMO || s3_req.isStore) && s3_hit)) && !(s3_req.miss && s3_req.isNtl)
   io.replace_access.bits.set := s3_idx
   io.replace_access.bits.way := OHToUInt(s3_way_en)
+  io.replace_access.bits.ntl := false.B
 
   io.replace_way.set.valid := GatedValidRegNext(s0_fire)
   io.replace_way.set.bits := s1_idx
