@@ -295,18 +295,18 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   private val s1_tlCorrupt = VecInit((0 until MaxFetchReqNum).map { reqIdx =>
     VecInit((0 until PortNumber).map { portIdx =>
-      DataHoldBypass(
-        s1_mshrValidReg(reqIdx)(portIdx) && RegNext(fromMiss.bits.corrupt),
-        s1_mshrValidReg(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
+      RegEnable(
+        s1_mshrValid(reqIdx)(portIdx) && fromMiss.bits.corrupt,
+        s1_mshrValid(reqIdx)(portIdx) || s0_fire
       )
     })
   })
 
   private val s1_tlDenied = VecInit((0 until MaxFetchReqNum).map { reqIdx =>
     VecInit((0 until PortNumber).map { portIdx =>
-      DataHoldBypass(
-        s1_mshrValidReg(reqIdx)(portIdx) && RegNext(fromMiss.bits.denied),
-        s1_mshrValidReg(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
+      RegEnable(
+        s1_mshrValid(reqIdx)(portIdx) && fromMiss.bits.denied,
+        s1_mshrValid(reqIdx)(portIdx) || s0_fire
       )
     })
   })
