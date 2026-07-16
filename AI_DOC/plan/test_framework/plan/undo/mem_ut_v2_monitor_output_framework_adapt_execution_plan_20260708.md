@@ -1,280 +1,339 @@
-# mem_ut V2 monitor output 与 V2-only output 分类适配执行 Plan
+# mem_ut V2 Monitor Output 测试框架适配最终 Coding Plan
 
-## 1. Plan 定位
+| 项目 | 内容 |
+|---|---|
+| 状态 | `undo`，待 coding |
+| 目标版本 | V2 |
+| 当前分支 | `mem_ut_uvm_v2` |
+| V2 接口权威 | `build_memblock/rtl/MemBlock.sv` |
+| 计划类型 | monitor output 分类、raw queue 边界和 V2-only output 职责收敛 |
+| 创建/修订日期 | 2026-07-15 |
 
-本文是 V2 顶层 agent monitor 输出策略和 V2-only output 分类的正式执行 plan。目标是逐 agent 明确 monitor 职责，避免把“未写 analysis port”误判为一定错误，也避免当前主 flow 必需的 raw queue 字段缺失。
+## 1. 范围与边界
 
-本轮范围收敛为“分类审查 + 当前主 flow 必需 RAW_QUEUE monitor 的最小修复”。本文不默认恢复大量 `ANALYSIS_PORT` transaction；analysis port 恢复必须另建 RM/coverage 或 monitor 专项 plan。
+本 plan 只整理 V2 monitor output 适配时需要解决的问题。每个问题均说明 V2 问题、修改原因、最终方案、修改的逻辑和可直接 coding 的文字伪代码。
 
-## 2. 范围边界
+本轮支持范围：
 
-涉及文件：
+- 复核 20 个顶层 agent monitor 的 runtime role 和 RM analysis role。
+- 保留 5 条现有 raw queue 主路径：CSR、sfence、ctrl、int writeback、IQ feedback。
+- 明确所有 20 条 env/RM analysis FIFO consumer 已连接，但 monitor producer 当前 deferred。
+- 明确 V2-only output、字段级 output 和 DCache/SBuffer/L2TLB 职责边界。
+- 对 IQ feedback 的 V2 STA SQ-only raw 与 VSTU scalar-only fatal 边界给出 coding 落点。
 
-```text
-mem_ut/ver/ut/memblock/agent/*/src/*_monitor.sv
-mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv
-mem_ut/ver/ut/memblock/tb/dut_inst.sv
-mem_ut/ver/ut/memblock/tb/*_agent_connect.sv
-AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md
-```
+本轮不支持：
 
-不属于本 plan：
+- 不批量恢复 `mon_item_port.write(mon_tr)`。
+- 不删除 env/RM analysis FIFO、RM port 或 blocking get loop。
+- 不实现 RM、checker、scoreboard 或 coverage。
+- 不新增 V2-only output agent。
+- 不把内部 `L2TLB_agent` 改接成顶层 L2/L2Cache/PTW/PMP output monitor。
+- 不实现 DCache `io_l2_hint_*` 和 `io_l2_flush_done` 驱动；该输入 sideband 由 DCache L2 sideband 专项唯一实现。
 
-- 不修改 int writeback raw event 语义；该内容由 int writeback plan 处理。
-- 不新增 V2-only output agent，除非分类证明当前主功能必需。
-- 不写 covergroup 或 scoreboard。
-- 不恢复 analysis port transaction，除非另有专项 plan 证明 RM/coverage/checker 当前必需。
+本 plan 只修改分类、职责边界和少量 monitor raw 生产合同，不改变 pass/fail/terminal、commit cursor、redirect/replay 仲裁或公共 batch 主状态机。
 
-### 2.1 执行前 RTL 基线确认
+## 2. 问题一：monitor 分类把 runtime raw 和 RM analysis 混在一起
 
-执行本 plan 前必须从仓库根目录确认当前 V2 RTL 权威输入真实存在：
+### V2 问题
 
-```bash
-test -e build/rtl/MemBlock.sv
-test -e build_memblock/rtl/MemBlock.sv
-test -e build_memblock/rtl/filelist.f
-```
+当前 20 个 agent 在 `memblock_env` 中均建立了 `mon_item_port -> uvm_tlm_analysis_fifo -> memblock_rm blocking_get` 链路，`memblock_rm` 也启动了对应 blocking get 线程。但 20 个 monitor 当前均未实际执行 `mon_item_port.write(mon_tr)`。
 
-若任一文件不存在，必须先确认当前 worktree 的 RTL 生成状态和 V2 profile，不得继续沿用不存在的 `build_memblock/rtl/MemBlockTop.sv` 或同级旧 worktree 作为接口事实来源。本 plan 多数步骤只分类 monitor output 和 V2-only output，也必须以真实 RTL 端口为准；该检查不代表本 plan 会直接修改 RTL。
+旧 plan 容易把这些端口描述为“无 consumer”或“debug-only XZ”。这会掩盖真实状态：consumer 已存在，producer deferred。
 
-## 3. 问题依据
+### 修改原因
 
-当前多个顶层 agent monitor 只做 X/Z 检查或 raw queue 写入，`mon_item_port.write(mon_tr)` 大多注释。
+dispatch runtime 使用 `memblock_sync_pkg` raw queue 推进公共状态；RM analysis FIFO 是另一条标准 transaction 链。两者不能互相替代。若把 raw queue 闭环误写成 RM transaction 闭环，后续 testcase 或 checker 可能错误依赖一个实际不会收到 transaction 的 RM port。
 
-V2-only 顶层 output 包括：
+### 修改方案与修改逻辑
 
-```text
-io_l2_tlb_req_resp_*
-io_l2_pmp_resp_*
-io_outer_l2PfCtrl_*
-io_wfi_wfiSafe
-```
+采用二维分类：
 
-其中 `io_l2_tlb_req_resp_*` 是 V2 顶层 L2/L2Cache 侧 TLB response，不是当前内部 `L2TLB_agent` 接管点。
-
-## 4. 修改原因
-
-monitor 输出路径有两类消费者：
-
-- 测试框架公共状态：通常走 `memblock_sync_pkg` raw queue。
-- RM/scoreboard/coverage：通常需要 analysis port transaction。
-
-如果不分类：
-
-- 可能强行恢复所有 monitor transaction，制造无用对象和字段维护成本。
-- 也可能漏掉某些当前主功能必需的 raw queue。
-- V2-only 顶层 output 可能被误接到错误 agent。
-
-## 5. 修改后方案
-
-### 5.1 monitor 分类
-
-每个 monitor 归入以下一类：
-
-| 分类 | 含义 | coding 行为 |
+| 维度 | 分类 | 本轮含义 |
 |---|---|---|
-| `XZ_ONLY` | 只检查 X/Z，不服务状态流 | 不恢复 analysis port，review 说明原因 |
-| `RAW_QUEUE` | 写 `memblock_sync_pkg` raw queue | 保证 raw 字段完整，不强制 `mon_item_port.write()` |
-| `ANALYSIS_PORT` | RM/scoreboard/coverage 当前需要 transaction | 本 plan 只记录分类，不 coding；另建专项 plan |
-| `RAW_AND_ANALYSIS` | 两条路径都需要 | 本 plan 只修 raw queue 必需字段；analysis 另建专项 plan |
+| runtime role | `RAW_QUEUE` | monitor 直接向 `memblock_sync_pkg` raw queue 入队，dispatch runtime 当前消费 |
+| runtime role | `RESPONDER_OBSERVATION` | agent 主要由 driver/sequence 代理下游响应，monitor 只观察握手和 X/Z |
+| runtime role | `DRIVER_OBSERVATION_XZ` | DUT input 由 agent driver 驱动，monitor 只回看和 X/Z |
+| runtime role | `OUTPUT_OBSERVATION_XZ` | DUT output 当前只观察和 X/Z，不进入主状态 |
+| runtime role | `UNSUPPORTED_VECTOR_OBSERVATION` | vector 端口存在，但 scalar flow 不支持，valid 时 fatal 或专项处理 |
+| RM role | `ANALYSIS_PORT_DEFERRED` | env/RM consumer 已连接，但 monitor producer 当前不 write |
 
-初始建议：
+20 个 agent 的 RM role 本轮统一为 `ANALYSIS_PORT_DEFERRED`。后续若恢复某个 analysis producer，必须由 monitor/RM 专项成对确认 transaction 字段、采样条件、RM pack 逻辑和 consumer 需求。
+
+### 文字伪代码
 
 ```text
-io_mem_to_ooo_ctrl_agent: RAW_QUEUE
-io_mem_to_ooo_int_wb_agent: RAW_QUEUE
-io_mem_to_ooo_iq_feedback_agent: RAW_QUEUE
-csr_ctrl_agent: RAW_QUEUE 或 RAW_AND_ANALYSIS，取决于 RM 需求
-L2tlb_agent: responder/internal, 默认不作为普通 analysis port
-其他未被公共状态消费 agent: XZ_ONLY，除非 RM 明确依赖
+classify_monitor_roles()：
+  枚举 mem_ut/ver/ut/memblock/agent 下全部 20 个 monitor；
+  对每个 monitor 检查是否调用 push_raw/push_raw_csr/push_raw_sfence；
+  检查对应 agent 是 responder、DUT input driver、DUT output observer 还是 unsupported vector observer；
+  写入 runtime role；
+
+  检查 memblock_env 中该 agent 的 analysis FIFO 和 analysis_export 连接；
+  检查 memblock_rm 中该 agent 的 blocking_get port 和 get loop；
+  检查 monitor 是否实际调用 mon_item_port.write；
+  如果 consumer 存在但 producer 不 write，则 RM role 固定为 ANALYSIS_PORT_DEFERRED；
+
+  raw queue 可作为 dispatch runtime 输入；
+  analysis FIFO 不得被 raw queue 的存在视为已闭环；
+  发现 RM transaction 需求时只登记后续专项，不在本 plan 顺手恢复 producer。
 ```
 
-执行本 plan 后必须在本文、implementation review 或同目录 review 段落中生成/更新 monitor 分类表，至少包含：
+## 3. 问题二：20 个 agent 的 runtime 职责需要完整落表
 
-| agent/monitor | 分类 | 是否本轮 coding | coding 原因或不 coding 原因 |
+### V2 问题
+
+原文存在示例式分类和跨专项描述，但 coding/review 需要能逐项判断每个 monitor 的职责、当前 runtime consumer 和本轮是否修改。只抽查 5 个 raw producer 会遗漏纯 output、driver observation、responder 和 unsupported vector 边界。
+
+### 修改原因
+
+monitor output 适配的目标不是新增所有 output consumer，而是防止错误接入公共状态。完整表可以避免后续 coding 时把未支持的 output、vector activity 或 responder observation 误写入 raw/status/pass/fail/terminal。
+
+### 修改方案与修改逻辑
+
+20 个 agent 的本轮结论如下：
+
+| agent/monitor | Runtime 角色 | 当前 runtime 路径 | RM 角色 | 本轮 coding 结论 |
+|---|---|---|---|---|
+| `backendToTopBypass_agent_agent` | `DRIVER_OBSERVATION_XZ` | 回看 backend bypass input | `ANALYSIS_PORT_DEFERRED` | 无 runtime 修改 |
+| `csr_ctrl_agent_agent` | `RAW_QUEUE` | CSR raw -> runtime CSR snapshot | `ANALYSIS_PORT_DEFERRED` | CSR 字段缺口由 CSR 专项修复 |
+| `dcache_agent_agent` | `RESPONDER_OBSERVATION` | DCache TL responder/XZ | `ANALYSIS_PORT_DEFERRED` | TL responder 保持；L2 sideband input 由 DCache 专项 |
+| `fence_agent_agent` | `RAW_QUEUE` | sfence raw -> TLB invalidation | `ANALYSIS_PORT_DEFERRED` | 保持 raw；`flushPipe` 边界由 CSR 专项 |
+| `int_sink_agent_agent` | `RESPONDER_OBSERVATION` | integer sink 握手/XZ | `ANALYSIS_PORT_DEFERRED` | 无 runtime 修改 |
+| `io_mem_to_ooo_ctrl_agent_agent` | `RAW_QUEUE`；字段级 `OUTPUT_OBSERVATION_XZ` | ctrl raw；`externalInterrupt_debug` 仅字段观察 | `ANALYSIS_PORT_DEFERRED` | MMIO/tag/raw 字段由 pending-MMIO 专项；`externalInterrupt_debug` 不入 raw |
+| `io_mem_to_ooo_int_wb_agent_agent` | `RAW_QUEUE` | split LDA/STA/STD raw writeback | `ANALYSIS_PORT_DEFERRED` | 由 int-WB 专项修复 |
+| `io_mem_to_ooo_iq_feedback_agent_agent` | `RAW_QUEUE` | STA IQ feedback/replay raw | `ANALYSIS_PORT_DEFERRED` | STA SQ-only raw 与 VSTU fatal |
+| `io_mem_to_ooo_vec_wb_agent_agent` | `UNSUPPORTED_VECTOR_OBSERVATION` | vector writeback 只做 unsupported gate | `ANALYSIS_PORT_DEFERRED` | scalar testcase 中 `writebackVldu` valid fatal |
+| `io_mem_to_ooo_wakeup_agent_agent` | `OUTPUT_OBSERVATION_XZ` | wakeup output 仅 X/Z | `ANALYSIS_PORT_DEFERRED` | 不进入 dispatch 主状态 |
+| `itlb_agent_agent` | `RESPONDER_OBSERVATION` | ITLB request/response observation | `ANALYSIS_PORT_DEFERRED` | 不纳入 MemBlock scalar dispatch 状态 |
+| `L2tlb_agent_agent` | `RESPONDER_OBSERVATION` | DTLB -> L2TLB request、L2TLB -> DTLB response | `ANALYSIS_PORT_DEFERRED` | 保持内部 DTLB/L2TLB 接管点 |
+| `lintsissue_agent_agent` | `DRIVER_OBSERVATION_XZ` | scalar split issue input 回看 | `ANALYSIS_PORT_DEFERRED` | 驱动字段由 split issue 专项 |
+| `lsqcommit_agent_agent` | `DRIVER_OBSERVATION_XZ` | ROB->LSQ sideband/flushSb input 回看 | `ANALYSIS_PORT_DEFERRED` | 驱动逻辑由 LSQ MMIO/status 专项 |
+| `lsqenq_agent_agent` | `DRIVER_OBSERVATION_XZ` | LSQ enqueue input 回看 | `ANALYSIS_PORT_DEFERRED` | 驱动字段和单拍确认由 enqueue 专项 |
+| `other_ctrl_agent_agent` | `OUTPUT_OBSERVATION_XZ` | halt/reset/error status X/Z | `ANALYSIS_PORT_DEFERRED` | 不进入 pass/fail/terminal |
+| `prefetch_agent_agent` | `OUTPUT_OBSERVATION_XZ` | L2/L3/ifetch prefetch observation | `ANALYSIS_PORT_DEFERRED` | `io_outer_l2PfCtrl_*` 后续专项 |
+| `redirect_agent_agent` | `DRIVER_OBSERVATION_XZ` | redirect input 回看 | `ANALYSIS_PORT_DEFERRED` | 不新增第二 redirect 状态来源 |
+| `sbuffer_agent_agent` | `RESPONDER_OBSERVATION` | SBuffer TL responder/XZ | `ANALYSIS_PORT_DEFERRED` | 不接公共状态 |
+| `vecissue_agent_agent` | `UNSUPPORTED_VECTOR_OBSERVATION` | VLD issue input 回看 | `ANALYSIS_PORT_DEFERRED` | scalar testcase 不启动随机 vector sequence，非零 valid fatal |
+
+### 文字伪代码
+
+```text
+review_monitor_table()：
+  逐行打开 20 个 monitor；
+  如果 monitor 写 raw queue，确认 raw factory、入队条件、consumer 和生命周期；
+  如果 monitor 只观察 driver/responder/output，确认不写 raw/status/pass/fail/terminal；
+  如果 monitor 属于 vector unsupported，确认 scalar reset 完成后 valid 非 0 会 fatal；
+  对每个 agent 同时检查 env/RM analysis consumer 已连接且 producer deferred；
+  新增或删除 agent 时必须同步更新本表，不能只更新 raw producer 清单。
+```
+
+## 4. 问题三：字段级 output 和 V2-only output 容易被错误接入公共状态
+
+### V2 问题
+
+`io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug` 位于 ctrl monitor 所属接口中，但它不是 `dispatch_raw_ctrl_t` 字段。若只按 agent 级别把 ctrl monitor 归为 `RAW_QUEUE`，coding 时可能把该 1 bit debug output 写入 CSR snapshot、redirect、pass/fail 或 terminal。
+
+另外，V2 顶层存在多组当前主 flow 不消费的 output，旧文档容易把它们误接到内部 agent 或 responder。
+
+### 修改原因
+
+同一个 monitor 可以同时包含业务 raw 字段和纯观察 output。职责必须精确到字段级，否则公共状态会出现第二来源或错误来源。V2-only output 当前没有主状态 schema、采样条件和生命周期，不能在分类 plan 中临时发明 consumer。
+
+### 修改方案与修改逻辑
+
+`externalInterrupt_debug` 只保留同名字段链：
+
+```text
+interface -> xaction -> connect -> monitor/XZ
+```
+
+它不进入：
+
+```text
+dispatch_raw_ctrl_t
+CSR snapshot
+status
+pass/fail/terminal
+redirect/replay
+analysis producer
+driver
+```
+
+V2-only output 分类如下：
+
+| output group | 当前分类 | 本轮处理 | 不支持边界 |
 |---|---|---|---|
-| `io_mem_to_ooo_ctrl_agent` | `RAW_QUEUE` | 仅当 raw 主 flow 字段缺失 | LSQ deq/redirect/flushSb 状态推进 |
-| `io_mem_to_ooo_int_wb_agent` | `RAW_QUEUE` | 仅当 raw 主 flow 字段缺失 | int writeback 状态推进 |
-| `io_mem_to_ooo_iq_feedback_agent` | `RAW_QUEUE` | 仅当 raw 主 flow 字段缺失 | issue feedback 状态推进 |
-| `csr_ctrl_agent` | `RAW_QUEUE` | 仅当 runtime CSR raw 字段缺失 | CSR snapshot 更新 |
-| `L2tlb_agent` | responder/internal | 不在 monitor output plan 中恢复 analysis | DTLB->L2TLB responder 模型 |
-| 其他 monitor | `XZ_ONLY` 或待定 | 默认不 coding | 无当前主 flow 消费者 |
+| `io_l2_tlb_req_resp_*` | `UNUSED_IN_CURRENT_MAIN_FLOW` | 保留 DUT 顶层连接 | 不接内部 `L2TLB_agent` |
+| `io_l2_pmp_resp_*` | `UNUSED_IN_CURRENT_MAIN_FLOW` | 不进入 dispatch raw/pass/fail | 后续 PMP observation/RM 专项 |
+| `io_outer_l2PfCtrl_*` | `OUTPUT_OBSERVATION_DEFERRED` | 当前不新增 agent | 后续 prefetch control 专项 |
+| `io_wfi_wfiSafe` | `STATUS_OBSERVATION_ONLY` | 不作为通过或 terminal 条件 | 后续低功耗专项 |
+| `io_outer_cpu_halt` | `STATUS_OBSERVATION_ONLY` | V2 halt status，不能称为旧 `cpuWfi` | 不触发 dispatch stop |
+| `io_reset_backend` | `STATUS_OBSERVATION_ONLY` | 与 TB `reset_backend_done` 分离 | 不替代 driver gate |
+| `auto_inner_frontendBridge_icache_out_a_bits_user_needHint` | `OUTPUT_OBSERVATION_DEFERRED` | 保留现有连接，不归属 20-agent 主表 | 后续 bus/TL user schema 专项 |
 
-### 5.2 V2-only output 分类
-
-默认处理：
-
-| output | 默认分类 | 原因 |
-|---|---|---|
-| `io_l2_tlb_req_resp_*` | `UNUSED_IN_CURRENT_MAIN_FLOW` | 顶层 L2 侧 TLB response，不接内部 `L2TLB_agent` |
-| `io_l2_pmp_resp_*` | `UNUSED_IN_CURRENT_MAIN_FLOW` | 当前 smoke 不依赖顶层 PMP response 推进状态 |
-| `io_outer_l2PfCtrl_*` | `UNUSED_IN_CURRENT_MAIN_FLOW` | prefetch control 后续专项 |
-| `io_wfi_wfiSafe` | `STATUS_OBSERVATION_ONLY` | 不作为通过条件 |
-
-reset/halt/WFI 边界说明：
-
-- `io_reset_backend` 和 `io_outer_cpu_halt` 已由 `other_ctrl_agent` 采样并做 X/Z/status 观察，默认不进入 dispatch raw queue，不作为 pass/fail 或 terminal_done 条件。
-- `memblock_sync_pkg::reset_backend_done` 是 testbench 在 `top_tb.sv` 中维护的仿真同步标志，用于 gate driver/monitor，不等同于 DUT output `io_reset_backend`。
-- V2 `io_outer_cpu_halt` 不应继续写成旧 V3 `cpuWfi/io_outer_cpu_wfi` 同义替换；`io_wfi_wfiSafe` 仍按本表归为 `STATUS_OBSERVATION_ONLY`，未建专项前不得作为测试通过条件。
-
-若某 output 被当前 testcase/RM/checker 明确依赖，另建 agent、RM/coverage 或 monitor 专项 plan，并按 agent 添加规则补齐结构；不得在本 plan 中混入 RM/checker/coverage 实现。
-
-## 6. 函数/任务级伪代码
-
-### 6.1 `classify_monitor_role()`
-
-函数目的：执行 plan 时逐 monitor 得出职责分类。
-
-输入：
-
-- monitor 是否写 raw queue。
-- monitor 是否仅 X/Z。
-- RM/env 是否连接 analysis export。
-- V2-only output 是否当前主功能必需。
-
-输出/副作用：
-
-- 输出分类表。
-- 不直接改状态。
-
-源码级伪代码：
+### 文字伪代码
 
 ```text
-for each monitor:
-    has_raw_queue_write = rg "push_raw|set_latest_raw" monitor
-    has_analysis_write = rg "mon_item_port.write" monitor
-    rm_depends = rg "<agent_name>.*analysis|mon_item_port" env rm
-    if has_raw_queue_write && rm_depends: RAW_AND_ANALYSIS
-    else if has_raw_queue_write: RAW_QUEUE
-    else if rm_depends: ANALYSIS_PORT
-    else: XZ_ONLY
+classify_field_level_outputs()：
+  对 ctrl monitor：
+    如果字段是 externalInterrupt_debug：
+      只检查 interface/xaction/connect/monitor/XZ 同名搬运；
+      不写 raw、CSR snapshot、status、pass/fail、terminal、redirect 或 replay；
+      不恢复 mon_item_port.write；
+
+  对 V2-only output：
+    如果当前主 flow 无 schema、无 consumer、无生命周期：
+      保留 DUT 顶层连接；
+      只记录职责分类和后续专项；
+      不新增 raw queue、status 字段、cursor、map、analysis producer 或 helper；
+
+  对 io_l2_tlb_req_resp 和 io_l2_pmp_resp：
+    确认它们是顶层 L2/L2Cache/PTW/PMP 侧接口；
+    不接入内部 DTLB -> L2TLB responder agent。
 ```
 
-中文文字伪代码：
+## 5. 问题四：DCache/SBuffer 与 L2TLB agent 边界需要防止串接
 
-执行者逐个 monitor 检查是否写入 raw queue、是否已经写 analysis port、env/RM 是否连接该 monitor transaction。如果 monitor 已经服务公共状态 raw queue，但 RM 不依赖标准 transaction，就归为 `RAW_QUEUE`。如果 RM 或 coverage 当前需要 transaction，则归为 `ANALYSIS_PORT` 或 `RAW_AND_ANALYSIS`。如果 monitor 只采样并做 X/Z，就归为 `XZ_ONLY`，不强行恢复 transaction。
+### V2 问题
 
-### 6.2 后续专项 `emit_analysis_transaction_if_required()`
+DCache/SBuffer agent 的主职责是 TileLink responder。`io_l2_hint_*` 和 `io_l2_flush_done` 是 DUT input sideband，不是 DCache TL D response，也不是 monitor output。若把 DCache responder “保持不变”写得过宽，可能遗漏这些 input 在 scalar flow 中必须 known-zero/fail-fast。
 
-函数目的：仅在后续 RM/coverage/monitor 专项 plan 中，对 `ANALYSIS_PORT` 或 `RAW_AND_ANALYSIS` monitor 恢复 transaction 输出。本 plan 不要求新增该函数或恢复 `mon_item_port.write()`。
+同时，顶层 `io_l2_tlb_req_resp_*` 和 `io_l2_pmp_resp_*` 不是当前内部 `L2TLB_agent` 的接管点。
 
-输入：采样字段、monitor 分类。
+### 修改原因
 
-输出/副作用：必要时创建 `mon_tr`、赋字段、`unpack()`、`mon_item_port.write(mon_tr)`。
+DCache/SBuffer responder、DCache L2 sideband input 和 L2TLB 内部 responder 是三类不同职责。混写会导致 agent 方向错误、driver owner 重复或 output 被接到错误 responder。
 
-源码级伪代码：
+### 修改方案与修改逻辑
+
+DCache/SBuffer：
+
+- TL A/B/C/D/E responder 和已有 `denied/corrupt` 策略保持。
+- PBMT/permission 不作为 DCache/SBuffer response 字段。
+- `io_l2_hint_valid`、`io_l2_hint_bits_sourceId`、`io_l2_hint_bits_isKeyword` 和 `io_l2_flush_done` 只由 DCache L2 sideband 专项实现 time-zero、xaction、helper、driver known-zero 和非零 fail-fast。
+- 本 plan 不为这四个 input 新增 runtime helper、raw 或公共状态。
+
+L2TLB：
+
+- `L2tlb_agent_agent` 保持 DTLB -> L2TLB request、L2TLB -> DTLB response 方向。
+- 顶层 L2/L2Cache/PTW/PMP observation 不接入该内部 agent。
+
+### 文字伪代码
 
 ```text
-if (role inside {ANALYSIS_PORT, RAW_AND_ANALYSIS}) begin
-    mon_tr = xaction::type_id::create("mon_tr");
-    assign all sampled fields required by xaction;
-    mon_tr.channel_id = cfg.channel_id;
-    mon_tr.unpack();
-    mon_item_port.write(mon_tr);
-end
+check_responder_boundaries()：
+  对 DCache/SBuffer：
+    保留 TL responder 和 X/Z observation；
+    不把 PBMT/permission 写成 DCache/SBuffer response 字段；
+    遇到 io_l2_hint_* 或 io_l2_flush_done：
+      判定为 DUT input sideband；
+      转交 DCache L2 sideband 专项；
+      本 plan 不新增 raw、status、helper 或 driver 逻辑；
+
+  对 L2TLB：
+    保持内部 DTLB request/response agent 方向；
+    如果看到顶层 io_l2_tlb_req_resp_* 或 io_l2_pmp_resp_*：
+      只记录为 V2-only output/deferred observation；
+      不接到 L2tlb_agent_agent。
 ```
 
-中文文字伪代码：
+## 6. 问题五：V2 STA IQ feedback raw 不能伪造 ROB/LQ，vector feedback 必须 fail-fast
 
-该逻辑只在后续专项证明 analysis 输出必需时启用。它创建 monitor transaction，把本拍采样字段完整赋给 transaction，再设置 channel_id 并调用 `unpack()`。最后通过 `mon_item_port.write()` 发给 analysis 订阅者。当前 plan 只记录哪些 monitor 可能需要专项，不在主 flow 适配中恢复无消费者 transaction。
+### V2 问题
 
-### 6.3 `classify_v2_only_output_group()`
-
-函数目的：判断 V2-only 顶层 output 是否需要进入 agent。
-
-源码级伪代码：
+V2 scalar `staIqFeedback.feedbackSlow` 只有：
 
 ```text
-for each v2_only_output_group:
-    if affects current raw queue state progress: FLOW_REQUIRED
-    else if rm_or_checker_depends_now: ANALYSIS_REQUIRED
-    else if only debug/status observation: STATUS_ONLY
-    else: UNUSED_IN_CURRENT_MAIN_FLOW
+valid
+hit
+sqIdx_flag
+sqIdx_value
 ```
 
-中文文字伪代码：
+它没有 ROB 或 LQ payload。旧逻辑若把 `rob_valid/lq_valid/sq_valid` 全部置 1，并把默认 0 payload 当真实 ROB/LQ key，会导致 adapter 用伪 key 解析 uid。
 
-执行者对每个 V2-only output 先判断它是否影响当前公共状态推进；如果影响，就必须进入 raw queue 或对应 handler。如果不影响状态，但当前 RM/checker 已经依赖，就需要 analysis monitor。如果只是 debug/status，就记录为观察项，不作为 testcase pass/fail。完全不被当前主功能使用的 output 保持 dut_inst 连接即可，不新增 agent。
+VSTU feedback 在 scalar-only 当前范围中没有闭环，不能 info/drop 后继续。
 
-## 7. 验收标准
+### 修改原因
 
-1. 每个顶层 agent monitor 都有分类表。
-2. `RAW_QUEUE` monitor 的 raw queue 字段完整且有消费者。
-3. `ANALYSIS_PORT/RAW_AND_ANALYSIS` monitor 只记录专项需求，不在本 plan 中恢复 `mon_tr` 输出。
-4. `XZ_ONLY` monitor 在分类表或 review 中说明不输出 transaction 的原因。
-5. V2-only output 四组均有主功能影响结论。
-6. `io_l2_tlb_req_resp_*` 不被接入内部 `L2TLB_agent`。
-7. 执行产物包含 monitor 分类表，列出每个 agent 分类和是否本轮 coding。
+STA feedback 的 uid、ROB key、`issue_epoch/replay_seq` 应由 IQ feedback/replay 专项的 issue-generation token 按真实 SQ key补齐。monitor 只能忠实保存接口真实字段。vector feedback 若进入公共状态，会形成未支持的 vector replay/writeback 路径。
 
-## 8. 验证命令或静态检查
+### 修改方案与修改逻辑
 
-```bash
-git diff --check -- mem_ut/ver/ut/memblock/agent mem_ut/ver/ut/memblock/env mem_ut/ver/ut/memblock/common mem_ut/ver/ut/memblock/tb AI_DOC
-rg -n "mon_item_port.write|push_raw|set_latest_raw|io_l2_tlb_req_resp|io_l2_pmp_resp|io_outer_l2PfCtrl|io_wfi_wfiSafe" mem_ut/ver/ut/memblock
-cd mem_ut/ver/ut/memblock/sim
-make eda_compile tc=tc_sanity mode=base_fun
+修改 `io_mem_to_ooo_iq_feedback_agent_agent_monitor::mon_data()` 的 V2 raw 构造：
+
+- STA valid 时只置 `sq_valid=1` 并复制真实 SQ key。
+- `rob_valid=0`、`lq_valid=0`。
+- raw 中保留 `hit`。
+- uid、ROB key、`issue_epoch/replay_seq` 不在 monitor 反推。
+- reset 完成后任一 `vstuIqFeedback_0/1_feedbackSlow_valid` 非 0，立即 `uvm_fatal`。
+- 本 plan 不恢复 `mon_item_port.write()`。
+
+### 文字伪代码
+
+```text
+io_mem_to_ooo_iq_feedback_agent_agent_monitor::mon_data()：
+  先执行原有采样和 X/Z 检查；
+
+  如果 reset 已完成且任一 VSTU feedback valid 非 0：
+    uvm_fatal；
+    不生成 vector raw；
+
+  如果 STA feedback valid：
+    raw = make_empty_raw_iq_feedback()；
+    raw.valid = 1；
+    raw.hit = sampled_hit；
+    raw.sq_valid = 1；
+    raw.sq_flag = sampled_sqIdx_flag；
+    raw.sq_value = sampled_sqIdx_value；
+    raw.rob_valid = 0；
+    raw.lq_valid = 0；
+    push_raw_iq_feedback(raw)；
+
+  后续由 IQ feedback/replay 专项：
+    用 SQ key 做 map/token 查询；
+    补 uid、ROB key、issue_epoch 和 replay_seq；
+    再进入原 batch/replay flow；
+  monitor 不扫描 main_trans_num，不从 status 全表反推 generation。
 ```
 
-本 plan 默认不恢复 monitor transaction。若后续专项恢复 monitor transaction 且影响运行期状态，再执行：
+## 7. Coding 落点汇总
 
-```bash
-make eda_run tc=tc_sanity mode=base_fun
+| 文件 | 对应问题与修改 |
+|---|---|
+| `mem_ut/ver/ut/memblock/agent/*/src/*_monitor.sv` | 问题一、二：逐 monitor 复核 runtime role 和 analysis producer deferred 状态 |
+| `mem_ut/ver/ut/memblock/env/src/memblock_env.sv` | 问题一：确认 20 个 analysis FIFO consumer 连接事实 |
+| `mem_ut/ver/ut/memblock/env/src/memblock_rm.sv` | 问题一：确认 20 个 blocking get consumer 存在但 producer deferred |
+| `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_ctrl_agent_agent/src/*` | 问题三：`externalInterrupt_debug` 字段级观察链，不进 raw |
+| `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_iq_feedback_agent_agent/src/io_mem_to_ooo_iq_feedback_agent_agent_monitor.sv` | 问题五：STA SQ-only raw，VSTU valid fatal |
+| `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_vec_wb_agent_agent/src/io_mem_to_ooo_vec_wb_agent_agent_monitor.sv` | 问题二：scalar-only `writebackVldu` valid fatal 边界 |
+| `mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/*` | 问题四：只复核 TL responder 边界；L2 sideband input 不在本 plan 修改 |
+| `mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/*` | 问题四：保持内部 DTLB/L2TLB responder 方向 |
+
+明确不修改：
+
+```text
+pass/fail/terminal owner
+commit/deq cursor
+redirect/replay batch 仲裁
+RM/checker/scoreboard/coverage
+analysis producer 批量恢复
+DCache io_l2_hint_* / io_l2_flush_done 驱动实现
+顶层 V2-only output 新 agent
 ```
 
-## 9. 与原始/初步 plan 差异说明
+## 8. 修改类型与原逻辑对比总结
 
-原始 monitor plan 说明了“analysis port 大多未写”和 V2-only output 待分析。本文将其收敛为可执行的分类审查和 RAW_QUEUE 最小修复流程，明确本轮不恢复大量 analysis port transaction，并要求产出逐 agent 分类表。
+| 修改项 | 类型 | 修改前逻辑 | 修改原因 | 修改后逻辑 |
+|---|---|---|---|---|
+| monitor 分类维度 | 文档/职责适配 | raw、XZ、analysis 单维混写 | consumer 已连接但 producer deferred 的事实被掩盖 | runtime role 和 RM role 二维分类 |
+| 20-agent 表 | 文档/审计适配 | 示例式分类，易漏 agent | coding/review 需要完整职责边界 | 20 个 agent 全部落表 |
+| analysis FIFO/RM consumer | 边界更正 | 可能描述为无 consumer | env/RM 实际已连接 blocking get | 统一 `ANALYSIS_PORT_DEFERRED` |
+| `externalInterrupt_debug` | 字段级职责适配 | ctrl monitor 整体归为 raw | 该字段是 output observation，不是 ctrl raw | 只保留字段链和 X/Z，不入公共状态 |
+| V2-only output | 职责分类 | 部分 output 缺职责记录或可能误接内部 agent | 当前无 schema/consumer/lifecycle | 只分类和 deferred，不新增 runtime 逻辑 |
+| DCache L2 sideband | 跨专项 owner 收敛 | 可能混在 DCache responder“不变”中 | 这些是 DUT input，需要 driver owner | 转交 DCache L2 sideband 专项 |
+| L2TLB 方向 | agent 边界 | 顶层 L2/PMP output 容易误接内部 agent | 内部 L2TLB agent 是 DTLB/L2TLB responder | 不接顶层 L2/PMP output |
+| STA IQ feedback raw | 功能逻辑修改 | 伪造 ROB/LQ valid | V2 只有真实 SQ key | raw 只保存 SQ key，generation 由 IQ 专项 token 补齐 |
+| VSTU feedback | unsupported gate | adapter 可能 info/drop | scalar flow 不支持 vector feedback | monitor 边界 fatal |
 
-## 10. 风险与非目标
-
-风险：
-
-- 若 RM 当前隐式依赖某 monitor transaction，需要执行者通过 env/RM 连接复查发现。
-- 恢复大量 analysis port 可能增加仿真开销，因此必须按分类启用。
-
-非目标：
-
-- 不实现 RM/checker/coverage。
-- 不新增 V2-only output agent，除非分类证明当前主功能必需。
-
-## 11. 与原测试框架逻辑对比和修改类型总结
-
-修改类型结论：`无代码优先检查/复查 + 仅字段/参数适配`，必要时包含 `局部逻辑适配`。本 plan 默认只做 monitor/V2-only output 字段分类和影响复查；只有发现 `RAW_QUEUE` 主 flow 必需字段缺失时才做局部字段修复。默认不恢复大量 analysis port，不改变 runtime 主逻辑。
-
-原测试框架逻辑：
-
-- 顶层 agent monitor 大多每拍采样 interface 字段并执行 X/Z 检查，但 `mon_item_port.write(mon_tr)` 多数处于注释状态。
-- 当前测试框架主 flow 主要依赖 `memblock_sync_pkg` raw queue：int writeback raw、IQ feedback raw、ctrl raw、CSR raw、sfence raw 等。
-- `dispatch_monitor_event_adapter` 消费 raw queue 并转换为公共状态事件；analysis port 当前不是 dispatch 主状态推进的必需路径。
-- V2-only 顶层 output 已在 `dut_inst`/connect 层存在或待分类，但多数还没有专用 agent 采样策略。
-
-本 plan 修改后逻辑：
-
-- 对每个 monitor 分类为 `XZ_ONLY`、`RAW_QUEUE`、`ANALYSIS_PORT` 或 `RAW_AND_ANALYSIS`。
-- `RAW_QUEUE` 类 monitor 只检查 raw queue 字段是否完整且有消费者；如果缺字段，按对应专项 plan 局部修 raw。
-- `ANALYSIS_PORT/RAW_AND_ANALYSIS` 默认只记录后续专项需求，不在本 plan 中批量恢复 `mon_item_port.write()`。
-- V2-only output 分组判断是否影响当前主状态推进；`io_l2_tlb_req_resp_*` 和 `io_l2_pmp_resp_*` 不接入内部 `L2TLB_agent`。
-
-逻辑改变项：
-
-- 默认无运行期逻辑改变。
-- 若发现 raw queue 主 flow 字段缺失，本 plan 只允许最小修复 monitor raw 写入或把问题转入已有专项，例如 int writeback plan、CSR/control plan、LSQ MMIO/status plan。原因是主状态推进依赖 raw queue，而不是 analysis port。
-- 批量恢复 analysis port 属于后续专项，不属于本 plan 主逻辑。
-
-字段/参数改变项：
-
-- 分类表覆盖顶层 agent monitor 的输出职责。
-- V2-only output 分类覆盖 `io_l2_tlb_req_resp_*`、`io_l2_pmp_resp_*`、`io_outer_l2PfCtrl_*`、`io_wfi_wfiSafe` 等组。
-- 不新增 env/plus 参数；不新增 raw struct 字段，除非另一个专项明确要求。
-- 20260709 signal matrix 中大量 perf event/input stimulus 类问题归 DUT/interface 或独立 agent 输入刺激适配，不作为本 8 个测试框架主体 flow 的遗漏。
-
-性能/生命周期影响：
-
-- RTL 基线路径确认只发生在执行前准备阶段，用于防止误读不存在的 `MemBlockTop.sv` 或错误 worktree，不属于测试框架 runtime 逻辑改变。
-- 默认不创建额外 `mon_tr` 对象，不增加 analysis port 广播开销。
-- 不改变 raw queue 消费顺序、active map、prefix/cursor、terminal_done 或 pass/fail。
-- 若后续专项恢复 analysis port，必须单独评估对象创建和订阅者影响。
-
-覆盖性结论：
-
-本 plan 覆盖 monitor output/V2-only output 分类 flow。它负责判断哪些 output 影响当前测试框架主状态，哪些只是观察或后续 RM/checker 入口。结论是：默认只是分类和 RAW_QUEUE 完整性复查，不影响测试框架主体逻辑；未纳入的 perf event/input stimulus 等属于 DUT/interface 或新增 agent 范围，不是当前 V2 测试框架 runtime flow 遗漏。
+保持不变的主体逻辑：5 条 raw queue 架构、raw batch 消费顺序、pass/fail/terminal、commit/deq、redirect/replay 仲裁、DCache/SBuffer TL responder、内部 L2TLB responder方向和 RM/checker/coverage deferred 状态。

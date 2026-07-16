@@ -14,6 +14,8 @@
 |---|---|---|---|---|
 | [Memory flushPipe flow](flows/memory_flush_pipe_flow.md) | `flushPipe`、SFENCE、HFENCE、CBO、CMO、`flushAfter`、`s3_flushPipe` | Decode、Fence FU、MemBlock、LoadUnit、StoreUnit、StoreQueue、ExceptionGen、ROB、TLB | Decode `flushPipe`、`deqCanDoCbo`、`mmioStout` | mem_ut sfence flow、memory trigger flow |
 | [Memory trigger flow](flows/memory_trigger_flow.md) | `trigger`、`TriggerAction`、breakpoint、Debug Mode、`tdata`、`triggerCanRaiseBpExp` | NewCSR Debug、MemBlock、LoadUnit、StoreUnit、ExceptionGen、ROB | CSR `mem_trigger`、Load/Store S1 vaddr | memory flushPipe flow、V2 interface signal matrix |
+| [LSQ 入队与 Redirect 恢复 flow](flows/lsq_enqueue_redirect_flow.md) | LSQ enqueue、`needAlloc`、`canAccept`、`ldCanAccept`、`sqCanAccept`、`LSQLdEnqWidth`、`LSQStEnqWidth`、`numLoadDp`、`numStoreDp`、`IssueBlockParams.numEnq`、`RenameWidth`、registered credit、redirect、cancel、pointer recovery、`flushPipe` | NewDispatch、LsqEnqCtrl、LsqWrapper、VirtualLoadQueue、StoreQueue、Scheduler、IssueQueue、ROB | `fromRename.fire`、`LsqEnqCtrl.do_enq`、`RegNext(canAccept)`、`RobPtr.needFlush` | memory flushPipe flow、memory trigger flow |
+| [ROB 压缩与后端指令信息流](flows/rob_compress_and_backend_instruction_flow.md) | ROB、RAB、`RobEntryBundle`、`canRobCompress`、`instrSize`、`realDestSize`、`uopNum`、`robIdx` | Decode、Rename、CompressUnit、NewDispatch、ROB、RAB、ExceptionGen、IssueQueue、LSQ | Decode `canRobCompress`、Rename `robIdx` 分配、ROB enqueue/writeback/commit | memory flushPipe flow、memory trigger flow、LSQ 入队与 Redirect 恢复 flow |
 
 ## 维护规则
 

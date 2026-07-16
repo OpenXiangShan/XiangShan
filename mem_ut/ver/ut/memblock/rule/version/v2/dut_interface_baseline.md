@@ -7,7 +7,6 @@ V2 DUT 接口适配必须以生成后的 V2 Verilog 为权威来源：
 ```text
 build_memblock/rtl/filelist.f
 build_memblock/rtl/MemBlock.sv
-build_memblock/rtl/MemBlockTop.sv
 ```
 
 Scala 源码只用于理解 `valid/ready`、index 和 bundle 语义，不能替代生成后 Verilog
@@ -15,28 +14,34 @@ Scala 源码只用于理解 `valid/ready`、index 和 bundle 语义，不能替�
 
 ## 当前状态
 
-当前 worktree 已成功生成 V2 Verilog。完整 DUT agent/interface 适配不属于分支迁移
-plan 的范围，应由后续 V2 DUT 适配 plan 单独处理。
+当前 worktree 已成功生成 V2 Verilog，`dut_inst.sv` 已按当前 `MemBlock` 顶层端口
+闭合。后续重新生成 RTL 时仍需按本文基线重新检查 agent/interface/connect。
 
-已观察到的生成后顶层事实：
-
-```text
-build_memblock/rtl/MemBlockTop.sv
-  module MemBlockTop
-  outer_cpu_halt
-  l2_tlb_req_*
-  l2_pmp_resp_*
-```
-
-已知后续需要处理的不匹配示例：
+已观察到的生成后 DUT 顶层事实：
 
 ```text
-Generated V2 top: outer_cpu_halt
-Current UVM connect: cpuWfi / io_outer_cpu_wfi
+build_memblock/rtl/MemBlock.sv
+  module MemBlock
+  io_outer_cpu_halt
+  io_l2_tlb_req_*
+  io_l2_pmp_resp_*
 ```
 
-该不匹配必须在后续 V2 DUT 适配 plan 中处理，不能通过静默修改生成后的 V2 设计
-RTL 来绕过。
+当前 profile 不存在 `build_memblock/rtl/MemBlockTop.sv`。`build/rtl/MemBlock.sv`
+可以辅助比对，且当前内容与权威 `build_memblock/rtl/MemBlock.sv` 一致；但
+filelist 和后续接口适配仍必须只以 `build_memblock/rtl` 为权威，避免两个生成
+目录后续分叉。
+
+当前 halt/reset 控制连接状态：
+
+```text
+Generated V2 MemBlock: io_outer_cpu_halt
+Current UVM connect/interface/xaction: io_outer_cpu_halt
+Generated V2 MemBlock: io_reset_backend
+Current UVM connect/interface/monitor: io_reset_backend
+```
+
+历史 `cpuWfi/io_outer_cpu_wfi` 命名不得重新作为 V2 当前接口使用。
 
 ## 后续检查清单
 

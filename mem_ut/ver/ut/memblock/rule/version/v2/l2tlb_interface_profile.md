@@ -8,8 +8,9 @@ DTLB 到 L2TLB 的 request 路径，以及 L2TLB 到 DTLB 的 response 路径。
 
 ## 当前状态
 
-V2 生成后的 Verilog 已暴露顶层 `l2_tlb_req_*` request/response 端口和
-`l2_pmp_resp_*` 端口。顶层 `io_l2_tlb_req_*` 是 L2/L2Cache 侧向
+V2 生成后的 `build_memblock/rtl/MemBlock.sv` 已暴露顶层
+`io_l2_tlb_req_*` request/response 端口和 `io_l2_pmp_resp_*` 端口。顶层
+`io_l2_tlb_req_*` 是 L2/L2Cache 侧向
 MemBlock 内部 TLB/L2TLB 发起地址查询的 requestor 口，不是 mem_ut
 `L2TLB_agent` 的接管点。
 
@@ -43,18 +44,18 @@ memblock_tlb_entry.pte_g/pte_u
 `s2_entry_perm_g/u` 固定为常量 0。
 
 这些是生成后 Verilog 的内部 wire 名，随 RTL 重新生成可能变化。后续更新 V2
-RTL 后必须重新检查 `build/rtl/MemBlock.sv` 中这些内部信号是否仍存在。
+RTL 后必须重新检查权威 `build_memblock/rtl/MemBlock.sv` 中这些内部信号是否仍存在。
 
 已观察到的顶层端口族：
 
 ```text
-build_memblock/rtl/MemBlockTop.sv
-  l2_tlb_req_req_ready
-  l2_tlb_req_req_valid
-  l2_tlb_req_req_bits_vaddr
-  l2_tlb_req_resp_valid
-  l2_tlb_req_resp_bits_paddr_*
-  l2_pmp_resp_ld/st/instr/mmio/atomic
+build_memblock/rtl/MemBlock.sv
+  io_l2_tlb_req_req_ready
+  io_l2_tlb_req_req_valid
+  io_l2_tlb_req_req_bits_vaddr
+  io_l2_tlb_req_resp_valid
+  io_l2_tlb_req_resp_bits_paddr_*
+  io_l2_pmp_resp_ld/st/instr/mmio/atomic
 ```
 
 ## 后续必做项

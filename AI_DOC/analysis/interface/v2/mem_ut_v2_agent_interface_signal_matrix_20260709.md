@@ -8,7 +8,7 @@
 
 ## 2. 检查方法
 
-- RTL 基准：`build/rtl/MemBlock.sv` 的 `module MemBlock` 顶层端口。
+- RTL 基准：当前 V2 profile权威文件`build_memblock/rtl/MemBlock.sv`及`build_memblock/rtl/filelist.f`；`build/rtl`只作辅助比对。
 - connect 基准：`tb/*_agent_connect.sv` 的 `MEMBLOCK_UT` 活动分支；`connect方向/对象（解析）` 从 `force U_IF_NAME.<signal> = ...`、`force ... = U_IF_NAME.<signal>` 或直接赋值中提取。
 - interface 基准：`agent/*/src/*_interface.sv` 中的 `logic` 字段。
 - transaction 基准：同名 `*_xaction.sv` 中声明的字段。
@@ -24,11 +24,11 @@
 | `L2tlb_agent_agent` | 63 | 63 | 63 | 63 | 60 |
 | `backendToTopBypass_agent_agent` | 2 | 2 | 2 | 2 | 2 |
 | `csr_ctrl_agent_agent` | 93 | 93 | 93 | 93 | 93 |
-| `dcache_agent_agent` | 53 | 53 | 53 | 53 | 22 |
+| `dcache_agent_agent` | 57 | 57 | 57 | 57 | 26 |
 | `fence_agent_agent` | 8 | 8 | 8 | 8 | 8 |
 | `int_sink_agent_agent` | 7 | 7 | 7 | 7 | 7 |
-| `io_mem_to_ooo_ctrl_agent_agent` | 41 | 41 | 41 | 41 | 0 |
-| `io_mem_to_ooo_int_wb_agent_agent` | 114 | 114 | 114 | 114 | 0 |
+| `io_mem_to_ooo_ctrl_agent_agent` | 42 | 42 | 42 | 42 | 0 |
+| `io_mem_to_ooo_int_wb_agent_agent` | 109 | 109 | 109 | 109 | 0 |
 | `io_mem_to_ooo_iq_feedback_agent_agent` | 26 | 26 | 26 | 26 | 0 |
 | `io_mem_to_ooo_vec_wb_agent_agent` | 73 | 73 | 73 | 73 | 0 |
 | `io_mem_to_ooo_wakeup_agent_agent` | 12 | 12 | 12 | 12 | 0 |
@@ -282,6 +282,10 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/dcache_a
 | `auto_inner_dcache_client_out_e_ready` | `` | `output` | `input` | 有 | 有 | IF->RTL: `auto_inner_dcache_client_out_e_ready`<br>RTL->IF: `auto_inner_dcache_client_out_e_ready` | 有 | 有 |
 | `auto_inner_dcache_client_out_e_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `auto_inner_dcache_client_out_e_valid` | 有 | 没有 |
 | `auto_inner_dcache_client_out_e_bits_sink` | `[9:0]` | `input` | `input` | 有 | 有 | RTL->IF: `auto_inner_dcache_client_out_e_bits_sink` | 有 | 没有 |
+| `io_l2_hint_valid` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_l2_hint_valid` | 有 | 有 |
+| `io_l2_hint_bits_sourceId` | `[3:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_l2_hint_bits_sourceId` | 有 | 有 |
+| `io_l2_hint_bits_isKeyword` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_l2_hint_bits_isKeyword` | 有 | 有 |
+| `io_l2_flush_done` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_l2_flush_done` | 有 | 有 |
 
 ### 4.5 `fence_agent_agent`
 
@@ -323,6 +327,7 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_ctrl_agent_agent/
 | `io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip` | 有 | 没有 |
 | `io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip` | 有 | 没有 |
 | `io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip` | 有 | 没有 |
+| `io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug` | 有 | 没有 |
 | `io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31` | 有 | 没有 |
 | `io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43` | 有 | 没有 |
 | `io_mem_to_ooo_topToBackendBypass_msiInfo_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_topToBackendBypass_msiInfo_valid` | 有 | 没有 |
@@ -343,7 +348,7 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_ctrl_agent_agent/
 | `io_mem_to_ooo_memoryViolation_bits_isRVC` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_memoryViolation_bits_isRVC` | 有 | 没有 |
 | `io_mem_to_ooo_memoryViolation_bits_level` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_memoryViolation_bits_level` | 有 | 没有 |
 | `io_mem_to_ooo_memoryViolation_bits_robIdx_flag` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_memoryViolation_bits_robIdx_flag` | 有 | 没有 |
-| `io_mem_to_ooo_memoryViolation_bits_robIdx_value` | `[8:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_memoryViolation_bits_robIdx_value` | 有 | 没有 |
+| `io_mem_to_ooo_memoryViolation_bits_robIdx_value` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_memoryViolation_bits_robIdx_value` | 有 | 没有 |
 | `io_mem_to_ooo_sbIsEmpty` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_sbIsEmpty` | 有 | 没有 |
 | `io_mem_to_ooo_lsqio_vaddr` | `[63:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_lsqio_vaddr` | 有 | 没有 |
 | `io_mem_to_ooo_lsqio_gpaddr` | `[63:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_lsqio_gpaddr` | 有 | 没有 |
@@ -364,95 +369,73 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_ctrl_agent_agent/
 
 interface 文件：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_interface.sv`
 
+本 agent 当前只保留 V2 `MemBlock` 顶层真实 `writebackLda/Sta/Std` output 端口命名；旧 V3 整数写回聚合别名已从 interface、xaction、monitor 和 connect 中删除，不再作为当前字段列出。
+
 | 信号 | 位宽 | drv_cb方向 | mon_cb方向 | xaction字段 | connect | connect方向/对象（解析） | monitor采集 | driver驱动 |
 |---|---|---|---|---|---|---|---|---|
-| `io_mem_to_ooo_intWriteback_6_0_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackStd_1_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_6_0_bits_toRob_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackStd_1_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_6_0_bits_toRob_bits_robIdx_value` | `[8:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackStd_1_bits_uop_robIdx_value` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_5_0_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackStd_0_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_5_0_bits_toRob_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackStd_0_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_5_0_bits_toRob_bits_robIdx_value` | `[8:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackStd_0_bits_uop_robIdx_value` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_4_0_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_4_0_bits_toRob_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_robIdx_flag` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_robIdx_flag` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_robIdx_value` | `[8:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_robIdx_value` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_3` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_3` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_6` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_6` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_7` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_7` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_15` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_15` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_19` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_19` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_exceptionVec_23` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_23` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger` | `[3:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_trigger` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_3_0_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_3_0_bits_toRob_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_robIdx_flag` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_robIdx_flag` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_robIdx_value` | `[8:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_robIdx_value` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_3` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_3` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_6` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_6` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_7` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_7` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_15` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_15` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_19` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_19` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_exceptionVec_23` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_23` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_trigger` | `[3:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_trigger` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_toRob_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_robIdx_flag` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_robIdx_flag` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_robIdx_value` | `[8:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_robIdx_value` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_3` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_3` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_4` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_4` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_5` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_5` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_trigger` | `[3:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_trigger` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_pdest` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_pdest` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_toIntRf_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_rfWen` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_toIntRf_bits` | `[63:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_data` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_toFpRf_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_fpWen` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_2_0_bits_toFpRf_bits` | `[63:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_data` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_toRob_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_robIdx_flag` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_robIdx_flag` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_robIdx_value` | `[8:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_robIdx_value` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_3` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_3` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_4` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_4` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_exceptionVec_5` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_5` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_trigger` | `[3:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_trigger` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_pdest` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_pdest` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_toIntRf_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_rfWen` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_toIntRf_bits` | `[63:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_data` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_toFpRf_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_fpWen` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_1_0_bits_toFpRf_bits` | `[63:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_data` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toRob_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_valid` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_robIdx_flag` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_robIdx_flag` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_robIdx_value` | `[8:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_robIdx_value` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_3` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_3` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_4` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_4` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_5` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_5` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_6` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_6` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_exceptionVec_7` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_7` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_trigger` | `[3:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_trigger` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_pdest` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_pdest` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toIntRf_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_rfWen` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toIntRf_bits` | `[63:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_data` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toFpRf_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_fpWen` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_toFpRf_bits` | `[63:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_data` | 有 | 没有 |
-| `io_mem_to_ooo_intWriteback_0_0_bits_isFromLoadUnit` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_isFromLoadUnit` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_valid` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_3` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_3` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_4` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_4` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_5` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_5` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_6` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_6` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_7` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_7` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_13` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_13` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_15` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_15` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_19` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_19` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_21` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_21` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_23` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_23` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_trigger` | `[3:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_trigger` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_rfWen` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_rfWen` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_fpWen` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_fpWen` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_flushPipe` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_flushPipe` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_pdest` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_pdest` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_robIdx_flag` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_robIdx_flag` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_robIdx_value` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_robIdx_value` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_uop_replayInst` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_replayInst` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_data` | `[63:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_data` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_0_bits_isFromLoadUnit` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_isFromLoadUnit` | 有 | 没有 |
 | `io_mem_to_ooo_writebackLda_0_bits_debug_isMMIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_debug_isMMIO` | 有 | 没有 |
 | `io_mem_to_ooo_writebackLda_0_bits_debug_isNCIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_debug_isNCIO` | 有 | 没有 |
 | `io_mem_to_ooo_writebackLda_0_bits_debug_isPerfCnt` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_debug_isPerfCnt` | 有 | 没有 |
-| `io_mem_to_ooo_writebackLda_0_bits_uop_flushPipe` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_flushPipe` | 有 | 没有 |
-| `io_mem_to_ooo_writebackLda_0_bits_uop_replayInst` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_0_bits_uop_replayInst` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_valid` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_3` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_3` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_4` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_4` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_5` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_5` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_13` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_13` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_19` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_19` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_21` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_21` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_trigger` | `[3:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_trigger` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_rfWen` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_rfWen` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_fpWen` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_fpWen` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_flushPipe` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_flushPipe` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_pdest` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_pdest` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_robIdx_flag` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_robIdx_flag` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_robIdx_value` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_robIdx_value` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_uop_replayInst` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_replayInst` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_1_bits_data` | `[63:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_data` | 有 | 没有 |
 | `io_mem_to_ooo_writebackLda_1_bits_debug_isMMIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_debug_isMMIO` | 有 | 没有 |
 | `io_mem_to_ooo_writebackLda_1_bits_debug_isNCIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_debug_isNCIO` | 有 | 没有 |
 | `io_mem_to_ooo_writebackLda_1_bits_debug_isPerfCnt` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_debug_isPerfCnt` | 有 | 没有 |
-| `io_mem_to_ooo_writebackLda_1_bits_uop_flushPipe` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_flushPipe` | 有 | 没有 |
-| `io_mem_to_ooo_writebackLda_1_bits_uop_replayInst` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_1_bits_uop_replayInst` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_valid` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_3` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_3` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_4` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_4` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_5` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_5` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_13` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_13` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_19` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_19` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_21` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_21` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_trigger` | `[3:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_trigger` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_rfWen` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_rfWen` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_fpWen` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_fpWen` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_flushPipe` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_flushPipe` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_pdest` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_pdest` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_robIdx_flag` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_robIdx_flag` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_robIdx_value` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_robIdx_value` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_uop_replayInst` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_replayInst` | 有 | 没有 |
+| `io_mem_to_ooo_writebackLda_2_bits_data` | `[63:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_data` | 有 | 没有 |
 | `io_mem_to_ooo_writebackLda_2_bits_debug_isMMIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_debug_isMMIO` | 有 | 没有 |
 | `io_mem_to_ooo_writebackLda_2_bits_debug_isNCIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_debug_isNCIO` | 有 | 没有 |
 | `io_mem_to_ooo_writebackLda_2_bits_debug_isPerfCnt` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_debug_isPerfCnt` | 有 | 没有 |
-| `io_mem_to_ooo_writebackLda_2_bits_uop_flushPipe` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_flushPipe` | 有 | 没有 |
-| `io_mem_to_ooo_writebackLda_2_bits_uop_replayInst` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackLda_2_bits_uop_replayInst` | 有 | 没有 |
-| `io_mem_to_ooo_writebackSta_0_bits_debug_isMMIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_debug_isMMIO` | 有 | 没有 |
-| `io_mem_to_ooo_writebackSta_0_bits_debug_isNCIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_debug_isNCIO` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_0_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_valid` | 有 | 没有 |
 | `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_0` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_0` | 有 | 没有 |
 | `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_1` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_1` | 有 | 没有 |
 | `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_2` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_2` | 有 | 没有 |
@@ -477,11 +460,28 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agen
 | `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_21` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_21` | 有 | 没有 |
 | `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_22` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_22` | 有 | 没有 |
 | `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_23` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_exceptionVec_23` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_0_bits_uop_trigger` | `[3:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_trigger` | 有 | 没有 |
 | `io_mem_to_ooo_writebackSta_0_bits_uop_flushPipe` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_flushPipe` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_0_bits_uop_robIdx_flag` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_robIdx_flag` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_0_bits_uop_robIdx_value` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_uop_robIdx_value` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_0_bits_debug_isMMIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_debug_isMMIO` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_0_bits_debug_isNCIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_0_bits_debug_isNCIO` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_1_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_valid` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_3` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_3` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_6` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_6` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_7` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_7` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_15` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_15` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_19` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_19` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_23` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_exceptionVec_23` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_1_bits_uop_trigger` | `[3:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_trigger` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_1_bits_uop_robIdx_flag` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_robIdx_flag` | 有 | 没有 |
+| `io_mem_to_ooo_writebackSta_1_bits_uop_robIdx_value` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_uop_robIdx_value` | 有 | 没有 |
 | `io_mem_to_ooo_writebackSta_1_bits_debug_isMMIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_debug_isMMIO` | 有 | 没有 |
 | `io_mem_to_ooo_writebackSta_1_bits_debug_isNCIO` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackSta_1_bits_debug_isNCIO` | 有 | 没有 |
-
-
+| `io_mem_to_ooo_writebackStd_0_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackStd_0_valid` | 有 | 没有 |
+| `io_mem_to_ooo_writebackStd_0_bits_uop_robIdx_value` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackStd_0_bits_uop_robIdx_value` | 有 | 没有 |
+| `io_mem_to_ooo_writebackStd_1_valid` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackStd_1_valid` | 有 | 没有 |
+| `io_mem_to_ooo_writebackStd_1_bits_uop_robIdx_value` | `[7:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_writebackStd_1_bits_uop_robIdx_value` | 有 | 没有 |
 ### 4.9 `io_mem_to_ooo_iq_feedback_agent_agent`
 
 interface 文件：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_iq_feedback_agent_agent/src/io_mem_to_ooo_iq_feedback_agent_agent_interface.sv`
@@ -514,6 +514,35 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_iq_feedback_agent
 | `io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_isVecPartReplay` | `` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_isVecPartReplay` | 有 | 没有 |
 | `io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMask` | `[15:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMask` | 有 | 没有 |
 | `io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMbIdx` | `[3:0]` | `input` | `input` | 有 | 有 | RTL->IF: `io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_bits_vecReplayMbIdx` | 有 | 没有 |
+
+V2 scalar STA IQ feedback 运行期结论：
+
+1. 上表证明每路`staIqFeedback`只有`valid/hit/sqIdx_flag/sqIdx_value`，没有ROB、LQ、
+   `issue_epoch`或`replay_seq`字段。generation不是缺失的interface字段，不能通过给
+   interface/xaction增加DUT不存在的payload解决。
+2. 当前monitor在scalar STA valid时仍把`dispatch_raw_iq_feedback_t.rob_valid=1`和
+   `lq_valid=1`，但没有真实ROB/LQ value；这会把empty helper的0值伪装成真实key，
+   可能先命中错误active uid。V2适配必须只置`sq_valid=1`并复制真实SQ key，
+   `rob_valid/lq_valid=0`。
+3. 即使SQ key可解析uid，第一次replay后也不能从当前status补旧event的
+   `issue_epoch/replay_seq`。LOAD/STA accepted fire必须建立不可变generation token；
+   adapter先用active SQ/ROB map解析uid，再匹配open token并附snapshot，随后才进入
+   原normalize/batch。attach不消费token；redirect-first放行后先只读
+   `validate_issue_generation_claim()`，原handler成功或命中唯一允许的STA compat no-op
+   后才`commit_issue_generation_claim()`。
+4. STA同一generation分别维护IQ feedback和real-WB pending：hit的原handler成功或唯一
+   compat no-op后才commit并只消费IQ、保留WB；miss只有成功进入原replay queue后才
+   commit IQ、取消同代WB并close。LOAD只维护real-WB pending；STD
+   继续ROB value-only受限方案，不建token且无STD replay。
+5. `vstuIqFeedback`属于vector replay接口。本轮scalar-only不支持vector LS，任一VSTU
+   valid固定`uvm_fatal`，不能静默当作STA，也不能info/drop后继续。完整vector partial
+   replay留给vector专项。
+
+对应唯一执行落点：
+
+```text
+AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_iq_feedback_replay_framework_adapt_execution_plan_20260711.md
+```
 
 ### 4.10 `io_mem_to_ooo_vec_wb_agent_agent`
 
@@ -810,7 +839,7 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/lsqcommit_agent_agent/src/lsqco
 | 信号 | 位宽 | drv_cb方向 | mon_cb方向 | xaction字段 | connect | connect方向/对象（解析） | monitor采集 | driver驱动 |
 |---|---|---|---|---|---|---|---|---|
 | `io_ooo_to_mem_lsqio_pendingPtr_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_lsqio_pendingPtr_flag`<br>RTL->IF: `io_ooo_to_mem_lsqio_pendingPtr_flag` | 有 | 有 |
-| `io_ooo_to_mem_lsqio_pendingPtr_value` | `[8:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_lsqio_pendingPtr_value`<br>RTL->IF: `io_ooo_to_mem_lsqio_pendingPtr_value` | 有 | 有 |
+| `io_ooo_to_mem_lsqio_pendingPtr_value` | `[7:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_lsqio_pendingPtr_value`<br>RTL->IF: `io_ooo_to_mem_lsqio_pendingPtr_value` | 有 | 有 |
 | `io_ooo_to_mem_flushSb` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_flushSb`<br>RTL->IF: `io_ooo_to_mem_flushSb` | 有 | 有 |
 | `io_ooo_to_mem_lsqio_pendingMMIOld` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_lsqio_pendingMMIOld`<br>RTL->IF: `io_ooo_to_mem_lsqio_pendingMMIOld` | 有 | 有 |
 | `io_ooo_to_mem_lsqio_pendingst` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_lsqio_pendingst`<br>RTL->IF: `io_ooo_to_mem_lsqio_pendingst` | 有 | 有 |
@@ -832,7 +861,7 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_a
 | `io_ooo_to_mem_enqLsq_req_0_bits_fuType` | `[35:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_0_bits_fuType`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_0_bits_fuType` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_0_bits_uopIdx` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_0_bits_uopIdx`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_0_bits_uopIdx` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_0_bits_robIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_0_bits_robIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_0_bits_robIdx_flag` | 有 | 有 |
-| `io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value` | `[8:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value` | 有 | 有 |
+| `io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value` | `[7:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_flag` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_value` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_0_bits_sqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_0_bits_sqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_0_bits_sqIdx_flag` | 有 | 有 |
@@ -842,7 +871,7 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_a
 | `io_ooo_to_mem_enqLsq_req_1_bits_fuType` | `[35:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_1_bits_fuType`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_1_bits_fuType` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_1_bits_uopIdx` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_1_bits_uopIdx`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_1_bits_uopIdx` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_1_bits_robIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_1_bits_robIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_1_bits_robIdx_flag` | 有 | 有 |
-| `io_ooo_to_mem_enqLsq_req_1_bits_robIdx_value` | `[8:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_1_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_1_bits_robIdx_value` | 有 | 有 |
+| `io_ooo_to_mem_enqLsq_req_1_bits_robIdx_value` | `[7:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_1_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_1_bits_robIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_flag` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_value` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_1_bits_sqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_1_bits_sqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_1_bits_sqIdx_flag` | 有 | 有 |
@@ -852,7 +881,7 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_a
 | `io_ooo_to_mem_enqLsq_req_2_bits_fuType` | `[35:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_2_bits_fuType`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_2_bits_fuType` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_2_bits_uopIdx` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_2_bits_uopIdx`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_2_bits_uopIdx` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_2_bits_robIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_2_bits_robIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_2_bits_robIdx_flag` | 有 | 有 |
-| `io_ooo_to_mem_enqLsq_req_2_bits_robIdx_value` | `[8:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_2_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_2_bits_robIdx_value` | 有 | 有 |
+| `io_ooo_to_mem_enqLsq_req_2_bits_robIdx_value` | `[7:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_2_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_2_bits_robIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_flag` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_value` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_2_bits_sqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_2_bits_sqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_2_bits_sqIdx_flag` | 有 | 有 |
@@ -862,7 +891,7 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_a
 | `io_ooo_to_mem_enqLsq_req_3_bits_fuType` | `[35:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_3_bits_fuType`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_3_bits_fuType` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_3_bits_uopIdx` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_3_bits_uopIdx`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_3_bits_uopIdx` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_3_bits_robIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_3_bits_robIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_3_bits_robIdx_flag` | 有 | 有 |
-| `io_ooo_to_mem_enqLsq_req_3_bits_robIdx_value` | `[8:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_3_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_3_bits_robIdx_value` | 有 | 有 |
+| `io_ooo_to_mem_enqLsq_req_3_bits_robIdx_value` | `[7:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_3_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_3_bits_robIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_flag` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_value` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_3_bits_sqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_3_bits_sqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_3_bits_sqIdx_flag` | 有 | 有 |
@@ -872,7 +901,7 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_a
 | `io_ooo_to_mem_enqLsq_req_4_bits_fuType` | `[35:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_4_bits_fuType`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_4_bits_fuType` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_4_bits_uopIdx` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_4_bits_uopIdx`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_4_bits_uopIdx` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_4_bits_robIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_4_bits_robIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_4_bits_robIdx_flag` | 有 | 有 |
-| `io_ooo_to_mem_enqLsq_req_4_bits_robIdx_value` | `[8:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_4_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_4_bits_robIdx_value` | 有 | 有 |
+| `io_ooo_to_mem_enqLsq_req_4_bits_robIdx_value` | `[7:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_4_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_4_bits_robIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_flag` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_value` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_4_bits_sqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_4_bits_sqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_4_bits_sqIdx_flag` | 有 | 有 |
@@ -882,7 +911,7 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_a
 | `io_ooo_to_mem_enqLsq_req_5_bits_fuType` | `[35:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_5_bits_fuType`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_5_bits_fuType` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_5_bits_uopIdx` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_5_bits_uopIdx`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_5_bits_uopIdx` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_5_bits_robIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_5_bits_robIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_5_bits_robIdx_flag` | 有 | 有 |
-| `io_ooo_to_mem_enqLsq_req_5_bits_robIdx_value` | `[8:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_5_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_5_bits_robIdx_value` | 有 | 有 |
+| `io_ooo_to_mem_enqLsq_req_5_bits_robIdx_value` | `[7:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_5_bits_robIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_5_bits_robIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_flag` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_value` | `[6:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_value`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_value` | 有 | 有 |
 | `io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_flag`<br>RTL->IF: `io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_flag` | 有 | 有 |
@@ -1107,7 +1136,7 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/redirect_agent_agent/src/redire
 | `io_redirect_valid` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_redirect_valid`<br>RTL->IF: `io_redirect_valid` | 有 | 有 |
 | `io_redirect_bits_level` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_redirect_bits_level`<br>RTL->IF: `io_redirect_bits_level` | 有 | 有 |
 | `io_redirect_bits_robIdx_flag` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_redirect_bits_robIdx_flag`<br>RTL->IF: `io_redirect_bits_robIdx_flag` | 有 | 有 |
-| `io_redirect_bits_robIdx_value` | `[8:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_redirect_bits_robIdx_value`<br>RTL->IF: `io_redirect_bits_robIdx_value` | 有 | 有 |
+| `io_redirect_bits_robIdx_value` | `[7:0]` | `output` | `input` | 有 | 有 | IF->RTL: `io_redirect_bits_robIdx_value`<br>RTL->IF: `io_redirect_bits_robIdx_value` | 有 | 有 |
 
 ### 4.19 `sbuffer_agent_agent`
 
@@ -1225,26 +1254,15 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/veciss
 
 数量：0
 
-本轮已将 `io_mem_to_ooo_int_wb_agent_agent` 中原缺失的 connect 全部补齐，
-并按用户要求删除旧 V3 聚合字段，不再通过常量 0 保留字段占位。
-静态扫描结果为 `interface=114`、`connect=114`、`missing=0`。
+本轮已将 `io_mem_to_ooo_int_wb_agent_agent` 统一收敛到 V2 顶层真实 `writebackLda/Sta/Std` 命名，interface、xaction、monitor 和 connect 均为 109 个字段，且 connect 活动分支与非活动分支均为同名 `RTL->IF` 连接。
 
-保留字段按 V2 RTL 真实来源连接：
+当前静态扫描结果：`interface=109`、`xaction=109`、`monitor=109`、`connect=109`、`missing=0`。
 
-- `intWriteback_0/1/2` 中当前 V2 interface 保留的 `exceptionVec` 位继续连接真实 RTL 输出。
-- `intWriteback_3/4` 的 `sqIdx_flag/value`、`intWriteback_5/6` 的 `robIdx_flag`、
-  `intWriteback_5/6` 的 `sqIdx_flag/value`、`intWriteback_0/1/2` 中其余旧聚合 `exceptionVec` 位和 `lqIdx_flag/value`，
-  已从 interface、xaction、monitor 和 connect 中删除。删除项包含原常量占位字段，也包含少量原先映射到
-  V2 `writebackLda` 真实 `exceptionVec_13/15/19/21/23` 的旧 `intWriteback_*` 别名；后续如需这些 V2 真实位，
-  应通过 V2 命名接口或测试框架适配 plan 重新接入。`intWriteback_5/6 sqIdx_flag/value`
-  虽然曾可追溯到 V2 内部 `_inner_stdExeUnits_0/1_io_out_bits_uop_sqIdx_*` wire，但它不是
-  V2 顶层端口，且属于旧 V3 聚合命名，本轮按“非 L2TLB agent 不接内部层级”的规则删除。
-
-后续如果测试框架仍需要使用上述旧 V3 聚合语义，必须在测试框架适配 plan 中重新定义 V2 真实语义来源，不能在当前 V2 interface 中保留占位字段。
+旧 V3 整数写回聚合别名不再保留，也不再常量化占位；如后续测试框架仍需要旧聚合语义，应在测试框架适配 plan 中重新定义对应 V2 真实语义来源，而不是在 DUT interface 层恢复旧字段名。
 
 ## 6. dut_inst 顶层端口未归属 agent 列表
 
-当前 V2 `MemBlock` 顶层端口除 `clock/reset` 外，未被 `tb/*_agent_connect.sv` 活动分支直接归属到 agent 的端口数量为：377。这些端口仍在 `dut_inst.sv` 中实例化，但没有进入现有 agent。
+当前 V2 `MemBlock` 顶层端口除 `clock/reset` 外，未被 `tb/*_agent_connect.sv` 活动分支直接归属到 agent 的端口数量为：360。这些端口仍在 `dut_inst.sv` 中实例化，但没有进入现有 agent。
 
 ### 6.1 按建议分类汇总
 
@@ -1252,10 +1270,8 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/veciss
 |---|---:|---|
 | Fetch/ITLB到Mem端口 | 1 | 建议新建 fetch_itlb_mem_monitor_agent 或扩展 itlb_agent。 |
 | Frontend reset bypass端口 | 2 | 建议并入 reset/frontend_ctrl_agent 或扩展 other_ctrl_agent。 |
-| L2 hint/flush控制端口 | 4 | 建议新建 l2_hint_flush_agent，区分 hint 输入驱动和 flush done 采样。 |
 | L2侧PMP response 顶层端口 | 2 | 建议新建 l2_pmp_resp_monitor_agent 或并入 l2_tlb_requestor_agent 的 response checker。 |
 | L2侧TLB request/response 顶层端口 | 13 | 建议新建 l2_tlb_requestor_agent；不要接到当前内部 L2TLB responder agent。 |
-| Mem->OOO输出端口 | 1 | 建议优先检查是否应并入已有 io_mem_to_ooo_* agent。 |
 | TileLink/总线自动生成端口 | 109 | 建议新建或复用 TileLink/bus 边界 agent，按 uncache、icachectrl、icache、dcache 等通道再拆子 agent。 |
 | Debug interrupt sink端口 | 1 | 建议扩展 int_sink_agent 或新建 debug_interrupt_sink_agent，不归入 TileLink/bus agent。 |
 | Top->Backend旁路控制端口 | 4 | 建议扩展 backendToTopBypass/other_ctrl 类 agent，按 MSI/CLINT time 分组。 |
@@ -1281,15 +1297,6 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/veciss
 | `io_resetInFrontendBypass_fromFrontend` | `input` | `` | `io_resetInFrontendBypass_fromFrontend` | 建议并入 reset/frontend_ctrl_agent 或扩展 other_ctrl_agent。 |
 | `io_resetInFrontendBypass_toL2Top` | `output` | `` | `io_resetInFrontendBypass_toL2Top` | 建议并入 reset/frontend_ctrl_agent 或扩展 other_ctrl_agent。 |
 
-#### L2 hint/flush控制端口
-
-| DUT端口 | 方向 | 位宽 | dut_inst连接信号 | 建议 |
-|---|---|---|---|---|
-| `io_l2_hint_valid` | `input` | `` | `io_l2_hint_valid` | 建议新建 l2_hint_flush_agent，区分 hint 输入驱动和 flush done 采样。 |
-| `io_l2_hint_bits_sourceId` | `input` | `[3:0]` | `io_l2_hint_bits_sourceId` | 建议新建 l2_hint_flush_agent，区分 hint 输入驱动和 flush done 采样。 |
-| `io_l2_hint_bits_isKeyword` | `input` | `` | `io_l2_hint_bits_isKeyword` | 建议新建 l2_hint_flush_agent，区分 hint 输入驱动和 flush done 采样。 |
-| `io_l2_flush_done` | `input` | `` | `io_l2_flush_done` | 建议新建 l2_hint_flush_agent，区分 hint 输入驱动和 flush done 采样。 |
-
 #### L2侧PMP response 顶层端口
 
 | DUT端口 | 方向 | 位宽 | dut_inst连接信号 | 建议 |
@@ -1314,12 +1321,6 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/veciss
 | `io_l2_tlb_req_resp_bits_excp_0_gpf_ld` | `output` | `` | `io_l2_tlb_req_resp_bits_excp_0_gpf_ld` | 建议新建 l2_tlb_requestor_agent；不要接到当前内部 L2TLB responder agent。 |
 | `io_l2_tlb_req_resp_bits_excp_0_pf_ld` | `output` | `` | `io_l2_tlb_req_resp_bits_excp_0_pf_ld` | 建议新建 l2_tlb_requestor_agent；不要接到当前内部 L2TLB responder agent。 |
 | `io_l2_tlb_req_resp_bits_excp_0_af_ld` | `output` | `` | `io_l2_tlb_req_resp_bits_excp_0_af_ld` | 建议新建 l2_tlb_requestor_agent；不要接到当前内部 L2TLB responder agent。 |
-
-#### Mem->OOO输出端口
-
-| DUT端口 | 方向 | 位宽 | dut_inst连接信号 | 建议 |
-|---|---|---|---|---|
-| `io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug` | `output` | `` | `io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug` | 建议优先检查是否应并入已有 io_mem_to_ooo_* agent。 |
 
 #### TileLink/总线自动生成端口
 
@@ -1535,27 +1536,6 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/veciss
 | `io_dft_reset_bcknd_mode` | `output` | `` | `io_dft_reset_bcknd_mode` | 建议扩展 other_ctrl_agent。 |
 | `io_dft_reset_bcknd_scan_mode` | `output` | `` | `io_dft_reset_bcknd_scan_mode` | 建议扩展 other_ctrl_agent。 |
 
-#### LDA writeback 未归属 exceptionVec 输出端口
-
-这些端口是 V2 `writebackLda_0/1/2` 顶层真实 output。当前 `io_mem_to_ooo_int_wb_agent_agent`
-已按“旧 V3 信号不保留”的要求删除旧 `intWriteback_*` 聚合别名，因此这些 V2 真实位暂未归属到现有 agent。
-后续如果测试框架需要完整 LDA `exceptionVec` 观察，应通过 V2 命名接口扩展 `io_mem_to_ooo_int_wb_agent_agent`
-或新建专用 writebackLda monitor agent，而不是恢复旧 V3 聚合字段名。
-
-| DUT端口 | 方向 | 位宽 | dut_inst连接信号 | 建议 |
-|---|---|---|---|---|
-| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_13` | `output` | `` | `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_13` | 建议后续按 V2 命名接口扩展 writeback monitor；DUT output 方向只需 monitor/coverage，不建议 driver 驱动。 |
-| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_15` | `output` | `` | `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_15` | 建议后续按 V2 命名接口扩展 writeback monitor；DUT output 方向只需 monitor/coverage，不建议 driver 驱动。 |
-| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_19` | `output` | `` | `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_19` | 建议后续按 V2 命名接口扩展 writeback monitor；DUT output 方向只需 monitor/coverage，不建议 driver 驱动。 |
-| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_21` | `output` | `` | `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_21` | 建议后续按 V2 命名接口扩展 writeback monitor；DUT output 方向只需 monitor/coverage，不建议 driver 驱动。 |
-| `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_23` | `output` | `` | `io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_23` | 建议后续按 V2 命名接口扩展 writeback monitor；DUT output 方向只需 monitor/coverage，不建议 driver 驱动。 |
-| `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_13` | `output` | `` | `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_13` | 建议后续按 V2 命名接口扩展 writeback monitor；DUT output 方向只需 monitor/coverage，不建议 driver 驱动。 |
-| `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_19` | `output` | `` | `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_19` | 建议后续按 V2 命名接口扩展 writeback monitor；DUT output 方向只需 monitor/coverage，不建议 driver 驱动。 |
-| `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_21` | `output` | `` | `io_mem_to_ooo_writebackLda_1_bits_uop_exceptionVec_21` | 建议后续按 V2 命名接口扩展 writeback monitor；DUT output 方向只需 monitor/coverage，不建议 driver 驱动。 |
-| `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_13` | `output` | `` | `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_13` | 建议后续按 V2 命名接口扩展 writeback monitor；DUT output 方向只需 monitor/coverage，不建议 driver 驱动。 |
-| `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_19` | `output` | `` | `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_19` | 建议后续按 V2 命名接口扩展 writeback monitor；DUT output 方向只需 monitor/coverage，不建议 driver 驱动。 |
-| `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_21` | `output` | `` | `io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_21` | 建议后续按 V2 命名接口扩展 writeback monitor；DUT output 方向只需 monitor/coverage，不建议 driver 驱动。 |
-
 #### 其他未分类
 
 | DUT端口 | 方向 | 位宽 | dut_inst连接信号 | 建议 |
@@ -1739,6 +1719,10 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/veciss
 
 - 本文统计的“没有 driver 驱动”仅表示当前 driver 源码没有主动赋值该 interface 字段。对于 DUT output 或被动采样类接口，这是预期状态；后续只需要重点关注 DUT input 且测试目标要求主动驱动的未驱动字段。
 
-- 当前 interface 字段的 connect 覆盖已闭合，`io_mem_to_ooo_int_wb_agent_agent` 静态扫描结果为 `interface=114`、`connect=114`、`missing=0`。其中当前保留的 V2 写回字段连接真实 RTL 输出；旧 V3 聚合字段已从 interface、xaction、monitor 和 connect 中删除，不再常量化保留。后续如测试框架仍依赖这些旧聚合语义，或需要补回被旧别名覆盖过的 V2 真实 `exceptionVec` 位，应在测试框架适配 plan 中通过 V2 命名接口重新定义语义来源。
+- 当前 interface 字段的 connect 覆盖已闭合，`io_mem_to_ooo_int_wb_agent_agent` 静态扫描结果为 `interface=109`、`xaction=109`、`monitor=109`、`connect=109`、`missing=0`。该 agent 已全部使用 V2 `writebackLda/Sta/Std` 顶层原生命名，旧 V3 整数写回聚合别名已从 interface、xaction、monitor 和 connect 中删除，不再常量化保留。
 
-- V2 顶层仍有 376 个端口未归属现有 agent，主要是 TileLink/总线、perf/trace、L2 TLB/PMP、L2 prefetch、WFI/低功耗、外部控制边界端口，以及删除旧 `intWriteback_*` 聚合别名后暂未重新接入的 LDA writeback `exceptionVec` 输出端口；如后续测试目标需要覆盖，应按本文分类新增或扩展 agent。
+- `io_mem_to_ooo_iq_feedback_agent_agent` 的静态字段链虽然完整，但scalar STA接口只含
+  SQ key。当前raw伪ROB/LQ valid和replay后generation缺口属于运行期语义问题，不能用
+  “interface/xaction/connect均有字段”判定为已适配；必须执行IQ feedback/replay专项。
+
+- V2 顶层仍有 360 个端口未归属现有 agent，主要是 TileLink/总线、perf/trace、L2 TLB/PMP、L2 prefetch、WFI/低功耗、外部控制边界端口；如后续测试目标需要覆盖，应按本文分类新增或扩展 agent。

@@ -123,7 +123,73 @@ V3 对比：
 - 这是明确的 V2-only 语义字段。
 - V3 当前源码不具备同名或同粒度 `TlbCsrBundle.priv.debug` 顶层输入，适配时不能用其他 priv bit 代替。
 
-### 3.4 `vstuIqFeedback.feedbackSlow` 的 vector partial replay 字段
+### 3.4 `staIqFeedback` 精简身份与 `vstuIqFeedback` vector partial replay
+
+#### 3.4.1 V2 scalar `staIqFeedback` 只有 SQ 身份
+
+覆盖端口：
+
+- `io_mem_to_ooo_staIqFeedback_{0,1}_feedbackSlow_valid`
+- `io_mem_to_ooo_staIqFeedback_{0,1}_feedbackSlow_bits_hit`
+- `io_mem_to_ooo_staIqFeedback_{0,1}_feedbackSlow_bits_sqIdx_flag/value`
+
+V2源码/RTL事实：
+
+- `MemBlock.scala`把scalar store-address slow feedback作为`staIqFeedback`返回backend
+  issue queue。
+- 当前`build_memblock/rtl/MemBlock.sv`展开后的每路scalar STA feedback只保留
+  `valid/hit/sqIdx_flag/sqIdx_value`；没有ROB、LQ、`issue_epoch`或`replay_seq`。
+- `hit=0`表示该次STA issue需要backend replay，`hit=1`表示该IQ feedback channel成功；
+  它不是RF/ROB real writeback。
+
+当前测试框架风险：
+
+```text
+io_mem_to_ooo_iq_feedback_agent_agent_monitor当前在STA valid时：
+  rob_valid=1；
+  lq_valid=1；
+  sq_valid=1并复制真实SQ key；
+但V2没有ROB/LQ payload，因此ROB/LQ value保持empty helper默认0。
+```
+
+该逻辑把默认0伪装成真实ROB/LQ key，可能误命中另一个active uid。只把伪valid清0仍
+不够：V2 raw也没有测试框架generation，第一次replay后当前status已变成新
+`issue_epoch/replay_seq`，不能用它给旧event补snapshot。
+
+V2 scalar适配方案：
+
+```text
+accepted LOAD/STA fire：
+  注册不可变issue-generation token；
+
+STA monitor raw：
+  只置sq_valid并复制真实SQ key；
+  rob_valid/lq_valid固定0；
+
+adapter：
+  SQ active map解析uid；
+  match open STA token并attach uid/ROB/issue_epoch/replay_seq；
+  attach不消费token；
+
+batch redirect-first放行后：
+  validate IQ claim资格，只生成局部claim_ctx且不修改token/status/tombstone；
+  调用原handle_issue_feedback_event；
+  hit的handler成功或命中唯一允许的STA same-generation distinct-channel compat no-op后，
+    commit并只清IQ pending、保留real-WB pending；
+  miss成功进入原replay queue后，commit清IQ、取消同generation real-WB并close STA_MISS；
+  miss/replay、fault、generation错配和其它handler拒绝不得走compat no-op，必须fatal且
+    token保持未消费；
+
+replay re-fire：
+  使用新issue_epoch/replay_seq注册新token；
+  旧event只能按closed tombstone reason drop。
+```
+
+LOAD只需要real-WB token；STD继续ROB value-only固定双probe，不建token且无STD
+replay。该方案不改变原batch redirect-first、pass/fault handler或terminal定义，只
+增加event correlation和active map释放前token生命周期检查。
+
+#### 3.4.2 `vstuIqFeedback.feedbackSlow` vector partial replay字段
 
 覆盖端口：
 
@@ -154,6 +220,8 @@ V3 对比：
 
 - 功能在 V3 内部仍有近似逻辑，但当前 V3 顶层不具备 V2 同名同结构端口。
 - 适配时要按 V3 `MemRSFeedbackIO` 实际生成端口重新连接，不能把 V2 `vstuIqFeedback` 三个字段直接视为 V3 缺失功能。
+- 本轮scalar-only不支持VSTU/vector partial replay；任一VSTU feedback valid必须
+  `uvm_fatal`。不能把vector feedback映射成scalar STA，也不能info/drop后继续。
 
 ### 3.5 `enqLsq.req.bits.exceptionVec_*`
 
@@ -266,24 +334,49 @@ V3 对比：
 
 覆盖端口：
 
+- `io_ooo_to_mem_lsqio_pendingPtr_flag/value`
 - `io_ooo_to_mem_lsqio_pendingMMIOld`
 - `io_ooo_to_mem_lsqio_pendingst`
 - `io_ooo_to_mem_lsqio_scommit`
 
 V2 源码：
 
-- `MemBlock.scala` 的 `ooo_to_mem.lsqio` 定义 `scommit`、`pendingMMIOld`、`pendingst`。
+- `MemBlock.scala` 的 `ooo_to_mem.lsqio` 定义 `pendingPtr`、`scommit`、`pendingMMIOld`、`pendingst`。
 - `XSCore.scala` 从 `backend.io.mem.robLsqIO` 接入这些信号。
 - `MemBlock.scala` 将这些字段分发给 `loadMisalignBuffer`、`storeMisalignBuffer` 和 `lsq.io.rob`。
+- `Rob.scala` 中 `pendingPtr := RegNext(deqPtr)`，因此 `pendingPtr` 语义是 ROB 当前 commit/deq head，而不是本拍 commit batch 的最后一个 entry。
 - `StoreQueue.scala` 使用 `pendingst && uop(deqPtr).robIdx === pendingPtr` 判断 ROB 当前 pending store 与 SQ entry 的关系。
 - `LoadQueueUncache.scala` 使用 `pendingMMIOld` 跟踪 pending MMIO load。
 
 功能逻辑：
 
-- `scommit` 表示 ROB 本周期提交的 store 数量。
-- `pendingst` 表示 ROB head 或相关提交状态中存在 pending store。
-- `pendingMMIOld` 表示存在 pending MMIO load。
+- `pendingPtr` 表示 ROB commit/deq head 指针。MemBlock standalone 测试框架应独立维护 modeled ROB head；有 commit batch 时该 head 等于 batch 第一个 uid 的完整 ROB key，无 batch 时仍持续指向当前未提交 head，不能使用 batch tail。
+- `scommit` 表示 ROB 本周期 `commitValid` 的 scalar store 数量；测试框架 fault terminal store 只是收敛抽象，不应计入。
+- `pendingst` 表示 ROB 处于正常 commit 检查状态，当前 head entry valid 且是 scalar store；它不要求该 store 已经 `commitValid`。
+- `pendingMMIOld` 表示 ROB 处于正常 commit 检查状态，当前 head entry valid、是 load 且 ROB `mmio` bit 已置位；它不要求该 load 已经 writeback或commit。
 - 这些信号用于 LSQ、misalign buffer 和 uncache/MMIO 路径与 ROB 提交流程同步，避免 MMIO、store、misalign split 操作越过提交顺序。
+
+#### 3.8.1 MMIO load 的 ROB head 与真实 commit 先后关系
+
+V2 ROB 中 `deqPtr` 不是“最后一个已经提交的 ROB 指针”，而是当前 ROB commit/deq 队头候选。`NewRobDeqPtrWrapper` 内部保存 `deqPtrVec`，`io.out := deqPtrVec`，并在满足提交推进条件时才把内部寄存器更新为 `deqPtrVec_next`。因此在普通 ready 指令提交成功时，下一拍 `deqPtr` 会推进；但如果当前 head 因 `commit_w=0` 不能真实提交，`deqPtr` 会停在该 entry。
+
+`pendingPtr := RegNext(deqPtr)` 只是把上一拍 ROB head 打一拍给 LSQ 使用，不表示该 ROB entry 已经提交。对 MMIO load，源码形成如下协议：
+
+```text
+1. load pipeline 发现 MMIO，`LoadQueueUncache` 记录 request entry，并通过 `loadMmio/loadMmioUop.robIdx` 通知 ROB 标记 entry.mmio。
+2. 更老指令提交后，该 MMIO load 的 robIdx 成为 ROB head，`deqPtr` 指向该 entry。
+3. 该 entry 尚未 MMIO response/writeback，因此 `commit_w=0`，真实 `commitValid` 不成立，`deqPtr` 不推进。
+4. ROB 仍可通过 `pendingMMIOld=1`、`pendingPtr=RegNext(deqPtr)` 告诉 `LoadQueueUncache`：当前 head 是 MMIO load，可以放行 side-effect uncache request。
+5. `LoadQueueUncache` 匹配 `req.uop.robIdx === pendingPtr` 后发送 MMIO request，response 回来后产生 `mmioOut` load writeback。
+6. ROB entry writeback 完成后 `commit_w=1`，后续才允许真实 commit/deq。
+```
+
+对应测试框架结论：
+
+- `pendingPtr_flag/value` 必须表达 ROB head 的完整 `RobPtr`，包括 flag 和 value，不能只用 value，也不能用 commit batch tail。
+- `pendingMMIOld/pendingPtr` 是 ROB head sideband grant，不是 pass/fail、terminal、LSQ deq 或真实 ROB commit。
+- 测试框架必须把 head sideband 与 ordinary commit candidate 解耦。MMIO load 已到 modeled ROB head且status已有MMIO load tag时，每拍驱动`pendingMMIOld=1`和当前`pendingPtr`，不要求writeback/pass，也不要求`commit_uids`非空。若普通batch为空，这一拍只是sideband-only周期，不设置`status.rob_commit`，不推进commit cursor/modeled head，也不提前deq、pass/fail或terminal；不需要再建立第二套特殊commit状态机。
+- `storeMmio/storeMmioUop` 同样应回填 status ROB mmio tag，但本轮只作为状态同步，不直接改变 pass/fail/terminal；store MMIO 的 request/writeback/commit 仍按 store/SQ/MMIO store 专项时序处理。
 
 V3 对比：
 
@@ -293,6 +386,7 @@ V3 对比：
 结论：
 
 - `pendingMMIOld` 与 `pendingst` 是明确 V2-only ROB/LSQ 控制输入。
+- 对 V2 mem_ut 适配，`pendingPtr/pendingst/scommit` 属于 DUT 输入 sideband 语义修正，不应直接改变测试框架公共 `commit/pending/terminal/pass-fail` 判定。
 - `scommit` 在 V3 Scala 中仍存在，但本轮 Verilog 对比显示 V2 顶层展开与 V3 端口集合不一致，连接时仍要以生成 RTL 为准。
 
 ### 3.9 `issueLda`

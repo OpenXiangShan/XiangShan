@@ -83,7 +83,7 @@ Dispatch framework 参数分组如下：
 | 分组 | 字段 |
 | --- | --- |
 | 主表与模式 | `MEMBLOCK_MAIN_TRANS_NUM`、`MEMBLOCK_USE_MANUAL_MAIN_TABLE` |
-| 入队与流水线宽度 | `MEMBLOCK_ENQ_PER_CYCLE`、`MEMBLOCK_ENQ_PER_CYCLE_RAND_EN`、`MEMBLOCK_REAL_LSQ_ENQ_MAX`、`MEMBLOCK_LOAD_PIP_NUM_LIMIT`、`MEMBLOCK_STA_PIP_NUM_LIMIT`、`MEMBLOCK_STD_PIP_NUM_LIMIT`、`MEMBLOCK_LOAD_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STA_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STD_PIP_NUM_RANDOM_EN`、`MEMBLOCK_REAL_ENQ_WIDTH`、`MEMBLOCK_REAL_LOAD_PIPE_NUM`、`MEMBLOCK_REAL_STA_PIPE_NUM`、`MEMBLOCK_REAL_STD_PIPE_NUM` |
+| 入队与流水线runtime使用量 | `MEMBLOCK_ENQ_PER_CYCLE`、`MEMBLOCK_ENQ_PER_CYCLE_RAND_EN`、`MEMBLOCK_LOAD_PIP_NUM_LIMIT`、`MEMBLOCK_STA_PIP_NUM_LIMIT`、`MEMBLOCK_STD_PIP_NUM_LIMIT`、`MEMBLOCK_LOAD_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STA_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STD_PIP_NUM_RANDOM_EN` |
 | op class 权重 | `MEMBLOCK_OP_CLASS_INT_LOAD_WT`、`MEMBLOCK_OP_CLASS_FP_LOAD_WT`、`MEMBLOCK_OP_CLASS_STORE_WT`、`MEMBLOCK_OP_CLASS_PREFETCH_WT`、`MEMBLOCK_OP_CLASS_AMO_WT`、`MEMBLOCK_OP_CLASS_CBO_WT` |
 | fuOpType 权重 | `MEMBLOCK_LOAD_FUOP_*_WT`、`MEMBLOCK_STORE_FUOP_*_WT`、`MEMBLOCK_PREFETCH_FUOP_*_WT`、`MEMBLOCK_CBO_FUOP_*_WT`、`MEMBLOCK_AMO_FUOP_*_WT` |
 | boundary profile 生成 | `MEMBLOCK_BOUNDARY_PROFILE_GEN_EN`、`MEMBLOCK_BOUNDARY_*_WT`、`MEMBLOCK_STORE_CROSS_8B_WITHIN_16B_EN` |
@@ -93,7 +93,8 @@ Dispatch framework 参数分组如下：
 | delay 权重 | `MEMBLOCK_DELAY_0_WT`、`MEMBLOCK_DELAY_1_20_WT`、`MEMBLOCK_DELAY_21_50_WT` |
 | 发射前补充字段 | `MEMBLOCK_MDP_LOAD_WAIT_WT`、`MEMBLOCK_MDP_STORESET_HIT_WT`、`MEMBLOCK_LOAD_WAIT_STRICT_WT`、`MEMBLOCK_RVC_WT`、`MEMBLOCK_PC_BASE`、`MEMBLOCK_PC_STRIDE`、`MEMBLOCK_FTQ_IDX_BASE`、`MEMBLOCK_PDEST_BASE`、`MEMBLOCK_PDEST_RANGE` |
 | TLB/PTE 权重 | `MEMBLOCK_TLB_PTE_*_WT` |
-| 地址范围 | `MEMBLOCK_PADDR_BASE`、`MEMBLOCK_PADDR_RANGE` |
+| 自动主表虚拟地址范围 | `MEMBLOCK_MAIN_VADDR_BASE`、`MEMBLOCK_MAIN_VADDR_RANGE` |
+| TLB物理地址映射范围 | `MEMBLOCK_PADDR_BASE`、`MEMBLOCK_PADDR_RANGE` |
 | 主动主流程 sequence debug | `MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES` |
 | lintsissue dispatch sequence | `MEMBLOCK_DISPATCH_ISSUE_SEQ_EN`、`MEMBLOCK_DISPATCH_ISSUE_NONBLOCKING_EN`、`MEMBLOCK_DISPATCH_READY_TIMEOUT`、`MEMBLOCK_STD_REAL_WB_PASS_EN` |
 | lsqenq admission sequence | `MEMBLOCK_LSQENQ_SEQ_EN`、`MEMBLOCK_LSQENQ_READY_TIMEOUT` |
@@ -103,8 +104,20 @@ Dispatch framework 参数分组如下：
 | L2TLB/PTW responder sequence | `MEMBLOCK_L2TLB_SEQ_EN`、`MEMBLOCK_L2TLB_MIN_LATENCY`、`MEMBLOCK_L2TLB_MAX_LATENCY`、`MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` |
 
 `seq_csr_common.sv` 是 sequence 使用的正式读取入口。它从 `plus.sv`
-读取最终值后执行合法性检查：非负整型检查、必需非零检查、权重组全 0
-fatal、优先级/地址复用概率 clamp，以及流水线配置对真实端口数量的 clamp。
+读取最终值后执行合法性检查：非负整型检查、必需非零检查、权重组全0
+fatal、优先级/地址复用概率clamp，以及`apply_runtime_resource_limits()`按编译期真实端口数量
+集中处理enqueue/pipe runtime行为上限。
+
+DUT物理LSQ enqueue slot和LOAD/STA/STD pipe数量不属于plus参数，统一由
+`cfg/memblock_compile_params.svh`的`MEMBLOCK_DUT_*`宏配置，并由
+`memblock_dispatch_types.sv`暴露同名typed localparam。五个旧`MEMBLOCK_REAL_*`硬件镜像从
+字段定义、加载、default cfg、runtime快照、getter和consumer完整删除，不保留旧名称检测或
+兼容wrapper。物理循环直接读取compile localparam，runtime plus只能调节本testcase使用量。
+
+`MEMBLOCK_MAIN_VADDR_BASE/RANGE` 只供 `apply_legal_addr_template()` 生成自动主表 normal
+虚拟地址，`MEMBLOCK_PADDR_BASE/RANGE` 继续只供 `tlb_map_builder` 生成翻译后的物理 PPN。
+两组默认值相同只用于兼容既有 Bare smoke，不表示 VA 和 PA 窗口继续耦合。manual directed
+和 boundary profile 地址生成不受 MAIN_VADDR 参数全局限制。
 
 `MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES` 是主动主流程 driver 的统一无进展
 debug 阈值，覆盖 LSQ enqueue、lintsissue dispatch issue 和 LSQ commit sequence。

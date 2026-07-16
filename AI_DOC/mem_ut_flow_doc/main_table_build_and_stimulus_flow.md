@@ -17,6 +17,23 @@
 
 说明：用户给出的 `issue_queue_assigner.sv` 在当前源码树中不存在。当前 issue 字段分配由 `issue_field_assigner.sv` 承担，issue queue 路由和选择由 `issue_queue_scheduler.sv` 承担。
 
+### V2 适配目标边界
+
+本文 flow 图和后续“真实逻辑摘要”记录的是当前尚未完成 V2 适配的测试框架源码，因此仍会出现
+`canAccept/response key`、`commit_allocate_with_resp()` 和 `uid[6:0] -> uopIdx` 等历史行为。
+这些行为不得作为 V2 coding 目标。V2 最终 admission 语义以
+`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`
+和 `AI_DOC/mem_ut_flow_doc/lsq_admission_flow.md` 的 V2 目标章节为准：
+
+- V2 MemBlock 顶层接收的是上游 `LsqEnqCtrl` 已接受并分配 key 后的一拍 `Valid` request，
+  测试框架不得等待顶层不存在的 `canAccept/response key`。
+- sequence 在驱动前预测整批 LQ/SQ key；driver完成E0 drive、E1 sample/abort/revoke后判断本批是否
+  仍有效。未被打断时重新调用`preview_allocate()`核对当前key，再调用唯一`commit_allocate()`提交，
+  不新增第二层prediction wrapper。
+- V2 scalar load/store 固定驱动 `uopIdx=0`、`lastUop=1`、`numLsElem=1`，
+  不得继续把全局 uid 低位写入 instruction-local `uopIdx`。
+- 带 accept/response 的其它版本继续走 capability 隔离的原确认路径；不得把两种确认语义混在同一隐式默认分支中。
+
 ## 1. 函数调用 Flow 图
 
 ```mermaid

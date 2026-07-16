@@ -32,7 +32,7 @@ AI_DOC/analysis/interface/v2/mem_ut_v2_dut_framework_followup_notes_20260707.md
 
 这会继续读取独立 memblock RTL，而不是用户指定的整核 `build/rtl`。修改前 `dut_inst.sv` 是 V3 形态，实例端口约 1393 个，其中 648 个端口不存在于 V2 整核 `MemBlock`，直接切到 V2 整核 RTL 会出现 DUT 端口不存在错误。
 
-修改前 `memblock_connect.sv` 展开的多个 connect 文件仍引用 V3 聚合接口或旧 internal 层级，例如 `io_ooo_to_mem_intIssue_*`、`io_ooo_to_mem_vecIssue_*`、`io_mem_to_ooo_intWriteback_*`、`io_mem_to_ooo_vecWriteback_*`、旧 L2TLB/PTW `_inner_*` 路径。这些引用在 V2 整核顶层不存在。
+修改前 `memblock_connect.sv` 展开的多个 connect 文件仍引用 V3 聚合接口或旧 internal 层级，例如 `io_ooo_to_mem_intIssue_*`、`io_ooo_to_mem_vecIssue_*`、旧整数写回聚合接口、`io_mem_to_ooo_vecWriteback_*`、旧 L2TLB/PTW `_inner_*` 路径。这些引用在 V2 整核顶层不存在。
 
 ## 3. 修改后逻辑
 
@@ -70,9 +70,9 @@ AI_DOC/analysis/interface/v2/mem_ut_v2_dut_framework_followup_notes_20260707.md
 | `io_ooo_to_mem_intIssue_3/4` | 映射到 `io_ooo_to_mem_issueSta_0/1` 的可对应字段。 |
 | `io_ooo_to_mem_intIssue_5/6` | 映射到 `io_ooo_to_mem_issueStd_0/1` 的可对应字段。 |
 | `io_ooo_to_mem_vecIssue_0/1` | 映射到 `io_ooo_to_mem_issueVldu_0/1` 的可对应字段。 |
-| `io_mem_to_ooo_intWriteback_0/1/2` | 从 `io_mem_to_ooo_writebackLda_0/1/2` 采样可对应字段。 |
-| `io_mem_to_ooo_intWriteback_3/4` | 从 `io_mem_to_ooo_writebackSta_0/1` 采样可对应字段。 |
-| `io_mem_to_ooo_intWriteback_5/6` | 从 `io_mem_to_ooo_writebackStd_0/1` 采样可对应字段。 |
+| 旧整数写回聚合 0/1/2 | 已统一替换为 V2 `io_mem_to_ooo_writebackLda_0/1/2_*` 原生命名。 |
+| 旧整数写回聚合 3/4 | 已统一替换为 V2 `io_mem_to_ooo_writebackSta_0/1_*` 原生命名。 |
+| 旧整数写回聚合 5/6 | 已统一替换为 V2 `io_mem_to_ooo_writebackStd_0/1_*` 原生命名。 |
 | `io_mem_to_ooo_vecWriteback_0/1` | 从 `io_mem_to_ooo_writebackVldu_0/1` 采样可对应字段。 |
 | `cpuWfi` / `io_outer_cpu_wfi` | 映射到 V2 `cpuHalted` / `io_outer_cpu_halt`。 |
 | CSR `*Enable` 字段 | 映射到 V2 `*_enable` 风格字段；V2 无等价字段置 0。 |
@@ -550,21 +550,11 @@ input  io_outer_cpu_halt;
 
 #### 7.9.3 int writeback 非公共状态字段删除
 
-功能特性：`io_mem_to_ooo_int_wb_agent` 仍保留部分 V3 聚合 writeback 字段，但这些字段在 V2 `writebackLda/Sta/Std` split 端口中没有 RTL 来源，且不进入 `memblock_sync_pkg::dispatch_raw_int_wb_t` 公共状态流。保留这些字段会让 monitor 读取悬空 interface 字段并做 X/Z 检查。
+功能特性：`io_mem_to_ooo_int_wb_agent` 早期 V2 适配中仍保留少量无 V2 顶层来源的旧写回聚合字段。本轮最终收敛后，这些字段以及后续所有旧写回聚合别名都已从 interface、xaction、monitor 和 connect 中删除。
 
-修改前逻辑：interface、xaction、monitor 和 driver 中仍保留以下无 V2 来源字段：
+修改前逻辑：driver 曾经暴露过无 V2 顶层来源的 ready/isRVC/pdest 等字段，monitor 也会对这些无来源字段做采样或 X/Z 检查，容易造成悬空字段和误报。
 
-```text
-io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC
-io_mem_to_ooo_intWriteback_3_0_ready
-io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC
-io_mem_to_ooo_intWriteback_3_0_bits_pdest
-io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC
-io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC
-io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC
-```
-
-修改后逻辑：上述字段已从 interface 声明、clocking block、xaction 字段/约束/打印/compare、monitor 局部采样/XZ 检查/注释 transaction 赋值、driver 驱动路径中删除。driver 中 `send_pkt()` 和 `drive_idle()` 不再驱动 `io_mem_to_ooo_intWriteback_3_0_ready`，因为该字段没有 V2 RTL 顶层来源。
+修改后逻辑：driver 保持空实现，不再驱动任何 int writeback 字段；interface 和 monitor 只保留 V2 `writebackLda/Sta/Std` 顶层真实 output。该阶段的删除项已被 7.10 的“全量 V2 命名统一”覆盖。
 
 源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_driver.sv`，逻辑对象：`send_pkt()` 和 `drive_idle()`。
 
@@ -578,25 +568,9 @@ task io_mem_to_ooo_int_wb_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode
 endtask:drive_idle
 ```
 
-中文伪代码：该逻辑在 int writeback agent driver 中原本负责驱动唯一残留的 `io_mem_to_ooo_intWriteback_3_0_ready`。删除该字段后，`send_pkt()` 不再从 transaction 中读取无来源 ready 字段，也不向 interface 写任何信号；`drive_idle()` 在 reset 和 idle 周期不再对该 ready 字段赋 0、1、X 或随机值。该 task 没有调用子函数，副作用是移除对 V2 不存在字段的驱动路径，避免 driver 和 interface 保留无效握手信号。
+中文伪代码：该逻辑在 int writeback agent driver 中表示当前 agent 只做 DUT output 被动采样。`send_pkt()` 不从 transaction 读取字段，也不向 interface 写信号；`drive_idle()` 在 reset 和 idle 周期同样不赋值任何字段。该 task 没有调用子函数，副作用是保证 V2 写回 output 不被 driver 误驱动。
 
-源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_monitor.sv`，逻辑对象：`mon_data()` 局部采样和 X/Z 检查。
-
-```systemverilog
-`TCNT_CHECK_SIG_XZ(io_mem_to_ooo_intWriteback_3_0_valid,io_mem_to_ooo_intWriteback_3_0_valid,1);
-`TCNT_CHECK_SIG_XZ(io_mem_to_ooo_intWriteback_3_0_bits_toRob_valid,io_mem_to_ooo_intWriteback_3_0_bits_toRob_valid,1);
-`TCNT_CHECK_SIG_XZ(io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_robIdx_flag,io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_robIdx_flag,1);
-```
-
-中文伪代码：该逻辑在 monitor 中负责对仍保留且需要采样的 V2 writeback 字段做 X/Z 检查。每拍采样后，monitor 只检查 V2 适配后仍存在的 valid、toRob valid 和 robIdx 等字段；已经删除的 `ready`、`isRVC`、`pdest` 不再被采样或检查。该逻辑继续调用 `TCNT_CHECK_SIG_XZ` 宏检查真实保留字段是否出现 X/Z，副作用是减少无来源字段导致的误报，同时不改变进入公共 raw queue 的字段处理。
-
-正确性检查：
-
-- 已执行残留扫描，以下 7 个删除字段在 `io_mem_to_ooo_int_wb_agent` 的 `src` 目录和 `tb/io_mem_to_ooo_int_wb_agent_connect.sv` 中均无引用：
-  `isRVC` 删除项、`io_mem_to_ooo_intWriteback_3_0_ready`、`io_mem_to_ooo_intWriteback_3_0_bits_pdest`。
-- 已确认 `io_mem_to_ooo_writebackLda/Sta_*` 是 V2 RTL output，并将这些字段在 `io_mem_to_ooo_int_wb_agent_agent_interface.sv` 的 `drv_cb` 中统一修正为 `input`，避免 driver clocking block 暴露错误驱动方向。
-- 本轮未删除 `rob_flag/lq_flag/lq_value/sq_flag/sq_value/exception_vec[]` 等进入 `dispatch_raw_int_wb_t` 的字段；这些字段已保留到测试框架 plan 中，后续需明确 V2 语义来源。
-- 本轮没有新增 V2/V3 宏隔离，仍保持 V2 分支只适配 V2 RTL 的策略。
+正确性检查：当前 interface 的 `drv_cb` 和 `mon_cb` 对 109 个 V2 写回字段均声明为 `input`；driver 源码中没有对这些字段的赋值路径。
 
 #### 7.9.4 测试框架待办和需确认项同步
 
@@ -638,79 +612,77 @@ endtask:drive_idle
 本轮执行的静态检查包括：
 
 ```bash
-rg -n "io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_isRVC|io_mem_to_ooo_intWriteback_3_0_ready|io_mem_to_ooo_intWriteback_3_0_bits_toRob_bits_isRVC|io_mem_to_ooo_intWriteback_3_0_bits_pdest|io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_isRVC|io_mem_to_ooo_intWriteback_1_0_bits_toRob_bits_isRVC|io_mem_to_ooo_intWriteback_0_0_bits_toRob_bits_isRVC" mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src mem_ut/ver/ut/memblock/tb/io_mem_to_ooo_int_wb_agent_connect.sv
+rg -n "<旧写回聚合命名关键字>" \
+  mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src \
+  mem_ut/ver/ut/memblock/tb/io_mem_to_ooo_int_wb_agent_connect.sv
 ```
 
-中文伪代码：该命令在 int writeback agent 源码目录和对应 connect 文件中查找本轮已删除的 7 个无 V2 来源字段。命令没有命中时，说明 interface、xaction、monitor、driver 和 connect 中已经没有这些字段的残留引用。该检查只验证本轮删除项闭合，不验证进入公共状态流的字段语义。
+中文伪代码：该命令在 int writeback agent 源码目录和对应 connect 文件中查找旧写回聚合命名及其旧 bundle 字段。命令没有命中时，说明 interface、xaction、monitor、driver 和 connect 中已经没有旧聚合别名残留。该检查只验证源码命名收敛，不替代测试框架语义适配验证。
 
-### 7.10 `io_mem_to_ooo_int_wb_agent` V2 字段集合收敛
+### 7.10 `io_mem_to_ooo_int_wb_agent` 全量 V2 命名统一
 
-功能特性：本轮根据用户要求“旧的 V3 信号需要删除，不要保留”，继续收敛 `io_mem_to_ooo_int_wb_agent_agent` 的 V2 字段集合。目标是让 interface、xaction、monitor 和 connect 只保留 V2 顶层真实输出对应字段；除 L2TLB 专项接管外，其他 agent 不再通过内部 wire 补旧 V3 聚合字段。
+功能特性：根据用户要求“全部更换成 V2 的，不要混合命名”，本轮将 `io_mem_to_ooo_int_wb_agent_agent` 从旧整数写回聚合别名彻底收敛到 V2 `MemBlock` 顶层真实 `writebackLda/Sta/Std` output 端口命名。
 
-修改前逻辑：上一轮为了闭合 connect 覆盖，`io_mem_to_ooo_int_wb_agent_agent_interface.sv` 中保留 191 个 interface 信号。此前已删除 73 个旧 `intWriteback_*` 聚合字段，其中包含常量占位字段和旧 V3 聚合别名字段。随后又发现 `intWriteback_5/6 sqIdx_flag/value` 虽然能追溯到 V2 内部 `_inner_stdExeUnits_0/1_io_out_bits_uop_sqIdx_*` wire，但它们不是 V2 `MemBlock` 顶层端口，字段名仍属于旧 `intWriteback_*` 聚合命名。
+修改前逻辑：interface、xaction、monitor 和 connect 同时存在旧写回聚合字段和 V2 `writebackLda/Sta/Std` 字段。connect 右侧已经接到 V2 RTL 顶层，但左侧 interface 和 raw queue 主路径仍使用旧聚合命名，且部分 ROB index 位宽仍是旧 9 bit。
 
-修改后逻辑：本轮继续删除 `intWriteback_5/6 sqIdx_flag/value` 4 个旧 V3 聚合字段，不再从 `_inner_stdExeUnits_0/1_io_out_bits_uop_sqIdx_*` 内部 wire 取值。`io_mem_to_ooo_int_wb_agent_agent_interface.sv`、`io_mem_to_ooo_int_wb_agent_agent_xaction.sv`、`io_mem_to_ooo_int_wb_agent_agent_monitor.sv` 和 `tb/io_mem_to_ooo_int_wb_agent_connect.sv` 已同步收敛到 114 个字段；connect 只保留当前 V2 顶层端口可直接提供的写回字段。driver 本身没有主动驱动该被动采样 agent，本轮不需要改 driver。
+修改后逻辑：四个文件均按 `build_memblock/rtl/MemBlock.sv` 中 109 个 V2 顶层 writeback output 重建。字段名、connect 左右侧、xaction 字段、monitor 采样和 X/Z 检查均使用 V2 原生命名；`robIdx_value` 位宽按 V2 顶层统一为 `[7:0]`。旧聚合别名不再保留，也不再作为常量占位字段存在。
 
-| 字段类别 | 修改后处理策略 | 说明 |
-|---|---|---|
-| `intWriteback_5/6 sqIdx_flag/value` | 删除 | 不是 V2 `MemBlock` 顶层端口；此前接到 `_inner_stdExeUnits_0/1_io_out_bits_uop_sqIdx_*` 属于非 L2TLB agent 内部层级引用，按本轮规则删除。 |
-| `intWriteback_5/6 robIdx_flag` | 删除 | V2 `writebackStd_0/1` 顶层只导出 `robIdx_value`，没有 `robIdx_flag`。 |
-| `intWriteback_3/4 sqIdx_flag/value` | 删除 | V2 `writebackSta_0/1` 写回输出未导出旧聚合 `sqIdx` 字段。 |
-| `intWriteback_0/1/2` 当前保留的 `exceptionVec` 位 | 保留并连接 `io_mem_to_ooo_writebackLda_0/1/2_bits_uop_exceptionVec_*` | 这些字段仍在当前 V2 interface 中存在，并有 V2 顶层真实输出。 |
-| `intWriteback_0/1/2` 其余旧聚合 `exceptionVec` 位 | 删除 | 包括原常量占位字段，以及原先映射到 V2 `exceptionVec_13/15/19/21/23` 的旧 `intWriteback_*` 别名。后续如需这些 V2 真实位，应通过 V2 命名接口或测试框架适配 plan 重新接入。 |
-| `intWriteback_0/1/2 lqIdx_flag/value` | 删除 | V2 写回输出没有旧聚合 `lqIdx` 字段。 |
+涉及源码：
+
+| 文件 | 修改内容 |
+|---|---|
+| `mem_ut/ver/ut/memblock/tb/io_mem_to_ooo_int_wb_agent_connect.sv` | 两个分支均改为 109 条 V2 同名 `RTL->IF` force。 |
+| `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_interface.sv` | interface logic、`drv_cb`、`mon_cb` 全部改为 V2 `writebackLda/Sta/Std` 字段。 |
+| `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_xaction.sv` | transaction 字段、空约束、UVM field、打印和 compare 均重建为 109 个 V2 字段。 |
+| `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_monitor.sv` | 本地变量、`mon_cb` 采样、X/Z 检查和 raw queue 写入均改用 V2 字段。 |
 
 源码位置：`mem_ut/ver/ut/memblock/tb/io_mem_to_ooo_int_wb_agent_connect.sv`，宏：`MEMBLOCK__IO_MEM_TO_OOO_INT_WB_AGENT_CONNECT`。
-该宏现在只负责把 V2 `MemBlock` 顶层写回真实输出接到 `io_mem_to_ooo_int_wb_agent_agent` interface，不再包含旧 V3-only 字段的常量占位，也不再从非 L2TLB 内部层级 wire 补旧字段。
+该宏现在只负责把 V2 `MemBlock` 顶层写回真实 output 接到同名 interface 字段。
 
 ```systemverilog
-force U_IF_NAME.io_mem_to_ooo_intWriteback_6_0_bits_toRob_bits_robIdx_value = RTL_PATH.io_mem_to_ooo_writebackStd_1_bits_uop_robIdx_value;
-force U_IF_NAME.io_mem_to_ooo_intWriteback_5_0_bits_toRob_bits_robIdx_value = RTL_PATH.io_mem_to_ooo_writebackStd_0_bits_uop_robIdx_value;
-force U_IF_NAME.io_mem_to_ooo_intWriteback_4_0_bits_toRob_bits_trigger = RTL_PATH.io_mem_to_ooo_writebackSta_1_bits_uop_trigger;
-force U_IF_NAME.io_mem_to_ooo_intWriteback_2_0_bits_toRob_bits_exceptionVec_3 = RTL_PATH.io_mem_to_ooo_writebackLda_2_bits_uop_exceptionVec_3;
-force U_IF_NAME.io_mem_to_ooo_intWriteback_2_0_bits_pdest = RTL_PATH.io_mem_to_ooo_writebackLda_2_bits_uop_pdest;
+force U_IF_NAME.io_mem_to_ooo_writebackLda_0_valid = RTL_PATH.io_mem_to_ooo_writebackLda_0_valid;
+force U_IF_NAME.io_mem_to_ooo_writebackSta_1_bits_uop_robIdx_value = RTL_PATH.io_mem_to_ooo_writebackSta_1_bits_uop_robIdx_value;
+force U_IF_NAME.io_mem_to_ooo_writebackStd_1_bits_uop_robIdx_value = RTL_PATH.io_mem_to_ooo_writebackStd_1_bits_uop_robIdx_value;
 ```
 
-中文伪代码：该 connect 逻辑在本 agent 中承担“把 V2 顶层写回真实输出映射到被动采样 interface”的功能。执行时宏逐项把 V2 `writebackStd`、`writebackSta` 和 `writebackLda` 中存在的顶层端口 force 到 interface，monitor 后续只采集这些真实来源字段。对于 V2 顶层没有导出的旧 V3 聚合字段，本轮不再生成 force 语句，也不再在 interface、xaction 和 monitor 中保留同名字段。
+中文伪代码：该 connect 逻辑在本 agent 中承担“把 V2 顶层写回真实输出映射到被动采样 interface”的功能。宏展开后逐项读取 V2 `writebackLda`、`writebackSta` 和 `writebackStd` 顶层端口，并 force 到同名 interface 字段；monitor 后续只从这些同名字段采样。该逻辑不再创建旧聚合别名，也不再从非 L2TLB 内部层级补旧字段。
 
-源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_xaction.sv`，逻辑对象：字段声明、UVM field 注册、空约束、`psdisplay()` 和 `compare()`。
-该 xaction 文件按当前 V2 interface 的 114 个字段重新生成重复性模板段，避免删除旧字段后残留空约束块或 compare 碎片。
+源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_interface.sv`，逻辑对象：V2 字段声明和 clocking block。
 
 ```systemverilog
-rand bit io_mem_to_ooo_intWriteback_6_0_valid;
-rand bit io_mem_to_ooo_intWriteback_6_0_bits_toRob_valid;
-rand bit [8:0] io_mem_to_ooo_intWriteback_6_0_bits_toRob_bits_robIdx_value;
-rand bit io_mem_to_ooo_intWriteback_5_0_valid;
-rand bit io_mem_to_ooo_intWriteback_5_0_bits_toRob_valid;
-rand bit [8:0] io_mem_to_ooo_intWriteback_5_0_bits_toRob_bits_robIdx_value;
+logic io_mem_to_ooo_writebackLda_0_valid;
+logic [7:0] io_mem_to_ooo_writebackLda_0_bits_uop_robIdx_value;
+logic [7:0] io_mem_to_ooo_writebackStd_1_bits_uop_robIdx_value;
 ```
 
-中文伪代码：该字段定义逻辑在 transaction 中保存 monitor 采样后的 V2 写回字段。xaction 只声明当前 interface 中存在的字段，并为每个字段生成对应的 UVM 注册、默认空约束、打印和比较逻辑；被删除的旧 V3-only 字段不会再进入 transaction，也不会被后续 monitor 或 compare 访问。
+中文伪代码：该 interface 逻辑声明 V2 顶层真实 output 对应的采样字段。每个字段在 `drv_cb` 和 `mon_cb` 中都按 `input` 暴露，表示 driver 不能写这些 DUT output，monitor 可以在采样点读取它们。位宽直接来自 V2 Verilog 顶层端口，ROB index value 不再沿用旧 9 bit 宽度。
 
-源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_monitor.sv`，逻辑对象：port 5/6 raw writeback 写入。
-该 monitor 负责把写回采样转成 `memblock_sync_pkg::dispatch_raw_int_wb_t`。本轮删除 `sqIdx` 来源后，port 5/6 不再把 `sq_valid` 置 1，避免公共状态误以为存在真实 SQ 索引。
+源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_monitor.sv`，函数/task：`mon_data()` raw writeback 写入。
+该 monitor 负责把 V2 LDA/STA/STD 写回采样转成 `memblock_sync_pkg::dispatch_raw_int_wb_t`。
 
 ```systemverilog
-raw_int_wb.port_id = 5;
-raw_int_wb.rob_valid = 1'b1;
-raw_int_wb.rob_value = io_mem_to_ooo_intWriteback_5_0_bits_toRob_bits_robIdx_value;
-raw_int_wb.cycle = $time;
-memblock_sync_pkg::push_raw_int_wb(raw_int_wb);
+if (io_mem_to_ooo_writebackLda_0_valid) begin
+    raw_int_wb = memblock_sync_pkg::make_empty_raw_int_wb();
+    raw_int_wb.port_id = 0;
+    raw_int_wb.rob_value = io_mem_to_ooo_writebackLda_0_bits_uop_robIdx_value;
+    raw_int_wb.exception_vec[13] = io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_13;
+    memblock_sync_pkg::push_raw_int_wb(raw_int_wb);
+end
 ```
 
-中文伪代码：该逻辑在 port 5 写回有效时创建一条 raw int writeback 事件。事件只携带 V2 顶层真实导出的 ROB value 和周期信息，不再声明 SQ 信息有效；`make_empty_raw_int_wb()` 提供默认空值，后续公共状态如果需要 std writeback 的 SQ 语义，必须在测试框架适配 plan 中定义新的 V2 语义来源。
+中文伪代码：该 raw 写入逻辑在 LDA0 写回有效时创建一条 raw int writeback 事件。事件先清空为默认空值，再记录端口号、ROB index value 和 V2 顶层真实导出的异常位，最后压入公共 raw queue。LDA1/LDA2、STA0/STA1、STD0/STD1 使用同样的 V2 原生命名路径；STD 端口只写 V2 顶层真实导出的 valid 和 ROB value，不补不存在的 flag 或 SQ 字段。
 
-文档同步：`AI_DOC/analysis/interface/v2/mem_ut_v2_agent_interface_signal_matrix_20260709.md` 已同步更新。`io_mem_to_ooo_int_wb_agent_agent` 汇总行改为 `interface=114`、`xaction=114`、`connect=114`、`monitor=114`、`driver=0`；4.8 逐信号矩阵已删除 `intWriteback_5/6 sqIdx_flag/value` 行，不再出现 `_inner_stdExeUnits_*` 内部 wire 映射。
+文档同步：`AI_DOC/analysis/interface/v2/mem_ut_v2_agent_interface_signal_matrix_20260709.md` 已同步更新。`io_mem_to_ooo_int_wb_agent_agent` 汇总为 `interface=109`、`xaction=109`、`connect=109`、`monitor=109`、`driver=0`，4.8 逐信号矩阵只列 V2 `writebackLda/Sta/Std` 字段。
 
 正确性检查：
 
-- 已用脚本扫描 interface、connect、xaction 和 monitor，结果为 `interface=114`、`connect=114`、`xaction=114`、`monitor=114`，`missing_connect/missing_xaction/missing_monitor/extra_*` 均为空。
-- 已扫描 `intWriteback_5/6 sqIdx_flag/value` 和 `_inner_stdExeUnits_0/1_io_out_bits_uop_sqIdx_*`，在 `tb` 和该 agent 源码中没有残留引用。
-- 已扫描所有非 L2TLB `tb/*_agent_connect.sv` 的 `RTL_PATH.*` 引用，疑似内部层级或非 V2 顶层端口连接数量为 0。L2TLB agent 是专项内部 responder 接管，按规则排除。
-- `xaction` 静态检查结果为 `brace_delta=0`、`fields=114`、`cons_decl=114`、`cons_body=114`、`uvm=114`、`compare=114`。
+- 源码范围扫描旧写回聚合命名关键字无命中。
+- `interface logic=109`、`xaction rand=109`、`extern constraint=109`、constraint body=109、`uvm_field_int=109`。
+- `monitor logic=109`、`mon_cb` 采样=109、X/Z 检查=109。
+- connect 两个分支共 218 条 force，唯一字段 109 个；左右侧 V2 字段名完全一致，每个字段出现 2 次。
+- `robIdx_value` 在 interface、xaction、monitor 和 connect 中均按 V2 `[7:0]` 处理。
 
-风险边界：本轮只删除旧 V3 聚合字段和非 L2TLB 内部 wire 补接，不修改测试激励框架主流程。后续如果 `dispatch_raw_int_wb_t`、scoreboard 或 sequence 仍需要 std writeback 的 SQ 语义，必须在 V2 测试框架适配 plan 中定义真实 V2 语义来源或删除框架依赖，不能在 DUT interface 层保留旧字段占位。
-
+风险边界：本轮只统一 DUT interface/transaction/monitor/connect 的字段命名和 V2 顶层真实端口连接，不修改测试激励框架主流程。`dispatch_raw_int_wb_t` 当前仍使用 9 bit ROB value 保存公共 raw 事件，V2 8 bit value 会零扩展进入该公共字段；是否进一步收窄公共状态位宽属于测试框架语义适配范围。
 
 ### 7.11 `itlb_agent` S2 entry VMID 字段补齐
 
@@ -749,6 +721,172 @@ io_fetch_to_mem_itlb_resp_bits_s2_entry_vmid = this.vif.mon_mp.mon_cb.io_fetch_t
 - itlb agent 的 interface、connect、xaction、monitor 静态字段集合已补齐该字段。
 - 该字段是 DUT output，被动采样，不需要 driver 驱动。
 
+
+### 7.12 `dcache_agent` L2 hint/flush 顶层输入合并
+
+功能特性：本轮按“L2 hint/flush 控制端口合并到 dcache agent”的方案，把 V2 顶层 input `io_l2_hint_valid`、`io_l2_hint_bits_sourceId`、`io_l2_hint_bits_isKeyword` 和 `io_l2_flush_done` 并入 `dcache_agent_agent`。这 4 个端口与 dcache/L2 侧 hint、flush 控制相关，当前 `dcache_agent_agent` 已覆盖 dcache TileLink 边界和 hint 相关 `needHint/isKeyword` 字段，因此直接扩展该 agent 比新增独立 agent 更符合当前划分。
+
+修改前逻辑：`dut_inst.sv` 已声明并实例化这 4 个 V2 顶层 input，默认 initial 块将其置 0，但没有进入任何 agent。接口矩阵文档此前把它们列在“L2 hint/flush 控制端口未归属”分类中，建议新建 `l2_hint_flush_agent`。
+
+修改后逻辑：本轮将这 4 个端口补入 `dcache_agent_agent_interface.sv`、`dcache_agent_connect.sv`、`dcache_agent_agent_xaction.sv`、`dcache_agent_agent_driver.sv` 和 `dcache_agent_agent_monitor.sv`。connect 方向为 `IF->RTL`，即由 dcache agent driver 通过 interface 驱动 DUT 顶层 input；monitor 同步采样并做 XZ 检查；xaction 保存字段、约束、UVM field、打印和 compare。测试激励主框架未修改，后续如果需要产生真实 L2 hint 或 flush done 场景，可通过 dcache transaction 字段驱动。
+
+| 字段 | DUT方向 | 位宽 | agent处理 |
+|---|---|---|---|
+| `io_l2_hint_valid` | input | 1 | dcache driver 驱动，monitor 采样。 |
+| `io_l2_hint_bits_sourceId` | input | `[3:0]` | dcache driver 驱动，monitor 采样。 |
+| `io_l2_hint_bits_isKeyword` | input | 1 | dcache driver 驱动，monitor 采样。 |
+| `io_l2_flush_done` | input | 1 | dcache driver 驱动，monitor 采样。 |
+
+源码位置：`mem_ut/ver/ut/memblock/tb/dcache_agent_connect.sv`，宏：`MEMBLOCK__DCACHE_AGENT_CONNECT`。
+该宏负责把 dcache agent interface 的 4 个 L2 hint/flush 控制字段驱动到 V2 `MemBlock` 顶层 input。
+
+```systemverilog
+force RTL_PATH.io_l2_hint_valid = U_IF_NAME.io_l2_hint_valid;
+force RTL_PATH.io_l2_hint_bits_sourceId = U_IF_NAME.io_l2_hint_bits_sourceId;
+force RTL_PATH.io_l2_hint_bits_isKeyword = U_IF_NAME.io_l2_hint_bits_isKeyword;
+force RTL_PATH.io_l2_flush_done = U_IF_NAME.io_l2_flush_done;
+```
+
+中文伪代码：该 connect 逻辑在 dcache agent 中承担“把测试环境提供的 L2 hint/flush 控制值送入 DUT 顶层”的功能。执行时分别把 interface 中的 hint valid、hint sourceId、hint isKeyword 和 flush done force 到 `MemBlock` 顶层同名 input；这些字段不再停留在 `dut_inst.sv` 的默认 0，也不再属于未归属端口。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/dcache_agent_agent_driver.sv`，函数/task：`send_pkt()`。
+该 task 负责把 sequence 传入的 dcache transaction 字段驱动到 interface 的 `drv_cb`。
+
+```systemverilog
+vif.drv_mp.drv_cb.io_l2_hint_valid <= tr.io_l2_hint_valid;
+vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= tr.io_l2_hint_bits_sourceId;
+vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= tr.io_l2_hint_bits_isKeyword;
+vif.drv_mp.drv_cb.io_l2_flush_done <= tr.io_l2_flush_done;
+```
+
+中文伪代码：该驱动逻辑在有效 transaction 下把 L2 hint/flush 控制字段从 `tr` 拷贝到 interface。`io_l2_hint_valid` 控制本拍是否发起 hint；`io_l2_hint_bits_sourceId` 和 `io_l2_hint_bits_isKeyword` 携带 hint 属性；`io_l2_flush_done` 表示外部 L2 flush 完成反馈。字段被写入 `drv_cb` 后，connect 宏会继续把它们送到 DUT 顶层 input。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/dcache_agent_agent_driver.sv`，函数/task：`drive_idle()`。
+该 task 负责 reset、gap 和无 transaction 周期的默认驱动，避免 DUT input 悬空。
+
+```systemverilog
+vif.drv_mp.drv_cb.io_l2_hint_valid <= '0;
+vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= '0;
+vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= '0;
+vif.drv_mp.drv_cb.io_l2_flush_done <= '0;
+```
+
+中文伪代码：该 idle 逻辑在默认 `DRV_0` 和 `DRV_LST` 模式下关闭 L2 hint，并把 sourceId、isKeyword 和 flush done 清零。这样 reset 后和无有效 transaction 周期内，DUT 顶层 input 有明确默认值，不依赖 `dut_inst.sv` 的一次性 initial 赋值。`DRV_1`、`DRV_X` 和 `DRV_RAND` 分支也已同步覆盖这些字段，保持 driver 字段集合一致。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/dcache_agent_agent_monitor.sv`，函数/task：`mon_data()`。
+该 task 每拍采样 dcache interface 字段，并在 XZ 检查打开时检查未知态。
+
+```systemverilog
+io_l2_hint_valid = this.vif.mon_mp.mon_cb.io_l2_hint_valid;
+io_l2_hint_bits_sourceId = this.vif.mon_mp.mon_cb.io_l2_hint_bits_sourceId;
+io_l2_hint_bits_isKeyword = this.vif.mon_mp.mon_cb.io_l2_hint_bits_isKeyword;
+io_l2_flush_done = this.vif.mon_mp.mon_cb.io_l2_flush_done;
+`TCNT_CHECK_SIG_XZ(io_l2_hint_bits_sourceId,io_l2_hint_bits_sourceId,4);
+```
+
+中文伪代码：该 monitor 逻辑每拍从 interface 的 `mon_cb` 读取 L2 hint/flush 字段到本地变量。reset 释放且 XZ 检查开启后，monitor 会按各字段位宽检查未知态，其中 `sourceId` 按 4 位检查。当前 monitor 只完成接口采样和 XZ 审计，不把这些字段接入 raw queue、RM 或 scoreboard，因此不修改测试框架主逻辑。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/dcache_agent_agent_xaction.sv`，逻辑对象：字段声明、约束和 UVM field 注册。
+该 xaction 负责保存 L2 hint/flush 字段，并让字段进入 UVM 打印、复制、比较等通用 transaction 行为。
+
+```systemverilog
+rand bit io_l2_hint_valid;
+rand bit [3:0] io_l2_hint_bits_sourceId;
+rand bit io_l2_hint_bits_isKeyword;
+rand bit io_l2_flush_done;
+constraint dcache_agent_agent_xaction::default_io_l2_hint_bits_sourceId_cons{
+    io_l2_hint_bits_sourceId inside {[4'd0:4'd15]};
+}
+```
+
+中文伪代码：该 xaction 逻辑为每个 L2 hint/flush interface 字段建立同名 transaction 字段。`valid`、`isKeyword` 和 `flush_done` 约束为 0 或 1；`sourceId` 约束为 4 位合法范围。UVM field、`psdisplay()` 和 `compare()` 也同步加入这些字段，避免 driver、monitor 或后续 sequence 使用 transaction 时出现字段缺失。
+
+文档同步：`AI_DOC/analysis/interface/v2/mem_ut_v2_agent_interface_signal_matrix_20260709.md` 已同步更新。`dcache_agent_agent` 汇总从 53 项改为 57 项，新增 4 个 L2 hint/flush 字段；这 4 个端口已从未归属端口列表移除。
+
+正确性检查：
+
+- V2 `build/rtl/MemBlock.sv` 中 4 个端口均为 `input`，`io_l2_hint_bits_sourceId` 位宽为 `[3:0]`，其余为 1 bit。
+- `dut_inst.sv` 中 4 个端口均已声明、默认置 0 并实例化到 `MemBlock`。
+- `dcache_agent_agent` 当前 interface、connect、xaction、driver、monitor 均包含这 4 个字段，connect 方向为 `IF->RTL`。
+- 本轮没有新增非 L2TLB 内部层级引用。
+
+风险边界：本轮只完成接口归属、默认驱动、transaction 字段和 monitor 采样，不新增测试激励场景，也不改变 RM/scoreboard 行为。真实 L2 hint/flush 功能性覆盖需要后续在 sequence 或测试框架适配 plan 中定义激励策略。
+
+
+### 7.13 `io_mem_to_ooo_ctrl_agent` externalInterrupt debug 字段补齐
+
+功能特性：本轮把 V2 顶层 output `io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug` 并入已有 `io_mem_to_ooo_ctrl_agent_agent`。该字段属于 `io_mem_to_ooo_topToBackendBypass_externalInterrupt_*` 同一组输出，和已接入的 `mtip/msip/meip/seip/nmi` 字段方向、语义归属一致，因此应补到已有 `io_mem_to_ooo_ctrl_agent_agent`，而不是新建 agent，也不是并入反方向的 `backendToTopBypass_agent_agent`。
+
+修改前逻辑：V2 `MemBlock` 顶层和 `dut_inst.sv` 已存在 `io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug`，但 `io_mem_to_ooo_ctrl_agent_agent_interface.sv`、`io_mem_to_ooo_ctrl_agent_connect.sv`、`io_mem_to_ooo_ctrl_agent_agent_xaction.sv` 和 `io_mem_to_ooo_ctrl_agent_agent_monitor.sv` 未包含该字段。接口矩阵文档把它列为唯一的 “Mem->OOO输出端口” 未归属项。
+
+修改后逻辑：本轮将该字段补入 `io_mem_to_ooo_ctrl_agent_agent`。connect 方向为 `RTL->IF`，即 DUT 顶层 output 进入 interface；monitor 每拍采样并做 XZ 检查；xaction 保存字段、约束、UVM field、打印和 compare。该字段是 DUT output，被动采样，driver 不驱动。
+
+源码位置：`mem_ut/ver/ut/memblock/tb/io_mem_to_ooo_ctrl_agent_connect.sv`，宏：`MEMBLOCK__IO_MEM_TO_OOO_CTRL_AGENT_CONNECT`。
+该宏负责把 V2 `MemBlock` 顶层 `io_mem_to_ooo_*` 控制类 output 接入 ctrl agent interface。
+
+```systemverilog
+force U_IF_NAME.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug =
+    RTL_PATH.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug;
+```
+
+中文伪代码：该 connect 逻辑在 ctrl agent 中承担“把 DUT 顶层 debug interrupt 输出送入 interface”的功能。执行时从 `MemBlock` 顶层读取 `externalInterrupt_debug`，并 force 到同名 interface 字段；monitor 后续和同组 `mtip/msip/meip/seip/nmi` 字段一起采样。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_ctrl_agent_agent/src/io_mem_to_ooo_ctrl_agent_agent_monitor.sv`，函数/task：`mon_data()`。
+该 monitor 每拍采样 ctrl agent interface 字段，并在 XZ 检查开启时检查未知态。
+
+```systemverilog
+io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug =
+    this.vif.mon_mp.mon_cb.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug;
+`TCNT_CHECK_SIG_XZ(io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug,
+                  io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug,1);
+```
+
+中文伪代码：该 monitor 逻辑每拍从 interface 的 `mon_cb` 读取 debug interrupt 输出到本地变量。reset 释放且 XZ 检查开启后，按 1 bit 位宽检查该字段没有未知态。该字段当前只完成接口采样和 transaction 闭合，不改变 `dispatch_raw_ctrl_t` 写入逻辑。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_ctrl_agent_agent/src/io_mem_to_ooo_ctrl_agent_agent_xaction.sv`，逻辑对象：字段声明、约束、UVM field、打印和 compare。
+该 xaction 负责保存 `externalInterrupt_debug` 字段，并让它进入 ctrl agent transaction 的通用打印和比较行为。
+
+```systemverilog
+rand bit io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug;
+extern constraint default_io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug_cons;
+`uvm_field_int(io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug, UVM_ALL_ON);
+```
+
+中文伪代码：该 xaction 逻辑为 debug interrupt 输出建立同名 transaction 字段，并注册默认约束和 UVM field。后续如果 monitor 创建 transaction 或测试框架读取 ctrl transaction，该字段不会缺失；如果比较两个 ctrl transaction，compare 逻辑也会覆盖该字段。
+
+文档同步：`AI_DOC/analysis/interface/v2/mem_ut_v2_agent_interface_signal_matrix_20260709.md` 已同步更新。`io_mem_to_ooo_ctrl_agent_agent` 汇总从 41 项改为 42 项，新增 `io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug`；该字段已从未归属 DUT 顶层端口列表移除。
+
+正确性检查：
+
+- V2 `build/rtl/MemBlock.sv` 中该端口为 `output`，位宽 1 bit。
+- `dut_inst.sv` 中该端口声明为 `wire` 并已实例化到 `MemBlock`。
+- `io_mem_to_ooo_ctrl_agent_agent` 当前 interface、connect、xaction、monitor 均包含该字段。
+- 该字段为 DUT output，driver 不驱动符合方向要求。
+
+风险边界：本轮只完成 V2 顶层 output 的 agent 归属和被动采样，不修改 raw ctrl queue、RM、scoreboard 或测试激励框架。debug interrupt 是否需要参与后续测试框架状态判断，应由后续测试框架适配 plan 单独定义。
+
+
+### 7.14 int writeback 最终命名复查
+
+功能特性：本轮复查并覆盖此前 LDA exceptionVec 单独补齐的历史修改，最终状态不再是“旧聚合字段 + V2 字段”的混合形态，而是完整 V2 `writebackLda/Sta/Std` 原生命名集合。
+
+修改前逻辑：此前文档曾把 LDA exceptionVec 作为增量补齐项记录，字段总数按混合命名统计。该统计已经不再代表当前源码状态。
+
+修改后逻辑：当前源码以 V2 `MemBlock` 顶层 109 个 writeback output 为唯一字段集合，LDA exceptionVec 位也作为同名 V2 字段包含在 109 个字段内，不再单独通过旧兼容路径描述。
+
+源码位置：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_xaction.sv`，逻辑对象：字段注册。
+
+```systemverilog
+rand bit io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_13;
+extern constraint default_io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_13_cons;
+`uvm_field_int(io_mem_to_ooo_writebackLda_0_bits_uop_exceptionVec_13, UVM_ALL_ON);
+```
+
+中文伪代码：该 xaction 逻辑为 V2 LDA exceptionVec output 建立同名 transaction 字段，并把字段加入默认空约束和 UVM 自动注册。monitor 后续如果创建 transaction，该字段不会缺失；compare 检查两个 transaction 时，也能发现该异常位不一致。
+
+正确性检查：当前 `io_mem_to_ooo_int_wb_agent_agent` 的 interface、xaction、monitor 和 connect 均为 109 个 V2 命名字段；此前混合命名统计已由本轮 V2 原生字段统计替代。
+
+风险边界：本轮不改变 exceptionVec 在公共 raw queue 中的语义，只改变 DUT interface 层字段命名和连接来源。后续如果测试框架需要进一步按异常位类型细分行为，应在测试框架适配 plan 中单独定义。
 
 ## 8. Review 结论
 

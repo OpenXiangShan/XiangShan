@@ -4,10 +4,20 @@
 
 需要注意：当前实现已经不是旧的 `adapter -> writeback_status_handler::handle_event()` 逐条处理模式。真实 monitor event 必须先进入 batch handler，由 batch handler 完成 normalize 和 redirect-first 仲裁后，才允许 writeback handler 更新状态。
 
+V2适配还必须在raw转换和batch之间增加issue-generation correlation：LOAD/STA
+accepted fire建立不可变token；V2 STA IQ raw只带真实SQ key，LDA/STA result只使用V2
+真实key；adapter附加token snapshot但不消费，redirect-first放行后先只读validate，只有
+原handler成功或命中唯一允许的STA compat no-op后才commit claim。
+第一次及后续replay不得从可变status给V2 LDA/STA event补generation。STD继续受限ROB
+value-only双probe，不建token且无STD replay。
+
 ## 1. 总体调用图
 
 ```mermaid
 flowchart TD
+    I0[LOAD/STA accepted issue fire] --> I1[register_issue_generation_token]
+    I1 -. immutable generation source .-> C12
+    I1 -. immutable generation source .-> C15
     A[memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor_once] --> B[memblock_dispatch_base_sequence::collect_runtime_context_events]
     B --> B1[dispatch_monitor_event_adapter::drain_csr_events]
     B --> B2[dispatch_monitor_event_adapter::drain_sfence_events]
@@ -16,12 +26,14 @@ flowchart TD
     C --> C1[dispatch_monitor_event_adapter::collect_writeback_events_batch]
     C1 --> C11[memblock_sync_pkg::pop_raw_int_wb]
     C11 --> C12[dispatch_monitor_event_adapter::convert_raw_int_wb]
-    C12 --> C13[events.push_back]
+    C12 --> C124[attach_issue_generation_snapshot LOAD/STA]
+    C124 --> C13[events.push_back]
 
     C --> C2[dispatch_monitor_event_adapter::collect_ctrl_redirect_events_batch]
     C2 --> C21[memblock_sync_pkg::pop_raw_ctrl]
-    C21 --> C22[dispatch_monitor_event_adapter::apply_raw_ctrl_deq]
-    C21 --> C23[dispatch_monitor_event_adapter::convert_raw_memory_violation]
+    C21 --> C20[dispatch_monitor_event_adapter::apply_raw_ctrl_mmio_tags]
+    C20 --> C22[dispatch_monitor_event_adapter::apply_raw_ctrl_deq]
+    C20 --> C23[dispatch_monitor_event_adapter::convert_raw_memory_violation]
     C23 --> C24[events.push_back]
 
     C --> D[dispatch_monitor_batch_handler::process_monitor_event_batch]
@@ -29,7 +41,7 @@ flowchart TD
     D1 --> D11[common_data_transaction::normalize_feedback_event]
     D --> D2{active_redirect valid?}
     D2 -->|yes| D21[event_covered_by_redirect]
-    D21 -->|covered| D22[drop event]
+    D21 -->|covered| D22[drop event without token validate or commit]
     D21 -->|uncovered redirect| D23[data.push_feedback_event]
     D23 --> D231[normalize_feedback_event]
     D231 --> D232[exception_event_q.push_back]
@@ -43,7 +55,10 @@ flowchart TD
     D31 -->|yes uncovered| D4
     D31 -->|no| D4[process_allowed_non_redirect_event]
 
-    D4 --> E{event source}
+    D4 --> D41{generation_correlated?}
+    D41 -->|yes| D42[validate_issue_generation_claim no side effect]
+    D41 -->|no| E
+    D42 --> E{event source}
     E -->|LOAD_WB / STORE_WB| F[writeback_status_handler::handle_real_writeback_event]
     E -->|STA_FEEDBACK / STD_FEEDBACK| G[writeback_status_handler::handle_issue_feedback_event]
 
@@ -54,6 +69,7 @@ flowchart TD
     F31 --> F32[exception_event_q.push_back]
     F1 -->|normal pass| F4[event_is_normal_pass]
     F4 --> F5[common_data_transaction::mark_target_normal_pass]
+    F5 --> D43[handler accepted or unique STA compat no-op then commit claim]
 
     G --> G1{iq_feedback_failed?}
     G1 -->|STA failed| G2[common_data_transaction::push_feedback_event replay]
@@ -63,6 +79,10 @@ flowchart TD
     G1 -->|hit| G4[target_real_wb_pass_enabled]
     G4 -->|enabled| G5[common_data_transaction::mark_issue_feedback_success]
     G4 -->|disabled| G6[common_data_transaction::mark_target_normal_pass compat]
+    G5 --> D43
+    G6 --> D43
+    F32 --> D43
+    G22 --> D43
 
     A --> H[memblock_dispatch_base_sequence::exception_redirect_replay_task]
     H --> H1[exception_redirect_replay_handler::process_pending_events]
@@ -77,18 +97,19 @@ flowchart TD
 
     C12 --> C121[dispatch_monitor_event_adapter::make_wb_event_base]
     C121 --> C122[common_data_transaction::make_empty_wb_event]
-    C12 --> C123[raw_rob_to_key / raw_lq_to_key / raw_sq_to_key]
+    C12 --> C123[LDA/STA real ROB key or STD value-only dual probe]
     C1 --> C14[memblock_sync_pkg::pop_raw_iq_feedback]
     C14 --> C15[dispatch_monitor_event_adapter::convert_raw_iq_feedback]
     C15 --> C151[dispatch_monitor_event_adapter::make_wb_event_base]
-    C15 --> C152[raw_rob_to_key / raw_lq_to_key / raw_sq_to_key]
-    C15 --> C16[events.push_back]
+    C15 --> C152[raw_sq_to_key only]
+    C15 --> C153[attach_issue_generation_snapshot IQ]
+    C153 --> C16[events.push_back]
 
     D11 --> D111[feedback_event_has_action]
     D111 --> D112[feedback_event_is_redirect / feedback_event_is_replay / feedback_event_has_fault]
     D11 --> D113[resolve_uid_for_event]
     D113 --> D114[lookup_active_uid_by_rob / lookup_active_uid_by_lq / lookup_active_uid_by_sq]
-    D11 --> D115[target_dispatched / get_target_issue_epoch / replay_seq fill]
+    D11 --> D115{generation_correlated? preserve token snapshot : compat status fallback}
 
     F5 --> F51[target_entry_done]
     F5 --> F52[conditional_set_target_status_field]
@@ -120,6 +141,7 @@ flowchart TD
     H61 --> H611[resolve_uid_for_event / get_event_issue_epoch / get_event_replay_seq]
     H122 --> H123[apply_redirect_flush_range]
     H123 --> H124[prepare_uid_for_redirect_reissue]
+    H124 --> H126[close_issue_generation_token REDIRECT before active map delete]
     H122 --> H125[clear_ptw_wait_replay_by_redirect + clear_redirect_drive_queue]
 ```
 
@@ -135,40 +157,66 @@ Writeback 函数调用主流程：
    collect_monitor_event_batch 再收集 writeback/IQ feedback/ctrl redirect；
    exception_redirect_replay_task 最后消费 recovery queue。
 
-2. raw monitor event 转换：
+2. issue generation建账：
+   LOAD/STA accepted fire用同一个局部issue_epoch同时写status snapshot并调用
+   register_issue_generation_token；
+   token保存fire时uid/target/真实key/issue_epoch/replay_seq/pipe/issue flush epoch/cycle；
+   LOAD维护real-WB pending，STA维护IQ和real-WB两个pending，STD不建token。
+
+3. raw monitor event 转换与attach：
    collect_writeback_events_batch 依次 pop raw int writeback 和 raw IQ feedback；
-   convert_raw_int_wb 把真实 writeback 端口事件转换成 LOAD/STA/STD target 的 memblock_wb_event_t；
-   convert_raw_iq_feedback 把 STA/STD IQ feedback 转换成 feedback event，其中 STA miss 可成为 replay；
-   collect_ctrl_redirect_events_batch pop raw ctrl，先 apply_raw_ctrl_deq 处理 LQ/SQ deq 与 sbIsEmpty，再把 memoryViolation 转成 redirect event。
+   convert_raw_int_wb按V2 LDA/STA/STD真实字段构造event；LDA/STA先通过active ROB map和
+   token附generation，STD继续value-only双flag固定probe；LDA replayInst转LOAD replay，
+   不置real_wb_valid；
+   convert_raw_iq_feedback只接受STA真实SQ key，通过active SQ map和token附generation，
+   STA miss成为普通replay；VSTU/STD IQ valid固定fatal；
+   STA IQ及LDA/STA WB monitor在DUT valid采样块内，把真实payload与
+   `sample_flush_epoch=dispatch_flush_epoch`、`cycle=$time`同拍写入raw；adapter只消费
+   该快照，出队时不得用current epoch回填或覆盖；
+   adapter attach只设置uid/ROB/issue_epoch/replay_seq和generation provenance，不消费
+   token pending；
+   collect_ctrl_redirect_events_batch pop raw ctrl，先按past/current/future flush epoch处理
+   MMIO tag，再apply_raw_ctrl_deq处理LQ/SQ deq与sbIsEmpty，最后把memoryViolation转成
+   redirect event。
 
-3. batch 级 normalize 和 redirect-first 仲裁：
+4. batch 级 normalize、redirect-first仲裁和两阶段claim：
    process_monitor_event_batch 调用 normalize_event_batch；
-   normalize_feedback_event 通过 active ROB/LQ/SQ map 解析 uid，并补齐 issue_epoch/replay_seq；
-   如果已有 active redirect，覆盖事件 drop，未覆盖 redirect 可入 recovery queue，未覆盖 non-redirect 可继续处理；
+   correlated V2 LOAD/STA event已经带token snapshot，normalize只校验和保留，不从当前
+   status补generation；非correlated兼容event继续使用原fallback；
+   如果已有active redirect，覆盖事件drop且不validate/commit，未覆盖redirect可入recovery
+   queue，未覆盖non-redirect可继续处理；
    如果同批存在 redirect，select_oldest_redirect 选最老 redirect 先 push_feedback_event，并 drop 被覆盖事件；
-   如果没有 redirect，所有 allowed non-redirect event 进入 writeback_status_handler。
+   未覆盖correlated event先调用validate_issue_generation_claim生成局部只读claim_ctx，
+   再进入writeback_status_handler或原backend replay入队；只有handler成功，或命中唯一
+   允许的STA same-generation distinct-channel compat no-op后才调用
+   commit_issue_generation_claim；STA hit此时才消费IQ，STA miss此时才取消WB并close，
+   STA WB此时才消费WB，LOAD result此时才消费唯一WB pending。其它handler拒绝fatal且
+   token保持未消费。
 
-4. writeback / feedback 分类处理：
+5. writeback / feedback 分类处理：
    handle_real_writeback_event 处理真实 int writeback；
    normal pass 调用 mark_target_normal_pass 直接落 status；
    fault 先调用 mark_target_fault 落 status，再 push_feedback_event 进入 recovery queue；
    handle_issue_feedback_event 处理 IQ feedback；
-   STA miss 调用 push_feedback_event 形成 replay，STD miss warning/drop，hit 根据 real WB pass 参数决定是否只标记 feedback success 或兼容 mark pass。
+   STA miss调用push_feedback_event形成replay；V2 monitor不生成STD IQ event；hit根据
+   real WB pass参数决定只标记feedback success或兼容mark pass。
 
-5. recovery queue 消费：
+6. recovery queue 消费：
    process_pending_events 先 service_ptw_wait_replay，再 advance_active_redirect；
    active redirect 未完成时不处理新 recovery event；
    没有 active redirect 时 pop_feedback_event 得到本轮 events；
    redirect 优先 request_redirect_flush + push_redirect_drive，并 requeue/drop 被覆盖事件；
    replay 调用 handle_replay_event，按 ptw_back_replay 等待或 mark_replay_pending；
-   fault 调用 handle_fault_event，只消费和打印上下文，不重复落 fault。
+   fault调用handle_fault_event，只消费和打印上下文，不重复落fault；
+   redirect apply、fault、terminal/deq按明确reason关闭token，replay re-fire建立新token；
+   closed tombstone只用于迟到event有原因drop，不给新generation提供snapshot。
 ```
 
 ## 2. `service_real_dispatch_flow()`
 
 源码位置：`memblock_main_dispatch_auto_build_main_table_base_sequence.sv`
 
-真实逻辑摘要：
+V2 coding后目标逻辑摘要：
 
 ```systemverilog
 forever begin
@@ -208,7 +256,7 @@ end
 
 源码位置：`memblock_main_dispatch_auto_build_main_table_base_sequence.sv`
 
-真实逻辑摘要：
+V2 coding后目标逻辑摘要：
 
 ```systemverilog
 memblock_sync_pkg::tick_dispatch_service_cycle();
@@ -235,7 +283,7 @@ exception_redirect_replay_task();
 
 源码位置：`memblock_dispatch_base_sequence.sv`
 
-真实逻辑摘要：
+V2 coding后目标逻辑摘要：
 
 ```systemverilog
 monitor_adapter.drain_csr_events();
@@ -332,12 +380,15 @@ end
 
 ```text
 不断从 raw int writeback queue 弹出 raw event；
-  调用 convert_raw_int_wb：把 DUT int writeback 端口字段转换成统一 event，并标记真实 writeback、target、ROB/LQ/SQ key；
+  调用convert_raw_int_wb：按V2 LDA/STA/STD真实字段构造统一event；
+  LDA/STA先匹配accepted fire token并附generation，LDA replayInst改成replay action；
+  STD固定双probe恢复唯一ROB flag/uid/SQ，不调用token；
   如果转换成功，就放入 batch；
 不断从 raw IQ feedback queue 弹出 raw event；
-  调用 convert_raw_iq_feedback：把 STA/STD IQ feedback 转换成统一 event，并把 STA miss 标记为 replay 语义；
+  调用convert_raw_iq_feedback：只接受V2 STA真实SQ key，匹配STA token后把miss标记为
+  replay语义；VSTU/STD IQ valid fatal；
   如果转换成功，也放入 batch；
-这里不判断 redirect 覆盖，也不判断最终 pass/fault 是否有效。
+这里不判断redirect覆盖，也不validate/commit token，不判断最终pass/fault是否有效。
 ```
 
 ## 7. `convert_raw_int_wb()`
@@ -347,45 +398,70 @@ end
 真实逻辑摘要：
 
 ```systemverilog
-wb_event.valid         = 1'b1;
-wb_event.port_id       = raw.port_id;
-wb_event.real_wb_valid = 1'b1;
-wb_event.has_exception = raw.exception_vec != '0;
-wb_event.exception_vec = raw.exception_vec;
-wb_event.has_rob       = raw_rob_to_key(...);
-case (raw.port_id)
-    0, 1, 2: source = LOAD_WB;  target = LOAD; has_lq = raw_lq_to_key(...);
-    3, 4:    source = STORE_WB; target = STA;  has_sq = raw_sq_to_key(...);
-    5, 6:    source = STORE_WB; target = STD;  has_sq = raw_sq_to_key(...);
+case (raw.source_kind)
+    LDA: begin
+        target = LOAD;
+        has_rob = raw_rob_to_key(...);
+        if (!attach_issue_generation_snapshot(...REAL_WB...)) return 0;
+        if (raw.replay_inst) begin
+            source = BACKEND_REPLAY;
+            replay_valid = 1;
+            real_wb_valid = 0;
+        end else begin
+            source = LOAD_WB;
+            real_wb_valid = 1;
+        end
+    end
+    STA: begin
+        target = STA;
+        has_rob = raw_rob_to_key(...);
+        if (!attach_issue_generation_snapshot(...REAL_WB...)) return 0;
+        source = STORE_WB;
+        real_wb_valid = 1;
+    end
+    STD: begin
+        target = STD;
+        normalize_std_rob_value_only(...);
+        source = STORE_WB;
+        real_wb_valid = 1;
+    end
 endcase
-wb_event.cycle = raw.cycle;
 ```
 
 功能解释：
 
-该函数把 DUT int writeback monitor 采到的端口事实转换成统一的 `memblock_wb_event_t`。`real_wb_valid=1` 表示这是 DUT 真实 writeback 路径，不是 IQ feedback。`exception_vec` 非零时，该 event 后续会走 fault 分支。
+该函数按V2 split LDA/STA/STD port事实转换统一event。`source_kind`表示LDA/STA/STD
+语义，`port_id`表示该kind内部lane，二者职责不同并同时保留。LDA/STA必须在设置
+normal real-WB动作前匹配fire token；LDA `replayInst=1`占用LOAD result channel，但
+功能上是backend replay，不是normal writeback。STD只有ROB value，继续固定双flag
+active-map probe并从唯一uid补完整身份，不接generation token。
 
 内部子调用：
 
 - `make_wb_event_base()`：创建默认清零的 `memblock_wb_event_t`。
 - `common_data_transaction::make_empty_wb_event()`：实际填充 event 默认值，保证所有 valid、key、action 字段有确定初值。
-- `raw_rob_to_key()` / `raw_lq_to_key()` / `raw_sq_to_key()`：把 monitor raw 的 flag/value 转成框架统一 key，并返回 raw valid。
+- `raw_rob_to_key()`：只转换LDA/STA真实完整ROB key，不给无来源key置valid。
+- `normalize_std_rob_value_only()`：固定probe`{0,value}/{1,value}`，唯一命中后从status
+  补完整ROB/SQ；0/2命中或生命周期错误fatal，不扫描active window。
+- `attach_issue_generation_snapshot()`：LDA/STA通过active ROB map和open token附加
+  `uid/issue_epoch/replay_seq`，不消费pending。
 
 文字伪代码：
 
 ```text
 如果 raw writeback 无效，返回无事件；
 调用 make_wb_event_base：创建默认清零 event，避免 valid、key、action 字段继承旧值；
-创建一个有效 event；
-标记 real_wb_valid=1，说明这是 DUT 真实 writeback；
-保存 exception_vec；
-调用 raw_rob_to_key：把 raw ROB flag/value 转成框架统一 ROB key，并记录 raw 端口是否提供有效 ROB；
-根据 port_id 判断 target：
-  0/1/2 是 load writeback；
-  3/4 是 store address writeback；
-  5/6 是 store data writeback；
-调用 raw_lq_to_key/raw_sq_to_key：按 port_id 补充 LQ 或 SQ key，供后续 active uid 反查；
-补充 cycle，记录该 event 的 monitor 采样周期；
+按source_kind确定LDA/STA/STD target，再校验kind内port_id范围；
+复制该port真实exception/replay/flush/trigger metadata，以及monitor采样拍已经冻结的
+sample_flush_epoch/cycle；不得在adapter出队时用current epoch回填；
+LDA/STA只转换真实完整ROB key，调用attach_issue_generation_snapshot：
+  active ROB map先解析uid；
+  open token校验target/pipe/key/fire cycle/issue flush epoch和REAL_WB pending；
+  CURRENT时附不可变generation，stale按tombstone reason drop，当前不一致fatal；
+LDA replayInst=1时设置BACKEND_REPLAY/replay_valid，保持real_wb_valid=0；
+LDA normal或STA在全部key/generation/non-normal metadata检查通过后才置real_wb_valid=1；
+STD调用value-only双probe，不调用token，成功后才置real_wb_valid=1；
+unsupported flushPipe/trigger等当前无consumer组合按int-WB专项固定策略fatal；
 返回转换成功。
 ```
 
@@ -398,58 +474,53 @@ wb_event.cycle = raw.cycle;
 ```systemverilog
 wb_event = make_wb_event_base();
 if (!raw.valid) return 1'b0;
-if (raw.vector_feedback) return 1'b0;
-if (!raw.is_sta && !raw.is_std) return 1'b0;
+if (raw.vector_feedback || raw.is_std || !raw.is_sta) `uvm_fatal(...);
 
 wb_event.valid = 1'b1;
 wb_event.port_id = raw.port_id;
-if (raw.is_sta) begin
-    wb_event.target = MEMBLOCK_ISSUE_TARGET_STA;
-    wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK;
-end else begin
-    wb_event.target = MEMBLOCK_ISSUE_TARGET_STD;
-    wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK;
-end
-if (raw.is_std && !raw.hit) begin
-    `uvm_warning("DISP_MON_ADAPT", "drop STD iq feedback miss ...")
-    return 1'b0;
-end
-wb_event.has_rob = raw_rob_to_key(...);
-wb_event.has_lq  = raw.is_std ? raw_lq_to_key(...) : 1'b0;
+wb_event.target = MEMBLOCK_ISSUE_TARGET_STA;
+wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK;
+wb_event.has_rob = 1'b0;
+wb_event.has_lq  = 1'b0;
 wb_event.has_sq  = raw_sq_to_key(...);
 wb_event.iq_feedback_valid       = 1'b1;
 wb_event.iq_feedback_hit         = raw.hit;
 wb_event.iq_feedback_failed      = !raw.hit;
-wb_event.iq_feedback_flush_state = raw.flush_state;
-wb_event.replay_valid            = raw.is_sta && !raw.hit;
-wb_event.ptw_back_replay         = raw.is_sta && !raw.hit && raw.flush_state;
+wb_event.iq_feedback_flush_state = 1'b0;
+wb_event.replay_valid            = !raw.hit;
+wb_event.ptw_back_replay         = 1'b0;
 wb_event.cycle                   = raw.cycle;
+if (!attach_issue_generation_snapshot(...IQ_FEEDBACK...)) return 1'b0;
 return 1'b1;
 ```
 
 功能解释：
 
-该函数把 IssueQueue feedback monitor 采到的 STA/STD feedback 转换成统一 event。它不会设置 `real_wb_valid`，因为 IQ feedback 不是真实 ROB/RF writeback。`hit=1` 只表示 IssueQueue finalSuccess；`hit=0` 对 STA 会派生成 replay，STD miss 当前没有后端 replay 路径，直接 warning 后丢弃。
+该函数把V2 scalar STA feedback转换成统一event。它不会设置`real_wb_valid`，因为IQ
+feedback不是真实ROB/RF writeback。V2 raw只有真实SQ key，ROB/LQ valid必须保持0；
+adapter通过active SQ map和open STA token附加generation。`hit=1`只表示IssueQueue
+finalSuccess，`hit=0`派生普通STA replay。V2没有scalar `flushState`，不触发PTW wait。
+任一VSTU或STD IQ raw在scalar模式下fatal。
 
 内部子调用：
 
 - `make_wb_event_base()`：创建默认清零 event。
 - `common_data_transaction::make_empty_wb_event()`：实际填充 event 默认值。
-- `raw_rob_to_key()` / `raw_lq_to_key()` / `raw_sq_to_key()`：转换 raw key。
+- `raw_sq_to_key()`：只转换V2真实SQ key。
+- `attach_issue_generation_snapshot()`：按active SQ map解析uid，匹配open STA token并附
+  snapshot；attach不消费pending。
 
 文字伪代码：
 
 ```text
 如果 raw IQ feedback 无效，返回无事件；
-如果是 vector feedback，当前不支持，丢弃；
-如果既不是 STA 也不是 STD，丢弃；
+如果是vector、STD或unknown scalar feedback，uvm_fatal；
 调用 make_wb_event_base：创建默认清零 event，保证 IQ feedback 不继承真实 writeback 标志；
-根据 raw.is_sta/raw.is_std 设置 target 和 source；
-如果是 STD miss，当前没有后端 STD replay path，warning 后丢弃；
-调用 raw_rob_to_key/raw_lq_to_key/raw_sq_to_key：保存 ROB/LQ/SQ key，供 normalize 阶段反查 active uid；
-设置 iq_feedback_valid/hit/failed/flush_state；
-如果是 STA miss，额外设置 replay_valid；
-如果 STA miss 且 flush_state=1，设置 ptw_back_replay；
+设置STA target/source，保持ROB/LQ invalid，只复制真实SQ key；
+设置iq_feedback_valid/hit/failed，miss额外设置replay_valid；
+flush_state和ptw_back_replay固定0；
+调用attach_issue_generation_snapshot附uid/ROB/issue_epoch/replay_seq；
+CURRENT才继续，closed/旧event按reason drop，未来/current不自洽event fatal；
 返回转换成功。
 ```
 
@@ -461,6 +532,7 @@ return 1'b1;
 
 ```systemverilog
 while (memblock_sync_pkg::pop_raw_ctrl(raw_ctrl)) begin
+    apply_raw_ctrl_mmio_tags(raw_ctrl);
     apply_raw_ctrl_deq(raw_ctrl);
     if (convert_raw_memory_violation(raw_ctrl, wb_event)) begin
         events.push_back(wb_event);
@@ -470,10 +542,14 @@ end
 
 功能解释：
 
-该 task 负责 ctrl output monitor event。`lq_deq/sq_deq/sb_is_empty` 这类资源释放状态仍然即时更新；`memoryViolation` 会被转换成 redirect event，放入同一个 batch 参与 redirect-first 仲裁。
+该task负责ctrl output monitor event。同一raw可能同时包含MMIO output和deq；必须先
+回填MMIO tag，再释放active map。`lq_deq/sq_deq/sb_is_empty`资源状态仍即时更新；
+`memoryViolation`转换成redirect event并进入同一batch。
 
 内部子调用：
 
+- `apply_raw_ctrl_mmio_tags()`：raw epoch小于current时info并只drop MMIO tag，相等时
+  固定双ROB key probe并写status tag，大于current时fatal。
 - `apply_raw_ctrl_deq()`：同步 ctrl monitor 中的 LQ/SQ deq 和 `sb_is_empty`。
 - `common_data_transaction::update_sb_is_empty()`：更新 store buffer empty 状态。
 - `lsq_commit_handler::apply_raw_ctrl_deq()`：根据 DUT deq 指针释放 LQ/SQ 映射。
@@ -483,6 +559,10 @@ end
 
 ```text
 不断从 raw ctrl queue 弹出事件；
+  调用apply_raw_ctrl_mmio_tags：
+    raw.mmio_flush_epoch小于current时只drop MMIO tag，仍继续本raw deq/violation；
+    大于current时按内部时序违例fatal；
+    等于current时唯一反查uid并写tag，0/2候选或dynamic epoch错误fatal；
   调用 apply_raw_ctrl_deq：先根据 lq_deq/sq_deq 更新 LSQ commit/deq 本地模型，并同步 sb_is_empty；
     apply_raw_ctrl_deq 内部调用 data.update_sb_is_empty(raw.sb_is_empty) 更新 SB empty 镜像；
     如果 lq_deq/sq_deq 均为 0，则不需要释放 LQ/SQ 映射，直接返回；
@@ -577,17 +657,21 @@ end
 文字伪代码：
 
 ```text
-调用 normalize_event_batch：把 batch 中所有 event 补齐 uid、ROB、issue_epoch、replay_seq，并过滤无法定位的旧事件；
-  normalize_event_batch 内部逐项调用 normalize_feedback_event，解析 active uid 并补齐 replay snapshot；
+调用normalize_event_batch：correlated LOAD/STA校验token已附snapshot，非correlated
+event按原规则解析uid/允许的fallback；
+  normalize_event_batch内部逐项调用normalize_feedback_event，但禁止给correlated
+  event从当前status补generation；
 如果一个 event 解析不到 active uid/ROB，就 warning 后丢弃；
 
 如果当前已经有 active redirect：
   调用 event_covered_by_redirect：用 ROB 顺序判断 event 是否在 active redirect flush 范围内；
     event_covered_by_redirect 内部调用 rob_order_util::rob_need_flush 判断 event ROB 是否落在 redirect flush 范围；
-  被 active redirect 覆盖的 event 直接丢弃；
+  被active redirect覆盖的event直接丢弃且不validate/commit token；
   调用 push_feedback_event：未覆盖的 redirect 进入 recovery queue，并在入队前再次 normalize；
-  调用 process_allowed_non_redirect_event：未覆盖的非 redirect event 继续交给 writeback handler 更新状态；
-    process_allowed_non_redirect_event 内部按 source 分派到 handle_real_writeback_event 或 handle_issue_feedback_event；未分类但带 replay/fault 的 event 会调用 push_feedback_event 入 recovery queue；
+  调用process_allowed_non_redirect_event：未覆盖的correlated event先只读validate token
+  kind，再按source交给原writeback handler；handler成功/唯一STA compat no-op后commit；
+  未分类但带replay/fault的event调用
+  push_feedback_event入recovery queue；
   结束本轮处理。
 
 如果当前没有 active redirect，但本批存在 redirect：
@@ -597,15 +681,15 @@ end
   调用 push_feedback_event：把 selected redirect 放入 recovery queue，等待 recovery handler 建立 active redirect；
   遍历本批其它 event：
     调用 same_redirect_event：识别并跳过 selected redirect 自身，避免重复入队；
-    调用 event_covered_by_redirect：被 selected redirect 覆盖的 event 直接丢弃；
+    调用event_covered_by_redirect：被selected redirect覆盖的event直接丢弃且不validate/commit；
       event_covered_by_redirect 内部调用 rob_order_util::rob_need_flush 判断 event ROB 是否落在 selected redirect flush 范围；
     调用 push_feedback_event：未覆盖的其它 redirect 放入 recovery queue 延后处理；
-    调用 process_allowed_non_redirect_event：未覆盖的非 redirect event 才允许继续更新状态；
-      process_allowed_non_redirect_event 内部按 source 分派到真实 writeback handler 或 IQ feedback handler。
+    调用process_allowed_non_redirect_event：未覆盖event按需要执行validate、原handler、
+    handler成功/唯一STA compat no-op后commit。
 
 如果本批没有 redirect：
-  调用 process_allowed_non_redirect_event：所有 normalized event 按来源进入对应 handler；
-    process_allowed_non_redirect_event 内部按 source 分派到 handle_real_writeback_event 或 handle_issue_feedback_event。
+  调用process_allowed_non_redirect_event：所有normalized event按需要先validate，再按来源
+  进入对应handler，接受后commit。
 ```
 
 关键内部子调用：
@@ -618,7 +702,8 @@ end
 - `redirect_from_event()` 内部会先调用 `event_is_redirect()`；如果非 redirect event 误入则 fatal。
 - `same_redirect_event()`：避免 selected redirect 被重复入队。
 - `same_redirect_event()` 内部比较 source、port_id、ROB key、`flush_itself` 和 `level`，用于识别“本批已经选中的同一个 redirect event”。
-- `process_allowed_non_redirect_event()`：只有通过 redirect 仲裁的非 redirect event 才能进入状态更新。
+- `process_allowed_non_redirect_event()`：只有通过redirect仲裁的非redirect event才能
+  validate claim资格并进入原状态更新；接受后才commit token。
 - `data.push_feedback_event()`：selected redirect 或未覆盖 redirect 进入 recovery queue。
 
 ## 12. `normalize_event_batch()`
@@ -640,14 +725,18 @@ end
 
 功能解释：
 
-batch handler 不直接相信 raw event 已经能定位到 transaction。它必须调用 `common_data_transaction::normalize_feedback_event()`，补齐 `uid/ROB/issue_epoch/replay_seq`，并确认该 event 对应 active 动态实例。
+batch handler不直接相信raw event。V2 correlated LOAD/STA event在adapter已经通过active
+map和token附齐`uid/ROB/issue_epoch/replay_seq`；normalize负责校验并保留这些不可变
+snapshot，不能用当前status覆盖。非correlated兼容/STD/redirect event继续按原规则
+解析uid或使用允许的fallback。
 
 文字伪代码：
 
 ```text
 遍历 batch 中每个 event；
   跳过无效 event；
-  调用 normalize_feedback_event：解析 active uid、补齐 ROB/issue_epoch/replay_seq，并过滤无法定位或 replay snapshot 缺失的旧事件；
+  调用normalize_feedback_event：correlated event校验已有uid/key/generation并禁止
+  status fallback；其它event按原active map规则解析uid和允许字段；
   如果 normalize 失败，说明无法定位当前 active uid，warning 后丢弃；
   如果 normalize 成功，放入 normalized_events，等待 redirect-first 仲裁。
 ```
@@ -680,7 +769,10 @@ return 1;
 
 功能解释：
 
-该函数把一个 monitor event 从“端口事实”提升为“能落状态的 transaction event”。它会通过 uid 或 ROB/LQ/SQ active map 反查 uid，并补齐发射快照。没有这个步骤，后续无法判断 event 是不是旧 replay、旧 issue 或被 redirect 覆盖的旧动态实例。
+该函数把monitor event提升为能参与batch仲裁的transaction event。V2 LOAD/STA raw的
+generation恢复已经前移到`attach_issue_generation_snapshot()`；本函数不能在第一次
+replay后从可变status猜快照。对非correlated event，原active map解析和受限fallback
+继续保留。
 
 文字伪代码：
 
@@ -694,10 +786,12 @@ return 1;
 补 uid 和 ROB key；
 如果不是 redirect：
   调用 feedback_event_target_is_valid：确认 target 必须是 LOAD/STA/STD；
-  如果当前 uid 已发生过 replay，且非 STD event 缺 issue_epoch 或 replay_seq 快照，warning 后丢弃；
-  调用 target_dispatched：缺 issue_epoch 时先确认该 target 已经发射；
-  调用 get_target_issue_epoch：从该 target 当前发射快照补齐 issue_epoch；
-如果缺 replay_seq，则从 status 当前 replay_seq 补齐；
+  如果generation_correlated=1：
+    要求has_uid/has_issue_epoch/has_replay_seq全部存在；
+    保留token snapshot，禁止从status补齐或覆盖；
+  否则如果当前uid已发生过replay且非STD event缺snapshot，warning/drop；
+  只有明确非correlated兼容event才允许在target_dispatched后从status补issue_epoch；
+只有非correlated兼容event缺replay_seq时，才允许从status当前replay_seq补齐；
 返回 normalized event。
 ```
 
@@ -709,10 +803,10 @@ return 1;
 - `feedback_event_has_fault()`：检查 exception/fault。
 - `resolve_uid_for_event()`：通过 uid、ROB、LQ、SQ active map 解析唯一 active uid。
 - `feedback_event_target_is_valid()`：非 redirect event 必须是 LOAD/STA/STD target。
-- `status.replay_seq` snapshot 防御：replay 后的非 STD event 必须自带 `issue_epoch/replay_seq` 快照；否则不能从当前 status 补齐，避免旧 event 被错配到新 replay 轮次。
-- `target_dispatched()`：缺 issue_epoch 时，必须确认该 target 已经发射过。
-- `status.get_target_issue_epoch()`：补齐缺失的 issue epoch。
-- `status.replay_seq`：补齐缺失的 replay seq。
+- `generation_correlated`防御：V2 LOAD/STA必须自带token快照；第一次及后续replay均
+  不允许status fallback。
+- `target_dispatched()` / status snapshot：只服务明确非correlated兼容event，不能给V2
+  correlated LOAD/STA提供generation。
 
 ## 14. `common_data_transaction::resolve_uid_for_event()`
 
@@ -775,39 +869,93 @@ return have_uid;
 
 源码位置：`dispatch_monitor_batch_handler.sv`
 
-真实逻辑摘要：
+V2 coding后目标逻辑摘要：
 
 ```systemverilog
+memblock_issue_generation_claim_ctx_t claim_ctx;
+bit handler_accepted = 1'b0;
+bit allowed_compat_noop = 1'b0;
+
+if (wb_event.generation_correlated) begin
+    claim_ctx = data.validate_issue_generation_claim(wb_event);
+    pre_facts = '{target_epoch, replay_seq, sta_pass, sta_writeback,
+                  fault, replay, redirect};
+end
 case (wb_event.source)
     MEMBLOCK_WB_EVENT_SOURCE_LOAD_WB,
     MEMBLOCK_WB_EVENT_SOURCE_STORE_WB:
-        return writeback_handler.handle_real_writeback_event(wb_event);
+        handler_accepted = writeback_handler.handle_real_writeback_event(wb_event);
 
     MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK,
     MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK:
-        return writeback_handler.handle_issue_feedback_event(wb_event);
+        handler_accepted = writeback_handler.handle_issue_feedback_event(wb_event);
 
     default:
         if (event_is_replay(wb_event) || event_has_fault(wb_event)) begin
             data.push_feedback_event(wb_event);
-            return 1'b1;
+            handler_accepted = 1'b1;
         end
 endcase
+if (wb_event.generation_correlated) begin
+    post_facts = '{target_epoch, replay_seq, sta_pass, sta_writeback,
+                   fault, replay, redirect};
+    allowed_compat_noop = !handler_accepted &&
+        wb_event.target == MEMBLOCK_ISSUE_TARGET_STA &&
+        ((wb_event.generation_event_kind == MEMBLOCK_ISSUE_EVENT_KIND_IQ_FEEDBACK &&
+          claim_ctx.real_wb_seen_before) ||
+         (wb_event.generation_event_kind == MEMBLOCK_ISSUE_EVENT_KIND_REAL_WB &&
+          claim_ctx.iq_seen_before)) &&
+        !event_has_fault(wb_event) && !event_is_replay(wb_event) &&
+        ((wb_event.generation_event_kind == MEMBLOCK_ISSUE_EVENT_KIND_IQ_FEEDBACK &&
+          wb_event.iq_feedback_hit) ||
+         (wb_event.generation_event_kind == MEMBLOCK_ISSUE_EVENT_KIND_REAL_WB &&
+          event_is_normal_pass(wb_event))) &&
+        !target_real_wb_pass_enabled(MEMBLOCK_ISSUE_TARGET_STA) &&
+        pre_facts.sta_pass && pre_facts.sta_writeback &&
+        post_facts == pre_facts;
+    if (!handler_accepted && !allowed_compat_noop) begin
+        `uvm_fatal(...)
+        return 1'b0;
+    end
+    data.commit_issue_generation_claim(
+        wb_event, claim_ctx, handler_accepted || allowed_compat_noop);
+end
+return handler_accepted || allowed_compat_noop;
 ```
 
 功能解释：
 
-该函数只处理已经通过 batch 仲裁的非 redirect event。它按 `source` 把事件分到真实 writeback 分支或 IQ feedback 分支。redirect 不允许进入这里。
+该函数只处理已经通过batch redirect-first仲裁的非redirect event。对correlated
+LOAD/STA，它先只读validate token对应event kind，再按`source`分到真实writeback、IQ
+feedback或backend replay分支；只有功能handler成功或唯一允许的STA compat no-op后才
+commit。attach、validate和commit分离保证covered或handler拒绝的event不会提前消费
+pending。redirect不允许进入这里。
 
 文字伪代码：
 
 ```text
 如果误传入 redirect，fatal；
+如果generation_correlated=1：
+  调用validate_issue_generation_claim，要求event epoch/seq/kind/key/pipe与open token一致；
+  生成局部claim_ctx并采样target epoch/seq/pass/writeback/fault/replay/redirect等pre-handler
+  标量事实；全过程不修改token、status或tombstone；
 如果来源是真实 LOAD/STORE writeback，调用 handle_real_writeback_event：按 fault 或 normal pass 更新状态；
 如果来源是 STA/STD IQ feedback，调用 handle_issue_feedback_event：按 IQ hit/miss 更新 issue success 或生成 replay；
 如果来源无法分类但带 replay/fault 语义，调用 push_feedback_event：进入 recovery queue，并在入队前再次 normalize；
-其它无法分类 event 丢弃。
+记录原handler是否成功；
+若拒绝，只允许STA同uid/target/issue_epoch/replay_seq、另一distinct kind已seen、当前为
+无fault/replay的STA hit或normal STA WB、target_real_wb_pass_enabled(STA)=0、pre状态已
+sta_pass=1且sta_writeback=1、post无异常变化的compat no-op；
+LOAD、STA miss、fault、replayInst、generation错配或其它拒绝都fatal并保持token未消费；
+成功或唯一compat no-op后调用commit_issue_generation_claim，重读并核对ctx before-image：
+  STA hit只清IQ pending并保留WB；STA miss清IQ、取消WB并close STA_MISS；
+  STA WB只清WB并按IQ pending决定保持open或close；LOAD result清唯一WB pending；
+非correlated的其它无法分类event沿用原drop策略。
 ```
+
+validate不直接写pass/fail/terminal或token；原handler仍是功能状态和recovery入队的
+owner。只有handler成功或上述唯一compat no-op才commit；其它拒绝fatal且不commit，避免
+token与status分叉。
 
 ## 16. `handle_real_writeback_event()`
 
@@ -837,7 +985,12 @@ end
 
 功能解释：
 
-该函数只处理真实 DUT int writeback。它有两个主要分支：无异常就是 normal pass，更新 target pass；有异常就是 fault，先更新 target fault，然后把 fault event 放入 recovery queue。
+该函数只处理真实DUT int writeback。V2 correlated LOAD/STA event进入前只完成
+REAL_WB claim资格validate，token尚未消费；handler只复用原有normal/fault状态机。
+无异常更新target pass；有异常先
+更新target fault，再把fault event放入recovery queue。STA WB可先于IQ hit到达：token
+在外层commit后保持open等待IQ；IQ先到时token则等待WB。handler不负责关闭或重建
+generation，外层只在handler成功或唯一STA compat no-op后commit。
 
 内部子调用：
 
@@ -853,6 +1006,8 @@ end
 ```text
 如果 event 既不是真实 writeback，也没有 fault，直接忽略；
 取出 uid、issue_epoch、replay_seq；
+如果是V2 correlated LOAD/STA，要求REAL_WB kind已在batch放行后完成只读validate，
+此时尚未commit；
 
 如果 event 带 exception：
   调用 mark_target_fault：先写 target writeback/fault，再设置 uid fault 和 exception_pending；
@@ -930,7 +1085,13 @@ end
 
 功能解释：
 
-该函数处理 IssueQueue feedback，而不是真实 writeback。`hit=1` 表示 IssueQueue finalSuccess；如果对应 target 配置为等待真实 writeback pass，那么这里只记录 issue feedback success，不置 target pass。`failed=1` 对 STA 会进入 replay queue；STD failed 当前没有后端 replay 路径，warning 后丢弃。
+该函数处理IssueQueue feedback，而不是真实writeback。V2 STA event进入前已附不可变
+generation并完成IQ kind只读validate，token尚未消费。handler成功返回后外层commit：
+hit只消费IQ pending，token继续等待STA real-WB；miss才取消同generation real-WB并
+close STA_MISS。`hit=1`表示IssueQueue finalSuccess；如果
+配置为等待真实writeback pass，这里只记录feedback success，不置target pass。
+`failed=1`对STA进入replay queue。V2 monitor不生成STD IQ event，现有STD防御分支只
+保留给非V2兼容入口。
 
 内部子调用：
 
@@ -945,9 +1106,11 @@ end
 ```text
 如果 event 不是 IQ feedback，忽略；
 取出 uid、issue_epoch、replay_seq；
+如果是V2 correlated STA，要求IQ kind已在redirect-first放行后完成只读validate，
+此时尚未commit；
 
 如果 IQ feedback failed：
-  如果 target 是 STD，当前不支持 STD backend replay，warning 后丢弃；
+  如果 target 是 STD，仅兼容保护路径warning/drop；V2 monitor不会产生该event；
   调用 push_feedback_event：否则把该 event 放入 recovery queue，后续由 replay handler 置 replay_pending；
 
 如果 IQ feedback hit：
@@ -1205,13 +1368,15 @@ exception_event_q.push_back(normalized_event);
 
 内部子调用：
 
-- `normalize_feedback_event()`：再次补齐并校验 uid/ROB/epoch，防止未规范化 event 进入 recovery queue。
+- `normalize_feedback_event()`：再次校验event；correlated snapshot必须原样保留，
+  不从当前status补generation。
 - `exception_event_q.push_back()`：真正入队。
 
 文字伪代码：
 
 ```text
-调用 normalize_feedback_event：再次解析 active uid、补齐 ROB/issue_epoch/replay_seq，并过滤无法定位的旧 event；
+调用normalize_feedback_event：correlated event要求已有uid/ROB/issue_epoch/replay_seq并
+禁止status fallback；非correlated event沿用原解析；
 如果 normalize 失败，直接丢弃；
 如果 normalize 成功，调用 exception_event_q.push_back，把 event 放入 recovery queue；
 等待 exception_redirect_replay_handler 后续消费。
@@ -1335,13 +1500,16 @@ data.mark_replay_pending(uid, wb_event.target, issue_epoch, replay_seq, wb_event
 
 功能解释：
 
-该函数消费 recovery queue 中的 replay event。它先重新解析 uid 和 epoch 快照，确认 event 仍属于 active transaction；如果配置为等待 PTW 且 event 是 PTW back replay，则先进入 PTW wait 队列，否则直接置 replay pending。
+该函数消费recovery queue中的replay event。它确认active uid并读取event快照；V2
+correlated LOAD/STA必须直接使用token snapshot，不能从当前status补齐。如果配置为
+等待PTW且event明确是PTW back replay，则先进入PTW wait，否则直接置replay pending。
+V2 STA feedback没有flushState，因此本来源固定不走PTW wait。
 
 内部子调用：
 
 - `data.resolve_uid_for_event()`：确认 replay event 仍能映射到 active uid。
-- `data.get_event_issue_epoch()`：读取 event 自带或 status 当前 target 的 issue_epoch。
-- `data.get_event_replay_seq()`：读取 event 自带或 status 当前 replay_seq。
+- `data.get_event_issue_epoch()` / `data.get_event_replay_seq()`：correlated event必须读取
+  自带token snapshot；只有明确非correlated兼容event可使用原status fallback。
 - `event_should_wait_ptw()`：检查 `MEMBLOCK_REPLAY_WAIT_PTW_EN` 和 `ptw_back_replay`。
 - `data.push_ptw_wait_replay()`：PTW back replay 延迟释放入口，内部会对同 uid/target/replay_seq wait item 去重。
 - `data.mark_replay_pending()`：真正置 replay pending，内部会清旧 target issue queue 项、清 target dispatched/pass、设置 replay target mask 并 bump replay_seq。
@@ -1350,7 +1518,8 @@ data.mark_replay_pending(uid, wb_event.target, issue_epoch, replay_seq, wb_event
 
 ```text
 解析 replay event 对应的 active uid；
-调用 get_event_issue_epoch/get_event_replay_seq：优先使用 event 快照，缺失时从当前 status 补齐；
+如果generation_correlated=1，要求issue_epoch/replay_seq自带且直接读取，缺失fatal；
+只有非correlated兼容event才允许原status fallback；
 如果该 replay 需要等 PTW：
   调用 push_ptw_wait_replay：放入 PTW wait replay 队列，并对同 uid/target/replay_seq 去重；
   本轮不置 replay_pending。
@@ -1478,6 +1647,9 @@ redirect_phase 回到 IDLE。
 ```text
 检查 redirect valid，禁止 flush 已 terminal_done uid；
 记录当前 uid 是否有 LQ/SQ active mapping；
+对真正被redirect覆盖的uid，先调用close_issue_generation_token(REDIRECT)：
+  关闭LOAD/STA open token并写最近SQ/ROB tombstone；
+  必须在retire_active_uid删除active key map前完成；
 如果 status.active：
   调用 retire_active_uid：从 active ROB/LQ/SQ map 删除 uid，并清掉该 uid 的 issue queue 项；
 否则：
@@ -1489,34 +1661,91 @@ redirect_phase 回到 IDLE。
 记录 last_event_cycle。
 ```
 
+## 29.1 issue-generation token 生命周期对 writeback flow 的约束
+
+```text
+reset：停止/清raw queue后，清open token和closed tombstone，再清active map与epoch；
+
+redirect：covered event在batch中drop且不validate/commit；apply阶段只关闭真正被覆盖uid的token；
+未覆盖老token保持open，可接受更高sample epoch的合法result；
+
+STA双channel：IQ hit和real-WB可任意顺序，各自在原handler成功或唯一compat no-op后
+commit一次；只到一个时token保持open；STA miss仅在replay入队成功后commit IQ并取消
+同generation WB；迟到WB按STA_MISS tombstone drop；
+
+LOAD：normal/fault/replayInst都消费唯一real-WB pending并按ALL_CONSUMED/FAULT/
+LOAD_REPLAY reason关闭；
+
+reissue：mark_replay_pending bump replay_seq但不创建token；新accepted fire使用新
+issue_epoch/replay_seq注册token；旧tombstone不能给新event附generation；
+
+terminal/deq：active map释放前检查LOAD/STA token；required pending泄漏fatal；只有
+明确optional pending可按TERMINAL/LSQ_DEQ关闭；公共terminal定义不改；
+
+stale：未来epoch、current必需event无token、duplicate kind或key/pipe错配fatal；
+旧epoch、早于fire或命中tombstone按close reason info/drop；无active-window扫描。
+```
+
 ## 30. 端到端行为总结
 
 ```text
 真实 int writeback normal pass：
-  raw_int_wb
+  LOAD/STA accepted fire -> register generation token
+  -> raw LDA/STA int_wb
   -> convert_raw_int_wb
+  -> active ROB map + attach token snapshot
   -> batch normalize / redirect-first 仲裁
+  -> validate REAL_WB claim资格，无副作用
   -> handle_real_writeback_event
   -> mark_target_normal_pass
   -> status pass/writeback 更新
+  -> handler成功或唯一STA compat no-op
+  -> commit REAL_WB event kind
 
 真实 int writeback fault：
-  raw_int_wb(exception_vec != 0)
+  LOAD/STA accepted fire -> register token
+  -> raw_int_wb(exception_vec != 0)
   -> convert_raw_int_wb
+  -> attach token snapshot
   -> batch normalize / redirect-first 仲裁
+  -> validate REAL_WB claim资格
   -> handle_real_writeback_event
   -> mark_target_fault
   -> push_feedback_event
+  -> handler成功返回
+  -> commit REAL_WB / close FAULT
   -> exception_event_q
   -> process_pending_events
   -> handle_fault_event 只消费，不重复 mark fault
 
+LDA replayInst：
+  LOAD accepted fire -> register real-WB token
+  -> raw LDA replayInst=1
+  -> attach REAL_WB token snapshot
+  -> real_wb_valid=0 replay_valid=1 source=BACKEND_REPLAY
+  -> redirect-first放行 / validate WB claim资格
+  -> push_feedback_event成功入队
+  -> commit WB / close LOAD_REPLAY
+  -> mark_replay_pending / re-fire新token
+
+STD real writeback：
+  raw STD只有ROB value
+  -> 固定probe两个ROB flag key并要求唯一active STD uid
+  -> 从status补完整ROB/SQ
+  -> 不调用generation token，不支持STD replay
+  -> 进入原normal/fault handler
+
 STA IQ feedback replay：
-  raw_iq_feedback(hit=0, is_sta=1)
+  STA accepted fire -> register IQ + real-WB pending token
+  -> raw_iq_feedback(hit=0, is_sta=1, SQ-only)
   -> convert_raw_iq_feedback
+  -> active SQ map + attach token snapshot
   -> batch normalize / redirect-first 仲裁
+  -> validate IQ claim资格
   -> handle_issue_feedback_event
   -> push_feedback_event
+  -> handler成功返回
+  -> commit IQ / cancel WB / close STA_MISS
   -> exception_event_q
   -> process_pending_events
   -> handle_replay_event
@@ -1538,35 +1767,53 @@ memoryViolation redirect 同批覆盖 writeback：
 
 ```text
 真实 int writeback normal pass：
-  adapter 把 raw_int_wb 转成 memblock_wb_event_t；
-  batch handler 先 normalize 并确认没有 redirect 覆盖；
+  accepted LOAD/STA fire先注册不可变generation token；
+  adapter把raw_int_wb转成event并通过active ROB map/token附加snapshot；
+  batch handler先normalize并确认没有redirect覆盖，随后只读validate REAL_WB kind；
   handle_real_writeback_event 判断为 normal pass；
   mark_target_normal_pass 更新 target writeback/pass；
-  如果 required_targets_done，全 uid writeback/pass 也置位。
+  如果 required_targets_done，全 uid writeback/pass 也置位；
+  handler成功或唯一STA compat no-op后外层commit REAL_WB。
 
 真实 int writeback fault：
-  adapter 根据 exception_vec!=0 生成 fault event；
+  adapter根据exception_vec!=0生成fault event并附token snapshot；
   batch handler 若发现 older redirect 覆盖该 fault，则 drop；
-  未覆盖时 handle_real_writeback_event 先 mark_target_fault；
+  未覆盖时先validate REAL_WB claim资格，再由handle_real_writeback_event执行
+  mark_target_fault；
   mark_target_fault 写 target fault 和 status.fault/exception_pending；
   随后 push_feedback_event 入 exception_event_q；
+  handler成功返回后外层commit REAL_WB并close FAULT；
   process_pending_events 在无 redirect 抢占时调用 handle_fault_event，只消费事件，不重复 mark fault。
 
+LDA replayInst：
+  adapter先按真实ROB匹配LOAD token，把result channel转换为backend replay而非normal WB；
+  batch放行后validate唯一WB pending资格，push_feedback_event成功入队后commit并close
+  LOAD_REPLAY；后续复用recovery和re-fire，新的LDA generation由新fire token唯一标识。
+
+STD real writeback：
+  adapter不读取悬空ROB flag/SQ payload；只对ROB value做两个完整key probe；
+  唯一命中后补status ROB/SQ并进入原handler；STD不建token且无STD replay。
+
 STA IQ feedback replay：
-  adapter 把 STA miss IQ feedback 转成 replay_valid event；
-  batch handler normalize 并做 redirect-first 过滤；
+  STA fire注册IQ+real-WB双pending token；
+  adapter只从STA raw读取真实SQ key，通过active SQ map/token附加generation并生成
+  replay_valid event；
+  batch handler normalize并做redirect-first过滤，covered event不validate/commit；
+  未覆盖时validate IQ claim资格且不修改token；
   handle_issue_feedback_event 对 STA failed 调用 push_feedback_event；
+  handler成功返回后外层commit IQ、取消同generation WB并close STA_MISS；
   process_pending_events 调用 handle_replay_event；
   handle_replay_event 根据 ptw_back_replay 选择等待 PTW 或直接 mark_replay_pending；
   mark_replay_pending 清对应 target 旧 issue 项、设置 replay_target 并 bump replay_seq；
-  下一轮 route_all_issue_queues 只把 replay target 重新入队。
+  下一轮route_all_issue_queues只把replay target重新入队，新accepted fire注册新token。
 
 memoryViolation redirect 同批覆盖 writeback：
   collect_monitor_event_batch 把 raw_int_wb 和 raw_ctrl.memoryViolation 放入同一个 events batch；
   process_monitor_event_batch 选择 oldest redirect；
   selected redirect 先 push_feedback_event；
-  被该 redirect 覆盖的 pass/fault/replay 不允许落 status；
+  被该redirect覆盖的pass/fault/replay不允许落status，也不validate/commit token；
   process_pending_events 建立 active_redirect 并 push_redirect_drive；
   redirect sequence drive 完成后 advance_active_redirect 调用 apply_redirect_flush；
-  apply_redirect_flush 清被覆盖 uid 的旧动态状态并回滚 admission 边界，后续重新 admission/issue。
+  apply_redirect_flush在active map删除前以REDIRECT reason关闭被覆盖uid token，再清旧
+  动态状态并回滚admission边界，后续重新admission/issue注册新token。
 ```

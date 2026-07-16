@@ -19,6 +19,37 @@
 
 说明：当前源码中没有 `issue_queue_assigner.sv`。LOAD/STA/STD payload 字段由 `issue_field_assigner.sv` 写入 `lintsissue_agent_agent_xaction`。
 
+V2 coding目标与当前源码基线的差异：
+
+- 物理端口名称固定为`issueLda_0..2`、`issueSta_0..1`、`issueStd_0..1`；文中
+  `intIssue_0..6`只表示当前未适配源码的历史扁平布局，不是V2目标接口名。
+- `MEMBLOCK_ISSUE_TARGET_LOAD/STA/STD`分别映射LDA、STA、STD。LDU的普通load和software
+  prefetch都只route到LOAD并驱动`issueLda`：前者behavior=LOAD，后者保留
+  `behavior=PREFETCH/is_prefetch=1`；STU同时允许STA+STD。CBO、atomic/MOU和vector本轮
+  在进入driver前fatal，不能把prefetch误归到unsupported边界。
+- LDA无FuType，STA有FuType和完整ROB/SQ，STD有FuType、ROB value-only和完整SQ；
+  `numLsElem`不在issue port，不能由通用helper写入。
+- fired-mask的LOAD base=0、STA base=`LOAD_PIPE_NUM`、STD base=
+  `LOAD_PIPE_NUM+STA_PIPE_NUM`；width/full-mask均由compile port count派生。
+- scalar testcase必须禁用默认随机vecissue sequence，并断言`issueVldu_valid=0`。
+
+V2逐port字段矩阵：
+
+| target | V2 port | ROB | LQ/SQ | FuType | FTQ/backend/dependency | `numLsElem` |
+|---|---|---|---|---|---|---|
+| LOAD | `issueLda_0..2` | 完整flag/value | 完整LQ | 端口无该字段 | 按真实LDA bundle写入 | 不存在 |
+| STA | `issueSta_0..1` | 完整flag/value | 完整SQ | V2编码 | 按真实STA bundle写入 | 不存在 |
+| STD | `issueStd_0..1` | value-only，不能写悬空flag | 完整SQ | V2编码 | 按真实STD bundle写入 | 不存在 |
+
+V2 scalar target合法矩阵：
+
+| `fuType`/operation behavior | target | V2 issue port | 本轮策略 |
+|---|---|---|---|
+| LDU + load `fuOpType` | LOAD | `issueLda_0..2` | 原有支持 |
+| LDU + software prefetch `fuOpType` | LOAD，`is_prefetch=1` | `issueLda_0..2` | 原有支持，默认PREFETCH权重保持1 |
+| STU scalar store | STA + STD | `issueSta_0..1` + `issueStd_0..1` | 原有scalar store支持 |
+| CBO、atomic/MOU、vector LS | 无合法scalar target | 无 | 本轮显式fatal或由主表配置禁止生成 |
+
 ## 1. 函数调用 Flow 图
 
 ```mermaid
@@ -35,7 +66,7 @@ flowchart TD
     G1 -->|yes| G2["return"]
     G1 -->|no| G3["advance_terminal_done_uid"]
     G3 --> G4["get_active_scan_begin_uid / get_active_scan_end_uid"]
-    G4 --> G5["scan up to MEMBLOCK_REAL_LSQ_ENQ_MAX"]
+    G4 --> G5["scan up to MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM"]
     G5 --> D
 
     D --> D1{"is_uid_route_ready?"}
@@ -113,7 +144,8 @@ flowchart TD
     Q5 --> S
     S --> S1["alloc_issue_epoch"]
     S1 --> S2["mark_issue_snapshot"]
-    S2 --> S3["delete_issue_queue_entry match_replay_seq=1"]
+    S2 --> S2A["register_issue_generation_token LOAD/STA"]
+    S2A --> S3["delete_issue_queue_entry match_replay_seq=1"]
     S3 --> S4["set_target_queued=0"]
     S4 --> S5["set_target_dispatched=1"]
     S5 --> S6["clear_replay_target_after_fire"]
@@ -130,9 +162,11 @@ LSQ admission 成功后 complete_admission 调用 prepare_issue_route_for_uid；
 prepare_issue_route_for_uid 要求 uid active 且 enq，随后置 issue_ready=1 并调用 route_uid；
 service_real_dispatch_flow 和 lintsissue drive loop 也会周期性调用 route_all_ready_uids 补 route；
 route_all_ready_uids 先检查 global flush/redirect/freeze，阻塞时直接返回；
-未阻塞时推进 terminal_done_uid，并只扫描 terminal_done_uid 到 max_enqueued_uid 之间最多 MEMBLOCK_REAL_LSQ_ENQ_MAX 个 uid；
+未阻塞时推进terminal_done_uid，并只扫描terminal_done_uid到max_enqueued_uid之间最多`MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM`个uid；该值是compile物理slot数，不由runtime plus配置；
 route_uid 对每个 uid 检查 active/enq/issue_ready、flushed、redirect_pending、exception_pending、replay_pending；
-通过检查后 derive_op_behavior，按 route_load/route_sta/route_std 调 route_target；
+通过检查后 derive_op_behavior：LDU普通load得到LOAD behavior，LDU software prefetch得到
+PREFETCH behavior并保持is_prefetch=1，但两者都只置route_load；随后按
+route_load/route_sta/route_std 调 route_target；
 route_target 对目标去重、过滤非 replay target、生成 issue item、写入 load_issue_q/sta_issue_q/std_issue_q，并置 queued bit。
 
 2. select 阶段
@@ -149,7 +183,8 @@ select_target_candidates 跳过已选 index、不可发射 item；global 模式�
 
 3. assign/driver 阶段
 assign_issue_items 对每个 selected item 使用 pipe_idx 写入 xaction；
-issue_field_assigner.assign_issue_item_fields 按 target 写 LOAD 0..2、STA 3..4、STD 5..6；
+当前源码的issue_field_assigner按历史扁平index写LOAD 0..2、STA 3..4、STD 5..6；
+V2目标按target直接写issueLda/Sta/Std物理port，并用派生base只计算内部fired-mask bit；
 start_item/finish_item 后 driver.main_phase 调 send_pkt 驱动 DUT；
 如果 wait_ready=1，driver.wait_dispatch_issue_ready 循环等待 valid port ready；
 每拍 clear_ready_dispatch_issue_ports 记录已 ready 的 port 到 fired_mask，并清掉该 port valid；
@@ -164,7 +199,12 @@ sequence 返回后先看 aborted_by_redirect；
 mark_fired_items 根据 target/uop_index 计算 port bit，bit 未命中则跳过；
 如果 data.issue_blocked_by_global_flush 当前为 1，调用 mark_issue_fire_already_accepted，只做 state eligibility 检查；
 否则调用 mark_issue_fire，包含 global flush 检查；
-fire 成功后分配 issue_epoch，记录 target issue snapshot，删除匹配 replay_seq 的 queue item，清 queued bit，置 dispatched bit，清 replay target；
+fire 成功后分配 issue_epoch，记录 target issue snapshot；随后用同一个issue_epoch和
+fired item调用`register_issue_generation_token()`：LOAD建立real-WB pending，STA建立
+IQ feedback和real-WB两个pending，STD不建token；注册成功后再删除匹配replay_seq的
+queue item，清queued bit，置dispatched bit并清replay target；
+token保存fire时不可变的uid/target/真实key/issue_epoch/replay_seq/pipe/flush epoch/
+cycle，后续event不得从可变status重建generation；
 STD 兼容路径在 MEMBLOCK_STD_REAL_WB_PASS_EN=0 时可补 issue-accept pass event。
 ```
 
@@ -221,7 +261,7 @@ end
 data.advance_terminal_done_uid();
 begin_uid = data.get_active_scan_begin_uid();
 end_uid   = data.get_active_scan_end_uid();
-scan_limit = seq_csr_common::get_real_lsq_enq_max();
+scan_limit = MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM;
 for (uid = begin_uid;
      uid < end_uid && scanned < scan_limit;
      uid++) begin
@@ -232,11 +272,11 @@ end
 
 功能解释：
 
-这是周期性补 route 入口，避免 LSQ admission 当拍遗漏或 replay 后需要重新 route 的 target 长期滞留。它只扫描公共 active 窗口，并用 `MEMBLOCK_REAL_LSQ_ENQ_MAX` 限流，避免大规模 testcase 每拍全表遍历。
+这是周期性补route入口，避免LSQ admission当拍遗漏或replay后需要重新route的target长期滞留。它只扫描公共active窗口，并用compile物理slot数`MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM`限流，避免大规模testcase每拍全表遍历。runtime plus只控制本拍候选/pipe使用量，不改变该物理扫描上限。
 
 输入/输出：
 
-- 输入：`dispatch_progress.terminal_done_uid`、`max_enqueued_uid`、`MEMBLOCK_REAL_LSQ_ENQ_MAX`。
+- 输入：`dispatch_progress.terminal_done_uid`、`max_enqueued_uid`、compile `MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM`。
 - 输出：可能向 `load_issue_q/sta_issue_q/std_issue_q` 补充 item。
 
 文字伪代码：
@@ -249,7 +289,7 @@ end
   这里不会因为 normal pass 但尚未 commit/deq 的 uid 前进，也不会因为 replay/redirect 中间态前进；
 begin_uid = terminal_done_uid；
 end_uid = max_enqueued_uid + 1，如果还没有 admission 则等于 begin；
-scan_limit = MEMBLOCK_REAL_LSQ_ENQ_MAX；
+scan_limit = MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM；
 从 begin_uid 顺序扫描到 end_uid 或达到 scan_limit：
   对每个 uid 调 route_uid；
 ```
@@ -285,7 +325,10 @@ end
 
 功能解释：
 
-`route_uid()` 把一个已 admission 的 uid 按 LSU behavior 拆成一个或多个 issue target。LOAD 走 LOAD；STORE 通常同时走 STA 和 STD；AMO/MOU 按 `derive_op_behavior()` 给出的 route bit 处理。
+`route_uid()` 把一个已 admission 的 uid 按 LSU behavior 拆成一个或多个 issue target。
+LDU普通load和software prefetch都走LOAD；prefetch只在behavior中保留`is_prefetch=1`，
+不会新增独立target。STORE通常同时走STA和STD。CBO、atomic/MOU和vector LS不属于本轮
+scalar闭环，必须在主表/capability gate或本函数合法性检查中fatal，不能继续route。
 
 输入/输出：
 
@@ -302,7 +345,11 @@ end
 读取 main transaction：
   获取该 transaction 的 fuType、fuOpType、lsq_flow、load/store/atomic 等主表字段。
 调用 lsq_ctrl_model::derive_op_behavior：
-  根据 main transaction 推导这条 transaction 应该拆成哪些 issue target，例如 LOAD、STA、STD，以及对应的 LSQ/atomic 行为信息。
+  LDU + load fuOpType得到LOAD behavior、is_prefetch=0、route_load=1；
+  LDU + software prefetch fuOpType得到PREFETCH behavior、is_prefetch=1、route_load=1；
+  两者route_sta/route_std均为0；
+  STU scalar store得到route_sta=1且route_std=1；
+  CBO、atomic/MOU或vector组合在本轮unsupported gate fatal；
 如果 route_load=1：
   调用 route_target(uid, LOAD, behavior)：
     尝试把该 uid 的 LOAD target 写入 load issue queue。
@@ -319,6 +366,9 @@ end
 - `is_uid_route_ready()`：统一判断该 uid 是否允许进入 route；它处理 global flush/redirect/freeze 阻塞、active/enq/issue_ready 门槛、flushed/redirect/exception/replay pending 门槛。
 - `lsq_ctrl_model::derive_op_behavior()`：把主表中的 `fuType/fuOpType/lsq_flow` 转换成 `route_load/route_sta/route_std` 等行为位。
 - `route_target()`：对单个 target 做重复过滤、replay target 过滤、旧 entry 清理、issue item 构造和目标 queue 入队。
+
+software prefetch沿用原有LOAD queue、LOAD最老优先仲裁、`issueLda` field assign、ready/fire、
+generation token和real-WB闭环；本轮只做V2 split port字段适配，不修改其功能路由。
 
 ## 5. `is_uid_route_ready()`
 
@@ -1262,6 +1312,7 @@ if (!is_issue_item_eligible(item)) begin
 end
 issue_epoch = data.alloc_issue_epoch();
 data.mark_issue_snapshot(item.uid, item.target, issue_epoch);
+data.register_issue_generation_token(item, issue_epoch);
 data.delete_issue_queue_entry(item.target, item.uid, item.replay_seq, 1'b1);
 set_target_queued(item.uid, item.target, 1'b0);
 set_target_dispatched(item.uid, item.target, 1'b1);
@@ -1280,12 +1331,20 @@ data.mark_issue_snapshot(item.uid, item.target, issue_epoch);
 
 功能解释：
 
-两个函数更新同一组状态。区别是 `mark_issue_fire()` 会重新检查 global flush 阻塞；`mark_issue_fire_already_accepted()` 用于 driver 已经观测 ready 的 partial fire，即使此时 global flush 已置位，也允许对已接收 port 落 dispatched，但仍检查 uid/item 状态和 replay_seq。
+两个函数更新同一组状态并注册同一种generation token。区别是
+`mark_issue_fire()`会重新检查global flush阻塞；
+`mark_issue_fire_already_accepted()`用于driver已经观测ready的partial fire，即使此时
+global flush已置位，也允许对已接收port落dispatched，但仍检查uid/item状态和
+replay_seq。两条路径必须使用同一个局部`issue_epoch`同时写status snapshot和token，
+不能让already-accepted路径遗漏correlation建账。
 
 输入/输出：
 
 - 输入：已 fire 的 queue item。
-- 输出：`issue_epoch`、target issue snapshot、queue 删除、queued 清 0、dispatched 置 1、replay target 清理。
+- 输出：`issue_epoch`、target issue snapshot、LOAD/STA不可变generation token、queue
+  删除、queued清0、dispatched置1、replay target清理。
+- 副作用：token写入`common_data_transaction`的open token map；同uid/target已有open
+  token时fatal。STD不建token，继续使用value-only real-WB专项。
 
 文字伪代码：
 
@@ -1298,6 +1357,13 @@ mark_issue_fire:
   分配 issue_epoch；
   调用 mark_issue_snapshot：
     记录 target issue_epoch/replay_seq 快照，供后续 writeback/feedback 过滤旧事件。
+  调用 register_issue_generation_token：
+    LOAD/STA复制fired item的uid、target、完整可用key、replay_seq、pipe，并记录本次
+    issue_epoch、采样flush epoch和fire cycle；
+    LOAD初始化real-WB pending；
+    STA初始化IQ feedback和real-WB两个pending；
+    STD直接返回，不建立token；
+    若同uid/target仍有open token则fatal，避免两个线级不可区分generation重叠；
   删除匹配 target/uid/replay_seq 的 queue entry；
   清 target queued bit；
   置 target dispatched bit；
@@ -1316,6 +1382,8 @@ mark_issue_fire_already_accepted:
 
 - `data.alloc_issue_epoch()`：生成全局 issue 版本。
 - `data.mark_issue_snapshot()`：写 target issue epoch。
+- `data.register_issue_generation_token()`：在accepted fire点保存不可变generation，
+  为后续STA SQ-only feedback和LDA/STA real-WB提供O(1) correlation来源；不消费event。
 - `data.delete_issue_queue_entry(match_replay_seq=1)`：只删当前动态实例 entry。
 - `data.clear_replay_target_after_fire()`：replay target 完成后清 pending。
 
@@ -1413,13 +1481,25 @@ Status 字段：
 - `replay_pending/replay_target_*`：只允许请求 replay 的 target route 和 fire。
 - `load_issue_epoch/sta_issue_epoch/std_issue_epoch`：fire 后分配，用于 writeback/feedback 过滤旧事件。
 
+Issue generation token：
+
+- 唯一owner是`common_data_transaction`，open索引为`uid + target`；STA stale tombstone按
+  SQ key，LOAD/STA real-WB tombstone按ROB key保存最近关闭记录。
+- LOAD token只有required real-WB pending；STA token分别维护IQ feedback和real-WB
+  pending；STD不建token。
+- token在fire后不可修改`issue_epoch/replay_seq/pipe/key`。后续adapter先用active
+  SQ/ROB map解析uid，再匹配token；不得从当前status推导第一次replay后的generation。
+- reset清全部open token/tombstone；redirect只关闭真正被覆盖uid的token；STA miss、
+  LDA replay/fault、terminal/deq按明确close reason关闭；reissue fire建立新token。
+- token生命周期不改变issue queue候选、优先级、fired-mask和dispatched字段定义。
+
 Driver 协作字段：
 
 - `memblock_dispatch_wait_ready`：sequence 要求 driver 等待 valid port ready。
 - `memblock_dispatch_nonblocking_issue`：为 1 时 driver 只采样一次 ready，未 fire item 不出队。
 - `memblock_dispatch_ready_timeout`：等待 ready 最大周期。
 - `memblock_dispatch_flush_epoch`：发射开始时的 flush 版本。
-- `memblock_dispatch_fired_mask`：driver 回填，bit0..2 LOAD、bit3..4 STA、bit5..6 STD。
+- `memblock_dispatch_fired_mask`：driver 回填；bit布局由compile-time LOAD/STA/STD port count和base派生。V2默认3/2/2仍得到7 bit，但源码不得硬编码宽度和offset。
 - `memblock_dispatch_aborted_by_redirect`：等待 ready 中遇到 redirect/flush 时置 1。
 
 ## 20. 分支优先级
@@ -1447,7 +1527,7 @@ Fire marking 分支优先级：
 2. Driver abort 且 `fired_mask=0`，直接 return，不修改 status。
 3. 未 abort 但 sequence 看到 global flush/redirect 或 flush_epoch 改变，跳过 fire marking。
 4. 正常路径若 `memblock_dispatch_nonblocking_issue=1`，只按真实 `tr.memblock_dispatch_fired_mask` 标记 fire。
-5. 正常路径若 `memblock_dispatch_nonblocking_issue=0`，用 `7'h7f` 标记全部 selected fired_items，保持旧阻塞等待语义。
+5. 正常路径若 `memblock_dispatch_nonblocking_issue=0`，使用由total port count派生的full mask标记全部selected fired_items；不得保留固定7-bit常量。
 6. `mark_issue_fire_already_accepted()` 只用于已被 DUT ready 接收的 redirect/flush 边界 item。
 
 ## 21. 端到端行为总结
@@ -1460,21 +1540,30 @@ LOAD 正常发射：
   -> route_target(LOAD)
   -> load_issue_q push queued_load=1
   -> lintsissue drive loop select LOAD
-  -> assign intIssue_0/1/2
+  -> V2 assign issueLda_0/1/2
   -> driver send_pkt and wait ready
   -> mark_fired_items bit0/1/2
   -> mark_issue_fire
+  -> register LOAD issue-generation token(real-WB pending)
   -> delete load_issue_q entry
   -> queued_load=0 load_dispatched=1 issue_epoch recorded
+
+software PREFETCH发射：
+  主表LDU + prefetch fuOpType，默认PREFETCH权重保持1
+  -> derive_op_behavior(PREFETCH, is_prefetch=1, route_load=1)
+  -> 后续完全复用LOAD的load_issue_q/select/issueLda/ready/fire/token路径
+  -> 不进入CBO/atomic/vector unsupported gate
 
 STORE STA/STD 正常发射：
   LSQ admission
   -> route_uid(route_sta + route_std)
   -> sta_issue_q/std_issue_q push
   -> select STA and STD according to pipe count/send_pri/ROB age
-  -> assign intIssue_3/4 and intIssue_5/6
-  -> driver ready records fired_mask[3:6]
+  -> V2 assign issueSta_0/1 and issueStd_0/1
+  -> driver按派生STA/STD base记录fired_mask
   -> mark_issue_fire per target
+  -> STA register issue-generation token(IQ + real-WB pending)
+  -> STD不建generation token
   -> queued_sta/std cleared, sta_dispatched/std_dispatched set
 
 send_pri 全局优先级：
@@ -1507,13 +1596,20 @@ LOAD 正常路径：
   Admission 让 uid active/enq/issue_ready；
   route_uid 看到 LOAD behavior，将 item 写入 load_issue_q；
   select 阶段确认 item 未 killed、未 replay stale、ready_cycle=0；
-  assign 阶段写 intIssue_0/1/2；
+  V2 assign阶段写issueLda_0/1/2；
   driver 等 ready，ready 后置 fired_mask 对应 bit；
-  sequence fire marking 分配 issue_epoch，删除 queue entry，清 queued_load，置 load_dispatched。
+  sequence fire marking分配issue_epoch并注册不可变LOAD token，再删除queue entry、清
+  queued_load、置load_dispatched；后续LDA real-WB必须匹配该token。
+
+software PREFETCH路径：
+  derive_op_behavior保留PREFETCH/is_prefetch语义，但target仍是LOAD；
+  route、select、V2 issueLda驱动、fire marking和generation闭环均复用原LOAD逻辑；
+  这是原有支持逻辑不变，不是本轮新增功能，也不得因CBO/atomic/vector边界被fatal。
 
 STORE 路径：
   STORE behavior 同时 route STA 和 STD；
-  两个 target 有独立 queue item、queued bit、dispatched bit 和 issue_epoch；
+  两个target有独立queue item、queued bit、dispatched bit和issue_epoch；
+  STA fire额外注册IQ+real-WB双pending token，STD明确不建token；
   STA/STD 可以同拍或不同拍 fire，状态独立更新；
   STD 如果关闭真实 writeback pass，可通过 issue-accept feedback 补 pass。
 

@@ -4,7 +4,8 @@
 
 - [normal_pass_flow.md](normal_pass_flow.md)：真实 writeback normal pass，直接落 status，不进入 `push_feedback_event()`。
 - [redirect_flow.md](redirect_flow.md)：`memoryViolation` redirect 进入 `push_feedback_event()` 后的 flush/reissue。
-- [replay_flow.md](replay_flow.md)：STA IQ feedback replay 进入 `push_feedback_event()` 后的 replay pending/route/issue。
+- [replay_flow.md](replay_flow.md)：STA IQ feedback miss或LDA `replayInst`进入
+  `push_feedback_event()`后的replay pending/route/issue及generation token生命周期。
 - [fault_exception_flow.md](fault_exception_flow.md)：真实 writeback fault 先 `mark_target_fault()`，再入队由 `handle_fault_event()` 消费。
 
 ## 1. 总览 Flow 图
@@ -16,23 +17,30 @@ flowchart TD
     C --> C1[convert_raw_int_wb]
     C --> C2[convert_raw_iq_feedback]
     C --> C3[convert_raw_memory_violation]
-    C1 --> D[dispatch_monitor_batch_handler::process_monitor_event_batch]
-    C2 --> D
+    C1 --> C11[attach_issue_generation_snapshot LDA/STA]
+    C2 --> C21[STA SQ-only + attach_issue_generation_snapshot]
+    C11 --> D[dispatch_monitor_batch_handler::process_monitor_event_batch]
+    C21 --> D
     C3 --> D
     D --> E[normalize_event_batch]
     E --> F[common_data_transaction::normalize_feedback_event]
     D --> G{redirect-first arbitration}
-    G -->|normal pass allowed| H[handle_real_writeback_event]
+    G -->|covered| G0[drop without validate or commit; redirect apply closes token]
+    G -->|allowed correlated| G1[validate_issue_generation_claim no side effect]
+    G -->|allowed non-correlated| H
+    G1 -->|normal pass allowed| H[handle_real_writeback_event]
     H -->|event_is_normal_pass| I[mark_target_normal_pass]
-    I --> J[no push_feedback_event]
+    I --> CMT[handler accepted or unique STA compat no-op then commit claim]
+    CMT --> J[no push_feedback_event]
     H -->|fault| K[mark_target_fault]
     K --> L[push_feedback_event]
     G -->|selected redirect| L
-    G -->|STA replay allowed| M[handle_issue_feedback_event]
+    G1 -->|STA/LDA replay allowed| M[handle_issue_feedback_event or backend replay route]
     M -->|iq_feedback_failed STA| L
     L --> N[normalize_feedback_event again]
     N --> O[exception_event_q.push_back]
-    O --> P[exception_redirect_replay_handler::process_pending_events]
+    O --> CMT2[if correlated and accepted commit claim; non-correlated continues]
+    CMT2 --> P[exception_redirect_replay_handler::process_pending_events]
     P --> Q{recovery type}
     Q -->|redirect| R[request_redirect_flush / push_redirect_drive / apply_redirect_flush]
     Q -->|replay| S[handle_replay_event / mark_replay_pending]
@@ -46,8 +54,14 @@ push_feedback_event Writeback 后续总览：
 
 1. monitor event 统一转换：
    service_monitor_once 调用 collect_monitor_event_batch；
-   adapter 分别把 raw int writeback、raw IQ feedback、raw memoryViolation 转成 memblock_wb_event_t；
-   batch handler 对同一 service cycle 的事件做 normalize 和 redirect-first 仲裁。
+   LOAD/STA accepted fire已经建立不可变generation token；
+   adapter把raw int writeback、STA SQ-only IQ feedback、raw memoryViolation转成event；
+   STA IQ及LDA/STA WB raw的`sample_flush_epoch/cycle`由monitor valid采样拍同拍冻结，
+   adapter只消费该provenance，禁止在出队时补current epoch；
+   LDA/STA先通过active map/token附`uid/issue_epoch/replay_seq`，STD不建token；
+   batch handler对同一service cycle的event做normalize和redirect-first仲裁；
+   covered event不validate/commit；未覆盖correlated event先只读validate对应kind，再进入
+   原handler，只有handler成功或唯一允许的STA compat no-op后才commit。
 
 2. normal pass 分支：
    如果事件是真实 writeback normal pass 且未被 redirect 覆盖，调用 handle_real_writeback_event；
@@ -55,15 +69,19 @@ push_feedback_event Writeback 后续总览：
    normal pass 不进入 push_feedback_event，因为它不需要跨 cycle recovery。
 
 3. recovery 分支：
-   如果事件是 selected redirect、STA replay 或 fault，才调用 push_feedback_event；
-   push_feedback_event 调用 normalize_feedback_event，保证 event 能解析到当前 active uid；
+   如果事件是selected redirect、STA replay、LDA backend replay或fault，才调用
+   push_feedback_event；
+   STA miss/LDA replay/fault先validate，原handler或replay入队成功后才commit token kind；
+   push_feedback_event调用normalize_feedback_event再次校验，correlated event必须保留
+   token snapshot并禁止status fallback；
    normalize 成功后写入 exception_event_q。
 
 4. recovery queue 消费：
    process_pending_events 是 exception_event_q 的统一消费者；
    redirect 优先级最高，会建立 active_redirect 并驱动 io_redirect；
    replay 在无 redirect 抢占时 mark_replay_pending 并等待 route/issue 重发；
-   fault 在 mark_target_fault 后只由 handle_fault_event 消费，不重复落 fault 状态。
+   fault在mark_target_fault后只由handle_fault_event消费，不重复落fault状态；
+   redirect apply、fault、replay、terminal/deq按reason关闭token，re-fire建立新token。
 ```
 
 
@@ -93,7 +111,7 @@ if (event_has_fault(wb_event)) begin
     return 1'b1;
 end
 
-// replay: STA IQ feedback failed
+// replay: STA IQ feedback failed or LDA replayInst backend replay
 if (wb_event.iq_feedback_failed && wb_event.target != MEMBLOCK_ISSUE_TARGET_STD) begin
     data.push_feedback_event(wb_event);
     return 1'b1;
@@ -109,15 +127,20 @@ data.push_feedback_event(selected_redirect_event);
 
 输入/输出：
 
-- 输入：redirect、replay、fault 语义的 `memblock_wb_event_t`。
+- 输入：redirect、replay、fault语义的event；V2 LOAD/STA correlated event已附token
+  snapshot并在redirect-first放行后通过只读validate。
 - 输出：normalize 成功后写入 `common_data_transaction::exception_event_q`。
 - 非输入：normal pass 不调用 `push_feedback_event()`。
+- 副作用：本函数不commit或关闭token；只校验并入recovery queue。调用方只在确认
+  handler/入队成功后commit claim。
 
 文字伪代码：
 
 ```text
 adapter 把 raw monitor fact 转换为 memblock_wb_event_t；
+V2 LOAD/STA adapter先匹配fire token并附snapshot，但不消费pending；
 batch handler 先 normalize，再做 active redirect 和同批 redirect-first 仲裁；
+covered event drop且不validate/commit；allowed correlated event先validate claim资格；
 如果事件是 normal pass：
   进入 normal_pass_flow.md；
   调用 mark_target_normal_pass；
@@ -125,13 +148,14 @@ batch handler 先 normalize，再做 active redirect 和同批 redirect-first �
 如果事件是 selected redirect：
   进入 redirect_flow.md；
   调用 push_feedback_event 后由 process_pending_events 建立 active redirect；
-如果事件是 STA replay：
+如果事件是STA miss或LDA replayInst：
   进入 replay_flow.md；
-  调用 push_feedback_event 后由 process_pending_events/handle_replay_event 设置 replay pending；
+  调用 push_feedback_event，成功入队后commit对应kind；随后由
+  process_pending_events/handle_replay_event 设置 replay pending；
 如果事件是 fault：
   进入 fault_exception_flow.md；
   先调用 mark_target_fault 落表，再调用 push_feedback_event；
-  后续 handle_fault_event 只消费，不重复 mark。
+  handler成功返回后commit claim；后续 handle_fault_event 只消费，不重复 mark。
 ```
 
 内部子调用：
@@ -169,7 +193,8 @@ endfunction
 文字伪代码：
 
 ```text
-调用 normalize_feedback_event：解析 active uid、补齐 ROB/issue_epoch/replay_seq，并过滤 stale event；
+调用normalize_feedback_event：correlated LOAD/STA要求已有token snapshot并禁止status
+fallback；非correlated event按原active map/fallback规则处理；
 如果 normalize 失败，直接返回，不入队；
 如果 normalize 成功，把 normalized_event push_back 到 exception_event_q；
 等待 exception_redirect_replay_handler::process_pending_events 消费。
@@ -205,7 +230,10 @@ end
 
 功能解释：
 
-这是 `push_feedback_event()` 后续能正确处理的前提。redirect 允许 `target=NONE`，但必须能通过 ROB 找到 active uid；replay/fault 必须是合法 LOAD/STA/STD target，并带有或能补齐 issue/replay 快照。
+这是`push_feedback_event()`后续能正确处理的前提。redirect允许`target=NONE`，但必须
+通过ROB找到active uid；V2 correlated LOAD/STA replay/fault必须自带fire token
+snapshot，不允许在第一次replay后从当前status补。明确非correlated兼容event才允许
+使用原受限fallback。
 
 文字伪代码：
 
@@ -216,9 +244,10 @@ end
 补齐 uid/has_uid；
 如果不是 redirect：
   调用 feedback_event_target_is_valid：要求 target 为 LOAD/STA/STD；
-  replay 后如果缺 issue_epoch/replay_seq snapshot，drop，避免旧 event 被补成新 replay 轮次；
-  缺 issue_epoch 时，先确认 target_dispatched，再从 status 获取 target issue epoch；
-缺 replay_seq 时，从 status.replay_seq 补齐；
+  如果generation_correlated=1，要求uid/issue_epoch/replay_seq完整并原样保留；
+  correlated event缺snapshot时fatal，禁止status fallback；
+  只有非correlated兼容event才沿用“replay后缺snapshot drop、首次可在
+  target_dispatched后补issue_epoch/replay_seq”的原规则；
 返回 normalized_event。
 ```
 
@@ -227,7 +256,7 @@ end
 - `feedback_event_has_action()`：判断 event 是否值得处理。
 - `resolve_uid_for_event()`：通过 active ROB/LQ/SQ map 反查 uid。
 - `feedback_event_target_is_valid()`：检查非 redirect target 合法性。
-- `target_dispatched()`：缺 issue epoch 时的补齐前提。
+- `target_dispatched()`：只用于非correlated兼容event缺issue epoch时的原补齐前提。
 
 ## 5. `process_pending_events()` 共同消费骨架
 
@@ -264,6 +293,12 @@ end
 
 这是 `push_feedback_event()` 入队后的共同消费者。redirect 优先级最高；如果 recovery queue 中存在 redirect，replay/fault 可能被 drop 或 requeue。只有没有 active redirect 且当前 recovery events 中没有 redirect 时，replay/fault 才被消费。注意：同一 monitor batch 中未被 redirect 覆盖的 non-redirect event 是由 batch handler 直接继续处理，不走这里的 requeue 规则。
 
+correlated event的token kind已在第一次monitor batch中按
+`validate -> original handler/enqueue -> commit`完成消费，本函数不得再次validate或commit。
+recovery queue中后出现redirect时，可drop/requeueevent；token已经按STA_MISS、
+LOAD_REPLAY或FAULT reason关闭，closed tombstone保证迟到event不会绑定新generation。
+redirect自身在apply阶段关闭真正被覆盖uid仍open的token。
+
 文字伪代码：
 
 ```text
@@ -274,6 +309,7 @@ end
 调用 select_oldest_redirect：如果存在 redirect，先处理 ROB 最老 redirect；
 如果建立 active_redirect：
   调用 requeue_events_not_flushed_by_redirect：覆盖事件 drop，未覆盖事件回队列；
+  redirect drive完成后apply flush，在active map删除前关闭被覆盖uid的open token；
   返回；
 如果没有 redirect：
   replay 调用 handle_replay_event；
@@ -290,14 +326,35 @@ normal pass 不在 exception_event_q，所以不会到这里。
 - `handle_replay_event()`：replay pending/等待 PTW。
 - `handle_fault_event()`：fault event 消费，不重复 mark。
 
+## 5.1 generation 生命周期边界
+
+```text
+issue fire：LOAD注册real-WB pending；STA注册IQ+real-WB pending；STD不建token；
+reset：清raw queue后清open token/tombstone，再清active map和epoch；
+redirect：covered event不validate/commit，apply只关闭真正被覆盖uid token；未覆盖token保持open；
+STA hit：handler成功/唯一compat no-op后commit IQ并等待WB；STA miss：replay入队成功后
+commit IQ、取消WB、close STA_MISS；
+LDA normal/fault/replayInst：handler/入队成功后commit唯一WB并按ALL_CONSUMED/FAULT/
+LOAD_REPLAY关闭；
+reissue：mark_replay_pending只bump seq，新accepted fire再注册新token；
+terminal/deq：active map删除前required pending泄漏fatal，optional才可按reason关闭；
+stale：未来epoch/current无token/duplicate/key-pipe错配fatal；旧epoch、早于fire或
+tombstone命中按reason info/drop；不得从可变status附新generation。
+```
+
+上述token动作不改变原batch redirect-first、pass/fault handler、replay queue或
+terminal定义，只增加event correlation和生命周期完整性检查。
+
 ## 6. 端到端行为总结
 
 ```text
 normal pass：
-  real writeback exception_vec=0
+  LOAD/STA fire token -> real writeback exception_vec=0 -> attach generation
   -> process_monitor_event_batch
+  -> redirect-first放行 -> validate REAL_WB claim资格
   -> handle_real_writeback_event
   -> mark_target_normal_pass
+  -> handler成功或唯一STA compat no-op -> commit REAL_WB
   -> 不调用 push_feedback_event
   -> 详见 normal_pass_flow.md
 
@@ -311,22 +368,33 @@ redirect：
   -> 详见 redirect_flow.md
 
 replay：
-  STA IQ feedback miss
+  STA fire token -> SQ-only IQ miss -> attach generation
+  -> redirect-first放行 -> validate IQ claim资格
   -> handle_issue_feedback_event
   -> push_feedback_event
   -> exception_event_q
+  -> handler成功返回 -> commit IQ/cancel WB/close STA_MISS
   -> process_pending_events
   -> handle_replay_event
-  -> push_ptw_wait_replay 或 mark_replay_pending
-  -> route/issue
+  -> mark_replay_pending
+  -> route/issue -> 新fire token
   -> 详见 replay_flow.md
 
+LDA replay：
+  LOAD fire token -> LDA replayInst -> attach generation
+  -> redirect-first放行 -> validate WB claim资格
+  -> push_feedback_event -> exception_event_q
+  -> 入队成功 -> commit WB/close LOAD_REPLAY
+  -> mark_replay_pending -> route/re-fire新token
+
 fault：
-  real writeback exception_vec!=0
+  real writeback exception_vec!=0 -> attach generation
+  -> redirect-first放行 -> validate REAL_WB claim资格
   -> handle_real_writeback_event
   -> mark_target_fault
   -> push_feedback_event
   -> exception_event_q
+  -> handler成功返回 -> commit REAL_WB/close FAULT
   -> process_pending_events
   -> handle_fault_event 只消费，不重复 mark
   -> 详见 fault_exception_flow.md
@@ -336,24 +404,33 @@ fault：
 
 ```text
 normal pass：
-  如果事件是真实 writeback 且无 redirect/replay/fault，batch handler 放行后直接进入 handle_real_writeback_event；
+  V2 LOAD/STA real-WB先匹配fire token；batch放行后只读validate REAL_WB再进入handler；
   handle_real_writeback_event 调用 mark_target_normal_pass 更新 target/uid pass 状态；
+  handler成功或唯一STA compat no-op后才commit REAL_WB；
   该事件不进入 push_feedback_event，因为它不需要 recovery queue 后续处理。
 
 redirect：
   如果 batch 中存在 memoryViolation redirect，batch handler 先选 oldest redirect；
   selected redirect 通过 push_feedback_event 进入 exception_event_q；
   process_pending_events 负责建立 active_redirect、驱动 redirect、flush 被覆盖 uid 并触发 reissue；
-  被 redirect 覆盖的同批 pass/fault/replay 不允许落状态。
+  被redirect覆盖的同批pass/fault/replay不允许落状态且不validate/commit token；apply阶段关闭
+  被覆盖uid的open token。
 
 replay：
-  如果 STA IQ feedback miss 未被 redirect 覆盖，handle_issue_feedback_event 将其作为 replay event 入队；
+  STA SQ-only miss先attach fire token；未被redirect覆盖时先validate IQ且不修改token；
+  handler将其作为replay event成功入队后才commit IQ、取消WB并close STA_MISS；
   process_pending_events 在没有 redirect 抢占时调用 handle_replay_event；
-  replay 根据 ptw_back_replay 选择等待 PTW 或直接 mark_replay_pending；
+  V2 STA没有flushState，直接mark_replay_pending；PTW wait仅保留给其它明确来源；
   mark_replay_pending 只设置需要重发的 target，后续由 route/issue 重新发射。
 
+LDA replay：
+  replayInst result通过LOAD token附generation，放行后先validate WB；
+  push_feedback_event成功后commit WB并close LOAD_REPLAY，再复用同一recovery flow，
+  新accepted fire创建新token。
+
 fault：
-  如果真实 writeback 带 exception_vec，handle_real_writeback_event 先 mark_target_fault；
+  V2 LOAD/STA fault先attach并validate token real-WB资格，再由handler mark_target_fault；
   fault 状态落表后再 push_feedback_event，供 recovery queue 统一消费；
+  handler成功返回后外层commit real-WB claim；
   handle_fault_event 只做消费和调试上下文解析，不重复写 fault 状态。
 ```
