@@ -72,6 +72,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   // prefetch
   val pf_source = UInt(L1PfSourceBits.W)
   val first_issue = Bool()
+  val retry_vec = UInt(2.W)
   val access = Bool()
 
   val id = UInt(reqIdWidth.W)
@@ -119,6 +120,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.miss_fail_cause_evict_btot := false.B
     req.pf_source := prefetch.pf_source.value
     req.first_issue := prefetch.first_issue
+    req.retry_vec := prefetch.retry_vec
     req.access := false.B
     req.id := 0.U
     req
@@ -132,6 +134,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.is_store := false.B
     req.pf_source.value := pf_source
     req.first_issue := first_issue
+    req.retry_vec := retry_vec
     req
   }
 }

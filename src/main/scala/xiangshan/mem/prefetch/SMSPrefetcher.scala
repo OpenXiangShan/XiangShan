@@ -1243,6 +1243,7 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   io.l1_req.bits.confidence := 1.U
   io.l1_req.bits.pf_source.value := L1_HW_PREFETCH_NULL
   io.l1_req.bits.first_issue := true.B
+  io.l1_req.bits.retry_vec := 0.U
   io.l1_req.valid := false.B
 
   for((train, i) <- io.ld_in.zipWithIndex){

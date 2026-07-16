@@ -38,12 +38,13 @@ class L1PrefetchRetryArbiter(
   private val fastDrain = RegInit(false.B)
   private val intervalCounter = RegInit(0.U((log2Ceil(retryInterval) max 1).W))
 
-  val firstIssueNack = io.nack.valid && io.nack.bits.first_issue
-  queue.io.enq.valid := firstIssueNack
+  val retryableNack = io.nack.valid && !io.nack.bits.retry_vec.andR
+  queue.io.enq.valid := retryableNack
   queue.io.enq.bits := io.nack.bits
 
   val full = !queue.io.enq.ready
-  val fullDrop = firstIssueNack && full
+  val fullDrop = retryableNack && full
+  val limitDrop = io.nack.valid && io.nack.bits.retry_vec.andR
   val enqueue = queue.io.enq.fire
 
   val retry = Wire(Decoupled(new L1PrefetchReq))
@@ -51,6 +52,8 @@ class L1PrefetchRetryArbiter(
   retry.valid := queue.io.deq.valid && retryEligible
   retry.bits := queue.io.deq.bits
   retry.bits.first_issue := false.B
+  retry.bits.retry_vec := queue.io.deq.bits.retry_vec |
+    Mux(queue.io.deq.bits.retry_vec(0), "b10".U, "b01".U)
   queue.io.deq.ready := retry.ready && retryEligible
 
   val blockOriginal = io.mshrFull || fastDrain || full
@@ -82,7 +85,10 @@ class L1PrefetchRetryArbiter(
   XSPerfAccumulate("l1PfRetryNack", io.nack.valid)
   XSPerfAccumulate("l1PfRetryEnqueue", enqueue)
   XSPerfAccumulate("l1PfRetryFullDrop", fullDrop)
-  XSPerfAccumulate("l1PfRetrySecondNackDrop", io.nack.valid && !io.nack.bits.first_issue)
+  XSPerfAccumulate("l1PfRetrySecondNack", io.nack.valid && io.nack.bits.retry_vec === "b01".U)
+  XSPerfAccumulate("l1PfRetryLimitDrop", limitDrop)
+  XSPerfAccumulate("l1PfRetryFirstRetryFire", dequeue && retry.bits.retry_vec === "b01".U)
+  XSPerfAccumulate("l1PfRetrySecondRetryFire", dequeue && retry.bits.retry_vec === "b11".U)
   XSPerfAccumulate("l1PfRetryNormalFire", dequeue && !fastDrain)
   XSPerfAccumulate("l1PfRetryFastDrainFire", dequeue && fastDrain)
   XSPerfAccumulate("l1PfRetryMshrFullCycles", io.mshrFull)
@@ -90,7 +96,13 @@ class L1PrefetchRetryArbiter(
 
   assert(!(retry.fire && io.mshrFull))
   assert(!retry.valid || !retry.bits.first_issue)
-  when(io.nack.valid && !io.nack.bits.first_issue) { assert(!enqueue) }
+  assert(!retry.valid || retry.bits.retry_vec.orR)
+  assert(!retry.valid || !queue.io.deq.bits.retry_vec.andR)
+  when(io.nack.valid) {
+    assert(io.nack.bits.first_issue === !io.nack.bits.retry_vec.orR)
+    assert(io.nack.bits.retry_vec =/= "b10".U)
+  }
+  when(limitDrop) { assert(!enqueue) }
   when(blockOriginal) { io.in.foreach(source => assert(!source.fire)) }
 }
 
@@ -759,6 +771,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_pf_req_arb.io.in(i).bits.req.is_store := false.B
     l1_pf_req_arb.io.in(i).bits.req.pf_source := l1_array(i).source
     l1_pf_req_arb.io.in(i).bits.req.first_issue := true.B
+    l1_pf_req_arb.io.in(i).bits.req.retry_vec := 0.U
     l1_pf_req_arb.io.in(i).bits.debug_vaddr := l1_array(i).get_pf_vaddr(forward_sent_vec)
   }
 
