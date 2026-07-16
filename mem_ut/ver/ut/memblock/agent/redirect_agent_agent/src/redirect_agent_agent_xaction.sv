@@ -8,13 +8,15 @@
 `ifndef REDIRECT_AGENT_AGENT_XACTION__SV
 `define REDIRECT_AGENT_AGENT_XACTION__SV
 
+`include "memblock_compile_params.svh"
+
 class redirect_agent_agent_xaction  extends tcnt_data_base;
     // Redirect is an input control interface to MemBlock. `level` follows
     // RedirectLevel in Scala: flushAfter=0, flush=1.
     rand bit io_redirect_valid         ;
     rand bit io_redirect_bits_level    ;
     rand bit io_redirect_bits_robIdx_flag;
-    rand bit [8:0] io_redirect_bits_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_redirect_bits_robIdx_value;
     extern constraint default_io_redirect_valid_cons;
     extern constraint default_io_redirect_bits_level_cons;
     extern constraint default_io_redirect_bits_robIdx_flag_cons;
@@ -50,7 +52,7 @@ constraint redirect_agent_agent_xaction::default_io_redirect_bits_robIdx_flag_co
 }
 
 constraint redirect_agent_agent_xaction::default_io_redirect_bits_robIdx_value_cons{
-    io_redirect_bits_robIdx_value inside {[9'd0:9'd351]};
+    io_redirect_bits_robIdx_value inside {[0:`MEMBLOCK_DUT_ROB_SIZE-1]};
 }
 
 function redirect_agent_agent_xaction::new(string name = "redirect_agent_agent_xaction");

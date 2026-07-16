@@ -8,6 +8,8 @@
 `ifndef REDIRECT_AGENT_AGENT_MONITOR__SV
 `define REDIRECT_AGENT_AGENT_MONITOR__SV
 
+`include "memblock_compile_params.svh"
+
 class redirect_agent_agent_monitor  extends tcnt_monitor_base#(virtual redirect_agent_agent_interface,redirect_agent_agent_cfg,redirect_agent_agent_xaction);
 
     `uvm_component_utils(redirect_agent_agent_monitor)
@@ -36,7 +38,7 @@ task redirect_agent_agent_monitor::mon_data();
     logic io_redirect_valid            ;
     logic io_redirect_bits_level       ;
     logic io_redirect_bits_robIdx_flag ;
-    logic [8:0] io_redirect_bits_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_redirect_bits_robIdx_value;
 
     redirect_agent_agent_xaction  mon_tr;
     while(1) begin
@@ -50,7 +52,7 @@ task redirect_agent_agent_monitor::mon_data();
             `TCNT_CHECK_SIG_XZ(io_redirect_valid,io_redirect_valid,1);
             `TCNT_CHECK_SIG_XZ(io_redirect_bits_level,io_redirect_bits_level,1);
             `TCNT_CHECK_SIG_XZ(io_redirect_bits_robIdx_flag,io_redirect_bits_robIdx_flag,1);
-            `TCNT_CHECK_SIG_XZ(io_redirect_bits_robIdx_value,io_redirect_bits_robIdx_value,9);
+            `TCNT_CHECK_SIG_XZ(io_redirect_bits_robIdx_value,io_redirect_bits_robIdx_value,`MEMBLOCK_DUT_ROB_VALUE_W);
 
         end
         // io_redirect_* is a DUT input driven by redirect sequences. Do not

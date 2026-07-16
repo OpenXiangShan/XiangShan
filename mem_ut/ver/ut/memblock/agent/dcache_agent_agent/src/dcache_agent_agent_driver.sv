@@ -104,6 +104,11 @@ task dcache_agent_agent_driver::send_pkt(dcache_agent_agent_xaction tr);
     vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_data <= tr.auto_inner_dcache_client_out_d_bits_data;
     vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_corrupt <= tr.auto_inner_dcache_client_out_d_bits_corrupt;
     vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= tr.auto_inner_dcache_client_out_e_ready;
+    // V2 L2 hint/flush 为 DUT input，transaction 有效时由 dcache agent 送入顶层。
+    vif.drv_mp.drv_cb.io_l2_hint_valid <= tr.io_l2_hint_valid;
+    vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= tr.io_l2_hint_bits_sourceId;
+    vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= tr.io_l2_hint_bits_isKeyword;
+    vif.drv_mp.drv_cb.io_l2_flush_done <= tr.io_l2_flush_done;
 
 endtask:send_pkt
 
@@ -132,6 +137,10 @@ task dcache_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_data <= '0;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_corrupt <= '0;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= '0;
+        vif.drv_mp.drv_cb.io_l2_hint_valid <= '0;
+        vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= '0;
+        vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= '0;
+        vif.drv_mp.drv_cb.io_l2_flush_done <= '0;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_1) begin
@@ -157,6 +166,10 @@ task dcache_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_data <= '1;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_corrupt <= '1;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= '1;
+        vif.drv_mp.drv_cb.io_l2_hint_valid <= '1;
+        vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= '1;
+        vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= '1;
+        vif.drv_mp.drv_cb.io_l2_flush_done <= '1;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_X) begin
@@ -182,6 +195,10 @@ task dcache_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_data <= 'x;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_corrupt <= 'x;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= 'x;
+        vif.drv_mp.drv_cb.io_l2_hint_valid <= 'x;
+        vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= 'x;
+        vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= 'x;
+        vif.drv_mp.drv_cb.io_l2_flush_done <= 'x;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_RAND) begin
@@ -207,6 +224,10 @@ task dcache_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_data <= $urandom;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_corrupt <= $urandom;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= $urandom;
+        vif.drv_mp.drv_cb.io_l2_hint_valid <= $urandom;
+        vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= $urandom;
+        vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= $urandom;
+        vif.drv_mp.drv_cb.io_l2_flush_done <= $urandom;
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_LST) begin
@@ -232,6 +253,10 @@ task dcache_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_data <= '0;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_corrupt <= '0;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= '0;
+        vif.drv_mp.drv_cb.io_l2_hint_valid <= '0;
+        vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= '0;
+        vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= '0;
+        vif.drv_mp.drv_cb.io_l2_flush_done <= '0;
 
     end
 

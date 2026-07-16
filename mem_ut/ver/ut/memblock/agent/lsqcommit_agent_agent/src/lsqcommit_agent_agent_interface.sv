@@ -8,6 +8,8 @@
 `ifndef LSQCOMMIT_AGENT_AGENT_INTERFACE__SV
 `define LSQCOMMIT_AGENT_AGENT_INTERFACE__SV
 
+`include "memblock_compile_params.svh"
+
 `ifndef DEF_SETUP_TIME
     `define DEF_SETUP_TIME 1
 `endif
@@ -18,7 +20,7 @@
 interface lsqcommit_agent_agent_interface  (input bit clk,input bit rst_n);
 
     logic io_ooo_to_mem_lsqio_pendingPtr_flag;
-    logic [8:0] io_ooo_to_mem_lsqio_pendingPtr_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_lsqio_pendingPtr_value;
     logic io_ooo_to_mem_flushSb        ;
 
     logic io_ooo_to_mem_lsqio_pendingMMIOld;

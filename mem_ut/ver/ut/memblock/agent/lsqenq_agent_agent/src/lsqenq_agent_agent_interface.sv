@@ -8,6 +8,8 @@
 `ifndef LSQENQ_AGENT_AGENT_INTERFACE__SV
 `define LSQENQ_AGENT_AGENT_INTERFACE__SV
 
+`include "memblock_compile_params.svh"
+
 `ifndef DEF_SETUP_TIME
     `define DEF_SETUP_TIME 1
 `endif
@@ -24,64 +26,64 @@ interface lsqenq_agent_agent_interface  (input bit clk,input bit rst_n);
     logic [1:0] io_ooo_to_mem_enqLsq_needAlloc_4;
     logic [1:0] io_ooo_to_mem_enqLsq_needAlloc_5;
     logic io_ooo_to_mem_enqLsq_req_0_valid;
-    logic [35:0] io_ooo_to_mem_enqLsq_req_0_bits_fuType;
+    logic [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_0_bits_fuType;
     logic [6:0] io_ooo_to_mem_enqLsq_req_0_bits_uopIdx;
     logic io_ooo_to_mem_enqLsq_req_0_bits_robIdx_flag;
-    logic [8:0] io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value;
     logic io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_flag;
-    logic [6:0] io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_value;
+    logic [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_value;
     logic io_ooo_to_mem_enqLsq_req_0_bits_sqIdx_flag;
-    logic [5:0] io_ooo_to_mem_enqLsq_req_0_bits_sqIdx_value;
+    logic [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_0_bits_sqIdx_value;
     logic [4:0] io_ooo_to_mem_enqLsq_req_0_bits_numLsElem;
     logic io_ooo_to_mem_enqLsq_req_1_valid;
-    logic [35:0] io_ooo_to_mem_enqLsq_req_1_bits_fuType;
+    logic [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_1_bits_fuType;
     logic [6:0] io_ooo_to_mem_enqLsq_req_1_bits_uopIdx;
     logic io_ooo_to_mem_enqLsq_req_1_bits_robIdx_flag;
-    logic [8:0] io_ooo_to_mem_enqLsq_req_1_bits_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_1_bits_robIdx_value;
     logic io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_flag;
-    logic [6:0] io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_value;
+    logic [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_value;
     logic io_ooo_to_mem_enqLsq_req_1_bits_sqIdx_flag;
-    logic [5:0] io_ooo_to_mem_enqLsq_req_1_bits_sqIdx_value;
+    logic [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_1_bits_sqIdx_value;
     logic [4:0] io_ooo_to_mem_enqLsq_req_1_bits_numLsElem;
     logic io_ooo_to_mem_enqLsq_req_2_valid;
-    logic [35:0] io_ooo_to_mem_enqLsq_req_2_bits_fuType;
+    logic [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_2_bits_fuType;
     logic [6:0] io_ooo_to_mem_enqLsq_req_2_bits_uopIdx;
     logic io_ooo_to_mem_enqLsq_req_2_bits_robIdx_flag;
-    logic [8:0] io_ooo_to_mem_enqLsq_req_2_bits_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_2_bits_robIdx_value;
     logic io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_flag;
-    logic [6:0] io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_value;
+    logic [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_value;
     logic io_ooo_to_mem_enqLsq_req_2_bits_sqIdx_flag;
-    logic [5:0] io_ooo_to_mem_enqLsq_req_2_bits_sqIdx_value;
+    logic [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_2_bits_sqIdx_value;
     logic [4:0] io_ooo_to_mem_enqLsq_req_2_bits_numLsElem;
     logic io_ooo_to_mem_enqLsq_req_3_valid;
-    logic [35:0] io_ooo_to_mem_enqLsq_req_3_bits_fuType;
+    logic [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_3_bits_fuType;
     logic [6:0] io_ooo_to_mem_enqLsq_req_3_bits_uopIdx;
     logic io_ooo_to_mem_enqLsq_req_3_bits_robIdx_flag;
-    logic [8:0] io_ooo_to_mem_enqLsq_req_3_bits_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_3_bits_robIdx_value;
     logic io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_flag;
-    logic [6:0] io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_value;
+    logic [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_value;
     logic io_ooo_to_mem_enqLsq_req_3_bits_sqIdx_flag;
-    logic [5:0] io_ooo_to_mem_enqLsq_req_3_bits_sqIdx_value;
+    logic [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_3_bits_sqIdx_value;
     logic [4:0] io_ooo_to_mem_enqLsq_req_3_bits_numLsElem;
     logic io_ooo_to_mem_enqLsq_req_4_valid;
-    logic [35:0] io_ooo_to_mem_enqLsq_req_4_bits_fuType;
+    logic [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_4_bits_fuType;
     logic [6:0] io_ooo_to_mem_enqLsq_req_4_bits_uopIdx;
     logic io_ooo_to_mem_enqLsq_req_4_bits_robIdx_flag;
-    logic [8:0] io_ooo_to_mem_enqLsq_req_4_bits_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_4_bits_robIdx_value;
     logic io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_flag;
-    logic [6:0] io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_value;
+    logic [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_value;
     logic io_ooo_to_mem_enqLsq_req_4_bits_sqIdx_flag;
-    logic [5:0] io_ooo_to_mem_enqLsq_req_4_bits_sqIdx_value;
+    logic [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_4_bits_sqIdx_value;
     logic [4:0] io_ooo_to_mem_enqLsq_req_4_bits_numLsElem;
     logic io_ooo_to_mem_enqLsq_req_5_valid;
-    logic [35:0] io_ooo_to_mem_enqLsq_req_5_bits_fuType;
+    logic [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_5_bits_fuType;
     logic [6:0] io_ooo_to_mem_enqLsq_req_5_bits_uopIdx;
     logic io_ooo_to_mem_enqLsq_req_5_bits_robIdx_flag;
-    logic [8:0] io_ooo_to_mem_enqLsq_req_5_bits_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_5_bits_robIdx_value;
     logic io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_flag;
-    logic [6:0] io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_value;
+    logic [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_value;
     logic io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_flag;
-    logic [5:0] io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_value;
+    logic [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_value;
     logic [4:0] io_ooo_to_mem_enqLsq_req_5_bits_numLsElem;
 
     logic io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_0;

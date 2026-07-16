@@ -8,6 +8,8 @@
 `ifndef IO_MEM_TO_OOO_CTRL_AGENT_AGENT_INTERFACE__SV
 `define IO_MEM_TO_OOO_CTRL_AGENT_AGENT_INTERFACE__SV
 
+`include "memblock_compile_params.svh"
+
 `ifndef DEF_SETUP_TIME
     `define DEF_SETUP_TIME 1
 `endif
@@ -22,6 +24,7 @@ interface io_mem_to_ooo_ctrl_agent_agent_interface  (input bit clk,input bit rst
     logic io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip;
     logic io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip;
     logic io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip;
+    logic io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug;
     logic io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31;
     logic io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43;
     logic io_mem_to_ooo_topToBackendBypass_msiInfo_valid;
@@ -34,15 +37,15 @@ interface io_mem_to_ooo_ctrl_agent_agent_interface  (input bit clk,input bit rst
     logic [1:0] io_mem_to_ooo_sqDeq    ;
     logic [3:0] io_mem_to_ooo_lqDeq    ;
     logic io_mem_to_ooo_lqDeqPtr_flag  ;
-    logic [6:0] io_mem_to_ooo_lqDeqPtr_value;
+    logic [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_mem_to_ooo_lqDeqPtr_value;
     logic io_mem_to_ooo_memoryViolation_valid;
     logic io_mem_to_ooo_memoryViolation_bits_ftqIdx_flag;
-    logic [5:0] io_mem_to_ooo_memoryViolation_bits_ftqIdx_value;
-    logic [4:0] io_mem_to_ooo_memoryViolation_bits_ftqOffset;
+    logic [`MEMBLOCK_DUT_FTQ_PTR_VALUE_W-1:0] io_mem_to_ooo_memoryViolation_bits_ftqIdx_value;
+    logic [`MEMBLOCK_DUT_FTQ_OFFSET_W-1:0] io_mem_to_ooo_memoryViolation_bits_ftqOffset;
     logic io_mem_to_ooo_memoryViolation_bits_isRVC;
     logic io_mem_to_ooo_memoryViolation_bits_level;
     logic io_mem_to_ooo_memoryViolation_bits_robIdx_flag;
-    logic [8:0] io_mem_to_ooo_memoryViolation_bits_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_memoryViolation_bits_robIdx_value;
     logic io_mem_to_ooo_sbIsEmpty      ;
     logic [63:0] io_mem_to_ooo_lsqio_vaddr;
     logic [63:0] io_mem_to_ooo_lsqio_gpaddr;
@@ -51,14 +54,14 @@ interface io_mem_to_ooo_ctrl_agent_agent_interface  (input bit clk,input bit rst
     logic io_mem_to_ooo_ldCancel_1_ld2Cancel;
     logic io_mem_to_ooo_ldCancel_2_ld2Cancel;
 
-    logic [7:0] io_mem_to_ooo_lsqio_loadMmioUop_0_robIdx_value;
-    logic [7:0] io_mem_to_ooo_lsqio_loadMmioUop_1_robIdx_value;
-    logic [7:0] io_mem_to_ooo_lsqio_loadMmioUop_2_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_loadMmioUop_0_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_loadMmioUop_1_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_loadMmioUop_2_robIdx_value;
     logic io_mem_to_ooo_lsqio_loadMmio_0;
     logic io_mem_to_ooo_lsqio_loadMmio_1;
     logic io_mem_to_ooo_lsqio_loadMmio_2;
     logic io_mem_to_ooo_lsqio_storeMmio;
-    logic [7:0] io_mem_to_ooo_lsqio_storeMmioUop_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_storeMmioUop_robIdx_value;
 
     clocking drv_cb @(posedge clk);
         `ifdef INTERFACE_ADD_DELAY
@@ -69,6 +72,7 @@ interface io_mem_to_ooo_ctrl_agent_agent_interface  (input bit clk,input bit rst
         input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip;
         input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip;
         input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip;
+        input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug;
         input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31;
         input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43;
         input  io_mem_to_ooo_topToBackendBypass_msiInfo_valid;
@@ -117,6 +121,7 @@ interface io_mem_to_ooo_ctrl_agent_agent_interface  (input bit clk,input bit rst
         input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip;
         input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip;
         input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip;
+        input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug;
         input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31;
         input  io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43;
         input  io_mem_to_ooo_topToBackendBypass_msiInfo_valid;

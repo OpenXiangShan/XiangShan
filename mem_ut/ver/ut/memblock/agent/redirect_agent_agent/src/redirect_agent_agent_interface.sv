@@ -8,6 +8,8 @@
 `ifndef REDIRECT_AGENT_AGENT_INTERFACE__SV
 `define REDIRECT_AGENT_AGENT_INTERFACE__SV
 
+`include "memblock_compile_params.svh"
+
 `ifndef DEF_SETUP_TIME
     `define DEF_SETUP_TIME 1
 `endif
@@ -20,7 +22,7 @@ interface redirect_agent_agent_interface  (input bit clk,input bit rst_n);
     logic io_redirect_valid            ;
     logic io_redirect_bits_level       ;
     logic io_redirect_bits_robIdx_flag ;
-    logic [8:0] io_redirect_bits_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_redirect_bits_robIdx_value;
 
     clocking drv_cb @(posedge clk);
         `ifdef INTERFACE_ADD_DELAY

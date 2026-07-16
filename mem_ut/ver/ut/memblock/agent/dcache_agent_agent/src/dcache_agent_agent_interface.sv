@@ -70,6 +70,11 @@ interface dcache_agent_agent_interface  (input bit clk,input bit rst_n);
     logic auto_inner_dcache_client_out_e_ready;
     logic auto_inner_dcache_client_out_e_valid;
     logic [9:0] auto_inner_dcache_client_out_e_bits_sink;
+    // V2 L2 hint/flush 顶层输入，由 dcache agent 统一驱动并由 monitor 采样。
+    logic io_l2_hint_valid;
+    logic [3:0] io_l2_hint_bits_sourceId;
+    logic io_l2_hint_bits_isKeyword;
+    logic io_l2_flush_done;
 
     clocking drv_cb @(posedge clk);
         `ifdef INTERFACE_ADD_DELAY
@@ -128,6 +133,10 @@ interface dcache_agent_agent_interface  (input bit clk,input bit rst_n);
         output auto_inner_dcache_client_out_e_ready;
         input  auto_inner_dcache_client_out_e_valid;
         input  auto_inner_dcache_client_out_e_bits_sink;
+        output io_l2_hint_valid;
+        output io_l2_hint_bits_sourceId;
+        output io_l2_hint_bits_isKeyword;
+        output io_l2_flush_done;
 
     endclocking:drv_cb
 
@@ -188,6 +197,10 @@ interface dcache_agent_agent_interface  (input bit clk,input bit rst_n);
         input  auto_inner_dcache_client_out_e_ready;
         input  auto_inner_dcache_client_out_e_valid;
         input  auto_inner_dcache_client_out_e_bits_sink;
+        input  io_l2_hint_valid;
+        input  io_l2_hint_bits_sourceId;
+        input  io_l2_hint_bits_isKeyword;
+        input  io_l2_flush_done;
 
     endclocking:mon_cb
 

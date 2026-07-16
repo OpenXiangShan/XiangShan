@@ -8,6 +8,8 @@
 `ifndef LSQENQ_AGENT_AGENT_XACTION__SV
 `define LSQENQ_AGENT_AGENT_XACTION__SV
 
+`include "memblock_compile_params.svh"
+
 class lsqenq_agent_agent_xaction  extends tcnt_data_base;
     // Base legality follows backend dispatch->LSQ handshake:
     // needAlloc: 0=no alloc, 1=load/vload, 2=store/vstore.
@@ -23,64 +25,64 @@ class lsqenq_agent_agent_xaction  extends tcnt_data_base;
     rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_4;
     rand bit [1:0] io_ooo_to_mem_enqLsq_needAlloc_5;
     rand bit io_ooo_to_mem_enqLsq_req_0_valid;
-    rand bit [35:0] io_ooo_to_mem_enqLsq_req_0_bits_fuType;
+    rand bit [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_0_bits_fuType;
     rand bit [6:0] io_ooo_to_mem_enqLsq_req_0_bits_uopIdx;
     rand bit io_ooo_to_mem_enqLsq_req_0_bits_robIdx_flag;
-    rand bit [8:0] io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_value;
+    rand bit [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_0_bits_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_req_0_bits_sqIdx_value;
+    rand bit [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_0_bits_sqIdx_value;
     rand bit [4:0] io_ooo_to_mem_enqLsq_req_0_bits_numLsElem;
     rand bit io_ooo_to_mem_enqLsq_req_1_valid;
-    rand bit [35:0] io_ooo_to_mem_enqLsq_req_1_bits_fuType;
+    rand bit [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_1_bits_fuType;
     rand bit [6:0] io_ooo_to_mem_enqLsq_req_1_bits_uopIdx;
     rand bit io_ooo_to_mem_enqLsq_req_1_bits_robIdx_flag;
-    rand bit [8:0] io_ooo_to_mem_enqLsq_req_1_bits_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_1_bits_robIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_value;
+    rand bit [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_1_bits_lqIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_1_bits_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_req_1_bits_sqIdx_value;
+    rand bit [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_1_bits_sqIdx_value;
     rand bit [4:0] io_ooo_to_mem_enqLsq_req_1_bits_numLsElem;
     rand bit io_ooo_to_mem_enqLsq_req_2_valid;
-    rand bit [35:0] io_ooo_to_mem_enqLsq_req_2_bits_fuType;
+    rand bit [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_2_bits_fuType;
     rand bit [6:0] io_ooo_to_mem_enqLsq_req_2_bits_uopIdx;
     rand bit io_ooo_to_mem_enqLsq_req_2_bits_robIdx_flag;
-    rand bit [8:0] io_ooo_to_mem_enqLsq_req_2_bits_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_2_bits_robIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_value;
+    rand bit [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_2_bits_lqIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_2_bits_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_req_2_bits_sqIdx_value;
+    rand bit [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_2_bits_sqIdx_value;
     rand bit [4:0] io_ooo_to_mem_enqLsq_req_2_bits_numLsElem;
     rand bit io_ooo_to_mem_enqLsq_req_3_valid;
-    rand bit [35:0] io_ooo_to_mem_enqLsq_req_3_bits_fuType;
+    rand bit [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_3_bits_fuType;
     rand bit [6:0] io_ooo_to_mem_enqLsq_req_3_bits_uopIdx;
     rand bit io_ooo_to_mem_enqLsq_req_3_bits_robIdx_flag;
-    rand bit [8:0] io_ooo_to_mem_enqLsq_req_3_bits_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_3_bits_robIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_value;
+    rand bit [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_3_bits_lqIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_3_bits_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_req_3_bits_sqIdx_value;
+    rand bit [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_3_bits_sqIdx_value;
     rand bit [4:0] io_ooo_to_mem_enqLsq_req_3_bits_numLsElem;
     rand bit io_ooo_to_mem_enqLsq_req_4_valid;
-    rand bit [35:0] io_ooo_to_mem_enqLsq_req_4_bits_fuType;
+    rand bit [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_4_bits_fuType;
     rand bit [6:0] io_ooo_to_mem_enqLsq_req_4_bits_uopIdx;
     rand bit io_ooo_to_mem_enqLsq_req_4_bits_robIdx_flag;
-    rand bit [8:0] io_ooo_to_mem_enqLsq_req_4_bits_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_4_bits_robIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_value;
+    rand bit [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_4_bits_lqIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_4_bits_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_req_4_bits_sqIdx_value;
+    rand bit [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_4_bits_sqIdx_value;
     rand bit [4:0] io_ooo_to_mem_enqLsq_req_4_bits_numLsElem;
     rand bit io_ooo_to_mem_enqLsq_req_5_valid;
-    rand bit [35:0] io_ooo_to_mem_enqLsq_req_5_bits_fuType;
+    rand bit [`MEMBLOCK_DUT_FUTYPE_W-1:0] io_ooo_to_mem_enqLsq_req_5_bits_fuType;
     rand bit [6:0] io_ooo_to_mem_enqLsq_req_5_bits_uopIdx;
     rand bit io_ooo_to_mem_enqLsq_req_5_bits_robIdx_flag;
-    rand bit [8:0] io_ooo_to_mem_enqLsq_req_5_bits_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_5_bits_robIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_flag;
-    rand bit [6:0] io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_value;
+    rand bit [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_5_bits_lqIdx_value;
     rand bit io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_flag;
-    rand bit [5:0] io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_value;
+    rand bit [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] io_ooo_to_mem_enqLsq_req_5_bits_sqIdx_value;
     rand bit [4:0] io_ooo_to_mem_enqLsq_req_5_bits_numLsElem;
 
     rand bit io_ooo_to_mem_enqLsq_req_0_bits_exceptionVec_0;
@@ -614,7 +616,7 @@ constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_0_bits_r
 }
 
 constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value_cons{
-    io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value inside {[9'd0:9'd351]};
+    io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value inside {[0:`MEMBLOCK_DUT_ROB_SIZE-1]};
 }
 
 constraint lsqenq_agent_agent_xaction::default_io_ooo_to_mem_enqLsq_req_0_bits_lqIdx_flag_cons{

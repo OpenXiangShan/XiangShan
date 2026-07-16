@@ -37,7 +37,7 @@ interface io_mem_to_ooo_vec_wb_agent_agent_interface  (input bit clk,input bit r
     logic [7:0] io_mem_to_ooo_writebackVldu_0_bits_uop_pdest;
     logic io_mem_to_ooo_writebackVldu_0_bits_uop_replayInst;
     logic io_mem_to_ooo_writebackVldu_0_bits_uop_robIdx_flag;
-    logic [7:0] io_mem_to_ooo_writebackVldu_0_bits_uop_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_writebackVldu_0_bits_uop_robIdx_value;
     logic [3:0] io_mem_to_ooo_writebackVldu_0_bits_uop_trigger;
     logic io_mem_to_ooo_writebackVldu_0_bits_uop_v0Wen;
     logic io_mem_to_ooo_writebackVldu_0_bits_uop_vecWen;
@@ -72,7 +72,7 @@ interface io_mem_to_ooo_vec_wb_agent_agent_interface  (input bit clk,input bit r
     logic [7:0] io_mem_to_ooo_writebackVldu_1_bits_uop_pdest;
     logic io_mem_to_ooo_writebackVldu_1_bits_uop_replayInst;
     logic io_mem_to_ooo_writebackVldu_1_bits_uop_robIdx_flag;
-    logic [7:0] io_mem_to_ooo_writebackVldu_1_bits_uop_robIdx_value;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_writebackVldu_1_bits_uop_robIdx_value;
     logic [3:0] io_mem_to_ooo_writebackVldu_1_bits_uop_trigger;
     logic io_mem_to_ooo_writebackVldu_1_bits_uop_v0Wen;
     logic io_mem_to_ooo_writebackVldu_1_bits_uop_vecWen;

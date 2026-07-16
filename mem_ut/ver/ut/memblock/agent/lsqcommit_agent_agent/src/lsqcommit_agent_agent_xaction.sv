@@ -8,11 +8,13 @@
 `ifndef LSQCOMMIT_AGENT_AGENT_XACTION__SV
 `define LSQCOMMIT_AGENT_AGENT_XACTION__SV
 
+`include "memblock_compile_params.svh"
+
 class lsqcommit_agent_agent_xaction  extends tcnt_data_base;
-    // This agent only models a subset of the full ROB->LSQ commit interface.
-    // pendingPtr must remain inside current ROB capacity.
+    // 中文注释：pendingPtr来自ROB提交侧，当前由LSQ commit sequence按软件commit cursor驱动。
+    // value宽度跟随DUT版本宏；V2默认8 bit/RobSize=160，V3可编译期覆盖。
     rand bit io_ooo_to_mem_lsqio_pendingPtr_flag;
-    rand bit [8:0] io_ooo_to_mem_lsqio_pendingPtr_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_ooo_to_mem_lsqio_pendingPtr_value;
     rand bit io_ooo_to_mem_flushSb     ;
 
     rand bit io_ooo_to_mem_lsqio_pendingMMIOld;
@@ -47,7 +49,7 @@ constraint lsqcommit_agent_agent_xaction::default_io_ooo_to_mem_lsqio_pendingPtr
 }
 
 constraint lsqcommit_agent_agent_xaction::default_io_ooo_to_mem_lsqio_pendingPtr_value_cons{
-    io_ooo_to_mem_lsqio_pendingPtr_value inside {[9'd0:9'd351]};
+    io_ooo_to_mem_lsqio_pendingPtr_value inside {[0:`MEMBLOCK_DUT_ROB_SIZE-1]};
 }
 
 constraint lsqcommit_agent_agent_xaction::default_io_ooo_to_mem_flushSb_cons{

@@ -8,6 +8,8 @@
 `ifndef IO_MEM_TO_OOO_CTRL_AGENT_AGENT_XACTION__SV
 `define IO_MEM_TO_OOO_CTRL_AGENT_AGENT_XACTION__SV
 
+`include "memblock_compile_params.svh"
+
 class io_mem_to_ooo_ctrl_agent_agent_xaction  extends tcnt_data_base;
     // Primarily a DUT-output monitor transaction. The following base
     // constraints only bound structural ranges and are not intended as
@@ -17,6 +19,7 @@ class io_mem_to_ooo_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip;
     rand bit io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip;
     rand bit io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip;
+    rand bit io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug;
     rand bit io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31;
     rand bit io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43;
     rand bit io_mem_to_ooo_topToBackendBypass_msiInfo_valid;
@@ -29,15 +32,15 @@ class io_mem_to_ooo_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit [1:0] io_mem_to_ooo_sqDeq ;
     rand bit [3:0] io_mem_to_ooo_lqDeq ;
     rand bit io_mem_to_ooo_lqDeqPtr_flag;
-    rand bit [6:0] io_mem_to_ooo_lqDeqPtr_value;
+    rand bit [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_mem_to_ooo_lqDeqPtr_value;
     rand bit io_mem_to_ooo_memoryViolation_valid;
     rand bit io_mem_to_ooo_memoryViolation_bits_ftqIdx_flag;
-    rand bit [5:0] io_mem_to_ooo_memoryViolation_bits_ftqIdx_value;
-    rand bit [4:0] io_mem_to_ooo_memoryViolation_bits_ftqOffset;
+    rand bit [`MEMBLOCK_DUT_FTQ_PTR_VALUE_W-1:0] io_mem_to_ooo_memoryViolation_bits_ftqIdx_value;
+    rand bit [`MEMBLOCK_DUT_FTQ_OFFSET_W-1:0] io_mem_to_ooo_memoryViolation_bits_ftqOffset;
     rand bit io_mem_to_ooo_memoryViolation_bits_isRVC;
     rand bit io_mem_to_ooo_memoryViolation_bits_level;
     rand bit io_mem_to_ooo_memoryViolation_bits_robIdx_flag;
-    rand bit [8:0] io_mem_to_ooo_memoryViolation_bits_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_memoryViolation_bits_robIdx_value;
     rand bit io_mem_to_ooo_sbIsEmpty   ;
     rand bit [63:0] io_mem_to_ooo_lsqio_vaddr;
     rand bit [63:0] io_mem_to_ooo_lsqio_gpaddr;
@@ -46,19 +49,20 @@ class io_mem_to_ooo_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_mem_to_ooo_ldCancel_1_ld2Cancel;
     rand bit io_mem_to_ooo_ldCancel_2_ld2Cancel;
 
-    rand bit [7:0] io_mem_to_ooo_lsqio_loadMmioUop_0_robIdx_value;
-    rand bit [7:0] io_mem_to_ooo_lsqio_loadMmioUop_1_robIdx_value;
-    rand bit [7:0] io_mem_to_ooo_lsqio_loadMmioUop_2_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_loadMmioUop_0_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_loadMmioUop_1_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_loadMmioUop_2_robIdx_value;
     rand bit io_mem_to_ooo_lsqio_loadMmio_0;
     rand bit io_mem_to_ooo_lsqio_loadMmio_1;
     rand bit io_mem_to_ooo_lsqio_loadMmio_2;
     rand bit io_mem_to_ooo_lsqio_storeMmio;
-    rand bit [7:0] io_mem_to_ooo_lsqio_storeMmioUop_robIdx_value;
+    rand bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_storeMmioUop_robIdx_value;
     extern constraint default_io_mem_to_ooo_topToBackendBypass_hartId_cons;
     extern constraint default_io_mem_to_ooo_topToBackendBypass_externalInterrupt_mtip_cons;
     extern constraint default_io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip_cons;
     extern constraint default_io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip_cons;
     extern constraint default_io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip_cons;
+    extern constraint default_io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug_cons;
     extern constraint default_io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31_cons;
     extern constraint default_io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43_cons;
     extern constraint default_io_mem_to_ooo_topToBackendBypass_msiInfo_valid_cons;
@@ -102,6 +106,7 @@ class io_mem_to_ooo_ctrl_agent_agent_xaction  extends tcnt_data_base;
         `uvm_field_int(io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip, UVM_ALL_ON);
+        `uvm_field_int(io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43, UVM_ALL_ON);
         `uvm_field_int(io_mem_to_ooo_topToBackendBypass_msiInfo_valid, UVM_ALL_ON);
@@ -160,6 +165,10 @@ constraint io_mem_to_ooo_ctrl_agent_agent_xaction::default_io_mem_to_ooo_topToBa
 }
 
 constraint io_mem_to_ooo_ctrl_agent_agent_xaction::default_io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip_cons{
+
+}
+
+constraint io_mem_to_ooo_ctrl_agent_agent_xaction::default_io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug_cons{
 
 }
 
@@ -367,6 +376,7 @@ function string io_mem_to_ooo_ctrl_agent_agent_xaction::psdisplay(string prefix 
     pkt_str = $sformatf("%sio_mem_to_ooo_topToBackendBypass_externalInterrupt_msip = 0x%0h ",pkt_str,this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_msip);
     pkt_str = $sformatf("%sio_mem_to_ooo_topToBackendBypass_externalInterrupt_meip = 0x%0h ",pkt_str,this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_meip);
     pkt_str = $sformatf("%sio_mem_to_ooo_topToBackendBypass_externalInterrupt_seip = 0x%0h ",pkt_str,this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip);
+    pkt_str = $sformatf("%sio_mem_to_ooo_topToBackendBypass_externalInterrupt_debug = 0x%0h ",pkt_str,this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug);
     pkt_str = $sformatf("%sio_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31 = 0x%0h ",pkt_str,this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31);
     pkt_str = $sformatf("%sio_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43 = 0x%0h ",pkt_str,this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_43);
     pkt_str = $sformatf("%sio_mem_to_ooo_topToBackendBypass_msiInfo_valid = 0x%0h ",pkt_str,this.io_mem_to_ooo_topToBackendBypass_msiInfo_valid);
@@ -438,6 +448,11 @@ function bit io_mem_to_ooo_ctrl_agent_agent_xaction::compare(uvm_object rhs, uvm
         if(this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip!=rhs_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip=0x%0h while the rhs_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip=0x%0h",this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip,rhs_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_seip),UVM_NONE)
+        end
+
+        if(this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug!=rhs_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug=0x%0h while the rhs_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug=0x%0h",this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug,rhs_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_debug),UVM_NONE)
         end
 
         if(this.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31!=rhs_.io_mem_to_ooo_topToBackendBypass_externalInterrupt_nmi_nmi_31) begin

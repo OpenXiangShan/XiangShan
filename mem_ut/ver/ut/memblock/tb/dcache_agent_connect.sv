@@ -68,6 +68,10 @@
         force RTL_PATH.auto_inner_dcache_client_out_e_ready = U_IF_NAME.auto_inner_dcache_client_out_e_ready; \
         force U_IF_NAME.auto_inner_dcache_client_out_e_valid = RTL_PATH.auto_inner_dcache_client_out_e_valid; \
         force U_IF_NAME.auto_inner_dcache_client_out_e_bits_sink = RTL_PATH.auto_inner_dcache_client_out_e_bits_sink; \
+        force RTL_PATH.io_l2_hint_valid = U_IF_NAME.io_l2_hint_valid; \
+        force RTL_PATH.io_l2_hint_bits_sourceId = U_IF_NAME.io_l2_hint_bits_sourceId; \
+        force RTL_PATH.io_l2_hint_bits_isKeyword = U_IF_NAME.io_l2_hint_bits_isKeyword; \
+        force RTL_PATH.io_l2_flush_done = U_IF_NAME.io_l2_flush_done; \
     end \
     `else \
     initial begin \
@@ -124,6 +128,10 @@
         force U_IF_NAME.auto_inner_dcache_client_out_e_ready = RTL_PATH.auto_inner_dcache_client_out_e_ready; \
         force U_IF_NAME.auto_inner_dcache_client_out_e_valid = RTL_PATH.auto_inner_dcache_client_out_e_valid; \
         force U_IF_NAME.auto_inner_dcache_client_out_e_bits_sink = RTL_PATH.auto_inner_dcache_client_out_e_bits_sink; \
+        force RTL_PATH.io_l2_hint_valid = U_IF_NAME.io_l2_hint_valid; \
+        force RTL_PATH.io_l2_hint_bits_sourceId = U_IF_NAME.io_l2_hint_bits_sourceId; \
+        force RTL_PATH.io_l2_hint_bits_isKeyword = U_IF_NAME.io_l2_hint_bits_isKeyword; \
+        force RTL_PATH.io_l2_flush_done = U_IF_NAME.io_l2_flush_done; \
     end \
     `endif
 
