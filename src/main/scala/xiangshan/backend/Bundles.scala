@@ -829,6 +829,11 @@ object Bundles {
     val loadDependency = Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W))
     val is0Lat = Bool()
     val isFmacWakeup = Bool()
+    val isFmulWakeup = Bool()
+    val isFaluWakeup = Bool()
+    val isI2fWakeup = Bool()
+    val isFdivWakeup = Bool()
+    val isLoadWakeup = Bool()
     val params = backendParams.allExuParams.filter(_.exuIdx == exuIdx).head
     val rcDest = OptionWrapper(params.needWriteRegCache, UInt(RegCacheIdxWidth.W))
     val pdestCopy  = OptionWrapper(copyWakeupOut, Vec(copyNum, UInt(params.wbPregIdxWidth.W)))
@@ -848,6 +853,11 @@ object Bundles {
       this.loadDependency := exuInput.loadDependency.getOrElse(0.U.asTypeOf(this.loadDependency))
       this.is0Lat := exuInput.is0Lat.getOrElse(false.B)
       this.isFmacWakeup := FuType.isFmul(exuInput.fuType) && FuOpType.FMacOpcodes.isOP3(exuInput.fuOpType)
+      this.isFmulWakeup := FuType.isFmul(exuInput.fuType) && !FuOpType.FMacOpcodes.isOP3(exuInput.fuOpType)
+      this.isFaluWakeup := exuInput.fuType === FuType.falu.U
+      this.isI2fWakeup := exuInput.fuType === FuType.i2f.U
+      this.isFdivWakeup := exuInput.fuType === FuType.fDivSqrt.U
+      this.isLoadWakeup := FuType.isLoad(exuInput.fuType)
       this.pdest := exuInput.pdest
       this.pdestV0 := exuInput.pdestV0.getOrElse(0.U)
       this.pdestVl := exuInput.pdestVl.getOrElse(0.U)

@@ -201,8 +201,13 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val perfOg0Cancel         = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Bool())))
     val perfWakeupByWB        = Output(Vec(params.numRegSrc, Bool()))
     val perfWakeupByIQ        = Option.when(params.hasIQWakeUp)(Output(Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool()))))
-    val perfSrc2LastReadyByFma    = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
-    val perfSrc2LastReadyByNonFma = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
+    val perfSrc2LastReadyByFma   = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
+    val perfSrc2LastReadyByFmul  = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
+    val perfSrc2LastReadyByFalu  = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
+    val perfSrc2LastReadyByI2f   = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
+    val perfSrc2LastReadyByFdiv  = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
+    val perfSrc2LastReadyByLoad  = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
+    val perfSrc2LastReadyByOther = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
     val earlyFmaSrc2          = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
     val earlyFmaSource        = Option.when(params.needEarlyFmaWakeup)(Output(UInt(backendParams.numExu.W)))
     val earlyFmaSrc2UseBypass = Option.when(params.needEarlyFmaWakeup)(Output(Bool()))
@@ -660,7 +665,12 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     commonOut.perfWakeupByWB                          := common.srcWakeupByWB.zip(status.srcStatus).map{ case (w, s) => w && SrcState.isBusy(s.srcState) && validReg }
     if (params.needEarlyFmaWakeup) {
       val src2LastReadyByFma = WireInit(false.B)
-      val src2LastReadyByNonFma = WireInit(false.B)
+      val src2LastReadyByFmul = WireInit(false.B)
+      val src2LastReadyByFalu = WireInit(false.B)
+      val src2LastReadyByI2f = WireInit(false.B)
+      val src2LastReadyByFdiv = WireInit(false.B)
+      val src2LastReadyByLoad = WireInit(false.B)
+      val src2LastReadyByOther = WireInit(false.B)
       if (isComp && !isEnq) {
         val src2LastReady = validReg &&
           SrcState.isBusy(status.srcStatus(2).srcState) &&
@@ -668,19 +678,55 @@ object EntryBundles extends HasCircularQueuePtrHelper {
         val src2WakeupByIQFma = hasIQWakeupGet.srcWakeupByIQ(2).zip(commonIn.wakeUpFromIQ).map {
           case (wakeup, source) => wakeup && source.bits.isFmacWakeup
         }.fold(false.B)(_ || _)
-        val src2WakeupByIQNonFma = hasIQWakeupGet.srcWakeupByIQ(2).zip(commonIn.wakeUpFromIQ).map {
-          case (wakeup, source) => wakeup && !source.bits.isFmacWakeup
+        val src2WakeupByIQFmul = hasIQWakeupGet.srcWakeupByIQ(2).zip(commonIn.wakeUpFromIQ).map {
+          case (wakeup, source) => wakeup && source.bits.isFmulWakeup
+        }.fold(false.B)(_ || _)
+        val src2WakeupByIQFalu = hasIQWakeupGet.srcWakeupByIQ(2).zip(commonIn.wakeUpFromIQ).map {
+          case (wakeup, source) => wakeup && source.bits.isFaluWakeup
+        }.fold(false.B)(_ || _)
+        val src2WakeupByIQI2f = hasIQWakeupGet.srcWakeupByIQ(2).zip(commonIn.wakeUpFromIQ).map {
+          case (wakeup, source) => wakeup && source.bits.isI2fWakeup
+        }.fold(false.B)(_ || _)
+        val src2WakeupByIQFdiv = hasIQWakeupGet.srcWakeupByIQ(2).zip(commonIn.wakeUpFromIQ).map {
+          case (wakeup, source) => wakeup && source.bits.isFdivWakeup
+        }.fold(false.B)(_ || _)
+        val src2WakeupByIQLoad = hasIQWakeupGet.srcWakeupByIQ(2).zip(commonIn.wakeUpFromIQ).map {
+          case (wakeup, source) => wakeup && source.bits.isLoadWakeup
+        }.fold(false.B)(_ || _)
+        val src2WakeupByIQOther = hasIQWakeupGet.srcWakeupByIQ(2).zip(commonIn.wakeUpFromIQ).map {
+          case (wakeup, source) => wakeup && !(source.bits.isFmacWakeup ||
+            source.bits.isFmulWakeup || source.bits.isFaluWakeup || source.bits.isI2fWakeup ||
+            source.bits.isFdivWakeup || source.bits.isLoadWakeup)
         }.fold(false.B)(_ || _)
         val src2WakeupByEarlyFma = hasIQWakeupGet.earlyFmaSrc2Wakeup &&
           !common.srcLoadTransCancelVec(2) &&
           !common.srcLoadCancelVec(2)
         val src2WakeupByFma = src2WakeupByEarlyFma || src2WakeupByIQFma
-        val src2WakeupByNonFma = common.srcWakeupByWB(2) || src2WakeupByIQNonFma
+        val src2WakeupByFmul = !src2WakeupByFma && src2WakeupByIQFmul
+        val src2WakeupByFalu = !src2WakeupByFma && !src2WakeupByFmul && src2WakeupByIQFalu
+        val src2WakeupByI2f = !src2WakeupByFma && !src2WakeupByFmul && !src2WakeupByFalu && src2WakeupByIQI2f
+        val src2WakeupByFdiv = !src2WakeupByFma && !src2WakeupByFmul && !src2WakeupByFalu &&
+          !src2WakeupByI2f && src2WakeupByIQFdiv
+        val src2WakeupByLoad = !src2WakeupByFma && !src2WakeupByFmul && !src2WakeupByFalu &&
+          !src2WakeupByI2f && !src2WakeupByFdiv && src2WakeupByIQLoad
+        val src2WakeupByOther = !src2WakeupByFma && !src2WakeupByFmul && !src2WakeupByFalu &&
+          !src2WakeupByI2f && !src2WakeupByFdiv && !src2WakeupByLoad &&
+          (common.srcWakeupByWB(2) || src2WakeupByIQOther)
         src2LastReadyByFma := src2LastReady && src2WakeupByFma
-        src2LastReadyByNonFma := src2LastReady && !src2WakeupByFma && src2WakeupByNonFma
+        src2LastReadyByFmul := src2LastReady && src2WakeupByFmul
+        src2LastReadyByFalu := src2LastReady && src2WakeupByFalu
+        src2LastReadyByI2f := src2LastReady && src2WakeupByI2f
+        src2LastReadyByFdiv := src2LastReady && src2WakeupByFdiv
+        src2LastReadyByLoad := src2LastReady && src2WakeupByLoad
+        src2LastReadyByOther := src2LastReady && src2WakeupByOther
       }
       commonOut.perfSrc2LastReadyByFma.get := src2LastReadyByFma
-      commonOut.perfSrc2LastReadyByNonFma.get := src2LastReadyByNonFma
+      commonOut.perfSrc2LastReadyByFmul.get := src2LastReadyByFmul
+      commonOut.perfSrc2LastReadyByFalu.get := src2LastReadyByFalu
+      commonOut.perfSrc2LastReadyByI2f.get := src2LastReadyByI2f
+      commonOut.perfSrc2LastReadyByFdiv.get := src2LastReadyByFdiv
+      commonOut.perfSrc2LastReadyByLoad.get := src2LastReadyByLoad
+      commonOut.perfSrc2LastReadyByOther.get := src2LastReadyByOther
     }
     commonOut.earlyFmaSrc2.foreach(_                  := entryUpdate.status.earlyFmaSrc2.get)
     commonOut.earlyFmaSource.foreach(_                := entryUpdate.status.earlyFmaSource.get)

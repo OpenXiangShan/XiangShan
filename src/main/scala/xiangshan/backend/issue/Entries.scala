@@ -111,8 +111,13 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
   val perfOg0CancelVec       = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, Bool()))))
   val perfWakeupByWBVec      = Wire(Vec(params.numEntries, Vec(params.numRegSrc, Bool())))
   val perfWakeupByIQVec      = OptionWrapper(params.hasIQWakeUp, Wire(Vec(params.numEntries, Vec(params.numRegSrc, Vec(params.numWakeupFromIQ, Bool())))))
-  val perfSrc2LastReadyByFmaVec    = OptionWrapper(params.needEarlyFmaWakeup, Wire(Vec(params.numEntries, Bool())))
-  val perfSrc2LastReadyByNonFmaVec = OptionWrapper(params.needEarlyFmaWakeup, Wire(Vec(params.numEntries, Bool())))
+  val perfSrc2LastReadyByFmaVec   = OptionWrapper(params.needEarlyFmaWakeup, Wire(Vec(params.numEntries, Bool())))
+  val perfSrc2LastReadyByFmulVec  = OptionWrapper(params.needEarlyFmaWakeup, Wire(Vec(params.numEntries, Bool())))
+  val perfSrc2LastReadyByFaluVec  = OptionWrapper(params.needEarlyFmaWakeup, Wire(Vec(params.numEntries, Bool())))
+  val perfSrc2LastReadyByI2fVec   = OptionWrapper(params.needEarlyFmaWakeup, Wire(Vec(params.numEntries, Bool())))
+  val perfSrc2LastReadyByFdivVec  = OptionWrapper(params.needEarlyFmaWakeup, Wire(Vec(params.numEntries, Bool())))
+  val perfSrc2LastReadyByLoadVec  = OptionWrapper(params.needEarlyFmaWakeup, Wire(Vec(params.numEntries, Bool())))
+  val perfSrc2LastReadyByOtherVec = OptionWrapper(params.needEarlyFmaWakeup, Wire(Vec(params.numEntries, Bool())))
   //cancel bypass
   val cancelBypassVec        = Wire(Vec(params.numEntries, Bool()))
 
@@ -438,7 +443,12 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     entryOutTransValidVec(entryIdx) := out.entryOutTransValid
     perfWakeupByWBVec(entryIdx)     := out.perfWakeupByWB
     perfSrc2LastReadyByFmaVec.foreach(_(entryIdx) := out.perfSrc2LastReadyByFma.get)
-    perfSrc2LastReadyByNonFmaVec.foreach(_(entryIdx) := out.perfSrc2LastReadyByNonFma.get)
+    perfSrc2LastReadyByFmulVec.foreach(_(entryIdx) := out.perfSrc2LastReadyByFmul.get)
+    perfSrc2LastReadyByFaluVec.foreach(_(entryIdx) := out.perfSrc2LastReadyByFalu.get)
+    perfSrc2LastReadyByI2fVec.foreach(_(entryIdx) := out.perfSrc2LastReadyByI2f.get)
+    perfSrc2LastReadyByFdivVec.foreach(_(entryIdx) := out.perfSrc2LastReadyByFdiv.get)
+    perfSrc2LastReadyByLoadVec.foreach(_(entryIdx) := out.perfSrc2LastReadyByLoad.get)
+    perfSrc2LastReadyByOtherVec.foreach(_(entryIdx) := out.perfSrc2LastReadyByOther.get)
     if (params.hasIQWakeUp) {
       perfLdCancelVec.get(entryIdx)   := out.perfLdCancel.get
       perfOg0CancelVec.get(entryIdx)  := out.perfOg0Cancel.get
@@ -491,16 +501,21 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     XSPerfAccumulate(s"compEntry_${i}_out_trans_cnt", entryOutTransValidVec(i + params.numEnq + params.numSimp))
   }
   if (params.needEarlyFmaWakeup && params.hasCompAndSimp && params.numComp > 0) {
-    val compEntryOldestOH = Wire(Vec(params.numComp, Bool()))
-    for (i <- 0 until params.numComp) {
-      compEntryOldestOH(i) := io.compEntryOldestSel.get.map(sel => sel.valid && sel.bits(i)).fold(false.B)(_ || _)
-    }
-
     val sawSrc01ReadySrc2Busy = RegInit(VecInit(Seq.fill(params.numComp)(false.B)))
     val src2LastReadyByFma = RegInit(VecInit(Seq.fill(params.numComp)(false.B)))
-    val src2LastReadyByNonFma = RegInit(VecInit(Seq.fill(params.numComp)(false.B)))
+    val src2LastReadyByFmul = RegInit(VecInit(Seq.fill(params.numComp)(false.B)))
+    val src2LastReadyByFalu = RegInit(VecInit(Seq.fill(params.numComp)(false.B)))
+    val src2LastReadyByI2f = RegInit(VecInit(Seq.fill(params.numComp)(false.B)))
+    val src2LastReadyByFdiv = RegInit(VecInit(Seq.fill(params.numComp)(false.B)))
+    val src2LastReadyByLoad = RegInit(VecInit(Seq.fill(params.numComp)(false.B)))
+    val src2LastReadyByOther = RegInit(VecInit(Seq.fill(params.numComp)(false.B)))
     val src2LastReadyByFmaCommit = Wire(Vec(params.numComp, Bool()))
-    val src2LastReadyByNonFmaCommit = Wire(Vec(params.numComp, Bool()))
+    val src2LastReadyByFmulCommit = Wire(Vec(params.numComp, Bool()))
+    val src2LastReadyByFaluCommit = Wire(Vec(params.numComp, Bool()))
+    val src2LastReadyByI2fCommit = Wire(Vec(params.numComp, Bool()))
+    val src2LastReadyByFdivCommit = Wire(Vec(params.numComp, Bool()))
+    val src2LastReadyByLoadCommit = Wire(Vec(params.numComp, Bool()))
+    val src2LastReadyByOtherCommit = Wire(Vec(params.numComp, Bool()))
 
     for (i <- 0 until params.numComp) {
       val entryIdx = i + params.numEnq + params.numSimp
@@ -511,37 +526,76 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
       val src0Ready = SrcState.isReady(entries(entryIdx).bits.status.srcStatus(0).srcState)
       val src1Ready = SrcState.isReady(entries(entryIdx).bits.status.srcStatus(1).srcState)
       val src2Busy = SrcState.isBusy(entries(entryIdx).bits.status.srcStatus(2).srcState)
-      val sawNow = validNow && compEntryOldestOH(i) && src0Ready && src1Ready && src2Busy
-      val alreadyRecorded = src2LastReadyByFma(i) || src2LastReadyByNonFma(i)
+      val sawNow = validNow && src0Ready && src1Ready && src2Busy
+      val alreadyRecorded = src2LastReadyByFma(i) || src2LastReadyByFmul(i) || src2LastReadyByFalu(i) ||
+        src2LastReadyByI2f(i) || src2LastReadyByFdiv(i) || src2LastReadyByLoad(i) || src2LastReadyByOther(i)
       val canRecord = sawSrc01ReadySrc2Busy(i) || sawNow
       val fmaNow = canRecord && !alreadyRecorded && perfSrc2LastReadyByFmaVec.get(entryIdx)
-      val nonFmaNow = canRecord && !alreadyRecorded && !fmaNow && perfSrc2LastReadyByNonFmaVec.get(entryIdx)
+      val fmulNow = canRecord && !alreadyRecorded && !fmaNow && perfSrc2LastReadyByFmulVec.get(entryIdx)
+      val faluNow = canRecord && !alreadyRecorded && !fmaNow && !fmulNow && perfSrc2LastReadyByFaluVec.get(entryIdx)
+      val i2fNow = canRecord && !alreadyRecorded && !fmaNow && !fmulNow && !faluNow &&
+        perfSrc2LastReadyByI2fVec.get(entryIdx)
+      val fdivNow = canRecord && !alreadyRecorded && !fmaNow && !fmulNow && !faluNow && !i2fNow &&
+        perfSrc2LastReadyByFdivVec.get(entryIdx)
+      val loadNow = canRecord && !alreadyRecorded && !fmaNow && !fmulNow && !faluNow && !i2fNow && !fdivNow &&
+        perfSrc2LastReadyByLoadVec.get(entryIdx)
+      val otherNow = canRecord && !alreadyRecorded && !fmaNow && !fmulNow && !faluNow && !i2fNow && !fdivNow &&
+        !loadNow && perfSrc2LastReadyByOtherVec.get(entryIdx)
 
       src2LastReadyByFmaCommit(i) := entryLeaving && (src2LastReadyByFma(i) || fmaNow)
-      src2LastReadyByNonFmaCommit(i) := entryLeaving && !(src2LastReadyByFma(i) || fmaNow) &&
-        (src2LastReadyByNonFma(i) || nonFmaNow)
+      src2LastReadyByFmulCommit(i) := entryLeaving && (src2LastReadyByFmul(i) || fmulNow)
+      src2LastReadyByFaluCommit(i) := entryLeaving && (src2LastReadyByFalu(i) || faluNow)
+      src2LastReadyByI2fCommit(i) := entryLeaving && (src2LastReadyByI2f(i) || i2fNow)
+      src2LastReadyByFdivCommit(i) := entryLeaving && (src2LastReadyByFdiv(i) || fdivNow)
+      src2LastReadyByLoadCommit(i) := entryLeaving && (src2LastReadyByLoad(i) || loadNow)
+      src2LastReadyByOtherCommit(i) := entryLeaving && (src2LastReadyByOther(i) || otherNow)
 
       when (entryLeaving || entryIn || !validNext) {
         sawSrc01ReadySrc2Busy(i) := false.B
         src2LastReadyByFma(i) := false.B
-        src2LastReadyByNonFma(i) := false.B
+        src2LastReadyByFmul(i) := false.B
+        src2LastReadyByFalu(i) := false.B
+        src2LastReadyByI2f(i) := false.B
+        src2LastReadyByFdiv(i) := false.B
+        src2LastReadyByLoad(i) := false.B
+        src2LastReadyByOther(i) := false.B
       }.otherwise {
         when (sawNow) {
           sawSrc01ReadySrc2Busy(i) := true.B
         }
         when (fmaNow) {
           src2LastReadyByFma(i) := true.B
-        }.elsewhen (nonFmaNow) {
-          src2LastReadyByNonFma(i) := true.B
+        }.elsewhen (fmulNow) {
+          src2LastReadyByFmul(i) := true.B
+        }.elsewhen (faluNow) {
+          src2LastReadyByFalu(i) := true.B
+        }.elsewhen (i2fNow) {
+          src2LastReadyByI2f(i) := true.B
+        }.elsewhen (fdivNow) {
+          src2LastReadyByFdiv(i) := true.B
+        }.elsewhen (loadNow) {
+          src2LastReadyByLoad(i) := true.B
+        }.elsewhen (otherNow) {
+          src2LastReadyByOther(i) := true.B
         }
       }
 
-      XSPerfAccumulate(s"compEntry_${i}_oldest_src01_ready_src2_last_by_non_fma_cnt", src2LastReadyByNonFmaCommit(i))
-      XSPerfAccumulate(s"compEntry_${i}_oldest_src01_ready_src2_last_by_fma_cnt", src2LastReadyByFmaCommit(i))
+      XSPerfAccumulate(s"compEntry_${i}_src01_ready_src2_last_by_fma_cnt", src2LastReadyByFmaCommit(i))
+      XSPerfAccumulate(s"compEntry_${i}_src01_ready_src2_last_by_fmul_cnt", src2LastReadyByFmulCommit(i))
+      XSPerfAccumulate(s"compEntry_${i}_src01_ready_src2_last_by_falu_cnt", src2LastReadyByFaluCommit(i))
+      XSPerfAccumulate(s"compEntry_${i}_src01_ready_src2_last_by_i2f_cnt", src2LastReadyByI2fCommit(i))
+      XSPerfAccumulate(s"compEntry_${i}_src01_ready_src2_last_by_fdiv_cnt", src2LastReadyByFdivCommit(i))
+      XSPerfAccumulate(s"compEntry_${i}_src01_ready_src2_last_by_load_cnt", src2LastReadyByLoadCommit(i))
+      XSPerfAccumulate(s"compEntry_${i}_src01_ready_src2_last_by_other_cnt", src2LastReadyByOtherCommit(i))
     }
 
-    XSPerfAccumulate(s"compEntry_all_oldest_src01_ready_src2_last_by_non_fma_cnt", PopCount(src2LastReadyByNonFmaCommit))
-    XSPerfAccumulate(s"compEntry_all_oldest_src01_ready_src2_last_by_fma_cnt", PopCount(src2LastReadyByFmaCommit))
+    XSPerfAccumulate(s"compEntry_all_src01_ready_src2_last_by_fma_cnt", PopCount(src2LastReadyByFmaCommit))
+    XSPerfAccumulate(s"compEntry_all_src01_ready_src2_last_by_fmul_cnt", PopCount(src2LastReadyByFmulCommit))
+    XSPerfAccumulate(s"compEntry_all_src01_ready_src2_last_by_falu_cnt", PopCount(src2LastReadyByFaluCommit))
+    XSPerfAccumulate(s"compEntry_all_src01_ready_src2_last_by_i2f_cnt", PopCount(src2LastReadyByI2fCommit))
+    XSPerfAccumulate(s"compEntry_all_src01_ready_src2_last_by_fdiv_cnt", PopCount(src2LastReadyByFdivCommit))
+    XSPerfAccumulate(s"compEntry_all_src01_ready_src2_last_by_load_cnt", PopCount(src2LastReadyByLoadCommit))
+    XSPerfAccumulate(s"compEntry_all_src01_ready_src2_last_by_other_cnt", PopCount(src2LastReadyByOtherCommit))
   }
   // total
   XSPerfAccumulate(s"enqEntry_all_in_cnt", PopCount(entryInValidVec.take(params.numEnq)))
