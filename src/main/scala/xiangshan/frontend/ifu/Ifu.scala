@@ -194,12 +194,14 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_specInstrCount       = RegEnable(s0_instrCount, s0_fire)
   private val s1_firstRange           = RegEnable(s0_firstRange, s0_fire)
   private val s1_totalRawInstrValid   = RegEnable(s0_totalRawInstrValid, s0_fire)
+  private val s1_firstEndIsHalfRvi    = RegEnable(s0_firstEndIsHalfRvi, s0_fire)
+  private val s1_totalEndIsHalfRvi    = RegEnable(s0_totalEndIsHalfRvi, s0_fire)
   private val s1_firstRawInstrValid   = s1_totalRawInstrValid & s1_firstRange
   private val s1_firstRawInstrEndMask = s1_instrEndMask.asUInt & s1_firstRange
   private val s1_invalidTaken = VecInit(
-    s1_fetchBlock(0).takenCfiOffset.valid && !s1_instrEndMask(s1_fetchBlock(0).takenCfiOffset.bits),
+    s1_fetchBlock(0).takenCfiOffset.valid && s1_firstEndIsHalfRvi,
     s1_fetchBlock(1).valid && s1_fetchBlock(1).takenCfiOffset.valid &&
-      !s1_instrEndMask(s1_totalEndPos)
+      s1_totalEndIsHalfRvi
   )
   private val s1_predTakenIdx = VecInit(
     PopCount(s1_firstRawInstrValid) - 1.U,
@@ -218,9 +220,6 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_prevEndIsHalfRvi   = RegEnable(s0_prevEndIsHalfRvi, s0_fire)
   private val s1_prevEndHalfRviData = RegInit(0.U(16.W))
   private val s1_prevEndHalfRviPc   = RegInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
-
-  private val s1_firstEndIsHalfRvi = RegEnable(s0_firstEndIsHalfRvi, s0_fire)
-  private val s1_totalEndIsHalfRvi = RegEnable(s0_totalEndIsHalfRvi, s0_fire)
 
   private val s1_instrData    = RegEnable(s0_icacheData.data, s0_fire)
   private val s1_icacheMetaIn = RegEnable(s0_icacheMeta, s0_fire)
