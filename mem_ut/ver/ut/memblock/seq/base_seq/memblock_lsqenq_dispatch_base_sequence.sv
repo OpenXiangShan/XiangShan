@@ -55,7 +55,7 @@ class memblock_lsqenq_dispatch_base_sequence extends lsqenq_agent_agent_default_
     extern function void set_req_fields(input lsqenq_agent_agent_xaction tr,
                                         input int unsigned slot,
                                         input bit valid,
-                                        input bit [35:0] fuType,
+                                        input bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] fuType,
                                         input bit [6:0] uopIdx,
                                         input memblock_rob_key_t rob_key,
                                         input memblock_lq_key_t lq_key,
@@ -354,7 +354,7 @@ function void memblock_lsqenq_dispatch_base_sequence::clear_lsqenq_xaction(input
     if (tr == null) begin
         `uvm_fatal(get_type_name(), "clear_lsqenq_xaction got null xaction")
     end
-    for (int unsigned slot = 0; slot < seq_csr_common::get_real_enq_width(); slot++) begin
+    for (int unsigned slot = 0; slot < MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM; slot++) begin
         set_need_alloc(tr, slot, 2'b00);
         set_req_fields(tr,
                        slot,
@@ -375,8 +375,11 @@ function void memblock_lsqenq_dispatch_base_sequence::assign_lsqenq_slot(input l
                                                                     input memblock_op_behavior_t behavior,
                                                                     input memblock_lq_key_t lq_key,
                                                                     input memblock_sq_key_t sq_key);
-    if (slot >= seq_csr_common::get_real_enq_width()) begin
-        `uvm_fatal(get_type_name(), $sformatf("slot=%0d exceeds real_enq_width", slot))
+    if (slot >= MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("slot=%0d exceeds compile-time LSQ enqueue slot count=%0d",
+                             slot,
+                             MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM))
     end
     set_need_alloc(tr, slot, behavior.need_alloc);
     set_req_fields(tr,
@@ -409,16 +412,25 @@ endfunction:set_need_alloc
 function void memblock_lsqenq_dispatch_base_sequence::set_req_fields(input lsqenq_agent_agent_xaction tr,
                                                                 input int unsigned slot,
                                                                 input bit valid,
-                                                                input bit [35:0] fuType,
+                                                                input bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] fuType,
                                                                 input bit [6:0] uopIdx,
                                                                 input memblock_rob_key_t rob_key,
                                                                 input memblock_lq_key_t lq_key,
                                                                 input memblock_sq_key_t sq_key,
                                                                 input bit [4:0] numLsElem);
+    bit [MEMBLOCK_DUT_FUTYPE_W-1:0] dut_futype;
+
+    if (valid) begin
+        dut_futype = encode_and_fit_dut_futype(
+            fuType,
+            $sformatf("%s::set_req_fields(slot=%0d)", get_type_name(), slot));
+    end else begin
+        dut_futype = '0;
+    end
     case (slot)
         0: begin
             tr.io_ooo_to_mem_enqLsq_req_0_valid = valid;
-            tr.io_ooo_to_mem_enqLsq_req_0_bits_fuType = fuType;
+            tr.io_ooo_to_mem_enqLsq_req_0_bits_fuType = dut_futype;
             tr.io_ooo_to_mem_enqLsq_req_0_bits_uopIdx = uopIdx;
             tr.io_ooo_to_mem_enqLsq_req_0_bits_robIdx_flag = rob_key.flag;
             tr.io_ooo_to_mem_enqLsq_req_0_bits_robIdx_value = rob_key.value;
@@ -430,7 +442,7 @@ function void memblock_lsqenq_dispatch_base_sequence::set_req_fields(input lsqen
         end
         1: begin
             tr.io_ooo_to_mem_enqLsq_req_1_valid = valid;
-            tr.io_ooo_to_mem_enqLsq_req_1_bits_fuType = fuType;
+            tr.io_ooo_to_mem_enqLsq_req_1_bits_fuType = dut_futype;
             tr.io_ooo_to_mem_enqLsq_req_1_bits_uopIdx = uopIdx;
             tr.io_ooo_to_mem_enqLsq_req_1_bits_robIdx_flag = rob_key.flag;
             tr.io_ooo_to_mem_enqLsq_req_1_bits_robIdx_value = rob_key.value;
@@ -442,7 +454,7 @@ function void memblock_lsqenq_dispatch_base_sequence::set_req_fields(input lsqen
         end
         2: begin
             tr.io_ooo_to_mem_enqLsq_req_2_valid = valid;
-            tr.io_ooo_to_mem_enqLsq_req_2_bits_fuType = fuType;
+            tr.io_ooo_to_mem_enqLsq_req_2_bits_fuType = dut_futype;
             tr.io_ooo_to_mem_enqLsq_req_2_bits_uopIdx = uopIdx;
             tr.io_ooo_to_mem_enqLsq_req_2_bits_robIdx_flag = rob_key.flag;
             tr.io_ooo_to_mem_enqLsq_req_2_bits_robIdx_value = rob_key.value;
@@ -454,7 +466,7 @@ function void memblock_lsqenq_dispatch_base_sequence::set_req_fields(input lsqen
         end
         3: begin
             tr.io_ooo_to_mem_enqLsq_req_3_valid = valid;
-            tr.io_ooo_to_mem_enqLsq_req_3_bits_fuType = fuType;
+            tr.io_ooo_to_mem_enqLsq_req_3_bits_fuType = dut_futype;
             tr.io_ooo_to_mem_enqLsq_req_3_bits_uopIdx = uopIdx;
             tr.io_ooo_to_mem_enqLsq_req_3_bits_robIdx_flag = rob_key.flag;
             tr.io_ooo_to_mem_enqLsq_req_3_bits_robIdx_value = rob_key.value;
@@ -466,7 +478,7 @@ function void memblock_lsqenq_dispatch_base_sequence::set_req_fields(input lsqen
         end
         4: begin
             tr.io_ooo_to_mem_enqLsq_req_4_valid = valid;
-            tr.io_ooo_to_mem_enqLsq_req_4_bits_fuType = fuType;
+            tr.io_ooo_to_mem_enqLsq_req_4_bits_fuType = dut_futype;
             tr.io_ooo_to_mem_enqLsq_req_4_bits_uopIdx = uopIdx;
             tr.io_ooo_to_mem_enqLsq_req_4_bits_robIdx_flag = rob_key.flag;
             tr.io_ooo_to_mem_enqLsq_req_4_bits_robIdx_value = rob_key.value;
@@ -478,7 +490,7 @@ function void memblock_lsqenq_dispatch_base_sequence::set_req_fields(input lsqen
         end
         5: begin
             tr.io_ooo_to_mem_enqLsq_req_5_valid = valid;
-            tr.io_ooo_to_mem_enqLsq_req_5_bits_fuType = fuType;
+            tr.io_ooo_to_mem_enqLsq_req_5_bits_fuType = dut_futype;
             tr.io_ooo_to_mem_enqLsq_req_5_bits_uopIdx = uopIdx;
             tr.io_ooo_to_mem_enqLsq_req_5_bits_robIdx_flag = rob_key.flag;
             tr.io_ooo_to_mem_enqLsq_req_5_bits_robIdx_value = rob_key.value;

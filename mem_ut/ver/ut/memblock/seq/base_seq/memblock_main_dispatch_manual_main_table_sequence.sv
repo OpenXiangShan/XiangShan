@@ -55,6 +55,11 @@ function main_control_transaction memblock_main_dispatch_manual_main_table_seque
                                                                                                          input int unsigned rob_value,
                                                                                                          input bit [63:0] base_addr);
     main_control_transaction tr;
+    bit [MEMBLOCK_ROB_VALUE_W-1:0] fitted_rob_value;
+
+    fitted_rob_value = fit_directed_rob_value_or_fatal(
+        rob_value,
+        $sformatf("%s::make_directed_transaction(%s)", get_type_name(), tr_name));
 
     tr = main_control_transaction::type_id::create(tr_name);
     if (tr == null) begin
@@ -63,7 +68,7 @@ function main_control_transaction memblock_main_dispatch_manual_main_table_seque
 
     tr.op_class     = op_class;
     tr.robIdx_flag  = 1'b0;
-    tr.robIdx_value = rob_value[8:0];
+    tr.robIdx_value = fitted_rob_value;
     tr.lqIdx_flag   = 1'b0;
     tr.lqIdx_value  = '0;
     tr.sqIdx_flag   = 1'b0;

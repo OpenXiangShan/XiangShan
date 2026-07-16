@@ -41,7 +41,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
 
     function bit raw_rob_to_key(input bit valid,
                                 input bit flag,
-                                input bit [8:0] value,
+                                input bit [MEMBLOCK_ROB_VALUE_W-1:0] value,
                                 output memblock_rob_key_t key);
         key.flag  = flag;
         key.value = value;
@@ -50,7 +50,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
 
     function bit raw_lq_to_key(input bit valid,
                                input bit flag,
-                               input bit [6:0] value,
+                               input bit [MEMBLOCK_LQ_VALUE_W-1:0] value,
                                output memblock_lq_key_t key);
         key.flag  = flag;
         key.value = value;
@@ -59,7 +59,7 @@ class dispatch_monitor_event_adapter extends uvm_object;
 
     function bit raw_sq_to_key(input bit valid,
                                input bit flag,
-                               input bit [5:0] value,
+                               input bit [MEMBLOCK_SQ_VALUE_W-1:0] value,
                                output memblock_sq_key_t key);
         key.flag  = flag;
         key.value = value;

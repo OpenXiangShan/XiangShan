@@ -8,25 +8,118 @@
 `ifndef MEMBLOCK_DISPATCH_TYPES__SV
 `define MEMBLOCK_DISPATCH_TYPES__SV
 
-localparam int unsigned MEMBLOCK_ROB_SIZE = 352;
-localparam int unsigned MEMBLOCK_LQ_SIZE  = 72;
-localparam int unsigned MEMBLOCK_SQ_SIZE  = 56;
-localparam int unsigned MEMBLOCK_COMMIT_WIDTH = 8;
+`include "memblock_compile_params.svh"
 
-// Width of the index value field only. The wrap flag is stored separately
-// in memblock_*_key_t, and legal values are still bounded by MEMBLOCK_*_SIZE.
-localparam int unsigned MEMBLOCK_ROB_VALUE_W = 9;
-localparam int unsigned MEMBLOCK_LQ_VALUE_W  = 7;
-localparam int unsigned MEMBLOCK_SQ_VALUE_W  = 6;
+localparam int unsigned MEMBLOCK_ROB_SIZE = `MEMBLOCK_DUT_ROB_SIZE;
+localparam int unsigned MEMBLOCK_LQ_SIZE  = `MEMBLOCK_DUT_LQ_SIZE;
+localparam int unsigned MEMBLOCK_SQ_SIZE  = `MEMBLOCK_DUT_SQ_SIZE;
+localparam int unsigned MEMBLOCK_COMMIT_WIDTH = `MEMBLOCK_DUT_COMMIT_WIDTH;
 
-// FuType one-hot constants from src/main/scala/xiangshan/backend/fu/FuType.scala.
-localparam bit [35:0] MEMBLOCK_FUTYPE_LDU     = 36'h0_0001_0000;
-localparam bit [35:0] MEMBLOCK_FUTYPE_STU     = 36'h0_0002_0000;
-localparam bit [35:0] MEMBLOCK_FUTYPE_MOU     = 36'h0_0004_0000;
-localparam bit [35:0] MEMBLOCK_FUTYPE_VLDU    = 36'h1_0000_0000;
-localparam bit [35:0] MEMBLOCK_FUTYPE_VSTU    = 36'h2_0000_0000;
-localparam bit [35:0] MEMBLOCK_FUTYPE_VSEGLDU = 36'h4_0000_0000;
-localparam bit [35:0] MEMBLOCK_FUTYPE_VSEGSTU = 36'h8_0000_0000;
+// 中文注释：DUT物理LSQ enqueue slot和scalar issue pipe数量。
+// interface/driver/scheduler直接消费这些编译期常量；runtime plus只能调小行为使用量。
+localparam int unsigned MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM = `MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM;
+localparam int unsigned MEMBLOCK_DUT_LOAD_PIPE_NUM    = `MEMBLOCK_DUT_LOAD_PIPE_NUM;
+localparam int unsigned MEMBLOCK_DUT_STA_PIPE_NUM     = `MEMBLOCK_DUT_STA_PIPE_NUM;
+localparam int unsigned MEMBLOCK_DUT_STD_PIPE_NUM     = `MEMBLOCK_DUT_STD_PIPE_NUM;
+localparam int unsigned MEMBLOCK_DUT_LOAD_PORT_BASE   = `MEMBLOCK_DUT_LOAD_PORT_BASE;
+localparam int unsigned MEMBLOCK_DUT_STA_PORT_BASE =
+    MEMBLOCK_DUT_LOAD_PORT_BASE + MEMBLOCK_DUT_LOAD_PIPE_NUM;
+localparam int unsigned MEMBLOCK_DUT_STD_PORT_BASE =
+    MEMBLOCK_DUT_STA_PORT_BASE + MEMBLOCK_DUT_STA_PIPE_NUM;
+localparam int unsigned MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM =
+    MEMBLOCK_DUT_STD_PORT_BASE + MEMBLOCK_DUT_STD_PIPE_NUM;
+localparam int unsigned MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W =
+    MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM;
+localparam int unsigned MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM = `MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM;
+localparam bit MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT = `MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT;
+localparam bit MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP = `MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP;
+localparam bit MEMBLOCK_DUT_HAS_SQ_DEQ_PTR = `MEMBLOCK_DUT_HAS_SQ_DEQ_PTR;
+
+// 中文注释：index value字段宽度只覆盖value本体，wrap flag单独保存在memblock_*_key_t。
+// V2默认ROB value为8 bit；合法取值仍由MEMBLOCK_*_SIZE限制，避免随机到DUT不存在的entry。
+localparam int unsigned MEMBLOCK_ROB_VALUE_W = `MEMBLOCK_DUT_ROB_VALUE_W;
+localparam int unsigned MEMBLOCK_LQ_VALUE_W  = `MEMBLOCK_DUT_LQ_VALUE_W;
+localparam int unsigned MEMBLOCK_SQ_VALUE_W  = `MEMBLOCK_DUT_SQ_VALUE_W;
+localparam int unsigned MEMBLOCK_FTQ_PTR_VALUE_W = `MEMBLOCK_DUT_FTQ_PTR_VALUE_W;
+localparam int unsigned MEMBLOCK_FTQ_OFFSET_W    = `MEMBLOCK_DUT_FTQ_OFFSET_W;
+
+// 当前版本FuType one-hot编码。内部容器保留36 bit，DUT-facing宽度单独检查。
+localparam int unsigned MEMBLOCK_INTERNAL_FUTYPE_W = `MEMBLOCK_INTERNAL_FUTYPE_W;
+localparam int unsigned MEMBLOCK_DUT_FUTYPE_W      = `MEMBLOCK_DUT_FUTYPE_W;
+localparam int unsigned MEMBLOCK_DUT_FUTYPE_LDU_BIT     = `MEMBLOCK_DUT_FUTYPE_LDU_BIT;
+localparam int unsigned MEMBLOCK_DUT_FUTYPE_STU_BIT     = `MEMBLOCK_DUT_FUTYPE_STU_BIT;
+localparam int unsigned MEMBLOCK_DUT_FUTYPE_MOU_BIT     = `MEMBLOCK_DUT_FUTYPE_MOU_BIT;
+localparam int unsigned MEMBLOCK_DUT_FUTYPE_VLDU_BIT    = `MEMBLOCK_DUT_FUTYPE_VLDU_BIT;
+localparam int unsigned MEMBLOCK_DUT_FUTYPE_VSTU_BIT    = `MEMBLOCK_DUT_FUTYPE_VSTU_BIT;
+localparam int unsigned MEMBLOCK_DUT_FUTYPE_VSEGLDU_BIT = `MEMBLOCK_DUT_FUTYPE_VSEGLDU_BIT;
+localparam int unsigned MEMBLOCK_DUT_FUTYPE_VSEGSTU_BIT = `MEMBLOCK_DUT_FUTYPE_VSEGSTU_BIT;
+
+localparam bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] MEMBLOCK_FUTYPE_LDU =
+    MEMBLOCK_INTERNAL_FUTYPE_W'(1) << MEMBLOCK_DUT_FUTYPE_LDU_BIT;
+localparam bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] MEMBLOCK_FUTYPE_STU =
+    MEMBLOCK_INTERNAL_FUTYPE_W'(1) << MEMBLOCK_DUT_FUTYPE_STU_BIT;
+localparam bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] MEMBLOCK_FUTYPE_MOU =
+    MEMBLOCK_INTERNAL_FUTYPE_W'(1) << MEMBLOCK_DUT_FUTYPE_MOU_BIT;
+localparam bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] MEMBLOCK_FUTYPE_VLDU =
+    MEMBLOCK_INTERNAL_FUTYPE_W'(1) << MEMBLOCK_DUT_FUTYPE_VLDU_BIT;
+localparam bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] MEMBLOCK_FUTYPE_VSTU =
+    MEMBLOCK_INTERNAL_FUTYPE_W'(1) << MEMBLOCK_DUT_FUTYPE_VSTU_BIT;
+localparam bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] MEMBLOCK_FUTYPE_VSEGLDU =
+    MEMBLOCK_INTERNAL_FUTYPE_W'(1) << MEMBLOCK_DUT_FUTYPE_VSEGLDU_BIT;
+localparam bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] MEMBLOCK_FUTYPE_VSEGSTU =
+    MEMBLOCK_INTERNAL_FUTYPE_W'(1) << MEMBLOCK_DUT_FUTYPE_VSEGSTU_BIT;
+
+function automatic bit [MEMBLOCK_DUT_FUTYPE_W-1:0]
+encode_and_fit_dut_futype(input bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] internal_fuType,
+                          input string caller);
+    case (internal_fuType)
+        MEMBLOCK_FUTYPE_LDU,
+        MEMBLOCK_FUTYPE_STU,
+        MEMBLOCK_FUTYPE_MOU: begin
+        end
+        MEMBLOCK_FUTYPE_VLDU,
+        MEMBLOCK_FUTYPE_VSTU,
+        MEMBLOCK_FUTYPE_VSEGLDU,
+        MEMBLOCK_FUTYPE_VSEGSTU: begin
+            `uvm_fatal("MEMBLOCK_FUTYPE", $sformatf("%s does not support vector LS FuType=0x%0h", caller, internal_fuType))
+        end
+        default: begin
+            `uvm_fatal("MEMBLOCK_FUTYPE", $sformatf("%s got unknown FuType=0x%0h", caller, internal_fuType))
+        end
+    endcase
+
+    if ((internal_fuType >> MEMBLOCK_DUT_FUTYPE_W) != '0) begin
+        `uvm_fatal("MEMBLOCK_FUTYPE",
+                   $sformatf("%s FuType=0x%0h has bits above DUT width=%0d",
+                             caller, internal_fuType, MEMBLOCK_DUT_FUTYPE_W))
+    end
+    return internal_fuType[MEMBLOCK_DUT_FUTYPE_W-1:0];
+endfunction:encode_and_fit_dut_futype
+
+function automatic bit [MEMBLOCK_ROB_VALUE_W-1:0]
+fit_directed_rob_value_or_fatal(input int unsigned value,
+                                input string caller_context);
+    longint unsigned exclusive_limit;
+    longint unsigned promoted_value;
+
+    if (MEMBLOCK_ROB_VALUE_W == 0) begin
+        `uvm_fatal("MEMBLOCK_ROB_FIT", $sformatf("%s ROB value width is zero", caller_context))
+    end
+    if (MEMBLOCK_ROB_VALUE_W >= $bits(longint unsigned)) begin
+        `uvm_fatal("MEMBLOCK_ROB_FIT",
+                   $sformatf("%s ROB value width=%0d cannot form a 64-bit exclusive limit",
+                             caller_context, MEMBLOCK_ROB_VALUE_W))
+    end
+
+    exclusive_limit = 64'd1 << MEMBLOCK_ROB_VALUE_W;
+    promoted_value = value;
+    if (promoted_value >= exclusive_limit) begin
+        `uvm_fatal("MEMBLOCK_ROB_FIT",
+                   $sformatf("%s ROB value=%0d exceeds width=%0d maximum=%0d",
+                             caller_context, value, MEMBLOCK_ROB_VALUE_W, exclusive_limit - 1))
+    end
+    return MEMBLOCK_ROB_VALUE_W'(value);
+endfunction:fit_directed_rob_value_or_fatal
 
 // LSUOpType constants from src/main/scala/xiangshan/package.scala.
 localparam bit [8:0] MEMBLOCK_LSUOP_LB          = 9'd0;

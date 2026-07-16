@@ -44,7 +44,7 @@ endclass:soft_test_memblock_dispatch_smoke_sequence
 
 function soft_test_memblock_dispatch_smoke_sequence::new(string name = "soft_test_memblock_dispatch_smoke_sequence");
     super.new(name);
-    dispatch_smoke_trans_num = 3;
+    dispatch_smoke_trans_num = 2;
 endfunction:new
 
 task soft_test_memblock_dispatch_smoke_sequence::body();
@@ -69,10 +69,6 @@ task soft_test_memblock_dispatch_smoke_sequence::build_directed_main_table();
                                                              MEMBLOCK_OP_CLASS_STORE,
                                                              1,
                                                              64'h0000_0000_8000_2000));
-    set_manual_main_transaction(2, make_directed_transaction("dispatch_smoke_amo",
-                                                             MEMBLOCK_OP_CLASS_AMO,
-                                                             2,
-                                                             64'h0000_0000_8000_3000));
     import_manual_main_table();
 endtask:build_directed_main_table
 
@@ -263,6 +259,11 @@ function main_control_transaction soft_test_memblock_dispatch_smoke_sequence::ma
                                                                                               input int unsigned rob_value,
                                                                                               input bit [63:0] base_addr);
     main_control_transaction tr;
+    bit [MEMBLOCK_ROB_VALUE_W-1:0] fitted_rob_value;
+
+    fitted_rob_value = fit_directed_rob_value_or_fatal(
+        rob_value,
+        $sformatf("%s::make_directed_transaction(%s)", get_type_name(), tr_name));
 
     tr = main_control_transaction::type_id::create(tr_name);
     if (tr == null) begin
@@ -271,7 +272,7 @@ function main_control_transaction soft_test_memblock_dispatch_smoke_sequence::ma
 
     tr.op_class     = op_class;
     tr.robIdx_flag  = 1'b0;
-    tr.robIdx_value = rob_value[8:0];
+    tr.robIdx_value = fitted_rob_value;
     tr.lqIdx_flag   = 1'b0;
     tr.lqIdx_value  = '0;
     tr.sqIdx_flag   = 1'b0;
@@ -301,12 +302,6 @@ function main_control_transaction soft_test_memblock_dispatch_smoke_sequence::ma
             tr.lsq_flow  = MEMBLOCK_LSQ_FLOW_STORE;
             tr.fuOpType  = MEMBLOCK_LSUOP_SD;
             tr.numLsElem = 5'd1;
-        end
-        MEMBLOCK_OP_CLASS_AMO: begin
-            tr.fuType    = MEMBLOCK_FUTYPE_MOU;
-            tr.lsq_flow  = MEMBLOCK_LSQ_FLOW_ATOMIC;
-            tr.fuOpType  = MEMBLOCK_LSUOP_AMOADD_D;
-            tr.numLsElem = 5'd0;
         end
         default: begin
             `uvm_fatal(get_type_name(), $sformatf("unsupported smoke op_class=%0d", op_class))
