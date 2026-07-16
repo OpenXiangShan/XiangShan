@@ -207,9 +207,10 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
   csBundle(0.U).flushPipe := vstartReg =/= 0.U
 
   switch(typeOfSplit) {
-    is(UopSplitType.AMO_CAS_W) {
+    is(UopSplitType.AMO_CAS_BHWD) {
+      val amocasOp = latchedInst.fuOpType(LSUOpType.AMOFuOpWidth - 1, 0)
       csBundle(0).uopIdx := 0.U
-      csBundle(0).fuOpType := Cat(1.U(3.W), LSUOpType.amocas_w)
+      csBundle(0).fuOpType := Cat(1.U(2.W), amocasOp)
       csBundle(0).lsrc(0) := 0.U
       csBundle(0).lsrc(1) := src2
       csBundle(0).rfWen := false.B
@@ -218,24 +219,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).flushPipe := false.B
 
       csBundle(1).uopIdx := 1.U
-      csBundle(1).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_w)
-      csBundle(1).lsrc(0) := src1
-      csBundle(1).lsrc(1) := dest
-      csBundle(1).waitForward := false.B
-      csBundle(1).blockBackward := true.B
-    }
-    is(UopSplitType.AMO_CAS_D) {
-      csBundle(0).uopIdx := 0.U
-      csBundle(0).fuOpType := Cat(1.U(3.W), LSUOpType.amocas_d)
-      csBundle(0).lsrc(0) := 0.U
-      csBundle(0).lsrc(1) := src2
-      csBundle(0).rfWen := false.B
-      csBundle(0).waitForward := true.B
-      csBundle(0).blockBackward := false.B
-      csBundle(0).flushPipe := false.B
-
-      csBundle(1).uopIdx := 1.U
-      csBundle(1).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_d)
+      csBundle(1).fuOpType := Cat(0.U(2.W), amocasOp)
       csBundle(1).lsrc(0) := src1
       csBundle(1).lsrc(1) := dest
       csBundle(1).waitForward := false.B
@@ -243,7 +227,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     }
     is(UopSplitType.AMO_CAS_Q) {
       csBundle(0).uopIdx := 0.U
-      csBundle(0).fuOpType := Cat(1.U(3.W), LSUOpType.amocas_q)
+      csBundle(0).fuOpType := Cat(1.U(2.W), LSUOpType.amocas_q)
       csBundle(0).lsrc(0) := 0.U
       csBundle(0).lsrc(1) := src2
       csBundle(0).rfWen := false.B
@@ -252,14 +236,14 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(0).flushPipe := false.B
 
       csBundle(1).uopIdx := 1.U
-      csBundle(1).fuOpType := Cat(0.U(3.W), LSUOpType.amocas_q)
+      csBundle(1).fuOpType := Cat(0.U(2.W), LSUOpType.amocas_q)
       csBundle(1).lsrc(0) := src1
       csBundle(1).lsrc(1) := dest
       csBundle(1).waitForward := false.B
       csBundle(1).blockBackward := false.B
 
       csBundle(2).uopIdx := 2.U
-      csBundle(2).fuOpType := Cat(3.U(3.W), LSUOpType.amocas_q)
+      csBundle(2).fuOpType := Cat(3.U(2.W), LSUOpType.amocas_q)
       csBundle(2).lsrc(0) := 0.U
       csBundle(2).lsrc(1) := Mux(src2 === 0.U, 0.U, src2 + 1.U)
       csBundle(2).rfWen := false.B
@@ -267,7 +251,7 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
       csBundle(2).blockBackward := false.B
 
       csBundle(3).uopIdx := 3.U
-      csBundle(3).fuOpType := Cat(2.U(3.W), LSUOpType.amocas_q)
+      csBundle(3).fuOpType := Cat(2.U(2.W), LSUOpType.amocas_q)
       csBundle(3).lsrc(0) := 0.U
       csBundle(3).lsrc(1) := Mux(dest === 0.U, 0.U, dest + 1.U)
       csBundle(3).ldest := Mux(dest === 0.U, 0.U, dest + 1.U)

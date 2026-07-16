@@ -785,43 +785,77 @@ package object xiangshan {
     def isCboFlush(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_flush)
     def isCboInval(op: UInt): Bool = isCbo(op) && (op(3, 0) === cbo_inval)
 
-    // atomics
-    // bit(1, 0) are size
-    // since atomics use a different fu type
-    // so we can safely reuse other load/store's encodings
-    // bit encoding: | optype(4bit) | size (2bit) |
-    // Only the least significant AMOFuOpWidth = 6 bits of fuOpType are used,
-    // therefore the MSBs are reused to identify uopIdx of AMOCAS.[WDQ]
-    def AMOFuOpWidth = 6
-    def lr_w      = "b000010".U
-    def sc_w      = "b000110".U
-    def amoswap_w = "b001010".U
-    def amoadd_w  = "b001110".U
-    def amoxor_w  = "b010010".U
-    def amoand_w  = "b010110".U
-    def amoor_w   = "b011010".U
-    def amomin_w  = "b011110".U
-    def amomax_w  = "b100010".U
-    def amominu_w = "b100110".U
-    def amomaxu_w = "b101010".U
-    def amocas_w  = "b101110".U
+    // Atomics use a dedicated fu type, so their encoding can reuse the load/store fuOpType space.
+    // bit encoding: | optype (4 bits) | size (3 bits) |
+    // The remaining two MSBs identify uopIdx of AMOCAS.[B/H/W/D/Q].
+    def AMOFuOpWidth = 7
+    def amoswap_b = "b0010000".U(AMOFuOpWidth.W)
+    def amoadd_b  = "b0011000".U(AMOFuOpWidth.W)
+    def amoxor_b  = "b0100000".U(AMOFuOpWidth.W)
+    def amoand_b  = "b0101000".U(AMOFuOpWidth.W)
+    def amoor_b   = "b0110000".U(AMOFuOpWidth.W)
+    def amomin_b  = "b0111000".U(AMOFuOpWidth.W)
+    def amomax_b  = "b1000000".U(AMOFuOpWidth.W)
+    def amominu_b = "b1001000".U(AMOFuOpWidth.W)
+    def amomaxu_b = "b1010000".U(AMOFuOpWidth.W)
+    def amocas_b  = "b1011000".U(AMOFuOpWidth.W)
 
-    def lr_d      = "b000011".U
-    def sc_d      = "b000111".U
-    def amoswap_d = "b001011".U
-    def amoadd_d  = "b001111".U
-    def amoxor_d  = "b010011".U
-    def amoand_d  = "b010111".U
-    def amoor_d   = "b011011".U
-    def amomin_d  = "b011111".U
-    def amomax_d  = "b100011".U
-    def amominu_d = "b100111".U
-    def amomaxu_d = "b101011".U
-    def amocas_d  = "b101111".U
+    def amoswap_h = "b0010001".U(AMOFuOpWidth.W)
+    def amoadd_h  = "b0011001".U(AMOFuOpWidth.W)
+    def amoxor_h  = "b0100001".U(AMOFuOpWidth.W)
+    def amoand_h  = "b0101001".U(AMOFuOpWidth.W)
+    def amoor_h   = "b0110001".U(AMOFuOpWidth.W)
+    def amomin_h  = "b0111001".U(AMOFuOpWidth.W)
+    def amomax_h  = "b1000001".U(AMOFuOpWidth.W)
+    def amominu_h = "b1001001".U(AMOFuOpWidth.W)
+    def amomaxu_h = "b1010001".U(AMOFuOpWidth.W)
+    def amocas_h  = "b1011001".U(AMOFuOpWidth.W)
 
-    def amocas_q  = "b101100".U
+    def lr_w      = "b0000010".U(AMOFuOpWidth.W)
+    def sc_w      = "b0001010".U(AMOFuOpWidth.W)
+    def amoswap_w = "b0010010".U(AMOFuOpWidth.W)
+    def amoadd_w  = "b0011010".U(AMOFuOpWidth.W)
+    def amoxor_w  = "b0100010".U(AMOFuOpWidth.W)
+    def amoand_w  = "b0101010".U(AMOFuOpWidth.W)
+    def amoor_w   = "b0110010".U(AMOFuOpWidth.W)
+    def amomin_w  = "b0111010".U(AMOFuOpWidth.W)
+    def amomax_w  = "b1000010".U(AMOFuOpWidth.W)
+    def amominu_w = "b1001010".U(AMOFuOpWidth.W)
+    def amomaxu_w = "b1010010".U(AMOFuOpWidth.W)
+    def amocas_w  = "b1011010".U(AMOFuOpWidth.W)
+
+    def lr_d      = "b0000011".U(AMOFuOpWidth.W)
+    def sc_d      = "b0001011".U(AMOFuOpWidth.W)
+    def amoswap_d = "b0010011".U(AMOFuOpWidth.W)
+    def amoadd_d  = "b0011011".U(AMOFuOpWidth.W)
+    def amoxor_d  = "b0100011".U(AMOFuOpWidth.W)
+    def amoand_d  = "b0101011".U(AMOFuOpWidth.W)
+    def amoor_d   = "b0110011".U(AMOFuOpWidth.W)
+    def amomin_d  = "b0111011".U(AMOFuOpWidth.W)
+    def amomax_d  = "b1000011".U(AMOFuOpWidth.W)
+    def amominu_d = "b1001011".U(AMOFuOpWidth.W)
+    def amomaxu_d = "b1010011".U(AMOFuOpWidth.W)
+    def amocas_d  = "b1011011".U(AMOFuOpWidth.W)
+
+    def amocas_q  = "b1011100".U(AMOFuOpWidth.W)
 
     def getAmocasUopIdx(opType: UInt): UInt = (opType >> this.AMOFuOpWidth).asUInt
+
+    def amoSize(op: UInt): UInt = op(AMOSize.width - 1, 0)
+
+    def amoSizeIs(sz: AMOSize.type => AMOSize)(op: UInt): Bool = amoSize(op) === sz(AMOSize).U
+
+    sealed abstract class AMOSize(uint: UInt) {
+      def U: UInt = this.uint
+    }
+    object AMOSize {
+      val width = 3
+      case object B extends AMOSize("b000".U(width.W))
+      case object H extends AMOSize("b001".U(width.W))
+      case object W extends AMOSize("b010".U(width.W))
+      case object D extends AMOSize("b011".U(width.W))
+      case object Q extends AMOSize("b100".U(width.W))
+    }
 
     def size(op: UInt) = op(1,0)
 
@@ -856,9 +890,9 @@ package object xiangshan {
     def isIndexed (fuOpType: UInt): Bool = fuOpType(5) && (fuOpType(8) ^ fuOpType(7))
     def isLr      (fuOpType: UInt): Bool = fuOpType === lr_w || fuOpType === lr_d
     def isSc      (fuOpType: UInt): Bool = fuOpType === sc_w || fuOpType === sc_d
-    def isAMOCASQ (fuOpType: UInt): Bool = fuOpType === amocas_q
-    def isAMOCASWD(fuOpType: UInt): Bool = fuOpType === amocas_w || fuOpType === amocas_d
-    def isAMOCAS  (fuOpType: UInt): Bool = fuOpType(5, 2) === "b1011".U
+    def isAMOCASQ   (fuOpType: UInt): Bool = fuOpType(AMOFuOpWidth - 1, 0) === amocas_q
+    def isAMOCASNotQ(fuOpType: UInt): Bool = isAMOCAS(fuOpType) && !isAMOCASQ(fuOpType)
+    def isAMOCAS    (fuOpType: UInt): Bool = fuOpType(6, 3) === "b1011".U
   }
 
   object BKUOpType {
@@ -1020,8 +1054,7 @@ package object xiangshan {
     def VEC_VFREDOSUM    = "b111101".U // VEC_VFREDOSUM
     def VEC_MVNR         = "b000100".U // vmvnr
 
-    def AMO_CAS_W        = "b110101".U // amocas_w
-    def AMO_CAS_D        = "b110110".U // amocas_d
+    def AMO_CAS_BHWD     = "b110101".U // B/H/W/D: 2 uops
     def AMO_CAS_Q        = "b110111".U // amocas_q
     // dummy means that the instruction is a complex instruction but uop number is 1
     def dummy     = "b111111".U
@@ -1031,7 +1064,7 @@ package object xiangshan {
     def apply() = UInt(6.W)
     def needSplit(UopSplitType: UInt) = UopSplitType(4) || UopSplitType(5)
 
-    def isAMOCAS(UopSplitType: UInt): Bool = UopSplitType === AMO_CAS_W || UopSplitType === AMO_CAS_D || UopSplitType === AMO_CAS_Q
+    def isAMOCAS(UopSplitType: UInt): Bool = UopSplitType === AMO_CAS_BHWD || UopSplitType === AMO_CAS_Q
   }
 
   object ExceptionNO {
