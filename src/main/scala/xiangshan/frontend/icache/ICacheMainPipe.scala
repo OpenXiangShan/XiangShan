@@ -30,6 +30,7 @@ import xiangshan.cache.mmu.Pbmt
 import xiangshan.cache.mmu.TlbCmd
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.ftq.BpuFlushInfo
 import xiangshan.frontend.ftq.FtqToMainPipeBundle
 
@@ -37,7 +38,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     with ICacheEccHelper
     with ICacheAddrHelper
     with ICacheDataHelper
-    with ICacheMissUpdateHelper {
+    with ICacheMissUpdateHelper
+    with HalfAlignHelper {
 
   class ICacheMainPipeIO(implicit p: Parameters) extends ICacheBundle {
     val hartId: UInt = Input(UInt(hartIdLen.W))
@@ -119,7 +121,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       req1LineIdx <- 0 until MaxFetchReqNum
     } yield {
       val bankOverlap =
-        (s0_wayLookupEntry(0).bankSel(req0LineIdx) & s0_wayLookupEntry(1).bankSel(req1LineIdx)).orR
+        (io.fromFtq.bits.req(0).bankSel(req0LineIdx) & io.fromFtq.bits.req(1).bankSel(req1LineIdx)).orR
       val sameWay =
         s0_wayLookupEntry(0).waymask(req0LineIdx) === s0_wayLookupEntry(1).waymask(req1LineIdx)
       val differentSet =
@@ -181,7 +183,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toData.valid := s0_valid && s1_ready && !s0_flush
   toData.bits.zipWithIndex.foreach { case (readReq, i) =>
     readReq.valid        := s0_req(i).valid
-    readReq.bits.bankSel := s0_wayLookupEntry(i).bankSel
+    readReq.bits.bankSel := s0_req(i).bankSel
     readReq.bits.waymask := s0_wayMask(i)
     readReq.bits.vSetIdx := s0_req(i).vSetIdx
   }
@@ -199,7 +201,9 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_exceptionInfo  = RegEnable(s0_exceptionInfo, s0_fire)
 
   private val s1_wayMask     = VecInit(s1_wayLookupEntry.map(_.waymask))
-  private val s1_isCrossLine = VecInit(s1_wayLookupEntry.map(_.isCrossLine))
+  private val s1_isCrossLine = VecInit(s1_req.map(req => isCrossLine(req.startVAddr, req.endPosition)))
+  private val s1_takenCfiOffset =
+    VecInit(s1_req.map(req => getFtqOffset(req.startVAddr, req.endPosition)))
 
   private val s1_pTag   = s1_wayLookupEntry(0).pTag
   private val s1_ftqIdx = s1_req(0).ftqIdx
@@ -383,15 +387,16 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   io.toIfu.req.valid := s1_valid && s1_fetchFinish && !s1_flush
   io.toIfu.req.bits.zipWithIndex.foreach { case (req, i) =>
-    req.valid            := s1_req(i).valid
-    req.startVAddr       := s1_req(i).startVAddr
-    req.ftqIdx           := s1_req(i).ftqIdx
-    req.takenCfiOffset   := s1_req(i).takenCfiOffset
-    req.range            := Fill(FetchBlockInstNum, 1.U(1.W)) >> (~s1_req(i).takenCfiOffset.bits).asUInt
-    req.size             := s1_req(i).takenCfiOffset.bits +& 1.U
-    req.data             := s1_data(i)
-    req.maybeRvcMap      := s1_maybeRvcMap(i)
-    req.perf_isCrossLine := s1_isCrossLine(i)
+    req.valid                := s1_req(i).valid
+    req.startVAddr           := s1_req(i).startVAddr
+    req.ftqIdx               := s1_req(i).ftqIdx
+    req.takenCfiOffset.valid := s1_req(i).taken
+    req.takenCfiOffset.bits  := s1_takenCfiOffset(i)
+    req.range                := Fill(FetchBlockInstNum, 1.U(1.W)) >> (~s1_takenCfiOffset(i)).asUInt
+    req.size                 := s1_takenCfiOffset(i) +& 1.U
+    req.data                 := s1_data(i)
+    req.maybeRvcMap          := s1_maybeRvcMap(i)
+    req.perf_isCrossLine     := s1_isCrossLine(i)
 
     req.icacheMeta.exception          := s1_exceptionOut
     req.icacheMeta.pmpMmio            := s1_pmpMmio
@@ -417,7 +422,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_wayLookupEntry = RegEnable(s1_wayLookupEntry, s1_fire)
   private val s2_pTag           = RegEnable(s1_pTag, s1_fire)
   private val s2_wayMask        = RegEnable(s1_wayMask, s1_fire)
-  private val s2_req            = RegEnable(s1_req, s1_fire)
+  private val s2_vAddr          = RegEnable(VecInit(s1_req.map(_.vAddr)), s1_fire)
   private val s2_sramDatas      = RegEnable(s1_sramDatas, s1_fire)
   private val s2_sramCodes      = RegEnable(s1_sramCodes, s1_fire)
   private val s2_offset         = RegEnable(s1_offset, s1_fire)
@@ -471,7 +476,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
       val info = Wire(Valid(new CorruptedInfo))
       info.valid        := metaCorrupt(portIdx) || dataCorrupt(portIdx)
-      info.bits.vAddr   := s2_req(reqIdx).vAddr(portIdx)
+      info.bits.vAddr   := s2_vAddr(reqIdx)(portIdx)
       info.bits.wayMask := s2_wayMask(reqIdx)(portIdx)
       info.bits.isMeta  := metaCorrupt(portIdx)
       info.bits.isData  := dataCorrupt(portIdx)

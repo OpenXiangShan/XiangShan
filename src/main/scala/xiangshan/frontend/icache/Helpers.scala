@@ -19,6 +19,7 @@ import chisel3._
 import chisel3.util._
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.PrunedAddrInit
+import xiangshan.frontend.bpu.HasBpuParameters
 
 trait ICacheEccHelper extends HasICacheParameters {
   // per-port
@@ -110,7 +111,7 @@ trait ICacheMetaHelper extends HasICacheParameters {
     getWaymask(reqPTag, VecInit(entries.map(_.bits.meta.phyTag)), VecInit(entries.map(_.valid)))
 }
 
-trait ICacheDataHelper extends HasICacheParameters {
+trait ICacheDataHelper extends HasICacheParameters with ICacheCacheLineHelper {
   def getBankIdx(blkOffset: UInt): UInt =
     (blkOffset >> rowOffBits).asUInt
 
@@ -131,20 +132,30 @@ trait ICacheDataHelper extends HasICacheParameters {
     )
   }
 
-  def getBankSel(startPc: PrunedAddr, takenCfiOffset: UInt): (Bool, Vec[UInt]) = {
-    val blockOffset        = startPc(blockOffBits - 1, 0)
-    val blockEndOffsetTemp = blockOffset +& Cat(takenCfiOffset, 0.U(instOffsetBits.W))
-    val blockEndOffset     = blockEndOffsetTemp(blockOffBits - 1, 0)
-    val isCrossLine        = blockEndOffsetTemp(blockOffBits)
-    val bankIdxLow         = getBankIdx(blockOffset)
-    val bankIdxHigh        = getBankIdx(blockEndOffset)
-    val bankSel = VecInit(
+  def getBankSel(startPc: PrunedAddr, endPosition: UInt): Vec[UInt] = {
+    val bankIdxLow = startPc(blockOffBits - 1, rowOffBits)
+    val (isCrossLine, bankIdxHigh) =
+      if (useHalfAlignFastPath) {
+        (
+          super.isCrossLine(startPc, endPosition),
+          Cat(
+            startPc(blockOffBits - 1) ^ endPosition(CfiPositionWidth - 1),
+            endPosition(CfiPositionWidth - 2, rowOffBits - instOffsetBits)
+          )
+        )
+      } else {
+        val (crossLine, endLineOffset) = getFetchBlockEndLineOffset(startPc, endPosition)
+        (
+          crossLine,
+          endLineOffset(blockOffBits - instOffsetBits - 1, rowOffBits - instOffsetBits)
+        )
+      }
+    VecInit(
       // first line: if in same line, select [low, high], else select [low, end]
       VecInit((0 until DataBanks).map(i => (i.U >= bankIdxLow) && (isCrossLine || i.U <= bankIdxHigh))).asUInt,
       // second line: if in same line, select nothing, else select [start, high]
       VecInit((0 until DataBanks).map(i => (i.U <= bankIdxHigh) && isCrossLine)).asUInt
     )
-    (isCrossLine, bankSel)
   }
 
   def getLineSel(blkOffset: UInt): Vec[Bool] = {
@@ -238,12 +249,26 @@ trait ICacheMissUpdateHelper extends HasICacheParameters with ICacheEccHelper wi
     })
 }
 
-trait ICacheCacheLineHelper extends HasICacheParameters {
-  def isCrossLine(startVAddr: PrunedAddr, takenCfiOffset: UInt): Bool = {
+trait ICacheCacheLineHelper extends HasICacheParameters with HasBpuParameters {
+  protected def useHalfAlignFastPath: Boolean =
+    FetchBlockSize == blockBytes && FetchBlockAlignSize == FetchBlockSize / 2
+
+  def getFetchBlockEndLineOffset(startPc: PrunedAddr, endPosition: UInt): (Bool, UInt) = {
     require(FetchBlockSize <= blockBytes, "Cannot fetch more than one cache line in a fetch block")
-    val startBlockOffset = startVAddr(blockOffBits - 1, instOffsetBits)
-    val endBlockOffset   = startBlockOffset +& takenCfiOffset
-    // if overflow, must be cross line
-    endBlockOffset(blockOffBits - instOffsetBits)
+    val endOffset              = endPosition - startPc(FetchBlockAlignWidth - 1, instOffsetBits)
+    val startLineOffset        = startPc(blockOffBits - 1, instOffsetBits)
+    val endLineOffsetWithCarry = startLineOffset +& endOffset
+    val isCrossLine            = endLineOffsetWithCarry(blockOffBits - instOffsetBits)
+    val endLineOffset          = endLineOffsetWithCarry(blockOffBits - instOffsetBits - 1, 0)
+    (isCrossLine, endLineOffset)
   }
+
+  def isCrossLine(startPc: PrunedAddr, endPosition: UInt): Bool =
+    // Fast path for the default configuration: 64B fetch block, 32B half-align.
+    if (useHalfAlignFastPath) {
+      startPc(blockOffBits - 1) && endPosition(CfiPositionWidth - 1)
+    } else {
+      // Generic fallback for other align sizes.
+      getFetchBlockEndLineOffset(startPc, endPosition)._1
+    }
 }

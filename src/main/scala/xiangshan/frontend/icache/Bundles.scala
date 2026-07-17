@@ -252,7 +252,6 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   val startVAddr:       PrunedAddr    = PrunedAddr(VAddrBits)
   val nextLineVAddr:    PrunedAddr    = PrunedAddr(VAddrBits)
   val isCrossLine:      Bool          = Bool()
-  val takenCfiOffset:   UInt          = UInt(CfiPositionWidth.W)
   val ftqIdx:           FtqPtr        = new FtqPtr
   val backendException: ExceptionType = new ExceptionType
   val isSoftPrefetch:   Bool          = Bool()
@@ -260,8 +259,7 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): PrefetchReqBundle = {
     startVAddr       := req.vaddr
     nextLineVAddr    := DontCare
-    isCrossLine      := false.B // prefetch only one line for a prefetch.i instruction
-    takenCfiOffset   := 0.U
+    isCrossLine      := false.B
     ftqIdx           := DontCare
     backendException := ExceptionType.None
     isSoftPrefetch   := true.B
@@ -278,8 +276,6 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
  */
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val vSetIdx:     Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
-  val bankSel:     Vec[UInt] = Vec(PortNumber, UInt(DataBanks.W))
-  val isCrossLine: Bool      = Bool()
   val waymask:     Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
   val maybeRvcMap: Vec[UInt] = Vec(PortNumber, UInt(MaxInstNumPerBlock.W))
   val metaCodes:   Vec[UInt] = Vec(PortNumber, UInt(MetaEccBits.W))
