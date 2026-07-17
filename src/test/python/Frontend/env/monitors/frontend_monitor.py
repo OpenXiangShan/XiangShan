@@ -352,6 +352,10 @@ class FrontendMonitor:
             "debug_is_mem_vio": int(self._read_dut_signal("io_backend_toFtq_redirect_bits_debugIsMemVio", 0)),
         }
         self._skip_cfvec_until_cycle = int(cycle) + 1
+        if self.backend_model is not None:
+            note_redirect = getattr(self.backend_model, "note_dut_redirect_observed", None)
+            if callable(note_redirect):
+                note_redirect(int(cycle))
         self._recovery_target_pc = int(target_pc) if self._redirect_target_requires_cfvec(int(target_pc)) else None
         self.expected_pc = None
         self.wait_sync_after_redirect = False
