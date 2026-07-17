@@ -73,6 +73,9 @@ class MainBtbInternalBank(
 
     val sramResetDone: Bool = Output(Bool())
 
+    val contextFlush: Bool = Input(Bool())
+    val bpuFlushing:  Bool = Input(Bool())
+
     val read:         Read         = new Read
     val writeEntry:   WriteEntry   = new WriteEntry
     val writeCounter: WriteCounter = new WriteCounter
@@ -96,6 +99,7 @@ class MainBtbInternalBank(
         singlePort = true,
         shouldReset = true,
         holdRead = true,
+        extraReset = true,
         withClockGate = true,
         hasMbist = hasMbist,
         hasSramCtl = hasSramCtl,
@@ -103,6 +107,7 @@ class MainBtbInternalBank(
       )
     ).suggestName(s"mbtb_sram_entry_align${alignIdx}_bank${bankIdx}_way${wayIdx}")
   }
+  entrySrams.foreach { s => s.extra_reset.get := io.contextFlush }
 
   // we often need to update counter, but not the whole entry, so store counters in separate SRAMs for better power
   private val counterSram = Module(new SRAMTemplate(
@@ -112,25 +117,31 @@ class MainBtbInternalBank(
     singlePort = true,
     shouldReset = true,
     holdRead = true,
+    extraReset = true,
     withClockGate = true,
     hasMbist = hasMbist,
     hasSramCtl = hasSramCtl,
     suffix = Option("bpu_mbtb_counter")
   )).suggestName(s"mbtb_sram_counter_align${alignIdx}_bank${bankIdx}")
+  counterSram.extra_reset.get := io.contextFlush
 
   private val entryWriteBuffer = Module(new WriteBuffer(
     new MainBtbEntrySramWriteReq,
     numEntries = WriteBufferSize,
     numPorts = NumWay,
+    hasContextFlush = true,
     nameSuffix = s"mbtbEntryAlign${alignIdx}_Bank${bankIdx}"
   ))
+  entryWriteBuffer.io.contextFlush.get := io.contextFlush
 
   private val counterWriteBuffer = Module(new Queue(
     new MainBtbCounterSramWriteReq,
     WriteBufferSize,
     pipe = true,
-    flow = true
+    flow = true,
+    hasFlush = true
   ))
+  counterWriteBuffer.io.flush.get := io.contextFlush
 
   io.sramResetDone := entrySrams.map(_.io.resetDone).reduce(_ && _) && counterSram.io.resetDone
 
@@ -167,7 +178,7 @@ class MainBtbInternalBank(
       writeEntry.req.bits.entry.tag === 0.U
 
   entryWriteBuffer.io.write.zipWithIndex.foreach { case (bufWrite, i) =>
-    val writeValid = writeEntry.req.valid && writeEntry.req.bits.wayMask(i)
+    val writeValid = writeEntry.req.valid && writeEntry.req.bits.wayMask(i) && !io.bpuFlushing
     val flushValid = flush.req.valid && flush.req.bits.wayMask(i) && !conflict
     val valid      = writeValid || flushValid
     bufWrite.valid := RegNext(valid, false.B)
@@ -189,7 +200,7 @@ class MainBtbInternalBank(
     )
   }
   // counter, dont care flush (`hit` is controlled by entry)
-  counterWriteBuffer.io.enq.valid         := writeCounter.req.valid
+  counterWriteBuffer.io.enq.valid         := writeCounter.req.valid && !io.bpuFlushing
   counterWriteBuffer.io.enq.bits.setIdx   := writeCounter.req.bits.setIdx
   counterWriteBuffer.io.enq.bits.wayMask  := writeCounter.req.bits.wayMask
   counterWriteBuffer.io.enq.bits.counters := writeCounter.req.bits.counters
