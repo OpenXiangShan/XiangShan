@@ -278,7 +278,8 @@ case class XSCoreParameters
     partialStaticPMP = true,
     outsideRecvFlush = true,
     saveLevel = false,
-    lgMaxSize = 4
+    lgMaxSize = 4,
+    enableAddrTransDebug = true
   ),
   sttlbParameters: TLBParameters = TLBParameters(
     name = "sttlb",
@@ -287,7 +288,8 @@ case class XSCoreParameters
     partialStaticPMP = true,
     outsideRecvFlush = true,
     saveLevel = false,
-    lgMaxSize = 4
+    lgMaxSize = 4,
+    enableAddrTransDebug = true
   ),
   hytlbParameters: TLBParameters = TLBParameters(
     name = "hytlb",
@@ -296,7 +298,8 @@ case class XSCoreParameters
     partialStaticPMP = true,
     outsideRecvFlush = true,
     saveLevel = false,
-    lgMaxSize = 4
+    lgMaxSize = 4,
+    enableAddrTransDebug = true
   ),
   pftlbParameters: TLBParameters = TLBParameters(
     name = "pftlb",

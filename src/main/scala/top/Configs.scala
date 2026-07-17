@@ -157,7 +157,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           partialStaticPMP = true,
           outsideRecvFlush = true,
           outReplace = false,
-          lgMaxSize = 4
+          lgMaxSize = 4,
+          enableAddrTransDebug = true
         ),
         sttlbParameters = TLBParameters(
           name = "sttlb",
@@ -165,7 +166,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           partialStaticPMP = true,
           outsideRecvFlush = true,
           outReplace = false,
-          lgMaxSize = 4
+          lgMaxSize = 4,
+          enableAddrTransDebug = true
         ),
         hytlbParameters = TLBParameters(
           name = "hytlb",
@@ -173,7 +175,8 @@ class MinimalConfig(n: Int = 1) extends Config(
           partialStaticPMP = true,
           outsideRecvFlush = true,
           outReplace = false,
-          lgMaxSize = 4
+          lgMaxSize = 4,
+          enableAddrTransDebug = true
         ),
         pftlbParameters = TLBParameters(
           name = "pftlb",

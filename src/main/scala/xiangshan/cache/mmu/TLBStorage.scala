@@ -91,7 +91,8 @@ class TLBFA(
   nWays: Int,
   saveLevel: Boolean = false,
   normalPage: Boolean,
-  superPage: Boolean
+  superPage: Boolean,
+  enableAddrTransDebug: Boolean
 )(implicit p: Parameters) extends TlbModule with HasPerfEvents {
 
   val io = IO(new TlbStorageIO(nSets, nWays, ports, nDups))
@@ -99,6 +100,9 @@ class TLBFA(
 
   val v = RegInit(VecInit(Seq.fill(nWays)(false.B)))
   val entries = Reg(Vec(nWays, new TlbSectorEntry(normalPage, superPage)))
+  val addrTransEntries = Option.when(enableAddrTransDebug)(
+    RegInit(VecInit(Seq.fill(nWays)(0.U.asTypeOf(new TlbSectorAddrTransDebug))))
+  )
   val g = entries.map(_.perm.g)
 
   for (i <- 0 until ports) {
@@ -143,6 +147,11 @@ class TLBFA(
         resp.bits.g_perm(d) := gPerm(0)
         resp.bits.s2xlate(d) := s2xLate(0)
       }
+      if (enableAddrTransDebug) {
+        resp.bits.addrTrans := AddrTransDebug.fromSector(addrTransEntries.get(0), reqVpn)
+      } else {
+        resp.bits.addrTrans := 0.U.asTypeOf(new AddrTransDebug)
+      }
     } else {
       for (d <- 0 until nDups) {
         resp.bits.ppn(d) := Mux1H(hitVecReg zip entries.map(_.genPPN(saveLevel, resp.valid)(reqVpn)))
@@ -151,6 +160,24 @@ class TLBFA(
         resp.bits.perm(d) := Mux1H(hitVecReg zip perm)
         resp.bits.g_perm(d) := Mux1H(hitVecReg zip gPerm)
         resp.bits.s2xlate(d) := Mux1H(hitVecReg zip s2xLate)
+      }
+      if (enableAddrTransDebug) {
+        val addrTransCandidates = addrTransEntries.get.map(AddrTransDebug.fromSector(_, reqVpn))
+        val selectedAddrTrans = ParallelPriorityMux(hitVecReg zip addrTransCandidates)
+        val conflictingHit = hitVecReg.zip(addrTransCandidates).map { case (hit, candidate) =>
+          hit && !AddrTransDebug.sameRawTranslation(selectedAddrTrans, candidate)
+        }.foldLeft(false.B)(_ || _)
+        val addrTrans = WireInit(selectedAddrTrans)
+        // A sector-TLB multi-hit is already counted by the normal storage
+        // logic. Select one real entry instead of bitwise-combining bundles,
+        // and retain it when every hit describes the same raw translation.
+        // Only genuinely conflicting duplicate entries suppress provenance.
+        when (!Cat(hitVecReg).orR || conflictingHit) {
+          addrTrans.valid := false.B
+        }
+        resp.bits.addrTrans := addrTrans
+      } else {
+        resp.bits.addrTrans := 0.U.asTypeOf(new AddrTransDebug)
       }
     }
 
@@ -169,6 +196,9 @@ class TLBFA(
   when (io.w.valid) {
     v(io.w.bits.wayIdx) := true.B
     entries(io.w.bits.wayIdx).apply(io.w.bits.data)
+    if (enableAddrTransDebug) {
+      addrTransEntries.get(io.w.bits.wayIdx) := AddrTransDebug.sectorFromPtw(io.w.bits.data)
+    }
   }
   // write assert, should not duplicate with the existing entries
   val w_hit_vec = VecInit(entries.zip(v).map{case (e, vi) => e.wbhit(io.w.bits.data, Mux(io.w.bits.data.s2xlate =/= noS2xlate, io.csr.vsatp.asid, io.csr.satp.asid), io.csr.hgatp.vmid, s2xlate = io.w.bits.data.s2xlate) && vi })
@@ -327,6 +357,7 @@ class TLBFakeFA(
 
     resp.valid := RegNext(req.valid)
     resp.bits.hit := true.B
+    resp.bits.addrTrans := 0.U.asTypeOf(new AddrTransDebug)
     for (d <- 0 until nDups) {
       resp.bits.perm(d).pf := pf
       resp.bits.perm(d).af := false.B
@@ -362,14 +393,15 @@ object TlbStorage {
     normalPage: Boolean,
     superPage: Boolean,
     useDmode: Boolean,
-    SoftTLB: Boolean
+    SoftTLB: Boolean,
+    enableAddrTransDebug: Boolean
   )(implicit p: Parameters) = {
     if (SoftTLB) {
       val storage = Module(new TLBFakeFA(ports, nDups, nSets, nWays, useDmode))
       storage.suggestName(s"${parentName}_fake_fa")
       storage.io
     } else {
-       val storage = Module(new TLBFA(parentName, ports, nDups, nSets, nWays, saveLevel, normalPage, superPage))
+       val storage = Module(new TLBFA(parentName, ports, nDups, nSets, nWays, saveLevel, normalPage, superPage, enableAddrTransDebug))
        storage.suggestName(s"${parentName}_fa")
        storage.io
     }
@@ -389,7 +421,8 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     normalPage = true,
     superPage = true,
     useDmode = q.useDmode,
-    SoftTLB = coreParams.softTLB
+    SoftTLB = coreParams.softTLB,
+    enableAddrTransDebug = q.enableAddrTransDebug
   )
 
   for (i <- 0 until ports) {
@@ -409,6 +442,7 @@ class TlbStorageWrapper(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit p
     rq.ready := q.ready // actually, not used
     rp.valid := p.valid // actually, not used
     rp.bits.hit := p.bits.hit
+    rp.bits.addrTrans := p.bits.addrTrans
     for (d <- 0 until nDups) {
       rp.bits.ppn(d) := p.bits.ppn(d)
       rp.bits.perm(d).pf := p.bits.perm(d).pf

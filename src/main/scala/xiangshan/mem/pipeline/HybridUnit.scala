@@ -26,7 +26,7 @@ import xiangshan.ExceptionNO._
 import xiangshan.backend.Bundles.{DynInst, MemExuInput, MemExuOutput}
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
-import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
+import xiangshan.backend.ctrlblock.{DebugLsInfo, DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.fu._
@@ -1345,10 +1345,28 @@ class HybridUnit(implicit p: Parameters) extends XSModule
   io.stout.bits  := sx_last_in
 
   // FIXME: please move this part to LoadQueueReplay
-  io.ldu_io.debug_ls := DontCare
-  io.stu_io.debug_ls := DontCare
-  io.stu_io.debug_ls.s1_isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch && !s1_ld_flow
+  io.ldu_io.debug_ls := 0.U.asTypeOf(new DebugLsInfoBundle)
+  io.stu_io.debug_ls := 0.U.asTypeOf(new DebugLsInfoBundle)
+  io.ldu_io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
   io.stu_io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
+  io.ldu_io.debug_ls.s2_robIdx := s1_in.uop.robIdx.value
+  io.stu_io.debug_ls.s2_robIdx := s1_in.uop.robIdx.value
+  io.ldu_io.debug_ls.s3_robIdx := s1_in.uop.robIdx.value
+  io.stu_io.debug_ls.s3_robIdx := s1_in.uop.robIdx.value
+  io.ldu_io.debug_ls.addrTransRobIdx := s1_in.uop.robIdx
+  io.stu_io.debug_ls.addrTransRobIdx := s1_in.uop.robIdx
+  io.ldu_io.debug_ls.s1_isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss &&
+    io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch && s1_ld_flow
+  io.stu_io.debug_ls.s1_isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss &&
+    io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch && !s1_ld_flow
+  io.ldu_io.debug_ls.addrTrans := io.tlb.resp.bits.addrTrans
+  io.ldu_io.debug_ls.addrTrans.valid := s1_valid && !s1_kill && !s1_isvec && s1_ld_flow && io.tlb.resp.valid &&
+    !s1_tlb_miss && !s1_prf && !s1_in.uop.robIdx.needFlush(io.redirect) &&
+    io.tlb.resp.bits.addrTrans.valid
+  io.stu_io.debug_ls.addrTrans := io.tlb.resp.bits.addrTrans
+  io.stu_io.debug_ls.addrTrans.valid := s1_valid && !s1_kill && !s1_isvec && !s1_ld_flow && io.tlb.resp.valid &&
+    !s1_tlb_miss && !s1_prf && !s1_in.uop.robIdx.needFlush(io.redirect) &&
+    io.tlb.resp.bits.addrTrans.valid
 
  // Topdown
   io.ldu_io.lsTopdownInfo.s1.robIdx          := s1_in.uop.robIdx.value

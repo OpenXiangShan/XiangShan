@@ -386,6 +386,7 @@ class PTWNewFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameter
   io.tlb.resp.bits.data.getGpa := DontCare // not used
   io.tlb.resp.bits.data.s1 := ptwResp.s1
   io.tlb.resp.bits.data.s2 := ptwResp.s2
+  io.tlb.resp.bits.data.addrTrans := ptwResp.addrTrans
   io.tlb.resp.bits.data.memidx := 0.U.asTypeOf(new MemBlockidxBundle)
   // vector used to represent different requestors of DTLB
   // (e.g. the store DTLB has StuCnt requestors)
@@ -545,6 +546,7 @@ class PTWFilter(Width: Int, Size: Int, FenceDelay: Int)(implicit p: Parameters) 
   io.tlb.resp.bits.data.s2xlate := ptwResp.s2xlate
   io.tlb.resp.bits.data.s1 := ptwResp.s1
   io.tlb.resp.bits.data.s2 := ptwResp.s2
+  io.tlb.resp.bits.data.addrTrans := ptwResp.addrTrans
   io.tlb.resp.bits.data.memidx := RegNext(PriorityMux(ptwResp_OldMatchVec, memidx))
   io.tlb.resp.bits.vector := resp_vector
   io.tlb.resp.bits.data.getGpa := RegNext(PriorityMux(ptwResp_OldMatchVec, getGpa))

@@ -47,6 +47,7 @@ import xiangshan.backend.rename.SnapshotGenerator
 import yunsuan.VfaluType
 import xiangshan.backend.rob.RobBundles._
 import xiangshan.backend.trace._
+import xiangshan.cache.mmu.AddrTransMode
 import chisel3.experimental.BundleLiterals._
 
 class Rob(params: BackendParams)(implicit p: Parameters) extends LazyModule with HasXSParameter {
@@ -274,6 +275,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // data for debug
   // Warn: debug_* prefix should not exist in generated verilog.
+  require((new DebugLsInfo).getWidth <= 512,
+    s"DebugLsInfo is ${(new DebugLsInfo).getWidth} bits, exceeding the 512-bit commit debug budget")
   val debug_microOp = DebugMem(RobSize, new DynInst)
   val debug_exuData = Reg(Vec(RobSize, UInt(XLEN.W))) //for debug
   val debug_exuDebug = Reg(Vec(RobSize, new DebugBundle)) //for debug
@@ -809,6 +812,37 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       fflagsDataRead(i),
       vxsatDataRead(i)
     )
+    val addrTrans = debug_lsInfo(deqPtrVec(i).value).addrTrans
+    val finalGvpn = addrTrans.finalGvpn
+    val finalPpn = addrTrans.finalPpn
+    val isMemCommit = io.commits.info(i).commitType === CommitType.LOAD ||
+      io.commits.info(i).commitType === CommitType.STORE
+    val addrTransComplete = MuxLookup(addrTrans.mode, false.B)(Seq(
+      AddrTransMode.hostNoG -> addrTrans.l0.valid,
+      AddrTransMode.vsOnly -> addrTrans.l0.valid,
+      AddrTransMode.gOnly -> (addrTrans.l0.valid && addrTrans.l0.gPteValid),
+      AddrTransMode.vsAndG -> (addrTrans.l0.valid && addrTrans.l0.gPteValid)
+    ))
+    val hasVsLeaf = addrTrans.l0.valid && addrTrans.mode =/= AddrTransMode.gOnly
+    when (io.commits.isCommit && io.commits.commitValid(i) && isMemCommit && !robEntries(deqPtrVec(i).value).vls &&
+      addrTrans.valid && addrTransComplete) {
+      printf(p"[addr-trans] rob ${deqPtrVec(i).value} pc ${Hexadecimal(debug_microOp(deqPtrVec(i).value).pc)} " +
+        p"store ${io.commits.info(i).commitType === CommitType.STORE} " +
+        // `s2xlate` is the request encoding: 00 is a host/no-G translation.
+        p"s2xlate ${Binary(addrTrans.mode)} vpn ${Hexadecimal(addrTrans.vpn)} " +
+        p"vs_l0_table_pte_v ${addrTrans.l1.valid} vs_l0_table_pte_src ${Decimal(addrTrans.l1.source)} " +
+        p"vs_l0_table_pte_ppn ${Hexadecimal(addrTrans.l1.ptePpn)} vs_l0_table_pte_lvl ${Decimal(addrTrans.l1.level)} " +
+        p"vs_l0_table_pte_n ${addrTrans.l1.pteN} " +
+        p"g_l0_table_pte_v ${addrTrans.l1.gPteValid} g_l0_table_pte_ppn ${Hexadecimal(addrTrans.l1.gPtePpn)} " +
+        p"g_l0_table_pte_lvl ${Decimal(addrTrans.l1.gPteLevel)} g_l0_table_pte_n ${addrTrans.l1.gPteN} " +
+        p"vs_leaf_pte_v ${hasVsLeaf} vs_leaf_pte_src ${Decimal(addrTrans.l0.source)} " +
+        p"vs_leaf_pte_ppn ${Hexadecimal(addrTrans.l0.ptePpn)} vs_leaf_pte_lvl ${Decimal(addrTrans.l0.level)} " +
+        p"vs_leaf_pte_n ${addrTrans.l0.pteN} " +
+        p"g_leaf_pte_v ${addrTrans.l0.gPteValid} g_leaf_pte_ppn ${Hexadecimal(addrTrans.l0.gPtePpn)} " +
+        p"g_leaf_pte_lvl ${Decimal(addrTrans.l0.gPteLevel)} g_leaf_pte_n ${addrTrans.l0.gPteN} " +
+        p"final_gvpn ${Hexadecimal(finalGvpn)} final_ppn ${Hexadecimal(finalPpn)} " +
+        p"paddr ${Hexadecimal(addrTrans.paddr)}\n")
+    }
     XSInfo(state === s_walk && io.commits.walkValid(i), "walked pc %x wen %d ldst %d data %x\n",
       debug_microOp(walkPtrVec(i).value).pc,
       io.commits.info(i).rfWen,
@@ -970,10 +1004,25 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   // debug_inst update
-  for (i <- 0 until (LduCnt + StaCnt)) {
-    debug_lsInfo(io.debug_ls.debugLsInfo(i).s1_robIdx).s1SignalEnable(io.debug_ls.debugLsInfo(i))
-    debug_lsInfo(io.debug_ls.debugLsInfo(i).s2_robIdx).s2SignalEnable(io.debug_ls.debugLsInfo(i))
-    debug_lsInfo(io.debug_ls.debugLsInfo(i).s3_robIdx).s3SignalEnable(io.debug_ls.debugLsInfo(i))
+  for (i <- 0 until (LduCnt + HyuCnt + StaCnt + HyuCnt)) {
+    val lsDebug = io.debug_ls.debugLsInfo(i)
+    debug_lsInfo(lsDebug.s1_robIdx).s1SignalEnable(lsDebug)
+    debug_lsInfo(lsDebug.s2_robIdx).s2SignalEnable(lsDebug)
+    debug_lsInfo(lsDebug.s3_robIdx).s3SignalEnable(lsDebug)
+
+    val addrTransTarget = Wire(new RobPtr)
+    addrTransTarget := lsDebug.addrTransRobIdx
+    val targetReallocated = canEnqueue.zip(allocatePtrVec).map { case (canEnq, ptr) =>
+      // A same-cycle commit can free this physical row and immediately reuse
+      // it with the opposite wrap flag.  In that case a late LS trace still
+      // carries the old full RobPtr and must not overwrite the new entry.
+      canEnq && ptr.value === addrTransTarget.value
+    }.foldLeft(false.B)(_ || _)
+    val targetMatches = debug_microOp(addrTransTarget.value).robIdx === addrTransTarget
+    when (lsDebug.addrTrans.valid && !addrTransTarget.needFlush(io.redirect) &&
+      targetMatches && !targetReallocated) {
+      debug_lsInfo(addrTransTarget.value).addrTrans := lsDebug.addrTrans
+    }
   }
   for (i <- 0 until LduCnt) {
     debug_lsTopdownInfo(io.lsTopdownInfo(i).s1.robIdx).s1SignalEnable(io.lsTopdownInfo(i))

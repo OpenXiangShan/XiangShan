@@ -4,6 +4,8 @@ import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util._
 import xiangshan.XSBundle
+import xiangshan.backend.rob.RobPtr
+import xiangshan.cache.mmu.AddrTransDebug
 import xiangshan.mem.LoadReplayCauses
 
 class DebugMdpInfo(implicit p: Parameters) extends XSBundle{
@@ -23,6 +25,7 @@ class DebugLsInfo(implicit p: Parameters) extends XSBundle{
   val s3_isReplay = Bool()
   val replayCause = Vec(LoadReplayCauses.allCauses, Bool())
   val replayCnt = UInt(XLEN.W)
+  val addrTrans = new AddrTransDebug
 
   def s1SignalEnable(ena: DebugLsInfo) = {
     when(ena.s1_isTlbFirstMiss) { s1_isTlbFirstMiss := true.B }
@@ -62,6 +65,7 @@ object DebugLsInfo {
     lsInfo.s3_isReplay := false.B
     lsInfo.replayCnt := 0.U
     lsInfo.replayCause := Seq.fill(LoadReplayCauses.allCauses)(false.B)
+    lsInfo.addrTrans := 0.U.asTypeOf(new AddrTransDebug)
     lsInfo
   }
 }
@@ -71,6 +75,7 @@ class DebugLsInfoBundle(implicit p: Parameters) extends DebugLsInfo {
   val s1_robIdx = UInt(log2Ceil(RobSize).W)
   val s2_robIdx = UInt(log2Ceil(RobSize).W)
   val s3_robIdx = UInt(log2Ceil(RobSize).W)
+  val addrTransRobIdx = new RobPtr
 }
 
 class DebugLSIO(implicit p: Parameters) extends XSBundle {

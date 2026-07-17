@@ -1882,8 +1882,17 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   // s1
   io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
+  io.debug_ls.addrTransRobIdx := s1_in.uop.robIdx
   io.debug_ls.s1_isLoadToLoadForward := s1_fire && s1_try_ptr_chasing && !s1_ptr_chasing_canceled
   io.debug_ls.s1_isTlbFirstMiss := s1_fire && s1_tlb_miss && s1_in.isFirstIssue
+  io.debug_ls.addrTrans := io.tlb.resp.bits.addrTrans
+  io.debug_ls.addrTrans.valid := s1_valid && !s1_kill && !s1_dly_err && !s1_in.isvec && io.tlb.resp.valid && !s1_tlb_miss &&
+    // A scalar misaligned load can issue two page subaccesses with one ROB
+    // entry. Preserve the original/first translation instead of allowing the
+    // final split to replace instruction-level provenance.
+    (!s1_in.isFrmMisAlignBuf || !s1_in.isFinalSplit) &&
+    !s1_in.tlbNoQuery && !s1_in.isHWPrefetch && !s1_in.uop.robIdx.needFlush(io.redirect) &&
+    io.tlb.resp.bits.addrTrans.valid
   // s2
   io.debug_ls.s2_robIdx := s2_in.uop.robIdx.value
   io.debug_ls.s2_isBankConflict := s2_fire && (!s2_kill && s2_bank_conflict)

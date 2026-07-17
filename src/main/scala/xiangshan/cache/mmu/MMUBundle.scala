@@ -460,6 +460,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
       val perm = Vec(nDups, Output(new TlbSectorPermBundle()))
       val g_perm = Vec(nDups, Output(new TlbPermBundle()))
       val s2xlate = Vec(nDups, Output(UInt(2.W)))
+      val addrTrans = Output(new AddrTransDebug)
     }))
   }
   val w = Flipped(ValidIO(new Bundle {
@@ -476,7 +477,7 @@ class TlbStorageIO(nSets: Int, nWays: Int, ports: Int, nDups: Int = 1)(implicit 
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt, this.r.resp(i).bits.addrTrans)
   }
 
   def w_apply(valid: Bool, wayIdx: UInt, data: PtwRespS2): Unit = {
@@ -501,6 +502,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
       val perm = Vec(nDups, Output(new TlbPermBundle()))
       val g_perm = Vec(nDups, Output(new TlbPermBundle()))
       val s2xlate = Vec(nDups, Output(UInt(2.W)))
+      val addrTrans = Output(new AddrTransDebug)
     }))
   }
   val w = Flipped(ValidIO(new Bundle {
@@ -515,7 +517,7 @@ class TlbStorageWrapperIO(ports: Int, q: TLBParameters, nDups: Int = 1)(implicit
   }
 
   def r_resp_apply(i: Int) = {
-    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.s2xlate, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt)
+    (this.r.resp(i).bits.hit, this.r.resp(i).bits.ppn, this.r.resp(i).bits.perm, this.r.resp(i).bits.g_perm, this.r.resp(i).bits.s2xlate, this.r.resp(i).bits.pbmt, this.r.resp(i).bits.g_pbmt, this.r.resp(i).bits.addrTrans)
   }
 
   def w_apply(valid: Bool, data: PtwRespS2): Unit = {
@@ -593,6 +595,59 @@ class TlbExceptionBundle(implicit p: Parameters) extends TlbBundle {
   val instr = Output(Bool())
 }
 
+object AddrTransMode {
+  val hostNoG = 0.U(2.W)
+  val vsOnly  = 1.U(2.W)
+  val gOnly   = 2.U(2.W)
+  val vsAndG  = 3.U(2.W)
+
+  // Request mode is an internal two-bit transport encoding. Convert it once
+  // when a diagnostic record is created so the public trace contract is
+  // expressed only in terms of the stages it records.
+  def fromRequestMode(requestMode: UInt): UInt = MuxLookup(requestMode, hostNoG)(Seq(
+    "b00".U(2.W) -> hostNoG,
+    "b01".U(2.W) -> vsOnly,
+    "b10".U(2.W) -> gOnly,
+    "b11".U(2.W) -> vsAndG
+  ))
+}
+
+class AddrTransDebug(implicit p: Parameters) extends TlbBundle {
+  val valid = Bool()
+  // Diagnostic mode encoding: host/no-G, VS-only, G-only, VS+G.
+  // Keep the legacy MMU translation-mode protocol naming out of this commit record.
+  val mode = UInt(2.W)
+  val vpn = UInt(vpnLen.W)
+  // Keep raw L2 provenance instead of a refill-VPN-specific reconstructed PPN.
+  // This allows an L1 TLB superpage/sector hit to reuse the record with its
+  // current request VPN.
+  val l1 = new L2AddrTransSlot
+  val l0 = new L2AddrTransSlot
+  val paddr = UInt(PAddrBits.W)
+
+  private def ppnWithVpn(ppn: UInt, level: UInt, n: Bool, inputVpn: UInt): UInt = {
+    MuxLookup(level, ppn)(Seq(
+      3.U -> Cat(ppn(ppn.getWidth - 1, vpnnLen * 3), inputVpn(vpnnLen * 3 - 1, 0)),
+      2.U -> Cat(ppn(ppn.getWidth - 1, vpnnLen * 2), inputVpn(vpnnLen * 2 - 1, 0)),
+      1.U -> Cat(ppn(ppn.getWidth - 1, vpnnLen), inputVpn(vpnnLen - 1, 0)),
+      0.U -> Mux(n,
+        Cat(ppn(ppn.getWidth - 1, pteNapotBits), inputVpn(pteNapotBits - 1, 0)),
+        ppn)
+    ))
+  }
+
+  // These are views, not stored fields: use the current request VPN so an
+  // L1-TLB superpage or sector reuse does not retain the refill VPN.
+  def finalGvpn: UInt = Mux(mode === AddrTransMode.gOnly, vpn,
+    ppnWithVpn(l0.ptePpn, l0.level, l0.pteN, vpn))
+
+  def finalPpn: UInt = {
+    val s1Ppn = ppnWithVpn(l0.ptePpn, l0.level, l0.pteN, vpn)
+    val gPtePpn = ppnWithVpn(l0.gPtePpn, l0.gPteLevel, l0.gPteN, finalGvpn)
+    Mux(mode === AddrTransMode.vsAndG || mode === AddrTransMode.gOnly, gPtePpn, s1Ppn)(ppnLen - 1, 0)
+  }
+}
+
 class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   val paddr = Vec(nDups, Output(UInt(PAddrBits.W)))
   val gpaddr = Vec(nDups, Output(UInt(XLEN.W)))
@@ -610,6 +665,7 @@ class TlbResp(nDups: Int = 1)(implicit p: Parameters) extends TlbBundle {
   })
   val ptwBack = Output(Bool()) // when ptw back, wake up replay rs's state
   val memidx = Output(new MemBlockidxBundle)
+  val addrTrans = Output(new AddrTransDebug)
 
   val debug = new Bundle {
     val robIdx = Output(new RobPtr)
@@ -1323,10 +1379,74 @@ class PtwMergeResp(implicit p: Parameters) extends PtwBundle {
   }
 }
 
+object L2AddrTransSource {
+  val none    = 0.U(3.W)
+  val l1Cache = 1.U(3.W)
+  val l0Cache = 2.U(3.W)
+  val spCache = 3.U(3.W)
+  val ptwMem  = 4.U(3.W)
+  val llptwMem = 5.U(3.W)
+}
+
+/**
+  * A compact record of one VS-stage PTE used by the L2 translation path.
+  *
+  * `ptePpn` and `gPtePpn` deliberately retain the raw PTE PPNs.  The VPN
+  * portion of a superpage is supplied by the current L1-TLB request when the
+  * final address is reconstructed, so this record remains valid after a
+  * superpage or sector-TLB hit is reused for another VPN.
+  */
+class L2AddrTransSlot(implicit p: Parameters) extends PtwBundle {
+  val valid   = Bool()
+  val source  = UInt(3.W)
+  val ptePpn  = UInt(ptePPNLen.W)
+  val level   = UInt(log2Up(Level + 1).W)
+  val pteN    = Bool()
+  val gPteValid = Bool()
+  val gPtePpn   = UInt(ptePPNLen.W)
+  val gPteLevel = UInt(log2Up(Level + 1).W)
+  val gPteN     = Bool()
+}
+
+/**
+ * L2-only address-translation provenance.  `l1` is specifically the VS
+ * level-1 non-leaf PTE that points to a VS level-0 table.  `l0` is the final
+ * VS leaf PTE; a large leaf is represented by `l0` with its actual level.
+ * L3/L2 and HPTW-internal walk state are intentionally omitted to keep the
+ * commit-side diagnostic payload compact.
+ *
+ * For G-only translation, there is no VS PTE.  `l1` stays invalid and `l0.valid`
+ * denotes a present diagnostic slot whose VS-primary fields are zero; the
+ * standalone G-stage leaf is carried by `l0.gPte*`.
+ */
+class L2AddrTransDebug(implicit p: Parameters) extends PtwBundle {
+  val valid   = Bool()
+  val vpn     = UInt(vpnLen.W)
+  val mode    = UInt(2.W)
+  val l1      = new L2AddrTransSlot
+  val l0      = new L2AddrTransSlot
+}
+
+/**
+  * Provenance kept by an L1 sector-TLB entry.
+  *
+  * The L1 record is common to all eight 4 KiB translations in a sector, but
+  * the L0 PTE (and, when applicable, its final G-stage PTE) is not.  Keeping
+  * just L0 per sector avoids both a stale refill-PTE report and eight copies
+  * of the common L1 trace.
+  */
+class TlbSectorAddrTransDebug(implicit p: Parameters) extends TlbBundle {
+  val valid   = Bool()
+  val mode    = UInt(2.W)
+  val l1      = new L2AddrTransSlot
+  val l0      = Vec(tlbcontiguous, new L2AddrTransSlot)
+}
+
 class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   val s2xlate = UInt(2.W)
   val s1 = new PtwSectorResp()
   val s2 = new HptwResp()
+  val addrTrans = new L2AddrTransDebug
 
   def hasS2xlate: Bool = {
     this.s2xlate =/= noS2xlate
@@ -1414,6 +1534,136 @@ class PtwRespS2(implicit p: Parameters) extends PtwBundle {
   }
 }
 
+object AddrTransDebug {
+  /**
+  * Normalize a G-only response to the diagnostic L0 contract.
+    *
+    * Keeping this at the common L2 response boundary makes cache hits, PTW
+    * responses and any later L1-TLB refill/bypass observe the same record.
+    */
+  def withGOnlyL0(
+    in: L2AddrTransDebug,
+    hResp: HptwResp
+  )(implicit p: Parameters): L2AddrTransDebug = {
+    val gOnly = WireInit(0.U.asTypeOf(new L2AddrTransDebug))
+    gOnly.valid := in.valid
+    gOnly.vpn := in.vpn
+    gOnly.mode := in.mode
+    gOnly.l0.valid := in.valid
+    gOnly.l0.gPteValid := in.valid && !hResp.gpf && !hResp.gaf
+    gOnly.l0.gPtePpn := hResp.entry.ppn
+    gOnly.l0.gPteLevel := hResp.entry.level.getOrElse(0.U)
+    gOnly.l0.gPteN := hResp.entry.n.getOrElse(0.U) =/= 0.U
+
+    Mux(in.mode === AddrTransMode.gOnly, gOnly, in)
+  }
+
+  def fromPtw(resp: PtwRespS2, vpn: UInt)(implicit p: Parameters): AddrTransDebug = {
+    // A normal L0 PTW response contains a sector of PTEs.  The functional
+    // bypass path reconstructs its PPN with the requesting VPN; provenance
+    // must select that same sector slot instead of retaining the PTE that
+    // happened to initiate the shared PTW response.
+    fromSector(sectorFromPtw(resp), vpn)
+  }
+
+  private def sameRawSlot(a: L2AddrTransSlot, b: L2AddrTransSlot): Bool = {
+    val samePrimary = Mux(a.valid || b.valid,
+      a.valid && b.valid &&
+        a.ptePpn === b.ptePpn && a.level === b.level && a.pteN === b.pteN,
+      true.B)
+    val sameG = Mux(a.gPteValid || b.gPteValid,
+      a.gPteValid && b.gPteValid &&
+        a.gPtePpn === b.gPtePpn &&
+        a.gPteLevel === b.gPteLevel &&
+        a.gPteN === b.gPteN,
+      true.B)
+    samePrimary && sameG
+  }
+
+  /**
+    * Compare the raw translation represented by two L1-TLB provenance
+    * candidates.  `source` is deliberately ignored: duplicate TLB entries
+    * may have obtained the same PTE through different cache/walk paths, and
+    * either source remains a truthful observation.
+    */
+  def sameRawTranslation(a: AddrTransDebug, b: AddrTransDebug): Bool = {
+    a.valid && b.valid && a.mode === b.mode &&
+      sameRawSlot(a.l1, b.l1) && sameRawSlot(a.l0, b.l0)
+  }
+
+  /**
+    * Build the L1-TLB storage form of an L2 response.
+    *
+    * A normal L0 cache line contains eight PTEs.  `PtwSectorResp` splits the
+    * raw PTE PPN into a common high portion and `ppn_low(i)`, so recover the
+    * raw PPN for each valid 4 KiB slot here.  Superpage/NAPOT provenance is
+    * already represented by the response's raw L0 slot and is shared by all
+    * sector indices.
+    *
+    * L2 supplies one final G-stage response.  When that response is 4 KiB,
+    * the L1-TLB entry can only hit the refill `pteidx` (or the matching
+    * only-stage-2 index); retain it only there.  A G-stage superpage/NAPOT
+    * PTE is safe to share across the complete sector.
+    */
+  def sectorFromPtw(resp: PtwRespS2)(implicit p: Parameters): TlbSectorAddrTransDebug = {
+    val out = WireInit(0.U.asTypeOf(new TlbSectorAddrTransDebug))
+    val l0 = resp.addrTrans.l0
+    val sectorWidth = resp.s1.ppn_low.head.getWidth
+    val s1Level = resp.s1.entry.level.getOrElse(0.U)
+    val s1N = resp.s1.entry.n.getOrElse(0.U) =/= 0.U
+    val gPteLevel = resp.s2.entry.level.getOrElse(0.U)
+    val gPteN = resp.s2.entry.n.getOrElse(0.U) =/= 0.U
+    val responseMode = resp.addrTrans.mode
+    val gOnlyResponse = responseMode === AddrTransMode.gOnly
+    val hasGStage = responseMode === AddrTransMode.vsAndG || gOnlyResponse
+    val s1L0IsSector = !gOnlyResponse && l0.valid &&
+      l0.level === 0.U && !l0.pteN && s1Level === 0.U && !s1N
+    val gPteIs4K = gPteLevel === 0.U && !gPteN
+    val gOnlySlot = VecInit(UIntToOH(resp.s2.entry.tag(sectorWidth - 1, 0)).asBools)
+
+    out.valid := resp.addrTrans.valid
+    out.mode := responseMode
+    out.l1 := resp.addrTrans.l1
+    for (i <- 0 until out.l0.length) {
+      out.l0(i) := l0
+
+      // The L0 cache stores a separate raw PTE for every normal-page slot.
+      when (s1L0IsSector) {
+        out.l0(i).valid := resp.s1.valididx(i)
+        out.l0(i).ptePpn := Cat(resp.s1.entry.ppn, resp.s1.ppn_low(i))
+        out.l0(i).level := 0.U
+        out.l0(i).pteN := false.B
+        when (!resp.s1.valididx(i)) {
+          out.l0(i).gPteValid := false.B
+        }
+      }
+
+      // A 4 KiB G-stage PTE belongs only to the L1-TLB-hit eligible slot.
+      when (hasGStage && l0.gPteValid && gPteIs4K) {
+        val gPteMatchesSlot = Mux(gOnlyResponse, gOnlySlot(i), resp.s1.pteidx(i))
+        out.l0(i).gPteValid := gPteMatchesSlot
+      }
+
+      // A G-only normal-page sector has exactly one usable subpage.
+      when (gOnlyResponse && gPteIs4K && !gOnlySlot(i)) {
+        out.l0(i).valid := false.B
+      }
+    }
+    out
+  }
+
+  /** Select the request's L0 provenance from an L1 sector-TLB record. */
+  def fromSector(entry: TlbSectorAddrTransDebug, vpn: UInt)(implicit p: Parameters): AddrTransDebug = {
+    val out = WireInit(0.U.asTypeOf(new AddrTransDebug))
+    out.valid := entry.valid
+    out.mode := entry.mode
+    out.vpn := vpn
+    out.l1 := entry.l1
+    out.l0 := entry.l0(vpn(log2Up(entry.l0.length) - 1, 0))
+    out
+  }
+}
+
 class PtwRespS2withMemIdx(implicit p: Parameters) extends PtwRespS2 {
   val memidx = new MemBlockidxBundle()
   val getGpa = Bool() // this req is to get gpa when having guest page fault
@@ -1445,6 +1695,7 @@ class L2TlbWithHptwIdBundle(implicit p: Parameters) extends PtwBundle {
   val isHptwReq = Bool()
   val isLLptw = Bool()
   val hptwId = UInt(log2Up(l2tlbParams.llptwsize).W)
+  val addrTrans = new L2AddrTransDebug
 }
 
 object ValidHoldBypass{

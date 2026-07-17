@@ -43,6 +43,7 @@ import xiangshan.backend.fu.{PMPReqBundle, PMPRespBundle}
 class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val req = Flipped(DecoupledIO(new Bundle {
     val req_info = new L2TlbInnerBundle()
+    val addrTrans = new L2AddrTransDebug
     val l3Hit = if (EnableSv48) Some(new Bool()) else None
     val l2Hit = Bool()
     val ppn = UInt(ptePPNLen.W)
@@ -60,6 +61,7 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val s2xlate = UInt(2.W)
     val resp = new PtwMergeResp
     val h_resp = new HptwResp
+    val addrTrans = new L2AddrTransDebug
   })
 
   val llptw = DecoupledIO(new LLPTWInBundle())
@@ -89,6 +91,7 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val refill = Output(new Bundle {
     val req_info = new L2TlbInnerBundle()
     val level = UInt(log2Up(Level + 1).W)
+    val l0ParentL1 = new L2AddrTransSlot
   })
   val bitmap = Option.when(HasBitmapCheck)(new Bundle {
       val req = DecoupledIO(new bitmapReqBundle())
@@ -201,6 +204,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   mem_addr := hptw_addr(PAddrBits - 1, 0)
 
   val hptw_resp = Reg(new HptwResp)
+  val addrTrans = RegInit(0.U.asTypeOf(new L2AddrTransDebug))
 
   val update_full_gvpn_mem_resp = RegInit(false.B)
   val full_gvpn_reg = Reg(UInt(ptePPNLen.W))
@@ -259,12 +263,14 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.resp.bits.resp := Mux(stage1Hit || (l3Hit || l2Hit) && guestFault && !pte_valid, stage1, ptw_resp)
   io.resp.bits.h_resp := Mux(gvpn_gpf, fake_h_resp, hptw_resp)
   io.resp.bits.s2xlate := req_s2xlate
+  io.resp.bits.addrTrans := addrTrans
 
   io.llptw.valid := s_llptw_req === false.B && to_find_pte && !accessFault && !guestFault
   io.llptw.bits.req_info.source := source
   io.llptw.bits.req_info.vpn := vpn
   io.llptw.bits.req_info.s2xlate := req_s2xlate
   io.llptw.bits.ppn := DontCare
+  io.llptw.bits.addrTrans := addrTrans
   if (HasBitmapCheck) {
     io.llptw.bits.bitmapCheck.get.jmp_bitmap_check := DontCare
     io.llptw.bits.bitmapCheck.get.ptes := DontCare
@@ -299,11 +305,16 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.refill.req_info.vpn := vpn
   io.refill.level := level
   io.refill.req_info.source := source
+  io.refill.l0ParentL1 := addrTrans.l1
 
   io.hptw.req.valid := !s_hptw_req || !s_last_hptw_req
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
   io.hptw.req.bits.gvpn := get_pn(gpaddr)
   io.hptw.req.bits.source := source
+
+  when (io.req.fire) {
+    addrTrans := io.req.bits.addrTrans
+  }
 
   if (HasBitmapCheck) {
     when (io.req.fire && jmp_bitmap_check_w) {
@@ -438,6 +449,14 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     mem_addr_update := true.B
   }
 
+  when (io.hptw.resp.fire && w_last_hptw_resp === false.B &&
+    addrTrans.valid && addrTrans.l0.valid) {
+    addrTrans.l0.gPteValid := !io.hptw.resp.bits.h_resp.gpf && !io.hptw.resp.bits.h_resp.gaf
+    addrTrans.l0.gPtePpn := io.hptw.resp.bits.h_resp.entry.ppn
+    addrTrans.l0.gPteLevel := io.hptw.resp.bits.h_resp.entry.level.getOrElse(0.U)
+    addrTrans.l0.gPteN := io.hptw.resp.bits.h_resp.entry.n.getOrElse(0.U) =/= 0.U
+  }
+
   when(sent_to_pmp && mem_addr_update === false.B){
     s_mem_req := false.B
     s_pmp_check := true.B
@@ -503,6 +522,24 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     } else {
       s_llptw_req := false.B
       mem_addr_update := true.B
+    }
+    when (addrTrans.valid && req_s2xlate =/= onlyStage2) {
+      when (level === 1.U && !find_pte) {
+        addrTrans.l1.valid := true.B
+        addrTrans.l1.source := L2AddrTransSource.ptwMem
+        addrTrans.l1.ptePpn := pte.getPPN()
+        addrTrans.l1.level := 1.U
+        addrTrans.l1.pteN := pte.n =/= 0.U
+        addrTrans.l1.gPteValid := false.B
+      }
+      when (find_pte) {
+        addrTrans.l0.valid := true.B
+        addrTrans.l0.source := L2AddrTransSource.ptwMem
+        addrTrans.l0.ptePpn := pte.getPPN()
+        addrTrans.l0.level := level
+        addrTrans.l0.pteN := pte.n =/= 0.U
+        addrTrans.l0.gPteValid := false.B
+      }
     }
   }
 
@@ -594,6 +631,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       whether_need_bitmap_check := false.B
       bitmap_checkfailed := false.B
     }
+    addrTrans := 0.U.asTypeOf(new L2AddrTransDebug)
   }
 
 
@@ -633,6 +671,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 class LLPTWInBundle(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val req_info = Output(new L2TlbInnerBundle())
   val ppn = Output(UInt(ptePPNLen.W))
+  val addrTrans = Output(new L2AddrTransDebug)
   val bitmapCheck = Option.when(HasBitmapCheck)(new Bundle {
     val jmp_bitmap_check = Bool() // find pte in l0 or sp, but need bitmap check
     val ptes = Vec(tlbcontiguous, UInt(XLEN.W)) // Page Table Entry Vector
@@ -649,6 +688,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val h_resp = Output(new HptwResp)
     val first_s2xlate_fault = Output(Bool()) // Whether the first stage 2 translation occurs pf/af
     val af = Output(Bool())
+    val addrTrans = Output(new L2AddrTransDebug)
     val bitmapCheck = Option.when(HasBitmapCheck)(new Bundle {
       val jmp_bitmap_check = Bool() // find pte in l0 or sp, but need bitmap check
       val ptes = Vec(tlbcontiguous, UInt(XLEN.W)) // Page Table Entry Vector
@@ -664,10 +704,15 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val enq_ptr = Output(UInt(log2Ceil(l2tlbParams.llptwsize).W))
     val buffer_it = Output(Vec(l2tlbParams.llptwsize, Bool()))
     val refill = Output(new L2TlbInnerBundle())
+    val refillL1 = Output(new L2AddrTransSlot())
     val req_mask = Input(Vec(l2tlbParams.llptwsize, Bool()))
     val flush_latch = Input(Vec(l2tlbParams.llptwsize, Bool()))
   }
-  val cache = DecoupledIO(new L2TlbInnerBundle())
+  val cache = DecoupledIO(new Bundle {
+    val req_info = new L2TlbInnerBundle()
+    val addrTrans = new L2AddrTransDebug
+  })
+  val l0TableGPteUpdate = ValidIO(new PageCacheL0TableGPteTrace())
   val pmp = Vec(2, new Bundle {
     val req  = Valid(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
@@ -694,6 +739,7 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
 class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
   val req_info = new L2TlbInnerBundle()
   val ppn = UInt(ptePPNLen.W)
+  val addrTrans = new L2AddrTransDebug
   val wait_id = UInt(log2Up(l2tlbParams.llptwsize).W)
   val af = Bool()
   val hptw_resp = new HptwResp()
@@ -711,12 +757,32 @@ class LLPTWEntry(implicit p: Parameters) extends XSBundle with HasPtwConst {
 class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPerfEvents {
   val io = IO(new LLPTWIO())
 
+  private def copyL0TableGPteTrace(dst: L2AddrTransDebug, src: L2AddrTransDebug): Unit = {
+    when (dst.valid && dst.l1.valid && src.l1.gPteValid) {
+      dst.l1.gPteValid := true.B
+      dst.l1.gPtePpn := src.l1.gPtePpn
+      dst.l1.gPteLevel := src.l1.gPteLevel
+      dst.l1.gPteN := src.l1.gPteN
+    }
+  }
+
+  private def recordL0TableGPteTrace(dst: L2AddrTransDebug, hResp: HptwResp): Unit = {
+    when (dst.valid && dst.l1.valid) {
+      dst.l1.gPteValid := !hResp.gpf && !hResp.gaf
+      dst.l1.gPtePpn := hResp.entry.ppn
+      dst.l1.gPteLevel := hResp.entry.level.getOrElse(0.U)
+      dst.l1.gPteN := hResp.entry.n.getOrElse(0.U) =/= 0.U
+    }
+  }
+
   // mbmc:bitmap csr
   val mbmc = io.csr.mbmc
   val bitmap_enable = (if (HasBitmapCheck) true.B else false.B) && mbmc.BME === 1.U && mbmc.CMODE === 0.U
 
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed
   val entries = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(0.U.asTypeOf(new LLPTWEntry()))))
+  io.l0TableGPteUpdate.valid := false.B
+  io.l0TableGPteUpdate.bits := 0.U.asTypeOf(new PageCacheL0TableGPteTrace)
   val state_idle :: state_hptw_req :: state_hptw_resp :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_last_hptw_req :: state_last_hptw_resp :: state_cache :: state_bitmap_check :: state_bitmap_resp :: Nil = Enum(12)
   val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
 
@@ -835,6 +901,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     state(enq_ptr) := enq_state
     entries(enq_ptr).req_info := io.in.bits.req_info
     entries(enq_ptr).ppn := Mux(to_bitmap_req || to_last_hptw_req || last_hptw_excp, last_hptw_req_ppn, io.in.bits.ppn)
+    entries(enq_ptr).addrTrans := io.in.bits.addrTrans
     entries(enq_ptr).wait_id := Mux(to_wait, wait_id, enq_ptr)
     entries(enq_ptr).af := false.B
     if (HasBitmapCheck) {
@@ -850,8 +917,23 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     }
     entries(enq_ptr).hptw_resp := Mux(to_last_hptw_req, entries(last_hptw_req_id).hptw_resp, Mux(to_wait, entries(wait_id).hptw_resp, entries(enq_ptr).hptw_resp))
     entries(enq_ptr).hptw_resp.gpf := Mux(last_hptw_excp, last_hptw_gStagePf, false.B)
+    when (to_wait && io.in.bits.addrTrans.valid && io.in.bits.addrTrans.l1.valid && entries(wait_id).addrTrans.l1.gPteValid) {
+      entries(enq_ptr).addrTrans.l1.gPteValid := true.B
+      entries(enq_ptr).addrTrans.l1.gPtePpn := entries(wait_id).addrTrans.l1.gPtePpn
+      entries(enq_ptr).addrTrans.l1.gPteLevel := entries(wait_id).addrTrans.l1.gPteLevel
+      entries(enq_ptr).addrTrans.l1.gPteN := entries(wait_id).addrTrans.l1.gPteN
+    }
     entries(enq_ptr).first_s2xlate_fault := false.B
     mem_resp_hit(enq_ptr) := to_bitmap_req || to_mem_out || to_last_hptw_req
+    when (io.in.bits.addrTrans.valid && io.in.bits.req_info.s2xlate =/= onlyStage2 &&
+      (to_mem_out || to_bitmap_req || to_last_hptw_req || last_hptw_excp)) {
+      entries(enq_ptr).addrTrans.l0.valid := true.B
+      entries(enq_ptr).addrTrans.l0.source := L2AddrTransSource.llptwMem
+      entries(enq_ptr).addrTrans.l0.ptePpn := last_hptw_req_pte.getPPN()
+      entries(enq_ptr).addrTrans.l0.level := 0.U
+      entries(enq_ptr).addrTrans.l0.pteN := last_hptw_req_pte.n =/= 0.U
+      entries(enq_ptr).addrTrans.l0.gPteValid := false.B
+    }
   }
 
   if (HasBitmapCheck) {
@@ -859,6 +941,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       state(enq_ptr) := state_bitmap_check
       entries(enq_ptr).req_info := io.in.bits.req_info
       entries(enq_ptr).ppn := io.in.bits.bitmapCheck.get.ptes(io.in.bits.req_info.vpn(sectortlbwidth - 1, 0)).asTypeOf(new PteBundle().cloneType).ppn
+      entries(enq_ptr).addrTrans := io.in.bits.addrTrans
       entries(enq_ptr).wait_id := enq_ptr
       entries(enq_ptr).af := false.B
       entries(enq_ptr).cf := false.B
@@ -926,6 +1009,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         // NOTE: "dup enq set state to mem_wait" -> "sending req set other dup entries to mem_wait"
         state(i) := state_mem_waiting
         entries(i).hptw_resp := entries(mem_arb.io.chosen).hptw_resp
+        copyL0TableGPteTrace(entries(i).addrTrans, entries(mem_arb.io.chosen).addrTrans)
         entries(i).wait_id := mem_arb.io.chosen
       }
     }
@@ -949,6 +1033,14 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         entries(i).ppn := Mux(ptes(index).n === 0.U, ptes(index).getPPN(), Cat(ptes(index).getPPN()(ptePPNLen - 1, pteNapotBits), entries(i).req_info.vpn(pteNapotBits - 1, 0))) // for last stage 2 translation
         // af will be judged in L2 TLB `contiguous_pte_to_merge_ptwResp`
         entries(i).hptw_resp.gpf := Mux(entries(i).req_info.s2xlate === allStage, gStagePf, false.B)
+        when (entries(i).addrTrans.valid && entries(i).req_info.s2xlate =/= onlyStage2) {
+          entries(i).addrTrans.l0.valid := true.B
+          entries(i).addrTrans.l0.source := L2AddrTransSource.llptwMem
+          entries(i).addrTrans.l0.ptePpn := ptes(index).getPPN()
+          entries(i).addrTrans.l0.level := 0.U
+          entries(i).addrTrans.l0.pteN := ptes(index).n =/= 0.U
+          entries(i).addrTrans.l0.gPteValid := false.B
+        }
         if (HasBitmapCheck) {
           entries(i).n := ptes(index).n
         }
@@ -998,6 +1090,16 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
     for (i <- state.indices) {
       when (state(i) === state_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
         val check_g_perm_fail = !io.hptw.resp.bits.h_resp.gaf && !io.hptw.resp.bits.h_resp.entry.perm.get.r
+        recordL0TableGPteTrace(entries(i).addrTrans, io.hptw.resp.bits.h_resp)
+        when (entries(i).addrTrans.valid && entries(i).addrTrans.l1.valid) {
+          io.l0TableGPteUpdate.valid := true.B
+          io.l0TableGPteUpdate.bits.ptePpn := entries(i).addrTrans.l1.ptePpn
+          io.l0TableGPteUpdate.bits.vmid := io.csr.hgatp.vmid
+          io.l0TableGPteUpdate.bits.gPteValid := !io.hptw.resp.bits.h_resp.gpf && !io.hptw.resp.bits.h_resp.gaf
+          io.l0TableGPteUpdate.bits.gPtePpn := io.hptw.resp.bits.h_resp.entry.ppn
+          io.l0TableGPteUpdate.bits.gPteLevel := io.hptw.resp.bits.h_resp.entry.level.getOrElse(0.U)
+          io.l0TableGPteUpdate.bits.gPteN := io.hptw.resp.bits.h_resp.entry.n.getOrElse(0.U) =/= 0.U
+        }
         when (check_g_perm_fail || io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf) {
           state(i) := state_mem_out
           entries(i).hptw_resp := io.hptw.resp.bits.h_resp
@@ -1011,12 +1113,25 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
           state(i) := Mux(Cat(need_to_waiting_vec).orR, state_mem_waiting, state_addr_check)
           entries(i).hptw_resp := io.hptw.resp.bits.h_resp
           entries(i).wait_id := Mux(Cat(need_to_waiting_vec).orR, waiting_index, entries(i).wait_id)
+          for (j <- state.indices) {
+            when (state(j) === state_mem_waiting &&
+              dup(entries(j).req_info.vpn, entries(i).req_info.vpn) &&
+              entries(j).req_info.s2xlate === entries(i).req_info.s2xlate) {
+              recordL0TableGPteTrace(entries(j).addrTrans, io.hptw.resp.bits.h_resp)
+            }
+          }
           //To do: change the entry that is having the same hptw req
         }
       }
       when (state(i) === state_last_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
         state(i) := state_mem_out
         entries(i).hptw_resp := io.hptw.resp.bits.h_resp
+        when (entries(i).addrTrans.valid && entries(i).addrTrans.l0.valid) {
+          entries(i).addrTrans.l0.gPteValid := !io.hptw.resp.bits.h_resp.gpf && !io.hptw.resp.bits.h_resp.gaf
+          entries(i).addrTrans.l0.gPtePpn := io.hptw.resp.bits.h_resp.entry.ppn
+          entries(i).addrTrans.l0.gPteLevel := io.hptw.resp.bits.h_resp.entry.level.getOrElse(0.U)
+          entries(i).addrTrans.l0.gPteN := io.hptw.resp.bits.h_resp.entry.n.getOrElse(0.U) =/= 0.U
+        }
         //To do: change the entry that is having the same hptw req
       }
     }
@@ -1053,6 +1168,7 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   io.out.bits.h_resp := entries(mem_ptr).hptw_resp
   io.out.bits.first_s2xlate_fault := entries(mem_ptr).first_s2xlate_fault
+  io.out.bits.addrTrans := entries(mem_ptr).addrTrans
 
   val hptw_req_arb = Module(new Arbiter(new Bundle{
       val source = UInt(bSourceWidth.W)
@@ -1087,11 +1203,13 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mem_refill_id = RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))
   io.mem.refill := entries(mem_refill_id).req_info
   io.mem.refill.s2xlate := entries(mem_refill_id).req_info.s2xlate
+  io.mem.refillL1 := entries(mem_refill_id).addrTrans.l1
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 
   io.cache.valid := Cat(is_cache).orR
-  io.cache.bits := ParallelMux(is_cache, entries.map(_.req_info))
+  io.cache.bits.req_info := ParallelMux(is_cache, entries.map(_.req_info))
+  io.cache.bits.addrTrans := ParallelMux(is_cache, entries.map(_.addrTrans))
 
   val has_bitmap_resp = ParallelOR(is_bitmap_resp).asBool
   if (HasBitmapCheck) {

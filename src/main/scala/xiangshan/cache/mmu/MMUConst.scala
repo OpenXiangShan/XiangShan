@@ -42,7 +42,9 @@ case class TLBParameters
   partialStaticPMP: Boolean = false, // partial static pmp result stored in entries
   outsideRecvFlush: Boolean = false, // if outside moudle waiting for tlb recv flush pipe
   saveLevel: Boolean = false,
-  lgMaxSize: Int = 3
+  lgMaxSize: Int = 3,
+  // Commit-side raw-PTE provenance is needed only by load/store execution.
+  enableAddrTransDebug: Boolean = false
 )
 
 case class L2TLBParameters

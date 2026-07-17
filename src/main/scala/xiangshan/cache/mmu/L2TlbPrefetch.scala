@@ -59,6 +59,7 @@ class L2TlbPrefetch(implicit p: Parameters) extends XSModule with HasPtwConst {
   io.out.bits.isHptwReq := false.B
   io.out.bits.isLLptw := false.B
   io.out.bits.hptwId := DontCare
+  io.out.bits.addrTrans := 0.U.asTypeOf(new L2AddrTransDebug)
 
   when (io.out.fire) {
     old_v(old_index) := true.B

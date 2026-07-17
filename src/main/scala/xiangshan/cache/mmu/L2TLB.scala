@@ -143,15 +143,20 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     val s2xlate = UInt(2.W)
     val s1 = new PtwSectorResp ()
     val s2 = new HptwResp()
+    val addrTrans = new L2AddrTransDebug
   }, 1)).io)
   val mergeArb = (0 until PtwWidth).map(i => Module(new Arbiter(new Bundle {
     val s2xlate = UInt(2.W)
     val s1 = new PtwMergeResp()
     val s2 = new HptwResp()
+    val addrTrans = new L2AddrTransDebug
   }, 3)).io)
   val outArbCachePort = 0
   val outArbFsmPort = 1
   val outArbMqPort = 2
+
+  cache.io.l0TableGPteUpdate.valid := llptw.io.l0TableGPteUpdate.valid
+  cache.io.l0TableGPteUpdate.bits := llptw.io.l0TableGPteUpdate.bits
 
   if (HasBitmapCheck) {
     // connect ptwcache and bitmap sleep-wakeup port
@@ -207,6 +212,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   arb2.io.in(InArbPTWPort).bits.isHptwReq := false.B
   arb2.io.in(InArbPTWPort).bits.isLLptw := false.B
   arb2.io.in(InArbPTWPort).bits.hptwId := DontCare
+  arb2.io.in(InArbPTWPort).bits.addrTrans := ptw.io.llptw.bits.addrTrans
   ptw.io.llptw.ready := arb2.io.in(InArbPTWPort).ready
   block_decoupled(missQueue.io.out, arb2.io.in(InArbMissQueuePort), Mux(missQueue.io.out.bits.isLLptw, !llptw.io.in.ready, !ptw.io.req.ready))
 
@@ -217,6 +223,11 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   arb2.io.in(InArbTlbPort).bits.isHptwReq := false.B
   arb2.io.in(InArbTlbPort).bits.isLLptw := false.B
   arb2.io.in(InArbTlbPort).bits.hptwId := DontCare
+  val tlbAddrTrans = WireInit(0.U.asTypeOf(new L2AddrTransDebug))
+  tlbAddrTrans.valid := true.B
+  tlbAddrTrans.vpn := arb1.io.out.bits.vpn
+  tlbAddrTrans.mode := AddrTransMode.fromRequestMode(arb1.io.out.bits.s2xlate)
+  arb2.io.in(InArbTlbPort).bits.addrTrans := tlbAddrTrans
   // 1. arb1 and arb2 are both comb logic, so ready can work just the same cycle
   // 2. arb1 can send one req at most in a cycle, so do not need to write
   //    "tlbCounter <= (MissQueueSize - 2).U"
@@ -229,6 +240,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   arb2.io.in(InArbHPTWPort).bits.isHptwReq := true.B
   arb2.io.in(InArbHPTWPort).bits.isLLptw := false.B
   arb2.io.in(InArbHPTWPort).bits.hptwId := hptw_req_arb.io.out.bits.id
+  arb2.io.in(InArbHPTWPort).bits.addrTrans := 0.U.asTypeOf(new L2AddrTransDebug)
   hptw_req_arb.io.out.ready := arb2.io.in(InArbHPTWPort).ready
   val hartId = p(XSCoreParamsKey).HartId
   if (l2tlbParams.enablePrefetch) {
@@ -267,10 +279,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   mq_arb.io.in(0).bits.isHptwReq := false.B
   mq_arb.io.in(0).bits.hptwId :=  DontCare
   mq_arb.io.in(0).bits.isLLptw := (cache.io.resp.bits.toFsm.l1Hit && !toFsm_toPTW) || toFsm_toLLPTW
-  mq_arb.io.in(1).bits.req_info := llptw.io.cache.bits
+  mq_arb.io.in(0).bits.addrTrans := cache.io.resp.bits.addrTrans
+  mq_arb.io.in(1).bits.req_info := llptw.io.cache.bits.req_info
   mq_arb.io.in(1).bits.isHptwReq := false.B
   mq_arb.io.in(1).bits.hptwId := DontCare
   mq_arb.io.in(1).bits.isLLptw := false.B
+  mq_arb.io.in(1).bits.addrTrans := llptw.io.cache.bits.addrTrans
   mq_arb.io.in(1).valid := llptw.io.cache.valid
   llptw.io.cache.ready := mq_arb.io.in(1).ready
   missQueue.io.in <> mq_arb.io.out
@@ -287,6 +301,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     !cache.io.resp.bits.isHptwReq
   llptw.io.in.bits.req_info := cache.io.resp.bits.req_info
   llptw.io.in.bits.ppn := cache.io.resp.bits.toFsm.ppn
+  llptw.io.in.bits.addrTrans := cache.io.resp.bits.addrTrans
   if (HasBitmapCheck) {
     llptw.io.in.bits.bitmapCheck.get.jmp_bitmap_check := cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check
     llptw.io.in.bits.bitmapCheck.get.ptes := cache.io.resp.bits.toFsm.bitmapCheck.get.ptes
@@ -306,6 +321,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   cache.io.req.bits.isHptwReq := arb2.io.out.bits.isHptwReq
   cache.io.req.bits.hptwId := arb2.io.out.bits.hptwId
   cache.io.req.bits.bypassed.map(_ := false.B)
+  cache.io.req.bits.addrTrans := arb2.io.out.bits.addrTrans
   cache.io.sfence := sfence_dup(2)
   cache.io.csr := csr_dup(2)
   cache.io.sfence_dup.zip(sfence_dup.drop(2).take(4)).map(s => s._1 := s._2)
@@ -331,6 +347,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   ptw.io.req.bits.ppn := cache.io.resp.bits.toFsm.ppn
   ptw.io.req.bits.stage1Hit := cache.io.resp.bits.toFsm.stage1Hit
   ptw.io.req.bits.stage1 := cache.io.resp.bits.stage1
+  ptw.io.req.bits.addrTrans := cache.io.resp.bits.addrTrans
   if (HasBitmapCheck) {
     ptw.io.req.bits.bitmapCheck.get.jmp_bitmap_check := cache.io.resp.bits.toFsm.bitmapCheck.get.jmp_bitmap_check
     ptw.io.req.bits.bitmapCheck.get.pte := cache.io.resp.bits.toFsm.bitmapCheck.get.pte
@@ -468,7 +485,7 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   // (miss queue may can't resp to tlb with low latency, it should have highest priority, but diffcult to design cache)
   val resp_pte = VecInit((0 until (if (HasBitmapCheck) MemReqWidth / 2 else MemReqWidth)).map(i =>
     if (i == l2tlbParams.llptwsize + 1) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), 0.U.asTypeOf(get_part(refill_data_tmp, req_addr_low(i))), mem_resp_done && mem_resp_from_hptw) }
-    else if (i == l2tlbParams.llptwsize) {RegEnable(get_part(refill_data_tmp, req_addr_low(i)), 0.U.asTypeOf(get_part(refill_data_tmp, req_addr_low(i))), mem_resp_done && mem_resp_from_ptw) }
+    else if (i == l2tlbParams.llptwsize) {DataHoldBypass(get_part(refill_data_tmp, req_addr_low(i)), 0.U.asTypeOf(get_part(refill_data_tmp, req_addr_low(i))), mem_resp_done && mem_resp_from_ptw) }
     else { Mux(llptw_mem.buffer_it(i), get_part(refill_data, req_addr_low(i)), RegEnable(get_part(refill_data, req_addr_low(i)), 0.U.asTypeOf(get_part(refill_data, req_addr_low(i))), llptw_mem.buffer_it(i))) }
     // llptw could not use refill_data_tmp, because enq bypass's result works at next cycle
   ))
@@ -537,9 +554,16 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val refill_from_hptw = mem_resp_from_hptw
   val refill_level = Mux(refill_from_llptw, 0.U, Mux(refill_from_ptw, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire), RegEnable(hptw.io.refill.level, 0.U, hptw.io.mem.req.fire)))
   val refill_valid = mem_resp_done && (if (HasBitmapCheck) !mem_resp_from_bitmap else true.B) && !flush && !flush_latch(mem.d.bits.source) && !(from_hptw(mem.d.bits.source) && hptw_bypassed)
+  val refill_l0_parent_l1 = WireInit(0.U.asTypeOf(new L2AddrTransSlot))
+  when (refill_from_llptw) {
+    refill_l0_parent_l1 := llptw_mem.refillL1
+  }.elsewhen (refill_from_ptw) {
+    refill_l0_parent_l1 := ptw.io.refill.l0ParentL1
+  }
 
   cache.io.refill.valid := GatedValidRegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
+  cache.io.refill.bits.l0ParentL1 := RegEnable(refill_l0_parent_l1, refill_valid)
   cache.io.refill.bits.req_info_dup.map(_ := RegEnable(Mux(refill_from_llptw, llptw_mem.refill, Mux(refill_from_ptw, ptw.io.refill.req_info, hptw.io.refill.req_info)), refill_valid))
   cache.io.refill.bits.level_dup.map(_ := RegEnable(refill_level, refill_valid))
   cache.io.refill.bits.levelOH(refill_level, refill_valid)
@@ -631,10 +655,12 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
     mergeArb(i).in(outArbCachePort).bits.s2xlate := cache.io.resp.bits.req_info.s2xlate
     mergeArb(i).in(outArbCachePort).bits.s1 := cache.io.resp.bits.stage1
     mergeArb(i).in(outArbCachePort).bits.s2 := cache.io.resp.bits.toHptw.resp
+    mergeArb(i).in(outArbCachePort).bits.addrTrans := cache.io.resp.bits.addrTrans
     mergeArb(i).in(outArbFsmPort).valid := ptw.io.resp.valid && ptw.io.resp.bits.source===i.U
     mergeArb(i).in(outArbFsmPort).bits.s2xlate := ptw.io.resp.bits.s2xlate
     mergeArb(i).in(outArbFsmPort).bits.s1 := ptw.io.resp.bits.resp
     mergeArb(i).in(outArbFsmPort).bits.s2 := ptw.io.resp.bits.h_resp
+    mergeArb(i).in(outArbFsmPort).bits.addrTrans := ptw.io.resp.bits.addrTrans
     mergeArb(i).in(outArbMqPort).valid := llptw_out.valid && llptw_out.bits.req_info.source===i.U
     mergeArb(i).in(outArbMqPort).bits.s2xlate := llptw_out.bits.req_info.s2xlate
     mergeArb(i).in(outArbMqPort).bits.s1 := Mux(
@@ -648,12 +674,17 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
       )
     )
     mergeArb(i).in(outArbMqPort).bits.s2 := llptw_out.bits.h_resp
+    mergeArb(i).in(outArbMqPort).bits.addrTrans := llptw_out.bits.addrTrans
     mergeArb(i).out.ready := outArb(i).in(0).ready
   }
 
   for (i <- 0 until PtwWidth) {
     outArb(i).in(0).valid := mergeArb(i).out.valid
     outArb(i).in(0).bits.s2xlate := mergeArb(i).out.bits.s2xlate
+    outArb(i).in(0).bits.addrTrans := AddrTransDebug.withGOnlyL0(
+      mergeArb(i).out.bits.addrTrans,
+      mergeArb(i).out.bits.s2
+    )
     if (HasBitmapCheck) {
       // mbmc:bitmap csr
       val mbmc = csr_dup(0).mbmc
@@ -1038,6 +1069,7 @@ class FakePTW()(implicit p: Parameters) extends XSModule with HasPtwConst {
     io.tlb(i).resp.bits.s1.entry.v := !pf
     io.tlb(i).resp.bits.s1.entry.prefetch := DontCare
     io.tlb(i).resp.bits.s1.entry.asid := io.csr.tlb.satp.asid
+    io.tlb(i).resp.bits.addrTrans := 0.U.asTypeOf(new L2AddrTransDebug)
   }
 }
 

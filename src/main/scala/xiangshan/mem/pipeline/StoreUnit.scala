@@ -27,7 +27,7 @@ import xiangshan.backend.Bundles.{MemExuInput, MemExuOutput, connectSamePort, Uo
 import xiangshan.backend.fu.PMPRespBundle
 import xiangshan.backend.fu.FuConfig._
 import xiangshan.backend.fu.FuType._
-import xiangshan.backend.ctrlblock.DebugLsInfoBundle
+import xiangshan.backend.ctrlblock.{DebugLsInfo, DebugLsInfoBundle}
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.Bundles._
@@ -692,9 +692,20 @@ class StoreUnit(implicit p: Parameters) extends XSModule
   // io.vecstout.bits.mask.map(_ := DontCare)
   // io.vecstout.bits.alignedType.map(_ := sx_last_in.alignedType)
 
-  io.debug_ls := DontCare
+  io.debug_ls := 0.U.asTypeOf(new DebugLsInfoBundle)
   io.debug_ls.s1_robIdx := s1_in.uop.robIdx.value
+  io.debug_ls.s2_robIdx := s1_in.uop.robIdx.value
+  io.debug_ls.s3_robIdx := s1_in.uop.robIdx.value
+  io.debug_ls.addrTransRobIdx := s1_in.uop.robIdx
   io.debug_ls.s1_isTlbFirstMiss := io.tlb.resp.valid && io.tlb.resp.bits.miss && io.tlb.resp.bits.debug.isFirstIssue && !s1_in.isHWPrefetch
+  io.debug_ls.addrTrans := io.tlb.resp.bits.addrTrans
+  io.debug_ls.addrTrans.valid := s1_valid && !s1_kill && !s1_isvec && !s1_frm_mab_vec && io.tlb.resp.valid && !s1_tlb_miss &&
+    // A scalar misaligned store can issue two page subaccesses with one ROB
+    // entry. Keep the original/first translation; the final split must not
+    // overwrite the instruction-level provenance at commit.
+    (!s1_in.isFrmMisAlignBuf || !s1_in.isFinalSplit) &&
+    !s1_in.isHWPrefetch && !s1_in.uop.robIdx.needFlush(io.redirect) &&
+    io.tlb.resp.bits.addrTrans.valid
 
   private def printPipeLine(pipeline: LsPipelineBundle, cond: Bool, name: String): Unit = {
     XSDebug(cond,

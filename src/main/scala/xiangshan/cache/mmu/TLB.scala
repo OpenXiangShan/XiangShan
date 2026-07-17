@@ -56,6 +56,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val ptw = io.ptw
   val pmp = io.pmp
   val refill_to_mem = io.refill_to_mem
+  val enableAddrTransDebug = q.enableAddrTransDebug
 
   /** Sfence.vma & Svinval
     * Sfence.vma will 1. flush old entries 2. flush inflight 3. flush pipe
@@ -279,8 +280,8 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
   /************************  main body above | method/log/perf below ****************************/
   def TLBRead(i: Int) = {
-    val (e_hit, e_ppn, e_perm, e_g_perm, e_s2xlate, e_pbmt, e_g_pbmt) = entries.io.r_resp_apply(i)
-    val (p_hit, p_ppn, p_pbmt, p_perm, p_gvpn, p_g_pbmt, p_g_perm, p_s2xlate, p_s1_level, p_s1_isLeaf, p_s1_isFakePte, p_hit_fast) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), req_in_s2xlate(i))
+    val (e_hit, e_ppn, e_perm, e_g_perm, e_s2xlate, e_pbmt, e_g_pbmt, e_addrTrans) = entries.io.r_resp_apply(i)
+    val (p_hit, p_ppn, p_pbmt, p_perm, p_gvpn, p_g_pbmt, p_g_perm, p_s2xlate, p_s1_level, p_s1_isLeaf, p_s1_isFakePte, p_addrTrans, p_hit_fast) = ptw_resp_bypass(get_pn(req_in(i).bits.vaddr), req_in_s2xlate(i))
     val enable = portTranslateEnable(i)
     val isOnlys2xlate = req_out_s2xlate(i) === onlyStage2
     val need_gpa_vpn_hit = need_gpa_vpn === get_pn(req_out(i).vaddr)
@@ -374,6 +375,26 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       val gpaddr = Cat(gvpn(d), gpaddr_offset)
       resp(i).bits.paddr(d) := Mux(enable, paddr, notTranslatePaddr)
       resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, crossPageVaddr, gpaddr)
+    }
+
+    if (enableAddrTransDebug) {
+      val addrTrans = WireInit(Mux(p_hit, p_addrTrans, e_addrTrans))
+      // The storage read is intentionally unconditional so a bare/no-translate
+      // request can still use the normal response pipeline.  Its PADDR bypasses
+      // the TLB result, however, so never let a coincidental old TLB hit become
+      // provenance for that request.
+      when (!(enable && (p_hit || e_hit))) {
+        addrTrans.valid := false.B
+      }.elsewhen (addrTrans.valid) {
+        // Both a storage hit and a PTW-bypass hit can reuse raw L2 PTE
+        // provenance. Bind it to the request receiving this response so a
+        // superpage or sector mapping never retains a refill VPN.
+        addrTrans.vpn := get_pn(req_out(i).vaddr)
+      }
+      addrTrans.paddr := resp(i).bits.paddr(0)
+      resp(i).bits.addrTrans := addrTrans
+    } else {
+      resp(i).bits.addrTrans := 0.U.asTypeOf(new AddrTransDebug)
     }
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
@@ -614,6 +635,13 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         pbmt_check(idx, d, io.ptw.resp.bits.s1.entry.pbmt, io.ptw.resp.bits.s2.entry.pbmt, s2xlate)
         perm_check(stage1, req_out(idx).cmd, idx, d, stage2, req_out(idx).hlvx, s2xlate)
       }
+      if (enableAddrTransDebug) {
+        val addrTrans = AddrTransDebug.fromPtw(io.ptw.resp.bits, vpn)
+        addrTrans.paddr := resp(idx).bits.paddr(0)
+        resp(idx).bits.addrTrans := addrTrans
+      } else {
+        resp(idx).bits.addrTrans := 0.U.asTypeOf(new AddrTransDebug)
+      }
       val pmpCmd = Mux(req_out(idx).hlvx, TlbCmd.read_exec, req_out(idx).cmd)
       pmp_check(resp(idx).bits.paddr(0), req_out(idx).size, pmpCmd, false.B, idx)
 
@@ -671,7 +699,16 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val p_s1_level = RegEnable(ptw.resp.bits.s1.entry.level.get, io.ptw.resp.fire)
     val p_s1_isLeaf = RegEnable(ptw.resp.bits.s1.isLeaf(), io.ptw.resp.fire)
     val p_s1_isFakePte = RegEnable(ptw.resp.bits.s1.isFakePte(), io.ptw.resp.fire)
-    (p_hit, p_ppn, p_pbmt, p_perm, p_gvpn, p_g_pbmt, p_g_perm, p_s2xlate, p_s1_level, p_s1_isLeaf, p_s1_isFakePte, p_hit_fast)
+    val p_addrTrans = if (enableAddrTransDebug) {
+      val trace = RegInit(0.U.asTypeOf(new AddrTransDebug))
+      when (io.ptw.resp.fire) {
+        trace := AddrTransDebug.fromPtw(ptw.resp.bits, vpn)
+      }
+      trace
+    } else {
+      WireInit(0.U.asTypeOf(new AddrTransDebug))
+    }
+    (p_hit, p_ppn, p_pbmt, p_perm, p_gvpn, p_g_pbmt, p_g_perm, p_s2xlate, p_s1_level, p_s1_isLeaf, p_s1_isFakePte, p_addrTrans, p_hit_fast)
   }
 
   // perf event
