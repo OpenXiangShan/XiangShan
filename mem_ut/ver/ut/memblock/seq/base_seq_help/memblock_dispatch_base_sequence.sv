@@ -392,7 +392,7 @@ function void memblock_dispatch_base_sequence::randomize_main_transaction(input 
     tr.lqIdx_value  = '0;
     tr.sqIdx_flag   = 1'b0;
     tr.sqIdx_value  = '0;
-    tr.numLsElem    = 5'd1;
+    tr.numLsElem    = memblock_num_ls_elem_t'(1);
     tr.imm          = main_control_transaction::sign_extend_imm12(tr.imm);
     tr.tlbAF        = 1'b0;
     tr.tlbPF        = 1'b0;
@@ -454,31 +454,31 @@ function void memblock_dispatch_base_sequence::apply_minimal_op_template(input m
             tr.fuType   = MEMBLOCK_FUTYPE_LDU;
             tr.lsq_flow = MEMBLOCK_LSQ_FLOW_LOAD;
             tr.fuOpType = random_load_fuoptype();
-            tr.numLsElem = 5'd1;
+            tr.numLsElem = memblock_num_ls_elem_t'(1);
         end
         MEMBLOCK_OP_CLASS_STORE: begin
             tr.fuType   = MEMBLOCK_FUTYPE_STU;
             tr.lsq_flow = MEMBLOCK_LSQ_FLOW_STORE;
             tr.fuOpType = random_store_fuoptype();
-            tr.numLsElem = 5'd1;
+            tr.numLsElem = memblock_num_ls_elem_t'(1);
         end
         MEMBLOCK_OP_CLASS_PREFETCH: begin
             tr.fuType   = MEMBLOCK_FUTYPE_LDU;
             tr.lsq_flow = MEMBLOCK_LSQ_FLOW_LOAD;
             tr.fuOpType = random_prefetch_fuoptype();
-            tr.numLsElem = 5'd1;
+            tr.numLsElem = memblock_num_ls_elem_t'(1);
         end
         MEMBLOCK_OP_CLASS_CBO: begin
             tr.fuType   = MEMBLOCK_FUTYPE_STU;
             tr.lsq_flow = MEMBLOCK_LSQ_FLOW_CBO;
             tr.fuOpType = random_cbo_fuoptype();
-            tr.numLsElem = 5'd1;
+            tr.numLsElem = memblock_num_ls_elem_t'(1);
         end
         MEMBLOCK_OP_CLASS_AMO: begin
             tr.fuType   = MEMBLOCK_FUTYPE_MOU;
             tr.lsq_flow = MEMBLOCK_LSQ_FLOW_ATOMIC;
             tr.fuOpType = random_amo_fuoptype();
-            tr.numLsElem = 5'd0;
+            tr.numLsElem = memblock_num_ls_elem_t'(0);
         end
         default: begin
             `uvm_fatal(get_type_name(), $sformatf("unsupported op_class=%0d", tr.op_class))
@@ -772,31 +772,31 @@ function void memblock_dispatch_base_sequence::apply_op_class_template(input mai
             tr.fuType    = MEMBLOCK_FUTYPE_LDU;
             tr.lsq_flow  = MEMBLOCK_LSQ_FLOW_LOAD;
             tr.fuOpType  = fuOpType;
-            tr.numLsElem = 5'd1;
+            tr.numLsElem = memblock_num_ls_elem_t'(1);
         end
         MEMBLOCK_OP_CLASS_STORE: begin
             tr.fuType    = MEMBLOCK_FUTYPE_STU;
             tr.lsq_flow  = MEMBLOCK_LSQ_FLOW_STORE;
             tr.fuOpType  = fuOpType;
-            tr.numLsElem = 5'd1;
+            tr.numLsElem = memblock_num_ls_elem_t'(1);
         end
         MEMBLOCK_OP_CLASS_PREFETCH: begin
             tr.fuType    = MEMBLOCK_FUTYPE_LDU;
             tr.lsq_flow  = MEMBLOCK_LSQ_FLOW_LOAD;
             tr.fuOpType  = fuOpType;
-            tr.numLsElem = 5'd1;
+            tr.numLsElem = memblock_num_ls_elem_t'(1);
         end
         MEMBLOCK_OP_CLASS_CBO: begin
             tr.fuType    = MEMBLOCK_FUTYPE_STU;
             tr.lsq_flow  = MEMBLOCK_LSQ_FLOW_CBO;
             tr.fuOpType  = fuOpType;
-            tr.numLsElem = 5'd1;
+            tr.numLsElem = memblock_num_ls_elem_t'(1);
         end
         MEMBLOCK_OP_CLASS_AMO: begin
             tr.fuType    = MEMBLOCK_FUTYPE_MOU;
             tr.lsq_flow  = MEMBLOCK_LSQ_FLOW_ATOMIC;
             tr.fuOpType  = fuOpType;
-            tr.numLsElem = 5'd0;
+            tr.numLsElem = memblock_num_ls_elem_t'(0);
         end
         default: begin
             `uvm_fatal(get_type_name(), $sformatf("unsupported boundary op_class=%0d", tr.op_class))

@@ -134,7 +134,7 @@ class lsq_ctrl_model extends uvm_object;
         behavior.is_prefetch            = 1'b0;
         behavior.is_cbo                 = 1'b0;
         behavior.is_atomic              = 1'b0;
-        behavior.num_ls_elem            = 5'd0;
+        behavior.num_ls_elem            = memblock_num_ls_elem_t'(0);
         behavior.atomic_sta_uop_count   = 3'd0;
         behavior.atomic_data_uop_count  = 3'd0;
         return behavior;
@@ -158,7 +158,7 @@ class lsq_ctrl_model extends uvm_object;
             behavior.route_load     = 1'b1;
             behavior.commit_is_load = 1'b1;
             behavior.commit_is_normal = 1'b0;
-            behavior.num_ls_elem    = 5'd1;
+            behavior.num_ls_elem    = memblock_num_ls_elem_t'(1);
             if (is_prefetch_fuoptype(tr.fuOpType)) begin
                 behavior.kind        = MEMBLOCK_OP_BEHAVIOR_PREFETCH;
                 behavior.is_prefetch = 1'b1;
@@ -174,7 +174,7 @@ class lsq_ctrl_model extends uvm_object;
             behavior.route_std       = 1'b1;
             behavior.commit_is_store = 1'b1;
             behavior.commit_is_normal = 1'b0;
-            behavior.num_ls_elem     = 5'd1;
+            behavior.num_ls_elem     = memblock_num_ls_elem_t'(1);
             if (is_cbo_fuoptype(tr.fuOpType)) begin
                 behavior.kind   = MEMBLOCK_OP_BEHAVIOR_CBO;
                 behavior.is_cbo = 1'b1;
@@ -193,7 +193,7 @@ class lsq_ctrl_model extends uvm_object;
             behavior.route_std        = 1'b1;
             behavior.commit_is_normal = 1'b1;
             behavior.is_atomic        = 1'b1;
-            behavior.num_ls_elem      = 5'd0;
+            behavior.num_ls_elem      = memblock_num_ls_elem_t'(0);
             if (is_amocas_q_fuoptype(tr.fuOpType)) begin
                 behavior.atomic_sta_uop_count  = 3'd2;
                 behavior.atomic_data_uop_count = 3'd4;
@@ -379,10 +379,8 @@ class lsq_ctrl_model extends uvm_object;
         end
 
         preview_allocate(behavior, expected_lq_key, expected_sq_key);
-        if (dut_lq_key.flag  != expected_lq_key.flag  ||
-            dut_lq_key.value != expected_lq_key.value ||
-            dut_sq_key.flag  != expected_sq_key.flag  ||
-            dut_sq_key.value != expected_sq_key.value) begin
+        if ((behavior.uses_lq && dut_lq_key != expected_lq_key) ||
+            (behavior.uses_sq && dut_sq_key != expected_sq_key)) begin
             `uvm_fatal("LSQ_CTRL",
                        $sformatf("uid=%0d LSQ enq resp mismatch: expected lq={%0d,%0d} sq={%0d,%0d}, got lq={%0d,%0d} sq={%0d,%0d}",
                                  uid,
@@ -396,24 +394,7 @@ class lsq_ctrl_model extends uvm_object;
                                  dut_sq_key.value))
         end
 
-        tr.lqIdx_flag  = dut_lq_key.flag;
-        tr.lqIdx_value = dut_lq_key.value;
-        tr.sqIdx_flag  = dut_sq_key.flag;
-        tr.sqIdx_value = dut_sq_key.value;
-        tr.numLsElem   = behavior.num_ls_elem;
-
-        data.set_main_transaction(uid, tr);
-        data.activate_uid(uid, behavior.uses_lq, behavior.uses_sq);
-        data.set_status_field(uid, MEMBLOCK_STATUS_ENQ, 1'b1);
-
-        if (behavior.uses_lq) begin
-            lq_enq_ptr = advance_lq_key(lq_enq_ptr, behavior.num_ls_elem);
-            lq_free_count -= behavior.num_ls_elem;
-        end
-        if (behavior.uses_sq) begin
-            sq_enq_ptr = advance_sq_key(sq_enq_ptr, behavior.num_ls_elem);
-            sq_free_count -= behavior.num_ls_elem;
-        end
+        commit_allocate(uid, behavior, tr);
     endfunction:commit_allocate_with_resp
 
     function void commit_non_lsq_admission(input memblock_uid_t uid,

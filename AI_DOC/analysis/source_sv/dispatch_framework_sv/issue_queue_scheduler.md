@@ -47,7 +47,10 @@
 
 端口选择不是随机的。`select_target_candidates()` 先按优先级/ROB 年龄选出每个 target 的候选数组，然后 `assign_issue_items()` 按数组顺序映射端口：第 0 个 load 候选进 load port0，第 1 个进 load port1，以此类推。driver 等待各端口 ready，已经 fire 的端口写入 `fired_mask`；未 fire 的端口不会从队列删除。
 
-route 不再保存本地完成前缀。`route_all_ready_uids()` 每拍调用 `data.advance_terminal_done_uid()`，随后扫描 `[data.get_active_scan_begin_uid(), data.get_active_scan_end_uid())`，并用 `seq_csr_common::get_real_lsq_enq_max()` 限制每拍最多扫描的 uid 数。这样 10 万笔请求下不会每拍从 0 全表扫描，扫描窗口默认 8，对应当前 8-wide LSQ enqueue 总 slot 配置。
+route 不再保存本地完成前缀。`route_all_ready_uids()` 每拍调用 `data.advance_terminal_done_uid()`，随后扫描
+`[data.get_active_scan_begin_uid(), data.get_active_scan_end_uid())`，并直接用
+`MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM` 限制每拍最多扫描的uid数。这样10万笔请求下不会每拍从0全表扫描；
+V2窗口为6，物理slot只由compile宏提供单一权威。
 
 主要函数：
 
@@ -56,13 +59,13 @@ route 不再保存本地完成前缀。`route_all_ready_uids()` 每拍调用 `da
 | `ensure_data()` | 无 | 延迟绑定公共 owner，防止构造顺序导致 null。 |
 | `make_empty_item()` | 无 | 返回安全空 item，所有字段清零，避免选项残留。 |
 | `make_issue_item(uid,target,behavior)` | uid、target、op behavior | 从主表/状态表提取发射需要的轻量字段；STD 使用 `send_pri_std`，其它 target 使用 `send_pri`。其中 `uop_index` 只是初始化为 0，真正发射端口编号由 `assign_issue_items()` 在本拍按候选数组下标覆盖；`uop_count` 普通标量为 1，atomic 根据 behavior 写入理论 uop 数。 |
-| `is_uid_route_ready(uid)` | uid | active、enq、TLB mapped 且没有 flush/redirect/exception 时才允许入队；replay pending 时继续允许路由，但只把 replay target mask 指定的目标重新入队。 |
+| `is_uid_route_ready(uid)` | uid | active、enq、issue_ready且没有flush/redirect/exception时才允许入队；replay pending时继续允许路由，但只把replay target mask指定的目标重新入队。 |
 | `target_already_queued_or_done(status,target)` | 状态、target | 防止同一 target 重复进入队列；load 若已全局 pass/writeback 也不再入队。 |
 | `set_target_queued(uid,target,value)`、`set_target_dispatched(uid,target,value)` | uid、target、值 | 统一更新状态表对应 target 位，避免调用方直接写字段。 |
 | `route_target(uid,target,behavior)` | uid、target、behavior | 生成 issue item 并压入对应队列；replay 时只 route 被 replay mask 指定的 target，入队前先清同 uid/target 的旧 pending 项。 |
-| `route_uid(uid)`、`route_all_ready_uids()` | uid/无 | `route_uid()` 根据 `derive_op_behavior()` 拆到 LOAD/STA/STD 队列；`route_all_ready_uids()` 每拍从公共 active scan begin 到 end 的右开窗口内最多扫描 `seq_csr_common::get_real_lsq_enq_max()` 个 uid，避免大表场景 O(main_trans_num) 扫描。 |
+| `route_uid(uid)`、`route_all_ready_uids()` | uid/无 | `route_uid()` 根据 `derive_op_behavior()` 拆到 LOAD/STA/STD 队列；`route_all_ready_uids()` 每拍从公共 active scan begin 到 end 的右开窗口内最多扫描 `MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM` 个 uid，避免大表场景 O(main_trans_num) 扫描。 |
 | `advance_issue_queue_delays()` | 无 | 每拍递减队列项 ready delay，直到 0 才可选中。 |
-| `is_issue_item_eligible(item)` | issue item | 发射前再次检查 active、enq、TLB、flush、redirect、exception、issue_killed、delay 和 target 状态。LOAD/STA 队列项必须匹配当前 replay_seq；STD 队列项不因同 uid 的 STA replay bump replay_seq 而失效，也不因 STA replay pending 被挡住。这样 store 的 STA 需要重发时，已经排队的 STD 仍可按自身状态继续发射；但 STD 仍受 `std_dispatched`、target issue_epoch 后续反馈检查和全局 flush/redirect 保护。 |
+| `is_issue_item_eligible(item)` | issue item | 发射前再次检查active、enq、issue_ready、flush、redirect、exception、issue_killed、delay和target状态。LOAD/STA队列项必须匹配当前replay_seq；STD队列项不因同uid的STA replay bump replay_seq而失效，也不因STA replay pending被挡住。这样store的STA需要重发时，已排队STD仍可按自身状态继续发射；但STD仍受`std_dispatched`、target issue_epoch反馈检查和全局flush/redirect保护。 |
 | `item_is_older(left,right)` | 两个 item | ROB 年龄相同时用 uid tie-break，保证确定性。 |
 | `item_is_better(candidate,best,compare_pri)` | 候选和当前最佳 | 启用 send priority 时先比优先级，否则按 ROB 年龄；优先级相等仍按年龄。 |
 | `find_global_max_send_pri(max_pri)` | 输出最大优先级 | global 模式采样命中时跨 LOAD/STA/STD 找全局最大优先级；找不到 eligible item 时调度退化为 non-global。 |

@@ -8,7 +8,7 @@
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv`、`build_memblock/rtl/filelist.f` |
 | Plan 类型 | V2 测试框架运行期适配总控，不替代专项 execution plan |
 | 适配原则 | 只记录 V2 适配的关键问题、专项 owner、修改逻辑边界和文字伪代码；不保留历史讨论和长 checklist |
-| 创建/修订日期 | 2026-07-15 |
+| 创建/修订日期 | 2026-07-17 |
 
 ## 1. 范围与边界
 
@@ -50,7 +50,7 @@ test -e build_memblock/rtl/filelist.f
 | compile 参数、宽度、FuType、ROB/LQ/SQ key | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_compile_param_and_width_adapt_execution_plan_20260708.md`，已归档完成；后续 LSQ delta 由 LSQ enqueue 最终 plan 维护 |
 | 自动主表 VADDR 窗口 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_main_table_vaddr_generation_adapt_execution_plan_20260713.md` |
 | DCache L2 sideband known-zero | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_dcache_l2_sideband_responder_adapt_execution_plan_20260712.md` |
-| LSQ enqueue | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md` |
+| LSQ enqueue | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`，coding、文档同步、冻结验证和最终独立review均已完成；真实load已闭环，store admission已覆盖，store终态仍由后续SQ deq专项闭环 |
 | split issue | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_split_issue_framework_adapt_execution_plan_20260708.md` |
 | IQ feedback/replay | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_iq_feedback_replay_framework_adapt_execution_plan_20260711.md` |
 | int-WB/writeback | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_int_wb_writeback_framework_adapt_execution_plan_20260708.md` |
@@ -87,8 +87,8 @@ compile/width 基线已完成。后续专项必须继续遵守：
 - runtime plus 只限制行为使用量，不改变物理 slot、pipe、port、key width 或 presence。
 - AMO/MOU、CBO、vector LS 本轮没有 scalar capability；默认权重为 0，显式非 0 或 manual/fixed 生成
   在主表落表/admission 前 fail-fast。
-- 最终 LSQ enqueue plan 负责在同一主链上追加 LSQ profile tuple、accept-response presence 和 V2 retry
-  guard，归档 compile plan 不再回写。
+- 最终 LSQ enqueue plan 已复用 V2 compile baseline，补齐 LSQ 派生宏、无 response 的 clock-first
+  streaming、load/store 6/4 gate和pending-sample时序；未增加新的profile selector或固定retry guard。
 
 ### 文字伪代码
 
@@ -215,8 +215,9 @@ ready/response 会没有完成条件。
 
 ### 修改原因
 
-V2 `LsqEnqCtrl` 的接受条件要求接受当前 batch 后仍保留 load/store enqueue reserve。软件 candidate
-必须复刻该 gate；driver 必须按 E0 drive、E1 sample/abort/revoke 单周期 request 时序执行。
+V2 6/4 表示单拍 load/store element 端口能力，不是软件模型必须长期保留的 LQ/SQ 空项数。V2 request
+从 driver clocking 边界 launch 后，到下一边界才有 DUT sample 机会；软件 allocation 必须在 launch 后
+立即预留，`issue_ready` 则必须延后到下一边界，才能同时保持 pointer 连续和每拍一批的 streaming 吞吐。
 
 ### 修改方案与修改逻辑
 
@@ -225,42 +226,47 @@ V2 `LsqEnqCtrl` 的接受条件要求接受当前 batch 后仍保留 load/store 
 - V2 scalar LDU/STU request 固定 `uopIdx=0`、`lastUop=1`、`numLsElem=1`。
 - request setter 从 `main_tr + behavior + predicted key` 一次构造完整 slot payload。
 - candidate 保持连续 UID 前缀，只在局部预览 pointer/free count，不修改公共状态。
-- V2 capacity gate 使用 `tentative load <= 6`、`tentative store <= 4`，并要求
-  `free >= tentative batch + reserve width`。
-- V2 driver 不调用 `wait_lsq_can_accept()` 或 response sample；E0 前和 E1 sample 后检查 redirect/epoch。
-- 每次 flush epoch 变化后，LSQ sequence 本地 guard 等 flush 解除，再按 dispatch service cycle 等 5 拍；
-  guard 只阻塞 LSQ candidate，不阻塞 non-LSQ admission。
+- V2 capacity gate 使用 `tentative load <= 6`、`tentative store <= 4`，并分别不超过实际 LQ/SQ free count；
+  不要求额外 reserve 6/4，也不先要求 base free 始终达到 6/4。
+- V2 driver 使用 clock-first streaming，不调用 `wait_lsq_can_accept()` 或 response sample；每个边界先让 DUT
+  采样上一批，再 launch 当前批并立即 `item_done()`。
+- launch 后立即调用唯一 `commit_allocate()` 预留资源；上一批在下一 driver边界通过
+  `complete_v2_pending_sample()` 开放 issue route。
+- collect、driver launch 和 confirm 分别复用现有 global flush/epoch gate；不增加固定5-cycle retry guard。
+- 随机 enqueue 数量支持 ZERO/MIDDLE/MAX 三类权重；返回0时只发送idle，不消费next uid或修改LSQ资源。
 
 ### 文字伪代码
 
 ```text
 collect_lsq_candidates()：
   如果 global flush gate 有效，返回空；
-  如果 V2 retry guard active，返回空；
-  保存 base_lq_free/base_sq_free；
-  如果 base_lq_free < LSQLdEnqWidth 或 base_sq_free < LSQStEnqWidth，返回空；
-  effective_slot_limit = min(runtime enq_per_cycle, compile slot num)；
+  每拍调用一次get_enq_per_cycle取得runtime目标；
+  如果目标为0，在读取uid/pointer/free count前返回空，并由上层发送全零idle；
+  保存当前LQ/SQ pointer和free count到局部变量；
   复制 LQ/SQ enqueue pointer 到局部变量；
   load_elem_count=0，store_elem_count=0；
   从 next-admit uid 开始预览连续前缀：
     遇非 LSQ、已有状态、unsupported op 或 slot 上限时停止；
-    derive_op_behavior() 得到 load/store element 数；
+    derive_op_behavior() 得到scalar load/store element 数，本轮要求num_ls_elem=1；
     tentative 计数超过 6/4 时停止；
-    base free 小于 tentative + reserve width 时停止；
+    tentative 计数超过对应实际free count时停止；
     保存 uid、tr、behavior、预测 key 到等长 queue；
     只推进局部 pointer 和局部 element count；
   返回 queue 是否非空。
 
 send_lsqenq_cycle()：
-  先处理 pending cancel 和 V2 retry guard 更新；
+  先处理 pending cancel；
+  上一批pending且下一uid是non-LSQ时，先发送idle边界完成上一批sample；
   先尝试 non-LSQ admission；
   收集 LSQ candidates；
   无 candidate 时发送一个全零 idle item；
   有 candidate 时：
     clear xaction；
     对每个 candidate 调用唯一 setter 构造完整 V2 request；
-    start_item/finish_item 交给 driver；
-    driver 未 abort 且 epoch 未变时，preview key 重新核对后调用唯一 commit_allocate()；
+    start_item/finish_item 交给clock-first driver；
+    finish_item返回后先complete上一批pending sample；
+    当前批未abort且epoch未变时，preview key重新核对后调用唯一commit_allocate()预留资源；
+    当前批保存为pending sample，下一driver边界才设置issue_ready；
   V2 不等待 canAccept/response。
 ```
 
@@ -601,7 +607,7 @@ make eda_run tc=tc_sanity mode=base_fun
 专项还必须运行各自 plan 定义的 directed smoke，例如：
 
 - split issue：真实 fired-mask、no-progress error 和 vector fail-fast。
-- LSQ enqueue：V2 E0/E1 request、6/4 capacity gate、redirect retry guard。
+- LSQ enqueue：V2 clock-first streaming、launch reservation/下一边界 sample、6/4 capacity gate、随机idle和redirect epoch路径。
 - IQ feedback/replay：STA IQ/WB 正向和独立 expected-fatal。
 - LSQ MMIO/status：normal pendingst/scommit、fault-at-tail、V2 SQ count-only、driver active idle hold。
 - L2TLB：single-outstanding request fire、response latency、idle-stop。
@@ -629,7 +635,7 @@ make eda_run tc=tc_sanity mode=base_fun
 后续 coverage 可采样：
 
 - V2 split issue target、FuType/fuOpType route。
-- LSQ enqueue slot 占用、load/store batch element 数和 redirect retry guard 命中。
+- LSQ enqueue slot 占用、load/store batch element 数、随机idle类别和redirect launch/sample时点。
 - STA IQ hit/miss、real-WB、expected-fatal 类型。
 - normal commit、fault convergence、V2 SQ count-only deq。
 - L2TLB ready gate/outstanding 状态和 response latency bucket。
@@ -643,7 +649,7 @@ make eda_run tc=tc_sanity mode=base_fun
 | 版本结构参数 | 编译期结构 | 固定 V3 值、runtime 镜像或同义参数可能并存 | V2/V3 结构必须 elaboration 前固定 | compile profile 是唯一权威，runtime 只限制行为使用量 |
 | 主表 VADDR | 参数语义 | VA 生成复用 PADDR 窗口 | VA/PADDR 语义不同 | MAIN_VADDR 与 PADDR 参数解耦 |
 | split issue | 激励生成 | 聚合 issue 语义和固定 fired-mask 残留 | V2 是 LDA/STA/STD split port | 由 compile port count 派生 route/mask，vector 本轮 fail-fast |
-| LSQ enqueue | 激励生成/driver 时序 | V3 slot/response 假设残留 | V2 无 accept-response，字段更多且 6/4 gate 不同 | 完整 request setter、capacity gate、E0/E1 单周期时序 |
+| LSQ enqueue | 激励生成/driver 时序 | V3 slot/response 假设残留，allocation和issue-ready同拍 | V2 无 accept-response，字段更多且launch后下一边界才完成sample | 完整request setter、load/store 6/4实际free gate、clock-first每拍streaming、launch reservation与下一边界issue-ready分层；不增加固定retry guard |
 | int-WB/IQ raw | monitor event | 伪造不存在 key，replay 后缺 snapshot | V2 raw 必须保真且 current event 必须带 generation | raw 保真 + current status snapshot attach + cycle timeline |
 | ROB/LSQ status | 状态生命周期 | fault 混入 normal commit，SQ pointer 默认 0 被误用 | V2 fault 不产生 normal commit，V2 无 sqDeqPtr | normal/fault 分流、full-raw owner、count-only deq |
 | L2TLB | responder 生命周期 | ready 可能由 item/default 绕过 | 需要 single-outstanding backpressure | 唯一 gate + fire 后清 gate + response done 后 rearm |

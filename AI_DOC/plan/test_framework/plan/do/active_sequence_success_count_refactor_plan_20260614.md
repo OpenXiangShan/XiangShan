@@ -1,5 +1,13 @@
 # 主动发射型 sequence 公共 success 退出改造方案
 
+> **LSQ enqueue 历史边界（2026-07-16）**：本文中的 8-slot、`canAccept/response`、
+> `commit_allocate_with_resp()` 作为 V2 主路径或 `MEMBLOCK_LSQENQ_SEQ_EN=0` 默认值描述均为
+> 早期实现审计，不代表当前 V2 行为。当前实现以
+> `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`
+> 和 `AI_DOC/mem_ut_flow_doc/lsq_admission_flow.md` 为准：6-slot、load/store 6/4、无顶层
+> ready/response、clock-first streaming、launch后reservation、下一driver边界issue-ready，且LSQ enqueue
+> sequence默认启用。
+
 ## 1. 背景
 
 当前 `memblock_lintsissue_dispatch_sequence::drive_dispatch_issue_loop()` 每拍调用：
@@ -646,10 +654,9 @@ ptw_wait_replay_q.size()
 2. 三个主 transaction driver 统一使用该参数作为 no-progress warning 阈值。
 3. 删除旧 `MEMBLOCK_DISPATCH_ISSUE_IDLE_STOP`、`MEMBLOCK_LSQENQ_IDLE_STOP`、
    `MEMBLOCK_LSQCOMMIT_IDLE_STOP` 以及对应 `*_START_TIMEOUT`，不保留兼容入口。
-4. 三个主 transaction driver 的 enable 默认值必须保守：`MEMBLOCK_DISPATCH_ISSUE_SEQ_EN=0`、
-   `MEMBLOCK_LSQENQ_SEQ_EN=0`、`MEMBLOCK_LSQCOMMIT_SEQ_EN=0`。真实 dispatch smoke 通过
-   `seq/plus_cfg/tc_dispatch_real*.cfg` 显式打开，避免普通 testcase 没有主表时启动常驻
-   active driver。
+4. 当前三个主 transaction driver 的默认值分别为：`MEMBLOCK_DISPATCH_ISSUE_SEQ_EN=0`、
+   `MEMBLOCK_LSQENQ_SEQ_EN=1`、`MEMBLOCK_LSQCOMMIT_SEQ_EN=1`。LSQ enqueue/commit 默认 sequence
+   在无主表时保持idle等待，并由testcase phase结束统一收尾；需要隔离的场景通过cfg显式置0。
 5. enable=0 时必须保持 idle 并返回，不允许调用父类随机 default sequence。原因是这些
    sequence 已经被 `tc_base` 挂到对应 agent 的 main_phase default sequence 上；如果关闭时
    继续 `super.body()`，普通 testcase 仍可能收到随机 LSQENQ/LINTSISSUE/LSQCOMMIT 激励。

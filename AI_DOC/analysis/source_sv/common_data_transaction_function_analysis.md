@@ -64,19 +64,20 @@ lsq_commit_handler / lsqcommit sequence
 |---|---|---|---|---|
 | `reset_all_tables(main_trans_num_i)` | 按 transaction 数量重置公共数据表、状态表、TLB 表、issue queue、feedback queue、active map、redirect/flushSb/PTW wait 状态。 | `main_trans_num_i`：本轮主表 transaction 数量。 | 无返回；副作用是重新分配数组并清空运行期状态。 | `build_random_main_table()` 或 `import_manual_main_table()` 的第一步，保证新主表不会继承上一轮残留状态。 |
 | `alloc_uid()` | 分配连续递增的 uid。 | 无显式输入，依赖 `next_uid/main_trans_num`。 | 返回 `memblock_uid_t uid`。 | 主表生成循环中为每条 transaction 分配公共主键，后续所有表都按 uid 关联。 |
-| `set_main_transaction(uid, tr)` | 把 transaction 写入 `main_table_by_uid[uid]`，并修正 `tr.uid`。 | `uid`、`main_control_transaction tr`。 | 无返回；副作用是更新主表。 | 主表生成阶段保存随机或手动 transaction；LSQ 入队确认前也用它写回 DUT 分配的 LQ/SQ index。 |
+| `set_main_transaction(uid, tr)` | 把 transaction 写入 `main_table_by_uid[uid]`，并修正 `tr.uid`。 | `uid`、`main_control_transaction tr`。 | 无返回；副作用是更新主表。 | 主表生成阶段保存随机或手动transaction；V2 request launch后由`commit_allocate()`写回软件preview的LQ/SQ key。 |
 | `init_status_for_uid(uid)` | 初始化该 uid 的状态表项，并从主表 snapshot 静态字段。 | `uid`。 | 返回 `status_transaction` 句柄。 | 主表全部生成后建立每条 transaction 的初始状态，后续入队、发射、写回都只更新状态表。 |
 | `check_main_table_complete()` | 检查 uid 分配数量、主表和状态表完整性，并置 `main_table_ready=1`。 | 无。 | 无返回；副作用是设置 `main_table_ready`，并可能 arm scheduled flushSb。 | 主表构建结束闸口。下游 LSQ 入队、L2TLB responder、issue sequence 看到 ready 后才能消费公共表。 |
 
 #### `lsq_ctrl_model / lsqenq sequence` LSQ admission 链路
 
-这条链路负责在 DUT 接受 LSQ 入队后，把主表项从“已生成但未进入 DUT”切换成“active，可被 monitor 反查”的状态。
+这条链路负责在V2 request launch后预留软件LSQ资源，把主表项从“已生成”切换成“active，可被monitor
+反查”的状态；下一driver边界才设置`issue_ready`。
 
 | 函数 | 功能 | 输入 | 输出 | 在调用关系中的作用 |
 |---|---|---|---|---|
-| `set_main_transaction(uid, tr)` | 将 DUT admission response 中确认的 `lqIdx/sqIdx/numLsElem` 写回主表。 | `uid`、带入队结果的 `main_control_transaction tr`。 | 无返回；更新主表项。 | LSQ 入队成功后，主表中的 LQ/SQ index 必须和 DUT 返回一致，后续 issue 字段和 monitor 反查都依赖这些值。 |
+| `set_main_transaction(uid, tr)` | 将软件`preview_allocate()`确认的`lqIdx/sqIdx/numLsElem`写回主表。 | `uid`、带reservation结果的`main_control_transaction tr`。 | 无返回；更新主表项。 | V2顶层没有enqueue response；主表key与request payload、active map和后续issue使用同一软件allocation真源。 |
 | `activate_uid(uid, map_lq, map_sq)` | 将 uid 标记 active，并建立 ROB 反查表；按需建立 LQ/SQ 反查表。 | `uid`、`map_lq`、`map_sq`。 | 无返回；副作用是更新 `uid_by_active_rob/uid_by_lq/uid_by_sq` 和 `status.active`。 | admission 成功后的关键状态切换。只有 active uid 才允许被 writeback、feedback、deq、redirect 事件命中。 |
-| `set_status_field(uid, MEMBLOCK_STATUS_ENQ, 1'b1)` | 设置该 uid 已完成入队。 | `uid`、字段枚举 `MEMBLOCK_STATUS_ENQ`、值 `1'b1`。 | 无返回；更新 `status.enq`。 | issue scheduler 会要求 `active/enq/tlb_mapped` 等状态满足后才允许 route 和发射。 |
+| `set_status_field(uid, MEMBLOCK_STATUS_ENQ, 1'b1)` | 设置该uid已建立launch reservation。 | `uid`、字段枚举`MEMBLOCK_STATUS_ENQ`、值`1'b1`。 | 无返回；更新`status.enq`。 | issue scheduler要求`active/enq/issue_ready`；`issue_ready`由下一driver边界的pending-sample completion设置。 |
 
 #### `tlb_map_builder / l2tlb sequence` TLB 建表和响应链路
 
@@ -219,7 +220,8 @@ lsq_commit_handler / lsqcommit sequence
 
 输出：无显式返回；更新 `main_table_by_uid[uid]`。
 
-主要调用方：`memblock_dispatch_base_sequence` 主表生成；`lsq_ctrl_model::commit_allocate()` 和 `commit_allocate_with_resp()` 在 LSQ admission 成功后写回 LQ/SQ index。
+主要调用方：`memblock_dispatch_base_sequence` 主表生成；V2由`lsq_ctrl_model::commit_allocate()`在request
+launch后写回LQ/SQ index。`commit_allocate_with_resp()`仅是其它profile的比较wrapper，最终仍转调同一owner。
 
 内部依赖：调用 `check_uid()` 做合法性检查。
 
@@ -1061,7 +1063,7 @@ end
 
 输出：无。
 
-主要调用方：`lsq_ctrl_model::commit_allocate()` 和 `commit_allocate_with_resp()`。
+主要调用方：V2为`lsq_ctrl_model::commit_allocate()`；response wrapper比较通过后也转调该唯一owner。
 
 内部依赖：调用 `get_main_transaction()`、`ensure_status_exists()`、`rob_order_util::rob_to_map_key()`、`is_valid_lq_key()`、`rob_order_util::lq_to_map_key()`、`is_valid_sq_key()`、`rob_order_util::sq_to_map_key()`。
 

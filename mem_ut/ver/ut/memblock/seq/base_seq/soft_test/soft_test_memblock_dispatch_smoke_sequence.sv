@@ -295,13 +295,13 @@ function main_control_transaction soft_test_memblock_dispatch_smoke_sequence::ma
             tr.fuType    = MEMBLOCK_FUTYPE_LDU;
             tr.lsq_flow  = MEMBLOCK_LSQ_FLOW_LOAD;
             tr.fuOpType  = MEMBLOCK_LSUOP_LD;
-            tr.numLsElem = 5'd1;
+            tr.numLsElem = memblock_num_ls_elem_t'(1);
         end
         MEMBLOCK_OP_CLASS_STORE: begin
             tr.fuType    = MEMBLOCK_FUTYPE_STU;
             tr.lsq_flow  = MEMBLOCK_LSQ_FLOW_STORE;
             tr.fuOpType  = MEMBLOCK_LSUOP_SD;
-            tr.numLsElem = 5'd1;
+            tr.numLsElem = memblock_num_ls_elem_t'(1);
         end
         default: begin
             `uvm_fatal(get_type_name(), $sformatf("unsupported smoke op_class=%0d", op_class))

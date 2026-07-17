@@ -1,5 +1,12 @@
 # dispatch_plan_v2 开发执行细节
 
+> **LSQ enqueue 适用性注记（2026-07-16）**：本文保留早期 dispatch 框架开发审计记录，
+> 其中 LSQ enqueue 的 8-slot、`canAccept/response`、默认关闭和随机 fallback 描述已经失效。
+> 当前 V2 行为以
+> `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`
+> 和 `AI_DOC/mem_ut_flow_doc/lsq_admission_flow.md` 为准：6-slot、load/store 6/4、无 response、
+> clock-first streaming，且 `MEMBLOCK_LSQENQ_SEQ_EN` 默认值为 1。
+
 ## 1. 开发规则
 
 本文件用于记录 `dispatch_plan_v2_review_annotated.md` 的实际开发拆分、实现细节、疑问处理和验收结果。每完成一个任务，都需要补充本文件中的实现说明、验收记录和后续风险。
@@ -1316,7 +1323,8 @@ Subagent review：
     - `lsq_ctrl`：`lsq_ctrl_model::get()` 单例句柄，负责 LSQ 资源预览、DUT resp 校验和正式指针推进。
     - `tlb_builder`：admission 成功后为该 uid 生成 TLB 表。
     - `issue_sched`：admission 和 TLB 表完成后把 uid 路由到 load/STA/STD 发射队列。
-    - `enable`：由 `MEMBLOCK_LSQENQ_SEQ_EN` 控制，默认 0。真实 dispatch smoke cfg 显式置 1，普通 testcase 不生成主表时保持安全默认 sequence。
+    - `enable`：早期实现由 `MEMBLOCK_LSQENQ_SEQ_EN` 控制并默认 0；当前默认值已改为 1。
+      无主表时当前 sequence 只保持 idle 并等待，显式置 0 时直接返回；现行时序和字段合同见文首适用性注记。
     - `ready_timeout`：driver 等待 `io_ooo_to_mem_enqLsq_canAccept` 的最大周期数，对应 `MEMBLOCK_LSQENQ_READY_TIMEOUT`。
     - `no_progress_warn_cycles`：来自 `MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES`，用于等待主表或 admission loop 连续无进展时周期性 warning，不作为退出条件。
     - admission 起点不再由本 sequence 保存本地 `next_admit_uid`；每轮从 `common_data_transaction::get_next_new_admit_uid()` 推导。这样 redirect flush 回退公共 `max_enqueued_uid` 后，老 uid 会自然重新成为下一条 admission 候选。

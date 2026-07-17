@@ -1,5 +1,11 @@
 # mem_ut 当前支持 Flow 与 DUT 实际场景 Flow 对比
 
+> **LSQ enqueue 历史边界（2026-07-16）**：本文保留的8-slot、`canAccept/response`、
+> response wrapper或默认关闭描述属于早期实现，不代表当前V2主链。当前权威为
+> `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`
+> 和`AI_DOC/mem_ut_flow_doc/lsq_admission_flow.md`：V2 6-slot、load/store 6/4、clock-first launch、
+> launch后reservation、下一driver边界issue-ready，且LSQ enqueue sequence默认启用。
+
 ## 1. 分析目标
 
 本文档用于回答两个问题：

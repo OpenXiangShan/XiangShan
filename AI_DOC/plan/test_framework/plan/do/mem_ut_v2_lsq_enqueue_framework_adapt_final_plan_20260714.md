@@ -2,13 +2,13 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待 coding |
+| 状态 | `do`，coding、文档同步、冻结验证和最终独立review均已完成 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv` |
 | 测试框架入口 | `memblock_lsqenq_dispatch_base_sequence::send_lsqenq_cycle()` |
 | 适配原则 | 只修改 V2 字段、参数和必要的入队完成细节，不改变主表、issue、commit/deq、pass/fail、terminal 主体逻辑 |
-| 创建/修订日期 | 2026-07-16 |
+| 创建/修订日期 | 2026-07-17 |
 
 ## 1. 范围与边界
 
@@ -46,6 +46,165 @@ uid 永久重试。
 V2/V3 的硬件结构差异只使用 compile profile 和 presence macro 隔离，不增加硬件结构 runtime plus。
 所有新增 V2 运行期分支都放在“accept-response presence 不存在”的编译分支。V3 只保留当前字段和
 方法入口的条件编译边界；本 plan 不新增或宣称补齐 V3 `wait/sample/response` 运行期功能。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### [IMPLEMENTATION_DELTA] 本轮保持 scalar-only
+
+- 来源：coding 前对照本 plan 范围声明、总控 plan 和用户已确认边界时发现，原问题四仍写有 vector
+  chunk 与同 UID 跨拍进度，但本轮明确不支持 vector LS / `issueVldu`。
+- 原 plan：Candidate 写成 vector-ready，并要求本轮实现 vector element 分片状态。
+- 实现调整：本轮只接受 `behavior.num_ls_elem == 1` 的 scalar LDU/STU；Candidate 仍按
+  `num_ls_elem` 类型累计，但不新增 vector chunk/progress 状态。vector 继续由现有 validation、
+  `derive_op_behavior()` 和 FuType helper fail-fast，分片功能转入后续 vector 专项。
+- 原因：vector 分片需要额外定义状态 owner、redirect/replay 恢复和终态合同，不能隐藏混入 scalar
+  V2 接口适配。
+- 影响范围：`memblock_lsqenq_dispatch_base_sequence.sv`、类型参数化和实现 review；不修改 issue loop。
+
+### [IMPLEMENTATION_DELTA] 复用已完成的 V2 compile baseline
+
+- 来源：总控 plan 已将 compile/width 基线归属到已完成的
+  `plan/do/mem_ut_v2_compile_param_and_width_adapt_execution_plan_20260708.md`，当前源码没有
+  `MEMBLOCK_DUT_PROFILE_V2/V3` selector。
+- 原 plan：本专项重新引入排他的 V2/V3 profile selector，并描述 V3 8-slot/accept-response tuple。
+- 实现调整：不修改 `tb.f`，不新增 profile selector。本轮只在现有 V2
+  `memblock_compile_params.svh` 补齐 LSQ 专项缺失的 load/store enqueue width、uopIdx 和
+  numLsElem 派生宏；现有 `MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP=0` 继续作为 V2 capability。
+- 原因：本专项目标是 V2 可执行适配；重新建立 V3 编译基线会扩大范围并形成第二套版本权威。
+- 影响范围：`memblock_compile_params.svh`、LSQ agent/sequence consumer 和实现 review；V3 不宣称验证。
+
+### [IMPLEMENTATION_DELTA] Candidate 不保留 6/4 个空项
+
+- 来源：原问题四仍要求 base LQ/SQ free count 先达到 6/4；这与此前确认的串行 UVM 软件分配模型冲突。
+- 原 plan：只有 LQ 至少空 6 项、SQ 至少空 4 项时才允许形成 Candidate。
+- 实现调整：只要求本拍累计 `load_elem_count <= MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH`、
+  `store_elem_count <= MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH`，并分别不超过该拍入口快照的实际 LQ/SQ
+  free count。不得额外执行 `base_lq_free >= 6` 或 `base_sq_free >= 4` gate。
+- 原因：6/4 是单拍端口结构上限；当前 UVM 在 launch confirm 时立即预留资源，不复制 RTL
+  registered credit 的提前余量。如果强制保留 6/4 个空项，LQ/SQ 尾部资源永远不可使用。
+- 影响范围：`collect_lsq_candidates()`、LSQ admission flow 文档和实现 review；已有 pointer、free-count
+  advance/cancel/release 公式不变。
+
+### [IMPLEMENTATION_DELTA] 6/4 Gate 覆盖整个 LSQ Agent 行为面
+
+- 来源：归档前独立review第7轮发现，原方案只在dispatch sequence的candidate路径累计6/4，但通用
+  `lsqenq_agent_agent_default_sequence`会直接随机化xaction，仍可能生成5个或6个store。
+- 原 plan：问题四只要求`collect_lsq_candidates()`限制load/store batch，没有定义随机default sequence
+  和外部directed item进入driver时的同一合同。
+- 实现调整：`lsqenq_agent_agent_xaction`新增batch约束，对6个slot中valid load/store分别计数并限制为
+  compile-profile 6/4；`validate_v2_scalar_item()`在首次VIF写入前再次统计并fail-fast。dispatch candidate
+  继续执行原有6/4和实际free-count过滤。
+- 原因：xaction约束保证标准随机路径不产生非法item，driver检查保证关闭约束、手工赋值或其它sequence
+  也不能绕过硬件端口能力；二者共同覆盖完整agent行为面。
+- 影响范围：`lsqenq_agent_agent_xaction.sv`、`lsqenq_agent_agent_driver.sv`、Plan/review和接口/flow文档；
+  不改变主表、allocation、issue、commit/deq或terminal owner。
+
+源码级伪代码：
+
+```text
+xaction batch constraint：
+  load_count = 六个slot中(valid && needAlloc==LQ)的数量；
+  store_count = 六个slot中(valid && needAlloc==SQ)的数量；
+  约束load_count <= MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH；
+  约束store_count <= MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH；
+
+driver validate_v2_scalar_item()：
+  load_count=0；store_count=0；
+  逐slot读取valid、needAlloc和payload；
+  inactive slot继续执行全零合同检查；
+  active load使load_count递增，超过compile load width则uvm_fatal；
+  active store使store_count递增，超过compile store width则uvm_fatal；
+  然后继续执行FuType、key范围和scalar字段检查；
+  所有检查通过后send_pkt才写VIF。
+```
+
+中文文字伪代码：先由xaction约束保证标准default sequence随机化时不会生成超过6/4的batch；driver不信任
+producer是否保持约束开启，所以在任何字段写入VIF前重新扫描六个slot。inactive slot不计数且必须全零，
+active slot按`needAlloc`归入load或store；计数第一次越过compile上限就fatal并阻止非法item继续成为有效激励。
+dispatch sequence仍在candidate阶段提前过滤，因此正常主路径不会依赖driver fatal来做仲裁。
+
+### [IMPLEMENTATION_DELTA] `fuOpType` 与 Framework Metadata 合同闭环
+
+- 来源：归档前独立review第8轮发现，xaction/driver虽然限制了`needAlloc/FuType`，但没有限制active
+  slot的`fuOpType`；自定义compare回退路径也遗漏`wait_can_accept/ready_timeout/flush_epoch`。
+- 原 plan：要求本轮只支持scalar load、software prefetch和普通store，并要求framework metadata进入
+  automation/打印/compare，但没有列出agent层可复用的`fuOpType`合法集合和手工compare完整字段。
+- 实现调整：xaction用两组宏值表唯一维护合法集合，LQ只接受普通load `0..6`和software prefetch
+  `8/9/10`，SQ只接受普通store `0..3`；逐slot constraint直接`inside`值表，driver static helper读取
+  同一值表完成fail-fast。
+  `psdisplay()`和自定义compare回退路径覆盖全部五个framework metadata字段。
+- 原因：通用default sequence和关闭constraint的directed item都不能绕过本轮scalar-only边界；仅凭
+  `FuType`无法排除CBO等不支持opcode。手工compare覆盖UVM automation失败结果时，也必须重新比较全部
+  本类功能metadata，否则不同flush epoch可能被误判为相等。
+- 影响范围：`lsqenq_agent_agent_xaction.sv`、`lsqenq_agent_agent_driver.sv`、Plan/review和字段分析文档；
+  不改变主表producer、dispatch setter、allocation、issue、commit/deq或terminal owner。
+
+文字伪代码：
+
+```text
+xaction随机约束：
+  active LQ slot要求fuOpType属于普通load 0..6或prefetch 8/9/10；
+  active SQ slot要求fuOpType属于普通store 0..3；
+  CBO 7/12/13/14、AMO和其它9-bit值均不可随机生成；
+
+driver运行期复核：
+  load/prefetch slot调用同一个LQ helper，不合法立即fatal；
+  store slot调用同一个SQ helper，不合法立即fatal；
+  复核发生在首次VIF赋值前，directed item不能绕过；
+
+display/compare：
+  打印wait_can_accept、ready_timeout、request_launched、aborted_by_redirect和flush_epoch；
+  super.compare失败进入项目既有手工回退时，逐项重新比较上述五个metadata；
+  任一字段不同都保持compare失败，不吞掉stale epoch或launch合同差异。
+```
+
+### [IMPLEMENTATION_DELTA] 当前 V2 物理展开拒绝非 6/6/4 Tuple
+
+- 来源：归档前独立review第11轮发现，`MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM`、
+  `MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH`和`MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH`虽是compile宏，但当前interface、
+  xaction、driver和setter仍显式展开六个slot。只检查非零及width不超过slot，无法阻止宏值与物理字段面分叉。
+- 原 plan：要求物理结构通过compile宏管理，未说明当前V2尚未具备任意tuple的全链路参数化能力。
+- 实现调整：保留三个宏作为consumer的唯一引用入口；`check_compile_param_consistency()`进一步要求当前V2
+  tuple严格等于6/6/4。非默认覆盖在任何sequence或driver激励前`uvm_fatal`；未来只有其它profile同步
+  参数化全部显式consumer后，才能修改或放开该检查。
+- 原因：较小slot值会让循环跳过仍被driver物理驱动的高slot，较大值会在case default处延迟fatal；两者
+  都不能作为合法版本切换。当前最小安全方案是明确拒绝不完整profile，而不是假装已经通用参数化。
+- 影响范围：`memblock_compile_params.svh`注释、`seq_csr_common::check_compile_param_consistency()`和
+  implementation review；默认6/6/4行为、candidate、driver时序和公共状态不变。
+
+文字伪代码：
+
+```text
+公共配置初始化时调用check_compile_param_consistency；
+先执行既有非零和width不超过slot检查；
+再比较当前LSQ slot/load/store compile tuple是否精确为6/6/4；
+任一值不同就在产生激励前uvm_fatal，并打印实际tuple；
+全部匹配才继续其它宽度、FuType和issue port一致性检查。
+```
+
+### [IMPLEMENTATION_DELTA] Streaming Gap 的 Display/Compare 回退闭环
+
+- 来源：归档前独立review第11轮发现，LSQ xaction已约束并由driver复核`pre_pkt_gap/post_pkt_gap=0`，
+  但custom compare在`super.compare()`失败后重置结果并手工比较时遗漏两个gap；`psdisplay()`也未打印。
+- 原 plan：要求V2 streaming使用零gap，没有覆盖项目基类compare返回失败后的本类手工回退细节。
+- 实现调整：`psdisplay()`打印pre/post gap；手工compare回退在framework metadata和payload之前显式比较
+  两个gap，任一不同保持compare失败并打印双方值。`start/finish`时间戳仍按既有回退语义忽略。
+- 原因：driver fatal只能阻止非法DUT激励，不能保证transaction compare正确；仅gap不同的item也必须被
+  debug/未来scoreboard识别为不同。
+- 影响范围：`lsqenq_agent_agent_xaction.sv`和implementation review；不改变random约束、driver、VIF或
+  公共状态。
+
+文字伪代码：
+
+```text
+psdisplay输出pre_pkt_gap和post_pkt_gap；
+compare先调用super.compare；
+如果进入项目既有手工回退：
+  重新把本类比较结果初始化为相等；
+  比较双方pre/post gap，任一不同则保持失败并打印差异；
+  再按既有顺序比较framework metadata、V2 extra字段和普通payload；
+不重新比较start/finish时间戳，保留原回退边界。
+```
 
 ## 2. 问题一：LSQ 硬件结构仍有 V3 固定值
 
@@ -477,8 +636,9 @@ V2 request 从一个 driver clocking 边界 drive 后，到下一个边界才被
 ### 修改方案与修改逻辑
 
 V2 `configure_from_plus()` 保留 sequence enable 和 no-progress 参数，直接把本地 `ready_timeout` 置零，
-不读取 timeout getter。`seq_csr_common::validate_and_clamp()` 在 V2 跳过 LSQ ready timeout 的
-warning/clamp；V3 仍保留原 timeout 字段及 wait/response 方法入口，其功能扩展不属于本 plan。
+不读取 timeout getter。公共 `seq_csr_common::load_from_plus()` 仍解析该兼容参数并执行非负合法性检查，
+因此显式负值仍会 fatal；`validate_and_clamp()` 则在 V2 跳过 LSQ ready timeout 的零值 warning/clamp。
+V3 仍保留原 timeout 字段及 wait/response 方法入口，其功能扩展不属于本 plan。
 
 V2 xaction 增加 framework-only metadata `memblock_dispatch_request_launched`，并把现有
 `memblock_dispatch_aborted_by_redirect` 的 V2 语义收窄为“launch 前因 flush/epoch 失效而未发送”。
@@ -827,15 +987,15 @@ reset、no-item、idle item 和launch前abort：
 | `mem_ut/ver/ut/memblock/env/plus.sv` | 问题四：新增 ZERO/MIDDLE/MAX 三类 enqueue 数量权重定义、中文注释和 plus 加载 |
 | `mem_ut/ver/ut/memblock/seq/plus_cfg/default.cfg` | 问题四：增加三个同名默认项，分别为 `0/-1/1`；`-1` 表示 MIDDLE AUTO |
 | `mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_types.sv` | 问题一、三：compile localparam、key/FuType 和 `memblock_num_ls_elem_t` |
-| `mem_ut/ver/ut/memblock/seq/base_seq_help/seq_csr_common.sv` | 问题一、四、五：compile tuple、三类权重快照/AUTO解析/合法性、两阶段 `std::randomize` getter 和 V2 timeout 不消费 |
+| `mem_ut/ver/ut/memblock/seq/base_seq_help/seq_csr_common.sv` | 问题一、四、五：compile tuple、三类权重快照/AUTO解析/合法性、两阶段 `std::randomize` getter，以及 timeout 公共解析与 V2 sequence 不读取的边界 |
 | `mem_ut/ver/ut/memblock/seq/base_seq_help/main_control_transaction.sv` | 问题三：`numLsElem` 统一类型和范围 |
 | `mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_ctrl_model.sv` | 问题三、六：behavior 类型；response wrapper 调用唯一 allocation owner |
 | `mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv` | 问题三：现有 `numLsElem` producer 使用统一类型 cast |
 | `mem_ut/ver/ut/memblock/seq/base_seq/memblock_lsqenq_dispatch_base_sequence.sv` | 问题三至七：request/candidate、随机 0 的无副作用短路与显式 idle、streaming launch reservation、pending-sample completion、non-LSQ/trailing idle 边界和现有 flush/epoch gate |
 | `mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_agent_agent_cfg.sv` | 问题八：V2 `DRV_0` soft 默认 |
 | `mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_agent_agent_interface.sv` | 问题一、二：profile 字段和统一宽度 |
-| `mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_agent_agent_xaction.sv` | 问题一至三、五：字段、类型、约束、automation/打印/compare，以及 framework-only `request_launched` metadata |
-| `mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_agent_agent_driver.sv` | 问题二、五、八：V2 clock-first streaming、launch 前 epoch 检查、build 合同、send 和 idle |
+| `mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_agent_agent_xaction.sv` | 问题一至五：字段、类型、逐slot scalar约束、整个batch的6/4约束、automation/打印/compare，以及 framework-only `request_launched` metadata |
+| `mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_agent_agent_driver.sv` | 问题二、四、五、八：V2 clock-first streaming、launch前epoch检查、整个batch的6/4运行期复核、build合同、send和idle |
 | `mem_ut/ver/ut/memblock/agent/lsqenq_agent_agent/src/lsqenq_agent_agent_monitor.sv` | 问题一、二：当前 profile 字段局部采样和 X/Z 宽度；不恢复 analysis-port 发布 |
 | `mem_ut/ver/ut/memblock/tb/lsqenq_agent_connect.sv` | 问题一、二：V2 extra 字段连接和 V3 presence 隔离 |
 | `mem_ut/ver/ut/memblock/rule/plus_demo_migration_plan.md` | 问题四：同步新增 plus 名称、默认配置和使用示例 |
@@ -860,16 +1020,16 @@ commit/deq、pass/fail、terminal owner
 | compile profile、slot、位宽和 presence | 字段/参数适配 | 散落默认值，混有 V3 8-slot、36-bit FuType、9-bit ROB 和固定 uop/LS-element 宽度 | V2 结构在编译期固定 | 一个 profile 定义全部 LSQ 结构；V2=6-slot、35-bit、8/7/6-bit key；uopIdx/numLsElem 从 MAX_UOP_SIZE/VLEN 派生；硬件结构不走 plus |
 | V2 extra request 字段链 | 字段适配 | 字段只存在于部分 interface/xaction/driver，setter/clear/connect 不完整 | active 和 idle 都可能残留字段 | slot0..5 的 interface、xaction、setter、driver、monitor-local/XZ、connect 使用同一字段集合；monitor 不新增 transaction 发布 |
 | `numLsElem` 类型 | 字段/参数适配 | 固定 `[4:0]` 和散落 `5'd0/1` | 类型存在多个权威 | seq 内统一使用 `memblock_num_ls_elem_t`；agent 使用同宽度 compile macro packed 类型 |
-| xaction 合法范围 | 字段/约束适配 | FuType 保留 V3 literal，uop/LQ/SQ/numLsElem 使用固定上限，且部分 slot 约束为空 | 位宽参数化后仍可能随机出错误 profile 或越过真实资源 size | 所有 slot 使用当前 profile FuType、MAX_UOP_SIZE、ROB/LQ/SQ SIZE 和 MAX_LS_ELEM；scalar setter再收紧到 uopIdx=0、numLsElem=1 |
+| xaction 合法范围 | 字段/约束适配 | FuType 保留 V3 literal，uop/LQ/SQ/numLsElem 使用固定上限，部分slot约束为空，通用随机路径可生成5/6个store，基类post gap可随机为0..50 | 位宽参数化后仍可能随机出错误profile、越过真实resource size、超过V2单拍store width或违反streaming零gap合同 | 所有slot使用当前profile FuType、MAX_UOP_SIZE、ROB/LQ/SQ SIZE和MAX_LS_ELEM；scalar setter再收紧到uopIdx=0、numLsElem=1；batch约束分别限制load/store为compile 6/4；LSQ xaction硬约束pre/post gap均为0 |
 | scalar request 构造 | 功能逻辑修改 | `uid[6:0]` 被写入 `uopIdx`，caller 分散拼 payload | uid 与 DUT uop 序号语义不同，V2 extra 字段缺少唯一 setter | scalar 固定 `uopIdx=0/lastUop=1/numLsElem=1`；setter 从 main/behavior/key 一次构造完整 request |
 | `clear_lsqenq_xaction()` | 功能逻辑修改 | 只清公共字段，extra 字段可能保留 | idle/reuse 必须无残留 | 遍历 compile slot，通过唯一 setter 清全部 qualifier 和 payload，不改公共状态 |
 | `assign_lsqenq_slot()` | 功能逻辑修改 | 接收 uid 并自行拼 raw 字段 | 产生错误 uopIdx 且重复 setter 职责 | 删除 uid 入参，只写 needAlloc 并调用唯一 request setter |
 | 每拍入队数量加权随机 | 新增 runtime 配置与功能 | `RAND_EN=1` 时用 `$urandom_range(MAX,1)` 均匀返回 `1..MAX`，不能生成主动空拍或控制边界概率 | 需要独立控制 0、中间数量和最大数量，同时保持硬件 slot 上限只有 compile profile 一个权威 | 新增 ZERO/MIDDLE/MAX 三类总权重；使用两阶段 `std::randomize/dist`；随机目标范围扩展为 `0..MAX`，固定模式仍为 `1..MAX`；MIDDLE 默认 AUTO 派生 `MAX-1`，V2 effective 默认 `0/5/1` 保持旧目标分布；权重只控制目标上限，实际 candidate 仍受 prefix、6/4 gate和free count过滤；非法权重或随机失败均 fatal |
-| `collect_lsq_candidates()` | 功能逻辑修改 | 只受 runtime 总 slot 数和逐项 free-count 约束，没有分别累计 load/store element；总量 getter 不会返回 0 | 总 slot 合法仍可能形成超过 V2 6-load/4-store 结构能力的 packet；RTL registered credit 不应复制到串行 UVM Candidate；随机 0 必须形成无公共状态副作用的主动 idle | 每拍只采样一次总量；返回 0 时在读取 uid/pointer/free 前返回空 candidate并走显式 idle；非零时先要求 base LQ/SQ free 满足 compile-profile 6/4 floor，再按 `behavior.num_ls_elem` 累计并要求 tentative 不超过 6/4 和对应 base free；该逻辑对 future vector/multi-element request 可复用；vector可分片request单笔超过硬件width时按chunk拆分，非vector或不可分片request才fatal；累计超限 uid 不消费、下一拍重试；不增加 per-type plus，不使用 `tentative + 6/4 reserve` |
-| runtime timeout 消费 | 配置细节修改 | V2 仍读取、clamp ready timeout | V2 没有 ready/response | V2 本地 timeout 固定 0且不调用 getter；V3 只保留现有 timeout 参数和方法入口，本 plan 不扩展其 runtime 功能 |
-| driver item 时序 | 功能逻辑修改 | active item 进入不存在完成条件的 accept 等待并可能重复发送；若单 item 自行等待 drive/sample 两个边界则只能两拍一批 | V2 无 response 完成出口，但连续 request 可以在相邻边界覆盖 | 每轮先过 clocking 边界再取 item；active launch 后立即 `item_done()`且不撤销，下一拍由 active/idle 覆盖；单笔延迟一拍、稳态每拍一批；V2 pre/post gap固定为0 |
+| `collect_lsq_candidates()` | 功能逻辑修改 | 只受 runtime 总 slot 数和逐项 free-count 约束，没有分别累计 load/store element；总量 getter 不会返回 0 | 总 slot 合法仍可能形成超过 V2 6-load/4-store 结构能力的 packet；RTL registered credit 不应复制到串行 UVM Candidate；随机 0 必须形成无公共状态副作用的主动 idle | 每拍只采样一次总量；返回 0 时在读取 uid/pointer/free 前返回空 candidate并走显式 idle；非零时按当前scalar `num_ls_elem=1`累计，并要求tentative不超过6/4和对应实际free count；不要求base free预留6/4，不实现vector chunk；累计超限uid不消费、下一拍重试；不增加per-type plus |
+| runtime timeout 消费 | 配置细节修改 | V2 sequence 仍读取并等待 ready timeout | V2 没有 ready/response | 公共参数层仍解析并检查该兼容参数非负；V2 sequence 本地 timeout 固定 0且不调用 getter、不等待 ready；零值 warning/clamp 只在 accept-response capability 存在时执行 |
+| driver item 时序 | 功能逻辑修改 | active item 进入不存在完成条件的 accept 等待并可能重复发送；若单 item 自行等待 drive/sample 两个边界则只能两拍一批；通用random item继承非零post gap | V2 无 response 完成出口，但连续 request 可以在相邻边界覆盖，任意producer都必须满足零gap | 每轮先过 clocking 边界再取 item；active launch 后立即 `item_done()`且不撤销，下一拍由active/idle覆盖；LSQ xaction把pre/post gap硬约束为0，driver在首次VIF赋值前继续fatal复核directed item |
 | xaction launch metadata | 新增框架字段 | 只有 `aborted_by_redirect`，无法区分“已放到 VIF、尚未 sample”和“launch 前被取消” | sequence 需要以 driver 实际 launch 结果决定是否预留资源 | 新增 framework-only `request_launched`；V2 `aborted_by_redirect` 只表示 launch 前取消；二者不连接 DUT |
-| `send_pkt()` | 字段驱动细节修改 | 只搬运已有字段，可能部分驱动后才暴露非法值 | 防止错误 scalar request 落入 vif | 首次 vif 写入前检查 scalar 固定字段，再一次搬运全部 V2 input |
+| `send_pkt()` | 字段驱动细节修改 | 只搬运已有字段，可能部分驱动后才暴露非法值，directed item可绕过random constraint形成5/6个store | 防止错误scalar request落入VIF，并让driver成为所有producer的协议兜底 | 首次VIF写入前检查每个slot的scalar固定字段、key范围和整个batch的load/store 6/4上限，再一次搬运全部V2 input |
 | `drive_idle()` | 字段驱动细节修改 | extra 字段和非零 mode 可能残留 valid/X | idle 必须是明确全零协议状态 | `DRV_0` 清当前 profile 的全部 request input |
 | `confirm_lsq_candidates()` | 功能逻辑修改 | 用预测 key 调 response helper，并在 driver 返回后同时 allocation 与开放 issue | V2 不存在 response；launch 后立即 issue 早于 DUT sample，全部延迟 allocation 又会让下一批 pointer 过期 | 只在 `request_launched=1` 时 preview 使用中的 key并调用唯一 `commit_allocate()`预留资源；不调用 `complete_admission()` |
 | pending-sample completion | 新增局部功能 | 没有“已 launch/已预留但尚未过 sample 边界”的状态 | streaming driver 必须把资源预留和 issue-ready 分开一拍 | sequence 保存单批 pending uid/epoch/launch cycle；每次 `finish_item()` 返回先完成上一批，再预留当前批；epoch有效才调用 `complete_admission()`执行原CSR drain并开放issue；sample/launch progress用inout OR汇总，不互相覆盖 |
@@ -882,3 +1042,163 @@ commit/deq、pass/fail、terminal owner
 保持不变的主体逻辑：主表生成和 validation、连续 uid admission、已有 pointer advance/cancel/release
 公式、non-LSQ admission 的判定与提交、issue scheduler 和 fired-mask、writeback、ROB commit、LSQ deq、pass/fail、
 terminal 和 global stop。
+
+## 12. 执行结果（2026-07-16）
+
+本 plan 已完成 coding。执行时以本文件的 `IMPLEMENTATION_DELTA` 为最终口径；原正文中以下内容只保留
+审计记录，不代表当前实现：
+
+- 不实现 V2/V3 profile selector，复用已归档的 V2 compile baseline。
+- 不要求 LQ/SQ base free 先达到 6/4，也不要求 `tentative + 6/4 reserve`。
+- 不实现 vector/multi-element chunk；本轮 scalar setter 只接受 `numLsElem=1`。
+- 不增加 redirect 后固定 5-cycle retry guard。
+
+执行中进一步采用十七个最小实现细节：
+
+1. `set_req_fields()` 不接收冗余 ROB key 参数，直接调用 `main_tr.get_rob_key()`；LQ/SQ key仍来自
+   candidate 预览。这样 ROB key只有主表一个权威，避免 caller 传入不一致副本。
+2. `tb/lsqenq_agent_connect.sv` 的 V2 extra字段连接和 `dut_inst.sv` 具体端口已在执行前基线完整，
+   本轮静态核对后不制造无意义diff；实际改动集中在字段宽度consumer、xaction/driver/monitor和sequence。
+3. driver 对合法 idle item 调用全零 `send_pkt()`，而不是直接调用 `drive_idle()`；`send_pkt()` 会先验证
+   inactive qualifier/payload全部为0，再搬运到VIF，因此接口效果相同且不会让 malformed idle绕过检查。
+4. 归档前独立review发现 xaction 自定义 compare 的旧手工回退路径会覆盖 UVM automation 对extra字段的
+   失败结果，`psdisplay()`也未显示这些字段。现用只读 `get_v2_extra_fields()` 同时补齐六个slot的
+   `exceptionVec/trigger/fuOpType/flushPipe/lastUop` 打印和比较，不改变driver或DUT数据路径。
+5. 独立review第2轮确认LSQ enqueue源码无新功能问题，但指出timeout公共参数解析边界和并发CSR Plan
+   分类描述不准确。现已统一为“公共层解析并检查非负，V2 sequence不读取、不等待ready”，并在review
+   文档中明确排除CSR control/sfence专项Plan。
+6. 独立review第3轮确认前述问题已闭环，并发现参数规则仍把
+   `MEMBLOCK_LSQENQ_SEQ_EN` 写成默认0。当前 `plus.sv/default.cfg` 的既有权威值均为1，已同步规则为
+   默认启用；无主表场景只等待并保持idle，显式关闭时直接返回且不回退随机sequence。
+7. 独立review第4轮确认源码无新问题，并发现当前web/interface/source analysis仍残留旧response主链，
+   多份历史Plan缺少失效注记，总控Plan内CSR并发hunk未分类，且第13章漏记enable默认值文档同步。
+   现已把当前文档改为V2无response的clock-first/pending-sample主链，为历史文档增加醒目边界，并补齐
+   review分类和本章修改类型总结。
+8. 独立review第5轮继续发现同类文档内部残留：Web其它节点仍有旧timeout/response描述，interface前部
+   仍列8路response，source analysis保留固定`5'd`和已删getter，另有8份历史Plan/review缺少失效注记，
+   总控Plan也提前写成已归档。现已按类别全量扫描并清理，三份JS重新通过`node --check`，总控Plan在
+   真正移动前恢复`undo`路径。
+9. 独立review第6轮确认源码无新问题，并发现少量key来源、`issue_ready`/`tlb_mapped`、Web helper名、
+   未launch fatal、unused key和归档门禁描述仍不精确。现已逐项按源码修正，并把implementation review
+   自身纳入diff覆盖矩阵。
+10. 独立review第7轮发现通用default sequence没有4-store batch gate、最终smoke早于最新compile、Web仍有
+    旧调用签名/AMO可达描述、implementation review漏展开idle边界，以及interface主文档保留V3 FuType
+    编码。现已补齐xaction约束和driver复核、刷新Web/interface、展开review源码证据；20:53开始的干净
+    compile在20:55成功结束，随后20:55:57的真实load smoke通过，结果已写入第14章。
+11. 独立review第8轮发现agent通用随机/direct路径没有限制active `fuOpType`，手工compare遗漏三个
+    framework metadata，non-LSQ pending边界文档顺序、review源码块结构和compile warning描述也不准确。
+    现已补齐agent层opcode helper和driver复核、全部metadata打印/比较，并同步当前flow/web/review证据。
+12. 独立review第9轮发现通用default random item继承基类`post_pkt_gap=0..50`，会被V2 driver零gap合同
+    拒绝。现由LSQ xaction硬约束pre/post gap均为0，driver保留首次VIF赋值前fatal兜底；本轮同时按真实
+    源码补齐non-LSQ sample顺序和implementation review关键task/helper展开。
+13. 第9轮修复后的default-random专项进一步发现，constraint调用自定义opcode helper时VCS会先求值函数
+    入参，不能反向求解随机`fuOpType`。现把load/prefetch和store合法集合分别定义为xaction文件内的宏值表；
+    constraint直接`inside`值表，driver checker helper也读取同一值表，既保留单一编码权威又可被solver求解。
+    宏值表修复后的clean compile、default-random专项和同一`simv`真实scalar-load smoke均已通过。
+14. 第10轮源码review发现`set_req_fields()`没有完整落实原Plan已要求的setter自校验。现由setter入口自行
+    拒绝空xaction和越界slot；idle分支要求`main_tr==null`、behavior完整等于
+    `make_default_behavior()`且LQ/SQ key全零。该修复只补齐错误caller的受控fatal，不改变当前唯一
+    clear caller、active payload、公共状态或DUT主路径。
+15. 第11轮源码review发现当前显式六slot字段面仍允许compile宏覆盖成非6/6/4。现由
+    `check_compile_param_consistency()`在激励前要求当前V2 tuple严格等于6/6/4；默认行为不变，未完成
+    全链路参数化的其它tuple受控fatal。
+16. 第11轮源码review发现custom compare手工回退遗漏pre/post gap。现由`psdisplay()`打印两个gap，
+    compare回退显式比较并报告差异；该修改只影响transaction debug/compare，不改变随机或驱动逻辑。
+17. 第11轮文档review发现当前flow/source/Web中仍有旧类名、错误allocation调用边、setter合同和epoch条件
+    表述遗漏，且原验证时间链无法证明覆盖最新源码。现已逐项按真实调用链同步，并在修复后冻结
+    `mem_ut/ver/ut/memblock` diff；冻结版clean compile、default-random专项和随后同一`simv`的真实
+    scalar-load smoke均通过。最终归档只使用第14章记录的冻结哈希和这组三段严格顺序证据。
+
+## 13. 执行后实际修改类型总结
+
+本章是执行后的当前实现总结，替代第11章中被 `IMPLEMENTATION_DELTA` 覆盖的旧描述。
+
+| 修改项 | 修改类型 | 原有逻辑 | 变更原因 | 当前实现 |
+|---|---|---|---|---|
+| V2 LSQ 派生宏和类型 | 字段/参数适配 | uopIdx、numLsElem和load/store enqueue width仍有固定值 | interface、xaction、monitor和sequence需要同一编译期权威；当前显式六slot consumer不能安全接受任意宏覆盖 | 新增6/4、MAX_UOP_SIZE/VLEN派生宏；seq内统一`memblock_num_ls_elem_t`；compile consistency在激励前要求当前V2 slot/load/store tuple为6/6/4，未来完整profile参数化后再放开 |
+| interface/xaction/monitor宽度 | 字段适配 | uopIdx/numLsElem保留固定packed宽度 | 防止版本切换后consumer分叉 | 全部消费`MEMBLOCK_DUT_*`宏；connect端已有字段链保持不动 |
+| V2 request字段构造 | 功能修改 | uid低位写uopIdx，extra字段未由唯一setter完整控制 | uid不是DUT uop序号，active/idle可能残留payload | scalar固定uopIdx=0、lastUop=1、numLsElem=1；extra异常字段本轮为0；ROB从main直接取得；setter自行拒绝空xaction/越界slot，idle要求null main、完整默认behavior和全零key |
+| xaction/driver合同 | 功能修改 | slot1..5约束不完整，inactive只检查needAlloc，active `fuOpType`可取任意9-bit值，通用随机/direct item可形成5/6个store或非零post gap，custom compare/display遗漏extra、gap和部分metadata | 任一producer都可能把不支持opcode、非法payload、超过V2端口能力的batch或非零gap送入driver；constraint调用checker函数还会让VCS无法反向求解随机opcode；debug/compare也可能漏掉V2字段、streaming gap或stale epoch差异 | 六个slot按valid条件约束；inactive qualifier/payload全0；宏值表唯一维护LQ load/prefetch 0..6/8..10和SQ store 0..3，constraint直接`inside`值表且driver helper读取同一值表；xaction batch约束限制load/store 6/4并硬约束pre/post gap为0；driver首次赋值前复查gap、opcode、scalar合同、key范围和batch计数；extra字段、pre/post gap及全部framework metadata进入display和手工compare回退路径 |
+| FuType | 字段/合法性适配 | xaction保留V3 literal | V3编码不能裁剪后送V2 | 使用当前profile LDU/STU one-hot和`encode_and_fit_dut_futype()`无损检查 |
+| 每拍总量随机 | 新增runtime功能 | 随机模式只能均匀返回1..MAX | 需要可配置主动idle和边界概率 | ZERO/MIDDLE/MAX两阶段`std::randomize`；默认0/5/1保持旧1..6均匀分布 |
+| 权重合法性 | 新增配置检查 | 无三类权重 | zero-only会让主动flow永不推进 | 随机模式使用64-bit逐项求和，禁止全0和MIDDLE+MAX=0；失败fatal |
+| load/store 6/4 gate | 功能修改 | 只限制总slot和free count，dispatch或default/direct路径都可能让6个store进入同一packet | V2 store每拍最多4 element，gate必须覆盖完整agent行为面 | dispatch candidate按`num_ls_elem`累计并限制6/4及实际free；xaction随机约束限制6/4；driver在写VIF前再次统计fail-fast；不额外保留6/4空项 |
+| driver时序 | 功能修改 | 等待不存在的canAccept/response或重复发送item | V2没有完成响应，但接口可以每拍streaming | clock-first：每边界先sample上一批，再launch当前批并立即item_done；pre/post gap固定0 |
+| launch metadata | 新增框架字段 | 只有abort字段，无法区分未launch和待sample | sequence必须根据driver实际行为决定是否预留 | 新增`request_launched`并纳入automation/打印/custom compare；不连接DUT |
+| allocation与issue-ready | 功能修改/新增局部状态 | driver返回后同拍allocation和开放issue | 当前request尚未经过下一DUT sample边界 | launch后立即`commit_allocate()`预留；单深度pending batch在下一driver边界才`complete_admission()` |
+| non-LSQ/末批边界 | 功能修改 | non-LSQ零时间路径和global stop可能绕过最后sample | 最后一批可能永远不进入issue | pending后遇non-LSQ或global stop时发送全零idle完成sample，再继续原流程/退出 |
+| response helper | 共享实现重构 | `commit_allocate_with_resp()`复制状态更新并比较unused key | 两个allocation owner易分叉 | 只比较实际使用key，随后复用唯一`commit_allocate()`；V2不调用该wrapper |
+| redirect分工 | 功能收敛 | launch/confirm/sample边界不清 | redirect可能出现在三个阶段 | launch前abort不预留；launch后epoch失效不开放issue；原redirect/cancel owner回退资源 |
+| ready timeout | 配置细节适配 | V2 sequence仍可能读取并等待LSQ ready timeout | V2接口无ready/response | 公共参数加载仍解析并检查该兼容参数非负；V2 sequence不读getter、不等待ready，只有`MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP=1`才执行零值warning/clamp |
+| sequence enable/default文档语义 | 文档语义同步，不改运行期逻辑 | 部分参数规则和历史文档仍写`MEMBLOCK_LSQENQ_SEQ_EN=0`，或声称real smoke必须单独打开 | `plus.sv`、`seq_csr_common`和`default.cfg`的既有单一权威均为1 | 当前规则明确默认1；无主表时sequence只idle等待，显式0时直接返回且不fallback；历史Plan保留正文但增加失效注记 |
+| idle drive模式 | 配置逻辑修改 | 通用drv_mode可能让idle含valid/X | no-item/reset/abort必须安全 | cfg soft默认DRV_0，driver build阶段拒绝非DRV_0，idle清全部字段 |
+
+保持不变：主表生成/validation、连续uid admission原则、issue scheduler内部算法、writeback、ROB commit、
+LSQ deq、pass/fail、terminal和global stop owner。
+
+## 14. 验证记录
+
+### 14.1 通过项
+
+- 第11轮修复后先冻结`mem_ut/ver/ut/memblock`源码/规则diff，编译前后SHA-256均为
+  `99fdd0c69f99f7dd3e08eed289ea9ace2df11c344b62563c8f147873f3f3b8f0`；验证期间没有继续修改该范围。
+- 冻结版远端VCS clean compile：删除`base_fun/partitionlib`和`base_fun/exec`后于2026-07-17 13:33
+  重新开始，13:35完成全量parsing、全部174个RTL module、全部UVM package、partition compile、stitch
+  和link；compile log只有`LCA_FEATURES_ENABLED`工具特性warning，没有源码编译错误，最终KDB报告
+  0 error/0 warning。
+- 冻结版default-random专项：在上述13:35生成的`simv`上以`UVM_FULL`和type override启动
+  10-item `lsqenq_agent_agent_default_sequence`；显式设置`MEMBLOCK_LSQCOMMIT_SEQ_EN=0`隔离空主表下的
+  无关commit sequence。日志明确显示main phase启动该sequence，结束时LSQ enqueue sequencer报告
+  `No default sequence to kill`；没有`CNST-CIF`、`RNDFLD`、gap/setter fatal或其它
+  `UVM_WARNING/ERROR/FATAL`，13:38:15最终`TEST CASE PASSED`。
+- 冻结版最终`tc_dispatch_real_smoke`：在default-random结束后使用同一`simv`，真实load从LSQ admission
+  进入LDA issue、DCache request/response、writeback、ROB commit、LQ deq和terminal，372.8ns结束，
+  13:38:28最终`TEST CASE PASSED`且`UVM_WARNING/ERROR/FATAL=0`。
+- 第9轮及opcode宏值表修复后远端VCS clean compile：2026-07-17 11:37开始，完成parsing、elaboration、
+  全部174个RTL module、全部partition compile、stitch和link；没有源码编译错误，日志包含1条无害的
+  `LCA_FEATURES_ENABLED`工具特性提示，最终KDB阶段报告0 error/0 warning。
+- default-random专项：通过type override在LSQ enqueue sequencer启动
+  `lsqenq_agent_agent_default_sequence`并随机发送10个item；为隔离空主表下会永久等待的无关LSQ commit
+  sequence，命令显式设置`MEMBLOCK_LSQCOMMIT_SEQ_EN=0`。main phase结束时LSQ enqueue sequencer报告
+  `No default sequence to kill`，证明sequence自然完成；没有`CNST-CIF`、`RNDFLD`、gap fatal或其它
+  `UVM_WARNING/ERROR/FATAL`，最终`TEST CASE PASSED`。
+- 第9轮最终`tc_dispatch_real_smoke`：default-random专项后通过`eda_batch_run`运行同一`simv`；真实load
+  从LSQ admission进入LDA issue、DCache request/response、writeback、ROB commit、LQ deq和terminal，
+  372.8ns结束，`TEST CASE PASSED`且`UVM_WARNING/ERROR/FATAL=0`。
+- 高ZERO权重随机场景：`ZERO/MIDDLE/MAX=100/0/1`，seed=1；issue从约255ns延迟到1950ns后正常完成
+  terminal，证明随机0只插idle且未消费uid，最终`UVM_ERROR=0`、`UVM_FATAL=0`。
+- zero-only非法场景：`ZERO/MIDDLE/MAX=1/0/0`在0ns按预期`uvm_fatal`，没有进入主动flow。
+- software-only `virtual_base_sequence`基础运行：通过；该场景不作为真实LSQ时序覆盖证据。
+
+### 14.2 已识别但不归属本专项的失败
+
+- `tc_dispatch_real_store_smoke` 已证明store经过LSQ admission、STA/STD issue、writeback和ROB commit；随后
+  在既有V2 SQ deq适配边界出现`DUT sqDeq start ... mismatches software SQ head`。
+- 6-store/总slot=6压力尝试在下游出现既有`WB_UID_MISMATCH`。日志已显示STA/STD连续发射，本轮
+  `collect_lsq_candidates()`的4-store上限由源码静态review确认；该下游writeback/deq问题属于int-WB和
+  LSQ commit/deq专项，不回写LSQ enqueue owner，也不阻塞本plan归档。
+- `basicTest + memblock_dispatch_real_smoke_vseq` 当前会在vseq启动同拍结束，不能作为有效真实flow smoke；
+  本轮改用现有`tc_dispatch_real_smoke`的agent default-sequence入口验证。virtual-sequence phase生命周期
+  问题不在本plan修改范围。
+- 第7轮和本轮归档检查重复调用`eda_run`时，VCS/NFS增量数据库先后出现`tdc.sdb corrupted`或partcomp
+  `SIGSEGV`，均在仿真启动前。清理`base_fun/partitionlib`和`base_fun/exec`下VCS生成缓存后，clean
+  compile均恢复；真实场景改用不重复编译的`batch_run`执行。这些工具异常不计为产品测试通过，也不
+  归因于SystemVerilog源码；当前归档依据只使用上述冻结diff哈希、13:33之后的最终clean compile、
+  default-random专项和随后同一`simv`的真实scalar-load smoke。
+
+最终日志：
+
+- compile：`mem_ut/ver/ut/memblock/sim/base_fun/log/vcs_compile_rtl.log`
+- default-random：`mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_sanity_ts=virtual_base_sequence_cfg=default_seed=666666_rtl_lsqenq_round12_frozen_default_random_20260717.log`
+- smoke：`mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_dispatch_real_smoke_ts=virtual_base_sequence_cfg=tc_dispatch_real_smoke_seed=666666_rtl_lsqenq_round12_frozen_real_load_20260717.log`
+
+## 15. 最终 Review 结论
+
+- 第12轮独立源码/V2语义review通过：无新发现、无必须修改项；明确排除CSR/sfence、DCache/L2、PMP/PMA
+  和其它非LSQ enqueue专项。
+- 第12轮文档review发现implementation review缺少三个helper/function的源码展开，以及最后一章缺少集中式
+  四要素总结；两项均已修复。
+- 修复后的第13轮独立文档review通过：60个SystemVerilog源码块均在5行内紧邻对应中文伪代码，最后一章
+  已完整覆盖修改类型、原逻辑、变更原因、变更后逻辑和新增/修改功能列表；无新发现、无必须修改项。
+- 本agent复核源码diff、同步文档、冻结哈希和最终日志后未发现其它blocker。本plan满足归档条件并移动到
+  `AI_DOC/plan/test_framework/plan/do`。

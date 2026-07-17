@@ -609,7 +609,7 @@ io_l2_flush_done
 状态：当前 V2 LSQ enqueue 适配只补齐 scalar request 字段、6 个物理 slot、单拍最多
 6 个 load element/4 个 store element 的 admission gate、V2 E0/E1 发送时序和 redirect 后重试。
 当前不新增 issue hold、LSQ 压力模式或 boundary directed vseq。该边界由
-`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`
 定义。
 
 本节中的“边界”是 LSQ 容量、admission 门限和 enqueue/redirect 时序边界，不是第 7 节的

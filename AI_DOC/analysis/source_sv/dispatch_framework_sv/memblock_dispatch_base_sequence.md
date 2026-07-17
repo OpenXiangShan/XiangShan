@@ -17,7 +17,7 @@
 - 真实 issue sequence 直接调用 `issue_queue_scheduler` 选择候选并标记发射，直接调用 `issue_field_assigner` 填 issue xaction；base sequence 不再保存 soft-only issue fire wrapper。
 - monitor 采到 DUT 返回事件后，它把 raw event 转成公共事件，再交给 writeback/replay/redirect handler 更新状态。
 
-真实 DUT 接口驱动仍由专门的 agent sequence 完成，例如 `memblock_lsqenq_dispatch_sequence`、`memblock_lintsissue_dispatch_sequence`、`memblock_lsqcommit_dispatch_sequence`、`memblock_l2tlb_base_sequence`、`memblock_redirect_dispatch_sequence`。base sequence 只提供这些 sequence 共同依赖的数据和 helper 调度入口。
+真实 DUT 接口驱动仍由专门的 agent sequence 完成，例如 `memblock_lsqenq_dispatch_base_sequence`、`memblock_issue_dispatch_base_sequence`、`memblock_lsqcommit_dispatch_base_sequence`、`memblock_l2tlb_base_sequence`、`memblock_redirect_dispatch_base_sequence`。base sequence 只提供这些 sequence 共同依赖的数据和 helper 调度入口。
 
 ## 2. 成员字段
 

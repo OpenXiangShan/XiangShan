@@ -85,7 +85,7 @@
           title: "fill fields",
           nodes: [
             fn("randomize_main_transaction", "tr, uid, rob_key", "填充主表字段", "先 randomize，再用 op template、合法地址、send_pri、delay 修正为可发激励。", ["select_op_class_by_weight()", "apply_minimal_op_template()", "apply_legal_addr_template()", "validate_main_table_entry()"]),
-            fn("apply_minimal_op_template", "main_control_transaction", "fuType/fuOpType/lsq_flow/numLsElem", "根据 op_class 建立 load/store/prefetch/AMO 最小合法组合。", ["random_load_fuoptype()", "random_store_fuoptype()", "random_amo_fuoptype()"]),
+            fn("apply_minimal_op_template", "main_control_transaction", "fuType/fuOpType/lsq_flow/numLsElem", "根据op_class建立字段组合；本轮主表校验只接受scalar load/store/prefetch，AMO/CBO/vector会fail-fast。", ["random_load_fuoptype()", "random_store_fuoptype()", "random_amo_fuoptype()"]),
           ],
         },
         {
@@ -101,34 +101,38 @@
     {
       id: "lsq-admission",
       title: "LSQ admission 入队流程",
-      summary: "展示主表 transaction 如何进入 DUT enqLsq，如何用 DUT resp 对齐软件 LSQ 模型，并进入 TLB/issue 后续流程。",
+      summary: "展示主表transaction如何形成V2 6路enqLsq batch，clock-first launch后预留软件LSQ资源，并在下一driver边界进入issue流程。",
       stages: [
         {
           title: "sequence loop",
           nodes: [
             fn("memblock_lsqenq_dispatch_base_sequence::body", "无", "启动 LSQ enqueue sequence", "默认开启，读取 plus 参数，等待主表 ready 后进入 admission loop。", ["seq_csr_common::init()", "configure_from_plus()", "wait_for_main_table()", "drive_lsqenq_loop()"]),
-            fn("drive_lsqenq_loop", "无", "多拍发送 admission", "forever loop 每拍调用 send_lsqenq_cycle，有进展则清 idle，连续空闲达到 idle_stop 后退出。", ["send_lsqenq_cycle()"]),
+            fn("drive_lsqenq_loop", "无", "多拍发送 admission", "forever loop 每拍调用 send_lsqenq_cycle；no-progress只warning，global stop时用必要trailing idle完成末批sample后退出。", ["send_lsqenq_cycle()", "send_idle_lsqenq_boundary()"]),
           ],
         },
         {
           title: "select uid",
           nodes: [
-            fn("send_lsqenq_cycle", "cycle_idx", "xaction 发给 driver；成功后状态推进", "一拍 LSQ admission 主体，先处理 need_alloc=0，再收集可入队候选。", ["admit_non_lsq_if_ready()", "collect_lsq_candidates()", "assign_lsqenq_slot()", "confirm_lsq_candidates()"]),
-            fn("collect_lsq_candidates", "output uids/trs/behaviors/lq_keys/sq_keys", "本拍候选队列", "从 common_data.get_next_new_admit_uid() 取得起点，按 get_enq_per_cycle() 的固定/随机上限、LQ/SQ free count 和 flush 状态选择连续 uid。", ["next_uid_needs_lsq_admission()", "advance_lq_key()", "advance_sq_key()"]),
+            fn("send_lsqenq_cycle", "cycle_idx", "上一批完成sample，当前批launch并预留", "一拍LSQ admission主体：先消费pending cancel；pending后遇non-LSQ时先发送idle完成sample，再执行non-LSQ admission；随后收集、launch并预留普通candidate。", ["apply_pending_lsq_cancels()", "send_idle_lsqenq_boundary()", "admit_non_lsq_if_ready()", "collect_lsq_candidates()", "assign_lsqenq_slot()", "complete_v2_pending_sample()", "confirm_lsq_candidates()"]),
+            fn("collect_lsq_candidates", "output uids/trs/behaviors/lq_keys/sq_keys", "本拍候选队列", "直接从common_data连续uid起点采样一次总slot目标，再按V2 load/store 6/4和实际LQ/SQ free count截断；随机0不消费uid。", ["admission_blocked_by_flush()", "data.get_status()", "data.get_main_transaction()", "lsq_ctrl_model::derive_op_behavior()", "advance_lq_key()", "advance_sq_key()"]),
           ],
         },
         {
           title: "drive DUT",
           nodes: [
-            fn("assign_lsqenq_slot", "tr, slot, uid, main_tr, behavior, lq_key, sq_key", "填 enqLsq needAlloc/req", "把 ROB/fuType/uopIdx/LQ/SQ/numLsElem 写入对应 slot。", ["set_need_alloc()", "set_req_fields()"]),
-            fn("lsqenq_agent_driver::wait_lsq_can_accept", "lsqenq xaction", "等待 canAccept；可能 abort", "driver 等 DUT canAccept，同时监测 flush_epoch，跨 redirect 则中止旧 admission。", ["sample_lsqenq_resp()"]),
+            fn("assign_lsqenq_slot", "tr, slot, main_tr, behavior, lq_key, sq_key", "填6路enqLsq needAlloc/req", "写完整V2 payload；scalar固定uopIdx=0、lastUop=1、numLsElem=1。", ["set_need_alloc()", "set_req_fields()"]),
+            fn("set_req_fields", "tr/slot/valid/main_tr/behavior/lq_key/sq_key", "只写当前xaction slot的req qualifier/payload", "入口先要求tr非null、slot小于编译期slot数；active要求main_tr非null、main/behavior均为scalar单元素且need_alloc与uses_lq/sq严格匹配，key来自candidate preview；idle要求main_tr为null、behavior完整等于make_default_behavior、LQ/SQ key全0。直接合同失败先fatal；active key范围由driver写VIF前检查，实际使用key漂移由confirm在公共reservation前检查。setter不修改其它slot或公共状态。", []),
+            fn("lsqenq_agent_agent_driver::main_phase", "lsqenq xaction", "一次边界驱动并设置launch metadata", "driver在clocking边界先让DUT采样上一拍，再检查epoch并调用send_pkt launch当前item；V2不等待ready/response。", ["lsqenq_agent_agent_driver::send_pkt()"]),
           ],
         },
         {
           title: "commit software",
           nodes: [
-            fn("confirm_lsq_candidates", "xaction 和候选列表", "更新软件 LSQ/status", "读取 DUT resp LQ/SQ key，确认与软件预览一致后提交。", ["get_resp_keys()", "lsq_ctrl.commit_allocate_with_resp()", "complete_admission()"]),
-            fn("complete_admission", "uid", "TLB 表 ready，issue queue 路由", "入队成功后的后处理：drain runtime CSR、生成 TLB 表、把 uid route 到 issue queue。", ["drain_csr_runtime_events()", "tlb_builder.build_tlb_for_uid()", "issue_sched.route_uid()"]),
+            fn("confirm_lsq_candidates", "xaction和候选/key列表", "launch后预留软件LSQ/status", "重新preview实际使用key；一致后调用唯一commit_allocate并保存当前pending batch。", ["lsq_ctrl.preview_allocate()", "lsq_ctrl_model::commit_allocate()"]),
+            fn("lsq_ctrl_model::commit_allocate", "uid/behavior/main transaction", "active map与本地LSQ pointer/free count推进", "写回主表key后直接调用data.activate_uid(uid, behavior.uses_lq, behavior.uses_sq)建立active map，再置enq；这里只建立reservation，不开放issue。", ["data.set_main_transaction()", "common_data_transaction::activate_uid()", "data.set_status_field()"]),
+            fn("common_data_transaction::activate_uid", "uid, map_lq, map_sq", "active ROB/LQ/SQ map", "commit_allocate直接传入behavior.uses_lq/uses_sq，建立ROB及所需LQ/SQ到uid的反查映射。", []),
+            fn("complete_v2_pending_sample", "上一批pending uid和pending_sample_flush_epoch", "下一driver边界开放issue或丢弃completion", "比较保存epoch与当前dispatch_flush_epoch；相等且flush未阻塞时才调用complete_admission，不等或阻塞时不调用、不开放issue，由既有redirect/cancel owner回退reservation。", ["complete_admission()", "clear_v2_pending_sample()"]),
+            fn("complete_admission", "uid", "issue_ready和issue queue路由", "普通LSQ由下一sample边界调用，non-LSQ兼容入口在commit后直接调用；统一drain runtime CSR并准备issue route。", ["drain_csr_runtime_events()", "issue_sched.prepare_issue_route_for_uid()"]),
           ],
         },
       ],
@@ -141,7 +145,7 @@
         {
           title: "route",
           nodes: [
-            fn("issue_sched.route_all_ready_uids", "无", "LOAD/STA/STD issue queue 更新", "扫描所有 uid，把 active/enq/tlb_mapped 且未 pending 的 uid route 到目标队列。", ["route_uid()"]),
+            fn("issue_sched.route_all_ready_uids", "无", "LOAD/STA/STD issue queue更新", "在公共active窗口内扫描，把active/enq/issue_ready且未被flush/redirect/exception阻塞的uid route到目标队列。", ["route_uid()"]),
             fn("route_uid", "uid", "目标队列可能新增 item", "根据 behavior 判断 route_load/route_sta/route_std。", ["lsq_ctrl_model::derive_op_behavior()", "route_target()"]),
             fn("route_target", "uid, target, behavior", "push issue queue，置 queued", "防重复入队；replay_pending 时只允许 replay target 入队。", ["target_already_queued_or_done()", "make_issue_item()", "data.push_issue_queue_item()"]),
           ],

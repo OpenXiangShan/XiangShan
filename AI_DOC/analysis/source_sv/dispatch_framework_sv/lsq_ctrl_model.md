@@ -1,63 +1,91 @@
-# lsq_ctrl_model.sv 源码分析
+# `lsq_ctrl_model` 源码分析
 
-本文档对应源码：
+## 1. 角色
 
-- `mem_ut/ver/ut/memblock/seq/base_seq/lsq_ctrl_model.sv`
+源码：`mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_ctrl_model.sv`
 
-## 1. 文件定位与使用场景
+`lsq_ctrl_model` 是测试框架的软件 LSQ allocation 镜像，不是完整 LSQ RTL 参考模型。它维护唯一一组
+LQ/SQ enqueue/dequeue pointer 和 free count，用于回答当前 scalar transaction 是否占用 LQ/SQ、预期
+分配哪个 key，以及 commit/deq/redirect 后软件资源如何释放或回退。
 
-软件 LSQ 分配镜像。它存在的原因是 LSQ enqueue 接口由 DUT 返回 LQ/SQ index，但 TB 也需要提前知道“应该分到哪里”，这样才能填 req、校验 resp，并在 deq 时维护资源数。
+## 2. 关键状态
 
-输入是主表 transaction 和 DUT enqueue response。输出给 `common_data_transaction::activate_uid()`，同时更新软件 `lq/sq_enq_ptr`、free count 和主表中的 LQ/SQ key。
-
-控制逻辑字段是 LQ/SQ enq/deq pointer 和 free count。`derive_op_behavior()` 返回的 behavior 也是控制核心，因为它决定当前操作是否需要分配 LSQ、进入哪些 issue queue。主表中的 fuType/fuOpType 是输入 payload，但会被这里解释成控制行为。
-
-字段：
-
-- `lq_enq_ptr/sq_enq_ptr`、`lq_deq_ptr/sq_deq_ptr`：软件 LQ/SQ 环形指针。
-- `lq_free_count/sq_free_count`：剩余资源。
-- `data`：公共数据单例。
-
-函数：
-
-- `reset()`：重置所有指针和 free count。
-- `is_*_fuoptype()`：识别 load/prefetch/store/CBO/AMO/AMOCAS。
-- `derive_op_behavior(tr)`：核心分类。LDU load/prefetch 需要 LQ 并 route load；STU store/CBO 需要 SQ 并 route STA/STD；MOU AMO 不分配 LSQ，但 route STA/STD，AMOCAS 按类型设置 `atomic_sta_uop_count/atomic_data_uop_count`。vector LS 直接 fatal。
-- `advance_lq_key/advance_sq_key`、`rewind_lq_key/rewind_sq_key`：环形推进/回退。
-- `can_allocate()`、`preview_allocate()`：检查和预览 LQ/SQ 分配。
-- `commit_allocate()`：软件 smoke 路径使用预期 key 激活 uid。
-- `commit_allocate_with_resp()`：真实 LSQ 路径用 DUT 返回 key 反校验软件预期，再激活 uid。
-- `commit_non_lsq_admission()`：AMO 等不分配 LSQ 的 admission。
-- `release_lq/release_sq()`：deq 后释放 free count。
-- `cancel_lq/cancel_sq()`：回退 enq pointer，用于 redirect reissue 等取消场景。`common_data_transaction::prepare_uid_for_redirect_reissue()` 会累计待取消 LQ/SQ 数量，`memblock_lsqenq_dispatch_sequence::apply_pending_lsq_cancels()` 在恢复 admission 前调用这里回退软件 LSQ 镜像。
-
-## 2. 字段与函数/task 设计原理
-
-`lsq_ctrl_model` 是软件侧 LSQ 分配镜像，不是完整 LSQ RTL 模型。它只回答：这条操作是否占 LQ/SQ、占几个元素、预期 index 是什么、DUT deq 后软件 free count 如何变化。
-
-关键字段：
-
-| 字段 | 含义 | 设计原理 |
+| 状态 | 含义 | 更新者 |
 |---|---|---|
-| `m_inst` | 单例句柄 | LSQ 指针必须全局唯一，不能每个 sequence 一份。 |
-| `data` | 公共数据 owner | 分配成功后需要写回主表、状态表和 active map。 |
-| `lq_enq_ptr/sq_enq_ptr` | 软件预期入队指针 | LSQ enqueue 前 preview，DUT resp 返回后比对。 |
-| `lq_deq_ptr/sq_deq_ptr` | 软件预期出队指针 | DUT deq monitor 返回后检查释放顺序。 |
-| `lq_free_count/sq_free_count` | 软件剩余资源 | 入队前判断是否有足够 LQ/SQ 资源，deq 后释放。 |
+| `lq_enq_ptr/sq_enq_ptr` | 下一笔分配的 LQ/SQ key | `commit_allocate()` 前进，`cancel_lq/sq()` 回退 |
+| `lq_deq_ptr/sq_deq_ptr` | 已释放资源的队头边界 | `release_lq/sq()` 前进 |
+| `lq_free_count/sq_free_count` | 当前可分配 element 数 | allocation 扣减，deq/cancel 增加 |
 
-主要函数：
+key 包含 wrap flag 和 value。value 位宽来自 compile macro，合法范围仍由真实 LQ/SQ size 检查。
 
-| 函数 | 参数 | 功能和设计原理 |
-|---|---|---|
-| `get()`、`reset()` | 无 | 获取单例并重置 LSQ 指针/free count，保证 testcase 从空 LSQ 开始。 |
-| `is_vector_ls_futype(fuType)` | fuType | 当前简化模型不支持 vector LS，先识别并 fatal，避免误按 scalar 处理。 |
-| `is_load_fuoptype()`、`is_store_fuoptype()`、`is_prefetch_fuoptype()`、`is_cbo_fuoptype()`、`is_amo_fuoptype()`、`is_amocas_*()` | fuOpType | 集中维护操作类型识别，主表生成、行为推导和校验共用同一套分类。 |
-| `make_default_behavior()` | 无 | 返回全 0 安全默认行为，后续只打开需要的位，避免字段沿用旧值。 |
-| `derive_op_behavior(tr)` | 主表 transaction | 把 fuType/fuOpType 转成 `memblock_op_behavior_t`，统一描述 need_alloc、uses_lq/sq、route_load/sta/std、commit 类型、atomic uop 数。 |
-| `advance_lq_key/base`、`advance_sq_key/base`、`rewind_lq_key/base`、`rewind_sq_key/base` | 起始 key、步数 | 统一处理 LQ/SQ 环形指针前进和回退，release/cancel 都用同一规则。 |
-| `can_allocate(behavior)` | op behavior | 根据 `uses_lq/uses_sq/num_ls_elem` 判断资源是否足够。 |
-| `preview_allocate(behavior,lq_key,sq_key)` | behavior、输出 key | 在真实 enqueue 前预测 DUT 应返回的 LQ/SQ key。 |
-| `commit_allocate(uid,behavior,tr)` | uid、behavior、主表 tr | software smoke 或非真实 resp 路径使用，直接按软件预期写回主表和 active map。 |
-| `commit_allocate_with_resp(uid,behavior,tr,dut_lq_key,dut_sq_key)` | uid、behavior、主表 tr、DUT 返回 key | real LSQ 入队路径使用，先比对 DUT resp 与软件预期，再写回主表/状态表。 |
-| `commit_non_lsq_admission(uid,behavior,tr)` | uid、behavior、主表 tr | AMO 等不分配普通 LQ/SQ 的路径仍可进入公共 active 生命周期。 |
-| `release_lq/sq(count)`、`cancel_lq/sq(count)` | 元素数 | deq 时释放资源，flush/cancel 时回退 enqueue 资源。redirect reissue 中，公共数据层先累计 `pending_lq_cancel_count/pending_sq_cancel_count`，LSQ admission sequence 再调用 `cancel_lq/cancel_sq` 消费，确保同 uid 重入队时软件预测 key 和 DUT response key 仍一致。 |
+## 3. 操作分类
+
+`derive_op_behavior()` 从 `main_control_transaction` 推导 admission 和 issue route：
+
+- scalar LDU/load/prefetch：`uses_lq=1`、`need_alloc=01`、`num_ls_elem=1`、route LOAD。
+- scalar STU/store：`uses_sq=1`、`need_alloc=10`、`num_ls_elem=1`、route STA 和 STD。
+- vector LS：当前 fail-fast，不允许按 scalar 静默处理。
+- MOU/AMO/CBO：保留原分类边界，但不属于本轮 V2 scalar LSQ enqueue 闭环。
+
+`memblock_op_behavior_t::num_ls_elem` 使用 `memblock_num_ls_elem_t`，与 V2 `numLsElem` 编译期宽度一致。
+
+## 4. 预览与唯一 allocation owner
+
+`preview_allocate()` 只读取 pointer/free count：
+
+```text
+返回当前 lq_enq_ptr 和 sq_enq_ptr 作为预测 key；
+如果 behavior 需要的 element 超过对应 free count，uvm_fatal；
+不写主表、状态表、map、pointer 或 free count。
+```
+
+`commit_allocate()` 是唯一 allocation owner：
+
+```text
+检查 transaction 非空且 uid 一致；
+调用 preview_allocate 得到当前实际 key；
+把 key 和 numLsElem 写回主表 transaction；
+调用 common_data_transaction::activate_uid 建立 active 和 LQ/SQ map；
+设置 MEMBLOCK_STATUS_ENQ；
+按 behavior.num_ls_elem 推进使用中的 enqueue pointer并扣减 free count；
+unused 队列不推进。
+```
+
+V2 `memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates()` 在 driver 确认 request 已 launch 后直接
+调用该函数建立 reservation；`issue_ready` 要等下一 driver sample 边界，由 sequence 的
+`complete_v2_pending_sample()` 单独开放。
+
+## 5. `commit_allocate_with_resp()`
+
+该函数保留给有真实 enqueue response 的接口版本，但不再复制 allocation 状态更新代码。当前逻辑为：
+
+```text
+检查 transaction、uid 和 LSQ behavior；
+调用 preview_allocate 得到 expected key；
+只比较 behavior 实际使用的 key：load 比 LQ，store 比 SQ；
+unused key 不参与比较；
+匹配后调用唯一 owner commit_allocate 完成状态和资源更新。
+```
+
+V2 顶层没有 LSQ enqueue response，因此 V2 sequence 不调用该 wrapper，也不把软件预测 key伪装成 DUT
+response。
+
+## 6. non-LSQ、deq 与 redirect
+
+`commit_non_lsq_admission()` 要求 `need_alloc=0` 且不使用 LQ/SQ，然后复用 `commit_allocate()` 建立
+active/enq。因为 `uses_lq/sq=0`，不会建立 LSQ map或修改 LSQ pointer/free count。
+
+`release_lq/sq(count)` 用于真实 DUT deq：推进 dequeue pointer并恢复 free count。
+
+`cancel_lq/sq(count)` 用于 redirect reissue：回退 enqueue pointer并恢复 free count。全局 redirect handler
+先根据 active mapping 累计 `pending_lq_cancel_count/pending_sq_cancel_count`；LSQ admission sequence 在下一轮
+candidate 前消费计数。pending-sample helper不直接释放资源，避免出现第二个 cancel owner。
+
+## 7. 正确性边界
+
+- candidate 阶段只预览，driver launch 成功后才调用 allocation owner。
+- V2 launch reservation 与 issue-ready 分两个边界，但 pointer/free count 在 launch 后立即更新，保证下一
+  packet 的预测 key连续且不重复。
+- response wrapper、V2 confirm 和 non-LSQ 路径最终都复用 `commit_allocate()`，状态更新公式只有一个权威。
+- 本轮 scalar setter只接受 `num_ls_elem=1`；vector/multi-element range map、逐 element deq 和 chunk progress
+  仍是后续专项。

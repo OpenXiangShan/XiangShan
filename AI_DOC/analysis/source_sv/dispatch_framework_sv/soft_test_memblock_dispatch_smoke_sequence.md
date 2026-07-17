@@ -24,7 +24,7 @@
 - `make_directed_transaction()`：构造 load/store/AMO 主表条目。
 - `make_pass_wb_event(item)`：带 uid/ROB/issue_epoch/replay_seq 的 pass event。
 - `all_required_targets_dispatched()`：确认 required target 都 dispatched。
-- `prepare_issue_route_for_uid(uid)`：soft-only helper。采集 runtime CSR event 后调用 `issue_queue_scheduler::prepare_issue_route_for_uid(uid)`，用于软件 admission 后设置 `issue_ready` 并 route。真实 DUT LSQ admission flow 不调用该 soft helper，而是在 `memblock_lsqenq_dispatch_sequence` 中直接调用 scheduler。
+- `prepare_issue_route_for_uid(uid)`：soft-only helper。采集 runtime CSR event 后调用 `issue_queue_scheduler::prepare_issue_route_for_uid(uid)`，用于软件 admission 后设置 `issue_ready` 并 route。真实 DUT LSQ admission flow 不调用该 soft helper，而是在 `memblock_lsqenq_dispatch_base_sequence` 的 pending-sample completion 中调用 scheduler。
 - `select_issue_candidates(load_items, sta_items, std_items)`：soft-only helper。转发到 `issue_queue_scheduler::select_issue_candidates()`，供 software smoke 从 issue queue 中挑选本拍模拟发射项。真实 issue driver 在 `memblock_lintsissue_dispatch_sequence` 中直接调用 scheduler。
 - `mark_issue_item_fire(item, fired)`：soft-only helper。转发到 `issue_queue_scheduler::mark_issue_fire()`，用于软件模拟 issue item 已被接收。真实 issue driver 根据 DUT fired mask 调 scheduler 更新状态。
 - `submit_writeback_event(wb_event)`：soft-only synthetic event 入口。直接调用 `writeback_status_handler::handle_event()` 注入 pass/replay 等事件。真实 DUT flow 的 writeback 事件来自 DUT output monitor，不走该入口。

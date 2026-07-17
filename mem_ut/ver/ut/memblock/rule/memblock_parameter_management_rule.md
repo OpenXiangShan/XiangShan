@@ -140,6 +140,25 @@ mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh
 - 如果后续需要只观察 DUT 原始 PTW/L2TLB response，必须另建 passive monitor 或 mirror 方案，不能复用当前 takeover 关闭模式。
 - 如果编译期关闭 takeover 又 runtime 打开 `MEMBLOCK_L2TLB_SEQ_EN=1`，sequence 应 fatal。
 
+当前 V2 LSQ enqueue 参数规则：
+
+- `MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM`、`MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH`、
+  `MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH` 只放在 `memblock_compile_params.svh`，当前V2固定分别为6/6/4。
+- 当前interface/xaction/driver/setter仍显式展开六个slot，`check_compile_param_consistency()`必须在任何激励
+  前拒绝非6/6/4 tuple。后续只有其它profile同步参数化全部显式consumer后，才能放开该精确检查；不得
+  仅覆盖三个宏就宣称已经完成版本切换。
+- `MEMBLOCK_DUT_MAX_UOP_SIZE` 和 `MEMBLOCK_DUT_VLEN` 是主参数；`UOP_IDX_W`、
+  `MAX_LS_ELEM`、`NUM_LS_ELEM_W` 必须由表达式派生，不建立可独立覆盖的第二权威。
+- `MEMBLOCK_ENQ_PER_CYCLE` 是固定模式的 runtime 总 slot 目标，合法范围为 `1..SLOT_NUM`；
+  load/store 物理上限不建立同义 runtime plus。
+- `MEMBLOCK_ENQ_PER_CYCLE_RAND_EN=1` 时，ZERO/MIDDLE/MAX 三类权重控制返回 0、中间值和
+  物理最大值的类别总概率。`MIDDLE_WEIGHT=-1` 表示 AUTO，有效值为 `SLOT_NUM-1`。
+- 随机模式禁止三类权重全 0，也禁止 `MIDDLE+MAX=0`；权重求和必须在 64-bit 无符号上下文逐项完成。
+- 随机返回 0 只表示 sequence 主动发送一拍全零 idle，不改变 DUT backpressure、issue hold、
+  pass/fail 或 terminal 语义，也不得消费 next-admit uid。
+- Candidate 最终数量继续受连续 uid 前缀、load/store 编译期 6/4 和实际 LQ/SQ free count约束；
+  6/4 不是软件模型必须长期保留的空项数。
+
 ## 运行期状态规则
 
 以下内容不是参数配置：

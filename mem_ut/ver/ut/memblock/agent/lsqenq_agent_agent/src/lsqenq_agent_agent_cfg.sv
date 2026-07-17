@@ -10,6 +10,10 @@
 
 class lsqenq_agent_agent_cfg extends tcnt_agent_cfg_base;
 
+    constraint c_v2_idle_drive_mode {
+        soft drv_mode == tcnt_dec_base::DRV_0;
+    }
+
     `uvm_object_utils_begin(lsqenq_agent_agent_cfg)
     `uvm_object_utils_end
 

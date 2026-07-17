@@ -17,19 +17,17 @@
 
 说明：用户给出的 `issue_queue_assigner.sv` 在当前源码树中不存在。当前 issue 字段分配由 `issue_field_assigner.sv` 承担，issue queue 路由和选择由 `issue_queue_scheduler.sv` 承担。
 
-### V2 适配目标边界
+### V2 LSQ admission 当前边界
 
-本文 flow 图和后续“真实逻辑摘要”记录的是当前尚未完成 V2 适配的测试框架源码，因此仍会出现
-`canAccept/response key`、`commit_allocate_with_resp()` 和 `uid[6:0] -> uopIdx` 等历史行为。
-这些行为不得作为 V2 coding 目标。V2 最终 admission 语义以
-`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`
-和 `AI_DOC/mem_ut_flow_doc/lsq_admission_flow.md` 的 V2 目标章节为准：
+本文已按当前 V2 源码同步 LSQ admission 主链。完整逐函数说明以
+`AI_DOC/mem_ut_flow_doc/lsq_admission_flow.md` 为准；本文件只保留主表到 issue queue 的衔接：
 
-- V2 MemBlock 顶层接收的是上游 `LsqEnqCtrl` 已接受并分配 key 后的一拍 `Valid` request，
-  测试框架不得等待顶层不存在的 `canAccept/response key`。
-- sequence 在驱动前预测整批 LQ/SQ key；driver完成E0 drive、E1 sample/abort/revoke后判断本批是否
-  仍有效。未被打断时重新调用`preview_allocate()`核对当前key，再调用唯一`commit_allocate()`提交，
-  不新增第二层prediction wrapper。
+- V2 MemBlock 顶层只有 6 路 enqueue request input，不存在顶层 `canAccept/response key`。
+- sequence 在 launch 前预览整批 LQ/SQ key，launch 后调用唯一 `commit_allocate()` 立即预留软件资源。
+- 当前批经过下一 driver clocking 边界后，`complete_v2_pending_sample()` 才调用
+  `complete_admission()` 设置 `issue_ready` 并进入 LOAD/STA/STD issue queue。
+- redirect/flush 覆盖 launch 后 pending batch 时不开放 issue，由既有 active map 和 LSQ cancel owner
+  回退 reservation；V2 不调用 response wrapper `commit_allocate_with_resp()`。
 - V2 scalar load/store 固定驱动 `uopIdx=0`、`lastUop=1`、`numLsElem=1`，
   不得继续把全局 uid 低位写入 instruction-local `uopIdx`。
 - 带 accept/response 的其它版本继续走 capability 隔离的原确认路径；不得把两种确认语义混在同一隐式默认分支中。
@@ -85,19 +83,22 @@ flowchart TD
     LSQ1 --> LSQ2["drive_lsqenq_loop"]
     LSQ2 --> LSQ3["send_lsqenq_cycle"]
     LSQ3 --> LSQ4["apply_pending_lsq_cancels"]
-    LSQ3 --> LSQ5{"admit_non_lsq_if_ready?"}
+    LSQ4 --> LSQ4A{"pending sample and next uid is non-LSQ?"}
+    LSQ4A -->|yes| LSQ4B["send_idle_lsqenq_boundary -> complete previous sample"]
+    LSQ4A -->|no| LSQ5{"admit_non_lsq_if_ready?"}
+    LSQ4B --> LSQ5
     LSQ5 -->|yes| LSQ6["commit_non_lsq_admission -> complete_admission"]
     LSQ5 -->|no| LSQ7["collect_lsq_candidates"]
     LSQ7 --> LSQ8{"candidate exists?"}
     LSQ8 -->|no| LSQ9["idle xaction"]
     LSQ8 -->|yes| LSQ10["assign_lsqenq_slot"]
     LSQ10 --> LSQ11["start_item / finish_item"]
-    LSQ11 --> LSQ12["confirm_lsq_candidates"]
-    LSQ12 --> LSQ13{"redirect/flush changed?"}
-    LSQ13 -->|yes| LSQ14["skip confirmation"]
-    LSQ13 -->|no| LSQ15["lsq_ctrl.commit_allocate_with_resp"]
-    LSQ15 --> LSQ16["data.activate_uid"]
-    LSQ16 --> LSQ17["data.set_status_field ENQ"]
+    LSQ11 --> LSQ12["complete_v2_pending_sample: complete previous batch"]
+    LSQ12 --> LSQ13["confirm_lsq_candidates: confirm current launch"]
+    LSQ13 --> LSQ14{"launched and epoch valid?"}
+    LSQ14 -->|no| LSQ15["skip current reservation"]
+    LSQ14 -->|yes| LSQ16["lsq_ctrl.commit_allocate + save pending batch"]
+    LSQ16 --> LSQ17["next driver boundary"]
     LSQ17 --> LSQ18["complete_admission"]
     LSQ18 --> LSQ19["issue_sched.prepare_issue_route_for_uid"]
     LSQ19 --> LSQ20["route_uid -> route_target"]
@@ -146,19 +147,21 @@ memblock_lsqenq_dispatch_base_sequence.body:
 
 send_lsqenq_cycle:
   先 apply_pending_lsq_cancels，消费 redirect 后需要回退的软件 LQ/SQ 指针；
+  如果上一批等待 sample，而 next uid 是 non-LSQ：
+    先发送全零 idle item 提供 driver 边界，再完成上一批 sample；
   如果 next uid 是 non-LSQ 类型且可 admission：
     commit_non_lsq_admission，随后 complete_admission；
   否则 collect_lsq_candidates 从 get_next_new_admit_uid 开始顺序取候选；
   如果没有候选：
     发 idle xaction；
   如果有候选：
-    assign_lsqenq_slot 写 req valid、fuType、uopIdx、ROB/LQ/SQ key、numLsElem；
-    start_item/finish_item 交给 lsqenq driver；
-    confirm_lsq_candidates 只在未发生 redirect/flush 且 flush_epoch 未变化时确认；
-    commit_allocate_with_resp 用 DUT resp key 校验软件预期 key，写回 main transaction 的 LQ/SQ key；
-    data.activate_uid 建立 ROB/LQ/SQ active map；
-    set_status_field(ENQ) 置 enq=1 并推进 max_enqueued_uid；
-    complete_admission 调用 prepare_issue_route_for_uid。
+    assign_lsqenq_slot 写 6 路 request 中使用 slot 的完整 V2 payload；
+    start_item/finish_item 交给 clock-first driver，driver 在当前边界 launch 后立即 item_done；
+    finish_item 返回后先调用 complete_v2_pending_sample 完成上一批；
+    confirm_lsq_candidates 只在当前 item 已 launch、未发生 redirect/flush 且 epoch 未变化时继续；
+    重新 preview 当前 key，和 candidate key 一致后调用唯一 commit_allocate 预留资源并建立 active map；
+    把当前 uid 保存为 pending sample，不在本边界开放 issue；
+    下一 driver 边界由 complete_v2_pending_sample 调用 complete_admission。
 
 4. issue queue 入队
 prepare_issue_route_for_uid:
@@ -475,7 +478,7 @@ tr.robIdx_flag  = rob_key.flag;
 tr.robIdx_value = rob_key.value;
 tr.lqIdx_flag   = 1'b0;
 tr.sqIdx_flag   = 1'b0;
-tr.numLsElem    = 5'd1;
+tr.numLsElem    = memblock_num_ls_elem_t'(1);
 tr.imm          = main_control_transaction::sign_extend_imm12(tr.imm);
 ...
 tr.op_class     = select_op_class_by_weight();
@@ -490,7 +493,8 @@ validate_main_table_entry(tr, $sformatf("random uid=%0d", uid));
 
 功能解释：
 
-该函数生成单条主表 transaction 的基础字段。LSQ key 在这里先清零，真实 LQ/SQ key 要等 LSQ admission 根据 DUT response 回填。
+该函数生成单条主表 transaction 的基础字段。LSQ key 在这里先清零，真实 LQ/SQ key 在 V2 request
+launch 后由软件 `commit_allocate()` 根据当前 enqueue pointer 回填。
 
 输入/输出：
 
@@ -506,7 +510,7 @@ validate_main_table_entry(tr, $sformatf("random uid=%0d", uid));
 清 TLB/PMA/denied/corrupt 异常字段；
 select_op_class_by_weight：按 MEMBLOCK_OP_CLASS_*_WT 选 load/store/prefetch/amo；
 apply_minimal_op_template：按 op_class 写 fuType、lsq_flow、fuOpType、numLsElem；
-apply_legal_addr_template：从 MEMBLOCK_PADDR_BASE/RANGE 中选 64B 对齐地址；
+apply_legal_addr_template：从 MEMBLOCK_MAIN_VADDR_BASE/RANGE 中选虚拟地址；
 randomize_send_pri_value：生成 send_pri 和 send_pri_std；
 randomize_delay_value：生成 issue queue ready_cycle 初值；
 update_vaddr；
@@ -534,19 +538,19 @@ case (tr.op_class)
         tr.fuType   = MEMBLOCK_FUTYPE_LDU;
         tr.lsq_flow = MEMBLOCK_LSQ_FLOW_LOAD;
         tr.fuOpType = random_load_fuoptype();
-        tr.numLsElem = 5'd1;
+        tr.numLsElem = memblock_num_ls_elem_t'(1);
     end
     MEMBLOCK_OP_CLASS_STORE: begin
         tr.fuType   = MEMBLOCK_FUTYPE_STU;
         tr.lsq_flow = MEMBLOCK_LSQ_FLOW_STORE;
         tr.fuOpType = random_store_fuoptype();
-        tr.numLsElem = 5'd1;
+        tr.numLsElem = memblock_num_ls_elem_t'(1);
     end
     MEMBLOCK_OP_CLASS_AMO: begin
         tr.fuType   = MEMBLOCK_FUTYPE_MOU;
         tr.lsq_flow = MEMBLOCK_LSQ_FLOW_ATOMIC;
         tr.fuOpType = random_amo_fuoptype();
-        tr.numLsElem = 5'd0;
+        tr.numLsElem = memblock_num_ls_elem_t'(0);
     end
 endcase
 ...
@@ -672,11 +676,15 @@ endcase
 
 功能解释：
 
-基础地址先从 `MEMBLOCK_PADDR_BASE/RANGE` 中选择 64B 对齐地址。随后 `apply_addr_reuse_window()` 可以按权重把当前 transaction 改成 load 或 store，并复制窗口内历史 transaction 的 `src_0/imm`，用于构造 load-after-store、store-after-load 等地址相关场景。
+基础虚拟地址先从 `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 中选择。随后 `apply_addr_reuse_window()` 可以按权重
+把当前 transaction 改成load或store，并复制窗口内历史transaction的`src_0/imm`，用于构造
+load-after-store、store-after-load等地址相关场景。TLB entry物理映射继续由独立
+`MEMBLOCK_PADDR_BASE/RANGE`控制，二者不互相限制。
 
 输入/输出：
 
-- 输入：`MEMBLOCK_PADDR_BASE`、`MEMBLOCK_PADDR_RANGE`、`MEMBLOCK_ADDR_REUSE_*`、`MEMBLOCK_ADDR_REF_WINDOW_*`。
+- 输入：`MEMBLOCK_MAIN_VADDR_BASE`、`MEMBLOCK_MAIN_VADDR_RANGE`、`MEMBLOCK_ADDR_REUSE_*`、
+  `MEMBLOCK_ADDR_REF_WINDOW_*`。
 - 输出：`tr.src_0/imm/vaddr`，可能还会改写 `op_class/fuType/fuOpType/lsq_flow`。
 
 文字伪代码：
@@ -952,33 +960,77 @@ forever:
 
 ```systemverilog
 apply_pending_lsq_cancels();
-if (admit_non_lsq_if_ready(has_progress)) begin
+if (pending_sample_valid) begin
+    if (next_uid_needs_lsq_admission(probe_uid, probe_tr, probe_behavior) &&
+        probe_behavior.need_alloc == 2'b00) begin
+        send_idle_lsqenq_boundary(cycle_idx, "non-LSQ sample boundary", has_progress);
+    end
+end
+if (admit_non_lsq_if_ready(admission_progress)) begin
+    has_progress |= admission_progress;
     return;
 end
 if (!collect_lsq_candidates(uids, trs, behaviors, lq_keys, sq_keys)) begin
-    ... idle xaction ...
+    send_idle_lsqenq_boundary(cycle_idx, "no LSQ candidate", has_progress);
     return;
 end
-...
 foreach (uids[idx]) begin
-    assign_lsqenq_slot(tr, idx, uids[idx], trs[idx], behaviors[idx], lq_keys[idx], sq_keys[idx]);
+    assign_lsqenq_slot(tr, idx, trs[idx], behaviors[idx], lq_keys[idx], sq_keys[idx]);
 end
 start_item(tr);
 finish_item(tr);
-confirm_lsq_candidates(tr, uids, trs, behaviors, has_progress);
+complete_v2_pending_sample(has_progress);
+confirm_lsq_candidates(tr, uids, trs, behaviors, lq_keys, sq_keys, has_progress);
+```
+
+中文伪代码：
+
+```text
+send_lsqenq_cycle：
+  先消费redirect遗留的LQ/SQ cancel；若上一批pending后紧接non-LSQ，则发送全零item提供driver边界；
+  non-LSQ兼容入口未处理时，收集普通candidate；无candidate也发送全零item并返回；
+  有candidate时只构造当前xaction slot，然后start_item/finish_item交给driver在本边界launch；
+  finish_item返回后，complete_v2_pending_sample只完成上一批：比较保存epoch与当前epoch，匹配才调用complete_admission；
+  最后调用confirm_lsq_candidates，它只为本边界刚launch的当前批建立reservation，当前批尚不开放issue。
 ```
 
 ```systemverilog
-if (tr.memblock_dispatch_aborted_by_redirect ||
-    admission_blocked_by_flush() ||
+if (!tr.memblock_dispatch_request_launched) begin
+    if (!tr.memblock_dispatch_aborted_by_redirect &&
+        !admission_blocked_by_flush() &&
+        tr.memblock_dispatch_flush_epoch == memblock_sync_pkg::dispatch_flush_epoch) begin
+        `uvm_fatal(get_type_name(), "active LSQ candidate returned without launch or redirect abort")
+    end
+    return;
+end
+if (tr.memblock_dispatch_aborted_by_redirect) begin
+    `uvm_fatal(get_type_name(), "LSQ transaction cannot be both launched and aborted before launch")
+end
+if (admission_blocked_by_flush() ||
     tr.memblock_dispatch_flush_epoch != memblock_sync_pkg::dispatch_flush_epoch) begin
     return;
 end
 foreach (uids[idx]) begin
-    get_resp_keys(tr, idx, dut_lq_key, dut_sq_key);
-    lsq_ctrl.commit_allocate_with_resp(uids[idx], behaviors[idx], trs[idx], dut_lq_key, dut_sq_key);
-    complete_admission(uids[idx]);
+    lsq_ctrl.preview_allocate(behaviors[idx], expected_lq_key, expected_sq_key);
+    if ((behaviors[idx].uses_lq && expected_lq_key != lq_keys[idx]) ||
+        (behaviors[idx].uses_sq && expected_sq_key != sq_keys[idx])) begin
+        `uvm_fatal(get_type_name(), "LSQ candidate preview drift")
+    end
+    lsq_ctrl.commit_allocate(uids[idx], behaviors[idx], trs[idx]);
+    pending_sample_uids.push_back(uids[idx]);
 end
+pending_sample_valid = 1'b1;
+```
+
+中文伪代码：
+
+```text
+confirm_lsq_candidates：
+  先验证当前item确实launch且未被redirect/flush或epoch变化取消，非法metadata直接fatal；
+  要求上一批pending已完成，并检查五组candidate queue非空且等长；
+  逐uid重新preview behavior实际使用的key，漂移时在公共状态修改前fatal；
+  调用commit_allocate建立active/enq/map并推进软件pointer/free count；
+  只把当前uid和launch epoch保存为pending-sample reservation，不调用complete_admission，也不开放issue。
 ```
 
 ```systemverilog
@@ -988,52 +1040,37 @@ function void memblock_lsqenq_dispatch_base_sequence::complete_admission(input m
 endfunction:complete_admission
 ```
 
+中文伪代码：
+
+```text
+complete_admission：
+  对普通LSQ batch，由下一driver边界的complete_v2_pending_sample确认保存epoch仍等于当前epoch后调用；
+  对当前主流程不可达的non-LSQ兼容入口，由admit_non_lsq_if_ready在commit_non_lsq_admission后直接调用；
+  先drain_csr_runtime_events更新CSR runtime snapshot；
+  再调用prepare_issue_route_for_uid检查active/enq、设置issue_ready并路由到对应issue queue。
+```
+
 功能解释：
 
-LSQ admission 是主表进入 active runtime 的边界。只有 confirmation 未被 redirect/flush 覆盖时，才会提交 LQ/SQ key、置 `enq`、置 `issue_ready` 并立即尝试 issue queue route。
+LSQ admission 是主表进入 active runtime 的边界。当前 request launch 后先预留 LQ/SQ key、置 `enq`
+并建立 active map；只有经过下一 driver 边界且未被 redirect/flush 覆盖时，才置 `issue_ready` 并尝试
+issue queue route。
 
 输入/输出：
 
-- 输入：`main_table_by_uid` 中顺序 next uid、DUT LSQ enqueue response key。
-- 输出：更新 `main_table_by_uid[uid].lqIdx/sqIdx`，建立 active ROB/LQ/SQ map，设置 `status.enq/issue_ready`，可能写入 issue queue。
-
-文字伪代码：
-
-```text
-send_lsqenq_cycle:
-  先处理 redirect 后 pending_lq_cancel_count/pending_sq_cancel_count；
-  如果 next uid 是 non-LSQ admission：
-    直接 commit_non_lsq_admission 并 complete_admission；
-  否则 collect_lsq_candidates；
-  如果没有候选：
-    发送 idle xaction；
-  有候选则写 LSQ req slot 并发给 driver；
-  driver 完成后调用 confirm_lsq_candidates；
-
-confirm_lsq_candidates:
-  如果 driver 标记 aborted_by_redirect：
-    直接 return，不确认，不写 status；
-  如果 admission_blocked_by_flush 或 flush_epoch 改变：
-    直接 return，不确认；
-  对每个 candidate:
-    从 xaction response 取 DUT lq/sq key；
-    commit_allocate_with_resp 校验并提交；
-    complete_admission；
-
-complete_admission:
-  drain_csr_runtime_events 更新 CSR runtime snapshot；
-  prepare_issue_route_for_uid 设置 issue_ready 并 route_uid。
-```
+- 输入：`main_table_by_uid` 中顺序 next uid、软件预览的 LQ/SQ key、driver launch metadata 和 flush epoch。
+- 输出：launch 后更新 `main_table_by_uid[uid].lqIdx/sqIdx`、建立 active ROB/LQ/SQ map并置
+  `status.enq`；下一边界再置 `issue_ready`，可能写入 issue queue。
 
 内部子调用：
 
 - `collect_lsq_candidates()`：从 `get_next_new_admit_uid()` 顺序收集最多 `MEMBLOCK_ENQ_PER_CYCLE` 个候选。
 - `assign_lsqenq_slot()`：写 LSQ req payload。
-- `confirm_lsq_candidates()`：redirect/flush 边界过滤。
-- `lsq_ctrl.commit_allocate_with_resp()`：提交 key 和 status。
+- `confirm_lsq_candidates()`：按 launch metadata 和 epoch 过滤，并调用唯一 `commit_allocate()` 预留资源。
+- `complete_v2_pending_sample()`：下一 driver 边界开放 issue，或在 redirect 后丢弃 pending completion。
 - `issue_sched.prepare_issue_route_for_uid()`：LSQ admission 后进入 issue route。
 
-## 16. `lsq_ctrl_model::commit_allocate_with_resp()` / `common_data_transaction::activate_uid()`
+## 16. `lsq_ctrl_model::commit_allocate()` / `common_data_transaction::activate_uid()`
 
 源码位置：以下多个文件共同实现：
 
@@ -1043,18 +1080,11 @@ complete_admission:
 真实逻辑摘要：
 
 ```systemverilog
-preview_allocate(behavior, expected_lq_key, expected_sq_key);
-if (dut_lq_key.flag  != expected_lq_key.flag  ||
-    dut_lq_key.value != expected_lq_key.value ||
-    dut_sq_key.flag  != expected_sq_key.flag  ||
-    dut_sq_key.value != expected_sq_key.value) begin
-    `uvm_fatal(...)
-end
-
-tr.lqIdx_flag  = dut_lq_key.flag;
-tr.lqIdx_value = dut_lq_key.value;
-tr.sqIdx_flag  = dut_sq_key.flag;
-tr.sqIdx_value = dut_sq_key.value;
+preview_allocate(behavior, lq_key, sq_key);
+tr.lqIdx_flag  = lq_key.flag;
+tr.lqIdx_value = lq_key.value;
+tr.sqIdx_flag  = sq_key.flag;
+tr.sqIdx_value = sq_key.value;
 tr.numLsElem   = behavior.num_ls_elem;
 
 data.set_main_transaction(uid, tr);
@@ -1076,20 +1106,22 @@ status.active = 1'b1;
 
 功能解释：
 
-该阶段把静态主表 entry 变成 active 动态实例。`commit_allocate_with_resp()` 以 DUT 返回 key 为准更新 main transaction；`activate_uid()` 建立 runtime 查找 map，后续 writeback、commit、redirect 都依赖这些 map 定位 uid。
+该阶段把静态主表 entry 变成 active 动态实例。`commit_allocate()` 使用当前软件指针生成 key 并更新
+main transaction；`activate_uid()` 建立 runtime 查找 map，后续 writeback、commit、redirect 都依赖这些
+map 定位 uid。V2 顶层没有 enqueue response，因此不调用 `commit_allocate_with_resp()`；该函数只保留为
+存在真实 response 的其它 profile 的比较 wrapper，内部最终仍调用唯一 `commit_allocate()`。
 
 输入/输出：
 
-- 输入：uid、behavior、main transaction、DUT LQ/SQ key。
+- 输入：uid、behavior、main transaction；LQ/SQ key由当前软件 pointer预览得到。
 - 输出：main transaction key 更新；`status.active=1`、`status.active_lq_mapped/active_sq_mapped`；`uid_by_active_rob/uid_by_lq/uid_by_sq`。
 
 文字伪代码：
 
 ```text
-commit_allocate_with_resp:
-  preview_allocate 计算软件期望 LQ/SQ key；
-  比较 DUT resp key 和软件期望 key，不一致 fatal；
-  将 DUT key 写回 main transaction；
+commit_allocate:
+  preview_allocate 计算当前软件 LQ/SQ key并检查free count；
+  将软件 key 写回 main transaction；
   set_main_transaction 更新主表；
   activate_uid 建立 active map；
   set_status_field(ENQ,1) 置 enq 并推进 max_enqueued_uid；
@@ -1108,7 +1140,7 @@ activate_uid:
 
 内部子调用：
 
-- `preview_allocate()`：计算软件 LSQ 指针预期。
+- `preview_allocate()`：计算软件 LSQ 指针预期并检查资源。
 - `data.set_status_field(MEMBLOCK_STATUS_ENQ)`：推进 admission 高水位。
 - `rob_order_util::*_to_map_key()`：将 ROB/LQ/SQ key 转 map key。
 
@@ -1293,10 +1325,16 @@ issue queue：
 
 LSQ admission 分支：
 
-1. `data.issue_blocked_by_global_flush()` 为最高优先级，阻止 admission。
-2. `admit_non_lsq_if_ready()` 在 LSQ allocate candidate 前处理 non-LSQ admission。
-3. `collect_lsq_candidates()` 只从 `get_next_new_admit_uid()` 顺序收集，遇到 invalid、active/enq、pending、资源不足或 non-LSQ 即停止。
-4. `confirm_lsq_candidates()` 中 redirect/flush 边界优先于 status 更新；若 `aborted_by_redirect` 或 `flush_epoch` 变化，不提交 key、不置 enq、不 route。
+1. 每轮先执行 `apply_pending_lsq_cancels()`，消费 redirect 已登记的 LQ/SQ 软件资源回退。
+2. 若上一批仍处于 pending sample 且下一 uid 为 non-LSQ，先调用 `send_idle_lsqenq_boundary()` 提供
+   driver 采样边界，再继续处理该 non-LSQ uid。
+3. `data.issue_blocked_by_global_flush()` 阻止新的 admission；global stop 还会先用 trailing idle 完成已有
+   pending batch 的 sample，再退出 sequence。
+4. `admit_non_lsq_if_ready()` 在 LSQ allocate candidate 前处理 non-LSQ admission。
+5. `collect_lsq_candidates()` 只从 `get_next_new_admit_uid()` 顺序收集，遇到 invalid、active/enq、pending、
+   资源不足或 non-LSQ 即停止。
+6. `confirm_lsq_candidates()` 中 redirect/flush 边界优先于 status 更新；若 `aborted_by_redirect` 或
+   `flush_epoch` 变化，不提交 key、不置 enq、不 route。
 
 issue route 分支：
 
@@ -1316,9 +1354,11 @@ issue route 分支：
   -> alloc_uid / randomize_main_transaction(op_class LOAD)
   -> set_main_transaction / init_status_for_main_table / main_table_ready
   -> LSQ enqueue collect_lsq_candidates
-  -> commit_allocate_with_resp
+  -> driver launch
+  -> commit_allocate reservation
   -> activate_uid + set_status_field(ENQ)
-  -> prepare_issue_route_for_uid
+  -> next driver boundary
+  -> complete_v2_pending_sample / prepare_issue_route_for_uid
   -> route_uid(route_load)
   -> route_target(LOAD)
   -> load_issue_q push + queued_load=1
@@ -1337,11 +1377,9 @@ issue route 分支：
 redirect/flush 覆盖 LSQ admission：
   send_lsqenq_cycle
   -> start_item/finish_item
-  -> confirm_lsq_candidates sees aborted_by_redirect or flush_epoch changed
-  -> return
-  -> no commit_allocate_with_resp
-  -> no ENQ
-  -> no issue_ready
+  -> launch前覆盖：driver不launch，confirm不建立reservation
+  -> launch后覆盖：reservation保留给原cancel owner回退
+  -> complete_v2_pending_sample不设置issue_ready
   -> no issue queue entry
 
 地址复用 load-after-store：
@@ -1362,9 +1400,9 @@ redirect/flush 覆盖 LSQ admission：
   主表先创建 uid 和 LOAD transaction；
   status 初始化时只保存 ROB/LQ/SQ key 快照，active/enq/issue_ready 仍为 0；
   LSQ enqueue sequence 等 main_table_ready 后，按 uid 顺序 admission；
-  commit_allocate_with_resp 确认 DUT LQ/SQ key 后，activate_uid 建 active map；
+  driver launch后，commit_allocate按当前软件pointer写LQ/SQ key并由activate_uid建active map；
   set_status_field(ENQ) 推进 max_enqueued_uid；
-  complete_admission 置 issue_ready 并 route；
+  下一driver边界由complete_v2_pending_sample调用complete_admission，置issue_ready并route；
   route_uid 识别 route_load，只写 load_issue_q。
 
 STORE：
@@ -1375,9 +1413,10 @@ STORE：
   后续真实 issue fire 会分别清 queued_sta/queued_std 并置 dispatched。
 
 redirect/flush 边界：
-  LSQ driver 等待 ready 或发包期间如果发生 redirect/flush，xaction 会带 aborted 或 flush_epoch 变化；
-  confirm_lsq_candidates 在任何 status/key 更新前检查该条件；
-  命中后直接丢弃本次 confirmation，避免旧动态实例被错误 admission 或错误 route。
+  LSQ driver每个clocking边界先让DUT采样上一批，再决定是否launch当前批；
+  launch前发生redirect/flush时不驱动当前request，也不建立reservation；
+  launch后、下一sample completion前发生redirect/flush时，complete_v2_pending_sample不开放issue；
+  既有redirect handler和LSQ cancel owner根据active mapping回退reservation，避免重复释放。
 
 地址复用：
   每条随机 transaction 先有合法独立地址；

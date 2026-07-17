@@ -83,7 +83,7 @@ Dispatch framework 参数分组如下：
 | 分组 | 字段 |
 | --- | --- |
 | 主表与模式 | `MEMBLOCK_MAIN_TRANS_NUM`、`MEMBLOCK_USE_MANUAL_MAIN_TABLE` |
-| 入队与流水线runtime使用量 | `MEMBLOCK_ENQ_PER_CYCLE`、`MEMBLOCK_ENQ_PER_CYCLE_RAND_EN`、`MEMBLOCK_LOAD_PIP_NUM_LIMIT`、`MEMBLOCK_STA_PIP_NUM_LIMIT`、`MEMBLOCK_STD_PIP_NUM_LIMIT`、`MEMBLOCK_LOAD_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STA_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STD_PIP_NUM_RANDOM_EN` |
+| 入队与流水线runtime使用量 | `MEMBLOCK_ENQ_PER_CYCLE`、`MEMBLOCK_ENQ_PER_CYCLE_RAND_EN`、`MEMBLOCK_ENQ_PER_CYCLE_ZERO_WEIGHT`、`MEMBLOCK_ENQ_PER_CYCLE_MIDDLE_WEIGHT`、`MEMBLOCK_ENQ_PER_CYCLE_MAX_WEIGHT`、`MEMBLOCK_LOAD_PIP_NUM_LIMIT`、`MEMBLOCK_STA_PIP_NUM_LIMIT`、`MEMBLOCK_STD_PIP_NUM_LIMIT`、`MEMBLOCK_LOAD_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STA_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STD_PIP_NUM_RANDOM_EN` |
 | op class 权重 | `MEMBLOCK_OP_CLASS_INT_LOAD_WT`、`MEMBLOCK_OP_CLASS_FP_LOAD_WT`、`MEMBLOCK_OP_CLASS_STORE_WT`、`MEMBLOCK_OP_CLASS_PREFETCH_WT`、`MEMBLOCK_OP_CLASS_AMO_WT`、`MEMBLOCK_OP_CLASS_CBO_WT` |
 | fuOpType 权重 | `MEMBLOCK_LOAD_FUOP_*_WT`、`MEMBLOCK_STORE_FUOP_*_WT`、`MEMBLOCK_PREFETCH_FUOP_*_WT`、`MEMBLOCK_CBO_FUOP_*_WT`、`MEMBLOCK_AMO_FUOP_*_WT` |
 | boundary profile 生成 | `MEMBLOCK_BOUNDARY_PROFILE_GEN_EN`、`MEMBLOCK_BOUNDARY_*_WT`、`MEMBLOCK_STORE_CROSS_8B_WITHIN_16B_EN` |
@@ -140,20 +140,25 @@ lintsissue driver 每个 xaction 只采样一次 DUT ready，只把真实 `valid
 `MEMBLOCK_DISPATCH_READY_TIMEOUT` 长等待，长期无 fire 由主动主流程 no-progress
 warning 提示。
 
-`MEMBLOCK_LSQENQ_SEQ_EN` 默认必须为 0。原因是 LSQ enqueue 是依赖 dispatch
-主表的主动主流程 driver；普通 `tc_sanity` 等 testcase 不生成主表，默认打开会导致
-sequence 合法地等待主表但 testcase 无法结束。真实 dispatch smoke 需要通过
-对应 `seq/plus_cfg/tc_dispatch_real*.cfg` 显式置 1。启用后，
-`memblock_lsqenq_dispatch_base_sequence` 会驱动真实 LSQ admission；关闭时该 sequence
-保持 idle 并返回，不回退父类随机 default sequence，避免普通 testcase 误发 LSQENQ。
-从已经生成的 `common_data_transaction` 主表按 uid 顺序完成 admission。需要 LSQ
-entry 的 load/store/CBO 会先用本地 `lsq_ctrl_model` 做资源预检，再由 driver 等待
-DUT `io_ooo_to_mem_enqLsq_canAccept` 后单拍发送 `needAlloc/req`，并用返回的
-`resp.lqIdx/sqIdx` 与本地预测值一致性校验后更新主表和状态表；`needAlloc=0` 的
-AMO/LR/SC 只做 non-LSQ admission，不驱动 LSQ 入队端口。每个成功 admission 后会
-立即生成 TLB 表并路由 load/STA/STD issue queue。LSQENQ 不再有专用 max_cycles、
-idle stop 或 start timeout；global stop 前常驻 admission，global stop 后退出。
-`MEMBLOCK_LSQENQ_READY_TIMEOUT` 只限制等待 `canAccept` 的最大周期数。
+`MEMBLOCK_LSQENQ_SEQ_EN` 默认必须为 1，与 `plus.sv` 和 `default.cfg` 保持一致。
+`tc_base` 默认安装 `memblock_lsqenq_dispatch_base_sequence`，因此任何构建 dispatch 主表的
+testcase 都会自动获得真实 LSQ admission，不需要在每个 directed cfg 中重复打开。没有构建主表时，
+sequence 只在 `wait_for_main_table()` 中保持接口 idle，既不随机驱动 LSQENQ，也不修改公共状态；
+testcase 主 phase 结束时由 UVM 统一结束 default sequence。需要明确关闭该主动 admission flow 的
+bring-up 或隔离场景，可以在对应 cfg/plusarg 中显式置 0；关闭后 sequence 保持 idle 并返回，
+不回退父类随机 default sequence。
+从已经生成的 `common_data_transaction` 主表按 uid 顺序完成 admission。本轮 V2 scalar
+load/store 先用本地 `lsq_ctrl_model` 预览 LQ/SQ key，再由 clock-first driver 把 request
+发送一次；V2 顶层没有 LSQ enqueue `canAccept/response`，因此不等待 ready，也不把软件
+预测 key 当成 DUT response。launch 后立即预留软件 LSQ 资源，下一 driver 边界才设置
+`issue_ready` 并路由 LOAD/STA/STD issue queue。redirect 覆盖 pending batch 时不开放 issue，
+仍由原全局 redirect/cancel owner 回退资源。公共参数层仍解析
+`MEMBLOCK_LSQENQ_READY_TIMEOUT` 并检查非负，但 V2 sequence 不读取该 getter，也不等待 ready。
+
+`MEMBLOCK_ENQ_PER_CYCLE_RAND_EN=1` 时，ZERO/MIDDLE/MAX 三类权重分别控制主动 idle、
+`1..SLOT_NUM-1` 和物理最大 slot 数的类别总概率。MIDDLE 的 `-1` 是 AUTO sentinel，
+有效权重派生为 `SLOT_NUM-1`。随机配置不得让 `MIDDLE+MAX=0`，避免主动 flow 永远只发送
+idle；随机目标仍会被连续 uid、V2 load/store 6/4 和实际 LQ/SQ free count继续截断。
 
 `MEMBLOCK_LSQCOMMIT_SEQ_EN` 默认必须为 0。启用后，
 `memblock_lsqcommit_dispatch_base_sequence` 会替换 lsqcommit agent 的安全默认

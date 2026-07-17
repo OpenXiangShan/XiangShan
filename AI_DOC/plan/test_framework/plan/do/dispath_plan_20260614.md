@@ -1,3 +1,13 @@
+# 早期可参数化测试激励框架草案
+
+> **LSQ enqueue 历史边界（2026-07-16）**：本文中的 8-slot、`canAccept/response`、
+> `commit_allocate_with_resp()` 作为 V2 主路径或 `MEMBLOCK_LSQENQ_SEQ_EN=0` 默认值描述均为
+> 早期实现审计，不代表当前 V2 行为。当前实现以
+> `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`
+> 和 `AI_DOC/mem_ut_flow_doc/lsq_admission_flow.md` 为准：6-slot、load/store 6/4、无顶层
+> ready/response、clock-first streaming、launch后reservation、下一driver边界issue-ready，且LSQ enqueue
+> sequence默认启用。
+
 背景知识：为memory UT环境设计一套可参数化的测试激励框架，该框架用于发送load、store请求，所有测试用例均需基于此框架生成；生成的测试用例需严格符合memblock DUT的合法行为，尤其需保证各信号字段的赋值、信号之间的依赖关联及时序逻辑，均满足 DUT的相关约束。
 
 核心要求补充：本任务中所有生成的表（第一套主表、TLB相关表、3张子表），最终均需存入common\_data\_transaction\.sv文件中；该文件需通过单例模式实现，确保在其他任何环境中均可被共享访问，所有生成器task生成的表数据，最终落脚点均为该common\_data\_transaction\.sv文件。同时需重点基于性能（读写速度、内存占用、访问效率）考量，选择最优的数据存储方式（链表、数组或其他合适形式），优先保证数据存储和共享的性能表现。

@@ -36,13 +36,13 @@
 
 | 语义 | Scala 常量 | 实际编码 |
 |---|---|---|
-| 标量 load | `FuType.ldu` | `36'h0001_0000` |
-| 标量 store | `FuType.stu` | `36'h0002_0000` |
-| 标量 AMO | `FuType.mou` | `36'h0004_0000` |
-| 向量 load | `FuType.vldu` | `36'h1000_00000` |
-| 向量 store | `FuType.vstu` | `36'h2000_00000` |
-| 向量 segment load | `FuType.vsegldu` | `36'h4000_00000` |
-| 向量 segment store | `FuType.vsegstu` | `36'h8000_00000` |
+| 标量 load | `FuType.ldu` | V2 bit 15，`36'h0000_8000` |
+| 标量 store | `FuType.stu` | V2 bit 16，`36'h0001_0000` |
+| 标量 AMO | `FuType.mou` | V2 bit 17，`36'h0002_0000` |
+| 向量 load | `FuType.vldu` | V2 bit 31，`36'h0_8000_0000` |
+| 向量 store | `FuType.vstu` | V2 bit 32，`36'h1_0000_0000` |
+| 向量 segment load | `FuType.vsegldu` | V2 bit 33，`36'h2_0000_0000` |
+| 向量 segment store | `FuType.vsegstu` | V2 bit 34，`36'h4_0000_0000` |
 
 ### 2. 标量 LSU fuOpType 速查表
 
@@ -396,15 +396,14 @@ UVM 驱动到 DUT：
 
 ### DUT 连接方向
 见：
-- [lsqenq_agent_connect.sv](/nfs/home/lixiangrui/work/memblock_ut/XiangShan/mem_ut/ver/ut/memblock/tb/lsqenq_agent_connect.sv)
+- `mem_ut/ver/ut/memblock/tb/lsqenq_agent_connect.sv`
 
 UVM 驱动到 DUT：
-- `needAlloc_[0..7]`
-- `req_[0..7]_*`
+- `needAlloc_[0..5]`
+- `req_[0..5]_*`
 
-UVM 观察 DUT 输出：
-- `canAccept`
-- `resp_[0..7].lqIdx/sqIdx`
+V2 顶层没有该 bundle 对应的 `canAccept` 或 response output。`lqCanAccept/sqCanAccept` 是独立
+LSQ状态观测，不是request握手。
 
 ### Scala 来源
 关键源码：
@@ -416,8 +415,10 @@ UVM 观察 DUT 输出：
 #### 5.1 `needAlloc`
 合法值：
 - `00`：不分配
-- `01`：load / vload
-- `10`：store / vstore
+- `01`：scalar load
+- `10`：scalar store
+
+本轮vector LS/`issueVldu`不支持，不能作为合法scalar激励静默发送。
 
 #### 5.2 `req_i_valid`
 合法值：
@@ -427,15 +428,12 @@ UVM 观察 DUT 输出：
 实际合法子集：
 - `ldu`
 - `stu`
-- `vldu`
-- `vstu`
 
-对标量框架建议：
-- load: `36'h0001_0000`
-- store: `36'h0002_0000`
+标量框架必须使用当前profile的`MEMBLOCK_DUT_FUTYPE_LDU/STU`，并通过
+`encode_and_fit_dut_futype()`确认36-bit内部one-hot可无损写入35-bit V2 DUT字段，禁止裁剪V3编码。
 
 补充：
-- `mou = 36'h0004_0000` 是合法 `FuType`，但通常不走普通标量 `lsqenq` 主路径
+- 当前V2 profile中`mou`为bit 17，即`36'h0002_0000`；它是合法`FuType`，但本轮scalar-only主表校验明确拒绝AMO/MOU
 - `Dispatch.scala` 中 `enqLsqIO.req.valid` 会过滤掉 `isAMOVec(i)`
 - 因此对普通 `lsqenq` 有效请求来说，不应把 `mou` 当作常规合法值来随机发
 
@@ -453,29 +451,31 @@ UVM 观察 DUT 输出：
 - 来自 ROB/rename 分配
 - 必须和 issue/commit 统一使用
 
-当前容量约束：
+当前V2容量约束：
 - `robIdx_flag inside {0,1}`
-- `robIdx_value inside {[0:351]}`
+- `robIdx_value < MEMBLOCK_DUT_ROB_SIZE`
 
 #### 5.6 `req_i_bits_lqIdx/sqIdx`
 说明：
-- 输入侧是 uop 字段镜像
-- 真正有效的分配结果以 `resp` 为准
+- 输入侧携带sequence按软件LQ/SQ pointer预览的key。
+- driver launch后由唯一`commit_allocate()`写回同一key并建立active map；V2没有response覆盖该结果。
 
 建议：
-- 首版激励输入可固定 0
-- 后续跟踪分配使用 `resp`
+- scalar load必须携带有效LQ key，scalar store必须携带有效SQ key。active request的unused key可以携带
+  另一队列当前软件preview值，但不参与allocation、漂移比较或pointer/free-count推进；inactive slot的
+  全部key和payload才必须为0。
+- launch后再次`preview_allocate()`与candidate key不一致时，在任何状态修改前fatal。
 
 当前容量约束：
 - `lqIdx_flag inside {0,1}`
-- `lqIdx_value inside {[0:71]}`
+- `lqIdx_value < MEMBLOCK_DUT_LQ_SIZE`
 - `sqIdx_flag inside {0,1}`
-- `sqIdx_value inside {[0:55]}`
+- `sqIdx_value < MEMBLOCK_DUT_SQ_SIZE`
 
 #### 5.7 `req_i_bits_numLsElem`
 合法值：
 - 标量固定 `1`
-- 向量按元素数分配
+- 本轮不支持vector/multi-element；非1值在scalar setter中fatal。
 
 ### 结论
 这是 `1.1` 最关键的 transaction，字段之间必须保持强一致性：
@@ -528,9 +528,9 @@ UVM 驱动 `valid/bits`
 - AMO 路径可能为 `mou`
 
 实际映射：
-- `ldu = 36'h0001_0000`
-- `stu = 36'h0002_0000`
-- `mou = 36'h0004_0000`
+- V2 `ldu = 36'h0000_8000`，bit 15
+- V2 `stu = 36'h0001_0000`，bit 16
+- V2 `mou = 36'h0002_0000`，bit 17
 
 #### `fuOpType`
 - 如果 `fuType=ldu`
@@ -900,10 +900,10 @@ UVM 驱动：
 - `vsegstu`
 
 实际映射：
-- `vldu    = 36'h1000_00000`
-- `vstu    = 36'h2000_00000`
-- `vsegldu = 36'h4000_00000`
-- `vsegstu = 36'h8000_00000`
+- V2 `vldu    = 36'h0_8000_0000`，bit 31
+- V2 `vstu    = 36'h1_0000_0000`，bit 32
+- V2 `vsegldu = 36'h2_0000_0000`，bit 33
+- V2 `vsegstu = 36'h4_0000_0000`，bit 34
 
 #### `fuOpType`
 合法值来源：
@@ -1424,13 +1424,29 @@ UVM 观察：
 
 语义上它们分别表示 LoadQueue / StoreQueue 当前是否还能接收新项。`LSQWrapper` 内部还会用两者互相约束 load/store 入队合法性。
 
-Scala 后端 dispatch 主阻塞条件使用的是统一的 `enqLsqIO.canAccept`。当前 mem_ut LSQ 入队已经等待 DUT `io_ooo_to_mem_enqLsq_canAccept`，并在 canAccept 后采样 `enqLsq_resp` 分配到的 `lqIdx/sqIdx`，所以 `lqCanAccept/sqCanAccept` 不应替代当前入队成功条件。
+Scala 完整后端中的上游 `LsqEnqCtrl` 会使用统一的 `enqLsqIO.canAccept` 决定是否向 MemBlock 发送
+已经接受的 request；但当前 V2 MemBlock 顶层交接面只保留 6 路 `needAlloc/req` input，不存在
+`io_ooo_to_mem_enqLsq_canAccept` 或 `enqLsq_resp` 顶层端口。mem_ut 因此在 sequence 中按软件
+LQ/SQ free count和单拍load/store 6/4能力预览key，driver按clock-first边界发送一次request；launch后
+立即预留资源，下一driver边界才开放issue。
+
+6/4合同覆盖三个入口层次：dispatch candidate按实际free count和6/4提前过滤；xaction batch约束保证
+通用default sequence最多随机出6个load或4个store；driver在首次写VIF前再次统计，防止directed item或
+关闭约束的producer发送5/6个store。driver复核是协议fail-fast，不替代candidate的正常资源仲裁。
+
+scalar opcode合同同样覆盖agent通用入口：active LQ的`fuOpType`只允许普通load `0..6`和software
+prefetch `8/9/10`，active SQ只允许普通store `0..3`。xaction逐slot约束负责default sequence，driver在
+首次写VIF前调用同一helper复核directed item；CBO `7/12/13/14`、AMO和其它9-bit值不能在本轮scalar
+LSQ enqueue支持范围内静默发送。
 
 建议：
 
-- 普通标量 LS flow 仍以 `io_ooo_to_mem_enqLsq_canAccept + resp` 作为入队闭环依据。
-- `lqCanAccept/sqCanAccept` 作为更细粒度的 LQ/SQ 接收能力观测信号，可用于 X-check、coverage，或后续 directed case 分析 LQ 满/SQ 满导致的 admission stall。
-- 如果后续要精确建模 backend dispatch stall 原因，可以把这两个信号加入 runtime snapshot，但不要绕过全局 canAccept/resp 闭环。
+- 普通标量 LS flow 以 V2 request launch、软件 reservation 和下一 driver边界 sample completion 作为
+  admission 闭环，不等待不存在的顶层 response。
+- `lqCanAccept/sqCanAccept` 是更细粒度的 LQ/SQ 接收能力观测信号，可用于 X-check、coverage，或后续
+  directed case 分析 LQ 满/SQ 满；当前 candidate gate 的资源真源仍是测试框架 `lsq_ctrl_model`。
+- 如果后续要精确建模完整 backend dispatch stall，应建立独立上游 `LsqEnqCtrl` 专项，不能把这两个
+  观测 output 反写成 V2 MemBlock request 的 ready/response。
 
 ### 字段合法值
 - 这些值由 DUT 内部状态机和后端协议产生
