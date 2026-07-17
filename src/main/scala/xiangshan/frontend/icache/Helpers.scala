@@ -178,7 +178,7 @@ trait ICacheDataHelper extends HasICacheParameters {
 
     info.maybeRvcMaskVec(0)(0) := genInstRange(
       Mux(
-        req(0).isCrossLine,
+        wayLookupEntry(0).isCrossLine,
         MaxInstNumPerBlock.U - info.shiftNum(0),
         firstFetchSize
       )
@@ -188,7 +188,7 @@ trait ICacheDataHelper extends HasICacheParameters {
       req(1).valid,
       genInstRange(
         firstFetchSize +& Mux(
-          req(1).isCrossLine,
+          wayLookupEntry(1).isCrossLine,
           MaxInstNumPerBlock.U - reqStart(1),
           secondFetchSize
         )

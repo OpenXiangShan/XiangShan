@@ -421,7 +421,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     req.takenCfiOffset   := s1_req(i).takenCfiOffset
     req.size             := s1_req(i).takenCfiOffset.bits +& 1.U
     req.data             := s1_data(i)
-    req.maybeRvcMap      := s1_maybeRvcMap(i)
     req.perf_isCrossLine := s1_isCrossLine(i)
 
     req.icacheMeta.exception          := s1_exceptionOut
