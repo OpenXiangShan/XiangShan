@@ -231,7 +231,9 @@ class FrontendInlinedImp(outer: FrontendInlined) extends FrontendInlinedImpBase(
 
   // ICache-Backend
   icache.io.csrPfEnable := RegNext(csrCtrl.pf_ctrl.l1I_pf_enable)
-  icache.io.fencei      := RegNext(io.fencei)
+  val fencei_reg = RegNext(io.fencei)
+  icache.io.fencei := fencei_reg
+  bpu.io.flush     := fencei_reg
 
   // IFU-Ibuffer
   ifu.io.toIBuffer <> ibuffer.io.in

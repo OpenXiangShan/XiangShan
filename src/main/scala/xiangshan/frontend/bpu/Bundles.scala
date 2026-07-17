@@ -192,6 +192,15 @@ class BpuCtrl extends Bundle {
   val scEnable:     Bool = Bool()
   val ittageEnable: Bool = Bool()
   val rasEnable:    Bool = Bool()
+  // BPU context-switch flush enable
+  val bpuFlushEn:        Bool = Bool()
+  val ubtbFlushEnable:   Bool = Bool()
+  val abtbFlushEnable:   Bool = Bool()
+  val mbtbFlushEnable:   Bool = Bool()
+  val tageFlushEnable:   Bool = Bool()
+  val scFlushEnable:     Bool = Bool()
+  val ittageFlushEnable: Bool = Bool()
+  val rasFlushEnable:    Bool = Bool()
 }
 
 // Bpu -> Ftq

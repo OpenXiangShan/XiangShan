@@ -80,6 +80,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
       t
   }
   io.sramResetDone := tables.map(_.sramResetDone).reduce(_ && _)
+  io.resetDone     := true.B
   // High-order tables have longer history, better discrimination, relatively stable,
   // and lower access frequency. No need to frequently clean dead entries based on useful counters.
   private val lowTickCounter  = RegInit(0.U((LowTickWidth + 1).W))

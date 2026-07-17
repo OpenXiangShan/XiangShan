@@ -62,6 +62,7 @@ class MicroRas(implicit p: Parameters) extends BasePredictor with HasRasParamete
   }
   val io = IO(new MicroRasIO)
   io.sramResetDone := true.B
+  io.resetDone     := true.B
   io.trainReady    := true.B
 
   // Track whether S2/S3 stages contain pending push/pop operations

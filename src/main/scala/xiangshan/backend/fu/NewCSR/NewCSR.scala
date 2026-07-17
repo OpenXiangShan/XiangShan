@@ -1447,6 +1447,14 @@ class NewCSR(implicit val p: Parameters) extends Module
   io.status.custom.bp_ctrl.scEnable     := sbpctl.regOut.SC_ENABLE.asBool
   io.status.custom.bp_ctrl.ittageEnable := sbpctl.regOut.ITTAGE_ENABLE.asBool
   io.status.custom.bp_ctrl.rasEnable    := sbpctl.regOut.RAS_ENABLE.asBool
+  io.status.custom.bp_ctrl.bpuFlushEn        := sbpctl.regOut.BPU_FLUSH_EN.asBool
+  io.status.custom.bp_ctrl.ubtbFlushEnable   := sbpctl.regOut.UBTB_FLUSH_ENABLE.asBool
+  io.status.custom.bp_ctrl.abtbFlushEnable   := sbpctl.regOut.ABTB_FLUSH_ENABLE.asBool
+  io.status.custom.bp_ctrl.mbtbFlushEnable   := sbpctl.regOut.MBTB_FLUSH_ENABLE.asBool
+  io.status.custom.bp_ctrl.tageFlushEnable   := sbpctl.regOut.TAGE_FLUSH_ENABLE.asBool
+  io.status.custom.bp_ctrl.scFlushEnable     := sbpctl.regOut.SC_FLUSH_ENABLE.asBool
+  io.status.custom.bp_ctrl.ittageFlushEnable := sbpctl.regOut.ITTAGE_FLUSH_ENABLE.asBool
+  io.status.custom.bp_ctrl.rasFlushEnable    := sbpctl.regOut.RAS_FLUSH_ENABLE.asBool
 
   io.status.custom.sbuffer_timeout                  := smblockctl.regOut.SBUFFER_TIMEOUT.asUInt
   io.status.custom.sbuffer_threshold                := smblockctl.regOut.SBUFFER_THRESHOLD.asUInt

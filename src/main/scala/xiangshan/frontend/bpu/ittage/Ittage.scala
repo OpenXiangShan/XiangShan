@@ -72,6 +72,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }
 
   io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
+  io.resetDone     := true.B
 
   private val useAltOnNa = RegInit((1 << (UseAltOnNaWidth - 1)).U(UseAltOnNaWidth.W))
   private val tickCnt    = RegInit(TickCounter.Zero)

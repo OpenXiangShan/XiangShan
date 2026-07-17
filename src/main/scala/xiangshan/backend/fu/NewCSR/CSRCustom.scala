@@ -75,6 +75,15 @@ class SbpctlBundle extends CSRBundle {
   val MBTB_ENABLE   = RW(2).withReset(true.B).withDescription("Enable the macro-BTB predictor.")
   val ABTB_ENABLE   = RW(1).withReset(true.B).withDescription("Enable the alternate branch target buffer.")
   val UBTB_ENABLE   = RW(0).withReset(true.B).withDescription("Enable the micro-BTB predictor.")
+  // BPU context-switch flush enable
+  val BPU_FLUSH_EN        = RW(7).withReset(false.B).withDescription("Enable the BPU context-switch flush mechanism (reset 0, default off).")
+  val UBTB_FLUSH_ENABLE   = RW(8).withReset(true.B).withDescription("Enable UBTB flush on context switch.")
+  val ABTB_FLUSH_ENABLE   = RW(9).withReset(true.B).withDescription("Enable ABTB flush on context switch.")
+  val MBTB_FLUSH_ENABLE   = RW(10).withReset(true.B).withDescription("Enable MBTB flush on context switch.")
+  val TAGE_FLUSH_ENABLE   = RW(11).withReset(true.B).withDescription("Enable TAGE flush on context switch.")
+  val SC_FLUSH_ENABLE     = RW(12).withReset(true.B).withDescription("Enable SC flush on context switch.")
+  val ITTAGE_FLUSH_ENABLE = RW(13).withReset(true.B).withDescription("Enable ITTAGE flush on context switch.")
+  val RAS_FLUSH_ENABLE    = RW(14).withReset(true.B).withDescription("Enable RAS flush on context switch.")
 }
 
 class SpfctlBundle extends CSRBundle {

@@ -98,6 +98,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       imliTable.io.sramResetDone :+
       biasTable.io.sramResetDone
   ).reduce(_ && _)
+  io.resetDone := true.B
 
   /*
    * ghr stage ctrl signals

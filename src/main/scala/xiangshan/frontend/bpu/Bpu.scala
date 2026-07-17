@@ -49,6 +49,7 @@ import xiangshan.frontend.bpu.utage.MicroTageMeta
 class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   class BpuIO extends Bundle {
     val ctrl:        BpuCtrl    = Input(new BpuCtrl)
+    val flush:       Bool       = Input(Bool())
     val resetVector: PrunedAddr = Input(PrunedAddr(PAddrBits))
     val fromFtq:     FtqToBpuIO = Flipped(new FtqToBpuIO)
     val toFtq:       BpuToFtqIO = new BpuToFtqIO
@@ -191,6 +192,43 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   fastTrain.bits.utageMeta       := s3_utageMeta
   fastTrain.bits.hasOverride     := s3_override
 
+  /* *** context-switch flush state machine *** */
+  val s_idle :: s_waiting :: s_flushing :: s_done :: Nil = Enum(4)
+  private val flushState                                 = RegInit(s_idle)
+
+  private val bpuFlushEn   = ctrl.bpuFlushEn
+  private val contextFlush = (flushState === s_waiting) && redirect.valid
+  private val bpuFlushing  = contextFlush || (flushState === s_flushing)
+
+  def getSubFlushEnable(p: BasePredictor): Bool = p match {
+    case _: MicroBtb => ctrl.ubtbFlushEnable
+    case _: AheadBtb => ctrl.abtbFlushEnable
+    case _: MainBtb  => ctrl.mbtbFlushEnable
+    case _: Tage     => ctrl.tageFlushEnable
+    case _: Sc       => ctrl.scFlushEnable
+    case _: Ittage   => ctrl.ittageFlushEnable
+    case _: Ras      => ctrl.rasFlushEnable
+    case _ => true.B
+  }
+
+  private val resetDone    = predictors.map(_.io.resetDone).reduce(_ && _)
+  private val allResetDone = RegInit(false.B)
+  when(contextFlush) {
+    allResetDone := false.B
+  }.elsewhen(resetDone) {
+    allResetDone := true.B
+  }
+
+  when((flushState === s_idle) && io.flush && bpuFlushEn) {
+    flushState := s_waiting
+  }.elsewhen((flushState === s_waiting) && redirect.valid) {
+    flushState := s_flushing
+  }.elsewhen((flushState === s_flushing) && allResetDone) {
+    flushState := s_done
+  }.elsewhen(flushState === s_done) {
+    flushState := s_idle
+  }
+
   predictors.foreach { p =>
     p.io.startPc   := s0_startPc.get
     p.io.stageCtrl := stageCtrl
@@ -203,6 +241,8 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     p.io.train.fromBpuTrain(train)
     // fastTrain is an Option[Valid[BpuFastTrain]], we need .foreach
     p.io.fastTrain.foreach(_ := fastTrain)
+    p.io.contextFlush := contextFlush && getSubFlushEnable(p)
+    p.io.bpuFlushing  := bpuFlushing && getSubFlushEnable(p)
   }
   io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
 

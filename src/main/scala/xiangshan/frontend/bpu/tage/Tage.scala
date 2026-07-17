@@ -55,6 +55,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
   /* *** reset *** */
   io.sramResetDone := tables.map(_.io.sramResetDone).reduce(_ && _)
+  io.resetDone     := true.B
 
   /* --------------------------------------------------------------------------------------------------------------
      predict pipeline stage 0
