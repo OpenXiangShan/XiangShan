@@ -81,6 +81,7 @@ class AtomicsReplayEntry(implicit p: Parameters) extends DCacheModule
     pipe_req.word_idx  := get_word(req.addr)
     pipe_req.amo_data  := req.data
     pipe_req.amo_mask  := req.mask
+    pipe_req.dbp_origin_valid := false.B
 
     when (io.pipe_req.fire) {
       state := s_pipe_resp

@@ -521,6 +521,10 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   val req = Reg(new MissReqWoStoreData)
   val req_primary_fire = Reg(new MissReqWoStoreData) // for perf use
+  val dbp_origin_pc = Reg(UInt(VAddrBits.W))
+  val dbp_origin_pf_source = Reg(UInt(L1PfSourceBits.W))
+  val dbp_origin_valid = RegInit(false.B)
+  val dbp_origin_is_prefetch = Reg(Bool())
   val req_store_mask = Reg(UInt(cfg.blockBytes.W))
   val req_valid = RegInit(false.B)
   val set = addr_to_dcache_set(req.vaddr)
@@ -648,6 +652,14 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     req.occupy_way := miss_req_pipe_reg_bits.occupy_way
     req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
     req_primary_fire := miss_req_pipe_reg_bits.toMissReqWoStoreData()
+    val dbp_prefetch_supported = miss_req_pipe_reg_bits.isFromPrefetch && (
+      miss_req_pipe_reg_bits.pf_source === L1_HW_PREFETCH_STREAM ||
+      miss_req_pipe_reg_bits.pf_source === L1_HW_PREFETCH_STRIDE
+    )
+    dbp_origin_pc := miss_req_pipe_reg_bits.pc
+    dbp_origin_pf_source := miss_req_pipe_reg_bits.pf_source
+    dbp_origin_valid := miss_req_pipe_reg_bits.isFromLoad || dbp_prefetch_supported
+    dbp_origin_is_prefetch := dbp_prefetch_supported
     evict_BtoT_way := false.B
     alloc_is_store := miss_req_pipe_reg_bits.isFromStore
     hasStore := miss_req_pipe_reg_bits.isFromStore
@@ -1007,6 +1019,10 @@ for(i <- 0 until reqNum) {
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
   io.main_pipe_req.bits.access := access
+  io.main_pipe_req.bits.dbp_origin_valid := dbp_origin_valid
+  io.main_pipe_req.bits.dbp_origin_pc := dbp_origin_pc
+  io.main_pipe_req.bits.dbp_origin_pf_source := dbp_origin_pf_source
+  io.main_pipe_req.bits.dbp_origin_is_prefetch := dbp_origin_is_prefetch
   io.main_pipe_req.bits.occupy_way := req.occupy_way
   io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
 

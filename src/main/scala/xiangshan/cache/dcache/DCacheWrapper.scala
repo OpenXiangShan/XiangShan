@@ -58,6 +58,7 @@ case class DCacheParameters
   enableDataEcc: Boolean = false,
   enableTagEcc: Boolean = false,
   cacheCtrlAddressOpt: Option[AddressSet] = None,
+  l1DBPParams: Option[L1DBPParams] = None,
 ) extends L1CacheParameters {
   // if sets * blockBytes > 4KB(page size),
   // cache alias will happen,
@@ -983,6 +984,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   println("  WPUEnableCfPred: " + dwpuParam.enCfPred)
   println("  WPUAlgorithm: " + dwpuParam.algoName)
   println("  HasCMO: " + HasCMO)
+  println("  L1DBP: " + cacheParams.l1DBPParams)
 
   // HybridUnit is no longer supported
   require(backendParams.HyuCnt == 0)
@@ -1036,6 +1038,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val ldu = Seq.tabulate(LoadPipelineWidth)({ i => Module(new LoadPipe(i))})
   val stu = Seq.tabulate(StorePipelineWidth)({ i => Module(new StorePipe(i))})
   val mainPipe     = Module(new MainPipe)
+  val l1dbp        = cacheParams.l1DBPParams.map(params => Module(new L1DBP(params)))
   // val refillPipe   = Module(new RefillPipe)
   val missQueue    = Module(new MissQueue(edge, MissReqPortCount))
   val probeQueue   = Module(new ProbeQueue(edge))
@@ -1057,6 +1060,21 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.wfi <> missQueue.io.wfi
   io.refillTrain := missQueue.io.refill_train
   mainPipe.io.prefetch_req <> io.prefetch_req
+  mainPipe.io.l1dbp.lateAccess := VecInit(ldu.map(_.io.access_stat))
+  l1dbp match {
+    case Some(dbp) =>
+      dbp.io.read := mainPipe.io.l1dbp.read
+      mainPipe.io.l1dbp.sampleResp := dbp.io.sampleResp
+      mainPipe.io.l1dbp.deadResp := dbp.io.deadResp
+      dbp.io.query := mainPipe.io.l1dbp.query
+      mainPipe.io.l1dbp.queryResp := dbp.io.queryResp
+      dbp.io.refill := mainPipe.io.l1dbp.refill
+      dbp.io.terminate := mainPipe.io.l1dbp.terminate
+    case None =>
+      mainPipe.io.l1dbp.sampleResp := 0.U.asTypeOf(mainPipe.io.l1dbp.sampleResp)
+      mainPipe.io.l1dbp.deadResp := 0.U.asTypeOf(mainPipe.io.l1dbp.deadResp)
+      mainPipe.io.l1dbp.queryResp := 0.U.asTypeOf(mainPipe.io.l1dbp.queryResp)
+  }
 
   // l1 dcache controller
   outer.cacheCtrlOpt.foreach {

@@ -73,6 +73,12 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val pf_source = UInt(L1PfSourceBits.W)
   val access = Bool()
 
+  // Immutable refill origin used by L1DBP.
+  val dbp_origin_valid = Bool()
+  val dbp_origin_pc = UInt(VAddrBits.W)
+  val dbp_origin_pf_source = UInt(L1PfSourceBits.W)
+  val dbp_origin_is_prefetch = Bool()
+
   val id = UInt(reqIdWidth.W)
 
   def isLoad: Bool = source === LOAD_SOURCE.U
@@ -99,6 +105,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.error := false.B
     req.id := store.id
     req.miss_fail_cause_evict_btot := false.B
+    req.dbp_origin_valid := false.B
     req
   }
 
@@ -119,6 +126,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.pf_source := prefetch.pf_source.value
     req.access := false.B
     req.id := 0.U
+    req.dbp_origin_valid := false.B
     req
   }
 }
@@ -140,6 +148,9 @@ class MainPipeInfoToMQ(implicit p:Parameters) extends DCacheBundle {
 }
 
 class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents with HasL1PrefetchSourceParameter {
+  private val dbpParams = cacheParams.l1DBPParams.getOrElse(L1DBPParams())
+  private val l1dbpEnabled = cacheParams.l1DBPParams.nonEmpty
+
   val io = IO(new Bundle() {
     // probe queue
     val probe_req = Flipped(DecoupledIO(new MainPipeReq))
@@ -217,6 +228,17 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       val clear = ValidIO(new L1AccessStatClear)
     }
 
+    val l1dbp = new Bundle {
+      val read = ValidIO(UInt(idxBits.W))
+      val sampleResp = Input(Vec(nWays, new L1DBPSampleEntry(dbpParams)))
+      val deadResp = Input(Vec(nWays, new L1DBPDeadEntry))
+      val query = ValidIO(new L1DBPOriginInfo)
+      val queryResp = Input(new L1DBPPrediction(dbpParams))
+      val refill = ValidIO(new L1DBPRefill(dbpParams))
+      val terminate = ValidIO(new L1DBPTerminate(dbpParams))
+      val lateAccess = Input(Vec(LoadPipelineWidth, ValidIO(new L1AccessStatAccess)))
+    }
+
     // sms prefetch
     val sms_agt_evict_req = DecoupledIO(new AGTEvictReq)
 
@@ -247,6 +269,16 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       val clr = ValidIO(new BloomQueryBundle(BLOOM_FILTER_ENTRY_NUM))
     }
   })
+
+  io.l1dbp.read := 0.U.asTypeOf(io.l1dbp.read)
+  io.l1dbp.query := 0.U.asTypeOf(io.l1dbp.query)
+  io.l1dbp.refill := 0.U.asTypeOf(io.l1dbp.refill)
+  io.l1dbp.terminate := 0.U.asTypeOf(io.l1dbp.terminate)
+
+  private def dbpLateAccessHit(set: UInt, wayEn: UInt): Bool =
+    io.l1dbp.lateAccess.map { access =>
+      access.valid && access.bits.set === set && (access.bits.way_en & wayEn).orR
+    }.reduce(_ || _)
 
   // meta array is made of regs, so meta write or read should always be ready
   assert(RegNext(io.meta_read.ready))
@@ -315,6 +347,15 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s0_fire = req.valid && s0_can_go
 
   req.ready := s0_can_go
+
+  if (l1dbpEnabled) {
+    io.l1dbp.read.valid := s0_fire
+    io.l1dbp.read.bits := s0_idx
+    io.l1dbp.query.valid := s0_fire && s0_req.miss && s0_req.dbp_origin_valid
+    io.l1dbp.query.bits.pc := s0_req.dbp_origin_pc
+    io.l1dbp.query.bits.pfSource := s0_req.dbp_origin_pf_source
+    io.l1dbp.query.bits.isPrefetch := s0_req.dbp_origin_is_prefetch
+  }
 
   val bank_write = VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, s0_req.store_mask).orR)).asUInt
   val bank_full_write = VecInit((0 until DCacheBanks).map(i => get_mask_of_bank(i, s0_req.store_mask).andR)).asUInt
@@ -408,6 +449,31 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val encTag_resp = Wire(io.tag_resp.cloneType)
   encTag_resp := Mux(GatedValidRegNext(s0_fire), VecInit(pseudo_encTag_resp), RegEnable(encTag_resp, s1_valid))
   val tag_resp = encTag_resp.map(encTag => encTag(tagBits - 1, 0))
+  val s1_prefetch_resp = Wire(Vec(nWays, UInt(L1PfSourceBits.W)))
+  val s1_access_resp = Wire(Vec(nWays, Bool()))
+  s1_prefetch_resp := Mux(
+    GatedValidRegNext(s0_fire),
+    VecInit(io.extra_meta_resp.map(_.prefetch)),
+    RegEnable(s1_prefetch_resp, s1_valid)
+  )
+  s1_access_resp := Mux(
+    GatedValidRegNext(s0_fire),
+    VecInit(io.extra_meta_resp.map(_.access)),
+    RegEnable(s1_access_resp, s1_valid)
+  )
+  val s1_dbp_sample_resp = Wire(Vec(nWays, new L1DBPSampleEntry(dbpParams)))
+  val s1_dbp_dead_resp = Wire(Vec(nWays, new L1DBPDeadEntry))
+  s1_dbp_sample_resp := Mux(
+    GatedValidRegNext(s0_fire),
+    io.l1dbp.sampleResp,
+    RegEnable(s1_dbp_sample_resp, s1_valid)
+  )
+  s1_dbp_dead_resp := Mux(
+    GatedValidRegNext(s0_fire),
+    io.l1dbp.deadResp,
+    RegEnable(s1_dbp_dead_resp, s1_valid)
+  )
+  val s1_dbp_prediction = RegEnable(io.l1dbp.queryResp, s0_fire)
   val s1_meta_valids = wayMap((w: Int) => Meta(meta_resp(w)).coh.isValid()).asUInt
   val s1_tag_errors = wayMap((w: Int) => s1_meta_valids(w) && dcacheParameters.tagCode.decode(encTag_resp(w)).error).asUInt
   val s1_tag_eq_way = wayMap((w: Int) => tag_resp(w) === get_tag(s1_req.addr)).asUInt
@@ -421,7 +487,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
 
   val s1_hit_tag = get_tag(s1_req.addr)
   val s1_hit_coh = ClientMetadata(ParallelMux(s1_tag_ecc_match_way.asBools, (0 until nWays).map(w => meta_resp(w))))
-  val s1_hit_prefetch = ParallelMux(s1_tag_ecc_match_way.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
+  val s1_hit_prefetch = ParallelMux(s1_tag_ecc_match_way.asBools, s1_prefetch_resp)
   val s1_extra_meta = Wire(io.extra_meta_resp.head.cloneType)
   s1_extra_meta := Mux(
     GatedValidRegNext(s0_fire),
@@ -451,7 +517,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   ) // UInt format of `s1_repl_way_en`
   val s1_repl_tag = ParallelMux(Mux(io.pseudo_error.valid && s1_has_real_tag_eq_way, s1_real_tag_match_way_en, s1_repl_way_en).asBools,
                                 (0 until nWays).map(w => tag_resp(w)))
-  val s1_repl_pf  = ParallelMux(s1_repl_way_en.asBools, (0 until nWays).map(w => io.extra_meta_resp(w).prefetch))
+  val s1_repl_pf  = ParallelMux(s1_repl_way_en.asBools, s1_prefetch_resp)
 
   val s1_real_tag = ParallelMux(s1_real_tag_match_way_en.asBools, (0 until nWays).map(w => io.tag_resp(w)))
 
@@ -463,6 +529,28 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_way = Mux(io.pseudo_error.valid && s1_has_real_tag_eq_way, s1_real_tag_match_way,
                    Mux(s1_need_replacement, s1_repl_way, OHToUInt(s1_tag_ecc_match_way)))
   assert(!RegNext(s1_fire && PopCount(s1_way_en) > 1.U))
+
+  val s1_dbp_way_en = Mux(s1_req.replace, s1_req.replace_way_en, s1_way_en)
+  val s1_dbp_sample = ParallelMux(
+    s1_dbp_way_en.asBools,
+    (0 until nWays).map(w => s1_dbp_sample_resp(w))
+  )
+  val s1_dbp_dead = ParallelMux(
+    s1_dbp_way_en.asBools,
+    (0 until nWays).map(w => s1_dbp_dead_resp(w))
+  )
+  val s1_dbp_old_access = ParallelMux(
+    s1_dbp_way_en.asBools,
+    s1_access_resp
+  )
+  val s1_dbp_old_pf_source = ParallelMux(
+    s1_dbp_way_en.asBools,
+    s1_prefetch_resp
+  )
+  val s1_dbp_old_coh_valid = ParallelMux(
+    s1_dbp_way_en.asBools,
+    (0 until nWays).map(w => meta_resp(w).asTypeOf(new Meta).coh.isValid())
+  )
 
   val s1_tag = s1_hit_tag
   val s1_coh = s1_hit_coh
@@ -505,6 +593,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s2_idx = get_dcache_idx(s2_req.vaddr)
 
   val s2_way_en = RegEnable(s1_way_en, s1_fire)
+  val s2_dbp_way_en = RegEnable(s1_dbp_way_en, s1_fire)
+  val s2_dbp_sample = RegEnable(s1_dbp_sample, s1_fire)
+  val s2_dbp_dead = RegEnable(s1_dbp_dead, s1_fire)
+  val s2_dbp_old_pf_source = RegEnable(s1_dbp_old_pf_source, s1_fire)
+  val s2_dbp_old_coh_valid = RegEnable(s1_dbp_old_coh_valid, s1_fire)
+  val s2_dbp_prediction = RegEnable(s1_dbp_prediction, s1_fire)
+  val s2_dbp_accessed = RegInit(false.B)
+  val s1_dbp_late_access = dbpLateAccessHit(s1_idx, s1_dbp_way_en)
+  val s2_dbp_late_access = dbpLateAccessHit(s2_idx, s2_dbp_way_en)
+  when(s1_fire) {
+    s2_dbp_accessed := s1_dbp_old_access || s1_dbp_late_access
+  }.elsewhen(s2_valid && s2_dbp_late_access) {
+    s2_dbp_accessed := true.B
+  }
   val s2_tag = Mux(s2_need_replacement, s2_repl_tag, RegEnable(s1_tag, s1_fire))
   val s2_coh = Mux(s2_need_replacement, s2_repl_coh, RegEnable(s1_coh, s1_fire))
   val s2_banked_store_wmask = RegEnable(s1_banked_store_wmask, s1_fire)
@@ -607,6 +709,20 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_way_en = RegEnable(s2_way_en, s2_fire_to_s3)
   val s3_banked_store_wmask = RegEnable(s2_banked_store_wmask, s2_fire_to_s3)
   val s3_idx = RegEnable(s2_idx, s2_fire_to_s3)
+  val s3_dbp_way_en = RegEnable(s2_dbp_way_en, s2_fire_to_s3)
+  val s3_dbp_sample = RegEnable(s2_dbp_sample, s2_fire_to_s3)
+  val s3_dbp_dead = RegEnable(s2_dbp_dead, s2_fire_to_s3)
+  val s3_dbp_old_pf_source = RegEnable(s2_dbp_old_pf_source, s2_fire_to_s3)
+  val s3_dbp_old_coh_valid = RegEnable(s2_dbp_old_coh_valid, s2_fire_to_s3)
+  val s3_dbp_prediction = RegEnable(s2_dbp_prediction, s2_fire_to_s3)
+  val s3_dbp_accessed = RegInit(false.B)
+  val s3_dbp_late_access = dbpLateAccessHit(s3_idx, s3_dbp_way_en)
+  when(s2_fire_to_s3) {
+    s3_dbp_accessed := s2_dbp_accessed || s2_dbp_late_access
+  }.elsewhen(s3_valid && s3_dbp_late_access) {
+    s3_dbp_accessed := true.B
+  }
+  val s3_dbp_accessed_final = s3_dbp_accessed || s3_dbp_late_access
   val s3_store_data_merged_without_cache = RegEnable(s2_store_data_merged_without_cache, s2_fire_to_s3)
   val s3_merge_mask = RegEnable(VecInit(s2_merge_mask.map(~_)), s2_fire_to_s3)
   val s3_isPrefetch = !s3_req.replace && !s3_req.probe && !s3_req.miss && s3_req.isPrefetch
@@ -849,6 +965,30 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s3_can_go = s3_probe_can_go || s3_store_can_go || s3_amo_can_go || s3_miss_can_go || s3_replace_can_go || s3_prefetch_can_go
   val s3_update_data_cango = s3_store_can_go || s3_amo_can_go || s3_miss_can_go // used to speed up data_write gen
   val s3_fire = s3_valid && s3_can_go
+
+  if (l1dbpEnabled) {
+    val dbpReplacementTerminate = s3_req.miss && s3_need_replacement
+    val dbpProbeTerminate = probe_update_meta && probe_new_coh.state === ClientStates.Nothing
+    val dbpExplicitReplaceTerminate = s3_req.replace
+    io.l1dbp.terminate.valid := s3_fire && s3_dbp_old_coh_valid && (
+      dbpReplacementTerminate || dbpProbeTerminate || dbpExplicitReplaceTerminate
+    )
+    io.l1dbp.terminate.bits.set := s3_idx
+    io.l1dbp.terminate.bits.wayEn := s3_dbp_way_en
+    io.l1dbp.terminate.bits.sample := s3_dbp_sample
+    io.l1dbp.terminate.bits.dead := s3_dbp_dead
+    io.l1dbp.terminate.bits.pfSource := s3_dbp_old_pf_source
+    io.l1dbp.terminate.bits.accessed := s3_dbp_accessed_final
+    io.l1dbp.terminate.bits.fromProbe := dbpProbeTerminate
+
+    io.l1dbp.refill.valid := s3_fire && s3_req.miss && s3_need_replacement
+    io.l1dbp.refill.bits.set := s3_idx
+    io.l1dbp.refill.bits.wayEn := s3_way_en
+    io.l1dbp.refill.bits.prediction := s3_dbp_prediction
+
+    XSPerfAccumulate("l1dbp_late_access_forwarded",
+      s3_valid && s3_dbp_late_access && !s3_dbp_accessed)
+  }
   when (s2_fire_to_s3) {
     s3_valid := true.B
   }.elsewhen (s3_fire) {
@@ -1048,11 +1188,16 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   XSPerfAccumulate("mainpipe_slot_conflict_1_3", (s1_idx === s3_idx && s1_way_en === s3_way_en && s1_req.miss && s3_req.miss && s1_valid && s3_valid))
   XSPerfAccumulate("mainpipe_slot_conflict_2_3", (s2_idx === s3_idx && s2_way_en === s3_way_en && s2_req.miss && s3_req.miss && s2_valid && s3_valid))
   // probe / replace will not update access bit
-  io.access_flag_write.valid := s3_fire && !s3_req.probe && !s3_req.replace
+  io.access_flag_write.valid := s3_fire && !s3_req.probe && !s3_req.replace &&
+    (!s3_req.isPrefetch || s3_req.miss)
   io.access_flag_write.bits.idx := s3_idx
   io.access_flag_write.bits.way_en := s3_way_en
-  // io.access_flag_write.bits.flag := true.B
-  io.access_flag_write.bits.flag :=Mux(s3_req.miss, s3_req.access, true.B)
+  val refillAccess = if (l1dbpEnabled) {
+    Mux(s3_need_replacement, s3_req.access, s3_dbp_accessed_final || s3_req.access)
+  } else {
+    s3_req.access
+  }
+  io.access_flag_write.bits.flag := Mux(s3_req.miss, refillAccess, true.B)
 
   io.tag_write.valid := s3_fire && s3_req.miss
   io.tag_write.bits.idx := s3_idx

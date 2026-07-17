@@ -212,6 +212,8 @@ class LoadUnitS0(param: ExeUnitParams)(
     PrefetchCoh.read
   )
   scalarIssue.bits.uop := ldin.toDynInst()
+  // ldin.pc is already the full PC reconstructed by Backend; prevent toDynInst from adding ftqOffset again.
+  scalarIssue.bits.uop.pc := ldin.pc.getOrElse(0.U)
   scalarIssue.bits.vaddr := ldinVAddr
   scalarIssue.bits.fullva := ldinFullva
   scalarIssue.bits.size := ldinSize
