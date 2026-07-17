@@ -42,14 +42,10 @@ object PhrPtr {
     apply(!ptr.flag, ptr.value)
 }
 
-class S1Train(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
-  val valid:              Bool                   = Bool()
-  val taken:              Bool                   = Bool() // actual s1_taken
-  val startPc:            PrunedAddr             = PrunedAddr(VAddrBits)
-  val abtbValid:          Bool                   = Bool()
-  val abtbFirstTakenBrOH: Vec[Bool]              = Vec(NumAheadBtbPredictionEntries, Bool())
-  val ubtbPrediction:     Valid[Prediction]      = Valid(new Prediction)
-  val abtbPrediction:     Vec[Valid[Prediction]] = Vec(NumAheadBtbPredictionEntries, Valid(new Prediction))
+class S1Train(implicit p: Parameters) extends PhrBundle {
+  val valid:      Bool       = Bool()
+  val startPc:    PrunedAddr = PrunedAddr(VAddrBits)
+  val prediction: Prediction = new Prediction
 }
 
 class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
@@ -152,8 +148,6 @@ class PhrFoldedHistory(val info: FoldedHistoryInfo, val maxUpdateNum: Int)(impli
 
     val fh         = WireInit(this)
     val hashFolded = computeFoldedHash(Cat(hashHigh, 0.U(maxUpdateNum.W)), info.FoldedLength)(info.HistoryLength)
-    dontTouch(newFoldedHist)
-    dontTouch(hashFolded)
     fh.foldedHist := newFoldedHist ^ hashFolded
     fh
   }
@@ -186,42 +180,6 @@ class PhrAllFoldedHistoryOldestBits(gen: Set[FoldedHistoryInfo])(implicit p: Par
       h.readFromPhr(phv, ptr)
     }
 }
-
-// class AheadFoldedHistoryOldestBits(val len: Int, val max_update_num: Int)(implicit p: Parameters) extends XSBundle {
-//   val bits = Vec(max_update_num * 2, Bool())
-//   // def info = (len, compLen)
-//   def getRealOb(brNumOH: UInt): Vec[Bool] = {
-//     val ob = Wire(Vec(max_update_num, Bool()))
-//     for (i <- 0 until max_update_num) {
-//       ob(i) := Mux1H(brNumOH, bits.drop(i).take(numBr + 1))
-//     }
-//     ob
-//   }
-// }
-
-// class AllAheadFoldedHistoryOldestBits(val gen: Seq[Tuple2[Int, Int]])(implicit p: Parameters) extends PhrBundle {
-//   val afhob = MixedVec(gen.filter(t => t._1 > t._2).map(_._1)
-//     .toSet.toList.map(l => new AheadFoldedHistoryOldestBits(l, numBr))) // remove duplicates
-//   require(gen.toSet.toList.equals(gen))
-//   def getObWithInfo(info: Tuple2[Int, Int]) = {
-//     val selected = afhob.filter(_.len == info._1)
-//     require(selected.length == 1)
-//     selected(0)
-//   }
-//   def read(ghv: Vec[Bool], ptr: PhrPtr) = {
-//     val hisLens      = afhob.map(_.len)
-//     val bitsToRead   = hisLens.flatMap(l => (0 until numBr * 2).map(i => l - i - 1)).toSet // remove duplicates
-//     val bitsWithInfo = bitsToRead.map(pos => (pos, ghv((ptr + (pos + 1).U).value)))
-//     for (ob <- afhob) {
-//       for (i <- 0 until numBr * 2) {
-//         val pos       = ob.len - i - 1
-//         val bit_found = bitsWithInfo.filter(_._1 == pos).toList
-//         require(bit_found.length == 1)
-//         ob.bits(i) := bit_found(0)._2
-//       }
-//     }
-//   }
-// }
 
 class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo])(implicit p: Parameters) extends PhrBundle
     with HasPhrParameters with Helpers {
@@ -266,25 +224,6 @@ class PhrAllFoldedHistories(gen: Set[FoldedHistoryInfo])(implicit p: Parameters)
     }
     res
   }
-
-  // TODO: Enable ahead logic
-  // def update(afhob: AllAheadFoldedHistoryOldestBits, lastBrNumOH: UInt, shift: Int, taken: Bool): AllFoldedHistories = {
-  //   val res = WireInit(this)
-  //   for (i <- 0 until this.hist.length) {
-  //     val fh = this.hist(i)
-  //     if (fh.needOldestBits) {
-  //       val info          = fh.info
-  //       val selectedAfhob = afhob.getObWithInfo(info)
-  //       val ob            = selectedAfhob.getRealOb(lastBrNumOH)
-  //       res.hist(i) := this.hist(i).update(ob, shift, taken)
-  //     } else {
-  //       val dumb = Wire(Vec(numBr, Bool())) // not needed
-  //       dumb        := DontCare
-  //       res.hist(i) := this.hist(i).update(dumb, shift, taken)
-  //     }
-  //   }
-  //   res
-  // }
 
   def display(cond: Bool): Unit =
     for (h <- hist) {
