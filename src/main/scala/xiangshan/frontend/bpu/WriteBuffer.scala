@@ -40,33 +40,37 @@ import xiangshan.XSModule
  * used to update the entry's wayMask and wayData when hit the same entry
  * @param hasCnt Whether the write request bundle has a counter field, used to update the entry's useful counter
  * @param hasFlush Whether the write buffer has a flush signal, used to reset the write buffer
+ * @param hasContextFlush Whether the write buffer has a context-flush signal, used to clear both needWrite and valids on context switch
  * @param nameSuffix Suffix of name, used for clearer logging
 */
 class WriteBuffer[T <: WriteReqBundle](
-    gen:        T,
-    numEntries: Int = 1,
-    numPorts:   Int = 1,
-    numWays:    Int = 1,
-    hasCnt:     Boolean = false,
-    hasWayMask: Boolean = false,
-    hasFlush:   Boolean = false,
-    nameSuffix: String = ""
+    gen:             T,
+    numEntries:      Int = 1,
+    numPorts:        Int = 1,
+    numWays:         Int = 1,
+    hasCnt:          Boolean = false,
+    hasWayMask:      Boolean = false,
+    hasFlush:        Boolean = false,
+    hasContextFlush: Boolean = false,
+    nameSuffix:      String = ""
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
   require(numPorts <= numEntries)
   class WriteBufferIO extends Bundle {
-    val write:     Vec[DecoupledIO[T]] = Vec(numPorts, Flipped(DecoupledIO(gen)))
-    val read:      Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
-    val takenMask: Option[Vec[Bool]]   = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
-    val flush:     Option[Bool]        = Option.when(hasFlush)(Input(Bool()))
+    val write:        Vec[DecoupledIO[T]] = Vec(numPorts, Flipped(DecoupledIO(gen)))
+    val read:         Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
+    val takenMask:    Option[Vec[Bool]]   = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
+    val flush:        Option[Bool]        = Option.when(hasFlush)(Input(Bool()))
+    val contextFlush: Option[Bool]        = Option.when(hasContextFlush)(Input(Bool()))
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
 
   private val namePrefix = s"WriteBuffer_${nameSuffix}"
 
   // clean write buffer when flush is true
-  private val flush = io.flush.getOrElse(false.B)
+  private val flush        = io.flush.getOrElse(false.B)
+  private val contextFlush = io.contextFlush.getOrElse(false.B)
 
   private def mergeSameWay(entry: T, writeGen: T): T = {
     val merged = WireInit(entry)
@@ -249,10 +253,16 @@ class WriteBuffer[T <: WriteReqBundle](
     val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
     replacerWay(nRows) := replacer.way
     replacer.access(touchWays)
-    when(flush) {
-      // Reset the write buffer needWrite when flush is true
+    when(flush || contextFlush) {
+      // Reset the write buffer needWrite when flush or contextFlush is true
       for (i <- 0 until numEntries) {
         needWrite(nRows)(i) := false.B
+      }
+    }
+    when(contextFlush) {
+      // On context switch, also invalidate all entries so stale data won't suppress future re-writes
+      for (i <- 0 until numEntries) {
+        valids(nRows)(i) := false.B
       }
     }
     XSPerfAccumulate(f"${namePrefix}_port${nRows}_is_full", writePortValid(nRows) && fullVec(nRows))
