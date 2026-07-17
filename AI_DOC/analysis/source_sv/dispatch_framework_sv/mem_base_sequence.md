@@ -84,4 +84,4 @@ AcquireBlock 可能按 size 拆成多个 32B beat。每个 beat 都从 32B 对�
 - 判断 load/store 是否 pass。
 - 处理 replay/redirect/commit。
 
-这些状态仍由 `memblock_lsqenq_dispatch_sequence`、`memblock_lintsissue_dispatch_sequence`、monitor adapter、writeback handler 和 `memblock_lsqcommit_dispatch_sequence` 负责。
+这些状态仍由 `memblock_lsqenq_dispatch_base_sequence`、`memblock_issue_dispatch_base_sequence`、monitor adapter、writeback handler 和 `memblock_lsqcommit_dispatch_base_sequence` 负责。

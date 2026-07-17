@@ -18,6 +18,8 @@ localparam int unsigned MEMBLOCK_COMMIT_WIDTH = `MEMBLOCK_DUT_COMMIT_WIDTH;
 // 中文注释：DUT物理LSQ enqueue slot和scalar issue pipe数量。
 // interface/driver/scheduler直接消费这些编译期常量；runtime plus只能调小行为使用量。
 localparam int unsigned MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM = `MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM;
+localparam int unsigned MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH = `MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH;
+localparam int unsigned MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH = `MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH;
 localparam int unsigned MEMBLOCK_DUT_LOAD_PIPE_NUM    = `MEMBLOCK_DUT_LOAD_PIPE_NUM;
 localparam int unsigned MEMBLOCK_DUT_STA_PIPE_NUM     = `MEMBLOCK_DUT_STA_PIPE_NUM;
 localparam int unsigned MEMBLOCK_DUT_STD_PIPE_NUM     = `MEMBLOCK_DUT_STD_PIPE_NUM;
@@ -34,6 +36,11 @@ localparam int unsigned MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM = `MEMBLOCK_DUT_MMIO_LOA
 localparam bit MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT = `MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT;
 localparam bit MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP = `MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP;
 localparam bit MEMBLOCK_DUT_HAS_SQ_DEQ_PTR = `MEMBLOCK_DUT_HAS_SQ_DEQ_PTR;
+localparam int unsigned MEMBLOCK_DUT_MAX_UOP_SIZE = `MEMBLOCK_DUT_MAX_UOP_SIZE;
+localparam int unsigned MEMBLOCK_DUT_UOP_IDX_W = `MEMBLOCK_DUT_UOP_IDX_W;
+localparam int unsigned MEMBLOCK_DUT_VLEN = `MEMBLOCK_DUT_VLEN;
+localparam int unsigned MEMBLOCK_DUT_MAX_LS_ELEM = `MEMBLOCK_DUT_MAX_LS_ELEM;
+localparam int unsigned MEMBLOCK_DUT_NUM_LS_ELEM_W = `MEMBLOCK_DUT_NUM_LS_ELEM_W;
 
 // 中文注释：index value字段宽度只覆盖value本体，wrap flag单独保存在memblock_*_key_t。
 // V2默认ROB value为8 bit；合法取值仍由MEMBLOCK_*_SIZE限制，避免随机到DUT不存在的entry。
@@ -170,6 +177,7 @@ localparam bit [5:0] MEMBLOCK_LSUOP_AMOCAS_D_LO = 6'd47;
 localparam bit [5:0] MEMBLOCK_LSUOP_AMOCAS_Q_LO = 6'd44;
 
 typedef int unsigned memblock_uid_t;
+typedef bit [MEMBLOCK_DUT_NUM_LS_ELEM_W-1:0] memblock_num_ls_elem_t;
 
 typedef struct {
     // 从0开始连续terminal_done后的第一个uid；route/redirect/reissue都从这里开始扫描。
@@ -341,7 +349,7 @@ typedef struct packed {
     bit                         is_prefetch;
     bit                         is_cbo;
     bit                         is_atomic;
-    bit [4:0]                   num_ls_elem;
+    memblock_num_ls_elem_t      num_ls_elem;
     bit [2:0]                   atomic_sta_uop_count;
     bit [2:0]                   atomic_data_uop_count;
 } memblock_op_behavior_t;
@@ -357,7 +365,7 @@ typedef struct {
     memblock_lq_key_t         lq_key;
     bit                       has_sqIdx;
     memblock_sq_key_t         sq_key;
-    bit [4:0]                 numLsElem;
+    memblock_num_ls_elem_t    numLsElem;
     int unsigned              uop_index;
     int unsigned              uop_count;
 } memblock_issue_q_item_t;

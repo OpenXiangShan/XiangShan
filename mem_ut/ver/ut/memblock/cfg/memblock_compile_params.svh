@@ -24,10 +24,17 @@
     `define MEMBLOCK_DUT_COMMIT_WIDTH 8
 `endif
 
-// V2默认物理资源数量：LSQ enqueue为6个slot，scalar issue为3/2/2条LOAD/STA/STD pipe。
-// 这些值决定interface数组、driver清零范围和scheduler物理扫描上限，只能在编译期覆盖。
+// V2物理资源数量：LSQ enqueue为6个slot，scalar issue为3/2/2条LOAD/STA/STD pipe。
+// 当前LSQ字段链显式展开6个slot，非6/6/4覆盖会被compile consistency检查拒绝；
+// 后续只有在其它profile同步参数化全部显式consumer后才能放开该tuple。
 `ifndef MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM
     `define MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM 6
+`endif
+`ifndef MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH
+    `define MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH 6
+`endif
+`ifndef MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH
+    `define MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH 4
 `endif
 `ifndef MEMBLOCK_DUT_LOAD_PIPE_NUM
     `define MEMBLOCK_DUT_LOAD_PIPE_NUM 3
@@ -48,6 +55,17 @@
 `ifndef MEMBLOCK_DUT_SQ_VALUE_W
     `define MEMBLOCK_DUT_SQ_VALUE_W 6
 `endif
+
+// V2 MicroOp字段的结构上限。派生宽度不得单独覆盖，避免interface和sequence使用不同权威。
+`ifndef MEMBLOCK_DUT_MAX_UOP_SIZE
+    `define MEMBLOCK_DUT_MAX_UOP_SIZE 65
+`endif
+`define MEMBLOCK_DUT_UOP_IDX_W ($clog2(`MEMBLOCK_DUT_MAX_UOP_SIZE + 1))
+`ifndef MEMBLOCK_DUT_VLEN
+    `define MEMBLOCK_DUT_VLEN 128
+`endif
+`define MEMBLOCK_DUT_MAX_LS_ELEM (`MEMBLOCK_DUT_VLEN / 8)
+`define MEMBLOCK_DUT_NUM_LS_ELEM_W ($clog2(`MEMBLOCK_DUT_MAX_LS_ELEM) + 1)
 
 // V2默认FuType编码与DUT端口宽度。内部容器保留跨V2/V3最大36 bit，
 // DUT-facing端口宽度和one-hot位置只能由当前版本profile在编译期覆盖。

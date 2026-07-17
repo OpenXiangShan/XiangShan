@@ -56,7 +56,7 @@ DUT payload 数据来源：
 
 边界：
 
-- 它不负责 LSQ admission；没有被 `memblock_lsqenq_dispatch_sequence` 激活和路由的 uid 不应进入这里。
+- 它不负责 LSQ admission；没有被 `memblock_lsqenq_dispatch_base_sequence` 激活和路由的 uid 不应进入这里。
 - 它不负责判断最终 pass；load/store pass 由 monitor/writeback handler 或兼容 pass 事件推进。
 - 普通 store STD 在 `MEMBLOCK_STD_REAL_WB_PASS_EN=0` 时会生成 `STD_FEEDBACK` synthetic issue feedback success，并由 handler 作为兼容 pass 闭环；严格模式下必须等待真实 writeback。
 - 若 driver 等待或非阻塞采样 ready 期间发生 redirect，未 ready 端口会被清 valid，已 ready 端口通过 fire mask 补记 dispatch。这样可以避免“已经被 DUT 接受但 TB 没标记”或“未被接受却被错误删除队列”的两类冲突。非阻塞正常路径同样只按真实 `fired_mask` 删除队列项；未 ready item 不分配 issue epoch、不置 dispatched，后续继续参与仲裁。

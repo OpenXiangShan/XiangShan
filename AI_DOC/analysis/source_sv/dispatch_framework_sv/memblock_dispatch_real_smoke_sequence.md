@@ -25,7 +25,7 @@
 `memblock_dispatch_real_smoke_sequence` 是真实 DUT dispatch flow 的顶层服务循环。它和四个真实接口 sequence 并行工作，但职责不同：
 
 - 本 sequence 负责建表、置 `main_table_ready`、服务 monitor、处理 replay/redirect/commit 状态和最终检查。
-- `memblock_lsqenq_dispatch_sequence`、`memblock_lintsissue_dispatch_sequence`、`memblock_lsqcommit_dispatch_sequence`、`memblock_l2tlb_base_sequence` 负责各自 agent 的真实 xaction 驱动。
+- `memblock_lsqenq_dispatch_base_sequence`、`memblock_issue_dispatch_base_sequence`、`memblock_lsqcommit_dispatch_base_sequence`、`memblock_l2tlb_base_sequence` 负责各自 agent 的真实 xaction 驱动。
 
 调度步骤：
 

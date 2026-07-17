@@ -1,5 +1,13 @@
 # MemBlock Dispatch 后端接口闭环检查与实施方案
 
+> **LSQ enqueue 历史边界（2026-07-16）**：本文中的 8-slot、`canAccept/response`、
+> `commit_allocate_with_resp()` 作为 V2 主路径或 `MEMBLOCK_LSQENQ_SEQ_EN=0` 默认值描述均为
+> 早期实现审计，不代表当前 V2 行为。当前实现以
+> `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`
+> 和 `AI_DOC/mem_ut_flow_doc/lsq_admission_flow.md` 为准：6-slot、load/store 6/4、无顶层
+> ready/response、clock-first streaming、launch后reservation、下一driver边界issue-ready，且LSQ enqueue
+> sequence默认启用。
+
 本文只检查后端到 MemBlock 顶层交互的测试框架闭环，不要求测试框架模拟 MemBlock 内部硬件队列。
 
 本轮代码落点和源码片段说明见：

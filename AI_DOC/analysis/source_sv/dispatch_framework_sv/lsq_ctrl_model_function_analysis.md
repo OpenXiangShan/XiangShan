@@ -2,7 +2,7 @@
 
 对应源码：
 
-- `mem_ut/ver/ut/memblock/seq/base_seq/lsq_ctrl_model.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq_help/lsq_ctrl_model.sv`
 
 本文按源码函数顺序说明 `lsq_ctrl_model`。每个函数先附源码，再说明：
 
@@ -26,7 +26,8 @@
 
 它主要被以下流程调用：
 
-- `memblock_lsqenq_dispatch_sequence.sv`：入队前预测资源，入队后用 DUT response 校验并提交分配。
+- `memblock_lsqenq_dispatch_base_sequence.sv`：入队前预测资源，V2 request launch后直接提交软件
+  reservation，下一driver边界才开放issue。
 - `lsq_commit_handler.sv`：ctrl monitor 采到 DUT lqDeq/sqDeq 后，使用本模型释放 LQ/SQ 资源。
 - `memblock_dispatch_base_sequence.sv`、`issue_queue_scheduler.sv`、`issue_field_assigner.sv`：通过 `derive_op_behavior()` 判断 load/store/atomic 的抽象行为。
 - `soft_test_*` sequence：软件 smoke 中直接使用软件预测路径提交或释放资源。
@@ -130,7 +131,7 @@ class lsq_ctrl_model extends uvm_object;
 被哪些上层调用：
 
 - `memblock_dispatch_base_sequence::pre_body()` 中获取并 reset。
-- `memblock_lsqenq_dispatch_sequence::ensure_helpers()` 中获取 LSQ 控制模型。
+- `memblock_lsqenq_dispatch_base_sequence::ensure_helpers()` 中获取 LSQ 控制模型。
 - `lsq_commit_handler::ensure_handles()` 中获取 LSQ 控制模型。
 - soft smoke sequence 中获取软件 LSQ 状态。
 
@@ -552,7 +553,7 @@ AMOCAS_Q 宽度更大，测试框架抽象成更多地址侧和数据侧 uop。
         behavior.is_prefetch            = 1'b0;
         behavior.is_cbo                 = 1'b0;
         behavior.is_atomic              = 1'b0;
-        behavior.num_ls_elem            = 5'd0;
+        behavior.num_ls_elem            = memblock_num_ls_elem_t'(0);
         behavior.atomic_sta_uop_count   = 3'd0;
         behavior.atomic_data_uop_count  = 3'd0;
         return behavior;
@@ -578,8 +579,8 @@ AMOCAS_Q 宽度更大，测试框架抽象成更多地址侧和数据侧 uop。
 被哪些函数调用：
 
 - `derive_op_behavior()`：先创建默认 behavior，再根据 fuType/fuOpType 打开相应字段。
-- `memblock_lsqenq_dispatch_sequence::next_uid_needs_lsq_admission()`：无 candidate 时返回默认 behavior。
-- `memblock_lsqenq_dispatch_sequence::admit_non_lsq_if_ready()` 等逻辑间接依赖默认 behavior。
+- `memblock_lsqenq_dispatch_base_sequence::next_uid_needs_lsq_admission()`：无 candidate 时返回默认 behavior。
+- `memblock_lsqenq_dispatch_base_sequence::admit_non_lsq_if_ready()` 等逻辑间接依赖默认 behavior。
 
 设计意义：
 
@@ -608,7 +609,7 @@ AMOCAS_Q 宽度更大，测试框架抽象成更多地址侧和数据侧 uop。
             behavior.route_load     = 1'b1;
             behavior.commit_is_load = 1'b1;
             behavior.commit_is_normal = 1'b0;
-            behavior.num_ls_elem    = 5'd1;
+            behavior.num_ls_elem    = memblock_num_ls_elem_t'(1);
             if (is_prefetch_fuoptype(tr.fuOpType)) begin
                 behavior.kind        = MEMBLOCK_OP_BEHAVIOR_PREFETCH;
                 behavior.is_prefetch = 1'b1;
@@ -624,7 +625,7 @@ AMOCAS_Q 宽度更大，测试框架抽象成更多地址侧和数据侧 uop。
             behavior.route_std       = 1'b1;
             behavior.commit_is_store = 1'b1;
             behavior.commit_is_normal = 1'b0;
-            behavior.num_ls_elem     = 5'd1;
+            behavior.num_ls_elem     = memblock_num_ls_elem_t'(1);
             if (is_cbo_fuoptype(tr.fuOpType)) begin
                 behavior.kind   = MEMBLOCK_OP_BEHAVIOR_CBO;
                 behavior.is_cbo = 1'b1;
@@ -643,7 +644,7 @@ AMOCAS_Q 宽度更大，测试框架抽象成更多地址侧和数据侧 uop。
             behavior.route_std        = 1'b1;
             behavior.commit_is_normal = 1'b1;
             behavior.is_atomic        = 1'b1;
-            behavior.num_ls_elem      = 5'd0;
+            behavior.num_ls_elem      = memblock_num_ls_elem_t'(0);
             if (is_amocas_q_fuoptype(tr.fuOpType)) begin
                 behavior.atomic_sta_uop_count  = 3'd2;
                 behavior.atomic_data_uop_count = 3'd4;
@@ -699,8 +700,8 @@ AMOCAS_Q 宽度更大，测试框架抽象成更多地址侧和数据侧 uop。
 
 被哪些上层调用：
 
-- `memblock_lsqenq_dispatch_sequence::next_uid_needs_lsq_admission()`：判断下一个 uid 是否需要 LSQ admission。
-- `memblock_lsqenq_dispatch_sequence::collect_lsq_candidates()`：收集一拍可入队 candidates。
+- `memblock_lsqenq_dispatch_base_sequence::next_uid_needs_lsq_admission()`：判断下一个 uid 是否需要 LSQ admission。
+- `memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates()`：收集一拍可入队 candidates。
 - `issue_field_assigner.sv`、`issue_queue_scheduler.sv`：决定 issue route 和 uop 字段。
 - `memblock_dispatch_base_sequence::derive_op_behavior()`：作为外部包装入口。
 
@@ -775,10 +776,10 @@ AMOCAS_Q 宽度更大，测试框架抽象成更多地址侧和数据侧 uop。
 被哪些函数调用：
 
 - `commit_allocate()`：分配 LQ 后推进 `lq_enq_ptr`。
-- `commit_allocate_with_resp()`：真实入队确认后推进 `lq_enq_ptr`。
+- `commit_allocate_with_resp()`：兼容profile比较通过后转调`commit_allocate()`，由唯一owner推进`lq_enq_ptr`。
 - `release_lq()`：DUT deq 后推进 `lq_deq_ptr`。
 - `lsq_commit_handler::apply_dut_lq_deq()`：枚举 DUT deq 的每个 LQ key。
-- `memblock_lsqenq_dispatch_sequence::collect_lsq_candidates()`：临时预测一拍多个 candidate 的 key。
+- `memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates()`：临时预测一拍多个 candidate 的 key。
 
 在调用函数中的作用：
 
@@ -828,10 +829,10 @@ AMOCAS_Q 宽度更大，测试框架抽象成更多地址侧和数据侧 uop。
 
 被哪些函数调用：
 
-- `commit_allocate()`、`commit_allocate_with_resp()`：分配 SQ 后推进 `sq_enq_ptr`。
+- `commit_allocate()`：分配SQ后推进`sq_enq_ptr`；response wrapper比较通过后也转调该owner。
 - `release_sq()`：DUT sqDeq 后推进 `sq_deq_ptr`。
 - `lsq_commit_handler::apply_dut_sq_deq()`：枚举 DUT deq 的 SQ key。
-- `memblock_lsqenq_dispatch_sequence::collect_lsq_candidates()`：预测批量 enqueue 的 SQ key。
+- `memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates()`：预测批量 enqueue 的 SQ key。
 
 在调用函数中的作用：
 
@@ -1126,7 +1127,8 @@ preview 不改变 pointer/free count，只给出当前预期 key。真实 pointe
 
 注意：
 
-真实 DUT LSQ enqueue flow 更常用 `commit_allocate_with_resp()`，因为它要校验 DUT 返回的 LQ/SQ key 是否等于软件预测。
+当前 V2 DUT LSQ enqueue flow 直接调用 `commit_allocate()`，因为顶层没有 enqueue response。
+`commit_allocate_with_resp()` 只保留为其它存在真实 response 的 profile 的比较 wrapper。
 
 ## 23. commit_allocate_with_resp()
 
@@ -1155,10 +1157,8 @@ preview 不改变 pointer/free count，只给出当前预期 key。真实 pointe
         end
 
         preview_allocate(behavior, expected_lq_key, expected_sq_key);
-        if (dut_lq_key.flag  != expected_lq_key.flag  ||
-            dut_lq_key.value != expected_lq_key.value ||
-            dut_sq_key.flag  != expected_sq_key.flag  ||
-            dut_sq_key.value != expected_sq_key.value) begin
+        if ((behavior.uses_lq && dut_lq_key != expected_lq_key) ||
+            (behavior.uses_sq && dut_sq_key != expected_sq_key)) begin
             `uvm_fatal("LSQ_CTRL",
                        $sformatf("uid=%0d LSQ enq resp mismatch: expected lq={%0d,%0d} sq={%0d,%0d}, got lq={%0d,%0d} sq={%0d,%0d}",
                                  uid,
@@ -1172,38 +1172,22 @@ preview 不改变 pointer/free count，只给出当前预期 key。真实 pointe
                                  dut_sq_key.value))
         end
 
-        tr.lqIdx_flag  = dut_lq_key.flag;
-        tr.lqIdx_value = dut_lq_key.value;
-        tr.sqIdx_flag  = dut_sq_key.flag;
-        tr.sqIdx_value = dut_sq_key.value;
-        tr.numLsElem   = behavior.num_ls_elem;
-
-        data.set_main_transaction(uid, tr);
-        data.activate_uid(uid, behavior.uses_lq, behavior.uses_sq);
-        data.set_status_field(uid, MEMBLOCK_STATUS_ENQ, 1'b1);
-
-        if (behavior.uses_lq) begin
-            lq_enq_ptr = advance_lq_key(lq_enq_ptr, behavior.num_ls_elem);
-            lq_free_count -= behavior.num_ls_elem;
-        end
-        if (behavior.uses_sq) begin
-            sq_enq_ptr = advance_sq_key(sq_enq_ptr, behavior.num_ls_elem);
-            sq_free_count -= behavior.num_ls_elem;
-        end
+        commit_allocate(uid, behavior, tr);
     endfunction:commit_allocate_with_resp
 ```
 
 功能目的：
 
-真实 LSQ enqueue flow 中，用 DUT 返回的 LQ/SQ key 校验软件预测，并提交 allocation。
+对存在真实 enqueue response 的兼容 profile，只比较 behavior 实际使用的 DUT LQ/SQ key 与软件预览；
+比较通过后转调唯一 `commit_allocate()` owner。当前 V2 flow 不调用本函数。
 
 输入：
 
 - `uid`：主表 uid。
 - `behavior`：操作行为，必须需要 LSQ allocation。
 - `tr`：主表 transaction。
-- `dut_lq_key`：DUT enqueue response 返回的 LQ key。
-- `dut_sq_key`：DUT enqueue response 返回的 SQ key。
+- `dut_lq_key`：兼容 profile 的 DUT enqueue response LQ key；behavior不使用LQ时忽略。
+- `dut_sq_key`：兼容 profile 的 DUT enqueue response SQ key；behavior不使用SQ时忽略。
 
 输出：
 
@@ -1213,29 +1197,25 @@ preview 不改变 pointer/free count，只给出当前预期 key。真实 pointe
 
 - `common_data_transaction::get()`
 - `preview_allocate()`
-- `data.set_main_transaction()`
-- `data.activate_uid()`
-- `data.set_status_field()`
-- `advance_lq_key()`
-- `advance_sq_key()`
+- `commit_allocate()`
 
 内部调用函数作用：
 
 - `preview_allocate()` 生成软件预期 key。
 - 本函数比较 DUT key 和 expected key，如果不一致 fatal。
-- `activate_uid()` 建立 active map，让后续 writeback/deq 能通过 LQ/SQ key 找回 uid。
-- `advance_*_key()` 在确认 DUT 与软件一致后推进软件 enqueue pointer。
+- 比较只覆盖 `behavior.uses_lq/uses_sq` 实际使用的 key，避免 unused key 形成无意义约束。
+- `commit_allocate()` 是唯一状态 owner，负责写主表、建立 active map、置 `enq` 和推进软件 pointer。
 
 被哪些上层调用：
 
-- `memblock_lsqenq_dispatch_sequence::confirm_lsq_candidates()`：
-  - 从 LSQ enqueue xaction 中读取 DUT response key。
-  - 对每个 uid 调用 `commit_allocate_with_resp()`。
-  - 然后执行 `complete_admission()` 建 TLB 并 route issue queue。
+- 当前 V2 `memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates()` 不调用本函数，而是核对
+  candidate preview后直接调用`commit_allocate()`。
+- 本函数仅供未来或其它具有真实enqueue response的profile调用。
 
 设计意义：
 
-这是 real DUT admission 路径最关键的校验点。它保证测试框架的软件 LSQ 指针和 DUT 实际分配的 index 保持一致。如果不一致，后续 issue 使用的 LQ/SQ index、ctrl deq 释放、active map 反查都会错。
+该 wrapper 防止有 response 的 profile 复制第二套 allocation 状态更新逻辑。V2 没有 response，
+正确性由candidate key、launch后再次preview和唯一`commit_allocate()`共同保证。
 
 ## 24. commit_non_lsq_admission()
 
@@ -1276,7 +1256,7 @@ preview 不改变 pointer/free count，只给出当前预期 key。真实 pointe
 
 被哪些上层调用：
 
-- `memblock_lsqenq_dispatch_sequence::admit_non_lsq_if_ready()`。
+- `memblock_lsqenq_dispatch_base_sequence::admit_non_lsq_if_ready()`。
 - soft smoke sequence。
 
 设计意义：
@@ -1472,12 +1452,13 @@ DUT sqDeq 后，释放软件模型中的 SQ 资源。
 ### 29.1 LSQ enqueue real DUT 路径
 
 ```text
-memblock_lsqenq_dispatch_sequence::collect_lsq_candidates()
+memblock_lsqenq_dispatch_base_sequence::collect_lsq_candidates()
   -> lsq_ctrl_model::derive_op_behavior()
   -> lsq_ctrl_model::advance_lq_key()/advance_sq_key()  临时预览批量 key
 
-memblock_lsqenq_dispatch_sequence::confirm_lsq_candidates()
-  -> lsq_ctrl_model::commit_allocate_with_resp()
+memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates()
+  -> lsq_ctrl_model::preview_allocate()
+  -> lsq_ctrl_model::commit_allocate()
      -> preview_allocate()
         -> can_allocate()
      -> data.set_main_transaction()
@@ -1489,7 +1470,7 @@ memblock_lsqenq_dispatch_sequence::confirm_lsq_candidates()
 ### 29.2 non-LSQ admission 路径
 
 ```text
-memblock_lsqenq_dispatch_sequence::admit_non_lsq_if_ready()
+memblock_lsqenq_dispatch_base_sequence::admit_non_lsq_if_ready()
   -> lsq_ctrl_model::commit_non_lsq_admission()
      -> commit_allocate()
         -> preview_allocate()
@@ -1524,6 +1505,7 @@ io_mem_to_ooo_ctrl_agent monitor
 
 - 当前 `derive_op_behavior()` 对 vector LS 直接 fatal，初版不支持 vector LS 资源拆分。
 - 当前 atomic/MOU 抽象为不分配普通 LQ/SQ，但会 route STA/STD，并根据 AMOCAS 类型设置 uop 数量。
-- `cancel_lq()` / `cancel_sq()` 当前是基础能力，主 flow 未直接使用。
-- real DUT LSQ enqueue 路径以 `commit_allocate_with_resp()` 为准，软件预测必须和 DUT response key 完全一致。
+- `cancel_lq()` / `cancel_sq()` 由LSQ sequence的pending cancel路径调用，回退redirect覆盖的reservation。
+- V2 real DUT LSQ enqueue路径以`commit_allocate()`为唯一allocation owner；launch后立即reservation，
+  下一driver边界才由`complete_v2_pending_sample()`开放issue。
 - DUT ctrl deq 是 LQ/SQ 资源释放的真源，`release_lq()` / `release_sq()` 只在 deq handler 中释放 free count。

@@ -49,8 +49,8 @@
 | `fuType`、`fuOpType` | DUT 真实功能单元类型和操作类型 | 发往 DUT 的核心控制字段，必须由合法 op_class 推导或校验，不能完全随机。 |
 | `src_0`、`imm`、`vaddr` | 地址源操作数、立即数、最终虚拟地址 | 框架统一用 `src_0 + sign_extend_imm12(imm)` 生成 `vaddr`，后续 TLB 和 issue 字段使用同一个地址。 |
 | `robIdx_flag/value` | ROB 指针 | DUT 侧年龄判断和 monitor 反查使用；主表保存初始值，状态表会快照。 |
-| `lqIdx_flag/value`、`sqIdx_flag/value` | LQ/SQ 分配结果 | 主表生成时可以为空，LSQ 入队后由 `lsq_ctrl_model` 按 DUT response 写回。 |
-| `numLsElem` | LSQ 元素数 | 当前 scalar 简化下多为 1；vector/多元素场景留字段但模型暂不完整支持。 |
+| `lqIdx_flag/value`、`sqIdx_flag/value` | LQ/SQ 分配结果 | 主表生成时可以为空；V2 request launch后由唯一`lsq_ctrl_model::commit_allocate()`按软件pointer reservation写回。 |
+| `numLsElem` | LSQ 元素数 | 使用`memblock_num_ls_elem_t`统一类型；当前scalar setter只接受1，vector/多元素另行专项。 |
 | `tlbAF/tlbPF/tlbGPF/PBMT/pmaAF` | 翻译和访问异常控制 | TLB entry builder 会复制到 `memblock_tlb_entry`，用于构造 L2TLB response。`pmaAF` 字段功能保留，后续可完善专项行为。 |
 | `corrupt`、`denied` | DCache/TL 返回异常控制 | 当前作为主表可控字段保留，完整返回路径专项未闭环。 |
 | `delay` | 进入 issue queue 后等待拍数 | 让调度器可以测试 ready delay 和排队逻辑。 |

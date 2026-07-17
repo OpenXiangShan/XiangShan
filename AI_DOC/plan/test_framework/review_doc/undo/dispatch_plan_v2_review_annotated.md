@@ -1,5 +1,11 @@
 # 可参数化的测试激励框架设计计划
 
+> **LSQ enqueue 历史边界（2026-07-16）**：本文保留的8-slot、`canAccept/response`、
+> response wrapper或默认关闭描述属于早期实现，不代表当前V2主链。当前权威为
+> `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`
+> 和`AI_DOC/mem_ut_flow_doc/lsq_admission_flow.md`：V2 6-slot、load/store 6/4、clock-first launch、
+> launch后reservation、下一driver边界issue-ready，且LSQ enqueue sequence默认启用。
+
 > [审查结论] 原方案整体方向可行：以主控制表、TLB 表、状态表和三个轻量发射队列作为统一数据源，能够支撑可参数化随机和 directed case。暂不建议另起替代优化方案；更合理的做法是在现有方案上补清关键边界，包括 TLB key、状态并发更新、flush/replay 时序、LSQ commit 精确定义、plus 初始化与文件集成。下面的 `REVIEW` 注释为终稿需要保留的实现风险提示。
 
 > [REVIEW 处理规则] 后续处理任一 `REVIEW` 注释时，必须先确认该 review 指出的真实风险，再把修正方案整合进正文；正文修正完成后由 subagent 独立确认风险已解决，确认后才删除对应 `REVIEW` 注释。

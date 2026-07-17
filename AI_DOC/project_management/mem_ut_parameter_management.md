@@ -89,14 +89,22 @@ runtime资源收敛：
 5. 所有直接受物理资源约束的runtime参数必须集中在`seq_csr_common::apply_runtime_resource_limits()`处理。其它sequence/helper不得再次写固定上限或复制clamp。
 6. `check_*`函数只做纯校验，不修改runtime字段；需要fatal/clamp并写回参数的函数使用`apply_`、`normalize_`或现有`validate_and_clamp()`入口。
 7. 删除硬件结构plus参数时必须同时删除字段定义、加载、default cfg、runtime快照、getter和全部consumer；除非用户明确要求兼容迁移，不为已删除名称保留扫描、warning、fatal或wrapper。
-8. 后续物理参数变化时只修改当前版本profile提供的compile宏；runtime limit、物理循环和文档通过同源localparam自动跟随，不同步维护第二套数值。
+8. 后续物理参数变化时应修改当前版本profile提供的compile宏，但必须先确认全部显式interface、xaction、
+   driver、monitor、connect和setter consumer已经参数化；当前V2 LSQ字段链尚未满足该条件，因此由compile
+   consistency拒绝非6/6/4 tuple，不能只改宏值假装完成版本切换。
 
 当前LSQ enqueue和scalar issue规则：
 
-- `MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM`是LSQ enqueue物理slot数，V2默认6。
+- `MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM`是LSQ enqueue物理slot数，当前V2固定为6。
+- `MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH/MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH`是V2每拍load/store element物理上限，
+  当前固定为6/4；它们不是必须保留的LQ/SQ空项数。
+- 当前interface/xaction/driver/setter显式展开6个slot，`check_compile_param_consistency()`必须在激励前要求
+  slot/load/store tuple精确为6/6/4。其它tuple只有在对应profile参数化全部显式consumer后才能开放。
 - `MEMBLOCK_DUT_LOAD_PIPE_NUM/MEMBLOCK_DUT_STA_PIPE_NUM/MEMBLOCK_DUT_STD_PIPE_NUM`是scalar issue物理pipe数，V2默认3/2/2。
 - `MEMBLOCK_ENQ_PER_CYCLE`必须位于`[1:MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM]`，越界直接fatal。
-- `MEMBLOCK_ENQ_PER_CYCLE_RAND_EN=1`时，`get_enq_per_cycle()`在完整编译期物理slot范围内随机，保持既有随机模式语义。
+- `MEMBLOCK_ENQ_PER_CYCLE_RAND_EN=1`时，`get_enq_per_cycle()`按`ZERO/MIDDLE/MAX`三类总权重在`[0:MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM]`内采样；MIDDLE的`-1`表示AUTO，派生为物理slot数减1。
+- 三类enqueue权重属于runtime行为概率，不镜像物理结构。随机模式禁止三类全0，也禁止`MIDDLE+MAX=0`，避免主动flow永远只发送idle；权重和使用`longint unsigned`逐项累加，避免32-bit表达式先溢出。
+- `collect_lsq_candidates()`每拍只采样一次总slot目标，再分别按编译期load/store 6/4和实际LQ/SQ free count截断；不得新增同义per-type runtime limit，也不得复制RTL registered credit公式要求额外预留6/4空项。
 - 三类`*_PIP_NUM_LIMIT`按对应compile pipe数执行warning+clamp；三类随机开关只决定固定返回limit还是在`[1:limit]`采样。
 - `MEMBLOCK_REAL_LSQ_ENQ_MAX`、`MEMBLOCK_REAL_ENQ_WIDTH`和三个`MEMBLOCK_REAL_*_PIPE_NUM`已经退出配置系统，不得重新引入兼容字段或wrapper。
 

@@ -28,7 +28,7 @@ class main_control_transaction extends uvm_object;
     rand bit [MEMBLOCK_LQ_VALUE_W-1:0] lqIdx_value;
     rand bit                 sqIdx_flag;
     rand bit [MEMBLOCK_SQ_VALUE_W-1:0] sqIdx_value;
-    rand bit [4:0]           numLsElem;
+    rand memblock_num_ls_elem_t numLsElem;
 
     rand bit                 tlbAF;
     rand bit                 tlbPF;
@@ -50,7 +50,7 @@ class main_control_transaction extends uvm_object;
     }
 
     constraint c_scalar_lsq_elem {
-        numLsElem inside {[0:31]};
+        numLsElem inside {[0:MEMBLOCK_DUT_MAX_LS_ELEM]};
     }
 
     function new(string name = "main_control_transaction");

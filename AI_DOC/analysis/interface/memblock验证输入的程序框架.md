@@ -43,12 +43,12 @@ L2TLB 是唯一特殊情况：memblock 环境中不单独包含 L2TLB module，�
 | `cycle` | 全局周期计数，支持延迟、超时、burst 间隔 |
 | `reset_done` | reset 释放后才允许发事务 |
 | `rob_alloc` | 分配和回收 `robIdx_flag/value`，约束 redirect、writeback、feedback |
-| `lq_alloc` | 分配和回收 `lqIdx_flag/value`，约束 load/vec load/LSQ resp |
+| `lq_alloc` | 分配和回收 `lqIdx_flag/value`，约束scalar load的软件reservation和DUT deq释放；vector另行专项 |
 | `sq_alloc` | 分配和回收 `sqIdx_flag/value`，约束 store/vec store/sbuffer/feedback |
 | `uop_alloc` | 生成 `uopIdx`、`vuopIdx`、`lastUop` |
 | `ftq_alloc` | 生成 `ftqIdx/ftqOffset/isRVC/pc` |
 | `issue_queue_state` | 记录 int/vec issue 已发未完成事务 |
-| `lsq_state` | 记录 enqLsq 请求、canAccept、resp 分配结果 |
+| `lsq_state` | 记录V2 enqLsq launch、软件LQ/SQ reservation、pending-sample和redirect cancel状态 |
 | `tl_outstanding` | 记录 TileLink A/C/E 与 B/D 响应的 source/sink/data 对应关系 |
 | `tlb_state` | 记录 ITLB/DTLB 请求与 L2TLB 响应对应关系 |
 | `redirect_state` | redirect 有效时取消或标记 younger robIdx 事务 |
@@ -230,27 +230,34 @@ STD 类通道 `5/6` 主要输入字段：
 
 输入端口：
 
-- `io_ooo_to_mem_enqLsq_needAlloc_0..7[1:0]`
-- `io_ooo_to_mem_enqLsq_req_0..7_valid`
-- `io_ooo_to_mem_enqLsq_req_0..7_bits_fuType[35:0]`
-- `io_ooo_to_mem_enqLsq_req_0..7_bits_uopIdx[6:0]`
-- `io_ooo_to_mem_enqLsq_req_0..7_bits_robIdx_flag/value[8:0]`
-- `io_ooo_to_mem_enqLsq_req_0..7_bits_lqIdx_flag/value[6:0]`
-- `io_ooo_to_mem_enqLsq_req_0..7_bits_sqIdx_flag/value[5:0]`
-- `io_ooo_to_mem_enqLsq_req_0..7_bits_numLsElem[4:0]`
+- `io_ooo_to_mem_enqLsq_needAlloc_0..5[1:0]`
+- `io_ooo_to_mem_enqLsq_req_0..5_valid`
+- `io_ooo_to_mem_enqLsq_req_0..5_bits_fuType[MEMBLOCK_DUT_FUTYPE_W-1:0]`
+- `io_ooo_to_mem_enqLsq_req_0..5_bits_uopIdx[MEMBLOCK_DUT_UOP_IDX_W-1:0]`
+- `io_ooo_to_mem_enqLsq_req_0..5_bits_robIdx_flag/value[MEMBLOCK_DUT_ROB_VALUE_W-1:0]`
+- `io_ooo_to_mem_enqLsq_req_0..5_bits_lqIdx_flag/value[MEMBLOCK_DUT_LQ_VALUE_W-1:0]`
+- `io_ooo_to_mem_enqLsq_req_0..5_bits_sqIdx_flag/value[MEMBLOCK_DUT_SQ_VALUE_W-1:0]`
+- `io_ooo_to_mem_enqLsq_req_0..5_bits_numLsElem[MEMBLOCK_DUT_NUM_LS_ELEM_W-1:0]`
+- `io_ooo_to_mem_enqLsq_req_0..5_bits_exceptionVec_0..23`
+- `io_ooo_to_mem_enqLsq_req_0..5_bits_trigger[3:0]`
+- `io_ooo_to_mem_enqLsq_req_0..5_bits_fuOpType[8:0]`
+- `io_ooo_to_mem_enqLsq_req_0..5_bits_flushPipe/lastUop`
 
-必须监测的 DUT output：
-
-- `io_ooo_to_mem_enqLsq_canAccept`
-- `io_ooo_to_mem_enqLsq_resp_0..7_lqIdx_flag/value[6:0]`
-- `io_ooo_to_mem_enqLsq_resp_0..7_sqIdx_flag/value[5:0]`
+V2 顶层没有对应的 `canAccept` 或 enqueue response output。`lqCanAccept/sqCanAccept` 属于 LSQ 状态观测，
+不是该 request bundle 的握手信号。
 
 规则：
 
 - `needAlloc` 要和 `fuType` 指示的 load/store/vector/segment 资源需求一致。
-- 只有在 `canAccept` 允许时提交 LSQ enqueue。
+- 本轮只支持 scalar load/store；scalar request 固定 `uopIdx=0`、`numLsElem=1`、`lastUop=1`。
+- active LQ的`fuOpType`只允许普通load `0..6`和software prefetch `8/9/10`；active SQ只允许普通store
+  `0..3`，CBO/AMO/其它opcode由xaction约束和driver共同拒绝。
+- 单拍总 slot 不超过6，load element不超过6，store element不超过4，且分别不超过软件LQ/SQ free count。
+- driver在clocking边界只launch一次request，不等待ready/response；launch后立即预留软件资源，下一边界
+  才设置`issue_ready`。
 - `req_N` 与对应 issue 事务必须共享 `robIdx/uopIdx/numLsElem`。
-- resp 返回的 `lqIdx/sqIdx` 必须写回公共 `lsq_state`，后续 issue、feedback、writeback 使用同一索引。
+- sequence预览并写入的`lqIdx/sqIdx`由唯一`commit_allocate()`写回公共状态，后续issue、feedback、
+  writeback使用同一索引。
 
 ### OOO -> Mem tlbCsr
 
@@ -487,7 +494,7 @@ TileLink 端口都是 MemBlock 顶层 Verilog IO，但输入生成程序只驱�
 ## 输入生成优先级
 
 1. 建立 `rob/lq/sq/uop/ftq` 公共分配器。
-2. 先驱动 `enqLsq`，拿到或确认 LSQ 分配结果。
+2. 先驱动V2 `enqLsq` request；launch后提交软件LSQ reservation，下一driver边界确认sample completion。
 3. 再驱动 `intIssue/vecIssue`，保证 `robIdx/lqIdx/sqIdx/numLsElem/fuType/fuOpType` 与 LSQ 状态一致。
 4. 同步驱动 `tlbCsr/sfence/redirect`，维护 TLB 与 flush 状态。
 5. 对 L2TLB 特例，按 ITLB/DTLB 请求生成 TLB 响应模型状态。

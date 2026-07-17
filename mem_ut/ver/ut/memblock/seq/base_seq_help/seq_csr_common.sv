@@ -16,8 +16,13 @@ class seq_csr_common;
     static int unsigned main_trans_num = 1;
     static bit          use_manual_main_table = 1'b0;
     static int unsigned enq_per_cycle = 4;
-    // 控制get_enq_per_cycle()是否每次在[1:编译期LSQ enqueue物理slot数]内均匀随机。
+    // 控制get_enq_per_cycle()是否按ZERO/MIDDLE/MAX权重采样[0:物理slot数]目标上限。
     static bit          enq_per_cycle_rand_en = 1'b0;
+    // 三个raw权重来自plus；MIDDLE=-1表示AUTO，effective字段保存按物理slot数解析后的非负值。
+    static int unsigned enq_per_cycle_zero_weight = 0;
+    static int          enq_per_cycle_middle_weight = -1;
+    static int unsigned enq_per_cycle_effective_middle_weight = 0;
+    static int unsigned enq_per_cycle_max_weight = 1;
     // LOAD/STA/STD issue运行期使用上限；由plus加载并被编译期物理pipe数clamp。
     // 调度路径不直接把它当本拍发射数，必须通过sample_*_pip_num()按随机开关采样。
     static int unsigned load_pip_num_limit = 3;
@@ -224,6 +229,11 @@ class seq_csr_common;
         use_manual_main_table       = plus::MEMBLOCK_USE_MANUAL_MAIN_TABLE;
         enq_per_cycle               = get_non_negative_int("MEMBLOCK_ENQ_PER_CYCLE", plus::MEMBLOCK_ENQ_PER_CYCLE);
         enq_per_cycle_rand_en       = plus::MEMBLOCK_ENQ_PER_CYCLE_RAND_EN;
+        enq_per_cycle_zero_weight   = get_non_negative_int("MEMBLOCK_ENQ_PER_CYCLE_ZERO_WEIGHT",
+                                                            plus::MEMBLOCK_ENQ_PER_CYCLE_ZERO_WEIGHT);
+        enq_per_cycle_middle_weight = plus::MEMBLOCK_ENQ_PER_CYCLE_MIDDLE_WEIGHT;
+        enq_per_cycle_max_weight    = get_non_negative_int("MEMBLOCK_ENQ_PER_CYCLE_MAX_WEIGHT",
+                                                            plus::MEMBLOCK_ENQ_PER_CYCLE_MAX_WEIGHT);
         load_pip_num_limit          = get_non_negative_int("MEMBLOCK_LOAD_PIP_NUM_LIMIT", plus::MEMBLOCK_LOAD_PIP_NUM_LIMIT);
         sta_pip_num_limit           = get_non_negative_int("MEMBLOCK_STA_PIP_NUM_LIMIT", plus::MEMBLOCK_STA_PIP_NUM_LIMIT);
         std_pip_num_limit           = get_non_negative_int("MEMBLOCK_STD_PIP_NUM_LIMIT", plus::MEMBLOCK_STD_PIP_NUM_LIMIT);
@@ -453,7 +463,8 @@ class seq_csr_common;
             `uvm_warning("SEQ_CSR_CFG", "redirect_freeze_timeout=0, clamp to 1")
             redirect_freeze_timeout = 1;
         end
-        if (lsqenq_seq_en && lsqenq_ready_timeout == 0) begin
+        if (MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP &&
+            lsqenq_seq_en && lsqenq_ready_timeout == 0) begin
             `uvm_warning("SEQ_CSR_CFG", "lsqenq_ready_timeout=0 while lsqenq sequence is enabled, clamp to 1")
             lsqenq_ready_timeout = 1;
         end
@@ -566,10 +577,34 @@ class seq_csr_common;
         if (MEMBLOCK_ROB_VALUE_W == 0 || MEMBLOCK_LQ_VALUE_W == 0 || MEMBLOCK_SQ_VALUE_W == 0 ||
             MEMBLOCK_INTERNAL_FUTYPE_W == 0 || MEMBLOCK_DUT_FUTYPE_W == 0 ||
             MEMBLOCK_FTQ_PTR_VALUE_W == 0 || MEMBLOCK_FTQ_OFFSET_W == 0 ||
-            MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM == 0 || MEMBLOCK_DUT_LOAD_PIPE_NUM == 0 ||
+            MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM == 0 || MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH == 0 ||
+            MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH == 0 || MEMBLOCK_DUT_LOAD_PIPE_NUM == 0 ||
             MEMBLOCK_DUT_STA_PIPE_NUM == 0 || MEMBLOCK_DUT_STD_PIPE_NUM == 0 ||
-            MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM == 0) begin
+            MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM == 0 || MEMBLOCK_DUT_MAX_UOP_SIZE == 0 ||
+            MEMBLOCK_DUT_UOP_IDX_W == 0 || MEMBLOCK_DUT_VLEN == 0 ||
+            MEMBLOCK_DUT_MAX_LS_ELEM == 0 || MEMBLOCK_DUT_NUM_LS_ELEM_W == 0) begin
             `uvm_fatal("SEQ_COMPILE_CFG", "compile-time width/count values must be non-zero")
+        end
+        if (MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH > MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM ||
+            MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH > MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM) begin
+            `uvm_fatal("SEQ_COMPILE_CFG", "LSQ load/store enqueue width exceeds total slot count")
+        end
+        if (MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM != 6 ||
+            MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH != 6 ||
+            MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH != 4) begin
+            `uvm_fatal("SEQ_COMPILE_CFG",
+                       $sformatf("current V2 LSQ field expansion requires slot/load/store tuple 6/6/4, got %0d/%0d/%0d",
+                                 MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM,
+                                 MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH,
+                                 MEMBLOCK_DUT_LSQ_ST_ENQ_WIDTH))
+        end
+        if (MEMBLOCK_DUT_UOP_IDX_W != $clog2(MEMBLOCK_DUT_MAX_UOP_SIZE + 1)) begin
+            `uvm_fatal("SEQ_COMPILE_CFG", "UOP_IDX_W is not derived from MAX_UOP_SIZE")
+        end
+        if ((MEMBLOCK_DUT_VLEN % 8) != 0 ||
+            MEMBLOCK_DUT_MAX_LS_ELEM != (MEMBLOCK_DUT_VLEN / 8) ||
+            MEMBLOCK_DUT_NUM_LS_ELEM_W != ($clog2(MEMBLOCK_DUT_MAX_LS_ELEM) + 1)) begin
+            `uvm_fatal("SEQ_COMPILE_CFG", "numLsElem constants are not derived from VLEN")
         end
         if (MEMBLOCK_DUT_FUTYPE_W > MEMBLOCK_INTERNAL_FUTYPE_W) begin
             `uvm_fatal("SEQ_COMPILE_CFG",
@@ -622,6 +657,8 @@ class seq_csr_common;
     // 中文注释：runtime资源参数只控制本次testcase使用量，物理上限统一取编译期DUT常量。
     // 本函数是enqueue/issue资源限制的唯一修改点；interface尺寸和driver物理循环不读取plus。
     static function void apply_runtime_resource_limits();
+        longint unsigned enq_weight_sum;
+
         if (MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM == 0 ||
             MEMBLOCK_DUT_LOAD_PIPE_NUM == 0 ||
             MEMBLOCK_DUT_STA_PIPE_NUM == 0 ||
@@ -634,6 +671,32 @@ class seq_csr_common;
                        $sformatf("MEMBLOCK_ENQ_PER_CYCLE=%0d must be in [1:%0d]",
                                  enq_per_cycle,
                                  MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM))
+        end
+        if (enq_per_cycle_middle_weight < -1) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       $sformatf("MEMBLOCK_ENQ_PER_CYCLE_MIDDLE_WEIGHT=%0d must be -1(AUTO) or non-negative",
+                                 enq_per_cycle_middle_weight))
+        end
+        if (enq_per_cycle_middle_weight == -1) begin
+            enq_per_cycle_effective_middle_weight = MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM - 1;
+        end else begin
+            enq_per_cycle_effective_middle_weight = enq_per_cycle_middle_weight;
+        end
+        if (enq_per_cycle_rand_en) begin
+            if (MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM <= 1 &&
+                enq_per_cycle_effective_middle_weight != 0) begin
+                `uvm_fatal("SEQ_CSR_CFG", "MIDDLE enqueue weight requires at least two physical slots")
+            end
+            enq_weight_sum = enq_per_cycle_zero_weight;
+            enq_weight_sum += enq_per_cycle_effective_middle_weight;
+            enq_weight_sum += enq_per_cycle_max_weight;
+            if (enq_weight_sum == 0) begin
+                `uvm_fatal("SEQ_CSR_CFG", "LSQ enqueue ZERO/MIDDLE/MAX weights must not all be zero")
+            end
+            if (enq_per_cycle_effective_middle_weight == 0 &&
+                enq_per_cycle_max_weight == 0) begin
+                `uvm_fatal("SEQ_CSR_CFG", "LSQ enqueue random weights cannot select ZERO forever")
+            end
         end
 
         clamp_int("load_pip_num_limit", load_pip_num_limit, 1, MEMBLOCK_DUT_LOAD_PIPE_NUM);
@@ -711,11 +774,45 @@ class seq_csr_common;
     endfunction:get_use_manual_main_table
 
     static function int unsigned get_enq_per_cycle();
+        int unsigned sample_class;
+        int unsigned middle_value;
+        int unsigned zero_weight;
+        int unsigned middle_weight;
+        int unsigned max_weight;
+
         check_initialized("get_enq_per_cycle");
-        if (enq_per_cycle_rand_en) begin
-            return $urandom_range(MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM, 1);
+        if (!enq_per_cycle_rand_en) begin
+            return enq_per_cycle;
         end
-        return enq_per_cycle;
+
+        zero_weight = enq_per_cycle_zero_weight;
+        middle_weight = enq_per_cycle_effective_middle_weight;
+        max_weight = enq_per_cycle_max_weight;
+        if (!std::randomize(sample_class) with {
+                sample_class dist {
+                    0 := zero_weight,
+                    1 := middle_weight,
+                    2 := max_weight
+                };
+            }) begin
+            `uvm_fatal("SEQ_CSR_CFG", "failed to randomize LSQ enqueue ZERO/MIDDLE/MAX class")
+        end
+        case (sample_class)
+            0: return 0;
+            1: begin
+                if (!std::randomize(middle_value) with {
+                        middle_value inside {[1:MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM-1]};
+                    }) begin
+                    `uvm_fatal("SEQ_CSR_CFG", "failed to randomize LSQ enqueue MIDDLE value")
+                end
+                return middle_value;
+            end
+            2: return MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM;
+            default: begin
+                `uvm_fatal("SEQ_CSR_CFG", $sformatf("invalid LSQ enqueue random class=%0d", sample_class))
+            end
+        endcase
+        return 0;
     endfunction:get_enq_per_cycle
 
     static function int unsigned get_load_pip_num_limit();
