@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
+source "${SCRIPT_DIR}/frontend_pylib.sh"
+FRONTEND_PYLIB="$(frontend_pylib_path "${REPO_DIR}")"
 
 LOG_DIR="${TB_REG_LOG_DIR:-${FRONTEND_DIR}/logs}"
 mkdir -p "${LOG_DIR}"
@@ -33,7 +35,7 @@ else
 fi
 
 cd "${REPO_DIR}"
-export PYTHONPATH="${FRONTEND_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-}"
+export PYTHONPATH="${FRONTEND_DIR}:${FRONTEND_PYLIB}:${PYTHONPATH:-}"
 PYTEST_CMD=(pytest -s -o log_cli=true --log-cli-level="${CLI_LEVEL}")
 if [[ "${PYTEST_DISABLE_RERUNFAILURES}" != "0" ]]; then
   PYTEST_CMD+=(-p no:rerunfailures)

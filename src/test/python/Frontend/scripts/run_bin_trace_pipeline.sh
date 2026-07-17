@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
+source "${SCRIPT_DIR}/frontend_pylib.sh"
+FRONTEND_PYLIB="$(frontend_pylib_path "${REPO_DIR}")"
 PIPELINE_STAGE="init"
 PIPELINE_REASON="not_started"
 
@@ -243,7 +245,7 @@ mkdir -p "$(dirname "${TRACE_PATH}")"
 if [[ "${SKIP_NEMU}" == "0" ]]; then
   mkdir -p "$(dirname "${NEMU_LOG_PATH}")"
 fi
-export PYTHONPATH="${FRONTEND_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-}"
+export PYTHONPATH="${FRONTEND_DIR}:${FRONTEND_PYLIB}:${PYTHONPATH:-}"
 
 if [[ "${SKIP_NEMU}" == "0" ]]; then
   PIPELINE_STAGE="trace_generation"

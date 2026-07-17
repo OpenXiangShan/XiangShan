@@ -294,18 +294,56 @@ FRONTEND_BUILD_DIR = ./build-frontend
 FRONTEND_RTL_DIR   = $(FRONTEND_BUILD_DIR)/rtl
 FRONTENDTOP        = top.FrontendTopMain
 FRONTEND_TOP_V     = $(FRONTEND_RTL_DIR)/FrontendTop.$(RTL_SUFFIX)
-FRONTEND_PYLIB     = $(FRONTEND_BUILD_DIR)/pylib/Frontend/libUTFrontend.so
 FRONTEND_BUILD_MANIFEST = $(FRONTEND_BUILD_DIR)/frontend_build_manifest.json
+FRONTEND_PYLIB_ROOT = $(FRONTEND_BUILD_DIR)/pylib-$(FRONTEND_SIM)
+FRONTEND_PYLIB_DIR = $(FRONTEND_PYLIB_ROOT)/Frontend
+FRONTEND_PYLIB     = $(FRONTEND_PYLIB_DIR)/libUTFrontend.so
+FRONTEND_SIM ?= verilator
 FRONTEND_WAVEFORM_FORMAT ?=
-FRONTEND_WAVEFORM_FORMAT_DEFAULT := fst
-FRONTEND_WAVEFORM_FORMAT_FILE = $(FRONTEND_BUILD_DIR)/.waveform_format
+FRONTEND_WAVEFORM_FORMAT_DEFAULT := $(if $(filter vcs,$(FRONTEND_SIM)),fsdb,fst)
+FRONTEND_WAVEFORM_FORMAT_FILE = $(FRONTEND_BUILD_DIR)/.waveform_format.$(FRONTEND_SIM)
+FRONTEND_CONFIG_FILE = $(FRONTEND_BUILD_DIR)/.frontend_config.$(FRONTEND_SIM)
 FRONTEND_CCACHE_DIR ?= $(abspath $(FRONTEND_BUILD_DIR)/.ccache)
 FRONTEND_CCACHE_TMP ?= $(abspath $(FRONTEND_BUILD_DIR)/.ccache-tmp)
-FRONTEND_CCACHE_ENV = CCACHE_DIR=$(FRONTEND_CCACHE_DIR) CCACHE_TEMPDIR=$(FRONTEND_CCACHE_TMP)
+FRONTEND_BUILD_JOBS ?= 32
+FRONTEND_LOCAL_CONFIG ?= .local/frontend.local.mk
+FRONTEND_VCS_HOME ?= $(VCS_HOME)
+FRONTEND_VERDI_HOME ?= $(VERDI_HOME)
+FRONTEND_VCS_HOST ?=
+FRONTEND_PICKER ?= picker
+FRONTEND_TOOL_PATH ?=
+FRONTEND_SWIG_LIB ?=
+ifeq ($(FRONTEND_SIM),vcs)
+-include $(FRONTEND_LOCAL_CONFIG)
+endif
+FRONTEND_SIM_ENV =
+FRONTEND_BUILD_ENV = CCACHE_DIR=$(FRONTEND_CCACHE_DIR) CCACHE_TEMPDIR=$(FRONTEND_CCACHE_TMP) NPROC=$(FRONTEND_BUILD_JOBS) MAKEFLAGS=-e $(if $(FRONTEND_TOOL_PATH),PATH=$(FRONTEND_TOOL_PATH)$$PATH) $(if $(FRONTEND_SWIG_LIB),SWIG_LIB=$(FRONTEND_SWIG_LIB)) $(FRONTEND_SIM_ENV)
+
+ifeq ($(FRONTEND_SIM),verilator)
+FRONTEND_ACCESS_MODE ?= MEM_DIRECT
+else ifeq ($(FRONTEND_SIM),vcs)
+FRONTEND_ACCESS_MODE ?= dpi
+FRONTEND_PICKER_SIM_ARGS =
+FRONTEND_SIM_ENV = VCS_HOME=$(FRONTEND_VCS_HOME) VERDI_HOME=$(FRONTEND_VERDI_HOME)
+else
+$(error FRONTEND_SIM must be one of: verilator vcs)
+endif
 
 ifneq ($(FRONTEND_WAVEFORM_FORMAT),)
-ifeq ($(filter $(FRONTEND_WAVEFORM_FORMAT),fst vcd),)
-$(error FRONTEND_WAVEFORM_FORMAT must be one of: fst vcd)
+ifeq ($(filter $(FRONTEND_WAVEFORM_FORMAT),fst vcd fsdb),)
+$(error FRONTEND_WAVEFORM_FORMAT must be one of: fst vcd fsdb)
+endif
+endif
+
+ifeq ($(FRONTEND_SIM),vcs)
+ifneq ($(FRONTEND_WAVEFORM_FORMAT),)
+ifneq ($(FRONTEND_WAVEFORM_FORMAT),fsdb)
+$(error FRONTEND_WAVEFORM_FORMAT must be fsdb when FRONTEND_SIM=vcs)
+endif
+endif
+else ifeq ($(FRONTEND_SIM),verilator)
+ifeq ($(FRONTEND_WAVEFORM_FORMAT),fsdb)
+$(error FRONTEND_WAVEFORM_FORMAT must be fst or vcd when FRONTEND_SIM=verilator)
 endif
 endif
 
@@ -323,6 +361,16 @@ $(FRONTEND_WAVEFORM_FORMAT_FILE): FORCE
 		printf '%s\n' "$$desired_format" > "$@"; \
 	fi
 
+$(FRONTEND_CONFIG_FILE): FORCE
+	@mkdir -p $(dir $@)
+	@desired_config="sim=$(FRONTEND_SIM) access=$(FRONTEND_ACCESS_MODE)"; \
+	if [ "$(FRONTEND_SIM)" = "vcs" ]; then \
+		desired_config="$$desired_config vcs_home=$(FRONTEND_VCS_HOME) verdi_home=$(FRONTEND_VERDI_HOME)"; \
+	fi; \
+	if [ ! -f "$@" ] || [ "$$(cat "$@")" != "$$desired_config" ]; then \
+		printf '%s\n' "$$desired_config" > "$@"; \
+	fi
+
 $(FRONTEND_TOP_V): $(SCALA_FILE) | $(FRONTEND_WAVEFORM_FORMAT_FILE)
 	mkdir -p $(@D) $(dir $(TIMELOG))
 	$(MILL_ENV) $(TIME_CMD) mill -i $(MILL_BUILD_ARGS) xiangshan.runMain $(FRONTENDTOP) \
@@ -333,18 +381,33 @@ ifeq ($(CHISEL_TARGET),systemverilog)
 	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
 endif
 
-$(FRONTEND_PYLIB): $(FRONTEND_TOP_V) $(FRONTEND_WAVEFORM_FORMAT_FILE)
-	rm -rf $(FRONTEND_BUILD_DIR)/pylib/Frontend
+$(FRONTEND_PYLIB): $(FRONTEND_TOP_V) $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND_CONFIG_FILE)
+	@if [ "$(FRONTEND_SIM)" = "vcs" ] && [ -n "$(FRONTEND_VCS_HOST)" ] && [ "$$(hostname -s)" != "$(FRONTEND_VCS_HOST)" ]; then \
+		echo "frontend VCS build must run on $(FRONTEND_VCS_HOST)"; \
+		echo "run this target on $(FRONTEND_VCS_HOST), or unset FRONTEND_VCS_HOST for an unrestricted build host"; \
+		exit 2; \
+	fi
+	@if [ "$(FRONTEND_SIM)" = "vcs" ] && { [ -z "$(FRONTEND_VCS_HOME)" ] || [ -z "$(FRONTEND_VERDI_HOME)" ]; }; then \
+		echo "frontend VCS build requires FRONTEND_VCS_HOME and FRONTEND_VERDI_HOME"; \
+		echo "example: make frontend-vcs FRONTEND_VCS_HOME=/path/to/vcs FRONTEND_VERDI_HOME=/path/to/verdi"; \
+		exit 2; \
+	fi
+	@if [ "$(FRONTEND_SIM)" = "vcs" ] && { [ ! -d "$(FRONTEND_VCS_HOME)" ] || [ ! -d "$(FRONTEND_VERDI_HOME)" ]; }; then \
+		echo "frontend VCS build requires existing tool directories"; \
+		echo "FRONTEND_VCS_HOME=$(FRONTEND_VCS_HOME)"; \
+		echo "FRONTEND_VERDI_HOME=$(FRONTEND_VERDI_HOME)"; \
+		exit 2; \
+	fi
+	rm -rf $(FRONTEND_PYLIB_DIR)
 	mkdir -p $(FRONTEND_CCACHE_DIR) $(FRONTEND_CCACHE_TMP)
 	@frontend_waveform_format="$$(cat "$(FRONTEND_WAVEFORM_FORMAT_FILE)" 2>/dev/null || printf '%s' '$(FRONTEND_WAVEFORM_FORMAT)')"; \
-	$(FRONTEND_CCACHE_ENV) time picker export $(dir $<)ClockGate.sv --sname Frontend \
+	$(FRONTEND_BUILD_ENV) time $(FRONTEND_PICKER) export $(dir $<)ClockGate.sv --sname Frontend \
 		--filelist $(dir $<)/filelist.f \
 		--lang python --autobuild true --cp_lib true \
-		--sim verilator --access-mode MEM_DIRECT \
-		--tdir $(FRONTEND_BUILD_DIR)/pylib/Frontend \
+		--sim $(FRONTEND_SIM) --access-mode $(FRONTEND_ACCESS_MODE) \
+		--tdir $(FRONTEND_PYLIB_DIR) \
 		-w $(FRONTEND_BUILD_DIR)/frontend.$$frontend_waveform_format \
-		--coverage \
-		-V "--output-split;20000;--no-timing"
+		--coverage $(FRONTEND_PICKER_SIM_ARGS)
 frontend: $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND_PYLIB)
 	@frontend_waveform_format="$$(cat "$(FRONTEND_WAVEFORM_FORMAT_FILE)" 2>/dev/null || printf '%s' '$(FRONTEND_WAVEFORM_FORMAT)')"; \
 	python3 src/test/python/Frontend/tools/write_frontend_build_manifest.py \
@@ -354,6 +417,14 @@ frontend: $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND_PYLIB)
 		--build-config "CONFIG=$(CONFIG);ISSUE=$(ISSUE);NUM_CORES=$(NUM_CORES);CHISEL_TARGET=$(CHISEL_TARGET);WAVEFORM=$$frontend_waveform_format" \
 		--build-command "make frontend CONFIG=$(CONFIG) ISSUE=$(ISSUE) NUM_CORES=$(NUM_CORES) CHISEL_TARGET=$(CHISEL_TARGET) FRONTEND_WAVEFORM_FORMAT=$$frontend_waveform_format"
 .PHONY: frontend
+
+frontend-verilator:
+	$(MAKE) frontend FRONTEND_SIM=verilator
+.PHONY: frontend-verilator
+
+frontend-vcs:
+	$(MAKE) frontend FRONTEND_SIM=vcs FRONTEND_WAVEFORM_FORMAT=fsdb
+.PHONY: frontend-vcs
 
 verilog: $(FRONTEND_WAVEFORM_FORMAT_FILE) $(call docker-deps,$(TOP_V))
 

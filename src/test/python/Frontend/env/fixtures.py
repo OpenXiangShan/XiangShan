@@ -13,9 +13,17 @@ from pathlib import Path
 import pytest
 from toffee_test.reporter import set_line_coverage
 
+from .pylib import frontend_pylib_path
+
 _HERE = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _HERE.parents[3]
-_PYLIB_PATH = _REPO_ROOT / 'build-frontend' / 'pylib'
+
+
+def _frontend_pylib_path() -> Path:
+    return frontend_pylib_path()
+
+
+_PYLIB_PATH = _frontend_pylib_path()
 
 for _path in (str(_PYLIB_PATH), str(_HERE)):
     if _path not in sys.path:
@@ -167,7 +175,7 @@ def _artifact_tag(request) -> str:
 
 def _normalize_waveform_format(value: str | None) -> str:
     normalized = "" if value is None else str(value).strip().lower()
-    return normalized if normalized in {"fst", "vcd"} else "fst"
+    return normalized if normalized in {"fst", "vcd", "fsdb"} else "fst"
 
 
 def _waveform_format_from_dut(dut) -> str:
@@ -367,8 +375,10 @@ def create_dut(request):
         and is_fake_frontend_dut(dut)
     ):
         pytest.skip(
-            "compiled Frontend DUT not found; run `make frontend` to build "
-            "build-frontend/pylib/Frontend before enabling TB_ENABLE_DUT_TESTS=1"
+            "compiled Frontend DUT not found; run `make frontend-verilator` "
+            "or `make frontend-vcs` to build the selected "
+            "build-frontend/pylib-<sim>/Frontend package before enabling "
+            "TB_ENABLE_DUT_TESTS=1"
         )
     waveform_format = _waveform_format_from_dut(dut)
 
