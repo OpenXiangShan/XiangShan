@@ -52,6 +52,12 @@ class S1Train(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
   val abtbPrediction:     Vec[Valid[Prediction]] = Vec(NumAheadBtbPredictionEntries, Valid(new Prediction))
 }
 
+class S1PredictionTrain(implicit p: Parameters) extends PhrBundle {
+  val valid:      Bool       = Bool()
+  val startPc:    PrunedAddr = PrunedAddr(VAddrBits)
+  val prediction: Prediction = new Prediction
+}
+
 class PhrUpdateData(implicit p: Parameters) extends PhrBundle with HasPhrParameters {
   val valid:   Bool       = Bool()
   val taken:   Bool       = Bool()
