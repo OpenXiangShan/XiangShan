@@ -115,7 +115,6 @@ object Func {
     val vl        = Option.when(cfg.readVl)(Vl())
     val imm       = UInt(cfg.destDataBits.W)
     val pc        = Option.when(cfg.needPc)(UInt(VAddrData().dataWidth.W))
-    val vfma      = Option.when(cfg.fuType == FuType.vfma)(new VFMacInfo)
   }
 
   class OutCtrl(cfg: VecFuConfig)(implicit p: Parameters) extends XSBundle {

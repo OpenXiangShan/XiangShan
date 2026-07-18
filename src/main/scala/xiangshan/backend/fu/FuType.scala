@@ -47,7 +47,7 @@ object FuType extends ChiselOHEnum {
   val vidiv = addType(name = "vidiv")
   val vfalu = addType(name = "vfalu")
   val vmove = addType(name = "vmove")
-  val vfma = addType(name = "vfma")
+  val vfmul = addType(name = "vfmul")
   val vfdiv = addType(name = "vfdiv")
   val vfcvt = addType(name = "vfcvt")
   val vset = addType(name = "vset")
@@ -115,7 +115,7 @@ object FuType extends ChiselOHEnum {
   val fpArithAll = Seq(falu, fcvt, fmul, fDivSqrt, f2v, fcmp)
   val scalaMemAll = Seq(ldu, stu, mou)
   val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
-  val vecOPF = Seq(vfalu, vfma, vfdiv, vfcvt)
+  val vecOPF = Seq(vfalu, vfmul, vfdiv, vfcvt)
   val vecVSET = Seq(vset)
   val vecArith = vecOPI ++ vecOPF
   val vecMem = Seq(vldu, vstu, vsegldu, vsegstu)
@@ -124,7 +124,7 @@ object FuType extends ChiselOHEnum {
   val vecAll = vecVSET ++ vecArithOrMem ++ vecMove
   val fpOP = fpArithAll ++ Seq(i2f, i2v)
   val scalaNeedFrm = Seq(i2f, fmul, fDivSqrt)
-  val vectorNeedFrm = Seq(vfalu, vfma, vfdiv, vfcvt)
+  val vectorNeedFrm = Seq(vfalu, vfmul, vfdiv, vfcvt)
   val blockBackCompress = Seq(brh, njmp)
 
   def X = BitPat.N(num) // Todo: Don't Care
@@ -201,7 +201,7 @@ object FuType extends ChiselOHEnum {
 
   def isVecOPF(fuType: UInt): Bool = FuTypeOrR(fuType, vecOPF)
 
-  def isVecOPFFma(fuType: UInt): Bool = FuTypeOrR(fuType, vfma)
+  def isVecOPFFmul(fuType: UInt): Bool = FuTypeOrR(fuType, vfmul)
 
   def isVArithMem(fuType: UInt): Bool = FuTypeOrR(fuType, vecArithOrMem) // except vset
 
@@ -246,7 +246,7 @@ object FuType extends ChiselOHEnum {
     vidiv -> "vidiv",
     vfalu -> "vfalu",
     vmove -> "vmove",
-    vfma -> "vfma",
+    vfmul -> "vfmul",
     vfdiv -> "vfdiv",
     vfcvt -> "vfcvt"
   )

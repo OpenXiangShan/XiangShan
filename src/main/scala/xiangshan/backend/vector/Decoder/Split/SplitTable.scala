@@ -2,7 +2,7 @@ package xiangshan.backend.vector.Decoder.Split
 
 import chisel3.util.BitPat
 import xiangshan.backend.decode.isa.Instructions._
-import xiangshan.backend.decode.opcode.Opcode.{Opcode, VMoveOpcodes, _}
+import xiangshan.backend.decode.opcode.Opcode._
 import xiangshan.backend.vector.Decoder.DecodePatterns.SewLmulPattern
 import xiangshan.backend.vector.Decoder.InstPattern.{VecArithInstPattern, VecInstPattern, VecIntVVVPattern}
 import xiangshan.backend.vector.Decoder.RVVDecodeUtil
@@ -958,41 +958,41 @@ object SplitTable {
     )
 
     val opf00Table = SeqMap[BitPat, SeqMap[SewLmulPattern, Seq[Opcode]]](
-      VFADD_VV -> dup(null, vfadd_fp16, vfadd_fp32, vfadd_fp64)(_.S1v),
-      VFADD_VF -> dup(null, vfadd_fp16, vfadd_fp32, vfadd_fp64)(_.S1f),
-      VFSUB_VV -> dup(null, vfsub_fp16, vfsub_fp32, vfsub_fp64)(_.S1v),
-      VFSUB_VF -> dup(null, vfsub_fp16, vfsub_fp32, vfsub_fp64)(_.S1f),
-      VFMIN_VV -> dup(null, vfmin_fp16, vfmin_fp32, vfmin_fp64)(_.S1v),
-      VFMIN_VF -> dup(null, vfmin_fp16, vfmin_fp32, vfmin_fp64)(_.S1f),
-      VFMAX_VV -> dup(null, vfmax_fp16, vfmax_fp32, vfmax_fp64)(_.S1v),
-      VFMAX_VF -> dup(null, vfmax_fp16, vfmax_fp32, vfmax_fp64)(_.S1f),
+      VFADD_VV -> dup(null, VFAluOpcodes.vfadd_fp16, VFAluOpcodes.vfadd_fp32, VFAluOpcodes.vfadd_fp64)(_.S1v),
+      VFADD_VF -> dup(null, VFAluOpcodes.vfadd_fp16, VFAluOpcodes.vfadd_fp32, VFAluOpcodes.vfadd_fp64)(_.S1f),
+      VFSUB_VV -> dup(null, VFAluOpcodes.vfsub_fp16, VFAluOpcodes.vfsub_fp32, VFAluOpcodes.vfsub_fp64)(_.S1v),
+      VFSUB_VF -> dup(null, VFAluOpcodes.vfsub_fp16, VFAluOpcodes.vfsub_fp32, VFAluOpcodes.vfsub_fp64)(_.S1f),
+      VFMIN_VV -> dup(null, VFAluOpcodes.vfmin_fp16, VFAluOpcodes.vfmin_fp32, VFAluOpcodes.vfmin_fp64)(_.S1v),
+      VFMIN_VF -> dup(null, VFAluOpcodes.vfmin_fp16, VFAluOpcodes.vfmin_fp32, VFAluOpcodes.vfmin_fp64)(_.S1f),
+      VFMAX_VV -> dup(null, VFAluOpcodes.vfmax_fp16, VFAluOpcodes.vfmax_fp32, VFAluOpcodes.vfmax_fp64)(_.S1v),
+      VFMAX_VF -> dup(null, VFAluOpcodes.vfmax_fp16, VFAluOpcodes.vfmax_fp32, VFAluOpcodes.vfmax_fp64)(_.S1f),
 
       VFREDUSUM_VS -> redu(
         null, null,
-        vfredusum_fp16, vfadd_fp16.copy().S1v,
-        vfredusum_fp32, vfadd_fp32.copy().S1v,
-        vfredusum_fp64, vfadd_fp64.copy().S1v,
+        vfredusum_fp16, VFAluOpcodes.vfadd_fp16.copy().S1v,
+        vfredusum_fp32, VFAluOpcodes.vfadd_fp32.copy().S1v,
+        vfredusum_fp64, VFAluOpcodes.vfadd_fp64.copy().S1v,
       ),
       VFREDOSUM_VS -> dup(null, vfredosum_fp16, vfredosum_fp32, vfredosum_fp64)(_ + Src2Mask),
       VFREDMIN_VS -> redu(
         null, null,
-        vfredmin_fp16, vfmin_fp16.copy().S1v,
-        vfredmin_fp32, vfmin_fp32.copy().S1v,
-        vfredmin_fp64, vfmin_fp64.copy().S1v,
+        vfredmin_fp16, VFAluOpcodes.vfmin_fp16.copy().S1v,
+        vfredmin_fp32, VFAluOpcodes.vfmin_fp32.copy().S1v,
+        vfredmin_fp64, VFAluOpcodes.vfmin_fp64.copy().S1v,
       ),
       VFREDMAX_VS -> redu(
         null, null,
-        vfredmax_fp16, vfmax_fp16.copy().S1v,
-        vfredmax_fp32, vfmax_fp32.copy().S1v,
-        vfredmax_fp64, vfmax_fp64.copy().S1v,
+        vfredmax_fp16, VFAluOpcodes.vfmax_fp16.copy().S1v,
+        vfredmax_fp32, VFAluOpcodes.vfmax_fp32.copy().S1v,
+        vfredmax_fp64, VFAluOpcodes.vfmax_fp64.copy().S1v,
       ),
 
-      VFSGNJ_VV  -> dup(null, vfsgnj_fp16, vfsgnj_fp32, vfsgnj_fp64)(_.S1v),
-      VFSGNJ_VF  -> dup(null, vfsgnj_fp16, vfsgnj_fp32, vfsgnj_fp64)(_.S1f),
-      VFSGNJN_VV -> dup(null, vfsgnjn_fp16, vfsgnjn_fp32, vfsgnjn_fp64)(_.S1v),
-      VFSGNJN_VF -> dup(null, vfsgnjn_fp16, vfsgnjn_fp32, vfsgnjn_fp64)(_.S1f),
-      VFSGNJX_VV -> dup(null, vfsgnjx_fp16, vfsgnjx_fp32, vfsgnjx_fp64)(_.S1v),
-      VFSGNJX_VF -> dup(null, vfsgnjx_fp16, vfsgnjx_fp32, vfsgnjx_fp64)(_.S1f),
+      VFSGNJ_VV  -> dup(null, VFAluOpcodes.vfsgnj_fp16, VFAluOpcodes.vfsgnj_fp32, VFAluOpcodes.vfsgnj_fp64)(_.S1v),
+      VFSGNJ_VF  -> dup(null, VFAluOpcodes.vfsgnj_fp16, VFAluOpcodes.vfsgnj_fp32, VFAluOpcodes.vfsgnj_fp64)(_.S1f),
+      VFSGNJN_VV -> dup(null, VFAluOpcodes.vfsgnjn_fp16, VFAluOpcodes.vfsgnjn_fp32, VFAluOpcodes.vfsgnjn_fp64)(_.S1v),
+      VFSGNJN_VF -> dup(null, VFAluOpcodes.vfsgnjn_fp16, VFAluOpcodes.vfsgnjn_fp32, VFAluOpcodes.vfsgnjn_fp64)(_.S1f),
+      VFSGNJX_VV -> dup(null, VFAluOpcodes.vfsgnjx_fp16, VFAluOpcodes.vfsgnjx_fp32, VFAluOpcodes.vfsgnjx_fp64)(_.S1v),
+      VFSGNJX_VF -> dup(null, VFAluOpcodes.vfsgnjx_fp16, VFAluOpcodes.vfsgnjx_fp32, VFAluOpcodes.vfsgnjx_fp64)(_.S1f),
 
       VFSLIDE1UP_VF    -> dup(null, vslide1up_e16, vslide1up_e32, vslide1up_e64)(_.S1f),
       VFSLIDE1DOWN_VF  -> dup(null, vslide1down_e16, vslide1down_e32, vslide1down_e64)(_.S1f),
@@ -1073,7 +1073,7 @@ object SplitTable {
       VFRDIV_VF         -> dup(null, vfdiv_fp16, vfdiv_fp32, vfdiv_fp64)(_.S1f.rev),
       VFMUL_VV          -> dup(null, vfmul_fp16, vfmul_fp32, vfmul_fp64)(_.S1v),
       VFMUL_VF          -> dup(null, vfmul_fp16, vfmul_fp32, vfmul_fp64)(_.S1f),
-      VFRSUB_VF         -> dup(null, vfsub_fp16, vfsub_fp32, vfsub_fp64)(_.S1f.rev),
+      VFRSUB_VF         -> dup(null, VFAluOpcodes.vfsub_fp16, VFAluOpcodes.vfsub_fp32, VFAluOpcodes.vfsub_fp64)(_.S1f.rev),
 
       VFMADD_VV         -> dup(null, vfmadd_fp16, vfmadd_fp32, vfmadd_fp64)(_.S1v),
       VFMADD_VF         -> dup(null, vfmadd_fp16, vfmadd_fp32, vfmadd_fp64)(_.S1f),
@@ -1094,14 +1094,14 @@ object SplitTable {
     )
 
     val opf11Table = SeqMap[BitPat, SeqMap[SewLmulPattern, Seq[Opcode]]](
-      VFWADD_VV         -> dupF2W(null, vfwadd_fp16, vfwadd_fp32)(_.S1v),
-      VFWADD_VF         -> dupF2W(null, vfwadd_fp16, vfwadd_fp32)(_.S1f),
-      VFWSUB_VV         -> dupF2W(null, vfwsub_fp16, vfwsub_fp32)(_.S1v),
-      VFWSUB_VF         -> dupF2W(null, vfwsub_fp16, vfwsub_fp32)(_.S1f),
-      VFWADD_WV         -> dupF2W(null, vfwadd_w_fp16, vfwadd_w_fp32)(_.S1v),
-      VFWADD_WF         -> dupF2W(null, vfwadd_w_fp16, vfwadd_w_fp32)(_.S1f),
-      VFWSUB_WV         -> dupF2W(null, vfwsub_w_fp16, vfwsub_w_fp32)(_.S1v),
-      VFWSUB_WF         -> dupF2W(null, vfwsub_w_fp16, vfwsub_w_fp32)(_.S1f),
+      VFWADD_VV         -> dupF2W(null, VFAluOpcodes.vfwadd_fp16, VFAluOpcodes.vfwadd_fp32)(_.S1v),
+      VFWADD_VF         -> dupF2W(null, VFAluOpcodes.vfwadd_fp16, VFAluOpcodes.vfwadd_fp32)(_.S1f),
+      VFWSUB_VV         -> dupF2W(null, VFAluOpcodes.vfwsub_fp16, VFAluOpcodes.vfwsub_fp32)(_.S1v),
+      VFWSUB_VF         -> dupF2W(null, VFAluOpcodes.vfwsub_fp16, VFAluOpcodes.vfwsub_fp32)(_.S1f),
+      VFWADD_WV         -> dupF2W(null, VFAluOpcodes.vfwadd_w_fp16, VFAluOpcodes.vfwadd_w_fp32)(_.S1v),
+      VFWADD_WF         -> dupF2W(null, VFAluOpcodes.vfwadd_w_fp16, VFAluOpcodes.vfwadd_w_fp32)(_.S1f),
+      VFWSUB_WV         -> dupF2W(null, VFAluOpcodes.vfwsub_w_fp16, VFAluOpcodes.vfwsub_w_fp32)(_.S1v),
+      VFWSUB_WF         -> dupF2W(null, VFAluOpcodes.vfwsub_w_fp16, VFAluOpcodes.vfwsub_w_fp32)(_.S1f),
       VFWMUL_VV         -> dupF2W(null, vfwmul_fp16, vfwmul_fp32)(_.S1v),
       VFWMUL_VF         -> dupF2W(null, vfwmul_fp16, vfwmul_fp32)(_.S1f),
       VFWMACC_VV        -> dupF2W(null, vfwmacc_fp16, vfwmacc_fp32)(_.S1v),
@@ -1114,8 +1114,8 @@ object SplitTable {
       VFWNMSAC_VF       -> dupF2W(null, vfwnmsac_fp16, vfwnmsac_fp32)(_.S1f),
       // to do
       VFWREDUSUM_VS     -> (
-        fwredu(_.e16)(vfwadd_fp16, vfwadd_w_fp16, vfwredusum_fp16) ++
-        fwredu(_.e32)(vfwadd_fp32, vfwadd_w_fp32, vfwredusum_fp32)
+        fwredu(_.e16)(VFAluOpcodes.vfwadd_fp16, VFAluOpcodes.vfwadd_w_fp16, vfwredusum_fp16) ++
+        fwredu(_.e32)(VFAluOpcodes.vfwadd_fp32, VFAluOpcodes.vfwadd_w_fp32, vfwredusum_fp32)
       ),
       VFWREDOSUM_VS     -> (
         fwredosum(_.e16)(vfwredosum_fp16) ++

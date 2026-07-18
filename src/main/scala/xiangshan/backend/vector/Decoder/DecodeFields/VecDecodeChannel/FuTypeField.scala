@@ -73,7 +73,8 @@ object FuTypeField {
       case _: Opcode.FDivOpcodes.type => FuType.fDivSqrt
       case _: Opcode.FCvtOpcodes.type => FuType.fcvt
       case _: Opcode.FMiscOpcodes.type => FuType.fcmp
-      case _: Opcode.VFMacOpcodes.type => FuType.vfma
+      case _: Opcode.VFAluOpcodes.type => FuType.vfalu
+      case _: Opcode.VFMacOpcodes.type => FuType.vfmul
       case _: Opcode.VFDivOpcodes.type => FuType.vfdiv
       case _: Opcode.VFCvtOpcodes.type => FuType.vfcvt
       case _: Opcode.VFMiscOpcodes.type => FuType.vfalu

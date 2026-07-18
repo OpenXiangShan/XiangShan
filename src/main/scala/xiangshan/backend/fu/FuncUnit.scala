@@ -144,11 +144,21 @@ class FuncUnitFmulOutputToFalu(implicit p: Parameters) extends XSBundle {
   val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
 }
 
+class FuncUnitVfmulOutputToVfalu(implicit p: Parameters) extends XSBundle {
+  val vfalucfg = FuConfig.VfaluCfg
+  val fuType = FuType()
+  val ctrl = new FuncUnitCtrlInput(vfalucfg)
+  val data = new FuncUnitDataInput(vfalucfg)
+  val perfDebugInfo = OptionWrapper(backendParams.debugEn, new PerfDebugInfo())
+  val debug_seqNum = OptionWrapper(backendParams.debugEn, InstSeqNum())
+}
+
 class FuncUnitIO(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val flush = Flipped(ValidIO(new Redirect))
   val in = Flipped(DecoupledIO(new FuncUnitInput(cfg)))
   val out = DecoupledIO(new FuncUnitOutput(cfg))
   val outToFaluFromFmul = OptionWrapper(cfg.isFmul, Valid(new FuncUnitFmulOutputToFalu))
+  val outToVfaluFromVfmul = OptionWrapper(cfg.isVfmul, Valid(new FuncUnitVfmulOutputToVfalu))
   val outValidAhead3Cycle = OptionWrapper(FuConfig.needUncertainWakeupFuConfigs.contains(cfg), Output(Bool()))
   val outRFWenAhead3Cycle = OptionWrapper(cfg.isCsr, Output(Bool()))
   val outPdestAhead3Cycle = OptionWrapper(cfg.isCsr, Output(UInt(PhyRegIdxWidth.W)))
@@ -238,6 +248,7 @@ trait HasPipelineReg { this: FuncUnit =>
   val latdiff :Int = cfg.latency.extraLatencyVal.getOrElse(0)
   val preLat :Int = latency - latdiff
   val fmulTofaluLatencyVal :Int = cfg.latency.fmulTofaluLatencyVal.getOrElse(0)
+  val vfmul2VfaluLatencyVal = fmulTofaluLatencyVal
   require(latency >= 0 && latdiff >=0)
 
   def pipelineReg(init: FuncUnitInput , valid:Bool, ready: Bool,latency: Int, flush:ValidIO[Redirect]): (Seq[FuncUnitInput],Seq[Bool],Seq[Bool])={
@@ -318,6 +329,21 @@ trait HasPipelineReg { this: FuncUnit =>
     outToFaluFromFmul.bits.ctrl := fmulTofaluCtrl
     outToFaluFromFmul.bits.perfDebugInfo.foreach(_ := fmulTofaluPerfVec.last.get)
     outToFaluFromFmul.bits.debug_seqNum.foreach(_ := fmulTofaluSeqNumVec.last.get)
+    io.out.valid := fixValidVec.last && !RegNextN(io.in.valid && FuOpType.FMacOpcodes.isOP3(io.in.bits.ctrl.fuOpType), cfg.latency.latencyVal.get)
+  } else if (cfg.isVfmul) {
+    val outToVfaluFromVfmul = io.outToVfaluFromVfmul.get
+    val (vfmul2VfaluPipeReg: Seq[FuncUnitInput], vfmul2VfaluValidVecThisFu, vfmul2VfaluRdyVec) = pipelineReg(io.in.bits, io.in.valid && FuOpType.FMacOpcodes.isOP3(io.in.bits.ctrl.fuOpType), true.B, vfmul2VfaluLatencyVal, io.flush)
+    val vfmul2VfaluValidVec = io.in.bits.validPipe.get.zip(vfmul2VfaluValidVecThisFu).map(x => x._1 && x._2)
+    val vfmul2VfaluCtrl = ctrlVec(vfmul2VfaluLatencyVal)
+    val vfmul2VfaluPerfVec = vfmul2VfaluPipeReg.map(_.perfDebugInfo)
+    val vfmul2VfaluSeqNumVec = vfmul2VfaluPipeReg.map(_.debug_seqNum)
+
+    io.in.ready := fixRdyVec.head && vfmul2VfaluRdyVec.head
+    outToVfaluFromVfmul.valid := vfmul2VfaluValidVec.last
+    outToVfaluFromVfmul.bits.fuType := FuType.vfalu.U
+    outToVfaluFromVfmul.bits.ctrl := vfmul2VfaluCtrl
+    outToVfaluFromVfmul.bits.perfDebugInfo.foreach(_ := vfmul2VfaluPerfVec.last.get)
+    outToVfaluFromVfmul.bits.debug_seqNum.foreach(_ := vfmul2VfaluSeqNumVec.last.get)
     io.out.valid := fixValidVec.last && !RegNextN(io.in.valid && FuOpType.FMacOpcodes.isOP3(io.in.bits.ctrl.fuOpType), cfg.latency.latencyVal.get)
   } else {
     io.out.valid := fixValidVec.last
