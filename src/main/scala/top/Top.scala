@@ -511,7 +511,7 @@ class XSTop()(implicit p: Parameters) extends BaseXSSoc()
             Option.when(useExternalLLC)(externalLLCControlRange -> llcRouteId)
           dontTouch(coreCHI)
           bind(
-            route(coreCHI, chiRouteMap),
+            route(coreCHI, chiRouteMap, Option.when(useExternalLLC)(llcRouteId)),
             Map(mmioRouteId -> mmioLogger.io.up, llcRouteId -> llcLogger.io.up)
           )
           chi_mmioBridge_opt(i).get.module.io.chi.connect(mmioLogger.io.down)
