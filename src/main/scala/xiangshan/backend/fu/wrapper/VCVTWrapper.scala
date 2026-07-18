@@ -74,7 +74,7 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
       mod.narrowSrc2 := narrowVs2Vec(i)
       mod.narrowSrc1 := narrowVs1Vec(i)
       mod.opType := opType.ex0
-      mod.rm := in.frm.get
+      mod.rm := frm
       mod.inSew1H := cvtInSew1H(i).ex0
       mod.outSew1H := cvtOutSew1H(i).ex0
       mod.cvt64UseWidenSrc2 := cvt64UseWidenSrc2(i).ex0

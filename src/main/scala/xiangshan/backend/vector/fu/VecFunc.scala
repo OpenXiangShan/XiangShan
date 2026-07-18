@@ -21,6 +21,7 @@ trait VecFuncAlias { this: Func =>
   protected def ex0vl = ex0data.vl.get
 
   protected def vxrm = in.vxrm.get
+  protected def frm = in.frm.get
 
   protected def ex0vma = ex0ctrl.vtype.get.vma
   protected def ex0vta = ex0ctrl.vtype.get.vta

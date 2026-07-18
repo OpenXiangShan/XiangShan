@@ -14,6 +14,7 @@ import xiangshan.backend.datapath.WbConfig.WbConfig
 import xiangshan.backend.decode.opcode.{Latency, Opcode}
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.{Fflags, Frm}
+import xiangshan.backend.fu.wrapper.{VFAluWrapper, VFMulWrapper}
 import xiangshan.backend.vector.Decoder.DecodeFields.VecDecodeChannel.{Frm => VecFrm}
 import xiangshan.backend.fu.vector.Bundles.{VType, Vxrm, _}
 import xiangshan.backend.regfile.PregParams
@@ -354,7 +355,6 @@ object Exu {
       sink.v0          .foreach(x => x := this.data.v0.get)
       sink.pc          .foreach(x => x := this.data.pc.get)
       sink.imm                         := this.data.imm.getOrElse(0.U)
-      sink.vfma       .foreach(x => x := this.data.vfma.get)
     }
 
     def <#=:(sink: Func.InUop) : Unit = {
@@ -490,7 +490,6 @@ object Exu {
     val vl  = Option.when(param.readVlRf)(Vl())
     val imm = Option.when(param.needImm)(UInt(param.immWidth.W))
     val pc  = Option.when(param.needPc)(UInt(VAddrData().dataWidth.W))
-    val vfma = Option.when(param.fuConfigs.exists(_.fuType == FuType.vfma))(new Func.VFMacInfo)
   }
 
   class InBypassCtrl(val param: ExuParam)(implicit p: Parameters) extends XSBundle {
