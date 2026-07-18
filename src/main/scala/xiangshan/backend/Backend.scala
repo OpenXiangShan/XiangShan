@@ -362,17 +362,37 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 //  }
   // for wbDatapath wirte regfile
   intRegion.io.fromFpExu.get := fpRegion.io.exuOut
-  intRegion.io.fromVecExu.get := 0.U.asTypeOf(intRegion.io.fromVecExu.get) // Todo V2I
+  intRegion.io.fromVecExu.get := 0.U.asTypeOf(intRegion.io.fromVecExu.get)
+  private val v2iSinks = intRegion.io.fromVecExu.get.flatten.filter(_.bits.params.writeIntRf)
+  private val v2iSources = vecRegion.out.gpWbNext.flatten
+  require(v2iSinks.size == v2iSources.size, s"V2I writeback ports: sinks=${v2iSinks.size}, sources=${v2iSources.size}")
+  v2iSinks.zip(v2iSources).foreach { case (sink, source) =>
+    sink.valid := source.wen
+    sink.bits.pdest := source.pdest
+    sink.bits.toIntRf.get.valid := source.wen
+    sink.bits.toIntRf.get.bits := source.data
+  }
   fpRegion.io.fromIntExu.get := intRegion.io.exuOut
-  fpRegion.io.fromVecExu.get := 0.U.asTypeOf(intRegion.io.fromVecExu.get) // Todo V2F
+  fpRegion.io.fromVecExu.get := 0.U.asTypeOf(fpRegion.io.fromVecExu.get)
+  private val v2fSinks = fpRegion.io.fromVecExu.get.flatten.filter(_.bits.params.writeFpRf)
+  private val v2fSources = vecRegion.out.fpWbNext.flatten
+  require(v2fSinks.size == v2fSources.size, s"V2F writeback ports: sinks=${v2fSinks.size}, sources=${v2fSources.size}")
+  v2fSinks.zip(v2fSources).foreach { case (sink, source) =>
+    sink.valid := source.wen
+    sink.bits.pdest := source.pdest
+    sink.bits.toFpRf.get.valid := source.wen
+    sink.bits.toFpRf.get.bits := source.data
+  }
   // for fast wakeup data
   intRegion.io.fromFpExuBlockOut.get <> fpRegion.io.fpExuBlockOut.get
   intRegion.io.intSchdBusyTable := intRegion.io.wbFuBusyTableWriteOut
   intRegion.io.fpSchdBusyTable := fpRegion.io.wbFuBusyTableWriteOut
-  intRegion.io.vfSchdBusyTable := 0.U.asTypeOf(intRegion.io.vfSchdBusyTable)
+  intRegion.io.vfSchdBusyTable := vecRegion.out.wbFuBusyTableWrite
   fpRegion.io.intSchdBusyTable := intRegion.io.wbFuBusyTableWriteOut
   fpRegion.io.fpSchdBusyTable := fpRegion.io.wbFuBusyTableWriteOut
-  fpRegion.io.vfSchdBusyTable := 0.U.asTypeOf(fpRegion.io.vfSchdBusyTable)
+  fpRegion.io.vfSchdBusyTable := vecRegion.out.wbFuBusyTableWrite
+  vecRegion.in.fromIntRegion.wbFuBusyTableWrite := intRegion.io.wbFuBusyTableWriteOut
+  vecRegion.in.fromFltRegion.wbFuBusyTableWrite := fpRegion.io.wbFuBusyTableWriteOut
   // for intIQ read fp regfile
   fpRegion.io.fromIntIQ.get <> intRegion.io.intIQOut.get
   intRegion.io.fpRfRdataIn.get := fpRegion.io.fpRfRdataOut.get

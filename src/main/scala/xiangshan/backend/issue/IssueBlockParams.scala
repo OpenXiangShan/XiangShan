@@ -252,6 +252,8 @@ case class IssueBlockParams(
 
   def needVlWen: Boolean = exuBlockParams.map(_.needVlWen).reduce(_ || _)
 
+  def writeVxsat: Boolean = exuBlockParams.map(_.writeVxsat).reduce(_ || _)
+
   def needOg2Resp: Boolean = exuBlockParams.map(_.needOg2).reduce(_ || _)
 
   def needS0Resp = this.isStAddrIQ || this.isStdIQ  || this.isVecStuIQ

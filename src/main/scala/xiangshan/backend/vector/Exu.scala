@@ -23,6 +23,7 @@ import xiangshan.backend.vector.VecRegionModule.DebugBundle
 import xiangshan.backend.vector.fu._
 import xiangshan.mem.StoreQueueDataWrite
 import xiangshan.mem.SqPtr
+import yunsuan.VMoveOpcode
 import yunsuan.vector.Common.{SewOH, VSew, _}
 import yunsuan.vector.v2.MergeUnit
 
@@ -106,6 +107,9 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
     case (mgu, i) =>
       val vl = ex(i).bits.data.vl.get.suggestName(s"ex${i}_vl")
       val vsew = ex(i).bits.ctrl.vtype.get.vsew
+      val isMoveToElem0 = FuType.FuTypeOrR(ex(i).bits.ctrl.fuType, FuType.vmove) &&
+        VMoveOpcode.isX2VS(ex(i).bits.ctrl.opcode)
+      val effectiveVl = Mux(isMoveToElem0 && vl.orR, 1.U, vl).suggestName(s"ex${i}_effectiveVl")
       val isWiden = Mux1H(fus.flatMap(_.out.ex.lift(i)).map(validIO =>
         validIO.valid -> validIO.bits.data.vec.get.isWiden.getOrElse(false.B)
       )).suggestName(s"ex${i}_isWiden")
@@ -115,8 +119,8 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       val resSew = Mux(isWiden, vsew + 1.U, vsew).suggestName(s"ex${i}_resSew")
       val eewOH = UIntToOH(resSew, SewOH.width).suggestName(s"ex${i}_eewOH")
       val vdIdx = Mux(isNarrow, ex(i).bits.ctrl.uopIdx >> 1, ex(i).bits.ctrl.uopIdx)
-      val vlMapVdIdx = elemIdxMapVdIdx(vl, eewOH)(3, 0) // 4 bits 0~8
-      val end = elemIdxMapElemE8Idx(vl, eewOH)
+      val vlMapVdIdx = elemIdxMapVdIdx(effectiveVl, eewOH)(3, 0) // 4 bits 0~8
+      val end = elemIdxMapElemE8Idx(effectiveVl, eewOH)
       val vd = Mux1H(fus.flatMap(_.out.ex.lift(i)).map { validIO =>
         val vecData = validIO.bits.data.vec.get
         val oldVd = ex(i).bits.data.src(2)
@@ -170,7 +174,7 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
             }
           ).suggestName(s"ex${i}_vxsat")
 
-          x := Mux1H(mgus(i).out.activeEn, vxsat)
+          x := Mux(ex(i).bits.ctrl.vxsatWen.getOrElse(false.B), Mux1H(mgus(i).out.activeEn, vxsat), 0.U)
       }
 
       out.bits.toRob.fflags.foreach {
