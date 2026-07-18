@@ -123,14 +123,26 @@ trait HasBertiHelper extends HasCircularQueuePtrHelper with HasDCacheParameters 
     }
   }
 
-  def getPrefetchVAddr(triggerVA: UInt, delta: SInt, ratio: UInt = 0.U): UInt = {
-    val ratioShift = ratio.pad(5)(4, 0)
-    val lineShift = (HtLineOffsetWidth.U + ratioShift)(4, 0)
-    if (useByteAddr) {
-      (triggerVA.asSInt + (delta.pad(VAddrBits) << ratioShift).asSInt).asUInt
+  private def shiftedDelta(delta: SInt, shift: Int): SInt = {
+    val padded = delta.pad(VAddrBits).asUInt
+    if (shift == 0) {
+      padded.asSInt
     } else {
-      (triggerVA.asSInt + (delta.pad(VAddrBits) << lineShift).asSInt).asUInt
+      Cat(padded(VAddrBits - shift - 1, 0), 0.U(shift.W)).asSInt
     }
+  }
+
+  def getPrefetchVAddr(triggerVA: UInt, delta: SInt, ratio: Int = 0): UInt = {
+    val shift = if (useByteAddr) ratio else HtLineOffsetWidth + ratio
+    (triggerVA.asSInt + shiftedDelta(delta, shift)).asUInt
+  }
+
+  def getPrefetchVAddr(triggerVA: UInt, delta: SInt, ratio: UInt): UInt = {
+    val baseShift = if (useByteAddr) 0 else HtLineOffsetWidth
+    val shifted = MuxLookup(ratio, shiftedDelta(delta, baseShift))((0 until 8).map { i =>
+      i.U -> shiftedDelta(delta, baseShift + i)
+    })
+    (triggerVA.asSInt + shifted).asUInt
   }
 }
 
