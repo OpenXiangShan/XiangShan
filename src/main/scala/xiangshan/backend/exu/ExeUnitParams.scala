@@ -240,9 +240,8 @@ case class ExeUnitParams(
   def intFuLatencyMap: Map[FuType.OHType, Int] = {
     if (intLatencyCertain) {
       if (isVfExeUnit) {
-        // vf exe unit writing back to int regfile should delay 1 cycle
-        // vf exe unit need og2 --> delay 1 cycle
-        writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 2)).toMap
+        // VecRegion scalar writeback reaches the shared RF write port four cycles after issue.
+        writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 4)).toMap
       } else {
         writeIntFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
       }
@@ -255,7 +254,10 @@ case class ExeUnitParams(
 
   def fpFuLatencyMap: Map[FuType.OHType, Int] = {
     if (fpLatencyCertain)
-      if (needOg2) writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap else writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
+      // Keep the legacy busy-table metadata aligned with VecRegion's issue-to-WB pipeline.
+      if (isVfExeUnit) writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 4)).toMap
+      else if (needOg2) writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get + 1)).toMap
+      else writeFpFuConfigs.map(x => (x.fuType, x.latency.latencyVal.get)).toMap
     else
       Map()
   }

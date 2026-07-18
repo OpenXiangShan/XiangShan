@@ -979,7 +979,7 @@ object VecIssueQueue {
       this.imm := source.imm
       this.frm.foreach(_ := source.frm)
       this.fflagsWen := source.fflagsWen
-      this.vxsatWen := false.B // Todo
+      this.vxsatWen := source.vxsatWen
       this.flushPipe := false.B // Todo: Check if it is needed
       this.latency := source.latency
       this.robIdx := source.robIdx
@@ -1023,7 +1023,7 @@ object VecIssueQueue {
       this.imm := source.imm.getOrElse(0.U)
       this.frm.foreach(_ := source.frm.getOrElse(0.U.asTypeOf(Frm())))
       this.fflagsWen := source.fflagsWen.getOrElse(false.B)
-      this.vxsatWen := false.B // Todo
+      this.vxsatWen := source.vxsatWen.getOrElse(false.B)
       this.flushPipe := false.B // Todo: Check if it is needed
       this.latency := source.latency
       this.robIdx := source.robIdx
