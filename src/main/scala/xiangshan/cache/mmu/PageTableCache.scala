@@ -127,17 +127,6 @@ class PtwCacheReq(implicit p: Parameters) extends PtwBundle {
   val addrTrans = new L2AddrTransDebug
 }
 
-class PageCacheL0TableGPteTrace(implicit p: Parameters) extends PtwBundle {
-  // `ptePpn` is the GPA PPN selected by the parent VS PTE; `gPte*` is the
-  // G-stage leaf PTE that maps the resulting VS L0 page-table page.
-  val ptePpn  = UInt(ptePPNLen.W)
-  val vmid    = UInt(vmidLen.W)
-  val gPteValid = Bool()
-  val gPtePpn   = UInt(ptePPNLen.W)
-  val gPteLevel = UInt(log2Up(Level + 1).W)
-  val gPteN     = Bool()
-}
-
 class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val req = Flipped(DecoupledIO(new PtwCacheReq()))
   val resp = DecoupledIO(new Bundle {
@@ -184,15 +173,8 @@ class PtwCacheIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwCo
       })
     }
   })
-  // Keep the G PTE for a VS L0 table page beside its parent VS-table sector.
-  // It can complete after the sector refill and is needed by later L0 hits.
-  val l0TableGPteUpdate = Flipped(ValidIO(new PageCacheL0TableGPteTrace()))
   val refill = Flipped(ValidIO(new Bundle {
     val ptes = UInt(blockBits.W)
-    // A level-0 cache line is a page-table page. Keep the raw parent L1 PTE
-    // beside the line so a later direct L0 hit can still report the complete
-    // VS/G provenance after the L1 PageCache entry has been replaced.
-    val l0ParentL1 = new L2AddrTransSlot
     val levelOH = new Bundle {
       // NOTE: levelOH has (Level+1) bits, each stands for page cache entries
       val sp = Bool()
@@ -300,7 +282,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l1h = Reg(Vec(l2tlbParams.l1nSets, Vec(l2tlbParams.l1nWays, UInt(2.W))))
   val l1asids = Reg(Vec(l2tlbParams.l1nSets, Vec(l2tlbParams.l1nWays, UInt(l2tlbParams.hashAsidWidth.W))))
   val l1vmids = Reg(Vec(l2tlbParams.l1nSets, Vec(l2tlbParams.l1nWays, UInt(l2tlbParams.hashAsidWidth.W))))
-  val l0TableGPteTrace = RegInit(VecInit(Seq.fill(l2tlbParams.l1nSets)(VecInit(Seq.fill(l2tlbParams.l1nWays)(VecInit(Seq.fill(PtwL1SectorSize)(0.U.asTypeOf(new PageCacheL0TableGPteTrace))))))))
   def getl1vSet(vpn: UInt) = {
     require(log2Up(l2tlbParams.l1nWays) == log2Down(l2tlbParams.l1nWays))
     val set = genPtwL1SetIdx(vpn)
@@ -341,14 +322,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   val l0asids = Reg(Vec(l2tlbParams.l0nSets, Vec(l2tlbParams.l0nWays, UInt(l2tlbParams.hashAsidWidth.W))))
   val l0vmids = Reg(Vec(l2tlbParams.l0nSets, Vec(l2tlbParams.l0nWays, UInt(l2tlbParams.hashAsidWidth.W))))
   val l0vpns = Reg(Vec(l2tlbParams.l0nSets, Vec(l2tlbParams.l0nWays, UInt(l2tlbParams.hashVpnWidth.W))))
-  val l0ParentL1 = RegInit(VecInit(Seq.fill(l2tlbParams.l0nSets)(VecInit(
-    Seq.fill(l2tlbParams.l0nWays)(0.U.asTypeOf(new L2AddrTransSlot))
-  ))))
-  // `l0vmids` is hashed for fence lookup and cannot safely identify a
-  // provenance sidecar update. Keep the full VMID with the parent snapshot.
-  val l0ParentL1Vmid = RegInit(VecInit(Seq.fill(l2tlbParams.l0nSets)(VecInit(
-    Seq.fill(l2tlbParams.l0nWays)(0.U(vmidLen.W))
-  ))))
   def getl0vSet(vpn: UInt) = {
     require(log2Up(l2tlbParams.l0nWays) == log2Down(l2tlbParams.l0nWays))
     val set = genPtwL0SetIdx(vpn)
@@ -485,7 +458,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
 
   // l1
   val ptwl1replace = ReplacementPolicy.fromString(l2tlbParams.l1Replacer,l2tlbParams.l1nWays,l2tlbParams.l1nSets)
-  val (l1Hit, l1HitPPN, l1HitPbmt, l1Pre, l1eccError, l0TableGPteTraceHit) = {
+  val (l1Hit, l1HitPPN, l1HitPbmt, l1Pre, l1eccError) = {
     val ridx = genPtwL1SetIdx(vpn_search)
     l1.io.r.req.valid := stageReq.fire
     l1.io.r.req.bits.apply(setIdx = ridx)
@@ -517,18 +490,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val hitWayData = hitWayEntry.entries
     val hit = ParallelOR(hitVec)
     val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l1nWays).map(_.U(log2Up(l2tlbParams.l1nWays).W)))
-    val hitL0TableGPteTrace = WireInit(0.U.asTypeOf(new PageCacheL0TableGPteTrace))
-    when (hit) {
-      hitL0TableGPteTrace := l0TableGPteTrace(genPtwL1SetIdx(check_vpn))(hitWay)(genPtwL1SectorIdx(check_vpn))
-      when (io.l0TableGPteUpdate.valid &&
-        l0TableGPteTrace(genPtwL1SetIdx(check_vpn))(hitWay)(genPtwL1SectorIdx(check_vpn)).ptePpn === io.l0TableGPteUpdate.bits.ptePpn &&
-        l0TableGPteTrace(genPtwL1SetIdx(check_vpn))(hitWay)(genPtwL1SectorIdx(check_vpn)).vmid === io.l0TableGPteUpdate.bits.vmid) {
-        hitL0TableGPteTrace.gPteValid := io.l0TableGPteUpdate.bits.gPteValid
-        hitL0TableGPteTrace.gPtePpn := io.l0TableGPteUpdate.bits.gPtePpn
-        hitL0TableGPteTrace.gPteLevel := io.l0TableGPteUpdate.bits.gPteLevel
-        hitL0TableGPteTrace.gPteN := io.l0TableGPteUpdate.bits.gPteN
-      }
-    }
     val eccError = WireInit(false.B)
     if (l2tlbParams.enablePTWECC) {
       eccError := hitWayEntry.decode()
@@ -551,7 +512,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     }
     XSDebug(stageCheck_valid_1cycle, p"[l1] l1Hit:${hit} l1HitPPN:0x${Hexadecimal(hitWayData.ppns(genPtwL1SectorIdx(check_vpn)))} hitVec:${Binary(hitVec.asUInt)} hitWay:${hitWay} vidx:${vVec}\n")
 
-    (hit, hitWayData.ppns(genPtwL1SectorIdx(check_vpn)), hitWayData.pbmts(genPtwL1SectorIdx(check_vpn)), hitWayData.prefetch, eccError, hitL0TableGPteTrace)
+    (hit, hitWayData.ppns(genPtwL1SectorIdx(check_vpn)), hitWayData.pbmts(genPtwL1SectorIdx(check_vpn)), hitWayData.prefetch, eccError)
   }
   if (EnableClockGate) {
     val te = ClockGate.genTeSink
@@ -566,7 +527,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   } // Use clock if EnableClockGate = false
   // l0
   val ptwl0replace = ReplacementPolicy.fromString(l2tlbParams.l0Replacer,l2tlbParams.l0nWays,l2tlbParams.l0nSets)
-  val (l0Hit, l0HitData, l0Pre, l0eccError, l0HitWay, l0BitmapCheckResult, l0JmpBitmapCheck, l0ParentL1Hit) = {
+  val (l0Hit, l0HitData, l0Pre, l0eccError, l0HitWay, l0BitmapCheckResult, l0JmpBitmapCheck) = {
     val ridx = genPtwL0SetIdx(vpn_search)
     l0.io.r.req.valid := stageReq.fire
     l0.io.r.req.bits.apply(setIdx = ridx)
@@ -596,10 +557,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     val hitWayData = hitWayEntry.entries
     val hitWayEcc = hitWayEntry.ecc
     val hitWay = ParallelPriorityMux(hitVec zip (0 until l2tlbParams.l0nWays).map(_.U(log2Up(l2tlbParams.l0nWays).W)))
-    val hitParentL1 = WireInit(0.U.asTypeOf(new L2AddrTransSlot))
-    when (ParallelOR(hitVec)) {
-      hitParentL1 := l0ParentL1(genPtwL0SetIdx(check_vpn))(hitWay)
-    }
 
     val ishptw = RegEnable(stageDelay(0).bits.isHptwReq,stageDelay(1).fire)
     val s2x_info = RegEnable(stageDelay(0).bits.req_info.s2xlate,stageDelay(1).fire)
@@ -640,7 +597,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     hitVec.suggestName(s"l0_hitVec")
     hitWay.suggestName(s"l0_hitWay")
 
-    (hit, hitWayData, hitWayData.prefetch, eccError, UIntToOH(hitWay), l0bitmapreg(hitWay), jmp_bitmap_check, hitParentL1)
+    (hit, hitWayData, hitWayData.prefetch, eccError, UIntToOH(hitWay), l0bitmapreg(hitWay), jmp_bitmap_check)
   }
   val l0HitPPN = l0HitData.ppns
   val l0HitPbmt = l0HitData.pbmts
@@ -738,11 +695,7 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
   check_res.sp.apply(spHit, spPre, spHitData.ppn, spHitData.pbmt, spHitData.n.getOrElse(0.U), spHitPerm, false.B, spHitLevel, spValid, spJmpBitmapCheck, spPte)
 
   val resp_res = Reg(new PageCacheRespBundle)
-  val respL0TableGPteTrace = RegInit(0.U.asTypeOf(new PageCacheL0TableGPteTrace))
-  val respL0ParentL1 = RegInit(0.U.asTypeOf(new L2AddrTransSlot))
   when (stageCheck(1).fire) { resp_res := check_res }
-  when (stageCheck(1).fire) { respL0TableGPteTrace := l0TableGPteTraceHit }
-  when (stageCheck(1).fire) { respL0ParentL1 := l0ParentL1Hit }
 
   // stageResp bypass
   val bypassed = if (EnableSv48) Wire(Vec(4, Bool())) else Wire(Vec(3, Bool()))
@@ -776,12 +729,6 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     addrTrans.l1.ptePpn := resp_res.l1.ppn
     addrTrans.l1.level := 1.U
     addrTrans.l1.pteN := resp_res.l1.n =/= 0.U
-    when (isAllStage && respL0TableGPteTrace.gPteValid) {
-      addrTrans.l1.gPteValid := true.B
-      addrTrans.l1.gPtePpn := respL0TableGPteTrace.gPtePpn
-      addrTrans.l1.gPteLevel := respL0TableGPteTrace.gPteLevel
-      addrTrans.l1.gPteN := respL0TableGPteTrace.gPteN
-    }
   }
   when (captureVsPte && (resp_res.l0.hit || resp_res.sp.hit)) {
     addrTrans.l0.valid := true.B
@@ -790,26 +737,15 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     addrTrans.l0.level := Mux(resp_res.l0.hit, 0.U, resp_res.sp.level)
     addrTrans.l0.pteN := Mux(resp_res.l0.hit, false.B, resp_res.sp.n =/= 0.U)
   }
-  when (captureVsPte && resp_res.l0.hit && !resp_res.l1.hit) {
-    // L0 and L1 arrays replace independently. A direct L0 hit must use the
-    // parent recorded at L0 refill when its L1 peer no longer hits.
-    addrTrans.l1 := respL0ParentL1
-  }
-  when (captureVsPte && resp_res.l0.hit && resp_res.l1.hit && isAllStage &&
-    !respL0TableGPteTrace.gPteValid && respL0ParentL1.gPteValid) {
-    // A newly refilled L1 line can hit before it has observed the HPTW
-    // result for this L0 table page. The matching L0 line keeps that result
-    // with its parent, so retain the G-stage table-page provenance here.
-    addrTrans.l1.gPteValid := true.B
-    addrTrans.l1.gPtePpn := respL0ParentL1.gPtePpn
-    addrTrans.l1.gPteLevel := respL0ParentL1.gPteLevel
-    addrTrans.l1.gPteN := respL0ParentL1.gPteN
+  when (captureVsPte && resp_res.sp.hit && !resp_res.l0.hit && resp_res.sp.level =/= 0.U) {
+    // A true superpage has no level-1 parent that points to an L0 table.
+    // A level-0 NAPOT leaf also lives in the SP cache, but still has that
+    // parent, so retain the parent already carried by the request.
+    addrTrans.l1 := 0.U.asTypeOf(new L2AddrTransSlot)
   }
   when (isOnlyStage1 || stageResp.bits.req_info.s2xlate === noS2xlate) {
-    // The L1/L0 PageCache namespaces are shared by only-stage-1 and
-    // all-stage lookups. Their G-stage sidecars belong only to all-stage
-    // producers, including an L0 parent sidecar restored above. Clear them
-    // for both VS-only and non-virtual translations.
+    // A reused request envelope may contain G-stage observations from an
+    // earlier path. They do not belong to VS-only or host translations.
     addrTrans.l1.gPteValid := false.B
     addrTrans.l1.gPtePpn := 0.U
     addrTrans.l1.gPteLevel := 0.U
@@ -1087,42 +1023,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l1h(l1RefillIdx)(l1VictimWay) := refill_h(1)
     l1asids(l1RefillIdx)(l1VictimWay) := XORFold(l1Wasid, l2tlbParams.hashAsidWidth)
     l1vmids(l1RefillIdx)(l1VictimWay) := XORFold(io.csr_dup(1).hgatp.vmid, l2tlbParams.hashAsidWidth)
-    for (i <- 0 until PtwL1SectorSize) {
-      l0TableGPteTrace(l1RefillIdx)(l1VictimWay)(i).ptePpn := memPtes(i).getPPN()
-      l0TableGPteTrace(l1RefillIdx)(l1VictimWay)(i).vmid := io.csr_dup(1).hgatp.vmid
-      l0TableGPteTrace(l1RefillIdx)(l1VictimWay)(i).gPteValid := false.B
-      l0TableGPteTrace(l1RefillIdx)(l1VictimWay)(i).gPtePpn := 0.U
-      l0TableGPteTrace(l1RefillIdx)(l1VictimWay)(i).gPteLevel := 0.U
-      l0TableGPteTrace(l1RefillIdx)(l1VictimWay)(i).gPteN := false.B
-      when (io.l0TableGPteUpdate.valid &&
-        memPtes(i).getPPN() === io.l0TableGPteUpdate.bits.ptePpn &&
-        io.csr_dup(1).hgatp.vmid === io.l0TableGPteUpdate.bits.vmid) {
-        l0TableGPteTrace(l1RefillIdx)(l1VictimWay)(i).gPteValid := io.l0TableGPteUpdate.bits.gPteValid
-        l0TableGPteTrace(l1RefillIdx)(l1VictimWay)(i).gPtePpn := io.l0TableGPteUpdate.bits.gPtePpn
-        l0TableGPteTrace(l1RefillIdx)(l1VictimWay)(i).gPteLevel := io.l0TableGPteUpdate.bits.gPteLevel
-        l0TableGPteTrace(l1RefillIdx)(l1VictimWay)(i).gPteN := io.l0TableGPteUpdate.bits.gPteN
-      }
-    }
 
     for (i <- 0 until l2tlbParams.l1nWays) {
       l1RefillPerf(i) := i.U === l1VictimWay
-    }
-  }
-  when (io.l0TableGPteUpdate.valid && !flush_dup(1)) {
-    for (set <- 0 until l2tlbParams.l1nSets) {
-      for (way <- 0 until l2tlbParams.l1nWays) {
-        for (sector <- 0 until PtwL1SectorSize) {
-          val isRefillVictim = l1Refill && l1RefillIdx === set.U && l1VictimWay === way.U
-          when (!isRefillVictim && l1v(set * l2tlbParams.l1nWays + way) && l1h(set)(way) === onlyStage1 &&
-            l0TableGPteTrace(set)(way)(sector).ptePpn === io.l0TableGPteUpdate.bits.ptePpn &&
-            l0TableGPteTrace(set)(way)(sector).vmid === io.l0TableGPteUpdate.bits.vmid) {
-            l0TableGPteTrace(set)(way)(sector).gPteValid := io.l0TableGPteUpdate.bits.gPteValid
-            l0TableGPteTrace(set)(way)(sector).gPtePpn := io.l0TableGPteUpdate.bits.gPtePpn
-            l0TableGPteTrace(set)(way)(sector).gPteLevel := io.l0TableGPteUpdate.bits.gPteLevel
-            l0TableGPteTrace(set)(way)(sector).gPteN := io.l0TableGPteUpdate.bits.gPteN
-          }
-        }
-      }
     }
   }
   XSDebug(l1Refill, p"[l1 refill] refillIdx:0x${Hexadecimal(l1RefillIdx)} victimWay:${l1VictimWay} victimWayOH:${Binary(l1VictimWayOH)} rfvOH(in UInt):${Cat(l1RefillIdx, l1VictimWay)}\n")
@@ -1169,30 +1072,9 @@ class PtwCache()(implicit p: Parameters) extends XSModule with HasPtwConst with 
     l0asids(l0RefillIdx)(l0VictimWay) := XORFold(l0Wasid, l2tlbParams.hashAsidWidth)
     l0vmids(l0RefillIdx)(l0VictimWay) := XORFold(io.csr_dup(0).hgatp.vmid, l2tlbParams.hashAsidWidth)
     l0vpns(l0RefillIdx)(l0VictimWay) := XORFold(l0Wvpn(vpnLen - 1, vpnLen - PtwL0TagLen), l2tlbParams.hashVpnWidth)
-    l0ParentL1(l0RefillIdx)(l0VictimWay) := refill.l0ParentL1
-    l0ParentL1Vmid(l0RefillIdx)(l0VictimWay) := io.csr_dup(0).hgatp.vmid
 
     for (i <- 0 until l2tlbParams.l0nWays) {
       l0RefillPerf(i) := i.U === l0VictimWay
-    }
-  }
-  // An L0 line can outlive its L1 parent.  If the G-stage mapping for the
-  // parent table page is learned later, preserve it with every matching L0
-  // snapshot as well as the L1-side trace.
-  when (io.l0TableGPteUpdate.valid && !flush_dup(0)) {
-    for (set <- 0 until l2tlbParams.l0nSets) {
-      for (way <- 0 until l2tlbParams.l0nWays) {
-        val isRefillVictim = l0Refill && l0RefillIdx === set.U && l0VictimWay === way.U
-        when (!isRefillVictim && l0v(set * l2tlbParams.l0nWays + way) &&
-          l0h(set)(way) === onlyStage1 && l0ParentL1(set)(way).valid &&
-          l0ParentL1(set)(way).ptePpn === io.l0TableGPteUpdate.bits.ptePpn &&
-          l0ParentL1Vmid(set)(way) === io.l0TableGPteUpdate.bits.vmid) {
-          l0ParentL1(set)(way).gPteValid := io.l0TableGPteUpdate.bits.gPteValid
-          l0ParentL1(set)(way).gPtePpn := io.l0TableGPteUpdate.bits.gPtePpn
-          l0ParentL1(set)(way).gPteLevel := io.l0TableGPteUpdate.bits.gPteLevel
-          l0ParentL1(set)(way).gPteN := io.l0TableGPteUpdate.bits.gPteN
-        }
-      }
     }
   }
   XSDebug(l0Refill, p"[l0 refill] refillIdx:0x${Hexadecimal(l0RefillIdx)} victimWay:${l0VictimWay} victimWayOH:${Binary(l0VictimWayOH)} rfvOH(in UInt):${Cat(l0RefillIdx, l0VictimWay)}\n")

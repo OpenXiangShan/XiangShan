@@ -155,9 +155,6 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val outArbFsmPort = 1
   val outArbMqPort = 2
 
-  cache.io.l0TableGPteUpdate.valid := llptw.io.l0TableGPteUpdate.valid
-  cache.io.l0TableGPteUpdate.bits := llptw.io.l0TableGPteUpdate.bits
-
   if (HasBitmapCheck) {
     // connect ptwcache and bitmap sleep-wakeup port
     cache.io.bitmap_wakeup.get <> bitmap.get.io.wakeup
@@ -554,16 +551,9 @@ class L2TLBImp(outer: L2TLB)(implicit p: Parameters) extends PtwModule(outer) wi
   val refill_from_hptw = mem_resp_from_hptw
   val refill_level = Mux(refill_from_llptw, 0.U, Mux(refill_from_ptw, RegEnable(ptw.io.refill.level, 0.U, ptw.io.mem.req.fire), RegEnable(hptw.io.refill.level, 0.U, hptw.io.mem.req.fire)))
   val refill_valid = mem_resp_done && (if (HasBitmapCheck) !mem_resp_from_bitmap else true.B) && !flush && !flush_latch(mem.d.bits.source) && !(from_hptw(mem.d.bits.source) && hptw_bypassed)
-  val refill_l0_parent_l1 = WireInit(0.U.asTypeOf(new L2AddrTransSlot))
-  when (refill_from_llptw) {
-    refill_l0_parent_l1 := llptw_mem.refillL1
-  }.elsewhen (refill_from_ptw) {
-    refill_l0_parent_l1 := ptw.io.refill.l0ParentL1
-  }
 
   cache.io.refill.valid := GatedValidRegNext(refill_valid, false.B)
   cache.io.refill.bits.ptes := refill_data.asUInt
-  cache.io.refill.bits.l0ParentL1 := RegEnable(refill_l0_parent_l1, refill_valid)
   cache.io.refill.bits.req_info_dup.map(_ := RegEnable(Mux(refill_from_llptw, llptw_mem.refill, Mux(refill_from_ptw, ptw.io.refill.req_info, hptw.io.refill.req_info)), refill_valid))
   cache.io.refill.bits.level_dup.map(_ := RegEnable(refill_level, refill_valid))
   cache.io.refill.bits.levelOH(refill_level, refill_valid)

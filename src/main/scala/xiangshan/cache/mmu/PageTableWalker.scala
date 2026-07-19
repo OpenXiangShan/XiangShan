@@ -91,7 +91,6 @@ class PTWIO()(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
   val refill = Output(new Bundle {
     val req_info = new L2TlbInnerBundle()
     val level = UInt(log2Up(Level + 1).W)
-    val l0ParentL1 = new L2AddrTransSlot
   })
   val bitmap = Option.when(HasBitmapCheck)(new Bundle {
       val req = DecoupledIO(new bitmapReqBundle())
@@ -305,7 +304,6 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   io.refill.req_info.vpn := vpn
   io.refill.level := level
   io.refill.req_info.source := source
-  io.refill.l0ParentL1 := addrTrans.l1
 
   io.hptw.req.valid := !s_hptw_req || !s_last_hptw_req
   io.hptw.req.bits.id := FsmReqID.U(bMemID.W)
@@ -704,7 +702,6 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val enq_ptr = Output(UInt(log2Ceil(l2tlbParams.llptwsize).W))
     val buffer_it = Output(Vec(l2tlbParams.llptwsize, Bool()))
     val refill = Output(new L2TlbInnerBundle())
-    val refillL1 = Output(new L2AddrTransSlot())
     val req_mask = Input(Vec(l2tlbParams.llptwsize, Bool()))
     val flush_latch = Input(Vec(l2tlbParams.llptwsize, Bool()))
   }
@@ -712,7 +709,6 @@ class LLPTWIO(implicit p: Parameters) extends MMUIOBaseBundle with HasPtwConst {
     val req_info = new L2TlbInnerBundle()
     val addrTrans = new L2AddrTransDebug
   })
-  val l0TableGPteUpdate = ValidIO(new PageCacheL0TableGPteTrace())
   val pmp = Vec(2, new Bundle {
     val req  = Valid(new PMPReqBundle())
     val resp = Flipped(new PMPRespBundle())
@@ -781,8 +777,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
 
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed || io.csr.priv.virt_changed
   val entries = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(0.U.asTypeOf(new LLPTWEntry()))))
-  io.l0TableGPteUpdate.valid := false.B
-  io.l0TableGPteUpdate.bits := 0.U.asTypeOf(new PageCacheL0TableGPteTrace)
   val state_idle :: state_hptw_req :: state_hptw_resp :: state_addr_check :: state_mem_req :: state_mem_waiting :: state_mem_out :: state_last_hptw_req :: state_last_hptw_resp :: state_cache :: state_bitmap_check :: state_bitmap_resp :: Nil = Enum(12)
   val state = RegInit(VecInit(Seq.fill(l2tlbParams.llptwsize)(state_idle)))
 
@@ -1091,15 +1085,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
       when (state(i) === state_hptw_resp && io.hptw.resp.bits.id === entries(i).wait_id && io.hptw.resp.bits.h_resp.entry.tag === entries(i).ppn) {
         val check_g_perm_fail = !io.hptw.resp.bits.h_resp.gaf && !io.hptw.resp.bits.h_resp.entry.perm.get.r
         recordL0TableGPteTrace(entries(i).addrTrans, io.hptw.resp.bits.h_resp)
-        when (entries(i).addrTrans.valid && entries(i).addrTrans.l1.valid) {
-          io.l0TableGPteUpdate.valid := true.B
-          io.l0TableGPteUpdate.bits.ptePpn := entries(i).addrTrans.l1.ptePpn
-          io.l0TableGPteUpdate.bits.vmid := io.csr.hgatp.vmid
-          io.l0TableGPteUpdate.bits.gPteValid := !io.hptw.resp.bits.h_resp.gpf && !io.hptw.resp.bits.h_resp.gaf
-          io.l0TableGPteUpdate.bits.gPtePpn := io.hptw.resp.bits.h_resp.entry.ppn
-          io.l0TableGPteUpdate.bits.gPteLevel := io.hptw.resp.bits.h_resp.entry.level.getOrElse(0.U)
-          io.l0TableGPteUpdate.bits.gPteN := io.hptw.resp.bits.h_resp.entry.n.getOrElse(0.U) =/= 0.U
-        }
         when (check_g_perm_fail || io.hptw.resp.bits.h_resp.gaf || io.hptw.resp.bits.h_resp.gpf) {
           state(i) := state_mem_out
           entries(i).hptw_resp := io.hptw.resp.bits.h_resp
@@ -1203,7 +1188,6 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   val mem_refill_id = RegNext(io.mem.resp.bits.id(log2Up(l2tlbParams.llptwsize)-1, 0))
   io.mem.refill := entries(mem_refill_id).req_info
   io.mem.refill.s2xlate := entries(mem_refill_id).req_info.s2xlate
-  io.mem.refillL1 := entries(mem_refill_id).addrTrans.l1
   io.mem.buffer_it := mem_resp_hit
   io.mem.enq_ptr := enq_ptr
 
