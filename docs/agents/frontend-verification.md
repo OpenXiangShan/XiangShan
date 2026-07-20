@@ -234,13 +234,19 @@ intention. Therefore:
 
 ## Build And Test
 
-Activate the environments before running frontend commands:
+Activate the mcpgateway environment before running Frontend Verilator build or
+Python DUT commands:
 
 ```bash
-source /nfs/share/unitychip/activate
 source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
 cd "$NOOP_HOME"
 ```
+
+Do not source `/nfs/share/unitychip/activate` for these commands. It prepends
+an older `libxspcomm.so` to `LD_LIBRARY_PATH`, which prevents the generated
+Frontend Python binding from loading. The required `mill`, `picker`, CMake,
+SWIG, and Verilator tools are available with the mcpgateway environment on
+this host.
 
 In sandboxed runs, disable the environment-level `pytest_rerunfailures` plugin
 by default. It opens a local socket during `pytest_configure` and otherwise
@@ -323,7 +329,6 @@ The script generates the NEMU golden trace first, then runs
 environment variables set consistently.
 
 ```bash
-source /nfs/share/unitychip/activate
 source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
 
 BIN_TRACE_ENV=(
@@ -555,7 +560,7 @@ src/test/python/Frontend/scripts/fst_to_fsdb.sh path/to/wave.fst [path/to/wave.f
 Rebuild the frontend Python DUT artifacts from the repo root:
 
 ```bash
-source /nfs/share/unitychip/activate
+source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
 cd "$NOOP_HOME"
 make frontend -j
 ```
