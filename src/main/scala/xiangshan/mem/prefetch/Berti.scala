@@ -889,6 +889,7 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
       io.l1_req.bits.is_store := false.B
       io.l1_req.bits.pf_source.value := L1_HW_PREFETCH_BERTI
       io.l1_req.bits.first_issue := true.B
+      io.l1_req.bits.retry_vec := 0.U
     }
     is(PrefetchTarget.L2.id.U){
       pfIdxArb.io.out.ready := io.l2_req.ready
