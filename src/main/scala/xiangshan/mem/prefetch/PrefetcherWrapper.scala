@@ -129,14 +129,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   val nack_to_l2 = Wire(Decoupled(new L2PrefetchReq()))
   nack_to_l2.valid := l1_pf_nack.valid
   nack_to_l2.bits.addr := l1_pf_nack.bits.paddr
-  nack_to_l2.bits.source := MuxLookup(
-    l1_pf_nack.bits.pf_source.value,
-    MemReqSource.Prefetch2L2Unknown.id.U
-  )(Seq(
-    L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L2Stride.id.U,
-    L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L2Stream.id.U,
-    L1_HW_PREFETCH_BERTI  -> MemReqSource.Prefetch2L2Berti.id.U,
-  ))
+  nack_to_l2.bits.source := MemReqSource.Prefetch2L2L1Nack.id.U
 
   val l2_pf_req = Wire(Decoupled(new L2PrefetchReq()))
   val l2_pf_arb = Module(new Arbiter(new L2PrefetchReq, prefetcherNum + 1))
@@ -342,16 +335,19 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   io.l1_pf_to_l2.pf_source := l2_pf_req.bits.source
   io.l1_pf_to_l2.l2_pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
 
+  val l1_pf_nack_source = l1_pf_nack.bits.pf_source.value
+  val l1_pf_nack_known_source = Seq(L1_HW_PREFETCH_STRIDE, L1_HW_PREFETCH_STREAM, L1_HW_PREFETCH_BERTI)
+    .map(l1_pf_nack_source === _).reduce(_ || _)
   XSPerfAccumulate("l1PfNackToL2Valid", nack_to_l2.valid)
   XSPerfAccumulate("l1PfNackToL2Fire", nack_to_l2.fire)
   XSPerfAccumulate("l1PfNackToL2Stride", nack_to_l2.fire &&
-    nack_to_l2.bits.source === MemReqSource.Prefetch2L2Stride.id.U)
+    l1_pf_nack_source === L1_HW_PREFETCH_STRIDE)
   XSPerfAccumulate("l1PfNackToL2Stream", nack_to_l2.fire &&
-    nack_to_l2.bits.source === MemReqSource.Prefetch2L2Stream.id.U)
+    l1_pf_nack_source === L1_HW_PREFETCH_STREAM)
   XSPerfAccumulate("l1PfNackToL2Berti", nack_to_l2.fire &&
-    nack_to_l2.bits.source === MemReqSource.Prefetch2L2Berti.id.U)
+    l1_pf_nack_source === L1_HW_PREFETCH_BERTI)
   XSPerfAccumulate("l1PfNackToL2Unknown", nack_to_l2.fire &&
-    nack_to_l2.bits.source === MemReqSource.Prefetch2L2Unknown.id.U)
+    !l1_pf_nack_known_source)
 
   when(nack_to_l2.valid) {
     assert(nack_to_l2.ready)
@@ -364,6 +360,8 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2StreamStride", clock, reset) 
   }.elsewhen(l2_pf_req.bits.source === MemReqSource.Prefetch2L2SMS.id.U) {
     l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2SMS", clock, reset)
+  }.elsewhen(l2_pf_req.bits.source === MemReqSource.Prefetch2L2L1Nack.id.U) {
+    l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2L1Nack", clock, reset)
   }.otherwise {
     l2_trace_table.log(l2_trace, l2_pf_req.valid, "L2Unknown", clock, reset)
   }
