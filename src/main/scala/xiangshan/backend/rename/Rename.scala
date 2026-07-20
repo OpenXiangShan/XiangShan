@@ -426,6 +426,10 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
   isMove zip io.in.map(_.bits) foreach {
     case (move, in) => move := Mux(in.exceptionVec.orR, false.B, in.isMove)
   }
+  val isNtlHint = Wire(Vec(RenameWidth, Bool()))
+  isNtlHint zip io.in.map(_.bits) foreach {
+    case (hint, in) => hint := Mux(in.exceptionVec.orR, false.B, in.isNtlHint)
+  }
 
   val walkNeedIntDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
   val walkNeedFpDest = WireDefault(VecInit(Seq.fill(RenameWidth)(false.B)))
@@ -494,12 +498,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     instrSize(i) := instrSizesVec(i) + io.fusionCross2FtqVec(i)
     uops(i).debug.foreach(_.fusionNum := PopCount(compressMasksVec(i) & Cat(io.isFusionVec.reverse)))
     val hasExceptionExceptFlushPipe = uops(i).exceptionVec.orR || TriggerAction.isDmode(uops(i).trigger)
-    when(isMove(i) || hasExceptionExceptFlushPipe) {
+    when(isMove(i) || isNtlHint(i) || hasExceptionExceptFlushPipe) {
       uops(i).numWB := 0.U
     }
     if (i > 0) {
       when(!needRobFlags(i - 1)) {
-        val numFusion = PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
+        val numFusion = PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(isNtlHint.reverse) | Cat(fusionValidVec.reverse)))
         val numuops = instrSizesVec(i) - numFusion
         dontTouch(numFusion)
         dontTouch(numuops)
@@ -509,12 +513,12 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         // rob need first uop isrvc, as it may attach interrupt to first uop(calculate pc)
         // branch need last uop isrvc, it will change in dispatch
         uops(i).isRVC := uops(i - 1).isRVC
-        uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
+        uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(isNtlHint.reverse) | Cat(fusionValidVec.reverse)))
       }
     }
     when(!needRobFlags(i)) {
       uops(i).lastUop := false.B
-      uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(fusionValidVec.reverse)))
+      uops(i).numWB := instrSizesVec(i) - PopCount(compressMasksVec(i) & (Cat(isMove.reverse) | Cat(isNtlHint.reverse) | Cat(fusionValidVec.reverse)))
       if (i < RenameWidth - 1) {
         uops(i).crossFtqCommit := uops(i + 1).crossFtqCommit
         uops(i).crossFtq := uops(i + 1).crossFtq

@@ -1575,12 +1575,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   if (env.EnableDifftest || env.AlwaysBasicDiff) {
     // These are the structures used by difftest only and should be optimized after synthesis.
     val dt_eliminatedMove = Mem(RobSize, Bool())
+    val dt_eliminatedNtlHint = Mem(RobSize, Bool())
     val dt_isRVC = Mem(RobSize, Bool())
     val dt_pcTransType = Option.when(env.EnableDifftest)(Mem(RobSize, new AddrTransType))
     val dt_exuDebug = Reg(Vec(RobSize, new DebugBundle))
     for (i <- 0 until RenameWidth) {
       when(canEnqueue(i)) {
         dt_eliminatedMove(allocatePtrVec(i).value) := io.enq.req(i).bits.isMove
+        dt_eliminatedNtlHint(allocatePtrVec(i).value) := io.enq.req(i).bits.isNtlHint
         dt_isRVC(allocatePtrVec(i).value) := io.enq.req(i).bits.isRVC
         dt_pcTransType.foreach(_(allocatePtrVec(i).value) := io.debugInstrAddrTransType)
       }
@@ -1599,13 +1601,14 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val ptr = deqPtrVec(i).value
       val exuOut = dt_exuDebug(ptr)
       val eliminatedMove = dt_eliminatedMove(ptr)
+      val eliminatedNtlHint = dt_eliminatedNtlHint(ptr)
       val isRVC = dt_isRVC(ptr)
       val instr = uop.debug_instr.getOrElse(0.U).asTypeOf(new XSInstBitFields)
       val isVLoad = instr.isVecLoad
 
       val diffMaxPhyRegs = Seq(MaxPhyRegs, 2 * (V0PhyRegs + VfPhyRegs)).max // For width of wpdest and otherwpdest
       val difftest = DifftestModule(new DiffInstrCommit(diffMaxPhyRegs), delay = 3, dontCare = true)
-      val dt_skip = Mux(eliminatedMove, false.B, exuOut.isSkipDiff)
+      val dt_skip = Mux(eliminatedMove || eliminatedNtlHint, false.B, exuOut.isSkipDiff)
       difftest.coreid := io.hartId
       difftest.index := i.U
       difftest.valid := io.commits.commitValid(i) && io.commits.isCommit
