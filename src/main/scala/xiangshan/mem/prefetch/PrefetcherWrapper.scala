@@ -121,12 +121,26 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     RegEnable(s2_storePcVec(i), io.trainSource.s2_storeFireHint(i))
   }
   /* prefetch arbiter */
-  val l1_pf_arb = Module(new L1PrefetchRetryArbiter(sourceCount = prefetcherNum))
-  l1_pf_arb.io.nack.valid := RegNext(io.l1_pf_nack.valid, false.B)
-  l1_pf_arb.io.nack.bits := RegEnable(io.l1_pf_nack.bits, io.l1_pf_nack.valid)
-  l1_pf_arb.io.mshrFull := io.l1_pf_mshr_full
+  val l1_pf_arb = Module(new Arbiter(new L1PrefetchReq, prefetcherNum))
+  val l1_pf_nack = Wire(Valid(new L1PrefetchReq))
+  l1_pf_nack.valid := RegNext(io.l1_pf_nack.valid, false.B)
+  l1_pf_nack.bits := RegEnable(io.l1_pf_nack.bits, io.l1_pf_nack.valid)
+
+  val nack_to_l2 = Wire(Decoupled(new L2PrefetchReq()))
+  nack_to_l2.valid := l1_pf_nack.valid
+  nack_to_l2.bits.addr := l1_pf_nack.bits.paddr
+  nack_to_l2.bits.source := MuxLookup(
+    l1_pf_nack.bits.pf_source.value,
+    MemReqSource.Prefetch2L2Unknown.id.U
+  )(Seq(
+    L1_HW_PREFETCH_STRIDE -> MemReqSource.Prefetch2L2Stride.id.U,
+    L1_HW_PREFETCH_STREAM -> MemReqSource.Prefetch2L2Stream.id.U,
+    L1_HW_PREFETCH_BERTI  -> MemReqSource.Prefetch2L2Berti.id.U,
+  ))
+
   val l2_pf_req = Wire(Decoupled(new L2PrefetchReq()))
-  val l2_pf_arb = Module(new Arbiter(new L2PrefetchReq, prefetcherNum))
+  val l2_pf_arb = Module(new Arbiter(new L2PrefetchReq, prefetcherNum + 1))
+  l2_pf_arb.io.in(0) <> nack_to_l2
   val l3_pf_req = Wire(Decoupled(new L3PrefetchReq()))
   val l3_pf_arb = Module(new Arbiter(new L3PrefetchReq, prefetcherNum))
 
@@ -141,7 +155,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     x.valid := false.B
     x.bits := DontCare
   }
-  l2_pf_arb.io.in.foreach{ x =>
+  l2_pf_arb.io.in.tail.foreach{ x =>
     x.valid := false.B
     x.bits := DontCare
   }
@@ -214,7 +228,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     io.tlb_req(IdxSMS) <> pf.io.tlb_req
     pf.io.pmp_resp := io.pmp_resp(IdxSMS)
 
-    l2_pf_arb.io.in(IdxSMS) <> pf.io.l2_req
+    l2_pf_arb.io.in(IdxSMS + 1) <> pf.io.l2_req
     pf.io.l1_req.ready := false.B
     pf.io.l3_req.ready := false.B
   })
@@ -258,7 +272,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     pf.io.pmp_resp := io.pmp_resp(IdxStreamStride)
 
     l1_pf_arb.io.in(IdxStreamStride) <> pf.io.l1_req
-    l2_pf_arb.io.in(IdxStreamStride) <> pf.io.l2_req
+    l2_pf_arb.io.in(IdxStreamStride + 1) <> pf.io.l2_req
     l3_pf_arb.io.in(IdxStreamStride) <> pf.io.l3_req
   })
 
@@ -300,7 +314,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     pf.io.pmp_resp := io.pmp_resp(IdxBerti)
 
     l1_pf_arb.io.in(IdxBerti) <> pf.io.l1_req
-    l2_pf_arb.io.in(IdxBerti) <> pf.io.l2_req
+    l2_pf_arb.io.in(IdxBerti + 1) <> pf.io.l2_req
     l3_pf_arb.io.in(IdxBerti) <> pf.io.l3_req
 
   })
@@ -328,6 +342,21 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   io.l1_pf_to_l2.pf_source := l2_pf_req.bits.source
   io.l1_pf_to_l2.l2_pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
 
+  XSPerfAccumulate("l1PfNackToL2Valid", nack_to_l2.valid)
+  XSPerfAccumulate("l1PfNackToL2Fire", nack_to_l2.fire)
+  XSPerfAccumulate("l1PfNackToL2Stride", nack_to_l2.fire &&
+    nack_to_l2.bits.source === MemReqSource.Prefetch2L2Stride.id.U)
+  XSPerfAccumulate("l1PfNackToL2Stream", nack_to_l2.fire &&
+    nack_to_l2.bits.source === MemReqSource.Prefetch2L2Stream.id.U)
+  XSPerfAccumulate("l1PfNackToL2Berti", nack_to_l2.fire &&
+    nack_to_l2.bits.source === MemReqSource.Prefetch2L2Berti.id.U)
+  XSPerfAccumulate("l1PfNackToL2Unknown", nack_to_l2.fire &&
+    nack_to_l2.bits.source === MemReqSource.Prefetch2L2Unknown.id.U)
+
+  when(nack_to_l2.valid) {
+    assert(nack_to_l2.ready)
+  }
+
   val l2_trace = Wire(new LoadPfDbBundle)
   l2_trace.paddr := l2_pf_req.bits.addr
   val l2_trace_table = ChiselDB.createTable(s"L2PrefetchTrace$hartId", new LoadPfDbBundle, basicDB = false)
@@ -342,7 +371,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   prefetcherSeq.zipWithIndex.foreach { case (pf, idx) =>
     val arbEvents = Seq(
       l1_pf_arb.io.in(idx).fire -> (l1_pf_arb.io.in(idx).valid && !l1_pf_arb.io.in(idx).ready),
-      l2_pf_arb.io.in(idx).fire -> (l2_pf_arb.io.in(idx).valid && !l2_pf_arb.io.in(idx).ready),
+      l2_pf_arb.io.in(idx + 1).fire -> (l2_pf_arb.io.in(idx + 1).valid && !l2_pf_arb.io.in(idx + 1).ready),
       l3_pf_arb.io.in(idx).fire -> (l3_pf_arb.io.in(idx).valid && !l3_pf_arb.io.in(idx).ready),
     )
     arbEvents.zipWithIndex.foreach { case ((fire, block), level) =>
