@@ -19,41 +19,39 @@ case class StreamStrideParams() extends PrefetcherParams{
 class L1PrefetchRetryArbiter(
   sourceCount: Int,
   depth: Int = 4,
-  retryInterval: Int = 4,
-  fastDrainExit: Int = 2,
 )(implicit p: Parameters) extends XSModule {
   require(sourceCount > 0)
   require(depth > 1 && isPow2(depth))
-  require(retryInterval > 0)
-  require(fastDrainExit >= 0 && fastDrainExit < depth)
 
   val io = IO(new Bundle {
     val in = Flipped(Vec(sourceCount, Decoupled(new L1PrefetchReq)))
+    val done = Input(Bool())
     val nack = Flipped(Valid(new L1PrefetchReq))
     val mshrFull = Input(Bool())
     val out = Decoupled(new L1PrefetchReq)
   })
 
   private val queue = Module(new Queue(new L1PrefetchReq, depth, pipe = false, flow = false))
-  private val fastDrain = RegInit(false.B)
-  private val intervalCounter = RegInit(0.U((log2Ceil(retryInterval) max 1).W))
+  private val inflightCount = RegInit(0.U(log2Ceil(depth + 1).W))
 
+  // Stage 1: retire completed requests and retain first-issue nacks.
   val firstIssueNack = io.nack.valid && io.nack.bits.first_issue
   queue.io.enq.valid := firstIssueNack
   queue.io.enq.bits := io.nack.bits
 
-  val full = !queue.io.enq.ready
-  val fullDrop = firstIssueNack && full
   val enqueue = queue.io.enq.fire
+  val reserved = queue.io.count +& inflightCount
+  val creditFull = reserved >= depth.U
 
+  // Stage 2: drain retries before admitting an original prefetch.
   val retry = Wire(Decoupled(new L1PrefetchReq))
-  val retryEligible = !io.mshrFull && (fastDrain || intervalCounter === 0.U)
-  retry.valid := queue.io.deq.valid && retryEligible
+  val retryPending = queue.io.deq.valid
+  retry.valid := retryPending && !io.mshrFull
   retry.bits := queue.io.deq.bits
   retry.bits.first_issue := false.B
-  queue.io.deq.ready := retry.ready && retryEligible
+  queue.io.deq.ready := retry.ready && !io.mshrFull
 
-  val blockOriginal = io.mshrFull || fastDrain || full
+  val blockOriginal = io.mshrFull || retryPending || creditFull
   val arb = Module(new Arbiter(new L1PrefetchReq, sourceCount + 1))
   arb.io.in(0) <> retry
   io.in.zip(arb.io.in.tail).foreach { case (source, sink) =>
@@ -63,34 +61,34 @@ class L1PrefetchRetryArbiter(
   }
   io.out <> arb.io.out
 
-  val dequeue = retry.fire
-  val enterFastDrain = enqueue && !dequeue && queue.io.count === (depth - 1).U
-  val exitFastDrain = !enqueue && dequeue && queue.io.count === (fastDrainExit + 1).U
-
-  when(enterFastDrain) {
-    fastDrain := true.B
-  }.elsewhen(exitFastDrain) {
-    fastDrain := false.B
-  }
-
-  when(io.mshrFull || dequeue) {
-    intervalCounter := (retryInterval - 1).U
-  }.elsewhen(intervalCounter =/= 0.U) {
-    intervalCounter := intervalCounter - 1.U
+  // Retry issue transfers a reservation from the queue to inflight; an
+  // original issue consumes a free reservation.
+  val issue = io.out.fire
+  when(issue =/= io.done) {
+    inflightCount := Mux(issue, inflightCount + 1.U, inflightCount - 1.U)
   }
 
   XSPerfAccumulate("l1PfRetryNack", io.nack.valid)
+  XSPerfAccumulate("l1PfRetryDone", io.done)
   XSPerfAccumulate("l1PfRetryEnqueue", enqueue)
-  XSPerfAccumulate("l1PfRetryFullDrop", fullDrop)
+  XSPerfAccumulate("l1PfRetryFullDrop", firstIssueNack && !queue.io.enq.ready)
   XSPerfAccumulate("l1PfRetrySecondNackDrop", io.nack.valid && !io.nack.bits.first_issue)
-  XSPerfAccumulate("l1PfRetryNormalFire", dequeue && !fastDrain)
-  XSPerfAccumulate("l1PfRetryFastDrainFire", dequeue && fastDrain)
+  XSPerfAccumulate("l1PfRetryFire", retry.fire)
+  XSPerfAccumulate("l1PfRetryOriginalFire", issue && !retry.fire)
   XSPerfAccumulate("l1PfRetryMshrFullCycles", io.mshrFull)
-  XSPerfAccumulate("l1PfRetryBlockOriginalCycles", fastDrain)
+  XSPerfAccumulate("l1PfRetryQueueNonEmptyCycles", retryPending)
+  XSPerfAccumulate("l1PfRetryCreditFullCycles", creditFull)
+  XSPerfAccumulate("l1PfRetryCreditFullNoDoneCycles", creditFull && !io.done)
+  XSPerfAccumulate("l1PfRetryBlockOriginalCycles", blockOriginal)
 
   assert(!(retry.fire && io.mshrFull))
   assert(!retry.valid || !retry.bits.first_issue)
+  assert(!io.nack.valid || io.done)
+  assert(!io.done || inflightCount =/= 0.U)
+  assert(reserved <= depth.U)
+  when(firstIssueNack) { assert(queue.io.enq.ready) }
   when(io.nack.valid && !io.nack.bits.first_issue) { assert(!enqueue) }
+  io.in.foreach(source => when(source.fire) { assert(source.bits.first_issue) })
   when(blockOriginal) { io.in.foreach(source => assert(!source.fire)) }
 }
 

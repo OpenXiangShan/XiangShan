@@ -97,6 +97,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     val pmp_resp = Vec(prefetcherNum, Flipped(new PMPRespBundle()))
     // prefetch req sender
     val l1_pf_to_l1 = DecoupledIO(new L1PrefetchReq())
+    val l1_pf_done = Input(Bool())
     val l1_pf_nack = Flipped(ValidIO(new L1PrefetchReq))
     val l1_pf_mshr_full = Input(Bool())
     val l1_pf_to_l2 = Output(new xscache.coupledL2.PrefetchRecv())
@@ -122,6 +123,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   }
   /* prefetch arbiter */
   val l1_pf_arb = Module(new L1PrefetchRetryArbiter(sourceCount = prefetcherNum))
+  l1_pf_arb.io.done := RegNext(io.l1_pf_done, false.B)
   l1_pf_arb.io.nack.valid := RegNext(io.l1_pf_nack.valid, false.B)
   l1_pf_arb.io.nack.bits := RegEnable(io.l1_pf_nack.bits, io.l1_pf_nack.valid)
   l1_pf_arb.io.mshrFull := io.l1_pf_mshr_full

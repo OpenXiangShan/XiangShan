@@ -840,6 +840,7 @@ class DCacheIO(implicit p: Parameters) extends DCacheBundle {
   val l1Miss = Output(Bool())
   val wfi = Flipped(new WfiReqBundle)
   val prefetch_req = Flipped(DecoupledIO(new L1PrefetchReq))
+  val prefetch_done = Output(Bool())
   val prefetch_nack = ValidIO(new L1PrefetchReq)
 }
 
@@ -1057,6 +1058,7 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   io.wfi <> missQueue.io.wfi
   io.refillTrain := missQueue.io.refill_train
   mainPipe.io.prefetch_req <> io.prefetch_req
+  io.prefetch_done := mainPipe.io.prefetch_done
   io.prefetch_nack := mainPipe.io.prefetch_nack
 
   // l1 dcache controller

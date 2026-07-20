@@ -179,6 +179,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val wb_ready_dup = Vec(nDupWbReady, Input(Bool()))
     // hardware prefetch
     val prefetch_req = Flipped(Decoupled(new L1PrefetchReq()))
+    val prefetch_done = Output(Bool())
     val prefetch_nack = ValidIO(new L1PrefetchReq)
     // pass to Prefetch Monitor for statistic
     val prefetch_stat = Output(new PipePrefetchStatBundle)
@@ -1003,6 +1004,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val total_prefetch = s2_fire && s2_isPrefetch
   val pf_late_in_cache = s2_fire && s2_hit && s2_isPrefetch
 
+  io.prefetch_done := total_prefetch
   io.prefetch_stat.total_prefetch := total_prefetch
   io.prefetch_stat.pf_late_in_cache := pf_late_in_cache
   io.prefetch_stat.pf_late_in_cache_source := s2_hit_prefetch
@@ -1010,6 +1012,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.prefetch_stat.nack_prefetch := nackPrefetch
   io.prefetch_nack.valid := nackPrefetch
   io.prefetch_nack.bits := s2_req.toL1PrefetchReq()
+  assert(!nackPrefetch || total_prefetch)
   io.prefetch_stat.pf_source := s2_req.pf_source
   io.prefetch_stat.hit_pf_in_cache := DontCare
   io.prefetch_stat.hit_source := DontCare

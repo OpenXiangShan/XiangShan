@@ -739,6 +739,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   prefetcher.io.pfCtrlFromTile.l2PfqBusy := io.l2PfqBusy
   prefetcher.io.pfCtrlFromCSR := io.ooo_to_mem.csrCtrl.pf_ctrl
   prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
+  prefetcher.io.l1_pf_done := dcache.io.prefetch_done
   prefetcher.io.l1_pf_nack := dcache.io.prefetch_nack
   prefetcher.io.l1_pf_mshr_full := RegNext(dcache.io.mshrFull, false.B)
   prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
