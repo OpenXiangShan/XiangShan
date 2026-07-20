@@ -212,6 +212,7 @@ class LoadUnitS0(param: ExeUnitParams)(
     PrefetchCoh.read
   )
   scalarIssue.bits.uop := ldin.toDynInst()
+  scalarIssue.bits.uop.pc := ldin.pc.getOrElse(0.U)
   scalarIssue.bits.vaddr := ldinVAddr
   scalarIssue.bits.fullva := ldinFullva
   scalarIssue.bits.size := ldinSize
