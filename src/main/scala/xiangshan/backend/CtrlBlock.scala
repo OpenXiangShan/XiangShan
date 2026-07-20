@@ -605,7 +605,7 @@ class CtrlBlockImp(
     decodePipeRename(i).ready := rename.io.in(i).ready
     rename.io.in(i).valid := decodePipeRename(i).valid && !fusionDecoder.io.clear(i)
     rename.io.in(i).bits := decodePipeRename(i).bits
-    dispatch.io.renameIn(i).valid := decodePipeRename(i).valid && !fusionDecoder.io.clear(i) && !decodePipeRename(i).bits.isMove
+    dispatch.io.renameIn(i).valid := decodePipeRename(i).valid && !fusionDecoder.io.clear(i) && !decodePipeRename(i).bits.isMove && !decodePipeRename(i).bits.isNtlHint
     dispatch.io.renameIn(i).bits := decodePipeRename(i).bits
     rename.io.validVec(i) := decodePipeRename(i).valid
     rename.io.isFusionVec(i) := false.B
