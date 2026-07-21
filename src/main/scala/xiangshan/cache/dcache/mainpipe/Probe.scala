@@ -105,7 +105,7 @@ class ProbeEntry(implicit p: Parameters) extends DCacheModule {
     pipeReq.probeNeedData := req.needData
     pipeReq.error := false.B
     pipeReq.id := io.id
-    pipeReq.missFailCauseEvictBtot := false.B
+    pipeReq.missFailCauseEvictBtoT := false.B
 
     when (io.pipeReq.fire) {
       state := sWaitResp

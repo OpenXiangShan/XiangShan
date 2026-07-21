@@ -35,7 +35,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   val missParam = UInt(TLPermissions.bdWidth.W)
   val missDirty = Bool()
   val occupyWay = UInt(nWays.W)
-  val missFailCauseEvictBtot = Bool()
+  val missFailCauseEvictBtoT = Bool()
 
   val probe = Bool()
   val probeParam = UInt(TLPermissions.bdWidth.W)
@@ -98,7 +98,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.replace := false.B
     req.error := false.B
     req.id := store.id
-    req.missFailCauseEvictBtot := false.B
+    req.missFailCauseEvictBtoT := false.B
     req
   }
 
@@ -115,7 +115,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.vaddr := prefetch.vaddr
     req.replace := false.B
     req.error := false.B
-    req.missFailCauseEvictBtot := false.B
+    req.missFailCauseEvictBtoT := false.B
     req.pfSource := prefetch.pf_source.value
     req.access := false.B
     req.id := 0.U
@@ -132,7 +132,7 @@ class MainPipeInfoToMQ(implicit p:Parameters) extends DCacheBundle {
   val s2_valid = Bool()
   val s2_miss_id = UInt(log2Up(cfg.nMissEntries).W) // For refill data selection
   val s2_replay_to_mq = Bool()
-  val s2_evict_bto_t_way = Bool()
+  val s2_evict_b_to_t_way = Bool()
   val s2_next_evict_way = UInt(nWays.W)
   val s3_valid = Bool()
   val s3_miss_id = UInt(log2Up(cfg.nMissEntries).W) // For mshr release
@@ -206,7 +206,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val replaceWay = new ReplacementWayReqIO
 
     val evictSet = Output(UInt())
-    val btotWaysForSet = Input(UInt(nWays.W))
+    val btoTWaysForSet = Input(UInt(nWays.W))
 
     // writeback addr to be replaced
     val replace = new MissQueueBlockIO
@@ -434,13 +434,13 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   val s1_invalid_way_en = ParallelPriorityMux(s1_invalid_vec.zipWithIndex.map(x => x._1 -> UIntToOH(x._2.U(nWays.W))))
   s1_repl_way_en := Mux(
     GatedValidRegNext(s0_fire),
-    Mux(s1_req.missFailCauseEvictBtot, s1_req.occupyWay, UIntToOH(io.replaceWay.way)),
+    Mux(s1_req.missFailCauseEvictBtoT, s1_req.occupyWay, UIntToOH(io.replaceWay.way)),
     RegEnable(s1_repl_way_en, s1_valid)
   )
   val s1_repl_way = Wire(UInt(wayBits.W))
   s1_repl_way := Mux(
     GatedValidRegNext(s0_fire),
-    Mux(s1_req.missFailCauseEvictBtot, OHToUInt(s1_req.occupyWay), io.replaceWay.way),
+    Mux(s1_req.missFailCauseEvictBtoT, OHToUInt(s1_req.occupyWay), io.replaceWay.way),
     RegEnable(s1_repl_way, s1_valid)
   ) // UInt format of `s1_repl_way_en`
   val s1_repl_tag = ParallelMux(Mux(io.pseudoError.valid && s1_has_real_tag_eq_way, s1_real_tag_match_way_en, s1_repl_way_en).asBools,
@@ -529,9 +529,9 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   s2_s0_set_conflict_store := s2_valid && storeIdx === s2_idx && !s2_is_prefetch
 
   // BtoT grow blocked: too many in-flight BtoT occupies in this set; replay store
-  val s2_has_more_then3_ways_bto_t = PopCount(io.btotWaysForSet) > (nWays-2).U
-  val s2_grow_perm_fail = s2_has_more_then3_ways_bto_t && s2_grow_perm
-  XSError(s2_valid && s2_grow_perm && io.btotWaysForSet.andR,
+  val s2_has_more_then3_ways_b_to_t = PopCount(io.btoTWaysForSet) > (nWays-2).U
+  val s2_grow_perm_fail = s2_has_more_then3_ways_b_to_t && s2_grow_perm
+  XSError(s2_valid && s2_grow_perm && io.btoTWaysForSet.andR,
     "BtoT grow permission, but all ways are BtoT\n"
   )
 
@@ -1153,8 +1153,8 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.mainpipeInfo.s2_valid := s2_valid && s2_req.miss
   io.mainpipeInfo.s2_miss_id := s2_req.missId
   io.mainpipeInfo.s2_replay_to_mq := s2_can_go_to_mq_no_data
-  io.mainpipeInfo.s2_evict_bto_t_way := s2_can_go_to_mq_evict_fail
-  io.mainpipeInfo.s2_next_evict_way := PriorityEncoderOH(~io.btotWaysForSet)
+  io.mainpipeInfo.s2_evict_b_to_t_way := s2_can_go_to_mq_evict_fail
+  io.mainpipeInfo.s2_next_evict_way := PriorityEncoderOH(~io.btoTWaysForSet)
   io.mainpipeInfo.s3_valid := s3_valid
   io.mainpipeInfo.s3_miss_id := s3_req.missId
   io.mainpipeInfo.s3_refill_resp := RegNext(s2_valid && s2_req.miss && s2_fire_to_s3)

@@ -584,7 +584,7 @@ class AtomicsUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   pipe_req.amoData := genWdataAMO(rs2, LSUOpType.size(uop.fuOpType))
   pipe_req.amoMask := genWmaskAMO(paddr, LSUOpType.size(uop.fuOpType))
   pipe_req.amoCmp  := genWdataAMO(rd, LSUOpType.size(uop.fuOpType))
-  pipe_req.missFailCauseEvictBtot := false.B
+  pipe_req.missFailCauseEvictBtoT := false.B
 
   if (env.EnableDifftest) {
     val difftest = DifftestModule(new DiffAtomicEvent)

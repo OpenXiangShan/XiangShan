@@ -1008,7 +1008,7 @@ for(i <- 0 until reqNum) {
   io.mainPipeReq.bits.pfSource := req.pfSource
   io.mainPipeReq.bits.access := access
   io.mainPipeReq.bits.occupyWay := req.occupyWay
-  io.mainPipeReq.bits.missFailCauseEvictBtot := evictBtoTWay
+  io.mainPipeReq.bits.missFailCauseEvictBtoT := evictBtoTWay
 
   io.probe.block := reqValid && wGrantlast &&
     get_block_addr(req.addr) === get_block_addr(io.probe.req.bits.addr) &&
@@ -1167,7 +1167,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     // block all way for set to BtoT
     val evictSet = Input(UInt())
-    val btotWaysForSet = Output(UInt(nWays.W))
+    val btoTWaysForSet = Output(UInt(nWays.W))
 
     // occupy set check
     val occupySet = Input(Vec(LoadPipelineWidth, UInt()))
@@ -1715,7 +1715,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
       e.io.mainPipeResp := io.mainPipeResp.valid && io.mainPipeResp.bits.ackMissQueue && io.mainPipeResp.bits.missId === i.U
       e.io.mainPipeReplay := io.mainpipeInfo.s2_valid && io.mainpipeInfo.s2_replay_to_mq && io.mainpipeInfo.s2_miss_id === i.U
-      e.io.mainPipeEvictBtoTWay := io.mainpipeInfo.s2_valid && io.mainpipeInfo.s2_evict_bto_t_way && io.mainpipeInfo.s2_miss_id === i.U
+      e.io.mainPipeEvictBtoTWay := io.mainpipeInfo.s2_valid && io.mainpipeInfo.s2_evict_b_to_t_way && io.mainpipeInfo.s2_miss_id === i.U
       e.io.mainPipeNextEvictWay := io.mainpipeInfo.s2_next_evict_way
       e.io.mainPipeRefillResp := io.mainpipeInfo.s3_valid && io.mainpipeInfo.s3_refill_resp && io.mainpipeInfo.s3_miss_id === i.U
 
@@ -1785,7 +1785,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val btotEvictSetHit = entries.map(e => e.io.reqIsBtoT && e.io.reqVaddr.valid && addrToDcacheSet(e.io.reqVaddr.bits) === io.evictSet) ++
     parallelPipeRegs.map(_.evictSetMatch(io.evictSet))
   val btotOccupyWays = entries.map(e => e.io.occupyWay) ++ parallelPipeRegs.map(_.req.occupyWay)
-  io.btotWaysForSet := btotEvictSetHit.zip(btotOccupyWays).map {
+  io.btoTWaysForSet := btotEvictSetHit.zip(btotOccupyWays).map {
     case (hit, way) => Fill(nWays, hit) & way
   }.reduce(_|_)
 
