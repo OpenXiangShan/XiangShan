@@ -422,6 +422,10 @@ V2 独立 worktree 默认由 `eda01_entry.sh` 自动导出：
 - 不得把 `L2TLB_agent` 写成或接成 L2TLB 与 L2Cache/PTW/memory 的下游交互模型
 - L2TLB lookup 优先使用 DTLB request 中的 `vpn/s2xlate` 和 runtime CSR snapshot 中的 `asid/vmid/csr_update_seq`
 - 不应假设 DTLB -> L2TLB request 携带 `paddr`；出现 paddr 查表说法时必须重新确认语义
+- 多 outstanding responder 必须按每次 `valid && ready` request fire 建立独立 token；CSR monitor 必须独立发布 runtime latest snapshot，首份 snapshot 有效前不得开放 ready
+- CSR runtime latest 的逐拍 baseline 只能由 monitor 维护；semantic raw clear 后必须有明确的重新发布条件，不得依赖过期 local dedup 标志
+- 同一时刻只允许一个 L2TLB lifecycle owner；legacy agent default sequence 与显式 virtual sequence 是互斥启动拓扑，不能混用
+- active responder 观察到的 flush event 必须属于当前 sample；迟到 event 不得重新锚定并取消 flush 后的新 request
 - 所有 L2TLB 相关修改必须同步检查相关 plan 和规则文档，避免文档仍描述为 L2TLB/L2Cache 下游模型
 
 ## memblock 参数分类管理规则

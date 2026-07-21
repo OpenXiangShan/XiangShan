@@ -2,7 +2,7 @@
 
 本文档对应源码：
 
-- `mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_l2tlb_base_sequence.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
 
 ## 1. 文件定位与使用场景
 
@@ -22,7 +22,9 @@ L2TLB/PTW responder sequence。当前语义是响应 DTLB/L2TLB 上游 PTW reque
 
 - `body()`：`MEMBLOCK_L2TLB_SEQ_EN=0` 直接 return；否则要求 `memblock_sync_pkg::l2tlb_responder_active=1`，随后直接进入 responder loop。
 - `request_valid()`/`request_fire()`：检查 reset/backend done 和 request valid/ready。
-- `send_l2tlb_cycle()`：看到 request valid 后采样 `vpn/s2xlate`，先发 ready item，再给 response item 设置 `pre_pkt_gap=latency`，由 driver 消费 gap 后返回 response。
+- `send_l2tlb_cycle()`：当前实际检查 `request_valid()`，不是已经定义但未使用的
+  `request_fire()`；看到 valid 后采样 `vpn/s2xlate`，先发 ready item，再给 response item设置
+  `pre_pkt_gap=latency`，由 driver 消费 gap 后返回 response。
 - `sample_request_fields(vpn,s2xlate)`：从 vif 采样 DTLB request 的 `vpn/s2xlate`。
 - `fill_dtlb_resp_from_entry()`：把 `memblock_tlb_entry` 填成 PTW response，包括 S1/S2 tag、asid/vmid、权限、ppn、pf/af/gpf。
 - `choose_latency()`：在 min/max 间随机。
@@ -36,7 +38,7 @@ L2TLB/PTW responder sequence。当前语义是响应 DTLB/L2TLB 上游 PTW reque
 | 阶段 | 条件 | 动作 | 输出 |
 |---|---|---|---|
 | 使能检查 | `MEMBLOCK_L2TLB_SEQ_EN=1` | 要求 `memblock_sync_pkg::l2tlb_responder_active=1` | 允许 force responder |
-| 采样 request | DUT request valid/fire | 从 vif 采样 `vpn/s2xlate` | lookup key 的 request 部分 |
+| 采样 request | 当前实现只检查 DUT request valid | 从 vif 采样 `vpn/s2xlate` | lookup key 的 request 部分；尚未严格绑定真实 fire |
 | runtime CSR 同步 | 每次 lookup 前 | 同步 latest CSR snapshot，更新 ASID/VMID/update_seq | lookup key 的 CSR 部分 |
 | 查/建 TLB entry | `vpn/s2xlate/asid/vmid` | `common_data_transaction.get_or_create_tlb_entry_by_req()` | lookup key、entry、created |
 | 发送 response | entry 可用 | `fill_dtlb_resp_from_entry()` 填 `L2tlb_agent_agent_xaction` | DUT PTW/L2TLB response |
@@ -46,7 +48,9 @@ L2TLB/PTW responder sequence。当前语义是响应 DTLB/L2TLB 上游 PTW reque
 
 - `MEMBLOCK_L2TLB_SEQ_EN`：responder sequence 运行开关；默认 1 时 sequence 主动响应 L2TLB request，显式设为 0 时 sequence 直接返回，不主动发 response。
 - `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN`：编译期接管开关，默认 1；为 0 时该 sequence 即使被 runtime 打开也会 fatal，因为 agent 没有接管 response 通路。
-- `MEMBLOCK_L2TLB_MIN_LATENCY`、`MEMBLOCK_L2TLB_MAX_LATENCY`：request fire 后到 response 的随机延迟范围。
+- `MEMBLOCK_L2TLB_MIN_LATENCY`、`MEMBLOCK_L2TLB_MAX_LATENCY`：当前只控制 response item 的
+  `pre_pkt_gap` 均匀随机范围；由于采样入口使用 `request_valid()` 且 ready item/response item 串行，
+  不能把它严格解释为 request fire 到 response sample 的周期差。
 - `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE`：控制 responder loop 的连续空闲退出阈值，默认 5000。L2TLB responder 不再使用固定 `max_cycles` 退出；只要有 request/response progress，`idle_count` 清零；连续 idle 超过该阈值后退出。
 
 查表 miss 行为：
@@ -66,3 +70,43 @@ TLB 数据来源：
 - 该 sequence 只回填 DTLB/L2TLB 上游 response，不建主表、不分配 LSQ、不推进 commit。
 - 该 sequence 不等待 `main_table_ready`。它只在实际 DTLB request 到来时查/建 TLB entry，并尝试回填已存在的 pending uid record。
 - runtime CSR 变化不再清 TLB 索引或拒绝命中；上下文变化自然体现在 lookup key 的 ASID/VMID 字段中，真正失效由后续 `sfence/hfence` entry 级逻辑负责。
+
+## 3. 当前多 Outstanding 生命周期缺口
+
+当前源码没有 request queue、inflight counter 或 response driving slot。`send_l2tlb_item()` 使用阻塞的
+`start_item()/finish_item()`，driver 在 `resp_tr.pre_pkt_gap` 期间循环 `drive_idle()`；active takeover 的
+idle 又继续把 request ready 驱成1。因此 gap 期间后续 request 可以在 DUT 接口真实 fire，但 sequence
+仍阻塞且没有保存该 request。
+
+`MEMBLOCK_L2TLB_SEQ_EN=0` 直接返回或 idle-stop 退出后，driver 主循环仍继续，当前 `drive_idle()` 也可能
+保持 ready=1。该行为同样可能接受无人响应的晚到 request。
+
+上述缺口不是 permission 字段问题。正式修改方案由：
+
+```text
+AI_DOC/plan/test_framework/plan/undo/
+mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md
+```
+
+统一处理。该 plan 将增加 bounded pending queue、response driving slot、request-time CSR 冻结、
+ordered/reorder 回复、三档加权 latency、逐拍 driver item 和 reset/flush/stop 生命周期。在该 plan coding
+完成前，本文件前两章仍描述当前源码，不得把未来 queue 行为当成已实现能力。
+
+未来实现必须遵守三个边界：相同 key 的每次真实 request fire 都建立独立 token，不按 key 合并；三档
+latency 只定义最早 `due_sample`，端口竞争时 completion 可以更晚；CSR 使用 non-destructive latest
+snapshot 并按 sequence number 幂等应用，sfence/CSR changed 另用 non-destructive flush event snapshot
+通知 lifecycle owner，不消费 dispatch flow 的 raw sfence queue。该 event 来自顶层 CSR/fence monitor，
+所以 ready hold 使用顶层到 filter 清空的4拍总延迟，而不是只使用 `PTWNewFilter` 内部2拍
+`fenceDelay`。CSR monitor将新增不受semantic capture gate控制的runtime latest发布，保证legacy default
+sequence也能取得首份CSR；snapshot有效并应用前ready必须保持0且不累计idle，但仍处理flush/global
+stop。ready开放后迟到的flush event必须在状态变化前fatal，只有startup/reset且ready从未开放时可把
+旧event作为保守baseline。
+
+`memblock_tlb_entry` 当前没有 UVM field automation，未来 pending record 不能只保存 live table handle，
+也不能依赖默认 `uvm_object::copy()`；专项将用显式逐字段 `copy_from()` 保存 entry snapshot，使 response
+payload 和 response sample 后的 UID 回填读取同一份 request-time 数据。
+
+此外，legacy `tc_base` agent default sequence和`basicTest + VSEQ_MAIN`显式virtual sequence是两种
+分别合法的启动拓扑；未来实现必须在ready生效前try-claim package级lifecycle owner，只有hybrid
+并发第二实例fatal，不能依赖sequencer对item的仲裁来合并两个实例各自的pending queue。正常handoff
+只允许最终inactive item后的自然release；强制kill后的同仿真handoff不支持。

@@ -88,14 +88,33 @@ L2TLB responder sequence 的职责是消费 DTLB request 并生成 L2TLB respons
 `MEMBLOCK_L2TLB_SEQ_EN`，该组合应 fatal，因为 responder sequence 无法把 response
 合法送回 DUT。
 
+同一时刻只允许一个 L2TLB lifecycle sequence 实例运行。legacy testcase 的 agent default sequence与
+`basicTest + VSEQ_MAIN` 的显式 virtual sequence是两种分别合法的启动拓扑；同一 testcase 不得混用，
+也不能各建一份 pending queue 后依赖 sequencer item arbitration 混跑。active sequence 必须在ready
+生效前 try-claim package 级 owner；公共 package helper只返回成功状态和当前owner名，UVM fatal由
+sequence报告。最终inactive item完成并自然退出后再release。
+
+正常owner交接只允许自然release后由后续实例claim。对持有owner的sequence执行`kill()`、
+`stop_sequences()`或phase jump后再在同一仿真启动新owner，不属于当前支持范围；强制终止只能用于
+仿真整体结束，不能依赖残留ready/owner自动恢复。
+
 推荐流程：
 
-1. monitor 或 sequence 采集 DTLB -> L2TLB request。
-2. 从 request 中保存 `vpn/s2xlate`，并在 request 采样时刻保存 runtime CSR snapshot，例如 `satp.asid/vsatp.asid/hgatp.vmid`。
+1. monitor 或 sequence 只在 DTLB -> L2TLB 的 `valid && ready` request fire 边界采集请求。
+2. 从 request 中保存 `vpn/s2xlate`，并在该 fire 边界保存 runtime CSR snapshot，例如
+   `satp.asid/vsatp.asid/hgatp.vmid`；延迟 response 时不得重新读取 current CSR 替换该 snapshot。
 3. 通过 req 的 `s2xlate` 选择有效 `asid/vmid` 字段，并构造 TLB lookup key。
-4. 查询 `common_data_transaction.sv` 中的 TLB 表。
-5. 构造 response item。
-6. 通过 L2TLB agent driver 返回给 DTLB。
+4. 每笔已握手 request 必须有独立 lifecycle record；如果版本 profile 允许多 outstanding，使用有
+   compile 上界的 queue 保存全部 request，不能在 driver gap 期间继续 ready 却不采样。
+   相同 lookup key 的多次真实 request fire 也必须分别建 record，除非对应版本 profile 明确证明
+   该接口允许把已接受 request 合并；当前 V2 明确禁止按 key 合并 token。
+   reset/flush 可以按版本合同取消 token 并不返回 response，但必须进入 canceled 记账，不能 silent drop。
+5. 查询 `common_data_transaction.sv` 中的 TLB 表并冻结 response item。
+   若 TLB entry class 没有完整 UVM field automation，不得把 live table handle 或默认 `copy()` 冒充
+   request-time snapshot；必须使用显式逐字段 copy helper，并让 response payload与完成时UID回填同源。
+6. 按对应版本 profile 允许的 ordered/reorder 合同选择已到期 request，每拍最多返回一笔。
+7. 通过 L2TLB agent driver 返回给 DTLB；只有 response 的真实 sample 边界后才登记完成并更新
+   依赖 response 完成的公共记录。
 
 注意：
 
@@ -103,6 +122,31 @@ L2TLB responder sequence 的职责是消费 DTLB request 并生成 L2TLB respons
 - 若文档或实现中出现“根据采集到的 paddr 查 L2TLB 表”的说法，必须重新确认来源。当前规则下优先使用 DTLB request 的 `vpn/s2xlate` 与 runtime CSR 的 `asid/vmid` 查表。
 - 所有基于 CSR 的 L2TLB lookup 必须使用运行时 CSR 镜像，不允许直接使用静态初始配置或 plus/参数快照。
 - `seq_csr_common.sv` 只提供 plus 配置和权重，不提供 CSR 运行时真值。
+- CSR monitor必须在post-reset sample独立发布non-destructive runtime CSR latest snapshot，不得让该
+  发布依赖dispatch semantic raw capture gate；semantic raw路径仍保留原gate。两条latest视图必须共享
+  同一snapshot sequence并幂等写入同一runtime CSR state，不能形成两套CSR模型。逐拍payload baseline
+  由monitor唯一持有并在每个post-reset sample更新；semantic latest被clear后，统一seq mismatch或
+  semantic valid=0必须使下一gate sample重新发布。
+- responder取得并应用首份有效runtime CSR snapshot前必须保持request ready为0，且该启动等待不能累计
+  idle-stop；不得用未初始化CSR构造lookup key。CSR未就绪路径仍必须处理flush event和global stop，
+  不能提前continue导致owner无法退出。
+- response 延迟应在 responder queue 中表示为 `due sample/cycle`，不得用会阻塞整个 driver 的
+  `pre_pkt_gap/post_pkt_gap` 实现多 outstanding latency。
+- `due sample/cycle` 只表示最早可响应边界；ordered head blocking 或单 response 端口竞争允许实际
+  completion 更晚，必须检查 completion 不早于 due，不能把 latency 档误写成拥塞下保证完成周期。
+- queue 满时通过 request ready 合法反压；ready 是 queue 容量和 reset/flush/stop 状态的派生值，
+  不建立同义 runtime ready plus。
+- reset、sfence 和 translation CSR changed 必须定义 pending request 的删除或排空规则；不得让 DUT
+  已 flush 的旧 request 在长延迟后收到无 owner response。
+- flush ready hold 必须以 event 的实际 monitor 观测点到 DTLB filter 清空点的总 pipeline 延迟为准；
+  若版本 profile 在 filter 外还有寄存级，不能只使用 filter 内部 `fenceDelay`。
+- 多 consumer 观察 flush 时应使用 non-destructive snapshot/event sequence；不得让 L2TLB lifecycle
+  owner pop 掉 dispatch/CSR flow 仍需消费的 raw sfence queue。
+- ready已经开放后，sequence首次观察到的新flush event必须来自当前sample；迟到event必须在修改
+  queue/driving/counter前fatal，不能从当前拍重新锚定并错误取消flush后新request。只有reset/startup且
+  ready从未开放时，才允许把较早latest event作为baseline并保守hold完整pipeline延迟。
+- idle-stop必须在构造下一cycle item前决定，退出路径必须发送最终`ready=0/resp_valid=0` item；禁止
+  发送ready=1后立即退出。
 
 ## driver / monitor 规则
 
@@ -116,6 +160,9 @@ monitor 应关注 DTLB 发往 L2TLB 的 request fire 和请求字段，至少包
 driver 应驱动 L2TLB 返回 DTLB 的 response，不应驱动 L2Cache/PTW 下游接口。
 
 driver/monitor 字段命名、方向和 valid/ready 语义必须以实际 Verilog interface 和 Scala/RTL 接口为准。无法确认时先查 RTL，不允许按 agent 名称猜测端口方向。
+
+当前 active responder 只允许 `DRV_0` idle 基线。`DRV_1` 等 generic pattern mode 会在没有合法 request
+lifecycle 时制造 ready/response，driver 必须 fail-fast，不能把它当作 L2TLB responder 压力模式。
 
 ## common data / TLB lookup 规则
 

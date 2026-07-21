@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待各专项 coding；L2TLB request lifecycle 尚待建立唯一子 plan owner |
+| 状态 | `undo`，待各专项 coding；L2TLB response/permission 与多 outstanding lifecycle 已建立唯一子 plan owner |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv`、`build_memblock/rtl/filelist.f` |
@@ -55,9 +55,8 @@ test -e build_memblock/rtl/filelist.f
 | split issue、vector stimulus/driver gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_split_issue_framework_adapt_execution_plan_20260708.md`；只拥有vecissue默认入口关闭和driver valid fatal，不修改vector output monitor |
 | IQ feedback/replay、VSTU gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_iq_feedback_replay_framework_adapt_execution_plan_20260711.md`；唯一实现STA SQ-only raw、current snapshot attach和VSTU valid fatal |
 | int-WB/writeback | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_int_wb_writeback_framework_adapt_execution_plan_20260708.md` |
-| CSR/sfence/runtime snapshot | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_csr_control_runtime_semantic_review_execution_plan_20260708.md` |
-| L2TLB response/permission | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md`；只拥有 permission 字段链和 responder 方向边界 |
-| L2TLB ready/single-outstanding lifecycle | 当前没有子 plan coding owner；不得从本总控直接 coding，后续必须扩展并重审 L2TLB 专项或建立唯一 lifecycle owner |
+| CSR/sfence payload字段与runtime语义 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_csr_control_runtime_semantic_review_execution_plan_20260708.md`；拥有CSR字段采样/消费语义；L2TLB专项只拥有不受semantic capture gate控制的latest发布 plumbing，并复用同一raw类型、统一seq和公共state，不复制字段模型 |
+| L2TLB response/permission、多 outstanding lifecycle | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md`；唯一拥有 permission 字段链、独立runtime CSR latest发布与统一seq、request-time CSR 冻结、per-fire token、pending queue、ordered/reorder 调度、三档最早 due、ready、reset/non-destructive flush event/stop 生命周期 |
 | LSQ MMIO/status、cancel output 对账 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`；该专项拥有per-epoch record、独立cancel snapshot/redirect anchor sideband源码与consumer、software/observed直接对账和global-stop gate，不能把observed count接到第二个SQ deq/free-count owner |
 | pending-MMIO load/store sideband | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md` |
 | monitor output分类、vector-WB gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md`；只规定ctrl snapshot/redirect anchor的monitor职责合同并唯一实现`writebackVldu` valid fatal；具体sideband类型、queue、producer源码、consumer和reconcile由LSQ MMIO/status专项唯一coding |
@@ -553,53 +552,90 @@ service_real_dispatch_flow() 的既有退出调用点：
   禁止service_monitor_once直接再次调用request_global_stop_if_done。
 ```
 
-## 9. 问题七：L2TLB response permission 已有 owner，request lifecycle 仍无 owner
+## 9. 问题七：L2TLB 串行阻塞 responder 会漏采 V2 多 outstanding request
 
 ### V2 问题
 
-V2 有 `_inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_g/u` 等 response permission 字段。仅把字段机械接到
-interface 不足以保证 active takeover 路径完整。总控旧稿同时加入了 request ready、single-outstanding、
-response cadence 和 stopping/reset 状态机，但当前 L2TLB permission 子 plan 明确不拥有这些生命周期逻辑，
-CSR 子 plan也明确不拥有 L2TLB request gate 或 outstanding tracker。
+V2 有 `_inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_g/u` 等 response permission 字段，同时
+`PTWNewFilter` 内部保存多笔 `vpn/s2xlate` request。当前 sequence 只按 `request_valid()` 串行发送
+ready item 和带 `pre_pkt_gap` 的 response item；gap 期间 driver idle 仍把 ready 置1，新的 request 可以
+真实 fire，但 sequence 正阻塞且没有 pending queue，存在丢请求风险。sequence 关闭或 idle-stop 退出后，
+driver 继续 active idle 也有同类风险。
 
 ### 修改原因
 
-L2TLB permission 字段链和 responder 方向已有唯一子 plan，可以直接按该 plan coding。request ready 和
-single-outstanding 是另一类运行期生命周期；在没有唯一子 plan owner、完整函数合同和退出边界前，不能
-继续把总控中的草案状态机当作可执行方案，否则会绕过正式 plan review。
+V2 `PtwRespS2` 没有 request ID，但 `PTWFilterEntry` 对全部有效 entry 按
+`s2xlate + hit(vpn/asid/vasid/vmid)` 匹配；L2TLB 又可从 cache、PTW FSM 和 LLPTW 三条不同延迟路径
+仲裁返回，因此 response 可按内容乱序命中。测试框架必须保存所有已握手 request，并在保留默认顺序模式
+的同时提供显式乱序模式。response 延迟不能继续阻塞 driver，而要成为每笔 queue record 的 due sample。
 
 ### 修改方案与修改逻辑
 
-L2TLB permission 专项只负责：
+扩展后的 L2TLB 专项唯一负责：
 
-- 检查 `s2_entry_perm_g/u` 从 `memblock_tlb_entry.pte_g/pte_u` 经 sequence、xaction、driver、interface、
-  active connect 到 RTL internal wire 的完整字段链；链路完整时不产生 SV diff，断链时只补断裂层。
-- 保持 `DTLB -> L2TLB_agent request`、`L2TLB_agent -> DTLB response` responder 方向，不接顶层
-  `io_l2_tlb_req_*` 或 L2Cache/PTW/memory 下游模型。
-- lookup 继续使用 request `vpn/s2xlate` 与 runtime CSR，不使用 paddr 替代 request key。
-- 当前 s1/s2 permission 继续同源 `entry.pte_*`；两套 PTE 独立建模属于后续 TODO。
-
-当前没有子 plan owner的边界：
-
-- `l2tlb_request_accept_enable`、strict outstanding count、driver ready gate、response cadence、idle-stop、
-  stopping/reset 状态机均不得从本总控直接 coding。
-- 后续若确认需要该 lifecycle，必须扩展并重审 L2TLB 专项或建立唯一专项 owner，再把最终合同回写总控。
+- 检查 `s2_entry_perm_g/u` 从 `entry.pte_g/pte_u` 经 sequence、xaction、driver、interface、active connect
+  到 RTL internal wire 的完整字段链。
+- 保持内部 `DTLB -> L2TLB_agent -> DTLB` responder 方向，不接顶层 `io_l2_tlb_req_*` 或下游模型。
+- 增加 compile `DFILTER_SIZE=32/FLUSH_HOLD_CYCLES=4` 及 `memblock_dispatch_types.sv` 同名typed
+  localparam，其中4拍来自顶层 CSR/sfence 到 internal
+  filter 的两级 `RegNext` 加 filter 内部 `fenceDelay=2`；runtime `MAX_OUTSTANDING`、`RESP_REORDER_EN`、
+  1拍/中/长最早可响应延迟值和三档权重；删除旧 `MIN/MAX_LATENCY`，避免两套延迟权威。
+- 用 `pending_q + driving slot` 保存全部 accepted request；request fire 时用显式 `copy_from()` 冻结
+  CSR/key/entry snapshot/response，
+  response sample 确认后才更新 uid TLB record。
+- legacy `tc_base` default sequence和`basicTest + VSEQ_MAIN`显式vseq是两种分别合法的启动拓扑；用
+  package try-claim/release拒绝hybrid并发建立第二份pending queue，package只返回状态，UVM fatal由
+  sequence报告；sequencer item arbitration不能替代lifecycle owner唯一性。
+- 相同 key 的每次真实 request fire 都建立独立 token 并各返回一次；不得因较早 response 可同时 refill
+  多个 DTLB filter entry 而合并、删除或跳过后续已接受 token。
+- ordered 模式只允许最老 due request 回复；reorder 模式在全部 due request 中用 `std::randomize` 选择。
+- 逐拍 cycle item 驱动 ready/response，driver 的 `pre_pkt_gap/post_pkt_gap` 必须为0；queue-full、reset、
+  sfence/CSR non-destructive flush event snapshot、global stop 和 idle-stop 生命周期均由该专项闭环。
+- 首份latest runtime CSR未有效前保持ready=0且不累计idle；active阶段新flush event必须与当前sample
+  同时，迟到event在任何queue/counter变化前fatal，只有ready从未开放的startup/reset允许旧baseline保守hold。
+- CSR monitor在post-reset sample无条件发布non-destructive runtime CSR latest snapshot；逐拍baseline只由
+  monitor维护并更新，semantic `push_raw_csr()`继续受capture gate控制；两条latest视图复用同一snapshot
+  sequence并幂等写同一`mmu_csr_state`，semantic clear后下一gate sample按valid/seq mismatch重发，保证
+  legacy `tc_base` default responder也能取得首份CSR。
+- idle-stop在构造下一cycle item前进入stopping并发送最终inactive item；强制kill/stop/phase jump后的
+  同仿真owner handoff不支持，正常handoff只允许自然release。
+- 三档 latency 只决定 `due_sample`，即最早可响应拍；端口竞争或 ordered head blocking 可以使实际
+  `complete_sample` 更晚，始终要求 `complete_sample>=due_sample`。
+- 当前 s1/s2 permission 继续同源 `entry.pte_*`；两套 PTE 独立建模仍属于 TODO。
 
 ### 文字伪代码
 
 ```text
+L2TLB request/response service：
+  每个sample边界先锁存request valid/vpn/s2xlate和接口实际ready；
+  等待NBA region后一次读取runtime CSR latest和non-destructive flush event_seq/sample_time snapshot；
+  先只读判定reset/backend；reset路径吸收latest flush baseline并清账，不执行active freshness fatal；
+  post-reset active阶段再校验新event.sample_time等于当前$time，迟到或超前均在任何状态变化前fatal；
+  校验通过后确认上一driving response，再按统一runtime CSR snapshot序号幂等同步runtime CSR；
+  合法event_seq前进时取消旧pending并按FLUSH_HOLD_CYCLES=4建立ready hold，即使CSR尚无效也推进event；
+  active同sample首次观察到新event时，旧ready形成的真实fire分配token并计入accepted/canceled；
+  startup/reset旧baseline因ready从未开放，只建立保守hold，不创建killed token；
+  CSR无效却观察到fire则fatal；CSR有效的真实request fire生成内部token，显式复制snapshot字段和
+  CSR/key/entry snapshot并冻结response后入pending_q；
+  相同key的每次fire仍各自入queue，禁止token合并；
+  处理global stop和idle-stop；CSR无效时保持inactive、不累计idle，但global stop仍可正常release退出；
+  CSR有效时按due sample和ordered/reorder模式最多选择一笔response；
+  pending与driving总数达到runtime上限时，下一cycle item把ready置0；
+  stop关闭新ready但排空已接受请求；在构造item前已经完成stop/idle-stop决定；
+  构造唯一gap=0 cycle item，idle-stop/CSR无效退出路径只能构造ready=0/resp=0；
+  driver驱动该item，不在driver内部等待延迟；
+  sequence在ready生效前try-claim唯一owner，最终inactive item后自然release；hybrid第二实例fatal；
+  response只在下一sample边界被确认后更新uid TLB record，reset/flush按专项event snapshot规则清理；
+  due只表示最早可响应拍，拥塞时complete允许晚于due但禁止早于due。
+  每次更新复查accepted=completed+flush/reset canceled+pending+driving。
+
 permission 字段链审计：
   从entry.pte_g/pte_u开始逐层检查s2_entry_perm_g/u；
   active takeover路径任一层缺声明、缺搬运或被常量0替代时，只修复该断裂层；
   inactive takeover分支可保持0，但必须说明它不是被动观察模式；
   request继续来自内部DTLB request的vpn/s2xlate；
   response继续返回内部DTLB，不接顶层L2/PMP端口；
-  不修改ready、outstanding、cadence或stopping状态。
-
-request lifecycle 后续处理：
-  当前总控只登记owner缺口；
-  在唯一子plan完成方案评审前，不新增gate、tracker或driver状态迁移；
-  当前permission专项完成不等价于single-outstanding lifecycle已完成。
+  共享entry.pte_*仍同时填S1/S2，独立两阶段权限留在TODO。
 ```
 
 ## 10. 问题八：CSR/sfence、debug 和 DCache L2 sideband 的默认与消费语义不同
@@ -736,8 +772,8 @@ V2 专项之间存在硬依赖，coding 应按以下顺序执行：
 5. 执行 int-WB 与 IQ feedback/replay，建立 monitor raw 到 current status 的事件链。
 6. 执行 monitor output 的 cancel snapshot/redirect anchor producer边界，并与 LSQ MMIO/status 的
    sideband consumer、record、主service和global-stop gate作为同一原子批次完成；不得只落producer。
-7. 执行 pending-MMIO producer/query、L2TLB permission、CSR/sfence、DCache sideband 和其余 monitor
-   output 分类；L2TLB request lifecycle 在唯一子 plan owner 建立前跳过，不得从总控实现。
+7. 执行 pending-MMIO producer/query、L2TLB response/permission 与多 outstanding lifecycle、CSR/sfence、
+   DCache sideband和其余monitor output分类；L2TLB源码修改只按其唯一专项执行，不从总控复制状态机。
 8. 每个专项完成后按各自 plan 运行静态检查、远端 compile/smoke，并生成对应 implementation review。
 
 ### 文字伪代码
@@ -773,8 +809,10 @@ make eda_run tc=tc_sanity mode=base_fun
 - LSQ enqueue：V2 clock-first streaming、launch reservation/下一边界 sample、6/4 capacity gate、随机idle和redirect epoch路径。
 - IQ feedback/replay：STA IQ/WB 正向和独立 expected-fatal。
 - LSQ MMIO/status：normal pendingst/scommit、fault-at-tail、V2 SQ count-only、driver active idle hold。
-- L2TLB permission：检查 `s2_entry_perm_g/u` active字段链、内部DTLB/L2TLB responder方向和
-  `vpn/s2xlate` lookup；single-outstanding、ready gate和idle-stop尚无子plan owner，不属于当前验收项。
+- L2TLB responder：检查 `s2_entry_perm_g/u` active字段链、内部DTLB/L2TLB方向和
+  `vpn/s2xlate` lookup；以bounded queue保存多outstanding，默认保序、可配置乱序，三档权重延迟，
+  request-time CSR冻结，相同key按每次request fire独立记账，response sample后更新uid record，并闭环
+  ready/reset/non-destructive flush event/stop；三档值只约束最早due，拥塞时complete可以更晚。
 - DCache 轻量 L2 responder：默认 cfg 的 hint/Probe 为 0；专项 cfg 检查 request-bound hint、
   small/medium/large delay、map-backed Probe 和 Release/GrantAck 生命周期；任意非零
   `io_l2_flush_done` 在首个 vif 赋值前 fatal。
@@ -805,8 +843,8 @@ make eda_run tc=tc_sanity mode=base_fun
 - LSQ enqueue slot 占用、load/store batch element 数、随机idle类别和redirect launch/sample时点。
 - STA IQ hit/miss、real-WB、expected-fatal 类型。
 - normal commit、fault convergence、V2 SQ count-only deq。
-- L2TLB response permission字段；ready gate/outstanding/response lifecycle仅在后续唯一owner实现后才可
-  作为coverage采样入口。
+- L2TLB response permission、request token、ordered/reorder mode、latency bucket、queue high-water、
+  flush drop和response complete sample；本总控不实现对应covergroup。
 
 覆盖率实现必须另建专项，不得混入本总控或当前测试框架激励主流程。
 
@@ -827,7 +865,7 @@ make eda_run tc=tc_sanity mode=base_fun
 | `scommit`/`sqDeq` 计数与指针 | 功能逻辑修正 | 可能把 ROB commit 数当成 SQ 释放数，或用 `scommit` 推进 `sq_deq_ptr`；load-only commit 边界不清 | ROB commit 与 SQ physical deq 是不同阶段，寄存器延迟和计数单位不同，`sqDeq=2` 只表示两个 SQ entry | normal batch 全部 UID 写 commit 状态，`scommit` 只传 scalar store 子集；`sqDeq` 只释放 SQ mapping；`sq_deq_ptr` 只由 reset/真实 deq release 更新，`sq_free_count` 独立按 reset/allocation/cancel/deq 更新；不建立同拍相等关系 |
 | redirect cancel record、reservation生命周期、free count 与 DUT 对账 | 功能逻辑新增/跨专项接口适配 | 聚合cancel回退；driver done即可早扫active map；pending batch只有UID与flush epoch、无稳定launch token；若reissue复用status reset会把旧token清零；cancel只采样/XZ | 早扫会被未消费deq污染；顶层/LSQ双T0和clocking monitor可见拍不同；token必须跨reissue/deq区分动态实例，且不能替代batch flush gate；observed不能写软件状态 | record创建后等待anchor、T0_lsq和ctrl drain再唯一扫描；pending UID升级为reservation token，原batch dispatch/flush epoch独立保留；void allocation后由begin/mark helper维护单调token和sample事实；snapshot只复制静态key，status reset仅用于首次建表/全表reset；sample早于/等于T0_lsq分别计allocated/same-cycle，晚于cutoff fatal；T0+3比较snapshot，rollback只消费finalized record，software/observed独立收敛 |
 | cancel directed验证 | 新增真实DUT场景和退出闭环 | software-only fault smoke直接改状态；既有basicTest real-smoke vseq记录过同拍结束，mapping后victim也可能先issue | DUT observed对账必须经过真实VIF且可重复制造LQ/SQ非零victim，后台sequence不能依赖phase强杀 | software-only只测ledger；新vseq使用automatic objection、3-entry table、victim issue delay和DUT_VISIBLE barrier，经redirect driver/anchor/snapshot/reconcile后要求LQ/SQ非零match、reissue、后台自然退出和终态收敛 |
-| L2TLB permission与lifecycle边界 | 字段链适配+owner缺口澄清 | permission字段链和ready生命周期混在总控并共同指向permission专项 | permission专项明确只处理字段链，CSR专项也不拥有ready/outstanding | 当前只执行`s2_entry_perm_g/u`字段链与responder方向审计；ready/single-outstanding/cadence/stopping不从总控coding，等待后续唯一owner |
+| L2TLB permission与lifecycle | 字段链适配+功能逻辑新增 | `request_valid`后串行ready/阻塞gap/response，无queue；gap和sequence退出时ready仍可接受无人记录请求；延迟值被driver gap当作串行等待；hybrid启动可建立两个状态owner；live entry handle不构成不可变快照；legacy default responder取不到gated raw CSR | V2 DTLB filter有32-entry多inflight并按内容匹配，L2TLB多路径允许返回次序变化；重复key可能跨filter产生多次request fire，真实L2TLB仍按每次fire记账；顶层flush到filter清空有2级RegNext+2拍fenceDelay；sequencer只能仲裁item不能合并queue；entry未注册UVM copy字段；lookup必须等待runtime CSR | 唯一专项实现package try-claim/release、独立runtime CSR latest发布并与semantic raw共享seq、`pending_q+driving slot`、显式entry `copy_from()`与request-time CSR冻结、CSR-ready gate、相同key每fire独立token、默认保序/可配乱序、三档最早due权重、逐拍driver、queue-full backpressure及reset/non-destructive flush event/4拍hold/stop；active迟到flush event状态变更前fatal，idle-stop先发最终inactive item；实际complete可晚于due，permission字段链保持最小适配 |
 | CSR/sfence | runtime snapshot/接口透传 | 近义字段可能混入 lookup/pass-fail，flushPipe 默认值和观测链不完整 | V2 字段语义分层，flushPipe 不影响当前框架行为 | snapshot-only；flushPipe 默认0、原值驱动、仅观测不消费 |
 | DCache L2 sideband | DUT input/responder | generic idle/random 可能驱无归属 hint 或 flush done | hint 只允许关联 GrantData，flush done 当前无合法 producer | request-bound hint；generic/idle known-zero；flush done 非零首赋值前 fatal |
 | monitor output | 观察链分类与时序sideband新增 | raw producer与analysis producer容易混淆，held cancel没有合法event valid，redirect monitor只有XZ回看 | RM transaction尚未闭环；cancel对账需要逐拍value和顶层采样锚点，但不能污染semantic batch/recovery | 5条semantic runtime路径保持；OUTPUT_OBSERVATION_XZ、ANALYSIS_PORT_DEFERRED分层；另增cancel snapshot/redirect anchor sideband，禁止当semantic raw或RM producer |
@@ -850,8 +888,8 @@ helper的输入、输出、副作用和完整伪代码以各专项执行plan正�
   V3 literal/接口残留分散；LSQ allocation与sample同拍；raw可能伪造key；commit/deq/cancel职责交叠；
   monitor output、L2TLB、CSR和DCache sideband边界不完整。
 修改后逻辑行为：
-  compile、VADDR、enqueue、issue、WB/IQ、MMIO/status、L2TLB permission、CSR、DCache和monitor分别由owner表执行；
-  L2TLB request lifecycle明确保持未分配owner状态，不从总控复制实现；
+  compile、VADDR、enqueue、issue、WB/IQ、MMIO/status、L2TLB responder、CSR、DCache和monitor分别由owner表执行；
+  L2TLB request/response lifecycle由扩展后的L2TLB专项唯一实现，总控不复制queue或driver状态机；
   跨专项只通过公开字段/helper合同交接，任一非owner不得复制状态机或写者。
 差异影响：
   改变V2字段来源、失败边界、部分driver/monitor时序和状态收敛；不改变各owner声明保持不变的主表顺序、
@@ -875,7 +913,7 @@ cancel_redirect_scan_ready(record) / service_cancel_reconcile()：
 encode_and_fit_dut_futype() / fit_directed_rob_value_or_fatal()：
   owner为已归档compile专项；输入内部编码或directed value，输出无损DUT值；不可表示时fatal，无运行期状态副作用。
 
-各issue/WB/IQ/L2TLB permission/CSR/DCache helper：
+各issue/WB/IQ/L2TLB responder/CSR/DCache helper：
   只由owner表对应专项新增或修改；总控只检查输入来自真实raw/current snapshot、输出进入既有queue/driver，
   以及unsupported路径fail-fast，不复制其候选循环、状态更新或fallback实现。
 ```
