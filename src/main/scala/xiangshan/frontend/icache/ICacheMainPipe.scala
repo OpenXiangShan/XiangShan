@@ -134,7 +134,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s0_hasMmio          = s0_wayLookupEntry.map(_.isMmio).reduce(_ || _)
   private val s0_hasItlbException = s0_exceptionInfo.map(_.itlbException.hasException).reduce(_ || _)
   private val s0_realTwoFetchValid = io.fromFtq.bits.req(1).valid && io.fromWayLookup.bits.wayLookupInfo(1).valid &&
-    !s0_dataSramReadConflict && !s0_hasMmio && !s0_hasItlbException
+    !s0_dataSramReadConflict && !s0_hasMmio && !s0_hasItlbException && false.B
 
   s0_req(1).valid := s0_realTwoFetchValid
 
