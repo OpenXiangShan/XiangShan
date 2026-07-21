@@ -515,11 +515,9 @@ TODO：
 
 ## 12. V2 L2 hint 与 L2 flush completion responder 完整闭环 TODO
 
-状态：当前不支持主动非零 L2 hint，也不支持具有 request/in-flight/completion
-关联的 L2 flush/低功耗完成模型。当前安全适配由
-`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_dcache_l2_sideband_responder_adapt_execution_plan_20260712.md`
-定义：以下四个 DUT input 从 time zero 到测试结束必须始终 known-zero，任何 transaction
-非零值在 driver 首次写 vif 前 fatal。
+状态：V2 request-bound L2 hint、轻量 coherent response、地址表和低频 Probe 已形成待执行专项 plan：
+`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`。
+`io_l2_flush_done` 仍不支持具有 request/in-flight/completion 关联的非零模型，继续保持 zero-only。
 
 ```text
 io_l2_hint_valid
@@ -528,16 +526,15 @@ io_l2_hint_bits_isKeyword
 io_l2_flush_done
 ```
 
-当前 zero-only 策略：
+当前能力边界：
 
-- interface 声明初始化、xaction hard constraint、constructor、idle/response builder、
-  `drive_idle()` 和 `send_pkt()` 共同保证四字段为0。
-- DCache A/B/C/D/E responder、memory model、load/store completion 和现有 replay flow
-  不产生主动 L2 hint。
+- interface 声明初始化、generic xaction、constructor、idle builder 和 `drive_idle()` 共同保证
+  无 owner 周期的四字段为 0。
+- 专用 responder 只允许对已接受的 `AcquireBlock -> GrantData` 产生一次 hint；Grant、CBOAck、
+  ReleaseAck、AccessAckData 和非 DCache client 不产生 hint。
 - 没有合法 L2 flush request 时不得产生 `l2_flush_done`；不得使用随机 pulse、固定周期
   pulse或 testcase 直接赋值伪造完成。
-- 不得通过删除 hard-zero constraint、关闭 driver fatal 或把字段改成 soft constraint
-  来宣称支持该功能。
+- 不得由 generic random transaction 或第二个并发 sequence 产生 hint/flush sideband。
 
 为什么需要独立专项：
 
@@ -551,24 +548,15 @@ io_l2_flush_done
 
 ### 12.1 L2 hint responder TODO
 
-- 新建 V2 L2 hint responder 专项 plan，明确 responder 所属 agent、唯一驱动 owner、
-  reset/idle行为和与现有 DCache responder 的协作边界。
-- 从实际 DCache/L2 transaction 建立 hint 候选，定义 `sourceId` 的权威来源；不得从
-  主表 uid、LQ/SQ key 或随机数直接伪造 MSHR source。
-- 建立 outstanding MSHR/sourceId 表，记录 request 类型、地址、source、GrantData beat
-  进度、keyword beat 和生命周期 epoch。
-- 只有 sourceId 唯一命中 active outstanding entry 时才允许 `l2_hint_valid=1`；未命中、
-  重复命中、已完成或已取消 source 必须 fail-fast 或按专项定义明确 drop。
-- 定义 hint 相对 GrantData 的合法窗口：最早/最晚周期、是否允许同拍、是否允许多次 hint，
-  以及 transaction 完成后何时删除 outstanding 状态。
-- 定义 `isKeyword` 的生成规则，必须由真实 beat/keyword 语义派生；禁止独立随机。
-- 定义 hint 与 DCache miss、MSHR merge、refill、LoadQueueReplay、redirect/replay 和 reset
-  的优先级及取消规则，避免唤醒已失效的 load。
-- 增加默认关闭的 plus/cfg 或 directed testcase 入口；关闭时继续执行现有 hard-zero合同。
-- directed testcase 至少覆盖：合法 source hint、keyword/non-keyword、hint-before-refill、
-  同拍 hint/refill、重复 hint、未知 source、redirect 后旧 source hint 和 reset 清理。
-- 增加 monitor/debug dump 和 end check，保证没有遗留 outstanding source、重复消费或
-  无归属 hint。
+- 执行 2026-07-17 轻量 L2Cache 专项 plan；唯一 owner 为现有
+  `dcache_mem__access_base_sequence` 的逐拍 service loop。
+- hint 候选只来自当前 DCache 分离端口已接受的 `AcquireBlock`，source 限制 0..15，
+  `sourceId/isKeyword` 分别取 A source 低 4 bit和 A echo。
+- 使用单 A reply 在途状态关联 hint 与两拍 GrantData，不建立主表 uid、LQ/SQ key 或第二份 MSHR 表。
+- hint 按参数在 no-hint fallback 和一次有效 pulse 之间采样；首拍 D.valid 位于 hint 后 2/3 拍，
+  backpressure 只允许把实际 D.fire 推迟。
+- 同一专项同时闭环 Grant/GrantData/CBOAck/ReleaseAck、固定 sink E ack、缓存地址表和轻量 Probe，
+  但不实现完整 L2 directory 或多 outstanding。
 
 ### 12.2 L2 flush/低功耗 completion responder TODO
 
@@ -590,11 +578,12 @@ io_l2_flush_done
   timeout、重复request、back-to-back request、reset during in-flight 和 completion去重。
 - end check 必须保证无未完成 flush、无孤立 done、request/completion 计数一致。
 
-### 12.3 开放非零 sideband 的前置条件
+### 12.3 开放非零 sideband 的条件
 
-只有以下条件全部满足后，才能修改当前 zero-only plan并允许四字段非零：
+Hint 只按 2026-07-17 专项 plan 的 request-bound 合同开放；`io_l2_flush_done` 只有以下条件全部满足后
+才允许从当前 zero-only 合同开放：
 
-- 两个专项分别形成已 review 的执行 plan，明确唯一 owner 和状态生命周期。
+- flush completion 专项形成已 review 的执行 plan，明确唯一 owner 和状态生命周期。
 - 非零值来自真实 request/outstanding 状态，而不是 random transaction payload。
 - interface/xaction/driver/builder 的 hard-zero合同按 capability 精确拆分，默认普通 smoke
   仍保持 zero-only。
@@ -701,3 +690,46 @@ agent 的 base sequence/driver。
 形成独立可 coding plan 并通过 review 后，才能从 V2 LSQ enqueue 适配 plan 的“不支持”列表中移除。
 专项默认关闭时，当前普通 scalar enqueue、issue、writeback、commit/deq、redirect/replay 和 terminal
 行为必须保持完全不变。
+
+## 14. V2 L2TLB S1/S2 PTE 权限独立建模 TODO
+
+状态：当前只完成 L2TLB response 权限字段链适配，尚未独立建模 S1/S2 两阶段 PTE 权限。
+
+当前能力边界：
+
+- `memblock_tlb_entry` 只有一套 `pte_d/a/g/u/x/w/r` 等 PTE 属性。
+- `memblock_l2tlb_base_sequence::fill_dtlb_resp_from_entry()` 使用同一套 `entry.pte_*` 同时填充
+  `s1_entry_perm_*` 和 `s2_entry_perm_*`。
+- V2 active takeover 路径中的 `s2_entry_perm_g/u` 已由 `entry.pte_g/pte_u` 驱动，不是常量 0；
+  interface、xaction、driver 和 connect 字段链是否完整仍由
+  `mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md` 负责核对。
+- 当前共享字段模型可以发送基础 S1/S2 response，但不能构造“S1 允许而 S2 拒绝”或“S1/S2 的
+  `G/U/A/D/R/W/X` 属性不同”等两阶段定向场景，也不能据此宣称已完成独立 stage2 权限建模。
+- 当前 `s2_gpf` 继续来自 `entry.tlbGPF`，`s2_gaf` 继续保持 0；这只表示当前能力边界，不代表
+  GPF/GAF 和 stage2 legal leaf 已完整派生。
+
+后续 TODO：
+
+- 新建 S1/S2 PTE 权限独立建模专项 plan；保持现有
+  `DTLB -> L2TLB_agent request`、`L2TLB_agent -> DTLB response` responder 方向，不得改接顶层
+  `io_l2_tlb_req_*` 或改造成 L2Cache/PTW/memory 下游模型。
+- 将 `memblock_tlb_entry` 扩展为两套明确的 S1/S2 PTE 属性，例如 `s1_pte_*` 与 `s2_pte_*`，并定义
+  初始化默认值、随机约束、合法化规则、复制/compare/print 和 reset 生命周期。
+- 更新 TLB entry builder、`uid` 记录和 debug dump，使其保存实际用于 response 的两阶段权限，
+  避免调试信息继续只显示一套共享 `pte_*`。
+- 更新 `fill_dtlb_resp_from_entry()`：`s1_entry_perm_*` 只读取 S1 PTE，`s2_entry_perm_*` 只读取
+  S2 PTE；禁止通过发送前临时改写共享字段来伪造阶段差异。
+- 分别定义 S1/S2 的 legal leaf、`R/W/X/U/G/A/D/V/N/PBMT` 约束，以及 PF、AF、GPF、GAF 的
+  来源和优先级；在这些规则确定前不得用局部 fixup 清除 `tlbGPF` 或强制生成“合法”stage2 entry。
+- 复查 sfence/hfence entry match 与 global-entry 判断，使每类失效操作读取语义对应阶段的 `G`
+  等属性；同步检查 lookup key 中 `vpn/s2xlate/asid/vmid/csr_update_seq` 的阶段语义。
+- 增加 directed testcase，至少覆盖 S1/S2 权限相同、仅 S1 拒绝、仅 S2 拒绝、S1/S2 `G/U`
+  不同以及 GPF/GAF 场景；response 字段和状态记录必须能区分 fault 来自哪个阶段。
+
+完成边界：
+
+- 当前 V2 `s2_entry_perm_g/u` 字段链适配不依赖本 TODO，字段链核对通过后可独立完成和归档。
+- 本 TODO 只扩展 responder 生成的两阶段权限语义和对应状态元数据，不建立第二套 TLB lookup、
+  LSQ、pass/fail 或 terminal 主流程。
+- 若后续需要判断 DUT 两阶段翻译结果是否正确，应另由 RM/checker/coverage 专项消费 S1/S2 状态；
+  不能把 responder 能生成独立权限等同于参考模型检查闭环完成。

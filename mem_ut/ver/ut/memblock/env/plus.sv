@@ -26,6 +26,7 @@ class plus;
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_USE_MANUAL_MAIN_TABLE, bit, 1'b0)
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_ENQ_PER_CYCLE, int, 4)
     // 使能后按ZERO/MIDDLE/MAX三类权重采样[0:编译期LSQ enqueue物理slot数]目标上限。
+    // ZERO允许成为唯一非零权重，用于有外部结束条件的idle-only场景；只禁止三类权重全0。
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_ENQ_PER_CYCLE_RAND_EN, bit, 1'b0)
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_ENQ_PER_CYCLE_ZERO_WEIGHT, int, 0)
     // -1表示AUTO，有效权重派生为物理slot数减1，使默认1..MAX保持均匀分布。

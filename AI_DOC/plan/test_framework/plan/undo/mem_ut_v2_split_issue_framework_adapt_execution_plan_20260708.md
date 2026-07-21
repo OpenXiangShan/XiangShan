@@ -19,7 +19,8 @@
 - V2 scalar split issue：`issueLda[0..2]`、`issueSta[0..1]`、`issueStd[0..1]`。
 - ordinary load、software prefetch、ordinary store 的 STA/STD 双 issue。
 - compile profile 提供的 pipe 数、port base、mask width 和 DUT-facing FuType width。
-- scalar-only 模式下 vector issue、VSTU feedback 和 VLD writeback fail-fast。
+- scalar-only 模式下关闭 vector issue stimulus，并在 vecissue driver 边界 fail-fast；VSTU feedback 和
+  VLD writeback 的 output fail-fast 只记录跨专项验收合同。
 - issue 主循环 no-progress 诊断改为基于 queue size 的 O(1) pending 判断。
 
 本轮不支持：
@@ -224,17 +225,23 @@ assign_sta_main_fields / assign_std_main_fields：
 
 ### 修改原因
 
-本轮明确不支持 vector LS / `issueVldu`。scalar testcase 应在默认调度入口、driver 输入边界和 DUT output monitor 边界同时封住 vector 活动；不能依赖后续 adapter 静默丢弃。
+本轮明确不支持 vector LS / `issueVldu`。scalar testcase 应在默认调度入口、driver 输入边界和 DUT
+output monitor 边界同时封住 vector 活动；不能依赖后续 adapter 静默丢弃。三个边界的行为合同一致，
+但源码 owner 必须唯一，不能由 split issue plan 重复修改 output monitor。
 
 ### 修改方案与修改逻辑
 
-三层 gate：
+三层 gate 及唯一 owner：
 
 1. 删除三处 vecissue default-sequence 配置，不设置 idle 替代 sequence，也不关闭 agent/driver。
 2. `vecissue_agent_agent_driver::send_pkt()` 收到 transaction 后，只要 `issueVldu_0_valid` 或 `issueVldu_1_valid` 不是确定 0，立即 fatal；二者为 0 时只驱动 `DRV_0` idle。
-3. monitor 边界：
-   - `io_mem_to_ooo_iq_feedback_agent_agent_monitor::mon_data()` 在 raw push 前检查任一 `vstuIqFeedback_0/1_feedbackSlow_valid` 非 0 fatal。
-   - `io_mem_to_ooo_vec_wb_agent_agent_monitor::mon_data()` 检查任一 `writebackVldu_0/1_valid` 非 0 fatal。
+3. output monitor 边界只作为跨专项依赖：
+   - VSTU feedback fatal 由 IQ feedback/replay plan 在
+     `io_mem_to_ooo_iq_feedback_agent_agent_monitor::mon_data()` 中唯一实现。
+   - `writebackVldu` fatal 由 monitor output plan 在
+     `io_mem_to_ooo_vec_wb_agent_agent_monitor::mon_data()` 中唯一实现。
+
+本 split issue plan 只 coding 第 1、2 层，不修改上述两个 output monitor。
 
 ### 文字伪代码
 
@@ -259,12 +266,14 @@ vecissue_agent_agent_driver::send_pkt(tr)：
   drive_idle(DRV_0)；
   return；
 
-IQ feedback monitor：
+以下两段是跨专项验收合同，不是本 split issue plan 的 coding 落点：
+
+IQ feedback/replay专项的IQ feedback monitor：
   reset 完成后，如果任一 VSTU feedback valid !== 0：
     uvm_fatal；
   合法 scalar STA feedback 继续既有 raw queue 生产；
 
-vector-WB monitor：
+monitor output专项的vector-WB monitor：
   reset 完成后，如果任一 writebackVldu valid !== 0：
     uvm_fatal；
   不写 status、pass/fail 或 terminal；
@@ -450,8 +459,6 @@ report_dispatch_issue_fire(port_idx)：
 | `mem_ut/ver/ut/memblock/agent/lintsissue_agent_agent/src/lintsissue_agent_agent_xaction.sv` | 问题一、六：参数化 fired-mask 宽度 |
 | `mem_ut/ver/ut/memblock/agent/lintsissue_agent_agent/src/lintsissue_agent_agent_driver.sv` | 问题一、六：ready 回填和 fire report 使用 base/limit |
 | `mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/vecissue_agent_agent_driver.sv` | 问题四：vector valid 非零 fatal，合法零 valid 只 idle |
-| `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_iq_feedback_agent_agent/src/io_mem_to_ooo_iq_feedback_agent_agent_monitor.sv` | 问题四：VSTU feedback valid fatal |
-| `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_vec_wb_agent_agent/src/io_mem_to_ooo_vec_wb_agent_agent_monitor.sv` | 问题四：`writebackVldu` valid fatal |
 | `mem_ut/ver/ut/memblock/tc/src/tc_base.sv` | 问题四：删除 vecissue default sequence |
 | `mem_ut/ver/ut/memblock/tc/src/tc_dispatch_real_smoke.sv` | 问题四：删除 real smoke vecissue generic sequence |
 | `mem_ut/ver/ut/memblock/tc/src/soft_test/soft_test_tc_dispatch_smoke.sv` | 问题四：删除 soft smoke vecissue generic sequence |
@@ -468,6 +475,8 @@ redirect/replay requeue 规则
 pass/fail/terminal 主体算法
 RM/checker/coverage
 VLD/vector LS 正向闭环
+io_mem_to_ooo_iq_feedback_agent_agent_monitor.sv中的VSTU fatal（由IQ feedback/replay专项唯一coding）
+io_mem_to_ooo_vec_wb_agent_agent_monitor.sv中的writebackVldu fatal（由monitor output专项唯一coding）
 ```
 
 ## 9. 修改类型与原逻辑对比总结
@@ -483,7 +492,8 @@ VLD/vector LS 正向闭环
 | LDA/STA/STD 字段 | 字段适配 | 可能复用不存在字段 | V2 split port 字段不同 | LDA 无 FuType，STA 完整 ROB/SQ，STD ROB value-only |
 | FuType DUT-facing | 字段适配 | 局部裁剪风险 | 内部容器和 V2 DUT 宽度不同 | STA/STD 写前调用 `encode_and_fit_dut_futype()` |
 | vecissue 默认入口 | 配置逻辑修改 | 三处可能启动默认 vector sequence | scalar flow 不支持 issueVldu | 删除三处 default sequence，不设置 idle 替代 |
-| vector driver/monitor | unsupported gate | 可能 drop 或继续 | 防止 vector 活动进入公共状态 | valid 非 0 在边界 fatal |
+| vecissue driver | unsupported gate，本 plan 唯一 coding | transaction 可能继续驱动 | 防止 vector issue 进入 DUT | valid 非 0 fatal，确定为 0 时只 idle |
+| VSTU/vector-WB monitor | 跨专项依赖，本 plan 无源码修改 | 可能 drop 或继续 | 防止 vector output 进入公共状态 | VSTU fatal由IQ专项唯一coding；`writebackVldu` fatal由monitor output专项唯一coding |
 | pending issue 判断 | 性能逻辑修改 | 可能每拍全表判断 | 高频路径必须 O(1) | 只读三个 queue size |
 | no-progress 退出 | 运行期逻辑修改 | 阈值可能混入正常退出 | 正常完成应由 terminal/global-stop | pending 且无 fire 才报错，queue 空合法 drain |
 | route scan 上限 | 性能/参数适配 | runtime 物理宽度 getter | 硬件结构是 compile 参数 | 每拍有限扫描上限用 `MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM` |

@@ -8,25 +8,36 @@
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv` |
 | 测试框架入口 | `io_mem_to_ooo_int_wb_agent_agent_monitor::mon_data()`、`dispatch_monitor_event_adapter::convert_raw_int_wb()` |
 | 适配原则 | 只重构 V2 split writeback raw producer 和 adapter key 归一化，不改变 writeback handler 主职责、RM/checker/coverage |
-| 创建/修订日期 | 2026-07-15 |
+| 创建/修订日期 | 2026-07-20 |
 
 ## 1. 范围与边界
 
 本 plan 只整理 V2 `writebackLda/Sta/Std` split writeback 进入公共状态流时需要解决的问题。每个问题均说明修改原因、最终方案、修改的原有逻辑和可直接 coding 的文字伪代码。
 
+当前权威 `build_memblock/rtl/MemBlock.sv` profile 没有
+`writebackHyuLda/writebackHyuSta` 顶层端口，也没有 `HybridUnit` 实例，因此当前 elaboration
+边界为 `HyuCnt=0`。本 plan 中的 `SCALAR_LDA` 只表示
+`writebackLda_0/1/2`，不包含可选的 `writebackHyuLda`。
+
 本轮支持范围：
 
-- V2 `writebackLda_0/1/2`、`writebackSta_0/1`、`writebackStd_0/1` raw event 保真采样。
+- V2 scalar `writebackLda_0/1/2`、`writebackSta_0/1`、`writebackStd_0/1` raw event 保真采样。
 - raw event 同时保留 `source_kind` 与 kind 内 `port_id`。
-- LDA/STA 使用真实 ROB key 加 current issue snapshot 补齐 UID、target key、`issue_epoch/replay_seq`。
+- SCALAR_LDA/STA 使用真实 ROB key 加 current issue snapshot 补齐 UID、target key、`issue_epoch/replay_seq`。
 - STD 只有 `robIdx_value` 时，通过两个 ROB flag 的 active map 固定探测补齐完整 ROB/SQ key。
-- LDA `replayInst`、AMO owner、STA/STD metadata 和缺 key 场景采用分层 fail-fast 策略。
+- STD 采用单一严格完成语义：`issueStd fire` 只表示 DUT 接收，只有真实
+  `writebackStd` 才能设置 `std_writeback/std_pass`。
+- SCALAR_LDA `replayInst`、AMO owner、STA/STD metadata 和缺 key 场景采用分层 fail-fast 策略。
 
 本轮不支持：
 
 - 不从 connect 层猜常量来伪造缺失 key。
 - 不把 RTL 内部 `_inner_stdExeUnits_*_sqIdx_*` wire 当作当前 top-level STD SQ key 来源。
 - 不新增历史 event 恢复 API、第二套 issue-generation 状态或全表扫描反查。
+- 不采样 `writebackHyuLda/writebackHyuSta`，不实现 HybridUnit replay 适配，也不把未来
+  `HYU_LDA` 合并进当前 `SCALAR_LDA` source kind。
+- 不保留 `STD_REAL_WB_PASS_EN` 兼容开关，不在 `issueStd fire` 后合成
+  `STD_FEEDBACK/iq_feedback_valid` pass。
 - 不实现 RM、checker、scoreboard 或 coverage。
 - 不改变 `writeback_status_handler` 的主职责和 pass/fail/terminal owner。
 
@@ -49,11 +60,11 @@ writebackSta_0/1
 writebackStd_0/1
 ```
 
-`writebackStd_0/1` 当前只有 `valid` 和 `robIdx_value`。LDA/STA/STD 的字段来源和缺失字段不同，不能只用一个全局 `port_id` 推导 target。
+`writebackStd_0/1` 当前只有 `valid` 和 `robIdx_value`。SCALAR_LDA/STA/STD 的字段来源和缺失字段不同，不能只用一个全局 `port_id` 推导 target。
 
 ### 修改原因
 
-adapter 需要知道 raw 来自 LDA、STA 还是 STD；同类内 lane 只用于物理端口编号。monitor 采样拍的 flush epoch 和 cycle 也必须与 payload 同拍冻结，不能在 adapter pop 时用 current 值回填。
+adapter 需要知道 raw 来自 SCALAR_LDA、STA 还是 STD；同类内 lane 只用于物理端口编号。monitor 采样拍的 flush epoch 和 cycle 也必须与 payload 同拍冻结，不能在 adapter pop 时用 current 值回填。
 
 ### 修改方案与修改逻辑
 
@@ -61,10 +72,10 @@ adapter 需要知道 raw 来自 LDA、STA 还是 STD；同类内 lane 只用于�
 
 ```systemverilog
 typedef enum bit [1:0] {
-    MEMBLOCK_INT_WB_SOURCE_INVALID = 2'd0,
-    MEMBLOCK_INT_WB_SOURCE_LDA     = 2'd1,
-    MEMBLOCK_INT_WB_SOURCE_STA     = 2'd2,
-    MEMBLOCK_INT_WB_SOURCE_STD     = 2'd3
+    MEMBLOCK_INT_WB_SOURCE_INVALID    = 2'd0,
+    MEMBLOCK_INT_WB_SOURCE_SCALAR_LDA = 2'd1,
+    MEMBLOCK_INT_WB_SOURCE_STA        = 2'd2,
+    MEMBLOCK_INT_WB_SOURCE_STD        = 2'd3
 } memblock_int_wb_source_kind_e;
 ```
 
@@ -77,20 +88,25 @@ sample_flush_epoch
 cycle
 key_needs_state_lookup
 rob_value_only_without_flag
+replay_inst_valid
+flush_pipe_valid
+trigger_valid
 replay_inst
 flush_pipe
-trigger
+trigger[3:0]
 ```
 
 合法端口映射：
 
 | `source_kind` | `port_id` 合法范围 | V2 端口 |
 |---|---:|---|
-| `LDA` | 0..2 | `writebackLda_0/1/2` |
+| `SCALAR_LDA` | 0..2 | `writebackLda_0/1/2` |
 | `STA` | 0..1 | `writebackSta_0/1` |
 | `STD` | 0..1 | `writebackStd_0/1` |
 
 `make_empty_raw_int_wb()` 必须清空所有字段和完整 24-bit `exception_vec`，`source_kind=INVALID`，`sample_flush_epoch/cycle=0`。
+metadata 的默认值必须使用语义中性值：`replay_inst=0`、`flush_pipe=0`、
+`trigger=4'hf`（V2 `TriggerAction.None`），并把三个 `*_valid` 标志清零。
 
 ### 文字伪代码
 
@@ -104,7 +120,12 @@ make_empty_raw_int_wb()：
   raw.rob_valid/lq_valid/sq_valid = 0；
   raw.key_needs_state_lookup = 0；
   raw.rob_value_only_without_flag = 0；
-  raw.replay_inst/flush_pipe/trigger = 0；
+  raw.replay_inst_valid = 0；
+  raw.flush_pipe_valid = 0；
+  raw.trigger_valid = 0；
+  raw.replay_inst = 0；
+  raw.flush_pipe = 0；
+  raw.trigger = 4'hf；
   raw.exception_vec[23:0] = 0；
   返回 raw；
 
@@ -118,6 +139,18 @@ build_raw_int_wb_from_v2_port(source_kind, port_id)：
   raw.valid = 1；
   raw.source_kind = source_kind；
   raw.port_id = port_id；
+  case (source_kind)
+    SCALAR_LDA：
+      raw.replay_inst_valid = 1；
+      raw.flush_pipe_valid = 1；
+      raw.trigger_valid = 1；
+    STA：
+      raw.flush_pipe_valid = (port_id == 0)；
+      raw.trigger_valid = 1；
+    STD：
+      // STD 没有 replay/flush/trigger 顶层字段，保持 valid=0、trigger=None。
+  endcase
+  只在对应 `*_valid=1` 时复制真实 metadata；不存在的字段保持默认值；
   raw.sample_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch；
   raw.cycle = $time；
   返回 raw；
@@ -168,21 +201,22 @@ io_mem_to_ooo_int_wb_agent_agent_monitor::mon_data()：
   不调用 mon_item_port.write；
 ```
 
-## 4. 问题三：LDA/STA 缺 LQ/SQ key，需要 current issue snapshot 补齐
+## 4. 问题三：SCALAR_LDA/STA 缺 LQ/SQ key，需要 current issue snapshot 补齐
 
 ### V2 问题
 
-V2 LDA/STA raw 具备真实 ROB key，但 LDA 顶层没有 LQ key，STA 顶层没有 SQ key。旧逻辑直接按 raw valid 设置 `real_wb_valid=1`，再用缺失或伪造 key 进入 writeback handler，会导致 uid 误归属、stale event 过滤失败或 pass/fault 状态错误。
+V2 SCALAR_LDA/STA raw 具备真实 ROB key，但 SCALAR_LDA 顶层没有 LQ key，STA 顶层没有 SQ key。旧逻辑直接按 raw valid 设置 `real_wb_valid=1`，再用缺失或伪造 key 进入 writeback handler，会导致 uid 误归属、stale event 过滤失败或 pass/fault 状态错误。
 
 ### 修改原因
 
-LDA/STA 的物理身份来源是真实 ROB key。LQ/SQ 是 target metadata，必须在确认当前 active issue generation 后从 status 补齐。不能在 adapter 中扫描全表或用 sample epoch 猜历史 generation。
+SCALAR_LDA/STA 的物理身份来源是真实 ROB key。LQ/SQ 是 target metadata，必须在确认当前 active issue generation 后从 status 补齐。不能在 adapter 中扫描全表或用 sample epoch 猜历史 generation。
 
 ### 修改方案与修改逻辑
 
-`convert_raw_int_wb()` 对 LDA/STA 执行顺序固定为：
+`convert_raw_int_wb()` 对 SCALAR_LDA/STA 执行顺序固定为：
 
-1. 入口先处理不可达 `replay_inst` 和 metadata fatal。
+1. 入口先执行 source/lane capability 和 metadata guard；当前 SCALAR_LDA source invariant
+   违例、未支持的 Debug/Trace action、未支持的 CBO flush 在任何状态更新前 fatal。
 2. 用 raw 完整 ROB key 构造半成品 `wb_event`。
 3. 调用 IQ feedback/replay 专项定义的唯一 API：
 
@@ -193,20 +227,23 @@ attach_current_issue_snapshot(wb_event)
 4. attach 成功后调用 `normalize_v2_int_wb_key(raw, wb_event)`。
 5. normalize 只校验 raw ROB key 与 current snapshot 一致，并检查 target required key 完整，不再次查 active map。
 
-LDA0 可能由 AtomicsUnit 覆盖。attach 解析 UID 后必须读取 `main_control_transaction.op_class`，若 `source==LOAD_WB && op_class==MEMBLOCK_OP_CLASS_AMO`，在 LOAD/LQ 生命周期判断前固定 fatal 为 unsupported atomic。
+LDA0（`SCALAR_LDA`、`port_id=0`）可能由 AtomicsUnit 覆盖。attach 解析 UID 后必须读取 `main_control_transaction.op_class`，若 `source==LOAD_WB && op_class==MEMBLOCK_OP_CLASS_AMO`，在 LOAD/LQ 生命周期判断前固定 fatal 为 unsupported atomic。
 
 ### 文字伪代码
 
 ```text
-convert_raw_int_wb(raw) 处理 LDA/STA：
-  如果 raw.replay_inst == 1：
-    uvm_fatal("INT_WB_REPLAY_INST_UNREACHABLE")；
+convert_raw_int_wb(raw) 处理 SCALAR_LDA/STA：
+  如果 raw.source_kind == SCALAR_LDA &&
+     raw.replay_inst_valid && raw.replay_inst == 1：
+    uvm_fatal("INT_WB_SCALAR_LDA_REPLAY_INST_INVARIANT")；
 
-  如果 raw.flush_pipe != 0 或 raw.trigger != 0：
-    uvm_fatal，因为当前 scalar flow 没有 consumer；
+  执行 metadata_guard(raw)：
+    检查 source/lane 对应的 `replay_inst_valid/flush_pipe_valid/trigger_valid`；
+    检查 trigger action、exceptionVec[breakPoint] 和来源是否一致；
+    对当前测试框架没有 consumer 的 Debug/Trace/CBO flush 组合 fail-fast；
 
   如果 raw.rob_valid == 0 或 raw.rob_value_only_without_flag == 1：
-    uvm_fatal，因为 LDA/STA 必须有真实 ROB key；
+    uvm_fatal，因为 SCALAR_LDA/STA 必须有真实 ROB key；
 
   wb_event = make_wb_event_base()；
   wb_event.source = LOAD_WB 或 STA_WB；
@@ -218,12 +255,12 @@ convert_raw_int_wb(raw) 处理 LDA/STA：
     解析唯一 UID；
     读取 current status；
     检查 active、target dispatched、未 kill、未 redirect、未 flush、未 terminal；
-    对 LDA0 的 AMO owner 在 LOAD/LQ 检查前 fatal；
+    对 SCALAR_LDA 的 port_id=0（LDA0）AMO owner 在 LOAD/LQ 检查前 fatal；
     从 current status 补 uid、target key、issue_epoch、replay_seq；
 
   调用 normalize_v2_int_wb_key(raw, wb_event)：
     比较 raw ROB key 与 snapshot ROB key；
-    LDA 要求 target=LOAD 且 UID/ROB/LQ 完整；
+    SCALAR_LDA 要求 target=LOAD 且 UID/ROB/LQ 完整；
     STA 要求 target=STA 且 UID/ROB/SQ 完整；
     不再次查询其它 uid 或 status；
 ```
@@ -257,7 +294,9 @@ adapter 新增 `resolve_std_uid_by_rob_value_only(raw, wb_event)`：
 - 只允许唯一候选。
 - 成功后补齐 UID、ROB key、SQ key。
 
-`STD_REAL_WB_PASS_EN=1` 时解析失败必须 fatal；为 0 时允许 warning+计数 drop，但必须清空半成品 event。
+STD real writeback 是 `std_writeback/std_pass` 的唯一完成 owner。value-only 双 flag 解析若
+出现零候选、双候选、active ROB/SQ owner 不一致或 required key 不完整，一律在任何状态
+修改前 fatal；不再保留参数化 warning/drop 分支。
 
 ### 文字伪代码
 
@@ -307,11 +346,27 @@ resolve_std_uid_by_rob_value_only(raw, wb_event)：
 
 ### V2 问题
 
-LDA/STA/STD 各 port 的 `exceptionVec` 位图不一致；LDA 有 `replayInst`，STA 没有；STA0 和 STA1 的 `flushPipe` 能力也不同。旧逻辑若统一复制或默认置 valid，会把不存在的 metadata 当成真实字段。
+SCALAR_LDA/STA/STD 各 port 的 `exceptionVec` 位图不一致；SCALAR_LDA 有
+`replayInst`，STA 没有；STA0 和 STA1 的 `flushPipe` 能力也不同。旧逻辑若统一复制或默认置
+valid，会把不存在的 metadata 当成真实字段。
 
 ### 修改原因
 
-raw event 是物理接口事实，不是语义猜测。不存在的 exception bit 和 metadata 必须保持 factory 0。当前 scalar flow 没有 `replayInst/trigger/flushPipe` 正向 consumer，不能生成半成品 event 继续跑。
+raw event 是物理接口事实，不是语义猜测。不存在的 exception bit 和 metadata 必须保持 factory 0。
+RTL 侧由 Backend/ExceptionGen/ROB 消费这些字段；但当前测试框架 adapter 尚未实现
+DebugMode、Trace action 和 CBO `flushAfter` 的对应状态收口，因此这些组合必须在状态更新前
+fail-fast，不能把它们当作普通 pass event。
+
+### 运行时语义约束（不是 capability）
+
+`FuConfig.flushPipe/replayInst/trigger` 只表示执行单元在 elaboration 时是否生成可选字段，
+不能直接推导某一拍写回值。当前 V2 Scala/生成 RTL 的运行时约束如下：
+
+| 字段 | 当前 V2 producer 与置位场景 | 本 plan 对 split writeback 的约束 |
+|---|---|---|
+| `replayInst` | 可选 `HybridUnit` 可在 `s3_rep_frm_fetch`（store-to-load forwarding 的物理/虚拟地址 CAM 匹配失败）时置 1，并由同一条件产生 `rollback.valid`；它通过独立 `writebackHyuLda` 输出。当前 profile 为 `HyuCnt=0`，`writebackLda_0/1/2` 的 scalar LoadUnit、LoadMisalignBuffer 路径显式清 0。 | 当前 SCALAR_LDA 看到 1 是 source invariant 违例，入口 fatal；不能当普通 Load pass。未来若接入 `HYU_LDA`，必须使用独立 source kind，并与同源 `memoryViolation` 关联。 |
+| `flushPipe` | Fence/SFENCE 等由 Decode 属性产生；STA0 的 StoreQueue CBO/CMO 写回可动态置 1；普通 SCALAR_LDA/STA 写回为 0，STA1/STD 不承载该字段。HybridUnit 内部名为 `s3_flushPipe` 的 load-load violation 只参与直接 rollback，没有写入 `uop.flushPipe`。 | SCALAR_LDA 为 1 视为 producer 违例；STA0 为 1 只允许 CBO/CMO，当前 adapter 未实现 CBO `flushAfter` 时 fatal；STA1/STD 保持 absent/0。 |
+| `trigger[3:0]` | Memory trigger 在 Load/Store 地址阶段按 CSR、地址、chain/timing 生成。`0=BreakpointExp`、`1=DebugMode`、`2/3/4=Trace`、`15=None`。STA0 StoreQueue uncache/CBO 还可能把 trigger 清为 0。 | 只接受 `None`，或 `BreakpointExp + exceptionVec[breakPoint]=1` 进入既有 fault path；STA0 的 uncache/CBO `0 + breakPoint=0` 仅按来源识别为中性值。Debug/Trace/未知编码 fail-fast。 |
 
 ### 修改方案与修改逻辑
 
@@ -327,12 +382,20 @@ raw event 是物理接口事实，不是语义猜测。不存在的 exception bi
 
 metadata 策略：
 
-- 任一 LDA raw `replay_inst=1`：converter 入口固定 fatal。
-- LDA `flush_pipe/trigger` 非 0：fatal。
-- STA `trigger` 非 0：fatal。
-- STA0 `flush_pipe` 非 0：fatal。
-- STA1 `flush_pipe` 不存在，raw 保持 0。
-- STD 不建模 replay/flush/trigger。
+- 任一当前 SCALAR_LDA raw `replay_inst=1`：converter 入口固定 fatal；不得把它转换成普通
+  real-WB/pass event。
+- SCALAR_LDA `flush_pipe=1`：当前 SCALAR_LDA producer invariant 违例，fatal。
+- STA0 `flush_pipe=1`：仅允许 StoreQueue CBO/CMO 来源；当前 adapter 未实现 CBO
+  `flushAfter` 收口时按 unsupported CBO flush fatal。普通 STA0 必须为 0。
+- STA1 没有 `flushPipe` 顶层字段，`flush_pipe_valid=0` 且 raw 值固定为 0。
+- STD 没有 `replayInst/flushPipe/trigger` 顶层字段，三个 valid flag 均为 0，值保持中性默认值。
+- `trigger=4'hf`（`TriggerAction.None`）：无动作，继续正常 key 归一化。
+- `trigger=4'h0`（`BreakpointExp`）：要求 `exceptionVec[breakPoint]=1`，交给既有 fault
+  路径；STA0 StoreQueue uncache/CBO 来源若同时 `breakPoint=0`，按来源识别为非规范中性值，
+  不生成 breakpoint fault。
+- `trigger=4'h1`（`DebugMode`）以及 `4'h2/3/4`（Trace action）：RTL 编码合法，但当前
+  adapter/handler 没有对应 consumer，入口 fatal。
+- 其它 trigger 编码：fatal。
 - `rfWen/fpWen/pdest/data/isFromLoadUnit/debug_isMMIO/isNCIO/isPerfCnt` 可作为观察/debug metadata，但当前不直接决定 pass/fault/terminal。
 
 ### 文字伪代码
@@ -347,54 +410,157 @@ build_raw_int_wb_from_v2_port() 复制 exceptionVec：
   如果是 STD，保持 exception_vec=0；
 
 convert_raw_int_wb() metadata guard：
-  如果 raw.source_kind 是 LDA 且 replay_inst=1，uvm_fatal；
-  如果 raw.source_kind 是 LDA 且 flush_pipe或trigger非0，uvm_fatal；
-  如果 raw.source_kind 是 STA 且 trigger非0，uvm_fatal；
-  如果 raw.source_kind 是 STA0 且 flush_pipe非0，uvm_fatal；
+  先校验 source/lane 对应的 metadata valid flag；不存在的字段若不是中性默认值，uvm_fatal；
+
+  如果 raw.source_kind == SCALAR_LDA 且 raw.replay_inst_valid && raw.replay_inst==1：
+    uvm_fatal("INT_WB_SCALAR_LDA_REPLAY_INST_INVARIANT")；
+  如果 raw.source_kind == SCALAR_LDA 且 raw.flush_pipe_valid && raw.flush_pipe==1：
+    uvm_fatal("INT_WB_SCALAR_LDA_FLUSH_PIPE_INVARIANT")；
+
+  如果 raw.source_kind 是 STA0 且 raw.flush_pipe_valid && raw.flush_pipe==1：
+    要求 raw provenance 表明 StoreQueue CBO/CMO；
+    当前 adapter 没有 CBO flushAfter consumer 时 uvm_fatal；
+  如果 raw.source_kind 是 STA1：
+    要求 flush_pipe_valid==0 且 flush_pipe==0；
+
+  如果 trigger_valid==0：
+    要求 trigger==4'hf；
+  否则按 trigger 编码分支：
+    4'hf：继续；
+    4'h0：普通 SCALAR_LDA/STA 要求 exceptionVec[breakPoint]==1；
+         STA0 StoreQueue uncache/CBO 允许 provenance 表明 breakPoint==0 的中性值；
+    4'h1、4'h2、4'h3、4'h4：当前 adapter 无 consumer，uvm_fatal；
+    其它：uvm_fatal；
+
   STD metadata 不生成 replay/flush/trigger 事件；
 ```
+
+### `replayInst=1` 为什么重发且当前指令不提交
+
+`replayInst` 不是 IQ feedback miss、LoadQueueReplay 或普通 TLB replay 的统称，而是
+写回给 ExceptionGen/ROB 的精确重放标志。它表示本次执行结果不能作为架构完成结果使用，
+必须清掉当前指令及其之后的投机状态，再从当前指令自身重新取指和执行。
+
+通用 replay writeback/ROB 安全语义为：
+
+```text
+如果一个 replayInst writeback 保留到 Backend：
+  replayInst=1 的结果仍先携带原 robIdx；
+  Backend 将它送入 ROB 的 replay 字段，writebackNeedFlush 同拍反映需要 flush；
+  ExceptionGen 按 robIdx 保存 replayInst，并与同一条指令的其它异常信息合并；
+
+当该 robIdx 到达 ROB head 且 commit_w 成立：
+  deqHasReplayInst=1；
+  ROB 产生 flushOut，redirect.level=RedirectLevel.flush；
+  redirect.flushItself()=1，目标 PC 使用当前指令 PC，而不是 PC+指令长度；
+  ROB/Rename/Issue/LSQ 清除当前指令及其后的旧执行状态，前端重新取当前指令；
+  当前指令不计入 commit，重新发射后必须收到普通完成写回才允许提交。
+```
+
+但 `HybridUnit.s3_rep_frm_fetch` 的实际恢复路径不能只描述成“等待 ROB head”。当
+store-to-load forward 的物理/虚拟地址 CAM 匹配结果失效时，同一个 S3 条件同时产生：
+
+```text
+HybridUnit.s3_rep_frm_fetch = 1
+  ├─ writebackHyuLda.uop.replayInst = 1
+  └─ ldu_io.rollback.valid = 1
+       rollback.level = RedirectLevel.flush
+                    ↓
+MemBlock 在 allRedirect 中选择最老项
+                    ↓
+mem_to_ooo.memoryViolation
+                    ↓
+Backend CtrlBlock redirect
+                    ↓
+立即 flush 当前指令及更年轻指令，从当前指令重新取指
+```
+
+因此 HybridUnit 的 `replayInst` writeback 和 `memoryViolation` 不是两个独立 replay，二者来自
+同一个 `s3_rep_frm_fetch`。直接 `memoryViolation/redirect` 是恢复和重新发射的唯一 owner；
+若 replay writeback 同时被观察到，它只能作为同一恢复原因的 metadata/ROB 安全信息，不能
+再创建第二次 replay、再次增加 `replay_seq`，也不能被当作普通
+`real_wb_valid && pass`。
+
+当前 plan 不接入 HybridUnit。当前 V2 `SCALAR_LDA` 端口即使保留 `replayInst` 字段，实际
+producer 仍将其清零，因此观察到 `replayInst=1` 必须在任何状态修改前按 source invariant
+fatal，不能静默吞掉该位。
+
+未来只有在 profile 启用 `HyuCnt>0` 时，才能扩展如下独立流程：
+
+```text
+将 source_kind enum 从 2 bit 扩为 3 bit，并新增 MEMBLOCK_INT_WB_SOURCE_HYU_LDA；
+独立采样 writebackHyuLda，不复用 SCALAR_LDA；
+HYU_LDA replayInst=1 必须匹配同一 ROB/issue generation 的 memoryViolation；
+执行 redirect-first 仲裁；
+由 memoryViolation 唯一关闭旧 generation 并令 replay_seq + 1；
+replayInst writeback 不进入普通 pass handler，也不重复触发 replay；
+无法证明二者属于同一 generation 时 fatal，不允许猜测。
+```
+
+源码核验后确认：`ExceptionGen.scala` 的 `in_wb_valids` 使用的是
+`RobExceptionInfo.has_exception` 方法，而不是只读取 `hasException` 字段。该方法定义为
+`hasException || flushPipe || singleStep || replayInst || TriggerAction.isDmode(trigger)`，
+因此即使 `replayInst=1` 且 `exceptionVec=0`，replay-only writeback 仍会进入
+ExceptionGen；`Rob.scala` 中 `exc_wb.bits.hasException := exceptionVec.orR` 只保存
+exceptionVec 摘要，不是 ExceptionGen 的唯一收集门控。当前 SCALAR_LDA 路径仍显式把
+`replayInst` 清零，所以 adapter 对 SCALAR_LDA 观察到 1 仍按 source invariant 违例
+固定 fatal；这与“replay-only 无法被 ExceptionGen 收集”是两件不同的事。
 
 ## 7. 问题六：key 归一化失败策略不能静默 drop 关键事件
 
 ### V2 问题
 
-旧逻辑在 key 缺失时可能 warning/drop 或留下部分 `has_rob/has_lq/has_sq` 状态。对于 LDA/STA，真实 valid raw 缺 current snapshot 是接口或生命周期错误；对于 STD，兼容参数关闭时可以 drop，但必须可见且不污染半成品 event。
+旧逻辑在 key 缺失时可能 warning/drop 或留下部分 `has_rob/has_lq/has_sq` 状态。
+SCALAR_LDA/STA/STD 的真实 valid writeback 都是当前严格完成流的关键事件；任何一个事件
+被丢弃，都可能让对应 target 永远等待，或者掩盖 DUT/monitor 的身份错误。
 
 ### 修改原因
 
-writeback event 一旦误归一化，会直接影响 pass/fault/terminal。失败策略必须按 target 分层，避免 silently wrong 和 silently stuck 两类问题。
+writeback event 一旦误归一化，会直接影响 pass/fault/terminal。STD 不再提供
+`STD_REAL_WB_PASS_EN=0` 的 synthetic issue-accept pass 兼容路径，因此不存在“真实
+writeback 不是 terminal 必需事件”的合法配置。所有受支持 target 都必须遵循
+all-or-fatal，避免 silently wrong 和 silently stuck 两类问题。
 
 ### 修改方案与修改逻辑
 
 `normalize_v2_int_wb_key(raw, wb_event)`：
 
-- LDA/STA：任何 raw ROB 缺失、snapshot 缺失、snapshot 与 raw key 不一致、required key 不完整均 fatal。
-- STD：先尝试 value-only 双 flag resolve；失败时调用 `fail_by_real_wb_policy(raw, STD, reason)`。
+- SCALAR_LDA/STA：任何 raw ROB 缺失、snapshot 缺失、snapshot 与 raw key 不一致、required key 不完整均 fatal。
+- STD：先尝试 value-only 双 flag resolve；零候选、双候选、ROB/SQ owner 不一致、snapshot
+  不完整或 required key 缺失均 fatal。
+- 不再实现 `fail_by_real_wb_policy()`、STD drop counter 或参数化 warning/drop 分支。
 
-`fail_by_real_wb_policy()`：
+STD 完成 owner 固定为：
 
-- `STD_REAL_WB_PASS_EN=1`：fatal。
-- `STD_REAL_WB_PASS_EN=0`：warning，计数，返回 drop。
-- drop 前必须把 `wb_event` 恢复为 empty base event。
+```text
+issueStd fire：
+  只设置std_dispatched、issue_epoch和当前generation snapshot；
+  不设置std_writeback/std_pass；
+  不生成STD_FEEDBACK synthetic event；
+
+真实writebackStd：
+  monitor采样raw；
+  adapter完成唯一key归一化；
+  writeback handler设置std_writeback/std_pass；
+```
 
 ### 文字伪代码
 
 ```text
 normalize_v2_int_wb_key(raw, wb_event)：
   case raw.source_kind:
-    LDA 或 STA：
+    SCALAR_LDA 或 STA：
       要求 wb_event 已经 attach current snapshot；
       要求 raw.rob_valid=1 且不是 value-only；
       raw_rob_key = {raw.rob_flag, raw.rob_value}；
       如果 wb_event.rob_key != raw_rob_key，uvm_fatal；
-      如果 LDA 但 target 不是 LOAD，uvm_fatal；
+      如果 SCALAR_LDA 但 target 不是 LOAD，uvm_fatal；
       如果 STA 但 target 不是 STA，uvm_fatal；
 
     STD：
       要求 raw 是 value-only 形态；
       如果 resolve_std_uid_by_rob_value_only() 失败：
-        wb_event = make_wb_event_base()；
-        return fail_by_real_wb_policy(raw, STD, reason)；
+        uvm_fatal("INT_WB_STD_KEY_NORMALIZE_FAILED")；
 
     default：
       uvm_fatal；
@@ -403,29 +569,54 @@ normalize_v2_int_wb_key(raw, wb_event)：
     LOAD 必须有 UID/ROB/LQ；
     STA 必须有 UID/ROB/SQ；
     STD 必须有 UID/ROB/SQ；
-  缺失时 LDA/STA fatal，STD 走 real-WB policy；
+  任一 required key 缺失均 uvm_fatal；
   成功返回 1；
+```
 
-fail_by_real_wb_policy(raw, target, reason)：
-  如果 target 是 STD 且 MEMBLOCK_STD_REAL_WB_PASS_EN == 0：
-    记录 warning 和 drop counter；
-    返回 0；
-  否则：
-    uvm_fatal；
+### 删除 `STD_REAL_WB_PASS_EN` 兼容路径
+
+coding 时必须同步删除：
+
+- `plus.sv` 中 `MEMBLOCK_STD_REAL_WB_PASS_EN` 的定义与 `load_bit()`。
+- `seq_csr_common.sv` 中 `std_real_wb_pass_en` 状态、加载和 getter。
+- 所有 plus cfg 中 `+MEMBLOCK_STD_REAL_WB_PASS_EN=...`。
+- `memblock_issue_dispatch_base_sequence.sv` 中
+  `item_needs_issue_accept_pass()`、`make_issue_accept_pass_event()`、
+  `submit_issue_accept_pass()` 及 issue fire 后的调用。
+- `writeback_status_handler.sv` 中 STD 根据该参数在 issue feedback 与 real-WB pass 之间切换
+  的逻辑。STD pass 只接受归一化后的真实 `writebackStd` event；意外出现
+  `MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK` 时 fail-fast，不能完成 STD target。
+- 活跃规则/说明文档中“设置为 0 可启用 STD synthetic pass”的操作说明。历史完成记录只
+  保留历史事实，不作为当前可用配置继续引用。
+
+### 严格模式验收约束
+
+```text
+1. issueStd fire后、writebackStd到达前：std_dispatched=1，std_pass=0；
+2. 唯一匹配的writebackStd到达后：std_writeback=1，std_pass=1；
+3. STD value-only ROB零命中或双命中：状态不变并立即fatal；
+4. STD补齐后的ROB/SQ owner不一致：状态不变并立即fatal；
+5. active代码和plus cfg中不再出现STD_REAL_WB_PASS_EN；
+6. 不再存在issue-accept STD synthetic pass producer或STD key failure drop counter。
 ```
 
 ## 8. Coding 落点汇总
 
 | 文件 | 对应问题与修改 |
 |---|---|
-| `mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv` | 问题一、六：raw enum、字段、factory、drop 计数入口 |
+| `mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv` | 问题一、六：raw enum、字段、factory；STD 归一化失败不新增 drop counter |
 | `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_interface.sv` | 问题一、五：V2 split 字段与 metadata 真实采样 |
 | `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_xaction.sv` | 问题一、五：字段结构与打印/比较同步 |
 | `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_int_wb_agent_agent/src/io_mem_to_ooo_int_wb_agent_agent_monitor.sv` | 问题二、五：唯一 raw push owner、builder、exception/metadata 采样 |
 | `mem_ut/ver/ut/memblock/tb/io_mem_to_ooo_int_wb_agent_connect.sv` | 问题一、五：确认只连接 V2 `writebackLda/Sta/Std` 顶层真实字段 |
-| `mem_ut/ver/ut/memblock/seq/base_seq_help/dispatch_monitor_event_adapter.sv` | 问题三、四、六：current snapshot attach、STD value-only resolve、normalize/fail policy |
-| `mem_ut/ver/ut/memblock/seq/base_seq_help/writeback_status_handler.sv` | 只消费归一化后的事件，不承担 key 猜测 |
+| `mem_ut/ver/ut/memblock/seq/base_seq_help/dispatch_monitor_event_adapter.sv` | 问题三、四、六：current snapshot attach、STD value-only resolve、all-or-fatal normalize policy |
+| `mem_ut/ver/ut/memblock/seq/base_seq_help/writeback_status_handler.sv` | 只消费归一化后的事件；删除 STD 参数分支，拒绝 synthetic `STD_FEEDBACK` 完成 |
 | `mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv` | 问题四：active ROB/SQ map O(1) lookup 复用 |
+| `mem_ut/ver/ut/memblock/env/plus.sv` | 问题六：删除 `MEMBLOCK_STD_REAL_WB_PASS_EN` 定义和加载 |
+| `mem_ut/ver/ut/memblock/seq/base_seq_help/seq_csr_common.sv` | 问题六：删除 STD real-WB pass 参数镜像和 getter |
+| `mem_ut/ver/ut/memblock/seq/base_seq/memblock_issue_dispatch_base_sequence.sv` | 问题六：删除 STD issue-accept synthetic pass producer 和调用 |
+| `mem_ut/ver/ut/memblock/seq/plus_cfg/*.cfg` | 问题六：删除废弃的 `+MEMBLOCK_STD_REAL_WB_PASS_EN=...` |
+| 活跃测试框架规则/说明文档 | 问题六：删除切换 STD synthetic pass 的用户操作说明，统一描述为严格 real-WB owner |
 
 明确不修改：
 
@@ -442,16 +633,19 @@ RM/checker/scoreboard/coverage
 
 | 修改项 | 类型 | 修改前逻辑 | 修改原因 | 修改后逻辑 |
 |---|---|---|---|---|
-| `source_kind/port_id` | 字段适配 | 全局 port 0..6 隐含 target | V2 是 LDA/STA/STD split port | kind 表示类别，port_id 只表示 kind 内 lane |
+| `source_kind/port_id` | 字段适配 | 全局 port 0..6 隐含 target | V2 是 SCALAR_LDA/STA/STD split port，当前 profile 不含 HYU | `SCALAR_LDA` 只表示 `writebackLda_0/1/2`；kind 表示类别，port_id 只表示 kind 内 lane |
 | raw provenance | 字段适配 | adapter 可能用 current epoch 回填 | payload 和 epoch 必须同拍 | monitor 采样拍冻结 `sample_flush_epoch/cycle` |
 | raw factory | 字段适配 | 新字段默认不完整 | 防止 metadata 残留 | empty raw 清所有 valid、metadata、exceptionVec |
 | monitor push owner | 功能逻辑修改 | helper 分散构造/入队风险 | 每个 valid lane 必须唯一 raw | `mon_data()` 唯一 push，builder 只返回 raw |
-| LDA/STA key | 功能逻辑修改 | 缺 LQ/SQ 时可能伪造或直接 pass | LQ/SQ 不是顶层 raw 物理字段 | raw ROB -> current snapshot -> normalize 校验 |
-| `replayInst` | unsupported gate | 可被误当 replay event | 当前受支持 scalar LDA producer 不应置高 | converter 入口 fatal，不生成 event |
+| SCALAR_LDA/STA key | 功能逻辑修改 | 缺 LQ/SQ 时可能伪造或直接 pass | LQ/SQ 不是顶层 raw 物理字段 | raw ROB -> current snapshot -> normalize 校验 |
+| `replayInst` | unsupported gate | 可被误当普通 real-WB/pass | 当前 SCALAR_LDA producer 不应置高；Hybrid 合法置位时还会由同源 rollback 产生 `memoryViolation` | SCALAR_LDA converter 入口 invariant fatal；未来 HYU 使用独立 source kind，并以 `memoryViolation` 为唯一 replay owner |
+| `flushPipe` | 语义/能力适配 | 把所有 lane 的字段统一当作可运行时置高 | 普通 SCALAR_LDA/STA 为 0，STA0 CBO/CMO 可为 1，STA1/STD absent | 按 source/lane/provenance 检查；仅未支持 CBO flush fatal |
+| `trigger[3:0]` | 编码适配 | 用 `trigger != 0` 判断有无动作 | `None=4'hf`，`0` 是 BreakpointExp，1/2/3/4 是 Debug/Trace | 按枚举和 exceptionVec/source 联合判断 |
 | LDA0 atomic owner | unsupported gate | 可能按 LOAD 缺 LQ 报错 | LDA0 可被 AtomicsUnit 覆盖 | 解析 UID 后按 `op_class==AMO` 固定 fatal |
 | STD key | 功能逻辑修改 | 伪造 ROB flag/SQ key 或 drop | V2 只有 ROB value | 双 flag active ROB map probe，唯一命中后从 status 补 SQ |
-| STD 失败策略 | 兼容逻辑 | drop/fatal 边界不清 | STD real pass 可由参数控制 | pass 开启 fatal，关闭 warning+计数 drop |
+| STD 完成 owner | 功能逻辑收敛 | 参数可切换 real-WB 与 issue-accept synthetic pass | 双 owner 会掩盖真实 writeback 丢失或错误 key | 删除 `STD_REAL_WB_PASS_EN` 和 synthetic producer，只有真实 `writebackStd` 可设置 pass |
+| STD 失败策略 | fail-fast | 参数关闭时可 warning/drop | 严格模式下每个真实 STD writeback 都是 terminal 必需事件 | value-only key 零命中、双命中、owner 不一致或 key 不完整一律 fatal |
 | exceptionVec | 字段适配 | 可能统一复制或默认 valid | 各 port 位图不同 | 按 port 真实位复制，不存在位保持 0 |
-| adapter 查询成本 | 性能边界 | 可能按 uid 全表反查 | monitor event 是高频路径 | LDA/STA 固定 active map 查询；STD 仅两个 ROB flag probe |
+| adapter 查询成本 | 性能边界 | 可能按 uid 全表反查 | monitor event 是高频路径 | SCALAR_LDA/STA 固定 active map 查询；STD 仅两个 ROB flag probe |
 
 保持不变的主体逻辑：raw batch 入口、writeback handler 状态推进职责、current issue token owner、redirect-first batch 仲裁、pass/fail/terminal 收口、RM/checker/coverage deferred 状态。

@@ -19,6 +19,7 @@ class seq_csr_common;
     // 控制get_enq_per_cycle()是否按ZERO/MIDDLE/MAX权重采样[0:物理slot数]目标上限。
     static bit          enq_per_cycle_rand_en = 1'b0;
     // 三个raw权重来自plus；MIDDLE=-1表示AUTO，effective字段保存按物理slot数解析后的非负值。
+    // ZERO允许成为唯一非零权重；此时sequence只发送idle，退出仍由既有外部global-stop/UVM phase负责。
     static int unsigned enq_per_cycle_zero_weight = 0;
     static int          enq_per_cycle_middle_weight = -1;
     static int unsigned enq_per_cycle_effective_middle_weight = 0;
@@ -692,10 +693,6 @@ class seq_csr_common;
             enq_weight_sum += enq_per_cycle_max_weight;
             if (enq_weight_sum == 0) begin
                 `uvm_fatal("SEQ_CSR_CFG", "LSQ enqueue ZERO/MIDDLE/MAX weights must not all be zero")
-            end
-            if (enq_per_cycle_effective_middle_weight == 0 &&
-                enq_per_cycle_max_weight == 0) begin
-                `uvm_fatal("SEQ_CSR_CFG", "LSQ enqueue random weights cannot select ZERO forever")
             end
         end
 

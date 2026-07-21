@@ -6,9 +6,9 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `6e721ccb42bec882b3254062bff003294a507854` |
-| 权威源码 | `src/main/scala/xiangshan/backend/rob/Rob.scala`、`src/main/scala/xiangshan/backend/rob/RobBundles.scala`、`src/main/scala/xiangshan/backend/rob/Rab.scala`、`src/main/scala/xiangshan/backend/rename/Rename.scala`、`src/main/scala/xiangshan/backend/rename/CompressUnit.scala`、`src/main/scala/xiangshan/backend/Bundles.scala`、`src/main/scala/xiangshan/backend/decode/DecodeUnit.scala` |
-| 最后核验日期 | 2026-07-15 |
+| 核验 commit | `bd813bc3ed5b39581be966c6518788852890ff6f` |
+| 权威源码 | `src/main/scala/xiangshan/backend/rob/Rob.scala`、`src/main/scala/xiangshan/backend/rob/RobBundles.scala`、`src/main/scala/xiangshan/backend/rob/RobDeqPtrWrapper.scala`、`src/main/scala/xiangshan/backend/rob/Rab.scala`、`src/main/scala/xiangshan/backend/rename/Rename.scala`、`src/main/scala/xiangshan/backend/rename/CompressUnit.scala`、`src/main/scala/xiangshan/backend/Bundles.scala`、`src/main/scala/xiangshan/backend/decode/DecodeUnit.scala`、`src/main/scala/xiangshan/mem/lsqueue/LSQWrapper.scala`、`src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala`、`src/main/scala/xiangshan/mem/lsqueue/LoadQueueUncache.scala` |
+| 最后核验日期 | 2026-07-18 |
 
 ## Flow 范围
 
@@ -21,6 +21,7 @@
 - 一条指令的其他信息分别保存在后端哪些结构中，以及各自作用。
 - ROB 压缩的条件、上限和不能压缩的边界。
 - RAB、ExceptionGen、LSQ、FTQ、IssueQueue 与 ROB 的职责分工。
+- ROB scalar store commit、StoreQueue request、`completed` 和 `sqDeq` 的顺序及 MMIO/CBO 例外。
 
 本文不覆盖前端取指预测细节、具体功能单元内部执行算法、完整 LSQ replay 策略和 V3 差异。
 
@@ -284,6 +285,69 @@ ROB 压缩时，组内后续指令不会各自创建完整 `RobEntryBundle`。�
 
 不会进入 ROB entry 的后续指令信息包括每条指令的完整 `fuOpType`、源寄存器、目的物理寄存器、LSQ index、调度 ready 状态和执行数据。这些信息由 `DynInst`、IssueQueue、LSQ、执行单元写回、RAB、ExceptionGen 或 FTQ 保存和消费。ROB 压缩合并的是提交控制信息，不合并执行数据通路本身。
 
+### 7. ROB 提交与 StoreQueue 出队的真实顺序
+
+这里必须把三个容易混淆的事件分开：
+
+1. **ROB 架构提交**：`Rob.scala` 的 `io.commits.commitValid` 为 1，且
+   `NewRobDeqPtrWrapper` 在时钟边界推进 `deqPtr`；对应的
+   `io.lsq.scommit` 是该提交批中 scalar store 数量的延迟通知。
+2. **store request 发出**：普通 cacheable/NC store 进入 `dataBuffer` 或 uncache
+   request；MMIO/CBO store 进入 uncache/CMO request。这个事件不等于 SQ entry 已经
+   物理出队。
+3. **SQ 物理出队**：`StoreQueue` 生成 `sqDeqCnt`，推进 `deqPtrExt`，并通过
+   `io.sqDeq := RegNext(sqDeqCnt)` 向后端输出释放数量。
+
+注意 V2 中有两个容易被同名变量混淆的数量：`ooo_to_mem.lsqio.scommit` 是
+ROB 到 MemBlock 的 scalar store 提交数量；`mem_to_ooo.sqDeq` 是 MemBlock 到后端的
+SQ 物理释放数量。后端 Dispatch/Scheduler 接收 `sqDeq` 后有时也把它命名为
+`scommit`，但它不是 ROB commit 的重复信号。
+
+ROB 侧的提交谓词是 `commit_w = (uopNum == 0) && stdWritebacked`。但是
+`pendingPtr := RegNext(deqPtr)` 和 `pendingst := RegNext(io.commits.isCommit && ...)`
+是 head sideband；`io.commits.isCommit` 可以为 1 而当前 `commitValid(0)` 仍为 0，
+因为 head 还可能没有满足 `commit_w`。因此 `pendingPtr/pendingst` 不能被解释为
+“本拍已经完成架构提交”。
+
+StoreQueue 的普通路径和特殊路径也不同：
+
+| 路径 | request/完成条件 | SQ deq 与 ROB commit 的关系 |
+|---|---|---|
+| 普通 cacheable scalar store | `dataBuffer.io.enq.valid` 要求 `allocated && committed && allvalid`；SBuffer fire 后才置 `completed` | 通常先经过延迟的 ROB head/`committed` 授权，再写 SBuffer，最后产生 `sqDeq`；这是常见顺序，但不是 `sqDeq` 逻辑上的显式 `rob_commit` 门控。 |
+| NC scalar store | `ncState` 要求 `committed && allvalid` 后发 uncache request；response/ack 后置 `completed` | 通常在 ROB commit 授权之后完成并出队。 |
+| MMIO/CBO store | `pendingst && pendingPtr` 可在 ROB head 尚未 `commit_w` 时放行 request；uncache/CMO response 后进入 writeback，`mmioStout.fire` 直接置 `completed` | **可能先 SQ deq、后 ROB `commitValid/scommit`**。`mmioState=s_wait` 等待 `scommit` 以允许后续 MMIO 状态收敛，但 `sqDeqCnt` 本身不检查 `committed`；源码还明确处理“MMIO 的 deq pointer 领先 cmt pointer”。 |
+
+关键源码顺序如下：
+
+```text
+ROB:
+  commit_w = (uopNum == 0) && stdWritebacked
+  commitValidThisLine = commit_v && commit_w && !blocked
+  scommit = RegNext(PopCount(commitValid store lanes))
+  pendingPtr = RegNext(deqPtr)
+  pendingst = RegNext(isCommit && head_is_store)
+
+StoreQueue:
+  normal store:
+    committed <- pendingPtr 的延迟 head 匹配
+    dataBuffer.valid <- allocated && committed && allvalid
+    SBuffer.fire -> completed = 1
+  MMIO/CBO store:
+    pendingst/pendingPtr -> request
+    response -> mmioStout.fire -> completed = 1
+  所有路径的物理释放判断：
+    sqDeqCnt = 连续的 allocated && completed
+    deqPtrExt <- deqPtrExt + sqDeqCnt
+    sqDeq = RegNext(sqDeqCnt)
+```
+
+因此，`status.rob_commit` 不应作为 `apply_dut_sq_deq_count_only()` 或其他 raw
+SQ deq 消费入口的全局硬门槛。它仍然是 `try_retire_committed_uid()` 做 normal
+success/terminal 收敛的必要条件，但 SQ deq 可以先释放 mapping，保留 uid 为 active，
+等待后续 ROB commit；MMIO/CBO 或异常清理路径则允许明确记录“deq-before-commit”。
+若 raw event 已经满足 SQ head、连续 count、active mapping 和 redirect/flush 世代校验，
+不能仅因软件 `status.rob_commit=0` 就判定 SQ pointer mismatch 或静默丢弃。
+
 ## 为什么不会丢失必要信息
 
 ROB 压缩不是把任意多条指令的完整状态强行塞入一个 entry，而是依赖两个前提：
@@ -339,6 +403,10 @@ RobCommitWidth = 8
 | `robEntries.stdWritebacked` | ROB enqueue/store writeback | 非 store 初始化为 true，store 初始化为 false；STD 写回置 true | 新 entry 覆盖 | `commit_w` | store 需要 STA/STD 都完成 |
 | `robEntries.needFlush` | ROB enqueue/writeback | 入队异常/flushPipe 或执行写回异常/flush/replay | entry commit/flush 后失效 | ROB head redirect/exception | 只有到 ROB head 后精确处理 |
 | `ExceptionGen.current` | ExceptionGen | enqueue 或 writeback 带异常/flush/replay/singleStep/trigger | redirect/flush 命中或被更老异常替换 | ROB head 异常判断 | 保留最老异常；同 robIdx 合并部分字段 |
+| `DynInst.replayInst` | 具备 replay capability 的执行/访存单元 | 执行结果要求从当前指令自身重新取指执行 | Rename 初始为 0；写回被 ExceptionGen 消费后随 redirect 清理 | ExceptionGen/ROB | 与 LSQ/RS 局部 replay 不同，必须到 ROB head 精确处理 |
+| `StoreQueue.committed` | StoreQueue ROB sideband consumer | cmt pointer entry 的 `robIdx` 不晚于延迟 `pendingPtr`，且未 cancel、Store S2 已完成 | 新 SQ entry 覆盖；entry 物理释放后不再有效 | cacheable/NC request 路径、redirect cancel | MMIO `s_wait` 还要求 `scommit>0` 才推进 cmt pointer |
+| `StoreQueue.completed` | SBuffer、uncache/MMIO/CBO response/writeback | 普通 store 的 SBuffer fire，NC response/ack，或 MMIO/CBO writeback | `sqDeqCnt` 消费后清零 | SQ 物理 deq | `sqDeqCnt` 只检查 `allocated && completed`，不检查 `committed` |
+| `StoreQueue.deqPtrExt/sqDeq` | StoreQueue deq logic | 队头连续 entry 均 `allocated && completed` | `deqPtrExt` 前进并清 entry；`sqDeq` 延迟输出 count | Backend Dispatch/Scheduler LSQ free count | MMIO deq pointer 可以领先 cmt pointer |
 | `RenameBuffer` | RAB | `req.valid && needWriteRf` | ROB commit/walk 推进 deq/walk pointer | arch RAT/free list/difftest | ROB 提供 commitSize/walkSize 控制提交/回滚数量 |
 | `robIdxHead` | Rename | Dispatch/Rename 成功输出后按 `validCount` 增加 | redirect 时恢复到 redirect robIdx | 后续 DynInst.robIdx 分配 | redirect 优先 |
 
@@ -354,11 +422,84 @@ ROB 压缩不改变精确异常原则。异常或 flush 处理仍发生在 ROB h
 
 这意味着：参与 ROB 压缩的指令不会携带需要独立精确异常处理的状态；一旦某条指令有异常或 Debug Mode trigger，压缩条件会阻止它和相邻指令合并。
 
+### `replayInst` 的精确 replay 语义
+
+`replayInst` 不是 IQ feedback miss、LoadQueueReplay 或 Store TLB replay 的统称。它是写回给
+ExceptionGen/ROB 的精确 replay 标志：指令到达 ROB head 后产生
+`RedirectLevel.flush`，redirect 点包含当前指令，因此当前指令不提交并从自身重新取指执行。
+
+它与 `flushPipe` 的区别是：
+
+| 字段 | 当前指令是否提交 | ROB redirect level | 重启位置 |
+|---|---|---|---|
+| `flushPipe=1` 且无异常 | 提交 | `flushAfter` | 当前指令之后 |
+| `replayInst=1` | 不提交 | `flush` | 当前指令自身 |
+
+`FuConfig.replayInst=true` 只表示该类执行单元需要 replay 输出 capability。在本文关注的
+scalar memory path 中，`LduCfg` 和 `HyldaCfg` 开启该 capability，`StaCfg` 和
+`StdCfg` 未开启；`VlduCfg/VstuCfg/VseglduSeg/VsegstuCfg` 也声明该 capability，
+但属于独立 vector writeback flow。当前 scalar
+`LoadUnit` 的正常写回显式执行 `s3_out.bits.uop.replayInst := false.B`，
+LoadMisalignBuffer 和 StoreMisalignBuffer 也显式清零，Rename 初始同样清零。当前源码中
+真正把该字段动态赋为条件表达式的是 `HybridUnit.s3_rep_frm_fetch`，它不属于
+`writebackLda_0/1/2` 的 scalar LDA 来源。
+
+### `replayInst` 的真实置位条件
+
+`HybridUnit` 的条件不是“所有 Load replay 都置位”。它先把三个 forwarding CAM 的
+`matchInvalid` 汇总，再要求当前拍仍是可进行正常 Load 流程的 `s3_troublem`：
+
+```scala
+val s3_vp_match_fail = RegNext(
+  io.ldu_io.lsq.forward.matchInvalid ||
+  io.ldu_io.sbuffer.matchInvalid ||
+  io.ldu_io.ubuffer.matchInvalid
+) && s3_troublem
+val s3_rep_frm_fetch = s3_vp_match_fail
+s3_out.bits.uop.replayInst := s3_rep_frm_fetch
+```
+
+`matchInvalid` 表示 store-to-load forwarding 的物理地址 CAM 与虚拟地址 CAM
+结果不一致；这不是普通数据未准备好，而是需要清理 SQ/已提交 sbuffer 后从前端重新
+执行的微架构异常。`s3_troublem` 同时排除了已有异常、MMIO、prefetch、late-kill
+等情况，并要求当前是 Load flow。相同原因在 `LoadUnit` 中只产生本地
+`io.rollback`，其正常 scalar LDA 写回又明确把 `uop.replayInst` 清零，所以不能把
+`LoadUnit.s3_flushPipe`、LoadQueue replay 或 IQ miss feedback 当成写回
+`replayInst=1`。
+
+写回后的精确处理链为：
+
+```text
+HybridUnit replayInst=1
+  -> Backend ExuOutput.replay
+  -> RobExceptionInfo.has_exception 方法命中
+     (hasException || flushPipe || singleStep || replayInst || DebugMode)
+  -> ExceptionGen.current.replayInst
+  -> ROB head deqHasReplayInst
+  -> RedirectLevel.flush
+  -> 当前 ROB 项和年轻项均清除，FTQ 从当前指令 PC 重取
+```
+
+这里的“不提交”特指架构 retirement：`RobDeqPtrWrapper` 用
+`RobExceptionInfo.not_commit` 阻止正常 `deqPtr` 前进，RAB 不会把该代目的物理寄存器映射
+提交为架构映射。`WbDataPath` 仍可能在 redirect 生效前把结果写入物理寄存器，这是投机
+写回；随后 `flush` 清除该 ROB 项、年轻项和对应 rename 状态，不能把这次写入当作可观察的
+架构结果。执行单元同时发出的 `io.rollback` 是流水线级的即时清理，ROB 中保存的
+`replayInst` 则保证即使结果已经进入后端写回，也不会被精确提交。
+
+因此 `replayInst` 不是“已经完成、再额外重发一次”的标记，而是声明本次执行结果
+不能成为架构提交结果；它必须先阻止提交，再用同一 PC 建立新一代动态指令。
+
+因此当前 V2 生成顶层虽然保留 LDA0/1/2 的 `uop.replayInst` 字段，但字段存在只证明
+compile-time capability；对 scalar LDA 有效写回，运行时值应为 0。监测到 1 可作为
+当前 V2 source invariant 违例 fail-fast，不能直接推导为普通 Load 写回成功。
+
 ## 关联 Agent 和 Flow
 
 - [Memory flushPipe flow](memory_flush_pipe_flow.md)：说明 `flushPipe` 如何进入 ExceptionGen/ROB 并在 ROB head 产生精确 redirect。
 - [Memory trigger flow](memory_trigger_flow.md)：说明 memory trigger 如何通过写回和 ROB 形成精确异常或 Debug Mode。
 - [LSQ 入队与 Redirect 恢复 flow](lsq_enqueue_redirect_flow.md)：说明 `robIdx.needFlush` 如何影响 LSQ 入队、取消和 redirect 恢复。
+- [Int writeback agent 接口知识](../../../interface/v2/agents/int_writeback_agent.md)：LDA/STA/STD split 顶层字段和 lane capability。
 
 ## V2/V3 差异
 
@@ -373,6 +514,8 @@ ROB 压缩不改变精确异常原则。异常或 flush 处理仍发生在 ROB h
 - `src/main/scala/xiangshan/backend/rob/Rob.scala:196`：ROB 只对 `req.valid && firstUop && canAccept` 建 entry。
 - `src/main/scala/xiangshan/backend/rob/Rob.scala:827`：ROB 按 `commitType` 生成 load/store commit 计数和 LSQ pending 状态。
 - `src/main/scala/xiangshan/backend/rob/Rob.scala:864`：`NewRobDeqPtrWrapper` 根据 commit/异常/block 状态推进 ROB deq pointer。
+- `src/main/scala/xiangshan/backend/rob/RobDeqPtrWrapper.scala:64-100`：`commit_w` 连续性、异常和 block 条件决定 ROB deq pointer 是否推进。
+- `src/main/scala/xiangshan/backend/rob/Rob.scala:776-841`：`commitValidThisLine`、`scommit`、`pendingst` 和 `pendingPtr` 的不同生成条件及寄存器边界。
 - `src/main/scala/xiangshan/backend/rob/Rob.scala:1004`：ROB 用 `robIdx` 匹配同一 entry 的入队和写回。
 - `src/main/scala/xiangshan/backend/rob/Rob.scala:1011`：`realDestSize` 按同一 `robIdx` 需要写寄存器的 uop 数量聚合。
 - `src/main/scala/xiangshan/backend/rob/Rob.scala:1037`：ROB 入队用 `numWB` 初始化 `uopNum`。
@@ -402,6 +545,25 @@ ROB 压缩不改变精确异常原则。异常或 flush 处理仍发生在 ROB h
 - `src/main/scala/xiangshan/backend/decode/DecodeUnit.scala:953`：Decode 生成非 fused `commitType` 的低两位分类。
 - `src/main/scala/xiangshan/backend/CtrlBlock.scala:605`：fusion decoder 将 fused 指令的 `commitType` 写为 `4.U` 到 `7.U`。
 - `src/main/scala/xiangshan/backend/dispatch/NewDispatch.scala:877`：Dispatch 根据前一条 fired 且 `CommitType.isFused` 识别 fused lane。
+- `src/main/scala/xiangshan/Bundle.scala:193-205`、`src/main/scala/xiangshan/backend/rob/RobBundles.scala:285-315`：`flushPipe`、`replayInst` 定义和 commit 边界。
+- `src/main/scala/xiangshan/backend/fu/FuConfig.scala:415-463`、`src/main/scala/xiangshan/backend/exu/ExeUnitParams.scala:65-76`：LDA/STA/STD replay capability。
+- `src/main/scala/xiangshan/backend/Backend.scala:671-703`：MemBlock `uop.replayInst` 进入 writeback replay 字段。
+- `src/main/scala/xiangshan/mem/pipeline/LoadUnit.scala:1560-1645`、`src/main/scala/xiangshan/mem/lsqueue/LoadMisalignBuffer.scala:562-568`：scalar LDA 写回清零。
+- `src/main/scala/xiangshan/mem/pipeline/HybridUnit.scala:1168-1215`：HybridUnit 的 `s3_rep_frm_fetch` 是当前源码中的动态 producer。
+- `src/main/scala/xiangshan/mem/Bundles.scala:200-208`、`src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:744-747`、`src/main/scala/xiangshan/mem/sbuffer/Sbuffer.scala:830-832`：`matchInvalid` 的地址 CAM 不一致定义。
+- `src/main/scala/xiangshan/backend/rob/RobBundles.scala:313-316`、`src/main/scala/xiangshan/backend/rob/ExceptionGen.scala:82-99,118-140`：`has_exception` 方法包含 replay，以及写回合并。
+- `src/main/scala/xiangshan/backend/rob/Rob.scala:578-630,1211-1227`：写回合并及 ROB head 的 `flush` redirect。
+- `src/main/scala/xiangshan/backend/rob/RobDeqPtrWrapper.scala:64-100`、`src/main/scala/xiangshan/backend/datapath/WbArbiter.scala:176-243,355-378`：`not_commit` 阻止 retirement 与物理寄存器投机写回的边界。
+- `src/main/scala/xiangshan/mem/lsqueue/LSQWrapper.scala:243-248`：ROB commit 到 LQ/SQ pointer 更新存在明确延迟。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:332-347`：`sqDeqCnt` 只由连续 `allocated && completed` entry 产生，`sqDeq` 再延迟一拍输出。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:479-483`：redirect 恢复逻辑明确注明 MMIO 的 `deqPtr` 可能领先 `cmtPtr`。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:820-927`：MMIO head sideband、uncache request、response/writeback 和 NC request 的不同门控。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1038-1071`：MMIO request 后清 pending，`mmioStout.fire` 直接置 `completed`。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1117-1219`：cmt pointer/`committed` 更新和普通 cacheable store 的 dataBuffer 入口条件。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1324-1343`：SBuffer fire 后设置普通 store 的 `completed`。
+- `src/main/scala/xiangshan/mem/lsqueue/StoreQueue.scala:1476-1519`：redirect 只取消未 committed entry，SQ deq pointer 独立推进。
+- `src/main/scala/xiangshan/backend/Backend.scala:269-273,420-425`：后端把 MemBlock `sqDeq` 作为 LSQ free/deq 数量接收，不能与 ROB->MemBlock 的 `lsqio.scommit` 混同。
+- `build_memblock/rtl/MemBlock.sv:831-950`：LDA/STA/STD split 顶层字段实际保留结果。
 
 ## 知识修订记录
 
@@ -410,6 +572,10 @@ ROB 压缩不改变精确异常原则。异常或 flush 处理仍发生在 ROB h
 | 2026-07-15 | `6e721ccb42bec882b3254062bff003294a507854` | 首次建立，无旧结论修订 | 建立 V2 ROB entry 字段语义、RAB/ExceptionGen 信息归属、后端指令流转和 ROB 压缩条件/上限 | 用户要求将 ROB/RAB/压缩讨论总结并扩展成 RTL 后端分析文档 | V2 Decode/Rename/Dispatch/ROB/RAB/ExceptionGen/LSQ/Commit |
 | 2026-07-15 | `6e721ccb42bec882b3254062bff003294a507854` | 文档只列出 `commitType` 包含 normal/load/store/branch/fused，未解释类型含义 | 补充 `CommitType` 编码、NORMAL/BRANCH/LOAD/STORE/fused 的语义、来源和 ROB/下游用途 | 用户追问 normal 和 fused 的具体含义 | V2 Decode/CtrlBlock/Dispatch/ROB commit 分类 |
 | 2026-07-15 | `6e721ccb42bec882b3254062bff003294a507854` | 文档已说明 entry 字段和压缩流程，但没有集中说明 ROB 的核心作用、维持该作用的主信息，以及压缩组后续指令进入 entry 的信息 | 补充 ROB 作用、顺序/完成/精确提交三类核心维护信息，并新增压缩组后续指令进入 entry 的信息表 | 用户要求将 ROB 作用和压缩后 entry 保存信息继续整合进文档 | V2 ROB commit/redirect/RAB/ExceptionGen/压缩 entry |
+| 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 只概括 replay 与 flush 共用 ExceptionGen，未区分精确重启位置，也未核验 scalar LDA producer | 明确 `replayInst` 使用 `flush` 从自身重放且当前指令不提交；当前 V2 scalar LDA 虽有端口 capability 但运行时应为 0 | 用户要求结合 Scala 源码解释 split writeback metadata 和测试框架 guard | V2 MemBlock writeback/ExceptionGen/ROB |
+| 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 未给出 `replayInst` 的具体运行时 producer，也未区分 forwarding 地址 CAM 失配和普通 Load replay | 补充 `HybridUnit.s3_rep_frm_fetch` 的 `matchInvalid && s3_troublem` 条件、scalar `LoadUnit` 清零边界，并明确 `RobExceptionInfo.has_exception` 方法会收集 replay-only 写回 | 用户追问 `replayInst` 何时置高以及为什么不能提交 | V2 HybridUnit/LoadUnit/ExceptionGen/ROB |
+| 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 只说明 replay redirect 会阻止提交，未区分架构 retirement 与物理寄存器投机写回，也未说明执行级 rollback 与 ROB 级 replay marker 的并行关系 | 补充 `RobDeqPtrWrapper.not_commit`、`WbDataPath` 和 `io.rollback` 的边界：旧代可能短暂写入物理寄存器，但不会进入架构映射，随后由 flush 清理 | 用户追问 `replayInst` 为什么重发且不会提交 | V2 HybridUnit/Backend/WbDataPath/ROB |
+| 2026-07-18 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 测试框架 flow 将 `status.rob_commit` 作为 V2 count-only SQ deq 的硬门槛，未区分 ROB commit、store request、`completed` 和物理 SQ deq | 明确普通 cacheable/NC store 通常先 commit 授权再出队，但 MMIO/CBO 可先完成并产生 SQ deq、后收到 ROB `commitValid/scommit`；`rob_commit` 只能门控最终 retire，不能全局门控 raw SQ deq 消费 | 用户要求结合 V2 Scala 核对 store 提交与 SQ 出队顺序 | V2 ROB/StoreQueue/MMIO/CBO/SQ deq 与 mem_ut 状态建模边界 |
 
 ## 待确认项
 
