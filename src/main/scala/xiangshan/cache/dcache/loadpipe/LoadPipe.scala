@@ -170,7 +170,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_paddr_dup_dcache = io.lsu.s1_paddr_dup_dcache
   val s1_load128Req = RegEnable(s0_load128Req, s0_fire)
   val s1_is_prefetch = s1_req.instrtype === DCACHE_PREFETCH_SOURCE.U
-  // LSU may update the address from io.lsu.s1_paddr, which affects the bank read enable only.
+  // LSU may update the address from io.lsu.s1_paddr_dup_lsu, which affects the bank read enable only.
   val s1_vaddr_update = Cat(s1_req.vaddr(VAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_lsu(blockOffBits - 1, 0))
   val s1_vaddr_update_dup = Cat(s1_req.vaddr_dup(VAddrBits - 1, blockOffBits), io.lsu.s1_paddr_dup_dcache(blockOffBits - 1, 0))
   val s1_vaddr = Mux(s1_load128Req, Cat(s1_vaddr_update(VAddrBits - 1, 4), 0.U(4.W)), s1_vaddr_update)
@@ -313,14 +313,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // val s2_valid = RegEnable(next = s1_valid && !io.lsu.s1_kill, init = false.B, enable = s1_fire)
   val s2_valid = RegInit(false.B)
-  val s2_valid_dup = RegInit(false.B)
   val s2_req = RegEnable(s1_req, s1_fire)
   val s2_pf_source = RegEnable(s1_pf_source, s1_fire)
   val s2_load128Req = RegEnable(s1_load128Req, s1_fire)
   val s2_paddr = RegEnable(s1_paddr_dup_dcache, s1_fire)
   val s2_vaddr = RegEnable(s1_vaddr, s1_fire)
   val s2_bank_oh = RegEnable(s1_bank_oh, s1_fire)
-  val s2_bank_oh_dup_0 = RegEnable(s1_bank_oh, s1_fire)
   val s2_wpu_pred_fail = RegEnable(s1_wpu_pred_fail, s1_fire)
   val s2_real_way_en = RegEnable(s1_tag_match_way_dup_dc, s1_fire)
   val s2_pred_way_en = RegEnable(s1_pred_tag_match_way_dup_dc, s1_fire)
@@ -336,11 +334,9 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   when (s1_fire) {
     s2_valid := !io.lsu.s1_kill
-    s2_valid_dup := !io.lsu.s1_kill
   }
   .elsewhen(io.lsu.resp.fire) {
     s2_valid := false.B
-    s2_valid_dup := false.B
   }
 
   dump_pipeline_reqs("LoadPipe s2", s2_valid, s2_req)
@@ -354,7 +350,6 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   // lsu side tag match
   val s2_hit_dup_lsu = RegNext(s1_tag_match_dup_lsu)
-
   io.lsu.s2_hit := s2_hit_dup_lsu && !s2_wpu_pred_fail
 
   val s2_hit_meta = RegEnable(s1_hit_meta, s1_fire)
@@ -370,19 +365,17 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
 
   //
   val s2_can_send_miss_req = RegEnable(s1_will_send_miss_req, s1_fire)
-  val s2_can_send_miss_req_dup = RegEnable(s1_will_send_miss_req, s1_fire)
 
   val s2_miss_req_valid     = s2_valid && s2_can_send_miss_req
-  val s2_miss_req_valid_dup = s2_valid_dup && s2_can_send_miss_req_dup
-  val s2_miss_req_fire      = s2_miss_req_valid_dup && io.miss_req.ready
+  val s2_miss_req_fire      = s2_miss_req_valid && io.miss_req.ready
 
   // when req got nacked, upper levels should replay this request
   // nacked or not
   val s2_nack_hit = RegEnable(s1_nack, s1_fire)
   // can no allocate mshr for load miss
-  val s2_nack_no_mshr = s2_miss_req_valid_dup && !io.miss_req.ready
+  val s2_nack_no_mshr = s2_miss_req_valid && !io.miss_req.ready
   // block with a wbq valid req
-  val s2_nack_wbq_conflict = s2_miss_req_valid_dup && io.wbq_block_miss_req
+  val s2_nack_wbq_conflict = s2_miss_req_valid && io.wbq_block_miss_req
   // Bank conflict on data arrays
   val s2_nack_data = RegEnable(!io.banked_data_read.ready, s1_fire)
   val s2_nack = s2_nack_hit || s2_nack_no_mshr || s2_nack_data || s2_nack_wbq_conflict
@@ -435,7 +428,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.occupy_way := s2_tag_match_way
 
   //send load miss to wbq
-  io.wbq_conflict_check.valid := s2_miss_req_valid_dup
+  io.wbq_conflict_check.valid := s2_miss_req_valid
   io.wbq_conflict_check.bits := get_block_addr(s2_paddr)
 
   // send back response

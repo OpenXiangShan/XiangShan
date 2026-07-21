@@ -163,7 +163,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val refill_info = Flipped(ValidIO(new MissQueueRefillInfo))
     // write-back queue
     val wb = DecoupledIO(new WritebackReq)
-    val wb_ready_dup = Vec(nDupWbReady, Input(Bool()))
     // hardware prefetch
     val prefetch_req = Flipped(Decoupled(new L1PrefetchReq()))
     // pass to Prefetch Monitor for statistic
@@ -181,7 +180,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val readline_error_delayed = Input(Bool())
     val data_write = DecoupledIO(new L1BankedDataWriteReq)
     val data_write_dup = Vec(DCacheBanks, Valid(new L1BankedDataWriteReqCtrl))
-    val data_write_ready_dup = Vec(nDupDataWriteReady, Input(Bool()))
 
     // meta array
     val meta_read = DecoupledIO(new MetaReadReq)
@@ -197,7 +195,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val tag_read = DecoupledIO(new TagReadReq)
     val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
     val tag_write = DecoupledIO(new TagWriteReq)
-    val tag_write_ready_dup = Vec(nDupTagWriteReady, Input(Bool()))
     val tag_write_intend = Output(new Bool())
 
     // update state vec in replacement algo
@@ -218,9 +215,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
       val s0_set = ValidIO(UInt(idxBits.W))
       val s1, s2, s3 = ValidIO(new MainPipeStatus)
     }
-    val status_dup = Vec(nDupStatus, new Bundle() {
-      val s1, s2, s3 = ValidIO(new MainPipeStatus)
-    })
 
     // lrsc locked block should block probe
     val lrsc_locked_block = Output(Valid(UInt(PAddrBits.W)))
@@ -1136,19 +1130,6 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.status.s3.valid := s3_valid && !s3_req.replace
   io.status.s3.bits.set := s3_idx
   io.status.s3.bits.way_en := s3_way_en
-
-  for ((s, i) <- io.status_dup.zipWithIndex) {
-    s.s1.valid := s1_valid
-    s.s1.bits.set := RegEnable(get_dcache_idx(s0_req.vaddr), s0_fire)
-    s.s1.bits.way_en := s1_way_en
-    s.s2.valid := s2_valid && !RegEnable(s1_req.replace, s1_fire)
-    s.s2.bits.set := RegEnable(get_dcache_idx(s1_req.vaddr), s1_fire)
-    s.s2.bits.way_en := s2_way_en
-    s.s3.valid := s3_valid && !RegEnable(s2_req.replace, s2_fire_to_s3)
-    s.s3.bits.set := RegEnable(get_dcache_idx(s2_req.vaddr), s2_fire_to_s3)
-    s.s3.bits.way_en := RegEnable(s2_way_en, s2_fire_to_s3)
-  }
-  dontTouch(io.status_dup)
 
   io.mainpipe_info.s2_valid := s2_valid && s2_req.miss
   io.mainpipe_info.s2_miss_id := s2_req.miss_id
