@@ -109,6 +109,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val maybe_need_gpa_not_allow_refill = WireInit(false.B)
   val need_clear_need_gpa = RegInit(false.B)
   val need_gpa_robidx = Reg(new RobPtr)
+  val need_gpa_robidx_valid = RegInit(false.B)
   val need_gpa_vpn = Reg(UInt(vpnLen.W))
   val resp_gpa_gvpn = Reg(UInt(ptePPNLen.W))
   val resp_gpa_refill = RegInit(false.B)
@@ -290,10 +291,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val lastCycleRedirect = req_out(i).debug.robIdx.needFlush(RegNext(redirect))
 
     need_clear_need_gpa := false.B
-    when (!isitlb && need_gpa_robidx.needFlush(redirect) || isitlb && flush_pipe(i) || need_clear_need_gpa){
+    when (!isitlb && need_gpa_robidx_valid && need_gpa_robidx.needFlush(redirect) || isitlb && flush_pipe(i) || need_clear_need_gpa){
       need_gpa := false.B
       resp_gpa_refill := false.B
       need_gpa_vpn := 0.U
+      need_gpa_robidx_valid := false.B
     }.elsewhen (req_out_v(i) && !p_hit && !(resp_gpa_refill && need_gpa_vpn_hit) && !isOnlys2xlate && hasGpf(i) && need_gpa === false.B && !io.requestor(i).req_kill && !isPrefetch && !currentRedirect && !lastCycleRedirect) {
       when(canGetGpa(i)) {
         maybe_need_gpa_not_allow_refill := true.B
@@ -302,6 +304,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
         need_gpa_vpn := get_pn(req_out(i).vaddr)
         resp_gpa_refill := false.B
         need_gpa_robidx := req_out(i).debug.robIdx
+        need_gpa_robidx_valid := true.B
         when (p_hit_fast) {
           need_clear_need_gpa := true.B
         }
