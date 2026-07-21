@@ -291,6 +291,7 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   val activeIssue   = Wire(Bool())
   val inActiveIssue = Wire(Bool())
   val splitFinish   = WireInit(false.B)
+  val isFirstActive = RegInit(false.B)
 
   // for split
   val splitIdx = RegInit(0.U(flowIdxBits.W))
@@ -404,7 +405,8 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
     x.uop_unit_stride_fof   := DontCare
     x.isFirstIssue          := DontCare
     x.mBIndex               := issueMbIndex
-    x.splitIndex             := splitIdx
+    x.splitIndex            := splitIdx
+    x.vecIsFirstActiveElement := isFirstActive
   }
 
   // redirect
@@ -451,10 +453,17 @@ abstract class VSplitBuffer(isVStore: Boolean = false)(implicit p: Parameters) e
   // allocated
   when(doEnqueue){ // if enqueue need to been cancelled, it will be false, so this have high priority
     allocated := true.B
+    isFirstActive := true.B
   }.elsewhen(needCancel) { // redirect
     allocated := false.B
+    isFirstActive := false.B
   }.elsewhen(splitFinish && (activeIssue || inActiveIssue)){ //dequeue
     allocated := false.B
+    isFirstActive := false.B
+  }
+
+  when(io.out.fire) {
+    isFirstActive := false.B
   }
 
   // out connect
