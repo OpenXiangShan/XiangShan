@@ -157,6 +157,7 @@ class VecPipeBundle(isVStore: Boolean=false)(implicit p: Parameters) extends VLS
   val vecActive           = Bool() // 1: vector active element, 0: vector not active element
   val is_first_ele        = Bool()
   val isFirstIssue        = Bool()
+  val vecIsFirstActiveElement = Bool()
 
   val uop = new DynInst
 

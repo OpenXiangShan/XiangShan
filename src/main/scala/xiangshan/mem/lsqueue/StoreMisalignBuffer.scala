@@ -228,7 +228,7 @@ class StoreMisalignBuffer(implicit p: Parameters) extends XSModule
   io.sqControl.toStoreQueue.crossPageCanDeq := !isCrossPage || bufferState === s_block || (req.isvec && bufferState === s_wb)
   io.sqControl.toStoreQueue.paddr := Cat(splitStoreResp(1).paddr(splitStoreResp(1).paddr.getWidth - 1, 3), 0.U(3.W))
 
-  io.sqControl.toStoreQueue.withSamePtr := sameSqPtr && sameUop && req.isvec && robMatch && isCrossPage
+  io.sqControl.toStoreQueue.withSamePtr := sameUop && req.isvec && robMatch && isCrossPage
 
   //state transition
   switch(bufferState) {
