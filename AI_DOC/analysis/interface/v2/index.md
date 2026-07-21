@@ -10,10 +10,9 @@
 
 ## Agent 文档
 
-当前暂无按新规则建立的 V2 agent 长期知识文档。
-
 | Agent 文档 | 关键词 | 覆盖模块/端口 | 入口信号 | 关联 Flow |
 |---|---|---|---|---|
+| [Int writeback agent](agents/int_writeback_agent.md) | `writebackLda`、`writebackSta`、`writebackStd`、`replayInst`、`trigger`、`flushPipe`、split lane | MemBlock、LoadUnit、StoreUnit、StoreQueue、Backend int writeback | `io_mem_to_ooo_writebackLda/Sta/Std_*_valid` | memory trigger、memory flushPipe、ROB/ExceptionGen flow |
 
 ## 维护规则
 

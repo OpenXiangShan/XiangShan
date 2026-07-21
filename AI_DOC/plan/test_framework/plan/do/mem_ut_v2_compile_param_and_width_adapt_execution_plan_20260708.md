@@ -6,10 +6,21 @@
 
 本 plan 主要处理编译期结构参数和 runtime 参数 clamp，同时负责按 V2 当前未闭环范围收敛 software dispatch smoke 默认场景，并在运行期参数加载和主表构造边界检测 AMO/CBO；不实现 LSQ enqueue、issue、writeback、L2TLB 或 monitor 的其它业务逻辑修改，这些内容由后续专项 plan 执行。
 
-本 compile/width 专项是以下 coding 的唯一 owner：编译期 width/port 权威、`seq_pkg::fit_directed_rob_value_or_fatal()` 共享实现、real manual 与 software smoke 两个 `make_directed_transaction()` 的 ROB value fit、V2 AMO/CBO运行期检测，以及 V2 software dispatch smoke 从 load/store/AMO 三笔收敛为 load/store 两笔。其它专项只能消费本 plan 产出的 localparam、helper 和 smoke 结果，不得复制 fit helper、再次用 slice 转换 directed ROB value，也不得保留或重新引入 software smoke 的 AMO/MOU 第三笔。
+本 compile/width 专项是第5章已列且第12章已完成的既有 width/port 参数、
+`seq_pkg::fit_directed_rob_value_or_fatal()` 共享实现、real manual 与 software smoke 两个
+`make_directed_transaction()` 的 ROB value fit、V2 AMO/CBO运行期检测，以及 V2 software dispatch smoke
+从 load/store/AMO 三笔收敛为 load/store 两笔的唯一 owner。其它专项只能消费这些已产出的
+localparam、helper 和 smoke 结果，不得复制 fit helper、再次用 slice 转换 directed ROB value，也不得
+保留或重新引入 software smoke 的 AMO/MOU 第三笔；归档后新增的其它结构宏不自动归入本 plan。
 
 执行状态：已完成，完成日期为2026-07-13。源码、参数、同步文档和验证结果见第12章；
 归档后本文件位于`AI_DOC/plan/test_framework/plan/do`。
+
+归档后依赖边界：后续 LSQ MMIO/status `undo` plan 会在同一个
+`memblock_compile_params.svh` 中新增 SQ deq count、cancel count 和 redirect/cancel 时序宏。
+这些尚未实现的宏、派生公式和 consumer 修改由该 `undo` plan 唯一拥有，不属于本 `do` plan
+的已完成范围；本文件只保留“所有硬件结构参数继续进入统一 compile header、不得建立 runtime
+plus 第二权威”这一公共约束。
 
 ## 2. 范围边界
 
@@ -245,11 +256,11 @@ memblock_dispatch_types.sv：
 | lintsissue agent + connect | LDA/STA/STD ROB/LQ/SQ、`waitForRobIdx`、FTQ ptr/offset、STA/STD `fuType`，monitor X/Z 参数 | ROB/LQ/SQ=8/7/6，FTQ=6/4，FuType=35 |
 | split issue fired-mask consumer | lintsissue xaction mask宽度、sequence `port_idx_for_item()`/`mark_fired_items()`/full-mask、driver ready bit和fire report | 只读 package `MEMBLOCK_DUT_LOAD/STA/STD_PORT_BASE`、pipe count、total/mask width；LOAD base默认与同名localparam由本 plan唯一拥有，split plan不得复制默认值 |
 | vecissue agent + connect | `issueVldu` 的 ROB/LQ/SQ、FTQ ptr/offset 和 `fuType` 字段，仅做编译宽度一致性 | 同上；功能仍由 split issue plan 固定 fatal |
-| IQ feedback agent + connect | STA/VSTU feedback 的 LQ/SQ value、monitor 局部变量及 X/Z 参数 | LQ/SQ=7/6；STA raw 只保留真实 SQ valid 的功能语义由 IQ feedback 专项处理 |
+| IQ feedback agent + connect | STA/VSTU feedback 的 LQ/SQ value、monitor 局部变量及 X/Z 参数 | LQ/SQ=7/6；STA SQ-only raw和VSTU valid fatal由IQ feedback/replay专项唯一处理 |
 | int-WB agent + connect | writebackLda/Sta/Std 的 ROB value、interface/xaction/monitor 声明及 X/Z 参数 | ROB=8；STD value-only 语义不因宽度适配而伪造 flag |
 | ctrl agent + connect | memoryViolation ROB、`ftqIdx_value`、`ftqOffset`，load/store MMIO uop ROB value，monitor X/Z 参数 | ROB=8，FTQ ptr=6，`memoryViolation.ftqOffset=4`；禁止保留 `[4:0]` 或 X/Z width 5 |
 | redirect agent + connect | redirect ROB value 的 interface/xaction/driver/monitor 和约束 | ROB=8；当前已宏化的字段保留并纳入静态检查 |
-| vector-WB agent + connect | `writebackVldu` ROB value | ROB=8；只做编译宽度一致性，valid 的 scalar-mode fatal 由 split issue plan 实现 |
+| vector-WB agent + connect | `writebackVldu` ROB value | ROB=8；本plan只做编译宽度一致性，valid的scalar-mode fatal由monitor output专项唯一实现 |
 | `common_data_transaction`、`lsq_ctrl_model`、`issue_queue_scheduler`、`lsq_commit_handler`、`dispatch_monitor_event_adapter`、redirect sequence | 任何直接声明、slice、format 或临时 key | 只使用 package key typedef/localparam；不得保留 `[7:0]/[6:0]/[5:0]` 作为结构权威 |
 | `seq_pkg::fit_directed_rob_value_or_fatal()`、real manual 与 software smoke 两个 `make_directed_transaction()` | `int unsigned rob_value` 到 `tr.robIdx_value` 的 directed 输入转换 | package helper 是唯一转换 owner；先按 `MEMBLOCK_ROB_VALUE_W` 检查原值可表示范围，再做显式 sized cast；两个 builder 只调用 helper，禁止固定 `[8:0]`、参数化低位 slice 或任何静默截断 |
 
@@ -397,6 +408,7 @@ function void check_compile_param_consistency();
     if any FuType bit >= INTERNAL_FUTYPE_W: fatal;
     if any scalar FuType bit >= DUT_FUTYPE_W: fatal;
     if any two FuType bits are equal: fatal;
+
 endfunction
 ```
 
@@ -789,7 +801,7 @@ make eda_run tc=tc_dispatch_replay_smoke mode=base_fun
 - 不修改 writeback event 归一化。
 - 不处理 L2TLB response 字段链路。
 
-## 与初步 plan 差异说明
+## 11. 原执行范围差异分析
 
 ### 原测试框架逻辑对比和修改类型总结
 
@@ -1178,7 +1190,8 @@ final继续要求active ROB/LQ/SQ map为空且LQ/SQ free count恢复满值；
 - runtime plusarg仍可通过固定`MEMBLOCK_ENQ_PER_CYCLE`和三类`*_PIP_NUM_LIMIT`控制本次行为使用量，但不能配置物理slot/pipe总数；随机enqueue模式保持在完整编译期物理slot范围内采样。
 - load/store 地址复用原逻辑继续由主表构建期既有 owner 维护：`build_random_main_table()` 维护 recent load/store 候选，`apply_addr_reuse_window()` 按既有权重选择复用种类并形成地址关系。V2 复核只为确认复用后的 transaction 正确消费 compile 宽度/FuType、LSQ enqueue 和 split issue 字段链；最终不修改候选选择、复用概率、load/store 地址关系、fallback 或复用算法，也不改变 ROB/LQ/SQ key、既有 issue generation、MMIO active-instance provenance、pass/fail 或 terminal。normal 自动主表地址的参数来源和合法槽失败策略由主表 VADDR 专项修改；`apply_addr_reuse_window()` 在两个专项中均无行为 diff，不计入本 plan 的12个函数合同。
 - 本 plan 不修改 LSQ enqueue payload 生成、issue target 选择、writeback event 归一化、MMIO 状态功能或 redirect/replay 生命周期。
-- vecissue/vector-WB 仅完成编译宽度一致性；vector valid 的 fatal 和 scalar 调度禁用由 split issue plan 实现。
+- 本plan对vecissue/vector-WB只完成编译宽度一致性；scalar调度禁用和vecissue driver fatal由split issue专项
+  实现，VSTU feedback fatal由IQ feedback/replay专项实现，`writebackVldu` fatal由monitor output专项实现。
 - atomic 和 CBO 完整支持分别延后到对应专项 plan；本 plan 负责参数初始化和所有scalar主表入口的运行期检测，在admission前fail-fast，以及默认 software smoke 不再构造 AMO/MOU。
 - software prefetch 默认权重1、PREFETCH behavior和LDU->LOAD/`issueLda`路径不变。
 - compile/width 专项是 package fit helper、两个 builder 调用和 software smoke 两笔收敛的唯一 owner；其它专项不重复 coding。
@@ -1262,3 +1275,63 @@ final继续要求active ROB/LQ/SQ map为空且LQ/SQ free count恢复满值；
 `make eda_batch_run`消费该已验证`simv`，避免重复compile。默认`tc_sanity`不建立主表，若保持
 `MEMBLOCK_LSQENQ_SEQ_EN=1/MEMBLOCK_LSQCOMMIT_SEQ_EN=1`会由两个常驻sequence持续等待；
 sanity验证因此显式置两者为0，该限制不影响三项dispatch smoke。
+
+## 与初步 plan 差异说明
+
+本章只总结本 `do` plan 已完成范围相对初步方案的功能差异，不承载后续 LSQ MMIO/status 的
+pending 实现。后续 SQ deq/cancel count 与 redirect/cancel latency 宏由对应 `undo` plan 唯一拥有。
+
+| 修改项 | 修改类型 | 修改前逻辑 | 变更原因 | 最终逻辑与影响 |
+|---|---|---|---|---|
+| 编译期结构权威 | 编译期参数/字段适配 | ROB/LQ/SQ/FuType/slot/pipe散落固定值，并保留同义runtime硬件参数 | V2/V3结构必须在elaboration前固定 | `memblock_compile_params.svh`是既有结构唯一默认入口，package只读暴露localparam；删除五个硬件结构plus，runtime只保留行为使用量 |
+| FuType写入 | 编码与失败策略修改 | 36-bit内部/V3编码可能被直接裁剪到V2 DUT 35-bit | 裁剪可能把不支持target伪装成合法编码 | `encode_and_fit_dut_futype()`检查one-hot bit和DUT宽度后无损转换；非法组合fatal，不改变合法route顺序 |
+| runtime资源限制 | runtime参数收敛修改 | 多个getter各自使用固定slot/pipe上限 | 分散clamp会形成第二结构权威 | `apply_runtime_resource_limits()`集中按compile localparam收敛enqueue/pipe使用量；`check_compile_param_consistency()`只校验、不写回 |
+| directed ROB value | 字段宽度与失败策略修改 | real/software builder分别做低位slice | V2 ROB value缩窄后可能静默截断 | `fit_directed_rob_value_or_fatal()`是共享入口，先检查可编码再显式cast；两个builder均调用，合法UID/ROB顺序不变 |
+| software smoke | 默认场景功能修改 | 固定load/store/AMO三笔，AMO在V2尚未闭环 | 默认场景会生成当前不支持激励 | 场景收敛为load/store两笔，commit期望改为2，LQ/SQ仍各deq一笔；主表、issue、writeback、commit/deq算法不变 |
+
+关键 helper 差异：新增的 `check_compile_param_consistency()` 输入为compile localparam、只产生
+fatal诊断；`encode_and_fit_dut_futype()` 输入内部FuType和target、输出可直接驱DUT的无损编码；
+`fit_directed_rob_value_or_fatal()` 输入directed整数和caller、输出V2 ROB value；
+`apply_runtime_resource_limits()` 输入已加载runtime快照、只修改行为上限。修改后的
+`validate_and_clamp()` 只编排公共检查与资源收敛，不再读取已删除硬件plus；两个
+`make_directed_transaction()` 不再自行slice。上述函数的逐分支文字伪代码见第6章，实际完成差异与
+验证见第12章。
+
+### 审稿用四要素伪代码
+
+```text
+修改目的：
+  用compile profile替代散落literal/runtime镜像，并拒绝FuType或directed ROB value静默截断。
+修改前逻辑行为：
+  getter各自按固定slot/pipe clamp；builder直接slice ROB value；36-bit内部FuType可能裁成35-bit DUT值；
+  software smoke固定生成load/store/AMO三笔。
+修改后逻辑行为：
+  validate_and_clamp统一调用compile一致性检查和runtime资源收敛；两个builder调用共享ROB fit helper；
+  FuType先检查target one-hot和DUT位宽再转换；V2 software smoke只生成load/store两笔。
+差异影响：
+  改变编译期参数来源、越界失败策略和V2 smoke默认内容；不改变合法ROB/LQ/SQ顺序、issue、WB、commit/deq算法。
+```
+
+### 新增/修改 Helper 详细伪代码
+
+```text
+check_compile_param_consistency()：
+  添加原因：集中发现profile宽度、端口数和FuType bit冲突。
+  输入为compile localparam；无输出和状态副作用；逐项检查非零、派生关系、bit唯一且可表示，失败fatal。
+
+encode_and_fit_dut_futype(internal_futype,target)：
+  添加原因：禁止把V3/36-bit编码直接裁剪到V2 35-bit接口。
+  校验target受支持、编码one-hot且置位bit小于DUT宽度；成功返回无损DUT编码，失败fatal；不修改transaction。
+
+fit_directed_rob_value_or_fatal(value,caller)：
+  添加原因：两个directed builder不能各自保留低位slice。
+  检查value可由MEMBLOCK_DUT_ROB_VALUE_W完整表示；成功显式cast并返回，失败携caller fatal；无表状态副作用。
+
+apply_runtime_resource_limits(runtime_snapshot)：
+  添加原因：runtime行为使用量必须统一受compile物理资源约束。
+  读取已加载runtime值和compile上限；只收敛enqueue/pipe行为上限，不修改compile参数或接口宽度。
+
+validate_and_clamp() / make_directed_transaction() 修改：
+  前者修改前分散读取硬件plus，修改后只编排check_compile_param_consistency和resource limits；
+  后者修改前自行slice ROB value，修改后调用共享fit helper，再保持原transaction字段构造顺序。
+```

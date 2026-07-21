@@ -6,9 +6,9 @@
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv` |
-| 主要入口 | `csr_ctrl_agent_agent_monitor::mon_data()`、`fence_agent_agent_driver::send_pkt()`、`memblock_l2tlb_base_sequence::send_l2tlb_cycle()` |
-| 适配原则 | snapshot-only 字段只进入 raw/runtime snapshot；`flushPipe=1` 只允许 `basicTest + memblock_sfence_flushpipe_directed_vseq` 独占 standalone；不改变 sequence、pass/fault、LSQ/issue/terminal 主流程 |
-| 创建/修订日期 | 2026-07-15 |
+| 主要入口 | `csr_ctrl_agent_agent_monitor::mon_data()`、`fence_agent_agent_xaction`、`fence_agent_agent_driver::send_pkt()`、`fence_agent_agent_monitor::mon_data()` |
+| 适配原则 | snapshot-only 字段只进入 raw/runtime snapshot；`sfence_bits_flushPipe` 只做接口构造、透明驱动和观测采样，默认值为 `0`，取值 `0/1` 均不改变测试框架行为 |
+| 创建/修订日期 | 2026-07-16 |
 
 ## 1. 范围与边界
 
@@ -18,18 +18,17 @@
 
 - `hd_misalign_ld_enable`、`hd_misalign_st_enable` 和 `tlbCsr_priv_debug` 的 monitor -> raw CSR -> `mmu_csr_runtime_state` snapshot 保存链路。
 - 三个 snapshot-only 字段的 xaction soft 默认、driver idle 默认、monitor X/Z 检查和 runtime copy。
-- `sfence_bits_flushPipe` 的默认 `0` 约束、monitor payload X/Z 检查、driver 驱动前 fail-fast gate。
-- `flushPipe=1` 的唯一 directed standalone 场景：`tc=basicTest ts=memblock_sfence_flushpipe_directed_vseq`。
-- quiescent provider 桥接、standalone cfg 校验、L2TLB request acceptance gate 和 strict single-outstanding tracking。
+- `sfence_bits_flushPipe` 的 xaction 默认 `0`、transaction/debug 展示、driver 原值透明驱动和 monitor payload X/Z 检查。
+- `flushPipe=1` 允许由 fence transaction 的 directed item 显式覆盖默认值后直接驱动 DUT，不增加 standalone 场景或运行期合法性 gate。
 
 本轮不支持：
 
 - snapshot-only 字段进入 sequence、主表构建、异常 directed 激励、pass/fault、terminal 或 L2TLB lookup key。
 - `tlbCsr_priv_debug` 的 debug-mode PMP/PMA/权限差异建模。
-- `sfence_bits_flushPipe` 进入 `dispatch_raw_sfence_t` 或 `decode_raw_sfence()`，也不实现年轻 uid kill、pipeline flush、epoch 回滚和 terminal 重收敛。
+- `sfence_bits_flushPipe` 进入 `dispatch_raw_sfence_t`、`decode_raw_sfence()` 或任何行为状态；也不实现年轻 uid kill、pipeline flush、epoch 回滚、terminal 重收敛、quiescent 检查或保护窗口。
 - branch predictor enable/control 字段进入 TLB lookup、权限或异常模型。
 - 通过 `seq_csr_common` plus/cfg/user cfg 替代 runtime CSR 真值。
-- 通过 fence child/vseq/driver 写 L2TLB gate，或新增跨 producer 的全局 admission 状态。
+- 因 `sfence_bits_flushPipe` 修改 L2TLB responder、request gate、outstanding tracker、redirect、LSQ admission 或跨 producer 全局状态。
 
 主要落点：
 
@@ -40,18 +39,9 @@ mem_ut/ver/ut/memblock/agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_monit
 mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv
 mem_ut/ver/ut/memblock/seq/base_seq_help/mmu_csr_runtime_state.sv
 mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv
-mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_sfence_quiescent_provider.sv
 mem_ut/ver/ut/memblock/agent/fence_agent_agent/src/fence_agent_agent_xaction.sv
 mem_ut/ver/ut/memblock/agent/fence_agent_agent/src/fence_agent_agent_driver.sv
 mem_ut/ver/ut/memblock/agent/fence_agent_agent/src/fence_agent_agent_monitor.sv
-mem_ut/ver/ut/memblock/agent/fence_agent_agent/src/fence_agent_agent_default_sequence.sv
-mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_sfence_flushpipe_directed_sequence.sv
-mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_sfence_flushpipe_directed_vseq.sv
-mem_ut/ver/ut/memblock/env/src/memblock_env_cfg.sv
-mem_ut/ver/ut/memblock/env/src/memblock_env.sv
-mem_ut/ver/ut/memblock/tc/src/basicTest.sv
-mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/L2tlb_agent_agent_driver.sv
-mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv
 ```
 
 执行前必须确认当前 V2 RTL 权威输入存在：
@@ -120,191 +110,86 @@ V2 `csr_ctrl_agent` 已能看到 `hd_misalign_ld_enable`、`hd_misalign_st_enabl
   如果后续需要让字段影响激励或判断，停止并转入独立专项 plan。
 ```
 
-## 3. 问题二：`sfence_bits_flushPipe` 缺少可执行的 V2 边界
+## 3. 问题二：`sfence_bits_flushPipe` 接口默认值和观测链不完整
 
 ### V2 问题
 
-`sfence_bits_flushPipe` 是 V2 fence payload 的真实字段，但当前公共状态只实现 TLB entry invalidation，不实现 flush pipe 后对年轻 request、inflight miss、redirect/replay 和 terminal 的收敛。若业务 default sequence 随机出 `flushPipe=1`，测试框架会把未建模语义当作普通 sfence 驱动。
+`sfence_bits_flushPipe` 是 V2 fence payload 的真实字段，interface、xaction 和 driver 已有同名字段，
+但 xaction 没有默认 `0` 约束，`psdisplay()` 和 custom `compare()` 没有覆盖该位，monitor 虽然读取了 interface，
+却没有在 `sfence_valid=1` 时对该 payload 做 X/Z 检查。默认 sequence 直接使用通用随机化时，
+该位可能无意随机为 `1`，不符合当前业务默认值约定。
 
 ### 修改原因
 
-Scala TLB 用 `sfence.valid && flushPipe` 区分会丢弃 pipe request 的 SFENCE 与不 flush pipe 的 Svinval。当前测试环境没有全局 pipeline flush owner，因此本轮只能把 `flushPipe=1` 收敛为独占 directed standalone 场景，并在驱动前确认环境静默。
+V2 MemBlock 的 load/store/prefetch DTLB 均为 non-blocking DTLB，当前生成 RTL 不使用
+`sfence_bits_flushPipe` 决定 DTLB hit/miss；当前 UVM L2TLB responder 和软件 TLB 失效流程也不读取
+该位。TLB entry invalidation 仍由 `sfence_valid` 和现有 rs1/rs2/addr/id/hv/hg payload 决定。
+
+因此该字段只需要完成接口构造、默认值、透明驱动和观测采样，不需要新增 pipeline flush owner、
+standalone vseq、quiescent provider、保护窗口、redirect/LSQ gate 或 L2TLB 生命周期约束。
 
 ### 修改方案与修改逻辑
 
-默认业务路径固定 `flushPipe=0`：
+`fence_agent_agent_xaction` 新增
+`default_io_ooo_to_mem_sfence_bits_flushPipe_cons`，使用 soft constraint 把默认值设为 `0`，
+作为默认值唯一权威；现有
+`fence_agent_agent_default_sequence` 继续使用通用 `uvm_do(req)`，不重复增加第二个 hard constraint。
+directed sequence 后续需要驱动 `1` 时，可用 inline constraint 或直接赋值覆盖 soft 默认，不需要新增
+专用 testcase、vseq、cfg 或 plus 参数。
 
-- `fence_agent_agent_xaction` 增加 `soft flushPipe == 1'b0`，`psdisplay()` 打印字段。
-- `fence_agent_agent_default_sequence::body()` 每笔随机 item 显式约束 `flushPipe == 0`。
-- `fence_agent_agent_driver::drive_idle(DRV_0)` 继续驱 `0`。
-- `fence_agent_agent_monitor::mon_data()` 每拍检查 `sfence_valid` X/Z；仅当 `valid===1` 时检查 payload，payload 包含 `flushPipe`；raw sfence 仍不保存 `flushPipe`。
+`fence_agent_agent_driver::send_pkt()` 保持现有透明驱动：transaction 是 `0` 就驱 `0`，是 `1` 就驱
+`1`，不查询 common data，不判断环境静默，也不修改任何全局状态。`drive_idle(DRV_0)` 继续驱 `0`。
 
-`flushPipe=1` 只允许新增 directed 路径：
+`fence_agent_agent_monitor::mon_data()` 保持每拍采样该字段；先检查 `sfence_valid`，仅当
+`valid===1'b1` 时把 `flushPipe` 与 rs1/rs2/addr/id/hv/hg 一起做 payload X/Z 检查。
+`dispatch_raw_sfence_t` 和 `memblock_sfence_payload_t` 不增加该字段，`push_raw_sfence()`、
+`decode_raw_sfence()`、`apply_sfence_invalidate()` 保持原行为，因此采样值只服务接口观测和 debug，
+不进入软件 TLB、L2TLB lookup 或其他行为判断。
 
-- `memblock_sfence_flushpipe_directed_sequence` 只生成一笔 `valid=1/flushPipe=1/pre_pkt_gap=0/post_pkt_gap=1` item。
-- `memblock_sfence_flushpipe_directed_vseq` 是唯一正式 caller，只允许通过 `tc=basicTest ts=memblock_sfence_flushpipe_directed_vseq` 启动。
-- `basicTest::build_phase()` 在创建、随机化和下发 env cfg 前解析 `VSEQ_MAIN`；精确命中该 vseq 时设置非 user 的 `sfence_flushpipe_standalone_mode=1`。
-- `memblock_env::build_phase()` 在 `apply_user_cfg()` 后、创建任何子组件前检查最终 effective cfg 和 agent default-sequence 拓扑；失败在 main phase 前 `uvm_fatal`，不静默改配置。
-- 顶层 vseq 只做无副作用 fail-fast 检查，不等待 drain、不清 queue/map/status、不调用 reset。V2 默认 `l2tlb_responder_active=1` 是 compile-time takeover 状态，不是 standalone 失败条件。
+`fence_agent_agent_xaction::psdisplay()` 增加该字段，保证 driver item 日志能看到实际驱动值。
+custom `compare()` 在现有逐字段比较中增加 `flushPipe`，避免两个 transaction 仅该位不同时被误判相等；
+这只补齐 transaction 保真，不新增 coverage、checker 或 pass/fail 逻辑。
 
 ### 文字伪代码
 
 ```text
-默认 fence 业务路径：
-  xaction randomize 默认 flushPipe=0；
-  fence default sequence 每笔 item 显式 randomize with flushPipe=0；
-  drive_idle 把 flushPipe 驱0；
-  monitor 先检查 valid；
-  valid为1时检查 rs1/rs2/addr/id/hv/hg/flushPipe payload；
-  raw sfence 只写既有 invalidation 字段，不写 flushPipe；
+xaction 构造：
+  保留 rand bit io_ooo_to_mem_sfence_bits_flushPipe；
+  声明并实现 default_io_ooo_to_mem_sfence_bits_flushPipe_cons；
+  约束内容为 soft io_ooo_to_mem_sfence_bits_flushPipe == 1'b0；
+  psdisplay() 打印该字段；
+  custom compare() 比较该字段，不等时返回compare失败并打印双方值；
+  普通 default sequence 复用 soft 默认得到0；
+  directed item优先在randomize()中使用hard inline constraint覆盖为1；
+  如果使用显式赋值，则必须在randomize成功后、finish_item()前赋1，后续不得再次randomize覆盖；
 
-basicTest build_phase：
-  先解析 VSEQ_MAIN；
-  如果字符串精确等于 memblock_sfence_flushpipe_directed_vseq：
-    在 cfg 下发和 env 创建前设置 sfence_flushpipe_standalone_mode=1；
-  否则保持 mode=0；
-  mode 不是 user cfg、plus 或 preset 字段；
+driver 驱动：
+  send_pkt(tr) 按 tr.io_ooo_to_mem_sfence_bits_flushPipe 原值驱动 DUT；
+  不因取值为1查询 provider、等待 drain、检查 quiescent 或设置全局 flush；
+  drive_idle(DRV_0) 继续把该位驱0；
 
-memblock_env build_phase：
-  apply_user_cfg() 后读取最终 cfg；
-  mode=0 时直接继续原 build；
-  mode=1 时检查 fence agent driver/sequencer 可用且 drv_mode=DRV_0；
-  检查其它业务 agent 不存在显式 main_phase default_sequence，或 driver 明确关闭；
-  允许 TCNT 空 fallback 启动，因为其 body 为空且不产生 item；
-  任一 user override 破坏 standalone 拓扑时 fatal；
+monitor 采样：
+  每拍读取 sfence_valid 和全部 payload；
+  先对 sfence_valid 做 X/Z 检查；
+  如果 sfence_valid===1'b1：
+    对 rs1/rs2/addr/id/hv/hg/flushPipe 做 X/Z 检查；
+    构造 raw_sfence 时仍只保存 valid/rs1/rs2/addr/id/hv/hg/cycle；
+    push_raw_sfence() 继续把事件交给既有 TLB entry invalidation flow；
+  如果 sfence_valid不是1：
+    不消费 payload，不产生 raw sfence；
 
-顶层 directed vseq：
-  检查 p_sequencer 和 fence_sqr 非空；
-  检查 common data 存在，main_trans_num/next_uid/main_table_ready 表示未构建业务表；
-  检查 active map、issue/recovery/raw/redirect/flushSb 状态为空；
-  检查 L2TLB request gate=0 且 outstanding count=0；
-  不读取 takeover 作为失败条件；
-  通过后只调用一次 child sequence；
-  失败时 fatal，不等待、不清理、不重试。
-```
+行为保持：
+  flushPipe为0或1都不修改测试框架 queue、map、status、epoch、redirect、LSQ或L2TLB状态；
+  在sfence_valid和其它payload相同的前提下，只切换flushPipe不改变DTLB hit/miss结果；
+  DTLB hit继续按hit处理，DTLB miss继续进入现有L2TLB responder流程；
+  sfence_valid仍是软件TLB失效事件的唯一入口。
 
-## 4. 问题三：fence driver 无法直接查询 common data 静默状态
-
-### V2 问题
-
-`fence_agent` package 编译早于 `seq_pkg`，driver 不能直接引用 `common_data_transaction`。如果把 provider 注册放在 dispatch sequence 或 testcase connect 中，`basicTest` standalone 路径可能没有 provider，或者 main phase 并发启动时注册顺序不确定。
-
-### 修改原因
-
-`flushPipe=1` 的最终合法性必须在 driver 写 interface 前实时确认。这个检查必须覆盖所有创建 `memblock_env` 的 testcase，并且不能引入早编译 package 到晚编译 package 的反向依赖。
-
-### 修改方案与修改逻辑
-
-在 `memblock_sync_pkg.sv` 中定义 provider base、唯一 handle、register/query API。该文件是独立 compile unit，必须自行在 package 前 include `uvm_macros.svh`，在 package 内 import `uvm_pkg::*`，不依赖后续 package 的 UVM 可见性。
-
-在 `seq_pkg.sv` 中紧跟 `common_data_transaction.sv` include 新增 `memblock_sfence_quiescent_provider.sv`。concrete provider 保存 live `common_data_transaction` handle，并把 query 实时转发给 `common_data_transaction::is_sfence_flushpipe_quiescent()`。
-
-`memblock_env::connect_phase()` 是唯一 runtime owner：先保留原 analysis FIFO、RM/scoreboard、virtual sequencer 连接，再取得 common data singleton，创建并保存 provider 成员，调用 register。`tc_base`、`basicTest`、dispatch `pre_body()`、directed child/vseq 均不得注册 provider。
-
-`fence_agent_agent_driver::send_pkt()` 在任何 interface 赋值前调用 `check_sfence_flushpipe_drive_allowed(tr)`。`valid=0` 或 `flushPipe=0` 直接通过；只有 `valid=1/flushPipe=1` 才 query provider。provider 未注册、common data 不可用或状态非静默都 fail closed。
-
-`is_sfence_flushpipe_quiescent()` 先做 O(1) map/queue/counter/state 检查；只有这些全部通过后，才在显式 `flushPipe=1` 低频路径按 `main_trans_num` 做有界 `status_by_uid` 全表扫描。默认 `flushPipe=0` 路径不扫描。
-
-### 文字伪代码
-
-```text
-memblock_sync_pkg：
-  定义 sfence_quiescent_provider_base::is_quiescent(reason)；
-  register(provider)：
-    provider为空则 fatal；
-    首次注册保存 handle；
-    同一 handle 重复注册直接返回；
-    不同 handle 冲突则 fatal；
-  query(reason)：
-    未注册时 reason="provider is not registered"，返回0；
-    已注册时实时调用 provider.is_quiescent(reason)，不缓存结果；
-
-memblock_env::connect_phase：
-  调用 super 并保留原连接顺序；
-  完成所有 analysis/vsqr 连接；
-  data = common_data_transaction::get()；
-  data 为空则 fatal；
-  provider 成员为空时 new(data)；
-  调用 memblock_sync_pkg::register_sfence_quiescent_provider(provider)；
-
-fence driver send_pkt：
-  在第一处 vif 赋值前调用 check_sfence_flushpipe_drive_allowed(tr)；
-  tr为空则 fatal；
-  valid=0 或 flushPipe=0 时返回；
-  valid=1/flushPipe=1 时 query provider；
-  query 返回 false 时 fatal，且不产生部分 interface 驱动；
-  query 返回 true 后立即驱动 valid 和全部 payload；
-  query 返回到第一处 vif 赋值之间不得插入 @/#/wait、日志或状态更新；
-
-common_data_transaction::is_sfence_flushpipe_quiescent：
-  先检查 active ROB/LQ/SQ map 是否为空；
-  检查 load/sta/std issue queue、exception/PTW replay、raw event、flushSb、redirect/flush/freeze 状态；
-  检查 l2tlb_ptw_outstanding_count==0；
-  不读取 l2tlb_request_accept_enable、l2tlb_ptw_tracker_started 或 l2tlb_responder_active；
-  O(1) 检查全通过后，确认 status_by_uid.size()==main_trans_num；
-  仅此时扫描 uid=0..main_trans_num-1，要求 status 非空且 status.active=0；
-  任一失败返回 false+首个 reason；
-  全部通过返回 true；
-  函数只读状态，不清 queue/map/counter，不推进 terminal。
-```
-
-## 5. 问题四：L2TLB request acceptance 与 outstanding 生命周期不受统一约束
-
-### V2 问题
-
-仅检查 quiescent 还不能保证 L2TLB responder 不会在 sequence 未准备好、response 正在处理或 idle-stop 过渡时继续把 `ready` 打开。旧 `ready_tr` 或多个 driver mode 也可能绕过统一 ready 控制，使第二笔 request fire 后没有 consumer。
-
-### 修改原因
-
-`flushPipe=1` standalone 需要确认当拍没有 L2TLB/PTW outstanding；正常 L2TLB responder 也必须保证 strict single-outstanding。acceptance gate、tracker started 和 outstanding count 必须各自表达不同语义，不能混成 cfg 或 reset 自动清理。
-
-### 修改方案与修改逻辑
-
-在 `memblock_sync_pkg` 新增 package 初值为 `0` 的 `l2tlb_request_accept_enable` 及 setter/query。唯一写者是 L2TLB driver reset 和 L2TLB base sequence 生命周期；fence driver、fence child/vseq、standalone cfg、common data reset 均不得写 gate。
-
-在 `common_data_transaction` 维护 `l2tlb_ptw_outstanding_count` 和 `l2tlb_ptw_tracker_started`。count 严格只允许 `0/1`，不是可累加 counter。`reset_all_tables()`、sequence kill、reset、provider 注册或 testcase 切换都不得清 count 或打开 gate。
-
-`L2tlb_agent_agent_driver` 新增唯一 ready 写点 `drive_l2tlb_request_ready(requested_ready)`。所有 `send_pkt()` 和 `drive_idle()` mode 都通过该 helper；helper 使用四态 `logic` 保留 X/RAND 语义，再统一应用 `l2tlb_responder_active && l2tlb_request_accept_enable` 和 current-fire 抑制。未知 driver mode 在任何 interface 写入前 fatal。
-
-`memblock_l2tlb_base_sequence` 在 body 开始清 gate；完成 enable、context、takeover 和 tracker start 后才置 gate=1。每次 true `request_fire()` 后立即 sample payload、begin `0->1`、gate=0；response `finish_item()` 返回后 done `1->0`，只有非 stopping 才 re-arm gate。begin 后 fatal 不做自动 done/re-arm，保留 gate=0/count=1 便于定位。
-
-### 文字伪代码
-
-```text
-L2TLB driver reset_phase：
-  首先 set_l2tlb_request_accept(0)；
-  再执行原 super/reset wait/idle/objection 流程；
-
-ready helper：
-  输入 requested_ready；
-  current_fire = vif.valid && 当前ready；
-  next_ready = requested_ready；
-  如果 takeover未开启或 gate=0，则 next_ready=0；
-  如果 current_fire=1，则 next_ready=0，防止连续接受第二笔；
-  将 next_ready 作为唯一 ready 写入；
-  所有 driver mode 恰好调用一次 helper；
-  unknown mode 在写 interface 前 fatal 并返回；
-
-L2TLB sequence body：
-  入口 set_l2tlb_request_accept(0)，stopping=0；
-  如果 MEMBLOCK_L2TLB_SEQ_EN=0，直接返回且 gate保持0；
-  完成 context、takeover 和 tracker_start 检查；
-  成功后 set_l2tlb_request_accept(1)；
-  进入循环；
-
-send_l2tlb_cycle：
-  只有 true request_fire 分支处理请求；
-  fire 后立即 sample request payload；
-  调用 l2tlb_ptw_begin()，要求旧 count=0 并置1；
-  立即 set_l2tlb_request_accept(0)；
-  删除 ready_tr，不允许 fire 后再提交 ready=1 item；
-  发送 response，finish_item 返回后调用 l2tlb_ptw_done()，要求旧 count=1 并置0；
-  如果 stopping=0，重新 set_l2tlb_request_accept(1)；
-  如果 stopping=1，不重新打开 gate；
-
-关闭与失败：
-  idle-stop 先置 stopping=1，再清 gate；
-  只有 ready为0且 count=0 时 loop/body 返回；
-  begin 后任何 fatal 不执行 finally-style 清理；
-  count=1 留给后续 start/restart fatal，不能被 reset_all_tables 静默抵消。
+最小验证：
+  默认创建并randomize一笔fence item，检查flushPipe=0；
+  通过hard inline constraint randomize第二笔item为flushPipe=1；
+  分别发送两笔item，检查driver interface和monitor采样值与item一致；
+  构造仅flushPipe不同的两个xaction，检查custom compare返回不相等；
+  检查raw_sfence类型、decode_raw_sfence()和apply_sfence_invalidate()仍无flushPipe字段或分支；
+  检查flushPipe=1路径不要求standalone、provider、quiescent、redirect、LSQ或L2TLB gate；
+  完成静态检查后运行V2远端compile和基础smoke，确认0/1透传不引入UVM_ERROR/UVM_FATAL。
 ```

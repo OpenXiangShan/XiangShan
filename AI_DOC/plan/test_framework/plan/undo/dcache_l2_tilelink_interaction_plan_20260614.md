@@ -1,5 +1,10 @@
 # DCache 与 L2Cache TileLink-C 交互支持计划
 
+> 本 plan 是早期完整模型草案。当前 V2 可执行轻量方案已收敛到
+> `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`。
+> V2 coding 不再直接执行本文的多 source、多 sink、完整 directory 和完整并发方案；这些能力保留为
+> 后续完整 L2 model 的知识输入。
+
 ## 1. 目标
 
 本计划用于指导后续完善 `dcache_mem__access_base_sequence`，使 mem_ut 环境中的 dcache agent 不再只模拟简单 A 到 D 的地址/数据访问，而是按 XiangShan DCache 与 L2Cache 的 TileLink-C 行为模拟完整 L2 侧 responder。

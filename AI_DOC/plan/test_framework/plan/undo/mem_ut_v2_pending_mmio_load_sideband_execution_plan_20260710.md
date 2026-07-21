@@ -264,18 +264,33 @@ LOAD/PREFETCH/STORE/CBO/AMOCAS/AMO 的分类是无 runtime state 的纯行为矩
 
 新增 `memblock_op_behavior_util.sv`，固定 include 在 `main_control_transaction.sv` 之后、`status_transaction.sv` 和 `common_data_transaction.sv` 之前。`seq.f` 只更新注释/清单以反映真实 include inventory，仍由 `seq_pkg.sv` 编译。
 
-`memblock_dispatch_types.sv` 新增 `memblock_fuop_category_e`，只命名既有 LOAD/PREFETCH/STORE/CBO/AMOCAS_Q/AMOCAS_WD/AMO 集合；它不是 runtime 参数，不进入 plus/cfg。
+本轮不新增 `memblock_fuop_category_e`，也不增加通用 `is_fuop_in_category()` 分发层。
+`memblock_op_behavior_util` 直接迁移 `lsq_ctrl_model` 现有具名 classifier、默认 behavior 构造和
+`derive_op_behavior()`；迁移时保持现有常量集合、判断优先级、behavior 字段赋值和 fatal 边界，不重新设计
+分类协议。
 
 `memblock_op_behavior_util` 提供：
 
 ```systemverilog
 static function bit is_vector_ls_futype(bit [MEMBLOCK_INTERNAL_FUTYPE_W-1:0] fuType);
-static function bit is_fuop_in_category(bit [8:0] fuOpType, memblock_fuop_category_e category);
+static function bit is_load_fuoptype(bit [8:0] fuOpType);
+static function bit is_prefetch_fuoptype(bit [8:0] fuOpType);
+static function bit is_store_fuoptype(bit [8:0] fuOpType);
+static function bit is_cbo_fuoptype(bit [8:0] fuOpType);
+static function bit is_amocas_q_fuoptype(bit [8:0] fuOpType);
+static function bit is_amocas_wd_fuoptype(bit [8:0] fuOpType);
+static function bit is_amo_fuoptype(bit [8:0] fuOpType);
 static function memblock_op_behavior_t make_default_behavior();
 static function memblock_op_behavior_t derive_op_behavior(main_control_transaction tr);
 ```
 
-`lsq_ctrl_model` 保留既有静态 API 名称，但函数体只一行转发到 `memblock_op_behavior_util`，不保留常量列表、case 或字段赋值。新 MMIO resolver/setter 直接调用 util，避免 common data 依赖后定义 class。
+`lsq_ctrl_model` 保留上述既有静态 API 名称和签名，但每个函数体只一行转发到
+`memblock_op_behavior_util`，不保留常量列表、case 或 behavior 字段赋值。新 MMIO resolver/setter 直接
+调用 util，避免 common data 依赖后定义的 stateful `lsq_ctrl_model`。
+
+本方案不采用 `typedef class common_data_transaction` 加 `extern` 方法拆分：该语法虽然可行，但会让
+`common_data_transaction` 与 `lsq_ctrl_model` 保持循环依赖，并要求把访问 common data 的构造/分配方法体
+移到完整 class 定义之后；对本轮纯分类共享没有必要。
 
 ### 文字伪代码
 
@@ -292,22 +307,22 @@ memblock_op_behavior_util::derive_op_behavior(tr)：
   如果 fuType 命中 vector LS，按本轮不支持边界 fatal；
   behavior = make_default_behavior()；
   如果 fuType 是 LDU：
-    用 is_fuop_in_category 区分 PREFETCH 和 LOAD；
+    先用 is_prefetch_fuoptype()，再用 is_load_fuoptype() 区分 PREFETCH 和 LOAD；
     填写 LQ、route、commit 和 num_ls_elem；
   如果 fuType 是 STU：
-    区分 CBO 和普通 STORE；
+    先用 is_cbo_fuoptype()，再用 is_store_fuoptype() 区分 CBO 和普通 STORE；
     填写 SQ、STA/STD route、commit 和 num_ls_elem；
   如果 fuType 是 MOU：
-    要求 AMO 分类命中；
-    按 AMOCAS_Q/AMOCAS_WD/其它 AMO 填写 uop 数和 route；
+    要求 is_amo_fuoptype() 命中；
+    按 is_amocas_q_fuoptype()/is_amocas_wd_fuoptype()/其它 AMO 填写 uop 数和 route；
   其它 fuType fatal；
   返回完整 behavior；
   全函数不访问 common_data、status、queue、map、driver 或 monitor；
 
 lsq_ctrl_model wrapper：
-  is_load_fuoptype 等旧 API 保留签名；
-  每个旧 API 只转发到 util；
-  不保留第二份分类常量；
+  is_vector_ls_futype、各具名fuOpType classifier、make_default_behavior和derive_op_behavior均保留签名；
+  每个旧 API 只一行转发到 util；
+  不保留第二份分类常量、case或字段赋值；
   后续调用方可逐步迁移，但行为真源只有 util。
 ```
 

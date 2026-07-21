@@ -157,8 +157,9 @@ load/store 先用本地 `lsq_ctrl_model` 预览 LQ/SQ key，再由 clock-first d
 
 `MEMBLOCK_ENQ_PER_CYCLE_RAND_EN=1` 时，ZERO/MIDDLE/MAX 三类权重分别控制主动 idle、
 `1..SLOT_NUM-1` 和物理最大 slot 数的类别总概率。MIDDLE 的 `-1` 是 AUTO sentinel，
-有效权重派生为 `SLOT_NUM-1`。随机配置不得让 `MIDDLE+MAX=0`，避免主动 flow 永远只发送
-idle；随机目标仍会被连续 uid、V2 load/store 6/4 和实际 LQ/SQ free count继续截断。
+有效权重派生为 `SLOT_NUM-1`。ZERO类别允许成为唯一非零权重，`1/0/0`表示idle-only；只有三类
+全0属于非法配置。zero-only不消费uid或产生terminal，只用于存在外部结束条件的场景；其它随机目标
+仍会被连续 uid、V2 load/store 6/4 和实际 LQ/SQ free count继续截断。
 
 `MEMBLOCK_LSQCOMMIT_SEQ_EN` 默认必须为 0。启用后，
 `memblock_lsqcommit_dispatch_base_sequence` 会替换 lsqcommit agent 的安全默认

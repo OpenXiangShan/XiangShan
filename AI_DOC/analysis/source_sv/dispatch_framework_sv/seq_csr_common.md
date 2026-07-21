@@ -61,8 +61,7 @@ MEMBLOCK_ENQ_PER_CYCLE_RAND_EN=0：
 MIDDLE 原始值只能为 -1 或非负数；
 AUTO 解析后保存 effective_middle_weight；
 使用 longint unsigned 逐项累计三类权重，避免 32-bit 加法溢出；
-三类权重不能全为 0；
-MIDDLE+MAX 不能为 0，防止随机模式永远只返回 idle 而使主动 flow 不推进；
+三类权重不能全为 0；ZERO 可以是唯一非零类别，`1/0/0` 表示合法的 idle-only 配置；
 物理 slot 数不大于 1 时，MIDDLE 权重必须为 0。
 ```
 

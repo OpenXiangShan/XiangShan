@@ -153,7 +153,9 @@ mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh
   load/store 物理上限不建立同义 runtime plus。
 - `MEMBLOCK_ENQ_PER_CYCLE_RAND_EN=1` 时，ZERO/MIDDLE/MAX 三类权重控制返回 0、中间值和
   物理最大值的类别总概率。`MIDDLE_WEIGHT=-1` 表示 AUTO，有效值为 `SLOT_NUM-1`。
-- 随机模式禁止三类权重全 0，也禁止 `MIDDLE+MAX=0`；权重求和必须在 64-bit 无符号上下文逐项完成。
+- 随机模式允许 `ZERO_WEIGHT` 成为唯一非零权重；`1/0/0`表示idle-only，只有三类全0非法。
+  总权重必须在64-bit无符号上下文逐项完成。zero-only不消费uid、不产生terminal，也不修改既有
+  no-progress/global-stop策略；只用于存在外部结束条件的场景。
 - 随机返回 0 只表示 sequence 主动发送一拍全零 idle，不改变 DUT backpressure、issue hold、
   pass/fail 或 terminal 语义，也不得消费 next-admit uid。
 - Candidate 最终数量继续受连续 uid 前缀、load/store 编译期 6/4 和实际 LQ/SQ free count约束；

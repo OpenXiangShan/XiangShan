@@ -492,9 +492,9 @@ unsigned；解析后的 effective weight 再保存为 unsigned 供随机 solver 
 non-LSQ 边界仍可使实际 candidate 数小于目标。`ZERO` 命中则明确禁止本拍建立新 LSQ candidate。
 
 权重加载和合法性集中在 `seq_csr_common::validate_and_clamp()`：`ZERO/MAX` 不得为负，`MIDDLE` 只允许
-`-1` 或非负值；随机模式下解析后的三类总权重必须大于 0，并且 `MIDDLE+MAX` 必须大于 0，禁止配置成
-永远只返回 0 而使主动 flow 永不推进。`MAX<=1` 时必须禁止非零 `MIDDLE`。任一约束随机化失败均
-`uvm_fatal`，不得静默回退成均匀随机。权重求和使用 `longint unsigned`，避免三个 `int` 相加时溢出。
+`-1` 或非负值；随机模式只要求解析后的三类总权重大于0，因此`ZERO/MIDDLE/MAX=1/0/0`是合法的
+idle-only配置。`MAX<=1` 时必须禁止非零 `MIDDLE`。任一约束随机化失败均`uvm_fatal`，不得静默回退
+成均匀随机。总权重使用`longint unsigned`逐项求和，避免三个`int`表达式先溢出。
 
 每次调用 `collect_lsq_candidates()` 时仍只通过 `get_enq_per_cycle()` 采样一次本拍总量上限。若返回 0，
 立即返回空 candidate，不读取 next uid，不检查或推进 LQ/SQ pointer/free，不修改主表、状态表或 map；
@@ -536,7 +536,6 @@ seq_csr_common 参数加载与检查：
     effective_middle_weight = MIDDLE_WEIGHT；
   如果RAND_EN=1：
     检查ZERO + effective_middle + MAX大于0；
-    检查effective_middle + MAX大于0，禁止永远只生成idle；
     如果MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM小于等于1且effective_middle不为0，则uvm_fatal；
 
 seq_csr_common::get_enq_per_cycle()：
@@ -733,7 +732,8 @@ allocation”，不再调用 `complete_admission()`。每次当前 item 的 `fin
 
 launch 成功后，`confirm_lsq_candidates()` 重新 `preview_allocate()` 并比较使用中的预测 key，随后逐项
 调用唯一 `commit_allocate()`，立即更新 active/enq、key map、pointer 和 free count，但不设置
-`issue_ready`。整批 uid、launch epoch 和 dispatch service cycle 保存到 pending-sample。下一 driver
+`issue_ready`。整批 uid、dispatch/flush epoch 和 dispatch service cycle 保存到 pending-sample。这里的
+`v2_pending_sample_epoch` 是 `tr.flush_epoch`，不是后续专项新增的 reservation launch epoch。下一 driver
 边界返回后，若 epoch 仍有效且无 flush，再逐 uid 调用原 `complete_admission()` 开放 issue route；
 若 epoch 已失效，则不开放 issue，由全局 redirect handler 和原 pending cancel 流程回退 reservation。
 `v2_pending_sample_launch_cycle` 只用于日志和时序诊断，不作为 sample 完成条件；sample 完成的唯一边界
@@ -852,7 +852,8 @@ driver launch 阶段：
   flush 正在进行或 transaction epoch 已过期时，不把 request launch 到 VIF；
 
 confirm 阶段：
-  driver 未 launch、当前仍处于 flush、或 transaction epoch 已过期时，不建立 launch reservation。
+  driver 未 launch时不建立reservation；driver已经launch时不再按当前flush/epoch二次否决，始终建立reservation；
+  保存的transaction epoch只在下一sample边界决定是否开放issue。
 ```
 
 若后续日志证明 `apply_redirect_flush()` 清标志后仍存在旧 epoch sample/cancel/mirror 收尾影响新 LSQ
@@ -880,9 +881,11 @@ V2 driver 在每个 clock-first launch 边界检查 `dispatch_flush_in_progress`
 `memblock_dispatch_aborted_by_redirect=1`、`memblock_dispatch_request_launched=0` 并 drive idle；否则只发送一次
 request，设置 `request_launched=1`。
 
-`confirm_lsq_candidates()` 只读取 driver 返回的 `request_launched`、`aborted_by_redirect` 和 epoch。如果
-request 未 launch 或 epoch 失效，则整批不预留资源；如果 request 已 launch 且 epoch 仍有效，才调用唯一
-allocation owner 建立 launch reservation，并登记 pending sample。confirm 不写任何 retry guard 字段，也不清
+`confirm_lsq_candidates()` 只读取 driver 返回的 `request_launched`、`aborted_by_redirect` 和 epoch。
+只有 `request_launched=0` 的 launch 前 abort 才整批不预留资源；一旦 `request_launched=1`，即使
+confirm 时 global flush 已开始或 batch epoch 已失效，也必须调用唯一 allocation owner 建立 reservation并
+登记 pending sample。epoch 只在下一边界控制是否开放 issue，不能反向取消已经放到 VIF 的 request。
+该归档后合同的 token/sample 增量由 MMIO/status `undo` plan 唯一 coding；confirm 不写 retry guard，也不清
 全局 flush 状态。
 
 三类 redirect 时点按以下方式处理：
@@ -931,9 +934,10 @@ confirm_lsq_candidates()：
     要求aborted_by_redirect=1或当前global flush有效或transaction epoch已失效；
     返回，不建立reservation；
   如果aborted_by_redirect=1且request_launched=1，uvm_fatal；
-  如果当前global flush有效或transaction epoch已失效：
-    返回，不建立reservation；
-  否则按问题六的launch reservation流程调用唯一allocation owner并登记pending sample；
+  不再因当前global flush有效或transaction epoch失效而返回；
+  按问题六的launch reservation流程调用唯一allocation owner并登记pending sample；
+  由MMIO/status专项紧接着建立(uid,reservation_launch_epoch) token；
+  独立保存transaction dispatch/flush epoch，供下一边界issue gate使用；
   confirm不新增post-release等待，不写全局flush状态；
 
 complete_v2_pending_sample()：
@@ -941,6 +945,17 @@ complete_v2_pending_sample()：
   不直接回退pointer/free count，也不写waiting/release字段；
   redirect handler和apply_pending_lsq_cancels()仍是cancel及资源回退owner。
 ```
+
+### 8-A. 归档后跨专项依赖边界
+
+本 plan 已完成的 `request_launched`、单深度 pending-sample 和 `commit_allocate()` 单一 allocation
+owner，是后续 redirect cancel 对账可复用的基础。尚未实现的 reservation 动态实例 token、统一
+DUT sample sequence、per-redirect record、DUT cancel snapshot 和 global-stop 收敛 gate，全部由
+`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`
+唯一描述和执行。该专项把本 plan 的 UID-only pending queue升级为reservation token queue；现有
+`v2_pending_sample_epoch`仍是独立batch dispatch/flush epoch并继续控制issue gate；同时删除当前源码中
+`request_launched=1`后按confirm时flush/epoch提前返回的旧分支，确保每个真实launch都有allocation/token。
+本 `do` plan 不复制其它待实现字段或record算法，具体coding仍由该`undo` plan唯一拥有。
 
 ## 9. 问题八：LSQ Idle 驱动模式不受约束
 
@@ -1036,7 +1051,7 @@ commit/deq、pass/fail、terminal owner
 | non-LSQ 与末批 sample 边界 | 功能逻辑修改 | non-LSQ admission 可零时间返回，主循环退出也不保证再经过 driver 边界 | 零时间路径不能证明上一 LSQ request 已被采样 | pending batch 遇到 non-LSQ 时先发 idle 再走原 non-LSQ admission；退出前 pending batch 用 trailing idle drain；连续 LSQ 不插空拍 |
 | `commit_allocate_with_resp()` | 共享实现重构 | 自己复制 main/status/map/pointer/free-count 更新并比较两个 key | 两个 allocation owner 容易分叉，unused key 比较无语义 | 只比较 behavior 实际使用的 response key，匹配后调用唯一 `commit_allocate()` |
 | redirect sample/cancel 分工 | 功能逻辑修改 | abort/confirm 没有区分 launch 前和 launch 后 sample 前，可能不建 mapping或过早开放 issue | launch 后 request 可能被 DUT采样，redirect 必须能按 active mapping回退 | launch 前 abort不预留；launch 后先保留reservation，epoch失效时不开放issue；原redirect handler累计cancel，原LSQ cancel路径回退资源 |
-| redirect/flush gate 统一 | 功能逻辑收敛 | collect、driver 和 confirm 对 redirect/flush 的观察点不统一，容易把 abort 结果当成唯一保护入口 | V2 redirect 可发生在 request 构造前、launch 前后和 sample 后；必须用已有全局 flag、epoch 和 driver launch 结果共同决定是否 admission/confirm | 不新增固定延迟 retry guard；collect 前检查 `admission_blocked_by_flush()`；driver launch 前检查 `dispatch_flush_in_progress` 和 epoch；confirm 只在 `request_launched=1`、未 abort、epoch 未失效且 global flush 无效时建立 reservation；flush 清 0 后下一轮先 apply pending LSQ cancel 再收集新 candidate |
+| redirect/flush gate 统一 | 功能逻辑收敛 | collect、driver 和 confirm 对 redirect/flush 的观察点不统一，容易把 abort 结果当成唯一保护入口 | V2 redirect 可发生在 request 构造前、launch 前后和 sample 后；必须用已有全局 flag、epoch 和 driver launch 结果共同决定是否 admission/confirm | 不新增固定延迟 retry guard；collect 前和driver launch前继续检查flush/epoch以形成launch前abort；一旦`request_launched=1`，confirm无条件建立reservation/token，batch epoch只在下一边界禁止issue；flush清0后先应用finalized cancel再收集新candidate |
 | LSQ `drv_mode` 合同 | 配置逻辑修改 | 通用 mode 可让 idle 随机出 valid/X | idle request 不属于 sequence | V2 soft 默认 `DRV_0`，active driver 在 build 阶段拒绝非零 mode |
 
 保持不变的主体逻辑：主表生成和 validation、连续 uid admission、已有 pointer advance/cancel/release
@@ -1121,14 +1136,14 @@ terminal 和 global stop。
 | xaction/driver合同 | 功能修改 | slot1..5约束不完整，inactive只检查needAlloc，active `fuOpType`可取任意9-bit值，通用随机/direct item可形成5/6个store或非零post gap，custom compare/display遗漏extra、gap和部分metadata | 任一producer都可能把不支持opcode、非法payload、超过V2端口能力的batch或非零gap送入driver；constraint调用checker函数还会让VCS无法反向求解随机opcode；debug/compare也可能漏掉V2字段、streaming gap或stale epoch差异 | 六个slot按valid条件约束；inactive qualifier/payload全0；宏值表唯一维护LQ load/prefetch 0..6/8..10和SQ store 0..3，constraint直接`inside`值表且driver helper读取同一值表；xaction batch约束限制load/store 6/4并硬约束pre/post gap为0；driver首次赋值前复查gap、opcode、scalar合同、key范围和batch计数；extra字段、pre/post gap及全部framework metadata进入display和手工compare回退路径 |
 | FuType | 字段/合法性适配 | xaction保留V3 literal | V3编码不能裁剪后送V2 | 使用当前profile LDU/STU one-hot和`encode_and_fit_dut_futype()`无损检查 |
 | 每拍总量随机 | 新增runtime功能 | 随机模式只能均匀返回1..MAX | 需要可配置主动idle和边界概率 | ZERO/MIDDLE/MAX两阶段`std::randomize`；默认0/5/1保持旧1..6均匀分布 |
-| 权重合法性 | 新增配置检查 | 无三类权重 | zero-only会让主动flow永不推进 | 随机模式使用64-bit逐项求和，禁止全0和MIDDLE+MAX=0；失败fatal |
+| 权重合法性 | 新增配置检查 | 无三类权重 | 需要支持ZERO及zero-only，同时拒绝随机solver没有合法类别的全0配置 | 随机模式用64-bit逐项计算三类总权重；只拒绝全0，`1/0/0`合法并稳定返回0；不新增zero-only自动退出或terminal逻辑 |
 | load/store 6/4 gate | 功能修改 | 只限制总slot和free count，dispatch或default/direct路径都可能让6个store进入同一packet | V2 store每拍最多4 element，gate必须覆盖完整agent行为面 | dispatch candidate按`num_ls_elem`累计并限制6/4及实际free；xaction随机约束限制6/4；driver在写VIF前再次统计fail-fast；不额外保留6/4空项 |
 | driver时序 | 功能修改 | 等待不存在的canAccept/response或重复发送item | V2没有完成响应，但接口可以每拍streaming | clock-first：每边界先sample上一批，再launch当前批并立即item_done；pre/post gap固定0 |
 | launch metadata | 新增框架字段 | 只有abort字段，无法区分未launch和待sample | sequence必须根据driver实际行为决定是否预留 | 新增`request_launched`并纳入automation/打印/custom compare；不连接DUT |
 | allocation与issue-ready | 功能修改/新增局部状态 | driver返回后同拍allocation和开放issue | 当前request尚未经过下一DUT sample边界 | launch后立即`commit_allocate()`预留；单深度pending batch在下一driver边界才`complete_admission()` |
 | non-LSQ/末批边界 | 功能修改 | non-LSQ零时间路径和global stop可能绕过最后sample | 最后一批可能永远不进入issue | pending后遇non-LSQ或global stop时发送全零idle完成sample，再继续原流程/退出 |
 | response helper | 共享实现重构 | `commit_allocate_with_resp()`复制状态更新并比较unused key | 两个allocation owner易分叉 | 只比较实际使用key，随后复用唯一`commit_allocate()`；V2不调用该wrapper |
-| redirect分工 | 功能收敛 | launch/confirm/sample边界不清 | redirect可能出现在三个阶段 | launch前abort不预留；launch后epoch失效不开放issue；原redirect/cancel owner回退资源 |
+| redirect分工 | 功能收敛 | launch/confirm/sample边界不清 | redirect可能出现在三个阶段 | launch前abort不预留；launch后即使epoch失效也建立并保留reservation，下一边界只禁止issue；原redirect/cancel owner回退资源 |
 | ready timeout | 配置细节适配 | V2 sequence仍可能读取并等待LSQ ready timeout | V2接口无ready/response | 公共参数加载仍解析并检查该兼容参数非负；V2 sequence不读getter、不等待ready，只有`MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP=1`才执行零值warning/clamp |
 | sequence enable/default文档语义 | 文档语义同步，不改运行期逻辑 | 部分参数规则和历史文档仍写`MEMBLOCK_LSQENQ_SEQ_EN=0`，或声称real smoke必须单独打开 | `plus.sv`、`seq_csr_common`和`default.cfg`的既有单一权威均为1 | 当前规则明确默认1；无主表时sequence只idle等待，显式0时直接返回且不fallback；历史Plan保留正文但增加失效注记 |
 | idle drive模式 | 配置逻辑修改 | 通用drv_mode可能让idle含valid/X | no-item/reset/abort必须安全 | cfg soft默认DRV_0，driver build阶段拒绝非DRV_0，idle清全部字段 |
@@ -1140,9 +1155,10 @@ LSQ deq、pass/fail、terminal和global stop owner。
 
 ### 14.1 通过项
 
-- 第11轮修复后先冻结`mem_ut/ver/ut/memblock`源码/规则diff，编译前后SHA-256均为
-  `99fdd0c69f99f7dd3e08eed289ea9ace2df11c344b62563c8f147873f3f3b8f0`；验证期间没有继续修改该范围。
-- 冻结版远端VCS clean compile：删除`base_fun/partitionlib`和`base_fun/exec`后于2026-07-17 13:33
+- 第11轮修复后的`mem_ut/ver/ut/memblock`冻结diff（SHA-256
+  `99fdd0c69f99f7dd3e08eed289ea9ace2df11c344b62563c8f147873f3f3b8f0`）是ZERO语义补充前的历史基线，
+  不覆盖本轮17:36之后的权重检查修改。
+- 历史冻结版远端VCS clean compile：删除`base_fun/partitionlib`和`base_fun/exec`后于2026-07-17 13:33
   重新开始，13:35完成全量parsing、全部174个RTL module、全部UVM package、partition compile、stitch
   和link；compile log只有`LCA_FEATURES_ENABLED`工具特性warning，没有源码编译错误，最终KDB报告
   0 error/0 warning。
@@ -1165,9 +1181,21 @@ LSQ deq、pass/fail、terminal和global stop owner。
 - 第9轮最终`tc_dispatch_real_smoke`：default-random专项后通过`eda_batch_run`运行同一`simv`；真实load
   从LSQ admission进入LDA issue、DCache request/response、writeback、ROB commit、LQ deq和terminal，
   372.8ns结束，`TEST CASE PASSED`且`UVM_WARNING/ERROR/FATAL=0`。
+- ZERO语义补充后的最终源码/规则diff：当前`git diff --binary -- mem_ut/ver/ut/memblock` SHA-256为
+  `39910ad5aa5155627e11072ef19b158f7d138656d971f9d09779b14646239377`；`seq_csr_common.sv`和`plus.sv`
+  均于17:36:42修改，随后于17:39重新开始远端VCS编译，最终KDB报告0 error/0 warning。该哈希覆盖
+  本轮代码/规则修改，不把之后仅有的plan/review文档编辑混入源码证据。
 - 高ZERO权重随机场景：`ZERO/MIDDLE/MAX=100/0/1`，seed=1；issue从约255ns延迟到1950ns后正常完成
   terminal，证明随机0只插idle且未消费uid，最终`UVM_ERROR=0`、`UVM_FATAL=0`。
-- zero-only非法场景：`ZERO/MIDDLE/MAX=1/0/0`在0ns按预期`uvm_fatal`，没有进入主动flow。
+- 用户语义澄清后的合法ZERO配置：`ZERO/MIDDLE/MAX=1/0/1`，远端VCS重新编译后运行
+  `tc_dispatch_real_smoke`，参数在0ns正确加载，372.8ns完成真实load admission、issue、writeback、
+  ROB commit、LQ deq和terminal，`TEST CASE PASSED`，`UVM_WARNING/ERROR/FATAL=0`。日志为
+  `mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_dispatch_real_smoke_ts=virtual_base_sequence_cfg=tc_dispatch_real_smoke_seed=666666_rtl_lsqenq_zero_mixed_final_20260717.log`。
+- zero-only支持场景：`ZERO/MIDDLE/MAX=1/0/0`在重新编译后的同一`simv`上运行`tc_smoke`，关闭LSQ
+  enqueue/commit/issue/L2TLB主sequence，由原有smoke phase结束；参数初始化检查无fatal，`TEST CASE PASSED`且
+  `UVM_WARNING/ERROR/FATAL=0`。该场景只证明zero-only配置合法和不伪造progress，不把非空主表推进到terminal。
+- 全零负向场景：`ZERO/MIDDLE/MAX=0/0/0`在`0ns`命中
+  `LSQ enqueue ZERO/MIDDLE/MAX weights must not all be zero`预期fatal。
 - software-only `virtual_base_sequence`基础运行：通过；该场景不作为真实LSQ时序覆盖证据。
 
 ### 14.2 已识别但不归属本专项的失败
@@ -1183,16 +1211,34 @@ LSQ deq、pass/fail、terminal和global stop owner。
 - 第7轮和本轮归档检查重复调用`eda_run`时，VCS/NFS增量数据库先后出现`tdc.sdb corrupted`或partcomp
   `SIGSEGV`，均在仿真启动前。清理`base_fun/partitionlib`和`base_fun/exec`下VCS生成缓存后，clean
   compile均恢复；真实场景改用不重复编译的`batch_run`执行。这些工具异常不计为产品测试通过，也不
-  归因于SystemVerilog源码；当前归档依据只使用上述冻结diff哈希、13:33之后的最终clean compile、
-  default-random专项和随后同一`simv`的真实scalar-load smoke。
+  归因于SystemVerilog源码；当前归档依据使用ZERO补充后的`39910ad5...39377`源码diff哈希、17:39之后
+  的最终clean compile、default-random专项和随后同一`simv`的真实scalar-load/权重边界场景。
 
 最终日志：
 
 - compile：`mem_ut/ver/ut/memblock/sim/base_fun/log/vcs_compile_rtl.log`
 - default-random：`mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_sanity_ts=virtual_base_sequence_cfg=default_seed=666666_rtl_lsqenq_round12_frozen_default_random_20260717.log`
 - smoke：`mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_dispatch_real_smoke_ts=virtual_base_sequence_cfg=tc_dispatch_real_smoke_seed=666666_rtl_lsqenq_round12_frozen_real_load_20260717.log`
+- 合法zero-only：`mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_smoke_ts=virtual_base_sequence_cfg=default_seed=666666_rtl_lsqenq_zero_only_supported_20260717.log`
+- 全零负向：`mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_dispatch_real_smoke_ts=virtual_base_sequence_cfg=tc_dispatch_real_smoke_seed=666666_rtl_lsqenq_zero_all_0ns_expected_fatal_20260717.log`
 
-## 15. 最终 Review 结论
+## 15. 用户后续语义澄清（IMPLEMENTATION_DELTA，2026-07-17）
+
+用户后续明确要求支持ZERO权重和`1/0/0` zero-only，并要求在0ns参数初始化完成后只检查三类中
+至少一个权重非零。本次补充不改变随机器、candidate或driver逻辑，只放开原zero-only禁用条件：
+
+```text
+ZERO_WEIGHT可以大于0，用于让get_enq_per_cycle()随机返回0；
+ZERO/MIDDLE/MAX全0继续fatal；
+1/0/0合法且每次采样都返回0；
+zero-only只发送idle，不消费uid，也不产生terminal或global stop。
+```
+
+实现删除正入队类别必须非零的fatal，只保留64-bit三类总权重全0检查。本补充不新增参数，不改变
+默认`0/-1/1`，也不改变pass/fail、terminal或no-progress owner。非空主表使用zero-only且没有外部
+结束条件时会按既有主动flow语义持续idle，最终由no-progress诊断/UVM timeout暴露，不伪造完成状态。
+
+## 16. 最终 Review 结论
 
 - 第12轮独立源码/V2语义review通过：无新发现、无必须修改项；明确排除CSR/sfence、DCache/L2、PMP/PMA
   和其它非LSQ enqueue专项。
@@ -1200,5 +1246,75 @@ LSQ deq、pass/fail、terminal和global stop owner。
   四要素总结；两项均已修复。
 - 修复后的第13轮独立文档review通过：60个SystemVerilog源码块均在5行内紧邻对应中文伪代码，最后一章
   已完整覆盖修改类型、原逻辑、变更原因、变更后逻辑和新增/修改功能列表；无新发现、无必须修改项。
-- 本agent复核源码diff、同步文档、冻结哈希和最终日志后未发现其它blocker。本plan满足归档条件并移动到
+- 用户后续ZERO/zero-only语义补充已完成源码、参数规则、flow、源码分析、plan和review同步；重新编译、
+  合法`1/0/1`真实load、合法`1/0/0` smoke场景和非法`0/0/0`负向场景均得到预期结果。
+- 最后一轮独立subagent review已通过：确认历史哈希与最终哈希的时间线无矛盾，源码只拒绝全零权重，
+  zero-only无progress验证边界已明确，无新增遗漏或逻辑问题。
+- 本agent复核最终源码diff、同步文档、最终哈希和日志后未发现除“zero-only启用完整LSQ flow不产生
+  admission progress”这一已记录边界外的blocker。本plan满足归档条件并移动到
   `AI_DOC/plan/test_framework/plan/do`。
+
+## 与初步 plan 差异说明
+
+本章只总结本 `do` plan 已完成的 LSQ enqueue 功能，不包含后续 cancel reconcile 的待实现字段或
+函数；后者由 MMIO/status `undo` plan 唯一拥有。
+
+| 修改项 | 修改类型 | 修改前逻辑 | 变更原因 | 最终逻辑与影响 |
+|---|---|---|---|---|
+| V2 request字段 | 接口字段适配 | slot/宽度和extra字段仍混有V3固定值，uid低位被写入uopIdx | V2是6-slot scalar request，uopIdx不是UID | compile宏统一字段宽度；唯一setter固定`uopIdx=0/lastUop=1/numLsElem=1`并填写完整payload，idle清全部字段 |
+| candidate 6/4 gate | candidate功能逻辑修改 | 只限制总slot/free count，可能构造6个store | V2单拍最多6 load/4 store element | `collect_lsq_candidates()`按scalar element累计并以6/4及实际free count过滤；超限UID留到下一拍，不复制RTL额外credit reserve |
+| enqueue数量随机 | runtime配置与随机功能新增 | 随机模式只返回1..MAX | 需要显式idle和边界概率 | ZERO/MIDDLE/MAX两阶段`dist`返回0/中间/MAX；`1/0/0`合法idle-only，仅三类全0fatal；返回0不消费UID或资源 |
+| driver握手 | driver时序逻辑修改 | 等不存在的canAccept/response，或每item等待两拍 | V2只有request input但支持相邻拍streaming | driver clock-first：每边界sample上一批、覆盖当前批并立即`item_done()`；pre/post gap固定0，active payload保持到下一覆盖 |
+| allocation与sample | 状态生命周期功能新增/修改 | driver返回后同拍allocation和issue-ready | 当前request尚未经过下一DUT sample边界 | `commit_allocate()`立即预留pointer/free count，单深度pending batch保存UID和独立dispatch/flush epoch，在下一`finish_item()`返回后才`complete_admission()`；后续MMIO/status专项升级UID queue为reservation token queue，不替代flush epoch gate；连续LSQ无空拍，non-LSQ/末批用idle补sample边界 |
+| redirect边界 | redirect生命周期逻辑修改 | launch前abort和launch后epoch失效未分层 | redirect可能落在构造、launch、sample三个阶段 | launch前abort不预留；一旦launch即建立reservation/token，confirm时epoch失效也不得跳过；下一sample边界只禁止issue，由既有redirect/cancel owner回退 |
+| idle驱动 | driver配置与失败策略修改 | 通用driver mode可能让idle含valid/X | 无item/reset/abort必须保持协议安全 | V2 active driver只接受`DRV_0`，非法mode在build阶段fatal；idle完整驱0，不改变pass/fail/terminal |
+
+关键 helper 差异：`set_req_fields()` 输入slot、main/behavior和预测key，输出完整V2 request且不修改公共
+状态；`collect_lsq_candidates()` 输入当前连续UID、compile 6/4和free count，输出本拍有序candidate；
+`get_enq_per_cycle()` 输出0..物理slot目标值；`confirm_lsq_candidates()` 只确认真实launch并调用唯一
+allocation owner；`complete_v2_pending_sample()` 只结算上一批并开放issue；
+`commit_allocate_with_resp()` 已收敛为比较wrapper。各函数完整分支和错误策略见第2至第9章，执行后
+差异与验证见第12至第16章。
+
+### 审稿用四要素伪代码
+
+```text
+修改目的：
+  让V2六slot、6-load/4-store、无response接口支持逐拍streaming和可配置idle，同时保持单一allocation owner。
+修改前逻辑行为：
+  candidate只按总slot限制；随机目标最小为1；driver等待不存在的accept/response；allocation与issue-ready同拍。
+修改后逻辑行为：
+  setter完整构造V2 scalar payload；candidate按load/store element和free count过滤；ZERO/MIDDLE/MAX可返回0；
+  driver在每个clock-first边界采样上一批并覆盖当前批；commit_allocate立即预留，下一边界才开放issue。
+差异影响：
+  改变V2 enqueue payload、随机idle、driver时序和issue-ready时点；不改变合法主表顺序、pass/fail或terminal owner。
+```
+
+### 新增/修改 Helper 详细伪代码
+
+```text
+set_req_fields(slot,main,behavior,predicted_key)：
+  添加原因：六个slot不能分散遗漏V2字段。
+  写单slot完整scalar request；校验target/opcode/key，inactive slot全零；不修改主表、pointer或free count。
+
+collect_lsq_candidates(target_count)：
+  添加原因：总slot限制不能阻止单拍超过4个store。
+  顺序读取连续UID；按num_ls_elem累计load/store并检查6/4、实际free count；超限UID留到下一拍，不消费状态。
+
+get_enq_per_cycle()：
+  添加原因：需要ZERO/MIDDLE/MAX可配置分布和合法zero-only。
+  检查三类总权重非零；用SV dist选择0、中间或MAX，再在中间区间随机；返回目标数，不写UID或LSQ状态。
+
+confirm_lsq_candidates()：
+  修改前把软件预测key伪装成response；修改后仅在request_launched时复核preview并调用唯一commit_allocate；
+  request_launched后不再受confirm时flush/epoch二次否决，保存UID batch和dispatch/flush epoch且不设置issue_ready；
+  只有launch前abort无allocation副作用，launch后epoch失效由下一sample/redirect路径收敛。
+
+complete_v2_pending_sample()：
+  添加原因：allocation预留与DUT sample/issue-ready必须分层。
+  下一finish_item返回后处理唯一pending batch；flush epoch有效才逐UID complete_admission，否则等待redirect owner回退；
+  清pending状态，不直接release pointer/free count。
+
+commit_allocate_with_resp()：
+  修改前复制状态/map/pointer更新；修改后只比较真实response key并调用commit_allocate，保持单一写者。
+```

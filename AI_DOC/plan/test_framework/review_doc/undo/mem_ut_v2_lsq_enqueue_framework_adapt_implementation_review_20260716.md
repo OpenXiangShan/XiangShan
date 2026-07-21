@@ -85,11 +85,10 @@ xaction、越界slot或不完整idle调用，错误caller可能在字段写入�
 手工回退遗漏pre/post gap；当前显式六slot字段链没有拒绝非6/6/4 compile tuple。两项均已按最小方案
 修复：display/compare覆盖streaming gap，compile consistency在激励前要求当前V2 tuple为6/6/4。
 
-同轮文档review发现：最终验证时间链不能绑定当前源码；current source/Web仍有旧类名或错误allocation
+同轮文档review发现：历史验证时间链不能绑定后续源码；current source/Web仍有旧类名或错误allocation
 调用边；setter完整自检未同步；主flow三个源码块共用一份伪代码；epoch条件表述不精确；非本次修改清单
-漏列L2 inner TileLink分析。以上问题均已逐项按当前源码修复。修复后冻结
-`mem_ut/ver/ut/memblock` diff，冻结版clean compile、default-random专项和随后同一`simv`的真实load smoke
-严格顺序通过；冻结哈希和日志见第12章。第12轮最终独立review通过前仍不得归档本Plan。
+漏列L2 inner TileLink分析。以上问题均已逐项按对应源码修复。13:33冻结版是ZERO语义补充前的历史基线，
+本轮权重修改另以第15.3节记录最终源码哈希、重新编译和验证日志。
 
 当前实现满足以下正确性条件：
 
@@ -100,7 +99,7 @@ xaction、越界slot或不完整idle调用，错误caller可能在字段写入�
 - driver无 `canAccept/response` 等待，连续batch可每拍launch；当前batch不会在DUT sample机会之前进入issue。
 - 通用random item由xaction保证pre/post gap均为0；driver保留同一检查拦截绕过约束的directed item。
 - redirect launch前不预留，launch后通过active mapping和原cancel owner回退，不新增第二套recovery状态。
-- 随机0只产生idle，不消费uid；zero-only配置在0ns fail-fast。
+- 随机0只产生idle，不消费uid；zero-only配置合法，只有三类权重全0时才在0ns fail-fast。
 - 主表、issue scheduler内部算法、writeback、commit/deq、pass/fail和terminal owner未改。
 
 ## 2. Diff 覆盖矩阵
@@ -975,9 +974,6 @@ enq_weight_sum += enq_per_cycle_effective_middle_weight;
 enq_weight_sum += enq_per_cycle_max_weight;
 if (enq_weight_sum == 0)
     `uvm_fatal("SEQ_CSR_CFG", "LSQ enqueue ZERO/MIDDLE/MAX weights must not all be zero")
-if (enq_per_cycle_effective_middle_weight == 0 &&
-    enq_per_cycle_max_weight == 0)
-    `uvm_fatal("SEQ_CSR_CFG", "LSQ enqueue random weights cannot select ZERO forever")
 ```
 
 中文伪代码：
@@ -985,9 +981,10 @@ if (enq_per_cycle_effective_middle_weight == 0 &&
 ```text
 先拒绝小于-1的MIDDLE raw值；
 raw值为-1时按物理slot数减1派生effective MIDDLE，否则使用显式非负值；
-在64-bit unsigned变量中逐项累加三类权重，避免32-bit表达式先溢出；
+在64-bit unsigned变量中逐项累加三类总权重，避免32-bit表达式先溢出；
 三类全0时fatal，因为随机solver没有合法类别；
-MIDDLE和MAX同时为0时fatal，因为主动flow会永久只发ZERO idle而无法完成。
+只要总权重大于0就允许进入随机solver，因此ZERO可以成为唯一非零权重；
+zero-only每次返回0，不消费uid，也不修改terminal/global-stop状态。
 ```
 
 ### 5.3 Agent 通用路径的 6/4 Gate
@@ -1077,8 +1074,9 @@ active slot按needAlloc进入load或store分支，同时检查FuType与该资源
 
 ### 5.4 正确性检查
 
-默认 `0/5/1` 保持旧1..6均匀分布。随机模式用64-bit逐项累加并拒绝全0及`MIDDLE+MAX=0`；高ZERO
-权重测试中issue延迟约1.7us后仍完成terminal，zero-only测试在0ns按预期fatal。dispatch candidate、
+默认 `0/5/1` 保持旧1..6均匀分布。随机模式用64-bit变量计算三类总权重并只拒绝全0；ZERO类别
+可以成为唯一非零类别。高ZERO权重测试中issue延迟约1.7us后仍完成terminal，zero-only使用外部
+phase结束场景验证配置可用且不伪造progress。dispatch candidate、
 xaction约束和driver复核分别覆盖主流程、标准随机路径和任意directed producer；xaction还把继承的
 pre/post gap都收紧为0，不再让default random item命中driver的streaming fatal。
 
@@ -2175,12 +2173,15 @@ end
 | 第9轮及opcode宏值表修复后远端VCS clean compile | PASS | 2026-07-17 11:37开始；174个RTL module、全部partition、stitch和link完成，无源码error；最终KDB阶段0 error/0 warning |
 | default-random gap/opcode专项 | PASS | type override启动10-item `lsqenq_agent_agent_default_sequence`；LSQ enqueue在main结束时无需kill，且无`CNST-CIF`、`RNDFLD`、gap fatal或UVM warning/error/fatal |
 | 第9轮最终真实scalar load | PASS | 使用同一`simv`，372.8ns完成LDA issue、DCache response、WB、ROB commit、LQ deq和terminal；`TEST CASE PASSED`，0 warning/error/fatal |
-| 第11轮修复后源码冻结 | PASS | 编译前后`git diff --binary -- mem_ut/ver/ut/memblock` SHA-256均为`99fdd0c69f99f7dd3e08eed289ea9ace2df11c344b62563c8f147873f3f3b8f0`；所有相关SV时间早于最终`simv` |
-| 冻结版最终远端VCS clean compile | PASS | 2026-07-17 13:33开始，13:35完成新partition、174个RTL module、全部UVM package、stitch和link；compile log仅有LCA工具warning，无源码error；最终KDB 0 error/0 warning |
+| 第11轮修复后历史源码冻结 | 历史基线 | ZERO语义补充前的`git diff --binary -- mem_ut/ver/ut/memblock` SHA-256为`99fdd0c69f99f7dd3e08eed289ea9ace2df11c344b62563c8f147873f3f3b8f0` |
+| 历史冻结版远端VCS clean compile | 历史证据 | 2026-07-17 13:33开始，13:35完成；该编译不包含17:36之后的ZERO权重代码修改 |
 | 冻结版default-random专项 | PASS | 13:35生成的`simv`以`UVM_FULL`明确启动10-item `lsqenq_agent_agent_default_sequence`，main结束时LSQ enqueue无需kill；13:38:15 PASS，0 warning/error/fatal |
 | 冻结版最终真实scalar load | PASS | 在default-random之后使用同一`simv`，13:38:28于372.8ns完成LDA issue、DCache response、WB、ROB commit、LQ deq和terminal；PASS，0 warning/error/fatal |
 | 高ZERO权重 `100/0/1` | PASS | issue延迟到约1950ns后完整terminal；0 error/fatal |
-| zero-only `1/0/0` | EXPECTED FATAL | 0ns命中`LSQ enqueue random weights cannot select ZERO forever` |
+| 合法ZERO配置 `1/0/1` | PASS | 重新编译后参数在0ns加载，372.8ns完成真实load terminal；`UVM_WARNING/ERROR/FATAL=0` |
+| zero-only `1/0/0` | PASS | `tc_smoke` 配置 `MEMBLOCK_LSQENQ_SEQ_EN=0`，由原有 smoke phase 结束；参数初始化检查无 fatal，`TEST CASE PASSED`，0 warning/error/fatal |
+| 全零 `0/0/0` | PASS（预期负向） | `tc_dispatch_real_smoke` 在 `0ns` 命中 `SEQ_CSR_CFG: LSQ enqueue ZERO/MIDDLE/MAX weights must not all be zero`，无其它 error |
+| ZERO语义补充后源码哈希与最终compile | PASS | 当前`git diff --binary -- mem_ut/ver/ut/memblock` SHA-256为`39910ad5aa5155627e11072ef19b158f7d138656d971f9d09779b14646239377`；17:39后重新编译，KDB 0 error/0 warning |
 | software-only基础序列 | PASS | 0 error/fatal，但不计真实LSQ覆盖 |
 | scalar store admission | 部分通过 | 已到STA/STD issue、WB和ROB commit；后续既有SQ deq pointer mismatch |
 | 6-store压力尝试 | 下游失败 | 旧尝试出现既有`WB_UID_MISMATCH`；当前4-store合同由candidate、xaction约束和driver复核三层静态确认 |
@@ -2190,6 +2191,8 @@ end
 - compile：`mem_ut/ver/ut/memblock/sim/base_fun/log/vcs_compile_rtl.log`
 - default-random专项：`mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_sanity_ts=virtual_base_sequence_cfg=default_seed=666666_rtl_lsqenq_round12_frozen_default_random_20260717.log`
 - 冻结版最终真实load：`mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_dispatch_real_smoke_ts=virtual_base_sequence_cfg=tc_dispatch_real_smoke_seed=666666_rtl_lsqenq_round12_frozen_real_load_20260717.log`
+- 合法 zero-only：`mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_smoke_ts=virtual_base_sequence_cfg=default_seed=666666_rtl_lsqenq_zero_only_supported_20260717.log`
+- 全零负向：`mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_dispatch_real_smoke_ts=virtual_base_sequence_cfg=tc_dispatch_real_smoke_seed=666666_rtl_lsqenq_zero_all_0ns_expected_fatal_20260717.log`
 
 store失败落在未修改的writeback/SQ deq专项，不证明LSQ enqueue失败，也不能被本轮静默放宽。完整store
 terminal仍是总控Plan中int-WB和ROB/LSQ commit/deq专项的验证依赖。
@@ -2299,7 +2302,7 @@ override、agent driver、VIF和DUT采样路径。日志确认被测default sequ
 | Agent通用item合同 | 功能逻辑修改 | inactive slot可能残留qualifier/payload，default/direct item可生成5/6个store或非零gap | 任意producer都必须满足V2物理和streaming合同 | xaction约束inactive全零、load/store 6/4及pre/post gap 0；driver首次VIF赋值前再次fail-fast复核 |
 | Transaction debug/compare | 功能逻辑修改 | custom compare回退可能吞掉extra、metadata或gap差异，display也不完整 | driver合法性检查不能替代transaction等价判断 | `get_v2_extra_fields()`聚合六slot；display和手工compare覆盖extra、五个framework metadata及pre/post gap |
 | 每拍入队数量随机 | 新增runtime功能 | 随机模式只在1..物理最大值内均匀采样，不能主动产生idle | 需要分别控制0、中间和最大边界概率 | 新增ZERO/MIDDLE/MAX权重；两阶段`std::randomize`返回0、中间值或物理最大值，默认0/5/1保持旧1..6均匀分布 |
-| 权重与runtime资源检查 | 新增配置检查 | 没有三类权重合法性和集中物理上限收敛 | 全0或zero-only会让主动flow无法推进 | `apply_runtime_resource_limits()`使用64-bit求和，拒绝非法组合并集中限制runtime资源；物理结构不建立runtime镜像 |
+| 权重与runtime资源检查 | 新增配置检查 | 没有三类权重合法性和集中物理上限收敛 | 需要允许ZERO和zero-only，同时拒绝三类全0导致solver无合法类别 | `apply_runtime_resource_limits()`使用64-bit变量计算三类总权重并只拒绝全0；`1/0/0`合法，物理结构不建立runtime镜像 |
 | Candidate gate | 功能逻辑修改 | 只限制总slot和free count，没有分别累计load/store element | 合法总slot仍可能超过V2 4-store能力 | 每拍只采样一次总目标，按连续uid累计6/4并限制实际LQ/SQ free；不额外保留6/4空项，超限uid留到下一拍 |
 | Driver发送时序 | 功能逻辑修改 | 可能等待不存在的`canAccept/response`或在item内重复发送 | V2仅有request input，且需要保持每拍一批吞吐 | clock-first循环每边界先形成上一批sample机会，再最多launch一个当前item并立即`item_done()`；无item驱全零idle |
 | Launch/reservation/pending sample | 新增局部状态并修改开放issue时点 | driver返回后allocation和`issue_ready`同拍发生 | 当前request尚未跨过下一DUT sample边界，但延后pointer又会重复分配 | launch后立即由唯一`commit_allocate()`预留；单深度pending batch在下一driver边界才`complete_admission()`开放issue |
@@ -2324,3 +2327,33 @@ ROB/LSQ commit/deq、pass/fail和terminal owner均未改变。
   不能通过放宽本轮LSQ enqueue检查修复，也不阻塞本plan归档。
 
 最终结论：本专项源码、文档、冻结验证和独立review均已闭环；关联Plan已移动到`plan/do`。
+
+### 15.3 用户后续ZERO权重语义复核（2026-07-17）
+
+用户后续要求明确支持ZERO权重和`1/0/0` zero-only，并只在0ns检查三类权重是否至少一个非零。
+当前源码保留ZERO命中后返回0和发送idle的行为，删除原`MIDDLE+MAX==0` fatal，只保留三类总权重
+全0检查。因此`1/0/1`、`100/0/1`和`1/0/0`均合法，`0/0/0`非法。该修改不改变candidate、driver、
+uid消费、no-progress、pass/fail或terminal逻辑；zero-only不会为非空主表伪造结束状态。
+
+本轮独立验证：
+
+- 远端VCS重新编译：`mem_ut/ver/ut/memblock/sim/base_fun/log/vcs_compile_rtl.log`，KDB
+  `0 error/0 warning`。
+- 合法`1/0/1`：
+  `mem_ut/ver/ut/memblock/sim/base_fun/log/tc=tc_dispatch_real_smoke_ts=virtual_base_sequence_cfg=tc_dispatch_real_smoke_seed=666666_rtl_lsqenq_zero_mixed_final_20260717.log`；
+  `TEST CASE PASSED`，372.8ns结束，`UVM_WARNING/ERROR/FATAL=0`。
+- zero-only`1/0/0`已在重新编译后的同一 `simv` 上用 `tc_smoke` 验证：关闭 LSQ enqueue/commit/issue/L2TLB
+  主 sequence，由原有 smoke phase结束；配置检查通过且没有伪造 admission progress。非空主表仍不得用该配置
+  等待 terminal，因为它按定义不会产生 admission progress。
+- 全零`0/0/0`已在 `0ns` 触发预期 fatal，确认检查仍拒绝随机 solver 没有合法类别的配置。
+
+`1/0/0`启用完整LSQ enqueue sequence时按定义只产生idle，不会消费uid或产生terminal；若没有外部结束条件，
+sequence只能由no-progress诊断/UVM timeout结束。因此本轮用关闭LSQ主sequence的`tc_smoke`验证参数初始化
+合法性和不伪造progress，不将其包装成完整LSQ flow PASS；这是预期验证边界，不是实现失败。
+
+最后一轮独立subagent review已通过：确认最终源码哈希、编译时间线、全零拒绝条件和 zero-only 验证边界
+均与当前代码一致，无新增遗漏或逻辑 blocker。
+
+第一次通过`eda_batch_run`传递多项用户plusarg时，wrapper将空格转义进单个参数，触发的是
+`plus.sv`参数格式fatal；该结果不计入产品验证。随后在`eda01`直接使用`SIM_TOOLS=vcs`的
+`batch_run`入口重新执行，四个plusarg均被独立加载，合法混合配置结果才作为有效验证证据。

@@ -498,8 +498,10 @@ driver在当前边界发现flush或epoch失效
 | `*_MAX_WEIGHT` | runtime | 选择MAX的类别总权重 |
 | `MEMBLOCK_LSQENQ_READY_TIMEOUT` | runtime兼容入口 | 公共参数层仍解析并检查非负；V2 sequence不读getter、不等待ready，且不做零值warning/clamp |
 
-随机模式禁止 `MIDDLE+MAX=0`，避免永远只发送idle。随机返回0不算新的admission progress；如果上一批
-pending，idle边界完成上一批sample仍算progress。
+随机模式允许配置非零 `ZERO_WEIGHT`，也允许 `ZERO/MIDDLE/MAX=1/0/0` 这种idle-only配置；随机模式下只有
+三类权重全0才会在参数初始化时fail-fast。随机返回0不算新的admission progress；如果上一批pending，
+idle边界完成上一批sample仍算progress。zero-only不会消费uid，也不会伪造terminal；非空主表使用该配置时
+不会自行请求global stop，只适用于testcase/UVM phase提供外部结束条件的idle场景。
 
 ## 12. 状态变化
 

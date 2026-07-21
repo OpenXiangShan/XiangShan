@@ -1,14 +1,14 @@
-# mem_ut V2 测试框架适配总控最终 Coding Plan
+# mem_ut V2 测试框架适配总控 Coding Plan
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待各专项 coding |
+| 状态 | `undo`，待各专项 coding；L2TLB request lifecycle 尚待建立唯一子 plan owner |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv`、`build_memblock/rtl/filelist.f` |
 | Plan 类型 | V2 测试框架运行期适配总控，不替代专项 execution plan |
 | 适配原则 | 只记录 V2 适配的关键问题、专项 owner、修改逻辑边界和文字伪代码；不保留历史讨论和长 checklist |
-| 创建/修订日期 | 2026-07-17 |
+| 创建/修订日期 | 2026-07-21 |
 
 ## 1. 范围与边界
 
@@ -47,29 +47,33 @@ test -e build_memblock/rtl/filelist.f
 
 | 适配域 | 唯一 coding owner |
 |---|---|
-| compile 参数、宽度、FuType、ROB/LQ/SQ key | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_compile_param_and_width_adapt_execution_plan_20260708.md`，已归档完成；后续 LSQ delta 由 LSQ enqueue 最终 plan 维护 |
+| 既有 compile 参数、宽度、FuType、ROB/LQ/SQ key | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_compile_param_and_width_adapt_execution_plan_20260708.md`，该范围已归档完成，只作为公共基线 |
+| SQ deq/cancel count width 与 redirect/cancel latency compile delta | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`；在统一compile header新增宏和派生检查，是这些未实现参数的唯一coding owner，不回写到已归档`do` plan |
 | 自动主表 VADDR 窗口 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_main_table_vaddr_generation_adapt_execution_plan_20260713.md` |
-| DCache L2 sideband known-zero | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_dcache_l2_sideband_responder_adapt_execution_plan_20260712.md` |
+| DCache 轻量 L2 response/hint/Probe，flush_done zero-only | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md` |
 | LSQ enqueue | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`，coding、文档同步、冻结验证和最终独立review均已完成；真实load已闭环，store admission已覆盖，store终态仍由后续SQ deq专项闭环 |
-| split issue | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_split_issue_framework_adapt_execution_plan_20260708.md` |
-| IQ feedback/replay | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_iq_feedback_replay_framework_adapt_execution_plan_20260711.md` |
+| split issue、vector stimulus/driver gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_split_issue_framework_adapt_execution_plan_20260708.md`；只拥有vecissue默认入口关闭和driver valid fatal，不修改vector output monitor |
+| IQ feedback/replay、VSTU gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_iq_feedback_replay_framework_adapt_execution_plan_20260711.md`；唯一实现STA SQ-only raw、current snapshot attach和VSTU valid fatal |
 | int-WB/writeback | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_int_wb_writeback_framework_adapt_execution_plan_20260708.md` |
 | CSR/sfence/runtime snapshot | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_csr_control_runtime_semantic_review_execution_plan_20260708.md` |
-| L2TLB response/permission/ready gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md` |
-| LSQ MMIO/status | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md` |
+| L2TLB response/permission | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md`；只拥有 permission 字段链和 responder 方向边界 |
+| L2TLB ready/single-outstanding lifecycle | 当前没有子 plan coding owner；不得从本总控直接 coding，后续必须扩展并重审 L2TLB 专项或建立唯一 lifecycle owner |
+| LSQ MMIO/status、cancel output 对账 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`；该专项拥有per-epoch record、独立cancel snapshot/redirect anchor sideband源码与consumer、software/observed直接对账和global-stop gate，不能把observed count接到第二个SQ deq/free-count owner |
 | pending-MMIO load/store sideband | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md` |
-| monitor output 分类 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md` |
+| monitor output分类、vector-WB gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md`；只规定ctrl snapshot/redirect anchor的monitor职责合同并唯一实现`writebackVldu` valid fatal；具体sideband类型、queue、producer源码、consumer和reconcile由LSQ MMIO/status专项唯一coding |
 
-本文中每个问题只给出总控级最终方案。coding 时以对应专项 owner 的文件清单和函数合同为准，不得从
-本文自行扩展修改范围。
+本文对已有 owner 的问题只给出总控级摘要。coding 时以对应专项 owner 的文件清单和函数合同为准，
+不得从本文自行扩展修改范围。owner 表明确标为“当前没有子 plan coding owner”的内容只登记缺口，
+不属于可执行 coding 方案。
 
 ## 3. 问题一：V2/V3 编译期结构仍可能存在第二权威
 
 ### V2 问题
 
-V2 和 V3 的 ROB value width、FuType width、LSQ enqueue slot、split issue port、SQ deq pointer
-presence 等是编译期结构。旧逻辑中仍可能存在固定 V3 literal、runtime plus 镜像或同义参数，导致
-V2 worktree 编译通过但运行期按错误结构截断、驱动或解析。
+V2 和 V3 的 ROB value width、FuType width、LSQ enqueue slot、split issue port、`sqDeq` count width、
+SQ deq pointer presence 等是编译期结构。旧逻辑中仍可能存在固定 V3 literal、runtime plus 镜像或
+同义参数；其中 ctrl raw/interface/xaction/monitor/XZ 仍把 `sqDeq` 重复写为 `[1:0]`/宽度 `2`，
+会让 V2 worktree 编译通过但运行期按错误结构截断、驱动或解析。
 
 ### 修改原因
 
@@ -85,6 +89,20 @@ compile/width 基线已完成。后续专项必须继续遵守：
   seq_csr_common::check_compile_param_consistency()` 是结构参数主链。
 - 业务 helper 直接使用 package localparam 或 compile macro，不新增 `get_compile_*()` 第二入口。
 - runtime plus 只限制行为使用量，不改变物理 slot、pipe、port、key width 或 presence。
+- `MEMBLOCK_DUT_ENSBUFFER_WIDTH` 是 `sqDeq` 最大计数的 profile 主参数；
+  `MEMBLOCK_SQ_DEQ_COUNT_W=$clog2(MEMBLOCK_DUT_ENSBUFFER_WIDTH+1)` 是唯一派生宽度，
+  raw/interface/xaction/monitor/XZ 公共 consumer 全链消费该宽度，不保留固定 `[1:0]` 或 `2`；
+  xaction 若被默认 sequence 随机化，合法值限制为 `0..MEMBLOCK_DUT_ENSBUFFER_WIDTH`。
+- 现有 `default_io_mem_to_ooo_sqDeq_cons` 必须实现为以下约束；该约束只限制随机 transaction，
+  不改变 DUT raw observed flow：
+
+  ```systemverilog
+  io_mem_to_ooo_sqDeq inside {[0:`MEMBLOCK_DUT_ENSBUFFER_WIDTH]};
+  ```
+- `MEMBLOCK_DUT_HAS_SQ_DEQ_PTR` 只控制 `sqDeqPtr` presence 和 pointer/count-only 分支，不能推导或
+  替代 `sqDeq` count width；count 总线在 capability 为 0 或 1 时都存在。
+- `dut_inst.sv` 继续保留当前 RTL 逐端口展开的具体 `[1:0]`，不作为公共参数第二权威；connect
+  继续同宽直连，不新增宽度声明。
 - AMO/MOU、CBO、vector LS 本轮没有 scalar capability；默认权重为 0，显式非 0 或 manual/fixed 生成
   在主表落表/admission 前 fail-fast。
 - 最终 LSQ enqueue plan 已复用 V2 compile baseline，补齐 LSQ 派生宏、无 response 的 clock-first
@@ -94,8 +112,13 @@ compile/width 基线已完成。后续专项必须继续遵守：
 
 ```text
 编译当前 V2 worktree：
-  tb.f 只选择 V2 profile；
+  当前 V2 分支通过 tb.f 的 compile include 链加载 V2 compile header 默认值；
   memblock_compile_params.svh 定义 V2 ROB/LQ/SQ/FuType/slot/port/presence tuple；
+  profile 定义 MEMBLOCK_DUT_ENSBUFFER_WIDTH=2，并按 RTL 公式唯一派生
+    MEMBLOCK_SQ_DEQ_COUNT_W=2；
+  ctrl raw/interface/xaction/monitor/XZ 全部消费该派生宽度；
+  dut_inst 保留当前 RTL 展开宽度，connect 只做同宽连接；
+  HAS_SQ_DEQ_PTR 只选择 pointer presence，不参与 count width 计算；
   如果缺宏、宏冲突或 tuple 与 V2 profile 不一致，编译或初始化 fatal；
 
 运行 seq_csr_common::validate_and_clamp()：
@@ -166,14 +189,15 @@ fired-mask 或 vector 默认 sequence 沿用到 V2，导致不支持的 vector L
 
 ### 修改方案与修改逻辑
 
-split issue 专项负责：
+相关专项按源码边界拆分唯一 owner：
 
-- 建立 `MEMBLOCK_ISSUE_TARGET_LOAD/STA/STD` 到 V2 `issueLda/Sta/Std` 的权威映射。
-- V2 FuType 使用 bit15/16/17 表示 scalar LDU/STU/MOU；禁止把 V3 36-bit literal 低位截断。
-- fired-mask width、LOAD/STA/STD base offset、full-mask、driver ready 映射全部从 compile port count 派生。
-- 删除 scalar testcase 中随机/generic vecissue default sequence 配置。
-- vecissue transaction、VSTU feedback、`writebackVldu` 任一 valid 在本轮 scalar flow 中 fatal。
-- issue loop 只有 driver fired-mask 确认的真实 fire 才计 progress；queue blocked、delay、route 尝试不计。
+- split issue专项建立 `MEMBLOCK_ISSUE_TARGET_LOAD/STA/STD` 到 V2 `issueLda/Sta/Std` 的权威映射。
+- split issue专项使用V2 FuType bit15/16/17表示scalar LDU/STU/MOU，禁止把V3 36-bit literal低位截断。
+- split issue专项让fired-mask width、LOAD/STA/STD base offset、full-mask、driver ready映射全部从compile port count派生。
+- split issue专项删除scalar testcase中的随机/generic vecissue default sequence，并唯一实现vecissue transaction valid fatal。
+- IQ feedback/replay专项唯一实现VSTU feedback valid fatal。
+- monitor output专项唯一实现`writebackVldu` valid fatal。
+- split issue专项保证issue loop只有driver fired-mask确认的真实fire才计progress；queue blocked、delay、route尝试不计。
 
 ### 文字伪代码
 
@@ -232,7 +256,8 @@ V2 6/4 表示单拍 load/store element 端口能力，不是软件模型必须�
   采样上一批，再 launch 当前批并立即 `item_done()`。
 - launch 后立即调用唯一 `commit_allocate()` 预留资源；上一批在下一 driver边界通过
   `complete_v2_pending_sample()` 开放 issue route。
-- collect、driver launch 和 confirm 分别复用现有 global flush/epoch gate；不增加固定5-cycle retry guard。
+- collect和driver launch复用现有global flush/epoch gate形成launch前abort；confirm只依据driver
+  `request_launched/aborted_by_redirect`，真实launch后不得被当前flush/epoch二次否决；不增加固定5-cycle retry guard。
 - 随机 enqueue 数量支持 ZERO/MIDDLE/MAX 三类权重；返回0时只发送idle，不消费next uid或修改LSQ资源。
 
 ### 文字伪代码
@@ -265,7 +290,8 @@ send_lsqenq_cycle()：
     对每个 candidate 调用唯一 setter 构造完整 V2 request；
     start_item/finish_item 交给clock-first driver；
     finish_item返回后先complete上一批pending sample；
-    当前批未abort且epoch未变时，preview key重新核对后调用唯一commit_allocate()预留资源；
+    当前批request_launched=1且未标记launch前abort时，preview key重新核对后调用唯一commit_allocate()预留资源；
+    confirm时即使epoch已变也必须预留，保存该epoch只用于下一sample边界的issue gate；
     当前批保存为pending sample，下一driver边界才设置issue_ready；
   V2 不等待 canAccept/response。
 ```
@@ -285,16 +311,19 @@ monitor raw 必须先保真表达 DUT 端口；adapter 再通过 active map 和 
 ### 修改方案与修改逻辑
 
 int-WB 专项负责 split WB raw 和 STD value-only 反查；IQ feedback/replay 专项负责 STA IQ SQ-only raw、
-current snapshot attach、STA 单向阶段状态和按 cycle timeline 处理。
+current snapshot attach、STA 单向阶段状态和单 service batch 内的 deferred ctrl 处理。
 
 总控固定以下组合：
 
 - STA IQ raw 只保留真实 SQ。
 - LDA/STA raw 只保留真实 ROB。
 - STD raw 使用 int-WB 专项的 ROB value-only 双 flag probe，不进入 STA current snapshot helper。
-- LDA/STA/IQ 进入 normalize 前必须已经附加 UID、canonical key、`issue_epoch/replay_seq`。
+- LDA/STA/IQ 进入既有 generic normalize 前，converter 本地必须已经附加并检查 UID、canonical key、
+  `issue_epoch/replay_seq`；本轮不修改 `normalize_feedback_event()` 的全局 fallback。
 - current snapshot 来源是现有 status，不新增 generation token/tombstone。
-- raw queue 积压时按 `raw.cycle` 分组，同 cycle IQ 先于 WB，当前 cycle ctrl apply/recovery 后才处理下一 cycle。
+- 每次 `service_monitor_once()` 只处理一个采样 cycle；本次可见的 IQ/WB/ctrl raw 必须同 cycle，出现
+  mixed-cycle 直接 fatal。semantic batch 完成后才按原顺序 apply 本次 deferred ctrl，service 尾部只执行
+  一次既有 recovery；不新增跨 cycle 排序或逐 cycle recovery 循环。
 
 ### 文字伪代码
 
@@ -313,32 +342,48 @@ adapter convert：
   写 UID、canonical key、issue_epoch、replay_seq；
   attach 失败固定 fatal；
 
-normalize：
+converter 本地完整性检查：
   如果 event 是 STA IQ、LDA WB 或 STA WB：
     要求 has_uid/has_issue_epoch/has_replay_seq 完整；
-    缺失 fatal，不从 status fallback；
+    缺失 fatal，不把该职责下沉到 generic normalize fallback；
 
-batch timeline：
-  冻结本次 service 的 IQ/WB/ctrl raw；
-  循环按三个 queue 头部最小 cycle 分组；
-  同 cycle 转换顺序为 IQ -> WB -> memoryViolation；
-  redirect-first 后 allowed event 才进入 stage check/handler/commit；
-  本 cycle full ctrl raw apply 后调用 replay/redirect recovery；
-  再处理下一 cycle。
+single-service batch：
+  本次 service drain 当前可见 IQ/WB/ctrl raw；
+  第一条 raw 固化本 batch sample_cycle；
+  后续任一 raw.cycle 不等于 sample_cycle 时 fatal；
+  ctrl raw 先保存到 deferred_ctrl，不立即删除 active map；
+  semantic events 继续交给既有 redirect-first batch handler；
+  semantic batch 完成后按原顺序 apply deferred_ctrl；
+  返回 service_monitor_once，由既有调用点执行一次 replay/redirect recovery；
+  不冻结三个 queue，不按最小 cycle 排序，不在 collector 内逐 cycle 调 recovery。
 ```
 
 ## 8. 问题六：ROB/LSQ commit、MMIO status 和 SQ deq pointer 语义混杂
 
 ### V2 问题
 
-V2 只有 `sqDeq` count，没有 `sqDeqPtr`。同时 `pendingPtr/pendingst/pendingMMIOld/scommit` 由
-lsqcommit driver 驱动，语义上依赖当前 ROB head。旧逻辑容易把 fault 当 normal commit、把 batch tail
-当 pending head、或把 ctrl raw deq 过早应用删除同批 event 的 active map。
+V2 只有 `sqDeq` count，没有 `sqDeqPtr`。当前 `sqDeq[1:0]` 是
+`log2Ceil(EnsbufferWidth+1)` 在 `EnsbufferWidth=2` 下的派生结果，不是独立固定协议宽度。同时
+`pendingPtr/pendingst/pendingMMIOld/scommit` 由 lsqcommit driver 驱动，语义上依赖当前 ROB head。
+旧逻辑容易把 fault 当 normal commit、把 batch tail 当 pending head、把 ctrl raw deq 过早应用删除同批
+event 的 active map，或让 raw/interface/monitor 使用不同的 `sqDeq` count width。
 
 ### 修改原因
 
 V2 LSQ/ROB sideband 既影响 DUT 输入，也影响测试框架 terminal 收敛。必须分清 normal commit、
 fault convergence、真实 LSQ deq 和 output tag producer，否则会掩盖 deadlock 或伪造 progress。
+
+本问题还必须明确 `scommit` 与 `sqDeq` 不是同一事件：
+
+| 语义 | V2 端口 | 方向 | 计数单位 | 框架影响 |
+|---|---|---|---|---|
+| ROB scalar store commit | `io_ooo_to_mem_lsqio_scommit` | ROB -> MemBlock | normal commit batch 中 scalar store 子集的数量 | normal batch 全部 UID 写 `status.rob_commit`，该字段只传递 scalar store 子集数量；不推进 `sq_deq_ptr` |
+| SQ physical deq | `io_mem_to_ooo_sqDeq` | MemBlock -> 后端 | 本拍连续离开 SQ 的 entry 数 | 消费 raw ctrl，释放 SQ mapping、`sq_deq_ptr` 和 free count；不写 `status.rob_commit` |
+
+完整 core 的下游 Dispatch/Scheduler 可能把 MemBlock `sqDeq` 接入名为 `scommit` 的 Bundle 字段，
+但那不是 ROB 输入 `scommit`。ROB 输出 `scommit` 经过一次 `RegNext`，StoreQueue 内部消费前还有
+一次 `GatedRegNext`；`sqDeqCnt` 则经 `RegNext` 形成 MemBlock 输出。两者可能跨周期、同拍但数值
+不等，或只出现其中一个；总控不得要求同拍相等，也不得用 ROB `scommit` 直接模拟 SQ deq。
 
 ### 修改方案与修改逻辑
 
@@ -346,12 +391,81 @@ LSQ MMIO/status 专项负责：
 
 - 独立 modeled ROB head 驱动 `pendingPtr/pendingst/pendingMMIOld`。
 - normal batch 和 fault convergence 互斥。
-- fault token 只置框架 `rob_commit`，真实 LSQ mapping 释放并形成 fault terminal 后才 rebase head。
+- fault token 只置框架 `rob_commit`，与真实 LQ/SQ deq 可按任意顺序独立到达；只有 token、fault 状态和
+  LSQ mapping释放全部收敛形成fault terminal后才rebase head。
 - `apply_raw_ctrl_deq(raw)` 是 LQ/SQ/SB full-raw 唯一 owner。
-- V2 SQ deq 使用 count-only 分支，全部预检查通过后才 release。
+- `MEMBLOCK_DUT_ENSBUFFER_WIDTH` 从 V2 profile 获取物理最大 count，
+  `MEMBLOCK_SQ_DEQ_COUNT_W=$clog2(MEMBLOCK_DUT_ENSBUFFER_WIDTH+1)` 只派生一次；
+  `dispatch_raw_ctrl_t.sq_deq`、ctrl interface/xaction/monitor/XZ 全部消费该宽度；`dut_inst.sv`
+  保持 RTL 展开的具体宽度，connect 保持同宽直连。handler 在消费前检查
+  `raw.sq_deq<=MEMBLOCK_DUT_ENSBUFFER_WIDTH`。
+- `MEMBLOCK_DUT_HAS_SQ_DEQ_PTR` 只控制 pointer payload presence 和 pointer/count-only 分支，不能替代
+  count width；无 pointer profile 仍保留完整 `sqDeq` count 总线。
+- `lqCancelCnt/sqCancelCnt` 的interface/xaction/monitor/snapshot宽度分别从LQ/SQ容量派生；xaction现有
+  `72/56` literal范围改为`MEMBLOCK_DUT_LQ_SIZE/SQ_SIZE`，monitor observed和record software
+  累计同样按对应容量检查，禁止位宽参数化后继续保留容量第二权威。
+- V2 SQ deq 使用 count-only 分支，全部预检查通过后才 release；预检查只确认当前 active
+  SQ owner，不把 `status.rob_commit` 作为 raw deq 硬门槛。`try_retire_committed_uid()` 仍负责
+  在 `rob_commit` 到达后收口 success/terminal。
+- `scommit` 和 `sqDeq` 由两个独立 consumer 消费：前者只更新 commit 状态/sideband，后者只更新
+  SQ mapping、`sq_deq_ptr` 和 free count；二者不互相补造、不互相推进。
+- 写者合同固定为：`lq_deq_ptr/sq_deq_ptr` 只由 reset 和成功消费真实 `lqDeq/sqDeq` 的
+  `release_lq/release_sq()` 更新；`lq_free_count/sq_free_count` 才由 reset、enqueue allocation、
+  redirect cancel 和真实 `lqDeq/sqDeq` release 更新。
+- 每个 redirect 由 `request_redirect_flush()` 创建一个 reconcile record；monitor 不创建第二个 redirect
+  状态机。`advance_active_redirect()`必须等待anchor、internal T0 sample和main service ctrl drain后，才调用
+  唯一`apply_redirect_flush_range()`扫描/清理；`try_retire_committed_uid()`命中active redirect只defer，
+  不旁路scan直接prepare。reservation ledger只补充sample sequence、same-cycle enqueue和防重复epoch。
+- 保持`commit_allocate()`现有void签名；真实launch的allocation完成后调用
+  `begin_lsq_reservation_launch(uid)`生成稳定reservation launch epoch，pending UID queue升级为
+  `(uid,reservation_launch_epoch)`token queue；原pending batch dispatch/flush epoch独立保留，只负责
+  `complete_admission()` gate，不得与reservation launch epoch合并。下一次
+  `finish_item()`返回后只取一次统一sample sequence并调用`mark_lsq_reservation_sampled()`。即使flush epoch
+  失效，也先把token对应实例标为DUT_VISIBLE，再拒绝issue-ready；missing/duplicate/重发实例mismatch均
+  fatal，不能按当前UID status反查。launch epoch只在全表reset清零；redirect clear或真实deq只清
+  visibility state/sample并保留epoch，防止旧callback命中新实例。
+- `confirm_lsq_candidates()`只有`request_launched=0`的launch前abort可以不建reservation；
+  `request_launched=1`后删除按confirm时global flush/epoch mismatch提前返回的旧分支，始终allocation并建token，
+  保存的batch dispatch/flush epoch只在下一sample边界禁止`complete_admission()`。
+- `status_transaction::snapshot_from_main()`保持只复制主表UID和ROB/LQ/SQ静态key，不得清reservation
+  metadata；`init_status_for_uid()/status.reset()`只用于首次建表或`reset_all_tables()`全局重置，不得用于
+  redirect reissue。调用顺序固定为`commit_allocate -> activate_uid/snapshot_from_main -> begin launch`，
+  因此reissue和deq都保留旧launch epoch，只有新真实launch递增动态实例token。
+- record 中的 `software_cancel_lq/sq_count` 是软件回退的唯一来源；
+  `apply_pending_lsq_cancels()`只消费`software_count_finalized=1`的record，并按record各调用一次
+  `cancel_lq/cancel_sq()`，后者仍是 enqueue pointer 和
+  free count 的唯一 cancel 写者。旧 `pending_lq/sq_cancel_count` 若保留，只能是未应用 record 的派生和。
+- ctrl monitor 每个 post-reset sample 把 `lqCancelCnt/sqCancelCnt` 写入独立 0/非0 snapshot sideband；
+  redirect monitor 只在顶层 `io_redirect_valid` sample 时写接口可观测的`level/robIdx`和sample-sequence
+  anchor，不伪造`flush_itself`。cancel output
+  没有 valid 且保持旧值，禁止按 nonzero、value-change 或 semantic ctrl event 生成 observation。
+- anchor按FIFO绑定最老未锚定record并比较接口可观测投影；已完成state flush但仍等待delayed output的
+  旧record可与下一笔active redirect record并存，有界FIFO按各自target sample支持连续相同count。
+  V2 redirect-to-LSQ latency=1定义expected cutoff：早于internal T0是allocated，等于internal T0是
+  same-cycle enqueue。DUT update latency=2只描述RTL更新边界；现有clocking monitor offset=1，实际
+  snapshot compare读取唯一派生observe latency=3。所有时序参数都只相对顶层anchor使用，不能相对
+  driver/service时点。
+  reconcile 在每个 record 的 exact target sample 直接比较一次 software/observed，software=0 也必须比较 0/0；
+  observed 不再次调用 `cancel_lq/cancel_sq()`。
+- 对账记录覆盖已完成 admission 和 DUT-visible pending sample，排除 launch 前 abort；software 与 observed
+  不等、target snapshot缺失、非target出现未解释的新level变化、anchor/payload不匹配或超时均
+  `uvm_fatal`。reconcile不改变单个UID的`terminal_done`，但record、anchor、snapshot和software rollback
+  未收敛时，`request_global_stop_if_done()`不得置位全局退出。
 - semantic event claim/handler 完成后才 apply deferred ctrl raw。
+- `memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor_once()` 是唯一调度点：每轮
+  drain cancel snapshot和redirect anchor，完成原semantic batch/recovery，再调用一次reconcile；
+  lsqcommit/LSQ enqueue子sequence不得建立第二个reconcile service loop。
+- `get_dut_sample_seq($time)`只允许clocking sample路径调用；negedge readiness/deadline使用纯只读
+  `peek_latest_dut_sample_seq()`和adapter维护的latest-drained watermark，不得额外递增sample sequence。
+- software-only smoke只验证ledger；新增basicTest real cancel-reconcile vseq使用automatic phase objection，
+  以3-entry manual table和年轻load/store的既有issue delay建立确定性DUT_VISIBLE barrier，再经redirect agent、
+  anchor、ctrl snapshot和main service驱动非零LQ/SQ cancel。DCache/SBuffer/redirect responder只在real-smoke
+  active、global stop且无inflight时自然退出；场景检查victim reissue、后台完成握手和最终全状态收敛。
 - active driver no-item/gap 保持 level sideband，只清 `scommit/flushSb` pulse。
-- progress 只由 normal commit、fault token、fault terminal rebase、真实 deq event 和 flushSb 边沿组成。
+- `has_progress` 保持既有轻量 activity 语义，只由 normal commit、当拍新驱动的 flushSb 和
+  `flushsb_busy()` 组成；fault token、fault terminal rebase 和真实 LQ/SQ deq 不要求单独计入。
+  该值只服务 idle/debug watchdog，不进入 pass/fail、terminal、pointer 或 global-stop 判定；本轮不新增
+  `lq_deq_event_seq/sq_deq_event_seq`、pointer snapshot 或 edge helper。
 
 ### 文字伪代码
 
@@ -376,103 +490,133 @@ build_lsqcommit_xaction()：
 
 apply_raw_ctrl_deq(raw)：
   先 update_sb_is_empty；
+  把 raw.sq_deq 作为 MEMBLOCK_SQ_DEQ_COUNT_W 宽的无符号 count 读取；
+  如果 count 超过 MEMBLOCK_DUT_ENSBUFFER_WIDTH，fatal；
   检查 sq_deq_ptr_valid 与 profile capability；
   LQ nonzero 走 pointer helper；
   SQ nonzero 且 profile 有 pointer 时走 pointer helper；
   SQ nonzero 且 V2 无 pointer 时走 count-only helper；
-  count-only helper 先预检查连续 SQ head owner 和 rob_commit；
-  全部通过后才 release pointer、删除 map、try_retire，并递增 sq_deq_event_seq；
+  count-only helper 先预检查连续 SQ head owner 和 active mapping，不要求 rob_commit；
+  全部通过后才 release pointer、删除 map并调用try_retire；
+  不新增或递增仅为has_progress服务的deq event sequence；
+
+scommit/sqDeq 解耦：
+  commit batch -> 全部 UID 标记 rob_commit；
+  再计算其中 scalar store 子集数量 -> 驱动 `io_ooo_to_mem_lsqio_scommit`；
+  不调用 release_sq，不修改 sq_deq_ptr/free count；
+  raw ctrl -> 读取 `io_mem_to_ooo_sqDeq` -> 按 SQ head/count 释放 mapping 和软件 SQ pointer；
+  不设置 rob_commit，不推进 commit_cursor/modeled_rob_deq_ptr；
+  sq_deq_ptr 只由 reset 和成功消费真实 sqDeq 的 release_sq() 写；
+  lq_free_count/sq_free_count 由 reset、enqueue allocation、redirect cancel 和真实 lqDeq/sqDeq release 写；
+  `scommit=0/sqDeq=0`（可能是 load-only commit）、`scommit=0/sqDeq>0`、
+  `scommit>0/sqDeq=0` 和两者同拍均为可处理状态，禁止同拍相等断言；
+
+deq-before-commit 状态收口：
+  raw sqDeq 命中当前 active SQ owner -> release_uid_sq_mapping(uid)；
+  保留 status.active=1、status.rob_commit=0，设置/保持 status.lsq_deq；
+  try_retire_committed_uid(uid) 因 rob_commit=0 暂不置 success/terminal_done；
+  后续 mark_rob_commit_uid(uid) 后再次调用 try_retire_committed_uid(uid)；
+  不因 mapping 释放提前推进 commit_cursor/modeled_rob_deq_ptr，不因 raw deq 直接完成 terminal；
 
 collect_monitor_event_batch()：
   collect writeback/IQ semantic events；
-  collect ctrl semantic events，并把完整 raw 存入 deferred queue；
+  collect ctrl semantic events，并把deq/memoryViolation/SBuffer字段的完整raw存入deferred queue；
+  semantic raw ctrl不保存cancel count；
   process semantic batch；
   apply_deferred_ctrl_updates_batch(deferred queue)；
-  task 返回后再执行既有 redirect/replay apply。
+
+advance_active_redirect()：
+  driver done后仍等待record anchor有效；
+  用peek只读sample seq和adapter latest-drained watermark确认都已到internal T0；
+  条件满足后才调用apply_redirect_flush_range唯一扫描active window；
+  try_retire命中active redirect时只等待该scan，不直接prepare；
+
+apply_pending_lsq_cancels()：
+  取最老software未应用record；
+  software_count未finalized则停止；
+  finalized后按record调用cancel_lq/cancel_sq一次并置software_applied；
+
+service_monitor_once()：
+  获取本轮service cycle；
+  收集CSR/sfence等runtime context；
+  adapter drain逐拍cancel snapshot和redirect sample anchor到common data sideband buffer；
+  调用collect_monitor_event_batch完成原semantic batch；
+  调用exception_redirect_replay_task完成原redirect/replay apply；
+  调用service_cancel_reconcile按record target sample直接比较software/observed，不修改deq/free count；
+  返回外层service_real_dispatch_flow；
+
+service_real_dispatch_flow() 的既有退出调用点：
+  每拍只在service_monitor_once和route_all_issue_queues之后调用一次all_transactions_terminal_done()；
+  all_transactions_terminal_done内部调用唯一request_global_stop_if_done()；
+  request_global_stop_if_done同时检查transaction、record、anchor、raw/local snapshot和software-pending；
+  任一cancel状态未收敛则保持主service运行，但不回退已经完成的UID terminal状态；
+  禁止service_monitor_once直接再次调用request_global_stop_if_done。
 ```
 
-## 9. 问题七：L2TLB response permission 和 request ready 不能只做字段连接
+## 9. 问题七：L2TLB response permission 已有 owner，request lifecycle 仍无 owner
 
 ### V2 问题
 
 V2 有 `_inner_ptw_io_tlb_1_resp_bits_s2_entry_perm_g/u` 等 response permission 字段。仅把字段机械接到
-interface 不足以保证 active takeover 路径完整。同时 L2TLB request ready 若没有 single-outstanding
-gate，responder 可能接受多笔 request 或在 sequence disabled 时握手无人消费。
+interface 不足以保证 active takeover 路径完整。总控旧稿同时加入了 request ready、single-outstanding、
+response cadence 和 stopping/reset 状态机，但当前 L2TLB permission 子 plan 明确不拥有这些生命周期逻辑，
+CSR 子 plan也明确不拥有 L2TLB request gate 或 outstanding tracker。
 
 ### 修改原因
 
-L2TLB agent 在 memblock 中代替 DTLB -> L2TLB request / L2TLB -> DTLB response responder。request
-ready 是运行期 backpressure，不是 plus/cfg，也不是 sfence freeze 或 ack。
+L2TLB permission 字段链和 responder 方向已有唯一子 plan，可以直接按该 plan coding。request ready 和
+single-outstanding 是另一类运行期生命周期；在没有唯一子 plan owner、完整函数合同和退出边界前，不能
+继续把总控中的草案状态机当作可执行方案，否则会绕过正式 plan review。
 
 ### 修改方案与修改逻辑
 
-L2TLB 专项负责：
+L2TLB permission 专项只负责：
 
-- `s1/s2 entry_perm_g/u` 字段从 entry -> xaction -> interface -> driver -> connect -> RTL internal wire
-  全链审计；当前 s1/s2 同源 `pte_g/pte_u` 只是字段链完整，独立 PTE 来源是后续 TODO。
-- `memblock_sync_pkg::l2tlb_request_accept_enable` 是唯一 ready gate，初值 0。
-- driver reset 第一项功能动作清 gate，早于 `super.reset_phase()` 和任何 idle drive。
-- driver 所有 ready 赋值都受 `l2tlb_responder_active && l2tlb_request_accept_enable` 约束。
-- responder disabled 时 gate=0；context、takeover 和 PTW tracking start 全部成功后才开 gate。
-- request fire 定义为采样沿 `valid && ready`；fire 后立即 outstanding 0->1、清 gate、删除独立
-  ready item。
-- response 完成后 outstanding 1->0；非 stopping 路径才重开 gate。
+- 检查 `s2_entry_perm_g/u` 从 `memblock_tlb_entry.pte_g/pte_u` 经 sequence、xaction、driver、interface、
+  active connect 到 RTL internal wire 的完整字段链；链路完整时不产生 SV diff，断链时只补断裂层。
+- 保持 `DTLB -> L2TLB_agent request`、`L2TLB_agent -> DTLB response` responder 方向，不接顶层
+  `io_l2_tlb_req_*` 或 L2Cache/PTW/memory 下游模型。
+- lookup 继续使用 request `vpn/s2xlate` 与 runtime CSR，不使用 paddr 替代 request key。
+- 当前 s1/s2 permission 继续同源 `entry.pte_*`；两套 PTE 独立建模属于后续 TODO。
+
+当前没有子 plan owner的边界：
+
+- `l2tlb_request_accept_enable`、strict outstanding count、driver ready gate、response cadence、idle-stop、
+  stopping/reset 状态机均不得从本总控直接 coding。
+- 后续若确认需要该 lifecycle，必须扩展并重审 L2TLB 专项或建立唯一专项 owner，再把最终合同回写总控。
 
 ### 文字伪代码
 
 ```text
-driver reset_phase()：
-  l2tlb_request_accept_enable=0；
-  调用 super.reset_phase()；
-  raise objection；
-  执行原 reset wait/idle；
-  drop objection。
+permission 字段链审计：
+  从entry.pte_g/pte_u开始逐层检查s2_entry_perm_g/u；
+  active takeover路径任一层缺声明、缺搬运或被常量0替代时，只修复该断裂层；
+  inactive takeover分支可保持0，但必须说明它不是被动观察模式；
+  request继续来自内部DTLB request的vpn/s2xlate；
+  response继续返回内部DTLB，不接顶层L2/PMP端口；
+  不修改ready、outstanding、cadence或stopping状态。
 
-driver ready 计算：
-  requested_ready 来自 item 或 idle mode；
-  effective_ready = l2tlb_responder_active && l2tlb_request_accept_enable && requested_ready；
-  如果当前拍 request_fire=valid && effective_ready：
-    下一拍 ready 强制安排为 0；
-  任何 drv mode 都不能绕过 gate。
-
-responder body()：
-  如果 cfg disabled：
-    gate=0；
-    退出；
-  ensure_context()；
-  检查 takeover；
-  start_l2tlb_ptw_tracking()，要求 outstanding count 为 0；
-  gate=1；
-  进入 drive_l2tlb_loop()。
-
-send_l2tlb_cycle()：
-  如果 request_fire：
-    先锁存完整 request payload；
-    mark_l2tlb_ptw_request_begin()，count 0->1；
-    gate=0；
-    构造 response item，pre_pkt_gap=choose_latency()+1，post_pkt_gap=1；
-    发送 response；
-    mark_l2tlb_ptw_request_done()，count 1->0；
-    如果非 stopping，gate=1；
-
-idle-stop：
-  达到 idle stop 时先 stopping=1 且 gate=0；
-  过渡拍若仍发生 final fire，必须完成 response 但不得 rearm；
-  只有 ready=0 且 outstanding count=0 时退出。
+request lifecycle 后续处理：
+  当前总控只登记owner缺口；
+  在唯一子plan完成方案评审前，不新增gate、tracker或driver状态迁移；
+  当前permission专项完成不等价于single-outstanding lifecycle已完成。
 ```
 
-## 10. 问题八：CSR/sfence、debug 和 DCache L2 sideband 不能按普通随机输入处理
+## 10. 问题八：CSR/sfence、debug 和 DCache L2 sideband 的默认与消费语义不同
 
 ### V2 问题
 
 V2 CSR control 命名与 V3 不同，包含 misalign、priv debug、branch predictor enable 等字段。
+`sfence_bits_flushPipe` 是需要构造、驱动和采样的真实接口字段，但它不是当前测试框架行为 owner。
 DCache 的 `io_l2_hint_*` 和 `io_l2_flush_done` 是 DUT input，机械接入后若沿用 generic idle/random
 mode，可能触发未建模 MSHR hint 或 CSR flush done 行为。
 
 ### 修改原因
 
-这些字段不是普通可随机输入。当前主 flow 没有合法非零 DCache L2 sideband producer；sfence
-`flushPipe=1` 必须在 standalone 条件下唯一驱动，不能与主 dispatch/LSQ/L2TLB 业务并发。
+CSR snapshot-only 字段只需要保存 runtime 真值；DCache hint 的合法非零 producer 只允许来自轻量
+L2 responder 已接受的 `AcquireBlock -> GrantData`，`io_l2_flush_done` 当前仍没有合法非零 producer。
+`sfence_bits_flushPipe` 则只需默认 `0` 并透明传递：取值为 `0` 或 `1` 都不改变
+软件 TLB、DTLB miss responder、redirect、LSQ 或 terminal 行为，不需要 standalone 边界。
 
 ### 修改方案与修改逻辑
 
@@ -480,16 +624,20 @@ CSR 专项负责：
 
 - `hd_misalign_ld/st_enable` 和 `tlbCsr_priv_debug` 采样到 raw CSR/runtime snapshot，但本轮不进入
   sequence、pass/fail、terminal 或 L2TLB lookup key。
-- sfence quiescent provider 由 `memblock_env::connect_phase()` 无条件注册，single-owner。
-- `flushPipe=1` 只允许 `tc=basicTest ts=memblock_sfence_flushpipe_directed_vseq` standalone 运行；
-  vseq 在唯一 child 前检查 main/dispatch/queue/flushSb/redirect/gate/outstanding 全空。
+- `fence_agent_agent_xaction` 为 `sfence_bits_flushPipe` 提供 soft 默认 `0`，并在 debug 文本和
+  custom `compare()` 中覆盖该字段；directed item 可覆盖为 `1`。
+- fence driver 按 item 原值驱动，idle 驱 `0`；不增加 quiescent provider、standalone cfg/vseq、
+  保护窗口或驱动前行为 gate。
+- fence monitor 在 `sfence_valid=1` 时采样并检查该 payload；raw sfence 和软件失效 flow 不保存、
+  不读取该位，仍只由 `sfence_valid` 触发既有 TLB entry invalidation。
 
 DCache L2 sideband 专项负责：
 
 - interface 四字段 time-zero 初始化为 0。
-- xaction constraint、`new()`、idle builder、response builder 都显式写 0。
-- `drive_idle()` 任意 mode 后都无条件驱这四字段为 0。
-- `send_pkt()` 首个 vif 赋值前检查四字段，任一非 0 或 X 以 `DCACHE_L2_SIDEBAND_UNSUPPORTED` fatal。
+- generic xaction random、`new()`、idle builder 和 `drive_idle()` 都保持四字段为 0。
+- 专用 responder 只对已接受的 `AcquireBlock -> GrantData` 按参数产生一次合法 hint，payload 取
+  A source 和 `echo_isKeyword`；Grant、CBOAck、ReleaseAck 和非 DCache client 不产生 hint。
+- `send_pkt()` 首个 vif 赋值前检查 hint 无效拍 payload 为 0，并拒绝任意非零 `io_l2_flush_done`。
 
 ### 文字伪代码
 
@@ -499,25 +647,27 @@ CSR monitor：
   写入 raw CSR/runtime snapshot；
   branch predictor enable 只做观察，不进入 TLB lookup 或 pass/fail；
 
-sfence standalone vseq：
-  build_phase 解析 VSEQ_MAIN；
-  只有精确命中 directed vseq 时设置 standalone mode；
-  env build 在创建子组件前校验所有 agent default sequence 和 drv mode；
-  vseq body 在唯一 uvm_do_on 前检查：
-    main/dispatch 状态为空；
-    active map 和 raw queue 为空；
-    flushSb/redirect/flush/freeze 为空；
-    L2TLB gate=0，outstanding=0；
-  child item 固定 valid=1、flushPipe=1、pre_pkt_gap=0、post_pkt_gap=1；
+sfence flushPipe 接口 flow：
+  xaction soft 默认 flushPipe=0；
+  default sequence 复用该默认，不重复建立第二个约束 owner；
+  directed item 如需覆盖为1，优先使用hard inline constraint；显式赋值必须在randomize后、finish_item前完成；
+  psdisplay打印该位，custom compare把仅该位不同的item判为不相等；
+  driver 无条件按 item 原值驱动 DUT，不查询 quiescent、不等待 drain、不写全局状态；
+  monitor 在 valid=1 时对 flushPipe 做 payload X/Z 检查；
+  raw sfence 不携带 flushPipe，软件 TLB invalidation 行为保持不变；
+  在valid和其它payload相同的前提下，只切换flushPipe不改变DTLB hit/miss或responder行为；
 
 DCache driver：
   drive_idle(mode)：
     保留原 TL A/B/C/D/E idle 逻辑；
     分支结束后无条件驱 l2_hint_valid/sourceId/isKeyword 和 l2_flush_done 为 0；
   send_pkt(tr)：
-    在任何 vif 赋值前检查四个 sideband；
-    任一非零或 X，fatal 且不产生部分驱动；
-    合法时保留原 TL payload 赋值，并把四个 sideband 明确驱 0。
+    在任何 vif 赋值前检查sideband自洽；
+    l2_flush_done非0或X时fatal；
+    hint_valid=0时要求sourceId/isKeyword均为0，否则fatal；
+    hint_valid=1时允许透传专用responder已经按AcquireBlock保存的sourceId/isKeyword；
+    driver不重复查询pending request，也不建立第二份hint owner；
+    合法时保留原TL payload并按item透传hint，flush_done明确驱0。
 ```
 
 ## 11. 问题九：monitor analysis port 与 V2-only output 容易被误当 runtime raw
@@ -535,11 +685,14 @@ RM/checker/scoreboard 成对设计，不能在 V2 interface 适配中批量打�
 
 ### 修改方案与修改逻辑
 
-monitor output 专项负责：
+monitor output 专项负责分类和 vector-WB unsupported gate：
 
 - 20 个 monitor 同时给出 runtime 角色和 RM analysis 角色。
 - 当前 analysis producer 统一记录为 `ANALYSIS_PORT_DEFERRED`，本轮不批量恢复。
-- 只有 CSR、sfence、ctrl、int-WB、IQ-feedback 等 raw producer 进入公共状态。
+- 保留 CSR latest snapshot、sfence、ctrl、int-WB、IQ-feedback 五条 semantic runtime 输入路径。
+- 规定 `lqCancelCnt/sqCancelCnt` 必须使用独立逐拍 snapshot sideband、redirect input 必须使用独立
+  sample-anchor sideband；两者不进入 semantic batch，也不是 RM analysis transaction。具体类型、queue、
+  monitor producer源码、consumer、sample sequence和reconcile由LSQ MMIO/status专项唯一coding。
 - `io_l2_tlb_req_resp_*` 和 `io_l2_pmp_resp_*` 不接内部 `L2TLB_agent`。
 - V2-only output 固定七组；`externalInterrupt_debug` 归属 ctrl agent 字段级
   `OUTPUT_OBSERVATION_XZ`，不进入 raw、CSR snapshot、status、pass/fail、terminal、redirect 或 replay。
@@ -562,6 +715,14 @@ monitor output 专项负责：
   如果字段是 externalInterrupt_debug：
     只补 interface/xaction/connect/monitor/XZ 同名字段链；
     不写 raw/status/terminal。
+  如果字段是lqCancelCnt/sqCancelCnt：
+    分类合同要求每个post-reset sample保存0/非0snapshot和统一sample sequence；
+    不按nonzero/value-change生成event，不复制到semantic raw ctrl；
+    具体producer实现只落在LSQ MMIO/status专项；
+  如果字段是顶层redirect valid/payload：
+    分类合同要求valid sample只保存cancel latency anchor；
+    不反灌成第二个recovery/status事件。
+    具体producer实现只落在LSQ MMIO/status专项。
 ```
 
 ## 12. 修改顺序
@@ -573,8 +734,10 @@ V2 专项之间存在硬依赖，coding 应按以下顺序执行：
 3. 执行主表 VADDR 和不支持 op fail-fast，确保后续 flow 不生成本轮不支持激励。
 4. 执行 split issue 和 LSQ enqueue，建立正确激励入口。
 5. 执行 int-WB 与 IQ feedback/replay，建立 monitor raw 到 current status 的事件链。
-6. 执行 pending-MMIO producer/query 与 LSQ MMIO/status，同一原子批次完成 ctrl raw producer 和 consumer。
-7. 执行 L2TLB、CSR/sfence、DCache sideband 和 monitor output 专项。
+6. 执行 monitor output 的 cancel snapshot/redirect anchor producer边界，并与 LSQ MMIO/status 的
+   sideband consumer、record、主service和global-stop gate作为同一原子批次完成；不得只落producer。
+7. 执行 pending-MMIO producer/query、L2TLB permission、CSR/sfence、DCache sideband 和其余 monitor
+   output 分类；L2TLB request lifecycle 在唯一子 plan owner 建立前跳过，不得从总控实现。
 8. 每个专项完成后按各自 plan 运行静态检查、远端 compile/smoke，并生成对应 implementation review。
 
 ### 文字伪代码
@@ -610,8 +773,11 @@ make eda_run tc=tc_sanity mode=base_fun
 - LSQ enqueue：V2 clock-first streaming、launch reservation/下一边界 sample、6/4 capacity gate、随机idle和redirect epoch路径。
 - IQ feedback/replay：STA IQ/WB 正向和独立 expected-fatal。
 - LSQ MMIO/status：normal pendingst/scommit、fault-at-tail、V2 SQ count-only、driver active idle hold。
-- L2TLB：single-outstanding request fire、response latency、idle-stop。
-- DCache L2 sideband：任意非零 sideband 在首个 vif 赋值前 fatal。
+- L2TLB permission：检查 `s2_entry_perm_g/u` active字段链、内部DTLB/L2TLB responder方向和
+  `vpn/s2xlate` lookup；single-outstanding、ready gate和idle-stop尚无子plan owner，不属于当前验收项。
+- DCache 轻量 L2 responder：默认 cfg 的 hint/Probe 为 0；专项 cfg 检查 request-bound hint、
+  small/medium/large delay、map-backed Probe 和 Release/GrantAck 生命周期；任意非零
+  `io_l2_flush_done` 在首个 vif 赋值前 fatal。
 
 本总控不新增 RM/checker/coverage 验证要求。coverage/checker/RM 后续只消费专项留下的字段、事件或标签。
 
@@ -622,9 +788,10 @@ make eda_run tc=tc_sanity mode=base_fun
 后续 RM/checker 可使用：
 
 - current snapshot 后的 UID、ROB/LQ/SQ canonical key、`issue_epoch/replay_seq`。
-- LSQ commit/deq 后的 terminal 状态和 deq event sequence。
+- LSQ commit/deq 后的 terminal 状态和真实 deq 状态；本轮不为RM新增deq event sequence。
 - pending-MMIO 专项落表的 MMIO tag。
-- monitor output 专项恢复的 standard transaction producer。
+- 后续独立 monitor/RM 专项成对恢复并完成字段合同的 standard transaction producer；当前 monitor
+  output 专项保持 `ANALYSIS_PORT_DEFERRED`，本轮没有该producer。
 
 这些字段只能作为后续组件输入；本 plan 不定义 DUT 正确性比较算法。
 
@@ -638,21 +805,77 @@ make eda_run tc=tc_sanity mode=base_fun
 - LSQ enqueue slot 占用、load/store batch element 数、随机idle类别和redirect launch/sample时点。
 - STA IQ hit/miss、real-WB、expected-fatal 类型。
 - normal commit、fault convergence、V2 SQ count-only deq。
-- L2TLB ready gate/outstanding 状态和 response latency bucket。
+- L2TLB response permission字段；ready gate/outstanding/response lifecycle仅在后续唯一owner实现后才可
+  作为coverage采样入口。
 
 覆盖率实现必须另建专项，不得混入本总控或当前测试框架激励主流程。
 
-## 16. 修改方案总结
+## 与初步 plan 差异说明
 
 | 修改项 | 类型 | 修改前逻辑 | 修改原因 | 修改后逻辑 |
 |---|---|---|---|---|
-| 版本结构参数 | 编译期结构 | 固定 V3 值、runtime 镜像或同义参数可能并存 | V2/V3 结构必须 elaboration 前固定 | compile profile 是唯一权威，runtime 只限制行为使用量 |
+| 版本结构参数 | 编译期结构 | 固定 V3 值、runtime 镜像或同义参数可能并存；`sqDeq` raw/interface/monitor/XZ 固定 `[1:0]`/`2` | V2/V3 结构必须 elaboration 前固定；当前 2 bit 只是 `EnsbufferWidth=2` 的派生结果 | 已归档compile plan继续拥有既有结构；MMIO/status undo plan在同一header唯一新增`MEMBLOCK_DUT_ENSBUFFER_WIDTH`并派生`MEMBLOCK_SQ_DEQ_COUNT_W`及cancel/latency宏，runtime只限制行为使用量，`HAS_SQ_DEQ_PTR`只控制pointer presence |
 | 主表 VADDR | 参数语义 | VA 生成复用 PADDR 窗口 | VA/PADDR 语义不同 | MAIN_VADDR 与 PADDR 参数解耦 |
 | split issue | 激励生成 | 聚合 issue 语义和固定 fired-mask 残留 | V2 是 LDA/STA/STD split port | 由 compile port count 派生 route/mask，vector 本轮 fail-fast |
 | LSQ enqueue | 激励生成/driver 时序 | V3 slot/response 假设残留，allocation和issue-ready同拍 | V2 无 accept-response，字段更多且launch后下一边界才完成sample | 完整request setter、load/store 6/4实际free gate、clock-first每拍streaming、launch reservation与下一边界issue-ready分层；不增加固定retry guard |
-| int-WB/IQ raw | monitor event | 伪造不存在 key，replay 后缺 snapshot | V2 raw 必须保真且 current event 必须带 generation | raw 保真 + current status snapshot attach + cycle timeline |
-| ROB/LSQ status | 状态生命周期 | fault 混入 normal commit，SQ pointer 默认 0 被误用 | V2 fault 不产生 normal commit，V2 无 sqDeqPtr | normal/fault 分流、full-raw owner、count-only deq |
-| L2TLB | responder 生命周期 | ready 可能由 item/default 绕过 | 需要 single-outstanding backpressure | 唯一 gate + fire 后清 gate + response done 后 rearm |
-| CSR/sfence | runtime snapshot | 近义字段可能混入 lookup/pass-fail | V2 字段语义分层 | snapshot-only、standalone flushPipe、provider single-owner |
-| DCache sideband | DUT input 防御 | generic idle/random 可能驱非零 | 当前无合法 producer | 全生命周期 known-zero，非零首赋值前 fatal |
-| monitor output | 观察链分类 | raw producer 与 analysis producer 容易混淆 | RM transaction 尚未闭环 | runtime/raw、OUTPUT_OBSERVATION_XZ、ANALYSIS_PORT_DEFERRED 分层 |
+| int-WB/IQ raw | monitor event | 伪造不存在 key，replay 后缺 snapshot，ctrl/deq可能提前删除同拍active map | V2 raw 必须保真且 current event 必须带 generation；当前service合同每次只消费一个采样cycle | raw保真+current status snapshot attach；converter本地完整性检查；mixed-cycle fatal；semantic batch后apply deferred ctrl，service尾部只recovery一次 |
+| ROB/LSQ status | 状态生命周期与 deq 顺序 | fault 混入 normal commit，SQ pointer 默认 0 被误用；count-only 草案把 `rob_commit` 当作 deq 前置条件；`scommit` 与 `sqDeq` 语义未分离 | V2 fault 不产生 normal commit，V2 无 `sqDeqPtr`，且两类信号方向、延迟、计数单位不同，MMIO/CBO 可能 SQ deq 先于 ROB commit | normal/fault 分流、full-raw owner、count-only deq；独立消费 `scommit`/`sqDeq`，deq 释放 mapping 与最终 retire 解耦 |
+| `sqDeq` count 字段链 | 字段/编译期参数适配，合法运行期功能不变 | `dispatch_raw_ctrl_t`、ctrl interface/xaction/monitor/XZ 分别固定 2 bit | count width 来自 `log2Ceil(EnsbufferWidth+1)`，与 SQ pointer presence、SQ size、store enqueue width 和 commit width均不同 | 公共 consumer 全链消费 `MEMBLOCK_SQ_DEQ_COUNT_W`，`dut_inst` 保留当前 RTL 展开宽度；既有 pointer/count-only release、pass/fail 和 terminal 逻辑不变 |
+| xaction `sqDeq` 合法范围 | 字段约束适配，不改变 DUT observed flow | `default_io_mem_to_ooo_sqDeq_cons` 为空，随机 transaction 可生成超出 V2 `EnsbufferWidth` 的值 | 默认 sequence 仍必须表达合法结构范围，即使 driver 不主动驱动该 output | 约束 `io_mem_to_ooo_sqDeq inside {[0:MEMBLOCK_DUT_ENSBUFFER_WIDTH]}`；只限制随机 transaction，不修改 raw 消费和终态逻辑 |
+| `sqDeq` count 合法范围 | 失败策略新增 | 2-bit 容器可编码 3，handler 没有按 `EnsbufferWidth=2` 拒绝该 RTL 不可能值 | packed width 与合法最大 count 是两个概念 | release 前检查 `count<=MEMBLOCK_DUT_ENSBUFFER_WIDTH`，越界 `uvm_fatal`；合法 0..max 流程不变 |
+| cancel count 合法范围 | 字段约束与失败策略适配 | xaction固定72/56，monitor与record累计没有同源容量检查 | count packed宽度可表示容量外值，固定literal无法跨profile | xaction、monitor observed及record software累计统一按LQ/SQ compile容量检查；越界fatal，合法cancel/free-count/terminal合同不变 |
+| `scommit`/`sqDeq` 计数与指针 | 功能逻辑修正 | 可能把 ROB commit 数当成 SQ 释放数，或用 `scommit` 推进 `sq_deq_ptr`；load-only commit 边界不清 | ROB commit 与 SQ physical deq 是不同阶段，寄存器延迟和计数单位不同，`sqDeq=2` 只表示两个 SQ entry | normal batch 全部 UID 写 commit 状态，`scommit` 只传 scalar store 子集；`sqDeq` 只释放 SQ mapping；`sq_deq_ptr` 只由 reset/真实 deq release 更新，`sq_free_count` 独立按 reset/allocation/cancel/deq 更新；不建立同拍相等关系 |
+| redirect cancel record、reservation生命周期、free count 与 DUT 对账 | 功能逻辑新增/跨专项接口适配 | 聚合cancel回退；driver done即可早扫active map；pending batch只有UID与flush epoch、无稳定launch token；若reissue复用status reset会把旧token清零；cancel只采样/XZ | 早扫会被未消费deq污染；顶层/LSQ双T0和clocking monitor可见拍不同；token必须跨reissue/deq区分动态实例，且不能替代batch flush gate；observed不能写软件状态 | record创建后等待anchor、T0_lsq和ctrl drain再唯一扫描；pending UID升级为reservation token，原batch dispatch/flush epoch独立保留；void allocation后由begin/mark helper维护单调token和sample事实；snapshot只复制静态key，status reset仅用于首次建表/全表reset；sample早于/等于T0_lsq分别计allocated/same-cycle，晚于cutoff fatal；T0+3比较snapshot，rollback只消费finalized record，software/observed独立收敛 |
+| cancel directed验证 | 新增真实DUT场景和退出闭环 | software-only fault smoke直接改状态；既有basicTest real-smoke vseq记录过同拍结束，mapping后victim也可能先issue | DUT observed对账必须经过真实VIF且可重复制造LQ/SQ非零victim，后台sequence不能依赖phase强杀 | software-only只测ledger；新vseq使用automatic objection、3-entry table、victim issue delay和DUT_VISIBLE barrier，经redirect driver/anchor/snapshot/reconcile后要求LQ/SQ非零match、reissue、后台自然退出和终态收敛 |
+| L2TLB permission与lifecycle边界 | 字段链适配+owner缺口澄清 | permission字段链和ready生命周期混在总控并共同指向permission专项 | permission专项明确只处理字段链，CSR专项也不拥有ready/outstanding | 当前只执行`s2_entry_perm_g/u`字段链与responder方向审计；ready/single-outstanding/cadence/stopping不从总控coding，等待后续唯一owner |
+| CSR/sfence | runtime snapshot/接口透传 | 近义字段可能混入 lookup/pass-fail，flushPipe 默认值和观测链不完整 | V2 字段语义分层，flushPipe 不影响当前框架行为 | snapshot-only；flushPipe 默认0、原值驱动、仅观测不消费 |
+| DCache L2 sideband | DUT input/responder | generic idle/random 可能驱无归属 hint 或 flush done | hint 只允许关联 GrantData，flush done 当前无合法 producer | request-bound hint；generic/idle known-zero；flush done 非零首赋值前 fatal |
+| monitor output | 观察链分类与时序sideband新增 | raw producer与analysis producer容易混淆，held cancel没有合法event valid，redirect monitor只有XZ回看 | RM transaction尚未闭环；cancel对账需要逐拍value和顶层采样锚点，但不能污染semantic batch/recovery | 5条semantic runtime路径保持；OUTPUT_OBSERVATION_XZ、ANALYSIS_PORT_DEFERRED分层；另增cancel snapshot/redirect anchor sideband，禁止当semantic raw或RM producer |
+
+跨专项关键 helper 差异：`begin_lsq_reservation_launch(uid)` 在现有 void allocation 后返回每UID单调
+launch token，`mark_lsq_reservation_sampled(uid,token,sample_seq)` 在下一driver边界只写DUT-visible sample
+事实；两者都不修改pointer/free count。`cancel_redirect_scan_ready()` 只读anchor与sample/drain watermark，
+决定`advance_active_redirect()`是否可调用唯一active scan。`service_cancel_reconcile()` 输入
+`software_count_finalized` record
+和bounded snapshot，输出observed进度/debug计数且不写LSQ状态。新cancel vseq覆盖phase、background和core
+三个virtual task，输入固定3-entry main table，输出真实redirect对账及自然退出结果。其它专项新增/修改
+helper的输入、输出、副作用和完整伪代码以各专项执行plan正文为准；总控不再复制第二实现。
+
+### 审稿用四要素与差异影响
+
+```text
+修改目的：
+  将V2各flow的接口字段、参数和新增状态逻辑路由到唯一专项owner，避免同一字段或状态被两份plan重复coding。
+修改前逻辑行为：
+  V3 literal/接口残留分散；LSQ allocation与sample同拍；raw可能伪造key；commit/deq/cancel职责交叠；
+  monitor output、L2TLB、CSR和DCache sideband边界不完整。
+修改后逻辑行为：
+  compile、VADDR、enqueue、issue、WB/IQ、MMIO/status、L2TLB permission、CSR、DCache和monitor分别由owner表执行；
+  L2TLB request lifecycle明确保持未分配owner状态，不从总控复制实现；
+  跨专项只通过公开字段/helper合同交接，任一非owner不得复制状态机或写者。
+差异影响：
+  改变V2字段来源、失败边界、部分driver/monitor时序和状态收敛；不改变各owner声明保持不变的主表顺序、
+  合法pass/fail定义及RM/checker/coverage职责。文档同步和验证范围按各专项执行plan完成。
+```
+
+### 跨专项 Helper 审稿伪代码
+
+本总控不新增任何源码 helper；下列内容只用于核对 owner 输入、输出和副作用，不作为第二实现。
+
+```text
+begin_lsq_reservation_launch(uid) / mark_lsq_reservation_sampled(uid,token,sample_seq)：
+  owner为MMIO/status专项；前者在唯一allocation后返回单调token，只写reservation metadata；
+  后者在下一driver边界校验token并写DUT_VISIBLE，不改pointer/free count，随后才由batch flush epoch决定issue。
+
+cancel_redirect_scan_ready(record) / service_cancel_reconcile()：
+  owner为MMIO/status专项；前者只读anchor和sample/drain watermark；后者直接比较finalized software count与target snapshot observed count；
+  二者均不调用release/cancel；software rollback由MMIO/status专项在现有enqueue sequence的
+  `apply_pending_lsq_cancels()`中消费software_count_finalized record。
+
+encode_and_fit_dut_futype() / fit_directed_rob_value_or_fatal()：
+  owner为已归档compile专项；输入内部编码或directed value，输出无损DUT值；不可表示时fatal，无运行期状态副作用。
+
+各issue/WB/IQ/L2TLB permission/CSR/DCache helper：
+  只由owner表对应专项新增或修改；总控只检查输入来自真实raw/current snapshot、输出进入既有queue/driver，
+  以及unsupported路径fail-fast，不复制其候选循环、状态更新或fallback实现。
+```
