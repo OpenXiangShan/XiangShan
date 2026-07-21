@@ -43,6 +43,7 @@ import freechips.rocketchip.util.SeqToAugmentedSeq
 class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val source = UInt(sourceTypeWidth.W)
   val pf_source = UInt(L1PfSourceBits.W)
+  val first_issue = Bool()
   val cmd = UInt(M_SZ.W)
   val addr = UInt(PAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
@@ -320,6 +321,8 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
       acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUStoreData.id.U)
     }.elsewhen(req.isFromAMO) {
       acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUAtomicData.id.U)
+    }.elsewhen(req.isFromPrefetch && !req.first_issue) {
+      acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetchReplay.id.U)
     }.otherwise {
       acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
     }
@@ -966,7 +969,11 @@ for(i <- 0 until reqNum) {
   io.mem_acquire.bits.user.lift(PrefetchKey).foreach(_ := Mux(io.l2_pf_store_only, req.isFromStore, true.B))
   // req source
   when(prefetch && !secondary_fired) {
-    io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
+    io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := Mux(
+      req.first_issue,
+      MemReqSource.L1DataPrefetch.id.U,
+      MemReqSource.L1DataPrefetchReplay.id.U
+    ))
   }.otherwise {
     when(req.isFromStore) {
       io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUStoreData.id.U)
@@ -974,6 +981,8 @@ for(i <- 0 until reqNum) {
       io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPULoadData.id.U)
     }.elsewhen(req.isFromAMO) {
       io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPUAtomicData.id.U)
+    }.elsewhen(req.isFromPrefetch && !req.first_issue) {
+      io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetchReplay.id.U)
     }.otherwise {
       io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
     }
