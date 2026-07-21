@@ -43,6 +43,7 @@ case class TageParameters(
     UsefulResetCtrWidth:   Int = 8,
     UseAltOnNaWidth:       Int = 7,
     NumUseAltOnNa:         Int = 128,
+    EnableAltPrediction:   Boolean = false,
     EnableTageTrace:       Boolean = false
 ) {}
 
@@ -57,9 +58,10 @@ trait HasTageParameters extends HasBpuParameters {
   def UsefulCtrInitValue: Int = tageParameters.UsefulCtrInitValue
   def WriteBufferSize:    Int = tageParameters.WriteBufferSize
 
-  def UsefulResetCtrWidth: Int = tageParameters.UsefulResetCtrWidth
-  def UseAltOnNaWidth:     Int = tageParameters.UseAltOnNaWidth
-  def NumUseAltOnNa:       Int = tageParameters.NumUseAltOnNa
+  def UsefulResetCtrWidth: Int     = tageParameters.UsefulResetCtrWidth
+  def UseAltOnNaWidth:     Int     = tageParameters.UseAltOnNaWidth
+  def NumUseAltOnNa:       Int     = tageParameters.NumUseAltOnNa
+  def EnableAltPrediction: Boolean = tageParameters.EnableAltPrediction
 
   def TableInfos: Seq[TageTableInfo] = tageParameters.TableInfos
 

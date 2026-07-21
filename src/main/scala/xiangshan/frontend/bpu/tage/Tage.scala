@@ -115,7 +115,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val position      = branch.bits.cfiPosition
     val cfiPc         = getCfiPcFromPosition(s2_startPc, position)
     val useAltOnNaIdx = getUseAltOnNaIdx(cfiPc)
-    val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
+    val useAltOnNa    = EnableAltPrediction.B && useAltOnNaVec(useAltOnNaIdx).isPositive
 
     // compare tags of each branch with all tables
     val allTableTagMatchResults = s2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
@@ -148,7 +148,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     // get prediction for each branch
     io.prediction(i).useProvider  := useProvider
     io.prediction(i).providerPred := provider.takenCtr.isPositive
-    io.prediction(i).hasAlt       := hasAlt
+    io.prediction(i).hasAlt       := EnableAltPrediction.B && hasAlt
     io.prediction(i).altPred      := alt.takenCtr.isPositive
 
     io.toSc.providerTakenCtrVec(i).valid := hasProvider && branch.valid
@@ -315,7 +315,7 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
     val position      = branch.bits.cfiPosition
     val actualTaken   = branch.bits.taken
     val useAltOnNaIdx = t2_cfiUseAltOnNaIdxVec(i)
-    val useAltOnNa    = useAltOnNaVec(useAltOnNaIdx).isPositive
+    val useAltOnNa    = EnableAltPrediction.B && useAltOnNaVec(useAltOnNaIdx).isPositive
 
     val allTableTagMatchResults = t2_readResp.zipWithIndex.map { case (tableReadResp, tableIdx) =>
       val tag          = t2_rawTag(tableIdx) ^ position
@@ -399,8 +399,10 @@ class Tage(implicit p: Parameters) extends BasePredictor with HasTageParameters 
 
     val needUpdateAltCtr = !alt.takenCtr.shouldHold(actualTaken) && useAlt
 
-    val incUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred === actualTaken
-    val decUseAltOnNa = hasProvider && provider.takenCtr.isWeak && altOrBasePred =/= actualTaken
+    val incUseAltOnNa =
+      EnableAltPrediction.B && hasProvider && provider.takenCtr.isWeak && altOrBasePred === actualTaken
+    val decUseAltOnNa =
+      EnableAltPrediction.B && hasProvider && provider.takenCtr.isWeak && altOrBasePred =/= actualTaken
 
     val trainInfo = Wire(new TrainInfo).suggestName(s"t2_branch_${i}_trainInfo")
     trainInfo.valid := isCond && mbtbHit // Only consider update if conditional branch
