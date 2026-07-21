@@ -427,6 +427,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   trapHandleMod.io.in.trapInfo.bits.irToVS := irToVS
   trapHandleMod.io.in.privState := privState
   trapHandleMod.io.in.mstatus  := mstatus.regOut
+  trapHandleMod.io.in.sstatus   := mstatus.sstatus
   trapHandleMod.io.in.vsstatus := vsstatus.regOut
   trapHandleMod.io.in.mnstatus := mnstatus.regOut
   trapHandleMod.io.in.mideleg  := mideleg.regOut
