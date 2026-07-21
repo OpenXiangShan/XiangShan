@@ -13,6 +13,7 @@
 | Agent 文档 | 关键词 | 覆盖模块/端口 | 入口信号 | 关联 Flow |
 |---|---|---|---|---|
 | [Int writeback agent](agents/int_writeback_agent.md) | `writebackLda`、`writebackSta`、`writebackStd`、`replayInst`、`trigger`、`flushPipe`、split lane | MemBlock、LoadUnit、StoreUnit、StoreQueue、Backend int writeback | `io_mem_to_ooo_writebackLda/Sta/Std_*_valid` | memory trigger、memory flushPipe、ROB/ExceptionGen flow |
+| [L2TLB agent](agents/l2tlb_agent.md) | `dtlbRepeater`、`inner_ptw`、`vpn`、`s2xlate`、S1/S2 permission、multi-outstanding、ordered/reorder response | MemBlock internal DTLB/L2TLB request-response | `_inner_dtlbRepeater_io_ptw_req_0_*`、`_inner_ptw_io_tlb_1_*` | DTLB-L2TLB 多请求与 Response 次序 flow、PMP/PMA flow |
 
 ## 维护规则
 
