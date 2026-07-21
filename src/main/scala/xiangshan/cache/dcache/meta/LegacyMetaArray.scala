@@ -42,7 +42,7 @@ object L1Metadata {
 
 class L1MetaReadReq(implicit p: Parameters) extends DCacheBundle {
   val idx = UInt(idxBits.W)
-  val way_en = UInt(nWays.W)
+  val wayEn = UInt(nWays.W)
   val tag = UInt(tagBits.W)
 }
 
@@ -62,36 +62,36 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
     val resp = Output(Vec(nWays, UInt(encMetaBits.W)))
     val error = Output(ValidIO(new L1CacheErrorInfo))
   })
-  val rst_cnt = RegInit(0.U(log2Up(nSets + 1).W))
-  val rst = rst_cnt < nSets.U
-  val waddr = Mux(rst, rst_cnt, io.write.bits.idx)
+  val rstCnt = RegInit(0.U(log2Up(nSets + 1).W))
+  val rst = rstCnt < nSets.U
+  val waddr = Mux(rst, rstCnt, io.write.bits.idx)
   val wdata = Mux(rst, rstVal, io.write.bits.data).asUInt
-  val wmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.write.bits.way_en.asSInt).asBools
-  val rmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.read.bits.way_en.asSInt).asBools
+  val wmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.write.bits.wayEn.asSInt).asBools
+  val rmask = Mux(rst || (nWays == 1).B, (-1).asSInt, io.read.bits.wayEn.asSInt).asBools
   when(rst) {
-    rst_cnt := rst_cnt + 1.U
+    rstCnt := rstCnt + 1.U
   }
 
-  val tag_array = Module(new SRAMTemplate(UInt(encMetaBits.W), set = nSets, way = nWays,
+  val tagArray = Module(new SRAMTemplate(UInt(encMetaBits.W), set = nSets, way = nWays,
     shouldReset = false, holdRead = false, singlePort = true))
 
   // tag write
   val wen = rst || io.write.valid
-  tag_array.io.w.req.valid := wen
-  tag_array.io.w.req.bits.apply(
+  tagArray.io.w.req.valid := wen
+  tagArray.io.w.req.bits.apply(
     setIdx = waddr,
     data = cacheParams.tagCode.encode(wdata),
     waymask = VecInit(wmask).asUInt)
 
   // tag read
   val ren = io.read.fire
-  tag_array.io.r.req.valid := ren
-  tag_array.io.r.req.bits.apply(setIdx = io.read.bits.idx)
-  io.resp := tag_array.io.r.resp.data
-  val ecc_errors = tag_array.io.r.resp.data.zipWithIndex.map({ case (d, w) =>
-    cacheParams.tagCode.decode(d).error && RegNext(io.read.bits.way_en(w))
+  tagArray.io.r.req.valid := ren
+  tagArray.io.r.req.bits.apply(setIdx = io.read.bits.idx)
+  io.resp := tagArray.io.r.resp.data
+  val eccErrors = tagArray.io.r.resp.data.zipWithIndex.map({ case (d, w) =>
+    cacheParams.tagCode.decode(d).error && RegNext(io.read.bits.wayEn(w))
   })
-  io.error.bits.report_to_beu := RegNext(io.read.fire) && Cat(ecc_errors).orR
+  io.error.bits.report_to_beu := RegNext(io.read.fire) && Cat(eccErrors).orR
   io.error.bits.paddr := Cat(io.read.bits.idx, 0.U(pgUntagBits.W))
 
   io.write.ready := !rst
@@ -100,13 +100,13 @@ class L1MetadataArray(onReset: () => L1Metadata)(implicit p: Parameters) extends
   def dumpRead = {
     XSDebug(io.read.fire,
       "MetaArray Read: idx: %d way_en: %x tag: %x\n",
-      io.read.bits.idx, io.read.bits.way_en, io.read.bits.tag)
+      io.read.bits.idx, io.read.bits.wayEn, io.read.bits.tag)
   }
 
   def dumpWrite = {
     XSDebug(io.write.fire,
       "MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
-      io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
+      io.write.bits.idx, io.write.bits.wayEn, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
   }
 
   // def dumpResp() = {
@@ -154,14 +154,14 @@ class DuplicatedMetaArray(numReadPorts: Int)(implicit p: Parameters) extends DCa
     (0 until numReadPorts) map { w =>
       XSDebug(io.read(w).fire,
         s"MetaArray Read channel: $w idx: %d way_en: %x tag: %x\n",
-        io.read(w).bits.idx, io.read(w).bits.way_en, io.read(w).bits.tag)
+        io.read(w).bits.idx, io.read(w).bits.wayEn, io.read(w).bits.tag)
     }
   }
 
   def dumpWrite = {
     XSDebug(io.write.fire,
       "MetaArray Write: idx: %d way_en: %x tag: %x new_tag: %x new_coh: %x\n",
-      io.write.bits.idx, io.write.bits.way_en, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
+      io.write.bits.idx, io.write.bits.wayEn, io.write.bits.tag, io.write.bits.data.tag, io.write.bits.data.coh.state)
   }
 
   // def dumpResp() = {

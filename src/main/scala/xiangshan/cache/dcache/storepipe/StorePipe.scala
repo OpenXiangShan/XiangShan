@@ -35,7 +35,7 @@ class DcacheStoreRespIO(implicit p: Parameters) extends DCacheBundle {
   // this store needs replay (for now, not used)
   val replay = Bool()
   // tag error TODO: add logic
-  val tag_error = Bool()
+  val tagError = Bool()
 }
 
 class DCacheStoreIO(implicit p: Parameters) extends DCacheBundle {
@@ -64,21 +64,21 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
     val lsu = Flipped(new DCacheStoreIO)
 
     // meta and data array read port
-    val meta_read = DecoupledIO(new MetaReadReq)
-    val meta_resp = Input(Vec(nWays, new Meta))
+    val metaRead = DecoupledIO(new MetaReadReq)
+    val metaResp = Input(Vec(nWays, new Meta))
     // TODO extra_meta_resp: error; prefetch; access (prefetch hit?)
     // val extra_meta_resp = Input(Vec(nWays, new DCacheExtraMeta))
 
-    val tag_read = DecoupledIO(new TagReadReq)
-    val tag_resp = Input(Vec(nWays, UInt(encTagBits.W)))
+    val tagRead = DecoupledIO(new TagReadReq)
+    val tagResp = Input(Vec(nWays, UInt(encTagBits.W)))
 
     // send miss request to dcache miss queue
-    val miss_req = DecoupledIO(new MissReq)
+    val missReq = DecoupledIO(new MissReq)
 
     // update state vec in replacement algo, for now, set this as false
-    val replace_access = ValidIO(new ReplacementAccessBundle)
+    val replaceAccess = ValidIO(new ReplacementAccessBundle)
     // find the way to be replaced
-    val replace_way = new ReplacementWayReqIO
+    val replaceWay = new ReplacementWayReqIO
 
     // ecc error
     val error = Output(ValidIO(new L1CacheErrorInfo))
@@ -94,15 +94,15 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   val s0_req = io.lsu.req.bits
   val s0_fire = io.lsu.req.fire
 
-  io.meta_read.valid        := s0_valid
-  io.meta_read.bits.idx     := get_dcache_idx(io.lsu.req.bits.vaddr)
-  io.meta_read.bits.way_en  := ~0.U(nWays.W)
+  io.metaRead.valid        := s0_valid
+  io.metaRead.bits.idx     := get_dcache_idx(io.lsu.req.bits.vaddr)
+  io.metaRead.bits.wayEn  := ~0.U(nWays.W)
 
-  io.tag_read.valid         := s0_valid
-  io.tag_read.bits.idx      := get_dcache_idx(io.lsu.req.bits.vaddr)
-  io.tag_read.bits.way_en   := ~0.U(nWays.W)
+  io.tagRead.valid         := s0_valid
+  io.tagRead.bits.idx      := get_dcache_idx(io.lsu.req.bits.vaddr)
+  io.tagRead.bits.wayEn   := ~0.U(nWays.W)
 
-  io.lsu.req.ready := io.meta_read.ready && io.tag_read.ready
+  io.lsu.req.ready := io.metaRead.ready && io.tagRead.ready
 
   XSPerfAccumulate("s0_valid", io.lsu.req.valid)
   XSPerfAccumulate("s0_valid_not_ready", io.lsu.req.valid && !io.lsu.req.ready)
@@ -117,8 +117,8 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   val s1_valid = RegNext(s0_fire)
   val s1_req = RegEnable(s0_req, s0_fire)
 
-  val s1_meta_resp = io.meta_resp
-  val s1_tag_resp  = io.tag_resp.map(tag => tag(tagBits - 1, 0))
+  val s1_meta_resp = io.metaResp
+  val s1_tag_resp  = io.tagResp.map(tag => tag(tagBits - 1, 0))
 
   val s1_paddr = io.lsu.s1_paddr
 
@@ -138,9 +138,9 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   /**
     * Don't choose a replace_way anymore
     */
-  io.replace_way.set.valid := false.B
-  io.replace_way.set.bits  := get_dcache_idx(s1_req.vaddr)
-  io.replace_way.dmWay     := get_direct_map_way(s1_req.vaddr)
+  io.replaceWay.set.valid := false.B
+  io.replaceWay.set.bits  := get_dcache_idx(s1_req.vaddr)
+  io.replaceWay.dmWay     := getDirectMapWay(s1_req.vaddr)
 
   val s1_need_replacement = !s1_tag_match.orR
 
@@ -160,7 +160,7 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   io.lsu.resp.bits.miss := !s2_hit
   io.lsu.resp.bits.replay := false.B
   // TODO: consider tag error
-  io.lsu.resp.bits.tag_error := false.B
+  io.lsu.resp.bits.tagError := false.B
 
 
   /**
@@ -168,32 +168,32 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
     */
   if(EnableStorePrefetchAtIssue) {
     // all miss stores, whether prefetched or normal, send requests directly to mshr
-    io.miss_req.valid := s2_valid && !s2_hit
+    io.missReq.valid := s2_valid && !s2_hit
   }else {
     // only prefetched miss stores will send requests directly to mshr
-    io.miss_req.valid := s2_valid && !s2_hit && s2_is_prefetch
+    io.missReq.valid := s2_valid && !s2_hit && s2_is_prefetch
   }
-  io.miss_req.bits := DontCare
+  io.missReq.bits := DontCare
   // only send out a prefetch write to Dcache
-  io.miss_req.bits.source := DCACHE_PREFETCH_SOURCE.U
-  io.miss_req.bits.pf_source := L1_HW_PREFETCH_STORE
-  io.miss_req.bits.cmd := MemoryOpConstants.M_PFW
-  io.miss_req.bits.addr := get_block_addr(s2_paddr)
-  io.miss_req.bits.vaddr := s2_req.vaddr
-  io.miss_req.bits.req_coh := s2_hit_coh
+  io.missReq.bits.source := DCACHE_PREFETCH_SOURCE.U
+  io.missReq.bits.pfSource := L1_HW_PREFETCH_STORE
+  io.missReq.bits.cmd := MemoryOpConstants.M_PFW
+  io.missReq.bits.addr := get_block_addr(s2_paddr)
+  io.missReq.bits.vaddr := s2_req.vaddr
+  io.missReq.bits.reqCoh := s2_hit_coh
   // TODO: consider tag error
-  io.miss_req.bits.cancel := io.lsu.s2_kill
-  io.miss_req.bits.pc := io.lsu.s2_pc
+  io.missReq.bits.cancel := io.lsu.s2_kill
+  io.missReq.bits.pc := io.lsu.s2_pc
 
   /**
     * update replacer, for now, disable this
     */
-  io.replace_access.valid := false.B
-  io.replace_access.bits  := DontCare
+  io.replaceAccess.valid := false.B
+  io.replaceAccess.bits  := DontCare
 
   XSPerfAccumulate("store_fire", s2_valid && !io.lsu.s2_kill)
   XSPerfAccumulate("sta_hit",  s2_valid &&  s2_hit && !io.lsu.s2_kill)
   XSPerfAccumulate("sta_miss", s2_valid && !s2_hit && !io.lsu.s2_kill)
-  XSPerfAccumulate("store_miss_prefetch_fire", io.miss_req.fire && !io.miss_req.bits.cancel)
-  XSPerfAccumulate("store_miss_prefetch_not_fire", io.miss_req.valid && !io.miss_req.ready && !io.miss_req.bits.cancel)
+  XSPerfAccumulate("store_miss_prefetch_fire", io.missReq.fire && !io.missReq.bits.cancel)
+  XSPerfAccumulate("store_miss_prefetch_not_fire", io.missReq.valid && !io.missReq.ready && !io.missReq.bits.cancel)
 }

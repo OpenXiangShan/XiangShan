@@ -138,7 +138,7 @@ trait HasSMSModuleHelper extends HasCircularQueuePtrHelper with HasDCacheParamet
 
   def get_alias_bits(region_vaddr: UInt): UInt = {
     val offset = log2Up(REGION_SIZE)
-    get_alias(Cat(region_vaddr, 0.U(offset.W)))
+    getAlias(Cat(region_vaddr, 0.U(offset.W)))
   }
 }
 

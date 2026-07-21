@@ -30,7 +30,7 @@ import scala.math.max
 class L1DataReadReq(implicit p: Parameters) extends DCacheBundle {
   // you can choose which bank to read to save power
   val rmask = Bits(blockRows.W)
-  val way_en = Bits(nWays.W)
+  val wayEn = Bits(nWays.W)
   val addr = Bits(untagBits.W)
 }
 
@@ -54,15 +54,15 @@ abstract class AbstractDataArray(implicit p: Parameters) extends DCacheModule {
   def dumpRead = {
     (0 until 3) map { w =>
       XSDebug(io.read(w).valid,
-        s"DataArray Read channel: $w valid way_en: %x addr: %x\n",
-        io.read(w).bits.way_en, io.read(w).bits.addr)
+        s"DataArray Read channel: $w valid wayEn: %x addr: %x\n",
+        io.read(w).bits.wayEn, io.read(w).bits.addr)
     }
   }
 
   def dumpWrite = {
     XSDebug(io.write.valid,
-      s"DataArray Write valid way_en: %x addr: %x\n",
-      io.write.bits.way_en, io.write.bits.addr)
+      s"DataArray Write valid wayEn: %x addr: %x\n",
+      io.write.bits.wayEn, io.write.bits.addr)
 
     (0 until blockRows) map { r =>
       XSDebug(io.write.valid,

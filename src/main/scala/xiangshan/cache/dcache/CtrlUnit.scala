@@ -80,7 +80,7 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
   lazy val module = new CtrlUnitImp
 
   class CtrlUnitImp extends LazyModuleImp(this) {
-    val io_pseudoError = IO(Vec(params.nSignalComps, DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle))))
+    val ioPseudoError = IO(Vec(params.nSignalComps, DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle))))
 
     require(params.maxBanks > 0, "At least one bank!")
     require(params.maxBanks == 1, "Is it necessary to have more than 1 bank?")
@@ -89,7 +89,7 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
     val tagMaskReg = RegInit(0.U(params.tagMaskRegWidth.W))
     val dataMaskRegs = RegInit(VecInit(Seq.fill(DCacheBanks)(0.U(DCacheSRAMRowBits.W))))
     val counterRegs = RegInit(VecInit(Seq.fill(1)(0.U(params.regWidth.W))))
-    val pseudoError_gen = Wire(Vec(params.nSignalComps, DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle))))
+    val pseudoErrorGen = Wire(Vec(params.nSignalComps, DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle))))
     val ctrlReg = ctrlRegs.head
     val ctrlRegBundle = ctrlRegs.head.asTypeOf(new CtrlUnitCtrlBundle)
     val delayReg = delayRegs.head
@@ -97,22 +97,22 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
 
     require(log2Up(params.nSignalComps) == ctrlRegBundle.comp.getWidth, "comp width must cover pseudo-error components!")
 
-    pseudoError_gen.zipWithIndex.foreach {
+    pseudoErrorGen.zipWithIndex.foreach {
       case (inj, i) =>
         inj.valid := ctrlRegBundle.ese && (ctrlRegBundle.comp === i.U) && (!ctrlRegBundle.ede || counterReg === 0.U)
     }
-    pseudoError_gen(0).bits.zip(ctrlRegBundle.bank.asBools).foreach {
+    pseudoErrorGen(0).bits.zip(ctrlRegBundle.bank.asBools).foreach {
       case (bankOut, bankEnable) =>
         bankOut.valid := bankEnable
         bankOut.mask  := tagMaskReg(tagBits - 1, 0)
     }
-    pseudoError_gen(1).bits.zip(ctrlRegBundle.bank.asBools).zip(dataMaskRegs).foreach {
+    pseudoErrorGen(1).bits.zip(ctrlRegBundle.bank.asBools).zip(dataMaskRegs).foreach {
       case ((bankOut, bankEnable), mask) =>
         bankOut.valid := bankEnable
         bankOut.mask  := mask.pad(tagBits)
     }
 
-    when(pseudoError_gen.map(_.fire).reduce(_ || _)) {
+    when(pseudoErrorGen.map(_.fire).reduce(_ || _)) {
       val newCtrlReg = WireInit(0.U.asTypeOf(ctrlRegBundle))
       newCtrlReg := ctrlRegBundle
       newCtrlReg.ese := Mux(ctrlRegBundle.persist, ctrlRegBundle.ese, false.B)
@@ -132,7 +132,7 @@ class CtrlUnit(params: L1CacheCtrlParams)(implicit p: Parameters) extends LazyMo
 
     for (i <- 0 until params.nSignalComps) {
       NewPipelineConnect(
-        pseudoError_gen(i), io_pseudoError(i), io_pseudoError(i).fire, false.B,
+        pseudoErrorGen(i), ioPseudoError(i), ioPseudoError(i).fire, false.B,
         Option(s"CtrlUnitPseudoErrorPipelineConnect${i}")
       )
     }

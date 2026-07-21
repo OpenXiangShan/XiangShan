@@ -482,7 +482,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   //val delayedDcacheRefill = RegNext(dcache.io.lsu.lsq)
 
   val csrCtrl = DelayN(io.ooo_to_mem.csrCtrl, 2)
-  dcache.io.l2_pf_store_only := RegNext(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_store_only, false.B)
+  dcache.io.l2PfStoreOnly := RegNext(io.ooo_to_mem.csrCtrl.pf_ctrl.l2_pf_store_only, false.B)
   val dcacheError = DelayNWithValid(dcache.io.error, 2)
   io.dcacheError <> dcacheError.bits.toL1BusErrorUnitInfo(dcacheError.valid)
   io.uncacheError.ecc_error <> DelayNWithValid(uncache.io.busError.ecc_error, 2)
@@ -737,8 +737,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val prefetcher = Module(new PrefetcherWrapper)
   prefetcher.io.pfCtrlFromTile.l2PfqBusy := io.l2PfqBusy
   prefetcher.io.pfCtrlFromCSR := io.ooo_to_mem.csrCtrl.pf_ctrl
-  prefetcher.io.pfCtrlFromDCache <> dcache.io.pf_ctrl
-  prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.sms_agt_evict_req
+  prefetcher.io.pfCtrlFromDCache <> dcache.io.pfCtrl
+  prefetcher.io.fromDCache.sms_agt_evict_req <> dcache.io.smsAgtEvictReq
   prefetcher.io.fromDCache.refillTrain := dcache.io.refillTrain
   prefetcher.io.fromOOO.s1_loadPc := issueLda.map(x => RegNext(x.bits.pc.get)) ++ io.ooo_to_mem.hybridPc
   prefetcher.io.fromOOO.s1_storePc := io.ooo_to_mem.storePc ++ io.ooo_to_mem.hybridPc
@@ -790,15 +790,15 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     else l1_pf_req.valid && !canAcceptPrefetch.take(i).reduce(_ || _)
   }
 
-  l1_pf_req.ready := dcache.io.prefetch_req.ready
+  l1_pf_req.ready := dcache.io.prefetchReq.ready
   newLoadUnits.zipWithIndex.foreach { case(u, i) => {
     u.io.prefetchReq.valid <> false.B
     u.io.prefetchReq.bits <> DontCare
   }}
 
   // move hw prefetch to mainpipe
-  dcache.io.prefetch_req.valid <> l1_pf_req.valid
-  dcache.io.prefetch_req.bits <> l1_pf_req.bits
+  dcache.io.prefetchReq.valid <> l1_pf_req.valid
+  dcache.io.prefetchReq.bits <> l1_pf_req.bits
 
   /** l1 pf fuzzer interface */
   val DebugEnableL1PFFuzzer = false
@@ -809,8 +809,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     fuzzer.io.paddr := DontCare
 
     // move hw prefetch to mainpipe
-    dcache.io.prefetch_req.valid <> fuzzer.io.req.valid
-    dcache.io.prefetch_req.bits <> fuzzer.io.req.bits
+    dcache.io.prefetchReq.valid <> fuzzer.io.req.valid
+    dcache.io.prefetchReq.bits <> fuzzer.io.req.bits
 
     fuzzer.io.req.ready := l1_pf_req.ready
   }
@@ -876,7 +876,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
       vSegmentUnit.io.rdcache.req.ready := dcache.io.lsu.load(i).req.ready
 
       when (vSegmentFlag) {
-        dcache.io.lsu.load(i).pf_source              := vSegmentUnit.io.rdcache.pf_source
+        dcache.io.lsu.load(i).pfSource               := vSegmentUnit.io.rdcache.pfSource
         dcache.io.lsu.load(i).s1_paddr_dup_lsu       := vSegmentUnit.io.rdcache.s1_paddr_dup_lsu
         dcache.io.lsu.load(i).s1_paddr_dup_dcache    := vSegmentUnit.io.rdcache.s1_paddr_dup_dcache
         dcache.io.lsu.load(i).s1_kill                := vSegmentUnit.io.rdcache.s1_kill
@@ -886,7 +886,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         dcache.io.lsu.load(i).s2_pc                  := vSegmentUnit.io.rdcache.s2_pc
         dcache.io.lsu.load(i).is128Req               := vSegmentUnit.io.rdcache.is128Req
       }.otherwise {
-        dcache.io.lsu.load(i).pf_source              := newLoadUnits(i).io.dcache.pf_source
+        dcache.io.lsu.load(i).pfSource               := newLoadUnits(i).io.dcache.pfSource
         dcache.io.lsu.load(i).s1_paddr_dup_lsu       := newLoadUnits(i).io.dcache.s1_paddr_dup_lsu
         dcache.io.lsu.load(i).s1_paddr_dup_dcache    := newLoadUnits(i).io.dcache.s1_paddr_dup_dcache
         dcache.io.lsu.load(i).s1_kill                := newLoadUnits(i).io.dcache.s1_kill
@@ -908,10 +908,10 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // forward & NC bypass
     lsq.io.forward(i) <> newLoadUnits(i).io.sqForward
     sbuffer.io.forward(i) <> newLoadUnits(i).io.sbufferForward
-    connectSamePort(dcache.io.lsu.forward_mshrStData(i), newLoadUnits(i).io.sbufferForward)
+    connectSamePort(dcache.io.lsu.forwardMshrStData(i), newLoadUnits(i).io.sbufferForward)
     uncache.io.forward(i) <> newLoadUnits(i).io.uncacheForward
-    dcache.io.lsu.forward_D(i) <> newLoadUnits(i).io.tldForward
-    dcache.io.lsu.forward_mshr(i) <> newLoadUnits(i).io.mshrForward
+    dcache.io.lsu.forwardD(i) <> newLoadUnits(i).io.tldForward
+    dcache.io.lsu.forwardMshr(i) <> newLoadUnits(i).io.mshrForward
     lsq.io.bypass(i) <> newLoadUnits(i).io.uncacheBypass
     // RAW / RAR violation check
     lsq.io.ldu.rawNukeQuery(i) <> newLoadUnits(i).io.rawNukeQuery
@@ -940,7 +940,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     val l2_hint = RegNext(io.l2_hint)
 
     // L2 Hint for DCache
-    dcache.io.l2_hint <> l2_hint
+    dcache.io.l2Hint <> l2_hint
 
     newLoadUnits(i).io.tlbHint.id := dtlbRepeater.io.hint.get.req(i).id
     newLoadUnits(i).io.tlbHint.full := dtlbRepeater.io.hint.get.req(i).full ||
@@ -1151,7 +1151,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   vSegmentUnit.io.sbuffer.ready := sbuffer.io.in.req(0).ready
   lsq.io.sqEmpty        <> sbuffer.io.sqempty
   sbuffer.io.physicalStoreQueueFull := lsq.io.physicalStoreQueueFull
-  dcache.io.force_write := lsq.io.force_write
+  dcache.io.forceWrite := lsq.io.force_write
 
   // Initialize when unenabled difftest.
   sbuffer.io.diffStore := DontCare
@@ -1342,7 +1342,7 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   // Sbuffer
   sbuffer.io.csrCtrl    <> csrCtrl
   sbuffer.io.dcache     <> dcache.io.lsu.store
-  sbuffer.io.mshr_store_empty := dcache.io.mshr_store_empty
+  sbuffer.io.mshr_store_empty := dcache.io.mshrStoreEmpty
   sbuffer.io.memSetPattenDetected := dcache.io.memSetPattenDetected
   sbuffer.io.force_write <> lsq.io.force_write
   // flush sbuffer

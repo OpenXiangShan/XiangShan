@@ -84,16 +84,16 @@ class DCacheWpuWrapper (nPorts: Int = 1) (implicit p:Parameters) extends DCacheM
   val io = IO(new DwpuIO(nWays, nPorts))
 
   /** pred */
-  val s0_dmSel = Wire(Vec(nPorts, Bool()))
+  val s0_dm_sel = Wire(Vec(nPorts, Bool()))
   val s0_pred_way_en = Wire(Vec(nPorts, UInt(nWays.W)))
   val s1_lookup_valid = Wire(Vec(nPorts, Bool()))
-  val s1_dmSel = Wire(Vec(nPorts, Bool()))
+  val s1_dm_sel = Wire(Vec(nPorts, Bool()))
   val s1_pred_way_en = Wire(Vec(nPorts, UInt(nWays.W)))
   val s1_pred_fail = Wire(Vec(nPorts, Bool()))
   val s1_hit = Wire(Vec(nPorts, Bool()))
 
   for(i <- 0 until nPorts){
-    s0_dmSel(i) := false.B
+    s0_dm_sel(i) := false.B
     wpu.io.predVec(i).en := io.req(i).valid
     wpu.io.predVec(i).vaddr := io.req(i).bits.vaddr
     when(io.req(i).bits.replayCarry.valid) {
@@ -106,7 +106,7 @@ class DCacheWpuWrapper (nPorts: Int = 1) (implicit p:Parameters) extends DCacheM
 
     /** check and update in s1 */
     s1_lookup_valid(i) := io.lookup_upd(i).valid
-    s1_dmSel(i) := RegNext(s0_dmSel(i))
+    s1_dm_sel(i) := RegNext(s0_dm_sel(i))
     s1_pred_way_en(i) := io.lookup_upd(i).bits.s1_pred_way_en
     s1_pred_fail(i) := io.lookup_upd(i).valid && s1_pred_way_en(i) =/= io.lookup_upd(i).bits.s1_real_way_en
     s1_hit(i) := !s1_pred_fail(i) && s1_pred_way_en(i).orR
@@ -163,13 +163,13 @@ class DCacheWpuWrapper (nPorts: Int = 1) (implicit p:Parameters) extends DCacheM
       wayConflictPredictor.io.pred(i).vaddr := io.cfpred(i).s0_vaddr
       s0_pred_way_conflict(i) := wayConflictPredictor.io.pred(i).way_conflict
       when(!s0_pred_way_conflict(i)) {
-        s0_pred_way_en(i) := UIntToOH(get_direct_map_way(io.req(i).bits.vaddr))
-        s0_dmSel(i) := true.B
+        s0_pred_way_en(i) := UIntToOH(getDirectMapWay(io.req(i).bits.vaddr))
+        s0_dm_sel(i) := true.B
       }
       wayConflictPredictor.io.update(i).en := io.lookup_upd(i).valid
       wayConflictPredictor.io.update(i).vaddr := io.cfpred(i).s1_vaddr
-      wayConflictPredictor.io.update(i).dm_hit := s1_dmSel(i) && io.cfpred(i).s1_dm_hit
-      wayConflictPredictor.io.update(i).sa_hit := !s1_dmSel(i) && s1_hit(i)
+      wayConflictPredictor.io.update(i).dm_hit := s1_dm_sel(i) && io.cfpred(i).s1_dm_hit
+      wayConflictPredictor.io.update(i).sa_hit := !s1_dm_sel(i) && s1_hit(i)
     }
     XSPerfAccumulate("wpu_pred_from_prediction", PopCount((0 until nPorts).map(i => io.req(i).valid && !io.req(i).bits.replayCarry.valid && s0_pred_way_conflict(i))))
     XSPerfAccumulate("wpu_pred_from_directMap", PopCount((0 until nPorts).map(i => io.req(i).valid && !io.req(i).bits.replayCarry.valid && !s0_pred_way_conflict(i))))

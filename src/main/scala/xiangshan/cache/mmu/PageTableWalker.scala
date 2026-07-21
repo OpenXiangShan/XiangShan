@@ -117,7 +117,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   // when req.fire, should use current_satp
   val current_satp = Mux(io.req.bits.req_info.s2xlate =/= noS2xlate, io.csr.vsatp, io.csr.satp)
   val satp = Mux(enableS2xlate, io.csr.vsatp, io.csr.satp)
-  val s1Pbmte = Mux(req_s2xlate =/= noS2xlate, io.csr.hPBMTE, io.csr.mPBMTE)
+  val s1_pbmte = Mux(req_s2xlate =/= noS2xlate, io.csr.hPBMTE, io.csr.mPBMTE)
 
   val mptEn = if (HasMptCheck) (io.csr.mmpt.mode =/= 0.U) else false.B // enable mpt when mpt mode is not bare
   val checkIntermediateNode = if (HasMptCheck) (io.csr.mmpt.optOutInNode === 0.U) else false.B
@@ -189,7 +189,7 @@ class PTW()(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
   }
   val pte_valid = RegInit(false.B)  // avoid l1tlb pf from stage1 when gpf happens in the first s2xlate in PTW
 
-  val pageFault = pte.isPf(level, s1Pbmte)
+  val pageFault = pte.isPf(level, s1_pbmte)
   val find_pte = pte.isLeaf() || ppn_af || pageFault
   val to_find_pte = level === 1.U && find_pte === false.B
   val source = RegEnable(io.req.bits.req_info.source, io.req.fire)
@@ -1101,8 +1101,8 @@ class LLPTW(implicit p: Parameters) extends XSModule with HasPtwConst with HasPe
         val req_hpaddr = MakeAddr(entries(i).hptw_resp.genPPNS2(get_pn(req_paddr)), getVpnn(entries(i).req_info.vpn, 0))
         val index =  Mux(entries(i).req_info.s2xlate === allStage, req_hpaddr, req_paddr)(log2Up(l2tlbParams.blockBytes)-1, log2Up(XLEN/8))
         val enableS2xlate = entries(i).req_info.s2xlate =/= noS2xlate
-        val s1Pbmte = Mux(enableS2xlate, io.csr.hPBMTE, io.csr.mPBMTE)
-        val vsStagePf = ptes(index).isPf(0.U, s1Pbmte) || !ptes(index).isLeaf() // Pagefault in vs-Stage
+        val s1_pbmte = Mux(enableS2xlate, io.csr.hPBMTE, io.csr.mPBMTE)
+        val vsStagePf = ptes(index).isPf(0.U, s1_pbmte) || !ptes(index).isLeaf() // Pagefault in vs-Stage
         // Pagefault in g-Stage; when vsStagePf valid, should not check gStagepf
         val gStagePf = ptes(index).isStage1Gpf(io.csr.hgatp.mode) && !vsStagePf
         state(i) := Mux(entries(i).req_info.s2xlate === allStage && !(vsStagePf || gStagePf),
