@@ -60,15 +60,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
   // =========== Components' Connection ============
   // L1 to l1_xbar
   coreParams.dcacheParametersOpt.map { params =>
-    l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger := memBlock.dcache_port :=
-      memBlock.l1d_to_l2_buffer.node := memBlock.dcache.clientNode
-
-    if (params.numMemChannels > 1 &&
-        memBlock.dcache_port_1.isDefined &&
-        memBlock.l1d_to_l2_buffer_1.isDefined &&
-        memBlock.dcache.clientNode_1.isDefined) {
-      l2top.inner.misc_l2_pmu := memBlock.dcache_port_1.get :=
-        memBlock.l1d_to_l2_buffer_1.get.node := memBlock.dcache.clientNode_1.get
+    val clientNodes = memBlock.dcache.clientNodes
+    (memBlock.dcache_port zip memBlock.l1d_to_l2_buffer zip clientNodes).zipWithIndex.foreach {
+      case (((port, buffer), clientNode), i) =>
+        l2top.inner.misc_l2_pmu := l2top.inner.l1d_logger(i) := port := buffer.node := clientNode
     }
   }
 

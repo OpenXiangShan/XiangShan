@@ -313,10 +313,10 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   val io = IO(new Bundle {
     val req = Flipped(DecoupledIO(new WritebackReq))
     val req_ready_dup = Vec(nDupWbReady, Output(Bool()))
-    val mem_release = DecoupledIO(new TLBundleC(edge.bundle))
-    val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-    val mem_release_1 = if (hasDualChannel) Some(DecoupledIO(new TLBundleC(edge.bundle))) else None
-    val mem_grant_1 = if (hasDualChannel) Some(Flipped(DecoupledIO(new TLBundleD(edge.bundle)))) else None
+    // ========== Multi-channel support ==========
+    // Each channel gets its own TL release/grant port
+    val mem_release = Vec(numMemChannels, DecoupledIO(new TLBundleC(edge.bundle)))
+    val mem_grant   = Vec(numMemChannels, Flipped(DecoupledIO(new TLBundleD(edge.bundle))))
 
     //val probe_ttob_check_req = Flipped(ValidIO(new ProbeToBCheckReq))
     //val probe_ttob_check_resp = ValidIO(new ProbeToBCheckResp)
@@ -338,20 +338,16 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   req.ready := alloc && !block_conflict
 
   // assign default values to output signals
-  io.mem_release.valid := false.B
-  io.mem_release.bits  := DontCare
-  io.mem_grant.ready   := false.B
-  if (hasDualChannel) {
-    io.mem_release_1.get.valid := false.B
-    io.mem_release_1.get.bits := DontCare
-    io.mem_grant_1.get.ready := false.B
+  for (ch <- 0 until numMemChannels) {
+    io.mem_release(ch).valid := false.B
+    io.mem_release(ch).bits  := DontCare
+    io.mem_grant(ch).ready   := false.B
   }
 
   // delay data write in writeback req for 1 cycle
   val req_data = RegEnable(io.req.bits.toWritebackReqData(), io.req.valid)
 
   require(isPow2(cfg.nMissEntries))
-  val grant_source = io.mem_grant.bits.source
   val entries = Seq.fill(cfg.nReleaseEntries)(Module(new WritebackEntry(edge)))
   entries.zipWithIndex.foreach {
     case (entry, i) =>
@@ -375,16 +371,9 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
 
       entry.io.mem_grant.valid := false.B
       entry.io.mem_grant.bits  := DontCare
-      if (hasDualChannel) {
-        when ((entry_id === io.mem_grant.bits.source) && io.mem_grant.valid) {
-          entry.io.mem_grant <> io.mem_grant
-        }
-        when ((entry_id === io.mem_grant_1.get.bits.source) && io.mem_grant_1.get.valid) {
-          entry.io.mem_grant <> io.mem_grant_1.get
-        }
-      } else {
-        when ((entry_id === io.mem_grant.bits.source) && io.mem_grant.valid) {
-          entry.io.mem_grant <> io.mem_grant
+      for (ch <- 0 until numMemChannels) {
+        when ((entry_id === io.mem_grant(ch).bits.source) && io.mem_grant(ch).valid) {
+          entry.io.mem_grant <> io.mem_grant(ch)
         }
       }
   }
@@ -410,24 +399,13 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
     }
   }
 
-  private def splitDecoupledByChannel[T <: Data](source: DecoupledIO[T], channel: UInt): (DecoupledIO[T], DecoupledIO[T]) = {
-    val ch0 = Wire(Decoupled(chiselTypeOf(source.bits)))
-    val ch1 = Wire(Decoupled(chiselTypeOf(source.bits)))
-    ch0.valid := source.valid && channel === 0.U
-    ch0.bits := source.bits
-    ch1.valid := source.valid && channel === 1.U
-    ch1.bits := source.bits
-    source.ready := Mux(channel === 1.U, ch1.ready, ch0.ready)
-    (ch0, ch1)
-  }
-
-  if (hasDualChannel) {
-    val splitEntryReleases = entries.map(e => splitDecoupledByChannel(e.io.mem_release, selectChannel(e.io.block_addr.bits)))
-    val (releaseCh0, releaseCh1) = splitEntryReleases.unzip
-    TLArbiter.robin(edge, io.mem_release, releaseCh0:_*)
-    TLArbiter.robin(edge, io.mem_release_1.get, releaseCh1:_*)
+  if (numMemChannels > 1) {
+    val demuxedEntryReleases = entries.map(e => demuxByChannel(e.io.mem_release, selectChannel(e.io.block_addr.bits), numMemChannels))
+    for (ch <- 0 until numMemChannels) {
+      TLArbiter.robin(edge, io.mem_release(ch), demuxedEntryReleases.map(_(ch)):_*)
+    }
   } else {
-    TLArbiter.robin(edge, io.mem_release, entries.map(_.io.mem_release):_*)
+    TLArbiter.robin(edge, io.mem_release(0), entries.map(_.io.mem_release):_*)
   }
 
   // sanity check
@@ -435,9 +413,8 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   // print req
   io.req.bits.dump(io.req.fire)
 
-  io.mem_grant.bits.dump(io.mem_grant.fire)
-  if (hasDualChannel) {
-    io.mem_grant_1.get.bits.dump(io.mem_grant_1.get.fire)
+  for (ch <- 0 until numMemChannels) {
+    io.mem_grant(ch).bits.dump(io.mem_grant(ch).fire)
   }
 
   // XSDebug(io.miss_req.valid, "miss_req: addr: %x\n", io.miss_req.bits)
@@ -448,9 +425,9 @@ class WritebackQueue(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModu
   for(i <- 0 until MissReqPortCount) {
     XSPerfAccumulate(s"block_miss_req_$i", io.block_miss_req(i))
   }
-  if (hasDualChannel) {
-    XSPerfAccumulate("dual_channle_release", io.mem_release.valid && io.mem_release_1.get.valid)
-    XSPerfAccumulate("dual_channle_releaseAck", io.mem_grant.valid && io.mem_grant_1.get.valid)
+  if (numMemChannels >= 2) {
+    XSPerfAccumulate("dual_channle_release", io.mem_release(0).valid && io.mem_release(1).valid)
+    XSPerfAccumulate("dual_channle_releaseAck", io.mem_grant(0).valid && io.mem_grant(1).valid)
   }
 
   val perfValidCount = RegNext(PopCount(entries.map(e => e.io.block_addr.valid)))
