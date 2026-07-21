@@ -43,6 +43,8 @@ class RegCacheAgeTimer
     val readPorts = Vec(numReadPorts, new RCAgeTimerReadPort(addrWidth))
     val writePorts = Vec(numWritePorts, new RCAgeTimerWritePort(addrWidth))
     val validInfo = Vec(numEntries, Input(Bool()))
+    // slots already chosen as a write destination whose write has not landed yet
+    val reserved = Vec(numEntries, Input(Bool()))
     val ageInfo = Vec(numEntries, Vec(numEntries, Output(Bool())))
   })
 
@@ -79,7 +81,11 @@ class RegCacheAgeTimer
       true.B
     else if (row < col) {
       val res = Wire(Bool())
-      when (io.validInfo(row) && !io.validInfo(col)) {
+      when (io.reserved(row) && !io.reserved(col)) {
+        res := false.B
+      }.elsewhen (!io.reserved(row) && io.reserved(col)) {
+        res := true.B
+      }.elsewhen (io.validInfo(row) && !io.validInfo(col)) {
         res := false.B
       }.elsewhen (!io.validInfo(row) && io.validInfo(col)) {
         res := true.B

@@ -119,6 +119,21 @@ class RegCache()(implicit p: Parameters, params: BackendParams) extends XSModule
     w.addr := rcIdx
   }
 
+  // a chosen slot stays reserved until its write lands, 3 cycles later
+  def buildReserved(sel: Vec[UInt], size: Int): Vec[Bool] = {
+    val z  = VecInit(Seq.fill(sel.length)(0.U(sel.head.getWidth.W)))
+    val g1 = RegNext(sel, z)
+    val g2 = RegNext(g1, z)
+    val gens = sel ++ g1 ++ g2
+    val mask = Wire(Vec(size, Bool()))
+    for (e <- 0 until size) {
+      mask(e) := gens.map(_ === e.U).reduce(_ || _)
+    }
+    mask
+  }
+  IntRegCacheAgeTimer.io.reserved := buildReserved(IntRegCacheRepRCIdx, IntRegCacheSize)
+  MemRegCacheAgeTimer.io.reserved := buildReserved(MemRegCacheRepRCIdx, MemRegCacheSize)
+
   if (params.basicDebugEn) {
     io.diffRcIdx.get.zipWithIndex.foreach { case (x, i) =>
       when(x.wen) {
