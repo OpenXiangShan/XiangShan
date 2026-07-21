@@ -9,7 +9,6 @@ class VecSrcTypeModuleIO extends Bundle {
   val in = Input(new Bundle {
     val fuOpType  : UInt = OpType()
     val vsew      : UInt = VSew()
-    val isReverse : Bool = Bool() // vrsub, vrdiv
     val isExt     : Bool = Bool()
     val isDstMask : Bool = Bool() // vvm, vvvm, mmm
     val isMove    : Bool = Bool() // vmv.s.x, vmv.v.v, vmv.v.x, vmv.v.i
