@@ -440,7 +440,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.dcacheReq.bits.mask := sink.bits.mask
   io.dcacheReq.bits.id := DontCare
   io.dcacheReq.bits.instrtype := Mux(isPrefetch, DCACHE_PREFETCH_SOURCE.U, LOAD_SOURCE.U)
-  io.dcacheReq.bits.isFirstIssue := firstIssue
+  io.dcacheReq.bits.isFirstIssue := Mux(isHwPrefetch, io.prefetchReq.bits.first_issue, firstIssue)
   io.dcacheReq.bits.replayCarry := DontCare
   io.dcacheReq.bits.lqIdx := uop.lqIdx
   io.dcacheReq.bits.debug_robIdx := uop.robIdx.value
