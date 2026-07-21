@@ -601,11 +601,11 @@ class LoadUnitS1(param: ExeUnitParams)(
   val redirectNextNext = Wire(redirect.cloneType)
   redirectNextNext.valid := GatedValidRegNext(redirectNext.valid)
   redirectNextNext.bits := RegEnable(redirectNext.bits, redirectNext.valid)
-  
+
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
 
   val kill = !pipeIn.valid || io.kill || isSwInstrPrefetch ||
-             robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) || 
+             robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) ||
              (robIdx.needFlush(redirectNextNext) && isUnalignTail)
 
   /**
@@ -832,6 +832,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     // TODO: move this inside of dcacheResp
     val dcacheBankConflict = Input(Bool())
     val dcacheMSHRNack = Input(Bool())
+    val dcacheMSHRBlock = Input(Bool())
 
     /**
       * Data forward response
@@ -992,6 +993,7 @@ class LoadUnitS2(param: ExeUnitParams)(
     */
   val dcacheMiss = io.dcacheResp.bits.miss
   val mshrNack = io.dcacheMSHRNack
+  val mshrBlock = io.dcacheMSHRBlock
   val bankConflict = io.dcacheBankConflict
 
   /**
@@ -1038,13 +1040,13 @@ class LoadUnitS2(param: ExeUnitParams)(
   val troubleMaker = !isPrefetch && !alwaysWriteback
   // 1.3 fast replay
   val cause = Wire(in.cause.get.cloneType)
-  val fastReplayMSHRNack = cause(C_DR) && !hasHigherPriorityCauses(cause, C_DR)
+  val fastReplayMSHRBlock = cause(C_DR) && !hasHigherPriorityCauses(cause, C_DR) && !mshrNack
   val fastReplayBankConflict = cause(C_BC) && !hasHigherPriorityCauses(cause, C_BC)
   // if store pipeline is waiting for store, send this load to fast replay
   val fastReplayNuke = cause(C_NK) &&  // TODO: use C_RAR or C_NK?
     !hasHigherPriorityCauses(VecInit(cause.patch(C_MA, Seq(cause(C_MA) && !fastReplayNukeFirst), 1)), C_RAR)
   val fastReplay = !LoadEntrance.isFastReplay(entrance) && // 1.3.1
-    (fastReplayMSHRNack || fastReplayBankConflict || fastReplayNuke) && // 1.3.2
+    (fastReplayMSHRBlock || fastReplayBankConflict || fastReplayNuke) && // 1.3.2
     !isUnalign && !tlbMiss // 1.3.3, if tlb miss, should not to fast replay
 
   /**
@@ -1083,7 +1085,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   cause(C_MA) := troubleMaker && uop.storeSetHit && sqAddrInvalid
   cause(C_TM) := troubleMaker && tlbMiss
   cause(C_FF) := troubleMaker && sqDataInvalid
-  cause(C_DR) := troubleMaker && needDCacheAccess && mshrNack
+  cause(C_DR) := troubleMaker && needDCacheAccess && (mshrNack || mshrBlock)
   cause(C_DM) := troubleMaker && needDCacheAccess && dcacheMiss
   cause(C_WF) := false.B
   cause(C_BC) := troubleMaker && (needDCacheAccess && bankConflict || isUnalignHead && in.shouldFastReplay.get)
@@ -1205,10 +1207,10 @@ class LoadUnitS2(param: ExeUnitParams)(
   XSPerfAccumulate("tld_full_forward", fire && io.tldForwardResp.valid)
   XSPerfAccumulate("full_forward", fire && fullForward)
   XSPerfAccumulate("prefetch", fire && isPrefetch)
-  XSPerfAccumulate("prefetch_ignore", fire && isPrefetch && io.dcacheMSHRNack)
+  XSPerfAccumulate("prefetch_ignore", fire && isPrefetch && (io.dcacheMSHRNack || io.dcacheMSHRBlock))
   XSPerfAccumulate("prefetch_miss", fire && isPrefetch && io.dcacheResp.bits.miss)
   XSPerfAccumulate("prefetch_hit", fire && isPrefetch && !io.dcacheResp.bits.miss)
-  XSPerfAccumulate("prefetch_accept", fire && isPrefetch && io.dcacheResp.bits.miss && !io.dcacheMSHRNack)
+  XSPerfAccumulate("prefetch_accept", fire && isPrefetch && io.dcacheResp.bits.miss && (!io.dcacheMSHRNack && !io.dcacheMSHRBlock))
   XSPerfAccumulate("forward_tld_replay", fire && in.forwardDChannel.get)
   XSPerfAccumulate("forward_tld_replay_succeed_mshr", fire && in.forwardDChannel.get && io.mshrForwardResp.valid)
   XSPerfAccumulate("forward_tld_replay_succeed_tld", fire && in.forwardDChannel.get && io.tldForwardResp.valid)
@@ -1929,7 +1931,8 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.dcache.s2_kill := s2.io.dcacheKill
   s2.io.dcacheResp <> io.dcache.resp
   s2.io.dcacheBankConflict := io.dcache.s2_bank_conflict
-  s2.io.dcacheMSHRNack := io.dcache.s2_mq_nack
+  s2.io.dcacheMSHRNack := io.dcache.s2_mq_full
+  s2.io.dcacheMSHRBlock := io.dcache.s2_block_enter_mq
   s2.io.sqForwardResp := io.sqForward.s2Resp
   s2.io.sbufferForwardResp := io.sbufferForward.s2Resp
   s2.io.uncacheForwardResp := io.uncacheForward.s2Resp

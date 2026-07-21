@@ -491,7 +491,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val pf_late_in_cache = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
   val hit_pf_in_cache = Wire(Bool()) // assigned in s3 for filtering
   val hit_source = Wire(UInt(L1PfSourceBits.W))
-  
+
   io.prefetch_stat.total_prefetch := total_prefetch
   io.prefetch_stat.pf_late_in_cache := pf_late_in_cache
   io.prefetch_stat.pf_late_in_cache_source := s2_hit_prefetch
@@ -514,7 +514,8 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.lsu.s1_disable_fast_wakeup := io.disable_ld_fast_wakeup
   io.lsu.s2_bank_conflict := io.bank_conflict_slow
   io.lsu.s2_wpu_pred_fail := s2_wpu_pred_fail_and_real_hit
-  io.lsu.s2_mq_nack       := (resp.bits.miss && (s2_nack_no_mshr || io.miss_req.bits.cancel || io.wbq_block_miss_req ) || s2_btot_occupy_fail)
+  io.lsu.s2_block_enter_mq := (resp.bits.miss && (io.miss_req.bits.cancel || io.wbq_block_miss_req) || s2_btot_occupy_fail)
+  io.lsu.s2_mq_full := resp.bits.miss && s2_nack_no_mshr
   assert(RegNext(s1_ready && s2_ready), "load pipeline should never be blocked")
 
   // --------------------------------------------------------------------------------

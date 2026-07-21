@@ -145,7 +145,7 @@ trait HasDCacheParameters
   val DCacheBanks = 32
   val DCacheDupNum = 16
   val DCacheSRAMRealRowBits = DCacheSRAMRowBits * DCacheWays // 1 real Bank = vitural_bank * way_nums
-  val DCacheSRAMRowBits = 16 
+  val DCacheSRAMRowBits = 16
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
   val MaxPrefetchEntry = cacheParams.nMaxPrefetchEntry
@@ -668,7 +668,8 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val s2_first_hit = Input(Bool())
   val s2_bank_conflict = Input(Bool())
   val s2_wpu_pred_fail = Input(Bool())
-  val s2_mq_nack = Input(Bool())
+  val s2_block_enter_mq = Input(Bool())
+  val s2_mq_full = Input(Bool())
 
   // debug
   val debug_s1_hit_way = Input(UInt(nWays.W))
