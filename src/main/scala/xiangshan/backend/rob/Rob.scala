@@ -788,9 +788,12 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqHasFlushPipe = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.flushPipe && !deqHasException && commit_w_delay
   val deqHasReplayInst = deqNeedFlushAndHitExceptionGenState && exceptionDataRead.bits.replayInst
   val deqIsVlsException = deqHasException && isVectorMemory(deqExceptionUop) && !exceptionDataRead.bits.isEnqExcp
+  val deqIsVlsFlushPipe = deqHasFlushPipe && isVectorMemory(deqExceptionUop)
+  val deqCanException = deqHasException && (!deqIsVlsException || deqVlsCanCommit)
+  val deqCanFlushPipe = deqHasFlushPipe && (!deqIsVlsFlushPipe || deqVlsCanCommit)
   // delay 2 cycle wait exceptionGen out
   // vls exception can be committed only when RAB commit all its reg pairs
-  deqVlsCanCommit := RegNext(RegNext(deqIsVlsException && deqPtrEntry.commit_w)) && rab.io.status.commitEnd
+  deqVlsCanCommit := RegNext(RegNext(deqPtrEntry.commit_w)) && rab.io.status.commitEnd
 
   // lock at assertion of deqVlsExceptionNeedCommit until condition not assert
   val deqVlsExcpLock = RegInit(false.B)
@@ -852,7 +855,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // Block any redirect or commit at the next cycle.
   val lastCycleFlush = RegNext(io.flushOut.valid)
 
-  io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException && (!deqIsVlsException || deqVlsCanCommit) || isFlushPipe) && !lastCycleFlush
+  io.flushOut.valid := (state === s_idle) && deqPtrEntryValid && (intrEnable || deqCanException || deqCanFlushPipe) && !lastCycleFlush
   io.flushOut.bits := DontCare
   val flushIsFormer = intrEnable || deqPtrEntry.slotNeedFlushMask(0)
   val flushBaseIsRVC = Mux(flushIsFormer, deqPtrEntry.slotHeadRvcMask(0), Mux(deqPtrEntry.predTaken, deqPtrEntry.slotHeadRvcMask(1), deqPtrEntry.slotHeadRvcMask(0)))
@@ -906,7 +909,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   XSPerfAccumulate("flush_pipe_num", io.flushOut.valid && isFlushPipe)
   XSPerfAccumulate("replay_inst_num", io.flushOut.valid && isFlushPipe && deqHasReplayInst)
 
-  val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqHasException && (!deqIsVlsException || deqVlsCanCommit)) && !lastCycleFlush
+  val exceptionHappen = (state === s_idle) && deqPtrEntryValid && (intrEnable || deqCanException) && !lastCycleFlush
   val exceptionIsFormer = deqExceptionIsFormer
   val exceptionUop = deqExceptionUop
   val exceptionDebug = debugMeta(exceptionUop)
