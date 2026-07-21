@@ -399,13 +399,6 @@ class CSRSpecialIO(implicit p: Parameters) extends XSBundle {
   val interrupt = Output(Bool())
 }
 
-class DiffCommitIO(implicit p: Parameters) extends XSBundle {
-  val isCommit = Bool()
-  val commitValid = Vec(CommitWidth * MaxUopSize, Bool())
-
-  val info = Vec(CommitWidth * MaxUopSize, new RabCommitInfo)
-}
-
 class RobCommitInfo(implicit p: Parameters) extends RobCommitEntryBundle
 
 class RobCommitIO(implicit p: Parameters) extends XSBundle {
