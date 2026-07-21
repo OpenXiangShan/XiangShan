@@ -435,43 +435,39 @@ trait HasIMSICImp[+L <: HasIMSIC] { this: BaseXSSocImp with HasAsyncClockImp
   }
 }
 
-trait HasTraceIO { this: BaseXSSoc with HasXSTile =>
-  InModuleBody {
-    val io = new Bundle {
-      val traceCoreInterface = IO(new Bundle {
-        val fromEncoder = Input(new Bundle {
-          val enable = Bool()
-          val stall  = Bool()
-        })
-        val toEncoder   = Output(new Bundle {
-          val cause     = UInt(TraceCauseWidth.W)
-          val tval      = UInt(TraceTvalWidth.W)
-          val priv      = UInt(TracePrivWidth.W)
-          val mstatus   = UInt(TraceStatusWidth.W)
-          val valid     = UInt(TraceGrpNum.W)
-          val iaddr     = UInt((TraceGrpNum * TraceIaddrWidth).W)
-          val itype     = UInt((TraceGrpNum * TraceItypeWidth).W)
-          val iretire   = UInt((TraceGrpNum * TraceIretireWidthCompressed).W)
-          val ilastsize = UInt((TraceGrpNum * TraceIlastsizeWidth).W)
-        })
+trait HasTraceIOImp[+L <: HasXSTile] {
+  this: BaseXSSocImp with HasXSTileImp[L] =>
+    val io_traceCoreInterface = IO(new Bundle {
+      val fromEncoder = Input(new Bundle {
+        val enable = Bool()
+        val stall  = Bool()
       })
-    }
-
+      val toEncoder   = Output(new Bundle {
+        val cause     = UInt(socParams.TraceCauseWidth.W)
+        val tval      = UInt(socParams.TraceTvalWidth.W)
+        val priv      = UInt(socParams.TracePrivWidth.W)
+        val mstatus   = UInt(socParams.TraceStatusWidth.W)
+        val valid     = UInt(socParams.TraceGrpNum.W)
+        val iaddr     = UInt((socParams.TraceGrpNum * socParams.TraceIaddrWidth).W)
+        val itype     = UInt((socParams.TraceGrpNum * socParams.TraceItypeWidth).W)
+        val iretire   = UInt((socParams.TraceGrpNum * socParams.TraceIretireWidthCompressed).W)
+        val ilastsize = UInt((socParams.TraceGrpNum * socParams.TraceIlastsizeWidth).W)
+      })
+    })
     // trace Interface
     val traceInterface = core_with_l2.module.io.traceCoreInterface
-    withClockAndReset(core_with_l2.module.clock, core_with_l2.module.reset){
-      traceInterface.fromEncoder := RegNext(io.traceCoreInterface.fromEncoder)
-      io.traceCoreInterface.toEncoder.priv := RegEnable(traceInterface.toEncoder.priv, traceInterface.toEncoder.groups(0).valid)
-      io.traceCoreInterface.toEncoder.cause := RegEnable(traceInterface.toEncoder.trap.cause, traceInterface.toEncoder.groups(0).valid)
-      io.traceCoreInterface.toEncoder.tval := RegEnable(traceInterface.toEncoder.trap.tval, traceInterface.toEncoder.groups(0).valid)
-      io.traceCoreInterface.toEncoder.mstatus := RegNext(traceInterface.toEncoder.mstatus)
-      io.traceCoreInterface.toEncoder.valid := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.valid)).asUInt, 0.U)
-      io.traceCoreInterface.toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(gp => RegEnable(gp.bits.iaddr, gp.valid))).asUInt
-      io.traceCoreInterface.toEncoder.itype := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt)
-      io.traceCoreInterface.toEncoder.iretire := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt)
-      io.traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(gp => RegEnable(gp.bits.ilastsize, gp.valid))).asUInt
+    withClockAndReset(core_with_l2.module.clock, cpuReset_sync){
+      traceInterface.fromEncoder := RegNext(io_traceCoreInterface.fromEncoder)
+      io_traceCoreInterface.toEncoder.priv := RegEnable(traceInterface.toEncoder.priv, traceInterface.toEncoder.groups(0).valid)
+      io_traceCoreInterface.toEncoder.cause := RegEnable(traceInterface.toEncoder.trap.cause, traceInterface.toEncoder.groups(0).valid)
+      io_traceCoreInterface.toEncoder.tval := RegEnable(traceInterface.toEncoder.trap.tval, traceInterface.toEncoder.groups(0).valid)
+      io_traceCoreInterface.toEncoder.mstatus := RegNext(traceInterface.toEncoder.mstatus)
+      io_traceCoreInterface.toEncoder.valid := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.valid)).asUInt, 0.U)
+      io_traceCoreInterface.toEncoder.iaddr := VecInit(traceInterface.toEncoder.groups.map(gp => RegEnable(gp.bits.iaddr, gp.valid))).asUInt
+      io_traceCoreInterface.toEncoder.itype := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.bits.itype)).asUInt, 0.U)
+      io_traceCoreInterface.toEncoder.iretire := RegNext(VecInit(traceInterface.toEncoder.groups.map(_.bits.iretire)).asUInt, 0.U)
+      io_traceCoreInterface.toEncoder.ilastsize := VecInit(traceInterface.toEncoder.groups.map(gp => RegEnable(gp.bits.ilastsize, gp.valid))).asUInt
     }
-  }
 }
 
 trait HasClintTimeImp[+L <: HasXSTile] { this: BaseXSSocImp with HasAsyncClockImp
@@ -495,7 +491,6 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
   with HasXSTile
   with HasSeperatedBusOpt
   with HasIMSIC
-  with HasTraceIO
 {
   override lazy val desiredName: String = "XSTop"
 
@@ -507,6 +502,7 @@ class XSNoCTop()(implicit p: Parameters) extends BaseXSSoc
     with HasClintTimeImp[XSNoCTop]
     with HasIMSICImp[XSNoCTop]
     with HasDTSImp[XSNoCTop]
+    with HasTraceIOImp[XSNoCTop]
   {
     /* work in SoC clock domain by default in XSTop scope */
     childClock := soc_clock
