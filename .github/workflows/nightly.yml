@@ -61,4 +61,5 @@ jobs:
 
           echo "Current: ${CURR_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY
           echo "Previous: ${PREV_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY
-          python3 $GITHUB_WORKSPACE/.github/workflows/nightly_perf_diff.py "${CURR_SCORE_FILE}" "${PREV_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY
+          python3 $GITHUB_WORKSPACE/scripts/ipc-report/main.py \
+            "${PREV_SCORE_FILE}" "${CURR_SCORE_FILE}" >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,167 @@
+# Generate an EMU IPC or Performance Regression score comparison from artifacts.
+name: Performance Diff Summary
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base commit SHA or workflow run ID
+        required: true
+        type: string
+      compare:
+        description: Space-separated commit SHAs or workflow run IDs to compare
+        required: true
+        type: string
+      pr:
+        description: Pull request number to comment on
+        required: false
+        type: string
+  issue_comment:
+    types: [created, edited]
+
+concurrency:
+  group: >-
+    performance-summary-${{
+      github.event_name == 'issue_comment' &&
+      startsWith(github.event.comment.body, '/diff') &&
+      github.event.comment.id || github.run_id
+    }}
+  cancel-in-progress: true
+
+jobs:
+  summary:
+    name: Generate and publish summary
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/diff'))
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+      issues: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Parse comparison request
+        id: request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+          EVENT_PR: ${{ github.event.issue.number }}
+          INPUT_BASE: ${{ inputs.base }}
+          INPUT_COMPARE: ${{ inputs.compare }}
+          INPUT_PR: ${{ inputs.pr }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          split_words() {
+            local value="$1"
+            local -n output="$2"
+            IFS=$' \t\r\n' read -r -d '' -a output < <(printf '%s\0' "${value}")
+          }
+
+          arguments=()
+          pr="${INPUT_PR}"
+
+          if [ "${EVENT_NAME}" = "issue_comment" ]; then
+            pr="${EVENT_PR}"
+            split_words "${COMMENT_BODY}" words
+            if [ "${#words[@]}" -eq 0 ] || [ "${words[0]}" != "/diff" ]; then
+              echo "Invalid command. Expected: /diff [BASE [COMPARE ...]]" >&2
+              exit 1
+            fi
+
+            pr_json=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr}")
+            pr_head=$(jq -r '.head.sha' <<< "${pr_json}")
+            pr_base=$(jq -r '.base.sha' <<< "${pr_json}")
+            arguments=("${words[@]:1}")
+
+            if [ "${#arguments[@]}" -eq 0 ]; then
+              arguments=("${pr_base}" "${pr_head}")
+            else
+              for index in "${!arguments[@]}"; do
+                if [ "${arguments[index]}" = "current" ]; then
+                  arguments[index]="${pr_head}"
+                fi
+              done
+            fi
+          else
+            arguments+=("${INPUT_BASE}")
+            split_words "${INPUT_COMPARE}" compare
+            arguments+=("${compare[@]}")
+          fi
+
+          arguments_json=$(jq -cn --args '$ARGS.positional' "${arguments[@]}")
+          echo "arguments=${arguments_json}" >> "${GITHUB_OUTPUT}"
+          echo "pr=${pr}" >> "${GITHUB_OUTPUT}"
+
+      - name: Install report dependencies
+        run: python3 -m pip install --disable-pip-version-check -r scripts/ipc-report/requirements.txt
+
+      - name: Generate summary
+        id: report
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARGUMENTS: ${{ steps.request.outputs.arguments }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          readarray -t arguments < <(jq -r '.[]' <<< "${ARGUMENTS}")
+
+          set +e
+          python3 scripts/ipc-report/main.py \
+            --token "${GH_TOKEN}" \
+            "${arguments[@]}" \
+            > report.body.md \
+            2> report.stderr
+          status=$?
+          set -e
+
+          {
+            cat report.body.md
+            echo
+            echo "<details>"
+            echo "<summary>stderr (exit code ${status})</summary>"
+            echo
+            echo '```text'
+            cat report.stderr
+            echo '```'
+            echo "</details>"
+          } > report.md
+
+          cat report.md >> "${GITHUB_STEP_SUMMARY}"
+          echo "status=${status}" >> "${GITHUB_OUTPUT}"
+
+      - name: Replace /diff comment
+        if: ${{ github.event_name == 'issue_comment' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          jq -n --rawfile body report.md '{body: $body}' |
+            gh api --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/issues/comments/${COMMENT_ID}" \
+              --input -
+
+      - name: Create or update PR comment
+        if: ${{ github.event_name == 'workflow_dispatch' && steps.request.outputs.pr != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.request.outputs.pr }}
+        run: |
+          gh pr comment "${PR}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --body-file report.md \
+            --edit-last \
+            --create-if-none
+
+      - name: Propagate report failure
+        if: ${{ steps.report.outputs.status != '0' }}
+        env:
+          STATUS: ${{ steps.report.outputs.status }}
+        run: |
+          echo "Report generation failed with exit code ${STATUS}" >&2
+          exit "${STATUS}"

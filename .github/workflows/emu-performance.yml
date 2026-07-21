@@ -324,29 +324,27 @@ jobs:
     needs: upload
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch emu-performance-summary workflow
+      - name: Dispatch summary workflow
         if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          DISPATCH_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }}
+          DISPATCH_REF: ${{ github.event.repository.default_branch }}
           HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || '' }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
           PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.number || '' }}
-          COMMENT_ID: ""
         run: |
           dispatch_ts=$(date -u +%s)
-          gh api repos/${GITHUB_REPOSITORY}/actions/workflows/emu-performance-summary.yml/dispatches \
+          gh api repos/${GITHUB_REPOSITORY}/actions/workflows/summary.yml/dispatches \
             -f ref="${DISPATCH_REF}" \
-            -f inputs[HEAD_SHA]="${HEAD_SHA}" \
-            -f inputs[BASE_SHA]="${BASE_SHA}" \
-            -f inputs[PR]="${PR}" \
-            -f inputs[COMMENT_ID]="${COMMENT_ID}"
+            -f "inputs[base]=${BASE_SHA}" \
+            -f "inputs[compare]=${HEAD_SHA}" \
+            -f "inputs[pr]=${PR}"
 
           summary_url=""
           for _ in {1..20}; do
             summary_url=$(gh run list \
               --repo "${GITHUB_REPOSITORY}" \
-              --workflow "EMU Performance Summary" \
+              --workflow "Performance Diff Summary" \
               --event workflow_dispatch \
               --branch "${DISPATCH_REF}" \
               --limit 20 \
