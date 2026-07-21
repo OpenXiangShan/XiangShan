@@ -492,7 +492,7 @@ class IntEarlyReleaseDataPathTest extends AnyFlatSpec with Matchers with ChiselS
       setTrackedSource(dut, localSrc = 0, logicalSrc = 0, trackId = 1, trackGen = 5, psrc = 23, dataSource = DataSource.reg)
       dut.io.out.valid.expect(true.B)
       dut.io.out.bits.fallback.expect(true.B)
-      dut.io.out.bits.reason.expect(IntERFallbackReason.unsupportedReadPath)
+      dut.io.out.bits.reason.expect(IntERFallbackReason.replayProneReadPath)
       dut.io.out.bits.src(0).valid.expect(true.B)
       dut.io.out.bits.src(0).trackGen.expect(5.U)
     }
@@ -508,7 +508,7 @@ class IntEarlyReleaseDataPathTest extends AnyFlatSpec with Matchers with ChiselS
       setTrackedSource(dut, localSrc = 1, logicalSrc = 1, trackId = 0, trackGen = 6, psrc = 25, dataSource = DataSource.regcache)
       dut.io.out.valid.expect(true.B)
       dut.io.out.bits.fallback.expect(true.B)
-      dut.io.out.bits.reason.expect(IntERFallbackReason.unsupportedReadPath)
+      dut.io.out.bits.reason.expect(IntERFallbackReason.uncertainReadPath)
       dut.io.out.bits.robIdx.value.expect(11.U)
       dut.io.out.bits.src(0).valid.expect(true.B)
       dut.io.out.bits.src(0).trackId.expect(1.U)

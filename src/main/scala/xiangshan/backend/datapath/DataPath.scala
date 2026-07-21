@@ -107,21 +107,43 @@ object DataPathIntEROps {
       src.valid && intRead && !supported
     }).asUInt.orR
     val activeTracked = s1Valid && anyTracked
-    val fallback = completed && anyTracked && (replayPronePath || uncertainReadPath || anyUnsupported)
+    val rawUnsupportedFallback = completed && anyTracked && anyUnsupported
+    val rawReplayProneFallback = completed && anyTracked && replayPronePath
+    val rawUncertainFallback = completed && anyTracked && uncertainReadPath
+    val fallback = rawReplayProneFallback || rawUncertainFallback || rawUnsupportedFallback
     val readDone = completed && anyTracked && !fallback
     val suppressed = activeTracked && !(fallback || readDone)
+    val fallbackCauseCount = PopCount(Seq(rawUnsupportedFallback, rawReplayProneFallback, rawUncertainFallback))
+    val primaryMultiple = fallback && fallbackCauseCount > 1.U
+    val primaryUnsupported = fallback && !primaryMultiple && rawUnsupportedFallback
+    val primaryReplay = fallback && !primaryMultiple && rawReplayProneFallback
+    val primaryUncertain = fallback && !primaryMultiple && rawUncertainFallback
+    val primaryOther = fallback && !primaryMultiple &&
+      !(rawUnsupportedFallback || rawReplayProneFallback || rawUncertainFallback)
+    val primaryReason = MuxCase(IntERFallbackReason.none, Seq(
+      primaryMultiple -> IntERFallbackReason.multiple,
+      primaryReplay -> IntERFallbackReason.replayProneReadPath,
+      primaryUncertain -> IntERFallbackReason.uncertainReadPath,
+      primaryUnsupported -> IntERFallbackReason.unsupportedReadPath,
+      primaryOther -> IntERFallbackReason.other
+    ))
 
     out.valid := fallback || readDone
     out.bits.fallback := fallback
-    out.bits.reason := Mux(fallback, IntERFallbackReason.unsupportedReadPath, IntERFallbackReason.none)
+    out.bits.reason := primaryReason
     status.foreach { s =>
       s.tracked := activeTracked
       s.accepted := readDone
       s.fallback := fallback
       s.suppressed := suppressed
-      s.unsupportedReadPath := completed && anyTracked && anyUnsupported
-      s.replayProne := completed && anyTracked && replayPronePath
-      s.uncertain := completed && anyTracked && uncertainReadPath
+      s.unsupportedReadPath := rawUnsupportedFallback
+      s.replayProne := rawReplayProneFallback
+      s.uncertain := rawUncertainFallback
+      s.primaryUnsupportedReadPath := primaryUnsupported
+      s.primaryReplayProne := primaryReplay
+      s.primaryUncertain := primaryUncertain
+      s.primaryMultiple := primaryMultiple
+      s.primaryOther := primaryOther
       s.trackedRegOHSourceCount := PopCount(trackedRegOHSources)
       s.trackedRegCacheSourceCount := PopCount(trackedRegCacheSources)
       s.trackedForwardSourceCount := PopCount(trackedForwardSources)
@@ -132,12 +154,12 @@ object DataPathIntEROps {
       s.acceptedBypassSourceCount := Mux(readDone, PopCount(trackedBypassSources), 0.U)
       s.fallbackForwardSourceCount := Mux(fallback, PopCount(trackedForwardSources), 0.U)
       s.fallbackBypassSourceCount := Mux(fallback, PopCount(trackedBypassSources), 0.U)
-      s.unsupportedForwardSourceCount := Mux(completed && anyTracked && anyUnsupported, PopCount(unsupportedForwardSources), 0.U)
-      s.unsupportedBypassSourceCount := Mux(completed && anyTracked && anyUnsupported, PopCount(unsupportedBypassSources), 0.U)
-      s.replayForwardSourceCount := Mux(completed && anyTracked && replayPronePath, PopCount(trackedForwardSources), 0.U)
-      s.replayBypassSourceCount := Mux(completed && anyTracked && replayPronePath, PopCount(trackedBypassSources), 0.U)
-      s.uncertainForwardSourceCount := Mux(completed && anyTracked && uncertainReadPath, PopCount(trackedForwardSources), 0.U)
-      s.uncertainBypassSourceCount := Mux(completed && anyTracked && uncertainReadPath, PopCount(trackedBypassSources), 0.U)
+      s.unsupportedForwardSourceCount := Mux(rawUnsupportedFallback, PopCount(unsupportedForwardSources), 0.U)
+      s.unsupportedBypassSourceCount := Mux(rawUnsupportedFallback, PopCount(unsupportedBypassSources), 0.U)
+      s.replayForwardSourceCount := Mux(rawReplayProneFallback, PopCount(trackedForwardSources), 0.U)
+      s.replayBypassSourceCount := Mux(rawReplayProneFallback, PopCount(trackedBypassSources), 0.U)
+      s.uncertainForwardSourceCount := Mux(rawUncertainFallback, PopCount(trackedForwardSources), 0.U)
+      s.uncertainBypassSourceCount := Mux(rawUncertainFallback, PopCount(trackedBypassSources), 0.U)
     }
 
     for (logicalSrc <- out.bits.src.indices) {
@@ -924,6 +946,11 @@ class DataPath(implicit p: Parameters, params: BackendParams, param: SchdBlockPa
     XSPerfAccumulate("int_er_datapath_suppressed_read_obs", PopCount(status.map(_.suppressed)))
     XSPerfAccumulate("int_er_datapath_replay_prone_fallback", PopCount(status.map(_.replayProne)))
     XSPerfAccumulate("int_er_datapath_uncertain_fallback", PopCount(status.map(_.uncertain)))
+    XSPerfAccumulate("int_er_datapath_primary_fallback_unsupported_read_path", PopCount(status.map(_.primaryUnsupportedReadPath)))
+    XSPerfAccumulate("int_er_datapath_primary_fallback_replay_prone", PopCount(status.map(_.primaryReplayProne)))
+    XSPerfAccumulate("int_er_datapath_primary_fallback_uncertain", PopCount(status.map(_.primaryUncertain)))
+    XSPerfAccumulate("int_er_datapath_primary_fallback_multiple", PopCount(status.map(_.primaryMultiple)))
+    XSPerfAccumulate("int_er_datapath_primary_fallback_other", PopCount(status.map(_.primaryOther)))
     if (IntEREnableWakeupAlignedReadDoneCounters) {
       XSPerfAccumulate("int_er_datapath_tracked_source_reg_oh", status.map(_.trackedRegOHSourceCount).reduce(_ +& _))
       XSPerfAccumulate("int_er_datapath_tracked_source_regcache", status.map(_.trackedRegCacheSourceCount).reduce(_ +& _))

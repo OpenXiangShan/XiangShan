@@ -531,7 +531,8 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 ) with DeprecatedConfigWarning
 
 class DefaultConfig(n: Int = 1) extends Config(
-  OpenLLCConfig("16MB", ways = 16, banks = 4)
+  new WithIntEarlyReleaseFunctional
+    ++ OpenLLCConfig("16MB", ways = 16, banks = 4)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4)
     ++ new BaseConfig(n)
@@ -595,6 +596,17 @@ private class WithIntEarlyReleaseFunctional extends Config((site, here, up) => {
   ))
 })
 
+private class WithIntEarlyReleaseDisabled extends Config((site, here, up) => {
+  case XSTileKey => up(XSTileKey).map { p =>
+    p.copy(
+      intEarlyRelease = p.intEarlyRelease.copy(
+        enable = false,
+        observeOnly = true
+      )
+    )
+  }
+})
+
 private class WithIntPreg128 extends Config((site, here, up) => {
   case XSTileKey => up(XSTileKey).map { p =>
     p.copy(
@@ -620,6 +632,11 @@ class IntERObserveOnlyMinimalConfig(n: Int = 1) extends Config(
 
 class IntERFunctionalConfig(n: Int = 1) extends Config(
   new WithIntEarlyReleaseFunctional
+    ++ new DefaultConfig(n)
+)
+
+class IntERDisabledConfig(n: Int = 1) extends Config(
+  new WithIntEarlyReleaseDisabled
     ++ new DefaultConfig(n)
 )
 

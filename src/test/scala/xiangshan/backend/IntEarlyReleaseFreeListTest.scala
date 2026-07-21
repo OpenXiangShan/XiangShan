@@ -164,9 +164,11 @@ class IntERUCAFreeListProbe(size: Int)(implicit p: Parameters) extends XSModule 
   uca.io.redirectKill := false.B
   uca.io.rename.source := 0.U.asTypeOf(uca.io.rename.source)
   uca.io.rename.sourceFallback := 0.U.asTypeOf(uca.io.rename.sourceFallback)
+  uca.io.rename.sourceFallbackReason := VecInit(Seq.fill(RenameWidth)(IntERFallbackReason.none))
   uca.io.rename.alloc := 0.U.asTypeOf(uca.io.rename.alloc)
   uca.io.rename.redef := 0.U.asTypeOf(uca.io.rename.redef)
   uca.io.rename.redefFallback := 0.U.asTypeOf(uca.io.rename.redefFallback)
+  uca.io.rename.redefFallbackReason := VecInit(Seq.fill(RenameWidth)(IntERFallbackReason.none))
   uca.io.producerReady := 0.U.asTypeOf(uca.io.producerReady)
   uca.io.readDone := 0.U.asTypeOf(uca.io.readDone)
   uca.io.squash := 0.U.asTypeOf(uca.io.squash)
@@ -370,8 +372,18 @@ class IntEarlyReleaseFreeListTest extends AnyFlatSpec with Matchers with ChiselS
   it should "expose stable MEFreeList early-free perf counter names" in {
     val source = sourceText("src/main/scala/xiangshan/backend/rename/freelist/MEFreeList.scala")
 
-    source should include("XSPerfAccumulate(\"int_er_me_freelist_early_free_req\"")
-    source should include("XSPerfAccumulate(\"int_er_me_freelist_early_free_merged\"")
+    Seq(
+      "int_er_me_freelist_early_free_req",
+      "int_er_me_freelist_early_free_merged",
+      "int_er_me_freelist_early_free_req_under_rename_width",
+      "int_er_me_freelist_early_free_req_under_2rename_width",
+      "int_er_me_freelist_early_free_req_when_cannot_allocate",
+      "int_er_me_freelist_early_free_cycle_under_rename_width",
+      "int_er_me_freelist_early_free_cycle_under_2rename_width",
+      "int_er_me_freelist_early_free_cycle_when_cannot_allocate"
+    ).foreach { counterName =>
+      source should include(s"""XSPerfAccumulate("$counterName"""")
+    }
   }
 
   it should "expose stable MEFreeList capacity perf counter names" in {

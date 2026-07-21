@@ -30,6 +30,7 @@ class IntSparseUCATest extends AnyFlatSpec with Matchers with ChiselSim {
 
     for (i <- dut.io.rename.source.indices) {
       dut.io.rename.sourceFallback(i).poke(false.B)
+      dut.io.rename.sourceFallbackReason(i).poke(IntERFallbackReason.none)
       dut.io.rename.alloc(i).valid.poke(false.B)
       dut.io.rename.alloc(i).bits.pdest.poke(0.U)
       setRobPtr(dut.io.rename.alloc(i).bits.robIdx, 0)
@@ -37,6 +38,7 @@ class IntSparseUCATest extends AnyFlatSpec with Matchers with ChiselSim {
       dut.io.rename.redef(i).bits.oldPdest.poke(0.U)
       setRobPtr(dut.io.rename.redef(i).bits.robIdx, 0)
       dut.io.rename.redefFallback(i).poke(false.B)
+      dut.io.rename.redefFallbackReason(i).poke(IntERFallbackReason.none)
       for (s <- dut.io.rename.source(i).indices) {
         dut.io.rename.source(i)(s).valid.poke(false.B)
         dut.io.rename.source(i)(s).psrc.poke(0.U)

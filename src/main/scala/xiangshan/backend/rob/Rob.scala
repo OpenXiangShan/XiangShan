@@ -35,7 +35,7 @@ import utils._
 import xiangshan._
 import xiangshan.PerfDebugInfo
 import xiangshan.backend.GPAMemEntry
-import xiangshan.backend.{BackendParams, IntCommitWriteback, IntERRobReadDoneStatus, IntERSquashSource, IntERSrcValueReadDone, IntERSTGuardDec, RatToVecExcpMod, RegWriteFromRab, VecExcpInfo}
+import xiangshan.backend.{BackendParams, IntCommitWriteback, IntERInstClass, IntERRobReadDoneStatus, IntERSquashSource, IntERSrcValueReadDone, IntERSTBlockReason, IntERSTGuardDec, RatToVecExcpMod, RegWriteFromRab, VecExcpInfo}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -862,6 +862,114 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       entries = robEntries,
       safeToCross = intERSafeToCross.get
     )
+    val stPendingWork = stCursor =/= enqPtr
+    val stNoWork = !stPendingWork
+    val stNextCursor = stCursor + stAdvance
+    val stPendingAfterScan = stNextCursor =/= enqPtr
+    val stCaughtUpAfterScan = stPendingWork && !stStop && !stPendingAfterScan
+    val stWalkWidthLimited = stPendingWork && !stStop && stPendingAfterScan && stAdvance === IntERSTWalkWidth.U
+    val stFrontierPtr = stNextCursor
+    val stEntryIdxWidth = log2Ceil(RobSize max 2)
+    val stFrontierIdx = stFrontierPtr.value(stEntryIdxWidth - 1, 0)
+    val stFrontierInRange = stFrontierPtr.value < RobSize.U
+    val stFrontierEntry = robEntries(stFrontierIdx)
+    val stInvalidFrontier = stPendingWork && !stStop && stPendingAfterScan && !stWalkWidthLimited &&
+      (!stFrontierInRange || !stFrontierEntry.valid)
+    val stValidFrontierBlocker = stPendingWork && !stStop && stPendingAfterScan && !stWalkWidthLimited &&
+      stFrontierInRange && stFrontierEntry.valid
+    val stFrontierSafeToCross = intERSafeToCross.get(stFrontierIdx)
+    val stBlockReason = MuxCase(IntERSTBlockReason.writebackedWaitCommit, Seq(
+      stFrontierEntry.needFlush -> IntERSTBlockReason.needFlush,
+      (!stFrontierEntry.isWritebacked) -> IntERSTBlockReason.notWritebacked,
+      (!stFrontierSafeToCross) -> IntERSTBlockReason.notResolved
+    ))
+    val stBlockerClass = stFrontierEntry.intER.get.instClass
+    val stPendingGuardCount = PopCount(robEntries.map(entry =>
+      entry.valid && entry.intER.get.redef.valid && !entry.intER.get.guardEmitted
+    ))
+
+    val stGlobalStopRecoveryWalk = stPendingWork && stStop && (state =/= s_idle)
+    val stGlobalStopIntrExcpReplay = stPendingWork && stStop && !stGlobalStopRecoveryWalk &&
+      (intrBitSetReg || deqHasException || deqHasReplayInst)
+    val stGlobalStopWfi = stPendingWork && stStop && !stGlobalStopRecoveryWalk &&
+      !stGlobalStopIntrExcpReplay && hasWFI
+    val stGlobalStopMispredictDrain = stPendingWork && stStop && !stGlobalStopRecoveryWalk &&
+      !stGlobalStopIntrExcpReplay && !stGlobalStopWfi && misPredBlock
+    val stGlobalStopCommitFlush = stPendingWork && stStop && !stGlobalStopRecoveryWalk &&
+      !stGlobalStopIntrExcpReplay && !stGlobalStopWfi && !stGlobalStopMispredictDrain &&
+      (lastCycleFlush || io.flushOut.valid || deqNeedFlush && !deqHasFlushed || deqFlushBlock)
+    val stGlobalStopCriticalError = stPendingWork && stStop && !stGlobalStopRecoveryWalk &&
+      !stGlobalStopIntrExcpReplay && !stGlobalStopWfi && !stGlobalStopMispredictDrain &&
+      !stGlobalStopCommitFlush && criticalErrorState
+    val stGlobalStopTraceBackpressure = stPendingWork && stStop && !stGlobalStopRecoveryWalk &&
+      !stGlobalStopIntrExcpReplay && !stGlobalStopWfi && !stGlobalStopMispredictDrain &&
+      !stGlobalStopCommitFlush && !stGlobalStopCriticalError && traceBlock
+    val stGlobalStopOther = stPendingWork && stStop && !stGlobalStopRecoveryWalk &&
+      !stGlobalStopIntrExcpReplay && !stGlobalStopWfi && !stGlobalStopMispredictDrain &&
+      !stGlobalStopCommitFlush && !stGlobalStopCriticalError && !stGlobalStopTraceBackpressure
+
+    val lastSTBlockerValid = RegInit(false.B)
+    val lastSTBlockerPtr = RegInit(0.U.asTypeOf(new RobPtr))
+    val lastSTBlockerReason = RegInit(0.U(IntERSTBlockReason.width.W))
+    val stBlockerEpisode = stValidFrontierBlocker && (
+      !lastSTBlockerValid || lastSTBlockerPtr =/= stFrontierPtr || lastSTBlockerReason =/= stBlockReason
+    )
+    when(stValidFrontierBlocker) {
+      lastSTBlockerValid := true.B
+      lastSTBlockerPtr := stFrontierPtr
+      lastSTBlockerReason := stBlockReason
+    }.otherwise {
+      lastSTBlockerValid := false.B
+    }
+
+    XSPerfAccumulate("int_er_rob_st_cycle", 1.U)
+    XSPerfAccumulate("int_er_rob_st_no_work_cycle", stNoWork)
+    XSPerfAccumulate("int_er_rob_st_pending_work_cycle", stPendingWork)
+    XSPerfAccumulate("int_er_rob_st_pending_global_stop_cycle", stPendingWork && stStop)
+    XSPerfAccumulate("int_er_rob_st_pending_caught_up_after_scan_cycle", stCaughtUpAfterScan)
+    XSPerfAccumulate("int_er_rob_st_pending_walk_width_limited_cycle", stWalkWidthLimited)
+    XSPerfAccumulate("int_er_rob_st_pending_invalid_frontier_cycle", stInvalidFrontier)
+    XSPerfAccumulate("int_er_rob_st_pending_valid_frontier_blocker_cycle", stValidFrontierBlocker)
+    XSPerfAccumulate("int_er_rob_st_global_stop_recovery_walk_cycle", stGlobalStopRecoveryWalk)
+    XSPerfAccumulate("int_er_rob_st_global_stop_interrupt_exception_replay_cycle", stGlobalStopIntrExcpReplay)
+    XSPerfAccumulate("int_er_rob_st_global_stop_wfi_cycle", stGlobalStopWfi)
+    XSPerfAccumulate("int_er_rob_st_global_stop_mispredict_drain_cycle", stGlobalStopMispredictDrain)
+    XSPerfAccumulate("int_er_rob_st_global_stop_commit_flush_cycle", stGlobalStopCommitFlush)
+    XSPerfAccumulate("int_er_rob_st_global_stop_critical_error_cycle", stGlobalStopCriticalError)
+    XSPerfAccumulate("int_er_rob_st_global_stop_trace_backpressure_cycle", stGlobalStopTraceBackpressure)
+    XSPerfAccumulate("int_er_rob_st_global_stop_other_cycle", stGlobalStopOther)
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_block_commit_cycle", stPendingWork && stStop && blockCommit)
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_non_idle_cycle", stPendingWork && stStop && (state =/= s_idle))
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_redirect_cycle", stPendingWork && stStop && io.redirect.valid)
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_flush_out_cycle", stPendingWork && stStop && io.flushOut.valid)
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_interrupt_cycle", stPendingWork && stStop && intrBitSetReg)
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_exception_cycle", stPendingWork && stStop && deqHasException)
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_flush_pipe_cycle", stPendingWork && stStop && deqHasFlushPipe)
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_replay_cycle", stPendingWork && stStop && deqHasReplayInst)
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_wfi_cycle", stPendingWork && stStop && hasWFI)
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_mispredict_drain_cycle", stPendingWork && stStop && misPredBlock)
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_commit_flush_cycle", stPendingWork && stStop && (lastCycleFlush || deqNeedFlush && !deqHasFlushed || deqFlushBlock))
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_critical_error_cycle", stPendingWork && stStop && criticalErrorState)
+    XSPerfAccumulate("int_er_rob_st_global_stop_raw_trace_backpressure_cycle", stPendingWork && stStop && traceBlock)
+    XSPerfAccumulate("int_er_rob_st_blocker_need_flush_cycle", stValidFrontierBlocker && stBlockReason === IntERSTBlockReason.needFlush)
+    XSPerfAccumulate("int_er_rob_st_blocker_not_writebacked_cycle", stValidFrontierBlocker && stBlockReason === IntERSTBlockReason.notWritebacked)
+    XSPerfAccumulate("int_er_rob_st_blocker_writebacked_wait_commit_cycle", stValidFrontierBlocker && stBlockReason === IntERSTBlockReason.writebackedWaitCommit)
+    XSPerfAccumulate("int_er_rob_st_blocker_not_resolved_cycle", stValidFrontierBlocker && stBlockReason === IntERSTBlockReason.notResolved)
+    XSPerfAccumulate("int_er_rob_st_blocker_episode", stBlockerEpisode)
+    XSPerfAccumulate("int_er_rob_st_pending_guard_entry_sum", stPendingGuardCount)
+    XSPerfAccumulate("int_er_rob_st_pending_work_with_guard_cycle", stPendingWork && stPendingGuardCount.orR)
+    XSPerfAccumulate("int_er_rob_st_blocker_pending_guard_cycle", stValidFrontierBlocker &&
+      stFrontierEntry.intER.get.redef.valid && !stFrontierEntry.intER.get.guardEmitted)
+    for ((reasonName, reasonValue) <- IntERSTBlockReason.namedValues) {
+      XSPerfAccumulate(s"int_er_rob_st_blocker_reason_${reasonName}_episode", stBlockerEpisode && stBlockReason === reasonValue)
+    }
+    for ((className, classValue) <- IntERInstClass.namedValues) {
+      val classHit = stValidFrontierBlocker && stBlockerClass === classValue
+      XSPerfAccumulate(s"int_er_rob_st_blocker_class_${className}_cycle", classHit)
+      for ((reasonName, reasonValue) <- IntERSTBlockReason.namedValues) {
+        XSPerfAccumulate(s"int_er_rob_st_blocker_class_${className}_reason_${reasonName}_cycle", classHit && stBlockReason === reasonValue)
+      }
+    }
 
     when(io.redirect.valid || io.flushOut.valid || state === s_walk) {
       intERSpecCursor.get := deqPtr

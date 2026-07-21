@@ -9,7 +9,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import java.nio.file.{Files, Path, Paths}
 import scala.io.Source
-import top.{DefaultConfig, IntERFunctionalConfig, IntERFunctionalMinimalConfig, MediumConfig}
+import top.{DefaultConfig, IntERDisabledConfig, IntERFunctionalConfig, IntERFunctionalMinimalConfig, MediumConfig}
 import utility.{LogUtilsOptions, LogUtilsOptionsKey, PerfCounterOptions, PerfCounterOptionsKey, XSPerfLevel}
 import xiangshan._
 import xiangshan.TopDownCounters._
@@ -704,9 +704,11 @@ class RenameERPolicyProbe(implicit p: Parameters) extends XSModule {
   uca.io.commitRedef := 0.U.asTypeOf(uca.io.commitRedef)
   uca.io.rename.source := 0.U.asTypeOf(uca.io.rename.source)
   uca.io.rename.sourceFallback := 0.U.asTypeOf(uca.io.rename.sourceFallback)
+  uca.io.rename.sourceFallbackReason := VecInit(Seq.fill(RenameWidth)(IntERFallbackReason.none))
   uca.io.rename.alloc := 0.U.asTypeOf(uca.io.rename.alloc)
   uca.io.rename.redef := 0.U.asTypeOf(uca.io.rename.redef)
   uca.io.rename.redefFallback := 0.U.asTypeOf(uca.io.rename.redefFallback)
+  uca.io.rename.redefFallbackReason := VecInit(Seq.fill(RenameWidth)(IntERFallbackReason.none))
 
   uca.io.rename.sourceFallback(0) := sourceFallback
   uca.io.rename.alloc(0).valid := producerEligible
@@ -788,9 +790,11 @@ class RenameERStoreDataPolicyProbe(implicit p: Parameters) extends XSModule {
   uca.io.commitRedef := 0.U.asTypeOf(uca.io.commitRedef)
   uca.io.rename.source := 0.U.asTypeOf(uca.io.rename.source)
   uca.io.rename.sourceFallback := 0.U.asTypeOf(uca.io.rename.sourceFallback)
+  uca.io.rename.sourceFallbackReason := VecInit(Seq.fill(RenameWidth)(IntERFallbackReason.none))
   uca.io.rename.alloc := 0.U.asTypeOf(uca.io.rename.alloc)
   uca.io.rename.redef := 0.U.asTypeOf(uca.io.rename.redef)
   uca.io.rename.redefFallback := 0.U.asTypeOf(uca.io.rename.redefFallback)
+  uca.io.rename.redefFallbackReason := VecInit(Seq.fill(RenameWidth)(IntERFallbackReason.none))
 
   uca.io.rename.sourceFallback(0) := sourceFallback
   uca.io.rename.alloc(0).valid := io.allocProducer
@@ -1469,14 +1473,27 @@ class IntEarlyReleaseBundlesTest extends AnyFlatSpec with Matchers with ChiselSi
     elaborateProbe(IntEarlyReleaseParams(), localSrc = 1, expectedTrackIdWidth = 4)
   }
 
-  it should "keep baseline configs disabled and enable functional Int ER only in explicit configs" in {
+  it should "enable functional Int ER in DefaultConfig and keep IntERDisabledConfig as the baseline" in {
     val defaultParams = (new DefaultConfig)(XSTileKey).head.intEarlyRelease
     val mediumParams = (new MediumConfig)(XSTileKey).head.intEarlyRelease
+    val disabledParams = (new IntERDisabledConfig)(XSTileKey).head.intEarlyRelease
     val functionalParams = (new IntERFunctionalConfig)(XSTileKey).head.intEarlyRelease
     val minimalFunctionalParams = (new IntERFunctionalMinimalConfig)(XSTileKey).head.intEarlyRelease
 
-    defaultParams.enable shouldBe false
-    mediumParams.enable shouldBe false
+    defaultParams.enable shouldBe true
+    defaultParams.observeOnly shouldBe false
+    defaultParams.trackEntries shouldBe 128
+    defaultParams.earlyFreeWidth shouldBe 8
+    defaultParams.stWalkWidth shouldBe 4
+
+    mediumParams.enable shouldBe true
+    mediumParams.observeOnly shouldBe false
+
+    disabledParams.enable shouldBe false
+    disabledParams.observeOnly shouldBe true
+    disabledParams.trackEntries shouldBe defaultParams.trackEntries
+    disabledParams.earlyFreeWidth shouldBe defaultParams.earlyFreeWidth
+    disabledParams.stWalkWidth shouldBe defaultParams.stWalkWidth
 
     functionalParams.enable shouldBe true
     functionalParams.observeOnly shouldBe false
@@ -1692,6 +1709,94 @@ class IntEarlyReleaseBundlesTest extends AnyFlatSpec with Matchers with ChiselSi
     renameSource should include("def intERDebugDelta")
     renameSource should include("intUCA.io.debug.producerReadyCount")
     renameSource should include("intUCA.io.debug.genMismatchCount")
+  }
+
+  it should "expose stable UCA bottleneck perf counter names" in {
+    val renameSource = sourceText("src/main/scala/xiangshan/backend/rename/Rename.scala")
+
+    Seq(
+      "int_er_uc_counting_entry_time",
+      "int_er_uc_entry_ready_time",
+      "int_er_uc_entry_blocker_no_redefiner",
+      "int_er_uc_entry_blocker_guard",
+      "int_er_uc_entry_blocker_producer",
+      "int_er_uc_entry_blocker_consumer",
+      "int_er_uc_entry_blocker_multiple",
+      "int_er_uc_early_free_eligible_all",
+      "int_er_uc_early_free_deferred_width",
+      "int_er_uc_early_free_width_limited_cycle",
+      "int_er_uc_first_fallback",
+      "int_er_uc_first_fallback_move",
+      "int_er_uc_first_fallback_store_data",
+      "int_er_uc_first_fallback_unsupported_consumer",
+      "int_er_uc_first_fallback_unsupported_read_path",
+      "int_er_uc_first_fallback_replay_prone",
+      "int_er_uc_first_fallback_uncertain",
+      "int_er_uc_first_fallback_same_cycle_bypass",
+      "int_er_uc_first_fallback_counter_saturated",
+      "int_er_uc_first_fallback_stale",
+      "int_er_uc_first_fallback_duplicate",
+      "int_er_uc_first_fallback_multiple",
+      "int_er_uc_first_fallback_other",
+      "int_er_uc_commit_clear_counting",
+      "int_er_uc_commit_clear_fallback_wait",
+      "int_er_uc_commit_clear_released_wait",
+      "int_er_uc_released_reused_before_commit",
+      "int_er_uc_released_unreused_at_commit"
+    ).foreach { counterName =>
+      renameSource should include(s"""XSPerfAccumulate("$counterName"""")
+    }
+  }
+
+  it should "expose stable DataPath primary fallback perf counter names" in {
+    val dataPathSource = sourceText("src/main/scala/xiangshan/backend/datapath/DataPath.scala")
+
+    Seq(
+      "int_er_datapath_primary_fallback_unsupported_read_path",
+      "int_er_datapath_primary_fallback_replay_prone",
+      "int_er_datapath_primary_fallback_uncertain",
+      "int_er_datapath_primary_fallback_multiple",
+      "int_er_datapath_primary_fallback_other"
+    ).foreach { counterName =>
+      dataPathSource should include(s"""XSPerfAccumulate("$counterName"""")
+    }
+    dataPathSource should include("IntERFallbackReason.replayProneReadPath")
+    dataPathSource should include("IntERFallbackReason.uncertainReadPath")
+  }
+
+  it should "expose stable ROB speculation tracker bottleneck perf counter names" in {
+    val robSource = sourceText("src/main/scala/xiangshan/backend/rob/Rob.scala")
+
+    Seq(
+      "int_er_rob_st_cycle",
+      "int_er_rob_st_no_work_cycle",
+      "int_er_rob_st_pending_work_cycle",
+      "int_er_rob_st_pending_global_stop_cycle",
+      "int_er_rob_st_pending_caught_up_after_scan_cycle",
+      "int_er_rob_st_pending_walk_width_limited_cycle",
+      "int_er_rob_st_pending_invalid_frontier_cycle",
+      "int_er_rob_st_pending_valid_frontier_blocker_cycle",
+      "int_er_rob_st_global_stop_recovery_walk_cycle",
+      "int_er_rob_st_global_stop_interrupt_exception_replay_cycle",
+      "int_er_rob_st_global_stop_wfi_cycle",
+      "int_er_rob_st_global_stop_mispredict_drain_cycle",
+      "int_er_rob_st_global_stop_commit_flush_cycle",
+      "int_er_rob_st_global_stop_critical_error_cycle",
+      "int_er_rob_st_global_stop_trace_backpressure_cycle",
+      "int_er_rob_st_global_stop_other_cycle",
+      "int_er_rob_st_blocker_need_flush_cycle",
+      "int_er_rob_st_blocker_not_writebacked_cycle",
+      "int_er_rob_st_blocker_writebacked_wait_commit_cycle",
+      "int_er_rob_st_blocker_not_resolved_cycle",
+      "int_er_rob_st_blocker_episode",
+      "int_er_rob_st_pending_guard_entry_sum",
+      "int_er_rob_st_pending_work_with_guard_cycle",
+      "int_er_rob_st_blocker_pending_guard_cycle"
+    ).foreach { counterName =>
+      robSource should include(s"""XSPerfAccumulate("$counterName"""")
+    }
+    robSource should include("int_er_rob_st_blocker_class_${className}_cycle")
+    robSource should include("int_er_rob_st_blocker_class_${className}_reason_${reasonName}_cycle")
   }
 
   it should "expose stable UCA occupancy perf counter names" in {

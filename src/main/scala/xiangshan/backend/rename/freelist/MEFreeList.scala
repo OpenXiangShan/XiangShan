@@ -144,6 +144,12 @@ class MEFreeList(size: Int, commitWidth: Int)(implicit p: Parameters) extends Ba
   XSPerfAccumulate("int_er_me_freelist_low_rename_width_cycle", freeRegCntReg < RenameWidth.U)
   XSPerfAccumulate("int_er_me_freelist_low_2rename_width_cycle", freeRegCntReg < (2 * RenameWidth).U)
   XSPerfAccumulate("int_er_me_freelist_empty_cycle", freeRegCntReg === 0.U)
+  XSPerfAccumulate("int_er_me_freelist_early_free_req_under_rename_width", Mux(freeRegCntReg < RenameWidth.U, earlyFreeReqCount, 0.U))
+  XSPerfAccumulate("int_er_me_freelist_early_free_req_under_2rename_width", Mux(freeRegCntReg < (2 * RenameWidth).U, earlyFreeReqCount, 0.U))
+  XSPerfAccumulate("int_er_me_freelist_early_free_req_when_cannot_allocate", Mux(!io.canAllocate, earlyFreeReqCount, 0.U))
+  XSPerfAccumulate("int_er_me_freelist_early_free_cycle_under_rename_width", earlyFreeReqCount.orR && freeRegCntReg < RenameWidth.U)
+  XSPerfAccumulate("int_er_me_freelist_early_free_cycle_under_2rename_width", earlyFreeReqCount.orR && freeRegCntReg < (2 * RenameWidth).U)
+  XSPerfAccumulate("int_er_me_freelist_early_free_cycle_when_cannot_allocate", earlyFreeReqCount.orR && !io.canAllocate)
   XSPerfHistogram("int_er_me_freelist_free_reg_count", freeRegCntReg, true.B, 0, size + 1, 1)
 
   val perfEvents = Seq(

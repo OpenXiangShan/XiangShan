@@ -32,6 +32,7 @@ import xiangshan.backend.{
   IntERCommitSuppress,
   IntERDebugBundle,
   IntEREntryState,
+  IntERFallbackReason,
   IntERUopMeta,
   RenameIntERIO,
   IntSparseUCA,
@@ -952,6 +953,18 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
       renameFallbackMove(i) := sourceProbeAllowed && isMove(i)
       renameFallbackUnsupportedConsumer(i) := sourceProbeAllowed && !isMove(i) && !supportedConsumer
       renameFallbackStoreDataConsumer(i) := sourceProbeAllowed && scalarStoreDataConsumer
+      val sourceFallbackReasonPop = PopCount(Seq(
+        renameFallbackMove(i),
+        renameFallbackUnsupportedConsumer(i),
+        renameFallbackStoreDataConsumer(i)
+      ))
+      intUCA.io.rename.sourceFallbackReason(i) := MuxCase(IntERFallbackReason.none, Seq(
+        (intUCA.io.rename.sourceFallback(i) && sourceFallbackReasonPop > 1.U) -> IntERFallbackReason.multiple,
+        (intUCA.io.rename.sourceFallback(i) && renameFallbackMove(i)) -> IntERFallbackReason.moveConsumer,
+        (intUCA.io.rename.sourceFallback(i) && renameFallbackStoreDataConsumer(i)) -> IntERFallbackReason.storeDataConsumer,
+        (intUCA.io.rename.sourceFallback(i) && renameFallbackUnsupportedConsumer(i)) -> IntERFallbackReason.unsupportedConsumer,
+        intUCA.io.rename.sourceFallback(i) -> IntERFallbackReason.other
+      ))
       intUCA.io.rename.alloc(i).valid := intEREligible
       intUCA.io.rename.alloc(i).bits.pdest := out.pdest
       intUCA.io.rename.alloc(i).bits.robIdx := out.robIdx
@@ -967,6 +980,11 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
         flushPipe = out.flushPipe,
         singleStep = io.singleStep,
         blocked = intERRenameBlocked
+      )
+      intUCA.io.rename.redefFallbackReason(i) := Mux(
+        intUCA.io.rename.redefFallback(i),
+        IntERFallbackReason.unsupportedConsumer,
+        IntERFallbackReason.none
       )
 
       for (s <- 0 until IntERLogicalSrcWidth) {
@@ -1022,6 +1040,34 @@ class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHe
     XSPerfAccumulate("int_er_uc_commit_identity_mismatch", intERDebugDelta(intUCA.io.debug.commitIdentityMismatchCount))
     XSPerfAccumulate("int_er_uc_gen_mismatch", intERDebugDelta(intUCA.io.debug.genMismatchCount))
     XSPerfAccumulate("int_er_uc_redirect_kill", intERDebugDelta(intUCA.io.debug.redirectKillCount))
+    XSPerfAccumulate("int_er_uc_counting_entry_time", intERDebugDelta(intUCA.io.debug.countingEntryTimeCount))
+    XSPerfAccumulate("int_er_uc_entry_ready_time", intERDebugDelta(intUCA.io.debug.readyEntryTimeCount))
+    XSPerfAccumulate("int_er_uc_entry_blocker_no_redefiner", intERDebugDelta(intUCA.io.debug.blockerNoRedefinerCount))
+    XSPerfAccumulate("int_er_uc_entry_blocker_guard", intERDebugDelta(intUCA.io.debug.blockerGuardCount))
+    XSPerfAccumulate("int_er_uc_entry_blocker_producer", intERDebugDelta(intUCA.io.debug.blockerProducerCount))
+    XSPerfAccumulate("int_er_uc_entry_blocker_consumer", intERDebugDelta(intUCA.io.debug.blockerConsumerCount))
+    XSPerfAccumulate("int_er_uc_entry_blocker_multiple", intERDebugDelta(intUCA.io.debug.blockerMultipleCount))
+    XSPerfAccumulate("int_er_uc_early_free_eligible_all", intERDebugDelta(intUCA.io.debug.earlyFreeEligibleCount))
+    XSPerfAccumulate("int_er_uc_early_free_deferred_width", intERDebugDelta(intUCA.io.debug.earlyFreeDeferredCount))
+    XSPerfAccumulate("int_er_uc_early_free_width_limited_cycle", intERDebugDelta(intUCA.io.debug.earlyFreeWidthLimitedCycleCount))
+    XSPerfAccumulate("int_er_uc_first_fallback", intERDebugDelta(intUCA.io.debug.firstFallbackCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_move", intERDebugDelta(intUCA.io.debug.firstFallbackMoveCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_store_data", intERDebugDelta(intUCA.io.debug.firstFallbackStoreDataCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_unsupported_consumer", intERDebugDelta(intUCA.io.debug.firstFallbackUnsupportedConsumerCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_unsupported_read_path", intERDebugDelta(intUCA.io.debug.firstFallbackUnsupportedReadPathCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_replay_prone", intERDebugDelta(intUCA.io.debug.firstFallbackReplayProneCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_uncertain", intERDebugDelta(intUCA.io.debug.firstFallbackUncertainCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_same_cycle_bypass", intERDebugDelta(intUCA.io.debug.firstFallbackSameCycleBypassCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_counter_saturated", intERDebugDelta(intUCA.io.debug.firstFallbackCounterSaturatedCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_stale", intERDebugDelta(intUCA.io.debug.firstFallbackStaleCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_duplicate", intERDebugDelta(intUCA.io.debug.firstFallbackDuplicateCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_multiple", intERDebugDelta(intUCA.io.debug.firstFallbackMultipleCount))
+    XSPerfAccumulate("int_er_uc_first_fallback_other", intERDebugDelta(intUCA.io.debug.firstFallbackOtherCount))
+    XSPerfAccumulate("int_er_uc_commit_clear_counting", intERDebugDelta(intUCA.io.debug.commitClearCountingCount))
+    XSPerfAccumulate("int_er_uc_commit_clear_fallback_wait", intERDebugDelta(intUCA.io.debug.commitClearFallbackWaitCount))
+    XSPerfAccumulate("int_er_uc_commit_clear_released_wait", intERDebugDelta(intUCA.io.debug.commitClearReleasedWaitCount))
+    XSPerfAccumulate("int_er_uc_released_reused_before_commit", intERDebugDelta(intUCA.io.debug.releasedReusedBeforeCommitCount))
+    XSPerfAccumulate("int_er_uc_released_unreused_at_commit", intERDebugDelta(intUCA.io.debug.releasedUnreusedAtCommitCount))
 
     val intERActiveCount = intUCA.io.debug.activeCount
     val intERCountingCount = PopCount(intUCA.io.debug.entries.map(_.state === IntEREntryState.counting))

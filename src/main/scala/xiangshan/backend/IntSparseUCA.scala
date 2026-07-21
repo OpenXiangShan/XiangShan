@@ -28,9 +28,11 @@ class IntSparseUCAIO(implicit p: org.chipsalliance.cde.config.Parameters) extend
   val rename = new Bundle {
     val source = Input(Vec(RenameWidth, Vec(IntERLogicalSrcWidth, new IntERRenameSourceProbe)))
     val sourceFallback = Input(Vec(RenameWidth, Bool()))
+    val sourceFallbackReason = Input(Vec(RenameWidth, UInt(IntERFallbackReason.width.W)))
     val alloc = Input(Vec(RenameWidth, ValidIO(new IntERProducerAlloc)))
     val redef = Input(Vec(RenameWidth, ValidIO(new IntERRedefProbe)))
     val redefFallback = Input(Vec(RenameWidth, Bool()))
+    val redefFallbackReason = Input(Vec(RenameWidth, UInt(IntERFallbackReason.width.W)))
 
     val srcMatch = Output(Vec(RenameWidth, Vec(IntERLogicalSrcWidth, new IntERSrcTrack)))
     val destTrack = Output(Vec(RenameWidth, new IntERDestTrack))
@@ -64,6 +66,7 @@ class IntSparseUCAEntry(implicit p: org.chipsalliance.cde.config.Parameters) ext
   val redefinerNS = Bool()
   val producedReady = Bool()
   val earlyFreeIssued = Bool()
+  val releasedReused = Bool()
 }
 
 class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends XSModule {
@@ -237,6 +240,20 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
   private val setSaturatedFallbackByEntry = Wire(Vec(entryCount, Bool()))
   private val genMismatchByEntry = Wire(Vec(entryCount, Bool()))
   private val commitClearByEntry = Wire(Vec(entryCount, Bool()))
+  private val releasedReuseByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackMoveByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackStoreDataByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackUnsupportedConsumerByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackUnsupportedReadPathByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackReplayProneByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackUncertainByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackSameCycleBypassByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackCounterSaturatedByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackStaleByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackDuplicateByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackMultipleByEntry = Wire(Vec(entryCount, Bool()))
+  private val firstFallbackOtherByEntry = Wire(Vec(entryCount, Bool()))
 
   for (e <- 0 until entryCount) {
     val entry = entries(e)
@@ -323,6 +340,119 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
     val redefHits = (0 until RenameWidth).map(i => redefFire(i) && redefMatchOH(i)(e))
     val redefFallbackHits = (0 until RenameWidth).map(i => redefFallbackHit(i) && redefMatchOH(i)(e))
     val commitClearHits = (0 until RabCommitWidth).map(i => commitClearOH(i)(e))
+    val releasedReuseHits = (0 until RenameWidth).map { i =>
+      io.rename.alloc(i).valid && isReleased(entry) && io.rename.alloc(i).bits.pdest === entry.pdest
+    }
+
+    val sourceFallbackMoveHits = (0 until RenameWidth).flatMap(i =>
+      (0 until IntERLogicalSrcWidth).map(s =>
+        sourceFallbackHit(i)(s) && sourceMatchOH(i)(s)(e) &&
+          io.rename.sourceFallbackReason(i) === IntERFallbackReason.moveConsumer
+      )
+    )
+    val sourceFallbackStoreDataHits = (0 until RenameWidth).flatMap(i =>
+      (0 until IntERLogicalSrcWidth).map(s =>
+        sourceFallbackHit(i)(s) && sourceMatchOH(i)(s)(e) &&
+          io.rename.sourceFallbackReason(i) === IntERFallbackReason.storeDataConsumer
+      )
+    )
+    val sourceFallbackUnsupportedConsumerHits = (0 until RenameWidth).flatMap(i =>
+      (0 until IntERLogicalSrcWidth).map(s =>
+        sourceFallbackHit(i)(s) && sourceMatchOH(i)(s)(e) &&
+          io.rename.sourceFallbackReason(i) === IntERFallbackReason.unsupportedConsumer
+      )
+    )
+    val sourceFallbackMultipleHits = (0 until RenameWidth).flatMap(i =>
+      (0 until IntERLogicalSrcWidth).map(s =>
+        sourceFallbackHit(i)(s) && sourceMatchOH(i)(s)(e) &&
+          io.rename.sourceFallbackReason(i) === IntERFallbackReason.multiple
+      )
+    )
+    val sourceFallbackOtherHits = (0 until RenameWidth).flatMap(i =>
+      (0 until IntERLogicalSrcWidth).map(s =>
+        sourceFallbackHit(i)(s) && sourceMatchOH(i)(s)(e) &&
+          io.rename.sourceFallbackReason(i) === IntERFallbackReason.other
+      )
+    )
+    val redefFallbackUnsupportedConsumerHits = (0 until RenameWidth).map(i =>
+      redefFallbackHit(i) && redefMatchOH(i)(e) &&
+        io.rename.redefFallbackReason(i) === IntERFallbackReason.unsupportedConsumer
+    )
+    val redefFallbackMultipleHits = (0 until RenameWidth).map(i =>
+      redefFallbackHit(i) && redefMatchOH(i)(e) &&
+        io.rename.redefFallbackReason(i) === IntERFallbackReason.multiple
+    )
+    val redefFallbackOtherHits = (0 until RenameWidth).map(i =>
+      redefFallbackHit(i) && redefMatchOH(i)(e) &&
+        io.rename.redefFallbackReason(i) === IntERFallbackReason.other
+    )
+    val readFallbackUnsupportedPathHits = io.readDone.flatMap { event =>
+      event.bits.src.map { src =>
+        event.valid && event.bits.fallback && src.valid &&
+          matchesCurrentSource(src.trackId, src.trackGen, src.psrc) && isCounting(entry) &&
+          event.bits.reason === IntERFallbackReason.unsupportedReadPath
+      }
+    }
+    val readFallbackReplayProneHits = io.readDone.flatMap { event =>
+      event.bits.src.map { src =>
+        event.valid && event.bits.fallback && src.valid &&
+          matchesCurrentSource(src.trackId, src.trackGen, src.psrc) && isCounting(entry) &&
+          event.bits.reason === IntERFallbackReason.replayProneReadPath
+      }
+    }
+    val readFallbackUncertainHits = io.readDone.flatMap { event =>
+      event.bits.src.map { src =>
+        event.valid && event.bits.fallback && src.valid &&
+          matchesCurrentSource(src.trackId, src.trackGen, src.psrc) && isCounting(entry) &&
+          event.bits.reason === IntERFallbackReason.uncertainReadPath
+      }
+    }
+    val readFallbackMultipleHits = io.readDone.flatMap { event =>
+      event.bits.src.map { src =>
+        event.valid && event.bits.fallback && src.valid &&
+          matchesCurrentSource(src.trackId, src.trackGen, src.psrc) && isCounting(entry) &&
+          event.bits.reason === IntERFallbackReason.multiple
+      }
+    }
+    val readFallbackStaleHits = io.readDone.flatMap { event =>
+      event.bits.src.map { src =>
+        event.valid && event.bits.fallback && src.valid &&
+          matchesCurrentSource(src.trackId, src.trackGen, src.psrc) && isCounting(entry) &&
+          event.bits.reason === IntERFallbackReason.staleEvent
+      }
+    }
+    val readFallbackOtherHits = io.readDone.flatMap { event =>
+      event.bits.src.map { src =>
+        event.valid && event.bits.fallback && src.valid &&
+          matchesCurrentSource(src.trackId, src.trackGen, src.psrc) && isCounting(entry) &&
+          event.bits.reason === IntERFallbackReason.other
+      }
+    }
+    val guardFallbackReasonHits = io.stGuardDec.map { event =>
+      event.valid && event.bits.fallback &&
+        event.bits.trackId === e.U && event.bits.trackGen === entries(e).gen && isCounting(entries(e)) &&
+        entries(e).redefinerSeen &&
+        event.bits.oldPdest === entries(e).pdest &&
+        sameRobPtr(event.bits.robIdx, entries(e).redefinerRobIdx)
+    }
+    val guardFallbackUnsupportedPathHits = guardFallbackReasonHits.zip(io.stGuardDec).map {
+      case (hit, event) => hit && event.bits.reason === IntERFallbackReason.unsupportedReadPath
+    }
+    val guardFallbackReplayProneHits = guardFallbackReasonHits.zip(io.stGuardDec).map {
+      case (hit, event) => hit && event.bits.reason === IntERFallbackReason.replayProneReadPath
+    }
+    val guardFallbackUncertainHits = guardFallbackReasonHits.zip(io.stGuardDec).map {
+      case (hit, event) => hit && event.bits.reason === IntERFallbackReason.uncertainReadPath
+    }
+    val guardFallbackMultipleHits = guardFallbackReasonHits.zip(io.stGuardDec).map {
+      case (hit, event) => hit && event.bits.reason === IntERFallbackReason.multiple
+    }
+    val guardFallbackStaleHits = guardFallbackReasonHits.zip(io.stGuardDec).map {
+      case (hit, event) => hit && event.bits.reason === IntERFallbackReason.staleEvent
+    }
+    val guardFallbackOtherHits = guardFallbackReasonHits.zip(io.stGuardDec).map {
+      case (hit, event) => hit && event.bits.reason === IntERFallbackReason.other
+    }
 
     incByEntry(e) := PopCount(sourceIncHits)
     readDecByEntry(e) := PopCount(readDecHits)
@@ -340,6 +470,63 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
       squashGenMismatchHits.foldLeft(false.B)(_ || _) ||
       guardGenMismatchHits.foldLeft(false.B)(_ || _)
     commitClearByEntry(e) := commitClearHits.foldLeft(false.B)(_ || _)
+    releasedReuseByEntry(e) := releasedReuseHits.foldLeft(false.B)(_ || _)
+
+    val allocatedHereForFallback = VecInit((0 until RenameWidth).map(i => allocFire(i) && allocIdx(i) === e.U)).asUInt.orR
+    val fallbackTransition = (isCounting(entry) || allocatedHereForFallback) &&
+      (setFallbackByEntry(e) || setSaturatedFallbackByEntry(e))
+    val moveReason = sourceFallbackMoveHits.foldLeft(false.B)(_ || _)
+    val storeDataReason = sourceFallbackStoreDataHits.foldLeft(false.B)(_ || _)
+    val unsupportedConsumerReason = sourceFallbackUnsupportedConsumerHits.foldLeft(false.B)(_ || _) ||
+      redefFallbackUnsupportedConsumerHits.foldLeft(false.B)(_ || _)
+    val unsupportedReadPathReason = readFallbackUnsupportedPathHits.foldLeft(false.B)(_ || _) ||
+      guardFallbackUnsupportedPathHits.foldLeft(false.B)(_ || _)
+    val replayProneReason = readFallbackReplayProneHits.foldLeft(false.B)(_ || _) ||
+      guardFallbackReplayProneHits.foldLeft(false.B)(_ || _)
+    val uncertainReason = readFallbackUncertainHits.foldLeft(false.B)(_ || _) ||
+      guardFallbackUncertainHits.foldLeft(false.B)(_ || _)
+    val sameCycleReason = sameCycleBypassFallbackHits.foldLeft(false.B)(_ || _)
+    val counterSaturatedReason = setSaturatedFallbackByEntry(e)
+    val staleReason = readFallbackStaleHits.foldLeft(false.B)(_ || _) ||
+      guardFallbackStaleHits.foldLeft(false.B)(_ || _)
+    val duplicateReason = false.B
+    val explicitMultipleReason = sourceFallbackMultipleHits.foldLeft(false.B)(_ || _) ||
+      redefFallbackMultipleHits.foldLeft(false.B)(_ || _) ||
+      readFallbackMultipleHits.foldLeft(false.B)(_ || _) ||
+      guardFallbackMultipleHits.foldLeft(false.B)(_ || _)
+    val explicitOtherReason = sourceFallbackOtherHits.foldLeft(false.B)(_ || _) ||
+      redefFallbackOtherHits.foldLeft(false.B)(_ || _) ||
+      readFallbackOtherHits.foldLeft(false.B)(_ || _) ||
+      guardFallbackOtherHits.foldLeft(false.B)(_ || _)
+    val reasonFlags = Seq(
+      moveReason,
+      storeDataReason,
+      unsupportedConsumerReason,
+      unsupportedReadPathReason,
+      replayProneReason,
+      uncertainReason,
+      sameCycleReason,
+      counterSaturatedReason,
+      staleReason,
+      duplicateReason,
+      explicitOtherReason
+    )
+    val reasonPop = PopCount(reasonFlags)
+    val multiReason = explicitMultipleReason || reasonPop > 1.U
+    val hasKnownReason = reasonPop.orR || explicitMultipleReason
+    firstFallbackByEntry(e) := fallbackTransition
+    firstFallbackMoveByEntry(e) := fallbackTransition && !multiReason && moveReason
+    firstFallbackStoreDataByEntry(e) := fallbackTransition && !multiReason && storeDataReason
+    firstFallbackUnsupportedConsumerByEntry(e) := fallbackTransition && !multiReason && unsupportedConsumerReason
+    firstFallbackUnsupportedReadPathByEntry(e) := fallbackTransition && !multiReason && unsupportedReadPathReason
+    firstFallbackReplayProneByEntry(e) := fallbackTransition && !multiReason && replayProneReason
+    firstFallbackUncertainByEntry(e) := fallbackTransition && !multiReason && uncertainReason
+    firstFallbackSameCycleBypassByEntry(e) := fallbackTransition && !multiReason && sameCycleReason
+    firstFallbackCounterSaturatedByEntry(e) := fallbackTransition && !multiReason && counterSaturatedReason
+    firstFallbackStaleByEntry(e) := fallbackTransition && !multiReason && staleReason
+    firstFallbackDuplicateByEntry(e) := fallbackTransition && !multiReason && duplicateReason
+    firstFallbackMultipleByEntry(e) := fallbackTransition && multiReason
+    firstFallbackOtherByEntry(e) := fallbackTransition && !multiReason && (!hasKnownReason || explicitOtherReason)
   }
 
   private val nextBeforeEarly = Wire(Vec(entryCount, new IntSparseUCAEntry))
@@ -400,6 +587,9 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
       when(setRedefinerNSByEntry(e)) {
         next.redefinerNS := true.B
       }
+      when(releasedReuseByEntry(e)) {
+        next.releasedReused := true.B
+      }
       when(updateCounter) {
         next.userCounter := nextCounter
       }
@@ -451,6 +641,61 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
 
   entries := nextEntries
 
+  private val countingEntryTime = entries.map(isCounting)
+  private val readyEntryTime = entries.map { entry =>
+    val noRedefiner = !entry.redefinerSeen
+    val guardPending = entry.redefinerSeen && !entry.redefinerNS
+    val producerPending = !entry.producedReady
+    val outstandingGuardToken = Mux(guardPending, 1.U(IntERCounterWidth.W), 0.U(IntERCounterWidth.W))
+    val consumerPending = entry.userCounter > outstandingGuardToken
+    isCounting(entry) && !entry.fallback &&
+      !(noRedefiner || guardPending || producerPending || consumerPending)
+  }
+  private val blockerNoRedefinerEntryTime = entries.map { entry =>
+    val noRedefiner = !entry.redefinerSeen
+    val guardPending = entry.redefinerSeen && !entry.redefinerNS
+    val producerPending = !entry.producedReady
+    val outstandingGuardToken = Mux(guardPending, 1.U(IntERCounterWidth.W), 0.U(IntERCounterWidth.W))
+    val consumerPending = entry.userCounter > outstandingGuardToken
+    isCounting(entry) && PopCount(Seq(noRedefiner, guardPending, producerPending, consumerPending)) === 1.U && noRedefiner
+  }
+  private val blockerGuardEntryTime = entries.map { entry =>
+    val noRedefiner = !entry.redefinerSeen
+    val guardPending = entry.redefinerSeen && !entry.redefinerNS
+    val producerPending = !entry.producedReady
+    val outstandingGuardToken = Mux(guardPending, 1.U(IntERCounterWidth.W), 0.U(IntERCounterWidth.W))
+    val consumerPending = entry.userCounter > outstandingGuardToken
+    isCounting(entry) && PopCount(Seq(noRedefiner, guardPending, producerPending, consumerPending)) === 1.U && guardPending
+  }
+  private val blockerProducerEntryTime = entries.map { entry =>
+    val noRedefiner = !entry.redefinerSeen
+    val guardPending = entry.redefinerSeen && !entry.redefinerNS
+    val producerPending = !entry.producedReady
+    val outstandingGuardToken = Mux(guardPending, 1.U(IntERCounterWidth.W), 0.U(IntERCounterWidth.W))
+    val consumerPending = entry.userCounter > outstandingGuardToken
+    isCounting(entry) && PopCount(Seq(noRedefiner, guardPending, producerPending, consumerPending)) === 1.U && producerPending
+  }
+  private val blockerConsumerEntryTime = entries.map { entry =>
+    val noRedefiner = !entry.redefinerSeen
+    val guardPending = entry.redefinerSeen && !entry.redefinerNS
+    val producerPending = !entry.producedReady
+    val outstandingGuardToken = Mux(guardPending, 1.U(IntERCounterWidth.W), 0.U(IntERCounterWidth.W))
+    val consumerPending = entry.userCounter > outstandingGuardToken
+    isCounting(entry) && PopCount(Seq(noRedefiner, guardPending, producerPending, consumerPending)) === 1.U && consumerPending
+  }
+  private val blockerMultipleEntryTime = entries.map { entry =>
+    val noRedefiner = !entry.redefinerSeen
+    val guardPending = entry.redefinerSeen && !entry.redefinerNS
+    val producerPending = !entry.producedReady
+    val outstandingGuardToken = Mux(guardPending, 1.U(IntERCounterWidth.W), 0.U(IntERCounterWidth.W))
+    val consumerPending = entry.userCounter > outstandingGuardToken
+    isCounting(entry) && PopCount(Seq(noRedefiner, guardPending, producerPending, consumerPending)) > 1.U
+  }
+  private val earlyEligibleCount = PopCount(earlyEligible)
+  private val earlySelectedCount = PopCount(earlyOpportunity)
+  private val earlyDeferredCount = earlyEligibleCount - earlySelectedCount
+  private val earlyWidthLimitedCycle = earlyEligibleCount > IntEREarlyFreeWidth.U
+
   private val allocCount = RegInit(0.U(32.W))
   private val fullUntrackedCount = RegInit(0.U(32.W))
   private val sourceMatchCount = RegInit(0.U(32.W))
@@ -467,6 +712,34 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
   private val commitIdentityMismatchCount = RegInit(0.U(32.W))
   private val genMismatchCount = RegInit(0.U(32.W))
   private val redirectKillCount = RegInit(0.U(32.W))
+  private val countingEntryTimeCount = RegInit(0.U(32.W))
+  private val readyEntryTimeCount = RegInit(0.U(32.W))
+  private val blockerNoRedefinerCount = RegInit(0.U(32.W))
+  private val blockerGuardCount = RegInit(0.U(32.W))
+  private val blockerProducerCount = RegInit(0.U(32.W))
+  private val blockerConsumerCount = RegInit(0.U(32.W))
+  private val blockerMultipleCount = RegInit(0.U(32.W))
+  private val earlyFreeEligibleCount = RegInit(0.U(32.W))
+  private val earlyFreeDeferredCount = RegInit(0.U(32.W))
+  private val earlyFreeWidthLimitedCycleCount = RegInit(0.U(32.W))
+  private val firstFallbackCount = RegInit(0.U(32.W))
+  private val firstFallbackMoveCount = RegInit(0.U(32.W))
+  private val firstFallbackStoreDataCount = RegInit(0.U(32.W))
+  private val firstFallbackUnsupportedConsumerCount = RegInit(0.U(32.W))
+  private val firstFallbackUnsupportedReadPathCount = RegInit(0.U(32.W))
+  private val firstFallbackReplayProneCount = RegInit(0.U(32.W))
+  private val firstFallbackUncertainCount = RegInit(0.U(32.W))
+  private val firstFallbackSameCycleBypassCount = RegInit(0.U(32.W))
+  private val firstFallbackCounterSaturatedCount = RegInit(0.U(32.W))
+  private val firstFallbackStaleCount = RegInit(0.U(32.W))
+  private val firstFallbackDuplicateCount = RegInit(0.U(32.W))
+  private val firstFallbackMultipleCount = RegInit(0.U(32.W))
+  private val firstFallbackOtherCount = RegInit(0.U(32.W))
+  private val commitClearCountingCount = RegInit(0.U(32.W))
+  private val commitClearFallbackWaitCount = RegInit(0.U(32.W))
+  private val commitClearReleasedWaitCount = RegInit(0.U(32.W))
+  private val releasedReusedBeforeCommitCount = RegInit(0.U(32.W))
+  private val releasedUnreusedAtCommitCount = RegInit(0.U(32.W))
 
   allocCount := allocCount + PopCount(allocFire)
   fullUntrackedCount := fullUntrackedCount + PopCount(io.rename.alloc.map(a => a.valid && !io.redirectKill)) - PopCount(allocFire)
@@ -484,6 +757,44 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
   commitIdentityMismatchCount := commitIdentityMismatchCount + PopCount(commitIdentityMismatch)
   genMismatchCount := genMismatchCount + PopCount(genMismatchByEntry)
   redirectKillCount := redirectKillCount + PopCount(VecInit(entries.map(e => io.redirectKill && isActive(e) && !isReleased(e))))
+  countingEntryTimeCount := countingEntryTimeCount + PopCount(countingEntryTime)
+  readyEntryTimeCount := readyEntryTimeCount + PopCount(readyEntryTime)
+  blockerNoRedefinerCount := blockerNoRedefinerCount + PopCount(blockerNoRedefinerEntryTime)
+  blockerGuardCount := blockerGuardCount + PopCount(blockerGuardEntryTime)
+  blockerProducerCount := blockerProducerCount + PopCount(blockerProducerEntryTime)
+  blockerConsumerCount := blockerConsumerCount + PopCount(blockerConsumerEntryTime)
+  blockerMultipleCount := blockerMultipleCount + PopCount(blockerMultipleEntryTime)
+  earlyFreeEligibleCount := earlyFreeEligibleCount + earlyEligibleCount
+  earlyFreeDeferredCount := earlyFreeDeferredCount + earlyDeferredCount
+  earlyFreeWidthLimitedCycleCount := earlyFreeWidthLimitedCycleCount + Mux(earlyWidthLimitedCycle, 1.U, 0.U)
+  firstFallbackCount := firstFallbackCount + PopCount(firstFallbackByEntry)
+  firstFallbackMoveCount := firstFallbackMoveCount + PopCount(firstFallbackMoveByEntry)
+  firstFallbackStoreDataCount := firstFallbackStoreDataCount + PopCount(firstFallbackStoreDataByEntry)
+  firstFallbackUnsupportedConsumerCount := firstFallbackUnsupportedConsumerCount + PopCount(firstFallbackUnsupportedConsumerByEntry)
+  firstFallbackUnsupportedReadPathCount := firstFallbackUnsupportedReadPathCount + PopCount(firstFallbackUnsupportedReadPathByEntry)
+  firstFallbackReplayProneCount := firstFallbackReplayProneCount + PopCount(firstFallbackReplayProneByEntry)
+  firstFallbackUncertainCount := firstFallbackUncertainCount + PopCount(firstFallbackUncertainByEntry)
+  firstFallbackSameCycleBypassCount := firstFallbackSameCycleBypassCount + PopCount(firstFallbackSameCycleBypassByEntry)
+  firstFallbackCounterSaturatedCount := firstFallbackCounterSaturatedCount + PopCount(firstFallbackCounterSaturatedByEntry)
+  firstFallbackStaleCount := firstFallbackStaleCount + PopCount(firstFallbackStaleByEntry)
+  firstFallbackDuplicateCount := firstFallbackDuplicateCount + PopCount(firstFallbackDuplicateByEntry)
+  firstFallbackMultipleCount := firstFallbackMultipleCount + PopCount(firstFallbackMultipleByEntry)
+  firstFallbackOtherCount := firstFallbackOtherCount + PopCount(firstFallbackOtherByEntry)
+  commitClearCountingCount := commitClearCountingCount + PopCount(entries.zip(commitClearByEntry).map {
+    case (entry, clear) => clear && isCounting(entry)
+  })
+  commitClearFallbackWaitCount := commitClearFallbackWaitCount + PopCount(entries.zip(commitClearByEntry).map {
+    case (entry, clear) => clear && isFallbackWait(entry)
+  })
+  commitClearReleasedWaitCount := commitClearReleasedWaitCount + PopCount(entries.zip(commitClearByEntry).map {
+    case (entry, clear) => clear && isReleased(entry)
+  })
+  releasedReusedBeforeCommitCount := releasedReusedBeforeCommitCount + PopCount(entries.zip(commitClearByEntry).zip(releasedReuseByEntry).map {
+    case ((entry, clear), reusedThisCycle) => clear && isReleased(entry) && (entry.releasedReused || reusedThisCycle)
+  })
+  releasedUnreusedAtCommitCount := releasedUnreusedAtCommitCount + PopCount(entries.zip(commitClearByEntry).zip(releasedReuseByEntry).map {
+    case ((entry, clear), reusedThisCycle) => clear && isReleased(entry) && !entry.releasedReused && !reusedThisCycle
+  })
 
   for (e <- 0 until entryCount) {
     io.debug.entries(e).state := entries(e).state
@@ -497,6 +808,7 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
     io.debug.entries(e).redefinerNS := entries(e).redefinerNS
     io.debug.entries(e).producedReady := entries(e).producedReady
     io.debug.entries(e).earlyFreeIssued := entries(e).earlyFreeIssued
+    io.debug.entries(e).releasedReused := entries(e).releasedReused
   }
   io.debug.activeCount := PopCount(entries.map(isActive))
   io.debug.allocCount := allocCount
@@ -515,4 +827,32 @@ class IntSparseUCA(implicit p: org.chipsalliance.cde.config.Parameters) extends 
   io.debug.commitIdentityMismatchCount := commitIdentityMismatchCount
   io.debug.genMismatchCount := genMismatchCount
   io.debug.redirectKillCount := redirectKillCount
+  io.debug.countingEntryTimeCount := countingEntryTimeCount
+  io.debug.readyEntryTimeCount := readyEntryTimeCount
+  io.debug.blockerNoRedefinerCount := blockerNoRedefinerCount
+  io.debug.blockerGuardCount := blockerGuardCount
+  io.debug.blockerProducerCount := blockerProducerCount
+  io.debug.blockerConsumerCount := blockerConsumerCount
+  io.debug.blockerMultipleCount := blockerMultipleCount
+  io.debug.earlyFreeEligibleCount := earlyFreeEligibleCount
+  io.debug.earlyFreeDeferredCount := earlyFreeDeferredCount
+  io.debug.earlyFreeWidthLimitedCycleCount := earlyFreeWidthLimitedCycleCount
+  io.debug.firstFallbackCount := firstFallbackCount
+  io.debug.firstFallbackMoveCount := firstFallbackMoveCount
+  io.debug.firstFallbackStoreDataCount := firstFallbackStoreDataCount
+  io.debug.firstFallbackUnsupportedConsumerCount := firstFallbackUnsupportedConsumerCount
+  io.debug.firstFallbackUnsupportedReadPathCount := firstFallbackUnsupportedReadPathCount
+  io.debug.firstFallbackReplayProneCount := firstFallbackReplayProneCount
+  io.debug.firstFallbackUncertainCount := firstFallbackUncertainCount
+  io.debug.firstFallbackSameCycleBypassCount := firstFallbackSameCycleBypassCount
+  io.debug.firstFallbackCounterSaturatedCount := firstFallbackCounterSaturatedCount
+  io.debug.firstFallbackStaleCount := firstFallbackStaleCount
+  io.debug.firstFallbackDuplicateCount := firstFallbackDuplicateCount
+  io.debug.firstFallbackMultipleCount := firstFallbackMultipleCount
+  io.debug.firstFallbackOtherCount := firstFallbackOtherCount
+  io.debug.commitClearCountingCount := commitClearCountingCount
+  io.debug.commitClearFallbackWaitCount := commitClearFallbackWaitCount
+  io.debug.commitClearReleasedWaitCount := commitClearReleasedWaitCount
+  io.debug.releasedReusedBeforeCommitCount := releasedReusedBeforeCommitCount
+  io.debug.releasedUnreusedAtCommitCount := releasedUnreusedAtCommitCount
 }

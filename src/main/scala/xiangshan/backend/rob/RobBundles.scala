@@ -25,7 +25,7 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.backend.{BackendParams, IntERFallbackReason, IntERRobReadDoneStatus, IntERRobUopMeta, IntERSrcValueReadDone, IntERSTGuardDec}
+import xiangshan.backend.{BackendParams, IntERFallbackReason, IntERInstClass, IntERRobReadDoneStatus, IntERRobUopMeta, IntERSrcValueReadDone, IntERSTGuardDec}
 import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx, EnqRobUop}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.ftq.FtqPtr
@@ -192,6 +192,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
       }
       meta.dest := Mux(robLocalIntERSafe, robEnq.intER.get.dest, 0.U.asTypeOf(meta.dest))
       meta.redef := Mux(robLocalIntERSafe, robEnq.intER.get.redef, 0.U.asTypeOf(meta.redef))
+      meta.instClass := Mux(robLocalIntERSafe, RobIntEROps.classifyInst(robEnq.fuType, robEnq.commitType), IntERInstClass.other)
       meta.resolved := false.B
       meta.guardEmitted := false.B
     }
@@ -470,6 +471,22 @@ object RobIntDiffOps {
 }
 
 object RobIntEROps {
+  def classifyInst(fuType: UInt, commitType: UInt): UInt = {
+    MuxCase(IntERInstClass.other, Seq(
+      FuType.isVLoad(fuType) -> IntERInstClass.vectorLoad,
+      FuType.isVStore(fuType) -> IntERInstClass.vectorStore,
+      FuType.isAMO(fuType) -> IntERInstClass.amo,
+      (commitType === CommitType.LOAD) -> IntERInstClass.scalarLoad,
+      (commitType === CommitType.STORE) -> IntERInstClass.scalarStore,
+      (CommitType.isBranch(commitType) || FuType.isBJU(fuType)) -> IntERInstClass.branchJump,
+      FuType.isCsr(fuType) -> IntERInstClass.csr,
+      FuType.isFence(fuType) -> IntERInstClass.fence,
+      FuType.isInt(fuType) -> IntERInstClass.otherInteger,
+      FuType.isFArith(fuType) -> IntERInstClass.otherFp,
+      FuType.isVall(fuType) -> IntERInstClass.otherVector
+    ))
+  }
+
   def assertGuardEmittedRedefNotFlushed(
     entry: RobBundles.RobEntryBundle,
     invalidatedByRedirect: Bool

@@ -35,6 +35,13 @@ object IntERFallbackReason {
   def staleEvent = 5.U(width.W)
   def duplicateSource = 6.U(width.W)
   def invalidPdest = 7.U(width.W)
+  def moveConsumer = 8.U(width.W)
+  def storeDataConsumer = 9.U(width.W)
+  def replayProneReadPath = 10.U(width.W)
+  def uncertainReadPath = 11.U(width.W)
+  def sameCycleBypass = 12.U(width.W)
+  def multiple = 13.U(width.W)
+  def other = 14.U(width.W)
 }
 
 object IntEREntryState {
@@ -44,6 +51,54 @@ object IntEREntryState {
   def counting = 1.U(width.W)
   def fallbackWaitCommit = 2.U(width.W)
   def releasedWaitCommit = 3.U(width.W)
+}
+
+object IntERInstClass {
+  val width = 4
+
+  def scalarLoad = 0.U(width.W)
+  def scalarStore = 1.U(width.W)
+  def vectorLoad = 2.U(width.W)
+  def vectorStore = 3.U(width.W)
+  def amo = 4.U(width.W)
+  def branchJump = 5.U(width.W)
+  def csr = 6.U(width.W)
+  def fence = 7.U(width.W)
+  def otherInteger = 8.U(width.W)
+  def otherFp = 9.U(width.W)
+  def otherVector = 10.U(width.W)
+  def other = 11.U(width.W)
+
+  val namedValues: Seq[(String, UInt)] = Seq(
+    "scalar_load" -> scalarLoad,
+    "scalar_store" -> scalarStore,
+    "vector_load" -> vectorLoad,
+    "vector_store" -> vectorStore,
+    "amo" -> amo,
+    "branch_jump" -> branchJump,
+    "csr" -> csr,
+    "fence" -> fence,
+    "other_integer" -> otherInteger,
+    "other_fp" -> otherFp,
+    "other_vector" -> otherVector,
+    "other" -> other
+  )
+}
+
+object IntERSTBlockReason {
+  val width = 2
+
+  def needFlush = 0.U(width.W)
+  def notWritebacked = 1.U(width.W)
+  def writebackedWaitCommit = 2.U(width.W)
+  def notResolved = 3.U(width.W)
+
+  val namedValues: Seq[(String, UInt)] = Seq(
+    "need_flush" -> needFlush,
+    "not_writebacked" -> notWritebacked,
+    "writebacked_wait_commit" -> writebackedWaitCommit,
+    "not_resolved" -> notResolved
+  )
 }
 
 object IntERBundleHelper {
@@ -121,6 +176,7 @@ class IntERRobUopMeta(implicit p: Parameters) extends XSBundle {
   val src = IntERBundleHelper.logicalRobSrcVec
   val dest = new IntERDestTrack
   val redef = new IntERRedefTrack
+  val instClass = UInt(IntERInstClass.width.W)
   val resolved = Bool()
   val guardEmitted = Bool()
 }
@@ -152,6 +208,11 @@ class IntERDataPathReadDoneStatus extends Bundle {
   val unsupportedReadPath = Bool()
   val replayProne = Bool()
   val uncertain = Bool()
+  val primaryUnsupportedReadPath = Bool()
+  val primaryReplayProne = Bool()
+  val primaryUncertain = Bool()
+  val primaryMultiple = Bool()
+  val primaryOther = Bool()
   val trackedRegOHSourceCount = UInt(4.W)
   val trackedRegCacheSourceCount = UInt(4.W)
   val trackedForwardSourceCount = UInt(4.W)
@@ -256,6 +317,7 @@ class IntEREntryDebug(implicit p: Parameters) extends XSBundle {
   val redefinerNS = Bool()
   val producedReady = Bool()
   val earlyFreeIssued = Bool()
+  val releasedReused = Bool()
 }
 
 class IntERDebugBundle(implicit p: Parameters) extends XSBundle {
@@ -277,4 +339,32 @@ class IntERDebugBundle(implicit p: Parameters) extends XSBundle {
   val commitIdentityMismatchCount = UInt(32.W)
   val genMismatchCount = UInt(32.W)
   val redirectKillCount = UInt(32.W)
+  val countingEntryTimeCount = UInt(32.W)
+  val readyEntryTimeCount = UInt(32.W)
+  val blockerNoRedefinerCount = UInt(32.W)
+  val blockerGuardCount = UInt(32.W)
+  val blockerProducerCount = UInt(32.W)
+  val blockerConsumerCount = UInt(32.W)
+  val blockerMultipleCount = UInt(32.W)
+  val earlyFreeEligibleCount = UInt(32.W)
+  val earlyFreeDeferredCount = UInt(32.W)
+  val earlyFreeWidthLimitedCycleCount = UInt(32.W)
+  val firstFallbackCount = UInt(32.W)
+  val firstFallbackMoveCount = UInt(32.W)
+  val firstFallbackStoreDataCount = UInt(32.W)
+  val firstFallbackUnsupportedConsumerCount = UInt(32.W)
+  val firstFallbackUnsupportedReadPathCount = UInt(32.W)
+  val firstFallbackReplayProneCount = UInt(32.W)
+  val firstFallbackUncertainCount = UInt(32.W)
+  val firstFallbackSameCycleBypassCount = UInt(32.W)
+  val firstFallbackCounterSaturatedCount = UInt(32.W)
+  val firstFallbackStaleCount = UInt(32.W)
+  val firstFallbackDuplicateCount = UInt(32.W)
+  val firstFallbackMultipleCount = UInt(32.W)
+  val firstFallbackOtherCount = UInt(32.W)
+  val commitClearCountingCount = UInt(32.W)
+  val commitClearFallbackWaitCount = UInt(32.W)
+  val commitClearReleasedWaitCount = UInt(32.W)
+  val releasedReusedBeforeCommitCount = UInt(32.W)
+  val releasedUnreusedAtCommitCount = UInt(32.W)
 }
