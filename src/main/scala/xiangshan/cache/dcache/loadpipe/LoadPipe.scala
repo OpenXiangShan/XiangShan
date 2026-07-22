@@ -534,6 +534,40 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss)
   XSPerfAccumulate("dcache_first_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss && !s2_hit_access)
 
+  // V0.4 path accounting: classify every MDP-marked S2 request before it is
+  // either served by L1, sent to MissQueue, nacked, or falls into another
+  // replay/permission path.  Keep demand and MDP stride prefetches separate;
+  // chasing prefetches deliberately do not carry mdpPfHint.
+  val mdpHintS2 = s2_valid && s2_mdp_pf_hint
+  val mdpHintS2Demand = mdpHintS2 && !s2_is_prefetch
+  val mdpHintS2Stride = mdpHintS2 && s2_is_prefetch
+  val mdpHintS2Events = Seq(
+    "s2" -> mdpHintS2,
+    "s2_hit" -> (mdpHintS2 && s2_hit),
+    "s2_miss_req" -> (mdpHintS2 && s2_miss_req_valid),
+    "s2_early_nack" -> (mdpHintS2 && s2_nack_hit),
+    "s2_data_nack" -> (mdpHintS2 && s2_nack_data),
+    "s2_no_mshr_nack" -> (mdpHintS2 && s2_nack_no_mshr),
+    "s2_wbq_nack" -> (mdpHintS2 && s2_nack_wbq_conflict),
+    "s2_other" -> (mdpHintS2 && !s2_hit && !s2_miss_req_valid && !s2_nack),
+    "miss_req_fire" -> (mdpHintS2 && io.miss_req.fire),
+    "miss_req_accepted" -> (mdpHintS2 && s2_miss_req_fire),
+    "miss_req_cancel" -> (mdpHintS2 && io.miss_req.fire && io.miss_req.bits.cancel),
+    "miss_req_block" -> (mdpHintS2 && s2_miss_req_valid && !io.miss_req.ready),
+    "miss_req_merge" -> (mdpHintS2 && s2_miss_merged)
+  )
+  mdpHintS2Events.foreach { case (name, enable) =>
+    XSPerfAccumulate(s"mdp_hint_$name", enable)
+  }
+  Seq("demand" -> mdpHintS2Demand, "stride" -> mdpHintS2Stride).foreach {
+    case (source, enable) =>
+      XSPerfAccumulate(s"mdp_hint_s2_$source", enable)
+      XSPerfAccumulate(s"mdp_hint_s2_${source}_hit", enable && s2_hit)
+      XSPerfAccumulate(s"mdp_hint_s2_${source}_miss_req", enable && s2_miss_req_valid)
+      XSPerfAccumulate(s"mdp_hint_${source}_miss_req_fire", enable && io.miss_req.fire)
+      XSPerfAccumulate(s"mdp_hint_${source}_miss_req_block", enable && s2_miss_req_valid && !io.miss_req.ready)
+  }
+
   // if ldu0 and ldu1 hit the same, count for 1
   val total_prefetch = s2_valid && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)
   val pf_late_in_cache = s2_valid && s2_hit && (s2_req.instrtype === DCACHE_PREFETCH_SOURCE.U)

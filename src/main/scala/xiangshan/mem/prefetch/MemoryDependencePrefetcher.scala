@@ -482,6 +482,9 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
 
   class MdpL1PrefetchDBEntry extends XSBundle {
     val timeCnt = UInt(64.W)
+    // PC of the load that generated this chasingPf or stridePf candidate.
+    // MdpPrefetchBuffer carries it across TLB translation to the final fire.
+    val triggerPC = UInt(VAddrBits.W)
     val vaddr = UInt(VAddrBits.W)
     val paddr = UInt(PAddrBits.W)
     val pfSource = UInt(L1PfSourceBits.W)
@@ -545,8 +548,9 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     val entry = mdt(s1_train0Idx)
     val oldImm = s1_train0OldEntry.imm.asSInt.pad(MDP_IMM_BITS + 1)
     val newImm = s1_train0Bits.imm.asSInt.pad(MDP_IMM_BITS + 1)
-    val immDiff = Mux(oldImm >= newImm, oldImm - newImm, newImm - oldImm)
-    val immClose = immDiff <= 1.S
+    // V0.4 treats only an exactly repeated immediate as confirmation of the
+    // current dependence.  A near value is a mismatch and must decay immCnt.
+    val immSame = oldImm === newImm
     val immCntDec = Mux(s1_train0OldEntry.immCnt === 0.U, 0.U, s1_train0OldEntry.immCnt - 1.U)
 
     when(s1_train0Hit) {
@@ -555,8 +559,8 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
         s1_train0OldEntry.conf,
         s1_train0OldEntry.conf + 1.U
       )
-      when(immClose) {
-        entry.imm := Mux(oldImm <= newImm, s1_train0OldEntry.imm, s1_train0Bits.imm)
+      when(immSame) {
+        entry.imm := s1_train0OldEntry.imm
         entry.immCnt := Mux(
           s1_train0OldEntry.immCnt === mdpCounterMax.U,
           s1_train0OldEntry.immCnt,
@@ -876,6 +880,7 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
 
   val l1PrefetchLog = Wire(new MdpL1PrefetchDBEntry)
   l1PrefetchLog.timeCnt := GTimer()
+  l1PrefetchLog.triggerPC := io.l1PrefetchReq.bits.mdpPC
   l1PrefetchLog.vaddr := io.l1PrefetchReq.bits.vaddr
   l1PrefetchLog.paddr := io.l1PrefetchReq.bits.paddr
   l1PrefetchLog.pfSource := io.l1PrefetchReq.bits.pf_source.value
