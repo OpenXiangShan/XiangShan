@@ -119,7 +119,7 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
   }
 
   val stateBanks = Seq.tabulate(params.renameWidth) { bank =>
-    SyncReadMem(params.storageEntries, UInt(stateWidth.W), SyncReadMem.ReadFirst)
+    Mem(params.storageEntries, UInt(stateWidth.W))
       .suggestName(s"diff_rat_state_bank_$bank")
   }
   val stateWriteValid = VecInit(io.renameUpdates.map(req => req.valid && req.bits.lastUop))
@@ -160,9 +160,9 @@ class DiffRatStateBuffer(implicit p: Parameters) extends XSModule {
     stateSlotValid(readSlot) := false.B
   }
 
-  val bankReadData = VecInit(stateBanks.map(_.read(readSlot, readRequestValid)))
+  val bankReadData = RegEnable(VecInit(stateBanks.map(_.read(readSlot))), readRequestValid)
   val readValid = RegNext(readRequestValid, false.B)
-  val readBankOH = RegEnable(UIntToOH(stateBankTags.read(readSlot), params.renameWidth), readRequestValid)
+  val readBankOH = RegEnable(UIntToOH(stateBankTags(readSlot), params.renameWidth), readRequestValid)
   val readState = Mux1H(readBankOH, bankReadData).asTypeOf(new DiffRatState(params))
   val committedRat = RegInit(DiffRatState.init(params))
 
