@@ -188,8 +188,8 @@ task csr_ctrl_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
         vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_bp_ctrl_tage_enable <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_bp_ctrl_ubtb_enable <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_frontend_trigger_debugMode <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable <= '0;
-        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable <= 1'b1;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable <= 1'b1;
         vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_mem_trigger_debugMode <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_priv_debug <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_mode <= '0;
@@ -278,6 +278,9 @@ task csr_ctrl_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_1) begin
+        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable <= '1;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable <= '1;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_priv_debug <= '1;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_mode <= '1;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_asid <= '1;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_ppn <= '1;
@@ -364,6 +367,9 @@ task csr_ctrl_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_X) begin
+        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable <= 'x;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable <= 'x;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_priv_debug <= 'x;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_mode <= 'x;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_asid <= 'x;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_ppn <= 'x;
@@ -450,6 +456,9 @@ task csr_ctrl_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_RAND) begin
+        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable <= $urandom;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable <= $urandom;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_priv_debug <= $urandom;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_mode <= $urandom;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_asid <= $urandom;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_ppn <= $urandom;
@@ -536,6 +545,9 @@ task csr_ctrl_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode)
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_LST) begin
+        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable <= '0;
+        vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_priv_debug <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_mode <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_asid <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_tlbCsr_satp_ppn <= '0;

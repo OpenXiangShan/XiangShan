@@ -27,6 +27,7 @@ class fence_agent_agent_xaction  extends tcnt_data_base;
     extern constraint default_io_ooo_to_mem_sfence_bits_id_cons;
     extern constraint default_io_ooo_to_mem_sfence_bits_hv_cons;
     extern constraint default_io_ooo_to_mem_sfence_bits_hg_cons;
+    extern constraint default_io_ooo_to_mem_sfence_bits_flushPipe_cons;
 
     extern function new(string name="fence_agent_agent_xaction");
     extern function void pack();
@@ -78,6 +79,10 @@ constraint fence_agent_agent_xaction::default_io_ooo_to_mem_sfence_bits_hg_cons{
     io_ooo_to_mem_sfence_bits_hg inside {1'b0, 1'b1};
 }
 
+constraint fence_agent_agent_xaction::default_io_ooo_to_mem_sfence_bits_flushPipe_cons{
+    soft io_ooo_to_mem_sfence_bits_flushPipe == 1'b0;
+}
+
 function fence_agent_agent_xaction::new(string name = "fence_agent_agent_xaction");
     super.new();
 endfunction:new
@@ -111,6 +116,7 @@ function string fence_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_ooo_to_mem_sfence_bits_id = 0x%0h ",pkt_str,this.io_ooo_to_mem_sfence_bits_id);
     pkt_str = $sformatf("%sio_ooo_to_mem_sfence_bits_hv = 0x%0h ",pkt_str,this.io_ooo_to_mem_sfence_bits_hv);
     pkt_str = $sformatf("%sio_ooo_to_mem_sfence_bits_hg = 0x%0h ",pkt_str,this.io_ooo_to_mem_sfence_bits_hg);
+    pkt_str = $sformatf("%sio_ooo_to_mem_sfence_bits_flushPipe = 0x%0h ",pkt_str,this.io_ooo_to_mem_sfence_bits_flushPipe);
 
     return pkt_str;
 endfunction:psdisplay
@@ -164,6 +170,11 @@ function bit fence_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer com
         if(this.io_ooo_to_mem_sfence_bits_hg!=rhs_.io_ooo_to_mem_sfence_bits_hg) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_sfence_bits_hg=0x%0h while the rhs_.io_ooo_to_mem_sfence_bits_hg=0x%0h",this.io_ooo_to_mem_sfence_bits_hg,rhs_.io_ooo_to_mem_sfence_bits_hg),UVM_NONE)
+        end
+
+        if(this.io_ooo_to_mem_sfence_bits_flushPipe!=rhs_.io_ooo_to_mem_sfence_bits_flushPipe) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_sfence_bits_flushPipe=0x%0h while the rhs_.io_ooo_to_mem_sfence_bits_flushPipe=0x%0h",this.io_ooo_to_mem_sfence_bits_flushPipe,rhs_.io_ooo_to_mem_sfence_bits_flushPipe),UVM_NONE)
         end
 
     end

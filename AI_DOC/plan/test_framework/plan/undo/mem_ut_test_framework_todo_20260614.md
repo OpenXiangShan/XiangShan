@@ -385,8 +385,8 @@ TODO：
 
 当前本轮 V2 适配策略：
 
-- `csr_ctrl_agent` monitor 需要采样 `io_ooo_to_mem_tlbCsr_priv_debug`。
-- raw CSR/runtime snapshot 保存 `priv_debug`，默认值为 `1'b0`，表示当前 smoke/main flow 默认不进入 debug mode。
+- `csr_ctrl_agent` monitor 已采样 `io_ooo_to_mem_tlbCsr_priv_debug`，并完成 X/Z 检查。
+- raw CSR/runtime snapshot 已保存 `priv_debug`，默认值为 `1'b0`，表示当前 smoke/main flow 默认不进入 debug mode。
 - 当前 sequence、主表、异常 directed 激励、pass/fault、terminal 和 L2TLB lookup 均不消费 `priv_debug`。
 - 当前测试框架不根据 `priv_debug` 生成、禁止或筛选 debug-mode 权限/异常激励。
 
@@ -417,7 +417,7 @@ TODO：
 
 当前本轮 V2 适配策略：
 
-- `fence_agent` 可以观察或驱动 `io_ooo_to_mem_sfence_bits_flushPipe` 端口，但 `dispatch_raw_sfence_t` 和 `decode_raw_sfence()` 不消费该字段。
+- `fence_agent` 已能以 soft 默认 `0` 构造、透明驱动、打印、比较并在 valid payload 下检查 `io_ooo_to_mem_sfence_bits_flushPipe`，但 `dispatch_raw_sfence_t` 和 `decode_raw_sfence()` 不消费该字段。
 - 现有 sfence flow 只按 `rs1/rs2/addr/id/hv/hg` 失效 `tlb_entry_by_key`，不删除主表、uid record、pending writeback、issue queue、LQ/SQ mapping 或 terminal 状态。
 - 当前测试框架不把 `flushPipe=1` 当作 MemBlock 本地暂停 LSQ enqueue/issue 的信号。
 - 当前建议 sfence directed 场景在 quiescent 窗口执行，即先让 active load/store 事务收敛，再发 sfence，避免框架等待被完整 core pipeline flush 杀掉的年轻指令事件。
@@ -439,7 +439,7 @@ TODO：
 后续 TODO：
 
 - 新建 `sfence flushPipe` 专项 plan，明确该专项是否要在 MemBlock standalone UT 中复刻完整 core 的 ROB 提交点 flush 行为。
-- 在 raw sfence payload 中增加 `flushPipe` 字段，并说明 monitor 写入、默认值、reset 清理和 debug dump。
+- 只有后续决定实现 standalone 全局 pipeline flush 行为时，才在 raw sfence payload 中增加 `flushPipe` 字段，并说明 monitor 写入、默认值、reset 清理和 debug dump；当前接口保真专项明确不增加该字段。
 - 增加 flush epoch 或等价状态，记录 sfence flush 的 ROB 边界、触发 cycle 和影响范围。
 - 按 ROB 年龄区分老指令和年轻指令：老于 sfence 的 load/store 继续等待正常完成，年轻于 sfence 的 active uid 标记为 killed 或 flush terminal。
 - 定义 pending writeback、issue/recovery queue、LQ/SQ mapping、main-table active uid 的清理或回滚策略。
@@ -722,7 +722,8 @@ agent 的 base sequence/driver。
 - 分别定义 S1/S2 的 legal leaf、`R/W/X/U/G/A/D/V/N/PBMT` 约束，以及 PF、AF、GPF、GAF 的
   来源和优先级；在这些规则确定前不得用局部 fixup 清除 `tlbGPF` 或强制生成“合法”stage2 entry。
 - 复查 sfence/hfence entry match 与 global-entry 判断，使每类失效操作读取语义对应阶段的 `G`
-  等属性；同步检查 lookup key 中 `vpn/s2xlate/asid/vmid/csr_update_seq` 的阶段语义。
+  等属性；同步确认 lookup key 只使用 `vpn/s2xlate/asid/vmid`，`csr_update_seq` 仅用于 runtime
+  语义变化追踪，不属于 lookup key。
 - 增加 directed testcase，至少覆盖 S1/S2 权限相同、仅 S1 拒绝、仅 S2 拒绝、S1/S2 `G/U`
   不同以及 GPF/GAF 场景；response 字段和状态记录必须能区分 fault 来自哪个阶段。
 

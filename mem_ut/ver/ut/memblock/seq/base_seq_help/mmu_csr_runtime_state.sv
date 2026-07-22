@@ -30,6 +30,9 @@ class mmu_csr_runtime_state extends uvm_object;
     bit            priv_vsum;
     bit            m_pbmt_en;
     bit            h_pbmt_en;
+    bit            hd_misalign_ld_enable;
+    bit            hd_misalign_st_enable;
+    bit            priv_debug;
 
     int unsigned   update_seq;
 
@@ -60,6 +63,9 @@ class mmu_csr_runtime_state extends uvm_object;
         priv_vsum  = 1'b0;
         m_pbmt_en  = 1'b0;
         h_pbmt_en  = 1'b0;
+        hd_misalign_ld_enable = 1'b1;
+        hd_misalign_st_enable = 1'b1;
+        priv_debug = 1'b0;
         update_seq = 0;
     endfunction:reset
 
@@ -114,6 +120,9 @@ class mmu_csr_runtime_state extends uvm_object;
         priv_vsum  = csr_tr.io_ooo_to_mem_tlbCsr_priv_vsum;
         m_pbmt_en  = csr_tr.io_ooo_to_mem_tlbCsr_mPBMTE;
         h_pbmt_en  = csr_tr.io_ooo_to_mem_tlbCsr_hPBMTE;
+        hd_misalign_ld_enable = csr_tr.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable;
+        hd_misalign_st_enable = csr_tr.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable;
+        priv_debug = csr_tr.io_ooo_to_mem_tlbCsr_priv_debug;
         if (changed) begin
             update_seq++;
         end
@@ -170,6 +179,9 @@ class mmu_csr_runtime_state extends uvm_object;
         priv_vsum  = raw.priv_vsum;
         m_pbmt_en  = raw.m_pbmt_en;
         h_pbmt_en  = raw.h_pbmt_en;
+        hd_misalign_ld_enable = raw.hd_misalign_ld_enable;
+        hd_misalign_st_enable = raw.hd_misalign_st_enable;
+        priv_debug = raw.priv_debug;
         if (changed) begin
             update_seq++;
         end
@@ -254,6 +266,9 @@ class mmu_csr_runtime_state extends uvm_object;
         priv_vsum  = rhs.priv_vsum;
         m_pbmt_en  = rhs.m_pbmt_en;
         h_pbmt_en  = rhs.h_pbmt_en;
+        hd_misalign_ld_enable = rhs.hd_misalign_ld_enable;
+        hd_misalign_st_enable = rhs.hd_misalign_st_enable;
+        priv_debug = rhs.priv_debug;
         update_seq = rhs.update_seq;
     endfunction:copy_from
 
