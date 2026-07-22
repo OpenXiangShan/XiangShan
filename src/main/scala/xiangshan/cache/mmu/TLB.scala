@@ -466,15 +466,15 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.isForVSnonLeafPTE := false.B
       resp(idx).bits.excp(nDups).pf.ld := RegNext(prepf) && isLd
       resp(idx).bits.excp(nDups).pf.st := RegNext(prepf) && isSt
-      resp(idx).bits.excp(nDups).pf.instr := false.B
+      resp(idx).bits.excp(nDups).pf.instr := RegNext(prepf) && isInst
 
       resp(idx).bits.excp(nDups).gpf.ld := RegNext(pregpf) && isLd
       resp(idx).bits.excp(nDups).gpf.st := RegNext(pregpf) && isSt
-      resp(idx).bits.excp(nDups).gpf.instr := false.B
+      resp(idx).bits.excp(nDups).gpf.instr := RegNext(pregpf) && isInst
 
       resp(idx).bits.excp(nDups).af.ld := RegNext(preaf) && TlbCmd.isRead(cmd)
       resp(idx).bits.excp(nDups).af.st := RegNext(preaf) && TlbCmd.isWrite(cmd)
-      resp(idx).bits.excp(nDups).af.instr := false.B
+      resp(idx).bits.excp(nDups).af.instr := RegNext(preaf) && isInst
 
       resp(idx).bits.excp(nDups).vaNeedExt := false.B
       // overwrite miss & gpaddr when exception related to high address truncation happens
