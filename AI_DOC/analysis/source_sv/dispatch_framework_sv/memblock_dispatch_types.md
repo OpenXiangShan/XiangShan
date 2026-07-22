@@ -319,7 +319,7 @@ fallback 规则：
 |---|---|---|---|
 | `memblock_op_behavior_t` | 描述一条 transaction 应该怎么走 LSQ、issue 和 commit 流程。 | 入队前、发射路由前、commit 前。 | `lsq_ctrl_model`、`issue_queue_scheduler`、`lsq_commit_handler`。 |
 | `memblock_wb_event_t` | 描述 DUT monitor 或框架反馈回来的一次完成、异常、replay 或 redirect 事件。 | writeback/feedback/replay/redirect 处理阶段。 | `dispatch_monitor_event_adapter`、`writeback_status_handler`、`exception_redirect_replay_handler`。 |
-| `memblock_wb_event_source_e` | 标记 `memblock_wb_event_t.source`，说明反馈事件来自哪里。 | 构造和分类 `memblock_wb_event_t` 时。 | monitor adapter、software smoke、issue accept pass、writeback/recovery handler。 |
+| `memblock_wb_event_source_e` | 标记 `memblock_wb_event_t.source`，说明反馈事件来自哪里。 | 构造和分类 `memblock_wb_event_t` 时。 | monitor adapter、software smoke、writeback/recovery handler。 |
 
 一句话区分：
 
@@ -351,7 +351,7 @@ memblock_wb_event_source_e   = 这个反馈事件来自哪里
 
 ### 7.2 反馈事件：`memblock_wb_event_t`
 
-`memblock_wb_event_t` 是统一反馈事件结构。DUT monitor 采集到的 load writeback、store feedback、IQ feedback、redirect、memory violation，或者框架内部构造的 synthetic pass/replay，都会先变成这个结构，再进入统一 handler。
+`memblock_wb_event_t` 是统一反馈事件结构。DUT monitor 采集到的 load writeback、store feedback、IQ feedback、redirect、memory violation，都会先变成这个结构，再进入统一 handler；当前 V2 int-WB 路径不再由 issue accept 构造 STD synthetic pass。
 
 它主要回答这些问题：
 
@@ -393,7 +393,7 @@ memblock_wb_event_source_e   = 这个反馈事件来自哪里
   -> memblock_op_behavior_t
   -> LSQ 分配 / issue queue 路由 / commit 候选判断
 
-DUT monitor raw event 或框架 synthetic event
+DUT monitor raw event
   -> memblock_wb_event_t.source = memblock_wb_event_source_e
   -> memblock_wb_event_t
   -> pass / fault / replay / redirect / flush 状态更新
@@ -417,7 +417,7 @@ DUT monitor raw event 或框架 synthetic event
 | `MEMBLOCK_WB_EVENT_SOURCE_STORE_WB` | store writeback 来源。 | 可对应 STA 或 STD。 | 标记 store 地址/数据侧完成或 fault。 |
 | `MEMBLOCK_WB_EVENT_SOURCE_SQ_WB` | SQ writeback/释放来源预留。 | 当前公共路径不赋值。 | reserved，SQ 释放当前走 ctrl deq/commit 路径。 |
 | `MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK` | STA IssueQueue feedback。 | target 为 STA。 | `hit=1` 只表示 issue feedback success；没有 real STA writeback 时才作为兼容 pass 来源。 |
-| `MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK` | STD IssueQueue feedback。 | target 为 STD。 | `hit=1` 只表示 issue feedback success；没有 real STD writeback 时才作为兼容 pass 来源。STD miss warning/drop。 |
+| `MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK` | STD IssueQueue feedback。 | target 为 STD。 | 严格 V2 模式下不作为完成来源；进入 completion handler 即 `uvm_fatal`。STD pass 只能来自真实 `writebackStd_0/1`。 |
 | `MEMBLOCK_WB_EVENT_SOURCE_EXCEPTION_INFO` | ExceptionInfoGen 类来源预留。 | 当前公共路径不赋值。 | reserved，异常当前统一由 `has_exception/exception_vec` 表达。 |
 | `MEMBLOCK_WB_EVENT_SOURCE_MEMORY_VIOLATION` | memory violation 来源。 | 通常 target 为 NONE。 | 必须构造 `redirect.valid=1` 的 payload，并保持 `redirect_valid == redirect.valid`，才触发 redirect。 |
 | `MEMBLOCK_WB_EVENT_SOURCE_BACKEND_REPLAY` | 后端 replay 来源标签。 | 必须能定位 LOAD/STA target。 | 必须同时设置 `replay_valid=1` 才触发 replay，并重新入对应发射队列；STD target replay request 会被公共数据层 warning 后忽略。 |
@@ -439,9 +439,9 @@ DUT monitor raw event 或框架 synthetic event
 | 阶段 | 文件/API | 如何使用 `source` |
 |---|---|---|
 | 事件初始化 | `common_data_transaction::make_empty_wb_event()` | 默认置 `MEMBLOCK_WB_EVENT_SOURCE_NONE`，表示当前 event 没有有效来源。 |
-| monitor raw 转换 | `dispatch_monitor_event_adapter::*` | 根据 raw monitor 来源和 port，把事件标成 `LOAD_WB`、`STORE_WB`、`STA_FEEDBACK`、`STD_FEEDBACK`、`REDIRECT`、`MEMORY_VIOLATION`。 |
+| monitor raw 转换 | `dispatch_monitor_event_adapter::*` | 根据 raw monitor 的 `source_kind` 和类别内 lane，把事件标成 `LOAD_WB`、`STORE_WB`、`STA_FEEDBACK`、`STD_FEEDBACK`、`REDIRECT`、`MEMORY_VIOLATION`。 |
 | software smoke 构造 pass | `soft_test_memblock_dispatch_smoke_sequence::make_pass_wb_event()` | 不依赖真实 monitor，按 issue target 手工构造 `LOAD_WB/STORE_WB`，并设置真实 writeback pass 语义。 |
-| issue accept pass | `memblock_lintsissue_dispatch_sequence::make_issue_accept_pass_event()` | 对普通 store STD，在未开启真实 STD writeback pass 时，构造 `STD_FEEDBACK` IQ hit 兼容 pass。 |
+| issue accept pass | 已删除 | V2 不再构造 STD issue-accept synthetic pass；issue fire 只记录 dispatched。 |
 | batch/writeback 分类 | `dispatch_monitor_batch_handler::process_monitor_event_batch()`、`writeback_status_handler::handle_real_writeback_event/handle_issue_feedback_event()` | batch handler 先处理 redirect 仲裁；writeback handler 只处理放行后的真实 writeback 或 IQ feedback。 |
 | event normalize | `common_data_transaction::feedback_event_is_redirect/feedback_event_is_replay/feedback_event_has_action()` | 只按显式行为字段判断 event 是否需要处理，并在 normalize 时解析 active uid。 |
 | recovery 分类 | `exception_redirect_replay_handler::event_is_redirect/event_is_replay()` | 从 feedback queue 中按 canonical `redirect.valid` 和 `replay_valid` 决定 flush 或重新入队；`redirect_valid` 不一致时 fatal。 |
@@ -451,12 +451,12 @@ DUT monitor raw event 或框架 synthetic event
 | `source` | 当前主要赋值位置 | 典型 target | 后续行为 |
 |---|---|---|---|
 | `MEMBLOCK_WB_EVENT_SOURCE_NONE` | `make_empty_wb_event()` | `NONE` | 默认空事件，不应触发状态变化。 |
-| `MEMBLOCK_WB_EVENT_SOURCE_LOAD_WB` | `dispatch_monitor_event_adapter::convert_raw_int_wb()` port 0/1/2；software smoke load pass | `LOAD` | 若 `real_wb_valid=1` 且无 exception/replay/redirect，更新 `LOAD_WRITEBACK/LOAD_PASS`；若有 exception，更新 load fault。 |
+| `MEMBLOCK_WB_EVENT_SOURCE_LOAD_WB` | `dispatch_monitor_event_adapter::convert_raw_int_wb()` 的 `SCALAR_LDA` lane 0/1/2；software smoke load pass | `LOAD` | 若 `real_wb_valid=1` 且无 exception/replay/redirect，更新 `LOAD_WRITEBACK/LOAD_PASS`；若有 exception，更新 load fault。 |
 | `MEMBLOCK_WB_EVENT_SOURCE_ATOMIC_WB` | 当前公共路径不赋值 | 后续 AMO/LR/SC 专项定义 | reserved 扩展点；当前公共路径不得用它驱动状态变化。 |
-| `MEMBLOCK_WB_EVENT_SOURCE_STORE_WB` | `dispatch_monitor_event_adapter::convert_raw_int_wb()` port 3/4、5/6；software smoke store pass | `STA` 或 `STD` | 若正常，则更新对应 STA/STD writeback/pass；若 exception，则更新对应 target fault。 |
+| `MEMBLOCK_WB_EVENT_SOURCE_STORE_WB` | `dispatch_monitor_event_adapter::convert_raw_int_wb()` 的 `STA` lane 0/1 或 `STD` lane 0/1；software smoke store pass | `STA` 或 `STD` | 若正常，则更新对应 STA/STD writeback/pass；若 exception，则更新对应 target fault。 |
 | `MEMBLOCK_WB_EVENT_SOURCE_SQ_WB` | 当前公共路径不赋值 | 后续 SQ 专项定义 | reserved；当前 SQ 释放/commit/deq 由 LSQ commit/control 路径表示。 |
 | `MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK` | `convert_raw_iq_feedback()` 的 STA feedback | `STA` | `hit=1` 置 `iq_feedback_*`，真实 STA writeback pass 开启时只标记 issue feedback success；关闭时作为兼容 pass。`hit=0` 通过 `replay_valid` 触发 replay。 |
-| `MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK` | `convert_raw_iq_feedback()` 的 STD feedback；issue accept pass | `STD` | `hit=1` 置 `iq_feedback_*`，真实 STD writeback pass 开启时只标记 issue feedback success；关闭时作为兼容 pass。STD miss warning/drop。 |
+| `MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK` | `convert_raw_iq_feedback()` 的 STD feedback | `STD` | 当前严格 V2 completion handler 拒绝该来源；它不能设置 STD pass，真实 `writebackStd_0/1` 才是完成 owner。 |
 | `MEMBLOCK_WB_EVENT_SOURCE_EXCEPTION_INFO` | 当前公共路径不赋值 | 后续异常专项定义 | reserved；当前异常由 `has_exception/exception_vec` 表示。 |
 | `MEMBLOCK_WB_EVENT_SOURCE_MEMORY_VIOLATION` | `dispatch_monitor_event_adapter::convert_raw_memory_violation()` | `NONE` | adapter 同时构造 `redirect.valid=1`、`level=memoryViolation.bits.level`，并按当前 RTL/Scala 语义用 `level(0)` 派生 `flush_itself`，后续按显式 redirect valid 走 flush。 |
 | `MEMBLOCK_WB_EVENT_SOURCE_BACKEND_REPLAY` | 当前公共路径主要用于软件注入 LOAD/STA replay event，后续可接真实 backend replay 接口 | LOAD/STA | 只表示来源；必须同时设置 `replay_valid=1`，recovery handler 才会调用 `mark_replay_pending()` 并重新入队。STD 没有 MemBlock 执行后返回后端的 replay feedback 通路，STD replay request 会 warning 后返回 0。 |
@@ -572,9 +572,9 @@ DUT monitor raw event 或框架 synthetic event
 | `replay_seq` | replay 序号快照。 | 防止旧 LOAD/STA replay/pass/fault 污染新 replay。 |
 | `has_replay_seq` | replay seq 是否有效。 | replay 后 LOAD/STA 必须提供有效快照；STD event 主要依靠 issue_epoch 防迟到。 |
 | `real_wb_valid` | 真实 int writeback/pass/fault 是否有效。 | 真实 writeback normal pass 的必要条件之一；IQ feedback 不写该字段。 |
-| `iq_feedback_valid` | IssueQueue feedback 是否有效。 | STA/STD IQ feedback 或 issue-accept 兼容路径。 |
+| `iq_feedback_valid` | IssueQueue feedback 是否有效。 | STA/STD IQ feedback；V2 不再由 issue accept 构造 STD synthetic event。 |
 | `iq_feedback_hit` | IssueQueue feedback finalSuccess/hit。 | 真实 writeback pass 开启时只标记 issue feedback success，关闭时可兼容转 pass。 |
-| `iq_feedback_failed` | IssueQueue feedback failed。 | STA failed 转 replay，STD failed warning/drop。 |
+| `iq_feedback_failed` | IssueQueue feedback failed。 | STA failed 转 replay；STD 进入严格拒绝路径，不能 warning/drop 后继续。 |
 | `iq_feedback_flush_state` | IQ feedback flush_state 原始状态位。 | PTW/TLB back replay 等调试和派生语义来源；不代表真实 writeback。 |
 | `has_exception` | 是否携带异常。 | 与 `exception_vec` 一起判断 fault。 |
 | `exception_vec[23:0]` | 异常向量。 | 非零时置 target fault 和 exception pending。 |

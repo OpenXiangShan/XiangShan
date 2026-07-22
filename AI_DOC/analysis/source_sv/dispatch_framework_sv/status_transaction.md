@@ -22,6 +22,9 @@
 - active 映射：`active_lq_mapped`、`active_sq_mapped`。
 - 索引快照：`robIdx_*`、`lqIdx_*`、`sqIdx_*`。
 - target 级 issue epoch：`load_issue_epoch`、`sta_issue_epoch`、`std_issue_epoch`。
+- target 级动态实例 flush epoch：`*_instance_flush_epoch_valid`、`*_instance_flush_epoch`；
+  记录该 target 最近一次真实 issue 所处的 dispatch flush epoch，adapter 用它判断 raw
+  writeback 是否属于当前动态实例，而不是只比较消费时的全局 epoch。
 - 动态实例版本：`dynamic_epoch`。
 - 异常信息：`exception_vec`、`exception_vaddr`、`exception_gpaddr`、`last_event_cycle`。
 
@@ -45,11 +48,11 @@
 | 队列状态 | `queued_load/sta/std` | 表示 uid 已经在对应 issue queue 中，防止重复入队，也用于 replay/redirect 清理。 |
 | 发射状态 | `load_dispatched/sta_dispatched/std_dispatched` | 表示对应 target 已经发往 DUT。与 queued 分开，能区分“排队等待”和“已经发射”。 |
 | writeback/pass/fault | `load_writeback/sta_writeback/std_writeback`、`load_pass/sta_pass/std_pass`、`load_fault/sta_fault/std_fault`、`writeback/pass/fault` | target 级状态与全局状态分离。store 必须 STA 和 STD 都完成后才能全局 pass，避免一个 target 覆盖另一个 target。 |
-| issue feedback success | `load_issue_feedback_success/sta_issue_feedback_success/std_issue_feedback_success` | 只记录 IssueQueue feedback `hit/finalSuccess` 已返回。它不等价于真实 writeback/pass；当 `MEMBLOCK_STA_REAL_WB_PASS_EN` 或 `MEMBLOCK_STD_REAL_WB_PASS_EN` 打开时，最终 pass 仍等待真实 int writeback。 |
+| issue feedback success | `load_issue_feedback_success/sta_issue_feedback_success/std_issue_feedback_success` | 只记录 IssueQueue feedback `hit/finalSuccess` 已返回。它不等价于真实 writeback/pass；STA 仍受 `MEMBLOCK_STA_REAL_WB_PASS_EN` 兼容策略影响，STD 永远等待真实 `writebackStd_0/1`。 |
 | 异常和 replay | `exception_pending`、`replay_pending`、`replay_target_load/sta/std` | `replay_valid=1` 的 LOAD/STA replay 事件可以只重发某个 target。mask 化字段保留 target 粒度；当前真实 DUT 路径不把 STD 建模成 backend replay 来源。 |
 | redirect/flush | `redirect_pending`、`flushed`、`issue_killed`、`dynamic_epoch` | redirect 后旧发射结果必须失效。`flushed` 表示当前动态实例已被 flush 覆盖，但不是终态；`redirect_pending` 表示等待同 uid 重新 admission；`dynamic_epoch` 在 reissue 准备时递增，用于区分同一 uid 的不同动态实例。 |
 | DUT index 快照 | `robIdx_*`、`lqIdx_*`、`sqIdx_*` | monitor 事件可能只带 ROB/LQ/SQ，不带 uid；状态表保留快照用于反查和 debug。 |
-| 防污染快照 | `load_issue_epoch`、`sta_issue_epoch`、`std_issue_epoch`、`dynamic_epoch`、`replay_seq` | 每个 target 发射时记录对应 epoch，replay 递增 seq，redirect reissue 递增 `dynamic_epoch`。LOAD/STA 的 pass/fault/replay 必须匹配 target epoch 和 replay_seq；STD 没有 MemBlock 后端 replay 通路，旧 STD pending/pass/fault 不用 replay_seq 失效，依靠 target epoch、active/flush/redirect/exception/issue_killed/std_dispatched 等条件防迟到。 |
+| 防污染快照 | `load_issue_epoch`、`sta_issue_epoch`、`std_issue_epoch`、`*_instance_flush_epoch`、`dynamic_epoch`、`replay_seq` | 每个 target 发射时记录对应 issue epoch 和 flush epoch，replay 递增 seq，redirect reissue 递增 `dynamic_epoch`。LOAD/STA 的 pass/fault/replay 必须匹配 target epoch、实例 flush epoch 和 replay_seq；STD 没有 MemBlock 后端 replay 通路，旧 STD pending/pass/fault 依靠 target epoch、实例 flush epoch、active/flush/redirect/exception/issue_killed/std_dispatched 等条件防迟到。 |
 | 异常信息 | `exception_vec`、`exception_vaddr`、`exception_gpaddr`、`last_event_cycle` | 保存最后一次异常或事件信息，便于日志和 waveform 定位。 |
 | active map 标志 | `active_lq_mapped`、`active_sq_mapped` | 表示 uid 当前是否占用 LQ/SQ active map，deq 时用它决定是否可 retire。 |
 

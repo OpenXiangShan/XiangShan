@@ -75,10 +75,10 @@ flowchart TD
     G1 -->|STA failed| G2[common_data_transaction::push_feedback_event replay]
     G2 --> G21[normalize_feedback_event]
     G21 --> G22[exception_event_q.push_back]
-    G1 -->|STD failed| G3[uvm_warning and drop]
+    G1 -->|STD feedback| G3[strict fatal; real STD WB only]
     G1 -->|hit| G4[target_real_wb_pass_enabled]
     G4 -->|enabled| G5[common_data_transaction::mark_issue_feedback_success]
-    G4 -->|disabled| G6[common_data_transaction::mark_target_normal_pass compat]
+    G4 -->|disabled| G6[STA compatibility only]
     G5 --> D43
     G6 --> D43
     F32 --> D43
@@ -886,9 +886,11 @@ case (wb_event.source)
     MEMBLOCK_WB_EVENT_SOURCE_STORE_WB:
         handler_accepted = writeback_handler.handle_real_writeback_event(wb_event);
 
-    MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK,
-    MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK:
+    MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK:
         handler_accepted = writeback_handler.handle_issue_feedback_event(wb_event);
+
+    MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK:
+        `uvm_fatal("WB_STATUS", "STD feedback cannot complete V2 STD target");
 
     default:
         if (event_is_replay(wb_event) || event_has_fault(wb_event)) begin
@@ -1058,15 +1060,15 @@ normal pass 必须是真实 writeback，且不能同时是 redirect、replay 或
 
 ```systemverilog
 if (!event_is_issue_feedback(wb_event)) return 0;
+if (wb_event.target == MEMBLOCK_ISSUE_TARGET_STD ||
+    wb_event.source == MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK) begin
+    `uvm_fatal("WB_STATUS", "STD issue feedback cannot complete V2 STD target");
+end
 uid = wb_event.uid;
 issue_epoch = wb_event.issue_epoch;
 replay_seq = wb_event.replay_seq;
 
 if (wb_event.iq_feedback_failed) begin
-    if (wb_event.target == MEMBLOCK_ISSUE_TARGET_STD) begin
-        `uvm_warning("WB_STATUS", "drop STD issue feedback failed ...")
-        return 0;
-    end
     data.push_feedback_event(wb_event);
     return 1;
 end
@@ -1085,21 +1087,20 @@ end
 
 功能解释：
 
-该函数处理IssueQueue feedback，而不是真实writeback。V2 STA event进入前已附不可变
-generation并完成IQ kind只读validate，token尚未消费。handler成功返回后外层commit：
-hit只消费IQ pending，token继续等待STA real-WB；miss才取消同generation real-WB并
-close STA_MISS。`hit=1`表示IssueQueue finalSuccess；如果
-配置为等待真实writeback pass，这里只记录feedback success，不置target pass。
-`failed=1`对STA进入replay queue。V2 monitor不生成STD IQ event，现有STD防御分支只
-保留给非V2兼容入口。
+该函数处理 IssueQueue feedback，而不是真实 writeback。V2 STA event 进入前已附不可变
+generation 并完成 IQ kind 只读校验；handler 成功返回后外层才提交 claim。`hit=1`
+在真实 STA writeback 约束打开时只记录 feedback success，随后等待 STA real-WB；
+`failed=1` 对 STA 进入 replay queue。STD feedback 是严格拒绝路径，不能设置 STD pass，
+也不能通过 warning/drop 让主动 flow 永久等待；V2 STD 的唯一完成来源是
+`writebackStd_0/1`。
 
 内部子调用：
 
-- `event_is_issue_feedback()`：确认 event 是 STA/STD IQ feedback。
+- `event_is_issue_feedback()`：确认 event 是 IQ feedback；STD 一旦进入本函数立即 fatal。
 - `data.push_feedback_event()`：STA feedback failed 时进入 recovery queue，后续由 replay handler 置 replay pending。
-- `target_real_wb_pass_enabled()`：判断该 target 的 IQ feedback hit 是否只能作为 issue success，还是可以兼容闭环为 pass。
+- `target_real_wb_pass_enabled()`：只判断 STA 的 IQ feedback hit 是否只能作为 issue success，还是可以兼容闭环为 pass。
 - `data.mark_issue_feedback_success()`：真实 writeback pass 打开时，只记录 IQ feedback success，不设置 target pass。
-- `data.mark_target_normal_pass()`：真实 writeback pass 关闭时的兼容路径，把 IQ feedback hit 当作 pass。
+- `data.mark_target_normal_pass()`：仅 STA 兼容开关关闭时把 IQ feedback hit 当作 pass；STD 不调用该路径。
 
 文字伪代码：
 
@@ -1110,15 +1111,16 @@ close STA_MISS。`hit=1`表示IssueQueue finalSuccess；如果
 此时尚未commit；
 
 如果 IQ feedback failed：
-  如果 target 是 STD，仅兼容保护路径warning/drop；V2 monitor不会产生该event；
-  调用 push_feedback_event：否则把该 event 放入 recovery queue，后续由 replay handler 置 replay_pending；
+  如果 target 是 STD，入口已经 fatal，不能静默丢弃；
+  如果 target 是 STA，调用 push_feedback_event，把该 event 放入 recovery queue，后续由 replay handler 置 replay_pending；
 
 如果 IQ feedback hit：
-  调用 target_real_wb_pass_enabled：读取 STA/STD real writeback pass 开关，判断 IQ hit 是否能直接闭环；
+  调用 target_real_wb_pass_enabled：读取 STA real writeback pass 开关，判断 STA IQ hit 是否能直接闭环；
   如果该 target 开启真实 writeback pass：
     调用 mark_issue_feedback_success，只记录 issue feedback success，等待真实 writeback 才能 pass；
-  如果该 target 未开启真实 writeback pass：
-    调用 mark_target_normal_pass，按兼容模式把 IQ feedback hit 当作 target pass。
+  如果 STA 未开启真实 writeback pass：
+    调用 mark_target_normal_pass，按 STA 兼容模式把 IQ feedback hit 当作 target pass；
+  STD 不会进入该分支。
 ```
 
 ## 19. `target_real_wb_pass_enabled()`
@@ -1128,24 +1130,21 @@ close STA_MISS。`hit=1`表示IssueQueue finalSuccess；如果
 真实逻辑摘要：
 
 ```systemverilog
-case (target)
-    MEMBLOCK_ISSUE_TARGET_STA: return seq_csr_common::get_sta_real_wb_pass_en();
-    MEMBLOCK_ISSUE_TARGET_STD: return seq_csr_common::get_std_real_wb_pass_en();
-    default: return 1'b0;
-endcase
+return target == MEMBLOCK_ISSUE_TARGET_STA &&
+       seq_csr_common::get_sta_real_wb_pass_en();
 ```
 
 功能解释：
 
-该函数决定 IQ feedback hit 是否可以直接闭环为 pass。默认真实 STA/STD writeback pass 打开时，IQ feedback hit 只表示 IssueQueue 接受成功，不代表最终 writeback pass。
+该函数决定 STA IQ feedback hit 是否可以直接闭环为 pass。V2 STD 不再查询 runtime
+开关，STD IQ feedback 不能设置 pass，必须等待真实 `writebackStd_0/1`。
 
 文字伪代码：
 
 ```text
 如果 target 是 STA，调用 get_sta_real_wb_pass_en：读取 STA 是否必须等待真实 writeback pass 的配置；
-如果 target 是 STD，调用 get_std_real_wb_pass_en：读取 STD 是否必须等待真实 writeback pass 的配置；
-其它 target 默认不等待额外 real writeback pass；
-返回该 target 是否必须等真实 writeback 才能 pass。
+如果 target 不是 STA（包括 STD），返回 false；STD 的 completion handler 会在更早的入口拒绝 IQ feedback；
+返回 STA 是否必须等真实 writeback 才能 pass。
 ```
 
 ## 20. `mark_target_normal_pass()`

@@ -13,7 +13,6 @@ class memblock_issue_dispatch_base_sequence extends lintsissue_agent_agent_defau
     common_data_transaction data;
     issue_queue_scheduler   issue_sched;
     issue_field_assigner    field_assigner;
-    writeback_status_handler issue_accept_wb_handler;
 
     bit          enable;
     int unsigned no_progress_warn_cycles;
@@ -35,9 +34,6 @@ class memblock_issue_dispatch_base_sequence extends lintsissue_agent_agent_defau
     extern function int unsigned port_idx_for_item(input memblock_issue_q_item_t item);
     extern function void mark_fired_items(input memblock_issue_q_item_t fired_items[$],
                                           input bit [MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0] fired_mask);
-    extern function bit item_needs_issue_accept_pass(input memblock_issue_q_item_t item);
-    extern function memblock_wb_event_t make_issue_accept_pass_event(input memblock_issue_q_item_t item);
-    extern function void submit_issue_accept_pass(input memblock_issue_q_item_t item);
 
 endclass:memblock_issue_dispatch_base_sequence
 
@@ -228,10 +224,7 @@ function void memblock_issue_dispatch_base_sequence::ensure_helpers();
     if (field_assigner == null) begin
         field_assigner = issue_field_assigner::type_id::create("field_assigner");
     end
-    if (issue_accept_wb_handler == null) begin
-        issue_accept_wb_handler = writeback_status_handler::type_id::create("issue_accept_wb_handler");
-    end
-    if (data == null || issue_sched == null || field_assigner == null || issue_accept_wb_handler == null) begin
+    if (data == null || issue_sched == null || field_assigner == null) begin
         `uvm_fatal(get_type_name(), "failed to initialize dispatch issue helpers")
     end
 endfunction:ensure_helpers
@@ -310,75 +303,8 @@ function void memblock_issue_dispatch_base_sequence::mark_fired_items(input memb
                          $sformatf("skip stale issue item uid=%0d target=%0d",
                                    fired_items[idx].uid,
                                    fired_items[idx].target))
-        end else begin
-            submit_issue_accept_pass(fired_items[idx]);
         end
     end
 endfunction:mark_fired_items
-
-function bit memblock_issue_dispatch_base_sequence::item_needs_issue_accept_pass(input memblock_issue_q_item_t item);
-    main_control_transaction main_tr;
-
-    ensure_helpers();
-    if (seq_csr_common::get_std_real_wb_pass_en()) begin
-        return 1'b0;
-    end
-    if (item.target != MEMBLOCK_ISSUE_TARGET_STD || !data.is_valid_uid(item.uid)) begin
-        return 1'b0;
-    end
-    main_tr = data.get_main_transaction(item.uid);
-    return main_tr.op_class == MEMBLOCK_OP_CLASS_STORE &&
-           main_tr.fuType == MEMBLOCK_FUTYPE_STU &&
-           lsq_ctrl_model::is_store_fuoptype(main_tr.fuOpType);
-endfunction:item_needs_issue_accept_pass
-
-function memblock_wb_event_t memblock_issue_dispatch_base_sequence::make_issue_accept_pass_event(input memblock_issue_q_item_t item);
-    memblock_wb_event_t     wb_event;
-    status_transaction      status;
-
-    ensure_helpers();
-    status = data.get_status(item.uid);
-    wb_event = data.make_empty_wb_event();
-    wb_event.valid               = 1'b1;
-    wb_event.source              = MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK;
-    wb_event.port_id             = item.uop_index;
-    wb_event.target              = MEMBLOCK_ISSUE_TARGET_STD;
-    wb_event.uid                 = item.uid;
-    wb_event.has_uid             = 1'b1;
-    wb_event.rob_key             = item.rob_key;
-    wb_event.has_rob             = 1'b1;
-    wb_event.sq_key              = item.sq_key;
-    wb_event.has_sq              = item.has_sqIdx;
-    wb_event.issue_epoch         = status.get_target_issue_epoch(MEMBLOCK_ISSUE_TARGET_STD);
-    wb_event.has_issue_epoch     = 1'b1;
-    wb_event.replay_seq          = item.replay_seq;
-    wb_event.has_replay_seq      = 1'b1;
-    // 中文注释：STD issue-accept pass 是兼容路径，只表示 STD issue response 成功。
-    // 当 MEMBLOCK_STD_REAL_WB_PASS_EN=0 时，handler 才会把该 feedback 转成 target pass。
-    wb_event.iq_feedback_valid   = 1'b1;
-    wb_event.iq_feedback_hit     = 1'b1;
-    wb_event.iq_feedback_failed  = 1'b0;
-    wb_event.cycle               = $time;
-    return wb_event;
-endfunction:make_issue_accept_pass_event
-
-function void memblock_issue_dispatch_base_sequence::submit_issue_accept_pass(input memblock_issue_q_item_t item);
-    memblock_wb_event_t wb_event;
-
-    if (!item_needs_issue_accept_pass(item)) begin
-        return;
-    end
-    wb_event = make_issue_accept_pass_event(item);
-    if (issue_accept_wb_handler.handle_event(wb_event)) begin
-        `uvm_info(get_type_name(),
-                  $sformatf("issue-accept STD pass uid=%0d rob=%0d:%0d sq=%0d:%0d",
-                            item.uid,
-                            item.rob_key.flag,
-                            item.rob_key.value,
-                            item.sq_key.flag,
-                            item.sq_key.value),
-                  UVM_LOW)
-    end
-endfunction:submit_issue_accept_pass
 
 `endif

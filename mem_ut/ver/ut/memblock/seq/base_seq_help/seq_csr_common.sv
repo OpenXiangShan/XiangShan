@@ -180,7 +180,6 @@ class seq_csr_common;
     static int unsigned redirect_drive_timeout = 1000;
     static int unsigned redirect_freeze_timeout = 1000;
     static bit          sta_real_wb_pass_en = 1'b0;
-    static bit          std_real_wb_pass_en = 1'b0;
     static bit          lsqenq_seq_en = 1'b1;
     static int unsigned lsqenq_ready_timeout = 1000;
     static bit          lsqcommit_seq_en = 1'b1;
@@ -377,7 +376,6 @@ class seq_csr_common;
         redirect_drive_timeout      = get_non_negative_int("MEMBLOCK_REDIRECT_DRIVE_TIMEOUT", plus::MEMBLOCK_REDIRECT_DRIVE_TIMEOUT);
         redirect_freeze_timeout     = get_non_negative_int("MEMBLOCK_REDIRECT_FREEZE_TIMEOUT", plus::MEMBLOCK_REDIRECT_FREEZE_TIMEOUT);
         sta_real_wb_pass_en         = plus::MEMBLOCK_STA_REAL_WB_PASS_EN;
-        std_real_wb_pass_en         = plus::MEMBLOCK_STD_REAL_WB_PASS_EN;
         lsqenq_seq_en               = plus::MEMBLOCK_LSQENQ_SEQ_EN;
         lsqenq_ready_timeout        = get_non_negative_int("MEMBLOCK_LSQENQ_READY_TIMEOUT", plus::MEMBLOCK_LSQENQ_READY_TIMEOUT);
         lsqcommit_seq_en            = plus::MEMBLOCK_LSQCOMMIT_SEQ_EN;
@@ -1394,11 +1392,6 @@ class seq_csr_common;
         check_initialized("get_sta_real_wb_pass_en");
         return sta_real_wb_pass_en;
     endfunction:get_sta_real_wb_pass_en
-
-    static function bit get_std_real_wb_pass_en();
-        check_initialized("get_std_real_wb_pass_en");
-        return std_real_wb_pass_en;
-    endfunction:get_std_real_wb_pass_en
 
     static function bit get_lsqenq_seq_en();
         check_initialized("get_lsqenq_seq_en");

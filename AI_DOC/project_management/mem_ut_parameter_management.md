@@ -159,15 +159,17 @@ runtime资源收敛：
 
 ```bash
 make eda_run tc=tc_dispatch_real_store_wb_smoke mode=base_fun cfg=tc_dispatch_real_store_wb_smoke
-make eda_run tc=tc_dispatch_real_store_wb_smoke mode=base_fun cfg=tc_dispatch_real_store_wb_smoke plus_arg="+MEMBLOCK_STD_REAL_WB_PASS_EN=0"
+make eda_run tc=tc_dispatch_real_store_wb_smoke mode=base_fun cfg=tc_dispatch_real_store_wb_smoke
 ```
 
-当前 dispatch 默认要求真实 STA/STD writeback/pass 路径：
+当前 dispatch 的完成来源约束：
 
 - `MEMBLOCK_STA_REAL_WB_PASS_EN=1`：STA IQ feedback hit 不作为 normal pass，等待真实 STA writeback monitor。
-- `MEMBLOCK_STD_REAL_WB_PASS_EN=1`：STD issue accept 不注入 synthetic pass，等待真实 STD writeback monitor。
+- STD 没有 `MEMBLOCK_STD_REAL_WB_PASS_EN` runtime 参数；V2 下 issueStd accept 只记录 dispatched，
+  必须等待真实 `writebackStd_0/1` monitor event 才能设置 STD writeback/pass。
 
-需要早期 bring-up 兼容路径时，必须在 testcase cfg 或用户 `plus_arg` 中显式设置对应参数为 0。
+STA 的早期 bring-up 兼容路径仍可按既有参数显式控制；STD 不提供 synthetic pass 兼容开关，
+缺失或无法唯一归一化的真实 writeback 会在 adapter 中 `uvm_fatal`，避免主动 flow 静默卡住。
 
 ### 2.4 编译期宏参数
 

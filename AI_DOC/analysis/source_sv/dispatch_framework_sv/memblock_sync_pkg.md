@@ -38,8 +38,8 @@
 
 | 类型 | 来源 monitor | 主要内容 | 后续消费者 |
 |---|---|---|---|
-| `dispatch_raw_int_wb_t` | `io_mem_to_ooo_int_wb_agent_agent_monitor.sv` | writeback port、ROB/LQ/SQ key、exception 等。 | `dispatch_monitor_event_adapter::convert_raw_int_wb()` 转为 LOAD/STA/STD writeback event。 |
-| `dispatch_raw_iq_feedback_t` | `io_mem_to_ooo_iq_feedback_agent_agent_monitor.sv` | IQ feedback hit、ROB/LQ/SQ key、flush/PTW-back state。 | `convert_raw_iq_feedback()` 只转成 `iq_feedback_*` IssueQueue response；STA `hit=0` 额外转 replay；STD `hit=0` warning/drop。`hit=1` 是否兼容 pass 由 handler 根据 real writeback pass 配置决定。 |
+| `dispatch_raw_int_wb_t` | `io_mem_to_ooo_int_wb_agent_agent_monitor.sv` | V2 `source_kind`、类别内 lane、ROB/exception/metadata、sample flush epoch；STD 只有 ROB value。 | `dispatch_monitor_event_adapter::convert_raw_int_wb()` 补 current snapshot 后转为 LOAD/STA/STD writeback event。 |
+| `dispatch_raw_iq_feedback_t` | `io_mem_to_ooo_iq_feedback_agent_agent_monitor.sv` | IQ feedback hit、STA SQ key、flush/PTW-back state。 | `convert_raw_iq_feedback()` 只转成 `iq_feedback_*` IssueQueue response；STA `hit=0` 额外转 replay；当前严格 V2 路径的 STD feedback 直接 fatal，不作为完成来源。 |
 | `dispatch_raw_ctrl_t` | `io_mem_to_ooo_ctrl_agent_agent_monitor.sv` | LQ/SQ deq 数量和指针、memory violation、`sbIsEmpty` 等。 | deq 交给 `lsq_commit_handler`；memory violation 当前归一成 redirect event；`sbIsEmpty` 解除 flushSb 等待。 |
 | `dispatch_raw_csr_t` | `csr_ctrl_agent_agent_monitor.sv` | MMU CSR 当前 raw 值和权限状态。 | `push_raw_csr()` 覆盖 latest CSR snapshot，`drain_csr_events()` 按 seq 同步到 `mmu_csr_runtime_state`。 |
 | `dispatch_raw_sfence_t` | `fence_agent_agent_monitor.sv` | `io_ooo_to_mem_sfence_valid/rs1/rs2/addr/id/hv/hg` 和采样 cycle。 | `dispatch_monitor_event_adapter::drain_sfence_events()` 调用 `common_data_transaction::apply_raw_sfence()`，删除命中的 live TLB entry。 |

@@ -86,8 +86,11 @@ make eda_run tc=<tc_name> mode=<mode_name> cfg=<cfg_name>
 
 ```bash
 make eda_run tc=tc_dispatch_real_store_wb_smoke mode=base_fun cfg=tc_dispatch_real_store_wb_smoke
-make eda_run tc=tc_dispatch_real_store_wb_smoke mode=base_fun cfg=tc_dispatch_real_store_wb_smoke plus_arg="+MEMBLOCK_STD_REAL_WB_PASS_EN=0"
 ```
+
+V2 `STD` 不再提供 `MEMBLOCK_STD_REAL_WB_PASS_EN` runtime 参数，也不允许通过 issue accept
+注入 synthetic pass。`issueStd` 只记录发射，必须等待真实 `writebackStd_0/1`；真实事件无法
+唯一归一化时由 adapter `uvm_fatal`，不能用参数切换为静默 drop。
 
 推荐检查 testcase cfg key 是否已在 `plus.sv` 中声明：
 

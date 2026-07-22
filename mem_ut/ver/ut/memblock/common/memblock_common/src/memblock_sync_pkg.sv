@@ -20,20 +20,49 @@ package memblock_sync_pkg;
     int unsigned dispatch_flush_epoch = 0;
     longint unsigned dispatch_service_cycle = 0;
 
+    typedef enum bit [1:0] {
+        // 无有效 V2 int-WB 来源，只用于 empty raw 的中性默认值。
+        MEMBLOCK_INT_WB_SOURCE_INVALID    = 2'd0,
+        // V2 标量 load-address writebackLda_0/1/2，port_id 为 kind 内 lane。
+        MEMBLOCK_INT_WB_SOURCE_SCALAR_LDA = 2'd1,
+        // V2 store-address writebackSta_0/1，port_id 为 kind 内 lane。
+        MEMBLOCK_INT_WB_SOURCE_STA        = 2'd2,
+        // V2 store-data writebackStd_0/1，port_id 为 kind 内 lane。
+        MEMBLOCK_INT_WB_SOURCE_STD        = 2'd3
+    } memblock_int_wb_source_kind_e;
+
     typedef struct {
-        bit               valid;
-        int unsigned      port_id;
-        bit               rob_valid;
-        bit               rob_flag;
+        bit                           valid;
+        // source_kind 区分 split writeback 类别，port_id 只表示该类别内的物理 lane。
+        memblock_int_wb_source_kind_e source_kind;
+        int unsigned                  port_id;
+        // monitor 在 payload 同拍冻结 flush epoch，adapter 不得用消费拍状态回填来源信息。
+        int unsigned                  sample_flush_epoch;
+        // 缺 key 标志由 monitor 按真实端口能力设置，后续 adapter 负责查询并补齐。
+        bit                           key_needs_state_lookup;
+        bit                           rob_value_only_without_flag;
+        bit                           rob_valid;
+        bit                           rob_flag;
         bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] rob_value;
-        bit               lq_valid;
-        bit               lq_flag;
+        bit                           lq_valid;
+        bit                           lq_flag;
         bit [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] lq_value;
-        bit               sq_valid;
-        bit               sq_flag;
+        bit                           sq_valid;
+        bit                           sq_flag;
         bit [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] sq_value;
-        bit [23:0]        exception_vec;
-        longint unsigned  cycle;
+        // metadata valid 明确区分“端口不存在该字段”和“真实字段采样值为 0”。
+        bit                           replay_inst_valid;
+        bit                           flush_pipe_valid;
+        bit                           trigger_valid;
+        bit                           replay_inst;
+        bit                           flush_pipe;
+        bit [3:0]                     trigger;
+        // STA0 的 trigger=0 只有在 uncache/CBO provenance 下才可视为中性值。
+        // monitor 按真实 debug sideband 设置；adapter 只读，不据此直接推进 pass/fault。
+        bit                           debug_is_mmio;
+        bit                           debug_is_ncio;
+        bit [23:0]                    exception_vec;
+        longint unsigned              cycle;
     } dispatch_raw_int_wb_t;
 
     typedef struct {
@@ -128,19 +157,31 @@ package memblock_sync_pkg;
 
     function dispatch_raw_int_wb_t make_empty_raw_int_wb();
         dispatch_raw_int_wb_t item;
-        item.valid         = 1'b0;
-        item.port_id       = 0;
-        item.rob_valid     = 1'b0;
-        item.rob_flag      = 1'b0;
-        item.rob_value     = '0;
-        item.lq_valid      = 1'b0;
-        item.lq_flag       = 1'b0;
-        item.lq_value      = '0;
-        item.sq_valid      = 1'b0;
-        item.sq_flag       = 1'b0;
-        item.sq_value      = '0;
-        item.exception_vec = '0;
-        item.cycle         = 0;
+        item.valid                       = 1'b0;
+        item.source_kind                 = MEMBLOCK_INT_WB_SOURCE_INVALID;
+        item.port_id                     = 0;
+        item.sample_flush_epoch          = 0;
+        item.key_needs_state_lookup      = 1'b0;
+        item.rob_value_only_without_flag = 1'b0;
+        item.rob_valid                   = 1'b0;
+        item.rob_flag                    = 1'b0;
+        item.rob_value                   = '0;
+        item.lq_valid                    = 1'b0;
+        item.lq_flag                     = 1'b0;
+        item.lq_value                    = '0;
+        item.sq_valid                    = 1'b0;
+        item.sq_flag                     = 1'b0;
+        item.sq_value                    = '0;
+        item.replay_inst_valid           = 1'b0;
+        item.flush_pipe_valid            = 1'b0;
+        item.trigger_valid               = 1'b0;
+        item.replay_inst                 = 1'b0;
+        item.flush_pipe                  = 1'b0;
+        item.trigger                     = 4'hf;
+        item.debug_is_mmio                = 1'b0;
+        item.debug_is_ncio                = 1'b0;
+        item.exception_vec               = '0;
+        item.cycle                       = 0;
         return item;
     endfunction:make_empty_raw_int_wb
 

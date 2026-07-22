@@ -29,7 +29,7 @@ class status_transaction extends uvm_object;
     bit sta_writeback;
     bit std_writeback;
     // 中文注释：各 target 的 IssueQueue feedback success 状态。
-    // 置位：IQ feedback hit 或 issue-accept 兼容路径经 mark_issue_feedback_success() 通过 epoch/replay 检查后置位。
+    // 置位：IQ feedback hit 经 mark_issue_feedback_success() 通过 epoch/replay 检查后置位。
     // 清零：status reset、redirect/replay 清理对应 target 发射结果时清零。为1只说明 issue response finalSuccess，不代表真实 writeback/pass。
     bit load_issue_feedback_success;
     bit sta_issue_feedback_success;
@@ -63,6 +63,16 @@ class status_transaction extends uvm_object;
     int unsigned        load_issue_epoch;
     int unsigned        sta_issue_epoch;
     int unsigned        std_issue_epoch;
+    // 记录每个 target 最近一次真实 issue 所属的 dispatch flush epoch。
+    // generic 字段保留为当前 uid 最近一次 issue 的兼容快照，target 字段用于事件归属校验。
+    bit                 active_instance_flush_epoch_valid;
+    int unsigned        active_instance_flush_epoch;
+    bit                 load_instance_flush_epoch_valid;
+    bit                 sta_instance_flush_epoch_valid;
+    bit                 std_instance_flush_epoch_valid;
+    int unsigned        load_instance_flush_epoch;
+    int unsigned        sta_instance_flush_epoch;
+    int unsigned        std_instance_flush_epoch;
     // 同一uid被redirect reissue后产生新动态实例；递增后可区分旧实例事件。
     int unsigned        dynamic_epoch;
     int unsigned        replay_seq;
@@ -128,6 +138,14 @@ class status_transaction extends uvm_object;
         load_issue_epoch  = 0;
         sta_issue_epoch   = 0;
         std_issue_epoch   = 0;
+        active_instance_flush_epoch_valid = 1'b0;
+        active_instance_flush_epoch       = 0;
+        load_instance_flush_epoch_valid   = 1'b0;
+        sta_instance_flush_epoch_valid    = 1'b0;
+        std_instance_flush_epoch_valid    = 1'b0;
+        load_instance_flush_epoch         = 0;
+        sta_instance_flush_epoch          = 0;
+        std_instance_flush_epoch          = 0;
         dynamic_epoch     = 0;
         replay_seq        = 0;
         issue_killed      = 1'b0;
@@ -180,6 +198,67 @@ class status_transaction extends uvm_object;
             end
         endcase
     endfunction:set_target_issue_epoch
+
+    function bit get_target_instance_flush_epoch(
+        input memblock_issue_target_e target,
+        output int unsigned instance_flush_epoch
+    );
+        case (target)
+            MEMBLOCK_ISSUE_TARGET_LOAD: begin
+                instance_flush_epoch = load_instance_flush_epoch;
+                return load_instance_flush_epoch_valid;
+            end
+            MEMBLOCK_ISSUE_TARGET_STA: begin
+                instance_flush_epoch = sta_instance_flush_epoch;
+                return sta_instance_flush_epoch_valid;
+            end
+            MEMBLOCK_ISSUE_TARGET_STD: begin
+                instance_flush_epoch = std_instance_flush_epoch;
+                return std_instance_flush_epoch_valid;
+            end
+            default: begin
+                `uvm_fatal("STATUS_TR", $sformatf("get_target_instance_flush_epoch got target=%0d", target))
+            end
+        endcase
+        instance_flush_epoch = 0;
+        return 1'b0;
+    endfunction:get_target_instance_flush_epoch
+
+    function void set_target_instance_flush_epoch(
+        input memblock_issue_target_e target,
+        input int unsigned instance_flush_epoch_i
+    );
+        case (target)
+            MEMBLOCK_ISSUE_TARGET_LOAD: begin
+                load_instance_flush_epoch_valid = 1'b1;
+                load_instance_flush_epoch = instance_flush_epoch_i;
+            end
+            MEMBLOCK_ISSUE_TARGET_STA: begin
+                sta_instance_flush_epoch_valid = 1'b1;
+                sta_instance_flush_epoch = instance_flush_epoch_i;
+            end
+            MEMBLOCK_ISSUE_TARGET_STD: begin
+                std_instance_flush_epoch_valid = 1'b1;
+                std_instance_flush_epoch = instance_flush_epoch_i;
+            end
+            default: begin
+                `uvm_fatal("STATUS_TR", $sformatf("set_target_instance_flush_epoch got target=%0d", target))
+            end
+        endcase
+        active_instance_flush_epoch_valid = 1'b1;
+        active_instance_flush_epoch = instance_flush_epoch_i;
+    endfunction:set_target_instance_flush_epoch
+
+    function void clear_target_instance_flush_epochs();
+        active_instance_flush_epoch_valid = 1'b0;
+        active_instance_flush_epoch = 0;
+        load_instance_flush_epoch_valid = 1'b0;
+        sta_instance_flush_epoch_valid = 1'b0;
+        std_instance_flush_epoch_valid = 1'b0;
+        load_instance_flush_epoch = 0;
+        sta_instance_flush_epoch = 0;
+        std_instance_flush_epoch = 0;
+    endfunction:clear_target_instance_flush_epochs
 
 endclass:status_transaction
 

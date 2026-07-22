@@ -186,8 +186,6 @@ class plus;
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_LSQ_RESYNC_ON_MISMATCH, bit, 1'b0)
     // 0: 允许 STA IQ feedback pass；1: 丢弃该兼容 pass，等待真实 STA writeback/feedback。默认等待真实路径。
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_STA_REAL_WB_PASS_EN, bit, 1'b1)
-    // 0: 普通 store STD issue accept 后注入 synthetic pass；1: 等待真实 STD feedback/writeback。默认等待真实路径。
-    `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_STD_REAL_WB_PASS_EN, bit, 1'b1)
 
     // 主动主流程driver的无进展debug阈值。该参数只打印warning，不作为正常退出条件。
     `MEMBLOCK_PLUS_ARGS_DEFINE(MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES, int, 10000)
@@ -369,7 +367,6 @@ class plus;
         // 读取非严格 DUT 行为 / smoke 兼容控制。严格 DUT 行为验证时重点检查这些开关。
         load_bit("MEMBLOCK_LSQ_RESYNC_ON_MISMATCH", MEMBLOCK_LSQ_RESYNC_ON_MISMATCH);
         load_bit("MEMBLOCK_STA_REAL_WB_PASS_EN", MEMBLOCK_STA_REAL_WB_PASS_EN);
-        load_bit("MEMBLOCK_STD_REAL_WB_PASS_EN", MEMBLOCK_STD_REAL_WB_PASS_EN);
 
         load_int("MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES", MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES);
         load_bit("MEMBLOCK_DISPATCH_ISSUE_SEQ_EN", MEMBLOCK_DISPATCH_ISSUE_SEQ_EN);

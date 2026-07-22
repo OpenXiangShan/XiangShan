@@ -168,7 +168,7 @@
         {
           title: "mark fire",
           nodes: [
-            fn("mark_fired_items", "fired_items, fired_mask", "状态表发射结果更新", "只标记 driver 确认 fired 的端口；redirect abort 时保留已接收 item。", ["mark_issue_fire()", "mark_issue_fire_already_accepted()", "submit_issue_accept_pass()"]),
+            fn("mark_fired_items", "fired_items, fired_mask", "状态表发射结果更新", "只标记 driver 确认 fired 的端口；redirect abort 时保留已接收 item。", ["mark_issue_fire()", "mark_issue_fire_already_accepted()"]),
             fn("mark_issue_fire", "issue item", "删除队列项，置 dispatched，分配 issue_epoch", "发射成功后的核心状态更新；replay target 发射后清 replay mask。", ["data.alloc_issue_epoch()", "data.mark_issue_snapshot()", "data.delete_issue_queue_entry()", "data.clear_replay_target_after_fire()"]),
           ],
         },

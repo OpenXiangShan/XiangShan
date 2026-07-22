@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待 coding |
+| 状态 | coding 已完成，review 通过，待归档到 `plan/do` |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv` |
@@ -40,6 +40,86 @@
   `STD_FEEDBACK/iq_feedback_valid` pass。
 - 不实现 RM、checker、scoreboard 或 coverage。
 - 不改变 `writeback_status_handler` 的主职责和 pass/fail/terminal owner。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### [IMPLEMENTATION_DELTA] 公共 current issue snapshot API 的 owner 前移
+
+来源：总控 plan 要求 int-WB 先于 IQ feedback/replay 执行，而本 plan 初稿在
+SCALAR_LDA/STA 归一化处引用了后续 IQ 专项定义的
+`attach_current_issue_snapshot()`。
+
+原 plan：由 IQ 专项先定义该 helper，int-WB 在后续阶段调用。
+
+实现调整：本专项建立唯一的公共 `attach_current_issue_snapshot()` API 及其 owner，先完成
+ROB/STD 相关的 snapshot 校验、UID/target key/`issue_epoch`/`replay_seq` 补齐；IQ 专项只在
+后续扩展该 API 的 STA SQ-only 分支，不得重新定义同名函数、第二个 active-map owner 或
+第二套 generation 状态。
+
+原因：按总控执行顺序 coding 时，int-WB 不能依赖尚未落地的 IQ 源码接口；同时必须保持
+current issue generation、active map 和 key 生命周期只有一个权威来源。
+
+影响范围：`dispatch_monitor_event_adapter.sv`、`common_data_transaction.sv` 及后续 IQ
+专项的接口合同。该调整不改变 raw 字段、STD value-only 双 flag 探测、strict real-WB
+完成 owner 或 pass/fail/terminal 的职责边界。
+
+### [IMPLEMENTATION_DELTA] STD 候选先过滤后判唯一
+
+来源：首轮 review 发现只按 active ROB map 的两个 flag hit 判双命中，会把另一 flag 上的
+非 STD uid 误判为两个合法 STD 候选。
+
+原 plan：对 `{flag=0,value}` 和 `{flag=1,value}` 做 probe 后要求唯一命中，再补齐 STD
+snapshot。
+
+实现调整：新增 `probe_std_candidate()`。每个 flag 命中 active ROB 后，先检查该 uid 的
+`std_dispatched`、active/SQ mapping、terminal/flush/kill、ROB/SQ owner、target issue epoch
+和 target instance flush epoch；只有通过这些检查的候选才参与零/一/双候选判定。最终选中的
+候选沿用同一份 snapshot，不重复猜测 key。
+
+原因：ROB value 相同但 flag 不同的 active uid 可能属于 LOAD/STA 或已经失效的动态实例，
+不能把“active ROB 命中”直接等同于“合法 STD writeback owner”。
+
+影响范围：`dispatch_monitor_event_adapter.sv`；仍然只执行两个 active ROB probe，不扫描
+主表或完整 status 表；零/双合法候选仍在状态修改前 `uvm_fatal`。
+
+### [IMPLEMENTATION_DELTA] 记录 target 级动态实例 flush epoch
+
+来源：首轮 review 发现仅将 raw sample epoch 与消费时全局
+`dispatch_flush_epoch` 比较，无法证明 raw 属于当前 target 的动态 issue instance，且会把
+flush 前采样、flush 后 drain 的事件误判为 fatal。
+
+原 plan：STD/LOAD/STA 反查时使用 `active_instance_flush_epoch_valid/active_instance_flush_epoch`
+验证 raw sample provenance。
+
+实现调整：`status_transaction` 增加 generic 最近 issue 快照和 LOAD/STA/STD target 级
+`*_instance_flush_epoch_valid/*_instance_flush_epoch`；`common_data_transaction::mark_issue_snapshot()`
+在真实 fire 边界记录当前 `dispatch_flush_epoch`，redirect 清理时统一失效。adapter 按
+`get_target_instance_flush_epoch()` 与 raw sample epoch 比较，future epoch 仍 fatal；只有
+sample epoch 早于 target 实例 epoch 才视为旧实例，未被 redirect 杀死的老指令可以在更晚的
+全局 epoch 写回。候选不匹配时先过滤，最终选中项不匹配时 fatal。
+
+原因：同一 uid 的不同 target 可能在不同拍 issue，单一 uid epoch 会覆盖另一个 target；
+target 级字段保留原有 target issue epoch 的粒度，避免跨 target 误关联。
+
+影响范围：`status_transaction.sv`、`common_data_transaction.sv`、
+`dispatch_monitor_event_adapter.sv` 及 status 分析文档；不改变 `dynamic_epoch/replay_seq`
+的既有 owner。
+
+### [IMPLEMENTATION_DELTA] 完整 absent metadata/exception capability guard
+
+来源：首轮 review 发现 capability valid flag 已校验，但 absent 的 `replayInst/flushPipe`
+非中性值以及不存在于某 lane 的 exceptionVec 位没有 fail-fast 检查。
+
+原 plan：不存在的字段保持中性默认值，并按真实 port 位图采样 exceptionVec。
+
+实现调整：`check_raw_int_wb_capability()` 增加 STA1/STD absent metadata 中性值检查，并按
+LDA0/LDA1-2/STA0/STA1/STD 的允许 bit mask 拒绝不存在的 exceptionVec 位。
+
+原因：当前 monitor factory 虽然会生成中性值，但 raw struct 可能由未来 producer 或测试
+注入构造；adapter 必须在状态更新前保护物理接口能力边界。
+
+影响范围：`dispatch_monitor_event_adapter.sv`；不改变真实 exceptionVec bit 的复制或 fault
+handler 逻辑。
 
 执行 coding 前必须确认：
 
@@ -649,3 +729,13 @@ RM/checker/scoreboard/coverage
 | adapter 查询成本 | 性能边界 | 可能按 uid 全表反查 | monitor event 是高频路径 | SCALAR_LDA/STA 固定 active map 查询；STD 仅两个 ROB flag probe |
 
 保持不变的主体逻辑：raw batch 入口、writeback handler 状态推进职责、current issue token owner、redirect-first batch 仲裁、pass/fail/terminal 收口、RM/checker/coverage deferred 状态。
+
+## 10. 执行结果
+
+- 代码、相关 flow/analysis/规则文档和 implementation review 已同步完成。
+- 独立 subagent review 结果为 `FINAL PASS`；本 agent 已复核 review 覆盖范围、旧符号清理和下游边界。
+- 干净远端 VCS/Verdi 编译通过，结果为 `0 error(s), 0 warning(s)`。
+- `tc_sanity` 通过，`UVM_ERROR=0`、`UVM_FATAL=0`。
+- 真实 store writeback smoke 已观察到 `STD writeback -> STA IQ feedback -> STA writeback -> ROB commit`；随后暴露的
+  `sqDeq` pointer mismatch 属于 LSQ MMIO/status/SQ deq 子计划，不属于本 plan 的 Int-WB owner。
+- 本 plan 不修改 SQ deq、commit/deq 顺序或 terminal owner；完成后可按执行规则移动到 `plan/do`。

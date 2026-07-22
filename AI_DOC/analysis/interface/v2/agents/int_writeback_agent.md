@@ -9,7 +9,7 @@
 | 核验 commit | `bd813bc3ed5b39581be966c6518788852890ff6f` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan`、`build_memblock/rtl/MemBlock.sv`、V2 `memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-07-17` |
+| 最后核验日期 | `2026-07-22` |
 
 ## Agent 职责和边界
 
@@ -73,9 +73,9 @@ Scala 内部使用 `DecoupledIO(new MemExuOutput)`。当前 whole-core 生成的
 
 | RTL 信号组 | interface/connect | monitor | raw/adapter 当前边界 |
 |---|---|---|---|
-| `writebackLda_0/1/2` | `io_mem_to_ooo_int_wb_agent_agent_interface.sv`、`io_mem_to_ooo_int_wb_agent_connect.sv` | `io_mem_to_ooo_int_wb_agent_agent_monitor::mon_data()` | 当前 raw 只保留 exception/key；metadata 保真和 guard 由 int-WB 适配 plan 处理 |
-| `writebackSta_0/1` | 同上 | 同上 | STA0/STA1 capability 必须分别处理，不能共用统一字段模板 |
-| `writebackStd_0/1` | 同上 | 同上 | 不得补造 trigger/flush/replay 字段 |
+| `writebackLda_0/1/2` | `io_mem_to_ooo_int_wb_agent_agent_interface.sv`、`io_mem_to_ooo_int_wb_agent_connect.sv` | `io_mem_to_ooo_int_wb_agent_agent_monitor::mon_data()` | raw 保留真实 ROB、metadata、exceptionVec、采样 flush epoch；adapter 按 lane capability 校验，并从 active status/map 补 LQ |
+| `writebackSta_0/1` | 同上 | 同上 | raw 分别采样 STA0/STA1 capability；adapter 校验 trigger/flushPipe/exceptionVec 能力并从 active status/map 补 SQ |
+| `writebackStd_0/1` | 同上 | 同上 | raw 只保留 ROB value-only 和 provenance；adapter 对两个 flag 做有限 active map 探测，不能补造 ROB flag/SQ key 或 trigger/flush/replay 字段 |
 
 ## 关联 Flow
 
@@ -106,6 +106,7 @@ Scala 内部使用 `DecoupledIO(new MemExuOutput)`。当前 whole-core 生成的
 |---|---|---|---|---|---|
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 首次建立，无旧的 agent 长期文档 | 建立 V2 LDA/STA/STD split writeback metadata capability、运行时语义和 lane 差异 | 用户要求结合 Scala 源码解释 metadata 和端口差异 | V2 MemBlock int writeback agent |
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 只说明 scalar LDA 的 `replayInst` 恒 0，未交代 Scala 中合法动态 producer 的归属 | 补充 `HybridUnit` 的 forwarding CAM 失配 producer，并明确其属于独立 Hyu writeback、不能套到 LDA0/1/2 | 用户追问 replay/flush/trigger 的置位场景 | V2 int writeback 与 HybridUnit 边界 |
+| 2026-07-22 | 当前 V2 int-WB 适配 coding | 只描述 interface 能力，未同步 raw/adapter 的运行时落点 | `mon_data()` 作为唯一 raw queue push owner；raw 冻结 sample epoch，adapter 负责 current snapshot、STD value-only 反查和 all-or-fatal key/capability 校验；STD 只有真实 writeback 才能完成 | 完成 V2 Int-WB 测试框架适配 | V2 int writeback agent 与 dispatch 公共状态流 |
 
 ## 待确认项
 

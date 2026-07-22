@@ -16,7 +16,7 @@
 并唯一负责同一 monitor 上 VSTU feedback 的 scalar-only fail-fast gate。
 
 SCALAR_LDA/STA/STD int-WB 的 raw source、lane、metadata、key 归一化、`replayInst` 和 AMO 检查，以
-`mem_ut_v2_int_wb_writeback_framework_adapt_execution_plan_20260708.md` 为唯一实现依据。本 plan 只复用
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_int_wb_writeback_framework_adapt_execution_plan_20260708.md` 为唯一实现依据。本 plan 只复用
 其归一化后的 real-WB event 和共用的 current snapshot helper，不重复定义 int-WB 修改逻辑。
 
 本轮支持：
@@ -322,7 +322,7 @@ semantic batch处理完成
 | `mem_ut/ver/ut/memblock/seq/virtual_sequence/soft_test` | 复用现有 soft-test 结构增加最小正向场景，不新增通用 expected-fatal runner |
 
 int-WB monitor、raw struct、metadata guard 和 ROB 分支 snapshot attach 的具体实现，继续由
-`mem_ut_v2_int_wb_writeback_framework_adapt_execution_plan_20260708.md` 管理。
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_int_wb_writeback_framework_adapt_execution_plan_20260708.md` 管理。
 
 明确不修改或不新增：
 

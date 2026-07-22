@@ -405,18 +405,18 @@ typedef struct {
     bit                         has_issue_epoch;
     int unsigned                replay_seq;
     bit                         has_replay_seq;
-    // 中文注释：DUT真实 int writeback/pass/fault 有效标志，只能由 int writeback 或明确模拟真实写回的 synthetic event 置位。
+    // 中文注释：DUT真实 int writeback/pass/fault 有效标志，只能由真实 int writeback 置位。
     // IQ feedback hit 不允许写该字段；handler 只在真实 writeback 分支用它更新 target writeback/pass。
     bit                         real_wb_valid;
     bit                         has_exception;
     bit [23:0]                  exception_vec;
     // 中文注释：DUT IssueQueue feedback 有效标志。置位后只表示本次 issue response 已返回，不等价于 ROB/RF writeback。
-    // 由 convert_raw_iq_feedback() 或 issue-accept 兼容路径设置，handler 根据 real_wb pass 配置决定是否仅记录 feedback done。
+    // 由 convert_raw_iq_feedback() 设置；handler 按 target 的兼容策略决定是否只记录 feedback done。
     bit                         iq_feedback_valid;
     // 中文注释：IssueQueue feedback hit/finalSuccess。为1时表示该 target 本次 issue 被 IQ 接受成功。
-    // 当真实 writeback pass 开启时只更新 issue_feedback_success；关闭时才作为兼容 pass 来源。
+    // STA 可由既有兼容开关决定是否只更新 issue_feedback_success；STD 永不作为 pass 来源。
     bit                         iq_feedback_hit;
-    // 中文注释：IssueQueue feedback failed。为1时表示该 target 本次 issue 失败；当前 STA failed 转 replay，STD failed warning/drop。
+    // 中文注释：IssueQueue feedback failed。为1时表示该 target 本次 issue 失败；当前 STA failed 转 replay，STD 进入严格拒绝路径。
     bit                         iq_feedback_failed;
     // 中文注释：IssueQueue feedback flush_state 原始语义保留位，用于区分 PTW/TLB back replay 等状态来源。
     // 它本身不代表真实 writeback，也不单独生成 pass。
