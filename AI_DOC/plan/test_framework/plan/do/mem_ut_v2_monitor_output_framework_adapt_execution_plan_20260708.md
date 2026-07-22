@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待 coding |
+| 状态 | `do`，coding、验证和最终 review 已完成 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv` |
@@ -438,3 +438,19 @@ STA IQ monitor跨专项边界：
   本plan不新增或修改helper；IQ feedback/replay专项唯一实现SQ-only raw、VSTU fatal和current snapshot attach；
   本plan只检查分类结果，不形成第二源码owner。
 ```
+
+## 执行记录（2026-07-22）
+
+本专项实际 coding 只修改 `io_mem_to_ooo_vec_wb_agent_agent_monitor::mon_data()`：保留原有接口采样，
+在 reset 完成后对两个 `writebackVldu` valid 使用四态安全的 `!== 1'b0` 检查；发现 `1/X/Z` 时
+`uvm_fatal`，确定为 0 时不生成 raw/event、不写公共状态。其它 monitor 分类和 sideband 内容作为跨专项
+职责约束保留，不在本专项重复实现。
+
+验证结果：
+
+- V2 全量远端 VCS/Verdi compile/elaboration/link 通过，结果为 `0 error(s), 0 warning(s)`。
+- 真实 scalar cancel/reconcile smoke 通过：
+  `mem_ut/ver/ut/memblock/sim/watermark_fun/log/tc=basicTest_ts=memblock_dispatch_real_cancel_reconcile_vseq_cfg=tc_dispatch_real_cancel_reconcile_smoke_seed=666666_rtl_watermark_fix.log`；日志包含 `TEST_PASS`，且 `UVM_ERROR=0`、`UVM_FATAL=0`。
+- 未单独 force 注入 `writebackVldu` 的 `1/X/Z` 负向场景；该检查由源码静态核对确认，负向动态验证不在本轮 scope。
+
+最终独立 subagent review 已返回 `FINAL PASS`。本 plan 随 implementation review 归档到 `plan/do`。
