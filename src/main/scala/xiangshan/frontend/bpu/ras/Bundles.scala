@@ -25,7 +25,7 @@ import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.bpu.BranchAttribute
 
 class RasEntry(implicit p: Parameters) extends RasBundle {
-  val retAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val retAddr: PrunedAddr = PrunedAddr(GuardedVAddrBits)
   val ctr:     UInt       = UInt(StackCounterWidth.W) // layer of nested call functions
 }
 
@@ -74,7 +74,7 @@ object RasInternalMeta {
 }
 
 class RasRedirectMeta(implicit p: Parameters) extends RasInternalMeta {
-  val topRetAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val topRetAddr: PrunedAddr = PrunedAddr(GuardedVAddrBits)
 }
 
 class RasCommitMeta(implicit p: Parameters) extends RasBundle {
@@ -107,5 +107,5 @@ class RasBypass(implicit p: Parameters) extends RasBundle {
 class RasSpecInfo(implicit p: Parameters) extends RasBundle {
   val attribute:   BranchAttribute = new BranchAttribute
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-  val startPc:     UInt            = UInt(VAddrBits.W)
+  val startPc:     UInt            = UInt(GuardedVAddrBits.W)
 }

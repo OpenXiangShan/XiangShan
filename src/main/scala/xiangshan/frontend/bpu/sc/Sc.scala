@@ -108,7 +108,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    *  predict pipeline stage 0
    */
-  private val s0_startPc  = io.startPc
+  private val s0_startPc  = io.startPc.truncate(VAddrBits)
   private val s0_bankMask = getBankMask(s0_startPc)
   private val s0_pathIdx = PathTableInfos.zip(pathTable).map { case (info, table) =>
     table.getPathTableIdx(
@@ -172,7 +172,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  predict pipeline stage 1
    *  calculate each ctr's percsum
    */
-  private val s1_startPc = RegEnable(io.startPc, s0_fire)
+  private val s1_startPc = RegEnable(s0_startPc, s0_fire)
   private val s1_pathResp = Mux(
     PathEnable.B,
     VecInit(pathTable.map(_.io.predictReadResp)),

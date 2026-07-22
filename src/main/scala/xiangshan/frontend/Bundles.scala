@@ -73,9 +73,9 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICa
 
   // fast path: Timing critical
   val valid:         Bool       = Bool()
-  val startVAddr:    PrunedAddr = PrunedAddr(VAddrBits)
-  val nextLineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
-  val target:        PrunedAddr = PrunedAddr(VAddrBits)
+  val startVAddr:    PrunedAddr = PrunedAddr(GuardedVAddrBits)
+  val nextLineVAddr: PrunedAddr = PrunedAddr(GuardedVAddrBits)
+  val target:        PrunedAddr = PrunedAddr(GuardedVAddrBits)
   // slow path
   val ftqIdx:         FtqPtr      = new FtqPtr
   val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
@@ -90,7 +90,7 @@ class FetchRequestBundle(implicit p: Parameters) extends FrontendBundle with ICa
 
 class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICacheParameters {
   val valid:               Bool            = Bool()
-  val vAddr:               Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
+  val vAddr:               Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(GuardedVAddrBits))
   def startVAddr:          PrunedAddr      = vAddr(0)
   def nextLineVAddr:       PrunedAddr      = vAddr(1)
   val taken:               Bool            = Bool()
@@ -141,7 +141,7 @@ class FrontendRedirect(implicit p: Parameters) extends FrontendBundle {
   val ftqOffset: UInt            = UInt(FetchBlockInstOffsetWidth.W) // maybe use later
   val isRVC:     Bool            = Bool()                            // seems unused for now, keep it.
   val attribute: BranchAttribute = new BranchAttribute
-  val target:    UInt            = UInt(VAddrBits.W)
+  val target:    UInt            = UInt(GuardedVAddrBits.W)
 }
 
 class IfuToFtqIO(implicit p: Parameters) extends FrontendBundle {

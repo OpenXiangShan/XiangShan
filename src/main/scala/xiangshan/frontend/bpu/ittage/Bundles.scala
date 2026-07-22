@@ -56,7 +56,7 @@ class IttageOffset(implicit p: Parameters) extends IttageBundle {
 
 class IttagePrediction(implicit p: Parameters) extends IttageBundle {
   val hit:    Bool       = Bool()
-  val target: PrunedAddr = PrunedAddr(VAddrBits)
+  val target: PrunedAddr = PrunedAddr(GuardedVAddrBits)
 }
 
 class IttageMeta(implicit p: Parameters) extends IttageBundle {

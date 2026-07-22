@@ -33,9 +33,9 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   class PredCheckerIO extends IfuBundle {
     class PredCheckerReq(implicit p: Parameters) extends IfuBundle {
       val instrVec:      Vec[Instruction]   = Vec(IBufferEnqueueWidth, new Instruction)
-      val jumpOffsetVec: Vec[PrunedAddr]    = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
+      val jumpOffsetVec: Vec[PrunedAddr]    = Vec(IBufferEnqueueWidth, PrunedAddr(GuardedVAddrBits))
       val pdInfoVec:     Vec[PreDecodeInfo] = Vec(IBufferEnqueueWidth, new PreDecodeInfo)
-      val instrPcVec:    Vec[PrunedAddr]    = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
+      val instrPcVec:    Vec[PrunedAddr]    = Vec(IBufferEnqueueWidth, PrunedAddr(GuardedVAddrBits))
     }
 
     class PredCheckerResp(implicit p: Parameters) extends IfuBundle {
@@ -125,12 +125,12 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   mispredIdx.valid := ParallelOR(stage1Fault)
   mispredIdx.bits  := ParallelPriorityEncoder(stage1Fault)
 
-  private val seqTargets = VecInit((0 until IBufferEnqueueWidth).map(i =>
-    instrPcVec(i) + Mux(pdInfoVec(i).isRVC || invalidTaken(i), 2.U, 4.U)
-  ))
+  private val seqTargets = VecInit(pdInfoVec.zipWithIndex.map { case (pd, i) =>
+    instrPcVec(i) + Mux(pd.isRVC || invalidTaken(i), 2.U, 4.U)
+  })
 
   private val jumpTargets = VecInit(pdInfoVec.zipWithIndex.map { case (pd, i) =>
-    (instrPcVec(i) + jumpOffsetVec(i)).asTypeOf(PrunedAddr(VAddrBits))
+    instrPcVec(i) + jumpOffsetVec(i)
   })
 
   private val fixedIsJump =
@@ -175,7 +175,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   io.resp.stage2Out.checkerRedirect.bits.attribute    := Mux(invalidTakenNext, BranchAttribute.None, finalAttributeNext)
   io.resp.stage2Out.checkerRedirect.bits.selectBlock  := finalSelectBlockNext
   io.resp.stage2Out.checkerRedirect.bits.invalidTaken := invalidTakenNext
-  io.resp.stage2Out.checkerRedirect.bits.mispredPc    := finalPcNext
+  io.resp.stage2Out.checkerRedirect.bits.mispredPc    := finalPcNext.truncate(VAddrBits)
   // FIXME: Not a reliable block-end marker; special cases may have only half a branch predicted.(invalidTaken)
   io.resp.stage2Out.checkerRedirect.bits.endOffset := endOffsetNext
 

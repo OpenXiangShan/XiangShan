@@ -20,12 +20,38 @@ package xiangshan.frontend
 import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
+import utility.SignExt
+import utility.ZeroExt
 import xiangshan.XSBundle
 
 class PrunedAddr(val length: Int)(implicit p: Parameters) extends XSBundle {
   val addr: UInt = UInt((length - instOffsetBits).W)
 
   def toUInt: UInt = Cat(addr, 0.U(instOffsetBits.W))
+
+  def signExt(targetWidth: Int): PrunedAddr = {
+    require(targetWidth >= length)
+    if (targetWidth == length) {
+      println(s"PrunedAddr: unnecessary ${this.pathName}.signExt call")
+    }
+    PrunedAddrInit(SignExt(toUInt, targetWidth))
+  }
+
+  def zeroExt(targetWidth: Int): PrunedAddr = {
+    require(targetWidth >= length)
+    if (targetWidth == length) {
+      println(s"PrunedAddr: unnecessary ${this.pathName}.zeroExt call")
+    }
+    PrunedAddrInit(ZeroExt(toUInt, targetWidth))
+  }
+
+  def truncate(targetWidth: Int): PrunedAddr = {
+    require(targetWidth <= length)
+    if (targetWidth == length) {
+      println(s"PrunedAddr: unnecessary ${this.pathName}.truncate call")
+    }
+    PrunedAddrInit(toUInt(targetWidth - 1, 0))
+  }
 
   def apply(x: Int): Bool = toUInt(x)
 

@@ -167,7 +167,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
           "ICache MainPipe: wayLookupEntry ftqIdx mismatch"
         )
         assert(
-          s0_wayLookupEntry(i).debug_startVAddr.get === s0_req(i).startVAddr,
+          s0_wayLookupEntry(i).debug_startVAddr.get ===
+            s0_req(i).startVAddr.truncate(VAddrBits),
           "ICache MainPipe: wayLookupEntry startVAddr mismatch"
         )
       }
@@ -482,7 +483,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
       val info = Wire(Valid(new CorruptedInfo))
       info.valid        := metaCorrupt(portIdx) || dataCorrupt(portIdx)
-      info.bits.vAddr   := s2_vAddr(reqIdx)(portIdx)
+      info.bits.vAddr   := s2_vAddr(reqIdx)(portIdx).truncate(VAddrBits)
       info.bits.wayMask := s2_wayMask(reqIdx)(portIdx)
       info.bits.isMeta  := metaCorrupt(portIdx)
       info.bits.isData  := dataCorrupt(portIdx)

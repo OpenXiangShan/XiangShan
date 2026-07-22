@@ -88,9 +88,9 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
 
   private val s2_resps = VecInit(tables.map(t => t.io.resp))
 
-  private val s2_ittageTarget      = Wire(PrunedAddr(VAddrBits))
-  private val s2_providerTarget    = Wire(PrunedAddr(VAddrBits))
-  private val s2_altProviderTarget = Wire(PrunedAddr(VAddrBits))
+  private val s2_ittageTarget      = Wire(PrunedAddr(GuardedVAddrBits))
+  private val s2_providerTarget    = Wire(PrunedAddr(GuardedVAddrBits))
+  private val s2_altProviderTarget = Wire(PrunedAddr(GuardedVAddrBits))
   private val s2_provided          = Wire(Bool())
   private val s2_provider          = Wire(UInt(log2Ceil(NumTables).W))
   private val s2_altProvided       = Wire(Bool())
@@ -189,7 +189,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   // Predict
   tables.foreach { t =>
     t.io.req.valid           := s1_fire && s1_isIndirect // TODO: s1_isIndirect for low power
-    t.io.req.bits.startPc    := s1_startPc
+    t.io.req.bits.startPc    := s1_startPc.truncate(VAddrBits)
     t.io.req.bits.foldedHist := io.s1_foldedPhr
   }
 
@@ -199,7 +199,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
     val usefulCnt:    SaturateCounter = UsefulCounter()
     val targetOffset: IttageOffset    = new IttageOffset
     val tableIdx:     UInt            = UInt(log2Ceil(NumTables).W)
-    val maskTarget:   Vec[UInt]       = Vec(NumTables, UInt(VAddrBits.W))
+    val maskTarget:   Vec[UInt]       = Vec(NumTables, UInt(GuardedVAddrBits.W))
   }
 
   private val inputRes = VecInit(s2_resps.zipWithIndex.map {
@@ -209,7 +209,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
       tableInfo.cnt           := r.bits.cnt
       tableInfo.targetOffset  := r.bits.targetOffset
       tableInfo.tableIdx      := i.U(log2Ceil(NumTables).W)
-      tableInfo.maskTarget    := VecInit(Seq.fill(NumTables)(0.U(VAddrBits.W)))
+      tableInfo.maskTarget    := VecInit(Seq.fill(NumTables)(0.U(GuardedVAddrBits.W)))
       tableInfo.maskTarget(i) := "hffff_ffff_ffff_ffff".U
       SelectTwoInterRes(r.valid, tableInfo)
   })
@@ -229,11 +229,15 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }
 
   // When the entry corresponding to the pointer is valid and does not use PCRegion, use rTable region.
-  private val regionTargets = Wire(Vec(NumTables, PrunedAddr(VAddrBits)))
+  private val regionTargets = Wire(Vec(NumTables, PrunedAddr(GuardedVAddrBits)))
   for (i <- 0 until NumTables) {
     regionTargets(i) := PrunedAddrInit(Mux(
       rTable.io.respHit(i) && !regionReadTargetOffset(i).usePcRegion,
-      Cat(rTable.io.respRegion(i), regionReadTargetOffset(i).offset.toUInt),
+      Cat(
+        s2_startPc(GuardedVAddrBits - 1),
+        rTable.io.respRegion(i),
+        regionReadTargetOffset(i).offset.toUInt
+      ),
       Cat(targetGetRegion(s2_startPc), regionReadTargetOffset(i).offset.toUInt)
     ))
   }
@@ -247,7 +251,7 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   }.reduce(_ | _))
 
   s2_ittageTarget := MuxCase(
-    0.U.asTypeOf(PrunedAddr(VAddrBits)),
+    0.U.asTypeOf(PrunedAddr(GuardedVAddrBits)),
     Seq(
       (provided && !(providerNull && altProvided)) -> providerCatTarget,
       (providerNull && altProvided)                -> altProviderCatTarget
@@ -288,8 +292,8 @@ class Ittage(implicit p: Parameters) extends BasePredictor with HasIttageParamet
   ittageMeta.providerUsefulCnt := s3_providerUsefulCnt
   ittageMeta.providerCnt       := s3_providerCnt
   ittageMeta.altProviderCnt    := s3_altProviderCnt
-  ittageMeta.providerTarget    := s3_providerTarget
-  ittageMeta.altProviderTarget := s3_altProviderTarget
+  ittageMeta.providerTarget    := s3_providerTarget.truncate(VAddrBits)
+  ittageMeta.altProviderTarget := s3_altProviderTarget.truncate(VAddrBits)
   ittageMeta.debug_predCycle.foreach(_ := GTimer())
   // Create a mask fo tables which did not hit our query, and also contain useless entries
   // and also uses a longer history than the provider

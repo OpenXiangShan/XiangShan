@@ -235,7 +235,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
 
   // used for check abtb output
-  io.debug_startPc := s2_startPc
+  io.debug_startPc := s2_startPc.truncate(VAddrBits)
 
   replacers.zipWithIndex.foreach { case (r, i) =>
     r.io.readValid   := s2_valid && s2_hit && s2_bankMask(i)

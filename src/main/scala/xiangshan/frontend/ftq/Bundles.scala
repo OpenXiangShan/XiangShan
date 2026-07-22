@@ -32,7 +32,7 @@ import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.PrefetchReqBundle
 
 class FtqEntry(implicit p: Parameters) extends FtqBundle {
-  val startPc:     PrunedAddr = PrunedAddr(VAddrBits)
+  val startPc:     PrunedAddr = PrunedAddr(GuardedVAddrBits)
   val taken:       Bool       = Bool()
   val endPosition: UInt       = UInt(CfiPositionWidth.W)
 }
@@ -116,12 +116,12 @@ class FtqToMainPipeBundle(implicit p: Parameters) extends FtqBundle {
 }
 
 class FtqPrefetchReq(implicit p: Parameters) extends FtqBundle with ICacheCacheLineHelper {
-  val startVAddr:    PrunedAddr = PrunedAddr(VAddrBits)
-  val nextLineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val startVAddr:    PrunedAddr = PrunedAddr(GuardedVAddrBits)
+  val nextLineVAddr: PrunedAddr = PrunedAddr(GuardedVAddrBits)
   val isCrossLine:   Bool       = Bool()
   val vSetIdx:       Vec[UInt]  = Vec(PortNumber, UInt(idxBits.W))
 
-  def vPageNumber: UInt = startVAddr(VAddrBits - 1, PageOffsetWidth)
+  def vPageNumber: UInt = startVAddr(GuardedVAddrBits - 1, PageOffsetWidth)
 
   def fromFtqEntry(entry: FtqEntry): FtqPrefetchReq = {
     startVAddr    := entry.startPc
@@ -133,8 +133,8 @@ class FtqPrefetchReq(implicit p: Parameters) extends FtqBundle with ICacheCacheL
 }
 
 class FtqFetchReq(implicit p: Parameters) extends FtqBundle with ICacheDataHelper {
-  val startVAddr:    PrunedAddr = PrunedAddr(VAddrBits)
-  val nextLineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val startVAddr:    PrunedAddr = PrunedAddr(GuardedVAddrBits)
+  val nextLineVAddr: PrunedAddr = PrunedAddr(GuardedVAddrBits)
   val taken:         Bool       = Bool()
   val endPosition:   UInt       = UInt(CfiPositionWidth.W)
   val bankSel:       Vec[UInt]  = Vec(PortNumber, UInt(DataBanks.W))
@@ -142,7 +142,7 @@ class FtqFetchReq(implicit p: Parameters) extends FtqBundle with ICacheDataHelpe
 
   def size: UInt = (endPosition +& 1.U) - startVAddr(FetchBlockAlignWidth - 1, instOffsetBits)
 
-  def vPageNumber: UInt = startVAddr(VAddrBits - 1, PageOffsetWidth)
+  def vPageNumber: UInt = startVAddr(GuardedVAddrBits - 1, PageOffsetWidth)
 
   def fromFtqEntry(entry: FtqEntry): FtqFetchReq = {
     startVAddr    := entry.startPc

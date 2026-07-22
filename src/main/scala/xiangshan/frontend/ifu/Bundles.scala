@@ -65,14 +65,14 @@ class InstrIndexEntry(implicit p: Parameters) extends IfuBundle {
 class FetchBlock(implicit p: Parameters) extends IfuBundle {
   val valid:          Bool        = Bool()
   val ftqIdx:         FtqPtr      = new FtqPtr
-  val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
+  val startVAddr:     PrunedAddr  = PrunedAddr(GuardedVAddrBits)
   val takenCfiOffset: Valid[UInt] = Valid(UInt(FetchBlockInstOffsetWidth.W))
   val range:          UInt        = UInt(FetchBlockInstNum.W)
   val size:           UInt        = UInt(log2Ceil(FetchBlockInstNum + 1).W)
 
-  val pcUpperBitsPlus1: UInt = UInt((VAddrBits - PcCutPoint).W)
+  val pcUpperBitsPlus1: UInt = UInt((GuardedVAddrBits - PcCutPoint).W)
 
-  def pcUpperBits: UInt = startVAddr(VAddrBits - 1, PcCutPoint)
+  def pcUpperBits: UInt = startVAddr(GuardedVAddrBits - 1, PcCutPoint)
 
   def fromICacheReq(req: MainPipeToIfuReq): FetchBlock = {
     valid            := req.valid
@@ -81,7 +81,7 @@ class FetchBlock(implicit p: Parameters) extends IfuBundle {
     takenCfiOffset   := req.takenCfiOffset
     range            := req.range
     size             := req.size
-    pcUpperBitsPlus1 := req.startVAddr(VAddrBits - 1, PcCutPoint) + 1.U
+    pcUpperBitsPlus1 := req.startVAddr(GuardedVAddrBits - 1, PcCutPoint) + 1.U
     this
   }
 }
@@ -144,7 +144,7 @@ class Instruction(implicit p: Parameters) extends IfuBundle with HasICacheParame
 }
 
 class PredCheckRedirect(implicit p: Parameters) extends IfuBundle {
-  val target:       PrunedAddr      = PrunedAddr(VAddrBits)
+  val target:       PrunedAddr      = PrunedAddr(GuardedVAddrBits)
   val misIdx:       Valid[UInt]     = Valid(UInt(log2Ceil(IBufferEnqueueWidth).W))
   val taken:        Bool            = Bool()
   val invalidTaken: Bool            = Bool()
@@ -182,7 +182,7 @@ class IfuRedirectInternal(implicit p: Parameters) extends IfuBundle {
   val prevIBufEnqPtr: IBufPtr = new IBufPtr
   // A fallthrough does not always correspond to a half RVI instruction.
   val isHalfInstr: Bool       = Bool()
-  val halfPc:      PrunedAddr = PrunedAddr(VAddrBits)
+  val halfPc:      PrunedAddr = PrunedAddr(GuardedVAddrBits)
   val halfData:    UInt       = UInt(16.W)
 }
 

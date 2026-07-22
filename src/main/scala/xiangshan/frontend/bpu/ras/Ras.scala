@@ -45,7 +45,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
     val commit:   Valid[BpuCommit]   = Flipped(Valid(new BpuCommit))
     val redirect: Valid[BpuRedirect] = Flipped(Valid(new BpuRedirect))
 
-    val topRetAddr:   PrunedAddr      = Output(PrunedAddr(VAddrBits))
+    val topRetAddr:   PrunedAddr      = Output(PrunedAddr(GuardedVAddrBits))
     val redirectMeta: RasRedirectMeta = Output(new RasRedirectMeta)
     val commitMeta:   RasCommitMeta   = Output(new RasCommitMeta)
   }
@@ -57,7 +57,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
 
   io.trainReady := true.B
 
-  def alignMask: UInt = ((~0.U(VAddrBits.W)) << FetchBlockAlignWidth).asUInt
+  def alignMask: UInt = ((~0.U(GuardedVAddrBits.W)) << FetchBlockAlignWidth).asUInt
 
   private val stack = Module(new RasStack).io
   // Here is an assertion that the same piece of valid data lasts for only one cycle.
@@ -102,7 +102,7 @@ class Ras(implicit p: Parameters) extends BasePredictor with HasRasParameters wi
   stack.redirect.isRet  := redirect.bits.attribute.isReturn
   stack.redirect.meta   := redirect.bits.meta.ras
   // Redirected branch PC points to end of instruction.
-  stack.redirect.callAddr := redirect.bits.cfiPc + 2.U
+  stack.redirect.callAddr := redirect.bits.cfiPc.signExt(GuardedVAddrBits) + 2.U
 
   private val commitValid    = RegNext(io.commit.valid, init = false.B)
   private val commitInfo     = RegEnable(io.commit.bits, io.commit.valid)
