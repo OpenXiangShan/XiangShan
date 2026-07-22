@@ -407,7 +407,9 @@ case class LLCConfig(llc: String) extends Config((site, here, up) => {
     up(XSTileKey).map { tile =>
       tile.copy(L2CacheParamsOpt = tile.L2CacheParamsOpt.map(_.copy(
         dataCheck = None,
-        enablePoison = false
+        enablePoison = false,
+        bufferableNC = false,
+        endpointOrderNC = true
       )))
     }
 })
