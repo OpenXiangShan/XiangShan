@@ -98,6 +98,7 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
     // prefetch req sender
     val l1_pf_to_l1 = DecoupledIO(new L1PrefetchReq())
     val l1_pf_to_l2 = Output(new xscache.coupledL2.PrefetchRecv())
+    val l1_pf_to_l3 = Output(new xscache.coupledL2.PrefetchRecv())
   })
 
   def isLoadAccess(uop: DynInst): Bool = FuType.isLoad(uop.fuType) || FuType.isVLoad(uop.fuType)
@@ -321,7 +322,12 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
   io.l1_pf_to_l2.addr_valid := l2_pf_req.valid
   io.l1_pf_to_l2.addr := l2_pf_req.bits.addr
   io.l1_pf_to_l2.pf_source := l2_pf_req.bits.source
-  io.l1_pf_to_l2.l2_pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
+  io.l1_pf_to_l2.pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L2_PF_REG_CNT, Some(true.B))
+
+  io.l1_pf_to_l3.addr_valid := l3_pf_req.valid
+  io.l1_pf_to_l3.addr := l3_pf_req.bits.addr
+  io.l1_pf_to_l3.pf_source := l3_pf_req.bits.source
+  io.l1_pf_to_l3.pf_en := RegNextN(io.pfCtrlFromCSR.l2_pf_enable, L3_PF_REG_CNT, Some(true.B))
 
   val l2_trace = Wire(new LoadPfDbBundle)
   l2_trace.paddr := l2_pf_req.bits.addr
