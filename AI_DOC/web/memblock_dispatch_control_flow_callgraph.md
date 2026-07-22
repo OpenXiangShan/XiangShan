@@ -604,10 +604,8 @@ base/count 推导，`MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM` 和
 | `send_issue_cycle(cycle_idx, has_fire)` | cycle | 驱动 issue xaction，更新发射状态 | 一拍 scalar split LOAD/STA/STD 发射；按候选 item 构造 compile-time 宽度 `candidate_mask`，拒绝 driver 返回候选外 bit，阻塞模式还要求全部 candidate 都已 fire | `clear_lintsissue_xaction()`、`select_issue_candidates()`、`assign_issue_items()`、`start_item()`、`finish_item()`、`port_idx_for_item()`、`mark_fired_items()` |
 | `assign_issue_items(tr, items, fired_items)` | xaction、候选 item 队列 | 填 xaction，并记录将要 fire 的 item | 将 scheduler 选出的 item 按队列内 idx 映射到对应 pipe | `field_assigner.assign_issue_item_fields()` |
 | `port_idx_for_item(item)` | issue item | 编译期布局下的全局 port index | 按 target base、local `uop_index` 和 target pipe count 做范围检查；越界或未知 target 立即 fatal | 无 |
-| `mark_fired_items(fired_items, fired_mask)` | fired item、driver 返回 mask | 对已被 DUT 接收的 item 做 `mark_issue_fire` | 先通过 `port_idx_for_item()` 把 target/local pipe 映射到逻辑 port，再只标记 mask 中实际 fire 的 item | `port_idx_for_item()`、`issue_sched.mark_issue_fire()`、`mark_issue_fire_already_accepted()`、`submit_issue_accept_pass()` |
-| `item_needs_issue_accept_pass(item)` | item | bit | 在真实 STD writeback pass 关闭时，为普通 store STD 构造软件 pass | `get_std_real_wb_pass_en()`、`data.get_main_transaction()`、`is_store_fuoptype()` |
-| `make_issue_accept_pass_event(item)` | item | `memblock_wb_event_t` | 构造 STD_FEEDBACK pass event，模拟 STD accept 后完成 | `data.get_status()`、`data.make_empty_wb_event()`、`status.get_target_issue_epoch()` |
-| `submit_issue_accept_pass(item)` | item | 写回 STD pass 状态 | 如果需要软件 STD pass，则直接交给 writeback handler | `item_needs_issue_accept_pass()`、`make_issue_accept_pass_event()`、`issue_accept_wb_handler.handle_event()` |
+| `mark_fired_items(fired_items, fired_mask)` | fired item、driver 返回 mask | 对已被 DUT 接收的 item 做 `mark_issue_fire` | 先通过 `port_idx_for_item()` 把 target/local pipe 映射到逻辑 port，再只标记 mask 中实际 fire 的 item | `port_idx_for_item()`、`issue_sched.mark_issue_fire()`、`mark_issue_fire_already_accepted()` |
+| STD completion | 真实 `writebackStd_0/1` raw event | 写回 STD pass 状态 | issueStd fire 只置 dispatched；V2 adapter 用 ROB value-only 反查唯一 active ROB/SQ owner，真实 writeback 才交给 handler | `convert_raw_int_wb()`、`resolve_std_uid_by_rob_value_only()`、`writeback_status_handler::handle_real_writeback_event()` |
 
 ### F.2.1 issue/LSQ/L2TLB driver 边界
 

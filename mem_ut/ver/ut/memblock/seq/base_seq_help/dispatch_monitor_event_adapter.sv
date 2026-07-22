@@ -73,45 +73,471 @@ class dispatch_monitor_event_adapter extends uvm_object;
         return data.resolve_uid_for_event(wb_event, uid);
     endfunction:event_has_active_uid
 
+    // 中文注释：唯一的 current issue snapshot owner。int-WB 先使用 ROB 精确 key 和
+    // STD value-only 双 flag 分支；后续 IQ 只能扩展本函数，不能另建同名 API 或第二套 map owner。
+    // 中文注释：把一个 active ROB 候选的当前 status/key 快照复制到 event。
+    // strict_candidate=0 仅供 value-only 分支筛选候选；真正选中后仍必须以 strict=1 再校验。
+    function bit fill_current_issue_snapshot(
+        ref memblock_wb_event_t wb_event,
+        input memblock_uid_t uid,
+        input memblock_rob_key_t rob_key,
+        input bit sample_flush_epoch_valid,
+        input int unsigned sample_flush_epoch,
+        input bit strict_candidate
+    );
+        status_transaction       status;
+        main_control_transaction main_tr;
+        memblock_rob_key_t       canonical_rob_key;
+        memblock_lq_key_t        lq_key;
+        memblock_sq_key_t        sq_key;
+        memblock_uid_t            mapped_uid;
+        int unsigned              target_epoch;
+        int unsigned              active_instance_flush_epoch;
+
+        status = data.get_status(uid);
+        if (!status.active || status.terminal_done || status.flushed ||
+            status.issue_killed || status.redirect_pending) begin
+            if (strict_candidate) begin
+                `uvm_fatal("INT_WB_ATTACH",
+                           $sformatf("ROB candidate is not current: uid=%0d active=%0d terminal=%0d flushed=%0d killed=%0d redirect_pending=%0d",
+                                     uid, status.active, status.terminal_done, status.flushed,
+                                     status.issue_killed, status.redirect_pending))
+            end
+            return 1'b0;
+        end
+        if (!data.target_dispatched(status, wb_event.target)) begin
+            if (strict_candidate) begin
+                `uvm_fatal("INT_WB_ATTACH",
+                           $sformatf("writeback target was not dispatched: uid=%0d target=%0d",
+                                     uid, wb_event.target))
+            end
+            return 1'b0;
+        end
+
+        if (sample_flush_epoch_valid) begin
+            if (sample_flush_epoch > memblock_sync_pkg::dispatch_flush_epoch) begin
+                `uvm_fatal("INT_WB_ATTACH",
+                           $sformatf("raw sample flush epoch is from the future: sample=%0d current=%0d",
+                                     sample_flush_epoch, memblock_sync_pkg::dispatch_flush_epoch))
+            end
+            if (!status.get_target_instance_flush_epoch(wb_event.target,
+                                                        active_instance_flush_epoch)) begin
+                if (strict_candidate) begin
+                    `uvm_fatal("INT_WB_ATTACH",
+                               $sformatf("uid=%0d target=%0d has no active instance flush epoch",
+                                         uid, wb_event.target))
+                end
+                return 1'b0;
+            end
+            // raw epoch 不能早于该 target 最近一次真实 issue；不能只比较当前全局 epoch，
+            // 因为未被 redirect 杀死的老指令可能在年轻指令 redirect 后才写回。
+            if (sample_flush_epoch < active_instance_flush_epoch) begin
+                if (strict_candidate) begin
+                    `uvm_fatal("INT_WB_ATTACH",
+                               $sformatf("raw sample epoch is older than current target instance: uid=%0d target=%0d sample=%0d instance=%0d",
+                                         uid, wb_event.target, sample_flush_epoch,
+                                         active_instance_flush_epoch))
+                end
+                return 1'b0;
+            end
+        end
+
+        canonical_rob_key = status.get_rob_key();
+        if (canonical_rob_key.flag != rob_key.flag || canonical_rob_key.value != rob_key.value) begin
+            `uvm_fatal("INT_WB_ATTACH",
+                       $sformatf("ROB key owner mismatch uid=%0d raw=%0d/%0d status=%0d/%0d",
+                                 uid, rob_key.flag, rob_key.value,
+                                 canonical_rob_key.flag, canonical_rob_key.value))
+        end
+
+        main_tr = data.get_main_transaction(uid);
+        if (wb_event.source == MEMBLOCK_WB_EVENT_SOURCE_LOAD_WB &&
+            wb_event.target == MEMBLOCK_ISSUE_TARGET_LOAD &&
+            wb_event.port_id == 0 &&
+            main_tr.op_class == MEMBLOCK_OP_CLASS_AMO) begin
+            `uvm_fatal("INT_WB_LDA0_AMO",
+                       $sformatf("LDA0 is owned by unsupported AMO uid=%0d; do not enter LOAD/LQ lifecycle", uid))
+        end
+
+        target_epoch = status.get_target_issue_epoch(wb_event.target);
+        if (target_epoch == 0) begin
+            if (strict_candidate) begin
+                `uvm_fatal("INT_WB_ATTACH",
+                           $sformatf("current issue snapshot has no issue_epoch: uid=%0d target=%0d",
+                                     uid, wb_event.target))
+            end
+            return 1'b0;
+        end
+
+        case (wb_event.target)
+            MEMBLOCK_ISSUE_TARGET_LOAD: begin
+                if (!status.active_lq_mapped) begin
+                    if (strict_candidate) `uvm_fatal("INT_WB_ATTACH", $sformatf("LOAD uid=%0d has no active LQ mapping", uid))
+                    return 1'b0;
+                end
+                lq_key.flag = status.lqIdx_flag;
+                lq_key.value = status.lqIdx_value;
+                if (!data.is_valid_lq_key(lq_key)) begin
+                    `uvm_fatal("INT_WB_ATTACH", $sformatf("LOAD uid=%0d has incomplete LQ key", uid))
+                end
+                if (!data.lookup_active_uid_by_lq(lq_key, mapped_uid) || mapped_uid != uid) begin
+                    `uvm_fatal("INT_WB_ATTACH", $sformatf("LOAD LQ owner mismatch uid=%0d", uid))
+                end
+                wb_event.lq_key = lq_key;
+                wb_event.has_lq = 1'b1;
+            end
+            MEMBLOCK_ISSUE_TARGET_STA,
+            MEMBLOCK_ISSUE_TARGET_STD: begin
+                if (!status.active_sq_mapped) begin
+                    if (strict_candidate) `uvm_fatal("INT_WB_ATTACH", $sformatf("STORE uid=%0d has no active SQ mapping", uid))
+                    return 1'b0;
+                end
+                sq_key.flag = status.sqIdx_flag;
+                sq_key.value = status.sqIdx_value;
+                if (!data.is_valid_sq_key(sq_key)) begin
+                    `uvm_fatal("INT_WB_ATTACH", $sformatf("STORE uid=%0d has incomplete SQ key", uid))
+                end
+                if (!data.lookup_active_uid_by_sq(sq_key, mapped_uid) || mapped_uid != uid) begin
+                    `uvm_fatal("INT_WB_ATTACH", $sformatf("STORE SQ owner mismatch uid=%0d", uid))
+                end
+                wb_event.sq_key = sq_key;
+                wb_event.has_sq = 1'b1;
+            end
+            default: `uvm_fatal("INT_WB_ATTACH", $sformatf("unsupported snapshot target=%0d", wb_event.target))
+        endcase
+
+        wb_event.uid = uid;
+        wb_event.has_uid = 1'b1;
+        wb_event.rob_key = canonical_rob_key;
+        wb_event.has_rob = 1'b1;
+        wb_event.issue_epoch = target_epoch;
+        wb_event.has_issue_epoch = 1'b1;
+        wb_event.replay_seq = status.replay_seq;
+        wb_event.has_replay_seq = 1'b1;
+        return 1'b1;
+    endfunction:fill_current_issue_snapshot
+
+    function void attach_current_issue_snapshot(
+        ref memblock_wb_event_t wb_event,
+        input bit rob_value_only_without_flag = 1'b0,
+        input bit sample_flush_epoch_valid = 1'b0,
+        input int unsigned sample_flush_epoch = 0
+    );
+        memblock_uid_t uid;
+        memblock_rob_key_t rob_key;
+        memblock_wb_event_t candidate;
+
+        ensure_handles();
+        if (!wb_event.valid) begin
+            `uvm_fatal("INT_WB_ATTACH", "attach_current_issue_snapshot requires valid event")
+        end
+        if (sample_flush_epoch_valid && sample_flush_epoch > memblock_sync_pkg::dispatch_flush_epoch) begin
+            `uvm_fatal("INT_WB_ATTACH", "snapshot attach received a future sample epoch")
+        end
+
+        if (rob_value_only_without_flag) begin
+            if (wb_event.has_rob) begin
+                `uvm_fatal("INT_WB_ATTACH", "STD value-only event must not claim a ROB flag")
+            end
+            begin : attach_value_only_candidates
+                memblock_uid_t uid0;
+                memblock_uid_t uid1;
+                memblock_wb_event_t candidate0;
+                memblock_wb_event_t candidate1;
+                bit hit0;
+                bit hit1;
+
+                hit0 = probe_std_candidate(wb_event, 1'b0, wb_event.rob_key.value,
+                                           sample_flush_epoch_valid, sample_flush_epoch,
+                                           uid0, candidate0);
+                hit1 = probe_std_candidate(wb_event, 1'b1, wb_event.rob_key.value,
+                                           sample_flush_epoch_valid, sample_flush_epoch,
+                                           uid1, candidate1);
+                if (hit0 && hit1) begin
+                    `uvm_fatal("INT_WB_STD_KEY", "STD value-only attach has two valid candidates")
+                end
+                if (!hit0 && !hit1) begin
+                    `uvm_fatal("INT_WB_STD_KEY", "STD value-only attach has no valid candidate")
+                end
+                wb_event = hit0 ? candidate0 : candidate1;
+            end
+            return;
+        end
+
+        if (!wb_event.has_rob) begin
+            `uvm_fatal("INT_WB_ATTACH", "ROB snapshot attach requires a complete raw ROB key")
+        end
+        rob_key = wb_event.rob_key;
+        if (!data.lookup_active_uid_by_rob(rob_key, uid)) begin
+            `uvm_fatal("INT_WB_ATTACH",
+                       $sformatf("no active uid for ROB key=%0d/%0d", rob_key.flag, rob_key.value))
+        end
+        candidate = wb_event;
+        if (!fill_current_issue_snapshot(candidate, uid, rob_key,
+                                         sample_flush_epoch_valid, sample_flush_epoch, 1'b1)) begin
+            `uvm_fatal("INT_WB_ATTACH", "ROB candidate failed current snapshot validation")
+        end
+        wb_event = candidate;
+    endfunction:attach_current_issue_snapshot
+
+    // 中文注释：对一个可能的 STD ROB flag 做一次有限候选检查。
+    // active ROB 命中后先按 STD target/status/SQ owner/实例 epoch 过滤，再参与唯一性判断；
+    // 因而另一 flag 命中一个非 STD uid 时不会误触发“双候选” fatal。
+    function bit probe_std_candidate(
+        input memblock_wb_event_t template_event,
+        input bit rob_flag,
+        input bit [MEMBLOCK_ROB_VALUE_W-1:0] rob_value,
+        input bit sample_flush_epoch_valid,
+        input int unsigned sample_flush_epoch,
+        output memblock_uid_t uid,
+        output memblock_wb_event_t candidate
+    );
+        memblock_rob_key_t rob_key;
+
+        uid = 0;
+        candidate = template_event;
+        rob_key.flag = rob_flag;
+        rob_key.value = rob_value;
+        candidate.rob_key = rob_key;
+        candidate.has_rob = 1'b0;
+        if (!data.lookup_active_uid_by_rob(rob_key, uid)) begin
+            return 1'b0;
+        end
+        return fill_current_issue_snapshot(candidate, uid, rob_key,
+                                           sample_flush_epoch_valid,
+                                           sample_flush_epoch,
+                                           1'b0);
+    endfunction:probe_std_candidate
+
+    function void resolve_std_uid_by_rob_value_only(
+        input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
+        ref memblock_wb_event_t wb_event
+    );
+        wb_event.rob_key.flag = 1'b0;
+        wb_event.rob_key.value = raw.rob_value;
+        wb_event.has_rob = 1'b0;
+        begin : resolve_candidates
+            memblock_uid_t uid0;
+            memblock_uid_t uid1;
+            memblock_wb_event_t candidate0;
+            memblock_wb_event_t candidate1;
+            bit hit0;
+            bit hit1;
+
+            hit0 = probe_std_candidate(wb_event, 1'b0, raw.rob_value,
+                                       1'b1, raw.sample_flush_epoch,
+                                       uid0, candidate0);
+            hit1 = probe_std_candidate(wb_event, 1'b1, raw.rob_value,
+                                       1'b1, raw.sample_flush_epoch,
+                                       uid1, candidate1);
+            if (hit0 && hit1) begin
+                `uvm_fatal("INT_WB_STD_KEY",
+                           $sformatf("STD ROB value=%0d has two valid active STD flag candidates uid0=%0d uid1=%0d",
+                                     raw.rob_value, uid0, uid1))
+            end
+            if (!hit0 && !hit1) begin
+                `uvm_fatal("INT_WB_STD_KEY",
+                           $sformatf("STD ROB value=%0d has zero valid active STD flag candidates",
+                                     raw.rob_value))
+            end
+            if (hit0) begin
+                wb_event = candidate0;
+            end else begin
+                wb_event = candidate1;
+            end
+        end
+    endfunction:resolve_std_uid_by_rob_value_only
+
+    function void check_raw_int_wb_capability(input memblock_sync_pkg::dispatch_raw_int_wb_t raw);
+        bit [23:0] allowed_exception_mask;
+
+        allowed_exception_mask = 24'b0;
+        if (raw.source_kind == memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_INVALID) begin
+            `uvm_fatal("INT_WB_CAP", "valid raw event has INVALID source_kind")
+        end
+        case (raw.source_kind)
+            memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_SCALAR_LDA: begin
+                if (raw.port_id > 2 || !raw.rob_valid || raw.rob_value_only_without_flag ||
+                    raw.lq_valid || raw.sq_valid || !raw.key_needs_state_lookup ||
+                    !raw.replay_inst_valid || !raw.flush_pipe_valid || !raw.trigger_valid) begin
+                    `uvm_fatal("INT_WB_CAP", $sformatf("invalid SCALAR_LDA raw capability lane=%0d", raw.port_id))
+                end
+                if (raw.port_id == 0) begin
+                    allowed_exception_mask = 24'hA8A0F8;
+                end else begin
+                    allowed_exception_mask = 24'h282038;
+                end
+            end
+            memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA: begin
+                if (raw.port_id > 1 || !raw.rob_valid || raw.rob_value_only_without_flag ||
+                    raw.lq_valid || raw.sq_valid || !raw.key_needs_state_lookup ||
+                    raw.replay_inst_valid || !raw.trigger_valid ||
+                    raw.flush_pipe_valid != (raw.port_id == 0) ||
+                    raw.replay_inst || (!raw.flush_pipe_valid && raw.flush_pipe)) begin
+                    `uvm_fatal("INT_WB_CAP", $sformatf("invalid STA raw capability lane=%0d", raw.port_id))
+                end
+                if (raw.port_id == 0) begin
+                    allowed_exception_mask = 24'hffffff;
+                end else begin
+                    allowed_exception_mask = 24'h8880C8;
+                end
+            end
+            memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STD: begin
+                if (raw.port_id > 1 || raw.rob_valid || !raw.rob_value_only_without_flag ||
+                    raw.lq_valid || raw.sq_valid || !raw.key_needs_state_lookup ||
+                    raw.replay_inst_valid || raw.flush_pipe_valid || raw.trigger_valid ||
+                    raw.replay_inst || raw.flush_pipe ||
+                    raw.exception_vec != 24'b0 || raw.trigger != 4'hf) begin
+                    `uvm_fatal("INT_WB_CAP", $sformatf("invalid STD value-only raw capability lane=%0d", raw.port_id))
+                end
+            end
+            default: `uvm_fatal("INT_WB_CAP", $sformatf("unsupported source_kind=%0d", raw.source_kind))
+        endcase
+        if ((raw.exception_vec & ~allowed_exception_mask) != 24'b0) begin
+            `uvm_fatal("INT_WB_CAP",
+                       $sformatf("raw exceptionVec contains bits absent from V2 source/lane kind=%0d lane=%0d value=0x%0h mask=0x%0h",
+                                 raw.source_kind, raw.port_id, raw.exception_vec,
+                                 allowed_exception_mask))
+        end
+    endfunction:check_raw_int_wb_capability
+
+    function void check_raw_int_wb_metadata(input memblock_sync_pkg::dispatch_raw_int_wb_t raw);
+        if (raw.source_kind == memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_SCALAR_LDA) begin
+            if (raw.replay_inst) begin
+                `uvm_fatal("INT_WB_SCALAR_LDA_REPLAY_INST_INVARIANT", "SCALAR_LDA replayInst must be zero in current V2 profile")
+            end
+            if (raw.flush_pipe) begin
+                `uvm_fatal("INT_WB_SCALAR_LDA_FLUSH_PIPE_INVARIANT", "SCALAR_LDA flushPipe must be zero in current V2 profile")
+            end
+        end
+        if (!raw.trigger_valid) begin
+            if (raw.trigger != 4'hf) begin
+                `uvm_fatal("INT_WB_METADATA", "absent trigger metadata must keep TriggerAction.None")
+            end
+            return;
+        end
+        case (raw.trigger)
+            4'hf: ;
+            4'h0: begin
+                if (!raw.exception_vec[3] &&
+                    !(raw.source_kind == memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA && raw.port_id == 0)) begin
+                    `uvm_fatal("INT_WB_TRIGGER", "BreakpointExp trigger requires exceptionVec[breakPoint]")
+                end
+            end
+            4'h1, 4'h2, 4'h3, 4'h4: begin
+                `uvm_fatal("INT_WB_TRIGGER_UNSUPPORTED", $sformatf("unsupported trigger action=0x%0h", raw.trigger))
+            end
+            default: `uvm_fatal("INT_WB_TRIGGER", $sformatf("unknown trigger action=0x%0h", raw.trigger))
+        endcase
+    endfunction:check_raw_int_wb_metadata
+
+    function void check_attached_int_wb_metadata(
+        input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
+        input memblock_wb_event_t wb_event
+    );
+        main_control_transaction main_tr;
+
+        if (raw.source_kind == memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA && raw.port_id == 0) begin
+            main_tr = data.get_main_transaction(wb_event.uid);
+            if (raw.flush_pipe) begin
+                if (main_tr.op_class != MEMBLOCK_OP_CLASS_CBO) begin
+                    `uvm_fatal("INT_WB_STA0_FLUSH_PIPE", "STA0 flushPipe is only legal for CBO/CMO producer")
+                end
+                `uvm_fatal("INT_WB_STA0_CBO_UNSUPPORTED", "STA0 CBO flushAfter has no current adapter consumer")
+            end
+            if (raw.trigger == 4'h0 && !raw.exception_vec[3] &&
+                main_tr.op_class != MEMBLOCK_OP_CLASS_CBO &&
+                !raw.debug_is_mmio && !raw.debug_is_ncio) begin
+                `uvm_fatal("INT_WB_STA0_TRIGGER_PROVENANCE", "STA0 trigger=0 without breakpoint needs uncache/CBO provenance")
+            end
+        end
+    endfunction:check_attached_int_wb_metadata
+
+    function bit normalize_v2_int_wb_key(
+        input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
+        ref memblock_wb_event_t wb_event
+    );
+        memblock_rob_key_t raw_rob_key;
+
+        raw_rob_key.flag = raw.rob_flag;
+        raw_rob_key.value = raw.rob_value;
+        case (raw.source_kind)
+            memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_SCALAR_LDA: begin
+                if (wb_event.source != MEMBLOCK_WB_EVENT_SOURCE_LOAD_WB ||
+                    wb_event.target != MEMBLOCK_ISSUE_TARGET_LOAD ||
+                    !raw.rob_valid || raw.rob_value_only_without_flag ||
+                    !wb_event.has_uid || !wb_event.has_rob || !wb_event.has_lq ||
+                    !wb_event.has_issue_epoch || !wb_event.has_replay_seq ||
+                    wb_event.rob_key.flag != raw_rob_key.flag ||
+                    wb_event.rob_key.value != raw_rob_key.value) begin
+                    `uvm_fatal("INT_WB_KEY", "SCALAR_LDA key normalization failed")
+                end
+            end
+            memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA: begin
+                if (wb_event.source != MEMBLOCK_WB_EVENT_SOURCE_STORE_WB ||
+                    wb_event.target != MEMBLOCK_ISSUE_TARGET_STA ||
+                    !raw.rob_valid || raw.rob_value_only_without_flag ||
+                    !wb_event.has_uid || !wb_event.has_rob || !wb_event.has_sq ||
+                    !wb_event.has_issue_epoch || !wb_event.has_replay_seq ||
+                    wb_event.rob_key.flag != raw_rob_key.flag ||
+                    wb_event.rob_key.value != raw_rob_key.value) begin
+                    `uvm_fatal("INT_WB_KEY", "STA key normalization failed")
+                end
+            end
+            memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STD: begin
+                if (wb_event.source != MEMBLOCK_WB_EVENT_SOURCE_STORE_WB ||
+                    wb_event.target != MEMBLOCK_ISSUE_TARGET_STD ||
+                    !raw.rob_value_only_without_flag || !wb_event.has_uid ||
+                    !wb_event.has_rob || !wb_event.has_sq ||
+                    !wb_event.has_issue_epoch || !wb_event.has_replay_seq ||
+                    wb_event.rob_key.value != raw.rob_value) begin
+                    `uvm_fatal("INT_WB_STD_KEY_NORMALIZE_FAILED", "STD value-only key normalization failed")
+                end
+            end
+            default: `uvm_fatal("INT_WB_KEY", "unsupported V2 raw source during normalization")
+        endcase
+        wb_event.real_wb_valid = 1'b1;
+        return 1'b1;
+    endfunction:normalize_v2_int_wb_key
+
     function bit convert_raw_int_wb(input memblock_sync_pkg::dispatch_raw_int_wb_t raw,
                                     output memblock_wb_event_t wb_event);
         wb_event = make_wb_event_base();
         if (!raw.valid) begin
             return 1'b0;
         end
-        wb_event.valid         = 1'b1;
-        wb_event.port_id       = raw.port_id;
-        wb_event.real_wb_valid = 1'b1;
-        wb_event.has_exception = raw.exception_vec != '0;
+        ensure_handles();
+        check_raw_int_wb_capability(raw);
+        check_raw_int_wb_metadata(raw);
+        wb_event.valid = 1'b1;
+        wb_event.port_id = raw.port_id;
         wb_event.exception_vec = raw.exception_vec;
-        wb_event.has_rob       = raw_rob_to_key(raw.rob_valid, raw.rob_flag, raw.rob_value, wb_event.rob_key);
-        case (raw.port_id)
-            0, 1, 2: begin
+        wb_event.has_exception = raw.exception_vec != 24'b0;
+        case (raw.source_kind)
+            memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_SCALAR_LDA: begin
                 wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_LOAD_WB;
                 wb_event.target = MEMBLOCK_ISSUE_TARGET_LOAD;
-                wb_event.has_lq = raw_lq_to_key(raw.lq_valid, raw.lq_flag, raw.lq_value, wb_event.lq_key);
-                wb_event.has_sq = 1'b0;
+                wb_event.has_rob = raw_rob_to_key(raw.rob_valid, raw.rob_flag, raw.rob_value, wb_event.rob_key);
+                attach_current_issue_snapshot(wb_event, 1'b0, 1'b1, raw.sample_flush_epoch);
             end
-            3, 4: begin
+            memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STA: begin
                 wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STORE_WB;
                 wb_event.target = MEMBLOCK_ISSUE_TARGET_STA;
-                wb_event.has_lq = 1'b0;
-                wb_event.has_sq = raw_sq_to_key(raw.sq_valid, raw.sq_flag, raw.sq_value, wb_event.sq_key);
+                wb_event.has_rob = raw_rob_to_key(raw.rob_valid, raw.rob_flag, raw.rob_value, wb_event.rob_key);
+                attach_current_issue_snapshot(wb_event, 1'b0, 1'b1, raw.sample_flush_epoch);
             end
-            5, 6: begin
+            memblock_sync_pkg::MEMBLOCK_INT_WB_SOURCE_STD: begin
                 wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STORE_WB;
                 wb_event.target = MEMBLOCK_ISSUE_TARGET_STD;
-                wb_event.has_lq = 1'b0;
-                wb_event.has_sq = raw_sq_to_key(raw.sq_valid, raw.sq_flag, raw.sq_value, wb_event.sq_key);
+                resolve_std_uid_by_rob_value_only(raw, wb_event);
             end
-            default: begin
-                `uvm_info("DISP_MON_ADAPT",
-                          $sformatf("drop raw int wb with unsupported memblock port=%0d", raw.port_id),
-                          UVM_LOW)
-                return 1'b0;
-            end
+            default: `uvm_fatal("DISP_MON_ADAPT", "invalid V2 int-WB source kind")
         endcase
-        wb_event.cycle               = raw.cycle;
+        check_attached_int_wb_metadata(raw, wb_event);
+        wb_event.cycle = raw.cycle;
+        if (!normalize_v2_int_wb_key(raw, wb_event)) begin
+            `uvm_fatal("INT_WB_KEY", "V2 int-WB normalization returned failure")
+        end
         return 1'b1;
     endfunction:convert_raw_int_wb
 
@@ -131,31 +557,21 @@ class dispatch_monitor_event_adapter extends uvm_object;
             `uvm_info("DISP_MON_ADAPT", "drop iq feedback with unknown scalar target", UVM_LOW)
             return 1'b0;
         end
+        if (raw.is_std) begin
+            `uvm_fatal("DISP_MON_ADAPT",
+                       $sformatf("STD IQ feedback cannot complete strict V2 STD real-WB target: port=%0d hit=%0d",
+                                 raw.port_id, raw.hit))
+        end
 
         wb_event.valid         = 1'b1;
         wb_event.port_id       = raw.port_id;
-        if (raw.is_sta) begin
-            wb_event.target = MEMBLOCK_ISSUE_TARGET_STA;
-            wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK;
-        end else begin
-            wb_event.target = MEMBLOCK_ISSUE_TARGET_STD;
-            wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK;
-        end
-        if (raw.is_std && !raw.hit) begin
-            `uvm_warning("DISP_MON_ADAPT",
-                         $sformatf("drop STD iq feedback miss port=%0d: MemBlock has no backend STD replay feedback path",
-                                   raw.port_id))
-            return 1'b0;
-        end
+        wb_event.target         = MEMBLOCK_ISSUE_TARGET_STA;
+        wb_event.source         = MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK;
         wb_event.has_rob       = raw_rob_to_key(raw.rob_valid, raw.rob_flag, raw.rob_value, wb_event.rob_key);
-        if (raw.is_std) begin
-            wb_event.has_lq = raw_lq_to_key(raw.lq_valid, raw.lq_flag, raw.lq_value, wb_event.lq_key);
-        end else begin
-            wb_event.has_lq = 1'b0;
-        end
+        wb_event.has_lq         = 1'b0;
         wb_event.has_sq        = raw_sq_to_key(raw.sq_valid, raw.sq_flag, raw.sq_value, wb_event.sq_key);
         // 中文注释：IQ feedback 是 IssueQueue response，不是真实 ROB/RF writeback。
-        // hit/finalSuccess 只写 iq_feedback_*；STA miss 额外生成 replay，STD miss 已在本函数 warning/drop。
+        // hit/finalSuccess 只写 iq_feedback_*；STA miss 额外生成 replay；STD 在入口直接 fatal。
         wb_event.iq_feedback_valid       = 1'b1;
         wb_event.iq_feedback_hit         = raw.hit;
         wb_event.iq_feedback_failed      = !raw.hit;

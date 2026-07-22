@@ -60,11 +60,8 @@ class writeback_status_handler extends uvm_object;
         if (!seq_csr_common::is_initialized()) begin
             return 1'b0;
         end
-        case (target)
-            MEMBLOCK_ISSUE_TARGET_STA: return seq_csr_common::get_sta_real_wb_pass_en();
-            MEMBLOCK_ISSUE_TARGET_STD: return seq_csr_common::get_std_real_wb_pass_en();
-            default: return 1'b0;
-        endcase
+        // STA 的兼容开关由后续 IQ 专项继续拥有；STD 不再有第二个完成 owner。
+        return target == MEMBLOCK_ISSUE_TARGET_STA && seq_csr_common::get_sta_real_wb_pass_en();
     endfunction:target_real_wb_pass_enabled
 
     function void validate_event_target(input memblock_wb_event_t wb_event,
@@ -141,6 +138,15 @@ class writeback_status_handler extends uvm_object;
         if (!event_is_issue_feedback(wb_event)) begin
             return 1'b0;
         end
+        if (wb_event.target == MEMBLOCK_ISSUE_TARGET_STD ||
+            wb_event.source == MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK) begin
+            `uvm_fatal("WB_STATUS",
+                       $sformatf("STD issue feedback cannot complete target; source=%0d hit=%0d failed=%0d uid=%0d",
+                                 wb_event.source,
+                                 wb_event.iq_feedback_hit,
+                                 wb_event.iq_feedback_failed,
+                                 wb_event.uid))
+        end
         uid = wb_event.uid;
         issue_epoch = wb_event.issue_epoch;
         replay_seq = wb_event.replay_seq;
@@ -210,9 +216,11 @@ class writeback_status_handler extends uvm_object;
             MEMBLOCK_WB_EVENT_SOURCE_STORE_WB: begin
                 return handle_real_writeback_event(wb_event);
             end
-            MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK,
-            MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK: begin
+            MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK: begin
                 return handle_issue_feedback_event(wb_event);
+            end
+            MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK: begin
+                `uvm_fatal("WB_STATUS", "STD_FEEDBACK is not a completion source in strict V2 int-WB mode")
             end
             default: begin
                 if (event_is_replay(wb_event)) begin

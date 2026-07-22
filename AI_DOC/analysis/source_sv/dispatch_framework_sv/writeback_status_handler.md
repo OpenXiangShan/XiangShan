@@ -2,20 +2,20 @@
 
 本文档对应源码：
 
-- `mem_ut/ver/ut/memblock/seq/base_seq/writeback_status_handler.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq_help/writeback_status_handler.sv`
 
 ## 1. 文件定位与使用场景
 
 处理已经通过 batch 仲裁的非 redirect `memblock_wb_event_t`。它存在的原因是 int writeback、IQ feedback、fault 来源不同，但最终都要落到同一个 status 表。真实 int writeback 才能直接置 target writeback/pass/fault；IQ feedback 只表示 IssueQueue response；redirect 仲裁和 active redirect 过滤已迁移到 `dispatch_monitor_batch_handler`。
 
-输入是 `dispatch_monitor_batch_handler` 放行后的 normalized event，或软件 smoke 构造且已经带 uid/ROB/issue_epoch/replay_seq 的 synthetic event。输出是 status 更新，或写入 `common_data_transaction::exception_event_q` 等待 recovery handler。
+输入是 `dispatch_monitor_batch_handler` 放行后的 normalized event，或软件 smoke 构造且已经带 uid/ROB/issue_epoch/replay_seq 的 event。输出是 status 更新，或写入 `common_data_transaction::exception_event_q` 等待 recovery handler。
 
 函数：
 
 - `event_has_fault()`、`event_is_redirect()`、`event_is_replay()`、`event_is_real_writeback()`、`event_is_issue_feedback()`、`event_is_normal_pass()`：事件分类。
 - `validate_event_target()`：非 redirect event 必须是 LOAD/STA/STD。
 - `handle_real_writeback_event(wb_event)`：处理真实 int writeback。无异常时调用 `mark_target_normal_pass()`，有异常时先 `mark_target_fault()` 再入 recovery 队列。
-- `handle_issue_feedback_event(wb_event)`：处理 IQ feedback。`hit=1` 且对应 `MEMBLOCK_*_REAL_WB_PASS_EN=1` 时只调用 `mark_issue_feedback_success()`；关闭 real writeback pass 时才作为兼容 pass 调 `mark_target_normal_pass()`。STA `hit=0` 入 replay 队列，STD `hit=0` warning 后丢弃。
+- `handle_issue_feedback_event(wb_event)`：处理 IQ feedback。STD target 或 `STD_FEEDBACK` source 在入口直接 fatal；STA `hit=1` 且 `MEMBLOCK_STA_REAL_WB_PASS_EN=1` 时只调用 `mark_issue_feedback_success()`，关闭该开关时才作为兼容 pass 调 `mark_target_normal_pass()`；STA `hit=0` 入 replay 队列。
 - `handle_event(wb_event)`：兼容 synthetic event 的轻量入口；要求 event 已经 normalized，不再执行 monitor normalize、active redirect stale filter 或 redirect 仲裁。
 - 已删除旧的 `process_event_queue()` 二次整理入口；`exception_event_q` 只由 `exception_redirect_replay_handler::process_pending_events()` 消费。
 
@@ -32,8 +32,8 @@
 | `event_is_real_writeback(wb_event)` | event | 判断 event 是否来自真实 writeback 语义，只看 `real_wb_valid`。 |
 | `event_is_issue_feedback(wb_event)` | event | 判断 event 是否是 IQ feedback。该分支不能直接等同真实 writeback。 |
 | `event_is_normal_pass(wb_event)` | event | 只有 real writeback valid 且无 redirect/replay/fault 时才是 normal pass。 |
-| `target_real_wb_pass_enabled(target)` | target | 查询 STA/STD 是否要求等待真实 writeback pass。开启时 IQ feedback hit 只记录 issue feedback success。 |
+| `target_real_wb_pass_enabled(target)` | target | 只查询 STA 是否要求等待真实 writeback pass；STD 不再查询 runtime 开关。 |
 | `validate_event_target(wb_event,caller)` | event、调用者 | normal event 必须指向 LOAD/STA/STD target，防止 monitor adapter 生成非法 target。 |
 | `handle_real_writeback_event(wb_event)` | event | 真实 writeback 分支。pass 更新 target writeback/pass；fault 更新 target fault 并入 recovery 队列。 |
-| `handle_issue_feedback_event(wb_event)` | event | IQ feedback 分支。hit 只表示 IssueQueue finalSuccess；根据 real writeback pass 开关决定记录 `*_issue_feedback_success` 还是走兼容 pass。failed 的 STA 进入 replay，STD failed 不建 replay。 |
+| `handle_issue_feedback_event(wb_event)` | event | IQ feedback 分支。STD 入口 fatal；STA hit 只表示 IssueQueue finalSuccess，并根据 STA real-WB 开关记录 feedback success 或走兼容 pass；STA failed 进入 replay。 |
 | `handle_event(wb_event)` | event | 只接受已 normalized 的非 redirect event；redirect 会 warning/drop，真实 monitor redirect 必须从 batch handler 进入 recovery queue。 |

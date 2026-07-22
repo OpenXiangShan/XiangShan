@@ -96,7 +96,7 @@ Dispatch framework 参数分组如下：
 | 自动主表虚拟地址范围 | `MEMBLOCK_MAIN_VADDR_BASE`、`MEMBLOCK_MAIN_VADDR_RANGE` |
 | TLB物理地址映射范围 | `MEMBLOCK_PADDR_BASE`、`MEMBLOCK_PADDR_RANGE` |
 | 主动主流程 sequence debug | `MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES` |
-| lintsissue dispatch sequence | `MEMBLOCK_DISPATCH_ISSUE_SEQ_EN`、`MEMBLOCK_DISPATCH_ISSUE_NONBLOCKING_EN`、`MEMBLOCK_DISPATCH_READY_TIMEOUT`、`MEMBLOCK_STD_REAL_WB_PASS_EN` |
+| lintsissue dispatch sequence | `MEMBLOCK_DISPATCH_ISSUE_SEQ_EN`、`MEMBLOCK_DISPATCH_ISSUE_NONBLOCKING_EN`、`MEMBLOCK_DISPATCH_READY_TIMEOUT` |
 | lsqenq admission sequence | `MEMBLOCK_LSQENQ_SEQ_EN`、`MEMBLOCK_LSQENQ_READY_TIMEOUT` |
 | lsqcommit pendingPtr sequence | `MEMBLOCK_LSQCOMMIT_SEQ_EN` |
 | redirect/recovery sequence | `MEMBLOCK_REDIRECT_SEQ_EN`、`MEMBLOCK_REDIRECT_DRIVE_TIMEOUT`、`MEMBLOCK_REDIRECT_FREEZE_TIMEOUT` |
@@ -233,10 +233,10 @@ fault/fatal/idle 缺项策略参数。
 make eda_run tc=tc_dispatch_real_store_wb_smoke mode=base_fun cfg=tc_dispatch_real_store_wb_smoke
 ```
 
-`MEMBLOCK_STD_REAL_WB_PASS_EN` 默认必须为 1。默认路径中，普通 scalar store 的 STD
-入口禁止 issue sequence 合成最小 issue-accept pass，STD pass 必须来自真实
-`io_mem_to_ooo_int_wb` port 5/6 monitor fact。需要兼容 synthetic pass 路径时，必须在
-对应 testcase cfg 或用户 `plus_arg` 中显式设置 `MEMBLOCK_STD_REAL_WB_PASS_EN=0`。
+V2 普通 scalar store 的 STD 入口禁止 issue sequence 合成 issue-accept pass，STD pass
+必须来自真实 `writebackStd_0/1` monitor fact。V2 不再提供
+`MEMBLOCK_STD_REAL_WB_PASS_EN` 参数，也不保留 synthetic pass 兼容路径；真实 STD writeback
+无法唯一归一化时由 adapter `uvm_fatal`。
 `tc_dispatch_real_multi_store_wb_smoke` 继承严格 store writeback 路径，并固定生成两条
 普通 scalar store，用于验证连续 uid/ROB/SQ 的真实 writeback、ROB commit 和 SQ deq 基础流。
 `tc_dispatch_real_mixed_wb_smoke` 同样继承严格 store writeback 路径，但通过手动主表固定生成
@@ -245,16 +245,16 @@ STD writeback、ROB commit 和 LQ/SQ deq 的组合闭环。
 
 `MEMBLOCK_STA_REAL_WB_PASS_EN` 默认必须为 1。默认路径中，普通 scalar store 的 STA
 入口会过滤 STA IQ feedback hit 转成的 normal pass，STA pass 必须来自真实
-`io_mem_to_ooo_int_wb` port 3/4 monitor
+`io_mem_to_ooo_int_wb` 的 V2 `writebackSta_0/1` monitor
 fact。IQ feedback 的 replay 判定按 XiangShan IssueQueue 语义只由 `hit=0` 触发，
 `flush_state` 仅作为 TLB/PTW-back 状态元信息，不单独触发 replay。
 需要兼容 STA IQ feedback pass 路径时，必须在对应 testcase cfg 或用户 `plus_arg` 中显式设置
 `MEMBLOCK_STA_REAL_WB_PASS_EN=0`。
 `tc_dispatch_real_store_sta_wb_smoke` 显式保持
-`MEMBLOCK_STA_REAL_WB_PASS_EN=1` 和 `MEMBLOCK_STD_REAL_WB_PASS_EN=1`，用于验证普通 store 的
+`MEMBLOCK_STA_REAL_WB_PASS_EN=1`，并使用 V2 严格 STD real-WB 语义，用于验证普通 store 的
 STA/STD 两个入口都来自真实 writeback monitor。
-`tc_dispatch_real_mixed_sta_wb_smoke` 在 mixed load/store 场景中同时强制打开这两个开关，
-用于验证同一个 testcase 内 load 真实写回、store STA 真实 writeback、store STD 真实
+`tc_dispatch_real_mixed_sta_wb_smoke` 在 mixed load/store 场景中强制打开 STA real-WB，
+并使用严格 STD real-WB 语义，用于验证同一个 testcase 内 load 真实写回、store STA 真实 writeback、store STD 真实
 writeback、ROB commit 和 LQ/SQ deq 的组合闭环。
 
 `tc_dispatch_replay_smoke` 是软件级 dispatch replay 闭环 testcase，不启用真实 DUT

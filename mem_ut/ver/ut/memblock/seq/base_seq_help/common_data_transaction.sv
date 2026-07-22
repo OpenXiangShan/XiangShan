@@ -450,6 +450,10 @@ class common_data_transaction extends uvm_object;
         ensure_status_exists(uid, "mark_issue_snapshot");
         status = status_by_uid[uid];
         status.set_target_issue_epoch(issue_target, issue_epoch);
+        status.set_target_instance_flush_epoch(
+            issue_target,
+            memblock_sync_pkg::dispatch_flush_epoch
+        );
         status.issue_killed = 1'b0;
         register_uid_tlb_record_on_issue(uid);
     endfunction:mark_issue_snapshot
@@ -828,6 +832,7 @@ class common_data_transaction extends uvm_object;
         status.exception_vec   = '0;
         status.exception_vaddr = '0;
         status.exception_gpaddr = '0;
+        status.clear_target_instance_flush_epochs();
     endfunction:clear_uid_dispatch_result
 
     function void prepare_uid_for_redirect_reissue(input memblock_uid_t uid,

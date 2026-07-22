@@ -295,6 +295,10 @@ drop，不为新generation提供snapshot。
 
 ```systemverilog
 if (!event_is_issue_feedback(wb_event)) return 1'b0;
+if (wb_event.target == MEMBLOCK_ISSUE_TARGET_STD ||
+    wb_event.source == MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK) begin
+    `uvm_fatal("WB_STATUS", "STD issue feedback cannot complete V2 STD target");
+end
 uid = wb_event.uid;
 issue_epoch = wb_event.issue_epoch;
 replay_seq = wb_event.replay_seq;
@@ -334,11 +338,11 @@ hit才消费IQ并保留real-WB。hit不进入replay queue。
   要求correlated V2 STA event已经由batch handler完成只读validate，token仍未消费；
 取 uid/issue_epoch/replay_seq；
 如果 iq_feedback_failed：
-  如果 target 是 STD，warning/drop，不建立 replay；
+  如果 target 是 STD，前面的严格入口已经 fatal，不允许 warning/drop 后继续；
   否则调用 data.push_feedback_event：STA replay 进入 recovery queue；
   返回 1；
 如果 iq_feedback_hit：
-  调用 target_real_wb_pass_enabled：判断 STA/STD 是否等待真实 writeback pass；
+  调用 target_real_wb_pass_enabled：只判断 STA 是否等待真实 writeback pass；STD 不进入该分支；
   如果开启，调用 mark_issue_feedback_success：只记录 issue feedback success，不置 pass；
   如果关闭，调用 mark_target_normal_pass：兼容模式下把 feedback hit 当 pass；
   返回处理结果；
@@ -347,7 +351,7 @@ hit才消费IQ并保留real-WB。hit不进入replay queue。
 
 内部子调用：
 
-- `target_real_wb_pass_enabled()`：读取 `seq_csr_common` 中 STA/STD real writeback pass 开关。
+- `target_real_wb_pass_enabled()`：只读取 `seq_csr_common` 中 STA real writeback pass 开关；STD 不再有对应 runtime 参数。
 - `data.push_feedback_event()`：STA replay 入队。
 - `data.mark_issue_feedback_success()`：hit 成功但等待真实 writeback 的记录。
 - `data.mark_target_normal_pass()`：兼容 pass 路径。

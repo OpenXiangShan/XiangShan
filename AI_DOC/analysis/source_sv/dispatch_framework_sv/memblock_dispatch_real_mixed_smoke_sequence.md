@@ -31,6 +31,7 @@
 
 - directed 表覆盖了随机 op class 选择，因此 op class 权重对这两条 transaction 不起主导作用。
 - 后续 LSQ 入队、TLB 建表、issue 发射、writeback、commit 仍然全部通过公共 `common_data_transaction` 和真实 agent sequence。
-- 如果 testcase 额外设置 `MEMBLOCK_STD_REAL_WB_PASS_EN` 或 pipe 数限制，仍会影响后续发射和 pass 判定。
+- STA 的 real-WB 兼容参数或 pipe 数限制仍会影响后续发射和 pass 判定；V2 STD 没有
+  `MEMBLOCK_STD_REAL_WB_PASS_EN`，issueStd fire 后必须等待真实 `writebackStd_0/1`。
 
 该 sequence 适合用来 debug “真实接口链路是否通”，不用于替代随机覆盖。

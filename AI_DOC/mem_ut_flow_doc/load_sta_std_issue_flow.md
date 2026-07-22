@@ -152,7 +152,7 @@ flowchart TD
     S3 --> S4["set_target_queued=0"]
     S4 --> S5["set_target_dispatched=1"]
     S5 --> S6["clear_replay_target_after_fire"]
-    S6 --> S7["optional submit_issue_accept_pass for STD"]
+    S6 --> S7["STD only waits for real writebackStd"]
 ```
 
 ### 1.1 函数调用 Flow 图整体文字伪代码
@@ -210,7 +210,8 @@ IQ feedback和real-WB两个pending，STD不建token；注册成功后再删除�
 queue item，清queued bit，置dispatched bit并清replay target；
 token保存fire时不可变的uid/target/真实key/issue_epoch/replay_seq/pipe/flush epoch/
 cycle，后续event不得从可变status重建generation；
-STD 兼容路径在 MEMBLOCK_STD_REAL_WB_PASS_EN=0 时可补 issue-accept pass event。
+STD 不再由 issue fire 合成 pass；只有真实 `writebackStd_0/1` 经过 int-WB adapter
+完成 key 归一化后，才允许设置 `std_writeback/std_pass`。
 ```
 
 ## 2. `prepare_issue_route_for_uid()`
@@ -1277,9 +1278,6 @@ if (data.issue_blocked_by_global_flush()) begin
 end else begin
     fire_marked = issue_sched.mark_issue_fire(fired_items[idx]);
 end
-if (fire_marked) begin
-    submit_issue_accept_pass(fired_items[idx]);
-end
 ```
 
 功能解释：
@@ -1289,7 +1287,7 @@ end
 输入/输出：
 
 - 输入：`fired_items`、`fired_mask[MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0]`。
-- 输出：fire 成功的 item 更新 status/queue；STD 兼容路径可能补 writeback event。
+- 输出：fire 成功的 item 更新 status/queue；STD 不在此阶段生成 writeback/pass event。
 
 文字伪代码：
 
@@ -1308,8 +1306,7 @@ end
 如果 fire_marked=0：
   warning stale item；
 否则：
-  调用 submit_issue_accept_pass：
-    在未开启真实 STD writeback pass 的兼容模式下，为已接受的 STD 构造 pass event。
+  只保留 issue snapshot/dispatched 状态；STD 的 pass 必须等待真实 writebackStd raw event。
 ```
 
 内部子调用：
@@ -1317,7 +1314,7 @@ end
 - `port_idx_for_item()`：把 target-local pipe 统一转换成参数化 fired-mask bit。
 - `issue_sched.mark_issue_fire()`：正常 fire marking。
 - `issue_sched.mark_issue_fire_already_accepted()`：redirect/flush 已开始但 port 已被 DUT ready 接收的边界 marking。
-- `submit_issue_accept_pass()`：STD 兼容 pass。
+- 不再调用 STD synthetic pass helper；真实 STD writeback 由 monitor/adapter/handler 链路完成。
 
 ## 17. `mark_issue_fire()` / `mark_issue_fire_already_accepted()`
 
@@ -1409,72 +1406,50 @@ mark_issue_fire_already_accepted:
 - `data.delete_issue_queue_entry(match_replay_seq=1)`：只删当前动态实例 entry。
 - `data.clear_replay_target_after_fire()`：replay target 完成后清 pending。
 
-## 18. `submit_issue_accept_pass()` 兼容路径
+## 18. STD real-WB 唯一完成边界
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_issue_dispatch_base_sequence.sv`
+源码位置：
+`mem_ut/ver/ut/memblock/seq/base_seq/memblock_issue_dispatch_base_sequence.sv`、
+`mem_ut/ver/ut/memblock/seq/base_seq_help/dispatch_monitor_event_adapter.sv`、
+`mem_ut/ver/ut/memblock/seq/base_seq_help/writeback_status_handler.sv`
 
 真实逻辑摘要：
 
 ```systemverilog
-if (seq_csr_common::get_std_real_wb_pass_en()) begin
-    return 1'b0;
+// issue fire 只更新 dispatched/issue snapshot；不构造 STD_FEEDBACK pass。
+// dispatch_monitor_event_adapter::convert_raw_int_wb() 对 writebackStd value-only
+// 做双 ROB flag active-map 探测并补齐 SQ key，随后交给 real writeback handler。
+if (wb_event.source == MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK) begin
+    `uvm_fatal("WB_STATUS", "STD_FEEDBACK is not a completion source in strict V2 int-WB mode")
 end
-if (item.target != MEMBLOCK_ISSUE_TARGET_STD || !data.is_valid_uid(item.uid)) begin
-    return 1'b0;
-end
-main_tr = data.get_main_transaction(item.uid);
-return main_tr.op_class == MEMBLOCK_OP_CLASS_STORE &&
-       main_tr.fuType == MEMBLOCK_FUTYPE_STU &&
-       lsq_ctrl_model::is_store_fuoptype(main_tr.fuOpType);
-```
-
-```systemverilog
-wb_event.source              = MEMBLOCK_WB_EVENT_SOURCE_STD_FEEDBACK;
-wb_event.target              = MEMBLOCK_ISSUE_TARGET_STD;
-wb_event.uid                 = item.uid;
-wb_event.issue_epoch         = status.get_target_issue_epoch(MEMBLOCK_ISSUE_TARGET_STD);
-wb_event.replay_seq          = item.replay_seq;
-wb_event.iq_feedback_valid   = 1'b1;
-wb_event.iq_feedback_hit     = 1'b1;
-wb_event.iq_feedback_failed  = 1'b0;
-...
-issue_accept_wb_handler.handle_event(wb_event)
 ```
 
 功能解释：
 
-这是 STD 没有真实 writeback pass 时的兼容路径。默认 `MEMBLOCK_STD_REAL_WB_PASS_EN=1` 时关闭；关闭后，STD issue 被 DUT 接收即可生成一个 IQ feedback success 事件，让 writeback handler 走 pass 状态。
+V2 本轮删除 STD issue-accept synthetic pass。STD issue fire 只表示 DUT 接收并记录当前
+generation；`writebackStd_0/1` 只有在 value-only ROB 反查唯一命中、ROB/SQ owner 一致且
+required key 完整时，才能进入 real writeback handler 设置 `std_writeback/std_pass`。
 
 输入/输出：
 
-- 输入：STD fired item、`MEMBLOCK_STD_REAL_WB_PASS_EN`。
-- 输出：可选 `memblock_wb_event_t`，由 `writeback_status_handler` 消费。
+- 输入：V2 `writebackStd_0/1` raw event，以及 active ROB/SQ/status map。
+- 输出：归一化的 `memblock_wb_event_t`，由 `writeback_status_handler` 消费；缺 key、零命中、双命中或 owner 不一致直接 fatal。
 
 文字伪代码：
 
 ```text
-item_needs_issue_accept_pass:
-  如果 std_real_wb_pass_en=1：
-    return false；
-  只有 target=STD 且 uid 合法才继续；
-  main transaction 必须是普通 STORE/STU/store fuOpType；
-
-make_issue_accept_pass_event:
-  构造 STD feedback event；
-  填 uid、ROB、SQ、issue_epoch、replay_seq；
-  iq_feedback_hit=1，failed=0；
-
-submit_issue_accept_pass:
-  如果不需要兼容 pass，return；
-  构造 event；
-  调 writeback_status_handler.handle_event。
+writebackStd raw：
+  保留真实 robIdx_value，不伪造 robIdx_flag/sqIdx；
+  对 flag=0 和 flag=1 各查询一次 active ROB map；
+  零命中或双命中 fatal；唯一命中后从 status 补 SQ key，并核对 SQ map owner；
+  归一化成功后调用 writeback_status_handler，才设置 STD writeback/pass。
 ```
 
 内部子调用：
 
-- `item_needs_issue_accept_pass()`：判断兼容路径是否启用。
-- `make_issue_accept_pass_event()`：构造 feedback event。
-- `writeback_status_handler::handle_event()`：落 writeback/pass 状态。
+- `attach_current_issue_snapshot()`：唯一负责 active ROB/status snapshot 和 generation key 补齐。
+- `resolve_std_uid_by_rob_value_only()`：固定双 flag 探测 value-only ROB，并要求唯一候选。
+- `writeback_status_handler::handle_real_writeback_event()`：唯一落 STD writeback/pass 状态。
 
 ## 19. 队列和状态说明
 
@@ -1635,7 +1610,8 @@ STORE 路径：
   两个target有独立queue item、queued bit、dispatched bit和issue_epoch；
   STA fire额外注册IQ+real-WB双pending token，STD明确不建token；
   STA/STD 可以同拍或不同拍 fire，状态独立更新；
-  STD 如果关闭真实 writeback pass，可通过 issue-accept feedback 补 pass。
+  STD issue fire 只记录 dispatched 和 target instance flush epoch；
+  只有真实 writebackStd value-only 事件唯一反查到当前 ROB/SQ owner 后才能补 pass。
 
 send_pri 路径：
   主表阶段生成 send_pri；
