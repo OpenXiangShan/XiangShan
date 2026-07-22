@@ -16,6 +16,7 @@ import xiangshan.backend.decode.opcode.Opcode.VIPermOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.VMoveOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.VSha256msOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.VSha256cOpcodes._
+import xiangshan.backend.decode.opcode.Opcode.VCryptoOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.VFCvtOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.VFMacOpcodes._
 import xiangshan.backend.decode.opcode.Opcode.VFDivOpcodes._
@@ -1127,6 +1128,10 @@ object SplitTable {
       VSHA2MS_VV -> dup(null, null, vsha256ms, null)(_.S1v),
       VSHA2CL_VV -> dup(null, null, vsha256cl, null)(_.S1v),
       VSHA2CH_VV -> dup(null, null, vsha256ch, null)(_.S1v),
+      VCLMUL_VV -> dup(null, null, null, vclmul)(_.S1v),
+      VCLMUL_VX -> dup(null, null, null, vclmul)(_.S2x),
+      VCLMULH_VV -> dup(null, null, null, vclmulh)(_.S1v),
+      VCLMULH_VX -> dup(null, null, null, vclmulh)(_.S2x)
     )
 
     opi00Table ++ opi01Table ++ opi10Table ++ opi11Table ++

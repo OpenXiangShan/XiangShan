@@ -60,6 +60,7 @@ object FuType extends ChiselOHEnum {
 
   val vsha256ms = addType(name = "vsha256ms")
   val vsha256c = addType(name = "vsha256c")
+  val vcrypto = addType(name = "vcrypto")
 
   val intArithAll = Seq(njmp, link, brh, i2f, i2v, csr, alu, mul, div, fence, bku)
   // dq0 includes int's iq0 and iq1
@@ -114,7 +115,7 @@ object FuType extends ChiselOHEnum {
   }
   val fpArithAll = Seq(falu, fcvt, fmul, fDivSqrt, f2v, fcmp)
   val scalaMemAll = Seq(ldu, stu, mou)
-  val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv)
+  val vecOPI = Seq(vipu, vialuF, vppu, vimac, vidiv, vcrypto)
   val vecOPF = Seq(vfalu, vfma, vfdiv, vfcvt)
   val vecVSET = Seq(vset)
   val vecArith = vecOPI ++ vecOPF

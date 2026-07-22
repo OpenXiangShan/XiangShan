@@ -168,7 +168,7 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu, vsha256ms, vsha256c).contains(fuType)
+    Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu, vsha256ms, vsha256c, vcrypto).contains(fuType)
   }
 
   def needUncertainWakeup: Boolean = {
@@ -201,7 +201,8 @@ case class FuConfig (
                             fuType == FuType.vfalu || fuType == FuType.vfma ||
                             fuType == FuType.vfdiv || fuType == FuType.vfcvt ||
                             fuType == FuType.vidiv || fuType == FuType.vmove ||
-                            fuType == FuType.vsha256ms || fuType == FuType.vsha256c
+                            fuType == FuType.vsha256ms || fuType == FuType.vsha256c ||
+                            fuType == FuType.vcrypto
 
   def isVecMem: Boolean = fuType == FuType.vldu || fuType == FuType.vstu ||
                           fuType == FuType.vsegldu || fuType == FuType.vsegstu ||
@@ -848,6 +849,26 @@ object FuConfig {
     readVType = true,
   )
 
+  val VcryptoCfg = FuConfig(
+    name = "vcrypto",
+    fuType = FuType.vcrypto,
+    fuGen = null,
+    srcData = Seq(
+      Seq(VecData(), VecData(), VecData()),
+      Seq(IntData(), VecData(), VecData()),
+    ),
+    piped = true,
+    writeVecRf = true,
+    writeV0Rf = true,
+    latency = CertainLatency(VectorCryptoWrapper.Latency),
+    vlWakeUp = true,
+    maskWakeUp = true,
+    destDataBits = 128,
+    readV0 = true,
+    readVl = true,
+    readVType = true,
+  )
+
   val FaluCfg = FuConfig(
     name = "falu",
     fuType = FuType.falu,
@@ -1020,11 +1041,11 @@ object FuConfig {
     LduCfg, StaCfg, StdCfg, HyldaCfg, HystaCfg, FakeHystaCfg, MouCfg, MoudCfg,
     VialuCfg, VimacCfg, VidivCfg, VppuCfg, VipuCfg, VmoveCfg, VfaluCfg, VfmaCfg, VfdivCfg, VfcvtCfg, VSha256msCfg, VSha256cCfg,
     FaluCfg, FmulCfg, FdivCfg, FcvtCfg,
-    VStdCfg, VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg
+    VStdCfg, VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg, VcryptoCfg
   )
 
   def VecArithFuConfigs = Seq(
-    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VmoveCfg, VfmaCfg, VfcvtCfg, VfdivCfg
+    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VmoveCfg, VfmaCfg, VfcvtCfg, VfdivCfg, VcryptoCfg
   )
 
   def needUncertainWakeupFuConfigs = Seq(
