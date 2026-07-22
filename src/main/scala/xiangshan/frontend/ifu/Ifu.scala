@@ -140,7 +140,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
 
   private val s0_totalEndPos = Mux(
     s0_fetchBlock(1).valid,
-    s0_fetchBlock(1).takenCfiOffset.bits + s0_fetchBlock(0).size,
+    (s0_fetchBlock(1).takenCfiOffset.bits + s0_fetchBlock(0).size)(FetchBlockInstOffsetWidth - 1, 0),
     s0_fetchBlock(0).takenCfiOffset.bits
   )
 
@@ -154,47 +154,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s0_totalEndIsHalfRvi = instrBoundary.io.resp.totalEndIsHalfRvi
   private val s0_rawInstrVec       = instrBoundary.io.resp.rawInstrVec
   private val s0_instrEndMask      = instrBoundary.io.resp.instrEndMask
-
-  // The BPU predicted taken, but the end of the fetch block falls in the middle of an instruction.
-  private val s0_invalidTaken = VecInit(
-    s0_fetchBlock(0).takenCfiOffset.valid && !s0_instrEndMask(s0_fetchBlock(0).takenCfiOffset.bits),
-    s0_fetchBlock(1).valid && s0_fetchBlock(1).takenCfiOffset.valid &&
-      !s0_instrEndMask(s0_fetchBlock(1).takenCfiOffset.bits + s0_fetchBlock(0).size)
-  )
-  dontTouch(s0_invalidTaken)
-
-  private val s0_fixedFetchBlock = WireDefault(s0_fetchBlock)
-  when(s0_invalidTaken(0)) {
-    s0_fixedFetchBlock(1).valid := false.B
-  }
-
-  dontTouch(s0_fixedFetchBlock)
-
-  private val s0_fixedTotalEndPos       = Mux(s0_invalidTaken(0), s0_fetchBlock(0).takenCfiOffset.bits, s0_totalEndPos)
-  private val s0_fixedTotalEndIsHalfRvi = Mux(s0_invalidTaken(0), s0_firstEndIsHalfRvi, s0_totalEndIsHalfRvi)
-  private val s0_fixedInvalidTaken      = VecInit(s0_invalidTaken(0), s0_invalidTaken(1) && !s0_invalidTaken(0))
-
-  private val s0_fixedRawInstrVec = WireDefault(s0_rawInstrVec)
-  s0_fixedRawInstrVec.foreach { instr =>
-    when(s0_invalidTaken(0) && instr.blockSel) {
-      instr.valid := false.B
-    }
-  }
-
-  private val s0_rawInstrValid = VecInit(s0_fixedRawInstrVec.map(_.valid)).asUInt
-  private val s0_firstBlockInstrCount =
-    PopCount(s0_rawInstrValid & VecInit(s0_fixedRawInstrVec.map(instr => !instr.blockSel)).asUInt)
-
-  private val (s0_compactedInstrVec, s0_instrCount) = compact(s0_fixedRawInstrVec)
-
-  private val s0_fixedCompactedInstrVec = WireDefault(s0_compactedInstrVec)
-  s0_fixedCompactedInstrVec.zipWithIndex.foreach { case (instr, i) =>
-    when(s0_fixedFetchBlock(1).valid && i.U >= s0_firstBlockInstrCount) {
-      instr.blockSel := true.B
-    }
-  }
-
-  private val s0_instrValid = VecInit(s0_fixedCompactedInstrVec.map(_.valid)).asUInt
+  private val s0_rawInstrValid     = VecInit(s0_rawInstrVec.map(_.valid)).asUInt
 
   // When invalidTaken is true, we can not flush s2_prevLastIsHalfRvi because the fetch block after it is fall-through.
   when(backendRedirect) {
@@ -204,35 +164,16 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }.elsewhen(uncacheRedirect.valid) {
     s0_prevEndIsHalfRvi := uncacheRedirect.isHalfInstr
   }.elsewhen(s0_fire && !s0_icacheMeta(0).isUncache) {
-    s0_prevEndIsHalfRvi := s0_fixedTotalEndIsHalfRvi
-  }
-
-  private val s0_predTakenIdx = VecInit(
-    Mux(s0_invalidTaken(0), s0_firstBlockInstrCount, s0_firstBlockInstrCount - 1.U),
-    Mux(s0_invalidTaken(1), s0_instrCount, s0_instrCount - 1.U)
-  )
-  dontTouch(s0_predTakenIdx)
-
-  when(s0_fire && s0_invalidTaken(0)) {
-    assert(
-      PopCount(s0_rawInstrValid & VecInit(s0_rawInstrVec.map(instr => !instr.blockSel)).asUInt) < FetchBlockInstNum.U
-    )
-  }
-  when(s0_fire && s0_invalidTaken(1)) {
-    assert(PopCount(s0_rawInstrValid) < FetchBlockInstNum.U)
+    s0_prevEndIsHalfRvi := s0_totalEndIsHalfRvi
   }
 
   // When an exception occurs, forward the exception information immediately instead of
   // waiting for instruction concatenation to complete.
-  private val s0_hasException   = s0_icacheMeta(0).exception.hasException
-  private val s0_realInstrValid = Mux(s0_hasException, 1.U(FetchBlockInstNum.W), s0_instrValid)
-  private val s0_realInstrCount = Mux(s0_hasException, 1.U((log2Ceil(FetchBlockInstNum) + 1).W), s0_instrCount)
-
-  private val s0_realInstrVec = WireDefault(s0_fixedCompactedInstrVec)
-  s0_realInstrVec.zipWithIndex.foreach { case (instr, i) =>
-    instr.valid := s0_realInstrValid(i)
-  }
-
+  private val s0_hasException = s0_icacheMeta(0).exception.hasException
+  private val s0_instrCount = Mux(s0_hasException, 1.U((log2Ceil(FetchBlockInstNum) + 1).W), PopCount(s0_instrEndMask))
+  private val s0_firstRange = VecInit(s0_rawInstrVec.map(instr => !instr.blockSel)).asUInt
+  private val s0_firstRawInstrValid = s0_rawInstrValid & s0_firstRange
+  private val s0_totalRawInstrValid = s0_rawInstrValid
   /* --------------------------------------------------------------------------------------------------------------
      stage 1
      - cat half rvi instruction
@@ -244,25 +185,45 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s1_fire  := s1_valid && s2_ready
   s1_ready := s1_fire || !s1_valid
 
-  private val s1_fetchBlock   = RegEnable(s0_fixedFetchBlock, s0_fire)
-  private val s1_predTakenIdx = RegEnable(s0_predTakenIdx, s0_fire)
-  private val s1_invalidTaken = RegEnable(s0_fixedInvalidTaken, s0_fire)
-  private val s1_instrCount   = RegEnable(s0_realInstrCount, s0_fire)
+  private val s1_hasException      = RegEnable(s0_hasException, s0_fire)
+  private val s1_fetchBlock        = RegEnable(s0_fetchBlock, s0_fire)
+  private val s1_totalEndPos       = RegEnable(s0_totalEndPos, s0_fire)
+  private val s1_instrEndMask      = RegEnable(s0_instrEndMask, s0_fire)
+  private val s1_compactedInstrVec = compact(s0_rawInstrVec, s0_fire)
+  // The pre-calculated enqueue amount required when estimating whether the IBuffer can be enqueued.
+  private val s1_specInstrCount       = RegEnable(s0_instrCount, s0_fire)
+  private val s1_firstRange           = RegEnable(s0_firstRange, s0_fire)
+  private val s1_totalRawInstrValid   = RegEnable(s0_totalRawInstrValid, s0_fire)
+  private val s1_firstEndIsHalfRvi    = RegEnable(s0_firstEndIsHalfRvi, s0_fire)
+  private val s1_totalEndIsHalfRvi    = RegEnable(s0_totalEndIsHalfRvi, s0_fire)
+  private val s1_firstRawInstrValid   = s1_totalRawInstrValid & s1_firstRange
+  private val s1_firstRawInstrEndMask = s1_instrEndMask.asUInt & s1_firstRange
+  private val s1_invalidTaken = VecInit(
+    s1_fetchBlock(0).takenCfiOffset.valid && s1_firstEndIsHalfRvi,
+    s1_fetchBlock(1).valid && s1_fetchBlock(1).takenCfiOffset.valid &&
+      s1_totalEndIsHalfRvi
+  )
+  private val s1_predTakenIdx = VecInit(
+    PopCount(s1_firstRawInstrValid) - 1.U,
+    PopCount(s1_totalRawInstrValid) - 1.U
+  )
 
   dontTouch(s1_fetchBlock)
-
+  private val s1_instrCount = Mux(
+    s1_invalidTaken(0),
+    PopCount(s1_firstRawInstrEndMask),
+    s1_specInstrCount
+  )
+  private val s1_instrValid =
+    Mux(s1_instrCount === FetchBlockInstNum.U, ~0.U(FetchBlockInstNum.W), UIntToMask(s1_instrCount, FetchBlockInstNum))
   private val s1_prevIBufEnqPtr     = RegInit(0.U.asTypeOf(new IBufPtr))
   private val s1_prevEndIsHalfRvi   = RegEnable(s0_prevEndIsHalfRvi, s0_fire)
   private val s1_prevEndHalfRviData = RegInit(0.U(16.W))
   private val s1_prevEndHalfRviPc   = RegInit(0.U.asTypeOf(PrunedAddr(VAddrBits)))
 
-  private val s1_firstEndIsHalfRvi = RegEnable(s0_firstEndIsHalfRvi, s0_fire)
-  private val s1_totalEndIsHalfRvi = RegEnable(s0_fixedTotalEndIsHalfRvi, s0_fire)
-
   private val s1_instrData    = RegEnable(s0_icacheData.data, s0_fire)
-  private val s1_totalEndPos  = RegEnable(s0_fixedTotalEndPos, s0_fire)
   private val s1_icacheMetaIn = RegEnable(s0_icacheMeta, s0_fire)
-  private val s1_instrVec     = RegEnable(s0_realInstrVec, s0_fire)
+  private val s1_instrVec     = s1_compactedInstrVec
 
   // ICache mainPipe send parity check result 1 cycle after io.fromICache.req.fire, here merge into icacheMeta.
   // for better timing.
@@ -294,52 +255,45 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s1_mergedInvalidTakenMask = s1_invalidTakenMask(0) | s1_invalidTakenMask(1)
   dontTouch(s1_mergedInvalidTakenMask)
 
-  private val s1_fixedInstrVec = WireDefault(s1_instrVec)
-  s1_fixedInstrVec(0).data := Mux(
-    s1_prevEndIsHalfRvi,
-    Cat(s1_instrVec(0).data(15, 0), s1_prevEndHalfRviData),
-    s1_instrVec(0).data
-  )
-  s1_fixedInstrVec(0).isPrevEndHalfRvi := s1_prevEndIsHalfRvi
-  s1_fixedInstrVec(0).endOffset        := Mux(s1_prevEndIsHalfRvi, 0.U, s1_instrVec(0).endOffset)
-  s1_fixedInstrVec.zipWithIndex.foreach { case (instr, i) =>
-    instr.isPredTaken  := s1_mergedPredTakenMask(i)
-    instr.invalidTaken := s1_mergedInvalidTakenMask(i)
-  }
-
-  private val s1_alignShiftNum = s1_prevIBufEnqPtr.value(1, 0)
-  dontTouch(s1_alignShiftNum)
-  private val s1_alignedInstrVec = align(s1_fixedInstrVec, s1_alignShiftNum)
-
-  private val s1_baseAlignedInstrPcVec = VecInit(s1_alignedInstrVec.map(instr => getInstrPc(instr, s1_fetchBlock)))
-
-  private val s1_alignedInstrPcLowerBitsVec = VecInit(s1_alignedInstrVec.map { instr =>
-    getInstrPcLowerBits(instr, s1_fetchBlock)
-  })
+  private val s1_alignShiftNum         = s1_prevIBufEnqPtr.value(1, 0)
+  private val s1_baseAlignedInstrVec   = align(s1_instrVec, s1_alignShiftNum)
+  private val s1_baseAlignedInstrPcVec = VecInit(s1_baseAlignedInstrVec.map(instr => getInstrPc(instr, s1_fetchBlock)))
+  private val s1_alignedInstrValid     = (s1_instrValid << s1_alignShiftNum).pad(IBufferEnqueueWidth)
+  private val s1_alignedPredTakenMask  = (s1_mergedPredTakenMask << s1_alignShiftNum).pad(IBufferEnqueueWidth)
+  private val s1_alignedInvalidTakenMask = (s1_mergedInvalidTakenMask << s1_alignShiftNum).pad(IBufferEnqueueWidth)
 
   private val s1_firstEndPos       = s1_fetchBlock(0).takenCfiOffset.bits
   private val s1_firstEndHalfRviPc = s1_fetchBlock(0).startVAddr + (s1_firstEndPos << 1)
   private val s1_totalEndHalfRviPc = Mux(
     s1_fetchBlock(1).valid,
-    s1_fetchBlock(1).startVAddr + ((s1_totalEndPos - s1_fetchBlock(0).size) << 1),
+    s1_fetchBlock(1).startVAddr + ((s1_fetchBlock(1).takenCfiOffset.bits) << 1),
     s1_firstEndHalfRviPc
   )
 
+  private val s1_firstEndHalfRviData = s1_instrData(s1_firstEndPos)
+  private val s1_totalEndHalfRviData = s1_instrData(s1_totalEndPos)
+
+  // Patch instruction data
   private val s1_alignedInstrPcVec = WireDefault(s1_baseAlignedInstrPcVec)
-  for (i <- 0 until IBufferEnqueueWidth) {
-    when(s1_alignedInstrVec(i).isPrevEndHalfRvi) {
-      s1_alignedInstrPcVec(i) := s1_prevEndHalfRviPc
-    }.elsewhen(s1_alignedInstrVec(i).invalidTaken) {
-      s1_alignedInstrPcVec(i) := Mux(
-        s1_alignedInstrVec(i).blockSel,
-        s1_totalEndHalfRviPc,
-        s1_firstEndHalfRviPc
+  private val s1_alignedInstrVec   = WireDefault(s1_baseAlignedInstrVec)
+  for (i <- 0 until IfuAlignWidth) {
+    when(s1_alignShiftNum === i.U) {
+      s1_alignedInstrPcVec(i) := Mux(s1_prevEndIsHalfRvi, s1_prevEndHalfRviPc, s1_baseAlignedInstrPcVec(i))
+      s1_alignedInstrVec(i).data := Mux(
+        s1_prevEndIsHalfRvi,
+        Cat(s1_baseAlignedInstrVec(i).data(15, 0), s1_prevEndHalfRviData),
+        s1_baseAlignedInstrVec(i).data
       )
+      s1_alignedInstrVec(i).isPrevEndHalfRvi := s1_prevEndIsHalfRvi
+      s1_alignedInstrVec(i).endOffset        := Mux(s1_prevEndIsHalfRvi, 0.U, s1_baseAlignedInstrVec(i).endOffset)
     }
   }
 
-  private val s1_firstEndHalfRviData = s1_instrData(s1_firstEndPos)
-  private val s1_totalEndHalfRviData = s1_instrData(s1_totalEndPos)
+  for (i <- 0 until IBufferEnqueueWidth) {
+    s1_alignedInstrVec(i).valid        := s1_alignedInstrValid(i)
+    s1_alignedInstrVec(i).isPredTaken  := s1_alignedPredTakenMask(i)
+    s1_alignedInstrVec(i).invalidTaken := s1_alignedInvalidTakenMask(i)
+  }
 
   private val s1_alignedFoldPc =
     VecInit(s1_alignedInstrPcVec.map(i => XORFold(i(VAddrBits - 1, 1), MemPredPCWidth)))
@@ -366,7 +320,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }.elsewhen(uncacheRedirect.valid) {
     s1_prevIBufEnqPtr := uncacheRedirect.prevIBufEnqPtr + uncacheRedirect.instrCount
   }.elsewhen(s1_fire && !s1_icacheMeta(0).isUncache) {
-    s1_prevIBufEnqPtr := s1_prevIBufEnqPtr + s1_instrCount
+    s1_prevIBufEnqPtr := s1_prevIBufEnqPtr + s1_specInstrCount
   }
 
   // reqIsUncache is used to limit the number of fetch requests and enable special pre-decode configurations.
@@ -403,6 +357,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   private val s2_totalEndHalfRviData = RegEnable(s1_totalEndHalfRviData, s1_fire)
 
   private val s2_instrCount        = RegEnable(s1_instrCount, s1_fire)
+  private val s2_alignedInstrValid = RegEnable(s1_alignedInstrValid, s1_fire)
   private val s2_icacheMeta        = RegEnable(s1_icacheMeta, s1_fire)
   private val s2_alignedInstrVec   = RegEnable(s1_alignedInstrVec, s1_fire)
   private val s2_alignedInstrPcVec = RegEnable(s1_alignedInstrPcVec, s1_fire)
@@ -429,26 +384,21 @@ class Ifu(implicit p: Parameters) extends IfuModule
     instr.data := expandedData
   }
 
-  private val s2_blockSel      = VecInit(s2_expandedInstrVec.map(_.blockSel))
-  private val s2_endOffsetVec  = VecInit(s2_expandedInstrVec.map(_.endOffset))
-  private val s2_rawInstrValid = VecInit(s2_expandedInstrVec.map(_.valid)).asUInt
+  private val s2_blockSel     = VecInit(s2_expandedInstrVec.map(_.blockSel))
+  private val s2_endOffsetVec = VecInit(s2_expandedInstrVec.map(_.endOffset))
   dontTouch(s2_blockSel)
-  dontTouch(s2_rawInstrValid)
 
-  private val s2_pdInfoVec     = Wire(Vec(IBufferEnqueueWidth, new PreDecodeInfo))
-  private val s2_jumpOffsetVec = Wire(Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits)))
+  private val s2_alignedPdInfoVec     = Wire(Vec(IBufferEnqueueWidth, new PreDecodeInfo))
+  private val s2_alignedJumpOffsetVec = Wire(Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits)))
   s2_alignedInstrVec.zipWithIndex.foreach { case (instr, i) =>
     val jalOffset = getJalOffset(instr.data, instr.isRvc)
     val brOffset  = getBrOffset(instr.data, instr.isRvc)
-    s2_pdInfoVec(i).valid       := instr.valid
-    s2_pdInfoVec(i).isRVC       := instr.isRvc
-    s2_pdInfoVec(i).brAttribute := BranchAttribute.decode(instr.data, instr.valid && s2_valid)
-    s2_jumpOffsetVec(i)         := Mux(s2_pdInfoVec(i).isBr, brOffset, jalOffset)
+    s2_alignedPdInfoVec(i).valid       := instr.valid
+    s2_alignedPdInfoVec(i).isRVC       := instr.isRvc
+    s2_alignedPdInfoVec(i).brAttribute := BranchAttribute.decode(instr.data, instr.valid && s2_valid)
+    s2_alignedJumpOffsetVec(i)         := Mux(s2_alignedPdInfoVec(i).isBr, brOffset, jalOffset)
   }
 
-  private val s2_uncacheLowerPc = RegEnable(s1_alignedInstrPcLowerBitsVec(s1_alignShiftNum), s1_fire)
-  private val s2_uncachePc =
-    catPC(s2_uncacheLowerPc, s2_fetchBlock(0).pcUpperBits, s2_fetchBlock(0).pcUpperBitsPlus1)
   private val s2_reqIsUncache    = RegEnable(s1_reqIsUncache, false.B, s1_fire)
   private val s2_useUncacheFetch = RegEnable(s1_useUncacheFetch, s1_fire)
   private val s2_uncacheCanGo =
@@ -513,17 +463,17 @@ class Ifu(implicit p: Parameters) extends IfuModule
   s2_ready := (io.toIBuffer.ready && (s2_uncacheCanGo || !s2_reqIsUncache)) || !s2_valid
 
   /* ** prediction result check ** */
-  checkerIn.valid                 := s2_valid
-  checkerIn.bits.jumpOffsetVec    := s2_jumpOffsetVec
-  checkerIn.bits.pdInfoVec        := s2_pdInfoVec
-  checkerIn.bits.instrPcVec       := s2_alignedInstrPcVec
-  checkerIn.bits.expandedInstrVec := s2_expandedInstrVec
+  checkerIn.valid              := s2_valid
+  checkerIn.bits.jumpOffsetVec := s2_alignedJumpOffsetVec
+  checkerIn.bits.pdInfoVec     := s2_alignedPdInfoVec
+  checkerIn.bits.instrPcVec    := s2_alignedInstrPcVec
+  checkerIn.bits.instrVec      := s2_alignedInstrVec
 
   private val s2_fixedInstrValid = checkerOutStage1.fixedInstrValid.asUInt
   dontTouch(s2_fixedInstrValid)
 
   /* ** frontend Trigger  ** */
-  frontendTrigger.io.pds             := s2_pdInfoVec
+  frontendTrigger.io.pds             := s2_alignedPdInfoVec
   frontendTrigger.io.pc              := s2_alignedInstrPcVec
   frontendTrigger.io.data            := 0.U.asTypeOf(Vec(IBufferEnqueueWidth + 1, UInt(16.W)))
   frontendTrigger.io.frontendTrigger := io.frontendTrigger
@@ -532,7 +482,7 @@ class Ifu(implicit p: Parameters) extends IfuModule
   /* ** send to IBuffer ** */
   io.toIBuffer.valid               := s2_toIBufferValid
   io.toIBuffer.bits.instrs         := s2_expandedInstrDataVec
-  io.toIBuffer.bits.valid          := s2_rawInstrValid
+  io.toIBuffer.bits.valid          := s2_alignedInstrValid
   io.toIBuffer.bits.enqEnable      := s2_fixedInstrValid
   io.toIBuffer.bits.isRvc          := s2_expandedInstrVec.map(_.isRvc)
   io.toIBuffer.bits.pc             := s2_alignedInstrPcVec // for debug
@@ -542,13 +492,13 @@ class Ifu(implicit p: Parameters) extends IfuModule
   }
 
   /* in s2, prevInstrCount equals to next cycle's IBuffer.numFromFetch without predChecker. "prev" means s1;
-   * when s1 fire (s1_valid && s2_ready), use s1_instrCount;
+   * when s1 fire (s1_valid && s2_ready), use s1_specInstrCount;
    * else when s2 stall (s2_valid && !s2_ready). use s2_instrCount because prevInstrCount equals to current instrCount;
    * otherwise, we don't care about prevInstrCount because next cycle's toIBuffer.valid won't set.
    */
   io.toIBuffer.bits.prevInstrCount := Mux(
     s1_fire,
-    Mux(s1_reqIsUncache, 1.U, s1_instrCount),
+    Mux(s1_reqIsUncache, 1.U, s1_specInstrCount),
     Mux(s2_reqIsUncache, 1.U, s2_instrCount)
   )
 

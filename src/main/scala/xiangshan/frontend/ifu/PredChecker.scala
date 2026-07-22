@@ -32,10 +32,10 @@ import xiangshan.frontend.bpu.BranchAttribute
 class PredChecker(implicit p: Parameters) extends IfuModule {
   class PredCheckerIO extends IfuBundle {
     class PredCheckerReq(implicit p: Parameters) extends IfuBundle {
-      val expandedInstrVec: Vec[Instruction]   = Vec(IBufferEnqueueWidth, new Instruction)
-      val jumpOffsetVec:    Vec[PrunedAddr]    = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
-      val pdInfoVec:        Vec[PreDecodeInfo] = Vec(IBufferEnqueueWidth, new PreDecodeInfo)
-      val instrPcVec:       Vec[PrunedAddr]    = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
+      val instrVec:      Vec[Instruction]   = Vec(IBufferEnqueueWidth, new Instruction)
+      val jumpOffsetVec: Vec[PrunedAddr]    = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
+      val pdInfoVec:     Vec[PreDecodeInfo] = Vec(IBufferEnqueueWidth, new PreDecodeInfo)
+      val instrPcVec:    Vec[PrunedAddr]    = Vec(IBufferEnqueueWidth, PrunedAddr(VAddrBits))
     }
 
     class PredCheckerResp(implicit p: Parameters) extends IfuBundle {
@@ -58,12 +58,12 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
 
   val io: PredCheckerIO = IO(new PredCheckerIO)
 
-  private val expandedInstrVec = io.req.bits.expandedInstrVec
-  private val endOffsetVec     = VecInit(expandedInstrVec.map(_.endOffset))
-  private val blockSel         = VecInit(expandedInstrVec.map(_.blockSel))
-  private val instrValid       = VecInit(expandedInstrVec.map(_.valid))
-  private val isPredTaken      = VecInit(expandedInstrVec.map(_.isPredTaken))
-  private val invalidTaken     = VecInit(expandedInstrVec.map(_.invalidTaken))
+  private val instrVec     = io.req.bits.instrVec
+  private val endOffsetVec = VecInit(instrVec.map(_.endOffset))
+  private val blockSel     = VecInit(instrVec.map(_.blockSel))
+  private val instrValid   = VecInit(instrVec.map(_.valid))
+  private val isPredTaken  = VecInit(instrVec.map(_.isPredTaken))
+  private val invalidTaken = VecInit(instrVec.map(_.invalidTaken))
 
   private val pdInfoVec     = io.req.bits.pdInfoVec
   private val instrPcVec    = io.req.bits.instrPcVec
@@ -108,7 +108,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   }).asUInt
 
   private val fixedInstrValid = VecInit((0 until IBufferEnqueueWidth).map(i =>
-    expandedInstrVec(i).valid && fixedRange(i)
+    instrVec(i).valid && fixedRange(i)
   ))
   io.resp.stage1Out.fixedInstrValid := fixedInstrValid
 
@@ -138,10 +138,10 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
       mispredIdx.valid &&
       (pdInfoVec(mispredIdx.bits).isJal || pdInfoVec(mispredIdx.bits).isBr)
 
-  private val finalIsRVC        = expandedInstrVec(mispredIdx.bits).isRvc
+  private val finalIsRVC        = instrVec(mispredIdx.bits).isRvc
   private val finalInvalidTaken = invalidTaken(mispredIdx.bits)
   private val finalNotCfiTaken  = notCfiTaken(mispredIdx.bits)
-  private val finalSelectBlock  = expandedInstrVec(mispredIdx.bits).blockSel
+  private val finalSelectBlock  = instrVec(mispredIdx.bits).blockSel
   private val finalPc           = instrPcVec(mispredIdx.bits)
   private val finalAttribute    = pdInfoVec(mispredIdx.bits).brAttribute
   private val fixedTaken        = fixedTakenVec(mispredIdx.bits)

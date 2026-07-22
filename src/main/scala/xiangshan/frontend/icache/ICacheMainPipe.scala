@@ -31,6 +31,7 @@ import xiangshan.cache.mmu.TlbCmd
 import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.PrunedAddr
 import xiangshan.frontend.ftq.BpuFlushInfo
+import xiangshan.frontend.ftq.FtqToMainPipeBundle
 
 class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     with ICacheEccHelper
@@ -45,7 +46,10 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     val dataRead:      DataReadBundle                         = new DataReadBundle
     val metaFlush:     MetaFlushBundle                        = new MetaFlushBundle
     val replacerTouch: ReplacerTouchBundle                    = new ReplacerTouchBundle
+    val fromFtq:       DecoupledIO[FtqToMainPipeBundle]       = Flipped(DecoupledIO(new FtqToMainPipeBundle))
     val fromWayLookup: DecoupledIO[WayLookupToMainPipeBundle] = Flipped(DecoupledIO(new WayLookupToMainPipeBundle))
+    val toWayLookup:   MainPipeToWayLookupBundle              = Output(new MainPipeToWayLookupBundle)
+    val toFtq:         MainPipeToFtqBundle                    = Output(new MainPipeToFtqBundle)
     val missReq:       DecoupledIO[MissReqBundle]             = DecoupledIO(new MissReqBundle)
     val missResp:      Valid[MissRespBundle]                  = Flipped(ValidIO(new MissRespBundle))
     val eccEnable:     Bool                                   = Input(Bool())
@@ -98,20 +102,75 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
    */
 
   /** s0 control */
-  private val s0_valid = io.fromWayLookup.valid
-  private val s0_req   = io.fromWayLookup.bits.req
+  private val s0_valid = io.fromFtq.valid && io.fromWayLookup.valid
+  private val s0_req   = WireDefault(io.fromFtq.bits.req)
 
   private val s0_ftqIdx = s0_req(0).ftqIdx
 
-  private val s0_wayLookupEntry = VecInit(io.fromWayLookup.bits.wayLookupInfo.map(_.entry))
-  private val s0_exceptionInfo  = VecInit(io.fromWayLookup.bits.wayLookupInfo.map(_.exceptionEntry))
+  private val s0_wayLookupEntry = VecInit(io.fromWayLookup.bits.wayLookupInfo.map(_.bits.entry))
+  private val s0_exceptionInfo  = VecInit(io.fromWayLookup.bits.wayLookupInfo.map(_.bits.exceptionEntry))
   private val s0_wayMask        = VecInit(s0_wayLookupEntry.map(_.waymask))
+
+  private val s0_dataSramReadConflict = {
+    val reqValid = io.fromFtq.bits.req.map(_.valid).reduce(_ && _)
+    // Each request may read its current line or next line, so check all four cross-request line pairs.
+    val linePairConflict = for {
+      req0LineIdx <- 0 until MaxFetchReqNum
+      req1LineIdx <- 0 until MaxFetchReqNum
+    } yield {
+      val bankOverlap =
+        (s0_wayLookupEntry(0).bankSel(req0LineIdx) & s0_wayLookupEntry(1).bankSel(req1LineIdx)).orR
+      val sameWay =
+        s0_wayLookupEntry(0).waymask(req0LineIdx) === s0_wayLookupEntry(1).waymask(req1LineIdx)
+      val differentSet =
+        s0_wayLookupEntry(0).vSetIdx(req0LineIdx) =/= s0_wayLookupEntry(1).vSetIdx(req1LineIdx)
+
+      bankOverlap && sameWay && differentSet
+    }
+
+    reqValid && linePairConflict.reduce(_ || _)
+  }
+
+  private val s0_hasMmio          = s0_wayLookupEntry.map(_.isMmio).reduce(_ || _)
+  private val s0_hasItlbException = s0_exceptionInfo.map(_.itlbException.hasException).reduce(_ || _)
+  private val s0_realTwoFetchValid = io.fromFtq.bits.req(1).valid && io.fromWayLookup.bits.wayLookupInfo(1).valid &&
+    !s0_dataSramReadConflict && !s0_hasMmio && !s0_hasItlbException
+
+  s0_req(1).valid := s0_realTwoFetchValid
 
   s0_flush := io.flush || io.flushFromBpu.shouldFlushByStage3(s0_ftqIdx, s0_valid)
 
-  io.fromWayLookup.ready := toData.ready && s1_ready && !s0_flush
+  private val s0_canAccept = toData.ready && s1_ready
+  io.fromFtq.ready       := s0_canAccept && io.fromWayLookup.valid && !s0_flush
+  io.fromWayLookup.ready := s0_canAccept && io.fromFtq.valid && !s0_flush
 
-  s0_fire := io.fromWayLookup.fire
+  io.toWayLookup.realTwoFetchValid := s0_realTwoFetchValid
+  io.toFtq.realTwoFetchValid       := s0_realTwoFetchValid
+
+  io.toFtq.perf_twoFetchFailReason :=
+    TwoFetchFailReason(
+      !io.fromWayLookup.bits.wayLookupInfo(1).valid,
+      s0_dataSramReadConflict,
+      s0_hasMmio,
+      s0_hasItlbException
+    )
+
+  s0_fire := io.fromFtq.fire
+
+  if (!env.FPGAPlatform) {
+    (0 until MaxFetchReqNum).foreach { i =>
+      when(s0_fire && s0_req(i).valid) {
+        assert(
+          s0_wayLookupEntry(i).debug_ftqIdx.get === s0_req(i).ftqIdx,
+          "ICache MainPipe: wayLookupEntry ftqIdx mismatch"
+        )
+        assert(
+          s0_wayLookupEntry(i).debug_startVAddr.get === s0_req(i).startVAddr,
+          "ICache MainPipe: wayLookupEntry startVAddr mismatch"
+        )
+      }
+    }
+  }
 
   /**
     ******************************************************************************
@@ -122,7 +181,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   toData.valid := s0_valid && s1_ready && !s0_flush
   toData.bits.zipWithIndex.foreach { case (readReq, i) =>
     readReq.valid        := s0_req(i).valid
-    readReq.bits.bankSel := s0_req(i).bankSel
+    readReq.bits.bankSel := s0_wayLookupEntry(i).bankSel
     readReq.bits.waymask := s0_wayMask(i)
     readReq.bits.vSetIdx := s0_req(i).vSetIdx
   }
@@ -139,7 +198,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_wayLookupEntry = RegEnable(s0_wayLookupEntry, s0_fire)
   private val s1_exceptionInfo  = RegEnable(s0_exceptionInfo, s0_fire)
 
-  private val s1_wayMask = VecInit(s1_wayLookupEntry.map(_.waymask))
+  private val s1_wayMask     = VecInit(s1_wayLookupEntry.map(_.waymask))
+  private val s1_isCrossLine = VecInit(s1_wayLookupEntry.map(_.isCrossLine))
 
   private val s1_pTag   = s1_wayLookupEntry(0).pTag
   private val s1_ftqIdx = s1_req(0).ftqIdx
@@ -160,7 +220,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
 
   private val s1_sramRespValid = RegNext(s0_fire)
   private val s1_lineValid = VecInit((0 until MaxFetchReqNum).map { i =>
-    VecInit(s1_req(i).valid, s1_req(i).valid && s1_req(i).isCrossLine)
+    VecInit(s1_req(i).valid, s1_req(i).valid && s1_isCrossLine(i))
   })
   private val s1_sramValid = VecInit((0 until MaxFetchReqNum).map { i =>
     VecInit(s1_lineValid(i).map(s1_sramRespValid && _))
@@ -180,34 +240,35 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     )
   })
 
-  dontTouch(s1_mshrValid)
-
   private val s1_bankMshrValid = VecInit((0 until MaxFetchReqNum).map { i =>
     getBankValid(s1_mshrValid(i), s1_offset(i))
   })
   private val s1_mshrDatas       = fromMiss.bits.data.asTypeOf(Vec(DataBanks, UInt(ICacheDataBits.W)))
   private val s1_mshrMaybeRvcMap = fromMiss.bits.maybeRvcMap.asTypeOf(Vec(DataBanks, UInt(MaxInstNumPerBank.W)))
 
+  private val s1_mshrValidReg       = RegNext(s1_mshrValid)
+  private val s1_bankMshrValidReg   = RegNext(s1_bankMshrValid)
+  private val s1_mshrDatasReg       = RegNext(s1_mshrDatas)
+  private val s1_mshrMaybeRvcMapReg = RegNext(s1_mshrMaybeRvcMap)
+
   private val s1_hits = VecInit((0 until MaxFetchReqNum).map { reqIdx =>
     VecInit((0 until PortNumber).map { portIdx =>
       DataHoldBypass(
-        s1_mshrValid(reqIdx)(portIdx) || s1_sramHits(reqIdx)(portIdx),
-        s1_mshrValid(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
+        s1_mshrValidReg(reqIdx)(portIdx) || s1_sramHits(reqIdx)(portIdx),
+        s1_mshrValidReg(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
       )
     })
   })
-
-  dontTouch(s1_hits)
 
   private val s1_data = VecInit((0 until MaxFetchReqNum).map { reqIdx =>
     VecInit((0 until DataBanks).map { bankIdx =>
       DataHoldBypass(
         Mux(
-          s1_bankMshrValid(reqIdx)(bankIdx),
-          s1_mshrDatas(bankIdx),
+          s1_bankMshrValidReg(reqIdx)(bankIdx),
+          s1_mshrDatasReg(bankIdx),
           s1_sramDatas(reqIdx)(bankIdx)
         ),
-        s1_bankMshrValid(reqIdx)(bankIdx) || s1_bankSramValid(reqIdx)(bankIdx)
+        s1_bankMshrValidReg(reqIdx)(bankIdx) || s1_bankSramValid(reqIdx)(bankIdx)
       )
     }).asUInt
   })
@@ -219,33 +280,33 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     VecInit((0 until DataBanks).map { bankIdx =>
       DataHoldBypass(
         Mux(
-          s1_bankMshrValid(reqIdx)(bankIdx),
-          s1_mshrMaybeRvcMap(bankIdx),
+          s1_bankMshrValidReg(reqIdx)(bankIdx),
+          s1_mshrMaybeRvcMapReg(bankIdx),
           Mux(
             s1_lineSel(reqIdx)(bankIdx),
             sramMaybeRvcMap(1)(bankIdx),
             sramMaybeRvcMap(0)(bankIdx)
           )
         ),
-        s1_bankMshrValid(reqIdx)(bankIdx) || s1_bankSramValid(reqIdx)(bankIdx)
+        s1_bankMshrValidReg(reqIdx)(bankIdx) || s1_bankSramValid(reqIdx)(bankIdx)
       )
     }).asUInt
   })
 
   private val s1_tlCorrupt = VecInit((0 until MaxFetchReqNum).map { reqIdx =>
     VecInit((0 until PortNumber).map { portIdx =>
-      DataHoldBypass(
+      RegEnable(
         s1_mshrValid(reqIdx)(portIdx) && fromMiss.bits.corrupt,
-        s1_mshrValid(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
+        s1_mshrValid(reqIdx)(portIdx) || s0_fire
       )
     })
   })
 
   private val s1_tlDenied = VecInit((0 until MaxFetchReqNum).map { reqIdx =>
     VecInit((0 until PortNumber).map { portIdx =>
-      DataHoldBypass(
+      RegEnable(
         s1_mshrValid(reqIdx)(portIdx) && fromMiss.bits.denied,
-        s1_mshrValid(reqIdx)(portIdx) || s1_sramValid(reqIdx)(portIdx)
+        s1_mshrValid(reqIdx)(portIdx) || s0_fire
       )
     })
   })
@@ -255,8 +316,8 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     io.replacerTouch.req(i).bits.vSetIdx := s1_req(0).vSetIdx(i)                      // FIXME
     io.replacerTouch.req(i).bits.way     := OHToUInt(s1_wayLookupEntry(0).waymask(i)) // FIXME
   }
-  io.replacerTouch.req(0).valid := RegNext(s0_fire) && s1_sramHits(0)(0)                          // FIXME
-  io.replacerTouch.req(1).valid := RegNext(s0_fire) && s1_sramHits(0)(1) && s1_req(0).isCrossLine // FIXME
+  io.replacerTouch.req(0).valid := RegNext(s0_fire) && s1_sramHits(0)(0)                      // FIXME
+  io.replacerTouch.req(1).valid := RegNext(s0_fire) && s1_sramHits(0)(1) && s1_isCrossLine(0) // FIXME
 
   /* *** PMP check (to be removed) *** */
   // if itlb has exception, pAddr can be invalid, therefore pmp check can be skipped do not do this now for timing
@@ -271,7 +332,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s1_exception = s1_exceptionInfo(0).itlbException || s1_pmpException
 
   private val s1_vAddr = VecInit(s1_req.flatMap(req => req.vAddr))
-  dontTouch(s1_vAddr)
 
   /* *** Fetch when miss or corrupt *** */
   // do not fetch if is mmio
@@ -310,7 +370,6 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   XSPerfAccumulate("to_missUnit_stall", toMiss.valid && !toMiss.ready)
 
   private val s1_fetchFinish = !s1_shouldFetch.reduce(_ || _)
-  dontTouch(s1_fetchFinish)
 
   private val s1_portValid = VecInit(s1_lineValid.flatten)
 
@@ -337,7 +396,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
     req.size             := s1_req(i).takenCfiOffset.bits +& 1.U
     req.data             := s1_data(i)
     req.maybeRvcMap      := s1_maybeRvcMap(i)
-    req.perf_isCrossLine := s1_req(i).isCrossLine
+    req.perf_isCrossLine := s1_isCrossLine(i)
 
     req.icacheMeta.exception          := s1_exceptionOut
     req.icacheMeta.pmpMmio            := s1_pmpMmio
@@ -369,6 +428,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val s2_offset         = RegEnable(s1_offset, s1_fire)
   private val s2_bankSramValid  = RegEnable(s1_bankSramValid, s1_fire)
   private val s2_sramHits       = RegEnable(s1_sramHits, s1_fire)
+  private val s2_isCrossLine    = RegEnable(s1_isCrossLine, s1_fire)
 
   // make corrupt-related info as a bundle for easier selection
   private class CorruptedInfo extends Bundle {
@@ -385,14 +445,14 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
       s2_wayLookupEntry(reqIdx).metaCodes,
       s2_wayMask(reqIdx),
       eccEnable,
-      s2_req(reqIdx).isCrossLine
+      s2_isCrossLine(reqIdx)
     )
 
     val dataCorrupt = checkDataEcc(
       s2_sramDatas(reqIdx),
       s2_sramCodes(reqIdx),
       eccEnable,
-      getBankSel(s2_offset(reqIdx), s2_valid, s2_req(reqIdx).isCrossLine),
+      getBankSel(s2_offset(reqIdx), s2_valid, s2_isCrossLine(reqIdx)),
       s2_bankSramValid(reqIdx),
       s2_sramHits(reqIdx)
     )
@@ -405,7 +465,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
      */
     when(s2_valid) {
       assert(
-        !(!s2_req(reqIdx).isCrossLine && (metaCorrupt(1) || dataCorrupt(1))),
+        !(!s2_isCrossLine(reqIdx) && (metaCorrupt(1) || dataCorrupt(1))),
         "meta or data corrupt detected on line 1 but s2_isCrossLine is false.B"
       )
     }
@@ -498,7 +558,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   accessTrace.vAddr      := s1_vAddr(0).toUInt
   accessTrace.pAddr      := getPAddrFromPTag(s1_vAddr(0), s1_pTag).toUInt
   accessTrace.wayMask    := s1_wayMask(0)
-  accessTrace.crossLine  := s1_req(0).isCrossLine
+  accessTrace.crossLine  := s1_isCrossLine(0)
   accessTrace.waitRefill := perf_waitRefill
   accessTrace.exception  := s1_exceptionOut
   accessTrace.pmpMmio    := s1_pmpMmio

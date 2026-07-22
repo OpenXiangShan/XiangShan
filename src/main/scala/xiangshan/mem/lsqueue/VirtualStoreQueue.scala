@@ -399,7 +399,7 @@ class VirtualStoreQueue[PhysicalQueuePtrType <: MultiFlagCircularQueuePtr[Physic
   io.toPhysicalQueue.redirectPtr.valid := toPhysicalQueueRedirectValid
   io.toPhysicalQueue.redirectPtr.bits := toPhysicalQueueRedirectPtr
 
-  io.toPhysicalQueue.headRobIdx := RegEnable(dataEntries(deqPtrVec.head.value).robIdx, preCommitMoveValid)
+  io.toPhysicalQueue.headRobIdx := RegEnable(dataEntries(preCommitPtr.value).robIdx, preCommitMoveValid)
 
   val sqRecoverStall = state =/= WalkState.idle || RegNext(redirectReg.valid) || DelayN(redirectReg.valid, 2)
   io.sqRecoverStall := sqRecoverStall

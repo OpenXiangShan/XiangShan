@@ -343,6 +343,7 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
     val resp_chanD = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val resp_to_lsq = DecoupledIO(new CMOResp)
     val wfi = Flipped(new WfiReqBundle)
+    val channel_sel = Output(UInt(memChannelBits.W))  // Channel selection for dual-channel support
   })
 
   val s_idle :: s_sreq :: s_wresp :: s_lsq_resp :: Nil = Enum(4)
@@ -386,6 +387,17 @@ class CMOUnit(edge: TLEdgeOut)(implicit p: Parameters) extends DCacheModule {
       }
     }
   }
+
+  // Channel selection based on request address (same as MissEntry)
+  private def selectChannel(addr: UInt): UInt = {
+    if (hasDualChannel) {
+      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
+      else 0.U(memChannelBits.W)
+    } else {
+      0.U(memChannelBits.W)
+    }
+  }
+  io.channel_sel := Mux(RegNext(io.req.fire), selectChannel(req.address), 0.U)
 
   io.req.ready := state === s_idle
 
@@ -438,7 +450,10 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
     val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
 
-    // client requests, queryME receive all miss_req now
+    // ========== Dual-channel support ==========
+    // Channel selection output
+    val channel_sel = Output(UInt(memChannelBits.W))
+
     val queryME = Vec(reqNum, Flipped(new DCacheMEQueryIOBundle))
 
     // output the signals to avoid redundant computation
@@ -529,6 +544,20 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val hasStore = RegInit(false.B)
   // initial keyword
   val isKeyword = RegInit(false.B)
+
+  // Route each MSHR to a fixed L1-L2 channel so A/D/E traffic stays on one path.
+  private def selectChannel(addr: UInt, mshrId: UInt): UInt = {
+    if (hasDualChannel) {
+      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
+      else mshrId(memChannelBits - 1, 0)
+    } else {
+      0.U(memChannelBits.W)
+    }
+  }
+  val channel_sel = Mux(req_valid, selectChannel(req.addr, io.id), 0.U)
+
+  // Output channel selection
+  io.channel_sel := channel_sel
 
   val miss_req_pipe_reg_bits = io.miss_req_pipe_reg.req
 
@@ -814,7 +843,6 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     evict_BtoT_way := true.B
     req.occupy_way := io.main_pipe_next_evict_way
   }
-  XSError(req_valid && req.isBtoT && io.main_pipe_evict_BtoT_way, "BtoT request will never evict a way")
 
   when (io.main_pipe_resp) {
     w_mainpipe_resp := true.B
@@ -1147,11 +1175,13 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     val queryMQ = Vec(reqNum, Flipped(new DCacheMQQueryIOBundle))
 
-    val mem_acquire = DecoupledIO(new TLBundleA(edge.bundle))
-    val mem_grant = Flipped(DecoupledIO(new TLBundleD(edge.bundle)))
-    val mem_finish = DecoupledIO(new TLBundleE(edge.bundle))
+    // ========== Multi-channel support ==========
+    // Each channel gets its own TL interface port
+    val mem_acquire = Vec(numMemChannels, DecoupledIO(new TLBundleA(edge.bundle)))
+    val mem_grant   = Vec(numMemChannels, Flipped(DecoupledIO(new TLBundleD(edge.bundle))))
+    val mem_finish  = Vec(numMemChannels, DecoupledIO(new TLBundleE(edge.bundle)))
 
-    val l2_hint = Input(Valid(new L2ToL1Hint())) // Hint from L2 Cache
+    val l2_hint = Input(Vec(cfg.numMemChannels, Valid(new L2ToL1Hint()))) // Hint from L2 Cache
 
     val main_pipe_req = DecoupledIO(new MainPipeReq)
     val main_pipe_resp = Flipped(ValidIO(new MainPipeResp))
@@ -1208,8 +1238,9 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   // Parallel pipeline registers for queryMQ path (reqNum ports)
   val parallel_pipe_regs = RegInit(VecInit(Seq.fill(reqNum)(0.U.asTypeOf(new MissReqPipeRegBundle(edge)))))
+  val parallel_regs_channel = WireInit(VecInit(Seq.fill(reqNum)(0.U(memChannelBits.W))))
 
-  val acquire_from_pipereg_vec = Wire(Vec(reqNum, chiselTypeOf(io.mem_acquire)))
+  val acquire_from_pipereg_vec = Wire(Vec(reqNum, chiselTypeOf(io.mem_acquire(0))))
 
   // val signals = computeMatchSignals(miss_req_pipe_reg.req, io.req.bits)
   val signals_vec = (0 until reqNum).map {i =>
@@ -1539,19 +1570,25 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   for (i <- 0 until reqNum) {
     when (io.queryMQ(i).req.valid) {
       parallel_pipe_regs(i).req := io.queryMQ(i).req.bits
+      parallel_pipe_regs(i).alloc := ((analysis.strategy(i) & 1.U) =/= 0.U) &&
+                                      (analysis.compress_group(i) === i.U) &&
+                                      !io.queryMQ(i).req.bits.cancel &&
+                                      !io.wbq_block_miss_req(i)
+
+      parallel_pipe_regs(i).merge := ((analysis.strategy(i) & 2.U) =/= 0.U) &&
+                                      (analysis.compress_group(i) === i.U) &&
+                                      !io.queryMQ(i).req.bits.cancel &&
+                                      !io.wbq_block_miss_req(i)
+
+      parallel_pipe_regs(i).mshr_id := analysis.target_mshr(i)
+      parallel_pipe_regs(i).cancel := io.wbq_block_miss_req(i)
+    }.otherwise {
+      // These regs form a one-cycle s0->s1 handoff. If no request fired this cycle,
+      // the handoff must be empty; otherwise stale alloc/merge intents leak forward.
+      parallel_pipe_regs(i).alloc := false.B
+      parallel_pipe_regs(i).merge := false.B
+      parallel_pipe_regs(i).cancel := false.B
     }
-    parallel_pipe_regs(i).alloc := ((analysis.strategy(i) & 1.U) =/= 0.U) &&
-                                    (analysis.compress_group(i) === i.U) &&
-                                    !io.queryMQ(i).req.bits.cancel &&
-                                    !io.wbq_block_miss_req(i)
-
-    parallel_pipe_regs(i).merge := ((analysis.strategy(i) & 2.U) =/= 0.U) &&
-                                    (analysis.compress_group(i) === i.U) &&
-                                    !io.queryMQ(i).req.bits.cancel &&
-                                    !io.wbq_block_miss_req(i)
-
-    parallel_pipe_regs(i).mshr_id := analysis.target_mshr(i)
-    parallel_pipe_regs(i).cancel := io.wbq_block_miss_req(i)
   }
 
   val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry)
@@ -1669,7 +1706,19 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     assert(!RegNext(out.valid && PopCount(Cat(in.map(_.valid))) > 1.U))
   }
 
-  io.mem_grant.ready := false.B
+  private def selectChannel(addr: UInt, mshrId: UInt): UInt = {
+    if (hasDualChannel) {
+      if (channelSelByAddr) get_block(addr)(memChannelBits - 1, 0)
+      else mshrId(memChannelBits - 1, 0)
+    } else {
+      0.U(memChannelBits.W)
+    }
+  }
+
+  // Default grant ready for all channels
+  for (ch <- 0 until numMemChannels) {
+    io.mem_grant(ch).ready := false.B
+  }
 
   val nMaxPrefetchEntry = Constantin.createRecord(s"nMaxPrefetchEntry${p(XSCoreParamsKey).HartId}", initValue = cfg.nMissEntries - 2)
   entries.zipWithIndex.foreach {
@@ -1694,8 +1743,10 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
       e.io.mem_grant.valid := false.B
       e.io.mem_grant.bits := DontCare
-      when (io.mem_grant.bits.source === i.U) {
-        e.io.mem_grant <> io.mem_grant
+      for (ch <- 0 until numMemChannels) {
+        when ((io.mem_grant(ch).bits.source === i.U) && io.mem_grant(ch).valid) {
+          e.io.mem_grant <> io.mem_grant(ch)
+        }
       }
 
       e.io.miss_req_pipe_reg       := DontCare
@@ -1732,8 +1783,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
       e.io.l2_hint.valid := false.B
       e.io.l2_hint.bits := DontCare
-      when(io.l2_hint.bits.sourceId === i.U) {
-        e.io.l2_hint <> io.l2_hint
+      val entryHintMatches = io.l2_hint.map(hint => hint.valid && hint.bits.sourceId === i.U)
+      assert(PopCount(VecInit(entryHintMatches)) <= 1.U, "multiple l2_hint hits for one miss entry")
+      for (ch <- 0 until cfg.numMemChannels) {
+        when(entryHintMatches(ch)) {
+          e.io.l2_hint <> io.l2_hint(ch)
+        }
       }
 
       e.io.wfi.wfiReq := io.wfi.wfiReq
@@ -1742,11 +1797,12 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   cmo_unit.io.wfi.wfiReq := io.wfi.wfiReq
   cmo_unit.io.req <> io.cmo_req
   io.cmo_resp <> cmo_unit.io.resp_to_lsq
-  when (io.mem_grant.valid && io.mem_grant.bits.opcode === TLMessages.CBOAck) {
-    cmo_unit.io.resp_chanD <> io.mem_grant
-  } .otherwise {
-    cmo_unit.io.resp_chanD.valid := false.B
-    cmo_unit.io.resp_chanD.bits := DontCare
+  cmo_unit.io.resp_chanD.valid := false.B
+  cmo_unit.io.resp_chanD.bits := DontCare
+  for (ch <- 0 until numMemChannels) {
+    when (io.mem_grant(ch).valid && io.mem_grant(ch).bits.opcode === TLMessages.CBOAck) {
+      cmo_unit.io.resp_chanD <> io.mem_grant(ch)
+    }
   }
   io.wfi.wfiSafe := (Seq(cmo_unit.io.wfi.wfiSafe) ++ entries.map(_.io.wfi.wfiSafe)).reduce(_&&_)
 
@@ -1768,9 +1824,33 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     XSPerfAccumulate(s"parallel_pipe_regs_valid_$i", parallel_pipe_regs(i).reg_valid())
   }
 
-  val acquire_sources = Seq(cmo_unit.io.req_chanA) ++ acquire_from_pipereg_vec ++ entries.map(_.io.mem_acquire)
-  TLArbiter.lowest(edge, io.mem_acquire, acquire_sources:_*)
-  TLArbiter.lowest(edge, io.mem_finish, entries.map(_.io.mem_finish):_*)
+  for(i <- 0 until reqNum) {
+    parallel_regs_channel(i) := selectChannel(parallel_pipe_regs(i).req.addr, parallel_pipe_regs(i).mshr_id)
+  }
+
+  if (numMemChannels > 1) {
+    // Demux each source into N channels, then arbitrate per channel
+    val demuxedPipeAcquires  = acquire_from_pipereg_vec.zipWithIndex.map { case (aq, i) =>
+      demuxByChannel(aq, parallel_regs_channel(i), numMemChannels)
+    }
+    val demuxedEntryAcquires = entries.map(e => demuxByChannel(e.io.mem_acquire, e.io.channel_sel, numMemChannels))
+    val demuxedEntryFinishes = entries.map(e => demuxByChannel(e.io.mem_finish, e.io.channel_sel, numMemChannels))
+    val demuxedCmoAcquire    = demuxByChannel(cmo_unit.io.req_chanA, cmo_unit.io.channel_sel, numMemChannels)
+
+    for (ch <- 0 until numMemChannels) {
+      val pipeAcquires  = demuxedPipeAcquires.map(_(ch))
+      val entryAcquires = demuxedEntryAcquires.map(_(ch))
+      val finishes      = demuxedEntryFinishes.map(_(ch))
+      val cmoAcquire    = demuxedCmoAcquire(ch)
+      TLArbiter.lowest(edge, io.mem_acquire(ch),
+        (Seq(cmoAcquire) ++ pipeAcquires ++ entryAcquires):_*)
+      TLArbiter.lowest(edge, io.mem_finish(ch), finishes:_*)
+    }
+  } else {
+    val acquire_sources = Seq(cmo_unit.io.req_chanA) ++ acquire_from_pipereg_vec ++ entries.map(_.io.mem_acquire)
+    TLArbiter.lowest(edge, io.mem_acquire(0), acquire_sources:_*)
+    TLArbiter.lowest(edge, io.mem_finish(0), entries.map(_.io.mem_finish):_*)
+  }
 
   // amo's main pipe req out
   arbiter(entries.map(_.io.main_pipe_req), io.main_pipe_req, Some("main_pipe_req"))
@@ -1853,13 +1933,62 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
   // Difftest
   if (env.EnableDifftest) {
+    val refillDiffValidVec = VecInit(entries.map(e =>
+      e.io.refill_to_ldq.valid &&
+      e.io.refill_to_ldq.bits.hasdata &&
+      e.io.refill_to_ldq.bits.refill_done
+    ))
+    val refillDiffMask = refillDiffValidVec.asUInt
+    val refillDiffFirstOH = PriorityEncoderOH(refillDiffMask)
+    val refillDiffRemainMask = refillDiffMask & ~refillDiffFirstOH
+    val refillDiffSecondOH = PriorityEncoderOH(refillDiffRemainMask)
+    val refillDiffFirstValid = refillDiffMask.orR
+    val refillDiffSecondValid = refillDiffRemainMask.orR
+
+    class RefillDiffEntry extends Bundle {
+      val addr = UInt(PAddrBits.W)
+      val data = Vec(8, UInt((cfg.blockBytes).W))
+      val mask = UInt((cfg.blockBytes / 8).W)
+    }
+
+    val refillDiffFirstEntry = WireDefault(0.U.asTypeOf(new RefillDiffEntry))
+    val refillDiffSecondEntry = WireDefault(0.U.asTypeOf(new RefillDiffEntry))
+    when(refillDiffFirstValid) {
+      refillDiffFirstEntry.addr := Mux1H(refillDiffFirstOH, entries.map(_.io.refill_to_ldq.bits.addr))
+      refillDiffFirstEntry.data := Mux1H(
+        refillDiffFirstOH,
+        entries.map(_.io.refill_to_ldq.bits.data_raw.asTypeOf(refillDiffFirstEntry.data))
+      )
+      refillDiffFirstEntry.mask := VecInit.fill(refillDiffFirstEntry.mask.getWidth)(true.B).asUInt
+    }
+    when(refillDiffSecondValid) {
+      refillDiffSecondEntry.addr := Mux1H(refillDiffSecondOH, entries.map(_.io.refill_to_ldq.bits.addr))
+      refillDiffSecondEntry.data := Mux1H(
+        refillDiffSecondOH,
+        entries.map(_.io.refill_to_ldq.bits.data_raw.asTypeOf(refillDiffSecondEntry.data))
+      )
+      refillDiffSecondEntry.mask := VecInit.fill(refillDiffSecondEntry.mask.getWidth)(true.B).asUInt
+    }
+
+    val refillDiffQueue = Module(new Queue(new RefillDiffEntry, entries = cfg.nMissEntries, flow = false, pipe = false))
+    val queueHasPending = refillDiffQueue.io.deq.valid
+    val emitCurrent = refillDiffFirstValid && (!queueHasPending || refillDiffSecondValid)
+    val emitQueued = queueHasPending && !emitCurrent
+    val enqueueSecondCurrent = emitCurrent && refillDiffSecondValid
+    val enqueueFirstCurrent = emitQueued && refillDiffFirstValid
+
+    refillDiffQueue.io.deq.ready := emitQueued
+    refillDiffQueue.io.enq.valid := enqueueSecondCurrent || enqueueFirstCurrent
+    refillDiffQueue.io.enq.bits := Mux(enqueueSecondCurrent, refillDiffSecondEntry, refillDiffFirstEntry)
+    assert(!refillDiffQueue.io.enq.valid || refillDiffQueue.io.enq.ready, "refill difftest queue overflow")
+
     val difftest = DifftestModule(new DiffRefillEvent, dontCare = true)
     difftest.coreid := io.hartId
     difftest.index := 1.U
-    difftest.valid := io.refill_to_ldq.valid && io.refill_to_ldq.bits.hasdata && io.refill_to_ldq.bits.refill_done
-    difftest.addr := io.refill_to_ldq.bits.addr
-    difftest.data := io.refill_to_ldq.bits.data_raw.asTypeOf(difftest.data)
-    difftest.mask := VecInit.fill(difftest.mask.getWidth)(true.B).asUInt
+    difftest.valid := emitCurrent || emitQueued
+    difftest.addr := Mux(emitQueued, refillDiffQueue.io.deq.bits.addr, refillDiffFirstEntry.addr)
+    difftest.data := Mux(emitQueued, refillDiffQueue.io.deq.bits.data, refillDiffFirstEntry.data)
+    difftest.mask := Mux(emitQueued, refillDiffQueue.io.deq.bits.mask, refillDiffFirstEntry.mask)
   }
 
   if (env.EnableDifftest) {
@@ -1892,6 +2021,11 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   XSPerfAccumulate("memSetPattenDetected", memSetPattenDetected)
   XSPerfAccumulate("no_free_entry", !ParallelORR(Cat(entries.map(e => e.io.primary_ready))))
   XSPerfAccumulate("free_entry_less_reqNum", PopCount(entries.map(e => e.io.primary_ready)) < reqNum.U)
+  if (numMemChannels >= 2) {
+    XSPerfAccumulate("dual_channle_acquire", io.mem_acquire(0).valid && io.mem_acquire(1).valid)
+    XSPerfAccumulate("dual_channle_grant", io.mem_grant(0).valid && io.mem_grant(1).valid)
+    XSPerfAccumulate("dual_channle_grantAck", io.mem_finish(0).valid && io.mem_finish(1).valid)
+  }
   val max_inflight = RegInit(0.U((log2Up(cfg.nMissEntries) + 1).W))
   val num_valids = PopCount(~Cat(primary_ready_vec).asUInt)
   when (num_valids > max_inflight) {

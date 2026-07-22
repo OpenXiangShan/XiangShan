@@ -117,7 +117,10 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     // mdp train io
     val mdpTrain        = ValidIO(new Redirect)
     val release = Flipped(Valid(new Release))
-    val loadWakeup = Flipped(ValidIO(new DCacheLoadWakeup()))
+    val loadWakeup = Flipped(Vec(cfg.numMemChannels, ValidIO(new DCacheLoadWakeup())))
+   // val refill = Flipped(Valid(new Refill))
+    // val tl_d_channel  = Input(Vec(cfg.numMemChannels, new DcacheToLduForwardIO))
+    // val maControl     = Flipped(new StoreMaBufToSqControlIO)
     val uncacheOutstanding = Input(Bool())
     val uncache = new UncacheWordIO
     val mmioStout = DecoupledIO(new MemToRob(staParams.head)) // writeback uncached store
@@ -131,7 +134,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
     val lqDeqPtr = Output(new LqPtr)
     val sqDeqPtr = Output(new SqPtr)
     val issuePtrExt = Output(new SqPtr)
-    val l2_hint = Input(Valid(new L2ToL1Hint()))
+    val l2_hint = Input(Vec(cfg.numMemChannels, Valid(new L2ToL1Hint())))
     val tlb_hint = Flipped(new TlbHintIO)
     val wakeupToLRQ = Vec(StaCnt + StdCnt, Flipped(ValidIO(new IssueQueueLRQWakeUpBundle)))
     val wakeupToLRQCancel = Input(Vec(StaCnt + StdCnt, new LRQWakeUpCancelBundle))

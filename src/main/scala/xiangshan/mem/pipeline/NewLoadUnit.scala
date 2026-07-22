@@ -1805,6 +1805,7 @@ class LoadUnitDataPath(val param: ExeUnitParams)(implicit p: Parameters) extends
 }
 
 class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
+  private val numMemChannels = p(XSCoreParamsKey).dcacheParametersOpt.get.numMemChannels
   val redirect = Flipped(ValidIO(new Redirect))
   // Request sources
   val ldin = Flipped(DecoupledIO(new ExuInput(param, hasCopySrc = true)))
@@ -1831,7 +1832,7 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   val sbufferForward = new SbufferForward
   val uncacheForward = new UncacheForward
   val mshrForward = new DCacheForward
-  val tldForward = new DCacheForward
+  val tldForward = Vec(numMemChannels, new DCacheForward)
   val uncacheBypass = new UncacheBypass
   // Nuke check with StoreUnit
   val staNukeQueryReq = Flipped(Vec(StorePipelineWidth, ValidIO(new StoreNukeQueryReq)))
@@ -1877,6 +1878,14 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s2.io.kill := false.B
   s3.io.kill := false.B
   dataPath.io.s1Meta := s1.io.dataPathMeta
+  val tldForwardRespValids = io.tldForward.map(_.s2Resp.valid)
+  val tldForwardRespMerged = Wire(ValidIO(new DCacheForwardResp))
+  tldForwardRespMerged.valid := tldForwardRespValids.reduce(_ || _)
+  tldForwardRespMerged.bits := Mux1H(
+    tldForwardRespValids :+ !tldForwardRespMerged.valid,
+    io.tldForward.map(_.s2Resp.bits) :+ 0.U.asTypeOf(new DCacheForwardResp)
+  )
+  assert(PopCount(tldForwardRespValids) <= 1.U, "multiple tldForward responses for one load unit")
 
   // IO wiring
   // S0
@@ -1893,7 +1902,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.sbufferForward.s0Req := s0.io.sqSbForwardReq
   io.uncacheForward.s0Req := s0.io.uncacheForwardReq
   io.mshrForward.s0Req := s0.io.mshrForwardReq
-  io.tldForward.s0Req := s0.io.tldForwardReq
+  io.tldForward.foreach(_.s0Req := s0.io.tldForwardReq)
   io.uncacheBypass.s0Req := s0.io.uncacheBypassReq
   io.wakeup := s0.io.wakeup
 
@@ -1914,8 +1923,10 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.uncacheForward.s1Kill := s1.io.uncacheForwardKill
   io.mshrForward.s1Req := s1.io.mshrForwardReq
   io.mshrForward.s1Kill := s1.io.mshrForwardKill
-  io.tldForward.s1Req := s1.io.tldForwardReq
-  io.tldForward.s1Kill := s1.io.tldForwardKill
+  io.tldForward.foreach { forward =>
+    forward.s1Req := s1.io.tldForwardReq
+    forward.s1Kill := s1.io.tldForwardKill
+  }
   s1.io.uncacheBypassResp := io.uncacheBypass.s1Resp
   s1.io.staNukeQueryReq := io.staNukeQueryReq
   io.prefetchTrainHintS1 := s1.io.prefetchTrainHint
@@ -1934,7 +1945,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   s2.io.sbufferForwardResp := io.sbufferForward.s2Resp
   s2.io.uncacheForwardResp := io.uncacheForward.s2Resp
   s2.io.mshrForwardResp := io.mshrForward.s2Resp
-  s2.io.tldForwardResp := io.tldForward.s2Resp
+  s2.io.tldForwardResp := tldForwardRespMerged
   s2.io.uncacheBypassResp := io.uncacheBypass.s2Resp
   s2.io.staNukeQueryReq := io.staNukeQueryReq
   io.rarNukeQuery.req <> s2.io.rarNukeQueryReq
@@ -1965,7 +1976,7 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   dataPath.io.s2SbufferForwardResp := io.sbufferForward.s2Resp
   dataPath.io.s2UncacheForwardResp := io.uncacheForward.s2Resp
   dataPath.io.s2MSHRForwardResp := io.mshrForward.s2Resp
-  dataPath.io.s2TLDForwardResp := io.tldForward.s2Resp
+  dataPath.io.s2TLDForwardResp := tldForwardRespMerged
   dataPath.io.s2UncacheBypassResp := io.uncacheBypass.s2Resp
   dataPath.io.s2DCacheResp.valid := io.dcache.resp.valid
   dataPath.io.s2DCacheResp.bits := io.dcache.resp.bits

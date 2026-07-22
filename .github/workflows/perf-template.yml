@@ -280,7 +280,6 @@ jobs:
             $CST_RUN_OPT $DRY_RUN_OPT
 
       - name: Report SPEC CPU score
-        if: always()
         run: |
           cd $SCRIPTS_HOME/perf_trigger
           python3 main.py \
@@ -292,7 +291,6 @@ jobs:
             > "$SCORE_FILE"
 
       - name: Summary result
-        if: always()
         run: |
           echo "### :rocket: Performance Test Result" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
@@ -309,3 +307,9 @@ jobs:
           echo "- int: **${INT_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- fp: **${FP_SCORE}**" >> $GITHUB_STEP_SUMMARY
           echo "- total: **${TOTAL_SCORE}**" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload report
+        uses: actions/upload-artifact@v7
+        with:
+          name: score
+          path: ${{ steps.set_env.outputs.SCORE_FILE }}

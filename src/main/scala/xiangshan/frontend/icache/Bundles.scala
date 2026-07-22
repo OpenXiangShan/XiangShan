@@ -20,6 +20,7 @@ import chisel3.util._
 import freechips.rocketchip.tilelink.TLBundleA
 import freechips.rocketchip.tilelink.TLEdgeOut
 import org.chipsalliance.cde.config.Parameters
+import utils.EnumUInt
 import xiangshan.SoftIfetchPrefetchBundle
 import xiangshan.backend.fu.PMPReqBundle
 import xiangshan.backend.fu.PMPRespBundle
@@ -28,7 +29,6 @@ import xiangshan.frontend.ExceptionType
 import xiangshan.frontend.FetchRequestBundle
 import xiangshan.frontend.FtqFetchRequest
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.TwoFetchInfo
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.frontend.ifu.IfuBundle
 
@@ -240,8 +240,11 @@ class MainPipeToIfuIO(implicit p: Parameters) extends ICacheBundle {
 }
 
 class WayLookupToMainPipeBundle(implicit p: Parameters) extends ICacheBundle {
-  val req:           Vec[FtqFetchRequest] = Vec(FetchPorts, new FtqFetchRequest)
-  val wayLookupInfo: Vec[WayLookupBundle] = Vec(FetchPorts, new WayLookupBundle)
+  val wayLookupInfo: Vec[Valid[WayLookupBundle]] = Vec(FetchPorts, Valid(new WayLookupBundle))
+}
+
+class MainPipeToWayLookupBundle(implicit p: Parameters) extends ICacheBundle {
+  val realTwoFetchValid: Bool = Bool()
 }
 
 /* ***** PrefetchPipe ***** */
@@ -249,6 +252,7 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
   val startVAddr:       PrunedAddr    = PrunedAddr(VAddrBits)
   val nextLineVAddr:    PrunedAddr    = PrunedAddr(VAddrBits)
   val isCrossLine:      Bool          = Bool()
+  val takenCfiOffset:   UInt          = UInt(CfiPositionWidth.W)
   val ftqIdx:           FtqPtr        = new FtqPtr
   val backendException: ExceptionType = new ExceptionType
   val isSoftPrefetch:   Bool          = Bool()
@@ -257,6 +261,7 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
     startVAddr       := req.vaddr
     nextLineVAddr    := DontCare
     isCrossLine      := false.B // prefetch only one line for a prefetch.i instruction
+    takenCfiOffset   := 0.U
     ftqIdx           := DontCare
     backendException := ExceptionType.None
     isSoftPrefetch   := true.B
@@ -273,6 +278,8 @@ class PrefetchReqBundle(implicit p: Parameters) extends ICacheBundle {
  */
 class WayLookupEntry(implicit p: Parameters) extends ICacheBundle {
   val vSetIdx:     Vec[UInt] = Vec(PortNumber, UInt(idxBits.W))
+  val bankSel:     Vec[UInt] = Vec(PortNumber, UInt(DataBanks.W))
+  val isCrossLine: Bool      = Bool()
   val waymask:     Vec[UInt] = Vec(PortNumber, UInt(nWays.W))
   val maybeRvcMap: Vec[UInt] = Vec(PortNumber, UInt(MaxInstNumPerBlock.W))
   val metaCodes:   Vec[UInt] = Vec(PortNumber, UInt(MetaEccBits.W))
@@ -419,21 +426,22 @@ class WayLookupPerfInfo(implicit p: Parameters) extends ICacheBundle {
   val empty: Bool = Bool()
 }
 
-class PrefetchToFtqBundle(implicit p: Parameters) extends ICacheBundle {
-  val ftqIdx:       FtqPtr                   = new FtqPtr
-  val twoFetchInfo: Vec[Valid[TwoFetchInfo]] = Vec(2, Valid(new TwoFetchInfo))
-}
-
 class ICacheToFtqIO(implicit p: Parameters) extends ICacheBundle {
-  val fromPrefetch:  Valid[PrefetchToFtqBundle] = Valid(new PrefetchToFtqBundle)
-  val fromWayLookup: WayLookupToFtqBundle       = Output(new WayLookupToFtqBundle)
+  val fromMainPipe: MainPipeToFtqBundle = Output(new MainPipeToFtqBundle)
 }
 
-class WayLookupToFtqBundle(implicit p: Parameters) extends ICacheBundle {
+object TwoFetchFailReason extends EnumUInt(4) {
+  def NoMeta:           UInt = 0.U(width.W)
+  def DataConflict:     UInt = 1.U(width.W)
+  def HasMmio:          UInt = 2.U(width.W)
+  def HasItlbException: UInt = 3.U(width.W)
+
+  def apply(noMeta: Bool, dataConflict: Bool, hasMmio: Bool, hasItlbException: Bool): UInt =
+    PriorityEncoder(Seq(noMeta, dataConflict, hasMmio, hasItlbException))
+}
+
+class MainPipeToFtqBundle(implicit p: Parameters) extends ICacheBundle {
   val realTwoFetchValid: Bool = Bool()
 
-  val perf_canNotServeTwoMeta:   Bool = Bool()
-  val perf_dataSramReadConflict: Bool = Bool()
-  val perf_hasMmio:              Bool = Bool()
-  val perf_hasItlbException:     Bool = Bool()
+  val perf_twoFetchFailReason: UInt = TwoFetchFailReason()
 }

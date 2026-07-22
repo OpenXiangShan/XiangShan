@@ -59,6 +59,7 @@ import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.icache.ICacheCacheLineHelper
 import xiangshan.frontend.icache.ICacheToFtqIO
+import xiangshan.frontend.icache.TwoFetchFailReason
 
 class Ftq(implicit p: Parameters) extends FtqModule
     with HalfAlignHelper
@@ -218,8 +219,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
     val twoPrefetchValid = io.toICache.toPrefetch.bits.twoPrefetchCase.valid
     pfPtr := Mux(twoPrefetchValid, pfPtr + 2.U, pfPtr + 1.U)
   }
-  when(io.toICache.toWayLookup.fire) {
-    fetchPtr := Mux(io.fromICache.fromWayLookup.realTwoFetchValid, fetchPtr + 2.U, fetchPtr + 1.U)
+  when(io.toICache.toMainPipe.fire) {
+    fetchPtr := Mux(io.fromICache.fromMainPipe.realTwoFetchValid, fetchPtr + 2.U, fetchPtr + 1.U)
   }
 
   // TODO: wait for Ifu/ICache to remove bpu s2 flush
@@ -278,6 +279,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     req.startVAddr       := prefetchReq(i).startVAddr
     req.nextLineVAddr    := req.startVAddr + blockBytes.U
     req.isCrossLine      := prefetchReq(i).isCrossLine
+    req.takenCfiOffset   := prefetchReq(i).takenCfiOffset
     req.ftqIdx           := pfPtr(i)
     req.backendException := Mux(backendExceptionPtr === pfPtr(i), backendException, ExceptionType.None)
     req.isSoftPrefetch   := false.B
@@ -300,16 +302,14 @@ class Ftq(implicit p: Parameters) extends FtqModule
       backendExceptionPtr === fetchPtr(0) || backendExceptionPtr === fetchPtr(1)
     ))
 
-  io.toICache.toWayLookup.valid := bpuPtr(0) > fetchPtr(0) && !redirect.valid &&
+  io.toICache.toMainPipe.valid := bpuPtr(0) > fetchPtr(0) && !redirect.valid &&
     distanceBetween(fetchPtr(0), commitPtr(0)) < (FtqSize - 1).U
-  io.toICache.toWayLookup.bits.req.zipWithIndex.foreach { case (req, i) =>
+  io.toICache.toMainPipe.bits.req.zipWithIndex.foreach { case (req, i) =>
     req.valid               := (if (i == 0) true.B else rawTwoFetchValid)
     req.startVAddr          := fetchReq(i).startVAddr
     req.nextLineVAddr       := fetchReq(i).nextLineVAddr
-    req.takenCfiOffset      := entryQueue(fetchPtr(i).value).takenCfiOffset
-    req.isCrossLine         := fetchReq(i).isCrossLine
+    req.takenCfiOffset      := fetchReq(i).takenCfiOffset
     req.ftqIdx              := fetchPtr(i)
-    req.bankSel             := fetchReq(i).bankSel
     req.vSetIdx             := fetchReq(i).vSetIdx
     req.hasBackendException := backendException.hasException && backendExceptionPtr === fetchPtr(i)
   }
@@ -694,30 +694,26 @@ class Ftq(implicit p: Parameters) extends FtqModule
   )
   XSPerfAccumulate(
     "total_fetch",
-    io.toICache.toWayLookup.fire
+    io.toICache.toMainPipe.fire
   )
   XSPerfAccumulate(
     "1fetch",
-    io.toICache.toWayLookup.fire && !io.fromICache.fromWayLookup.realTwoFetchValid
+    io.toICache.toMainPipe.fire && !io.fromICache.fromMainPipe.realTwoFetchValid
   )
   XSPerfAccumulate(
     "2fetch",
-    io.toICache.toWayLookup.fire && io.fromICache.fromWayLookup.realTwoFetchValid
+    io.toICache.toMainPipe.fire && io.fromICache.fromMainPipe.realTwoFetchValid
   )
   XSPerfSeqAccumulate(
     "2fetch_fail_reason",
-    io.toICache.toWayLookup.fire && !io.fromICache.fromWayLookup.realTwoFetchValid,
+    io.toICache.toMainPipe.fire && !io.fromICache.fromMainPipe.realTwoFetchValid,
     Seq(
       ("fb_not_enough", distanceBetween(bpuPtr(0), fetchPtr(0)) <= 3.U),
       ("fb1_exception", backendException.hasException && backendExceptionPtr === fetchPtr(0)),
       ("fb2_exception", backendException.hasException && backendExceptionPtr === fetchPtr(1)),
       ("total_size", (fetchReq(0).size +& fetchReq(1).size) > FetchBlockInstNum.U),
-      ("page_conflict", fetchReq(0).vPageNumber =/= fetchReq(1).vPageNumber),
-      ("can_not_serve_two_meta", io.fromICache.fromWayLookup.perf_canNotServeTwoMeta),
-      ("sram_conflict", io.fromICache.fromWayLookup.perf_dataSramReadConflict),
-      ("has_mmio", io.fromICache.fromWayLookup.perf_hasMmio),
-      ("has_itlb_exception", io.fromICache.fromWayLookup.perf_hasItlbException)
-    ),
+      ("page_conflict", fetchReq(0).vPageNumber =/= fetchReq(1).vPageNumber)
+    ) ++ TwoFetchFailReason.getValidSeq(io.fromICache.fromMainPipe.perf_twoFetchFailReason),
     withPriority = true
   )
 }

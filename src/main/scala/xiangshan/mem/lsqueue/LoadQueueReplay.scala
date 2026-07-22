@@ -213,7 +213,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     // queue-based replay
     val replay = Vec(LoadPipelineWidth, Decoupled(new LoadReplayIO))
 
-    val loadWakeup = Flipped(ValidIO(new DCacheLoadWakeup()))
+    val loadWakeup = Flipped(Vec(cfg.numMemChannels, ValidIO(new DCacheLoadWakeup())))
 
     // from StoreQueue
     val stAddrReadySqPtr = Input(new SqPtr)
@@ -232,7 +232,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val ldWbPtr = Input(new LqPtr)
     val rarFull = Input(Bool())
     val rawFull = Input(Bool())
-    val l2_hint  = Input(Valid(new L2ToL1Hint()))
+    val l2_hint  = Input(Vec(cfg.numMemChannels, Valid(new L2ToL1Hint())))
     val tlb_hint = Flipped(new TlbHintIO)
     val tlbReplayDelayCycleCtrl = Vec(4, Input(UInt(ReSelectLen.W)))
 
@@ -376,6 +376,36 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val lqIdxMatchNc = VecInit((0 until LoadQueueReplaySize).map { i =>
     io.ncWakeup.valid && io.ncWakeup.bits === uop(i).lqIdx
   })
+  private def tlDChannelHit(mshrId: UInt): Bool = {
+    VecInit(io.loadWakeup.map(ch => ch.valid && ch.bits.mshrId === mshrId)).asUInt.orR
+  }
+
+  private val tlDChannelLastCycleValid = RegNext(
+    VecInit(io.loadWakeup.map(_.valid)),
+    0.U.asTypeOf(Vec(cfg.numMemChannels, Bool()))
+  )
+  private val tlDChannelLastCycleMshrId = RegNext(
+    VecInit(io.loadWakeup.map(_.bits.mshrId)),
+    0.U.asTypeOf(Vec(cfg.numMemChannels, UInt(log2Up(cfg.nMissEntries).W)))
+  )
+
+  private def tlDChannelHitLastCycle(mshrId: UInt): Bool = {
+    VecInit((0 until cfg.numMemChannels).map(i => tlDChannelLastCycleValid(i) && tlDChannelLastCycleMshrId(i) === mshrId)).asUInt.orR
+  }
+
+  private def l2HintMatchVec(mshrId: UInt): Seq[Bool] = {
+    io.l2_hint.map(hint => hint.valid && hint.bits.sourceId === mshrId)
+  }
+
+  private def l2HintHit(mshrId: UInt): Bool = {
+    VecInit(l2HintMatchVec(mshrId)).asUInt.orR
+  }
+
+  private def l2HintIsKeyword(mshrId: UInt): Bool = {
+    val matchVec = l2HintMatchVec(mshrId)
+    assert(PopCount(VecInit(matchVec)) <= 1.U, "multiple l2_hint hits for one replay entry")
+    Mux(VecInit(matchVec).asUInt.orR, Mux1H(matchVec.zip(io.l2_hint.map(_.bits.isKeyword))), false.B)
+  }
 
   val storeAddrWakeupCancelVec = VecInit((0 until LoadQueueReplaySize).map(i =>
     allocated(i) && cause(i)(LoadReplayCauses.C_MA) &&
@@ -387,6 +417,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   ))
   val storeAddrWakeupCount = PopCount((0 until LoadQueueReplaySize).map(i => storeAddrWakeupVec(i).asUInt.orR && allocated(i)))
   val storeDataWakeupCount = PopCount((0 until LoadQueueReplaySize).map(i => storeDataWakeupVec(i).asUInt.orR && allocated(i)))
+
   // update blocking condition
   (0 until LoadQueueReplaySize).map(i => {
     // case C_MA
@@ -405,7 +436,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     }
     // case C_DM
     when (cause(i)(LoadReplayCauses.C_DM)) {
-      blocking(i) := Mux(io.loadWakeup.valid && io.loadWakeup.bits.mshrId === missMSHRId(i), false.B, blocking(i))
+      blocking(i) := Mux(tlDChannelHit(missMSHRId(i)), false.B, blocking(i))
     }
     // case C_RAR
     when (cause(i)(LoadReplayCauses.C_RAR)) {
@@ -490,15 +521,17 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   // l2 hint wakes up cache missed load
   // l2 will send GrantData in next 2/3 cycle, wake up the missed load early and sent them to load pipe, so them will hit the data in D channel or mshr in load S1
   val s0_loadHintWakeMask = VecInit((0 until LoadQueueReplaySize).map(i => {
-    allocated(i) && !scheduled(i) && cause(i)(LoadReplayCauses.C_DM) && blocking(i) && missMSHRId(i) === io.l2_hint.bits.sourceId && io.l2_hint.valid
+    allocated(i) && !scheduled(i) && cause(i)(LoadReplayCauses.C_DM) && blocking(i) && l2HintHit(missMSHRId(i))
   })).asUInt
   // l2 will send 2 beats data in 2 cycles, so if data needed by this load is in first beat, select it this cycle, otherwise next cycle
   // when isKeyword = 1, s0_loadHintSelMask need overturn
-    val s0_loadHintSelMask = Mux(
-     io.l2_hint.bits.isKeyword,
-     s0_loadHintWakeMask & dataInLastBeatReg.asUInt,
-     s0_loadHintWakeMask & VecInit(dataInLastBeatReg.map(!_)).asUInt
-     )
+    val s0_loadHintSelMask = VecInit((0 until LoadQueueReplaySize).map(i => {
+      s0_loadHintWakeMask(i) && Mux(
+        l2HintIsKeyword(missMSHRId(i)),
+        dataInLastBeatReg(i),
+        !dataInLastBeatReg(i)
+      )
+    })).asUInt
   val s0_remLoadHintSelMask = VecInit((0 until LoadPipelineWidth).map(rem => getRemBits(s0_loadHintSelMask)(rem)))
   val s0_remHintSelValidVec = VecInit((0 until LoadPipelineWidth).map(rem => ParallelORR(s0_remLoadHintSelMask(rem))))
   val s0_hintSelValid = ParallelORR(s0_loadHintSelMask)
@@ -561,6 +594,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   val s0_remOldestSelOH = (0 until LoadPipelineWidth).map(rem =>
     Mux(s0_remOldestMatch(rem), PriorityEncoderOH(s0_remOldestMatchMask(rem)), PriorityEncoderOH(s0_remOlderMatchMask(rem)))
   )
+  val s0_remOldestHintSelVec = s0_remOldestSelVec.zip(s0_remLoadHintSelMask).map {
+    case(oldestVec, hintVec) => oldestVec & hintVec
+  }
 
   // select oldest logic
   s0_oldestSel := VecInit((0 until LoadPipelineWidth).map(rport => {
@@ -571,9 +607,9 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
     val ageOldestIndexOH = ageOldest.bits
 
     // select program order oldest
-    val l2HintFirst = io.l2_hint.valid && s0_remOldestHintSel(rport)
-    val issOldestValid = l2HintFirst || s0_remOldestMatch(rport) || s0_remOlderMatch(rport)
-    val issOldestIndexOH = Mux(l2HintFirst, s0_remOldestHintSelOH(rport), s0_remOldestSelOH(rport))
+    val l2HintFirst = ParallelORR(s0_remOldestHintSelVec(rport))
+    val issOldestValid = l2HintFirst || ParallelORR(s0_remOldestSelVec(rport))
+    val issOldestIndexOH = Mux(l2HintFirst, PriorityEncoderOH(s0_remOldestHintSelVec(rport)), PriorityEncoderOH(s0_remOldestSelVec(rport)))
 
     val oldest = Wire(Valid(UInt()))
     val oldestSel = Mux(issOldestValid, issOldestIndexOH, ageOldestIndexOH)
@@ -811,9 +847,12 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
 
       // special case: dcache miss
       when (replayInfo.cause(LoadReplayCauses.C_DM) && enq.bits.handledByMSHR) {
+        val tlDHitThisCycle = tlDChannelHit(replayInfo.mshr_id)
+        val tlDHitLastCycle = tlDChannelHitLastCycle(replayInfo.mshr_id)
         blocking(enqIndex) := !replayInfo.full_fwd && //  dcache miss
-                              !(io.loadWakeup.valid && io.loadWakeup.bits.mshrId === replayInfo.mshr_id) && // no refill in this cycle
-                              !(RegNext(io.loadWakeup.valid) && RegNext(io.loadWakeup.bits.mshrId) === replayInfo.mshr_id) // no refill in last cycle
+                              !tlDHitThisCycle && // no refill in this cycle
+                              !tlDHitLastCycle // not refill in last cycle
+
       }
 
       // extra info
@@ -959,7 +998,7 @@ class LoadQueueReplay(implicit p: Parameters) extends XSModule
   XSPerfAccumulate("replay_forward_fail", replayForwardFailCount)
   XSPerfAccumulate("replay_dcache_miss", replayDCacheMissCount)
   XSPerfAccumulate("replay_hint_wakeup", s0_hintSelValid)
-  XSPerfAccumulate("replay_hint_priority_beat1", io.l2_hint.valid && io.l2_hint.bits.isKeyword)
+  XSPerfAccumulate("replay_hint_priority_beat1", PopCount(VecInit(io.l2_hint.map(hint => hint.valid && hint.bits.isKeyword))))
   XSPerfAccumulate("replay_storeQueue_multi_match", replayMultiMatchCount)
   XSPerfAccumulate("replay_store_addr_wakeup", storeAddrWakeupCount)
   XSPerfAccumulate("replay_store_data_wakeup", storeDataWakeupCount)

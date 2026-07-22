@@ -35,22 +35,16 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheDa
   /* *** read *** */
   private val r0_valid = io.read.req.valid
   private val r0_req   = io.read.req.bits
-  dontTouch(r0_req)
 
   io.read.req.ready := banks.map(_.io.read.req.ready).reduce(_ && _)
 
   // Save req->(bank, way) ownership to route SRAM response back per-req in the next cycle.
   private val r0_reqPerBankWayMask = Wire(Vec(MaxFetchReqNum, Vec(DataBanks, UInt(nWays.W))))
-  dontTouch(r0_reqPerBankWayMask)
 
   banks.zipWithIndex.foreach { case (bank, bankIdx) =>
     val reqReadBankValid = Wire(Vec(MaxFetchReqNum, Bool())).suggestName(s"bank_${bankIdx}_reqReadBankValid")
     val reqReadSetIdx    = Wire(Vec(MaxFetchReqNum, UInt(idxBits.W))).suggestName(s"bank_${bankIdx}_reqReadSetIdx")
     val reqReadWayValid  = Wire(Vec(MaxFetchReqNum, UInt(nWays.W))).suggestName(s"bank_${bankIdx}_reqReadWayValid")
-
-    dontTouch(reqReadBankValid)
-    dontTouch(reqReadSetIdx)
-    dontTouch(reqReadWayValid)
 
     (0 until MaxFetchReqNum).foreach { i =>
       val lineSelOH = Cat(r0_req(i).bits.bankSel(1)(bankIdx), r0_req(i).bits.bankSel(0)(bankIdx))
@@ -67,9 +61,6 @@ class ICacheDataArray(implicit p: Parameters) extends ICacheModule with ICacheDa
 
     val perWayReadValid  = Wire(Vec(nWays, Bool())).suggestName(s"bank_${bankIdx}_perWayReadValid")
     val perWayReadSetIdx = Wire(Vec(nWays, UInt(idxBits.W))).suggestName(s"bank_${bankIdx}_perWayReadSetIdx")
-
-    dontTouch(perWayReadValid)
-    dontTouch(perWayReadSetIdx)
 
     (0 until nWays).foreach { wayIdx =>
       val reqSel = VecInit((0 until MaxFetchReqNum).map(reqIdx => reqReadWayValid(reqIdx)(wayIdx)))

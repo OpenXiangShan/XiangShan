@@ -176,8 +176,6 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   prefetcher.io.fromFtq.bits        := io.fromFtq.toPrefetch.bits
   prefetcher.io.fromFtq.bits.req(0) := Mux(softPrefetchValid, softPrefetch, io.fromFtq.toPrefetch.bits.req(0))
   io.fromFtq.toPrefetch.ready       := prefetcher.io.fromFtq.ready && !softPrefetchValid
-  io.toFtq.fromPrefetch             := prefetcher.io.toFtq
-  io.toFtq.fromWayLookup            := wayLookup.io.toFtq
 
   missUnit.io.hartId := io.hartId
   missUnit.io.fencei := io.fencei
@@ -194,11 +192,13 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   mainPipe.io.eccEnable    := eccEnable
   mainPipe.io.hartId       := io.hartId
   mainPipe.io.missResp     := missUnit.io.resp
+  mainPipe.io.fromFtq <> io.fromFtq.toMainPipe
   mainPipe.io.fromWayLookup <> wayLookup.io.toMainPipe
+  io.toFtq.fromMainPipe := mainPipe.io.toFtq
 
   wayLookup.io.flush        := io.fromFtq.redirectFlush
   wayLookup.io.flushFromBpu := io.fromFtq.flushFromBpu
-  wayLookup.io.fromFtq <> io.fromFtq.toWayLookup
+  wayLookup.io.fromMainPipe := mainPipe.io.toWayLookup
   wayLookup.io.write <> prefetcher.io.wayLookupWrite
   wayLookup.io.update := missUnit.io.resp
 
@@ -212,7 +212,7 @@ class ICacheImp(outer: ICache) extends LazyModuleImp(outer) with HasICacheParame
   io.itlbFlushPipe := prefetcher.io.itlbFlushPipe
 
   // notify IFU that Icache pipeline is available
-  io.toIfu.fetchReady := wayLookup.io.fromFtq.ready
+  io.toIfu.fetchReady := io.fromFtq.toMainPipe.ready
 
   // send final accepted fetch bundle
   io.toIfu.req <> mainPipe.io.toIfu.req
