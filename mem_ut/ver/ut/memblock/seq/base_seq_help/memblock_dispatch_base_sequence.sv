@@ -113,6 +113,9 @@ class memblock_dispatch_base_sequence extends uvm_sequence;
                                                         input main_control_transaction ref_tr,
                                                         input bit copy_addr,
                                                         input string caller);
+    extern virtual function void ensure_normal_reused_addr_span(input main_control_transaction tr,
+                                                                input main_control_transaction ref_tr,
+                                                                input string caller);
     extern virtual function void apply_addr_reuse_window(input main_control_transaction tr,
                                                          input memblock_uid_t cur_uid,
                                                          ref memblock_uid_t recent_load_uid_q[$],
@@ -1606,6 +1609,75 @@ function void memblock_dispatch_base_sequence::set_transaction_ls_kind(input mai
     tr.update_vaddr();
 endfunction:set_transaction_ls_kind
 
+function void memblock_dispatch_base_sequence::ensure_normal_reused_addr_span(input main_control_transaction tr,
+                                                                               input main_control_transaction ref_tr,
+                                                                               input string caller);
+    bit [63:0] base;
+    bit [63:0] upper;
+    bit [63:0] access_end;
+    bit [63:0] ref_end;
+    bit [8:0] fitted_fuOpType;
+    bit [63:0] range;
+    int unsigned size_bytes;
+    int unsigned ref_size_bytes;
+
+    if (tr == null) begin
+        `uvm_fatal(get_type_name(), $sformatf("%s got null transaction", caller))
+    end
+    if (seq_csr_common::get_boundary_profile_gen_en()) begin
+        return;
+    end
+
+    base  = seq_csr_common::get_main_vaddr_base();
+    range = seq_csr_common::get_main_vaddr_range();
+    upper = base + range - 1;
+    tr.update_vaddr();
+    size_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+    if (size_bytes == 0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s uid=%0d cannot derive final access size op_class=%s fuOpType=0x%0h",
+                             caller, tr.uid, op_class_name(tr.op_class), tr.fuOpType))
+    end
+    access_end = tr.vaddr + size_bytes - 1;
+    if (tr.vaddr >= base && access_end >= tr.vaddr && access_end <= upper) begin
+        return;
+    end
+
+    if (ref_tr == null) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s uid=%0d final address span is outside MAIN_VADDR and has no reference",
+                             caller, tr.uid))
+    end
+    ref_tr.update_vaddr();
+    ref_size_bytes = derive_size_bytes(ref_tr.op_class, ref_tr.fuOpType);
+    if (ref_size_bytes == 0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s ref uid=%0d has invalid access size", caller, ref_tr.uid))
+    end
+    ref_end = ref_tr.vaddr + ref_size_bytes - 1;
+    if (ref_tr.vaddr < base || ref_end < ref_tr.vaddr || ref_end > upper) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s ref uid=%0d address span is outside MAIN_VADDR",
+                             caller, ref_tr.uid))
+    end
+
+    // A copied reference address remains authoritative; only shrink an incompatible
+    // randomly selected scalar access to a legal opcode with the reference size.
+    fitted_fuOpType = default_fuop_by_op_class_and_size(tr.op_class, ref_size_bytes);
+    apply_op_class_template(tr, fitted_fuOpType);
+    tr.update_vaddr();
+    size_bytes = derive_size_bytes(tr.op_class, tr.fuOpType);
+    access_end = tr.vaddr + size_bytes - 1;
+    if (tr.vaddr < base || access_end < tr.vaddr || access_end > upper) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("%s uid=%0d could not fit reused address span vaddr=0x%0h size=%0d",
+                             caller, tr.uid, tr.vaddr, size_bytes))
+    end
+    `uvm_info(get_type_name(),
+              $sformatf("%s uid=%0d fitted reused access to ref_size=%0d", caller, tr.uid, ref_size_bytes),
+              UVM_HIGH)
+endfunction:ensure_normal_reused_addr_span
+
 function void memblock_dispatch_base_sequence::fixup_after_addr_reuse(input main_control_transaction tr,
                                                                       input main_control_transaction ref_tr,
                                                                       input bit copy_addr,
@@ -1621,6 +1693,9 @@ function void memblock_dispatch_base_sequence::fixup_after_addr_reuse(input main
         tr.imm   = ref_tr.imm;
     end
     tr.update_vaddr();
+    if (copy_addr) begin
+        ensure_normal_reused_addr_span(tr, ref_tr, caller);
+    end
     validate_main_table_entry(tr, caller);
 endfunction:fixup_after_addr_reuse
 
@@ -1684,7 +1759,14 @@ function void memblock_dispatch_base_sequence::apply_addr_reuse_window(input mai
         fallback_caller = $sformatf("%s fallback uid=%0d", caller_prefix, cur_uid);
         tr.op_class = fallback_op_class;
         apply_minimal_op_template(tr);
-        fixup_after_addr_reuse(tr, null, 1'b0, fallback_caller);
+        if (seq_csr_common::get_boundary_profile_gen_en()) begin
+            fixup_after_addr_reuse(tr, null, 1'b0, fallback_caller);
+        end else begin
+            // No address relationship exists without a reference; regenerate a legal
+            // address after the fallback operation type has been selected.
+            apply_legal_addr_template(tr);
+            validate_main_table_entry(tr, fallback_caller);
+        end
         return;
     end
 

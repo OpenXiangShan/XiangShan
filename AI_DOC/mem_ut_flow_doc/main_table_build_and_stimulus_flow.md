@@ -57,8 +57,9 @@ flowchart TD
     M --> N["apply_addr_reuse_window"]
     N --> N1{"reuse enabled and recent ref exists?"}
     N1 -->|yes| N2["set_transaction_ls_kind + copy ref src_0/imm"]
-    N1 -->|fallback/no| N3["keep legal generated addr or switch LS kind only"]
-    N2 --> O["data.set_main_transaction"]
+    N2 --> N2A["normal: ensure final access span;必要时收敛到 ref size"]
+    N1 -->|fallback/no| N3["normal:按最终类型重新选合法地址；boundary保留原地址"]
+    N2A --> O["data.set_main_transaction"]
     N3 --> O
     O --> P["push_recent_uid"]
     P --> Q["rob_order_util::rob_advance"]
@@ -691,9 +692,10 @@ load-after-store、store-after-load等地址相关场景。TLB entry物理映射
 
 ```text
 apply_legal_addr_template:
-  计算 paddr base/range 的 64B 对齐槽；
-  随机选择一个槽；
-  写 src_0，imm=0，更新 vaddr；
+  读取 MAIN_VADDR base/range，并检查完整访问跨度；
+  计算窗口内可容纳该访问的 64B 对齐起始槽；
+  随机选择一个合法槽，写 src_0、清 imm，并更新 vaddr；
+  PADDR base/range只留给后续TLB entry物理映射；
 
 choose_addr_ref_window:
   如果 fixed_window>0，直接使用；
@@ -706,8 +708,9 @@ apply_addr_reuse_window:
   如果引用队列有历史 uid：
     取 ref_tr，必要时 set_transaction_ls_kind，把当前改成 load 或 store；
     copy ref_tr.src_0/ref_tr.imm，并 update_vaddr；
+    normal 路径检查最终访问跨度；如果随机新尺寸越过 MAIN_VADDR 窗口，保留复制地址并选择与 ref size 相同的合法 opcode；
   如果引用队列为空：
-    走 fallback，可能只切换 load/store 类型，不复制地址；
+    走 fallback；normal 路径在最终类型确定后重新调用 legal address template，boundary 路径不受 MAIN_VADDR 拦截；
   validate_main_table_entry 复核改写后的 transaction。
 ```
 
@@ -716,7 +719,8 @@ apply_addr_reuse_window:
 - `prune_recent_uid_q()`：删除 `cur_uid - old_uid > addr_ref_window` 的历史 uid。
 - `random_pick_recent_uid()`：从历史队列随机选引用 uid，部分模式会删除被引用 uid。
 - `set_transaction_ls_kind()`：把当前 transaction 切成 load 或 store 模板。
-- `fixup_after_addr_reuse()`：复制地址并做合法性检查。
+- `fixup_after_addr_reuse()`：复制地址、调用 normal 最终跨度收口并做合法性检查。
+- `ensure_normal_reused_addr_span()`：只在 normal 复制地址场景收敛越界访问大小，不改变地址复用关系。
 
 ## 11. `randomize_send_pri_value()`
 

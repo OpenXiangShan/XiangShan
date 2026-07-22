@@ -49,7 +49,7 @@ test -e build_memblock/rtl/filelist.f
 |---|---|
 | 既有 compile 参数、宽度、FuType、ROB/LQ/SQ key | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_compile_param_and_width_adapt_execution_plan_20260708.md`，该范围已归档完成，只作为公共基线 |
 | SQ deq/cancel count width 与 redirect/cancel latency compile delta | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`；在统一compile header新增宏和派生检查，是这些未实现参数的唯一coding owner，不回写到已归档`do` plan |
-| 自动主表 VADDR 窗口 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_main_table_vaddr_generation_adapt_execution_plan_20260713.md` |
+| 自动主表 VADDR 窗口 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_main_table_vaddr_generation_adapt_execution_plan_20260713.md`，源码审计、地址复用跨度修复、远端验证和两轮独立 review 已完成 |
 | DCache 轻量 L2 response/hint/Probe，flush_done zero-only | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md` |
 | LSQ enqueue | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`，coding、文档同步、冻结验证和最终独立review均已完成；真实load已闭环，store admission已覆盖，store终态仍由后续SQ deq专项闭环 |
 | split issue、vector stimulus/driver gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_split_issue_framework_adapt_execution_plan_20260708.md`；只拥有vecissue默认入口关闭和driver valid fatal，不修改vector output monitor |
@@ -64,6 +64,17 @@ test -e build_memblock/rtl/filelist.f
 本文对已有 owner 的问题只给出总控级摘要。coding 时以对应专项 owner 的文件清单和函数合同为准，
 不得从本文自行扩展修改范围。owner 表明确标为“当前没有子 plan coding owner”的内容只登记缺口，
 不属于可执行 coding 方案。
+
+### 2.1 子计划执行记录
+
+| 子计划 | 状态 | 本功能记录 | Review/验证 |
+|---|---|---|---|
+| compile 参数与宽度适配 | 已完成并归档 | 建立 V2 compile profile 单一真源，参数化 ROB/LQ/SQ key、FuType、物理 slot/port/capability，并移除硬件结构 runtime plus 镜像。 | 以 `plan/do/mem_ut_v2_compile_param_and_width_adapt_execution_plan_20260708.md` 的归档记录为准。 |
+| LSQ enqueue 适配 | 已完成并归档 | 完成 V2 6-slot、load/store 6/4 过滤、完整 enqueue 字段、无 response 的 clock-first streaming、launch reservation 与下一采样边界 issue-ready。 | 以 `plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md` 及对应 implementation review 为准。 |
+| 自动主表 VADDR 窗口 | 已完成并归档 | 自动 normal 主表改用独立 `MAIN_VADDR` 参数，初始化时拒绝非法 Sv39 正规范窗口，按完整访问跨度选择 64B 对齐虚拟地址；地址复用最终尺寸越界时保留参考地址并按 ref size 收敛合法 opcode，无参考 fallback 按最终类型重新选址；TLB builder 的 PADDR 映射保持独立。 | 干净远端编译通过；默认及 VA/PA 不同窗口的 smoke 通过；窄窗口场景实际触发 helper，后续 SQ deq mismatch 已明确归属后续 owner；第二轮独立 review 通过。review 位于 `review_doc/do/mem_ut_v2_main_table_vaddr_generation_adapt_implementation_review_20260721.md`。 |
+
+后续每完成一个子计划，必须在本表追加其实际功能、归档路径和验证结果，并保持每个子计划一个独立
+本地 git commit。
 
 ## 3. 问题一：V2/V3 编译期结构仍可能存在第二权威
 

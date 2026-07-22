@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待 coding |
+| 状态 | `do`，coding、修复、验证和独立 review 已完成 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | 测试框架入口 | `memblock_dispatch_base_sequence::apply_legal_addr_template()` |
@@ -303,3 +303,65 @@ MEMBLOCK_PADDR_RANGE      = 0x0000000010000000
 - 本 plan 不扩展 Sv48 高地址、negative canonical 或 non-canonical fault；这些需要后续 directed 地址专项。
 - manual directed 和 boundary profile 不受 `MEMBLOCK_MAIN_VADDR_*` 全局拦截，后续如果要统一边界地址策略，需要单独 plan。
 - 本 plan 只整理执行方案，不在本文档阶段执行编译或仿真。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### 当前源码已提前实现
+
+```text
+来源：执行前对当前分支和历史commit进行审计。
+原plan：状态为待coding，要求新增MAIN_VADDR参数链、合法性检查和地址生成逻辑。
+实现调整：上述SystemVerilog逻辑已由22732ba476提前实现，本执行单元不重复重写，只做逐项源码审计、验证、review和归档。
+原因：避免为制造diff改写已经符合plan的主体逻辑。
+影响范围：不新增运行期行为；最终review必须逐项记录已有实现证据和历史来源。
+```
+
+### 同步过时 flow/analysis 描述
+
+```text
+来源：执行中静态搜索发现当前有效文档仍残留PADDR生成虚拟地址的旧伪代码。
+原plan：第1章将flow文档列为本轮不修改。
+实现调整：修正main_table_build_and_stimulus_flow.md、memblock_dispatch_base_sequence.md、
+memblock_dispatch_control_flow_callgraph.md及两份callgraph app.js中的过时地址来源描述。
+原因：plan执行规则要求当前flow/analysis文档与源码一致；保留旧描述会让后续review误判VADDR/PADDR仍耦合。
+影响范围：仅文档同步，不改变主表、TLB、LSQ、issue、pass/fail或terminal行为。
+```
+
+### 执行验证入口修正
+
+```text
+来源：执行远端动态验证时发现tc_sanity/default的virtual_base_sequence为空，不创建主表。
+原plan：使用tc_sanity/default作为本专项动态验收入口。
+实现调整：保留干净eda_compile编译验收；动态验收改用现有tc_dispatch_real_smoke及同名cfg，直接覆盖自动建表和完整load闭环。
+原因：tc_sanity/default只验证环境可拉起，不是主表flow testcase；使用它会让LSQ responder等待main_trans_num，而不能验证VADDR生成。
+影响范围：只修正验收入口，不修改testcase、sequence或运行期行为。
+执行结果：默认窗口及MAIN_VADDR/PADDR不同窗口的tc_dispatch_real_smoke均通过，TEST CASE PASSED，
+UVM_WARNING=0，UVM_ERROR=0，UVM_FATAL=0；不同窗口运行处于Bare场景，只证明MAIN_VADDR独立生效，
+不宣称动态覆盖translated PPN路径。
+```
+
+### 首轮 review 修复：地址复用后的最终跨度
+
+```text
+来源：独立 review 检查到 apply_legal_addr_template() 先于 apply_addr_reuse_window() 执行；地址复用可能
+把最终 load/store 访问尺寸改大，而原实现只校验了复用前的尺寸。
+问题场景：MAIN_VADDR 窗口末端只剩 1..7 个字节时，参考 transaction 的对齐地址对小尺寸合法，复用后
+随机出的更大尺寸可能越过窗口。
+实现调整：新增 ensure_normal_reused_addr_span()，由 fixup_after_addr_reuse() 在复制地址后调用。
+如果最终跨度已合法，保持原 transaction；如果越界，保留参考 src_0/imm 和地址复用关系，使用
+default_fuop_by_op_class_and_size() 按参考 transaction 的访问尺寸收敛目标 load/store fuOpType。
+无参考 fallback：normal 路径在 fallback 类型确定后重新调用 apply_legal_addr_template()；boundary 路径
+继续保留原地址，不消费 MAIN_VADDR。
+原因：修正最终 transaction 而不是只修正生成前 transaction，避免窄窗口随机配置产生 DUT 非法地址；
+同时不引入第二个地址复用队列或改变 boundary/manual 语义。
+影响范围：normal 主表的极端窗口地址复用和 fallback 合法化；不改变主表顺序、TLB PADDR consumer、
+LSQ/issue/WB/commit/deq/pass/fail/terminal 控制。
+```
+
+### 最终复审结果
+
+```text
+第二轮独立 subagent review 已完成，结论为“最终 review 通过，无强制修改项”。
+确认范围：helper 调用顺序、normal fallback 重新合法化、复制地址越界时按 ref size 收敛、
+boundary/manual 隔离、文档伪代码和总控 owner 路径均无遗漏。
+```

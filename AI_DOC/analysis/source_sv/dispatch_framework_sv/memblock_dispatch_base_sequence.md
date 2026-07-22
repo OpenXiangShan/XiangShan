@@ -54,7 +54,7 @@
 |---|---|---|---|
 | 初始化 | `pre_body()` | plus 参数、UVM factory、已有公共单例 | 初始化 `seq_csr_common`，绑定 `data` 和各 helper。 |
 | 主表准备 | `build_main_table()` | `seq_csr_common::get_use_manual_main_table()`、手动表或随机权重 | 填充 `main_table_by_uid[]`、`status_by_uid[]`，检查主表完整性。 |
-| 地址相关性注入 | `apply_addr_reuse_window()` | recent load/store uid queue、uid窗口、地址复用权重 | 在主表生成期修正当前 transaction 类型并可复制窗口内参考地址。 |
+| 地址相关性注入 | `apply_addr_reuse_window()` | recent load/store uid queue、uid窗口、地址复用权重 | 在主表生成期修正当前 transaction 类型并可复制窗口内参考地址；normal 路径最终再检查访问跨度。 |
 | issue route 服务 | `route_all_issue_queues()` | 公共状态表和 issue queue | 扫描 ready uid 并补充路由；真实 admission 后的 `issue_ready` 设置由 scheduler 核心 helper 完成。 |
 | monitor event 服务 | `collect_*_events()`、`exception_redirect_replay_task()` | monitor raw queue、feedback event queue | 更新 pass/fault/replay/redirect/flush/retire 状态。 |
 
@@ -88,7 +88,7 @@
 | `randomize_main_transaction(tr, uid, rob_key)` | `tr`：待随机 transaction；`uid`：分配好的 uid；`rob_key`：分配好的 ROB key。 | 无返回；直接修改 `tr`。 | 完成单条随机主表 transaction 的所有基础字段：uid/ROB、LQ/SQ 初值、异常默认值、op class、fuType/fuOpType、地址、send priority、delay。最后调用校验。 |
 | `select_op_class_by_weight()` | 无显式参数；读取 int load/fp load/store/prefetch/AMO 权重。 | `memblock_op_class_e`。 | 按 plus 权重选择操作大类。所有权重为 0 时底层 `rand_weighted5()` fatal。 |
 | `apply_minimal_op_template(tr)` | `tr`：已选好 `op_class` 的 transaction。 | 无返回；修改 `tr.fuType/tr.lsq_flow/tr.fuOpType/numLsElem`。 | 根据 op class 套最小合法模板：load/prefetch 走 LDU+LOAD 且 `numLsElem=1`，store 走 STU+STORE 且 `numLsElem=1`，AMO 走 MOU+ATOMIC 且当前 `numLsElem=0`；地址复用改类型时也依赖它清掉旧模板残留。 |
-| `apply_legal_addr_template(tr)` | `tr`：待填地址 transaction。 | 无返回；修改 `tr.src_0/tr.imm/vaddr`。 | 在 `paddr_base/paddr_range` 范围内挑一个 64B 对齐地址，写到 `src_0`，`imm=0`，然后更新 vaddr。 |
+| `apply_legal_addr_template(tr)` | `tr`：待填地址 transaction。 | 无返回；修改 `tr.src_0/tr.imm/vaddr`。 | 在 `MEMBLOCK_MAIN_VADDR_BASE/RANGE` 虚拟地址窗口内挑选能容纳完整访问跨度的 64B 对齐起始地址，写到 `src_0`，清 `imm` 后更新并核对 `vaddr`；PADDR 参数不在该函数消费。 |
 | `random_load_fuoptype()` | 无。 | 9-bit load `fuOpType`。 | 在 LB/LH/LW/LD/LBU/LHU/LWU 中随机选一个。 |
 | `random_store_fuoptype()` | 无。 | 9-bit store `fuOpType`。 | 在 SB/SH/SW/SD 中随机选一个。 |
 | `random_prefetch_fuoptype()` | 无。 | 9-bit prefetch `fuOpType`。 | 在 PREFETCH_I/PREFETCH_R/PREFETCH_W 中随机选一个。 |
@@ -107,7 +107,8 @@
 | `choose_addr_ref_window()` | 无显式参数；读取 fixed/small/medium/large 窗口参数。 | `int unsigned` uid 距离窗口。 | 选择本轮 random main table 的地址复用窗口，最终上限为 `min(MEMBLOCK_LQ_SIZE, MEMBLOCK_SQ_SIZE)`。 |
 | `apply_addr_reuse_window(tr, cur_uid, recent_load_uid_q, recent_store_uid_q)` | 当前 transaction、当前 uid、窗口内 load/store uid queue。 | 无返回；可能修正 `tr.op_class/fuType/fuOpType/lsq_flow/src_0/imm/vaddr`。 | 每个 uid 只随机一次 enable，命中后按四类 after 枚举选择一个参考队列，在主表写入前完成类型修正和地址复制。 |
 | `set_transaction_ls_kind(tr, make_load)` | transaction 和目标 load/store 类型。 | 无返回；修正 op class 和最小合法模板。 | 第一层类型修正 helper，保证 `fuType/fuOpType/lsq_flow/numLsElem` 与最终 load/store 类型一致。 |
-| `fixup_after_addr_reuse(tr, ref_tr, copy_addr, caller)` | 当前 transaction、可选参考 transaction、是否复制地址。 | 无返回；更新 `vaddr` 并校验。 | 第二层复用后 fixup helper，负责复制 `src_0/imm`、重算 `vaddr`，并调用 `validate_main_table_entry()`。 |
+| `fixup_after_addr_reuse(tr, ref_tr, copy_addr, caller)` | 当前 transaction、可选参考 transaction、是否复制地址。 | 无返回；更新 `vaddr` 并校验。 | 第二层复用后 fixup helper，负责复制 `src_0/imm`、重算 `vaddr`；normal 复制地址时调用 `ensure_normal_reused_addr_span()`，再调用 `validate_main_table_entry()`。 |
+| `ensure_normal_reused_addr_span(tr, ref_tr, caller)` | 当前 transaction、参考 transaction、调用者。 | 无返回；必要时修正最终 `fuOpType`。 | 只用于 normal 自动主表：若复制地址后的随机访问跨度越过 MAIN_VADDR 窗口，则保留参考地址并把目标 load/store opcode 收敛到参考访问大小；boundary/manual 不消费该窗口。 |
 | `prune_recent_uid_q(uid_q, cur_uid, addr_ref_window)` | recent uid queue、当前 uid、窗口。 | 无返回；删除过期 uid。 | 从队头淘汰 `cur_uid - ref_uid > addr_ref_window` 的候选，避免用已经离当前太远的 LSQ entry。 |
 | `random_pick_recent_uid(uid_q, ref_uid, delete_after_pick)` | recent uid queue、输出 ref uid、是否删除。 | `bit`：是否选到候选。 | 从窗口内候选随机取 uid；同类型复用会删除队列项，跨类型复用保留队列项。 |
 | `push_recent_uid(tr, uid, recent_load_uid_q, recent_store_uid_q)` | 最终 transaction 和 uid。 | 无返回；把 uid 推入 load 或 store recent queue。 | 当前项写入主表后按最终类型入队，供后续 uid 使用。 |
