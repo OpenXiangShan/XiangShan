@@ -269,7 +269,7 @@ class StreamBitVectorArray(implicit p: Parameters) extends XSModule with HasStre
 
   val l1_depth_const = Constantin.createRecord(s"streamL1Depth${p(XSCoreParamsKey).HartId}", initValue = 64)
   val l2_depth_const = Constantin.createRecord(s"streamL2Depth${p(XSCoreParamsKey).HartId}", initValue = 640)
-  val l3_depth_const = Constantin.createRecord(s"streamL3Depth${p(XSCoreParamsKey).HartId}", initValue = 640) // l3 is not useful
+  val l3_depth_const = Constantin.createRecord(s"streamL3Depth${p(XSCoreParamsKey).HartId}", initValue = 960) // l3 is not useful
 
   val l1_depth = Wire(UInt(DEPTH_BITS.W))
   val l2_depth = Wire(UInt(DEPTH_BITS.W))
