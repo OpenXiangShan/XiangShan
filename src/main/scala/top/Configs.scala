@@ -414,7 +414,8 @@ case class LLCConfig(llc: String) extends Config((site, here, up) => {
 
 case class ZhuJiangConfig(size: String, ways: Int = 16) extends Config((site, here, up) => {
   case SoCParamsKey =>
-    up(SoCParamsKey).copy(ZhuJiangParams = ZJParameters(
+    val soc = up(SoCParamsKey)
+    soc.copy(ZhuJiangParams = soc.ZhuJiangParams.copy(
       cacheSizeInB = CacheSizeParser.toBytes(size),
       cacheWays = ways
     ))
@@ -570,6 +571,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 
 class DefaultConfig(n: Int = 1) extends Config(
   OpenLLCConfig("16MB", ways = 16, banks = 4)
+    ++ ZhuJiangConfig("16MB", ways = 16)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
     ++ new BaseConfig(n)

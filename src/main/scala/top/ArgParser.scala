@@ -187,11 +187,15 @@ object ArgParser {
           nextOption(config.alter((site, here, up) => {
             case SoCParamsKey =>
               val socParam = up(SoCParamsKey)
+              val sizeInBytes = value.toInt * 1024
               val banks = socParam.L3NBanks
               val openLLCParam = socParam.OpenLLCParamsOpt.map { llc =>
-                llc.copy(sets = value.toInt * 1024 / banks / llc.ways / 64)
+                llc.copy(sets = sizeInBytes / banks / llc.ways / 64)
               }
-              socParam.copy(OpenLLCParamsOpt = openLLCParam)
+              socParam.copy(
+                OpenLLCParamsOpt = openLLCParam,
+                ZhuJiangParams = socParam.ZhuJiangParams.copy(cacheSizeInB = sizeInBytes)
+              )
           }), tail)
         case "--sim-mem-size" :: value :: tail =>
           nextOption(config.alter((site, here, up) => {
