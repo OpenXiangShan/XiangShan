@@ -2,11 +2,16 @@
 
 本文档对应源码：
 
-- `mem_ut/ver/ut/memblock/seq/base_seq/dispatch_monitor_batch_handler.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq_help/dispatch_monitor_batch_handler.sv`
 
 ## 1. 文件定位
 
 `dispatch_monitor_batch_handler` 是 monitor semantic event 的 batch 级仲裁层。adapter 只负责把 raw int writeback、raw IQ feedback、memoryViolation 转成 `memblock_wb_event_t` 并收集到同一个 batch；batch handler 再统一 normalize、过滤 active redirect 覆盖的 stale event，并在同批存在 redirect 时先选择 oldest redirect。
+
+当前调用者在进入本类前固定同一采样batch的事件顺序：先收集IQ raw，再收集int-WB raw，
+最后把memoryViolation转换成redirect event。raw ctrl中的deq先保存为`deferred_ctrl`，只有
+`process_monitor_event_batch()`完成后才应用。因此本类仍只负责semantic event仲裁，不负责
+raw queue排序或LQ/SQ map释放。
 
 职责边界：
 
@@ -28,7 +33,8 @@ process_monitor_event_batch(events)
   -> 未覆盖的其它 redirect 保留进 recovery queue，等当前 redirect 完成后再处理
 ```
 
-无法解析 active uid/ROB key 的 event 会在 normalize 阶段 `uvm_warning` 后丢弃。这样无法定位归属的 pass/fault/replay 不会绕过 redirect 仲裁落状态。
+generic event无法解析active uid/ROB key时仍由normalize warning/drop；V2 STA IQ是当前必需
+event，已在adapter中通过SQ owner反查并fail-fast，不会以warning/drop隐藏缺失反馈。
 
 ## 3. 函数说明
 
@@ -41,7 +47,16 @@ process_monitor_event_batch(events)
 | `process_allowed_non_redirect_event(event)` | 对 batch 已放行的真实 writeback/IQ feedback 调用 writeback handler；其它 replay/fault 语义入 recovery queue。 |
 | `process_monitor_event_batch(events)` | batch 总入口，执行 redirect-first 仲裁和状态更新分发。 |
 
-## 4. 删除/收窄点
+## 4. 与 IQ-first/deferred ctrl 的关系
+
+本类按输入`events`顺序处理所有未被redirect覆盖的非redirect event，所以同拍IQ hit先设置
+`sta_issue_feedback_success`，随后STA real-WB再执行严格顺序检查。若同拍存在older redirect，
+redirect-first仍先过滤被覆盖的IQ/WB，跨队列排序不会绕过redirect仲裁。
+
+`deferred_ctrl`不进入本类；调用者在本类返回后按raw FIFO调用`apply_raw_ctrl_deq()`。这样
+IQ/WB的active SQ/LQ owner检查使用采样拍仍有效的mapping，之后才释放DUT已deq的entry。
+
+## 5. 删除/收窄点
 
 - `writeback_status_handler` 不再负责 monitor event 的 normalize、active redirect stale filter 或 redirect 入口。
 - `dispatch_monitor_event_adapter` 不再边 drain 边调用 `writeback_handler.handle_event()`。

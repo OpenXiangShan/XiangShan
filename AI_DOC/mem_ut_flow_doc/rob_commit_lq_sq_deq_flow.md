@@ -7,6 +7,12 @@
 
 `flushSb` 在本 flow 中共享 `lsqcommit` driver 和 ctrl monitor 的 `sbIsEmpty` 采样。当前实现是队列式请求：`memblock_lsqcommit_dispatch_base_sequence` 先构造普通 commit xaction，再在同一个 xaction 上可选附加 `io_ooo_to_mem_flushSb=1`。完整 directed 测试流程见 `flushsb_test_flow.md`。
 
+对于 dispatch monitor 的 V2 同拍事件，`raw_ctrl` 的 deq 不在采样后立即释放 active
+LQ/SQ mapping，而是先暂存，待 `dispatch_monitor_batch_handler::process_monitor_event_batch`
+完成 redirect-first/feedback owner 检查后，再按 raw FIFO 调用 `apply_raw_ctrl_deq()`。这只
+改变 monitor batch 内的应用时点，不改变 LSQ commit sequence 的 pendingPtr/scommit 建模。
+IQ 相关当前权威 flow 见 [`iq_feedback_replay_v2_flow.md`](iq_feedback_replay_v2_flow.md)。
+
 V2 目标逻辑由两份 execution plan共同定义。当前源码中的 `pendingPtr` 仍写 commit batch tail；目标改为独立 `modeled_rob_deq_ptr`：每拍先按当前head派生`pendingPtr/pendingst/pendingMMIOld`，再独立选择commit batch和normal-only `scommit`。batch发送后先全批预检查，再原子落表并推进到batch后next head；无batch MMIO head只保持sideband，不推进软件状态。V2 SQ deq按count-only处理，不消费默认0 pointer。MMIO raw在同拍deq前先写status tag。上述改动不改变candidate、pass/fail和terminal定义。
 
 ## 1. 函数调用 Flow 图
@@ -954,15 +960,30 @@ pop_raw_ctrl:
 真实逻辑摘要：
 
 ```systemverilog
-monitor_adapter.collect_writeback_events_batch(events);
-monitor_adapter.collect_ctrl_redirect_events_batch(events);
+monitor_adapter.collect_writeback_events_batch(events,
+                                               sample_cycle,
+                                               sample_cycle_valid);
+monitor_adapter.collect_ctrl_redirect_events_batch(events,
+                                                   deferred_ctrl,
+                                                   sample_cycle,
+                                                   sample_cycle_valid);
 monitor_batch_handler.process_monitor_event_batch(events);
+foreach (deferred_ctrl[idx]) begin
+    monitor_adapter.apply_raw_ctrl_deq(deferred_ctrl[idx]);
+end
 ```
 
 ```systemverilog
-task dispatch_monitor_event_adapter::collect_ctrl_redirect_events_batch(ref memblock_wb_event_t events[$]);
+task dispatch_monitor_event_adapter::collect_ctrl_redirect_events_batch(
+    ref memblock_wb_event_t events[$],
+    ref memblock_sync_pkg::dispatch_raw_ctrl_t deferred_ctrl[$],
+    ref longint unsigned sample_cycle,
+    ref bit sample_cycle_valid
+);
     while (memblock_sync_pkg::pop_raw_ctrl(raw_ctrl)) begin
-        apply_raw_ctrl_deq(raw_ctrl);
+        check_raw_sample_cycle(raw_ctrl.cycle, sample_cycle,
+                               sample_cycle_valid, "ctrl");
+        deferred_ctrl.push_back(raw_ctrl);
         if (convert_raw_memory_violation(raw_ctrl, wb_event)) begin
             events.push_back(wb_event);
         end
@@ -972,37 +993,41 @@ endtask
 
 功能解释：
 
-service loop 每轮把 writeback/IQ feedback 和 ctrl raw fact 收成同一批。ctrl raw fact 的 deq 部分立即应用；memoryViolation 部分转换成 redirect event 后进入 batch handler 做 redirect-first 仲裁。
+service loop 每轮把 writeback/IQ feedback 和 ctrl raw fact 收成同一批。ctrl raw 先进入
+`deferred_ctrl`，memoryViolation 转换成 redirect event 后进入 batch handler；只有 semantic
+batch 完成 owner 反查和 redirect-first 仲裁后，才按 FIFO 应用 deq。
 
 输入/输出：
 
 - 输入：`raw_ctrl_q`、writeback raw queues。
-- 输出：LQ/SQ deq 可能释放 active map；memoryViolation redirect event 可能进入 `events[$]`。
+- 输出：memoryViolation redirect event 可能进入 `events[$]`；deferred ctrl 在 batch 完成后
+  才释放 LQ/SQ active map并更新 `sbIsEmpty`。
 
 文字伪代码：
 
 ```text
 collect_monitor_event_batch:
   创建 events 队列；
+  创建 deferred_ctrl 队列和本拍 sample_cycle 状态；
   绑定 writeback handler；
   创建/绑定 monitor_commit_handler；
-  collect_writeback_events_batch 收集 int wb 和 IQ feedback；
-  collect_ctrl_redirect_events_batch drain raw_ctrl；
+  collect_writeback_events_batch 先收集 IQ feedback，再收集 int wb；
+  collect_ctrl_redirect_events_batch drain raw_ctrl并保存到 deferred_ctrl；
   process_monitor_event_batch 对 events 做 normalize 和 redirect-first。
+  batch 处理完成后，按 deferred_ctrl FIFO 调用 apply_raw_ctrl_deq。
 
 collect_ctrl_redirect_events_batch:
   while pop_raw_ctrl 成功：
-    先调用 apply_raw_ctrl_deq：
-      更新 sbIsEmpty；
-      应用 LQ/SQ deq；
-    再调用 convert_raw_memory_violation：
+    调用 check_raw_sample_cycle，要求 raw 与当前 semantic batch 同拍；
+    把完整 raw 保存到 deferred_ctrl，不立即释放 active map；
+    调用 convert_raw_memory_violation：
       如果 memoryViolation valid，把 raw ctrl 转成 redirect wb_event；
       push 到本轮 events；
 ```
 
 内部子调用：
 
-- `dispatch_monitor_event_adapter::apply_raw_ctrl_deq()`：本 flow 的 deq 应用入口。
+- `dispatch_monitor_event_adapter::apply_raw_ctrl_deq()`：semantic batch 返回后的 deq 应用入口。
 - `dispatch_monitor_event_adapter::convert_raw_memory_violation()`：redirect flow 入口，本文只说明顺序边界。
 - `dispatch_monitor_batch_handler::process_monitor_event_batch()`：对 redirect/writeback/replay/fault 做统一 batch 仲裁。
 
@@ -1484,7 +1509,8 @@ retire 是 active 生命周期终点。正常 commit/deq 路径进入这里时 L
 - 元素：`dispatch_raw_ctrl_t`，包含 `lq_deq/sq_deq/*DeqPtr/memoryViolation/sb_is_empty/cycle`。
 - 消费者：`dispatch_monitor_event_adapter::collect_ctrl_redirect_events_batch()` 调用 `pop_raw_ctrl()`。
 - 消费后：
-  - `apply_raw_ctrl_deq()` 立即处理 `sbIsEmpty` 和 LQ/SQ deq。
+  - collector 先把完整 raw 保存到当前 service 的 `deferred_ctrl`。
+  - semantic batch 完成后，`apply_raw_ctrl_deq()`才处理 `sbIsEmpty` 和 LQ/SQ deq。
   - `convert_raw_memory_violation()` 把 memoryViolation 转成 redirect event，交给 batch handler。
 - drop/requeue：`push_raw_ctrl()` 在 `dispatch_monitor_capture_en=0` 或 `item.valid=0` 时不入队；`pop_raw_ctrl()` 空队列返回 false，不 requeue。
 

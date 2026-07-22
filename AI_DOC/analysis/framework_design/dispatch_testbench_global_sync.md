@@ -448,8 +448,14 @@ class dispatch_monitor_event_adapter extends uvm_object;
 ```systemverilog
 function void drain_csr_events();
 function void drain_sfence_events();
-task collect_writeback_events_batch(ref memblock_wb_event_t events[$]);
-task collect_ctrl_redirect_events_batch(ref memblock_wb_event_t events[$]);
+task collect_writeback_events_batch(ref memblock_wb_event_t events[$],
+                                    ref longint unsigned sample_cycle,
+                                    ref bit sample_cycle_valid);
+task collect_ctrl_redirect_events_batch(
+    ref memblock_wb_event_t events[$],
+    ref memblock_sync_pkg::dispatch_raw_ctrl_t deferred_ctrl[$],
+    ref longint unsigned sample_cycle,
+    ref bit sample_cycle_valid);
 ```
 
 `drain_csr_events()` 只同步 CSR runtime latest snapshot，不消费 sfence/hfence。`drain_sfence_events()` 只消费 `raw_sfence_q` 中的离散 fence 事件。真实主控 service loop 通过 `collect_runtime_context_events()` 显式按 `drain_csr_events()` -> `drain_sfence_events()` 顺序处理，保证 sfence/hfence 匹配使用最新 runtime CSR，同时避免 CSR-only 路径隐式消费 fence 事件。
@@ -459,16 +465,26 @@ task collect_ctrl_redirect_events_batch(ref memblock_wb_event_t events[$]);
 处理顺序：
 
 ```systemverilog
-monitor_adapter.collect_writeback_events_batch(events);
-monitor_adapter.collect_ctrl_redirect_events_batch(events);
+monitor_adapter.collect_writeback_events_batch(events,
+                                               sample_cycle,
+                                               sample_cycle_valid);
+monitor_adapter.collect_ctrl_redirect_events_batch(events,
+                                                   deferred_ctrl,
+                                                   sample_cycle,
+                                                   sample_cycle_valid);
 monitor_batch_handler.process_monitor_event_batch(events);
+foreach (deferred_ctrl[idx]) begin
+    monitor_adapter.apply_raw_ctrl_deq(deferred_ctrl[idx]);
+end
 ```
 
 作用：
 
-- 把同一 service cycle 的 int writeback、IQ feedback 和 ctrl memoryViolation 收集进同一个 `events` batch。
+- 把同一 service cycle 的 IQ feedback、int writeback 和 ctrl memoryViolation 收集进同一个
+  `events` batch；同拍固定IQ在int-WB之前。
 - 由 `dispatch_monitor_batch_handler` 统一 normalize、选择 oldest redirect，并过滤被 redirect 覆盖的 stale event。
 - 只有 batch 放行后的非 redirect event 才进入 `writeback_status_handler` 更新状态。
+- ctrl deq和`sbIsEmpty`先保存在`deferred_ctrl`，batch返回后才按FIFO应用。
 
 ### 8.2 collect_ctrl_redirect_events_batch
 
@@ -476,9 +492,11 @@ monitor_batch_handler.process_monitor_event_batch(events);
 
 ```systemverilog
 while (memblock_sync_pkg::pop_raw_ctrl(raw_ctrl)) begin
-    apply_raw_ctrl_deq(raw_ctrl);
+    check_raw_sample_cycle(raw_ctrl.cycle, sample_cycle,
+                           sample_cycle_valid, "ctrl");
+    deferred_ctrl.push_back(raw_ctrl);
     if (convert_raw_memory_violation(raw_ctrl, wb_event)) begin
-        void'(writeback_handler.handle_event(wb_event));
+        events.push_back(wb_event);
     end
 end
 ```
@@ -486,8 +504,9 @@ end
 作用：
 
 - 消费 ctrl raw event。
-- ctrl event 中的 LSQ deq 和 `sbIsEmpty` 先落状态。
-- 如果 ctrl event 带 memoryViolation，再转换成 redirect event，作为 redirect recovery 触发源。
+- 检查raw与当前IQ/int-WB batch属于同一采样拍，并把完整raw保存到`deferred_ctrl`。
+- 如果 ctrl event 带 memoryViolation，转换成 redirect event并追加到同一semantic batch。
+- batch完成后，调用者才通过`apply_raw_ctrl_deq()`更新LSQ deq和`sbIsEmpty`。
 
 ### 8.3 为什么 adapter 要检查 active uid
 

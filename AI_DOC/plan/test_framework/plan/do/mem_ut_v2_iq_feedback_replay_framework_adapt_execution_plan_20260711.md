@@ -2,13 +2,35 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待 coding |
+| 状态 | coding、文档同步和本agent独立review已完成；专项运行存在已记录的前置环境阻塞 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv` |
 | 测试框架入口 | `memblock_dispatch_base_sequence::collect_monitor_event_batch()` |
 | 适配原则 | monitor 只采真实字段；event 只绑定 current status；保持现有 handler/recovery；不增加历史 generation 防御系统 |
 | 创建/修订日期 | 2026-07-21 |
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### [IMPLEMENTATION_DELTA] 同一采样拍的 IQ/WB 语义顺序
+
+来源：coding 后的独立静态复查发现，原实现沿用 `int-WB` 队列先于 IQ 队列的跨队列收集顺序。
+当同一采样拍同时出现 STA IQ hit 和 STA real-WB 时，严格 real-WB 检查会在 IQ hit 尚未落表前
+误报 `WB_STATUS_STA_ORDER`。
+
+原 plan：要求 STA 的语义顺序为 IQ hit 后 real-WB，但只规定了各 producer 队列内部 FIFO，未明确
+同一采样拍的跨队列处理顺序。
+
+实现调整：保持 `raw_iq_feedback_q` 和 `raw_int_wb_q` 各自 FIFO 不变，在单个 semantic batch 中先
+转换/追加 IQ event，再转换/追加 int-WB event。随后仍由 batch handler 统一执行 redirect-first；因此
+同拍 IQ hit 先设置 `sta_issue_feedback_success`，real-WB 再进入严格检查。若同拍是 IQ miss 和未被
+redirect 覆盖的 real-WB，仍按非法顺序 fatal。
+
+原因：不新增历史 generation 状态，也不改变 redirect、replay 或 real-WB owner，只补齐同拍事件的
+确定性语义顺序。
+
+影响范围：`dispatch_monitor_event_adapter::collect_writeback_events_batch()`、本 plan 的伪代码和
+对应 flow 文档；各 raw producer、handler 主职责及 queue 生命周期不变。
 
 ## 1. 范围与成立条件
 
@@ -207,9 +229,13 @@ collect_monitor_event_batch()：
   deferred_ctrl=[]；
   sample_cycle_valid=0；
 
-  drain当前可见int-WB和IQ raw：
+  先drain当前可见IQ raw：
     检查raw.cycle与本batch sample_cycle一致；
-    转换成功的event加入events；
+    转换成功的IQ event加入events；
+
+  再drain当前可见int-WB raw：
+    检查raw.cycle与本batch sample_cycle一致；
+    转换成功的int-WB event加入events；
 
   drain当前可见ctrl raw：
     检查raw.cycle与本batch sample_cycle一致；
@@ -270,7 +296,7 @@ sta_fault
 处理STA real-WB或fault-WB：
   读取当前status；
   如果sta_issue_feedback_success=0：
-    以STA_WB_BEFORE_IQ fatal；
+    以WB_STATUS_STA_ORDER fatal；
   否则进入现有handle_real_writeback_event()逻辑。
 
 处理scalar STA IQ miss：
@@ -319,7 +345,7 @@ semantic batch处理完成
 | `mem_ut/ver/ut/memblock/seq/base_seq_help/dispatch_monitor_event_adapter.sv` | 增加 STA IQ current snapshot attach；ctrl raw 延后 apply；可见 raw 必须同 cycle |
 | `mem_ut/ver/ut/memblock/seq/base_seq_help/writeback_status_handler.sv` | STA IQ hit 始终先记录现有 feedback success；STA WB 前检查该状态 |
 | `mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_base_sequence.sv` | semantic batch 后按原顺序 apply deferred ctrl；保留 service 尾部一次 recovery |
-| `mem_ut/ver/ut/memblock/seq/virtual_sequence/soft_test` | 复用现有 soft-test 结构增加最小正向场景，不新增通用 expected-fatal runner |
+| `mem_ut/ver/ut/memblock/seq/base_seq/soft_test/soft_test_memblock_dispatch_replay_smoke_sequence.sv` | 复用现有 soft-test 结构增加最小正向场景，不新增通用 expected-fatal runner |
 
 int-WB monitor、raw struct、metadata guard 和 ROB 分支 snapshot attach 的具体实现，继续由
 `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_int_wb_writeback_framework_adapt_execution_plan_20260708.md` 管理。
@@ -359,8 +385,24 @@ vector LS正向闭环、RM、scoreboard、checker和coverage（VSTU valid fail-f
 - 默认严格模式下 STA WB 到达前必须已经记录 IQ hit。
 - 每次 service drain 的 int-WB、IQ、ctrl raw 必须属于同一采样 cycle。
 
-不新增通用 expected-fatal 脚本。需要验证 `STA_WB_BEFORE_IQ` 时，复用仓库现有仿真命令和日志检查
+不新增通用 expected-fatal 脚本。需要验证 `WB_STATUS_STA_ORDER` 时，复用仓库现有仿真命令和日志检查
 方式即可；该验证基础设施不作为本功能 coding 的前置条件。
+
+### 8.1 执行结果
+
+- 清理一次被VCS异常退出损坏的增量数据库后，完成全量VCS/Verdi编译，结果为
+  `0 error(s), 0 warning(s)`。
+- 恢复默认配置运行 `make eda_run tc=tc_sanity mode=base_fun` 通过，日志出现
+  `TEST CASE PASSED`，`UVM_ERROR=0`、`UVM_FATAL=0`，退出码为0。
+- 本次 `eda_run` 的依赖编译阶段曾再次出现 VCS incremental `SIGSEGV`，但后续 partcomp
+  stitch、链接和仿真均完成；该工具链残余风险不归因于 IQ 逻辑。
+- 真实store smoke已观察到`STD real-WB -> STA IQ feedback -> STA real-WB -> ROB commit`；
+  随后停在既有SQ deq pointer mismatch，归属LSQ MMIO/status/SQ deq专项，不是本plan逻辑。
+- `tc_dispatch_replay_smoke`在sequence开始前被int-WB monitor的
+  `STD0 valid is X/Z`无条件raw producer检查终止。临时关闭该monitor会暴露
+  `memblock_env::connect_phase()`对disabled monitor的空句柄连接问题。因此本轮软件replay
+  正向场景未运行到IQ注入点；该验证缺口和风险在implementation review中保留，不把环境
+  启动失败记为IQ功能失败或通过。
 
 ## 9. 修改前后对比
 
@@ -369,7 +411,7 @@ vector LS正向闭环、RM、scoreboard、checker和coverage（VSTU valid fail-f
 | STA IQ raw | 伪造 ROB0/LQ0 | 只保留真实 SQ |
 | generation | replay 后缺 snapshot 被 drop | 用真实 SQ 查 current status 并附加 snapshot |
 | normalize | 计划增加全局 snapshot 强制谓词 | generic normalize 不变，converter 本地检查 |
-| raw batch | 计划按多个 cycle 分组并逐组 recovery | 每 service 单 batch；mixed-cycle fatal；ctrl/deq 延后 |
+| raw batch | 计划按多个 cycle 分组并逐组 recovery | 每 service 单 batch；IQ 先于 int-WB；mixed-cycle fatal；ctrl/deq 延后 |
 | STA 阶段 | 计划新增两个 seen 位和 check/commit helper | 复用 `sta_issue_feedback_success/sta_writeback/pass/fault` |
 | 迟到/duplicate | 计划增加额外 lifecycle 防御 | 依赖当前 V2 合同，不增加历史状态 |
 | 负向验证 | 计划新增通用 expected-fatal runner | 不属于功能适配，复用现有运行方式 |

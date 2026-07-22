@@ -14,7 +14,10 @@
 
 - `event_has_fault()`、`event_is_redirect()`、`event_is_replay()`、`event_is_real_writeback()`、`event_is_issue_feedback()`、`event_is_normal_pass()`：事件分类。
 - `validate_event_target()`：非 redirect event 必须是 LOAD/STA/STD。
-- `handle_real_writeback_event(wb_event)`：处理真实 int writeback。无异常时调用 `mark_target_normal_pass()`，有异常时先 `mark_target_fault()` 再入 recovery 队列。
+- `handle_real_writeback_event(wb_event)`：处理真实 int writeback。严格 STA 模式先要求
+  `sta_issue_feedback_success=1`；未观察到 current IQ hit 时以 `WB_STATUS_STA_ORDER` fatal。
+  顺序合法后，无异常时调用 `mark_target_normal_pass()`，有异常时先 `mark_target_fault()`
+  再入 recovery 队列。
 - `handle_issue_feedback_event(wb_event)`：处理 IQ feedback。STD target 或 `STD_FEEDBACK` source 在入口直接 fatal；STA `hit=1` 且 `MEMBLOCK_STA_REAL_WB_PASS_EN=1` 时只调用 `mark_issue_feedback_success()`，关闭该开关时才作为兼容 pass 调 `mark_target_normal_pass()`；STA `hit=0` 入 replay 队列。
 - `handle_event(wb_event)`：兼容 synthetic event 的轻量入口；要求 event 已经 normalized，不再执行 monitor normalize、active redirect stale filter 或 redirect 仲裁。
 - 已删除旧的 `process_event_queue()` 二次整理入口；`exception_event_q` 只由 `exception_redirect_replay_handler::process_pending_events()` 消费。
@@ -34,6 +37,20 @@
 | `event_is_normal_pass(wb_event)` | event | 只有 real writeback valid 且无 redirect/replay/fault 时才是 normal pass。 |
 | `target_real_wb_pass_enabled(target)` | target | 只查询 STA 是否要求等待真实 writeback pass；STD 不再查询 runtime 开关。 |
 | `validate_event_target(wb_event,caller)` | event、调用者 | normal event 必须指向 LOAD/STA/STD target，防止 monitor adapter 生成非法 target。 |
-| `handle_real_writeback_event(wb_event)` | event | 真实 writeback 分支。pass 更新 target writeback/pass；fault 更新 target fault 并入 recovery 队列。 |
+| `handle_real_writeback_event(wb_event)` | event | 真实 writeback 分支。严格 STA 模式先检查 current issue 已有 IQ hit；通过后 pass 更新 target writeback/pass，fault 更新 target fault并入 recovery 队列。 |
 | `handle_issue_feedback_event(wb_event)` | event | IQ feedback 分支。STD 入口 fatal；STA hit 只表示 IssueQueue finalSuccess，并根据 STA real-WB 开关记录 feedback success 或走兼容 pass；STA failed 进入 replay。 |
 | `handle_event(wb_event)` | event | 只接受已 normalized 的非 redirect event；redirect 会 warning/drop，真实 monitor redirect 必须从 batch handler 进入 recovery queue。 |
+
+## 3. STA IQ 与 real-WB 顺序
+
+当`MEMBLOCK_STA_REAL_WB_PASS_EN=1`时，STA合法完成顺序固定为：
+
+```text
+IQ hit -> mark_issue_feedback_success -> STA real-WB/fault-WB -> pass/fault owner
+IQ miss -> replay recovery，不允许同一动态实例继续 real-WB
+```
+
+`handle_real_writeback_event()`在修改任何writeback/pass/fault状态前读取current status。若
+target为STA且`sta_issue_feedback_success=0`，立即fatal。这个检查不会影响LOAD/STD，也不会
+新增pass/fail/terminal owner；它只阻止STA real-WB绕过IQ replay判定。同一采样拍的IQ和
+int-WB由adapter先按IQ顺序放入batch，因此合法同拍hit/WB不会被误报。

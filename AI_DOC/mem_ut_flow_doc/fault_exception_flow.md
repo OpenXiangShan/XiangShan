@@ -2,6 +2,11 @@
 
 本文按通用 flow 文档规则整理 mem_ut 中 real writeback fault 之后的处理。关键结论：**fault 状态先在 `writeback_status_handler::handle_real_writeback_event()` 中通过 `mark_target_fault()` 落表；随后 fault event 进入 `push_feedback_event()`，由 `handle_fault_event()` 消费，但不重复 mark fault。**
 
+V2 scalar STA fault writeback 在严格模式下还必须先观察到同一 current issue 的 STA IQ
+feedback success；否则 `handle_real_writeback_event()` 以 `WB_STATUS_STA_ORDER` fail-fast。
+STA IQ 的 SQ-only 反查、同拍 IQ/WB 顺序和 ctrl deq 延后规则见
+[`iq_feedback_replay_v2_flow.md`](iq_feedback_replay_v2_flow.md)。
+
 ## 1. 函数调用 Flow 图
 
 ```mermaid

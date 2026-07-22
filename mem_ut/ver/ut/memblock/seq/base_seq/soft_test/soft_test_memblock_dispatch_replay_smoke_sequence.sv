@@ -23,7 +23,8 @@ class soft_test_memblock_dispatch_replay_smoke_sequence extends soft_test_memblo
                                                 input memblock_uid_t uid,
                                                 input memblock_issue_target_e target,
                                                 output memblock_issue_q_item_t item);
-    extern virtual function memblock_wb_event_t make_replay_wb_event(input memblock_issue_q_item_t item);
+    extern virtual task submit_raw_sta_iq_feedback(input memblock_issue_q_item_t item,
+                                                    input bit hit);
     extern virtual function memblock_wb_event_t make_pass_wb_event_with_snapshot(input memblock_issue_q_item_t item,
                                                                                 input int unsigned issue_epoch,
                                                                                 input int unsigned replay_seq);
@@ -61,11 +62,19 @@ task soft_test_memblock_dispatch_replay_smoke_sequence::body();
     old_replay_seq      = status.replay_seq;
 
     inject_writeback_events_except(fired_items, 1, MEMBLOCK_ISSUE_TARGET_STA);
-    submit_writeback_event(make_replay_wb_event(first_sta_item));
+    submit_raw_sta_iq_feedback(first_sta_item, 1'b0);
     exception_redirect_replay_task();
     check_replay_pending_state(1, old_sta_issue_epoch, old_replay_seq);
 
     fire_replay_sta_item(1, replay_sta_item);
+
+    // 中文注释：严格 STA 完成要求当前动态实例先记录 IQ hit；后续 stale 检查和
+    // 最终 real-WB 都必须在该阶段之后进入 handler。
+    submit_raw_sta_iq_feedback(replay_sta_item, 1'b1);
+    status = data.get_status(1);
+    if (!status.sta_issue_feedback_success) begin
+        `uvm_fatal(get_type_name(), "replay STA IQ hit did not record feedback success")
+    end
 
     submit_writeback_event(make_pass_wb_event_with_snapshot(replay_sta_item,
                                                             old_sta_issue_epoch,
@@ -157,33 +166,22 @@ function bit soft_test_memblock_dispatch_replay_smoke_sequence::find_fired_item(
     return 1'b0;
 endfunction:find_fired_item
 
-function memblock_wb_event_t soft_test_memblock_dispatch_replay_smoke_sequence::make_replay_wb_event(input memblock_issue_q_item_t item);
-    memblock_wb_event_t wb_event;
-    status_transaction  status;
+task soft_test_memblock_dispatch_replay_smoke_sequence::submit_raw_sta_iq_feedback(input memblock_issue_q_item_t item,
+                                                                                    input bit hit);
+    memblock_sync_pkg::dispatch_raw_iq_feedback_t raw_iq;
 
-    wb_event = data.make_empty_wb_event();
-    status   = data.get_status(item.uid);
-
-    wb_event.valid           = 1'b1;
-    wb_event.source          = MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK;
-    wb_event.target          = item.target;
-    wb_event.uid             = item.uid;
-    wb_event.has_uid         = 1'b1;
-    wb_event.rob_key         = item.rob_key;
-    wb_event.has_rob         = 1'b1;
-    wb_event.sq_key          = item.sq_key;
-    wb_event.has_sq          = item.has_sqIdx;
-    wb_event.issue_epoch     = status.get_target_issue_epoch(item.target);
-    wb_event.has_issue_epoch = 1'b1;
-    wb_event.replay_seq      = status.replay_seq;
-    wb_event.has_replay_seq  = 1'b1;
-    wb_event.iq_feedback_valid  = 1'b1;
-    wb_event.iq_feedback_hit    = 1'b0;
-    wb_event.iq_feedback_failed = 1'b1;
-    wb_event.replay_valid    = 1'b1;
-    wb_event.cycle           = $time;
-    return wb_event;
-endfunction:make_replay_wb_event
+    raw_iq = memblock_sync_pkg::make_empty_raw_iq_feedback();
+    raw_iq.valid     = 1'b1;
+    raw_iq.port_id   = item.uop_index;
+    raw_iq.is_sta    = 1'b1;
+    raw_iq.sq_valid  = 1'b1;
+    raw_iq.sq_flag   = item.sq_key.flag;
+    raw_iq.sq_value  = item.sq_key.value;
+    raw_iq.hit       = hit;
+    raw_iq.cycle     = $time;
+    memblock_sync_pkg::push_raw_iq_feedback(raw_iq);
+    collect_monitor_event_batch();
+endtask:submit_raw_sta_iq_feedback
 
 function memblock_wb_event_t soft_test_memblock_dispatch_replay_smoke_sequence::make_pass_wb_event_with_snapshot(input memblock_issue_q_item_t item,
                                                                                                       input int unsigned issue_epoch,
