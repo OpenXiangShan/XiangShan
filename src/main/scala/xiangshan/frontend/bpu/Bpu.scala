@@ -166,7 +166,16 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   stageCtrl.s1_fire := s1_fire
   stageCtrl.s2_fire := s2_fire
   stageCtrl.s3_fire := s3_fire
-  stageCtrl.t0_fire := io.fromFtq.train.fire
+
+  // Buffer training to preserve PHR alignment across predictor stalls.
+  private val trainPipeValid = RegInit(false.B)
+  // Duplicate startPcVec locally to limit predictor fan-out.
+  private val trainPipeBits       = RegInit(0.U.asTypeOf(new Train(NumStartPcDuplicate)))
+  private val predictorTrainReady = Wire(Bool())
+  private val trainPipeDeqFire    = Wire(Bool())
+
+  trainPipeDeqFire  := trainPipeValid && predictorTrainReady
+  stageCtrl.t0_fire := trainPipeDeqFire
 
   private val t0_compareMatrix = CompareMatrix(VecInit(io.fromFtq.train.bits.branches.map(_.bits.cfiPosition)))
   // mark all branches after the first mispredict as invalid
@@ -194,17 +203,22 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   predictors.foreach { p =>
     p.io.startPc   := s0_startPc.get
     p.io.stageCtrl := stageCtrl
-    // in this fromBpuTrain, we get a duplicated startPcVec, so this cannot be moved outside "predictors.foreach"
-    // i.e. this is wrong: ```
-    //   private val train = Wire(new Train)
-    //   train.fromBpuTrain(io.fromFtq.train.bits)
-    //   predictors.foreach { p => p.io.train := train }
-    // ```
-    p.io.train.fromBpuTrain(train)
+    // Consume a different registered startPcVec copy for each predictor.
+    p.io.train.fromBpuTrain(trainPipeBits)
     // fastTrain is an Option[Valid[BpuFastTrain]], we need .foreach
     p.io.fastTrain.foreach(_ := fastTrain)
   }
-  io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
+  predictorTrainReady := predictors.map(_.io.trainReady).reduce(_ && _)
+
+  io.fromFtq.train.ready := !trainPipeValid || trainPipeDeqFire
+  when(io.fromFtq.train.fire) {
+    trainPipeBits.fromBpuTrain(train)
+  }
+  when(trainPipeDeqFire) {
+    trainPipeValid := io.fromFtq.train.fire
+  }.elsewhen(io.fromFtq.train.fire) {
+    trainPipeValid := true.B
+  }
 
   /* *** predictor specific inputs *** */
   abtb.io.redirectValid  := redirect.valid
