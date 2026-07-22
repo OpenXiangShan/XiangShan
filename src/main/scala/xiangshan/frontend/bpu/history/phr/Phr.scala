@@ -22,7 +22,6 @@ import utility.XSError
 import utility.XSPerfAccumulate
 import utility.XSWarn
 import xiangshan.frontend.PrunedAddr
-import xiangshan.frontend.PrunedAddrInit
 import xiangshan.frontend.bpu.Train
 
 // PHR: Predicted History Register
@@ -131,20 +130,20 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   redirectData.valid   := io.train.redirect.valid
   redirectData.taken   := io.train.redirect.bits.taken
   redirectData.cfiPc   := io.train.redirect.bits.cfiPc
-  redirectData.target  := io.train.redirect.bits.target
+  redirectData.target  := io.train.redirect.bits.target.truncate(VAddrBits)
   redirectData.phrMeta := io.train.redirect.bits.meta.phr
 
   s3_override             := io.train.s3_override
   s3_overrideData.valid   := s3_override
   s3_overrideData.taken   := io.train.s3_prediction.taken
   s3_overrideData.cfiPc   := getCfiPcFromPosition(io.train.s3_startPc, io.train.s3_prediction.cfiPosition)
-  s3_overrideData.target  := io.train.s3_prediction.target
+  s3_overrideData.target  := io.train.s3_prediction.target.truncate(VAddrBits)
   s3_overrideData.phrMeta := io.train.s3_phrMeta
 
   s1UpdateData.valid              := s1_valid
   s1UpdateData.taken              := io.s1Train.prediction.taken
   s1UpdateData.cfiPc              := getCfiPcFromPosition(io.s1Train.startPc, io.s1Train.prediction.cfiPosition)
-  s1UpdateData.target             := io.s1Train.prediction.target
+  s1UpdateData.target             := io.s1Train.prediction.target.truncate(VAddrBits)
   s1UpdateData.phrMeta.phrPtr     := s1_phrPtr
   s1UpdateData.phrMeta.phrLowBits := s1_phrLowBits
 

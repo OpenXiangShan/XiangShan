@@ -32,15 +32,15 @@ class RasStack(implicit p: Parameters) extends RasModule
       val fire:      Bool       = Input(Bool())
       val pushValid: Bool       = Input(Bool())
       val popValid:  Bool       = Input(Bool())
-      val pushAddr:  PrunedAddr = Input(PrunedAddr(VAddrBits))
-      val popAddr:   PrunedAddr = Output(PrunedAddr(VAddrBits))
+      val pushAddr:  PrunedAddr = Input(PrunedAddr(GuardedVAddrBits))
+      val popAddr:   PrunedAddr = Output(PrunedAddr(GuardedVAddrBits))
     }
 
     class RasCommitIO extends Bundle {
       val valid:     Bool       = Input(Bool())
       val pushValid: Bool       = Input(Bool())
       val popValid:  Bool       = Input(Bool())
-      val pushAddr:  PrunedAddr = Input(PrunedAddr(VAddrBits))
+      val pushAddr:  PrunedAddr = Input(PrunedAddr(GuardedVAddrBits))
       val metaTosw:  RasPtr     = Input(new RasPtr)
       // for debug purpose only
       val metaSsp: UInt = Input(UInt(log2Up(CommitStackSize).W))
@@ -49,7 +49,7 @@ class RasStack(implicit p: Parameters) extends RasModule
     class RasRedirectIO extends Bundle {
       val valid:    Bool            = Input(Bool())
       val isCall:   Bool            = Input(Bool())
-      val callAddr: PrunedAddr      = Input(PrunedAddr(VAddrBits))
+      val callAddr: PrunedAddr      = Input(PrunedAddr(GuardedVAddrBits))
       val isRet:    Bool            = Input(Bool())
       val meta:     RasInternalMeta = Input(new RasInternalMeta)
     }
@@ -64,9 +64,11 @@ class RasStack(implicit p: Parameters) extends RasModule
   }
   val io: RasStackIO = IO(new RasStackIO)
 
-  private val commitStack = RegInit(VecInit(Seq.fill(CommitStackSize)(RasEntry(PrunedAddrInit(0.U(VAddrBits.W)), 0.U))))
-  private val specQueue   = RegInit(VecInit(Seq.fill(SpecQueueSize)(RasEntry(PrunedAddrInit(0.U(VAddrBits.W)), 0.U))))
-  private val specNos     = RegInit(VecInit(Seq.fill(SpecQueueSize)(RasPtr(false.B, 0.U))))
+  private val commitStack =
+    RegInit(VecInit(Seq.fill(CommitStackSize)(RasEntry(PrunedAddrInit(0.U(GuardedVAddrBits.W)), 0.U))))
+  private val specQueue =
+    RegInit(VecInit(Seq.fill(SpecQueueSize)(RasEntry(PrunedAddrInit(0.U(GuardedVAddrBits.W)), 0.U))))
+  private val specNos = RegInit(VecInit(Seq.fill(SpecQueueSize)(RasPtr(false.B, 0.U))))
 
   private val nsp = RegInit(0.U(log2Up(CommitStackSize).W))
   private val ssp = RegInit(0.U(log2Up(CommitStackSize).W))

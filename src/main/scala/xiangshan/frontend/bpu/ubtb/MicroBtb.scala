@@ -119,7 +119,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
     t0_startPc     := io.fastTrain.get.bits.startPc
     t0_actualTaken := io.fastTrain.get.bits.finalPrediction.taken
     t0_position    := io.fastTrain.get.bits.finalPrediction.cfiPosition
-    t0_fullTarget  := io.fastTrain.get.bits.finalPrediction.target
+    t0_fullTarget  := io.fastTrain.get.bits.finalPrediction.target.truncate(VAddrBits)
     t0_attribute   := io.fastTrain.get.bits.finalPrediction.attribute
   } else {
     // FIXME: not sure if first mispredict is the best, maybe first taken?

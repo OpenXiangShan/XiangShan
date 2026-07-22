@@ -67,7 +67,7 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val a2_fire                = io.stageCtrl.s1_fire
   private val overrideValid          = io.overrideValid
   private val redirectValid          = io.redirectValid
-  private val a0_indexPc             = io.startPc
+  private val a0_indexPc             = io.startPc.truncate(VAddrBits)
   private val a0_indexFoldedPathHist = io.normalPathHist
 
   /* *** submodules *** */

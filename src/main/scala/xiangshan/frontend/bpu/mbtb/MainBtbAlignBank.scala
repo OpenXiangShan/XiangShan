@@ -34,7 +34,7 @@ class MainBtbAlignBank(
       class Req extends Bundle {
         // NOTE: this startPc is not from Bpu top, it's calculated in MainBtb top
         // i.e. (VecInit.tabulate(NumAlignBanks)(startPc + _ * alignSize))(alignIdx) rotated right by startAlignIdx
-        val startPc:       PrunedAddr = new PrunedAddr(VAddrBits)
+        val startPc:       PrunedAddr = new PrunedAddr(GuardedVAddrBits)
         val posHigherBits: UInt       = UInt(AlignBankIdxLen.W)
         val crossPage:     Bool       = Bool()
       }

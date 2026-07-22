@@ -629,13 +629,8 @@ trait HasXSParameter {
     }
   } // VAddrBits is Virtual Memory addr bits
 
-  def VAddrMaxBits = {
-    if(EnableSv48) {
-      coreParams.VAddrBitsSv48 max coreParams.GPAddrBitsSv48x4
-    } else {
-      coreParams.VAddrBitsSv39 max coreParams.GPAddrBitsSv39x4
-    }
-  }
+  def GuardedVAddrBits = VAddrBits + 1 // 1 extra guard bit for overflow/canonical check
+
   def SdidLength = coreParams.SdidLength
   def AsidLength = coreParams.AsidLength
   def VmidLength = coreParams.VmidLength

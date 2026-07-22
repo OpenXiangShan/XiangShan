@@ -235,7 +235,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   }
 
   // used for check abtb output
-  io.debug_startPc := s2_startPc
+  io.debug_startPc := s2_startPc.truncate(VAddrBits)
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 0

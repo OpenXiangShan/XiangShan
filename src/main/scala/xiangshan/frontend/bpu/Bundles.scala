@@ -196,8 +196,8 @@ class BpuCtrl extends Bundle {
 
 // Bpu -> Ftq
 class BpuPrediction(implicit p: Parameters) extends BpuBundle {
-  val startPc:     PrunedAddr = PrunedAddr(VAddrBits)
-  val target:      PrunedAddr = PrunedAddr(VAddrBits)
+  val startPc:     PrunedAddr = PrunedAddr(GuardedVAddrBits)
+  val target:      PrunedAddr = PrunedAddr(GuardedVAddrBits)
   val taken:       Bool       = Bool()
   val endPosition: UInt       = UInt(CfiPositionWidth.W)
   // override valid
@@ -215,7 +215,7 @@ class BpuPrediction(implicit p: Parameters) extends BpuBundle {
 class BpuRedirect(implicit p: Parameters) extends BpuBundle {
   // BpuRedirect need the virtual address of the control flow instruction (cfiPc) instead of startPc in other bundles
   val cfiPc:     PrunedAddr      = PrunedAddr(VAddrBits)
-  val target:    PrunedAddr      = PrunedAddr(VAddrBits)
+  val target:    PrunedAddr      = PrunedAddr(GuardedVAddrBits)
   val taken:     Bool            = Bool()
   val attribute: BranchAttribute = new BranchAttribute
   val meta:      BpuRedirectMeta = new BpuRedirectMeta
@@ -384,7 +384,7 @@ class StageCtrl(implicit p: Parameters) extends BpuBundle {
 // sub predictors -> Bpu top
 class Prediction(implicit p: Parameters) extends BpuBundle {
   val cfiPosition: UInt            = UInt(CfiPositionWidth.W)
-  val target:      PrunedAddr      = PrunedAddr(VAddrBits)
+  val target:      PrunedAddr      = PrunedAddr(GuardedVAddrBits)
   val attribute:   BranchAttribute = new BranchAttribute
   val taken:       Bool            = Bool()
 }

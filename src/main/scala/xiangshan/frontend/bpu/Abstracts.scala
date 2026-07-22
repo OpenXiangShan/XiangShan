@@ -36,7 +36,7 @@ abstract class BasePredictorIO(implicit p: Parameters) extends BpuBundle {
   // predict stage control
   val stageCtrl: StageCtrl = Input(new StageCtrl)
   // predict request
-  val startPc: PrunedAddr = Input(PrunedAddr(VAddrBits))
+  val startPc: PrunedAddr = Input(PrunedAddr(GuardedVAddrBits))
   // resolve train
   val trainReady: Bool  = Output(Bool())
   val train:      Train = Input(new Train)
