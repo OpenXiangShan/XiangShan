@@ -3,6 +3,13 @@
 
 本文档介绍如何为DUT（Design Under Test）创建必要的 pytest fixture，确保测试的稳定性和可维护性。
 
+> **Frontend 特例：**本文中的 `get_coverage_groups`、toffee `CovGroup` 和
+> `set_func_coverage` 示例只适用于仍使用旧接口的其他 DUT。Frontend 必须先读取
+> `src/test/python/Frontend/docs/03_功能覆盖率建模/skills.md`，并只使用
+> `FunctionalCoverageRecorder` + `env/funcov.py` 单一功能覆盖率链路；不得据此重新创建
+> `env/coverage_def.py` 或第二套采样/收集实现。`dut.SetCoverage()` 与
+> `set_line_coverage()` 属于代码覆盖率链路，不在此禁用范围内。
+
 ## DUT Fixture 创建
 
 ### 概述

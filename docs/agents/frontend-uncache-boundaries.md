@@ -366,11 +366,11 @@ auto_inner_instrUncache_client_out_a_bits_address = <MMIO fetch address>
 当前确认的 DUT 表现：
 
 - `d_bits_corrupt = 1`：backend `cfVec` 上对应指令标记
-  `exceptionVec_19 = 1`，functional coverage bin 为
-  `frontend_exception_type = hwe`。
+  `exceptionVec_19 = 1`。旧 `frontend_exception_type = hwe` 规划项当前未建仓，
+  不能作为 active funcov 命中上报。
 - `d_bits_denied = 1`：backend `cfVec` 上对应指令标记 access fault，
-  functional coverage bin 为 `frontend_exception_type = af`，并且 MMIO 路径应命中
-  `fetch_path_x_exception = mmio_x_af`。
+  旧 `frontend_exception_type = af` 和 `fetch_path_x_exception = mmio_x_af`
+  规划项当前未建仓，正确性以 cfVec、monitor 和 testcase assertion 为准。
 - 跨 8B beat resend 场景中，TileLink A 地址是 8B 对齐 beat 地址，不是原始
   指令 PC。例如 PC `0x10001006` 的第一拍 A 地址为 `0x10001000`，第二拍 resend
   A 地址为 `0x10001008`。
@@ -383,7 +383,6 @@ auto_inner_instrUncache_client_out_a_bits_address = <MMIO fetch address>
 - agent 统计确认只注入目标 fault，例如 `corrupt_resp_count == 1` 或
   `denied_resp_count == 1`。
 - `env.monitor.exception_mark_count > 0`。
-- functional coverage 命中对应 `frontend_exception_type`。
 - `not env.monitor.get_errors()`。
 
 `WFI` directed case 应在 `io_backend_wfi_wfiReq = 1` 期间确认没有新的 uncache
@@ -392,29 +391,21 @@ A channel request handshake；释放为 `0` 后应能观察到新的 request。
 ### Functional Coverage
 
 uncache 通路的 functional coverage 定义在
-`src/test/python/Frontend/docs/frontend_bt_functional_coverage_pilot.csv`，由
+`src/test/python/Frontend/docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv`，由
 `FunctionalCoverageRecorder` 从 env event 和 DUT-visible 端口采样。
 
-当前 uncache covergroup：
+当前 active uncache 模型只有 `BIN-416..BIN-423`：
 
-- `uncache_req_state`
-  - `normal_fire`：uncache A 通道完成一次 request handshake。
-  - `a_ready_backpressure`：A 通道 `valid=1` 且 `ready=0`。
-  - `wfi_blocked`：`backend.wfi_req=1` 窗口内没有新增 uncache A request。
-- `uncache_resp_type`
-  - `clean`：D 通道返回时 `corrupt=0` 且 `denied=0`。
-  - `corrupt`：D 通道返回 `corrupt=1`。
-  - `denied`：D 通道返回 `denied=1`。
-- `uncache_resend_flow`
-  - `first_denied_resend`：首拍注入 `denied=1` 后仍观察到下一 8B beat
-    request。
-  - `second_beat_fault`：resend 后第二拍返回 `corrupt` 或 `denied`。
-- `uncache_flush_flow`
-  - `redirect_flush_pending`：backend redirect 到来时 uncache agent 仍有
-    pending response。
-  - `redirect_flush_fault`：redirect 后短窗口内收到 stale fault response，且不
-    应形成前端异常。
-  - `consecutive_redirect_pending`：pending uncache 上连续 backend redirect。
+- `uncache_page_boundary`：页尾 RVC 无补半、页尾 RVI 跨页补半。
+- `uncache_ordering`：PBMT.NC/PBMT.IO 与 PMP MMIO 的 commit-gate 语义。
+- `uncache_path_switch` / `fetch_path_switch`：redirect 后 cacheable、NC 和 MMIO
+  路径切换不受旧事务污染。
+
+`uncache_req_state`、`uncache_resp_type`、`uncache_resend_flow`、
+`uncache_flush_flow` 和 `frontend_exception_type` 仍可作为未来规划名称，但其
+registry 行 `Coverpoint` 为空，不属于 active model，也没有第二套 runtime sampler。
+在建立唯一叶子、Coverpoint 和采样契约前，相关 testcase 只提供 checker/assertion
+证据，不能上报功能覆盖率 HIT。
 
 这些 coverpoint 的目标是覆盖端口级通路行为，不替代 `.S/bin` 对正常指令流地址
 边界的覆盖。`.S/bin` 仍负责 8B beat、RVC/RVI、fetch-block、page-near-tail 等

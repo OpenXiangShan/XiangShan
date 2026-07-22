@@ -35,9 +35,10 @@
          - "Guide_Doc/dut_fixture.md"
 
   - name: coverage_model_implementation
-    desc: "功能覆盖率模型实现"
+    desc: "功能覆盖率模型实现（Frontend 使用专用 canonical recorder 流程）"
     task:
       - "目标：创建覆盖率统计系统，跟踪哪些功能已测试"
+      - "Frontend 特例：先读取 src/test/python/Frontend/docs/03_功能覆盖率建模/skills.md；Frontend 只能使用 FunctionalCoverageRecorder + env/funcov.py 单一采样链，不得生成 coverage_def.py、get_coverage_groups、toffee CovGroup 或平行 SV covergroup。以下 CovGroup 步骤仅适用于尚未迁移的其他 DUT。"
       - "第1步：读取功能分析文档{OUT}/{DUT}_functions_and_checks.md"
       - "第2步：为每个功能分组<FG-*>创建CovGroup覆盖组"
       - "第3步：为每个功能点<FC-*>添加watch_point监测点"

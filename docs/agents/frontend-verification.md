@@ -29,8 +29,12 @@ tree. Start here unless the task explicitly says otherwise.
   helpers used by the API layer.
 - `src/test/python/Frontend/env/functional_coverage.py`: functional coverage
   recorder and pilot-csv integration.
-- `src/test/python/Frontend/env/coverage_def.py`: coverage definitions. Update
-  when behavior changes introduce new scenario classes.
+- `src/test/python/Frontend/env/funcov.py`: module-level predicates in the only
+  active recorder/sampler chain. Keep each group/point/bin aligned with the
+  canonical registry.
+- `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh`: standard bin-trace
+  entry that now auto-creates `TB_RUN_ID` / `TB_ARTIFACT_DIR` and routes
+  waveform, coverage, funcov, and case-log outputs into that run layout.
 - `src/test/python/Frontend/env/agents/`: DUT-facing side agents such as
   ICache, PTW, uncache, and backend drive logic.
 - `src/test/python/Frontend/env/model/`: semantic model helpers, golden trace
@@ -52,8 +56,13 @@ tree. Start here unless the task explicitly says otherwise.
 - `build-frontend/pylib/Frontend/`: generated Python bindings, shared objects,
   signal map, and `Frontend_top.sv`.
 - `build-frontend/rtl/`: generated RTL artifacts useful for cross-checking DUT behavior.
+- `build-frontend/frontend_build_manifest.json`: written only after a successful
+  `make frontend`; binds the design SHA and build configuration to the compiled
+  DUT, generated RTL tree, and signal-contract hashes.
 - `ready-to-run/`: example DUT binaries used by frontend bin-trace investigations.
-- `NEMU/logs/`: trace inputs used to reconstruct failing windows.
+- `NEMU/logs/`: legacy/imported trace inputs used to reconstruct old failing
+  windows; new runner-generated trace and raw NEMU logs belong under the run's
+  `inputs/` directory.
 
 ## Source Of Truth
 
@@ -73,6 +82,14 @@ interface. If a signal is not present on the current DUT object or in the
 generated `Frontend_top.sv` / `signals.json`, remove it from the bundle or
 treat it as intentionally optional; do not keep historical or guessed signal
 names in the active env contract.
+
+Functional-coverage artifacts must carry explicit `coverage_targets` when the
+run is being generated for a known Bin_ID/TP_ID scope. Back-annotation should
+prefer those targets over artifact-tag substring matching, which remains only
+for historical compatibility.
+Python directed tests declare targets with `funcov_bins` / `funcov_tps`
+markers. Assembly bin-trace runs resolve exact registry testcase names from the
+bin stem.
 
 The current Frontend package intentionally has two layers:
 
@@ -330,7 +347,8 @@ needs different observability, stop, or wall-clock timeout behavior.
 ### Variants
 
 The script accepts optional explicit trace and NEMU-log paths after the
-binary:
+binary. The following form is for importing a previously generated legacy
+trace; omitted paths default under the new run's `inputs/` directory:
 
 ```bash
 timeout --foreground 1200 env "${BIN_TRACE_ENV[@]}" \
@@ -416,15 +434,29 @@ already set to match that case's run requirements.
 
 ### Artifacts
 
-After a run, look for artifacts in the date-stamped frontend data directory,
-for example `src/test/python/Frontend/data/<YYYYMMDD>/`. Bin-trace per-case
-`.log` and `.fst` filenames include the binary stem and pytest case name:
-`<case>_test_bin_trace.log` and `<case>_test_bin_trace.fst`. Non-bin DUT cases
-also use the same date directory; their filenames are based on the pytest case
-name.
+Each run uses a unique root, normally
+`src/test/python/Frontend/data/runs/<run_id>/`. Code coverage, waveform,
+functional coverage, and case logs are kept together under `coverage/`,
+`waveforms/`, `funcov/`, and `logs/`. Bin-trace filenames include the binary
+stem and pytest case name, for example `<case>_test_bin_trace.fst` and
+`<case>_test_bin_trace.funcov.json`.
 
-Functional coverage artifacts are written separately under
-`src/test/python/Frontend/data/funcov/`.
+Do not write new evidence to the old date directories or the global
+`data/funcov/` directory. Those locations contain historical artifacts only.
+
+Each DUT run must carry explicit `coverage_targets`; a bin stem that does not
+resolve to an active registry row is an input error and must stop the run.
+Monitor/checker redirect-recovery errors are real failures and must not be
+filtered out by a legacy helper. Positive bin hits from a failed run, an old
+schema, or a build without a valid manifest remain diagnostic evidence only.
+The back-annotation gate also verifies that the declared waveform, raw `.dat`,
+case log, and funcov paths are regular files under the same artifact root.
+Waveform, `.dat`, and funcov files must be non-empty; a path string alone is
+not evidence. It recomputes the current canonical registry and sampler hashes,
+and the artifact's definitions hash, so evidence from an older coverage model
+cannot be promoted against the current test-point table. Recorded testcase,
+assembly (when present), binary, and golden-trace hashes are also recomputed
+from their declared files; missing or changed inputs invalidate the evidence.
 
 `src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace` is a
 run-to-completion entrypoint. Do not use it as a load-only or partial-step
@@ -449,8 +481,10 @@ meet the following operational requirements:
   allowed
 - every run must generate a waveform artifact
 - every run must generate a readable log artifact
-- the default artifact location should be a date-stamped directory under
-  `src/test/python/Frontend/data/` unless an explicit path override is given
+- every run must use a unique `run_id` and artifact root, normally
+  `src/test/python/Frontend/data/runs/<run_id>/`
+- code coverage, waveform, funcov, and logs from one run must not be mixed with
+  another run's output directories
 - waveform and log filenames should be logically tied to the binary and test
   case, so the reproduction can be matched back to the exact run
 
@@ -473,7 +507,7 @@ Therefore:
 - for DUT bin runs, set `TB_TRACE_STAGNANT_CYCLES_LIMIT` and fail early when
   golden-trace cursor stops advancing (pipeline default: `20000`)
 - for pipeline runs, use `TB_PYTEST_TIMEOUT_SECS` to set the DUT-stage timeout;
-  default is `900` seconds
+  default is `6400` seconds
 - in interactive debug sessions, do not launch open-ended DUT bin runs; always
   keep `TB_TRACE_STAGNANT_CYCLES_LIMIT` and `TB_PYTEST_TIMEOUT_SECS` enabled
   and prefer wrapping the pipeline command with an outer `timeout` guard
@@ -542,8 +576,9 @@ make frontend -j
   Do not waive SRAM files by default. Override with `TB_LINE_COVERAGE_IGNORE=...`
   or `TB_LINE_COVERAGE_OMIT=...`; disable reporter registration with
   `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` for debugging.
-- Update `src/test/python/Frontend/env/coverage_def.py` when introducing new
-  fetch, branch, redirect, exception, or performance scenario coverage.
+- Update the canonical coverage registry and
+  `src/test/python/Frontend/env/funcov.py` together when introducing functional
+  coverage. Do not add a parallel toffee or SV functional coverage sampler.
 - Do not commit transient logs, generated waveforms, or other temporary
   artifacts unless they are intentional fixtures.
 
@@ -574,25 +609,21 @@ than host-side test scaffolding.
 
 ## Artifact Naming
 
-- When you generate debugging waveforms under
-  `src/test/python/Frontend/data/`, place them in a date folder instead of
-  dumping them directly in `data/`.
-- Use a stable date folder name such as `src/test/python/Frontend/data/20260414/`.
-- Waveform filenames must be logically named from the reproduction context, for
-  example: test name, binary name, seed, and purpose or fix tag.
-- Prefer names in the form
-  `<test-or-bin>_<seed-or-case>_<purpose>.<ext>`; once the file already lives
-  under a date directory, do not repeat the date in the filename.
-- Apply the same naming discipline to paired debug logs when you intentionally
-  keep them under `data/`.
+- Use one unique `run_id` for every invocation and keep its outputs under one
+  run root.
+- Waveform and log filenames must identify the testcase or binary; the run
+  identity belongs in the parent directory and artifact metadata.
+- A suite must allocate a different run ID and directory for every case. It
+  may aggregate `.dat` files by glob after all cases finish, but it must not
+  make the cases write into one shared live directory.
+- Historical date directories are read-only evidence and must not be reused as
+  current run destinations.
 
 Current default implementation details in `env/fixtures.py`:
 
-- waveform, case log, and coverage `.dat` default to a date-stamped
-  subdirectory under `src/test/python/Frontend/data/`, regardless of whether
-  `TB_BIN_PATH` is set
-- non-bin DUT tests follow the same dated artifact layout as bin-trace tests;
-  do not leave their `.fst`, `.log`, or `.dat` files directly under `data/`
+- waveform, case log, coverage `.dat`, and funcov default under
+  `src/test/python/Frontend/data/runs/<run_id>/`
+- non-bin DUT tests use the same run-scoped layout as bin-trace tests
 - default waveform file name is `<bin-stem>_<test-name>.<wave-ext>`
 - default `wave-ext` is `fst`
 - if frontend is rebuilt with `FRONTEND_WAVEFORM_FORMAT=vcd`, default `wave-ext` becomes `vcd` and later `make frontend` runs keep using `vcd` until `FRONTEND_WAVEFORM_FORMAT=fst` is specified explicitly
@@ -603,11 +634,12 @@ Current default implementation details in `env/fixtures.py`:
 - case logs are enabled by default through `TB_ENABLE_CASE_LOG=1`; set it to
   `0` only when intentionally suppressing per-case logs
 - `TB_WAVEFORM_PATH`, `TB_WAVEFORM_DIR`, `TB_CASE_LOG_PATH`, and
-  `TB_COVERAGE_DIR` still override the default locations when explicitly set
+  `TB_COVERAGE_DIR` still override default locations when explicitly set; any
+  regression or suite using overrides must keep them unique per run
 
 ## Deeper References
 
 - `docs/testbench/Guide_Doc/dut_fixture.md`
 - `docs/testbench/Guide_Doc/dut_api_instruction.md`
-- `docs/testbench/Guide_Doc/dut_function_coverage_def.md`
+- `src/test/python/Frontend/docs/03_功能覆盖率建模/skills.md`
 - `docs/testbench/testbench_stages.yaml`

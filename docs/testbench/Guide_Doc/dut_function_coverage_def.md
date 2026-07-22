@@ -1,6 +1,14 @@
 
 # DUT 功能覆盖率定义指南
 
+> **Legacy template notice (2026-07):** this document describes the historical
+> toffee `CovGroup`/`watch_point` API and is retained only for DUTs that still
+> use that contract. The Frontend verification environment no longer uses this
+> implementation. For Frontend, follow
+> `src/test/python/Frontend/docs/03_功能覆盖率建模/skills.md` and keep one
+> `FunctionalCoverageRecorder`/`funcov.py` chain; do not create
+> `env/coverage_def.py`, `get_coverage_groups`, or a parallel CovGroup model.
+
 ## 概述
 
 功能覆盖率（Functional Coverage）是验证过程中的重要指标，用于衡量测试用例对设计功能的覆盖程度。本文档介绍如何使用 `toffee` 和 `toffee_test` 库定义和实现功能覆盖率。

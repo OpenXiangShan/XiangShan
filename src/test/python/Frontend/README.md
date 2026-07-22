@@ -51,6 +51,8 @@
 - `env/dut_factory.py` 负责真实 DUT 构造。
 - `env/nemu_trace_pipeline.py` 负责从 bin 驱动 NEMU trace 生成。
 - `env/functional_coverage.py` 负责功能覆盖率事件记录与产物输出。
+- `env/funcov.py` 负责 canonical group/coverpoint/bin 的 DUT 周期级采样；
+  不再维护平行的 toffee 功能覆盖率定义。
 - `env/monitor.py` 与 `env/monitors/` 共同承担 monitor 侧数据结构和 DUT 观测逻辑。
 - `env/bundles/`、coverage 和启动控制里出现的信号名，必须以当前生成出来的 DUT 接口为准。
   不允许长期保留已经不在 DUT 中出现的历史信号；缺失信号要么从 bundle/coverage 中删除，要么被明确建模为可选信号。
@@ -85,7 +87,7 @@
   - 多个 `.dat` 或目录输入默认输出到 `coverage.genhtml/`
   - 会自动生成 `merged.info` 并调用 `genhtml --ignore-errors range --filter missing`
   - 若要把指定 `.dat` 合并到已有 `coverage.genhtml/`，可直接执行：
-    `source /nfs/share/unitychip/activate && PATH=/nfs/share/unitychip/bin:$PATH src/test/python/Frontend/scripts/gen_coverage_html.sh src/test/python/Frontend/data/<case>.dat src/test/python/Frontend/data/coverage.genhtml`
+    `source /nfs/share/unitychip/activate && PATH=/nfs/share/unitychip/bin:$PATH src/test/python/Frontend/scripts/gen_coverage_html.sh src/test/python/Frontend/data/runs/<run_id>/coverage`
 - `Frontend.ignore`
   - 用于 `toffee_test.reporter.set_line_coverage` 的 line coverage waive。
   - `scripts/gen_coverage_html.sh` 也会默认读取该文件，并把文件级 pattern 转成 `genhtml --exclude`。
@@ -99,17 +101,21 @@
   - 可用 `TB_LINE_COVERAGE_OMIT=/path/to/file.omit` 覆盖默认 omit 文件。
   - 可用 `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` 关闭 pytest teardown 阶段的 toffee line coverage 上报。
 - `scripts/report_raw_code_coverage.py`
-  - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py`
-  - 直接合并 `data/*.dat`，按 raw 覆盖点输出总 `line/branch/expr/toggle` 覆盖率
+  - 用法: `python src/test/python/Frontend/scripts/report_raw_code_coverage.py --data-dir src/test/python/Frontend/data/runs/<run_id>/coverage`
+  - 合并指定同版本 run/suite 的 `.dat`，按 raw 覆盖点输出总 `line/branch/expr/toggle` 覆盖率
+  - 使用 `--json-output <path> --run-id <run_id>` 固化机器可读 summary；汇编 suite 默认写入 `<suite_id>_report/code_coverage_summary.json`
   - 同时给出 `ifu_strict`、`ifu_core`、`icache`、`bpu`、`tlb_pmp`、`fault_path` 的 raw line 覆盖率拆分
+- `scripts/run_baremode_asm_suite.sh`
+  - 对每个 case 保留独立 run 目录，随后自动生成逐 artifact gate audit、只读反标结果和同签名 `observed` funcov aggregate。
+  - `observed` aggregate 只用于批量 summary/unhit；自动 `HIT` 仍只认逐 case、真实 DUT 且通过全部门禁的原始 artifact。
 - `scripts/asm_to_jsonl.sh`
   - 用法: `src/test/python/Frontend/scripts/asm_to_jsonl.sh <case.S> [bin_path] [trace_jsonl_path]`
   - 默认把 `.S` 链接到 `0x10001000`，按 NEMU memory base `0x10000000`
     在最终 `.bin` 前补 `0x1000` 字节 0
   - 默认输出 `.bin` 到 `tests/asm_cases/generated/<case>.bin`，输出 golden trace 到
-    `NEMU/logs/<case>.trace.jsonl`
+    `data/runs/<run_id>/inputs/<case>.trace.jsonl`
   - 通过现有 `tools/nemu_bin_to_golden_trace.py` 调用 NEMU 并转换 trace；
-    raw NEMU log 默认写到 `NEMU/logs/<case>.nemu.log`
+    raw NEMU log 默认写到 `data/runs/<run_id>/inputs/<case>.nemu.log`
   - 调用前需要先激活 frontend Python/runtime 环境；脚本本身不写死 venv 路径
   - 可用 `NEMU_EXEC=/path/to/riscv64-nemu-interpreter` 手动指定 NEMU；
     默认使用 `ready-to-run/riscv64-nemu-interpreter`
@@ -144,10 +150,27 @@ src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.b
 - 详细测试参数、bin-trace 环境变量、runtime bound、artifact 规则和
   direct `pytest` 约束，统一见 `docs/agents/frontend-verification.md`。
 
+## 覆盖率闭环
+
+Frontend BT 只保留两条职责不同的覆盖率链：
+
+1. 功能覆盖率：
+   `测试点主表 -> 03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv -> env/funcov.py -> env/functional_coverage.py -> data/runs/<run_id>/funcov/*.funcov.json -> tools/backannotate_funcov.py`。
+   registry 当前共 222 行，其中只有 `Coverpoint` 完整并与 sampler 一一对应的 64 行会装入 runtime；其余 158 行均为 `UNMAPPED` 历史规划。带 `旧BPU_FTQ` 路径的历史行全部保持 `Coverpoint` 为空，不能进入采样或自动反标。
+   标准 bin-trace 脚本会自动生成 `TB_RUN_ID` / `TB_ARTIFACT_DIR`；fixture 会将 pytest `funcov_bins` 标记或与汇编 case stem 精确匹配的 registry 行写入 `coverage_targets`。
+   `make frontend` 在编译成功后生成 `build-frontend/frontend_build_manifest.json`。funcov 只在 manifest 的源码状态干净且其中的 DUT/RTL/signal-contract 哈希与当前编译产物一致时接受其中的 `dut_source_sha`。
+2. 代码覆盖率：
+   `dut.SetCoverage() -> Verilator .dat -> toffee set_line_coverage() -> report_raw_code_coverage.py/gen_coverage_html.sh`。
+
+功能覆盖率证明目标场景被激励；checker、assertion、monitor 或 trace 对比证明 DUT 行为正确。代码覆盖率用于发现 RTL 空洞，三者不能互相替代。完整建模、真实 DUT 证据、版本隔离、自动反标和人工 `CLOSED` 规则见
+`docs/03_功能覆盖率建模/skills.md`。
+
 ## 文档分工
 
 - 目录结构、入口分层和当前实现定位，以当前 README 为准。
 - frontend 验证流程、bin-trace 运行要求、artifact 规则和提交约束，统一见
   `docs/agents/frontend-verification.md`。
+- 测试点驱动的功能覆盖率建模、回归、版本门禁和反标规范，统一见
+  `docs/03_功能覆盖率建模/skills.md`。
 - DUT / monitor / env mismatch 的分析方法，统一见
   `docs/agents/frontend-debugging.md`。
