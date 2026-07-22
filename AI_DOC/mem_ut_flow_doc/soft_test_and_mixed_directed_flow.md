@@ -5,8 +5,9 @@
 - `soft_test` 软件闭环 smoke / replay smoke。
 - `memblock_main_dispatch_manual_main_table_sequence` 真实 DUT mixed directed main table 构造。
 
-这两类 flow 都不是 monitor 驱动的真实后端反馈主链路：
-- `soft_test` 是软件事件模拟闭环，用于快速验证 status/queue/commit/deq/replay 规则。
+这两类 flow 都不等待 DUT monitor 产生真实后端反馈：
+- `soft_test` 是软件事件模拟闭环，用于快速验证 status/queue/commit/deq/replay 规则；
+  replay smoke 会注入与 V2 monitor 同格式的 SQ-only raw，并复用公共 adapter/batch handler。
 - `real_mixed` 是真实 DUT smoke 的定向主表构造分支，只负责生成混合 load/store 主表，不替代 monitor/recovery 逻辑。
 
 对应主要源码：
@@ -32,9 +33,13 @@ flowchart TD
     H --> I[route_all_issue_queues]
     I --> J[select_issue_candidates]
     J --> K[fire_selected_items / fire_all_issue_items]
-    K --> L[make_pass_wb_event / make_replay_wb_event]
-    L --> M[submit_writeback_event]
-    M --> N[writeback_status_handler::handle_event]
+    K --> L[make_pass_wb_event / submit_raw_sta_iq_feedback]
+    L --> M{event type}
+    M -->|direct real-WB| N[writeback_status_handler::handle_event]
+    M -->|raw STA IQ| N0[raw_iq_feedback_q]
+    N0 --> N01[collect_monitor_event_batch]
+    N01 --> N02[convert_raw_iq_feedback / process_monitor_event_batch]
+    N02 --> N
     N --> N1[normal pass: mark_target_normal_pass]
     N --> N2[replay/fault: push_feedback_event]
     N1 --> O[commit_and_deq_lsq]
@@ -68,10 +73,12 @@ Soft test / mixed directed flow：
    select_issue_candidates / fire_selected_items / fire_all_issue_items 根据队列内容直接 fire，不依赖真实 DUT 后端反馈。
 
 3. soft_test 写回与 commit 阶段：
-   make_pass_wb_event/make_replay_wb_event 构造软件 writeback/replay event；
-   submit_writeback_event 把 event 交给 writeback_status_handler::handle_event；
-   handler 再进入 normal pass 或 replay/fault 分支；
-   replay smoke 会构造 make_replay_wb_event，并验证 stale pass 被忽略；
+   normal software smoke用make_pass_wb_event构造real-WB event，再由submit_writeback_event
+   直接交给writeback_status_handler::handle_event；
+   replay smoke用submit_raw_sta_iq_feedback构造V2 SQ-only raw，写入raw_iq_feedback_q后
+   调用collect_monitor_event_batch，复用真实adapter/batch handler形成hit/miss语义；
+   hit=0进入replay recovery，hit=1先设置sta_issue_feedback_success；
+   replay smoke随后注入旧快照和当前快照real-WB，验证stale过滤与最终完成；
    commit_and_deq_lsq 通过 lsq_commit_handler 收敛 ROB commit 和 LQ/SQ deq；
    check_final_status / check_replay_final_status 最后验证所有状态和 replay 轮次正确。
 
@@ -166,10 +173,11 @@ build_directed_main_table();
 admit_lsq_and_route_issue();
 fire_all_issue_items(fired_items);
 inject_writeback_events_except(... STA ...);
-submit_writeback_event(make_replay_wb_event(first_sta_item));
+submit_raw_sta_iq_feedback(first_sta_item, 1'b0);
 exception_redirect_replay_task();
 check_replay_pending_state(...);
 fire_replay_sta_item(...);
+submit_raw_sta_iq_feedback(replay_sta_item, 1'b1);
 submit_writeback_event(make_pass_wb_event_with_snapshot(...));
 check_stale_pass_ignored(...);
 submit_writeback_event(make_pass_wb_event(...));
@@ -180,7 +188,9 @@ check_final_status();
 
 功能解释：
 
-该 sequence 专门验证 replay 轮次和 stale pass 过滤，不依赖真实 DUT 输出。它通过软件构造 replay event、stale pass event 和最终 pass event，验证 replay_seq/issue_epoch 过滤是否正确。
+该 sequence 专门验证 replay 轮次和 stale pass 过滤，不依赖真实 DUT 输出。它不再直接构造
+完整 replay event，而是注入与 V2 monitor 一致的 SQ-only STA IQ raw，验证 active SQ owner
+反查、IQ hit/miss、replay_seq/issue_epoch 过滤和严格 real-WB 顺序。
 
 输入/输出：
 
@@ -193,9 +203,10 @@ check_final_status();
 先构造并 fire 所有 issue item；
 找到目标 STA item，记录当前 issue_epoch 和 replay_seq；
 先注入除了目标 STA 之外的正常 pass；
-再注入 replay 语义事件，触发 exception/replay 处理；
+注入hit=0的SQ-only STA IQ raw，由adapter补齐current snapshot并触发replay处理；
 检查目标 uid 进入 replay_pending；
 重新 fire STA replay item；
+注入hit=1的SQ-only STA IQ raw，确认sta_issue_feedback_success置位；
 注入带旧 snapshot 的 pass，确认被忽略；
 注入正确的 replay pass，确认 replay 完成；
 最后 commit/deq 并检查最终状态。
@@ -487,10 +498,12 @@ soft_test smoke：
 soft_test replay smoke：
   body
   -> fire_all_issue_items
-  -> make_replay_wb_event
+  -> submit_raw_sta_iq_feedback(hit=0)
+  -> raw_iq_feedback_q / collect_monitor_event_batch
   -> exception/replay 处理
   -> check_stale_pass_ignored
   -> replay STA 再发射
+  -> submit_raw_sta_iq_feedback(hit=1)
   -> check_replay_final_status
   -> commit_and_deq_lsq
   -> check_final_status

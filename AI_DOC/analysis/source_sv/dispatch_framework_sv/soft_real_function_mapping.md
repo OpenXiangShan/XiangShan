@@ -183,7 +183,7 @@ DUT memblock output
 | `soft_test_memblock_dispatch_smoke_sequence::admit_lsq_and_route_issue()` | 直接调用 `lsq_ctrl.commit_allocate()` / `commit_non_lsq_admission()`，模拟 LSQ admission 成功，然后 route issue queue。 | `memblock_lsqenq_dispatch_base_sequence` 驱动真实 LSQ enqueue 接口；launch后reservation，下一driver边界执行`complete_admission()`。 |
 | `soft_test_memblock_dispatch_smoke_sequence::fire_all_issue_items()` / `fire_selected_items()` | 从 issue queue 中取 item，人工调用 `mark_issue_item_fire()`，模拟 issue fire。 | `memblock_issue_dispatch_base_sequence` 驱动真实 load/STA/STD issue 接口，并根据 fired mask 更新状态。 |
 | `soft_test_memblock_dispatch_smoke_sequence::inject_writeback_events()` | 人工构造 pass writeback event。 | DUT output monitor 采集真实 writeback/feedback，再由 monitor adapter 归一化。 |
-| `soft_test_memblock_dispatch_replay_smoke_sequence::make_replay_wb_event()` 相关路径 | 人工构造 replay event，验证 replay 状态机。 | DUT feedback/ctrl output monitor 采集 replay/redirect 相关事件。 |
+| `soft_test_memblock_dispatch_replay_smoke_sequence::submit_raw_sta_iq_feedback()` | 人工构造与V2 STA monitor相同的SQ-only raw，复用公共adapter/batch handler验证IQ miss/replay和hit/real-WB顺序。 | DUT IQ feedback monitor采集真实`valid/hit/sqIdx`并写同一raw queue；后续adapter/recovery路径相同。 |
 | `soft_test_memblock_dispatch_smoke_sequence::commit_and_deq_lsq()` | 直接调用 commit handler 更新 ROB commit、LQ/SQ deq 状态。 | `memblock_lsqcommit_dispatch_base_sequence` 驱动真实 LSQ commit 接口；deq/释放状态由 DUT monitor 或 commit handler 校验路径更新。 |
 
 这些 soft test 任务的目的不是严格模拟真实接口时序，而是用软件事件快速验证公共状态表、issue queue、writeback/replay/commit handler 的闭环逻辑。

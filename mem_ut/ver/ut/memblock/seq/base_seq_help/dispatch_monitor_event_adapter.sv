@@ -235,6 +235,57 @@ class dispatch_monitor_event_adapter extends uvm_object;
             `uvm_fatal("INT_WB_ATTACH", "snapshot attach received a future sample epoch")
         end
 
+        // 中文注释：V2 STA IQ feedback 只携带 SQ。先用当前 active SQ mapping
+        // 反查 owner，再复用公共 ROB/target snapshot 检查补齐 event 身份。
+        if (wb_event.source == MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK &&
+            wb_event.target == MEMBLOCK_ISSUE_TARGET_STA &&
+            wb_event.has_sq && !wb_event.has_rob && !wb_event.has_lq) begin
+            memblock_uid_t iq_uid;
+            status_transaction iq_status;
+            memblock_sq_key_t canonical_sq;
+            memblock_wb_event_t iq_candidate;
+
+            if (!data.is_valid_sq_key(wb_event.sq_key)) begin
+                `uvm_fatal("IQ_FEEDBACK_ATTACH",
+                           $sformatf("STA IQ raw SQ key is incomplete=%0d/%0d",
+                                     wb_event.sq_key.flag, wb_event.sq_key.value))
+            end
+            if (!data.lookup_active_uid_by_sq(wb_event.sq_key, iq_uid)) begin
+                `uvm_fatal("IQ_FEEDBACK_ATTACH",
+                           $sformatf("no active uid for STA IQ SQ key=%0d/%0d",
+                                     wb_event.sq_key.flag, wb_event.sq_key.value))
+            end
+            iq_status = data.get_status(iq_uid);
+            canonical_sq.flag  = iq_status.sqIdx_flag;
+            canonical_sq.value = iq_status.sqIdx_value;
+            if (!iq_status.active_sq_mapped ||
+                !iq_status.sta_dispatched ||
+                canonical_sq.flag != wb_event.sq_key.flag ||
+                canonical_sq.value != wb_event.sq_key.value) begin
+                `uvm_fatal("IQ_FEEDBACK_ATTACH",
+                           $sformatf("STA IQ SQ owner mismatch uid=%0d raw=%0d/%0d status=%0d/%0d mapped=%0d",
+                                     iq_uid,
+                                     wb_event.sq_key.flag, wb_event.sq_key.value,
+                                     canonical_sq.flag, canonical_sq.value,
+                                     iq_status.active_sq_mapped))
+            end
+            iq_candidate = wb_event;
+            iq_candidate.uid = iq_uid;
+            iq_candidate.has_uid = 1'b1;
+            iq_candidate.rob_key = iq_status.get_rob_key();
+            iq_candidate.has_rob = 1'b1;
+            if (!fill_current_issue_snapshot(iq_candidate,
+                                             iq_uid,
+                                             iq_candidate.rob_key,
+                                             1'b0,
+                                             0,
+                                             1'b1)) begin
+                `uvm_fatal("IQ_FEEDBACK_ATTACH", "STA IQ current snapshot validation failed")
+            end
+            wb_event = iq_candidate;
+            return;
+        end
+
         if (rob_value_only_without_flag) begin
             if (wb_event.has_rob) begin
                 `uvm_fatal("INT_WB_ATTACH", "STD value-only event must not claim a ROB flag")
@@ -548,19 +599,22 @@ class dispatch_monitor_event_adapter extends uvm_object;
             return 1'b0;
         end
         if (raw.vector_feedback) begin
-            `uvm_info("DISP_MON_ADAPT",
-                      $sformatf("drop vector iq feedback port=%0d source_type=0x%0h", raw.port_id, raw.source_type),
-                      UVM_LOW)
-            return 1'b0;
+            `uvm_fatal("DISP_MON_ADAPT",
+                       $sformatf("vector IQ feedback is unsupported port=%0d source_type=0x%0h",
+                                 raw.port_id, raw.source_type))
         end
         if (!raw.is_sta && !raw.is_std) begin
-            `uvm_info("DISP_MON_ADAPT", "drop iq feedback with unknown scalar target", UVM_LOW)
-            return 1'b0;
+            `uvm_fatal("DISP_MON_ADAPT", "IQ feedback has no supported scalar target")
         end
         if (raw.is_std) begin
             `uvm_fatal("DISP_MON_ADAPT",
                        $sformatf("STD IQ feedback cannot complete strict V2 STD real-WB target: port=%0d hit=%0d",
                                  raw.port_id, raw.hit))
+        end
+        if (!raw.sq_valid || raw.rob_valid || raw.lq_valid) begin
+            `uvm_fatal("DISP_MON_ADAPT",
+                       $sformatf("STA IQ feedback must be SQ-only: sq_valid=%0d rob_valid=%0d lq_valid=%0d",
+                                 raw.sq_valid, raw.rob_valid, raw.lq_valid))
         end
 
         wb_event.valid         = 1'b1;
@@ -569,7 +623,12 @@ class dispatch_monitor_event_adapter extends uvm_object;
         wb_event.source         = MEMBLOCK_WB_EVENT_SOURCE_STA_FEEDBACK;
         wb_event.has_rob       = raw_rob_to_key(raw.rob_valid, raw.rob_flag, raw.rob_value, wb_event.rob_key);
         wb_event.has_lq         = 1'b0;
-        wb_event.has_sq        = raw_sq_to_key(raw.sq_valid, raw.sq_flag, raw.sq_value, wb_event.sq_key);
+        wb_event.has_sq         = raw_sq_to_key(raw.sq_valid, raw.sq_flag, raw.sq_value, wb_event.sq_key);
+        attach_current_issue_snapshot(wb_event);
+        if (!wb_event.has_uid || !wb_event.has_rob || !wb_event.has_sq ||
+            !wb_event.has_issue_epoch || !wb_event.has_replay_seq) begin
+            `uvm_fatal("DISP_MON_ADAPT", "STA IQ feedback snapshot is incomplete")
+        end
         // 中文注释：IQ feedback 是 IssueQueue response，不是真实 ROB/RF writeback。
         // hit/finalSuccess 只写 iq_feedback_*；STA miss 额外生成 replay；STD 在入口直接 fatal。
         wb_event.iq_feedback_valid       = 1'b1;
@@ -640,29 +699,53 @@ class dispatch_monitor_event_adapter extends uvm_object;
         end
     endfunction:drain_sfence_events
 
-    task collect_writeback_events_batch(ref memblock_wb_event_t events[$]);
+    task check_raw_sample_cycle(input longint unsigned raw_cycle,
+                                ref longint unsigned sample_cycle,
+                                ref bit sample_cycle_valid,
+                                input string source_name);
+        if (!sample_cycle_valid) begin
+            sample_cycle = raw_cycle;
+            sample_cycle_valid = 1'b1;
+        end else if (sample_cycle != raw_cycle) begin
+            `uvm_fatal("DISP_MON_BATCH",
+                       $sformatf("mixed monitor sample cycle source=%s expected=%0d actual=%0d",
+                                 source_name, sample_cycle, raw_cycle))
+        end
+    endtask:check_raw_sample_cycle
+
+    task collect_writeback_events_batch(ref memblock_wb_event_t events[$],
+                                        ref longint unsigned sample_cycle,
+                                        ref bit sample_cycle_valid);
         memblock_sync_pkg::dispatch_raw_int_wb_t raw_int_wb;
         memblock_sync_pkg::dispatch_raw_iq_feedback_t raw_iq;
         memblock_wb_event_t wb_event;
 
-        while (memblock_sync_pkg::pop_raw_int_wb(raw_int_wb)) begin
-            if (convert_raw_int_wb(raw_int_wb, wb_event)) begin
+        // 中文注释：IQ hit 是 STA real-WB 的语义前置事件。各 raw queue 内仍保持 FIFO，
+        // 这里只固定同一采样 batch 的跨队列顺序，再交给 batch handler 做 redirect-first。
+        while (memblock_sync_pkg::pop_raw_iq_feedback(raw_iq)) begin
+            check_raw_sample_cycle(raw_iq.cycle, sample_cycle, sample_cycle_valid, "iq_feedback");
+            if (convert_raw_iq_feedback(raw_iq, wb_event)) begin
                 events.push_back(wb_event);
             end
         end
-        while (memblock_sync_pkg::pop_raw_iq_feedback(raw_iq)) begin
-            if (convert_raw_iq_feedback(raw_iq, wb_event)) begin
+        while (memblock_sync_pkg::pop_raw_int_wb(raw_int_wb)) begin
+            check_raw_sample_cycle(raw_int_wb.cycle, sample_cycle, sample_cycle_valid, "int_wb");
+            if (convert_raw_int_wb(raw_int_wb, wb_event)) begin
                 events.push_back(wb_event);
             end
         end
     endtask:collect_writeback_events_batch
 
-    task collect_ctrl_redirect_events_batch(ref memblock_wb_event_t events[$]);
+    task collect_ctrl_redirect_events_batch(ref memblock_wb_event_t events[$],
+                                            ref memblock_sync_pkg::dispatch_raw_ctrl_t deferred_ctrl[$],
+                                            ref longint unsigned sample_cycle,
+                                            ref bit sample_cycle_valid);
         memblock_sync_pkg::dispatch_raw_ctrl_t raw_ctrl;
         memblock_wb_event_t wb_event;
 
         while (memblock_sync_pkg::pop_raw_ctrl(raw_ctrl)) begin
-            apply_raw_ctrl_deq(raw_ctrl);
+            check_raw_sample_cycle(raw_ctrl.cycle, sample_cycle, sample_cycle_valid, "ctrl");
+            deferred_ctrl.push_back(raw_ctrl);
             if (convert_raw_memory_violation(raw_ctrl, wb_event)) begin
                 events.push_back(wb_event);
             end

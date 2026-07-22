@@ -46,7 +46,13 @@
 
 第四步，真实 DUT flow 中，LSQ 入队 sequence 在 DUT admission 成功后直接调用 `issue_queue_scheduler::prepare_issue_route_for_uid()`。该 helper 会确认 uid 已经 active/enq，把 `MEMBLOCK_STATUS_ISSUE_READY` 置高，并把 uid 放入 LOAD/STA/STD issue queue。`issue_ready` 只表示该 uid 已具备进入 issue 路径的测试框架条件；真实 TLB entry 会等 DTLB 发出 L2TLB request 后，由 L2TLB responder 通过公共表按 key 查找或创建，并在 PTE 回填 uid record 后置 `MEMBLOCK_STATUS_TLB_MAPPED`。software smoke 中的同名准备函数只保留在 `soft_test_memblock_dispatch_smoke_sequence` 内部。
 
-第五步，monitor 和 recovery 路径不断服务 DUT 返回事件。真实 service loop 使用 `collect_monitor_event_batch()` 一次性收集 raw int writeback、IQ feedback 和 ctrl memoryViolation，交给 `dispatch_monitor_batch_handler::process_monitor_event_batch()` 做 normalize、active redirect 过滤和同批 redirect-first 仲裁。只有未被 redirect 覆盖的非 redirect event 才交给 `writeback_status_handler` 落 pass/fault/IQ feedback 状态；redirect/replay/fault 进入 `exception_event_q` 后由 `exception_redirect_replay_task()` 统一处理 replay pending、redirect drive/flush/recovery。
+第五步，monitor 和 recovery 路径不断服务 DUT 返回事件。真实 service loop 使用
+`collect_monitor_event_batch()`先收集同拍 raw IQ feedback、再收集 int writeback，并把 ctrl
+memoryViolation加入同一个semantic batch；ctrl deq保存到局部`deferred_ctrl`。batch handler
+完成 normalize、active redirect 过滤和同批 redirect-first 仲裁后，调用者才按FIFO应用deferred
+ctrl。只有未被 redirect 覆盖的非 redirect event 才交给 `writeback_status_handler` 落
+pass/fault/IQ feedback 状态；redirect/replay/fault 进入 `exception_event_q` 后由
+`exception_redirect_replay_task()`统一处理 replay pending、redirect drive/flush/recovery。
 
 ## 4. 生命周期与数据流
 
@@ -137,7 +143,7 @@ base sequence 不再保留 `assign_main_issue_fields()`、`assign_issue_dep_fiel
 |---|---|---|---|
 | `collect_csr_runtime_events()` | 无显式参数；输入来自 CSR latest snapshot。 | 无返回；更新 runtime CSR snapshot。 | 调用 `monitor_adapter.drain_csr_events()`。该入口只同步 CSR runtime，不消费 sfence/hfence，TLB 建表前会调用，保证 lookup key 使用当前真实 CSR 上下文。 |
 | `collect_runtime_context_events()` | 无显式参数；输入来自 CSR latest snapshot 和 raw sfence queue。 | 无返回；先更新 runtime CSR snapshot，再消费 sfence/hfence。 | 统一 service loop 使用该入口显式执行 `drain_csr_events()` -> `drain_sfence_events()`，保证 sfence/hfence entry 级失效使用最新 CSR runtime，同时避免其它 CSR-only 路径隐式消费 sfence。 |
-| `collect_monitor_event_batch()` | 无显式参数；输入来自 raw int writeback、raw IQ feedback、raw ctrl queue。 | 无返回；可能更新 pass/fault/IQ feedback 状态或 enqueue redirect/replay/fault recovery event。 | 真实 monitor service 入口。同一轮先收集所有 semantic event，再由 batch handler 选择 oldest redirect、过滤覆盖范围内的 stale event，并处理未覆盖 event。 |
+| `collect_monitor_event_batch()` | 无显式参数；输入来自 raw IQ feedback、raw int writeback、raw ctrl queue。 | 无返回；可能更新 pass/fault/IQ feedback 状态、enqueue redirect/replay/fault recovery event，并在semantic batch后应用deferred ctrl。 | 真实 monitor service 入口。同一轮固定IQ先于int-WB，ctrl deq延后；batch handler选择oldest redirect、过滤覆盖范围内的stale event，并处理未覆盖event。 |
 | `exception_redirect_replay_task()` | 无。 | 无返回；更新 replay pending、redirect drive/flush/recovery 状态。 | 调用 `exception_handler.process_pending_events()`。这是 replay 重新入队和 redirect 恢复流程的公共入口。 |
 
 ## 6. 关键约束和错误处理

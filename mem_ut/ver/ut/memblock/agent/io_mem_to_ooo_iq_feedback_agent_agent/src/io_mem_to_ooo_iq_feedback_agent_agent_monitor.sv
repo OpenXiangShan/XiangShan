@@ -116,17 +116,24 @@ task io_mem_to_ooo_iq_feedback_agent_agent_monitor::mon_data();
 
         end
         if(this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
+            // V2 本轮只支持 scalar STA IQ feedback。VSTU valid 不能静默按 scalar
+            // 解释，也不能在 raw queue 中留下一个下游永远无法完成的 vector event。
+            if (io_mem_to_ooo_vstuIqFeedback_0_feedbackSlow_valid !== 1'b0 ||
+                io_mem_to_ooo_vstuIqFeedback_1_feedbackSlow_valid !== 1'b0) begin
+                `uvm_fatal("IQ_FEEDBACK_MON",
+                           "VSTU IQ feedback is outside the scalar-only V2 flow")
+            end
             if (io_mem_to_ooo_staIqFeedback_0_feedbackSlow_valid) begin
                 raw_iq_feedback = memblock_sync_pkg::make_empty_raw_iq_feedback();
                 raw_iq_feedback.valid = 1'b1;
                 raw_iq_feedback.port_id = 0;
                 raw_iq_feedback.is_sta = 1'b1;
-                raw_iq_feedback.rob_valid = 1'b1;
                 raw_iq_feedback.hit = io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_hit;
                 raw_iq_feedback.sq_valid = 1'b1;
                 raw_iq_feedback.sq_flag = io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_flag;
                 raw_iq_feedback.sq_value = io_mem_to_ooo_staIqFeedback_0_feedbackSlow_bits_sqIdx_value;
-                raw_iq_feedback.lq_valid = 1'b1;
+                raw_iq_feedback.rob_valid = 1'b0;
+                raw_iq_feedback.lq_valid = 1'b0;
                 raw_iq_feedback.cycle = $time;
                 memblock_sync_pkg::push_raw_iq_feedback(raw_iq_feedback);
             end
@@ -135,12 +142,12 @@ task io_mem_to_ooo_iq_feedback_agent_agent_monitor::mon_data();
                 raw_iq_feedback.valid = 1'b1;
                 raw_iq_feedback.port_id = 1;
                 raw_iq_feedback.is_sta = 1'b1;
-                raw_iq_feedback.rob_valid = 1'b1;
                 raw_iq_feedback.hit = io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_hit;
                 raw_iq_feedback.sq_valid = 1'b1;
                 raw_iq_feedback.sq_flag = io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_flag;
                 raw_iq_feedback.sq_value = io_mem_to_ooo_staIqFeedback_1_feedbackSlow_bits_sqIdx_value;
-                raw_iq_feedback.lq_valid = 1'b1;
+                raw_iq_feedback.rob_valid = 1'b0;
+                raw_iq_feedback.lq_valid = 1'b0;
                 raw_iq_feedback.cycle = $time;
                 memblock_sync_pkg::push_raw_iq_feedback(raw_iq_feedback);
             end

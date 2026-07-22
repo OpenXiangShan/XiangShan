@@ -77,6 +77,7 @@ class writeback_status_handler extends uvm_object;
         memblock_uid_t   uid;
         int unsigned     issue_epoch;
         int unsigned     replay_seq;
+        status_transaction status;
 
         if (!event_is_real_writeback(wb_event) && !event_has_fault(wb_event)) begin
             return 1'b0;
@@ -84,6 +85,16 @@ class writeback_status_handler extends uvm_object;
         uid = wb_event.uid;
         issue_epoch = wb_event.issue_epoch;
         replay_seq = wb_event.replay_seq;
+        status = data.get_status(uid);
+        // 中文注释：严格 STA 模式把 IQ hit 作为 real-WB/fault-WB 的前置阶段。
+        // 未观察到 current issue 的 hit 时立即失败，不能让写回绕过 replay 判定。
+        if (wb_event.target == MEMBLOCK_ISSUE_TARGET_STA &&
+            target_real_wb_pass_enabled(MEMBLOCK_ISSUE_TARGET_STA) &&
+            !status.sta_issue_feedback_success) begin
+            `uvm_fatal("WB_STATUS_STA_ORDER",
+                       $sformatf("STA real writeback arrived before IQ hit uid=%0d issue_epoch=%0d replay_seq=%0d",
+                                 uid, issue_epoch, replay_seq))
+        end
         if (event_has_fault(wb_event)) begin
             `uvm_info("WB_STATUS",
                       $sformatf("fault feedback uid=%0d target=%0d port=%0d rob_valid=%0d rob=%0d/%0d lq_valid=%0d lq=%0d/%0d exception_vec=0x%0h",

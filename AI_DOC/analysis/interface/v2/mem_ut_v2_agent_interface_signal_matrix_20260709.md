@@ -518,22 +518,17 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_iq_feedback_agent
 V2 scalar STA IQ feedback 运行期结论：
 
 1. 上表证明每路`staIqFeedback`只有`valid/hit/sqIdx_flag/sqIdx_value`，没有ROB、LQ、
-   `issue_epoch`或`replay_seq`字段。generation不是缺失的interface字段，不能通过给
+   `issue_epoch`或`replay_seq`字段。动态实例信息不是缺失的interface字段，不能通过给
    interface/xaction增加DUT不存在的payload解决。
-2. 当前monitor在scalar STA valid时仍把`dispatch_raw_iq_feedback_t.rob_valid=1`和
-   `lq_valid=1`，但没有真实ROB/LQ value；这会把empty helper的0值伪装成真实key，
-   可能先命中错误active uid。V2适配必须只置`sq_valid=1`并复制真实SQ key，
-   `rob_valid/lq_valid=0`。
-3. 即使SQ key可解析uid，第一次replay后也不能从当前status补旧event的
-   `issue_epoch/replay_seq`。LOAD/STA accepted fire必须建立不可变generation token；
-   adapter先用active SQ/ROB map解析uid，再匹配open token并附snapshot，随后才进入
-   原normalize/batch。attach不消费token；redirect-first放行后先只读
-   `validate_issue_generation_claim()`，原handler成功或命中唯一允许的STA compat no-op
-   后才`commit_issue_generation_claim()`。
-4. STA同一generation分别维护IQ feedback和real-WB pending：hit的原handler成功或唯一
-   compat no-op后才commit并只消费IQ、保留WB；miss只有成功进入原replay queue后才
-   commit IQ、取消同代WB并close。LOAD只维护real-WB pending；STD
-   继续ROB value-only受限方案，不建token且无STD replay。
+2. 当前 monitor 已按真实接口构造 SQ-only raw：只置`sq_valid=1`并复制真实SQ key，
+   `rob_valid/lq_valid=0`，不再把 empty raw 的0值伪装成ROB0/LQ0。
+3. adapter 以 active SQ map 唯一反查 uid，再从该 uid 的 current status 校验
+   `active_sq_mapped/sta_dispatched/canonical SQ`并补齐ROB、`issue_epoch/replay_seq`。
+   查无owner、owner不一致或snapshot不完整均fatal；本轮不建立generation token、claim map
+   或tombstone。
+4. STA IQ hit只调用`mark_issue_feedback_success()`，严格模式下继续等待真实STA real-WB；
+   miss进入现有replay recovery，清旧STA状态、递增`replay_seq`并允许重新issue。
+   同一采样batch先处理IQ raw再处理int-WB raw；ctrl deq在semantic batch之后应用。
 5. `vstuIqFeedback`属于vector replay接口。本轮scalar-only不支持vector LS，任一VSTU
    valid固定`uvm_fatal`，不能静默当作STA，也不能info/drop后继续。完整vector partial
    replay留给vector专项。
@@ -541,7 +536,7 @@ V2 scalar STA IQ feedback 运行期结论：
 对应唯一执行落点：
 
 ```text
-AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_iq_feedback_replay_framework_adapt_execution_plan_20260711.md
+AI_DOC/plan/test_framework/plan/do/mem_ut_v2_iq_feedback_replay_framework_adapt_execution_plan_20260711.md
 ```
 
 ### 4.10 `io_mem_to_ooo_vec_wb_agent_agent`
@@ -1721,8 +1716,8 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/veciss
 
 - 当前 interface 字段的 connect 覆盖已闭合，`io_mem_to_ooo_int_wb_agent_agent` 静态扫描结果为 `interface=109`、`xaction=109`、`monitor=109`、`connect=109`、`missing=0`。该 agent 已全部使用 V2 `writebackLda/Sta/Std` 顶层原生命名，旧 V3 整数写回聚合别名已从 interface、xaction、monitor 和 connect 中删除，不再常量化保留。
 
-- `io_mem_to_ooo_iq_feedback_agent_agent` 的静态字段链虽然完整，但scalar STA接口只含
-  SQ key。当前raw伪ROB/LQ valid和replay后generation缺口属于运行期语义问题，不能用
-  “interface/xaction/connect均有字段”判定为已适配；必须执行IQ feedback/replay专项。
+- `io_mem_to_ooo_iq_feedback_agent_agent` 的静态字段链完整，scalar STA接口只含SQ key。
+  IQ feedback/replay专项已把monitor改为SQ-only raw，并由adapter通过active SQ map/current
+  status补齐当前动态实例；VSTU valid在scalar-only范围内显式fatal。
 
 - V2 顶层仍有 360 个端口未归属现有 agent，主要是 TileLink/总线、perf/trace、L2 TLB/PMP、L2 prefetch、WFI/低功耗、外部控制边界端口；如后续测试目标需要覆盖，应按本文分类新增或扩展 agent。

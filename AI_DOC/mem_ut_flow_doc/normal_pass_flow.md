@@ -2,13 +2,19 @@
 
 本文按 `AI_DOC/project_management/mem_ut_flow_document_rule.md` 整理 mem_ut 中 writeback 之后的 normal pass 后续处理。normal pass 的核心结论是：**它只在 writeback status 路径中更新 status，不进入 `push_feedback_event()`，也不进入 `exception_event_q` / `process_pending_events()` recovery 路径。**
 
-V2 LOAD/STA normal pass在进入该原状态机前必须先完成issue-generation correlation：
-accepted fire建立不可变token，adapter attach但不消费，redirect-first放行后先只读
-validate；原handler成功或命中唯一允许的STA compat no-op后才commit claim。
-第一次replay后不得从当前status补旧event generation。STD继续ROB value-only双probe，
-不建token。
+V2 LOAD/STA normal pass 在进入该原状态机前使用已有 active map/current status 完成
+key 与 current issue snapshot 反查；本轮 IQ 专项不新增 issue-generation token、claim 或
+tombstone。STA IQ hit 只设置 `sta_issue_feedback_success`，真实 STA writeback 才能推进
+target pass。IQ 专项的 raw、同拍排序和 deferred ctrl 细节见
+[`iq_feedback_replay_v2_flow.md`](iq_feedback_replay_v2_flow.md)。STD 继续 ROB value-only
+双 probe。
+
+本文较早章节中的 token/claim 调用图属于前置设计记录，不能作为当前 V2 源码调用链。
 
 ## 1. 函数调用 Flow 图
+
+> 下方早期图包含尚未落地的 token/claim 节点，仅保留用于历史方案追溯。当前源码的 IQ/WB
+> 顺序与状态反查以 [`iq_feedback_replay_v2_flow.md`](iq_feedback_replay_v2_flow.md) 为准。
 
 ```mermaid
 flowchart TD
@@ -154,15 +160,20 @@ exception_redirect_replay_task();
 ```text
 递增 dispatch service cycle，给事件处理和 timeout 使用统一周期；
 调用 collect_runtime_context_events：同步 CSR runtime/sfence 等上下文，不直接决定 normal pass；
-调用 collect_monitor_event_batch：同一 service cycle 内先收集 raw int writeback/IQ feedback，再收集 ctrl memoryViolation redirect，最后形成同一个 batch；
+调用 collect_monitor_event_batch：同一 service cycle 内先收集 raw IQ feedback、再收集 int writeback，
+随后暂存 ctrl并把 memoryViolation redirect加入同一个 semantic batch；
 batch handler 对这个统一 batch 做 normalize 和 redirect-first 仲裁，未被 redirect 覆盖的 pass 才能落表；
+semantic batch完成后按FIFO应用deferred ctrl，释放DUT已deq的LQ/SQ mapping；
 调用 exception_redirect_replay_task：只消费 redirect/replay/fault 的 exception_event_q，normal pass 不在这个队列里。
 ```
 
 内部子调用：
 
 - `collect_runtime_context_events()`：先 drain CSR latest snapshot，再 drain sfence/hfence FIFO；normal pass 路径只需要它保证 runtime 上下文已同步。
-- `collect_monitor_event_batch()`：先 `collect_writeback_events_batch(events)`，再 `collect_ctrl_redirect_events_batch(events)`，最后 `process_monitor_event_batch(events)`；normal pass 和同拍 redirect 在这里进入同一个 batch。
+- `collect_monitor_event_batch()`：先调用带`sample_cycle`参数的
+  `collect_writeback_events_batch()`，再调用带`deferred_ctrl`参数的
+  `collect_ctrl_redirect_events_batch()`，最后执行`process_monitor_event_batch()`并应用deferred
+  ctrl；normal pass和同拍redirect在这里进入同一个semantic batch。
 - `exception_redirect_replay_task()`：消费 `push_feedback_event()` 入队的 recovery event；normal pass 不进入。
 
 ## 4. `collect_writeback_events_batch()` / `convert_raw_int_wb()`

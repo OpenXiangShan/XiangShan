@@ -2,11 +2,18 @@
 
 本文按通用 flow 文档规则整理 mem_ut 中 writeback/IQ feedback 后 replay进入
 `push_feedback_event()`后的完整处理。V2 scalar replay来源包括STA IQ feedback miss和
-LDA `replayInst=1`；STD不建立backend replay。V2 STA feedback只有真实SQ key，必须先
-匹配issue fire时建立的不可变generation token；第一次及后续replay都不得从可变
-status补旧event的`issue_epoch/replay_seq`。
+LDA `replayInst=1`；STD不建立backend replay。V2 STA feedback只有真实SQ key，当前实现
+由 `active SQ map + current status` 补齐 UID、ROB、`issue_epoch/replay_seq`，不建立第二套
+generation token/tombstone 状态机。IQ 专项的当前权威细节见
+[`iq_feedback_replay_v2_flow.md`](iq_feedback_replay_v2_flow.md)。
+
+本文较早章节中若仍出现 `register_issue_generation_token`、claim 或 token close 等前置设计
+描述，仅作为历史方案记录；当前源码和上述 V2 专项 flow 不消费这些接口。
 
 ## 1. 函数调用 Flow 图
+
+> 下方历史图保留了前置 token 设计节点。当前 V2 IQ 的实际调用顺序、状态来源和 deferred
+> ctrl 行为以 [`iq_feedback_replay_v2_flow.md`](iq_feedback_replay_v2_flow.md) 为准。
 
 ```mermaid
 flowchart TD

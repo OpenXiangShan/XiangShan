@@ -2,6 +2,11 @@
 
 本文按通用 flow 文档规则整理 mem_ut 中 writeback 之后 redirect 的完整后续。当前真实 DUT 来源是 `io_mem_to_ooo_ctrl.memoryViolation` 被 raw ctrl monitor 采集后转成 `memblock_wb_event_t.redirect`。redirect 进入 `push_feedback_event()` 后，必须继续追到 `process_pending_events -> request_redirect_flush -> push_redirect_drive -> redirect sequence drive -> advance_active_redirect -> apply_redirect_flush -> reissue`。
 
+当前 V2 batch 语义中，ctrl raw 的 `lqDeq/sqDeq/sbIsEmpty` 先暂存，semantic batch 完成
+redirect-first 后才按 FIFO 调用 `apply_raw_ctrl_deq()`；因此本图中 `apply_raw_ctrl_deq`
+位于 `process_monitor_event_batch` 之后。IQ 专项当前边界见
+[`iq_feedback_replay_v2_flow.md`](iq_feedback_replay_v2_flow.md)。
+
 ## 1. 函数调用 Flow 图
 
 ```mermaid
@@ -9,9 +14,10 @@ flowchart TD
     A[service_monitor_once] --> B[collect_monitor_event_batch]
     B --> C[dispatch_monitor_event_adapter::collect_ctrl_redirect_events_batch]
     C --> D[pop_raw_ctrl]
-    D --> E[apply_raw_ctrl_deq]
+    D --> E[deferred_ctrl FIFO]
     D --> F[convert_raw_memory_violation]
     F --> G[process_monitor_event_batch]
+    G --> E1[apply_raw_ctrl_deq]
     G --> H[normalize_event_batch]
     H --> I[normalize_feedback_event]
     I --> J[resolve_uid_for_event]
@@ -55,7 +61,7 @@ Redirect 主流程：
 1. ctrl output monitor 采集：
    service_monitor_once 调用 collect_monitor_event_batch；
    collect_ctrl_redirect_events_batch 从 raw ctrl queue 出队；
-   apply_raw_ctrl_deq 先处理 sbIsEmpty 和 LQ/SQ deq；
+   apply_raw_ctrl_deq 在 semantic batch 完成后处理 sbIsEmpty 和 LQ/SQ deq；
    convert_raw_memory_violation 将 memoryViolation 转成 redirect 语义 memblock_wb_event_t。
 
 2. batch 级 redirect-first 仲裁：
@@ -88,7 +94,9 @@ Redirect 主流程：
 
 ```systemverilog
 while (memblock_sync_pkg::pop_raw_ctrl(raw_ctrl)) begin
-    apply_raw_ctrl_deq(raw_ctrl);
+    check_raw_sample_cycle(raw_ctrl.cycle, sample_cycle,
+                           sample_cycle_valid, "ctrl");
+    deferred_ctrl.push_back(raw_ctrl);
     if (convert_raw_memory_violation(raw_ctrl, wb_event)) begin
         events.push_back(wb_event);
     end
@@ -106,18 +114,22 @@ wb_event.redirect.rob_key = wb_event.rob_key;
 
 功能解释：
 
-raw ctrl monitor 采集到 memoryViolation 后，adapter 把它转换成 redirect 语义 event。这里不直接 drive redirect，也不直接 flush status；只是把事件放进 batch，后续由 batch handler 做 redirect-first 仲裁。
+raw ctrl monitor 采集到 memoryViolation 后，adapter 把它转换成 redirect 语义 event。完整 raw
+先保存到 `deferred_ctrl`，不会在 owner 反查和 redirect-first 之前释放 LQ/SQ active map。这里不
+直接 drive redirect，也不直接 flush status；只是把 redirect event 放进 batch。
 
 输入/输出：
 
 - 输入：`dispatch_raw_ctrl_t raw_ctrl`。
-- 输出：redirect `memblock_wb_event_t` 进入当前 batch。
+- 输出：redirect `memblock_wb_event_t` 进入当前 batch；完整 raw ctrl 进入本拍
+  `deferred_ctrl`，在 semantic batch 返回后才应用 deq。
 
 文字伪代码：
 
 ```text
 循环 pop_raw_ctrl：读取 DUT ctrl output monitor 采集的 raw ctrl；
-调用 apply_raw_ctrl_deq：先更新 SB empty，并把 LQ/SQ deq 交给 commit handler 释放映射；
+调用 check_raw_sample_cycle：确认 ctrl raw 与当前 IQ/int-WB semantic batch 属于同一采样拍；
+把完整 raw ctrl 追加到 deferred_ctrl，本阶段不更新 SB empty，也不释放 LQ/SQ mapping；
 调用 convert_raw_memory_violation：如果 memory_violation_valid=0，返回 false；
 如果 valid，创建 wb_event，source 设 MEMORY_VIOLATION，target 设 NONE；
 设置 redirect_valid 和 redirect.valid；
@@ -125,6 +137,7 @@ raw ctrl monitor 采集到 memoryViolation 后，adapter 把它转换成 redirec
 调用 raw_rob_to_key：把 memoryViolation ROB 指针转为 rob_key；
 把 rob_key 复制到 redirect.rob_key；
 把 redirect event push 到 batch events。
+process_monitor_event_batch 完成后，调用者再按 deferred_ctrl FIFO执行 apply_raw_ctrl_deq。
 ```
 
 内部子调用：

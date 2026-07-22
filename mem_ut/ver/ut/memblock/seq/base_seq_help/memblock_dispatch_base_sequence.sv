@@ -334,6 +334,12 @@ endfunction:collect_runtime_context_events
 
 task memblock_dispatch_base_sequence::collect_monitor_event_batch();
     memblock_wb_event_t events[$];
+    memblock_sync_pkg::dispatch_raw_ctrl_t deferred_ctrl[$];
+    longint unsigned sample_cycle;
+    bit sample_cycle_valid;
+
+    sample_cycle = 0;
+    sample_cycle_valid = 1'b0;
 
     if (writeback_handler == null) begin
         writeback_handler = writeback_status_handler::type_id::create("writeback_handler");
@@ -354,9 +360,17 @@ task memblock_dispatch_base_sequence::collect_monitor_event_batch();
     monitor_adapter.bind_commit_handler(monitor_commit_handler);
     // 中文注释：同一 service cycle 内的 int writeback、IQ feedback 和 memoryViolation
     // 必须先形成同一个 semantic batch，再由 dispatch_monitor_batch_handler 做 redirect-first 仲裁。
-    monitor_adapter.collect_writeback_events_batch(events);
-    monitor_adapter.collect_ctrl_redirect_events_batch(events);
+    monitor_adapter.collect_writeback_events_batch(events, sample_cycle, sample_cycle_valid);
+    monitor_adapter.collect_ctrl_redirect_events_batch(events,
+                                                       deferred_ctrl,
+                                                       sample_cycle,
+                                                       sample_cycle_valid);
     monitor_batch_handler.process_monitor_event_batch(events);
+    // 中文注释：semantic batch 已完成 redirect-first/feedback 处理后，才释放本拍
+    // ctrl/deq 对应的 LQ/SQ mapping；保持 raw ctrl 的 FIFO 顺序。
+    foreach (deferred_ctrl[idx]) begin
+        monitor_adapter.apply_raw_ctrl_deq(deferred_ctrl[idx]);
+    end
 endtask:collect_monitor_event_batch
 
 task memblock_dispatch_base_sequence::exception_redirect_replay_task();
