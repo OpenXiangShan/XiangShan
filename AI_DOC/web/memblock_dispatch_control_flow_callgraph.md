@@ -8,6 +8,9 @@
 - `mem_ut/ver/ut/memblock/tc/src/tc_dispatch_real_smoke.sv`
 - `mem_ut/ver/ut/memblock/env/src/memblock_env.sv`
 - `mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv`
+- `mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh`
+- `mem_ut/ver/ut/memblock/agent/lintsissue_agent_agent/src/lintsissue_agent_agent_driver.sv`
+- `mem_ut/ver/ut/memblock/agent/vecissue_agent_agent/src/vecissue_agent_agent_driver.sv`
 - `mem_ut/ver/ut/memblock/seq/base_seq_help/*.sv`
 - `mem_ut/ver/ut/memblock/seq/base_seq/memblock_*dispatch*.sv`
 
@@ -62,8 +65,8 @@ memblock_main_dispatch_auto_build_main_table_base_sequence::body
     -> route_all_ready_uids()
     -> select_issue_candidates()
     -> assign_issue_item_fields()
-    -> 驱动 intIssue 0..6
-    -> mark_issue_fire()
+    -> 驱动当前 V2 scalar split 的 issueLda/issueSta/issueStd
+    -> 由 compile-time port base/count 计算 fire port，并标记 fired item
 
   memblock_lsqcommit_dispatch_base_sequence
     -> 等 main_table_ready
@@ -472,6 +475,8 @@ memblock_issue_dispatch_base_sequence::drive_dispatch_issue_loop()
     issue_sched.route_all_ready_uids()
     send_issue_cycle()
     issue_sched.advance_issue_queue_delays()
+    pending_issue_work = issue_sched.has_pending_issue_work()
+    无 fire 且 pending_issue_work 时累计 no-progress；队列为空时清零 idle 计数
 ```
 
 ### E.2 `issue_queue_scheduler` 路由函数表
@@ -487,6 +492,7 @@ memblock_issue_dispatch_base_sequence::drive_dispatch_issue_loop()
 | `route_target(uid, target, behavior)` | uid、target、behavior | push issue queue，置 queued | 单 target 入队；先删除旧项防重复 | `target_already_queued_or_done()`、`data.replay_target_requested()`、`data.delete_issue_queue_entry()`、`make_issue_item()`、`data.push_issue_queue_item()`、`set_target_queued()` |
 | `route_uid(uid)` | uid | LOAD/STA/STD 队列更新 | 按 behavior 把 uid 路由到对应 target | `is_uid_route_ready()`、`lsq_ctrl_model::derive_op_behavior()`、`route_target()` |
 | `route_all_ready_uids()` | 无 | 扫描所有 uid 并尝试路由 | monitor/replay 后兜底把 ready uid 送回 issue queue | `data.issue_blocked_by_global_flush()`、`route_uid()` |
+| `has_pending_issue_work()` | 无 | bit | 仅根据 LOAD/STA/STD 三个 issue queue 是否非空判断当前是否仍有待发射工作；供 no-progress 诊断使用 | `data.load_issue_q`、`data.sta_issue_q`、`data.std_issue_q` |
 | `advance_issue_queue_delays()` | 无 | 每个队列 item 的 `ready_cycle--` | 实现发射延迟 | 无 |
 
 ### E.3 调度选择调用链
@@ -536,11 +542,12 @@ drive_dispatch_issue_loop()
     issue_sched.route_all_ready_uids()
     send_issue_cycle(cycle_idx, has_fire)
     issue_sched.advance_issue_queue_delays()
+    pending_issue_work = issue_sched.has_pending_issue_work()
 
 send_issue_cycle(cycle_idx, has_fire)
   -> create lintsissue xaction
   -> field_assigner.clear_lintsissue_xaction(tr)
-  -> 设置 wait_ready / nonblocking / timeout / flush_epoch / fired_mask
+  -> 设置 wait_ready / nonblocking / timeout / flush_epoch / compile-time 宽度 fired_mask
   -> if !issue_blocked_by_global_flush():
        issue_sched.select_issue_candidates()
        assign_issue_items(load_items)
@@ -548,36 +555,56 @@ send_issue_cycle(cycle_idx, has_fire)
        assign_issue_items(std_items)
   -> start_item(tr); finish_item(tr)
        driver:
-         if nonblocking:
-           drive_dispatch_issue_one_cycle()
-           sample ready once, set fired_mask only for valid&&ready
-           clear remaining valid and return
+         if wait_ready item 已跨 flush:
+           clear valid, send_pkt, mark aborted
          else:
-           wait_dispatch_issue_ready()
-           while pending valid:
-             clear ready ports that fired
-             if dispatch_flush_epoch changed:
-               clear valid, mark aborted
-               return
-             send_pkt
-  -> if aborted_by_redirect:
-       mark_fired_items(fired_items, fired_mask)
-  -> else if no flush epoch change:
-       mark_fired_items(fired_items, nonblocking ? fired_mask : 7'h7f)
+           send_pkt initial valid/payload
+           if nonblocking:
+             drive_dispatch_issue_one_cycle()
+             sample ready once, set fired_mask only for valid&&ready
+             clear remaining valid and return
+           else:
+             wait_dispatch_issue_ready()
+             while pending valid:
+               clear ready ports that fired
+               if dispatch_flush_epoch changed:
+                 clear valid, mark aborted
+                 return
+               send_pkt
+  -> foreach candidate item:
+       candidate_mask[port_idx_for_item(item)] = 1
+  -> effective_fired_mask = driver_fired_mask & candidate_mask
+  -> driver_fired_mask 含 candidate 之外的 bit: fatal
+  -> blocking 且未 abort/flush 时，effective_fired_mask != candidate_mask: fatal
+  -> effective_fired_mask 非 0:
+       mark_fired_items(fired_items, effective_fired_mask)
+  -> abort/flush 后只取消尚未 fire 的 candidate；已经 fire 的 item 已在上一步标记
 ```
+
+当前 V2 issue 的物理接口是 `issueLda[0..2]`、`issueSta[0..1]` 和
+`issueStd[0..1]`。逻辑 port index 不再由固定数字表述，而是按编译期布局计算：
+LOAD 使用 `MEMBLOCK_DUT_LOAD_PORT_BASE + local_pipe`，STA 使用
+`MEMBLOCK_DUT_STA_PORT_BASE + local_pipe`，STD 使用
+`MEMBLOCK_DUT_STD_PORT_BASE + local_pipe`；其中各 target 的 base 由前一 target 的
+base/count 推导，`MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM` 和
+`MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W` 再由最终布局得到。当前 V2 profile 的物理信号
+枚举仍是上述 3/2/2 组，但 driver 会按 compile-time count 门控 valid/ready 和 mask，
+不能把这些当前展开值当成接口合同。xaction 的 `memblock_dispatch_fired_mask`
+声明也使用 LOAD base 加三组 pipe count 的表达式，和上述 `MASK_W` 保持同一布局来源。
 
 ### F.2 发射 sequence 函数表
 
 | 函数 | 输入 | 输出/副作用 | 功能 | 子函数 |
 |---|---|---|---|---|
 | `memblock_issue_dispatch_base_sequence::body()` | 无 | 启动 issue sequence | 根据 plus enable 决定是否驱动真实 issue 口 | `seq_csr_common::init()`、`configure_from_plus()`、`ensure_helpers()`、`wait_for_main_table()`、`drive_dispatch_issue_loop()` |
-| `configure_from_plus()` | 无 | 设置 enable/max/idle/start timeout | 读取 issue sequence 参数 | `get_dispatch_issue_*()` |
+| `configure_from_plus()` | 无 | 设置 `enable/no_progress_warn_cycles` | 读取 issue sequence 开关和 no-progress 阈值 | `get_dispatch_issue_seq_en()`、`get_active_seq_no_progress_warn_cycles()` |
 | `ensure_helpers()` | 无 | 准备 `data/issue_sched/field_assigner/issue_accept_wb_handler` | issue 发射所需 helper | `common_data_transaction::get()`、`type_id::create()` |
 | `wait_for_main_table()` | 无 | 等主表 ready | 与主表生成同步 | 无 |
-| `drive_dispatch_issue_loop()` | 无 | 多拍发射 | 每拍 route、send、advance delay | `route_all_ready_uids()`、`send_issue_cycle()`、`advance_issue_queue_delays()` |
-| `send_issue_cycle(cycle_idx, has_fire)` | cycle | 驱动 issue xaction，更新发射状态 | 一拍 LOAD/STA/STD 发射 | `clear_lintsissue_xaction()`、`select_issue_candidates()`、`assign_issue_items()`、`start_item()`、`finish_item()`、`mark_fired_items()` |
+| `drive_dispatch_issue_loop()` | 无 | 多拍发射和 no-progress 诊断 | 每拍 route、send、advance delay，再查询 issue queue 是否仍非空；只有“有待发射队列且长期无 fire”才报 error | `route_all_ready_uids()`、`send_issue_cycle()`、`advance_issue_queue_delays()`、`has_pending_issue_work()` |
+| `send_issue_cycle(cycle_idx, has_fire)` | cycle | 驱动 issue xaction，更新发射状态 | 一拍 scalar split LOAD/STA/STD 发射；按候选 item 构造 compile-time 宽度 `candidate_mask`，拒绝 driver 返回候选外 bit，阻塞模式还要求全部 candidate 都已 fire | `clear_lintsissue_xaction()`、`select_issue_candidates()`、`assign_issue_items()`、`start_item()`、`finish_item()`、`port_idx_for_item()`、`mark_fired_items()` |
 | `assign_issue_items(tr, items, fired_items)` | xaction、候选 item 队列 | 填 xaction，并记录将要 fire 的 item | 将 scheduler 选出的 item 按队列内 idx 映射到对应 pipe | `field_assigner.assign_issue_item_fields()` |
-| `mark_fired_items(fired_items, fired_mask)` | fired item、driver 返回 mask | 对已被 DUT 接收的 item 做 `mark_issue_fire` | 根据 target 把 uop_index 映射到 port 0..6，只标记真正 fired 的 port | `issue_sched.mark_issue_fire()`、`mark_issue_fire_already_accepted()`、`submit_issue_accept_pass()` |
+| `port_idx_for_item(item)` | issue item | 编译期布局下的全局 port index | 按 target base、local `uop_index` 和 target pipe count 做范围检查；越界或未知 target 立即 fatal | 无 |
+| `mark_fired_items(fired_items, fired_mask)` | fired item、driver 返回 mask | 对已被 DUT 接收的 item 做 `mark_issue_fire` | 先通过 `port_idx_for_item()` 把 target/local pipe 映射到逻辑 port，再只标记 mask 中实际 fire 的 item | `port_idx_for_item()`、`issue_sched.mark_issue_fire()`、`mark_issue_fire_already_accepted()`、`submit_issue_accept_pass()` |
 | `item_needs_issue_accept_pass(item)` | item | bit | 在真实 STD writeback pass 关闭时，为普通 store STD 构造软件 pass | `get_std_real_wb_pass_en()`、`data.get_main_transaction()`、`is_store_fuoptype()` |
 | `make_issue_accept_pass_event(item)` | item | `memblock_wb_event_t` | 构造 STD_FEEDBACK pass event，模拟 STD accept 后完成 | `data.get_status()`、`data.make_empty_wb_event()`、`status.get_target_issue_epoch()` |
 | `submit_issue_accept_pass(item)` | item | 写回 STD pass 状态 | 如果需要软件 STD pass，则直接交给 writeback handler | `item_needs_issue_accept_pass()`、`make_issue_accept_pass_event()`、`issue_accept_wb_handler.handle_event()` |
@@ -592,7 +619,13 @@ reservation 与下一边界 issue-ready 分成两个阶段。
 |---|---|---|---|---|
 | `lsqenq_agent_agent_driver::main_phase()` | sequencer item | 每个clocking边界先sample上一拍，再取并覆盖当前item | `try_next_item()`前清空句柄；在写VIF前检查flush/epoch并设置launch/abort metadata；无item或abort驱全零idle；active item launch后立即`item_done()` | `send_pkt()`、`drive_idle()` |
 | `lsqenq_agent_agent_driver::send_pkt(tr)` | LSQENQ xaction | 一次驱动6路`enqLsq_needAlloc/req` | 先校验scalar字段和整个batch的load/store 6/4上限，再机械写入VIF；不负责flush/epoch或launch metadata | `validate_v2_scalar_item()` |
-| `lintsissue_agent_agent_driver::send_pkt(tr)` / `drive_dispatch_issue_one_cycle()` / `wait_dispatch_issue_ready()` | issue xaction | 驱动 7 个 intIssue valid/payload；回填 fired mask | 阻塞模式等待各 pipe ready；非阻塞模式只采样一次 ready。两种模式都只有 valid&&ready 的 port 才置入 `memblock_dispatch_fired_mask`；如果 flush epoch 改变，则 abort 未 fire 的 port | `memblock_issue_dispatch_base_sequence::send_issue_cycle()` |
+| `lintsissue_agent_agent_driver::main_phase()` | sequencer issue xaction | 初始 valid/payload 驱动、阻塞/非阻塞模式分派、item_done | 在 clocking 边界先检查 wait-ready item 是否跨 flush；正常路径先 `send_pkt()`，再进入 one-cycle 或 ready-wait；abort 路径清 valid、重发 valid 已全零的 xaction 并置 abort 标记 | `send_pkt()`、`clear_dispatch_issue_ports()`、`drive_dispatch_issue_one_cycle()`、`wait_dispatch_issue_ready()`、`drive_idle()` |
+| `lintsissue_agent_agent_driver::send_pkt(tr)` / `drive_dispatch_issue_one_cycle()` / `wait_dispatch_issue_ready()` | issue xaction | 驱动 `issueLda/issueSta/issueStd` valid/payload；回填按布局计算的 fired mask | 阻塞模式等待仍 pending 的 valid port；非阻塞模式只采样一次 ready。`clear_ready_dispatch_issue_ports()` 在 valid 为 1 时先拒绝 X/Z ready，再只对 ready 严格等于 1 的 port 记录 fire；如果 flush epoch 改变，则 abort 未 fire 的 port | `memblock_issue_dispatch_base_sequence::send_issue_cycle()` |
+| `lintsissue_agent_agent_driver::clear_dispatch_issue_ports(tr)` | issue xaction | 所有物理 issue valid 清零 | flush/abort 边界清理待发送 valid，保留 payload 供后续 idle/诊断驱动 | `lintsissue_agent_agent_driver::main_phase()`、`wait_dispatch_issue_ready()`、`drive_dispatch_issue_one_cycle()` |
+| `lintsissue_agent_agent_driver::drive_idle(drv_mode)` | driver mode | issue VIF 全零 idle | 无 sequencer item或处理 pre/post packet gap 时保持 scalar issue 接口空闲 | `lintsissue_agent_agent_driver::main_phase()` |
+| `lintsissue_agent_agent_driver::has_dispatch_issue_pending(tr)` | issue xaction | bit | 只把 compile-time count 启用的物理 valid 纳入 pending 判断 | 无 |
+| `lintsissue_agent_agent_driver::record_dispatch_issue_fire(port_idx, tr)` | 逻辑 port index、issue xaction | 设置 `memblock_dispatch_fired_mask[port_idx]` 并输出 fire 诊断 | 校验 port 位于 `[MEMBLOCK_DUT_LOAD_PORT_BASE, issue_port_num)` 后记录一次 fire，再委托分类日志 | `report_dispatch_issue_fire()` |
+| `vecissue_agent_agent_driver::send_pkt(tr)` | vector issue xaction | vector 接口保持 idle，非法 valid 直接 fatal | 当前 flow 是 scalar-only；任一 `issueVldu` valid 非 0 都 fail-fast，且 testcase 不再绑定 vecissue 默认 sequence | `drive_idle()` |
 | `lsqcommit_agent_agent_driver::send_pkt(tr)` | commit xaction | 驱动 pendingPtr/flushSb | commit sequence 已在发送前决定 pendingPtr 或 flushSb，driver 只负责把 xaction 打到接口 | `memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle()` |
 | `redirect_agent_agent_driver::send_pkt(tr)` | redirect xaction | 驱动 redirect valid/payload | redirect sequence 发完后调用 `mark_redirect_drive_done()`，exception handler 下一服务周期才能 apply flush | `memblock_redirect_dispatch_base_sequence::drive_redirect_payload()` |
 | `L2tlb_agent_agent_driver::send_pkt(tr)` | L2TLB xaction | 驱动 DTLB/L2TLB request ready 和 response payload | L2TLB responder 用 ready/wait/response 多个 xaction 组合完成一次 request-response | `memblock_l2tlb_base_sequence::send_l2tlb_item()` |
@@ -602,21 +635,23 @@ reservation 与下一边界 issue-ready 分成两个阶段。
 | 函数 | 输入 | 输出/副作用 | 功能 | 子函数 |
 |---|---|---|---|---|
 | `issue_field_assigner::clear_lintsissue_xaction(tr)` | xaction | 清所有 issue valid/ready/payload | 每拍发射前初始化 xaction | 无 |
-| `assign_issue_item_fields(tr, item, pipe_idx)` | xaction、item、pipe | 填主表字段、依赖字段、后端 meta 字段 | 发射字段总入口 | `assign_main_issue_fields()`、`assign_issue_dep_fields()`、`assign_backend_meta_fields()` |
+| `assign_issue_item_fields(tr, item, pipe_idx)` | xaction、item、pipe | 填主表字段、依赖字段、后端 meta 字段；非法 vector/不匹配 target 立即 fatal | 先校验 split style、main transaction、pipe 范围和 scalar-only FuType/FuOpType 合同，再进入字段赋值 | `check_pipe_idx()`、`check_target_futype_fuoptype()`、`assign_main_issue_fields()`、`assign_issue_dep_fields()`、`assign_backend_meta_fields()` |
 | `assign_main_issue_fields(tr, item, pipe_idx)` | xaction、item、pipe | 写 fuType/fuOpType/src/imm/ROB/LQ/SQ 等主字段 | 把主表和 issue item 关键字段写到对应 LOAD/STA/STD pipe | `data.get_main_transaction()`、`assign_load_main_fields()`、`assign_sta_main_fields()`、`assign_std_main_fields()` |
-| `assign_load_main_fields()` | xaction、main_tr、item、pipe | 写 intIssue 0/1/2 | LOAD pipe 主字段 | 无 |
-| `assign_sta_main_fields()` | xaction、main_tr、item、pipe | 写 intIssue 3/4 | STA pipe 主字段 | 无 |
-| `assign_std_main_fields()` | xaction、main_tr、item、pipe | 写 intIssue 5/6 | STD pipe 主字段 | 无 |
-| `assign_issue_dep_fields(tr, item, pipe_idx)` | xaction、item、pipe | 写 MDP/依赖字段 | 对 load 写 `loadWaitBit/waitForRobIdx/storeSetHit/loadWaitStrict`；对 STA 写 `isFirstIssue/storeSetHit/ssid` | `deterministic_percent_hit()`、`select_prior_store_for_load()`、`data.get_status()` |
+| `assign_load_main_fields()` | xaction、main_tr、item、pipe | 写对应 `issueLda_<local_pipe>` 字段 | LOAD pipe 主字段 | 无 |
+| `assign_sta_main_fields()` | xaction、main_tr、item、pipe | 写对应 `issueSta_<local_pipe>` 字段 | STA pipe 主字段 | 无 |
+| `assign_std_main_fields()` | xaction、main_tr、item、pipe | 写对应 `issueStd_<local_pipe>` 字段 | STD pipe 主字段 | 无 |
+| `assign_issue_dep_fields(tr, item, pipe_idx)` | xaction、item、pipe | 写 MDP/依赖字段 | 仅对 LOAD 写 `loadWaitBit/waitForRobIdx/storeSetHit/loadWaitStrict`；STA/STD 不写依赖字段 | `deterministic_percent_hit()`、`select_prior_store_for_load()`、`data.get_status()` |
 | `select_prior_store_for_load(uid, wait_rob_key)` | uid | 更老 store ROB key | 为 load 生成 waitForRobIdx | `data.get_main_transaction()`、`data.get_status()`、`derive_op_behavior()` |
-| `assign_backend_meta_fields(tr, item, pipe_idx)` | xaction、item、pipe | 写 `pdest/rfWen/fpWen/pc/isRVC/ftqIdx/ftqOffset` | 这些字段主要随流水到后端；load/AMO 的 rfWen/fpWen/pdest 影响写回目的 | `derive_wen()`、`compute_pdest()`、`compute_pc()`、`compute_is_rvc()`、`compute_ftq_*()` |
-| `derive_wen(main_tr, rfWen, fpWen)` | 主表 | rfWen/fpWen | INT load/AMO -> rfWen，FP load -> fpWen，二者互斥 | 无 |
+| `assign_backend_meta_fields(tr, item, pipe_idx)` | xaction、item、pipe | 写 `pdest/rfWen/fpWen/pc/isRVC/ftqIdx/ftqOffset` | 这些字段主要随流水到后端；scalar load 的 rfWen/fpWen/pdest 影响写回目的 | `derive_wen()`、`compute_pdest()`、`compute_pc()`、`compute_is_rvc()`、`compute_ftq_*()` |
+| `derive_wen(main_tr, rfWen, fpWen)` | 主表 | rfWen/fpWen | 当前 scalar issue 中 INT load -> rfWen、FP load -> fpWen，二者互斥；helper 内保留的 AMO 分支不代表本轮 issue flow 支持 AMO | 无 |
 | `compute_pdest(uid, has_wb)` | uid、是否写回 | pdest | 生成写回物理寄存器号；无写回则 0 | `get_pdest_base()`、`get_pdest_range()` |
 | `compute_pc(uid)` | uid | pc | 按 `pc_base + uid * pc_stride` 生成 PC | `get_pc_base()`、`get_pc_stride()` |
 | `compute_is_rvc(uid)` | uid | isRVC | 按权重生成压缩指令标志 | `deterministic_percent_hit()`、`get_rvc_wt()` |
 | `compute_ftq_flag/value/offset(uid)` | uid | ftq 字段 | 生成 FTQ metadata | `get_ftq_idx_base()` |
 | `deterministic_percent_hit(uid, salt, percent)` | uid、salt、百分比 | bit | 稳定的伪随机百分比命中，避免同一 uid 多次调用结果漂移 | 无 |
-| `check_pipe_idx(target, pipe_idx, caller)` | target、pipe、caller | 非法 fatal | 限制 LOAD<3、STA<2、STD<2 | `is_valid_pipe_idx()` |
+| `get_target_pipe_limit(target)` | target | compile-time pipe count | 返回 LOAD/STA/STD 对应的 `MEMBLOCK_DUT_*_PIPE_NUM` | 无 |
+| `check_pipe_idx(target, pipe_idx, caller)` | target、pipe、caller | 非法 fatal | 按 `get_target_pipe_limit()` 校验 local pipe，不把当前物理展开数量写死 | `get_target_pipe_limit()` |
+| `check_target_futype_fuoptype(main_tr, behavior, target)` | 主表 transaction、op behavior、target | scalar 合同失败时 fatal | 拒绝 vector LS、atomic/MOU、CBO 和不匹配的 LDU/STU route；确认普通 load/prefetch 只能走 LOAD，store 只能走 STA/STD | `lsq_ctrl_model::is_vector_ls_futype()`、`derive_op_behavior()`、FuOpType 分类 helper |
 
 ## 8. 阶段 G：monitor raw event 采集与 writeback 状态更新
 
@@ -1171,7 +1206,7 @@ end_test_check()
 | `has_lqIdx/lq_key` | LQ key 有效性和值 | load 发射和 LQ writeback/deq 反查 |
 | `has_sqIdx/sq_key` | SQ key 有效性和值 | store 发射和 SQ feedback/deq 反查 |
 | `numLsElem` | LS 元素数 | scalar 当前为 1，atomic/向量扩展时使用 |
-| `uop_index/uop_count` | target 内 uop 编号/数量 | 多 uop atomic 和 pipe 映射 |
+| `uop_index/uop_count` | target 内 uop 编号/数量 | 当前 scalar split flow 用 `uop_index` 表示 target 内 local pipe；多 uop atomic 不属于现行支持范围 |
 
 ### 13.4 `memblock_wb_event_t`
 
@@ -1258,6 +1293,9 @@ data.end_test_check();
 
 - `memblock_main_dispatch_auto_build_main_table_base_sequence::service_real_dispatch_flow()` 只做 monitor service 和 route，不直接等待 LSQENQ/LINTSISSUE/LSQCOMMIT sequence 的完成；当前完成判据依赖公共状态表和 active map 是否清空，因此 testcase cfg 必须确保 LSQENQ/LINTSISSUE/LSQCOMMIT/REDIRECT/L2TLB sequence 都按预期 enable。
 - `memblock_lsqenq_dispatch_base_sequence::admit_non_lsq_if_ready()` 是未来不使用LQ/SQ操作的兼容入口；当前主表校验会拒绝atomic/MOU/CBO，scalar load/store的`need_alloc`均非0，所以本轮支持范围内该入口不可达。后续支持AMO时必须由AMO专项重新定义真实LSQ资源和issue行为，不能直接启用该兼容入口。
+- 当前 issue 发射只支持 scalar split 接口。`assign_issue_item_fields()` 会拒绝 vector LS、atomic/MOU、CBO 和 target/FuOpType 不匹配；vecissue 默认 sequence 已停用，外部若仍提交有效 vector xaction，driver 会直接 fatal。
+- compile-time base/count 和 mask 宽度消除了逻辑映射中的固定编号，但 V2 xaction/VIF/driver 仍显式枚举 `issueLda[0..2]`、`issueSta[0..1]`、`issueStd[0..1]`。count 可以约束当前物理槽的使用量；若要扩展超过这些已生成字段，仍需同步更新 interface、xaction 和 driver，不能只改宏。
+- issue no-progress error 只覆盖 LOAD/STA/STD queue 非空且长期无 fire；队列已经为空、但系统仍等待 writeback/commit/deq/terminal 时会清零 issue idle 计数，这些等待由各自流程的完成检查负责。
 - `exception_event_q` 只由 `exception_redirect_replay_handler::process_pending_events()` 消费；如果未来增加新的复杂 event source，应继续通过 `writeback_status_handler::handle_event()` 或等价分类入口入队，避免新增二次 pop/requeue 路径。
 - `memblock_issue_dispatch_base_sequence::assign_issue_items()` 用 target 内候选数组 index 作为 pipe_idx，要求 scheduler 返回的候选数量不超过对应 pipe 数；这个约束目前由 `select_target_candidates(max_count)` 保证。
 - `report_deq_mismatch()` 在 `MEMBLOCK_LSQ_RESYNC_ON_MISMATCH=1` 时只降级 warning，不做真正 LSQ 状态重同步。该开关更适合作 debug 继续运行，不适合作功能正确性验收。

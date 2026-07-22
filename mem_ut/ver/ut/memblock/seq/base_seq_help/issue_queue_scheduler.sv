@@ -228,6 +228,16 @@ class issue_queue_scheduler extends uvm_object;
         end
     endfunction:route_all_ready_uids
 
+    function bit has_pending_issue_work();
+        ensure_data();
+        if (data == null) begin
+            `uvm_fatal("ISSUE_Q", "has_pending_issue_work got null common data")
+        end
+        return data.load_issue_q.size() != 0 ||
+               data.sta_issue_q.size()  != 0 ||
+               data.std_issue_q.size()  != 0;
+    endfunction:has_pending_issue_work
+
     function void advance_issue_queue_delays();
         ensure_data();
         foreach (data.load_issue_q[idx]) begin

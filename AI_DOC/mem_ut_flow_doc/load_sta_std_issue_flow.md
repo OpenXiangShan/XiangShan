@@ -1,4 +1,4 @@
-# MemBlock LOAD/STA/STD Issue Queue and Lintsissue Fire Flow
+# MemBlock LOAD/STA/STD Issue Queue 与 Lintsissue Fire Flow
 
 本文按当前源码整理 LOAD/STA/STD issue queue 的 route、select、assign、driver ready/fire 和 fire marking 流程。入口覆盖两类真实调用：
 
@@ -19,10 +19,10 @@
 
 说明：当前源码中没有 `issue_queue_assigner.sv`。LOAD/STA/STD payload 字段由 `issue_field_assigner.sv` 写入 `lintsissue_agent_agent_xaction`。
 
-V2 coding目标与当前源码基线的差异：
+当前 V2 scalar split issue 实现：
 
-- 物理端口名称固定为`issueLda_0..2`、`issueSta_0..1`、`issueStd_0..1`；文中
-  `intIssue_0..6`只表示当前未适配源码的历史扁平布局，不是V2目标接口名。
+- 物理端口名称为 `issueLda_0..2`、`issueSta_0..1`、`issueStd_0..1`。历史扁平
+  `intIssue_0..6` 只用于解释旧行为，不是当前源码或 V2 接口名。
 - `MEMBLOCK_ISSUE_TARGET_LOAD/STA/STD`分别映射LDA、STA、STD。LDU的普通load和software
   prefetch都只route到LOAD并驱动`issueLda`：前者behavior=LOAD，后者保留
   `behavior=PREFETCH/is_prefetch=1`；STU同时允许STA+STD。CBO、atomic/MOU和vector本轮
@@ -30,14 +30,16 @@ V2 coding目标与当前源码基线的差异：
 - LDA无FuType，STA有FuType和完整ROB/SQ，STD有FuType、ROB value-only和完整SQ；
   `numLsElem`不在issue port，不能由通用helper写入。
 - fired-mask的LOAD base=0、STA base=`LOAD_PIPE_NUM`、STD base=
-  `LOAD_PIPE_NUM+STA_PIPE_NUM`；width/full-mask均由compile port count派生。
-- scalar testcase必须禁用默认随机vecissue sequence，并断言`issueVldu_valid=0`。
+  `LOAD_PIPE_NUM+STA_PIPE_NUM`；width由compile port count派生，blocking 只检查真实 mask 覆盖
+  candidate，不生成 full-mask。
+- scalar testcase 不启动随机 vecissue default sequence；vecissue driver 收到任一不确定为 0 的
+  `issueVldu_valid` 时立即 fatal，确定为 0 时只驱动 idle。
 
 V2逐port字段矩阵：
 
 | target | V2 port | ROB | LQ/SQ | FuType | FTQ/backend/dependency | `numLsElem` |
 |---|---|---|---|---|---|---|
-| LOAD | `issueLda_0..2` | 完整flag/value | 完整LQ | 端口无该字段 | 按真实LDA bundle写入 | 不存在 |
+| LOAD | `issueLda_0..2` | 完整flag/value | 完整LQ/SQ | 端口无该字段 | 按真实LDA bundle写入 | 不存在 |
 | STA | `issueSta_0..1` | 完整flag/value | 完整SQ | V2编码 | 按真实STA bundle写入 | 不存在 |
 | STD | `issueStd_0..1` | value-only，不能写悬空flag | 完整SQ | V2编码 | 按真实STD bundle写入 | 不存在 |
 
@@ -118,9 +120,7 @@ flowchart TD
     N -->|no| P["return to sequence"]
     N -->|yes and nonblocking=1| O0["drive_dispatch_issue_one_cycle"]
     N -->|yes and nonblocking=0| O["wait_dispatch_issue_ready"]
-    O0 --> O01{"flush before sample?"}
-    O01 -->|yes| O3
-    O01 -->|no| O02["clear_ready_dispatch_issue_ports"]
+    O0 --> O02["clear_ready_dispatch_issue_ports"]
     O02 --> O03{"flush after sample?"}
     O03 -->|yes| O3
     O03 -->|no| O04["clear_dispatch_issue_ports + send_pkt"]
@@ -133,15 +133,18 @@ flowchart TD
     O4 -->|timeout| O5["uvm_fatal ready timeout"]
     O4 -->|no| P
 
-    P --> Q{"aborted_by_redirect?"}
-    Q -->|yes and fired_mask!=0| Q1["mark_fired_items fired_mask"]
-    Q -->|yes and fired_mask==0| Q2["return"]
-    Q -->|no| Q3{"issue_blocked_by_global_flush or flush_epoch changed?"}
-    Q3 -->|yes| Q4["skip fire marking"]
-    Q3 -->|no and fired_items!=empty| Q5["mark_fired_items effective_fired_mask"]
+    P --> P1["build candidate_mask and effective_fired_mask"]
+    P1 --> P2{"fired_mask has candidate-outside bit?"}
+    P2 -->|yes| P3["uvm_fatal"]
+    P2 -->|no| P4{"blocking and not abort/flush: mask covers candidates?"}
+    P4 -->|no| P5["uvm_fatal"]
+    P4 -->|yes| P6["mark confirmed fired items first"]
+    P4 -->|not applicable| P6
+    P6 --> Q{"aborted_by_redirect or flush/epoch changed?"}
+    Q -->|yes| Q1["only cancel unfired candidates; return"]
+    Q -->|no| Q2["normal return"]
 
-    Q1 --> S["mark_issue_fire_already_accepted or mark_issue_fire"]
-    Q5 --> S
+    P6 --> S["mark_issue_fire_already_accepted or mark_issue_fire"]
     S --> S1["alloc_issue_epoch"]
     S1 --> S2["mark_issue_snapshot"]
     S2 --> S2A["register_issue_generation_token LOAD/STA"]
@@ -183,20 +186,22 @@ select_target_candidates 跳过已选 index、不可发射 item；global 模式�
 
 3. assign/driver 阶段
 assign_issue_items 对每个 selected item 使用 pipe_idx 写入 xaction；
-当前源码的issue_field_assigner按历史扁平index写LOAD 0..2、STA 3..4、STD 5..6；
-V2目标按target直接写issueLda/Sta/Std物理port，并用派生base只计算内部fired-mask bit；
+issue_field_assigner 先检查 FuType/fuOpType/behavior/target 合法矩阵，再按 target 直接写
+issueLda/Sta/Std 物理 port；LOAD/STA/STD 的 local pipe 都从 0 开始，只有内部 fired-mask bit
+使用 compile-time port base 转换；
 start_item/finish_item 后 driver.main_phase 调 send_pkt 驱动 DUT；
 如果 wait_ready=1，driver.wait_dispatch_issue_ready 循环等待 valid port ready；
 每拍 clear_ready_dispatch_issue_ports 记录已 ready 的 port 到 fired_mask，并清掉该 port valid；
 等待过程中如果 flush_in_progress 或 flush_epoch 改变，则清所有 remaining valid，重发清空包，置 aborted_by_redirect=1 返回。
 
 4. fire marking 阶段
-sequence 返回后先看 aborted_by_redirect；
-如果 aborted 且 fired_mask 非 0，只对 fired_mask 命中的 port 调 mark_fired_items；
-如果 aborted 且 fired_mask 为 0，直接返回，不改 status；
-如果未 aborted，但当前 global flush/redirect 阻塞或 flush_epoch 改变，跳过 fire marking；
-正常情况下对本拍 selected fired_items 全部调用 mark_fired_items；
-mark_fired_items 根据 target/uop_index 计算 port bit，bit 未命中则跳过；
+sequence 返回后根据 fired_items 构造 candidate_mask，并计算
+effective_fired_mask = fired_mask & candidate_mask；如果 driver 返回 candidate 之外的 bit，立即 fatal；
+blocking 且未 abort/flush 时，要求 effective_fired_mask 覆盖全部 candidate，否则 fatal；
+无论随后是否观察到 abort/flush/epoch 变化，都先对 effective_fired_mask 命中的 item 调 mark_fired_items；
+已确认的 fire 不因同拍 redirect 被撤销，未确认的 candidate 不推进；
+mark_fired_items 调用 port_idx_for_item，根据 compile-time target base、pipe count 和 uop_index
+计算 port bit，bit 未命中则跳过；
 如果 data.issue_blocked_by_global_flush 当前为 1，调用 mark_issue_fire_already_accepted，只做 state eligibility 检查；
 否则调用 mark_issue_fire，包含 global flush 检查；
 fire 成功后分配 issue_epoch，记录 target issue snapshot；随后用同一个issue_epoch和
@@ -576,9 +581,12 @@ drive_dispatch_issue_loop();
 
 ```systemverilog
 forever begin
+    bit pending_issue_work;
+
     issue_sched.route_all_ready_uids();
     send_issue_cycle(cycle_idx, has_fire);
     issue_sched.advance_issue_queue_delays();
+    pending_issue_work = issue_sched.has_pending_issue_work();
 
     if (data.is_global_stop_requested()) begin
         break;
@@ -620,11 +628,16 @@ drive_dispatch_issue_loop:
     从 issue queue 中选择本拍候选，构造并驱动 lintsissue xaction，然后根据 driver 回填更新 fire 状态。
   调用 advance_issue_queue_delays：
     递减 queue item 的 ready_cycle，使带 delay 的 item 在后续 cycle 变为可发射。
+  调用 has_pending_issue_work：
+    只读取 LOAD/STA/STD 三条 queue 的 size，不扫描主表或状态表。
   如果 global_stop_requested：
     break；
   如果 has_fire：
     idle_count 清 0；
-  否则 idle_count 累加，到阈值打印 warning。
+  否则如果 pending_issue_work：
+    idle_count 累加，命中阈值整数倍时报告 uvm_error，但不 break/return；
+  否则：
+    queue 已空，可能仍在等待 writeback/commit/deq/terminal，idle_count 清 0。
 ```
 
 内部子调用：
@@ -633,6 +646,7 @@ drive_dispatch_issue_loop:
 - `wait_for_main_table()`：等待主表 ready。
 - `send_issue_cycle()`：选择、驱动、标记 fire。
 - `issue_sched.advance_issue_queue_delays()`：递减 queue delay。
+- `issue_sched.has_pending_issue_work()`：以 O(1) queue size 查询区分 pending stall 和合法 drain。
 
 ## 9. `send_issue_cycle()`
 
@@ -661,32 +675,26 @@ end
 start_item(tr);
 finish_item(tr);
 
-if (tr.memblock_dispatch_aborted_by_redirect) begin
-    if (tr.memblock_dispatch_fired_mask != '0) begin
-        mark_fired_items(fired_items, tr.memblock_dispatch_fired_mask);
-        has_fire = 1'b1;
-    end
-    return;
+candidate_mask = '0;
+foreach (fired_items[idx]) begin
+    candidate_mask[port_idx_for_item(fired_items[idx])] = 1'b1;
 end
-
-if (data.issue_blocked_by_global_flush() ||
-    tr.memblock_dispatch_flush_epoch != memblock_sync_pkg::dispatch_flush_epoch) begin
-    return;
+effective_fired_mask = tr.memblock_dispatch_fired_mask & candidate_mask;
+if ((tr.memblock_dispatch_fired_mask & ~candidate_mask) != '0) begin
+    `uvm_fatal(..., "driver returned fired bit outside candidate mask")
 end
-
-if (fired_items.size() != 0) begin
-    bit [6:0] effective_fired_mask;
-
-    if (tr.memblock_dispatch_nonblocking_issue) begin
-        effective_fired_mask = tr.memblock_dispatch_fired_mask;
-    end else begin
-        effective_fired_mask = 7'h7f;
-    end
-
-    if (effective_fired_mask != '0) begin
-        mark_fired_items(fired_items, effective_fired_mask);
-        has_fire = 1'b1;
-    end
+flush_or_epoch_changed = data.issue_blocked_by_global_flush() ||
+                         tr.memblock_dispatch_flush_epoch != memblock_sync_pkg::dispatch_flush_epoch;
+if (!tr.memblock_dispatch_aborted_by_redirect && !flush_or_epoch_changed &&
+    !tr.memblock_dispatch_nonblocking_issue && effective_fired_mask != candidate_mask) begin
+    `uvm_fatal(..., "blocking issue did not fire all candidates")
+end
+if (effective_fired_mask != '0) begin
+    mark_fired_items(fired_items, effective_fired_mask);
+    has_fire = 1'b1;
+end
+if (tr.memblock_dispatch_aborted_by_redirect || flush_or_epoch_changed) begin
+    return;
 end
 ```
 
@@ -704,7 +712,7 @@ end
 ```text
 创建 xaction；
 调用 clear_lintsissue_xaction：
-  清空所有 intIssue valid/bits，避免上一拍 payload 残留到本拍。
+  清空所有 issueLda/issueSta/issueStd valid/bits，避免上一拍 payload 残留到本拍。
 设置 wait_ready=1、nonblocking_issue、ready_timeout、aborted_by_redirect=0；
 记录本拍开始 flush_epoch；
 fired_mask 清 0；
@@ -716,26 +724,14 @@ fired_mask 清 0；
     把 LOAD/STA/STD 候选写入 xaction 对应端口，并把候选复制到 fired_items，用于 driver 返回后做状态更新。
 start_item/finish_item，driver 实际驱动并可能回填 fired_mask/aborted_by_redirect；
 
-如果 aborted_by_redirect=1：
-  如果 fired_mask 非 0：
-    调用 mark_fired_items：
-      只对 fired_mask 命中的 port 更新 dispatched 状态，未命中的 port 保留给后续 flush/replay 处理。
-    has_fire=1；
+根据 fired_items 构造 candidate_mask，并计算 effective_fired_mask = fired_mask & candidate_mask；
+如果 driver 返回 candidate 之外的 bit，立即 fatal；
+如果 blocking 且未 abort/flush，要求 effective_fired_mask 覆盖全部 candidate，否则 fatal；
+如果 effective_fired_mask 非 0，先调用 mark_fired_items，并置 has_fire=1；
+如果随后发现 aborted_by_redirect、global flush 或 flush_epoch 改变：
+  只取消尚未确认 fire 的 candidate，已确认的 fire 保持已推进状态；
   return；
-
-如果未 aborted，但当前 issue_blocked_by_global_flush=1 或 flush_epoch 改变：
-  跳过 fire marking；
-  return；
-
-如果 fired_items 非空：
-  如果 nonblocking_issue=1：
-    effective_fired_mask 使用 driver 回填的真实 fired_mask。
-    只有 valid&&ready 的 port 才会出队；未 ready item 保留在 issue queue。
-  如果 nonblocking_issue=0：
-    effective_fired_mask 使用 7'h7f，保持旧阻塞等待路径的全部 selected item 已 fire 假设。
-  如果 effective_fired_mask 非 0：
-    调用 mark_fired_items；
-    has_fire=1。
+正常路径同样只使用 driver 返回的真实 fired_mask，不生成全 1 mask。
 ```
 
 内部子调用：
@@ -931,6 +927,14 @@ end
 function void assign_issue_item_fields(input lintsissue_agent_agent_xaction tr,
                                        input memblock_issue_q_item_t item,
                                        input int unsigned pipe_idx);
+    main_control_transaction main_tr;
+    memblock_op_behavior_t behavior;
+
+    ensure_data();
+    main_tr = data.get_main_transaction(item.uid);
+    check_pipe_idx(item.target, pipe_idx, "assign_issue_item_fields");
+    behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+    check_target_futype_fuoptype(main_tr, behavior, item.target);
     assign_main_issue_fields(tr, item, pipe_idx);
     assign_issue_dep_fields(tr, item, pipe_idx);
     assign_backend_meta_fields(tr, item, pipe_idx);
@@ -939,7 +943,9 @@ endfunction:assign_issue_item_fields
 
 功能解释：
 
-`assign_issue_items()` 把 selected items 绑定到目标 pipe index，并保存一份 `fired_items` 供发射后状态标记使用。`issue_field_assigner` 按 target 把 fields 写到 lintsissue 的 7 个端口。
+`assign_issue_items()` 把 selected items 绑定到 target-local pipe index，并保存一份
+`fired_items` 供发射后状态标记使用。`issue_field_assigner` 先校验合法矩阵，再按 target 写入
+V2 `issueLda/issueSta/issueStd` 物理端口。
 
 输入/输出：
 
@@ -956,6 +962,10 @@ assign_issue_items:
   fired_item.uop_index = pipe_idx，用于后续映射 fired_mask port bit；
 
 assign_issue_item_fields:
+  获取主表项并检查 split profile、target 和 local pipe 范围；
+  vector LS 直接 fatal；
+  调 derive_op_behavior 取得统一 operation behavior；
+  调 check_target_futype_fuoptype，检查 FuType/fuOpType/route/target 一致；
   assign_main_issue_fields 写 valid、fuType/fuOpType、src_0、imm、ROB、LQ/SQ key；
   assign_issue_dep_fields 写 LOAD wait/store-set 或 STA first-issue/store-set；
   assign_backend_meta_fields 写 LOAD/STA 的 pdest、rfWen/fpWen、pc、RVC、ftq。
@@ -964,6 +974,7 @@ assign_issue_item_fields:
 内部子调用：
 
 - `assign_main_issue_fields()`：主 payload。
+- `check_target_futype_fuoptype()`：复用统一 classifier 检查 scalar split issue 合法矩阵。
 - `assign_issue_dep_fields()`：依赖字段。
 - `assign_backend_meta_fields()`：后端 meta 字段。
 
@@ -982,42 +993,40 @@ endcase
 ```
 
 ```systemverilog
-// LOAD pipe 0/1/2 -> intIssue_0/1/2
-tr.io_ooo_to_mem_intIssue_0_0_valid = 1'b1;
+// LOAD local pipe 0 -> issueLda_0
+tr.io_ooo_to_mem_issueLda_0_valid = 1'b1;
 ...
-// STA pipe 0/1 -> intIssue_3/4
-tr.io_ooo_to_mem_intIssue_3_0_valid = 1'b1;
+// STA local pipe 0 -> issueSta_0
+tr.io_ooo_to_mem_issueSta_0_valid = 1'b1;
 ...
-// STD pipe 0/1 -> intIssue_5/6
-tr.io_ooo_to_mem_intIssue_5_0_valid = 1'b1;
+// STD local pipe 0 -> issueStd_0
+tr.io_ooo_to_mem_issueStd_0_valid = 1'b1;
 ```
 
 功能解释：
 
-端口映射固定为 LOAD 使用 `intIssue_0/1/2`，STA 使用 `intIssue_3/4`，STD 使用 `intIssue_5/6`。后续 `mark_fired_items()` 也按这个映射把 target pipe index 转成 `fired_mask[6:0]`。
+LOAD、STA、STD 分别写自己的 V2 split port，三类 local pipe 都从 0 开始。后续
+`port_idx_for_item()` 才使用 compile-time LOAD/STA/STD base 把 local pipe 转成参数化 fired-mask
+bit。
 
 输入/输出：
 
 - 输入：target、pipe_idx、main transaction、queue item。
-- 输出：对应 intIssue port 的 valid 和 bits。
+- 输出：对应 `issueLda/issueSta/issueStd` port 的 valid 和 bits。
 
 文字伪代码：
 
 ```text
 检查 pipe_idx 是否在 target 合法范围；
 LOAD:
-  pipe 0 写 intIssue_0；
-  pipe 1 写 intIssue_1；
-  pipe 2 写 intIssue_2；
-  写 fuOpType/src_0/imm/ROB/LQ/SQ；
+  pipe 0/1/2 分别写 issueLda_0/1/2；
+  写 fuOpType/src_0/imm/ROB/LQ/SQ，不伪造 FuType；
 STA:
-  pipe 0 写 intIssue_3；
-  pipe 1 写 intIssue_4；
-  写 fuType/fuOpType/src_0/imm/ROB/SQ；
+  pipe 0/1 分别写 issueSta_0/1；
+  无损编码 V2 35-bit FuType，再写 fuOpType/src_0/imm/ROB/SQ；
 STD:
-  pipe 0 写 intIssue_5；
-  pipe 1 写 intIssue_6；
-  写 fuType/fuOpType/src_0/ROB/SQ。
+  pipe 0/1 分别写 issueStd_0/1；
+  无损编码 V2 35-bit FuType，再写 fuOpType/src_0/ROB value/SQ，不伪造 ROB flag。
 ```
 
 内部子调用：
@@ -1032,6 +1041,7 @@ STD:
 真实逻辑摘要：
 
 ```systemverilog
+req = null;
 seq_item_port.try_next_item(req);
 if(req!=null) begin
     repeat(req.pre_pkt_gap) begin
@@ -1039,12 +1049,21 @@ if(req!=null) begin
         this.drive_idle(this.cfg.drv_mode);
     end
     @this.vif.drv_mp.drv_cb;
-    this.send_pkt(req);
-    if (req.memblock_dispatch_wait_ready) begin
-        if (req.memblock_dispatch_nonblocking_issue) begin
-            this.drive_dispatch_issue_one_cycle(req);
-        end else begin
-            this.wait_dispatch_issue_ready(req);
+    if (req.memblock_dispatch_wait_ready &&
+        (memblock_sync_pkg::dispatch_flush_in_progress ||
+         req.memblock_dispatch_flush_epoch != memblock_sync_pkg::dispatch_flush_epoch)) begin
+        req.memblock_dispatch_fired_mask = '0;
+        clear_dispatch_issue_ports(req);
+        this.send_pkt(req);
+        req.memblock_dispatch_aborted_by_redirect = 1'b1;
+    end else begin
+        this.send_pkt(req);
+        if (req.memblock_dispatch_wait_ready) begin
+            if (req.memblock_dispatch_nonblocking_issue) begin
+                this.drive_dispatch_issue_one_cycle(req);
+            end else begin
+                this.wait_dispatch_issue_ready(req);
+            end
         end
     end
     repeat(req.post_pkt_gap) begin
@@ -1053,22 +1072,35 @@ if(req!=null) begin
     end
     seq_item_port.item_done();
 end
+else begin
+    @this.vif.drv_mp.drv_cb;
+    this.drive_idle(this.cfg.drv_mode);
+end
 ```
 
+首次 launch 前如果 wait-ready item 已跨过 flush epoch，driver 只清 valid、驱动 idle 并置
+`aborted_by_redirect`，不会把过期 transaction 发到 DUT；每轮 `try_next_item()` 前显式清空
+`req`，避免无 item 时复用上一轮句柄。正常 launch 后，blocking/nonblocking 子任务再按各自
+真实 ready/fire 合同处理。
+
 ```systemverilog
-vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_valid <= tr.io_ooo_to_mem_intIssue_6_0_valid;
+vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_valid <= tr.io_ooo_to_mem_issueLda_0_valid;
 ...
-vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_valid <= tr.io_ooo_to_mem_intIssue_0_0_valid;
+vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_valid <= tr.io_ooo_to_mem_issueSta_0_valid;
+...
+vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_valid <= tr.io_ooo_to_mem_issueStd_0_valid;
 ```
 
 功能解释：
 
-driver 是真实驱动 DUT intIssue valid/bits 的组件。sequence 只构造 xaction；真正 ready 等待和 `fired_mask` 回填发生在 driver。
+driver 是真实驱动 DUT `issueLda/issueSta/issueStd` valid/bits 的组件。sequence 只构造
+xaction；真正 ready 等待和 `fired_mask` 回填发生在 driver。
 
 输入/输出：
 
 - 输入：`lintsissue_agent_agent_xaction req`。
-- 输出：DUT interface 上的 `io_ooo_to_mem_intIssue_*` valid/bits；回填 `req.memblock_dispatch_fired_mask/aborted_by_redirect`。
+- 输出：DUT interface 上的 split issue valid/bits；回填
+  `req.memblock_dispatch_fired_mask/aborted_by_redirect`。
 
 文字伪代码：
 
@@ -1089,7 +1121,7 @@ main_phase:
     每拍 drive_idle；
 
 send_pkt:
-  将 xaction 中 intIssue_6 到 intIssue_0 的 valid/bits 全部写到 vif.drv_cb；
+  将 xaction 中 issueLda_0..2、issueSta_0..1、issueStd_0..1 的 valid/bits 写到 vif.drv_cb；
 ```
 
 内部子调用：
@@ -1129,20 +1161,23 @@ end
 ```
 
 ```systemverilog
-if (tr.io_ooo_to_mem_intIssue_6_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_6_0_ready) begin
-    tr.memblock_dispatch_fired_mask[6] = 1'b1;
-    tr.io_ooo_to_mem_intIssue_6_0_valid = 1'b0;
+if (tr.io_ooo_to_mem_issueLda_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_ready) begin
+    tr.io_ooo_to_mem_issueLda_0_valid = 1'b0;
+    record_dispatch_issue_fire(`MEMBLOCK_DUT_LOAD_PORT_BASE + 0, tr);
 end
 ...
-if (tr.io_ooo_to_mem_intIssue_0_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_intIssue_0_0_ready) begin
-    tr.memblock_dispatch_fired_mask[0] = 1'b1;
-    tr.io_ooo_to_mem_intIssue_0_0_valid = 1'b0;
+if (tr.io_ooo_to_mem_issueStd_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_ready) begin
+    tr.io_ooo_to_mem_issueStd_0_valid = 1'b0;
+    record_dispatch_issue_fire(`MEMBLOCK_DUT_LOAD_PORT_BASE + `MEMBLOCK_DUT_LOAD_PIPE_NUM +
+                               `MEMBLOCK_DUT_STA_PIPE_NUM + 0, tr);
 end
 ```
 
 功能解释：
 
-这是 partial fire 处理的核心。每个 ready 的 port 单独置 `fired_mask` 并清 valid；如果等待期间遇到 redirect/flush，driver 只保留已经 ready 的 fired_mask，清掉未 ready 的 valid，并通知 sequence 走 abort 路径。
+这是 partial fire 处理的核心。每个 ready 的 port 通过 compile-time base 计算 mask bit，单独置
+`fired_mask` 并清 valid；如果等待期间遇到 redirect/flush，driver 只保留已经 ready 的
+fired-mask，清掉未 ready 的 valid，并通知 sequence 走 abort 路径。
 
 输入/输出：
 
@@ -1156,8 +1191,8 @@ end
 while 还有 valid port pending：
   等一个 driver clock；
   clear_ready_dispatch_issue_ports：
-    对每个 port，如果 valid && ready：
-      fired_mask[port]=1；
+    对每个 V2 split port，如果 valid && ready：
+      调 record_dispatch_issue_fire，以 target base + local pipe 设置 fired-mask bit；
       清该 port valid；
   如果 dispatch_flush_in_progress=1 或 flush_epoch 改变：
     clear_dispatch_issue_ports 清所有剩余 valid；
@@ -1174,6 +1209,7 @@ while 还有 valid port pending：
 
 - `has_dispatch_issue_pending()`：检查是否仍有 valid port。
 - `clear_ready_dispatch_issue_ports()`：记录每个已 ready port。
+- `record_dispatch_issue_fire()`：检查参数化 port 上界、设置 mask bit并输出 target/local-pipe 日志。
 - `clear_dispatch_issue_ports()`：redirect/flush 时清 remaining valid。
 - `report_dispatch_issue_timeout()`：timeout 诊断。
 
@@ -1189,13 +1225,6 @@ if (!has_dispatch_issue_pending(tr)) begin
     return;
 end
 @this.vif.drv_mp.drv_cb;
-if (memblock_sync_pkg::dispatch_flush_in_progress ||
-    tr.memblock_dispatch_flush_epoch != memblock_sync_pkg::dispatch_flush_epoch) begin
-    clear_dispatch_issue_ports(tr);
-    this.send_pkt(tr);
-    tr.memblock_dispatch_aborted_by_redirect = 1'b1;
-    return;
-end
 clear_ready_dispatch_issue_ports(tr);
 if (memblock_sync_pkg::dispatch_flush_in_progress ||
     tr.memblock_dispatch_flush_epoch != memblock_sync_pkg::dispatch_flush_epoch) begin
@@ -1210,7 +1239,7 @@ this.send_pkt(tr);
 
 功能解释：
 
-这是非阻塞 issue drive 的 driver 路径。它只等待一个 driver clocking block，采样一次 DUT ready；只有本拍真实 `valid&&ready` 的 port 会置入 `fired_mask`。未 ready port 会被清 valid 后结束本次 xaction，但不会被 sequence 标记为 dispatched，因此仍留在 issue queue 下轮重试。
+这是非阻塞 issue drive 的 driver 路径。它只等待一个 driver clocking block，先采样一次 DUT ready；只有本拍真实 `valid&&ready` 的 port 会置入 `fired_mask`，再检查 flush/epoch。未 ready port 会被清 valid 后结束本次 xaction，但不会被 sequence 标记为 dispatched，因此仍留在 issue queue 下轮重试。
 
 文字伪代码：
 
@@ -1220,12 +1249,10 @@ this.send_pkt(tr);
   如果当前 xaction 没有任何 valid port，直接返回；
   这样空 xaction 不会额外等待一个 driver clock，保持旧阻塞路径无 pending 时立即返回的行为；
 等待一个 driver clock；
-采样 ready 前检查 flush/epoch：
-  如果 flush 已开始或 epoch 改变：
-    清掉所有 valid，drive idle，置 aborted_by_redirect=1，返回；
 调用 clear_ready_dispatch_issue_ports：
-  对每个 valid&&ready port 置 fired_mask 并清该 port valid；
-采样 ready 后再次检查 flush/epoch：
+  对每个 valid 检查 ready 是否 X/Z；
+  对每个 valid&&ready===1 port 置 fired_mask 并清该 port valid；
+采样 ready 后检查 flush/epoch：
   如果 flush 已开始或 epoch 改变：
     清掉剩余 valid，drive idle，置 aborted_by_redirect=1，返回；
 正常非阻塞结束：
@@ -1241,11 +1268,7 @@ this.send_pkt(tr);
 真实逻辑摘要：
 
 ```systemverilog
-case (fired_items[idx].target)
-    MEMBLOCK_ISSUE_TARGET_LOAD: port_idx = fired_items[idx].uop_index;
-    MEMBLOCK_ISSUE_TARGET_STA:  port_idx = fired_items[idx].uop_index + 3;
-    MEMBLOCK_ISSUE_TARGET_STD:  port_idx = fired_items[idx].uop_index + 5;
-endcase
+port_idx = port_idx_for_item(fired_items[idx]);
 if (!fired_mask[port_idx]) begin
     continue;
 end
@@ -1265,17 +1288,15 @@ end
 
 输入/输出：
 
-- 输入：`fired_items`、`fired_mask[6:0]`。
+- 输入：`fired_items`、`fired_mask[MEMBLOCK_DUT_SCALAR_ISSUE_MASK_W-1:0]`。
 - 输出：fire 成功的 item 更新 status/queue；STD 兼容路径可能补 writeback event。
 
 文字伪代码：
 
 ```text
 遍历 fired_items；
-按 target 和 uop_index 计算真实 port_idx：
-  LOAD pipe 0/1/2 -> bit 0/1/2；
-  STA pipe 0/1 -> bit 3/4；
-  STD pipe 0/1 -> bit 5/6；
+调用 port_idx_for_item，按 target 的 compile-time base、pipe count 和 local uop_index
+计算真实 port_idx；local pipe 越界或结果超出 port count/mask width 时 fatal；
 如果 fired_mask[port_idx]=0：
   continue，不标记；
 如果当前 issue_blocked_by_global_flush=1：
@@ -1293,6 +1314,7 @@ end
 
 内部子调用：
 
+- `port_idx_for_item()`：把 target-local pipe 统一转换成参数化 fired-mask bit。
 - `issue_sched.mark_issue_fire()`：正常 fire marking。
 - `issue_sched.mark_issue_fire_already_accepted()`：redirect/flush 已开始但 port 已被 DUT ready 接收的边界 marking。
 - `submit_issue_accept_pass()`：STD 兼容 pass。
@@ -1499,7 +1521,7 @@ Driver 协作字段：
 - `memblock_dispatch_nonblocking_issue`：为 1 时 driver 只采样一次 ready，未 fire item 不出队。
 - `memblock_dispatch_ready_timeout`：等待 ready 最大周期。
 - `memblock_dispatch_flush_epoch`：发射开始时的 flush 版本。
-- `memblock_dispatch_fired_mask`：driver 回填；bit布局由compile-time LOAD/STA/STD port count和base派生。V2默认3/2/2仍得到7 bit，但源码不得硬编码宽度和offset。
+- `memblock_dispatch_fired_mask`：driver 回填；bit布局由compile-time LOAD/STA/STD port count和base派生。V2默认3/2/2仍得到7 bit，但源码不得硬编码宽度和offset；split profile 若超过显式 3/2/2 字段展开能力，会在 `check_compile_param_consistency()` 初始化阶段 fatal。
 - `memblock_dispatch_aborted_by_redirect`：等待 ready 中遇到 redirect/flush 时置 1。
 
 ## 20. 分支优先级
@@ -1523,12 +1545,14 @@ Select 分支优先级：
 
 Fire marking 分支优先级：
 
-1. Driver 若 `aborted_by_redirect=1`，sequence 只按 `fired_mask` 标记已 ready port。
-2. Driver abort 且 `fired_mask=0`，直接 return，不修改 status。
-3. 未 abort 但 sequence 看到 global flush/redirect 或 flush_epoch 改变，跳过 fire marking。
-4. 正常路径若 `memblock_dispatch_nonblocking_issue=1`，只按真实 `tr.memblock_dispatch_fired_mask` 标记 fire。
-5. 正常路径若 `memblock_dispatch_nonblocking_issue=0`，使用由total port count派生的full mask标记全部selected fired_items；不得保留固定7-bit常量。
-6. `mark_issue_fire_already_accepted()` 只用于已被 DUT ready 接收的 redirect/flush 边界 item。
+1. sequence 先由 selected `fired_items` 构造 `candidate_mask`，并将 driver 返回的
+   `fired_mask` 与之求交；candidate 之外的 bit 立即 fatal。
+2. blocking 且未 abort/flush 时，真实 mask 未覆盖全部 candidate 立即 fatal；不使用 full-mask
+   代替握手事实。
+3. 无论随后是否观察到 abort/flush/epoch 变化，都先按真实 `effective_fired_mask` 标记已确认
+   ready port；abort 或 epoch 变化只取消未 fire candidate。
+4. `effective_fired_mask=0` 时不修改 status；未命中的 item 保留在 queue 中等待后续 route。
+5. `mark_issue_fire_already_accepted()` 只用于已被 DUT ready 接收的 redirect/flush 边界 item。
 
 ## 21. 端到端行为总结
 

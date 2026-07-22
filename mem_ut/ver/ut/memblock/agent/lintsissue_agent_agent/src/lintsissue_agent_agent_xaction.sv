@@ -20,7 +20,8 @@ class lintsissue_agent_agent_xaction  extends tcnt_data_base;
     int unsigned memblock_dispatch_ready_timeout;
     bit memblock_dispatch_aborted_by_redirect;
     int unsigned memblock_dispatch_flush_epoch;
-    bit [(`MEMBLOCK_DUT_LOAD_PIPE_NUM + `MEMBLOCK_DUT_STA_PIPE_NUM + `MEMBLOCK_DUT_STD_PIPE_NUM)-1:0]
+    bit [(`MEMBLOCK_DUT_LOAD_PORT_BASE + `MEMBLOCK_DUT_LOAD_PIPE_NUM +
+          `MEMBLOCK_DUT_STA_PIPE_NUM + `MEMBLOCK_DUT_STD_PIPE_NUM)-1:0]
         memblock_dispatch_fired_mask;
 
     rand bit [63:0] io_ooo_to_mem_issueLda_0_bits_src_0;

@@ -13,6 +13,7 @@
     `include "uvm_macros.svh"
 `endif
 
+`include "memblock_compile_params.svh"
 `include "lintsissue_agent_agent_dec.sv"
 `include "lintsissue_agent_agent_interface.sv"
 package lintsissue_agent_agent_pkg;

@@ -32,6 +32,9 @@ seq_csr_common::init/reload_from_plus：
 
 - load/store enqueue width 不大于总 slot 数。
 - 当前显式六slot字段链要求slot/load/store compile tuple精确为6/6/4；非默认覆盖在激励前fatal。
+- split issue 的当前 interface/xaction/driver 只显式展开 LDA/STA/STD=3/2/2；若 split profile
+  的任一 pipe count 超过该上限，`check_compile_param_consistency()` 在初始化阶段立即 fatal，
+  防止只修改宏后延迟到字段赋值或 driver 循环才报错。
 - `MEMBLOCK_DUT_UOP_IDX_W == $clog2(MEMBLOCK_DUT_MAX_UOP_SIZE+1)`。
 - `MAX_LS_ELEM == VLEN/8`。
 - `NUM_LS_ELEM_W == $clog2(MAX_LS_ELEM)+1`。

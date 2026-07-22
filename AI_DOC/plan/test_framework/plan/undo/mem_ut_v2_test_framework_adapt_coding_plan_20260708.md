@@ -52,7 +52,7 @@ test -e build_memblock/rtl/filelist.f
 | 自动主表 VADDR 窗口 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_main_table_vaddr_generation_adapt_execution_plan_20260713.md`，源码审计、地址复用跨度修复、远端验证和两轮独立 review 已完成 |
 | DCache 轻量 L2 response/hint/Probe，flush_done zero-only | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md` |
 | LSQ enqueue | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`，coding、文档同步、冻结验证和最终独立review均已完成；真实load已闭环，store admission已覆盖，store终态仍由后续SQ deq专项闭环 |
-| split issue、vector stimulus/driver gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_split_issue_framework_adapt_execution_plan_20260708.md`；只拥有vecissue默认入口关闭和driver valid fatal，不修改vector output monitor |
+| split issue、vector stimulus/driver gate | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_split_issue_framework_adapt_execution_plan_20260708.md`，已完成并归档；只拥有vecissue默认入口关闭和driver valid fatal，不修改vector output monitor |
 | IQ feedback/replay、VSTU gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_iq_feedback_replay_framework_adapt_execution_plan_20260711.md`；唯一实现STA SQ-only raw、current snapshot attach和VSTU valid fatal |
 | int-WB/writeback | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_int_wb_writeback_framework_adapt_execution_plan_20260708.md` |
 | CSR/sfence payload字段与runtime语义 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_csr_control_runtime_semantic_review_execution_plan_20260708.md`；拥有CSR字段采样/消费语义；L2TLB专项只拥有不受semantic capture gate控制的latest发布 plumbing，并复用同一raw类型、统一seq和公共state，不复制字段模型 |
@@ -72,6 +72,7 @@ test -e build_memblock/rtl/filelist.f
 | compile 参数与宽度适配 | 已完成并归档 | 建立 V2 compile profile 单一真源，参数化 ROB/LQ/SQ key、FuType、物理 slot/port/capability，并移除硬件结构 runtime plus 镜像。 | 以 `plan/do/mem_ut_v2_compile_param_and_width_adapt_execution_plan_20260708.md` 的归档记录为准。 |
 | LSQ enqueue 适配 | 已完成并归档 | 完成 V2 6-slot、load/store 6/4 过滤、完整 enqueue 字段、无 response 的 clock-first streaming、launch reservation 与下一采样边界 issue-ready。 | 以 `plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md` 及对应 implementation review 为准。 |
 | 自动主表 VADDR 窗口 | 已完成并归档 | 自动 normal 主表改用独立 `MAIN_VADDR` 参数，初始化时拒绝非法 Sv39 正规范窗口，按完整访问跨度选择 64B 对齐虚拟地址；地址复用最终尺寸越界时保留参考地址并按 ref size 收敛合法 opcode，无参考 fallback 按最终类型重新选址；TLB builder 的 PADDR 映射保持独立。 | 干净远端编译通过；默认及 VA/PA 不同窗口的 smoke 通过；窄窗口场景实际触发 helper，后续 SQ deq mismatch 已明确归属后续 owner；第二轮独立 review 通过。review 位于 `review_doc/do/mem_ut_v2_main_table_vaddr_generation_adapt_implementation_review_20260721.md`。 |
+| V2 split issue | 已完成并归档 | 建立 LOAD/STA/STD 到 `issueLda/issueSta/issueStd` 的 target-local pipe 映射；字段写入前检查 FuType/fuOpType/behavior 合法矩阵；driver 只记录真实 `valid&&ready` fired-mask，redirect/epoch 仅取消未 fire item；关闭 scalar testcase 的 vector 默认入口并在 vecissue driver fail-fast。 | VCS 编译通过；正确 preset 的 `tc_dispatch_real_smoke` 通过，`UVM_ERROR=0`、`UVM_FATAL=0`；implementation review 最后一轮 subagent `FINAL PASS`。review 位于 `review_doc/undo/mem_ut_v2_split_issue_framework_adapt_implementation_review_20260722.md`。 |
 
 后续每完成一个子计划，必须在本表追加其实际功能、归档路径和验证结果，并保持每个子计划一个独立
 本地 git commit。

@@ -536,7 +536,7 @@ DUT monitor raw event 或框架 synthetic event
 | `has_sqIdx` | 是否携带有效 SQ key。 | store-like 发射和 event 反查使用。 |
 | `sq_key` | SQ key 快照。 | 驱动 STA/STD 的 `sqIdx`，或用于 debug/校验。 |
 | `numLsElem` | LSQ 元素数快照。 | 发射字段和一致性检查使用。 |
-| `uop_index` | 当前 issue item 本拍映射到 target 内第几个 pipe/port。 | `make_issue_item()` 中先清 0；真实发射前由 `assign_issue_items()` 用候选数组下标覆盖。LOAD 0/1/2 映射 `intIssue_0/1/2`，STA 0/1 映射 `intIssue_3/4`，STD 0/1 映射 `intIssue_5/6`；`mark_fired_items()` 用它匹配 `fired_mask`。 |
+| `uop_index` | 当前 issue item 本拍映射到 target 内第几个 pipe/port。 | `make_issue_item()` 中先清 0；真实发射前由 `assign_issue_items()` 用候选数组下标覆盖。V2 split issue 先写入 target-local 的 `issueLda`/`issueSta`/`issueStd` pipe，`port_idx_for_item()` 再依据 compile-time base 将 local pipe 映射到 `fired_mask`；`mark_fired_items()` 使用同一映射匹配真实 fire。 |
 | `uop_count` | 当前 target 理论需要的 uop 数。 | 普通标量 load/store 为 1；atomic/AMOCAS 会记录地址侧或数据侧 uop 数。当前 issue queue 尚未按该字段展开多个 queue item，因此它是 atomic 多 uop 的记录/预留字段。 |
 
 生命周期：

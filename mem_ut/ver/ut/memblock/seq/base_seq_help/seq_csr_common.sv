@@ -620,6 +620,16 @@ class seq_csr_common;
             MEMBLOCK_DUT_LOAD_PORT_BASE >= MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM) begin
             `uvm_fatal("SEQ_COMPILE_CFG", "scalar issue PORT_BASE/PORT_NUM/MASK_W constants are inconsistent")
         end
+        if (MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT &&
+            (MEMBLOCK_DUT_LOAD_PIPE_NUM > 3 ||
+             MEMBLOCK_DUT_STA_PIPE_NUM > 2 ||
+             MEMBLOCK_DUT_STD_PIPE_NUM > 2)) begin
+            `uvm_fatal("SEQ_COMPILE_CFG",
+                       $sformatf("split issue physical expansion supports at most LDA/STA/STD=3/2/2, got %0d/%0d/%0d",
+                                 MEMBLOCK_DUT_LOAD_PIPE_NUM,
+                                 MEMBLOCK_DUT_STA_PIPE_NUM,
+                                 MEMBLOCK_DUT_STD_PIPE_NUM))
+        end
         for (int unsigned port_idx = MEMBLOCK_DUT_LOAD_PORT_BASE;
              port_idx < MEMBLOCK_DUT_SCALAR_ISSUE_PORT_NUM;
              port_idx++) begin

@@ -1,62 +1,110 @@
-# memblock_lintsissue_dispatch_sequence.sv 源码分析
+# `memblock_issue_dispatch_base_sequence.sv` 源码分析
 
 本文档对应源码：
 
-- `mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_lintsissue_dispatch_sequence.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq/memblock_issue_dispatch_base_sequence.sv`
+- `mem_ut/ver/ut/memblock/agent/lintsissue_agent_agent/src/lintsissue_agent_agent_driver.sv`
+- `mem_ut/ver/ut/memblock/agent/lintsissue_agent_agent/src/lintsissue_agent_agent_xaction.sv`
 
-## 1. 文件定位与使用场景
+## 1. Sequence 职责
 
-真实 lintsissue 发射驱动 sequence，继承 `lintsissue_agent_agent_default_sequence`。它负责把 issue queue 里的候选转成 DUT intIssue port transaction。它不决定 uid 是否已经入队或 TLB 是否已建，这些由 scheduler/status 保证；它只在每拍选择候选、填字段、等待 ready，然后通知 scheduler 这些项已 fire。
+该 sequence 把 `issue_queue_scheduler` 选出的 scalar LOAD/STA/STD 候选转换成 V2
+`issueLda/issueSta/issueStd` transaction，并只对 driver 确认 fire 的 item 推进
+queued/dispatched/issue-epoch 状态。
 
-输入是三类 issue queue 和 `issue_field_assigner`。输出是 `lintsissue_agent_agent_xaction` 和 status 中的 dispatched/issue_epoch/replay mask 更新。
+它不负责 LSQ admission、最终 writeback/commit/deq，也不改变 redirect/replay 的 queue 恢复
+算法。scalar testcase 不支持 `issueVldu`；vector default sequence 被移除，vecissue driver 对
+非零 valid fail-fast。
 
-控制逻辑字段包括 pipe 数、非阻塞 issue 开关、ready timeout、queue item 的 target/priority/delay/replay_seq、driver wait ready 开关。xaction 里的地址、ROB/LQ/SQ、pc、pdest 等是 DUT payload。
+## 2. 每拍控制流
 
-关键 task/function：
+```text
+drive_dispatch_issue_loop：
+  调用 route_all_ready_uids，在 compile slot 上界内补 route；
+  调用 send_issue_cycle，完成本拍选择、驱动和 fire 标记；
+  调用 advance_issue_queue_delays，推进尚未 ready 的 queue item；
+  调用 has_pending_issue_work，只读取三条 queue size；
+  如果 global_stop_requested，正常退出；
+  如果本拍有 fire，清 no-progress 计数；
+  否则如果 queue 仍有 pending，累计计数并按阈值整数倍报告 uvm_error，但不退出；
+  否则 queue 已空，清计数并合法等待 writeback/commit/deq/terminal。
+```
 
-- `drive_dispatch_issue_loop()`：global stop 前每拍 route ready uid、send issue cycle、递减 delay；global stop 后退出。
-- `send_issue_cycle()`：创建 `lintsissue_agent_agent_xaction`，清空，设置 wait ready 和 timeout，选择候选，填字段，start/finish item。
-- `assign_issue_items()`：按数组 index 作为 pipe_idx；load 对应 0..2，STA 0..1 映射到 port 3/4，STD 0..1 映射到 port 5/6。
-- `mark_fired_items()`：根据 driver 回填的 `memblock_dispatch_fired_mask` 标记已 fire 端口；redirect 中止和非阻塞正常返回时都只标记已经 ready/fire 的端口，未 fire 项留在队列中等待后续 flush/replay 或下一轮仲裁处理。
-- `item_needs_issue_accept_pass()`：当 `MEMBLOCK_STD_REAL_WB_PASS_EN=0` 且是普通 store STD 时，发射接受后注入兼容 STD issue feedback success。
-- `make_issue_accept_pass_event()`、`submit_issue_accept_pass()`：构造 `STD_FEEDBACK + iq_feedback_hit` 事件；handler 在 real STD writeback pass 关闭时才把它转换为 target pass。
+no-progress 不再把“queue 已空但系统仍在 drain”误判为 issue stall，也不作为正常退出条件。
 
-## 2. 调度关系与参数数据流
+## 3. Candidate 到物理端口
 
-该 sequence 是 LOAD/STA/STD 真正进入 MemBlock 流水线入口的驱动者。它挂在 `env.u_lintsissue_agent_agent.sqr.main_phase`，是否工作由 `MEMBLOCK_DISPATCH_ISSUE_SEQ_EN` 控制。
+`assign_issue_items()` 对每类 target 使用候选数组下标作为 local pipe。字段赋值入口
+`issue_field_assigner::assign_issue_item_fields()` 先检查 FuType/fuOpType/behavior/target 合法
+矩阵，再写真实 V2 split port。
 
-调度关系：
+| target | local pipe | DUT 端口 | mask bit |
+|---|---:|---|---:|
+| LOAD | `i` | `issueLda_i` | `MEMBLOCK_DUT_LOAD_PORT_BASE + i` |
+| STA | `i` | `issueSta_i` | `MEMBLOCK_DUT_STA_PORT_BASE + i` |
+| STD | `i` | `issueStd_i` | `MEMBLOCK_DUT_STD_PORT_BASE + i` |
 
-| 阶段 | 输入 | 动作 | 输出 |
-|---|---|---|---|
-| route ready uid | `common_data_transaction` 状态表 | 调用 scheduler 把 ready uid 放入 LOAD/STA/STD 队列 | issue queue item |
-| 仲裁候选 | issue queue、pipe 数、`send_pri`、ROB 年龄、delay | 选择本拍可发射的 item | fired item 列表 |
-| 字段赋值 | 主表、状态表、TLB/LQ/SQ key、第二/第三类字段 | `issue_field_assigner` 填 `lintsissue_agent_agent_xaction` | DUT issue payload |
-| 驱动接口 | xaction valid bits | driver 等待对应 ready 后完成 item | issue fire |
-| 更新状态 | fired item + fire mask | `mark_issue_fire()` 或 `mark_issue_fire_already_accepted()` 更新 dispatched/issue_epoch 并删除队列项 | 后续等待 writeback/feedback |
+`port_idx_for_item()` 统一完成 item 到 mask bit 的转换，并检查 local pipe、port count 和 mask
+width。xaction 的 `memblock_dispatch_fired_mask` 宽度也由同一 compile-time base/count 表达式
+派生。
 
-参数数据流：
+## 4. Driver ready/fire 合同
 
-- `MEMBLOCK_DISPATCH_ISSUE_SEQ_EN`：总开关。
-- `MEMBLOCK_DISPATCH_ISSUE_NONBLOCKING_EN`：非阻塞 issue drive 开关；为 1 时每个 xaction 只采样一次 ready，正常返回也以真实 `fired_mask` 为准。
-- `MEMBLOCK_LOAD_PIP_NUM_LIMIT`、`MEMBLOCK_STA_PIP_NUM_LIMIT`、`MEMBLOCK_STD_PIP_NUM_LIMIT`：LOAD/STA/STD 每拍最多发射数量上限，会被真实 pipe 数 clamp；调度时通过 `sample_*_pip_num()` 得到本拍数量。
-- `MEMBLOCK_LOAD_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STA_PIP_NUM_RANDOM_EN`、`MEMBLOCK_STD_PIP_NUM_RANDOM_EN`：为 0 时本拍数量固定等于对应 LIMIT；为 1 时每拍在 `[1:LIMIT]` 内随机。
-- `MEMBLOCK_SEND_PRI_MODE_EN`：开启后主表随机 `send_pri/send_pri_std`，issue 仲裁先比较 priority，再按 ROB age。
-- `MEMBLOCK_GLOBAL_SEND_PRI_EN_WT`：send_pri 模式下每拍启用 global priority filter 的权重；采样为 0 时只做各 target 内部 priority 仲裁。
-- `MEMBLOCK_DISPATCH_READY_TIMEOUT`：控制 dispatch 专用 item 等待 DUT ready 的最大周期数。
-- `MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES`：控制 issue loop 连续无 fire 时的 warning 周期；只用于 debug，不作为退出条件。正常退出只看顶层置位的 `global_stop_requested`。
-- `MEMBLOCK_STA_REAL_WB_PASS_EN`、`MEMBLOCK_STD_REAL_WB_PASS_EN` 不改变发射 payload，但影响发射后 pass 是否可由 feedback/issue accept 兼容闭环。
-- `memblock_dispatch_flush_epoch`、`memblock_dispatch_nonblocking_issue` 和 `memblock_dispatch_fired_mask` 是 xaction 内部协同字段。`flush_epoch` 让 driver 在等待或采样 ready 时识别 redirect/flush epoch 变化；`nonblocking_issue` 决定 driver 是阻塞等待所有 valid port，还是只采样一次 ready；`fired_mask` 告诉 sequence 哪些端口已经被 DUT 接受。
+driver 先把 xaction 的 V2 split payload 放到 clocking block。之后：
 
-DUT payload 数据来源：
+- blocking 模式持续等待所有 valid port fire；每个 `valid && ready` 通过
+  `record_dispatch_issue_fire()` 写入真实 fired-mask，sequence 返回后要求该 mask 覆盖本拍
+  `candidate_mask`，不再用 all-ones mask 伪造 fire。
+- nonblocking 模式只等待一个 sample 边界；只有本拍 `valid && ready` 的 port 写 mask，未 ready
+  item 保留在 queue 中等待后续仲裁。
+- 等待期间发生 redirect/flush 时，driver 清 remaining valid 并置
+  `memblock_dispatch_aborted_by_redirect`。已确认 fire 的 mask 保留，未 fire port 不得推进状态。
 
-- 主表：`fuType/fuOpType/src/imm/vaddr/robIdx/pdest/rfWen/fpWen/pc/isRVC/ftqIdx/ftqOffset` 等。
-- LSQ/TLB 状态：`lqIdx/sqIdx`、active key、issue epoch、replay seq。
-- 第二类字段：MDP/load wait/store set/first issue 等发射前补充字段。
+`record_dispatch_issue_fire()` 和 `report_dispatch_issue_fire()` 使用 compile-time LOAD/STA/STD
+base/limit，不再使用固定 `<=2`、`<=4`、`-3`、`-5`。
 
-边界：
+## 5. `send_issue_cycle()` 文字伪代码
 
-- 它不负责 LSQ admission；没有被 `memblock_lsqenq_dispatch_base_sequence` 激活和路由的 uid 不应进入这里。
-- 它不负责判断最终 pass；load/store pass 由 monitor/writeback handler 或兼容 pass 事件推进。
-- 普通 store STD 在 `MEMBLOCK_STD_REAL_WB_PASS_EN=0` 时会生成 `STD_FEEDBACK` synthetic issue feedback success，并由 handler 作为兼容 pass 闭环；严格模式下必须等待真实 writeback。
-- 若 driver 等待或非阻塞采样 ready 期间发生 redirect，未 ready 端口会被清 valid，已 ready 端口通过 fire mask 补记 dispatch。这样可以避免“已经被 DUT 接受但 TB 没标记”或“未被接受却被错误删除队列”的两类冲突。非阻塞正常路径同样只按真实 `fired_mask` 删除队列项；未 ready item 不分配 issue epoch、不置 dispatched，后续继续参与仲裁。
+```text
+创建并清零 lintsissue xaction；
+设置 wait_ready、nonblocking、ready_timeout、flush_epoch，并清 fired_mask；
+若当前未被 global flush 阻塞：
+  调用 scheduler 选择 LOAD/STA/STD 候选；
+  再次检查 flush；
+  调用 assign_issue_items，把候选写入 V2 split port并保存 fired_items；
+start_item/finish_item，由 driver 驱动并回填 fired_mask/abort；
+
+根据 fired_items 构造 candidate_mask；
+effective_fired_mask = fired_mask 与 candidate_mask 的交集；
+如果 fired_mask 含 candidate 之外的 bit，立即 fatal；
+blocking 且没有 abort/flush 时，要求 effective_fired_mask 覆盖 candidate_mask，否则 fatal；
+effective_fired_mask 非零时先调用 mark_fired_items，并置 has_fire=1；
+
+如果 driver 因 redirect 中止，或 sequence 返回时 flush/epoch 已变化：
+  只取消尚未确认 fire 的 candidate；已确认 fire 已在上一步推进；
+  未命中的 item 不删除、不置 dispatched；
+  返回；
+
+正常结束时同样只使用 driver 返回的真实 fired_mask，不生成 all-ones mask。
+```
+
+## 6. `mark_fired_items()`
+
+该函数使用 `port_idx_for_item()` 把 target-local pipe 转成参数化 mask bit。mask 未命中的 item
+直接跳过；命中的 item 根据当前 flush 状态调用 `mark_issue_fire()` 或
+`mark_issue_fire_already_accepted()`。只有 mark 成功后才允许走 STD 兼容 accept-pass 路径。
+
+因此状态推进的唯一依据是 DUT 真实 fire，而不是候选存在、固定端口编号或 redirect 前曾经拉高
+valid。
+
+## 7. 参数与支持边界
+
+- `MEMBLOCK_DISPATCH_ISSUE_SEQ_EN`：主动 issue sequence 总开关。
+- `MEMBLOCK_DISPATCH_ISSUE_NONBLOCKING_EN`：选择单次 sample 或阻塞等待模式。
+- `MEMBLOCK_DISPATCH_READY_TIMEOUT`：blocking ready 等待上限。
+- `MEMBLOCK_LOAD/STA/STD_PIP_NUM_LIMIT`：testcase 行为使用量，统一受 compile pipe 数收敛。
+- `MEMBLOCK_ACTIVE_SEQ_NO_PROGRESS_WARN_CYCLES`：pending queue stall 诊断周期，不控制正常退出。
+
+物理 pipe 数、port base 和 mask width 不是 runtime plus 参数，统一来自
+`memblock_compile_params.svh`。本轮不实现 vector issue、MOU/AMO/CBO completion、RM/checker 或
+coverage，也不修改 pass/fail/terminal 主体算法。
