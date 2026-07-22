@@ -298,6 +298,13 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
     metaPhrFolded.getHistWithInfo(info).foldedHist :=
       computeFoldedHist(predictHist, info.FoldedLength)(info.HistoryLength)
   }
+  // Register the history reconstructed from the FTQ training transaction.
+  // BPU dispatches the corresponding train metadata on the following cycle.
+  private val trainFoldedPhrReg = RegEnable(
+    metaPhrFolded,
+    0.U.asTypeOf(new PhrAllFoldedHistories(AllFoldedHistoryInfo)),
+    bpTrainValid
+  )
   private val oldFoldedPhr = MuxCase(
     s1_foldedPhrReg,
     Seq(
@@ -313,7 +320,7 @@ class Phr(implicit p: Parameters) extends PhrModule with HasPhrParameters with H
   io.s1_foldedPhr   := s1_foldedPhrReg
   io.s2_foldedPhr   := s2_foldedPhrReg
   io.s3_foldedPhr   := s3_foldedPhrReg
-  io.trainFoldedPhr := metaPhrFolded
+  io.trainFoldedPhr := trainFoldedPhrReg
   io.oldFoldedPhr   := oldFoldedPhr
 
   // TODO: Currently unavailable，waiting for ftq commit info

@@ -247,16 +247,16 @@ class BranchInfo(implicit p: Parameters) extends BpuBundle with HalfAlignHelper 
 }
 
 // Backend & Ftq -> Bpu
-class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
+class BpuTrain(NumStartPcVecDup: Int = 1)(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
   val startPcVec: Duplicate[Vec[PrunedAddr]] =
-    Duplicate(NumStartPcDuplicate, Vec(NumBtbAlignBanks, PrunedAddr(VAddrBits)))
+    Duplicate(NumStartPcVecDup, Vec(NumBtbAlignBanks, PrunedAddr(VAddrBits)))
   val branches: Vec[Valid[BranchInfo]] = Vec(ResolveEntryBranchNumber, Valid(new BranchInfo))
   val meta:     BpuResolveMeta         = new BpuResolveMeta
   val perfMeta: BpuPerfMeta            = new BpuPerfMeta
 
   val debug_source: UInt = ResolveSource()
 
-  def startPc: PrunedAddr = startPcVec.get.head // get one duplicate and use its head (startPc for first alignBank)
+  def startPc: PrunedAddr = startPcVec.get.head // startPc for the first align bank
 
   // we masked out all branches after the first mispredict branch in Bpu top (refer to Bpu.scala t0_firstMispredictMask)
   // so, we can assert that branches.map(b => b.valid && b.bits.mispredict) is at-most-one-hot
@@ -266,10 +266,7 @@ class BpuTrain(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
 }
 
 // Bpu top -> predictors
-class Train(NumStartPcVecDup: Int = 1)(implicit p: Parameters) extends BpuTrain {
-  override val startPcVec: Duplicate[Vec[PrunedAddr]] =
-    Duplicate(NumStartPcVecDup, Vec(NumBtbAlignBanks, PrunedAddr(VAddrBits)))
-
+class Train(NumStartPcVecDup: Int = 1)(implicit p: Parameters) extends BpuTrain(NumStartPcVecDup) {
   def fromBpuTrain(that: BpuTrain): Unit = {
     this.startPcVec := that.startPcVec // NOTE this ':=' is overloaded for fan-out balancing
     this.branches   := that.branches
