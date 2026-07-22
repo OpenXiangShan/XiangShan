@@ -333,7 +333,11 @@ class PredCheckerResp(implicit p: Parameters) extends XSBundle with HasPdConst {
   }
   // to Ftq write back port (stage 2)
   val stage2Out = new Bundle {
-    val fixedTarget   = Vec(PredictWidth, UInt(VAddrBits.W))
+    // fixedTarget is pc+offset, so needs an extra bit for ITLB to do canonical-check
+    val fixedTarget = Vec(PredictWidth, UInt((VAddrBits + 1).W))
+    // jalTarget is used only to train FTB, keep VAddrBits to save area,
+    // FTB might generate fetch block with wrong target the next time,
+    // but predecode will find predTarget =/= fixedTarget and generates a redirect, so this is fine.
     val jalTarget     = Vec(PredictWidth, UInt(VAddrBits.W))
     val fixedMissPred = Vec(PredictWidth, Bool())
     val faultType     = Vec(PredictWidth, new CheckInfo)
@@ -395,7 +399,7 @@ class PredChecker(implicit p: Parameters) extends XSModule with HasPdConst {
   })
 
   val jumpTargets = VecInit(pds.zipWithIndex.map { case (pd, i) =>
-    (pc(i) + jumpOffset(i)).asTypeOf(UInt(VAddrBits.W))
+    (SignExt(pc(i), XLEN) + jumpOffset(i))(VAddrBits, 0)
   })
   val seqTargets = VecInit((0 until PredictWidth).map(i => pc(i) + Mux(pds(i).isRVC || !instrValid(i), 2.U, 4.U)))
 
