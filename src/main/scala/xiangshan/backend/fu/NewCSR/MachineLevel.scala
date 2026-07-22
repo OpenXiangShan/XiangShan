@@ -330,7 +330,7 @@ trait MachineLevel { self: NewCSR =>
     .setAddr(CSRs.mtval2)
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
-    val PMM   = EnvPMM(33, 32, wNoEffect).withReset(EnvPMM.Disable).withDescription("Machine security memory protection mode from the Smmpm extension.")
+    val PMM   = EnvPMM(33, 32, wNoFilter).withReset(EnvPMM.Disable).withDescription("Machine security memory protection mode from the Smmpm extension.")
     val MLPE  = RO(10).withDescription("Machine landing-pad enable from the Zicfilp extension.")
     val SSEED = RO( 9).withDescription("Seed CSR enable from the Zkr extension.")
     val USEED = RO( 8).withDescription("User seed CSR enable from the Zkr extension.")
