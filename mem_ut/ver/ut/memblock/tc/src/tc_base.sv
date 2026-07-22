@@ -53,7 +53,6 @@ function void `TC_NAME::build_phase(uvm_phase phase);
     uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_lsqcommit_agent_agent.sqr.main_phase"  , "default_sequence", memblock_lsqcommit_dispatch_base_sequence::type_id::get());
     uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_lsqenq_agent_agent.sqr.main_phase"  , "default_sequence", memblock_lsqenq_dispatch_base_sequence::type_id::get());
     uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_lintsissue_agent_agent.sqr.main_phase"  , "default_sequence", memblock_issue_dispatch_base_sequence::type_id::get());
-    uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_vecissue_agent_agent.sqr.main_phase"  , "default_sequence", vecissue_agent_agent_default_sequence::type_id::get());
     uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_redirect_agent_agent.sqr.main_phase"  , "default_sequence", memblock_redirect_dispatch_base_sequence::type_id::get());
     uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_sbuffer_agent_agent.sqr.main_phase"  , "default_sequence", sbuffer_mem_access_base_sequence::type_id::get());
     uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_dcache_agent_agent.sqr.main_phase"  , "default_sequence", dcache_mem__access_base_sequence::type_id::get());

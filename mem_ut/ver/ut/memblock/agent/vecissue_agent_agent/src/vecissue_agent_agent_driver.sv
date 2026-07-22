@@ -83,80 +83,18 @@ endtask:main_phase
 
 task vecissue_agent_agent_driver::send_pkt(vecissue_agent_agent_xaction tr);
 
-    vif.drv_mp.drv_cb.io_ooo_to_mem_isStoreException <= tr.io_ooo_to_mem_isStoreException;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_flowNum <= tr.io_ooo_to_mem_issueVldu_0_bits_flowNum;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay <= tr.io_ooo_to_mem_issueVldu_0_bits_isVecPartReplay;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_src_0 <= tr.io_ooo_to_mem_issueVldu_0_bits_src_0;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_src_1 <= tr.io_ooo_to_mem_issueVldu_0_bits_src_1;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_src_2 <= tr.io_ooo_to_mem_issueVldu_0_bits_src_2;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_src_3 <= tr.io_ooo_to_mem_issueVldu_0_bits_src_3;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_src_4 <= tr.io_ooo_to_mem_issueVldu_0_bits_src_4;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_ftqOffset <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_ftqOffset;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_ftqPtr_flag <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_ftqPtr_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_ftqPtr_value <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_ftqPtr_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_fuOpType <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_fuOpType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_fuType <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_fuType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_lqIdx_flag <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_lqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_lqIdx_value <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_lqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_pdest <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_pdest;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_robIdx_flag <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_robIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_robIdx_value <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_robIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_sqIdx_flag <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_sqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_sqIdx_value <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_sqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_v0Wen <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_v0Wen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vecWen <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vecWen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vlWen <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vlWen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_isVleff <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_isVleff;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_lastUop <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_lastUop;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_nf <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_nf;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_veew <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_veew;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vlmul <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vlmul;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vm <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vm;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vma <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vma;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vmask <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vmask;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vsew <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vsew;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vstart <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vstart;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vta <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vta;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vuopIdx <= tr.io_ooo_to_mem_issueVldu_0_bits_uop_vpu_vuopIdx;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_vecReplayMask <= tr.io_ooo_to_mem_issueVldu_0_bits_vecReplayMask;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_bits_vecReplayMbIdx <= tr.io_ooo_to_mem_issueVldu_0_bits_vecReplayMbIdx;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_0_valid <= tr.io_ooo_to_mem_issueVldu_0_valid;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_flowNum <= tr.io_ooo_to_mem_issueVldu_1_bits_flowNum;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_isVecPartReplay <= tr.io_ooo_to_mem_issueVldu_1_bits_isVecPartReplay;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_src_0 <= tr.io_ooo_to_mem_issueVldu_1_bits_src_0;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_src_1 <= tr.io_ooo_to_mem_issueVldu_1_bits_src_1;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_src_2 <= tr.io_ooo_to_mem_issueVldu_1_bits_src_2;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_src_3 <= tr.io_ooo_to_mem_issueVldu_1_bits_src_3;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_src_4 <= tr.io_ooo_to_mem_issueVldu_1_bits_src_4;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_ftqOffset <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_ftqOffset;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_ftqPtr_flag <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_ftqPtr_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_ftqPtr_value <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_ftqPtr_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_fuOpType <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_fuOpType;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_lqIdx_flag <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_lqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_lqIdx_value <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_lqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_pdest <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_pdest;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_robIdx_flag <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_robIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_robIdx_value <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_robIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_sqIdx_flag <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_sqIdx_flag;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_sqIdx_value <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_sqIdx_value;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_v0Wen <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_v0Wen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vecWen <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vecWen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vlWen <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vlWen;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_isVleff <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_isVleff;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_lastUop <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_lastUop;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_nf <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_nf;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_veew <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_veew;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vlmul <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vlmul;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vm <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vm;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vma <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vma;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vmask <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vmask;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vsew <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vsew;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vstart <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vstart;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vta <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vta;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vuopIdx <= tr.io_ooo_to_mem_issueVldu_1_bits_uop_vpu_vuopIdx;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_vecReplayMask <= tr.io_ooo_to_mem_issueVldu_1_bits_vecReplayMask;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_bits_vecReplayMbIdx <= tr.io_ooo_to_mem_issueVldu_1_bits_vecReplayMbIdx;
-    vif.drv_mp.drv_cb.io_ooo_to_mem_issueVldu_1_valid <= tr.io_ooo_to_mem_issueVldu_1_valid;
+    if (tr == null) begin
+        `uvm_fatal(get_type_name(), "vecissue send_pkt got null transaction")
+    end
+    if (tr.io_ooo_to_mem_issueVldu_0_valid !== 1'b0 ||
+        tr.io_ooo_to_mem_issueVldu_1_valid !== 1'b0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("vector issue is outside current scalar scope: valid0=%b valid1=%b",
+                             tr.io_ooo_to_mem_issueVldu_0_valid,
+                             tr.io_ooo_to_mem_issueVldu_1_valid))
+    end
+    drive_idle(tcnt_dec_base::DRV_0);
+    // Scalar split-issue scope intentionally leaves the vector interface idle.
 
 endtask:send_pkt
 

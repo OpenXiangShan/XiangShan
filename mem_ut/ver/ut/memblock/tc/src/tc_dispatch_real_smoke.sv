@@ -83,7 +83,6 @@ class tc_dispatch_real_smoke extends tc_base;
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_backendToTopBypass_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(backendToTopBypass_agent_agent_xaction)::type_id::get());
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_fence_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(fence_agent_agent_xaction)::type_id::get());
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_csr_ctrl_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(csr_ctrl_agent_agent_xaction)::type_id::get());
-        uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_vecissue_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(vecissue_agent_agent_xaction)::type_id::get());
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_redirect_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(redirect_agent_agent_xaction)::type_id::get());
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_int_sink_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(int_sink_agent_agent_xaction)::type_id::get());
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_itlb_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(itlb_agent_agent_xaction)::type_id::get());

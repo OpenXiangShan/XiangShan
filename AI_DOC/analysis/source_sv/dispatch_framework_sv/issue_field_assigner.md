@@ -1,54 +1,81 @@
-# issue_field_assigner.sv 源码分析
+# `issue_field_assigner.sv` 源码分析
 
 本文档对应源码：
 
-- `mem_ut/ver/ut/memblock/seq/base_seq/issue_field_assigner.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq_help/issue_field_assigner.sv`
 
-## 1. 文件定位与使用场景
+## 1. 文件职责
 
-发射前字段赋值 helper，目标是 `lintsissue_agent_agent_xaction`。scheduler 只选出“发谁”，这个 helper 负责把主表/status/queue item 翻译成 DUT lintsissue port 上的每个信号。
+`issue_field_assigner` 是 scalar split issue 的字段翻译入口。scheduler 只决定本拍选择哪些
+`memblock_issue_q_item_t`，本 helper 根据 item 的 `uid/target/pipe_idx` 从主表和状态表取得字段，
+写入 `lintsissue_agent_agent_xaction` 的 V2 `issueLda/issueSta/issueStd` 端口。
 
-输入是 issue item、主表 transaction、status 和配置权重。输出是 xaction 的 port 0/1/2 load、3/4 STA、5/6 STD payload。
+它不改变 issue queue 仲裁、redirect/replay 生命周期或 pass/fail/terminal。字段写完后是否真正
+fire，仍由 driver 的 `valid && ready` 和 sequence 的 fired-mask 回填决定。
 
-控制逻辑字段主要是 `valid`、load wait/StoreSet 相关字段、`isFirstIssue` 和 write enable。地址、ROB/LQ/SQ、pc/ftq/pdest 等更多是随接口携带的 payload。当前源码里 STD 只填主字段，没有第二类依赖字段和第三类后端 meta 字段。
+## 2. V2 端口与字段边界
 
-关键函数：
+| target | V2 端口 | 本 helper 写入的关键字段 | 不存在或不得伪造的字段 |
+|---|---|---|---|
+| LOAD | `issueLda_0..2` | ROB/LQ/SQ 完整 key、`fuOpType`、src/imm、FTQ、PC、依赖字段、写回元信息 | `fuType`、`numLsElem` |
+| STA | `issueSta_0..1` | `fuType[34:0]`、`fuOpType`、ROB/SQ 完整 key、src/imm、pdest/rfWen | LQ、FTQ、`numLsElem` |
+| STD | `issueStd_0..1` | `fuType[34:0]`、`fuOpType`、ROB value、SQ 完整 key、store data | `robIdx_flag`、LQ、FTQ、`numLsElem` |
 
-- `clear_lintsissue_xaction(tr)`：清 0/1/2 load、3/4 STA、5/6 STD 所有 valid/payload。
-- `assign_load_main_fields()`：load pipe 0/1/2 赋 `valid/fuOpType/src_0/imm/robIdx/lqIdx/sqIdx`。
-- `assign_sta_main_fields()`：STA pipe 3/4 赋 `valid/fuType/fuOpType/src_0/imm/robIdx/sqIdx`。
-- `assign_std_main_fields()`：STD pipe 5/6 赋 `valid/fuType/fuOpType/src_0/robIdx/sqIdx`。
-- `assign_main_issue_fields()`：按 target 分派上述函数。
-- `assign_issue_dep_fields()`：为 load 赋 `loadWaitBit/waitForRobIdx/storeSetHit/loadWaitStrict`；为 STA 赋 `isFirstIssue/storeSetHit/ssid`；STD 当前无第二类字段。
-- `assign_backend_meta_fields()`：为 load/STA 赋 `pdest/rfWen/fpWen/pc/isRVC/ftqIdx/ftqOffset`；STD 当前无第三类字段。
-- `assign_issue_item_fields()`：依次调用主字段、依赖字段、后端 meta。
-- `derive_wen()`：INT load 和 AMO 写 int，FP load 写 fp，store/prefetch 不写回。
-- `select_prior_store_for_load()`：为 load wait 选择之前 active/enq 的 store。
-- `deterministic_percent_hit()`：基于 uid/salt 的确定性概率，用于 MDP/RVC 等字段。
+STA/STD 的 DUT-facing FuType 由 `encode_and_fit_dut_futype()` 无损转换。内部 36-bit FuType
+容器不能直接裁剪后写入 V2 35-bit 端口。FTQ value/offset 分别消费
+`MEMBLOCK_FTQ_PTR_VALUE_W` 和 `MEMBLOCK_FTQ_OFFSET_W`，不保留局部固定切片。
 
-## 2. 字段与函数/task 设计原理
+## 3. 合法矩阵
 
-`issue_field_assigner` 的设计重点是把“调度选择”和“接口赋值”彻底分开。scheduler 只选 item；assigner 根据 uid 从主表/状态表取字段，填到 lintsissue xaction 的正确 port。
+`assign_issue_item_fields()` 是唯一总入口。它先确认 split profile、target pipe 范围和主表项，
+再复用 `lsq_ctrl_model::derive_op_behavior()` 与 classifier 检查如下矩阵：
 
-关键函数：
+| `fuType/fuOpType` | behavior | 合法 target | 结果 |
+|---|---|---|---|
+| LDU + 普通 load | `LOAD`，只 `route_load` | LOAD | 写 `issueLda` |
+| LDU + software prefetch | `PREFETCH/is_prefetch=1`，只 `route_load` | LOAD | 写 `issueLda` |
+| STU + scalar store | 同时 `route_sta/route_std` | STA 或 STD | 写对应 split port |
+| MOU/AMO、CBO、vector LS、未知组合 | unsupported | 无 | 字段赋值前 `uvm_fatal` |
 
-| 函数 | 参数 | 功能和设计原理 |
+software prefetch 与普通 load 的 classifier 互斥，因此 scalar-only gate 不会误杀合法 prefetch。
+本轮不把 V2 STA 物理上可承载的 CBO/AMO 当作普通 store；这些路径尚无完整 completion 闭环。
+
+## 4. 关键函数
+
+| 函数 | 输入/输出 | 功能和副作用 |
 |---|---|---|
-| `ensure_data()` | 无 | 绑定公共 owner。 |
-| `deterministic_percent_hit(uid,percent,salt)` | uid、百分比、salt | 用 uid 和 salt 得到确定性概率命中，不依赖随机调用顺序，保证回归可复现。 |
-| `is_valid_pipe_idx(target,pipe_idx)`、`check_pipe_idx(target,pipe_idx)` | target、pipe index | 根据 LOAD/STA/STD 各自 pipe 数检查 port 合法性，防止越界赋值。 |
-| `select_prior_store_for_load(uid,store_uid)` | load uid、输出 store uid | 给 load wait/MDP 字段选择前序 store，避免等待未来 store 造成非法激励。 |
-| `compute_is_rvc(uid)` | uid | 按权重生成 RVC 元信息，不影响 MemBlock 主调度，但随发射下发给后端/调试路径。 |
-| `compute_pc(uid)` | uid | 使用 `pc_base + uid * pc_stride` 生成可追踪 PC，便于日志和 waveform 对齐。 |
-| `compute_ftq_flag/value/offset(uid)` | uid | 生成 FTQ 元信息，作为第三类后端字段随流水线传递。 |
-| `compute_pdest(uid,has_wb)` | uid、是否写回 | 只有写回有效时生成物理目的寄存器，避免无写回指令携带误导性 pdest。 |
-| `derive_wen(main_tr,rfWen,fpWen)` | 主表 tr、输出 int/fp 写使能 | 根据 op_class 推导 `rfWen/fpWen`。这些字段在 MemBlock 侧主要随流水线传递，对 load 写回端和后端 RF 写回有意义。 |
-| `clear_lintsissue_xaction(tr)` | xaction | 每拍清空所有 LOAD/STA/STD port，避免上一拍 valid 或 payload 残留。 |
-| `assign_load_main_fields(tr,pipe_idx,item,main_tr,status)` | xaction、pipe、item、主表、状态 | 填 load port 的主控制字段，如 fuType/fuOpType/addr/ROB/LQ。 |
-| `assign_sta_main_fields(...)`、`assign_std_main_fields(...)` | xaction、pipe、item、主表、状态 | 分别填 STA/STD port 字段，store 拆 target 后各自赋值。 |
-| `assign_main_issue_fields(tr,item,pipe_idx)` | xaction、issue item、pipe | 根据 target 分派到 load/STA/STD 主字段赋值函数。 |
-| `assign_issue_dep_fields(tr,item,pipe_idx)` | xaction、issue item、pipe | 发射前补第二类字段，如 `loadWaitBit/waitForRobIdx/storeSetHit/loadWaitStrict/isFirstIssue`。 |
-| `assign_backend_meta_fields(tr,item,pipe_idx)` | xaction、issue item、pipe | 发射前补第三类后端字段，如 `pc/isRVC/ftqIdx/ftqOffset/pdest/rfWen/fpWen`。 |
-| `assign_issue_item_fields(tr,item,pipe_idx)` | xaction、issue item、pipe | 单个 item 的总赋值入口：先主字段，再依赖字段，再后端元信息。 |
+| `get_target_pipe_limit(target)` | target；返回 compile-time pipe 数 | LOAD/STA/STD 分别读取 `MEMBLOCK_DUT_*_PIPE_NUM`，非法 target fatal。 |
+| `check_pipe_idx(target, pipe_idx, caller)` | target、局部 pipe、调用者 | 检查局部 pipe 小于该 target 的物理数量；只检查，不改状态。 |
+| `check_target_futype_fuoptype(main_tr, behavior, target)` | 主表项、统一 behavior、target | 检查 FuType、fuOpType、route 和 target 一致；不复制第二套 operation classifier。 |
+| `clear_lintsissue_xaction(tr)` | xaction | 清全部 V2 split issue valid/payload，避免上一拍残留。 |
+| `assign_load_main_fields()` | xaction、主表项、item、局部 pipe | 写 LDA 主字段。 |
+| `assign_sta_main_fields()` | 同上 | 无损编码 FuType 后写 STA 主字段。 |
+| `assign_std_main_fields()` | 同上 | 无损编码 FuType 后写 STD 主字段，ROB 只写 value。 |
+| `assign_issue_dep_fields()` | xaction、item、局部 pipe | 仅 LOAD 写 MDP/StoreSet 字段；STA/STD 不写依赖字段，V2 端口不存在这些字段。 |
+| `assign_backend_meta_fields()` | xaction、item、局部 pipe | LOAD 写 FTQ/PC/pdest/WEN，STA 写 pdest/rfWen，STD 不写额外 meta。 |
+| `assign_issue_item_fields()` | xaction、item、局部 pipe | 完成所有前置检查，再依次调用主字段、依赖字段和后端元信息 helper。 |
 
-这样设计的好处是，后续如果某个字段赋值规则需要调整，只改 assigner；如果调度规则调整，只改 scheduler，两者不会互相污染。
+## 5. 总入口文字伪代码
+
+```text
+assign_issue_item_fields(tr, item, pipe_idx)：
+  绑定 common_data；tr 为空则 fatal；
+  用 item.uid 取得主表项，缺失则 fatal；
+  当前 profile 不是 split issue 则 fatal；
+  根据 item.target 的 compile-time pipe 数检查 pipe_idx；
+  vector LS 直接以 scalar-scope 错误 fatal；
+  调用 derive_op_behavior 取得统一 operation behavior；
+  调用 check_target_futype_fuoptype，确认 FuType、fuOpType、route 与 target 一致；
+  调用 assign_main_issue_fields，写对应 V2 split port 的主 payload；
+  调用 assign_issue_dep_fields，只给真实存在该字段的 target 写依赖元信息；
+  调用 assign_backend_meta_fields，只给真实存在该字段的 target 写后端元信息；
+  本函数不删除 queue item、不置 dispatched，也不生成 pass/fail。
+```
+
+## 6. 支持边界
+
+- 本轮只支持 scalar load、software prefetch 和 scalar store。
+- `issueVldu` 由独立 vecissue agent 承载；scalar testcase 不启动其随机 default sequence，
+  vecissue driver 收到非零 valid 时 fail-fast。
+- MOU/AMO/CBO 和 vector LS 不会静默映射到 LDA/STA/STD。
+- STD real writeback、IQ feedback、redirect/replay 和最终状态收敛由各自 flow owner 处理。

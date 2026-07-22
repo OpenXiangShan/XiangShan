@@ -40,7 +40,6 @@ class soft_test_tc_dispatch_smoke extends tc_smoke;
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_lsqcommit_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(lsqcommit_agent_agent_xaction)::type_id::get());
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_lsqenq_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(lsqenq_agent_agent_xaction)::type_id::get());
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_lintsissue_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(lintsissue_agent_agent_xaction)::type_id::get());
-        uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_vecissue_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(vecissue_agent_agent_xaction)::type_id::get());
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_redirect_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(redirect_agent_agent_xaction)::type_id::get());
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_sbuffer_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(sbuffer_agent_agent_xaction)::type_id::get());
         uvm_config_db#(uvm_object_wrapper)::set(this, "env.u_dcache_agent_agent.sqr.main_phase", "default_sequence", tcnt_default_sequence_base#(dcache_agent_agent_xaction)::type_id::get());

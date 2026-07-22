@@ -22,6 +22,8 @@ class lintsissue_agent_agent_driver  extends tcnt_driver_base#(virtual lintsissu
     extern function bit has_dispatch_issue_pending(lintsissue_agent_agent_xaction tr);
     extern function void clear_dispatch_issue_ports(lintsissue_agent_agent_xaction tr);
     extern function void clear_ready_dispatch_issue_ports(lintsissue_agent_agent_xaction tr);
+    extern function void record_dispatch_issue_fire(input int unsigned port_idx,
+                                                    lintsissue_agent_agent_xaction tr);
     extern function void report_dispatch_issue_fire(input int unsigned port_idx,
                                                     lintsissue_agent_agent_xaction tr);
     extern function void report_dispatch_issue_timeout(lintsissue_agent_agent_xaction tr,
@@ -63,6 +65,7 @@ task lintsissue_agent_agent_driver::main_phase(uvm_phase phase);
     //while(1) begin
     if(this.cfg.sqr_sw==tcnt_dec_base::ON && this.cfg.drv_sw==tcnt_dec_base::ON) begin
         while(1) begin
+            req = null;
             seq_item_port.try_next_item(req);
             if(req!=null) begin
                 repeat(req.pre_pkt_gap) begin
@@ -70,12 +73,21 @@ task lintsissue_agent_agent_driver::main_phase(uvm_phase phase);
                     this.drive_idle(this.cfg.drv_mode);
                 end
                 @this.vif.drv_mp.drv_cb;
-                this.send_pkt(req);
-                if (req.memblock_dispatch_wait_ready) begin
-                    if (req.memblock_dispatch_nonblocking_issue) begin
-                        this.drive_dispatch_issue_one_cycle(req);
-                    end else begin
-                        this.wait_dispatch_issue_ready(req);
+                if (req.memblock_dispatch_wait_ready &&
+                    (memblock_sync_pkg::dispatch_flush_in_progress ||
+                     req.memblock_dispatch_flush_epoch != memblock_sync_pkg::dispatch_flush_epoch)) begin
+                    req.memblock_dispatch_fired_mask = '0;
+                    clear_dispatch_issue_ports(req);
+                    this.send_pkt(req);
+                    req.memblock_dispatch_aborted_by_redirect = 1'b1;
+                end else begin
+                    this.send_pkt(req);
+                    if (req.memblock_dispatch_wait_ready) begin
+                        if (req.memblock_dispatch_nonblocking_issue) begin
+                            this.drive_dispatch_issue_one_cycle(req);
+                        end else begin
+                            this.wait_dispatch_issue_ready(req);
+                        end
                     end
                 end
                 repeat(req.post_pkt_gap) begin
@@ -248,14 +260,6 @@ task lintsissue_agent_agent_driver::drive_dispatch_issue_one_cycle(lintsissue_ag
 
     @this.vif.drv_mp.drv_cb;
 
-    if (memblock_sync_pkg::dispatch_flush_in_progress ||
-        tr.memblock_dispatch_flush_epoch != memblock_sync_pkg::dispatch_flush_epoch) begin
-        clear_dispatch_issue_ports(tr);
-        this.send_pkt(tr);
-        tr.memblock_dispatch_aborted_by_redirect = 1'b1;
-        return;
-    end
-
     clear_ready_dispatch_issue_ports(tr);
 
     if (memblock_sync_pkg::dispatch_flush_in_progress ||
@@ -274,13 +278,13 @@ function bit lintsissue_agent_agent_driver::has_dispatch_issue_pending(lintsissu
     if (tr == null) begin
         `uvm_fatal(get_type_name(), "has_dispatch_issue_pending got null xaction")
     end
-    return tr.io_ooo_to_mem_issueLda_0_valid ||
-           tr.io_ooo_to_mem_issueLda_1_valid ||
-           tr.io_ooo_to_mem_issueLda_2_valid ||
-           tr.io_ooo_to_mem_issueSta_0_valid ||
-           tr.io_ooo_to_mem_issueSta_1_valid ||
-           tr.io_ooo_to_mem_issueStd_0_valid ||
-           tr.io_ooo_to_mem_issueStd_1_valid;
+    return ((`MEMBLOCK_DUT_LOAD_PIPE_NUM > 0) && tr.io_ooo_to_mem_issueLda_0_valid) ||
+           ((`MEMBLOCK_DUT_LOAD_PIPE_NUM > 1) && tr.io_ooo_to_mem_issueLda_1_valid) ||
+           ((`MEMBLOCK_DUT_LOAD_PIPE_NUM > 2) && tr.io_ooo_to_mem_issueLda_2_valid) ||
+           ((`MEMBLOCK_DUT_STA_PIPE_NUM > 0) && tr.io_ooo_to_mem_issueSta_0_valid) ||
+           ((`MEMBLOCK_DUT_STA_PIPE_NUM > 1) && tr.io_ooo_to_mem_issueSta_1_valid) ||
+           ((`MEMBLOCK_DUT_STD_PIPE_NUM > 0) && tr.io_ooo_to_mem_issueStd_0_valid) ||
+           ((`MEMBLOCK_DUT_STD_PIPE_NUM > 1) && tr.io_ooo_to_mem_issueStd_1_valid);
 endfunction:has_dispatch_issue_pending
 
 function void lintsissue_agent_agent_driver::clear_dispatch_issue_ports(lintsissue_agent_agent_xaction tr);
@@ -300,62 +304,120 @@ function void lintsissue_agent_agent_driver::clear_ready_dispatch_issue_ports(li
     if (tr == null) begin
         `uvm_fatal(get_type_name(), "clear_ready_dispatch_issue_ports got null xaction")
     end
-    if (tr.io_ooo_to_mem_issueLda_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_ready) begin
-        tr.io_ooo_to_mem_issueLda_0_valid = 1'b0;
-        tr.memblock_dispatch_fired_mask[0] = 1'b1;
-        report_dispatch_issue_fire(0, tr);
+    if ((`MEMBLOCK_DUT_LOAD_PIPE_NUM > 0) && tr.io_ooo_to_mem_issueLda_0_valid) begin
+        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_ready)) begin
+            `uvm_fatal(get_type_name(), "issueLda_0_ready is X/Z while valid")
+        end
+        if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_0_ready === 1'b1) begin
+            tr.io_ooo_to_mem_issueLda_0_valid = 1'b0;
+            record_dispatch_issue_fire(`MEMBLOCK_DUT_LOAD_PORT_BASE + 0, tr);
+        end
     end
-    if (tr.io_ooo_to_mem_issueLda_1_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_ready) begin
-        tr.io_ooo_to_mem_issueLda_1_valid = 1'b0;
-        tr.memblock_dispatch_fired_mask[1] = 1'b1;
-        report_dispatch_issue_fire(1, tr);
+    if ((`MEMBLOCK_DUT_LOAD_PIPE_NUM > 1) && tr.io_ooo_to_mem_issueLda_1_valid) begin
+        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_ready)) begin
+            `uvm_fatal(get_type_name(), "issueLda_1_ready is X/Z while valid")
+        end
+        if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_1_ready === 1'b1) begin
+            tr.io_ooo_to_mem_issueLda_1_valid = 1'b0;
+            record_dispatch_issue_fire(`MEMBLOCK_DUT_LOAD_PORT_BASE + 1, tr);
+        end
     end
-    if (tr.io_ooo_to_mem_issueLda_2_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_ready) begin
-        tr.io_ooo_to_mem_issueLda_2_valid = 1'b0;
-        tr.memblock_dispatch_fired_mask[2] = 1'b1;
-        report_dispatch_issue_fire(2, tr);
+    if ((`MEMBLOCK_DUT_LOAD_PIPE_NUM > 2) && tr.io_ooo_to_mem_issueLda_2_valid) begin
+        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_ready)) begin
+            `uvm_fatal(get_type_name(), "issueLda_2_ready is X/Z while valid")
+        end
+        if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueLda_2_ready === 1'b1) begin
+            tr.io_ooo_to_mem_issueLda_2_valid = 1'b0;
+            record_dispatch_issue_fire(`MEMBLOCK_DUT_LOAD_PORT_BASE + 2, tr);
+        end
     end
-    if (tr.io_ooo_to_mem_issueSta_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_ready) begin
-        tr.io_ooo_to_mem_issueSta_0_valid = 1'b0;
-        tr.memblock_dispatch_fired_mask[3] = 1'b1;
-        report_dispatch_issue_fire(3, tr);
+    if ((`MEMBLOCK_DUT_STA_PIPE_NUM > 0) && tr.io_ooo_to_mem_issueSta_0_valid) begin
+        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_ready)) begin
+            `uvm_fatal(get_type_name(), "issueSta_0_ready is X/Z while valid")
+        end
+        if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_0_ready === 1'b1) begin
+            tr.io_ooo_to_mem_issueSta_0_valid = 1'b0;
+            record_dispatch_issue_fire(`MEMBLOCK_DUT_LOAD_PORT_BASE + `MEMBLOCK_DUT_LOAD_PIPE_NUM + 0, tr);
+        end
     end
-    if (tr.io_ooo_to_mem_issueSta_1_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_ready) begin
-        tr.io_ooo_to_mem_issueSta_1_valid = 1'b0;
-        tr.memblock_dispatch_fired_mask[4] = 1'b1;
-        report_dispatch_issue_fire(4, tr);
+    if ((`MEMBLOCK_DUT_STA_PIPE_NUM > 1) && tr.io_ooo_to_mem_issueSta_1_valid) begin
+        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_ready)) begin
+            `uvm_fatal(get_type_name(), "issueSta_1_ready is X/Z while valid")
+        end
+        if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueSta_1_ready === 1'b1) begin
+            tr.io_ooo_to_mem_issueSta_1_valid = 1'b0;
+            record_dispatch_issue_fire(`MEMBLOCK_DUT_LOAD_PORT_BASE + `MEMBLOCK_DUT_LOAD_PIPE_NUM + 1, tr);
+        end
     end
-    if (tr.io_ooo_to_mem_issueStd_0_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_ready) begin
-        tr.io_ooo_to_mem_issueStd_0_valid = 1'b0;
-        tr.memblock_dispatch_fired_mask[5] = 1'b1;
-        report_dispatch_issue_fire(5, tr);
+    if ((`MEMBLOCK_DUT_STD_PIPE_NUM > 0) && tr.io_ooo_to_mem_issueStd_0_valid) begin
+        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_ready)) begin
+            `uvm_fatal(get_type_name(), "issueStd_0_ready is X/Z while valid")
+        end
+        if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_0_ready === 1'b1) begin
+            tr.io_ooo_to_mem_issueStd_0_valid = 1'b0;
+            record_dispatch_issue_fire(`MEMBLOCK_DUT_LOAD_PORT_BASE + `MEMBLOCK_DUT_LOAD_PIPE_NUM +
+                                        `MEMBLOCK_DUT_STA_PIPE_NUM + 0, tr);
+        end
     end
-    if (tr.io_ooo_to_mem_issueStd_1_valid && vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_ready) begin
-        tr.io_ooo_to_mem_issueStd_1_valid = 1'b0;
-        tr.memblock_dispatch_fired_mask[6] = 1'b1;
-        report_dispatch_issue_fire(6, tr);
+    if ((`MEMBLOCK_DUT_STD_PIPE_NUM > 1) && tr.io_ooo_to_mem_issueStd_1_valid) begin
+        if ($isunknown(vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_ready)) begin
+            `uvm_fatal(get_type_name(), "issueStd_1_ready is X/Z while valid")
+        end
+        if (vif.drv_mp.drv_cb.io_ooo_to_mem_issueStd_1_ready === 1'b1) begin
+            tr.io_ooo_to_mem_issueStd_1_valid = 1'b0;
+            record_dispatch_issue_fire(`MEMBLOCK_DUT_LOAD_PORT_BASE + `MEMBLOCK_DUT_LOAD_PIPE_NUM +
+                                        `MEMBLOCK_DUT_STA_PIPE_NUM + 1, tr);
+        end
     end
 endfunction:clear_ready_dispatch_issue_ports
 
+function void lintsissue_agent_agent_driver::record_dispatch_issue_fire(input int unsigned port_idx,
+                                                                         lintsissue_agent_agent_xaction tr);
+    localparam int unsigned issue_port_num =
+        `MEMBLOCK_DUT_LOAD_PORT_BASE + `MEMBLOCK_DUT_LOAD_PIPE_NUM +
+        `MEMBLOCK_DUT_STA_PIPE_NUM + `MEMBLOCK_DUT_STD_PIPE_NUM;
+
+    if (tr == null) begin
+        `uvm_fatal(get_type_name(), "record_dispatch_issue_fire got null xaction")
+    end
+    if (port_idx < `MEMBLOCK_DUT_LOAD_PORT_BASE || port_idx >= issue_port_num) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("fire port=%0d outside scalar issue range=[%0d,%0d)",
+                             port_idx, `MEMBLOCK_DUT_LOAD_PORT_BASE, issue_port_num))
+    end
+    tr.memblock_dispatch_fired_mask[port_idx] = 1'b1;
+    report_dispatch_issue_fire(port_idx, tr);
+endfunction:record_dispatch_issue_fire
+
 function void lintsissue_agent_agent_driver::report_dispatch_issue_fire(input int unsigned port_idx,
                                                                         lintsissue_agent_agent_xaction tr);
+    localparam int unsigned load_base = `MEMBLOCK_DUT_LOAD_PORT_BASE;
+    localparam int unsigned sta_base  = load_base + `MEMBLOCK_DUT_LOAD_PIPE_NUM;
+    localparam int unsigned std_base  = sta_base + `MEMBLOCK_DUT_STA_PIPE_NUM;
+    localparam int unsigned issue_port_num = std_base + `MEMBLOCK_DUT_STD_PIPE_NUM;
+
     if (tr == null) begin
         return;
     end
-    if (port_idx <= 2) begin
+    if (port_idx < load_base || port_idx >= issue_port_num) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("report_dispatch_issue_fire got invalid port=%0d range=[%0d,%0d)",
+                             port_idx, load_base, issue_port_num))
+    end
+    if (port_idx >= load_base && port_idx < sta_base) begin
         `uvm_info(get_type_name(),
-                  $sformatf("dispatch issue fire lda_port=%0d", port_idx),
+                  $sformatf("dispatch issue fire lda_port=%0d", port_idx - load_base),
                   UVM_LOW)
         report_dispatch_hdl_bit("top_tb.U_MEMBLOCK._inner_LoadUnit_0_io_tlb_req_valid");
         report_dispatch_hdl_bit("top_tb.U_MEMBLOCK._inner_LoadUnit_0_io_dcache_req_valid");
         report_dispatch_hdl_bit("top_tb.U_MEMBLOCK._inner_dcache_io_lsu_load_0_req_ready");
-    end else if (port_idx <= 4) begin
+    end else if (port_idx >= sta_base && port_idx < std_base) begin
         `uvm_info(get_type_name(),
-                  $sformatf("dispatch issue fire sta_port=%0d", port_idx - 3),
+                  $sformatf("dispatch issue fire sta_port=%0d", port_idx - sta_base),
                   UVM_LOW)
     end else begin
         `uvm_info(get_type_name(),
-                  $sformatf("dispatch issue fire std_port=%0d", port_idx - 5),
+                  $sformatf("dispatch issue fire std_port=%0d", port_idx - std_base),
                   UVM_LOW)
     end
 endfunction:report_dispatch_issue_fire
@@ -368,15 +430,15 @@ function void lintsissue_agent_agent_driver::report_dispatch_issue_timeout(lints
     end
 
     `uvm_info(get_type_name(),
-              $sformatf("dispatch timeout wait_cycles=%0d vld[6:0]=%0b%0b%0b%0b%0b%0b%0b",
+              $sformatf("dispatch timeout wait_cycles=%0d lda_valid=%0b%0b%0b sta_valid=%0b%0b std_valid=%0b%0b",
                         wait_cycles,
-                        tr.io_ooo_to_mem_issueStd_1_valid,
-                        tr.io_ooo_to_mem_issueStd_0_valid,
-                        tr.io_ooo_to_mem_issueSta_1_valid,
-                        tr.io_ooo_to_mem_issueSta_0_valid,
                         tr.io_ooo_to_mem_issueLda_2_valid,
                         tr.io_ooo_to_mem_issueLda_1_valid,
-                        tr.io_ooo_to_mem_issueLda_0_valid),
+                        tr.io_ooo_to_mem_issueLda_0_valid,
+                        tr.io_ooo_to_mem_issueSta_1_valid,
+                        tr.io_ooo_to_mem_issueSta_0_valid,
+                        tr.io_ooo_to_mem_issueStd_1_valid,
+                        tr.io_ooo_to_mem_issueStd_0_valid),
               UVM_LOW)
     `uvm_info(get_type_name(),
               $sformatf("load0 payload fuOpType=0x%0h src=0x%0h rob=%0d:%0d lq=%0d:%0d sq=%0d:%0d",

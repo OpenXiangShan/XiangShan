@@ -40,23 +40,94 @@ class issue_field_assigner extends uvm_object;
         return score < percent;
     endfunction:deterministic_percent_hit
 
-    function bit is_valid_pipe_idx(input memblock_issue_target_e target,
-                                   input int unsigned pipe_idx);
+    function int unsigned get_target_pipe_limit(input memblock_issue_target_e target);
         case (target)
-            MEMBLOCK_ISSUE_TARGET_LOAD: return pipe_idx < MEMBLOCK_DUT_LOAD_PIPE_NUM;
-            MEMBLOCK_ISSUE_TARGET_STA:  return pipe_idx < MEMBLOCK_DUT_STA_PIPE_NUM;
-            MEMBLOCK_ISSUE_TARGET_STD:  return pipe_idx < MEMBLOCK_DUT_STD_PIPE_NUM;
-            default: return 1'b0;
+            MEMBLOCK_ISSUE_TARGET_LOAD: return MEMBLOCK_DUT_LOAD_PIPE_NUM;
+            MEMBLOCK_ISSUE_TARGET_STA:  return MEMBLOCK_DUT_STA_PIPE_NUM;
+            MEMBLOCK_ISSUE_TARGET_STD:  return MEMBLOCK_DUT_STD_PIPE_NUM;
+            default: begin
+                `uvm_fatal("ISSUE_FIELD", $sformatf("get_target_pipe_limit got unsupported target=%0d", target))
+            end
         endcase
-    endfunction:is_valid_pipe_idx
+        return 0;
+    endfunction:get_target_pipe_limit
 
     function void check_pipe_idx(input memblock_issue_target_e target,
                                  input int unsigned pipe_idx,
                                  input string caller);
-        if (!is_valid_pipe_idx(target, pipe_idx)) begin
-            `uvm_fatal("ISSUE_FIELD", $sformatf("%s got target=%0d pipe_idx=%0d", caller, target, pipe_idx))
+        int unsigned pipe_limit;
+
+        pipe_limit = get_target_pipe_limit(target);
+        if (pipe_idx >= pipe_limit) begin
+            `uvm_fatal("ISSUE_FIELD",
+                       $sformatf("%s got target=%0d pipe_idx=%0d limit=%0d",
+                                 caller, target, pipe_idx, pipe_limit))
         end
     endfunction:check_pipe_idx
+
+    function void check_target_futype_fuoptype(input main_control_transaction main_tr,
+                                               input memblock_op_behavior_t behavior,
+                                               input memblock_issue_target_e target);
+        if (main_tr == null) begin
+            `uvm_fatal("ISSUE_FIELD", "check_target_futype_fuoptype got null main transaction")
+        end
+        if (lsq_ctrl_model::is_vector_ls_futype(main_tr.fuType)) begin
+            `uvm_fatal("ISSUE_FIELD",
+                       $sformatf("uid=%0d vector LS FuType=0x%0h is outside scalar split issue scope",
+                                 main_tr.uid, main_tr.fuType))
+        end
+        if (main_tr.fuType == MEMBLOCK_FUTYPE_MOU || behavior.is_atomic) begin
+            `uvm_fatal("ISSUE_FIELD",
+                       $sformatf("uid=%0d atomic/MOU issue target=%0d is outside scalar split issue scope",
+                                 main_tr.uid, target))
+        end
+
+        case (main_tr.fuType)
+            MEMBLOCK_FUTYPE_LDU: begin
+                if (!behavior.route_load || behavior.route_sta || behavior.route_std ||
+                    target != MEMBLOCK_ISSUE_TARGET_LOAD) begin
+                    `uvm_fatal("ISSUE_FIELD",
+                               $sformatf("uid=%0d LDU route/target mismatch: target=%0d load=%0d sta=%0d std=%0d",
+                                         main_tr.uid, target, behavior.route_load,
+                                         behavior.route_sta, behavior.route_std))
+                end
+                if (lsq_ctrl_model::is_load_fuoptype(main_tr.fuOpType)) begin
+                    if (behavior.kind != MEMBLOCK_OP_BEHAVIOR_LOAD || behavior.is_prefetch) begin
+                        `uvm_fatal("ISSUE_FIELD",
+                                   $sformatf("uid=%0d ordinary load fuOpType=%0d has inconsistent behavior kind=%0d prefetch=%0d",
+                                             main_tr.uid, main_tr.fuOpType, behavior.kind, behavior.is_prefetch))
+                    end
+                end else if (lsq_ctrl_model::is_prefetch_fuoptype(main_tr.fuOpType)) begin
+                    if (behavior.kind != MEMBLOCK_OP_BEHAVIOR_PREFETCH || !behavior.is_prefetch) begin
+                        `uvm_fatal("ISSUE_FIELD",
+                                   $sformatf("uid=%0d prefetch fuOpType=%0d has inconsistent behavior kind=%0d prefetch=%0d",
+                                             main_tr.uid, main_tr.fuOpType, behavior.kind, behavior.is_prefetch))
+                    end
+                end else begin
+                    `uvm_fatal("ISSUE_FIELD",
+                               $sformatf("uid=%0d LDU fuOpType=%0d is not ordinary load or prefetch",
+                                         main_tr.uid, main_tr.fuOpType))
+                end
+            end
+            MEMBLOCK_FUTYPE_STU: begin
+                if (!lsq_ctrl_model::is_store_fuoptype(main_tr.fuOpType) ||
+                    lsq_ctrl_model::is_cbo_fuoptype(main_tr.fuOpType) ||
+                    behavior.route_load || !behavior.route_sta || !behavior.route_std ||
+                    (target != MEMBLOCK_ISSUE_TARGET_STA && target != MEMBLOCK_ISSUE_TARGET_STD)) begin
+                    `uvm_fatal("ISSUE_FIELD",
+                               $sformatf("uid=%0d STU route/target/fuOpType mismatch: target=%0d fuOpType=%0d load=%0d sta=%0d std=%0d cbo=%0d",
+                                         main_tr.uid, target, main_tr.fuOpType, behavior.route_load,
+                                         behavior.route_sta, behavior.route_std,
+                                         behavior.is_cbo))
+                end
+            end
+            default: begin
+                `uvm_fatal("ISSUE_FIELD",
+                           $sformatf("uid=%0d FuType=0x%0h is not supported by scalar split issue",
+                                     main_tr.uid, main_tr.fuType))
+            end
+        endcase
+    endfunction:check_target_futype_fuoptype
 
     function bit select_prior_store_for_load(input memblock_uid_t uid,
                                              output memblock_rob_key_t wait_rob_key);
@@ -510,7 +581,7 @@ class issue_field_assigner extends uvm_object;
                         tr.io_ooo_to_mem_issueLda_0_bits_uop_preDecodeInfo_isRVC = is_rvc;
                         tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_flag = ftq_flag;
                         tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqPtr_value = ftq_value;
-                        tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqOffset = ftq_offset[3:0];
+                        tr.io_ooo_to_mem_issueLda_0_bits_uop_ftqOffset = ftq_offset;
                     end
                     1: begin
                         tr.io_ooo_to_mem_issueLda_1_bits_uop_pdest = pdest;
@@ -520,7 +591,7 @@ class issue_field_assigner extends uvm_object;
                         tr.io_ooo_to_mem_issueLda_1_bits_uop_preDecodeInfo_isRVC = is_rvc;
                         tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_flag = ftq_flag;
                         tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqPtr_value = ftq_value;
-                        tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqOffset = ftq_offset[3:0];
+                        tr.io_ooo_to_mem_issueLda_1_bits_uop_ftqOffset = ftq_offset;
                     end
                     2: begin
                         tr.io_ooo_to_mem_issueLda_2_bits_uop_pdest = pdest;
@@ -530,7 +601,7 @@ class issue_field_assigner extends uvm_object;
                         tr.io_ooo_to_mem_issueLda_2_bits_uop_preDecodeInfo_isRVC = is_rvc;
                         tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_flag = ftq_flag;
                         tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqPtr_value = ftq_value;
-                        tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqOffset = ftq_offset[3:0];
+                        tr.io_ooo_to_mem_issueLda_2_bits_uop_ftqOffset = ftq_offset;
                     end
                 endcase
             end
@@ -556,6 +627,28 @@ class issue_field_assigner extends uvm_object;
     function void assign_issue_item_fields(input lintsissue_agent_agent_xaction tr,
                                            input memblock_issue_q_item_t item,
                                            input int unsigned pipe_idx);
+        main_control_transaction main_tr;
+        memblock_op_behavior_t   behavior;
+
+        ensure_data();
+        if (tr == null) begin
+            `uvm_fatal("ISSUE_FIELD", "assign_issue_item_fields got null xaction")
+        end
+        main_tr = data.get_main_transaction(item.uid);
+        if (main_tr == null) begin
+            `uvm_fatal("ISSUE_FIELD", $sformatf("uid=%0d has null main transaction", item.uid))
+        end
+        if (!MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT) begin
+            `uvm_fatal("ISSUE_FIELD", "assign_issue_item_fields requires split issue port style")
+        end
+        check_pipe_idx(item.target, pipe_idx, "assign_issue_item_fields");
+        if (lsq_ctrl_model::is_vector_ls_futype(main_tr.fuType)) begin
+            `uvm_fatal("ISSUE_FIELD",
+                       $sformatf("uid=%0d vector LS FuType=0x%0h is outside scalar split issue scope",
+                                 main_tr.uid, main_tr.fuType))
+        end
+        behavior = lsq_ctrl_model::derive_op_behavior(main_tr);
+        check_target_futype_fuoptype(main_tr, behavior, item.target);
         assign_main_issue_fields(tr, item, pipe_idx);
         assign_issue_dep_fields(tr, item, pipe_idx);
         assign_backend_meta_fields(tr, item, pipe_idx);
