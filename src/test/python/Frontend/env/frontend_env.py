@@ -94,7 +94,9 @@ class FrontendEnv:
         self._cycle_observers.append(observer)
 
     def _create_collaborators(self) -> Dict[str, object]:
-        backend_random_seed = os.getenv("TB_BACKEND_RANDOM_SEED", "").strip()
+        backend_random_seed = os.getenv(
+            "TB_BACKEND_RANDOM_SEED", os.getenv("TB_SEED", "1")
+        ).strip()
         branch_checker = BranchChecker()
         return {
             "branch_checker": branch_checker,
@@ -118,7 +120,7 @@ class FrontendEnv:
                 commit_min_delay=self.config.backend.commit_min_delay,
                 commit_max_delay=self.config.backend.commit_max_delay,
                 auto_redirect_on_golden_mispredict=self.config.backend.auto_redirect_on_golden_mispredict,
-                random_seed=(None if not backend_random_seed else int(backend_random_seed, 0)),
+                random_seed=int(backend_random_seed or "1", 0),
             ),
         }
 

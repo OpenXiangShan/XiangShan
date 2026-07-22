@@ -24,7 +24,10 @@ Environment variables:
   TRACE_LIMIT     Limit converted trace entries when > 0
                   default: 0
   NEMU_LOG_PATH   Raw NEMU log path
-                  default: <repo>/NEMU/logs/<case>.nemu.log
+                  default: <artifact-root>/inputs/<case>.nemu.log
+  TB_RUN_ID       Run identifier used by the default trace/log layout
+  TB_ARTIFACT_DIR Run artifact root; defaults to
+                  <repo>/src/test/python/Frontend/data/runs/<run-id>
   PYTHON          Python command used to call the existing converter
                   default: python from the caller's activated environment
   KEEP_ELF        Keep ELF/MAP/raw bin under ready-to-run when set to 1
@@ -32,8 +35,8 @@ Environment variables:
 
 Outputs:
   bin_path defaults to <repo>/src/test/python/Frontend/tests/asm_cases/generated/<case>.bin.
-  trace_jsonl_path defaults to <repo>/NEMU/logs/<case>.trace.jsonl.
-  NEMU_LOG_PATH defaults to <repo>/NEMU/logs/<case>.nemu.log.
+  trace_jsonl_path defaults to <artifact-root>/inputs/<case>.trace.jsonl.
+  NEMU_LOG_PATH defaults to <artifact-root>/inputs/<case>.nemu.log.
 
 The final .bin is already padded for NEMU. No separate raw or _padded bin is
 left behind unless KEEP_ELF=1 is set for debugging artifacts.
@@ -61,10 +64,27 @@ NEMU_MEM_BASE="${NEMU_MEM_BASE:-0x10000000}"
 NEMU_MAX_INSTR="${NEMU_MAX_INSTR:-0}"
 TRACE_LIMIT="${TRACE_LIMIT:-0}"
 KEEP_ELF="${KEEP_ELF:-0}"
+RUN_ID_DEFAULT="frontend_trace_${CASE_STEM}_$(date +%Y%m%d_%H%M%S)_$$"
+RUN_ID="${TB_RUN_ID:-${RUN_ID_DEFAULT}}"
+ARTIFACT_ROOT="${TB_ARTIFACT_DIR:-${FRONTEND_DIR}/data/runs/${RUN_ID}}"
 
 BIN_PATH="${2:-${FRONTEND_DIR}/tests/asm_cases/generated/${CASE_STEM}.bin}"
-TRACE_JSONL_PATH="${3:-${REPO_DIR}/NEMU/logs/${CASE_STEM}.trace.jsonl}"
-NEMU_LOG_PATH="${NEMU_LOG_PATH:-${REPO_DIR}/NEMU/logs/${CASE_STEM}.nemu.log}"
+TRACE_JSONL_PATH="${3:-${ARTIFACT_ROOT}/inputs/${CASE_STEM}.trace.jsonl}"
+NEMU_LOG_PATH="${NEMU_LOG_PATH:-${ARTIFACT_ROOT}/inputs/${CASE_STEM}.nemu.log}"
+
+if ! [[ "${RUN_ID}" =~ ^[A-Za-z0-9_.=-]+$ ]]; then
+  echo "[asm-to-jsonl][error] TB_RUN_ID must contain only A-Z, a-z, 0-9, _, ., =, or -: ${RUN_ID}" >&2
+  exit 2
+fi
+if [[ -d "${ARTIFACT_ROOT}" ]]; then
+  shopt -s nullglob dotglob
+  existing_run_entries=("${ARTIFACT_ROOT}"/*)
+  shopt -u nullglob dotglob
+  if [[ "${#existing_run_entries[@]}" -gt 0 ]]; then
+    echo "[asm-to-jsonl][error] refusing to overwrite non-empty run root: ${ARTIFACT_ROOT}" >&2
+    exit 2
+  fi
+fi
 
 if [[ ! -x "${NEMU_EXEC}" ]]; then
   echo "[asm-to-jsonl][error] NEMU executable not found or not executable: ${NEMU_EXEC}" >&2

@@ -4,14 +4,14 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./scripts/gen_coverage_html.sh [--ignore-file FILE] [--omit-file FILE] [input.dat ... | input_dir] [output_dir]
+  ./scripts/gen_coverage_html.sh [--ignore-file FILE] [--omit-file FILE] <input.dat ... | input_dir> [output_dir]
 
 Notes:
-  - With no input, the script collects all .dat files under src/test/python/Frontend/data/.
+  - Input is required so incompatible DUT runs are not merged accidentally.
   - A single directory input collects all .dat files directly under that directory.
   - Multiple .dat inputs are merged before generating HTML.
   - Output defaults to <input_stem>.genhtml/ for a single .dat input, or
-    coverage.genhtml/ next to the input directory / default data directory.
+    coverage.genhtml/ next to the input directory.
   - The script will generate merged.info in the output directory.
   - If no --ignore-file is passed, src/test/python/Frontend/Frontend.ignore is
     used when present. Each non-empty, non-comment line is passed to genhtml as
@@ -26,7 +26,6 @@ EOF
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEFAULT_DATA_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)/data"
 DEFAULT_IGNORE_FILE="$(cd "${SCRIPT_DIR}/.." && pwd)/Frontend.ignore"
 DEFAULT_OMIT_FILE="$(cd "${SCRIPT_DIR}/.." && pwd)/Frontend.omit"
 
@@ -75,8 +74,9 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ $# -eq 0 ]]; then
-  INPUTS=("${DEFAULT_DATA_DIR}"/*.dat)
-  OUTPUT_DIR="${DEFAULT_DATA_DIR}/coverage.genhtml"
+  echo "[frontend][error] coverage input is required" >&2
+  usage >&2
+  exit 2
 elif [[ $# -eq 1 ]]; then
   if [[ -d "$1" ]]; then
     INPUTS=("$1"/*.dat)

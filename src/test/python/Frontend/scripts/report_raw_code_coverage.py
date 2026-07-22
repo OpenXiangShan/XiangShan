@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
+import hashlib
+import json
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -92,8 +94,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-dir",
         type=Path,
-        default=Path(__file__).resolve().parent.parent / "data",
-        help="Directory containing testcase .dat files",
+        required=True,
+        help="One run/suite directory containing compatible testcase .dat files",
     )
     parser.add_argument(
         "--source-root",
@@ -123,6 +125,12 @@ def parse_args() -> argparse.Namespace:
         default=20,
         help="Minimum raw points required before a module enters the low-coverage table",
     )
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        help="Write a machine-readable copy of the summary without changing stdout",
+    )
+    parser.add_argument("--run-id", default="", help="Run or suite identifier stored in JSON output")
     return parser.parse_args()
 
 
@@ -314,6 +322,20 @@ def print_table(headers: list[str], rows: list[list[str]]) -> None:
         print(fmt.format(*row))
 
 
+def file_sha256(path: Path) -> str:
+    if not path.is_file():
+        return "unavailable"
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def counter_dict(counter: Counter) -> dict[str, int | float]:
+    return {"hit": counter.hit, "total": counter.total, "pct": round(counter.pct, 6)}
+
+
 def main() -> int:
     args = parse_args()
     dat_files = sorted(args.data_dir.glob(args.glob))
@@ -428,6 +450,55 @@ def main() -> int:
         else:
             print("no modules matched the current filter")
         print()
+
+    if args.json_output is not None:
+        output_path = args.json_output.resolve()
+        if output_path.exists():
+            raise SystemExit(f"refusing to overwrite existing coverage summary: {output_path}")
+        build_manifest_path = args.source_root.resolve() / "frontend_build_manifest.json"
+        summary = {
+            "schema_version": 1,
+            "run_id": str(args.run_id).strip() or None,
+            "data_dir": str(args.data_dir.resolve()),
+            "selection_glob": args.glob,
+            "dat_files": [
+                {"path": str(path.resolve()), "size_bytes": path.stat().st_size}
+                for path in dat_files
+            ],
+            "point_keys": len(points),
+            "source_root": str(args.source_root.resolve()),
+            "source_glob": args.source_glob,
+            "source_files": source_files,
+            "build_manifest_path": str(build_manifest_path),
+            "build_manifest_sha256": file_sha256(build_manifest_path),
+            "overall": {
+                kind: counter_dict(overall.get(kind, Counter()))
+                for kind in ("line", "branch", "expr", "toggle")
+            },
+            "sv_overall": {
+                kind: counter_dict(sv_overall.get(kind, Counter()))
+                for kind in ("line", "branch", "expr", "toggle")
+            },
+            "scopes": {},
+        }
+        for scope in SUMMARY_SCOPES:
+            line_counter, matched_modules = scope_counter(sv_modules, scope, "line")
+            branch_counter, _ = scope_counter(sv_modules, scope, "branch")
+            toggle_counter, _ = scope_counter(sv_modules, scope, "toggle")
+            source_line_count, source_modules = source_line_scope(source_lines, scope)
+            summary["scopes"][scope] = {
+                "line": counter_dict(line_counter),
+                "branch": counter_dict(branch_counter),
+                "toggle": counter_dict(toggle_counter),
+                "matched_coverage_modules": matched_modules,
+                "source_lines": source_line_count,
+                "source_modules": source_modules,
+            }
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = output_path.with_name(f".{output_path.name}.tmp")
+        temporary.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(output_path)
+        print(f"json_output: {output_path}")
 
     return 0
 

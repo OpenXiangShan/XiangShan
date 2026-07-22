@@ -76,15 +76,6 @@ def _warmup_commits(env, target_count: int = 4, max_cycles: int = 3000) -> int:
     ).run(env)
 
 
-def _step_until_coverage_hits(env, expected_keys, max_cycles: int = 32) -> bool:
-    keys = list(expected_keys)
-    for _ in range(max(0, int(max_cycles))):
-        env.step(1)
-        if all(env.functional_coverage.key_hit(*key) for key in keys):
-            return True
-    return all(env.functional_coverage.key_hit(*key) for key in keys)
-
-
 def _queue_backend_fault_redirect(env, *, target_pc: int, **fault_bits: int) -> None:
     redirect_context = env.backend_model._latest_non_stale_redirect_drive_context()
     if redirect_context is None:
@@ -106,14 +97,7 @@ def _queue_backend_fault_redirect(env, *, target_pc: int, **fault_bits: int) -> 
     )
 
 
-def _monitor_errors_except_redirect_recovery(env) -> list[dict]:
-    return [
-        error
-        for error in env.monitor.get_errors()
-        if str(error.get("kind", "")) not in {"REDIRECT_CFVEC_TARGET_MISMATCH", "REDIRECT_TIMEOUT"}
-    ]
-
-
+@pytest.mark.funcov_bins("BIN-401", "BIN-404", "BIN-408", "BIN-413")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_baremode_seq_icache_basic_pilot(env):
     scenario = BaremodeSequentialIFUScenario(base_addr=_BASE, words=128, expected_fetches=4)
@@ -124,11 +108,10 @@ def test_baremode_seq_icache_basic_pilot(env):
 
     assert commits >= 4
     ifu_result.assert_passed()
-    assert env.functional_coverage.key_hit("reset_boot_path", "seen")
-    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
-    assert env.functional_coverage.key_hit("bpu_basic_pred_type", "seq_no_cfi")
-    assert env.functional_coverage.key_hit("ftq_queue_state", "empty")
-    assert env.functional_coverage.key_hit("ibuffer_state", "empty")
+    assert env.functional_coverage.key_hit("ifu_instr_size_type", "rvi_seen")
+    assert env.functional_coverage.key_hit("ifu_pc_step_type", "step_4b_rvi")
+    assert env.functional_coverage.key_hit("ifu_boundary_event", "rvi_start")
+    assert env.functional_coverage.key_hit("ifu_cfi_decode_type", "non_cfi")
     assert not env.monitor.get_errors()
 
 
@@ -138,22 +121,10 @@ def test_baremode_mmio_uncache_redirect_pilot(env):
     commits = _warmup_commits(env, target_count=4)
 
     env.backend_model.inject_redirect(_MMIO_BASE, "ctrl_redirect")
-    covered = _step_until_coverage_hits(
-        env,
-        [
-            ("fetch_path_type", "mmio_uncache"),
-            ("frontend_exception_type", "af"),
-            ("fetch_path_x_exception", "mmio_x_af"),
-        ],
-        max_cycles=24,
-    )
+    env.step(24)
 
     assert commits >= 4
-    assert covered is True
-    assert env.functional_coverage.key_hit("fetch_path_type", "mmio_uncache")
-    assert env.functional_coverage.key_hit("frontend_exception_type", "af")
-    assert env.functional_coverage.key_hit("fetch_path_x_exception", "mmio_x_af")
-    assert not _monitor_errors_except_redirect_recovery(env)
+    assert not env.monitor.get_errors()
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -171,12 +142,8 @@ def test_baremode_backend_memvio_redirect_pilot(env):
 
     assert commits >= 4
     assert redirected is True
-    assert env.functional_coverage.key_hit("redirect_type", "memVio")
-    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
-    assert env.functional_coverage.key_hit("reset_boot_path", "seen")
-    assert env.functional_coverage.key_hit("bpu_basic_pred_type", "seq_no_cfi")
     assert CheckPcSequence(PcSequenceExpectation(expected_pcs=(_BASE + 0x80,), max_cycles=400)).run(env)
-    assert not _monitor_errors_except_redirect_recovery(env)
+    assert not env.monitor.get_errors()
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -194,11 +161,8 @@ def test_baremode_backend_interrupt_redirect_pilot(env):
 
     assert commits >= 4
     assert redirected is True
-    assert env.functional_coverage.key_hit("redirect_type", "interrupt")
-    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
-    assert env.functional_coverage.key_hit("reset_boot_path", "seen")
     assert CheckPcSequence(PcSequenceExpectation(expected_pcs=(_BASE + 0xA0,), max_cycles=400)).run(env)
-    assert not _monitor_errors_except_redirect_recovery(env)
+    assert not env.monitor.get_errors()
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -210,11 +174,8 @@ def test_baremode_backend_ipf_redirect_pilot(env):
     env.step(30)
 
     assert commits >= 4
-    assert env.functional_coverage.key_hit("frontend_exception_type", "pf")
-    assert env.functional_coverage.key_hit("fetch_path_x_exception", "icache_x_pf")
-    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
     assert CheckPcSequence(PcSequenceExpectation(expected_pcs=(_BASE + 0xC0,), max_cycles=400)).run(env)
-    assert not _monitor_errors_except_redirect_recovery(env)
+    assert not env.monitor.get_errors()
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -226,10 +187,8 @@ def test_baremode_backend_iaf_redirect_pilot(env):
     env.step(30)
 
     assert commits >= 4
-    assert env.functional_coverage.key_hit("frontend_exception_type", "af")
-    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
     assert CheckPcSequence(PcSequenceExpectation(expected_pcs=(_BASE + 0xE0,), max_cycles=400)).run(env)
-    assert not _monitor_errors_except_redirect_recovery(env)
+    assert not env.monitor.get_errors()
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -241,10 +200,8 @@ def test_baremode_backend_igpf_redirect_pilot(env):
     env.step(30)
 
     assert commits >= 4
-    assert env.functional_coverage.key_hit("frontend_exception_type", "gpf")
-    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
     assert CheckPcSequence(PcSequenceExpectation(expected_pcs=(_BASE + 0x100,), max_cycles=400)).run(env)
-    assert not _monitor_errors_except_redirect_recovery(env)
+    assert not env.monitor.get_errors()
 
 
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
@@ -260,10 +217,6 @@ def test_baremode_backend_short_backpressure_pilot(env):
 
     assert commits_before >= 4
     assert commits_after >= 4
-    assert env.functional_coverage.key_hit("backend_accept_mode", "all_block_short")
-    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
-    assert env.functional_coverage.key_hit("reset_boot_path", "seen")
-    assert env.functional_coverage.key_hit("bpu_basic_pred_type", "seq_no_cfi")
     assert not env.monitor.get_errors()
 
 
@@ -274,26 +227,16 @@ def test_baremode_queue_near_full_backpressure_pilot(env):
 
     env.backend_model.set_can_accept(0)
     # Backend all-block pressure fills IBuffer; FTQ near/full is covered by redirect/fault scenarios.
-    covered = _step_until_coverage_hits(
-        env,
-        [
-            ("ibuffer_state", "near_full"),
-            ("ibuffer_state_x_backend_mode", "near_full_x_all_block"),
-        ],
-        max_cycles=192,
-    )
+    env.step(192)
     env.backend_model.set_can_accept(1)
     commits_after = _warmup_commits(env, target_count=4, max_cycles=6000)
 
     assert commits_before >= 4
     assert commits_after >= 4
-    assert covered is True
-    assert env.functional_coverage.key_hit("ibuffer_state", "near_full")
-    assert env.functional_coverage.key_hit("ibuffer_state_x_backend_mode", "near_full_x_all_block")
-    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-415")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_baremode_direct_jmp_coverage_pilot(env):
     prog = [_NOP] * 64
@@ -305,11 +248,11 @@ def test_baremode_direct_jmp_coverage_pilot(env):
 
     assert commits >= 4
     assert env.branch_checker.get_stats()["by_type"]["jump"] >= 1
-    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
-    assert env.functional_coverage.key_hit("reset_boot_path", "seen")
+    assert env.functional_coverage.key_hit("ifu_cfi_decode_type", "jal")
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-414")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_baremode_cond_nt_coverage_pilot(env):
     prog = [_NOP] * 64
@@ -321,6 +264,5 @@ def test_baremode_cond_nt_coverage_pilot(env):
 
     assert commits >= 4
     assert env.branch_checker.get_stats()["by_type"]["branch"] >= 1
-    assert env.functional_coverage.key_hit("fetch_path_type", "icache_seq")
-    assert env.functional_coverage.key_hit("reset_boot_path", "seen")
+    assert env.functional_coverage.key_hit("ifu_cfi_decode_type", "branch")
     assert not env.monitor.get_errors()

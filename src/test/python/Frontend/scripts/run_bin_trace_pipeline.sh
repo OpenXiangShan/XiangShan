@@ -24,6 +24,22 @@ Usage:
   ./scripts/run_bin_trace_pipeline.sh <bin_path> [trace_jsonl_path] [nemu_log_path] [pytest_target]
 
 Environment variables:
+  TB_RUN_ID           Run identifier used in provenance and default artifact layout
+  TB_RUN_COMMAND      Reproduction command stored in the funcov artifact
+  TB_SEED             Test/global random seed (default: 1)
+  TB_BACKEND_RANDOM_SEED
+                      Backend timing seed (default: TB_SEED)
+  TB_ARTIFACT_DIR     Root directory for this run's artifacts
+  TB_COVERAGE_DIR     Coverage output directory; defaults under TB_ARTIFACT_DIR
+  TB_WAVEFORM_DIR     Waveform output directory; defaults under TB_ARTIFACT_DIR
+  TB_FUNCOV_DIR       Functional coverage JSON/CSV output directory
+  TB_CASE_LOG_DIR     Per-case log output directory
+  TB_FUNCOV_TARGET_BINS
+                      Explicit comma/space-separated target Bin_ID values
+  TB_FUNCOV_TARGET_TP_IDS
+                      Optional comma/space-separated target TP_ID values
+  TB_DUT_BUILD_MANIFEST
+                      Build manifest path; defaults to build-frontend/frontend_build_manifest.json
   TB_SKIP_NEMU        Skip NEMU trace generation and use the existing trace_jsonl_path directly (default: 0)
   TB_NEMU_EXEC         NEMU executable path (default: <repo>/ready-to-run/riscv64-nemu-interpreter)
   TB_NEMU_MAX_INSTR    Pass -I to NEMU when > 0 (default: 0)
@@ -61,12 +77,26 @@ if [[ $# -lt 1 || $# -gt 4 ]]; then
   exit 1
 fi
 
+if [[ -z "${TB_RUN_COMMAND:-}" ]]; then
+  printf -v TB_RUN_COMMAND '%q ' "$0" "$@"
+  TB_RUN_COMMAND="${TB_RUN_COMMAND% }"
+fi
+
 BIN_PATH="$1"
 BIN_BASENAME="$(basename "${BIN_PATH}")"
 BIN_STEM="${BIN_BASENAME%.*}"
+RUN_ID_DEFAULT="frontend_${BIN_STEM}_$(date +%Y%m%d_%H%M%S)_$$"
+RUN_ID="${TB_RUN_ID:-${RUN_ID_DEFAULT}}"
+ARTIFACT_ROOT="${TB_ARTIFACT_DIR:-${FRONTEND_DIR}/data/runs/${RUN_ID}}"
+TB_RUN_ID="${RUN_ID}"
+TB_ARTIFACT_DIR="${ARTIFACT_ROOT}"
+TB_COVERAGE_DIR="${TB_COVERAGE_DIR:-${ARTIFACT_ROOT}/coverage}"
+TB_WAVEFORM_DIR="${TB_WAVEFORM_DIR:-${ARTIFACT_ROOT}/waveforms}"
+TB_FUNCOV_DIR="${TB_FUNCOV_DIR:-${ARTIFACT_ROOT}/funcov}"
+TB_CASE_LOG_DIR="${TB_CASE_LOG_DIR:-${ARTIFACT_ROOT}/logs}"
 
-TRACE_PATH="${2:-${REPO_DIR}/NEMU/logs/${BIN_STEM}.trace.jsonl}"
-NEMU_LOG_PATH="${3:-${REPO_DIR}/NEMU/logs/${BIN_STEM}.nemu.log}"
+TRACE_PATH="${2:-${ARTIFACT_ROOT}/inputs/${BIN_STEM}.trace.jsonl}"
+NEMU_LOG_PATH="${3:-${ARTIFACT_ROOT}/inputs/${BIN_STEM}.nemu.log}"
 NEMU_EXEC="${TB_NEMU_EXEC:-${REPO_DIR}/ready-to-run/riscv64-nemu-interpreter}"
 NEMU_MAX_INSTR="${TB_NEMU_MAX_INSTR:-0}"
 TRACE_LIMIT="${TB_TRACE_LIMIT:-0}"
@@ -85,10 +115,19 @@ PYTEST_TIMEOUT_SECS="${TB_PYTEST_TIMEOUT_SECS:-6400}"
 PYTHON_BIN="${PYTHON:-python3}"
 PYTEST_DISABLE_RERUNFAILURES="${TB_PYTEST_DISABLE_RERUNFAILURES:-1}"
 LOG_LEVEL="${TB_LOG_LEVEL:-INFO}"
+SEED="${TB_SEED:-1}"
+BACKEND_RANDOM_SEED="${TB_BACKEND_RANDOM_SEED:-${SEED}}"
 ENV_LOG_LEVEL="${TB_ENV_LOG_LEVEL:-${LOG_LEVEL}}"
 CLI_LOG_LEVEL="${TB_LOG_CLI_LEVEL:-${LOG_LEVEL}}"
 export TB_ENV_LOG_LEVEL="${ENV_LOG_LEVEL}"
 export PYTEST_ADDOPTS="${PYTEST_ADDOPTS:--s -o log_cli=true --log-cli-level=${CLI_LOG_LEVEL}}"
+
+if ! [[ "${RUN_ID}" =~ ^[A-Za-z0-9_.=-]+$ ]]; then
+  PIPELINE_STAGE="validate_inputs"
+  PIPELINE_REASON="invalid_run_id"
+  echo "[frontend][error] TB_RUN_ID must contain only A-Z, a-z, 0-9, _, ., =, or -: ${RUN_ID}" >&2
+  exit 2
+fi
 
 if [[ "${BIN_STEM}" == "microbench" ]]; then
   NEMU_MAX_INSTR=0
@@ -96,9 +135,37 @@ if [[ "${BIN_STEM}" == "microbench" ]]; then
   echo "[frontend] microbench detected: using run-to-completion bin-trace flow"
 fi
 
+directory_has_entries() {
+  local directory="$1"
+  local entries=()
+  [[ -d "${directory}" ]] || return 1
+  shopt -s nullglob dotglob
+  entries=("${directory}"/*)
+  shopt -u nullglob dotglob
+  [[ "${#entries[@]}" -gt 0 ]]
+}
+
+for output_dir in "${TB_COVERAGE_DIR}" "${TB_WAVEFORM_DIR}" "${TB_FUNCOV_DIR}" "${TB_CASE_LOG_DIR}"; do
+  if directory_has_entries "${output_dir}"; then
+    PIPELINE_STAGE="validate_inputs"
+    PIPELINE_REASON="artifact_output_not_empty"
+    echo "[frontend][error] refusing to overwrite non-empty run output directory: ${output_dir}" >&2
+    exit 2
+  fi
+done
+
 echo "[frontend] repo: ${REPO_DIR}"
 echo "[frontend] package: ${FRONTEND_DIR}"
 echo "[frontend] bin: ${BIN_PATH}"
+echo "[frontend] run_id: ${TB_RUN_ID}"
+echo "[frontend] run_command: ${TB_RUN_COMMAND}"
+echo "[frontend] seed: ${SEED}"
+echo "[frontend] backend_random_seed: ${BACKEND_RANDOM_SEED}"
+echo "[frontend] artifact_root: ${TB_ARTIFACT_DIR}"
+echo "[frontend] coverage_dir: ${TB_COVERAGE_DIR}"
+echo "[frontend] waveform_dir: ${TB_WAVEFORM_DIR}"
+echo "[frontend] funcov_dir: ${TB_FUNCOV_DIR}"
+echo "[frontend] case_log_dir: ${TB_CASE_LOG_DIR}"
 echo "[frontend] trace: ${TRACE_PATH}"
 echo "[frontend] nemu_log: ${NEMU_LOG_PATH}"
 echo "[frontend] nemu_exec: ${NEMU_EXEC}"
@@ -220,6 +287,20 @@ if [[ "${RUN_DUT}" != "0" ]]; then
     TB_ENABLE_DUT_TESTS=1 \
     TB_BIN_TRACE_PIPELINE=1 \
     TB_BIN_PATH="${BIN_PATH}" \
+    TB_ASM_PATH="${TB_ASM_PATH:-}" \
+    TB_RUN_COMMAND="${TB_RUN_COMMAND}" \
+    TB_SEED="${SEED}" \
+    TB_BACKEND_RANDOM_SEED="${BACKEND_RANDOM_SEED}" \
+    TB_RUN_ID="${TB_RUN_ID}" \
+    TB_ARTIFACT_DIR="${TB_ARTIFACT_DIR}" \
+    TB_COVERAGE_DIR="${TB_COVERAGE_DIR}" \
+    TB_WAVEFORM_DIR="${TB_WAVEFORM_DIR}" \
+    TB_FUNCOV_DIR="${TB_FUNCOV_DIR}" \
+    TB_CASE_LOG_DIR="${TB_CASE_LOG_DIR}" \
+    TB_FUNCOV_TARGET_BINS="${TB_FUNCOV_TARGET_BINS:-}" \
+    TB_FUNCOV_TARGET_TP_IDS="${TB_FUNCOV_TARGET_TP_IDS:-}" \
+    TB_FUNCOV_TARGET_TESTCASES="${TB_FUNCOV_TARGET_TESTCASES:-}" \
+    TB_DUT_BUILD_MANIFEST="${TB_DUT_BUILD_MANIFEST:-}" \
     TB_TRACE_PATH="${TRACE_PATH}" \
     TB_BASE_ADDR="${BASE_ADDR}" \
     TB_RESET_VECTOR="${RESET_VECTOR}" \

@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import os
+import platform
 from collections import deque
 from dataclasses import asdict, dataclass, field
-from functools import cached_property
+from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+from .artifact_provenance import file_sha256, load_frontend_build_manifest
 from .funcov import (
-    sample_backend_redirect_coverage,
-    sample_bpu_subpredictor_coverage,
-    sample_bpu_to_ftq_coverage,
-    sample_bpu_v3_basic_prediction_coverage,
+    CFVEC_SAMPLER_BIN_KEYS,
+    TWO_FETCH_SAMPLER_BIN_KEYS,
     sample_cfvec_coverage,
-    sample_ftq_coverage,
     sample_two_fetch_coverage,
 )
 from .rvc_decoder import expand_rvc
@@ -40,12 +41,68 @@ def _sanitize(value: Any) -> Any:
     return str(value)
 
 
+@lru_cache(maxsize=None)
+def _file_sha256(path_text: str) -> str:
+    return file_sha256(Path(path_text))
+
+
+def _json_sha256(value: Any) -> str:
+    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+COMPATIBILITY_FIELDS = (
+    "dut_source_sha",
+    "dut_build_sha256",
+    "dut_python_extension_sha256",
+    "generated_rtl_sha256",
+    "registry_sha256",
+    "sampler_sha256",
+    "signal_contract_sha256",
+    "build_config",
+    "toolchain",
+)
+
+
+def _normalize_string_list(values: Optional[Iterable[Any]]) -> List[str]:
+    if values is None:
+        return []
+    result: List[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        result.append(text)
+    return result
+
+
+UNCACHE_EVENT_SAMPLER_BIN_KEYS = frozenset(
+    {
+        ("uncache_ordering", "pbmt_nc_pmp_mmio_wait_commit"),
+        ("uncache_ordering", "pbmt_nc_non_mmio_no_commit_gate"),
+        ("uncache_path_switch", "uncache_to_icache_clean"),
+        ("fetch_path_switch", "icache_to_mmio_clean"),
+        ("uncache_ordering", "pbmt_io_wait_commit"),
+        ("uncache_path_switch", "icache_to_nc_clean"),
+    }
+)
+
+FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
+    set(CFVEC_SAMPLER_BIN_KEYS)
+    | set(TWO_FETCH_SAMPLER_BIN_KEYS)
+    | set(UNCACHE_EVENT_SAMPLER_BIN_KEYS)
+)
+
+
 @dataclass(frozen=True)
 class CoverageBinDef:
     bin_id: str
     stage: str
     coverage_type: str
     coverage_group: str
+    coverpoint: str
     bin_name: str
     mapped_path: str
     sample_event: str
@@ -55,7 +112,11 @@ class CoverageBinDef:
     suggested_testcase: str
 
     @property
-    def key(self) -> Tuple[str, str]:
+    def key(self) -> Tuple[str, str, str]:
+        return (self.coverage_group, self.coverpoint, self.bin_name)
+
+    @property
+    def group_bin_key(self) -> Tuple[str, str]:
         return (self.coverage_group, self.bin_name)
 
 
@@ -68,14 +129,6 @@ class CoverageHit:
 
 
 class FunctionalCoverageRecorder:
-    _EXCEPTION_BINS = {
-        1: "af",
-        2: "ill",
-        12: "pf",
-        19: "hwe",
-        20: "gpf",
-    }
-
     def __init__(
         self,
         definitions: Iterable[CoverageBinDef],
@@ -86,47 +139,229 @@ class FunctionalCoverageRecorder:
         source_csv: Optional[Path] = None,
         waveform_path: Optional[Path] = None,
         line_coverage_path: Optional[Path] = None,
+        target_bin_ids: Optional[Iterable[Any]] = None,
+        target_tp_ids: Optional[Iterable[Any]] = None,
+        target_testcases: Optional[Iterable[Any]] = None,
     ) -> None:
         defs = list(definitions)
         self.definitions = defs
         self.definition_by_key = {d.key: d for d in defs}
-        self.hits: Dict[Tuple[str, str], CoverageHit] = {}
+        self.definition_by_group_bin = {d.group_bin_key: d for d in defs}
+        self.definition_by_bin_id = {d.bin_id: d for d in defs}
+        if len(self.definition_by_key) != len(defs):
+            raise ValueError("duplicate functional coverage group/point/bin definition")
+        if len(self.definition_by_group_bin) != len(defs):
+            raise ValueError("duplicate functional coverage group/bin definition")
+        if len(self.definition_by_bin_id) != len(defs):
+            raise ValueError("duplicate functional coverage Bin_ID definition")
+        self.hits: Dict[Tuple[str, str, str], CoverageHit] = {}
         self.testcase_name = str(testcase_name)
         self.artifact_tag = str(artifact_tag)
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.source_csv = str(source_csv) if source_csv is not None else None
+        if source_csv is not None and Path(source_csv).resolve() == default_pilot_csv_path().resolve():
+            registry_keys = set(self.definition_by_group_bin)
+            sampler_keys = set(FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS)
+            if registry_keys != sampler_keys:
+                missing = sorted(registry_keys - sampler_keys)
+                stale = sorted(sampler_keys - registry_keys)
+                raise ValueError(
+                    "canonical functional coverage registry/sampler mismatch: "
+                    f"missing_sampler={missing}, stale_sampler={stale}"
+                )
         self.waveform_path = str(waveform_path) if waveform_path is not None else None
         self.line_coverage_path = str(line_coverage_path) if line_coverage_path is not None else None
+        self.coverage_targets = self._build_coverage_targets(
+            target_bin_ids=target_bin_ids,
+            target_tp_ids=target_tp_ids,
+            target_testcases=target_testcases,
+        )
+        self.provenance = self._build_provenance()
+        self.run_metadata = {
+            "run_id": os.getenv("TB_RUN_ID", "").strip() or None,
+            "pytest_outcome": os.getenv("TB_RUN_OUTCOME", "unknown").strip().lower() or "unknown",
+            "exit_code": self._optional_int(os.getenv("TB_RUN_EXIT_CODE")),
+            "checker": {"status": "unknown", "error_count": None, "errors": []},
+        }
         self.events_tail: deque[dict] = deque(maxlen=256)
+        self.risk_observations: deque[dict] = deque(maxlen=128)
         self.env = None
         self._reset_seen_high = False
         self._reset_release_cycle: Optional[int] = None
-        self._boot_recorded = False
         self._last_fetch_path = "icache_seq"
         self._last_fetch_cycle = -1
         self._redirected_fetch_path: Optional[dict] = None
-        self._ptw_req_pending = 0
-        self._pending_ptw_resp_cycle: Optional[int] = None
-        self._backend_block_start_cycle: Optional[int] = None
-        self._last_ibuffer_state: Optional[str] = None
-        self._last_ftq_state: Optional[str] = None
-        self._uncache_last_a: Optional[dict] = None
-        self._uncache_recent_a_events: deque[dict] = deque(maxlen=16)
         self._uncache_page_tail_requests: Dict[int, dict] = {}
         self._uncache_active_nc = False
         self._last_uncache_was_nc = False
-        self._uncache_last_pending_redirect_cycle: Optional[int] = None
-        self._uncache_wfi_start_req_count: Optional[int] = None
         self._ifu_last_cfvec: Optional[dict] = None
-        self._ifu_seen_rvc = False
-        self._ifu_seen_rvi = False
+        self._ifu_redirect_skip_until_cycle: Optional[int] = None
         self._two_fetch_last_fetch_ptr: Optional[tuple[int, int]] = None
+        self._two_fetch_expected_ptr_step: Optional[int] = None
         self._two_fetch_waiting_refill = False
         self._two_fetch_ftq_pending = False
         self._two_fetch_last_dual_cycle: Optional[int] = None
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
+
+    @staticmethod
+    def _optional_int(value: Any) -> Optional[int]:
+        if value is None or str(value).strip() == "":
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def set_run_metadata(
+        self,
+        *,
+        outcome: Optional[str] = None,
+        exit_code: Optional[int] = None,
+        checker: Optional[dict] = None,
+        run_id: Optional[str] = None,
+        extra: Optional[dict] = None,
+    ) -> None:
+        """Attach pytest/checker outcome to the artifact before it is written."""
+        if outcome is not None:
+            self.run_metadata["pytest_outcome"] = str(outcome).strip().lower() or "unknown"
+        if exit_code is not None:
+            self.run_metadata["exit_code"] = self._optional_int(exit_code)
+        if run_id is not None:
+            self.run_metadata["run_id"] = str(run_id).strip() or None
+        if checker is not None:
+            self.run_metadata["checker"] = _sanitize(dict(checker))
+        if extra is not None:
+            self.run_metadata.update(_sanitize(dict(extra)))
+
+    @staticmethod
+    def _hit_key_for(item: CoverageBinDef) -> str:
+        return f"{item.coverage_group}::{item.coverpoint}::{item.bin_name}"
+
+    def _build_coverage_targets(
+        self,
+        *,
+        target_bin_ids: Optional[Iterable[Any]],
+        target_tp_ids: Optional[Iterable[Any]],
+        target_testcases: Optional[Iterable[Any]],
+    ) -> dict:
+        bin_ids = _normalize_string_list(target_bin_ids)
+        testcases = _normalize_string_list(target_testcases)
+        explicit_testcases = _normalize_string_list(
+            [
+                *str(os.getenv("TB_FUNCOV_TARGET_TESTCASES", ""))
+                .replace(",", " ")
+                .replace(";", " ")
+                .split(),
+                Path(os.getenv("TB_BIN_PATH", "").strip()).stem
+                if os.getenv("TB_BIN_PATH", "").strip()
+                else "",
+            ]
+        )
+        if explicit_testcases:
+            unresolved = sorted(
+                testcase
+                for testcase in explicit_testcases
+                if not any(item.suggested_testcase == testcase for item in self.definitions)
+            )
+            if unresolved:
+                raise ValueError(
+                    "functional coverage explicit testcase does not resolve to an active registry bin: "
+                    f"{unresolved}"
+                )
+        if not bin_ids and testcases:
+            testcase_set = set(testcases)
+            bin_ids = [
+                item.bin_id
+                for item in self.definitions
+                if item.suggested_testcase in testcase_set
+            ]
+            explicit_testcase_scope = bool(
+                os.getenv("TB_BIN_PATH", "").strip()
+                or os.getenv("TB_FUNCOV_TARGET_TESTCASES", "").strip()
+            )
+            if explicit_testcase_scope and not bin_ids:
+                raise ValueError(
+                    "functional coverage target testcase does not resolve to an active registry bin: "
+                    f"{testcases}"
+                )
+        unknown = sorted(set(bin_ids) - set(self.definition_by_bin_id))
+        if unknown:
+            raise ValueError(f"unknown functional coverage target Bin_ID(s): {unknown}")
+        target_defs = [self.definition_by_bin_id[bin_id] for bin_id in bin_ids]
+        return {
+            "bin_ids": bin_ids,
+            "hit_keys": [self._hit_key_for(item) for item in target_defs],
+            "tp_ids": _normalize_string_list(target_tp_ids),
+            "testcases": testcases,
+        }
+
+    def _build_provenance(self) -> dict:
+        frontend_root = _frontend_root()
+        repo_root = frontend_root.parents[3]
+        build_root = repo_root / "build-frontend"
+        manifest_override = os.getenv("TB_DUT_BUILD_MANIFEST", "").strip()
+        build = load_frontend_build_manifest(
+            build_root,
+            Path(manifest_override) if manifest_override else None,
+        )
+        source_override = os.getenv("TB_DUT_SOURCE_SHA", "").strip()
+        build_config_override = os.getenv("TB_DUT_BUILD_CONFIG", "").strip()
+        manifest_status = str(build["build_manifest_status"]).strip().lower()
+        manifest_was_valid = manifest_status == "valid"
+        manifest_reasons = list(build.get("build_manifest_reasons") or [])
+        manifest_source_sha = str(build.get("dut_source_sha") or "").strip()
+        dut_source_sha = manifest_source_sha
+        dut_source_origin = "build_manifest"
+        if source_override:
+            if manifest_was_valid and manifest_source_sha:
+                if source_override.lower() != manifest_source_sha.lower():
+                    manifest_status = "invalid"
+                    manifest_reasons.append("source_sha_override_mismatch")
+                # A matching environment value is only a consistency check;
+                # the manifest remains the authoritative source.
+            else:
+                # Keep an override for diagnostics, but an invalid/missing
+                # manifest still blocks DUT evidence in back-annotation.
+                dut_source_sha = source_override
+                dut_source_origin = "environment"
+        build_config = str(build.get("build_config") or "frontend-default").strip()
+        if build_config_override:
+            if manifest_was_valid and build_config_override != build_config:
+                manifest_status = "invalid"
+                manifest_reasons.append("build_config_override_mismatch")
+            elif not manifest_was_valid:
+                build_config = build_config_override
+        definitions_sha256 = _json_sha256([asdict(item) for item in self.definitions])
+        sampler_sha256 = _json_sha256(
+            {
+                "functional_coverage.py": _file_sha256(str(Path(__file__).resolve())),
+                "funcov.py": _file_sha256(str((Path(__file__).resolve().parent / "funcov.py"))),
+            }
+        )
+        provenance = {
+            "dut_source_sha": dut_source_sha,
+            "dut_source_origin": dut_source_origin,
+            "dut_build_sha256": build["dut_build_sha256"],
+            "dut_python_extension_sha256": build["dut_python_extension_sha256"],
+            "generated_rtl_sha256": build["generated_rtl_sha256"],
+            "registry_sha256": (
+                _file_sha256(self.source_csv) if self.source_csv is not None else definitions_sha256
+            ),
+            "definitions_sha256": definitions_sha256,
+            "sampler_sha256": sampler_sha256,
+            "signal_contract_sha256": build["signal_contract_sha256"],
+            "build_config": build_config,
+            "build_manifest_status": manifest_status,
+            "build_manifest_sha256": build["build_manifest_sha256"],
+            "build_manifest_reasons": manifest_reasons,
+            "toolchain": f"python-{platform.python_version()}",
+        }
+        provenance["compatibility_signature"] = _json_sha256(
+            {field: provenance[field] for field in COMPATIBILITY_FIELDS}
+        )
+        return provenance
 
     @classmethod
     def from_pilot_csv(
@@ -138,17 +373,24 @@ class FunctionalCoverageRecorder:
         output_dir: Path,
         waveform_path: Optional[Path] = None,
         line_coverage_path: Optional[Path] = None,
+        target_bin_ids: Optional[Iterable[Any]] = None,
+        target_tp_ids: Optional[Iterable[Any]] = None,
+        target_testcases: Optional[Iterable[Any]] = None,
     ) -> "FunctionalCoverageRecorder":
         defs: List[CoverageBinDef] = []
         with Path(csv_path).open("r", encoding="utf-8-sig", newline="") as f:
             reader = csv.DictReader(f)
             for row in reader:
+                coverpoint = str(row["Coverpoint"]).strip()
+                if not coverpoint:
+                    continue
                 defs.append(
                     CoverageBinDef(
                         bin_id=str(row["Bin_ID"]).strip(),
                         stage=str(row["阶段"]).strip(),
                         coverage_type=str(row["覆盖类型"]).strip(),
                         coverage_group=str(row["Coverage_Group"]).strip(),
+                        coverpoint=coverpoint,
                         bin_name=str(row["Bin_Name"]).strip(),
                         mapped_path=str(row["映射测试点路径"]).strip(),
                         sample_event=str(row["建议采样事件"]).strip(),
@@ -166,6 +408,9 @@ class FunctionalCoverageRecorder:
             source_csv=Path(csv_path),
             waveform_path=waveform_path,
             line_coverage_path=line_coverage_path,
+            target_bin_ids=target_bin_ids,
+            target_tp_ids=target_tp_ids,
+            target_testcases=target_testcases,
         )
 
     def attach(self, env) -> None:
@@ -180,15 +425,26 @@ class FunctionalCoverageRecorder:
     def unhit_path(self) -> Path:
         return self.output_dir / f"{self.artifact_tag}.funcov.unhit.csv"
 
-    def key_hit(self, coverage_group: str, bin_name: str) -> bool:
-        key = self._coverage_key(str(coverage_group), str(bin_name))
+    def key_hit(self, coverage_group: str, bin_name: str, *, coverpoint: Optional[str] = None) -> bool:
+        key = self._coverage_key(str(coverage_group), str(bin_name), coverpoint=coverpoint)
         hit = self.hits.get(key)
         return bool(hit and hit.hits > 0)
 
-    def mark(self, coverage_group: str, bin_name: str, cycle: int, evidence: Optional[dict] = None) -> bool:
-        key = self._coverage_key(str(coverage_group), str(bin_name))
+    def mark(
+        self,
+        coverage_group: str,
+        bin_name: str,
+        cycle: int,
+        evidence: Optional[dict] = None,
+        *,
+        coverpoint: Optional[str] = None,
+    ) -> bool:
+        key = self._coverage_key(str(coverage_group), str(bin_name), coverpoint=coverpoint)
         if key not in self.definition_by_key:
-            return False
+            raise KeyError(
+                "functional coverage sampler attempted an unmodeled bin: "
+                f"{key[0]}::{key[1]}::{key[2]}"
+            )
         hit = self.hits.setdefault(key, CoverageHit())
         hit.hits += 1
         hit.last_cycle = int(cycle)
@@ -198,16 +454,20 @@ class FunctionalCoverageRecorder:
             hit.evidence.append(_sanitize(evidence))
         return True
 
-    def _coverage_key(self, coverage_group: str, bin_name: str) -> Tuple[str, str]:
-        key = (str(coverage_group), str(bin_name))
-        if key in self.definition_by_key:
-            return key
-        if str(coverage_group) == "bpu_basic_pred_type":
-            if str(bin_name) == "seq_no_cfi":
-                return ("bpu_v3_basic_flow", "no_cfi")
-            if str(bin_name) in {"direct_jmp", "cond_taken", "cond_nt"}:
-                return ("bpu_v3_basic_flow", "has_cfi")
-        return key
+    def _coverage_key(
+        self,
+        coverage_group: str,
+        bin_name: str,
+        *,
+        coverpoint: Optional[str] = None,
+    ) -> Tuple[str, str, str]:
+        if coverpoint is not None:
+            return (str(coverage_group), str(coverpoint), str(bin_name))
+
+        definition = self.definition_by_group_bin.get((str(coverage_group), str(bin_name)))
+        if definition is not None:
+            return definition.key
+        return (str(coverage_group), "", str(bin_name))
 
     def handle_event(self, event: Dict[str, Any]) -> None:
         evt = _sanitize(event)
@@ -234,7 +494,6 @@ class FunctionalCoverageRecorder:
                 self._redirected_fetch_path = None
             self._last_fetch_path = "icache_seq"
             self._last_fetch_cycle = cycle
-            self.mark("fetch_path_type", "icache_seq", cycle, {"event": event_type, "payload": payload})
         elif event_type == "handshake.uncache_a":
             address = int(payload.get("address", 0))
             if (
@@ -268,27 +527,31 @@ class FunctionalCoverageRecorder:
             self._redirected_fetch_path = None
             self._last_fetch_path = "mmio_uncache"
             self._last_fetch_cycle = cycle
-            self.mark("fetch_path_type", "mmio_uncache", cycle, {"event": event_type, "payload": payload})
             self._sample_uncache_a_event(cycle, payload)
-        elif event_type == "handshake.uncache_d":
-            self._sample_uncache_d_event(cycle, payload)
-        elif event_type == "handshake.ptw_req":
-            self._ptw_req_pending += 1
-            self.mark("itlb_result_type", "miss", cycle, {"event": event_type, "payload": payload})
-        elif event_type == "handshake.ptw_resp":
-            self._pending_ptw_resp_cycle = cycle
         elif event_type == "backend.redirect":
             self._redirected_fetch_path = {
                 "path": self._last_fetch_path,
                 "pbmt_nc": bool(self._last_uncache_was_nc),
             }
-            redirect_bin = self._classify_redirect_reason(str(payload.get("reason", "")))
-            self.mark("redirect_type", redirect_bin, cycle, {"event": event_type, "payload": payload})
-            self._sample_uncache_redirect_event(cycle, payload)
-        elif event_type == "backend.can_accept":
-            self._handle_can_accept_event(cycle, payload)
-        elif event_type == "backend.wfi_req":
-            self._handle_wfi_req_event(cycle, payload)
+            self._ifu_last_cfvec = None
+            self._ifu_redirect_skip_until_cycle = cycle + 1
+            self._uncache_page_tail_requests.clear()
+
+    def _clear_transient_sampling_state(self) -> None:
+        self._last_fetch_path = "icache_seq"
+        self._last_fetch_cycle = -1
+        self._redirected_fetch_path = None
+        self._uncache_page_tail_requests.clear()
+        self._uncache_active_nc = False
+        self._last_uncache_was_nc = False
+        self._ifu_last_cfvec = None
+        self._ifu_redirect_skip_until_cycle = None
+        self._two_fetch_last_fetch_ptr = None
+        self._two_fetch_expected_ptr_step = None
+        self._two_fetch_waiting_refill = False
+        self._two_fetch_ftq_pending = False
+        self._two_fetch_last_dual_cycle = None
+        self._two_fetch_last_waylookup_write_state = None
 
     def on_cycle(self, cycle: int, env) -> None:
         dut = env.dut
@@ -296,42 +559,16 @@ class FunctionalCoverageRecorder:
         reset_val = self._read_dut_signal(dut, "reset", 0)
         if reset_val == 1:
             self._reset_seen_high = True
+            self._clear_transient_sampling_state()
+            return
         elif self._reset_seen_high and self._reset_release_cycle is None:
             self._reset_release_cycle = cycle
 
         sample_two_fetch_coverage(self, env, cycle)
         sample_cfvec_coverage(self, env, cycle)
-        sample_bpu_subpredictor_coverage(self, env, cycle)
-        sample_bpu_v3_basic_prediction_coverage(self, env, cycle)
-        sample_bpu_to_ftq_coverage(self, env, cycle)
 
-        if (
-            self._read_dut_signal(dut, "io_ptw_req_0_valid", 0) == 1
-            and self._read_dut_signal(dut, "io_ptw_req_0_ready", 0) == 1
-        ):
-            self._ptw_req_pending += 1
-            self.mark(
-                "itlb_result_type",
-                "miss",
-                cycle,
-                {
-                    "event": "cycle.ptw_req",
-                    "vpn": self._read_dut_signal(dut, "io_ptw_req_0_bits_vpn", 0),
-                },
-            )
-
-        self._sample_ibuffer_state(dut, cycle, env)
+        self._sample_ibuffer_contract(dut, cycle)
         self._sample_uncache_cycle_state(dut, cycle, env)
-        sample_ftq_coverage(self, env, cycle)
-
-        if self._read_dut_signal(dut, "io_backend_toFtq_redirect_valid", 0) == 1:
-            sample_backend_redirect_coverage(self, env, cycle)
-            self._sample_backend_redirect_faults(env, dut, cycle)
-
-        if self._read_dut_signal(dut, "io_ptw_resp_valid", 0) == 1:
-            self._sample_ptw_response(dut, cycle)
-        elif self._pending_ptw_resp_cycle == cycle:
-            self._sample_ptw_response(dut, cycle)
 
     def _lookup_dut_signal(self, dut, name: str):
         name = str(name)
@@ -457,6 +694,7 @@ class FunctionalCoverageRecorder:
                 f,
                 fieldnames=[
                     "Coverage_Group",
+                    "Coverpoint",
                     "Total_Bins",
                     "Hit_Bins",
                     "Coverage_Pct",
@@ -474,6 +712,7 @@ class FunctionalCoverageRecorder:
                 fieldnames=[
                     "Bin_ID",
                     "Coverage_Group",
+                    "Coverpoint",
                     "Bin_Name",
                     "Priority",
                     "Stage",
@@ -503,8 +742,76 @@ class FunctionalCoverageRecorder:
         if not raw_list:
             raise ValueError("merge_raw_files requires at least one raw coverage json")
 
-        with raw_list[0].open("r", encoding="utf-8") as f:
-            first = json.load(f)
+        raw_artifacts: list[tuple[Path, dict]] = []
+        compatibility_signature: Optional[str] = None
+        first_definitions: Optional[list] = None
+        for raw_path in raw_list:
+            try:
+                with raw_path.open("r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    f"invalid functional coverage artifact {raw_path}: {type(exc).__name__}"
+                ) from exc
+            if not isinstance(data, dict):
+                raise ValueError(f"invalid functional coverage artifact root: {raw_path}")
+            if data.get("artifact_schema_version") != 2:
+                raise ValueError(f"legacy functional coverage artifact cannot be merged: {raw_path}")
+
+            provenance = data.get("provenance")
+            if not isinstance(provenance, dict):
+                raise ValueError(f"functional coverage artifact lacks provenance: {raw_path}")
+            missing_fields = [
+                field
+                for field in COMPATIBILITY_FIELDS
+                if provenance.get(field) is None or str(provenance.get(field)).strip() == ""
+            ]
+            if missing_fields:
+                raise ValueError(
+                    "functional coverage artifact lacks compatibility fields: "
+                    f"{raw_path}: {missing_fields}"
+                )
+            recorded_signature = str(provenance.get("compatibility_signature") or "").strip().lower()
+            expected_signature = _json_sha256(
+                {field: provenance[field] for field in COMPATIBILITY_FIELDS}
+            )
+            if recorded_signature != expected_signature:
+                raise ValueError(
+                    "incompatible functional coverage artifacts: "
+                    f"{raw_path} signature does not match its provenance"
+                )
+            if compatibility_signature is None:
+                compatibility_signature = recorded_signature
+            elif recorded_signature != compatibility_signature:
+                raise ValueError(
+                    "incompatible functional coverage artifacts: "
+                    f"{raw_path} has signature {recorded_signature!r}, "
+                    f"expected {compatibility_signature!r}"
+                )
+
+            definitions = data.get("definitions")
+            if not isinstance(definitions, list):
+                raise ValueError(f"functional coverage artifact lacks definitions: {raw_path}")
+            recorded_definitions_sha256 = str(
+                provenance.get("definitions_sha256") or ""
+            ).strip().lower()
+            expected_definitions_sha256 = _json_sha256(definitions)
+            if recorded_definitions_sha256 != expected_definitions_sha256:
+                raise ValueError(
+                    "incompatible functional coverage artifacts: "
+                    f"{raw_path} definitions do not match provenance"
+                )
+            if first_definitions is None:
+                first_definitions = definitions
+            elif definitions != first_definitions:
+                raise ValueError(
+                    "incompatible functional coverage artifacts: "
+                    f"{raw_path} definitions differ from {raw_list[0]}"
+                )
+            raw_artifacts.append((raw_path, data))
+
+        first = raw_artifacts[0][1]
+        first_provenance = first["provenance"]
 
         defs = [
             CoverageBinDef(
@@ -512,6 +819,7 @@ class FunctionalCoverageRecorder:
                 stage=item["stage"],
                 coverage_type=item["coverage_type"],
                 coverage_group=item["coverage_group"],
+                coverpoint=item.get("coverpoint", ""),
                 bin_name=item["bin_name"],
                 mapped_path=item["mapped_path"],
                 sample_event=item["sample_event"],
@@ -530,12 +838,22 @@ class FunctionalCoverageRecorder:
             output_dir=output_dir,
             source_csv=Path(first["source_csv"]) if first.get("source_csv") else None,
         )
-        for raw_path in raw_list:
-            with raw_path.open("r", encoding="utf-8") as f:
-                data = json.load(f)
-            for key_str, hit in data.get("hits", {}).items():
-                group, bin_name = key_str.split("::", 1)
-                target = merged.hits.setdefault((group, bin_name), CoverageHit())
+        merged.provenance = dict(first_provenance)
+        for raw_path, data in raw_artifacts:
+            hits = data.get("hits")
+            if not isinstance(hits, dict):
+                raise ValueError(f"functional coverage artifact has invalid hits: {raw_path}")
+            for key_str, hit in hits.items():
+                if not isinstance(hit, dict):
+                    raise ValueError(f"invalid functional coverage hit record: {raw_path}:{key_str}")
+                parts = key_str.split("::")
+                if len(parts) != 3:
+                    raise ValueError(f"invalid functional coverage hit key: {key_str}")
+                group, coverpoint, bin_name = parts
+                key = (group, coverpoint, bin_name)
+                if key not in merged.definition_by_key:
+                    raise ValueError(f"unknown functional coverage hit key: {key_str}")
+                target = merged.hits.setdefault(key, CoverageHit())
                 target.hits += int(hit.get("hits", 0))
                 first_cycle = hit.get("first_cycle")
                 if first_cycle is not None:
@@ -549,51 +867,8 @@ class FunctionalCoverageRecorder:
                     target.evidence.append(item)
         return merged
 
-    def _handle_can_accept_event(self, cycle: int, payload: Dict[str, Any]) -> None:
-        value = int(payload.get("value", 1))
-        if value == 0:
-            if self._backend_block_start_cycle is None:
-                self._backend_block_start_cycle = cycle
-            return
-
-        if self._backend_block_start_cycle is None:
-            return
-
-        blocked_cycles = max(0, cycle - self._backend_block_start_cycle)
-        if 0 < blocked_cycles <= 32:
-            self.mark(
-                "backend_accept_mode",
-                "all_block_short",
-                cycle,
-                {"blocked_cycles": blocked_cycles, "event": "backend.can_accept"},
-            )
-        self._backend_block_start_cycle = None
-
     def _sample_uncache_a_event(self, cycle: int, payload: Dict[str, Any]) -> None:
         addr = int(payload.get("address", 0))
-        corrupt = int(payload.get("corrupt", 0))
-        denied = int(payload.get("denied", 0))
-        evidence = {
-            "event": "handshake.uncache_a",
-            "address": addr,
-            "corrupt": corrupt,
-            "denied": denied,
-            "pbmt_nc": int(self._uncache_active_nc),
-        }
-
-        self.mark("uncache_req_state", "normal_fire", cycle, evidence)
-
-        last = self._uncache_last_a
-        if last is not None and addr == int(last.get("address", -16)) + 8 and int(last.get("denied", 0)) == 1:
-            self.mark(
-                "uncache_resend_flow",
-                "first_denied_resend",
-                cycle,
-                {**evidence, "first_address": int(last.get("address", 0))},
-            )
-
-        self._uncache_last_a = evidence
-        self._uncache_recent_a_events.append(evidence)
         self._last_uncache_was_nc = bool(self._uncache_active_nc)
         self._uncache_active_nc = False
 
@@ -607,97 +882,12 @@ class FunctionalCoverageRecorder:
                 "next_page_requested": False,
             }
 
-    def _sample_uncache_d_event(self, cycle: int, payload: Dict[str, Any]) -> None:
-        addr = int(payload.get("address", 0))
-        corrupt = int(payload.get("corrupt", 0))
-        denied = int(payload.get("denied", 0))
-        evidence = {"event": "handshake.uncache_d", "address": addr, "corrupt": corrupt, "denied": denied}
-
-        if corrupt == 1:
-            self.mark("uncache_resp_type", "corrupt", cycle, evidence)
-        elif denied == 1:
-            self.mark("uncache_resp_type", "denied", cycle, evidence)
-        else:
-            self.mark("uncache_resp_type", "clean", cycle, evidence)
-
-        first = next(
-            (item for item in reversed(self._uncache_recent_a_events) if addr == int(item.get("address", -16)) + 8),
-            None,
-        )
-        if (corrupt == 1 or denied == 1) and first is not None:
-            self.mark(
-                "uncache_resend_flow",
-                "second_beat_fault",
-                cycle,
-                {**evidence, "first_address": int(first.get("address", 0))},
-            )
-
-        if (corrupt == 1 or denied == 1) and self._uncache_last_pending_redirect_cycle is not None:
-            if 0 <= cycle - int(self._uncache_last_pending_redirect_cycle) <= 128:
-                self.mark(
-                    "uncache_flush_flow",
-                    "redirect_flush_fault",
-                    cycle,
-                    {**evidence, "redirect_cycle": int(self._uncache_last_pending_redirect_cycle)},
-                )
-
-    def _sample_uncache_redirect_event(self, cycle: int, payload: Dict[str, Any]) -> None:
-        if self.env is None or getattr(self.env, "uncache_agent", None) is None:
-            return
-        stats = self.env.uncache_agent.get_stats()
-        pending = int(stats.get("pending", 0))
-        if pending <= 0:
-            return
-
-        evidence = {"event": "backend.redirect", "pending": pending, "payload": payload}
-        self.mark("uncache_flush_flow", "redirect_flush_pending", cycle, evidence)
-        if self._uncache_last_pending_redirect_cycle is not None:
-            if 0 <= cycle - int(self._uncache_last_pending_redirect_cycle) <= 16:
-                self.mark(
-                    "uncache_flush_flow",
-                    "consecutive_redirect_pending",
-                    cycle,
-                    {**evidence, "previous_redirect_cycle": int(self._uncache_last_pending_redirect_cycle)},
-                )
-        self._uncache_last_pending_redirect_cycle = cycle
-
-    def _handle_wfi_req_event(self, cycle: int, payload: Dict[str, Any]) -> None:
-        value = int(payload.get("value", 0))
-        if self.env is None or getattr(self.env, "uncache_agent", None) is None:
-            return
-
-        req_count = int(self.env.uncache_agent.get_stats().get("req_count", 0))
-        if value == 1:
-            self._uncache_wfi_start_req_count = req_count
-            return
-
-        if self._uncache_wfi_start_req_count is None:
-            return
-        if req_count == int(self._uncache_wfi_start_req_count):
-            self.mark(
-                "uncache_req_state",
-                "wfi_blocked",
-                cycle,
-                {"event": "backend.wfi_req", "start_req_count": int(self._uncache_wfi_start_req_count)},
-            )
-        self._uncache_wfi_start_req_count = None
-
     def _sample_uncache_cycle_state(self, dut, cycle: int, env) -> None:
-        if getattr(env, "uncache_if", None) is None:
-            return
-        try:
-            a_valid = int(env.uncache_if.a_valid.value)
-            a_ready = int(env.uncache_if.a_ready.value)
-        except Exception:
-            return
-        if a_valid == 1 and a_ready == 0:
-            self.mark("uncache_req_state", "a_ready_backpressure", cycle, {"event": "cycle.uncache_a_stall"})
-
         pbmt = self._try_read_dut_signal(
-            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMeta_0_itlbPbmt"
+            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_itlbPbmt"
         )
         pmp_mmio = self._try_read_dut_signal(
-            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMeta_0_pmpMmio"
+            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_pmpMmio"
         )
         state = self._try_read_dut_signal(
             dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheState"
@@ -730,73 +920,44 @@ class FunctionalCoverageRecorder:
                 cycle,
                 {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state, "can_accept": can_accept},
             )
-    def _sample_ibuffer_state(self, dut, cycle: int, env) -> None:
-        if self._reset_release_cycle is None:
+
+    def _sample_ibuffer_contract(self, dut, cycle: int) -> None:
+        """Capture alignment/ownership facts without turning them into hits."""
+        valid = self._try_read_dut_signal(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid")
+        enq = self._try_read_dut_signal(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0")
+        if valid is None or enq is None:
             return
 
-        ibuf_size = 48
-        num_valid = self._read_first_dut_signal(
-            dut,
-            (
-                "Frontend_top.Frontend.inner_ibuffer.numValid",
-                "Frontend_top.Frontend.inner_ibuffer_numValid",
-                "Frontend_top.Frontend.ibuffer.numValid",
-                "Frontend_top.Frontend.ibuffer_numValid",
-            ),
-        )
-        ibuf_full = self._try_read_dut_signal(dut, "io_frontendInfo_ibufFull")
-        valid_outputs = sum(
-            1 for slot in range(8) if self._read_dut_signal(dut, f"io_backend_cfVec_{slot}_valid", 0) == 1
-        )
-
-        if num_valid is None:
-            evidence = {
-                "event": "ibuffer_cfvec_proxy",
-                "num_valid": None,
-                "valid_outputs": int(valid_outputs),
-                "size": int(ibuf_size),
-            }
-            if self._boot_recorded and valid_outputs == 0:
-                self._mark_ibuffer_state("empty", cycle, evidence)
-            if self._backend_block_start_cycle is not None and valid_outputs >= 6:
-                self._mark_ibuffer_state("near_full", cycle, evidence)
-            if self._backend_block_start_cycle is not None and valid_outputs >= 8:
-                self._mark_ibuffer_state("full", cycle, evidence)
-            if ibuf_full == 1:
-                self._mark_ibuffer_state("near_full", cycle, {"event": "io_frontendInfo_ibufFull"})
-                self._mark_ibuffer_state("full", cycle, {"event": "io_frontendInfo_ibufFull"})
-            return
-
-        evidence = {
-            "event": "ibuffer_num_valid",
-            "num_valid": int(num_valid),
-            "valid_outputs": int(valid_outputs),
-            "size": int(ibuf_size),
-        }
-        if int(num_valid) <= 0:
-            self._mark_ibuffer_state("empty", cycle, evidence)
-        if self._backend_block_start_cycle is not None and int(num_valid) >= 32:
-            self._mark_ibuffer_state("near_full", cycle, evidence)
-        if ibuf_full == 1 or int(num_valid) >= ibuf_size - 1:
-            self._mark_ibuffer_state("full", cycle, {**evidence, "ibuf_full": int(ibuf_full or 0)})
-
-    def _mark_ibuffer_state(self, state: str, cycle: int, evidence: dict) -> None:
-        self._last_ibuffer_state = str(state)
-        self.mark("ibuffer_state", state, cycle, evidence)
-        if state in {"near_full", "full"} and self._backend_block_start_cycle is not None:
-            self.mark(
-                "ibuffer_state_x_backend_mode",
-                "near_full_x_all_block",
-                cycle,
-                {
-                    **evidence,
-                    "backend_block_start_cycle": int(self._backend_block_start_cycle),
-                },
+        masks: list[int] = []
+        for index in range(35):
+            value = self._read_first_dut_signal(
+                dut,
+                (
+                    f"Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_exceptionMask_{index}",
+                    f"Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_exceptionMask_{index}",
+                    f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionMask_{index}",
+                ),
             )
+            if value is None:
+                break
+            masks.append(int(value) & 1)
+        if not masks:
+            return
 
-    def _mark_ftq_state(self, state: str, cycle: int, evidence: dict) -> None:
-        self._last_ftq_state = str(state)
-        self.mark("ftq_queue_state", state, cycle, evidence)
+        enq_bits = int(enq)
+        mask_bits = sum(bit << index for index, bit in enumerate(masks))
+        invalid_mask = mask_bits & ~enq_bits
+        self.risk_observations.append(
+            {
+                "cycle": int(cycle),
+                "risk": "ibuffer_exception_mask_enq_alignment",
+                "valid": int(valid),
+                "enq_enable": enq_bits,
+                "exception_mask": mask_bits,
+                "mask_without_enq": int(invalid_mask),
+                "aligned": invalid_mask == 0,
+            }
+        )
 
     @staticmethod
     def _circular_distance(newer_flag: int, newer_value: int, older_flag: int, older_value: int, size: int) -> int:
@@ -805,77 +966,6 @@ class FunctionalCoverageRecorder:
         newer = (int(newer_flag) & 1) * size + (int(newer_value) % size)
         older = (int(older_flag) & 1) * size + (int(older_value) % size)
         return (newer - older) % modulo
-
-    def _sample_exception_slot(self, dut, base: str, slot: int, pc: int, cycle: int, fetch_path: str) -> None:
-        for cause, bin_name in self._EXCEPTION_BINS.items():
-            if self._read_dut_signal(dut, f"{base}bits_exceptionVec_{cause}", 0) != 1:
-                continue
-            evidence = {"slot": slot, "pc": pc, "cause": cause}
-            self.mark("frontend_exception_type", bin_name, cycle, evidence)
-            if fetch_path == "icache_seq" and bin_name == "pf":
-                self.mark("fetch_path_x_exception", "icache_x_pf", cycle, evidence)
-            if fetch_path == "mmio_uncache" and bin_name == "af":
-                self.mark("fetch_path_x_exception", "mmio_x_af", cycle, evidence)
-
-    def _sample_ptw_response(self, dut, cycle: int) -> None:
-        entry_v = self._read_dut_signal(dut, "io_ptw_resp_bits_s1_entry_v", 0)
-        perm_x = self._read_dut_signal(dut, "io_ptw_resp_bits_s1_entry_perm_x", 0)
-        resp_pf = self._read_dut_signal(dut, "io_ptw_resp_bits_s1_pf", 0)
-        resp_af = self._read_dut_signal(dut, "io_ptw_resp_bits_s1_af", 0)
-        if resp_pf == 1 or resp_af == 1 or entry_v == 0 or perm_x == 0:
-            self.mark(
-                "ptw_resp_type",
-                "pf",
-                cycle,
-                {"entry_v": entry_v, "perm_x": perm_x, "resp_pf": resp_pf, "resp_af": resp_af},
-            )
-        else:
-            self.mark(
-                "ptw_resp_type",
-                "leaf_pte",
-                cycle,
-                {"entry_v": entry_v, "perm_x": perm_x, "resp_pf": resp_pf, "resp_af": resp_af},
-            )
-            if self._ptw_req_pending > 0:
-                self.mark("itlb_ptw_flow", "miss_walk_refill", cycle, {"pending_reqs": self._ptw_req_pending})
-                self.mark("itlb_state_x_ptw_resp", "single_miss_x_leaf_pte", cycle, {"pending_reqs": self._ptw_req_pending})
-        self._ptw_req_pending = max(0, self._ptw_req_pending - 1)
-        self._pending_ptw_resp_cycle = None
-
-    def _sample_backend_redirect_faults(self, env, dut, cycle: int) -> None:
-        target_pc = self._read_dut_signal(dut, "io_backend_toFtq_redirect_bits_target", 0)
-        evidence = {
-            "event": "backend_redirect_fault",
-            "target_pc": int(target_pc),
-        }
-        backend_ipf = self._read_dut_signal(dut, "io_backend_toFtq_redirect_bits_backendIPF", 0)
-        backend_iaf = self._read_dut_signal(dut, "io_backend_toFtq_redirect_bits_backendIAF", 0)
-        backend_igpf = self._read_dut_signal(dut, "io_backend_toFtq_redirect_bits_backendIGPF", 0)
-        if backend_ipf == 1:
-            self.mark("frontend_exception_type", "pf", cycle, evidence)
-            self.mark("fetch_path_x_exception", "icache_x_pf", cycle, evidence)
-        if backend_iaf == 1:
-            self.mark("frontend_exception_type", "af", cycle, evidence)
-            if env.memory.is_mmio(int(target_pc)):
-                self.mark("fetch_path_x_exception", "mmio_x_af", cycle, evidence)
-        if backend_igpf == 1:
-            self.mark("frontend_exception_type", "gpf", cycle, evidence)
-
-    def _infer_fetch_path(self, env, pc: int, cycle: int) -> str:
-        if env.memory.is_mmio(int(pc)):
-            return "mmio_uncache"
-        if self._last_fetch_path == "mmio_uncache" and (cycle - self._last_fetch_cycle) <= 32:
-            return "mmio_uncache"
-        return "icache_seq"
-
-    @staticmethod
-    def _classify_redirect_reason(reason: str) -> str:
-        lowered = reason.lower()
-        if "memvio" in lowered:
-            return "memVio"
-        if "interrupt" in lowered:
-            return "interrupt"
-        return "ctrl"
 
     def _raw_dict(self) -> dict:
         stats = {}
@@ -890,45 +980,75 @@ class FunctionalCoverageRecorder:
             except Exception:
                 errors = []
 
+        run = dict(self.run_metadata)
+        checker = dict(run.get("checker") or {})
+        monitor = (stats.get("monitor") or {}) if isinstance(stats, dict) else {}
+        if checker.get("status") in {None, "", "unknown"}:
+            checker_errors = len(errors) + int(monitor.get("error_count", 0) or 0)
+            checker = {
+                "status": "pass" if checker_errors == 0 else "fail",
+                "error_count": checker_errors,
+                "errors": errors[:32],
+            }
+        run["checker"] = _sanitize(checker)
+        run["pytest_outcome"] = str(run.get("pytest_outcome") or "unknown").lower()
+        run["exit_code"] = self._optional_int(run.get("exit_code"))
+
         return {
+            "artifact_schema_version": 2,
             "testcase_name": self.testcase_name,
             "artifact_tag": self.artifact_tag,
             "source_csv": self.source_csv,
             "waveform_path": self.waveform_path,
             "line_coverage_path": self.line_coverage_path,
+            "coverage_targets": self.coverage_targets,
+            "provenance": self.provenance,
             "definitions": [asdict(d) for d in self.definitions],
             "hits": {
-                f"{group}::{bin_name}": {
-                    "bin_id": self.definition_by_key[(group, bin_name)].bin_id,
+                f"{group}::{coverpoint}::{bin_name}": {
+                    "bin_id": self.definition_by_key[(group, coverpoint, bin_name)].bin_id,
+                    "coverpoint": coverpoint,
                     "hits": hit.hits,
                     "first_cycle": hit.first_cycle,
                     "last_cycle": hit.last_cycle,
                     "evidence": hit.evidence,
                 }
-                for (group, bin_name), hit in sorted(self.hits.items())
+                for (group, coverpoint, bin_name), hit in sorted(self.hits.items())
             },
             "summary": self._summary_rows(),
             "unhit": self._unhit_rows(),
             "stats": stats,
             "errors": errors,
+            "run": _sanitize(run),
+            "outcome": {
+                "status": run["pytest_outcome"],
+                "exit_code": run["exit_code"],
+            },
+            "checker": _sanitize(checker),
             "recent_events": list(self.events_tail),
+            "risk_observations": list(self.risk_observations),
         }
 
     def _summary_rows(self) -> List[dict]:
-        grouped: Dict[str, List[CoverageBinDef]] = {}
+        grouped: Dict[Tuple[str, str], List[CoverageBinDef]] = {}
         for item in self.definitions:
-            grouped.setdefault(item.coverage_group, []).append(item)
+            grouped.setdefault((item.coverage_group, item.coverpoint), []).append(item)
 
         rows: List[dict] = []
-        for coverage_group in sorted(grouped):
-            defs = grouped[coverage_group]
-            hit_defs = [d for d in defs if self.key_hit(d.coverage_group, d.bin_name)]
+        for coverage_group, coverpoint in sorted(grouped):
+            defs = grouped[(coverage_group, coverpoint)]
+            hit_defs = [
+                d
+                for d in defs
+                if self.key_hit(d.coverage_group, d.bin_name, coverpoint=d.coverpoint)
+            ]
             total = len(defs)
             hit_count = len(hit_defs)
             pct = 0.0 if total == 0 else (100.0 * hit_count / float(total))
             rows.append(
                 {
                     "Coverage_Group": coverage_group,
+                    "Coverpoint": coverpoint,
                     "Total_Bins": total,
                     "Hit_Bins": hit_count,
                     "Coverage_Pct": f"{pct:.2f}",
@@ -941,12 +1061,13 @@ class FunctionalCoverageRecorder:
     def _unhit_rows(self) -> List[dict]:
         rows: List[dict] = []
         for item in self.definitions:
-            if self.key_hit(item.coverage_group, item.bin_name):
+            if self.key_hit(item.coverage_group, item.bin_name, coverpoint=item.coverpoint):
                 continue
             rows.append(
                 {
                     "Bin_ID": item.bin_id,
                     "Coverage_Group": item.coverage_group,
+                    "Coverpoint": item.coverpoint,
                     "Bin_Name": item.bin_name,
                     "Priority": item.priority,
                     "Stage": item.stage,

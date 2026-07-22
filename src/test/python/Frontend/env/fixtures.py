@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import re
 import sys
 import tempfile
@@ -21,7 +22,7 @@ for _path in (str(_PYLIB_PATH), str(_HERE)):
         sys.path.insert(0, _path)
 
 from .api import api_Frontend_load_program
-from .coverage_def import get_coverage_groups
+from .artifact_provenance import file_sha256
 from .dut_factory import create_frontend_dut, is_fake_frontend_dut
 from .env_config import DEFAULT_ENV_CONFIG
 from .functional_coverage import FunctionalCoverageRecorder, default_pilot_csv_path
@@ -38,16 +39,97 @@ def _data_dir() -> Path:
     return p
 
 
+_DEFAULT_RUN_ID: str | None = None
+
+
+def _effective_run_id() -> str:
+    global _DEFAULT_RUN_ID
+    explicit = os.getenv("TB_RUN_ID", "").strip()
+    if explicit:
+        return explicit
+    if _DEFAULT_RUN_ID is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        _DEFAULT_RUN_ID = f"frontend_pytest_{timestamp}_{os.getpid()}"
+    return _DEFAULT_RUN_ID
+
+
 def _funcov_dir() -> Path:
-    p = _data_dir() / "funcov"
+    raw = os.getenv("TB_FUNCOV_DIR", "").strip()
+    if raw:
+        p = Path(raw)
+    else:
+        artifact_root = os.getenv("TB_ARTIFACT_DIR", "").strip()
+        if artifact_root:
+            p = Path(artifact_root) / "funcov"
+        else:
+            p = _data_dir() / "runs" / _safe_path_component(_effective_run_id()) / "funcov"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
+def _safe_path_component(value: str) -> str:
+    text = re.sub(r"[^A-Za-z0-9_.=-]+", "_", str(value).strip())
+    return text.strip("._") or "run"
+
+
 def _artifact_root_dir(request, default_dir: Path) -> Path:
-    date_dir = default_dir / datetime.now().strftime("%Y%m%d")
-    date_dir.mkdir(parents=True, exist_ok=True)
-    return date_dir
+    raw = os.getenv("TB_ARTIFACT_DIR", "").strip()
+    if raw:
+        root = Path(raw)
+    else:
+        root = default_dir / "runs" / _safe_path_component(_effective_run_id())
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _split_env_list(raw: str | None) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for token in re.split(r"[\s,;]+", str(raw or "").strip()):
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        result.append(token)
+    return result
+
+
+def _flatten_marker_values(values) -> list[str]:
+    if isinstance(values, (str, bytes)):
+        values = (values,)
+    result: list[str] = []
+    for value in values:
+        if isinstance(value, (list, tuple, set)):
+            result.extend(_flatten_marker_values(value))
+        else:
+            result.extend(_split_env_list(str(value)))
+    return result
+
+
+def _funcov_targets(request) -> dict[str, list[str]]:
+    bin_ids = _split_env_list(os.getenv("TB_FUNCOV_TARGET_BINS", ""))
+    tp_ids = _split_env_list(os.getenv("TB_FUNCOV_TARGET_TP_IDS", ""))
+    testcases = _split_env_list(os.getenv("TB_FUNCOV_TARGET_TESTCASES", ""))
+    node = getattr(request, "node", None)
+    if node is not None:
+        testcases.extend(
+            str(value).strip()
+            for value in (getattr(node, "originalname", None), getattr(node, "name", None))
+            if str(value or "").strip()
+        )
+        for marker in node.iter_markers("funcov_bins"):
+            bin_ids.extend(_flatten_marker_values(marker.args))
+            bin_ids.extend(_flatten_marker_values(marker.kwargs.get("bins", [])))
+        for marker in node.iter_markers("funcov_tps"):
+            tp_ids.extend(_flatten_marker_values(marker.args))
+            tp_ids.extend(_flatten_marker_values(marker.kwargs.get("tps", [])))
+    raw_bin = os.getenv("TB_BIN_PATH", "").strip()
+    if raw_bin:
+        testcases.append(Path(raw_bin).stem)
+    return {
+        "bin_ids": _split_env_list(" ".join(bin_ids)),
+        "tp_ids": _split_env_list(" ".join(tp_ids)),
+        "testcases": _split_env_list(" ".join(testcases)),
+    }
 
 
 def _is_enabled(name: str, default: str = "1") -> bool:
@@ -61,6 +143,18 @@ def _read_int_env(name: str, default: str) -> int:
         return int(raw, 0)
     except ValueError as exc:
         raise AssertionError(f"{name} must be a valid integer, got: {raw}") from exc
+
+
+def _test_seed() -> int:
+    return _read_int_env("TB_SEED", "1")
+
+
+def _input_path_metadata(env_name: str) -> tuple[str | None, str]:
+    raw = os.getenv(env_name, "").strip()
+    if not raw:
+        return None, "unavailable"
+    path = Path(raw).resolve()
+    return str(path), file_sha256(path)
 
 
 def _artifact_tag(request) -> str:
@@ -115,6 +209,70 @@ def _coverage_omit_path() -> Path | None:
     raw = os.getenv("TB_LINE_COVERAGE_OMIT", "").strip()
     path = Path(raw) if raw else _HERE / "Frontend.omit"
     return path if path.is_file() else None
+
+
+def _funcov_run_metadata(request, env) -> dict:
+    report = getattr(getattr(request, "node", None), "rep_call", None)
+    outcome = str(getattr(report, "outcome", "unknown") or "unknown").lower()
+    exit_code = 0 if outcome == "passed" else 1
+    try:
+        errors = list(env.get_errors())
+    except Exception:
+        errors = [{"kind": "checker_error_collection_failed"}]
+    node = getattr(request, "node", None)
+    node_path_raw = getattr(node, "path", None)
+    testcase_path = Path(str(node_path_raw)).resolve() if node_path_raw is not None else None
+    bin_path, bin_sha256 = _input_path_metadata("TB_BIN_PATH")
+    trace_path, trace_sha256 = _input_path_metadata("TB_TRACE_PATH")
+    asm_path, asm_sha256 = _input_path_metadata("TB_ASM_PATH")
+    seed = _test_seed()
+    backend_seed = _read_int_env("TB_BACKEND_RANDOM_SEED", str(seed))
+    config = getattr(env, "config", DEFAULT_ENV_CONFIG)
+    nodeid = str(getattr(node, "nodeid", "") or "").strip()
+    run_command = os.getenv("TB_RUN_COMMAND", "").strip() or f"pytest {nodeid}".strip()
+    run_id = _effective_run_id()
+    artifact_root_raw = os.getenv("TB_ARTIFACT_DIR", "").strip()
+    artifact_root = (
+        Path(artifact_root_raw)
+        if artifact_root_raw
+        else _data_dir() / "runs" / _safe_path_component(run_id)
+    ).resolve()
+    case_log_path = str(
+        getattr(getattr(env, "dut", None), "_frontend_case_log_path", "") or ""
+    ).strip()
+    return {
+        "outcome": outcome,
+        "exit_code": exit_code,
+        "checker": {
+            "status": "pass" if not errors and outcome == "passed" else "fail",
+            "error_count": len(errors),
+            "errors": errors[:32],
+        },
+        "run_id": run_id,
+        "execution": {
+            "testcase_nodeid": nodeid,
+            "testcase_path": None if testcase_path is None else str(testcase_path),
+            "testcase_sha256": (
+                "unavailable" if testcase_path is None else file_sha256(testcase_path)
+            ),
+            "asm_path": asm_path,
+            "asm_sha256": asm_sha256,
+            "bin_path": bin_path,
+            "bin_sha256": bin_sha256,
+            "trace_path": trace_path,
+            "trace_sha256": trace_sha256,
+            "run_command": run_command,
+            "artifact_root": str(artifact_root),
+            "case_log_path": case_log_path or None,
+            "seed": seed,
+            "seeds": {
+                "test": seed,
+                "backend": backend_seed,
+                "icache": int(config.icache.seed),
+                "ptw": int(config.ptw.seed),
+            },
+        },
+    }
 
 
 def _line_ranges(lines: list[int]) -> list[str]:
@@ -175,7 +333,7 @@ def _log_path(request, default_dir: Path) -> Path:
         path = Path(raw.format(tc=tag))
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
-    log_dir = _artifact_root_dir(request, default_dir)
+    log_dir = Path(os.getenv("TB_CASE_LOG_DIR", "").strip() or str(_artifact_root_dir(request, default_dir)))
     log_dir.mkdir(parents=True, exist_ok=True)
     return log_dir / f"{tag}.log"
 
@@ -244,20 +402,12 @@ def dut(request):
     dut = create_dut(request)
     coverage = _coverage_path(request, _data_dir())
     dut.InitClock("clock")
-    groups = get_coverage_groups(dut) if _is_enabled("TB_ENABLE_TOFFEE_FUNCOV", default="1") else []
-    if groups:
-        dut.StepRis(lambda _: [g.sample() for g in groups])
     yield dut
     try:
         if hasattr(dut, "FlushWaveform"):
             dut.FlushWaveform()
     except Exception:
         logger.exception("dut waveform flush failed")
-    for g in groups:
-        try:
-            g.clear()
-        except Exception:
-            pass
     if _is_enabled("TB_ENABLE_TOFFEE_LINE_COVERAGE", default="1") and coverage.is_file():
         ignore = _expanded_coverage_ignore_path()
         set_line_coverage(request, str(coverage), ignore=ignore)
@@ -275,6 +425,7 @@ def dut(request):
 @pytest.fixture(scope="function")
 def env(dut, request):
     configure_env_logging()
+    random.seed(_test_seed())
     data_dir = _data_dir()
     funcov_dir = _funcov_dir()
     tag = _artifact_tag(request)
@@ -282,6 +433,7 @@ def env(dut, request):
     coverage = _coverage_path(request, data_dir)
     recorder = None
     if _is_enabled("TB_ENABLE_FUNCTIONAL_COVERAGE", default="1"):
+        targets = _funcov_targets(request)
         recorder = FunctionalCoverageRecorder.from_pilot_csv(
             default_pilot_csv_path(),
             testcase_name=request.node.name if request is not None else "frontend",
@@ -289,6 +441,9 @@ def env(dut, request):
             output_dir=funcov_dir,
             waveform_path=waveform,
             line_coverage_path=coverage,
+            target_bin_ids=targets["bin_ids"],
+            target_tp_ids=targets["tp_ids"],
+            target_testcases=targets["testcases"],
         )
     tb = FrontendEnv(dut, event_sink=None if recorder is None else recorder.handle_event, config=DEFAULT_ENV_CONFIG)
     tb.waveform_path = str(waveform)
@@ -304,6 +459,15 @@ def env(dut, request):
     )
     yield tb
     if recorder is not None:
+        metadata = _funcov_run_metadata(request, tb)
+        metadata["execution"]["funcov_path"] = str(recorder.raw_path().resolve())
+        recorder.set_run_metadata(
+            outcome=metadata["outcome"],
+            exit_code=metadata["exit_code"],
+            checker=metadata["checker"],
+            run_id=metadata["run_id"],
+            extra=metadata["execution"],
+        )
         recorder.write_artifacts()
 
 

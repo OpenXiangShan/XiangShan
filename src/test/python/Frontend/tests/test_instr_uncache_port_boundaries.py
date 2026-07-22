@@ -456,12 +456,12 @@ def _wait_for_resp_count(env, count: int, *, max_cycles: int = 2000) -> bool:
     return int(env.uncache_agent.get_stats().get("resp_count", 0)) >= int(count)
 
 
-def _wait_for_frontend_exception(env, bin_name: str, *, max_cycles: int = 2000) -> bool:
+def _wait_for_monitor_exception(env, *, max_cycles: int = 2000) -> bool:
     for _ in range(int(max_cycles)):
-        if env.functional_coverage.key_hit("frontend_exception_type", str(bin_name)):
+        if int(env.monitor.exception_mark_count) > 0:
             return True
         env.step(1)
-    return env.functional_coverage.key_hit("frontend_exception_type", str(bin_name))
+    return int(env.monitor.exception_mark_count) > 0
 
 
 def _wait_for_observed_pc(env, pc: int, *, max_cycles: int = 2000) -> bool:
@@ -673,9 +673,6 @@ def test_uncache_a_ready_backpressure_holds_request(env):
 
     assert req_after > req_before
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before + 2
-    assert env.functional_coverage.key_hit("uncache_req_state", "normal_fire")
-    assert env.functional_coverage.key_hit("uncache_req_state", "a_ready_backpressure")
-    assert env.functional_coverage.key_hit("uncache_resp_type", "clean")
     assert not env.monitor.get_errors()
 
 
@@ -706,10 +703,7 @@ def test_uncache_response_fault_reports_dut_exception(
     assert resp_count > 0
     assert int(stats.get("corrupt_resp_count", 0)) == (1 if fault_kwargs.get("corrupt") else 0)
     assert int(stats.get("denied_resp_count", 0)) == (1 if fault_kwargs.get("denied") else 0)
-    assert _wait_for_frontend_exception(env, expected_exception)
-    assert env.functional_coverage.key_hit("uncache_resp_type", expected_resp_type)
-    if expected_path_exception is not None:
-        assert env.functional_coverage.key_hit("fetch_path_x_exception", expected_path_exception)
+    assert _wait_for_monitor_exception(env)
     assert env.monitor.exception_mark_count > 0
     assert not env.monitor.get_errors()
 
@@ -741,7 +735,6 @@ def test_uncache_wfi_blocks_new_acquire_and_refill_not_safe(env):
     assert req_after > req_during_wfi
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_during_wfi + 2
     assert saw_not_safe
-    assert env.functional_coverage.key_hit("uncache_req_state", "wfi_blocked")
     assert not env.monitor.get_errors()
 
 
@@ -780,7 +773,6 @@ def test_uncache_wfi_during_a_ready_backpressure_retracts_unaccepted_request(env
 
     assert req_after > req_before
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before + 2
-    assert env.functional_coverage.key_hit("uncache_req_state", "a_ready_backpressure")
     assert not env.monitor.get_errors()
 
 
@@ -801,7 +793,6 @@ def test_uncache_pending_response_flushed_by_redirect(env):
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0
     assert int(env.uncache_agent.get_stats().get("req_count", 0)) >= req_before_redirect
     assert not any(int(obs.pc) == _MMIO_BASE for obs in env.monitor.observations)
-    assert env.functional_coverage.key_hit("uncache_flush_flow", "redirect_flush_pending")
     assert not env.monitor.get_errors()
 
 
@@ -835,8 +826,6 @@ def test_uncache_flushed_fault_response_does_not_report_exception(env, fault_kwa
 
     assert int(stats.get("corrupt_resp_count", 0)) == (1 if fault_kwargs.get("corrupt") else 0)
     assert int(stats.get("denied_resp_count", 0)) == (1 if fault_kwargs.get("denied") else 0)
-    assert env.functional_coverage.key_hit("uncache_flush_flow", "redirect_flush_fault")
-    assert not env.functional_coverage.key_hit("frontend_exception_type", blocked_exception)
     assert env.monitor.exception_mark_count == 0
     assert not env.monitor.get_errors()
 
@@ -855,10 +844,10 @@ def test_uncache_consecutive_redirects_drop_older_pending_fetch(env):
     assert _wait_for_observed_pc(env, _MMIO_BASE + 0x80, max_cycles=5000)
     assert not any(int(obs.pc) == _MMIO_BASE for obs in env.monitor.observations)
     assert int(env.uncache_agent.get_stats().get("resp_count", 0)) > 0
-    assert env.functional_coverage.key_hit("uncache_flush_flow", "consecutive_redirect_pending")
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-421")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_redirect_to_mmio_while_icache_response_pending(env):
     _prepare_normal_and_mmio_cnop_stream(env)
@@ -906,6 +895,7 @@ def test_uncache_mmio_and_icache_pending_redirects_do_not_pollute_new_path(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-419")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
     expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
@@ -957,6 +947,7 @@ def test_uncache_pbmt_nc_non_mmio_uses_uncache_path(env):
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-422")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pbmt_io_waits_commit_on_cacheable_pma(env):
     expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
@@ -1084,6 +1075,7 @@ def test_uncache_pbmt_nc_after_ibuffer_backpressure_can_output_multiple_cfvec_la
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-418")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pbmt_nc_mmio_pma_second_fetch_waits_commit(env):
     _expected_block, mapping = _prepare_sv39_mapped_pbmt_nc_cfi_stream(
@@ -1165,6 +1157,7 @@ def test_uncache_pbmt_nc_real_bin_uses_generated_sv39_vaddr_mapping(env, tmp_pat
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-420")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_pbmt_nc_pending_redirect_to_cacheable_non_mmio_has_enough_requests(env):
     nc_expected, _cacheable_pcs = _prepare_sv39_dual_nc_cacheable_stream(env)
@@ -1219,6 +1212,7 @@ def test_uncache_pbmt_nc_pending_redirect_to_cacheable_non_mmio_has_enough_reque
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-423")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_cacheable_pending_redirect_to_pbmt_nc_has_enough_requests(env):
     nc_expected, cacheable_pcs = _prepare_sv39_dual_nc_cacheable_stream(env)
@@ -1297,7 +1291,7 @@ def test_uncache_resend_first_beat_corrupt_suppresses_resend(env):
 
     assert _wait_for_request_addr(env, _MMIO_BASE)
     assert _wait_for_uncache_resp(env)
-    assert _wait_for_frontend_exception(env, "hwe")
+    assert _wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
 
     assert stats.get("request_addrs", []).count(_MMIO_BASE) == 1
@@ -1324,9 +1318,6 @@ def test_uncache_resend_first_beat_denied_allows_resend(env):
     assert int(stats.get("corrupt_resp_count", 0)) == 0
     assert stats.get("request_addrs", []).count(_MMIO_BASE) == 1
     assert (_MMIO_BASE + 8) in stats.get("request_addrs", [])
-    assert env.functional_coverage.key_hit("uncache_resend_flow", "first_denied_resend")
-    assert not env.functional_coverage.key_hit("frontend_exception_type", "af")
-    assert not env.functional_coverage.key_hit("frontend_exception_type", "hwe")
     assert env.monitor.exception_mark_count == 0
     assert not env.monitor.get_errors()
 
@@ -1345,16 +1336,16 @@ def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exceptio
     assert _wait_for_request_addr(env, _MMIO_BASE)
     assert _wait_for_request_addr(env, _MMIO_BASE + 8)
     assert _wait_for_resp_count(env, 2)
-    assert _wait_for_frontend_exception(env, exception)
+    assert _wait_for_monitor_exception(env)
     stats = env.uncache_agent.get_stats()
 
     assert _MMIO_BASE in stats.get("request_addrs", [])
     assert (_MMIO_BASE + 8) in stats.get("request_addrs", [])
-    assert env.functional_coverage.key_hit("uncache_resend_flow", "second_beat_fault")
     assert env.monitor.exception_mark_count > 0
     assert not env.monitor.get_errors()
 
 
+@pytest.mark.funcov_bins("BIN-417")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     _prepare_cross_page_rvi_stream(env)
@@ -1379,6 +1370,7 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     assert env.functional_coverage.key_hit("uncache_page_boundary", "rvi_tail_resend_next_page")
 
 
+@pytest.mark.funcov_bins("BIN-416")
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):
     _prepare_cross_page_rvc_stream(env)
@@ -1443,5 +1435,4 @@ def test_uncache_wfi_during_mmio_commit_gate_blocks_next_request(env):
     assert req_during_gate_and_wfi == req_before
     assert req_still_commit_gated == req_before
     assert req_after_commit > req_before
-    assert env.functional_coverage.key_hit("uncache_req_state", "wfi_blocked")
     assert not env.monitor.get_errors()

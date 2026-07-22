@@ -294,7 +294,8 @@ FRONTEND_BUILD_DIR = ./build-frontend
 FRONTEND_RTL_DIR   = $(FRONTEND_BUILD_DIR)/rtl
 FRONTENDTOP        = top.FrontendTopMain
 FRONTEND_TOP_V     = $(FRONTEND_RTL_DIR)/FrontendTop.$(RTL_SUFFIX)
-FRONTEND_PYLIB     = $(FRONTEND_BUILD_DIR)/pylib/libUTFrontend.so
+FRONTEND_PYLIB     = $(FRONTEND_BUILD_DIR)/pylib/Frontend/libUTFrontend.so
+FRONTEND_BUILD_MANIFEST = $(FRONTEND_BUILD_DIR)/frontend_build_manifest.json
 FRONTEND_WAVEFORM_FORMAT ?=
 FRONTEND_WAVEFORM_FORMAT_DEFAULT := fst
 FRONTEND_WAVEFORM_FORMAT_FILE = $(FRONTEND_BUILD_DIR)/.waveform_format
@@ -345,6 +346,13 @@ $(FRONTEND_PYLIB): $(FRONTEND_TOP_V) $(FRONTEND_WAVEFORM_FORMAT_FILE)
 		--coverage \
 		-V "--output-split;20000;--no-timing"
 frontend: $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND_PYLIB)
+	@frontend_waveform_format="$$(cat "$(FRONTEND_WAVEFORM_FORMAT_FILE)" 2>/dev/null || printf '%s' '$(FRONTEND_WAVEFORM_FORMAT)')"; \
+	python3 src/test/python/Frontend/tools/write_frontend_build_manifest.py \
+		--repo-root . \
+		--build-root $(FRONTEND_BUILD_DIR) \
+		--output $(FRONTEND_BUILD_MANIFEST) \
+		--build-config "CONFIG=$(CONFIG);ISSUE=$(ISSUE);NUM_CORES=$(NUM_CORES);CHISEL_TARGET=$(CHISEL_TARGET);WAVEFORM=$$frontend_waveform_format" \
+		--build-command "make frontend CONFIG=$(CONFIG) ISSUE=$(ISSUE) NUM_CORES=$(NUM_CORES) CHISEL_TARGET=$(CHISEL_TARGET) FRONTEND_WAVEFORM_FORMAT=$$frontend_waveform_format"
 .PHONY: frontend
 
 verilog: $(FRONTEND_WAVEFORM_FORMAT_FILE) $(call docker-deps,$(TOP_V))

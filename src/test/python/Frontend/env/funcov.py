@@ -23,6 +23,16 @@ def _count_truthy(values) -> int:
     return sum(1 for value in values if int(value or 0) != 0)
 
 
+_WAYLOOKUP_PREFIX = "Frontend_top.Frontend.inner_icache.wayLookup."
+_WAY_DATA_CONFLICT_SIGNALS = tuple(
+    f"{_WAYLOOKUP_PREFIX}isDataSramReadConflict_reqReadInfo_1_1{'' if index == 0 else f'_{index}'}"
+    for index in range(8)
+) + tuple(
+    f"{_WAYLOOKUP_PREFIX}__Vtogcov__isDataSramReadConflict_reqReadInfo_1_1{'' if index == 0 else f'_{index}'}"
+    for index in range(8)
+)
+
+
 _TWO_FETCH_SIGNALS = {
     "ftq_valid": (
         "Frontend_top.Frontend.inner_icache.wayLookup.io_fromFtq_valid",
@@ -102,6 +112,19 @@ _TWO_FETCH_SIGNALS = {
     "way_exception_ptr_value": (
         "Frontend_top.Frontend.inner_icache.wayLookup.exceptionPtr_value",
     ),
+    "way_empty": (
+        "Frontend_top.Frontend.inner_icache.wayLookup.io_perf_empty",
+        "Frontend_top.Frontend.inner_icache.wayLookup.__Vtogcov__io_perf_empty",
+    ),
+    "way_write_ptr_flag": (
+        "Frontend_top.Frontend.inner_icache.wayLookup.writePtr_flag",
+        "Frontend_top.Frontend.inner_icache.wayLookup.__Vtogcov__writePtr_flag",
+    ),
+    "way_write_ptr_value": (
+        "Frontend_top.Frontend.inner_icache.wayLookup.writePtr_value",
+        "Frontend_top.Frontend.inner_icache.wayLookup.__Vtogcov__writePtr_value",
+    ),
+    "way_data_conflict": _WAY_DATA_CONFLICT_SIGNALS,
     "main_s1_valid": (
         "Frontend_top.Frontend.inner_icache.mainPipe.s1_valid",
     ),
@@ -150,11 +173,15 @@ _TWO_FETCH_SIGNALS = {
     "checker_invalid": (
         "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_invalidTaken",
     ),
+    "fixed_instr_valid": (
+        "Frontend_top.Frontend.inner_ifu.s2_fixedInstrValid",
+        "Frontend_top.Frontend.inner_ifu.__Vtogcov__s2_fixedInstrValid",
+    ),
 }
 
 
-# Single source of truth for the 2-fetch coverpoint names used by the pilot,
-# Toffee covergroups, raw funcov sampler, and testpoint back-annotation.
+# Single source of truth for the 2-fetch coverpoint names used by the registry,
+# JSON funcov sampler, and testpoint back-annotation.
 TWO_FETCH_COVERPOINTS = {
     "two_fetch_ftq_eligibility": "request_eligibility",
     "two_fetch_pointer_advance": "fetch_ptr_step",
@@ -221,8 +248,54 @@ TWO_FETCH_SAMPLER_BIN_KEYS = frozenset(
 )
 
 
+CFVEC_SAMPLER_BIN_KEYS = frozenset(
+    {
+        ("ifu_instr_size_type", "rvi_seen"),
+        ("ifu_instr_size_type", "rvc_seen"),
+        ("ifu_instr_size_type", "mixed_rvi_rvc_seen"),
+        ("ifu_pc_step_type", "step_4b_rvi"),
+        ("ifu_pc_step_type", "step_2b_rvc"),
+        ("ifu_pc_step_type", "mixed_no_gap_no_dup"),
+        ("ifu_boundary_event", "rvc_start"),
+        ("ifu_boundary_event", "rvi_start"),
+        ("ifu_boundary_event", "rvi_high_half_suppressed"),
+        ("ifu_fetch_block_position", "head"),
+        ("ifu_fetch_block_position", "mid"),
+        ("ifu_fetch_block_position", "tail"),
+        ("ifu_cfi_decode_type", "non_cfi"),
+        ("ifu_cfi_decode_type", "branch"),
+        ("ifu_cfi_decode_type", "jal"),
+        ("uncache_page_boundary", "rvc_tail_no_resend_before_delivery"),
+        ("uncache_page_boundary", "rvi_tail_resend_next_page"),
+    }
+)
+
+
 def _tf_read(recorder, key: str) -> int | None:
     return _read_first(recorder, _TWO_FETCH_SIGNALS[key])
+
+
+def _tf_signal_or(recorder, names) -> int | None:
+    values = [_read_first(recorder, (name,)) for name in names]
+    readable = [int(value) for value in values if value is not None]
+    if not readable:
+        return None
+    return int(any(readable))
+
+
+def _tf_ftq_start(recorder, slot: int) -> int | None:
+    """Read a raw two-fetch candidate address from the active FTQ entries."""
+    direct = _tf_read(recorder, f"ftq_req{int(slot)}_start")
+    if direct is not None:
+        return direct
+    fetch_ptr = _tf_read(recorder, "fetch_ptr_value")
+    if fetch_ptr is None:
+        return None
+    index = (int(fetch_ptr) + int(slot)) % 64
+    return _read_first(
+        recorder,
+        (f"Frontend_top.Frontend.inner_ftq.entryQueue_{index}_startPc_addr",),
+    )
 
 
 def _tf_vector(recorder, module: str, template: str, count: int) -> list[int | None]:
@@ -279,14 +352,86 @@ def _tf_waylookup_reasons(recorder) -> dict[str, bool] | None:
     exception_ptr = (int(exception_flag), int(exception_value) % waylookup_size)
     has_itlb_exception = int(exception_valid) == 1 and exception_ptr in (read_ptr, next_ptr)
 
+    direct_conflict = _tf_signal_or(recorder, _WAY_DATA_CONFLICT_SIGNALS)
+    if direct_conflict is None:
+        # Do not infer a SRAM conflict merely because another blocker was not
+        # visible.  Missing observability is an unclosed bin, not a hit.
+        return {
+            "insufficient_meta": not can_deq_second,
+            "mmio": has_mmio,
+            "itlb_exception": has_itlb_exception,
+            "data_bank_conflict": False,
+        }
+
     return {
         "insufficient_meta": not can_deq_second,
         "mmio": has_mmio,
         "itlb_exception": has_itlb_exception,
-        # realTwoFetchValid has only these four blockers. Once the other three
-        # are excluded, a remaining fallback is the data SRAM bank conflict.
-        "data_bank_conflict": can_deq_second and not has_mmio and not has_itlb_exception,
+        "data_bank_conflict": can_deq_second and not has_mmio and not has_itlb_exception and int(direct_conflict) == 1,
     }
+
+
+def _tf_waylookup_write_observation(recorder, cycle: int) -> None:
+    way_empty = _tf_read(recorder, "way_empty")
+    write_flag = _tf_read(recorder, "way_write_ptr_flag")
+    write_value = _tf_read(recorder, "way_write_ptr_value")
+    write_ptr = None
+    if write_flag is not None and write_value is not None:
+        write_ptr = [int(write_flag), int(write_value)]
+
+    previous = getattr(recorder, "_two_fetch_last_waylookup_write_state", None)
+    ptr_changed = bool(
+        write_ptr is not None
+        and previous is not None
+        and previous.get("write_ptr") is not None
+        and write_ptr != previous.get("write_ptr")
+    )
+    was_empty = previous is not None and previous.get("empty") == 1
+    should_record = bool(
+        way_empty is not None
+        and (int(way_empty) == 1 or ptr_changed or was_empty)
+        and (write_ptr is not None or previous is not None)
+    )
+    if should_record:
+        recorder.risk_observations.append(
+            _tf_evidence(
+                "waylookup_empty_write_timing",
+                empty=int(way_empty),
+                write_ptr=write_ptr,
+                write_ptr_changed=int(ptr_changed),
+                previous_empty=int(was_empty),
+                previous_write_ptr=(None if previous is None else previous.get("write_ptr")),
+                write_fire_observed="unavailable",
+                cycle=cycle,
+            )
+        )
+
+    if way_empty is not None or write_ptr is not None:
+        recorder._two_fetch_last_waylookup_write_state = {
+            "empty": None if way_empty is None else int(way_empty),
+            "write_ptr": write_ptr,
+        }
+
+
+def _tf_remask_fault_count(recorder) -> int | None:
+    """Return the observed prediction-fault count, or None if not observable."""
+    dut = _dut(recorder)
+    if dut is None:
+        return None
+    values: list[int | None] = []
+    for index in range(34):
+        values.append(
+            _read_first(
+                recorder,
+                (
+                    f"Frontend_top.Frontend.inner_ifu.predChecker.remaskFault_{index}",
+                    f"Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__remaskFault_{index}",
+                ),
+            )
+        )
+    if any(value is None for value in values):
+        return None
+    return sum(int(value) != 0 for value in values)
 
 
 def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
@@ -294,6 +439,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         return
 
     cycle = int(cycle)
+    _tf_waylookup_write_observation(recorder, cycle)
     backend_cfg = getattr(getattr(env, "config", None), "backend", None)
     ftq_size = int(getattr(backend_cfg, "ftq_size", 64) or 64)
 
@@ -313,8 +459,8 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
     recorder._two_fetch_ftq_pending = bool(ftq_valid == 1 and ftq_ready == 0 and ftq_req1_valid == 1)
 
     if ftq_fire and ftq_req1_valid is not None:
-        start0 = _tf_read(recorder, "ftq_req0_start")
-        start1 = _tf_read(recorder, "ftq_req1_start")
+        start0 = _tf_ftq_start(recorder, 0)
+        start1 = _tf_ftq_start(recorder, 1)
         end0 = _tf_read(recorder, "ftq_req0_end")
         end1 = _tf_read(recorder, "ftq_req1_end")
         exc0 = _tf_read(recorder, "ftq_req0_exception")
@@ -364,13 +510,23 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
                 current_ptr[0], current_ptr[1], last_ptr[0], last_ptr[1], ftq_size
             )
             evidence = _tf_evidence("fetch_ptr_advance", before=list(last_ptr), after=list(current_ptr), delta=delta)
-            if delta == 1:
+            expected_step = recorder._two_fetch_expected_ptr_step
+            if expected_step == 1 and delta == 1:
                 recorder.mark("two_fetch_pointer_advance", "step_one", cycle, evidence)
-            elif delta == 2:
+            elif expected_step == 2 and delta == 2:
                 recorder.mark("two_fetch_pointer_advance", "step_two", cycle, evidence)
                 if current_ptr[1] < last_ptr[1] or current_ptr[0] != last_ptr[0]:
                     recorder.mark("two_fetch_pointer_advance", "wrap_step_two", cycle, evidence)
+        recorder._two_fetch_expected_ptr_step = None
         recorder._two_fetch_last_fetch_ptr = current_ptr
+
+    way_req1 = _tf_read(recorder, "way_req1_valid")
+    way_valid = _tf_read(recorder, "way_out_valid")
+    way_ready = _tf_read(recorder, "way_out_ready")
+    way_real_two = _tf_read(recorder, "way_real_two")
+    way_fire = way_valid == 1 and way_ready == 1
+    if way_fire and way_real_two is not None:
+        recorder._two_fetch_expected_ptr_step = 2 if int(way_real_two) == 1 else 1
 
     prefetch_valid = _tf_read(recorder, "prefetch_valid")
     prefetch_ready = _tf_read(recorder, "prefetch_ready")
@@ -385,12 +541,10 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
                 _tf_evidence("two_prefetch", case=int(prefetch_case)),
             )
 
-    way_req1 = _tf_read(recorder, "way_req1_valid")
-    way_valid = _tf_read(recorder, "way_out_valid")
-    way_ready = _tf_read(recorder, "way_out_ready")
-    way_real_two = _tf_read(recorder, "way_real_two")
-    way_fire = way_valid == 1 and way_ready == 1
     if way_fire and way_req1 == 1 and way_real_two is not None:
+        way_empty = _tf_read(recorder, "way_empty")
+        write_flag = _tf_read(recorder, "way_write_ptr_flag")
+        write_value = _tf_read(recorder, "way_write_ptr_value")
         evidence = _tf_evidence(
             "waylookup_to_mainpipe",
             real_two=int(way_real_two),
@@ -400,6 +554,10 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         else:
             way_reasons = _tf_waylookup_reasons(recorder)
             evidence["reasons"] = way_reasons
+            if way_empty is not None:
+                evidence["waylookup_empty"] = int(way_empty)
+            if write_flag is not None and write_value is not None:
+                evidence["waylookup_write_ptr"] = [int(write_flag), int(write_value)]
             recorder.mark("two_fetch_waylookup_result", "single_fallback", cycle, evidence)
             if way_reasons is not None:
                 for bin_name, hit in way_reasons.items():
@@ -500,6 +658,8 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
     checker_valid = _tf_read(recorder, "checker_valid")
     checker_select = _tf_read(recorder, "checker_select")
     checker_invalid = _tf_read(recorder, "checker_invalid")
+    fixed_instr_valid = _tf_read(recorder, "fixed_instr_valid")
+    remask_fault_count = _tf_remask_fault_count(recorder)
     recent_dual = recorder._two_fetch_last_dual_cycle is not None and (
         cycle - int(recorder._two_fetch_last_dual_cycle)
     ) <= 8
@@ -511,19 +671,27 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
             cycle,
             _tf_evidence("checker_redirect", select_block=int(checker_select), invalid_taken=checker_invalid),
         )
-        if int(checker_select) == 0:
+        if int(checker_select) == 0 and remask_fault_count is not None and remask_fault_count >= 2:
             recorder.mark(
                 "two_fetch_checker_priority",
                 "first_masks_second",
                 cycle,
-                _tf_evidence("checker_first_block"),
+                _tf_evidence("checker_first_block", remask_fault_count=remask_fault_count),
             )
-        else:
+        elif (
+            int(checker_select) == 1
+            and int(checker_invalid or 0) == 1
+            and fixed_instr_valid is not None
+            and (int(fixed_instr_valid) & 0x1) != 0
+        ):
             recorder.mark(
                 "two_fetch_checker_priority",
                 "second_after_first_valid",
                 cycle,
-                _tf_evidence("checker_second_block"),
+                _tf_evidence(
+                    "checker_second_block",
+                    fixed_instr_valid=int(fixed_instr_valid),
+                ),
             )
             if checker_invalid == 1:
                 recorder.mark(
@@ -544,13 +712,19 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
             recorder.mark("two_fetch_delivery", "dual_stall", cycle, _tf_evidence("to_ibuffer_dual_stall"))
 
     backend_redirect = _read(recorder, "io_backend_toFtq_redirect_valid", 0)
-    if backend_redirect == 1 and recent_dual and _tf_read(recorder, "ifu_flush") == 1:
-        recorder.mark(
-            "two_fetch_flush_flow",
-            "backend_redirect_drops_inflight",
-            cycle,
-            _tf_evidence("backend_redirect_dual_inflight"),
-        )
+    if backend_redirect == 1:
+        if recent_dual and _tf_read(recorder, "ifu_flush") == 1:
+            recorder.mark(
+                "two_fetch_flush_flow",
+                "backend_redirect_drops_inflight",
+                cycle,
+                _tf_evidence("backend_redirect_dual_inflight"),
+            )
+        recorder._two_fetch_last_fetch_ptr = None
+        recorder._two_fetch_waiting_refill = False
+        recorder._two_fetch_ftq_pending = False
+        recorder._two_fetch_last_dual_cycle = None
+        recorder._two_fetch_last_waylookup_write_state = None
 
 
 def _classify_block_pos(pc: int) -> str:
@@ -564,18 +738,9 @@ def _classify_block_pos(pc: int) -> str:
 
 def _classify_cfi_kind(instr: int, is_rvc: bool) -> str:
     instr = int(instr) & 0xFFFFFFFF
-    if bool(is_rvc):
-        raw16 = instr & 0xFFFF
-        quadrant = raw16 & 0x3
-        funct3 = (raw16 >> 13) & 0x7
-        if quadrant == 0x1 and funct3 in {0x5, 0x1}:
-            return "jal"
-        if quadrant == 0x1 and funct3 in {0x6, 0x7}:
-            return "branch"
-        if quadrant == 0x2 and funct3 == 0x4 and ((raw16 >> 2) & 0x1F) == 0:
-            return "jalr"
-        return "non_cfi"
-
+    # Frontend cfVec/IBuffer carries the expanded 32-bit instruction even
+    # when bits_isRvc is set.  Decode the expanded opcode; only the width
+    # flag remains compressed metadata.
     opcode = instr & 0x7F
     if opcode == 0x63:
         return "branch"
@@ -602,7 +767,8 @@ def _sample_ifu_cfvec_coverage(recorder, cycle: int, slot: int, pc: int, instr: 
 
     recorder.mark("ifu_instr_size_type", size_bin, cycle, evidence)
     recorder.mark("ifu_fetch_block_position", pos_bin, cycle, evidence)
-    recorder.mark("ifu_cfi_decode_type", cfi_bin, cycle, evidence)
+    if cfi_bin != "jalr":
+        recorder.mark("ifu_cfi_decode_type", cfi_bin, cycle, evidence)
 
     page = int(pc) & ~0xFFF
     page_tail = recorder._uncache_page_tail_requests.get(page)
@@ -624,14 +790,9 @@ def _sample_ifu_cfvec_coverage(recorder, cycle: int, slot: int, pc: int, instr: 
             )
 
     if bool(is_rvc):
-        recorder._ifu_seen_rvc = True
         recorder.mark("ifu_boundary_event", "rvc_start", cycle, evidence)
     else:
-        recorder._ifu_seen_rvi = True
         recorder.mark("ifu_boundary_event", "rvi_start", cycle, evidence)
-
-    if recorder._ifu_seen_rvc and recorder._ifu_seen_rvi:
-        recorder.mark("ifu_instr_size_type", "mixed_rvi_rvc_seen", cycle, evidence)
 
     last = getattr(recorder, "_ifu_last_cfvec", None)
     if last is not None:
@@ -647,12 +808,13 @@ def _sample_ifu_cfvec_coverage(recorder, cycle: int, slot: int, pc: int, instr: 
                     cycle,
                     {**evidence, "last_pc": last_pc, "actual_step": actual_step},
                 )
-                recorder.mark(
-                    "ifu_pc_step_type",
-                    "mixed_no_gap_no_dup",
-                    cycle,
-                    {**evidence, "last_pc": last_pc, "actual_step": actual_step},
-                )
+                if last_is_rvc != bool(is_rvc) and (last_pc & ~0x3F) == (int(pc) & ~0x3F):
+                    recorder.mark(
+                        "ifu_pc_step_type",
+                        "mixed_no_gap_no_dup",
+                        cycle,
+                        {**evidence, "last_pc": last_pc, "actual_step": actual_step},
+                    )
             if not last_is_rvc and actual_step == 4:
                 recorder.mark(
                     "ifu_boundary_event",
@@ -663,18 +825,23 @@ def _sample_ifu_cfvec_coverage(recorder, cycle: int, slot: int, pc: int, instr: 
     recorder._ifu_last_cfvec = {"pc": int(pc), "is_rvc": int(bool(is_rvc)), "slot": int(slot)}
 
 
-def _slot_half_region(slot: int) -> str:
-    return "front" if int(slot) < 4 else "back"
-
-
 def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
     dut = getattr(env, "dut", None)
     if dut is None:
         return
 
+    cycle = int(cycle)
+    skip_until = getattr(recorder, "_ifu_redirect_skip_until_cycle", None)
+    if _read(recorder, "io_backend_toFtq_redirect_valid", 0) == 1:
+        skip_until = max(int(skip_until or cycle), cycle + 1)
+        recorder._ifu_redirect_skip_until_cycle = skip_until
+    if skip_until is not None and cycle <= int(skip_until):
+        recorder._ifu_last_cfvec = None
+        return
+    recorder._ifu_redirect_skip_until_cycle = None
+
     valid_slots: list[int] = []
     cf_entries: list[dict] = []
-    saw_cfi = False
     for slot in range(8):
         base = f"io_backend_cfVec_{slot}_"
         if recorder._read_dut_signal(dut, base + "valid", 0) != 1:
@@ -684,7 +851,6 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
         pc = int(recorder._read_dut_signal(dut, base + "bits_pc", 0))
         instr = int(recorder._read_dut_signal(dut, base + "bits_instr", 0)) & 0xFFFFFFFF
         is_rvc = bool(recorder._read_dut_signal(dut, base + "bits_isRvc", 0))
-        pred_taken = bool(recorder._read_dut_signal(dut, base + "bits_predTaken", 0))
         ftq_flag = recorder._read_dut_signal(dut, base + "bits_ftqPtr_flag", 0)
         ftq_value = recorder._read_dut_signal(dut, base + "bits_ftqPtr_value", 0)
         ex_sum = (
@@ -705,36 +871,13 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
         )
         _sample_ifu_cfvec_coverage(recorder, cycle, slot, pc, instr, is_rvc)
 
-        fetch_path = recorder._infer_fetch_path(env, pc, cycle)
-        recorder.mark("fetch_path_type", fetch_path, cycle, {"pc": pc})
-
-        opcode = instr & 0x7F
-        if not is_rvc and opcode == 0x6F:
-            saw_cfi = True
-            recorder.mark("bpu_basic_pred_type", "direct_jmp", cycle, {"pc": pc, "instr": instr})
-        elif not is_rvc and opcode == 0x63:
-            saw_cfi = True
-            branch_bin = "cond_taken" if pred_taken else "cond_nt"
-            recorder.mark(
-                "bpu_basic_pred_type",
-                branch_bin,
-                cycle,
-                {"pc": pc, "instr": instr, "pred_taken": pred_taken},
-            )
-
-        recorder._sample_exception_slot(dut, base, slot, pc, cycle, fetch_path)
-
-    if valid_slots and not saw_cfi:
-        recorder.mark("bpu_basic_pred_type", "seq_no_cfi", cycle, {"slot_count": len(valid_slots)})
-
-    if valid_slots and recorder._reset_release_cycle is not None and not recorder._boot_recorded:
+    if {entry["is_rvc"] for entry in cf_entries} == {0, 1}:
         recorder.mark(
-            "reset_boot_path",
-            "seen",
+            "ifu_instr_size_type",
+            "mixed_rvi_rvc_seen",
             cycle,
-            {"reset_release_cycle": recorder._reset_release_cycle, "slot_count": len(valid_slots)},
+            {"event": "cfvec_mixed_width_window", "entries": cf_entries},
         )
-        recorder._boot_recorded = True
 
     recent_dual = recorder._two_fetch_last_dual_cycle is not None and (
         int(cycle) - int(recorder._two_fetch_last_dual_cycle)
@@ -763,192 +906,3 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
                     {**evidence, "boundary_slots": [before["slot"], after["slot"]]},
                 )
                 break
-
-
-def sample_ftq_coverage(recorder, env, cycle: int) -> None:
-    if recorder._reset_release_cycle is None:
-        return
-
-    backend_cfg = getattr(getattr(env, "config", None), "backend", None)
-    ftq_size = int(getattr(backend_cfg, "ftq_size", 64) or 64)
-    bpu_flag = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_ftq.bpuPtr_ptrs_0_flag",
-            "Frontend_top.Frontend.ftq.bpuPtr_ptrs_0_flag",
-        ),
-    )
-    bpu_value = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_ftq.bpuPtr_ptrs_0_value",
-            "Frontend_top.Frontend.ftq.bpuPtr_ptrs_0_value",
-        ),
-    )
-    commit_flag = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_ftq.commitPtr_ptrs_0_flag",
-            "Frontend_top.Frontend.ftq.commitPtr_ptrs_0_flag",
-        ),
-    )
-    commit_value = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_ftq.commitPtr_ptrs_0_value",
-            "Frontend_top.Frontend.ftq.commitPtr_ptrs_0_value",
-        ),
-    )
-    if None in (bpu_flag, bpu_value, commit_flag, commit_value):
-        return
-
-    occupancy = recorder._circular_distance(
-        int(bpu_flag),
-        int(bpu_value),
-        int(commit_flag),
-        int(commit_value),
-        int(ftq_size),
-    )
-    evidence = {
-        "event": "ftq_pointer_distance",
-        "occupancy": int(occupancy),
-        "size": int(ftq_size),
-        "bpu_ptr": [int(bpu_flag), int(bpu_value)],
-        "commit_ptr": [int(commit_flag), int(commit_value)],
-    }
-    if occupancy <= 0:
-        recorder._mark_ftq_state("empty", cycle, evidence)
-    if occupancy >= (ftq_size * 3) // 4:
-        recorder._mark_ftq_state("near_full", cycle, evidence)
-    if occupancy >= ftq_size - 1:
-        recorder._mark_ftq_state("full", cycle, evidence)
-
-
-def sample_backend_redirect_coverage(recorder, env, cycle: int) -> None:
-    target = _read(recorder, "io_backend_toFtq_redirect_bits_target", 0)
-    offset = _read(recorder, "io_backend_toFtq_redirect_bits_ftqOffset", 0)
-    evidence = {"event": "backend_redirect", "target_pc": int(target), "ftq_offset": int(offset)}
-
-    recorder.mark(
-        "bpu_backend_redirect_target_align",
-        "word" if (int(target) & 0x3) == 0 else "halfword_only",
-        cycle,
-        evidence,
-    )
-    if (int(target) & 0x1) == 0:
-        recorder.mark("bpu_backend_redirect_target_align", "halfword", cycle, evidence)
-
-    if int(offset) <= 0:
-        offset_bin = "head"
-    elif int(offset) >= 7:
-        offset_bin = "tail"
-    else:
-        offset_bin = "mid"
-    recorder.mark("bpu_backend_redirect_offset", offset_bin, cycle, evidence)
-
-
-def sample_bpu_to_ftq_coverage(recorder, env, cycle: int) -> None:
-    valid = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_bpu_to_ftq_valid",
-            "Frontend_top.Frontend.inner_bpu.io_out_valid",
-        ),
-    )
-    ready = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_bpu_to_ftq_ready",
-            "Frontend_top.Frontend.inner_ftq.io_fromBpu_ready",
-        ),
-    )
-    if valid != 1 or ready != 1:
-        return
-
-    offset = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_bpu_to_ftq_bits_takenCfiOffset",
-            "Frontend_top.Frontend.inner_bpu.io_out_bits_takenCfiOffset",
-        ),
-    )
-    target = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_bpu_to_ftq_bits_target",
-            "Frontend_top.Frontend.inner_bpu.io_out_bits_target",
-        ),
-    )
-    evidence = {"event": "bpu_to_ftq", "offset": offset, "target": target}
-    if offset is not None:
-        if int(offset) <= 0:
-            recorder.mark("bpu_internal_prediction_offset", "head", cycle, evidence)
-        elif int(offset) >= 7:
-            recorder.mark("bpu_internal_prediction_offset", "tail", cycle, evidence)
-        else:
-            recorder.mark("bpu_internal_prediction_offset", "mid", cycle, evidence)
-    if target is not None:
-        recorder.mark(
-            "bpu_internal_prediction_target_align",
-            "word" if (int(target) & 0x3) == 0 else "halfword_only",
-            cycle,
-            evidence,
-        )
-        if (int(target) & 0x1) == 0:
-            recorder.mark("bpu_internal_prediction_target_align", "halfword", cycle, evidence)
-
-
-def sample_bpu_v3_basic_prediction_coverage(recorder, env, cycle: int) -> None:
-    s3_valid = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_bpu.s3_valid",
-            "Frontend_top.Frontend.bpu.s3_valid",
-        ),
-    )
-    if s3_valid != 1:
-        return
-
-    taken = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_bpu.s3_s1Prediction_taken",
-            "Frontend_top.Frontend.bpu.s3_s1Prediction_taken",
-        ),
-    )
-    cfi_pos = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_bpu.s3_prediction_cfiPosition",
-            "Frontend_top.Frontend.bpu.s3_prediction_cfiPosition",
-        ),
-    )
-    if taken is None:
-        return
-
-    evidence = {"event": "bpu_v3_s3", "taken": int(taken)}
-    if int(taken) == 0:
-        recorder.mark("bpu_v3_basic_flow", "no_cfi", cycle, evidence)
-    elif cfi_pos is not None:
-        cfi_slot = int(cfi_pos) >> 2
-        evidence = {**evidence, "cfi_pos": int(cfi_pos), "cfi_slot": cfi_slot}
-        recorder.mark("bpu_v3_basic_flow", "has_cfi", cycle, evidence)
-        recorder.mark("bpu_v3_taken_slot_half", _slot_half_region(cfi_slot), cycle, evidence)
-        recorder.mark(
-            "bpu_v3_cfi_offset_region",
-            "head" if int(cfi_pos) == 0 else "tail" if int(cfi_pos) >= 15 else "mid",
-            cycle,
-            evidence,
-        )
-
-
-def sample_bpu_subpredictor_coverage(recorder, env, cycle: int) -> None:
-    ubtb_hit = _read_first(
-        recorder,
-        (
-            "Frontend_top.Frontend.inner_bpu.ubtb.t1_hit",
-            "Frontend_top.Frontend.bpu.ubtb.t1_hit",
-        ),
-    )
-    if ubtb_hit is not None:
-        recorder.mark("bpu_subpred_ubtb_hit", "hit" if int(ubtb_hit) else "miss", cycle, {"event": "ubtb_t1"})
