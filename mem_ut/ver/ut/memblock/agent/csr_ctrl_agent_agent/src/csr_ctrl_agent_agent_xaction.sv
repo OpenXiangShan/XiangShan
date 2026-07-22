@@ -103,6 +103,9 @@ class csr_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_ooo_to_mem_csrCtrl_hd_misalign_st_enable;
     rand bit io_ooo_to_mem_csrCtrl_mem_trigger_debugMode;
     rand bit io_ooo_to_mem_tlbCsr_priv_debug;
+    extern constraint default_io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable_cons;
+    extern constraint default_io_ooo_to_mem_csrCtrl_hd_misalign_st_enable_cons;
+    extern constraint default_io_ooo_to_mem_tlbCsr_priv_debug_cons;
     extern constraint default_io_ooo_to_mem_tlbCsr_satp_mode_cons;
     extern constraint default_io_ooo_to_mem_tlbCsr_satp_asid_cons;
     extern constraint default_io_ooo_to_mem_tlbCsr_satp_ppn_cons;
@@ -637,6 +640,18 @@ constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_fsIsOff_c
 
 }
 
+constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable_cons{
+    soft io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable == 1'b1;
+}
+
+constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_csrCtrl_hd_misalign_st_enable_cons{
+    soft io_ooo_to_mem_csrCtrl_hd_misalign_st_enable == 1'b1;
+}
+
+constraint csr_ctrl_agent_agent_xaction::default_io_ooo_to_mem_tlbCsr_priv_debug_cons{
+    soft io_ooo_to_mem_tlbCsr_priv_debug == 1'b0;
+}
+
 function csr_ctrl_agent_agent_xaction::new(string name = "csr_ctrl_agent_agent_xaction");
     super.new();
 endfunction:new
@@ -746,6 +761,9 @@ function string csr_ctrl_agent_agent_xaction::psdisplay(string prefix = "");
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_3 = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_3);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp);
     pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_fsIsOff = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_fsIsOff);
+    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_hd_misalign_ld_enable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable);
+    pkt_str = $sformatf("%sio_ooo_to_mem_csrCtrl_hd_misalign_st_enable = 0x%0h ",pkt_str,this.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable);
+    pkt_str = $sformatf("%sio_ooo_to_mem_tlbCsr_priv_debug = 0x%0h ",pkt_str,this.io_ooo_to_mem_tlbCsr_priv_debug);
 
     return pkt_str;
 endfunction:psdisplay
@@ -1190,6 +1208,21 @@ function bit csr_ctrl_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer 
         if(this.io_ooo_to_mem_csrCtrl_fsIsOff!=rhs_.io_ooo_to_mem_csrCtrl_fsIsOff) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_fsIsOff=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_fsIsOff=0x%0h",this.io_ooo_to_mem_csrCtrl_fsIsOff,rhs_.io_ooo_to_mem_csrCtrl_fsIsOff),UVM_NONE)
+        end
+
+        if(this.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable!=rhs_.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable=0x%0h",this.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable,rhs_.io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable),UVM_NONE)
+        end
+
+        if(this.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable!=rhs_.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable=0x%0h while the rhs_.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable=0x%0h",this.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable,rhs_.io_ooo_to_mem_csrCtrl_hd_misalign_st_enable),UVM_NONE)
+        end
+
+        if(this.io_ooo_to_mem_tlbCsr_priv_debug!=rhs_.io_ooo_to_mem_tlbCsr_priv_debug) begin
+            super_result = 0;
+            `uvm_info(get_type_name(),$sformatf("compare fail for this.io_ooo_to_mem_tlbCsr_priv_debug=0x%0h while the rhs_.io_ooo_to_mem_tlbCsr_priv_debug=0x%0h",this.io_ooo_to_mem_tlbCsr_priv_debug,rhs_.io_ooo_to_mem_tlbCsr_priv_debug),UVM_NONE)
         end
 
     end

@@ -39,7 +39,7 @@ L2TLB/PTW responder sequence。当前语义是响应 DTLB/L2TLB 上游 PTW reque
 |---|---|---|---|
 | 使能检查 | `MEMBLOCK_L2TLB_SEQ_EN=1` | 要求 `memblock_sync_pkg::l2tlb_responder_active=1` | 允许 force responder |
 | 采样 request | 当前实现只检查 DUT request valid | 从 vif 采样 `vpn/s2xlate` | lookup key 的 request 部分；尚未严格绑定真实 fire |
-| runtime CSR 同步 | 每次 lookup 前 | 同步 latest CSR snapshot，更新 ASID/VMID/update_seq | lookup key 的 CSR 部分 |
+| runtime CSR 同步 | 每次 lookup 前 | 同步 latest CSR snapshot，更新 ASID/VMID；`update_seq` 仅作为 runtime 语义变化追踪值 | lookup key 的 ASID/VMID 部分 |
 | 查/建 TLB entry | `vpn/s2xlate/asid/vmid` | `common_data_transaction.get_or_create_tlb_entry_by_req()` | lookup key、entry、created |
 | 发送 response | entry 可用 | `fill_dtlb_resp_from_entry()` 填 `L2tlb_agent_agent_xaction` | DUT PTW/L2TLB response |
 | 回填 uid record | response entry 已确定 | 调用 `common_data_transaction::update_uid_tlb_records_by_entry(key, entry)` | 所有匹配 pending uid record 的 PTE 备份完成 |

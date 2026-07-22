@@ -19,6 +19,7 @@ package memblock_sync_pkg;
     bit dispatch_flushsb_waiting_empty = 1'b0;
     int unsigned dispatch_flush_epoch = 0;
     longint unsigned dispatch_service_cycle = 0;
+    int unsigned raw_csr_rearm_epoch = 0;
 
     typedef enum bit [1:0] {
         // 无有效 V2 int-WB 来源，只用于 empty raw 的中性默认值。
@@ -131,6 +132,9 @@ package memblock_sync_pkg;
         bit               priv_spvp;
         bit [1:0]         priv_imode;
         bit [1:0]         priv_dmode;
+        bit               hd_misalign_ld_enable;
+        bit               hd_misalign_st_enable;
+        bit               priv_debug;
         bit               m_pbmt_en;
         bit               h_pbmt_en;
         longint unsigned  cycle;
@@ -256,6 +260,9 @@ package memblock_sync_pkg;
         item.priv_spvp         = 1'b0;
         item.priv_imode        = '0;
         item.priv_dmode        = '0;
+        item.hd_misalign_ld_enable = 1'b1;
+        item.hd_misalign_st_enable = 1'b1;
+        item.priv_debug        = 1'b0;
         item.m_pbmt_en         = 1'b0;
         item.h_pbmt_en         = 1'b0;
         item.cycle             = 0;
@@ -295,6 +302,9 @@ package memblock_sync_pkg;
             prev.priv_spvp         != cur.priv_spvp         ||
             prev.priv_imode        != cur.priv_imode        ||
             prev.priv_dmode        != cur.priv_dmode        ||
+            prev.hd_misalign_ld_enable != cur.hd_misalign_ld_enable ||
+            prev.hd_misalign_st_enable != cur.hd_misalign_st_enable ||
+            prev.priv_debug        != cur.priv_debug        ||
             prev.m_pbmt_en         != cur.m_pbmt_en         ||
             prev.h_pbmt_en         != cur.h_pbmt_en         ||
             (cur.satp_changed      && !prev.satp_changed)   ||
@@ -390,6 +400,7 @@ package memblock_sync_pkg;
         latest_raw_csr = make_empty_raw_csr();
         latest_raw_csr_valid = 1'b0;
         latest_raw_csr_seq = 0;
+        raw_csr_rearm_epoch++;
         dispatch_service_cycle = 0;
     endfunction:clear_raw_monitor_queues
 

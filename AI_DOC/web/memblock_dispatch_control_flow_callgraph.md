@@ -408,11 +408,11 @@ memblock_l2tlb_base_sequence::body()
 drive_l2tlb_loop()
   loop:
     @(l2tlb_vif.drv_cb)
-    send_l2tlb_cycle(idle_count, has_progress)
+    send_l2tlb_cycle(send_count, has_progress)
     if has_progress: idle_count = 0
     else: idle_count++ until idle_count > idle_stop_cycle
 
-send_l2tlb_cycle(idle_count, has_progress)
+send_l2tlb_cycle(send_count, has_progress)
   -> if request_valid()
        sample_request_fields(vpn, s2xlate)
        send ready_tr
@@ -438,11 +438,11 @@ L2TLB agent 代替的是 L2TLB 对上游 DTLB 的 responder 功能，连接点�
 | `memblock_tlb_entry::update_addr_fields(vaddr_i, paddr_i)` | vaddr/paddr | 更新 vpn/ppn/addr_low/index | 派生 L2TLB response 所需字段 | `derive_index_fields()` |
 | `memblock_tlb_entry::apply_csr_state(csr_state, s2xlate_i)` | runtime CSR、s2xlate | 写 asid/vmid/priv/lookup_key | 将当前 MMU CSR 上下文绑定到 TLB 表项 | `make_lookup_key()` |
 | `memblock_tlb_entry::fixup_pte_legal()` | 无 | 修正 PTE bit | 保证 V/R/W/X/A/D 基本合法组合 | 无 |
-| `mmu_csr_runtime_state::update_from_raw_csr(raw)` | raw CSR | 更新 CSR 镜像，变化则 `update_seq++` | 运行时获取真实 DUT CSR，而不是初始静态 CSR | 无 |
+| `mmu_csr_runtime_state::update_from_raw_csr(raw)` | raw CSR | 更新完整 CSR 镜像；只有既有翻译/权限语义字段变化才 `update_seq++` | 运行时获取真实 DUT CSR；snapshot-only 的 misalign/priv_debug 变化不伪造语义版本 | 无 |
 | `mmu_csr_runtime_state::make_lookup_key(vpn, s2xlate)` | vpn、s2xlate | `{vpn,asid,vmid,s2xlate}` | 生成 TLB 关联数组 key | `current_asid()`、`current_vmid()` |
 | `memblock_l2tlb_base_sequence::body()` | 无 | 启动或关闭 L2TLB responder | L2TLB sequence 主入口；确认 plus enable 和 connect takeover 后直接进入 request responder loop | `seq_csr_common::init()`、`configure_from_plus()`、`ensure_context()`、`drive_l2tlb_loop()` |
 | `drive_l2tlb_loop()` | 无 | 多拍采样 request 并发 response | L2TLB responder 主循环；每拍在 `drv_cb` 上调用一次 `send_l2tlb_cycle()`，有 progress 则清 `idle_count`，连续 idle 超过 `idle_stop_cycle` 后退出 | `send_l2tlb_cycle()` |
-| `send_l2tlb_cycle(idle_count, has_progress)` | idle 计数 | 可能发 ready/response xaction | 单次 request-response 闭环；采到 request 后先发 ready，再按 latency 设置 response gap，查/建 TLB 表并发 response | `request_valid()`、`sample_request_fields()`、`create_l2tlb_xaction()`、`send_l2tlb_item()`、`choose_latency()`、`get_or_create_tlb_entry_by_req()`、`fill_dtlb_resp_from_entry()`、`update_uid_tlb_records_by_entry()` |
+| `send_l2tlb_cycle(send_count, has_progress)` | response 序号和本轮 progress | 可能发 ready/response xaction | 单次 request-response 闭环；采到 request 后先发 ready，再按 latency 设置 response gap，查/建 TLB 表并发 response | `request_valid()`、`sample_request_fields()`、`create_l2tlb_xaction()`、`send_l2tlb_item()`、`choose_latency()`、`get_or_create_tlb_entry_by_req()`、`fill_dtlb_resp_from_entry()`、`update_uid_tlb_records_by_entry()` |
 | `send_l2tlb_item(tr)` | L2TLB xaction | 发给 driver | L2TLB sequence 到 agent driver 的统一发送入口 | `start_item()`、`finish_item()` |
 | `configure_from_plus()` | 无 | 设置 enable、latency、idle stop cycle | 从 `seq_csr_common` 读取 L2TLB responder 参数 | `get_l2tlb_*()` |
 | `ensure_context()` | 无 | 获取 `data/monitor_adapter/l2tlb_vif` | 响应 request 前准备公共数据和 interface；vif 不存在则 fatal | `common_data_transaction::get()`、`type_id::create()`、`uvm_config_db::get()` |
@@ -734,7 +734,7 @@ memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor_once
 | `push_raw_ctrl(item)` / `pop_raw_ctrl(item)` | raw ctrl | push/pop | ctrl raw queue |
 | `push_raw_sfence(item)` / `pop_raw_sfence(item)` | raw sfence/hfence | push/pop | sfence/hfence 是离散 TLB invalidation 事件，必须 FIFO 消费，不能像 CSR snapshot 一样覆盖成 latest |
 | `push_raw_csr(item)` / `get_latest_raw_csr(item, seq)` | raw CSR | latest snapshot / seq | CSR runtime latest snapshot |
-| `clear_raw_monitor_queues()` | 无 | 清 raw queues，service cycle 清 0 | test reset/end 清理 |
+| `clear_raw_monitor_queues()` | 无 | 清 raw queues/latest CSR，service cycle 清 0，并递增 `raw_csr_rearm_epoch` | test reset/end 清理；CSR monitor 用 epoch 丢弃本地去重基线并重发首份 snapshot |
 | `tick_dispatch_service_cycle()` | 无 | `dispatch_service_cycle++` | 给 TB 软件服务循环提供周期号 |
 | `get_dispatch_service_cycle()` | 无 | cycle | replay wait/redirect timeout/flushSb timeout 使用 |
 | `raw_monitor_queue_size()` | 无 | raw queue 总长度 | end check 判断残留 |
@@ -1148,12 +1148,12 @@ end_test_check()
 |---|---|---|
 | `main_trans_num` | 主表总行数 | 控制 uid 范围和 end check |
 | `next_uid` | 下一个待分配 uid | 主表生成阶段连续分配 |
-| `main_table_ready` | 主表可被 agent sequence 消费 | LSQENQ/LINTSISSUE/LSQCOMMIT/L2TLB 等待条件 |
+| `main_table_ready` | 主表可被依赖主表的 agent sequence 消费 | LSQENQ/LINTSISSUE/LSQCOMMIT 等主表驱动 sequence 等待；L2TLB responder 不等待该条件 |
 | `main_table_by_uid[]` | uid -> 主表 transaction | 激励静态字段来源 |
 | `status_by_uid[]` | uid -> runtime status | 全流程状态机核心 |
 | `tlb_entry_by_key[]` | `{vpn,asid,vmid,s2xlate}` -> live TLB/PTE entry | L2TLB responder 按 request 和 runtime CSR 查/建 entry |
 | `uid_tlb_record_by_uid[]` | uid -> 发射时 TLB 上下文和 PTE 回填记录 | debug、追溯和 PTW wait replay ready 判断 |
-| `mmu_csr_state` | runtime CSR 镜像 | TLB key 的 ASID/VMID/priv 来源 |
+| `mmu_csr_state` | runtime CSR 镜像，含 snapshot-only 的 misalign enable/priv_debug | TLB key 的 ASID/VMID 来源；其他权限字段供 entry/response 语义使用；snapshot-only 字段当前只保存不消费 |
 | `load_issue_q/sta_issue_q/std_issue_q` | 三个发射队列 | 保存还未成功 fire 的 issue item |
 | `exception_event_q` | replay/redirect/fault 复杂事件队列 | exception handler 消费 |
 | `pending_redirect_drive_q` | 待驱动 redirect payload | redirect sequence 消费 |
@@ -1161,7 +1161,6 @@ end_test_check()
 | `uid_by_active_rob` | active ROB key -> uid | writeback/redirect 反查 uid |
 | `uid_by_lq` | active LQ key -> uid | load writeback/LQ deq 反查 uid |
 | `uid_by_sq` | active SQ key -> uid | store feedback/SQ deq 反查 uid |
-| `uid_by_tlb_key` | TLB lookup key -> uid | L2TLB request 查表 |
 
 ### 13.2 `status_transaction` 状态位
 
@@ -1297,4 +1296,4 @@ data.end_test_check();
 - `exception_event_q` 只由 `exception_redirect_replay_handler::process_pending_events()` 消费；如果未来增加新的复杂 event source，应继续通过 `writeback_status_handler::handle_event()` 或等价分类入口入队，避免新增二次 pop/requeue 路径。
 - `memblock_issue_dispatch_base_sequence::assign_issue_items()` 用 target 内候选数组 index 作为 pipe_idx，要求 scheduler 返回的候选数量不超过对应 pipe 数；这个约束目前由 `select_target_candidates(max_count)` 保证。
 - `report_deq_mismatch()` 在 `MEMBLOCK_LSQ_RESYNC_ON_MISMATCH=1` 时只降级 warning，不做真正 LSQ 状态重同步。该开关更适合作 debug 继续运行，不适合作功能正确性验收。
-- L2TLB lookup 依赖 runtime CSR 的 `update_seq`。CSR monitor capture 如果未开启或 raw CSR 未及时 drain，可能导致 TLB key 使用旧 CSR 镜像。
+- L2TLB lookup key 依赖 runtime CSR 中的 ASID/VMID 和 request 的 `vpn/s2xlate`，不读取 `update_seq`。CSR monitor capture 如果未开启或 raw CSR 未及时 drain，仍可能使 key 使用旧的 ASID/VMID runtime 镜像；`update_seq` 当前只用于语义变化调试和追踪。

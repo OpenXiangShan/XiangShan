@@ -30,6 +30,7 @@
 | `dispatch_flush_epoch` | flush 版本号。 | sequence 发出 xaction 时保存 epoch，driver 若发现 epoch 变化则认为该请求被 redirect 取消。 |
 | `dispatch_service_cycle` | dispatch service loop 的软件周期计数。 | redirect freeze、flushSb 等待、PTW-back replay 等 timeout 均使用该计数，避免直接依赖 `$time`。 |
 | `dispatch_monitor_capture_en` | monitor raw queue 采集开关。 | 只在 dispatch real smoke 期间采集；end check 前关闭并清残留。 |
+| `raw_csr_rearm_epoch` | latest CSR 被软件清空后的重新发布代号。 | `clear_raw_monitor_queues()` 递增；CSR monitor 见变化后清除本地 payload 去重基线。 |
 | `l2tlb_responder_active` | 当前 L2TLB agent 是否接管 DTLB/L2TLB response。 | L2TLB driver idle ready 行为和 L2TLB sequence 启动检查依赖它。语义是上游 DTLB responder，不是 L2Cache/PTW 下游模型。 |
 | `dispatch_real_smoke_active` | 当前是否处于 dispatch real smoke 场景。 | CSR driver 等组件用它选择 dispatch 场景下的默认驱动值。 |
 | `dispatch_flushsb_waiting_empty` | directed flushSb 已发出且正在等待 `sbIsEmpty`。 | ctrl monitor 在等待期间持续采集 `sbIsEmpty` raw ctrl event。 |
@@ -41,7 +42,7 @@
 | `dispatch_raw_int_wb_t` | `io_mem_to_ooo_int_wb_agent_agent_monitor.sv` | V2 `source_kind`、类别内 lane、ROB/exception/metadata、sample flush epoch；STD 只有 ROB value。 | `dispatch_monitor_event_adapter::convert_raw_int_wb()` 补 current snapshot 后转为 LOAD/STA/STD writeback event。 |
 | `dispatch_raw_iq_feedback_t` | `io_mem_to_ooo_iq_feedback_agent_agent_monitor.sv` | IQ feedback hit、STA SQ key、flush/PTW-back state。 | `convert_raw_iq_feedback()` 只转成 `iq_feedback_*` IssueQueue response；STA `hit=0` 额外转 replay；当前严格 V2 路径的 STD feedback 直接 fatal，不作为完成来源。 |
 | `dispatch_raw_ctrl_t` | `io_mem_to_ooo_ctrl_agent_agent_monitor.sv` | LQ/SQ deq 数量和指针、memory violation、`sbIsEmpty` 等。 | deq 交给 `lsq_commit_handler`；memory violation 当前归一成 redirect event；`sbIsEmpty` 解除 flushSb 等待。 |
-| `dispatch_raw_csr_t` | `csr_ctrl_agent_agent_monitor.sv` | MMU CSR 当前 raw 值和权限状态。 | `push_raw_csr()` 覆盖 latest CSR snapshot，`drain_csr_events()` 按 seq 同步到 `mmu_csr_runtime_state`。 |
+| `dispatch_raw_csr_t` | `csr_ctrl_agent_agent_monitor.sv` | MMU CSR 当前 raw 值和权限状态，以及 snapshot-only 的 `hd_misalign_ld/st_enable`、`priv_debug`。 | `push_raw_csr()` 覆盖 latest CSR snapshot，`drain_csr_events()` 按 seq 同步到 `mmu_csr_runtime_state`。 |
 | `dispatch_raw_sfence_t` | `fence_agent_agent_monitor.sv` | `io_ooo_to_mem_sfence_valid/rs1/rs2/addr/id/hv/hg` 和采样 cycle。 | `dispatch_monitor_event_adapter::drain_sfence_events()` 调用 `common_data_transaction::apply_raw_sfence()`，删除命中的 live TLB entry。 |
 
 ## 4. raw queue 与 API
@@ -52,7 +53,7 @@
 | `raw_csr_payload_changed()` | 判断 CSR raw payload 是否真正变化，避免每拍重复推送相同 CSR snapshot。 |
 | `push_raw_*()` | 除 CSR 外，在 `dispatch_monitor_capture_en && valid` 时把 raw event push 到对应 FIFO。CSR 是 runtime 状态，不走 FIFO，`push_raw_csr()` 只覆盖 `latest_raw_csr` 并递增 `latest_raw_csr_seq`。sfence/hfence 也走 FIFO，因为每条 fence 都是一次离散失效事件，不能像 CSR snapshot 那样只保留 latest。monitor 不直接改 status 表，保持采集和状态更新解耦。 |
 | `pop_raw_*()` | FIFO 弹出 raw event，供 `dispatch_monitor_event_adapter` drain。 |
-| `clear_raw_monitor_queues()` | 清空所有 raw queue。testcase reset、flush 收尾或 end check 前用于消除残留事件。 |
+| `clear_raw_monitor_queues()` | 清空所有 raw queue 和 latest CSR，并递增 `raw_csr_rearm_epoch`。testcase reset、flush 收尾或 end check 前用于消除残留事件；epoch 保证 capture 保持开启且 CSR 值未变化时也会重新发布首份 snapshot。 |
 | `tick_dispatch_service_cycle()`、`get_dispatch_service_cycle()` | 维护/读取 service-cycle 计数，供 timeout 和 directed wait 使用。 |
 | `raw_monitor_queue_size()` | 返回所有 raw queue 总残留数量。`end_test_check()` 用它判断 monitor 采集是否还有未消费事件。 |
 
@@ -61,6 +62,8 @@
 - raw queue 只保存 monitor 原始事件，不直接更新 `common_data_transaction` 状态。
 - 所有 raw event 必须经 `dispatch_monitor_event_adapter` 归一化后再进入 writeback/replay/redirect/commit/CSR 处理链路。
 - sfence/hfence raw event 也必须经 adapter 调用公共数据 API；fence monitor 不能直接删除 `tlb_entry_by_key`。
+- `raw_csr_payload_changed()` 比较三个 V2 snapshot-only 字段，保证它们变化时 latest snapshot 能更新；runtime 是否产生语义版本变化由 `mmu_csr_runtime_state` 单独决定。
+- `dispatch_raw_sfence_t` 不保存 `sfence_bits_flushPipe`；该位当前只完成 transaction/driver/monitor 保真，不进入软件失效行为。
 - `io_redirect_*` 是 TB 驱动 DUT 的 input 接口，redirect monitor 不再 push raw event；Self Redirect Filter 已删除/停用。
 - `dispatch_monitor_capture_en` 关闭后，monitor 不应继续 push 新事件；若仍有残留，end check 会 warning 并清空。
 - L2TLB 相关字段只表示 DTLB/L2TLB 上游 responder 是否 active，不表示 L2TLB 到 cache/memory 下游访问模型。

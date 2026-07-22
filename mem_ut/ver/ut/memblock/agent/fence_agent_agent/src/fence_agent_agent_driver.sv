@@ -108,6 +108,7 @@ task fence_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_1) begin
+        vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_flushPipe <= '1;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_valid <= '1;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_rs1 <= '1;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_rs2 <= '1;
@@ -118,6 +119,7 @@ task fence_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_X) begin
+        vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_flushPipe <= 'x;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_valid <= 'x;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_rs1 <= 'x;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_rs2 <= 'x;
@@ -128,6 +130,7 @@ task fence_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_RAND) begin
+        vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_flushPipe <= $urandom;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_valid <= $urandom;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_rs1 <= $urandom;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_rs2 <= $urandom;
@@ -138,6 +141,7 @@ task fence_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 
     end
     else if(drv_mode==tcnt_dec_base::DRV_LST) begin
+        vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_flushPipe <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_valid <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_rs1 <= '0;
         vif.drv_mp.drv_cb.io_ooo_to_mem_sfence_bits_rs2 <= '0;

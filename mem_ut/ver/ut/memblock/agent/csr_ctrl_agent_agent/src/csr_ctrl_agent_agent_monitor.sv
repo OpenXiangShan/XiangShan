@@ -132,10 +132,12 @@ task csr_ctrl_agent_agent_monitor::mon_data();
     memblock_sync_pkg::dispatch_raw_csr_t last_raw_csr;
     bit has_last_raw_csr;
     bit last_capture_en;
+    int unsigned last_raw_csr_rearm_epoch;
 
     last_raw_csr = memblock_sync_pkg::make_empty_raw_csr();
     has_last_raw_csr = 1'b0;
     last_capture_en = 1'b0;
+    last_raw_csr_rearm_epoch = memblock_sync_pkg::raw_csr_rearm_epoch;
     while(1) begin
         @this.vif.mon_mp.mon_cb;
         io_ooo_to_mem_tlbCsr_satp_mode = this.vif.mon_mp.mon_cb.io_ooo_to_mem_tlbCsr_satp_mode;
@@ -317,7 +319,15 @@ task csr_ctrl_agent_agent_monitor::mon_data();
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_3,io_ooo_to_mem_csrCtrl_mem_trigger_tEnableVec_3,1);
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp,io_ooo_to_mem_csrCtrl_mem_trigger_triggerCanRaiseBpExp,1);
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_csrCtrl_fsIsOff,io_ooo_to_mem_csrCtrl_fsIsOff,1);
+            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable,io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable,1);
+            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_csrCtrl_hd_misalign_st_enable,io_ooo_to_mem_csrCtrl_hd_misalign_st_enable,1);
+            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_tlbCsr_priv_debug,io_ooo_to_mem_tlbCsr_priv_debug,1);
 
+        end
+        if (memblock_sync_pkg::raw_csr_rearm_epoch != last_raw_csr_rearm_epoch) begin
+            has_last_raw_csr = 1'b0;
+            last_raw_csr = memblock_sync_pkg::make_empty_raw_csr();
+            last_raw_csr_rearm_epoch = memblock_sync_pkg::raw_csr_rearm_epoch;
         end
         if (memblock_sync_pkg::dispatch_monitor_capture_en != last_capture_en) begin
             has_last_raw_csr = 1'b0;
@@ -351,6 +361,9 @@ task csr_ctrl_agent_agent_monitor::mon_data();
             raw_csr.priv_spvp         = io_ooo_to_mem_tlbCsr_priv_spvp;
             raw_csr.priv_imode        = io_ooo_to_mem_tlbCsr_priv_imode;
             raw_csr.priv_dmode        = io_ooo_to_mem_tlbCsr_priv_dmode;
+            raw_csr.hd_misalign_ld_enable = io_ooo_to_mem_csrCtrl_hd_misalign_ld_enable;
+            raw_csr.hd_misalign_st_enable = io_ooo_to_mem_csrCtrl_hd_misalign_st_enable;
+            raw_csr.priv_debug        = io_ooo_to_mem_tlbCsr_priv_debug;
             raw_csr.m_pbmt_en         = io_ooo_to_mem_tlbCsr_mPBMTE;
             raw_csr.h_pbmt_en         = io_ooo_to_mem_tlbCsr_hPBMTE;
             raw_csr.cycle             = $time;

@@ -58,17 +58,19 @@ task fence_agent_agent_monitor::mon_data();
 
         if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_valid,io_ooo_to_mem_sfence_valid,1);
-            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_rs1,io_ooo_to_mem_sfence_bits_rs1,1);
-            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_rs2,io_ooo_to_mem_sfence_bits_rs2,1);
-            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_addr,io_ooo_to_mem_sfence_bits_addr,50);
-            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_id,io_ooo_to_mem_sfence_bits_id,16);
-            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_hv,io_ooo_to_mem_sfence_bits_hv,1);
-            `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_hg,io_ooo_to_mem_sfence_bits_hg,1);
-
+            if (io_ooo_to_mem_sfence_valid===1'b1) begin
+                `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_rs1,io_ooo_to_mem_sfence_bits_rs1,1);
+                `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_rs2,io_ooo_to_mem_sfence_bits_rs2,1);
+                `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_addr,io_ooo_to_mem_sfence_bits_addr,50);
+                `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_id,io_ooo_to_mem_sfence_bits_id,16);
+                `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_hv,io_ooo_to_mem_sfence_bits_hv,1);
+                `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_hg,io_ooo_to_mem_sfence_bits_hg,1);
+                `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_sfence_bits_flushPipe,io_ooo_to_mem_sfence_bits_flushPipe,1);
+            end
         end
         if(this.vif.rst_n==1'b1 &&
            memblock_sync_pkg::reset_backend_done==1'b1 &&
-           io_ooo_to_mem_sfence_valid==1'b1) begin
+           io_ooo_to_mem_sfence_valid===1'b1) begin
             raw_sfence = memblock_sync_pkg::make_empty_raw_sfence();
             raw_sfence.valid = 1'b1;
             raw_sfence.rs1   = io_ooo_to_mem_sfence_bits_rs1;
