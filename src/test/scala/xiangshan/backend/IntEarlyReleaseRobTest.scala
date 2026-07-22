@@ -10,6 +10,7 @@ import top.DefaultConfig
 import utility.{LogUtilsOptions, LogUtilsOptionsKey, PerfCounterOptions, PerfCounterOptionsKey, XSPerfLevel}
 import xiangshan._
 import xiangshan.backend.Bundles.EnqRobUop
+import xiangshan.backend.fu.FuType
 import xiangshan.backend.rob.RobBundles.RobEntryBundle
 import xiangshan.backend.rob.{RobBundles, RobIntDiffOps, RobIntEROps, RobPtr}
 
@@ -201,6 +202,179 @@ class IntERRobMultiUopRejectProbe(implicit p: Parameters) extends XSModule {
   RobBundles.connectEnq(entry, enq)
   io.entrySrcValid := entry.intER.get.src(0).valid
   io.entryRedefValid := entry.intER.get.redef.valid
+}
+
+class IntERRobWritebackResolveEligibilityProbe(implicit p: Parameters) extends XSModule {
+  require(EnableIntEarlyRegRelease, "probe requires Int ER metadata")
+
+  val io = IO(new Bundle {
+    val fuType = Input(FuType())
+    val commitType = Input(CommitType())
+    val firstUop = Input(Bool())
+    val lastUop = Input(Bool())
+    val numUops = Input(UInt(log2Up(MaxUopSize).W))
+    val numWB = Input(UInt(log2Up(MaxUopSize).W))
+    val hasException = Input(Bool())
+    val exceptionVec = Input(Bool())
+    val singleStep = Input(Bool())
+    val triggerDmode = Input(Bool())
+    val flushPipe = Input(Bool())
+    val replayInst = Input(Bool())
+    val waitForward = Input(Bool())
+    val blockBackward = Input(Bool())
+    val isMove = Input(Bool())
+    val isXSTrap = Input(Bool())
+    val isVset = Input(Bool())
+    val robFlag = Input(Bool())
+    val eligible = Output(Bool())
+    val resolveClass = Output(UInt(IntERWritebackResolveClass.width.W))
+    val storedRobFlag = Output(Bool())
+    val resolved = Output(Bool())
+    val resolvedByWriteback = Output(Bool())
+  })
+
+  private val enq = Wire(new EnqRobUop)
+  private val entry = Wire(new RobEntryBundle)
+
+  enq := 0.U.asTypeOf(enq)
+  entry := 0.U.asTypeOf(entry)
+
+  enq.fuType := io.fuType
+  enq.commitType := io.commitType
+  enq.firstUop := io.firstUop
+  enq.lastUop := io.lastUop
+  enq.numUops := io.numUops
+  enq.numWB := io.numWB
+  enq.hasException := io.hasException
+  enq.exceptionVec(ExceptionNO.illegalInstr) := io.exceptionVec
+  enq.singleStep := io.singleStep
+  enq.trigger := Mux(io.triggerDmode, TriggerAction.DebugMode, TriggerAction.None)
+  enq.flushPipe := io.flushPipe
+  enq.replayInst := io.replayInst
+  enq.waitForward := io.waitForward
+  enq.blockBackward := io.blockBackward
+  enq.isMove := io.isMove
+  enq.isXSTrap := io.isXSTrap
+  enq.isVset := io.isVset
+  enq.robIdx.flag := io.robFlag
+  enq.robIdx.value := 5.U
+
+  RobBundles.connectEnq(entry, enq)
+
+  io.eligible := entry.intER.get.writebackResolveEligible
+  io.resolveClass := entry.intER.get.writebackResolveClass
+  io.storedRobFlag := entry.intER.get.writebackResolveRobFlag
+  io.resolved := entry.intER.get.resolved
+  io.resolvedByWriteback := entry.intER.get.resolvedByWriteback
+}
+
+class IntERRobWritebackResolveStatusProbe(implicit p: Parameters) extends XSModule {
+  require(EnableIntEarlyRegRelease, "probe requires Int ER metadata")
+
+  private val wbPorts = 4
+  private val wbCountWidth = log2Ceil(wbPorts + 1)
+
+  val io = IO(new Bundle {
+    val entryValid = Input(Bool())
+    val entryEligible = Input(Bool())
+    val entryResolved = Input(Bool())
+    val entryNeedFlush = Input(Bool())
+    val entryUopNum = Input(UInt(log2Up(MaxUopSize + 1).W))
+    val entryRobFlag = Input(Bool())
+    val entryRobIdx = Input(UInt(log2Ceil(RobSize).W))
+    val acceptedValid = Input(Vec(wbPorts, Bool()))
+    val acceptedRobFlag = Input(Vec(wbPorts, Bool()))
+    val acceptedRobIdx = Input(Vec(wbPorts, UInt(log2Ceil(RobSize).W)))
+    val writebackNumsValid = Input(Vec(wbPorts, Bool()))
+    val writebackNums = Input(Vec(wbPorts, UInt(wbCountWidth.W)))
+    val rawValid = Input(Vec(wbPorts, Bool()))
+    val rawRobFlag = Input(Vec(wbPorts, Bool()))
+    val rawRobIdx = Input(Vec(wbPorts, UInt(log2Ceil(RobSize).W)))
+    val sameCycleNeedFlush = Input(Bool())
+    val redirectValid = Input(Bool())
+    val redirectRobFlag = Input(Bool())
+    val redirectRobIdx = Input(UInt(log2Ceil(RobSize).W))
+    val redirectFlushSelf = Input(Bool())
+    val flushOutValid = Input(Bool())
+    val recoveryActive = Input(Bool())
+    val sameCycleEnqueueReuse = Input(Bool())
+    val finalCandidate = Output(Bool())
+    val resolved = Output(Bool())
+    val blockedNeedFlush = Output(Bool())
+    val blockedRedirectRecovery = Output(Bool())
+    val identityReuseRaw = Output(Bool())
+  })
+
+  private val entry = Wire(new RobEntryBundle)
+  private val entryRobIdx = Wire(new RobPtr)
+  private val acceptedValid = Wire(Vec(wbPorts, Bool()))
+  private val acceptedRobIdx = Wire(Vec(wbPorts, new RobPtr))
+  private val rawValid = Wire(Vec(wbPorts, Bool()))
+  private val rawRobIdx = Wire(Vec(wbPorts, new RobPtr))
+  private val writebackNums = Wire(Vec(wbPorts, ValidIO(UInt(wbCountWidth.W))))
+  private val redirect = Wire(Valid(new Redirect))
+
+  entry := 0.U.asTypeOf(entry)
+  entry.valid := io.entryValid
+  entry.needFlush := io.entryNeedFlush
+  entry.uopNum := io.entryUopNum
+  entry.intER.get.writebackResolveEligible := io.entryEligible
+  entry.intER.get.resolved := io.entryResolved
+
+  entryRobIdx.flag := io.entryRobFlag
+  entryRobIdx.value := io.entryRobIdx
+
+  acceptedValid := 0.U.asTypeOf(acceptedValid)
+  acceptedRobIdx := 0.U.asTypeOf(acceptedRobIdx)
+  rawValid := 0.U.asTypeOf(rawValid)
+  rawRobIdx := 0.U.asTypeOf(rawRobIdx)
+  for (port <- 0 until wbPorts) {
+    acceptedValid(port) := io.acceptedValid(port)
+    acceptedRobIdx(port).flag := io.acceptedRobFlag(port)
+    acceptedRobIdx(port).value := io.acceptedRobIdx(port)
+    rawValid(port) := io.rawValid(port)
+    rawRobIdx(port).flag := io.rawRobFlag(port)
+    rawRobIdx(port).value := io.rawRobIdx(port)
+    writebackNums(port).valid := io.writebackNumsValid(port)
+    writebackNums(port).bits := io.writebackNums(port)
+  }
+
+  redirect.valid := io.redirectValid
+  redirect.bits := 0.U.asTypeOf(redirect.bits)
+  redirect.bits.robIdx.flag := io.redirectRobFlag
+  redirect.bits.robIdx.value := io.redirectRobIdx
+  redirect.bits.level := Mux(io.redirectFlushSelf, RedirectLevel.flush, RedirectLevel.flushAfter)
+
+  private val status = RobIntEROps.writebackResolveStatusFromRobIdx(
+    entry = entry,
+    entryRobIdx = entryRobIdx,
+    acceptedValid = acceptedValid.toSeq,
+    acceptedRobIdx = acceptedRobIdx.toSeq,
+    writebackNums = writebackNums.toSeq,
+    rawValid = rawValid.toSeq,
+    rawRobIdx = rawRobIdx.toSeq,
+    sameCycleNeedFlush = io.sameCycleNeedFlush,
+    redirect = redirect,
+    flushOutValid = io.flushOutValid,
+    recoveryActive = io.recoveryActive,
+    sameCycleEnqueueReuse = io.sameCycleEnqueueReuse
+  )
+
+  io.finalCandidate := status.finalCandidate
+  io.resolved := status.resolved
+  io.blockedNeedFlush := status.blockedNeedFlush
+  io.blockedRedirectRecovery := status.blockedRedirectRecovery
+  io.identityReuseRaw := status.identityReuseRaw
+}
+
+class IntERRobInterruptDrainProbe(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle {
+    val rawIntrEnable = Input(Bool())
+    val hasOutstandingGuard = Input(Bool())
+    val intrEnable = Output(Bool())
+  })
+
+  io.intrEnable := RobIntEROps.gateInterruptForOutstandingGuard(io.rawIntrEnable, io.hasOutstandingGuard)
 }
 
 class IntERRobDirectDiffShadowProbe(implicit p: Parameters) extends XSModule {
@@ -641,6 +815,91 @@ class IntEarlyReleaseRobTest extends AnyFlatSpec with Matchers with ChiselSim {
     dut.io.redirect.bits.level.poke(flushSelf.B)
   }
 
+  private def driveWritebackResolveEligibility(
+    dut: IntERRobWritebackResolveEligibilityProbe,
+    fuType: UInt = FuType.alu.U,
+    commitType: UInt = CommitType.NORMAL,
+    firstUop: Boolean = true,
+    lastUop: Boolean = true,
+    numUops: Int = 1,
+    numWB: Int = 1,
+    hasException: Boolean = false,
+    exceptionVec: Boolean = false,
+    singleStep: Boolean = false,
+    triggerDmode: Boolean = false,
+    flushPipe: Boolean = false,
+    replayInst: Boolean = false,
+    waitForward: Boolean = false,
+    blockBackward: Boolean = false,
+    isMove: Boolean = false,
+    isXSTrap: Boolean = false,
+    isVset: Boolean = false,
+    robFlag: Boolean = false
+  ): Unit = {
+    dut.io.fuType.poke(fuType)
+    dut.io.commitType.poke(commitType)
+    dut.io.firstUop.poke(firstUop.B)
+    dut.io.lastUop.poke(lastUop.B)
+    dut.io.numUops.poke(numUops.U)
+    dut.io.numWB.poke(numWB.U)
+    dut.io.hasException.poke(hasException.B)
+    dut.io.exceptionVec.poke(exceptionVec.B)
+    dut.io.singleStep.poke(singleStep.B)
+    dut.io.triggerDmode.poke(triggerDmode.B)
+    dut.io.flushPipe.poke(flushPipe.B)
+    dut.io.replayInst.poke(replayInst.B)
+    dut.io.waitForward.poke(waitForward.B)
+    dut.io.blockBackward.poke(blockBackward.B)
+    dut.io.isMove.poke(isMove.B)
+    dut.io.isXSTrap.poke(isXSTrap.B)
+    dut.io.isVset.poke(isVset.B)
+    dut.io.robFlag.poke(robFlag.B)
+  }
+
+  private def clearWritebackResolveStatus(dut: IntERRobWritebackResolveStatusProbe): Unit = {
+    dut.io.entryValid.poke(true.B)
+    dut.io.entryEligible.poke(true.B)
+    dut.io.entryResolved.poke(false.B)
+    dut.io.entryNeedFlush.poke(false.B)
+    dut.io.entryUopNum.poke(1.U)
+    dut.io.entryRobFlag.poke(false.B)
+    dut.io.entryRobIdx.poke(5.U)
+    for (port <- 0 until dut.io.acceptedValid.length) {
+      dut.io.acceptedValid(port).poke(false.B)
+      dut.io.acceptedRobFlag(port).poke(false.B)
+      dut.io.acceptedRobIdx(port).poke(0.U)
+      dut.io.writebackNumsValid(port).poke(false.B)
+      dut.io.writebackNums(port).poke(0.U)
+      dut.io.rawValid(port).poke(false.B)
+      dut.io.rawRobFlag(port).poke(false.B)
+      dut.io.rawRobIdx(port).poke(0.U)
+    }
+    dut.io.sameCycleNeedFlush.poke(false.B)
+    dut.io.redirectValid.poke(false.B)
+    dut.io.redirectRobFlag.poke(false.B)
+    dut.io.redirectRobIdx.poke(0.U)
+    dut.io.redirectFlushSelf.poke(false.B)
+    dut.io.flushOutValid.poke(false.B)
+    dut.io.recoveryActive.poke(false.B)
+    dut.io.sameCycleEnqueueReuse.poke(false.B)
+  }
+
+  private def driveAcceptedWriteback(
+    dut: IntERRobWritebackResolveStatusProbe,
+    port: Int = 0,
+    robIdx: Int = 5,
+    robFlag: Boolean = false,
+    count: Int = 1,
+    countValid: Boolean = true,
+    acceptedValid: Boolean = true
+  ): Unit = {
+    dut.io.acceptedValid(port).poke(acceptedValid.B)
+    dut.io.acceptedRobFlag(port).poke(robFlag.B)
+    dut.io.acceptedRobIdx(port).poke(robIdx.U)
+    dut.io.writebackNumsValid(port).poke(countValid.B)
+    dut.io.writebackNums(port).poke(count.U)
+  }
+
   it should "fail fast on out-of-range readDone source indexes before stored-source lookup" in {
     val robBundlesSource = sourceText("src/main/scala/xiangshan/backend/rob/RobBundles.scala")
 
@@ -648,6 +907,208 @@ class IntEarlyReleaseRobTest extends AnyFlatSpec with Matchers with ChiselSim {
     robBundlesSource should include("val safeSrcIdx = Mux(srcIdxInRange, srcEvent.srcIdx, 0.U)")
     robBundlesSource should include("val stored = robEntry.intER.get.src(safeSrcIdx)")
     robBundlesSource should not include "val stored = robEntry.intER.get.src(srcEvent.srcIdx)"
+  }
+
+  it should "mark only whitelisted single normal integer entries writeback-resolve eligible" in {
+    val config = configWith(IntEarlyReleaseParams(
+      enable = true,
+      trackEntries = 2,
+      enableOtherIntegerWritebackResolve = true
+    ))
+
+    simulate(new IntERRobWritebackResolveEligibilityProbe()(config)) { dut =>
+      Seq(
+        FuType.alu.U -> IntERWritebackResolveClass.alu,
+        FuType.mul.U -> IntERWritebackResolveClass.mul,
+        FuType.div.U -> IntERWritebackResolveClass.div,
+        FuType.bku.U -> IntERWritebackResolveClass.other,
+        FuType.i2f.U -> IntERWritebackResolveClass.other,
+        FuType.i2v.U -> IntERWritebackResolveClass.other
+      ).foreach { case (fuType, resolveClass) =>
+        driveWritebackResolveEligibility(dut, fuType = fuType, robFlag = true)
+        dut.io.eligible.expect(true.B)
+        dut.io.resolveClass.expect(resolveClass)
+        dut.io.storedRobFlag.expect(true.B)
+        dut.io.resolved.expect(false.B)
+        dut.io.resolvedByWriteback.expect(false.B)
+      }
+
+      Seq(
+        FuType.brh.U,
+        FuType.jmp.U,
+        FuType.ldu.U,
+        FuType.stu.U,
+        FuType.mou.U,
+        FuType.csr.U,
+        FuType.fence.U,
+        FuType.vsetiwi.U,
+        FuType.vsetiwf.U,
+        FuType.vsetfwf.U,
+        FuType.falu.U,
+        FuType.vipu.U
+      ).foreach { fuType =>
+        driveWritebackResolveEligibility(dut, fuType = fuType)
+        dut.io.eligible.expect(false.B)
+      }
+    }
+  }
+
+  it should "keep the writeback-resolve path behind its independent config knob" in {
+    val config = configWith(IntEarlyReleaseParams(enable = true, trackEntries = 2))
+
+    simulate(new IntERRobWritebackResolveEligibilityProbe()(config)) { dut =>
+      driveWritebackResolveEligibility(dut, fuType = FuType.alu.U)
+      dut.io.eligible.expect(false.B)
+    }
+  }
+
+  it should "reject special, exceptional, and non-single-entry writeback-resolve cases" in {
+    val config = configWith(IntEarlyReleaseParams(
+      enable = true,
+      trackEntries = 2,
+      enableOtherIntegerWritebackResolve = true
+    ))
+
+    simulate(new IntERRobWritebackResolveEligibilityProbe()(config)) { dut =>
+      driveWritebackResolveEligibility(dut, firstUop = false)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, lastUop = false)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, numUops = 2)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, numWB = 0)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, numWB = 2)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, commitType = CommitType.LOAD)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, hasException = true)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, exceptionVec = true)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, singleStep = true)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, triggerDmode = true)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, flushPipe = true)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, replayInst = true)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, waitForward = true)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, blockBackward = true)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, isMove = true)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, isXSTrap = true)
+      dut.io.eligible.expect(false.B)
+      driveWritebackResolveEligibility(dut, isVset = true)
+      dut.io.eligible.expect(false.B)
+    }
+  }
+
+  it should "resolve only final accepted writeback with full ROB identity" in {
+    val config = configWith(IntEarlyReleaseParams(
+      enable = true,
+      trackEntries = 2,
+      enableOtherIntegerWritebackResolve = true
+    ))
+
+    simulate(new IntERRobWritebackResolveStatusProbe()(config)) { dut =>
+      clearWritebackResolveStatus(dut)
+      driveAcceptedWriteback(dut)
+      dut.io.finalCandidate.expect(true.B)
+      dut.io.resolved.expect(true.B)
+      dut.io.blockedNeedFlush.expect(false.B)
+      dut.io.blockedRedirectRecovery.expect(false.B)
+
+      clearWritebackResolveStatus(dut)
+      driveAcceptedWriteback(dut, countValid = false)
+      dut.io.finalCandidate.expect(false.B)
+      dut.io.resolved.expect(false.B)
+
+      clearWritebackResolveStatus(dut)
+      driveAcceptedWriteback(dut, count = 2)
+      dut.io.finalCandidate.expect(false.B)
+      dut.io.resolved.expect(false.B)
+
+      clearWritebackResolveStatus(dut)
+      driveAcceptedWriteback(dut, robFlag = true)
+      dut.io.finalCandidate.expect(false.B)
+      dut.io.resolved.expect(false.B)
+    }
+  }
+
+  it should "classify writeback-resolve blockers and stale generation diagnostics" in {
+    val config = configWith(IntEarlyReleaseParams(
+      enable = true,
+      trackEntries = 2,
+      enableOtherIntegerWritebackResolve = true
+    ))
+
+    simulate(new IntERRobWritebackResolveStatusProbe()(config)) { dut =>
+      clearWritebackResolveStatus(dut)
+      driveAcceptedWriteback(dut)
+      dut.io.sameCycleNeedFlush.poke(true.B)
+      dut.io.finalCandidate.expect(true.B)
+      dut.io.resolved.expect(false.B)
+      dut.io.blockedNeedFlush.expect(true.B)
+      dut.io.blockedRedirectRecovery.expect(false.B)
+
+      clearWritebackResolveStatus(dut)
+      driveAcceptedWriteback(dut)
+      dut.io.recoveryActive.poke(true.B)
+      dut.io.finalCandidate.expect(true.B)
+      dut.io.resolved.expect(false.B)
+      dut.io.blockedNeedFlush.expect(false.B)
+      dut.io.blockedRedirectRecovery.expect(true.B)
+
+      clearWritebackResolveStatus(dut)
+      driveAcceptedWriteback(dut)
+      dut.io.redirectValid.poke(true.B)
+      dut.io.redirectRobIdx.poke(4.U)
+      dut.io.redirectFlushSelf.poke(false.B)
+      dut.io.finalCandidate.expect(true.B)
+      dut.io.resolved.expect(false.B)
+      dut.io.blockedRedirectRecovery.expect(true.B)
+
+      clearWritebackResolveStatus(dut)
+      driveAcceptedWriteback(dut)
+      dut.io.sameCycleEnqueueReuse.poke(true.B)
+      dut.io.finalCandidate.expect(true.B)
+      dut.io.resolved.expect(false.B)
+      dut.io.blockedRedirectRecovery.expect(true.B)
+
+      clearWritebackResolveStatus(dut)
+      dut.io.rawValid(0).poke(true.B)
+      dut.io.rawRobFlag(0).poke(true.B)
+      dut.io.rawRobIdx(0).poke(5.U)
+      dut.io.identityReuseRaw.expect(true.B)
+      dut.io.finalCandidate.expect(false.B)
+      dut.io.resolved.expect(false.B)
+    }
+  }
+
+  it should "defer interrupt acceptance while an ER guard is outstanding" in {
+    val config = configWith(IntEarlyReleaseParams(
+      enable = true,
+      trackEntries = 2,
+      enableOtherIntegerWritebackResolve = true
+    ))
+
+    simulate(new IntERRobInterruptDrainProbe()(config)) { dut =>
+      dut.io.rawIntrEnable.poke(false.B)
+      dut.io.hasOutstandingGuard.poke(false.B)
+      dut.io.intrEnable.expect(false.B)
+
+      dut.io.rawIntrEnable.poke(true.B)
+      dut.io.hasOutstandingGuard.poke(false.B)
+      dut.io.intrEnable.expect(true.B)
+
+      dut.io.rawIntrEnable.poke(true.B)
+      dut.io.hasOutstandingGuard.poke(true.B)
+      dut.io.intrEnable.expect(false.B)
+    }
   }
 
   it should "emit one validated decrement and suppress later duplicates" in {

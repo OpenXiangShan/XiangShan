@@ -101,6 +101,15 @@ object IntERSTBlockReason {
   )
 }
 
+object IntERWritebackResolveClass {
+  val width = 2
+
+  def alu = 0.U(width.W)
+  def mul = 1.U(width.W)
+  def div = 2.U(width.W)
+  def other = 3.U(width.W)
+}
+
 object IntERBundleHelper {
   def sourceIndexWidth(numSrc: Int): Int = log2Ceil(numSrc max 2)
 
@@ -177,8 +186,20 @@ class IntERRobUopMeta(implicit p: Parameters) extends XSBundle {
   val dest = new IntERDestTrack
   val redef = new IntERRedefTrack
   val instClass = UInt(IntERInstClass.width.W)
+  val writebackResolveEligible = Bool()
+  val writebackResolveRobFlag = Bool()
+  val writebackResolveClass = UInt(IntERWritebackResolveClass.width.W)
   val resolved = Bool()
+  val resolvedByWriteback = Bool()
   val guardEmitted = Bool()
+}
+
+class IntERWritebackResolveStatus extends Bundle {
+  val finalCandidate = Bool()
+  val resolved = Bool()
+  val blockedNeedFlush = Bool()
+  val blockedRedirectRecovery = Bool()
+  val identityReuseRaw = Bool()
 }
 
 class IntERLocalUopMeta(val numSrc: Int)(implicit p: Parameters) extends XSBundle {

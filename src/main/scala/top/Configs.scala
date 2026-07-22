@@ -591,7 +591,8 @@ private class WithIntEarlyReleaseFunctional extends Config((site, here, up) => {
       stWalkWidth = 4,
       enableForwardReadDone = true,
       enableBypassReadDone = true,
-      enableBypass2ReadDone = false
+      enableBypass2ReadDone = false,
+      enableOtherIntegerWritebackResolve = true
     )
   ))
 })
@@ -601,7 +602,8 @@ private class WithIntEarlyReleaseDisabled extends Config((site, here, up) => {
     p.copy(
       intEarlyRelease = p.intEarlyRelease.copy(
         enable = false,
-        observeOnly = true
+        observeOnly = true,
+        enableOtherIntegerWritebackResolve = false
       )
     )
   }

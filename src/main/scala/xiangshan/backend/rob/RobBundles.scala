@@ -25,8 +25,8 @@ import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import utils._
 import xiangshan._
-import xiangshan.backend.{BackendParams, IntERFallbackReason, IntERInstClass, IntERRobReadDoneStatus, IntERRobUopMeta, IntERSrcValueReadDone, IntERSTGuardDec}
-import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx, EnqRobUop}
+import xiangshan.backend.{BackendParams, IntERFallbackReason, IntERInstClass, IntERRobReadDoneStatus, IntERRobUopMeta, IntERSrcValueReadDone, IntERSTGuardDec, IntERWritebackResolveClass, IntERWritebackResolveStatus}
+import xiangshan.backend.Bundles.{DynInst, ExceptionInfo, ExuOutput, UopIdx, EnqRobUop, WriteBackRobBundle}
 import xiangshan.backend.fu.{FuConfig, FuType}
 import xiangshan.frontend.ftq.FtqPtr
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
@@ -139,7 +139,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val dirtyVs = Bool()
   }
 
-  def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop): Unit = {
+  def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop)(implicit p: Parameters): Unit = {
     robEntry.wflags := robEnq.wfflags
     robEntry.commitType := robEnq.commitType
     robEntry.ftqIdx := robEnq.ftqPtr
@@ -193,7 +193,11 @@ object RobBundles extends HasCircularQueuePtrHelper {
       meta.dest := Mux(robLocalIntERSafe, robEnq.intER.get.dest, 0.U.asTypeOf(meta.dest))
       meta.redef := Mux(robLocalIntERSafe, robEnq.intER.get.redef, 0.U.asTypeOf(meta.redef))
       meta.instClass := Mux(robLocalIntERSafe, RobIntEROps.classifyInst(robEnq.fuType, robEnq.commitType), IntERInstClass.other)
+      meta.writebackResolveEligible := RobIntEROps.writebackResolveEligible(robEnq)
+      meta.writebackResolveRobFlag := robEnq.robIdx.flag
+      meta.writebackResolveClass := RobIntEROps.writebackResolveClass(robEnq.fuType)
       meta.resolved := false.B
+      meta.resolvedByWriteback := false.B
       meta.guardEmitted := false.B
     }
     robEntry.topdownIssued.foreach(_ := false.B)
@@ -485,6 +489,117 @@ object RobIntEROps {
       FuType.isFArith(fuType) -> IntERInstClass.otherFp,
       FuType.isVall(fuType) -> IntERInstClass.otherVector
     ))
+  }
+
+  def isWritebackResolveFu(fuType: UInt): Bool = {
+    FuType.FuTypeOrR(fuType, Seq(FuType.alu, FuType.mul, FuType.div, FuType.bku, FuType.i2f, FuType.i2v))
+  }
+
+  def writebackResolveClass(fuType: UInt): UInt = {
+    MuxCase(IntERWritebackResolveClass.other, Seq(
+      FuType.FuTypeOrR(fuType, Seq(FuType.alu)) -> IntERWritebackResolveClass.alu,
+      FuType.FuTypeOrR(fuType, Seq(FuType.mul)) -> IntERWritebackResolveClass.mul,
+      FuType.FuTypeOrR(fuType, Seq(FuType.div)) -> IntERWritebackResolveClass.div
+    ))
+  }
+
+  def writebackResolveEligible(robEnq: EnqRobUop)(implicit p: Parameters): Bool = {
+    val singleEntry = robEnq.firstUop && robEnq.lastUop && robEnq.numUops === 1.U
+    p(XSCoreParamsKey).intEarlyRelease.enableOtherIntegerWritebackResolve.B &&
+      singleEntry &&
+      robEnq.numWB === 1.U &&
+      robEnq.commitType === CommitType.NORMAL &&
+      isWritebackResolveFu(robEnq.fuType) &&
+      !robEnq.hasException &&
+      !robEnq.exceptionVec.orR &&
+      !robEnq.singleStep &&
+      !TriggerAction.isDmode(robEnq.trigger) &&
+      !robEnq.flushPipe &&
+      !robEnq.replayInst &&
+      !robEnq.waitForward &&
+      !robEnq.blockBackward &&
+      !robEnq.isMove &&
+      !robEnq.isXSTrap &&
+      !robEnq.isVset &&
+      !FuType.isVset(robEnq.fuType)
+  }
+
+  def writebackResolveStatus(
+    entry: RobBundles.RobEntryBundle,
+    entryRobIdx: RobPtr,
+    acceptedWriteback: Seq[ValidIO[WriteBackRobBundle]],
+    writebackNums: Seq[ValidIO[UInt]],
+    rawWriteback: Seq[ValidIO[WriteBackRobBundle]],
+    sameCycleNeedFlush: Bool,
+    redirect: Valid[Redirect],
+    flushOutValid: Bool,
+    recoveryActive: Bool,
+    sameCycleEnqueueReuse: Bool
+  )(implicit p: Parameters): IntERWritebackResolveStatus = {
+    require(acceptedWriteback.length == writebackNums.length, "ROB ER WB resolve accepted writeback/count widths must match")
+
+    writebackResolveStatusFromRobIdx(
+      entry = entry,
+      entryRobIdx = entryRobIdx,
+      acceptedValid = acceptedWriteback.map(_.valid),
+      acceptedRobIdx = acceptedWriteback.map(_.bits.robIdx),
+      writebackNums = writebackNums,
+      rawValid = rawWriteback.map(_.valid),
+      rawRobIdx = rawWriteback.map(_.bits.robIdx),
+      sameCycleNeedFlush = sameCycleNeedFlush,
+      redirect = redirect,
+      flushOutValid = flushOutValid,
+      recoveryActive = recoveryActive,
+      sameCycleEnqueueReuse = sameCycleEnqueueReuse
+    )
+  }
+
+  def writebackResolveStatusFromRobIdx(
+    entry: RobBundles.RobEntryBundle,
+    entryRobIdx: RobPtr,
+    acceptedValid: Seq[Bool],
+    acceptedRobIdx: Seq[RobPtr],
+    writebackNums: Seq[ValidIO[UInt]],
+    rawValid: Seq[Bool],
+    rawRobIdx: Seq[RobPtr],
+    sameCycleNeedFlush: Bool,
+    redirect: Valid[Redirect],
+    flushOutValid: Bool,
+    recoveryActive: Bool,
+    sameCycleEnqueueReuse: Bool
+  )(implicit p: Parameters): IntERWritebackResolveStatus = {
+    require(acceptedValid.length == acceptedRobIdx.length, "ROB ER WB resolve accepted valid/idx widths must match")
+    require(acceptedValid.length == writebackNums.length, "ROB ER WB resolve accepted writeback/count widths must match")
+    require(rawValid.length == rawRobIdx.length, "ROB ER WB resolve raw valid/idx widths must match")
+
+    val status = Wire(new IntERWritebackResolveStatus)
+    status := 0.U.asTypeOf(status)
+
+    val acceptedMatches = acceptedValid.zip(acceptedRobIdx).zip(writebackNums).map { case ((valid, robIdx), count) =>
+      count.valid && valid && robIdx === entryRobIdx
+    }
+    val acceptedMatch = VecInit(acceptedMatches).asUInt.orR
+    val acceptedCount = Mux1H(acceptedMatches, writebackNums.map(_.bits))
+    val finalAcceptedWriteback = acceptedMatch && acceptedCount =/= 0.U && entry.uopNum === acceptedCount
+
+    status.finalCandidate := entry.valid &&
+      entry.intER.get.writebackResolveEligible &&
+      !entry.intER.get.resolved &&
+      finalAcceptedWriteback
+    status.blockedNeedFlush := status.finalCandidate && (entry.needFlush || sameCycleNeedFlush)
+    status.blockedRedirectRecovery := status.finalCandidate &&
+      !status.blockedNeedFlush &&
+      (entryRobIdx.needFlush(redirect) || flushOutValid || recoveryActive || sameCycleEnqueueReuse)
+    status.resolved := status.finalCandidate && !status.blockedNeedFlush && !status.blockedRedirectRecovery
+    status.identityReuseRaw := VecInit(rawValid.zip(rawRobIdx).map { case (valid, robIdx) =>
+      valid && robIdx.value === entryRobIdx.value && robIdx =/= entryRobIdx
+    }).asUInt.orR
+
+    status
+  }
+
+  def gateInterruptForOutstandingGuard(rawIntrEnable: Bool, hasOutstandingGuard: Bool): Bool = {
+    rawIntrEnable && !hasOutstandingGuard
   }
 
   def assertGuardEmittedRedefNotFlushed(

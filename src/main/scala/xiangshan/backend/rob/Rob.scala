@@ -35,7 +35,7 @@ import utils._
 import xiangshan._
 import xiangshan.PerfDebugInfo
 import xiangshan.backend.GPAMemEntry
-import xiangshan.backend.{BackendParams, IntCommitWriteback, IntERInstClass, IntERRobReadDoneStatus, IntERSquashSource, IntERSrcValueReadDone, IntERSTBlockReason, IntERSTGuardDec, RatToVecExcpMod, RegWriteFromRab, VecExcpInfo}
+import xiangshan.backend.{BackendParams, IntCommitWriteback, IntERInstClass, IntERRobReadDoneStatus, IntERSquashSource, IntERSrcValueReadDone, IntERSTBlockReason, IntERSTGuardDec, IntERWritebackResolveClass, IntERWritebackResolveStatus, RatToVecExcpMod, RegWriteFromRab, VecExcpInfo}
 import xiangshan.backend.Bundles._
 import xiangshan.backend.decode.isa.bitfield.XSInstBitFields
 import xiangshan.backend.fu.{FuConfig, FuType}
@@ -191,6 +191,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val intERReadDoneStatus = Option.when(EnableIntEarlyRegRelease)(
     Wire(Vec(IntERReadDoneWidth, new IntERRobReadDoneStatus))
   )
+  val intERWritebackResolveStatus = Option.when(EnableIntEarlyRegRelease)(
+    Wire(Vec(RobSize, new IntERWritebackResolveStatus))
+  )
   val intERSpecCursor = Option.when(EnableIntEarlyRegRelease)(RegInit(0.U.asTypeOf(new RobPtr)))
   if (EnableIntEarlyRegRelease) {
     RobIntEROps.validateReadDoneEvents(
@@ -213,6 +216,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     intERSTGuardEmittedMarks.get := 0.U.asTypeOf(intERSTGuardEmittedMarks.get)
     intERSafeToCross.get := 0.U.asTypeOf(intERSafeToCross.get)
     intERCommitSafeNow.get := 0.U.asTypeOf(intERCommitSafeNow.get)
+    intERWritebackResolveStatus.get := 0.U.asTypeOf(intERWritebackResolveStatus.get)
   }
   // pointers
   // For enqueue ptr, we don't duplicate it since only enqueue needs it.
@@ -651,7 +655,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqPtrEntryValid = deqPtrEntry.commit_v
   val deqHasFlushed = RegInit(false.B)
   val intrBitSetReg = RegNext(io.csr.intrBitSet)
-  val intrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interrupt_safe && !deqHasFlushed
+  val hasOutstandingIntERGuard = if (EnableIntEarlyRegRelease) {
+    VecInit(robEntries.map(entry =>
+      entry.valid && entry.intER.get.redef.valid && entry.intER.get.guardEmitted
+    )).asUInt.orR
+  } else {
+    false.B
+  }
+  val rawIntrEnable = intrBitSetReg && !hasWaitForward && deqPtrEntry.interrupt_safe && !deqHasFlushed
+  val intrEnable = if (EnableIntEarlyRegRelease) {
+    RobIntEROps.gateInterruptForOutstandingGuard(rawIntrEnable, hasOutstandingIntERGuard)
+  } else {
+    rawIntrEnable
+  }
   val deqNeedFlush = deqPtrEntry.needFlush && deqPtrEntry.commit_v && deqPtrEntry.commit_w
   val deqHitExceptionGenState = exceptionDataRead.valid && exceptionDataRead.bits.robIdx === deqPtr
   val deqNeedFlushAndHitExceptionGenState = deqNeedFlush && deqHitExceptionGenState
@@ -845,6 +861,34 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   if (EnableIntEarlyRegRelease) {
     for (entry <- 0 until RobSize) {
+      val entryRobIdx = Wire(new RobPtr)
+      entryRobIdx.flag := robEntries(entry).intER.get.writebackResolveRobFlag
+      entryRobIdx.value := entry.U
+      val sameCycleNeedFlushWriteback = if (exceptionWBs.nonEmpty) {
+        VecInit(exceptionWBs.zip(io.writebackNeedFlush).map { case (wb, needFlush) =>
+          wb.valid && wb.bits.robIdx === entryRobIdx && needFlush
+        }).asUInt.orR
+      } else {
+        false.B
+      }
+      val sameCycleEnqueueReuse = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === entry.U)).map {
+        case (valid, hit) => valid && hit
+      }).asUInt.orR
+      intERWritebackResolveStatus.get(entry) := RobIntEROps.writebackResolveStatus(
+        entry = robEntries(entry),
+        entryRobIdx = entryRobIdx,
+        acceptedWriteback = io.writeback.toSeq,
+        writebackNums = io.writebackNums.toSeq,
+        rawWriteback = io.exuWriteback.toSeq,
+        sameCycleNeedFlush = sameCycleNeedFlushWriteback,
+        redirect = io.redirect,
+        flushOutValid = io.flushOut.valid,
+        recoveryActive = state =/= s_idle,
+        sameCycleEnqueueReuse = sameCycleEnqueueReuse
+      )
+    }
+
+    for (entry <- 0 until RobSize) {
       intERCommitSafeNow.get(entry) := io.commits.isCommit &&
         VecInit(io.commits.commitValid.zip(deqPtrVec.map(_.value === entry.U)).map {
           case (valid, hit) => valid && hit
@@ -970,6 +1014,52 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
         XSPerfAccumulate(s"int_er_rob_st_blocker_class_${className}_reason_${reasonName}_cycle", classHit && stBlockReason === reasonValue)
       }
     }
+    val wbResolveStatus = intERWritebackResolveStatus.get
+    val wbResolveFinalCandidateCount = PopCount(wbResolveStatus.map(_.finalCandidate))
+    val wbResolvedCount = PopCount(wbResolveStatus.map(_.resolved))
+    val wbResolveBlockedNeedFlushCount = PopCount(wbResolveStatus.map(_.blockedNeedFlush))
+    val wbResolveBlockedRedirectRecoveryCount = PopCount(wbResolveStatus.map(_.blockedRedirectRecovery))
+    val wbResolveAluCount = PopCount(robEntries.zip(wbResolveStatus).map {
+      case (entry, status) => status.resolved && entry.intER.get.writebackResolveClass === IntERWritebackResolveClass.alu
+    })
+    val wbResolveMulCount = PopCount(robEntries.zip(wbResolveStatus).map {
+      case (entry, status) => status.resolved && entry.intER.get.writebackResolveClass === IntERWritebackResolveClass.mul
+    })
+    val wbResolveDivCount = PopCount(robEntries.zip(wbResolveStatus).map {
+      case (entry, status) => status.resolved && entry.intER.get.writebackResolveClass === IntERWritebackResolveClass.div
+    })
+    val wbResolveOtherCount = PopCount(robEntries.zip(wbResolveStatus).map {
+      case (entry, status) => status.resolved && entry.intER.get.writebackResolveClass === IntERWritebackResolveClass.other
+    })
+    val wbResolveEligibleEnqCount = PopCount(io.enq.req.zip(canEnqueue).map {
+      case (req, valid) => valid && RobIntEROps.writebackResolveEligible(req.bits)
+    })
+    val outstandingGuardCount = PopCount(robEntries.map(entry =>
+      entry.valid && entry.intER.get.redef.valid && entry.intER.get.guardEmitted
+    ))
+    val interruptDeferredForGuardCycle = rawIntrEnable && hasOutstandingIntERGuard
+    val interruptDeferredForGuardLast = RegNext(interruptDeferredForGuardCycle, false.B)
+
+    XSPerfAccumulate("int_er_rob_wb_resolve_eligible_enq", wbResolveEligibleEnqCount)
+    XSPerfAccumulate("int_er_rob_wb_resolve_final_candidate", wbResolveFinalCandidateCount)
+    XSPerfAccumulate("int_er_rob_resolved_by_writeback", wbResolvedCount)
+    XSPerfAccumulate("int_er_rob_resolved_by_writeback_alu", wbResolveAluCount)
+    XSPerfAccumulate("int_er_rob_resolved_by_writeback_mul", wbResolveMulCount)
+    XSPerfAccumulate("int_er_rob_resolved_by_writeback_div", wbResolveDivCount)
+    XSPerfAccumulate("int_er_rob_resolved_by_writeback_other", wbResolveOtherCount)
+    XSPerfAccumulate("int_er_rob_wb_resolve_blocked_need_flush", wbResolveBlockedNeedFlushCount)
+    XSPerfAccumulate("int_er_rob_wb_resolve_blocked_redirect_recovery", wbResolveBlockedRedirectRecoveryCount)
+    XSPerfAccumulate("int_er_rob_wb_resolve_rejected_identity_reuse_raw", PopCount(wbResolveStatus.map(_.identityReuseRaw)))
+    XSPerfAccumulate("int_er_rob_wb_resolved_entry_cycle", PopCount(robEntries.map(entry =>
+      entry.valid && entry.intER.get.resolvedByWriteback
+    )))
+    XSPerfAccumulate("int_er_rob_interrupt_deferred_for_guard_cycle", interruptDeferredForGuardCycle)
+    XSPerfAccumulate("int_er_rob_interrupt_deferred_for_guard_episode", interruptDeferredForGuardCycle && !interruptDeferredForGuardLast)
+    XSPerfAccumulate("int_er_rob_outstanding_guard_sum", outstandingGuardCount)
+
+    assert(wbResolvedCount === wbResolveAluCount +& wbResolveMulCount +& wbResolveDivCount +& wbResolveOtherCount)
+    assert(wbResolveFinalCandidateCount === wbResolvedCount +& wbResolveBlockedNeedFlushCount +& wbResolveBlockedRedirectRecoveryCount)
+    assert(!intrEnable || !hasOutstandingIntERGuard, "ROB ER interrupt accepted with outstanding guard")
 
     when(io.redirect.valid || io.flushOut.valid || state === s_walk) {
       intERSpecCursor.get := deqPtr
@@ -980,7 +1070,10 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       val enqHit = VecInit(canEnqueue.zip(allocatePtrVec.map(_.value === entry.U)).map {
         case (valid, hit) => valid && hit
       }).asUInt.orR
-      when(intERCommitSafeNow.get(entry) && !enqHit) {
+      when(wbResolveStatus(entry).resolved && !enqHit) {
+        robEntries(entry).intER.get.resolved := true.B
+        robEntries(entry).intER.get.resolvedByWriteback := true.B
+      }.elsewhen(intERCommitSafeNow.get(entry) && !enqHit) {
         robEntries(entry).intER.get.resolved := true.B
       }
       when(intERSTGuardEmittedMarks.get(entry) && !enqHit) {

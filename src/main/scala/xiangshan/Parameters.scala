@@ -58,7 +58,8 @@ case class IntEarlyReleaseParams(
   enableForwardReadDone: Boolean = false,
   enableBypassReadDone: Boolean = false,
   enableBypass2ReadDone: Boolean = false,
-  enableWakeupAlignedReadDoneCounters: Boolean = true
+  enableWakeupAlignedReadDoneCounters: Boolean = true,
+  enableOtherIntegerWritebackResolve: Boolean = false
 ) {
   private def isPowerOf2(x: Int): Boolean = x > 0 && ((x & (x - 1)) == 0)
 
@@ -693,6 +694,7 @@ trait HasXSParameter {
   def IntEREnableBypassReadDone = intEarlyRelease.enableBypassReadDone
   def IntEREnableBypass2ReadDone = intEarlyRelease.enableBypass2ReadDone
   def IntEREnableWakeupAlignedReadDoneCounters = intEarlyRelease.enableWakeupAlignedReadDoneCounters
+  def IntEREnableOtherIntegerWritebackResolve = intEarlyRelease.enableOtherIntegerWritebackResolve
   def IntEREnableDirectDiffShadowXRF = EnableIntEarlyRegRelease && IntEREnableDiffShadowXRF
   def IntERMaxIntSrc = backendParams.numIntRegSrc
   def IntERLogicalSrcWidth = backendParams.numSrc

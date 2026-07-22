@@ -1485,25 +1485,34 @@ class IntEarlyReleaseBundlesTest extends AnyFlatSpec with Matchers with ChiselSi
     defaultParams.trackEntries shouldBe 128
     defaultParams.earlyFreeWidth shouldBe 8
     defaultParams.stWalkWidth shouldBe 4
+    defaultParams.enableOtherIntegerWritebackResolve shouldBe true
 
     mediumParams.enable shouldBe true
     mediumParams.observeOnly shouldBe false
+    mediumParams.enableOtherIntegerWritebackResolve shouldBe true
 
     disabledParams.enable shouldBe false
     disabledParams.observeOnly shouldBe true
     disabledParams.trackEntries shouldBe defaultParams.trackEntries
     disabledParams.earlyFreeWidth shouldBe defaultParams.earlyFreeWidth
     disabledParams.stWalkWidth shouldBe defaultParams.stWalkWidth
+    disabledParams.enableOtherIntegerWritebackResolve shouldBe false
 
     functionalParams.enable shouldBe true
     functionalParams.observeOnly shouldBe false
     functionalParams.trackEntries shouldBe 128
     functionalParams.earlyFreeWidth shouldBe 8
+    functionalParams.enableOtherIntegerWritebackResolve shouldBe true
 
     minimalFunctionalParams.enable shouldBe true
     minimalFunctionalParams.observeOnly shouldBe false
     minimalFunctionalParams.trackEntries shouldBe 128
     minimalFunctionalParams.earlyFreeWidth shouldBe 8
+    minimalFunctionalParams.enableOtherIntegerWritebackResolve shouldBe true
+  }
+
+  it should "keep ordinary integer writeback resolve disabled in bare IntEarlyReleaseParams" in {
+    IntEarlyReleaseParams().enableOtherIntegerWritebackResolve shouldBe false
   }
 
   it should "not expose unimplemented Int ER configuration knobs" in {
@@ -1797,6 +1806,33 @@ class IntEarlyReleaseBundlesTest extends AnyFlatSpec with Matchers with ChiselSi
     }
     robSource should include("int_er_rob_st_blocker_class_${className}_cycle")
     robSource should include("int_er_rob_st_blocker_class_${className}_reason_${reasonName}_cycle")
+  }
+
+  it should "expose stable ROB writeback-resolve perf counter names and closure assertions" in {
+    val robSource = sourceText("src/main/scala/xiangshan/backend/rob/Rob.scala")
+
+    Seq(
+      "int_er_rob_wb_resolve_eligible_enq",
+      "int_er_rob_wb_resolve_final_candidate",
+      "int_er_rob_resolved_by_writeback",
+      "int_er_rob_resolved_by_writeback_alu",
+      "int_er_rob_resolved_by_writeback_mul",
+      "int_er_rob_resolved_by_writeback_div",
+      "int_er_rob_resolved_by_writeback_other",
+      "int_er_rob_wb_resolve_blocked_need_flush",
+      "int_er_rob_wb_resolve_blocked_redirect_recovery",
+      "int_er_rob_wb_resolve_rejected_identity_reuse_raw",
+      "int_er_rob_wb_resolved_entry_cycle",
+      "int_er_rob_interrupt_deferred_for_guard_cycle",
+      "int_er_rob_interrupt_deferred_for_guard_episode",
+      "int_er_rob_outstanding_guard_sum"
+    ).foreach { counterName =>
+      robSource should include(s"""XSPerfAccumulate("$counterName"""")
+    }
+
+    robSource should include("assert(wbResolvedCount ===")
+    robSource should include("assert(wbResolveFinalCandidateCount ===")
+    robSource should include("ROB ER interrupt accepted with outstanding guard")
   }
 
   it should "expose stable UCA occupancy perf counter names" in {

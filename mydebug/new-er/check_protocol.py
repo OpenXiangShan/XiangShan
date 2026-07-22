@@ -9,6 +9,11 @@ README = ROOT / "README.md"
 
 REQUIRED_SNIPPETS = [
     "Read History First",
+    "task tag",
+    "all prior records for that task tag",
+    "Do not bulk-read records from other tasks",
+    "Prior records for this task",
+    "Cross-task relevance",
     "Debug Record Location",
     "Hit-Good-Trap Rule",
     "Wave And Log Capture",

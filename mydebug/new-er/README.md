@@ -7,11 +7,13 @@ This directory stores system-level debug history for the int-only early register
 Before starting any new debug round:
 
 1. Read this `README.md`.
-2. List and read all prior records in `mydebug/new-er/records/`.
-3. Reuse prior symptom notes, waveform conclusions, and rejected hypotheses before adding a new hypothesis.
-4. If no prior records exist, write `Prior records: none` in the new record.
+2. Determine the stable task tag for the current implementation task.
+3. List and read all prior records for that task tag in `mydebug/new-er/records/`.
+4. Reuse task-scoped symptom notes, waveform conclusions, and rejected hypotheses before adding a new hypothesis.
+5. Do not bulk-read records from other tasks. Read a cross-task record only when a current-task record explicitly references it and explains why it is relevant to the current symptom.
+6. If no prior records exist for the current task tag, write `Prior records for this task: none` in the new record.
 
-Do not debug a system-level failure from memory only. The first action must be reading the saved history under this directory.
+Do not debug a system-level failure from memory only. The first action must be reading the complete history for the current task, not the complete history of every IntER task.
 
 ## Debug Record Location
 
@@ -21,9 +23,9 @@ Use this layout:
 mydebug/new-er/
   README.md
   records/
-    YYYYMMDD-HHMMSS-<short-test-name>.md
+    YYYYMMDD-HHMMSS-<task-tag>-<short-test-name>.md
   artifacts/
-    YYYYMMDD-HHMMSS-<short-test-name>/
+    YYYYMMDD-HHMMSS-<task-tag>-<short-test-name>/
       command.txt
       config.txt
       stdout.log
@@ -32,7 +34,7 @@ mydebug/new-er/
       counters/
 ```
 
-Record filenames must be stable and sortable. Use the local timestamp of the debug run and a short testcase name, for example `20260622-013000-riscv-tests-add.md`.
+Record filenames must be stable, sortable, and task-scoped. Use the local timestamp, a stable task tag shared by every round of the same implementation task, and a short testcase name, for example `20260622-013000-int-er-writeback-resolve-riscv-tests-add.md`.
 
 ## Hit-Good-Trap Rule
 
@@ -73,13 +75,17 @@ Copy this template into each new record under `mydebug/new-er/records/`.
 
 - Date:
 - Owner:
+- Task tag:
 - Testcase:
 - Result:
 - Final trap line:
 
 ## Prior History
 
+- Prior records for this task:
 - Prior records read:
+- Cross-task records read (optional):
+- Cross-task relevance (required when used):
 - Reused observations:
 - Rejected old hypotheses:
 
@@ -168,4 +174,4 @@ When applicable, inspect these areas before declaring a root cause:
 
 ## Completion Rule
 
-A debug round is not complete until the record contains command, configuration, stdout, stderr, wave or explicit no-wave reason, symptom, hypothesis, root cause or `unknown`, fix or `none yet`, validation, and next action.
+A debug round is not complete until the record contains a stable task tag, the complete task-scoped prior-record list, command, configuration, stdout, stderr, wave or explicit no-wave reason, symptom, hypothesis, root cause or `unknown`, fix or `none yet`, validation, and next action. Any cross-task record must include an explicit relevance statement.
