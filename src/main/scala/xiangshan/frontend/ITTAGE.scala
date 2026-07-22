@@ -596,7 +596,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   s2_tageTarget := Mux1H(Seq(
     (provided && !(providerNull && altProvided), providerCatTarget),
     (altProvided && providerNull, altproviderCatTarget),
-    (!provided, baseTarget)
+    (!provided, baseTarget(VAddrBits - 1, 0))
   ))
   s2_provided          := provided
   s2_provider          := providerInfo.tableIdx
@@ -614,7 +614,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     fp & s3_tageTarget <-
       io.out.s3.full_pred zip s3_tageTarget_dup
   )
-    yield fp.jalr_target := s3_tageTarget
+    yield fp.jalr_target := SignExt(s3_tageTarget, VAddrBits + 1)
 
   resp_meta.provider.valid    := s3_provided
   resp_meta.provider.bits     := s3_provider
