@@ -95,7 +95,7 @@ RVC 扩展和非法压缩指令处理由 S3 的 `RvcExpander` 完成：合法 C 
 
 PredChecker 的目的不是完整重新预测，而是利用 IFU 已知的指令属性，尽早发现能确定的方向/范围错误：jal、jalr、ret 未被预测 taken，非 CFI 被预测 taken，预测位置落在无效槽位。Stage1 选最早 fault、裁剪 `fixedTwoFetchRange` 并修正 taken；Stage2/WB 打拍输出 `checkerRedirect`、错误位置、目标、属性和性能故障类型。
 
-历史错误类型从 V2 的五类扩展为 V3 的 `JalFault/JalrFault/RetFault/NotCfiFault/InvalidTaken/TargetFault`（另有 `NoFault`，共 7 个枚举值）。设计折中是：范围/方向错误可触发 remask/redirect；direct target mismatch 可以记账，但不一定单独重定向，以避免拉长关键路径和重复纠正预测器。
+历史错误类型从 V2 的五类扩展为 V3 的 `JalFault/JalrFault/RetFault/NotCfiFault/InvalidTaken/TargetFault`（另有 `NoFault`，共 7 个枚举值）。这是枚举层面的历史契约；当前实现实际可产生哪些 fault、`TargetFault` 是否仍只保留为枚举，必须按 active RTL 复核。设计折中是：范围/方向错误可触发 remask/redirect；direct target mismatch 可以记账，但不一定单独重定向，以避免拉长关键路径和重复纠正预测器。
 
 ### 4.2 关键边界
 
@@ -177,7 +177,7 @@ PredChecker 的目的不是完整重新预测，而是利用 IFU 已知的指令
 
 - MMIO/NC 入口分流、`isFirstInstr` 旁路、`ifuStall` 对 `toUncache.valid` 的抑制，以及 `mmioCommitRead.mmioFtqPtr = ftqIdx - 1`。
 - `fromUncache.fire` 与 `resp.valid` 在历史快照中相差一拍；scoreboard 不能按同拍响应建模。
-- TileLink `corrupt/denied` 应映射到明确的 `ExceptionType`，而 `incomplete` 表示 `crossPage`/拼接状态而不是异常源；跨页半条 RVI、MMIO/非 MMIO 交错和 redirect/flush 竞争仍需单列。
+- 在旧快照接口中，TileLink `corrupt/denied` 应映射到明确的 `ExceptionType`，而 `incomplete` 表示 `crossPage`/拼接状态而不是异常源；当前接口可能改用 `needResend` 等命名，必须按 active RTL 复核。跨页半条 RVI、MMIO/非 MMIO 交错和 redirect/flush 竞争仍需单列。
 - MMIO commit 查询有请求/响应延迟，不能用上一请求或更早请求的 commit 结果放行当前请求。
 
 ### 7.3 验证建议
@@ -190,7 +190,7 @@ PredChecker 的目的不是完整重新预测，而是利用 IFU 已知的指令
 ### 7.4 当前 RTL 复核点
 
 - 历史 V3-refresh 快照的 `WaitLastCommit` 有 FIXME/直通，`mmioCommitRead` 可观察但未真正决定停留；确认当前版本是否已经接入 oldest-commit。
-- 核对 `resp.valid` 延迟、`corrupt/denied` 映射、`crossPage` 锁存和 flush 清理，防止 stale data/exception 泄漏到下一请求。
+- 核对 `resp.valid` 延迟、`corrupt/denied` 映射、`crossPage`/`needResend` 锁存和 flush 清理，防止 stale data/exception 泄漏到下一请求；同时确认 active IFU 路径对跨页返回采用的 redirect/重取策略。
 - 复核跨页拼接所在层级和 two-fetch 同时含 uncache 的限制；不能把旧设计图的“上层拼接”当作接口保证。
 
 ## 8. FrontendTrigger
