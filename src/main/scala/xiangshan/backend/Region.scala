@@ -195,6 +195,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     imp.io.s1Resp.get.head.failed := feedBack.valid && !feedBack.bits.hit
     imp.io.s1Resp.get.head.finalSuccess := feedBack.valid && feedBack.bits.hit
     imp.io.s1Resp.get.head.fuType := 0.U
+    imp.io.s1Resp.get.head.isFmac := false.B
     imp.io.s1Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
     imp.io.s1Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
   }
