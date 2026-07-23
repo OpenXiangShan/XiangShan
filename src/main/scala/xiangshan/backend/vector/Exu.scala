@@ -426,6 +426,7 @@ object Exu {
 
     def <#=:(sink: Func.InCtrl): Unit = {
       sink.opcode                      := this.ctrl.opcode
+      sink.isReverse                   := this.ctrl.isReverse
       sink.latency                     := this.ctrl.latency
       sink.robIdx                      := this.ctrl.robIdx
       sink.uopIdx                      := this.ctrl.uopIdx
@@ -522,6 +523,7 @@ object Exu {
 
     val fuType    = FuType()
     val opcode    = Opcode()
+    val isReverse = Bool()
     val latency   = Latency()
 
     val gpWen     = Option.when(param.needGpWen)(Bool())
@@ -553,6 +555,7 @@ object Exu {
       this.uopIdx := deq.uopIdx
       this.fuType := deq.fuType
       this.opcode := deq.opcode
+      this.isReverse := deq.isReverse
       this.latency := deq.latency
 
       this.gpWen.foreach(_ := deq.gpWen)

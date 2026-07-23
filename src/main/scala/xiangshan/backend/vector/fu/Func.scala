@@ -93,6 +93,7 @@ object Func {
 
   class InCtrl(cfg: VecFuConfig)(implicit p: Parameters) extends XSBundle {
     val opcode    = FuOpType()
+    val isReverse = Bool()
     val latency   = Latency()
     val robIdx    = new RobPtr
     val uopIdx    = UopIdx()

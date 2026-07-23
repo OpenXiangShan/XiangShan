@@ -72,8 +72,8 @@ class VFAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
     case (mod, i) =>
       mod.io.fire               := op3Fire_s0 || ex(0).valid
       mod.io.in.opcode          := Mux(op3Fire_s0, op3Context_s0.ctrlOpcode,            fuOpType                               )
-      mod.io.in.fpA             := Mux(op3Fire_s0, op3Context_s0.mul(i).fpA,            vs2Split.io.outVec64b(i)               )
-      mod.io.in.fpB             := Mux(op3Fire_s0, op3Context_s0.addend(i),             vs1Split.io.outVec64b(i)               )
+      mod.io.in.fpA             := Mux(op3Fire_s0, op3Context_s0.mul(i).fpA,            Mux(ex0ctrl.isReverse, vs1Split.io.outVec64b(i), vs2Split.io.outVec64b(i)))
+      mod.io.in.fpB             := Mux(op3Fire_s0, op3Context_s0.addend(i),             Mux(ex0ctrl.isReverse, vs2Split.io.outVec64b(i), vs1Split.io.outVec64b(i)))
       mod.io.in.fpAAppend       := Mux(op3Fire_s0, op3Context_s0.mul(i).fpAAppend,      0.U                                    )
       mod.io.in.roundMode       := Mux(op3Fire_s0, op3Context_s0.frm,                   frm                                    )
       mod.io.in.inCtrlFromVFMul := Mux(op3Fire_s0, op3Context_s0.mul(i).FMULToFADDCtrl, 0.U.asTypeOf(new VFMul2VFALUCtrlBundle))
