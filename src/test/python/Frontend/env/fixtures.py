@@ -407,9 +407,23 @@ def create_dut(request):
     return dut
 
 
+def _suppress_dut_finalizer_for_batch_run(dut) -> None:
+    """Keep VCS from calling $finish when pytest releases a function-scoped DUT."""
+    if not _is_enabled("TB_SKIP_DUT_FINISH", default="0"):
+        return
+    dut_type = type(dut)
+    if getattr(dut_type, "_frontend_batch_finalizer_suppressed", False):
+        return
+    if "__del__" not in vars(dut_type):
+        return
+    dut_type.__del__ = lambda _dut: None
+    dut_type._frontend_batch_finalizer_suppressed = True
+
+
 @pytest.fixture(scope="function")
 def dut(request):
     dut = create_dut(request)
+    _suppress_dut_finalizer_for_batch_run(dut)
     coverage = _coverage_path(request, _data_dir())
     dut.InitClock("clock")
     yield dut
@@ -429,7 +443,8 @@ def dut(request):
             handler.close()
         except Exception:
             logger.exception("dut case log handler teardown failed")
-    dut.Finish()
+    if not _is_enabled("TB_SKIP_DUT_FINISH", default="0"):
+        dut.Finish()
 
 
 @pytest.fixture(scope="function")
