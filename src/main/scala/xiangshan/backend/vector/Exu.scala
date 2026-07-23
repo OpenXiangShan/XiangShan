@@ -157,9 +157,11 @@ class Exu(val param: ExuParam)(implicit val p: Parameters) extends Module with H
       out.bits.toRob.vxsat.foreach {
         case x =>
           val vxsat: Vec[UInt] = Mux1H(
-            fus.flatMap(_.out.ex.lift(i)).map(
-              validIO => validIO.valid -> validIO.bits.data.vec.get.vxsatE8.getOrElse(0.U.asTypeOf(Vec(vlenb, Vxsat())))
-            )
+            fus.flatMap(_.out.ex.lift(i)).map {
+              validIO =>
+                val vxsatWen = ex(i).bits.ctrl.vxsatWen.getOrElse(false.B)
+                (validIO.valid && vxsatWen) -> validIO.bits.data.vec.get.vxsatE8.getOrElse(0.U.asTypeOf(Vec(vlenb, Vxsat())))
+            }
           ).suggestName(s"ex${i}_vxsat")
 
           x := Mux1H(mgus(i).out.activeEn, vxsat)
