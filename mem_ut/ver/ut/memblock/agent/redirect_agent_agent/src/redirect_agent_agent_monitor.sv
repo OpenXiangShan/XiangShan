@@ -55,6 +55,20 @@ task redirect_agent_agent_monitor::mon_data();
             `TCNT_CHECK_SIG_XZ(io_redirect_bits_robIdx_value,io_redirect_bits_robIdx_value,`MEMBLOCK_DUT_ROB_VALUE_W);
 
         end
+        if(this.vif.rst_n===1'b1 && memblock_sync_pkg::reset_backend_done===1'b1 &&
+           io_redirect_valid===1'b1) begin
+            memblock_sync_pkg::dispatch_raw_redirect_anchor_t anchor;
+
+            // 中文伪代码：只记录顶层 redirect 真正被 monitor sample 到的 payload/序号，
+            // 不调用 recovery handler，也不写 status/pass/fail/terminal。
+            anchor.valid = 1'b1;
+            anchor.level = io_redirect_bits_level;
+            anchor.rob_flag = io_redirect_bits_robIdx_flag;
+            anchor.rob_value = io_redirect_bits_robIdx_value;
+            anchor.sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+            anchor.cycle = $time;
+            memblock_sync_pkg::push_raw_redirect_anchor(anchor);
+        end
         // io_redirect_* is a DUT input driven by redirect sequences. Do not
         // feed monitor samples back into dispatch recovery; recovery is sourced
         // from DUT output events such as io_mem_to_ooo_ctrl.memoryViolation.

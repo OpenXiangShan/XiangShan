@@ -123,6 +123,35 @@
 `ifndef MEMBLOCK_DUT_HAS_SQ_DEQ_PTR
     `define MEMBLOCK_DUT_HAS_SQ_DEQ_PTR 0
 `endif
+
+// V2 StoreQueue 的 sqDeq 是 entry count，不是 SQ pointer。count width 必须
+// 与 EnsbufferWidth 独立派生；cancel count width 则分别由 LQ/SQ 容量派生。
+`ifndef MEMBLOCK_DUT_ENSBUFFER_WIDTH
+    `define MEMBLOCK_DUT_ENSBUFFER_WIDTH 2
+`endif
+`define MEMBLOCK_SQ_DEQ_COUNT_W ($clog2(`MEMBLOCK_DUT_ENSBUFFER_WIDTH + 1))
+`define MEMBLOCK_LQ_CANCEL_COUNT_W ($clog2(`MEMBLOCK_DUT_LQ_SIZE + 1))
+`define MEMBLOCK_SQ_CANCEL_COUNT_W ($clog2(`MEMBLOCK_DUT_SQ_SIZE + 1))
+
+// Redirect cancel 对账使用编译期 RTL/monitor 时序合同，不提供 runtime plus 镜像。
+// 中文注释：以下值描述 profile 的结构/采样合同；sequence 只能读取派生结果，不能
+// 在运行期重新解释或建立同义 plus 参数。
+`ifndef MEMBLOCK_DUT_REDIRECT_TO_LSQ_LATENCY
+    `define MEMBLOCK_DUT_REDIRECT_TO_LSQ_LATENCY 1
+`endif
+`ifndef MEMBLOCK_DUT_CANCEL_OUTPUT_LATENCY
+    `define MEMBLOCK_DUT_CANCEL_OUTPUT_LATENCY 2
+`endif
+`ifndef MEMBLOCK_TB_CANCEL_MONITOR_SAMPLE_OFFSET
+    `define MEMBLOCK_TB_CANCEL_MONITOR_SAMPLE_OFFSET 1
+`endif
+`define MEMBLOCK_CANCEL_SNAPSHOT_OBSERVE_LATENCY \
+    (`MEMBLOCK_DUT_CANCEL_OUTPUT_LATENCY + `MEMBLOCK_TB_CANCEL_MONITOR_SAMPLE_OFFSET)
+`define MEMBLOCK_CANCEL_RECORD_MAX_DEPTH \
+    (`MEMBLOCK_CANCEL_SNAPSHOT_OBSERVE_LATENCY + 2)
+`define MEMBLOCK_CANCEL_SNAPSHOT_QUEUE_MAX_DEPTH \
+    (2 * `MEMBLOCK_CANCEL_SNAPSHOT_OBSERVE_LATENCY + 8)
+
 // V2 L2TLB/DTLB responder结构合同。DFILTER_SIZE限制可接受request总数；
 // FLUSH_HOLD_CYCLES覆盖顶层CSR/sfence观测点到DTLB filter清空点的总延迟。
 // 两者只允许由版本compile profile覆盖，不建立runtime plus镜像。

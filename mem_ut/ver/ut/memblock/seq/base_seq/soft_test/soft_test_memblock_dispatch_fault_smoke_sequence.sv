@@ -37,6 +37,10 @@ task soft_test_memblock_dispatch_fault_smoke_sequence::body();
     memblock_issue_q_item_t fired_items[$];
     memblock_issue_q_item_t fault_item;
 
+    // fault smoke 不调用父 body，因此在自己的入口复用并 reset singleton owner。
+    commit_handler = lsq_commit_handler::get();
+    commit_handler.bind_lsq_ctrl(lsq_ctrl);
+    commit_handler.reset_lsqcommit_runtime_state();
     build_directed_main_table();
     admit_lsq_and_route_issue();
     fire_all_issue_items(fired_items);
@@ -72,26 +76,37 @@ task soft_test_memblock_dispatch_fault_smoke_sequence::commit_and_deq_lsq();
     memblock_lq_key_t             lq_deq_head;
     memblock_sq_key_t             sq_deq_head;
     bit                           has_commit;
+    bit                           has_fault_head;
+    memblock_uid_t                fault_uid;
 
     if (commit_handler == null) begin
-        commit_handler = lsq_commit_handler::type_id::create("commit_handler");
+        commit_handler = lsq_commit_handler::get();
     end
     commit_handler.bind_lsq_ctrl(lsq_ctrl);
 
-    commit_handler.build_lsqcommit_xaction(commit_tr, commit_uids, has_commit);
-    if (!has_commit || commit_uids.size() != 1 || commit_uids[0] != 0) begin
+    commit_handler.build_lsqcommit_xaction(commit_tr, commit_uids, has_commit,
+                                           has_fault_head, fault_uid);
+    if (has_commit || !has_fault_head || fault_uid != 0 || commit_uids.size() != 0) begin
         `uvm_fatal(get_type_name(),
-                   $sformatf("expected first commit batch to contain only fault uid0, got has_commit=%0d size=%0d first=%0d",
+                   $sformatf("expected first cycle to carry only fault uid0 token, got commit=%0d fault=%0d fault_uid=%0d size=%0d",
                              has_commit,
-                             commit_uids.size(),
-                             commit_uids.size() == 0 ? 0 : commit_uids[0]))
+                             has_fault_head,
+                             fault_uid,
+                             commit_uids.size()))
     end
-    commit_handler.mark_rob_commit_batch(commit_uids);
+    if (commit_tr.io_ooo_to_mem_lsqio_pendingst ||
+        commit_tr.io_ooo_to_mem_lsqio_pendingMMIOld ||
+        commit_tr.io_ooo_to_mem_lsqio_scommit != '0) begin
+        `uvm_fatal(get_type_name(),
+                   "fault-head LSQ commit transaction must keep pendingst/pendingMMIOld/scommit clear")
+    end
+    commit_handler.mark_fault_rob_commit_uid(fault_uid);
     lq_deq_head = lsq_ctrl.lq_deq_ptr;
     commit_handler.apply_dut_lq_deq(1, lq_deq_head, 1'b0);
 
-    commit_handler.build_lsqcommit_xaction(commit_tr, commit_uids, has_commit);
-    if (!has_commit || commit_uids.size() == 0) begin
+    commit_handler.build_lsqcommit_xaction(commit_tr, commit_uids, has_commit,
+                                           has_fault_head, fault_uid);
+    if (!has_commit || has_fault_head || commit_uids.size() == 0) begin
         `uvm_fatal(get_type_name(), "expected second commit batch after fault uid terminal_done")
     end
     commit_handler.mark_rob_commit_batch(commit_uids);

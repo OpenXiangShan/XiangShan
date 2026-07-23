@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待 coding |
+| 状态 | `do`，coding、最终回归和独立终审均已完成并归档 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv` |
@@ -81,9 +81,9 @@ V2 顶层暴露 `loadMmio/loadMmioUop/storeMmio/storeMmioUop/pendingMMIOld/pendi
 | `loadMmio/loadMmioUop` | `FLOW_REQUIRED` 的前置 tag 输入 | producer/query 由 pending-MMIO 专项拥有，本 plan 只通过 `uid_is_mmio_load()` 消费已落表 tag |
 | `storeMmio/storeMmioUop` | `FLOW_REQUIRED` 的前置 tag 输入 | producer/query 由 pending-MMIO 专项拥有，本 plan 不用它直接改变 pass/fail |
 | `pendingPtr` | driver control | 每拍来自 modeled ROB head 完整 key |
-| `pendingst` | driver control | 当前 sideband head 是 scalar store 且无 global block 时置 1 |
+| `pendingst` | driver control | 当前 sideband head 属于V2 scalar ROB store commit分类且无 global block 时置1；该分类是`CommitType.STORE && !vls`，包含普通STU store和STU CBO |
 | `pendingMMIOld` | driver control | 当前 sideband head 是 load 且 status MMIO tag 为 1 时置 1 |
-| `scommit` | driver control | 只统计本拍真实 normal scalar store commit 数；fault 不计；不推进软件 `sq_deq_ptr` 或 SQ free count |
+| `scommit` | driver control | 只统计本拍真实normal scalar ROB store commit数；普通STU store和STU CBO计入，fault/vector不计；不推进软件`sq_deq_ptr`或SQ free count |
 
 ### `scommit` 与 `sqDeq` 的解耦合同
 
@@ -169,14 +169,14 @@ SBuffer、uncache、MMIO/CBO response 和异常完成都可能改变 `completed`
   解析 modeled head 的 active UID；
   如果 head valid 且无 global block：
     读取 main transaction 和 behavior；
-    pendingst = behavior.commit_is_store；
+    pendingst = memblock_op_behavior_util::is_scalar_rob_store_commit(behavior)；
     pendingMMIOld = behavior.commit_is_load && data.uid_is_mmio_load(head_uid)；
   否则：
     pendingst=0；
     pendingMMIOld=0；
 
   如果本拍有 normal commit batch：
-    scommit = batch 中 scalar store commit 数；
+    scommit = batch 中 is_scalar_rob_store_commit(behavior) 为1的数量；
   如果本拍是 fault convergence 或无 normal commit：
     scommit=0；
 
@@ -635,12 +635,15 @@ deferred full raw。即使 semantic events 为空或 normalize 后为空，也�
 
 ### 修改方案与修改逻辑
 
-`collect_monitor_event_batch()` 使用栈帧内 automatic `deferred_ctrl_updates[$]` 保存完整 ctrl raw：
+`collect_monitor_event_batch()` 使用栈帧内 automatic `deferred_ctrl_updates[$]` 收集本拍完整 ctrl raw；
+semantic batch 完成后，adapter 把这些 raw 追加到同步包中的持久
+`deferred_raw_ctrl_q`，再按队首成功语义消费：
 
 1. collect WB/IQ semantic events。
 2. collect ctrl semantic events，并把完整 ctrl raw 按 pop 顺序写入 deferred queue。
 3. process semantic batch。
-4. apply deferred ctrl updates，逐项调用 full-raw wrapper。
+4. 把本拍 deferred ctrl 追加到持久 FIFO。
+5. 从持久 FIFO 队首调用 full-raw wrapper；只有 wrapper 返回成功才 pop，resync mismatch 返回失败并停止本拍消费。
 
 pending-MMIO 专项只拥有 ctrl collector 内的 MMIO tag、memoryViolation 转换和 deferred raw 生产。
 本 plan 拥有总编排、deferred consumer 和 LQ/SQ/SB 状态推进。
@@ -659,19 +662,30 @@ memblock_dispatch_base_sequence::collect_monitor_event_batch()：
   task 返回后，上层再调用既有 exception_redirect_replay_task() apply redirect；
 
 dispatch_monitor_event_adapter::apply_deferred_ctrl_updates_batch(ref deferred_ctrl_updates)：
-  while deferred_ctrl_updates 非空：
-    raw = deferred_ctrl_updates[0]；
-    调用 apply_raw_ctrl_deq(raw)；
-    只有 full-raw 调用正常返回后，才 pop_front；
-  函数末检查 queue 为空；
+  按原顺序把本拍deferred_ctrl_updates追加到memblock_sync_pkg::deferred_raw_ctrl_q；
+  清空栈帧内deferred_ctrl_updates；
+  while 持久FIFO非空：
+    raw = 持久FIFO[0]；
+    success = apply_raw_ctrl_deq(raw)；
+    如果success=0：停止本拍消费，保留当前队首和全部后续raw；
+    如果success=1：pop_front当前队首并继续；
   函数不缓存 UID，不展开 count/pointer，不直接读 active map；
+
+lsq_commit_handler::apply_raw_ctrl_deq(raw)：
+  严格模式的mismatch仍uvm_fatal；
+  resync模式的mismatch在report warning后返回0；
+  LQ/SQ联合预检和提交全部成功后返回1；
+
+runtime drain：
+  raw_monitor_queue_size同时统计raw_ctrl_q和deferred_raw_ctrl_q；
+  持久FIFO仍有等待重试的raw时禁止global stop；
 
 顺序合同：
   semantic events 为空也必须进入 deferred consumer；
   count=0 raw 也必须调用 full-raw wrapper，以更新 sb_is_empty；
   actual redirect 不能在 deferred apply 前删除本批 claim 所需 map；
-  如果 map 已被先前 batch redirect 删除，full-raw wrapper 按当前 map 预检查和 mismatch policy 处理，
-  不使用采样时 UID 强制 release 或复活 entry。
+  如果 map 已被先前 batch redirect 删除，full-raw wrapper 按当前 map 预检查和 mismatch policy 处理；
+  strict模式停止于fatal，resync模式保留队首重试，不使用采样时 UID 强制 release 或复活 entry。
 ```
 
 ### 5-A. Redirect cancel、free count 与 DUT 输出对账
@@ -846,7 +860,7 @@ deadline_sample_seq
 
 `software_cancel_*_count` 和 record 内部累计值使用 `int unsigned`；独立snapshot/interface/xaction/monitor 的
 DUT-facing cancel 字段使用由 LQ/SQ 容量派生的
-`MEMBLOCK_DUT_LQ_CANCEL_COUNT_W`、`MEMBLOCK_DUT_SQ_CANCEL_COUNT_W`，不得继续保留独立的
+`MEMBLOCK_LQ_CANCEL_COUNT_W`、`MEMBLOCK_SQ_CANCEL_COUNT_W`，不得继续保留独立的
 `[6:0]`、`[5:0]` 第二权威。两个派生宽度、
 `MEMBLOCK_DUT_REDIRECT_TO_LSQ_LATENCY`、`MEMBLOCK_DUT_CANCEL_OUTPUT_LATENCY`、
 `MEMBLOCK_TB_CANCEL_MONITOR_SAMPLE_OFFSET`和派生的
@@ -867,8 +881,8 @@ V2 RTL 的 cancel output 具有固定寄存器延迟，但现有 monitor 的 clo
 ```text
 MEMBLOCK_DUT_ENSBUFFER_WIDTH = 2
 MEMBLOCK_SQ_DEQ_COUNT_W = $clog2(MEMBLOCK_DUT_ENSBUFFER_WIDTH + 1)  // V2为2
-MEMBLOCK_DUT_LQ_CANCEL_COUNT_W = $clog2(MEMBLOCK_DUT_LQ_SIZE + 1)
-MEMBLOCK_DUT_SQ_CANCEL_COUNT_W = $clog2(MEMBLOCK_DUT_SQ_SIZE + 1)
+MEMBLOCK_LQ_CANCEL_COUNT_W = $clog2(MEMBLOCK_DUT_LQ_SIZE + 1)
+MEMBLOCK_SQ_CANCEL_COUNT_W = $clog2(MEMBLOCK_DUT_SQ_SIZE + 1)
 MEMBLOCK_DUT_CANCEL_OUTPUT_LATENCY = 2
 MEMBLOCK_DUT_REDIRECT_TO_LSQ_LATENCY = 1
 MEMBLOCK_TB_CANCEL_MONITOR_SAMPLE_OFFSET = 1
@@ -1226,6 +1240,13 @@ sequence 调用 `mark_lsq_reservation_sampled()`，只覆盖 token、allocated/s
 rollback；它不得调用 package 的 DUT clock sample getter、push monitor snapshot或设置 observed-valid。
 普通无 redirect software smoke 不需要伪造 reservation sample metadata。
 
+两层 directed 验证的覆盖边界如下，不得用其中一层的结果替代另一层：
+
+| 验证层 | 输入与状态来源 | 本层覆盖 | 本层不覆盖 |
+|---|---|---|---|
+| software-only 账本测试 | 测试直接构造 framework record、reservation token 和 synthetic sample sequence | token 生命周期、allocated/same-cycle 分类、software rollback、record/queue cleanup | 真实 redirect driver、DUT redirect sample anchor、DUT `lqCancelCnt/sqCancelCnt` snapshot 和 software/observed 对账 |
+| 真实 DUT cancel directed vseq | 真实 LSQ enqueue/issue、redirect driver、redirect monitor anchor、ctrl monitor cancel snapshot 和主 service | 年轻 scalar load/store victim 的非零 cancel、逐 epoch software/observed 对账、rollback、reissue 和终态收敛 | vector/multi-element、AMO/CBO、MMIO 专项组合及所有 redirect level 的穷举覆盖 |
+
 新增真实DUT directed flow：
 
 ```text
@@ -1348,8 +1369,9 @@ make eda_run tc=basicTest ts=memblock_dispatch_real_cancel_reconcile_vseq \
   mode=base_fun cfg=tc_dispatch_real_cancel_reconcile_smoke
 ```
 
-新增base/vseq必须同步`seq_pkg.sv`和`seq.f`，base sequence先include，vseq后include；`basicTest`仍只负责
-选择`env.vsqr.main_phase.default_sequence`，场景调度全部留在vseq中。
+新增base/vseq必须同步`seq_pkg.sv`和`seq.f`，base sequence先include，vseq后include；`basicTest`只负责解析
+`+VSEQ_MAIN`、按factory wrapper创建目标vseq并显式调用`start(env.vsqr)`，场景调度全部留在vseq中，
+不得再通过`env.vsqr.main_phase.default_sequence`间接启动。
 
 #### 主 service、reset 与 global-stop 单点合同
 
@@ -1561,13 +1583,13 @@ has_progress 边界：
 | `mem_ut/ver/ut/memblock/seq/base_seq/memblock_main_dispatch_auto_build_main_table_base_sequence.sv` | 问题五-A：`service_monitor_once()` 是 snapshot/anchor drain 和 reconcile 唯一 scheduler；global stop 前继续 service |
 | `mem_ut/ver/ut/memblock/seq/base_seq/soft_test/soft_test_memblock_dispatch_smoke_sequence.sv` | 问题一、四、五-A：normal smoke 检查 pendingst/scommit、独立 sqDeq 释放、V2 count-only SQ deq 和无 redirect cancel 的零基线 |
 | `mem_ut/ver/ut/memblock/seq/base_seq/soft_test/soft_test_memblock_dispatch_fault_smoke_sequence.sv` | 问题三、五-A：software-only fault/record/rollback ledger单元测试；不得宣称覆盖DUT anchor/snapshot对账 |
-| `mem_ut/ver/ut/memblock/seq/base_seq/memblock_main_dispatch_cancel_reconcile_sequence.sv` | 问题五-A：待新增真实DUT三笔manual main sequence，提供older anchor load和younger load/store victims |
-| `mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_dispatch_real_cancel_reconcile_vseq.sv` | 问题五-A：待新增automatic phase objection、background完成握手、core flow override、确定性victim barrier、真实redirect注入与完整agent/main-service对账flow |
+| `mem_ut/ver/ut/memblock/seq/base_seq/memblock_main_dispatch_cancel_reconcile_sequence.sv` | 问题五-A：本轮已新增（执行前不存在）的真实DUT三笔manual main sequence，提供older anchor load和younger load/store victims |
+| `mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_dispatch_real_cancel_reconcile_vseq.sv` | 问题五-A：本轮已新增（执行前不存在），实现automatic phase objection、background完成握手、core flow override、确定性victim barrier、真实redirect注入与完整agent/main-service对账flow |
 | `mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_dispatch_real_smoke_vseq.sv` | 问题五-A：保持父类两个helper的sequence类型和并发行为，只把直接`.start()`迁移为项目强制的`uvm_do_on`；child background复用迁移后的helper，child core override也只使用`uvm_do_on` |
 | `mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv` | 问题五-A：DCache/SBuffer responder在real-smoke active且global stop、无inflight时驱idle并自然退出；payload/延迟逻辑不变 |
 | `mem_ut/ver/ut/memblock/seq/base_seq/memblock_redirect_dispatch_base_sequence.sv` | 问题五-A：redirect queue/inflight与active redirect收敛后按global stop驱idle并自然退出；原drive/timeout逻辑不变 |
-| `mem_ut/ver/ut/memblock/seq/seq_pkg.sv`、`seq/seq.f` | 问题五-A：按base先于vseq的依赖顺序注册两个新增sequence，不新增散落testcase sequence |
-| `mem_ut/ver/ut/memblock/seq/plus_cfg/tc_dispatch_real_cancel_reconcile_smoke.cfg` | 问题五-A：待新增basicTest+vseq场景preset，要求LQ/SQ nonzero successful match和最终全状态收敛 |
+| `mem_ut/ver/ut/memblock/seq/seq_pkg.sv`、`seq/seq.f` | 问题五-A：两个注册文件执行前已存在；本轮已按base先于vseq的依赖顺序注册上述两个新增sequence，没有新增散落testcase sequence |
+| `mem_ut/ver/ut/memblock/seq/plus_cfg/tc_dispatch_real_cancel_reconcile_smoke.cfg` | 问题五-A：本轮已新增（执行前不存在）的basicTest+vseq场景preset，用于要求LQ/SQ nonzero successful match和最终全状态收敛 |
 | `mem_ut/ver/ut/memblock/rule/memblock_parameter_management_rule.md`、`AI_DOC/project_management/mem_ut_parameter_management.md` | coding完成后补充ENSBUFFER/SQ-deq/cancel/latency宏均属编译期结构、directed cfg只复用既有runtime key，不新增plus镜像 |
 | `mem_ut/ver/ut/memblock/rule/plus_demo_migration_plan.md` | coding完成后同步LSQCOMMIT说明：删除“pendingPtr推进到batch tail”和“V2未暴露scommit”的旧描述，改为modeled ROB head level sideband与真实normal scalar store scommit；明确本专项不新增/删除/迁移runtime plus，并在implementation review记录检查结果 |
 | `AI_DOC/mem_ut_flow_doc/lsq_admission_flow.md`、`redirect_flow.md`、`rob_commit_lq_sq_deq_flow.md`、`virtual_sequence_unified_dispatch_flow.md` | coding完成后按真实实现同步token/sample、延迟scan、cancel对账、global-stop和vseq自然退出调用链；本轮只修改plan，不提前改flow |
@@ -1710,3 +1732,278 @@ memblock_dispatch_real_cancel_reconcile_vseq的background/core/redirect tasks：
   等uid1/uid2 DUT_VISIBLE后驱flushAfter redirect，等待anchor/snapshot/reissue和三UID终态；
   responder在global stop且无inflight时安全idle后自然退出，256-cycle仅作失败watchdog。
 ```
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### [IMPLEMENTATION_DELTA] 最后 normal commit batch 后的 `pendingPtr` watermark
+
+- **来源**：专项真实仿真中，UID1 load 与 UID2 store 同拍 normal commit 后，软件
+  `commit_cursor_uid` 已到 `main_trans_num`，原实现把 `modeled_head_valid` 和
+  `pendingPtr` 一起清零；V2 `StoreQueue` 的 `committed` 仍要求
+  `uop.robIdx <= GatedRegNext(io.rob.pendingPtr)`，因此 UID2 没有进入 committed、
+  request、completed 和 `sqDeq` 链路。
+- **原 plan/原实现**：`pendingPtr` 只在 `modeled_head_valid` 时发布；没有下一条 modeled head
+  时驱动零 key。该做法保持了“不能用 key+1 推导新 head”的约束，但遗漏了最后一个已提交
+  store 仍需要一个 DUT 可见的 ROB watermark 的场景。
+- **实现调整**：`lsq_commit_handler` 增加 `committed_rob_watermark` 和
+  `committed_rob_watermark_valid`。每次 normal commit batch 全部成功后，保存该 batch 最后 UID
+  的权威完整 `robIdx(flag/value)`；若 rebase 后 `modeled_head_valid=1`，无论 active map 当前是否命中，
+  `pendingPtr` 都无条件发布 modeled head。active-map lookup 只决定 `pendingst/pendingMMIOld`，不得决定
+  `pendingPtr`；若 cursor 已到表尾，则保持
+  `modeled_head_valid=0`，但在 active idle 和 terminal drain 周期继续发布保存的 watermark。
+- **边界**：watermark 不是新的 ROB head，不触发任何 `pending*` pulse/level，不推进
+  `commit_cursor`、SQ/LQ pointer、free count、pass/fail 或 terminal；它只覆盖已知已提交 batch
+  的 StoreQueue ROB 比较门槛。完整 `flag/value` 直接来自 status，禁止 `rob key + 1`，因此不引入
+  manual 主表 key 不连续或 wrap 的算术假设。terminal idle 判断只检查 pulse 和未收敛队列，不能
+  再要求 `pendingPtr` 为零。
+
+中文伪代码：
+
+```text
+mark_rob_commit_batch(uids)：
+  先按原流程预检查并逐 UID 标记 status.rob_commit；
+  读取 uids 最后一项的完整 rob key，保存为 committed_rob_watermark；
+  commit_cursor 推进到 batch 尾后的 UID；
+  rebase：cursor未到表尾时从对应status重建下一条权威modeled head，否则只清modeled_head_valid并保留watermark。
+
+clear_lsqcommit_xaction(tr)：
+  如果 modeled_head_valid=1，无条件让pendingPtr发布modeled_rob_deq_ptr；
+  否则如果final watermark满足publishable条件，pendingPtr发布最后已提交batch tail；
+  否则发布零 key；
+  active-map lookup不参与上述pointer选择，只在build阶段决定pendingst/pendingMMIOld；
+  scommit/flushSb 仍按原 pulse 逻辑清零。
+
+terminal_idle 判断：
+  只要求 commit cursor、modeled head、fault、cancel/raw/anchor 和 pulse 字段收敛；
+  允许 pendingPtr 保持 watermark，因为它不代表仍有 active ROB head。
+```
+
+### [IMPLEMENTATION_DELTA] active idle 与 configured idle 路径分离
+
+- **来源**：pending-MMIO directed 仿真收尾 review 发现，初版 driver 虽然已经缓存
+  `pendingPtr/pendingst/pendingMMIOld`，但 main-phase 的 no-item、pre-gap 和 post-gap 仍调用
+  `drive_idle(cfg.drv_mode)`；只有 `DRV_0` 分支重驱 cache，`DRV_1/DRV_X/DRV_RAND/DRV_LST`
+  会改写或遗漏 active level。
+- **原 plan 要求**：问题六要求 active 气泡与 configured/reset idle 分离；active idle 必须无条件保持
+  最近一次 level，只清 `scommit/flushSb` pulse，reset 清 cache。
+- **实现调整**：新增 `drive_active_idle()`。main-phase 三类 active 气泡统一调用该 task，不再读取
+  `cfg.drv_mode`；`reset_phase()` 和其它 configured idle 场景继续调用原 `drive_idle(cfg.drv_mode)`。
+  `send_pkt()` 驱动 transaction 后缓存三项 level，`reset_phase()` 同时清 valid 和全部 cache payload。
+- **调用关系**：`main_phase()` 在 pre-gap、post-gap、no-item 分支调用 `drive_active_idle()`；有 item
+  的有效拍调用 `send_pkt()` 更新 VIF 和 cache；`reset_phase()` 只调用 `drive_idle()` 并清 cache。
+- **模式边界**：active 路径不再进入 `DRV_0/DRV_1/DRV_X/DRV_RAND/DRV_LST` 分支，因此 X、随机值、
+  全 1 或 legacy idle 都不会污染 active level；configured/reset idle 的原模式行为不变。本修复不新增
+  transaction、随机约束、状态机、timeout 或结束条件。
+- **影响范围**：
+  `mem_ut/ver/ut/memblock/agent/lsqcommit_agent_agent/src/lsqcommit_agent_agent_driver.sv`。
+
+### [IMPLEMENTATION_DELTA] 统一 runtime drain 后再请求 global stop
+
+抽象功能描述：`common_data_transaction::runtime_drain_complete()` 在主动 flow 已形成连续
+`terminal_done` 前缀后，统一判断所有运行期 producer、queue 和 recovery 控制是否收敛。它只读取
+queue size、associative map count、pending bit 和 phase，不扫描 `main_table_by_uid/status_by_uid`。
+
+- **来源**：原 `request_global_stop_if_done()` 只等待 cancel record、anchor、snapshot 和 raw timing
+  sideband，可能在 monitor raw、exception、issue、redirect、PTW replay 或 flushSb 尚未消费时提前停止。
+- **实现调整**：新增 `runtime_drain_complete()`，覆盖 `raw_monitor_queue_size()`、`exception_event_q`、
+  load/STA/STD issue queue、active ROB/LQ/SQ map、redirect pending/inflight/control、
+  `ptw_wait_replay_q`、flushSb request/active/waiting 状态，以及 cancel record、software apply、
+  pending count、anchor、local snapshot 和 package raw timing queue。`request_global_stop_if_done()` 只在
+  `transaction_done() && runtime_drain_complete()` 时置位 stop；`end_test_check()` 复用同一 predicate 做
+  低成本终态自检。
+- **性能边界**：`transaction_done()` 只推进连续 terminal prefix；runtime predicate 不做每拍主表扫描。
+  cancel apply query 最多扫描 compile-bound record FIFO，其他条件均为 O(1) size/count/bit 读取。
+
+中文伪代码：
+
+```text
+request_global_stop_if_done()：
+  推进并检查terminal_done连续前缀；
+  如果尚未覆盖main_trans_num，保持global_stop_requested=0；
+  如果任一raw/event/issue/map/redirect/PTW/flushSb/cancel/timing状态未drain，保持为0；
+  只有transaction完成且统一runtime drain返回1时，置global_stop_requested=1。
+```
+
+### [IMPLEMENTATION_DELTA] 未锚定 cancel record 保留 snapshot
+
+抽象功能描述：`common_data_transaction::service_cancel_reconcile()` 在 anchor 未到达时保留本地
+snapshot，使后续绑定得到的 record 仍能按精确 sample sequence 对账；只有 record FIFO 为空时才执行
+held-level baseline 消费。
+
+- **来源**：当前实现用“找不到 anchored observation-pending record”直接进入 baseline 分支，混淆了
+  “完全无 record”和“已有 record 但最老项尚未绑定 anchor”。后者会提前 pop 未来 target snapshot。
+- **实现调整**：完成 anchor bind 和既有 anchor deadline 检查后，若找不到 anchored pending record 但
+  `cancel_record_q` 非空，立即停止 snapshot loop并保留队首；若 record FIFO 为空，才做 baseline check并
+  pop。record 已锚定后仍只消费 `compare_snapshot_sample_seq` 的 exact sample，早于 target 的 snapshot
+  按 baseline 检查，晚于 target、target 缺失、count 不匹配和 deadline 超期继续 `uvm_fatal`。
+
+### [IMPLEMENTATION_DELTA] full ctrl raw 的 SQ capability 最终分支
+
+抽象功能描述：`lsq_commit_handler::apply_raw_ctrl_deq()` 对同一 full ctrl raw 的 LQ/SQ owner 先做联合
+预检，再原子提交两侧 release。SQ 预检按 compile capability 显式选择 pointer 或 V2 count-only 语义，
+但 capability 不参与 `sq_deq` 字段宽度计算。
+
+- **原 plan**：要求 full raw 继续沿用 pointer/count-only wrapper，但没有明确 wrapper 会立即提交，因而
+  不能直接用于同一 raw 的 LQ/SQ 联合原子预检。
+- **实现调整**：提取共享的 SQ start-key/owner 预检核心，并增加独立
+  `preflight_dut_sq_deq_count_only()`。当 `MEMBLOCK_DUT_HAS_SQ_DEQ_PTR=1` 时，从 raw pointer 计算 start key；
+  当其为 0 时，显式忽略 raw pointer payload并从软件 `sq_deq_ptr` 取得起点。两侧预检全部成功后才依次
+  `commit_dut_lq_deq()`、`commit_dut_sq_deq()`；任一失败都不允许另一侧部分 release。
+- **宽度边界**：`raw.sq_deq` 始终使用 `MEMBLOCK_SQ_DEQ_COUNT_W`，并继续检查
+  `count <= MEMBLOCK_DUT_ENSBUFFER_WIDTH`。`MEMBLOCK_DUT_HAS_SQ_DEQ_PTR` 只选择 pointer presence、validity
+  和语义分支，不能作为 count width。
+
+### [IMPLEMENTATION_DELTA] directed sequence/testcase 文件范围与实际实现对齐
+
+- **来源**：coding 过程已按问题五-A实现真实 DUT cancel directed flow，但原 plan 文末仍保留
+  “本批次写权限不包含 directed sequence/testcase，本轮不修改”的限制，与正文、Coding 落点
+  和已落地源码矛盾。
+- **原 plan/原限制**：问题五-A正文规划新增三笔 manual main sequence、真实 DUT cancel vseq 和专用
+  cfg；但文末又将所有 directed sequence/testcase 排除在本批次写范围外，只允许记录验证建议。
+  该限制是执行前 plan 的原始约束，不应被改写成“执行前已存在 directed 文件”。
+- **实现调整**：撤销上述笼统排除，把本轮 directed 写范围精确限定为以下 plan-defined 内容：
+  1. 新增 `memblock_main_dispatch_cancel_reconcile_sequence.sv`；
+  2. 新增 `memblock_dispatch_real_cancel_reconcile_vseq.sv`；
+  3. 新增 `tc_dispatch_real_cancel_reconcile_smoke.cfg`；
+  4. 在执行前已存在的 `seq_pkg.sv` 和 `seq.f` 中注册两个新 sequence。
+  三个新文件在本 plan 执行前均不存在；它们是本轮 coding 产物，不是执行前基线。
+- **原因**：software-only 账本测试只能验证 framework 内部 token、record、rollback 和 cleanup，无法经过
+  redirect driver、redirect monitor anchor、ctrl monitor cancel snapshot 和主 service 验证真实 DUT observed cancel
+  链路。真实 directed vseq 是闭合该链路的必要验证入口，因此必须纳入本轮实现范围。
+- **影响范围**：只修正上述三个新文件与两个注册文件的 plan 状态，不扩展任何其他
+  directed testcase、不新增 cfg key，也不改变本 plan 的 commit/deq、cancel reconcile、global-stop 或
+  pass/fail/terminal 功能方案。
+- **覆盖边界**：software-only 账本测试仍只覆盖 synthetic token/record/rollback/cleanup，不宣称 DUT
+  observed cancel；真实 DUT cancel directed vseq 覆盖 scalar younger load/store victim 的真实 redirect、anchor、
+  cancel snapshot、software/observed 对账、reissue 和终态收敛，不扩展到 vector/multi-element、AMO/CBO、
+  MMIO 或所有 redirect level 的穷举验证。
+- **验证状态**：2026-07-23 最终工作区使用独立 mode `v2_lsq_mmio_cbo_final_20260723` 完成 VCS/KDB
+  compile；最终 KDB 摘要为 `0 error(s), 0 warning(s)`，完整 transcript 另有一条工具自身的
+  `LCA_FEATURES_ENABLED` usage warning。真实 cancel directed、默认 real smoke和pending-MMIO directed
+  均为`TEST_PASS`且`UVM_ERROR=0/UVM_FATAL=0`。
+  `tc_sanity + default.cfg`不会建立本plan main table，已作为错误组合终止，不作为失败或通过证据。
+
+### [IMPLEMENTATION_DELTA] real-smoke responder 完成握手
+
+- **来源**：独立 review 发现父类 `memblock_dispatch_real_smoke_vseq::body()` 在
+  `start_core_dispatch_flow()` 返回后立即清除 `dispatch_real_smoke_active`，但后台 DCache、SBuffer 和
+  redirect responder 仍可能尚未返回；它们依赖该 active 标志与 `global_stop_requested` 的组合观察最终退出边界。
+- **原逻辑**：后台 responder 通过`join_none`启动，core flow返回后直接清 active并结束 vseq；若 responder
+  尚未抢到最后一个 stop sample，会错过自然退出条件。
+- **实现调整**：core flow返回后执行`wait fork`，等待同一父 task 创建的后台 responder fork完整返回，再清
+  `dispatch_real_smoke_active`。不改变 responder的global-stop/inflight退出条件，也不新增第二个状态 owner。
+- **原因**：把场景完成定义为“core flow完成且后台 responder完成握手”，消除收尾时序竞争；若 responder真正
+  卡住，则由既有UVM timeout暴露，而不是静默结束主vseq。
+- **影响范围**：仅`memblock_dispatch_real_smoke_vseq::body()`的vseq收尾顺序和本段文档说明；cancel
+  reconcile子类已有独立`wait_for_background_responders()`，不改变其实现。
+
+### [IMPLEMENTATION_DELTA] deferred ctrl resync 队首保留
+
+- **来源**：独立源码 review 发现，`apply_raw_ctrl_deq()` 在
+  `MEMBLOCK_LSQ_RESYNC_ON_MISMATCH=1` 时只打印 warning 后 `return`，旧 consumer 又无返回值并用
+  automatic queue 的 `foreach` 继续执行，当前 raw 会在 task 返回时被静默丢弃。
+- **原实现**：ctrl raw 从 `raw_ctrl_q` 弹出后只保存在本次 service task 的栈帧队列；handler 的
+  LQ/SQ preflight 失败没有 success 返回值，consumer无法区分“成功应用”和“resync warning”。
+- **实现调整**：`lsq_commit_handler::apply_raw_ctrl_deq()` 和 adapter wrapper 改为返回 success bit；
+  `memblock_sync_pkg` 新增 `deferred_raw_ctrl_q` 及 push/peek/pop API。semantic batch完成后先把本拍 raw
+  追加到持久 FIFO，再从队首消费；success=1才pop，success=0立即停止并留待下一service tick重试。
+  `clear_raw_monitor_queues()`清该FIFO，`raw_monitor_queue_size()`把它计入runtime drain。
+- **原因**：既保留strict模式的fail-fast，又使resync模式真正具备“暂不应用、后续重试”语义；raw不会
+  丢失，后续raw也不会越过失败队首，global stop不会漏看已完成semantic conversion但尚未完成deq的事实。
+- **副作用边界**：MMIO normalize仍在deq删除active map前执行，重复重试按canonical setter保持幂等；
+  `sbIsEmpty`是level观察值，可重复更新。该队列不保存UID，不强制release，不改变pass/fail/terminal。
+
+文字伪代码：
+
+```text
+每拍先把ctrl raw转换出的memoryViolation加入semantic batch，并把完整raw保存在本拍临时队列；
+semantic redirect-first处理返回后，把临时队列全部追加到持久deferred FIFO；
+查看持久FIFO队首并调用full-raw owner：
+  若LQ/SQ联合预检成功并完成release，返回成功并弹出队首；
+  若resync mismatch，返回失败，保留队首和全部后续raw到下一service tick；
+  若strict mismatch，按原策略uvm_fatal；
+runtime drain把持久FIFO计入未完成工作，队列非空时不允许global stop。
+```
+
+### [IMPLEMENTATION_DELTA] software-only smoke 复用 singleton commit owner
+
+- **来源**：独立源码 review 发现 normal/fault software-only smoke 仍通过
+  `lsq_commit_handler::type_id::create("commit_handler")` 建私有实例，绕过真实 flow 的 singleton
+  cursor、modeled head、watermark和fault token合同。
+- **原实现**：两个 smoke 的 `commit_and_deq_lsq()` 按需创建私有 handler；单测可能在私有状态上通过，
+  却不能证明真实 adapter/lsqcommit sequence共享owner的行为。
+- **实现调整**：两个 smoke 都改用 `lsq_commit_handler::get()`；各自 `body()` 开始时绑定公共
+  `lsq_ctrl` 并调用一次 `reset_lsqcommit_runtime_state()`。后续 commit/deq helper只复用该句柄，不再创建
+  第二实例。
+- **原因**：软件场景之间需要清理singleton私有游标，但不能复制或直接清公共status/map/LSQ pointer；
+  reset API正好只清handler私有生命周期状态。
+- **验证边界**：legacy `soft_test_tc_dispatch_smoke/fault_smoke` 在当前V2环境会在场景启动前被既有
+  int-WB monitor X/Z检查终止，因此本轮不把该testcase结果写成通过；VCS编译和真实flow回归已经覆盖
+  singleton API的类型与共享owner主路径。
+
+文字伪代码：
+
+```text
+software-only normal/fault body开始：
+  取得lsq_commit_handler::get()返回的唯一实例；
+  绑定公共lsq_ctrl；
+  只reset handler私有commit cursor、modeled head、watermark和fault token；
+  再构建本场景main/status并执行commit/deq；
+commit_and_deq_lsq若句柄为空，只再次调用get，不再factory create私有handler。
+```
+
+### [IMPLEMENTATION_DELTA] CBO 的 scalar ROB store sideband 分类显式化
+
+- **来源**：最后一轮独立review发现，plan和review使用“scalar store”描述`pendingst/scommit`，但初版
+  实现直接读取`behavior.commit_is_store`；该字段对普通STU store和STU CBO都为1，文档没有说明CBO
+  是否属于本sideband分类，现有真实回归也没有执行完整CBO flow。
+- **V2权威语义**：`src/main/scala/xiangshan/backend/rob/Rob.scala`用
+  `commitType == CommitType.STORE && !robEntry.vls`生成`scommit`，并用ROB head的
+  `commitType == CommitType.STORE`生成`pendingst`。CBO解码为`FuType.STU`，所以属于非vector
+  `CommitType.STORE`；它不是普通memory store，但属于本接口的scalar ROB store分类。
+- **原plan/初版实现**：原plan要求只统计“normal scalar store”，但未定义该术语是否包含CBO；初版
+  实现用`commit_is_store`同时驱动两个字段，功能方向符合RTL，但缺少白名单helper、差异说明和可观察
+  分类检查，容易被误改成只接受`behavior.kind==STORE`。
+- **实现调整**：`memblock_op_behavior_util`新增无状态
+  `is_scalar_rob_store_commit(behavior)`，只接受`commit_is_store=1`且kind为STORE或CBO的行为；
+  `lsq_commit_handler::build_lsqcommit_xaction()`构造`pendingst`和统计`scommit`时统一调用该helper。
+  real cancel directed main sequence在导入真实三笔load/store主表前构造一个不入表的CBO probe，要求
+  helper对LOAD/STORE/CBO返回0/1/1，并打印`ROB_STORE_CLASS`通过日志。
+- **原因**：用同一个helper保持level字段和pulse字段分类一致，同时与V2 ROB的`STORE && !vls`语义
+  对齐；显式STORE/CBO白名单又避免未来新增store-like behavior时无审查地进入接口。
+- **影响范围**：不改变main table、LSQ allocation、issue/writeback、deq、pass/fail/terminal或CBO
+  支持开关；CBO probe不进入主表、不驱DUT，也不创建状态/map。默认CBO激励仍由
+  `MEMBLOCK_OP_CLASS_CBO_WT=0`边界关闭。
+- **验证边界**：本轮只验证ROB sideband分类helper并继续回归普通store真实闭环，不宣称支持或覆盖
+  CBO enqueue、issue、writeback、DCache response、commit/deq完整flow。
+
+文字伪代码：
+
+```text
+is_scalar_rob_store_commit(behavior)：
+  返回 behavior.commit_is_store
+     且 behavior不是atomic
+     且 behavior.kind属于STORE或CBO；
+
+构造pendingst和scommit：
+  pendingst只读取当前active head的同一helper结果；
+  scommit只累计normal commit batch中同一helper为1的uid；
+  fault、load、atomic和vector不贡献；
+
+real cancel directed分类检查：
+  从现有load/store transaction派生behavior；
+  额外构造不入主表的CBO STU probe并派生behavior；
+  若helper结果不是LOAD/STORE/CBO=0/1/1则fatal；
+  只输出分类通过日志，不推进任何runtime状态。
+```
+
+以下仍作为补充验证建议保留，不用于扩张上述本轮 directed 文件范围，也不在终回归前标记为已通过：
+
+- 增加 modeled head 有效但 active-map 暂未命中的 sideband 检查：`pendingPtr` 保持 modeled key，
+  `pendingst/pendingMMIOld` 为 0；表尾只发布 final committed watermark。
+- 在 cancel reconcile directed flow 中先送 snapshot、后送 anchor，确认 snapshot 不被 baseline pop；再覆盖
+  无 record baseline 消费、exact target 匹配和 deadline/missing-target fatal。
+- 在 terminal 后分别保留 raw monitor、exception、三类 issue、redirect、PTW replay、flushSb 和 cancel
+  pending，确认 global stop 均保持 0，并在逐项 drain 后才变为 1。
+- 覆盖 V2 同一 full raw 同时携带 LQ/SQ deq，以及 SQ owner 预检失败场景，确认失败时 LQ pointer/free
+  count 也不发生部分更新。

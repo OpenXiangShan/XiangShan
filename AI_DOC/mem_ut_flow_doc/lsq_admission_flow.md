@@ -13,13 +13,25 @@
 
 ## 1. Flow 边界
 
+### 1.1 术语与抽象功能说明
+
+| 英文术语 | 当前 flow 中的中文含义 | 代码对象/状态落点 | 示例 |
+|---|---|---|---|
+| `candidate` | 本拍按 uid 顺序预览、尚未修改公共状态的 LSQ 入队候选 | `collect_lsq_candidates()` 的五组局部 queue | load/store 数量或 free count 达到上限时停止收集 |
+| `launch` | driver 已在当前 clocking 边界把 active request 写到 VIF | `memblock_dispatch_request_launched` | launch 前遇到 redirect 时只发 idle，不建立 allocation |
+| `reservation token` | 一次真实 launch 对应的动态实例凭证，绑定 `uid` 和单调 `launch_epoch` | `memblock_lsq_reservation_token_t`、`status.lsq_reservation_launch_epoch` | 同一 uid redirect 后重新入队会得到新的 epoch |
+| `DUT sample sequence` | 多个 monitor/sequence 对同一仿真采样时刻共享的单调序号 | `memblock_sync_pkg::get_dut_sample_seq($time)`、`status.lsq_reservation_sample_seq` | 下一 driver 边界把上一批 token 标成 `DUT_VISIBLE` |
+| `pending sample` | 已 launch、已分配软件 LQ/SQ，但尚未由下一边界记录 DUT 可见性的单深度 batch | `pending_sample_valid`、`pending_sample_tokens` | C0 launch batch A，C1 才完成 A 的 sample |
+| `cancel record` | 单个 redirect epoch 的软件回退量和 DUT cancel 观察值对账记录 | `common_data_transaction::cancel_record_q` | software count 只回退一次，observed count 只核对一次 |
+| `owner` | 对某类状态拥有唯一修改权的对象 | allocation owner 为 `lsq_ctrl_model::commit_allocate()`；cancel owner 为逐 epoch record 的软件应用路径 | DUT observed cancel 不拥有 pointer/free count 回退权 |
+
 LSQ admission 只负责以下行为：
 
 1. 从 `main_table_by_uid` 的 next-admit uid开始顺序选择 candidate。
 2. 为 scalar load/store预测 LQ/SQ key并构造 V2 enqueue request。
 3. driver launch 成功后立即预留软件 LSQ 资源。
 4. 经过下一 driver clocking 边界后设置 `issue_ready`，进入 LOAD/STA/STD issue queue。
-5. redirect 时复用全局 recovery 和原 LSQ cancel owner回退 reservation。
+5. redirect 时由逐 epoch `cancel_record_q` 记录软件 cancel，LSQ enqueue sequence 每个 record 只回退一次 reservation。
 
 本 flow 不修改主表生成、issue fire、writeback、ROB commit、LSQ deq、pass/fail 或 terminal owner。
 本轮不支持 vector LS/`issueVldu`、multi-element chunk、enqueue 前 directed exception、issue hold、压力模式
@@ -76,8 +88,9 @@ flowchart TD
    正常拍调用 send_lsqenq_cycle，并根据 launch/sample/non-LSQ 是否推进维护 no-progress warning计数。
 
 3. redirect cancel：
-   send_lsqenq_cycle 首先消费 pending LQ/SQ cancel count；
-   cancel helper只回退软件 pointer/free count，不创建新的 recovery owner。
+   send_lsqenq_cycle 首先按 FIFO 扫描已完成 software count 的 `cancel_record_q`；
+   每个 record 的 software count 只用于一次 pointer/free-count 回退并置 `software_applied`；
+   DUT observed cancel 只在 reconcile 路径核对，不会再次调用 `cancel_lq/cancel_sq`。
 
 4. non-LSQ 边界：
    若上一 LSQ batch pending而下一 uid 为 non-LSQ，先发送全零 idle并完成上一批 sample；
@@ -88,13 +101,15 @@ flowchart TD
    状态表或map，并生成idle item；此前仍允许读取global-flush gate；
    非零时只预览连续 uid，分别限制 load element不超过6、store element不超过4，并受实际free count限制。
 
-6. launch 与 reservation：
+6. launch 与 reservation token：
    driver 在 clocking 边界先让 DUT采样上一拍，再取得当前item并检查flush epoch；
-   合法active item只发送一次并立即item_done；sequence先完成上一批sample，再为当前launch批建立reservation。
+   合法active item只发送一次并立即item_done；sequence先完成上一批sample，再为当前launch批建立 allocation；
+   每个已 launch uid 调用 `begin_lsq_reservation_launch()` 生成 `{uid, launch_epoch}` token。
 
 7. sample 与 issue route：
-   pending batch只有在下一driver边界到来且epoch仍有效时才调用complete_admission；
-   该调用设置issue_ready并写入LOAD/STA/STD issue queue；redirect覆盖的pending批不开放issue。
+   pending batch在下一driver边界统一取得 DUT sample sequence，并先把所有 token 标为 `DUT_VISIBLE`；
+   只有保存的flush epoch仍有效时才调用complete_admission，设置issue_ready并写入LOAD/STA/STD issue queue；
+   redirect覆盖的已 launch实例保留“确实被DUT采样”的事实，但不开放旧实例issue，后续由cancel record回退资源。
 ```
 
 ## 3. 关键状态和 owner
@@ -105,12 +120,14 @@ flowchart TD
 | `status.active/enq` | uid 已建立当前动态实例和 admission reservation | `lsq_ctrl_model::commit_allocate()` | redirect/reissue、commit/terminal flow |
 | LQ/SQ active map | DUT key 到 uid 的运行期映射 | `common_data_transaction::activate_uid()` | monitor event反查、deq、redirect cancel |
 | `lq/sq_enq_ptr`、free count | 软件 LSQ allocation 镜像 | `commit_allocate()` | candidate preview、deq release、redirect cancel |
-| `pending_sample_*` | 当前已 launch/已预留、尚未经过下一 sample 边界的一批 uid | `confirm_lsq_candidates()` | `complete_v2_pending_sample()` |
+| `pending_sample_tokens` | 当前已 launch/已预留、尚未经过下一 sample 边界的一批 `{uid, launch_epoch}` | `confirm_lsq_candidates()` | `complete_v2_pending_sample()` |
+| `status.lsq_reservation_state` | 当前动态实例处于未建 token、等待 sample、DUT 可见或已计入 cancel | `begin_lsq_reservation_launch()`、`mark_lsq_reservation_sampled()`、`note_lsq_cancel_for_uid()` | redirect scan 只统计 `DUT_VISIBLE` mapping |
+| `status.lsq_reservation_sample_seq` | 该动态实例真实跨过的 DUT sample 序号 | `mark_lsq_reservation_sampled()` | 与 redirect 的 LSQ cutoff 比较 |
 | `status.issue_ready` 和 issue queue | uid 可以进入后续 issue flow | `prepare_issue_route_for_uid()` | issue sequence/scheduler |
-| `pending_lq/sq_cancel_count` | redirect 后待回退的 element 数 | 全局 redirect handler | `apply_pending_lsq_cancels()` |
+| `cancel_record_q` | 每个 redirect epoch 独立的软件 cancel、资源回退和 DUT observed 对账生命周期 | `request_redirect_flush()` 创建，redirect scan 完成 software count | `apply_pending_lsq_cancels()` 只应用 software count；reconcile 只比较 observed count |
 
-`pending_sample_*` 是 sequence 局部过程态，不是第二套 active map。它只决定何时开放 issue，不拥有
-pointer/free count回退。
+`pending_sample_*` 是 sequence 局部过程态，不是第二套 active map。token 记录真实 launch/sample 事实，
+但不拥有 pointer/free count 回退；资源回退权只属于对应 redirect epoch 的 software cancel 应用。
 
 ## 4. Sequence 初始化与主循环
 
@@ -118,7 +135,8 @@ pointer/free count回退。
 
 源码位置：`memblock_lsqenq_dispatch_base_sequence.sv`，task：`body()`。
 
-该 task 是 LSQ admission入口，负责配置、依赖获取和主表同步。
+抽象功能描述：该 task 是 LSQ admission入口，负责配置、依赖获取和主表同步；它不拥有candidate分配、
+driver launch或cancel回退。
 
 ```systemverilog
 seq_csr_common::init();
@@ -145,7 +163,8 @@ drive_lsqenq_loop();
 
 源码位置：同上，task：`drive_lsqenq_loop()`。
 
-该 task 按拍调用 admission，并确保 global stop前的最后一个 pending batch经过 sample边界。
+抽象功能描述：该 task 按拍调用 admission，并确保 global stop前的最后一个 pending batch经过sample
+边界；no-progress计数只用于诊断，不是正常退出条件。
 
 ```systemverilog
 if (data.is_global_stop_requested()) begin
@@ -173,7 +192,8 @@ pending清空后退出；
 
 源码位置：`memblock_lsqenq_dispatch_base_sequence.sv`，task：`send_lsqenq_cycle()`。
 
-该 task 串联 cancel、non-LSQ、candidate、driver item、上一批 sample和当前批 reservation。
+抽象功能描述：该 task 是每拍 LSQ admission 调度入口，先应用已经定案的逐 epoch software cancel，
+再处理 non-LSQ 或 LSQ candidate；driver 返回后结算上一批 sample，并为当前真实 launch 建立新 token。
 
 ```systemverilog
 apply_pending_lsq_cancels();
@@ -190,7 +210,7 @@ confirm_lsq_candidates(tr, uids, trs, behaviors, lq_keys, sq_keys, has_progress)
 中文伪代码：
 
 ```text
-先消费redirect留下的cancel count，使新candidate看到已回退的pointer/free count；
+先按 `cancel_record_q` FIFO 应用已定案且尚未回退的 software count，使新candidate看到正确pointer/free count；
 若pending batch后面紧接non-LSQ，先发送idle完成pending sample，再执行原non-LSQ admission并返回；
 否则先尝试直接处理non-LSQ；成功时不创建LSQ item；
 调用collect_lsq_candidates只读预览本拍连续scalar LS；
@@ -202,26 +222,38 @@ has_progress只做OR汇总，sample进展不会被当前launch结果覆盖。
 
 ### 5.2 `apply_pending_lsq_cancels()`
 
-该函数消费公共 recovery owner累计的 cancel count。
+源码位置：`memblock_lsqenq_dispatch_base_sequence.sv`，function：`apply_pending_lsq_cancels()`。
+
+抽象功能描述：该函数是软件 LSQ pointer/free-count 的唯一 redirect 回退入口。它按 redirect record
+顺序消费已完成 active scan 的 software count，并把该 record 标成已应用；DUT observed count 不经过
+本函数，也不能触发第二次回退。
 
 ```systemverilog
-if (data.pending_lq_cancel_count != 0) begin
-    lsq_ctrl.cancel_lq(data.pending_lq_cancel_count);
-    data.pending_lq_cancel_count = 0;
+foreach (data.cancel_record_q[idx]) begin
+    if (!data.cancel_record_q[idx].valid ||
+        data.cancel_record_q[idx].software_applied) continue;
+    if (!data.cancel_record_q[idx].software_count_finalized) break;
+    lq_count = data.cancel_record_q[idx].software_cancel_lq_count;
+    sq_count = data.cancel_record_q[idx].software_cancel_sq_count;
+    if (lq_count != 0) lsq_ctrl.cancel_lq(lq_count);
+    if (sq_count != 0) lsq_ctrl.cancel_sq(sq_count);
+    data.mark_cancel_record_applied(data.cancel_record_q[idx].redirect_epoch);
 end
-if (data.pending_sq_cancel_count != 0) begin
-    lsq_ctrl.cancel_sq(data.pending_sq_cancel_count);
-    data.pending_sq_cancel_count = 0;
-end
+data.check_cancel_pending_aggregate();
 ```
 
 中文伪代码：
 
 ```text
-读取全局redirect handler登记的LQ/SQ取消element数；
-分别调用LSQ软件镜像的cancel函数回退enqueue pointer并恢复free count；
-成功后清零公共pending count，避免下一拍重复回退；
-该函数不重新扫描主表，也不决定哪些uid被flush。
+按 FIFO 遍历 cancel_record_q；
+无效或已 software_applied 的 record 跳过；遇到最老的未 finalize record立即停止，不能越过epoch乱序回退；
+读取该 record 的 software_cancel_lq_count/software_cancel_sq_count；
+非零 LQ count 调用 cancel_lq，非零 SQ count 调用 cancel_sq，各自只恢复一次软件pointer/free count；
+同步扣减仅用于一致性校验的公共镜像计数，发现下溢立即fatal；
+调用 mark_cancel_record_applied，把当前epoch标为software_applied；
+最后调用 check_cancel_pending_aggregate，确认镜像值与尚未应用record之和一致；
+DUT observed count由每个dispatch service tick唯一入口service_lsq_timing_reconcile调用
+service_cancel_reconcile比较，绝不回到本函数再次释放资源。
 ```
 
 ## 6. Candidate 生成
@@ -230,7 +262,8 @@ end
 
 源码位置：`memblock_lsqenq_dispatch_base_sequence.sv`，function：`collect_lsq_candidates()`。
 
-该函数处于每拍高频路径，只扫描本拍连续候选，范围上限为编译期6个slot，不做全表扫描。
+抽象功能描述：该函数处于每拍高频路径，从next-admit uid开始只预览本拍连续候选并返回局部key；
+范围上限为编译期6个slot，不修改公共pointer、free count、map或状态表。
 
 ```systemverilog
 max_enq = seq_csr_common::get_enq_per_cycle();
@@ -271,8 +304,8 @@ derive_op_behavior推导LQ/SQ占用；当前scalar路径要求num_ls_elem=1，�
 
 源码位置：`memblock_lsqenq_dispatch_base_sequence.sv`，function：`set_req_fields()`。
 
-该函数是单个 slot request qualifier/payload 的唯一写者。入口检查发生在 `case (slot)` 的任何字段写入
-之前。
+抽象功能描述：该函数是单个slot request qualifier/payload的唯一写者，把一个已验证candidate或idle
+合同编码到指定V2物理slot；入口检查发生在`case (slot)`的任何字段写入之前。
 
 ```systemverilog
 if (tr == null) begin
@@ -338,7 +371,8 @@ idle合同不满足时也在当前slot字段写入前fatal；
 
 源码位置：`agent/lsqenq_agent_agent/src/lsqenq_agent_agent_driver.sv`。
 
-driver 每个边界最多取得一个item；当前item launch后不在本item内等待下一拍。
+抽象功能描述：driver每个clocking边界最多取得一个item，先让DUT采样上一轮VIF值，再判断当前item是
+真实launch还是redirect前abort；当前item写入后立即item_done，不在本item内等待下一拍。
 
 ```systemverilog
 @this.vif.drv_mp.drv_cb;
@@ -401,7 +435,8 @@ free count提前截断，不依赖driver fatal做正常仲裁。
 
 源码位置：`memblock_lsqenq_dispatch_base_sequence.sv`。
 
-该函数只为当前已launch batch建立reservation，不开放issue。
+抽象功能描述：该函数把 driver 已确认 launch 的 candidate 原子写入软件 allocation/map，并为每个 uid
+创建动态实例 token；它不开放 issue，也不根据函数调用时恰好出现的后续 flush 撤销已经发生的 launch。
 
 ```systemverilog
 if (!tr.memblock_dispatch_request_launched) begin
@@ -409,10 +444,14 @@ if (!tr.memblock_dispatch_request_launched) begin
     return;
 end
 foreach (uids[idx]) begin
+    memblock_lsq_reservation_token_t token;
     lsq_ctrl.preview_allocate(behaviors[idx], expected_lq_key, expected_sq_key);
     // 只比较behavior实际使用的key。
     lsq_ctrl.commit_allocate(uids[idx], behaviors[idx], trs[idx]);
-    pending_sample_uids.push_back(uids[idx]);
+    token.valid = 1'b1;
+    token.uid = uids[idx];
+    token.launch_epoch = data.begin_lsq_reservation_launch(uids[idx]);
+    pending_sample_tokens.push_back(token);
 end
 pending_sample_flush_epoch = tr.memblock_dispatch_flush_epoch;
 pending_sample_valid = 1'b1;
@@ -423,24 +462,32 @@ pending_sample_valid = 1'b1;
 ```text
 driver未launch时，只允许该item已标记redirect abort、当前flush有效或epoch失效；否则fatal暴露driver合同错误；
 launch和abort同时为1时fatal；
-当前flush或epoch失效时不建立reservation；
 检查五组candidate queue非空且等长，并要求上一批pending已经完成；
 逐uid重新preview当前真实pointer，只比较load使用的LQ key或store使用的SQ key；
 预测漂移时在任何状态修改前fatal；
 调用唯一allocation owner commit_allocate建立active/enq/map并推进pointer/free count；
-把uid和epoch保存到单深度pending batch，等待下一driver边界开放issue。
+调用begin_lsq_reservation_launch递增当前uid的launch_epoch，并把状态置为LAUNCHED_PENDING_SAMPLE；
+把{uid, launch_epoch}保存到单深度pending batch，等待下一driver边界记录sample事实并决定是否开放issue；
+一旦request_launched=1，即使函数执行时flush epoch已变化也不能丢弃allocation，否则DUT已经看到的请求会没有软件owner。
 ```
 
 ### 9.2 `complete_v2_pending_sample()`
 
-该函数在每次 `finish_item()` 返回后先处理上一批。
+抽象功能描述：该函数在下一 driver 边界后为上一批 token 记录统一 DUT sample sequence；随后仅用
+flush epoch决定是否开放旧实例 issue。sample事实和issue开放是两个独立动作。
 
 ```systemverilog
 if (!pending_sample_valid) return;
+sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+foreach (pending_sample_tokens[idx]) begin
+    data.mark_lsq_reservation_sampled(pending_sample_tokens[idx].uid,
+                                      pending_sample_tokens[idx].launch_epoch,
+                                      sample_seq);
+end
 if (!admission_blocked_by_flush() &&
     pending_sample_flush_epoch == memblock_sync_pkg::dispatch_flush_epoch) begin
-    foreach (pending_sample_uids[idx]) begin
-        complete_admission(pending_sample_uids[idx]);
+    foreach (pending_sample_tokens[idx]) begin
+        complete_admission(pending_sample_tokens[idx].uid);
     end
 end
 clear_v2_pending_sample();
@@ -450,11 +497,14 @@ clear_v2_pending_sample();
 
 ```text
 没有pending batch时直接返回；
+用当前仿真采样时刻取得统一DUT sample sequence；
+逐token调用mark_lsq_reservation_sampled，并同时校验uid的launch_epoch仍匹配，把状态变为DUT_VISIBLE；
 比较pending_sample_flush_epoch与当前memblock_sync_pkg::dispatch_flush_epoch；
 两者相等且global flush未阻塞时，逐uid调用complete_admission；
 complete_admission先drain CSR runtime event，再由issue scheduler检查active/enq并设置issue_ready、写对应issue queue；
-保存epoch与当前epoch不等或global flush阻塞时，不调用complete_admission、不开放issue，也不在本函数手工释放LSQ资源；
-既有redirect/cancel owner负责回退reservation；
+保存epoch与当前epoch不等或global flush阻塞时，不调用complete_admission、不开放旧实例issue；
+该路径仍保留DUT_VISIBLE/sample_seq，供redirect scan判断该mapping应计入哪一个epoch的software cancel；
+逐epochcancel record负责回退reservation；
 无论正常或redirect路径都清本地pending queue和metadata，避免重复完成。
 ```
 
@@ -474,9 +524,11 @@ driver在当前边界发现flush或epoch失效
 
 ```text
 当前batch已建立active/enq/map reservation
--> 下一边界complete_v2_pending_sample发现epoch失效，不开放issue
--> global redirect handler根据active mapping累计pending LQ/SQ cancel
--> LSQ sequence下一轮apply_pending_lsq_cancels回退pointer/free count
+-> 下一边界complete_v2_pending_sample先记录reservation sample_seq和DUT_VISIBLE
+-> 发现epoch失效，不开放旧实例issue
+-> redirect scan把满足sample cutoff的mapping写入当前epoch cancel record的software count
+-> LSQ sequence下一轮按该record调用apply_pending_lsq_cancels，只回退一次pointer/free count
+-> DUT cancel snapshot与同一record对账，但不再次回退资源
 -> rollback后的uid重新进入candidate。
 ```
 
@@ -561,13 +613,15 @@ launch前redirect：
   -> same uid retry
 
 launch后redirect：
-  reservation
+  reservation token
   -> complete_v2_pending_sample比较pending_sample_flush_epoch与当前dispatch_flush_epoch
+  -> mark_lsq_reservation_sampled记录DUT sample sequence和DUT_VISIBLE
   -> 保存epoch与当前epoch不等，不调用complete_admission
   -> no issue route
-  -> 既有global redirect/cancel owner累计回退量
+  -> 当前redirect epoch的cancel record统计software cancel
   -> apply_pending_lsq_cancels
-  -> pointer/free rollback
+  -> software count只执行一次pointer/free rollback
+  -> DUT observed count只对账，不再次rollback
   -> uid reissue
 
 末批drain：
@@ -582,11 +636,13 @@ launch后redirect：
 
 ```text
 正常路径先从连续uid前缀生成不超过V2 6-load/4-store能力的request；xaction约束保证通用随机路径遵守
-同一上限，driver在写VIF前再对所有producer复核。driver只launch一次，sequence立即预留资源，使下一批
-看到正确pointer。下一driver边界证明上一批已有DUT sample机会，才把uid放入issue queue。
+同一上限，driver在写VIF前再对所有producer复核。driver只launch一次，sequence立即预留资源并生成
+`{uid, launch_epoch}` token，使下一批看到正确pointer。下一driver边界给上一批写入统一sample sequence，
+token转为DUT可见后才把uid放入issue queue。
 
-redirect路径按发生时点分层：launch前不建状态；launch后保留足够mapping让全局recovery可识别并取消，
-但epoch失效批不开放issue；资源回退仍只有原redirect/cancel owner。
+redirect路径按发生时点分层：launch前不建状态；launch后必须保留allocation、mapping和sample事实，
+使逐epochcancel record能准确统计DUT已看到的LQ/SQ entry。epoch失效批不开放issue；software count只回退
+一次，DUT observed count只负责核对。
 
 随机idle和末批trailing idle都只提供一个全零driver边界。前者不消费next uid，后者保证最后一批不会
 停在已预留未route状态；二者都不修改pass/fail/terminal语义。

@@ -48,9 +48,9 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
     logic io_mem_to_ooo_topToBackendBypass_clintTime_valid;
     logic [63:0] io_mem_to_ooo_topToBackendBypass_clintTime_bits;
     logic io_mem_to_ooo_topToBackendBypass_l2FlushDone;
-    logic [6:0] io_mem_to_ooo_lqCancelCnt;
-    logic [5:0] io_mem_to_ooo_sqCancelCnt;
-    logic [1:0] io_mem_to_ooo_sqDeq    ;
+    logic [`MEMBLOCK_LQ_CANCEL_COUNT_W-1:0] io_mem_to_ooo_lqCancelCnt;
+    logic [`MEMBLOCK_SQ_CANCEL_COUNT_W-1:0] io_mem_to_ooo_sqCancelCnt;
+    logic [`MEMBLOCK_SQ_DEQ_COUNT_W-1:0] io_mem_to_ooo_sqDeq;
     logic [3:0] io_mem_to_ooo_lqDeq    ;
     logic io_mem_to_ooo_lqDeqPtr_flag  ;
     logic [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_mem_to_ooo_lqDeqPtr_value;
@@ -70,14 +70,14 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
     logic io_mem_to_ooo_ldCancel_1_ld2Cancel;
     logic io_mem_to_ooo_ldCancel_2_ld2Cancel;
 
-    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_loadMmioUop_0_robIdx_value;
-    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_loadMmioUop_1_robIdx_value;
-    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_loadMmioUop_2_robIdx_value;
-    logic io_mem_to_ooo_lsqio_loadMmio_0;
-    logic io_mem_to_ooo_lsqio_loadMmio_1;
-    logic io_mem_to_ooo_lsqio_loadMmio_2;
-    logic io_mem_to_ooo_lsqio_storeMmio;
-    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] io_mem_to_ooo_lsqio_storeMmioUop_robIdx_value;
+    logic [`MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM-1:0] load_mmio_valid;
+    logic [`MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM-1:0][`MEMBLOCK_DUT_ROB_VALUE_W-1:0]
+          load_mmio_rob_value;
+    logic store_mmio_valid;
+    logic [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] store_mmio_rob_value;
+    logic sq_deq_ptr_valid;
+    logic sq_deq_ptr_flag;
+    logic [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] sq_deq_ptr_value;
     io_mem_to_ooo_ctrl_agent_agent_xaction  mon_tr;
     memblock_sync_pkg::dispatch_raw_ctrl_t raw_ctrl;
     while(1) begin
@@ -117,14 +117,14 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
         io_mem_to_ooo_ldCancel_1_ld2Cancel = this.vif.mon_mp.mon_cb.io_mem_to_ooo_ldCancel_1_ld2Cancel;
         io_mem_to_ooo_ldCancel_2_ld2Cancel = this.vif.mon_mp.mon_cb.io_mem_to_ooo_ldCancel_2_ld2Cancel;
 
-        io_mem_to_ooo_lsqio_loadMmioUop_0_robIdx_value = this.vif.mon_mp.mon_cb.io_mem_to_ooo_lsqio_loadMmioUop_0_robIdx_value;
-        io_mem_to_ooo_lsqio_loadMmioUop_1_robIdx_value = this.vif.mon_mp.mon_cb.io_mem_to_ooo_lsqio_loadMmioUop_1_robIdx_value;
-        io_mem_to_ooo_lsqio_loadMmioUop_2_robIdx_value = this.vif.mon_mp.mon_cb.io_mem_to_ooo_lsqio_loadMmioUop_2_robIdx_value;
-        io_mem_to_ooo_lsqio_loadMmio_0 = this.vif.mon_mp.mon_cb.io_mem_to_ooo_lsqio_loadMmio_0;
-        io_mem_to_ooo_lsqio_loadMmio_1 = this.vif.mon_mp.mon_cb.io_mem_to_ooo_lsqio_loadMmio_1;
-        io_mem_to_ooo_lsqio_loadMmio_2 = this.vif.mon_mp.mon_cb.io_mem_to_ooo_lsqio_loadMmio_2;
-        io_mem_to_ooo_lsqio_storeMmio = this.vif.mon_mp.mon_cb.io_mem_to_ooo_lsqio_storeMmio;
-        io_mem_to_ooo_lsqio_storeMmioUop_robIdx_value = this.vif.mon_mp.mon_cb.io_mem_to_ooo_lsqio_storeMmioUop_robIdx_value;
+        this.vif.sample_mmio_outputs(load_mmio_valid,
+                                     load_mmio_rob_value,
+                                     store_mmio_valid,
+                                     store_mmio_rob_value);
+        this.vif.sample_sq_deq_ptr(io_mem_to_ooo_sqDeq,
+                                   sq_deq_ptr_valid,
+                                   sq_deq_ptr_flag,
+                                   sq_deq_ptr_value);
 
         if(this.cfg.xz_sw==tcnt_dec_base::ON && this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
             `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_topToBackendBypass_hartId,io_mem_to_ooo_topToBackendBypass_hartId,6);
@@ -140,9 +140,9 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
             `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_topToBackendBypass_clintTime_valid,io_mem_to_ooo_topToBackendBypass_clintTime_valid,1);
             `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_topToBackendBypass_clintTime_bits,io_mem_to_ooo_topToBackendBypass_clintTime_bits,64);
             `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_topToBackendBypass_l2FlushDone,io_mem_to_ooo_topToBackendBypass_l2FlushDone,1);
-            `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_lqCancelCnt,io_mem_to_ooo_lqCancelCnt,7);
-            `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_sqCancelCnt,io_mem_to_ooo_sqCancelCnt,6);
-            `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_sqDeq,io_mem_to_ooo_sqDeq,2);
+            `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_lqCancelCnt,io_mem_to_ooo_lqCancelCnt,`MEMBLOCK_LQ_CANCEL_COUNT_W);
+            `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_sqCancelCnt,io_mem_to_ooo_sqCancelCnt,`MEMBLOCK_SQ_CANCEL_COUNT_W);
+            `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_sqDeq,io_mem_to_ooo_sqDeq,`MEMBLOCK_SQ_DEQ_COUNT_W);
             `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_lqDeq,io_mem_to_ooo_lqDeq,4);
             `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_lqDeqPtr_flag,io_mem_to_ooo_lqDeqPtr_flag,1);
             `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_lqDeqPtr_value,io_mem_to_ooo_lqDeqPtr_value,`MEMBLOCK_DUT_LQ_VALUE_W);
@@ -161,19 +161,84 @@ task io_mem_to_ooo_ctrl_agent_agent_monitor::mon_data();
             `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_ldCancel_0_ld2Cancel,io_mem_to_ooo_ldCancel_0_ld2Cancel,1);
             `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_ldCancel_1_ld2Cancel,io_mem_to_ooo_ldCancel_1_ld2Cancel,1);
             `TCNT_CHECK_SIG_XZ(io_mem_to_ooo_ldCancel_2_ld2Cancel,io_mem_to_ooo_ldCancel_2_ld2Cancel,1);
-
+            `TCNT_CHECK_SIG_XZ(load_mmio_valid,load_mmio_valid,`MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM);
+            `TCNT_CHECK_SIG_XZ(store_mmio_valid,store_mmio_valid,1);
+            foreach (load_mmio_valid[port]) begin
+                if (load_mmio_valid[port] === 1'b1) begin
+                    `TCNT_CHECK_SIG_XZ(load_mmio_rob_value[port],load_mmio_rob_value[port],`MEMBLOCK_DUT_ROB_VALUE_W);
+                end
+            end
+            if (store_mmio_valid === 1'b1) begin
+                `TCNT_CHECK_SIG_XZ(store_mmio_rob_value,store_mmio_rob_value,`MEMBLOCK_DUT_ROB_VALUE_W);
+            end
+            if (sq_deq_ptr_valid === 1'b1) begin
+                `TCNT_CHECK_SIG_XZ(sq_deq_ptr_flag,sq_deq_ptr_flag,1);
+                `TCNT_CHECK_SIG_XZ(sq_deq_ptr_value,sq_deq_ptr_value,`MEMBLOCK_DUT_SQ_VALUE_W);
+            end
         end
         if(this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
+            bit any_mmio_valid;
+
+            any_mmio_valid = store_mmio_valid === 1'b1;
+            foreach (load_mmio_valid[port]) begin
+                any_mmio_valid |= load_mmio_valid[port] === 1'b1;
+            end
+            if (!`MEMBLOCK_DUT_HAS_SQ_DEQ_PTR && sq_deq_ptr_valid !== 1'b0) begin
+                `uvm_fatal("CTRL_MONITOR", "V2 count-only sqDeq unexpectedly sampled a pointer")
+            end
+            if (`MEMBLOCK_DUT_HAS_SQ_DEQ_PTR && io_mem_to_ooo_sqDeq != '0 &&
+                sq_deq_ptr_valid !== 1'b1) begin
+                `uvm_fatal("CTRL_MONITOR", "pointer-capable sqDeq sample is missing its pointer")
+            end
+            begin
+                memblock_sync_pkg::dispatch_raw_cancel_snapshot_t cancel_snapshot;
+
+                if (io_mem_to_ooo_lqCancelCnt > `MEMBLOCK_DUT_LQ_SIZE ||
+                    io_mem_to_ooo_sqCancelCnt > `MEMBLOCK_DUT_SQ_SIZE) begin
+                    `uvm_fatal("CTRL_MONITOR",
+                               $sformatf("DUT cancel count exceeds capacity lq=%0d/%0d sq=%0d/%0d",
+                                         io_mem_to_ooo_lqCancelCnt, `MEMBLOCK_DUT_LQ_SIZE,
+                                         io_mem_to_ooo_sqCancelCnt, `MEMBLOCK_DUT_SQ_SIZE))
+                end
+
+                // 中文伪代码：每个可见 DUT sample 都记录 held cancel level，零值也保留；
+                // adapter/LSQ owner 只在对应 redirect target sample 消费一次。
+                cancel_snapshot.lq_cancel_count = io_mem_to_ooo_lqCancelCnt;
+                cancel_snapshot.sq_cancel_count = io_mem_to_ooo_sqCancelCnt;
+                cancel_snapshot.sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+                cancel_snapshot.cycle = $time;
+                memblock_sync_pkg::push_raw_cancel_snapshot(cancel_snapshot);
+            end
             if (io_mem_to_ooo_lqDeq != '0 ||
                 io_mem_to_ooo_sqDeq != '0 ||
                 io_mem_to_ooo_memoryViolation_valid ||
-                memblock_sync_pkg::dispatch_flushsb_waiting_empty) begin
+                memblock_sync_pkg::dispatch_flushsb_waiting_empty ||
+                any_mmio_valid) begin
                 raw_ctrl = memblock_sync_pkg::make_empty_raw_ctrl();
                 raw_ctrl.valid = 1'b1;
                 raw_ctrl.lq_deq = io_mem_to_ooo_lqDeq;
                 raw_ctrl.sq_deq = io_mem_to_ooo_sqDeq;
                 raw_ctrl.lq_deq_ptr_flag = io_mem_to_ooo_lqDeqPtr_flag;
                 raw_ctrl.lq_deq_ptr_value = io_mem_to_ooo_lqDeqPtr_value;
+                raw_ctrl.sq_deq_ptr_valid = sq_deq_ptr_valid;
+                raw_ctrl.sq_deq_ptr_flag = sq_deq_ptr_flag;
+                raw_ctrl.sq_deq_ptr_value = sq_deq_ptr_value;
+                foreach (load_mmio_valid[port]) begin
+                    if (load_mmio_valid[port] === 1'b1) begin
+                        raw_ctrl.load_mmio_valid[port] = 1'b1;
+                        raw_ctrl.load_mmio_rob_value[port] = load_mmio_rob_value[port];
+                    end
+                end
+                if (store_mmio_valid === 1'b1) begin
+                    raw_ctrl.store_mmio_valid = 1'b1;
+                    raw_ctrl.store_mmio_rob_value = store_mmio_rob_value;
+                end
+                if (any_mmio_valid) begin
+                    raw_ctrl.mmio_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+                    // 中文伪代码：MMIO valid 时把本次 monitor sample 的单调序号
+                    // 固定到 raw；后续 adapter 不得用消费时刻的序号覆盖它。
+                    raw_ctrl.mmio_sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+                end
                 raw_ctrl.memory_violation_valid = io_mem_to_ooo_memoryViolation_valid;
                 raw_ctrl.memory_violation_rob_valid = io_mem_to_ooo_memoryViolation_valid;
                 raw_ctrl.memory_violation_rob_flag = io_mem_to_ooo_memoryViolation_bits_robIdx_flag;

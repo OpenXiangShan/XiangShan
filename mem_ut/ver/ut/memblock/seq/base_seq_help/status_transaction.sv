@@ -54,6 +54,24 @@ class status_transaction extends uvm_object;
     bit active_lq_mapped;
     bit active_sq_mapped;
 
+    // 中文注释：这些字段只描述 LSQ 动态实例是否已经跨过 DUT sample 边界，
+    // 不改变 pass/fail/terminal 语义，也不替代 batch flush epoch。
+    memblock_lsq_reservation_state_e lsq_reservation_state;
+    int unsigned                    lsq_reservation_launch_epoch;
+    longint unsigned                lsq_reservation_sample_seq;
+    bit                             lsq_reservation_sample_valid;
+    int unsigned                    lsq_cancel_accounted_epoch;
+    // 中文注释：当前 dynamic_epoch 是否有且只有一个 canonical MMIO tag。
+    // 置位/更新只允许走 common_data_transaction::set_uid_mmio_tag()；
+    // redirect/reissue 由 clear_uid_mmio_tag() 清零，普通 terminal retire 不复用实例。
+    bit                             mmio_tag_valid;
+    // 中文注释：有效 tag 的互斥 kind。load/store 不得同时为 1；query 还会
+    // 校验 mmio_tag_dynamic_epoch，防止旧实例 tag 被新实例观察。
+    bit                             is_mmio_load;
+    bit                             is_mmio_store;
+    memblock_mmio_tag_source_e      mmio_tag_source;
+    int unsigned                    mmio_tag_dynamic_epoch;
+
     bit                 robIdx_flag;
     bit [MEMBLOCK_ROB_VALUE_W-1:0] robIdx_value;
     bit                 lqIdx_flag;
@@ -63,10 +81,13 @@ class status_transaction extends uvm_object;
     int unsigned        load_issue_epoch;
     int unsigned        sta_issue_epoch;
     int unsigned        std_issue_epoch;
-    // 记录每个 target 最近一次真实 issue 所属的 dispatch flush epoch。
-    // generic 字段保留为当前 uid 最近一次 issue 的兼容快照，target 字段用于事件归属校验。
+    // 中文注释：active_instance_flush_epoch 记录 activate_uid() 建立当前动态实例时
+    // 的 dispatch flush epoch。activate_uid() 置位，clear_uid_dispatch_result() 清零；
+    // MMIO value-only resolver 用它证明 raw 属于当前实例或旧实例。
     bit                 active_instance_flush_epoch_valid;
     int unsigned        active_instance_flush_epoch;
+    // 记录每个 target 最近一次真实 issue 所属的 dispatch flush epoch，供 WB/feedback
+    // 归属校验；它们不拥有 active-instance activation provenance。
     bit                 load_instance_flush_epoch_valid;
     bit                 sta_instance_flush_epoch_valid;
     bit                 std_instance_flush_epoch_valid;
@@ -129,6 +150,16 @@ class status_transaction extends uvm_object;
         terminal_done     = 1'b0;
         active_lq_mapped  = 1'b0;
         active_sq_mapped  = 1'b0;
+        lsq_reservation_state = MEMBLOCK_LSQ_RESERVATION_NONE;
+        lsq_reservation_launch_epoch = 0;
+        lsq_reservation_sample_seq = 0;
+        lsq_reservation_sample_valid = 1'b0;
+        lsq_cancel_accounted_epoch = 0;
+        mmio_tag_valid = 1'b0;
+        is_mmio_load = 1'b0;
+        is_mmio_store = 1'b0;
+        mmio_tag_source = MEMBLOCK_MMIO_TAG_NONE;
+        mmio_tag_dynamic_epoch = 0;
         robIdx_flag       = 1'b0;
         robIdx_value      = '0;
         lqIdx_flag        = 1'b0;
@@ -245,13 +276,9 @@ class status_transaction extends uvm_object;
                 `uvm_fatal("STATUS_TR", $sformatf("set_target_instance_flush_epoch got target=%0d", target))
             end
         endcase
-        active_instance_flush_epoch_valid = 1'b1;
-        active_instance_flush_epoch = instance_flush_epoch_i;
     endfunction:set_target_instance_flush_epoch
 
     function void clear_target_instance_flush_epochs();
-        active_instance_flush_epoch_valid = 1'b0;
-        active_instance_flush_epoch = 0;
         load_instance_flush_epoch_valid = 1'b0;
         sta_instance_flush_epoch_valid = 1'b0;
         std_instance_flush_epoch_valid = 1'b0;
@@ -259,6 +286,14 @@ class status_transaction extends uvm_object;
         sta_instance_flush_epoch = 0;
         std_instance_flush_epoch = 0;
     endfunction:clear_target_instance_flush_epochs
+
+    function void clear_lsq_reservation_visibility();
+        // 中文伪代码：真实 deq/redirect 清除当前动态实例可见性，但保留单调 launch epoch，
+        // 使同 UID 的晚到 callback 不能命中新实例。
+        lsq_reservation_state = MEMBLOCK_LSQ_RESERVATION_NONE;
+        lsq_reservation_sample_seq = 0;
+        lsq_reservation_sample_valid = 1'b0;
+    endfunction:clear_lsq_reservation_visibility
 
 endclass:status_transaction
 

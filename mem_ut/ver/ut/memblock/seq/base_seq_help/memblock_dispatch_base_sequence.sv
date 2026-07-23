@@ -193,7 +193,7 @@ task memblock_dispatch_base_sequence::pre_body();
         exception_handler = exception_redirect_replay_handler::type_id::create("exception_handler");
     end
     if (monitor_commit_handler == null) begin
-        monitor_commit_handler = lsq_commit_handler::type_id::create("monitor_commit_handler");
+        monitor_commit_handler = lsq_commit_handler::get();
         monitor_commit_handler.bind_lsq_ctrl(lsq_ctrl);
     end
     if (monitor_adapter == null) begin
@@ -349,7 +349,7 @@ task memblock_dispatch_base_sequence::collect_monitor_event_batch();
     end
     monitor_batch_handler.bind_writeback_handler(writeback_handler);
     if (monitor_commit_handler == null) begin
-        monitor_commit_handler = lsq_commit_handler::type_id::create("monitor_commit_handler");
+        monitor_commit_handler = lsq_commit_handler::get();
         if (lsq_ctrl != null) begin
             monitor_commit_handler.bind_lsq_ctrl(lsq_ctrl);
         end
@@ -367,10 +367,8 @@ task memblock_dispatch_base_sequence::collect_monitor_event_batch();
                                                        sample_cycle_valid);
     monitor_batch_handler.process_monitor_event_batch(events);
     // 中文注释：semantic batch 已完成 redirect-first/feedback 处理后，才释放本拍
-    // ctrl/deq 对应的 LQ/SQ mapping；保持 raw ctrl 的 FIFO 顺序。
-    foreach (deferred_ctrl[idx]) begin
-        monitor_adapter.apply_raw_ctrl_deq(deferred_ctrl[idx]);
-    end
+    // ctrl/deq 对应的 LQ/SQ mapping；失败的队首 raw 保留到后续 service tick 重试。
+    monitor_adapter.apply_deferred_ctrl_updates_batch(deferred_ctrl);
 endtask:collect_monitor_event_batch
 
 task memblock_dispatch_base_sequence::exception_redirect_replay_task();

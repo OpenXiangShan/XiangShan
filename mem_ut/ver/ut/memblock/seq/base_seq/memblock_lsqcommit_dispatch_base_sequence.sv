@@ -24,7 +24,8 @@ class memblock_lsqcommit_dispatch_base_sequence extends lsqcommit_agent_agent_de
     extern virtual task body();
     extern virtual task drive_lsqcommit_loop();
     extern virtual task send_lsqcommit_cycle(input int unsigned cycle_idx,
-                                             output bit has_progress);
+                                             output bit has_progress,
+                                             output bit terminal_idle_published);
     extern task wait_for_main_table();
     extern task wait_clock_tick();
     extern function void configure_from_plus();
@@ -64,17 +65,9 @@ task memblock_lsqcommit_dispatch_base_sequence::drive_lsqcommit_loop();
     idle_count = 0;
     forever begin
         bit has_progress;
+        bit terminal_idle_published;
 
-        if (data.is_global_stop_requested() &&
-            !data.flushsb_request_pending()) begin
-            `uvm_info(get_type_name(),
-                      $sformatf("stop LSQ commit loop by global_stop_requested at cycle=%0d",
-                                cycle_idx),
-                      UVM_LOW)
-            break;
-        end
-
-        send_lsqcommit_cycle(cycle_idx, has_progress);
+        send_lsqcommit_cycle(cycle_idx, has_progress, terminal_idle_published);
         cycle_idx++;
         if (has_progress) begin
             idle_count = 0;
@@ -94,20 +87,35 @@ task memblock_lsqcommit_dispatch_base_sequence::drive_lsqcommit_loop();
                 idle_count = 0;
             end
         end
+        if (data.is_global_stop_requested() &&
+            !data.flushsb_request_pending() &&
+            terminal_idle_published) begin
+            `uvm_info(get_type_name(),
+                      $sformatf("stop LSQ commit loop after publishing terminal idle at cycle=%0d",
+                                cycle_idx),
+                      UVM_LOW)
+            break;
+        end
     end
 endtask:drive_lsqcommit_loop
 
 task memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle(input int unsigned cycle_idx,
-                                                                output bit has_progress);
+                                                                output bit has_progress,
+                                                                output bit terminal_idle_published);
     lsqcommit_agent_agent_xaction tr;
     memblock_uid_t                commit_uids[$];
     memblock_flushsb_req_t        flushsb_req;
     bit                           has_commit;
+    bit                           has_fault_head;
+    memblock_uid_t                fault_uid;
     bit                           has_flushsb_progress;
 
     has_commit = 1'b0;
+    has_fault_head = 1'b0;
+    fault_uid = 0;
     has_flushsb_progress = 1'b0;
     has_progress = 1'b0;
+    terminal_idle_published = 1'b0;
     data.warn_flushsb_timeout_if_needed(seq_csr_common::get_flushsb_timeout());
     if (data.issue_blocked_by_global_flush()) begin
         tr = lsqcommit_agent_agent_xaction::type_id::create($sformatf("lsqcommit_dispatch_idle_tr_%0d", cycle_idx));
@@ -117,7 +125,8 @@ task memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle(input int u
         has_progress = data.flushsb_request_pending();
         return;
     end
-    commit_handler.build_lsqcommit_xaction(tr, commit_uids, has_commit);
+    commit_handler.build_lsqcommit_xaction(tr, commit_uids, has_commit,
+                                           has_fault_head, fault_uid);
     tr.set_name($sformatf("lsqcommit_dispatch_tr_%0d", cycle_idx));
     if (data.try_pop_flushsb_request(flushsb_req)) begin
         tr.io_ooo_to_mem_flushSb = 1'b1;
@@ -131,10 +140,26 @@ task memblock_lsqcommit_dispatch_base_sequence::send_lsqcommit_cycle(input int u
 
     if (has_commit) begin
         commit_handler.mark_rob_commit_batch(commit_uids);
+    end else if (has_fault_head) begin
+        commit_handler.mark_fault_rob_commit_uid(fault_uid);
     end
     has_progress = has_commit ||
+                   has_fault_head ||
                    has_flushsb_progress ||
                    data.flushsb_busy();
+    terminal_idle_published = data.is_global_stop_requested() &&
+                              commit_handler.commit_cursor_uid == data.main_trans_num &&
+                              commit_handler.modeled_rob_deq_ptr_initialized &&
+                              !commit_handler.modeled_head_valid &&
+                              !commit_handler.fault_head_waiting &&
+                              !data.flushsb_request_pending() &&
+                              !data.cancel_reconcile_pending() &&
+                              !data.redirect_sample_anchor_pending() &&
+                              !data.cancel_snapshot_buffer_pending() &&
+                              !tr.io_ooo_to_mem_lsqio_pendingMMIOld &&
+                              !tr.io_ooo_to_mem_lsqio_pendingst &&
+                              tr.io_ooo_to_mem_lsqio_scommit == '0 &&
+                              !tr.io_ooo_to_mem_flushSb;
 endtask:send_lsqcommit_cycle
 
 task memblock_lsqcommit_dispatch_base_sequence::wait_for_main_table();
@@ -169,8 +194,9 @@ endfunction:configure_from_plus
 function void memblock_lsqcommit_dispatch_base_sequence::ensure_helpers();
     data = common_data_transaction::get();
     if (commit_handler == null) begin
-        commit_handler = lsq_commit_handler::type_id::create("commit_handler");
+        commit_handler = lsq_commit_handler::get();
     end
+    commit_handler.reset_lsqcommit_runtime_state();
     commit_handler.bind_lsq_ctrl(lsq_ctrl_model::get());
     if (data == null || commit_handler == null) begin
         `uvm_fatal(get_type_name(), "failed to initialize lsqcommit helpers")

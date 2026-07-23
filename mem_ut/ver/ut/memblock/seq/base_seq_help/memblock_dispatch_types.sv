@@ -36,8 +36,25 @@ localparam int unsigned MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM = `MEMBLOCK_DUT_MMIO_LOA
 localparam bit MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT = `MEMBLOCK_DUT_ISSUE_PORT_STYLE_SPLIT;
 localparam bit MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP = `MEMBLOCK_DUT_LSQ_ENQ_HAS_ACCEPT_RESP;
 localparam bit MEMBLOCK_DUT_HAS_SQ_DEQ_PTR = `MEMBLOCK_DUT_HAS_SQ_DEQ_PTR;
-localparam int unsigned MEMBLOCK_DUT_L2TLB_DFILTER_SIZE = `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE;
-localparam int unsigned MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES = `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
+localparam int unsigned MEMBLOCK_DUT_ENSBUFFER_WIDTH = `MEMBLOCK_DUT_ENSBUFFER_WIDTH;
+localparam int unsigned MEMBLOCK_SQ_DEQ_COUNT_W = `MEMBLOCK_SQ_DEQ_COUNT_W;
+localparam int unsigned MEMBLOCK_LQ_CANCEL_COUNT_W = `MEMBLOCK_LQ_CANCEL_COUNT_W;
+localparam int unsigned MEMBLOCK_SQ_CANCEL_COUNT_W = `MEMBLOCK_SQ_CANCEL_COUNT_W;
+localparam int unsigned MEMBLOCK_DUT_REDIRECT_TO_LSQ_LATENCY = `MEMBLOCK_DUT_REDIRECT_TO_LSQ_LATENCY;
+localparam int unsigned MEMBLOCK_DUT_CANCEL_OUTPUT_LATENCY = `MEMBLOCK_DUT_CANCEL_OUTPUT_LATENCY;
+localparam int unsigned MEMBLOCK_TB_CANCEL_MONITOR_SAMPLE_OFFSET =
+    `MEMBLOCK_TB_CANCEL_MONITOR_SAMPLE_OFFSET;
+localparam int unsigned MEMBLOCK_CANCEL_SNAPSHOT_OBSERVE_LATENCY =
+    `MEMBLOCK_CANCEL_SNAPSHOT_OBSERVE_LATENCY;
+localparam int unsigned MEMBLOCK_CANCEL_RECORD_MAX_DEPTH = `MEMBLOCK_CANCEL_RECORD_MAX_DEPTH;
+localparam int unsigned MEMBLOCK_CANCEL_SNAPSHOT_QUEUE_MAX_DEPTH =
+    `MEMBLOCK_CANCEL_SNAPSHOT_QUEUE_MAX_DEPTH;
+// 中文注释：V2 DTLB filter容量和顶层flush观测到filter清空的hold拍数。
+// L2TLB responder只读这些typed localparam，用于queue上界、参数收敛和ready恢复边界。
+localparam int unsigned MEMBLOCK_DUT_L2TLB_DFILTER_SIZE =
+    `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE;
+localparam int unsigned MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES =
+    `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
 localparam int unsigned MEMBLOCK_DUT_MAX_UOP_SIZE = `MEMBLOCK_DUT_MAX_UOP_SIZE;
 localparam int unsigned MEMBLOCK_DUT_UOP_IDX_W = `MEMBLOCK_DUT_UOP_IDX_W;
 localparam int unsigned MEMBLOCK_DUT_VLEN = `MEMBLOCK_DUT_VLEN;
@@ -332,6 +349,31 @@ typedef enum bit [2:0] {
     MEMBLOCK_OP_BEHAVIOR_ATOMIC   = 3'd5
 } memblock_op_behavior_kind_e;
 
+typedef enum bit [1:0] {
+    // 当前动态实例没有 MMIO 属性；不得作为 setter 的有效 kind。
+    MEMBLOCK_MMIO_KIND_NONE  = 2'd0,
+    // scalar load 的 MMIO 属性；只允许绑定到 active load 动态实例。
+    MEMBLOCK_MMIO_KIND_LOAD  = 2'd1,
+    // scalar store 的 MMIO 属性；只允许绑定到 active store 动态实例。
+    MEMBLOCK_MMIO_KIND_STORE = 2'd2
+} memblock_mmio_kind_e;
+
+typedef enum bit [1:0] {
+    // 空 tag 的中性来源；有效 tag 不允许使用该值。
+    MEMBLOCK_MMIO_TAG_NONE     = 2'd0,
+    // software-only directed 场景通过 canonical API 预置的属性。
+    MEMBLOCK_MMIO_TAG_DIRECTED = 2'd1,
+    // ctrl monitor 的真实 loadMmio/storeMmio output，经 adapter 归一化后的属性。
+    MEMBLOCK_MMIO_TAG_MONITOR  = 2'd2
+} memblock_mmio_tag_source_e;
+
+typedef enum bit {
+    // raw ROB value 唯一归属于当前 active 动态实例，可以进入 tag staging。
+    MEMBLOCK_MMIO_RESOLVE_CURRENT    = 1'b0,
+    // raw 可证明早于当前动态实例或属于已经消失的旧 epoch，只丢弃该 port。
+    MEMBLOCK_MMIO_RESOLVE_STALE_DROP = 1'b1
+} memblock_mmio_resolve_result_e;
+
 typedef struct packed {
     memblock_op_behavior_kind_e kind;
     bit [1:0]                   need_alloc;
@@ -389,6 +431,52 @@ typedef struct {
     // 请求来源标签：0=directed/unknown，1=periodic，后续可扩展其它producer。
     int unsigned              source;
 } memblock_flushsb_req_t;
+
+typedef enum bit [1:0] {
+    MEMBLOCK_LSQ_RESERVATION_NONE = 2'd0,
+    MEMBLOCK_LSQ_RESERVATION_LAUNCHED_PENDING_SAMPLE = 2'd1,
+    MEMBLOCK_LSQ_RESERVATION_DUT_VISIBLE = 2'd2,
+    MEMBLOCK_LSQ_RESERVATION_CANCEL_ACCOUNTED = 2'd3
+} memblock_lsq_reservation_state_e;
+
+// 中文伪代码：真实 LSQ launch 后创建 token；下一采样边界把同一 token 标记为 DUT_VISIBLE。
+typedef struct {
+    bit          valid;
+    memblock_uid_t uid;
+    int unsigned launch_epoch;
+} memblock_lsq_reservation_token_t;
+
+// 中文注释：每个 framework redirect epoch 唯一的 cancel 对账记录。
+// request_redirect_flush() 创建，redirect monitor anchor 按 FIFO 绑定；active scan 写
+// software count，LSQ enqueue sequence 只应用该 count，main service 只比较 DUT snapshot。
+// software_applied 与 observed_valid 是独立进度，两者均完成后才允许从 FIFO 头删除。
+typedef struct {
+    bit                         valid;
+    int unsigned                redirect_epoch;
+    int unsigned                cancel_record_id;
+    memblock_redirect_payload_t redirect;
+    longint unsigned            redirect_service_cycle;
+    bit                         redirect_drive_done_valid;
+    longint unsigned            redirect_drive_done_service_cycle;
+    longint unsigned            state_flush_applied_service_cycle;
+    longint unsigned            anchor_deadline_service_cycle;
+    bit                         redirect_anchor_valid;
+    longint unsigned            redirect_sample_seq;
+    longint unsigned            redirect_lsq_sample_seq;
+    longint unsigned            dut_cancel_update_sample_seq;
+    longint unsigned            compare_snapshot_sample_seq;
+    longint unsigned            deadline_sample_seq;
+    int unsigned                software_cancel_lq_count;
+    int unsigned                software_cancel_sq_count;
+    bit                         active_scan_done;
+    bit                         software_count_finalized;
+    bit                         software_applied;
+    bit                         observed_valid;
+    int unsigned                observed_cancel_lq_count;
+    int unsigned                observed_cancel_sq_count;
+} memblock_cancel_reconcile_t;
+
+typedef memblock_cancel_reconcile_t memblock_lsq_cancel_record_t;
 
 typedef struct {
     bit                         valid;

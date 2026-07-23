@@ -19,7 +19,7 @@ class memblock_lsqenq_dispatch_base_sequence extends lsqenq_agent_agent_default_
     int unsigned no_progress_warn_cycles;
     // 已launch并预留资源、但尚未跨过下一driver采样边界的单深度batch；confirm写入，sample helper清理。
     bit          pending_sample_valid;
-    memblock_uid_t pending_sample_uids[$];
+    memblock_lsq_reservation_token_t pending_sample_tokens[$];
     int unsigned pending_sample_flush_epoch;
     longint unsigned pending_sample_launch_cycle;
 
@@ -243,16 +243,40 @@ endfunction:ensure_helpers
 
 function void memblock_lsqenq_dispatch_base_sequence::apply_pending_lsq_cancels();
     ensure_helpers();
-    if (data.pending_lq_cancel_count != 0) begin
-        // redirect flush后回退软件LSQ admission镜像，确保重入队仍与后续软件preview key一致。
-        lsq_ctrl.cancel_lq(data.pending_lq_cancel_count);
-        data.pending_lq_cancel_count = 0;
+    foreach (data.cancel_record_q[idx]) begin
+        int unsigned lq_count;
+        int unsigned sq_count;
+        int unsigned redirect_epoch;
+
+        if (!data.cancel_record_q[idx].valid ||
+            data.cancel_record_q[idx].software_applied) begin
+            continue;
+        end
+        if (!data.cancel_record_q[idx].software_count_finalized) begin
+            break;
+        end
+        lq_count = data.cancel_record_q[idx].software_cancel_lq_count;
+        sq_count = data.cancel_record_q[idx].software_cancel_sq_count;
+        redirect_epoch = data.cancel_record_q[idx].redirect_epoch;
+        // 中文伪代码：software count 既是资源回退量也是 DUT compare 期望值；
+        // observed count 只核对，不再次调用 cancel_lq/cancel_sq。
+        if (lq_count != 0) begin
+            lsq_ctrl.cancel_lq(lq_count);
+            if (data.pending_lq_cancel_count < lq_count) begin
+                `uvm_fatal(get_type_name(), "pending LQ cancel aggregate underflow")
+            end
+            data.pending_lq_cancel_count -= lq_count;
+        end
+        if (sq_count != 0) begin
+            lsq_ctrl.cancel_sq(sq_count);
+            if (data.pending_sq_cancel_count < sq_count) begin
+                `uvm_fatal(get_type_name(), "pending SQ cancel aggregate underflow")
+            end
+            data.pending_sq_cancel_count -= sq_count;
+        end
+        data.mark_cancel_record_applied(redirect_epoch);
     end
-    if (data.pending_sq_cancel_count != 0) begin
-        // redirect flush后回退软件SQ admission镜像，后续uid从公共高水位顺序重入队。
-        lsq_ctrl.cancel_sq(data.pending_sq_cancel_count);
-        data.pending_sq_cancel_count = 0;
-    end
+    data.check_cancel_pending_aggregate();
 endfunction:apply_pending_lsq_cancels
 
 function void memblock_lsqenq_dispatch_base_sequence::drain_csr_runtime_events();
@@ -649,11 +673,6 @@ function void memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates(inp
     if (tr.memblock_dispatch_aborted_by_redirect) begin
         `uvm_fatal(get_type_name(), "LSQ transaction cannot be both launched and aborted before launch")
     end
-    if (admission_blocked_by_flush() ||
-        tr.memblock_dispatch_flush_epoch != memblock_sync_pkg::dispatch_flush_epoch) begin
-        `uvm_info(get_type_name(), "skip LSQ enqueue confirmation because redirect/flush is in progress", UVM_LOW)
-        return;
-    end
     if (pending_sample_valid) begin
         `uvm_fatal(get_type_name(), "cannot reserve current LSQ batch before completing previous sample")
     end
@@ -665,6 +684,7 @@ function void memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates(inp
     foreach (uids[idx]) begin
         memblock_lq_key_t expected_lq_key;
         memblock_sq_key_t expected_sq_key;
+        memblock_lsq_reservation_token_t token;
 
         lsq_ctrl.preview_allocate(behaviors[idx], expected_lq_key, expected_sq_key);
         if (behaviors[idx].uses_lq && expected_lq_key != lq_keys[idx]) begin
@@ -680,7 +700,10 @@ function void memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates(inp
                                  sq_keys[idx].flag, sq_keys[idx].value))
         end
         lsq_ctrl.commit_allocate(uids[idx], behaviors[idx], trs[idx]);
-        pending_sample_uids.push_back(uids[idx]);
+        token.valid = 1'b1;
+        token.uid = uids[idx];
+        token.launch_epoch = data.begin_lsq_reservation_launch(uids[idx]);
+        pending_sample_tokens.push_back(token);
         has_progress = 1'b1;
     end
     pending_sample_flush_epoch = tr.memblock_dispatch_flush_epoch;
@@ -689,13 +712,24 @@ function void memblock_lsqenq_dispatch_base_sequence::confirm_lsq_candidates(inp
 endfunction:confirm_lsq_candidates
 
 function void memblock_lsqenq_dispatch_base_sequence::complete_v2_pending_sample(inout bit has_progress);
+    longint unsigned sample_seq;
+
     if (!pending_sample_valid) begin
         return;
     end
+    sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+    foreach (pending_sample_tokens[idx]) begin
+        if (!pending_sample_tokens[idx].valid) begin
+            `uvm_fatal(get_type_name(), "pending LSQ reservation token is invalid")
+        end
+        data.mark_lsq_reservation_sampled(pending_sample_tokens[idx].uid,
+                                          pending_sample_tokens[idx].launch_epoch,
+                                          sample_seq);
+    end
     if (!admission_blocked_by_flush() &&
         pending_sample_flush_epoch == memblock_sync_pkg::dispatch_flush_epoch) begin
-        foreach (pending_sample_uids[idx]) begin
-            complete_admission(pending_sample_uids[idx]);
+        foreach (pending_sample_tokens[idx]) begin
+            complete_admission(pending_sample_tokens[idx].uid);
             has_progress = 1'b1;
         end
     end else begin
@@ -710,7 +744,7 @@ function void memblock_lsqenq_dispatch_base_sequence::complete_v2_pending_sample
 endfunction:complete_v2_pending_sample
 
 function void memblock_lsqenq_dispatch_base_sequence::clear_v2_pending_sample();
-    pending_sample_uids.delete();
+    pending_sample_tokens.delete();
     pending_sample_valid = 1'b0;
     pending_sample_flush_epoch = 0;
     pending_sample_launch_cycle = 0;

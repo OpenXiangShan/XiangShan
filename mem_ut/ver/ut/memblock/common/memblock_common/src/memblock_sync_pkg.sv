@@ -11,6 +11,8 @@
 `include "memblock_compile_params.svh"
 
 package memblock_sync_pkg;
+    import uvm_pkg::*;
+
     bit reset_backend_done = 1'b0;
     bit dispatch_flush_in_progress = 1'b0;
     bit dispatch_monitor_capture_en = 1'b0;
@@ -94,11 +96,26 @@ package memblock_sync_pkg;
     typedef struct {
         bit               valid;
         bit [3:0]         lq_deq;
-        bit [1:0]         sq_deq;
+        bit [`MEMBLOCK_SQ_DEQ_COUNT_W-1:0] sq_deq;
         bit               lq_deq_ptr_flag;
         bit [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] lq_deq_ptr_value;
+        // SQ pointer capability 与 payload 分离。V2 count-only profile 恒为 0；
+        // pointer-capable profile 只在 sq_deq 非零且真实 pointer 被采样时置 1。
+        bit               sq_deq_ptr_valid;
         bit               sq_deq_ptr_flag;
         bit [`MEMBLOCK_DUT_SQ_VALUE_W-1:0] sq_deq_ptr_value;
+        // ctrl monitor 是 MMIO output 的唯一 producer。valid 为 1 的 lane 才允许
+        // adapter 读取对应 ROB value；mmio_flush_epoch 固定为采样拍的 flush epoch。
+        bit [`MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM-1:0] load_mmio_valid;
+        bit [`MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM-1:0][`MEMBLOCK_DUT_ROB_VALUE_W-1:0]
+                          load_mmio_rob_value;
+        bit               store_mmio_valid;
+        bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0] store_mmio_rob_value;
+        int unsigned      mmio_flush_epoch;
+        // 中文注释：MMIO output 由 LoadQueueUncache 的 s1 后一拍脉冲产生；该序号
+        // 是 ctrl monitor 采样该脉冲的 DUT sample provenance，不等同于 flush epoch。
+        // 只有 monitor 在 MMIO valid 时写入，adapter 不得用当前 sample 重新推导。
+        longint unsigned  mmio_sample_seq;
         bit               memory_violation_valid;
         bit               memory_violation_rob_valid;
         bit               memory_violation_rob_flag;
@@ -112,6 +129,26 @@ package memblock_sync_pkg;
         bit               sb_is_empty;
         longint unsigned  cycle;
     } dispatch_raw_ctrl_t;
+
+    // 中文伪代码：ctrl monitor 每个 post-reset sample 都记录一次 held cancel level，
+    // 即使两个 count 都为 0 也入队；该队列不属于 semantic ctrl raw batch。
+    typedef struct {
+        bit [`MEMBLOCK_LQ_CANCEL_COUNT_W-1:0] lq_cancel_count;
+        bit [`MEMBLOCK_SQ_CANCEL_COUNT_W-1:0] sq_cancel_count;
+        longint unsigned                       sample_seq;
+        longint unsigned                       cycle;
+    } dispatch_raw_cancel_snapshot_t;
+
+    // 中文伪代码：redirect monitor 只记录 DUT 实际采样到的输入投影和 sample 序号，
+    // 不把该 sideband 重新包装成 recovery event。
+    typedef struct {
+        bit                                      valid;
+        bit                                      level;
+        bit                                      rob_flag;
+        bit [`MEMBLOCK_DUT_ROB_VALUE_W-1:0]     rob_value;
+        longint unsigned                         sample_seq;
+        longint unsigned                         cycle;
+    } dispatch_raw_redirect_anchor_t;
 
     typedef struct {
         bit               valid;
@@ -158,11 +195,15 @@ package memblock_sync_pkg;
     dispatch_raw_int_wb_t      raw_int_wb_q[$];
     dispatch_raw_iq_feedback_t raw_iq_feedback_q[$];
     dispatch_raw_ctrl_t        raw_ctrl_q[$];
+    // ctrl raw 已完成 semantic conversion、但尚未完成 LSQ owner apply 的持久 FIFO。
+    // 不能放在一次 service task 的 automatic queue 中，否则 resync warning 后会丢失。
+    dispatch_raw_ctrl_t        deferred_raw_ctrl_q[$];
+    dispatch_raw_cancel_snapshot_t raw_cancel_snapshot_q[$];
+    dispatch_raw_redirect_anchor_t raw_redirect_anchor_q[$];
     dispatch_raw_sfence_t      raw_sfence_q[$];
     dispatch_raw_csr_t         latest_raw_csr;
     bit                        latest_raw_csr_valid;
     int unsigned               latest_raw_csr_seq;
-
     // 中文注释：CSR monitor独立发布的post-reset runtime latest视图。
     // payload变化时序号单调递增；clear semantic raw queue和DUT reset均不清该公共快照。
     dispatch_raw_csr_t         runtime_csr_snapshot;
@@ -173,6 +214,10 @@ package memblock_sync_pkg;
     longint unsigned           l2tlb_flush_event_seq;
     time                       l2tlb_flush_sample_time;
     bit                        l2tlb_flush_event_valid;
+    longint unsigned           dut_sample_seq;
+    longint unsigned           dut_sample_time;
+    bit                        dut_sample_time_valid;
+
     function dispatch_raw_int_wb_t make_empty_raw_int_wb();
         dispatch_raw_int_wb_t item;
         item.valid                       = 1'b0;
@@ -233,8 +278,15 @@ package memblock_sync_pkg;
         item.sq_deq                     = '0;
         item.lq_deq_ptr_flag            = 1'b0;
         item.lq_deq_ptr_value           = '0;
+        item.sq_deq_ptr_valid           = 1'b0;
         item.sq_deq_ptr_flag            = 1'b0;
         item.sq_deq_ptr_value           = '0;
+        item.load_mmio_valid            = '0;
+        item.load_mmio_rob_value        = '0;
+        item.store_mmio_valid           = 1'b0;
+        item.store_mmio_rob_value       = '0;
+        item.mmio_flush_epoch           = 0;
+        item.mmio_sample_seq            = 0;
         item.memory_violation_valid     = 1'b0;
         item.memory_violation_rob_valid = 1'b0;
         item.memory_violation_rob_flag  = 1'b0;
@@ -249,6 +301,26 @@ package memblock_sync_pkg;
         item.cycle                      = 0;
         return item;
     endfunction:make_empty_raw_ctrl
+
+    function dispatch_raw_cancel_snapshot_t make_empty_raw_cancel_snapshot();
+        dispatch_raw_cancel_snapshot_t item;
+        item.lq_cancel_count = '0;
+        item.sq_cancel_count = '0;
+        item.sample_seq = 0;
+        item.cycle = 0;
+        return item;
+    endfunction:make_empty_raw_cancel_snapshot
+
+    function dispatch_raw_redirect_anchor_t make_empty_raw_redirect_anchor();
+        dispatch_raw_redirect_anchor_t item;
+        item.valid = 1'b0;
+        item.level = 1'b0;
+        item.rob_flag = 1'b0;
+        item.rob_value = '0;
+        item.sample_seq = 0;
+        item.cycle = 0;
+        return item;
+    endfunction:make_empty_raw_redirect_anchor
 
     function dispatch_raw_csr_t make_empty_raw_csr();
         dispatch_raw_csr_t item;
@@ -431,6 +503,90 @@ package memblock_sync_pkg;
         return 1'b1;
     endfunction:pop_raw_ctrl
 
+    function void push_deferred_raw_ctrl(input dispatch_raw_ctrl_t item);
+        // 该 raw 已经在 monitor capture 开启时进入 deferred 阶段；后续即使
+        // capture 开关变化，也不能丢失等待重试的事实。
+        if (item.valid) begin
+            deferred_raw_ctrl_q.push_back(item);
+        end
+    endfunction:push_deferred_raw_ctrl
+
+    function bit peek_deferred_raw_ctrl(output dispatch_raw_ctrl_t item);
+        if (deferred_raw_ctrl_q.size() == 0) begin
+            item = make_empty_raw_ctrl();
+            return 1'b0;
+        end
+        item = deferred_raw_ctrl_q[0];
+        return 1'b1;
+    endfunction:peek_deferred_raw_ctrl
+
+    function bit pop_deferred_raw_ctrl(output dispatch_raw_ctrl_t item);
+        if (deferred_raw_ctrl_q.size() == 0) begin
+            item = make_empty_raw_ctrl();
+            return 1'b0;
+        end
+        item = deferred_raw_ctrl_q.pop_front();
+        return 1'b1;
+    endfunction:pop_deferred_raw_ctrl
+
+    function longint unsigned get_dut_sample_seq(input longint unsigned sample_time);
+        if (!dut_sample_time_valid) begin
+            dut_sample_time = sample_time;
+            dut_sample_time_valid = 1'b1;
+            dut_sample_seq = 1;
+        end else if (sample_time < dut_sample_time) begin
+            `uvm_fatal("MEMBLOCK_SAMPLE_SEQ",
+                       $sformatf("DUT sample time moved backwards: previous=%0d current=%0d",
+                                 dut_sample_time, sample_time))
+        end else if (sample_time != dut_sample_time) begin
+            dut_sample_time = sample_time;
+            dut_sample_seq++;
+        end
+        return dut_sample_seq;
+    endfunction:get_dut_sample_seq
+
+    function longint unsigned peek_latest_dut_sample_seq();
+        return dut_sample_seq;
+    endfunction:peek_latest_dut_sample_seq
+
+    function void push_raw_cancel_snapshot(input dispatch_raw_cancel_snapshot_t item);
+        if (dispatch_monitor_capture_en) begin
+            if (raw_cancel_snapshot_q.size() >= `MEMBLOCK_CANCEL_SNAPSHOT_QUEUE_MAX_DEPTH) begin
+                `uvm_fatal("MEMBLOCK_SYNC", $sformatf("raw cancel snapshot queue exceeds compile bound=%0d",
+                                                        `MEMBLOCK_CANCEL_SNAPSHOT_QUEUE_MAX_DEPTH))
+            end
+            raw_cancel_snapshot_q.push_back(item);
+        end
+    endfunction:push_raw_cancel_snapshot
+
+    function bit pop_raw_cancel_snapshot(output dispatch_raw_cancel_snapshot_t item);
+        if (raw_cancel_snapshot_q.size() == 0) begin
+            item = make_empty_raw_cancel_snapshot();
+            return 1'b0;
+        end
+        item = raw_cancel_snapshot_q.pop_front();
+        return 1'b1;
+    endfunction:pop_raw_cancel_snapshot
+
+    function void push_raw_redirect_anchor(input dispatch_raw_redirect_anchor_t item);
+        if (dispatch_monitor_capture_en && item.valid) begin
+            if (raw_redirect_anchor_q.size() >= `MEMBLOCK_CANCEL_RECORD_MAX_DEPTH) begin
+                `uvm_fatal("MEMBLOCK_SYNC", $sformatf("raw redirect anchor queue exceeds compile bound=%0d",
+                                                        `MEMBLOCK_CANCEL_RECORD_MAX_DEPTH))
+            end
+            raw_redirect_anchor_q.push_back(item);
+        end
+    endfunction:push_raw_redirect_anchor
+
+    function bit pop_raw_redirect_anchor(output dispatch_raw_redirect_anchor_t item);
+        if (raw_redirect_anchor_q.size() == 0) begin
+            item = make_empty_raw_redirect_anchor();
+            return 1'b0;
+        end
+        item = raw_redirect_anchor_q.pop_front();
+        return 1'b1;
+    endfunction:pop_raw_redirect_anchor
+
     function void push_raw_csr(input dispatch_raw_csr_t item);
         if (dispatch_monitor_capture_en && item.valid &&
             runtime_csr_snapshot_valid &&
@@ -472,10 +628,16 @@ package memblock_sync_pkg;
         raw_int_wb_q.delete();
         raw_iq_feedback_q.delete();
         raw_ctrl_q.delete();
+        deferred_raw_ctrl_q.delete();
+        raw_cancel_snapshot_q.delete();
+        raw_redirect_anchor_q.delete();
         raw_sfence_q.delete();
         latest_raw_csr = make_empty_raw_csr();
         latest_raw_csr_valid = 1'b0;
         latest_raw_csr_seq = 0;
+        dut_sample_seq = 0;
+        dut_sample_time = 0;
+        dut_sample_time_valid = 1'b0;
         raw_csr_rearm_epoch++;
         dispatch_service_cycle = 0;
     endfunction:clear_raw_monitor_queues
@@ -492,8 +654,15 @@ package memblock_sync_pkg;
         return raw_int_wb_q.size() +
                raw_iq_feedback_q.size() +
                raw_ctrl_q.size() +
+               deferred_raw_ctrl_q.size() +
+               raw_cancel_snapshot_q.size() +
+               raw_redirect_anchor_q.size() +
                raw_sfence_q.size();
     endfunction:raw_monitor_queue_size
+
+    function int unsigned lsq_timing_sideband_queue_size();
+        return raw_cancel_snapshot_q.size() + raw_redirect_anchor_q.size();
+    endfunction:lsq_timing_sideband_queue_size
 endpackage
 
 `endif

@@ -1,355 +1,514 @@
 # Virtual Sequence 统一调度 Flow
 
-## 1. Flow 定位
+本文描述 memblock 通过 `basicTest + ts=<virtual sequence>` 选择顶层场景，并由
+`basicTest::main_phase()` 在 `env.vsqr` 上显式启动目标 vseq，再由
+`memblock_virtual_sequencer`并发调度真实agent sequence的当前调用链。重点覆盖real smoke和
+`memblock_dispatch_real_cancel_reconcile_vseq`的自然退出行为。
 
-本文描述 memblock 当前通过 `basicTest + ts=<virtual sequence>` 启动测试场景的真实源码 flow。该 flow 的目标是把 testcase 固定为 `basicTest`，把场景选择收敛到 `env.vsqr.main_phase.default_sequence` 上运行的 `virtual_base_sequence` 派生类。
+## 1. Flow 定位与术语
 
-核心对象：
+### 1.1 术语与抽象功能说明
 
-- `basicTest`：固定 testcase 入口，负责创建 `memblock_env`、读取 `+VSEQ_MAIN`、配置 `env.vsqr.main_phase.default_sequence`。
-- `memblock_virtual_sequencer`：env 里的 virtual sequencer，只保存各 agent 真实 sequencer handle。
-- `virtual_base_sequence`：所有顶层 vseq 的基类，默认 body 为空。
-- `memblock_dispatch_real_smoke_vseq`：real dispatch smoke 场景 vseq，负责启动 real smoke 需要的 base/responder sequence。
+| 英文术语 | 当前 flow 中的中文含义 | 代码对象/状态落点 | 示例 |
+|---|---|---|---|
+| `virtual sequencer` | 只汇总各agent sequencer handle的顶层调度器 | `memblock_env::vsqr`、`memblock_virtual_sequencer` | vseq通过`p_sequencer.lsqenq_sqr`启动LSQ sequence |
+| `explicit vseq start` | testcase在`main_phase()`中创建并显式`start()`的顶层sequence | `find_wrapper_by_name()`、`create_object_by_type()`、`main_vseq.start(env.vsqr)` | `ts=memblock_pending_mmio_directed_vseq`直接创建目标vseq |
+| `core flow` | 会建立主表并最终收敛的有限并发sequence集合 | `start_core_dispatch_flow()` | LSQ enq、issue、commit、L2TLB和main sequence |
+| `background responder` | 响应DUT request或框架drive queue的长期sequence | `dcache_mem__access_base_sequence`、`sbuffer_mem_access_base_sequence`、redirect sequence | global stop且无inflight后自然返回 |
+| `global stop` | 所有transaction和公共cancel/raw状态收敛后的统一停止标志 | `common_data_transaction::global_stop_requested` | 不是仅由`terminal_done_uid`单独决定 |
+| `inflight` | responder已经接受、但response或drive生命周期尚未完成的请求 | DCache/SBuffer握手状态、redirect drive queue/inflight | inflight存在时不能因global stop直接退出 |
+| `natural exit` | sequence在安全idle边界自行`break/return` | responder `body()`、cancel vseq等待逻辑 | 不使用`disable fork`强杀线程 |
+| `testcase objection` | `basicTest`在顶层`start()`前raise、返回后drop的phase objection | `basicTest::main_phase()` | 覆盖目标vseq完整`start()`，不依赖派生`pre_body/post_body`保活 |
+| `automatic phase objection` | sequence自身可选的自动raise/drop机制，不是顶层phase保活唯一来源 | cancel vseq `set_automatic_phase_objection(1'b1)` | 可覆盖局部sequence生命周期，但外层testcase objection仍在整个`start()`期间保持 |
+| `software-only directed` | 只在virtual sequencer上运行公共owner API检查、不启动业务agent sequence的专项入口 | `memblock_pending_mmio_directed_vseq` | 覆盖normal raw、LOAD `R/R+1` stale和精确expected-fatal |
+
+### 1.2 核心对象
+
+- `basicTest`：固定testcase入口，创建env、读取`+VSEQ_MAIN`、查找目标wrapper，并在`main_phase()`显式创建和启动vseq。
+- `memblock_virtual_sequencer`：保存各agent sequencer handle，不拥有driver或monitor数据流。
+- `virtual_base_sequence`：顶层vseq基类和sequencer检查入口。
+- `memblock_dispatch_real_smoke_vseq`：并发启动background responder和core flow。
+- `memblock_dispatch_real_cancel_reconcile_vseq`：在real smoke拓扑中加入真实redirect barrier、cancel
+  coverage检查和background responder完成握手。
+- `memblock_pending_mmio_directed_vseq`：通过既有virtual sequence选择路径启动pending-MMIO soft sequence；
+  不修改`basicTest`启动逻辑，也不启动real smoke background/core agent拓扑。
 
 ## 2. 函数调用 Flow 图
 
 ```mermaid
 flowchart TD
-    A[make tc=basicTest ts=<vseq>] --> B[project_cfg_vcs/xrun.mk adds +VSEQ_MAIN=${ts}]
+    A[make tc=basicTest ts=<vseq>] --> B[+VSEQ_MAIN=<vseq>]
     B --> C[basicTest::build_phase]
     C --> D[configure_real_env_cfg]
-    C --> E[memblock_env::build_phase creates env.vsqr]
-    E --> F[memblock_env::connect_phase connects agent sqr handles to vsqr]
-    C --> G[read +VSEQ_MAIN]
-    G --> H{usr_test_vseq == virtual_base_sequence}
-    H -->|yes| I[keep default empty virtual_base_sequence]
-    H -->|no| J[factory override virtual_base_sequence to user vseq]
-    I --> K[env.vsqr.main_phase starts selected vseq]
-    J --> K
-    K --> L[virtual_base_sequence::pre_body raises objection]
+    C --> E[memblock_env::build_phase creates vsqr]
+    E --> F[memblock_env::connect_phase binds agent sqr handles]
+    C --> G[find_wrapper_by_name for +VSEQ_MAIN]
+    G --> H[basicTest::main_phase]
+    H --> I[create_object_by_type and cast]
+    I --> J[testcase raises objection]
+    J --> K[set sequencer phase randomize]
+    K --> L[main_vseq.start env.vsqr]
     L --> M{selected vseq}
-    M -->|empty| N[virtual_base_sequence::body returns]
-    M -->|real smoke| O[memblock_dispatch_real_smoke_vseq::body]
-    O --> P[require_real_smoke_sqr checks needed agent sqr]
-    O --> Q[set dispatch_real_smoke_active=1]
-    Q --> R[start_background_responders]
-    Q --> S[start_core_dispatch_flow]
-    R --> T[dcache/sbuffer/redirect responders run in background]
-    S --> U[lsqenq/issue/commit/L2TLB/main flow run]
-    U --> V[clear dispatch_real_smoke_active and disable background fork]
+    M -->|default| VB[virtual_base_sequence::body returns]
+    M -->|real smoke| RS[memblock_dispatch_real_smoke_vseq::body]
+    M -->|cancel reconcile| CR[memblock_dispatch_real_cancel_reconcile_vseq::body]
+    M -->|pending MMIO directed| PM[memblock_pending_mmio_directed_vseq::body]
+    PM --> PM1[require_virtual_sqr]
+    PM1 --> PM2[uvm_do_on pending MMIO soft sequence]
+    PM2 --> PM3[normal raw R R+1 stale exact expected fatal]
+
+    RS --> RS1[require_real_smoke_sqr]
+    RS1 --> RS2[dispatch_real_smoke_active=1]
+    RS2 --> RS3[start_background_responders]
+    RS2 --> RS4[start_core_dispatch_flow]
+    RS3 --> RS5[uvm_do_on DCache/SBuffer/redirect responder]
+    RS4 --> RS6[uvm_do_on LSQ enq/issue/commit/L2TLB/main]
+    RS6 --> RS7[main service requests global stop after terminal and cancel/raw drain]
+    RS7 --> RS8[core sequences publish final idle and return]
+    RS7 --> RS9[responders wait until no inflight, drive safe idle, return]
+
+    CR --> CR1[start_background_responders join_none]
+    CR --> CR2[start_core_dispatch_flow plus directed redirect barrier]
+    CR2 --> CR3[wait DUT-visible uid1/uid2 reservations]
+    CR3 --> CR4[request_redirect_flush + push_redirect_drive]
+    CR4 --> CR5[per-epoch cancel reconcile]
+    CR5 --> CR6[all core sequences join]
+    CR6 --> CR7[check nonzero LQ/SQ match coverage]
+    CR7 --> CR8[wait_for_background_responders]
+    RS9 --> CR8
+    CR8 --> CR9[clear active flag and body returns]
+
+    VB --> DONE[start returns and testcase drops objection]
+    RS8 --> DONE
+    CR9 --> DONE
+    PM3 --> DONE
 ```
 
-### 函数调用 Flow 图整体文字伪代码
+### 2.1 函数调用 Flow 图整体文字伪代码
 
 ```text
-Virtual sequence 统一调度主流程：
+1. testcase与vseq选择：
+   make的ts参数转成+VSEQ_MAIN；
+   basicTest创建real-smoke cfg和env，并用find_wrapper_by_name查目标类；
+   main_phase使用create_object_by_type创建并cast目标vseq；
+   testcase在start前raise objection、start返回后drop，因此覆盖完整pre_body/body/post_body，
+   不依赖派生vseq自身的objection保持main phase存活。
 
-1. makefile 参数转换阶段：
-   用户通过 make 参数 tc 和 ts 选择 testcase 与 virtual sequence。
-   project_cfg_vcs.mk 或 project_cfg_xrun.mk 把 ts 转成 +VSEQ_MAIN=<ts>。
-   远端 eda make 包装脚本把 ts 一并转发到远端 make，避免远端仿真退回默认 vseq。
+2. virtual sequencer接线：
+   env build创建vsqr；
+   env connect把已创建agent的sqr句柄赋给vsqr；
+   具体vseq在启动前调用require_real_smoke_sqr，缺少必需handle时fatal。
 
-2. basicTest 构建阶段：
-   basicTest::build_phase 创建 memblock_env_cfg，设置 agent driver 进入 DRV_0 且关闭 xz 驱动。
-   basicTest 创建 env，并读取 +VSEQ_MAIN。
-   如果 +VSEQ_MAIN 不是 virtual_base_sequence，则把 virtual_base_sequence factory override 为用户指定 vseq。
-   basicTest 把 env.vsqr.main_phase.default_sequence 设置成 virtual_base_sequence；UVM factory 会在 main_phase 启动实际 vseq 类型。
+3. real smoke调度：
+   body置dispatch_real_smoke_active；
+   background task用uvm_do_on并发启动DCache、SBuffer和redirect responder；
+   core task用uvm_do_on并发启动LSQ enq、issue、commit、L2TLB和main sequence；
+   main service只在所有uid terminal且cancel record、anchor、snapshot及raw timing queue收敛后请求global stop；
+   core driver发布末尾安全idle，responder在无inflight边界自行返回。
 
-3. env virtual sequencer 接线阶段：
-   memblock_env::build_phase 创建 memblock_virtual_sequencer 类型的 vsqr。
-   memblock_env::connect_phase 把每个已创建 agent 的 sqr 赋值到 vsqr 对应字段。
-   后续 vseq 只通过 p_sequencer.<agent>_sqr 访问 agent sequencer，不再查找层级路径。
+4. cancel reconcile专项：
+   testcase objection覆盖完整顶层start；子vseq现有automatic objection只属于sequence内部生命周期；
+   directed main sequence建立anchor load、victim load和victim store；
+   barrier等待两个victim的LSQ reservation都被真实DUT sample，再注入flushAfter redirect；
+   公共flow完成逐epochsoftware-vs-DUT cancel对账和uid reissue；
+   core join后检查LQ/SQ非零匹配计数；
+   wait_for_background_responders确认三个responder自然退出后，vseq才返回。
 
-4. vseq 运行阶段：
-   virtual_base_sequence::pre_body 在 main_phase 启动时 raise objection，保证 vseq 生命周期覆盖 main_phase。
-   如果用户没有指定真实场景，virtual_base_sequence::body 只打印空 body 日志后返回。
-   如果用户指定 memblock_dispatch_real_smoke_vseq，则该 vseq 先检查 real smoke 必需的 sequencer handle，再置位 dispatch_real_smoke_active。
-   vseq 启动后台 dcache、sbuffer、redirect responder，随后启动 LSQ enq、issue、commit、L2TLB 和 main table 主流程。
-   主流程结束后清零 dispatch_real_smoke_active，body 返回后由 inherited post_body drop objection。
-   memblock_dispatch_real_smoke_vseq::pre_body 设置 main_phase drain_time 为 1us，使 UVM 在 objection drop 后保留 1us 尾部处理窗口，不再显式 disable 后台 responder fork。
+5. pending-MMIO software-only专项：
+   复用既有VSEQ_MAIN显式启动入口进入pending-MMIO vseq，不新增basicTest场景分支；
+   vseq只检查virtual sequencer并用uvm_do_on启动soft sequence；
+   soft sequence覆盖normal raw、LOAD redirect sample R/R+1 stale和精确expected-fatal后自然返回，
+   不启动real smoke agent拓扑。
 ```
 
 ## 3. `basicTest::build_phase()`
 
 源码位置：`mem_ut/ver/ut/memblock/tc/src/basicTest.sv`
 
+抽象功能描述：该函数是固定testcase的构建入口，负责创建real DUT环境配置、实例化env、解析命令行
+`ts`并找到目标vseq的真实factory wrapper。它不创建或启动sequence，也不配置phase default sequence。
+
 真实逻辑摘要：
 
 ```systemverilog
-string usr_test_vseq="virtual_base_sequence";
 seq_csr_common::reload_from_plus();
 real_smoke_cfg = memblock_env_cfg::type_id::create("real_smoke_cfg");
 void'(real_smoke_cfg.randomize());
 configure_real_env_cfg(real_smoke_cfg);
 uvm_config_db#(memblock_env_cfg)::set(this, "env", "cfg", real_smoke_cfg);
-this.env = memblock_env::type_id::create("env", this);
-if (!$value$plusargs("VSEQ_MAIN=%s", usr_test_vseq)) begin
-    void'(uvm_cmdline_proc.get_arg_value("+VSEQ_MAIN=", usr_test_vseq));
+env = memblock_env::type_id::create("env", this);
+main_vseq_name = "virtual_base_sequence";
+if (!$value$plusargs("VSEQ_MAIN=%s", main_vseq_name)) begin
+    void'(uvm_cmdline_proc.get_arg_value("+VSEQ_MAIN=", main_vseq_name));
 end
-if (usr_test_vseq != "virtual_base_sequence") begin
-    uvm_factory::get().set_type_override_by_name("virtual_base_sequence",usr_test_vseq);
+main_vseq_wrapper = uvm_factory::get().find_wrapper_by_name(main_vseq_name);
+if (main_vseq_wrapper == null) begin
+    `uvm_fatal("BASIC_VSEQ_FACTORY",
+               $sformatf("+VSEQ_MAIN type is not registered: %0s", main_vseq_name))
 end
-uvm_config_db#(uvm_object_wrapper)::set(this, "env.vsqr.main_phase",
-    "default_sequence",virtual_base_sequence::type_id::get());
 ```
-
-功能解释：
-
-`basicTest::build_phase()` 是新入口的唯一 testcase 构建点。它不直接启动 real smoke sequence，而是把 `env.vsqr.main_phase.default_sequence` 固定设置为 `virtual_base_sequence`，再通过 factory override 把该基类替换成 `ts` 指定的真实 vseq。
-
-输入/输出：
-
-- 输入：makefile 转出的 `+VSEQ_MAIN=<vseq>`，以及普通 plus/cfg 参数。
-- 输出：创建 `env`，设置 `env` cfg，设置 `env.vsqr.main_phase.default_sequence`。
-- 副作用：如果指定用户 vseq，则注册 `virtual_base_sequence -> usr_test_vseq` 的 factory override。
 
 文字伪代码：
 
 ```text
-basicTest::build_phase 在当前 flow 中负责固定 testcase 入口并选择顶层 vseq。
-函数先重新加载 plus 参数，创建并随机化 memblock_env_cfg，然后把所有 agent 的 driver mode 和 xz 设置调整为 real DUT flow 需要的安全默认配置。
-函数将 cfg 写入 config_db，并创建 env，使 env 后续 build_phase 能拿到 cfg。
-函数读取 +VSEQ_MAIN：优先使用 $value$plusargs 直接解析命令行，若没有读到，再尝试 uvm_cmdline_processor。
-如果读到的 vseq 不是 virtual_base_sequence，函数通过 UVM factory 把 virtual_base_sequence 替换为用户指定 vseq；这样 main_phase 仍只配置一个稳定锚点。
-最后函数把 env.vsqr.main_phase.default_sequence 设置为 virtual_base_sequence，使 UVM main_phase 在 vsqr 上启动被 factory override 后的真实 vseq。
+重新加载plus参数，创建并随机化memblock_env_cfg；
+configure_real_env_cfg把真实flow涉及agent的driver mode设为DRV_0并关闭XZ驱动；
+cfg写入config_db后创建env；
+读取+VSEQ_MAIN，未传入时保留virtual_base_sequence；
+用find_wrapper_by_name直接查目标类的真实wrapper，未注册时在build phase立即fatal；
+不写env.vsqr.main_phase.default_sequence，也不设置virtual_base_sequence factory override；
+设置10ms UVM timeout作为异常兜底，不把固定周期数当作正常退出条件。
 ```
 
-## 4. `memblock_env::build_phase()` 和 `connect_phase()`
+### 3.1 `basicTest::main_phase()`
+
+源码位置：`mem_ut/ver/ut/memblock/tc/src/basicTest.sv`
+
+抽象功能描述：该task把build阶段解析到的wrapper创建为`virtual_base_sequence`派生对象，并在
+`env.vsqr`上显式执行完整`start()`。它负责顶层vseq和main phase的生命周期，不直接调度任何agent
+sequence，也不实现具体场景逻辑。
+
+```systemverilog
+created_obj = uvm_factory::get().create_object_by_type(
+    main_vseq_wrapper, env.vsqr.get_full_name(), main_vseq_name);
+if (created_obj == null) begin
+    `uvm_fatal("BASIC_VSEQ_CREATE", ...)
+end
+if (!$cast(main_vseq, created_obj)) begin
+    `uvm_fatal("BASIC_VSEQ_TYPE", ...)
+end
+
+phase.raise_objection(this, "starting main virtual sequence");
+main_vseq.set_sequencer(env.vsqr);
+main_vseq.reseed();
+main_vseq.set_starting_phase(phase);
+if (!main_vseq.do_not_randomize && !main_vseq.randomize()) begin
+    `uvm_fatal("BASIC_VSEQ_RANDOMIZE", ...)
+end
+main_vseq.uvm_report_info("VSEQ_BODY", "starting body ...", UVM_LOW);
+main_vseq.start(env.vsqr);
+main_vseq.uvm_report_info("VSEQ_BODY", "body completed", UVM_LOW);
+phase.drop_objection(this, "main virtual sequence completed");
+```
+
+文字伪代码：
+
+```text
+main_phase先检查env.vsqr和wrapper非空；
+create_object_by_type按目标wrapper创建对象，创建失败立即fatal；
+cast要求目标类型继承virtual_base_sequence，类型不符立即fatal；
+testcase在start前raise objection，然后设置sequencer、随机种子和starting phase并randomize；
+输出VSEQ_BODY starting后调用start(env.vsqr)，同步执行目标对象的pre_body/body/post_body；
+只有start完整返回后才输出VSEQ_BODY completed并drop testcase objection。
+```
+
+testcase objection覆盖完整`start()`调用。派生vseq即使没有raise objection，或覆盖了
+`pre_body()/post_body()`而未调用父实现，main phase也会由testcase保持到目标vseq返回；派生vseq现有的
+手工/automatic objection只承担自身兼容或drain语义，不是顶层保活前提。
+
+## 4. `memblock_env::build_phase()` / `connect_phase()`
 
 源码位置：`mem_ut/ver/ut/memblock/env/src/memblock_env.sv`
 
-真实逻辑摘要：
+抽象功能描述：env创建virtual sequencer并把每个已创建agent的sequencer句柄汇总到其中；它不判断某个
+场景究竟需要哪些agent，该检查留给vseq。
 
 ```systemverilog
-this.cfg.apply_user_cfg();
-this.vsqr = memblock_virtual_sequencer::type_id::create("vsqr", this);
-...
-if (this.vsqr == null) begin
-    `uvm_fatal(get_type_name(), "vsqr is null")
-end
-if (this.u_lsqenq_agent_agent != null) begin
-    this.vsqr.lsqenq_sqr = this.u_lsqenq_agent_agent.sqr;
-end
-if (this.u_L2tlb_agent_agent != null) begin
-    this.vsqr.L2tlb_sqr = this.u_L2tlb_agent_agent.sqr;
-end
+vsqr = memblock_virtual_sequencer::type_id::create("vsqr", this);
+if (u_lsqenq_agent_agent != null) vsqr.lsqenq_sqr = u_lsqenq_agent_agent.sqr;
+if (u_L2tlb_agent_agent != null) vsqr.L2tlb_sqr = u_L2tlb_agent_agent.sqr;
+// 其它agent同样接入。
 ```
-
-功能解释：
-
-`memblock_env` 创建 `vsqr` 并在 connect phase 把各 agent sequencer handle 汇总到 `vsqr`。`vsqr` 不创建 agent、不驱动 transaction，只作为 vseq 调度各 agent sequence 的 handle 聚合点。
-
-输入/输出：
-
-- 输入：env 中已创建的各 agent component。
-- 输出：`vsqr.<agent>_sqr` 字段。
-- 失败策略：`vsqr` 未创建时 `UVM_FATAL`；具体 agent sequencer 是否必须存在由场景 vseq 调用 `require_agent_sqr()` 决定。
 
 文字伪代码：
 
 ```text
-memblock_env::build_phase 在当前 flow 中负责创建 virtual sequencer。
-函数先读取或创建 env cfg，并调用 apply_user_cfg 把用户配置应用到 agent cfg。
-随后创建 memblock_virtual_sequencer 类型的 vsqr；vsqr 与各 agent 同属于 env，不拥有 agent 生命周期。
-
-memblock_env::connect_phase 在当前 flow 中负责把 agent sequencer 接到 vsqr。
-函数先完成原有 RM/scoreboard/monitor 连接，保持旧数据通路不变。
-然后检查 vsqr 是否为空；如果为空说明 build 阶段没有创建成功，直接 fatal。
-对每个 agent，函数判断 agent component 是否存在；若存在，则把 agent.sqr 赋给 vsqr 中对应字段。
-没有创建或未打开的 agent 不在 env 层 fatal，后续由具体 vseq 在启动该 agent sequence 前判断该 sequencer 是否为必需资源。
+build阶段应用env cfg并创建vsqr；
+connect阶段保留原RM/scoreboard/monitor连接，再逐agent赋sequencer handle；
+agent未创建时env不立即fatal；真正启动该agent的vseq调用require_agent_sqr检查并给出明确fatal。
 ```
 
 ## 5. `virtual_base_sequence`
 
 源码位置：`mem_ut/ver/ut/memblock/seq/virtual_sequence/virtual_base_sequence.sv`
 
-真实逻辑摘要：
+抽象功能描述：该基类固定`p_sequencer`类型并提供virtual/agent sequencer合法性检查；默认body为空，
+用于`basicTest`未选择实际场景时的安全入口。
 
 ```systemverilog
-class virtual_base_sequence extends uvm_sequence;
-    `uvm_object_utils(virtual_base_sequence)
-    `uvm_declare_p_sequencer(memblock_virtual_sequencer)
-...
-function void virtual_base_sequence::require_agent_sqr(input string agent_name,
-                                                       input uvm_sequencer_base sqr);
+`uvm_declare_p_sequencer(memblock_virtual_sequencer)
+
+function void require_agent_sqr(string agent_name, uvm_sequencer_base sqr);
     require_virtual_sqr();
-    if (sqr == null) begin
-        `uvm_fatal(get_type_name(),
-                   $sformatf("required agent sequencer is null: %0s", agent_name))
-    end
+    if (sqr == null) `uvm_fatal(...);
 endfunction
 ```
 
-功能解释：
+基类`pre_body/post_body`在公共`starting_phase`非空时仍会手工raise/drop objection，属于保留的sequence
+内部行为。顶层生命周期由`basicTest::main_phase()`的外层testcase objection覆盖，因此任何派生vseq都不依赖
+该公共callback来保持main phase存活；`get_starting_phase()`仍可用于读取phase和配置drain time。
 
-`virtual_base_sequence` 是所有顶层 memblock vseq 的共同基类。它用 `uvm_declare_p_sequencer` 把 `p_sequencer` 固定为 `memblock_virtual_sequencer`，并提供启动 child sequence 前的 sequencer handle 检查。
+## 6. `memblock_dispatch_real_smoke_vseq`
 
-输入/输出：
+### 6.1 `body()`
 
-- 输入：UVM 启动该 sequence 时绑定的 sequencer。
-- 输出：无 transaction 输出；默认 body 为空。
-- 副作用：`pre_body/post_body` 在 phase sequence 场景下 raise/drop objection。
-
-文字伪代码：
-
-```text
-virtual_base_sequence 在当前 flow 中提供统一 vseq 基类和 sequencer 检查能力。
-pre_body 检查 starting_phase 是否存在；若存在，raise objection，保证 vseq body 执行期间 main_phase 不提前结束。
-body 默认只打印空 body 日志，不启动任何 child sequence，作为 basicTest 默认空场景。
-post_body 在 starting_phase 存在时 drop objection，释放 main_phase。
-require_virtual_sqr 检查当前 sequence 是否运行在 memblock_virtual_sequencer 上；如果 p_sequencer 为空，说明启动点错误，直接 fatal。
-require_agent_sqr 先复用 require_virtual_sqr 检查顶层 sequencer，再检查目标 agent sequencer 是否连接；如果为空，说明该场景需要的 agent sequencer 未创建或未打开，直接 fatal。
-```
-
-## 6. `memblock_dispatch_real_smoke_vseq::body()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_dispatch_real_smoke_vseq.sv`
-
-真实逻辑摘要：
+抽象功能描述：real smoke body建立场景active窗口，异步启动background responder，再同步等待有限core
+flow和后台responder都完成。它不强制kill responder，也不会在后台task返回前清除active窗口。
 
 ```systemverilog
 require_real_smoke_sqr();
-seq_csr_common::init();
 memblock_sync_pkg::dispatch_real_smoke_active = 1'b1;
-fork : background_responder_fork
+fork
     start_background_responders();
 join_none
 start_core_dispatch_flow();
+wait fork;
 memblock_sync_pkg::dispatch_real_smoke_active = 1'b0;
 ```
 
-功能解释：
+中文伪代码：
 
-`memblock_dispatch_real_smoke_vseq::body()` 是 real dispatch smoke 的顶层调度入口。它统一启动后台 responder 和核心有限流程 sequence，替代旧 testcase 在 main_phase 中直接 start real smoke sequence 的方式。
+1. 置`dispatch_real_smoke_active=1`，并以`join_none`启动后台DCache、SBuffer和redirect responder。
+2. 同步等待core dispatch flow完成；core flow结束不代表后台responder已经观察到最终stop边界。
+3. 执行`wait fork`等待本task创建的后台fork完整返回；responder只有在`global_stop_requested`且无inflight时
+   才会自然返回，因而不会被提前清 active 竞态截断。
+4. 后台task返回后才清`dispatch_real_smoke_active`并结束vseq；若responder卡住，由UVM timeout暴露问题。
 
-输入/输出：
+### 6.2 `start_background_responders()`
 
-- 输入：`p_sequencer` 中连接好的 agent sequencer handle。
-- 输出：向各 agent sequencer 启动 child sequence。
-- 副作用：置位/清零 `memblock_sync_pkg::dispatch_real_smoke_active`。
-
-文字伪代码：
-
-```text
-body 在当前 flow 中负责 real smoke 场景的完整生命周期。
-函数首先调用 require_real_smoke_sqr，逐个检查 lsqenq、issue、commit、L2TLB、dcache、sbuffer、redirect 这些 real smoke 必需 sequencer 已经连接。
-函数初始化 seq_csr_common，使当前 sequence 能读取最新 CSR/plus 公共配置。
-函数将 dispatch_real_smoke_active 置 1；CSR driver 等同步逻辑据此切换到 real smoke 需要的驱动模式。
-函数用后台 fork 启动 start_background_responders，该子流程会启动 dcache、sbuffer、redirect responder，这些 responder 可能持续运行。
-函数随后启动 start_core_dispatch_flow，该子流程启动 LSQ enq、issue、commit、L2TLB 和主表主流程，并等待它们结束。
-核心流程结束后，函数清零 dispatch_real_smoke_active 并返回 body。
-继承自 virtual_base_sequence 的 post_body 会 drop main_phase objection；本 vseq 的 pre_body 已设置 1us drain_time，UVM 在 phase 结束前保留 1us 给后台 responder 处理尾部握手。
-该流程不再显式 disable 后台 responder fork，避免在主流程结束点直接截断 responder 线程。
-```
-
-## 7. `start_background_responders()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_dispatch_real_smoke_vseq.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-dcache_seq = dcache_mem__access_base_sequence::type_id::create("dcache_seq");
-sbuffer_seq = sbuffer_mem_access_base_sequence::type_id::create("sbuffer_seq");
-redirect_seq = memblock_redirect_dispatch_base_sequence::type_id::create("redirect_seq");
-fork
-    dcache_seq.start(p_sequencer.dcache_sqr);
-    sbuffer_seq.start(p_sequencer.sbuffer_sqr);
-    redirect_seq.start(p_sequencer.redirect_sqr);
-join
-```
-
-功能解释：
-
-该 task 启动 real smoke 必需的被动 responder。dcache/sbuffer responder 响应 DUT memory request；redirect responder 消费框架已生成的 pending redirect payload，没有 payload 时保持 idle。
-
-输入/输出：
-
-- 输入：`p_sequencer.dcache_sqr`、`sbuffer_sqr`、`redirect_sqr`。
-- 输出：在对应 agent sequencer 上启动 responder sequence。
-- 生命周期：被外层 `background_responder_fork` 以 join_none 启动，主流程结束后不显式 disable；由 UVM phase drain/结束机制收束。
-
-文字伪代码：
-
-```text
-start_background_responders 在当前 flow 中负责启动可能长期运行的后台 responder。
-函数创建 dcache、sbuffer 和 redirect 三个 responder sequence 对象。
-函数并行 start 三个 sequence：dcache sequence 处理 DUT dcache memory request，sbuffer sequence 处理 sbuffer memory request，redirect sequence 处理框架 pending redirect payload。
-该 task 自身使用 join 等待三个后台 sequence，因此通常不会自然返回；外层 body 使用 join_none 启动它。
-核心主流程结束后，body 不再 disable 外层 fork，而是清零 active 标志后返回；post_body drop objection 后，UVM 使用 pre_body 设置的 1us drain_time 给后台 responder 留出尾部处理时间。
-```
-
-## 8. `start_core_dispatch_flow()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_dispatch_real_smoke_vseq.sv`
-
-真实逻辑摘要：
+抽象功能描述：该task并发启动三个长期responder，并使用`join`把task返回定义为“三者都自然退出”。
 
 ```systemverilog
 fork
-    lsqenq_seq.start(p_sequencer.lsqenq_sqr);
-    issue_seq.start(p_sequencer.lintsissue_sqr);
-    lsqcommit_seq.start(p_sequencer.lsqcommit_sqr);
-    l2tlb_seq.start(p_sequencer.L2tlb_sqr);
-    main_seq.start(p_sequencer);
+    `uvm_do_on(dcache_seq, p_sequencer.dcache_sqr)
+    `uvm_do_on(sbuffer_seq, p_sequencer.sbuffer_sqr)
+    `uvm_do_on(redirect_seq, p_sequencer.redirect_sqr)
 join
 ```
 
-功能解释：
+每个responder的退出边界：
 
-该 task 启动 real smoke 的核心有限流程。主表 sequence 负责 build main table、service real dispatch flow 和 end check；LSQ enq、issue、commit、L2TLB sequence 负责对应 agent 的真实驱动或响应。
+- DCache：global stop且当前A valid为0；先发安全idle，再break。已接受请求的全部D response在回到循环
+  顶部前完成，因此退出点无response inflight。
+- SBuffer：global stop且当前A valid为0；已接受请求的D response先完成，再发安全idle并break。
+- Redirect：global stop、pending/inflight drive为空且无active redirect；发安全idle并break。
 
-输入/输出：
+### 6.3 `start_core_dispatch_flow()`
 
-- 输入：`p_sequencer` 及其 agent sequencer handle。
-- 输出：在对应 sequencer 上启动核心 child sequence。
-- 退出条件：所有并行 child sequence 返回后，该 task 返回给 vseq body。
+抽象功能描述：该task在各自真实sequencer上启动五个有限sequence，并用`join`等待它们按公共global
+stop规则自然返回。
+
+```systemverilog
+fork
+    `uvm_do_on(lsqenq_seq, p_sequencer.lsqenq_sqr)
+    `uvm_do_on(issue_seq, p_sequencer.lintsissue_sqr)
+    `uvm_do_on(lsqcommit_seq, p_sequencer.lsqcommit_sqr)
+    `uvm_do_on(l2tlb_seq, p_sequencer.L2tlb_sqr)
+    `uvm_do_on(main_seq, p_sequencer)
+join
+```
+
+LSQ enqueue结算最后pending sample；LSQ commit发布最后terminal idle和可选committed watermark；main
+sequence持续drain semantic raw与cancel timing sideband。只有这些子sequence全部返回后，core task才结束。
+
+## 7. `memblock_dispatch_real_cancel_reconcile_vseq`
+
+### 7.1 phase生命周期
+
+源码位置：`memblock_dispatch_real_cancel_reconcile_vseq.sv`
+
+抽象功能描述：该vseq需要等待core flow和background responder完成握手；顶层phase生命周期由
+`basicTest::main_phase()`的testcase objection覆盖，vseq自身的automatic objection只保留为局部sequence
+生命周期和drain配置机制。`pre_body()`读取真实starting phase并设置drain time。
+
+```systemverilog
+set_automatic_phase_objection(1'b1);
+phase = get_starting_phase();
+if (phase == null) begin
+    `uvm_fatal(get_type_name(), "cancel reconcile vseq requires a starting phase")
+end
+phase.phase_done.set_drain_time(this, 1us);
+```
+
+中文伪代码：
+
+1. vseq构造时开启自身automatic objection，但这不是testcase保持main phase存活的唯一条件。
+2. `pre_body()`读取由`basicTest`传入的starting phase；读取失败立即fatal，成功后设置1us drain time。
+3. `post_body()`只清理场景active标志；testcase objection仍由`basicTest`在完整`start()`返回后统一drop。
+
+这避免直接依赖可能为null的deprecated `starting_phase`公共别名。`post_body()`只清
+`dispatch_real_smoke_active`；若automatic objection存在，则由UVM负责配对释放，但不替代testcase objection。
+
+### 7.2 `start_core_dispatch_flow()` 与 directed barrier
+
+抽象功能描述：子vseq复用四个真实agent sequence，用专项manual main sequence替换普通main sequence，
+并额外并发一个只负责等待和注入redirect的barrier task。
+
+```systemverilog
+fork
+    `uvm_do_on(lsqenq_seq, p_sequencer.lsqenq_sqr)
+    `uvm_do_on(issue_seq, p_sequencer.lintsissue_sqr)
+    `uvm_do_on(lsqcommit_seq, p_sequencer.lsqcommit_sqr)
+    `uvm_do_on(l2tlb_seq, p_sequencer.L2tlb_sqr)
+    `uvm_do_on(main_seq, p_sequencer)
+    drive_directed_redirect_when_ready();
+join
+```
+
+专项main table有三笔：uid0 anchor load、uid1 victim load、uid2 victim store。barrier要求uid1/uid2：
+
+- 分别仍持有active LQ/SQ mapping。
+- `lsq_reservation_state == MEMBLOCK_LSQ_RESERVATION_DUT_VISIBLE`。
+- `lsq_reservation_sample_valid=1`。
+- 尚未issue/writeback/deq/terminal。
+
+满足后，以uid0 ROB key构造flushAfter redirect，调用`request_redirect_flush()`与
+`push_redirect_drive()`。它不伪造monitor anchor或DUT cancel snapshot；后两者必须来自真实interface
+采样。
+
+### 7.3 coverage与自然退出
+
+core `join`返回后，vseq要求：
+
+```systemverilog
+cancel_reconcile_match_count != 0;
+cancel_reconcile_lq_nonzero_match_count != 0;
+cancel_reconcile_sq_nonzero_match_count != 0;
+```
+
+这些字段只证明真实LQ/SQ非零对账发生过，不参与公共pass/fail/global-stop。随后
+`wait_for_background_responders()`最多等待256个service clock边界，只有父task中三个responder的
+`join`返回并置`background_responders_done=1`后才结束；超时fatal。该vseq没有`disable fork`路径。
+
+### 7.4 `memblock_pending_mmio_directed_vseq` software-only入口
+
+源码位置：`mem_ut/ver/ut/memblock/seq/virtual_sequence/memblock_pending_mmio_directed_vseq.sv`。
+
+抽象功能描述：该vseq只验证virtual sequencer存在，然后在同一个virtual sequencer上启动
+`soft_test_memblock_pending_mmio_directed_sequence`；它不创建或启动LSQ/DCache/SBuffer/L2TLB agent
+sequence，也不修改`basicTest`启动入口。
+
+```systemverilog
+task memblock_pending_mmio_directed_vseq::body();
+    soft_test_memblock_pending_mmio_directed_sequence directed_seq;
+
+    require_virtual_sqr();
+    `uvm_do_on(directed_seq, p_sequencer)
+endtask:body
+```
 
 文字伪代码：
 
 ```text
-start_core_dispatch_flow 在当前 flow 中负责启动 real smoke 的核心有限阶段。
-函数创建 LSQ enq、issue、commit、L2TLB 和 main table sequence 对象。
-函数并行 start 这些 sequence：LSQ enq 负责向 LSQ admission 接口发交易，issue 负责发射接口交易，commit 负责 LSQ commit/deq 相关驱动，L2TLB 负责 TLB response，main sequence 负责生成主表并推进 real dispatch 主流程。
-函数使用 join 等待所有核心 sequence 结束；只有这些 sequence 都按自身终止条件返回后，body 才能清理 active 标志并进入 UVM drain-time 退出流程。
+basicTest::build_phase通过find_wrapper_by_name解析+VSEQ_MAIN，main_phase通过create_object_by_type创建
+该vseq并在env.vsqr上显式start；
+先检查p_sequencer是有效memblock virtual sequencer；
+在该sequencer上用uvm_do_on启动software-only pending-MMIO sequence并同步等待其返回；
+soft sequence内部覆盖normal raw、redirect sample R与R+1 stale、精确expected-fatal和既有owner合同；
+本入口不启动业务agent default sequence，不新增basicTest分支，也不承担最终仿真结果判断。
 ```
+
+## 8. Global stop 收敛合同
+
+main service每个negedge按以下顺序推进：
+
+```text
+tick_dispatch_service_cycle
+-> drain CSR/sfence runtime
+-> drain cancel snapshot和redirect anchor
+-> collect/process semantic monitor batch
+-> process redirect/replay/fault recovery
+-> 再次drain cancel timing sideband（仍只收集raw）
+-> service_lsq_timing_reconcile -> service_cancel_reconcile（每tick唯一一次）
+-> route issue（未global stop时）
+-> request_global_stop_if_done
+```
+
+`request_global_stop_if_done()`除`terminal_done_uid >= main_trans_num`外，还要求：
+
+- `cancel_record_q`为空。
+- 没有尚未应用的软件LSQ cancel。
+- redirect anchor history、cancel snapshot history为空。
+- raw cancel snapshot和raw redirect anchor queue为空。
+
+因此真实cancel flow不会在observed snapshot尚未比较时提前让core/responder退出。LSQ commit sequence还会
+发布最后terminal idle；redirect/DCache/SBuffer responder则分别检查自己的无inflight边界。
 
 ## 9. 编译与仿真参数 Flow
 
-源码位置：
-
-- `mem_ut/scr/verif/project_cfg.mk`
-- `mem_ut/scr/verif/project_cfg_vcs.mk`
-- `mem_ut/scr/verif/project_cfg_xrun.mk`
-- `mem_ut/ver/ut/memblock/sim/Makefile`
-- `mem_ut/ver/ut/memblock/sim/remote_eda_make.sh`
-
-真实逻辑摘要：
+用户入口：
 
 ```makefile
-tc       := basicTest
-ts       := virtual_base_sequence
-SIMV_OPTIONS += +VSEQ_MAIN=${ts}
-...
-seed='$(seed)' tc='$(tc)' ts='$(ts)' pl='$(pl)' mode='$(mode)'
-...
-FORWARD_VARS=(
-    seed
-    tc
-    ts
-)
+make eda_run tc=basicTest ts=<virtual_sequence> mode=base_fun cfg=<cfg>
 ```
 
-功能解释：
-
-makefile 默认入口切到 `tc=basicTest ts=virtual_base_sequence`。用户通过 `ts=<vseq>` 指定具体场景，VCS/xrun 配置把 `ts` 转成 `+VSEQ_MAIN`，远端运行脚本把 `ts` 变量透传到远端 make。
-
-文字伪代码：
+VCS/xrun配置把`ts`转换为`+VSEQ_MAIN=${ts}`，远端包装脚本继续转发`ts`。真实cancel专项使用：
 
 ```text
-makefile 参数 flow 负责把用户可见的 ts 转成 basicTest 可读取的 +VSEQ_MAIN。
-默认配置把 tc 设为 basicTest，把 ts 设为 virtual_base_sequence，使默认运行只启动空 vseq。
-VCS 和 xrun 配置都把 +VSEQ_MAIN=${ts} 加入仿真命令行。
-远端 eda make 入口在调用 remote_eda_make.sh 时传入 ts，remote_eda_make.sh 又把 ts 放入 FORWARD_VARS；这样远端 make 不会丢失用户指定的 vseq。
-日志和波形文件名包含 tc、ts、cfg、seed，便于同一 testcase 下区分不同 virtual sequence 场景。
+ts=memblock_dispatch_real_cancel_reconcile_vseq
+cfg=tc_dispatch_real_cancel_reconcile_smoke
+```
+
+pending-MMIO software-only专项复用同一个选择入口：
+
+```text
+ts=memblock_pending_mmio_directed_vseq
+```
+
+2026-07-22 batch验证已确认该入口实际执行：移除损坏的专项生成库并设置`partcmp_op=off`后，VCS/KDB
+compile为0 error/0 warning；日志中出现`VSEQ_BODY` start/complete、`R`/`R+1` stale、directed completion、
+caught fatal=1、`UVM_ERROR=0`、`UVM_FATAL=0`和`TEST_PASS`。日志路径为
+`mem_ut/ver/ut/memblock/sim/pending_mmio_v2_fun/log/tc=basicTest_ts=memblock_pending_mmio_directed_vseq_cfg=default_seed=666666_rtl_.log`。
+该批次不包含本轮新增的`stale_reason`日志赋值，修复后的专项重跑仍待主agent复验。
+
+## 10. 端到端行为总结
+
+```text
+普通real smoke：
+  basicTest + VSEQ_MAIN
+  -> find_wrapper_by_name
+  -> create_object_by_type
+  -> basicTest::main_phase explicit start
+  -> real_smoke_vseq
+  -> background responders + core flow
+  -> all uid terminal and cancel/raw drain
+  -> global stop
+  -> core final idle + responder no-inflight idle
+  -> child sequences自然返回
+
+真实cancel reconcile：
+  testcase objection covers complete start; cancel vseq automatic objection is supplementary
+  -> three-entry directed main table
+  -> wait victim reservation DUT_VISIBLE
+  -> real redirect drive
+  -> redirect anchor/cancel snapshot monitor
+  -> per-epoch software-vs-DUT reconcile
+  -> victim reissue and terminal
+  -> global stop after all cancel/raw state drain
+  -> background_responders_done
+  -> vseq返回
+  -> basicTest drop testcase objection
+
+pending-MMIO software-only directed：
+  basicTest find_wrapper_by_name/create_object_by_type
+  -> basicTest::main_phase explicit start
+  -> memblock_pending_mmio_directed_vseq
+  -> require_virtual_sqr
+  -> uvm_do_on pending-MMIO soft sequence
+  -> normal raw + R/R+1 stale + 精确expected-fatal
+  -> soft sequence自然返回
+```
+
+端到端文字伪代码：
+
+```text
+basicTest负责解析、创建并显式启动顶层vseq，所有agent sequence都由virtual sequencer显式调度。real smoke把有限core flow
+和长期responder分开：前者依赖transaction/cancel/raw收敛，后者依赖global stop和自身无inflight边界。
+
+cancel专项不直接修改reservation、cancel count或terminal。它只等待真实DUT-visible victim后注入redirect，
+其余行为复用公共flow。testcase objection覆盖完整顶层start，派生vseq的automatic objection只提供补充的
+sequence生命周期/drain语义，也避免用disable fork截断尚未完成的response。
+
+pending-MMIO入口不复用real smoke并发拓扑，只通过basicTest的显式wrapper创建/start入口启动software-only
+sequence。它不启动agent phase default sequence；stale_reason修复后的重跑尚未完成，不能把该项写成最终复验通过。
 ```

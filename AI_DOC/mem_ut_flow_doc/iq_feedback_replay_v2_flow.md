@@ -307,9 +307,7 @@ monitor_adapter.collect_ctrl_redirect_events_batch(events,
                                                    sample_cycle,
                                                    sample_cycle_valid);
 monitor_batch_handler.process_monitor_event_batch(events);
-foreach (deferred_ctrl[idx]) begin
-    monitor_adapter.apply_raw_ctrl_deq(deferred_ctrl[idx]);
-end
+monitor_adapter.apply_deferred_ctrl_updates_batch(deferred_ctrl);
 ```
 
 文字伪代码：
@@ -318,8 +316,9 @@ end
 顶层 batch task 先收集 IQ/int-WB，再收集 ctrl 中的 redirect semantic event。
 调用 process_monitor_event_batch 完成 normalize、oldest redirect 选择和 covered event 过滤；
 只有未被 redirect 覆盖的 IQ/WB 才能更新 status 或写 recovery queue。
-batch handler 返回后按 deferred_ctrl 原顺序调用 apply_raw_ctrl_deq；该 helper 更新 sbIsEmpty，
-并把 lqDeq/sqDeq count 与 pointer 交给 lsq_commit_handler 释放 active mapping。
+batch handler 返回后把 deferred_ctrl 原顺序追加到持久 deferred FIFO；adapter按队首调用
+apply_raw_ctrl_deq。该helper更新sbIsEmpty，并把lqDeq/sqDeq count与pointer交给singleton
+lsq_commit_handler释放active mapping；owner成功才pop，resync mismatch保留队首到下一service tick。
 本 task 不调用 recovery；外层 service_monitor_once 仍只在尾部调用一次 exception_redirect_replay_task。
 ```
 
@@ -541,7 +540,9 @@ real-WB再更新完成态，最后DUT deq释放active SQ mapping；三者不共�
 
 ## 9. 当前验证边界
 
-- VCS/Verdi 全量编译已通过，结果为 `0 error(s), 0 warning(s)`。
+- VCS/Verdi 全量编译已通过；`v2_lsq_mmio_cbo_final_20260723/log/vcs_compile_rtl.log` 的最终 KDB
+  摘要为 `0 error(s), 0 warning(s)`，完整 transcript 另有一条工具自身的
+  `LCA_FEATURES_ENABLED` usage warning，不是源码编译 warning。
 - 真实 store smoke 已进入 `STD real-WB -> STA IQ feedback -> STA real-WB -> ROB commit`，
   随后在既有 SQ deq pointer 对账处失败；该失败归属 LSQ MMIO/status/SQ deq 子计划。
 - 软件 replay smoke 当前在 sequence 启动前被既有 int-WB monitor raw producer 的

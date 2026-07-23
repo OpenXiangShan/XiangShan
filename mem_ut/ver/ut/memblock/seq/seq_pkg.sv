@@ -70,6 +70,7 @@ package seq_pkg;
     `include "seq_csr_common.sv"
     `include "mmu_csr_runtime_state.sv"
     `include "main_control_transaction.sv"
+    `include "memblock_op_behavior_util.sv"
     `include "status_transaction.sv"
     `include "memblock_tlb_entry.sv"
     `include "tlb_map_builder.sv"
@@ -94,10 +95,12 @@ package seq_pkg;
     `include "memblock_l2tlb_base_sequence.sv"
     `include "memblock_main_dispatch_auto_build_main_table_base_sequence.sv"
     `include "memblock_main_dispatch_manual_main_table_sequence.sv"
+    `include "memblock_main_dispatch_cancel_reconcile_sequence.sv"
     `include "mem_base_sequence.sv"
     `include "memblock_virtual_sequencer.sv"
     `include "virtual_base_sequence.sv"
     `include "memblock_dispatch_real_smoke_vseq.sv"
+    `include "memblock_dispatch_real_cancel_reconcile_vseq.sv"
 
 endpackage
 

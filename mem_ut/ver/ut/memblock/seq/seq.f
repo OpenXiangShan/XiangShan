@@ -11,6 +11,7 @@ seq_pkg.sv
 // ./base_seq_help/seq_csr_common.sv
 // ./base_seq_help/mmu_csr_runtime_state.sv
 // ./base_seq_help/main_control_transaction.sv
+// ./base_seq_help/memblock_op_behavior_util.sv
 // ./base_seq_help/status_transaction.sv
 // ./base_seq_help/memblock_tlb_entry.sv
 // ./base_seq_help/common_data_transaction.sv
@@ -36,6 +37,8 @@ seq_pkg.sv
 // ./base_seq/memblock_l2tlb_base_sequence.sv
 // ./base_seq/memblock_main_dispatch_auto_build_main_table_base_sequence.sv
 // ./base_seq/memblock_main_dispatch_manual_main_table_sequence.sv
+// ./base_seq/memblock_main_dispatch_cancel_reconcile_sequence.sv
 // ../env/src/memblock_virtual_sequencer.sv
 // ./virtual_sequence/virtual_base_sequence.sv
 // ./virtual_sequence/memblock_dispatch_real_smoke_vseq.sv
+// ./virtual_sequence/memblock_dispatch_real_cancel_reconcile_vseq.sv

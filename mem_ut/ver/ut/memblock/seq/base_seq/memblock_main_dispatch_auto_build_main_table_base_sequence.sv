@@ -84,8 +84,17 @@ task memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor
     // 中文注释：本轮 raw int writeback、IQ feedback 和 memoryViolation 先收集成同一个 batch。
     // batch handler 先做 normalize 和 redirect-first 仲裁，只有未被 redirect 覆盖的 event 才能落状态。
     collect_runtime_context_events();
+    if (monitor_adapter == null) begin
+        monitor_adapter = dispatch_monitor_event_adapter::type_id::create("monitor_adapter");
+    end
+    monitor_adapter.drain_lsq_timing_sidebands();
     collect_monitor_event_batch();
     exception_redirect_replay_task();
+    // redirect scan 可能在 exception handler 中刚刚 finalize software count；
+    // 再 drain 一次可收集处理期间到达的 sideband；同一 service tick 只在此处
+    // 执行一次 reconcile，避免一拍两次推进 deadline/record 生命周期。
+    monitor_adapter.drain_lsq_timing_sidebands();
+    monitor_adapter.service_lsq_timing_reconcile();
 endtask:service_monitor_once
 
 function bit memblock_main_dispatch_auto_build_main_table_base_sequence::all_transactions_terminal_done();
