@@ -7,7 +7,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，已被 2026-07-17 L2Cache 专项 plan 替代，不再执行 |
+| 状态 | `do`，已被 2026-07-17 L2Cache 专项 plan 完整替代并归档，不再单独执行 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv` |

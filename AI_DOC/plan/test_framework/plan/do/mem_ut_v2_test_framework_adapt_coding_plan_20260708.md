@@ -2,13 +2,13 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，monitor output、L2TLB、LSQ MMIO/status、pending-MMIO 和 L2Cache responder 专项均已完成；本总控 plan 仍保留在 undo 作为总控记录 |
+| 状态 | `do`，总控列出的 V2 测试框架专项均已完成 coding、文档同步、专项验证、独立 review 和本地提交 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv`、`build_memblock/rtl/filelist.f` |
 | Plan 类型 | V2 测试框架运行期适配总控，不替代专项 execution plan |
 | 适配原则 | 只记录 V2 适配的关键问题、专项 owner、修改逻辑边界和文字伪代码；不保留历史讨论和长 checklist |
-| 创建/修订日期 | 2026-07-21 |
+| 创建/修订日期 | 2026-07-23 |
 
 ## 1. 范围与边界
 
@@ -83,10 +83,35 @@ test -e build_memblock/rtl/filelist.f
 | LSQ MMIO/status 与 cancel 对账 | 已完成并归档 | 建立modeled ROB head及表尾watermark，分离normal commit、fault convergence和LQ/SQ physical deq；参数化`sqDeq` count-only链路；active idle保持level sideband；redirect epoch按software count与DUT snapshot直接对账且只由software路径回退free count；deferred raw FIFO、singleton owner和runtime drain闭环；`pendingst/scommit`按V2 scalar ROB store分类接受STORE/CBO。 | 最终VCS/KDB compile通过；default real smoke、real cancel reconcile和pending-MMIO directed均`TEST_PASS`且未捕获error/fatal为0；CBO分类日志通过；最后一轮独立review `FINAL PASS`。plan位于`plan/do/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`，review位于`review_doc/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_implementation_review_20260722.md`。 |
 | pending-MMIO load/store sideband | 已完成并归档 | ctrl monitor采集load/store MMIO raw与ROB value；resolver结合完整active key、动态epoch和LOAD sample provenance归一化uid；status保存canonical tag/source，LSQ owner只查询tag生成head `pendingMMIOld`；stale旧owner丢弃，无法证明归属或新owner重叠fail-fast；directed vseq覆盖tag/provenance、fault head、owner reset和global-stop raw drain。 | `v2_lsq_mmio_cbo_final_20260723`下directed为`TEST_PASS`，`UVM_ERROR=0`、未捕获`UVM_FATAL=0`、精确caught fatal=1；相邻real smoke/cancel也通过；最后一轮独立review `FINAL PASS`。plan位于`plan/do/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md`，review位于`review_doc/undo/mem_ut_v2_pending_mmio_load_sideband_implementation_review_20260722.md`。 |
 | DCache L2 response/hint/Probe | 已完成并归档 | 建立轻量 coherent response、三档 delay、Hint/Probe、GrantAck/E、cached-line和C assembly；补齐 C.fire owner 独占、channel/sideband 四态 fail-fast、generic E.ready 安全值、global-stop drain 与 legacy done handshake。 | compile 0 error（工具日志保留 LCA warning）；canonical 默认、Hint=100、Probe=100、legacy real smoke 均 `TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0`；最终独立 subagent review `FINAL PASS`。plan 已归档到 `plan/do`，implementation review 在 `review_doc/undo/mem_ut_v2_l2cache_response_hint_probe_model_implementation_review_20260723.md`。 |
-| DCache 轻量 L2 response/hint/Probe | 已完成并归档 | DCache responder按Acquire/ CBO/Release分类生成Grant/GrantData/CBOAck/ReleaseAck；新增三档delay、GrantAck/E owner、64B cached-line表、Hint绑定、单Probe及C assembly；driver锁步发送，sideband/channel四态检查，C.fire独占仲裁，global-stop drain和legacy done握手。 | VCS/KDB compile 通过（0 error，工具日志有LCA warning）；canonical默认、Hint=100、Probe=100和legacy `tc_dispatch_real_smoke`均`TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0`；独立review最后一轮严格`FINAL PASS`。plan位于`plan/do/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`，review位于`review_doc/undo/mem_ut_v2_l2cache_response_hint_probe_model_implementation_review_20260723.md`。 |
 
-后续每完成一个子计划，必须在本表追加其实际功能、归档路径和验证结果，并保持每个子计划一个独立
-本地 git commit。
+本表已经覆盖总控中的全部专项 owner。后续新增的 V2 功能不回填为本总控的隐式子项，必须另建带
+唯一 owner 的专项 plan，并继续遵守“一专项一份 implementation review、一个本地 commit”的规则。
+
+### 2.2 总控闭环审计
+
+总控归档前已确认：owner 表中列出的所有专项 plan 均位于 `plan/do`；各专项的实际逻辑、参数、字段链、
+flow/analysis 同步和验证结论均记录在对应 plan 与 implementation review 中。主要实现或归档提交如下：
+
+| 专项 | 主要实现或归档提交 |
+|---|---|
+| compile 参数与宽度公共基线 | `35e994a0a6`、`63470bc7b1` |
+| LSQ enqueue | `bd813bc3ed` |
+| 自动主表 VADDR | `f1756a4833` |
+| split issue | `642147364d` |
+| int-WB/writeback | `a3e626988c` |
+| IQ feedback/replay | `887e0e6de5` |
+| CSR/sfence runtime | `bf6598541d` |
+| monitor output 分类 | `cf63e12ebd` |
+| L2TLB responder | `e374f39c5d` |
+| LSQ MMIO/status | `64bed78edc` |
+| pending-MMIO sideband | `7c25383b9a` |
+| DCache L2 response/hint/Probe | `bace94b6ef` |
+
+最后执行的 DCache 专项 compile/smoke 基于前述所有专项提交之后的集成代码树：VCS/KDB compile 为
+0 error；canonical 默认、Hint=100、Probe=100 和 legacy real smoke 均通过，且
+`UVM_ERROR=0`、`UVM_FATAL=0`。因此总控关闭不再增加第二套集成状态机或重复 smoke；仍未支持的
+vector LS、独立 S1/S2 PTE 权限、完整 core `sfence.flushPipe`、DCache/SBuffer denied/corrupt 等能力
+继续保留在 TODO 边界，不属于本轮 scalar V2 适配未完成项。
 
 ## 3. 问题一：V2/V3 编译期结构仍可能存在第二权威
 

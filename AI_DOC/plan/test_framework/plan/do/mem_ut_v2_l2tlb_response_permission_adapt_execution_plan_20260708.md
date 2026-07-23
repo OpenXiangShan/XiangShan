@@ -790,7 +790,7 @@ AI_DOC/analysis/source_sv/dispatch_framework_sv/memblock_l2tlb_base_sequence.md
 AI_DOC/analysis/source_sv/dispatch_framework_sv/memblock_dispatch_types.md
 AI_DOC/analysis/source_sv/dispatch_framework_sv/memblock_sync_pkg.md
 AI_DOC/web/memblock_dispatch_control_flow_callgraph_enhanced/assets/app.js
-AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_test_framework_adapt_coding_plan_20260708.md
+AI_DOC/plan/test_framework/plan/do/mem_ut_v2_test_framework_adapt_coding_plan_20260708.md
 AI_DOC/plan/test_framework/plan/do/l2tlb_base_seq_plan_20260614.md
 AI_DOC/plan/test_framework/plan/do/dispatch_plan_v2_framework_design_20260614.md
 AI_DOC/plan/test_framework/plan/do/dispatch_plan_v2_development_detail_20260614.md

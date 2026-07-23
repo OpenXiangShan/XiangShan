@@ -46,11 +46,11 @@ TileLink-C 场景返回、没有 L2 response delay、没有有效 hint、也没�
 替代关系：
 
 - 本 plan 完整替代
-  `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_dcache_l2_sideband_responder_adapt_execution_plan_20260712.md`。
+  `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_dcache_l2_sideband_responder_adapt_execution_plan_20260712.md`。
   原 plan 的 interface known-zero、idle known-zero 和 `io_l2_flush_done=0` 要求并入本 plan；
   原 plan 的 hint 永久 zero-only 要求不再执行。
 - 本 plan 取代
-  `AI_DOC/plan/test_framework/plan/undo/dcache_l2_tilelink_interaction_plan_20260614.md`
+  `AI_DOC/plan/test_framework/plan/do/dcache_l2_tilelink_interaction_plan_20260614.md`
   作为当前 V2 的可执行轻量方案。旧 plan 中多 source、多 sink、完整权限目录、Probe cooldown、
   error injection 和完整并发模型不在本轮实现。
 
