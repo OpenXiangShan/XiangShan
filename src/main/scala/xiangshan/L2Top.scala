@@ -320,7 +320,7 @@ class L2TopInlined()(implicit p: Parameters) extends LazyModule
       l2.io.pfCtrlFromCore := io.pfCtrlFromCore
       l2.io.dft.zip(io.dft).foreach({ case(a, b) => a := b })
       l2.io.dft_reset.zip(io.dft_reset).foreach({ case(a, b) => a := b })
-      io.l2_hint := l2.io.l2_hint.head
+      io.l2_hint := l2.io.l2_hint
       l2.io.debugTopDown.robHeadPaddr := DontCare
       l2.io.hartId := io.hartId.fromTile
       l2.io.debugTopDown.robHeadPaddr := io.debugTopDown.robHeadPaddr
