@@ -70,7 +70,7 @@ trait CSRCustom { self: NewCSR =>
 class SbpctlBundle extends CSRBundle {
   val RAS_ENABLE    = RW(6).withReset(true.B).withDescription("Enable the return-address stack predictor.")
   val ITTAGE_ENABLE = RW(5).withReset(true.B).withDescription("Enable the indirect-target TAGE predictor.")
-  val SC_ENABLE     = RW(4).withReset(true.B).withDescription("Enable the statistical corrector.")
+  val SC_ENABLE     = RW(4).withReset(false.B).withDescription("Enable the statistical corrector.")
   val TAGE_ENABLE   = RW(3).withReset(true.B).withDescription("Enable the TAGE predictor.")
   val MBTB_ENABLE   = RW(2).withReset(true.B).withDescription("Enable the macro-BTB predictor.")
   val ABTB_ENABLE   = RW(1).withReset(true.B).withDescription("Enable the alternate branch target buffer.")
