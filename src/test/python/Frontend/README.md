@@ -177,15 +177,15 @@ src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.b
 Frontend BT 只保留两条职责不同的覆盖率链：
 
 1. 功能覆盖率：
-   `测试点主表 -> 03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv -> env/funcov.py -> env/functional_coverage.py -> data/runs/<run_id>/funcov/*.funcov.json -> tools/backannotate_funcov.py`。
+   `测试点主表 -> 03_funcov_model/frontend_bt_functional_coverage_pilot.csv -> env/funcov.py -> env/functional_coverage.py -> data/runs/<run_id>/funcov/*.funcov.json -> tools/backannotate_funcov.py`。
    registry 当前共 222 行，其中只有 `Coverpoint` 完整并与 sampler 一一对应的 64 行会装入 runtime；其余 158 行均为 `UNMAPPED` 历史规划。带 `旧BPU_FTQ` 路径的历史行全部保持 `Coverpoint` 为空，不能进入采样或自动反标。
    标准 bin-trace 脚本会自动生成 `TB_RUN_ID` / `TB_ARTIFACT_DIR`；fixture 会将 pytest `funcov_bins` 标记或与汇编 case stem 精确匹配的 registry 行写入 `coverage_targets`。
-   `make frontend` 在编译成功后生成 `build-frontend/frontend_build_manifest.json`。funcov 只在 manifest 的源码状态干净且其中的 DUT/RTL/signal-contract 哈希与当前编译产物一致时接受其中的 `dut_source_sha`。
+   `make frontend` 在对应 package 构建成功后生成 `build-frontend/frontend_build_manifest.<sim>.json`。funcov 按 `TB_FRONTEND_SIM` 选择 manifest，且只在其源码状态干净、`simulator` 与已选 package 一致、DUT/RTL/signal-contract 哈希与当前编译产物一致时接受其中的 `dut_source_sha`。
 2. 代码覆盖率：
    `dut.SetCoverage() -> Verilator .dat -> toffee set_line_coverage() -> report_raw_code_coverage.py/gen_coverage_html.sh`。
 
 功能覆盖率证明目标场景被激励；checker、assertion、monitor 或 trace 对比证明 DUT 行为正确。代码覆盖率用于发现 RTL 空洞，三者不能互相替代。完整建模、真实 DUT 证据、版本隔离、自动反标和人工 `CLOSED` 规则见
-`docs/03_功能覆盖率建模/skills.md`。
+`docs/03_funcov_model/skills.md`。
 
 ## 文档分工
 
@@ -193,6 +193,6 @@ Frontend BT 只保留两条职责不同的覆盖率链：
 - frontend 验证流程、bin-trace 运行要求、artifact 规则和提交约束，统一见
   `docs/agents/frontend-verification.md`。
 - 测试点驱动的功能覆盖率建模、回归、版本门禁和反标规范，统一见
-  `docs/03_功能覆盖率建模/skills.md`。
+  `docs/03_funcov_model/skills.md`。
 - DUT / monitor / env mismatch 的分析方法，统一见
   `docs/agents/frontend-debugging.md`。

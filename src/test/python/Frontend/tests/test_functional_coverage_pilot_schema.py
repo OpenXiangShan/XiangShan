@@ -17,7 +17,7 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
     repo_root = Path(__file__).resolve().parents[5]
     pilot_path = (
         repo_root
-        / "src/test/python/Frontend/docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv"
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
     )
 
     summary = validate_pilot_schema(pilot_path)
@@ -29,7 +29,7 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     repo_root = Path(__file__).resolve().parents[5]
     pilot_path = (
         repo_root
-        / "src/test/python/Frontend/docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv"
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
     )
 
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
@@ -64,11 +64,11 @@ def test_ifu_predecode_and_two_fetch_leaves_are_single_bin_and_actionable():
     repo_root = Path(__file__).resolve().parents[5]
     pilot_path = (
         repo_root
-        / "src/test/python/Frontend/docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv"
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
     )
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
     )
 
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:

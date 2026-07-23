@@ -41,7 +41,7 @@ AI 可以分析代码、提出测试点和预期，但不能独立批准从 DUT 
 
 只维护以下 canonical 输入：
 
-- 测试点主表：`../02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv`
+- 测试点主表：`../02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv`
 - coverage registry：`frontend_bt_functional_coverage_pilot.csv`
 - 功能覆盖率 recorder、调度和 event 采样：`../../env/functional_coverage.py`
 - 模块级周期采样 predicate：`../../env/funcov.py`

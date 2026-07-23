@@ -18,6 +18,7 @@ from .funcov import (
     sample_cfvec_coverage,
     sample_two_fetch_coverage,
 )
+from .pylib import frontend_pylib_path
 from .rvc_decoder import expand_rvc
 
 
@@ -26,7 +27,7 @@ def _frontend_root() -> Path:
 
 
 def default_pilot_csv_path() -> Path:
-    return _frontend_root() / "docs" / "03_功能覆盖率建模" / "frontend_bt_functional_coverage_pilot.csv"
+    return _frontend_root() / "docs" / "03_funcov_model" / "frontend_bt_functional_coverage_pilot.csv"
 
 
 def _sanitize(value: Any) -> Any:
@@ -302,9 +303,12 @@ class FunctionalCoverageRecorder:
         repo_root = frontend_root.parents[3]
         build_root = repo_root / "build-frontend"
         manifest_override = os.getenv("TB_DUT_BUILD_MANIFEST", "").strip()
+        simulator = os.getenv("TB_FRONTEND_SIM", "verilator")
         build = load_frontend_build_manifest(
             build_root,
             Path(manifest_override) if manifest_override else None,
+            simulator=simulator,
+            pylib_dir=frontend_pylib_path() / "Frontend",
         )
         source_override = os.getenv("TB_DUT_SOURCE_SHA", "").strip()
         build_config_override = os.getenv("TB_DUT_BUILD_CONFIG", "").strip()

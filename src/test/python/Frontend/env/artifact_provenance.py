@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any
 
 
-BUILD_MANIFEST_SCHEMA_VERSION = 1
+BUILD_MANIFEST_SCHEMA_VERSION = 2
+SUPPORTED_FRONTEND_SIMS = ("verilator", "vcs")
 BUILD_HASH_FIELDS = (
     "dut_build_sha256",
     "dut_python_extension_sha256",
@@ -56,9 +57,27 @@ def rtl_tree_sha256(rtl_dir: Path) -> str:
     return digest.hexdigest()
 
 
-def current_frontend_build_hashes(build_root: Path) -> dict[str, str]:
+def frontend_simulator(simulator: str | None = None) -> str:
+    value = str(simulator or "verilator").strip().lower()
+    if value not in SUPPORTED_FRONTEND_SIMS:
+        raise ValueError(f"frontend simulator must be one of: {' '.join(SUPPORTED_FRONTEND_SIMS)}")
+    return value
+
+
+def frontend_build_manifest_path(build_root: Path, simulator: str | None = None) -> Path:
+    sim = frontend_simulator(simulator)
+    return Path(build_root) / f"frontend_build_manifest.{sim}.json"
+
+
+def current_frontend_build_hashes(
+    build_root: Path,
+    *,
+    simulator: str | None = None,
+    pylib_dir: Path | None = None,
+) -> dict[str, str]:
     build_root = Path(build_root)
-    pylib = build_root / "pylib" / "Frontend"
+    sim = frontend_simulator(simulator)
+    pylib = Path(pylib_dir) if pylib_dir is not None else build_root / f"pylib-{sim}" / "Frontend"
     return {
         "dut_build_sha256": file_sha256(pylib / "libUTFrontend.so"),
         "dut_python_extension_sha256": file_sha256(pylib / "_UT_Frontend.so"),
@@ -75,17 +94,25 @@ def write_frontend_build_manifest(
     source_tree_dirty: bool,
     build_config: str,
     build_command: str,
+    simulator: str | None = None,
+    pylib_dir: Path | None = None,
 ) -> dict[str, Any]:
     output_path = Path(output_path)
+    sim = frontend_simulator(simulator)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     manifest = {
         "schema_version": BUILD_MANIFEST_SCHEMA_VERSION,
+        "simulator": sim,
         "dut_source_sha": str(dut_source_sha).strip() or "unavailable",
         "source_tree_dirty": bool(source_tree_dirty),
         "build_config": str(build_config).strip() or "frontend-default",
         "build_command": str(build_command).strip(),
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "artifacts": current_frontend_build_hashes(build_root),
+        "artifacts": current_frontend_build_hashes(
+            build_root,
+            simulator=sim,
+            pylib_dir=pylib_dir,
+        ),
     }
     temporary = output_path.with_name(f".{output_path.name}.tmp")
     temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -93,10 +120,21 @@ def write_frontend_build_manifest(
     return manifest
 
 
-def load_frontend_build_manifest(build_root: Path, manifest_path: Path | None = None) -> dict[str, Any]:
+def load_frontend_build_manifest(
+    build_root: Path,
+    manifest_path: Path | None = None,
+    *,
+    simulator: str | None = None,
+    pylib_dir: Path | None = None,
+) -> dict[str, Any]:
     build_root = Path(build_root)
-    path = Path(manifest_path) if manifest_path is not None else build_root / "frontend_build_manifest.json"
-    current_hashes = current_frontend_build_hashes(build_root)
+    sim = frontend_simulator(simulator)
+    path = Path(manifest_path) if manifest_path is not None else frontend_build_manifest_path(build_root, sim)
+    current_hashes = current_frontend_build_hashes(
+        build_root,
+        simulator=sim,
+        pylib_dir=pylib_dir,
+    )
     result: dict[str, Any] = {
         **current_hashes,
         "dut_source_sha": "unavailable",
@@ -124,6 +162,8 @@ def load_frontend_build_manifest(build_root: Path, manifest_path: Path | None = 
     reasons: list[str] = []
     if manifest.get("schema_version") != BUILD_MANIFEST_SCHEMA_VERSION:
         reasons.append("manifest_schema_mismatch")
+    if str(manifest.get("simulator") or "").strip().lower() != sim:
+        reasons.append("manifest_simulator_mismatch")
     source_sha = str(manifest.get("dut_source_sha") or "").strip()
     if not source_sha or source_sha in {"unknown", "unavailable"}:
         reasons.append("missing_dut_source_sha")

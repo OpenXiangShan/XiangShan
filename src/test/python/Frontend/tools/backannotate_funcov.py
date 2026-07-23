@@ -66,7 +66,7 @@ _FRONTEND_ROOT = Path(__file__).resolve().parents[1]
 _CANONICAL_REGISTRY = (
     _FRONTEND_ROOT
     / "docs"
-    / "03_功能覆盖率建模"
+    / "03_funcov_model"
     / "frontend_bt_functional_coverage_pilot.csv"
 )
 _SAMPLER_FILES = (

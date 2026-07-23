@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 from collections import defaultdict
 from dataclasses import dataclass
@@ -455,7 +456,8 @@ def main() -> int:
         output_path = args.json_output.resolve()
         if output_path.exists():
             raise SystemExit(f"refusing to overwrite existing coverage summary: {output_path}")
-        build_manifest_path = args.source_root.resolve() / "frontend_build_manifest.json"
+        simulator = os.getenv("TB_FRONTEND_SIM", "verilator").strip().lower()
+        build_manifest_path = args.source_root.resolve() / f"frontend_build_manifest.{simulator}.json"
         summary = {
             "schema_version": 1,
             "run_id": str(args.run_id).strip() or None,

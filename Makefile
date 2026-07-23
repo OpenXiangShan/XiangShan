@@ -294,7 +294,7 @@ FRONTEND_BUILD_DIR = ./build-frontend
 FRONTEND_RTL_DIR   = $(FRONTEND_BUILD_DIR)/rtl
 FRONTENDTOP        = top.FrontendTopMain
 FRONTEND_TOP_V     = $(FRONTEND_RTL_DIR)/FrontendTop.$(RTL_SUFFIX)
-FRONTEND_BUILD_MANIFEST = $(FRONTEND_BUILD_DIR)/frontend_build_manifest.json
+FRONTEND_BUILD_MANIFEST = $(FRONTEND_BUILD_DIR)/frontend_build_manifest.$(FRONTEND_SIM).json
 FRONTEND_PYLIB_ROOT = $(FRONTEND_BUILD_DIR)/pylib-$(FRONTEND_SIM)
 FRONTEND_PYLIB_DIR = $(FRONTEND_PYLIB_ROOT)/Frontend
 FRONTEND_PYLIB     = $(FRONTEND_PYLIB_DIR)/libUTFrontend.so
@@ -425,14 +425,16 @@ $(FRONTEND_PYLIB): $(FRONTEND_TOP_V) $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND
 		--tdir $(FRONTEND_PYLIB_DIR) \
 		-w $(FRONTEND_BUILD_DIR)/frontend.$$frontend_waveform_format \
 		--coverage $(FRONTEND_PICKER_SIM_ARGS)
-frontend: $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND_PYLIB)
+$(FRONTEND_BUILD_MANIFEST): $(FRONTEND_PYLIB) $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND_CONFIG_FILE)
 	@frontend_waveform_format="$$(cat "$(FRONTEND_WAVEFORM_FORMAT_FILE)" 2>/dev/null || printf '%s' '$(FRONTEND_WAVEFORM_FORMAT)')"; \
 	python3 src/test/python/Frontend/tools/write_frontend_build_manifest.py \
 		--repo-root . \
 		--build-root $(FRONTEND_BUILD_DIR) \
 		--output $(FRONTEND_BUILD_MANIFEST) \
+		--sim $(FRONTEND_SIM) \
 		--build-config "CONFIG=$(CONFIG);ISSUE=$(ISSUE);NUM_CORES=$(NUM_CORES);CHISEL_TARGET=$(CHISEL_TARGET);WAVEFORM=$$frontend_waveform_format" \
 		--build-command "make frontend CONFIG=$(CONFIG) ISSUE=$(ISSUE) NUM_CORES=$(NUM_CORES) CHISEL_TARGET=$(CHISEL_TARGET) FRONTEND_WAVEFORM_FORMAT=$$frontend_waveform_format"
+frontend: $(FRONTEND_BUILD_MANIFEST)
 .PHONY: frontend
 
 frontend-verilator:

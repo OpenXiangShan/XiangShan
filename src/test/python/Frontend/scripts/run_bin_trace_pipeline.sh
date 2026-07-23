@@ -41,7 +41,7 @@ Environment variables:
   TB_FUNCOV_TARGET_TP_IDS
                       Optional comma/space-separated target TP_ID values
   TB_DUT_BUILD_MANIFEST
-                      Build manifest path; defaults to build-frontend/frontend_build_manifest.json
+                      Build manifest path; defaults to the TB_FRONTEND_SIM-specific manifest
   TB_SKIP_NEMU        Skip NEMU trace generation and use the existing trace_jsonl_path directly (default: 0)
   TB_NEMU_EXEC         NEMU executable path (default: <repo>/ready-to-run/riscv64-nemu-interpreter)
   TB_NEMU_MAX_INSTR    Pass -I to NEMU when > 0 (default: 0)

@@ -58,9 +58,10 @@ tree. Start here unless the task explicitly says otherwise.
 - `build-frontend/pylib-vcs/Frontend/`: generated VCS Python bindings, shared
   objects, signal map, and `Frontend_top.sv`.
 - `build-frontend/rtl/`: generated RTL artifacts useful for cross-checking DUT behavior.
-- `build-frontend/frontend_build_manifest.json`: written only after a successful
-  `make frontend`; binds the design SHA and build configuration to the compiled
-  DUT, generated RTL tree, and signal-contract hashes.
+- `build-frontend/frontend_build_manifest.<sim>.json`: generated with the
+  corresponding `pylib-<sim>` package; binds that package, generated RTL tree,
+  build configuration, and signal-contract hashes. `<sim>` is `verilator` or
+  `vcs`.
 - `ready-to-run/`: example DUT binaries used by frontend bin-trace investigations.
 - `NEMU/logs/`: legacy/imported trace inputs used to reconstruct old failing
   windows; new runner-generated trace and raw NEMU logs belong under the run's
@@ -705,5 +706,5 @@ Current default implementation details in `env/fixtures.py`:
 
 - `docs/testbench/Guide_Doc/dut_fixture.md`
 - `docs/testbench/Guide_Doc/dut_api_instruction.md`
-- `src/test/python/Frontend/docs/03_功能覆盖率建模/skills.md`
+- `src/test/python/Frontend/docs/03_funcov_model/skills.md`
 - `docs/testbench/testbench_stages.yaml`

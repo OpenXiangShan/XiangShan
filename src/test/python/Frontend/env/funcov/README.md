@@ -8,7 +8,7 @@
 
 对应源测试点：
 
-`src/test/python/Frontend/docs/02_测试点分解/Frontend_testpoint_v1.0.csv`
+`src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_v1.0.csv`
 
 当前只处理 CSV 逻辑行 `382-532`。
 
