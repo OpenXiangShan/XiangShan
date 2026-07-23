@@ -303,6 +303,10 @@ FRONTEND_WAVEFORM_FORMAT ?=
 FRONTEND_WAVEFORM_FORMAT_DEFAULT := $(if $(filter vcs,$(FRONTEND_SIM)),fsdb,fst)
 FRONTEND_WAVEFORM_FORMAT_FILE = $(FRONTEND_BUILD_DIR)/.waveform_format.$(FRONTEND_SIM)
 FRONTEND_CONFIG_FILE = $(FRONTEND_BUILD_DIR)/.frontend_config.$(FRONTEND_SIM)
+FRONTEND_FUNCOV_SV_DIR = src/test/python/Frontend/env/funcov/sv
+FRONTEND_FUNCOV_FILELIST = $(FRONTEND_RTL_DIR)/filelist.funcov.f
+FRONTEND_PICKER_FILELIST = $(FRONTEND_RTL_DIR)/filelist.f
+FRONTEND_PYLIB_EXTRA_DEPS =
 FRONTEND_CCACHE_DIR ?= $(abspath $(FRONTEND_BUILD_DIR)/.ccache)
 FRONTEND_CCACHE_TMP ?= $(abspath $(FRONTEND_BUILD_DIR)/.ccache-tmp)
 FRONTEND_BUILD_JOBS ?= 32
@@ -325,6 +329,9 @@ else ifeq ($(FRONTEND_SIM),vcs)
 FRONTEND_ACCESS_MODE ?= dpi
 FRONTEND_PICKER_SIM_ARGS =
 FRONTEND_SIM_ENV = VCS_HOME=$(FRONTEND_VCS_HOME) VERDI_HOME=$(FRONTEND_VERDI_HOME)
+FRONTEND_FUNCOV_SV_FILES = $(shell find $(FRONTEND_FUNCOV_SV_DIR) -type f -name '*.sv' -print 2>/dev/null | sort)
+FRONTEND_PICKER_FILELIST = $(FRONTEND_FUNCOV_FILELIST)
+FRONTEND_PYLIB_EXTRA_DEPS = $(FRONTEND_FUNCOV_FILELIST) $(FRONTEND_FUNCOV_SV_FILES)
 else
 $(error FRONTEND_SIM must be one of: verilator vcs)
 endif
@@ -381,7 +388,17 @@ ifeq ($(CHISEL_TARGET),systemverilog)
 	@cat $(dir $@).__diff__ $@ > $(dir $@).__out__ && mv $(dir $@).__out__ $@
 endif
 
-$(FRONTEND_PYLIB): $(FRONTEND_TOP_V) $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND_CONFIG_FILE)
+$(FRONTEND_FUNCOV_FILELIST): FORCE $(FRONTEND_TOP_V)
+	@tmp="$@.tmp"; \
+	{ \
+		cat "$(FRONTEND_RTL_DIR)/filelist.f"; \
+		for frontend_funcov_sv in $(FRONTEND_FUNCOV_SV_FILES); do \
+			printf '%s\n' "$(abspath .)/$$frontend_funcov_sv"; \
+		done; \
+	} > "$$tmp"; \
+	if ! cmp -s "$$tmp" "$@"; then mv "$$tmp" "$@"; else rm -f "$$tmp"; fi
+
+$(FRONTEND_PYLIB): $(FRONTEND_TOP_V) $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND_CONFIG_FILE) $(FRONTEND_PYLIB_EXTRA_DEPS)
 	@if [ "$(FRONTEND_SIM)" = "vcs" ] && [ -n "$(FRONTEND_VCS_HOST)" ] && [ "$$(hostname -s)" != "$(FRONTEND_VCS_HOST)" ]; then \
 		echo "frontend VCS build must run on $(FRONTEND_VCS_HOST)"; \
 		echo "run this target on $(FRONTEND_VCS_HOST), or unset FRONTEND_VCS_HOST for an unrestricted build host"; \
@@ -402,7 +419,7 @@ $(FRONTEND_PYLIB): $(FRONTEND_TOP_V) $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND
 	mkdir -p $(FRONTEND_CCACHE_DIR) $(FRONTEND_CCACHE_TMP)
 	@frontend_waveform_format="$$(cat "$(FRONTEND_WAVEFORM_FORMAT_FILE)" 2>/dev/null || printf '%s' '$(FRONTEND_WAVEFORM_FORMAT)')"; \
 	$(FRONTEND_BUILD_ENV) time $(FRONTEND_PICKER) export $(dir $<)ClockGate.sv --sname Frontend \
-		--filelist $(dir $<)/filelist.f \
+		--filelist $(FRONTEND_PICKER_FILELIST) \
 		--lang python --autobuild true --cp_lib true \
 		--sim $(FRONTEND_SIM) --access-mode $(FRONTEND_ACCESS_MODE) \
 		--tdir $(FRONTEND_PYLIB_DIR) \
