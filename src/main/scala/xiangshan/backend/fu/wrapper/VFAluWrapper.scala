@@ -9,10 +9,28 @@ import xiangshan.backend.decode.opcode.Opcode.VFMacOpcodes.isFmul
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.vector.fu.Func._
-import xiangshan.backend.vector.fu.{VecFixLatFunc, VecFuConfig}
+import xiangshan.backend.vector.fu.{Func, VecFixLatFunc, VecFuConfig}
 import yunsuan.vector.Common.{Fflags, VSew}
 import yunsuan.vector.vfalu.VectorFALU
 import yunsuan.vector.vfmul.{VFMul2VFALUCtrlBundle, VFMul2VFALUOutput}
+
+object VFAluWrapper {
+  /**
+    * The S1 product is not a register-file result.  It carries the complete
+    * OP3 context into VFALU so its S1 result can use the normal vector
+    * writeback and merge path.
+    */
+  class VFMulForward(cfg: VecFuConfig)(implicit p: Parameters) extends XSBundle {
+    val mul = Vec(cfg.destDataBits / 64, new VFMul2VFALUOutput)
+    val addend = Vec(cfg.destDataBits / 64, UInt(64.W))
+    val isSub = Bool()
+    val ctrlOpcode = UInt(6.W)
+    val frm = UInt(3.W)
+    val ctrl = new Func.InCtrl(cfg)
+    val data = new Func.InData(cfg)
+    val debug = Option.when(backendParams.debugEn)(new xiangshan.backend.vector.VecRegionModule.DebugBundle)
+  }
+}
 
 class VFAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg) {
 
@@ -25,15 +43,16 @@ class VFAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
   private val zeroFflagsE8 = VecInit(Seq.fill(vlenb)(zeroFflags))
   private val zeroNarrowFflagsE8 = VecInit(Seq.fill(vlenb / 2)(zeroFflags))
 
-  private val ex0opcode = fuOpType
-  private val ex0NextOpcode = ex0Next.bits.ctrl.opcode
-  private val ex0vsew = ex0ctrl.vtype.get.vsew
-  private val isOP3 = makePipeReg(VFMacOpcodes.isOP3(ex0NextOpcode), pipeRegValids)
-  //  private val resSew = Wire(Vec(normalLatency + 1, UInt(ex0vsew.getWidth.W)))
+  // VectorFALU S0 accepts the VFMUL S1 product.  Keep the original uop
+  // alongside it so MergeUnit observes the matching oldVd/vl/vtype context.
+  private val op3Fire_s0 = in.fromVfmul.get.valid
+  private val op3Fire_s1 = RegInit(false.B)
+  op3Fire_s1 := op3Fire_s0
+  private val op3Context_s0 = in.fromVfmul.get.bits
+  private val op3Context_s1 = RegEnable(op3Context_s0, op3Fire_s0)
 
-  //  for (i <- 0 to cfg.latency) {
-  //    resSew(i) := ex(i).bits.ctrl.vtype.get.vsew
-  //  }
+  out.op3OutContext.get.valid := op3Fire_s1 && !op3Context_s0.ctrl.robIdx.needFlush(in.flush)
+  out.op3OutContext.get.bits := op3Context_s1
 
   private val vfalus = Seq.fill(numVecModule)(Module(new VectorFALU)) // WARNING: Don't change this module. MUST USE VectorFloatMultiplier
 //  val fromVfmul = IO(Output(Valid(Vec(numVecModule, new FuncUnitFaluInputFromFmul))))
@@ -49,18 +68,16 @@ class VFAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
   private val resultData = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
   private val fflagsData = Wire(Vec(numVecModule, Vec(vlenb / numVecModule, Fflags())))
 
-  //  val outToFaluFromFmul = out.outToVfaluFromVfmul.get
-
   vfalus.zipWithIndex.foreach {
     case (mod, i) =>
-      mod.io.fire               := ex(0).valid
-      mod.io.in.opcode          := ex0opcode
-      mod.io.in.fpA             := vs2Split.io.outVec64b(i)
-      mod.io.in.fpB             := vs1Split.io.outVec64b(i)
-      mod.io.in.fpAAppend       := 0.U
-      mod.io.in.roundMode       := frm
-      mod.io.in.inCtrlFromVFMul := 0.U.asTypeOf(new VFMul2VFALUCtrlBundle)
-      mod.io.in.isSubFromVFMul  := false.B
+      mod.io.fire               := op3Fire_s0 || ex(0).valid
+      mod.io.in.opcode          := Mux(op3Fire_s0, op3Context_s0.ctrlOpcode,            fuOpType                               )
+      mod.io.in.fpA             := Mux(op3Fire_s0, op3Context_s0.mul(i).fpA,            vs2Split.io.outVec64b(i)               )
+      mod.io.in.fpB             := Mux(op3Fire_s0, op3Context_s0.addend(i),             vs1Split.io.outVec64b(i)               )
+      mod.io.in.fpAAppend       := Mux(op3Fire_s0, op3Context_s0.mul(i).fpAAppend,      0.U                                    )
+      mod.io.in.roundMode       := Mux(op3Fire_s0, op3Context_s0.frm,                   frm                                    )
+      mod.io.in.inCtrlFromVFMul := Mux(op3Fire_s0, op3Context_s0.mul(i).FMULToFADDCtrl, 0.U.asTypeOf(new VFMul2VFALUCtrlBundle))
+      mod.io.in.isSubFromVFMul  := Mux(op3Fire_s0, op3Context_s0.isSub,                 false.B                                )
 
       resultData(i) := mod.io.out.fpResult
       fflagsData(i) := mod.io.out.fflagsVec
@@ -90,6 +107,24 @@ class VFAluWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
     vecData.fflagsE8.get := fflagsData.asTypeOf(Vec(vlenb, Fflags()))
   }
 
-  out.ex(cfg.latency).valid := ex(cfg.latency).valid
+  when (op3Fire_s1) {
+    out.ex(cfg.latency).bits.ctrl.robIdx     :=  op3Context_s1.ctrl.robIdx
+    out.ex(cfg.latency).bits.ctrl.pdest      :=  op3Context_s1.ctrl.pdest
+    out.ex(cfg.latency).bits.ctrl.pdestV0   .zip(op3Context_s1.ctrl.pdestV0  ).foreach { case (sink, source) => sink := source }
+    out.ex(cfg.latency).bits.ctrl.pdestVl   .zip(op3Context_s1.ctrl.pdestVl  ).foreach { case (sink, source) => sink := source }
+    out.ex(cfg.latency).bits.ctrl.rfWen     .zip(op3Context_s1.ctrl.rfWen    ).foreach { case (sink, source) => sink := source }
+    out.ex(cfg.latency).bits.ctrl.fpWen     .zip(op3Context_s1.ctrl.fpWen    ).foreach { case (sink, source) => sink := source }
+    out.ex(cfg.latency).bits.ctrl.vecWen    .zip(op3Context_s1.ctrl.vecWen   ).foreach { case (sink, source) => sink := source }
+    out.ex(cfg.latency).bits.ctrl.v0Wen     .zip(op3Context_s1.ctrl.v0Wen    ).foreach { case (sink, source) => sink := source }
+    out.ex(cfg.latency).bits.ctrl.vlWen     .zip(op3Context_s1.ctrl.vlWen    ).foreach { case (sink, source) => sink := source }
+    out.ex(cfg.latency).bits.ctrl.flushPipe .zip(op3Context_s1.ctrl.flushPipe).foreach { case (sink, source) => sink := source }
+    out.ex(cfg.latency).bits.ctrl.fflagsWen .zip(op3Context_s1.ctrl.fflagsWen).foreach { case (sink, source) => sink := source }
+    out.ex(cfg.latency).bits.debug          .zip(op3Context_s1.debug         ).foreach { case (sink, source) => sink := source }
+  }
 
+  // The normal VFALU input and an OP3 product reserve the same S0.  The
+  // issue-side writeback reservation prevents this collision.
+  assert(!(op3Fire_s0 && ex(0).valid), "VFALU received OP2 and OP3 work in the same S0")
+  assert(!(op3Fire_s1 && ex(cfg.latency).valid), "VFALU produced OP2 and OP3 results in the same cycle")
+  out.ex(cfg.latency).valid := Mux(op3Fire_s1, out.op3OutContext.get.valid, ex(cfg.latency).valid)
 }

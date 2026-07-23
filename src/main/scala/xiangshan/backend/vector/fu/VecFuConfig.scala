@@ -190,6 +190,8 @@ case class VecFuConfig (
 
   def isVfmul: Boolean = fuType == FuType.vfmul
 
+  def isVfalu: Boolean = fuType == FuType.vfalu
+
   def isVecMem: Boolean = fuType == FuType.vldu || fuType == FuType.vstu ||
                           fuType == FuType.vsegldu || fuType == FuType.vsegstu ||
                           name == "vstd"

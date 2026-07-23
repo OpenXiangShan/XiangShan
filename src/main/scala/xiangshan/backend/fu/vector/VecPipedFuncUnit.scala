@@ -35,8 +35,6 @@ trait VecFuncUnitAlias { this: FuncUnit =>
   protected val isExt     = vecCtrl.isExt
   protected val isDstMask = vecCtrl.isDstMask
   protected val isMove    = vecCtrl.isMove
-  // swap vs1 and vs2, used by vrsub, etc
-  protected val isReverse = vecCtrl.isReverse
 
   protected val sew8  = vecCtrl.sew8
   protected val sew16 = vecCtrl.sew16
