@@ -1,5 +1,7 @@
 # DCache 与 L2Cache TileLink-C 交互支持计划
 
+> 状态：`do`，早期完整模型草案已归档，不再作为当前 V2 coding 入口。
+>
 > 本 plan 是早期完整模型草案。当前 V2 可执行轻量方案已收敛到
 > `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`。
 > V2 coding 不再直接执行本文的多 source、多 sink、完整 directory 和完整并发方案；这些能力保留为

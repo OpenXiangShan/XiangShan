@@ -355,7 +355,7 @@ mem_ut/ver/ut/memblock/rule/plus_demo_migration_plan.md
 `dcache_mem__access_base_sequence` 后续需要从简单 A 到 D 内存响应扩展为完整的 DCache-L2 TileLink-C responder。详细方案见：
 
 ```text
-AI_DOC/plan/test_framework/plan/undo/dcache_l2_tilelink_interaction_plan_20260614.md
+AI_DOC/plan/test_framework/plan/do/dcache_l2_tilelink_interaction_plan_20260614.md
 ```
 
 该扩展计划覆盖：
