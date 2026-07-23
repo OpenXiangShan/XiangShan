@@ -170,6 +170,7 @@ class DecodeStageImp(
         bits.oldVType := mopInfo.oldVType
         bits.vlsInstr := false.B // Todo: remove
         bits.fflagsWen := uopInfo.fflagsWen
+        bits.vxsatWen := uopInfo.vxsatWen
         bits.dirtyVs := uopInfo.dirtyVs
         bits.isMove := uopInfo.isMove
         bits.uopIdx := uopInfo.uopIdx
