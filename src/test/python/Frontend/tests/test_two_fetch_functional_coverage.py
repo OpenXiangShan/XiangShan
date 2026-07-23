@@ -26,6 +26,7 @@ from env.functional_coverage import (
     FunctionalCoverageRecorder,
     default_pilot_csv_path,
 )
+from env.pylib import frontend_offset_path
 from tools.backannotate_funcov import (
     PilotBin,
     _target_matches,
@@ -548,7 +549,7 @@ def test_sampler_cannot_silently_mark_an_unmodeled_bin(tmp_path):
 
 
 def test_two_fetch_signal_map_matches_current_frontend_offset():
-    offset = Path(__file__).resolve().parents[5] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
+    offset = frontend_offset_path()
     if not offset.exists():
         return
 
