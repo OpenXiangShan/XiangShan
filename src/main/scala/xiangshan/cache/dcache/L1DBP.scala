@@ -15,11 +15,19 @@ import xiangshan.mem.HasL1PrefetchSourceParameter
 
 case class L1DBPParams(
   sampleBits: Int = 2,
-  pcPredictorEntries: Int = 8192
+  pcPredictorEntries: Int = 8192,
+  accessedIncrement: Int = 1
 ) {
   require(pcPredictorEntries >= 2 && isPow2(pcPredictorEntries),
     "L1DBP PC predictor entries must be a power of two and at least two")
+  require(accessedIncrement >= 1 && accessedIncrement <= L1DBPParams.counterMax,
+    s"L1DBP accessed counter increment must be in [1, ${L1DBPParams.counterMax}]")
   def pcIndexWidth: Int = log2Ceil(pcPredictorEntries)
+}
+
+object L1DBPParams {
+  val counterWidth = 2
+  val counterMax = (1 << counterWidth) - 1
 }
 
 object L1DBPOrigin {
@@ -159,6 +167,9 @@ class L1DBPMonitor(params: L1DBPParams)(implicit p: Parameters) extends DCacheMo
 
 class L1DBP(val l1dbpParams: L1DBPParams)(implicit p: Parameters)
   extends DCacheModule with HasL1DBPParameters with HasL1PrefetchSourceParameter {
+  private val counterWidth = L1DBPParams.counterWidth
+  private val counterMax = L1DBPParams.counterMax
+
   val io = IO(new Bundle {
     val read = Flipped(ValidIO(UInt(idxBits.W)))
     val sampleResp = Output(Vec(nWays, new L1DBPSampleEntry(l1dbpParams)))
@@ -171,8 +182,8 @@ class L1DBP(val l1dbpParams: L1DBPParams)(implicit p: Parameters)
     val terminate = Flipped(ValidIO(new L1DBPTerminate(l1dbpParams)))
   })
 
-  val pcCounters = RegInit(VecInit(Seq.fill(l1dbpParams.pcPredictorEntries)(2.U(2.W))))
-  val pfCounters = RegInit(VecInit(Seq.fill(2)(2.U(2.W))))
+  val pcCounters = RegInit(VecInit(Seq.fill(l1dbpParams.pcPredictorEntries)(2.U(counterWidth.W))))
+  val pfCounters = RegInit(VecInit(Seq.fill(2)(2.U(counterWidth.W))))
 
   val sampleArray = Module(new L1DBPSampleArray(l1dbpParams))
   sampleArray.io.read.valid := io.read.valid && isL1DBPSampleSet(io.read.bits)
@@ -219,7 +230,11 @@ class L1DBP(val l1dbpParams: L1DBPParams)(implicit p: Parameters)
   val rawTrainCounter = Mux(terminateWasPrefetch, pfCounters(trainPfIndex), pcCounters(trainIndex))
   val trainedCounter = Mux(
     io.terminate.bits.accessed,
-    3.U(2.W),
+    Mux(
+      rawTrainCounter +& l1dbpParams.accessedIncrement.U >= counterMax.U(counterWidth.W),
+      counterMax.U(counterWidth.W),
+      rawTrainCounter + l1dbpParams.accessedIncrement.U
+    ),
     Mux(rawTrainCounter === 0.U, 0.U, rawTrainCounter - 1.U)
   )
 
