@@ -92,13 +92,13 @@ class Ftq_RF_Components(implicit p: Parameters) extends XSBundle with BPUUtils {
     p"startAddr:${Hexadecimal(startAddr)}"
 }
 
-// Ftq_RF_Components keeps an extra bit for canonical check, backend pcMem does not need that
 class FtqPcMemEntry(implicit p: Parameters) extends Ftq_RF_Components {
-  override val startAddr    = UInt(VAddrBits.W)
+  // Ftq_RF_Components keeps an extra bit on nextLineAddr for canonical check,
+  // backend pcMem / targetMem does not need that, override here to reduce area
   override val nextLineAddr = UInt(VAddrBits.W)
 
   def fromFtqPcBundle(b: Ftq_RF_Components) = {
-    startAddr     := b.startAddr(VAddrBits - 1, 0)
+    startAddr     := b.startAddr
     nextLineAddr  := b.nextLineAddr(VAddrBits - 1, 0)
     isNextMask    := b.isNextMask
     fallThruError := b.fallThruError
