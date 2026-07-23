@@ -54,7 +54,6 @@ class L1BankedDataReadReq(implicit p: Parameters) extends DCacheBundle
 class L1BankedDataReadReqWithMask(implicit p: Parameters) extends DCacheBundle
 {
   val way_en = Bits(DCacheWays.W)
-  val htag_miss = Bool()
   val addr = Bits(PAddrBits.W)
   val addr_dup = Bits(PAddrBits.W)
   val bankMask = Bits(DCacheBanks.W)
@@ -65,7 +64,6 @@ class L1BankedDataReadLineReq(implicit p: Parameters) extends L1BankedDataReadRe
 {
   val rmask = Bits(DCacheBanks.W)
   val way = Bits(log2Up(DCacheWays).W) // UInt format of way_en for better timing
-  val way_en_htag = Bits(DCacheWays.W)
 }
 
 // Now, we can write a cache-block in a single cycle
@@ -257,7 +255,6 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     // load pipeline read word req
     val read = Vec(LoadPipelineWidth, Flipped(DecoupledIO(new L1BankedDataReadReqWithMask)))
     val is128Req = Input(Vec(LoadPipelineWidth, Bool()))
-    val s2_tag_match_way = Input(Vec(LoadPipelineWidth, UInt(DCacheWays.W)))
     // main pipeline read / write line req
     val readline_intend = Input(Bool())
     val readline = Flipped(DecoupledIO(new L1BankedDataReadLineReq))
@@ -279,6 +276,8 @@ abstract class AbstractBankedDataArray(implicit p: Parameters) extends DCacheMod
     val rr_bank_conflict_slow = Output(Vec(LoadPipelineWidth, Bool()))
     val disable_ld_fast_wakeup = Output(Vec(LoadPipelineWidth, Bool()))
     val pseudo_error = Flipped(DecoupledIO(Vec(DCacheBanks, new CtrlUnitSignalingBundle)))
+    val readline_way_en_htag = Input(UInt(DCacheWays.W))
+    val s2_tag_match_way = Input(Vec(LoadPipelineWidth, UInt(DCacheWays.W)))
   })
 
   // Half of the data banks use the duplicate address path to reduce fanout.
@@ -693,7 +692,6 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
   data_banks.map(_.map(_.dump()))
 
   val way_en = Wire(Vec(LoadPipelineWidth, io.read(0).bits.way_en.cloneType))
-  val htag_miss = io.read.map(_.bits.htag_miss)
   val set_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
   val set_addrs_dup = Wire(Vec(LoadPipelineWidth, UInt()))
   val div_addrs = Wire(Vec(LoadPipelineWidth, UInt()))
@@ -750,8 +748,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       io.read(x).valid && io.read(y).valid &&
       div_addrs(x) === div_addrs(y) &&
       (io.read(x).bits.bankMask & io.read(y).bits.bankMask) =/= 0.U &&
-      set_addrs(x) =/= set_addrs(y) &&
-      !htag_miss(x) && !htag_miss(y)
+      set_addrs(x) =/= set_addrs(y)
     }
   }
   ))
@@ -779,8 +776,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     } else {
       io.read(i).valid &&
       div_addrs(i) === line_div_addr &&
-      set_addrs(i) =/= line_set_addr &&
-      !htag_miss(i)
+      set_addrs(i) =/= line_set_addr
     }
     rrl_bank_conflict(i) := judge && io.readline.valid
     rrl_bank_conflict_intend(i) := judge && io.readline_intend
@@ -789,8 +785,7 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     io.read(x).valid &&
     write_valid_reg &&
     div_addrs(x) === write_div_addr_dup_reg.head &&
-    (write_bank_mask_reg & io.read(x).bits.bankMask) =/= 0.U &&
-    !htag_miss(x)
+    (write_bank_mask_reg & io.read(x).bits.bankMask) =/= 0.U
   )
   val wrl_bank_conflict = io.readline.valid && write_valid_reg &&
     line_div_addr === write_div_addr_dup_reg.head &&
@@ -864,11 +859,11 @@ class BankedDataArray(implicit p: Parameters) extends AbstractBankedDataArray {
       //     +-----------------+
       val bank_addr_matchs = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
         io.read(i).valid && div_addrs(i) === div_index.U &&
-          io.read(i).bits.bankMask(bank_index) && !rr_bank_conflict_oldest(i) && !htag_miss(i)
+          io.read(i).bits.bankMask(bank_index) && !rr_bank_conflict_oldest(i)
       })))
       val bank_addr_matchs_dup = WireInit(VecInit(List.tabulate(LoadPipelineWidth)(i => {
         io.read(i).valid && div_addrs_dup(i) === div_index.U &&
-          io.read(i).bits.bankMask(bank_index) && !rr_bank_conflict_oldest(i) && !htag_miss(i)
+          io.read(i).bits.bankMask(bank_index) && !rr_bank_conflict_oldest(i)
       })))
       val readline_match = Wire(Bool())
       if (ReduceReadlineConflict) {
