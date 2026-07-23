@@ -29,6 +29,7 @@ seq_pkg.sv
 // ./base_seq/soft_test/soft_test_memblock_dispatch_smoke_sequence.sv
 // ./base_seq/soft_test/soft_test_memblock_dispatch_fault_smoke_sequence.sv
 // ./base_seq/soft_test/soft_test_memblock_dispatch_replay_smoke_sequence.sv
+// ./base_seq/soft_test/soft_test_memblock_pending_mmio_directed_sequence.sv
 // ./base_seq/memblock_lsqenq_dispatch_base_sequence.sv
 // ./base_seq/memblock_issue_dispatch_base_sequence.sv
 // ./base_seq/memblock_lsqcommit_dispatch_base_sequence.sv
@@ -40,5 +41,6 @@ seq_pkg.sv
 // ./base_seq/memblock_main_dispatch_cancel_reconcile_sequence.sv
 // ../env/src/memblock_virtual_sequencer.sv
 // ./virtual_sequence/virtual_base_sequence.sv
+// ./virtual_sequence/memblock_pending_mmio_directed_vseq.sv
 // ./virtual_sequence/memblock_dispatch_real_smoke_vseq.sv
 // ./virtual_sequence/memblock_dispatch_real_cancel_reconcile_vseq.sv

@@ -484,7 +484,7 @@ TODO：
 
 ## 11. V2 MMIO load/store directed 与 `pendingMMIOld` 建模 TODO
 
-状态：已有专项 execution plan 承接 ROB mmio 状态表标签与 `pendingMMIOld` 支持，路径为 `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md`。当前 TODO 继续记录完整 MMIO directed、地址属性、store MMIO 后续 RM/checker 边界；DUT `loadMmio/loadMmioUop.robIdx_value` 和 `storeMmio/storeMmioUop.robIdx_value` monitor 回填已经是该专项的默认第一阶段方案，不再作为待确认项。
+状态：已有专项 execution plan 承接 ROB mmio 状态表标签与 `pendingMMIOld` 支持，路径为 `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md`。该专项已完成并归档；当前 TODO 继续记录完整 MMIO directed、地址属性、store MMIO 后续 RM/checker 边界。DUT `loadMmio/loadMmioUop.robIdx_value` 和 `storeMmio/storeMmioUop.robIdx_value` monitor 回填已落地，不再作为待确认项。
 
 当前本轮 V2 适配策略：
 

@@ -951,7 +951,7 @@ complete_v2_pending_sample()：
 本 plan 已完成的 `request_launched`、单深度 pending-sample 和 `commit_allocate()` 单一 allocation
 owner，是后续 redirect cancel 对账可复用的基础。尚未实现的 reservation 动态实例 token、统一
 DUT sample sequence、per-redirect record、DUT cancel snapshot 和 global-stop 收敛 gate，全部由
-`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`
 唯一描述和执行。该专项把本 plan 的 UID-only pending queue升级为reservation token queue；现有
 `v2_pending_sample_epoch`仍是独立batch dispatch/flush epoch并继续控制issue gate；同时删除当前源码中
 `request_launched=1`后按confirm时flush/epoch提前返回的旧分支，确保每个真实launch都有allocation/token。

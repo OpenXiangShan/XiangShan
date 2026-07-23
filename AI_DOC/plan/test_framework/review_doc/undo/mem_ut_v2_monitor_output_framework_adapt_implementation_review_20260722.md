@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 关联 plan | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md` |
+| 关联 plan | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md` |
 | review 日期 | 2026-07-22 |
 | review 范围 | monitor output 职责分类与 scalar-only vector writeback gate |
 | 当前结论 | 最终独立 review 通过（`FINAL PASS`） |
@@ -151,15 +151,15 @@ helper；$sformatf 只格式化错误消息，uvm_fatal 是新增 gate 的唯一
 | `M` | `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_vec_wb_agent_agent/src/io_mem_to_ooo_vec_wb_agent_agent_monitor.sv` | 本专项 | 唯一源码增量是 scalar-only `writebackVldu` unsupported gate。 |
 | `??` | `AI_DOC/plan/test_framework/review_doc/undo/mem_ut_v2_monitor_output_framework_adapt_implementation_review_20260722.md` | 本专项 | 本 implementation review 文档。 |
 
-关联 plan `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md` 是本 review 的对齐基线，但当前内容干净，未出现在上述 71 个状态项中。其余 69 项均为非本专项，完整分类如下。
+关联 plan `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md` 是本 review 的对齐基线，但当前内容干净，未出现在上述 71 个状态项中。其余 69 项均为非本专项，完整分类如下。
 
 ### 9.2 非本专项文档、规则与 Plan
 
 | 状态与数量 | 完整文件集合 | 本专项/非本专项 | 归属说明 |
 |---|---|---|---|
 | `M`，10 项 | `AGENTS.md`；`AI_DOC/mem_ut_flow_doc/{lsq_admission_flow.md,redirect_flow.md,rob_commit_lq_sq_deq_flow.md,virtual_sequence_unified_dispatch_flow.md,writeback_function_call_flow.md}`；`AI_DOC/project_management/{mem_ut_code_review_document_rule.md,mem_ut_flow_document_rule.md,mem_ut_test_framework_logic_build_rule.md,mem_ut_test_framework_plan_review_rule.md}` | 非本专项 | 项目规则以及 LSQ admission、redirect、commit/deq、统一 dispatch、writeback flow 的并行维护；不是 vector-WB gate 的源码或专项 review。 |
-| `M`，1 项 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md` | 非本专项 | LSQ MMIO/status plan 的执行中补充，记录最后 normal commit batch 后 `pendingPtr` watermark；不属于 monitor-output gate。 |
-| `M`，1 项 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md` | 非本专项 | pending-MMIO load sideband plan 的 coding 记录及 collector/reconcile、singleton adapter、directed helper 补充；不属于 monitor-output gate。 |
+| `M`，1 项 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md` | 非本专项 | LSQ MMIO/status plan 的执行中补充，记录最后 normal commit batch 后 `pendingPtr` watermark；不属于 monitor-output gate。 |
+| `M`，1 项 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md` | 非本专项 | pending-MMIO load sideband plan 的 coding 记录及 collector/reconcile、singleton adapter、directed helper 补充；不属于 monitor-output gate。 |
 
 ### 9.3 非本专项 Review 搬迁与新 Review
 
