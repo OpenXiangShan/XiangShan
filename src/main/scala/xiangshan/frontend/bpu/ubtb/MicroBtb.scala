@@ -31,6 +31,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   class MicroBtbIO(implicit p: Parameters) extends BasePredictorIO with HasFastTrainIO {
     // predict
     val prediction: Valid[Prediction] = Output(Valid(new Prediction))
+    val squash:     Bool              = Input(Bool())
   }
 
   val io: MicroBtbIO = IO(new MicroBtbIO)
@@ -114,8 +115,11 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t0_fullTarget  = Wire(PrunedAddr(VAddrBits))
   private val t0_attribute   = Wire(new BranchAttribute)
 
+  // Permit exactly the first fast-train block after each BPU squash.
+  private val allowFastTrain = RegInit(false.B)
+
   if (UseFastTrain) {
-    t0_fire        := io.fastTrain.get.valid && io.enable
+    t0_fire        := io.fastTrain.get.valid && io.enable && allowFastTrain && !io.squash
     t0_startPc     := io.fastTrain.get.bits.startPc
     t0_actualTaken := io.fastTrain.get.bits.finalPrediction.taken
     t0_position    := io.fastTrain.get.bits.finalPrediction.cfiPosition
@@ -172,7 +176,7 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
    * - update entries
    * - update replacer
    */
-  t1_fire := RegNext(t0_fire, false.B)
+  t1_fire := (if (UseFastTrain) RegNext(t0_fire, false.B) && !io.squash else RegNext(t0_fire, false.B))
   t1_tag  := RegEnable(t0_tag, t0_fire)
   private val t1_actualTaken = RegEnable(t0_actualTaken, t0_fire)
   private val t1_position    = RegEnable(t0_position, t0_fire)
@@ -189,6 +193,15 @@ class MicroBtb(implicit p: Parameters) extends BasePredictor with HasMicroBtbPar
   private val t1_hitPositionSame  = RegEnable(t0_hitPositionSame, t0_fire)
   private val t1_hitAttributeSame = RegEnable(t0_hitAttributeSame, t0_fire)
   private val t1_hitTargetSame    = RegEnable(t0_hitTargetSame, t0_fire)
+
+  if (UseFastTrain) {
+    when(io.squash) {
+      allowFastTrain := true.B
+    }.elsewhen(io.fastTrain.get.valid) {
+      allowFastTrain := false.B
+    }
+  }
+
   // only when t1 is updating/allocating can t0 hit it
   t0_hitT1Update := t1_fire && t0_tag === t1_tag && (t1_hit || t1_allocate)
   // init a new entry
