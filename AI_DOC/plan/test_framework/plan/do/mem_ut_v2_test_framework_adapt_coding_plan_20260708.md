@@ -110,8 +110,9 @@ flow/analysis 同步和验证结论均记录在对应 plan 与 implementation re
 最后执行的 DCache 专项 compile/smoke 基于前述所有专项提交之后的集成代码树：VCS/KDB compile 为
 0 error；canonical 默认、Hint=100、Probe=100 和 legacy real smoke 均通过，且
 `UVM_ERROR=0`、`UVM_FATAL=0`。因此总控关闭不再增加第二套集成状态机或重复 smoke；仍未支持的
-vector LS、独立 S1/S2 PTE 权限、完整 core `sfence.flushPipe`、DCache/SBuffer denied/corrupt 等能力
-继续保留在 TODO 边界，不属于本轮 scalar V2 适配未完成项。
+vector LS、独立 S1/S2 PTE 权限和 DCache/SBuffer denied/corrupt 等能力继续保留在 TODO 边界。
+完整 core `sfence.flushPipe -> ROB flushAfter` 是当前 MemBlock standalone 之外的架构职责，不是后续
+必须补做的 V2 测试框架适配项；当前字段保真与 `sfence.valid` TLB invalidation 已闭环。
 
 ## 3. 问题一：V2/V3 编译期结构仍可能存在第二权威
 

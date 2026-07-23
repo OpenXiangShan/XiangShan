@@ -1,6 +1,6 @@
 # mem_ut sfence/hfence flow
 
-本文档说明 mem_ut 测试框架中 sfence/hfence 离散 TLB invalidation 事件的真实函数调用链。当前实现把 CSR runtime 镜像和 sfence/hfence 事件拆成两类状态：CSR 是 latest snapshot，sfence/hfence 是 FIFO 事件。统一 service loop 按 `drain_csr_events()` -> `drain_sfence_events()` 的顺序处理，保证失效匹配使用最新 CSR runtime，同时不让 CSR-only 路径隐式消费 sfence。V2 `sfence_bits_flushPipe` 已完成 transaction 默认、driver 透明驱动和有效 payload 观测，但不写入 raw sfence，也不改变该失效链路。
+本文档说明 mem_ut 测试框架中 sfence/hfence 离散 TLB invalidation 事件的真实函数调用链。当前实现把 CSR runtime 镜像和 sfence/hfence 事件拆成两类状态：CSR 是 latest snapshot，sfence/hfence 是 FIFO 事件。统一 service loop 按 `drain_csr_events()` -> `drain_sfence_events()` 的顺序处理，保证失效匹配使用最新 CSR runtime，同时不让 CSR-only 路径隐式消费 sfence。V2 `sfence_bits_flushPipe` 已完成 transaction 默认、driver 透明驱动和有效 payload 观测，但不写入 raw sfence，也不改变该失效链路。完整 core 的 `flushAfter` 由 ROB/CtrlBlock 产生，不是 MemBlock 本地行为；当前 standalone 测试框架无需据此增加 LSQ 暂停、年轻 uid kill、queue 回滚或 terminal 重收敛逻辑。
 
 ## 1. 函数调用 Flow 图
 
@@ -981,6 +981,10 @@ L2TLB responder 自己的 CSR-only 路径只调用 `drain_csr_events()`，不会
 ## 21. 端到端行为总结
 
 sfence/hfence flow 是一条 monitor raw event 到 live TLB cache invalidation 的离散事件链路。fence monitor 不直接访问公共 TLB 表，只把 DUT sfence payload 包成 `dispatch_raw_sfence_t` 写入 `raw_sfence_q`。真实 dispatch service loop 每轮先同步 CSR latest snapshot，再 FIFO 消费 sfence/hfence。公共数据层把 raw event decode 成 `memblock_sfence_payload_t`，按地址、stage、ASID/VMID 和 global PTE 规则匹配 `tlb_entry_by_key`，最后删除命中的 live entry。该删除不影响主表、状态表或 uid TLB record；它只让后续同 key L2TLB request 重新建表。
+
+`sfence_bits_flushPipe=1` 只作为接口保真值被透明驱动和观测，不是本 flow 的行为输入。测试框架不从
+该位自行产生 global redirect；如果 DUT 通过独立 redirect 接口真实给出 redirect，仍由既有
+redirect/replay flow 处理。完整 core ROB 提交点的 `flushAfter` 不属于当前 MemBlock standalone TODO。
 
 ### 21.1 端到端文字伪代码
 

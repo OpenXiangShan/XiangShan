@@ -6,10 +6,10 @@
 |---|---|
 | RTL 版本 | V2 |
 | 分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `bd813bc3ed5b39581be966c6518788852890ff6f` |
+| 核验 commit | `fe12e3b4b52bf78c950f4ab7ede60ce7e11ee031` |
 | 设计基线 | `2acbf327cf7fb514593acc00d4c41117ec499e08`，见 V2 `branch_policy.md` |
 | 权威源码 | `src/main/scala/xiangshan`；DUT 生成基线见 `mem_ut/ver/ut/memblock/rule/version/v2/memblock_rtl_profile.md` |
-| 最后核验日期 | `2026-07-17` |
+| 最后核验日期 | `2026-07-23` |
 
 ## Flow 范围
 
@@ -44,6 +44,21 @@ StoreQueue 的入队表达式均不检查该字段；它只有在 ROB 头转换�
 redirect 后，才通过 redirect gate、同拍取消和已分配 entry 回收间接影响更年轻
 Load/Store 入队。SFENCE/FENCE 同时携带的 `blockBackward` 会更早阻止年轻指令
 Dispatch，但这是独立控制属性，不是 LSQ 对 `flushPipe` 的检查。
+
+### MemBlock standalone 验证边界
+
+完整 core 中的 pipeline flush owner 是 ROB/CtrlBlock：Fence FU 把同一个
+`uop.ctrl.flushPipe` 一路送入 `sfence.bits.flushPipe`、一路随写回送到 ROB；ROB 只在该
+指令到队头、可提交且没有异常时产生 `RedirectLevel.flushAfter`，再由全局 redirect 网络清除
+年轻指令。MemBlock 不根据 `sfence.bits.flushPipe` 本地暂停 LSQ enqueue/issue，也不从该位直接
+推导年轻 load/store 的 kill、replay、queue 回滚或 terminal 状态。
+
+因此，当前只实例化 MemBlock、没有 ROB/CtrlBlock 的 standalone 测试框架不需要补一套“完整 core
+flushPipe 模型”。当前适配闭环是：字段默认 0、允许 directed 原值驱动、valid payload 做 X/Z 观测，
+并继续由 `sfence.valid` 和 rs1/rs2/addr/id/hv/hg 完成软件 TLB entry invalidation。测试框架不得仅因
+该位为 1 人工暂停 LSQ driver、生成 redirect 或清 active uid；只有未来 DUT 边界扩展到真实
+ROB/CtrlBlock/global redirect 时，才需要在新的全核集成环境中验证该架构行为，这不是当前
+MemBlock V2 适配 TODO。
 
 全核范围还存在两类不经过 MemBlock 的合法来源：
 
@@ -420,6 +435,7 @@ redirect 点自身也需要被清掉。
 | 2026-07-16 | `0ec33be518d75ba9cbcf28bcf51118b68e8a0d96` | 已说明 SFENCE 与 ROB flushAfter 协同，但把通用 blocking TLB 的 miss 保留逻辑泛化到了 DTLB | 明确 `sfence.bits.flushPipe` 只影响 blocking TLB 的 `miss_req_v`；V2 MemBlock DTLB 为 non-blocking，不消费该 bit，并补充 sfence 与查询同拍时可能采到 flush 前 hit 的边界 | 用户要求结合 Scala 源码分析 `flushPipe` 对 DTLB 查询的影响 | V2 DTLB/TLB/PTW/MemBlock/ROB/LSQ |
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 只说明普通访存清零和 CBO 动态置位，未解释为什么 STA0/STA1 顶层字段不同 | 补充 split writeback lane 的 capability、实际来源和 STA0 合法 CBO flush 边界 | 结合 V2 Scala/生成 RTL 分析 metadata guard 的端口依据 | V2 MemBlock/LoadUnit/StoreUnit/StoreQueue/ROB |
 | 2026-07-17 | `bd813bc3ed5b39581be966c6518788852890ff6f` | 文档主要覆盖 Fence/CBO，未列出当前 `NewCSR` 和 `VSETVL` 的其他合法 flushPipe producer | 补充全核静态 Decode、当前 `NewCSR` 动态 CSR 条件，并区分 wrapper.CSR 与旧版同名实现 | 用户追问 `flushPipe` 在什么场景下置高 | V2 Decode/CSR/Fence/MemBlock/ROB |
+| 2026-07-23 | `fe12e3b4b52bf78c950f4ab7ede60ce7e11ee031` | 总控/测试框架 TODO 仍可能把完整 core `flushAfter` 写成 standalone MemBlock 后续适配项 | 明确 ROB/CtrlBlock 是完整 pipeline flush owner；当前 MemBlock standalone 不从 `sfence.bits.flushPipe` 生成暂停、redirect、kill 或 terminal 状态，不需要额外功能适配 | 用户复核此前“该位不影响 MemBlock 本地控制”的结论 | V2 Fence/ROB/CtrlBlock 与 MemBlock standalone 验证边界 |
 
 ## 待确认项
 

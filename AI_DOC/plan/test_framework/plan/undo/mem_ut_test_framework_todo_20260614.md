@@ -411,42 +411,24 @@ TODO：
 - 若需要主动构造 debug-mode PMP/PMA fault/pass 场景，补充 testcase 配置、PMP/PMA 环境准备、主表标签和激励自洽检查。
 - 不在该 TODO 中实现 RM/scoreboard 正确性比较；若后续需要检查 DUT 结果正确性，应另建 RM/checker/coverage 专项。
 
-## 9. V2 `sfence_bits_flushPipe` 全局 pipeline flush 建模 TODO
+## 9. V2 `sfence_bits_flushPipe` standalone 职责边界（已关闭，非 TODO）
 
-状态：当前只做 sfence/hfence 的 TLB entry invalidation，不做完整 pipeline flush 行为建模。
+状态：当前 V2 MemBlock standalone 适配已经闭环，不需要增加完整 core pipeline flush 模型。
 
-当前本轮 V2 适配策略：
+当前实现与源码边界：
 
-- `fence_agent` 已能以 soft 默认 `0` 构造、透明驱动、打印、比较并在 valid payload 下检查 `io_ooo_to_mem_sfence_bits_flushPipe`，但 `dispatch_raw_sfence_t` 和 `decode_raw_sfence()` 不消费该字段。
-- 现有 sfence flow 只按 `rs1/rs2/addr/id/hv/hg` 失效 `tlb_entry_by_key`，不删除主表、uid record、pending writeback、issue queue、LQ/SQ mapping 或 terminal 状态。
-- 当前测试框架不把 `flushPipe=1` 当作 MemBlock 本地暂停 LSQ enqueue/issue 的信号。
-- 当前建议 sfence directed 场景在 quiescent 窗口执行，即先让 active load/store 事务收敛，再发 sfence，避免框架等待被完整 core pipeline flush 杀掉的年轻指令事件。
+- `fence_agent` 以 soft 默认 `0` 构造该字段，支持 directed 原值驱动、打印、比较和 valid payload X/Z 检查。
+- `dispatch_raw_sfence_t` 和 `decode_raw_sfence()` 不消费该字段；软件 TLB entry invalidation 继续只由 `sfence_valid` 和 `rs1/rs2/addr/id/hv/hg` 决定。
+- Decode 为 SFENCE/HFENCE 设置 `blockBackward=1` 和 `flushPipe=1`；Fence FU 把同一个 uop 属性分别送入 sfence payload 和写回。
+- 完整 core 中只有 ROB 在该指令到队头、可提交且无异常时产生 `RedirectLevel.flushAfter`，再由 CtrlBlock/global redirect 清除年轻指令。
+- MemBlock 不根据 `sfence_bits_flushPipe` 本地暂停 LSQ enqueue/issue，也不从该位产生年轻 uid kill、replay、queue 回滚或 terminal 状态。
 
-源码语义边界：
+关闭结论：
 
-- Scala `SfenceBundle.bits.flushPipe` 在 V2/V3 源码语义中都存在；V2 当前生成 `MemBlock.sv` 顶层暴露 `io_ooo_to_mem_sfence_bits_flushPipe`，V3 生成 MemBlock 顶层可能不暴露同名端口。
-- `SFENCE_VMA/HFENCE/FENCE` decode 会给 uop 设置 `flushPipe=1`。
-- Fence 执行单元把 uop 的 `flushPipe` 透传到 sfence bundle 和写回控制信息。
-- ROB 将 `flushPipe` 归为 `needFlush`，但不是 exception；当该 uop 到达 ROB head 并满足提交条件时触发全局 pipeline flush，杀掉年轻指令。
-- MemBlock 内部 DTLB 的独立 `flushPipe` 输入在当前源码中接为 `false.B`，因此不能把 `sfence_bits_flushPipe` 简化理解成 MemBlock 本地 LSQ 暂停控制。
-
-为什么不在本轮实现：
-
-- 完整语义不是单个字段补齐，而是后端全局 flush 的生命周期建模，需要 ROB age、flush epoch、年轻 uid kill、pending event 清理和 terminal 收敛。
-- 若只在测试框架看到 `flushPipe=1` 后暂停 LSQ driver，会引入 DUT MemBlock 本地没有的控制语义，反而扭曲 standalone MemBlock UT 的激励行为。
-- 若只丢弃部分 event 而不更新主表和 terminal，可能导致 active uid 一直等待不会返回的 writeback/commit/replay event。
-
-后续 TODO：
-
-- 新建 `sfence flushPipe` 专项 plan，明确该专项是否要在 MemBlock standalone UT 中复刻完整 core 的 ROB 提交点 flush 行为。
-- 只有后续决定实现 standalone 全局 pipeline flush 行为时，才在 raw sfence payload 中增加 `flushPipe` 字段，并说明 monitor 写入、默认值、reset 清理和 debug dump；当前接口保真专项明确不增加该字段。
-- 增加 flush epoch 或等价状态，记录 sfence flush 的 ROB 边界、触发 cycle 和影响范围。
-- 按 ROB 年龄区分老指令和年轻指令：老于 sfence 的 load/store 继续等待正常完成，年轻于 sfence 的 active uid 标记为 killed 或 flush terminal。
-- 定义 pending writeback、issue/recovery queue、LQ/SQ mapping、main-table active uid 的清理或回滚策略。
-- 定义 `sfence_bits_flushPipe` 与已有 redirect、replay、flushSb、memoryViolation 的优先级，避免同拍事件双重清理或漏清理。
-- 定义 terminal 收敛规则：被 flush kill 的 uid 必须进入明确 terminal/killed 状态，不能继续等待不存在的 DUT event。
-- 若无法可靠获得 ROB age 或 sfence 提交边界，则该专项必须限制 testcase 到 quiescent sfence 场景，或对非 quiescent `flushPipe=1` 场景 `uvm_fatal`。
-- 不在该 TODO 中实现 RM/scoreboard 正确性比较；该专项只解决测试框架激励生命周期和终态闭环。
+- 测试框架不得仅因 `sfence_bits_flushPipe=1` 人工暂停 driver、构造 redirect、清 active mapping 或改变 pass/fail/terminal。
+- directed `flushPipe=1` 不要求仅在 quiescent 窗口发送；它在当前 standalone DUT 边界内与 `0` 的差异只保留在接口观测，不形成额外软件行为。
+- 如果 DUT 通过已有独立 redirect 接口真实产生 redirect，继续由既有 redirect/replay owner 按真实事件处理，不能把该结果反推为由 fence agent 创建。
+- 只有未来验证对象扩展到包含 ROB/CtrlBlock/global redirect 的完整 core 环境时，才应在新的全核集成计划中验证 `flushAfter`；这不是当前 MemBlock V2 测试框架适配项。
 
 ## 10. DCache/SBuffer `corrupt/denied` response 注入 TODO
 
