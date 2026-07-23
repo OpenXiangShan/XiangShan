@@ -108,7 +108,7 @@ object openNCB extends ChiselModule {
 object zhujiangCompat extends ChiselModule {
   def millSourcePath = pwd / "XSCache" / "ZhuJiang"
 
-  def moduleDeps = Seq(`rocket-chip`, utility)
+  def moduleDeps = Seq(`rocket-chip`, utility, difftest)
 
   override def sources: T[Seq[PathRef]] = Task.Sources {
     Seq(
