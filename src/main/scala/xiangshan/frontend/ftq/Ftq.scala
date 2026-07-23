@@ -337,7 +337,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
 
   io.toBackend.wen     := (prediction.fire || bpuS3Redirect) && !redirect.valid
   io.toBackend.ftqIdx  := predictionPtr.value
-  io.toBackend.startPc := prediction.bits.startPc.truncate(VAddrBits)
+  io.toBackend.startPc := prediction.bits.startPc
 
   // --------------------------------------------------------------------------------
   // Redirect from backend and IFU
