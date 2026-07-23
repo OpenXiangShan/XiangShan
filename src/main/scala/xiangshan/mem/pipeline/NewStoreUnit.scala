@@ -313,7 +313,6 @@ class StoreUnitS1(param: ExeUnitParams)(
   val isUnalignHead = in.unalignHead.get
   val cross4KPage = in.cross4KPage.get
   val cross16Byte = isUnalignTail || isUnalignHead
-  val vecBaseVaddr = in.vecBaseVaddr.get
   val illegalIssue = pipeIn.valid && !in.uop.sqIdx.withInPhysicalQueue(io.sqDeqPtr)
   val legalIssue = pipeIn.valid && in.uop.sqIdx.withInPhysicalQueue(io.sqDeqPtr)
 

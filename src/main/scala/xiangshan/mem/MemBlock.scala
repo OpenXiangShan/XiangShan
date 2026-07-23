@@ -996,10 +996,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     // 2. when store issue, broadcast issued sqPtr to wake up the following insts
     io.mem_to_ooo.updateLFST(i) := stu.io.updateLFST
 
-    // vector
-    stu.io.vecstin.valid := false.B
-    stu.io.vecstin.bits := DontCare
-    stu.io.vecstout.ready := false.B
     // from storeQueue
     stu.io.sqDeqPtr := lsq.io.sqDeqPtr
   }
@@ -1157,25 +1153,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   (0 until VstuCnt).foreach{i =>
-    vsSplit(i).io.redirect <> redirect
-    vsSplit(i).io.in <> issueVldu(i)
-    vsSplit(i).io.sqDeqPtr.get := lsq.io.sqDeqPtr
-    vsSplit(i).io.in.valid := issueVldu(i).valid &&
-                              vStoreCanAccept(i) && !isSegment
-    vsSplit(i).io.toMergeBuffer <> vsMergeBuffer(i).io.fromSplit.head
-    val vsSplitOut = Wire(DecoupledIO(new VectorStoreIn()))
-    vsSplitOut.valid := vsSplit(i).io.out.valid
-    vsSplitOut.bits := vsSplit(i).io.out.bits.toVectorStoreIn()
-    vsSplit(i).io.out.ready := vsSplitOut.ready
-    NewPipelineConnect(
-      vsSplitOut, storeUnits(i).io.vecstin, storeUnits(i).io.vecstin.fire,
-      Mux(vsSplitOut.fire,
-        vsSplitOut.bits.uop.robIdx.needFlush(io.redirect),
-        storeUnits(i).io.vecstin.bits.uop.robIdx.needFlush(io.redirect)
-      ),
-      Option("VsSplitConnectStu")
-    )
-    vsSplit(i).io.vstd.get := DontCare // Todo: Discuss how to pass vector store data
     io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow.valid := false.B
     io.mem_to_ooo.vstuIqFeedback(i).feedbackSlow.bits := DontCare
     io.mem_to_ooo.vstuIqFeedback(i).feedbackFast := DontCare
