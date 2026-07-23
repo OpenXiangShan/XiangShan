@@ -99,10 +99,10 @@ trait CSREventBase {
 
     val bareAddr   = ZeroExt(addr(PAddrWidth - 1, 0), XLEN)
     // When enable virtual memory, the higher bit should fill with the msb of address of Sv39/Sv48/Sv57
-    val sv39Addr   = SignExt(addr.take(39), XLEN)
-    val sv39x4Addr = ZeroExt(addr.take(39 + 2), XLEN)
-    val sv48Addr   = SignExt(addr.take(48), XLEN)
-    val sv48x4Addr = ZeroExt(addr.take(48 + 2), XLEN)
+    val sv39Addr   = SignExt(addr.take(40), XLEN)
+    val sv39x4Addr = ZeroExt(addr.take(40 + 2), XLEN)
+    val sv48Addr   = SignExt(addr.take(49), XLEN)
+    val sv48x4Addr = ZeroExt(addr.take(49 + 2), XLEN)
 
     val trapAddr = Mux1H(Seq(
       isBare   -> bareAddr,
@@ -118,7 +118,7 @@ trait CSREventBase {
 
 class TrapEntryEventInput(implicit val p: Parameters) extends Bundle with HasXSParameter {
   val causeNO = Input(new CauseBundle)
-  val trapPc = Input(UInt(VaddrMaxWidth.W))
+  val trapPc = Input(UInt((VaddrMaxWidth+1).W))
   val trapPcGPA = Input(UInt(PAddrBitsMax.W))
   val trapInst = Input(ValidIO(UInt(InstWidth.W)))
   val fetchMalTval = Input(UInt(XLEN.W))
