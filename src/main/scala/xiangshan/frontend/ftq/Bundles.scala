@@ -90,7 +90,7 @@ class FtqToCtrlIO(implicit p: Parameters) extends FtqBundle {
   // write to backend pc mem
   val wen:     Bool       = Output(Bool())
   val ftqIdx:  UInt       = Output(UInt(FtqPtr.width.W))
-  val startPc: PrunedAddr = Output(PrunedAddr(VAddrBits))
+  val startPc: PrunedAddr = Output(PrunedAddr(GuardedVAddrBits))
 }
 
 class PerfMeta(implicit p: Parameters) extends FtqBundle {
