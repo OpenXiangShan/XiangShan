@@ -59,7 +59,7 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
   val io: ICachePrefetchPipeIO = IO(new ICachePrefetchPipeIO)
 
   private val (toItlb, fromItlb) = (io.itlb.req, io.itlb.resp)
-  private val (toPmp, fromPmp)   = (io.pmp.req, io.pmp.resp)
+  private val (toPmp, fromPmp)   = (io.pmp.req, RegNext(io.pmp.resp))
   private val (toMeta, fromMeta) = (io.metaRead.req, io.metaRead.resp)
   private val (toMiss, fromMiss) = (io.missReq, io.missResp)
   private val toWayLookup        = io.wayLookupWrite

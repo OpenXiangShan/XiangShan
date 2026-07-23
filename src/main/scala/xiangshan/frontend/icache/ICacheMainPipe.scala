@@ -73,7 +73,7 @@ class ICacheMainPipe(implicit p: Parameters) extends ICacheModule
   private val (toData, fromData) = (io.dataRead.req, io.dataRead.resp)
   private val toMetaFlush        = io.metaFlush.req
   private val (toMiss, fromMiss) = (io.missReq, io.missResp)
-  private val (toPmp, fromPmp)   = (io.pmp.req, io.pmp.resp)
+  private val (toPmp, fromPmp)   = (io.pmp.req, RegNext(io.pmp.resp))
   private val eccEnable =
     if (ForceMetaEccFail || ForceDataEccFail) true.B else io.eccEnable
 
