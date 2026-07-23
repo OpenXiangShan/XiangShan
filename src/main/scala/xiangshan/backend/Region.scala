@@ -535,8 +535,8 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
         toMem(i)(j).valid := RegNext(toMemValidAfterCancel)
         toMem(i)(j).bits := RegNext(toMemExuInput.bits)
         if (toMem(i)(j).bits.params.hasLoadFu){
-          toMemExuInput.ready := toMem(i)(j).ready
           val toMemValidReg = RegInit(Bool(), false.B)
+          toMemExuInput.ready := toMem(i)(j).ready || !toMemValidReg
           toMemValidReg := toMemValidAfterCancel && (!toMemValidReg || toMem(i)(j).fire) ||
                            toMemValidReg && !toMem(i)(j).fire && !toMem(i)(j).bits.robIdx.needFlush(flushCopyRegVec.last)
           toMem(i)(j).valid := toMemValidReg
