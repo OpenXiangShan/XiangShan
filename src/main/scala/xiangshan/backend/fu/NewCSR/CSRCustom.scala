@@ -78,6 +78,7 @@ class SbpctlBundle extends CSRBundle {
 }
 
 class SpfctlBundle extends CSRBundle {
+  val L2_PF_CDP_ENABLE        = RW(    33).withReset(true.B).withDescription("Enable CDP-based L2 training and L2 prefetching.")
   val BERTI_ENABLE            = RW(    32).withReset(true.B).withDescription("Enable the Berti prefetcher.")
   val L2_PF_DELAY_LATENCY     = SpfctlL2PfDelayLatency(31, 22).withReset(SpfctlL2PfDelayLatency.initValue).withDescription("Delay latency used when training the L2 prefetcher.")
   val L2_PF_TP_ENABLE         = RW(    21).withReset(true.B).withDescription("Enable TP-based L2 training and L2 prefetching.")
