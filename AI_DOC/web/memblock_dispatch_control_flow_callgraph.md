@@ -24,6 +24,8 @@ tc_dispatch_real_smoke::main_phase
   -> super.main_phase()
   -> run_real_smoke_sequence()
        -> memblock_main_dispatch_auto_build_main_table_base_sequence::start(null)
+  -> wait(memblock_sync_pkg::dcache_responder_done)
+  -> memblock_sync_pkg::dispatch_real_smoke_active = 0
 
 tc_base::build_phase
   -> 创建 memblock_env
@@ -1238,6 +1240,7 @@ end_test_check()
 | `dispatch_service_cycle` | TB 软件服务周期 | replay wait、redirect drive done、flushSb timeout |
 | `dispatch_flushsb_waiting_empty` | flushSb 已驱动，等待 sbIsEmpty | ctrl monitor 即使只有 sbIsEmpty 也 push raw_ctrl |
 | `l2tlb_responder_active` | L2TLB connect takeover 生效 | L2TLB responder sequence 启动前检查 |
+| `dcache_responder_done` | DCache 已完成 terminal idle 并自然返回 | legacy testcase 在 drop objection 前等待 |
 | `raw_int_wb_q/raw_iq_feedback_q/raw_ctrl_q`、`latest_raw_csr` | raw monitor queues 和 CSR latest snapshot | adapter 统一消费/同步并更新状态 |
 
 ## 14. 从代码实现角度的主循环伪代码

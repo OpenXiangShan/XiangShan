@@ -101,6 +101,7 @@ Dispatch framework 参数分组如下：
 | lsqcommit pendingPtr sequence | `MEMBLOCK_LSQCOMMIT_SEQ_EN` |
 | redirect/recovery sequence | `MEMBLOCK_REDIRECT_SEQ_EN`、`MEMBLOCK_REDIRECT_DRIVE_TIMEOUT`、`MEMBLOCK_REDIRECT_FREEZE_TIMEOUT` |
 | directed flushSb/PTW replay | `MEMBLOCK_FLUSHSB_SEQ_EN`、`MEMBLOCK_FLUSHSB_REQUEST_CYCLE`、`MEMBLOCK_FLUSHSB_TIMEOUT`、`MEMBLOCK_REPLAY_WAIT_PTW_EN`、`MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT` |
+| DCache 轻量 L2 responder | `MEMBLOCK_L2_RSP_DELAY_SMALL_WT`、`MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT`、`MEMBLOCK_L2_RSP_DELAY_LARGE_WT`、`MEMBLOCK_L2_HINT_VALID_WT`、`MEMBLOCK_L2_PROBE_ENABLE_WT` |
 | L2TLB/PTW responder sequence | `MEMBLOCK_L2TLB_SEQ_EN`、`MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY`、`MEMBLOCK_L2TLB_RESP_1C_WT`、`MEMBLOCK_L2TLB_RESP_MID_WT`、`MEMBLOCK_L2TLB_RESP_LONG_WT`、`MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` |
 
 `seq_csr_common.sv` 是 sequence 使用的正式读取入口。它从 `plus.sv`
@@ -196,6 +197,17 @@ dispatch service-cycle warning；timeout 到达只 warning，不退出 sequence�
 `MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT` 后再重新入 issue queue。该机制只节流后端 replay
 重新入队，不模拟 MemBlock 内部 `LoadQueueReplay`，也不把 `flush_state` 单独解释成
 replay 条件。
+
+`MEMBLOCK_L2_RSP_DELAY_SMALL_WT`、`MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT` 和
+`MEMBLOCK_L2_RSP_DELAY_LARGE_WT` 是 DCache 轻量 L2 responder 的三档首拍 D response
+delay 权重。它们只控制 small=`3..5`、medium=`6..15`、large=`16..50` 三个固定区间的类别选择，
+三项都必须非负且不能全 0。`MEMBLOCK_L2_HINT_VALID_WT` 和
+`MEMBLOCK_L2_PROBE_ENABLE_WT` 是 `[0:100]` 的百分比权重，分别控制每个
+`AcquireBlock -> GrantData` 是否产生一次 hint，以及每个合格空闲 service cycle
+是否尝试发起一次 map-backed `Probe(toN)`。这五个参数统一走
+`env/plus.sv -> seq_csr_common -> getter -> dcache_mem__access_base_sequence`；
+getter 只读，非法负值、全零 delay 组合和大于 100 的百分比权重都在
+`seq_csr_common::validate_and_clamp()` 中 fail-fast，不做静默 clamp。
 
 `MEMBLOCK_L2TLB_SEQ_EN` 默认值为 1。启用后，
 `memblock_l2tlb_base_sequence` 从 L2TLB/PTW agent 采样 `vpn/s2xlate`
