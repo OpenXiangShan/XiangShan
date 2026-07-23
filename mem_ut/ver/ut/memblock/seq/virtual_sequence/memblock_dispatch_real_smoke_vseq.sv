@@ -45,6 +45,12 @@ task memblock_dispatch_real_smoke_vseq::body();
 
     start_core_dispatch_flow();
 
+    // The responders use global_stop_requested plus their own inflight state as
+    // the natural exit condition.  Keep the scenario active until the forked
+    // responder task has returned; clearing the activity bit first can make a
+    // responder miss its final stop sample and wait forever.
+    wait fork;
+
     memblock_sync_pkg::dispatch_real_smoke_active = 1'b0;
     `uvm_info(get_type_name(), "real dispatch smoke virtual sequence completed", UVM_LOW)
 endtask:body
@@ -65,14 +71,18 @@ task memblock_dispatch_real_smoke_vseq::start_background_responders();
     sbuffer_mem_access_base_sequence        sbuffer_seq;
     memblock_redirect_dispatch_base_sequence redirect_seq;
 
-    dcache_seq = dcache_mem__access_base_sequence::type_id::create("dcache_seq");
-    sbuffer_seq = sbuffer_mem_access_base_sequence::type_id::create("sbuffer_seq");
-    redirect_seq = memblock_redirect_dispatch_base_sequence::type_id::create("redirect_seq");
-
+    // 中文注释：三个 responder 都由 virtual sequencer 显式调度；它们在 real-smoke
+    // global stop 且各自无 inflight 后自然退出，因此本 task 的 join 可作为完成握手。
     fork
-        dcache_seq.start(p_sequencer.dcache_sqr);
-        sbuffer_seq.start(p_sequencer.sbuffer_sqr);
-        redirect_seq.start(p_sequencer.redirect_sqr);
+        begin : start_dcache_responder
+            `uvm_do_on(dcache_seq, p_sequencer.dcache_sqr)
+        end
+        begin : start_sbuffer_responder
+            `uvm_do_on(sbuffer_seq, p_sequencer.sbuffer_sqr)
+        end
+        begin : start_redirect_responder
+            `uvm_do_on(redirect_seq, p_sequencer.redirect_sqr)
+        end
     join
 endtask:start_background_responders
 
@@ -83,18 +93,24 @@ task memblock_dispatch_real_smoke_vseq::start_core_dispatch_flow();
     memblock_l2tlb_base_sequence                            l2tlb_seq;
     memblock_main_dispatch_auto_build_main_table_base_sequence main_seq;
 
-    lsqenq_seq = memblock_lsqenq_dispatch_base_sequence::type_id::create("lsqenq_seq");
-    issue_seq = memblock_issue_dispatch_base_sequence::type_id::create("issue_seq");
-    lsqcommit_seq = memblock_lsqcommit_dispatch_base_sequence::type_id::create("lsqcommit_seq");
-    l2tlb_seq = memblock_l2tlb_base_sequence::type_id::create("l2tlb_seq");
-    main_seq = memblock_main_dispatch_auto_build_main_table_base_sequence::type_id::create("main_seq");
-
+    // 中文注释：agent sequence 只在对应真实 agent sequencer 上启动，主 orchestration
+    // sequence 在 virtual sequencer 上启动；fork/join 和原 real-smoke 并发边界保持不变。
     fork
-        lsqenq_seq.start(p_sequencer.lsqenq_sqr);
-        issue_seq.start(p_sequencer.lintsissue_sqr);
-        lsqcommit_seq.start(p_sequencer.lsqcommit_sqr);
-        l2tlb_seq.start(p_sequencer.L2tlb_sqr);
-        main_seq.start(p_sequencer);
+        begin : start_lsqenq_sequence
+            `uvm_do_on(lsqenq_seq, p_sequencer.lsqenq_sqr)
+        end
+        begin : start_issue_sequence
+            `uvm_do_on(issue_seq, p_sequencer.lintsissue_sqr)
+        end
+        begin : start_lsqcommit_sequence
+            `uvm_do_on(lsqcommit_seq, p_sequencer.lsqcommit_sqr)
+        end
+        begin : start_l2tlb_sequence
+            `uvm_do_on(l2tlb_seq, p_sequencer.L2tlb_sqr)
+        end
+        begin : start_main_sequence
+            `uvm_do_on(main_seq, p_sequencer)
+        end
     join
 endtask:start_core_dispatch_flow
 

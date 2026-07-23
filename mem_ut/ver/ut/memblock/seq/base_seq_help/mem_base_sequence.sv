@@ -458,14 +458,30 @@ task dcache_mem__access_base_sequence::body();
     dcache_agent_agent_xaction idle_xact;
     dcache_agent_agent_xaction req_xact;
     dcache_agent_agent_xaction rsp_xact;
+    common_data_transaction data;
 
     if (!uvm_config_db#(virtual dcache_agent_agent_interface)::get(null, get_full_name(), "vif", dcache_vif) &&
         !uvm_config_db#(virtual dcache_agent_agent_interface)::get(null, "uvm_test_top.env.u_dcache_agent_agent*", "vif", dcache_vif)) begin
         `uvm_fatal(get_type_name(), "dcache virtual interface is not set for memory access sequence")
     end
+    data = common_data_transaction::get();
+    if (data == null) begin
+        `uvm_fatal(get_type_name(), "failed to get common_data_transaction for DCache responder")
+    end
 
     forever begin
         int unsigned beats;
+
+        // 中文注释：真实 real-smoke 场景结束后，只有当前没有可接收的 A 请求时才退出。
+        // DCache 的完整 D response 已在上一轮循环结束前发送完毕，因此这里是无 inflight
+        // response 的边界；安全 idle 先驱动一拍，避免退出时残留 valid/ready。
+        if (memblock_sync_pkg::dispatch_real_smoke_active &&
+            data.is_global_stop_requested() &&
+            dcache_vif.auto_inner_dcache_client_out_a_valid === 1'b0) begin
+            build_dcache_idle_xaction(idle_xact);
+            send_dcache_xaction(idle_xact);
+            break;
+        end
 
         build_dcache_idle_xaction(idle_xact);
         send_dcache_xaction(idle_xact);
@@ -653,13 +669,28 @@ task sbuffer_mem_access_base_sequence::body();
     sbuffer_agent_agent_xaction idle_xact;
     sbuffer_agent_agent_xaction req_xact;
     sbuffer_agent_agent_xaction rsp_xact;
+    common_data_transaction data;
 
     if (!uvm_config_db#(virtual sbuffer_agent_agent_interface)::get(null, get_full_name(), "vif", sbuffer_vif) &&
         !uvm_config_db#(virtual sbuffer_agent_agent_interface)::get(null, "uvm_test_top.env.u_sbuffer_agent_agent*", "vif", sbuffer_vif)) begin
         `uvm_fatal(get_type_name(), "sbuffer virtual interface is not set for memory access sequence")
     end
+    data = common_data_transaction::get();
+    if (data == null) begin
+        `uvm_fatal(get_type_name(), "failed to get common_data_transaction for SBuffer responder")
+    end
 
     forever begin
+        // 中文注释：SBuffer response 在本轮发送完成后才回到循环顶部；global stop 且没有
+        // 尚未接受的 A 请求时发送安全 idle 并自然退出，不依赖 phase kill。
+        if (memblock_sync_pkg::dispatch_real_smoke_active &&
+            data.is_global_stop_requested() &&
+            sbuffer_vif.auto_inner_buffers_out_a_valid === 1'b0) begin
+            build_sbuffer_idle_xaction(idle_xact);
+            send_sbuffer_xaction(idle_xact);
+            break;
+        end
+
         build_sbuffer_idle_xaction(idle_xact);
         send_sbuffer_xaction(idle_xact);
 

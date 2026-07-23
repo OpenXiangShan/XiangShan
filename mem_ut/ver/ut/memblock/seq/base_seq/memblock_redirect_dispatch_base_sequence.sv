@@ -57,6 +57,17 @@ task memblock_redirect_dispatch_base_sequence::body();
     forever begin
         memblock_redirect_payload_t payload;
 
+        // 中文注释：redirect responder 没有独立的 response payload；queue/inflight 和
+        // active redirect 都清空后，global stop 才表示本场景可收尾。先发送一拍安全 idle，
+        // 再 break，避免依赖 phase 强制终止无限 responder loop。
+        if (memblock_sync_pkg::dispatch_real_smoke_active &&
+            data.is_global_stop_requested() &&
+            !data.has_pending_redirect_drive() &&
+            !data.active_redirect.valid) begin
+            drive_idle_once("redirect_real_smoke_stop_idle_tr");
+            break;
+        end
+
         if (data.try_pop_redirect_drive(payload)) begin
             drive_redirect_payload(payload);
             idle_count = 0;

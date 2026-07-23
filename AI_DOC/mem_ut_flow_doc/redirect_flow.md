@@ -1,654 +1,580 @@
-# Redirect Flow
+# Redirect 与 LSQ Cancel Reconcile Flow
 
-本文按通用 flow 文档规则整理 mem_ut 中 writeback 之后 redirect 的完整后续。当前真实 DUT 来源是 `io_mem_to_ooo_ctrl.memoryViolation` 被 raw ctrl monitor 采集后转成 `memblock_wb_event_t.redirect`。redirect 进入 `push_feedback_event()` 后，必须继续追到 `process_pending_events -> request_redirect_flush -> push_redirect_drive -> redirect sequence drive -> advance_active_redirect -> apply_redirect_flush -> reissue`。
+本文描述当前 V2 memblock 测试框架从 DUT `memoryViolation` 产生 redirect，到真实驱动
+`io_redirect_*`、清理旧动态实例、回退软件 LSQ reservation，并把软件 cancel 数量与 DUT
+`lqCancelCnt/sqCancelCnt` 逐 redirect epoch 对账的完整调用链。
 
-当前 V2 batch 语义中，ctrl raw 的 `lqDeq/sqDeq/sbIsEmpty` 先暂存，semantic batch 完成
-redirect-first 后才按 FIFO 调用 `apply_raw_ctrl_deq()`；因此本图中 `apply_raw_ctrl_deq`
-位于 `process_monitor_event_batch` 之后。IQ 专项当前边界见
+权威源码：
+
+- `mem_ut/ver/ut/memblock/seq/base_seq_help/dispatch_monitor_event_adapter.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq_help/dispatch_monitor_batch_handler.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq_help/exception_redirect_replay_handler.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq/memblock_redirect_dispatch_base_sequence.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq/memblock_lsqenq_dispatch_base_sequence.sv`
+- `mem_ut/ver/ut/memblock/agent/redirect_agent_agent/src/redirect_agent_agent_monitor.sv`
+- `mem_ut/ver/ut/memblock/agent/io_mem_to_ooo_ctrl_agent_agent/src/io_mem_to_ooo_ctrl_agent_agent_monitor.sv`
+- `mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv`
+
+IQ feedback/replay 的专项边界见
 [`iq_feedback_replay_v2_flow.md`](iq_feedback_replay_v2_flow.md)。
 
-## 1. 函数调用 Flow 图
+## 1. Flow 边界与术语
+
+### 1.1 术语与抽象功能说明
+
+| 英文术语 | 当前 flow 中的中文含义 | 代码对象/状态落点 | 示例 |
+|---|---|---|---|
+| `semantic batch` | 同一采样拍的 writeback、IQ feedback 和 memoryViolation 统一仲裁集合 | `collect_monitor_event_batch()`、`dispatch_monitor_batch_handler` | redirect-first 决定同批 normal event 是否允许落状态 |
+| `redirect epoch` | 每次 `request_redirect_flush()` 递增的恢复代次 | `memblock_sync_pkg::dispatch_flush_epoch` | 被 flush uid 的 software cancel 归入该 epoch |
+| `reservation token` | 某 uid 一次真实 LSQ launch 的动态实例凭证 | `lsq_reservation_launch_epoch`、`lsq_reservation_sample_seq` | redirect scan 只统计已成为 `DUT_VISIBLE` 的 mapping |
+| `DUT sample sequence` | 多个 monitor/sequence 对同一仿真采样时刻共享的单调序号 | `get_dut_sample_seq($time)` | reservation、redirect anchor 和 cancel snapshot 使用同一时序坐标 |
+| `redirect anchor` | `io_redirect_*` 真正被 monitor 采样到的 payload 和 sample 序号 | `dispatch_raw_redirect_anchor_t`、`raw_redirect_anchor_q` | 只锚定时序，不形成第二个 recovery event |
+| `cancel snapshot` | ctrl monitor 每个 sample 保存的 `lqCancelCnt/sqCancelCnt` 电平 | `dispatch_raw_cancel_snapshot_t`、`raw_cancel_snapshot_q` | 两个 count 都为 0 时也必须保存 |
+| `cancel record` | 一个 redirect epoch 的 software cancel、资源回退和 DUT observed 对账生命周期 | `memblock_lsq_cancel_record_t`、`cancel_record_q` | `software_applied` 与 `observed_valid` 都成立后才删除 |
+| `active mapping` | 当前动态实例拥有的 ROB/LQ/SQ key 到 uid 映射 | `uid_by_active_rob`、`uid_by_lq`、`uid_by_sq` | redirect scan 在清 map 前登记 software cancel |
+| `observed cancel` | DUT 在目标 sample 输出的 cancel 数量 | `observed_cancel_lq_count/sq_count` | 只核对，不再次调用 `cancel_lq/cancel_sq` |
+
+本 flow 的 recovery 来源仍是 DUT output `memoryViolation`。redirect agent monitor 采样的是测试框架
+已经驱动到 DUT input 的 `io_redirect_*`，它只产生独立 timing anchor，不能再次进入
+`exception_event_q`。
+
+### 1.2 职责边界
+
+- `dispatch_monitor_batch_handler`：拥有同一 semantic batch 的 redirect-first 仲裁。
+- `exception_redirect_replay_handler`：拥有 active redirect 的建立与推进。
+- `common_data_transaction::cancel_record_q`：逐 epoch 保存 cancel 生命周期事实。
+- `memblock_lsqenq_dispatch_base_sequence::apply_pending_lsq_cancels()`：唯一执行软件
+  LSQ pointer/free-count 回退。
+- `service_lsq_timing_reconcile()`：每个 dispatch service tick 唯一调用一次，只比较 software count 与 DUT observed count，不释放资源，不修改
+  pass/fail/terminal。
+
+## 2. 函数调用 Flow 图
 
 ```mermaid
 flowchart TD
-    A[service_monitor_once] --> B[collect_monitor_event_batch]
-    B --> C[dispatch_monitor_event_adapter::collect_ctrl_redirect_events_batch]
-    C --> D[pop_raw_ctrl]
-    D --> E[deferred_ctrl FIFO]
-    D --> F[convert_raw_memory_violation]
-    F --> G[process_monitor_event_batch]
-    G --> E1[apply_raw_ctrl_deq]
-    G --> H[normalize_event_batch]
-    H --> I[normalize_feedback_event]
-    I --> J[resolve_uid_for_event]
-    G --> K[select_oldest_redirect]
-    K --> L[redirect_event_is_older]
-    L --> M[rob_order_util::rob_is_after]
-    K --> N[data.push_feedback_event]
-    N --> O[normalize_feedback_event]
-    O --> P[exception_event_q]
-    P --> Q[exception_redirect_replay_task]
-    Q --> R[process_pending_events]
-    R --> S[service_ptw_wait_replay]
-    R --> T[advance_active_redirect]
-    R --> U[pop_feedback_event]
-    U --> V[select_oldest_redirect]
-    V --> W[redirect_from_event]
-    W --> X[request_redirect_flush]
-    X --> Y[push_redirect_drive]
-    Y --> Y1[pending_redirect_drive_q]
-    Y1 --> Y2[memblock_redirect_dispatch_base_sequence::body]
-    Y2 --> Y3[try_pop_redirect_drive]
-    Y3 --> Y4[drive_redirect_payload]
-    Y4 --> Y5[mark_redirect_drive_done]
-    Y --> Z[requeue_events_not_flushed_by_redirect]
-    T --> AA[redirect_drive_done_for]
-    AA --> AB[apply_redirect_flush]
-    AB --> AC[apply_redirect_flush_range]
-    AC --> AD[prepare_uid_for_redirect_reissue]
-    AD --> AE[retire_active_uid/remove_uid_from_issue_queues]
-    AD --> AF[clear_uid_dispatch_result]
-    AB --> AG[clear_ptw_wait_replay_by_redirect]
-    AB --> AH[clear_redirect_drive_queue]
-    AF --> AI[重新 admission 后 route/issue]
+    A[memblock_main_dispatch_auto_build_main_table_base_sequence::service_monitor_once] --> B[drain_lsq_timing_sidebands]
+    B --> B1[pop_raw_cancel_snapshot / pop_raw_redirect_anchor]
+    B1 --> B2[add_cancel_snapshot / add_redirect_anchor]
+    B2 --> B3[first drain complete]
+    A --> C[collect_monitor_event_batch]
+    C --> D[collect_ctrl_redirect_events_batch]
+    D --> E[pop_raw_ctrl into deferred_ctrl]
+    E --> F[convert_raw_memory_violation]
+    F --> G[dispatch_monitor_batch_handler::process_monitor_event_batch]
+    G --> H[select_oldest_redirect]
+    H --> I[push_feedback_event -> exception_event_q]
+    G --> J[apply_raw_ctrl_deq after semantic batch]
+    A --> K[exception_redirect_replay_task]
+    K --> L[process_pending_events]
+    L --> M[service_ptw_wait_replay and advance_active_redirect]
+    M --> N{active redirect exists before advance?}
+    N -->|yes| V{drive done and cancel_redirect_scan_ready?}
+    N -->|no| O[select oldest queued redirect]
+    V -->|no| L0[second drain_lsq_timing_sidebands]
+    V -->|yes| W[apply_redirect_flush]
+    W --> X[apply_redirect_flush_range]
+    X --> Y[note_lsq_cancel_for_uid before mapping release]
+    Y --> Z[prepare_uid_for_redirect_reissue]
+    X --> AA[finalize software count]
+    AA --> AB[apply_pending_lsq_cancels once]
+    Z --> AF[rollback admission and reissue]
+    AF --> O
+    O --> O1{oldest redirect found?}
+    O1 -->|no| L0
+    O1 -->|yes| P[request_redirect_flush]
+    P --> P1[create per-epoch cancel_record]
+    P1 --> Q[push_redirect_drive -> pending_redirect_drive_q]
+    Q --> L0
+    Q -. background responder .-> R[memblock_redirect_dispatch_base_sequence::body]
+    R --> S[try_pop_redirect_drive]
+    S --> T[drive_redirect_payload]
+    T --> U[mark_redirect_drive_done]
+    T --> U1[redirect monitor pushes raw_redirect_anchor]
+    U1 -. same or later service tick .-> B1
+    L0 --> L1[service_lsq_timing_reconcile once per service tick]
+    L1 --> AC[compare exact target snapshot]
+    AB --> AD{software_applied and observed_valid}
+    AC --> AD
+    AD --> AE[cleanup_completed_cancel_records]
 ```
 
-## 1.1 函数调用 Flow 图整体文字伪代码
+### 2.1 函数调用 Flow 图整体文字伪代码
 
 ```text
-Redirect 主流程：
+1. 每个DUT sample的时序事实采集：
+   ctrl monitor始终保存lqCancelCnt/sqCancelCnt和sample_seq，零值也进入raw_cancel_snapshot_q；
+   redirect monitor仅在io_redirect_valid被采样时保存payload和sample_seq到raw_redirect_anchor_q；
+   两条sideband不进入semantic raw ctrl batch，也不直接修改状态表。
 
-1. ctrl output monitor 采集：
-   service_monitor_once 调用 collect_monitor_event_batch；
-   collect_ctrl_redirect_events_batch 从 raw ctrl queue 出队；
-   apply_raw_ctrl_deq 在 semantic batch 完成后处理 sbIsEmpty 和 LQ/SQ deq；
-   convert_raw_memory_violation 将 memoryViolation 转成 redirect 语义 memblock_wb_event_t。
+2. memoryViolation语义仲裁：
+   collect_ctrl_redirect_events_batch从raw_ctrl_q取出完整ctrl raw并暂存在deferred_ctrl；
+   convert_raw_memory_violation把有效memoryViolation转换为redirect wb_event；
+   process_monitor_event_batch先选同批最老redirect，被覆盖的normal pass/fault/replay直接drop；
+   selected redirect经push_feedback_event进入exception_event_q；
+   semantic batch结束后才按FIFO应用deferred_ctrl中的LQ/SQ deq。
 
-2. batch 级 redirect-first 仲裁：
-   process_monitor_event_batch normalize 整批事件；
-   select_oldest_redirect 选择同批最老 redirect；
-   selected redirect 调用 push_feedback_event 入 exception_event_q；
-   同批被该 redirect 覆盖的 pass/fault/replay 直接 drop，未覆盖事件继续处理或回队列。
+3. 建立active redirect与record：
+   process_pending_events从exception_event_q再次选择最老redirect；
+   request_redirect_flush冻结issue/route、递增dispatch_flush_epoch，并创建该epoch唯一cancel record；
+   push_redirect_drive把payload交给redirect responder；未被当前redirect覆盖的recovery event回队等待。
 
-3. recovery queue 建立 active redirect：
-   process_pending_events 先 service_ptw_wait_replay，再 advance_active_redirect；
-   如果当前没有 active redirect，则 pop_feedback_event 得到本轮 recovery events；
-   select_oldest_redirect 再次确认 queue 内 redirect 优先级；
-   request_redirect_flush 建立 active_redirect/flush_in_progress/issue_freeze_ack；
-   push_redirect_drive 将 payload 写入 pending_redirect_drive_q，等待 redirect sequence drive。
+4. 真实drive与sample锚定：
+   redirect responder从pending_redirect_drive_q取payload并驱动io_redirect_*；
+   mark_redirect_drive_done记录drive完成，但不代表LSQ侧时序已经到达；
+   redirect monitor发布真实sample anchor；adapter把anchor绑定到最老未锚定record，计算LSQ cutoff和DUT cancel比较拍。
 
-4. redirect drive 和 flush 应用：
-   memblock_redirect_dispatch_base_sequence 从 pending_redirect_drive_q 取 payload，drive io_redirect；
-   drive 完成后 mark_redirect_drive_done；
-   下一轮 process_pending_events 的 advance_active_redirect 看到 drive done，调用 apply_redirect_flush；
-   apply_redirect_flush_range 扫描 active uid，prepare_uid_for_redirect_reissue 清旧状态并回滚 admission 边界；
-   flush 结束后清 redirect queue/state，后续 LSQ admission/route/issue 重新发射被 flush 的 uid。
+5. flush scan与software cancel：
+   advance_active_redirect同时要求redirect_drive_done_for和cancel_redirect_scan_ready；
+   apply_redirect_flush_range只扫描active uid窗口；
+   每个命中uid在清mapping前调用note_lsq_cancel_for_uid，校验reservation sample并累加本record的software count；
+   scan结束后finalize software count、回滚admission高水位并清全局freeze；
+   LSQ enqueue sequence按record顺序只执行一次cancel_lq/cancel_sq并置software_applied。
+
+6. DUT对账与收敛：
+   service_monitor_once完成semantic/recovery处理后，只调用一次service_lsq_timing_reconcile；
+   该入口调用service_cancel_reconcile并选择record定义的精确target snapshot；
+   snapshot count必须等于同一record的software count，否则fatal；
+   observed count只置observed_valid，不二次回退资源；
+   software_applied和observed_valid都成立后，record才从FIFO头删除；
+   global stop必须继续等待record、anchor、snapshot和raw timing sideband全部收敛。
 ```
 
+## 3. Monitor 采集与 semantic batch
 
-## 2. `collect_ctrl_redirect_events_batch()` / `convert_raw_memory_violation()`
+### 3.1 ctrl monitor 的 semantic raw 与 cancel snapshot
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/dispatch_monitor_event_adapter.sv`
+源码位置：`io_mem_to_ooo_ctrl_agent_agent_monitor.sv`
+
+抽象功能描述：ctrl monitor 同时产生两类不同用途的数据：有事件时产生 semantic `raw_ctrl`，每拍产生
+独立 cancel snapshot。前者进入 redirect/deq 仲裁，后者只服务 cancel 时序对账。
+
+真实逻辑摘要：
+
+```systemverilog
+cancel_snapshot.lq_cancel_count = io_mem_to_ooo_lqCancelCnt;
+cancel_snapshot.sq_cancel_count = io_mem_to_ooo_sqCancelCnt;
+cancel_snapshot.sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+cancel_snapshot.cycle = $time;
+memblock_sync_pkg::push_raw_cancel_snapshot(cancel_snapshot);
+
+if (io_mem_to_ooo_lqDeq != '0 || io_mem_to_ooo_sqDeq != '0 ||
+    io_mem_to_ooo_memoryViolation_valid || dispatch_flushsb_waiting_empty ||
+    any_mmio_valid) begin
+    raw_ctrl = memblock_sync_pkg::make_empty_raw_ctrl();
+    // 同一full raw填deq、pointer capability、MMIO、memoryViolation和sbIsEmpty。
+end
+```
+
+文字伪代码：
+
+```text
+每个post-reset monitor sample先检查cancel count没有超过物理LQ/SQ容量；
+无论count是否为0，都附带统一sample_seq写入raw_cancel_snapshot_q；
+只有deq、MMIO、memoryViolation或flushSb等待条件有效时才生成raw_ctrl；
+MMIO load lane数使用MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM，raw同时保存value-only ROB、采样flush epoch和sq_deq_ptr_valid；
+cancel snapshot不塞入raw_ctrl，避免semantic batch是否为空影响cancel held level采集。
+```
+
+### 3.2 `collect_ctrl_redirect_events_batch()` / `process_monitor_event_batch()`
+
+源码位置：
+
+- `dispatch_monitor_event_adapter.sv`
+- `dispatch_monitor_batch_handler.sv`
+
+抽象功能描述：adapter把memoryViolation转换为统一 redirect event，但延迟同一 raw 中的deq状态应用；
+batch handler以redirect-first顺序决定同拍事件是否有效。
 
 真实逻辑摘要：
 
 ```systemverilog
 while (memblock_sync_pkg::pop_raw_ctrl(raw_ctrl)) begin
-    check_raw_sample_cycle(raw_ctrl.cycle, sample_cycle,
-                           sample_cycle_valid, "ctrl");
     deferred_ctrl.push_back(raw_ctrl);
     if (convert_raw_memory_violation(raw_ctrl, wb_event)) begin
         events.push_back(wb_event);
     end
 end
 
-wb_event.source = MEMBLOCK_WB_EVENT_SOURCE_MEMORY_VIOLATION;
-wb_event.target = MEMBLOCK_ISSUE_TARGET_NONE;
-wb_event.redirect_valid = 1'b1;
-wb_event.redirect.valid = 1'b1;
-wb_event.redirect.flush_itself = raw.memory_violation_level;
-wb_event.redirect.level = raw.memory_violation_level;
-wb_event.has_rob = raw_rob_to_key(..., wb_event.rob_key);
-wb_event.redirect.rob_key = wb_event.rob_key;
-```
-
-功能解释：
-
-raw ctrl monitor 采集到 memoryViolation 后，adapter 把它转换成 redirect 语义 event。完整 raw
-先保存到 `deferred_ctrl`，不会在 owner 反查和 redirect-first 之前释放 LQ/SQ active map。这里不
-直接 drive redirect，也不直接 flush status；只是把 redirect event 放进 batch。
-
-输入/输出：
-
-- 输入：`dispatch_raw_ctrl_t raw_ctrl`。
-- 输出：redirect `memblock_wb_event_t` 进入当前 batch；完整 raw ctrl 进入本拍
-  `deferred_ctrl`，在 semantic batch 返回后才应用 deq。
-
-文字伪代码：
-
-```text
-循环 pop_raw_ctrl：读取 DUT ctrl output monitor 采集的 raw ctrl；
-调用 check_raw_sample_cycle：确认 ctrl raw 与当前 IQ/int-WB semantic batch 属于同一采样拍；
-把完整 raw ctrl 追加到 deferred_ctrl，本阶段不更新 SB empty，也不释放 LQ/SQ mapping；
-调用 convert_raw_memory_violation：如果 memory_violation_valid=0，返回 false；
-如果 valid，创建 wb_event，source 设 MEMORY_VIOLATION，target 设 NONE；
-设置 redirect_valid 和 redirect.valid；
-把 memory_violation_level 写入 flush_itself/level；
-调用 raw_rob_to_key：把 memoryViolation ROB 指针转为 rob_key；
-把 rob_key 复制到 redirect.rob_key；
-把 redirect event push 到 batch events。
-process_monitor_event_batch 完成后，调用者再按 deferred_ctrl FIFO执行 apply_raw_ctrl_deq。
-```
-
-内部子调用：
-
-- `apply_raw_ctrl_deq()`：更新 `sb_is_empty`，并调用 `monitor_commit_handler.apply_raw_ctrl_deq()` 处理 DUT LQ/SQ deq。
-- `raw_rob_to_key()`：转换 ROB flag/value。
-- `make_wb_event_base()`：创建空 event。
-
-## 3. `process_monitor_event_batch()` redirect-first 仲裁
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/dispatch_monitor_batch_handler.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-if (!normalize_event_batch(events, normalized_events)) return;
-
 if (select_oldest_redirect(normalized_events, selected_redirect_event)) begin
-    selected_redirect = redirect_from_event(selected_redirect_event);
     data.push_feedback_event(selected_redirect_event);
     foreach (normalized_events[idx]) begin
-        if (same_redirect_event(...)) continue;
         if (event_covered_by_redirect(normalized_events[idx], selected_redirect)) continue;
-        if (event_is_redirect(normalized_events[idx])) data.push_feedback_event(normalized_events[idx]);
-        else void'(process_allowed_non_redirect_event(normalized_events[idx]));
+        // 未覆盖redirect入recovery queue，未覆盖normal event继续其原处理路径。
     end
-    return;
-}
-```
-
-功能解释：
-
-batch handler 保证 redirect 优先于同批 normal pass/fault/replay。选中 oldest redirect 后，被它覆盖的 writeback/replay/fault 不落状态；未覆盖 non-redirect event 会在同一轮继续处理，未覆盖的其它 redirect 会继续进入 recovery queue。selected redirect 自身通过 `push_feedback_event()` 进入 recovery queue。
-
-输入/输出：
-
-- 输入：本拍所有 normalized events。
-- 输出：selected redirect 入 `exception_event_q`；同批覆盖事件 drop；同批未覆盖 non-redirect 直接继续处理；同批未覆盖 redirect 继续入 `exception_event_q`。
-
-文字伪代码：
-
-```text
-调用 normalize_event_batch：对所有 event 调用 normalize_feedback_event，解析 active uid 和 ROB key；
-调用 select_oldest_redirect：遍历 normalized_events，用 event_is_redirect 过滤 redirect；
-select_oldest_redirect 内部调用 redirect_event_is_older：ROB 相同按 port_id 稳定排序，否则调用 rob_order_util::rob_is_after 判断谁更老；
-如果选中 oldest redirect：
-  调用 redirect_from_event 取 redirect payload；
-  调用 data.push_feedback_event：把 selected redirect 放入 recovery queue；
-  遍历同 batch 其它 event：
-    调用 same_redirect_event：跳过 selected redirect 自身；
-    调用 event_covered_by_redirect：用 rob_need_flush 判断 event 是否被 redirect 覆盖，覆盖则 drop；
-    未覆盖 redirect 继续 push_feedback_event；
-    未覆盖 non-redirect 调用 process_allowed_non_redirect_event。
-```
-
-内部子调用：
-
-- `normalize_event_batch()`：调用 `data.normalize_feedback_event()`。
-- `select_oldest_redirect()`：选择同批最老 redirect。
-- `event_covered_by_redirect()`：调用 `rob_order_util::rob_need_flush()`。
-- `data.push_feedback_event()`：redirect 入 recovery queue。
-
-## 4. `push_feedback_event()` 到 `exception_event_q`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv:1112`
-
-真实逻辑摘要：
-
-```systemverilog
-if (!normalize_feedback_event(wb_event, normalized_event)) begin
-    return;
 end
-exception_event_q.push_back(normalized_event);
 ```
-
-功能解释：
-
-redirect 在 batch handler 中已经 normalize 过，但入队时仍会再次 normalize，作为防御。成功后放入 `exception_event_q`，等待 `process_pending_events()` 消费。
-
-输入/输出：
-
-- 输入：selected redirect event。
-- 输出：`exception_event_q` 新增 normalized redirect event。
 
 文字伪代码：
 
 ```text
-调用 normalize_feedback_event：如果 redirect 缺 has_rob，则从 redirect.rob_key 补；
-调用 resolve_uid_for_event：用 ROB key 反查 active uid；
-补齐 uid/has_uid/replay_seq；
-redirect 不要求 LOAD/STA/STD target，也不补 issue_epoch；
-normalize 成功后 push_back 到 exception_event_q。
+adapter先把完整raw_ctrl保存在deferred_ctrl，不在owner反查前释放LQ/SQ mapping；
+memoryViolation valid时构造source=MEMORY_VIOLATION、target=NONE的redirect event；
+batch handler规范化所有event，并按ROB顺序选择最老redirect；
+同批被覆盖的pass/fault/replay不落状态；未覆盖event继续处理；
+selected redirect进入exception_event_q；
+batch handler返回后，调用者才按deferred_ctrl FIFO执行apply_raw_ctrl_deq；
+apply_raw_ctrl_deq先原子归一化MMIO tag，再把同一个完整raw交给唯一lsq_commit_handler singleton；
+handler执行SQ pointer capability检查和LQ/SQ联合preflight，V2 count-only分支不另建deq owner。
 ```
 
-内部子调用：
+## 4. `process_pending_events()` 与 record 创建
 
-- `normalize_feedback_event()`：redirect 入队前二次规范化。
-- `resolve_uid_for_event()`：通过 active ROB map 反查 uid。
+源码位置：
 
-## 5. `process_pending_events()` redirect 消费
+- `exception_redirect_replay_handler.sv`
+- `common_data_transaction.sv`
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/exception_redirect_replay_handler.sv`
+抽象功能描述：`process_pending_events()`在没有active redirect时从recovery queue选最老redirect；
+`request_redirect_flush()`创建本次恢复唯一的active状态和cancel record，并把payload排队给driver。
 
 真实逻辑摘要：
 
 ```systemverilog
-service_ptw_wait_replay();
 advance_active_redirect();
 if (data.active_redirect.valid) return;
 while (data.pop_feedback_event(wb_event)) events.push_back(wb_event);
-
 if (select_oldest_redirect(events, redirect_event)) begin
     redirect = redirect_from_event(redirect_event);
-    if (seq_csr_common::is_initialized() && !seq_csr_common::get_redirect_seq_en()) fatal;
-    if (!data.active_redirect.valid) begin
-        data.request_redirect_flush(redirect);
-        data.push_redirect_drive(redirect);
-    end
+    data.request_redirect_flush(redirect);
+    data.push_redirect_drive(redirect);
 end
-if (data.active_redirect.valid) begin
-    requeue_events_not_flushed_by_redirect(events, data.active_redirect);
-    return;
-end
+
+// request_redirect_flush
+memblock_sync_pkg::dispatch_flush_epoch++;
+record.valid = 1'b1;
+record.redirect_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+record.cancel_record_id = ++next_cancel_record_id;
+record.redirect = redirect;
+cancel_record_q.push_back(record);
+active_cancel_record_id = record.cancel_record_id;
+active_cancel_record_id_valid = 1'b1;
 ```
-
-功能解释：
-
-这是 redirect queue 的消费点。它再次做 oldest redirect 选择，因为 `exception_event_q` 可能累积多个 batch 的 redirect/replay/fault。选中 redirect 后建立 active redirect，驱动 redirect sequence，并把 recovery queue 中未被 flush 覆盖的 event 放回队列。这里的 requeue 只发生在 `exception_event_q` 消费阶段，不代表 batch handler 对同批未覆盖 non-redirect event 也会 requeue。
-
-输入/输出：
-
-- 输入：`exception_event_q`。
-- 输出：active redirect 状态、redirect drive queue、事件 requeue/drop。
 
 文字伪代码：
 
 ```text
-调用 service_ptw_wait_replay：active redirect 存在时暂停 PTW wait replay，避免先置 replay_pending 再被 flush；
-调用 advance_active_redirect：如果已有 active redirect，检查 drive 是否 done，done 后 apply flush；
-如果 active_redirect 仍存在，返回，不处理新队列；
-循环调用 pop_feedback_event：把 exception_event_q 当前内容全部弹到本地 events；
-调用 select_oldest_redirect：在 events 中选 ROB 最老 redirect；
-如果有 redirect：
-  调用 redirect_from_event 获取 payload；
-  检查 get_redirect_seq_en，未开启则 fatal；
-  调用 request_redirect_flush：建立 active_redirect、flush_in_progress、issue_freeze_ack、dispatch_flush_epoch；
-  调用 push_redirect_drive：把 payload 放入 pending_redirect_drive_q 给 redirect sequence；
-如果 active_redirect 建立：
-  调用 requeue_events_not_flushed_by_redirect：当前 redirect 覆盖的 event drop，未覆盖的 event push_front 回 exception_event_q；
-  返回，等待后续 advance_active_redirect apply flush。
+先推进已有active redirect；未完成时直接返回，保持redirect单飞；
+没有active redirect时取空exception_event_q并选最老redirect；
+redirect sequence未使能时fatal；
+request_redirect_flush拒绝和另一个active redirect/record重叠；
+递增dispatch_flush_epoch，创建带唯一record id和payload的有界FIFO项；
+设置flush_in_progress、dispatch_flush_in_progress和issue_freeze_ack；
+push_redirect_drive只把payload放入pending_redirect_drive_q；
+本轮其它未覆盖event重新放回exception_event_q，等当前redirect结束。
 ```
 
-内部子调用：
+## 5. redirect drive、anchor 与时序边界
 
-- `service_ptw_wait_replay()`：redirect 单飞期间暂停 replay 释放。
-- `advance_active_redirect()`：已有 redirect 的推进点。
-- `pop_feedback_event()`：从 `exception_event_q` 出队。
-- `request_redirect_flush()`：建立 redirect/freeze 状态。
-- `push_redirect_drive()`：给 redirect sequence 的 pending queue。
-- `requeue_events_not_flushed_by_redirect()`：保持未覆盖 event。
+### 5.1 `memblock_redirect_dispatch_base_sequence::body()`
 
-## 6. `request_redirect_flush()` / `push_redirect_drive()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
+抽象功能描述：该 responder消费pending redirect payload并真实驱动DUT；没有payload时保持安全idle，
+real-smoke结束且没有queue/inflight/active redirect时自然退出。
 
 真实逻辑摘要：
 
 ```systemverilog
-// request_redirect_flush 关键行为
-active_redirect = redirect;
-flush_in_progress = 1'b1;
-memblock_sync_pkg::dispatch_flush_in_progress = 1'b1;
-issue_freeze_ack = 1'b1;
-redirect_phase = MEMBLOCK_REDIRECT_PHASE_DETECTED;
-
-// push_redirect_drive 关键行为
-pending_redirect_drive_q.push_back(redirect);
-```
-
-功能解释：
-
-`request_redirect_flush()` 是测试框架内部建立“当前有 redirect 正在恢复”的锁；`push_redirect_drive()` 只把 redirect payload 放入 `pending_redirect_drive_q`。真正的 inflight 置位和 drive done 记录发生在 redirect sequence 的 `try_pop_redirect_drive()` / `mark_redirect_drive_done()` 中。两者配合，先冻结 route/issue，再把 payload 排队给 redirect sequence 驱动 DUT redirect input。
-
-输入/输出：
-
-- 输入：`memblock_redirect_payload_t redirect`。
-- 输出：`request_redirect_flush()` 更新 active redirect / freeze 状态；`push_redirect_drive()` 只更新 pending drive queue。
-
-文字伪代码：
-
-```text
-request_redirect_flush：
-  检查 redirect.valid；
-  记录 active_redirect；
-  设置 flush_in_progress 和 dispatch_flush_in_progress，阻止 route/issue 继续发旧动态实例；
-  设置 issue_freeze_ack，表示 issue 侧应冻结；
-  记录 redirect_freeze_cycle 和 phase；
-
-push_redirect_drive：
-  检查 redirect.valid；
-  把 redirect payload push 到 pending_redirect_drive_q；
-  不设置 redirect_drive_inflight，也不设置 redirect_phase；
-  等待 redirect sequence 调用 try_pop_redirect_drive 取走 payload。
-```
-
-内部子调用：
-
-- `pending_redirect_drive_q.push_back()`：redirect sequence 后续从该队列取 payload。
-- `memblock_sync_pkg::dispatch_flush_in_progress`：跨 sequence 的全局 freeze 标志。
-
-## 7. `memblock_redirect_dispatch_base_sequence` drive 链路
-
-源码位置：涉及以下文件：
-
-- `mem_ut/ver/ut/memblock/seq/base_seq/memblock_redirect_dispatch_base_sequence.sv`
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
-
-真实逻辑摘要：
-
-```systemverilog
+if (dispatch_real_smoke_active && data.is_global_stop_requested() &&
+    !data.has_pending_redirect_drive() && !data.active_redirect.valid) begin
+    drive_idle_once("redirect_real_smoke_stop_idle_tr");
+    break;
+end
 if (data.try_pop_redirect_drive(payload)) begin
     drive_redirect_payload(payload);
 end else begin
     drive_idle_once(...);
-    if (drive_timeout != 0 && data.active_redirect.valid &&
-        !data.redirect_drive_done_for(data.active_redirect)) fatal;
+end
+```
+
+文字伪代码：
+
+```text
+try_pop_redirect_drive从FIFO取payload并置redirect_drive_inflight；
+drive_redirect_payload构造xaction并通过start_item/finish_item驱动io_redirect_*；
+mark_redirect_drive_done校验payload属于active record，清inflight并记录drive-done与anchor deadline；
+没有payload时发idle，active redirect超出drive_timeout仍未drive则fatal；
+global stop且无redirect生命周期时，再发一拍idle并break，不依赖phase强杀线程。
+```
+
+### 5.2 redirect monitor 与 `bind_redirect_anchors_to_cancel_records()`
+
+抽象功能描述：monitor只发布DUT真实采样事实；绑定函数把该事实按FIFO和payload关联到框架record，
+并从anchor sample推导LSQ scan和cancel compare的目标拍。
+
+真实逻辑摘要：
+
+```systemverilog
+if (io_redirect_valid === 1'b1) begin
+    anchor.valid = 1'b1;
+    anchor.level = io_redirect_bits_level;
+    anchor.rob_flag = io_redirect_bits_robIdx_flag;
+    anchor.rob_value = io_redirect_bits_robIdx_value;
+    anchor.sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+    memblock_sync_pkg::push_raw_redirect_anchor(anchor);
 end
 
-// try_pop_redirect_drive
-if (pending_redirect_drive_q.size() == 0 || redirect_drive_inflight) return 1'b0;
-payload = pending_redirect_drive_q.pop_front();
-redirect_drive_inflight_payload = payload;
-redirect_drive_inflight = 1'b1;
-
-// drive_redirect_payload
-assign_redirect_xaction(tr, payload);
-start_item(tr);
-finish_item(tr);
-data.mark_redirect_drive_done(payload);
+record.redirect_sample_seq = anchor.sample_seq;
+record.redirect_lsq_sample_seq = anchor.sample_seq + MEMBLOCK_DUT_REDIRECT_TO_LSQ_LATENCY;
+record.compare_snapshot_sample_seq = anchor.sample_seq + MEMBLOCK_CANCEL_SNAPSHOT_OBSERVE_LATENCY;
 ```
-
-功能解释：
-
-redirect payload 入 `pending_redirect_drive_q` 后，真正的 DUT input drive 由 `memblock_redirect_dispatch_base_sequence` 完成。它每拍尝试 `try_pop_redirect_drive()`；成功后生成 redirect xaction、驱动 agent，并在 drive 完成后调用 `mark_redirect_drive_done()`。`advance_active_redirect()` 看到 drive done 后才允许 apply flush。
-
-输入/输出：
-
-- 输入：`pending_redirect_drive_q` 中的 redirect payload。
-- 输出：redirect agent xaction；`redirect_drive_inflight` / `redirect_drive_done_epoch` / `redirect_drive_done_cycle` 更新。
 
 文字伪代码：
 
 ```text
-redirect sequence body 初始化 seq_csr_common 和配置；
-如果 redirect sequence disable，只 drive idle 并返回；
-循环执行：
-  调用 try_pop_redirect_drive：如果 pending queue 非空且当前没有 inflight，则 pop 一个 payload；
-  try_pop_redirect_drive 内部设置 redirect_drive_inflight_payload 和 redirect_drive_inflight=1；
-  如果 pop 成功，调用 drive_redirect_payload；
-  drive_redirect_payload 创建 redirect xaction，调用 assign_redirect_xaction 填 DUT input 字段；
-  调用 start_item/finish_item 把 xaction 发给 redirect driver；
-  调用 mark_redirect_drive_done：清 inflight，递增 redirect_drive_done_epoch，记录 redirect_drive_done_cycle；
-  如果 payload 等于 active_redirect，mark_redirect_drive_done 设置 redirect_phase=REDIRECT_DRIVEN；
-  如果没有 payload，drive_idle_once；
-  如果 idle 超过 redirect_drive_timeout 且 active_redirect 还未 done，fatal。
+monitor只在valid真实采样时发布anchor，不调用recovery handler；
+drain_lsq_timing_sidebands把raw anchor搬到redirect_anchor_history_q；
+bind函数取最老未anchor record，要求level和ROB flag/value与anchor完全一致；
+绑定后计算redirect_lsq_sample_seq、DUT cancel update拍、compare snapshot拍和deadline；
+迟到、乱序、无record或payload不一致均fatal，不能让旧anchor重新锚定新request。
 ```
 
-内部子调用：
+## 6. `advance_active_redirect()` 与 software cancel
 
-- `try_pop_redirect_drive()`：从 `pending_redirect_drive_q` 出队并置 inflight。
-- `drive_redirect_payload()`：把 payload 转成 redirect agent xaction 并 drive。
-- `assign_redirect_xaction()`：填 `io_redirect_*` 字段。
-- `mark_redirect_drive_done()`：记录 drive 完成，是 `redirect_drive_done_for()` 后续返回 true 的前提。
-- `redirect_drive_done_for()`：被 timeout 检查和 `advance_active_redirect()` 使用。
+### 6.1 `cancel_redirect_scan_ready()` / `apply_redirect_flush_range()`
 
-## 8. `advance_active_redirect()` / `apply_redirect_flush()`
-
-源码位置：涉及以下文件：
-
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/exception_redirect_replay_handler.sv`
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
+抽象功能描述：该阶段在真实redirect LSQ边界到达后扫描受限active window，确定本epoch需要取消的
+LQ/SQ element并清理旧动态实例；它产生software count，不消费DUT observed count。
 
 真实逻辑摘要：
 
 ```systemverilog
-if (data.redirect_drive_done_for(redirect)) begin
+if (data.redirect_drive_done_for(redirect) &&
+    data.cancel_redirect_scan_ready(redirect)) begin
     data.apply_redirect_flush(redirect);
-end else if (timeout) fatal;
+end
 
-apply_redirect_flush_range(redirect);
-clear_ptw_wait_replay_by_redirect(redirect);
-clear_redirect_drive_queue();
-flush_in_progress = 1'b0;
-dispatch_flush_in_progress = 1'b0;
-issue_freeze_ack = 1'b0;
-active_redirect = '{default:'0};
-redirect_phase = IDLE;
-```
-
-功能解释：
-
-`advance_active_redirect()` 每拍检查 redirect drive 是否完成。完成后 `apply_redirect_flush()` 才真正修改 common data 状态：flush 被 redirect 覆盖的 uid、清 PTW wait replay、清 drive 状态、解除 freeze。
-
-输入/输出：
-
-- 输入：`data.active_redirect`。
-- 输出：被覆盖 uid 准备 reissue，redirect 状态清空。
-
-文字伪代码：
-
-```text
-advance_active_redirect：
-  如果没有 active_redirect，直接返回；
-  调用 redirect_drive_done_for：检查 pending_redirect_drive_q/inflight 已清，drive done epoch 有效，phase 已到 REDIRECT_DRIVEN，且当前 cycle 大于 drive done cycle；
-  如果 drive done，调用 apply_redirect_flush；
-  如果超过 redirect_freeze_timeout 仍未完成，fatal；
-
-apply_redirect_flush：
-  调用 apply_redirect_flush_range：扫描 active uid 窗口，找出被 redirect 覆盖的 uid 并准备 reissue；
-  调用 clear_ptw_wait_replay_by_redirect：删除被 redirect 覆盖的 PTW wait replay；
-  调用 clear_redirect_drive_queue：清 pending/inflight/done 状态；
-  清 flush_in_progress、dispatch_flush_in_progress、issue_freeze_ack 和 active_redirect；
-  redirect_phase 回到 IDLE。
-```
-
-内部子调用：
-
-- `redirect_drive_done_for()`：确认 redirect sequence 已完成 drive，且不是同拍立即 apply。
-- `apply_redirect_flush_range()`：真正扫描 uid 并 flush。
-- `clear_ptw_wait_replay_by_redirect()`：避免 flush 后释放旧 replay。
-- `clear_redirect_drive_queue()`：结束本次 redirect drive 状态。
-
-## 9. `apply_redirect_flush_range()` / `prepare_uid_for_redirect_reissue()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-advance_terminal_done_uid();
-begin_uid = get_active_scan_begin_uid();
-end_uid = get_active_scan_end_uid();
-for (uid = begin_uid; uid < end_uid; uid++) begin
-    status = get_status(uid);
-    if (status.terminal_done || (!status.active && !status.writeback && !status.pass)) continue;
+for (memblock_uid_t uid = begin_uid; uid < end_uid; uid++) begin
     if (rob_order_util::rob_need_flush(status.get_rob_key(), redirect)) begin
         prepare_uid_for_redirect_reissue(uid, redirect);
     end
 end
-if (found_flushed) rollback_max_enqueued_uid(oldest_flushed_uid);
+cancel_record_q[record_idx].active_scan_done = 1'b1;
+cancel_record_q[record_idx].software_count_finalized = 1'b1;
+active_cancel_record_id_valid = 1'b0;
+```
 
-// prepare_uid_for_redirect_reissue
-if (status.active) retire_active_uid(uid);
-else remove_uid_from_issue_queues(uid);
-if (had_lq_mapping) pending_lq_cancel_count += main_tr.numLsElem;
-if (had_sq_mapping) pending_sq_cancel_count += main_tr.numLsElem;
+文字伪代码：
+
+```text
+advance_active_redirect要求drive done和cancel_redirect_scan_ready同时成立；
+scan-ready要求record已有anchor，最新DUT sample和已drain cancel snapshot watermark都不早于redirect LSQ cutoff；
+freeze timeout只warning并继续等待，由统一no-progress/UVM timeout最终兜底；
+apply_redirect_flush_range扫描terminal_done_uid到max_enqueued_uid形成的active window，不做历史全表扫描；
+每个ROB命中uid调用prepare_uid_for_redirect_reissue；
+scan结束后把record的software count标为finalized，清active record id并回滚最老flushed admission边界；
+apply_redirect_flush最后清PTW wait replay、drive queue和global freeze状态。
+```
+
+### 6.2 `note_lsq_cancel_for_uid()` / `prepare_uid_for_redirect_reissue()`
+
+抽象功能描述：`note_lsq_cancel_for_uid()`必须在mapping释放前保存该动态实例的cancel事实；
+`prepare_uid_for_redirect_reissue()`随后清旧map、issue项和执行状态，为同uid新动态实例重新admission做准备。
+
+真实逻辑摘要：
+
+```systemverilog
+if (status.active_lq_mapped || status.active_sq_mapped) begin
+    if (status.lsq_reservation_state != MEMBLOCK_LSQ_RESERVATION_DUT_VISIBLE ||
+        !status.lsq_reservation_sample_valid) fatal;
+    if (status.lsq_reservation_sample_seq >
+        cancel_record_q[record_idx].redirect_lsq_sample_seq) fatal;
+end
+if (status.active_lq_mapped)
+    cancel_record_q[record_idx].software_cancel_lq_count += main_tr.numLsElem;
+if (status.active_sq_mapped)
+    cancel_record_q[record_idx].software_cancel_sq_count += main_tr.numLsElem;
+status.lsq_reservation_state = MEMBLOCK_LSQ_RESERVATION_CANCEL_ACCOUNTED;
+
+note_lsq_cancel_for_uid(uid, dispatch_flush_epoch);
+retire_active_uid(uid);
 clear_uid_dispatch_result(uid);
 status.redirect_pending = 1'b1;
 status.flushed = 1'b1;
 status.dynamic_epoch++;
-status.active = 1'b0;
 ```
-
-功能解释：
-
-这是 redirect flush 真正影响 transaction 的位置。被 redirect 覆盖的 uid 会被清掉 active map/issue queue/status 完成痕迹，记录 pending cancel，并设置 `redirect_pending/flushed`。之后 LSQ admission 会从回滚后的 uid 重新 admission，route/issue 再重发。
-
-输入/输出：
-
-- 输入：active redirect payload。
-- 输出：被覆盖 uid 清理并准备重新 admission；admission 高水位回滚。
 
 文字伪代码：
 
 ```text
-apply_redirect_flush_range：
-  调用 advance_terminal_done_uid：跳过已经 terminal_done 的 uid 前缀，缩小扫描范围；
-  调用 get_active_scan_begin_uid/get_active_scan_end_uid：确定当前已 admission 活跃窗口；
-  遍历窗口内 uid：
-    调用 get_status；
-    terminal_done uid 跳过；非 active 且无 writeback/pass 的 uid 跳过；
-    调用 status.get_rob_key 和 rob_order_util::rob_need_flush：判断该 uid 是否被 redirect 覆盖；
-    覆盖则记录最小 flushed uid，并调用 prepare_uid_for_redirect_reissue；
-  如果找到 flushed uid，调用 rollback_max_enqueued_uid(oldest_flushed_uid)：回退 admission 边界；
-
-prepare_uid_for_redirect_reissue：
-  检查 redirect.valid；
-  如果 status.terminal_done，fatal，禁止 flush 已完成 uid；
-  读取 main transaction，记录旧 LQ/SQ mapping 是否存在；
-  如果 status.active，调用 retire_active_uid：删除 active ROB/LQ/SQ map 并 remove_uid_from_issue_queues；
-  如果不 active，直接调用 remove_uid_from_issue_queues；
-  根据旧 LQ/SQ mapping 累加 pending_lq_cancel_count/pending_sq_cancel_count；
-  调用 clear_uid_dispatch_result：清 enq/queued/dispatched/writeback/pass/fault/replay 等动态结果；
-  设置 redirect_pending=1、flushed=1、dynamic_epoch++、active=0、success=0；
-  等待后续重新 admission/route/issue。
+用当前redirect epoch定位唯一record，并防止同一uid在同一epoch重复计数；
+无LQ/SQ mapping的uid只记录已accounted，不增加count；
+有mapping时要求scalar numLsElem=1、reservation为DUT_VISIBLE且sample_seq不晚于本次cutoff；
+按active_lq_mapped/active_sq_mapped分别累加本record的software count；
+先完成上述登记，再调用retire_active_uid释放active ROB/LQ/SQ map；
+清queued/dispatched/writeback/pass/fault/commit/deq等旧实例状态；
+设置redirect_pending/flushed并递增dynamic_epoch，等待同uid重新admission。
 ```
 
-内部子调用：
+### 6.3 `apply_pending_lsq_cancels()`
 
-- `advance_terminal_done_uid()`：推进已 terminal_done uid 前缀。
-- `rob_order_util::rob_need_flush()`：按照 ROB flag/value 和 redirect payload 判断是否 flush。
-- `retire_active_uid()`：删除 active ROB/LQ/SQ map，并清 issue queue。
-- `remove_uid_from_issue_queues()`：清 load/sta/std issue queue 中该 uid 的旧项。
-- `clear_uid_dispatch_result()`：清动态执行结果，保留主表静态配置。
-- `rollback_max_enqueued_uid()`：让 LSQ admission 从最老 flushed uid 重新开始。
+抽象功能描述：该函数按record FIFO把已经finalize的软件count应用到软件LSQ模型，每个record只执行
+一次；它不读取record中的observed count。
 
-## 10. reissue 后续
-
-源码位置：涉及以下文件：
-
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
-- `mem_ut/ver/ut/memblock/seq/base_seq_help/issue_queue_scheduler.sv`
-- `mem_ut/ver/ut/memblock/seq/base_seq/memblock_lsqenq_dispatch_base_sequence.sv`
-
-功能解释：
-
-redirect flush 本身不会立刻把 uid 塞回 issue queue，而是把 uid 状态改成可重新 admission 的形态，并回滚 admission 边界。后续 LSQ enqueue sequence 重新入队同 uid，`set_status_field(ENQ)` 会清掉 `redirect_pending/flushed/issue_killed`，再由 issue route 重新发射。
+```systemverilog
+foreach (data.cancel_record_q[idx]) begin
+    if (!data.cancel_record_q[idx].valid ||
+        data.cancel_record_q[idx].software_applied) continue;
+    if (!data.cancel_record_q[idx].software_count_finalized) break;
+    if (data.cancel_record_q[idx].software_cancel_lq_count != 0)
+        lsq_ctrl.cancel_lq(data.cancel_record_q[idx].software_cancel_lq_count);
+    if (data.cancel_record_q[idx].software_cancel_sq_count != 0)
+        lsq_ctrl.cancel_sq(data.cancel_record_q[idx].software_cancel_sq_count);
+    data.mark_cancel_record_applied(data.cancel_record_q[idx].redirect_epoch);
+end
+```
 
 文字伪代码：
 
 ```text
-LSQ admission 看到 max_enqueued_uid 已回滚，从 oldest_flushed_uid 重新尝试入队；
-调用 activate_uid / set_status_field(ENQ)：重新建立 active ROB/LQ/SQ map；
-set_status_field(ENQ) 如果发现 redirect_pending 或 flushed，会清 redirect_pending、flushed、issue_killed；
-issue_queue_scheduler::route_all_ready_uids 扫描 active window；
-route_uid 根据主表 behavior 重新 route LOAD/STA/STD；
-route_target 生成 issue item 并 push_issue_queue_item；
-后续 issue scheduler drive 到 DUT，进入新动态实例。
+保持redirect epoch顺序，不能越过尚未finalize的老record；
+调用cancel_lq/cancel_sq回退enqueue pointer并恢复free count；
+把record置software_applied，下一拍不会重复执行；
+observed_cancel_lq/sq_count不参与资源回退，避免DUT snapshot导致二次恢复free count。
 ```
 
-## 11. 端到端行为总结
+## 7. `drain_lsq_timing_sidebands()` / `service_lsq_timing_reconcile()` 与逐 epoch 对账
+
+源码位置：
+
+- `dispatch_monitor_event_adapter.sv`
+- `common_data_transaction.sv`
+
+抽象功能描述：`drain_lsq_timing_sidebands()`只搬运两条raw timing sideband；
+`service_lsq_timing_reconcile()`是每个dispatch service tick的唯一对账入口，调用
+`service_cancel_reconcile()`在record指定的精确target sample比较software count与DUT count。
+
+顺序约束是：先创建record，再取得redirect anchor；sample cutoff到达后才能scan并finalize software
+count；只有software count finalized后才允许比较target snapshot。`software_applied`和`observed_valid`
+在finalize之后可以先后独立完成，源码不要求二者同拍；cleanup只要求二者最终都成立。无论observed
+先到还是software apply先到，observed路径都不能调用资源回退API。
+
+真实逻辑摘要：
+
+```systemverilog
+// drain_lsq_timing_sidebands: collector only; may run before and after semantic batch
+while (memblock_sync_pkg::pop_raw_cancel_snapshot(cancel_snapshot)) begin
+    data.add_cancel_snapshot(cancel_snapshot);
+end
+while (memblock_sync_pkg::pop_raw_redirect_anchor(redirect_anchor)) begin
+    data.add_redirect_anchor(redirect_anchor);
+end
+
+// service_lsq_timing_reconcile: exactly once per dispatch service tick
+data.service_cancel_reconcile();
+
+if (snapshot.sample_seq ==
+    cancel_record_q[record_idx].compare_snapshot_sample_seq) begin
+    if (snapshot.lq_cancel_count !=
+            cancel_record_q[record_idx].software_cancel_lq_count ||
+        snapshot.sq_cancel_count !=
+            cancel_record_q[record_idx].software_cancel_sq_count) fatal;
+    cancel_record_q[record_idx].observed_cancel_lq_count = snapshot.lq_cancel_count;
+    cancel_record_q[record_idx].observed_cancel_sq_count = snapshot.sq_cancel_count;
+    cancel_record_q[record_idx].observed_valid = 1'b1;
+end
+```
+
+文字伪代码：
+
+```text
+service_monitor_once在semantic batch前drain一次，并在exception/redirect scan后再drain一次；
+两次drain都只把raw sideband搬到公共history，第一次覆盖tick入口前事实，第二次补收处理期间到达的事实；
+第二次drain后仅调用一次service_lsq_timing_reconcile，再统一绑定anchor并消费已到target snapshot；
+target之前的snapshot只检查held baseline并从history删除；
+target snapshot已到但software count未finalize时暂停，不能提前比较或丢弃；
+target sample丢失、越过deadline或count不一致均fatal；
+匹配时保存observed count、置observed_valid并更新仅用于directed coverage的match计数；
+该函数不调用release/cancel、不写pass/fail/terminal；
+cleanup_completed_cancel_records只从FIFO头删除同时software_applied且observed_valid的record。
+```
+
+## 8. Reissue、global stop 与真实 cancel vseq
+
+### 8.1 Reissue
+
+redirect flush不会直接把uid塞回issue queue。`rollback_max_enqueued_uid()`使LSQ admission从最老
+flushed uid重新开始；新launch创建新的`lsq_reservation_launch_epoch`，后续route/issue/writeback按
+原主流程推进。旧event因dynamic epoch、replay sequence和active map失效而被过滤。
+
+### 8.2 Global stop 收敛
+
+`common_data_transaction::request_global_stop_if_done()`只有同时满足以下条件才置
+`global_stop_requested`：
+
+- `terminal_done_uid >= main_trans_num`。
+- `cancel_record_q`为空，没有待应用software cancel。
+- cancel一致性镜像计数为0。
+- redirect anchor history和cancel snapshot history为空。
+- `raw_cancel_snapshot_q/raw_redirect_anchor_q`两条timing sideband raw queue为空。
+
+因此transaction terminal并不允许绕过迟到的cancel record/raw sideband。`end_test_check()`再次检查
+这些状态，防止测试在未对账时静默结束。
+
+### 8.3 `memblock_dispatch_real_cancel_reconcile_vseq`
+
+该directed vseq建立三笔真实transaction：uid0为redirect anchor，uid1 load和uid2 store为年轻victim。
+它等待uid1/uid2 reservation都达到`DUT_VISIBLE`且尚未issue/writeback/deq，然后调用
+`request_redirect_flush()`和`push_redirect_drive()`注入真实redirect。场景要求至少完成一次非零LQ和
+一次非零SQ reconcile匹配。
+
+父、子vseq均通过`uvm_do_on`在virtual sequencer对应agent sequencer上启动；DCache、SBuffer和redirect
+responder在global stop且各自无inflight后发送安全idle并自然返回。cancel vseq等待
+`background_responders_done`，不使用`disable fork`截断response。
+
+## 9. 端到端行为总结
 
 ```text
 memoryViolation redirect：
-  raw ctrl memoryViolation
-  -> collect_ctrl_redirect_events_batch
-  -> apply_raw_ctrl_deq 更新 SB/LQ/SQ deq
-  -> convert_raw_memory_violation 生成 redirect wb_event
-  -> process_monitor_event_batch
-  -> normalize_event_batch / normalize_feedback_event / resolve_uid_for_event
-  -> select_oldest_redirect
-  -> data.push_feedback_event
-  -> normalize_feedback_event 二次规范化
+  ctrl raw memoryViolation
+  -> convert_raw_memory_violation
+  -> semantic batch redirect-first
   -> exception_event_q
-  -> process_pending_events
-  -> pop_feedback_event
-  -> select_oldest_redirect
-  -> request_redirect_flush 建立 active_redirect/freeze
-  -> push_redirect_drive 放入 pending_redirect_drive_q
-  -> memblock_redirect_dispatch_base_sequence::body
-  -> try_pop_redirect_drive 设置 redirect_drive_inflight
-  -> drive_redirect_payload 驱动 redirect agent
-  -> mark_redirect_drive_done 清 inflight 并记录 done epoch/cycle
-  -> requeue_events_not_flushed_by_redirect 保留 recovery queue 中未覆盖 event
-  -> advance_active_redirect 等 drive done
-  -> redirect_drive_done_for 返回 true
-  -> apply_redirect_flush
-  -> apply_redirect_flush_range / prepare_uid_for_redirect_reissue
-  -> rollback_max_enqueued_uid
-  -> LSQ admission 重新入队
-  -> route_all_issue_queues 重新 route/issue
+  -> request_redirect_flush + per-epoch cancel record
+  -> pending_redirect_drive_q
+  -> real io_redirect drive
+  -> monitor redirect anchor
+  -> cancel_redirect_scan_ready
+  -> active-window flush scan
+  -> software cancel finalized/applied
+  -> exact DUT cancel snapshot compare
+  -> record cleanup
+  -> uid re-admission/reissue
 
-redirect 覆盖同批 normal pass/fault/replay：
-  同 batch 选出 oldest redirect
-  -> event_covered_by_redirect 调用 rob_need_flush
-  -> 被覆盖 event drop
-  -> 不落 normal pass/fault/replay 状态
+同批被redirect覆盖的normal event：
+  normalized event
+  -> event_covered_by_redirect
+  -> drop
+  -> 不写pass/fault/replay状态
 
-recovery queue 中 redirect 未覆盖 event：
-  process_pending_events 建立 active redirect
-  -> requeue_events_not_flushed_by_redirect
-  -> 未覆盖 event push_front 回 exception_event_q
-  -> 当前 redirect 完成后下一拍继续处理
+逐epochcancel：
+  DUT-visible reservation mapping
+  -> note_lsq_cancel_for_uid
+  -> record.software_cancel_*
+  -> apply_pending_lsq_cancels一次
+  -> record.software_applied
+  -> service_lsq_timing_reconcile唯一调用service_cancel_reconcile比较observed snapshot
+  -> record.observed_valid
+  -> 两条进度都完成后pop record
 
-同 batch 中 redirect 未覆盖 non-redirect event：
-  process_monitor_event_batch 选出 oldest redirect
-  -> event_covered_by_redirect 返回 false
-  -> process_allowed_non_redirect_event
-  -> 按 normal pass / replay / fault 场景继续处理
+真实cancel场景退出：
+  all uid terminal
+  -> cancel record/history/raw timing sideband全部drain
+  -> request_global_stop_if_done
+  -> responder无inflight后安全idle并自然退出
+  -> cancel vseq等待background_responders_done后返回
 ```
 
-端到端文字伪代码描述：
+端到端文字伪代码：
 
 ```text
-memoryViolation redirect：
-  当 ctrl monitor 采到 memoryViolation 时，adapter 先处理同一个 raw ctrl 中的 LQ/SQ deq 和 SB empty；
-  如果 memoryViolation valid，则 convert_raw_memory_violation 生成 target=NONE 的 redirect wb_event；
-  batch handler normalize 后选择同批 oldest redirect，selected redirect 通过 push_feedback_event 进入 exception_event_q；
-  process_pending_events 从 exception_event_q 中再次选 oldest redirect，建立 active_redirect 和全局 freeze；
-  request_redirect_flush 记录 active_redirect、dispatch_flush_epoch、issue_freeze_ack，阻止旧动态实例继续 route/issue；
-  push_redirect_drive 把 redirect payload 放进 pending_redirect_drive_q，等待 redirect sequence 驱动 DUT input；
-  redirect sequence drive 完成后 mark_redirect_drive_done 记录 done epoch/cycle；
-  下一拍 advance_active_redirect 看到 drive done，调用 apply_redirect_flush；
-  apply_redirect_flush_range 扫描 active uid 窗口，命中 flush 范围的 uid 调用 prepare_uid_for_redirect_reissue；
-  prepare_uid_for_redirect_reissue 清 active map、issue queue、动态完成状态，并设置 redirect_pending/flushed/dynamic_epoch；
-  rollback_max_enqueued_uid 回滚 admission 边界，后续 LSQ admission 重新入队并 route/issue。
+memoryViolation先参与同拍redirect-first仲裁，防止旧动态实例的pass/fault/replay抢先落表。选中的redirect
+建立唯一active record并真实驱动DUT；monitor anchor把框架record与DUT采样拍绑定。只有LSQ cutoff到达后
+才扫描active mapping，且每个mapping在释放前必须具备有效reservation sample事实。
 
-redirect 覆盖同批 normal pass/fault/replay：
-  batch handler 先选 oldest redirect，而不是先让 pass/fault/replay 落状态；
-  对同批其它 event 调用 event_covered_by_redirect；
-  如果 event 被 redirect 覆盖，说明它属于将被 flush 的旧动态实例，直接 drop；
-  drop 后不会写 pass/fault/replay 状态，也不会创建 replay pending。
+软件scan结果既是资源回退量，也是DUT cancel期望值。LSQ sequence只按software count回退一次；
+DUT observed count只在精确target sample对账，不会再次改变pointer/free count。record必须等软件应用和
+DUT观察两条独立进度都结束才能删除。
 
-recovery queue 中 redirect 未覆盖 event：
-  process_pending_events 建立 active_redirect 后，会把本轮从 exception_event_q 弹出的其它 event 重新分类；
-  被 active_redirect 覆盖的 event 直接 drop；
-  未覆盖 event push_front 回 exception_event_q，等当前 redirect drive/apply flush 完成后再处理；
-  这样保证同一时间只有一个 active redirect 推进，同时不丢失不在 flush 范围内的 recovery event。
-
-同 batch 中 redirect 未覆盖 non-redirect event：
-  batch handler 发现 event 不被 selected redirect 覆盖时，不需要 requeue；
-  non-redirect event 直接进入 process_allowed_non_redirect_event；
-  后续按 normal pass、replay 或 fault 各自场景继续处理。
+最后，即使所有uid已经terminal，公共stop仍等待cancel record、anchor、snapshot及raw timing queue清空。
+这样真实cancel vseq可以让所有responder在无inflight边界自然退出，而不是依赖phase结束强制杀线程。
 ```

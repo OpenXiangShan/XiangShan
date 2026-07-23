@@ -600,6 +600,8 @@ class seq_csr_common;
             MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM == 0 || MEMBLOCK_DUT_MAX_UOP_SIZE == 0 ||
             MEMBLOCK_DUT_UOP_IDX_W == 0 || MEMBLOCK_DUT_VLEN == 0 ||
             MEMBLOCK_DUT_MAX_LS_ELEM == 0 || MEMBLOCK_DUT_NUM_LS_ELEM_W == 0 ||
+            MEMBLOCK_DUT_ENSBUFFER_WIDTH == 0 || MEMBLOCK_SQ_DEQ_COUNT_W == 0 ||
+            MEMBLOCK_LQ_CANCEL_COUNT_W == 0 || MEMBLOCK_SQ_CANCEL_COUNT_W == 0 ||
             MEMBLOCK_DUT_L2TLB_DFILTER_SIZE == 0 ||
             MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES == 0) begin
             `uvm_fatal("SEQ_COMPILE_CFG", "compile-time width/count values must be non-zero")
@@ -619,6 +621,23 @@ class seq_csr_common;
         end
         if (MEMBLOCK_DUT_UOP_IDX_W != $clog2(MEMBLOCK_DUT_MAX_UOP_SIZE + 1)) begin
             `uvm_fatal("SEQ_COMPILE_CFG", "UOP_IDX_W is not derived from MAX_UOP_SIZE")
+        end
+        if (MEMBLOCK_SQ_DEQ_COUNT_W != $clog2(MEMBLOCK_DUT_ENSBUFFER_WIDTH + 1) ||
+            MEMBLOCK_LQ_CANCEL_COUNT_W != $clog2(MEMBLOCK_LQ_SIZE + 1) ||
+            MEMBLOCK_SQ_CANCEL_COUNT_W != $clog2(MEMBLOCK_SQ_SIZE + 1)) begin
+            `uvm_fatal("SEQ_COMPILE_CFG", "SQ deq/cancel widths are not derived from their compile-time owners")
+        end
+        if (MEMBLOCK_DUT_REDIRECT_TO_LSQ_LATENCY == 0 ||
+            MEMBLOCK_DUT_CANCEL_OUTPUT_LATENCY == 0 ||
+            MEMBLOCK_TB_CANCEL_MONITOR_SAMPLE_OFFSET != 1 ||
+            MEMBLOCK_CANCEL_SNAPSHOT_OBSERVE_LATENCY !=
+                MEMBLOCK_DUT_CANCEL_OUTPUT_LATENCY +
+                MEMBLOCK_TB_CANCEL_MONITOR_SAMPLE_OFFSET ||
+            MEMBLOCK_CANCEL_RECORD_MAX_DEPTH !=
+                MEMBLOCK_CANCEL_SNAPSHOT_OBSERVE_LATENCY + 2 ||
+            MEMBLOCK_CANCEL_SNAPSHOT_QUEUE_MAX_DEPTH !=
+                2 * MEMBLOCK_CANCEL_SNAPSHOT_OBSERVE_LATENCY + 8) begin
+            `uvm_fatal("SEQ_COMPILE_CFG", "cancel observe latency is not derived from DUT update and monitor offset")
         end
         if ((MEMBLOCK_DUT_VLEN % 8) != 0 ||
             MEMBLOCK_DUT_MAX_LS_ELEM != (MEMBLOCK_DUT_VLEN / 8) ||
@@ -691,7 +710,8 @@ class seq_csr_common;
         if (MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM == 0 ||
             MEMBLOCK_DUT_LOAD_PIPE_NUM == 0 ||
             MEMBLOCK_DUT_STA_PIPE_NUM == 0 ||
-            MEMBLOCK_DUT_STD_PIPE_NUM == 0) begin
+            MEMBLOCK_DUT_STD_PIPE_NUM == 0 ||
+            MEMBLOCK_DUT_L2TLB_DFILTER_SIZE == 0) begin
             `uvm_fatal("SEQ_CSR_CFG", "compile-time LSQ enqueue/issue resource counts must be non-zero")
         end
 

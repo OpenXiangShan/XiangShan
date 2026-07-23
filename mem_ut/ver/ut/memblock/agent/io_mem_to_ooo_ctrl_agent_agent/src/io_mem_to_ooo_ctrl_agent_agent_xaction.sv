@@ -27,9 +27,9 @@ class io_mem_to_ooo_ctrl_agent_agent_xaction  extends tcnt_data_base;
     rand bit io_mem_to_ooo_topToBackendBypass_clintTime_valid;
     rand bit [63:0] io_mem_to_ooo_topToBackendBypass_clintTime_bits;
     rand bit io_mem_to_ooo_topToBackendBypass_l2FlushDone;
-    rand bit [6:0] io_mem_to_ooo_lqCancelCnt;
-    rand bit [5:0] io_mem_to_ooo_sqCancelCnt;
-    rand bit [1:0] io_mem_to_ooo_sqDeq ;
+    rand bit [`MEMBLOCK_LQ_CANCEL_COUNT_W-1:0] io_mem_to_ooo_lqCancelCnt;
+    rand bit [`MEMBLOCK_SQ_CANCEL_COUNT_W-1:0] io_mem_to_ooo_sqCancelCnt;
+    rand bit [`MEMBLOCK_SQ_DEQ_COUNT_W-1:0] io_mem_to_ooo_sqDeq;
     rand bit [3:0] io_mem_to_ooo_lqDeq ;
     rand bit io_mem_to_ooo_lqDeqPtr_flag;
     rand bit [`MEMBLOCK_DUT_LQ_VALUE_W-1:0] io_mem_to_ooo_lqDeqPtr_value;
@@ -201,15 +201,15 @@ constraint io_mem_to_ooo_ctrl_agent_agent_xaction::default_io_mem_to_ooo_topToBa
 }
 
 constraint io_mem_to_ooo_ctrl_agent_agent_xaction::default_io_mem_to_ooo_lqCancelCnt_cons{
-    io_mem_to_ooo_lqCancelCnt inside {[7'd0:7'd72]};
+    io_mem_to_ooo_lqCancelCnt inside {[0:`MEMBLOCK_DUT_LQ_SIZE]};
 }
 
 constraint io_mem_to_ooo_ctrl_agent_agent_xaction::default_io_mem_to_ooo_sqCancelCnt_cons{
-    io_mem_to_ooo_sqCancelCnt inside {[6'd0:6'd56]};
+    io_mem_to_ooo_sqCancelCnt inside {[0:`MEMBLOCK_DUT_SQ_SIZE]};
 }
 
 constraint io_mem_to_ooo_ctrl_agent_agent_xaction::default_io_mem_to_ooo_sqDeq_cons{
-
+    io_mem_to_ooo_sqDeq inside {[0:`MEMBLOCK_DUT_ENSBUFFER_WIDTH]};
 }
 
 constraint io_mem_to_ooo_ctrl_agent_agent_xaction::default_io_mem_to_ooo_lqDeq_cons{

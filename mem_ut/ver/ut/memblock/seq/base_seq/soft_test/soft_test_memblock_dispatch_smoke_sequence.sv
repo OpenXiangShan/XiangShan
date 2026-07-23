@@ -50,6 +50,11 @@ endfunction:new
 task soft_test_memblock_dispatch_smoke_sequence::body();
     memblock_issue_q_item_t fired_items[$];
 
+    // LSQ commit/deq/head 状态只能由 singleton owner 维护；每个 software-only
+    // 场景开始时只清该 owner 的私有 cursor，不复制公共 status/map。
+    commit_handler = lsq_commit_handler::get();
+    commit_handler.bind_lsq_ctrl(lsq_ctrl);
+    commit_handler.reset_lsqcommit_runtime_state();
     build_directed_main_table();
     admit_lsq_and_route_issue();
     fire_all_issue_items(fired_items);
@@ -145,13 +150,16 @@ task soft_test_memblock_dispatch_smoke_sequence::commit_and_deq_lsq();
     memblock_lq_key_t             lq_deq_head;
     memblock_sq_key_t             sq_deq_head;
     bit                           has_commit;
+    bit                           has_fault_head;
+    memblock_uid_t                fault_uid;
 
     if (commit_handler == null) begin
-        commit_handler = lsq_commit_handler::type_id::create("commit_handler");
+        commit_handler = lsq_commit_handler::get();
     end
     commit_handler.bind_lsq_ctrl(lsq_ctrl);
-    commit_handler.build_lsqcommit_xaction(commit_tr, commit_uids, has_commit);
-    if (!has_commit || commit_uids.size() != dispatch_smoke_trans_num) begin
+    commit_handler.build_lsqcommit_xaction(commit_tr, commit_uids, has_commit,
+                                           has_fault_head, fault_uid);
+    if (!has_commit || has_fault_head || commit_uids.size() != dispatch_smoke_trans_num) begin
         `uvm_fatal(get_type_name(),
                    $sformatf("expected %0d ROB commits, got has_commit=%0d size=%0d",
                              dispatch_smoke_trans_num,

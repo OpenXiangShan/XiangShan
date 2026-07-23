@@ -12,7 +12,21 @@ STD 继续受限于 ROB value-only 双 probe，不建立 backend replay。
 
 本文早期 token/claim 图保留为历史设计记录，当前代码以专项 flow 和源码为准。
 
-## 1. 总体调用图
+## 1. 术语与总体调用图
+
+### 1.0 术语与抽象功能说明
+
+| 英文术语 | 当前flow中的中文含义 | 代码对象/状态落点 | 示例 |
+|---|---|---|---|
+| `semantic batch` | 同一service sample中先统一做redirect-first仲裁的writeback/IQ/memoryViolation事件集合 | `events[$]`、`process_monitor_event_batch()` | 被同批older redirect覆盖的WB不得落status |
+| `deferred ctrl` | semantic batch完成后才应用的完整ctrl raw；本拍先进入临时列表，再转入持久FIFO | `deferred_ctrl[$]`、`deferred_raw_ctrl_q` | resync mismatch保留队首，MMIO、deq和`sbIsEmpty`不会静默丢失 |
+| `observation epoch` | monitor观察MMIO output时保存的环境flush epoch，不是producer身份 | `raw.mmio_flush_epoch` | 旧脉冲可能带redirect后的observation epoch |
+| `producer provenance` | MMIO valid所在DUT sample的单调序号 | `raw.mmio_sample_seq` | LOAD与redirect sample `R/R+1`做overlap判定 |
+| `redirect sample anchor` | redirect输入被DUT采样的sample序号和完整payload | cancel record、redirect anchor FIFO | anchor sample记为`R` |
+| `active owner` | 完整ROB key当前唯一映射的动态uid实例 | `uid_by_active_rob` | value-only raw需要probe flag 0/1两个key |
+| `staging` | 同一个ctrl raw在写status前的MMIO uid/kind去重列表 | `staged_tags[$]` | 所有tag先preflight再统一commit |
+| `STALE_DROP` | 有充分证据证明某个MMIO port属于旧实例，仅丢该port | `MEMBLOCK_MMIO_RESOLVE_STALE_DROP` | 唯一旧load owner被redirect覆盖 |
+| `overlap` | LOAD MMIO sample等于未完成redirect的`R`或`R+1` | `resolve_mmio_uid_by_rob_value()` | 新/无/多/不兼容owner均fatal |
 
 > 本文早期总体图包含 token/claim 设计节点，属于历史方案记录。当前 V2 IQ raw 的
 > SQ-only 反查、IQ 先于 int-WB 的同拍顺序和 deferred ctrl 以
@@ -36,9 +50,8 @@ flowchart TD
 
     C --> C2[dispatch_monitor_event_adapter::collect_ctrl_redirect_events_batch]
     C2 --> C21[memblock_sync_pkg::pop_raw_ctrl]
-    C21 --> C20[dispatch_monitor_event_adapter::apply_raw_ctrl_mmio_tags]
-    C20 --> C22[dispatch_monitor_event_adapter::apply_raw_ctrl_deq]
-    C20 --> C23[dispatch_monitor_event_adapter::convert_raw_memory_violation]
+    C21 --> C25[deferred_ctrl.push_back full raw]
+    C21 --> C23[dispatch_monitor_event_adapter::convert_raw_memory_violation]
     C23 --> C24[events.push_back]
 
     C --> D[dispatch_monitor_batch_handler::process_monitor_event_batch]
@@ -59,6 +72,20 @@ flowchart TD
     D31 -->|yes| D33[drop covered writeback/fault/replay]
     D31 -->|yes uncovered| D4
     D31 -->|no| D4[process_allowed_non_redirect_event]
+    D --> C19[append full raw to deferred_raw_ctrl_q]
+    C25 --> C19
+    C19 --> C20[dispatch_monitor_event_adapter::apply_raw_ctrl_mmio_tags on queue head]
+    C20 --> C201[resolve value-only ROB with epoch and sample provenance]
+    C201 --> C202{LOAD sample overlaps redirect R or R+1?}
+    C202 -->|unique covered old load| C203[STALE_DROP this port]
+    C202 -->|new no multiple incompatible or unproved| C204[MMIO_RESOLVE fatal]
+    C202 -->|no overlap or STORE| C205[stage preflight commit canonical tag]
+    C203 --> C22[lsq_commit_handler::apply_raw_ctrl_deq full raw]
+    C205 --> C22
+    C22 --> C221{owner success?}
+    C221 -->|yes| C222[pop deferred queue head]
+    C221 -->|resync mismatch| C223[retain head until next service tick]
+    C221 -->|strict mismatch| C224[uvm_fatal]
 
     D4 --> D41{generation_correlated?}
     D41 -->|yes| D42[validate_issue_generation_claim no side effect]
@@ -176,8 +203,14 @@ Writeback 函数调用主流程：
    STA IQ及LDA/STA WB monitor在DUT valid采样块内，把真实payload与
    `sample_flush_epoch=dispatch_flush_epoch`、`cycle=$time`同拍写入raw；adapter只消费
    该快照，出队时不得用current epoch回填或覆盖；
-   collect_ctrl_redirect_events_batch pop raw ctrl并保存到deferred_ctrl，把memoryViolation转成
-   redirect event；semantic batch完成后才apply_raw_ctrl_deq处理LQ/SQ deq与sbIsEmpty。
+   ctrl monitor只在任一MMIO valid时冻结`mmio_flush_epoch` observation epoch和同拍
+   `mmio_sample_seq` producer provenance；
+   collect_ctrl_redirect_events_batch pop raw ctrl并保存完整对象到deferred_ctrl，把memoryViolation转成
+   redirect event；semantic batch完成后，adapter先原子归一化同一raw的MMIO tag；
+   LOAD sample若与未完成redirect的R/R+1重叠，只有唯一旧scalar load owner、已dispatch且完整key被覆盖
+   才STALE_DROP；新owner、无owner、多record、不兼容owner或无法证明覆盖均MMIO_RESOLVE fatal；
+   STORE不套用该LOAD overlap规则；tag处理返回后，再把完整raw交给singleton lsq_commit_handler处理
+   LQ/SQ deq与sbIsEmpty。
 
 4. batch 级 normalize和redirect-first仲裁：
    process_monitor_event_batch 调用 normalize_event_batch；
@@ -321,9 +354,7 @@ monitor_adapter.collect_ctrl_redirect_events_batch(events,
                                                    sample_cycle,
                                                    sample_cycle_valid);
 monitor_batch_handler.process_monitor_event_batch(events);
-foreach (deferred_ctrl[idx]) begin
-    monitor_adapter.apply_raw_ctrl_deq(deferred_ctrl[idx]);
-end
+monitor_adapter.apply_deferred_ctrl_updates_batch(deferred_ctrl);
 ```
 
 功能解释：
@@ -341,7 +372,7 @@ base sequence 会在调用本 task 前确保 `writeback_handler`、`monitor_batc
 如果 writeback_handler 为空，创建 writeback_status_handler，作为真实 writeback/IQ feedback 的状态更新器；
 如果 monitor_batch_handler 为空，创建 dispatch_monitor_batch_handler；
 调用 monitor_batch_handler.bind_writeback_handler：把 writeback_handler 绑定给 batch handler，用于处理通过 redirect 仲裁的非 redirect event；
-如果 monitor_commit_handler 为空，创建 lsq_commit_handler；
+如果 monitor_commit_handler 为空，取得lsq_commit_handler::get()返回的singleton；
 如果 lsq_ctrl 存在，调用 monitor_commit_handler.bind_lsq_ctrl：让 ctrl deq 同步可以释放本地 LSQ 映射；
 如果 monitor_adapter 为空，创建 dispatch_monitor_event_adapter；
 调用 monitor_adapter.bind_commit_handler：把 monitor_commit_handler 绑定给 adapter，供 ctrl deq 同步使用；
@@ -351,8 +382,8 @@ base sequence 会在调用本 task 前确保 `writeback_handler`、`monitor_batc
 deferred_ctrl，并把 memoryViolation 转换成 redirect event 放入 events；
 调用 process_monitor_event_batch：把整个 events 一次性交给 batch handler，由它做 normalize 和 redirect-first 仲裁；
 由 batch handler 决定哪些事件可以真正更新状态；
-batch handler 返回后，按 deferred_ctrl FIFO 调用 apply_raw_ctrl_deq，更新 sbIsEmpty 并释放
-DUT 已出队的 LQ/SQ mapping。
+batch handler 返回后，调用apply_deferred_ctrl_updates_batch：先按原顺序追加到持久FIFO，再按队首调用
+apply_raw_ctrl_deq；full raw成功后才pop并更新后续项，resync失败时保留队首到下一service tick。
 ```
 
 兼容入口说明：
@@ -546,6 +577,9 @@ ROB/issue_epoch/replay_seq；owner缺失、STA未dispatched或snapshot不完整�
 
 源码位置：`dispatch_monitor_event_adapter.sv`
 
+抽象功能描述：collector只把完整ctrl raw保存到本service的deferred列表，并把memoryViolation投影为
+semantic redirect event；它不解析MMIO owner、不释放LQ/SQ mapping，也不写`sbIsEmpty`。
+
 真实逻辑摘要：
 
 ```systemverilog
@@ -569,9 +603,10 @@ end
 
 - `check_raw_sample_cycle()`：要求 ctrl raw 与本次 IQ/int-WB semantic batch 属于同一采样拍。
 - `deferred_ctrl.push_back()`：保存完整 raw，延后应用资源状态。
-- `apply_raw_ctrl_deq()`：由`collect_monitor_event_batch()`在semantic batch返回后调用，
-  同步 ctrl monitor 中的 LQ/SQ deq 和 `sb_is_empty`。
-- `common_data_transaction::update_sb_is_empty()`：更新 store buffer empty 状态。
+- `apply_deferred_ctrl_updates_batch()`：semantic batch返回后把本拍临时列表追加到持久FIFO，并按队首
+  success语义调用`apply_raw_ctrl_deq()`；失败不pop。
+- `apply_raw_ctrl_deq()`：先归一化MMIO tag，再把完整raw交给唯一LSQ owner并返回owner success。
+- `apply_raw_ctrl_mmio_tags()`：在active map释放前解析value-only MMIO facts，并执行全raw preflight/commit。
 - `lsq_commit_handler::apply_raw_ctrl_deq()`：根据 DUT deq 指针释放 LQ/SQ 映射。
 - `convert_raw_memory_violation()`：把 memoryViolation 转成 redirect event。
 
@@ -584,11 +619,14 @@ end
   调用 convert_raw_memory_violation：如果 raw ctrl 中存在 memoryViolation，就转换成 redirect event；
   redirect event 不立即 drive redirect，也不直接 flush；
   先放入 batch，让 batch handler 判断它是否是本批 oldest redirect。
-process_monitor_event_batch返回后，调用者按deferred_ctrl FIFO调用apply_raw_ctrl_deq：
-  先调用data.update_sb_is_empty更新SB empty镜像；
-  如果lq_deq/sq_deq都为0，不释放mapping；
-  否则组出LQ/SQ deq pointer并调用monitor_commit_handler.apply_raw_ctrl_deq，
-  由commit handler释放DUT已deq的active mapping。
+process_monitor_event_batch返回后，调用者把deferred_ctrl追加到持久deferred_raw_ctrl_q：
+  从持久FIFO队首调用apply_raw_ctrl_deq，不允许后续raw越过当前队首；
+  先调用apply_raw_ctrl_mmio_tags，在active map仍存在时解析每个MMIO port；
+  MMIO-only raw即使lq_deq/sq_deq都为0也必须完成tag处理；
+  tag处理返回后，把未拆分的完整raw交给monitor_commit_handler.apply_raw_ctrl_deq；
+  commit handler联合预检LQ/SQ deq，更新sb_is_empty，并释放DUT已deq的active mapping；
+  owner成功后pop队首；resync mismatch返回失败并保留队首，strict mismatch仍fatal；
+  raw_monitor_queue_size包含持久FIFO，所以等待重试时不能发布global stop。
 ```
 
 ## 10. `convert_raw_memory_violation()`
@@ -631,6 +669,96 @@ target 设为 NONE，因为 redirect 是全局恢复边界；
 调用 raw_rob_to_key：保存 memoryViolation 对应 ROB key，作为 redirect flush 边界；
 保存 redirect payload；
 返回转换成功，等待 batch handler 仲裁。
+```
+
+## 10.1 pending-MMIO deferred raw provenance
+
+### 10.1.1 ctrl monitor sample冻结
+
+源码位置：`io_mem_to_ooo_ctrl_agent_agent_monitor.sv`，task：`mon_data()`。
+
+抽象功能描述：monitor把MMIO valid/value、观察时环境epoch和同拍DUT sample序号冻结到同一个ctrl raw；
+它不反查uid，也不在MMIO全invalid时生成虚假的sample provenance。
+
+```systemverilog
+if (any_mmio_valid) begin
+    raw_ctrl.mmio_flush_epoch = memblock_sync_pkg::dispatch_flush_epoch;
+    raw_ctrl.mmio_sample_seq = memblock_sync_pkg::get_dut_sample_seq($time);
+end
+```
+
+文字伪代码：
+
+```text
+任一load/store MMIO valid时，保存当前dispatch flush epoch作为observation epoch；
+在同一个分支调用sample accessor，把本monitor sample的单调序号冻结为producer provenance；
+MMIO全invalid时两个字段保持empty raw默认值，adapter不得在消费拍补写。
+```
+
+### 10.1.2 `resolve_mmio_uid_by_rob_value()`
+
+源码位置：`common_data_transaction.sv`。
+
+抽象功能描述：resolver把value-only ROB fact分类为唯一当前owner、可证明旧fact或fatal。LOAD额外读取
+未完成redirect timing provenance；STORE不使用LOAD的`R/R+1`规则。函数不写status。
+
+```systemverilog
+if (load_overlap_observed) begin
+    if (active_candidate_count == 1 &&
+        overlap_old_covered_count == 1 &&
+        overlap_new_candidate_count == 0 &&
+        overlap_uncovered_count == 0 &&
+        overlap_incompatible_count == 0) begin
+        stale_reason = $sformatf(
+            "loadMmio sample=%0d overlaps redirect sample=%0d and old active ROB=%0d/%0d is covered",
+            raw_sample_seq, overlap_redirect_sample_seq,
+            overlap_old_key.flag, overlap_old_key.value);
+        return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
+    end
+    `uvm_fatal("MMIO_RESOLVE",
+               $sformatf("cannot prove LOAD MMIO stale ownership sample=%0d redirect_sample=%0d active=%0d old_covered=%0d new=%0d uncovered=%0d incompatible=%0d",
+                         raw_sample_seq, overlap_redirect_sample_seq,
+                         active_candidate_count, overlap_old_covered_count,
+                         overlap_new_candidate_count, overlap_uncovered_count,
+                         overlap_incompatible_count))
+    return MEMBLOCK_MMIO_RESOLVE_STALE_DROP;
+end
+```
+
+文字伪代码：
+
+```text
+LOAD先扫描有深度上限的全部未完成anchored record和未绑定anchor FIFO，只匹配sample R或R+1；
+再probe同一ROB value的flag 0/1两个完整active key，并按行为、dispatch、activation epoch和redirect覆盖分类；
+只有active候选恰好一个、且它是已dispatch scalar load、旧于redirect并被完整key覆盖时STALE_DROP；
+新owner、无owner、多owner、不兼容owner、多个record/anchor或无法证明覆盖均MMIO_RESOLVE fatal；
+STORE跳过overlap扫描，继续按observation epoch与active provenance执行普通CURRENT/STALE/fatal分类。
+```
+
+### 10.1.3 `apply_raw_ctrl_mmio_tags()` / `apply_raw_ctrl_deq()`
+
+源码位置：`dispatch_monitor_event_adapter.sv`。
+
+抽象功能描述：adapter在active map仍存在时先解析完整raw的全部MMIO事实，全部preflight通过后原子写tag；
+随后才把同一raw交给singleton LSQ owner应用deq与`sbIsEmpty`。
+
+```systemverilog
+function bit apply_raw_ctrl_deq(input memblock_sync_pkg::dispatch_raw_ctrl_t raw);
+    ensure_handles();
+    apply_raw_ctrl_mmio_tags(raw);
+    return monitor_commit_handler.apply_raw_ctrl_deq(raw);
+endfunction:apply_raw_ctrl_deq
+```
+
+文字伪代码：
+
+```text
+确保data和唯一LSQ handler已绑定；
+先调用MMIO adapter逐port resolve：stale只丢该port，current按uid去重进入staging；
+所有staging先调用canonical setter做dry-run，全部成功后再commit；
+返回后把完整raw交给singleton LSQ handler，后者才允许更新sbIsEmpty和释放LQ/SQ mapping；
+handler返回成功才从`deferred_raw_ctrl_q`弹出队首，resync失败保留队首重试；因此deq不会先删除MMIO
+value-only反查所需的active map，也不会把失败raw静默丢弃。
 ```
 
 ## 11. `process_monitor_event_batch()`
@@ -1775,6 +1903,20 @@ STA IQ feedback replay：
   -> handle_replay_event
   -> mark_replay_pending
 
+pending-MMIO deferred ctrl：
+  ctrl monitor看到loadMmio/storeMmio valid
+  -> 保存value、observation epoch与同拍mmio_sample_seq
+  -> collect_ctrl_redirect_events_batch保存完整raw到deferred_ctrl
+  -> semantic batch先完成redirect-first仲裁
+  -> 把完整raw追加到持久deferred_raw_ctrl_q并从队首处理
+  -> apply_raw_ctrl_mmio_tags在active map释放前逐port解析
+  -> 普通current owner进入staging并全量preflight/commit
+  -> LOAD R/R+1只有唯一旧scalar load owner被redirect覆盖才STALE_DROP
+  -> 新/无/多/不兼容owner或无法证明覆盖均MMIO_RESOLVE fatal
+  -> STORE不套用LOAD overlap规则
+  -> tag处理返回后才由singleton LSQ owner应用同raw deq与sbIsEmpty
+  -> owner成功才pop；resync mismatch保留队首，strict mismatch fatal
+
 memoryViolation redirect 同批覆盖 writeback：
   raw_int_wb + raw_ctrl.memoryViolation
   -> 同一个 events batch
@@ -1830,6 +1972,15 @@ STA IQ feedback replay：
   handle_replay_event 根据 ptw_back_replay 选择等待 PTW 或直接 mark_replay_pending；
   mark_replay_pending 清对应 target 旧 issue 项、设置 replay_target 并 bump replay_seq；
   下一轮route_all_issue_queues只把replay target重新入队，新accepted fire注册新token。
+
+pending-MMIO deferred ctrl：
+  monitor只在MMIO valid时冻结observation epoch和同拍sample provenance；
+  collector把完整raw延迟到semantic redirect-first之后，再追加到持久deferred FIFO；
+  adapter在deq释放active map前解析每个value-only ROB fact；
+  LOAD sample命中未完成redirect的R/R+1时，只有唯一旧scalar load、已dispatch且完整key被覆盖才drop；
+  新owner、无owner、多个timing record、不兼容owner或无法证明覆盖都fatal，不能写到新实例；
+  STORE不进入该overlap规则；全部current tag先preflight再commit，最后才应用同raw deq；
+  full-raw owner成功才pop FIFO，resync失败保留队首且runtime drain继续为未完成。
 
 memoryViolation redirect 同批覆盖 writeback：
   collect_monitor_event_batch 把 raw_int_wb 和 raw_ctrl.memoryViolation 放入同一个 events batch；

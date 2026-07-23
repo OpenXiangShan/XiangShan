@@ -10,6 +10,12 @@
 
 class dispatch_monitor_event_adapter extends uvm_object;
 
+    typedef struct {
+        memblock_uid_t            uid;
+        memblock_mmio_kind_e      kind;
+        int unsigned              first_port_order;
+    } memblock_mmio_tag_stage_t;
+
     common_data_transaction data;
     lsq_commit_handler      monitor_commit_handler;
 
@@ -30,7 +36,9 @@ class dispatch_monitor_event_adapter extends uvm_object;
             data = common_data_transaction::get();
         end
         if (monitor_commit_handler == null) begin
-            monitor_commit_handler = lsq_commit_handler::type_id::create("dispatch_monitor_lsq_commit_handler");
+            // LSQ commit/deq/head lifecycle 只能有一个 owner；adapter fallback 也必须
+            // 绑定 singleton，禁止创建第二个带独立 cursor/pointer 的 handler。
+            monitor_commit_handler = lsq_commit_handler::get();
         end
     endfunction:ensure_handles
 
@@ -664,21 +672,163 @@ class dispatch_monitor_event_adapter extends uvm_object;
         return 1'b1;
     endfunction:convert_raw_memory_violation
 
-    function void apply_raw_ctrl_deq(input memblock_sync_pkg::dispatch_raw_ctrl_t raw);
-        memblock_lq_key_t lq_ptr;
-        memblock_sq_key_t sq_ptr;
+    // 中文注释：把同一 ctrl raw 的 value-only MMIO facts 先全部归一化、去重和
+    // dry-run 预检，再按首 port 顺序原子提交。任何冲突都发生在 status 写入前。
+    function void apply_raw_ctrl_mmio_tags(
+        input memblock_sync_pkg::dispatch_raw_ctrl_t raw
+    );
+        memblock_mmio_tag_stage_t staged_tags[$];
+        int unsigned port_order;
 
         ensure_handles();
-        data.update_sb_is_empty(raw.sb_is_empty);
-        if (raw.lq_deq == 0 && raw.sq_deq == 0) begin
+        if (raw.load_mmio_valid == '0 && !raw.store_mmio_valid) begin
             return;
         end
-        lq_ptr.flag  = raw.lq_deq_ptr_flag;
-        lq_ptr.value = raw.lq_deq_ptr_value;
-        sq_ptr.flag  = raw.sq_deq_ptr_flag;
-        sq_ptr.value = raw.sq_deq_ptr_value;
-        monitor_commit_handler.apply_raw_ctrl_deq(raw.lq_deq, lq_ptr, raw.sq_deq, sq_ptr);
+        // 必须在第一次 active-map probe 前拒绝 future raw。
+        if (raw.mmio_flush_epoch > memblock_sync_pkg::dispatch_flush_epoch) begin
+            `uvm_fatal("MMIO_RAW",
+                       $sformatf("future ctrl raw epoch=%0d current=%0d cycle=%0d",
+                                 raw.mmio_flush_epoch,
+                                 memblock_sync_pkg::dispatch_flush_epoch,
+                                 raw.cycle))
+        end
+
+        port_order = 0;
+        foreach (raw.load_mmio_valid[port]) begin
+            if (raw.load_mmio_valid[port]) begin
+                memblock_uid_t uid;
+                string stale_reason;
+                memblock_mmio_resolve_result_e result;
+                int existing_idx;
+
+                result = data.resolve_mmio_uid_by_rob_value(
+                    raw.load_mmio_rob_value[port],
+                    MEMBLOCK_MMIO_KIND_LOAD,
+                    raw.mmio_flush_epoch,
+                    raw.mmio_sample_seq,
+                    uid,
+                    stale_reason);
+                if (result == MEMBLOCK_MMIO_RESOLVE_STALE_DROP) begin
+                    `uvm_info("MMIO_RAW",
+                              $sformatf("drop stale loadMmio port=%0d ROB value=%0d epoch=%0d sample=%0d reason=%s",
+                                        port, raw.load_mmio_rob_value[port],
+                                        raw.mmio_flush_epoch, raw.mmio_sample_seq,
+                                        stale_reason),
+                              UVM_LOW)
+                end else begin
+                    existing_idx = -1;
+                    foreach (staged_tags[idx]) begin
+                        if (staged_tags[idx].uid == uid) begin
+                            existing_idx = idx;
+                            break;
+                        end
+                    end
+                    if (existing_idx >= 0 &&
+                        staged_tags[existing_idx].kind != MEMBLOCK_MMIO_KIND_LOAD) begin
+                        `uvm_fatal("MMIO_RAW",
+                                   $sformatf("same raw assigns load/store MMIO kinds to uid=%0d",
+                                             uid))
+                    end
+                    if (existing_idx < 0) begin
+                        memblock_mmio_tag_stage_t stage;
+
+                        stage.uid = uid;
+                        stage.kind = MEMBLOCK_MMIO_KIND_LOAD;
+                        stage.first_port_order = port_order;
+                        staged_tags.push_back(stage);
+                    end
+                end
+            end
+            port_order++;
+        end
+
+        if (raw.store_mmio_valid) begin
+            memblock_uid_t uid;
+            string stale_reason;
+            memblock_mmio_resolve_result_e result;
+            int existing_idx;
+
+            result = data.resolve_mmio_uid_by_rob_value(
+                raw.store_mmio_rob_value,
+                MEMBLOCK_MMIO_KIND_STORE,
+                raw.mmio_flush_epoch,
+                raw.mmio_sample_seq,
+                uid,
+                stale_reason);
+            if (result == MEMBLOCK_MMIO_RESOLVE_STALE_DROP) begin
+                `uvm_info("MMIO_RAW",
+                          $sformatf("drop stale storeMmio ROB value=%0d epoch=%0d reason=%s",
+                                    raw.store_mmio_rob_value,
+                                    raw.mmio_flush_epoch, stale_reason),
+                          UVM_LOW)
+            end else begin
+                existing_idx = -1;
+                foreach (staged_tags[idx]) begin
+                    if (staged_tags[idx].uid == uid) begin
+                        existing_idx = idx;
+                        break;
+                    end
+                end
+                if (existing_idx >= 0 &&
+                    staged_tags[existing_idx].kind != MEMBLOCK_MMIO_KIND_STORE) begin
+                    `uvm_fatal("MMIO_RAW",
+                               $sformatf("same raw assigns load/store MMIO kinds to uid=%0d",
+                                         uid))
+                end
+                if (existing_idx < 0) begin
+                    memblock_mmio_tag_stage_t stage;
+
+                    stage.uid = uid;
+                    stage.kind = MEMBLOCK_MMIO_KIND_STORE;
+                    stage.first_port_order = port_order;
+                    staged_tags.push_back(stage);
+                end
+            end
+        end
+
+        foreach (staged_tags[idx]) begin
+            data.set_uid_mmio_tag(staged_tags[idx].uid,
+                                  staged_tags[idx].kind,
+                                  MEMBLOCK_MMIO_TAG_MONITOR,
+                                  1'b0);
+        end
+        foreach (staged_tags[idx]) begin
+            data.set_uid_mmio_tag(staged_tags[idx].uid,
+                                  staged_tags[idx].kind,
+                                  MEMBLOCK_MMIO_TAG_MONITOR,
+                                  1'b1);
+        end
+    endfunction:apply_raw_ctrl_mmio_tags
+
+    function bit apply_raw_ctrl_deq(input memblock_sync_pkg::dispatch_raw_ctrl_t raw);
+        ensure_handles();
+        // MMIO normalization 必须先于 full-raw deq；后者可能删除 active ROB/LQ/SQ map。
+        apply_raw_ctrl_mmio_tags(raw);
+        return monitor_commit_handler.apply_raw_ctrl_deq(raw);
     endfunction:apply_raw_ctrl_deq
+
+    // 将本轮已经转换过 semantic event 的 full raw 转入持久 FIFO，并按队首
+    // 成功语义消费。resync mismatch 只阻塞队首，不丢弃当前 raw 或后续 raw。
+    function void apply_deferred_ctrl_updates_batch(
+        ref memblock_sync_pkg::dispatch_raw_ctrl_t deferred_ctrl[$]);
+        memblock_sync_pkg::dispatch_raw_ctrl_t raw;
+        memblock_sync_pkg::dispatch_raw_ctrl_t applied_raw;
+
+        ensure_handles();
+        foreach (deferred_ctrl[idx]) begin
+            memblock_sync_pkg::push_deferred_raw_ctrl(deferred_ctrl[idx]);
+        end
+        deferred_ctrl.delete();
+
+        while (memblock_sync_pkg::peek_deferred_raw_ctrl(raw)) begin
+            if (!apply_raw_ctrl_deq(raw)) begin
+                break;
+            end
+            if (!memblock_sync_pkg::pop_deferred_raw_ctrl(applied_raw)) begin
+                `uvm_fatal("DISP_MON_BATCH", "deferred ctrl apply succeeded but queue pop failed")
+            end
+        end
+    endfunction:apply_deferred_ctrl_updates_batch
 
     function void drain_csr_events();
         memblock_sync_pkg::dispatch_raw_csr_t raw_csr;
@@ -698,6 +848,28 @@ class dispatch_monitor_event_adapter extends uvm_object;
             void'(data.apply_raw_sfence(raw_sfence));
         end
     endfunction:drain_sfence_events
+
+    function void drain_lsq_timing_sidebands();
+        memblock_sync_pkg::dispatch_raw_cancel_snapshot_t cancel_snapshot;
+        memblock_sync_pkg::dispatch_raw_redirect_anchor_t redirect_anchor;
+
+        ensure_handles();
+        // 中文伪代码：collector 只保存采样事实，可在同一 service tick 前后各
+        // 调用一次；reconcile 由独立入口在 exception/redirect 处理后只执行一次。
+        while (memblock_sync_pkg::pop_raw_cancel_snapshot(cancel_snapshot)) begin
+            data.add_cancel_snapshot(cancel_snapshot);
+        end
+        while (memblock_sync_pkg::pop_raw_redirect_anchor(redirect_anchor)) begin
+            data.add_redirect_anchor(redirect_anchor);
+        end
+    endfunction:drain_lsq_timing_sidebands
+
+    // 中文注释：每个 dispatch service tick 的唯一 reconcile 调用入口。
+    // 对账不调用 release/cancel，也不写 pass/fail/terminal。
+    function void service_lsq_timing_reconcile();
+        ensure_handles();
+        data.service_cancel_reconcile();
+    endfunction:service_lsq_timing_reconcile
 
     task check_raw_sample_cycle(input longint unsigned raw_cycle,
                                 ref longint unsigned sample_cycle,
