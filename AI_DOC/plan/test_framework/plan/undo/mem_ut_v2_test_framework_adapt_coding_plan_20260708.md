@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，L2TLB 专项已完成 coding、验证、独立 review 并归档到 `plan/do`；其余专项按 owner 继续执行 |
+| 状态 | `undo`，monitor output、L2TLB、LSQ MMIO/status 和 pending-MMIO 专项均已完成并归档；L2Cache responder 等剩余专项按 owner 继续执行 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv`、`build_memblock/rtl/filelist.f` |
@@ -48,7 +48,7 @@ test -e build_memblock/rtl/filelist.f
 | 适配域 | 唯一 coding owner |
 |---|---|
 | 既有 compile 参数、宽度、FuType、ROB/LQ/SQ key | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_compile_param_and_width_adapt_execution_plan_20260708.md`，该范围已归档完成，只作为公共基线 |
-| SQ deq/cancel count width 与 redirect/cancel latency compile delta | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`；在统一compile header新增宏和派生检查，是这些未实现参数的唯一coding owner，不回写到已归档`do` plan |
+| SQ deq/cancel count width 与 redirect/cancel latency compile delta | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`；已在统一compile header新增宏和派生检查，是这些参数的唯一coding owner，不回写到既有compile plan |
 | 自动主表 VADDR 窗口 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_main_table_vaddr_generation_adapt_execution_plan_20260713.md`，源码审计、地址复用跨度修复、远端验证和两轮独立 review 已完成 |
 | DCache 轻量 L2 response/hint/Probe，flush_done zero-only | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md` |
 | LSQ enqueue | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`，coding、文档同步、冻结验证和最终独立review均已完成；真实load已闭环，store admission已覆盖，store终态仍由后续SQ deq专项闭环 |
@@ -57,9 +57,9 @@ test -e build_memblock/rtl/filelist.f
 | int-WB/writeback | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_int_wb_writeback_framework_adapt_execution_plan_20260708.md` |
 | CSR/sfence payload字段与runtime语义 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_csr_control_runtime_semantic_review_execution_plan_20260708.md`；拥有CSR字段采样/消费语义；L2TLB专项只拥有不受semantic capture gate控制的latest发布 plumbing，并复用同一raw类型、统一seq和公共state，不复制字段模型 |
 | L2TLB response/permission、多 outstanding lifecycle | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md`；唯一拥有 permission 字段链、独立runtime CSR latest发布与统一seq、request-time CSR 冻结、per-fire token、pending queue、ordered/reorder 调度、三档最早 due、ready、reset/non-destructive flush event/stop 生命周期 |
-| LSQ MMIO/status、cancel output 对账 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`；该专项拥有per-epoch record、独立cancel snapshot/redirect anchor sideband源码与consumer、software/observed直接对账和global-stop gate，不能把observed count接到第二个SQ deq/free-count owner |
-| pending-MMIO load/store sideband | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md` |
-| monitor output分类、vector-WB gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md`；只规定ctrl snapshot/redirect anchor的monitor职责合同并唯一实现`writebackVldu` valid fatal；具体sideband类型、queue、producer源码、consumer和reconcile由LSQ MMIO/status专项唯一coding |
+| LSQ MMIO/status、cancel output 对账 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`；已完成per-epoch record、独立cancel snapshot/redirect anchor sideband源码与consumer、software/observed直接对账和global-stop gate，observed count不接入第二个SQ deq/free-count owner |
+| pending-MMIO load/store sideband | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md`；已完成MMIO raw、active uid tag/provenance、head query和directed owner-contract闭环 |
+| monitor output分类、vector-WB gate | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md`；已完成ctrl snapshot/redirect anchor的monitor职责分类和`writebackVldu` valid fatal；具体sideband类型、queue、producer源码、consumer和reconcile由已归档LSQ MMIO/status专项唯一coding |
 
 本文对已有 owner 的问题只给出总控级摘要。coding 时以对应专项 owner 的文件清单和函数合同为准，
 不得从本文自行扩展修改范围。owner 表明确标为“当前没有子 plan coding owner”的内容只登记缺口，
@@ -77,6 +77,9 @@ test -e build_memblock/rtl/filelist.f
 | IQ feedback/replay | 已完成并归档 | STA monitor只生成真实SQ-only raw；adapter用active SQ map/current status补UID、ROB、issue epoch和replay sequence；同拍IQ先于int-WB进入同一redirect-first batch；ctrl deq延后应用；严格模式要求STA real-WB前已有IQ hit；VSTU/STD IQ保持fail-fast边界。 | 全量VCS/Verdi编译`0 error(s), 0 warning(s)`；真实store路径已经过STD WB、STA IQ/WB和ROB commit，后续SQ deq mismatch归下游owner；software replay受既有int-WB inactive STD X/Z和disabled-monitor connect问题阻塞。review位于`review_doc/undo/mem_ut_v2_iq_feedback_replay_framework_adapt_implementation_review_20260722.md`；plan已移至`plan/do`。 |
 | CSR/sfence runtime 语义 | 已完成并归档 | 完成 misalign/priv_debug 的 `1/1/0` snapshot-only 链路、CSR re-arm epoch、sfence `flushPipe` 透明驱动与四态 valid/XZ 边界；不改变 TLB key、standalone flush、pass/fail 或 terminal 主流程。 | V2 远端 compile/elaboration/link 和 `tc_sanity` smoke 通过，`TEST CASE PASSED`、`UVM_ERROR=0`、`UVM_FATAL=0`；最终独立 reviewer `FINAL PASS`。plan 已归档到 `plan/do`；implementation review 保留在 `review_doc/undo/mem_ut_v2_csr_control_runtime_semantic_review_implementation_review_20260722.md`。 |
 | L2TLB response/permission 与多 outstanding lifecycle | 已完成并归档 | 保持 DTLB -> L2TLB request、L2TLB -> DTLB response 语义；补齐 V2 S1/S2 G/U 字段链，按每次真实 request fire 建 token，使用 bounded pending queue + driving slot，支持默认顺序/可配乱序回复、三档 due latency、CSR latest、flush/reset/stop 生命周期和唯一 owner。driver 最终采用 owner=0 idle、owner=1 阻塞取当拍必有 item 的握手，并补齐 `do_kill/get_owned_item_or_abort/phase_ended` 强制停序清理；独立 S1/S2 权限模型仍留在 TODO。 | r7 staged-only compile、disabled和tc_sanity active smoke通过；r8强制停序补强后的compile与active basic smoke通过，且文档未把它误写为callback动态命中。独立 reviewer核对staged代码、UVM 1.2调用链、r7/r8日志和共享文件提交边界后给出`FINAL PASS`。implementation review位于`review_doc/undo/mem_ut_v2_l2tlb_response_permission_adapt_implementation_review_20260722.md`，plan已移动到`plan/do`。 |
+| Monitor output 分类与 vector-WB gate | 已完成并归档 | 保持现有output observation与analysis-port deferred边界；`writebackVldu` valid为1或X/Z时fail-fast，不生产第二套scalar raw/event；cancel snapshot和redirect anchor只定义monitor职责，状态owner仍由LSQ专项实现。 | 独立review `FINAL PASS`；commit `cf63e12ebd`；plan位于`plan/do/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md`，review位于`review_doc/undo/mem_ut_v2_monitor_output_framework_adapt_implementation_review_20260722.md`。 |
+| LSQ MMIO/status 与 cancel 对账 | 已完成并归档 | 建立modeled ROB head及表尾watermark，分离normal commit、fault convergence和LQ/SQ physical deq；参数化`sqDeq` count-only链路；active idle保持level sideband；redirect epoch按software count与DUT snapshot直接对账且只由software路径回退free count；deferred raw FIFO、singleton owner和runtime drain闭环；`pendingst/scommit`按V2 scalar ROB store分类接受STORE/CBO。 | 最终VCS/KDB compile通过；default real smoke、real cancel reconcile和pending-MMIO directed均`TEST_PASS`且未捕获error/fatal为0；CBO分类日志通过；最后一轮独立review `FINAL PASS`。plan位于`plan/do/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`，review位于`review_doc/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_implementation_review_20260722.md`。 |
+| pending-MMIO load/store sideband | 已完成并归档 | ctrl monitor采集load/store MMIO raw与ROB value；resolver结合完整active key、动态epoch和LOAD sample provenance归一化uid；status保存canonical tag/source，LSQ owner只查询tag生成head `pendingMMIOld`；stale旧owner丢弃，无法证明归属或新owner重叠fail-fast；directed vseq覆盖tag/provenance、fault head、owner reset和global-stop raw drain。 | `v2_lsq_mmio_cbo_final_20260723`下directed为`TEST_PASS`，`UVM_ERROR=0`、未捕获`UVM_FATAL=0`、精确caught fatal=1；相邻real smoke/cancel也通过；最后一轮独立review `FINAL PASS`。plan位于`plan/do/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md`，review位于`review_doc/undo/mem_ut_v2_pending_mmio_load_sideband_implementation_review_20260722.md`。 |
 
 后续每完成一个子计划，必须在本表追加其实际功能、归档路径和验证结果，并保持每个子计划一个独立
 本地 git commit。

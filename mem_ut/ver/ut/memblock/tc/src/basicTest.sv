@@ -7,6 +7,8 @@ class basicTest extends tcnt_test_base ;
       plus    plus_args ;
       memblock_env env;
       memblock_env_cfg real_smoke_cfg;
+      string main_vseq_name;
+      uvm_object_wrapper main_vseq_wrapper;
       `uvm_component_utils(basicTest)
       virtual tc_if rst_vif;
 
@@ -17,7 +19,6 @@ class basicTest extends tcnt_test_base ;
 
       virtual function void build_phase(uvm_phase phase);
 
-            string usr_test_vseq="virtual_base_sequence";
             uvm_cmdline_processor uvm_cmdline_proc;
             super.build_phase(phase);
                     seq_csr_common::reload_from_plus();
@@ -30,20 +31,66 @@ class basicTest extends tcnt_test_base ;
             uvm_cmdline_proc = uvm_cmdline_processor::get_inst();
             `uvm_info(get_type_name(),"enter test_build_phase",UVM_LOW)
 
-            if (!$value$plusargs("VSEQ_MAIN=%s", usr_test_vseq)) begin
-                void'(uvm_cmdline_proc.get_arg_value("+VSEQ_MAIN=", usr_test_vseq));
+            main_vseq_name = "virtual_base_sequence";
+            if (!$value$plusargs("VSEQ_MAIN=%s", main_vseq_name)) begin
+                void'(uvm_cmdline_proc.get_arg_value("+VSEQ_MAIN=", main_vseq_name));
             end
-            `uvm_info(get_type_name(),$sformatf("usr_test_vseq_name:%0s",usr_test_vseq),UVM_LOW)
-            if (usr_test_vseq != "virtual_base_sequence") begin
-`ifdef TCNT_USE_UVM12
-                uvm_factory::get().set_type_override_by_name("virtual_base_sequence",usr_test_vseq);
-`else
-                factory.set_type_override_by_name("virtual_base_sequence",usr_test_vseq);
-`endif
+            `uvm_info(get_type_name(),$sformatf("usr_test_vseq_name:%0s",main_vseq_name),UVM_LOW)
+            main_vseq_wrapper = uvm_factory::get().find_wrapper_by_name(main_vseq_name);
+            if (main_vseq_wrapper == null) begin
+                `uvm_fatal("BASIC_VSEQ_FACTORY",
+                           $sformatf("+VSEQ_MAIN type is not registered: %0s",
+                                     main_vseq_name))
             end
-            uvm_config_db#(uvm_object_wrapper)::set(this, "env.vsqr.main_phase", "default_sequence",virtual_base_sequence::type_id::get());
             if (!uvm_config_db#(virtual tc_if)::get(this, "", "vif", rst_vif)) `uvm_error(get_type_name(), "Failed to get tc_if interface!");
       endfunction:build_phase
+
+      virtual task main_phase(uvm_phase phase);
+          uvm_object created_obj;
+          virtual_base_sequence main_vseq;
+
+          super.main_phase(phase);
+          if (env == null || env.vsqr == null) begin
+              `uvm_fatal("BASIC_VSEQ_SQR",
+                         "memblock_env.vsqr is null; cannot start +VSEQ_MAIN")
+          end
+          if (main_vseq_wrapper == null) begin
+              `uvm_fatal("BASIC_VSEQ_FACTORY",
+                         "main virtual sequence wrapper was not resolved in build_phase")
+          end
+
+          created_obj = uvm_factory::get().create_object_by_type(
+              main_vseq_wrapper, env.vsqr.get_full_name(), main_vseq_name);
+          if (created_obj == null) begin
+              `uvm_fatal("BASIC_VSEQ_CREATE",
+                         $sformatf("factory failed to create +VSEQ_MAIN type: %0s",
+                                   main_vseq_name))
+          end
+          if (!$cast(main_vseq, created_obj)) begin
+              `uvm_fatal("BASIC_VSEQ_TYPE",
+                         $sformatf("+VSEQ_MAIN type must extend virtual_base_sequence: %0s",
+                                   created_obj.get_type_name()))
+          end
+
+          // 中文注释：testcase objection 覆盖整个 start() 调用；派生 vseq 不依赖
+          // pre_body()/post_body() objection 来保持 main_phase 存活。
+          phase.raise_objection(this, "starting main virtual sequence");
+          main_vseq.set_sequencer(env.vsqr);
+          main_vseq.reseed();
+          main_vseq.set_starting_phase(phase);
+          if (!main_vseq.do_not_randomize && !main_vseq.randomize()) begin
+              `uvm_fatal("BASIC_VSEQ_RANDOMIZE",
+                         $sformatf("failed to randomize +VSEQ_MAIN type: %0s",
+                                   main_vseq.get_type_name()))
+          end
+          main_vseq.uvm_report_info(
+              "VSEQ_BODY",
+              $sformatf("starting body on %0s", env.vsqr.get_full_name()),
+              UVM_LOW);
+          main_vseq.start(env.vsqr);
+          main_vseq.uvm_report_info("VSEQ_BODY", "body completed", UVM_LOW);
+          phase.drop_objection(this, "main virtual sequence completed");
+      endtask:main_phase
 
     virtual function void configure_real_env_cfg(input memblock_env_cfg cfg);
         if (cfg == null) begin
