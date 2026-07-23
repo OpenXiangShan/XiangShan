@@ -344,6 +344,21 @@ V2 顶层没有对应的 `canAccept` 或 enqueue response output。`lqCanAccept/
 - `io_fromTopToBackend_*`
 - `io_inner_*` / `io_outer_*` 中只做顶层透传的 bypass/control 信号
 
+### V2 DCache L2 sideband 当前 owner
+
+上述四个字段不是普通 top-level generic random 的自由输入：
+
+- `io_l2_hint_valid/sourceId/isKeyword` 的唯一非零 producer 是 DCache responder 在真实接受
+  `AcquireBlock -> GrantData` 后按 L2 权重排期的一拍 Hint；generic xaction、generic idle 和
+  driver idle 保持 0。driver 在首个 VIF 赋值前使用四态检查：valid 未知、valid=0 时 payload
+  非零/未知，或 valid=1 时 payload 未知均 fatal。
+- `io_l2_flush_done` 本轮没有功能模型，从 time zero 到测试结束保持已知 0；任意非零或未知 item
+  在 driver 发送边界拒绝。
+- 四个 sideband xaction 字段使用四态 `logic`，因此 X/Z 不会在 driver 检查前被二态折叠；generic
+  idle 还把 E.ready 固定为 0，只有 GrantAck owner item 可以打开 E.ready。
+- 该 sideband 只影响 DCache responder 的协议细节，不写 dispatch 主表/status，也不直接改变
+  pass/fail/terminal owner。完整时序见 `AI_DOC/mem_ut_flow_doc/dcache_l2_response_hint_probe_model_flow.md`。
+
 ## L2TLB 特例：ITLB/DTLB 与 L2TLB 交互
 
 这部分虽然语义来自 L2TLB，但在 memblock 环境中按 MemBlock 顶层 Verilog 端口处理。环境不实例化 L2TLB module 时，需要用该接口模型化 L2TLB 交互。

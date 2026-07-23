@@ -1,415 +1,235 @@
 # DCache/SBuffer Memory Responder Flow
 
-本文档说明 mem_ut 中 `mem_base_sequence.sv` 提供的 DCache 和 SBuffer memory responder flow。它们是 DUT 下游 TileLink-like memory responder：采样 A channel request，访问 sequence 内部 `main_mem`，再驱动 D channel response。
+本文是共享 memory responder 的总览。DCache V2 coherent 细节以
+AI_DOC/mem_ut_flow_doc/dcache_l2_response_hint_probe_model_flow.md 为准；本文同时保留
+SBuffer 的单拍 responder 说明，避免共享源码修改后总览仍描述旧 DCache for-loop。
 
-## 1. 函数调用 Flow 图
+## 1. Flow 定位与职责边界
+
+### 1.1 术语与抽象功能说明
+
+| 英文术语 | 当前含义 | 代码对象/状态落点 | 示例 |
+|---|---|---|---|
+| responder | 响应 DUT memory channel 的长期 sequence | DCache/SBuffer base sequence | 不写 dispatch status |
+| service cycle | DCache response 模型的逻辑拍计数 | service_cycle | 用于 delay 和 Hint due |
+| armed snapshot | valid 已采样、等待下一边界确认 fire 的请求快照 | armed_a_req_xact、armed_c_req_xact | A.valid 先保存，下一拍才接受 |
+| pending response | 已接受但尚未完成的 response | pending_d_*、C assembly | D.ready=0 时保持 payload |
+| owner | 当前负责某条协议生命周期的唯一状态 | GrantAck owner、Probe owner | 无 owner 不消费 E |
+| safe idle | 所有 channel valid/ready 和 sideband 为 0 的 item | build_*_idle_xaction | reset/terminal 边界发送 |
+| in-flight | 尚未完成的 handshake、pending response 或 assembly | DCache pending/armed/Probe/GrantAck | stop 后必须先排空 |
+
+抽象功能说明：两个 responder 都复用 mem_access_base_sequence 的稀疏主存，但协议模型不同。DCache
+是 V2 轻量 coherent responder；SBuffer 仍是单拍 A-to-D responder。二者都不拥有主表、LQ/SQ、
+pass/fail、ROB commit 或 terminal 状态。
+
+## 2. 函数调用 Flow 图
 
 ```mermaid
 flowchart TD
-    A[dcache_mem__access_base_sequence::body] --> B[build_dcache_idle_xaction]
-    B --> C[send_dcache_xaction idle]
-    C --> D{rst && reset_backend_done && A_valid}
-    D -->|no| B
-    D -->|yes| E[capture_dcache_a_xaction]
-    E --> F[send A ready pulse]
-    F --> G[dcache_d_beats]
-    G --> H[per beat copy req and adjust beat_addr]
-    H --> I[dcache_mem_access_xaction]
-    I --> J[dcache_mem_access_task]
-    J --> K[main_mem_access_task]
-    K --> L[build D response]
-    L --> M{D ready}
-    M -->|no| L
-    M -->|yes| B
+    A[dcache_mem__access_base_sequence::body] --> B[wait drv_cb sample]
+    B --> C[compute last_cycle fire]
+    C --> D[build_dcache_idle_xaction]
+    D --> E{owner priority}
+    E -->|pending D| F[build_pending_d_xaction]
+    E -->|GrantAck| G[e_ready only]
+    E -->|Probe| H[drive Probe B]
+    E -->|C| I[start/consume C assembly]
+    E -->|A| J[arm A snapshot]
+    E -->|idle| K[try_start_probe]
+    F --> L[send_dcache_xaction]
+    G --> L
+    H --> L
+    I --> L
+    J --> L
+    K --> L
+    L --> B
 
-    N[sbuffer_mem_access_base_sequence::body] --> O[build_sbuffer_idle_xaction]
-    O --> P[send_sbuffer_xaction idle]
-    P --> Q{rst && reset_backend_done && A_valid}
-    Q -->|no| O
-    Q -->|yes| R[capture_sbuffer_a_xaction]
-    R --> S[send A ready pulse]
-    S --> T[sbuffer_mem_access_xaction]
-    T --> U[sbuffer_mem_access_task]
-    U --> K
-    T --> V[build D response]
-    V --> W{D ready}
-    W -->|no| V
-    W -->|yes| O
+    M[sbuffer_mem_access_base_sequence::body] --> N[build_sbuffer_idle_xaction]
+    N --> O[采样 A valid]
+    O -->|valid| P[capture_sbuffer_a_xaction]
+    P --> Q[sbuffer_mem_access_xaction]
+    Q --> R[wait D ready]
+    R --> N
+    O -->|无 valid/stop drain| N
 ```
 
-### 1.1 函数调用 Flow 图整体文字伪代码
+### 2.1 函数调用 Flow 图整体文字伪代码
 
 ```text
-DCache responder 主流程：
-  body 每拍先发送 idle xaction。
-  如果 reset 完成且 DCache A channel valid：
-    capture_dcache_a_xaction 采样请求。
-    发送一拍 A ready 接收请求。
-    dcache_d_beats 根据 opcode/size 计算 D response beat 数。
-    每个 beat 调整地址后调用 dcache_mem_access_xaction。
-    dcache_mem_access_xaction 访问 main_mem 并构造 D response。
-    body 循环发送 D response，直到 DUT D ready。
+DCache：
+  body 在 drv_cb 边界采样上一 item 的对端 ready/valid；
+  用 last_cycle_xact 确认 A/B/C/D/E fire；
+  先推进已确认的旧 owner，再从 idle item 开始按 pending D、GrantAck、Probe、C、A 优先级构造下一 item；
+  A.fire 才调用 accept_dcache_a_request 建立 Grant/GrantData/CBOAck pending；
+  D.fire 才推进 beat或建立 GrantAck owner；
+  E.fire 才插入 cached line table；
+  C.fire 才进入 Probe/Release assembly；
+  C.fire 完成后的同拍禁止 A arm 和新 Probe，C assembly 下一拍继续优先；
+  非 reset 边界先检查 A.valid/B.ready/C.valid/D.ready/E.valid 四态 raw 值；
+  global stop 只在所有 DCache in-flight 清空后发送 safe idle并退出。
 
-SBuffer responder 主流程：
-  body 每拍先发送 idle xaction。
-  如果 reset 完成且 SBuffer A channel valid：
-    capture_sbuffer_a_xaction 采样请求。
-    发送一拍 A ready 接收请求。
-    sbuffer_mem_access_xaction 访问 main_mem 并构造单拍 D response。
-    body 循环发送 D response，直到 DUT D ready。
+SBuffer：
+  body 发送 idle；
+  reset完成且看到 A.valid时采样 request并发送 A.ready；
+  调用 sbuffer_mem_access_xaction访问公共主存并生成单拍 D；
+  持续发送到 DUT D.ready；
+  global stop且没有尚未接受的 A时发送 safe idle并退出。
 
-共享 memory 访问：
-  dcache/sbuffer task 都调用 main_mem_access_task。
-  main_mem_access_task 对 store 按 byte mask 更新 main_mem，对 load 返回 main_mem 数据。
+共享主存：
+  DCache 64B coherent beat和SBuffer 8B beat都经过 main_mem_access_task；
+  range、corrupt、denied由公共memory后端返回。
 ```
 
-## 2. `dcache_mem__access_base_sequence::body()`
+## 3. DCache responder 总览
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv`
+源码位置：mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv:1311-1590。
 
-真实逻辑摘要：
+抽象功能描述：DCache body 是单一逐拍 service loop，负责 fire 采样、response delay、Hint、
+GrantAck、Probe、C assembly 和 global stop。它不依赖 DCache monitor analysis port。
+
+当前 DCache 合同：
+
+| 输入/事件 | 当前处理 |
+|---|---|
+| AcquireBlock | 两拍 GrantData，固定 sink 0，可按权重发一次 Hint |
+| AcquirePerm | 单拍 Grant(toT)，固定 sink 0，等待 E |
+| CBOClean/Flush/Inval | 单拍 CBOAck；flush/inval 完成后删 map |
+| Release | 单拍 ReleaseAck |
+| ReleaseData | 两拍接收、可写主存、再发 ReleaseAck |
+| ProbeAck/ProbeAckData | 匹配 Probe owner，完成后删 map |
+| 不支持的 A/C opcode | 在建立 response 前 fatal，不 fallback AccessAckData |
+| io_l2_flush_done | 始终为已知 0；driver 首次赋值前做四态检查 |
+| global stop | 禁止新 Probe；等待 pending/owner/armed/valid 全部收敛后发布 done 并自然退出 |
+
+### 3.1 body() 的 fire 边界
+
+抽象功能描述：每轮先采样上一 item 的对端值，再决定本轮 item；它不把看到 valid 等同于
+已经握手。
 
 ```systemverilog
-forever begin
-    build_dcache_idle_xaction(idle_xact);
-    send_dcache_xaction(idle_xact);
-
-    if (dcache_vif.rst_n == 1'b1 &&
-        memblock_sync_pkg::reset_backend_done == 1'b1 &&
-        dcache_vif.auto_inner_dcache_client_out_a_valid === 1'b1) begin
-        capture_dcache_a_xaction(req_xact);
-        build_dcache_idle_xaction(idle_xact);
-        idle_xact.auto_inner_dcache_client_out_a_ready = 1'b1;
-        send_dcache_xaction(idle_xact);
-        beats = dcache_d_beats(req_xact.auto_inner_dcache_client_out_a_bits_opcode,
-                               req_xact.auto_inner_dcache_client_out_a_bits_size);
-        for (int unsigned beat_idx = 0; beat_idx < beats; beat_idx++) begin
-            beat_req_xact.copy(req_xact);
-            beat_addr = dcache_beat_addr(req_xact.auto_inner_dcache_client_out_a_bits_address) +
-                        (mem_addr_t'(beat_idx) * 48'd32);
-            beat_req_xact.auto_inner_dcache_client_out_a_bits_address = beat_addr;
-            dcache_mem_access_xaction(beat_req_xact, rsp_xact);
-            rsp_xact.auto_inner_dcache_client_out_a_ready = 1'b0;
-            do begin
-                send_dcache_xaction(rsp_xact);
-            end while (dcache_vif.auto_inner_dcache_client_out_d_ready !== 1'b1);
-        end
-    end
-end
+@(dcache_vif.drv_cb);
+a_fire = (last_cycle_xact.auto_inner_dcache_client_out_a_ready == 1'b1) && sampled_a_valid;
+d_fire = (last_cycle_xact.auto_inner_dcache_client_out_d_valid == 1'b1) && sampled_d_ready;
+e_fire = (last_cycle_xact.auto_inner_dcache_client_out_e_ready == 1'b1) && sampled_e_valid;
 ```
 
-功能解释：
+中文伪代码：等待采样边界；将上一 item 的 ready/valid与当前 DUT 对端值相与；只在 fire 后调用对应状态更新函数。
 
-DCache responder 常驻运行，先保持 idle，再在 A valid 时接收请求并按 D ready backpressure 驱动 response。
+C.fire 完成后的本拍显式跳过 A/Probe 仲裁；A.fire 已完成时阻止同拍 A arm，避免旧 C owner 被
+新 pending D 抢占或同一个输入被重复分类。
 
-输入/输出：
+### 3.2 DCache driver 合同
 
-- 输入：DCache A channel request、D channel ready。
-- 输出：A ready pulse、D channel response。
+源码位置：mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/dcache_agent_agent_driver.sv:51-255。
 
-文字伪代码：
-
-```text
-DCache responder 循环：
-  构造并发送 idle xaction。
-  如果 reset 完成且 A valid：
-    采样 A request。
-    发送一拍 A ready，表示接收请求。
-    根据 opcode/size 计算 D response beat 数。
-    对每个 beat：
-      复制原始 request。
-      按 beat_idx 调整地址到对应 32B beat。
-      调用 dcache_mem_access_xaction 构造 response。
-      清 response 的 A ready。
-      持续发送 response，直到 DUT D ready。
-```
-
-内部子调用：
-
-- `build_dcache_idle_xaction()`：清空 DCache responder 输出。
-- `capture_dcache_a_xaction()`：从 vif 采样 A channel payload。
-- `dcache_d_beats()`：确定 response beat 数。
-- `dcache_mem_access_xaction()`：访问 main memory 并生成 D response。
-
-## 3. `dcache_mem_access_xaction()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv`
-
-真实逻辑摘要：
+抽象功能描述：driver 一对一搬运 sequence item，不决定协议状态。
 
 ```systemverilog
-is_store = is_store_opcode(req_xact.auto_inner_dcache_client_out_a_bits_opcode);
-dcache_mem_access_task(
-    req_xact.auto_inner_dcache_client_out_a_bits_address,
-    is_store,
-    dcache_beat_mask(req_xact.auto_inner_dcache_client_out_a_bits_opcode,
-                     req_xact.auto_inner_dcache_client_out_a_bits_mask),
-    req_xact.auto_inner_dcache_client_out_a_bits_data,
-    corrupt,
-    denied,
-    load_data
-);
-
-rsp_xact.auto_inner_dcache_client_out_d_valid        = 1'b1;
-rsp_xact.auto_inner_dcache_client_out_d_bits_opcode  =
-    dcache_d_opcode(req_xact.auto_inner_dcache_client_out_a_bits_opcode);
-rsp_xact.auto_inner_dcache_client_out_d_bits_size    = req_xact.auto_inner_dcache_client_out_a_bits_size;
-rsp_xact.auto_inner_dcache_client_out_d_bits_source  = req_xact.auto_inner_dcache_client_out_a_bits_source;
-rsp_xact.auto_inner_dcache_client_out_d_bits_denied  = denied;
-rsp_xact.auto_inner_dcache_client_out_d_bits_data    = is_store ? '0 : load_data;
-rsp_xact.auto_inner_dcache_client_out_d_bits_corrupt = corrupt;
+req = null;
+seq_item_port.get_next_item(req);
+send_pkt(req);
+seq_item_port.item_done();
 ```
 
-功能解释：
+中文伪代码：清空旧句柄；阻塞获取新 item；立即写 clocking output；完成 item_done；不 hold 或重复上一 item。
 
-该 task 把一笔 DCache A request 转成 D response。store 只更新 memory 并返回 ack；load 从 memory 读数据并返回 AccessAckData/GrantData。
+send_pkt 要求 pre/post gap 为 0，使用四态比较检查 Hint valid/payload 和 flush_done；null item、
+未知 valid/payload 或非已知 0 的 flush 都在首次 VIF 赋值前 fatal。四个 sideband xaction 字段为
+四态 `logic`，检查不会在 driver 前被二态折叠；generic idle 的四个 sideband 和 E.ready 始终写 0。
+DCache 详细状态流见专用 flow 文档。
 
-输入/输出：
+### 3.3 GrantAck、Probe 和 C assembly
 
-- 输入：DCache A request xaction。
-- 输出：DCache D response xaction。
+抽象功能描述：DCache 的 D/E/B/C 生命周期由 sequence-local owner 管理，不把完成的 map 当作
+in-flight。
 
-文字伪代码：
+中文伪代码：
 
-```text
-构造 DCache response：
-  根据 opcode 判断是否 store。
-  调用 dcache_mem_access_task：
-    对 store 写 main_mem。
-    对 load 读 main_mem。
-    返回 corrupt/denied/load_data。
-  设置 D channel valid。
-  根据 A opcode 选择 D opcode。
-  复制 size/source。
-  写入 denied/corrupt。
-  如果是 store，D data 为 0；如果是 load，D data 为 load_data。
-```
+1. Grant/GrantData 最后一拍 D.fire：保存 line/alias/sink，置 GrantAck owner，暂不插入 map。
+2. 只有 owner 分支才把 e_ready 置 1；无 owner 的 E.valid fatal；匹配 E.fire 后以四态完全匹配校验
+   sink 并插入 map。
+3. 未 stop、完全空闲且 map 非空时按权重启动 Probe；helper 自身重复检查全部 owner hazard；B.fire
+   后等待 ProbeAck/Data。
+4. ProbeAckData/ReleaseData 收两拍，header 必须稳定；无 corrupt 才写主存。
+5. Release 完成后排期 ReleaseAck；Probe/失效操作完成后删除 map。
 
-内部子调用：
+## 4. SBuffer responder 总览
 
-- `is_store_opcode()`：判断 PutFullData/PutPartialData。
-- `dcache_beat_mask()`：Acquire 使用全 mask，其它请求使用原 mask。
-- `dcache_d_opcode()`：把 A opcode 映射成 D opcode。
-- `dcache_mem_access_task()`：访问共享 memory。
+源码位置：mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv:1592-1768。
 
-## 4. `sbuffer_mem_access_base_sequence::body()`
+抽象功能描述：SBuffer sequence 复用公共主存，按 8B beat 处理单拍 A-to-D request；它没有 DCache
+的 GrantAck、Probe、Hint 或 multi-beat C owner。
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv`
-
-真实逻辑摘要：
+### 4.1 sbuffer_mem_access_base_sequence::body()
 
 ```systemverilog
-forever begin
+if (data.is_global_stop_requested() &&
+    sbuffer_vif.auto_inner_buffers_out_a_valid === 1'b0) begin
     build_sbuffer_idle_xaction(idle_xact);
     send_sbuffer_xaction(idle_xact);
-
-    if (sbuffer_vif.rst_n == 1'b1 &&
-        memblock_sync_pkg::reset_backend_done == 1'b1 &&
-        sbuffer_vif.auto_inner_buffers_out_a_valid === 1'b1) begin
-        capture_sbuffer_a_xaction(req_xact);
-        build_sbuffer_idle_xaction(idle_xact);
-        idle_xact.auto_inner_buffers_out_a_ready = 1'b1;
-        send_sbuffer_xaction(idle_xact);
-        sbuffer_mem_access_xaction(req_xact, rsp_xact);
-        rsp_xact.auto_inner_buffers_out_a_ready = 1'b0;
-
-        do begin
-            send_sbuffer_xaction(rsp_xact);
-        end while (sbuffer_vif.auto_inner_buffers_out_d_ready !== 1'b1);
-    end
+    break;
 end
 ```
 
-功能解释：
+中文伪代码：stop 已请求且没有尚未接受的 SBuffer A 时发送 safe idle并退出；否则发送 idle，看到
+A.valid后采样、发送 A.ready并等待 D.ready。退出不依赖 `dispatch_real_smoke_active` 保持为 1。
 
-SBuffer responder 和 DCache responder 类似，但当前实现是单 beat response。它接收 SBuffer A request，访问 shared memory，然后等待 D ready。
+### 4.2 sbuffer_mem_access_xaction()
 
-输入/输出：
+抽象功能描述：将 SBuffer A request 映射到公共 memory，并生成单拍 D response。
 
-- 输入：SBuffer A channel request、D channel ready。
-- 输出：A ready pulse、D channel response。
+中文伪代码：判断 opcode 是否 store；将地址按 8B 对齐、mask/data送入 sbuffer_mem_access_task；
+store 返回 ack，load 返回 64bit data；复制 source/size并保留 denied/corrupt。
 
-文字伪代码：
+## 5. 公共 memory 后端
 
-```text
-SBuffer responder 循环：
-  发送 idle xaction。
-  如果 reset 完成且 A valid：
-    采样 A request。
-    发送一拍 A ready。
-    调用 sbuffer_mem_access_xaction 构造 response。
-    清 response 的 A ready。
-    持续发送 D response，直到 DUT D ready。
-```
+源码位置：mem_base_sequence.sv:11-255。
 
-## 5. `sbuffer_mem_access_xaction()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv`
-
-真实逻辑摘要：
+抽象功能描述：mem_access_base_sequence 保存 sparse main_mem，并提供范围检查、lazy line 和 byte
+mask 访问。main_mem 的内部片段是 1024-bit；DCache/SBuffer 只使用其中的 64B/8B 子范围。
 
 ```systemverilog
-is_store = is_store_opcode(req_xact.auto_inner_buffers_out_a_bits_opcode);
-sbuffer_mem_access_task(
-    req_xact.auto_inner_buffers_out_a_bits_address,
-    is_store,
-    req_xact.auto_inner_buffers_out_a_bits_mask,
-    req_xact.auto_inner_buffers_out_a_bits_data,
-    corrupt,
-    denied,
-    load_data
-);
-
-rsp_xact.auto_inner_buffers_out_a_ready        = 1'b1;
-rsp_xact.auto_inner_buffers_out_d_valid        = 1'b1;
-rsp_xact.auto_inner_buffers_out_d_bits_opcode  = is_store ? 4'd0 : 4'd1;
-rsp_xact.auto_inner_buffers_out_d_bits_size    = req_xact.auto_inner_buffers_out_a_bits_size;
-rsp_xact.auto_inner_buffers_out_d_bits_source  = req_xact.auto_inner_buffers_out_a_bits_source;
-rsp_xact.auto_inner_buffers_out_d_bits_denied  = denied;
-rsp_xact.auto_inner_buffers_out_d_bits_data    = is_store ? '0 : load_data;
-rsp_xact.auto_inner_buffers_out_d_bits_corrupt = corrupt;
-```
-
-功能解释：
-
-该 task 把 SBuffer A request 转成 D response。store 返回 ack，load 返回数据。
-
-输入/输出：
-
-- 输入：SBuffer A request xaction。
-- 输出：SBuffer D response xaction。
-
-文字伪代码：
-
-```text
-构造 SBuffer response：
-  根据 opcode 判断是否 store。
-  调用 sbuffer_mem_access_task 访问 shared memory。
-  设置 A ready 和 D valid。
-  store response opcode 为 0，load response opcode 为 1。
-  复制 size/source。
-  写入 denied/corrupt。
-  store 不返回 data，load 返回 load_data。
-```
-
-## 6. `main_mem_access_task()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-line_addr = addr[47:6];
-line_offset = addr[5:0];
-ensure_main_line(line_addr);
-line_data = main_mem[line_addr];
-
-if (is_store) begin
-    for (int unsigned byte_idx = 0; byte_idx < 64; byte_idx++) begin
-        if (byte_mask[byte_idx]) begin
-            line_data[byte_idx*8 +: 8] = store_data[byte_idx*8 +: 8];
+if (!is_main_mem_access_in_range(addr, byte_mask)) begin
+    denied = 1'b1;
+end
+if (!(corrupt || denied)) begin
+    foreach (byte_mask[i]) begin
+        if (byte_mask[i]) begin
+            ensure_main_line(line_addr);
+            if (is_store)
+                main_mem[line_addr][(byte_offset * 8) +: 8] = store_data[(i * 8) +: 8];
+            else
+                load_data[(i * 8) +: 8] = main_mem[line_addr][(byte_offset * 8) +: 8];
         end
     end
-    main_mem[line_addr] = line_data;
 end
-load_data = line_data;
-paddr_to_error(addr, corrupt, denied);
 ```
 
-功能解释：
+中文伪代码：先逐字节检查地址范围；越界置 denied；无错误时懒创建 line；store 按 mask更新、load复制 data；错误时 load data清零。
 
-这是 DCache/SBuffer responder 共享的 memory 后端。它按 64B cache line 存储，用 byte mask 支持部分写。
+DCache body 启动时用公共 PADDR base/range 初始化自身 range，因此 DCache 完整 64B line 检查
+实际生效；这不改变主表虚拟地址生成。SBuffer 继续使用公共后端的既有 range 状态。
 
-输入/输出：
+## 6. 与其它 flow 的边界和同步要求
 
-- 输入：物理地址、store/load 类型、byte mask、store data。
-- 输出：load data、corrupt、denied，并可能更新 `main_mem`。
+这些 responder 不生成主表、issue、writeback、ROB commit/deq、redirect/replay 或 pass/fail。
+virtual_sequence_unified_dispatch_flow 只描述它们的启动、join和自然退出；本文件描述共享 memory
+后端和 SBuffer，DCache 专项 flow 描述完整 coherent 生命周期。
 
-文字伪代码：
+任何修改以下共享对象的子 plan 都必须同步本文件及命中文档：
 
-```text
-访问 shared main_mem：
-  根据地址计算 line_addr 和 line_offset。
-  如果 main_mem 没有该 line：
-    ensure_main_line 创建 lazy line。
-  读取 line_data。
-  如果是 store：
-    遍历 64 个 byte。
-    对 byte_mask=1 的 byte 写入 store_data。
-    把更新后的 line_data 写回 main_mem。
-  无论 load/store，都把 line_data 返回给 load_data。
-  调用 paddr_to_error 计算 corrupt/denied。
-```
+- mem_base_sequence.sv 的 body、driver 时序、memory range 或 global stop；
+- dcache_agent_agent_driver 的 get_next_item/send_pkt/idle 行为；
+- io_l2_hint/io_l2_flush_done 的 producer、约束或 fail-fast；
+- DCache/SBuffer responder 的退出条件。
 
-内部子调用：
+## 7. 与旧实现的差异总结
 
-- `ensure_main_line()`：懒创建 memory line。
-- `build_lazy_line()`：按 line address 生成默认数据。
-- `paddr_to_error()`：根据地址范围返回 corrupt/denied。
-
-## 7. 队列和状态说明
-
-- 这两个 responder 不使用 `common_data_transaction` 的 issue queue/status table。
-- `main_mem` 是 `mem_access_base_sequence` 内部 associative array，按 line address 保存 64B 数据。
-- DCache responder 会处理多 beat AcquireBlock，SBuffer responder 当前按单 beat 响应。
-- request/response 没有显式软件队列；A request 被采样后立即构造 response，并在 D ready 前重复 drive 同一个 response。
-
-## 8. 分支优先级
-
-1. reset 未完成时只发送 idle。
-2. A valid 为 0 时只发送 idle。
-3. A valid 为 1 时先发送 A ready 接收 request，再访问 memory。
-4. D response 会一直 drive 到 D ready。
-5. store 更新 memory 后返回 ack；load 不更新 memory，只返回 data。
-6. DCache AcquireBlock 根据 size 可能多 beat，SBuffer 当前没有多 beat loop。
-
-## 9. 端到端行为总结
-
-```text
-场景 A：DCache load
-  DCache A valid Get/Acquire
-  -> capture_dcache_a_xaction
-  -> A ready pulse
-  -> dcache_mem_access_xaction
-  -> main_mem_access_task load
-  -> D valid with load_data
-  -> wait D ready
-
-场景 B：DCache store
-  DCache A valid Put
-  -> capture_dcache_a_xaction
-  -> A ready pulse
-  -> dcache_mem_access_xaction
-  -> main_mem_access_task masked store
-  -> D valid ack no data
-  -> wait D ready
-
-场景 C：SBuffer request
-  SBuffer A valid
-  -> capture_sbuffer_a_xaction
-  -> A ready pulse
-  -> sbuffer_mem_access_xaction
-  -> main_mem_access_task
-  -> D valid response
-  -> wait D ready
-```
-
-### 9.1 端到端文字伪代码
-
-```text
-场景 A：
-  DCache responder 发现 A valid 后采样 request。
-  它先给 A ready，表示请求已被 testbench memory 接收。
-  对 load，dcache_mem_access_xaction 从 main_mem 读取 line data。
-  然后构造带 data 的 D response，并一直发送到 DUT D ready。
-
-场景 B：
-  DCache responder 发现 store request 后采样 request。
-  main_mem_access_task 按 byte mask 更新对应 cache line。
-  D response 只返回 ack，不返回 store data。
-  如果 DUT 暂时不 ready，sequence 持续 drive 同一 response。
-
-场景 C：
-  SBuffer responder 的处理模型类似 DCache，但当前是单 beat response。
-  它采样 request、发送 A ready、访问 main_mem，再等待 D ready 完成响应。
-```
+- DCache 由旧 A-to-D 阻塞 for-loop 改为 fire 驱动逐拍状态机。
+- DCache 新增 coherent response 分类、delay、Hint、GrantAck/E、cached line、Probe 和 C assembly。
+- DCache driver 改为阻塞 get_next_item 后立即发送，消除旧 hold 造成的重复 beat。
+- DCache sideband 使用四态 fail-fast；无 GrantAck owner 的 E.valid 和未知 E sink 不再静默通过。
+- C assembly fire 后独占本拍仲裁，stop 后禁止新 Probe和未握手 A；global stop 需要 DCache 自身
+  in-flight drain，cached line map 不阻塞退出。
+- DCache terminal idle 后发布 `dcache_responder_done`，legacy testcase 等待该标志后才 drop objection。
+- SBuffer 仍保持单拍响应主体，不共享 DCache coherent owner。

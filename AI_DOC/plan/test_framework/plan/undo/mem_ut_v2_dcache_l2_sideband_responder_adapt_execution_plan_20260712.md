@@ -1,7 +1,7 @@
 # mem_ut V2 DCache L2 Sideband Responder 适配最终 Coding Plan
 
 > 本 plan 已由
-> `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`
+> `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`
 > 完整替代，不再单独执行。原 `io_l2_flush_done=0`、interface/idle known-zero 要求已并入新 plan；
 > 原 hint 永久 zero-only 要求已被按请求关联的可控 hint 模型替代。
 

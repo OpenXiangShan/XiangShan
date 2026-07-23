@@ -18,6 +18,7 @@
 | `global stop` | 所有transaction和公共cancel/raw状态收敛后的统一停止标志 | `common_data_transaction::global_stop_requested` | 不是仅由`terminal_done_uid`单独决定 |
 | `inflight` | responder已经接受、但response或drive生命周期尚未完成的请求 | DCache/SBuffer握手状态、redirect drive queue/inflight | inflight存在时不能因global stop直接退出 |
 | `natural exit` | sequence在安全idle边界自行`break/return` | responder `body()`、cancel vseq等待逻辑 | 不使用`disable fork`强杀线程 |
+| `responder done` | DCache 已完成 terminal idle 并自然返回的兼容完成标志 | `memblock_sync_pkg::dcache_responder_done` | legacy testcase 用它保持 phase objection |
 | `testcase objection` | `basicTest`在顶层`start()`前raise、返回后drop的phase objection | `basicTest::main_phase()` | 覆盖目标vseq完整`start()`，不依赖派生`pre_body/post_body`保活 |
 | `automatic phase objection` | sequence自身可选的自动raise/drop机制，不是顶层phase保活唯一来源 | cancel vseq `set_automatic_phase_objection(1'b1)` | 可覆盖局部sequence生命周期，但外层testcase objection仍在整个`start()`期间保持 |
 | `software-only directed` | 只在virtual sequencer上运行公共owner API检查、不启动业务agent sequence的专项入口 | `memblock_pending_mmio_directed_vseq` | 覆盖normal raw、LOAD `R/R+1` stale和精确expected-fatal |
@@ -288,10 +289,21 @@ join
 
 每个responder的退出边界：
 
-- DCache：global stop且当前A valid为0；先发安全idle，再break。已接受请求的全部D response在回到循环
-  顶部前完成，因此退出点无response inflight。
+- DCache：global stop后继续等待pending D、GrantAck、Probe B/C、C assembly、A/C armed snapshot
+  和当前A/C valid全部归零；cached line map不属于inflight。满足条件后发安全idle再break，不能只
+  用A valid为0作为退出条件。
 - SBuffer：global stop且当前A valid为0；已接受请求的D response先完成，再发安全idle并break。
 - Redirect：global stop、pending/inflight drive为空且无active redirect；发安全idle并break。
+
+DCache responder 的 item 交付还依赖 DCache driver 的锁步合同：driver 阻塞 get_next_item 后立即
+send_pkt/item_done，不在 item 之间 hold 或重复上一 item；DCache sequence 在下一 drv_cb 边界采样
+上一 item 的对端 ready/valid，再确认 fire。该细节由
+dcache_l2_response_hint_probe_model_flow.md 和 dcache_sbuffer_memory_responder_flow.md 共同维护。
+
+legacy `tc_dispatch_real_smoke` 仍由 agent phase default sequence 启动 responder，无法使用 vseq 的
+`wait fork`。DCache sequence 启动时清 `dcache_responder_done`，完成 terminal idle 后置一；legacy
+testcase 等待该标志后才清 `dispatch_real_smoke_active` 和 drop objection。该兼容握手只补 DCache
+自然退出，不改变 canonical vseq 的三 responder `join`。
 
 ### 6.3 `start_core_dispatch_flow()`
 

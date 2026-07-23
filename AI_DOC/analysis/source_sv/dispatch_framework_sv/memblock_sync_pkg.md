@@ -31,6 +31,7 @@ memblock_sync_pkg 是 UVM monitor、dispatch service 和 L2TLB responder 之间�
 | dispatch_monitor_capture_en | semantic raw queue采集开关 | 各monitor的push_raw_* |
 | l2tlb_responder_active | connect takeover是否把L2TLB response交给agent | L2TLB sequence和driver |
 | dispatch_real_smoke_active | 当前是否运行dispatch real smoke | smoke相关driver |
+| dcache_responder_done | DCache 已完成 terminal idle 并自然返回 | legacy real-smoke testcase phase objection |
 | dispatch_flushsb_waiting_empty | flushSb已发出且等待sbIsEmpty | ctrl monitor和flushSb flow |
 | dispatch_flush_epoch | dispatch flush版本 | LSQ admission和redirect |
 | dispatch_service_cycle | 软件service周期 | debug、timeout、TLB record时间戳 |
@@ -38,6 +39,10 @@ memblock_sync_pkg 是 UVM monitor、dispatch service 和 L2TLB responder 之间�
 | l2tlb_lifecycle_owner_claimed/name | 唯一L2TLB responder owner | sequence claim/release |
 
 l2tlb_lifecycle_owner_* 不由 DUT reset 清除。只有 owner sequence 发送最终 inactive cycle item并自然退出后，调用者名称匹配的 release 才能清除它。
+
+`dcache_responder_done` 不是 DUT 状态，也不参与 pass/fail/terminal 判断。DCache responder 每次 body
+启动时清零，global stop 后把全部 in-flight 排空并发送最后 safe idle 后置一；canonical vseq 仍以
+`wait fork` 为主，只有 legacy `tc_dispatch_real_smoke` 用该标志防止 phase 提前结束。
 
 ## 3. Raw 类型和队列
 

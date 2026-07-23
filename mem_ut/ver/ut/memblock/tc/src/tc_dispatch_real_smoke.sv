@@ -106,6 +106,9 @@ class tc_dispatch_real_smoke extends tc_base;
         memblock_sync_pkg::dispatch_real_smoke_active = 1'b1;
         super.main_phase(phase);
         run_real_smoke_sequence();
+        // legacy testcase 的 responder 由 agent default_sequence 启动，必须等待
+        // DCache 在 global stop 后完成最后一个 safe idle，不能直接 drop objection。
+        wait(memblock_sync_pkg::dcache_responder_done === 1'b1);
         memblock_sync_pkg::dispatch_real_smoke_active = 1'b0;
         phase.drop_objection(this);
     endtask:main_phase

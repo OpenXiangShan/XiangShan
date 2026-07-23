@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，monitor output、L2TLB、LSQ MMIO/status 和 pending-MMIO 专项均已完成并归档；L2Cache responder 等剩余专项按 owner 继续执行 |
+| 状态 | `undo`，monitor output、L2TLB、LSQ MMIO/status、pending-MMIO 和 L2Cache responder 专项均已完成；本总控 plan 仍保留在 undo 作为总控记录 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv`、`build_memblock/rtl/filelist.f` |
@@ -31,7 +31,9 @@
 
 - 机械 DUT/interface/connect 字段逐项修复；这些由 DUT/interface 适配专项负责。
 - RM、scoreboard、checker、coverage。
-- 任何未被专项授权的 flow 文档、analysis 文档、rule/profile 文档同步。
+- 与专项源码逻辑无关的 flow、analysis、rule/profile 文档修改。若专项改动了共享 driver、sequence、
+  helper、状态 owner、退出条件或其它 flow 会引用的行为，则所有受影响的当前有效 flow/analysis
+  文档都属于该专项的强制同步范围，不能以“不在原文件清单”为由跳过。
 - V3 运行期功能补齐。
 
 所有 V2 专项执行前必须先确认：
@@ -50,7 +52,7 @@ test -e build_memblock/rtl/filelist.f
 | 既有 compile 参数、宽度、FuType、ROB/LQ/SQ key | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_compile_param_and_width_adapt_execution_plan_20260708.md`，该范围已归档完成，只作为公共基线 |
 | SQ deq/cancel count width 与 redirect/cancel latency compile delta | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`；已在统一compile header新增宏和派生检查，是这些参数的唯一coding owner，不回写到既有compile plan |
 | 自动主表 VADDR 窗口 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_main_table_vaddr_generation_adapt_execution_plan_20260713.md`，源码审计、地址复用跨度修复、远端验证和两轮独立 review 已完成 |
-| DCache 轻量 L2 response/hint/Probe，flush_done zero-only | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md` |
+| DCache 轻量 L2 response/hint/Probe，flush_done zero-only | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md` |
 | LSQ enqueue | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_lsq_enqueue_framework_adapt_final_plan_20260714.md`，coding、文档同步、冻结验证和最终独立review均已完成；真实load已闭环，store admission已覆盖，store终态仍由后续SQ deq专项闭环 |
 | split issue、vector stimulus/driver gate | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_split_issue_framework_adapt_execution_plan_20260708.md`，已完成并归档；只拥有vecissue默认入口关闭和driver valid fatal，不修改vector output monitor |
 | IQ feedback/replay、VSTU gate | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_iq_feedback_replay_framework_adapt_execution_plan_20260711.md`；已完成STA SQ-only raw、active SQ/current snapshot attach、同拍IQ-first、deferred ctrl、严格STA real-WB顺序和VSTU valid fatal |
@@ -80,6 +82,8 @@ test -e build_memblock/rtl/filelist.f
 | Monitor output 分类与 vector-WB gate | 已完成并归档 | 保持现有output observation与analysis-port deferred边界；`writebackVldu` valid为1或X/Z时fail-fast，不生产第二套scalar raw/event；cancel snapshot和redirect anchor只定义monitor职责，状态owner仍由LSQ专项实现。 | 独立review `FINAL PASS`；commit `cf63e12ebd`；plan位于`plan/do/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md`，review位于`review_doc/undo/mem_ut_v2_monitor_output_framework_adapt_implementation_review_20260722.md`。 |
 | LSQ MMIO/status 与 cancel 对账 | 已完成并归档 | 建立modeled ROB head及表尾watermark，分离normal commit、fault convergence和LQ/SQ physical deq；参数化`sqDeq` count-only链路；active idle保持level sideband；redirect epoch按software count与DUT snapshot直接对账且只由software路径回退free count；deferred raw FIFO、singleton owner和runtime drain闭环；`pendingst/scommit`按V2 scalar ROB store分类接受STORE/CBO。 | 最终VCS/KDB compile通过；default real smoke、real cancel reconcile和pending-MMIO directed均`TEST_PASS`且未捕获error/fatal为0；CBO分类日志通过；最后一轮独立review `FINAL PASS`。plan位于`plan/do/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`，review位于`review_doc/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_implementation_review_20260722.md`。 |
 | pending-MMIO load/store sideband | 已完成并归档 | ctrl monitor采集load/store MMIO raw与ROB value；resolver结合完整active key、动态epoch和LOAD sample provenance归一化uid；status保存canonical tag/source，LSQ owner只查询tag生成head `pendingMMIOld`；stale旧owner丢弃，无法证明归属或新owner重叠fail-fast；directed vseq覆盖tag/provenance、fault head、owner reset和global-stop raw drain。 | `v2_lsq_mmio_cbo_final_20260723`下directed为`TEST_PASS`，`UVM_ERROR=0`、未捕获`UVM_FATAL=0`、精确caught fatal=1；相邻real smoke/cancel也通过；最后一轮独立review `FINAL PASS`。plan位于`plan/do/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md`，review位于`review_doc/undo/mem_ut_v2_pending_mmio_load_sideband_implementation_review_20260722.md`。 |
+| DCache L2 response/hint/Probe | 已完成并归档 | 建立轻量 coherent response、三档 delay、Hint/Probe、GrantAck/E、cached-line和C assembly；补齐 C.fire owner 独占、channel/sideband 四态 fail-fast、generic E.ready 安全值、global-stop drain 与 legacy done handshake。 | compile 0 error（工具日志保留 LCA warning）；canonical 默认、Hint=100、Probe=100、legacy real smoke 均 `TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0`；最终独立 subagent review `FINAL PASS`。plan 已归档到 `plan/do`，implementation review 在 `review_doc/undo/mem_ut_v2_l2cache_response_hint_probe_model_implementation_review_20260723.md`。 |
+| DCache 轻量 L2 response/hint/Probe | 已完成并归档 | DCache responder按Acquire/ CBO/Release分类生成Grant/GrantData/CBOAck/ReleaseAck；新增三档delay、GrantAck/E owner、64B cached-line表、Hint绑定、单Probe及C assembly；driver锁步发送，sideband/channel四态检查，C.fire独占仲裁，global-stop drain和legacy done握手。 | VCS/KDB compile 通过（0 error，工具日志有LCA warning）；canonical默认、Hint=100、Probe=100和legacy `tc_dispatch_real_smoke`均`TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0`；独立review最后一轮严格`FINAL PASS`。plan位于`plan/do/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`，review位于`review_doc/undo/mem_ut_v2_l2cache_response_hint_probe_model_implementation_review_20260723.md`。 |
 
 后续每完成一个子计划，必须在本表追加其实际功能、归档路径和验证结果，并保持每个子计划一个独立
 本地 git commit。
@@ -793,7 +797,10 @@ V2 专项之间存在硬依赖，coding 应按以下顺序执行：
    sideband consumer、record、主service和global-stop gate作为同一原子批次完成；不得只落producer。
 7. 执行 pending-MMIO producer/query、L2TLB response/permission 与多 outstanding lifecycle、CSR/sfence、
    DCache sideband和其余monitor output分类；L2TLB源码修改只按其唯一专项执行，不从总控复制状态机。
-8. 每个专项完成后按各自 plan 运行静态检查、远端 compile/smoke，并生成对应 implementation review。
+8. 每个专项 coding 后先按修改的 class/function/signal/参数名扫描全部当前有效 flow/analysis 文档；
+   同步本专项文档，以及任何因共享逻辑改动而受影响的其它 flow 文档。历史 plan/review 不重写正文，
+   但仍保留旧结论时必须加“已被替代”注记和最新文档路径。
+9. 文档同步完成后按各自 plan 运行静态检查、远端 compile/smoke，并生成对应 implementation review。
 
 ### 文字伪代码
 
@@ -803,7 +810,11 @@ V2 专项之间存在硬依赖，coding 应按以下顺序执行：
   读取该专项 plan 和它声明的硬前置；
   如果专项依赖的 macro/raw field/helper 缺失：
     停止该专项 coding，不写 fallback；
-  只修改专项 owner 列出的源码、cfg 和文档；
+  只修改专项 owner 授权的源码和cfg；
+  用本次修改的class/function/signal/参数名扫描AI_DOC；
+  对每个命中的当前有效flow/analysis文档判断行为是否变化；
+  如果行为变化：同步其入口、时序、owner、退出条件和伪代码；
+  如果历史plan/review保留旧实现：增加被替代注记，不伪装成当前有效逻辑；
   高频路径使用 cursor、map、queue、bounded snapshot；
   禁止每拍或每 event 全表扫描；
   完成后运行专项 plan 指定静态检查；

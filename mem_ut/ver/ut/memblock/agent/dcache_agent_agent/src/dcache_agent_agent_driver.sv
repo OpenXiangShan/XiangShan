@@ -16,6 +16,7 @@ class dcache_agent_agent_driver  extends tcnt_driver_base#(virtual dcache_agent_
     extern virtual function void build_phase(uvm_phase phase);
     extern virtual task reset_phase(uvm_phase phase);
     extern task main_phase(uvm_phase phase);
+    extern function void check_l2_sideband_item(dcache_agent_agent_xaction tr);
     extern task send_pkt(dcache_agent_agent_xaction tr);
     extern task drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 endclass:dcache_agent_agent_driver
@@ -52,24 +53,16 @@ task dcache_agent_agent_driver::main_phase(uvm_phase phase);
     //while(1) begin
     if(this.cfg.sqr_sw==tcnt_dec_base::ON && this.cfg.drv_sw==tcnt_dec_base::ON) begin
         while(1) begin
-            seq_item_port.try_next_item(req);
-            if(req!=null) begin
-                repeat(req.pre_pkt_gap) begin
-                    @this.vif.drv_mp.drv_cb;
-                    this.drive_idle(this.cfg.drv_mode);
-                end
-                @this.vif.drv_mp.drv_cb;
-                this.send_pkt(req);
-                repeat(req.post_pkt_gap) begin
-                    @this.vif.drv_mp.drv_cb;
-                    this.drive_idle(this.cfg.drv_mode);
-                end
-                seq_item_port.item_done();
+            // 中文注释：逐拍 responder 在 drv_cb 边界提交下一周期 item。
+            // driver 阻塞等待并立即更新 clocking output，不额外插入一个
+            // hold 边界，否则 ready=1 时同一 valid beat 会被重复采样。
+            req = null;
+            seq_item_port.get_next_item(req);
+            if (req == null) begin
+                `uvm_fatal(get_type_name(), "get_next_item returned a null DCache item")
             end
-            else begin
-                @this.vif.drv_mp.drv_cb;
-                this.drive_idle(this.cfg.drv_mode);
-            end
+            this.send_pkt(req);
+            seq_item_port.item_done();
         end
     end
     else if (this.cfg.drv_sw==tcnt_dec_base::ON) begin
@@ -81,7 +74,36 @@ task dcache_agent_agent_driver::main_phase(uvm_phase phase);
     end
 endtask:main_phase
 
+function void dcache_agent_agent_driver::check_l2_sideband_item(dcache_agent_agent_xaction tr);
+    if (tr == null) begin
+        `uvm_fatal(get_type_name(), "cannot check a null DCache item")
+    end
+    if (tr.io_l2_flush_done !== 1'b0) begin
+        `uvm_fatal(get_type_name(), "io_l2_flush_done must stay 0 in DCache responder items")
+    end
+    if (tr.io_l2_hint_valid !== 1'b0 && tr.io_l2_hint_valid !== 1'b1) begin
+        `uvm_fatal(get_type_name(), "io_l2_hint_valid must be known before driving the DUT")
+    end
+    if (tr.io_l2_hint_valid === 1'b0 &&
+        (tr.io_l2_hint_bits_sourceId !== '0 || tr.io_l2_hint_bits_isKeyword !== 1'b0)) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("hint payload must be zero when io_l2_hint_valid=0, got sourceId=0x%0h isKeyword=%0b",
+                             tr.io_l2_hint_bits_sourceId,
+                             tr.io_l2_hint_bits_isKeyword))
+    end
+    if (tr.io_l2_hint_valid === 1'b1 &&
+        ((^tr.io_l2_hint_bits_sourceId === 1'bx) ||
+         (tr.io_l2_hint_bits_isKeyword !== 1'b0 &&
+          tr.io_l2_hint_bits_isKeyword !== 1'b1))) begin
+        `uvm_fatal(get_type_name(), "hint payload must be known when io_l2_hint_valid=1")
+    end
+endfunction:check_l2_sideband_item
+
 task dcache_agent_agent_driver::send_pkt(dcache_agent_agent_xaction tr);
+    if (tr.pre_pkt_gap != 0 || tr.post_pkt_gap != 0) begin
+        `uvm_fatal(get_type_name(), "DCache responder item must use pre_pkt_gap=0 and post_pkt_gap=0")
+    end
+    check_l2_sideband_item(tr);
     vif.drv_mp.drv_cb.auto_inner_dcache_client_out_a_ready <= tr.auto_inner_dcache_client_out_a_ready;
     vif.drv_mp.drv_cb.auto_inner_dcache_client_out_b_valid <= tr.auto_inner_dcache_client_out_b_valid;
     vif.drv_mp.drv_cb.auto_inner_dcache_client_out_b_bits_opcode <= tr.auto_inner_dcache_client_out_b_bits_opcode;
@@ -137,11 +159,6 @@ task dcache_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_data <= '0;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_corrupt <= '0;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= '0;
-        vif.drv_mp.drv_cb.io_l2_hint_valid <= '0;
-        vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= '0;
-        vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= '0;
-        vif.drv_mp.drv_cb.io_l2_flush_done <= '0;
-
     end
     else if(drv_mode==tcnt_dec_base::DRV_1) begin
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_a_ready <= '1;
@@ -165,12 +182,6 @@ task dcache_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_echo_isKeyword <= '1;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_data <= '1;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_corrupt <= '1;
-        vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= '1;
-        vif.drv_mp.drv_cb.io_l2_hint_valid <= '1;
-        vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= '1;
-        vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= '1;
-        vif.drv_mp.drv_cb.io_l2_flush_done <= '1;
-
     end
     else if(drv_mode==tcnt_dec_base::DRV_X) begin
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_a_ready <= 'x;
@@ -194,12 +205,6 @@ task dcache_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_echo_isKeyword <= 'x;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_data <= 'x;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_corrupt <= 'x;
-        vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= 'x;
-        vif.drv_mp.drv_cb.io_l2_hint_valid <= 'x;
-        vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= 'x;
-        vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= 'x;
-        vif.drv_mp.drv_cb.io_l2_flush_done <= 'x;
-
     end
     else if(drv_mode==tcnt_dec_base::DRV_RAND) begin
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_a_ready <= $urandom;
@@ -223,12 +228,6 @@ task dcache_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_echo_isKeyword <= $urandom;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_data <= $urandom;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_corrupt <= $urandom;
-        vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= $urandom;
-        vif.drv_mp.drv_cb.io_l2_hint_valid <= $urandom;
-        vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= $urandom;
-        vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= $urandom;
-        vif.drv_mp.drv_cb.io_l2_flush_done <= $urandom;
-
     end
     else if(drv_mode==tcnt_dec_base::DRV_LST) begin
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_a_ready <= '0;
@@ -253,12 +252,17 @@ task dcache_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_data <= '0;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_d_bits_corrupt <= '0;
         vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= '0;
-        vif.drv_mp.drv_cb.io_l2_hint_valid <= '0;
-        vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= '0;
-        vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= '0;
-        vif.drv_mp.drv_cb.io_l2_flush_done <= '0;
-
     end
+
+    // 中文注释：hint/flush sideband 只能由专用 responder builder 覆盖。
+    // generic idle 路径无论 drv_mode 取值如何，都必须保持 known-zero。
+    vif.drv_mp.drv_cb.io_l2_hint_valid <= '0;
+    vif.drv_mp.drv_cb.io_l2_hint_bits_sourceId <= '0;
+    vif.drv_mp.drv_cb.io_l2_hint_bits_isKeyword <= '0;
+    vif.drv_mp.drv_cb.io_l2_flush_done <= '0;
+    // E.ready 只能由 owner-managed GrantAck item 打开；generic idle、DRV_1
+    // 和 DRV_RAND 不能在没有 owner 时向 DUT 宣称可以消费 E。
+    vif.drv_mp.drv_cb.auto_inner_dcache_client_out_e_ready <= '0;
 
 endtask:drive_idle
 

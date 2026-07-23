@@ -65,10 +65,14 @@ class dcache_agent_agent_xaction  extends tcnt_data_base;
     rand bit auto_inner_dcache_client_out_e_ready;
     rand bit auto_inner_dcache_client_out_e_valid;
     rand bit [9:0] auto_inner_dcache_client_out_e_bits_sink;
-    rand bit io_l2_hint_valid;
-    rand bit [3:0] io_l2_hint_bits_sourceId;
-    rand bit io_l2_hint_bits_isKeyword;
-    rand bit io_l2_flush_done;
+    // 中文注释：DCache L2 hint sideband 只允许专用 responder 手工构造。
+    // generic random/new 路径默认保持全 0；driver 发送前再检查 payload/flush 合同。
+    // 中文注释：sideband 保留四态，driver 才能在赋值到 VIF 前识别 X/Z；
+    // 约束只限制正常 randomize 结果，不能把手工构造的未知值提前折叠成 0/1。
+    rand logic io_l2_hint_valid;
+    rand logic [3:0] io_l2_hint_bits_sourceId;
+    rand logic io_l2_hint_bits_isKeyword;
+    rand logic io_l2_flush_done;
 
     extern constraint default_auto_inner_dcache_client_out_a_ready_cons;
     extern constraint default_auto_inner_dcache_client_out_a_valid_cons;
@@ -404,7 +408,7 @@ constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_d_bi
 }
 
 constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_e_ready_cons{
-    auto_inner_dcache_client_out_e_ready inside {1'b0, 1'b1};
+    auto_inner_dcache_client_out_e_ready == 1'b0;
 }
 
 constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_e_valid_cons{
@@ -416,23 +420,35 @@ constraint dcache_agent_agent_xaction::default_auto_inner_dcache_client_out_e_bi
 }
 
 constraint dcache_agent_agent_xaction::default_io_l2_hint_valid_cons{
-    io_l2_hint_valid inside {1'b0, 1'b1};
+    io_l2_hint_valid == 1'b0;
 }
 
 constraint dcache_agent_agent_xaction::default_io_l2_hint_bits_sourceId_cons{
-    io_l2_hint_bits_sourceId inside {[4'd0:4'd15]};
+    if (io_l2_hint_valid == 1'b0) {
+        io_l2_hint_bits_sourceId == 4'd0;
+    } else {
+        io_l2_hint_bits_sourceId inside {[4'd0:4'd15]};
+    }
 }
 
 constraint dcache_agent_agent_xaction::default_io_l2_hint_bits_isKeyword_cons{
-    io_l2_hint_bits_isKeyword inside {1'b0, 1'b1};
+    if (io_l2_hint_valid == 1'b0) {
+        io_l2_hint_bits_isKeyword == 1'b0;
+    } else {
+        io_l2_hint_bits_isKeyword inside {1'b0, 1'b1};
+    }
 }
 
 constraint dcache_agent_agent_xaction::default_io_l2_flush_done_cons{
-    io_l2_flush_done inside {1'b0, 1'b1};
+    io_l2_flush_done == 1'b0;
 }
 
 function dcache_agent_agent_xaction::new(string name = "dcache_agent_agent_xaction");
     super.new();
+    io_l2_hint_valid = 1'b0;
+    io_l2_hint_bits_sourceId = '0;
+    io_l2_hint_bits_isKeyword = 1'b0;
+    io_l2_flush_done = 1'b0;
 endfunction:new
 
 function void dcache_agent_agent_xaction::pack();
@@ -803,22 +819,22 @@ function bit dcache_agent_agent_xaction::compare(uvm_object rhs, uvm_comparer co
             `uvm_info(get_type_name(),$sformatf("compare fail for this.auto_inner_dcache_client_out_e_bits_sink=0x%0h while the rhs_.auto_inner_dcache_client_out_e_bits_sink=0x%0h",this.auto_inner_dcache_client_out_e_bits_sink,rhs_.auto_inner_dcache_client_out_e_bits_sink),UVM_NONE)
         end
 
-        if(this.io_l2_hint_valid!=rhs_.io_l2_hint_valid) begin
+        if(this.io_l2_hint_valid!==rhs_.io_l2_hint_valid) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_l2_hint_valid=0x%0h while the rhs_.io_l2_hint_valid=0x%0h",this.io_l2_hint_valid,rhs_.io_l2_hint_valid),UVM_NONE)
         end
 
-        if(this.io_l2_hint_bits_sourceId!=rhs_.io_l2_hint_bits_sourceId) begin
+        if(this.io_l2_hint_bits_sourceId!==rhs_.io_l2_hint_bits_sourceId) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_l2_hint_bits_sourceId=0x%0h while the rhs_.io_l2_hint_bits_sourceId=0x%0h",this.io_l2_hint_bits_sourceId,rhs_.io_l2_hint_bits_sourceId),UVM_NONE)
         end
 
-        if(this.io_l2_hint_bits_isKeyword!=rhs_.io_l2_hint_bits_isKeyword) begin
+        if(this.io_l2_hint_bits_isKeyword!==rhs_.io_l2_hint_bits_isKeyword) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_l2_hint_bits_isKeyword=0x%0h while the rhs_.io_l2_hint_bits_isKeyword=0x%0h",this.io_l2_hint_bits_isKeyword,rhs_.io_l2_hint_bits_isKeyword),UVM_NONE)
         end
 
-        if(this.io_l2_flush_done!=rhs_.io_l2_flush_done) begin
+        if(this.io_l2_flush_done!==rhs_.io_l2_flush_done) begin
             super_result = 0;
             `uvm_info(get_type_name(),$sformatf("compare fail for this.io_l2_flush_done=0x%0h while the rhs_.io_l2_flush_done=0x%0h",this.io_l2_flush_done,rhs_.io_l2_flush_done),UVM_NONE)
         end

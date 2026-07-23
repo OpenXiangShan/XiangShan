@@ -71,10 +71,11 @@ interface dcache_agent_agent_interface  (input bit clk,input bit rst_n);
     logic auto_inner_dcache_client_out_e_valid;
     logic [9:0] auto_inner_dcache_client_out_e_bits_sink;
     // V2 L2 hint/flush 顶层输入，由 dcache agent 统一驱动并由 monitor 采样。
-    logic io_l2_hint_valid;
-    logic [3:0] io_l2_hint_bits_sourceId;
-    logic io_l2_hint_bits_isKeyword;
-    logic io_l2_flush_done;
+    // 显式 time-zero known-zero，避免 responder 接管前顶层看到 X。
+    logic io_l2_hint_valid = '0;
+    logic [3:0] io_l2_hint_bits_sourceId = '0;
+    logic io_l2_hint_bits_isKeyword = '0;
+    logic io_l2_flush_done = '0;
 
     clocking drv_cb @(posedge clk);
         `ifdef INTERFACE_ADD_DELAY

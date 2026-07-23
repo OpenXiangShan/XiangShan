@@ -18,6 +18,9 @@ package memblock_sync_pkg;
     bit dispatch_monitor_capture_en = 1'b0;
     bit l2tlb_responder_active = 1'b0;
     bit dispatch_real_smoke_active = 1'b0;
+    // 中文注释：DCache responder 已在 global stop 后发送 terminal idle 并自然返回。
+    // legacy testcase 用它保持 phase objection，避免 responder 被 phase 提前杀掉。
+    bit dcache_responder_done = 1'b0;
     bit dispatch_flushsb_waiting_empty = 1'b0;
     int unsigned dispatch_flush_epoch = 0;
     longint unsigned dispatch_service_cycle = 0;

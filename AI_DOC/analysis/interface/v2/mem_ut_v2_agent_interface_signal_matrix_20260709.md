@@ -287,6 +287,15 @@ interface 文件：`mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/dcache_a
 | `io_l2_hint_bits_isKeyword` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_l2_hint_bits_isKeyword` | 有 | 有 |
 | `io_l2_flush_done` | `` | `output` | `input` | 有 | 有 | IF->RTL: `io_l2_flush_done` | 有 | 有 |
 
+补充的运行期 owner 约束：上述四个字段虽然在 interface、xaction、connect、monitor/driver 矩阵中
+均已接入，但不是 generic random 的自由激励。`io_l2_hint_valid/sourceId/isKeyword` 只有在
+DCache responder 真实接受 `AcquireBlock -> GrantData` 后才能由专用 builder 产生一拍非零 Hint；
+generic xaction、generic idle 和 driver idle 必须保持 0。`io_l2_flush_done` 当前没有功能 producer，
+全程保持已知 0。driver 在首次 VIF 赋值前使用四态检查，未知 Hint valid/payload、非已知 0 的
+flush 和 valid=0 时非零 payload 均 fail-fast；四个 sideband xaction 字段保留四态，generic
+E.ready 固定为 0，只有 GrantAck owner item 可以打开。字段链路和 A/C/D/E 完整生命周期见
+`AI_DOC/mem_ut_flow_doc/dcache_l2_response_hint_probe_model_flow.md`。
+
 ### 4.5 `fence_agent_agent`
 
 interface 文件：`mem_ut/ver/ut/memblock/agent/fence_agent_agent/src/fence_agent_agent_interface.sv`

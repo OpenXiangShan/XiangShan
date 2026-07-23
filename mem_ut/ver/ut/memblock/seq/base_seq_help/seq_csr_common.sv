@@ -188,6 +188,15 @@ class seq_csr_common;
     static int unsigned flushsb_timeout = 1000;
     static bit          replay_wait_ptw_en = 1'b0;
     static int unsigned replay_wait_ptw_timeout = 1000;
+    // 中文注释：DCache 轻量 L2 responder 的三档首拍 response delay 权重。
+    // plus/default cfg 负责提供 raw 权重；validate_and_clamp() 只做 fail-fast，不做静默 clamp。
+    static int unsigned l2_rsp_delay_small_wt = 1;
+    static int unsigned l2_rsp_delay_medium_wt = 0;
+    static int unsigned l2_rsp_delay_large_wt = 0;
+    // 中文注释：每个 AcquireBlock 产生 hint、每个合格空闲周期尝试 Probe 的百分比权重。
+    // 0 表示关闭，100 表示每次都命中；sequence 只读 getter，不在 getter 内修改状态。
+    static int unsigned l2_hint_valid_wt = 0;
+    static int unsigned l2_probe_enable_wt = 0;
     // 中文注释：L2TLB responder运行期开关与队列/调度策略。
     // load_from_plus()设置，validate/apply入口校验并按compile filter容量收敛，sequence只读getter。
     static bit          l2tlb_seq_en = 1'b1;
@@ -393,6 +402,11 @@ class seq_csr_common;
         flushsb_timeout             = get_non_negative_int("MEMBLOCK_FLUSHSB_TIMEOUT", plus::MEMBLOCK_FLUSHSB_TIMEOUT);
         replay_wait_ptw_en          = plus::MEMBLOCK_REPLAY_WAIT_PTW_EN;
         replay_wait_ptw_timeout     = get_non_negative_int("MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT", plus::MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT);
+        l2_rsp_delay_small_wt       = get_non_negative_int("MEMBLOCK_L2_RSP_DELAY_SMALL_WT", plus::MEMBLOCK_L2_RSP_DELAY_SMALL_WT);
+        l2_rsp_delay_medium_wt      = get_non_negative_int("MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT", plus::MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT);
+        l2_rsp_delay_large_wt       = get_non_negative_int("MEMBLOCK_L2_RSP_DELAY_LARGE_WT", plus::MEMBLOCK_L2_RSP_DELAY_LARGE_WT);
+        l2_hint_valid_wt            = get_non_negative_int("MEMBLOCK_L2_HINT_VALID_WT", plus::MEMBLOCK_L2_HINT_VALID_WT);
+        l2_probe_enable_wt          = get_non_negative_int("MEMBLOCK_L2_PROBE_ENABLE_WT", plus::MEMBLOCK_L2_PROBE_ENABLE_WT);
         l2tlb_seq_en                = plus::MEMBLOCK_L2TLB_SEQ_EN;
         l2tlb_max_outstanding       = get_non_negative_int("MEMBLOCK_L2TLB_MAX_OUTSTANDING", plus::MEMBLOCK_L2TLB_MAX_OUTSTANDING);
         l2tlb_resp_reorder_en       = plus::MEMBLOCK_L2TLB_RESP_REORDER_EN;
@@ -490,6 +504,18 @@ class seq_csr_common;
         if (replay_wait_ptw_en && replay_wait_ptw_timeout == 0) begin
             `uvm_warning("SEQ_CSR_CFG", "replay_wait_ptw_timeout=0 while replay wait PTW is enabled, clamp to 1")
             replay_wait_ptw_timeout = 1;
+        end
+        fatal_if_all_zero3("DCache L2 response delay weights",
+                           l2_rsp_delay_small_wt,
+                           l2_rsp_delay_medium_wt,
+                           l2_rsp_delay_large_wt);
+        if (l2_hint_valid_wt > 100) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       $sformatf("MEMBLOCK_L2_HINT_VALID_WT=%0d must be within [0:100]", l2_hint_valid_wt))
+        end
+        if (l2_probe_enable_wt > 100) begin
+            `uvm_fatal("SEQ_CSR_CFG",
+                       $sformatf("MEMBLOCK_L2_PROBE_ENABLE_WT=%0d must be within [0:100]", l2_probe_enable_wt))
         end
         if (l2tlb_resp_mid_latency <= 1) begin
             `uvm_fatal("SEQ_CSR_CFG", "MEMBLOCK_L2TLB_RESP_MID_LATENCY must be greater than 1")
@@ -1479,6 +1505,31 @@ class seq_csr_common;
         check_initialized("get_replay_wait_ptw_timeout");
         return replay_wait_ptw_timeout;
     endfunction:get_replay_wait_ptw_timeout
+
+    static function int unsigned get_l2_rsp_delay_small_wt();
+        check_initialized("get_l2_rsp_delay_small_wt");
+        return l2_rsp_delay_small_wt;
+    endfunction:get_l2_rsp_delay_small_wt
+
+    static function int unsigned get_l2_rsp_delay_medium_wt();
+        check_initialized("get_l2_rsp_delay_medium_wt");
+        return l2_rsp_delay_medium_wt;
+    endfunction:get_l2_rsp_delay_medium_wt
+
+    static function int unsigned get_l2_rsp_delay_large_wt();
+        check_initialized("get_l2_rsp_delay_large_wt");
+        return l2_rsp_delay_large_wt;
+    endfunction:get_l2_rsp_delay_large_wt
+
+    static function int unsigned get_l2_hint_valid_wt();
+        check_initialized("get_l2_hint_valid_wt");
+        return l2_hint_valid_wt;
+    endfunction:get_l2_hint_valid_wt
+
+    static function int unsigned get_l2_probe_enable_wt();
+        check_initialized("get_l2_probe_enable_wt");
+        return l2_probe_enable_wt;
+    endfunction:get_l2_probe_enable_wt
 
     static function bit get_l2tlb_seq_en();
         check_initialized("get_l2tlb_seq_en");

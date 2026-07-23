@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待 coding |
+| 状态 | `do`，coding、文档同步、compile/smoke 和最终独立 review 已完成并归档 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | DUT 接口权威 | `build_memblock/rtl/MemBlock.sv` |
@@ -11,6 +11,19 @@
 | 创建日期 | 2026-07-17 |
 
 ## 1. 目标、范围与替代关系
+
+### 1.1 术语与抽象功能说明
+
+| 英文术语 | 当前 plan 中的中文含义 | 代码对象或状态落点 | 典型场景 |
+|---|---|---|---|
+| `owner` | 某个在途协议生命周期的唯一状态维护者，同一资源不能被第二条路径覆盖 | `pending_d_valid`、`waiting_grant_ack`、`c_assembly_owner`、`waiting_probe_c` | `GrantData` 最后一拍完成后只由 GrantAck owner 等待 E |
+| `pending D` | 已接受、已经分类但尚未完成全部 D beat 的唯一回复 | `pending_d_*` | `AcquireBlock` 建立两拍 `GrantData` |
+| `armed snapshot` | 已保存 DUT valid/payload，并将在下一采样边界用上一拍 ready 确认 fire 的请求快照 | `a_accept_armed`、`c_accept_armed` | C 首拍 valid 被保存，下一拍 C.fire 后才进入 assembly |
+| `C assembly` | 对 `ProbeAckData` 或 `ReleaseData` 两个 C beat 的唯一收集状态 | `c_assembly_*` | 首拍建立 owner，第二拍完成主存写回和状态清理 |
+| `drain` | global stop 后只完成已握手或已在 DUT channel 上的事务，不再由环境新建 Probe | `dcache_mem__access_base_sequence::body()` | pending D、GrantAck、Probe C 全部归零后发送 terminal idle |
+| `sideband` | 不属于 TileLink A/B/C/D/E 主握手的 Hint/flush 输入 | `io_l2_hint_*`、`io_l2_flush_done` | Hint 只与一笔 `AcquireBlock` 生命周期绑定 |
+| `cached line table` | 已完成 GrantAck、可供 Probe 选择的 64B line 候选表，不是完整目录或参考模型 | `cached_alias_by_line` | E.fire 后插入，Probe/Release/CBO 失效时删除 |
+| `lockstep driver` | sequence 每个采样边界提交一个 item，driver 立即写 clocking output，不重复上一 item | `dcache_agent_agent_driver::main_phase()` | D.ready=1 时一个 D beat 只计一次 fire |
 
 本 plan 解决当前 `dcache_mem__access_base_sequence` 只做简化 A 到 D 回复、无法按 coherent
 TileLink-C 场景返回、没有 L2 response delay、没有有效 hint、也没有主动 Probe 和 DCache 缓存地址
@@ -73,20 +86,36 @@ ICache/PTW 等非 DCache client。因此本 plan 对“非 DCache source”和 `
 | `mem_ut/ver/ut/memblock/env/plus.sv` | 定义并加载 5 个 L2 responder 权重参数 |
 | `mem_ut/ver/ut/memblock/seq/base_seq_help/seq_csr_common.sv` | 保存参数快照、检查范围、提供只读 getter |
 | `mem_ut/ver/ut/memblock/seq/plus_cfg/default.cfg` | 增加保守默认值 |
-| `mem_ut/ver/ut/memblock/seq/plus_cfg/tc_dispatch_real_l2cache_model.cfg`（coding 时待新增） | 提供同时开启 delay mix、hint 和低频 Probe 的专项 preset |
+| `mem_ut/ver/ut/memblock/seq/plus_cfg/tc_dispatch_real_l2cache_model.cfg` | 独立可执行的 real-smoke 基础 preset；覆盖三档 delay，hint/Probe 默认关闭 |
 | `mem_ut/ver/ut/memblock/seq/base_seq_help/mem_base_sequence.sv` | 在 `dcache_mem__access_base_sequence` 内实现逐拍轻量 L2 responder、地址表和 Probe owner |
+| `mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv` | 保存 DCache responder terminal-done 兼容握手，不参与主表语义 |
+| `mem_ut/ver/ut/memblock/tc/src/tc_dispatch_real_smoke.sv` | legacy direct testcase 等待 DCache responder 自然完成后再 drop objection |
 | `mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/dcache_agent_agent_interface.sv` | 给 4 个 L2 sideband DUT input 增加明确 time-zero 初值 |
 | `mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/dcache_agent_agent_xaction.sv` | 让 generic random path 保持 sideband 为 0，专用 responder 通过手工 builder 产生合法 hint |
 | `mem_ut/ver/ut/memblock/agent/dcache_agent_agent/src/dcache_agent_agent_driver.sv` | idle 隔离 sideband，发送前检查 hint payload 和 flush zero-only 合同 |
 | `mem_ut/ver/ut/memblock/rule/plus_demo_migration_plan.md` | 同步登记新增公共参数及使用者 |
+| `AI_DOC/mem_ut_flow_doc/dcache_l2_response_hint_probe_model_flow.md` | 新增本专项逐拍协议 flow |
+| `AI_DOC/mem_ut_flow_doc/dcache_sbuffer_memory_responder_flow.md` | 同步共享 memory responder 文档中的 DCache 分支，保留 SBuffer 分支 |
+| `AI_DOC/mem_ut_flow_doc/virtual_sequence_unified_dispatch_flow.md` | 同步 background DCache responder 的完整 in-flight drain 条件 |
+| `AI_DOC/analysis/source_sv/dispatch_framework_sv/mem_base_sequence.md` | 同步共享源码分析、函数清单和 DCache/SBuffer 边界 |
+| `AI_DOC/analysis/interface/memblock验证输入的程序框架.md` | 把 Hint 从永久安全常量更新为 request-bound responder 输入，flush_done 仍为 0 |
+| `AI_DOC/analysis/interface/v2/mem_ut_v2_agent_interface_signal_matrix_20260709.md` | 在既有字段矩阵后补当前 producer/owner 语义，不改变字段统计 |
 | 两个被替代的旧 plan | 标记为已被本 plan 替代，不再单独执行 |
 
-不新增 agent、interface 端口、transaction 字段、testcase 或 virtual sequence；现有
+不新增 agent、interface 端口、testcase class 或 virtual sequence；现有
 `memblock_dispatch_real_smoke_vseq` 已经在 `p_sequencer.dcache_sqr` 上启动
 `dcache_mem__access_base_sequence`，因此 `seq_pkg.sv`、`seq.f`、`tb.f` 和 vseq 调度不变。
 当前 DCache monitor 的 transaction 创建和 analysis-port 发布仍处于注释状态，本 plan 不恢复 monitor
 producer，也不依赖 monitor event。A/B/C/D/E fire 全部由同一 sequence 直接组合“上一拍实际发送的
 `last_cycle_xact`”与当前 VIF 对端 ready/valid 计算。
+
+`tc_dispatch_real_l2cache_model.cfg` 不会继承 `tc_dispatch_real_smoke.cfg`；因此该文件显式包含
+real-smoke 所需的主表、LSQ enqueue/issue/commit、L2TLB 和 TLB 合法性开关，再覆盖本专项的 L2
+权重。这样直接以 `cfg=tc_dispatch_real_l2cache_model` 运行时不会因缺少基础 preset 而静默关闭主流程。
+
+本专项修改了共享 `dcache_agent_agent_driver` 和 `mem_base_sequence.sv`，因此不能只新增一份 L2Cache
+专项 flow。执行完成前必须扫描这些 class/function 的全部当前有效文档引用，并同步 DCache/SBuffer
+共享 responder flow、virtual-sequence background drain flow、源码分析和接口输入分类文档。
 
 ## 4. 问题一：L2 回复类型没有按 DCache coherent 场景分层
 
@@ -532,7 +561,8 @@ accept_dcache_c_beat(c_vif_fields)：
 ### 修改了什么逻辑
 
 1. 新增 `waiting_grant_ack`、`pending_grant_line`、`pending_grant_alias` 三个 sequence-local 字段。
-2. `e_ready` 在 responder active 期间保持 1；E.fire 时检查 sink 和 owner。
+2. `e_ready` 默认保持 0；只有 `waiting_grant_ack=1` 的 owner 分支才打开为 1，避免 DUT 在
+   responder 尚未建立 GrantAck owner 时提前消费 E。E.fire 时检查 sink 和 owner。
 3. 未等待 E 时看到 E.valid 视为协议/模型不一致并 `uvm_fatal`，不静默消费。
 4. 等待 E 时允许处理 E，A 和 Probe 保持 blocked；不设置固定 timeout，以免把合法 DUT latency误判为错，
    但使用现有 no-progress 机制和 UVM debug 日志暴露长期等待。
@@ -548,7 +578,8 @@ Grant 或 GrantData 最后一拍 D.fire：
   不插入地址表；
 
 service_e_channel(cycle_xact)：
-  cycle_xact.e_ready=1；
+  默认 cycle_xact.e_ready=0；
+  只有 waiting_grant_ack=1 时把 cycle_xact.e_ready 置 1；
   如果 vif.e_valid==0，返回；
   如果 waiting_grant_ack==0，uvm_fatal；
   如果 vif.e_sink!=0，uvm_fatal；
@@ -617,8 +648,10 @@ driver::send_pkt(tr)：
 ### 功能抽象与实现
 
 所有功能由 `dcache_mem__access_base_sequence::body()` 的单一逐拍 service loop 调度。每轮只构造和发送
-一个 `cycle_xact`，driver 在下一个 clocking block edge 驱动该 item。这样每个状态只由 sequence 本身
-更新一次，不创建并行队列线程，也不让 `pre_pkt_gap` 代替协议状态机。
+一个 `cycle_xact`。sequence 在每轮入口等待 `@(dcache_vif.drv_cb)`，该边界先采样上一轮已经写入
+clocking output 的值；随后 driver 通过阻塞 `get_next_item()` 取到本轮 item 后立即 `send_pkt()`，不再
+额外插入 hold 边界或复用上一 item。这样每个状态只由 sequence 本身更新一次，不创建并行队列线程，
+也不让 `pre_pkt_gap/post_pkt_gap` 代替协议状态机。
 
 fire 采用两阶段确认：当前轮看到 DUT valid 时只捕获稳定 payload 并在 `cycle_xact` 中 arm 对应 ready；
 `finish_item()` 返回后保留该 item 作为 `last_cycle_xact`。下一轮先用
@@ -650,8 +683,9 @@ fire 采用两阶段确认：当前轮看到 DUT valid 时只捕获稳定 payloa
 2. `seq_csr_common::init()` 在 body 开头调用；它是 semaphore 保护的幂等 task，兼容 vseq 已提前初始化和
    `tc_base` 直接启动 responder 两种入口。
 3. 所有 builder 从 `build_dcache_idle_xaction()` 开始；该 idle 模板固定
-   `a_ready=0/b_valid=0/c_ready=0/d_valid=0/e_ready=1`，4 个 sideband 为 0，
-   `pre_pkt_gap/post_pkt_gap` 固定 0。只有本拍 owner helper 可以覆盖对应 ready/valid。
+   `a_ready=0/b_valid=0/c_ready=0/d_valid=0/e_ready=0`，4 个 sideband 为 0，
+   `pre_pkt_gap/post_pkt_gap` 固定 0。只有 `waiting_grant_ack` owner 可以把 e_ready 覆盖为 1，
+   其它 owner helper 只能覆盖自己负责的 ready/valid。
 4. 只在一个地方更新 `service_cycle`、pending state、地址表和 Probe state；保存
    `last_cycle_xact/last_drive_cycle` 作为 handshake 事实，不读取未启用的 monitor analysis port。
 
@@ -665,13 +699,15 @@ dcache_mem__access_base_sequence::body()：
   清全部 pending state、service_cycle、last_cycle_xact 和缓存地址表；
 
   forever：
+    先等待一个 dcache_vif.drv_cb 边界；
+    采样 DUT 当前 valid/ready，作为上一轮 cycle_xact 的握手对端值；
     build_dcache_idle_xaction(cycle_xact)；
-    默认 a_ready=0、b_valid=0、c_ready=0、d_valid=0、e_ready=1；
+    默认 a_ready=0、b_valid=0、c_ready=0、d_valid=0、e_ready=0；
     cycle_xact.pre_pkt_gap=0，post_pkt_gap=0；
 
     如果 reset 未解除或 backend reset 未完成：
       清 pending state 和地址表；
-      发送 a/b/c/d/sideband 为0且 e_ready=1 的 safe idle；
+      发送 a/b/c/d/e/sideband 全 0 的 safe idle；
       last_cycle_xact = cycle_xact；
       last_drive_cycle = service_cycle；
       service_cycle++；
@@ -689,7 +725,7 @@ dcache_mem__access_base_sequence::body()：
         ReleaseAck due cycle 也以 last_drive_cycle 为起点；
 
     如果最后一拍 D.fire 与合法 E.fire 在同一观察周期出现，先建立 waiting_grant_ack，再消费 E；
-    默认 e_ready=1；
+    只有 waiting_grant_ack 分支把 e_ready=1，否则保持 e_ready=0；
 
     如果 D 正在 hold：继续驱同一 D payload，c_ready和a_ready保持0；
     否则如果 B 正在 hold：继续驱同一 B payload；
@@ -711,6 +747,8 @@ dcache_mem__access_base_sequence::body()：
     否则：
       尝试按权重启动一个 Probe；
 
+    对已经在本轮确认 fire 的 A/C，不再用同一拍 sampled valid 重新 arm；
+    也就是 C 分支和 A 分支分别要求 !c_fire / !a_fire，避免同一 fire 被重复分类；
     service_hint(service_cycle, cycle_xact)；
     cycle_xact.io_l2_flush_done=0；
     send_dcache_xaction(cycle_xact)；
@@ -741,15 +779,20 @@ env/plus.sv
 | `MEMBLOCK_L2_HINT_VALID_WT` | 0 | 0..100，0 关闭，100 每个 AcquireBlock 都发 |
 | `MEMBLOCK_L2_PROBE_ENABLE_WT` | 0 | 0..100，0 关闭，100 每个合格机会都尝试 |
 
-coding 时待新增的 `tc_dispatch_real_l2cache_model.cfg` 只覆盖专项值，建议初始配置：
+`tc_dispatch_real_l2cache_model.cfg` 是独立可执行 preset，显式包含 real-smoke 的主流程开关，
+并在其后覆盖专项值。当前默认配置为：
 
 ```text
 +MEMBLOCK_L2_RSP_DELAY_SMALL_WT=6
 +MEMBLOCK_L2_RSP_DELAY_MEDIUM_WT=3
 +MEMBLOCK_L2_RSP_DELAY_LARGE_WT=1
-+MEMBLOCK_L2_HINT_VALID_WT=80
-+MEMBLOCK_L2_PROBE_ENABLE_WT=5
++MEMBLOCK_L2_HINT_VALID_WT=0
++MEMBLOCK_L2_PROBE_ENABLE_WT=0
 ```
+
+需要观察 hint 或 Probe 时，使用一次只覆盖一个参数的 plusarg，例如
+`+MEMBLOCK_L2_HINT_VALID_WT=100` 或 `+MEMBLOCK_L2_PROBE_ENABLE_WT=100`；当前 Makefile/plus
+解析路径不把多个空格分隔的 plusarg 稳定合并为一个 directed preset。
 
 ### 文字伪代码
 
@@ -845,19 +888,27 @@ DCache DUT-output 端口伪造 A request，也不把暂时不可达误判为 res
 
 ```bash
 cd mem_ut/ver/ut/memblock/sim
-make eda_compile tc=tc_sanity mode=base_fun
-make eda_run tc=tc_sanity mode=base_fun
-make eda_run tc=basicTest ts=memblock_dispatch_real_smoke_vseq mode=base_fun cfg=tc_dispatch_real_smoke
-make eda_run tc=basicTest ts=memblock_dispatch_real_smoke_vseq mode=base_fun cfg=tc_dispatch_real_l2cache_model
+make eda_compile tc=tc_sanity mode=v2_l2cache_lockstep_20260723
+make eda_batch_run seed=666666 tc=basicTest ts=memblock_dispatch_real_smoke_vseq \
+  mode=v2_l2cache_lockstep_20260723 cfg=tc_dispatch_real_l2cache_model wave=off
+make eda_batch_run seed=666669 tc=basicTest ts=memblock_dispatch_real_smoke_vseq \
+  mode=v2_l2cache_lockstep_20260723 cfg=tc_dispatch_real_l2cache_model wave=on \
+  plus_arg=+MEMBLOCK_L2_HINT_VALID_WT=100
+make eda_batch_run seed=666668 tc=basicTest ts=memblock_dispatch_real_smoke_vseq \
+  mode=v2_l2cache_lockstep_20260723 cfg=tc_dispatch_real_l2cache_model wave=on \
+  plus_arg=+MEMBLOCK_L2_PROBE_ENABLE_WT=100
 ```
 
 验收标准：
 
 - 编译通过。
-- 上述仿真均 `TEST CASE PASSED`，`UVM_ERROR=0`、`UVM_FATAL=0`。
+- 编译结果为 0 error；日志仍包含 VCS `LCA_FEATURES_ENABLED` 环境 warning。普通 real smoke、
+  hint=100 定向 smoke 和 Probe=100 定向 smoke
+  均为 `TEST_PASS`，`UVM_ERROR=0`、`UVM_FATAL=0`。
 - 波形能对应证明 A/C/D/E、hint 和 Probe 的 handshake、delay、hold、map 生命周期。
-- 默认 cfg 不主动产生 hint/Probe；专项 cfg 能观察到非零 hint 和至少一次 map-backed Probe。若有限
-  transaction 数导致随机未命中 Probe，应提高 Probe 权重或 transaction 数后重跑，不把未命中当成 DUT 错误。
+- 默认 cfg 不主动产生 hint/Probe；使用单独 plusarg 的定向 smoke 已观察到单拍 hint 和 map-backed
+  Probe。有限 transaction 数导致随机未命中 Probe 时，应提高 Probe 权重或 transaction 数后重跑，
+  不把未命中当成 DUT 错误。
 
 ## 16. 剩余风险与后续边界
 
@@ -884,3 +935,239 @@ Release/Probe data writeback 事件和 map insert/delete reason。本 plan 不�
 后续覆盖率可使用 response kind、delay class、hint selected、keyword、Probe selected、C reply opcode、
 ReleaseData corrupt 和 map size 作为采样维度；这些字段只作为后续观测入口，不在本 plan 中定义 coverage
 bin 或达标规则。
+
+## 19. 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### 19.1 专项 cfg 的 hint/probe 默认值
+
+原 plan 建议 `tc_dispatch_real_l2cache_model.cfg` 采用非零 hint/probe 权重，作为专项压力配置。
+本次 coding 按用户当前要求，把新 cfg 的 `MEMBLOCK_L2_HINT_VALID_WT` 和
+`MEMBLOCK_L2_PROBE_ENABLE_WT` 默认保持为 `0`，仅保留三档 response delay 权重。
+
+原因：
+
+- 用户要求“新增 `tc_dispatch_real_l2cache_model.cfg`，默认参数保持 hint/probe 关闭”。
+- 当前 DCache responder 的 hint/probe 能力已经在公共参数链和主循环内补齐，但专项 cfg 默认不主动打开，
+  方便先用同一套 responder 验证基础可编译/可运行闭环，再由额外 plusarg 或后续 cfg 单独放开压力项。
+
+影响范围：
+
+- `mem_ut/ver/ut/memblock/seq/plus_cfg/tc_dispatch_real_l2cache_model.cfg`
+- 对应 review 文档中的默认 cfg 说明
+- 远端仿真命令需要通过额外 plusarg 或后续 cfg 才能观察非零 hint/probe
+
+### 19.2 [IMPLEMENTATION_DELTA] e_ready owner 收紧
+
+原 plan 的早期文字曾把 idle `e_ready` 描述为 1，并只强调在 E.fire 时检查 sink。实际 coding
+发现这样会在最后一拍 D.fire 的状态切换前提前让 DUT 消费 E，sequence 还没有建立
+`waiting_grant_ack` owner，GrantAck 可能被丢失。
+
+实现调整：`build_dcache_idle_xaction()` 默认 `e_ready=0`；只有上一拍最后一拍 Grant/GrantData
+已经转入 `waiting_grant_ack` 时，当前 item 才把 `e_ready` 置 1。E.fire 后校验 sink=0、插入
+cached line table 并清 owner。
+
+文字伪代码：
+
+```text
+默认构造 item 时 e_ready=0；
+若 waiting_grant_ack=1，则本拍 e_ready=1；
+若上一拍 e_ready=1 且 DUT e_valid=1，校验 sink 后完成 GrantAck；
+其它状态不开放 E，防止无 owner 的 E 被提前消费。
+```
+
+### 19.3 [IMPLEMENTATION_DELTA] DCache driver 锁步发送
+
+原 plan 只规定 sequence 的 `last_cycle_xact` 采样，没有明确 driver 是否会在 item 之间额外等待
+clocking event。旧 driver 使用 `try_next_item()`，无 item 时会 hold 上一 item，可能在 ready=1
+时重复握手同一个 D beat。
+
+实现调整：`dcache_agent_agent_driver::main_phase()` 在 responder 模式下阻塞
+`get_next_item()`，收到 item 后立即调用 `send_pkt()` 并 `item_done()`；不再保存或重复驱动上一
+item，也不使用 `pre_pkt_gap/post_pkt_gap` 插入协议等待。sequence 每轮入口的 `drv_cb` 只负责
+采样上一轮已经提交的 clocking output。
+
+文字伪代码：
+
+```text
+driver 主循环：
+  清空 req 句柄；
+  阻塞取下一 item；
+  item 非空则立即写入 clocking output；
+  调用 item_done；
+sequence 主循环：
+  在下一 drv_cb 边界采样上一 item 的对端 ready/valid；
+  用 last_cycle_xact 与采样值确认 fire，再构造下一 item。
+```
+
+### 19.4 [IMPLEMENTATION_DELTA] 同一采样拍 fire 防重复分类
+
+原 plan 描述了 fire 后推进状态，但没有明确“本轮已经消费的 sampled valid 不得再次作为新请求
+arm”。Probe C 完成时，若继续执行 idle C 分支，会把同一拍 ProbeAck 再次分类并触发错误。
+
+实现调整：body 每轮先清零 `a_fire/b_fire/c_fire/d_fire/e_fire`；C assembly、waiting Probe C 和
+idle C 分支都要求 `!c_fire`，A 分支要求 `!a_fire`。因此同一采样拍只会完成一次旧 transaction，
+不会重复建立新的 A/C snapshot。
+
+文字伪代码：
+
+```text
+先根据上一 item 和当前 sampled valid/ready 计算 fire；
+若 c_fire，完成当前 C owner 并清 armed C，不再进入任何 sampled C arm 分支；
+若 a_fire，接受当前 A 并清 armed A，不再把同一 A 当成新请求；
+只有 !c_fire 或 !a_fire 时，才允许对当前 valid 建立下一拍 snapshot。
+```
+
+### 19.5 [IMPLEMENTATION_DELTA] 主存物理范围初始化
+
+原 plan 要求对完整 64B line 做范围检查，但 `mem_access_base_sequence` 的 range helper 在没有
+调用 `init_main_mem_range()` 时默认允许所有地址，单看 `check_line_range()` 不能保证该合同。
+
+实现调整：DCache responder 在 `seq_csr_common::init()` 后清理本地 range，并用
+`get_paddr_base()/get_paddr_range()` 初始化 `main_mem_ranges`。该检查只约束 DCache responder
+看到的物理地址和主存访问，不改变主表的虚拟地址窗口或 TLB 映射策略。
+
+文字伪代码：
+
+```text
+初始化公共参数；
+清除本 sequence 旧的主存 range；
+读取共享 PADDR base/range；
+把 PADDR 窗口注册到本 sequence；
+后续完整 line 检查逐字节要求落在该窗口内，越界直接 fatal。
+```
+
+### 19.6 [IMPLEMENTATION_DELTA] 真实 smoke cfg 独立可执行
+
+原 plan 把专项 cfg 描述成只覆盖 L2 参数，但 Makefile 每次只读取一个 cfg 文件，不提供 cfg 继承。
+实现已把 real-smoke 的主表、LSQ、issue、commit、L2TLB 和 TLB 合法性开关复制到
+`tc_dispatch_real_l2cache_model.cfg`，末尾再覆盖 L2 delay/hint/probe 值；hint/probe 默认仍为 0。
+
+### 19.7 [IMPLEMENTATION_DELTA] 清理 DCache 旧 gap/delay 残留
+
+coding 复查发现 DCache class 中的 `default_pre_pkt_gap`、`default_post_pkt_gap` 和
+`accept_dcache_a_request()` 局部 `sampled_delay` 已不再被读取；当前锁步 responder 的 gap 固定由
+`build_dcache_idle_xaction()` 写 0，response 到期时间唯一由
+`accept_cycle + sample_l2_response_delay()` 计算。
+
+实现调整：删除 DCache 专属的无效字段声明和初始化，以及未使用局部变量；保留 SBuffer class 自己的
+gap 字段和单拍响应逻辑。该调整不改变任何 channel、owner、delay 区间或退出条件，只避免形成第二个
+时间/gap 状态来源。
+
+### 19.8 [IMPLEMENTATION_DELTA] 最新波形验证记录
+
+为满足本 plan 的波形验收标准，使用独立专项 cfg 重新运行：
+
+- seed 666669、`wave=on`、`+MEMBLOCK_L2_HINT_VALID_WT=100`：A.fire=245.2ns，Hint
+  `valid` 在 280.2ns 到 285.2ns 为 1，D 两个 GrantData beat 连续覆盖 295.2ns 到 305.2ns，
+  E.ready 在 305.2ns 开放并于 310.2ns 完成 E.fire。
+- seed 666668、`wave=on`、`+MEMBLOCK_L2_PROBE_ENABLE_WT=100`：B Probe 在 290.4ns
+  完成，地址为 `0x08b64e280`；C ProbeAck 在 1470.4ns 出现同地址，1475.4ns 完成 C.fire，
+  responder 退出日志为 `cached_lines=0`。
+
+对应波形文件位于 sim mode 的 `wave/` 目录；该验证只观察接口握手和 sequence 日志，不把波形
+观测误写成 RM/scoreboard 结论。
+
+### 19.9 [IMPLEMENTATION_DELTA] 通用 `drive_idle` 模式边界
+
+静态扫描仍可看到 `dcache_agent_agent_driver::drive_idle()` 在显式 `DRV_1/DRV_RAND` 配置下保持
+既有 TileLink channel 随机/全 1 行为，其中包括 `e_ready`。这不是 real-smoke responder item 路径：
+real-smoke 的 DCache agent 使用 `sqr_sw=ON`，由 `send_pkt()` 透传
+`build_dcache_idle_xaction()` 的 `e_ready=0`，再由 `waiting_grant_ack` owner 单独打开 E。
+
+实现保持通用 `drive_idle` 的原有 channel 行为，避免把本专项的 owner 语义扩散为全环境 driver 模式
+改造；四个 V2 L2 sideband 在所有 generic idle mode 末尾仍强制 known-zero。后续若要用 `DRV_1` 或
+`DRV_RAND` 压测 DCache coherent responder，必须另建兼容专项，不能把该模式和 real-smoke owner
+合同混用。
+
+### 19.10 [IMPLEMENTATION_DELTA] 最终 review 收紧 sideband 四态和无主 E.valid 边界
+
+最终源码 review 发现，driver 早期实现用普通 `!=/==` 检查 Hint/flush 字段，四态值可能无法按
+fail-fast 合同明确归类；同时 `process_e_fire()` 只检查已经握手的 E，尚未把原 plan 中“没有
+GrantAck owner 时出现 E.valid 直接 fatal”落实到主循环。
+
+实现调整：`check_l2_sideband_item()` 使用 case equality/inequality 检查 null item、
+`io_l2_flush_done`、Hint valid 和有效 payload 的 known-value 合同；主循环在处理当拍 D/E fire 后，
+若看到 `sampled_e_valid=1`、本拍没有 E.fire 且仍没有 `waiting_grant_ack` owner，则立即 fatal。
+`process_e_fire()` 的 sink 比较也改为 case inequality，避免未知 sink 被当成匹配。
+
+文字伪代码：
+
+```text
+发送 item 前：
+  item 为空则 fatal；
+  flush_done 不是已知 0 则 fatal；
+  Hint valid 不是已知 0/1 则 fatal；
+  valid=0 时 payload 不是全 0 则 fatal；
+  valid=1 时 payload 含未知值则 fatal；
+每个 service 边界：
+  先处理最后一拍 D.fire，允许它建立 GrantAck owner；
+  再处理合法 E.fire；
+  若 E.valid=1 但既没有 E.fire 也没有 owner，则 fatal；
+  E.fire 的 sink 不是完全匹配的保存值时 fatal。
+```
+
+### 19.11 [IMPLEMENTATION_DELTA] C assembly 完成拍独占仲裁
+
+最终 review 发现，首个 `C.fire` 建立两拍 C assembly 后，同一 service 拍仍可能继续进入 A arm 或
+Probe 创建分支，使 A 的 pending D 与 C assembly 后续 `ReleaseAck` 争用唯一 D owner。
+
+实现调整：处理完 `C.fire` 后，本轮仲裁增加独立空分支，不再 arm A 或启动 Probe；下一拍由
+`c_assembly_owner` 最高优先级继续接受第二个 C beat。`try_start_probe()` 同时增加 pending D、
+GrantAck、Probe、C assembly、A/C armed 和 stop gate，即使未来调用点变化也不能绕过 owner hazard。
+
+文字伪代码：
+
+```text
+若本拍发生 C.fire：
+  先推进当前 C owner；
+  本拍剩余时间不再开放 A.ready，也不创建 B Probe；
+  下一拍优先根据 c_assembly_owner 接受第二个 C beat。
+尝试 Probe 前：
+  任一 pending/owner/armed 状态存在或 global stop 已请求时直接返回；
+  只有完全空闲时才采样 Probe 权重并选择 cached line。
+```
+
+### 19.12 [IMPLEMENTATION_DELTA] 四态采样链改为真正可达
+
+早期实现虽然在 driver 使用 case equality，但 xaction 的四个 sideband 仍声明为二态 `bit`，并且
+service loop 把 E.valid 直接折叠成二态，X/Z 会在检查前丢失。
+
+实现调整：Hint/flush xaction 字段改为 `logic`，compare 使用 case inequality；service loop 先保存
+A.valid、B.ready、C.valid、D.ready、E.valid 的四态 raw 值，非 reset 时任一 X/Z 直接 fatal，之后
+才生成二态 fire 条件。E sink 继续在真实 E.fire 时用 case inequality 与保存 sink 对比。
+
+文字伪代码：
+
+```text
+采样五个 channel 对端握手位的四态 raw 值；
+若不在 reset 且任一 raw 不是已知 0/1，则 fatal；
+通过 raw===1 生成二态 sampled 值；
+只有 sampled valid/ready 与上一 item 同时满足时才形成 fire。
+```
+
+### 19.13 [IMPLEMENTATION_DELTA] generic E.ready 统一保持安全 0
+
+原 delta 仅把 `DRV_1/DRV_RAND` 描述为 real-smoke 之外的边界，但这会让同一个 driver 仍存在无
+GrantAck owner 的 E.ready producer。
+
+实现调整：`drive_idle()` 的 generic 分支不再给 `e_ready` 写入 1、X 或随机值，并在所有模式末尾
+统一写 `e_ready=0`；xaction 的默认随机约束也固定 `e_ready=0`。只有
+`dcache_mem__access_base_sequence` 手工构造、且
+`waiting_grant_ack=1` 的 item 可以把 E.ready 置 1。
+
+### 19.14 [IMPLEMENTATION_DELTA] global stop 与 legacy testcase 完成握手
+
+global stop 后禁止新 Probe；本拍已经由上一 item 的 A.ready 形成的 A.fire 仍按已握手事务完成。
+stop 后新出现但没有 sampled fire 的 A.valid 直接 fatal，不能重新打开 A.ready。C-channel
+Release/Probe reply 属于 DUT 已发出的 drain 输入，继续按 owner 接收。
+
+为避免 legacy `tc_dispatch_real_smoke` 在 DCache responder 发送 terminal idle 前 drop phase
+objection，公共同步包新增 `dcache_responder_done`。DCache body 启动时清零，完成全部 in-flight、发送
+最后 safe idle 后置一；legacy testcase 等待该标志后才清 `dispatch_real_smoke_active` 并退出。
+canonical `basicTest + memblock_dispatch_real_smoke_vseq` 仍使用既有 `wait fork` 作为完整 join。
+
+### 19.15 [IMPLEMENTATION_DELTA] 验证 warning 口径修正
+
+VCS compile 的功能结果为 0 error，但日志包含工具自身的 `LCA_FEATURES_ENABLED` warning；UVM 运行
+日志也保留既有 resource/default-sequence warning。验收只记录 `TEST_PASS`、`UVM_ERROR=0` 和
+`UVM_FATAL=0`，不再把结果写成“0 warning”。

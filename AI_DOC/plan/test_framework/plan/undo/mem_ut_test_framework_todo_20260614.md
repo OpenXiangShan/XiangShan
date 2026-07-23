@@ -516,7 +516,7 @@ TODO：
 ## 12. V2 L2 hint 与 L2 flush completion responder 完整闭环 TODO
 
 状态：V2 request-bound L2 hint、轻量 coherent response、地址表和低频 Probe 已形成待执行专项 plan：
-`AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`。
+`AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2cache_response_hint_probe_model_coding_plan_20260717.md`。
 `io_l2_flush_done` 仍不支持具有 request/in-flight/completion 关联的非零模型，继续保持 zero-only。
 
 ```text
