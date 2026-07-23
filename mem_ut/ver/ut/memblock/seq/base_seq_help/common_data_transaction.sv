@@ -1588,17 +1588,38 @@ class common_data_transaction extends uvm_object;
                                                 output memblock_tlb_entry entry,
                                                 output bit created);
         key = make_tlb_key_by_req(vpn, s2xlate);
+        return get_or_create_tlb_entry_by_req_with_snapshot(vpn,
+                                                             s2xlate,
+                                                             mmu_csr_state,
+                                                             key,
+                                                             entry,
+                                                             created);
+    endfunction:get_or_create_tlb_entry_by_req
+
+    // 中文注释：L2TLB request fire必须用该笔request冻结的CSR生成key和新entry。
+    // 不能在CSR变更边界回退到common_data的live mmu_csr_state；命中旧表项时仍复用同一by-key存储。
+    function bit get_or_create_tlb_entry_by_req_with_snapshot(
+        input bit [37:0] vpn,
+        input bit [1:0] s2xlate,
+        input mmu_csr_runtime_state csr_snapshot,
+        output memblock_tlb_lookup_key_t key,
+        output memblock_tlb_entry entry,
+        output bit created);
+        if (csr_snapshot == null) begin
+            `uvm_fatal("COMMON_DATA", "get_or_create_tlb_entry_by_req_with_snapshot got null csr_snapshot")
+        end
+        key = csr_snapshot.make_lookup_key({26'b0, vpn}, s2xlate);
         if (has_tlb_entry(key)) begin
             entry = tlb_entry_by_key[key];
             entry.last_hit_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
             created = 1'b0;
             return 1'b1;
         end
-        entry = build_tlb_entry_for_key(key);
+        entry = build_tlb_entry_for_key_with_csr(key, csr_snapshot);
         insert_tlb_entry(key, entry);
         created = 1'b1;
         return 1'b1;
-    endfunction:get_or_create_tlb_entry_by_req
+    endfunction:get_or_create_tlb_entry_by_req_with_snapshot
 
     function memblock_sfence_payload_t decode_raw_sfence(input memblock_sync_pkg::dispatch_raw_sfence_t raw);
         memblock_sfence_payload_t payload;
@@ -1720,20 +1741,33 @@ class common_data_transaction extends uvm_object;
         return apply_sfence_invalidate(decode_raw_sfence(raw));
     endfunction:apply_raw_sfence
 
-    function memblock_tlb_entry build_tlb_entry_for_key(input memblock_tlb_lookup_key_t key);
+    function memblock_tlb_entry build_tlb_entry_for_key_with_csr(
+        input memblock_tlb_lookup_key_t key,
+        input mmu_csr_runtime_state csr_snapshot);
         memblock_tlb_entry entry;
         tlb_map_builder    builder;
 
+        if (csr_snapshot == null) begin
+            `uvm_fatal("COMMON_DATA", "build_tlb_entry_for_key_with_csr got null csr_snapshot")
+        end
         builder = tlb_map_builder::type_id::create("tlb_builder_by_key");
         if (builder == null) begin
             `uvm_fatal("COMMON_DATA", "failed to create tlb_map_builder")
         end
-        entry = builder.build_tlb_entry_for_req(key.vpn[37:0], key.s2xlate, mmu_csr_state);
+        entry = builder.build_tlb_entry_for_req(key.vpn[37:0], key.s2xlate, csr_snapshot);
         entry.lookup_key = key;
         entry.asid = key.asid;
         entry.vmid = key.vmid;
         entry.s2xlate = key.s2xlate;
         return entry;
+    endfunction:build_tlb_entry_for_key_with_csr
+
+    function memblock_tlb_entry build_tlb_entry_for_key(input memblock_tlb_lookup_key_t key);
+        if (mmu_csr_state == null) begin
+            mmu_csr_state = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
+            mmu_csr_state.reset();
+        end
+        return build_tlb_entry_for_key_with_csr(key, mmu_csr_state);
     endfunction:build_tlb_entry_for_key
 
     function void get_mmu_csr_snapshot(output mmu_csr_runtime_state snapshot);
@@ -1820,9 +1854,10 @@ class common_data_transaction extends uvm_object;
             end
         end
         if (match_count == 0) begin
-            `uvm_error("COMMON_DATA",
-                       $sformatf("no pending uid_tlb_record matches TLB key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d",
-                                 key.vpn, key.asid, key.vmid, key.s2xlate))
+            `uvm_info("COMMON_DATA",
+                      $sformatf("no pending uid_tlb_record matches L2TLB response key vpn=0x%0h asid=0x%0h vmid=0x%0h s2xlate=%0d; allow prefetch/no-UID request",
+                                key.vpn, key.asid, key.vmid, key.s2xlate),
+                      UVM_LOW)
         end
         return match_count;
     endfunction:update_uid_tlb_records_by_entry

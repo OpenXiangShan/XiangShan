@@ -10,6 +10,8 @@
 
 本文基于以下输入文档和当前源码整理：
 
+> **L2TLB 当前实现说明（2026-07-22）**：本文中的早期 L2TLB 串行/gap 参数说明不作为当前接口合同；当前 V2 responder 的 queue、flush、owner、CSR snapshot 和延迟参数以 V2 L2TLB execution plan 与 analysis 文档为准。
+
 - `AI_DOC/plan/test_framework/plan/do/dispatch_plan_v2_development_detail_20260614.md`
 - `AI_DOC/plan/test_framework/review_doc/undo/dispatch_plan_v2_review_annotated.md`
 - `mem_ut/ver/ut/memblock` 下 dispatch 公共测试框架实现

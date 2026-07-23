@@ -129,15 +129,14 @@ task csr_ctrl_agent_agent_monitor::mon_data();
     logic io_ooo_to_mem_tlbCsr_priv_debug;
     csr_ctrl_agent_agent_xaction  mon_tr;
     memblock_sync_pkg::dispatch_raw_csr_t raw_csr;
-    memblock_sync_pkg::dispatch_raw_csr_t last_raw_csr;
-    bit has_last_raw_csr;
-    bit last_capture_en;
-    int unsigned last_raw_csr_rearm_epoch;
+    // 中文注释：逐拍runtime CSR payload baseline，只由本monitor维护。
+    // reset清valid；post-reset每拍更新，独立于semantic raw capture gate。
+    memblock_sync_pkg::dispatch_raw_csr_t last_runtime_csr;
+    bit has_last_runtime_csr;
+    bit runtime_payload_changed;
 
-    last_raw_csr = memblock_sync_pkg::make_empty_raw_csr();
-    has_last_raw_csr = 1'b0;
-    last_capture_en = 1'b0;
-    last_raw_csr_rearm_epoch = memblock_sync_pkg::raw_csr_rearm_epoch;
+    last_runtime_csr = memblock_sync_pkg::make_empty_raw_csr();
+    has_last_runtime_csr = 1'b0;
     while(1) begin
         @this.vif.mon_mp.mon_cb;
         io_ooo_to_mem_tlbCsr_satp_mode = this.vif.mon_mp.mon_cb.io_ooo_to_mem_tlbCsr_satp_mode;
@@ -324,20 +323,11 @@ task csr_ctrl_agent_agent_monitor::mon_data();
             `TCNT_CHECK_SIG_XZ(io_ooo_to_mem_tlbCsr_priv_debug,io_ooo_to_mem_tlbCsr_priv_debug,1);
 
         end
-        if (memblock_sync_pkg::raw_csr_rearm_epoch != last_raw_csr_rearm_epoch) begin
-            has_last_raw_csr = 1'b0;
-            last_raw_csr = memblock_sync_pkg::make_empty_raw_csr();
-            last_raw_csr_rearm_epoch = memblock_sync_pkg::raw_csr_rearm_epoch;
-        end
-        if (memblock_sync_pkg::dispatch_monitor_capture_en != last_capture_en) begin
-            has_last_raw_csr = 1'b0;
-            last_capture_en = memblock_sync_pkg::dispatch_monitor_capture_en;
-        end
         if (this.vif.rst_n!=1'b1 || memblock_sync_pkg::reset_backend_done!=1'b1) begin
-            has_last_raw_csr = 1'b0;
+            has_last_runtime_csr = 1'b0;
+            last_runtime_csr = memblock_sync_pkg::make_empty_raw_csr();
         end
-        if(this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1 &&
-           memblock_sync_pkg::dispatch_monitor_capture_en==1'b1) begin
+        if(this.vif.rst_n==1'b1 && memblock_sync_pkg::reset_backend_done==1'b1) begin
             raw_csr = memblock_sync_pkg::make_empty_raw_csr();
             raw_csr.valid             = 1'b1;
             raw_csr.satp_mode         = io_ooo_to_mem_tlbCsr_satp_mode;
@@ -367,12 +357,21 @@ task csr_ctrl_agent_agent_monitor::mon_data();
             raw_csr.m_pbmt_en         = io_ooo_to_mem_tlbCsr_mPBMTE;
             raw_csr.h_pbmt_en         = io_ooo_to_mem_tlbCsr_hPBMTE;
             raw_csr.cycle             = $time;
-            if (!has_last_raw_csr ||
-                memblock_sync_pkg::raw_csr_payload_changed(last_raw_csr, raw_csr)) begin
-                memblock_sync_pkg::push_raw_csr(raw_csr);
-                has_last_raw_csr = 1'b1;
+
+            runtime_payload_changed =
+                !has_last_runtime_csr ||
+                memblock_sync_pkg::raw_csr_payload_changed(last_runtime_csr, raw_csr);
+            memblock_sync_pkg::publish_runtime_csr_snapshot(raw_csr,
+                                                             runtime_payload_changed);
+            if (raw_csr.satp_changed || raw_csr.vsatp_changed ||
+                raw_csr.hgatp_changed || raw_csr.priv_virt_changed) begin
+                memblock_sync_pkg::note_l2tlb_flush_event($time);
             end
-            last_raw_csr = raw_csr;
+            if (memblock_sync_pkg::dispatch_monitor_capture_en) begin
+                memblock_sync_pkg::push_raw_csr(raw_csr);
+            end
+            last_runtime_csr = raw_csr;
+            has_last_runtime_csr = 1'b1;
         end
         //if(xxxTODOxxx==1'b1) begin
         //    mon_tr = csr_ctrl_agent_agent_xaction::type_id::create("mon_tr");

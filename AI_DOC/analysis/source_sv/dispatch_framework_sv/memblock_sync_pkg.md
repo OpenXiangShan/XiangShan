@@ -2,68 +2,246 @@
 
 本文档对应源码：
 
-- `mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv`
+- mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv
 
-`memblock_sync_pkg` 是 memblock UT 中用于 dispatch real smoke 的共享同步包和 monitor raw queue。它不是 transaction，也不直接驱动 DUT；它更像 monitor 到 dispatch 公共框架之间的轻量邮箱，同时保存少量跨 agent/sequence 共享的全局状态。
+memblock_sync_pkg 是 UVM monitor、dispatch service 和 L2TLB responder 之间的共享同步包。它保存 raw queue、runtime latest snapshot、非破坏性 flush sideband、dispatch service cycle 和 lifecycle owner 状态；它不直接驱动 DUT，也不直接修改主表 pass/fail/terminal。
 
-## 1. 文件定位与使用场景
+## 1. 术语与抽象职责
 
-输入来自各 monitor 或 connect 侧调用的 `push_raw_*()`，输出给 `dispatch_monitor_event_adapter` 调用的 `pop_raw_*()`。`dispatch_monitor_capture_en` 是关键控制开关，避免非 dispatch 场景或 testcase 收尾阶段继续把 raw event 塞进公共状态机。
-
-主要使用链路：
-
-| 阶段 | 使用方式 |
-|---|---|
-| reset/backend done | `top_tb.sv` 更新 `reset_backend_done`，driver/monitor/sequence 用它判断 DUT 是否进入可工作阶段。 |
-| real smoke active | real smoke testcase 设置 `dispatch_real_smoke_active`，部分 driver 根据它选择 dispatch 专用默认值。 |
-| L2TLB responder active | `L2tlb_agent_connect.sv` 更新 `l2tlb_responder_active`，L2TLB driver/sequence 用它决定是否接管 DTLB/L2TLB response。 |
-| flush 协同 | `common_data_transaction` 更新 `dispatch_flush_in_progress` 和 `dispatch_flush_epoch`，LSQ enqueue driver 用它中止被 redirect 冲掉的 admission。 |
-| monitor raw 采集 | writeback、IQ feedback、ctrl、CSR、fence monitor 调用 `push_raw_*()`；redirect input monitor 不反馈 recovery。 |
-| service loop drain | `dispatch_monitor_event_adapter` 周期性 `pop_raw_*()` 并转换成公共 event/status 更新。 |
-
-## 2. 全局同步字段
-
-| 字段 | 含义 | 使用场景 |
+| 术语 | 当前 package 中的含义 | 状态落点 |
 |---|---|---|
-| `reset_backend_done` | backend reset/初始化完成标志。 | driver、monitor、L2TLB responder、base sequence 等等待该标志后才进入 dispatch 活动。 |
-| `dispatch_flush_in_progress` | dispatch 框架正在处理 redirect/flush。 | issue scheduler 停止发射；LSQ enqueue driver 检测到后中止当前 admission。 |
-| `dispatch_flush_epoch` | flush 版本号。 | sequence 发出 xaction 时保存 epoch，driver 若发现 epoch 变化则认为该请求被 redirect 取消。 |
-| `dispatch_service_cycle` | dispatch service loop 的软件周期计数。 | redirect freeze、flushSb 等待、PTW-back replay 等 timeout 均使用该计数，避免直接依赖 `$time`。 |
-| `dispatch_monitor_capture_en` | monitor raw queue 采集开关。 | 只在 dispatch real smoke 期间采集；end check 前关闭并清残留。 |
-| `raw_csr_rearm_epoch` | latest CSR 被软件清空后的重新发布代号。 | `clear_raw_monitor_queues()` 递增；CSR monitor 见变化后清除本地 payload 去重基线。 |
-| `l2tlb_responder_active` | 当前 L2TLB agent 是否接管 DTLB/L2TLB response。 | L2TLB driver idle ready 行为和 L2TLB sequence 启动检查依赖它。语义是上游 DTLB responder，不是 L2Cache/PTW 下游模型。 |
-| `dispatch_real_smoke_active` | 当前是否处于 dispatch real smoke 场景。 | CSR driver 等组件用它选择 dispatch 场景下的默认驱动值。 |
-| `dispatch_flushsb_waiting_empty` | directed flushSb 已发出且正在等待 `sbIsEmpty`。 | ctrl monitor 在等待期间持续采集 `sbIsEmpty` raw ctrl event。 |
+| raw queue | monitor采集的离散事件 FIFO，必须由对应 semantic consumer pop | raw_int_wb_q、raw_ctrl_q、raw_sfence_q等 |
+| runtime latest | CSR monitor发布的最新状态快照，可由多个consumer重复读取 | runtime_csr_snapshot |
+| semantic raw latest | dispatch semantic flow使用的gated CSR latest视图 | latest_raw_csr |
+| flush event | L2TLB responder使用的非破坏性失效通知 | l2tlb_flush_event_seq/sample_time/valid |
+| owner | 当前唯一拥有L2TLB responder lifecycle的sequence | l2tlb_lifecycle_owner_claimed/name |
+| service cycle | dispatch 软件服务循环的单调计数 | dispatch_service_cycle |
 
-## 3. raw event struct
+抽象职责分为两条边界：
 
-| 类型 | 来源 monitor | 主要内容 | 后续消费者 |
+1. monitor把真实接口值转换成 raw event 或 runtime snapshot；
+2. consumer从对应视图读取并负责后续状态更新。L2TLB responder只读 runtime latest 和 flush latest，不抢占 dispatch raw queue 的消费权。
+
+## 2. 全局同步状态
+
+| 字段 | 含义 | 主要使用者 |
+|---|---|---|
+| reset_backend_done | backend reset/初始化完成 | driver、monitor、sequence |
+| dispatch_flush_in_progress | dispatch redirect/flush正在处理 | issue/LSQ dispatch flow |
+| dispatch_monitor_capture_en | semantic raw queue采集开关 | 各monitor的push_raw_* |
+| l2tlb_responder_active | connect takeover是否把L2TLB response交给agent | L2TLB sequence和driver |
+| dispatch_real_smoke_active | 当前是否运行dispatch real smoke | smoke相关driver |
+| dispatch_flushsb_waiting_empty | flushSb已发出且等待sbIsEmpty | ctrl monitor和flushSb flow |
+| dispatch_flush_epoch | dispatch flush版本 | LSQ admission和redirect |
+| dispatch_service_cycle | 软件service周期 | debug、timeout、TLB record时间戳 |
+| raw_csr_rearm_epoch | semantic CSR clear后的重新发布代号 | CSR monitor |
+| l2tlb_lifecycle_owner_claimed/name | 唯一L2TLB responder owner | sequence claim/release |
+
+l2tlb_lifecycle_owner_* 不由 DUT reset 清除。只有 owner sequence 发送最终 inactive cycle item并自然退出后，调用者名称匹配的 release 才能清除它。
+
+## 3. Raw 类型和队列
+
+### 3.1 raw event 类型
+
+| 类型 | 生产者 | 主要字段 | 消费者 |
 |---|---|---|---|
-| `dispatch_raw_int_wb_t` | `io_mem_to_ooo_int_wb_agent_agent_monitor.sv` | V2 `source_kind`、类别内 lane、ROB/exception/metadata、sample flush epoch；STD 只有 ROB value。 | `dispatch_monitor_event_adapter::convert_raw_int_wb()` 补 current snapshot 后转为 LOAD/STA/STD writeback event。 |
-| `dispatch_raw_iq_feedback_t` | `io_mem_to_ooo_iq_feedback_agent_agent_monitor.sv` | IQ feedback hit、STA SQ key、flush/PTW-back state。 | `convert_raw_iq_feedback()` 只转成 `iq_feedback_*` IssueQueue response；STA `hit=0` 额外转 replay；当前严格 V2 路径的 STD feedback 直接 fatal，不作为完成来源。 |
-| `dispatch_raw_ctrl_t` | `io_mem_to_ooo_ctrl_agent_agent_monitor.sv` | LQ/SQ deq 数量和指针、memory violation、`sbIsEmpty` 等。 | deq 交给 `lsq_commit_handler`；memory violation 当前归一成 redirect event；`sbIsEmpty` 解除 flushSb 等待。 |
-| `dispatch_raw_csr_t` | `csr_ctrl_agent_agent_monitor.sv` | MMU CSR 当前 raw 值和权限状态，以及 snapshot-only 的 `hd_misalign_ld/st_enable`、`priv_debug`。 | `push_raw_csr()` 覆盖 latest CSR snapshot，`drain_csr_events()` 按 seq 同步到 `mmu_csr_runtime_state`。 |
-| `dispatch_raw_sfence_t` | `fence_agent_agent_monitor.sv` | `io_ooo_to_mem_sfence_valid/rs1/rs2/addr/id/hv/hg` 和采样 cycle。 | `dispatch_monitor_event_adapter::drain_sfence_events()` 调用 `common_data_transaction::apply_raw_sfence()`，删除命中的 live TLB entry。 |
+| dispatch_raw_int_wb_t | int-WB monitor | V2 source_kind、lane内port、ROB/LQ/SQ key、metadata、exception和采样flush epoch | dispatch_monitor_event_adapter |
+| dispatch_raw_iq_feedback_t | IQ feedback monitor | target、key、hit、flush state和exception | dispatch monitor adapter |
+| dispatch_raw_ctrl_t | ctrl monitor | LQ/SQ deq、memory violation、sbIsEmpty等 | LSQ/redirect/flushSb handler |
+| dispatch_raw_sfence_t | fence monitor | valid、rs1/rs2、addr/id、hv/hg和service cycle | semantic sfence adapter |
+| dispatch_raw_csr_t | CSR monitor | satp/vsatp/hgatp、权限、PBMT和snapshot-only字段 | runtime snapshot及CSR semantic flow |
 
-## 4. raw queue 与 API
+dispatch_raw_csr_t 中的 hd_misalign_ld_enable、hd_misalign_st_enable 和 priv_debug 被 monitor 采样并保存；它们属于 runtime snapshot字段，本 package不把它们混入 L2TLB lookup key，也不直接改变主表 pass/fault判断。
 
-| 函数/task | 功能和设计原理 |
-|---|---|
-| `make_empty_raw_*()` | 构造对应 raw event 的安全空值，monitor 填字段前统一从空结构开始，避免旧字段残留。 |
-| `raw_csr_payload_changed()` | 判断 CSR raw payload 是否真正变化，避免每拍重复推送相同 CSR snapshot。 |
-| `push_raw_*()` | 除 CSR 外，在 `dispatch_monitor_capture_en && valid` 时把 raw event push 到对应 FIFO。CSR 是 runtime 状态，不走 FIFO，`push_raw_csr()` 只覆盖 `latest_raw_csr` 并递增 `latest_raw_csr_seq`。sfence/hfence 也走 FIFO，因为每条 fence 都是一次离散失效事件，不能像 CSR snapshot 那样只保留 latest。monitor 不直接改 status 表，保持采集和状态更新解耦。 |
-| `pop_raw_*()` | FIFO 弹出 raw event，供 `dispatch_monitor_event_adapter` drain。 |
-| `clear_raw_monitor_queues()` | 清空所有 raw queue 和 latest CSR，并递增 `raw_csr_rearm_epoch`。testcase reset、flush 收尾或 end check 前用于消除残留事件；epoch 保证 capture 保持开启且 CSR 值未变化时也会重新发布首份 snapshot。 |
-| `tick_dispatch_service_cycle()`、`get_dispatch_service_cycle()` | 维护/读取 service-cycle 计数，供 timeout 和 directed wait 使用。 |
-| `raw_monitor_queue_size()` | 返回所有 raw queue 总残留数量。`end_test_check()` 用它判断 monitor 采集是否还有未消费事件。 |
+### 3.2 raw queue API
 
-## 5. 设计约束
+抽象功能描述：push/pop API让 monitor采集和semantic状态更新解耦；除CSR latest以外，离散事件都用FIFO保存，避免事件被后一个事件覆盖。
 
-- raw queue 只保存 monitor 原始事件，不直接更新 `common_data_transaction` 状态。
-- 所有 raw event 必须经 `dispatch_monitor_event_adapter` 归一化后再进入 writeback/replay/redirect/commit/CSR 处理链路。
-- sfence/hfence raw event 也必须经 adapter 调用公共数据 API；fence monitor 不能直接删除 `tlb_entry_by_key`。
-- `raw_csr_payload_changed()` 比较三个 V2 snapshot-only 字段，保证它们变化时 latest snapshot 能更新；runtime 是否产生语义版本变化由 `mmu_csr_runtime_state` 单独决定。
-- `dispatch_raw_sfence_t` 不保存 `sfence_bits_flushPipe`；该位当前只完成 transaction/driver/monitor 保真，不进入软件失效行为。
-- `io_redirect_*` 是 TB 驱动 DUT 的 input 接口，redirect monitor 不再 push raw event；Self Redirect Filter 已删除/停用。
-- `dispatch_monitor_capture_en` 关闭后，monitor 不应继续 push 新事件；若仍有残留，end check 会 warning 并清空。
-- L2TLB 相关字段只表示 DTLB/L2TLB 上游 responder 是否 active，不表示 L2TLB 到 cache/memory 下游访问模型。
+核心行为：
+
+~~~text
+make_empty_raw_*：
+  返回安全空结构，避免monitor复用旧字段；
+
+push_raw_int_wb/iq_feedback/ctrl/sfence：
+  只有capture gate开启且事件有效时入队；
+
+pop_raw_*：
+  FIFO为空返回空结构和0；
+  非空从队头取出一条事件；
+
+clear_raw_monitor_queues：
+  清所有semantic raw FIFO和latest_raw_csr；
+  清latest_raw_csr_seq并把dispatch_service_cycle清零；
+  递增raw_csr_rearm_epoch；
+  不清runtime_csr_snapshot、runtime_csr_snapshot_seq、l2tlb_flush_event_seq或owner。
+~~~
+
+package API不直接更新 common_data_transaction，由 dispatch_monitor_event_adapter、LSQ handler、redirect owner 或其他明确 consumer 负责。
+
+## 4. Runtime CSR latest
+
+### 4.1 publish_runtime_csr_snapshot()
+
+源码位置：
+
+- mem_ut/ver/ut/memblock/agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_monitor.sv
+- mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv
+
+抽象功能描述：CSR monitor维护自己的逐拍 baseline，并把首份或发生变化的完整 CSR payload发布为公共 latest。该视图独立于 dispatch_monitor_capture_en，用于保证 legacy L2TLB default sequence也能取得真实CSR。
+
+真实逻辑摘要：
+
+~~~systemverilog
+runtime_payload_changed =
+    !has_last_runtime_csr ||
+    memblock_sync_pkg::raw_csr_payload_changed(last_runtime_csr, raw_csr);
+memblock_sync_pkg::publish_runtime_csr_snapshot(raw_csr,
+                                                 runtime_payload_changed);
+
+function void publish_runtime_csr_snapshot(input dispatch_raw_csr_t item,
+                                           input bit payload_changed);
+    if (item.valid && payload_changed) begin
+        runtime_csr_snapshot = item;
+        runtime_csr_snapshot_valid = 1'b1;
+        runtime_csr_snapshot_seq++;
+    end
+endfunction
+~~~
+
+文字伪代码：
+
+~~~text
+post-reset monitor每拍构造raw_csr；
+首份sample或payload变化时调用publisher；
+publisher覆盖runtime_csr_snapshot并递增统一seq；
+payload未变化时保留原latest和seq；
+publisher不pop raw queue，不修改TLB table、ready或主表状态。
+~~~
+
+raw_csr_payload_changed() 比较查表和异常建模需要的 MMU CSR、权限、PBMT以及 hd_misalign_ld/st_enable、priv_debug。branch predictor enable 等字段不进入该比较，也不进入 L2TLB lookup key。
+
+### 4.2 get_latest_runtime_csr_snapshot()
+
+抽象功能描述：该函数返回当前 runtime latest 的副本和统一序号，不消费或清除 snapshot。
+
+~~~systemverilog
+seq = runtime_csr_snapshot_seq;
+if (!runtime_csr_snapshot_valid) begin
+    item = make_empty_raw_csr();
+    return 1'b0;
+end
+item = runtime_csr_snapshot;
+return 1'b1;
+~~~
+
+L2TLB sequence每拍读取该接口，并把同一 seq 传给 common_data_transaction::apply_raw_csr_runtime()。多个consumer读取不会互相争抢；同一seq的重复apply由公共数据层幂等抑制。
+
+### 4.3 push_raw_csr() 与 get_latest_raw_csr()
+
+这两个函数服务 dispatch semantic raw flow，不替代 runtime latest：
+
+~~~text
+push_raw_csr：
+  只有capture gate、raw valid且runtime snapshot已建立时工作；
+  当semantic latest无效或seq不同，把raw写入latest_raw_csr；
+  使用runtime_csr_snapshot_seq作为统一版本，不单独制造第二个CSR版本号；
+
+get_latest_raw_csr：
+  返回gated semantic latest及其seq；
+  不消费runtime snapshot。
+~~~
+
+clear_raw_monitor_queues() 清掉 latest_raw_csr_valid 后，只要capture仍开启，下一次 push_raw_csr() 可按无效标志重新发布同一runtime版本。runtime latest本身保持不变。
+
+## 5. L2TLB flush lifecycle sideband
+
+### 5.1 note_l2tlb_flush_event()
+
+源码位置：
+
+- CSR monitor
+- fence monitor
+- memblock_sync_pkg.sv
+
+抽象功能描述：记录一个会影响 DTLB filter生命周期的最新事件，不承担 semantic sfence entry删除，也不直接清 pending queue。
+
+~~~systemverilog
+function void note_l2tlb_flush_event(input time sample_time);
+    l2tlb_flush_event_seq++;
+    l2tlb_flush_sample_time = sample_time;
+    l2tlb_flush_event_valid = 1'b1;
+endfunction
+~~~
+
+发布规则：
+
+- CSR monitor在 satp_changed、vsatp_changed、hgatp_changed 或 priv_virt_changed 发生时发布。
+- fence monitor对每个post-reset有效 sfence sample发布。
+- event seq在一次仿真中单调递增，不因semantic raw clear回退。
+- event sideband不受 dispatch_monitor_capture_en 控制。
+
+### 5.2 get_latest_l2tlb_flush_event()
+
+抽象功能描述：向 L2TLB lifecycle owner提供当前latest event的只读副本。
+
+~~~systemverilog
+event_seq = l2tlb_flush_event_seq;
+sample_time = l2tlb_flush_sample_time;
+valid = l2tlb_flush_event_valid;
+~~~
+
+sequence保存自己的 last_seen_flush_event_seq。它在等待NBA后读取该接口，发现seq前进才处理一次；读取不会pop raw_sfence_q，也不会替代 apply_raw_sfence() 对 live TLB entry的semantic失效。
+
+## 6. L2TLB lifecycle owner API
+
+### 6.1 try_claim_l2tlb_lifecycle_owner()
+
+抽象功能描述：在任何ready开放前，尝试把唯一 responder lifecycle所有权交给一个sequence实例。
+
+~~~text
+输出当前owner名称；
+如果lifecycle_owner_claimed为1：
+  返回0，不修改状态；
+否则：
+  保存调用者名称，置claimed为1，返回1。
+~~~
+
+package helper只返回状态，不调用UVM report。sequence收到0后负责 uvm_fatal，避免把两个queue owner交给sequencer item arbitration隐式交错。
+
+### 6.2 try_release_l2tlb_lifecycle_owner()
+
+抽象功能描述：只允许当前owner在自然排空后释放所有权。
+
+~~~text
+输出当前owner；
+若未claimed或调用者名称不匹配：
+  返回0且保持状态；
+否则：
+  清claimed和owner name，返回1。
+~~~
+
+DUT reset不清owner。支持的交接顺序是：最终inactive item完成、sequence自然退出、release成功，随后新实例claim。强制 kill 后在同一仿真重新handoff不属于当前支持范围。
+
+## 7. Sample 与公共时间边界
+
+L2TLB responder 自己的 `sample_seq` 是 sequence 私有状态，不由本 package 维护，也不提供
+`get_dut_sample_seq()` 接口。当前 package 只维护 dispatch service cycle；未来 cancel/redirect
+对账专项若需要 DUT sample watermark，应由该专项明确新增写者和生命周期，不能把尚不存在的 API
+当作当前 package 能力。
+
+### 7.1 service cycle API
+
+tick_dispatch_service_cycle() 和 get_dispatch_service_cycle() 维护 dispatch software service cycle。它用于日志、timeout和UID TLB record时间戳，不代替 L2TLB responder自己的 sample_seq。
+
+## 8. L2TLB 相关状态不变量
+
+- L2TLB sequence只能读取 runtime_csr_snapshot 和 l2tlb_flush_event，不能pop dispatch raw queue。
+- runtime_csr_snapshot_seq 与 latest_raw_csr_seq共享版本语义，但两者是不同消费视图。
+- clear_raw_monitor_queues()不应让L2TLB丢失已发布的runtime CSR或重复处理旧flush event。
+- owner状态只由try-claim/release修改；package不负责检查 outstanding，sequence在release前检查。
+- package不生成request token、不创建pending record、不选择response、不修改主表pass/fail/terminal。
+- l2tlb_responder_active只表示 DTLB/L2TLB上游response takeover，不表示 L2Cache/PTW下游模型。
+- dispatch_raw_csr_t中的 misalign 和 priv_debug字段目前只保存snapshot；是否被异常激励消费者使用由专项sequence/plan决定。
+- 当前 package 不定义 cancel snapshot、redirect anchor 或公共 DUT sample sequence；这些属于后续 LSQ
+  MMIO/status 与 redirect/cancel 专项的边界，不能在本分析中作为现有 API 描述。

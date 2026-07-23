@@ -190,7 +190,7 @@ flush 清空 filter entry；验证 responder 若从顶层 monitor 建立 flush s
 
 - [V2 L2TLB agent 接口知识](../../../interface/v2/agents/l2tlb_agent.md)：内部接管点、字段和 UVM 映射。
 - [Memory flushPipe flow](memory_flush_pipe_flow.md)：sfence 与完整 core flushPipe 的不同职责。
-- `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md`：
+- `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md`：
   测试框架多 outstanding responder 的执行方案。
 
 ## V2/V3 差异

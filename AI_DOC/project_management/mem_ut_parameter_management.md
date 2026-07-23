@@ -200,7 +200,15 @@ mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh
 - 不应把编译期宏散落在 sequence、agent、driver、monitor 或 testcase 内部。
 - 宏文件只管理编译期参数，不承担 runtime 配置职责。
 
-### 2.5 校验函数命名规则
+### 2.5 L2TLB 参数当前分层
+
+V2 L2TLB responder 的结构参数与 runtime 行为参数必须分开管理：
+
+- `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE`、`MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES` 是 compile-time DUT 结构/时序合同，只在 `mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh` 定义，并由 `memblock_dispatch_types.sv` 暴露 typed localparam。
+- `MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY`、三个 `MEMBLOCK_L2TLB_RESP_*_WT` 和 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` 是 runtime sequence 行为参数，统一经过 `env/plus.sv -> seq_csr_common -> getter`。
+- `MEMBLOCK_L2TLB_MIN_LATENCY`、`MEMBLOCK_L2TLB_MAX_LATENCY` 已删除，不得在 preset cfg、getter、历史迁移入口之外重新出现；历史文档应注明以当前 V2 L2TLB execution plan 为准。
+
+### 2.6 校验函数命名规则
 
 后续新增合法性检查、模式一致性检查或上下文一致性检查函数时，函数名必须带
 `check_` 前缀。

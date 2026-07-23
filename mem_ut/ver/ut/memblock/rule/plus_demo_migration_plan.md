@@ -101,7 +101,7 @@ Dispatch framework 参数分组如下：
 | lsqcommit pendingPtr sequence | `MEMBLOCK_LSQCOMMIT_SEQ_EN` |
 | redirect/recovery sequence | `MEMBLOCK_REDIRECT_SEQ_EN`、`MEMBLOCK_REDIRECT_DRIVE_TIMEOUT`、`MEMBLOCK_REDIRECT_FREEZE_TIMEOUT` |
 | directed flushSb/PTW replay | `MEMBLOCK_FLUSHSB_SEQ_EN`、`MEMBLOCK_FLUSHSB_REQUEST_CYCLE`、`MEMBLOCK_FLUSHSB_TIMEOUT`、`MEMBLOCK_REPLAY_WAIT_PTW_EN`、`MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT` |
-| L2TLB/PTW responder sequence | `MEMBLOCK_L2TLB_SEQ_EN`、`MEMBLOCK_L2TLB_MIN_LATENCY`、`MEMBLOCK_L2TLB_MAX_LATENCY`、`MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` |
+| L2TLB/PTW responder sequence | `MEMBLOCK_L2TLB_SEQ_EN`、`MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY`、`MEMBLOCK_L2TLB_RESP_1C_WT`、`MEMBLOCK_L2TLB_RESP_MID_WT`、`MEMBLOCK_L2TLB_RESP_LONG_WT`、`MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` |
 
 `seq_csr_common.sv` 是 sequence 使用的正式读取入口。它从 `plus.sv`
 读取最终值后执行合法性检查：非负整型检查、必需非零检查、权重组全0
@@ -210,8 +210,11 @@ connect 是否接管由编译期宏 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN` 控制�
 编译期覆盖 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN=0` 表示关闭 L2TLB agent 接管，
 agent interface 保持非激活默认值；该模式不是只观察 DUT 原始 L2TLB/PTW response。
 如后续需要保留并观察 DUT 原始 response 通路，应另建 passive monitor 或 mirror 方案。
-`MEMBLOCK_L2TLB_MIN_LATENCY` 和
-`MEMBLOCK_L2TLB_MAX_LATENCY` 控制 response 延迟范围；查不到表项时由
+`MEMBLOCK_L2TLB_MAX_OUTSTANDING` 控制行为层 outstanding 上限，不能超过 V2 compile-time
+`MEMBLOCK_DUT_L2TLB_DFILTER_SIZE`；`MEMBLOCK_L2TLB_RESP_REORDER_EN` 控制默认保序或到期项乱序。
+`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY` 与三个 `*_WT` 参数控制
+1 拍/中/长三档最早 response due 的加权选择。旧的 `MEMBLOCK_L2TLB_MIN_LATENCY` 和
+`MEMBLOCK_L2TLB_MAX_LATENCY` 已删除，不得再加入 cfg 或源码。查不到表项时由
 `get_or_create_tlb_entry_by_req()` 自动创建 by-key TLB entry，不再提供额外的
 fault/fatal/idle 缺项策略参数。
 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` 控制 responder 连续空闲停止条件，连续 idle 超过该阈值才停止。L2TLB responder

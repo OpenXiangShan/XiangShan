@@ -1,5 +1,7 @@
 # l2tlb_base_sequence.sv Implementation Plan
 
+> **历史实现说明（2026-07-22）**：本文记录早期 L2TLB skeleton 的设计过程。当前 V2 有效实现、参数名称和生命周期合同以 `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md` 及其 implementation review 为准；本文中的 `MIN/MAX_LATENCY`、blocking `pre_pkt_gap` 和 single-outstanding 描述不再是当前行为。
+
 ## 1. 目标
 
 实现 `memblock_l2tlb_base_sequence.sv`，用于对 DTLB/L2TLB 侧的翻译请求进行响应建模：
@@ -133,6 +135,8 @@ tlb_req_context_t tlb_req_context_by_robidx[bit [8:0]];
 4. response entry 确定后，按 key 回填所有 `pte_valid=0` 的匹配 uid record。
 
 ## 4. l2tlb_base_sequence.sv 行为
+
+> 本文后续参数段落记录的是早期 skeleton。当前 V2 有效实现由 `mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md` 统一定义；旧 `MIN/MAX_LATENCY`、串行 `pre_pkt_gap` 和 single-outstanding 描述不应作为当前 coding 指令。
 
 ### 4.1 类定义
 

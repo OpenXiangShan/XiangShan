@@ -1,1314 +1,889 @@
-# mem_ut TLB/L2TLB responder flow
+# mem_ut TLB/L2TLB Responder Flow
 
-本文档说明 mem_ut 中 L2TLB responder 的真实函数调用链。当前 `L2TLB_agent` 是 DTLB 与 L2TLB 连接处的上游 responder：request 来自 DTLB，response 由 `L2TLB_agent` 回给 DTLB。它不是 L2TLB 到 L2Cache、PTW 或 memory 的下游访问模型。
+本文档说明 V2 mem_ut 中 L2TLB responder 的真实函数调用链。当前 `L2TLB_agent` 位于 DTLB 与 L2TLB 的 request/response 连接点：request 方向是 DTLB 到 `L2TLB_agent`，response 方向是 `L2TLB_agent` 到 DTLB。它不建模 L2TLB 到 L2Cache、PTW page walk 或 memory 的下游访问。
 
-## 1. 函数调用 Flow 图
+## 1. 术语与抽象功能说明
+
+### 1.1 术语
+
+| 英文术语 | 当前 flow 中的中文含义 | 代码对象或状态落点 | 示例 |
+|---|---|---|---|
+| `sample` | DUT 在一个 clocking block 边界看到的稳定接口值 | `sample_seq`、`drv_cb`、`mon_cb` | sample N 采到上一周期已驱动的 `ready` |
+| `request fire` | 同一 sample 的 request `valid && ready` 为 1，表示 DUT 与 responder 完成一笔请求握手 | `request_fire()`、`sampled_req_*` | 只有 fire 才创建动态 request token |
+| `token` | 测试框架给每次 request fire 分配的单调编号，只用于生命周期审计 | `memblock_l2tlb_pending_req::request_token` | 相同 lookup key 的两次 fire 仍有两个 token |
+| `pending_q` | 已经 fire、但尚未选到 response 端口的 bounded request 队列 | `memblock_l2tlb_base_sequence::pending_q` | 长延迟 request 在到期前保留在队列中 |
+| `driving_req` | 已经放入当前 cycle item，等待下一 sample 确认完成的唯一 response | `driving_req`、`driving_valid` | V2 response 无 ready，下一 sample 即完成 |
+| `outstanding` | 已接受但尚未完成或取消的 token 总数 | `pending_q.size() + driving_valid` | 用它产生 request backpressure |
+| `due sample` | 一笔 request 最早允许被 DUT 采样 response 的 sample 序号 | `due_sample_seq` | 1C 档的 due 为 accept sample 加 1 |
+| `ordered` | 只允许 `pending_q` 队头到期后回复 | `resp_reorder_en=0` 或 `stopping=1` | 队头未到期时，后续已到期项也等待 |
+| `reorder` | 从所有已到期 pending token 中随机选择一笔回复 | `resp_reorder_en=1` | 后接受的短延迟请求可先回复 |
+| `runtime CSR latest` | CSR monitor 独立发布、可重复读取且不受 dispatch semantic capture gate 控制的最新 MMU CSR 快照 | `runtime_csr_snapshot`、`runtime_csr_snapshot_seq` | responder 首次取得该快照后才开放 request ready |
+| `flush event` | CSR translation context changed 或有效 sfence sample 发布的非破坏性生命周期 sideband | `l2tlb_flush_event_seq/sample_time/valid` | responder 读取 latest，不 pop `raw_sfence_q` |
+| `hold` | flush 后暂时关闭 request ready 和 response 的安全 sample 窗口 | `accept_hold_until_sample` | V2 使用编译期 `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES` |
+| `lifecycle owner` | 唯一拥有 responder queue、token、ready 和 response 调度权的 sequence 实例 | `l2tlb_lifecycle_owner_claimed/name` | agent default sequence 与显式 virtual sequence不能并发拥有 |
+| `entry snapshot` | request fire 时从 live TLB entry 显式复制的不可变回复数据 | `memblock_l2tlb_pending_req::entry_snapshot` | 等待期间 live table 被 sfence 删除也不改变已接受 request 的 payload |
+| `UID record` | dispatch 主表 uid 对应的 TLB 等待记录；不是每笔 DTLB request 都必须具备 | `uid_tlb_record_by_uid` | prefetch 或无 UID request 的匹配数可以为 0 |
+| `ready opportunity` | reset或flush阻塞解除后至少发送一拍可接受ready的机会，不等同于真实request fire | `ready_opportunity_since_lifecycle_block` | hold结束且idle阈值为1时先发送ready，再允许退出 |
+
+### 1.2 Flow 抽象职责
+
+L2TLB responder 的抽象职责是：在每个 sample 精确识别 DTLB request fire，为每次 fire 冻结 request-time CSR、lookup key、TLB entry 和 response payload，然后通过 bounded queue 按 due/order 策略逐拍返回。它同时拥有 reset、flush、stop 与 token 守恒，不拥有主表 pass/fail/terminal，也不消费 dispatch semantic raw queue。
+
+关键时序合同：
+
+```text
+进入 sample N 的 service tick：
+  valid、vpn、s2xlate取 drv_cb 在该边界的 sample；
+  ready取 mon_cb 在同一边界看到的实际接口 sample；
+  request_fire = sampled_valid && sampled_ready；
+  等待 NBA 后读取同一边界 monitor 发布的 CSR/flush latest；
+  生成供下一个 sample 使用的唯一 cycle item。
+```
+
+## 2. 函数调用 Flow 图
 
 ```mermaid
 flowchart TD
-    A[MEMBLOCK__L2TLB_AGENT_CONNECT] --> B[memblock_sync_pkg::l2tlb_responder_active]
-    A --> C[force U_IF.io_ptw_req_0_valid/vpn/s2xlate from RTL _inner_dtlbRepeater_io_ptw_req_0_*]
-    A --> D{MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN != 0}
-    D -->|active| E[force RTL _inner_ptw_io_tlb_1_req_0_ready/resp_* from U_IF]
-    D -->|inactive| F[force U_IF ready/resp_* from RTL original PTW/L2TLB path]
+    A[MEMBLOCK__L2TLB_AGENT_CONNECT] --> B[l2tlb_responder_active]
+    A --> C[DTLB request valid/vpn/s2xlate进入VIF]
+    A --> D[agent ready/response返回DTLB]
 
-    G[memblock_l2tlb_base_sequence::body] --> H[seq_csr_common::init]
-    H --> I[memblock_l2tlb_base_sequence::configure_from_plus]
-    I --> J{enable?}
-    J -->|false| K[return]
-    J -->|true| L[memblock_l2tlb_base_sequence::ensure_context]
-    L --> M{l2tlb_responder_active?}
-    M -->|false| N[uvm_fatal]
-    M -->|true| O[memblock_l2tlb_base_sequence::drive_l2tlb_loop]
+    E[CSR monitor post-reset sample] --> F[publish_runtime_csr_snapshot]
+    E --> G{translation context changed}
+    G -->|是| H[note_l2tlb_flush_event]
+    I[fence monitor有效sfence sample] --> H
 
-    O --> P[wait l2tlb_vif drv_cb]
-    P --> Q[memblock_l2tlb_base_sequence::send_l2tlb_cycle]
-    Q --> R{request_valid}
-    R -->|false| S[idle_count++ / idle_stop check]
-    S -->|idle_count > idle_stop_cycle| T[break]
-    S -->|not timeout| P
-    R -->|true| U[memblock_l2tlb_base_sequence::sample_request_fields]
-    U --> V[memblock_l2tlb_base_sequence::create_l2tlb_xaction ready_tr]
-    V --> W[memblock_l2tlb_base_sequence::send_l2tlb_item ready_tr]
-    W --> X[L2tlb_agent_agent_driver::send_pkt drives io_ptw_req_0_ready]
-    X --> Y[memblock_l2tlb_base_sequence::choose_latency]
-    Y --> Z[memblock_l2tlb_base_sequence::create_l2tlb_xaction resp_tr]
-    Z --> AA[memblock_l2tlb_base_sequence::drain_csr_runtime_events]
-    AA --> AB[dispatch_monitor_event_adapter::drain_csr_events]
-    AB --> AC[common_data_transaction::apply_raw_csr_runtime]
-    AC --> AD[common_data_transaction::get_or_create_tlb_entry_by_req]
-    AD --> AE[common_data_transaction::make_tlb_key_by_req]
-    AE --> AF[mmu_csr_runtime_state::make_lookup_key]
-    AD --> AG{has_tlb_entry}
-    AG -->|hit| AH[entry last_hit_cycle update]
-    AG -->|miss| AI[common_data_transaction::build_tlb_entry_for_key]
-    AI --> AJ[tlb_map_builder::build_tlb_entry_for_req]
-    AJ --> AK[memblock_tlb_entry::update_addr_fields / fixup_pte_legal / apply_csr_state]
-    AK --> AL[common_data_transaction::insert_tlb_entry]
-    AH --> AM[memblock_l2tlb_base_sequence::fill_dtlb_resp_from_entry]
-    AL --> AM
-    AM --> AN[common_data_transaction::update_uid_tlb_records_by_entry]
-    AN --> AO[memblock_uid_tlb_record::copy_entry_fields]
-    AO --> AP[set MEMBLOCK_STATUS_TLB_MAPPED]
-    AP --> AQ[memblock_l2tlb_base_sequence::send_l2tlb_item resp_tr]
-    AQ --> AR[L2tlb_agent_agent_driver::main_phase]
-    AR --> AS[L2tlb_agent_agent_driver::send_pkt drives io_ptw_resp_valid/entry fields]
-    AS --> P
+    J[memblock_l2tlb_base_sequence::body] --> K[seq_csr_common::init/configure_from_plus]
+    K --> L{sequence enabled}
+    L -->|否| M[return且不claim owner]
+    L -->|是| N[ensure_context]
+    N --> O{takeover active}
+    O -->|否| P[uvm_fatal]
+    O -->|是| Q[try_claim_l2tlb_lifecycle_owner]
+    Q -->|失败| P
+    Q -->|成功| R[initialize_lifecycle_state]
+    R --> S[drive_l2tlb_loop]
+
+    S --> T[等待drv_cb并递增sample_seq]
+    T --> U[send_l2tlb_cycle]
+    U --> V[锁存drv_cb valid/vpn/s2xlate与mon_cb ready]
+    V --> W[等待NBA并读取flush latest]
+    W --> X{reset/backend ready}
+    X -->|否| Y[cancel_outstanding_by_reset]
+    Y --> Z[发送inactive item]
+    X -->|是| AA[校验flush event freshness]
+    AA --> AB{driving_valid}
+    AB -->|是| AC[complete_driving_response]
+    AB -->|否| AD[drain_csr_runtime_events]
+    AC --> AD
+    AD --> AE{新flush event}
+    AE -->|是| AF[handle_l2tlb_flush_event]
+    AE -->|否| AG{request_fire}
+    AF --> AG
+    AG -->|同拍flush kill| AH[record_flush_killed_request]
+    AG -->|正常fire| AI[capture_fired_request]
+    AG -->|否| AJ[不新增token]
+    AI --> AK[request-time get/create entry并push pending_q]
+    AH --> AL[更新stop与idle及ready opportunity状态]
+    AJ --> AL
+    AK --> AL
+    AL --> AM[select_due_response sample_seq+1]
+    AM --> AN[计算下一拍ready并发送gap=0 cycle item]
+    AN --> AO{stopping且outstanding为0}
+    AO -->|否| T
+    AO -->|是| AP[最终inactive item]
+    AP --> AQ[check accounting并release owner]
+
+    AM --> AR{ordered或stopping}
+    AR -->|是| AS[只检查pending_q头]
+    AR -->|否| AT[从全部due项中随机选择]
+    AS --> AU[写driving_req]
+    AT --> AU
+    AU --> AV[L2TLB driver逐拍send_pkt]
+
+    AC --> AW[update_uid_tlb_records_by_entry]
+    AW --> AX{匹配UID record数量}
+    AX -->|大于0| AY[回填PTE并置TLB_MAPPED]
+    AX -->|等于0| AZ[UVM_LOW info]
 ```
 
-### 1.1 函数调用 Flow 图整体文字伪代码
+### 2.1 函数调用 Flow 图整体文字伪代码
 
 ```text
-TLB/L2TLB responder 主流程：
+L2TLB responder 主流程：
 
-1. 连接阶段：
-   MEMBLOCK__L2TLB_AGENT_CONNECT 创建 L2tlb_agent_agent_interface；
-   把 DTLB request 信号 _inner_dtlbRepeater_io_ptw_req_0_valid/vpn/s2xlate force 到 interface；
-   根据 MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN 设置 l2tlb_responder_active；
-   如果 takeover active：
-     把 interface 的 ready 和 resp_* force 回 RTL _inner_ptw_io_tlb_1_*；
-     这表示 L2TLB_agent 接管 L2TLB 返回 DTLB 的 response 通路；
-   如果 takeover inactive：
-     interface 只观察原始 RTL ready/resp_*，sequence 如果仍启用会 fatal。
+1. 连接和 sideband 发布：
+   connect把DTLB request采到agent interface；takeover active时把agent ready/response驱回DTLB连接点；
+   CSR monitor在每个post-reset sample构造runtime CSR，并在首份或payload变化时发布latest snapshot；
+   CSR translation context changed或有效sfence sample调用note_l2tlb_flush_event；
+   runtime CSR latest和flush latest都可重复读取，不消费dispatch raw queue。
+   L2TLB sequence在每个mid-test reset窗口的首个blocked sample记录runtime snapshot seq；reset持续期间不覆盖该baseline，只有CSR monitor发布更高seq的post-reset snapshot后才重新开放ready。
 
-2. sequence 启动阶段：
-   memblock_l2tlb_base_sequence::body 初始化 seq_csr_common；
-   configure_from_plus 读取 MEMBLOCK_L2TLB_SEQ_EN、latency 和 idle_stop_cycle；
-   如果 MEMBLOCK_L2TLB_SEQ_EN=0：
-     直接返回，不响应 request；
-   否则 ensure_context 获取 common_data_transaction、monitor_adapter 和 L2TLB vif；
-   如果 l2tlb_responder_active=0：
-     fatal，因为 sequence 无法合法把 response 回给 DTLB；
-   否则进入 drive_l2tlb_loop。
+2. sequence 启动和 owner：
+   body初始化参数；disable时直接返回；
+   enable时取得公共data和VIF，确认connect takeover active；
+   调用try_claim_l2tlb_lifecycle_owner；已有owner时fatal；
+   claim成功后初始化本实例queue、token、counter、sample和stop状态，再进入逐拍循环。
 
-3. request 轮询阶段：
-   drive_l2tlb_loop 每个 l2tlb_vif.drv_cb 调 send_l2tlb_cycle；
-   send_l2tlb_cycle 先检查 request_valid；
-   request_valid 只要求 rst_n、reset_backend_done 和 io_ptw_req_0_valid 为 1；
-   如果没有 request：
-     has_progress=0，idle_count 递增；
-     idle_count 超过 idle_stop_cycle 后退出 sequence；
-   如果有 request：
-     sample_request_fields 采 DTLB request 的 vpn/s2xlate；
-     先发 ready_tr，把 io_ptw_req_0_ready 拉高一个 xaction；
-     再创建 resp_tr，设置随机 pre_pkt_gap，并保留 request vpn/s2xlate 供 driver/xaction 追踪。
+3. 每个 sample 的输入锁存：
+   drive_l2tlb_loop等待drv_cb，sample_seq加1；
+   send_l2tlb_cycle立即从drv_cb锁存valid/vpn/s2xlate，从mon_cb锁存同边界实际ready；
+   之后只使用sampled字段，不再读取live request；
+   等待NBA，使同边界CSR/fence monitor完成latest发布，然后读取flush event snapshot。
 
-4. lookup/build 阶段：
-   在查表前 drain_csr_runtime_events；
-   drain_csr_runtime_events 只调用 drain_csr_events，不消费 sfence FIFO；
-   common_data_transaction::get_or_create_tlb_entry_by_req 使用 request 的 vpn/s2xlate；
-   make_tlb_key_by_req 调 mmu_csr_state.make_lookup_key，把 runtime CSR 中的 asid/vmid 合入 key；
-   如果 tlb_entry_by_key 已有该 key：
-     命中并更新 last_hit_cycle；
-   如果没有该 key：
-     build_tlb_entry_for_key 创建 tlb_map_builder；
-     tlb_map_builder 按 vpn/s2xlate/runtime CSR 生成 memblock_tlb_entry；
-     insert_tlb_entry 写入 tlb_entry_by_key。
+4. reset和flush优先级：
+   reset/backend未就绪时，把pending_q和driving_req全部记为reset canceled并清除；每个reset窗口首次blocked sample关闭CSR-ready、清ready opportunity并记录snapshot序号基线，后续reset sample保持该基线，发送inactive；
+   正常状态先校验新flush event的sample_time，ready曾开放后迟到或未来event在任何生命周期变更前fatal；
+   校验通过后确认上一拍driving response完成，再应用runtime CSR latest；
+   新flush event删除旧event版本的pending token，建立编译期hold窗口并清ready opportunity；
+   若同一sample仍由旧ready形成request fire，给它分配token并记为flush canceled，不建entry、不回response。
 
-5. response 回填阶段：
-   fill_dtlb_resp_from_entry 把 entry 的 S1/S2 tag、ASID/VMID、PPN、权限、fault 和 index 字段填入 resp_tr；
-   update_uid_tlb_records_by_entry 遍历 uid_tlb_record_by_uid；
-   只回填 record_valid=1 且 pte_valid=0 且 key 完全匹配的 uid record；
-   匹配 uid 的 record.copy_entry_fields 置 pte_valid=1；
-   同时设置 MEMBLOCK_STATUS_TLB_MAPPED；
-   如果没有任何 uid record 匹配，打印 UVM_ERROR，但 sequence 仍发送 response。
+5. request fire和冻结：
+   正常request_fire且未被flush kill时调用capture_fired_request；
+   读取request-time MMU CSR副本，构造{vpn,asid,vmid,s2xlate} key；
+   立即命中或创建live TLB entry，再用copy_from冻结entry snapshot；
+   根据snapshot填好response payload，选择1C/MID/LONG due档；
+   创建独立token并push pending_q；相同key不会合并。
 
-6. driver 发送阶段：
-   send_l2tlb_item 用 start_item/finish_item 把 resp_tr 交给 L2tlb_agent_agent_driver；
-   driver main_phase 根据 pre_pkt_gap 先 idle 若干拍；
-   send_pkt 驱动 io_ptw_resp_valid 和所有 response entry 字段；
-   connect takeover active 时，这些 interface 字段 force 回 DTLB/L2TLB response RTL 连接点。
+6. response调度：
+   select_due_response以sample_seq+1为候选完成边界；
+   ordered或stopping只允许队头到期后进入driving；
+   reorder从全部due项中随机选择一笔；
+   选中项从pending_q移到唯一driving_req，尚未算完成；
+   ready由CSR有效、非hold、非stopping和outstanding小于上限共同决定；reset/flush阻塞解除后第一次ready item完成发送时置ready opportunity；
+   每拍只发送一个gap=0 cycle item，item可以同时携带ready和一笔response。
+
+7. response完成和UID副作用：
+   下一sample到来时，complete_driving_response确认上一cycle response已被固定接收；
+   此时才使用冻结的key/entry snapshot回填匹配UID record；
+   有匹配则复制PTE并置TLB_MAPPED；零匹配只记UVM_LOW info；
+   completed计数加1并清driving slot。
+
+8. stop和退出：
+   global stop或idle stop只关闭新ready，不丢弃正常pending；idle stop只能在本次reset/flush阻塞后已提供ready opportunity时累计；
+   stopping时强制ordered排空，直到pending_q和driving均空；
+   发送最后一个ready=0、resp_valid=0的item；
+   检查accepted等于completed、flush/reset canceled和outstanding之和；
+   自然release lifecycle owner后退出。
 ```
 
-## 2. `MEMBLOCK__L2TLB_AGENT_CONNECT`
+## 3. `MEMBLOCK__L2TLB_AGENT_CONNECT`
 
 源码位置：`mem_ut/ver/ut/memblock/tb/L2tlb_agent_connect.sv`
+
+抽象功能描述：该 connect 宏建立 DTLB request 到 agent、agent response 回 DTLB 的方向，并发布 takeover 是否生效。它不创建 request token，也不拥有 responder queue。
 
 真实逻辑摘要：
 
 ```systemverilog
 U_IF_NAME``_l2tlb_active = (`MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN != 0);
 memblock_sync_pkg::l2tlb_responder_active = U_IF_NAME``_l2tlb_active;
-...
-force U_IF_NAME.io_ptw_req_0_valid = RTL_PATH._inner_dtlbRepeater_io_ptw_req_0_valid;
-force U_IF_NAME.io_ptw_req_0_bits_vpn = RTL_PATH._inner_dtlbRepeater_io_ptw_req_0_bits_vpn;
-force U_IF_NAME.io_ptw_req_0_bits_s2xlate = RTL_PATH._inner_dtlbRepeater_io_ptw_req_0_bits_s2xlate;
-if(U_IF_NAME``_l2tlb_active) begin
-    force RTL_PATH._inner_ptw_io_tlb_1_req_0_ready = U_IF_NAME.io_ptw_req_0_ready;
-    force RTL_PATH._inner_ptw_io_tlb_1_resp_valid = U_IF_NAME.io_ptw_resp_valid;
-    force RTL_PATH._inner_ptw_io_tlb_1_resp_bits_s2xlate = U_IF_NAME.io_ptw_resp_bits_s2xlate;
-    ...
-end else begin
-    force U_IF_NAME.io_ptw_req_0_ready = RTL_PATH._inner_ptw_io_tlb_1_req_0_ready;
-    force U_IF_NAME.io_ptw_resp_valid = RTL_PATH._inner_ptw_io_tlb_1_resp_valid;
-    ...
-end
+force U_IF_NAME.io_ptw_req_0_valid =
+    RTL_PATH._inner_dtlbRepeater_io_ptw_req_0_valid;
+force U_IF_NAME.io_ptw_req_0_bits_vpn =
+    RTL_PATH._inner_dtlbRepeater_io_ptw_req_0_bits_vpn;
+force U_IF_NAME.io_ptw_req_0_bits_s2xlate =
+    RTL_PATH._inner_dtlbRepeater_io_ptw_req_0_bits_s2xlate;
 ```
-
-功能解释：
-
-该 connect 宏确认了 L2TLB agent 的语义边界：request 从 DTLB repeater 侧进入 agent interface；response 从 agent interface 返回给 DTLB/L2TLB response 连接点。takeover 关闭时，agent 只观察原 RTL response，不接管驱动。
-
-输入/输出：
-
-- 输入：`MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN`、RTL DTLB request 信号、原 RTL PTW/L2TLB response 信号。
-- 输出：`memblock_sync_pkg::l2tlb_responder_active`；takeover active 时，agent driver 的 ready/resp 被 force 回 RTL。
 
 文字伪代码：
 
 ```text
-创建 L2tlb_agent_agent_interface；
-把 vif 写入 uvm_config_db；
-根据 MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN 设置本地 active 位；
-把 active 位同步到 memblock_sync_pkg::l2tlb_responder_active；
-清 interface ready/resp 默认值；
-总是把 DTLB request valid/vpn/s2xlate force 到 interface；
-如果 active=1：
-  force RTL request ready 和 response 字段等于 interface；
+把DTLB repeater request valid/vpn/s2xlate接到VIF；
+如果compile takeover active：
+  把VIF ready和全部response字段驱回RTL DTLB/L2TLB连接点；
 否则：
-  force interface ready/response 字段等于 RTL 原始路径；
+  agent不拥有response通路，enabled sequence会在body中fatal；
+把active状态写入memblock_sync_pkg供sequence和driver检查。
 ```
 
-内部子调用：
+## 4. Runtime CSR 与 Flush Sideband
 
-- 无函数子调用；该宏通过 force 建立连接和接管状态。
+### 4.1 `publish_runtime_csr_snapshot()` / `get_latest_runtime_csr_snapshot()`
 
-## 3. `memblock_l2tlb_base_sequence::body()`
+源码位置：
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
+- `mem_ut/ver/ut/memblock/agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_monitor.sv`
+- `mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv`
+
+抽象功能描述：CSR monitor 维护唯一逐拍 baseline，package 保存可重复读取的 latest snapshot。该视图让 responder 在没有 dispatch real-smoke capture 的场景也能获得真实 MMU CSR。
 
 真实逻辑摘要：
 
 ```systemverilog
-task memblock_l2tlb_base_sequence::body();
-    seq_csr_common::init();
-    configure_from_plus();
-    if (!enable) begin
-        return;
-    end
-    ensure_context();
-    if (!memblock_sync_pkg::l2tlb_responder_active) begin
-        `uvm_fatal(get_type_name(),
-                   "MEMBLOCK_L2TLB_SEQ_EN is enabled but L2TLB connect takeover is not active; enable compile macro MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN")
-    end
-    drive_l2tlb_loop();
-endtask
-```
+runtime_payload_changed =
+    !has_last_runtime_csr ||
+    memblock_sync_pkg::raw_csr_payload_changed(last_runtime_csr, raw_csr);
+memblock_sync_pkg::publish_runtime_csr_snapshot(raw_csr,
+                                                 runtime_payload_changed);
 
-功能解释：
-
-L2TLB responder sequence 的主入口。它用 runtime plus 控制是否运行，用 compile-time takeover 状态确认 response 通路是否真的接管。
-
-输入/输出：
-
-- 输入：`MEMBLOCK_L2TLB_SEQ_EN`、latency/idle plus 配置、`l2tlb_responder_active`。
-- 输出：disabled 时直接退出；enabled 且 takeover active 时进入 responder loop；enabled 但 takeover inactive 时 fatal。
-
-文字伪代码：
-
-```text
-初始化 seq_csr_common；
-调用 configure_from_plus：读取 sequence enable 和参数；
-如果 enable=0：
-  返回，不发送 ready/response；
-调用 ensure_context：获取公共数据、adapter 和 vif；
-如果 l2tlb_responder_active=0：
-  fatal，避免 response 没有合法连接点；
-调用 drive_l2tlb_loop：开始被动响应 DTLB request；
-```
-
-内部子调用：
-
-- `configure_from_plus()`：读取 `seq_csr_common` 中的 L2TLB sequence 参数。
-- `ensure_context()`：获取共享数据和 virtual interface。
-- `drive_l2tlb_loop()`：循环等待 request。
-
-## 4. `memblock_l2tlb_base_sequence::configure_from_plus()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-function void memblock_l2tlb_base_sequence::configure_from_plus();
-    enable = seq_csr_common::get_l2tlb_seq_en();
-    min_latency = seq_csr_common::get_l2tlb_min_latency();
-    max_latency = seq_csr_common::get_l2tlb_max_latency();
-    idle_stop_cycle = seq_csr_common::get_l2tlb_idle_stop_cycle();
-endfunction
-```
-
-功能解释：
-
-读取 L2TLB responder 的运行开关、response latency 随机范围和空闲退出阈值。
-
-输入/输出：
-
-- 输入：`seq_csr_common` 已初始化的 L2TLB 参数。
-- 输出：成员变量 `enable/min_latency/max_latency/idle_stop_cycle`。
-
-文字伪代码：
-
-```text
-读取 MEMBLOCK_L2TLB_SEQ_EN 到 enable；
-读取 min/max latency；
-读取 idle_stop_cycle；
-```
-
-内部子调用：
-
-- `seq_csr_common::get_l2tlb_seq_en()`。
-- `seq_csr_common::get_l2tlb_min_latency()`。
-- `seq_csr_common::get_l2tlb_max_latency()`。
-- `seq_csr_common::get_l2tlb_idle_stop_cycle()`。
-
-## 5. `memblock_l2tlb_base_sequence::ensure_context()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-function void memblock_l2tlb_base_sequence::ensure_context();
-    data = common_data_transaction::get();
-    if (monitor_adapter == null) begin
-        monitor_adapter = dispatch_monitor_event_adapter::type_id::create("monitor_adapter");
-    end
-    if (data == null) begin
-        `uvm_fatal(get_type_name(), "failed to get common_data_transaction")
-    end
-    if (monitor_adapter == null) begin
-        `uvm_fatal(get_type_name(), "failed to create dispatch_monitor_event_adapter")
-    end
-    if (!uvm_config_db#(virtual L2tlb_agent_agent_interface)::get(null, get_full_name(), "vif", l2tlb_vif) &&
-        !uvm_config_db#(virtual L2tlb_agent_agent_interface)::get(null, "uvm_test_top.env.u_L2tlb_agent_agent*", "vif", l2tlb_vif)) begin
-        `uvm_fatal(get_type_name(), "L2TLB virtual interface is not set")
+function void publish_runtime_csr_snapshot(input dispatch_raw_csr_t item,
+                                           input bit payload_changed);
+    if (item.valid && payload_changed) begin
+        runtime_csr_snapshot = item;
+        runtime_csr_snapshot_valid = 1'b1;
+        runtime_csr_snapshot_seq++;
     end
 endfunction
 ```
 
-功能解释：
-
-建立 responder 所需上下文：公共数据表、monitor adapter 和 L2TLB virtual interface。
-
-输入/输出：
-
-- 输入：UVM config DB 中的 L2TLB vif。
-- 输出：`data`、`monitor_adapter`、`l2tlb_vif` 成员可用；失败时 fatal。
-
 文字伪代码：
 
 ```text
-获取 common_data_transaction singleton；
-如果 monitor_adapter 为空，创建 adapter；
-如果 data 或 adapter 创建失败，fatal；
-先按当前 sequence full_name 获取 vif；
-如果失败，再按 env.u_L2tlb_agent_agent 通配路径获取 vif；
-如果仍失败，fatal；
+reset/backend未就绪时，monitor清自己的last baseline；
+post-reset每拍构造完整raw_csr；
+首份snapshot或payload变化时，publish覆盖package latest并递增统一seq；
+get_latest只复制latest和seq，不清valid、不消费队列；
+clear_raw_monitor_queues只清semantic raw视图，不清runtime latest；
+L2TLB和dispatch可用同一seq调用apply_raw_csr_runtime，后到者按seq幂等返回。
 ```
 
-内部子调用：
+### 4.2 `note_l2tlb_flush_event()` / `get_latest_l2tlb_flush_event()`
 
-- `common_data_transaction::get()`：返回共享数据 owner。
-- `uvm_config_db::get()`：获取 agent interface。
+源码位置：
 
-## 6. `memblock_l2tlb_base_sequence::drive_l2tlb_loop()`
+- `mem_ut/ver/ut/memblock/agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_monitor.sv`
+- `mem_ut/ver/ut/memblock/agent/fence_agent_agent/src/fence_agent_agent_monitor.sv`
+- `mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv`
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
+抽象功能描述：monitor 把会使 DTLB filter 失效的 CSR changed 或 sfence sample发布为非破坏性 latest event，responder用本地 `last_seen_flush_event_seq` 独立去重。
 
 真实逻辑摘要：
 
 ```systemverilog
-idle_count = 0;
-send_count = 0;
+function void note_l2tlb_flush_event(input time sample_time);
+    l2tlb_flush_event_seq++;
+    l2tlb_flush_sample_time = sample_time;
+    l2tlb_flush_event_valid = 1'b1;
+endfunction
+
+function void get_latest_l2tlb_flush_event(output longint unsigned event_seq,
+                                           output time sample_time,
+                                           output bit valid);
+    event_seq = l2tlb_flush_event_seq;
+    sample_time = l2tlb_flush_sample_time;
+    valid = l2tlb_flush_event_valid;
+endfunction
+```
+
+文字伪代码：
+
+```text
+CSR monitor把satp/vsatp/hgatp/priv_virt changed位OR后，每个有效sample最多发布一次event；
+fence monitor对每个post-reset有效sfence sample发布一次event；
+note递增event_seq并保存monitor的$time；
+get只返回当前latest，不pop raw_sfence_q；
+sequence等待NBA后读取，active阶段要求新event的sample_time等于当前$time。
+```
+
+### 4.3 `try_claim_l2tlb_lifecycle_owner()` / `try_release_l2tlb_lifecycle_owner()`
+
+源码位置：`mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv`
+
+抽象功能描述：这两个 package helper 保证同一时刻只有一个 sequence 实例拥有 request ready、queue 和 response 调度。helper 只返回成功状态，报告由 sequence 负责。
+
+文字伪代码：
+
+```text
+try_claim：
+  如果claimed已经为1，返回0并输出当前owner；
+  否则保存owner_name、置claimed并返回1；
+try_release：
+  只有claimed为1且调用者名称完全匹配时才清owner并返回1；
+  其它情况返回0且不修改owner；
+DUT reset不释放owner；只有最终inactive item完成后的自然退出才release。
+```
+
+## 5. `body()` 与启动状态
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
+
+抽象功能描述：`body()` 是 responder 生命周期入口，负责读取已校验参数、确认 takeover、取得唯一 owner，并在循环自然结束后验证排空和释放 owner。
+
+真实逻辑摘要：
+
+```systemverilog
+seq_csr_common::init();
+configure_from_plus();
+if (!enable) return;
+ensure_context();
+if (!memblock_sync_pkg::l2tlb_responder_active) `uvm_fatal(...)
+if (!memblock_sync_pkg::try_claim_l2tlb_lifecycle_owner(
+        lifecycle_owner_name, current_owner)) `uvm_fatal(...)
+initialize_lifecycle_state();
+drive_l2tlb_loop();
+check_l2tlb_lifecycle_accounting("owner_release");
+if (outstanding_count() != 0) `uvm_fatal(...)
+if (!memblock_sync_pkg::try_release_l2tlb_lifecycle_owner(
+        lifecycle_owner_name, current_owner)) `uvm_fatal(...)
+```
+
+文字伪代码：
+
+```text
+初始化和校验参数；
+sequence关闭时直接返回，不claim owner；
+获取common_data_transaction和L2TLB VIF；
+takeover未启用时fatal；
+以get_full_name为owner名称尝试claim，冲突时报告两者名称并fatal；
+初始化本实例lifecycle状态并进入逐拍循环；
+循环退出后要求token等式闭合且outstanding为0；
+名称匹配地release owner，失败时fatal。
+```
+
+### 5.1 `configure_from_plus()`
+
+抽象功能描述：该函数只读取 `seq_csr_common` 已完成合法性检查和物理资源收敛的参数快照，不直接读取 plusarg。
+
+```systemverilog
+enable = seq_csr_common::get_l2tlb_seq_en();
+max_outstanding = seq_csr_common::get_l2tlb_max_outstanding();
+resp_reorder_en = seq_csr_common::get_l2tlb_resp_reorder_en();
+resp_mid_latency = seq_csr_common::get_l2tlb_resp_mid_latency();
+resp_long_latency = seq_csr_common::get_l2tlb_resp_long_latency();
+resp_1c_wt = seq_csr_common::get_l2tlb_resp_1c_wt();
+resp_mid_wt = seq_csr_common::get_l2tlb_resp_mid_wt();
+resp_long_wt = seq_csr_common::get_l2tlb_resp_long_wt();
+idle_stop_cycle = seq_csr_common::get_l2tlb_idle_stop_cycle();
+```
+
+参数语义：
+
+| 参数 | 作用 |
+|---|---|
+| `MEMBLOCK_L2TLB_MAX_OUTSTANDING` | 行为层 outstanding 上限，最终不超过 V2 DTLB filter 编译期容量 |
+| `MEMBLOCK_L2TLB_RESP_REORDER_EN` | 0 为顺序回复，1 为已到期项随机回复 |
+| `MEMBLOCK_L2TLB_RESP_MID_LATENCY` | 中延迟档最早 due 间隔，必须大于 1 |
+| `MEMBLOCK_L2TLB_RESP_LONG_LATENCY` | 长延迟档最早 due 间隔，必须大于中档 |
+| `MEMBLOCK_L2TLB_RESP_1C_WT` | 1 拍档权重 |
+| `MEMBLOCK_L2TLB_RESP_MID_WT` | 中延迟档权重 |
+| `MEMBLOCK_L2TLB_RESP_LONG_WT` | 长延迟档权重；三个权重不能同时为 0 |
+| `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE` | 无 lifecycle block、无 outstanding、无 progress 时的连续空闲退出阈值 |
+
+### 5.2 `ensure_context()` / `initialize_lifecycle_state()`
+
+抽象功能描述：`ensure_context()` 取得公共状态 owner 和 virtual interface；`initialize_lifecycle_state()` 只初始化当前 sequence 实例的 queue、counter 和本地 sample 状态。
+
+文字伪代码：
+
+```text
+ensure_context：
+  获取common_data_transaction singleton；
+  从当前sequence路径或agent通配路径获取VIF；
+  任一失败都fatal；
+initialize_lifecycle_state：
+  清pending_q和driving slot；
+  清accepted/completed/flush/reset canceled计数并把next token置0；
+  清sample、flush baseline、hold、CSR valid、stop、idle和sampled request字段；
+  不修改package runtime CSR latest、flush latest或owner claim状态。
+```
+
+## 6. 逐拍 Service Loop
+
+### 6.1 `drive_l2tlb_loop()`
+
+抽象功能描述：该 task 只建立稳定的每拍调用边界。所有 queue、flush、stop 和 response 决策都委托给 `send_l2tlb_cycle()`。
+
+真实逻辑摘要：
+
+```systemverilog
 forever begin
-    bit has_progress;
-
     @(l2tlb_vif.drv_cb);
-    send_l2tlb_cycle(send_count, has_progress);
-    if (has_progress) begin
-        send_count++;
-        idle_count = 0;
-    end else begin
-        idle_count++;
-        if (idle_count > idle_stop_cycle) begin
-            break;
-        end
-    end
+    sample_seq++;
+    send_l2tlb_cycle(has_progress, should_exit);
+    if (should_exit) break;
 end
 ```
 
-功能解释：
-
-被动 responder loop。它不预知 request 总数，只按连续 idle 周期退出；每处理一个 request，`send_count` 增加并清空 idle 计数。
-
-输入/输出：
-
-- 输入：`l2tlb_vif.drv_cb`、`idle_stop_cycle`。
-- 输出：周期性调用 `send_l2tlb_cycle()`；空闲超时后退出。
-
 文字伪代码：
 
 ```text
-idle_count=0；
-send_count=0；
-永久循环：
-  等待 l2tlb_vif.drv_cb；
-  调用 send_l2tlb_cycle；
-  如果 has_progress=1：
-    send_count++；
-    idle_count=0；
-  否则：
-    idle_count++；
-    如果 idle_count > idle_stop_cycle：
-      打印日志并退出循环；
+等待下一drv_cb边界；
+递增本地sample_seq；
+调用send_l2tlb_cycle推进一次完整lifecycle service；
+只有helper已发送最终inactive item并返回should_exit时退出。
 ```
 
-内部子调用：
+### 6.2 `send_l2tlb_cycle()`
 
-- `send_l2tlb_cycle()`：单拍 request 检查、查表、回包。
-
-## 7. `memblock_l2tlb_base_sequence::send_l2tlb_cycle()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
+抽象功能描述：该 task 是 responder 唯一的逐拍 lifecycle owner。输入是当前 sample 的 VIF 与公共 latest sideband，输出是供下一 sample 使用的唯一 cycle item，同时维护 request、response、flush、reset、stop 和 idle 状态。
 
 真实逻辑摘要：
 
 ```systemverilog
-has_progress = 1'b0;
-if (request_valid()) begin
-    sample_request_fields(vpn, s2xlate);
-    ready_tr = create_l2tlb_xaction($sformatf("l2tlb_ready_tr_send_%0d", send_count));
-    ready_tr.io_ptw_req_0_ready = 1'b1;
-    send_l2tlb_item(ready_tr);
-    latency = choose_latency();
-    resp_tr = create_l2tlb_xaction($sformatf("l2tlb_resp_tr_send_%0d", send_count));
-    resp_tr.pre_pkt_gap = latency;
-    resp_tr.io_ptw_req_0_valid = 1'b1;
-    resp_tr.io_ptw_req_0_bits_vpn = vpn;
-    resp_tr.io_ptw_req_0_bits_s2xlate = s2xlate;
-    drain_csr_runtime_events();
-    if (data.get_or_create_tlb_entry_by_req(vpn, s2xlate, key, entry, created)) begin
-        fill_dtlb_resp_from_entry(entry, resp_tr);
-        record_update_count = data.update_uid_tlb_records_by_entry(key, entry);
-    end else begin
-        `uvm_fatal(get_type_name(), $sformatf("L2TLB entry miss for vpn=0x%0h s2xlate=%0d", vpn, s2xlate))
+sampled_req_valid = (l2tlb_vif.drv_cb.io_ptw_req_0_valid === 1'b1);
+sampled_req_ready = (l2tlb_vif.mon_cb.io_ptw_req_0_ready === 1'b1);
+sampled_req_vpn = l2tlb_vif.drv_cb.io_ptw_req_0_bits_vpn;
+sampled_req_s2xlate = l2tlb_vif.drv_cb.io_ptw_req_0_bits_s2xlate;
+uvm_wait_for_nba_region();
+memblock_sync_pkg::get_latest_l2tlb_flush_event(...);
+...
+if (driving_valid) complete_driving_response();
+drain_csr_runtime_events();
+if (new_flush_event) handle_l2tlb_flush_event(...);
+if (request_fire() && !request_killed) capture_fired_request();
+...
+if (has_progress || lifecycle_blocked || stopping || outstanding_count() != 0 ||
+    !acceptance_opened_since_reset || !ready_opportunity_since_lifecycle_block)
+    idle_count = 0;
+else
+    idle_count++;
+response_selected = select_due_response(sample_seq + 1, cycle_tr);
+next_ready = !stopping && csr_snapshot_valid && !hold_active &&
+             outstanding_count() < max_outstanding;
+cycle_tr.io_ptw_req_0_ready = next_ready;
+if (next_ready) begin
+    acceptance_opened_since_reset = 1'b1;
+end
+send_l2tlb_item(cycle_tr);
+if (next_ready)
+    ready_opportunity_since_lifecycle_block = 1'b1;
+```
+
+内部控制流文字伪代码：
+
+```text
+1. 锁存同一边界的request数据和实际ready；
+2. 等待NBA并非破坏性读取flush latest；
+3. reset/backend未就绪时执行reset cancel、吸收flush baseline、发送inactive并返回；
+4. 拒绝event_seq倒退；ready曾开放后，新event时间不是当前$time则在状态变更前fatal；
+5. 若driving_valid，确认上一cycle response完成；
+6. 获取并幂等应用runtime CSR latest；
+7. 若flush event前进，取消旧pending并建立hold；
+8. 若锁存的valid&&ready为1且没有被同拍flush kill，冻结并入队新request；
+9. 读取global stop；根据progress、CSR/hold block、是否已开放过ready、本次阻塞后是否已提供ready opportunity、stop和outstanding维护idle counter；
+10. CSR有效且不在hold时，最多选择一笔对sample_seq+1已到期的response；
+11. 若未选response，构造全清零cycle item；
+12. 根据stop、CSR、hold、容量计算下一拍ready；所有gap字段保持0；
+13. 发送唯一cycle item；ready item完成发送后记录本次阻塞后已提供机会；stopping且outstanding为0时要求该item完全inactive，并返回should_exit。
+```
+
+## 7. Request Fire 与 Outstanding 账本
+
+### 7.1 `request_fire()` / `outstanding_count()`
+
+抽象功能描述：`request_fire()` 把同一 sample 的真实握手定义为动态实例边界；`outstanding_count()` 给 ready 容量和生命周期审计提供统一计数。
+
+```systemverilog
+function bit request_fire();
+    return sampled_req_valid && sampled_req_ready;
+endfunction
+
+function int unsigned outstanding_count();
+    return pending_q.size() + (driving_valid ? 1 : 0);
+endfunction
+```
+
+约束：
+
+- queue-full 时 ready 会在前一 cycle item 中关闭，因此保持 valid 不会重复创建 token。
+- `driving_req` 仍占 outstanding，直到下一 sample 的 `complete_driving_response()`。
+- 相同 `{vpn,asid,vmid,s2xlate}` 的不同 fire 不合并。
+
+### 7.2 `capture_fired_request()`
+
+抽象功能描述：该函数把一笔真实 fire 转换成不可变 pending record。它在接受时冻结查表上下文和 response，但不提前更新 UID record。
+
+真实逻辑摘要：
+
+```systemverilog
+pending.request_token = next_request_token++;
+pending.vpn = sampled_req_vpn;
+pending.s2xlate = sampled_req_s2xlate;
+data.get_mmu_csr_snapshot(pending.csr_snapshot);
+pending.lookup_key = pending.csr_snapshot.make_lookup_key(
+    {26'b0, pending.vpn}, pending.s2xlate);
+data.get_or_create_tlb_entry_by_req(..., returned_key, live_entry, created);
+pending.entry_snapshot.copy_from(live_entry);
+fill_dtlb_resp_from_entry(pending.entry_snapshot, pending.resp_tr);
+pending.min_latency = choose_latency(pending.latency_bucket);
+pending.accept_sample_seq = sample_seq;
+pending.due_sample_seq = sample_seq + pending.min_latency;
+pending.accept_flush_event_seq = last_seen_flush_event_seq;
+pending_q.push_back(pending);
+accepted_count++;
+```
+
+文字伪代码：
+
+```text
+如果outstanding已到max仍观察到fire，fatal；
+创建pending对象并分配单调token；
+复制sampled vpn/s2xlate；
+取得request-time MMU CSR对象副本，并用它构造lookup key；
+按同一request和当前公共CSR命中或创建live entry；
+returned key与snapshot key不一致时fatal；
+创建entry_snapshot并显式copy_from live entry；
+创建全清零response xaction，再从entry_snapshot填充payload；
+按三档权重选择min latency，计算accept/due sample；
+保存当前flush event版本，push pending_q并递增accepted；
+立即检查token守恒；不调用UID record回填。
+```
+
+### 7.3 `check_l2tlb_lifecycle_accounting()`
+
+抽象功能描述：该函数集中验证每个已接受 token 必须属于 completed、flush canceled、reset canceled 或当前 outstanding 中的一类。
+
+```systemverilog
+accounted_count = completed_count + flush_canceled_count +
+                  reset_canceled_count + outstanding_count();
+if (accepted_count != accounted_count) `uvm_fatal(...)
+```
+
+该账本只检查 responder 自身生命周期，不影响主表 pass/fail/terminal。
+
+## 8. Due Latency 与 Response 调度
+
+### 8.1 `choose_latency()`
+
+抽象功能描述：该函数为每个 token 从 1C、中、长三档中选择最早 due 间隔。它不等待时钟，也不修改 driver gap。
+
+真实逻辑摘要：
+
+```systemverilog
+std::randomize(bucket) with {
+    bucket dist {
+        L2TLB_LATENCY_1C   := resp_1c_wt,
+        L2TLB_LATENCY_MID  := resp_mid_wt,
+        L2TLB_LATENCY_LONG := resp_long_wt
+    };
+};
+```
+
+文字伪代码：
+
+```text
+按三个已校验权重随机bucket；
+1C返回1；MID返回resp_mid_latency；LONG返回resp_long_latency；
+随机失败或非法bucket时fatal；
+返回值只决定due_sample_seq，端口竞争可使真实complete更晚。
+```
+
+### 8.2 `select_due_response()`
+
+抽象功能描述：该函数从 pending queue 选择最多一笔可在 `next_sample_seq` 完成的 token，并将其移动到唯一 driving slot。
+
+真实逻辑摘要：
+
+```systemverilog
+if (stopping || !resp_reorder_en) begin
+    if (pending_q[0].due_sample_seq > next_sample_seq) return 1'b0;
+    selected_index = 0;
+end else begin
+    foreach (pending_q[idx])
+        if (pending_q[idx].due_sample_seq <= next_sample_seq)
+            eligible_indices.push_back(idx);
+    std::randomize(choice) with { choice < eligible_count; };
+    selected_index = eligible_indices[choice];
+end
+driving_req = pending_q[selected_index];
+pending_q.delete(selected_index);
+driving_valid = 1'b1;
+cycle_tr = driving_req.resp_tr;
+```
+
+文字伪代码：
+
+```text
+pending为空时返回未选中；
+ordered或stopping：只检查队头，未到期则本拍不回复；
+reorder：单次扫描全部pending，把due项索引收集到临时队列，再均匀随机一个；
+选择前要求token的accept flush版本等于当前last_seen版本，否则fatal；
+把token从pending移动到driving，并把冻结response作为本拍cycle item；
+移动后token仍属于outstanding，不增加completed。
+```
+
+### 8.3 `complete_driving_response()`
+
+抽象功能描述：该函数在下一 sample 确认上一 cycle response 已被 V2 固定接收，并在这个真实完成点执行 UID record 回填。
+
+真实逻辑摘要：
+
+```systemverilog
+if (complete_sample_seq < driving_req.due_sample_seq) `uvm_fatal(...)
+record_update_count = data.update_uid_tlb_records_by_entry(
+    driving_req.lookup_key, driving_req.entry_snapshot);
+driving_req = null;
+driving_valid = 1'b0;
+completed_count++;
+check_l2tlb_lifecycle_accounting("response_complete");
+```
+
+文字伪代码：
+
+```text
+要求driving slot有效；
+当前sample小于due时fatal；
+使用request-time key和entry snapshot更新所有匹配UID record；
+输出token、due、complete、额外等待和匹配数量日志；
+清driving并递增completed；
+重新验证token守恒。
+```
+
+## 9. Flush、Reset 与 Stop
+
+### 9.1 `handle_l2tlb_flush_event()` / `record_flush_killed_request()`
+
+抽象功能描述：flush helper 取消新 event 之前接受但尚未驱动的 pending token，记录同边界由旧 ready 形成的 fire，并建立 DTLB filter 清空 hold。它不回滚本边界已经完成的上一 response。
+
+真实逻辑摘要：
+
+```systemverilog
+for (int idx = int'(pending_q.size()) - 1; idx >= 0; idx--) begin
+    if (pending_q[idx].accept_flush_event_seq < event_seq) begin
+        pending_q.delete(idx);
+        drop_count++;
     end
-    send_l2tlb_item(resp_tr);
-    has_progress = 1'b1;
+end
+flush_canceled_count += drop_count;
+last_seen_flush_event_seq = event_seq;
+accept_hold_until_sample =
+    sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
+ready_opportunity_since_lifecycle_block = 1'b0;
+if (acceptance_opened_since_reset && event_sample_time == $time &&
+    request_fire()) begin
+    record_flush_killed_request(event_seq, event_sample_time);
+    request_killed = 1'b1;
 end
 ```
 
-功能解释：
+文字伪代码：
 
-单个 request 的完整处理函数。它从 DTLB request 中采 `vpn/s2xlate`，先发送 ready，再基于 runtime CSR 查找或创建 TLB entry，填充 response transaction，回填 uid record，最后把 response 交给 driver。
+```text
+从队尾向前删除accept event版本早于新event的pending，避免删除时索引漂移；
+把删除数量计入flush canceled；
+更新last_seen event并从当前sample建立compile-time hold，同时清除本次阻塞后的ready opportunity；
+如果ready曾开放、event来自当前sample且本拍request fire：
+  分配一个正常单调token；
+  accepted和flush canceled各加1；
+  不读CSR、不建entry、不push pending、不返回response；
+startup旧baseline没有真实ready授权，因此只建立保守hold，不创建killed token；
+最后检查token守恒。
+```
 
-输入/输出：
+### 9.2 `cancel_outstanding_by_reset()`
 
-- 输入：DTLB request `io_ptw_req_0_valid/bits_vpn/bits_s2xlate`、runtime CSR、`tlb_entry_by_key`。
-- 输出：`io_ptw_req_0_ready` xaction、`io_ptw_resp_*` xaction、`uid_tlb_record_by_uid` 回填、`MEMBLOCK_STATUS_TLB_MAPPED`。
+抽象功能描述：reset helper 把当前 pending 和 driving token 全部归类为 reset canceled并清空容器。它不回填 UID record，也不回退 token 编号和累计计数。
 
 文字伪代码：
 
 ```text
-默认 has_progress=0；
-如果 request_valid=0：
-  直接返回，让外层 idle_count 增加；
-如果 request_valid=1：
-  调用 sample_request_fields：采 vpn/s2xlate；
-  创建 ready_tr，并将 io_ptw_req_0_ready=1；
-  send_l2tlb_item ready_tr：让 driver 对 DTLB request 给 ready；
-  调用 choose_latency：选择 response 前等待拍数；
-  创建 resp_tr，设置 pre_pkt_gap；
-  在 resp_tr 中保存本次 request 的 valid/vpn/s2xlate；
-  调用 drain_csr_runtime_events：只同步 latest CSR；
-  调用 data.get_or_create_tlb_entry_by_req：
-    用 vpn/s2xlate/runtime CSR 构造 key；
-    hit 则取 live entry；
-    miss 则创建并插入 entry；
-  如果查表/建表成功：
-    fill_dtlb_resp_from_entry：把 entry 填到 response 字段；
-    update_uid_tlb_records_by_entry：回填所有匹配 uid record；
-  否则：
-    fatal；
-  send_l2tlb_item resp_tr：把 response 交给 driver；
-  has_progress=1；
+canceled_count = pending_q.size + driving_valid；
+reset_canceled_count加canceled_count；
+清pending_q、driving_req和driving_valid；
+有取消时输出info；
+检查accepted生命周期等式；
+调用方随后清本地CSR valid、ready开放状态、ready opportunity和hold，并把flush baseline对齐latest。
 ```
 
-内部子调用：
+### 9.3 Global Stop 与 Idle Stop
 
-- `request_valid()`：判断是否有 DTLB request。
-- `sample_request_fields()`：采 request `vpn/s2xlate`。
-- `create_l2tlb_xaction()` / `clear_l2tlb_xaction()`：创建并清空 transaction。
-- `send_l2tlb_item()`：交给 sequencer/driver。
-- `choose_latency()`：随机 response latency。
-- `drain_csr_runtime_events()`：更新 CSR runtime。
-- `common_data_transaction::get_or_create_tlb_entry_by_req()`：按 key 查表或建表。
-- `fill_dtlb_resp_from_entry()`：填 response payload。
-- `common_data_transaction::update_uid_tlb_records_by_entry()`：回填 uid record。
+抽象功能描述：两种 stop 都只停止接受新 request，并让现有 outstanding 正常排空。global stop来自公共 data，idle stop只在没有 lifecycle block、没有 outstanding、没有 progress时累计。
 
-## 8. `memblock_l2tlb_base_sequence::request_valid()`
+文字伪代码：
 
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
+```text
+观察global stop后置stopping；
+stopping使next_ready=0，并让response选择强制ordered；
+pending或driving存在时继续逐拍回复；
+idle counter在CSR未就绪、flush hold、尚未开放过ready、本次reset/flush阻塞后尚未提供ready opportunity、stopping、outstanding非空或有progress时清0；
+hold解除后的首个可接受sample先发送ready并置ready opportunity，下一sample才允许累计idle；
+达到idle阈值时置stopping；
+stopping且outstanding为0时发送最终inactive item，然后退出并release owner。
+```
+
+## 10. Response Payload 与 G/U 字段链
+
+### 10.1 `clear_l2tlb_xaction()` / `fill_dtlb_resp_from_entry()`
+
+抽象功能描述：`clear_l2tlb_xaction()` 为每个 cycle item建立确定的 inactive 默认值；`fill_dtlb_resp_from_entry()` 把 request-time entry snapshot转换为完整 DTLB response payload。
 
 真实逻辑摘要：
 
 ```systemverilog
-function bit memblock_l2tlb_base_sequence::request_valid();
-    if (l2tlb_vif == null) begin
-        return 1'b0;
-    end
-    return l2tlb_vif.rst_n === 1'b1 &&
-           memblock_sync_pkg::reset_backend_done === 1'b1 &&
-           l2tlb_vif.io_ptw_req_0_valid === 1'b1;
-endfunction
+resp.io_ptw_resp_bits_s1_entry_perm_g = entry.pte_g;
+resp.io_ptw_resp_bits_s1_entry_perm_u = entry.pte_u;
+...
+resp.io_ptw_resp_bits_s2_entry_perm_g = entry.pte_g;
+resp.io_ptw_resp_bits_s2_entry_perm_u = entry.pte_u;
 ```
 
-功能解释：
-
-判断 DTLB 是否正在发起 L2TLB request。当前 sequence 用 valid 判断是否需要响应，并随后主动发送 ready。
-
-输入/输出：
-
-- 输入：`l2tlb_vif`、`rst_n`、`reset_backend_done`、`io_ptw_req_0_valid`。
-- 输出：是否进入本轮 responder 处理。
-
-文字伪代码：
+G/U 完整链路：
 
 ```text
-如果 vif 为空：
-  返回 0；
-如果 rst_n=1 且 reset_backend_done=1 且 io_ptw_req_0_valid=1：
-  返回 1；
-否则返回 0；
+memblock_tlb_entry entry_snapshot.pte_g/pte_u
+  -> L2tlb_agent_agent_xaction
+     io_ptw_resp_bits_s1_entry_perm_g/u
+     io_ptw_resp_bits_s2_entry_perm_g/u
+  -> L2tlb_agent_agent_driver::send_pkt()
+  -> L2tlb_agent_agent_interface drv_cb
+  -> L2tlb_agent_connect takeover force
+  -> RTL _inner_ptw_io_tlb_1_resp_bits_s1/s2_entry_perm_g/u
 ```
 
-内部子调用：
+response monitor 在 mon_cb 侧独立采样同一组 S1/S2 perm_g/perm_u 并执行 X/Z 检查；当前实现只保留采样值和 X/Z 诊断，`mon_tr` 填充及 `mon_item_port.write()` 仍未启用，因此本专项不把它描述为已完成的 analysis transaction publisher，也不反向修改 pending record 或主表状态。
 
-- 无。
+当前建模边界：S1 与 S2 字段接口链已经分别驱动，但两组 permission 都来自同一份 `entry_snapshot.pte_g/pte_u`。本专项没有建立独立 S1/S2 PTE 权限对象；需要独立阶段权限时应进入后续专项，不能把当前共享值解释成完整二阶段权限参考模型。
 
-## 9. `memblock_l2tlb_base_sequence::sample_request_fields()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-function void memblock_l2tlb_base_sequence::sample_request_fields(output bit [37:0] vpn,
-                                                                  output bit [1:0] s2xlate);
-    vpn = l2tlb_vif.io_ptw_req_0_bits_vpn;
-    s2xlate = l2tlb_vif.io_ptw_req_0_bits_s2xlate;
-endfunction
-```
-
-功能解释：
-
-从 DTLB request 采样 lookup 所需字段。当前 request 不携带 `paddr`，lookup 不能基于 `paddr`。
-
-输入/输出：
-
-- 输入：`io_ptw_req_0_bits_vpn`、`io_ptw_req_0_bits_s2xlate`。
-- 输出：`vpn`、`s2xlate`。
-
-文字伪代码：
-
-```text
-vpn = interface request vpn；
-s2xlate = interface request s2xlate；
-```
-
-内部子调用：
-
-- 无。
-
-## 10. `memblock_l2tlb_base_sequence::drain_csr_runtime_events()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-function void memblock_l2tlb_base_sequence::drain_csr_runtime_events();
-    ensure_context();
-    monitor_adapter.drain_csr_events();
-endfunction
-```
-
-功能解释：
-
-在 L2TLB lookup 前同步最新 CSR runtime。该函数只 drain CSR latest snapshot，不消费 `raw_sfence_q`。
-
-输入/输出：
-
-- 输入：`latest_raw_csr`。
-- 输出：可能更新 `common_data_transaction::mmu_csr_state`。
-
-文字伪代码：
-
-```text
-确保 data、adapter、vif 可用；
-调用 monitor_adapter.drain_csr_events：
-  如果 latest CSR 有新 seq，则更新 mmu_csr_state；
-  不调用 drain_sfence_events；
-```
-
-内部子调用：
-
-- `ensure_context()`：保证 adapter 可用。
-- `dispatch_monitor_event_adapter::drain_csr_events()`：CSR latest snapshot 消费入口。
-
-## 11. `common_data_transaction::get_or_create_tlb_entry_by_req()`
+### 10.2 `update_uid_tlb_records_by_entry()`
 
 源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
 
-真实逻辑摘要：
-
-```systemverilog
-function bit get_or_create_tlb_entry_by_req(input bit [37:0] vpn,
-                                            input bit [1:0] s2xlate,
-                                            output memblock_tlb_lookup_key_t key,
-                                            output memblock_tlb_entry entry,
-                                            output bit created);
-    key = make_tlb_key_by_req(vpn, s2xlate);
-    if (has_tlb_entry(key)) begin
-        entry = tlb_entry_by_key[key];
-        entry.last_hit_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
-        created = 1'b0;
-        return 1'b1;
-    end
-    entry = build_tlb_entry_for_key(key);
-    insert_tlb_entry(key, entry);
-    created = 1'b1;
-    return 1'b1;
-endfunction
-```
-
-功能解释：
-
-L2TLB responder 的核心 lookup API。它用 request `vpn/s2xlate` 和 runtime CSR 生成 key，命中则复用 live entry，miss 则创建新 entry。
-
-输入/输出：
-
-- 输入：DTLB request 的 `vpn/s2xlate`、当前 `mmu_csr_state`。
-- 输出：`key`、`entry`、`created`；可能新增 `tlb_entry_by_key[key]`。
+抽象功能描述：该函数在 response 真正完成后，把 entry snapshot回填给所有等待同一 key 的 UID record。它不是“每个 response 必须属于一个 UID”的 checker。
 
 文字伪代码：
 
 ```text
-调用 make_tlb_key_by_req：由 vpn/s2xlate/runtime CSR 生成 key；
-如果 has_tlb_entry(key)=1：
-  entry = tlb_entry_by_key[key]；
-  更新 entry.last_hit_cycle；
-  created=0；
-  返回成功；
-否则：
-  调用 build_tlb_entry_for_key：生成新 entry；
-  调用 insert_tlb_entry：写入 tlb_entry_by_key；
-  created=1；
-  返回成功；
+遍历uid_tlb_record_by_uid；
+跳过null、record_valid=0或pte_valid=1的record；
+对vpn/s2xlate/asid/vmid全部匹配者复制entry字段并置TLB_MAPPED；
+match_count为0时输出UVM_LOW info，允许prefetch或无UID request；
+返回匹配数量供token completion日志使用；
+不修改主表pass/fail/terminal。
 ```
 
-内部子调用：
+## 11. Driver 逐拍搬运
 
-- `make_tlb_key_by_req()`：生成 `{vpn,asid,vmid,s2xlate}` key。
-- `has_tlb_entry()`：检查 live entry 是否存在且非 null。
-- `build_tlb_entry_for_key()`：miss 时创建 entry。
-- `insert_tlb_entry()`：写入 by-key TLB cache。
+### 11.1 `send_l2tlb_item()`
 
-## 12. `common_data_transaction::make_tlb_key_by_req()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
-
-真实逻辑摘要：
+抽象功能描述：该 task 使用标准 UVM item handshake把一拍 cycle transaction交给 driver，并强制所有时间调度已由 sequence完成。
 
 ```systemverilog
-function memblock_tlb_lookup_key_t make_tlb_key_by_req(input bit [37:0] vpn,
-                                                       input bit [1:0] s2xlate);
-    if (mmu_csr_state == null) begin
-        mmu_csr_state = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
-        mmu_csr_state.reset();
-    end
-    return mmu_csr_state.make_lookup_key({26'b0, vpn}, s2xlate);
-endfunction
+if (tr == null) `uvm_fatal(...)
+if (tr.pre_pkt_gap != 0 || tr.post_pkt_gap != 0) `uvm_fatal(...)
+start_item(tr);
+finish_item(tr);
 ```
 
-功能解释：
-
-把 DTLB request 的 `vpn/s2xlate` 转换成公共 TLB key。ASID/VMID 不是 request 直接携带，而是从当前 runtime CSR 镜像中派生。
-
-输入/输出：
-
-- 输入：`vpn[37:0]`、`s2xlate`。
-- 输出：`memblock_tlb_lookup_key_t`。
-
-文字伪代码：
-
-```text
-如果 mmu_csr_state 为空：
-  创建并 reset；
-将 38-bit vpn 扩展为 52-bit key.vpn 输入；
-调用 mmu_csr_state.make_lookup_key：
-  根据 s2xlate 选择当前 ASID/VMID；
-返回 key；
-```
-
-内部子调用：
-
-- `mmu_csr_runtime_state::make_lookup_key()`：填充 key 的 `vpn/asid/vmid/s2xlate`。
-
-## 13. `mmu_csr_runtime_state::make_lookup_key()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/mmu_csr_runtime_state.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-function memblock_tlb_lookup_key_t make_lookup_key(input bit [63:0] vpn,
-                                                   input bit [1:0] s2xlate);
-    memblock_tlb_lookup_key_t key;
-
-    key.vpn     = vpn[51:0];
-    key.asid    = current_asid(s2xlate);
-    key.vmid    = current_vmid(s2xlate);
-    key.s2xlate = s2xlate;
-    return key;
-endfunction
-```
-
-功能解释：
-
-runtime CSR key 生成函数。`current_asid()` 与 `current_vmid()` 按翻译阶段决定 ASID/VMID 是否有效。
-
-输入/输出：
-
-- 输入：扩展后的 VPN 和 DTLB request `s2xlate`。
-- 输出：完整 lookup key。
-
-文字伪代码：
-
-```text
-key.vpn = vpn[51:0]；
-key.asid = current_asid(s2xlate)：
-  s2xlate=0 用 satp_asid；
-  s2xlate=1 或 3 用 vsatp_asid；
-  s2xlate=2 用 0；
-key.vmid = current_vmid(s2xlate)：
-  s2xlate=2 或 3 用 hgatp_vmid；
-  其它为 0；
-key.s2xlate = request s2xlate；
-返回 key；
-```
-
-内部子调用：
-
-- `current_asid()`：按 s2xlate 返回 satp/vsatp ASID 或 0。
-- `current_vmid()`：按 s2xlate 返回 hgatp VMID 或 0。
-
-## 14. `common_data_transaction::build_tlb_entry_for_key()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-function memblock_tlb_entry build_tlb_entry_for_key(input memblock_tlb_lookup_key_t key);
-    memblock_tlb_entry entry;
-    tlb_map_builder    builder;
-
-    builder = tlb_map_builder::type_id::create("tlb_builder_by_key");
-    if (builder == null) begin
-        `uvm_fatal("COMMON_DATA", "failed to create tlb_map_builder")
-    end
-    entry = builder.build_tlb_entry_for_req(key.vpn[37:0], key.s2xlate, mmu_csr_state);
-    entry.lookup_key = key;
-    entry.asid = key.asid;
-    entry.vmid = key.vmid;
-    entry.s2xlate = key.s2xlate;
-    return entry;
-endfunction
-```
-
-功能解释：
-
-lookup miss 时创建 TLB entry。builder 使用 key 中的 request 语义和当前 CSR state 生成 entry，再用 key 覆盖 entry 的索引字段。
-
-输入/输出：
-
-- 输入：`memblock_tlb_lookup_key_t key`。
-- 输出：新建的 `memblock_tlb_entry`。
-
-文字伪代码：
-
-```text
-创建 tlb_map_builder；
-如果创建失败，fatal；
-调用 builder.build_tlb_entry_for_req：
-  输入 key.vpn[37:0]、key.s2xlate 和 mmu_csr_state；
-将 entry.lookup_key/asid/vmid/s2xlate 设置为 key；
-返回 entry；
-```
-
-内部子调用：
-
-- `tlb_map_builder::build_tlb_entry_for_req()`：生成地址、PTE、CSR 派生字段。
-
-## 15. `tlb_map_builder::build_tlb_entry_for_req()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/tlb_map_builder.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-function memblock_tlb_entry build_tlb_entry_for_req(input bit [37:0] vpn,
-                                                    input bit [1:0] s2xlate,
-                                                    input mmu_csr_runtime_state csr_state);
-    memblock_tlb_entry entry;
-    bit [63:0]         vaddr;
-
-    if (csr_state == null) begin
-        `uvm_fatal("TLB_BUILDER", "build_tlb_entry_for_req got null csr_state")
-    end
-    entry = memblock_tlb_entry::type_id::create($sformatf("tlb_entry_%0h_%0d", vpn, s2xlate));
-    entry.reset();
-    vaddr = {14'b0, vpn, 12'b0};
-    entry.update_addr_fields(vaddr, choose_paddr(vaddr));
-    randomize_pte_bits(entry);
-    entry.fixup_pte_legal(memblock_tlb_entry::MEMBLOCK_TLB_ACCESS_UNKNOWN);
-    entry.apply_csr_state(csr_state, s2xlate);
-    entry.create_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
-    entry.last_hit_cycle = entry.create_cycle;
-    return entry;
-endfunction
-```
-
-功能解释：
-
-为 DTLB request 创建可回包的 TLB entry。它从 VPN 生成虚拟地址，选择物理地址，随机/修正 PTE 字段，应用 runtime CSR context，并记录创建周期。
-
-输入/输出：
-
-- 输入：request `vpn/s2xlate`、`mmu_csr_runtime_state`。
-- 输出：`memblock_tlb_entry`，包含 PPN、权限、fault、level、lookup key 等 response 所需字段。
-
-文字伪代码：
-
-```text
-如果 csr_state=null：
-  fatal；
-创建 memblock_tlb_entry；
-reset entry；
-vaddr = {14'b0, vpn, 12'b0}；
-调用 choose_paddr：按 PADDR_BASE/PADDR_RANGE 和 vpn mix 生成 paddr；
-entry.update_addr_fields：填 vaddr/paddr/vpn/ppn/addr_low/index 字段；
-randomize_pte_bits：按 seq_csr_common 权重生成 PTE 位；
-entry.fixup_pte_legal：根据 PTE mode 修正 A/D/R/W/X 等组合；
-entry.apply_csr_state：用 csr_state 和 s2xlate 生成 lookup_key/asid/vmid/priv_mode；
-记录 create_cycle 和 last_hit_cycle；
-返回 entry；
-```
-
-内部子调用：
-
-- `choose_paddr()`：从配置的物理地址范围选择 paddr。
-- `randomize_pte_bits()`：按权重生成 PTE bit。
-- `memblock_tlb_entry::update_addr_fields()`：派生 VPN/PPN/index。
-- `memblock_tlb_entry::fixup_pte_legal()`：修正 PTE 合法性。
-- `memblock_tlb_entry::apply_csr_state()`：应用 CSR runtime context。
-
-## 16. `common_data_transaction::insert_tlb_entry()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-function void insert_tlb_entry(input memblock_tlb_lookup_key_t key,
-                               input memblock_tlb_entry entry);
-    if (entry == null) begin
-        `uvm_fatal("COMMON_DATA", "insert_tlb_entry got null entry")
-    end
-    entry.lookup_key = key;
-    entry.asid       = key.asid;
-    entry.vmid       = key.vmid;
-    entry.s2xlate    = key.s2xlate;
-    tlb_entry_by_key[key] = entry;
-endfunction
-```
-
-功能解释：
-
-把新 entry 写入 live TLB cache。key 是后续 L2TLB request hit 和 sfence invalidation 的共同索引。
-
-输入/输出：
-
-- 输入：`key`、`entry`。
-- 输出：`tlb_entry_by_key[key] = entry`。
-
-文字伪代码：
-
-```text
-如果 entry=null：
-  fatal；
-确保 entry.lookup_key/asid/vmid/s2xlate 与 key 一致；
-写入 tlb_entry_by_key[key]；
-```
-
-内部子调用：
-
-- 无。
-
-## 17. `memblock_l2tlb_base_sequence::fill_dtlb_resp_from_entry()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-function void memblock_l2tlb_base_sequence::fill_dtlb_resp_from_entry(input memblock_tlb_entry entry,
-                                                                      ref L2tlb_agent_agent_xaction resp);
-    if (resp == null || entry == null) begin
-        `uvm_fatal(get_type_name(), "fill_dtlb_resp_from_entry got null input")
-    end
-
-    resp.io_ptw_resp_valid = 1'b1;
-    resp.io_ptw_resp_bits_s2xlate = entry.s2xlate;
-    resp.io_ptw_resp_bits_s1_entry_tag = entry.lookup_key.vpn[34:0];
-    resp.io_ptw_resp_bits_s1_entry_asid = entry.asid[15:0];
-    resp.io_ptw_resp_bits_s1_entry_vmid = entry.vmid[13:0];
-    resp.io_ptw_resp_bits_s1_entry_perm_g = entry.pte_g;
-    resp.io_ptw_resp_bits_s1_entry_ppn = entry.ppn[40:0];
-    ...
-    resp.io_ptw_resp_bits_s2_entry_tag = entry.lookup_key.vpn[37:0];
-    resp.io_ptw_resp_bits_s2_entry_vmid = entry.vmid[13:0];
-    resp.io_ptw_resp_bits_s2_entry_ppn = entry.ppn[37:0];
-    resp.io_ptw_resp_bits_s2_gpf = entry.tlbGPF;
-    resp.io_ptw_resp_bits_s2_gaf = 1'b0;
-endfunction
-```
-
-功能解释：
-
-把 `memblock_tlb_entry` 转换成 DTLB 可接收的 L2TLB response xaction。字段包括 S1/S2 entry tag、ASID/VMID、权限、PPN、level、fault、AF/PF 和 index 辅助字段。
-
-输入/输出：
-
-- 输入：`memblock_tlb_entry entry`。
-- 输出：`L2tlb_agent_agent_xaction resp` 的 `io_ptw_resp_*` 字段。
-
-文字伪代码：
-
-```text
-如果 resp 或 entry 为空：
-  fatal；
-置 io_ptw_resp_valid=1；
-复制 s2xlate；
-填 S1 entry：
-  tag=entry.lookup_key.vpn[34:0]；
-  asid/vmid=entry.asid/entry.vmid；
-  n/pbmt/perm/level/v/ppn 来自 entry；
-  addr_low、ppn_low、valididx、pteidx 来自 entry 派生字段；
-  pf=entry.tlbPF；
-  af=entry.tlbAF 或 entry.pmaAF；
-填 S2 entry：
-  tag=entry.lookup_key.vpn[37:0]；
-  vmid、n、pbmt、ppn、perm、level 来自 entry；
-  gpf=entry.tlbGPF；
-  gaf 固定为 0；
-```
-
-内部子调用：
-
-- 无。
-
-## 18. `common_data_transaction::update_uid_tlb_records_by_entry()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-function int unsigned update_uid_tlb_records_by_entry(input memblock_tlb_lookup_key_t key,
-                                                      input memblock_tlb_entry entry);
-    int unsigned match_count;
-
-    if (entry == null) begin
-        `uvm_fatal("COMMON_DATA", "update_uid_tlb_records_by_entry got null entry")
-    end
-    match_count = 0;
-    foreach (uid_tlb_record_by_uid[uid]) begin
-        memblock_uid_tlb_record record;
-
-        record = uid_tlb_record_by_uid[uid];
-        if (record == null || !record.record_valid || record.pte_valid) begin
-            continue;
-        end
-        if (record.vpn == key.vpn &&
-            record.s2xlate == key.s2xlate &&
-            record.asid == key.asid &&
-            record.vmid == key.vmid) begin
-            record.copy_entry_fields(entry);
-            set_status_field(record.uid, MEMBLOCK_STATUS_TLB_MAPPED, 1'b1);
-            match_count++;
-        end
-    end
-    if (match_count == 0) begin
-        `uvm_error("COMMON_DATA", "no pending uid_tlb_record matches TLB key ...")
-    end
-    return match_count;
-endfunction
-```
-
-功能解释：
-
-L2TLB response 生成后，按 key 回填所有等待该 TLB entry 的 uid record。多个 uid 可以共享同一个 `{vpn,asid,vmid,s2xlate}` entry。
-
-输入/输出：
-
-- 输入：lookup `key`、live `entry`、`uid_tlb_record_by_uid`。
-- 输出：匹配 record 的 PTE 字段被复制，`pte_valid=1`；对应 uid 的 `MEMBLOCK_STATUS_TLB_MAPPED=1`。
-
-文字伪代码：
-
-```text
-如果 entry=null：
-  fatal；
-match_count=0；
-遍历 uid_tlb_record_by_uid：
-  如果 record=null 或 record_valid=0：
-    跳过；
-  如果 record.pte_valid=1：
-    跳过，避免重复回填；
-  如果 record 的 vpn/s2xlate/asid/vmid 全部等于 key：
-    调用 record.copy_entry_fields：复制 entry 的 PPN/PTE/fault/level 等字段并置 pte_valid；
-    调用 set_status_field：置 MEMBLOCK_STATUS_TLB_MAPPED；
-    match_count++；
-如果 match_count=0：
-  打印 UVM_ERROR，表示当前 response 没有等待中的 uid record；
-返回 match_count；
-```
-
-内部子调用：
-
-- `memblock_uid_tlb_record::copy_entry_fields()`：复制 entry 字段并置 `pte_valid`。
-- `set_status_field()`：更新 uid 状态表。
-
-## 19. `memblock_uid_tlb_record::copy_entry_fields()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_tlb_entry.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-function void copy_entry_fields(input memblock_tlb_entry entry);
-    if (entry == null) begin
-        `uvm_fatal("UID_TLB_RECORD", "copy_entry_fields got null entry")
-    end
-    lookup_key       = entry.lookup_key;
-    asid             = entry.asid;
-    vmid             = entry.vmid;
-    s2xlate          = entry.s2xlate;
-    vpn              = entry.lookup_key.vpn;
-    paddr            = entry.paddr;
-    ppn              = entry.ppn;
-    pte_r            = entry.pte_r;
-    ...
-    level            = entry.level;
-    pte_valid        = 1'b1;
-    pte_update_cycle = memblock_sync_pkg::get_dispatch_service_cycle();
-endfunction
-```
-
-功能解释：
-
-把 live TLB entry 的最终 PTE/PPN/fault 信息复制到 uid record，作为该 uid 已等到 L2TLB response 的证据。
-
-输入/输出：
-
-- 输入：`memblock_tlb_entry entry`。
-- 输出：record 字段更新，`pte_valid=1`，`pte_update_cycle` 更新。
-
-文字伪代码：
-
-```text
-如果 entry=null：
-  fatal；
-复制 lookup_key、asid、vmid、s2xlate、vpn；
-复制 paddr/ppn；
-复制所有 PTE permission、fault、pbmt、level 字段；
-pte_valid=1；
-pte_update_cycle=当前 dispatch_service_cycle；
-```
-
-内部子调用：
-
-- `memblock_sync_pkg::get_dispatch_service_cycle()`：记录回填周期。
-
-## 20. `memblock_l2tlb_base_sequence::send_l2tlb_item()`
-
-源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-task memblock_l2tlb_base_sequence::send_l2tlb_item(input L2tlb_agent_agent_xaction tr);
-    if (tr == null) begin
-        `uvm_fatal(get_type_name(), "send_l2tlb_item got null xaction")
-    end
-    start_item(tr);
-    finish_item(tr);
-endtask
-```
-
-功能解释：
-
-把 ready 或 response xaction 交给 L2TLB agent sequencer/driver。
-
-输入/输出：
-
-- 输入：`L2tlb_agent_agent_xaction tr`。
-- 输出：driver 的 `seq_item_port` 后续可取到该 item。
-
-文字伪代码：
-
-```text
-如果 tr=null：
-  fatal；
-start_item；
-finish_item；
-```
-
-内部子调用：
-
-- `start_item()` / `finish_item()`：标准 UVM sequence item 发送。
-
-## 21. `L2tlb_agent_agent_driver::main_phase()`
+### 11.2 `L2tlb_agent_agent_driver::main_phase()`
 
 源码位置：`mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/L2tlb_agent_agent_driver.sv`
 
+抽象功能描述：driver 每个 `drv_cb` 边界先读取 lifecycle owner 状态。没有 owner 时显式驱动
+inactive；owner 已声明时阻塞等待该 owner 在当前边界必须提供的唯一 cycle item，然后只做字段搬运。
+它不维护 latency、pending queue 或 stop；owner bit 只作为 sequence/driver 的 item 存在合同。
+
 真实逻辑摘要：
 
 ```systemverilog
-if(this.cfg.sqr_sw==tcnt_dec_base::ON && this.cfg.drv_sw==tcnt_dec_base::ON) begin
-    while(1) begin
-        seq_item_port.try_next_item(req);
-        if(req!=null) begin
-            repeat(req.pre_pkt_gap) begin
-                @this.vif.drv_mp.drv_cb;
-                this.drive_idle(this.cfg.drv_mode);
-            end
-            @this.vif.drv_mp.drv_cb;
-            this.send_pkt(req);
-            repeat(req.post_pkt_gap) begin
-                @this.vif.drv_mp.drv_cb;
-                this.drive_idle(this.cfg.drv_mode);
-            end
-            seq_item_port.item_done();
-        end
-        else begin
-            @this.vif.drv_mp.drv_cb;
-            this.drive_idle(this.cfg.drv_mode);
-        end
+while (1) begin
+    @this.vif.drv_mp.drv_cb;
+    if (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
+        this.drive_idle(this.cfg.drv_mode);
+    end
+    else begin
+        req = null;
+        seq_item_port.get_next_item(req);
+        if (req == null) `uvm_fatal(...)
+        if (req.pre_pkt_gap != 0 || req.post_pkt_gap != 0) `uvm_fatal(...)
+        this.send_pkt(req);
+        seq_item_port.item_done();
     end
 end
 ```
 
-功能解释：
+文字伪代码：
 
-L2TLB agent driver 的主循环。它从 sequencer 拉取 ready/response item，按 `pre_pkt_gap/post_pkt_gap` 插入 idle，再调用 `send_pkt()` 驱动 interface。
+```text
+每拍等待driver clocking边界；
+若lifecycle owner未声明，调用drive_idle，使ready、resp_valid和payload保持inactive；
+若owner已声明，清req句柄并调用get_owned_item_or_abort；正常分支阻塞get_next_item，等待sequence在该边界交付必有item；
+若owner被do_kill/phase终止清除，或phase进入READY_TO_END及以后，取item分支被取消并驱动一拍idle后返回；
+正常分支的空item或非0 gap立即fatal；合法item调用send_pkt一次性驱动ready、resp_valid和全部payload并item_done；
+driver不额外等待、不选择latency、不维护queue或生命周期状态。
+```
 
-输入/输出：
+### 11.3 `send_pkt()` / `drive_idle()`
 
-- 输入：sequence 发送的 `L2tlb_agent_agent_xaction`。
-- 输出：interface 上的 `io_ptw_req_0_ready` 和 `io_ptw_resp_*`。
+抽象功能描述：`send_pkt()` 把 xaction逐字段驱动到 VIF；`drive_idle(DRV_0)` 在 reset、sequence disabled、
+sequence退出或 lifecycle owner 未声明时关闭 ready/response，避免无人记录的 request fire。
 
 文字伪代码：
 
 ```text
-如果 sqr_sw 和 drv_sw 都打开：
-  永久循环：
-    try_next_item；
-    如果拿到 req：
-      pre_pkt_gap 期间每拍 drive_idle；
-      下一拍调用 send_pkt 驱动 req；
-      post_pkt_gap 期间每拍 drive_idle；
-      item_done；
-    如果没有 req：
-      等一拍并 drive_idle；
-如果 sqr_sw=OFF 且 drv_sw=ON：
-  fatal，要求提供 driver send task；
+send_pkt：
+  驱动request ready；
+  驱动response valid、S1/S2 tag、ASID/VMID、PPN、permission、PBMT和fault字段；
+drive_idle(DRV_0)：
+  ready=0；resp_valid=0；全部payload清0；
+active responder要求DRV_0，generic全1/随机模式在reset phase被拒绝。
 ```
 
-内部子调用：
-
-- `drive_idle()`：空闲周期默认驱动。
-- `send_pkt()`：真实驱动 ready/response 字段。
-
-## 22. `L2tlb_agent_agent_driver::send_pkt()`
-
-源码位置：`mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/L2tlb_agent_agent_driver.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-task L2tlb_agent_agent_driver::send_pkt(L2tlb_agent_agent_xaction tr);
-    vif.drv_mp.drv_cb.io_ptw_req_0_ready <= tr.io_ptw_req_0_ready;
-    vif.drv_mp.drv_cb.io_ptw_resp_valid <= tr.io_ptw_resp_valid;
-    vif.drv_mp.drv_cb.io_ptw_resp_bits_s2xlate <= tr.io_ptw_resp_bits_s2xlate;
-    vif.drv_mp.drv_cb.io_ptw_resp_bits_s1_entry_tag <= tr.io_ptw_resp_bits_s1_entry_tag;
-    ...
-    vif.drv_mp.drv_cb.io_ptw_resp_bits_s2_entry_level <= tr.io_ptw_resp_bits_s2_entry_level;
-    vif.drv_mp.drv_cb.io_ptw_resp_bits_s2_gpf <= tr.io_ptw_resp_bits_s2_gpf;
-    vif.drv_mp.drv_cb.io_ptw_resp_bits_s2_gaf <= tr.io_ptw_resp_bits_s2_gaf;
-endtask
-```
-
-功能解释：
-
-把 xaction 的 ready/response 字段驱动到 `L2tlb_agent_agent_interface`。connect takeover active 时，这些字段再被 force 回 DUT 的 DTLB/L2TLB response 连接点。
-
-输入/输出：
-
-- 输入：`L2tlb_agent_agent_xaction tr`。
-- 输出：interface driver clocking block 上的 ready/resp。
-
-文字伪代码：
+### 11.4 强制停序与 phase 结束
 
 ```text
-驱动 io_ptw_req_0_ready；
-驱动 io_ptw_resp_valid；
-驱动 s2xlate；
-逐字段驱动 S1 entry tag/asid/vmid/permission/level/v/ppn/index/pf/af；
-逐字段驱动 S2 entry tag/vmid/permission/level/gpf/gaf；
+sequence.kill()/stop_sequences() 调用 memblock_l2tlb_base_sequence::do_kill()；
+do_kill 通过 package try_release 清除 owner，不依赖 post_body；
+driver 的 get_owned_item_or_abort 同时等待 get_next_item 和下一个 drv_cb 的 owner/phase 状态；
+owner 被清除或 phase 进入 READY_TO_END/ENDED/JUMPING/CLEANUP/DONE 时，取item分支被终止，驱动idle并返回；
+UVM 直接杀掉运行线程时，driver::phase_ended() 作为组件回调再次调用 try_release，防止 phase 结束后残留 stale owner；
+强制 kill/stop_sequences 后在同一 phase 重新 handoff owner不属于当前支持范围；
+此路径不创建或完成任何新token，也不改写主表pass/fail/terminal。
 ```
 
-内部子调用：
+## 12. 队列、状态与优先级
 
-- 无。
+### 12.1 队列和状态表
 
-## 23. `L2tlb_agent_agent_driver::drive_idle()`
+| 对象 | 写者 | 读者 | 删除或更新点 |
+|---|---|---|---|
+| `pending_q` | `capture_fired_request()` | `select_due_response()`、flush/reset | 选择后移到driving；flush/reset时取消 |
+| `driving_req` | `select_due_response()` | 下一 sample 的 `complete_driving_response()` | 完成或reset时清除 |
+| `accepted/completed/canceled` | request、complete、flush、reset helper | lifecycle accounting | sequence生命周期内单调，不随DUT reset回退 |
+| `runtime_csr_snapshot` | CSR monitor/package publisher | L2TLB responder、dispatch CSR consumer | latest覆盖；semantic raw clear不删除 |
+| `l2tlb_flush_event` | CSR/fence monitor | responder | latest只读；本地event seq去重 |
+| `tlb_entry_by_key` | get/create/build flow | request capture、sfence semantic flow | sfence可删除live entry；已冻结snapshot不受影响 |
+| `uid_tlb_record_by_uid` | dispatch issue上下文登记；response完成时回填 | PTW-back replay等消费者 | response complete时有匹配才置PTE valid |
+| `l2tlb_lifecycle_owner_*` | package claim/release；sequence `do_kill`；driver `phase_ended` 兜底 | sequence启动/退出/强制停序 | reset不清；自然release或强制清理时清 |
+| `ready_opportunity_since_lifecycle_block` | reset分支、flush helper、next_ready分支 | idle-stop判断 | reset/flush清0；首次重新生成ready=1时置1 |
 
-源码位置：`mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/L2tlb_agent_agent_driver.sv`
-
-真实逻辑摘要：
-
-```systemverilog
-if(drv_mode==tcnt_dec_base::DRV_0) begin
-    vif.drv_mp.drv_cb.io_ptw_req_0_ready <= memblock_sync_pkg::l2tlb_responder_active ? '0 : '1;
-    vif.drv_mp.drv_cb.io_ptw_resp_valid <= '0;
-    ...
-end
-else if(drv_mode==tcnt_dec_base::DRV_1) begin
-    vif.drv_mp.drv_cb.io_ptw_req_0_ready <= '1;
-    vif.drv_mp.drv_cb.io_ptw_resp_valid <= '1;
-    ...
-end
-```
-
-功能解释：
-
-空闲周期默认驱动。正常 `DRV_0` 下，takeover active 时 idle ready 为 0，避免没有 sequence item 时误接收 request；takeover inactive 时 idle ready 为 1，保持观察/透传场景下 interface 不阻断。
-
-输入/输出：
-
-- 输入：driver mode、`l2tlb_responder_active`。
-- 输出：idle ready/resp 默认值。
-
-文字伪代码：
+### 12.2 单拍优先级
 
 ```text
-如果 drv_mode=DRV_0：
-  如果 l2tlb_responder_active=1：
-    idle ready=0；
-  否则：
-    idle ready=1；
-  response valid 和 payload 清 0；
-如果 drv_mode=DRV_1：
-  ready、response valid 和 payload 驱 1；
-其它模式按 driver 模板后续分支处理；
+1. 锁存request sample并等待NBA；
+2. reset/backend判断；
+3. flush event单调性和freshness检查；
+4. 确认上一driving response；
+5. 应用runtime CSR latest；
+6. 处理新flush event和同拍killed fire；
+7. 接受正常request fire；
+8. 处理global/idle stop；
+9. 选择下一response；
+10. 计算下一ready并发送唯一cycle item；
+11. 满足排空条件时退出。
 ```
 
-内部子调用：
-
-- 无。
-
-## 24. 队列和状态说明
-
-| 队列/状态 | 写入者 | 消费者 | 元素/字段含义 | 删除或更新条件 |
-|---|---|---|---|---|
-| `memblock_sync_pkg::l2tlb_responder_active` | `MEMBLOCK__L2TLB_AGENT_CONNECT` | `memblock_l2tlb_base_sequence::body()`、driver `drive_idle()` | connect takeover 是否 active | 仿真初始根据 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN` 设置 |
-| `latest_raw_csr/latest_raw_csr_seq` | CSR monitor via `push_raw_csr()` | `drain_csr_runtime_events()` -> `drain_csr_events()` | 最新 CSR runtime snapshot | L2TLB lookup 前按 seq 去重应用；不作为 FIFO |
-| `mmu_csr_state` | `apply_raw_csr_runtime()` | `make_tlb_key_by_req()` | 当前 ASID/VMID/priv/runtime CSR | raw CSR seq 更新时刷新；sfence 不直接更新 |
-| `tlb_entry_by_key[key]` | `insert_tlb_entry()` | `get_or_create_tlb_entry_by_req()`、sfence flow | live TLB entry cache，key 为 `{vpn,asid,vmid,s2xlate}` | lookup miss 时插入；sfence/hfence 匹配时删除 |
-| `uid_tlb_record_by_uid[uid]` | issue path 预登记；L2TLB response 回填 | `update_uid_tlb_records_by_entry()`、PTW wait/replay | uid 发射时的 TLB context 和 response 后 PTE 信息 | record 回填后 `pte_valid=1`；sfence 不删除 |
-| `ptw_wait_replay_q[$]` | replay handler | `pop_ready_ptw_wait_replay()` | 等待 L2TLB response done 或 timeout 的 replay 项 | 当 `tlb_entry_ready_for_uid()` 或 timeout 满足时出队 |
-| sequence item queue | `send_l2tlb_item()` | `L2tlb_agent_agent_driver::main_phase()` | ready_tr 或 resp_tr | driver `item_done()` 后消费完成 |
-
-## 25. 分支优先级
-
-- connect 优先级：`MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN` 决定 response 是否由 agent 接管；runtime `MEMBLOCK_L2TLB_SEQ_EN` 只决定 sequence 是否运行。
-- sequence 启动优先级：`enable=0` 直接 return；`enable=1` 但 `l2tlb_responder_active=0` 直接 fatal；只有二者都满足才进入 loop。
-- request 处理优先级：`request_valid()` 为 false 时不查表、不发 response；连续 idle 超过 `idle_stop_cycle` 后退出。
-- ready/response 顺序：源码先发送 `ready_tr`，再创建并延迟发送 `resp_tr`。
-- CSR 与 sfence 优先级：L2TLB lookup 前只同步 CSR latest snapshot，不消费 sfence FIFO；sfence FIFO 消费由 dispatch service 的 runtime context flow 显式处理。
-- lookup 优先级：先按 request `vpn/s2xlate` 和 runtime CSR 生成 key；`has_tlb_entry()` hit 优先复用 live entry；miss 才 build/insert。
-- uid record 回填优先级：只回填 `record_valid=1 && pte_valid=0` 且 `vpn/s2xlate/asid/vmid` 完全匹配的 record；没有匹配时 `UVM_ERROR`，但 response 仍发送。
-- driver idle 优先级：正常 `DRV_0` 下 takeover active 时 idle ready=0，只有 sequence 发送 ready_tr 时才 ready。
-
-## 26. 端到端行为总结
-
-L2TLB responder flow 从 DTLB 发出的 `io_ptw_req_0_valid/vpn/s2xlate` 开始。connect 宏把这些 request 字段接入 `L2tlb_agent_agent_interface`，并在 takeover active 时把 agent 的 ready/response force 回 DTLB/L2TLB response 连接点。`memblock_l2tlb_base_sequence` 在 enabled 且 takeover active 后循环等待 request；采到 request 后先 ready，再用 request 的 `vpn/s2xlate` 和最新 runtime CSR 生成 `{vpn,asid,vmid,s2xlate}` key。live TLB cache 命中则复用 entry，miss 则创建 entry 并插入 `tlb_entry_by_key`。随后 sequence 把 entry 填成 response xaction，回填所有匹配 uid record，并由 driver 将 response 驱动回 DTLB。
-
-### 26.1 端到端文字伪代码
+## 13. 最小时序示例
 
 ```text
-连接：
-  从 DTLB repeater 采 request valid/vpn/s2xlate；
-  如果 connect takeover active：
-    agent interface ready/resp 驱回 DTLB/L2TLB response 点；
-  否则：
-    agent 只观察原 RTL response；
+假设CSR已有效、无flush、max_outstanding大于1：
 
-启动：
-  body 初始化 plus 配置；
-  如果 MEMBLOCK_L2TLB_SEQ_EN=0：
-    退出；
-  如果 MEMBLOCK_L2TLB_SEQ_EN=1 但 takeover inactive：
-    fatal；
-  否则进入 responder loop；
+sample N：
+  drv_cb.valid=1，mon_cb.ready=1，因此request A fire；
+  capture A，抽到1C，A.due=N+1；
+  select_due_response(next=N+1)把A移入driving；
+  driver把A response和下一拍ready一起驱动。
 
-处理 request：
-  每拍检查 request_valid；
-  如果无 request：
-    增加 idle_count，超过 idle_stop_cycle 后退出；
-  如果有 request：
-    采 vpn/s2xlate；
-    发送 ready_tr；
-    选择 response latency；
-    同步 latest CSR runtime；
-    key = {vpn, current_asid(s2xlate), current_vmid(s2xlate), s2xlate}；
-    如果 tlb_entry_by_key[key] 存在：
-      复用 entry；
-    否则：
-      用 tlb_map_builder 创建 entry；
-      插入 tlb_entry_by_key；
-    把 entry 填入 response xaction；
-    遍历 uid_tlb_record_by_uid：
-      对匹配且 pte_valid=0 的 uid record 复制 entry 字段；
-      置 MEMBLOCK_STATUS_TLB_MAPPED；
-    发送 response xaction；
-    driver 按 pre_pkt_gap 延迟后驱动 io_ptw_resp_*；
+sample N+1：
+  complete_driving_response确认A完成并回填匹配UID；
+  如果此时request B也满足valid&&ready，B创建独立token；
+  A和B即使key相同也不会合并。
 
-后续：
-  PTW-back replay wait 可通过 uid record 的 pte_valid 判断 response done；
-  sfence/hfence 可删除 live tlb_entry_by_key；
-  被删除后同 key request 再来会重新 build entry；
+若A抽到LONG且后续B抽到1C：
+  ordered模式等待A到期后再处理B；
+  reorder模式可在B到期时先选择B；
+  两种模式都保持accepted token逐笔闭合。
 ```
 
-## 27. 语义边界
+## 14. 语义边界
 
-- request 来源是 DTLB：`_inner_dtlbRepeater_io_ptw_req_0_valid/vpn/s2xlate`。
-- response 方向是 L2TLB_agent 到 DTLB：`_inner_ptw_io_tlb_1_req_0_ready/resp_*` 在 takeover active 时由 agent interface 驱动。
-- 查表依据是 DTLB request 的 `vpn/s2xlate` 和 runtime CSR 的 `asid/vmid`。
-- 当前 request 不携带 `paddr`；文档和实现都不应描述为根据 DTLB request 的 `paddr` 查表。
-- `L2TLB_agent` 不建模 L2TLB 到 L2Cache/PTW/memory 的下游访问，也不接管 L2Cache refill、PTW memory request 或 dcache error 类接口。
-- 当前源码的 request 接收边界由 `request_valid()` 触发：sequence 看到 DTLB request valid 后先发送一拍 `io_ptw_req_0_ready=1` 的 ready xaction，再按 latency 发送 response。`request_fire()` 函数存在但当前主路径未使用，因此本文档按真实源码描述为 valid-triggered responder，而不是同拍 valid-ready fire-triggered responder。
+- request 的唯一接受条件是同一 sample 的 `drv_cb.valid` 与 `mon_cb.ready` 同时为 1。
+- request 的 `vpn/s2xlate` 始终来自该 `drv_cb` sample，不从 response 等待期 live VIF重新读取。
+- `token` 不写入 DUT payload，DUT 仍依靠 response 内容匹配 outstanding request。
+- runtime CSR latest 是 snapshot，不是 FIFO；flush event latest 是 lifecycle sideband，不替代 semantic sfence queue。
+- response 端口没有 backpressure，因此 driving item在下一 sample完成；仍必须保留 driving slot到该边界。
+- S1/S2 `G/U` 接口字段都已驱动，但当前共享同一份 `pte_g/pte_u`，不表示独立二阶段权限模型已经完成。
+- 合法 DTLB request 可以没有测试框架 UID；零匹配只记 info，不影响 token completion。
+- responder不修改主表 pass/fail/terminal，不分配 LSQ，不推进 ROB commit或LQ/SQ deq。
+- reset、flush canceled token不返回 response；global/idle stop则排空正常 outstanding后退出。
+- 强制 `kill()`、`stop_sequences()` 后在同一次仿真重新 handoff owner不属于当前支持范围。

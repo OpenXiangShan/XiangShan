@@ -4,6 +4,8 @@
 
 本文不重复说明原有 LSQ 入队、基础 issue、基础 writeback/replay、基础 deq 和 pendingPtr commit flow，只覆盖本轮为了把 DUT 后端接口事实闭环到 mem_ut 公共状态机所做的增强。
 
+> **L2TLB 当前实现说明（2026-07-22）**：本文的 L2TLB 相关段落保留后端闭环背景；当前 responder 的有效 queue/driver/flush/owner 合同以 `mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md` 和 `memblock_l2tlb_base_sequence.md` 为准。
+
 通俗地说，本轮目标不是在 TB 里重做一个 MemBlock，而是补齐下面这条链路：
 
 ```text

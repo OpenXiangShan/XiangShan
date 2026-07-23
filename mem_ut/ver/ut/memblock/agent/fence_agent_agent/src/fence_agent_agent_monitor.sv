@@ -71,6 +71,9 @@ task fence_agent_agent_monitor::mon_data();
         if(this.vif.rst_n==1'b1 &&
            memblock_sync_pkg::reset_backend_done==1'b1 &&
            io_ooo_to_mem_sfence_valid===1'b1) begin
+            // 中文注释：L2TLB lifecycle sideband独立于semantic raw capture gate。
+            // 每个post-reset有效sfence sample递增一次event，sequence以event_seq非破坏读取。
+            memblock_sync_pkg::note_l2tlb_flush_event($time);
             raw_sfence = memblock_sync_pkg::make_empty_raw_sfence();
             raw_sfence.valid = 1'b1;
             raw_sfence.rs1   = io_ooo_to_mem_sfence_bits_rs1;

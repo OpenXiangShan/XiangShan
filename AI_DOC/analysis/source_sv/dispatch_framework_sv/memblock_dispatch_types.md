@@ -2,7 +2,7 @@
 
 本文档对应源码：
 
-- `mem_ut/ver/ut/memblock/seq/base_seq/memblock_dispatch_types.sv`
+- `mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_dispatch_types.sv`
 
 该文件定义 dispatch 框架的公共“类型语言”：容量参数、DUT 编码常量、ROB/LQ/SQ key、主表抽象操作类型、发射目标、writeback 事件、状态字段和发射队列轻量项。它本身不保存运行状态，也不直接驱动 DUT；真正的行为由 `lsq_ctrl_model`、`issue_queue_scheduler`、`writeback_status_handler`、`lsq_commit_handler` 等 helper 使用这些类型共同完成。
 
@@ -12,7 +12,7 @@
 |---|---|---|
 | 主表生成 | `memblock_uid_t`、`memblock_op_class_e`、`memblock_lsq_flow_e`、`MEMBLOCK_FUTYPE_*`、`MEMBLOCK_LSUOP_*` | 生成每条 transaction 的高层操作意图和合法 `fuType/fuOpType`。 |
 | LSQ 入队 | `memblock_op_behavior_t`、`memblock_rob_key_t`、`memblock_lq_key_t`、`memblock_sq_key_t` | 判断是否需要 LQ/SQ，分配并记录 `robIdx/lqIdx/sqIdx`。 |
-| TLB 查表 | `memblock_tlb_lookup_key_t` | 用 runtime CSR snapshot 和 DTLB request 信息构造 `{vpn, asid, vmid, s2xlate}` 查表 key。 |
+| TLB 查表 | `memblock_tlb_lookup_key_t`、V2 L2TLB compile localparam | 用 runtime CSR snapshot 和 DTLB request 信息构造 `{vpn, asid, vmid, s2xlate}` 查表 key；L2TLB outstanding 和 flush hold 使用 V2 结构上限。 |
 | 发射队列 | `memblock_issue_target_e`、`memblock_issue_q_item_t` | 把一个 uid 拆成 LOAD/STA/STD 目标队列项，控制 ready delay、优先级和 target-aware replay 序号。 |
 | 地址复用 | `memblock_addr_reuse_kind_e` | 随机主表生成期选择当前 transaction 要按哪类 load/store after 场景复用窗口内地址。 |
 | 流水线反馈 | `memblock_wb_event_source_e`、`memblock_wb_event_t` | 把 monitor 采集到的 writeback、fault、replay、redirect 统一成事件。 |
@@ -24,13 +24,24 @@
 
 | 字段 | 含义 | 使用场景和约束 |
 |---|---|---|
-| `MEMBLOCK_ROB_SIZE = 352` | 当前模型/DUT 期望的 ROB 槽位数量。 | ROB 指针推进、年龄比较、active ROB map、redirect flush 判断都要以该容量为边界。 |
+| `MEMBLOCK_ROB_SIZE = 160` | 当前 V2 模型/DUT 期望的 ROB 槽位数量。 | ROB 指针推进、年龄比较、active ROB map、redirect flush 判断都要以该容量为边界。 |
 | `MEMBLOCK_LQ_SIZE = 72` | 当前模型/DUT 期望的 LQ 槽位数量。 | load/prefetch 入队资源检查、`lqIdx` 分配、DUT `lqDeq/cancel` 释放都依赖它。 |
 | `MEMBLOCK_SQ_SIZE = 56` | 当前模型/DUT 期望的 SQ 槽位数量。 | store/CBO 入队资源检查、`sqIdx` 分配、DUT `sqDeq/cancel` 释放都依赖它。 |
 | `MEMBLOCK_COMMIT_WIDTH = 8` | 每拍最多向 LSQ commit 侧推进的 ROB commit 数。 | `lsq_commit_handler::select_rob_commit_batch()` 用它限制 commit batch。 |
-| `MEMBLOCK_ROB_VALUE_W = 9` | `robIdx.value` 字段位宽，不含 wrap `flag`。 | 9 bit 只表示编码空间可到 `0..511`，真实合法值仍必须小于 `MEMBLOCK_ROB_SIZE`。 |
+| `MEMBLOCK_ROB_VALUE_W = 8` | `robIdx.value` 字段位宽，不含 wrap `flag`。 | 8 bit 只表示编码空间可到 `0..255`，真实合法值仍必须小于 `MEMBLOCK_ROB_SIZE`。 |
 | `MEMBLOCK_LQ_VALUE_W = 7` | `lqIdx.value` 字段位宽，不含 wrap `flag`。 | 7 bit 只表示编码空间可到 `0..127`，真实合法值仍必须小于 `MEMBLOCK_LQ_SIZE`。 |
 | `MEMBLOCK_SQ_VALUE_W = 6` | `sqIdx.value` 字段位宽，不含 wrap `flag`。 | 6 bit 只表示编码空间可到 `0..63`，真实合法值仍必须小于 `MEMBLOCK_SQ_SIZE`。 |
+
+### 2.1 V2 L2TLB 结构参数
+
+源码中的这些 localparam 直接从 `memblock_compile_params.svh` 派生，描述 V2 DUT 的物理结构，不是 runtime plus 镜像：
+
+| localparam | 来源宏 | 含义 | 使用者 |
+|---|---|---|---|
+| `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE` | `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE` | DTLB filter 的结构容量；V2 默认由 `dfilterSize` 决定。 | `seq_csr_common::apply_runtime_resource_limits()` 限制 `MEMBLOCK_L2TLB_MAX_OUTSTANDING`；L2TLB responder的 bounded queue上限 |
+| `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES` | `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES` | 顶层 monitor 观察到 CSR/sfence flush 后，等待 DTLB filter 完成清空的安全 sample 窗口。 | L2TLB responder 的 `accept_hold_until_sample` |
+
+这两个参数只表示连接时已知的硬件结构和时序边界。运行期可以把行为上限调小，但不能超过结构容量；版本切换时应由 compile profile 修改宏，不再建立同义 plus 参数。
 
 关键约束：
 
@@ -205,9 +216,22 @@ sq_to_map_key(key)  = {key.flag, key.value};
 - TLB 表不能只用 VPN 做唯一索引。
 - L2TLB responder 查表应先构造 `{vpn, asid, vmid, s2xlate}`，再直接查 `tlb_entry_by_key` 得到 live TLB entry。
 - uid 只用于发射上下文追踪和 PTE 回填记录，不作为 TLB entry 主索引，也不建立 `key -> uid` 强绑定。
-- 所有基于 CSR 的 lookup 条件都应使用 runtime CSR snapshot，而不是 `csr_csr_common.sv` 中的初始值。
+- 所有基于 CSR 的 lookup 条件都应使用 runtime CSR snapshot，而不是 `seq_csr_common.sv` 中的初始值。
 
-### 5.3 `memblock_sfence_payload_t`
+L2TLB responder 的 request-time key 具体由当前 sample 的 `vpn/s2xlate` 和已应用的 runtime CSR `asid/vmid` 组成。每次真实 `valid && ready` fire 都独立查表并建立自己的 responder token；uid 不是 TLB key，也不是请求合并条件。
+
+### 5.3 L2TLB response lifecycle 类型边界
+
+`memblock_dispatch_types.sv` 不定义 L2TLB pending record 或 response owner，它只提供 L2TLB responder使用的结构参数和查表 key类型。`pending_q`、`driving_req`、latency bucket和 token 位于 `memblock_l2tlb_base_sequence.sv`，共享 owner、runtime latest和 flush event 位于 `memblock_sync_pkg.sv`。
+
+因此：
+
+- `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE` 约束 queue 上限，但不负责记录请求生命周期。
+- `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES` 约束 ready 恢复边界，但不消费或修改 `raw_sfence_q`。
+- `memblock_tlb_lookup_key_t` 只描述 `{vpn, asid, vmid, s2xlate}`，不携带内部 token。
+- response 的 S1/S2 `perm_g/u` 字段链由 L2TLB agent transaction/driver/sequence 维护；当前两阶段字段都从同一 `memblock_tlb_entry.pte_g/pte_u` 填充，独立 S1/S2 权限不是本类型文件提供的能力。
+
+### 5.4 `memblock_sfence_payload_t`
 
 `memblock_sfence_payload_t` 是公共数据层内部使用的 sfence/hfence 失效 payload。fence monitor 采到的是接口 raw 字段，公共数据层先把 raw 字段 decode 成这个 payload，再遍历 `tlb_entry_by_key` 做 entry 级删除。
 
