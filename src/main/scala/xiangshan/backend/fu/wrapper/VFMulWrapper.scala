@@ -32,6 +32,12 @@ class VFMulWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
   private val ex0vsew = ex0ctrl.vtype.get.vsew
   private val isFmul = makePipeReg(VFMacOpcodes.isFmul(ex0NextOpcode), pipeRegValids)
   private val isOP3 = makePipeReg(VFMacOpcodes.isOP3(ex0NextOpcode), pipeRegValids)
+  private val op3MulUsesOldVd =
+    VFMacOpcodes.isFmadd(ex0opcode) || VFMacOpcodes.isFnmadd(ex0opcode) ||
+    VFMacOpcodes.isFmsub(ex0opcode) || VFMacOpcodes.isFnmsub(ex0opcode)
+  private val op3NegProduct =
+    VFMacOpcodes.isFnmadd(ex0opcode) || VFMacOpcodes.isFnmsub(ex0opcode) ||
+    VFMacOpcodes.isFnmacc(ex0opcode) || VFMacOpcodes.isFnmsac(ex0opcode)
 //  private val resSew = Wire(Vec(normalLatency + 1, UInt(ex0vsew.getWidth.W)))
 
 //  for (i <- 0 to cfg.latency) {
@@ -52,16 +58,14 @@ class VFMulWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
   private val resultData = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
   private val fflagsData = Wire(Vec(numVecModule, Vec(vlenb / numVecModule, Fflags())))
 
-//  val outToFaluFromFmul = out.outToVfaluFromVfmul.get
-
   vfmuls.zipWithIndex.foreach {
     case (mod, i) =>
       mod.io.fire             := ex(0).valid
       mod.io.in.isFMUL        := isFmul.ex0
-      mod.io.in.isNeg         := false.B
+      mod.io.in.isNeg         := op3NegProduct
       mod.io.in.fp_fmt        := VFMacOpcodes.getDataType(ex0opcode)
-      mod.io.in.fp_a          := vs2Split.io.outVec64b(i)
-      mod.io.in.fp_b          := vs1Split.io.outVec64b(i)
+      mod.io.in.fp_a          := vs1Split.io.outVec64b(i)
+      mod.io.in.fp_b          := Mux(op3MulUsesOldVd, oldVdSplit.io.outVec64b(i), vs2Split.io.outVec64b(i))
       mod.io.in.round_mode    := frm
 
       toVfalu.bits(i) := mod.io.outToFADD
@@ -69,7 +73,9 @@ class VFMulWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
       resultData(i) := mod.io.out.fpResult
       fflagsData(i) := mod.io.out.fflagsVec
   }
-  toVfalu.valid := ex(1).valid
+  // VectorFMUL S1 is the unrounded product consumed by the vector adder.
+  // OP2 multiplication must never enter this path.
+  toVfalu.valid := ex(1).valid && isOP3.ex(1)
 
   private def zeroVecData(vecData: VecSpecialData): Unit = {
     vecData.normal := 0.U

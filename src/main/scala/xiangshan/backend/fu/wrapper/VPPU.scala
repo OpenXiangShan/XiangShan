@@ -51,7 +51,6 @@ class VPPU(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
     */
   typeMod.io.in.fuOpType := fuOpType
   typeMod.io.in.vsew := vsew
-  typeMod.io.in.isReverse := isReverse
   typeMod.io.in.isExt := isExt
   typeMod.io.in.isDstMask := vecCtrl.isDstMask
   typeMod.io.in.isMove := isMove

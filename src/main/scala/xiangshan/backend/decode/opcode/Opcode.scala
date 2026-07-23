@@ -75,7 +75,8 @@ object Opcode {
   object VFMacOpcodes extends Opcodes.FMacOpcode {
     override def getLat(opcode: Opcode): Int = {
       require(this.all.contains(opcode))
-      2
+      // FMacOpcode.getOpNum is bit 5; OP3 is encoded as one.
+      if (opcode.encode(5).rawString == "1") 3 else 2
     }
   }
 

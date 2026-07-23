@@ -890,7 +890,6 @@ object Bundles {
     val nf        = Nf()
     val veew      = VEew()
 
-    val isReverse = Bool() // vrsub, vrdiv
     val isExt     = Bool()
     val isNarrow  = Bool()
     val isDstMask = Bool() // vvm, vvvm, mmm

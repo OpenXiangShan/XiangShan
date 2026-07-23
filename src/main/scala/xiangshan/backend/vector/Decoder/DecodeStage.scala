@@ -178,7 +178,6 @@ class DecodeStageImp(
         bits.vpu.vl := 0.U // Todo: remove it
         bits.vpu.nf := 0.U // Todo: remove it
         bits.vpu.veew := 0.U // Todo: remove it
-        bits.vpu.isReverse := 0.U // Todo: remove it
         bits.vpu.isExt := 0.U // Todo: remove it
         bits.vpu.isNarrow := 0.U // Todo: remove it
         bits.vpu.isDstMask := 0.U // Todo: remove it
