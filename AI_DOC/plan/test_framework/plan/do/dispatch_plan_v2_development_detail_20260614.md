@@ -9,6 +9,8 @@
 
 ## 1. 开发规则
 
+> **L2TLB 当前实现说明（2026-07-22）**：本文早期 Task15 的 L2TLB 参数和串行 responder 记录仅作历史背景。当前 V2 使用 `MAX_OUTSTANDING`、ordered/reorder、三档 weighted due、逐拍 cycle item 和 package lifecycle owner，具体以 V2 L2TLB execution plan 为准。
+
 本文件用于记录 `dispatch_plan_v2_review_annotated.md` 的实际开发拆分、实现细节、疑问处理和验收结果。每完成一个任务，都需要补充本文件中的实现说明、验收记录和后续风险。
 
 执行节奏：
@@ -1431,6 +1433,8 @@ Subagent review：
 - `make eda_run tc=tc_sanity mode=base_fun` 通过，日志显示 `TEST CASE PASSED`，`UVM_ERROR=0`，`UVM_FATAL=0`。
 
 ### Task15：L2TLB/PTW responder sequence
+
+> 本 Task15 记录的是早期 skeleton。当前 V2 实现已由 L2TLB lifecycle 专项替代；下方旧 `min/max latency`、串行 `pre_pkt_gap` 和 single-outstanding 描述不应作为 coding 指令。
 
 目标：实现默认关闭的 L2TLB/PTW response sequence，使其在后续接入真实 L2TLB/DTLB 请求后可以消费 `common_data_transaction.sv` 中的 TLB 表回填 response transaction。本任务不修复当前占位 `L2tlb_agent_connect.sv`，也不把 L2TLB agent 强行接入 `memblock_connect.sv`。
 

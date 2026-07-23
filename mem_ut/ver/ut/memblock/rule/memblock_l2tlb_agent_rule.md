@@ -82,6 +82,8 @@ DUT 原始 PTW/L2TLB response。
 
 L2TLB responder sequence 的职责是消费 DTLB request 并生成 L2TLB response。
 
+当前 V2 runtime 调度参数为 `MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、`MEMBLOCK_L2TLB_RESP_MID_LATENCY`、`MEMBLOCK_L2TLB_RESP_LONG_LATENCY`、三个 `MEMBLOCK_L2TLB_RESP_*_WT` 和 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE`。结构上限和 flush hold 由 compile-time `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE`、`MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES` 提供。旧 `MEMBLOCK_L2TLB_MIN_LATENCY/MAX_LATENCY` 已删除，不得恢复为第二延迟权威。
+
 `MEMBLOCK_L2TLB_SEQ_EN=1` 时，sequence 启动前必须确认
 `memblock_sync_pkg::l2tlb_responder_active=1`。如果编译期关闭了
 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN`，但 runtime 又打开了
@@ -147,6 +149,9 @@ sequence报告。最终inactive item完成并自然退出后再release。
   ready从未开放时，才允许把较早latest event作为baseline并保守hold完整pipeline延迟。
 - idle-stop必须在构造下一cycle item前决定，退出路径必须发送最终`ready=0/resp_valid=0` item；禁止
   发送ready=1后立即退出。
+- reset释放或flush ready hold解除后，idle-stop重新计数前必须至少生成一拍合法`ready=1`机会。
+  “本次lifecycle block后是否提供过ready机会”必须使用独立状态维护，不能复用
+  `acceptance_opened_since_reset`：后者还承担active flush event时间新鲜度判断，flush时不能清零。
 
 ## driver / monitor 规则
 

@@ -107,6 +107,46 @@ class memblock_tlb_entry extends uvm_object;
         end
     endfunction:reset
 
+    // 中文注释：把request fire时刻的live TLB entry逐字段冻结到独立对象。
+    // L2TLB pending record调用；后续sfence删除或live metadata更新不会改变已排队response。
+    function void copy_from(input memblock_tlb_entry source);
+        if (source == null) begin
+            `uvm_fatal("TLB_ENTRY", "copy_from got null source")
+        end
+        lookup_key = source.lookup_key;
+        vaddr = source.vaddr;
+        paddr = source.paddr;
+        vpn = source.vpn;
+        ppn = source.ppn;
+        pte_r = source.pte_r;
+        pte_w = source.pte_w;
+        pte_x = source.pte_x;
+        pte_u = source.pte_u;
+        pte_g = source.pte_g;
+        pte_a = source.pte_a;
+        pte_d = source.pte_d;
+        pte_n = source.pte_n;
+        pte_v = source.pte_v;
+        pbmt = source.pbmt;
+        tlbAF = source.tlbAF;
+        tlbPF = source.tlbPF;
+        tlbGPF = source.tlbGPF;
+        pmaAF = source.pmaAF;
+        asid = source.asid;
+        vmid = source.vmid;
+        s2xlate = source.s2xlate;
+        priv_mode = source.priv_mode;
+        level = source.level;
+        addr_low = source.addr_low;
+        create_cycle = source.create_cycle;
+        last_hit_cycle = source.last_hit_cycle;
+        foreach (ppn_low[idx]) begin
+            ppn_low[idx] = source.ppn_low[idx];
+            valididx[idx] = source.valididx[idx];
+            pteidx[idx] = source.pteidx[idx];
+        end
+    endfunction:copy_from
+
     function void update_addr_fields(input bit [63:0] vaddr_i, input bit [63:0] paddr_i);
         vaddr = vaddr_i;
         paddr = paddr_i;

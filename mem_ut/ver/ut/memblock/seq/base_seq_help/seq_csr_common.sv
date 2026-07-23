@@ -188,9 +188,18 @@ class seq_csr_common;
     static int unsigned flushsb_timeout = 1000;
     static bit          replay_wait_ptw_en = 1'b0;
     static int unsigned replay_wait_ptw_timeout = 1000;
-    static bit          l2tlb_seq_en = 1'b0;
-    static int unsigned l2tlb_min_latency = 1;
-    static int unsigned l2tlb_max_latency = 4;
+    // 中文注释：L2TLB responder运行期开关与队列/调度策略。
+    // load_from_plus()设置，validate/apply入口校验并按compile filter容量收敛，sequence只读getter。
+    static bit          l2tlb_seq_en = 1'b1;
+    static int unsigned l2tlb_max_outstanding = 8;
+    static bit          l2tlb_resp_reorder_en = 1'b0;
+    // 中文注释：三档最早response间隔及权重；1C档固定为1拍，MID/LONG由plus配置。
+    // 三项权重至少一项非零，sequence使用std::randomize/dist选择每个request的due类别。
+    static int unsigned l2tlb_resp_mid_latency = 4;
+    static int unsigned l2tlb_resp_long_latency = 16;
+    static int unsigned l2tlb_resp_1c_wt = 8;
+    static int unsigned l2tlb_resp_mid_wt = 3;
+    static int unsigned l2tlb_resp_long_wt = 1;
     static int unsigned l2tlb_idle_stop_cycle = 5000;
 
     static task init();
@@ -385,8 +394,13 @@ class seq_csr_common;
         replay_wait_ptw_en          = plus::MEMBLOCK_REPLAY_WAIT_PTW_EN;
         replay_wait_ptw_timeout     = get_non_negative_int("MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT", plus::MEMBLOCK_REPLAY_WAIT_PTW_TIMEOUT);
         l2tlb_seq_en                = plus::MEMBLOCK_L2TLB_SEQ_EN;
-        l2tlb_min_latency           = get_non_negative_int("MEMBLOCK_L2TLB_MIN_LATENCY", plus::MEMBLOCK_L2TLB_MIN_LATENCY);
-        l2tlb_max_latency           = get_non_negative_int("MEMBLOCK_L2TLB_MAX_LATENCY", plus::MEMBLOCK_L2TLB_MAX_LATENCY);
+        l2tlb_max_outstanding       = get_non_negative_int("MEMBLOCK_L2TLB_MAX_OUTSTANDING", plus::MEMBLOCK_L2TLB_MAX_OUTSTANDING);
+        l2tlb_resp_reorder_en       = plus::MEMBLOCK_L2TLB_RESP_REORDER_EN;
+        l2tlb_resp_mid_latency      = get_non_negative_int("MEMBLOCK_L2TLB_RESP_MID_LATENCY", plus::MEMBLOCK_L2TLB_RESP_MID_LATENCY);
+        l2tlb_resp_long_latency     = get_non_negative_int("MEMBLOCK_L2TLB_RESP_LONG_LATENCY", plus::MEMBLOCK_L2TLB_RESP_LONG_LATENCY);
+        l2tlb_resp_1c_wt            = get_non_negative_int("MEMBLOCK_L2TLB_RESP_1C_WT", plus::MEMBLOCK_L2TLB_RESP_1C_WT);
+        l2tlb_resp_mid_wt           = get_non_negative_int("MEMBLOCK_L2TLB_RESP_MID_WT", plus::MEMBLOCK_L2TLB_RESP_MID_WT);
+        l2tlb_resp_long_wt          = get_non_negative_int("MEMBLOCK_L2TLB_RESP_LONG_WT", plus::MEMBLOCK_L2TLB_RESP_LONG_WT);
         l2tlb_idle_stop_cycle       = get_non_negative_int("MEMBLOCK_L2TLB_IDLE_STOP_CYCLE", plus::MEMBLOCK_L2TLB_IDLE_STOP_CYCLE);
     endfunction:load_from_plus
 
@@ -397,6 +411,7 @@ class seq_csr_common;
         fatal_if_zero("main_trans_num", main_trans_num);
         fatal_if_zero("main_vaddr_range", main_vaddr_range);
         fatal_if_zero("paddr_range", paddr_range);
+        fatal_if_zero("l2tlb_max_outstanding", l2tlb_max_outstanding);
         apply_runtime_resource_limits();
 
         if (op_class_amo_wt != 0) begin
@@ -476,13 +491,16 @@ class seq_csr_common;
             `uvm_warning("SEQ_CSR_CFG", "replay_wait_ptw_timeout=0 while replay wait PTW is enabled, clamp to 1")
             replay_wait_ptw_timeout = 1;
         end
-        if (l2tlb_min_latency > l2tlb_max_latency) begin
-            `uvm_warning("SEQ_CSR_CFG",
-                         $sformatf("l2tlb_min_latency=%0d exceeds max=%0d, set max to min",
-                                   l2tlb_min_latency,
-                                   l2tlb_max_latency))
-            l2tlb_max_latency = l2tlb_min_latency;
+        if (l2tlb_resp_mid_latency <= 1) begin
+            `uvm_fatal("SEQ_CSR_CFG", "MEMBLOCK_L2TLB_RESP_MID_LATENCY must be greater than 1")
         end
+        if (l2tlb_resp_long_latency <= l2tlb_resp_mid_latency) begin
+            `uvm_fatal("SEQ_CSR_CFG", "MEMBLOCK_L2TLB_RESP_LONG_LATENCY must exceed MID_LATENCY")
+        end
+        fatal_if_all_zero3("L2TLB response latency weights",
+                           l2tlb_resp_1c_wt,
+                           l2tlb_resp_mid_wt,
+                           l2tlb_resp_long_wt);
         if (l2tlb_seq_en && l2tlb_idle_stop_cycle == 0) begin
             `uvm_warning("SEQ_CSR_CFG", "l2tlb_idle_stop_cycle=0 while L2TLB sequence is enabled, clamp to 1")
             l2tlb_idle_stop_cycle = 1;
@@ -581,7 +599,9 @@ class seq_csr_common;
             MEMBLOCK_DUT_STA_PIPE_NUM == 0 || MEMBLOCK_DUT_STD_PIPE_NUM == 0 ||
             MEMBLOCK_DUT_MMIO_LOAD_PORT_NUM == 0 || MEMBLOCK_DUT_MAX_UOP_SIZE == 0 ||
             MEMBLOCK_DUT_UOP_IDX_W == 0 || MEMBLOCK_DUT_VLEN == 0 ||
-            MEMBLOCK_DUT_MAX_LS_ELEM == 0 || MEMBLOCK_DUT_NUM_LS_ELEM_W == 0) begin
+            MEMBLOCK_DUT_MAX_LS_ELEM == 0 || MEMBLOCK_DUT_NUM_LS_ELEM_W == 0 ||
+            MEMBLOCK_DUT_L2TLB_DFILTER_SIZE == 0 ||
+            MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES == 0) begin
             `uvm_fatal("SEQ_COMPILE_CFG", "compile-time width/count values must be non-zero")
         end
         if (MEMBLOCK_DUT_LSQ_LD_ENQ_WIDTH > MEMBLOCK_DUT_LSQ_ENQ_SLOT_NUM ||
@@ -707,6 +727,13 @@ class seq_csr_common;
         clamp_int("load_pip_num_limit", load_pip_num_limit, 1, MEMBLOCK_DUT_LOAD_PIPE_NUM);
         clamp_int("sta_pip_num_limit", sta_pip_num_limit, 1, MEMBLOCK_DUT_STA_PIPE_NUM);
         clamp_int("std_pip_num_limit", std_pip_num_limit, 1, MEMBLOCK_DUT_STD_PIPE_NUM);
+        if (l2tlb_max_outstanding > MEMBLOCK_DUT_L2TLB_DFILTER_SIZE) begin
+            `uvm_warning("SEQ_CSR_CFG",
+                         $sformatf("MEMBLOCK_L2TLB_MAX_OUTSTANDING=%0d exceeds DUT DTLB filter size=%0d, clamp to compile limit",
+                                   l2tlb_max_outstanding,
+                                   MEMBLOCK_DUT_L2TLB_DFILTER_SIZE))
+            l2tlb_max_outstanding = MEMBLOCK_DUT_L2TLB_DFILTER_SIZE;
+        end
     endfunction:apply_runtime_resource_limits
 
     static function int unsigned get_non_negative_int(string name, int value);
@@ -1438,15 +1465,40 @@ class seq_csr_common;
         return l2tlb_seq_en;
     endfunction:get_l2tlb_seq_en
 
-    static function int unsigned get_l2tlb_min_latency();
-        check_initialized("get_l2tlb_min_latency");
-        return l2tlb_min_latency;
-    endfunction:get_l2tlb_min_latency
+    static function int unsigned get_l2tlb_max_outstanding();
+        check_initialized("get_l2tlb_max_outstanding");
+        return l2tlb_max_outstanding;
+    endfunction:get_l2tlb_max_outstanding
 
-    static function int unsigned get_l2tlb_max_latency();
-        check_initialized("get_l2tlb_max_latency");
-        return l2tlb_max_latency;
-    endfunction:get_l2tlb_max_latency
+    static function bit get_l2tlb_resp_reorder_en();
+        check_initialized("get_l2tlb_resp_reorder_en");
+        return l2tlb_resp_reorder_en;
+    endfunction:get_l2tlb_resp_reorder_en
+
+    static function int unsigned get_l2tlb_resp_mid_latency();
+        check_initialized("get_l2tlb_resp_mid_latency");
+        return l2tlb_resp_mid_latency;
+    endfunction:get_l2tlb_resp_mid_latency
+
+    static function int unsigned get_l2tlb_resp_long_latency();
+        check_initialized("get_l2tlb_resp_long_latency");
+        return l2tlb_resp_long_latency;
+    endfunction:get_l2tlb_resp_long_latency
+
+    static function int unsigned get_l2tlb_resp_1c_wt();
+        check_initialized("get_l2tlb_resp_1c_wt");
+        return l2tlb_resp_1c_wt;
+    endfunction:get_l2tlb_resp_1c_wt
+
+    static function int unsigned get_l2tlb_resp_mid_wt();
+        check_initialized("get_l2tlb_resp_mid_wt");
+        return l2tlb_resp_mid_wt;
+    endfunction:get_l2tlb_resp_mid_wt
+
+    static function int unsigned get_l2tlb_resp_long_wt();
+        check_initialized("get_l2tlb_resp_long_wt");
+        return l2tlb_resp_long_wt;
+    endfunction:get_l2tlb_resp_long_wt
 
     static function int unsigned get_l2tlb_idle_stop_cycle();
         check_initialized("get_l2tlb_idle_stop_cycle");

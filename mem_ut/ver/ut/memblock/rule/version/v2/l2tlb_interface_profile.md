@@ -70,15 +70,20 @@ ordered head blocking 或单 response 端口竞争可以让实际
 V2 顶层 CSR/fence agent 的观测点到 DTLB filter 清空不是2拍。`MemBlock.scala` 先把
 `io.ooo_to_mem.sfence/tlbCsr` 经过两级 `RegNext`，`PTWNewFilter` 内部再使用
 `ldtlbParams.fenceDelay=2`，因此 responder 从顶层 monitor event 开始必须按4拍总延迟 hold ready。
-L2TLB lifecycle 专项 coding 后使用 `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES=4` 表达该
-observer-to-filter 合同；在专项落地前该宏尚未实现。实现时不得把内部 `fenceDelay` 单独作为 ready
-恢复边界。`MEMBLOCK_DUT_L2TLB_DFILTER_SIZE=32` 和该hold宏均须在公共dispatch types中建立typed
+L2TLB lifecycle 专项 coding 使用 `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES=4` 表达该
+observer-to-filter 合同；不得把内部 `fenceDelay` 单独作为 ready 恢复边界。
+`MEMBLOCK_DUT_L2TLB_DFILTER_SIZE=32` 和该hold宏已经在公共dispatch types中建立typed
 localparam，业务逻辑不直接散落展开compile宏。
 
 ready已经开放后，新flush event的monitor `sample_time`必须等于sequence当前sample；迟到event表示
 sideband服务合同失效，必须在任何queue/counter变化前fatal，不能从当前拍重新锚定并误杀flush后
 request。只有reset/startup且ready从未开放时，才允许把较早latest event作为baseline并从当前拍
 保守hold 4拍。
+
+每次reset或4拍flush hold解除后，responder必须至少重新生成一拍合法ready机会，之后才允许
+`MEMBLOCK_L2TLB_IDLE_STOP_CYCLE`累计。该机会由独立
+`ready_opportunity_since_lifecycle_block`维护：reset/flush清0，真正生成`next_ready=1`时置1。
+不得在flush时清`acceptance_opened_since_reset`替代该状态，因为后者用于上述active event时间合同。
 
 CSR monitor必须在post-reset sample无条件发布non-destructive runtime CSR latest snapshot；原semantic
 raw capture gate保持不变，两条latest视图共享统一snapshot sequence和公共`mmu_csr_state`。这样legacy
@@ -116,5 +121,5 @@ build_memblock/rtl/MemBlock.sv
 3. 不得把顶层 `io_l2_tlb_req_*` 重新作为 `L2TLB_agent` 接管点。
 4. 只有在专项 V2 DUT 适配 plan 下，才允许更新 interface、xaction、driver 或 monitor。
 5. 多 outstanding、ordered/reorder、加权 latency 和 reset/flush/stop 生命周期统一由
-   `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md`
-   执行；不得在其它 plan 再建第二个 L2TLB request queue 或 ready owner。
+   `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md`
+   执行；本专项完成后不得在其它 plan 再建第二个 L2TLB request queue 或 ready owner。

@@ -16,7 +16,12 @@ class L2tlb_agent_agent_driver  extends tcnt_driver_base#(virtual L2tlb_agent_ag
     extern virtual function void build_phase(uvm_phase phase);
     extern virtual task reset_phase(uvm_phase phase);
     extern task main_phase(uvm_phase phase);
+    extern virtual function void phase_ended(uvm_phase phase);
     extern task send_pkt(L2tlb_agent_agent_xaction tr);
+    extern task get_owned_item_or_abort(uvm_phase phase,
+                                        output L2tlb_agent_agent_xaction tr,
+                                        output bit got_item,
+                                        output bit aborted);
     extern task drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 endclass:L2tlb_agent_agent_driver
 
@@ -28,9 +33,27 @@ function void L2tlb_agent_agent_driver::build_phase(uvm_phase phase);
     super.build_phase(phase);
 endfunction:build_phase
 
+function void L2tlb_agent_agent_driver::phase_ended(uvm_phase phase);
+    string current_owner;
+
+    // 中文注释：正常路径由sequence在最终inactive item后release；若UVM直接结束phase并杀掉sequence线程，
+    // driver作为component的phase_ended是最后一个公共清理点，禁止owner状态泄漏到后续handoff。
+    if (memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
+        void'(memblock_sync_pkg::try_release_l2tlb_lifecycle_owner(
+            memblock_sync_pkg::l2tlb_lifecycle_owner_name, current_owner));
+    end
+    super.phase_ended(phase);
+endfunction:phase_ended
+
 task L2tlb_agent_agent_driver::reset_phase(uvm_phase phase);
 
     super.reset_phase(phase);
+    if (memblock_sync_pkg::l2tlb_responder_active &&
+        this.cfg.drv_mode != tcnt_dec_base::DRV_0) begin
+        `uvm_fatal(get_type_name(),
+                   $sformatf("active L2TLB responder requires DRV_0, got drv_mode=%0d",
+                             this.cfg.drv_mode))
+    end
     phase.raise_objection(this);
 
     repeat(2) begin
@@ -52,23 +75,31 @@ task L2tlb_agent_agent_driver::main_phase(uvm_phase phase);
     //while(1) begin
     if(this.cfg.sqr_sw==tcnt_dec_base::ON && this.cfg.drv_sw==tcnt_dec_base::ON) begin
         while(1) begin
-            seq_item_port.try_next_item(req);
-            if(req!=null) begin
-                repeat(req.pre_pkt_gap) begin
-                    @this.vif.drv_mp.drv_cb;
-                    this.drive_idle(this.cfg.drv_mode);
-                end
-                @this.vif.drv_mp.drv_cb;
-                this.send_pkt(req);
-                repeat(req.post_pkt_gap) begin
-                    @this.vif.drv_mp.drv_cb;
-                    this.drive_idle(this.cfg.drv_mode);
-                end
-                seq_item_port.item_done();
+            @this.vif.drv_mp.drv_cb;
+            // 中文注释：owner未声明时不等待item，sequence disabled/退出后每拍驱动idle。
+            // owner已声明后，sequence必须在当前drv_cb边界提供唯一cycle item；阻塞
+            // 握手消除sequence与driver同拍唤醒时try_next_item先执行造成的伪idle竞态。
+            if (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
+                this.drive_idle(this.cfg.drv_mode);
             end
             else begin
-                @this.vif.drv_mp.drv_cb;
-                this.drive_idle(this.cfg.drv_mode);
+                bit got_item;
+                bit aborted;
+                this.get_owned_item_or_abort(phase, req, got_item, aborted);
+                if (aborted) begin
+                    this.drive_idle(this.cfg.drv_mode);
+                    return;
+                end
+                if (!got_item || req == null) begin
+                    `uvm_fatal(get_type_name(), "active L2TLB lifecycle owner returned no cycle item")
+                end
+                if (req.pre_pkt_gap != 0 || req.post_pkt_gap != 0) begin
+                    `uvm_fatal(get_type_name(),
+                               $sformatf("L2TLB cycle item requires gap=0, got pre=%0d post=%0d",
+                                         req.pre_pkt_gap, req.post_pkt_gap))
+                end
+                this.send_pkt(req);
+                seq_item_port.item_done();
             end
         end
     end
@@ -80,6 +111,37 @@ task L2tlb_agent_agent_driver::main_phase(uvm_phase phase);
         end
     end
 endtask:main_phase
+
+task L2tlb_agent_agent_driver::get_owned_item_or_abort(uvm_phase phase,
+                                                        output L2tlb_agent_agent_xaction tr,
+                                                        output bit got_item,
+                                                        output bit aborted);
+    got_item = 1'b0;
+    aborted = 1'b0;
+    tr = null;
+
+    fork : owned_item_or_abort
+        begin
+            seq_item_port.get_next_item(tr);
+            got_item = 1'b1;
+        end
+        begin
+            forever begin
+                @this.vif.drv_mp.drv_cb;
+                if (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed ||
+                    phase.get_state() inside {UVM_PHASE_READY_TO_END,
+                                              UVM_PHASE_ENDED,
+                                              UVM_PHASE_JUMPING,
+                                              UVM_PHASE_CLEANUP,
+                                              UVM_PHASE_DONE}) begin
+                    aborted = 1'b1;
+                    break;
+                end
+            end
+        end
+    join_any
+    disable owned_item_or_abort;
+endtask:get_owned_item_or_abort
 
 task L2tlb_agent_agent_driver::send_pkt(L2tlb_agent_agent_xaction tr);
     vif.drv_mp.drv_cb.io_ptw_req_0_ready <= tr.io_ptw_req_0_ready;
@@ -148,9 +210,9 @@ endtask:send_pkt
 task L2tlb_agent_agent_driver::drive_idle(tcnt_dec_base::drv_mode_e drv_mode);
 
     if(drv_mode==tcnt_dec_base::DRV_0) begin
-        // 中文注释：L2TLB responder 接管时，idle 周期也保持 ready=1，
-        // 让 V2 内部 dtlbRepeater -> inner_ptw 请求能被默认接收；未接管时保持非激活。
-        vif.drv_mp.drv_cb.io_ptw_req_0_ready <= memblock_sync_pkg::l2tlb_responder_active ? '1 : '0;
+        // 中文注释：idle/reset/sequence退出时固定关闭ready和response。
+        // 只有唯一lifecycle owner发送的逐拍cycle item可以授权接收DTLB request。
+        vif.drv_mp.drv_cb.io_ptw_req_0_ready <= '0;
         vif.drv_mp.drv_cb.io_ptw_resp_valid <= '0;
         vif.drv_mp.drv_cb.io_ptw_resp_bits_s2xlate <= '0;
         vif.drv_mp.drv_cb.io_ptw_resp_bits_s1_entry_tag <= '0;

@@ -123,6 +123,15 @@
 `ifndef MEMBLOCK_DUT_HAS_SQ_DEQ_PTR
     `define MEMBLOCK_DUT_HAS_SQ_DEQ_PTR 0
 `endif
+// V2 L2TLB/DTLB responder结构合同。DFILTER_SIZE限制可接受request总数；
+// FLUSH_HOLD_CYCLES覆盖顶层CSR/sfence观测点到DTLB filter清空点的总延迟。
+// 两者只允许由版本compile profile覆盖，不建立runtime plus镜像。
+`ifndef MEMBLOCK_DUT_L2TLB_DFILTER_SIZE
+    `define MEMBLOCK_DUT_L2TLB_DFILTER_SIZE 32
+`endif
+`ifndef MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES
+    `define MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES 4
+`endif
 
 // L2TLB connect-time takeover switch.
 // 1: mem_ut L2TLB_agent owns the DTLB <-> L2TLB response path.

@@ -20,6 +20,10 @@ package memblock_sync_pkg;
     int unsigned dispatch_flush_epoch = 0;
     longint unsigned dispatch_service_cycle = 0;
     int unsigned raw_csr_rearm_epoch = 0;
+    // 中文注释：同一时刻唯一的L2TLB responder生命周期owner。
+    // enable sequence在开放ready前claim，最终inactive item完成后release；DUT reset不清owner。
+    bit l2tlb_lifecycle_owner_claimed = 1'b0;
+    string l2tlb_lifecycle_owner_name = "";
 
     typedef enum bit [1:0] {
         // 无有效 V2 int-WB 来源，只用于 empty raw 的中性默认值。
@@ -159,6 +163,16 @@ package memblock_sync_pkg;
     bit                        latest_raw_csr_valid;
     int unsigned               latest_raw_csr_seq;
 
+    // 中文注释：CSR monitor独立发布的post-reset runtime latest视图。
+    // payload变化时序号单调递增；clear semantic raw queue和DUT reset均不清该公共快照。
+    dispatch_raw_csr_t         runtime_csr_snapshot;
+    bit                        runtime_csr_snapshot_valid;
+    int unsigned               runtime_csr_snapshot_seq;
+    // 中文注释：CSR changed或sfence monitor事件的non-destructive latest视图。
+    // monitor每次真实采样递增event_seq；L2TLB sequence只保存本地last_seen，不pop raw queue。
+    longint unsigned           l2tlb_flush_event_seq;
+    time                       l2tlb_flush_sample_time;
+    bit                        l2tlb_flush_event_valid;
     function dispatch_raw_int_wb_t make_empty_raw_int_wb();
         dispatch_raw_int_wb_t item;
         item.valid                       = 1'b0;
@@ -313,6 +327,65 @@ package memblock_sync_pkg;
             (cur.priv_virt_changed && !prev.priv_virt_changed);
     endfunction:raw_csr_payload_changed
 
+    function bit try_claim_l2tlb_lifecycle_owner(input string owner_name,
+                                                  output string current_owner);
+        current_owner = l2tlb_lifecycle_owner_name;
+        if (l2tlb_lifecycle_owner_claimed) begin
+            return 1'b0;
+        end
+        l2tlb_lifecycle_owner_claimed = 1'b1;
+        l2tlb_lifecycle_owner_name = owner_name;
+        current_owner = owner_name;
+        return 1'b1;
+    endfunction:try_claim_l2tlb_lifecycle_owner
+
+    function bit try_release_l2tlb_lifecycle_owner(input string owner_name,
+                                                    output string current_owner);
+        current_owner = l2tlb_lifecycle_owner_name;
+        if (!l2tlb_lifecycle_owner_claimed ||
+            l2tlb_lifecycle_owner_name != owner_name) begin
+            return 1'b0;
+        end
+        l2tlb_lifecycle_owner_claimed = 1'b0;
+        l2tlb_lifecycle_owner_name = "";
+        current_owner = "";
+        return 1'b1;
+    endfunction:try_release_l2tlb_lifecycle_owner
+
+    function void note_l2tlb_flush_event(input time sample_time);
+        l2tlb_flush_event_seq++;
+        l2tlb_flush_sample_time = sample_time;
+        l2tlb_flush_event_valid = 1'b1;
+    endfunction:note_l2tlb_flush_event
+
+    function void get_latest_l2tlb_flush_event(output longint unsigned event_seq,
+                                                output time sample_time,
+                                                output bit valid);
+        event_seq = l2tlb_flush_event_seq;
+        sample_time = l2tlb_flush_sample_time;
+        valid = l2tlb_flush_event_valid;
+    endfunction:get_latest_l2tlb_flush_event
+
+    function void publish_runtime_csr_snapshot(input dispatch_raw_csr_t item,
+                                               input bit payload_changed);
+        if (item.valid && payload_changed) begin
+            runtime_csr_snapshot = item;
+            runtime_csr_snapshot_valid = 1'b1;
+            runtime_csr_snapshot_seq++;
+        end
+    endfunction:publish_runtime_csr_snapshot
+
+    function bit get_latest_runtime_csr_snapshot(output dispatch_raw_csr_t item,
+                                                  output int unsigned seq);
+        seq = runtime_csr_snapshot_seq;
+        if (!runtime_csr_snapshot_valid) begin
+            item = make_empty_raw_csr();
+            return 1'b0;
+        end
+        item = runtime_csr_snapshot;
+        return 1'b1;
+    endfunction:get_latest_runtime_csr_snapshot
+
     function void push_raw_int_wb(input dispatch_raw_int_wb_t item);
         if (dispatch_monitor_capture_en && item.valid) begin
             raw_int_wb_q.push_back(item);
@@ -359,10 +432,13 @@ package memblock_sync_pkg;
     endfunction:pop_raw_ctrl
 
     function void push_raw_csr(input dispatch_raw_csr_t item);
-        if (dispatch_monitor_capture_en && item.valid) begin
+        if (dispatch_monitor_capture_en && item.valid &&
+            runtime_csr_snapshot_valid &&
+            (!latest_raw_csr_valid ||
+             latest_raw_csr_seq != runtime_csr_snapshot_seq)) begin
             latest_raw_csr = item;
             latest_raw_csr_valid = 1'b1;
-            latest_raw_csr_seq++;
+            latest_raw_csr_seq = runtime_csr_snapshot_seq;
         end
     endfunction:push_raw_csr
 

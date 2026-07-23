@@ -138,6 +138,7 @@ function void memblock_env_cfg::post_randomize();
     this.u_L2tlb_agent_agent_cfg.drv_sw = tcnt_dec_base::ON ;
     this.u_L2tlb_agent_agent_cfg.mon_sw = tcnt_dec_base::ON ;
     this.u_L2tlb_agent_agent_cfg.xz_sw = tcnt_dec_base::OFF ;
+    this.u_L2tlb_agent_agent_cfg.drv_mode = tcnt_dec_base::DRV_0;
     this.u_L2tlb_agent_agent_cfg.channel_id = 19;
 
     this.u_itlb_agent_agent_cfg.sqr_sw = tcnt_dec_base::ON  ;

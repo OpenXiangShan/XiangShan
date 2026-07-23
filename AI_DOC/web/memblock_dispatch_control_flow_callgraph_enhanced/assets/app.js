@@ -485,60 +485,489 @@ endfunction:apply_pending_lsq_cancels`,
 
     "memblock_l2tlb_base_sequence::body": fn("memblock_l2tlb_base_sequence::body", {
       file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
-      input: "default sequence 启动",
-      output: "响应 DTLB->L2TLB request",
-      purpose: "代替 L2TLB 对上游 DTLB 的 responder 功能。",
-      role: "采 request 中的 vpn/s2xlate，结合 runtime CSR 查 common_data TLB 表并回填 response。",
-      calls: ["seq_csr_common::init", "memblock_l2tlb_base_sequence::ensure_context", "memblock_l2tlb_base_sequence::configure_from_plus", "wait_for_main_table", "drive_l2tlb_loop"],
+      input: "default sequence 或显式 virtual sequence 启动",
+      output: "唯一 L2TLB lifecycle owner 的自然退出",
+      purpose: "启动 DTLB->L2TLB request、L2TLB->DTLB response responder。",
+      role: "读取参数并取得唯一 owner，运行多 outstanding service，排空 token 并发送最终 inactive item 后释放 owner。",
+      calls: ["seq_csr_common::init", "memblock_l2tlb_base_sequence::configure_from_plus", "memblock_l2tlb_base_sequence::ensure_context", "memblock_sync_pkg::try_claim_l2tlb_lifecycle_owner", "memblock_l2tlb_base_sequence::initialize_lifecycle_state", "drive_l2tlb_loop", "memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting", "memblock_sync_pkg::try_release_l2tlb_lifecycle_owner"],
+      source: String.raw`seq_csr_common::init();
+configure_from_plus();
+if (!enable) return;
+ensure_context();
+try_claim_l2tlb_lifecycle_owner(lifecycle_owner_name, current_owner);
+initialize_lifecycle_state();
+drive_l2tlb_loop();
+check_l2tlb_lifecycle_accounting("owner_release");
+try_release_l2tlb_lifecycle_owner(lifecycle_owner_name, current_owner);`,
+      logicNotes: ["真实源码在takeover关闭、claim/release失败或outstanding未排空时fatal；这里展示owner生命周期主骨架。"],
     }),
-    "memblock_l2tlb_base_sequence::configure_from_plus": fn("memblock_l2tlb_base_sequence::configure_from_plus", { file: "memblock_l2tlb_base_sequence.sv", input: "plus getter", output: "latency/idle stop cycle", purpose: "读取 L2TLB responder 参数。", role: "控制 response latency 和连续 idle 退出阈值。" }),
-    "memblock_l2tlb_base_sequence::ensure_context": fn("memblock_l2tlb_base_sequence::ensure_context", { file: "memblock_l2tlb_base_sequence.sv", input: "uvm_config_db vif / common_data", output: "data、monitor_adapter、l2tlb_vif 可用", purpose: "准备 L2TLB responder 所需上下文。", role: "保证 sequence 连接的是 DTLB->L2TLB 上游接口，而不是 L2TLB->L2Cache/PTW 下游接口。", calls: ["common_data_transaction::get"] }),
-    "drive_l2tlb_loop": fn("drive_l2tlb_loop", { file: "memblock_l2tlb_base_sequence.sv", input: "无", output: "持续处理 request", purpose: "L2TLB responder 主循环。", role: "每拍采样 request，按 latency 查表并驱动 response；有 progress 清 idle_count，连续 idle 超过 idle_stop_cycle 后退出。", calls: ["send_l2tlb_cycle"] }),
+    "memblock_l2tlb_base_sequence::configure_from_plus": fn("memblock_l2tlb_base_sequence::configure_from_plus", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "seq_csr_common getter",
+      output: "queue、reorder、三档 latency 权重和 idle stop 快照",
+      purpose: "冻结 L2TLB responder 的运行期行为参数。",
+      role: "MAX_OUTSTANDING 已由 seq_csr_common 按编译期 DTLB filter 深度收敛；结构上限不建立 runtime 镜像。",
+      source: String.raw`enable = seq_csr_common::get_l2tlb_seq_en();
+max_outstanding = seq_csr_common::get_l2tlb_max_outstanding();
+resp_reorder_en = seq_csr_common::get_l2tlb_resp_reorder_en();
+resp_mid_latency = seq_csr_common::get_l2tlb_resp_mid_latency();
+resp_long_latency = seq_csr_common::get_l2tlb_resp_long_latency();
+resp_1c_wt = seq_csr_common::get_l2tlb_resp_1c_wt();
+resp_mid_wt = seq_csr_common::get_l2tlb_resp_mid_wt();
+resp_long_wt = seq_csr_common::get_l2tlb_resp_long_wt();
+idle_stop_cycle = seq_csr_common::get_l2tlb_idle_stop_cycle();`,
+      logicNotes: ["sequence只消费已校验的getter快照，不直接解析plus或把compile-time结构上限镜像成runtime参数。"],
+    }),
+    "memblock_l2tlb_base_sequence::ensure_context": fn("memblock_l2tlb_base_sequence::ensure_context", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "uvm_config_db vif / common_data",
+      output: "data 与 l2tlb_vif 可用",
+      purpose: "准备 L2TLB responder 所需上下文。",
+      role: "保证 sequence 连接的是 DTLB->L2TLB 上游接口，而不是 L2TLB->L2Cache/PTW 下游接口。",
+      calls: ["common_data_transaction::get"],
+      source: String.raw`data = common_data_transaction::get();
+uvm_config_db#(virtual L2tlb_agent_agent_interface)::get(..., l2tlb_vif);`,
+      logicNotes: ["data或VIF缺失时真实源码fatal；该函数不claim owner、不驱动ready。"],
+    }),
+    "memblock_l2tlb_base_sequence::initialize_lifecycle_state": fn("memblock_l2tlb_base_sequence::initialize_lifecycle_state", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "新 owner 生命周期",
+      output: "清空 pending/driving 与本地计数",
+      purpose: "建立 responder 本地状态基线。",
+      role: "只在 owner 启动时重置；DUT reset 通过 canceled 记账，不重新初始化累计 token 计数。",
+      source: String.raw`pending_q.delete();
+driving_req = null;
+driving_valid = 1'b0;
+accepted_count = 0;
+completed_count = 0;
+flush_canceled_count = 0;
+reset_canceled_count = 0;
+ready_opportunity_since_lifecycle_block = 1'b0;`,
+      logicNotes: ["真实源码还清sample、CSR freshness和stop字段；package latest与owner claim不在此清除。"],
+    }),
+    "memblock_sync_pkg::try_claim_l2tlb_lifecycle_owner": fn("memblock_sync_pkg::try_claim_l2tlb_lifecycle_owner", {
+      file: "mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv",
+      input: "sequence full name",
+      output: "claim 结果与当前 owner",
+      purpose: "保证同一时刻只有一个 L2TLB lifecycle owner。",
+      role: "阻止 legacy default sequence 与显式 vseq 各自维护 pending queue；自然退出后由对应 release 清除。",
+      source: String.raw`current_owner = l2tlb_lifecycle_owner_name;
+if (l2tlb_lifecycle_owner_claimed) return 1'b0;
+l2tlb_lifecycle_owner_claimed = 1'b1;
+l2tlb_lifecycle_owner_name = owner_name;
+current_owner = owner_name;
+return 1'b1;`,
+      logicNotes: ["helper只返回状态，不直接调用UVM reporting；sequence决定失败时fatal。"],
+    }),
+    "memblock_sync_pkg::try_release_l2tlb_lifecycle_owner": fn("memblock_sync_pkg::try_release_l2tlb_lifecycle_owner", {
+      file: "mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv",
+      input: "owner name",
+      output: "release 结果与当前 owner",
+      purpose: "在 responder 排空并发送最终 inactive item 后释放 L2TLB lifecycle owner。",
+      role: "只允许当前 owner 释放；释放失败说明生命周期所有权已被破坏，sequence 应 fatal。",
+      source: String.raw`if (!l2tlb_lifecycle_owner_claimed || l2tlb_lifecycle_owner_name != owner_name)
+    return 1'b0;
+l2tlb_lifecycle_owner_claimed = 1'b0;
+l2tlb_lifecycle_owner_name = "";
+return 1'b1;`,
+      logicNotes: ["reset不释放owner；只有自然排空后的sequence显式release。"],
+    }),
+    "memblock_sync_pkg::get_latest_l2tlb_flush_event": fn("memblock_sync_pkg::get_latest_l2tlb_flush_event", {
+      file: "mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv",
+      input: "package latest flush event",
+      output: "event_seq、sample_time、valid",
+      purpose: "为L2TLB responder提供不消费队列的flush latest视图。",
+      role: "只读事件序号和观测时间；sequence自行比较last_seen序号并决定取消/hold，不清semantic raw queue。",
+      source: String.raw`function void get_latest_l2tlb_flush_event(output longint unsigned event_seq,
+                                            output time sample_time,
+                                            output bit valid);
+    event_seq = l2tlb_flush_event_seq;
+    sample_time = l2tlb_flush_sample_time;
+    valid = l2tlb_flush_event_valid;
+endfunction:get_latest_l2tlb_flush_event`,
+      logicNotes: ["latest getter不pop、不清除事件，允许responder与dispatch consumer独立观察同一sideband。"],
+    }),
+    "memblock_sync_pkg::get_latest_runtime_csr_snapshot": fn("memblock_sync_pkg::get_latest_runtime_csr_snapshot", {
+      file: "mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv",
+      input: "package runtime CSR latest",
+      output: "raw CSR副本、snapshot seq和valid结果",
+      purpose: "让L2TLB responder在semantic capture gate关闭时仍可取得运行期CSR。",
+      role: "无有效snapshot时返回空对象和0；有效时复制latest并返回统一序号，不消费semantic raw queue。",
+      source: String.raw`function bit get_latest_runtime_csr_snapshot(output dispatch_raw_csr_t item,
+                                          output int unsigned seq);
+    seq = runtime_csr_snapshot_seq;
+    if (!runtime_csr_snapshot_valid) begin
+        item = make_empty_raw_csr();
+        return 1'b0;
+    end
+    item = runtime_csr_snapshot;
+    return 1'b1;
+endfunction:get_latest_runtime_csr_snapshot`,
+      logicNotes: ["sequence用返回bit决定csr_snapshot_valid；seq只用于reset freshness和幂等应用。"],
+    }),
+    "drive_l2tlb_loop": fn("drive_l2tlb_loop", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "L2TLB drv_cb 时钟边界",
+      output: "逐拍推进直到 should_exit",
+      purpose: "L2TLB responder 主循环。",
+      role: "每个 sample 递增 sample_seq 并调用一次 send_l2tlb_cycle，不在 driver gap 中阻塞。",
+      calls: ["send_l2tlb_cycle"],
+      source: String.raw`forever begin
+    @(l2tlb_vif.drv_cb);
+    sample_seq++;
+    send_l2tlb_cycle(has_progress, should_exit);
+    if (should_exit) break;
+end`,
+      logicNotes: ["退出只由send_l2tlb_cycle在最终inactive且outstanding为空时返回should_exit。"],
+    }),
     "send_l2tlb_cycle": fn("send_l2tlb_cycle", {
       file: "memblock_l2tlb_base_sequence.sv",
-      input: "send_count",
-      output: "response xaction 或 idle",
-      purpose: "处理一拍 L2TLB request/response。",
-      role: "request valid 时采 vpn/s2xlate，查表命中则回填 TLB 表项，并向上层返回 has_progress 以清零 idle_count。",
-      calls: ["memblock_l2tlb_base_sequence::request_valid", "sample_request_fields", "memblock_l2tlb_base_sequence::create_l2tlb_xaction", "memblock_l2tlb_base_sequence::send_l2tlb_item", "memblock_l2tlb_base_sequence::choose_latency", "common_data_transaction::get_or_create_tlb_entry_by_req", "fill_dtlb_resp_from_entry", "common_data_transaction::update_uid_tlb_records_by_entry"],
-      source: String.raw`task memblock_l2tlb_base_sequence::send_l2tlb_cycle(input int unsigned send_count,
-                                                    output bit has_progress);
-    has_progress = 1'b0;
-    if (request_valid()) begin
-        sample_request_fields(vpn, s2xlate);
-        ready_tr = create_l2tlb_xaction($sformatf("l2tlb_ready_tr_send_%0d", send_count));
-        ready_tr.io_ptw_req_0_ready = 1'b1;
-        send_l2tlb_item(ready_tr);
-        latency = choose_latency();
-        resp_tr = create_l2tlb_xaction($sformatf("l2tlb_resp_tr_send_%0d", send_count));
-        resp_tr.pre_pkt_gap = latency;
-        drain_csr_runtime_events();
-        if (data.get_or_create_tlb_entry_by_req(vpn, s2xlate, key, entry, created)) begin
-            fill_dtlb_resp_from_entry(entry, resp_tr);
-            record_update_count = data.update_uid_tlb_records_by_entry(key, entry);
-        end else begin
-            ` + "`" + String.raw`uvm_fatal(get_type_name(),
-                       $sformatf("L2TLB entry miss for vpn=0x%0h s2xlate=%0d", vpn, s2xlate))
-        end
-        send_l2tlb_item(resp_tr);
-        has_progress = 1'b1;
+      input: "同一 sample 的 request valid/vpn/s2xlate/实际 ready，以及 CSR、flush、stop latest",
+      output: "唯一 gap=0 cycle item、has_progress、should_exit",
+      purpose: "按固定优先级推进一拍 L2TLB request/response 生命周期。",
+      role: "先确认上一 response，再处理 CSR/flush 和真实 fire，随后选择下一笔到期 response并派生下一拍 ready。",
+      calls: ["memblock_l2tlb_base_sequence::request_fire", "memblock_l2tlb_base_sequence::complete_driving_response", "memblock_l2tlb_base_sequence::drain_csr_runtime_events", "memblock_l2tlb_base_sequence::handle_l2tlb_flush_event", "memblock_l2tlb_base_sequence::capture_fired_request", "memblock_l2tlb_base_sequence::select_due_response", "memblock_l2tlb_base_sequence::outstanding_count", "memblock_l2tlb_base_sequence::create_l2tlb_xaction", "memblock_l2tlb_base_sequence::send_l2tlb_item"],
+      source: String.raw`task memblock_l2tlb_base_sequence::send_l2tlb_cycle(output bit has_progress,
+                                                    output bit should_exit);
+    sampled_req_valid = (l2tlb_vif.drv_cb.io_ptw_req_0_valid === 1'b1);
+    sampled_req_ready = (l2tlb_vif.mon_cb.io_ptw_req_0_ready === 1'b1);
+    sampled_req_vpn = l2tlb_vif.drv_cb.io_ptw_req_0_bits_vpn;
+    sampled_req_s2xlate = l2tlb_vif.drv_cb.io_ptw_req_0_bits_s2xlate;
+    uvm_wait_for_nba_region();
+    if (reset_or_backend_blocked) cancel_outstanding_by_reset();
+    if (driving_valid) complete_driving_response();
+    drain_csr_runtime_events();
+    if (new_flush_event)
+        handle_l2tlb_flush_event(flush_event_seq, flush_sample_time, request_killed);
+    if (request_fire() && !request_killed) capture_fired_request();
+    if (has_progress || lifecycle_blocked || stopping || outstanding_count() !== 0 ||
+        !acceptance_opened_since_reset || !ready_opportunity_since_lifecycle_block)
+        idle_count = 0;
+    else
+        idle_count += 1;
+    if (idle_count >= idle_stop_cycle && acceptance_opened_since_reset)
+        stopping = true;
+    if (csr_snapshot_valid && !hold_active)
+        response_selected = select_due_response(sample_seq + 1, cycle_tr);
+    next_ready = !stopping && csr_snapshot_valid && !hold_active &&
+                 outstanding_count() < max_outstanding;
+    cycle_tr.io_ptw_req_0_ready = next_ready;
+    if (next_ready) begin
+        acceptance_opened_since_reset = 1'b1;
     end
+    send_l2tlb_item(cycle_tr);
+    if (next_ready)
+        ready_opportunity_since_lifecycle_block = 1'b1;
+    should_exit = stopping && outstanding_count() == 0;
 endtask:send_l2tlb_cycle`,
       logicNotes: [
-        "该 sequence 代替的是 L2TLB 对 DTLB 的上游响应，所以它先对 request ready，再按 pre_pkt_gap 延迟 response。",
-        "缺项策略已经取消：get_or_create_tlb_entry_by_req 返回失败时直接 uvm_fatal，不再填默认缺项 response。",
+        "以上 source 是省略日志和 fatal 分支的当前控制骨架；真实源码还先检查 flush event 单调性和 sample freshness。",
+        "只有同一 sample 的 valid&&ready 才建立 token；valid level 不会重复采样。",
+        "pending_q 加 driving slot 支持多 outstanding；latency 只写 due_sample_seq，cycle item 和 driver gap 恒为 0。",
+        "global/idle stop 关闭新 ready并排空 token；reset或flush hold解除后尚未提供ready机会时不累计 idle-stop；退出前必须发送 ready=0、resp_valid=0 的最终 item。",
       ],
     }),
-    "sample_request_fields": fn("sample_request_fields", { file: "memblock_l2tlb_base_sequence.sv", input: "L2TLB interface", output: "vpn, s2xlate", purpose: "采 DTLB->L2TLB 请求关键字段。", role: "注意该 agent 代替 L2TLB，不是 L2TLB 到 L2Cache/PTW 下游模型。" }),
-    "memblock_l2tlb_base_sequence::request_valid": fn("memblock_l2tlb_base_sequence::request_valid", { file: "memblock_l2tlb_base_sequence.sv", input: "l2tlb_vif.rst_n/reset_backend_done/io_ptw_req_0_valid", output: "bit", purpose: "判断当前拍是否有可接受的 DTLB->L2TLB request。", role: "过滤 reset 和后端未 ready 时的无效采样。" }),
-    "memblock_l2tlb_base_sequence::create_l2tlb_xaction": fn("memblock_l2tlb_base_sequence::create_l2tlb_xaction", { file: "memblock_l2tlb_base_sequence.sv", input: "name", output: "已清零的 L2tlb_agent_agent_xaction", purpose: "创建 responder driver transaction。", role: "ready 包和 response 包都通过它创建，随后由 clear_l2tlb_xaction 消除字段残留。" , calls: ["memblock_l2tlb_base_sequence::clear_l2tlb_xaction"] }),
-    "memblock_l2tlb_base_sequence::clear_l2tlb_xaction": fn("memblock_l2tlb_base_sequence::clear_l2tlb_xaction", { file: "memblock_l2tlb_base_sequence.sv", input: "L2tlb_agent_agent_xaction", output: "所有 request/response 字段清零", purpose: "清空 L2TLB xaction 默认值。", role: "防止上一拍 response 字段残留到下一拍 ready/resp 包。" }),
-    "memblock_l2tlb_base_sequence::choose_latency": fn("memblock_l2tlb_base_sequence::choose_latency", { file: "memblock_l2tlb_base_sequence.sv", input: "min_latency/max_latency", output: "pre_pkt_gap latency", purpose: "选择 L2TLB response 延迟。", role: "不再通过发送空 wait transaction 延迟，而是直接写 resp_tr.pre_pkt_gap。" }),
-    "memblock_l2tlb_base_sequence::send_l2tlb_item": fn("memblock_l2tlb_base_sequence::send_l2tlb_item", { file: "memblock_l2tlb_base_sequence.sv", input: "L2tlb_agent_agent_xaction", output: "start_item/finish_item 发给 driver", purpose: "发送 L2TLB ready/response transaction。", role: "把 responder sequence 生成的 xaction 交给 L2TLB agent driver。" }),
-    "common_data_transaction::get_or_create_tlb_entry_by_req": fn("common_data_transaction::get_or_create_tlb_entry_by_req", { file: "common_data_transaction.sv", input: "vpn, s2xlate, runtime CSR", output: "key, entry, created", purpose: "按 by-key TLB cache 查/建 entry。", role: "key 包含 vpn/asid/vmid/s2xlate；miss 自动建 entry，失败则 L2TLB sequence fatal。", calls: ["common_data_transaction::build_tlb_entry_for_key"] }),
-    "common_data_transaction::build_tlb_entry_for_key": fn("common_data_transaction::build_tlb_entry_for_key", { file: "common_data_transaction.sv", input: "memblock_tlb_lookup_key_t", output: "memblock_tlb_entry", purpose: "按 TLB key 构造 entry。", role: "集中调用 TLB entry randomize/fixup 逻辑，保证 response 权限、level、A/D 位合法化策略一致。" }),
-    "fill_dtlb_resp_from_entry": fn("fill_dtlb_resp_from_entry", { file: "memblock_l2tlb_base_sequence.sv", input: "memblock_tlb_entry", output: "L2TLB response payload", purpose: "回填 PTE/PPN/权限/fault。", role: "把 by-key TLB entry 转换成 driver xaction。" }),
-    "common_data_transaction::update_uid_tlb_records_by_entry": fn("common_data_transaction::update_uid_tlb_records_by_entry", { file: "common_data_transaction.sv", input: "key, entry", output: "匹配 uid record pte_valid=1", purpose: "回填 uid 追踪记录。", role: "PTW wait replay 和 debug 通过 uid record 判断 PTE 是否已回填。" }),
+    "memblock_l2tlb_base_sequence::outstanding_count": fn("memblock_l2tlb_base_sequence::outstanding_count", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "pending_q、driving_valid",
+      output: "当前 outstanding token 数量",
+      purpose: "为 ready 容量、生命周期守恒和 stop drain 提供唯一计数来源。",
+      role: "pending_q 中尚未选择 response 的 token 加上 driving slot 中尚未完成的 token；不读取主表，也不修改状态。",
+      source: String.raw`function int unsigned memblock_l2tlb_base_sequence::outstanding_count();
+    return pending_q.size() + (driving_valid ? 1 : 0);
+endfunction:outstanding_count`,
+      logicNotes: ["这是当前源码的完整短函数；driving token 在下一sample确认完成前仍占用容量。"],
+    }),
+    "memblock_l2tlb_base_sequence::cancel_outstanding_by_reset": fn("memblock_l2tlb_base_sequence::cancel_outstanding_by_reset", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "pending_q、driving_req、driving_valid",
+      output: "reset_canceled_count增加，outstanding清空",
+      purpose: "在DUT reset边界显式关闭所有已接受但未完成的L2TLB token。",
+      role: "不回填UID、不回退token编号；清空后调用生命周期审计，避免silent drop。",
+      source: String.raw`canceled_count = outstanding_count();
+reset_canceled_count += canceled_count;
+pending_q.delete();
+driving_req = null;
+driving_valid = 1'b0;
+check_l2tlb_lifecycle_accounting("reset_cancel");`,
+      logicNotes: ["reset取消属于token生命周期分类，不等价于正常response完成。"],
+    }),
+    "memblock_l2tlb_base_sequence::request_fire": fn("memblock_l2tlb_base_sequence::request_fire", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "锁存的 sampled_req_valid 与 sampled_req_ready",
+      output: "bit",
+      purpose: "定义每笔动态 request token 的唯一接受边界。",
+      role: "只消费同一 clocking sample 的快照，不在 NBA 后重读 live interface。",
+      source: String.raw`function bit memblock_l2tlb_base_sequence::request_fire();
+    return sampled_req_valid && sampled_req_ready;
+endfunction:request_fire`,
+      logicNotes: ["valid与ready均为1才表示真实握手；level valid不会重复创建token。"],
+    }),
+    "memblock_l2tlb_base_sequence::drain_csr_runtime_events": fn("memblock_l2tlb_base_sequence::drain_csr_runtime_events", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "non-destructive runtime CSR latest 与 seq",
+      output: "common_data MMU CSR state、csr_snapshot_valid",
+      purpose: "在开放 ready 和构造 lookup key 前同步运行期 CSR。",
+      role: "mid-test reset 后要求 snapshot seq 超过 reset baseline，禁止复用 reset 前快照；publisher 由 CSR monitor 拥有，本函数只读取 latest 并应用到 common_data。",
+      calls: ["common_data_transaction::apply_raw_csr_runtime", "memblock_sync_pkg::get_latest_runtime_csr_snapshot"],
+      source: String.raw`if (!memblock_sync_pkg::get_latest_runtime_csr_snapshot(raw_csr, raw_csr_seq))
+    return;
+if (require_post_reset_csr_refresh && raw_csr_seq <= reset_runtime_csr_seq_baseline)
+    return;
+data.apply_raw_csr_runtime(raw_csr, raw_csr_seq);
+csr_snapshot_valid = 1'b1;
+require_post_reset_csr_refresh = 1'b0;`,
+      logicNotes: ["无latest或仍未越过reset baseline时保持ready gate关闭；成功应用后才允许派生ready。"],
+    }),
+    "common_data_transaction::apply_raw_csr_runtime": fn("common_data_transaction::apply_raw_csr_runtime", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv",
+      input: "runtime CSR raw snapshot 与 snapshot sequence",
+      output: "公共 mmu_csr_state 更新",
+      purpose: "把 non-destructive CSR latest 应用到公共 TLB lookup runtime 镜像。",
+      role: "按 sequence 幂等更新，避免 L2TLB 与 dispatch 两个 consumer 重复应用同一 snapshot。",
+      source: String.raw`if (!raw.valid || raw_csr_seq == last_applied_raw_csr_seq)
+    return;
+if (mmu_csr_state == null)
+    mmu_csr_state = mmu_csr_runtime_state::type_id::create("mmu_csr_state");
+mmu_csr_state.update_from_raw_csr(raw);
+last_applied_raw_csr_seq = raw_csr_seq;`,
+      logicNotes: ["同一snapshot sequence只更新一次公共CSR对象；不清semantic raw queue。"],
+    }),
+    "memblock_l2tlb_base_sequence::capture_fired_request": fn("memblock_l2tlb_base_sequence::capture_fired_request", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "真实 request fire 与 request-time CSR",
+      output: "pending_q 新 token",
+      purpose: "冻结 request、lookup key、TLB entry 和 response payload。",
+      role: "相同 key 的每次 fire 仍建立独立 record；live entry 通过 copy_from 冻结，后续 sfence 不改已排队 payload。",
+      calls: ["common_data_transaction::get_or_create_tlb_entry_by_req", "memblock_tlb_entry::copy_from", "fill_dtlb_resp_from_entry", "memblock_l2tlb_base_sequence::choose_latency", "memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting"],
+      source: String.raw`pending.request_token = next_request_token++;
+pending.vpn = sampled_req_vpn;
+pending.s2xlate = sampled_req_s2xlate;
+data.get_mmu_csr_snapshot(pending.csr_snapshot);
+pending.lookup_key = pending.csr_snapshot.make_lookup_key({26'b0, pending.vpn}, pending.s2xlate);
+data.get_or_create_tlb_entry_by_req(pending.vpn, pending.s2xlate, returned_key, live_entry, created);
+pending.entry_snapshot.copy_from(live_entry);
+fill_dtlb_resp_from_entry(pending.entry_snapshot, pending.resp_tr);
+pending_q.push_back(pending);
+accepted_count++;`,
+      logicNotes: ["真实源码还包含null、容量和key drift fatal；该骨架突出fire时冻结上下文并入队。"],
+    }),
+    "memblock_l2tlb_base_sequence::handle_l2tlb_flush_event": fn("memblock_l2tlb_base_sequence::handle_l2tlb_flush_event", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "non-destructive flush event seq/time",
+      output: "旧 pending 取消、同拍 killed token、ready hold",
+      purpose: "把 CSR changed 或 sfence 映射为 L2TLB 生命周期失效边界。",
+      role: "只取消尚未 driving 的旧 token；清ready opportunity并建立V2 hold；DUT observed event 不消费 semantic sfence queue。",
+      calls: ["memblock_l2tlb_base_sequence::record_flush_killed_request", "memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting"],
+      source: String.raw`for (int idx = int'(pending_q.size()) - 1; idx >= 0; idx--) begin
+    if (pending_q[idx].accept_flush_event_seq < event_seq) begin
+        pending_q.delete(idx);
+        drop_count++;
+    end
+end
+flush_canceled_count += drop_count;
+last_seen_flush_event_seq = event_seq;
+accept_hold_until_sample = sample_seq + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES;
+ready_opportunity_since_lifecycle_block = 1'b0;`,
+      logicNotes: ["同拍旧ready形成的fire另由record_flush_killed_request记账；driving response先在本sample完成，不被回滚。"],
+    }),
+    "memblock_l2tlb_base_sequence::record_flush_killed_request": fn("memblock_l2tlb_base_sequence::record_flush_killed_request", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "同拍 flush event 与已 fire request",
+      output: "flush-canceled token 记账",
+      purpose: "记录旧 ready 窗口中被 flush 杀掉的 request fire。",
+      role: "递增 accepted 和 flush-canceled 计数但不建 entry、不生成 response，保证 token 守恒。",
+      source: String.raw`token = next_request_token++;
+accepted_count++;
+flush_canceled_count++;
+check_l2tlb_lifecycle_accounting("flush_window_cancel");`,
+      logicNotes: ["只有当前sample的event_time等于$time且valid&&ready真实fire时调用。"],
+    }),
+    "memblock_l2tlb_base_sequence::select_due_response": fn("memblock_l2tlb_base_sequence::select_due_response", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "pending_q、next_sample_seq、ordered/reorder 模式",
+      output: "唯一 driving_req 与 response cycle item",
+      purpose: "选择一笔已到期 request 放到 response 端口。",
+      role: "ordered 只看队头；reorder 在全部到期项中随机；选中后仍属于 outstanding，下一 sample 才完成。",
+      source: String.raw`if (stopping || !resp_reorder_en) begin
+    if (pending_q[0].due_sample_seq > next_sample_seq) return 1'b0;
+    selected_index = 0;
+end else begin
+    foreach (pending_q[idx])
+        if (pending_q[idx].due_sample_seq <= next_sample_seq)
+            eligible_indices.push_back(idx);
+    if (eligible_indices.size() == 0) return 1'b0;
+    if (!std::randomize(choice) with { choice < eligible_indices.size(); })
+        \`uvm_fatal(get_type_name(), "failed to randomize eligible response");
+    selected_index = eligible_indices[choice];
+end
+driving_req = pending_q[selected_index];
+pending_q.delete(selected_index);
+driving_valid = 1'b1;
+cycle_tr = driving_req.resp_tr;`,
+      logicNotes: ["实际源码还检查flush epoch和null transaction；选择进入driving不等于response完成。"],
+    }),
+    "memblock_l2tlb_base_sequence::complete_driving_response": fn("memblock_l2tlb_base_sequence::complete_driving_response", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "上一拍 driving_req",
+      output: "completed_count 与匹配 UID PTE 回填",
+      purpose: "在 response 真实 sample 边界闭合 token。",
+      role: "完成不得早于 due；零 UID 匹配允许 prefetch/no-UID request，只记 UVM_LOW。",
+      calls: ["common_data_transaction::update_uid_tlb_records_by_entry", "memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting"],
+      source: String.raw`record_update_count = data.update_uid_tlb_records_by_entry(
+    driving_req.lookup_key, driving_req.entry_snapshot);
+driving_req = null;
+driving_valid = 1'b0;
+completed_count++;
+check_l2tlb_lifecycle_accounting("response_complete");`,
+      logicNotes: ["实际源码先检查complete_sample不早于due；UID回填发生在真实response采样之后。"],
+    }),
+    "memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting": fn("memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "accepted/completed/flush-canceled/reset-canceled/pending/driving",
+      output: "守恒或 fatal",
+      purpose: "保证每个真实 fire token 恰好处于一个生命周期分类。",
+      role: "只审计本地 responder 账本，不修改 pass/fail/terminal。",
+      source: String.raw`accounted_count = completed_count + flush_canceled_count +
+                      reset_canceled_count + outstanding_count();
+if (accepted_count != accounted_count)
+    \`uvm_fatal(get_type_name(), "L2TLB lifecycle mismatch");`,
+      logicNotes: ["所有request/response/flush/reset状态转换后调用；outstanding_count只读取pending和driving。"],
+    }),
+    "memblock_tlb_entry::copy_from": fn("memblock_tlb_entry::copy_from", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq_help/memblock_tlb_entry.sv",
+      input: "live memblock_tlb_entry",
+      output: "独立字段快照",
+      purpose: "冻结 request-time TLB response 来源。",
+      role: "显式复制地址、PTE、fault、CSR key 和索引数组，避免无 UVM field automation 时 copy() 丢字段。",
+      source: String.raw`lookup_key = source.lookup_key;
+pte_r = source.pte_r; pte_w = source.pte_w; pte_x = source.pte_x;
+pte_u = source.pte_u; pte_g = source.pte_g;
+tlbAF = source.tlbAF; tlbPF = source.tlbPF; tlbGPF = source.tlbGPF;
+foreach (ppn_low[idx]) begin
+    ppn_low[idx] = source.ppn_low[idx];
+    valididx[idx] = source.valididx[idx];
+    pteidx[idx] = source.pteidx[idx];
+end`,
+      logicNotes: ["真实源码还复制地址、PBMT、ASID/VMID、level和其它权限/fault字段；此处突出不可变snapshot。"],
+    }),
+    "memblock_l2tlb_base_sequence::create_l2tlb_xaction": fn("memblock_l2tlb_base_sequence::create_l2tlb_xaction", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "name",
+      output: "已清零的 L2tlb_agent_agent_xaction",
+      purpose: "创建 responder driver transaction。",
+      role: "ready 包和 response 包都通过它创建，随后由 clear_l2tlb_xaction 消除字段残留。",
+      calls: ["memblock_l2tlb_base_sequence::clear_l2tlb_xaction"],
+      source: String.raw`tr = L2tlb_agent_agent_xaction::type_id::create(name);
+clear_l2tlb_xaction(tr);
+return tr;`,
+      logicNotes: ["null object由真实源码fatal；每个cycle item都从确定的inactive基线开始。"],
+    }),
+    "memblock_l2tlb_base_sequence::clear_l2tlb_xaction": fn("memblock_l2tlb_base_sequence::clear_l2tlb_xaction", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "L2tlb_agent_agent_xaction",
+      output: "所有 request/response 字段清零",
+      purpose: "清空 L2TLB xaction 默认值。",
+      role: "防止上一拍 response 字段残留到下一拍 ready/resp 包。",
+      source: String.raw`tr.io_ptw_req_0_ready = 1'b0;
+tr.io_ptw_resp_valid = 1'b0;
+tr.io_ptw_resp_bits_s1_entry_perm_g = '0;
+tr.io_ptw_resp_bits_s1_entry_perm_u = '0;
+tr.io_ptw_resp_bits_s2_entry_perm_g = '0;
+tr.io_ptw_resp_bits_s2_entry_perm_u = '0;
+tr.pre_pkt_gap = 0;
+tr.post_pkt_gap = 0;`,
+      logicNotes: ["真实源码继续清零全部tag、PPN、index和fault字段。"],
+    }),
+    "memblock_l2tlb_base_sequence::choose_latency": fn("memblock_l2tlb_base_sequence::choose_latency", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "1C/MID/LONG 三档权重",
+      output: "latency bucket 与最早 sample 间隔",
+      purpose: "为每个 token 选择 due latency。",
+      role: "只生成 1、MID 或 LONG 最早边界，不写 pre_pkt_gap，也不保证拥塞下的精确完成拍。",
+      source: String.raw`if (!std::randomize(bucket) with {
+        bucket dist { L2TLB_LATENCY_1C := resp_1c_wt,
+                      L2TLB_LATENCY_MID := resp_mid_wt,
+                      L2TLB_LATENCY_LONG := resp_long_wt; };
+    }) \`uvm_fatal(...);
+case (bucket)
+    L2TLB_LATENCY_1C: return 1;
+    L2TLB_LATENCY_MID: return resp_mid_latency;
+    L2TLB_LATENCY_LONG: return resp_long_latency;
+endcase`,
+      logicNotes: ["due只表示最早完成边界；driver item和gap保持逐拍0。"],
+    }),
+    "memblock_l2tlb_base_sequence::send_l2tlb_item": fn("memblock_l2tlb_base_sequence::send_l2tlb_item", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "唯一 gap=0 L2TLB cycle item",
+      output: "start_item/finish_item 发给 driver",
+      purpose: "逐拍发送 ready/response transaction。",
+      role: "pre/post gap 非零直接 fatal；driver只搬运字段，不拥有 queue 或 latency。",
+      source: String.raw`if (tr == null) \`uvm_fatal(get_type_name(), "send_l2tlb_item got null xaction");
+if (tr.pre_pkt_gap != 0 || tr.post_pkt_gap != 0)
+    \`uvm_fatal(get_type_name(), "L2TLB cycle item must use gap=0");
+start_item(tr);
+finish_item(tr);`,
+      logicNotes: ["sequence负责逐拍生命周期；driver收到item后只执行字段搬运。"],
+    }),
+    "common_data_transaction::get_or_create_tlb_entry_by_req": fn("common_data_transaction::get_or_create_tlb_entry_by_req", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv",
+      input: "vpn, s2xlate, runtime CSR",
+      output: "key, entry, created",
+      purpose: "按 by-key TLB cache 查/建 entry。",
+      role: "key 包含 vpn/asid/vmid/s2xlate；miss 自动建 entry，失败则 L2TLB sequence fatal。",
+      calls: ["common_data_transaction::build_tlb_entry_for_key"],
+      source: String.raw`key = mmu_csr_state.make_lookup_key({26'b0, vpn}, s2xlate);
+if (tlb_entry_by_key.exists(key)) begin
+    entry = tlb_entry_by_key[key];
+    created = 1'b0;
+end else begin
+    entry = build_tlb_entry_for_key(key);
+    tlb_entry_by_key[key] = entry;
+    created = 1'b1;
+end`,
+      logicNotes: ["查表key使用request-time runtime CSR，不按paddr或uid建立L2TLB主表。"],
+    }),
+    "common_data_transaction::build_tlb_entry_for_key": fn("common_data_transaction::build_tlb_entry_for_key", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv",
+      input: "memblock_tlb_lookup_key_t",
+      output: "memblock_tlb_entry",
+      purpose: "按 TLB key 构造 entry。",
+      role: "集中调用 TLB entry randomize/fixup 逻辑，保证 response 权限、level、A/D 位合法化策略一致。",
+      source: String.raw`entry = memblock_tlb_entry::type_id::create($sformatf("tlb_entry_%0h", key.vpn));
+entry.lookup_key = key;
+entry.apply_csr_state(mmu_csr_state, key.s2xlate);
+entry.randomize();
+return entry;`,
+      logicNotes: ["真实源码还执行地址/PTE合法化和必要fixup；建表helper不直接驱动DUT。"],
+    }),
+    "fill_dtlb_resp_from_entry": fn("fill_dtlb_resp_from_entry", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv",
+      input: "memblock_tlb_entry",
+      output: "L2TLB response payload",
+      purpose: "回填 PTE/PPN/权限/fault。",
+      role: "把 by-key TLB entry 转换成 driver xaction；S1/S2 G/U字段分别写入，但当前共享entry来源。",
+      source: String.raw`resp.io_ptw_resp_bits_s1_entry_perm_g = entry.pte_g;
+resp.io_ptw_resp_bits_s1_entry_perm_u = entry.pte_u;
+resp.io_ptw_resp_bits_s2_entry_perm_g = entry.pte_g;
+resp.io_ptw_resp_bits_s2_entry_perm_u = entry.pte_u;`,
+      logicNotes: ["其它tag、PPN、fault和index字段在真实源码中同样从entry snapshot填充；独立S1/S2权限仍是TODO。"],
+    }),
+    "common_data_transaction::update_uid_tlb_records_by_entry": fn("common_data_transaction::update_uid_tlb_records_by_entry", {
+      file: "mem_ut/ver/ut/memblock/seq/base_seq_help/common_data_transaction.sv",
+      input: "key, entry",
+      output: "匹配 uid record pte_valid=1 与匹配数量",
+      purpose: "回填 uid 追踪记录。",
+      role: "PTW wait replay 和 debug 通过 uid record 判断 PTE 是否已回填；零匹配允许合法无UID request。",
+      source: String.raw`if (record.vpn == key.vpn && record.s2xlate == key.s2xlate &&
+    record.asid == key.asid && record.vmid == key.vmid) begin
+    record.copy_entry_fields(entry);
+    set_status_field(record.uid, MEMBLOCK_STATUS_TLB_MAPPED, 1'b1);
+    match_count++;
+end
+return match_count;`,
+      logicNotes: ["无匹配时真实源码输出UVM_LOW而非UVM_ERROR；该helper不修改pass/fail/terminal。"],
+    }),
 
     "service_real_dispatch_flow": fn("service_real_dispatch_flow", {
       file: "memblock_main_dispatch_auto_build_main_table_base_sequence.sv",
@@ -582,12 +1011,12 @@ endtask:send_l2tlb_cycle`,
       calls: ["memblock_sync_pkg::push_raw_ctrl"],
     }),
     "csr_ctrl_agent_agent_monitor::mon_data": fn("csr_ctrl_agent_agent_monitor::mon_data", {
-      file: "CSR runtime monitor / memblock_sync_pkg.sv",
+      file: "mem_ut/ver/ut/memblock/agent/csr_ctrl_agent_agent/src/csr_ctrl_agent_agent_monitor.sv",
       input: "runtime CSR snapshot",
-      output: "latest_raw_csr 被覆盖，latest_raw_csr_seq 递增",
+      output: "runtime_csr_snapshot/seq；capture gate 开启时同步 semantic latest_raw_csr",
       purpose: "采集实时 ASID/VMID/satp/vsatp/hgatp/s2xlate 上下文。",
-      role: "TLB/L2TLB 查表必须使用 runtime CSR，不使用初始配置值。",
-      calls: ["memblock_sync_pkg::push_raw_csr"],
+      role: "monitor 是 runtime latest 的唯一 publisher；L2TLB responder不依赖 semantic raw capture gate。",
+      calls: ["memblock_sync_pkg::publish_runtime_csr_snapshot", "memblock_sync_pkg::note_l2tlb_flush_event", "memblock_sync_pkg::push_raw_csr"],
     }),
     "fence_agent_agent_monitor::mon_data": fn("fence_agent_agent_monitor::mon_data", {
       file: "fence_agent_agent_monitor.sv",
@@ -595,12 +1024,36 @@ endtask:send_l2tlb_cycle`,
       output: "raw_sfence_q 增加采样项",
       purpose: "采集 sfence/hfence 离散 TLB invalidation 事件。",
       role: "fence monitor 只记录事实；统一 service loop 在 CSR runtime 同步后 FIFO 消费。",
-      calls: ["memblock_sync_pkg::push_raw_sfence"],
+      calls: ["memblock_sync_pkg::note_l2tlb_flush_event", "memblock_sync_pkg::push_raw_sfence"],
     }),
     "memblock_sync_pkg::push_raw_int_wb": fn("memblock_sync_pkg::push_raw_int_wb", { file: "memblock_sync_pkg.sv", input: "dispatch_raw_int_wb_t", output: "raw_int_wb_q.push_back", purpose: "缓存 int writeback raw event。", role: "把 monitor 采样与主控 service loop 解耦。" }),
     "memblock_sync_pkg::push_raw_iq_feedback": fn("memblock_sync_pkg::push_raw_iq_feedback", { file: "memblock_sync_pkg.sv", input: "dispatch_raw_iq_feedback_t", output: "raw_iq_feedback_q.push_back", purpose: "缓存 IQ feedback raw event。", role: "STA/STD pass/replay 之后由 adapter 消费。" }),
     "memblock_sync_pkg::push_raw_ctrl": fn("memblock_sync_pkg::push_raw_ctrl", { file: "memblock_sync_pkg.sv", input: "dispatch_raw_ctrl_t", output: "raw_ctrl_q.push_back", purpose: "缓存 ctrl raw event。", role: "LQ/SQ deq、memoryViolation、sbIsEmpty 通过该队列进入主控处理。" }),
-    "memblock_sync_pkg::push_raw_csr": fn("memblock_sync_pkg::push_raw_csr", { file: "memblock_sync_pkg.sv", input: "dispatch_raw_csr_t", output: "latest_raw_csr/latest_raw_csr_seq", purpose: "缓存最新 CSR runtime snapshot。", role: "主控同步后更新 runtime CSR 镜像。" }),
+    "memblock_sync_pkg::publish_runtime_csr_snapshot": fn("memblock_sync_pkg::publish_runtime_csr_snapshot", {
+      file: "mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv",
+      input: "dispatch_raw_csr_t 与 payload_changed",
+      output: "runtime_csr_snapshot/latest sequence",
+      purpose: "由 CSR monitor 发布 non-destructive runtime CSR latest 视图。",
+      role: "不依赖 semantic raw queue 是否开启或已被消费；L2TLB responder 通过 get_latest_runtime_csr_snapshot()读取该视图。",
+      source: String.raw`if (item.valid && payload_changed) begin
+    runtime_csr_snapshot = item;
+    runtime_csr_snapshot_valid = 1'b1;
+    runtime_csr_snapshot_seq++;
+end`,
+      logicNotes: ["只有首次或payload变化发布新序号；latest可重复读取。"],
+    }),
+    "memblock_sync_pkg::note_l2tlb_flush_event": fn("memblock_sync_pkg::note_l2tlb_flush_event", {
+      file: "mem_ut/ver/ut/memblock/common/memblock_common/src/memblock_sync_pkg.sv",
+      input: "monitor sample time",
+      output: "l2tlb_flush_event_seq/latest sample time",
+      purpose: "发布 CSR changed 或 sfence 对 L2TLB filter 生命周期的非破坏性失效事件。",
+      role: "只更新 latest sideband；不消费 semantic sfence queue，也不直接清 pending queue。",
+      source: String.raw`l2tlb_flush_event_seq++;
+l2tlb_flush_sample_time = sample_time;
+l2tlb_flush_event_valid = 1'b1;`,
+      logicNotes: ["responder读取序号并在本地去重；其它semantic consumer仍可读取自己的raw queue。"],
+    }),
+    "memblock_sync_pkg::push_raw_csr": fn("memblock_sync_pkg::push_raw_csr", { file: "memblock_sync_pkg.sv", input: "dispatch_raw_csr_t", output: "latest_raw_csr/latest_raw_csr_seq", purpose: "缓存最新 CSR runtime snapshot。", role: "在 monitor 发布 runtime latest 后，为公共 semantic raw consumer 保留一份队列/最新视图。" }),
     "memblock_sync_pkg::push_raw_sfence": fn("memblock_sync_pkg::push_raw_sfence", { file: "memblock_sync_pkg.sv", input: "dispatch_raw_sfence_t", output: "raw_sfence_q.push_back", purpose: "缓存 sfence/hfence raw event。", role: "sfence/hfence 是离散失效命令，必须 FIFO 消费，不能像 CSR snapshot 一样覆盖成 latest。" }),
     "collect_csr_runtime_events": fn("collect_csr_runtime_events", { file: "memblock_dispatch_base_sequence.sv", input: "latest_raw_csr", output: "runtime CSR 镜像更新", purpose: "同步 CSR runtime monitor snapshot。", role: "TLB lookup 和权限模式必须使用实时 CSR，而不是初始 csr_common。", calls: ["dispatch_monitor_event_adapter::drain_csr_events"] }),
     "collect_runtime_context_events": fn("collect_runtime_context_events", { file: "memblock_dispatch_base_sequence.sv", input: "latest_raw_csr/raw_sfence_q", output: "runtime CSR 镜像更新和 live TLB entry 失效", purpose: "统一 service loop 的 runtime context 入口。", role: "显式先同步 CSR runtime，再 FIFO 消费 sfence/hfence，避免 CSR-only 路径隐式清 fence queue。", calls: ["dispatch_monitor_event_adapter::drain_csr_events", "dispatch_monitor_event_adapter::drain_sfence_events"] }),
@@ -762,6 +1215,84 @@ endcase`, logicNotes: ["这是当前源码的近似骨架；LDU 分支区分 ord
     "assign_main_issue_fields": fn("assign_main_issue_fields", { file: "issue_field_assigner.sv", input: "main transaction", output: "fuType/fuOpType/robIdx/src/imm 等", purpose: "填直接影响 DUT 发射的主字段。", role: "这些字段决定 DUT 进入哪条 LS pipeline 以及执行什么操作。" }),
     "assign_issue_dep_fields": fn("assign_issue_dep_fields", { file: "issue_field_assigner.sv", input: "main/status", output: "LOAD 的 loadWait/storeSet 字段", purpose: "填影响 LOAD 次级行为的依赖字段。", role: "仅 LOAD 写入 MDP/StoreSet 依赖字段；V2 STA/STD 不存在这些字段，不写入伪依赖信息。" }),
     "assign_backend_meta_fields": fn("assign_backend_meta_fields", { file: "issue_field_assigner.sv", input: "main transaction", output: "pc/isRVC/ftq/pdest/rfWen/fpWen 等", purpose: "填随流水线到后端的 meta 字段。", role: "通常不主导 MemBlock 控制流，但写回/后端追踪会使用。" }),
+    "L2tlb_agent_agent_driver::main_phase": fn("L2tlb_agent_agent_driver::main_phase", {
+      file: "mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/L2tlb_agent_agent_driver.sv",
+      input: "L2TLB lifecycle owner状态与sequence逐拍gap=0 cycle item",
+      output: "ready/response字段写入VIF并item_done",
+      purpose: "把唯一lifecycle owner生成的cycle item按一拍边界搬运到L2TLB interface。",
+      role: "driver只读owner作为item存在门控；无owner驱动inactive，有owner阻塞取当拍必有item，不维护pending queue或latency。",
+      calls: ["L2tlb_agent_agent_driver::drive_idle", "L2tlb_agent_agent_driver::get_owned_item_or_abort", "L2tlb_agent_agent_driver::send_pkt", "L2tlb_agent_agent_driver::phase_ended"],
+      source: String.raw`@this.vif.drv_mp.drv_cb;
+if (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed) begin
+    this.drive_idle(this.cfg.drv_mode);
+end else begin
+    this.get_owned_item_or_abort(phase, req, got_item, aborted);
+    if (aborted) begin
+        this.drive_idle(this.cfg.drv_mode);
+        return;
+    end
+    if (!got_item || req == null) \`uvm_fatal(get_type_name(), "active owner returned no item");
+    if (req.pre_pkt_gap != 0 || req.post_pkt_gap != 0) \`uvm_fatal(...);
+    this.send_pkt(req);
+    seq_item_port.item_done();
+end`,
+      logicNotes: ["这是当前源码的近似骨架；get_owned_item_or_abort并行等待item和phase/owner中断，phase_ended兜底清理owner；实际send_pkt逐字段驱动全部S1/S2 response payload。"],
+    }),
+    "L2tlb_agent_agent_driver::get_owned_item_or_abort": fn("L2tlb_agent_agent_driver::get_owned_item_or_abort", {
+      file: "mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/L2tlb_agent_agent_driver.sv",
+      input: "uvm_phase + owner状态 + sequencer item",
+      output: "got_item/aborted + cycle item",
+      purpose: "在保持active阻塞握手的同时，让owner撤销或phase终止可以打断get_next_item等待。",
+      role: "正常item分支由driver消费；abort分支只驱动idle并退出，不调用item_done，不创建token。",
+      calls: ["L2tlb_agent_agent_driver::drive_idle"],
+      source: String.raw`fork : owned_item_or_abort
+  seq_item_port.get_next_item(tr);
+  @this.vif.drv_mp.drv_cb;
+  if (!memblock_sync_pkg::l2tlb_lifecycle_owner_claimed ||
+      phase.get_state() inside {UVM_PHASE_READY_TO_END, UVM_PHASE_ENDED,
+                                UVM_PHASE_JUMPING, UVM_PHASE_CLEANUP, UVM_PHASE_DONE})
+    aborted = 1'b1;
+join_any`,
+      logicNotes: ["这是当前源码的近似骨架；真实实现join_any后disable另一条分支。"],
+    }),
+    "L2tlb_agent_agent_driver::phase_ended": fn("L2tlb_agent_agent_driver::phase_ended", {
+      file: "mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/L2tlb_agent_agent_driver.sv",
+      input: "uvm_phase end callback",
+      output: "owner release side effect",
+      purpose: "phase直接杀掉sequence时清除残留L2TLB lifecycle owner。",
+      role: "只调用package try_release，不修改pending/token或主表状态。",
+      source: String.raw`if (memblock_sync_pkg::l2tlb_lifecycle_owner_claimed)
+  void'(memblock_sync_pkg::try_release_l2tlb_lifecycle_owner(
+      memblock_sync_pkg::l2tlb_lifecycle_owner_name, current_owner));`,
+    }),
+    "L2tlb_agent_agent_driver::send_pkt": fn("L2tlb_agent_agent_driver::send_pkt", {
+      file: "mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/L2tlb_agent_agent_driver.sv",
+      input: "L2tlb_agent_agent_xaction",
+      output: "L2TLB ready、resp_valid和response payload写入drv_cb",
+      purpose: "执行L2TLB response字段的机械搬运。",
+      role: "不重新解释permission、不选择延迟、不更新状态；S1/S2 G/U分别从xaction传到interface。",
+      source: String.raw`vif.drv_mp.drv_cb.io_ptw_req_0_ready <= tr.io_ptw_req_0_ready;
+vif.drv_mp.drv_cb.io_ptw_resp_valid <= tr.io_ptw_resp_valid;
+vif.drv_mp.drv_cb.io_ptw_resp_bits_s1_entry_perm_g <= tr.io_ptw_resp_bits_s1_entry_perm_g;
+vif.drv_mp.drv_cb.io_ptw_resp_bits_s1_entry_perm_u <= tr.io_ptw_resp_bits_s1_entry_perm_u;
+vif.drv_mp.drv_cb.io_ptw_resp_bits_s2_entry_perm_g <= tr.io_ptw_resp_bits_s2_entry_perm_g;
+vif.drv_mp.drv_cb.io_ptw_resp_bits_s2_entry_perm_u <= tr.io_ptw_resp_bits_s2_entry_perm_u;`,
+      logicNotes: ["这里展示关键字段；真实源码继续逐字段搬运其它S1/S2 payload。"],
+    }),
+    "L2tlb_agent_agent_driver::drive_idle": fn("L2tlb_agent_agent_driver::drive_idle", {
+      file: "mem_ut/ver/ut/memblock/agent/L2tlb_agent_agent/src/L2tlb_agent_agent_driver.sv",
+      input: "driver mode",
+      output: "ready/response/payload全零的inactive边界",
+      purpose: "在reset、sequence disabled/退出或无lifecycle owner时关闭L2TLB接管输出。",
+      role: "DRV_0只驱动全零；active responder不允许generic pattern模式制造无人记录的ready或response。",
+      source: String.raw`if (drv_mode == tcnt_dec_base::DRV_0) begin
+    vif.drv_mp.drv_cb.io_ptw_req_0_ready <= '0;
+    vif.drv_mp.drv_cb.io_ptw_resp_valid <= '0;
+    vif.drv_mp.drv_cb.io_ptw_resp_bits_s2xlate <= '0;
+    // 其它S1/S2 response payload同样清零
+end`,
+      logicNotes: ["这是当前源码的近似骨架；真实源码逐字段清零全部payload。"],
+    }),
     "lintsissue_agent_agent_driver::main_phase": fn("lintsissue_agent_agent_driver::main_phase", { file: "mem_ut/ver/ut/memblock/agent/lintsissue_agent_agent/src/lintsissue_agent_agent_driver.sv", input: "sequencer issue xaction", output: "初始驱动、阻塞/非阻塞分派、item_done", purpose: "issue driver 的主 phase 边界。", role: "在 clocking 边界检查 wait-ready item 是否跨 flush；正常路径先 send_pkt，再按配置进入 one-cycle 或 ready-wait，abort 路径清 valid 并重发 valid 已全零的 xaction。", calls: ["lintsissue_agent_agent_driver::send_pkt", "lintsissue_agent_agent_driver::clear_dispatch_issue_ports", "lintsissue_agent_agent_driver::drive_dispatch_issue_one_cycle", "lintsissue_agent_agent_driver::wait_dispatch_issue_ready", "lintsissue_agent_agent_driver::drive_idle"], source: String.raw`if (wait_ready && flush_or_epoch_changed()) begin
     fired_mask = '0;
     clear_dispatch_issue_ports(req);
@@ -1170,7 +1701,7 @@ endfunction:clear_uid_dispatch_result`,
           lane("admission", ["memblock_lsqenq_dispatch_base_sequence::body", "send_lsqenq_cycle", "memblock_lsqenq_dispatch_base_sequence::apply_pending_lsq_cancels", "complete_admission"]),
           lane("issue", ["scalar_issue_compile_time_layout", "memblock_issue_dispatch_base_sequence::body", "send_issue_cycle", "issue_field_assigner::assign_issue_item_fields", "lintsissue_agent_agent_driver::record_dispatch_issue_fire", "issue_queue_scheduler::mark_issue_fire"]),
           lane("commit", ["memblock_lsqcommit_dispatch_base_sequence::body", "send_lsqcommit_cycle", "lsq_commit_handler::apply_raw_ctrl_deq"]),
-          lane("l2tlb", ["memblock_l2tlb_base_sequence::body", "send_l2tlb_cycle", "common_data_transaction::get_or_create_tlb_entry_by_req"]),
+          lane("l2tlb", ["memblock_l2tlb_base_sequence::body", "memblock_sync_pkg::try_claim_l2tlb_lifecycle_owner", "send_l2tlb_cycle", "memblock_l2tlb_base_sequence::cancel_outstanding_by_reset", "memblock_l2tlb_base_sequence::capture_fired_request", "memblock_l2tlb_base_sequence::select_due_response", "memblock_l2tlb_base_sequence::complete_driving_response", "L2tlb_agent_agent_driver::main_phase"]),
           lane("recovery", ["exception_redirect_replay_handler::process_pending_events", "exception_redirect_replay_handler::requeue_events_not_flushed_by_redirect", "memblock_redirect_dispatch_base_sequence::body", "common_data_transaction::apply_redirect_flush"]),
         ]),
       ],
@@ -1222,11 +1753,12 @@ endfunction:clear_uid_dispatch_result`,
         stage("TLB 表生成", "L2TLB request 到来时按 by-key cache 查/建 TLB entry；没有 admission 后预构建 per-uid TLB 表。", [
           lane("builder", ["common_data_transaction::get_or_create_tlb_entry_by_req", "common_data_transaction::build_tlb_entry_for_key"]),
         ]),
-        stage("responder sequence", "采 request，按 by-key entry 回包，并回填匹配 uid record。", [
-          lane("setup", ["memblock_l2tlb_base_sequence::body", "memblock_l2tlb_base_sequence::ensure_context", "memblock_l2tlb_base_sequence::configure_from_plus", "wait_for_main_table", "drive_l2tlb_loop"]),
-          lane("request", ["send_l2tlb_cycle", "memblock_l2tlb_base_sequence::request_valid", "sample_request_fields", "memblock_l2tlb_base_sequence::create_l2tlb_xaction"]),
-          lane("lookup", ["common_data_transaction::get_or_create_tlb_entry_by_req", "common_data_transaction::build_tlb_entry_for_key"]),
-          lane("response", ["memblock_l2tlb_base_sequence::choose_latency", "fill_dtlb_resp_from_entry", "common_data_transaction::update_uid_tlb_records_by_entry", "memblock_l2tlb_base_sequence::send_l2tlb_item"]),
+        stage("responder sequence", "按真实 fire 建 token，使用 bounded pending queue 调度 response，并在 sample 边界回填匹配 uid record。", [
+          lane("setup", ["memblock_l2tlb_base_sequence::body", "memblock_l2tlb_base_sequence::ensure_context", "memblock_l2tlb_base_sequence::configure_from_plus", "memblock_sync_pkg::try_claim_l2tlb_lifecycle_owner", "memblock_l2tlb_base_sequence::initialize_lifecycle_state", "drive_l2tlb_loop", "memblock_sync_pkg::try_release_l2tlb_lifecycle_owner"]),
+          lane("sample/request", ["send_l2tlb_cycle", "memblock_l2tlb_base_sequence::request_fire", "memblock_l2tlb_base_sequence::drain_csr_runtime_events", "memblock_sync_pkg::get_latest_runtime_csr_snapshot", "memblock_sync_pkg::get_latest_l2tlb_flush_event", "memblock_l2tlb_base_sequence::capture_fired_request"]),
+          lane("lookup/snapshot", ["common_data_transaction::get_or_create_tlb_entry_by_req", "common_data_transaction::build_tlb_entry_for_key", "memblock_tlb_entry::copy_from", "fill_dtlb_resp_from_entry"]),
+          lane("response", ["memblock_l2tlb_base_sequence::choose_latency", "memblock_l2tlb_base_sequence::select_due_response", "memblock_l2tlb_base_sequence::send_l2tlb_item", "L2tlb_agent_agent_driver::send_pkt", "memblock_l2tlb_base_sequence::complete_driving_response", "common_data_transaction::update_uid_tlb_records_by_entry"]),
+          lane("flush/accounting", ["memblock_l2tlb_base_sequence::handle_l2tlb_flush_event", "memblock_l2tlb_base_sequence::check_l2tlb_lifecycle_accounting"]),
         ]),
       ],
     },
@@ -1258,12 +1790,12 @@ endfunction:clear_uid_dispatch_result`,
           lane("service", ["service_real_dispatch_flow", "service_monitor_once", "memblock_sync_pkg::tick_dispatch_service_cycle"]),
           lane("runtime context", ["collect_runtime_context_events", "dispatch_monitor_event_adapter::drain_csr_events", "dispatch_monitor_event_adapter::drain_sfence_events"]),
         ]),
-        stage("raw monitor", "monitor 采样只进入 raw queue，不直接改状态。", [
+        stage("raw monitor", "monitor 采样写入 semantic raw queue且不直接改状态；CSR monitor还独立发布 non-destructive runtime latest sideband。", [
           lane("int wb", ["io_mem_to_ooo_int_wb_monitor::mon_data", "memblock_sync_pkg::push_raw_int_wb"]),
           lane("iq feedback", ["io_mem_to_ooo_iq_feedback_monitor::mon_data", "memblock_sync_pkg::push_raw_iq_feedback"]),
           lane("ctrl", ["io_mem_to_ooo_ctrl_monitor::mon_data", "memblock_sync_pkg::push_raw_ctrl"]),
-          lane("csr", ["csr_ctrl_agent_agent_monitor::mon_data", "memblock_sync_pkg::push_raw_csr"]),
-          lane("sfence", ["fence_agent_agent_monitor::mon_data", "memblock_sync_pkg::push_raw_sfence"]),
+          lane("csr", ["csr_ctrl_agent_agent_monitor::mon_data", "memblock_sync_pkg::publish_runtime_csr_snapshot", "memblock_sync_pkg::note_l2tlb_flush_event", "memblock_sync_pkg::push_raw_csr"]),
+          lane("sfence", ["fence_agent_agent_monitor::mon_data", "memblock_sync_pkg::note_l2tlb_flush_event", "memblock_sync_pkg::push_raw_sfence"]),
         ]),
         stage("writeback raw", "int_wb 和 IQ feedback 转换为 memblock_wb_event_t。", [
           lane("batch collect", ["collect_monitor_event_batch", "dispatch_monitor_event_adapter::collect_writeback_events_batch", "dispatch_monitor_event_adapter::collect_ctrl_redirect_events_batch"]),

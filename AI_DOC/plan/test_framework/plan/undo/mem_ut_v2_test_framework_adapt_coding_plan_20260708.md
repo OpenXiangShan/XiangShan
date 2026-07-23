@@ -2,7 +2,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待各专项 coding；L2TLB response/permission 与多 outstanding lifecycle 已建立唯一子 plan owner |
+| 状态 | `undo`，L2TLB 专项已完成 coding、验证、独立 review 并归档到 `plan/do`；其余专项按 owner 继续执行 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
 | V2 接口权威 | `build_memblock/rtl/MemBlock.sv`、`build_memblock/rtl/filelist.f` |
@@ -56,7 +56,7 @@ test -e build_memblock/rtl/filelist.f
 | IQ feedback/replay、VSTU gate | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_iq_feedback_replay_framework_adapt_execution_plan_20260711.md`；已完成STA SQ-only raw、active SQ/current snapshot attach、同拍IQ-first、deferred ctrl、严格STA real-WB顺序和VSTU valid fatal |
 | int-WB/writeback | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_int_wb_writeback_framework_adapt_execution_plan_20260708.md` |
 | CSR/sfence payload字段与runtime语义 | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_csr_control_runtime_semantic_review_execution_plan_20260708.md`；拥有CSR字段采样/消费语义；L2TLB专项只拥有不受semantic capture gate控制的latest发布 plumbing，并复用同一raw类型、统一seq和公共state，不复制字段模型 |
-| L2TLB response/permission、多 outstanding lifecycle | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md`；唯一拥有 permission 字段链、独立runtime CSR latest发布与统一seq、request-time CSR 冻结、per-fire token、pending queue、ordered/reorder 调度、三档最早 due、ready、reset/non-destructive flush event/stop 生命周期 |
+| L2TLB response/permission、多 outstanding lifecycle | `AI_DOC/plan/test_framework/plan/do/mem_ut_v2_l2tlb_response_permission_adapt_execution_plan_20260708.md`；唯一拥有 permission 字段链、独立runtime CSR latest发布与统一seq、request-time CSR 冻结、per-fire token、pending queue、ordered/reorder 调度、三档最早 due、ready、reset/non-destructive flush event/stop 生命周期 |
 | LSQ MMIO/status、cancel output 对账 | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_lsq_mmio_status_framework_adapt_execution_plan_20260708.md`；该专项拥有per-epoch record、独立cancel snapshot/redirect anchor sideband源码与consumer、software/observed直接对账和global-stop gate，不能把observed count接到第二个SQ deq/free-count owner |
 | pending-MMIO load/store sideband | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_pending_mmio_load_sideband_execution_plan_20260710.md` |
 | monitor output分类、vector-WB gate | `AI_DOC/plan/test_framework/plan/undo/mem_ut_v2_monitor_output_framework_adapt_execution_plan_20260708.md`；只规定ctrl snapshot/redirect anchor的monitor职责合同并唯一实现`writebackVldu` valid fatal；具体sideband类型、queue、producer源码、consumer和reconcile由LSQ MMIO/status专项唯一coding |
@@ -76,6 +76,7 @@ test -e build_memblock/rtl/filelist.f
 | Int-WB/writeback | 已完成并归档 | V2 split `writebackLda/Sta/Std` 按 source/lane 采样；LDA/STA 用真实 ROB key 补 current issue snapshot；STD 用 ROB value-only 双 flag 过滤后唯一反查并从 status 补 SQ；只有真实 STD writeback 设置完成状态；target flush epoch 和 capability guard 防止 stale/unsupported event。 | 干净远端 VCS/Verdi 编译 `0 error(s), 0 warning(s)`；`tc_sanity` 通过；真实 store smoke 已闭环 STD/STA WB 与 ROB commit，后续 SQ deq pointer mismatch 明确归属下游 owner。review 位于 `review_doc/undo/mem_ut_v2_int_wb_writeback_framework_adapt_implementation_review_20260722.md`；plan 已移至 `plan/do`。 |
 | IQ feedback/replay | 已完成并归档 | STA monitor只生成真实SQ-only raw；adapter用active SQ map/current status补UID、ROB、issue epoch和replay sequence；同拍IQ先于int-WB进入同一redirect-first batch；ctrl deq延后应用；严格模式要求STA real-WB前已有IQ hit；VSTU/STD IQ保持fail-fast边界。 | 全量VCS/Verdi编译`0 error(s), 0 warning(s)`；真实store路径已经过STD WB、STA IQ/WB和ROB commit，后续SQ deq mismatch归下游owner；software replay受既有int-WB inactive STD X/Z和disabled-monitor connect问题阻塞。review位于`review_doc/undo/mem_ut_v2_iq_feedback_replay_framework_adapt_implementation_review_20260722.md`；plan已移至`plan/do`。 |
 | CSR/sfence runtime 语义 | 已完成并归档 | 完成 misalign/priv_debug 的 `1/1/0` snapshot-only 链路、CSR re-arm epoch、sfence `flushPipe` 透明驱动与四态 valid/XZ 边界；不改变 TLB key、standalone flush、pass/fail 或 terminal 主流程。 | V2 远端 compile/elaboration/link 和 `tc_sanity` smoke 通过，`TEST CASE PASSED`、`UVM_ERROR=0`、`UVM_FATAL=0`；最终独立 reviewer `FINAL PASS`。plan 已归档到 `plan/do`；implementation review 保留在 `review_doc/undo/mem_ut_v2_csr_control_runtime_semantic_review_implementation_review_20260722.md`。 |
+| L2TLB response/permission 与多 outstanding lifecycle | 已完成并归档 | 保持 DTLB -> L2TLB request、L2TLB -> DTLB response 语义；补齐 V2 S1/S2 G/U 字段链，按每次真实 request fire 建 token，使用 bounded pending queue + driving slot，支持默认顺序/可配乱序回复、三档 due latency、CSR latest、flush/reset/stop 生命周期和唯一 owner。driver 最终采用 owner=0 idle、owner=1 阻塞取当拍必有 item 的握手，并补齐 `do_kill/get_owned_item_or_abort/phase_ended` 强制停序清理；独立 S1/S2 权限模型仍留在 TODO。 | r7 staged-only compile、disabled和tc_sanity active smoke通过；r8强制停序补强后的compile与active basic smoke通过，且文档未把它误写为callback动态命中。独立 reviewer核对staged代码、UVM 1.2调用链、r7/r8日志和共享文件提交边界后给出`FINAL PASS`。implementation review位于`review_doc/undo/mem_ut_v2_l2tlb_response_permission_adapt_implementation_review_20260722.md`，plan已移动到`plan/do`。 |
 
 后续每完成一个子计划，必须在本表追加其实际功能、归档路径和验证结果，并保持每个子计划一个独立
 本地 git commit。

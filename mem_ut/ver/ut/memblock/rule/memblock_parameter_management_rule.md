@@ -142,6 +142,9 @@ mem_ut/ver/ut/memblock/cfg/memblock_compile_params.svh
 - 编译期覆盖 `MEMBLOCK_L2TLB_CONNECT_TAKEOVER_EN=0` 表示关闭 `L2TLB_agent` 接管，agent interface 保持非激活默认值；该模式不是只观察 DUT 原始 PTW/L2TLB response。
 - 如果后续需要只观察 DUT 原始 PTW/L2TLB response，必须另建 passive monitor 或 mirror 方案，不能复用当前 takeover 关闭模式。
 - 如果编译期关闭 takeover 又 runtime 打开 `MEMBLOCK_L2TLB_SEQ_EN=1`，sequence 应 fatal。
+- V2 L2TLB 结构宏 `MEMBLOCK_DUT_L2TLB_DFILTER_SIZE` 和 `MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES` 只放在 `memblock_compile_params.svh`，并由 `memblock_dispatch_types.sv` 暴露 typed localparam；不得建立 plus 镜像。
+- L2TLB runtime plus 只保留 `MEMBLOCK_L2TLB_MAX_OUTSTANDING`、`MEMBLOCK_L2TLB_RESP_REORDER_EN`、三档 response latency/weight 和 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE`。sequence 通过 `seq_csr_common` getter 获取已经校验和按结构上限收敛的值。
+- `MEMBLOCK_L2TLB_MIN_LATENCY`、`MEMBLOCK_L2TLB_MAX_LATENCY` 已删除；旧历史文档中的同名字段仅作为历史记录，不得重新加入 `plus.sv`、preset cfg 或 getter。
 
 当前 V2 LSQ enqueue 参数规则：
 

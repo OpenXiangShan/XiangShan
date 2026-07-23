@@ -2,14 +2,14 @@
 
 | 项目 | 内容 |
 |---|---|
-| 状态 | `undo`，待 coding |
+| 状态 | `do`，coding、文档同步、验证和独立 review 已完成；本 plan 已归档 |
 | 目标版本 | V2 |
 | 当前分支 | `mem_ut_uvm_v2` |
-| 核验 commit | `bd813bc3ed5b39581be966c6518788852890ff6f` |
+| 核验 commit | `cf63e12ebd00db93524edc35c1fab646b6a48e31`（当前 staged 基线） |
 | RTL/Scala 权威 | `build_memblock/rtl/MemBlock.sv`、`src/main/scala/xiangshan/cache/mmu`、`src/main/scala/xiangshan/mem/MemBlock.scala` |
 | 测试框架入口 | `memblock_l2tlb_base_sequence`、`L2tlb_agent_agent_driver` |
 | Plan 定位 | V2 DTLB/L2TLB responder 的 response 字段适配、请求队列、回复调度和生命周期 owner |
-| 修订日期 | 2026-07-21 |
+| 修订日期 | 2026-07-23 |
 
 ## 1. Plan 定位与范围
 
@@ -363,7 +363,7 @@ owner 的 sequence 调用 `kill()`、`stop_sequences()` 或 phase jump 后再启
 ```text
 确认runtime owner try-claim成功；
 初始化sample_seq、单调request_token、pending_q、driving slot、last_seen_flush_event_seq、
-csr_snapshot_valid、acceptance_opened_since_reset和idle_count；
+csr_snapshot_valid、acceptance_opened_since_reset、ready_opportunity_since_lifecycle_block和idle_count；
 循环等待l2tlb_vif.drv_cb：
   sample_seq加1；
   立即从drv_cb锁存request valid/vpn/s2xlate，并锁存当前interface实际ready；
@@ -372,7 +372,7 @@ csr_snapshot_valid、acceptance_opened_since_reset和idle_count；
   若reset未释放或reset_backend_done不成立：
     把pending_q和driving token计入reset_canceled_count后清除，不更新uid TLB record；
     单调token和累计lifecycle计数不回退，并复查生命周期等式；
-    acceptance_opened_since_reset清0；flush latest序号无条件对齐为reset baseline，不做active freshness fatal；
+    acceptance_opened_since_reset和ready_opportunity_since_lifecycle_block清0；flush latest序号无条件对齐为reset baseline，不做active freshness fatal；
     发送ready=0、resp_valid=0的cycle item；
     idle_count清0；若global_stop_requested已置位，发送完成后自然release并退出，否则继续下一拍；
 
@@ -416,7 +416,7 @@ csr_snapshot_valid、acceptance_opened_since_reset和idle_count；
     已接受pending request继续按due时间排空；
 
   更新idle并在构造下一cycle item前判断idle-stop：
-    reset/CSR未有效/flush hold/其它lifecycle block期间idle_count保持0；
+    reset/CSR未有效/flush hold/尚未开放过ready/本次reset或flush解除后尚未提供ready机会/其它lifecycle block期间idle_count保持0；
     只有全部block解除、pending/driving均空且本拍无progress时才增加idle_count；
     达到IDLE_STOP_CYCLE时先进入stopping，本拍必须构造最终inactive item；
 
@@ -432,9 +432,10 @@ csr_snapshot_valid、acceptance_opened_since_reset和idle_count；
   根据stopping、csr_snapshot_valid、flush hold和outstanding_count计算下一拍ready：
     只有未stopping、CSR已有效、已过hold且outstanding_count小于MAX_OUTSTANDING时置1；
     response valid与ready可以同拍出现，分别表示返回旧请求和接受新请求；
-    任一item把ready置1后设置acceptance_opened_since_reset=1；
+    任一item把ready置1后先设置acceptance_opened_since_reset=1；
 
   发送本拍唯一cycle item；pre_pkt_gap/post_pkt_gap必须为0；
+  send_l2tlb_item完成后，若该item的ready为1，再设置ready_opportunity_since_lifecycle_block=1；
 
   stopping且outstanding为空时，当前item必须是ready=0/resp=0，发送完成后release owner并退出；
   禁止先发送ready=1 item再依据更新后的idle_count立即退出；idle-stop只能走前述最终inactive item路径。
@@ -456,8 +457,8 @@ csr_snapshot_valid、acceptance_opened_since_reset和idle_count；
 调用data.get_mmu_csr_snapshot()复制当前runtime CSR；
 用snapshot.make_lookup_key(vpn,s2xlate)生成request-time key；
 立即调用现有TLB get-or-create路径：
-  因CSR已在本拍先同步，当前公共state与snapshot一致；
-  命中则取得已有live entry，未命中则按该key创建并插入live entry；
+  调用snapshot-aware get-or-create helper，以request.csr_snapshot生成key；
+  命中则取得已有live entry，未命中则使用同一snapshot构造并插入live entry；
   若返回key与snapshot生成key不一致则uvm_fatal，防止上下文漂移；
 创建memblock_tlb_entry entry_snapshot并调用copy_from(live_entry)逐字段复制；
 创建并clear response xaction；
@@ -568,21 +569,23 @@ stopping或ordered模式：
 ## 7. Driver 逐拍合同
 
 当前 driver 在 `pre_pkt_gap` 中循环 `drive_idle()`，同时 sequence 阻塞在 `finish_item()`；idle 又把
-ready保持为1，导致期间发生的 request fire 无 owner。修改后 driver 只执行逐拍 cycle item：
+ready保持为1，导致期间发生的 request fire 无 owner。修改后 driver 使用 lifecycle owner 作为当前拍
+item 必然存在的合同：没有 owner 时不取 item 并显式驱动 inactive；owner 已声明时阻塞等待当前拍的唯一
+cycle item，避免 sequence 和 driver 同拍唤醒时非阻塞获取先执行造成伪 idle：
 
 ```text
 reset_phase进入时若takeover active且cfg.drv_mode不是DRV_0，立即uvm_fatal；
 main_phase每轮先等待vif.drv_cb；
-把req置null，禁止复用上一拍item handle；
-调用阻塞get_next_item(req)，与同一sample tick生成item的responder sequence完成delta-cycle同步；
-req为空、pre_pkt_gap非0或post_pkt_gap非0均uvm_fatal；
-调用send_pkt(req)一次，把ready、resp_valid和payload驱到下一sample边界；
-立即item_done；
-不在driver内部等待额外周期，不自行选择latency，不维护outstanding queue。
+若l2tlb_lifecycle_owner_claimed=0，调用drive_idle(DRV_0)驱动ready=0/resp_valid=0；
+若owner已声明，把req置null并调用get_owned_item_or_abort；正常分支阻塞get_next_item(req)，禁止复用上一拍item handle；
+若owner被do_kill/phase终止清除，或phase进入READY_TO_END及以后，取item分支取消并驱动一拍idle后返回；正常分支返回null item或item gap非0时fatal，否则调用send_pkt(req)一次，把ready、resp_valid和payload驱到下一sample边界；
+取得item后立即item_done；
+除active owner的UVM item握手外，不在driver内部等待额外周期，不自行选择latency，不维护outstanding queue。
 ```
 
-`drive_idle(DRV_0)` 改为 `ready=0/resp_valid=0/payload=0`。只有 sequence 的 cycle item 可以把 ready
-置1。这样 `MEMBLOCK_L2TLB_SEQ_EN=0`、sequence 已退出或 reset 时不会接受无人记录的 request。
+`drive_idle(DRV_0)` 改为 `ready=0/resp_valid=0/payload=0`。只有 sequence 取得并交付的 cycle item
+可以把 ready置1；无 item、`MEMBLOCK_L2TLB_SEQ_EN=0`、sequence 已退出或 reset 时均保持 inactive，
+不会接受无人记录的 request。
 
 ## 8. Flush、Reset 与停止生命周期
 
@@ -671,13 +674,14 @@ sequence 的 pending/driving 状态。reset 边界读取一次 latest snapshot �
 ```text
 记录新event_seq/sample_time和本次被丢弃pending数量；
 把当前本地sample记为flush_anchor_sample；
-删除全部尚未进入driving slot、且accept_flush_event_seq早于新event的request；
+从pending_q尾部向前删除全部尚未进入driving slot、且accept_flush_event_seq早于新event的request；
 把删除数量累加到flush_canceled_count；
 当前边界刚完成的driving response先按已采样事实完成，不回滚；
 active阶段首次观察到同sample新event时，本拍由旧ready形成的request fire调用
 record_flush_killed_request()分配token并记账，但不建立pending response record；
 startup/reset baseline因ready从未开放，不调用record_flush_killed_request()；
 设置accept_hold_until = flush_anchor_sample + MEMBLOCK_DUT_L2TLB_FLUSH_HOLD_CYCLES；
+清除ready_opportunity_since_lifecycle_block，要求hold解除后重新发送至少一拍ready机会；
 在sample_seq达到hold边界前，所有cycle item ready=0、resp_valid=0；
 sample_seq达到hold边界时，filter已完成DelayN flush；本拍生成的ready最早在下一sample被DUT使用；
 不调用update_uid_tlb_records_by_entry处理被丢弃request。
@@ -920,7 +924,10 @@ permission字段链和共享S1/S2 PTE边界保持不变。
 修改drive_l2tlb_loop：从单请求串行调用改为逐拍queue service和排空退出。
 删除request_valid admission helper，保留并统一使用valid&&ready的request_fire。
 删除sample_request_fields live-VIF helper，vpn/s2xlate统一来自drv_cb边界snapshot。
-修改driver::main_phase：从try_next_item+gap循环改为每边界阻塞获取唯一cycle item。
+修改driver::main_phase：从带pre/post gap的串行执行改为owner门控的逐拍搬运；
+无owner时显式驱动inactive，有owner时阻塞取得当前边界必须存在的唯gap0 cycle item。
+新增get_owned_item_or_abort：并行等待get_next_item和owner/phase中断；中断时驱动idle后返回。
+新增sequence::do_kill和driver::phase_ended兜底清理owner，防止强制停序留下stale owner。
 修改driver::drive_idle：ready从takeover active时恒1改为恒0，ready只由sequence item授权。
 修改update_uid_tlb_records_by_entry：零匹配从test failure降为合法debug，命中更新逻辑不变。
 ```
@@ -1271,10 +1278,11 @@ active idle把ready保持为1。
 ```text
 reset/main运行前要求active responder使用DRV_0，DRV_1等generic pattern模式立即fatal；
 每轮先等待drv_cb sample边界；
-把req置null并阻塞get_next_item，使driver和同sample生成item的sequence完成标准握手；
-null或任一gap非0立即fatal；
-send_pkt一次驱动下一sample的ready/response payload；
-立即item_done，不在driver中维护latency、queue或stop状态。
+没有lifecycle owner时调用drive_idle，保证ready/resp_valid/payload为inactive；
+owner已声明时把req置null并调用get_owned_item_or_abort；正常分支阻塞get_next_item，等待该owner在当前边界必须提供的item；
+owner被do_kill或phase终止清除时取item分支中断，驱动idle后返回；
+正常分支取得null item立即fatal；非null item检查两个gap均为0，随后调用send_pkt驱动下一sample的ready/response payload并item_done；
+不在driver中维护latency、queue或stop状态，所有生命周期判断仍由sequence负责。
 ```
 
 差异影响：driver从带时间调度的串行执行者改为纯逐拍搬运者；所有 lifecycle 决策回到 sequence。
@@ -1297,3 +1305,217 @@ reset、sequence disabled和sequence退出后保持inactive。
 ```
 
 差异影响：消除无人记录 request fire；不改变 active cycle item 的 ready/payload 搬运。
+
+## 执行中补充/修正（IMPLEMENTATION_DELTA）
+
+### [IMPLEMENTATION_DELTA] request fire 的 `ready` 采样边界
+
+- 原 plan：要求在每个 service tick 锁存 request valid、VPN、`s2xlate` 和实际 ready，未进一步规定
+  ready 必须从哪一个 clocking block 读取。
+- 实际实现：`valid/vpn/s2xlate` 从 `drv_cb` 的 input sample 读取，`ready` 从同一时刻的
+  `mon_cb.io_ptw_req_0_ready` input sample 读取；`request_fire()` 只消费这四个锁存值。
+- 原因：`drv_cb.io_ptw_req_0_ready` 是 driver output view，直接读取 live interface 可能看到当前
+  delta 已更新的下一拍值，造成 ready 与 DUT request payload 不属于同一 sample。
+- 影响：只收紧采样边界，不改变 ready 的容量、flush、stop 判定和 queue 逻辑；避免重复建 token 或漏记
+真实 fire。
+
+### [IMPLEMENTATION_DELTA] reset 后 runtime CSR snapshot freshness
+
+- 原 plan：reset 时把本地 `csr_snapshot_valid` 清0，并说明 package runtime latest 不被 semantic raw clear破坏；未明确 mid-test reset 后如何阻止 sequence重新使用 reset 前 latest。
+- 实际实现：每个 reset 窗口只有首次 blocked sample 读取当前 `runtime_csr_snapshot_seq` 作为 baseline并置 `require_post_reset_csr_refresh=1`；reset持续期间不再覆盖该 baseline，reset释放后只有看到更大的 snapshot seq才重新应用 CSR并开放 ready。
+- 原因：CSR monitor在每次 reset后会清私有baseline，并于首个post-reset sample无条件发布新snapshot。等待 seq前进既复用该既有合同，又避免清掉其它consumer仍需读取的package latest。
+- 影响：只收紧 mid-test reset恢复时序；首次启动且已经存在合法post-reset snapshot时仍可直接使用。等待期间保持ready/response inactive、idle不累计，但flush和global stop继续处理。
+
+### [IMPLEMENTATION_DELTA] active L2TLB responder 的 driver 默认配置
+
+- 原 plan：active takeover 下 driver 若 `drv_mode != DRV_0` 在 reset phase 直接 fatal，并要求
+  `tc_base` default sequence 与 `basicTest + VSEQ_MAIN` 两种拓扑均可运行；未列出公共 env 默认值的具体写者。
+- 实际实现：`memblock_env_cfg::post_randomize()` 将 L2TLB agent 默认 `drv_mode` 设为 `DRV_0`；
+  `tc_sanity::build_phase()` 同步显式设置 L2TLB `drv_mode=DRV_0`、`xz_sw=OFF`。testcase 或 user cfg
+  若主动覆盖成其它模式仍由 driver fatal，保持错误配置不可静默运行。
+- 原因：首轮 `tc_sanity` 验证发现该 testcase 漏设 L2TLB driver mode，随机得到 `DRV_X` 后在 0ns
+  触发预期合同检查；只修 testcase 会留下普通 `tc_base` 的同一缺口。
+- 影响：只补 active responder 的默认配置，不改变非 L2TLB agent 的随机模式，也不改变 sequence owner、
+  request/response 或主表状态逻辑。
+
+### [IMPLEMENTATION_DELTA] idle-stop 首次 ready 边界
+
+- 原实现：当 `idle_stop_cycle=1` 且 CSR 已有效、没有 outstanding/progress 时，sequence 会在构造本拍
+  cycle item 前先累计 idle 并置 `stopping`，可能在 `acceptance_opened_since_reset=0` 时直接退出，导致
+  DUT 从未获得一拍可用的 request `ready`。
+- 修改后：`acceptance_opened_since_reset=0` 作为 lifecycle blocked 条件处理，idle counter 保持为 0；
+  sequence 至少发送一拍 `ready=1` 的 capability item 后，才允许按 idle 阈值退出。
+- 原因：`idle_stop_cycle` 是无请求时的收敛辅助，不应跳过 responder 的首次 admission 授权；修复只改变
+  首次 ready 的退出保护，不改变 queue、response、flush 或 token 语义。
+
+### [IMPLEMENTATION_DELTA] flush hold 后重新开放 ready 的 idle-stop 边界
+
+- 原 plan/原实现：`acceptance_opened_since_reset` 只表示本次 reset 后历史上曾经开放过 ready。flush
+  建立 hold 时它仍保持为 1；因此当 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE=1` 时，hold 结束的首个 sample
+  会被当作普通空闲拍，先置 `stopping`，再生成 `ready=0`，可能错过 DUT 在 hold 期间持续保持的 request。
+- 实际实现：新增独立的 `ready_opportunity_since_lifecycle_block`。reset 和每次新 flush event 清零；idle
+  计数在该标志为 0 时保持为 0；本拍计算出合法的 `next_ready=1` 并交付 cycle item 后才置 1。
+- 原因：不能复用 `acceptance_opened_since_reset`，因为后者还承担 active flush 时间新鲜度校验；需要把“历史曾开放”
+  与“本次生命周期阻塞解除后已给过一次 ready 机会”分开建模。
+- 影响范围：只影响 flush/reset hold 后的首次 idle 收敛边界；不改变 pending/driving token、response due、
+  flush cancel、主表状态或 pass/fail/terminal。
+
+源码位置：`mem_ut/ver/ut/memblock/seq/base_seq/memblock_l2tlb_base_sequence.sv`，字段定义、
+`send_l2tlb_cycle()` 和 `handle_l2tlb_flush_event()`。
+
+```systemverilog
+bit ready_opportunity_since_lifecycle_block;
+
+if (reset_or_backend_blocked) begin
+    acceptance_opened_since_reset = 1'b0;
+    ready_opportunity_since_lifecycle_block = 1'b0;
+end
+
+if (new_flush_event) begin
+    handle_l2tlb_flush_event(flush_event_seq, flush_sample_time, request_killed);
+end
+
+if (has_progress || lifecycle_blocked || stopping ||
+    outstanding_count() != 0 || !acceptance_opened_since_reset ||
+    !ready_opportunity_since_lifecycle_block)
+    idle_count = 0;
+else
+    idle_count++;
+
+next_ready = !stopping && csr_snapshot_valid && !hold_active &&
+             outstanding_count() < max_outstanding;
+if (next_ready) begin
+    acceptance_opened_since_reset = 1'b1;
+end
+send_l2tlb_item(cycle_tr);
+if (next_ready)
+    ready_opportunity_since_lifecycle_block = 1'b1;
+```
+
+中文伪代码：
+
+```text
+该逻辑把“reset后曾经开放过ready”和“本次reset/flush阻塞解除后已经提供过ready机会”分成两个状态。
+进入reset时同时清两个状态；收到新flush时由handle_l2tlb_flush_event清第二个状态并建立hold，第一状态保留用于active event时间校验。
+每拍计算idle前，如果CSR/hold仍阻塞、仍有outstanding、尚未开放过ready，或者本次阻塞解除后还没有提供ready机会，就把idle_count清零，不能触发idle-stop。
+hold结束后，若没有stop且CSR有效、容量未满，next_ready会被计算为1；只有把这一拍cycle item交付给driver后，才把ready_opportunity_since_lifecycle_block置1。
+下一拍才允许idle计数；如果请求在这第一拍真实fire，capture_fired_request会正常建立token，后续按原有pending/driving流程处理。
+handle_l2tlb_flush_event仍负责从pending队列尾部向前取消旧token、累计flush_canceled_count和设置hold；该新标志只影响退出保护，不改变取消或响应账本。
+```
+
+### [IMPLEMENTATION_DELTA] request-time CSR snapshot 驱动 TLB get-or-create
+
+- 原 plan/原实现：`pending_req` 已保存 `csr_snapshot` 并用它生成 `lookup_key`，但公共
+  `get_or_create_tlb_entry_by_req()` 的建表路径仍从 `common_data_transaction.mmu_csr_state` 的 live
+  CSR 构造新 entry；在 CSR 更新边界，entry 来源与 token 的 request-time snapshot 可能不一致。
+- 实际实现：`common_data_transaction` 新增
+  `get_or_create_tlb_entry_by_req_with_snapshot()` 和
+  `build_tlb_entry_for_key_with_csr()`；L2TLB `capture_fired_request()` 显式传入
+  `pending.csr_snapshot`。旧 `get_or_create_tlb_entry_by_req()` 保留为兼容包装，仅把当前 live CSR
+  作为显式 snapshot 传给新 helper。
+- 原因：plan 要求 response payload、lookup key 和 entry 在 request fire 边界冻结，不能只冻结 key 而让
+  新 entry 回退到另一个时点的 CSR。命中已有 by-key entry 时仍复用公共表，不改变表的 owner 或 sfence
+  entry-level invalidation 逻辑。
+- 影响范围：只收紧 L2TLB request-time 建表的 CSR 来源；其它调用旧 API 的 flow 行为保持不变。entry
+  snapshot、response payload、UID 回填和主表 pass/fail/terminal 语义不变。
+
+源码与文字伪代码：
+
+```systemverilog
+key = csr_snapshot.make_lookup_key({26'b0, vpn}, s2xlate);
+if (has_tlb_entry(key)) begin
+    entry = tlb_entry_by_key[key];
+end else begin
+    entry = build_tlb_entry_for_key_with_csr(key, csr_snapshot);
+    insert_tlb_entry(key, entry);
+end
+```
+
+```text
+request fire后先复制该拍CSR snapshot；
+用同一份snapshot生成key并查公共by-key表；
+未命中时用同一snapshot构造entry再插表，命中时只更新hit时间；
+后续response和UID回填继续使用entry_snapshot，不重新读取live CSR。
+```
+
+### [IMPLEMENTATION_DELTA] sequence disabled 与 active 同拍 item 的 owner 门控握手
+
+- 第一次 review 发现：无条件阻塞 `get_next_item()` 在 `MEMBLOCK_L2TLB_SEQ_EN=0`
+  时没有 producer，不能作为 inactive baseline 的唯一实现。
+- 中间实现曾改为每拍 `try_next_item()` + idle fallback；最终独立 review 发现 sequence 与
+  driver 都在同一 `drv_cb` 唤醒，driver 可能先尝试取 item 并驱动伪 idle，使本应交给
+  DUT 的 ready/response 机会随调度顺序丢失。该中间方案已废弃。
+- 最终实现：driver 在每个 `drv_cb` 边界先检查
+  `memblock_sync_pkg::l2tlb_lifecycle_owner_claimed`。无 owner 时直接 `drive_idle()`；有 owner
+  时清空 `req` 并阻塞 `get_next_item()`，等待 owner sequence 在当前边界必须交付的唯一
+  gap=0 cycle item。null item 或非零 gap 立即 fatal。
+- 合同成立原因：sequence 在进入逐拍 service loop 前 claim owner，在最终 inactive
+  item 完成 `finish_item()` 后才 release。因此 owner=1 的每个 driver 边界都必有一笔 item；
+  disabled/自然退出时 owner=0，driver 不进入阻塞取 item。
+- 影响：这是 sequence/driver UVM 握手时序修正，不改变 request fire 采样、
+  pending/driving token、response 调度、flush/reset、主表 pass/fail/terminal 或 owner 的唯一性。
+- 验证：r6 的 compile、disabled smoke 和 active scalar smoke 只覆盖已废弃的中间
+  `try_next_item()` 版本，不作为最终 owner-gated 实现的验收结果；最终结果在本 plan
+  后续执行记录中单独补充。
+
+## 执行结果
+
+- 实现已落到 L2TLB sequence、driver、transaction/interface/connect 字段链、runtime CSR/flush latest、
+  TLB entry snapshot 和 V2 compile/runtime 参数入口；没有改变主表 pass/fail/terminal owner。
+- 相关 flow、source analysis、L2TLB rule/profile 和 implementation review 已同步。
+- 网页调用图已同步更新为当前 owner、真实 request fire、pending/driving、flush cancel 和 response completion
+  调用链，并通过 `node --check`。
+- 从当前 `HEAD` 建立临时 detached worktree并只应用最终 `git diff --cached`；staged-only mode
+  `l2tlb_stage_verify_20260722_r6` 的 VCS/KDB compile 已完成，源码无 compile error，Verdi KDB 报告
+  `0 error(s), 0 warning(s)`；编译命令仍有 VCS `-lca` 产生的预期 `LCA_FEATURES_ENABLED` usage
+  warning，因此不能把整个工具输出表述为绝对零 warning。r6 已包含 request-time CSR snapshot
+  贯穿 get-or-create，但其 driver 仍为已废弃的 `try_next_item()` 中间实现；只作为历史结果，最终 owner-gated 重验见后续 r7 条目。
+- `make eda_run` 会按现有 Makefile 的 `run: compile batch_run` 依赖重复触发 VCS 增量/KDB
+  elaboration，本次曾在该工具阶段出现 `SIGSEGV`，因此不把这次 wrapper 结果当作 DUT/源码失败；
+  已改为在同一 staged-only 编译产物上直接运行 `simv`，并逐 token 传入 default runtime plus，
+  关闭与空 `virtual_base_sequence` 不相容的 LSQ enqueue/commit sequence，保留 L2TLB sequence，
+  额外设置 `MEMBLOCK_L2TLB_IDLE_STOP_CYCLE=1`。
+- r6 直接运行曾覆盖两条 driver 边界，但只属于已废弃中间实现：`l2tlb_disabled_direct_20260722_r6.log` 使用
+  `MEMBLOCK_L2TLB_SEQ_EN=0` 和空 `virtual_base_sequence`，在 `265.3ns` 输出 `TEST_PASS`、
+  `UVM_ERROR=0`、`UVM_FATAL=0`；`l2tlb_active_cfg_direct_20260722_r6.log` 使用启用 L2TLB 的
+  1 条 scalar load real-smoke，在 `380.3ns` 输出 `TEST_PASS`、`UVM_ERROR=0`、`UVM_FATAL=0`。
+  两次运行的既有 warning 均来自未配置的 vecissue default sequence。
+- r5 的直接 smoke 仍保留为生命周期验证记录：flush event 在 `sample=2` 建立 `hold_until=6`，hold
+  解除后先提供一拍 `ready` 机会再 idle-stop；r5/r6 均没有真实 non-bare DTLB PTW miss response，
+  因此不能宣称覆盖动态 response payload。multiple outstanding、reorder、reset/flush cancel和非零
+  G/U payload仍是动态验证边界。
+- 最新源码 review 位于
+  `AI_DOC/plan/test_framework/review_doc/undo/mem_ut_v2_l2tlb_response_permission_adapt_implementation_review_20260722.md`；
+  本 plan 已完成 `undo -> do` 归档；后续 review 修正直接追加到当前 `do` plan 的
+  `IMPLEMENTATION_DELTA`，不再重复移动路径。
+
+### [IMPLEMENTATION_DELTA] 验证 mode
+
+- 旧 `sanity_v2_fun` 增量数据库在重跑时出现 VCS `tdc.sdb` corrupted，未进入源码编译或仿真。
+- 改用 detached worktree只应用 staged diff；r5 完成 request-time CSR snapshot helper 补强后的
+  staged-only 验证，r6 进一步覆盖已废弃的 `try_next_item()` idle fallback，并完成全量
+  compile、disabled direct-simv 和 active scalar real-smoke direct-simv。最终 owner-gated driver 必须另行
+  staged-only 重验；该历史条目后由 r7 完成 owner-gated 重验，r8 再覆盖强制停序补强，生成目录属于仿真产物，不纳入源码提交。
+
+### [IMPLEMENTATION_DELTA] owner-gated driver 重验 r7
+
+- 重新建立 detached staged-only worktree `/nfs/home/lixiangrui/work/memblock_ut/XiangShan_V2/.codex_l2tlb_stage_verify_r7`，只应用当前 index diff，并使用已验证的 V2 `build_memblock/rtl`；worktree 名与仿真 mode `l2tlb_stage_verify_20260722_r7` 不同。
+- 完成 `make eda_compile tc=tc_sanity mode=l2tlb_stage_verify_20260722_r7`；VCS/KDB 编译退出 0，Verdi KDB 为 `0 error(s), 0 warning(s)`，仅保留 VCS `-lca` 预期 usage warning。
+- 在 eda01 直接运行 `basicTest + VSEQ_MAIN=virtual_base_sequence + MEMBLOCK_L2TLB_SEQ_EN=0`；`TEST_PASS`、`UVM_ERROR=0`、`UVM_FATAL=0`，于 265.3ns 退出。
+- 使用 `tc_sanity + VSEQ_MAIN=memblock_dispatch_real_smoke_vseq + cfg=tc_dispatch_real_smoke`运行 active responder；L2TLB owner 成功 claim，flush/hold/idle-stop 日志正常，`TEST CASE PASSED`、`UVM_ERROR=0`、`UVM_FATAL=0`。
+- 以上验证只证明 owner-gated 交付与 disabled/active 退出不卡死；non-bare PTW miss、multiple outstanding/reorder 和非零 G/U 动态覆盖仍保留为原计划边界。
+
+### [IMPLEMENTATION_DELTA] 强制停序的 owner 清理与取item中断
+
+- 原中间 owner-gated 方案在自然退出之外没有处理 UVM `kill()/stop_sequences()`。若 sequence 在 `get_next_item()` 等待期间被杀，可能留下 package owner 并使 driver 继续阻塞。
+- `memblock_l2tlb_base_sequence::do_kill()` 现在调用已有 `try_release_l2tlb_lifecycle_owner()`；正常自然 release 后重复调用是幂等的，不依赖 `post_body()`。
+- `L2tlb_agent_agent_driver::get_owned_item_or_abort()` 用 `fork...join_any` 同时等待 `get_next_item()` 和下一边界的 owner/phase 状态；owner 被清除或 phase 进入 `READY_TO_END/ENDED/JUMPING/CLEANUP/DONE` 时关闭取item分支，驱动 idle 并返回。
+- `L2tlb_agent_agent_driver::phase_ended()` 作为 component 兜底，即使 UVM 直接杀掉 phase 线程也会尝试释放 owner；不新建 token，不写主表状态。
+- 这是 lifecycle 收敛功能修改，不改变 DTLB/L2TLB 方向、request fire、pending/driving 调度或 permission 字段链。
+- r8 重新 staged-only compile 通过，`basicTest + memblock_dispatch_real_smoke_vseq` 在 265.3ns `TEST_PASS`、`UVM_ERROR=0`、`UVM_FATAL=0`。该日志只证明补强源码可编译且 active basic smoke 可结束，不宣称动态命中 `do_kill()`、`stop_sequences()` 或 `phase_ended()`；这些强制停序路径当前依赖 UVM 1.2 调用链与源码静态审查。
+
+### [IMPLEMENTATION_DELTA] 最终独立 Review
+
+- 最终候选已把 driver/sequence 的强制停序说明、r7/r8 证据边界和网页调用图全部同步到 git index；共享文件中的 MMIO/cancel 工作树改动保持未暂存，不属于本专项。
+- 独立 reviewer 直接核对当前 staged snapshot、UVM 1.2 `do_kill()` 调用链、r7 disabled/active 日志和 r8 compile/active basic日志，没有发现实现 blocker或文档矛盾，最终结论为 `FINAL PASS`。
+- reviewer确认强制 kill 后同 phase 重启 owner仍是显式不支持边界；forced-stop callback、multi-outstanding/reorder、non-bare PTW miss和非零G/U payload继续作为已记录的动态覆盖缺口，不改变本专项完成状态。
