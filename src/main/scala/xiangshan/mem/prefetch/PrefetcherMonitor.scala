@@ -85,13 +85,27 @@ class PrefetcherMonitor()(implicit p: Parameters) extends XSModule with HasStrea
   val StrideMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("stride")))
   val BertiMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("berti")))
   val MdpStrideMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("mdpstride")))
+  val MdpStreamMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("mdpstream")))
   val MdpChasingMonitor = Module(new L1PrefetchMonitor(PrefetcherMonitorParam.fromString("mdpchasing")))
+  val MdpChasingStrideMonitor = Module(new L1PrefetchMonitor(
+    PrefetcherMonitorParam.fromString("mdpchasingstride")))
+  val MdpChasingStreamMonitor = Module(new L1PrefetchMonitor(
+    PrefetcherMonitorParam.fromString("mdpchasingstream")))
+  val MdpChasingChainMonitor = Module(new L1PrefetchMonitor(
+    PrefetcherMonitorParam.fromString("mdpchasingchain")))
+  val MdpChasingHistoryMonitor = Module(new L1PrefetchMonitor(
+    PrefetcherMonitorParam.fromString("mdpchasinghistory")))
 
   StreamMonitor.io.prefetch_info:= prefetch_info
   StrideMonitor.io.prefetch_info := prefetch_info
   BertiMonitor.io.prefetch_info := prefetch_info
   MdpStrideMonitor.io.prefetch_info := prefetch_info
+  MdpStreamMonitor.io.prefetch_info := prefetch_info
   MdpChasingMonitor.io.prefetch_info := prefetch_info
+  MdpChasingStrideMonitor.io.prefetch_info := prefetch_info
+  MdpChasingStreamMonitor.io.prefetch_info := prefetch_info
+  MdpChasingChainMonitor.io.prefetch_info := prefetch_info
+  MdpChasingHistoryMonitor.io.prefetch_info := prefetch_info
   
   // stream 0, stride 1
   io.pf_ctrl(0) := StreamMonitor.io.pf_ctrl
@@ -281,7 +295,12 @@ class L1PrefetchMonitor(param : PrefetcherMonitorParam)(implicit p: Parameters) 
     ("Stride", isFromStride),
     ("Berti", isFromBerti),
     ("MdpStride", isFromMdpStride),
-    ("MdpChasing", isFromMdpChasing)
+    ("MdpStream", isFromMdpStream),
+    ("MdpChasingStride", isFromMdpChasingStride),
+    ("MdpChasingStream", isFromMdpChasingStream),
+    ("MdpChasingChain", isFromMdpChasingChain),
+    ("MdpChasingHistory", isFromMdpChasingHistory),
+    ("MdpLegacyChasing", isFromMdpLegacyChasing)
   )
   XSPerfAccumulate(s"l1prefetchSent${param.name}", total_prefetch)
   XSPerfAccumulate(s"l1prefetchHit${param.name}", hit_pf)
@@ -340,7 +359,12 @@ object PrefetcherMonitorParam {
     case "stride" => new StrideMonitorParam()
     case "berti" => new BertiMonitorParam()
     case "mdpstride" => new MdpStrideMonitorParam()
+    case "mdpstream" => new MdpStreamMonitorParam()
     case "mdpchasing" => new MdpChasingMonitorParam()
+    case "mdpchasingstride" => new MdpChasingStrideMonitorParam()
+    case "mdpchasingstream" => new MdpChasingStreamMonitorParam()
+    case "mdpchasingchain" => new MdpChasingChainMonitorParam()
+    case "mdpchasinghistory" => new MdpChasingHistoryMonitorParam()
     case t => throw new IllegalArgumentException(s"unknown Prefetcher type $t")
   }
 }
@@ -368,7 +392,32 @@ class MdpStrideMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSou
   override def isMyType(value: UInt) = isFromMdpStride(value)
 }
 
+class MdpStreamMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
+  override val name: String = "MdpStream"
+  override def isMyType(value: UInt) = isFromMdpStream(value)
+}
+
 class MdpChasingMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
   override val name: String = "MdpChasing"
   override def isMyType(value: UInt) = isFromMdpChasing(value)
+}
+
+class MdpChasingStrideMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
+  override val name: String = "MdpChasingStride"
+  override def isMyType(value: UInt) = isFromMdpChasingStride(value)
+}
+
+class MdpChasingStreamMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
+  override val name: String = "MdpChasingStream"
+  override def isMyType(value: UInt) = isFromMdpChasingStream(value)
+}
+
+class MdpChasingChainMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
+  override val name: String = "MdpChasingChain"
+  override def isMyType(value: UInt) = isFromMdpChasingChain(value)
+}
+
+class MdpChasingHistoryMonitorParam extends PrefetcherMonitorParam with HasL1PrefetchSourceParameter {
+  override val name: String = "MdpChasingHistory"
+  override def isMyType(value: UInt) = isFromMdpChasingHistory(value)
 }

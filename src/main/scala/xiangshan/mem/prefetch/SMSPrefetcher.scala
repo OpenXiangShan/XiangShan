@@ -1248,6 +1248,11 @@ class SMSPrefetcher()(implicit p: Parameters) extends BasePrefecher with HasSMSM
   io.l1_req.bits.mdpPC := 0.U
   io.l1_req.bits.mdpLoadSize := 0.U
   io.l1_req.bits.mdpLoadUnsigned := false.B
+  io.l1_req.bits.mdpChainImm := 0.U
+  io.l1_req.bits.mdpChainValid := false.B
+  io.l1_req.bits.mdpChainLoadSize := 0.U
+  io.l1_req.bits.mdpChainLoadUnsigned := false.B
+  io.l1_req.bits.mdpOrigin := 0.U
   io.l1_req.valid := false.B
 
   for((train, i) <- io.ld_in.zipWithIndex){

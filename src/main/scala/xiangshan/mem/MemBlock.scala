@@ -914,6 +914,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         dcache.io.lsu.load(i).mdpPC                   := 0.U
         dcache.io.lsu.load(i).mdpLoadSize             := 0.U
         dcache.io.lsu.load(i).mdpLoadUnsigned         := false.B
+        dcache.io.lsu.load(i).mdpChainImm              := 0.U
+        dcache.io.lsu.load(i).mdpChainValid            := false.B
+        dcache.io.lsu.load(i).mdpChainLoadSize         := 0.U
+        dcache.io.lsu.load(i).mdpChainLoadUnsigned     := false.B
+        dcache.io.lsu.load(i).mdpOrigin                := 0.U
       }.otherwise {
         dcache.io.lsu.load(i).pf_source              := newLoadUnits(i).io.dcache.pf_source
         dcache.io.lsu.load(i).s1_paddr_dup_lsu       := newLoadUnits(i).io.dcache.s1_paddr_dup_lsu
@@ -931,6 +936,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
         dcache.io.lsu.load(i).mdpPC                   := newLoadUnits(i).io.dcache.mdpPC
         dcache.io.lsu.load(i).mdpLoadSize             := newLoadUnits(i).io.dcache.mdpLoadSize
         dcache.io.lsu.load(i).mdpLoadUnsigned         := newLoadUnits(i).io.dcache.mdpLoadUnsigned
+        dcache.io.lsu.load(i).mdpChainImm              := newLoadUnits(i).io.dcache.mdpChainImm
+        dcache.io.lsu.load(i).mdpChainValid            := newLoadUnits(i).io.dcache.mdpChainValid
+        dcache.io.lsu.load(i).mdpChainLoadSize         := newLoadUnits(i).io.dcache.mdpChainLoadSize
+        dcache.io.lsu.load(i).mdpChainLoadUnsigned     := newLoadUnits(i).io.dcache.mdpChainLoadUnsigned
+        dcache.io.lsu.load(i).mdpOrigin                := newLoadUnits(i).io.dcache.mdpOrigin
       }
     }
 

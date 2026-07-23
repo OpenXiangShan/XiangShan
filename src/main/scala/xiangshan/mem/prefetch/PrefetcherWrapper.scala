@@ -170,8 +170,9 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
       mdpTrain0Filter.io.in(i).bits := io.mdpTrain0(i).bits
 
       val source = io.trainSource.s3_load(i)
-      // Only a demand miss or a demand hit on MDP stridePf trains BST and may
-      // generate another stridePf.  chasingPf hits are deliberately excluded.
+      // V0.5 keeps the pre-existing train1 source policy: a demand miss or a
+      // demand hit on MDP stridePf trains the base tables. Todo item 4 (all MDP
+      // hits and history chasing) is explicitly deferred for this iteration.
       mdpTrain1Filter.io.ldTrainOpt.get(i).valid := source.valid && source.bits.isFirstIssue &&
         (source.bits.miss || isFromMdpStride(source.bits.metaSource)) &&
         !source.bits.isHwPrefetch && enableMDP

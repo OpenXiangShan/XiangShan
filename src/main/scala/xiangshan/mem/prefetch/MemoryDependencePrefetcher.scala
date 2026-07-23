@@ -30,6 +30,8 @@ case class MdpParams(
   immBits: Int = 12,
   mdtEntries: Int = 16,
   bstEntries: Int = 8,
+  bsmtEntries: Int = 8,
+  bsmtDepthBlocks: Int = 1,
   counterBits: Int = 3,
   confInit: Int = 1,
   confThreshold: Int = 4,
@@ -45,6 +47,8 @@ case class MdpParams(
   override def name: String = "mdp"
   override def tlbPlace = TLBPlace.dtlb_pf
   require(chasingDepth >= 1)
+  require(bsmtEntries == 8)
+  require(bsmtDepthBlocks >= 1)
 }
 
 trait HasMdpParameters extends HasL1PrefetchHelper {
@@ -55,6 +59,7 @@ trait HasMdpParameters extends HasL1PrefetchHelper {
   val MDP_IMM_BITS = mdpParams.immBits
   val MDP_MDT_ENTRIES = mdpParams.mdtEntries
   val MDP_BST_ENTRIES = mdpParams.bstEntries
+  val MDP_BSMT_ENTRIES = mdpParams.bsmtEntries
   val MDP_COUNTER_BITS = mdpParams.counterBits
 
   val MDP_CONF_INIT = mdpParams.confInit
@@ -67,6 +72,19 @@ trait HasMdpParameters extends HasL1PrefetchHelper {
   def mdpCounterMax: Int = (1 << MDP_COUNTER_BITS) - 1
 }
 
+/** Cause of the next MDP chasing request carried through L1/L2 miss state. */
+object MdpPfOrigin {
+  val width = 3
+  val stride = 0.U(width.W)
+  val stream = 1.U(width.W)
+  val chain = 2.U(width.W)
+  // Reserved while todo item 4 is deferred in this iteration.
+  val history = 3.U(width.W)
+  // A demand MDT hit produces the original, unclassified chasing request.
+  // Only a refill caused by an MDP prefetch receives a detailed origin above.
+  val legacy = 4.U(width.W)
+}
+
 class MdpTrainReqBundle(implicit p: Parameters) extends XSBundle with HasMdpParameters {
   // From each LDU S0 (through MdpTrainFilter) to MDP train0.  The producer PC
   // is the MDT key and pc/imm describe the dependent load.
@@ -74,6 +92,8 @@ class MdpTrainReqBundle(implicit p: Parameters) extends XSBundle with HasMdpPara
   val wakedupPC = UInt(VAddrBits.W)
   val pc = UInt(VAddrBits.W)
   val imm = UInt(MDP_IMM_BITS.W)
+  val loadSize = UInt(2.W)
+  val loadUnsigned = Bool()
   val robIdx = new RobPtr
 }
 
@@ -97,6 +117,11 @@ class MdpL1PfHintBundle(implicit p: Parameters) extends XSBundle with HasMdpPara
   val vaddr = UInt(VAddrBits.W)
   val lduId = UInt(log2Up(backendParams.LduCnt).W)
   val robIdx = new RobPtr
+  val mdpChainImm = UInt(MDP_IMM_BITS.W)
+  val mdpChainValid = Bool()
+  val mdpChainLoadSize = UInt(2.W)
+  val mdpChainLoadUnsigned = Bool()
+  val mdpOrigin = UInt(MdpPfOrigin.width.W)
 }
 
 class MdpChasingPfReqBundle(implicit p: Parameters) extends XSBundle with HasMdpParameters {
@@ -107,6 +132,13 @@ class MdpChasingPfReqBundle(implicit p: Parameters) extends XSBundle with HasMdp
   val pc = UInt(VAddrBits.W)
   val vaddr = UInt(VAddrBits.W)
   val mshrId = UInt(log2Up(cfg.nMissEntries).W)
+  val mdpChainImm = UInt(MDP_IMM_BITS.W)
+  val mdpChainValid = Bool()
+  val mdpChainLoadSize = UInt(2.W)
+  val mdpChainLoadUnsigned = Bool()
+  val mdpOrigin = UInt(MdpPfOrigin.width.W)
+  val mdpLoadSize = UInt(2.W)
+  val mdpLoadUnsigned = Bool()
 }
 
 /** Internal MDP candidate passed to the translation/filter buffer.
@@ -123,13 +155,18 @@ class MdpSourcePrefetchReq(implicit p: Parameters) extends XSBundle with HasMdpP
   val prefetchVA = UInt(VAddrBits.W)
   // pfSource separates stridePf/chasingPf in the common L1 PrefetchMonitor.
   val pfSource = UInt(L1PfSourceBits.W)
-  // Only stridePf sets the fields below.  They pass through LDU/LoadPipe/MSHR
-  // and are consumed when a miss refill creates a subsequent chasingPf.
+  // Hint-carrying base/recursive requests set the fields below. They pass
+  // through LDU/LoadPipe/MSHR and are consumed when a refill creates chasingPf.
   val mdpPfHint = Bool()
   val mdpImm = UInt(MDP_IMM_BITS.W)
   val mdpVaddr = UInt(VAddrBits.W)
   val mdpLoadSize = UInt(2.W)
   val mdpLoadUnsigned = Bool()
+  val mdpChainImm = UInt(MDP_IMM_BITS.W)
+  val mdpChainValid = Bool()
+  val mdpChainLoadSize = UInt(2.W)
+  val mdpChainLoadUnsigned = Bool()
+  val mdpOrigin = UInt(MdpPfOrigin.width.W)
 }
 
 class MdpTrainFilter(size: Int)(implicit p: Parameters) extends XSModule with HasMdpParameters {
@@ -220,6 +257,11 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
     val mdpVaddr = UInt(VAddrBits.W)
     val mdpLoadSize = UInt(2.W)
     val mdpLoadUnsigned = Bool()
+    val mdpChainImm = UInt(MDP_IMM_BITS.W)
+    val mdpChainValid = Bool()
+    val mdpChainLoadSize = UInt(2.W)
+    val mdpChainLoadUnsigned = Bool()
+    val mdpOrigin = UInt(MdpPfOrigin.width.W)
 
     def vaddr: UInt = Cat(vline, 0.U(lineOffsetWidth.W))
     def paddr: UInt = Cat(pline, 0.U(lineOffsetWidth.W))
@@ -247,9 +289,17 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   val replaceCandidates = Mux(invalidVec.asUInt.orR, invalidVec, VecInit(Seq.fill(size)(true.B)))
   val replaceIdx = replacer.way(replaceCandidates.reverse)._2
   val srcIdx = Wire(UInt(indexWidth.W))
-  srcIdx := Mux(matchVec.asUInt.orR, OHToUInt(matchVec), replaceIdx)
+  val hasMatch = matchVec.asUInt.orR
+  srcIdx := Mux(hasMatch, OHToUInt(matchVec), replaceIdx)
+  // A same-line base candidate must not erase a recursive chain that has not
+  // reached L1 yet.  A new chain candidate may still promote a base entry.
+  val preserveExistingChain = io.srcReq.valid && hasMatch &&
+    entries(srcIdx).mdpChainValid && !io.srcReq.bits.mdpChainValid
+  val preserveExistingHint = io.srcReq.valid && hasMatch &&
+    entries(srcIdx).mdpPfHint && !io.srcReq.bits.mdpPfHint
+  val preserveExistingContext = preserveExistingChain || preserveExistingHint
 
-  when(io.srcReq.valid) {
+  when(io.srcReq.valid && !preserveExistingContext) {
     entries(srcIdx).vline := srcLine
     entries(srcIdx).pline := 0.U
     entries(srcIdx).pvalid := false.B
@@ -262,6 +312,11 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
     entries(srcIdx).mdpVaddr := io.srcReq.bits.mdpVaddr
     entries(srcIdx).mdpLoadSize := io.srcReq.bits.mdpLoadSize
     entries(srcIdx).mdpLoadUnsigned := io.srcReq.bits.mdpLoadUnsigned
+    entries(srcIdx).mdpChainImm := io.srcReq.bits.mdpChainImm
+    entries(srcIdx).mdpChainValid := io.srcReq.bits.mdpChainValid
+    entries(srcIdx).mdpChainLoadSize := io.srcReq.bits.mdpChainLoadSize
+    entries(srcIdx).mdpChainLoadUnsigned := io.srcReq.bits.mdpChainLoadUnsigned
+    entries(srcIdx).mdpOrigin := io.srcReq.bits.mdpOrigin
     valids(srcIdx) := true.B
     replacer.access(srcIdx)
   }
@@ -363,8 +418,14 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   io.l1Req.bits.mdpPC := entries(pfIdx).triggerPC
   io.l1Req.bits.mdpLoadSize := entries(pfIdx).mdpLoadSize
   io.l1Req.bits.mdpLoadUnsigned := entries(pfIdx).mdpLoadUnsigned
+  io.l1Req.bits.mdpChainImm := entries(pfIdx).mdpChainImm
+  io.l1Req.bits.mdpChainValid := entries(pfIdx).mdpChainValid
+  io.l1Req.bits.mdpChainLoadSize := entries(pfIdx).mdpChainLoadSize
+  io.l1Req.bits.mdpChainLoadUnsigned := entries(pfIdx).mdpChainLoadUnsigned
+  io.l1Req.bits.mdpOrigin := entries(pfIdx).mdpOrigin
 
-  when(pfIdxArb.io.out.fire && !(io.srcReq.valid && srcIdx === pfIdx)) {
+  when(pfIdxArb.io.out.fire &&
+    (!(io.srcReq.valid && srcIdx === pfIdx) || preserveExistingContext)) {
     valids(pfIdx) := false.B
   }
 
@@ -389,6 +450,22 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
 
   // Performance counters are kept at the end of the class.
   XSPerfAccumulate("mdp_pf_buffer_src", io.srcReq.valid)
+  XSPerfAccumulate("mdp_pf_buffer_prevent_downgrade", preserveExistingContext)
+  XSPerfAccumulate("mdp_pf_buffer_preserve_hint", preserveExistingHint)
+  XSPerfAccumulate("mdp_pf_buffer_preserve_chain", preserveExistingChain)
+  Seq(
+    "legacy_chasing" -> isFromMdpLegacyChasing(io.srcReq.bits.pfSource),
+    "stride" -> isFromMdpStride(io.srcReq.bits.pfSource),
+    "stream" -> isFromMdpStream(io.srcReq.bits.pfSource),
+    "chasing_stride" -> isFromMdpChasingStride(io.srcReq.bits.pfSource),
+    "chasing_stream" -> isFromMdpChasingStream(io.srcReq.bits.pfSource),
+    "chasing_chain" -> isFromMdpChasingChain(io.srcReq.bits.pfSource),
+    "chasing_history" -> isFromMdpChasingHistory(io.srcReq.bits.pfSource)
+  ).foreach { case (name, sourceMatch) =>
+    XSPerfAccumulate(s"mdp_pf_buffer_src_$name", io.srcReq.valid && sourceMatch)
+    XSPerfAccumulate(s"mdp_pf_buffer_overwrite_$name",
+      io.srcReq.valid && hasMatch && !preserveExistingContext && sourceMatch)
+  }
   XSPerfAccumulate("mdp_tlb_req", io.tlbReq.req.fire)
   XSPerfAccumulate("mdp_tlb_req_blocked", io.tlbReq.req.valid && !io.tlbReq.req.ready)
   XSPerfAccumulate("mdp_tlb_resp", io.tlbReq.resp.fire)
@@ -399,6 +476,17 @@ class MdpPrefetchBuffer(size: Int)(implicit p: Parameters) extends XSModule with
   XSPerfAccumulate("mdp_tlb_fault", s3_fault)
   XSPerfAccumulate("mdp_tlb_stale", s3_tlbRespValid && s3_stale)
   XSPerfAccumulate("mdp_l1_pf_fire", io.l1Req.fire)
+  Seq(
+    "legacy_chasing" -> isFromMdpLegacyChasing(entries(pfIdx).pfSource),
+    "stride" -> isFromMdpStride(entries(pfIdx).pfSource),
+    "stream" -> isFromMdpStream(entries(pfIdx).pfSource),
+    "chasing_stride" -> isFromMdpChasingStride(entries(pfIdx).pfSource),
+    "chasing_stream" -> isFromMdpChasingStream(entries(pfIdx).pfSource),
+    "chasing_chain" -> isFromMdpChasingChain(entries(pfIdx).pfSource),
+    "chasing_history" -> isFromMdpChasingHistory(entries(pfIdx).pfSource)
+  ).foreach { case (name, sourceMatch) =>
+    XSPerfAccumulate(s"mdp_l1_pf_fire_$name", io.l1Req.fire && sourceMatch)
+  }
 }
 
 class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with HasMdpParameters {
@@ -407,16 +495,12 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     val hashPC = UInt(HASH_TAG_WIDTH.W)
     val imm = UInt(MDP_IMM_BITS.W)
     val immCnt = UInt(MDP_COUNTER_BITS.W)
-    val conf = UInt(MDP_COUNTER_BITS.W)
-    val valid = Bool()
-  }
-
-  // BST learns address strides only for PCs that are already present in MDT.
-  class BstEntry extends XSBundle {
-    val hashPC = UInt(HASH_TAG_WIDTH.W)
-    val prevVaddr = UInt(VAddrBits.W)
-    val stride = UInt(VAddrBits.W)
-    val decr = Bool()
+    // Once two confident dependent-load PCs are observed in train0, chainImm
+    // records the second MDT immediate used after the first chasing request.
+    val chainImm = UInt(MDP_IMM_BITS.W)
+    val chainValid = Bool()
+    val chainLoadSize = UInt(2.W)
+    val chainLoadUnsigned = Bool()
     val conf = UInt(MDP_COUNTER_BITS.W)
     val valid = Bool()
   }
@@ -433,6 +517,14 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     val oldImm = UInt(MDP_IMM_BITS.W)
     val oldImmCnt = UInt(MDP_COUNTER_BITS.W)
     val oldConf = UInt(MDP_COUNTER_BITS.W)
+    val dependentHit = Bool()
+    val dependentImm = UInt(MDP_IMM_BITS.W)
+    val oldChainImm = UInt(MDP_IMM_BITS.W)
+    val oldChainValid = Bool()
+    val chainUpdated = Bool()
+    val newChainImm = UInt(MDP_IMM_BITS.W)
+    val chainLoadSize = UInt(2.W)
+    val chainLoadUnsigned = Bool()
   }
 
   class MdpHintDBEntry extends XSBundle {
@@ -441,33 +533,11 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     val pc = UInt(VAddrBits.W)
     val vaddr = UInt(VAddrBits.W)
     val imm = UInt(MDP_IMM_BITS.W)
+    val chainImm = UInt(MDP_IMM_BITS.W)
+    val chainValid = Bool()
+    val chainLoadSize = UInt(2.W)
+    val chainLoadUnsigned = Bool()
     val robIdx = UInt(log2Ceil(RobSize).W)
-  }
-
-  /** One row per train1 operation entering the serialized BST update stage.
-    * Fields prefixed with old describe the selected entry before this update;
-    * updated fields describe the state committed when mdtHit is true.
-    */
-  class MdpTrain1DBEntry extends XSBundle {
-    val timeCnt = UInt(64.W)
-    val pc = UInt(VAddrBits.W)
-    val vaddr = UInt(VAddrBits.W)
-    val mdtHit = Bool()
-    val bstHit = Bool()
-    val bstIdx = UInt(log2Up(MDP_BST_ENTRIES).W)
-    val oldPrevVaddr = UInt(VAddrBits.W)
-    val delta = UInt(VAddrBits.W)
-    val decr = Bool()
-    val oldStride = UInt(VAddrBits.W)
-    val oldDecr = Bool()
-    val oldConf = UInt(MDP_COUNTER_BITS.W)
-    val strideValid = Bool()
-    val strideMatch = Bool()
-    val updatedStride = UInt(VAddrBits.W)
-    val updatedDecr = Bool()
-    val updatedConf = UInt(MDP_COUNTER_BITS.W)
-    val allocated = Bool()
-    val generated = Bool()
   }
 
   class MdpChasingPfDBEntry extends XSBundle {
@@ -477,6 +547,12 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     val vaddr = UInt(VAddrBits.W)
     val data = UInt(XLEN.W)
     val imm = UInt(MDP_IMM_BITS.W)
+    val chainImm = UInt(MDP_IMM_BITS.W)
+    val chainValid = Bool()
+    val chainLoadSize = UInt(2.W)
+    val chainLoadUnsigned = Bool()
+    val origin = UInt(MdpPfOrigin.width.W)
+    val pfSource = UInt(L1PfSourceBits.W)
     val prefetchVaddr = UInt(VAddrBits.W)
   }
 
@@ -488,6 +564,9 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     val vaddr = UInt(VAddrBits.W)
     val paddr = UInt(PAddrBits.W)
     val pfSource = UInt(L1PfSourceBits.W)
+    val origin = UInt(MdpPfOrigin.width.W)
+    val chainValid = Bool()
+    val mdpPfHint = Bool()
   }
 
   val io = IO(new Bundle {
@@ -512,8 +591,6 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
 
   val mdt = RegInit(VecInit(Seq.fill(MDP_MDT_ENTRIES)(0.U.asTypeOf(new MdtEntry))))
   val mdtPlru = new ValidPseudoLRU(MDP_MDT_ENTRIES)
-  val bst = RegInit(VecInit(Seq.fill(MDP_BST_ENTRIES)(0.U.asTypeOf(new BstEntry))))
-  val bstPlru = new ValidPseudoLRU(MDP_BST_ENTRIES)
 
   // train0 s0: query MDT and select the update/replacement entry.
   // Hold s0 for one cycle while s1 writes MDT. This prevents a back-to-back
@@ -524,6 +601,10 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   val s0_train0Hash = pc_hash_tag(io.train0.bits.wakedupPC)
   val s0_train0MatchVec = VecInit(mdt.map(e => e.valid && e.hashPC === s0_train0Hash))
   val s0_train0Hit = s0_train0MatchVec.asUInt.orR
+  val s0_train0DependentHash = pc_hash_tag(io.train0.bits.pc)
+  val s0_train0DependentMatchVec = VecInit(mdt.map(e => e.valid && e.hashPC === s0_train0DependentHash))
+  val s0_train0DependentHit = s0_train0DependentMatchVec.asUInt.orR
+  val s0_train0DependentEntry = Mux1H(s0_train0DependentMatchVec, mdt)
   val mdtMinConf = mdt.map(_.conf).reduce((a, b) => Mux(a < b, a, b))
   val mdtInvalidVec = VecInit(mdt.map(!_.valid))
   val mdtLowConfVec = VecInit(mdt.map(e => e.valid && e.conf === mdtMinConf))
@@ -537,6 +618,8 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   val s1_train0Hit = RegEnable(s0_train0Hit, io.train0.fire)
   val s1_train0Idx = RegEnable(s0_train0Idx, io.train0.fire)
   val s1_train0OldEntry = RegEnable(mdt(s0_train0Idx), io.train0.fire)
+  val s1_train0DependentHit = RegEnable(s0_train0DependentHit, io.train0.fire)
+  val s1_train0DependentEntry = RegEnable(s0_train0DependentEntry, io.train0.fire)
   when(io.train0.fire) {
     s1_train0Valid := true.B
   }.elsewhen(s1_train0Valid) {
@@ -544,6 +627,28 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   }
 
   // train0 s1: update MDT.  This is the only stage that writes MDT state.
+  val s1_train0ChainCanUpdate = s1_train0Valid && s1_train0Bits.wakedup &&
+    s1_train0Hit && s1_train0DependentHit &&
+    s1_train0OldEntry.conf >= MDP_CONF_THRESHOLD.U &&
+    s1_train0DependentEntry.conf >= MDP_CONF_THRESHOLD.U
+  val s1_train0OldChainS = s1_train0OldEntry.chainImm.asSInt.pad(MDP_IMM_BITS + 1)
+  val s1_train0DependentImmS = s1_train0DependentEntry.imm.asSInt.pad(MDP_IMM_BITS + 1)
+  val s1_train0ChainDiff = Mux(
+    s1_train0OldChainS >= s1_train0DependentImmS,
+    (s1_train0OldChainS - s1_train0DependentImmS).asUInt,
+    (s1_train0DependentImmS - s1_train0OldChainS).asUInt
+  )
+  val s1_train0ChainNear = s1_train0OldEntry.chainValid && s1_train0ChainDiff <= 1.U
+  val s1_train0ChainMin = Mux(
+    s1_train0OldChainS <= s1_train0DependentImmS,
+    s1_train0OldEntry.chainImm,
+    s1_train0DependentEntry.imm
+  )
+  val s1_train0NewChainImm = Mux(
+    s1_train0ChainNear,
+    s1_train0ChainMin,
+    s1_train0DependentEntry.imm
+  )
   when(s1_train0Valid && s1_train0Bits.wakedup) {
     val entry = mdt(s1_train0Idx)
     val oldImm = s1_train0OldEntry.imm.asSInt.pad(MDP_IMM_BITS + 1)
@@ -573,11 +678,21 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
           entry.immCnt := MDP_IMM_CNT_INIT.U
         }
       }
+      when(s1_train0ChainCanUpdate) {
+        entry.chainImm := s1_train0NewChainImm
+        entry.chainValid := true.B
+        entry.chainLoadSize := s1_train0Bits.loadSize
+        entry.chainLoadUnsigned := s1_train0Bits.loadUnsigned
+      }
     }.otherwise {
       entry.hashPC := s1_train0Hash
       entry.imm := s1_train0Bits.imm
       entry.immCnt := MDP_IMM_CNT_INIT.U
       entry.conf := MDP_CONF_INIT.U
+      entry.chainImm := 0.U
+      entry.chainValid := false.B
+      entry.chainLoadSize := 0.U
+      entry.chainLoadUnsigned := false.B
       entry.valid := true.B
     }
     mdtPlru.access(s1_train0Idx)
@@ -603,107 +718,47 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     // LDU and LoadPipe request-identity pipelines must be delayed with it.
     io.l1PfHint(i).valid := s1_triggerValid && s1_triggerConfident
     io.l1PfHint(i).bits.imm := s1_triggerEntry.imm
+    io.l1PfHint(i).bits.mdpChainImm := s1_triggerEntry.chainImm
+    io.l1PfHint(i).bits.mdpChainValid := s1_triggerEntry.chainValid
+    io.l1PfHint(i).bits.mdpChainLoadSize := s1_triggerEntry.chainLoadSize
+    io.l1PfHint(i).bits.mdpChainLoadUnsigned := s1_triggerEntry.chainLoadUnsigned
+    io.l1PfHint(i).bits.mdpOrigin := MdpPfOrigin.legacy
     io.l1PfHint(i).bits.pc := s1_triggerBits.pc
     io.l1PfHint(i).bits.vaddr := s1_triggerBits.vaddr
     io.l1PfHint(i).bits.lduId := s1_triggerBits.lduId
     io.l1PfHint(i).bits.robIdx := s1_triggerBits.robIdx
   }
 
-  // train1 s0: query MDT/BST and calculate the observed address delta.
+  // train1 s0: query MDT once, then atomically fork the training event to BSeT
+  // and BSmT. Both child modules use this boundary as their s0 anchor.
   val s0_train1Hash = pc_hash_tag(io.train1.bits.pc)
   val s0_train1MdtMatchVec = VecInit(mdt.map(e => e.valid && e.hashPC === s0_train1Hash))
   val s0_train1MdtHit = s0_train1MdtMatchVec.asUInt.orR
   val s0_train1MdtEntry = Mux1H(s0_train1MdtMatchVec, mdt)
-  val s0_train1BstMatchVec = VecInit(bst.map(e => e.valid && e.hashPC === s0_train1Hash))
-  val s0_train1BstHit = s0_train1BstMatchVec.asUInt.orR
-  val bstInvalidVec = VecInit(bst.map(!_.valid))
-  val bstReplaceCandidates = Mux(bstInvalidVec.asUInt.orR, bstInvalidVec, VecInit(Seq.fill(MDP_BST_ENTRIES)(true.B)))
-  val bstReplaceIdx = bstPlru.way(bstReplaceCandidates.reverse)._2
-  val s0_train1BstIdx = Wire(UInt(log2Up(MDP_BST_ENTRIES).W))
-  s0_train1BstIdx := Mux(s0_train1BstHit, OHToUInt(s0_train1BstMatchVec), bstReplaceIdx)
-  val s0_train1BstEntry = bst(s0_train1BstIdx)
-  val s0_train1DeltaPlus = io.train1.bits.vaddr -& s0_train1BstEntry.prevVaddr
-  val s0_train1Decr = s0_train1DeltaPlus(VAddrBits)
-  val s0_train1Delta = Mux(
-    s0_train1Decr,
-    s0_train1BstEntry.prevVaddr - io.train1.bits.vaddr,
-    s0_train1DeltaPlus(VAddrBits - 1, 0)
-  )
-  val s0_train1StrideValid = s0_train1Delta =/= 0.U
-  val s0_train1StrideMatch =
-    s0_train1Delta === s0_train1BstEntry.stride && s0_train1Decr === s0_train1BstEntry.decr
+  val s0_train1MdtIdx = OHToUInt(s0_train1MdtMatchVec)
+  val train1MdtInfo = Wire(new MdpMdtInfoBundle)
+  train1MdtInfo.hit := s0_train1MdtHit
+  train1MdtInfo.index := s0_train1MdtIdx
+  train1MdtInfo.hashPC := s0_train1Hash
+  train1MdtInfo.conf := s0_train1MdtEntry.conf
+  train1MdtInfo.imm := s0_train1MdtEntry.imm
+  train1MdtInfo.chainImm := s0_train1MdtEntry.chainImm
+  train1MdtInfo.chainValid := s0_train1MdtEntry.chainValid
+  train1MdtInfo.chainLoadSize := s0_train1MdtEntry.chainLoadSize
+  train1MdtInfo.chainLoadUnsigned := s0_train1MdtEntry.chainLoadUnsigned
 
-  // As with MDT, serialize BST read/update for one bubble so consecutive
-  // training of the same PC cannot lose a confidence or prevVaddr update.
-  val s1_train1Valid = RegInit(false.B)
-  io.train1.ready := !s1_train1Valid
-  val s1_train1Bits = RegEnable(io.train1.bits, io.train1.fire)
-  val s1_train1Hash = RegEnable(s0_train1Hash, io.train1.fire)
-  val s1_train1MdtHit = RegEnable(s0_train1MdtHit, io.train1.fire)
-  val s1_train1MdtEntry = RegEnable(s0_train1MdtEntry, io.train1.fire)
-  val s1_train1BstHit = RegEnable(s0_train1BstHit, io.train1.fire)
-  val s1_train1BstIdx = RegEnable(s0_train1BstIdx, io.train1.fire)
-  val s1_train1BstEntry = RegEnable(s0_train1BstEntry, io.train1.fire)
-  val s1_train1Delta = RegEnable(s0_train1Delta, io.train1.fire)
-  val s1_train1Decr = RegEnable(s0_train1Decr, io.train1.fire)
-  val s1_train1StrideValid = RegEnable(s0_train1StrideValid, io.train1.fire)
-  val s1_train1StrideMatch = RegEnable(s0_train1StrideMatch, io.train1.fire)
-  when(io.train1.fire) {
-    s1_train1Valid := true.B
-  }.elsewhen(s1_train1Valid) {
-    s1_train1Valid := false.B
-  }
-
-  val s1_train1BstConfInc = Mux(
-    s1_train1BstEntry.conf === mdpCounterMax.U,
-    s1_train1BstEntry.conf,
-    s1_train1BstEntry.conf + 1.U
-  )
-  // stridePf requires both MDT and the updated BST entry to be confident.
-  val s1_train1CanPrefetch = s1_train1Valid && s1_train1MdtHit &&
-    s1_train1MdtEntry.conf >= MDP_CONF_THRESHOLD.U && s1_train1BstHit &&
-    s1_train1StrideValid && s1_train1StrideMatch &&
-    s1_train1BstConfInc >= MDP_BST_CONF_THRESHOLD.U
-
-  // train1 s1: update/allocate BST; this is the only BST write stage.
-  when(s1_train1Valid && s1_train1MdtHit) {
-    val entry = bst(s1_train1BstIdx)
-    when(s1_train1BstHit) {
-      when(s1_train1StrideValid) {
-        when(s1_train1StrideMatch) {
-          entry.conf := s1_train1BstConfInc
-        }.otherwise {
-          entry.conf := Mux(s1_train1BstEntry.conf === 0.U, 0.U, s1_train1BstEntry.conf - 1.U)
-          when(s1_train1BstEntry.conf <= 1.U) {
-            entry.stride := s1_train1Delta
-            entry.decr := s1_train1Decr
-          }
-        }
-      }
-      entry.prevVaddr := s1_train1Bits.vaddr
-    }.otherwise {
-      entry.hashPC := s1_train1Hash
-      entry.prevVaddr := s1_train1Bits.vaddr
-      entry.stride := 0.U
-      entry.decr := false.B
-      entry.conf := 0.U
-      entry.valid := true.B
-    }
-    bstPlru.access(s1_train1BstIdx)
-  }
-
-  val s2_stridePfValid = RegNext(s1_train1CanPrefetch, false.B)
-  val s2_stridePfTrain = RegEnable(s1_train1Bits, s1_train1CanPrefetch)
-  val s2_stridePfStride = RegEnable(s1_train1BstEntry.stride, s1_train1CanPrefetch)
-  val s2_stridePfDecr = RegEnable(s1_train1BstEntry.decr, s1_train1CanPrefetch)
-  val s2_stridePfImm = RegEnable(s1_train1MdtEntry.imm, s1_train1CanPrefetch)
-
-  // train1 s2: calculate the stridePf target address from registered s1 state.
-  val s2_stridePfVaddr = Mux(
-    s2_stridePfDecr,
-    s2_stridePfTrain.vaddr - s2_stridePfStride,
-    s2_stridePfTrain.vaddr + s2_stridePfStride
-  )(VAddrBits - 1, 0)
+  val bset = Module(new BaseStrideTable)
+  val bsmt = Module(new BaseStreamTable(mdpParams.bsmtEntries, mdpParams.bsmtDepthBlocks))
+  val train1TablesReady = bset.io.train.ready && bsmt.io.train.ready
+  io.train1.ready := train1TablesReady
+  bset.io.train.valid := io.train1.valid && train1TablesReady
+  bset.io.train.bits := io.train1.bits
+  bset.io.mdtInfo := train1MdtInfo
+  bsmt.io.train.valid := io.train1.valid && train1TablesReady
+  bsmt.io.train.bits := io.train1.bits
+  bsmt.io.mdtInfo := train1MdtInfo
+  assert(bset.io.train.fire === bsmt.io.train.fire,
+    "BSeT and BSmT must consume every train1 event atomically")
 
   // chasingPf is asynchronous to train0/train1.  Capture it in s1 and register
   // the data+imm result once more so the prefetch address is produced in s2.
@@ -720,11 +775,22 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     s2_chasingPfVaddr(VAddrBits - 1, DCacheLineOffset),
     0.U(DCacheLineOffset.W)
   )
+  val s2_chasingPfSource = MuxLookup(
+    s2_chasingPfBits.mdpOrigin,
+    L1_HW_PREFETCH_MDP_CHASING
+  )(Seq(
+    MdpPfOrigin.stride -> L1_HW_PREFETCH_MDP_CHASING_STRIDE,
+    MdpPfOrigin.stream -> L1_HW_PREFETCH_MDP_CHASING_STREAM,
+    MdpPfOrigin.chain -> L1_HW_PREFETCH_MDP_CHASING_CHAIN,
+    MdpPfOrigin.history -> L1_HW_PREFETCH_MDP_CHASING_HISTORY,
+    MdpPfOrigin.legacy -> L1_HW_PREFETCH_MDP_CHASING
+  ))
 
   // chasingDepth is the total number of generated requests.  V0.3 sets it to
   // one, so only data + signext(imm) is sent; larger values retain the existing
   // behavior of adding adjacent lines in the learned immediate direction.
-  // chasingPf requests do not recursively carry a hint.
+  // Only depth zero recursively carries BaseChain metadata; otherwise one
+  // refill could fan out into an exponentially growing chain.
   val chasingPfReqs = Seq.tabulate(MDP_CHASING_DEPTH) { depth =>
     val req = Wire(Valid(new MdpSourcePrefetchReq))
     val lineDelta = (depth * blockBytes).U(VAddrBits.W)
@@ -741,32 +807,44 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     req.bits.triggerPC := s2_chasingPfBits.pc
     req.bits.triggerVA := s2_chasingPfBits.vaddr
     req.bits.prefetchVA := depthVaddr
-    req.bits.pfSource := L1_HW_PREFETCH_MDP_CHASING
-    req.bits.mdpPfHint := false.B
-    req.bits.mdpImm := 0.U
+    val recursive = (depth == 0).B && s2_chasingPfBits.mdpChainValid
+    req.bits.pfSource := s2_chasingPfSource
+    req.bits.mdpPfHint := recursive
+    req.bits.mdpImm := Mux(recursive, s2_chasingPfBits.mdpChainImm, 0.U)
     req.bits.mdpVaddr := depthVaddr
-    req.bits.mdpLoadSize := 0.U
-    req.bits.mdpLoadUnsigned := false.B
+    req.bits.mdpLoadSize := Mux(recursive, s2_chasingPfBits.mdpChainLoadSize, s2_chasingPfBits.mdpLoadSize)
+    req.bits.mdpLoadUnsigned := Mux(
+      recursive,
+      s2_chasingPfBits.mdpChainLoadUnsigned,
+      s2_chasingPfBits.mdpLoadUnsigned
+    )
+    // Consume one trained chain descriptor. The resulting carrier is hinted so
+    // its refill emits the next chasing request, but it cannot recursively reuse
+    // the same descriptor without another PC-indexed MDT lookup.
+    req.bits.mdpChainImm := 0.U
+    req.bits.mdpChainValid := false.B
+    req.bits.mdpChainLoadSize := 0.U
+    req.bits.mdpChainLoadUnsigned := false.B
+    req.bits.mdpOrigin := MdpPfOrigin.chain
     req
   }
 
-  // A stridePf is also an MDP hint carrier.  If it misses, its exact address,
-  // imm and load semantics are retained in the MSHR and returned as chasingPf.
+  // BSeT and BSmT both emit hint carriers. If they miss, their exact address,
+  // MDT/chain metadata and load semantics return through the MSHR as chasingPf.
   val stridePfReq = Wire(Valid(new MdpSourcePrefetchReq))
-  stridePfReq.valid := s2_stridePfValid
-  stridePfReq.bits.triggerPC := s2_stridePfTrain.pc
-  stridePfReq.bits.triggerVA := s2_stridePfTrain.vaddr
-  stridePfReq.bits.prefetchVA := s2_stridePfVaddr
-  stridePfReq.bits.pfSource := L1_HW_PREFETCH_MDP_STRIDE
-  stridePfReq.bits.mdpPfHint := true.B
-  stridePfReq.bits.mdpImm := s2_stridePfImm
-  stridePfReq.bits.mdpVaddr := s2_stridePfVaddr
-  stridePfReq.bits.mdpLoadSize := s2_stridePfTrain.loadSize
-  stridePfReq.bits.mdpLoadUnsigned := s2_stridePfTrain.loadUnsigned
+  stridePfReq := bset.io.stridePf
+  val rawStreamPfReq = Wire(Valid(new MdpSourcePrefetchReq))
+  rawStreamPfReq := bsmt.io.streamPf
+  val basePfSameLine = stridePfReq.valid && rawStreamPfReq.valid &&
+    stridePfReq.bits.prefetchVA(VAddrBits - 1, DCacheLineOffset) ===
+      rawStreamPfReq.bits.prefetchVA(VAddrBits - 1, DCacheLineOffset)
+  val streamPfReq = Wire(Valid(new MdpSourcePrefetchReq))
+  streamPfReq.bits := rawStreamPfReq.bits
+  streamPfReq.valid := rawStreamPfReq.valid && !basePfSameLine
 
-  // All depth candidates and stridePf may be generated together; independent
+  // All depth candidates and two base prefetches may be generated together; independent
   // enqueue lanes preserve them before the shared translation/filter buffer.
-  val sourceEnqLanes = MDP_CHASING_DEPTH + 1
+  val sourceEnqLanes = MDP_CHASING_DEPTH + 2
   val sourceQueue = Module(new MultiPortQueue(
     new MdpSourcePrefetchReq,
     enq_lanes = sourceEnqLanes,
@@ -780,6 +858,8 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   }
   sourceQueue.io.enq(MDP_CHASING_DEPTH).valid := stridePfReq.valid
   sourceQueue.io.enq(MDP_CHASING_DEPTH).bits := stridePfReq.bits
+  sourceQueue.io.enq(MDP_CHASING_DEPTH + 1).valid := streamPfReq.valid
+  sourceQueue.io.enq(MDP_CHASING_DEPTH + 1).bits := streamPfReq.bits
 
   val pfBuffer = Module(new MdpPrefetchBuffer(mdpParams.prefetchBufferEntries))
   pfBuffer.io.srcReq.valid := sourceQueue.io.deq.head.valid
@@ -792,7 +872,6 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   // ChiselDB instrumentation is grouped at the end of the class.
   val hartId = p(XSCoreParamsKey).HartId
   val train0Table = ChiselDB.createTable(s"mdpTrain0_hart$hartId", new MdpTrain0DBEntry, basicDB = true)
-  val train1Table = ChiselDB.createTable(s"mdpTrain1_hart$hartId", new MdpTrain1DBEntry, basicDB = true)
   val hintTable = ChiselDB.createTable(s"mdpHint_hart$hartId", new MdpHintDBEntry, basicDB = true)
   val chasingPfTable = ChiselDB.createTable(s"mdpChasingPf_hart$hartId", new MdpChasingPfDBEntry, basicDB = true)
   val l1PrefetchTable = ChiselDB.createTable(s"mdpL1Prefetch_hart$hartId", new MdpL1PrefetchDBEntry, basicDB = true)
@@ -807,55 +886,19 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   train0Log.oldImm := s1_train0OldEntry.imm
   train0Log.oldImmCnt := s1_train0OldEntry.immCnt
   train0Log.oldConf := s1_train0OldEntry.conf
+  train0Log.dependentHit := s1_train0DependentHit
+  train0Log.dependentImm := Mux(s1_train0DependentHit, s1_train0DependentEntry.imm, 0.U)
+  train0Log.oldChainImm := s1_train0OldEntry.chainImm
+  train0Log.oldChainValid := s1_train0OldEntry.chainValid
+  train0Log.chainUpdated := s1_train0ChainCanUpdate
+  train0Log.newChainImm := Mux(
+    s1_train0ChainCanUpdate,
+    s1_train0NewChainImm,
+    s1_train0OldEntry.chainImm
+  )
+  train0Log.chainLoadSize := s1_train0Bits.loadSize
+  train0Log.chainLoadUnsigned := s1_train0Bits.loadUnsigned
   train0Table.log(train0Log, s1_train0Valid, "mdp", clock, reset)
-
-  val train1BstConfDec = Mux(
-    s1_train1BstEntry.conf === 0.U,
-    0.U,
-    s1_train1BstEntry.conf - 1.U
-  )
-  val train1ReplaceStride = s1_train1StrideValid && !s1_train1StrideMatch &&
-    s1_train1BstEntry.conf <= 1.U
-  val train1UpdatedStride = Mux(
-    !s1_train1BstHit,
-    0.U,
-    Mux(train1ReplaceStride, s1_train1Delta, s1_train1BstEntry.stride)
-  )
-  val train1UpdatedDecr = Mux(
-    !s1_train1BstHit,
-    false.B,
-    Mux(train1ReplaceStride, s1_train1Decr, s1_train1BstEntry.decr)
-  )
-  val train1UpdatedConf = Mux(
-    !s1_train1BstHit,
-    0.U,
-    Mux(
-      !s1_train1StrideValid,
-      s1_train1BstEntry.conf,
-      Mux(s1_train1StrideMatch, s1_train1BstConfInc, train1BstConfDec)
-    )
-  )
-  val train1Log = Wire(new MdpTrain1DBEntry)
-  train1Log.timeCnt := GTimer()
-  train1Log.pc := s1_train1Bits.pc
-  train1Log.vaddr := s1_train1Bits.vaddr
-  train1Log.mdtHit := s1_train1MdtHit
-  train1Log.bstHit := s1_train1BstHit
-  train1Log.bstIdx := s1_train1BstIdx
-  train1Log.oldPrevVaddr := s1_train1BstEntry.prevVaddr
-  train1Log.delta := s1_train1Delta
-  train1Log.decr := s1_train1Decr
-  train1Log.oldStride := s1_train1BstEntry.stride
-  train1Log.oldDecr := s1_train1BstEntry.decr
-  train1Log.oldConf := s1_train1BstEntry.conf
-  train1Log.strideValid := s1_train1StrideValid
-  train1Log.strideMatch := s1_train1StrideMatch
-  train1Log.updatedStride := train1UpdatedStride
-  train1Log.updatedDecr := train1UpdatedDecr
-  train1Log.updatedConf := train1UpdatedConf
-  train1Log.allocated := s1_train1MdtHit && !s1_train1BstHit
-  train1Log.generated := s1_train1CanPrefetch
-  train1Table.log(train1Log, s1_train1Valid, "mdp", clock, reset)
 
   for (i <- 0 until backendParams.LduCnt) {
     val hintLog = Wire(new MdpHintDBEntry)
@@ -864,6 +907,10 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     hintLog.pc := io.l1PfHint(i).bits.pc
     hintLog.vaddr := io.l1PfHint(i).bits.vaddr
     hintLog.imm := io.l1PfHint(i).bits.imm
+    hintLog.chainImm := io.l1PfHint(i).bits.mdpChainImm
+    hintLog.chainValid := io.l1PfHint(i).bits.mdpChainValid
+    hintLog.chainLoadSize := io.l1PfHint(i).bits.mdpChainLoadSize
+    hintLog.chainLoadUnsigned := io.l1PfHint(i).bits.mdpChainLoadUnsigned
     hintLog.robIdx := io.l1PfHint(i).bits.robIdx.value
     hintTable.log(hintLog, io.l1PfHint(i).valid, s"ldu$i", clock, reset)
   }
@@ -875,6 +922,12 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   chasingPfLog.vaddr := s2_chasingPfBits.vaddr
   chasingPfLog.data := s2_chasingPfBits.data
   chasingPfLog.imm := s2_chasingPfBits.imm
+  chasingPfLog.chainImm := s2_chasingPfBits.mdpChainImm
+  chasingPfLog.chainValid := s2_chasingPfBits.mdpChainValid
+  chasingPfLog.chainLoadSize := s2_chasingPfBits.mdpChainLoadSize
+  chasingPfLog.chainLoadUnsigned := s2_chasingPfBits.mdpChainLoadUnsigned
+  chasingPfLog.origin := s2_chasingPfBits.mdpOrigin
+  chasingPfLog.pfSource := s2_chasingPfSource
   chasingPfLog.prefetchVaddr := s2_chasingPfVaddr
   chasingPfTable.log(chasingPfLog, s2_chasingPfValid, "mdp", clock, reset)
 
@@ -884,20 +937,42 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
   l1PrefetchLog.vaddr := io.l1PrefetchReq.bits.vaddr
   l1PrefetchLog.paddr := io.l1PrefetchReq.bits.paddr
   l1PrefetchLog.pfSource := io.l1PrefetchReq.bits.pf_source.value
+  l1PrefetchLog.origin := io.l1PrefetchReq.bits.mdpOrigin
+  l1PrefetchLog.chainValid := io.l1PrefetchReq.bits.mdpChainValid
+  l1PrefetchLog.mdpPfHint := io.l1PrefetchReq.bits.mdpPfHint
   l1PrefetchTable.log(l1PrefetchLog, io.l1PrefetchReq.fire, "mdp", clock, reset)
 
   // Assertions and performance counters are kept at the end of the class.
   assert(PopCount(s0_train0MatchVec) <= 1.U)
+  assert(PopCount(s0_train0DependentMatchVec) <= 1.U)
   assert(PopCount(s0_train1MdtMatchVec) <= 1.U)
-  assert(PopCount(s0_train1BstMatchVec) <= 1.U)
 
   XSPerfAccumulate("mdp_train0", io.train0.fire)
   XSPerfAccumulate("mdp_train0_hit", s1_train0Valid && s1_train0Hit)
   XSPerfAccumulate("mdp_train0_alloc", s1_train0Valid && !s1_train0Hit)
+  XSPerfAccumulate("mdp_mdt_imm_same", s1_train0Valid && s1_train0Hit &&
+    s1_train0OldEntry.imm === s1_train0Bits.imm)
+  XSPerfAccumulate("mdp_mdt_imm_mismatch_decay", s1_train0Valid && s1_train0Hit &&
+    s1_train0OldEntry.imm =/= s1_train0Bits.imm &&
+    s1_train0OldEntry.immCnt > MDP_IMM_CNT_THRESHOLD.U)
+  XSPerfAccumulate("mdp_mdt_imm_mismatch_replace", s1_train0Valid && s1_train0Hit &&
+    s1_train0OldEntry.imm =/= s1_train0Bits.imm &&
+    Mux(s1_train0OldEntry.immCnt === 0.U, 0.U, s1_train0OldEntry.immCnt - 1.U) <
+      MDP_IMM_CNT_THRESHOLD.U)
+  XSPerfAccumulate("mdp_mdt_chain_update", s1_train0ChainCanUpdate)
+  XSPerfAccumulate("mdp_mdt_chain_update_initial", s1_train0ChainCanUpdate &&
+    !s1_train0OldEntry.chainValid)
+  XSPerfAccumulate("mdp_mdt_chain_update_near_keep", s1_train0ChainCanUpdate &&
+    s1_train0ChainNear && s1_train0OldChainS <= s1_train0DependentImmS)
+  XSPerfAccumulate("mdp_mdt_chain_update_near_smaller", s1_train0ChainCanUpdate &&
+    s1_train0ChainNear && s1_train0OldChainS > s1_train0DependentImmS)
+  XSPerfAccumulate("mdp_mdt_chain_update_far_replace", s1_train0ChainCanUpdate &&
+    s1_train0OldEntry.chainValid && !s1_train0ChainNear)
   XSPerfAccumulate("mdp_train1", io.train1.fire)
-  XSPerfAccumulate("mdp_train1_mdt_hit", s1_train1Valid && s1_train1MdtHit)
-  XSPerfAccumulate("mdp_train1_bst_hit", s1_train1Valid && s1_train1MdtHit && s1_train1BstHit)
-  XSPerfAccumulate("mdp_stride_pf_s2", s2_stridePfValid)
+  XSPerfAccumulate("mdp_train1_mdt_hit", io.train1.fire && s0_train1MdtHit)
+  XSPerfAccumulate("mdp_stride_pf_s2", stridePfReq.valid)
+  XSPerfAccumulate("mdp_stream_pf_s2", rawStreamPfReq.valid)
+  XSPerfAccumulate("mdp_base_pf_same_line", basePfSameLine)
   XSPerfAccumulate("mdp_chasing_pf", io.chasingPf.fire)
   XSPerfAccumulate("mdp_chasing_pf_s2", s2_chasingPfValid)
   chasingPfReqs.zipWithIndex.foreach { case (req, i) =>
@@ -907,6 +982,12 @@ class MemoryDependencePrefetcher(implicit p: Parameters) extends XSModule with H
     "mdp_stride_pf_queue_drop",
     stridePfReq.valid && !sourceQueue.io.enq(MDP_CHASING_DEPTH).ready
   )
+  XSPerfAccumulate(
+    "mdp_stream_pf_queue_drop",
+    streamPfReq.valid && !sourceQueue.io.enq(MDP_CHASING_DEPTH + 1).ready
+  )
+  XSPerfAccumulate("mdp_chain_recursive_pf", chasingPfReqs.head.valid &&
+    chasingPfReqs.head.bits.mdpPfHint)
   for (i <- 0 until backendParams.LduCnt) {
     XSPerfAccumulate(s"mdp_trigger_$i", io.trigger(i).valid)
     XSPerfAccumulate(s"mdp_hint_$i", io.l1PfHint(i).valid)

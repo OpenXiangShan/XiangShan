@@ -29,8 +29,9 @@ import chisel3.util._
 import xscache.coupledL2.{IsKeywordKey, MemBackTypeMM, MemPageTypeNC, PCKey, VaddrKey}
 import difftest._
 import freechips.rocketchip.tilelink._
-import xscache.common.{AliasKey, DirtyKey, MdpHintKey, MdpImmKey, MdpLoadSizeKey, MdpLoadUnsignedKey,
-  MdpPCKey, MdpVaddrKey, PrefetchKey}
+import xscache.common.{AliasKey, DirtyKey, MdpChainImmKey, MdpChainLoadSizeKey, MdpChainLoadUnsignedKey,
+  MdpChainValidKey, MdpHintKey, MdpImmKey, MdpLoadSizeKey, MdpLoadUnsignedKey, MdpOriginKey, MdpPCKey,
+  MdpVaddrKey, PrefetchKey}
 import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan._
@@ -56,6 +57,11 @@ class MissReqWoStoreData(implicit p: Parameters) extends DCacheBundle {
   val mdpPC = UInt(VAddrBits.W)
   val mdpLoadSize = UInt(2.W)
   val mdpLoadUnsigned = Bool()
+  val mdpChainImm = UInt(12.W)
+  val mdpChainValid = Bool()
+  val mdpChainLoadSize = UInt(2.W)
+  val mdpChainLoadUnsigned = Bool()
+  val mdpOrigin = UInt(3.W)
 
   val lqIdx = new LqPtr
   // store
@@ -330,6 +336,11 @@ class MissReqPipeRegBundle(edge: TLEdgeOut)(implicit p: Parameters) extends DCac
     acquire.user.lift(MdpPCKey).foreach(_ := req.mdpPC)
     acquire.user.lift(MdpLoadSizeKey).foreach(_ := req.mdpLoadSize)
     acquire.user.lift(MdpLoadUnsignedKey).foreach(_ := req.mdpLoadUnsigned)
+    acquire.user.lift(MdpChainImmKey).foreach(_ := req.mdpChainImm)
+    acquire.user.lift(MdpChainValidKey).foreach(_ := req.mdpChainValid)
+    acquire.user.lift(MdpChainLoadSizeKey).foreach(_ := req.mdpChainLoadSize)
+    acquire.user.lift(MdpChainLoadUnsignedKey).foreach(_ := req.mdpChainLoadUnsigned)
+    acquire.user.lift(MdpOriginKey).foreach(_ := req.mdpOrigin)
     // req source
     when(req.isFromLoad) {
       acquire.user.lift(ReqSourceKey).foreach(_ := MemReqSource.CPULoadData.id.U)
@@ -664,6 +675,20 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     req_valid := true.B
 
     req := miss_req_pipe_reg_bits.toMissReqWoStoreData()
+    req.mdpChainValid := miss_req_pipe_reg_bits.pfHintMDP && miss_req_pipe_reg_bits.mdpChainValid
+    req.mdpChainImm := Mux(
+      miss_req_pipe_reg_bits.pfHintMDP && miss_req_pipe_reg_bits.mdpChainValid,
+      miss_req_pipe_reg_bits.mdpChainImm,
+      0.U
+    )
+    req.mdpChainLoadSize := Mux(
+      miss_req_pipe_reg_bits.pfHintMDP && miss_req_pipe_reg_bits.mdpChainValid,
+      miss_req_pipe_reg_bits.mdpChainLoadSize,
+      0.U
+    )
+    req.mdpChainLoadUnsigned := miss_req_pipe_reg_bits.pfHintMDP &&
+      miss_req_pipe_reg_bits.mdpChainValid && miss_req_pipe_reg_bits.mdpChainLoadUnsigned
+    req.mdpOrigin := Mux(miss_req_pipe_reg_bits.pfHintMDP, miss_req_pipe_reg_bits.mdpOrigin, 0.U)
     req.isBtoT := miss_req_pipe_reg_bits.isBtoT
     req.occupy_way := miss_req_pipe_reg_bits.occupy_way
     req.addr := get_block_addr(miss_req_pipe_reg_bits.addr)
@@ -725,6 +750,17 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
     refill_and_store_data := refill_and_store_data_update
   }
 
+  val existingMdpChain = req.pfHintMDP && req.mdpChainValid
+  val incomingMdpHint = miss_req_pipe_reg_bits.pfHintMDP
+  val incomingMdpChain = incomingMdpHint && miss_req_pipe_reg_bits.mdpChainValid
+  val takeIncomingMdp = incomingMdpHint && (!existingMdpChain || incomingMdpChain)
+  // A pipe-reg merge updates req at this clock edge.  Hold the standard
+  // Acquire for one cycle whenever that merge would promote/replace MDP
+  // context; otherwise it could fire with the old metadata in parallel with
+  // the merge and SinkA would observe a stale hint.
+  val mdpMergePending = io.miss_req_pipe_reg.merge &&
+    !io.miss_req_pipe_reg.cancel && takeIncomingMdp
+
   when (io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel) {
     assert(RegNext(secondary_fire) || RegNext(RegNext(primary_fire)), p"after 1 cycle of secondary_fire or 2 cycle of primary_fire, entry will be merged:${io.id}")
     assert(miss_req_pipe_reg_bits.req_coh.state <= req.req_coh.state || (prefetch && !access))
@@ -744,6 +780,11 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       req.mdpPC := req.mdpPC
       req.mdpLoadSize := req.mdpLoadSize
       req.mdpLoadUnsigned := req.mdpLoadUnsigned
+      req.mdpChainImm := req.mdpChainImm
+      req.mdpChainValid := req.mdpChainValid
+      req.mdpChainLoadSize := req.mdpChainLoadSize
+      req.mdpChainLoadUnsigned := req.mdpChainLoadUnsigned
+      req.mdpOrigin := req.mdpOrigin
       req.isBtoT := miss_req_pipe_reg_bits.isBtoT
       req.occupy_way := miss_req_pipe_reg_bits.occupy_way
       evict_BtoT_way := false.B
@@ -753,16 +794,28 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       full_overwrite := full_overwrite || miss_req_pipe_reg_bits.full_overwrite
       assert(is_alias_match(req.vaddr, miss_req_pipe_reg_bits.vaddr), "alias bits should be the same when merging store")
     }
-    // A hinted load may merge into an already allocated MSHR.  In that case it
-    // replaces the pending context so the returned data uses this load's VA,
-    // PC, immediate, access width and signedness.
-    when(miss_req_pipe_reg_bits.pfHintMDP) {
+    // Resolve the complete context atomically. A chain carrier outranks a plain
+    // hint; requests of equal rank retain the existing newest-wins behavior.
+    when(takeIncomingMdp) {
       req.pfHintMDP := true.B
       req.mdpImm := miss_req_pipe_reg_bits.mdpImm
       req.mdpVaddr := miss_req_pipe_reg_bits.mdpVaddr
       req.mdpPC := miss_req_pipe_reg_bits.mdpPC
       req.mdpLoadSize := miss_req_pipe_reg_bits.mdpLoadSize
       req.mdpLoadUnsigned := miss_req_pipe_reg_bits.mdpLoadUnsigned
+      req.mdpChainValid := incomingMdpChain
+      req.mdpChainImm := Mux(
+        miss_req_pipe_reg_bits.mdpChainValid,
+        miss_req_pipe_reg_bits.mdpChainImm,
+        0.U
+      )
+      req.mdpChainLoadSize := Mux(
+        incomingMdpChain,
+        miss_req_pipe_reg_bits.mdpChainLoadSize,
+        0.U
+      )
+      req.mdpChainLoadUnsigned := incomingMdpChain && miss_req_pipe_reg_bits.mdpChainLoadUnsigned
+      req.mdpOrigin := miss_req_pipe_reg_bits.mdpOrigin
     }
 
     should_refill_data := should_refill_data_reg || miss_req_pipe_reg_bits.isFromLoad
@@ -975,6 +1028,7 @@ for(i <- 0 until reqNum) {
   // Note: now, only wait for store, because store may acquire T
   io.mem_acquire.valid := !s_acquire &&
     !(io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel && miss_req_pipe_reg_bits.isFromStore) &&
+    !mdpMergePending &&
     !io.wfi.wfiReq
   val grow_param = req.req_coh.onAccess(req.cmd)._2
   val acquireBlock = edge.AcquireBlock(
@@ -1009,6 +1063,11 @@ for(i <- 0 until reqNum) {
   io.mem_acquire.bits.user.lift(MdpPCKey).foreach(_ := req.mdpPC)
   io.mem_acquire.bits.user.lift(MdpLoadSizeKey).foreach(_ := req.mdpLoadSize)
   io.mem_acquire.bits.user.lift(MdpLoadUnsignedKey).foreach(_ := req.mdpLoadUnsigned)
+  io.mem_acquire.bits.user.lift(MdpChainImmKey).foreach(_ := req.mdpChainImm)
+  io.mem_acquire.bits.user.lift(MdpChainValidKey).foreach(_ := req.mdpChainValid)
+  io.mem_acquire.bits.user.lift(MdpChainLoadSizeKey).foreach(_ := req.mdpChainLoadSize)
+  io.mem_acquire.bits.user.lift(MdpChainLoadUnsignedKey).foreach(_ := req.mdpChainLoadUnsigned)
+  io.mem_acquire.bits.user.lift(MdpOriginKey).foreach(_ := req.mdpOrigin)
   // req source
   when(prefetch && !secondary_fired) {
     io.mem_acquire.bits.user.lift(ReqSourceKey).foreach(_ := MemReqSource.L1DataPrefetch.id.U)
@@ -1053,6 +1112,17 @@ for(i <- 0 until reqNum) {
   io.main_pipe_req.bits.id := req.id
   io.main_pipe_req.bits.pf_source := req.pf_source
   io.main_pipe_req.bits.access := access
+  io.main_pipe_req.bits.mdpPfHint := req.pfHintMDP
+  io.main_pipe_req.bits.mdpImm := req.mdpImm
+  io.main_pipe_req.bits.mdpVaddr := req.mdpVaddr
+  io.main_pipe_req.bits.mdpPC := req.mdpPC
+  io.main_pipe_req.bits.mdpLoadSize := req.mdpLoadSize
+  io.main_pipe_req.bits.mdpLoadUnsigned := req.mdpLoadUnsigned
+  io.main_pipe_req.bits.mdpChainImm := req.mdpChainImm
+  io.main_pipe_req.bits.mdpChainValid := req.pfHintMDP && req.mdpChainValid
+  io.main_pipe_req.bits.mdpChainLoadSize := Mux(req.mdpChainValid, req.mdpChainLoadSize, 0.U)
+  io.main_pipe_req.bits.mdpChainLoadUnsigned := req.mdpChainValid && req.mdpChainLoadUnsigned
+  io.main_pipe_req.bits.mdpOrigin := Mux(req.pfHintMDP, req.mdpOrigin, 0.U)
   io.main_pipe_req.bits.occupy_way := req.occupy_way
   io.main_pipe_req.bits.miss_fail_cause_evict_btot := evict_BtoT_way
 
@@ -1111,31 +1181,48 @@ for(i <- 0 until reqNum) {
     2.U -> Mux(req.mdpLoadUnsigned, ZeroExt(mdpRawData(31, 0), XLEN), SignExt(mdpRawData(31, 0), XLEN)),
     3.U -> mdpRawData
   ))
-  // Both a hinted demand miss and a hinted MDP stridePf miss must produce one
-  // chasingPf event.  Hardware prefetches have no LDQ refill, so this path must
-  // not be gated by refill_to_ldq_en.
-  io.mdp_chasing_pf.valid := refill_done && hasData && req.pfHintMDP
+  // Both a hinted demand miss and a hinted MDP stridePf miss may produce one
+  // chasingPf event.  Never train from a denied/corrupt refill: `denied` and
+  // `corrupt` are sticky registers updated on the final Grant edge, so include
+  // the current Grant's error bits in this combinational gate as well.
+  val mdpRefillError = denied || corrupt ||
+    (io.mem_grant.fire && (io.mem_grant.bits.denied || io.mem_grant.bits.corrupt))
+  io.mdp_chasing_pf.valid := refill_done && hasData && req.pfHintMDP && !mdpRefillError
   io.mdp_chasing_pf.bits.data := mdpLoadData
   io.mdp_chasing_pf.bits.imm := req.mdpImm
   io.mdp_chasing_pf.bits.pc := req.mdpPC
   io.mdp_chasing_pf.bits.vaddr := req.mdpVaddr
   io.mdp_chasing_pf.bits.mshrId := io.id
+  io.mdp_chasing_pf.bits.mdpChainImm := req.mdpChainImm
+  io.mdp_chasing_pf.bits.mdpChainValid := req.mdpChainValid
+  io.mdp_chasing_pf.bits.mdpChainLoadSize := req.mdpChainLoadSize
+  io.mdp_chasing_pf.bits.mdpChainLoadUnsigned := req.mdpChainLoadUnsigned
+  io.mdp_chasing_pf.bits.mdpOrigin := req.mdpOrigin
+  io.mdp_chasing_pf.bits.mdpLoadSize := req.mdpLoadSize
+  io.mdp_chasing_pf.bits.mdpLoadUnsigned := req.mdpLoadUnsigned
 
   // MDP counters are kept beside the existing MissEntry refill counters.
   val mdpHintMshrAlloc = io.miss_req_pipe_reg.alloc && !io.miss_req_pipe_reg.cancel &&
     miss_req_pipe_reg_bits.pfHintMDP
   val mdpHintMshrMerge = io.miss_req_pipe_reg.merge && !io.miss_req_pipe_reg.cancel &&
     miss_req_pipe_reg_bits.pfHintMDP
-  // The first merge turns an ordinary MSHR into a hinted MSHR.  A multiple
-  // merge targets an already hinted MSHR and overwrites its one saved context;
-  // counting the two separately explains why several hints yield one refill.
+  // The first merge turns an ordinary MSHR into a hinted MSHR. Multiple merges
+  // resolve their complete context with chain > plain hint priority.
   val mdpHintMshrFirstMerge = mdpHintMshrMerge && !req.pfHintMDP
   val mdpHintMshrMultipleMerge = mdpHintMshrMerge && req.pfHintMDP
   XSPerfAccumulate("mdp_hint_mshr_alloc", mdpHintMshrAlloc)
   XSPerfAccumulate("mdp_hint_mshr_merge", mdpHintMshrMerge)
   XSPerfAccumulate("mdp_hint_mshr_first_merge", mdpHintMshrFirstMerge)
   XSPerfAccumulate("mdp_hint_mshr_multiple_merge", mdpHintMshrMultipleMerge)
+  XSPerfAccumulate("mdp_hint_mshr_preserve_chain",
+    mdpHintMshrMerge && existingMdpChain && !incomingMdpChain)
   XSPerfAccumulate("mdp_hint_mshr_refill", io.mdp_chasing_pf.valid)
+  XSPerfAccumulate("mdp_chain_mshr_alloc", mdpHintMshrAlloc && miss_req_pipe_reg_bits.mdpChainValid)
+  XSPerfAccumulate("mdp_chain_mshr_merge", mdpHintMshrMerge && miss_req_pipe_reg_bits.mdpChainValid)
+  XSPerfAccumulate("mdp_chain_mshr_refill", io.mdp_chasing_pf.valid && req.mdpChainValid)
+  when(req_valid) {
+    assert(!req.mdpChainValid || req.pfHintMDP, "MDP chain MSHR context requires a hint marker")
+  }
 
   XSPerfAccumulate("miss_refill_mainpipe_req", io.main_pipe_req.fire)
   XSPerfAccumulate("miss_refill_without_hint", io.main_pipe_req.fire && !mainpipe_req_fired && !w_l2hint)
@@ -1336,6 +1423,7 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   val can_merge_from_pipe = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
   val can_merge_from_pipe_mshr = Wire(Vec(reqNum, UInt(log2Up(cfg.nMissEntries).W)))
   val can_merge_store_from_pipe = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
+  val can_merge_mdp_from_pipe = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
   val can_allocate_vec = WireInit(VecInit(Seq.fill(reqNum)(false.B)))
 
   // ===== Analyze all requests =====
@@ -1438,6 +1526,18 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
       // sending Acquire, otherwise the entry cmd and Grant param can diverge.
       when(parallel_pipe_regs(j).alloc && !parallel_pipe_regs(j).cancel && parallel_pipe_regs(j).merge_req(signals_j) && io.queryMQ(i).req.bits.isFromStore && io.queryMQ(i).req.valid) {
         can_merge_store_from_pipe(j) := true.B
+      }
+
+      val existingPipeChain = parallel_pipe_regs(j).req.pfHintMDP &&
+        parallel_pipe_regs(j).req.mdpChainValid
+      val incomingPipeChain = io.queryMQ(i).req.bits.pfHintMDP &&
+        io.queryMQ(i).req.bits.mdpChainValid
+      val takeIncomingPipeMdp = io.queryMQ(i).req.bits.pfHintMDP &&
+        (!existingPipeChain || incomingPipeChain)
+      when(parallel_pipe_regs(j).alloc && !parallel_pipe_regs(j).cancel &&
+        parallel_pipe_regs(j).merge_req(signals_j) && io.queryMQ(i).req.valid &&
+        !io.queryMQ(i).req.bits.cancel && takeIncomingPipeMdp) {
+        can_merge_mdp_from_pipe(j) := true.B
       }
 
       // do not alloc when (addr_match & alias_match)
@@ -1620,10 +1720,76 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   /*  MissQueue enq logic is now splitted into 2 cycles
    *
    */
+  // Compression accepts every same-line request but only the group leader owns
+  // a pipe register. Select one complete context with chain > hint > ordinary;
+  // within each rank the lowest request-port index has deterministic priority.
+  val compressedReqBits = Wire(Vec(reqNum, new MissReq))
+  def assignMdpContext(dst: MissReq, src: MissReq): Unit = {
+    val srcChain = src.pfHintMDP && src.mdpChainValid
+    dst.pfHintMDP := true.B
+    dst.mdpImm := src.mdpImm
+    dst.mdpVaddr := src.mdpVaddr
+    dst.mdpPC := src.mdpPC
+    dst.mdpLoadSize := src.mdpLoadSize
+    dst.mdpLoadUnsigned := src.mdpLoadUnsigned
+    dst.mdpChainImm := Mux(srcChain, src.mdpChainImm, 0.U)
+    dst.mdpChainValid := srcChain
+    dst.mdpChainLoadSize := Mux(srcChain, src.mdpChainLoadSize, 0.U)
+    dst.mdpChainLoadUnsigned := srcChain && src.mdpChainLoadUnsigned
+    dst.mdpOrigin := src.mdpOrigin
+  }
+  for (i <- 0 until reqNum) {
+    compressedReqBits(i) := io.queryMQ(i).req.bits
+    val leaderHint = io.queryMQ(i).req.bits.pfHintMDP
+    val leaderChain = leaderHint && io.queryMQ(i).req.bits.mdpChainValid
+    compressedReqBits(i).pfHintMDP := leaderHint
+    compressedReqBits(i).mdpImm := Mux(leaderHint, io.queryMQ(i).req.bits.mdpImm, 0.U)
+    compressedReqBits(i).mdpVaddr := Mux(leaderHint, io.queryMQ(i).req.bits.mdpVaddr, 0.U)
+    compressedReqBits(i).mdpPC := Mux(leaderHint, io.queryMQ(i).req.bits.mdpPC, 0.U)
+    compressedReqBits(i).mdpLoadSize := Mux(leaderHint, io.queryMQ(i).req.bits.mdpLoadSize, 0.U)
+    compressedReqBits(i).mdpLoadUnsigned := leaderHint && io.queryMQ(i).req.bits.mdpLoadUnsigned
+    compressedReqBits(i).mdpChainValid := leaderChain
+    compressedReqBits(i).mdpChainImm := Mux(leaderChain, io.queryMQ(i).req.bits.mdpChainImm, 0.U)
+    compressedReqBits(i).mdpChainLoadSize := Mux(
+      leaderChain,
+      io.queryMQ(i).req.bits.mdpChainLoadSize,
+      0.U
+    )
+    compressedReqBits(i).mdpChainLoadUnsigned :=
+      leaderChain && io.queryMQ(i).req.bits.mdpChainLoadUnsigned
+    compressedReqBits(i).mdpOrigin := Mux(
+      io.queryMQ(i).req.bits.pfHintMDP,
+      io.queryMQ(i).req.bits.mdpOrigin,
+      0.U
+    )
+    for (j <- (0 until reqNum).reverse) {
+      when(query_fire(j) && analysis.compress_group(j) === i.U &&
+        !io.queryMQ(j).req.bits.cancel && io.queryMQ(j).req.bits.pfHintMDP) {
+        assignMdpContext(compressedReqBits(i), io.queryMQ(j).req.bits)
+      }
+    }
+    for (j <- (0 until reqNum).reverse) {
+      when(query_fire(j) && analysis.compress_group(j) === i.U &&
+        !io.queryMQ(j).req.bits.cancel && io.queryMQ(j).req.bits.pfHintMDP &&
+        io.queryMQ(j).req.bits.mdpChainValid) {
+        assignMdpContext(compressedReqBits(i), io.queryMQ(j).req.bits)
+      }
+    }
+    val groupHasChain = VecInit((0 until reqNum).map(j =>
+      query_fire(j) && analysis.compress_group(j) === i.U &&
+        !io.queryMQ(j).req.bits.cancel && io.queryMQ(j).req.bits.pfHintMDP &&
+        io.queryMQ(j).req.bits.mdpChainValid
+    )).asUInt.orR
+    when(query_fire(i) && analysis.compress_group(i) === i.U) {
+      assert(!groupHasChain || (compressedReqBits(i).pfHintMDP && compressedReqBits(i).mdpChainValid),
+        "compressed MDP chain context must reach its group leader")
+    }
+  }
+
   // Update parallel pipeline registers
   for (i <- 0 until reqNum) {
     when (io.queryMQ(i).req.valid) {
-      parallel_pipe_regs(i).req := io.queryMQ(i).req.bits
+      parallel_pipe_regs(i).req := compressedReqBits(i)
     }
     parallel_pipe_regs(i).alloc := ((analysis.strategy(i) & 1.U) =/= 0.U) &&
                                     (analysis.compress_group(i) === i.U) &&
@@ -1637,6 +1803,27 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
 
     parallel_pipe_regs(i).mshr_id := analysis.target_mshr(i)
     parallel_pipe_regs(i).cancel := io.wbq_block_miss_req(i)
+  }
+
+  val mdpHintCompressedFollowers = PopCount((0 until reqNum).map(i =>
+    query_fire(i) && analysis.compress_group(i) =/= i.U && !io.queryMQ(i).req.bits.cancel &&
+      io.queryMQ(i).req.bits.pfHintMDP
+  ))
+  XSPerfAccumulate("mdp_hint_compress_follower", mdpHintCompressedFollowers)
+  val mdpChainCompressedFollowers = PopCount((0 until reqNum).map(i =>
+    query_fire(i) && analysis.compress_group(i) =/= i.U && !io.queryMQ(i).req.bits.cancel &&
+      io.queryMQ(i).req.bits.pfHintMDP && io.queryMQ(i).req.bits.mdpChainValid
+  ))
+  XSPerfAccumulate("mdp_chain_compress_follower", mdpChainCompressedFollowers)
+  for (i <- 0 until reqNum) {
+    when(io.queryMQ(i).req.valid && !io.queryMQ(i).req.bits.cancel) {
+      assert(!io.queryMQ(i).req.bits.mdpChainValid || io.queryMQ(i).req.bits.pfHintMDP,
+        "MDP chain input requires a hint marker")
+    }
+    when(parallel_pipe_regs(i).reg_valid()) {
+      assert(!parallel_pipe_regs(i).req.mdpChainValid || parallel_pipe_regs(i).req.pfHintMDP,
+        "MDP chain pipe context requires a hint marker")
+    }
   }
 
   val req_mshr_handled_vec = entries.map(_.io.req_handled_by_this_entry)
@@ -1849,7 +2036,8 @@ class MissQueue(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   io.mdp_chasing_pf.zip(entries).foreach { case (out, entry) => out := entry.io.mdp_chasing_pf }
 
   for(i <- 0 until reqNum) {
-    acquire_from_pipereg_vec(i).valid := parallel_pipe_regs(i).alloc && !can_merge_store_from_pipe(i) && !io.wfi.wfiReq
+    acquire_from_pipereg_vec(i).valid := parallel_pipe_regs(i).alloc &&
+      !can_merge_store_from_pipe(i) && !can_merge_mdp_from_pipe(i) && !io.wfi.wfiReq
     acquire_from_pipereg_vec(i).bits := parallel_pipe_regs(i).get_acquire(io.l2_pf_store_only)
 
     XSPerfAccumulate(s"acquire_fire_from_pipereg_$i", acquire_from_pipereg_vec(i).fire)

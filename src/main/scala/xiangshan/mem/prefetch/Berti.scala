@@ -894,6 +894,11 @@ class DeltaPrefetchBuffer(size: Int, name: String)(implicit p: Parameters) exten
       io.l1_req.bits.mdpPC := 0.U
       io.l1_req.bits.mdpLoadSize := 0.U
       io.l1_req.bits.mdpLoadUnsigned := false.B
+      io.l1_req.bits.mdpChainImm := 0.U
+      io.l1_req.bits.mdpChainValid := false.B
+      io.l1_req.bits.mdpChainLoadSize := 0.U
+      io.l1_req.bits.mdpChainLoadUnsigned := false.B
+      io.l1_req.bits.mdpOrigin := 0.U
     }
     is(PrefetchTarget.L2.id.U){
       pfIdxArb.io.out.ready := io.l2_req.ready

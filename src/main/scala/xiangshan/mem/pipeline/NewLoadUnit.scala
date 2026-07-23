@@ -100,6 +100,11 @@ class LoadUnitS0(param: ExeUnitParams)(
     val mdpPC = Output(UInt(VAddrBits.W))
     val mdpLoadSize = Output(UInt(2.W))
     val mdpLoadUnsigned = Output(Bool())
+    val mdpChainImm = Output(UInt(MDP_IMM_BITS.W))
+    val mdpChainValid = Output(Bool())
+    val mdpChainLoadSize = Output(UInt(2.W))
+    val mdpChainLoadUnsigned = Output(Bool())
+    val mdpOrigin = Output(UInt(3.W))
 
     // Debug info
     val debugInfo = Output(new Bundle() {
@@ -139,6 +144,11 @@ class LoadUnitS0(param: ExeUnitParams)(
     val wakedupPC = UInt(VAddrBits.W)
     val vaddr = UInt(VAddrBits.W)
     val imm = UInt(MDP_IMM_BITS.W)
+    val chainImm = UInt(MDP_IMM_BITS.W)
+    val chainValid = Bool()
+    val origin = UInt(MdpPfOrigin.width.W)
+    val loadSize = UInt(2.W)
+    val loadUnsigned = Bool()
     val robIdx = UInt(log2Ceil(RobSize).W)
     val lduId = UInt(log2Up(backendParams.LduCnt).W)
   }
@@ -568,6 +578,31 @@ class LoadUnitS0(param: ExeUnitParams)(
     s1MdpTriggerBits.loadUnsigned,
     s1MdpStridePfReq.mdpLoadUnsigned
   )
+  io.mdpChainImm := Mux(
+    mdpDemandHintMatch,
+    io.mdpPfHint.bits.mdpChainImm,
+    s1MdpStridePfReq.mdpChainImm
+  )
+  io.mdpChainValid := Mux(
+    mdpDemandHintMatch,
+    io.mdpPfHint.bits.mdpChainValid,
+    s1MdpStridePfReq.mdpChainValid
+  )
+  io.mdpChainLoadSize := Mux(
+    mdpDemandHintMatch,
+    io.mdpPfHint.bits.mdpChainLoadSize,
+    s1MdpStridePfReq.mdpChainLoadSize
+  )
+  io.mdpChainLoadUnsigned := Mux(
+    mdpDemandHintMatch,
+    io.mdpPfHint.bits.mdpChainLoadUnsigned,
+    s1MdpStridePfReq.mdpChainLoadUnsigned
+  )
+  io.mdpOrigin := Mux(
+    mdpDemandHintMatch,
+    io.mdpPfHint.bits.mdpOrigin,
+    s1MdpStridePfReq.mdpOrigin
+  )
 
   val mdpTrain0Valid = io.ldin.fire && io.ldin.bits.wakedup && FuType.isLoad(io.ldin.bits.fuType)
   io.mdpTrain0.valid := mdpTrain0Valid
@@ -575,6 +610,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.mdpTrain0.bits.wakedupPC := io.ldin.bits.wakedupPC
   io.mdpTrain0.bits.pc := io.ldin.bits.pc.getOrElse(0.U)
   io.mdpTrain0.bits.imm := io.ldin.bits.imm(MDP_IMM_BITS - 1, 0)
+  io.mdpTrain0.bits.loadSize := ldinSize
+  io.mdpTrain0.bits.loadUnsigned := io.ldin.bits.fuOpType(2)
   io.mdpTrain0.bits.robIdx := io.ldin.bits.robIdx
 
   io.sqSbForwardReq.valid := sink.valid
@@ -630,6 +667,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   mdpTrain0Log.pc := io.mdpTrain0.bits.pc
   mdpTrain0Log.wakedupPC := io.mdpTrain0.bits.wakedupPC
   mdpTrain0Log.imm := io.mdpTrain0.bits.imm
+  mdpTrain0Log.loadSize := io.mdpTrain0.bits.loadSize
+  mdpTrain0Log.loadUnsigned := io.mdpTrain0.bits.loadUnsigned
   mdpTrain0Log.robIdx := io.mdpTrain0.bits.robIdx.value
   mdpTrain0Log.lduId := io.mdpLduId
   mdpLduTable.log(mdpTrain0Log, io.mdpTrain0.valid, "train0", clock, reset)
@@ -640,6 +679,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   mdpTriggerLog.eventType := 1.U
   mdpTriggerLog.pc := io.mdpTrigger.bits.pc
   mdpTriggerLog.vaddr := io.mdpTrigger.bits.vaddr
+  mdpTriggerLog.loadSize := io.mdpTrigger.bits.loadSize
+  mdpTriggerLog.loadUnsigned := io.mdpTrigger.bits.loadUnsigned
   mdpTriggerLog.robIdx := io.mdpTrigger.bits.robIdx.value
   mdpTriggerLog.lduId := io.mdpLduId
   mdpLduTable.log(mdpTriggerLog, io.mdpTrigger.valid, "trigger", clock, reset)
@@ -654,6 +695,11 @@ class LoadUnitS0(param: ExeUnitParams)(
   mdpHintLog.pc := s1MdpTriggerBits.pc
   mdpHintLog.vaddr := s1MdpTriggerBits.vaddr
   mdpHintLog.imm := io.mdpPfHint.bits.imm
+  mdpHintLog.chainImm := io.mdpPfHint.bits.mdpChainImm
+  mdpHintLog.chainValid := io.mdpPfHint.bits.mdpChainValid
+  mdpHintLog.origin := io.mdpPfHint.bits.mdpOrigin
+  mdpHintLog.loadSize := s1MdpTriggerBits.loadSize
+  mdpHintLog.loadUnsigned := s1MdpTriggerBits.loadUnsigned
   mdpHintLog.robIdx := s1MdpTriggerBits.robIdx.value
   mdpHintLog.lduId := io.mdpLduId
   mdpLduTable.log(mdpHintLog, mdpDemandHintMatch, "hint", clock, reset)
@@ -2101,6 +2147,11 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.dcache.mdpPC := s0.io.mdpPC
   io.dcache.mdpLoadSize := s0.io.mdpLoadSize
   io.dcache.mdpLoadUnsigned := s0.io.mdpLoadUnsigned
+  io.dcache.mdpChainImm := s0.io.mdpChainImm
+  io.dcache.mdpChainValid := s0.io.mdpChainValid
+  io.dcache.mdpChainLoadSize := s0.io.mdpChainLoadSize
+  io.dcache.mdpChainLoadUnsigned := s0.io.mdpChainLoadUnsigned
+  io.dcache.mdpOrigin := s0.io.mdpOrigin
   io.sqForward.s0Req := s0.io.sqSbForwardReq
   io.sbufferForward.s0Req := s0.io.sqSbForwardReq
   io.uncacheForward.s0Req := s0.io.uncacheForwardReq

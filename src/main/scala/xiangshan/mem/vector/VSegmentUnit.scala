@@ -712,6 +712,11 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   io.rdcache.mdpPC                  := 0.U
   io.rdcache.mdpLoadSize            := 0.U
   io.rdcache.mdpLoadUnsigned        := false.B
+  io.rdcache.mdpChainImm            := 0.U
+  io.rdcache.mdpChainValid          := false.B
+  io.rdcache.mdpChainLoadSize       := 0.U
+  io.rdcache.mdpChainLoadUnsigned   := false.B
+  io.rdcache.mdpOrigin              := 0.U
   io.rdcache.req.bits.id            := DontCare
   io.rdcache.resp.ready             := true.B
   io.rdcache.s1_paddr_dup_lsu       := dcacheReqPaddr

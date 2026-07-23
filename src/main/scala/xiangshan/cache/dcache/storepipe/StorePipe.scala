@@ -192,6 +192,11 @@ class StorePipe(id: Int)(implicit p: Parameters) extends DCacheModule{
   io.miss_req.bits.mdpPC := 0.U
   io.miss_req.bits.mdpLoadSize := 0.U
   io.miss_req.bits.mdpLoadUnsigned := false.B
+  io.miss_req.bits.mdpChainImm := 0.U
+  io.miss_req.bits.mdpChainValid := false.B
+  io.miss_req.bits.mdpChainLoadSize := 0.U
+  io.miss_req.bits.mdpChainLoadUnsigned := false.B
+  io.miss_req.bits.mdpOrigin := 0.U
 
   /**
     * update replacer, for now, disable this

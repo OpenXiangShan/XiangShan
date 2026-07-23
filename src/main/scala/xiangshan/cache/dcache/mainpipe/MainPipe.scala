@@ -72,6 +72,19 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
   // prefetch
   val pf_source = UInt(L1PfSourceBits.W)
   val access = Bool()
+  // MDP prefetches use MainPipe directly. Keep their hinted-load context in
+  // this request until a miss is allocated or merged in MissQueue.
+  val mdpPfHint = Bool()
+  val mdpImm = UInt(12.W)
+  val mdpVaddr = UInt(VAddrBits.W)
+  val mdpPC = UInt(VAddrBits.W)
+  val mdpLoadSize = UInt(2.W)
+  val mdpLoadUnsigned = Bool()
+  val mdpChainImm = UInt(12.W)
+  val mdpChainValid = Bool()
+  val mdpChainLoadSize = UInt(2.W)
+  val mdpChainLoadUnsigned = Bool()
+  val mdpOrigin = UInt(3.W)
 
   val id = UInt(reqIdWidth.W)
 
@@ -99,6 +112,17 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.error := false.B
     req.id := store.id
     req.miss_fail_cause_evict_btot := false.B
+    req.mdpPfHint := false.B
+    req.mdpImm := 0.U
+    req.mdpVaddr := 0.U
+    req.mdpPC := 0.U
+    req.mdpLoadSize := 0.U
+    req.mdpLoadUnsigned := false.B
+    req.mdpChainImm := 0.U
+    req.mdpChainValid := false.B
+    req.mdpChainLoadSize := 0.U
+    req.mdpChainLoadUnsigned := false.B
+    req.mdpOrigin := 0.U
     req
   }
 
@@ -119,6 +143,22 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.pf_source := prefetch.pf_source.value
     req.access := false.B
     req.id := 0.U
+    req.mdpPfHint := prefetch.mdpPfHint
+    req.mdpImm := Mux(prefetch.mdpPfHint, prefetch.mdpImm, 0.U)
+    req.mdpVaddr := Mux(prefetch.mdpPfHint, prefetch.mdpVaddr, 0.U)
+    req.mdpPC := Mux(prefetch.mdpPfHint, prefetch.mdpPC, 0.U)
+    req.mdpLoadSize := Mux(prefetch.mdpPfHint, prefetch.mdpLoadSize, 0.U)
+    req.mdpLoadUnsigned := prefetch.mdpPfHint && prefetch.mdpLoadUnsigned
+    req.mdpChainValid := prefetch.mdpPfHint && prefetch.mdpChainValid
+    req.mdpChainImm := Mux(prefetch.mdpPfHint && prefetch.mdpChainValid, prefetch.mdpChainImm, 0.U)
+    req.mdpChainLoadSize := Mux(
+      prefetch.mdpPfHint && prefetch.mdpChainValid,
+      prefetch.mdpChainLoadSize,
+      0.U
+    )
+    req.mdpChainLoadUnsigned :=
+      prefetch.mdpPfHint && prefetch.mdpChainValid && prefetch.mdpChainLoadUnsigned
+    req.mdpOrigin := Mux(prefetch.mdpPfHint, prefetch.mdpOrigin, 0.U)
     req
   }
 }
@@ -928,17 +968,42 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req.id := s2_req.id
   miss_req.cancel := s2_grow_perm_fail
   miss_req.pc := 0.U // MainPipe requests (Store Buffer writeback) don't have a single corresponding PC
-  // MainPipe handles store/writeback traffic, not hinted scalar loads; drive
-  // every MDP field to a safe value before this request reaches MissQueue.
-  miss_req.pfHintMDP := false.B
-  miss_req.mdpImm := 0.U
-  miss_req.mdpVaddr := 0.U
-  miss_req.mdpPC := 0.U
-  miss_req.mdpLoadSize := 0.U
-  miss_req.mdpLoadUnsigned := false.B
+  val isMdpCarrier = s2_isPrefetch && s2_req.mdpPfHint
+  miss_req.pfHintMDP := isMdpCarrier
+  miss_req.mdpImm := Mux(isMdpCarrier, s2_req.mdpImm, 0.U)
+  miss_req.mdpVaddr := Mux(isMdpCarrier, s2_req.mdpVaddr, 0.U)
+  miss_req.mdpPC := Mux(isMdpCarrier, s2_req.mdpPC, 0.U)
+  miss_req.mdpLoadSize := Mux(isMdpCarrier, s2_req.mdpLoadSize, 0.U)
+  miss_req.mdpLoadUnsigned := isMdpCarrier && s2_req.mdpLoadUnsigned
+  miss_req.mdpChainValid := isMdpCarrier && s2_req.mdpChainValid
+  miss_req.mdpChainImm := Mux(isMdpCarrier && s2_req.mdpChainValid, s2_req.mdpChainImm, 0.U)
+  miss_req.mdpChainLoadSize := Mux(
+    isMdpCarrier && s2_req.mdpChainValid,
+    s2_req.mdpChainLoadSize,
+    0.U
+  )
+  miss_req.mdpChainLoadUnsigned :=
+    isMdpCarrier && s2_req.mdpChainValid && s2_req.mdpChainLoadUnsigned
+  miss_req.mdpOrigin := Mux(isMdpCarrier, s2_req.mdpOrigin, 0.U)
   miss_req.full_overwrite := s2_req.isStore && s2_req.store_mask.andR
   miss_req.isBtoT := s2_grow_perm
   miss_req.occupy_way := s2_tag_ecc_match_way
+
+  val mdpMainPipeS2 = s2_valid && s2_isPrefetch && s2_req.mdpPfHint
+  XSPerfAccumulate("mdp_mainpipe_hint_s2", mdpMainPipeS2)
+  XSPerfAccumulate("mdp_mainpipe_hint_s2_hit", mdpMainPipeS2 && s2_hit)
+  XSPerfAccumulate("mdp_mainpipe_hint_s2_miss_req", mdpMainPipeS2 && io.miss_req.valid)
+  XSPerfAccumulate("mdp_mainpipe_hint_miss_req_fire", mdpMainPipeS2 && io.miss_req.fire)
+  Seq(
+    "stride" -> isFromMdpStride(s2_req.pf_source),
+    "stream" -> isFromMdpStream(s2_req.pf_source),
+    "chasing_stride" -> isFromMdpChasingStride(s2_req.pf_source),
+    "chasing_stream" -> isFromMdpChasingStream(s2_req.pf_source),
+    "chasing_chain" -> isFromMdpChasingChain(s2_req.pf_source),
+    "chasing_history" -> isFromMdpChasingHistory(s2_req.pf_source)
+  ).foreach { case (name, sourceMatch) =>
+    XSPerfAccumulate(s"mdp_mainpipe_hint_s2_$name", mdpMainPipeS2 && sourceMatch)
+  }
 
   io.wbq_conflict_check.valid := s2_valid && s2_can_go_to_mq
   io.wbq_conflict_check.bits := s2_req.addr

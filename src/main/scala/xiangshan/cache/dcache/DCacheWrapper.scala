@@ -23,7 +23,8 @@ import xscache.coupledL2.{IsKeywordKey, IsKeywordField, MemBackTypeMMField, MemP
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.tilelink._
 import freechips.rocketchip.util.BundleFieldBase
-import xscache.common.{AliasField, MdpHintField, MdpImmField, MdpLoadSizeField, MdpLoadUnsignedField,
+import xscache.common.{AliasField, MdpChainImmField, MdpChainLoadSizeField, MdpChainLoadUnsignedField,
+  MdpChainValidField, MdpHintField, MdpImmField, MdpLoadSizeField, MdpLoadUnsignedField, MdpOriginField,
   MdpPCField, MdpVaddrField, PrefetchField}
 import org.chipsalliance.cde.config.Parameters
 import utility._
@@ -648,6 +649,11 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   val mdpPC = Output(UInt(VAddrBits.W))
   val mdpLoadSize = Output(UInt(2.W))
   val mdpLoadUnsigned = Output(Bool())
+  val mdpChainImm = Output(UInt(12.W))
+  val mdpChainValid = Output(Bool())
+  val mdpChainLoadSize = Output(UInt(2.W))
+  val mdpChainLoadUnsigned = Output(Bool())
+  val mdpOrigin = Output(UInt(3.W))
   // cycle0: load microop
  // val s0_uop = Output(new MicroOp)
   // cycle 0: virtual address: req.addr
@@ -931,6 +937,11 @@ class DCache()(implicit p: Parameters) extends LazyModule with HasDCacheParamete
     MdpPCField(VAddrBits),
     MdpLoadSizeField(),
     MdpLoadUnsignedField(),
+    MdpChainImmField(12),
+    MdpChainValidField(),
+    MdpChainLoadSizeField(),
+    MdpChainLoadUnsignedField(),
+    MdpOriginField(3),
     ReqSourceField(),
     VaddrField(VAddrBits - blockOffBits),
     MemBackTypeMMField(),

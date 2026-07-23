@@ -675,6 +675,11 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
     l1_pf_req_arb.io.in(i).bits.req.mdpPC := 0.U
     l1_pf_req_arb.io.in(i).bits.req.mdpLoadSize := 0.U
     l1_pf_req_arb.io.in(i).bits.req.mdpLoadUnsigned := false.B
+    l1_pf_req_arb.io.in(i).bits.req.mdpChainImm := 0.U
+    l1_pf_req_arb.io.in(i).bits.req.mdpChainValid := false.B
+    l1_pf_req_arb.io.in(i).bits.req.mdpChainLoadSize := 0.U
+    l1_pf_req_arb.io.in(i).bits.req.mdpChainLoadUnsigned := false.B
+    l1_pf_req_arb.io.in(i).bits.req.mdpOrigin := 0.U
     l1_pf_req_arb.io.in(i).bits.debug_vaddr := l1_array(i).get_pf_vaddr()
   }
 

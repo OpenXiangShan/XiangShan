@@ -190,6 +190,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s1_mdp_pc_hold = Reg(UInt(VAddrBits.W))
   val s1_mdp_load_size_hold = Reg(UInt(2.W))
   val s1_mdp_load_unsigned_hold = Reg(Bool())
+  val s1_mdp_chain_imm_hold = Reg(UInt(12.W))
+  val s1_mdp_chain_valid_hold = Reg(Bool())
+  val s1_mdp_chain_load_size_hold = Reg(UInt(2.W))
+  val s1_mdp_chain_load_unsigned_hold = Reg(Bool())
+  val s1_mdp_origin_hold = Reg(UInt(3.W))
   when(s1_valid && !s1_fire && io.lsu.mdpPfHint) {
     s1_mdp_hint_hold := true.B
     s1_mdp_imm_hold := io.lsu.mdpImm
@@ -197,6 +202,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     s1_mdp_pc_hold := io.lsu.mdpPC
     s1_mdp_load_size_hold := io.lsu.mdpLoadSize
     s1_mdp_load_unsigned_hold := io.lsu.mdpLoadUnsigned
+    s1_mdp_chain_imm_hold := io.lsu.mdpChainImm
+    s1_mdp_chain_valid_hold := io.lsu.mdpChainValid
+    s1_mdp_chain_load_size_hold := io.lsu.mdpChainLoadSize
+    s1_mdp_chain_load_unsigned_hold := io.lsu.mdpChainLoadUnsigned
+    s1_mdp_origin_hold := io.lsu.mdpOrigin
   }
   when(s1_fire) {
     s1_mdp_hint_hold := false.B
@@ -211,6 +221,19 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
     io.lsu.mdpLoadUnsigned,
     s1_mdp_load_unsigned_hold
   )
+  val s1_mdp_chain_imm = Mux(io.lsu.mdpPfHint, io.lsu.mdpChainImm, s1_mdp_chain_imm_hold)
+  val s1_mdp_chain_valid = Mux(io.lsu.mdpPfHint, io.lsu.mdpChainValid, s1_mdp_chain_valid_hold)
+  val s1_mdp_chain_load_size = Mux(
+    io.lsu.mdpPfHint,
+    io.lsu.mdpChainLoadSize,
+    s1_mdp_chain_load_size_hold
+  )
+  val s1_mdp_chain_load_unsigned = Mux(
+    io.lsu.mdpPfHint,
+    io.lsu.mdpChainLoadUnsigned,
+    s1_mdp_chain_load_unsigned_hold
+  )
+  val s1_mdp_origin = Mux(io.lsu.mdpPfHint, io.lsu.mdpOrigin, s1_mdp_origin_hold)
 
   when (s0_fire) { s1_valid := true.B }
   .elsewhen (s1_fire) { s1_valid := false.B }
@@ -433,6 +456,11 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s2_mdp_pc = RegEnable(s1_mdp_pc, s1_fire)
   val s2_mdp_load_size = RegEnable(s1_mdp_load_size, s1_fire)
   val s2_mdp_load_unsigned = RegEnable(s1_mdp_load_unsigned, s1_fire)
+  val s2_mdp_chain_imm = RegEnable(s1_mdp_chain_imm, s1_fire)
+  val s2_mdp_chain_valid = RegEnable(s1_mdp_chain_valid, s1_fire)
+  val s2_mdp_chain_load_size = RegEnable(s1_mdp_chain_load_size, s1_fire)
+  val s2_mdp_chain_load_unsigned = RegEnable(s1_mdp_chain_load_unsigned, s1_fire)
+  val s2_mdp_origin = RegEnable(s1_mdp_origin, s1_fire)
 
   val s2_tag_error = WireInit(false.B)
   val s2_tl_error = RegEnable(s1_tl_error, s1_fire)
@@ -479,6 +507,19 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits.mdpPC := s2_mdp_pc
   io.miss_req.bits.mdpLoadSize := s2_mdp_load_size
   io.miss_req.bits.mdpLoadUnsigned := s2_mdp_load_unsigned
+  // Treat the chain fields as one atomic extension of the hinted-load context.
+  // An invalid chain is explicitly cleared so a later MSHR merge cannot retain
+  // chain state belonging to an older load on the same cache line.
+  io.miss_req.bits.mdpChainValid := s2_mdp_pf_hint && s2_mdp_chain_valid
+  io.miss_req.bits.mdpChainImm := Mux(s2_mdp_pf_hint && s2_mdp_chain_valid, s2_mdp_chain_imm, 0.U)
+  io.miss_req.bits.mdpChainLoadSize := Mux(
+    s2_mdp_pf_hint && s2_mdp_chain_valid,
+    s2_mdp_chain_load_size,
+    0.U
+  )
+  io.miss_req.bits.mdpChainLoadUnsigned :=
+    s2_mdp_pf_hint && s2_mdp_chain_valid && s2_mdp_chain_load_unsigned
+  io.miss_req.bits.mdpOrigin := Mux(s2_mdp_pf_hint, s2_mdp_origin, 0.U)
   io.miss_req.bits.isBtoT := s2_grow_perm_btot
   io.miss_req.bits.occupy_way := s2_tag_match_way
 
@@ -534,13 +575,12 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   XSPerfAccumulate("dcache_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss)
   XSPerfAccumulate("dcache_first_read_from_prefetched_line", s2_valid && isPrefetchRelated(s2_hit_prefetch) && !resp.bits.miss && !s2_hit_access)
 
-  // V0.4 path accounting: classify every MDP-marked S2 request before it is
-  // either served by L1, sent to MissQueue, nacked, or falls into another
-  // replay/permission path.  Keep demand and MDP stride prefetches separate;
-  // chasing prefetches deliberately do not carry mdpPfHint.
+  // Classify every MDP-marked S2 request before it is served, sent to
+  // MissQueue, nacked, or replayed. V0.5 lets stride, stream and recursive
+  // chasing prefetches carry hints, so hardware requests use their real source.
   val mdpHintS2 = s2_valid && s2_mdp_pf_hint
   val mdpHintS2Demand = mdpHintS2 && !s2_is_prefetch
-  val mdpHintS2Stride = mdpHintS2 && s2_is_prefetch
+  val mdpHintS2Prefetch = mdpHintS2 && s2_is_prefetch
   val mdpHintS2Events = Seq(
     "s2" -> mdpHintS2,
     "s2_hit" -> (mdpHintS2 && s2_hit),
@@ -559,7 +599,17 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   mdpHintS2Events.foreach { case (name, enable) =>
     XSPerfAccumulate(s"mdp_hint_$name", enable)
   }
-  Seq("demand" -> mdpHintS2Demand, "stride" -> mdpHintS2Stride).foreach {
+  Seq(
+    "demand" -> mdpHintS2Demand,
+    "prefetch" -> mdpHintS2Prefetch,
+    "stride" -> (mdpHintS2Prefetch && isFromMdpStride(s2_pf_source)),
+    "stream" -> (mdpHintS2Prefetch && isFromMdpStream(s2_pf_source)),
+    "legacy_chasing" -> (mdpHintS2Prefetch && isFromMdpLegacyChasing(s2_pf_source)),
+    "chasing_stride" -> (mdpHintS2Prefetch && isFromMdpChasingStride(s2_pf_source)),
+    "chasing_stream" -> (mdpHintS2Prefetch && isFromMdpChasingStream(s2_pf_source)),
+    "chasing_chain" -> (mdpHintS2Prefetch && isFromMdpChasingChain(s2_pf_source)),
+    "chasing_history" -> (mdpHintS2Prefetch && isFromMdpChasingHistory(s2_pf_source))
+  ).foreach {
     case (source, enable) =>
       XSPerfAccumulate(s"mdp_hint_s2_$source", enable)
       XSPerfAccumulate(s"mdp_hint_s2_${source}_hit", enable && s2_hit)
