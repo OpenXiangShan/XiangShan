@@ -92,7 +92,7 @@ SBuffer flush、正常/异常 WB、redirect/replay 和 sfence：
 | redirect/replay/cancel | 已覆盖；software/DUT cancel 只对账一次，epoch、snapshot、anchor 和 drain 有 owner | IQ/replay 与 LSQ MMIO/status plans/flows |
 | SBuffer flush | 已覆盖当前 V2 smoke 的状态/退出边界；完整 denied/corrupt response 注入仍为 TODO | flushSb flow、LSQ status plan、TODO |
 | DCache 回复 | 已覆盖当前轻量 coherent 范围；GrantAck/E、Probe、Release 和 Hint 均有生命周期 | DCache plan/flow、共享 responder flow |
-| sfence/CSR | 已覆盖 snapshot、payload 透传和 standalone TLB invalidation 边界；完整 core flushPipe 仍为 TODO | CSR plan、sfence flow、TODO |
+| sfence/CSR | 已覆盖 snapshot、payload 透传和 standalone TLB invalidation；完整 core `flushAfter` 属于 ROB/CtrlBlock，不是 MemBlock standalone TODO | CSR plan、sfence flow、V2 RTL flushPipe flow |
 
 共享 `mem_base_sequence`、DCache driver、virtual sequence drain、同步包和参数入口的修改已同步到
 对应的 flow/analysis 文档；旧 plan 已明确“被替代”或移动到 `plan/do`，不存在继续指向旧
@@ -112,18 +112,25 @@ SBuffer flush、正常/异常 WB、redirect/replay 和 sfence：
 | legacy `tc_dispatch_real_smoke` | `TEST CASE PASSED`，`UVM_ERROR=0`，`UVM_FATAL=0` |
 | staged diff/旧路径扫描 | `git diff --check` 通过；旧 DCache/总控 `plan/undo` 入口已清理 |
 
-## 6. 保留的 TODO 边界
+## 6. 保留的 TODO 与已关闭职责边界
 
 以下是明确不属于本轮 scalar V2 测试框架适配的后续工作，不构成总控遗漏：
 
 - vector LS/`issueVldu` 专项；当前 scalar flow 对不支持组合 fail-fast，不静默当作 scalar。
 - L2TLB S1/S2 独立 PTE G/U 权限模型；当前最小链路由 `tlb_entry.pte_g/pte_u` 同源驱动。
-- 完整 core 语义下 `sfence_bits_flushPipe` 对 ROB/global pipeline flush 的建模。
 - DCache/SBuffer `denied/corrupt/PBMT/permission` response 注入和对应 RM/terminal 语义。
 - 完整 analysis-port standard transaction producer、RM、scoreboard 和 coverage。
+
+`sfence_bits_flushPipe` 不在上述 TODO 中。完整 core 由 ROB 在提交点产生 `flushAfter`，MemBlock 不从
+该 payload 位本地暂停 LSQ 或清理年轻状态；当前 standalone 仅做字段保真和
+`sfence.valid` 驱动的 TLB invalidation，已经满足本轮适配范围。未来只有在验证对象扩展到真实
+ROB/CtrlBlock/global redirect 时才需要全核集成验证，不应为当前 MemBlock 新建补偿状态机。
 
 ## 7. 最终结论
 
 总控 owner、flow、字段链、功能逻辑、文档同步和提交边界均已闭环；当前工作区中与本专项无关的
 规则增强、RTL 知识文档和历史 review 批量迁移未被纳入总控提交。独立 subagent `Popper` 已核对
 7 个 staged 文件、owner 覆盖、TODO 边界、旧路径和验证事实，结论为 `FINAL PASS`，未发现 blocker。
+后续针对 `sfence_bits_flushPipe` 从“未来 TODO”纠正为“MemBlock standalone 已关闭职责边界”的修订，
+独立 subagent `Dalton` 再次对照 V2 Decode/Fence FU/ROB/TLB/LSQ Scala 源码复核，结论同样为
+`FINAL PASS`：完整 core `flushAfter` 属于 ROB/CtrlBlock，当前测试框架不需要补偿状态机。
