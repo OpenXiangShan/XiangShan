@@ -56,8 +56,7 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
 
   val line_set_addr = addr_to_dcache_div_set(io.readline.bits.addr)
   val line_div_addr = addr_to_dcache_div(io.readline.bits.addr)
-  val line_way_en = io.readline.bits.way_en
-  val line_way_en_htag = io.readline.bits.way_en_htag
+  val line_way_en_htag = io.readline_way_en_htag
 
   val write_bank_mask_reg = RegEnable(io.write.bits.wmask, 0.U(DCacheBanks.W), io.write.valid)
   val write_data_reg = RegEnable(io.write.bits.data, io.write.valid)

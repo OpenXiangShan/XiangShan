@@ -175,6 +175,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     val data_read = Vec(LoadPipelineWidth, Input(Bool()))
     val data_read_intend = Output(Bool())
     val data_readline = DecoupledIO(new L1BankedDataReadLineReq)
+    val readline_way_en_htag = Output(UInt(nWays.W))
     val data_readline_can_go = Output(Bool())
     val data_readline_stall = Output(Bool())
     val data_readline_can_resp = Output(Bool())
@@ -921,7 +922,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   io.data_read_intend := s1_valid && s1_need_data
   io.data_readline.valid := s1_valid && s1_need_data
   io.data_readline.bits.rmask := s1_banked_rmask
-  io.data_readline.bits.way_en_htag := s1_way_en_htag
+  io.readline_way_en_htag := s1_way_en_htag
   io.data_readline.bits.way_en := s1_way_en
   io.data_readline.bits.way := s1_way
   io.data_readline.bits.addr := s1_req.vaddr

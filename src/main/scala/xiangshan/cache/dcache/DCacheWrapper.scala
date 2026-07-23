@@ -157,15 +157,18 @@ trait HasDCacheParameters
   require(!channelSelByAddr || isPow2(numMemChannels),
     s"channelSelByAddr requires numMemChannels to be a power of 2, got $numMemChannels")
 
-  // banked dcache support
+  // Use Hash Tag Array and corresponding DataArray
+  val UseHTADataArray = true
+  val HashTagBits = 4
+
   val DCacheSetDiv = 1
   val DCacheSets = cacheParams.nSets
   val DCacheWayDiv = 2
   val DCacheWays = cacheParams.nWays
-  val DCacheBanks = 32
+  val DCacheBanks = if (UseHTADataArray) 8 else 32
   val DCacheDupNum = 16
+  val DCacheSRAMRowBits = blockBits / DCacheBanks
   val DCacheSRAMRealRowBits = DCacheSRAMRowBits * DCacheWays // 1 real Bank = vitural_bank * way_nums
-  val DCacheSRAMRowBits = 16 
   val DCacheWordBits = 64 // hardcoded
   val DCacheWordBytes = DCacheWordBits / 8
   val MaxPrefetchEntry = cacheParams.nMaxPrefetchEntry
@@ -241,8 +244,6 @@ trait HasDCacheParameters
   val tagWritePort = metaWritePort + 1
   val errWritePort = tagWritePort + 1
   val wbPort = errWritePort + 1
-  val HashTagBits = 4
-  val EnableDCacheHashTagArray = true
 
   def set_to_dcache_div(set: UInt) = {
     require(set.getWidth >= DCacheSetBits)
@@ -1017,7 +1018,6 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   val edge = edges(0)
 
   require(pseudoErrorMaskBits >= tagBits, "pseudo-error masks must cover tagBits")
-  require(pseudoErrorMaskBits >= DCacheSRAMRowBits, "pseudo-error masks must cover data-bank row width")
   require(bus.d.bits.data.getWidth == l1BusDataWidth, "DCache: tilelink width does not match")
 
 
@@ -1061,8 +1061,10 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
 
   //----------------------------------------
   // core data structures
-  // val bankedDataArray = if(dwpuParam.enWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
-  val bankedDataArray = Module(new HTADataArray) //if(dwpuParam.enWPU) Module(new SramedDataArray) else Module(new BankedDataArray)
+  val bankedDataArray =
+    if (UseHTADataArray) Module(new HTADataArray)
+    else if (dwpuParam.enWPU) Module(new SramedDataArray)
+    else Module(new BankedDataArray)
   val metaArray = Module(new L1CohMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1))
   val errorArray = Module(new L1ErrorMetaArray(readPorts = LoadPipelineWidth + 1, writePorts = 1, enableBypass = true))
   val prefetchArray = Module(new L1PrefetchSourceArray(
@@ -1370,13 +1372,17 @@ class DCacheImp(outer: DCache) extends LazyModuleImp(outer) with HasDCacheParame
   (0 until LoadPipelineWidth).map(i => {
     bankedDataArray.io.read(i) <> ldu(i).io.banked_data_read
     bankedDataArray.io.is128Req(i) <> ldu(i).io.is128Req
-    bankedDataArray.io.s2_tag_match_way(i) := ldu(i).io.s2_tag_match_way
     bankedDataArray.io.read_error_delayed(i) <> ldu(i).io.read_error_delayed
 
     ldu(i).io.banked_data_resp := bankedDataArray.io.read_resp(i)
 
     ldu(i).io.bank_conflict_slow := bankedDataArray.io.bank_conflict_slow(i)
   })
+
+  for (i <- 0 until LoadPipelineWidth) {
+    bankedDataArray.io.s2_tag_match_way(i) := ldu(i).io.s2_tag_match_way
+  }
+  bankedDataArray.io.readline_way_en_htag := mainPipe.io.readline_way_en_htag
 
   def processChannel(forward: DCacheForward, bus: TLBundle, i: Int): Unit = {
     val s0ReqValid = forward.s0Req.valid
