@@ -86,6 +86,7 @@
   - 单个 `.dat` 默认输出到同目录下的 `<stem>.genhtml/`
   - 多个 `.dat` 或目录输入默认输出到 `coverage.genhtml/`
   - 会自动生成 `merged.info` 并调用 `genhtml --ignore-errors range --filter missing`
+  - HTML 行号左侧的 `[ + ]` / `[ - ]` 来自 `merged.info` 里的 `BRDA` 记录，但不一定都是 RTL `if/else` branch。`verilator_coverage -write-info` 会把部分 raw coverage point 转成 lcov `BRDA`；例如端口声明行 `output io_phr_444` 左侧两个 `+`，原始 `.dat` 中对应的是 `t=toggle` 的 `io_phr_444:0->1` 和 `io_phr_444:1->0`。遇到端口、wire、reg 声明行出现 `[ + + ]` 时，应回查 raw `.dat` 的 `t=` 和 `o=` 字段，不要直接解释成代码分支。
   - 若要把指定 `.dat` 合并到已有 `coverage.genhtml/`，可直接执行：
     `source /nfs/share/unitychip/activate && PATH=/nfs/share/unitychip/bin:$PATH src/test/python/Frontend/scripts/gen_coverage_html.sh src/test/python/Frontend/data/runs/<run_id>/coverage`
 - `Frontend.ignore`
@@ -131,6 +132,27 @@
   - 路径: `src/test/python/Frontend/tools/run_dut_with_bin_trace.py`
 
 ## 运行入口
+
+- 构建 Verilator 版 Frontend Python DUT：
+
+```bash
+make frontend-verilator
+```
+
+- 构建 VCS 版 Frontend Python DUT：
+
+```bash
+make frontend-vcs \
+  FRONTEND_VCS_HOME=/path/to/vcs \
+  FRONTEND_VERDI_HOME=/path/to/verdi
+```
+
+`make frontend` 默认构建 Verilator 版；`make frontend-vcs` 固定使用 VCS
+和 FSDB 波形。两套产物分别保留在
+`build-frontend/pylib-verilator/Frontend/` 和
+`build-frontend/pylib-vcs/Frontend/`。跑测试时用 `TB_FRONTEND_SIM=verilator`
+或 `TB_FRONTEND_SIM=vcs` 选择；只有需要显式指定非默认目录时才使用
+`TB_FRONTEND_PYLIB=/path/to/pylib-root`。
 
 - 默认回归入口：
 

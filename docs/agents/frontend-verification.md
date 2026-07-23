@@ -53,8 +53,10 @@ tree. Start here unless the task explicitly says otherwise.
 - `src/test/python/Frontend/scripts/fst_to_fsdb.sh`: convert a frontend `.fst`
   waveform to `.fsdb` through a temporary `.vcd`.
 - `src/test/python/Frontend/tests/`: active frontend regressions. Put new tests here.
-- `build-frontend/pylib/Frontend/`: generated Python bindings, shared objects,
-  signal map, and `Frontend_top.sv`.
+- `build-frontend/pylib-verilator/Frontend/`: generated Verilator Python
+  bindings, shared objects, signal map, and `Frontend_top.sv`.
+- `build-frontend/pylib-vcs/Frontend/`: generated VCS Python bindings, shared
+  objects, signal map, and `Frontend_top.sv`.
 - `build-frontend/rtl/`: generated RTL artifacts useful for cross-checking DUT behavior.
 - `build-frontend/frontend_build_manifest.json`: written only after a successful
   `make frontend`; binds the design SHA and build configuration to the compiled
@@ -69,7 +71,7 @@ tree. Start here unless the task explicitly says otherwise.
 Use the most direct artifact that reflects real DUT behavior:
 
 1. Observed DUT-facing IO in the Python environment and tests.
-2. Generated artifacts under `build-frontend/pylib/Frontend/`, especially
+2. Generated artifacts under the selected frontend pylib directory, especially
    `Frontend_top.sv` and `signals.json`.
 3. Generated RTL under `build-frontend/rtl/` when signal-level confirmation is needed.
 4. Reference docs under `docs/testbench/Guide_Doc/`.
@@ -197,6 +199,20 @@ that boundary stable.
   every signal name against the current DUT object and generated artifacts
   first. Required signals should fail fast when absent; signals not present on
   the DUT should not remain in the active contract.
+- For SystemVerilog funcov, choose the number of `bins` from the distinct
+  observable scenarios that need separate coverage accounting. A coverpoint may
+  legitimately have one bin; do not add complement or placeholder bins merely
+  to make every coverpoint multi-bin. Multiple testpoints may instead map to
+  distinct bins of one coverpoint when they share the same sampled dimension.
+- Use event encoding only when its categories are inherently mutually
+  exclusive. Do not collapse independently concurrent conditions into an
+  `if`/`else if` event selector, because lower-priority observations are then
+  silently lost. Sample such conditions with separate coverpoints, including
+  single-bin coverpoints when each condition has one meaningful hit.
+- Prefer direct, readable coverpoint predicates over derived event encodings.
+  Do not introduce an `always_comb` event selector merely to reduce the number
+  of coverpoints; compactness is not a goal when it obscures the sampled
+  condition.
 - After changing code, rerun the relevant tests before giving a conclusion. If
   you have not rerun the relevant tests yet, say that explicitly and do not
   present the result as a validated conclusion.
@@ -247,6 +263,30 @@ an older `libxspcomm.so` to `LD_LIBRARY_PATH`, which prevents the generated
 Frontend Python binding from loading. The required `mill`, `picker`, CMake,
 SWIG, and Verilator tools are available with the mcpgateway environment on
 this host.
+
+Build the default Verilator frontend DUT package from the repo root:
+
+```bash
+make frontend
+```
+
+Build the VCS frontend DUT package on a host with VCS and Verdi available; the
+target uses FSDB waveforms and requires explicit VCS/Verdi roots if the module
+environment does not export them:
+
+```bash
+make frontend-vcs \
+  FRONTEND_VCS_HOME=/path/to/vcs \
+  FRONTEND_VERDI_HOME=/path/to/verdi
+```
+
+`make frontend` defaults to Verilator. `make frontend-verilator` is an
+equivalent explicit alias and writes
+`build-frontend/pylib-verilator/Frontend/`; `make frontend-vcs` writes
+`build-frontend/pylib-vcs/Frontend/`. The two DUT packages can coexist. Select
+the package for a test process with `TB_FRONTEND_SIM=verilator` or
+`TB_FRONTEND_SIM=vcs`; use `TB_FRONTEND_PYLIB=/path/to/pylib-root` only for an
+explicit override.
 
 In sandboxed runs, disable the environment-level `pytest_rerunfailures` plugin
 by default. It opens a local socket during `pytest_configure` and otherwise
@@ -557,6 +597,22 @@ Convert a frontend FST waveform to FSDB:
 src/test/python/Frontend/scripts/fst_to_fsdb.sh path/to/wave.fst [path/to/wave.fsdb]
 ```
 
+Open a VCS-generated frontend FSDB with RTL in Verdi:
+
+```bash
+verdi -sv \
+  "$NOOP_HOME/build-frontend/pylib-vcs/Frontend/Frontend_top.sv" \
+  -F "$NOOP_HOME/build-frontend/rtl/filelist.funcov.f" \
+  -top Frontend_top \
+  -ssf "$NOOP_HOME/src/test/python/Frontend/data/<date>/<case>.fsdb"
+```
+
+Use `-F`, not `-f`, so relative RTL paths inside the generated filelist are
+resolved from the filelist directory. Include the picker/VCS wrapper
+`build-frontend/pylib-vcs/Frontend/Frontend_top.sv` explicitly and use
+`-top Frontend_top`; the generated RTL module `FrontendTop` is the DUT under
+that wrapper, not the FSDB top.
+
 Rebuild the frontend Python DUT artifacts from the repo root:
 
 ```bash
@@ -623,6 +679,9 @@ than host-side test scaffolding.
   make the cases write into one shared live directory.
 - Historical date directories are read-only evidence and must not be reused as
   current run destinations.
+- Keep wrapper or pipeline logs for a DUT run in the same run root as the
+  waveform and case log. Do not create a separate ad-hoc log directory for a
+  run whose artifacts already live under that run root.
 
 Current default implementation details in `env/fixtures.py`:
 
