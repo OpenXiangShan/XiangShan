@@ -222,7 +222,16 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val checkedVa = Seq(EffectiveVa(i), lastVa)
     val pf48 = VecInit(checkedVa.map(va => SignExt(va(47, 0), XLEN) =/= va)).asUInt
     val pf39 = VecInit(checkedVa.map(va => SignExt(va(38, 0), XLEN) =/= va)).asUInt
-    val gpf48 = VecInit(checkedVa.map(va => va(XLEN - 1, 48 + 2) =/= 0.U)).asUInt
+    val gpf48 = VecInit(checkedVa.map(va => Mux(
+      // ITLB uses fullva SignExt-ed from 50bit pc,
+      // it can wrongly SignExt a canonical Sv48x4 address into a non-canonical one,
+      // so here we check if EffectiveVa(49) is 0:
+      //   if it is, then an pc overflow happened, a gpf should be raised.
+      //   otherwise, EffectiveVa(63..50) is SignExt-ed from EffectiveVa(49) and we should ignore it.
+      TlbCmd.isExec(req_in(i).bits.cmd),
+      va(XLEN - 1, 48 + 2) =/= 0.U && va(48 + 2 - 1) === 0.U,
+      va(XLEN - 1, 48 + 2) =/= 0.U,
+    ))).asUInt
     val gpf39 = VecInit(checkedVa.map(va => va(XLEN - 1, 39 + 2) =/= 0.U)).asUInt
     val af = VecInit(checkedVa.map(va => va(XLEN - 1, PAddrBits) =/= 0.U)).asUInt
     when (req(i).valid && req(i).bits.checkfullva) {
