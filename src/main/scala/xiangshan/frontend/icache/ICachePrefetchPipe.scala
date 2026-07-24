@@ -33,8 +33,7 @@ import xiangshan.frontend.ftq.FtqToPrefetchBundle
 class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
     with ICacheAddrHelper
     with ICacheMetaHelper
-    with ICacheMissUpdateHelper
-    with ICacheDataHelper {
+    with ICacheMissUpdateHelper {
 
   class ICachePrefetchPipeIO(implicit p: Parameters) extends ICacheBundle {
     // control
@@ -292,8 +291,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
   // Disallow enqueuing wayLookup when SRAM write occurs.
   toWayLookup.zipWithIndex.foreach { case (port, i) =>
-    val (isCrossLine, bankSel) = getBankSel(s1_req(i).startVAddr, s1_req(i).takenCfiOffset)
-
     port.valid :=
       // tlb/meta ready
       ((s1_state === S1FsmState.EnqWay) || ((s1_state === S1FsmState.Idle) && tlbFinish)) &&
@@ -308,8 +305,6 @@ class ICachePrefetchPipe(implicit p: Parameters) extends ICacheModule
 
     port.bits.ftqIdx            := s1_req(i).ftqIdx
     port.bits.entry.vSetIdx     := VecInit(get_idx(s1_req(i).startVAddr), get_idx(s1_req(i).nextLineVAddr))
-    port.bits.entry.bankSel     := bankSel
-    port.bits.entry.isCrossLine := isCrossLine
     port.bits.entry.waymask     := VecInit(s1_reqMetaInfo(i).map(_.waymask))
     port.bits.entry.pTag        := s1_pTag
     port.bits.entry.maybeRvcMap := VecInit(s1_reqMetaInfo(i).map(_.maybeRvcMap))

@@ -28,11 +28,13 @@ import xiangshan.frontend.bpu.BpuPerfMeta
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.icache.ICacheCacheLineHelper
+import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.PrefetchReqBundle
 
 class FtqEntry(implicit p: Parameters) extends FtqBundle {
-  val startPc:        PrunedAddr  = PrunedAddr(VAddrBits)
-  val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+  val startPc:     PrunedAddr = PrunedAddr(VAddrBits)
+  val taken:       Bool       = Bool()
+  val endPosition: UInt       = UInt(CfiPositionWidth.W)
 }
 
 class MetaEntry(implicit p: Parameters) extends FtqBundle {
@@ -114,39 +116,41 @@ class FtqToMainPipeBundle(implicit p: Parameters) extends FtqBundle {
 }
 
 class FtqPrefetchReq(implicit p: Parameters) extends FtqBundle with ICacheCacheLineHelper {
-  val startVAddr:     PrunedAddr = PrunedAddr(VAddrBits)
-  val nextLineVAddr:  PrunedAddr = PrunedAddr(VAddrBits)
-  val takenCfiOffset: UInt       = UInt(CfiPositionWidth.W)
-  val isCrossLine:    Bool       = Bool()
-  val vSetIdx:        Vec[UInt]  = Vec(MaxPrefetchReqNum, UInt(idxBits.W))
-  val vPageNumber:    UInt       = UInt((VAddrBits - PageOffsetWidth).W)
+  val startVAddr:    PrunedAddr = PrunedAddr(VAddrBits)
+  val nextLineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val isCrossLine:   Bool       = Bool()
+  val vSetIdx:       Vec[UInt]  = Vec(PortNumber, UInt(idxBits.W))
+
+  def vPageNumber: UInt = startVAddr(VAddrBits - 1, PageOffsetWidth)
 
   def fromFtqEntry(entry: FtqEntry): FtqPrefetchReq = {
-    startVAddr     := entry.startPc
-    nextLineVAddr  := entry.startPc + blockBytes.U
-    takenCfiOffset := entry.takenCfiOffset.bits
-    isCrossLine    := isCrossLine(startVAddr, takenCfiOffset)
-    vSetIdx        := VecInit(get_idx(startVAddr), get_idx(nextLineVAddr))
-    vPageNumber    := entry.startPc(VAddrBits - 1, PageOffsetWidth)
+    startVAddr    := entry.startPc
+    nextLineVAddr := entry.startPc + blockBytes.U
+    isCrossLine   := super.isCrossLine(startVAddr, entry.endPosition)
+    vSetIdx       := VecInit(get_idx(startVAddr), get_idx(nextLineVAddr))
     this
   }
 }
 
-class FtqFetchReq(implicit p: Parameters) extends FtqBundle with ICacheCacheLineHelper {
-  val startVAddr:     PrunedAddr  = PrunedAddr(VAddrBits)
-  val nextLineVAddr:  PrunedAddr  = PrunedAddr(VAddrBits)
-  val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
-  val vSetIdx:        Vec[UInt]   = Vec(PortNumber, UInt(idxBits.W))
-  val size:           UInt        = UInt((log2Ceil(FetchBlockInstNum) + 1).W)
-  val vPageNumber:    UInt        = UInt((VAddrBits - PageOffsetWidth).W)
+class FtqFetchReq(implicit p: Parameters) extends FtqBundle with ICacheDataHelper {
+  val startVAddr:    PrunedAddr = PrunedAddr(VAddrBits)
+  val nextLineVAddr: PrunedAddr = PrunedAddr(VAddrBits)
+  val taken:         Bool       = Bool()
+  val endPosition:   UInt       = UInt(CfiPositionWidth.W)
+  val bankSel:       Vec[UInt]  = Vec(PortNumber, UInt(DataBanks.W))
+  val vSetIdx:       Vec[UInt]  = Vec(PortNumber, UInt(idxBits.W))
+
+  def size: UInt = (endPosition +& 1.U) - startVAddr(FetchBlockAlignWidth - 1, instOffsetBits)
+
+  def vPageNumber: UInt = startVAddr(VAddrBits - 1, PageOffsetWidth)
 
   def fromFtqEntry(entry: FtqEntry): FtqFetchReq = {
-    startVAddr     := entry.startPc
-    nextLineVAddr  := entry.startPc + blockBytes.U
-    takenCfiOffset := entry.takenCfiOffset
-    vSetIdx        := VecInit(get_idx(startVAddr), get_idx(startVAddr) + 1.U)
-    size           := entry.takenCfiOffset.bits +& 1.U
-    vPageNumber    := entry.startPc(VAddrBits - 1, PageOffsetWidth)
+    startVAddr    := entry.startPc
+    nextLineVAddr := entry.startPc + blockBytes.U
+    taken         := entry.taken
+    endPosition   := entry.endPosition
+    bankSel       := getBankSel(startVAddr, endPosition)
+    vSetIdx       := VecInit(get_idx(startVAddr), get_idx(startVAddr) + 1.U)
     this
   }
 }

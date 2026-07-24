@@ -195,18 +195,19 @@ class BpuCtrl extends Bundle {
 }
 
 // Bpu -> Ftq
-class BpuPrediction(implicit p: Parameters) extends BpuBundle with HalfAlignHelper {
-  val startPc:        PrunedAddr  = PrunedAddr(VAddrBits)
-  val target:         PrunedAddr  = PrunedAddr(VAddrBits)
-  val takenCfiOffset: Valid[UInt] = Valid(UInt(CfiPositionWidth.W))
+class BpuPrediction(implicit p: Parameters) extends BpuBundle {
+  val startPc:     PrunedAddr = PrunedAddr(VAddrBits)
+  val target:      PrunedAddr = PrunedAddr(VAddrBits)
+  val taken:       Bool       = Bool()
+  val endPosition: UInt       = UInt(CfiPositionWidth.W)
   // override valid
   val s3Override: Bool = Bool()
 
   def fromStage(startPc: PrunedAddr, prediction: Prediction): Unit = {
-    this.startPc              := startPc
-    this.takenCfiOffset.valid := prediction.taken
-    this.takenCfiOffset.bits  := getFtqOffset(startPc, prediction.cfiPosition)
-    this.target               := prediction.target
+    this.startPc     := startPc
+    this.target      := prediction.target
+    this.taken       := prediction.taken
+    this.endPosition := prediction.cfiPosition
   }
 }
 
