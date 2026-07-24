@@ -461,7 +461,6 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     // when pf and gpf can't happens simultaneously
     val hasPf = (ldPf || ldUpdate || stPf || stUpdate || instrPf || instrUpdate) && s1_valid && !af && !isFakePte && !isNonLeaf
-    // Only lsu need check related to high address truncation
     when (RegNext(prepf || pregpf || preaf)) {
       resp(idx).bits.isForVSnonLeafPTE := false.B
       resp(idx).bits.excp(nDups).pf.ld := RegNext(prepf) && isLd
@@ -479,7 +478,13 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).vaNeedExt := false.B
       // overwrite miss & gpaddr when exception related to high address truncation happens
       resp(idx).bits.miss := false.B
-      resp(idx).bits.gpaddr(nDups) := req_out(idx).fullva
+      // Instruction fetch only provides a VAddrBits+1-bit va (from the PC), which the frontend
+      // can only sign-extend to XLEN since the current translation mode is unavailable there.
+      // However, sequential fetch may overflow the PC into the invalid bit[50]=1 region under Sv48x4,
+      // in such case, do sign-extension would wrongly set bits [63:51]=1.
+      // Zero-extend instead to report the correct unsigned gpaddr on guest page faults
+      // DTLB requests carry a full XLEN va, so keeping it as-is.
+      resp(idx).bits.gpaddr(nDups) := Mux(isInst, ZeroExt(req_out(idx).fullva(VAddrBits, 0), XLEN), req_out(idx).fullva)
     } .otherwise {
       // isForVSnonLeafPTE is used only when gpf happens and it caused by a G-stage translation which supports VS-stage translation
       // it will be sent to CSR in order to modify the m/htinst.
