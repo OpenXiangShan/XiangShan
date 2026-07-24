@@ -279,6 +279,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toICache.toPrefetch.bits.req.zipWithIndex.foreach { case (req, i) =>
     req.startVAddr       := prefetchReq(i).startVAddr
     req.nextLineVAddr    := prefetchReq(i).nextLineVAddr
+    req.vSetIdx          := prefetchReq(i).vSetIdx
     req.isCrossLine      := prefetchReq(i).isCrossLine
     req.ftqIdx           := pfPtr(i)
     req.backendException := Mux(backendExceptionPtr === pfPtr(i), backendException, ExceptionType.None)
