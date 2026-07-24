@@ -429,9 +429,10 @@ Other `run_bin_trace_pipeline.sh` knobs worth recording:
   `tests/test_bin_trace_dut.py::test_bin_trace` nodeid.
 - `TB_TRACE_MAX_CYCLES=...`: bound DUT execution cycles for a debug run; `0`
   keeps the run-to-completion behavior.
-- `TB_TRACE_TARGET_CURSOR=...`: treat reaching this golden-trace cursor as pass.
-  Use `0` to disable (default). When set to a positive integer, run stops with
-  pass as soon as `cursor >= target`.
+- `TB_TRACE_TARGET_CURSOR=...`: stop once this golden-trace cursor is reached.
+  Use `0` to disable (default). A positive value is bounded debug/window
+  evidence only: reaching the cursor means no enabled checker failed in that
+  prefix, not that the full bin-trace regression completed.
 - `TB_PYTEST_TIMEOUT_SECS=...`: set the DUT-stage wall-clock timeout used by
   the pipeline script; default is `6400`.
 - `TB_TRACE_STALL_SNAPSHOT_INTERVAL=...`: print stall snapshots every N
@@ -464,8 +465,8 @@ For this direct-`pytest` path, keep the required environment variables explicit:
 - `TB_BIN_PATH=...`: point the testcase at the exact ready-to-run binary.
 - `TB_TRACE_PATH=...`: point the testcase at the prepared golden trace file.
 - `TB_BASE_ADDR=...`: keep the DUT load base consistent with the binary image.
-- `TB_TRACE_TARGET_CURSOR=...`: optional cursor target for early pass; `0`
-  disables it.
+- `TB_TRACE_TARGET_CURSOR=...`: optional cursor target for a bounded debug
+  window; `0` disables it.
 - `TB_TRACE_STAGNANT_CYCLES_LIMIT=...`: keep stagnant-cycle early-stop enabled
   so the run fails on real forward-progress stalls instead of hanging silently.
 
@@ -509,9 +510,11 @@ run-to-completion entrypoint. Do not use it as a load-only or partial-step
 smoke path. By default it runs until golden completion; set
 `TB_TRACE_MAX_CYCLES` to a positive integer only when you intentionally want a
 bounded debug run, or set `TB_TRACE_TARGET_CURSOR` to stop at a specific
-golden cursor and treat it as pass. In bounded mode, exhausting the explicit
-cycle budget is not itself a failure; only observed DUT/env misbehavior such as
-monitor errors or stagnant-cycle early-stop should fail the run.
+golden cursor. In bounded mode, exhausting the explicit cycle budget or reaching
+the target cursor is only bounded-window evidence; only `status=completed`
+with the full trace consumed is full bin-trace regression pass evidence.
+Observed DUT/env misbehavior such as monitor errors or stagnant-cycle early-stop
+must still fail the run.
 
 For direct `pytest`, use an outer `timeout` guard explicitly. The
 `TB_PYTEST_TIMEOUT_SECS` knob is consumed by `scripts/run_bin_trace_pipeline.sh`; it
