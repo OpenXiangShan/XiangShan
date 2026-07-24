@@ -41,6 +41,7 @@ import xiangshan.frontend.bpu.mbtb.MainBtb
 import xiangshan.frontend.bpu.ras.MicroRas
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
+import xiangshan.frontend.bpu.sc.ScTrainPrecompute
 import xiangshan.frontend.bpu.tage.Tage
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.bpu.utage.MicroTage
@@ -191,6 +192,11 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   train.branches.zipWithIndex.foreach { case (b, i) =>
     b.valid := io.fromFtq.train.bits.branches(i).valid && t0_firstMispredictMask(i)
   }
+  private val trainPipeScWriteValidVec = RegEnable(
+    ScTrainPrecompute.writeValidVec(train),
+    VecInit.fill(ResolveEntryBranchNumber)(false.B),
+    io.fromFtq.train.fire
+  )
 
   private val fastTrain = Wire(Valid(new FastTrain))
   fastTrain.valid                := s3_valid
@@ -270,6 +276,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   sc.io.providerTakenCtrs   := tage.io.toSc.providerTakenCtrVec
   sc.io.foldedPathHist      := phr.io.s0_foldedPhr
   sc.io.imli                := commonHR.io.s0_imli
+  sc.io.trainWriteValidVec  := trainPipeScWriteValidVec
   sc.io.trainFoldedPathHist := phr.io.trainFoldedPhr
   sc.io.commonHR            := commonHR.io.s0_commonHR
 
