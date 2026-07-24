@@ -151,6 +151,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   private val endOffset = endOffsetVec(mispredIdx.bits)
 
   private val mispredIdxNext             = RegEnable(mispredIdx, io.req.valid)
+  private val fixedTakenNext             = RegEnable(fixedTaken, io.req.valid)
   private val finalIsRVCNext             = RegEnable(finalIsRVC, io.req.valid)
   private val finalAttributeNext         = RegEnable(finalAttribute, io.req.valid)
   private val invalidTakenNext           = RegEnable(finalInvalidTaken, io.req.valid)
@@ -172,7 +173,7 @@ class PredChecker(implicit p: Parameters) extends IfuModule {
   io.resp.stage2Out.checkerRedirect.valid          := mispredIdxNext.valid && wbValid
   io.resp.stage2Out.checkerRedirect.bits.target    := fixedTarget
   io.resp.stage2Out.checkerRedirect.bits.misIdx    := mispredIdxNext
-  io.resp.stage2Out.checkerRedirect.bits.taken     := fixedTaken
+  io.resp.stage2Out.checkerRedirect.bits.taken     := fixedTakenNext && mispredIdxNext.valid && wbValid
   io.resp.stage2Out.checkerRedirect.bits.isRVC     := finalIsRVCNext
   io.resp.stage2Out.checkerRedirect.bits.attribute := Mux(invalidTakenNext, BranchAttribute.None, finalAttributeNext)
   io.resp.stage2Out.checkerRedirect.bits.blockSel  := finalBlockSelNext
