@@ -27,33 +27,26 @@ class VFMulWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
   private val zeroFflagsE8 = VecInit(Seq.fill(vlenb)(zeroFflags))
   private val zeroNarrowFflagsE8 = VecInit(Seq.fill(vlenb / 2)(zeroFflags))
 
-  private val ex0opcode = fuOpType
   private val ex0NextOpcode = ex0Next.bits.ctrl.opcode
-  private val ex0vsew = ex0ctrl.vtype.get.vsew
   private val isFmul = makePipeReg(VFMacOpcodes.isFmul(ex0NextOpcode), pipeRegValids)
   private val isOP3 = makePipeReg(VFMacOpcodes.isOP3(ex0NextOpcode), pipeRegValids)
-  private val op3MulUsesOldVd =
-    VFMacOpcodes.isFmadd(ex0opcode) || VFMacOpcodes.isFnmadd(ex0opcode) ||
-    VFMacOpcodes.isFmsub(ex0opcode) || VFMacOpcodes.isFnmsub(ex0opcode)
-  private val op3NegProduct =
-    VFMacOpcodes.isFnmadd(ex0opcode) || VFMacOpcodes.isFnmsub(ex0opcode) ||
-    VFMacOpcodes.isFnmacc(ex0opcode) || VFMacOpcodes.isFnmsac(ex0opcode)
-//  private val resSew = Wire(Vec(normalLatency + 1, UInt(ex0vsew.getWidth.W)))
-
-//  for (i <- 0 to cfg.latency) {
-//    resSew(i) := ex(i).bits.ctrl.vtype.get.vsew
-//  }
+  private val dataType = makePipeReg(VFMacOpcodes.getDataType(ex0NextOpcode), pipeRegValids)
+  private val op3MulUsesOldVd = VFMacOpcodes.isFmadd(ex0NextOpcode) || VFMacOpcodes.isFnmadd(ex0NextOpcode) ||
+    VFMacOpcodes.isFmsub(ex0NextOpcode) || VFMacOpcodes.isFnmsub(ex0NextOpcode)
+  private val op3NegProduct = makePipeReg(
+    VFMacOpcodes.isFnmadd(ex0NextOpcode) || VFMacOpcodes.isFnmsub(ex0NextOpcode) ||
+      VFMacOpcodes.isFnmacc(ex0NextOpcode) || VFMacOpcodes.isFnmsac(ex0NextOpcode),
+    pipeRegValids)
 
   private val vfmuls = Seq.fill(numVecModule)(Module(new VectorFMUL)) // WARNING: Don't change this module. MUST USE VectorFloatMultiplier
   val toVfalu = IO(Output(Valid(Vec(numVecModule, new VFMul2VFALUOutput))))
 
-  private val vs2Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
   private val vs1Split = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
-  private val oldVdSplit = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
+  private val fpBSplit = Module(new VecDataSplitModule(dataWidth, dataWidthOfDataModule))
 
-  vs2Split.io.inVecData := ex0vs2
+  private val fpBIn = makePipeReg(Mux(op3MulUsesOldVd, ex0NextOldVd, ex0NextVs2), pipeRegValids)
   vs1Split.io.inVecData := ex0vs1
-  oldVdSplit.io.inVecData := ex0oldVd
+  fpBSplit.io.inVecData := fpBIn.ex0
 
   private val resultData = Wire(Vec(numVecModule, UInt(dataWidthOfDataModule.W)))
   private val fflagsData = Wire(Vec(numVecModule, Vec(vlenb / numVecModule, Fflags())))
@@ -62,10 +55,10 @@ class VFMulWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFu
     case (mod, i) =>
       mod.io.fire             := ex(0).valid
       mod.io.in.isFMUL        := isFmul.ex0
-      mod.io.in.isNeg         := op3NegProduct
-      mod.io.in.fp_fmt        := VFMacOpcodes.getDataType(ex0opcode)
+      mod.io.in.isNeg         := op3NegProduct.ex0
+      mod.io.in.fp_fmt        := dataType.ex0
       mod.io.in.fp_a          := vs1Split.io.outVec64b(i)
-      mod.io.in.fp_b          := Mux(op3MulUsesOldVd, oldVdSplit.io.outVec64b(i), vs2Split.io.outVec64b(i))
+      mod.io.in.fp_b          := fpBSplit.io.outVec64b(i)
       mod.io.in.round_mode    := frm
 
       toVfalu.bits(i) := mod.io.outToFADD

@@ -20,6 +20,11 @@ trait VecFuncAlias { this: Func =>
   protected def ex0oldVd = ex0data.src(2)
   protected def ex0vl = ex0data.vl.get
 
+  protected def ex0NextData = ex0Next.bits.data
+  protected def ex0NextVs1 = ex0NextData.src(0)
+  protected def ex0NextVs2 = ex0NextData.src(1)
+  protected def ex0NextOldVd = ex0NextData.src(2)
+
   protected def vxrm = in.vxrm.get
   protected def frm = in.frm.get
 
