@@ -1303,44 +1303,6 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
                     "cycle": cycle,
                 }
 
-            redirect_pending = getattr(recorder, "_two_fetch_redirect_pending", None)
-            if redirect_pending is not None and entries is not None:
-                old_tags = set(redirect_pending.get("old_tags") or ())
-                delivered_old = any(entry["ftq_ptr"] in old_tags for entry in entries)
-                target = redirect_pending.get("target")
-                first_pc = int(entries[0]["pc"]) << 1 if entries else None
-                if delivered_old:
-                    recorder.risk_observations.append(
-                        _tf_evidence(
-                            "two_fetch_redirect_old_tag_delivery",
-                            old_tags=[list(tag) for tag in sorted(old_tags)],
-                            delivered_tags=[list(tag) for tag in compressed_tags],
-                            cycle=cycle,
-                        )
-                    )
-                elif target is not None and first_pc == int(target):
-                    recorder.mark(
-                        "two_fetch_flush_flow",
-                        "backend_redirect_drops_inflight",
-                        cycle,
-                        _tf_evidence(
-                            "backend_redirect_first_new_delivery",
-                            target=int(target),
-                            first_pc=first_pc,
-                            old_tags=[list(tag) for tag in sorted(old_tags)],
-                            delivered_tags=[list(tag) for tag in compressed_tags],
-                        ),
-                    )
-                else:
-                    recorder.risk_observations.append(
-                        _tf_evidence(
-                            "two_fetch_redirect_wrong_first_delivery",
-                            target=target,
-                            first_pc=first_pc,
-                            cycle=cycle,
-                        )
-                    )
-                recorder._two_fetch_redirect_pending = None
         elif to_ibuffer_ready == 0:
             payload = _tf_ibuffer_payload(recorder)
             previous_payload = getattr(recorder, "_two_fetch_stalled_payload", None)
@@ -1376,6 +1338,51 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         recorder._two_fetch_stalled_payload = None
         recorder._two_fetch_stalled_payload_stable = True
         recorder._two_fetch_stalled_since = None
+
+    redirect_pending = getattr(recorder, "_two_fetch_redirect_pending", None)
+    if redirect_pending is not None and to_ibuffer_valid == 1 and to_ibuffer_ready == 1:
+        entries = _tf_ibuffer_entries(recorder)
+        if entries is not None:
+            compressed_tags = []
+            for entry in entries:
+                if not compressed_tags or entry["ftq_ptr"] != compressed_tags[-1]:
+                    compressed_tags.append(entry["ftq_ptr"])
+            old_tags = set(redirect_pending.get("old_tags") or ())
+            delivered_old = any(entry["ftq_ptr"] in old_tags for entry in entries)
+            target = redirect_pending.get("target")
+            first_pc = int(entries[0]["pc"]) << 1 if entries else None
+            if delivered_old:
+                recorder.risk_observations.append(
+                    _tf_evidence(
+                        "two_fetch_redirect_old_tag_delivery",
+                        old_tags=[list(tag) for tag in sorted(old_tags)],
+                        delivered_tags=[list(tag) for tag in compressed_tags],
+                        cycle=cycle,
+                    )
+                )
+            elif target is not None and first_pc == int(target):
+                recorder.mark(
+                    "two_fetch_flush_flow",
+                    "backend_redirect_drops_inflight",
+                    cycle,
+                    _tf_evidence(
+                        "backend_redirect_first_new_delivery",
+                        target=int(target),
+                        first_pc=first_pc,
+                        old_tags=[list(tag) for tag in sorted(old_tags)],
+                        delivered_tags=[list(tag) for tag in compressed_tags],
+                    ),
+                )
+            else:
+                recorder.risk_observations.append(
+                    _tf_evidence(
+                        "two_fetch_redirect_wrong_first_delivery",
+                        target=target,
+                        first_pc=first_pc,
+                        cycle=cycle,
+                    )
+                )
+            recorder._two_fetch_redirect_pending = None
 
     if backend_redirect == 1:
         in_flight_tags = None

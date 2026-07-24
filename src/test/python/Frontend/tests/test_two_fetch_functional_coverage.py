@@ -1080,6 +1080,27 @@ def test_backend_redirect_can_associate_recent_inflight_tags_after_flush_clear(t
     assert recorder._two_fetch_recent_inflight_tags is None
 
 
+def test_backend_redirect_hit_allows_single_recovery_ibuffer_fire(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    target = 0x80000100
+    recorder._two_fetch_redirect_pending = {
+        "old_tags": ((0, 10), (0, 11)),
+        "target": target,
+        "cycle": 1,
+    }
+    dut.set_key("ifu_second_valid", 0)
+    dut.set_key("ifu_s2_valid", 1)
+    dut.set_key("to_ibuffer_valid", 1)
+    dut.set_key("to_ibuffer_ready", 1)
+    _set_ibuffer_entries(dut, [(0, target >> 1, 1, 0, 20)])
+
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("two_fetch_flush_flow", "backend_redirect_drops_inflight")
+    assert recorder._two_fetch_redirect_pending is None
+    assert not recorder.risk_observations
+
+
 def test_non_backend_flush_clears_recent_inflight_tags(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     recorder._two_fetch_recent_inflight_tags = {
