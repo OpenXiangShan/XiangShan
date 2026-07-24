@@ -22,8 +22,8 @@ import xiangshan.frontend.bpu.TageTableInfo
 
 case class TageParameters(
     TableInfos: Seq[TageTableInfo] = Seq(
-      // TageTableInfo(Size, NumWays, HistoryLength)
-      // Size = NumSets * NumWays * NumBanks
+      // TageTableInfo(default active size, default active ways, static history length)
+      // default active size = default active sets * default active ways * NumBanks
       new TageTableInfo(4096, 2, 4),
       new TageTableInfo(4096, 2, 9),
       new TageTableInfo(4096, 2, 17),
@@ -33,29 +33,48 @@ case class TageParameters(
       new TageTableInfo(4096, 2, 211),
       new TageTableInfo(4096, 2, 397)
     ),
-    NumBanks:              Int = 4, // to alleviate read-write conflicts in single-port SRAM
-    TagWidth:              Int = 13,
+    NumBanks:              Int = 4,  // to alleviate read-write conflicts in single-port SRAM
+    TagWidth:              Int = 13, // default active tag width
     TakenCtrWidth:         Int = 3,
-    UsefulCtrWidth:        Int = 2,
+    UsefulCtrWidth:        Int = 2,  // default active useful counter width
     UsefulCtrInitValue:    Int = 0,
     NumUsefulCtrSramFolds: Int = 8,
-    WriteBufferSize:       Int = 4,
+    WriteBufferSize:       Int = 8,
     UsefulResetCtrWidth:   Int = 8,
     UseAltOnNaWidth:       Int = 7,
     NumUseAltOnNa:         Int = 128,
+    MinNumSets:            Int = 512,
+    MaxNumSets:            Int = 4096,
+    MinNumWays:            Int = 2,
+    MaxNumWays:            Int = 8,
+    MinTagWidth:           Int = 10,
+    MaxTagWidth:           Int = 20,
+    MinUsefulCtrWidth:     Int = 1,
+    MaxUsefulCtrWidth:     Int = 2,
     EnableTageTrace:       Boolean = false
-) {}
+) {
+  require(TableInfos.forall(info => info.getNumSets(NumBanks) >= MinNumSets))
+  require(TableInfos.forall(info => info.getNumSets(NumBanks) <= MaxNumSets))
+  require(TableInfos.forall(info => isPow2(info.getNumSets(NumBanks))))
+  require(TableInfos.forall(info => info.NumWays >= MinNumWays && info.NumWays <= MaxNumWays))
+  require(TagWidth >= MinTagWidth && TagWidth <= MaxTagWidth)
+  require(UsefulCtrWidth >= MinUsefulCtrWidth && UsefulCtrWidth <= MaxUsefulCtrWidth)
+  require(isPow2(MinNumSets) && isPow2(MaxNumSets))
+  require(WriteBufferSize >= MaxNumWays)
+}
 
 trait HasTageParameters extends HasBpuParameters {
   def tageParameters: TageParameters = bpuParameters.tageParameters
 
-  def NumBanks:           Int = tageParameters.NumBanks
-  def BankIdxWidth:       Int = log2Ceil(NumBanks)
-  def TagWidth:           Int = tageParameters.TagWidth
-  def TakenCtrWidth:      Int = tageParameters.TakenCtrWidth
-  def UsefulCtrWidth:     Int = tageParameters.UsefulCtrWidth
-  def UsefulCtrInitValue: Int = tageParameters.UsefulCtrInitValue
-  def WriteBufferSize:    Int = tageParameters.WriteBufferSize
+  def NumBanks:              Int = tageParameters.NumBanks
+  def BankIdxWidth:          Int = log2Ceil(NumBanks)
+  def TagWidth:              Int = tageParameters.MaxTagWidth
+  def DefaultTagWidth:       Int = tageParameters.TagWidth
+  def TakenCtrWidth:         Int = tageParameters.TakenCtrWidth
+  def UsefulCtrWidth:        Int = tageParameters.MaxUsefulCtrWidth
+  def DefaultUsefulCtrWidth: Int = tageParameters.UsefulCtrWidth
+  def UsefulCtrInitValue:    Int = tageParameters.UsefulCtrInitValue
+  def WriteBufferSize:       Int = tageParameters.WriteBufferSize
 
   def UsefulResetCtrWidth: Int = tageParameters.UsefulResetCtrWidth
   def UseAltOnNaWidth:     Int = tageParameters.UseAltOnNaWidth
@@ -66,16 +85,30 @@ trait HasTageParameters extends HasBpuParameters {
   def NumTables:     Int = TableInfos.length
   def TableIdxWidth: Int = log2Ceil(NumTables)
 
-  def MaxNumSets:     Int = TableInfos.map(_.getNumSets(NumBanks)).max
+  def MinNumSets:     Int = tageParameters.MinNumSets
+  def MaxNumSets:     Int = tageParameters.MaxNumSets
   def MaxSetIdxWidth: Int = log2Ceil(MaxNumSets)
 
-  def MaxNumWays:     Int = TableInfos.map(_.NumWays).max
+  def MinNumWays:     Int = tageParameters.MinNumWays
+  def MaxNumWays:     Int = tageParameters.MaxNumWays
   def MaxWayIdxWidth: Int = log2Ceil(MaxNumWays)
 
+  def MinNumSetsLog2:            Int = log2Ceil(MinNumSets)
+  def MaxNumSetsLog2:            Int = log2Ceil(MaxNumSets)
+  def ActiveNumSetsLog2Width:    Int = log2Ceil(MaxNumSetsLog2 + 1)
+  def ActiveNumWaysWidth:        Int = log2Ceil(MaxNumWays + 1)
+  def ActiveTagWidthWidth:       Int = log2Ceil(TagWidth + 1)
+  def ActiveUsefulCtrWidthWidth: Int = log2Ceil(UsefulCtrWidth + 1)
+
+  def SupportedNumSets: Seq[Int] =
+    Iterator.iterate(MinNumSets)(_ * 2).takeWhile(_ <= MaxNumSets).toSeq
+  def SupportedTagWidths: Seq[Int] =
+    tageParameters.MinTagWidth to tageParameters.MaxTagWidth
+
   // per table parameters
-  def NumSets(implicit info:     TageTableInfo): Int = info.getNumSets(NumBanks)
+  def NumSets(implicit info:     TageTableInfo): Int = MaxNumSets
   def SetIdxWidth(implicit info: TageTableInfo): Int = log2Ceil(NumSets)
-  def NumWays(implicit info:     TageTableInfo): Int = info.NumWays
+  def NumWays(implicit info:     TageTableInfo): Int = MaxNumWays
   def WayIdxWidth(implicit info: TageTableInfo): Int = log2Ceil(NumWays)
 
   def NumUsefulCtrSramFolds: Int = tageParameters.NumUsefulCtrSramFolds

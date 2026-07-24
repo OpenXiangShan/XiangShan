@@ -26,6 +26,7 @@ import utility.XSPerfAccumulate
 import utility.XSPerfHistogram
 import utility.XSPerfSeqAccumulate
 import utils.DuplicateInit
+import xiangshan.XSCoreParamsKey
 import xiangshan.frontend.BpuToFtqIO
 import xiangshan.frontend.FrontendTopDownBundle
 import xiangshan.frontend.FtqToBpuIO
@@ -42,6 +43,8 @@ import xiangshan.frontend.bpu.ras.MicroRas
 import xiangshan.frontend.bpu.ras.Ras
 import xiangshan.frontend.bpu.sc.Sc
 import xiangshan.frontend.bpu.tage.Tage
+import xiangshan.frontend.bpu.tage.TageRuntimeConfig
+import xiangshan.frontend.bpu.tage.TageTableConfig
 import xiangshan.frontend.bpu.ubtb.MicroBtb
 import xiangshan.frontend.bpu.utage.MicroTage
 import xiangshan.frontend.bpu.utage.MicroTageMeta
@@ -243,10 +246,39 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   ras.io.specIn.bits.attribute   := s3_prediction.attribute
   ras.io.specIn.bits.cfiPosition := s3_prediction.cfiPosition
 
+  private val hartId           = p(XSCoreParamsKey).HartId
+  private val tageTableConfigs = Wire(Vec(bpuParameters.tageParameters.TableInfos.length, new TageTableConfig))
+  bpuParameters.tageParameters.TableInfos.zip(tageTableConfigs).zipWithIndex.foreach {
+    case ((info, config), tableIdx) =>
+      config.numSetsLog2 := Constantin
+        .createRecord(
+          s"tageTableNumSetsLog2_${hartId}_${tableIdx}",
+          initValue = log2Ceil(info.getNumSets(bpuParameters.tageParameters.NumBanks))
+        )(config.numSetsLog2.getWidth - 1, 0)
+      config.numWays := Constantin
+        .createRecord(s"tageTableNumWays_${hartId}_${tableIdx}", initValue = info.NumWays)(
+          config.numWays.getWidth - 1,
+          0
+        )
+  }
+  private val tageRuntimeConfig = Wire(new TageRuntimeConfig)
+  tageRuntimeConfig.tagWidth := Constantin
+    .createRecord(s"tageTagWidth_${hartId}", initValue = bpuParameters.tageParameters.TagWidth)(
+      tageRuntimeConfig.tagWidth.getWidth - 1,
+      0
+    )
+  tageRuntimeConfig.usefulCtrWidth := Constantin
+    .createRecord(s"tageUsefulCtrWidth_${hartId}", initValue = bpuParameters.tageParameters.UsefulCtrWidth)(
+      tageRuntimeConfig.usefulCtrWidth.getWidth - 1,
+      0
+    )
+
   tage.io.fromMainBtb.result             := mbtb.io.result
   tage.io.fromMainBtb.s1_positions       := mbtb.io.s1_positions
   tage.io.fromPhr.foldedPathHist         := phr.io.s0_foldedPhr
   tage.io.fromPhr.foldedPathHistForTrain := phr.io.trainFoldedPhr
+  tage.io.tableConfigs                   := tageTableConfigs
+  tage.io.runtimeConfig                  := tageRuntimeConfig
   tage.io.debug_trainValid               := io.fromFtq.train.valid // for perf counters
 
   ittage.io.s1_foldedPhr   := phr.io.s1_foldedPhr

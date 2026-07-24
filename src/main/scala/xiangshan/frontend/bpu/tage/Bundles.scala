@@ -35,7 +35,7 @@ object TakenCounter extends SaturateCounterFactory {
 
 object UsefulCounter extends SaturateCounterFactory {
   def width(implicit p: Parameters): Int =
-    p(XSCoreParamsKey).frontendParameters.bpuParameters.tageParameters.UsefulCtrWidth
+    p(XSCoreParamsKey).frontendParameters.bpuParameters.tageParameters.MaxUsefulCtrWidth
 
   def Init(implicit p: Parameters): SaturateCounter =
     SaturateCounterInit(width, p(XSCoreParamsKey).frontendParameters.bpuParameters.tageParameters.UsefulCtrInitValue)
@@ -111,14 +111,26 @@ class TableWriteReq(implicit p: Parameters, info: TageTableInfo) extends TageBun
 class TageMetaEntry(implicit p: Parameters) extends TageBundle {
   val useProvider:       Bool            = Bool()
   val providerTableIdx:  UInt            = UInt(TableIdxWidth.W)
-  val providerWayIdx:    UInt            = UInt(MaxNumWays.W)
+  val providerWayIdx:    UInt            = UInt(MaxWayIdxWidth.W)
   val providerTakenCtr:  SaturateCounter = TakenCounter()
   val providerUsefulCtr: SaturateCounter = UsefulCounter()
   val altOrBasePred:     Bool            = Bool()
 }
 
+class TageTableConfig(implicit p: Parameters) extends TageBundle {
+  val numSetsLog2: UInt = UInt(ActiveNumSetsLog2Width.W)
+  val numWays:     UInt = UInt(ActiveNumWaysWidth.W)
+}
+
+class TageRuntimeConfig(implicit p: Parameters) extends TageBundle {
+  val tagWidth:       UInt = UInt(ActiveTagWidthWidth.W)
+  val usefulCtrWidth: UInt = UInt(ActiveUsefulCtrWidthWidth.W)
+}
+
 class TageMeta(implicit p: Parameters) extends TageBundle {
-  val entries: Vec[TageMetaEntry] = Vec(NumBtbResultEntries, new TageMetaEntry)
+  val entries:       Vec[TageMetaEntry]   = Vec(NumBtbResultEntries, new TageMetaEntry)
+  val tableConfigs:  Vec[TageTableConfig] = Vec(NumTables, new TageTableConfig)
+  val runtimeConfig: TageRuntimeConfig    = new TageRuntimeConfig
 }
 
 class TageFoldedHist(implicit p: Parameters, info: TageTableInfo) extends TageBundle {
