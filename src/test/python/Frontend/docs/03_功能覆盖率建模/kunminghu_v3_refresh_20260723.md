@@ -183,3 +183,164 @@ evidence for them before merge.
 For each merged watchlist item, record the new design SHA, build a new clean DUT,
 refresh the affected signal contract and leaves, and generate a new non-merged
 evidence set.
+
+## 8. Closure execution result (2026-07-24)
+
+This closure touched verification assets only. No `src/main/scala` or generated
+design source was edited. Relative to the frozen local design SHA
+`29c99bba49cd8d0d086ee5bebe631e75a1378136`, the final implementation HEAD has no
+design-source diff.
+
+### 8.1 Final revisions and DUT manifest
+
+- Final verification implementation SHA:
+  `681ed1d9119c8cb5d22441b5dfc388bad8a2072e`.
+- Frozen DUT source SHA:
+  `29c99bba49cd8d0d086ee5bebe631e75a1378136`.
+- Remote kunminghu-v3 reference SHA:
+  `06f4a74041023799b9ed32c0447c7d55c762f999`.
+- Build command:
+  `make frontend CONFIG=DefaultConfig ISSUE=E.b NUM_CORES=1 CHISEL_TARGET=systemverilog FRONTEND_WAVEFORM_FORMAT=fst`.
+- Required environment activation was:
+  `deactivate 2>/dev/null || true; source /nfs/share/unitychip/activate`.
+
+`build-frontend/frontend_build_manifest.json` runtime validation is valid:
+
+| Field | Value |
+| --- | --- |
+| `dut_source_sha` | `29c99bba49cd8d0d086ee5bebe631e75a1378136` |
+| `implementation_sha` | `681ed1d9119c8cb5d22441b5dfc388bad8a2072e` |
+| `design_baseline_sha` | `06f4a74041023799b9ed32c0447c7d55c762f999` |
+| `source_tree_dirty` | `false` |
+| `dut_build_sha256` | `7e78bf59c8540806f896d8afec38c9bd325ecc559b380742edc9f04482b1b29c` |
+| `dut_python_extension_sha256` | `edde3e89475de8ffd6ad38ef25601f16c50ac9b6dcd3c179d5184fd25b4bd1d9` |
+| `generated_rtl_sha256` | `b53d2e11575b9d96d5bb67941c9453f9e3472af8d424001100fa813bb9e78528` |
+| `signal_contract_sha256` | `229aee1975415243bfc8deb3847e2fdf58c5a2134fb24bb959cc893132c0fc7d` |
+
+### 8.2 Verification-side implementation changes
+
+Canonical assets were updated in place; no second registry or sampler was
+introduced.
+
+- `env/funcov.py`
+  - remapped two-fetch final service width to
+    `fromMainPipe.realTwoFetchValid`;
+  - removed nonexistent `s0_twoFetchFailReason` and old
+    `WayLookup.io_fromFtq_*` assumptions;
+  - reconstructed observable MainPipe fallback reasons only where current RTL
+    signals provide a legal same-transaction relation;
+  - moved `invalidTaken` sampling to current s1/rawInstrVec semantics;
+  - made pointer-advance bins require a real two-fetch candidate instead of
+    inferring step-one from ordinary single fetches;
+  - fixed backend-redirect in-flight tag association and allowed the recovery
+    path to be single-width while still proving old dual tags were dropped;
+  - kept unobservable conditions diagnostic instead of using default zero.
+- `env/functional_coverage.py`
+  - kept IBuffer payload-stability observations as diagnostics; checker/testcase
+    assertions remain responsible for pass/fail, while refill/redirect ownership
+    mismatches still block HIT.
+- `tests/`
+  - extended model, signal-contract, IBuffer backpressure, backend redirect,
+    BPU s3, ICache refill/fault/flush, and uncache prev-half directed checks.
+- Canonical CSVs:
+  - testpoint wording for #6219/#6221 was refreshed earlier for BIN-416/417 and
+    BIN-501..541;
+  - this run strictly backannotated the entire active registry, not just BIN-5xx.
+
+### 8.3 Tests and regressions
+
+| Step | Result |
+| --- | --- |
+| Registry/mapping/schema/model unit tests | `148 passed` |
+| Signal-contract tests | `6 passed` |
+| #6219/#6221 affected directed, single run diagnostic | `10 passed, 1 skipped, 2 failed` |
+| #6219/#6221 affected directed, unique run_id per item | `11 passed, 1 skipped, 2 failed` |
+| Active asm/bin-trace suite | `4 passed, 5 failed` after resolving `NEMU_EXEC` to `/nfs/home/jiabowen/ai_workspace/NEMU/build/riscv64-nemu-interpreter` |
+| Additional active uncache tests | `5 passed, 1 skipped` |
+| Strict full-registry backannotation | `hit=28, partial=16, model=19, failed=16, closed_preserved=0`; one BLOCKED row remains BLOCKED |
+| Strict codecov over eligible passing `.dat` only | Passed, 19 unique run IDs |
+| Strict codecov over all active `.dat` | Correctly rejected failed sidecar evidence |
+
+The main artifact roots are:
+
+- `src/test/python/Frontend/data/runs/frontend_refresh_20260724_active64_directed_*_681ed1d91/`
+- `src/test/python/Frontend/data/runs/frontend_refresh_20260724_active64_uncache_*_681ed1d91/`
+- `src/test/python/Frontend/data/runs/frontend_refresh_20260724_active64_asm2_681ed1d91_*/`
+- `src/test/python/Frontend/data/runs/frontend_refresh_20260724_active64_report_681ed1d91/`
+
+### 8.4 Current active registry status
+
+After applying the strict backannotation to
+`../02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv`, the 64
+active bins are:
+
+| Status | Count |
+| --- | ---: |
+| HIT | 28 |
+| PARTIAL | 16 |
+| MODELED | 19 |
+| BLOCKED | 1 |
+| CLOSED | 0 |
+
+Strict functional coverage is therefore `28 / 64` for automatic HIT closure.
+Observed diagnostic funcov, including failed or otherwise rejected artifacts, saw
+`43 / 64` active bins; those extra hits were not allowed to upgrade status.
+
+New current-version HIT evidence includes:
+
+- BIN-401..415 from the four passing IFU asm/bin-trace cases;
+- BIN-416/417 and BIN-418..421/423 from uncache directed tests;
+- BIN-520/521/523/524 from ICache MainPipe hit/refill directed tests;
+- BIN-538/539 from IBuffer backpressure and dual delivery tests.
+
+Current-version rejected or partial evidence includes:
+
+- BIN-509: BPU s3 competition testcase failed and the target bin was not hit.
+- BIN-529: RVI cross-block asm/bin-trace failed before a valid closure.
+- BIN-540: backend redirect testcase hit the target bin, but monitor/checker
+  failed, so it remains PARTIAL.
+- Several two-fetch asm bins were observed in failed bin-trace artifacts and
+  remain PARTIAL until the checker/backend recovery issue is resolved.
+
+### 8.5 Code coverage
+
+Code coverage was generated from 19 passing, provenance-clean `.dat` files with
+unique run IDs. Failed or skipped test `.dat` files were not merged.
+
+| Kind | Hit | Total | Percent |
+| --- | ---: | ---: | ---: |
+| line | 2696 | 26042 | 10.35% |
+| branch | 14513 | 30302 | 47.89% |
+| expr | 21497 | 44249 | 48.58% |
+| toggle | 314812 | 954708 | 32.97% |
+
+The strict all-active codecov attempt rejected the failed backend-redirect
+sidecar, proving that failed artifacts were not mixed into the accepted code
+coverage denominator.
+
+### 8.6 Remaining blockers and bugs
+
+- Backend redirect recovery mismatch:
+  `test_backend_redirect_drops_dual_miss_and_ignores_delayed_old_response`
+  drives target `0x80000100`; the coverage sampler now observes BIN-540, but
+  the monitor reports `REDIRECT_RECOVERY_TARGET_MISMATCH` at cycle 694
+  (`expected=0x80000100`, `actual=0x80000000`). This blocks HIT.
+- BPU s3 redirect competition:
+  `test_bpu_s3_override_drops_stalled_dual_request_before_mainpipe_fire` did not
+  find a rollback-eligible stalled dual FTQ collision in 4000 cycles. It also
+  reports repeated `PC_MISMATCH` errors (`expected=0x800001c0`,
+  `actual=0x80000180`) at cycles 945, 1713, 2993, 3761, and 4529.
+- Five two-fetch asm/bin-trace cases fail on the backend model's
+  `golden_first_mismatch_redirect` recovery assertion. Example failures include
+  `actual_pc=0x80001110 target_pc=0x80000fe0` and
+  `actual_pc=0x80000160 target_pc=0x80000020`. These artifacts remain
+  diagnostic only.
+- BIN-422 remains BLOCKED because the current generated DUT does not expose
+  `io_tlbCsr_mPBMTE`.
+- `rawInstrVec[31].isCrossBlockInstr` is still missing from the current signal
+  inventory; bins that require this exact flag cannot use a default-zero hit.
+- MainPipe/WayLookup data-bank conflict and some prioritized failure reasons
+  still lack a complete same-s0 observable relation. BIN-515..518 remain modeled
+  unless additional observability or deterministic legal stimulus is added.
+
+No `CLOSED` status was written by automation.

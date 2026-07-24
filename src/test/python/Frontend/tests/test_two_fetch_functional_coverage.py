@@ -2848,6 +2848,57 @@ def test_backannotation_rejects_hit_from_failed_dut_artifact(tmp_path):
     assert "monitor_errors:1" in row["evidence"]
 
 
+def test_backannotation_replaces_stale_auto_evidence_when_new_artifact_arrives(tmp_path):
+    pilot_path = tmp_path / "pilot.csv"
+    testpoint_path = tmp_path / "testpoints.csv"
+    dut_path = tmp_path / "dut.funcov.json"
+    pilot_path.write_text(
+        "Bin_ID,Coverage_Group,Coverpoint,Bin_Name,建议试点用例\n"
+        "BIN-501,two_fetch_ftq_eligibility,request_eligibility,eligible_dual,case_a\n",
+        encoding="utf-8-sig",
+    )
+    testpoint_path.write_text(
+        "一级测试点,coverage,status,testcase,evidence\n"
+        "leaf,\"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, "
+        "bins eligible_dual (BIN-501)\",PARTIAL,case_a,"
+        "HUMAN_NOTE:keep; DUT:old_case:hits=1; DUT_REJECTED:bad_case:pytest_outcome:failed\n",
+        encoding="utf-8-sig",
+    )
+    dut_path.write_text(
+        json.dumps(
+            {
+                "artifact_schema_version": 2,
+                "artifact_tag": "case_a_test_bin_trace",
+                "coverage_targets": {"bin_ids": ["BIN-501"], "hit_keys": []},
+                **_eligible_artifact_paths("unit-replace-auto", "case_a"),
+                "provenance": _eligible_provenance(),
+                "run": _eligible_run("unit-replace-auto"),
+                "stats": {"monitor": {"cycles_total": 10, "error_count": 0}},
+                "errors": [],
+                "hits": {"two_fetch_ftq_eligibility::request_eligibility::eligible_dual": {"hits": 3}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    counts = backannotate(
+        testpoint_path,
+        load_pilot(pilot_path),
+        load_artifacts([dut_path]),
+        apply=True,
+    )
+
+    assert counts["hit"] == 1
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["status"] == "HIT"
+    assert "HUMAN_NOTE:keep" in row["evidence"]
+    assert "DUT:old_case" not in row["evidence"]
+    assert "DUT_REJECTED:bad_case" not in row["evidence"]
+    assert "DUT:case_a_test_bin_trace:hits=3" in row["evidence"]
+    assert "run_id=unit-replace-auto" in row["evidence"]
+
+
 def test_backannotation_rejects_legacy_group_bin_hit_key(tmp_path):
     pilot_path = tmp_path / "pilot.csv"
     testpoint_path = tmp_path / "testpoints.csv"

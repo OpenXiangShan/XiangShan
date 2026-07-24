@@ -826,8 +826,22 @@ def build_artifact_audit(artifacts: Iterable[tuple[Path, dict, str]]) -> list[di
     return rows
 
 
-def _append_evidence(existing: str, entries: Iterable[str]) -> str:
+_AUTO_EVIDENCE_PREFIXES = (
+    "DUT:",
+    "DUT_REJECTED:",
+    "ARTIFACT_REJECTED:",
+    "MODEL:",
+)
+
+
+def _append_evidence(existing: str, entries: Iterable[str], *, replace_auto: bool = False) -> str:
     values = [item for item in str(existing or "").split("; ") if item]
+    if replace_auto:
+        values = [
+            item
+            for item in values
+            if not item.startswith(_AUTO_EVIDENCE_PREFIXES)
+        ]
     for entry in entries:
         if entry not in values:
             values.append(entry)
@@ -896,8 +910,11 @@ def backannotate(
                 if target_matches or (_as_int(hit) or 0) > 0:
                     model_entries.append(f"MODEL:{tag}")
 
+        new_entries = [*model_entries, *dut_entries, *rejected_entries]
         row["evidence"] = _append_evidence(
-            row["evidence"], [*model_entries, *dut_entries, *rejected_entries]
+            row["evidence"],
+            new_entries,
+            replace_auto=bool(new_entries),
         )
         if dut_entries:
             row["status"] = "HIT"
