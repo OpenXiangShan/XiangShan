@@ -50,7 +50,12 @@ TEST_FILE = $(shell find ./src/test/scala -name '*.scala')
 CONFIG ?= DefaultConfig
 NUM_CORES ?= 1
 ISSUE ?= E.b
+XS_NOC_CONFIGS = XSNoCTopConfig XSNoCTopMinimalConfig XSNoCDiffTopConfig XSNoCDiffTopMinimalConfig
+ifneq ($(filter $(CONFIG),$(XS_NOC_CONFIGS)),)
+LLC ?= OpenLLC
+else
 LLC ?= ZhuJiang
+endif
 CHISEL_TARGET ?= systemverilog
 
 SUPPORT_CHI_ISSUE = B C E.b
