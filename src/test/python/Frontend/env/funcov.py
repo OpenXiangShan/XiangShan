@@ -755,6 +755,8 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         recorder._two_fetch_stalled_payload = None
         recorder._two_fetch_stalled_payload_stable = True
         recorder._two_fetch_stalled_since = None
+        if backend_redirect != 1:
+            recorder._two_fetch_recent_inflight_tags = None
     pending_fetch_flag = _tf_read(recorder, "fetch_ptr_flag")
     pending_fetch_value = _tf_read(recorder, "fetch_ptr_value")
     recorder._two_fetch_ftq_pending = (
@@ -950,6 +952,12 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
             (True, False): "miss_hit",
             (True, True): "miss_miss",
         }[(req0_miss, req1_miss)]
+        recorder._two_fetch_recent_inflight_tags = {
+            "tags": main_s1_tag,
+            "cycle": cycle,
+            "has_miss": bool(req0_miss or req1_miss),
+            "pattern": pattern,
+        }
         recorder._two_fetch_last_main_s1_tag = main_s1_tag
         recorder._two_fetch_refill_pending = {
             "tag": main_s1_tag,
@@ -1381,6 +1389,10 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
             in_flight_tags = expected_cfvec.get("tags")
         elif second_valid == 1 and s2_valid == 1 and None not in (current_s2_tag0, current_s2_tag1):
             in_flight_tags = (current_s2_tag0, current_s2_tag1)
+        else:
+            recent = getattr(recorder, "_two_fetch_recent_inflight_tags", None)
+            if recent is not None and cycle - int(recent.get("cycle", cycle)) <= 128:
+                in_flight_tags = recent.get("tags")
         redirect_target = _tf_read(recorder, "backend_redirect_target")
         if (
             in_flight_tags is not None
@@ -1403,6 +1415,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         recorder._two_fetch_stalled_payload_stable = True
         recorder._two_fetch_stalled_since = None
         recorder._two_fetch_expected_cfvec = None
+        recorder._two_fetch_recent_inflight_tags = None
 
 
 def _classify_block_pos(pc: int) -> str:

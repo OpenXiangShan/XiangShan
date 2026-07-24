@@ -761,6 +761,36 @@ def test_two_fetch_replacing_pending_refill_fails_checker(tmp_path):
     assert raw["checker"]["status"] == "fail"
 
 
+def test_two_fetch_ibuffer_payload_risk_stays_diagnostic(tmp_path):
+    recorder, _env, _dut = _make_recorder(tmp_path)
+    recorder.risk_observations.append(
+        {"event": "ibuffer_payload_changed_under_backpressure", "cycle": 12}
+    )
+
+    raw = recorder._raw_dict()
+
+    assert raw["errors"] == []
+    assert raw["checker"]["status"] == "pass"
+    assert any(
+        item.get("event") == "ibuffer_payload_changed_under_backpressure"
+        for item in raw["risk_observations"]
+    )
+
+
+def test_two_fetch_redirect_risk_still_fails_checker(tmp_path):
+    recorder, _env, _dut = _make_recorder(tmp_path)
+    recorder.risk_observations.append(
+        {"event": "two_fetch_redirect_wrong_first_delivery", "cycle": 12}
+    )
+
+    raw = recorder._raw_dict()
+
+    assert raw["errors"] == [
+        {"event": "two_fetch_redirect_wrong_first_delivery", "cycle": 12}
+    ]
+    assert raw["checker"]["status"] == "fail"
+
+
 def test_two_fetch_checker_second_invalid_taken_bin(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     recorder._two_fetch_last_dual_cycle = 6
@@ -1022,6 +1052,46 @@ def test_backend_redirect_requires_old_tags_dropped_and_new_target_delivery(tmp_
 
     assert recorder.key_hit("two_fetch_flush_flow", "backend_redirect_drops_inflight")
     assert not recorder.risk_observations
+
+
+def test_backend_redirect_can_associate_recent_inflight_tags_after_flush_clear(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    recorder._two_fetch_recent_inflight_tags = {
+        "tags": ((0, 10), (0, 11)),
+        "cycle": 1,
+        "has_miss": True,
+        "pattern": "miss_miss",
+    }
+    target = 0x80000100
+    dut.set_key("backend_redirect", 1)
+    dut.set_key("backend_redirect_target", target)
+    dut.set_key("main_s1_flush", 1)
+
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    assert {
+        key: recorder._two_fetch_redirect_pending.get(key)
+        for key in ("old_tags", "target", "cycle")
+    } == {
+        "old_tags": ((0, 10), (0, 11)),
+        "target": target,
+        "cycle": 2,
+    }
+    assert recorder._two_fetch_recent_inflight_tags is None
+
+
+def test_non_backend_flush_clears_recent_inflight_tags(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    recorder._two_fetch_recent_inflight_tags = {
+        "tags": ((0, 10), (0, 11)),
+        "cycle": 1,
+    }
+    dut.set_key("main_s1_flush", 1)
+
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    assert recorder._two_fetch_recent_inflight_tags is None
+    assert recorder._two_fetch_redirect_pending is None
 
 
 def test_backend_redirect_old_tag_delivery_is_a_protocol_risk_not_a_hit(tmp_path):

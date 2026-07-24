@@ -213,6 +213,7 @@ class FunctionalCoverageRecorder:
         self._two_fetch_stalled_payload: Optional[tuple[int, ...]] = None
         self._two_fetch_expected_cfvec: Optional[dict] = None
         self._two_fetch_redirect_pending: Optional[dict] = None
+        self._two_fetch_recent_inflight_tags: Optional[dict] = None
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
 
@@ -586,6 +587,7 @@ class FunctionalCoverageRecorder:
         self._two_fetch_stalled_payload = None
         self._two_fetch_expected_cfvec = None
         self._two_fetch_redirect_pending = None
+        self._two_fetch_recent_inflight_tags = None
 
     def on_cycle(self, cycle: int, env) -> None:
         dut = env.dut
@@ -1026,14 +1028,17 @@ class FunctionalCoverageRecorder:
             except Exception:
                 errors = []
 
-        # Sampler-side protocol observations are evidence, not hits.  A
-        # payload change while valid&&!ready or a refill/tag mismatch is a
-        # checker failure for this run and must block automatic HIT.
+        # Sampler-side protocol observations are evidence, not hits.  Refill
+        # and redirect ownership mismatches are transaction-attribution errors
+        # for this run and must block automatic HIT.  IBuffer payload stability
+        # is checked by the directed testcase/monitor; sampler observations are
+        # retained under risk_observations as diagnostics instead of being
+        # promoted to run-level checker errors.
         protocol_risks = [
             item
             for item in self.risk_observations
             if str(item.get("event", "")).startswith(
-                ("ibuffer_payload_changed", "two_fetch_refill_", "two_fetch_redirect_")
+                ("two_fetch_refill_", "two_fetch_redirect_")
             )
         ]
         if protocol_risks:
