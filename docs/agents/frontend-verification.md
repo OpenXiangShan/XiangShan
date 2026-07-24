@@ -32,9 +32,14 @@ tree. Start here unless the task explicitly says otherwise.
 - `src/test/python/Frontend/env/funcov.py`: module-level predicates in the only
   active recorder/sampler chain. Keep each group/point/bin aligned with the
   canonical registry.
-- `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh`: standard bin-trace
-  entry that now auto-creates `TB_RUN_ID` / `TB_ARTIFACT_DIR` and routes
-  waveform, coverage, funcov, and case-log outputs into that run layout.
+- `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh`: standard
+  single-case bin-trace entry that now auto-creates `TB_RUN_ID` /
+  `TB_ARTIFACT_DIR` and routes waveform, coverage, funcov, and case-log
+  outputs into that run layout.
+- `src/test/python/Frontend/scripts/run_bin_trace_suite.sh`: curated
+  ready-to-run bin-trace regression wrapper. Pass selected bins as arguments or
+  with `--list-file <path>`; it runs the single-case pipeline for each selected
+  bin.
 - `src/test/python/Frontend/env/agents/`: DUT-facing side agents such as
   ICache, PTW, uncache, and backend drive logic.
 - `src/test/python/Frontend/env/model/`: semantic model helpers, golden trace
@@ -109,6 +114,13 @@ that boundary stable.
 
 - If the requested path is not minimal, prefer the shorter path and explain the change in direction.
 - When splitting batched commits, prefer `git add -p` first. Do not make direct documentation edits as part of the commit-splitting phase. If `git add -p` cannot express the desired split, stop and ask the user before changing files further.
+- When the user says a file or change should not be uploaded, committed, staged,
+  or included in a diff, treat that strictly as a version-control boundary. Do
+  not delete, move, truncate, or rewrite the local file unless the user
+  explicitly asks for local deletion or cleanup.
+- When adding a contract test for a script, wrapper, or runner, place it in a
+  dedicated test file named after that entrypoint. Do not hide runner contracts
+  inside an unrelated feature test file.
 - Never use `git push -f` under any circumstances.
 - Every log printed by the verification environment must help debug a real
   failure and be as short as practical. Do not add noisy, redundant, or
@@ -296,10 +308,16 @@ do this by passing `-p no:rerunfailures`. If you invoke `pytest` directly,
 include the same flag unless you intentionally need that plugin outside the
 sandbox.
 
-Run the default frontend regression flow from the repo root:
+Run the default non-DUT frontend regression flow from the repo root:
 
 ```bash
 src/test/python/Frontend/scripts/run_pytest_with_log.sh
+```
+
+Run the DUT-enabled frontend regression flow explicitly:
+
+```bash
+TB_ENABLE_DUT_TESTS=1 src/test/python/Frontend/scripts/run_pytest_with_log.sh
 ```
 
 Run a narrower frontend test:
@@ -323,7 +341,8 @@ Common direct-`pytest` arguments worth keeping consistent:
 
 `src/test/python/Frontend/scripts/run_pytest_with_log.sh` already sets the
 logging-related pytest arguments above and disables `rerunfailures` by default.
-Use direct `pytest` mainly when you need a narrower target or explicit env vars.
+It does not enable DUT integration by itself. Use direct `pytest` mainly when
+you need a narrower target or explicit env vars.
 
 `src/test/python/Frontend/scripts/run_pytest_with_log.sh` also accepts these
 script-level env vars:
@@ -354,8 +373,10 @@ git config core.hooksPath .githooks
 
 ## Bin-Trace Workflow
 
-Treat `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh` as the only
-supported bin-trace entrypoint for ready-to-run cases.
+Treat `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh` as the
+supported single-case bin-trace entrypoint for ready-to-run cases.
+`run_bin_trace_suite.sh` is the supported curated regression wrapper and should
+delegate each selected bin to the single-case pipeline.
 
 When preparing binaries for the frontend_bt NEMU configuration whose memory
 image starts at `0x10000000` while the frontend reset vector is `0x10001000`,
@@ -379,6 +400,32 @@ BIN_TRACE_ENV=(
 timeout --foreground 1200 env "${BIN_TRACE_ENV[@]}" \
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
 ```
+
+### Regression List
+
+Use `run_bin_trace_suite.sh` for an explicitly selected ready-to-run bin-trace
+regression:
+
+```bash
+timeout --foreground 2400 env "${BIN_TRACE_ENV[@]}" \
+src/test/python/Frontend/scripts/run_bin_trace_suite.sh \
+  ready-to-run/cfi_mix_case.bin \
+  ready-to-run/cfi_random_5inst_case.bin
+```
+
+Do not add a tracked default active-bin list. Keep the selected bin set explicit
+in the command line or in a user-provided `--list-file <path>` outside the
+commit unless the list itself is intentionally under review. Leave long-running
+workloads out unless they are explicitly requested for that run.
+
+Useful suite controls:
+
+- `src/test/python/Frontend/scripts/run_bin_trace_suite.sh --list <bin ...>`:
+  print the selected bins without running them.
+- `src/test/python/Frontend/scripts/run_bin_trace_suite.sh --list-file <path>`:
+  run a different list file.
+- `TB_BIN_TRACE_SUITE_CONTINUE_ON_FAIL=1`: continue later bins after a case
+  failure.
 
 `run_bin_trace_pipeline.sh` defaults both env logging and pytest CLI logging to
 `INFO`, and defaults `PYTEST_ADDOPTS` to

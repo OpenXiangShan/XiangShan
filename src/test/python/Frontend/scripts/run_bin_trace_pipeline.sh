@@ -53,7 +53,8 @@ Environment variables:
   TB_TRACE_STALL_SNAPSHOT_INTERVAL
                        Print stall snapshots every N stagnant cycles when > 0 (default: 5000)
   TB_TRACE_TARGET_CURSOR
-                       Treat reaching this trace cursor as pass (default: 0, disabled)
+                       Stop at this cursor for bounded debug/window evidence
+                       (default: 0, disabled)
   TB_TRACE_MAX_CYCLES  Optional DUT cycle budget for test_bin_trace; 0 means run until
                        golden completion (default: 0)
   TB_PYTEST_TIMEOUT_SECS

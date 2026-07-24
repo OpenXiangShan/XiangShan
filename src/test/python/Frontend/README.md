@@ -33,7 +33,7 @@
 - `scripts/`
   - Frontend 目录下的 shell 脚本入口。
   - 包含 `run_pytest_with_log.sh`、`run_web_console.sh`、
-    `run_bin_trace_pipeline.sh`、`fst_to_fsdb.sh`、
+    `run_bin_trace_pipeline.sh`、`run_bin_trace_suite.sh`、`fst_to_fsdb.sh`、
     `gen_coverage_html.sh` 和 `report_raw_code_coverage.py`。
 - `tools/`
   - Frontend 目录下的 Python 工具入口。
@@ -154,13 +154,30 @@ make frontend-vcs \
 或 `TB_FRONTEND_SIM=vcs` 选择；只有需要显式指定非默认目录时才使用
 `TB_FRONTEND_PYLIB=/path/to/pylib-root`。
 
-- 默认回归入口：
+- non-DUT 默认回归入口：
 
 ```bash
 src/test/python/Frontend/scripts/run_pytest_with_log.sh
 ```
 
-- bin trace 标准入口：
+- DUT 集成回归入口：
+
+```bash
+TB_ENABLE_DUT_TESTS=1 src/test/python/Frontend/scripts/run_pytest_with_log.sh
+```
+
+- bin trace 列表回归入口：
+
+```bash
+src/test/python/Frontend/scripts/run_bin_trace_suite.sh \
+  ready-to-run/cfi_mix_case.bin \
+  ready-to-run/cfi_random_5inst_case.bin
+```
+
+bin 列表必须通过命令行参数或 `--list-file <path>` 显式提供；不要上传默认
+active list。长时间运行的大 case 只在需要时手动加入本次命令或本地 list file。
+
+- bin trace 单 case 入口：
 
 ```bash
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
