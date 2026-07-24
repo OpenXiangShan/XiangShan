@@ -392,19 +392,23 @@ object DecodeChannelOutput {
 
   def fromVecChannelUop(vuop: VecDecodeChannelOutputUop): DecodeChannelOutput = {
     val uop = Wire(new DecodeChannelOutput)
+    // VFALU can reverse its inputs after register-file reads. Keeping the
+    // scalar in src1 is required because only that issue port reads FPRs.
+    val reverseVfalu = vuop.src12Rev && vuop.fuType === FuType.vfalu.U
+    val swapSrc12 = vuop.src12Rev && !reverseVfalu
 
     uop.fuType := vuop.fuType
     uop.opcode := vuop.opcode
     uop.isVset := vuop.isVset
 
-    uop.src1Ren := Mux(vuop.src12Rev, vuop.renameInfo.src2Ren, vuop.renameInfo.src1Ren)
-    uop.src1Type := Mux(vuop.src12Rev, vuop.renameInfo.src2Type, vuop.renameInfo.src1Type)
-    uop.src2Ren := Mux(vuop.src12Rev, vuop.renameInfo.src1Ren,vuop.renameInfo.src2Ren)
-    uop.src2Type := Mux(vuop.src12Rev, vuop.renameInfo.src1Type,vuop.renameInfo.src2Type)
+    uop.src1Ren := Mux(swapSrc12, vuop.renameInfo.src2Ren, vuop.renameInfo.src1Ren)
+    uop.src1Type := Mux(swapSrc12, vuop.renameInfo.src2Type, vuop.renameInfo.src1Type)
+    uop.src2Ren := Mux(swapSrc12, vuop.renameInfo.src1Ren,vuop.renameInfo.src2Ren)
+    uop.src2Type := Mux(swapSrc12, vuop.renameInfo.src1Type,vuop.renameInfo.src2Type)
     uop.src3Ren := vuop.renameInfo.readVdAsSrc || vuop.vdDepElim =/= VdDepElim.Always
     uop.src3Type.value := DecodeSrcType.VP
-    uop.lsrc1 := Mux(vuop.src12Rev, vuop.src.src2, vuop.src.src1)
-    uop.lsrc2 := Mux(vuop.src12Rev, vuop.src.src1, vuop.src.src2)
+    uop.lsrc1 := Mux(swapSrc12, vuop.src.src2, vuop.src.src1)
+    uop.lsrc2 := Mux(swapSrc12, vuop.src.src1, vuop.src.src2)
     uop.lsrc3 := vuop.src.dest
     uop.vlRen := vuop.renameInfo.vlRen
     uop.v0Ren := vuop.v0Ren
@@ -441,7 +445,7 @@ object DecodeChannelOutput {
     uop.uopIdx := vuop.uopIdx
     uop.isFirstUop := vuop.isFirstUop
     uop.isLastUop := vuop.isLastUop
-    uop.src12Rev := vuop.src12Rev
+    uop.src12Rev := reverseVfalu
 
     uop.isJR := false.B
     uop.isJ := false.B

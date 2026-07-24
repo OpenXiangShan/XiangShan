@@ -890,12 +890,12 @@ object Bundles {
     val nf        = Nf()
     val veew      = VEew()
 
-    val isReverse = Bool() // vrsub, vrdiv
     val isExt     = Bool()
     val isNarrow  = Bool()
     val isDstMask = Bool() // vvm, vvvm, mmm
     val isOpMask  = Bool() // vmand, vmnand
     val isMove    = Bool() // vmv.s.x, vmv.v.v, vmv.v.x, vmv.v.i
+    val isReverse = Bool() // reverse operand order for vector arithmetic
 
     val isDependOldVd = Bool() // some instruction's computation depends on oldvd
     val isWritePartVd = Bool() // some instruction's computation writes part of vd, such as vredsum

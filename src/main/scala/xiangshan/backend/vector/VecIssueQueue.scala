@@ -915,6 +915,7 @@ object VecIssueQueue {
     // from decode
     val fuType    = FuType()
     val opcode    = FuOpType()
+    val isReverse = Bool()
 
     val vm        = Bool()
     val vtype     = VType()
@@ -959,6 +960,7 @@ object VecIssueQueue {
     def fromDispatchOutUop(source: DispatchOutUop): Unit = {
       this.fuType := source.fuType
       this.opcode := source.fuOpType
+      this.isReverse := source.vpu.isReverse
 
       this.vm := source.vm
       this.vtype := source.vtype
@@ -1002,6 +1004,7 @@ object VecIssueQueue {
     def fromRegionInUop(source: RegionInUop): Unit = {
       this.fuType := source.fuType
       this.opcode := source.fuOpType
+      this.isReverse := source.vpu.map(_.isReverse).getOrElse(false.B)
 
       this.vm := source.vm.getOrElse(false.B)
       this.vtype := source.vtype.getOrElse(0.U.asTypeOf(this.vtype))
@@ -1049,6 +1052,7 @@ object VecIssueQueue {
 
     val fuType       = FuType()
     val opcode       = Opcode()
+    val isReverse    = Bool()
 
     val robIdx       = new RobPtr
     val uopIdx       = UopIdx()
@@ -1093,6 +1097,7 @@ object VecIssueQueue {
     def fromEntry(entry: Entry): Unit = {
       this.fuType := entry.payload.fuType
       this.opcode := entry.payload.opcode
+      this.isReverse := entry.payload.isReverse
       this.vm.foreach(_ := entry.payload.vm.get)
       this.robIdx := entry.status.robIdx
       this.uopIdx := entry.status.uopIdx
@@ -1218,6 +1223,7 @@ object VecIssueQueue {
   class Payload(implicit p: Parameters, param: IssueParam) extends XSBundle {
     val fuType    = FuType()
     val opcode    = FuOpType()
+    val isReverse = Bool()
     val vm        = Option.when(param.needVM)(Bool())
     val vtype     = Option.when(param.readVType)(VType())
     val oldVType  = Option.when(param.readOldVType)(VType())
@@ -1246,6 +1252,7 @@ object VecIssueQueue {
     def fromEnq(enq: Enq): Unit = {
       this.fuType := enq.fuType
       this.opcode := enq.opcode
+      this.isReverse := enq.isReverse
       this.vm.foreach(_ := enq.vm)
       this.vtype.foreach(_ := enq.vtype)
       this.oldVType.foreach(_ := enq.oldVType)

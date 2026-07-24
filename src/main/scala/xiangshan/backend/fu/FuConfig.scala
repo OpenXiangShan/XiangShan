@@ -168,7 +168,7 @@ case class FuConfig (
 
   def needVecCtrl: Boolean = {
     import FuType._
-    Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfma, vfdiv, vfcvt, vldu, vstu, vsha256ms, vsha256c).contains(fuType)
+    Seq(vipu, vialuF, vimac, vidiv, vppu, vfalu, vmove, vfmul, vfdiv, vfcvt, vldu, vstu, vsha256ms, vsha256c).contains(fuType)
   }
 
   def needUncertainWakeup: Boolean = {
@@ -198,10 +198,12 @@ case class FuConfig (
 
   def isVecArith: Boolean = fuType == FuType.vialuF || fuType == FuType.vimac ||
                             fuType == FuType.vppu || fuType == FuType.vipu ||
-                            fuType == FuType.vfalu || fuType == FuType.vfma ||
+                            fuType == FuType.vfalu || fuType == FuType.vfmul ||
                             fuType == FuType.vfdiv || fuType == FuType.vfcvt ||
                             fuType == FuType.vidiv || fuType == FuType.vmove ||
                             fuType == FuType.vsha256ms || fuType == FuType.vsha256c
+
+  def isVfmul: Boolean = fuType == FuType.vfmul
 
   def isVecMem: Boolean = fuType == FuType.vldu || fuType == FuType.vstu ||
                           fuType == FuType.vsegldu || fuType == FuType.vsegstu ||
@@ -716,15 +718,16 @@ object FuConfig {
   val VfaluCfg = FuConfig (
     name = "vfalu",
     fuType = FuType.vfalu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFAlu(cfg)(p).suggestName("Vfalu")),
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
+      Seq(FpData(),  VecData(), VecData()), // fs1, vs2, vd_old
     ),
     piped = true,
     writeVecRf = true,
     writeV0Rf = true,
-    writeFpRf = true,
     writeFflags = true,
+    needWidenOut = true,
     latency = CertainLatency(1),
     vlWakeUp = true,
     maskWakeUp = true,
@@ -736,10 +739,10 @@ object FuConfig {
     readVType = true,
   )
 
-  val VfmaCfg = FuConfig (
-    name = "vfma",
-    fuType = FuType.vfma,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFMA(cfg)(p).suggestName("Vfma")),
+  val VfmulCfg = FuConfig (
+    name = "vfmul",
+    fuType = FuType.vfmul,
+    fuGen = null,
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
       Seq(FpData(),  VecData(), VecData()), // fs1, vs2, vd_old
@@ -749,7 +752,7 @@ object FuConfig {
     writeV0Rf = true,
     writeFflags = true,
     needWidenOut = true,
-    latency = CertainLatency(3),
+    latency = CertainLatency(2),
     vlWakeUp = true,
     maskWakeUp = true,
     destDataBits = 128,
@@ -766,6 +769,7 @@ object FuConfig {
     fuGen = (p: Parameters, cfg: FuConfig) => Module(new VFDivSqrt(cfg)(p).suggestName("Vfdiv")),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
+      Seq(FpData(),  VecData(), VecData()), // fs1, vs2, vd_old
     ),
     piped = false,
     writeVecRf = true,
@@ -1018,13 +1022,13 @@ object FuConfig {
     NJmpCfg, LinkCfg, BrhCfg, I2fCfg, FcmpCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg,
     VSetCfg, VSetRvfWvfCfg, VSetRiWvfCfg, VSetRiWiCfg,
     LduCfg, StaCfg, StdCfg, HyldaCfg, HystaCfg, FakeHystaCfg, MouCfg, MoudCfg,
-    VialuCfg, VimacCfg, VidivCfg, VppuCfg, VipuCfg, VmoveCfg, VfaluCfg, VfmaCfg, VfdivCfg, VfcvtCfg, VSha256msCfg, VSha256cCfg,
+    VialuCfg, VimacCfg, VidivCfg, VppuCfg, VipuCfg, VmoveCfg, VfaluCfg, VfmulCfg, VfdivCfg, VfcvtCfg, VSha256msCfg, VSha256cCfg,
     FaluCfg, FmulCfg, FdivCfg, FcvtCfg,
     VStdCfg, VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg
   )
 
   def VecArithFuConfigs = Seq(
-    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VmoveCfg, VfmaCfg, VfcvtCfg, VfdivCfg
+    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VmoveCfg, VfmulCfg, VfcvtCfg, VfdivCfg
   )
 
   def needUncertainWakeupFuConfigs = Seq(

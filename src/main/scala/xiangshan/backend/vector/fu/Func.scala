@@ -10,6 +10,7 @@ import xiangshan.backend.decode.opcode.Latency
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.fpu.Bundles.Frm
 import xiangshan.backend.fu.vector.Bundles._
+import xiangshan.backend.fu.wrapper.VFAluWrapper
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecRegionModule
 import xiangshan.mem.{SqPtr, StoreQueueDataWrite}
@@ -70,10 +71,12 @@ object Func {
     val ex = Vec(cfg.latency + 1, ValidIO(new InUop))
     val frm = Option.when(cfg.needSrcFrm)(Frm())
     val vxrm = Option.when(cfg.needSrcVxrm)(Vxrm())
+    val fromVfmul = Option.when(cfg.isVfalu)(ValidIO(new VFAluWrapper.VFMulForward(cfg)))
   }
 
   class Out(implicit val cfg: VecFuConfig, p: Parameters) extends XSBundle {
     val ex = Vec(cfg.latency + 1, ValidIO(new OutUop))
+    val op3OutContext = Option.when(cfg.isVfalu)(ValidIO(new VFAluWrapper.VFMulForward(cfg)))
   }
 
   class InUop(implicit val cfg: VecFuConfig, p: Parameters) extends XSBundle {
@@ -90,6 +93,7 @@ object Func {
 
   class InCtrl(cfg: VecFuConfig)(implicit p: Parameters) extends XSBundle {
     val opcode    = FuOpType()
+    val isReverse = Bool()
     val latency   = Latency()
     val robIdx    = new RobPtr
     val uopIdx    = UopIdx()
@@ -115,7 +119,6 @@ object Func {
     val vl        = Option.when(cfg.readVl)(Vl())
     val imm       = UInt(cfg.destDataBits.W)
     val pc        = Option.when(cfg.needPc)(UInt(VAddrData().dataWidth.W))
-    val vfma      = Option.when(cfg.fuType == FuType.vfma)(new VFMacInfo)
   }
 
   class OutCtrl(cfg: VecFuConfig)(implicit p: Parameters) extends XSBundle {
