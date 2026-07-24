@@ -20,6 +20,10 @@ from env.funcov import (
     sample_cfvec_coverage,
     sample_two_fetch_coverage,
 )
+from env.icache_funcov import (
+    ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
+    ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
+)
 from env.artifact_provenance import load_frontend_build_manifest, write_frontend_build_manifest
 from env.functional_coverage import (
     FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS,
@@ -89,6 +93,7 @@ def _eligible_provenance():
             {
                 "functional_coverage.py": file_sha256(frontend_root / "env/functional_coverage.py"),
                 "funcov.py": file_sha256(frontend_root / "env/funcov.py"),
+                "icache_funcov.py": file_sha256(frontend_root / "env/icache_funcov.py"),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -481,10 +486,12 @@ def test_canonical_registry_matches_the_single_sampler_contract():
             for row in csv.DictReader(handle)
             if row["Coverpoint"].strip()
         }
-    assert len(active) == 64
+    assert len(active) == 137
     assert active == set(FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS)
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
     assert len(TWO_FETCH_SAMPLER_BIN_KEYS) == 41
+    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 49
+    assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 24
 
 
 def test_cfvec_mixed_bins_are_window_scoped_and_do_not_hit_on_rvi_only(tmp_path):
@@ -658,7 +665,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
     assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(recorder.definitions) == 64
+    assert len(recorder.definitions) == 137
     assert all(item.coverpoint for item in recorder.definitions)
     assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source

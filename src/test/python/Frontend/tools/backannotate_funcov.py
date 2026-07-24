@@ -72,6 +72,7 @@ _CANONICAL_REGISTRY = (
 _SAMPLER_FILES = (
     _FRONTEND_ROOT / "env" / "functional_coverage.py",
     _FRONTEND_ROOT / "env" / "funcov.py",
+    _FRONTEND_ROOT / "env" / "icache_funcov.py",
 )
 
 

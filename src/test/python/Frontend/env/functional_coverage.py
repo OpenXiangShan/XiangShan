@@ -18,6 +18,14 @@ from .funcov import (
     sample_cfvec_coverage,
     sample_two_fetch_coverage,
 )
+from .icache_funcov import (
+    ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
+    ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
+    reset_icache_mainpipe_coverage_state,
+    reset_icache_prefetchpipe_coverage_state,
+    sample_icache_mainpipe_coverage,
+    sample_icache_prefetchpipe_coverage,
+)
 from .pylib import frontend_pylib_path
 from .rvc_decoder import expand_rvc
 
@@ -94,6 +102,8 @@ FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
     set(CFVEC_SAMPLER_BIN_KEYS)
     | set(TWO_FETCH_SAMPLER_BIN_KEYS)
     | set(UNCACHE_EVENT_SAMPLER_BIN_KEYS)
+    | set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)
+    | set(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS)
 )
 
 
@@ -342,6 +352,9 @@ class FunctionalCoverageRecorder:
             {
                 "functional_coverage.py": _file_sha256(str(Path(__file__).resolve())),
                 "funcov.py": _file_sha256(str((Path(__file__).resolve().parent / "funcov.py"))),
+                "icache_funcov.py": _file_sha256(
+                    str((Path(__file__).resolve().parent / "icache_funcov.py"))
+                ),
             }
         )
         provenance = {
@@ -556,6 +569,8 @@ class FunctionalCoverageRecorder:
         self._two_fetch_ftq_pending = False
         self._two_fetch_last_dual_cycle = None
         self._two_fetch_last_waylookup_write_state = None
+        reset_icache_mainpipe_coverage_state(self)
+        reset_icache_prefetchpipe_coverage_state(self)
 
     def on_cycle(self, cycle: int, env) -> None:
         dut = env.dut
@@ -570,6 +585,8 @@ class FunctionalCoverageRecorder:
 
         sample_two_fetch_coverage(self, env, cycle)
         sample_cfvec_coverage(self, env, cycle)
+        sample_icache_mainpipe_coverage(self, env, cycle)
+        sample_icache_prefetchpipe_coverage(self, env, cycle)
 
         self._sample_ibuffer_contract(dut, cycle)
         self._sample_uncache_cycle_state(dut, cycle, env)
