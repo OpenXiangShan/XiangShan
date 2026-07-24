@@ -42,6 +42,7 @@ object Opcode {
       VFDivOpcodes,
       VFMiscOpcodes,
       VFRedOpcodes,
+      VCryptoOpcodes,
     )
 
     for (opcodeCls <- opcodes) {
@@ -73,6 +74,7 @@ object Opcode {
   val VFMiscOpcodes     = opcodes.VFMiscOpcode
   val VFCvtOpcodes      = opcodes.VFCvtOpcode
   val VFMacOpcodes      = opcodes.VFMacOpcode
+  val VCryptoOpcodes    = opcodes.VCryptoOpcode
 
   // Todo: remove these
   def X = BitPat("b0_0000_0000")

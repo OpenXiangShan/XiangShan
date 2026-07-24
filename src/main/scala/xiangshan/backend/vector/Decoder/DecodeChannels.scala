@@ -51,11 +51,11 @@ class DecodeChannels(
     s"_M2x${MaxM2UopIdx}_M4x${MaxM4UopIdx}_M8x${MaxM8UopIdx}"
 
   require(extensions.distinct.size == extensions.size, "Duplicate extensions are not allowed")
-  val simpleExts: Seq[ExtBase] = extensions.diff(Seq(V, Zvbb, Zvknha, Zacas, ZacasZabha))
+  val simpleExts: Seq[ExtBase] = extensions.diff(Seq(V, Zvbb, Zvbc, Zvknha, Zacas, ZacasZabha))
   val simpleInsts = InstPattern.extensionInsts(simpleExts: _*)
 
   // Get vector instruction bits pattern by extensions
-  val vectorExts = extensions.intersect(Seq(V, Zvbb, Zvknha, Zacas, ZacasZabha))
+  val vectorExts = extensions.intersect(Seq(V, Zvbb, Zvbc, Zvknha, Zacas, ZacasZabha))
   val vectorInsts = InstPattern.extensionInsts(vectorExts: _*).map(_.asInstanceOf[VecInstPattern])
 
   val uopBufferSize = maxSplitUopNum - 1

@@ -38,6 +38,8 @@ object Extensions {
 
   case object Zvbb extends UnprivExt(Seq(ZVBBType))
 
+  case object Zvbc extends UnprivExt(Seq(ZVBCType))
+
   case object Zvknha extends UnprivExt(Seq(ZVKNHAType))
 
   case object Za64rs extends UnprivExt()
@@ -155,6 +157,7 @@ object Extensions {
     V, H,
     Zvknha,
     Zvbb,
+    Zvbc,
     XSTrap,
     Zicond,
     Zifencei, Zknd, Zkne, Zknh, Zksed, Zksh,
