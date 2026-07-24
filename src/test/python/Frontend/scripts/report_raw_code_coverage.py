@@ -4,12 +4,50 @@ import argparse
 import hashlib
 import json
 import re
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
 
+FRONTEND_ROOT = Path(__file__).resolve().parents[1]
+PROVENANCE_ROOT = FRONTEND_ROOT / "env"
+if str(PROVENANCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROVENANCE_ROOT))
+
+from artifact_provenance import (  # noqa: E402
+    BUILD_HASH_FIELDS as MANIFEST_BUILD_HASH_FIELDS,
+    load_frontend_build_manifest,
+)
+
+
 FIELD_RE = re.compile(r"\x01([^\x02]+)\x02([^\x01]*)")
+SHA256_RE = re.compile(r"[0-9a-fA-F]{64}\Z")
+
+# These fields are the build identity.  A raw Verilator .dat file does not
+# carry provenance itself, so the matching funcov sidecar is the authority
+# that binds it to one clean DUT build.
+BUILD_HASH_FIELDS = tuple(MANIFEST_BUILD_HASH_FIELDS)
+COMPATIBILITY_FIELDS = (
+    "dut_source_sha",
+    "implementation_sha",
+    "design_baseline_sha",
+    "source_sha_override",
+    "source_delta_sha256",
+    "source_delta_files",
+    "source_delta_policy",
+    *BUILD_HASH_FIELDS,
+    "registry_sha256",
+    "sampler_sha256",
+    "build_config",
+    "toolchain",
+)
+PASS_OUTCOMES = {"pass", "passed", "ok", "success", "successful"}
+
+
+class CoverageProvenanceError(ValueError):
+    """Raised before merging when a .dat lacks trustworthy build identity."""
+
 
 FRONTEND_TOP_RE = re.compile(r"(Frontend|Frontend_top)")
 IFU_STRICT_RE = re.compile(r"(Frontend|ICache|TLB|TLBFA|BTB|Btb|Tage|Ittage|Ras|PMP|Ifu|IBuffer|Ftq)")
@@ -132,6 +170,305 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--run-id", default="", help="Run or suite identifier stored in JSON output")
     return parser.parse_args()
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _manifest_path(source_root: Path) -> Path:
+    """Resolve the build manifest for either a build root or its rtl child."""
+    source_root = source_root.resolve()
+    candidates = [source_root / "frontend_build_manifest.json"]
+    if source_root.name == "rtl":
+        candidates.append(source_root.parent / "frontend_build_manifest.json")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    # Return the canonical location so the error names the expected file.
+    return candidates[0]
+
+
+def _run_roots_for_dat(dat_path: Path) -> list[Path]:
+    """Return likely run roots for a coverage file."""
+    dat_path = dat_path.resolve()
+    roots = [dat_path.parent]
+    if dat_path.parent.name in {"coverage", "codecov"}:
+        roots.insert(0, dat_path.parent.parent)
+    elif dat_path.parent.parent != dat_path.parent:
+        roots.append(dat_path.parent.parent)
+    return list(dict.fromkeys(roots))
+
+
+def _funcov_candidates(dat_files: list[Path], data_dir: Path) -> list[Path]:
+    """Find sidecars in each selected run before considering a broad scan."""
+    candidates: set[Path] = set()
+    search_dirs: set[Path] = {data_dir.resolve() / "funcov"}
+    for dat_path in dat_files:
+        for root in _run_roots_for_dat(dat_path):
+            search_dirs.add(root / "funcov")
+    for directory in sorted(search_dirs):
+        if not directory.exists():
+            continue
+        if directory.is_file():
+            continue
+        for path in directory.rglob("*.funcov.json"):
+            if path.is_file():
+                candidates.add(path.resolve())
+    return sorted(candidates)
+
+
+def _compatibility_signature(provenance: dict) -> str:
+    payload = {field: provenance.get(field) for field in COMPATIBILITY_FIELDS}
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _load_manifest(manifest_path: Path) -> tuple[dict, str]:
+    if not manifest_path.is_file():
+        raise CoverageProvenanceError(f"build manifest missing: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise CoverageProvenanceError(f"build manifest unreadable: {manifest_path}") from exc
+    if not isinstance(manifest, dict):
+        raise CoverageProvenanceError(f"build manifest is not an object: {manifest_path}")
+    if manifest.get("source_tree_dirty") is not False:
+        raise CoverageProvenanceError("build manifest source_tree_dirty is not false")
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise CoverageProvenanceError("build manifest lacks artifacts object")
+    for field in BUILD_HASH_FIELDS:
+        value = str(artifacts.get(field) or "").strip()
+        if SHA256_RE.fullmatch(value) is None:
+            raise CoverageProvenanceError(f"build manifest has invalid artifact hash: {field}")
+    runtime = load_frontend_build_manifest(manifest_path.parent, manifest_path)
+    if str(runtime.get("build_manifest_status") or "").strip().lower() != "valid":
+        reasons = runtime.get("build_manifest_reasons") or ["unknown"]
+        raise CoverageProvenanceError(
+            "build manifest runtime validation failed: " + ",".join(map(str, reasons))
+        )
+    for field in BUILD_HASH_FIELDS:
+        if str(runtime.get(field) or "").strip().lower() != str(artifacts[field]).strip().lower():
+            raise CoverageProvenanceError(f"runtime artifact hash mismatch: {field}")
+    return manifest, file_sha256(manifest_path)
+
+
+def _index_funcov_sidecars(
+    candidates: list[Path],
+) -> tuple[dict[str, list[tuple[Path, dict]]], dict[str, str]]:
+    by_coverage: dict[str, list[tuple[Path, dict]]] = defaultdict(list)
+    malformed: dict[str, str] = {}
+    for sidecar in candidates:
+        try:
+            raw = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            malformed[str(sidecar)] = f"unreadable sidecar ({type(exc).__name__})"
+            continue
+        if not isinstance(raw, dict):
+            malformed[str(sidecar)] = "sidecar root is not an object"
+            continue
+        coverage_raw = str(raw.get("line_coverage_path") or "").strip()
+        if not coverage_raw:
+            malformed[str(sidecar)] = "sidecar lacks line_coverage_path"
+            continue
+        try:
+            coverage_path = str(Path(coverage_raw).expanduser().resolve())
+        except (OSError, RuntimeError) as exc:
+            malformed[str(sidecar)] = f"invalid line_coverage_path ({type(exc).__name__})"
+            continue
+        by_coverage[coverage_path].append((sidecar, raw))
+    return by_coverage, malformed
+
+
+def validate_dat_provenance(
+    dat_files: list[Path],
+    *,
+    data_dir: Path,
+    source_root: Path,
+) -> dict:
+    """Validate every selected .dat before it contributes to the aggregate."""
+    if not dat_files:
+        raise CoverageProvenanceError("no .dat files selected")
+    manifest_path = _manifest_path(source_root)
+    manifest, manifest_hash = _load_manifest(manifest_path)
+    manifest_artifacts = manifest["artifacts"]
+    candidates = _funcov_candidates(dat_files, data_dir)
+    by_coverage, _malformed = _index_funcov_sidecars(candidates)
+    selected_paths = {str(path.resolve()) for path in dat_files}
+    if selected_paths - set(by_coverage):
+        # Compatibility fallback for custom runners that keep sidecars under a
+        # suite-level directory instead of each case run root.
+        broad_candidates = {
+            path.resolve()
+            for path in data_dir.resolve().rglob("*.funcov.json")
+            if path.is_file()
+        }
+        by_coverage, _malformed = _index_funcov_sidecars(
+            sorted(set(candidates) | broad_candidates)
+        )
+
+    records = []
+    run_ids: set[str] = set()
+    compatibility_signature = None
+    build_identity = None
+    for dat_path in dat_files:
+        dat_path = dat_path.resolve()
+        try:
+            if dat_path.stat().st_size <= 0:
+                raise CoverageProvenanceError(f"empty .dat: {dat_path}")
+        except OSError as exc:
+            raise CoverageProvenanceError(f"cannot stat .dat: {dat_path}") from exc
+
+        matches = by_coverage.get(str(dat_path), [])
+        if len(matches) != 1:
+            detail = "missing" if not matches else f"ambiguous ({len(matches)} sidecars)"
+            raise CoverageProvenanceError(f"{detail} funcov sidecar for .dat: {dat_path}")
+        sidecar_path, raw = matches[0]
+        if raw.get("artifact_schema_version") != 2:
+            raise CoverageProvenanceError(f"legacy funcov sidecar: {sidecar_path}")
+        provenance = raw.get("provenance")
+        if not isinstance(provenance, dict):
+            raise CoverageProvenanceError(f"sidecar lacks provenance: {sidecar_path}")
+        manifest_status = str(provenance.get("build_manifest_status") or "").strip().lower()
+        if manifest_status != "valid":
+            raise CoverageProvenanceError(f"sidecar build manifest is not valid: {sidecar_path}")
+        manifest_reasons = provenance.get("build_manifest_reasons")
+        if not isinstance(manifest_reasons, list) or manifest_reasons:
+            raise CoverageProvenanceError(f"sidecar build manifest has reasons: {sidecar_path}")
+        recorded_manifest_hash = str(provenance.get("build_manifest_sha256") or "").strip().lower()
+        if recorded_manifest_hash != manifest_hash:
+            raise CoverageProvenanceError(f"manifest hash mismatch for sidecar: {sidecar_path}")
+        for field in BUILD_HASH_FIELDS:
+            value = str(provenance.get(field) or "").strip().lower()
+            expected = str(manifest_artifacts.get(field) or "").strip().lower()
+            if SHA256_RE.fullmatch(value) is None:
+                raise CoverageProvenanceError(f"sidecar has invalid {field}: {sidecar_path}")
+            if value != expected:
+                raise CoverageProvenanceError(f"{field} mismatch for sidecar: {sidecar_path}")
+
+        missing_compat = [
+            field
+            for field in COMPATIBILITY_FIELDS
+            if field not in provenance
+            or provenance[field] is None
+            or (isinstance(provenance[field], str) and not provenance[field].strip())
+        ]
+        if missing_compat:
+            raise CoverageProvenanceError(
+                f"sidecar lacks compatibility fields {missing_compat}: {sidecar_path}"
+            )
+        recorded_signature = str(provenance.get("compatibility_signature") or "").strip().lower()
+        if SHA256_RE.fullmatch(recorded_signature) is None:
+            raise CoverageProvenanceError(f"sidecar has invalid compatibility signature: {sidecar_path}")
+        if recorded_signature != _compatibility_signature(provenance):
+            raise CoverageProvenanceError(f"compatibility signature mismatch: {sidecar_path}")
+        if compatibility_signature is None:
+            compatibility_signature = recorded_signature
+        elif recorded_signature != compatibility_signature:
+            raise CoverageProvenanceError(f"cross-build compatibility mismatch: {sidecar_path}")
+
+        run = raw.get("run")
+        if not isinstance(run, dict):
+            raise CoverageProvenanceError(f"sidecar lacks run metadata: {sidecar_path}")
+        run_id = str(run.get("run_id") or "").strip()
+        if not run_id:
+            raise CoverageProvenanceError(f"sidecar lacks run_id: {sidecar_path}")
+        if run_id in run_ids:
+            raise CoverageProvenanceError(f"duplicate run_id across .dat files: {run_id}")
+        run_ids.add(run_id)
+        outcome = str(run.get("pytest_outcome") or "").strip().lower()
+        if outcome not in PASS_OUTCOMES or run.get("exit_code") not in {0, "0"}:
+            raise CoverageProvenanceError(f"pytest gate failed for sidecar: {sidecar_path}")
+        checker = run.get("checker")
+        if not isinstance(checker, dict) or str(checker.get("status") or "").strip().lower() not in PASS_OUTCOMES:
+            raise CoverageProvenanceError(f"checker gate failed for sidecar: {sidecar_path}")
+        if "error_count" not in checker:
+            raise CoverageProvenanceError(f"checker error_count is missing for sidecar: {sidecar_path}")
+        try:
+            checker_error_count = int(checker.get("error_count"))
+        except (TypeError, ValueError) as exc:
+            raise CoverageProvenanceError(
+                f"checker error_count is invalid for sidecar: {sidecar_path}"
+            ) from exc
+        if checker_error_count != 0:
+            raise CoverageProvenanceError(f"checker errors present for sidecar: {sidecar_path}")
+        checker_errors = checker.get("errors")
+        if checker_errors != []:
+            raise CoverageProvenanceError(f"checker error details present for sidecar: {sidecar_path}")
+
+        stats = raw.get("stats")
+        monitor = stats.get("monitor") if isinstance(stats, dict) else None
+        if not isinstance(monitor, dict):
+            raise CoverageProvenanceError(f"sidecar lacks monitor statistics: {sidecar_path}")
+        if "cycles_total" not in monitor:
+            raise CoverageProvenanceError(f"monitor cycles_total is missing for sidecar: {sidecar_path}")
+        try:
+            monitor_cycles = int(monitor.get("cycles_total"))
+        except (TypeError, ValueError) as exc:
+            raise CoverageProvenanceError(
+                f"monitor cycles_total is invalid for sidecar: {sidecar_path}"
+            ) from exc
+        if monitor_cycles <= 0:
+            raise CoverageProvenanceError(f"monitor cycles_total is not positive for sidecar: {sidecar_path}")
+        if "error_count" not in monitor:
+            raise CoverageProvenanceError(f"monitor error_count is missing for sidecar: {sidecar_path}")
+        try:
+            monitor_error_count = int(monitor.get("error_count"))
+        except (TypeError, ValueError) as exc:
+            raise CoverageProvenanceError(
+                f"monitor error_count is invalid for sidecar: {sidecar_path}"
+            ) from exc
+        if monitor_error_count != 0:
+            raise CoverageProvenanceError(f"monitor errors present for sidecar: {sidecar_path}")
+        monitor_errors = monitor.get("errors")
+        if monitor_errors not in (None, []):
+            raise CoverageProvenanceError(f"monitor error details present for sidecar: {sidecar_path}")
+        if raw.get("errors") != []:
+            raise CoverageProvenanceError(f"funcov errors present for sidecar: {sidecar_path}")
+
+        waveform_raw = str(raw.get("waveform_path") or "").strip()
+        if not waveform_raw or not Path(waveform_raw).is_absolute():
+            raise CoverageProvenanceError(f"sidecar lacks absolute waveform path: {sidecar_path}")
+        waveform_path = Path(waveform_raw)
+        try:
+            if not waveform_path.is_file() or waveform_path.stat().st_size <= 0:
+                raise CoverageProvenanceError(
+                    f"waveform gate failed for sidecar: {sidecar_path}"
+                )
+        except OSError as exc:
+            raise CoverageProvenanceError(
+                f"cannot stat waveform for sidecar: {sidecar_path}"
+            ) from exc
+
+        identity = tuple(str(provenance[field]).strip().lower() for field in BUILD_HASH_FIELDS)
+        if build_identity is None:
+            build_identity = identity
+        elif identity != build_identity:
+            raise CoverageProvenanceError(f"DUT build identity mismatch: {sidecar_path}")
+        records.append(
+            {
+                "path": str(dat_path),
+                "size_bytes": dat_path.stat().st_size,
+                "funcov_path": str(sidecar_path),
+                "run_id": run_id,
+                "waveform_path": str(waveform_path),
+                "build_manifest_sha256": recorded_manifest_hash,
+                "compatibility_signature": recorded_signature,
+            }
+        )
+    return {
+        "manifest_path": str(manifest_path.resolve()),
+        "manifest_sha256": manifest_hash,
+        "run_ids": sorted(run_ids),
+        "compatibility_signature": compatibility_signature,
+        "build_hashes": dict(zip(BUILD_HASH_FIELDS, build_identity or ())),
+        "dat_files": records,
+    }
 
 
 def normalize_module(path_text: str) -> str:
@@ -322,16 +659,6 @@ def print_table(headers: list[str], rows: list[list[str]]) -> None:
         print(fmt.format(*row))
 
 
-def file_sha256(path: Path) -> str:
-    if not path.is_file():
-        return "unavailable"
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def counter_dict(counter: Counter) -> dict[str, int | float]:
     return {"hit": counter.hit, "total": counter.total, "pct": round(counter.pct, 6)}
 
@@ -341,6 +668,16 @@ def main() -> int:
     dat_files = sorted(args.data_dir.glob(args.glob))
     if not dat_files:
         raise SystemExit(f"no .dat files matched: {args.data_dir / args.glob}")
+
+    try:
+        provenance = validate_dat_provenance(
+            dat_files,
+            data_dir=args.data_dir,
+            source_root=args.source_root,
+        )
+    except CoverageProvenanceError as exc:
+        print(f"[frontend][error] code coverage provenance gate failed: {exc}", file=sys.stderr)
+        return 2
 
     points = load_merged_points(dat_files)
     overall, modules = build_stats(points)
@@ -354,6 +691,9 @@ def main() -> int:
     print(f"source_root: {args.source_root}")
     print(f"source_glob: {args.source_glob}")
     print(f"source_files: {source_files}")
+    print(f"manifest   : {provenance['manifest_path']}")
+    print(f"manifest_sha256: {provenance['manifest_sha256']}")
+    print(f"run_ids    : {', '.join(provenance['run_ids'])}")
     print()
 
     overall_rows = []
@@ -455,22 +795,23 @@ def main() -> int:
         output_path = args.json_output.resolve()
         if output_path.exists():
             raise SystemExit(f"refusing to overwrite existing coverage summary: {output_path}")
-        build_manifest_path = args.source_root.resolve() / "frontend_build_manifest.json"
+        build_manifest_path = Path(provenance["manifest_path"])
         summary = {
             "schema_version": 1,
             "run_id": str(args.run_id).strip() or None,
             "data_dir": str(args.data_dir.resolve()),
             "selection_glob": args.glob,
             "dat_files": [
-                {"path": str(path.resolve()), "size_bytes": path.stat().st_size}
-                for path in dat_files
+                {"path": item["path"], "size_bytes": item["size_bytes"]}
+                for item in provenance["dat_files"]
             ],
             "point_keys": len(points),
             "source_root": str(args.source_root.resolve()),
             "source_glob": args.source_glob,
             "source_files": source_files,
             "build_manifest_path": str(build_manifest_path),
-            "build_manifest_sha256": file_sha256(build_manifest_path),
+            "build_manifest_sha256": provenance["manifest_sha256"],
+            "provenance": provenance,
             "overall": {
                 kind: counter_dict(overall.get(kind, Counter()))
                 for kind in ("line", "branch", "expr", "toggle")

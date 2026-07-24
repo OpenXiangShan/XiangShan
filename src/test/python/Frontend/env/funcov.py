@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 
 def _dut(recorder):
     return getattr(getattr(recorder, "env", None), "dut", None)
@@ -24,39 +26,43 @@ def _count_truthy(values) -> int:
 
 
 _WAYLOOKUP_PREFIX = "Frontend_top.Frontend.inner_icache.wayLookup."
-_WAY_DATA_CONFLICT_SIGNALS = tuple(
-    f"{_WAYLOOKUP_PREFIX}isDataSramReadConflict_reqReadInfo_1_1{'' if index == 0 else f'_{index}'}"
-    for index in range(8)
-) + tuple(
-    f"{_WAYLOOKUP_PREFIX}__Vtogcov__isDataSramReadConflict_reqReadInfo_1_1{'' if index == 0 else f'_{index}'}"
-    for index in range(8)
-)
+_MAINPIPE_PREFIX = "Frontend_top.Frontend.inner_icache.mainPipe."
+_IFU_PREFIX = "Frontend_top.Frontend.inner_ifu."
 
 
 _TWO_FETCH_SIGNALS = {
     "ftq_valid": (
-        "Frontend_top.Frontend.inner_icache.wayLookup.io_fromFtq_valid",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_valid",
     ),
     "ftq_ready": (
-        "Frontend_top.Frontend.inner_icache.wayLookup.io_fromFtq_ready",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_ready",
     ),
     "ftq_req1_valid": (
-        "Frontend_top.Frontend.inner_icache.wayLookup.io_fromFtq_bits_req_1_valid",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_valid",
     ),
     "ftq_req0_start": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toWayLookup_bits_req_0_startVAddr_addr",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_vAddr_0_addr",
     ),
     "ftq_req1_start": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toWayLookup_bits_req_1_startVAddr_addr",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_vAddr_0_addr",
     ),
     "ftq_req0_end": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toWayLookup_bits_req_0_takenCfiOffset_bits",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_takenCfiOffset_bits",
     ),
     "ftq_req1_end": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toWayLookup_bits_req_1_takenCfiOffset_bits",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_takenCfiOffset_bits",
     ),
     "ftq_req0_exception": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toWayLookup_bits_req_0_hasBackendException",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_0_hasBackendException",
+    ),
+    "ftq_backend_exception": (
+        "Frontend_top.Frontend.inner_ftq.backendException_value",
+    ),
+    "ftq_backend_exception_ptr_flag": (
+        "Frontend_top.Frontend.inner_ftq.backendExceptionPtr_flag",
+    ),
+    "ftq_backend_exception_ptr_value": (
+        "Frontend_top.Frontend.inner_ftq.backendExceptionPtr_value",
     ),
     "bpu_ptr_flag": (
         "Frontend_top.Frontend.inner_ftq.bpuPtr_ptrs_0_flag",
@@ -83,16 +89,25 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_ftq.io_toICache_toPrefetch_bits_twoPrefetchCase_value_0",
     ),
     "way_req1_valid": (
-        "Frontend_top.Frontend.inner_icache.wayLookup.io_fromFtq_bits_req_1_valid",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_bits_req_1_valid",
     ),
     "way_out_valid": (
-        "Frontend_top.Frontend.inner_icache.wayLookup.io_fromFtq_valid",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_valid",
     ),
     "way_out_ready": (
-        "Frontend_top.Frontend.inner_icache.wayLookup.io_fromFtq_ready",
+        f"{_MAINPIPE_PREFIX}io_fromFtq_ready",
     ),
     "way_real_two": (
-        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toFtq_fromWayLookup_realTwoFetchValid",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",
+    ),
+    "main_s0_fire": (
+        f"{_MAINPIPE_PREFIX}s0_fire",
+    ),
+    "bpu_s3_flush_ptr_flag": (
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_flag",
+    ),
+    "bpu_s3_flush_ptr_value": (
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_flushFromBpu_s3_bits_value",
     ),
     "way_num_valid": (
         "Frontend_top.Frontend.inner_icache.wayLookup.numValidEntries",
@@ -124,7 +139,40 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_icache.wayLookup.writePtr_value",
         "Frontend_top.Frontend.inner_icache.wayLookup.__Vtogcov__writePtr_value",
     ),
-    "way_data_conflict": _WAY_DATA_CONFLICT_SIGNALS,
+    "main_wli1_valid": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_1_valid",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_1_valid",
+    ),
+    "main_wli0_is_mmio": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_0_bits_entry_isMmio",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_0_bits_entry_isMmio",
+    ),
+    "main_wli1_is_mmio": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_1_bits_entry_isMmio",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_1_bits_entry_isMmio",
+    ),
+    "main_wli0_itlb_exception": (
+        f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_0_bits_exceptionEntry_itlbException_value",
+    ),
+    "main_wli1_itlb_exception": (
+        f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_1_bits_exceptionEntry_itlbException_value",
+    ),
+    "main_wli0_vset0": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_0_bits_entry_vSetIdx_0",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_0_bits_entry_vSetIdx_0",
+    ),
+    "main_wli0_vset1": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_0_bits_entry_vSetIdx_1",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_0_bits_entry_vSetIdx_1",
+    ),
+    "main_wli1_vset0": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_1_bits_entry_vSetIdx_0",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_1_bits_entry_vSetIdx_0",
+    ),
+    "main_wli1_vset1": (
+        f"{_MAINPIPE_PREFIX}io_fromWayLookup_bits_wayLookupInfo_1_bits_entry_vSetIdx_1",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__io_fromWayLookup_bits_wayLookupInfo_1_bits_entry_vSetIdx_1",
+    ),
     "main_s1_valid": (
         "Frontend_top.Frontend.inner_icache.mainPipe.s1_valid",
     ),
@@ -147,13 +195,19 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_0_takenCfiOffset_valid",
     ),
     "ifu_first_invalid": (
-        "Frontend_top.Frontend.inner_ifu.s0_invalidTaken_0",
+        f"{_IFU_PREFIX}s1_invalidTaken_0",
     ),
-    "ifu_fixed_second_valid": (
-        "Frontend_top.Frontend.inner_ifu.s0_fixedFetchBlock_1_valid",
+    "ifu_s1_valid": (
+        f"{_IFU_PREFIX}s1_valid",
+    ),
+    "ifu_s1_instr_count": (
+        f"{_IFU_PREFIX}s1_instrCount",
     ),
     "ifu_second_valid": (
         "Frontend_top.Frontend.inner_ifu.s2_fetchBlock_1_valid",
+    ),
+    "ifu_s2_valid": (
+        "Frontend_top.Frontend.inner_ifu.s2_valid_valid",
     ),
     "to_ibuffer_valid": (
         "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid",
@@ -174,8 +228,71 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_ifu.predChecker.__Vtogcov__io_resp_stage2Out_checkerRedirect_bits_invalidTaken",
     ),
     "fixed_instr_valid": (
-        "Frontend_top.Frontend.inner_ifu.s2_fixedInstrValid",
-        "Frontend_top.Frontend.inner_ifu.__Vtogcov__s2_fixedInstrValid",
+        f"{_IFU_PREFIX}s2_fixedInstrValid",
+        f"{_IFU_PREFIX}__Vtogcov__s2_fixedInstrValid",
+    ),
+    "backend_redirect": (
+        "Frontend_top.io_backend_toFtq_redirect_valid",
+    ),
+    "main_s1_ftq0_flag": (
+        f"{_MAINPIPE_PREFIX}s1_req_0_ftqIdx_flag",
+    ),
+    "main_s1_ftq0_value": (
+        f"{_MAINPIPE_PREFIX}s1_req_0_ftqIdx_value",
+    ),
+    "main_s1_ftq1_flag": (
+        f"{_MAINPIPE_PREFIX}s1_req_1_ftqIdx_flag",
+    ),
+    "main_s1_ftq1_value": (
+        f"{_MAINPIPE_PREFIX}s1_req_1_ftqIdx_value",
+    ),
+    "main_s1_fire": (
+        f"{_MAINPIPE_PREFIX}s1_fire",
+    ),
+    "main_s1_flush": (
+        f"{_MAINPIPE_PREFIX}s1_flush",
+    ),
+    "main_s1_exception": (
+        f"{_MAINPIPE_PREFIX}s1_exception_value",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__s1_exception_value",
+    ),
+    "main_s1_mmio": (
+        f"{_MAINPIPE_PREFIX}s1_isMmio",
+        f"{_MAINPIPE_PREFIX}__Vtogcov__s1_isMmio",
+    ),
+    "ifu_req0_ftq_flag": (
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_0_ftqIdx_flag",
+    ),
+    "ifu_req0_ftq_value": (
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_0_ftqIdx_value",
+    ),
+    "ifu_req1_ftq_flag": (
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_1_ftqIdx_flag",
+    ),
+    "ifu_req1_ftq_value": (
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_1_ftqIdx_value",
+    ),
+    "ifu_req0_start": (
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_0_startVAddr_addr",
+    ),
+    "ifu_req1_start": (
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toIfu_req_bits_1_startVAddr_addr",
+    ),
+    "ifu_s2_ftq0_flag": (
+        f"{_IFU_PREFIX}s2_fetchBlock_0_ftqIdx_flag",
+    ),
+    "ifu_s2_ftq0_value": (
+        f"{_IFU_PREFIX}s2_fetchBlock_0_ftqIdx_value",
+    ),
+    "ifu_s2_ftq1_flag": (
+        f"{_IFU_PREFIX}s2_fetchBlock_1_ftqIdx_flag",
+    ),
+    "ifu_s2_ftq1_value": (
+        f"{_IFU_PREFIX}s2_fetchBlock_1_ftqIdx_value",
+    ),
+    "backend_redirect_target": (
+        "Frontend_top.io_backend_toFtq_redirect_bits_target",
+        "Frontend_top.__Vtogcov__io_backend_toFtq_redirect_bits_target",
     ),
 }
 
@@ -199,6 +316,17 @@ TWO_FETCH_COVERPOINTS = {
     "two_fetch_checker_redirect": "select_block",
     "two_fetch_delivery": "delivery_state",
 }
+
+
+_RAW_INSTR_FIELDS = ("valid", "data", "isRvc", "blockSel", "isCrossBlockInstr", "startOffset")
+
+
+def _tf_raw_instr_field_candidates(index: int, field: str) -> tuple[str, str]:
+    base = "Frontend_top.Frontend.inner_ifu.instrBoundary."
+    return (
+        f"{base}io_resp_rawInstrVec_{index}_{field}",
+        f"{base}__Vtogcov__io_resp_rawInstrVec_{index}_{field}",
+    )
 
 
 TWO_FETCH_SAMPLER_BIN_KEYS = frozenset(
@@ -324,51 +452,170 @@ def _tf_next_ptr(flag: int, value: int, size: int) -> tuple[int, int]:
     return int(flag), value
 
 
-def _tf_waylookup_reasons(recorder) -> dict[str, bool] | None:
-    num_valid = _tf_read(recorder, "way_num_valid")
-    read_flag = _tf_read(recorder, "way_read_ptr_flag")
-    read_value = _tf_read(recorder, "way_read_ptr_value")
-    exception_valid = _tf_read(recorder, "way_exception_valid")
-    exception_flag = _tf_read(recorder, "way_exception_ptr_flag")
-    exception_value = _tf_read(recorder, "way_exception_ptr_value")
-    if None in (num_valid, read_flag, read_value, exception_valid, exception_flag, exception_value):
+def _tf_mainpipe_fail_reason(recorder) -> dict[str, bool] | None:
+    """Reconstruct observable MainPipe s0 two-fetch fallback reasons.
+
+    The current signal inventory does not expose ``perf_twoFetchFailReason``
+    directly.  Do not guess it.  Only mark a reason when the same-transaction
+    WayLookupInfo inputs prove the priority-encoded reason.  Data-bank conflict
+    needs bankSel and waymask from the s0 transaction, which are not currently
+    present in the inventory, so this helper never fabricates that bin.
+    """
+    waylookup1_valid = _tf_read(recorder, "main_wli1_valid")
+    if waylookup1_valid is None:
         return None
-
-    waylookup_size = 32
-    index0 = int(read_value) % waylookup_size
-    index1 = (index0 + 1) % waylookup_size
-    updates = _tf_vector(recorder, "inner_icache.wayLookup", "entryUpdate_updated{suffix}", 64)
-    mmio = _tf_vector(recorder, "inner_icache.wayLookup", "entries_{index}_isMmio", waylookup_size)
-    if any(value is None for value in updates) or any(value is None for value in mmio):
-        return None
-
-    update_stall0 = bool(int(updates[index0 * 2]) or int(updates[index0 * 2 + 1]))
-    update_stall1 = bool(int(updates[index1 * 2]) or int(updates[index1 * 2 + 1]))
-    can_deq_second = int(num_valid) > 1 and not update_stall0 and not update_stall1
-    has_mmio = bool(int(mmio[index0]) or int(mmio[index1]))
-
-    read_ptr = (int(read_flag), index0)
-    next_ptr = _tf_next_ptr(read_flag, index0, waylookup_size)
-    exception_ptr = (int(exception_flag), int(exception_value) % waylookup_size)
-    has_itlb_exception = int(exception_valid) == 1 and exception_ptr in (read_ptr, next_ptr)
-
-    direct_conflict = _tf_signal_or(recorder, _WAY_DATA_CONFLICT_SIGNALS)
-    if direct_conflict is None:
-        # Do not infer a SRAM conflict merely because another blocker was not
-        # visible.  Missing observability is an unclosed bin, not a hit.
+    if int(waylookup1_valid) == 0:
         return {
-            "insufficient_meta": not can_deq_second,
-            "mmio": has_mmio,
-            "itlb_exception": has_itlb_exception,
+            "insufficient_meta": True,
             "data_bank_conflict": False,
+            "mmio": False,
+            "itlb_exception": False,
         }
 
+    # A sufficient proof that dataConflict is false: all cross-request line
+    # pairs have identical vSetIdx, making the RTL differentSet term false
+    # regardless of the unobservable bankSel/waymask inputs.
+    vsets = [
+        _tf_read(recorder, "main_wli0_vset0"),
+        _tf_read(recorder, "main_wli0_vset1"),
+        _tf_read(recorder, "main_wli1_vset0"),
+        _tf_read(recorder, "main_wli1_vset1"),
+    ]
+    if any(value is None for value in vsets) or len({int(value) for value in vsets}) != 1:
+        return None
+
+    mmio_values = [
+        _tf_read(recorder, "main_wli0_is_mmio"),
+        _tf_read(recorder, "main_wli1_is_mmio"),
+    ]
+    itlb_values = [
+        _tf_read(recorder, "main_wli0_itlb_exception"),
+        _tf_read(recorder, "main_wli1_itlb_exception"),
+    ]
+    if any(value is None for value in [*mmio_values, *itlb_values]):
+        return None
+
+    has_mmio = any(int(value) != 0 for value in mmio_values)
+    has_itlb_exception = any(int(value) != 0 for value in itlb_values)
     return {
-        "insufficient_meta": not can_deq_second,
+        "insufficient_meta": False,
+        "data_bank_conflict": False,
         "mmio": has_mmio,
-        "itlb_exception": has_itlb_exception,
-        "data_bank_conflict": can_deq_second and not has_mmio and not has_itlb_exception and int(direct_conflict) == 1,
+        "itlb_exception": (not has_mmio) and has_itlb_exception,
     }
+
+
+def _tf_tag(recorder, prefix: str) -> tuple[int, int] | None:
+    flag = _tf_read(recorder, f"{prefix}_flag")
+    value = _tf_read(recorder, f"{prefix}_value")
+    if flag is None or value is None:
+        return None
+    return int(flag), int(value)
+
+
+def _tf_any_vector(recorder, module: str, template: str, count: int) -> bool | None:
+    values = _tf_vector(recorder, module, template, count)
+    if any(value is None for value in values):
+        return None
+    return any(int(value) != 0 for value in values)
+
+
+def _tf_line_vector(recorder, stem: str) -> list[int | None] | None:
+    """Read both cache-line lanes for both MainPipe requests.
+
+    The direct and Vtogcov spellings are both accepted because generated
+    Verilator inventories expose one or the other depending on optimization.
+    A partially readable vector is deliberately rejected by returning None.
+    """
+    values: list[int | None] = []
+    for req_idx in range(2):
+        for line_idx in range(2):
+            suffix = f"_{req_idx}_{line_idx}"
+            values.append(
+                _read_first(
+                    recorder,
+                    (
+                        f"{_MAINPIPE_PREFIX}{stem}{suffix}",
+                        f"{_MAINPIPE_PREFIX}__Vtogcov__{stem}{suffix}",
+                    ),
+                )
+            )
+    if any(value is None for value in values):
+        return None
+    return [int(value) for value in values]
+
+
+def _tf_ibuffer_payload(recorder) -> tuple[int, ...] | None:
+    """Snapshot all observable IBuffer payload fields used by Decoupled stability.
+
+    The generated offset inventory contains the Vtogcov view for every lane.  A
+    missing field means the contract is incomplete, so this helper returns None
+    instead of treating it as zero.
+    """
+    base = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
+    registered = getattr(recorder, "_registered_internal_signals", None)
+    if registered is None:
+        return None
+    names = sorted(str(name) for name in registered if str(name).startswith(base))
+    if not names:
+        return None
+    values = [_read_first(recorder, (name,)) for name in names]
+    if any(value is None for value in values):
+        return None
+    return tuple(int(value) for value in values)
+
+
+def _tf_raw_instr_vector(recorder) -> list[dict] | None:
+    """Read the complete InstrBoundary result for one IFU s0 transaction."""
+    result: list[dict] = []
+    for index in range(32):
+        item = {}
+        for field in _RAW_INSTR_FIELDS:
+            value = _read_first(recorder, _tf_raw_instr_field_candidates(index, field))
+            if value is None:
+                if field == "isCrossBlockInstr":
+                    item[field] = None
+                    continue
+                return None
+            item[field] = int(value)
+        result.append(item)
+    return result
+
+
+def _tf_first_block_raw_instr_count(recorder) -> int | None:
+    raw = _tf_raw_instr_vector(recorder)
+    if raw is None:
+        return None
+    return sum(1 for item in raw if item["valid"] == 1 and item["blockSel"] == 0)
+
+
+def _tf_ibuffer_entries(recorder) -> list[dict] | None:
+    """Read every enabled IBuffer lane with its PC, width, and FTQ identity."""
+    base = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
+    enable = _read_first(recorder, (base + "enqEnable",))
+    if enable is None:
+        return None
+    entries: list[dict] = []
+    for index in range(36):
+        if ((int(enable) >> index) & 1) == 0:
+            continue
+        values = {
+            "pc": _read_first(recorder, (f"{base}pc_{index}_addr",)),
+            "is_rvc": _read_first(recorder, (f"{base}isRvc_{index}",)),
+            "ftq_flag": _read_first(recorder, (f"{base}ftqPtr_{index}_flag",)),
+            "ftq_value": _read_first(recorder, (f"{base}ftqPtr_{index}_value",)),
+        }
+        if any(value is None for value in values.values()):
+            return None
+        entries.append(
+            {
+                "slot": index,
+                "pc": int(values["pc"]),
+                "is_rvc": int(values["is_rvc"]),
+                "ftq_ptr": (int(values["ftq_flag"]), int(values["ftq_value"])),
+            }
+        )
+    return entries
 
 
 def _tf_waylookup_write_observation(recorder, cycle: int) -> None:
@@ -450,13 +697,63 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
 
     bpu_s3_flush = _tf_read(recorder, "bpu_s3_flush")
     if bpu_s3_flush == 1 and recorder._two_fetch_ftq_pending:
-        recorder.mark(
-            "two_fetch_flush_flow",
-            "bpu_s3_drop_before_issue",
-            cycle,
-            _tf_evidence("bpu_s3_flush_pending_dual"),
-        )
-    recorder._two_fetch_ftq_pending = bool(ftq_valid == 1 and ftq_ready == 0 and ftq_req1_valid == 1)
+        pending = recorder._two_fetch_ftq_pending
+        if isinstance(pending, dict):
+            pending_ptr = pending.get("fetch_ptr")
+            pending_cycle = pending.get("cycle")
+        else:
+            pending_ptr = None
+            pending_cycle = None
+        flush_flag = _tf_read(recorder, "bpu_s3_flush_ptr_flag")
+        flush_value = _tf_read(recorder, "bpu_s3_flush_ptr_value")
+        flush_ptr = None if None in (flush_flag, flush_value) else (int(flush_flag), int(flush_value))
+        if pending_ptr is not None and flush_ptr is not None and tuple(pending_ptr) == tuple(flush_ptr):
+            recorder.mark(
+                "two_fetch_flush_flow",
+                "bpu_s3_drop_before_issue",
+                cycle,
+                _tf_evidence(
+                    "bpu_s3_flush_pending_dual",
+                    pending_ptr=list(pending_ptr),
+                    flush_ptr=list(flush_ptr),
+                    pending_cycle=pending_cycle,
+                ),
+            )
+        else:
+            recorder.risk_observations.append(
+                _tf_evidence(
+                    "bpu_s3_pending_dual_flush_ptr_unmatched_or_unobservable",
+                    pending_ptr=None if pending_ptr is None else list(pending_ptr),
+                    flush_ptr=None if flush_ptr is None else list(flush_ptr),
+                    pending_cycle=pending_cycle,
+                    cycle=cycle,
+                )
+            )
+    main_s1_flush = _tf_read(recorder, "main_s1_flush")
+    backend_redirect = _tf_read(recorder, "backend_redirect")
+    if bpu_s3_flush == 1 or main_s1_flush == 1:
+        # A flush invalidates both the s1 miss association and any held
+        # payload.  Do not let a later response be attributed to the old FTQ
+        # pair.
+        recorder._two_fetch_refill_pending = None
+        recorder._two_fetch_last_main_s1_tag = None
+        recorder._two_fetch_stalled_payload = None
+        recorder._two_fetch_stalled_payload_stable = True
+        recorder._two_fetch_stalled_since = None
+    pending_fetch_flag = _tf_read(recorder, "fetch_ptr_flag")
+    pending_fetch_value = _tf_read(recorder, "fetch_ptr_value")
+    recorder._two_fetch_ftq_pending = (
+        {
+            "cycle": cycle,
+            "fetch_ptr": (
+                None
+                if None in (pending_fetch_flag, pending_fetch_value)
+                else (int(pending_fetch_flag), int(pending_fetch_value))
+            ),
+        }
+        if ftq_valid == 1 and ftq_ready == 0 and ftq_req1_valid == 1
+        else False
+    )
 
     if ftq_fire and ftq_req1_valid is not None:
         start0 = _tf_ftq_start(recorder, 0)
@@ -464,6 +761,9 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         end0 = _tf_read(recorder, "ftq_req0_end")
         end1 = _tf_read(recorder, "ftq_req1_end")
         exc0 = _tf_read(recorder, "ftq_req0_exception")
+        backend_exc = _tf_read(recorder, "ftq_backend_exception")
+        backend_exc_flag = _tf_read(recorder, "ftq_backend_exception_ptr_flag")
+        backend_exc_value = _tf_read(recorder, "ftq_backend_exception_ptr_value")
         bpu_flag = _tf_read(recorder, "bpu_ptr_flag")
         bpu_value = _tf_read(recorder, "bpu_ptr_value")
         fetch_flag = _tf_read(recorder, "fetch_ptr_flag")
@@ -476,14 +776,32 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         # PrunedAddr.addr is halfword-addressed, so its bit 11 is virtual-address bit 12.
         cross_page = None not in (start0, start1) and (int(start0) >> 11) != (int(start1) >> 11)
         size_block = None not in (end0, end1) and int(end0) + int(end1) + 2 > 32
+        backend_exception_candidate = False
+        if None not in (
+            backend_exc,
+            backend_exc_flag,
+            backend_exc_value,
+            fetch_flag,
+            fetch_value,
+        ):
+            exception_ptr = (int(backend_exc_flag), int(backend_exc_value))
+            candidate0 = (int(fetch_flag), int(fetch_value))
+            candidate1 = _tf_next_ptr(fetch_flag, fetch_value, ftq_size)
+            backend_exception_candidate = int(backend_exc) != 0 and exception_ptr in (candidate0, candidate1)
         evidence = _tf_evidence(
-            "ftq_to_waylookup",
+            "ftq_to_mainpipe",
             req1_valid=int(ftq_req1_valid),
             start0=start0,
             start1=start1,
             end0=end0,
             end1=end1,
             exception0=exc0,
+            backend_exception=backend_exc,
+            backend_exception_ptr=(
+                None
+                if backend_exc_flag is None or backend_exc_value is None
+                else [int(backend_exc_flag), int(backend_exc_value)]
+            ),
             runahead_distance=runahead_distance,
         )
         if int(ftq_req1_valid) == 1:
@@ -495,9 +813,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
                 recorder.mark("two_fetch_ftq_eligibility", "blocked_size", cycle, evidence)
             if cross_page:
                 recorder.mark("two_fetch_ftq_eligibility", "blocked_cross_page", cycle, evidence)
-            # The generated DUT exposes hasBackendException for req0 only. Do
-            # not infer req1's state from unrelated eligibility conditions.
-            if exc0 == 1:
+            if exc0 == 1 or backend_exception_candidate:
                 recorder.mark("two_fetch_ftq_eligibility", "blocked_backend_exception", cycle, evidence)
 
     fetch_flag = _tf_read(recorder, "fetch_ptr_flag")
@@ -520,13 +836,17 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         recorder._two_fetch_expected_ptr_step = None
         recorder._two_fetch_last_fetch_ptr = current_ptr
 
-    way_req1 = _tf_read(recorder, "way_req1_valid")
-    way_valid = _tf_read(recorder, "way_out_valid")
-    way_ready = _tf_read(recorder, "way_out_ready")
-    way_real_two = _tf_read(recorder, "way_real_two")
-    way_fire = way_valid == 1 and way_ready == 1
-    if way_fire and way_real_two is not None:
-        recorder._two_fetch_expected_ptr_step = 2 if int(way_real_two) == 1 else 1
+    # #6221 moves the accepted transaction and the real-two decision to
+    # MainPipe s0.  Keep the historical key names for registry compatibility,
+    # but read only the MainPipe handshake and same-transaction result.
+    main_req1_candidate = _tf_read(recorder, "way_req1_valid")
+    main_valid = _tf_read(recorder, "way_out_valid")
+    main_ready = _tf_read(recorder, "way_out_ready")
+    main_real_two = _tf_read(recorder, "way_real_two")
+    main_s0_fire = _tf_read(recorder, "main_s0_fire")
+    main_fire = main_s0_fire == 1
+    if main_fire and main_req1_candidate == 1 and main_real_two is not None:
+        recorder._two_fetch_expected_ptr_step = 2 if int(main_real_two) == 1 else 1
 
     prefetch_valid = _tf_read(recorder, "prefetch_valid")
     prefetch_ready = _tf_read(recorder, "prefetch_ready")
@@ -541,33 +861,72 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
                 _tf_evidence("two_prefetch", case=int(prefetch_case)),
             )
 
-    if way_fire and way_req1 == 1 and way_real_two is not None:
+    if main_fire and main_req1_candidate == 1 and main_real_two is not None:
         way_empty = _tf_read(recorder, "way_empty")
         write_flag = _tf_read(recorder, "way_write_ptr_flag")
         write_value = _tf_read(recorder, "way_write_ptr_value")
         evidence = _tf_evidence(
-            "waylookup_to_mainpipe",
-            real_two=int(way_real_two),
+            "mainpipe_s0_fire",
+            real_two=int(main_real_two),
         )
-        if int(way_real_two) == 1:
+        if int(main_real_two) == 1:
             recorder.mark("two_fetch_waylookup_result", "dual_served", cycle, evidence)
         else:
-            way_reasons = _tf_waylookup_reasons(recorder)
-            evidence["reasons"] = way_reasons
+            main_reason = _tf_mainpipe_fail_reason(recorder)
+            if main_reason is not None:
+                evidence["mainpipe_fail_reason_flags"] = {
+                    key: int(value) for key, value in main_reason.items()
+                }
             if way_empty is not None:
                 evidence["waylookup_empty"] = int(way_empty)
             if write_flag is not None and write_value is not None:
                 evidence["waylookup_write_ptr"] = [int(write_flag), int(write_value)]
             recorder.mark("two_fetch_waylookup_result", "single_fallback", cycle, evidence)
-            if way_reasons is not None:
-                for bin_name, hit in way_reasons.items():
+            if main_reason is not None:
+                for bin_name, hit in main_reason.items():
                     if hit:
                         recorder.mark("two_fetch_waylookup_block_reason", bin_name, cycle, evidence)
+            else:
+                recorder.risk_observations.append(
+                    _tf_evidence(
+                        "mainpipe_fallback_reason_unobservable",
+                        real_two=int(main_real_two),
+                        cycle=cycle,
+                    )
+                )
 
     main_valid = _tf_read(recorder, "main_s1_valid")
     main_req1 = _tf_read(recorder, "main_req1_valid")
+    main_exception = _tf_read(recorder, "main_s1_exception")
+    main_mmio = _tf_read(recorder, "main_s1_mmio")
     should_fetch = _tf_vector(recorder, "inner_icache.mainPipe", "s1_shouldFetch_{index}", 4)
-    if main_valid == 1 and main_req1 == 1 and all(value is not None for value in should_fetch):
+    main_s1_tag = None
+    if main_valid == 1 and main_req1 == 1:
+        tag0 = _tf_tag(recorder, "main_s1_ftq0")
+        tag1 = _tf_tag(recorder, "main_s1_ftq1")
+        if tag0 is not None and tag1 is not None:
+            main_s1_tag = (tag0, tag1)
+    is_new_main_transaction = main_s1_tag is not None and main_s1_tag != getattr(
+        recorder, "_two_fetch_last_main_s1_tag", None
+    )
+    if (
+        is_new_main_transaction
+        and main_exception == 0
+        and main_mmio == 0
+        and main_s1_flush != 1
+        and backend_redirect != 1
+        and all(value is not None for value in should_fetch)
+    ):
+        previous_pending = getattr(recorder, "_two_fetch_refill_pending", None)
+        if previous_pending is not None:
+            recorder.risk_observations.append(
+                _tf_evidence(
+                    "two_fetch_refill_replaced_before_completion",
+                    previous_tag=previous_pending.get("tag"),
+                    new_tag=[list(main_s1_tag[0]), list(main_s1_tag[1])],
+                    cycle=cycle,
+                )
+            )
         req0_miss = bool(int(should_fetch[0]) or int(should_fetch[1]))
         req1_miss = bool(int(should_fetch[2]) or int(should_fetch[3]))
         pattern = {
@@ -576,14 +935,32 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
             (True, False): "miss_hit",
             (True, True): "miss_miss",
         }[(req0_miss, req1_miss)]
-        recorder.mark(
-            "two_fetch_mainpipe_hit_pattern",
-            pattern,
-            cycle,
-            _tf_evidence("mainpipe_dual", should_fetch=[int(value) for value in should_fetch]),
-        )
-        if req0_miss or req1_miss:
-            recorder._two_fetch_waiting_refill = True
+        recorder._two_fetch_last_main_s1_tag = main_s1_tag
+        recorder._two_fetch_refill_pending = {
+            "tag": main_s1_tag,
+            "pattern": pattern,
+            "miss_cycle": cycle,
+            "has_miss": bool(req0_miss or req1_miss),
+            "required_lines": [bool(int(value)) for value in should_fetch],
+            "raw_refill_cycles": [None, None, None, None],
+            "registered_refill_cycles": [None, None, None, None],
+        }
+
+    pending_refill = getattr(recorder, "_two_fetch_refill_pending", None)
+    raw_refill = _tf_line_vector(recorder, "s1_mshrValid")
+    registered_refill = _tf_line_vector(recorder, "s1_mshrValidReg")
+    if pending_refill is not None:
+        required_lines = pending_refill.get("required_lines", [False] * 4)
+        raw_cycles = pending_refill.setdefault("raw_refill_cycles", [None] * 4)
+        registered_cycles = pending_refill.setdefault("registered_refill_cycles", [None] * 4)
+        if raw_refill is not None and registered_refill is not None:
+            for index, required in enumerate(required_lines):
+                if not required:
+                    continue
+                if int(raw_refill[index]) != 0 and raw_cycles[index] is None:
+                    raw_cycles[index] = cycle
+                if int(registered_refill[index]) != 0 and registered_cycles[index] is None:
+                    registered_cycles[index] = cycle
 
     ifu_valid = _tf_read(recorder, "ifu_valid")
     ifu_ready = _tf_read(recorder, "ifu_ready")
@@ -592,51 +969,163 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
     if ifu_fire and ifu_req1 == 1:
         recorder._two_fetch_last_dual_cycle = cycle
         recorder.mark("two_fetch_ifu_window", "dual_window", cycle, _tf_evidence("icache_to_ifu_dual"))
-        if recorder._two_fetch_waiting_refill:
-            recorder.mark(
-                "two_fetch_mainpipe_completion",
-                "wait_refill_then_dual",
-                cycle,
-                _tf_evidence("dual_after_refill"),
+        if pending_refill is not None:
+            ifu_tag0 = _tf_tag(recorder, "ifu_req0_ftq")
+            ifu_tag1 = _tf_tag(recorder, "ifu_req1_ftq")
+            observed_tag = None if ifu_tag0 is None or ifu_tag1 is None else (ifu_tag0, ifu_tag1)
+            expected_tag = pending_refill.get("tag")
+            required_lines = pending_refill.get("required_lines", [False] * 4)
+            raw_cycles = pending_refill.get("raw_refill_cycles", [None] * 4)
+            registered_cycles = pending_refill.get("registered_refill_cycles", [None] * 4)
+            registered_complete = all(
+                not required
+                or (
+                    raw_cycles[index] is not None
+                    and registered_cycles[index] is not None
+                    and int(registered_cycles[index]) == int(raw_cycles[index]) + 1
+                )
+                for index, required in enumerate(required_lines)
             )
-            recorder._two_fetch_waiting_refill = False
+            if observed_tag == expected_tag and registered_complete:
+                completion_evidence = _tf_evidence(
+                    "dual_after_mainpipe_completion",
+                    ftq_tag=[list(expected_tag[0]), list(expected_tag[1])],
+                    initial_cycle=pending_refill.get("miss_cycle"),
+                    raw_refill_cycles=raw_cycles,
+                    registered_refill_cycles=registered_cycles,
+                )
+                recorder.mark(
+                    "two_fetch_mainpipe_hit_pattern",
+                    str(pending_refill.get("pattern")),
+                    cycle,
+                    completion_evidence,
+                )
+                if pending_refill.get("has_miss"):
+                    recorder.mark(
+                        "two_fetch_mainpipe_completion",
+                        "wait_refill_then_dual",
+                        cycle,
+                        completion_evidence,
+                    )
+                recorder._two_fetch_refill_pending = None
+            else:
+                recorder.risk_observations.append(
+                    _tf_evidence(
+                        "two_fetch_refill_tag_mismatch",
+                        expected_tag=(None if expected_tag is None else [list(expected_tag[0]), list(expected_tag[1])]),
+                        observed_tag=(None if observed_tag is None else [list(observed_tag[0]), list(observed_tag[1])]),
+                        raw_refill_cycles=raw_cycles,
+                        registered_refill_cycles=registered_cycles,
+                        registered_complete=int(registered_complete),
+                        cycle=cycle,
+                    )
+                )
 
         first_size = _tf_read(recorder, "ifu_req0_size")
-        block_sel = _tf_vector(
-            recorder,
-            "inner_ifu.instrBoundary",
-            "io_resp_rawInstrVec_{index}_blockSel",
-            31,
+        raw_instr = _tf_raw_instr_vector(recorder)
+        unknown_cross_indices = (
+            []
+            if raw_instr is None
+            else [index for index, item in enumerate(raw_instr) if item.get("isCrossBlockInstr") is None]
         )
-        readable_block_sel = [value for value in block_sel if value is not None]
-        if first_size is not None and readable_block_sel and any(int(value) for value in readable_block_sel):
-            recorder.mark(
-                "two_fetch_ifu_source",
-                "blocksel_switch",
-                cycle,
+        if unknown_cross_indices and not getattr(recorder, "_two_fetch_raw_cross_unknown_reported", False):
+            recorder.risk_observations.append(
                 _tf_evidence(
-                    "ifu_blocksel",
-                    first_size=int(first_size),
-                    second_block_slots=_count_truthy(readable_block_sel),
-                ),
+                    "raw_instr_cross_flag_unobservable",
+                    indices=unknown_cross_indices,
+                    note=(
+                        "missing isCrossBlockInstr is not defaulted; bins requiring this flag "
+                        "must remain unhit unless another observable relation proves them"
+                    ),
+                )
             )
-
-        cross_flags = _tf_vector(
-            recorder,
-            "inner_ifu.instrBoundary",
-            "io_resp_rawInstrVec_{index}_isCrossBlockInstr",
-            31,
+            recorder._two_fetch_raw_cross_unknown_reported = True
+        cross_indices = (
+            []
+            if raw_instr is None
+            else [index for index, item in enumerate(raw_instr) if item.get("isCrossBlockInstr") == 1]
         )
-        readable_cross_flags = [value for value in cross_flags if value is not None]
-        if readable_cross_flags and any(int(value) for value in readable_cross_flags):
-            recorder.mark(
-                "two_fetch_cross_block",
-                "rvi_stitch",
-                cycle,
-                _tf_evidence("cross_block_rvi", cross_count=_count_truthy(readable_cross_flags)),
-            )
-        if _tf_read(recorder, "ifu_first_taken") == 1 and readable_cross_flags and not any(
-            int(value) for value in readable_cross_flags
+        blocksel_exact = False
+        if raw_instr is not None and first_size is not None and 0 < int(first_size) < len(raw_instr):
+            size = int(first_size)
+            expected_blocksels = []
+            for index, item in enumerate(raw_instr):
+                cross_flag = item.get("isCrossBlockInstr")
+                if index == size - 1 and cross_flag is None:
+                    expected_blocksels = []
+                    break
+                expected_blocksels.append(
+                    item["blockSel"]
+                    == int(index >= size or (index == size - 1 and cross_flag == 1))
+                )
+            blocksel_exact = bool(expected_blocksels) and all(expected_blocksels)
+            first_valid = any(item["valid"] == 1 and item["blockSel"] == 0 for item in raw_instr)
+            second_valid = any(item["valid"] == 1 and item["blockSel"] == 1 for item in raw_instr)
+            if blocksel_exact and first_valid and second_valid:
+                recorder.mark(
+                    "two_fetch_ifu_source",
+                    "blocksel_switch",
+                    cycle,
+                    _tf_evidence(
+                        "ifu_blocksel_exact",
+                        first_size=size,
+                        cross_indices=cross_indices,
+                    ),
+                )
+
+            if len(cross_indices) == 1:
+                cross_index = cross_indices[0]
+                cross_item = raw_instr[cross_index]
+                start0 = _tf_read(recorder, "ifu_req0_start")
+                start1 = _tf_read(recorder, "ifu_req1_start")
+                cross_pc = None if start0 is None else int(start0) + cross_index
+                low_half = high_half = None
+                if cross_pc is not None:
+                    low_raw, _ = recorder._read_expected_fetch_raw(env, int(cross_pc) << 1, 2)
+                    low_half = None if low_raw is None else int(low_raw) & 0xFFFF
+                if start1 is not None:
+                    high_raw, _ = recorder._read_expected_fetch_raw(env, int(start1) << 1, 2)
+                    high_half = None if high_raw is None else int(high_raw) & 0xFFFF
+                expected_data = (
+                    None
+                    if low_half is None or high_half is None
+                    else int(low_half) | (int(high_half) << 16)
+                )
+                next_half_not_duplicated = (
+                    cross_index + 1 < len(raw_instr) and raw_instr[cross_index + 1]["valid"] == 0
+                )
+                if (
+                    blocksel_exact
+                    and cross_index == size - 1
+                    and cross_item["valid"] == 1
+                    and cross_item["isRvc"] == 0
+                    and cross_item["blockSel"] == 1
+                    and cross_item["startOffset"] == 31
+                    and start0 is not None
+                    and start1 is not None
+                    and int(start1) == int(start0) + size
+                    and expected_data is not None
+                    and cross_item["data"] == expected_data
+                    and next_half_not_duplicated
+                ):
+                    recorder.mark(
+                        "two_fetch_cross_block",
+                        "rvi_stitch",
+                        cycle,
+                        _tf_evidence(
+                            "cross_block_rvi_exact",
+                            raw_index=cross_index,
+                            pc=int(cross_pc) << 1,
+                            data=int(cross_item["data"]),
+                            first_size=size,
+                        ),
+                    )
+
+        if (
+            _tf_read(recorder, "ifu_first_taken") == 1
+            and raw_instr is not None
+            and blocksel_exact
+            and not cross_indices
         ):
             recorder.mark(
                 "two_fetch_cross_block",
@@ -645,15 +1134,21 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
                 _tf_evidence("first_taken_no_cross_stitch"),
             )
 
-    if ifu_fire and _tf_read(recorder, "ifu_first_invalid") == 1 and _tf_read(
-        recorder, "ifu_fixed_second_valid"
-    ) == 0:
-        recorder.mark(
-            "two_fetch_invalid_taken",
-            "first_masks_second",
-            cycle,
-            _tf_evidence("first_invalid_taken"),
-        )
+    if (
+        _tf_read(recorder, "ifu_s1_valid") == 1
+        and _tf_read(recorder, "ifu_first_invalid") == 1
+        and _tf_read(recorder, "ifu_req1_valid") == 1
+        and _tf_read(recorder, "ifu_flush") != 1
+    ):
+        ifu_s1_instr_count = _tf_read(recorder, "ifu_s1_instr_count")
+        first_block_count = _tf_first_block_raw_instr_count(recorder)
+        if ifu_s1_instr_count is not None and first_block_count is not None and int(ifu_s1_instr_count) == int(first_block_count):
+            recorder.mark(
+                "two_fetch_invalid_taken",
+                "first_masks_second",
+                cycle,
+                _tf_evidence("s1_first_invalid_taken_masks_second"),
+            )
 
     checker_valid = _tf_read(recorder, "checker_valid")
     checker_select = _tf_read(recorder, "checker_select")
@@ -702,29 +1197,191 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
                 )
 
     second_valid = _tf_read(recorder, "ifu_second_valid")
+    s2_valid = _tf_read(recorder, "ifu_s2_valid")
     to_ibuffer_valid = _tf_read(recorder, "to_ibuffer_valid")
     to_ibuffer_ready = _tf_read(recorder, "to_ibuffer_ready")
-    if second_valid == 1 and to_ibuffer_valid == 1:
+    if (
+        second_valid == 1
+        and s2_valid == 1
+        and to_ibuffer_valid == 1
+        and backend_redirect != 1
+        and bpu_s3_flush != 1
+        and main_s1_flush != 1
+        and _tf_read(recorder, "ifu_flush") != 1
+    ):
         recorder._two_fetch_last_dual_cycle = cycle
         if to_ibuffer_ready == 1:
-            recorder.mark("two_fetch_delivery", "dual_fire", cycle, _tf_evidence("to_ibuffer_dual_fire"))
-        elif to_ibuffer_ready == 0:
-            recorder.mark("two_fetch_delivery", "dual_stall", cycle, _tf_evidence("to_ibuffer_dual_stall"))
-
-    backend_redirect = _read(recorder, "io_backend_toFtq_redirect_valid", 0)
-    if backend_redirect == 1:
-        if recent_dual and _tf_read(recorder, "ifu_flush") == 1:
-            recorder.mark(
-                "two_fetch_flush_flow",
-                "backend_redirect_drops_inflight",
-                cycle,
-                _tf_evidence("backend_redirect_dual_inflight"),
+            current_payload = _tf_ibuffer_payload(recorder)
+            stalled_payload = getattr(recorder, "_two_fetch_stalled_payload", None)
+            if stalled_payload is not None:
+                stable_ok = bool(getattr(recorder, "_two_fetch_stalled_payload_stable", True))
+                stalled_since = getattr(recorder, "_two_fetch_stalled_since", None)
+                if current_payload is not None and current_payload == stalled_payload and stable_ok:
+                    recorder.mark(
+                        "two_fetch_delivery",
+                        "dual_stall",
+                        cycle,
+                        _tf_evidence(
+                            "to_ibuffer_dual_stall_payload_stable_until_fire",
+                            stalled_since=stalled_since,
+                            fire_cycle=cycle,
+                            payload_sha=hashlib.sha256(repr(current_payload).encode("ascii")).hexdigest(),
+                        ),
+                    )
+                elif current_payload is None or current_payload != stalled_payload:
+                    recorder.risk_observations.append(
+                        _tf_evidence(
+                            "ibuffer_payload_changed_under_backpressure",
+                            cycle=cycle,
+                            stalled_since=stalled_since,
+                            current_payload_observable=int(current_payload is not None),
+                        )
+                    )
+                recorder._two_fetch_stalled_payload = None
+                recorder._two_fetch_stalled_payload_stable = True
+                recorder._two_fetch_stalled_since = None
+            entries = _tf_ibuffer_entries(recorder)
+            s2_tag0 = _tf_tag(recorder, "ifu_s2_ftq0")
+            s2_tag1 = _tf_tag(recorder, "ifu_s2_ftq1")
+            expected_tags = None if s2_tag0 is None or s2_tag1 is None else (s2_tag0, s2_tag1)
+            compressed_tags = []
+            if entries is not None:
+                for entry in entries:
+                    if not compressed_tags or entry["ftq_ptr"] != compressed_tags[-1]:
+                        compressed_tags.append(entry["ftq_ptr"])
+            pc_ordered = bool(entries)
+            if entries:
+                for before, after in zip(entries, entries[1:]):
+                    if before["ftq_ptr"] == after["ftq_ptr"]:
+                        expected_step = 1 if before["is_rvc"] else 2
+                        if int(after["pc"]) - int(before["pc"]) != expected_step:
+                            pc_ordered = False
+                            break
+            exact_dual_payload = (
+                expected_tags is not None
+                and entries is not None
+                and compressed_tags == [expected_tags[0], expected_tags[1]]
+                and pc_ordered
             )
+            if exact_dual_payload:
+                evidence = _tf_evidence(
+                    "to_ibuffer_dual_fire_exact",
+                    ftq_tags=[list(expected_tags[0]), list(expected_tags[1])],
+                    entries=entries,
+                )
+                recorder.mark("two_fetch_delivery", "dual_fire", cycle, evidence)
+                recorder._two_fetch_expected_cfvec = {
+                    "tags": expected_tags,
+                    "cycle": cycle,
+                }
+
+            redirect_pending = getattr(recorder, "_two_fetch_redirect_pending", None)
+            if redirect_pending is not None and entries is not None:
+                old_tags = set(redirect_pending.get("old_tags") or ())
+                delivered_old = any(entry["ftq_ptr"] in old_tags for entry in entries)
+                target = redirect_pending.get("target")
+                first_pc = int(entries[0]["pc"]) << 1 if entries else None
+                if delivered_old:
+                    recorder.risk_observations.append(
+                        _tf_evidence(
+                            "two_fetch_redirect_old_tag_delivery",
+                            old_tags=[list(tag) for tag in sorted(old_tags)],
+                            delivered_tags=[list(tag) for tag in compressed_tags],
+                            cycle=cycle,
+                        )
+                    )
+                elif target is not None and first_pc == int(target):
+                    recorder.mark(
+                        "two_fetch_flush_flow",
+                        "backend_redirect_drops_inflight",
+                        cycle,
+                        _tf_evidence(
+                            "backend_redirect_first_new_delivery",
+                            target=int(target),
+                            first_pc=first_pc,
+                            old_tags=[list(tag) for tag in sorted(old_tags)],
+                            delivered_tags=[list(tag) for tag in compressed_tags],
+                        ),
+                    )
+                else:
+                    recorder.risk_observations.append(
+                        _tf_evidence(
+                            "two_fetch_redirect_wrong_first_delivery",
+                            target=target,
+                            first_pc=first_pc,
+                            cycle=cycle,
+                        )
+                    )
+                recorder._two_fetch_redirect_pending = None
+        elif to_ibuffer_ready == 0:
+            payload = _tf_ibuffer_payload(recorder)
+            previous_payload = getattr(recorder, "_two_fetch_stalled_payload", None)
+            if payload is not None and previous_payload is None:
+                recorder._two_fetch_stalled_since = cycle
+                recorder._two_fetch_stalled_payload_stable = True
+            elif payload is not None and previous_payload is not None and payload != previous_payload:
+                recorder.risk_observations.append(
+                    _tf_evidence(
+                        "ibuffer_payload_changed_under_backpressure",
+                        cycle=cycle,
+                    )
+                )
+                recorder._two_fetch_stalled_payload_stable = False
+            recorder._two_fetch_stalled_payload = payload
+        else:
+            recorder._two_fetch_stalled_payload = None
+            recorder._two_fetch_stalled_payload_stable = True
+            recorder._two_fetch_stalled_since = None
+    elif (
+        recorder._two_fetch_stalled_payload is not None
+        and to_ibuffer_valid == 1
+        and to_ibuffer_ready == 0
+    ):
+        payload = _tf_ibuffer_payload(recorder)
+        if payload is None or payload != recorder._two_fetch_stalled_payload:
+            recorder.risk_observations.append(
+                _tf_evidence("ibuffer_payload_changed_under_backpressure", cycle=cycle)
+            )
+            recorder._two_fetch_stalled_payload_stable = False
+        recorder._two_fetch_stalled_payload = payload
+    elif to_ibuffer_valid != 1:
+        recorder._two_fetch_stalled_payload = None
+        recorder._two_fetch_stalled_payload_stable = True
+        recorder._two_fetch_stalled_since = None
+
+    if backend_redirect == 1:
+        in_flight_tags = None
+        pending_refill = getattr(recorder, "_two_fetch_refill_pending", None)
+        expected_cfvec = getattr(recorder, "_two_fetch_expected_cfvec", None)
+        current_s2_tag0 = _tf_tag(recorder, "ifu_s2_ftq0")
+        current_s2_tag1 = _tf_tag(recorder, "ifu_s2_ftq1")
+        if pending_refill is not None:
+            in_flight_tags = pending_refill.get("tag")
+        elif expected_cfvec is not None:
+            in_flight_tags = expected_cfvec.get("tags")
+        elif second_valid == 1 and s2_valid == 1 and None not in (current_s2_tag0, current_s2_tag1):
+            in_flight_tags = (current_s2_tag0, current_s2_tag1)
+        redirect_target = _tf_read(recorder, "backend_redirect_target")
+        if (
+            in_flight_tags is not None
+            and redirect_target is not None
+            and (_tf_read(recorder, "ifu_flush") == 1 or main_s1_flush == 1)
+        ):
+            recorder._two_fetch_redirect_pending = {
+                "old_tags": tuple(in_flight_tags),
+                "target": int(redirect_target),
+                "cycle": cycle,
+            }
         recorder._two_fetch_last_fetch_ptr = None
-        recorder._two_fetch_waiting_refill = False
+        recorder._two_fetch_refill_pending = None
         recorder._two_fetch_ftq_pending = False
         recorder._two_fetch_last_dual_cycle = None
         recorder._two_fetch_last_waylookup_write_state = None
+        recorder._two_fetch_last_main_s1_tag = None
+        recorder._two_fetch_stalled_payload = None
+        recorder._two_fetch_stalled_payload_stable = True
+        recorder._two_fetch_stalled_since = None
+        recorder._two_fetch_expected_cfvec = None
 
 
 def _classify_block_pos(pc: int) -> str:
@@ -879,16 +1536,41 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
             {"event": "cfvec_mixed_width_window", "entries": cf_entries},
         )
 
-    recent_dual = recorder._two_fetch_last_dual_cycle is not None and (
-        int(cycle) - int(recorder._two_fetch_last_dual_cycle)
-    ) <= 64
     unique_ftq_ptrs = []
     for entry in cf_entries:
         if entry["ftq_ptr"] not in unique_ftq_ptrs:
             unique_ftq_ptrs.append(entry["ftq_ptr"])
-    if recent_dual and len(unique_ftq_ptrs) >= 2:
+
+    redirect_pending = getattr(recorder, "_two_fetch_redirect_pending", None)
+    if redirect_pending is not None:
+        old_tags = set(redirect_pending.get("old_tags") or ())
+        delivered_old = [entry for entry in cf_entries if entry["ftq_ptr"] in old_tags]
+        if delivered_old:
+            recorder.risk_observations.append(
+                {
+                    "event": "two_fetch_redirect_old_tag_cfvec_delivery",
+                    "cycle": cycle,
+                    "old_tags": [list(tag) for tag in sorted(old_tags)],
+                    "entries": delivered_old,
+                }
+            )
+
+    expected_cfvec = getattr(recorder, "_two_fetch_expected_cfvec", None)
+    expected_tags = None
+    if expected_cfvec is not None:
+        expected_cycle = int(expected_cfvec.get("cycle", cycle))
+        if cycle - expected_cycle > 64:
+            recorder._two_fetch_expected_cfvec = None
+        else:
+            expected_tags = tuple(expected_cfvec.get("tags") or ())
+    exact_two_source_delivery = (
+        len(expected_tags or ()) == 2
+        and unique_ftq_ptrs == [expected_tags[0], expected_tags[1]]
+    )
+    if exact_two_source_delivery:
         evidence = {
-            "event": "backend_cfvec_two_ftq_sources",
+            "event": "backend_cfvec_exact_two_ftq_sources",
+            "expected_ftq_ptrs": [list(ptr) for ptr in expected_tags],
             "ftq_ptrs": [list(ptr) for ptr in unique_ftq_ptrs],
             "entries": cf_entries,
         }
@@ -906,3 +1588,4 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
                     {**evidence, "boundary_slots": [before["slot"], after["slot"]]},
                 )
                 break
+        recorder._two_fetch_expected_cfvec = None

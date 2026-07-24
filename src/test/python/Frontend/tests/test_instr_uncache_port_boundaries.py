@@ -578,6 +578,110 @@ _INSTR_UNCACHE_ENTRY_STATE_SIGNALS = (
     "Frontend_top.Frontend.inner_instrUncache.entries_0.state",
     "TOP.Frontend_top.Frontend.inner_instrUncache.entries_0.state",
 )
+_IFU_PREV_HALF_RVI_SIGNALS = {
+    "s0": (
+        "Frontend_top.Frontend.inner_ifu.s0_prevEndIsHalfRvi",
+        "TOP.Frontend_top.Frontend.inner_ifu.s0_prevEndIsHalfRvi",
+    ),
+    "s1": (
+        "Frontend_top.Frontend.inner_ifu.s1_prevEndIsHalfRvi",
+        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndIsHalfRvi",
+    ),
+    "s1_data": (
+        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviData",
+        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviData",
+    ),
+    "s1_pc": (
+        "Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviPc_addr",
+        "TOP.Frontend_top.Frontend.inner_ifu.s1_prevEndHalfRviPc_addr",
+    ),
+    "s2": (
+        "Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRvi",
+        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndIsHalfRvi",
+    ),
+    "s2_valid": (
+        "Frontend_top.Frontend.inner_ifu.s2_valid_valid",
+        "TOP.Frontend_top.Frontend.inner_ifu.s2_valid_valid",
+    ),
+    "s2_data": (
+        "Frontend_top.Frontend.inner_ifu.s2_prevEndHalfRviData",
+        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndHalfRviData",
+    ),
+    "s2_pc": (
+        "Frontend_top.Frontend.inner_ifu.s2_prevEndHalfPc_addr",
+        "TOP.Frontend_top.Frontend.inner_ifu.s2_prevEndHalfPc_addr",
+    ),
+}
+_IFU_BACKEND_REDIRECT_SIGNALS = (
+    "Frontend_top.Frontend.inner_ftq.backendRedirect_valid",
+    "TOP.Frontend_top.Frontend.inner_ftq.backendRedirect_valid",
+    "Frontend_top.io_backend_toFtq_redirect_valid",
+    "io_backend_toFtq_redirect_valid",
+)
+_IFU_UNCACHE_NEED_RESEND_SIGNALS = (
+    "Frontend_top.Frontend.inner_ifu.uncacheNeedResend",
+    "TOP.Frontend_top.Frontend.inner_ifu.uncacheNeedResend",
+)
+
+
+def test_uncache_prev_half_signal_contract_matches_dut_inventory():
+    """The cross-page observer must fail closed when any retimed state is absent."""
+    offset = Path(__file__).resolve().parents[5] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
+    assert offset.exists(), "DUT signal inventory is required before signal-contract tests"
+    registered = {
+        line[len("  - name: ") :].strip()
+        for line in offset.read_text(encoding="utf-8").splitlines()
+        if line.startswith("  - name: ")
+    }
+    required = [
+        *_IFU_PREV_HALF_RVI_SIGNALS.values(),
+        _IFU_BACKEND_REDIRECT_SIGNALS,
+        _IFU_UNCACHE_NEED_RESEND_SIGNALS,
+    ]
+    missing = [list(names) for names in required if not any(name in registered for name in names)]
+    assert not missing, {"missing_internal_signals": missing}
+
+
+def _capture_prev_half_rvi_state(env, cycle: int) -> dict:
+    stats = env.uncache_agent.get_stats()
+    request_addrs = list(stats.get("request_addrs", []))
+    response_addrs = list(stats.get("response_addrs", []))
+    return {
+        "cycle": int(cycle),
+        "s0": _require_first_dut_signal(env, _IFU_PREV_HALF_RVI_SIGNALS["s0"]),
+        "s1": _require_first_dut_signal(env, _IFU_PREV_HALF_RVI_SIGNALS["s1"]),
+        "s1_data": _require_first_dut_signal(env, _IFU_PREV_HALF_RVI_SIGNALS["s1_data"]),
+        "s1_pc": _require_first_dut_signal(env, _IFU_PREV_HALF_RVI_SIGNALS["s1_pc"]),
+        "s2": _require_first_dut_signal(env, _IFU_PREV_HALF_RVI_SIGNALS["s2"]),
+        "s2_valid": _require_first_dut_signal(env, _IFU_PREV_HALF_RVI_SIGNALS["s2_valid"]),
+        "s2_data": _require_first_dut_signal(env, _IFU_PREV_HALF_RVI_SIGNALS["s2_data"]),
+        "s2_pc": _require_first_dut_signal(env, _IFU_PREV_HALF_RVI_SIGNALS["s2_pc"]),
+        "backend_redirect": _require_first_dut_signal(env, _IFU_BACKEND_REDIRECT_SIGNALS),
+        "need_resend": _require_first_dut_signal(env, _IFU_UNCACHE_NEED_RESEND_SIGNALS),
+        "req_count": int(stats.get("req_count", 0)),
+        "resp_count": int(stats.get("resp_count", 0)),
+        "pending_count": int(stats.get("pending", 0)),
+        "last_request_addr": request_addrs[-1] if request_addrs else None,
+        "last_response_addr": response_addrs[-1] if response_addrs else None,
+    }
+
+
+def _register_prev_half_rvi_observer(env) -> list[dict]:
+    samples: list[dict] = []
+    env.register_cycle_observer(
+        lambda cycle, active_env: samples.append(_capture_prev_half_rvi_state(active_env, cycle))
+    )
+    return samples
+
+
+def _pending_uncache_samples(samples: Sequence[dict], addr: int) -> list[dict]:
+    return [
+        sample
+        for sample in samples
+        if sample["last_request_addr"] == int(addr)
+        and sample["last_response_addr"] != int(addr)
+        and int(sample["pending_count"]) > 0
+    ]
 
 
 def _assert_ifu_uncache_state(env, expected: int) -> None:
@@ -1349,6 +1453,10 @@ def test_uncache_resend_second_beat_fault_reports_exception(env, fault, exceptio
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     _prepare_cross_page_rvi_stream(env)
+    # Keep the second-page response outstanding long enough to observe the
+    # retimed half-RVI state, rather than proving only the final cfVec result.
+    env.uncache_agent.configure(latency=2, mmio_latency=16)
+    prev_half_samples = _register_prev_half_rvi_observer(env)
     _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
 
     first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
@@ -1366,6 +1474,115 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
     assert stats.get("request_addrs", []).count(next_page) == 1
     assert int(observed.instr) == _ADDI_X0_X0_0
     assert not bool(observed.is_rvc)
+
+    recovery_samples = list(prev_half_samples)
+    expected_half_data = _ADDI_X0_X0_0 & 0xFFFF
+    expected_half_pc = _CROSS_PAGE_PC >> 1
+    pending_samples = _pending_uncache_samples(recovery_samples, next_page)
+    assert len(pending_samples) >= 2, {
+        "reason": "no multi-cycle next-page response stall was observed",
+        "pending_samples": pending_samples,
+        "uncache": stats,
+    }
+    pending_cycles = [int(sample["cycle"]) for sample in pending_samples]
+    assert any(
+        current == previous + 1
+        for previous, current in zip(pending_cycles, pending_cycles[1:])
+    ), {"pending_cycles": pending_cycles}
+
+    need_resend_samples = [
+        sample
+        for sample in recovery_samples
+        if sample["last_request_addr"] == first_beat and int(sample["need_resend"]) == 1
+    ]
+    assert need_resend_samples, {
+        "reason": "first-page RVI response did not expose needResend",
+        "samples": recovery_samples[-16:],
+    }
+
+    transaction_samples = [
+        sample
+        for sample in recovery_samples
+        if sample["last_request_addr"] in {first_beat, next_page}
+    ]
+    assert any(sample["s0"] == 1 for sample in transaction_samples), {
+        "reason": "s0 never recorded the first-page RVI half",
+        "samples": transaction_samples[-16:],
+    }
+    s1_recovery = [
+        sample
+        for sample in transaction_samples
+        if sample["last_request_addr"] == first_beat
+        and sample["s1"] == 1
+        and int(sample["s1_data"]) == expected_half_data
+        and int(sample["s1_pc"]) == expected_half_pc
+    ]
+    assert s1_recovery, {
+        "reason": "s1 did not capture the first-page half-RVI payload",
+        "samples": transaction_samples[-16:],
+        "expected_half_data": expected_half_data,
+        "expected_half_pc": expected_half_pc,
+    }
+    s2_recovery = [sample for sample in pending_samples if sample["s2"] == 1]
+    assert s2_recovery, {
+        "reason": "s2 never carried prevHalfRvi during the next-page response",
+        "pending_samples": pending_samples,
+    }
+
+    # The delayed next-page response must hold the assembled instruction's
+    # source half and PC on every cycle until the response is consumed.
+    for sample in pending_samples:
+        assert int(sample["s2"]) == 1, {"sample": sample, "reason": "s2 half-RVI flag dropped while stalled"}
+        assert int(sample["s2_data"]) == expected_half_data, {
+            "sample": sample,
+            "expected_half_data": expected_half_data,
+        }
+        assert int(sample["s2_pc"]) == expected_half_pc, {
+            "sample": sample,
+            "expected_half_pc": expected_half_pc,
+        }
+
+    # Exercise backend redirect after recovery and make sure the old saved
+    # half cannot leak into the redirected path.
+    observations_before_redirect = len(env.monitor.observations)
+    redirect_queued_cycle = int(env.current_cycle)
+    redirect_target = _MMIO_BASE + 0x40
+    _force_redirect_to(env, redirect_target)
+    assert _wait_for_observed_pc(env, redirect_target, max_cycles=5000)
+    redirect_samples = [
+        sample for sample in prev_half_samples if int(sample["cycle"]) >= redirect_queued_cycle
+    ]
+    redirect_cycles = [
+        int(sample["cycle"])
+        for sample in redirect_samples
+        if int(sample["backend_redirect"]) == 1
+    ]
+    assert redirect_cycles, {
+        "reason": "backend redirect was not observable",
+        "samples": redirect_samples[-16:],
+    }
+    first_redirect_cycle = min(redirect_cycles)
+    redirect_clear_window = [
+        sample
+        for sample in redirect_samples
+        if first_redirect_cycle <= int(sample["cycle"]) <= first_redirect_cycle + 3
+    ]
+    # S2 payload registers are RegEnable state; redirect invalidates them via
+    # s2_valid rather than requiring the physically stale bits to be zero.
+    assert any(
+        int(sample["s0"]) == 0
+        and int(sample["s1_data"]) == 0
+        and int(sample["s1_pc"]) == 0
+        and int(sample["s2_valid"]) == 0
+        for sample in redirect_clear_window
+    ), {
+        "reason": "backend redirect did not clear saved half-RVI payload",
+        "redirect_clear_window": redirect_clear_window,
+    }
+    assert not any(
+        int(obs.pc) == _CROSS_PAGE_PC
+        for obs in env.monitor.observations[observations_before_redirect:]
+    )
     assert not env.monitor.get_errors()
     assert env.functional_coverage.key_hit("uncache_page_boundary", "rvi_tail_resend_next_page")
 
@@ -1374,6 +1591,8 @@ def test_uncache_page_tail_rvi_need_resend_rechecks_next_page(env):
 @pytest.mark.skipif(not _RUN_DUT, reason="set TB_ENABLE_DUT_TESTS=1 to run DUT integration")
 def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):
     _prepare_cross_page_rvc_stream(env)
+    env.uncache_agent.configure(latency=2, mmio_latency=16)
+    prev_half_samples = _register_prev_half_rvi_observer(env)
     _initialize_mmio_fetch(env, reset_vector=_CROSS_PAGE_PC)
 
     first_beat = _CROSS_PAGE_PC & ~(_UNCACHE_BEAT_BYTES - 1)
@@ -1390,6 +1609,33 @@ def test_uncache_page_tail_rvc_does_not_fetch_next_page_before_delivery(env):
     assert bool(observed.is_rvc)
     assert stats.get("request_addrs", []).count(first_beat) == 1
     assert next_page not in stats.get("request_addrs", [])
+    pending_samples = _pending_uncache_samples(prev_half_samples, first_beat)
+    assert len(pending_samples) >= 2, {
+        "reason": "no multi-cycle RVC response window was observed",
+        "pending_samples": pending_samples,
+        "uncache": stats,
+    }
+    pending_cycles = [int(sample["cycle"]) for sample in pending_samples]
+    assert any(
+        current == previous + 1
+        for previous, current in zip(pending_cycles, pending_cycles[1:])
+    ), {"pending_cycles": pending_cycles}
+    rvc_window = [
+        sample
+        for sample in prev_half_samples
+        if min(pending_cycles) - 2 <= int(sample["cycle"]) <= max(pending_cycles) + 2
+    ]
+    assert not any(
+        int(sample["s0"]) or int(sample["s1"]) or int(sample["s2"])
+        for sample in rvc_window
+    ), {
+        "reason": "RVC page-tail path unexpectedly carried prevHalfRvi state",
+        "samples": rvc_window,
+    }
+    assert not any(int(sample["need_resend"]) for sample in rvc_window), {
+        "reason": "RVC page-tail response unexpectedly asserted needResend",
+        "samples": rvc_window,
+    }
     assert env.functional_coverage.key_hit("uncache_page_boundary", "rvc_tail_no_resend_before_delivery")
     assert not env.monitor.get_errors()
 

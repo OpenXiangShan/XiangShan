@@ -237,8 +237,10 @@ intention. Therefore:
 Activate the environments before running frontend commands:
 
 ```bash
+if declare -F deactivate >/dev/null 2>&1; then
+  deactivate
+fi
 source /nfs/share/unitychip/activate
-source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
 cd "$NOOP_HOME"
 ```
 
@@ -323,8 +325,10 @@ The script generates the NEMU golden trace first, then runs
 environment variables set consistently.
 
 ```bash
+if declare -F deactivate >/dev/null 2>&1; then
+  deactivate
+fi
 source /nfs/share/unitychip/activate
-source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
 
 BIN_TRACE_ENV=(
   TB_NEMU_EXEC=ready-to-run/riscv64-nemu-interpreter
@@ -555,6 +559,9 @@ src/test/python/Frontend/scripts/fst_to_fsdb.sh path/to/wave.fst [path/to/wave.f
 Rebuild the frontend Python DUT artifacts from the repo root:
 
 ```bash
+if declare -F deactivate >/dev/null 2>&1; then
+  deactivate
+fi
 source /nfs/share/unitychip/activate
 cd "$NOOP_HOME"
 make frontend -j

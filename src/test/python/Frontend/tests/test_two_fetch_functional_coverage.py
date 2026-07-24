@@ -1,6 +1,7 @@
 import csv
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -11,12 +12,14 @@ import pytest
 
 import env.fixtures as fixtures_module
 import env.functional_coverage as functional_coverage_module
+import tools.backannotate_funcov as backannotate_module
 from env.funcov import (
     CFVEC_SAMPLER_BIN_KEYS,
+    _RAW_INSTR_FIELDS,
     TWO_FETCH_COVERPOINTS,
     TWO_FETCH_SAMPLER_BIN_KEYS,
     _TWO_FETCH_SIGNALS,
-    _WAY_DATA_CONFLICT_SIGNALS,
+    _tf_raw_instr_field_candidates,
     sample_cfvec_coverage,
     sample_two_fetch_coverage,
 )
@@ -59,6 +62,34 @@ class _Memory:
     def is_mmio(_addr):
         return False
 
+    @staticmethod
+    def read_u8(_addr):
+        return 0
+
+
+def _set_raw_instr_vector(
+    dut,
+    *,
+    first_size,
+    total_size=32,
+    cross_index=None,
+    cross_data=0,
+):
+    base = "Frontend_top.Frontend.inner_ifu.instrBoundary."
+    for index in range(32):
+        is_cross = int(cross_index is not None and index == int(cross_index))
+        values = {
+            "valid": int(index < int(total_size) and index != (int(cross_index) + 1 if cross_index is not None else -1)),
+            "data": int(cross_data) if is_cross else 0,
+            "isRvc": 0 if is_cross else 1,
+            "blockSel": int(index >= int(first_size) or (is_cross and index == int(first_size) - 1)),
+            "isCrossBlockInstr": is_cross,
+            "startOffset": 31 if is_cross else (index - int(first_size) if index >= int(first_size) else index),
+        }
+        for field, value in values.items():
+            dut.set(f"{base}io_resp_rawInstrVec_{index}_{field}", value)
+            dut.set(f"{base}__Vtogcov__io_resp_rawInstrVec_{index}_{field}", value)
+
 
 def _set_cfvec_entries(dut, entries):
     for slot in range(8):
@@ -74,6 +105,45 @@ def _set_cfvec_entries(dut, entries):
         dut.set(base + "bits_instr", instr)
         dut.set(base + "bits_ftqPtr_flag", 0)
         dut.set(base + "bits_ftqPtr_value", int(slot))
+
+
+def _set_ibuffer_entries(dut, entries):
+    base = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
+    enable = 0
+    for index in range(36):
+        dut.set(f"{base}pc_{index}_addr", 0)
+        dut.set(f"{base}isRvc_{index}", 0)
+        dut.set(f"{base}ftqPtr_{index}_flag", 0)
+        dut.set(f"{base}ftqPtr_{index}_value", 0)
+    for slot, pc, is_rvc, flag, value in entries:
+        slot = int(slot)
+        enable |= 1 << slot
+        dut.set(f"{base}pc_{slot}_addr", pc)
+        dut.set(f"{base}isRvc_{slot}", is_rvc)
+        dut.set(f"{base}ftqPtr_{slot}_flag", flag)
+        dut.set(f"{base}ftqPtr_{slot}_value", value)
+    dut.set(base + "enqEnable", enable)
+
+
+def _set_mainpipe_waylookup_inputs(
+    dut,
+    *,
+    second_meta_valid=1,
+    mmio0=0,
+    mmio1=0,
+    itlb0=0,
+    itlb1=0,
+    vset=0,
+):
+    dut.set_key("main_wli1_valid", second_meta_valid)
+    dut.set_key("main_wli0_is_mmio", mmio0)
+    dut.set_key("main_wli1_is_mmio", mmio1)
+    dut.set_key("main_wli0_itlb_exception", itlb0)
+    dut.set_key("main_wli1_itlb_exception", itlb1)
+    dut.set_key("main_wli0_vset0", vset)
+    dut.set_key("main_wli0_vset1", vset)
+    dut.set_key("main_wli1_vset0", vset)
+    dut.set_key("main_wli1_vset1", vset)
 
 
 def _eligible_provenance():
@@ -94,34 +164,66 @@ def _eligible_provenance():
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
-    values = {
-        key: "b" * 64
-        for key in (
-            "dut_build_sha256",
-            "dut_python_extension_sha256",
-            "generated_rtl_sha256",
-            "registry_sha256",
-            "sampler_sha256",
-            "signal_contract_sha256",
-            "build_manifest_sha256",
-            "compatibility_signature",
-            "build_config",
-            "toolchain",
+    build_root = Path("/tmp/frontend-funcov-unit") / f"manifest-{os.getpid()}" / "build-frontend"
+    manifest_path = build_root / "frontend_build_manifest.json"
+    if not manifest_path.is_file():
+        pylib = build_root / "pylib" / "Frontend"
+        rtl = build_root / "rtl"
+        pylib.mkdir(parents=True, exist_ok=True)
+        rtl.mkdir(parents=True, exist_ok=True)
+        (pylib / "libUTFrontend.so").write_bytes(b"unit-dut-model")
+        (pylib / "_UT_Frontend.so").write_bytes(b"unit-python-extension")
+        (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
+        (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
+        write_frontend_build_manifest(
+            manifest_path,
+            build_root=build_root,
+            dut_source_sha="a" * 40,
+            source_tree_dirty=False,
+            build_config="frontend-test",
+            build_command="make frontend",
         )
+    manifest = load_frontend_build_manifest(build_root, manifest_path)
+    assert manifest["build_manifest_status"] == "valid", manifest["build_manifest_reasons"]
+    values = {
+        **{
+            key: manifest[key]
+            for key in (
+                "dut_build_sha256",
+                "dut_python_extension_sha256",
+                "generated_rtl_sha256",
+                "signal_contract_sha256",
+            )
+        },
+        "build_manifest_path": str(manifest_path.resolve()),
+        "build_manifest_sha256": manifest["build_manifest_sha256"],
     }
     values["registry_sha256"] = file_sha256(default_pilot_csv_path())
     values["definitions_sha256"] = definitions_sha256
     values["sampler_sha256"] = sampler_sha256
-    values["dut_source_sha"] = "a" * 40
-    values["build_config"] = "frontend-test"
+    values["dut_source_sha"] = manifest["dut_source_sha"]
+    values["implementation_sha"] = manifest["implementation_sha"]
+    values["design_baseline_sha"] = manifest["design_baseline_sha"]
+    values["source_sha_override"] = manifest["source_sha_override"]
+    values["source_delta_sha256"] = manifest["source_delta_sha256"]
+    values["source_delta_files"] = manifest["source_delta_files"]
+    values["source_delta_policy"] = manifest["source_delta_policy"]
+    values["build_config"] = manifest["build_config"]
     values["toolchain"] = "python-test"
-    values["build_manifest_status"] = "valid"
+    values["build_manifest_status"] = manifest["build_manifest_status"]
+    values["build_manifest_reasons"] = manifest["build_manifest_reasons"]
     return _resign_provenance(values)
 
 
 def _resign_provenance(values):
     compatibility_fields = (
         "dut_source_sha",
+        "implementation_sha",
+        "design_baseline_sha",
+        "source_sha_override",
+        "source_delta_sha256",
+        "source_delta_files",
+        "source_delta_policy",
         "dut_build_sha256",
         "dut_python_extension_sha256",
         "generated_rtl_sha256",
@@ -193,6 +295,14 @@ def _eligible_run(
 
 def _make_recorder(tmp_path, *, target_bin_ids=None, target_tp_ids=None, target_testcases=None):
     dut = _FakeDut()
+    for key in (
+        "bpu_s3_flush",
+        "main_s1_flush",
+        "main_s1_exception",
+        "main_s1_mmio",
+        "backend_redirect",
+    ):
+        dut.set_key(key, 0)
     env = SimpleNamespace(
         dut=dut,
         config=SimpleNamespace(backend=SimpleNamespace(ftq_size=64)),
@@ -211,6 +321,12 @@ def _make_recorder(tmp_path, *, target_bin_ids=None, target_tp_ids=None, target_
     return recorder, env, dut
 
 
+def _install_eligible_provenance(recorder):
+    provenance = _eligible_provenance()
+    provenance["definitions_sha256"] = recorder.provenance["definitions_sha256"]
+    recorder.provenance = provenance
+
+
 def test_two_fetch_ftq_eligibility_and_pointer_bins(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     dut.set_key("ftq_valid", 1)
@@ -227,6 +343,7 @@ def test_two_fetch_ftq_eligibility_and_pointer_bins(tmp_path):
     dut.set_key("fetch_ptr_value", 62)
     dut.set_key("way_out_valid", 1)
     dut.set_key("way_out_ready", 1)
+    dut.set_key("main_s0_fire", 1)
     dut.set_key("way_real_two", 1)
 
     sample_two_fetch_coverage(recorder, env, 1)
@@ -292,15 +409,30 @@ def test_two_fetch_waylookup_ifu_and_delivery_bins(tmp_path):
     dut.set_key("way_req1_valid", 1)
     dut.set_key("way_out_valid", 1)
     dut.set_key("way_out_ready", 1)
+    dut.set_key("main_s0_fire", 1)
     dut.set_key("way_real_two", 1)
     dut.set_key("ifu_valid", 1)
     dut.set_key("ifu_ready", 1)
     dut.set_key("ifu_req1_valid", 1)
     dut.set_key("ifu_req0_size", 8)
-    dut.set("Frontend_top.Frontend.inner_ifu.instrBoundary.io_resp_rawInstrVec_8_blockSel", 1)
+    dut.set_key("ifu_req0_start", 0x40000000)
+    dut.set_key("ifu_req1_start", 0x40000008)
+    _set_raw_instr_vector(dut, first_size=8)
     dut.set_key("ifu_second_valid", 1)
+    dut.set_key("ifu_s2_valid", 1)
+    dut.set_key("ifu_s2_ftq0_flag", 0)
+    dut.set_key("ifu_s2_ftq0_value", 5)
+    dut.set_key("ifu_s2_ftq1_flag", 0)
+    dut.set_key("ifu_s2_ftq1_value", 6)
     dut.set_key("to_ibuffer_valid", 1)
     dut.set_key("to_ibuffer_ready", 1)
+    _set_ibuffer_entries(
+        dut,
+        [
+            (0, 0x40000000, 1, 0, 5),
+            (1, 0x40000008, 1, 0, 6),
+        ],
+    )
 
     sample_two_fetch_coverage(recorder, env, 3)
 
@@ -310,50 +442,97 @@ def test_two_fetch_waylookup_ifu_and_delivery_bins(tmp_path):
     assert recorder.key_hit("two_fetch_delivery", "dual_fire")
 
     dut.set_key("way_real_two", 0)
-    dut.set_key("way_num_valid", 2)
-    dut.set_key("way_read_ptr_flag", 0)
-    dut.set_key("way_read_ptr_value", 0)
-    dut.set_key("way_exception_valid", 0)
-    dut.set_key("way_exception_ptr_flag", 0)
-    dut.set_key("way_exception_ptr_value", 0)
-    for index in range(64):
-        suffix = "" if index == 0 else f"_{index}"
-        dut.set(f"Frontend_top.Frontend.inner_icache.wayLookup.entryUpdate_updated{suffix}", 0)
-    for index in range(32):
-        dut.set(f"Frontend_top.Frontend.inner_icache.wayLookup.entries_{index}_isMmio", 0)
-    dut.set(
-        "Frontend_top.Frontend.inner_icache.wayLookup.isDataSramReadConflict_reqReadInfo_1_1",
-        1,
-    )
+    _set_mainpipe_waylookup_inputs(dut, second_meta_valid=0)
 
     sample_two_fetch_coverage(recorder, env, 4)
-    assert recorder.key_hit("two_fetch_waylookup_block_reason", "data_bank_conflict")
+    assert recorder.key_hit("two_fetch_waylookup_result", "single_fallback")
+    assert recorder.key_hit("two_fetch_waylookup_block_reason", "insufficient_meta")
 
 
-def test_waylookup_data_conflict_aggregates_all_bank_lanes(tmp_path):
+@pytest.mark.parametrize(
+    ("inputs", "expected_bin"),
+    [
+        ({"second_meta_valid": 0}, "insufficient_meta"),
+        ({"mmio1": 1}, "mmio"),
+        ({"itlb1": 1}, "itlb_exception"),
+    ],
+)
+def test_two_fetch_mainpipe_reason_is_reconstructed_from_waylookup_inputs(tmp_path, inputs, expected_bin):
+    recorder, _env, dut = _make_recorder(tmp_path / f"reason-{expected_bin}")
+    dut.set_key("way_req1_valid", 1)
+    dut.set_key("way_out_valid", 1)
+    dut.set_key("way_out_ready", 1)
+    dut.set_key("main_s0_fire", 1)
+    dut.set_key("way_real_two", 0)
+    _set_mainpipe_waylookup_inputs(dut, **inputs)
+
+    sample_two_fetch_coverage(recorder, _env, 1)
+
+    assert recorder.key_hit("two_fetch_waylookup_result", "single_fallback")
+    assert recorder.key_hit("two_fetch_waylookup_block_reason", expected_bin)
+    assert sum(
+        recorder.key_hit("two_fetch_waylookup_block_reason", candidate)
+        for candidate in ("insufficient_meta", "data_bank_conflict", "mmio", "itlb_exception")
+    ) == 1
+
+
+@pytest.mark.parametrize(
+    ("real_two", "step"),
+    [(0, 1), (1, 2)],
+)
+def test_two_fetch_pointer_advance_binds_mainpipe_result(tmp_path, real_two, step):
+    recorder, _env, dut = _make_recorder(tmp_path / f"pointer-{real_two}")
+    dut.set_key("fetch_ptr_flag", 0)
+    dut.set_key("fetch_ptr_value", 0)
+    dut.set_key("way_req1_valid", 1)
+    dut.set_key("way_out_valid", 1)
+    dut.set_key("way_out_ready", 1)
+    dut.set_key("main_s0_fire", 1)
+    dut.set_key("way_real_two", real_two)
+    sample_two_fetch_coverage(recorder, _env, 1)
+
+    dut.set_key("fetch_ptr_value", step)
+    sample_two_fetch_coverage(recorder, _env, 2)
+
+    expected = "step_two" if step == 2 else "step_one"
+    assert recorder.key_hit("two_fetch_pointer_advance", expected)
+
+
+def test_two_fetch_pointer_advance_ignores_single_candidate_without_req1(tmp_path):
+    recorder, _env, dut = _make_recorder(tmp_path)
+    dut.set_key("fetch_ptr_flag", 0)
+    dut.set_key("fetch_ptr_value", 0)
+    dut.set_key("way_req1_valid", 0)
+    dut.set_key("way_out_valid", 1)
+    dut.set_key("way_out_ready", 1)
+    dut.set_key("main_s0_fire", 1)
+    dut.set_key("way_real_two", 0)
+    sample_two_fetch_coverage(recorder, _env, 1)
+
+    dut.set_key("fetch_ptr_value", 1)
+    sample_two_fetch_coverage(recorder, _env, 2)
+
+    assert not recorder.key_hit("two_fetch_pointer_advance", "step_one")
+
+
+def test_waylookup_data_conflict_does_not_hit_without_observable_bank_inputs(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     dut.set_key("way_req1_valid", 1)
     dut.set_key("way_out_valid", 1)
     dut.set_key("way_out_ready", 1)
+    dut.set_key("main_s0_fire", 1)
     dut.set_key("way_real_two", 0)
-    dut.set_key("way_num_valid", 2)
-    dut.set_key("way_read_ptr_flag", 0)
-    dut.set_key("way_read_ptr_value", 0)
-    dut.set_key("way_exception_valid", 0)
-    dut.set_key("way_exception_ptr_flag", 0)
-    dut.set_key("way_exception_ptr_value", 0)
-    for index in range(64):
-        suffix = "" if index == 0 else f"_{index}"
-        dut.set(f"Frontend_top.Frontend.inner_icache.wayLookup.entryUpdate_updated{suffix}", 0)
-    for index in range(32):
-        dut.set(f"Frontend_top.Frontend.inner_icache.wayLookup.entries_{index}_isMmio", 0)
-
-    dut.set("Frontend_top.Frontend.inner_icache.wayLookup.isDataSramReadConflict_reqReadInfo_1_1", 0)
-    dut.set("Frontend_top.Frontend.inner_icache.wayLookup.isDataSramReadConflict_reqReadInfo_1_1_7", 1)
+    _set_mainpipe_waylookup_inputs(dut)
+    dut.set_key("main_wli1_vset1", 3)
 
     sample_two_fetch_coverage(recorder, env, 4)
 
-    assert recorder.key_hit("two_fetch_waylookup_block_reason", "data_bank_conflict")
+    assert recorder.key_hit("two_fetch_waylookup_result", "single_fallback")
+    assert not recorder.key_hit("two_fetch_waylookup_block_reason", "data_bank_conflict")
+    assert any(
+        item.get("event") == "mainpipe_fallback_reason_unobservable"
+        for item in recorder.risk_observations
+    )
 
 
 def test_waylookup_empty_write_observation_is_not_gated_by_two_fetch(tmp_path):
@@ -385,22 +564,201 @@ def test_two_fetch_mainpipe_refill_completion_bin(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     dut.set_key("main_s1_valid", 1)
     dut.set_key("main_req1_valid", 1)
+    dut.set_key("main_s1_ftq0_flag", 0)
+    dut.set_key("main_s1_ftq0_value", 4)
+    dut.set_key("main_s1_ftq1_flag", 0)
+    dut.set_key("main_s1_ftq1_value", 5)
     dut.set_key("ifu_valid", 0)
     dut.set_key("ifu_ready", 0)
     dut.set_key("ifu_req1_valid", 0)
     for index, value in enumerate((0, 0, 1, 0)):
         dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_shouldFetch_{index}", value)
+    for req in range(2):
+        for line in range(2):
+            dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValid_{req}_{line}", 0)
+            dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValidReg_{req}_{line}", 0)
 
     sample_two_fetch_coverage(recorder, env, 4)
-    assert recorder.key_hit("two_fetch_mainpipe_hit_pattern", "hit_miss")
+    assert not recorder.key_hit("two_fetch_mainpipe_hit_pattern", "hit_miss")
 
+    dut.set("Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValid_1_0", 1)
+    sample_two_fetch_coverage(recorder, env, 5)
+    dut.set("Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValid_1_0", 0)
+    dut.set("Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValidReg_1_0", 1)
     dut.set_key("main_s1_valid", 0)
     dut.set_key("ifu_valid", 1)
     dut.set_key("ifu_ready", 1)
     dut.set_key("ifu_req1_valid", 1)
-    sample_two_fetch_coverage(recorder, env, 5)
+    dut.set_key("ifu_req0_ftq_flag", 0)
+    dut.set_key("ifu_req0_ftq_value", 4)
+    dut.set_key("ifu_req1_ftq_flag", 0)
+    dut.set_key("ifu_req1_ftq_value", 5)
+    sample_two_fetch_coverage(recorder, env, 6)
 
+    assert recorder.key_hit("two_fetch_mainpipe_hit_pattern", "hit_miss")
     assert recorder.key_hit("two_fetch_mainpipe_completion", "wait_refill_then_dual")
+
+
+@pytest.mark.parametrize(
+    ("should_fetch", "expected_bin"),
+    [
+        ((0, 0, 0, 0), "hit_hit"),
+        ((0, 0, 1, 0), "hit_miss"),
+        ((1, 0, 0, 0), "miss_hit"),
+        ((1, 0, 1, 0), "miss_miss"),
+    ],
+)
+def test_two_fetch_mainpipe_classifies_all_hit_miss_combinations(
+    tmp_path, should_fetch, expected_bin
+):
+    recorder, env, dut = _make_recorder(tmp_path / expected_bin)
+    dut.set_key("main_s1_valid", 1)
+    dut.set_key("main_req1_valid", 1)
+    dut.set_key("main_s1_ftq0_flag", 0)
+    dut.set_key("main_s1_ftq0_value", 8)
+    dut.set_key("main_s1_ftq1_flag", 0)
+    dut.set_key("main_s1_ftq1_value", 9)
+    for index, value in enumerate(should_fetch):
+        dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_shouldFetch_{index}", value)
+        req, line = divmod(index, 2)
+        dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValid_{req}_{line}", 0)
+        dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValidReg_{req}_{line}", 0)
+    dut.set_key("ifu_req0_ftq_flag", 0)
+    dut.set_key("ifu_req0_ftq_value", 8)
+    dut.set_key("ifu_req1_ftq_flag", 0)
+    dut.set_key("ifu_req1_ftq_value", 9)
+    dut.set_key("ifu_ready", 1)
+    dut.set_key("ifu_req1_valid", 1)
+
+    required = [index for index, value in enumerate(should_fetch) if value]
+    dut.set_key("ifu_valid", int(not required))
+    sample_two_fetch_coverage(recorder, env, 1)
+    if required:
+        for index in required:
+            req, line = divmod(index, 2)
+            dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValid_{req}_{line}", 1)
+        sample_two_fetch_coverage(recorder, env, 2)
+        for index in required:
+            req, line = divmod(index, 2)
+            dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValid_{req}_{line}", 0)
+            dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_mshrValidReg_{req}_{line}", 1)
+        dut.set_key("ifu_valid", 1)
+        sample_two_fetch_coverage(recorder, env, 3)
+
+    assert recorder.key_hit("two_fetch_mainpipe_hit_pattern", expected_bin)
+    assert sum(
+        recorder.key_hit("two_fetch_mainpipe_hit_pattern", candidate)
+        for candidate in ("hit_hit", "hit_miss", "miss_hit", "miss_miss")
+    ) == 1
+
+
+@pytest.mark.parametrize("gate_key", ["main_s1_exception", "main_s1_mmio"])
+def test_two_fetch_mainpipe_exception_or_mmio_is_not_hit_hit(tmp_path, gate_key):
+    recorder, env, dut = _make_recorder(tmp_path / gate_key)
+    dut.set_key(gate_key, 1)
+    dut.set_key("main_s1_valid", 1)
+    dut.set_key("main_req1_valid", 1)
+    dut.set_key("main_s1_ftq0_flag", 0)
+    dut.set_key("main_s1_ftq0_value", 8)
+    dut.set_key("main_s1_ftq1_flag", 0)
+    dut.set_key("main_s1_ftq1_value", 9)
+    for index in range(4):
+        dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_shouldFetch_{index}", 0)
+    dut.set_key("ifu_valid", 1)
+    dut.set_key("ifu_ready", 1)
+    dut.set_key("ifu_req1_valid", 1)
+    dut.set_key("ifu_req0_ftq_flag", 0)
+    dut.set_key("ifu_req0_ftq_value", 8)
+    dut.set_key("ifu_req1_ftq_flag", 0)
+    dut.set_key("ifu_req1_ftq_value", 9)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("two_fetch_mainpipe_hit_pattern", "hit_hit")
+
+
+@pytest.mark.parametrize("flush_key", ["main_s1_flush", "bpu_s3_flush", "backend_redirect"])
+def test_two_fetch_flush_discards_pending_refill_association(tmp_path, flush_key):
+    recorder, env, dut = _make_recorder(tmp_path / flush_key)
+    for candidate in ("main_s1_flush", "bpu_s3_flush", "backend_redirect"):
+        dut.set_key(candidate, 0)
+    dut.set_key("main_s1_valid", 1)
+    dut.set_key("main_req1_valid", 1)
+    dut.set_key("main_s1_ftq0_flag", 0)
+    dut.set_key("main_s1_ftq0_value", 10)
+    dut.set_key("main_s1_ftq1_flag", 0)
+    dut.set_key("main_s1_ftq1_value", 11)
+    for index, value in enumerate((1, 0, 0, 0)):
+        dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_shouldFetch_{index}", value)
+    sample_two_fetch_coverage(recorder, env, 1)
+    assert recorder._two_fetch_refill_pending is not None
+
+    dut.set_key("main_s1_valid", 0)
+    dut.set_key(flush_key, 1)
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    assert recorder._two_fetch_refill_pending is None
+
+
+def test_two_fetch_bpu_s3_flush_drop_requires_pending_pointer_match(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ftq_valid", 1)
+    dut.set_key("ftq_ready", 0)
+    dut.set_key("ftq_req1_valid", 1)
+    dut.set_key("fetch_ptr_flag", 0)
+    dut.set_key("fetch_ptr_value", 12)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    dut.set_key("bpu_s3_flush", 1)
+    dut.set_key("bpu_s3_flush_ptr_flag", 0)
+    dut.set_key("bpu_s3_flush_ptr_value", 12)
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("two_fetch_flush_flow", "bpu_s3_drop_before_issue")
+
+    mismatch, mismatch_env, mismatch_dut = _make_recorder(tmp_path / "mismatch")
+    mismatch_dut.set_key("ftq_valid", 1)
+    mismatch_dut.set_key("ftq_ready", 0)
+    mismatch_dut.set_key("ftq_req1_valid", 1)
+    mismatch_dut.set_key("fetch_ptr_flag", 0)
+    mismatch_dut.set_key("fetch_ptr_value", 12)
+    sample_two_fetch_coverage(mismatch, mismatch_env, 1)
+
+    mismatch_dut.set_key("bpu_s3_flush", 1)
+    mismatch_dut.set_key("bpu_s3_flush_ptr_flag", 0)
+    mismatch_dut.set_key("bpu_s3_flush_ptr_value", 13)
+    sample_two_fetch_coverage(mismatch, mismatch_env, 2)
+
+    assert not mismatch.key_hit("two_fetch_flush_flow", "bpu_s3_drop_before_issue")
+    assert any(
+        item.get("event") == "bpu_s3_pending_dual_flush_ptr_unmatched_or_unobservable"
+        for item in mismatch.risk_observations
+    )
+
+
+def test_two_fetch_replacing_pending_refill_fails_checker(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("main_s1_valid", 1)
+    dut.set_key("main_req1_valid", 1)
+    dut.set_key("main_s1_ftq0_flag", 0)
+    dut.set_key("main_s1_ftq0_value", 12)
+    dut.set_key("main_s1_ftq1_flag", 0)
+    dut.set_key("main_s1_ftq1_value", 13)
+    for index, value in enumerate((1, 0, 0, 0)):
+        dut.set(f"Frontend_top.Frontend.inner_icache.mainPipe.s1_shouldFetch_{index}", value)
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    dut.set_key("main_s1_ftq0_value", 14)
+    dut.set_key("main_s1_ftq1_value", 15)
+    sample_two_fetch_coverage(recorder, env, 2)
+    raw = recorder._raw_dict()
+
+    assert any(
+        item.get("event") == "two_fetch_refill_replaced_before_completion"
+        for item in recorder.risk_observations
+    )
+    assert raw["checker"]["status"] == "fail"
 
 
 def test_two_fetch_checker_second_invalid_taken_bin(tmp_path):
@@ -416,6 +774,122 @@ def test_two_fetch_checker_second_invalid_taken_bin(tmp_path):
     assert recorder.key_hit("two_fetch_checker_redirect", "second_block")
     assert recorder.key_hit("two_fetch_checker_priority", "second_after_first_valid")
     assert recorder.key_hit("two_fetch_invalid_taken", "second_redirect")
+
+
+def test_two_fetch_first_invalid_taken_uses_s1_mask_observation(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ifu_s1_valid", 1)
+    dut.set_key("ifu_first_invalid", 1)
+    dut.set_key("ifu_s1_instr_count", 8)
+    dut.set_key("ifu_req1_valid", 1)
+    _set_raw_instr_vector(dut, first_size=8)
+
+    sample_two_fetch_coverage(recorder, env, 9)
+
+    assert recorder.key_hit("two_fetch_invalid_taken", "first_masks_second")
+
+
+def test_two_fetch_rvi_stitch_requires_exact_boundary_data_and_no_duplicate(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ifu_valid", 1)
+    dut.set_key("ifu_ready", 1)
+    dut.set_key("ifu_req1_valid", 1)
+    dut.set_key("ifu_req0_size", 8)
+    dut.set_key("ifu_req0_start", 0x40000000)
+    dut.set_key("ifu_req1_start", 0x40000008)
+    _set_raw_instr_vector(dut, first_size=8, cross_index=7, cross_data=0)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    assert recorder.key_hit("two_fetch_ifu_source", "blocksel_switch")
+    assert recorder.key_hit("two_fetch_cross_block", "rvi_stitch")
+
+
+def test_two_fetch_rvi_stitch_does_not_hit_when_second_half_is_duplicated(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ifu_valid", 1)
+    dut.set_key("ifu_ready", 1)
+    dut.set_key("ifu_req1_valid", 1)
+    dut.set_key("ifu_req0_size", 8)
+    dut.set_key("ifu_req0_start", 0x40000000)
+    dut.set_key("ifu_req1_start", 0x40000008)
+    _set_raw_instr_vector(dut, first_size=8, cross_index=7, cross_data=0)
+    base = "Frontend_top.Frontend.inner_ifu.instrBoundary."
+    dut.set(f"{base}io_resp_rawInstrVec_8_valid", 1)
+    dut.set(f"{base}__Vtogcov__io_resp_rawInstrVec_8_valid", 1)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    assert not recorder.key_hit("two_fetch_cross_block", "rvi_stitch")
+
+
+def test_two_fetch_ibuffer_backpressure_requires_stable_full_payload(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ifu_second_valid", 1)
+    dut.set_key("ifu_s2_valid", 1)
+    dut.set_key("to_ibuffer_valid", 1)
+    dut.set_key("to_ibuffer_ready", 0)
+    offset = Path(__file__).resolve().parents[5] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
+    prefix = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
+    names = sorted(
+        line[len("  - name: ") :].strip()
+        for line in offset.read_text(encoding="utf-8").splitlines()
+        if line.startswith("  - name: ") and line[len("  - name: ") :].startswith(prefix)
+    )
+    assert names
+    for index, name in enumerate(names):
+        dut.set(name, index + 1)
+
+    sample_two_fetch_coverage(recorder, env, 10)
+    assert not recorder.key_hit("two_fetch_delivery", "dual_stall")
+    sample_two_fetch_coverage(recorder, env, 11)
+    assert not recorder.key_hit("two_fetch_delivery", "dual_stall")
+    dut.set_key("to_ibuffer_ready", 1)
+    sample_two_fetch_coverage(recorder, env, 12)
+    assert recorder.key_hit("two_fetch_delivery", "dual_stall")
+
+    dut.set_key("to_ibuffer_ready", 0)
+    sample_two_fetch_coverage(recorder, env, 13)
+    dut.set(names[-1], 0xBAD)
+    sample_two_fetch_coverage(recorder, env, 14)
+    assert any(
+        item.get("event") == "ibuffer_payload_changed_under_backpressure"
+        for item in recorder.risk_observations
+    )
+
+
+def test_two_fetch_ibuffer_fire_ends_the_payload_hold_window(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ifu_second_valid", 1)
+    dut.set_key("ifu_s2_valid", 1)
+    dut.set_key("to_ibuffer_valid", 1)
+    offset = Path(__file__).resolve().parents[5] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
+    prefix = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
+    names = sorted(
+        line[len("  - name: ") :].strip()
+        for line in offset.read_text(encoding="utf-8").splitlines()
+        if line.startswith("  - name: ") and line[len("  - name: ") :].startswith(prefix)
+    )
+    assert names
+    for index, name in enumerate(names):
+        dut.set(name, index + 1)
+
+    dut.set_key("to_ibuffer_ready", 0)
+    sample_two_fetch_coverage(recorder, env, 1)
+    assert recorder._two_fetch_stalled_payload is not None
+
+    dut.set_key("to_ibuffer_ready", 1)
+    sample_two_fetch_coverage(recorder, env, 2)
+    assert recorder._two_fetch_stalled_payload is None
+
+    dut.set(names[-1], 0xBAD)
+    dut.set_key("to_ibuffer_ready", 0)
+    sample_two_fetch_coverage(recorder, env, 3)
+    assert recorder._two_fetch_stalled_payload is not None
+    assert not any(
+        item.get("event") == "ibuffer_payload_changed_under_backpressure"
+        for item in recorder.risk_observations
+    )
 
 
 def test_checker_priority_does_not_infer_two_faults_from_select_only(tmp_path):
@@ -441,6 +915,10 @@ def test_compressed_cfvec_uses_expanded_instruction_for_cfi_classification(tmp_p
 def test_two_fetch_backend_two_ftq_source_and_mixed_bins(tmp_path):
     recorder, env, dut = _make_recorder(tmp_path)
     recorder._two_fetch_last_dual_cycle = 8
+    recorder._two_fetch_expected_cfvec = {
+        "tags": ((0, 3), (0, 4)),
+        "cycle": 8,
+    }
     for slot in range(8):
         dut.set(f"io_backend_cfVec_{slot}_valid", 0)
 
@@ -466,6 +944,129 @@ def test_two_fetch_backend_two_ftq_source_and_mixed_bins(tmp_path):
     assert recorder.key_hit("two_fetch_delivery", "two_ftq_entries_same_cycle")
     assert recorder.key_hit("two_fetch_cross_block", "mixed_rvc_rvi")
     assert recorder.key_hit("two_fetch_cross_block", "rvc_independent")
+
+
+def test_two_fetch_backend_sources_require_exact_delivered_ftq_pair(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    recorder._two_fetch_last_dual_cycle = 8
+    recorder._two_fetch_expected_cfvec = {
+        "tags": ((0, 3), (0, 4)),
+        "cycle": 8,
+    }
+    _set_cfvec_entries(
+        dut,
+        [
+            (0, 0x80000000, 0, 0x00000013),
+            (1, 0x80000004, 1, 0x00000001),
+        ],
+    )
+
+    sample_cfvec_coverage(recorder, env, 9)
+
+    assert not recorder.key_hit("two_fetch_ifu_source", "two_ftq_sources")
+    assert not recorder.key_hit("two_fetch_delivery", "two_ftq_entries_same_cycle")
+
+
+def test_backend_redirect_requires_old_tags_dropped_and_new_target_delivery(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ifu_second_valid", 0)
+    dut.set_key("ifu_s2_valid", 0)
+    dut.set_key("to_ibuffer_valid", 0)
+    dut.set_key("to_ibuffer_ready", 0)
+    dut.set_key("ifu_s2_ftq0_flag", 0)
+    dut.set_key("ifu_s2_ftq0_value", 0)
+    dut.set_key("ifu_s2_ftq1_flag", 0)
+    dut.set_key("ifu_s2_ftq1_value", 0)
+    _set_ibuffer_entries(dut, [])
+    recorder._two_fetch_expected_cfvec = {
+        "tags": ((0, 10), (0, 11)),
+        "cycle": 1,
+    }
+    target = 0x80000100
+    dut.set_key("backend_redirect", 1)
+    dut.set_key("backend_redirect_target", target)
+    dut.set_key("ifu_flush", 1)
+
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    assert recorder._two_fetch_redirect_pending == {
+        "old_tags": ((0, 10), (0, 11)),
+        "target": target,
+        "cycle": 1,
+    }
+    assert not recorder.key_hit("two_fetch_flush_flow", "backend_redirect_drops_inflight")
+
+    dut.set_key("backend_redirect", 0)
+    dut.set_key("ifu_flush", 0)
+    dut.set_key("ifu_second_valid", 1)
+    dut.set_key("ifu_s2_valid", 1)
+    dut.set_key("ifu_s2_ftq0_flag", 0)
+    dut.set_key("ifu_s2_ftq0_value", 20)
+    dut.set_key("ifu_s2_ftq1_flag", 0)
+    dut.set_key("ifu_s2_ftq1_value", 21)
+    dut.set_key("to_ibuffer_valid", 1)
+    dut.set_key("to_ibuffer_ready", 1)
+    _set_ibuffer_entries(
+        dut,
+        [
+            (0, target >> 1, 1, 0, 20),
+            (1, (target >> 1) + 1, 0, 0, 20),
+            (2, (target >> 1) + 3, 1, 0, 21),
+        ],
+    )
+
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    assert recorder.key_hit("two_fetch_flush_flow", "backend_redirect_drops_inflight")
+    assert not recorder.risk_observations
+
+
+def test_backend_redirect_old_tag_delivery_is_a_protocol_risk_not_a_hit(tmp_path):
+    recorder, env, dut = _make_recorder(tmp_path)
+    dut.set_key("ifu_second_valid", 0)
+    dut.set_key("ifu_s2_valid", 0)
+    dut.set_key("to_ibuffer_valid", 0)
+    dut.set_key("to_ibuffer_ready", 0)
+    dut.set_key("ifu_s2_ftq0_flag", 0)
+    dut.set_key("ifu_s2_ftq0_value", 0)
+    dut.set_key("ifu_s2_ftq1_flag", 0)
+    dut.set_key("ifu_s2_ftq1_value", 0)
+    _set_ibuffer_entries(dut, [])
+    recorder._two_fetch_expected_cfvec = {
+        "tags": ((0, 10), (0, 11)),
+        "cycle": 1,
+    }
+    target = 0x80000100
+    dut.set_key("backend_redirect", 1)
+    dut.set_key("backend_redirect_target", target)
+    dut.set_key("ifu_flush", 1)
+    sample_two_fetch_coverage(recorder, env, 1)
+
+    dut.set_key("backend_redirect", 0)
+    dut.set_key("ifu_flush", 0)
+    dut.set_key("ifu_second_valid", 1)
+    dut.set_key("ifu_s2_valid", 1)
+    dut.set_key("ifu_s2_ftq0_flag", 0)
+    dut.set_key("ifu_s2_ftq0_value", 10)
+    dut.set_key("ifu_s2_ftq1_flag", 0)
+    dut.set_key("ifu_s2_ftq1_value", 11)
+    dut.set_key("to_ibuffer_valid", 1)
+    dut.set_key("to_ibuffer_ready", 1)
+    _set_ibuffer_entries(
+        dut,
+        [
+            (0, 0x40000000, 1, 0, 10),
+            (1, 0x40000010, 1, 0, 11),
+        ],
+    )
+
+    sample_two_fetch_coverage(recorder, env, 2)
+
+    assert not recorder.key_hit("two_fetch_flush_flow", "backend_redirect_drops_inflight")
+    assert any(
+        item.get("event") == "two_fetch_redirect_old_tag_delivery"
+        for item in recorder.risk_observations
+    )
 
 
 def test_canonical_registry_matches_the_single_sampler_contract():
@@ -549,8 +1150,7 @@ def test_sampler_cannot_silently_mark_an_unmodeled_bin(tmp_path):
 
 def test_two_fetch_signal_map_matches_current_frontend_offset():
     offset = Path(__file__).resolve().parents[5] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
-    if not offset.exists():
-        return
+    assert offset.exists(), "DUT signal inventory is required before signal-contract tests"
 
     registered = {
         line[len("  - name: ") :].strip()
@@ -568,13 +1168,14 @@ def test_two_fetch_signal_map_matches_current_frontend_offset():
         "Frontend_top.Frontend.inner_ftq.entryQueue_63_startPc_addr",
     } <= registered
 
+
     generated = [
         *(
             f"Frontend_top.Frontend.inner_icache.mainPipe.s1_shouldFetch_{index}"
             for index in range(4)
         ),
         *(
-            "Frontend_top.Frontend.inner_icache.wayLookup.entryUpdate_updated"
+        "Frontend_top.Frontend.inner_icache.wayLookup.entryUpdate_updated"
             + ("" if index == 0 else f"_{index}")
             for index in range(64)
         ),
@@ -582,19 +1183,37 @@ def test_two_fetch_signal_map_matches_current_frontend_offset():
             f"Frontend_top.Frontend.inner_icache.wayLookup.entries_{index}_isMmio"
             for index in range(32)
         ),
-        *(
-            f"Frontend_top.Frontend.inner_ifu.instrBoundary.io_resp_rawInstrVec_{index}_{field}"
-            for field in ("blockSel", "isCrossBlockInstr")
-            for index in range(31)
-        ),
+    ]
+    missing_raw_fields = [
+        (index, field, _tf_raw_instr_field_candidates(index, field))
+        for field in _RAW_INSTR_FIELDS
+        for index in range(32)
+        if not (
+            field == "isCrossBlockInstr"
+            and index == 31
+            and not any(signal in registered for signal in _tf_raw_instr_field_candidates(index, field))
+        )
+        and not any(signal in registered for signal in _tf_raw_instr_field_candidates(index, field))
     ]
     generated.extend(
         f"Frontend_top.Frontend.inner_ifu.predChecker.remaskFault_{index}"
         for index in range(34)
     )
     generated.append("Frontend_top.Frontend.inner_ifu.s2_fixedInstrValid")
+    generated.extend(
+        (
+            "Frontend_top.Frontend.inner_icache.mainPipe.s0_fire",
+            "Frontend_top.Frontend.inner_icache.__Vtogcov__io_toFtq_fromMainPipe_realTwoFetchValid",
+        )
+    )
+    assert not missing_raw_fields
     assert not [signal for signal in generated if signal not in registered]
-    assert set(_WAY_DATA_CONFLICT_SIGNALS) <= registered
+
+
+def test_funcov_and_backannotation_compatibility_fields_stay_identical():
+    assert tuple(functional_coverage_module.COMPATIBILITY_FIELDS) == tuple(
+        backannotate_module._COMPATIBILITY_FIELDS
+    )
 
 
 def test_two_fetch_backannotation_matches_registry_and_sampler():
@@ -740,6 +1359,91 @@ def test_frontend_runners_keep_artifacts_scoped_to_one_run(tmp_path):
     assert 'DEFAULT_DATA_DIR' not in html_coverage_source
 
 
+def _write_codecov_provenance_fixture(
+    *,
+    dat_path: Path,
+    source_root: Path,
+    run_id: str = "unit-codecov-case",
+) -> Path:
+    pylib = source_root / "pylib" / "Frontend"
+    rtl = source_root / "rtl"
+    pylib.mkdir(parents=True, exist_ok=True)
+    rtl.mkdir(parents=True, exist_ok=True)
+    (pylib / "libUTFrontend.so").write_bytes(b"unit-dut-model")
+    (pylib / "_UT_Frontend.so").write_bytes(b"unit-python-extension")
+    (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
+    (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
+    manifest_path = source_root / "frontend_build_manifest.json"
+    manifest = write_frontend_build_manifest(
+        manifest_path,
+        build_root=source_root,
+        dut_source_sha="a" * 40,
+        source_tree_dirty=False,
+        build_config="frontend-unit",
+        build_command="make frontend",
+    )
+    build_hashes = manifest["artifacts"]
+    provenance = {
+        "dut_source_sha": "a" * 40,
+        "implementation_sha": "a" * 40,
+        "design_baseline_sha": "a" * 40,
+        "source_sha_override": False,
+        "source_delta_sha256": hashlib.sha256(b"").hexdigest(),
+        "source_delta_files": [],
+        "source_delta_policy": "none",
+        **build_hashes,
+        "registry_sha256": "5" * 64,
+        "sampler_sha256": "6" * 64,
+        "build_config": "frontend-unit",
+        "toolchain": "python-unit",
+        "build_manifest_status": "valid",
+        "build_manifest_reasons": [],
+        "build_manifest_path": str(manifest_path.resolve()),
+        "build_manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+    }
+    compatibility_payload = {
+        field: provenance[field]
+        for field in functional_coverage_module.COMPATIBILITY_FIELDS
+    }
+    provenance["compatibility_signature"] = hashlib.sha256(
+        json.dumps(
+            compatibility_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    funcov_dir = dat_path.parent.parent / "funcov"
+    waveform_dir = dat_path.parent.parent / "waveforms"
+    funcov_dir.mkdir(parents=True, exist_ok=True)
+    waveform_dir.mkdir(parents=True, exist_ok=True)
+    waveform_path = waveform_dir / f"{dat_path.stem}.fst"
+    waveform_path.write_bytes(b"unit-waveform")
+    sidecar_path = funcov_dir / f"{dat_path.stem}.funcov.json"
+    sidecar_path.write_text(
+        json.dumps(
+            {
+                "artifact_schema_version": 2,
+                "line_coverage_path": str(dat_path.resolve()),
+                "waveform_path": str(waveform_path.resolve()),
+                "provenance": provenance,
+                "stats": {"monitor": {"cycles_total": 1, "error_count": 0}},
+                "errors": [],
+                "run": {
+                    "run_id": run_id,
+                    "pytest_outcome": "passed",
+                    "exit_code": 0,
+                    "checker": {"status": "pass", "error_count": 0, "errors": []},
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return sidecar_path
+
+
 def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
     data_dir = tmp_path / "coverage"
     source_root = tmp_path / "build-frontend"
@@ -751,6 +1455,10 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
         "C \x01f\x02Frontend.sv\x01t\x02line\x01x\x021\x02 1\n"
         "C \x01f\x02Frontend.sv\x01t\x02branch\x01x\x022\x02 0\n",
         encoding="utf-8",
+    )
+    sidecar_path = _write_codecov_provenance_fixture(
+        dat_path=data_dir / "case.dat",
+        source_root=source_root,
     )
     frontend_root = Path(__file__).resolve().parents[1]
 
@@ -781,7 +1489,145 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
     ]
     assert summary["overall"]["line"] == {"hit": 1, "total": 1, "pct": 100.0}
     assert summary["overall"]["branch"] == {"hit": 0, "total": 1, "pct": 0.0}
-    assert summary["scopes"]["all"]["source_lines"] == 2
+    assert summary["scopes"]["all"]["source_lines"] == 3
+    assert summary["provenance"]["run_ids"] == ["unit-codecov-case"]
+    assert summary["provenance"]["dat_files"][0]["funcov_path"] == str(
+        sidecar_path.resolve()
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_error"),
+    [
+        ("missing_sidecar", "missing funcov sidecar"),
+        ("empty_dat", "empty .dat"),
+        ("manifest_hash", "manifest hash mismatch"),
+        ("dut_hash", "dut_build_sha256 mismatch"),
+        ("runtime_dut", "build manifest runtime validation failed"),
+        ("compatibility", "compatibility signature mismatch"),
+        ("monitor", "monitor errors present"),
+        ("monitor_missing_cycles", "monitor cycles_total is missing"),
+        ("monitor_missing_count", "monitor error_count is missing"),
+        ("checker_missing_count", "checker error_count is missing"),
+        ("checker_missing_errors", "checker error details present"),
+        ("raw_errors_missing", "funcov errors present"),
+        ("waveform", "waveform gate failed"),
+    ],
+)
+def test_raw_code_coverage_report_rejects_unproven_dat(
+    tmp_path, mutation, expected_error
+):
+    data_dir = tmp_path / "coverage"
+    source_root = tmp_path / "build-frontend"
+    data_dir.mkdir()
+    source_root.mkdir()
+    (source_root / "Frontend.sv").write_text("module Frontend;\nendmodule\n", encoding="utf-8")
+    dat_path = data_dir / "case.dat"
+    dat_path.write_text(
+        "C \x01f\x02Frontend.sv\x01t\x02line\x01x\x021\x02 1\n",
+        encoding="utf-8",
+    )
+    sidecar_path = _write_codecov_provenance_fixture(
+        dat_path=dat_path,
+        source_root=source_root,
+    )
+    if mutation == "missing_sidecar":
+        sidecar_path.unlink()
+    elif mutation == "empty_dat":
+        dat_path.write_bytes(b"")
+    elif mutation == "runtime_dut":
+        (source_root / "pylib" / "Frontend" / "libUTFrontend.so").write_bytes(
+            b"tampered-after-manifest"
+        )
+    else:
+        sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        if mutation == "manifest_hash":
+            sidecar["provenance"]["build_manifest_sha256"] = "f" * 64
+        elif mutation == "dut_hash":
+            sidecar["provenance"]["dut_build_sha256"] = "f" * 64
+            payload = {
+                field: sidecar["provenance"][field]
+                for field in functional_coverage_module.COMPATIBILITY_FIELDS
+            }
+            sidecar["provenance"]["compatibility_signature"] = hashlib.sha256(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+        elif mutation == "compatibility":
+            sidecar["provenance"]["compatibility_signature"] = "f" * 64
+        elif mutation == "monitor":
+            sidecar["stats"]["monitor"]["error_count"] = 1
+        elif mutation == "monitor_missing_cycles":
+            del sidecar["stats"]["monitor"]["cycles_total"]
+        elif mutation == "monitor_missing_count":
+            del sidecar["stats"]["monitor"]["error_count"]
+        elif mutation == "checker_missing_count":
+            del sidecar["run"]["checker"]["error_count"]
+        elif mutation == "checker_missing_errors":
+            del sidecar["run"]["checker"]["errors"]
+        elif mutation == "raw_errors_missing":
+            del sidecar["errors"]
+        elif mutation == "waveform":
+            Path(sidecar["waveform_path"]).unlink()
+        sidecar_path.write_text(json.dumps(sidecar) + "\n", encoding="utf-8")
+
+    frontend_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(frontend_root / "scripts/report_raw_code_coverage.py"),
+            "--data-dir",
+            str(data_dir),
+            "--source-root",
+            str(source_root),
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert expected_error in result.stderr
+
+
+def test_raw_code_coverage_report_rejects_duplicate_run_ids(tmp_path):
+    data_dir = tmp_path / "coverage"
+    source_root = tmp_path / "build-frontend"
+    data_dir.mkdir()
+    source_root.mkdir()
+    first_dat = data_dir / "first.dat"
+    second_dat = data_dir / "second.dat"
+    coverage_record = "C \x01f\x02Frontend.sv\x01t\x02line\x01x\x021\x02 1\n"
+    first_dat.write_text(coverage_record, encoding="utf-8")
+    second_dat.write_text(coverage_record, encoding="utf-8")
+    first_sidecar = _write_codecov_provenance_fixture(
+        dat_path=first_dat,
+        source_root=source_root,
+        run_id="duplicate-unit-run",
+    )
+    second_sidecar = first_sidecar.with_name("second.funcov.json")
+    second = json.loads(first_sidecar.read_text(encoding="utf-8"))
+    second["line_coverage_path"] = str(second_dat.resolve())
+    second_sidecar.write_text(json.dumps(second) + "\n", encoding="utf-8")
+
+    frontend_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(frontend_root / "scripts/report_raw_code_coverage.py"),
+            "--data-dir",
+            str(data_dir),
+            "--source-root",
+            str(source_root),
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert "duplicate run_id across .dat files" in result.stderr
 
 
 def test_effective_run_id_honors_explicit_value_after_default_generation(monkeypatch):
@@ -800,8 +1646,10 @@ def test_effective_run_id_honors_explicit_value_after_default_generation(monkeyp
         fixtures_module._DEFAULT_RUN_ID = previous_default
 
 
-def test_funcov_artifact_uses_coverpoint_key_and_strict_merge_signature(tmp_path):
+def test_funcov_artifact_uses_coverpoint_key_and_strict_merge_signature(tmp_path, monkeypatch):
+    monkeypatch.setenv("TB_RUN_ID", "unit-merge-1")
     recorder, _env, _dut = _make_recorder(tmp_path)
+    _install_eligible_provenance(recorder)
     assert recorder.mark(
         "two_fetch_ftq_eligibility",
         "eligible_dual",
@@ -818,17 +1666,30 @@ def test_funcov_artifact_uses_coverpoint_key_and_strict_merge_signature(tmp_path
     assert raw["hits"][key]["coverpoint"] == "request_eligibility"
     assert raw["provenance"]["compatibility_signature"]
 
+    second_path = tmp_path / "second.funcov.json"
+    second = json.loads(raw_path.read_text(encoding="utf-8"))
+    second["run"] = dict(second["run"])
+    second["run"]["run_id"] = "unit-merge-2"
+    second_path.write_text(json.dumps(second), encoding="utf-8")
     merged = FunctionalCoverageRecorder.merge_raw_files(
-        [raw_path, raw_path],
+        [raw_path, second_path],
         artifact_tag="merged",
         output_dir=tmp_path / "merged",
     )
     assert merged.hits[
         ("two_fetch_ftq_eligibility", "request_eligibility", "eligible_dual")
     ].hits == 2
+    with pytest.raises(ValueError, match="duplicate functional coverage run_id"):
+        FunctionalCoverageRecorder.merge_raw_files(
+            [raw_path, raw_path],
+            artifact_tag="duplicate-run",
+            output_dir=tmp_path / "duplicate-run",
+        )
 
     incompatible_path = tmp_path / "incompatible.funcov.json"
     incompatible = dict(raw)
+    incompatible["run"] = dict(raw["run"])
+    incompatible["run"]["run_id"] = "unit-merge-incompatible"
     incompatible["provenance"] = dict(raw["provenance"])
     incompatible["provenance"]["compatibility_signature"] = "different-version"
     incompatible_path.write_text(json.dumps(incompatible), encoding="utf-8")
@@ -949,6 +1810,10 @@ def test_build_manifest_binds_source_sha_to_compiled_artifacts(tmp_path):
     assert valid["build_manifest_status"] == "valid"
     assert valid["dut_source_sha"] == "a" * 40
     assert valid["build_config"] == "frontend-test"
+    assert valid["implementation_sha"] == "a" * 40
+    assert valid["design_baseline_sha"] == "a" * 40
+    assert valid["source_delta_policy"] == "none"
+    assert valid["source_delta_sha256"] == hashlib.sha256(b"").hexdigest()
 
     (pylib / "libUTFrontend.so").write_bytes(b"changed-dut-model")
     invalid = load_frontend_build_manifest(build_root)
@@ -976,6 +1841,71 @@ def test_build_manifest_cli_import_does_not_initialize_testbench_packages():
     )
 
     assert result.returncode == 0, result.stderr
+
+
+def test_build_manifest_runtime_rechecks_allowlisted_source_delta(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "-C", str(repo), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "unit@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Frontend Unit"], check=True)
+    (repo / ".gitignore").write_text("/build-frontend/\n", encoding="utf-8")
+    design_file = repo / "src/main/scala/xiangshan/frontend/icache/ICacheMainPipe.scala"
+    design_file.parent.mkdir(parents=True)
+    design_file.write_text("class MainPipe {\n  val old = true\n}\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "baseline"], check=True)
+    baseline = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+    design_file.write_text("class MainPipe {\n  val old = true\n  val observed = true\n}\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-q", "-m", "observability"], check=True)
+    implementation = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+
+    build_root = repo / "build-frontend"
+    pylib = build_root / "pylib" / "Frontend"
+    rtl = build_root / "rtl"
+    pylib.mkdir(parents=True)
+    rtl.mkdir(parents=True)
+    (pylib / "libUTFrontend.so").write_bytes(b"dut-model")
+    (pylib / "_UT_Frontend.so").write_bytes(b"python-extension")
+    (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
+    (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
+    tool_path = Path(__file__).resolve().parents[1] / "tools/write_frontend_build_manifest.py"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(tool_path),
+            "--repo-root",
+            str(repo),
+            "--build-root",
+            str(build_root),
+            "--output",
+            str(build_root / "frontend_build_manifest.json"),
+            "--build-config",
+            "unit",
+            "--dut-source-sha",
+            baseline,
+            "--design-baseline-sha",
+            baseline,
+        ],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    loaded = load_frontend_build_manifest(build_root)
+    assert loaded["build_manifest_status"] == "valid"
+    assert loaded["dut_source_sha"] == baseline
+    assert loaded["implementation_sha"] == implementation
+
+    manifest_path = build_root / "frontend_build_manifest.json"
+    tampered = json.loads(manifest_path.read_text(encoding="utf-8"))
+    tampered["source_delta_sha256"] = "f" * 64
+    manifest_path.write_text(json.dumps(tampered), encoding="utf-8")
+    invalid = load_frontend_build_manifest(build_root)
+    assert invalid["build_manifest_status"] == "invalid"
+    assert "source_delta_hash_runtime_mismatch" in invalid["build_manifest_reasons"]
 
 
 @pytest.mark.parametrize(
@@ -1013,6 +1943,37 @@ def test_build_manifest_rejects_malformed_provenance(tmp_path, mutation, reason)
     assert loaded["build_manifest_status"] == "invalid"
     assert loaded["dut_source_sha"] == "unavailable"
     assert reason in loaded["build_manifest_reasons"]
+
+
+def test_build_manifest_rejects_unchecked_source_sha_override(tmp_path):
+    build_root = tmp_path / "build-frontend"
+    pylib = build_root / "pylib" / "Frontend"
+    rtl = build_root / "rtl"
+    pylib.mkdir(parents=True)
+    rtl.mkdir(parents=True)
+    (pylib / "libUTFrontend.so").write_bytes(b"dut-model")
+    (pylib / "_UT_Frontend.so").write_bytes(b"python-extension")
+    (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
+    (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
+    manifest_path = build_root / "frontend_build_manifest.json"
+    manifest = write_frontend_build_manifest(
+        manifest_path,
+        build_root=build_root,
+        dut_source_sha="a" * 40,
+        source_tree_dirty=False,
+        build_config="frontend-test",
+        build_command="make frontend",
+        metadata={
+            "implementation_sha": "b" * 40,
+            "source_sha_override": True,
+        },
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    loaded = load_frontend_build_manifest(build_root)
+
+    assert loaded["build_manifest_status"] == "invalid"
+    assert "source_delta_policy_not_allowlisted" in loaded["build_manifest_reasons"]
 
 
 def test_recorder_rejects_overrides_that_disagree_with_valid_build_manifest(tmp_path, monkeypatch):
@@ -1591,6 +2552,8 @@ def test_backannotation_rejects_tampered_definitions(tmp_path):
 
 def test_funcov_merge_rejects_unknown_coverpoint_key(tmp_path):
     recorder, _env, _dut = _make_recorder(tmp_path)
+    _install_eligible_provenance(recorder)
+    recorder.run_metadata["run_id"] = "unit-unknown-coverpoint"
     raw_path = Path(recorder.write_artifacts()["raw_path"])
     raw = json.loads(raw_path.read_text(encoding="utf-8"))
     raw["hits"] = {
@@ -1613,6 +2576,8 @@ def test_funcov_merge_rejects_unknown_coverpoint_key(tmp_path):
 
 def test_funcov_merge_rejects_legacy_group_bin_key(tmp_path):
     recorder, _env, _dut = _make_recorder(tmp_path)
+    _install_eligible_provenance(recorder)
+    recorder.run_metadata["run_id"] = "unit-legacy-hit-key"
     raw_path = Path(recorder.write_artifacts()["raw_path"])
     raw = json.loads(raw_path.read_text(encoding="utf-8"))
     raw["hits"] = {
@@ -1702,6 +2667,36 @@ def test_backannotation_tool_distinguishes_model_dut_and_manual_close(tmp_path):
         )
     with pytest.raises(ValueError, match="already owned"):
         validate_mapping(testpoint_path, pilot)
+
+
+def test_backannotation_keeps_stale_or_missing_dut_evidence_partial(tmp_path):
+    pilot_path = tmp_path / "pilot.csv"
+    testpoint_path = tmp_path / "testpoints.csv"
+    pilot_path.write_text(
+        "Bin_ID,Coverage_Group,Coverpoint,Bin_Name,建议试点用例\n"
+        "BIN-501,two_fetch_ftq_eligibility,request_eligibility,eligible_dual,case_a\n",
+        encoding="utf-8-sig",
+    )
+    testpoint_path.write_text(
+        "一级测试点,coverage,status,testcase,evidence\n"
+        "leaf,\"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, "
+        "bins eligible_dual (BIN-501)\",PARTIAL,case_a,OLD_DIAGNOSTIC\n",
+        encoding="utf-8-sig",
+    )
+
+    counts = backannotate(
+        testpoint_path,
+        load_pilot(pilot_path),
+        [],
+        apply=True,
+    )
+
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        row = next(csv.DictReader(handle))
+    assert row["status"] == "PARTIAL"
+    assert row["evidence"] == "OLD_DIAGNOSTIC"
+    assert counts["partial"] == 1
+    assert counts["model"] == 0
 
 
 def test_backannotation_rejects_hit_from_failed_dut_artifact(tmp_path):

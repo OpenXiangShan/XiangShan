@@ -53,6 +53,12 @@ def _json_sha256(value: Any) -> str:
 
 COMPATIBILITY_FIELDS = (
     "dut_source_sha",
+    "implementation_sha",
+    "design_baseline_sha",
+    "source_sha_override",
+    "source_delta_sha256",
+    "source_delta_files",
+    "source_delta_policy",
     "dut_build_sha256",
     "dut_python_extension_sha256",
     "generated_rtl_sha256",
@@ -199,9 +205,14 @@ class FunctionalCoverageRecorder:
         self._ifu_redirect_skip_until_cycle: Optional[int] = None
         self._two_fetch_last_fetch_ptr: Optional[tuple[int, int]] = None
         self._two_fetch_expected_ptr_step: Optional[int] = None
-        self._two_fetch_waiting_refill = False
+        self._two_fetch_refill_pending: Optional[dict] = None
+        self._two_fetch_last_main_s1_tag: Optional[tuple] = None
         self._two_fetch_ftq_pending = False
         self._two_fetch_last_dual_cycle: Optional[int] = None
+        self._two_fetch_last_waylookup_write_state = None
+        self._two_fetch_stalled_payload: Optional[tuple[int, ...]] = None
+        self._two_fetch_expected_cfvec: Optional[dict] = None
+        self._two_fetch_redirect_pending: Optional[dict] = None
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
 
@@ -302,9 +313,14 @@ class FunctionalCoverageRecorder:
         repo_root = frontend_root.parents[3]
         build_root = repo_root / "build-frontend"
         manifest_override = os.getenv("TB_DUT_BUILD_MANIFEST", "").strip()
+        manifest_path = (
+            Path(manifest_override).expanduser()
+            if manifest_override
+            else build_root / "frontend_build_manifest.json"
+        ).resolve(strict=False)
         build = load_frontend_build_manifest(
             build_root,
-            Path(manifest_override) if manifest_override else None,
+            manifest_path,
         )
         source_override = os.getenv("TB_DUT_SOURCE_SHA", "").strip()
         build_config_override = os.getenv("TB_DUT_BUILD_CONFIG", "").strip()
@@ -334,6 +350,11 @@ class FunctionalCoverageRecorder:
             elif not manifest_was_valid:
                 build_config = build_config_override
         definitions_sha256 = _json_sha256([asdict(item) for item in self.definitions])
+        effective_source_override = bool(build.get("source_sha_override", False))
+        if source_override and (
+            not manifest_source_sha or source_override.lower() != manifest_source_sha.lower()
+        ):
+            effective_source_override = True
         sampler_sha256 = _json_sha256(
             {
                 "functional_coverage.py": _file_sha256(str(Path(__file__).resolve())),
@@ -343,6 +364,12 @@ class FunctionalCoverageRecorder:
         provenance = {
             "dut_source_sha": dut_source_sha,
             "dut_source_origin": dut_source_origin,
+            "design_baseline_sha": build.get("design_baseline_sha", "unavailable"),
+            "implementation_sha": build.get("implementation_sha", "unavailable"),
+            "source_sha_override": effective_source_override,
+            "source_delta_sha256": build.get("source_delta_sha256", "unavailable"),
+            "source_delta_files": list(build.get("source_delta_files") or []),
+            "source_delta_policy": build.get("source_delta_policy", "unavailable"),
             "dut_build_sha256": build["dut_build_sha256"],
             "dut_python_extension_sha256": build["dut_python_extension_sha256"],
             "generated_rtl_sha256": build["generated_rtl_sha256"],
@@ -353,6 +380,9 @@ class FunctionalCoverageRecorder:
             "sampler_sha256": sampler_sha256,
             "signal_contract_sha256": build["signal_contract_sha256"],
             "build_config": build_config,
+            # Back-annotation must reload the exact manifest used by this run
+            # instead of trusting the recorder's copied status/hash fields.
+            "build_manifest_path": str(manifest_path),
             "build_manifest_status": manifest_status,
             "build_manifest_sha256": build["build_manifest_sha256"],
             "build_manifest_reasons": manifest_reasons,
@@ -548,10 +578,14 @@ class FunctionalCoverageRecorder:
         self._ifu_redirect_skip_until_cycle = None
         self._two_fetch_last_fetch_ptr = None
         self._two_fetch_expected_ptr_step = None
-        self._two_fetch_waiting_refill = False
+        self._two_fetch_refill_pending = None
+        self._two_fetch_last_main_s1_tag = None
         self._two_fetch_ftq_pending = False
         self._two_fetch_last_dual_cycle = None
         self._two_fetch_last_waylookup_write_state = None
+        self._two_fetch_stalled_payload = None
+        self._two_fetch_expected_cfvec = None
+        self._two_fetch_redirect_pending = None
 
     def on_cycle(self, cycle: int, env) -> None:
         dut = env.dut
@@ -745,6 +779,7 @@ class FunctionalCoverageRecorder:
         raw_artifacts: list[tuple[Path, dict]] = []
         compatibility_signature: Optional[str] = None
         first_definitions: Optional[list] = None
+        run_ids: set[str] = set()
         for raw_path in raw_list:
             try:
                 with raw_path.open("r", encoding="utf-8") as f:
@@ -761,16 +796,27 @@ class FunctionalCoverageRecorder:
             provenance = data.get("provenance")
             if not isinstance(provenance, dict):
                 raise ValueError(f"functional coverage artifact lacks provenance: {raw_path}")
+            manifest_status = str(provenance.get("build_manifest_status") or "").strip().lower()
+            if manifest_status != "valid":
+                raise ValueError(f"functional coverage artifact has invalid build manifest: {raw_path}")
             missing_fields = [
                 field
                 for field in COMPATIBILITY_FIELDS
-                if provenance.get(field) is None or str(provenance.get(field)).strip() == ""
+                if provenance.get(field) is None
+                or str(provenance.get(field)).strip() in {"", "unavailable", "unknown"}
             ]
             if missing_fields:
                 raise ValueError(
                     "functional coverage artifact lacks compatibility fields: "
                     f"{raw_path}: {missing_fields}"
                 )
+            run = data.get("run")
+            run_id = str(run.get("run_id") or "").strip() if isinstance(run, dict) else ""
+            if not run_id:
+                raise ValueError(f"functional coverage artifact lacks unique run_id: {raw_path}")
+            if run_id in run_ids:
+                raise ValueError(f"duplicate functional coverage run_id cannot be merged: {run_id}")
+            run_ids.add(run_id)
             recorded_signature = str(provenance.get("compatibility_signature") or "").strip().lower()
             expected_signature = _json_sha256(
                 {field: provenance[field] for field in COMPATIBILITY_FIELDS}
@@ -979,6 +1025,20 @@ class FunctionalCoverageRecorder:
                 errors = _sanitize(self.env.get_errors())
             except Exception:
                 errors = []
+
+        # Sampler-side protocol observations are evidence, not hits.  A
+        # payload change while valid&&!ready or a refill/tag mismatch is a
+        # checker failure for this run and must block automatic HIT.
+        protocol_risks = [
+            item
+            for item in self.risk_observations
+            if str(item.get("event", "")).startswith(
+                ("ibuffer_payload_changed", "two_fetch_refill_", "two_fetch_redirect_")
+            )
+        ]
+        if protocol_risks:
+            errors = list(errors) if isinstance(errors, list) else []
+            errors.extend(protocol_risks[:32])
 
         run = dict(self.run_metadata)
         checker = dict(run.get("checker") or {})

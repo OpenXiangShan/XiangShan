@@ -351,6 +351,8 @@ frontend: $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND_PYLIB)
 		--repo-root . \
 		--build-root $(FRONTEND_BUILD_DIR) \
 		--output $(FRONTEND_BUILD_MANIFEST) \
+		--dut-source-sha "$${FRONTEND_DUT_SOURCE_SHA:-}" \
+		--design-baseline-sha "$${FRONTEND_DESIGN_BASELINE_SHA:-}" \
 		--build-config "CONFIG=$(CONFIG);ISSUE=$(ISSUE);NUM_CORES=$(NUM_CORES);CHISEL_TARGET=$(CHISEL_TARGET);WAVEFORM=$$frontend_waveform_format" \
 		--build-command "make frontend CONFIG=$(CONFIG) ISSUE=$(ISSUE) NUM_CORES=$(NUM_CORES) CHISEL_TARGET=$(CHISEL_TARGET) FRONTEND_WAVEFORM_FORMAT=$$frontend_waveform_format"
 .PHONY: frontend

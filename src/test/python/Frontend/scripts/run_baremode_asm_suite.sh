@@ -8,6 +8,7 @@ REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
 DEFAULT_CASES=(
   "${FRONTEND_DIR}/tests/asm_cases/fe_2fetch_cross_page_blocked.S"
   "${FRONTEND_DIR}/tests/asm_cases/fe_2fetch_mixed_rvc_rvi.S"
+  "${FRONTEND_DIR}/tests/asm_cases/fe_2fetch_rvi_cross_block.S"
   "${FRONTEND_DIR}/tests/asm_cases/fe_2fetch_size_blocked.S"
   "${FRONTEND_DIR}/tests/asm_cases/fe_2fetch_trained_short_blocks.S"
   "${FRONTEND_DIR}/tests/asm_cases/fe_ifu_cfi_decode_basic.S"
