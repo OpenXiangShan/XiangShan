@@ -166,6 +166,8 @@ src/test/python/Frontend/scripts/run_pytest_with_log.sh
 TB_ENABLE_DUT_TESTS=1 src/test/python/Frontend/scripts/run_pytest_with_log.sh
 ```
 
+DUT 批量回归必须看到 pytest final summary 和预期用例数量，不能只看退出码。
+
 - bin trace 列表回归入口：
 
 ```bash

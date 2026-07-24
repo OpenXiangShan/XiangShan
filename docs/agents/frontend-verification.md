@@ -338,6 +338,8 @@ Common direct-`pytest` arguments worth keeping consistent:
   the exact run.
 - `TB_ENABLE_DUT_TESTS=1`: required for DUT integration cases guarded by the
   existing `_RUN_DUT` pattern.
+- A DUT batch regression is complete only if pytest reaches the final summary
+  and the selected/completed case count matches the intended target.
 
 `src/test/python/Frontend/scripts/run_pytest_with_log.sh` already sets the
 logging-related pytest arguments above and disables `rerunfailures` by default.
@@ -351,6 +353,8 @@ script-level env vars:
   `TB_ENV_LOG_LEVEL`, then `INFO`.
 - `TB_PYTEST_DISABLE_RERUNFAILURES=0|1`: keep or disable
   `-p no:rerunfailures`; default is `1` in this tree.
+- `TB_SKIP_DUT_FINISH=1`: suppress fixture teardown `dut.Finish()` for an
+  explicit DUT batch-run strategy. It is not pass evidence by itself.
 - `TB_TRACE_START_INDEX=...`: start golden comparison from the given jsonl
   index when loading a bin trace.
 - `TB_RESET_VECTOR=...`: start DUT fetch from the given PC instead of the
