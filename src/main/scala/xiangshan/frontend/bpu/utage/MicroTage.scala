@@ -79,9 +79,19 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
       )).io
       t
   }
-  io.sramResetDone := tables.map(_.sramResetDone).reduce(_ && _)
-  io.resetDone     := true.B
-  // High-order tables have longer history, better discrimination, relatively stable,
+ io.sramResetDone := tables.map(_.sramResetDone).reduce(_ && _)
+  tables.foreach { t =>
+    t.contextFlush := io.contextFlush
+    t.bpuFlushing  := io.bpuFlushing
+  }
+  private val flushPending = RegInit(false.B)
+  when(io.contextFlush) {
+    flushPending := true.B
+  }.elsewhen(flushPending && io.sramResetDone) {
+    flushPending := false.B
+  }
+  io.resetDone := !flushPending && !io.contextFlush
+ // High-order tables have longer history, better discrimination, relatively stable,
   // and lower access frequency. No need to frequently clean dead entries based on useful counters.
   private val lowTickCounter  = RegInit(0.U((LowTickWidth + 1).W))
   private val highTickCounter = RegInit(0.U((HighTickWidth + 1).W))
@@ -242,6 +252,21 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     a3_posHitVec := a2_posHitVec
   }
 
+  // Flush prediction pipeline registers on context switch (last-connect).
+  when(io.contextFlush) {
+    a1_readIndex         := 0.U.asTypeOf(a1_readIndex)
+    a2_readIndex         := 0.U.asTypeOf(a2_readIndex)
+    a2_predRead          := 0.U.asTypeOf(a2_predRead)
+    a2_posHitVec         := 0.U.asTypeOf(a2_posHitVec)
+    a2_foldedPathHist    := 0.U.asTypeOf(a2_foldedPathHist)
+    a2_fromAbtbPos       := 0.U.asTypeOf(a2_fromAbtbPos)
+    a2_abtbUseTableIDVec := 0.U.asTypeOf(a2_abtbUseTableIDVec)
+    a2_abtbTakenVec      := 0.U.asTypeOf(a2_abtbTakenVec)
+    a3_predRead          := 0.U.asTypeOf(a3_predRead)
+    a3_readIndex         := 0.U.asTypeOf(a3_readIndex)
+    a3_posHitVec         := 0.U.asTypeOf(a3_posHitVec)
+  }
+
   // ------------ MicroTage is only concerned with conditional branches ---------- //
   private val t0_train                  = RegNext(io.fastTrain.get.bits, 0.U.asTypeOf(new FastTrain))
   private val t0_fire                   = RegNext(io.fastTrain.get.valid, false.B)
@@ -323,6 +348,19 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
   private val t1_normalAllocMask    = PriorityEncoderOH(t1_allocCandidateMask)
   private val t1_trainStartPc       = RegEnable(t0_trainStartPc, t0_fire)
 
+  // Flush training T1 registers across the whole flush window (last-connect).
+  when(io.bpuFlushing) {
+    t1_fire                   := false.B
+    t1_foldedPathHistForTrain := 0.U.asTypeOf(t1_foldedPathHistForTrain)
+    t1_trainRead              := 0.U.asTypeOf(t1_trainRead)
+    t1_trainResult            := 0.U.asTypeOf(t1_trainResult)
+    t1_misPredProviderOH      := 0.U.asTypeOf(t1_misPredProviderOH)
+    t1_needAlloc              := false.B
+    t1_allocTaken             := false.B
+    t1_allocCfiPosition       := 0.U.asTypeOf(t1_allocCfiPosition)
+    t1_trainStartPc           := 0.U.asTypeOf(t1_trainStartPc)
+  }
+
   for (i <- 0 until NumTables) {
     tables(i).train.t0_trainIndex.valid := t0_fire
     tables(i).train.t0_trainIndex.bits  := t0_trainIdx(i)
@@ -380,6 +418,12 @@ class MicroTage(implicit p: Parameters) extends BasePredictor with HasMicroTageP
     highTickCounter := 0.U
   }.elsewhen((t1_normalAllocMask === 0.U) && t1_needAlloc && t1_fire) {
     highTickCounter := highTickCounter + 1.U
+  }
+
+  // Flush tick counters on context switch (last-connect).
+  when(io.contextFlush) {
+    lowTickCounter  := 0.U
+    highTickCounter := 0.U
   }
 
   // ==========================================================================
