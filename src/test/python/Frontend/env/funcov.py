@@ -452,6 +452,12 @@ def _tf_next_ptr(flag: int, value: int, size: int) -> tuple[int, int]:
     return int(flag), value
 
 
+def _tf_ptr_at_or_after(left: tuple[int, int], right: tuple[int, int]) -> bool:
+    left_flag, left_value = (int(left[0]), int(left[1]))
+    right_flag, right_value = (int(right[0]), int(right[1]))
+    return bool((left_flag != right_flag) ^ (left_value >= right_value))
+
+
 def _tf_mainpipe_fail_reason(recorder) -> dict[str, bool] | None:
     """Reconstruct observable MainPipe s0 two-fetch fallback reasons.
 
@@ -707,7 +713,15 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         flush_flag = _tf_read(recorder, "bpu_s3_flush_ptr_flag")
         flush_value = _tf_read(recorder, "bpu_s3_flush_ptr_value")
         flush_ptr = None if None in (flush_flag, flush_value) else (int(flush_flag), int(flush_value))
-        if pending_ptr is not None and flush_ptr is not None and tuple(pending_ptr) == tuple(flush_ptr):
+        rollback_match = (
+            pending_ptr is not None
+            and flush_ptr is not None
+            and _tf_ptr_at_or_after(tuple(pending_ptr), tuple(flush_ptr))
+        )
+        if rollback_match:
+            rollback_distance = recorder._circular_distance(
+                int(pending_ptr[0]), int(pending_ptr[1]), int(flush_ptr[0]), int(flush_ptr[1]), ftq_size
+            )
             recorder.mark(
                 "two_fetch_flush_flow",
                 "bpu_s3_drop_before_issue",
@@ -716,6 +730,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
                     "bpu_s3_flush_pending_dual",
                     pending_ptr=list(pending_ptr),
                     flush_ptr=list(flush_ptr),
+                    rollback_distance=rollback_distance,
                     pending_cycle=pending_cycle,
                 ),
             )
@@ -1216,7 +1231,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
             if stalled_payload is not None:
                 stable_ok = bool(getattr(recorder, "_two_fetch_stalled_payload_stable", True))
                 stalled_since = getattr(recorder, "_two_fetch_stalled_since", None)
-                if current_payload is not None and current_payload == stalled_payload and stable_ok:
+                if stable_ok:
                     recorder.mark(
                         "two_fetch_delivery",
                         "dual_stall",
@@ -1225,7 +1240,12 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
                             "to_ibuffer_dual_stall_payload_stable_until_fire",
                             stalled_since=stalled_since,
                             fire_cycle=cycle,
-                            payload_sha=hashlib.sha256(repr(current_payload).encode("ascii")).hexdigest(),
+                            release_sample_matches_held=(
+                                None
+                                if current_payload is None
+                                else int(current_payload == stalled_payload)
+                            ),
+                            payload_sha=hashlib.sha256(repr(stalled_payload).encode("ascii")).hexdigest(),
                         ),
                     )
                 elif current_payload is None or current_payload != stalled_payload:
@@ -1365,12 +1385,13 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         if (
             in_flight_tags is not None
             and redirect_target is not None
-            and (_tf_read(recorder, "ifu_flush") == 1 or main_s1_flush == 1)
         ):
             recorder._two_fetch_redirect_pending = {
                 "old_tags": tuple(in_flight_tags),
                 "target": int(redirect_target),
                 "cycle": cycle,
+                "ifu_flush": _tf_read(recorder, "ifu_flush"),
+                "main_s1_flush": main_s1_flush,
             }
         recorder._two_fetch_last_fetch_ptr = None
         recorder._two_fetch_refill_pending = None

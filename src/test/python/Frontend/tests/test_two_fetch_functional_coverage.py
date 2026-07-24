@@ -989,7 +989,10 @@ def test_backend_redirect_requires_old_tags_dropped_and_new_target_delivery(tmp_
 
     sample_two_fetch_coverage(recorder, env, 1)
 
-    assert recorder._two_fetch_redirect_pending == {
+    assert {
+        key: recorder._two_fetch_redirect_pending.get(key)
+        for key in ("old_tags", "target", "cycle")
+    } == {
         "old_tags": ((0, 10), (0, 11)),
         "target": target,
         "cycle": 1,
