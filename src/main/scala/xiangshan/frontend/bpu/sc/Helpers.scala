@@ -21,10 +21,36 @@ import scala.math.min
 import utility.ParallelXOR
 import utils.AddrField
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.FoldedHistoryInfo
 import xiangshan.frontend.bpu.PhrHelper
 import xiangshan.frontend.bpu.ScTableInfo
 import xiangshan.frontend.bpu.history.phr.PhrAllFoldedHistories
+
+object ScTrainPrecompute {
+  def writeValidVec(train: BpuTrain): Vec[Bool] = {
+    val mbtbEntries = train.meta.mbtb.entries.flatten
+    val scMeta      = train.meta.sc
+    VecInit(train.branches.map { branch =>
+      val hit     = WireInit(false.B)
+      val predIdx = WireInit(0.U(log2Ceil(mbtbEntries.length).W))
+      for (i <- (0 until mbtbEntries.length).reverse) {
+        when(mbtbEntries(i).hit(branch.bits)) {
+          hit     := true.B
+          predIdx := i.U
+        }
+      }
+      val taken     = branch.valid && branch.bits.taken && branch.bits.attribute.isConditional
+      val predValid = scMeta.tagePredValid(predIdx)
+      val useSc     = scMeta.useScPred(predIdx)
+      val scPred    = scMeta.scPred(predIdx)
+      val tagePred  = scMeta.tagePred(predIdx)
+
+      branch.valid && branch.bits.attribute.isConditional && hit && predValid &&
+      (!(useSc && scPred === taken) || !(useSc && predValid && scPred === tagePred))
+    })
+  }
+}
 
 trait Helpers extends HasScParameters with PhrHelper {
   def sign(x: SInt): Bool = x(x.getWidth - 1)

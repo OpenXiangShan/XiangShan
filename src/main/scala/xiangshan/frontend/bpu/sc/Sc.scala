@@ -46,6 +46,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     val foldedPathHist:      PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val imli:                UInt                  = Input(UInt(ImliHistoryLength.W))
     val commonHR:            CommonHREntry         = Input(new CommonHREntry())
+    val trainWriteValidVec:  Vec[Bool]             = Input(Vec(ResolveEntryBranchNumber, Bool()))
     val trainFoldedPathHist: PhrAllFoldedHistories = Input(new PhrAllFoldedHistories(AllFoldedHistoryInfo))
     val scTakenMask:         Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
     val scUsed:              Vec[Bool]             = Output(Vec(NumBtbResultEntries, Bool()))
@@ -385,15 +386,19 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   }
   private val t0_writeTakenVec =
     VecInit(t0_branches.map(b => b.valid && b.bits.taken && b.bits.attribute.isConditional))
-  private val t0_writeValidVec =
+  private val t0_writeValidVecRef =
     VecInit(t0_branches.zip(t0_branchesScIdxHitVec).zip(t0_branchesScIdxVec).zip(t0_writeTakenVec).map {
       case (((b, hit), predIdx), taken) =>
         b.valid && b.bits.attribute.isConditional && hit && t0_meta.tagePredValid(predIdx) &&
         (!(t0_meta.useScPred(predIdx) && t0_meta.scPred(predIdx) === taken) || !(t0_meta.useScPred(predIdx) &&
           t0_meta.tagePredValid(predIdx) && t0_meta.scPred(predIdx) === t0_meta.tagePred(predIdx)))
     })
-  private val t0_needWrite    = t0_writeValidVec.reduce(_ || _)
-  private val t0_bankConflict = t0_needWrite && s0_fire && t0_bankMask === s0_bankMask
+  private val t0_writeValidVec = io.trainWriteValidVec
+  private val t0_needWrite     = t0_writeValidVec.reduce(_ || _)
+  private val t0_bankConflict  = t0_needWrite && s0_fire && t0_bankMask === s0_bankMask
+  when(t0_fire) {
+    assert(t0_writeValidVec.asUInt === t0_writeValidVecRef.asUInt)
+  }
   io.trainReady := !t0_bankConflict
   pathTable.zip(t0_pathIdx).foreach { case (table, idx) =>
     table.io.trainReadReq.valid         := t0_fire && t0_needWrite && PathEnable.B
