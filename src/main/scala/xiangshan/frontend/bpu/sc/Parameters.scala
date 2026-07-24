@@ -98,4 +98,12 @@ trait HasScParameters extends HasBpuParameters {
   def WriteBufferSize: Int = scParameters.WriteBufferSize
 
   def EnableScTrace: Boolean = scParameters.EnableScTrace
+  def EnableScDebug: Boolean = !env.FPGAPlatform && (env.EnablePerfDebug || EnableScTrace)
+
+  def ScSumWidth: Int = CtrWidth + log2Ceil(NumTables) + 2
+  def ScSetIdxWidth: Int = log2Ceil(
+    (PathTableInfos ++ GlobalTableInfos ++ BackwardTableInfos :+ ImliTableInfo :+ BiasTableInfo)
+      .map(_.NumSets)
+      .max
+  )
 }

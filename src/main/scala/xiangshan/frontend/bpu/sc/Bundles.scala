@@ -67,9 +67,6 @@ class ScTableTrain(val numSets: Int, val numWays: Int)(implicit p: Parameters) e
 }
 
 class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
-  // NOTE: Seems ChiselDB has problem dealing with SInt, so we do not use ScEntry for scResp here
-  // FIXME: is there a better way to do this?
-  private def ScEntryWidth = (new ScEntry).getWidth
   val scBiasLowerBits: Vec[UInt] = Vec(NumWays, UInt(BiasUseTageBitWidth.W))
   val scPred:          Vec[Bool] = Vec(NumWays, Bool())
   val tagePred:        Vec[Bool] = Vec(NumBtbResultEntries, Bool())
@@ -79,41 +76,75 @@ class ScMeta(implicit p: Parameters) extends ScBundle with HasScParameters {
   val sumAboveThres:   Vec[Bool] = Vec(NumWays, Bool())
 
   // for debug
-  val debug_scPathTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
-  val debug_scGlobalTakenVec: Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
-  val debug_scBWTakenVec:     Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
-  val debug_scImliTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
-  val debug_scBiasTakenVec:   Option[Vec[Bool]] = Some(Vec(NumWays, Bool()))
+  val debug_scPathTakenVec:   Option[Vec[Bool]] = Option.when(EnableScDebug)(Vec(NumWays, Bool()))
+  val debug_scGlobalTakenVec: Option[Vec[Bool]] = Option.when(EnableScDebug)(Vec(NumWays, Bool()))
+  val debug_scBWTakenVec:     Option[Vec[Bool]] = Option.when(EnableScDebug)(Vec(NumWays, Bool()))
+  val debug_scImliTakenVec:   Option[Vec[Bool]] = Option.when(EnableScDebug)(Vec(NumWays, Bool()))
+  val debug_scBiasTakenVec:   Option[Vec[Bool]] = Option.when(EnableScDebug)(Vec(NumWays, Bool()))
   val debug_predPathIdx: Option[MixedVec[UInt]] =
-    Some(MixedVec(PathTableInfos.map(info => UInt(log2Ceil(info.NumSets).W))))
+    Option.when(EnableScDebug)(MixedVec(PathTableInfos.map(info => UInt(log2Ceil(info.NumSets).W))))
   val debug_predGlobalIdx: Option[MixedVec[UInt]] =
-    Some(MixedVec(GlobalTableInfos.map(info => UInt(log2Ceil(info.NumSets).W))))
+    Option.when(EnableScDebug)(MixedVec(GlobalTableInfos.map(info => UInt(log2Ceil(info.NumSets).W))))
   val debug_predBWIdx: Option[MixedVec[UInt]] =
-    Some(MixedVec(BackwardTableInfos.map(info => UInt(log2Ceil(info.NumSets).W))))
-  val debug_predImliIdx: Option[UInt] = Some(UInt(log2Ceil(ImliTableInfo.NumSets).W))
-  val debug_predBiasIdx: Option[UInt] = Some(UInt(log2Ceil(BiasTableInfo.NumSets).W))
+    Option.when(EnableScDebug)(MixedVec(BackwardTableInfos.map(info => UInt(log2Ceil(info.NumSets).W))))
+  val debug_predImliIdx:   Option[UInt]      = Option.when(EnableScDebug)(UInt(log2Ceil(ImliTableInfo.NumSets).W))
+  val debug_predBiasIdx:   Option[UInt]      = Option.when(EnableScDebug)(UInt(log2Ceil(BiasTableInfo.NumSets).W))
+  val debug_totalPercsum:  Option[Vec[UInt]] = Option.when(EnableScDebug)(Vec(NumWays, UInt(ScSumWidth.W)))
+  val debug_threshold:     Option[Vec[UInt]] = Option.when(EnableScDebug)(Vec(NumWays, UInt(ThresholdWidth.W)))
+  val debug_commonHRValid: Option[Bool]      = Option.when(EnableScDebug)(Bool())
 }
 
 class ScConditionalBranchTrace(implicit p: Parameters) extends ScBundle with HasScParameters {
   private def ScEntryWidth = (new ScEntry).getWidth
-  val startPc: PrunedAddr = PrunedAddr(VAddrBits)
-  val cfiPc:   UInt       = UInt(VAddrBits.W)
+  val startPc:     PrunedAddr = PrunedAddr(VAddrBits)
+  val cfiPc:       UInt       = UInt(VAddrBits.W)
+  val predSlotIdx: UInt       = UInt(log2Ceil(NumWays).W)
+  val tableWayIdx: UInt       = UInt(log2Ceil(NumWays).W)
+
+  val updateValid:    Bool = Bool()
+  val trainDataValid: Bool = Bool()
+
   // tage provider info
   val providerValid: Bool = Bool()
   val providerTaken: Bool = Bool()
   val providerCtr:   UInt = UInt(TageTakenCtrWidth.W)
-  // sc resp
-  val pathResp:   Vec[UInt] = Vec(NumPathTables, UInt(ScEntryWidth.W))
-  val globalResp: Vec[UInt] = Vec(NumGlobalTables, UInt(ScEntryWidth.W))
-  val biasResp:   UInt      = UInt(ScEntryWidth.W)
-  // sc pred
-  val sumAboveThres: Bool = Bool()
-  val scPred:        Bool = Bool()
-  val useSc:         Bool = Bool()
+
+  // prediction-time context
+  val predCommonHRValid: Bool      = Bool()
+  val predPathSetIdx:    Vec[UInt] = Vec(NumPathTables, UInt(ScSetIdxWidth.W))
+  val predGlobalSetIdx:  Vec[UInt] = Vec(NumGlobalTables, UInt(ScSetIdxWidth.W))
+  val predBWSetIdx:      Vec[UInt] = Vec(NumBWTables, UInt(ScSetIdxWidth.W))
+  val predImliSetIdx:    UInt      = UInt(ScSetIdxWidth.W)
+  val predBiasSetIdx:    UInt      = UInt(ScSetIdxWidth.W)
+  val pathPred:          Bool      = Bool()
+  val globalPred:        Bool      = Bool()
+  val bwPred:            Bool      = Bool()
+  val imliPred:          Bool      = Bool()
+  val biasPred:          Bool      = Bool()
+  val totalPercsum:      UInt      = UInt(ScSumWidth.W)
+  val threshold:         UInt      = UInt(ThresholdWidth.W)
+  val sumAboveThres:     Bool      = Bool()
+  val scPred:            Bool      = Bool()
+  val useSc:             Bool      = Bool()
+
+  // Entries are re-read at training time and are valid only when trainDataValid is set.
+  val trainCommonHRValid: Bool      = Bool()
+  val trainPathSetIdx:    Vec[UInt] = Vec(NumPathTables, UInt(ScSetIdxWidth.W))
+  val trainGlobalSetIdx:  Vec[UInt] = Vec(NumGlobalTables, UInt(ScSetIdxWidth.W))
+  val trainBWSetIdx:      Vec[UInt] = Vec(NumBWTables, UInt(ScSetIdxWidth.W))
+  val trainImliSetIdx:    UInt      = UInt(ScSetIdxWidth.W)
+  val trainBiasSetIdx:    UInt      = UInt(ScSetIdxWidth.W)
+  val trainPathResp:      Vec[UInt] = Vec(NumPathTables, UInt(ScEntryWidth.W))
+  val trainGlobalResp:    Vec[UInt] = Vec(NumGlobalTables, UInt(ScEntryWidth.W))
+  val trainBWResp:        Vec[UInt] = Vec(NumBWTables, UInt(ScEntryWidth.W))
+  val trainImliResp:      UInt      = UInt(ScEntryWidth.W)
+  val trainBiasResp:      UInt      = UInt(ScEntryWidth.W)
 
   // actual
-  val actualTaken: Bool = Bool()
-  val mispredict:  Bool = Bool()
+  val actualTaken:  Bool = Bool()
+  val mispredict:   Bool = Bool()
+  val finalPred:    Bool = Bool()
+  val finalCorrect: Bool = Bool()
 
   val scCorrectTageWrong:   Bool = Bool()
   val scWrongTageCorrect:   Bool = Bool()

@@ -23,7 +23,6 @@ import utility.ChiselDB
 import utility.ParallelSingedExpandingAdd
 import utility.XSError
 import utility.XSPerfAccumulate
-import utility.XSPerfSeqAccumulate
 import xiangshan.frontend.bpu.BasePredictor
 import xiangshan.frontend.bpu.BasePredictorIO
 import xiangshan.frontend.bpu.FoldedHistoryInfo
@@ -221,7 +220,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  predict pipeline stage 2
    *  match entries and calculate final percSum
    */
-  private val s2_startPc = RegEnable(s1_startPc, s1_fire)
+  private val s2_startPc       = RegEnable(s1_startPc, s1_fire)
+  private val s2_commonHRValid = RegEnable(s1_commonHRValid, s1_fire)
 
   private val s2_biasPercsum = VecInit(s1_biasPercsum.map(RegEnable(_, s1_fire)))
 
@@ -334,17 +334,28 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   io.meta.useScPred     := RegEnable(s2_useScPred, s2_fire)
   io.meta.sumAboveThres := RegEnable(s2_sumAboveThres, s2_fire)
 
-  io.meta.debug_scPathTakenVec.get   := VecInit(s2_pathPred.map(RegEnable(_, s2_fire))) // for performance counter
-  io.meta.debug_scGlobalTakenVec.get := VecInit(s2_globalPred.map(RegEnable(_, s2_fire)))
-  io.meta.debug_scBWTakenVec.get     := VecInit(s2_bwPred.map(RegEnable(_, s2_fire)))
-  io.meta.debug_scImliTakenVec.get   := VecInit(s2_imliPred.map(RegEnable(_, s2_fire)))
-  io.meta.debug_scBiasTakenVec.get   := VecInit(s2_biasPred.map(RegEnable(_, s2_fire)))
+  if (EnableScDebug) {
+    io.meta.debug_scPathTakenVec.get   := RegEnable(VecInit(s2_pathPred), s2_fire)
+    io.meta.debug_scGlobalTakenVec.get := RegEnable(VecInit(s2_globalPred), s2_fire)
+    io.meta.debug_scBWTakenVec.get     := RegEnable(VecInit(s2_bwPred), s2_fire)
+    io.meta.debug_scImliTakenVec.get   := RegEnable(VecInit(s2_imliPred), s2_fire)
+    io.meta.debug_scBiasTakenVec.get   := RegEnable(VecInit(s2_biasPred), s2_fire)
 
-  io.meta.debug_predPathIdx.get   := RegEnable(MixedVecInit(s2_pathIdx), s2_fire) // for debug
-  io.meta.debug_predGlobalIdx.get := RegEnable(MixedVecInit(s2_globalIdx), s2_fire)
-  io.meta.debug_predBWIdx.get     := RegEnable(MixedVecInit(s2_bwIdx), s2_fire)
-  io.meta.debug_predImliIdx.get   := RegEnable(s2_imliIdx, s2_fire)
-  io.meta.debug_predBiasIdx.get   := RegEnable(s2_biasIdx, s2_fire)
+    io.meta.debug_predPathIdx.get   := RegEnable(MixedVecInit(s2_pathIdx), s2_fire)
+    io.meta.debug_predGlobalIdx.get := RegEnable(MixedVecInit(s2_globalIdx), s2_fire)
+    io.meta.debug_predBWIdx.get     := RegEnable(MixedVecInit(s2_bwIdx), s2_fire)
+    io.meta.debug_predImliIdx.get   := RegEnable(s2_imliIdx, s2_fire)
+    io.meta.debug_predBiasIdx.get   := RegEnable(s2_biasIdx, s2_fire)
+    io.meta.debug_totalPercsum.get := RegEnable(
+      VecInit(s2_totalPercsum.map(_.pad(ScSumWidth).asUInt)),
+      s2_fire
+    )
+    io.meta.debug_threshold.get := RegEnable(
+      VecInit(s2_wayIdx.map(wayIdx => s2_thresholds(wayIdx))),
+      s2_fire
+    )
+    io.meta.debug_commonHRValid.get := RegEnable(s2_commonHRValid, s2_fire)
+  }
 
   /*
    *  train pipeline stage 0
@@ -687,217 +698,278 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   biasTable.io.update.wayMask  := t2_writeBiasWayMask
   biasTable.io.update.entryVec := t2_writeBiasEntryVec
 
-  /*
-   *  PerfAccumulate
-   */
+  private val t1_resolvedScValidVec = VecInit.tabulate(ResolveEntryBranchNumber) { i =>
+    val predSlotIdx = t1_branchesScIdxVec(i)
+    t1_fire && t1_branches(i).valid && t1_branches(i).bits.attribute.isConditional &&
+    t1_branchesScIdxHitVec(i) && t1_meta.tagePredValid(predSlotIdx)
+  }
 
-  private val scCorrectVec   = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scWrongVec     = WireInit(VecInit.fill(NumWays)(false.B))
-  private val tageCorrectVec = WireInit(VecInit.fill(NumWays)(false.B))
-  private val tageWrongVec   = WireInit(VecInit.fill(NumWays)(false.B))
-  private val trainUseScVec  = WireInit(VecInit.fill(NumWays)(false.B))
+  if (EnableScDebug) {
+    val branchIndices   = 0 until ResolveEntryBranchNumber
+    val actualTaken     = branchIndices.map(i => t1_branches(i).bits.taken)
+    val predSlotIdx     = branchIndices.map(i => t1_branchesScIdxVec(i))
+    val useScEvent      = branchIndices.map(i => t1_resolvedScValidVec(i) && t1_meta.useScPred(predSlotIdx(i)))
+    val notUseScEvent   = branchIndices.map(i => t1_resolvedScValidVec(i) && !t1_meta.useScPred(predSlotIdx(i)))
+    val trainUseScEvent = branchIndices.map(i => t1_writeValidVec(i) && t1_meta.useScPred(predSlotIdx(i)))
 
-  private val scPathCorrectVec   = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scPathWrongVec     = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scGlobalCorrectVec = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scGlobalWrongVec   = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scBWCorrectVec     = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scBWWrongVec       = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scImliCorrectVec   = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scImliWrongVec     = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scBiasCorrectVec   = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scBiasWrongVec     = WireInit(VecInit.fill(NumWays)(false.B))
-
-  private val scUsedVec    = WireInit(VecInit.fill(NumWays)(false.B))
-  private val scNotUsedVec = WireInit(VecInit.fill(NumWays)(false.B))
-  private val changeVec    = VecInit.fill(NumWays)(false.B)
-  // foreach train branches
-  for (i <- 0 until ResolveEntryBranchNumber) {
-    val branchWayIdx = t1_branchesScIdxVec(i)
-    when(t1_meta.useScPred(branchWayIdx) && t1_writeValidVec(i)) {
-      tageCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.tagePred(branchWayIdx)
-      tageWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.tagePred(branchWayIdx)
-      scCorrectVec(branchWayIdx)   := t1_writeTakenVec(i) === t1_meta.scPred(branchWayIdx)
-      scWrongVec(branchWayIdx)     := t1_writeTakenVec(i) =/= t1_meta.scPred(branchWayIdx)
-      trainUseScVec(branchWayIdx)  := true.B
-
-      scPathCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.debug_scPathTakenVec.get(branchWayIdx)
-      scPathWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.debug_scPathTakenVec.get(branchWayIdx)
-      scGlobalCorrectVec(branchWayIdx) := t1_writeTakenVec(i) ===
-        t1_meta.debug_scGlobalTakenVec.get(branchWayIdx) && t1_commonHR.valid
-      scGlobalWrongVec(branchWayIdx) := t1_writeTakenVec(i) =/=
-        t1_meta.debug_scGlobalTakenVec.get(branchWayIdx) && t1_commonHR.valid
-      scBWCorrectVec(branchWayIdx) := t1_writeTakenVec(i) ===
-        t1_meta.debug_scBWTakenVec.get(branchWayIdx) && t1_commonHR.valid
-      scBWWrongVec(branchWayIdx) := t1_writeTakenVec(i) =/=
-        t1_meta.debug_scBWTakenVec.get(branchWayIdx) && t1_commonHR.valid
-
-      scImliCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.debug_scImliTakenVec.get(branchWayIdx)
-      scImliWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.debug_scImliTakenVec.get(branchWayIdx)
-      scBiasCorrectVec(branchWayIdx) := t1_writeTakenVec(i) === t1_meta.debug_scBiasTakenVec.get(branchWayIdx)
-      scBiasWrongVec(branchWayIdx)   := t1_writeTakenVec(i) =/= t1_meta.debug_scBiasTakenVec.get(branchWayIdx)
-
-      scUsedVec(branchWayIdx) := true.B
-    }.otherwise {
-      scNotUsedVec(branchWayIdx) := !t1_meta.useScPred(branchWayIdx) && t1_writeValidVec(i)
+    val scCorrectEvent = branchIndices.map(i => useScEvent(i) && actualTaken(i) === t1_meta.scPred(predSlotIdx(i)))
+    val scWrongEvent   = branchIndices.map(i => useScEvent(i) && actualTaken(i) =/= t1_meta.scPred(predSlotIdx(i)))
+    val tageCorrectEvent = branchIndices.map { i =>
+      useScEvent(i) && actualTaken(i) === t1_meta.tagePred(predSlotIdx(i))
     }
-  }
-  // foreach write way
-  for (i <- 0 until NumWays) {
-    val pChange = t1_oldPathEntries.zip(t1_writePathEntryVec).map {
-      case (oldEntries, writeEntries) =>
-        oldEntries(i).ctr =/= writeEntries(i).ctr
-    }.reduce(_ || _) && PathEnable.B
-    val gChange = t1_oldGlobalEntries.zip(t1_writeGlobalEntryVec).map {
-      case (oldEntries, writeEntries) =>
-        oldEntries(i).ctr =/= writeEntries(i).ctr
-    }.reduce(_ || _) && GlobalEnable.B
-    // val bChange =
-    //   (t1_oldBiasEntries(i).ctr.value =/= t1_writeBiasEntryVec(i).ctr.value) && t1_writeBiasWayMask(i) && BiasEnable.B
-    changeVec(i) := pChange || gChange
+    val tageWrongEvent = branchIndices.map(i => useScEvent(i) && actualTaken(i) =/= t1_meta.tagePred(predSlotIdx(i)))
 
-    XSPerfAccumulate(s"sc_correct_tage_wrong${i}", scCorrectVec(i) && tageWrongVec(i))
-    XSPerfAccumulate(s"sc_wrong_tage_correct${i}", scWrongVec(i) && tageCorrectVec(i))
-    XSPerfAccumulate(s"sc_correct_tage_correct${i}", scCorrectVec(i) && tageCorrectVec(i))
-    XSPerfAccumulate(s"sc_wrong_tage_wrong${i}", scWrongVec(i) && tageWrongVec(i))
+    def componentCorrect(pred: Vec[Bool], enabled: Bool = true.B): Seq[Bool] = branchIndices.map { i =>
+      useScEvent(i) && enabled && actualTaken(i) === pred(predSlotIdx(i))
+    }
+    def componentWrong(pred: Vec[Bool], enabled: Bool = true.B): Seq[Bool] = branchIndices.map { i =>
+      useScEvent(i) && enabled && actualTaken(i) =/= pred(predSlotIdx(i))
+    }
+    def countAtPredSlot(events: Seq[Bool], slot: Int): UInt =
+      PopCount(events.zip(predSlotIdx).map { case (event, idx) => event && idx === slot.U })
 
-    XSPerfAccumulate(s"t1_use_sc${i}", scUsedVec(i))
-    XSPerfAccumulate(s"t1_not_use_sc${i}", scNotUsedVec(i))
+    val pathCorrectEvent   = componentCorrect(t1_meta.debug_scPathTakenVec.get, PathEnable.B)
+    val pathWrongEvent     = componentWrong(t1_meta.debug_scPathTakenVec.get, PathEnable.B)
+    val globalValid        = t1_meta.debug_commonHRValid.get && GlobalEnable.B
+    val globalCorrectEvent = componentCorrect(t1_meta.debug_scGlobalTakenVec.get, globalValid)
+    val globalWrongEvent   = componentWrong(t1_meta.debug_scGlobalTakenVec.get, globalValid)
+    val bwValid            = t1_meta.debug_commonHRValid.get && BWEnable.B
+    val bwCorrectEvent     = componentCorrect(t1_meta.debug_scBWTakenVec.get, bwValid)
+    val bwWrongEvent       = componentWrong(t1_meta.debug_scBWTakenVec.get, bwValid)
+    val imliCorrectEvent   = componentCorrect(t1_meta.debug_scImliTakenVec.get, ImliEnable.B)
+    val imliWrongEvent     = componentWrong(t1_meta.debug_scImliTakenVec.get, ImliEnable.B)
+    val biasCorrectEvent   = componentCorrect(t1_meta.debug_scBiasTakenVec.get, BiasEnable.B)
+    val biasWrongEvent     = componentWrong(t1_meta.debug_scBiasTakenVec.get, BiasEnable.B)
 
-    XSPerfAccumulate(s"sc_path_correct${i}", scPathCorrectVec(i))
-    XSPerfAccumulate(s"sc_path_wrong${i}", scPathWrongVec(i))
-    XSPerfAccumulate(s"sc_global_correct${i}", scGlobalCorrectVec(i))
-    XSPerfAccumulate(s"sc_global_wrong${i}", scGlobalWrongVec(i))
-    XSPerfAccumulate(s"sc_bw_correct${i}", scBWCorrectVec(i))
-    XSPerfAccumulate(s"sc_bw_wrong${i}", scBWWrongVec(i))
-    XSPerfAccumulate(s"sc_imli_correct${i}", scImliCorrectVec(i))
-    XSPerfAccumulate(s"sc_imli_wrong${i}", scImliWrongVec(i))
-    XSPerfAccumulate(s"sc_bias_correct${i}", scBiasCorrectVec(i))
-    XSPerfAccumulate(s"sc_bias_wrong${i}", scBiasWrongVec(i))
+    val pathChangeVec = VecInit.tabulate(NumWays) { i =>
+      PathEnable.B && t1_oldPathEntries.zip(t1_writePathEntryVec).map {
+        case (oldEntries, writeEntries) => oldEntries(i).ctr =/= writeEntries(i).ctr
+      }.reduce(_ || _)
+    }
+    val globalChangeVec = VecInit.tabulate(NumWays) { i =>
+      GlobalEnable.B && t1_commonHR.valid && t1_oldGlobalEntries.zip(t1_writeGlobalEntryVec).map {
+        case (oldEntries, writeEntries) => oldEntries(i).ctr =/= writeEntries(i).ctr
+      }.reduce(_ || _)
+    }
+    val bwChangeVec = VecInit.tabulate(NumWays) { i =>
+      BWEnable.B && t1_commonHR.valid && t1_oldBWEntries.zip(t1_writeBWEntryVec).map {
+        case (oldEntries, writeEntries) => oldEntries(i).ctr =/= writeEntries(i).ctr
+      }.reduce(_ || _)
+    }
+    val imliChangeVec = VecInit.tabulate(NumWays) { i =>
+      ImliEnable.B && t1_oldImliEntries(i).ctr =/= t1_writeImliEntryVec(i).ctr
+    }
+    val biasWaysPerScWay = 1 << BiasUseTageBitWidth
+    val biasChangeVec = VecInit.tabulate(NumWays) { i =>
+      BiasEnable.B && (0 until biasWaysPerScWay).map { lowBits =>
+        val biasWay = i * biasWaysPerScWay + lowBits
+        t1_oldBiasEntries(biasWay).ctr =/= t1_writeBiasEntryVec(biasWay).ctr
+      }.reduce(_ || _)
+    }
+    val changeVec = VecInit.tabulate(NumWays) { i =>
+      pathChangeVec(i) || globalChangeVec(i) || bwChangeVec(i) || imliChangeVec(i) || biasChangeVec(i)
+    }
 
-    XSPerfAccumulate(s"path_table_change${i}", t1_writeValid && pChange)
-    XSPerfAccumulate(s"global_table_change${i}", t1_writeValid && gChange)
-    // XSPerfAccumulate(s"bias_table_change${i}", t1_writeValid && bChange)
-    XSPerfAccumulate(s"sc_train${i}", t1_writeValid && changeVec(i))
-  }
+    for (i <- 0 until NumWays) {
+      XSPerfAccumulate(
+        s"sc_correct_tage_wrong${i}",
+        countAtPredSlot(
+          scCorrectEvent.zip(tageWrongEvent).map {
+            case (scCorrect, tageWrong) => scCorrect && tageWrong
+          },
+          i
+        )
+      )
+      XSPerfAccumulate(
+        s"sc_wrong_tage_correct${i}",
+        countAtPredSlot(
+          scWrongEvent.zip(tageCorrectEvent).map {
+            case (scWrong, tageCorrect) => scWrong && tageCorrect
+          },
+          i
+        )
+      )
+      XSPerfAccumulate(
+        s"sc_correct_tage_correct${i}",
+        countAtPredSlot(
+          scCorrectEvent.zip(tageCorrectEvent).map {
+            case (scCorrect, tageCorrect) => scCorrect && tageCorrect
+          },
+          i
+        )
+      )
+      XSPerfAccumulate(
+        s"sc_wrong_tage_wrong${i}",
+        countAtPredSlot(
+          scWrongEvent.zip(tageWrongEvent).map {
+            case (scWrong, tageWrong) => scWrong && tageWrong
+          },
+          i
+        )
+      )
 
-  XSPerfSeqAccumulate(
-    "total",
-    t1_writeValid,
-    Seq(
-      ("sc_train", changeVec.reduce(_ || _)),
-      ("train_use_sc", trainUseScVec.reduce(_ || _)),
-      ("pred_use_sc", t1_meta.useScPred.reduce(_ || _))
-    )
-  )
+      XSPerfAccumulate(s"t1_use_sc${i}", countAtPredSlot(useScEvent, i))
+      XSPerfAccumulate(s"t1_not_use_sc${i}", countAtPredSlot(notUseScEvent, i))
 
-  XSPerfAccumulate(
-    s"total_sc_correct_tage_wrong",
-    scCorrectVec zip tageWrongVec map { case (scC, tageW) => scC && tageW } reduce (_ || _)
-  )
-  XSPerfAccumulate(
-    s"total_sc_wrong_tage_correct",
-    scWrongVec zip tageCorrectVec map { case (scW, tageC) => scW && tageC } reduce (_ || _)
-  )
-  XSPerfAccumulate(
-    s"total_sc_correct_tage_correct",
-    scCorrectVec zip tageCorrectVec map { case (scC, tageC) => scC && tageC } reduce (_ || _)
-  )
-  XSPerfAccumulate(
-    s"total_sc_wrong_tage_wrong",
-    scWrongVec zip tageWrongVec map { case (scW, tageW) => scW && tageW } reduce (_ || _)
-  )
-  XSPerfAccumulate(s"total_sc_correct", scCorrectVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_sc_wrong", scWrongVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_tage_correct", tageCorrectVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_tage_wrong", tageWrongVec.reduce(_ || _))
+      XSPerfAccumulate(s"sc_path_correct${i}", countAtPredSlot(pathCorrectEvent, i))
+      XSPerfAccumulate(s"sc_path_wrong${i}", countAtPredSlot(pathWrongEvent, i))
+      XSPerfAccumulate(s"sc_global_correct${i}", countAtPredSlot(globalCorrectEvent, i))
+      XSPerfAccumulate(s"sc_global_wrong${i}", countAtPredSlot(globalWrongEvent, i))
+      XSPerfAccumulate(s"sc_bw_correct${i}", countAtPredSlot(bwCorrectEvent, i))
+      XSPerfAccumulate(s"sc_bw_wrong${i}", countAtPredSlot(bwWrongEvent, i))
+      XSPerfAccumulate(s"sc_imli_correct${i}", countAtPredSlot(imliCorrectEvent, i))
+      XSPerfAccumulate(s"sc_imli_wrong${i}", countAtPredSlot(imliWrongEvent, i))
+      XSPerfAccumulate(s"sc_bias_correct${i}", countAtPredSlot(biasCorrectEvent, i))
+      XSPerfAccumulate(s"sc_bias_wrong${i}", countAtPredSlot(biasWrongEvent, i))
 
-  XSPerfAccumulate(s"total_sc_path_correct", scPathCorrectVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_sc_path_wrong", scPathWrongVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_sc_global_correct", scGlobalCorrectVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_sc_global_wrong", scGlobalWrongVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_sc_bw_correct", scBWCorrectVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_sc_bw_wrong", scBWWrongVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_sc_imli_correct", scImliCorrectVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_sc_imli_wrong", scImliWrongVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_sc_bias_correct", scBiasCorrectVec.reduce(_ || _))
-  XSPerfAccumulate(s"total_sc_bias_wrong", scBiasWrongVec.reduce(_ || _))
+      XSPerfAccumulate(s"path_table_change${i}", pathChangeVec(i))
+      XSPerfAccumulate(s"global_table_change${i}", globalChangeVec(i))
+      XSPerfAccumulate(s"bw_table_change${i}", bwChangeVec(i))
+      XSPerfAccumulate(s"imli_table_change${i}", imliChangeVec(i))
+      XSPerfAccumulate(s"bias_table_change${i}", biasChangeVec(i))
+      XSPerfAccumulate(s"sc_train${i}", changeVec(i))
+    }
 
-  XSPerfAccumulate(s"threshold_try_overflow", t1_writeValid && t1_thresholdOverflowVec.reduce(_ || _))
-  XSPerfAccumulate(s"threshold_try_underflow", t1_writeValid && t1_thresholdUnderflowVec.reduce(_ || _))
+    val scCorrectTageWrongEvent = scCorrectEvent.zip(tageWrongEvent).map {
+      case (scCorrect, tageWrong) => scCorrect && tageWrong
+    }
+    val scWrongTageCorrectEvent = scWrongEvent.zip(tageCorrectEvent).map {
+      case (scWrong, tageCorrect) => scWrong && tageCorrect
+    }
+    val scCorrectTageCorrectEvent = scCorrectEvent.zip(tageCorrectEvent).map {
+      case (scCorrect, tageCorrect) => scCorrect && tageCorrect
+    }
+    val scWrongTageWrongEvent = scWrongEvent.zip(tageWrongEvent).map {
+      case (scWrong, tageWrong) => scWrong && tageWrong
+    }
+    val notUsedScCorrectTageWrongEvent = branchIndices.map { i =>
+      notUseScEvent(i) && actualTaken(i) === t1_meta.scPred(predSlotIdx(i)) &&
+      actualTaken(i) =/= t1_meta.tagePred(predSlotIdx(i))
+    }
+    val notUsedScWrongTageCorrectEvent = branchIndices.map { i =>
+      notUseScEvent(i) && actualTaken(i) =/= t1_meta.scPred(predSlotIdx(i)) &&
+      actualTaken(i) === t1_meta.tagePred(predSlotIdx(i))
+    }
 
-  dontTouch(s2_sumPercsum)
-  dontTouch(s2_totalPercsum)
-  dontTouch(s2_hitMask)
-  dontTouch(s2_scPred)
-  dontTouch(s2_useScPred)
-  dontTouch(t1_branchesWayIdxVec)
-  dontTouch(t1_writeThresVec)
-  dontTouch(t1_meta)
-  dontTouch(scCorrectVec)
-  dontTouch(scWrongVec)
+    XSPerfAccumulate("total_sc_train", PopCount(changeVec))
+    XSPerfAccumulate("total_train_use_sc", PopCount(trainUseScEvent))
+    XSPerfAccumulate("total_pred_use_sc", PopCount(useScEvent))
+    XSPerfAccumulate("total_sc_correct_tage_wrong", PopCount(scCorrectTageWrongEvent))
+    XSPerfAccumulate("total_sc_wrong_tage_correct", PopCount(scWrongTageCorrectEvent))
+    XSPerfAccumulate("total_sc_correct_tage_correct", PopCount(scCorrectTageCorrectEvent))
+    XSPerfAccumulate("total_sc_wrong_tage_wrong", PopCount(scWrongTageWrongEvent))
+    XSPerfAccumulate("total_sc_correct", PopCount(scCorrectEvent))
+    XSPerfAccumulate("total_sc_wrong", PopCount(scWrongEvent))
+    XSPerfAccumulate("total_tage_correct", PopCount(tageCorrectEvent))
+    XSPerfAccumulate("total_tage_wrong", PopCount(tageWrongEvent))
+    XSPerfAccumulate("total_not_used_sc_correct_tage_wrong", PopCount(notUsedScCorrectTageWrongEvent))
+    XSPerfAccumulate("total_not_used_sc_wrong_tage_correct", PopCount(notUsedScWrongTageCorrectEvent))
 
-  private val sc_path_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.debug_predPathIdx.get.zip(t1_pathSetIdx).map {
-    case (predIdx, trainIdx) => predIdx =/= trainIdx
-  }.reduce(_ || _))
-  private val sc_global_predIdx_diff_trainIdx =
-    t1_writeValid && (t1_meta.debug_predGlobalIdx.get.zip(t1_globalSetIdx).map {
+    XSPerfAccumulate("total_sc_path_correct", PopCount(pathCorrectEvent))
+    XSPerfAccumulate("total_sc_path_wrong", PopCount(pathWrongEvent))
+    XSPerfAccumulate("total_sc_global_correct", PopCount(globalCorrectEvent))
+    XSPerfAccumulate("total_sc_global_wrong", PopCount(globalWrongEvent))
+    XSPerfAccumulate("total_sc_bw_correct", PopCount(bwCorrectEvent))
+    XSPerfAccumulate("total_sc_bw_wrong", PopCount(bwWrongEvent))
+    XSPerfAccumulate("total_sc_imli_correct", PopCount(imliCorrectEvent))
+    XSPerfAccumulate("total_sc_imli_wrong", PopCount(imliWrongEvent))
+    XSPerfAccumulate("total_sc_bias_correct", PopCount(biasCorrectEvent))
+    XSPerfAccumulate("total_sc_bias_wrong", PopCount(biasWrongEvent))
+
+    XSPerfAccumulate("threshold_try_overflow", PopCount(t1_thresholdOverflowVec))
+    XSPerfAccumulate("threshold_try_underflow", PopCount(t1_thresholdUnderflowVec))
+
+    val pathPredIdxDiff = t1_writeValid && t1_meta.debug_predPathIdx.get.zip(t1_pathSetIdx).map {
       case (predIdx, trainIdx) => predIdx =/= trainIdx
-    }.reduce(_ || _))
-  private val sc_bias_predIdx_diff_trainIdx = t1_writeValid && (t1_meta.debug_predBiasIdx.get =/= t1_biasSetIdx)
+    }.reduce(_ || _)
+    val globalPredIdxDiff = t1_writeValid && t1_meta.debug_predGlobalIdx.get.zip(t1_globalSetIdx).map {
+      case (predIdx, trainIdx) => predIdx =/= trainIdx
+    }.reduce(_ || _)
+    val biasPredIdxDiff = t1_writeValid && t1_meta.debug_predBiasIdx.get =/= t1_biasSetIdx
 
-  dontTouch(sc_path_predIdx_diff_trainIdx)
-  dontTouch(sc_global_predIdx_diff_trainIdx)
-  dontTouch(sc_bias_predIdx_diff_trainIdx)
+    XSPerfAccumulate("sc_path_predIdx_diff_trainIdx", pathPredIdxDiff)
+    XSPerfAccumulate("sc_global_predIdx_diff_trainIdx", globalPredIdxDiff)
+    XSPerfAccumulate("sc_bias_predIdx_diff_trainIdx", biasPredIdxDiff)
+  }
 
   XSPerfAccumulate("sc_global_table_invalid", s0_fire && !s0_commonHR.valid)
   XSPerfAccumulate("sc_global_table_valid", s0_fire && s0_commonHR.valid)
-  XSPerfAccumulate("sc_path_predIdx_diff_trainIdx", sc_path_predIdx_diff_trainIdx)
-  XSPerfAccumulate("sc_global_predIdx_diff_trainIdx", sc_global_predIdx_diff_trainIdx)
-  XSPerfAccumulate("sc_bias_predIdx_diff_trainIdx", sc_bias_predIdx_diff_trainIdx)
 
-  /* *** Sc Trace *** */
-  private val scTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ScConditionalBranchTrace)))
-  scTraceVec.zipWithIndex.foreach { case (trace, i) =>
-    val predWayIdx = t1_branchesScIdxVec(i)
-    trace.valid        := t1_writeValidVec(i)
-    trace.bits.startPc := t1_startPc
-    trace.bits.cfiPc   := t1_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
+  if (EnableScTrace) {
+    val scTraceVec = Wire(Vec(ResolveEntryBranchNumber, Valid(new ScConditionalBranchTrace)))
+    scTraceVec.zipWithIndex.foreach { case (trace, i) =>
+      val predSlotIdx = t1_branchesScIdxVec(i)
+      val tableWayIdx = t1_branchesWayIdxVec(i)
+      val actualTaken = t1_branches(i).bits.taken
+      val scCorrect   = actualTaken === t1_meta.scPred(predSlotIdx)
+      val tageCorrect = actualTaken === t1_meta.tagePred(predSlotIdx)
+      val finalPred   = Mux(t1_meta.useScPred(predSlotIdx), t1_meta.scPred(predSlotIdx), t1_meta.tagePred(predSlotIdx))
 
-    trace.bits.providerValid := t1_meta.tagePredValid(predWayIdx)
-    trace.bits.providerTaken := t1_meta.tagePred(predWayIdx)
-    trace.bits.providerCtr   := t1_meta.tageCtr(predWayIdx)
+      trace.valid               := t1_resolvedScValidVec(i)
+      trace.bits.startPc        := t1_startPc
+      trace.bits.cfiPc          := t1_branches(i).bits.debug_realCfiPc.getOrElse(0.U(VAddrBits.W))
+      trace.bits.predSlotIdx    := predSlotIdx
+      trace.bits.tableWayIdx    := tableWayIdx
+      trace.bits.updateValid    := t1_writeValidVec(i)
+      trace.bits.trainDataValid := t1_writeValid
 
-    trace.bits.pathResp   := VecInit(t1_oldPathEntries.map(v => v(predWayIdx).asUInt))
-    trace.bits.globalResp := VecInit(t1_oldGlobalEntries.map(v => v(predWayIdx).asUInt))
-    val biasWayIdx = Cat(t1_branchesWayIdxVec(i), t1_oldBiasLowBits(predWayIdx))
-    trace.bits.biasResp := t1_oldBiasEntries(biasWayIdx).asUInt
+      trace.bits.providerValid := t1_meta.tagePredValid(predSlotIdx)
+      trace.bits.providerTaken := t1_meta.tagePred(predSlotIdx)
+      trace.bits.providerCtr   := t1_meta.tageCtr(predSlotIdx)
 
-    trace.bits.sumAboveThres := t1_meta.sumAboveThres(predWayIdx)
-    trace.bits.scPred        := t1_meta.scPred(predWayIdx)
-    trace.bits.useSc         := t1_meta.useScPred(predWayIdx)
+      trace.bits.predCommonHRValid := t1_meta.debug_commonHRValid.get
+      trace.bits.predPathSetIdx    := VecInit(t1_meta.debug_predPathIdx.get.map(_.pad(ScSetIdxWidth)))
+      trace.bits.predGlobalSetIdx  := VecInit(t1_meta.debug_predGlobalIdx.get.map(_.pad(ScSetIdxWidth)))
+      trace.bits.predBWSetIdx      := VecInit(t1_meta.debug_predBWIdx.get.map(_.pad(ScSetIdxWidth)))
+      trace.bits.predImliSetIdx    := t1_meta.debug_predImliIdx.get
+      trace.bits.predBiasSetIdx    := t1_meta.debug_predBiasIdx.get
+      trace.bits.pathPred          := t1_meta.debug_scPathTakenVec.get(predSlotIdx)
+      trace.bits.globalPred        := t1_meta.debug_scGlobalTakenVec.get(predSlotIdx)
+      trace.bits.bwPred            := t1_meta.debug_scBWTakenVec.get(predSlotIdx)
+      trace.bits.imliPred          := t1_meta.debug_scImliTakenVec.get(predSlotIdx)
+      trace.bits.biasPred          := t1_meta.debug_scBiasTakenVec.get(predSlotIdx)
+      trace.bits.totalPercsum      := t1_meta.debug_totalPercsum.get(predSlotIdx)
+      trace.bits.threshold         := t1_meta.debug_threshold.get(predSlotIdx)
+      trace.bits.sumAboveThres     := t1_meta.sumAboveThres(predSlotIdx)
+      trace.bits.scPred            := t1_meta.scPred(predSlotIdx)
+      trace.bits.useSc             := t1_meta.useScPred(predSlotIdx)
 
-    trace.bits.actualTaken := t1_writeTakenVec(i)
-    trace.bits.mispredict  := t1_branches(i).bits.mispredict
+      trace.bits.trainCommonHRValid := t1_commonHR.valid
+      trace.bits.trainPathSetIdx    := VecInit(t1_pathSetIdx.map(_.pad(ScSetIdxWidth)))
+      trace.bits.trainGlobalSetIdx  := VecInit(t1_globalSetIdx.map(_.pad(ScSetIdxWidth)))
+      trace.bits.trainBWSetIdx      := VecInit(t1_bwSetIdx.map(_.pad(ScSetIdxWidth)))
+      trace.bits.trainImliSetIdx    := t1_imliSetIdx
+      trace.bits.trainBiasSetIdx    := t1_biasSetIdx
+      trace.bits.trainPathResp      := VecInit(t1_oldPathEntries.map(entries => entries(tableWayIdx).asUInt))
+      trace.bits.trainGlobalResp    := VecInit(t1_oldGlobalEntries.map(entries => entries(tableWayIdx).asUInt))
+      trace.bits.trainBWResp        := VecInit(t1_oldBWEntries.map(entries => entries(tableWayIdx).asUInt))
+      trace.bits.trainImliResp      := t1_oldImliEntries(tableWayIdx).asUInt
+      val biasWayIdx = Cat(tableWayIdx, t1_oldBiasLowBits(predSlotIdx))
+      trace.bits.trainBiasResp := t1_oldBiasEntries(biasWayIdx).asUInt
 
-    trace.bits.scCorrectTageWrong   := scCorrectVec(predWayIdx) && tageWrongVec(predWayIdx)
-    trace.bits.scWrongTageCorrect   := scWrongVec(predWayIdx) && tageCorrectVec(predWayIdx)
-    trace.bits.scCorrectTageCorrect := scCorrectVec(predWayIdx) && tageCorrectVec(predWayIdx)
-    trace.bits.scWrongTageWrong     := scWrongVec(predWayIdx) && tageWrongVec(predWayIdx)
-    trace.bits.scWrong              := scWrongVec(predWayIdx)
-    trace.bits.scCorrect            := scCorrectVec(predWayIdx)
+      trace.bits.actualTaken  := actualTaken
+      trace.bits.mispredict   := t1_branches(i).bits.mispredict
+      trace.bits.finalPred    := finalPred
+      trace.bits.finalCorrect := finalPred === actualTaken
 
-  }
+      trace.bits.scCorrectTageWrong   := scCorrect && !tageCorrect
+      trace.bits.scWrongTageCorrect   := !scCorrect && tageCorrect
+      trace.bits.scCorrectTageCorrect := scCorrect && tageCorrect
+      trace.bits.scWrongTageWrong     := !scCorrect && !tageCorrect
+      trace.bits.scWrong              := !scCorrect
+      trace.bits.scCorrect            := scCorrect
+    }
 
-  private val scTraceDBTables = (0 until ResolveEntryBranchNumber).map { i =>
-    ChiselDB.createTable(s"scCondTrace_${i}", new ScConditionalBranchTrace, EnableScTrace)
-  }
-  scTraceDBTables.zip(scTraceVec).foreach { case (dbTable, condTrace) =>
-    dbTable.log(
-      data = condTrace.bits,
-      en = condTrace.valid,
-      clock = clock,
-      reset = reset
-    )
+    val scTraceDBTables = (0 until ResolveEntryBranchNumber).map { i =>
+      ChiselDB.createTable(s"scCondTrace_${i}", new ScConditionalBranchTrace, EnableScTrace)
+    }
+    scTraceDBTables.zip(scTraceVec).foreach { case (dbTable, condTrace) =>
+      dbTable.log(
+        data = condTrace.bits,
+        en = condTrace.valid,
+        clock = clock,
+        reset = reset
+      )
+    }
   }
 }
