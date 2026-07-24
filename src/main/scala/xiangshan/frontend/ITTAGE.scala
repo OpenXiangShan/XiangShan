@@ -45,7 +45,7 @@ trait ITTageParams extends HasXSParameter with HasBPUParameter {
   val ITTageUsBits     = 1
   val TargetOffsetBits = 20
   val RegionNums       = 16
-  val RegionBits       = VAddrBits - TargetOffsetBits
+  val RegionBits       = GuardedVAddrBits - TargetOffsetBits
   val RegionPorts      = 2
   def ctrNull(ctr: UInt, ctrBits: Int = ITTageCtrBits): Bool =
     ctr === 0.U
@@ -53,12 +53,12 @@ trait ITTageParams extends HasXSParameter with HasBPUParameter {
     ctr < (1 << (ctrBits - 1)).U
   val UAONA_bits = 4
 
-  def targetGetRegion(target: UInt): UInt = target(VAddrBits - 1, TargetOffsetBits)
+  def targetGetRegion(target: UInt): UInt = target(GuardedVAddrBits - 1, TargetOffsetBits)
   def targetGetOffset(target: UInt): UInt = target(TargetOffsetBits - 1, 0)
 
   lazy val TotalBits: Int = ITTageTableInfos.map {
     case (s, h, t) => {
-      s * (1 + t + ITTageCtrBits + ITTageUsBits + VAddrBits)
+      s * (1 + t + ITTageCtrBits + ITTageUsBits + GuardedVAddrBits)
     }
   }.sum
 }
@@ -111,8 +111,8 @@ class ITTageMeta(implicit p: Parameters) extends XSBundle with ITTageParams {
   val providerCtr       = UInt(ITTageCtrBits.W)
   val altProviderCtr    = UInt(ITTageCtrBits.W)
   val allocate          = ValidUndirectioned(UInt(log2Ceil(ITTageNTables).W))
-  val providerTarget    = UInt(VAddrBits.W)
-  val altProviderTarget = UInt(VAddrBits.W)
+  val providerTarget    = UInt(GuardedVAddrBits.W)
+  val altProviderTarget = UInt(GuardedVAddrBits.W)
   val pred_cycle        = if (!env.FPGAPlatform) Some(UInt(64.W)) else None
 
   override def toPrintable =
@@ -443,9 +443,9 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   val debug_pc_s2 = RegEnable(debug_pc_s1, io.s1_fire(3))
   val debug_pc_s3 = RegEnable(debug_pc_s2, io.s2_fire(3))
 
-  val s2_tageTarget        = Wire(UInt(VAddrBits.W))
-  val s2_providerTarget    = Wire(UInt(VAddrBits.W))
-  val s2_altProviderTarget = Wire(UInt(VAddrBits.W))
+  val s2_tageTarget        = Wire(UInt(GuardedVAddrBits.W))
+  val s2_providerTarget    = Wire(UInt(GuardedVAddrBits.W))
+  val s2_altProviderTarget = Wire(UInt(GuardedVAddrBits.W))
   val s2_provided          = Wire(Bool())
   val s2_provider          = Wire(UInt(log2Ceil(ITTageNTables).W))
   val s2_altProvided       = Wire(Bool())
@@ -539,14 +539,14 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   // Predict
   tables.map { t =>
     t.io.req.valid            := io.s1_fire(3) && s1_isIndirect
-    t.io.req.bits.pc          := s1_pc_dup(3)
+    t.io.req.bits.pc          := s1_pc_dup(3)(VAddrBits - 1, 0)
     t.io.req.bits.folded_hist := io.in.bits.s1_folded_hist(3)
   }
 
   // access tag tables and output meta info
   class ITTageTableInfo(implicit p: Parameters) extends ITTageResp {
     val tableIdx   = UInt(log2Ceil(ITTageNTables).W)
-    val maskTarget = Vec(ITTageNTables, UInt(VAddrBits.W))
+    val maskTarget = Vec(ITTageNTables, UInt(GuardedVAddrBits.W))
   }
 
   val inputRes = VecInit(s2_resps.zipWithIndex.map {
@@ -556,8 +556,8 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
       tableInfo.ctr           := r.bits.ctr
       tableInfo.target_offset := r.bits.target_offset
       tableInfo.tableIdx      := i.U(log2Ceil(ITTageNTables).W)
-      tableInfo.maskTarget    := VecInit(Seq.fill(ITTageNTables)(0.U(VAddrBits.W)))
-      tableInfo.maskTarget(i) := "hffff_ffff_ffff_ffff".U
+      tableInfo.maskTarget    := VecInit(Seq.fill(ITTageNTables)(0.U(GuardedVAddrBits.W)))
+      tableInfo.maskTarget(i) := Fill(GuardedVAddrBits, 1.U)
       SelectTwoInterRes(r.valid, tableInfo)
   })
 
@@ -576,7 +576,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     req_pointer := region_r_target_offset(i).pointer
   }
   // When the entry corresponding to the pointer is valid and does not use PCRegion, use rTable region.
-  val region_targets = Wire(Vec(ITTageNTables, UInt(VAddrBits.W)))
+  val region_targets = Wire(Vec(ITTageNTables, UInt(GuardedVAddrBits.W)))
   for (i <- 0 until ITTageNTables) {
     region_targets(i) := Mux(
       rTable.io.resp_hit(i) && !region_r_target_offset(i).usePCRegion,
@@ -596,7 +596,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
   s2_tageTarget := Mux1H(Seq(
     (provided && !(providerNull && altProvided), providerCatTarget),
     (altProvided && providerNull, altproviderCatTarget),
-    (!provided, baseTarget(VAddrBits - 1, 0))
+    (!provided, baseTarget)
   ))
   s2_provided          := provided
   s2_provider          := providerInfo.tableIdx
@@ -614,7 +614,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
     fp & s3_tageTarget <-
       io.out.s3.full_pred zip s3_tageTarget_dup
   )
-    yield fp.jalr_target := SignExt(s3_tageTarget, VAddrBits + 1)
+    yield fp.jalr_target := s3_tageTarget
 
   resp_meta.provider.valid    := s3_provided
   resp_meta.provider.bits     := s3_provider
@@ -743,7 +743,7 @@ class ITTage(implicit p: Parameters) extends BaseITTage {
 
     tables(i).io.update.uValid := RegEnable(updateUMask(i), false.B, updateMask(i))
     tables(i).io.update.u      := RegEnable(updateU(i), updateMask(i))
-    tables(i).io.update.pc     := RegEnable(update_pc, updateMask(i))
+    tables(i).io.update.pc     := RegEnable(update_pc(VAddrBits - 1, 0), updateMask(i))
     tables(i).io.update.ghist  := RegEnable(update.ghist, updateMask(i))
   }
 

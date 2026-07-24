@@ -334,7 +334,7 @@ class PredCheckerResp(implicit p: Parameters) extends XSBundle with HasPdConst {
   // to Ftq write back port (stage 2)
   val stage2Out = new Bundle {
     // fixedTarget is pc+offset, so needs an extra bit for ITLB to do canonical-check
-    val fixedTarget = Vec(PredictWidth, UInt((VAddrBits + 1).W))
+    val fixedTarget = Vec(PredictWidth, UInt(GuardedVAddrBits.W))
     // jalTarget is used only to train FTB, keep VAddrBits to save area,
     // FTB might generate fetch block with wrong target the next time,
     // but predecode will find predTarget =/= fixedTarget and generates a redirect, so this is fine.

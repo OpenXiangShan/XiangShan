@@ -6,8 +6,8 @@ import chisel3.util._
 import freechips.rocketchip.diplomacy.{LazyModule, LazyModuleImp}
 import utility._
 import xiangshan._
-import xiangshan.backend.datapath.DataConfig.VAddrData
-import xiangshan.frontend.{FtqPcMemEntry, FtqPtr, FtqToCtrlIO}
+import xiangshan.backend.datapath.DataConfig.{GuardedVAddrData, VAddrData}
+import xiangshan.frontend.{FtqPtr, FtqToCtrlIO, Ftq_RF_Components}
 
 class PcTargetMem(params: BackendParams)(implicit p: Parameters) extends LazyModule {
   override def shouldBeInlined: Boolean = false
@@ -24,9 +24,9 @@ class PcTargetMemImp(override val wrapper: PcTargetMem)(implicit p: Parameters, 
   private val readValid = io.toDataPath.fromDataPathValid
 
   private def hasRen: Boolean = true
-  private val targetMem = Module(new SyncDataModuleTemplate(new FtqPcMemEntry, FtqSize, numTargetMemRead, 1, hasRen = hasRen))
+  private val targetMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, numTargetMemRead, 1, hasRen = hasRen))
   private val targetPCVec : Vec[UInt] = Wire(Vec(params.numTargetReadPort, UInt(VAddrData().dataWidth.W)))
-  private val pcVec       : Vec[UInt] = Wire(Vec(params.numPcMemReadPort, UInt(VAddrData().dataWidth.W)))
+  private val pcVec       : Vec[UInt] = Wire(Vec(params.numPcMemReadPort, UInt(GuardedVAddrData().dataWidth.W)))
 
   targetMem.io.wen.head := GatedValidRegNext(io.fromFrontendFtq.pc_mem_wen)
   targetMem.io.waddr.head := RegEnable(io.fromFrontendFtq.pc_mem_waddr, io.fromFrontendFtq.pc_mem_wen)
@@ -69,8 +69,8 @@ class PcToDataPathIO(params: BackendParams)(implicit p: Parameters) extends XSBu
   val fromDataPathFtqOffset = Input(Vec(params.numPcMemReadPort, UInt(log2Up(PredictWidth).W)))
   //Target PC
   val toDataPathTargetPC = Output(Vec(params.numTargetReadPort, UInt(VAddrData().dataWidth.W)))
-  //PC
-  val toDataPathPC = Output(Vec(params.numPcMemReadPort, UInt(VAddrData().dataWidth.W)))
+  //PC, need an extra guard bit for canonical check
+  val toDataPathPC = Output(Vec(params.numPcMemReadPort, UInt(GuardedVAddrData().dataWidth.W)))
 }
 
 class PcTargetMemIO()(implicit p: Parameters, params: BackendParams) extends XSBundle {

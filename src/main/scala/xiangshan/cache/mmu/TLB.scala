@@ -478,7 +478,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       resp(idx).bits.excp(nDups).vaNeedExt := false.B
       // overwrite miss & gpaddr when exception related to high address truncation happens
       resp(idx).bits.miss := false.B
-      // Instruction fetch only provides a VAddrBits+1-bit va (from the PC), which the frontend
+      // Instruction fetch only provides a GuardedVAddrBits-bit va (from the PC), which the frontend
       // can only sign-extend to XLEN since the current translation mode is unavailable there.
       // However, sequential fetch may overflow the PC into the invalid bit[50]=1 region under Sv48x4,
       // in such case, do sign-extension would wrongly set bits [63:51]=1.

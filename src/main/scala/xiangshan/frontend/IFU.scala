@@ -87,24 +87,24 @@ class NewIFUIO(implicit p: Parameters) extends XSBundle {
 // the middle of an RVI inst
 class LastHalfInfo(implicit p: Parameters) extends XSBundle {
   val valid    = Bool()
-  val middlePC = UInt((VAddrBits + 1).W)
+  val middlePC = UInt(GuardedVAddrBits.W)
   def matchThisBlock(startAddr: UInt) = valid && middlePC === startAddr
 }
 
 class IfuToPreDecode(implicit p: Parameters) extends XSBundle {
   val data            = if (HasCExtension) Vec(PredictWidth + 1, UInt(16.W)) else Vec(PredictWidth, UInt(32.W))
   val frontendTrigger = new FrontendTdataDistributeIO
-  val pc              = Vec(PredictWidth, UInt(VAddrBits.W))
+  val pc              = Vec(PredictWidth, UInt(GuardedVAddrBits.W))
 }
 
 class IfuToPredChecker(implicit p: Parameters) extends XSBundle {
   val ftqOffset  = Valid(UInt(log2Ceil(PredictWidth).W))
   val jumpOffset = Vec(PredictWidth, UInt(XLEN.W))
-  val target     = UInt((VAddrBits + 1).W)
+  val target     = UInt(GuardedVAddrBits.W)
   val instrRange = Vec(PredictWidth, Bool())
   val instrValid = Vec(PredictWidth, Bool())
   val pds        = Vec(PredictWidth, new PreDecodeInfo)
-  val pc         = Vec(PredictWidth, UInt((VAddrBits + 1).W))
+  val pc         = Vec(PredictWidth, UInt(GuardedVAddrBits.W))
   val fire_in    = Bool()
 }
 
@@ -601,7 +601,7 @@ class NewIFU(implicit p: Parameters) extends XSModule
     * Half snpc(i) is larger than pc(i) by 4. Using pc to calculate half snpc may be a good choice.
     ***********************************************************************
     */
-  val f3_half_snpc = Wire(Vec(PredictWidth, UInt((VAddrBits + 1).W)))
+  val f3_half_snpc = Wire(Vec(PredictWidth, UInt(GuardedVAddrBits.W)))
   for (i <- 0 until PredictWidth) {
     if (i == (PredictWidth - 2)) {
       f3_half_snpc(i) := CatPC(f3_pc_last_lower_result_plus2, f3_pc_high, f3_pc_high_plus1)

@@ -50,7 +50,7 @@ class IBufferIO(implicit p: Parameters) extends XSBundle {
 
 class IBufEntry(implicit p: Parameters) extends XSBundle {
   val inst                     = UInt(32.W)
-  val pc                       = UInt(VAddrBits.W)
+  val pc                       = UInt(GuardedVAddrBits.W)
   val foldpc                   = UInt(MemPredPCWidth.W)
   val pd                       = new PreDecodeInfo
   val pred_taken               = Bool()

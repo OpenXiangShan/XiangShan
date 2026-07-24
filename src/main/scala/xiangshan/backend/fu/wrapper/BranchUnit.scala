@@ -3,15 +3,13 @@ package xiangshan.backend.fu.wrapper
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
 import chisel3.util.log2Up
-import utility.{SignExt, ZeroExt}
-import xiangshan.backend.decode.ImmUnion
+import utility.SignExt
 import xiangshan.backend.fu.{BranchModule, FuConfig, FuncUnit}
-import xiangshan.backend.datapath.DataConfig.VAddrData
 import xiangshan.{RedirectLevel, SelImm, XSModule}
 
 class AddrAddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val pcExtend = Input(UInt((VAddrBits + 1).W))
+    val pcExtend = Input(UInt(GuardedVAddrBits.W))
     val taken = Input(Bool())
     val isRVC = Input(Bool())
     val imm = Input(UInt(32.W)) // branch inst only support 12 bits immediate num
@@ -21,7 +19,7 @@ class AddrAddModule(implicit p: Parameters) extends XSModule {
   val immMinWidth = FuConfig.BrhCfg.immType.map(x => SelImm.getImmUnion(x).len).max
   print(s"[Branch]: immMinWidth = $immMinWidth\n")
   io.target := SignExt(Mux(io.taken,
-    io.pcExtend + SignExt(io.imm(immMinWidth + 2, 0), VAddrBits + 1),
+    io.pcExtend + SignExt(io.imm(immMinWidth + 2, 0), GuardedVAddrBits),
     io.pcExtend + (io.nextPcOffset << instOffsetBits).asUInt
   ), XLEN)
 }
@@ -34,10 +32,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   dataModule.io.func := io.in.bits.ctrl.fuOpType
   dataModule.io.pred_taken := io.in.bits.ctrl.predictInfo.get.taken
 
-  val pcExtend = Mux(io.instrAddrTransType.get.shouldBeSext,
-    SignExt(io.in.bits.data.pc.get, VAddrBits + 1),
-    ZeroExt(io.in.bits.data.pc.get, VAddrBits + 1)
-  )
+  val pcExtend = io.in.bits.data.pc.get
   addModule.io.pcExtend := pcExtend
   addModule.io.imm := io.in.bits.data.imm // imm
   addModule.io.taken := dataModule.io.taken

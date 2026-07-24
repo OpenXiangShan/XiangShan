@@ -34,7 +34,7 @@ import xiangshan.backend.fu.vector.Bundles.{VType, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
 import xiangshan.backend.rename.{Rename, RenameTableWrapper, SnapshotGenerator}
 import xiangshan.backend.rob.{Rob, RobCSRIO, RobCoreTopDownIO, RobDebugRollingIO, RobLsqIO, RobPtr}
-import xiangshan.frontend.{FtqPcMemEntry, FtqPtr, FtqRead}
+import xiangshan.frontend.{FtqPtr, FtqRead, Ftq_RF_Components}
 import xiangshan.mem.{LqPtr, LsqEnqIO, SqPtr}
 import xiangshan.backend.issue.{FpScheduler, IntScheduler, MemScheduler, VfScheduler}
 import xiangshan.backend.trace._
@@ -95,7 +95,7 @@ class CtrlBlockImp(
   val rename = Module(new Rename)
   val redirectGen = Module(new RedirectGenerator)
   private def hasRen: Boolean = true
-  private val pcMem = Module(new SyncDataModuleTemplate(new FtqPcMemEntry, FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
+  private val pcMem = Module(new SyncDataModuleTemplate(new Ftq_RF_Components, FtqSize, numPcMemRead, 1, "BackendPC", hasRen = hasRen))
   private val rob = wrapper.rob.module
   private val memCtrl = Module(new MemCtrl(params))
 
@@ -326,7 +326,7 @@ class CtrlBlockImp(
 
   redirectGen.io.loadReplay.bits.cfiUpdate.pc := loadRedirectPcRead
   val load_target = loadRedirectPcRead
-  redirectGen.io.loadReplay.bits.cfiUpdate.target := SignExt(load_target, VAddrBits + 1)
+  redirectGen.io.loadReplay.bits.cfiUpdate.target := load_target
 
   redirectGen.io.robFlush := s1_robFlushRedirect
 
@@ -373,7 +373,7 @@ class CtrlBlockImp(
   private val s5_csrIsTrap = DelayN(rob.io.exception.valid, 4)
   private val s5_trapTargetFromCsr = io.robio.csr.trapTarget
 
-  val flushTarget = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.pc, SignExt(s2_robFlushPc, XLEN))
+  val flushTarget = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.pc, s2_robFlushPc)
   val s5_trapTargetIAF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIAF, false.B)
   val s5_trapTargetIPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIPF, false.B)
   val s5_trapTargetIGPF = Mux(s5_csrIsTrap, s5_trapTargetFromCsr.raiseIGPF, false.B)

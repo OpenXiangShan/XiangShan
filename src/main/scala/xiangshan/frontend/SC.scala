@@ -265,7 +265,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         val t   = Module(new SCTable(nRows / TageBanks, ctrBits, histLen))
         val req = t.io.req
         req.valid            := io.s0_fire(3)
-        req.bits.pc          := s0_pc_dup(3)
+        req.bits.pc          := s0_pc_dup(3)(VAddrBits - 1, 0)
         req.bits.folded_hist := io.in.bits.folded_hist(3)
         req.bits.ghist       := DontCare
         if (!EnableSC) { t.io.update := DontCare }
@@ -442,7 +442,7 @@ trait HasSC extends HasSCParameter with HasPerfEvents { this: Tage =>
         scTables(i).io.update.tagePreds(b) := RegEnable(scUpdateTagePreds(b), realWen)
         scTables(i).io.update.takens(b)    := RegEnable(scUpdateTakens(b), realWen)
         scTables(i).io.update.oldCtrs(b)   := RegEnable(scUpdateOldCtrs(b)(i), realWen)
-        scTables(i).io.update.pc           := RegEnable(update_pc, realWen)
+        scTables(i).io.update.pc           := RegEnable(update_pc(VAddrBits - 1, 0), realWen)
         scTables(i).io.update.ghist        := RegEnable(update.ghist, realWen)
       }
     }

@@ -36,7 +36,7 @@ import xiangshan._
 import xiangshan.frontend._
 
 class RASEntry()(implicit p: Parameters) extends XSBundle {
-  val retAddr = UInt((VAddrBits + 1).W)
+  val retAddr = UInt(GuardedVAddrBits.W)
   val ctr     = UInt(RasCtrSize.W) // layer of nested call functions
   def =/=(that: RASEntry) = this.retAddr =/= that.retAddr || this.ctr =/= that.ctr
 }
@@ -109,7 +109,7 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
     val io = IO(new Bundle {
       val spec_push_valid = Input(Bool())
       val spec_pop_valid  = Input(Bool())
-      val spec_push_addr  = Input(UInt((VAddrBits + 1).W))
+      val spec_push_addr  = Input(UInt(GuardedVAddrBits.W))
       // for write bypass between s2 and s3
 
       val s2_fire        = Input(Bool())
@@ -118,13 +118,13 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
       val s3_meta        = Input(new RASInternalMeta)
       val s3_missed_pop  = Input(Bool())
       val s3_missed_push = Input(Bool())
-      val s3_pushAddr    = Input(UInt((VAddrBits + 1).W))
-      val spec_pop_addr  = Output(UInt((VAddrBits + 1).W))
+      val s3_pushAddr    = Input(UInt(GuardedVAddrBits.W))
+      val spec_pop_addr  = Output(UInt(GuardedVAddrBits.W))
 
       val commit_valid      = Input(Bool())
       val commit_push_valid = Input(Bool())
       val commit_pop_valid  = Input(Bool())
-      val commit_push_addr  = Input(UInt((VAddrBits + 1).W))
+      val commit_push_addr  = Input(UInt(GuardedVAddrBits.W))
       val commit_meta_TOSW  = Input(new RASPtr)
       // for debug purpose only
       val commit_meta_ssp = Input(UInt(log2Up(RasSize).W))
@@ -137,7 +137,7 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
       val redirect_meta_TOSW = Input(new RASPtr)
       val redirect_meta_TOSR = Input(new RASPtr)
       val redirect_meta_NOS  = Input(new RASPtr)
-      val redirect_callAddr  = Input(UInt((VAddrBits + 1).W))
+      val redirect_callAddr  = Input(UInt(GuardedVAddrBits.W))
 
       val ssp  = Output(UInt(log2Up(RasSize).W))
       val sctr = Output(UInt(RasCtrSize.W))
@@ -723,7 +723,7 @@ class RAS(implicit p: Parameters) extends BasePredictor with HasCircularQueuePtr
   stack.redirect_meta_TOSW := recover_cfi.TOSW
   stack.redirect_meta_TOSR := recover_cfi.TOSR
   stack.redirect_meta_NOS  := recover_cfi.NOS
-  stack.redirect_callAddr  := SignExt(recover_cfi.pc, VAddrBits + 1) + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
+  stack.redirect_callAddr  := recover_cfi.pc + Mux(recover_cfi.pd.isRVC, 2.U, 4.U)
 
   val updateValid = RegNext(io.update.valid, init = false.B)
   val update      = Wire(new BranchPredictionUpdate)

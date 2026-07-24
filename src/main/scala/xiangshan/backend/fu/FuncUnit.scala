@@ -56,7 +56,7 @@ class FuncUnitCtrlOutput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle
 class FuncUnitDataInput(cfg: FuConfig)(implicit p: Parameters) extends XSBundle {
   val src       = MixedVec(cfg.genSrcDataVec)
   val imm       = UInt(cfg.destDataBits.W)
-  val pc        = OptionWrapper(cfg.needPc, UInt(VAddrData().dataWidth.W))
+  val pc        = OptionWrapper(cfg.needPc, UInt(GuardedVAddrData().dataWidth.W))
   val nextPcOffset = OptionWrapper(cfg.needPc, UInt((log2Up(PredictWidth) + 1).W))
 
   def getSrcVConfig : UInt = src(cfg.vconfigIdx)

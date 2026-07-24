@@ -94,7 +94,7 @@ class PredictorAnswer(implicit p: Parameters) extends XSBundle {
 
 class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParameter {
   // from backend
-  val pc = UInt(VAddrBits.W)
+  val pc = UInt(GuardedVAddrBits.W)
   // frontend -> backend -> frontend
   val pd = new PreDecodeInfo
   val ssp = UInt(log2Up(RasSize).W)
@@ -102,7 +102,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val TOSW = new RASPtr
   val TOSR = new RASPtr
   val NOS = new RASPtr
-  val topAddr = UInt((VAddrBits + 1).W)
+  val topAddr = UInt(GuardedVAddrBits.W)
   // val hist = new ShiftingGlobalHistory
   val folded_hist = new AllFoldedHistories(foldedGHistInfos)
   val afhob = new AllAheadFoldedHistoryOldestBits(foldedGHistInfos)
@@ -115,7 +115,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
   val jr_hit = Bool() // if in ftb entry
   val sc_hit = Bool() // if used in ftb entry, invalid if !br_hit
   val predTaken = Bool()
-  val target = UInt((VAddrBits + 1).W)
+  val target = UInt(GuardedVAddrBits.W)
   val taken = Bool()
   val isMisPred = Bool()
   val shift = UInt((log2Ceil(numBr)+1).W)
@@ -143,7 +143,7 @@ class CfiUpdateInfo(implicit p: Parameters) extends XSBundle with HasBPUParamete
 // Dequeue DecodeWidth insts from Ibuffer
 class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val instr = UInt(32.W)
-  val pc = UInt(VAddrBits.W)
+  val pc = UInt(GuardedVAddrBits.W)
   val foldpc = UInt(MemPredPCWidth.W)
   val exceptionVec = ExceptionVec()
   val backendException = Bool()

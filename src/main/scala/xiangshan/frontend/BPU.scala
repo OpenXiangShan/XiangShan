@@ -37,7 +37,7 @@ trait HasBPUConst extends HasXSParameter {
   val numDup = 4
 
   // Used to gate PC higher parts
-  val pcSegments = Seq(VAddrBits - 24, 12, 12)
+  val pcSegments = Seq(GuardedVAddrBits - 24, 12, 12)
 
   def BP_STAGES = (0 until 3).map(_.U(2.W))
   def BP_S1     = BP_STAGES(0)
@@ -108,8 +108,8 @@ trait BPUUtils extends HasXSParameter {
   }
 
   def getFallThroughAddr(start: UInt, carry: Bool, pft: UInt) = {
-    val higher = SignExt(start, VAddrBits + 1)
-      .head(VAddrBits + 1 - log2Ceil(PredictWidth) - instOffsetBits)
+    require(start.getWidth == GuardedVAddrBits)
+    val higher = start.head(GuardedVAddrBits - log2Ceil(PredictWidth) - instOffsetBits)
     Cat(Mux(carry, higher + 1.U, higher), pft, 0.U(instOffsetBits.W))
   }
 
@@ -123,7 +123,7 @@ trait BPUUtils extends HasXSParameter {
 class BasePredictorInput(implicit p: Parameters) extends XSBundle with HasBPUConst {
   def nInputs = 1
 
-  val s0_pc = Vec(numDup, UInt(VAddrBits.W))
+  val s0_pc = Vec(numDup, UInt(GuardedVAddrBits.W))
 
   val folded_hist    = Vec(numDup, new AllFoldedHistories(foldedGHistInfos))
   val s1_folded_hist = Vec(numDup, new AllFoldedHistories(foldedGHistInfos))
@@ -207,9 +207,9 @@ abstract class BasePredictor(implicit p: Parameters) extends XSModule
     SegmentedAddrNext(s2_pc, s2_fire, Some("s3_pc"))
   }
 
-  io.out.s1.pc := s1_pc_dup.map(SignExt(_, VAddrBits + 1))
-  io.out.s2.pc := s2_pc_dup.map(pc => SignExt(pc.getAddr(), VAddrBits + 1))
-  io.out.s3.pc := s3_pc_dup.map(pc => SignExt(pc.getAddr(), VAddrBits + 1))
+  io.out.s1.pc := s1_pc_dup
+  io.out.s2.pc := s2_pc_dup.map(_.getAddr())
+  io.out.s3.pc := s3_pc_dup.map(_.getAddr())
 
   val perfEvents: Seq[(String, UInt)] = Seq()
 
@@ -287,7 +287,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   val s1_ready_dup, s2_ready_dup, s3_ready_dup                                  = dup_wire(Bool())
   val s1_components_ready_dup, s2_components_ready_dup, s3_components_ready_dup = dup_wire(Bool())
 
-  val s0_pc_dup = dup(WireInit(0.U((VAddrBits + 1).W)))
+  val s0_pc_dup = dup(WireInit(0.U(GuardedVAddrBits.W)))
   val s0_pc_reg_dup = s0_pc_dup.zip(s0_stall_dup).map { case (s0_pc, s0_stall) =>
     RegEnable(s0_pc, !s0_stall)
   }
@@ -355,12 +355,6 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
   s0_ghist := getHist(s0_ghist_ptr_dup(0))
 
   val resp = WireInit(predictors.io.out)
-  // pc is (VAddrBits + 1) in width, but each predictor can only predict VAddrBits,
-  // the extra 1 bit is for ITLB to do the canonical check, and is initially from fall-through, redirect target, etc..
-  // so here we need to override resp.sx.pc to actual pipeline pc.
-  resp.s1.pc := VecInit(predictors.io.out.s1.pc.map(pc => Cat(s1_pc(VAddrBits), pc(VAddrBits - 1, 0))))
-  resp.s2.pc := VecInit(predictors.io.out.s2.pc.map(pc => Cat(s2_pc(VAddrBits), pc(VAddrBits - 1, 0))))
-  resp.s3.pc := VecInit(predictors.io.out.s3.pc.map(pc => Cat(s3_pc(VAddrBits), pc(VAddrBits - 1, 0))))
 
   val toFtq_fire = io.bpu_to_ftq.resp.valid && io.bpu_to_ftq.resp.ready
 
@@ -603,7 +597,7 @@ class Predictor(implicit p: Parameters) extends XSModule with HasBPUConst with H
 
   class PreviousPredInfo extends Bundle {
     val hit         = Vec(numDup, Bool())
-    val target      = Vec(numDup, UInt((VAddrBits + 1).W))
+    val target      = Vec(numDup, UInt(GuardedVAddrBits.W))
     val lastBrPosOH = Vec(numDup, Vec(numBr + 1, Bool()))
     val taken       = Vec(numDup, Bool())
     val takenMask   = Vec(numDup, Vec(numBr, Bool()))

@@ -29,8 +29,8 @@ abstract class IPrefetchBundle(implicit p: Parameters) extends ICacheBundle
 abstract class IPrefetchModule(implicit p: Parameters) extends ICacheModule
 
 class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
-  val startAddr:        UInt   = UInt((VAddrBits + 1).W)
-  val nextlineStart:    UInt   = UInt((VAddrBits + 1).W)
+  val startAddr:        UInt   = UInt(GuardedVAddrBits.W)
+  val nextlineStart:    UInt   = UInt(GuardedVAddrBits.W)
   val ftqIdx:           FtqPtr = new FtqPtr
   val isSoftPrefetch:   Bool   = Bool()
   val backendException: UInt   = UInt(ExceptionType.width.W)
@@ -45,8 +45,8 @@ class IPrefetchReq(implicit p: Parameters) extends IPrefetchBundle {
   }
 
   def fromSoftPrefetch(req: SoftIfetchPrefetchBundle): IPrefetchReq = {
-    this.startAddr      := SignExt(req.vaddr, VAddrBits + 1)
-    this.nextlineStart  := SignExt(req.vaddr, VAddrBits + 1) + (1 << blockOffBits).U
+    this.startAddr      := SignExt(req.vaddr, GuardedVAddrBits)
+    this.nextlineStart  := SignExt(req.vaddr, GuardedVAddrBits) + (1 << blockOffBits).U
     this.ftqIdx         := DontCare
     this.isSoftPrefetch := true.B
     this

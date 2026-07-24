@@ -42,7 +42,7 @@ object Bundles {
   // frontend -> backend
   class StaticInst(implicit p: Parameters) extends XSBundle {
     val instr            = UInt(32.W)
-    val pc               = UInt(VAddrBits.W)
+    val pc               = UInt(GuardedVAddrBits.W)
     val foldpc           = UInt(MemPredPCWidth.W)
     val exceptionVec     = ExceptionVec()
     val isFetchMalAddr   = Bool()
@@ -79,7 +79,7 @@ object Bundles {
     def numSrc = backendParams.numSrc
     // passed from StaticInst
     val instr           = UInt(32.W)
-    val pc              = UInt(VAddrBits.W)
+    val pc              = UInt(GuardedVAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
     val isFetchMalAddr  = Bool()
@@ -179,7 +179,7 @@ object Bundles {
     def numSrc          = backendParams.numSrc
     // passed from StaticInst
     val instr           = UInt(32.W)
-    val pc              = UInt(VAddrBits.W)
+    val pc              = UInt(GuardedVAddrBits.W)
     val foldpc          = UInt(MemPredPCWidth.W)
     val exceptionVec    = ExceptionVec()
     val isFetchMalAddr  = Bool()
@@ -632,7 +632,7 @@ object Bundles {
     val fpu           = if (params.writeFflags)   Some(new FPUCtrlSignals)            else None
     val vpu           = if (params.needVPUCtrl)   Some(new VPUCtrlSignals)            else None
     val flushPipe     = if (params.flushPipe)     Some(Bool())                        else None
-    val pc            = if (params.needPc)        Some(UInt(VAddrData().dataWidth.W)) else None
+    val pc            = if (params.needPc)        Some(UInt(GuardedVAddrData().dataWidth.W)) else None
     val preDecode     = if (params.hasPredecode)  Some(new PreDecodeInfo)             else None
     val ftqIdx        = if (params.needPc || params.replayInst || params.hasStoreAddrFu || params.hasCSR)
                                                   Some(new FtqPtr)                    else None
@@ -877,7 +877,7 @@ object Bundles {
   }
 
   class ExceptionInfo(implicit p: Parameters) extends XSBundle {
-    val pc = UInt((VAddrData().dataWidth + 1).W)
+    val pc = UInt(GuardedVAddrData().dataWidth.W)
     val instr = UInt(32.W)
     val commitType = CommitType()
     val exceptionVec = ExceptionVec()

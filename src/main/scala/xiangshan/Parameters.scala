@@ -635,6 +635,8 @@ trait HasXSParameter {
     }
   } // VAddrBits is Virtual Memory addr bits
 
+  def GuardedVAddrBits = VAddrBits + 1
+
   def VAddrMaxBits = {
     if(EnableSv48) {
       coreParams.VAddrBitsSv48 max coreParams.GPAddrBitsSv48x4

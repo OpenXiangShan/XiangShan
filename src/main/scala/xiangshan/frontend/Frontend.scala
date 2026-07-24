@@ -231,7 +231,7 @@ class FrontendInlinedImp(outer: FrontendInlined) extends LazyModuleImp(outer)
   io.backend.fromIfu := ifu.io.toBackend
   io.frontendInfo.bpuInfo <> ftq.io.bpuInfo
 
-  val checkPcMem = Reg(Vec(FtqSize, new FtqPcMemEntry))
+  val checkPcMem = Reg(Vec(FtqSize, new Ftq_RF_Components))
   when(ftq.io.toBackend.pc_mem_wen) {
     checkPcMem(ftq.io.toBackend.pc_mem_waddr) := ftq.io.toBackend.pc_mem_wdata
   }

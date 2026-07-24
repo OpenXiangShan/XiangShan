@@ -643,7 +643,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
     case ((nRows, histLen, tagLen), i) => {
       val t = Module(new TageTable(nRows, histLen, tagLen, i))
       t.io.req.valid            := io.s0_fire(1)
-      t.io.req.bits.pc          := s0_pc_dup(1)
+      t.io.req.bits.pc          := s0_pc_dup(1)(VAddrBits - 1, 0)
       t.io.req.bits.folded_hist := io.in.bits.folded_hist(1)
       t.io.req.bits.ghist       := io.in.bits.ghist
       t
@@ -651,7 +651,7 @@ class Tage(implicit p: Parameters) extends BaseTage {
   }
   val bt = Module(new TageBTable)
   bt.io.req.valid := io.s0_fire(1)
-  bt.io.req.bits  := s0_pc_dup(1)
+  bt.io.req.bits  := s0_pc_dup(1)(VAddrBits - 1, 0)
   private val mbistPl           = MbistPipeline.PlaceMbistPipeline(1, "MbistPipeTage", hasMbist)
   val bankTickCtrDistanceToTops = Seq.fill(numBr)(RegInit(((1 << TickWidth) - 1).U(TickWidth.W)))
   val bankTickCtrs              = Seq.fill(numBr)(RegInit(0.U(TickWidth.W)))
@@ -992,13 +992,13 @@ class Tage(implicit p: Parameters) extends BaseTage {
       tables(i).io.update.uMask(w) := RegEnable(updateUMask(w)(i), realWen)
       tables(i).io.update.us(w)    := RegEnable(updateU(w)(i), realWen)
       // use fetch pc instead of instruction pc
-      tables(i).io.update.pc    := RegEnable(update_pc, realWen)
+      tables(i).io.update.pc    := RegEnable(update_pc(VAddrBits - 1, 0), realWen)
       tables(i).io.update.ghist := RegEnable(update.ghist, realWen)
     }
   }
   bt.io.update_mask   := RegNext(baseupdate)
   bt.io.update_cnt    := RegEnable(updatebcnt, baseupdate.reduce(_ | _))
-  bt.io.update_pc     := RegEnable(update_pc, baseupdate.reduce(_ | _))
+  bt.io.update_pc     := RegEnable(update_pc(VAddrBits - 1, 0), baseupdate.reduce(_ | _))
   bt.io.update_takens := RegEnable(bUpdateTakens, baseupdate.reduce(_ | _))
 
   // all should be ready for req
