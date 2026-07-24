@@ -117,7 +117,7 @@ def test_recovery_target_requires_expected_recovery_ftq() -> None:
     assert model._queue_entry_matches_recovery_target(entry, 0x1000) is False
 
 
-def test_ready_redirect_skips_cfvec_queue_sampling_at_t_and_t_plus_one() -> None:
+def test_model_redirect_samples_t_then_skips_cfvec_from_observed_dut_redirect() -> None:
     model = BackendModel()
     interface = _ObserveIf()
     model.observe_if = interface
@@ -144,19 +144,36 @@ def test_ready_redirect_skips_cfvec_queue_sampling_at_t_and_t_plus_one() -> None
     actions = model.plan_cycle_actions()
 
     assert actions.redirect_payload is not None
-    assert list(model._cfvec_queue) == []
+    assert [entry.pc for entry in model._cfvec_queue] == [0x1004]
+    assert model._skip_cfvec_until_cycle is None
 
     model.current_cycle = 11
+    model.note_dut_redirect_observed(11)
     _set_first_cfvec(interface, 0x1008)
     model.plan_cycle_actions()
 
-    assert list(model._cfvec_queue) == []
+    assert [entry.pc for entry in model._cfvec_queue] == [0x1004]
 
     model.current_cycle = 12
+    _set_first_cfvec(interface, 0x1010)
+    model.plan_cycle_actions()
+
+    assert [entry.pc for entry in model._cfvec_queue] == [0x1004]
+
+    model.current_cycle = 13
     _set_first_cfvec(interface, 0x2000, ftq_value=1)
     model.plan_cycle_actions()
 
-    assert [entry.pc for entry in model._cfvec_queue] == [0x2000]
+    assert [entry.pc for entry in model._cfvec_queue] == [0x1004, 0x2000]
+
+
+def test_observed_dut_redirect_extends_cfvec_skip_from_observed_cycle() -> None:
+    model = BackendModel()
+    model._skip_cfvec_until_cycle = 11
+
+    model.note_dut_redirect_observed(11)
+
+    assert model._skip_cfvec_until_cycle == 12
 
 
 def test_recovery_first_sampled_cfvec_must_be_target_after_skip_window() -> None:

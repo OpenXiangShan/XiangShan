@@ -132,7 +132,14 @@ def test_funcov_artifact_records_absolute_manifest_path(tmp_path, monkeypatch):
     seen: dict[str, Path] = {}
     empty_delta_sha = hashlib.sha256(b"").hexdigest()
 
-    def fake_load(build_root: Path, manifest_path: Path) -> dict:
+    def fake_load(
+        build_root: Path,
+        manifest_path: Path,
+        *,
+        simulator: str | None = None,
+        pylib_dir: Path | None = None,
+    ) -> dict:
+        del build_root, simulator, pylib_dir
         seen["manifest_path"] = manifest_path
         return {
             "dut_source_sha": _SOURCE_SHA,

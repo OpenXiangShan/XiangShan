@@ -26,7 +26,7 @@ if str(_IMPORT_ROOT) not in sys.path:
 from env.artifact_provenance import load_frontend_build_manifest
 
 
-STATUSES = {"UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED", "BLOCKED", "N-A"}
+STATUSES = {"UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED", "BLOCKED", "N-A", "SV_FUNCOV"}
 REFERENCE_RE = re.compile(
     r"^covergroup ([^,;]+), coverpoint ([^,;]+), bins ([^ (;]+) \((BIN-\d+)\)$"
 )
@@ -103,12 +103,13 @@ _FRONTEND_ROOT = Path(__file__).resolve().parents[1]
 _CANONICAL_REGISTRY = (
     _FRONTEND_ROOT
     / "docs"
-    / "03_功能覆盖率建模"
+    / "03_funcov_model"
     / "frontend_bt_functional_coverage_pilot.csv"
 )
 _SAMPLER_FILES = (
     _FRONTEND_ROOT / "env" / "functional_coverage.py",
     _FRONTEND_ROOT / "env" / "funcov.py",
+    _FRONTEND_ROOT / "env" / "icache_funcov.py",
 )
 
 
@@ -182,7 +183,12 @@ def validate_pilot_schema(path: Path) -> dict[str, int]:
     return {"rows": len(rows), "bin_ids": len(bin_ids), "mapping_keys": len(mapping_keys), "legacy_ids": len(legacy_ids)}
 
 
-def load_pilot(path: Path, *, bin_prefix: str | None = None) -> dict[str, PilotBin]:
+def load_pilot(
+    path: Path,
+    *,
+    bin_prefix: str | None = None,
+    bin_ids: set[str] | None = None,
+) -> dict[str, PilotBin]:
     fields, rows = _read_csv(path)
     required = {"Bin_ID", "Coverage_Group", "Coverpoint", "Bin_Name", "建议试点用例"}
     missing = required - set(fields)
@@ -192,6 +198,8 @@ def load_pilot(path: Path, *, bin_prefix: str | None = None) -> dict[str, PilotB
     for row in rows:
         bin_id = row["Bin_ID"].strip()
         if bin_prefix is not None and not bin_id.startswith(bin_prefix):
+            continue
+        if bin_ids is not None and bin_id not in bin_ids:
             continue
         item = PilotBin(
             bin_id=bin_id,
@@ -220,6 +228,7 @@ def validate_mapping(
     pilot: dict[str, PilotBin],
     *,
     bin_prefix: str | None = None,
+    bin_ids: set[str] | None = None,
 ) -> dict[str, int]:
     fields, rows = _read_csv(testpoint_path)
     required = {"coverage", "status", "testcase", "evidence"}
@@ -237,11 +246,15 @@ def validate_mapping(
             continue
         if bin_prefix is not None and bin_prefix not in coverage:
             continue
+        if bin_ids is not None and not (set(re.findall(r"BIN-\d+", coverage)) & bin_ids):
+            continue
         ref = parse_reference(coverage)
         if ref is None:
             raise ValueError(f"line {line}: leaf must bind exactly one group/point/bin")
         group, point, bin_name, bin_id = ref
         if bin_prefix is not None and not bin_id.startswith(bin_prefix):
+            continue
+        if bin_ids is not None and bin_id not in bin_ids:
             continue
         expected = pilot.get(bin_id)
         if expected is None:
@@ -855,9 +868,10 @@ def backannotate(
     *,
     apply: bool,
     bin_prefix: str | None = None,
+    bin_ids: set[str] | None = None,
 ) -> dict[str, int]:
     fields, rows = _read_csv(testpoint_path)
-    validate_mapping(testpoint_path, pilot, bin_prefix=bin_prefix)
+    validate_mapping(testpoint_path, pilot, bin_prefix=bin_prefix, bin_ids=bin_ids)
     artifacts = list(artifacts)
     counts = {"model": 0, "partial": 0, "hit": 0, "failed": 0, "closed_preserved": 0}
 
@@ -866,6 +880,8 @@ def backannotate(
         if ref is None:
             continue
         group, point, bin_name, bin_id = ref
+        if bin_ids is not None and bin_id not in bin_ids:
+            continue
         item = pilot.get(bin_id)
         if item is None:
             continue
@@ -946,6 +962,12 @@ def main() -> int:
     parser.add_argument("--testpoints", type=Path)
     parser.add_argument("--artifact", type=Path, action="append", default=[])
     parser.add_argument("--bin-prefix", help="optional scoped Bin_ID prefix, for example BIN-5")
+    parser.add_argument(
+        "--bin-id",
+        action="append",
+        default=[],
+        help="exact active Bin_ID to process; may be repeated",
+    )
     parser.add_argument("--check", action="store_true", help="validate only; do not write")
     parser.add_argument("--schema-check", action="store_true", help="validate global pilot identifiers only")
     parser.add_argument(
@@ -962,7 +984,15 @@ def main() -> int:
     if args.testpoints is None:
         parser.error("--testpoints is required unless --schema-check is used")
 
-    pilot = load_pilot(args.pilot, bin_prefix=args.bin_prefix)
+    selected_bin_ids = {str(value).strip() for value in args.bin_id if str(value).strip()}
+    invalid_bin_ids = sorted(value for value in selected_bin_ids if not BIN_ID_RE.fullmatch(value))
+    if invalid_bin_ids:
+        parser.error(f"invalid --bin-id value(s): {invalid_bin_ids}")
+    pilot = load_pilot(
+        args.pilot,
+        bin_prefix=args.bin_prefix,
+        bin_ids=selected_bin_ids or None,
+    )
     artifacts = load_artifacts(args.artifact)
     if args.audit_json is not None:
         args.audit_json.parent.mkdir(parents=True, exist_ok=True)
@@ -976,6 +1006,7 @@ def main() -> int:
         artifacts,
         apply=not args.check,
         bin_prefix=args.bin_prefix,
+        bin_ids=selected_bin_ids or None,
     )
     print(" ".join(f"{key}={value}" for key, value in sorted(counts.items())))
     return 0

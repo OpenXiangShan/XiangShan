@@ -557,7 +557,7 @@ backend commit 被卡住时，新的 MMIO request 不应继续发出
   顶层端口声明里。`Frontend` 实例化连接里没有 `.io_tlbCsr_mPBMTE(...)` /
   `.io_tlbCsr_hPBMTE(...)`，因为 `Frontend.sv` 本身没有对应端口；所以这两个
   顶层输入是悬空/无效端口，对当前 DUT 行为没有影响。
-- Python pylib wrapper `build-frontend/pylib/Frontend/Frontend_top.sv` 与
+- 选中的 `build-frontend/pylib-<sim>/Frontend/` 目录下的 Python pylib wrapper 与
   `Frontend.sv` 一致，也没有 `io_tlbCsr_mPBMTE` / `io_tlbCsr_hPBMTE` 的 DPI
   getter/setter。因此不能通过 Python directed case 直接“打开 DUT 的 PBMTE”。
 - 在 PBMTE 未打开时，PBMT 非零 PTE 不能作为“NC uncache path”证明。若要覆盖

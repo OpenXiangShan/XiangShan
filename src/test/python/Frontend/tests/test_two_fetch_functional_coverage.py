@@ -23,12 +23,17 @@ from env.funcov import (
     sample_cfvec_coverage,
     sample_two_fetch_coverage,
 )
+from env.icache_funcov import (
+    ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
+    ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
+)
 from env.artifact_provenance import load_frontend_build_manifest, write_frontend_build_manifest
 from env.functional_coverage import (
     FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS,
     FunctionalCoverageRecorder,
     default_pilot_csv_path,
 )
+from env.pylib import frontend_offset_path
 from tools.backannotate_funcov import (
     PilotBin,
     _target_matches,
@@ -158,6 +163,7 @@ def _eligible_provenance():
             {
                 "functional_coverage.py": file_sha256(frontend_root / "env/functional_coverage.py"),
                 "funcov.py": file_sha256(frontend_root / "env/funcov.py"),
+                "icache_funcov.py": file_sha256(frontend_root / "env/icache_funcov.py"),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -165,9 +171,9 @@ def _eligible_provenance():
         ).encode("utf-8")
     ).hexdigest()
     build_root = Path("/tmp/frontend-funcov-unit") / f"manifest-{os.getpid()}" / "build-frontend"
-    manifest_path = build_root / "frontend_build_manifest.json"
+    manifest_path = build_root / "frontend_build_manifest.verilator.json"
     if not manifest_path.is_file():
-        pylib = build_root / "pylib" / "Frontend"
+        pylib = build_root / "pylib-verilator" / "Frontend"
         rtl = build_root / "rtl"
         pylib.mkdir(parents=True, exist_ok=True)
         rtl.mkdir(parents=True, exist_ok=True)
@@ -182,8 +188,9 @@ def _eligible_provenance():
             source_tree_dirty=False,
             build_config="frontend-test",
             build_command="make frontend",
+            simulator="verilator",
         )
-    manifest = load_frontend_build_manifest(build_root, manifest_path)
+    manifest = load_frontend_build_manifest(build_root, manifest_path, simulator="verilator")
     assert manifest["build_manifest_status"] == "valid", manifest["build_manifest_reasons"]
     values = {
         **{
@@ -1167,7 +1174,7 @@ def test_canonical_registry_matches_the_single_sampler_contract():
     repo_root = Path(__file__).resolve().parents[5]
     pilot_path = (
         repo_root
-        / "src/test/python/Frontend/docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv"
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
     )
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
         active = {
@@ -1175,10 +1182,12 @@ def test_canonical_registry_matches_the_single_sampler_contract():
             for row in csv.DictReader(handle)
             if row["Coverpoint"].strip()
         }
-    assert len(active) == 64
+    assert len(active) == 137
     assert active == set(FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS)
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
     assert len(TWO_FETCH_SAMPLER_BIN_KEYS) == 41
+    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 49
+    assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 24
 
 
 def test_cfvec_mixed_bins_are_window_scoped_and_do_not_hit_on_rvi_only(tmp_path):
@@ -1243,7 +1252,7 @@ def test_sampler_cannot_silently_mark_an_unmodeled_bin(tmp_path):
 
 
 def test_two_fetch_signal_map_matches_current_frontend_offset():
-    offset = Path(__file__).resolve().parents[5] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
+    offset = frontend_offset_path()
     assert offset.exists(), "DUT signal inventory is required before signal-contract tests"
 
     registered = {
@@ -1314,7 +1323,7 @@ def test_two_fetch_backannotation_matches_registry_and_sampler():
     repo_root = Path(__file__).resolve().parents[5]
     pilot_path = (
         repo_root
-        / "src/test/python/Frontend/docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv"
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
     )
     with pilot_path.open(encoding="utf-8-sig", newline="") as f:
         pilot_rows = [row for row in csv.DictReader(f) if row["Bin_ID"].startswith("BIN-5")]
@@ -1338,7 +1347,7 @@ def test_two_fetch_backannotation_matches_registry_and_sampler():
 
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
     )
     mapping = validate_mapping(
         testpoint_path,
@@ -1370,7 +1379,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
     assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
     assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(recorder.definitions) == 64
+    assert len(recorder.definitions) == 137
     assert all(item.coverpoint for item in recorder.definitions)
     assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source
@@ -1882,7 +1891,7 @@ def test_explicit_unknown_testcase_cannot_hide_behind_a_known_target(tmp_path, m
 
 def test_build_manifest_binds_source_sha_to_compiled_artifacts(tmp_path):
     build_root = tmp_path / "build-frontend"
-    pylib = build_root / "pylib" / "Frontend"
+    pylib = build_root / "pylib-verilator" / "Frontend"
     rtl = build_root / "rtl"
     pylib.mkdir(parents=True)
     rtl.mkdir(parents=True)
@@ -1890,7 +1899,7 @@ def test_build_manifest_binds_source_sha_to_compiled_artifacts(tmp_path):
     (pylib / "_UT_Frontend.so").write_bytes(b"python-extension")
     (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
     (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
-    manifest_path = build_root / "frontend_build_manifest.json"
+    manifest_path = build_root / "frontend_build_manifest.verilator.json"
 
     write_frontend_build_manifest(
         manifest_path,
@@ -1899,8 +1908,9 @@ def test_build_manifest_binds_source_sha_to_compiled_artifacts(tmp_path):
         source_tree_dirty=False,
         build_config="frontend-test",
         build_command="make frontend",
+        simulator="verilator",
     )
-    valid = load_frontend_build_manifest(build_root)
+    valid = load_frontend_build_manifest(build_root, simulator="verilator")
     assert valid["build_manifest_status"] == "valid"
     assert valid["dut_source_sha"] == "a" * 40
     assert valid["build_config"] == "frontend-test"
@@ -1910,10 +1920,43 @@ def test_build_manifest_binds_source_sha_to_compiled_artifacts(tmp_path):
     assert valid["source_delta_sha256"] == hashlib.sha256(b"").hexdigest()
 
     (pylib / "libUTFrontend.so").write_bytes(b"changed-dut-model")
-    invalid = load_frontend_build_manifest(build_root)
+    invalid = load_frontend_build_manifest(build_root, simulator="verilator")
     assert invalid["build_manifest_status"] == "invalid"
     assert invalid["dut_source_sha"] == "unavailable"
     assert "build_hash_mismatch:dut_build_sha256" in invalid["build_manifest_reasons"]
+
+
+def test_build_manifests_are_isolated_by_simulator(tmp_path):
+    build_root = tmp_path / "build-frontend"
+    rtl = build_root / "rtl"
+    rtl.mkdir(parents=True)
+    (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
+
+    for simulator in ("verilator", "vcs"):
+        pylib = build_root / f"pylib-{simulator}" / "Frontend"
+        pylib.mkdir(parents=True)
+        (pylib / "libUTFrontend.so").write_bytes(f"{simulator}-dut".encode())
+        (pylib / "_UT_Frontend.so").write_bytes(f"{simulator}-extension".encode())
+        (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
+        write_frontend_build_manifest(
+            build_root / f"frontend_build_manifest.{simulator}.json",
+            build_root=build_root,
+            dut_source_sha="a" * 40,
+            source_tree_dirty=False,
+            build_config=f"frontend-{simulator}",
+            build_command=f"make frontend-{simulator}",
+            simulator=simulator,
+        )
+
+    assert load_frontend_build_manifest(build_root, simulator="verilator")["build_manifest_status"] == "valid"
+    assert load_frontend_build_manifest(build_root, simulator="vcs")["build_manifest_status"] == "valid"
+
+    (build_root / "pylib-vcs" / "Frontend" / "libUTFrontend.so").write_bytes(b"changed-vcs-dut")
+
+    assert load_frontend_build_manifest(build_root, simulator="verilator")["build_manifest_status"] == "valid"
+    invalid_vcs = load_frontend_build_manifest(build_root, simulator="vcs")
+    assert invalid_vcs["build_manifest_status"] == "invalid"
+    assert "build_hash_mismatch:dut_build_sha256" in invalid_vcs["build_manifest_reasons"]
 
 
 def test_build_manifest_cli_import_does_not_initialize_testbench_packages():
@@ -2012,7 +2055,7 @@ def test_build_manifest_runtime_rechecks_allowlisted_source_delta(tmp_path):
 )
 def test_build_manifest_rejects_malformed_provenance(tmp_path, mutation, reason):
     build_root = tmp_path / "build-frontend"
-    pylib = build_root / "pylib" / "Frontend"
+    pylib = build_root / "pylib-verilator" / "Frontend"
     rtl = build_root / "rtl"
     pylib.mkdir(parents=True)
     rtl.mkdir(parents=True)
@@ -2020,7 +2063,7 @@ def test_build_manifest_rejects_malformed_provenance(tmp_path, mutation, reason)
     (pylib / "_UT_Frontend.so").write_bytes(b"python-extension")
     (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
     (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
-    manifest_path = build_root / "frontend_build_manifest.json"
+    manifest_path = build_root / "frontend_build_manifest.verilator.json"
     manifest = write_frontend_build_manifest(
         manifest_path,
         build_root=build_root,
@@ -2028,11 +2071,12 @@ def test_build_manifest_rejects_malformed_provenance(tmp_path, mutation, reason)
         source_tree_dirty=False,
         build_config="frontend-test",
         build_command="make frontend",
+        simulator="verilator",
     )
     manifest.update(mutation)
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    loaded = load_frontend_build_manifest(build_root)
+    loaded = load_frontend_build_manifest(build_root, simulator="verilator")
 
     assert loaded["build_manifest_status"] == "invalid"
     assert loaded["dut_source_sha"] == "unavailable"
@@ -2082,11 +2126,14 @@ def test_recorder_rejects_overrides_that_disagree_with_valid_build_manifest(tmp_
         "build_manifest_sha256": "f" * 64,
         "build_manifest_reasons": [],
     }
-    monkeypatch.setattr(
-        functional_coverage_module,
-        "load_frontend_build_manifest",
-        lambda *_args, **_kwargs: dict(manifest),
-    )
+    manifest_calls = []
+
+    def load_manifest(*_args, **kwargs):
+        manifest_calls.append(kwargs)
+        return dict(manifest)
+
+    monkeypatch.setattr(functional_coverage_module, "load_frontend_build_manifest", load_manifest)
+    monkeypatch.setenv("TB_FRONTEND_SIM", "vcs")
     monkeypatch.setenv("TB_DUT_SOURCE_SHA", "1" * 40)
     monkeypatch.setenv("TB_DUT_BUILD_CONFIG", "frontend-other")
 
@@ -2100,6 +2147,8 @@ def test_recorder_rejects_overrides_that_disagree_with_valid_build_manifest(tmp_
         "source_sha_override_mismatch",
         "build_config_override_mismatch",
     ]
+    assert manifest_calls[0]["simulator"] == "vcs"
+    assert manifest_calls[0]["pylib_dir"].as_posix().endswith("build-frontend/pylib-vcs/Frontend")
 
     monkeypatch.setenv("TB_DUT_SOURCE_SHA", "A" * 40)
     monkeypatch.setenv("TB_DUT_BUILD_CONFIG", "frontend-clean")
@@ -2791,6 +2840,33 @@ def test_backannotation_keeps_stale_or_missing_dut_evidence_partial(tmp_path):
     assert row["evidence"] == "OLD_DIAGNOSTIC"
     assert counts["partial"] == 1
     assert counts["model"] == 0
+
+
+def test_backannotation_exact_bin_selection_ignores_other_coverage_domains(tmp_path):
+    pilot_path = tmp_path / "pilot.csv"
+    testpoint_path = tmp_path / "testpoints.csv"
+    pilot_path.write_text(
+        "Bin_ID,Coverage_Group,Coverpoint,Bin_Name,建议试点用例\n"
+        "BIN-501,two_fetch_ftq_eligibility,request_eligibility,eligible_dual,case_a\n",
+        encoding="utf-8-sig",
+    )
+    testpoint_path.write_text(
+        "一级测试点,coverage,status,testcase,evidence\n"
+        "selected,\"covergroup two_fetch_ftq_eligibility, coverpoint request_eligibility, "
+        "bins eligible_dual (BIN-501)\",HIT,case_a,OLD_DUT\n"
+        "other,\"covergroup other, coverpoint other, bins ignored (BIN-999)\",MODELED,,\n",
+        encoding="utf-8-sig",
+    )
+
+    pilot = load_pilot(pilot_path, bin_ids={"BIN-501"})
+    assert validate_mapping(testpoint_path, pilot, bin_ids={"BIN-501"}) == {"BIN-501": 2}
+    counts = backannotate(testpoint_path, pilot, [], apply=True, bin_ids={"BIN-501"})
+
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    assert counts["partial"] == 1
+    assert rows[0]["status"] == "PARTIAL"
+    assert rows[1]["status"] == "MODELED"
 
 
 def test_backannotation_rejects_hit_from_failed_dut_artifact(tmp_path):
