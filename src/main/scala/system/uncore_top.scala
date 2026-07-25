@@ -78,7 +78,7 @@ import xiangshan.XSTileKey
  * @param MSIOutDataWidth Data width for each output port. Default is 64.
  */
 case class AplicParams(
-    CFG_ADDR_WIDTH: Int = 40,
+    CFG_ADDR_WIDTH: Int = 48,
     CFG_DATA_WIDTH: Int = 64,
     CFG_ID_WIDTH:   Int = 16,
     APLICAddrMap:   AddressSet = AddressSet(0x1E020000L, 0x7fff),
@@ -1483,7 +1483,7 @@ class uncoreTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModule 
 object PbusGen extends App {
   // Example configuration with mixed input widths
   val aplicparams = AplicParams(
-    CFG_ADDR_WIDTH = 40,
+    CFG_ADDR_WIDTH = 48,
     CFG_DATA_WIDTH = 64,
     CFG_ID_WIDTH = 11,
     APLICAddrMap = AddressSet(0x1E020000L, 0x7fff),

@@ -142,7 +142,7 @@ class apic_aplic_top(params: AplicParams) extends BlackBox {
     val arst_n = Input(Reset())
     // 读地址通道 (AR)
     // val i_aplic_mmcr = IO(Input(AXI4BundleAW()))
-    val i_aplic_mmcr_araddr  = Input(UInt(40.W)) // 39:0
+    val i_aplic_mmcr_araddr  = Input(UInt(params.CFG_ADDR_WIDTH.W)) // CFG_ADDR_WIDTH-1:0
     val i_aplic_mmcr_arburst = Input(UInt(2.W))  // 1:0
     val i_aplic_mmcr_arcache = Input(UInt(4.W))  // 3:0
     val i_aplic_mmcr_arid    = Input(UInt(16.W)) // 15:0
@@ -153,7 +153,7 @@ class apic_aplic_top(params: AplicParams) extends BlackBox {
     val i_aplic_mmcr_arvalid = Input(Bool())     // 单bit
 
     // 写地址通道 (AW)
-    val i_aplic_mmcr_awaddr  = Input(UInt(40.W)) // 39:0
+    val i_aplic_mmcr_awaddr  = Input(UInt(params.CFG_ADDR_WIDTH.W)) // CFG_ADDR_WIDTH-1:0
     val i_aplic_mmcr_awburst = Input(UInt(2.W))  // 1:0
     val i_aplic_mmcr_awcache = Input(UInt(4.W))  // 3:0
     val i_aplic_mmcr_awid    = Input(UInt(16.W)) // 15:0
@@ -194,7 +194,7 @@ class apic_aplic_top(params: AplicParams) extends BlackBox {
     val o_aplic_mmcr_wready  = Output(Bool())     // 单bit
 
     // MSI 子接口输出
-    val o_aplic_msi_awaddr  = Output(UInt(40.W)) // 39:0
+    val o_aplic_msi_awaddr  = Output(UInt(params.CFG_ADDR_WIDTH.W)) // CFG_ADDR_WIDTH-1:0
     val o_aplic_msi_awid    = Output(UInt(16.W)) // 15:0
     val o_aplic_msi_awprot  = Output(UInt(3.W))  // 2:0
     val o_aplic_msi_awvalid = Output(Bool())     // 单bit
