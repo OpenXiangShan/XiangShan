@@ -39,6 +39,9 @@ class ScTable(
     val trainReadResp:   Vec[ScEntry]      = Output(Vec(numWays, new ScEntry()))
     val update:          ScTableTrain      = Input(new ScTableTrain(numSets, numWays))
     val sramResetDone:   Bool              = Output(Bool())
+    val contextFlush:    Bool              = Input(Bool())
+    val inResetWindow:   Bool              = Input(Bool())
+    val writeBufferEmpty: Bool             = Output(Bool())
   }
 
   val io = IO(new ScTableIO())
@@ -57,6 +60,7 @@ class ScTable(
       way = numWays,
       singlePort = true,
       shouldReset = true,
+      extraReset = true,
       holdRead = true,
       withClockGate = true,
       hasMbist = hasMbist,
@@ -64,6 +68,8 @@ class ScTable(
       suffix = Option("bpu_sc")
     ))
   )
+  // trigger entry SRAM extraReset (row-by-row zeroing) on context flush
+  sram.foreach { bank => bank.extra_reset.get := io.contextFlush }
 
   private val writeBuffer = Seq.tabulate(NumBanks)(bankIdx =>
     Module(new WriteBuffer(
@@ -72,15 +78,17 @@ class ScTable(
       numPorts = 1,
       numWays = numWays,
       hasWayMask = true,
+      hasContextFlush = true,
       nameSuffix = s"sc${tableType}${tableIdx}_${bankIdx}"
     ))
   )
+  writeBuffer.foreach { buffer => buffer.io.contextFlush.get := io.contextFlush }
 
   // read path table by setIndex
   sram.zipWithIndex.foreach { case (bank, bankIdx) =>
     val predictReadValid = io.predictReadReq.valid && io.predictReadReq.bits.bankMask(bankIdx)
     val trainReadValid   = io.trainReadReq.valid && io.trainReadReq.bits.bankMask(bankIdx)
-    bank.io.r.req.valid       := predictReadValid || trainReadValid
+    bank.io.r.req.valid       := (predictReadValid || trainReadValid) && !io.inResetWindow
     bank.io.r.req.bits.setIdx := Mux(predictReadValid, io.predictReadReq.bits.setIdx, io.trainReadReq.bits.setIdx)
     assert(!(predictReadValid && trainReadValid), s"read conflict in sc${tableType}${tableIdx}_${bankIdx}")
   }
@@ -102,7 +110,7 @@ class ScTable(
   writeBuffer.zip(updateBankMask.asBools).foreach {
     case (buffer, bankEnable) =>
       val writeValid = updateValid && bankEnable
-      buffer.io.write.head.valid       := writeValid
+      buffer.io.write.head.valid       := writeValid && !io.inResetWindow
       buffer.io.write.head.bits.setIdx := updateIdx
       buffer.io.write.head.bits.wayMask.get := Mux(
         writeValid,
@@ -118,11 +126,12 @@ class ScTable(
 
   sram.zip(writeBuffer).zipWithIndex.foreach {
     case ((bank, buffer), i) =>
-      bank.io.w.req.valid            := buffer.io.read.head.valid && !bank.io.r.req.valid
+      bank.io.w.req.valid            := buffer.io.read.head.valid && !bank.io.r.req.valid && !io.inResetWindow
       bank.io.w.req.bits.setIdx      := buffer.io.read.head.bits.setIdx
       bank.io.w.req.bits.waymask.get := buffer.io.read.head.bits.wayMask.get.asUInt
       bank.io.w.req.bits.data        := VecInit(buffer.io.read.head.bits.wayData.get.map(_.asTypeOf(new ScEntry())))
-      buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
-      buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid
+      buffer.io.read.head.ready      := bank.io.w.req.ready && !bank.io.r.req.valid && !io.inResetWindow
   }
+
+  io.writeBufferEmpty := !writeBuffer.map(_.io.read.head.valid).reduce(_ || _)
 }

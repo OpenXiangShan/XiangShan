@@ -98,7 +98,26 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
       imliTable.io.sramResetDone :+
       biasTable.io.sramResetDone
   ).reduce(_ && _)
-  io.resetDone := true.B
+  private val allTables: Seq[ScTable] = pathTable ++ globalTable ++ bwTable ++ Seq(imliTable, biasTable)
+
+  allTables.foreach(_.io.contextFlush := io.contextFlush)
+
+  private val sramResetDone      = allTables.map(_.io.sramResetDone).reduce(_ && _)
+  private val writeBuffersEmpty  = allTables.map(_.io.writeBufferEmpty).reduce(_ && _)
+  private val tableResetDone     = sramResetDone && writeBuffersEmpty
+
+  private val contextResetPending = RegInit(true.B)
+  when(io.contextFlush) {
+    contextResetPending := true.B
+  }.elsewhen(tableResetDone) {
+    contextResetPending := false.B
+  }
+
+  private val inResetWindow = io.contextFlush || (contextResetPending && !tableResetDone)
+
+  allTables.foreach(_.io.inResetWindow := inResetWindow)
+
+  io.resetDone := !inResetWindow
 
   /*
    * ghr stage ctrl signals
@@ -143,29 +162,31 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   private val s1_bwIdx = s0_bwIdx.map(RegEnable(_, s0_fire)) // for debug
   private val s2_bwIdx = s1_bwIdx.map(RegEnable(_, s1_fire)) // for debug
 
+  private val s0ScReadValid = s0_fire && !inResetWindow
+
   pathTable.zip(s0_pathIdx).foreach { case (table, idx) =>
-    table.io.predictReadReq.valid         := s0_fire && PathEnable.B
+    table.io.predictReadReq.valid         := s0ScReadValid && PathEnable.B
     table.io.predictReadReq.bits.setIdx   := idx
     table.io.predictReadReq.bits.bankMask := s0_bankMask
   }
 
   globalTable.zip(s0_globalIdx).foreach { case (table, idx) =>
-    table.io.predictReadReq.valid := s0_fire && s0_commonHR.valid && GlobalEnable.B // if ghr invalid not request global table
+    table.io.predictReadReq.valid := s0ScReadValid && s0_commonHR.valid && GlobalEnable.B // if ghr invalid not request global table
     table.io.predictReadReq.bits.setIdx   := idx
     table.io.predictReadReq.bits.bankMask := s0_bankMask
   }
 
   bwTable.zip(s0_bwIdx).foreach { case (table, idx) =>
-    table.io.predictReadReq.valid         := s0_fire && s0_commonHR.valid && BWEnable.B
+    table.io.predictReadReq.valid         := s0ScReadValid && s0_commonHR.valid && BWEnable.B
     table.io.predictReadReq.bits.setIdx   := idx
     table.io.predictReadReq.bits.bankMask := s0_bankMask
   }
 
-  imliTable.io.predictReadReq.valid         := s0_fire && ImliEnable.B
+  imliTable.io.predictReadReq.valid         := s0ScReadValid && ImliEnable.B
   imliTable.io.predictReadReq.bits.setIdx   := s0_imliIdx
   imliTable.io.predictReadReq.bits.bankMask := s0_bankMask
 
-  biasTable.io.predictReadReq.valid         := s0_fire && BiasEnable.B
+  biasTable.io.predictReadReq.valid         := s0ScReadValid && BiasEnable.B
   biasTable.io.predictReadReq.bits.setIdx   := s0_biasIdx
   biasTable.io.predictReadReq.bits.bankMask := s0_bankMask
 
@@ -173,33 +194,41 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  predict pipeline stage 1
    *  calculate each ctr's percsum
    */
+  private val s1ScReadRespPulse   = RegNext(s0ScReadValid, false.B)
+  private val s1ScReadRespPending = RegInit(false.B)
+  when(s1ScReadRespPulse) { s1ScReadRespPending := true.B }
+  when(s1_fire)           { s1ScReadRespPending := false.B }
+  when(io.contextFlush)   { s1ScReadRespPending := false.B }
+  private val s1ScReadRespValid =
+    (s1ScReadRespPulse || s1ScReadRespPending) && !inResetWindow
+
   private val s1_startPc = RegEnable(io.startPc, s0_fire)
   private val s1_pathResp = Mux(
-    PathEnable.B,
+    s1ScReadRespValid && PathEnable.B,
     VecInit(pathTable.map(_.io.predictReadResp)),
     VecInit.fill(NumPathTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
   )
   // if s0_commonHR invalid, global table resp is also invalid
   private val s1_globalResp = Mux(
-    s1_commonHRValid && GlobalEnable.B,
+    s1ScReadRespValid && s1_commonHRValid && GlobalEnable.B,
     VecInit(globalTable.map(_.io.predictReadResp)),
     VecInit.fill(NumGlobalTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
   )
 
   private val s1_bwResp = Mux(
-    s1_commonHRValid && BWEnable.B,
+    s1ScReadRespValid && s1_commonHRValid && BWEnable.B,
     VecInit(bwTable.map(_.io.predictReadResp)),
     VecInit.fill(NumBWTables)(VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry())))
   )
 
   private val s1_imliResp = Mux(
-    ImliEnable.B,
+    s1ScReadRespValid && ImliEnable.B,
     imliTable.io.predictReadResp,
     VecInit.fill(NumWays)(0.U.asTypeOf(new ScEntry()))
   )
 
   private val s1_biasResp = Mux(
-    BiasEnable.B,
+    s1ScReadRespValid && BiasEnable.B,
     biasTable.io.predictReadResp,
     VecInit.fill(BiasTableNumWays)(0.U.asTypeOf(new ScEntry()))
   )
@@ -222,14 +251,20 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
    *  predict pipeline stage 2
    *  match entries and calculate final percSum
    */
+  private def contextClearRegEnable[T <: Data](next: T, enable: Bool): T = {
+    val reg = RegEnable(next, enable)
+    when(io.contextFlush) { reg := 0.U.asTypeOf(reg) }
+    reg
+  }
+
   private val s2_startPc = RegEnable(s1_startPc, s1_fire)
 
-  private val s2_biasPercsum = VecInit(s1_biasPercsum.map(RegEnable(_, s1_fire)))
+  private val s2_biasPercsum = VecInit(s1_biasPercsum.map(x => contextClearRegEnable(x, s1_fire)))
 
-  private val s2_bwPercsum     = VecInit(s1_bwPercsum.map(RegEnable(_, s1_fire)))
-  private val s2_imliPercsum   = VecInit(s1_imliPercsum.map(RegEnable(_, s1_fire)))
-  private val s2_pathPercsum   = VecInit(s1_pathPercsum.map(RegEnable(_, s1_fire)))
-  private val s2_globalPercsum = VecInit(s1_globalPercsum.map(RegEnable(_, s1_fire)))
+  private val s2_bwPercsum     = VecInit(s1_bwPercsum.map(x => contextClearRegEnable(x, s1_fire)))
+  private val s2_imliPercsum   = VecInit(s1_imliPercsum.map(x => contextClearRegEnable(x, s1_fire)))
+  private val s2_pathPercsum   = VecInit(s1_pathPercsum.map(x => contextClearRegEnable(x, s1_fire)))
+  private val s2_globalPercsum = VecInit(s1_globalPercsum.map(x => contextClearRegEnable(x, s1_fire)))
 
   private val s2_mergePercsum = Seq(s2_pathPercsum, s2_globalPercsum, s2_bwPercsum, s2_imliPercsum)
   private val s2_sumPercsum   = VecInit.tabulate(NumWays)(j => ParallelSingedExpandingAdd(s2_mergePercsum.map(_(j))))
@@ -319,38 +354,44 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     dontTouch(conf)
   }
 
-  io.scTakenMask := s2_scPred
-  io.scUsed      := s2_useScPred
+  io.scTakenMask := Mux(io.bpuFlushing, 0.U.asTypeOf(s2_scPred), s2_scPred)
+  io.scUsed      := Mux(io.bpuFlushing, 0.U.asTypeOf(s2_useScPred), s2_useScPred)
 
   s2_useScPred.zip(s2_providerValid).foreach { case (use, valid) =>
     XSError(s2_fire && use && !valid, "SC useScPred is true but tage provider is invalid!\n")
   }
 
-  io.meta.scBiasLowerBits := RegEnable(s2_biasIdxLowBits, s2_fire)
+  private def contextSafeMetaReg[T <: Data](next: T): T = {
+    val zero = 0.U.asTypeOf(next)
+    val reg = contextClearRegEnable(Mux(io.bpuFlushing, zero, next), s2_fire)
+    Mux(io.bpuFlushing, zero, reg)
+  }
 
-  io.meta.scPred        := RegEnable(s2_scPred, s2_fire)
-  io.meta.tagePred      := RegEnable(s2_providerTakenMask, s2_fire)
-  io.meta.tageCtr       := RegEnable(VecInit(s2_providerCtr.map(_.value)), s2_fire)
-  io.meta.tagePredValid := RegEnable(s2_providerValid, s2_fire)
-  io.meta.useScPred     := RegEnable(s2_useScPred, s2_fire)
-  io.meta.sumAboveThres := RegEnable(s2_sumAboveThres, s2_fire)
+  io.meta.scBiasLowerBits := contextSafeMetaReg(s2_biasIdxLowBits)
 
-  io.meta.debug_scPathTakenVec.get   := VecInit(s2_pathPred.map(RegEnable(_, s2_fire))) // for performance counter
-  io.meta.debug_scGlobalTakenVec.get := VecInit(s2_globalPred.map(RegEnable(_, s2_fire)))
-  io.meta.debug_scBWTakenVec.get     := VecInit(s2_bwPred.map(RegEnable(_, s2_fire)))
-  io.meta.debug_scImliTakenVec.get   := VecInit(s2_imliPred.map(RegEnable(_, s2_fire)))
-  io.meta.debug_scBiasTakenVec.get   := VecInit(s2_biasPred.map(RegEnable(_, s2_fire)))
+  io.meta.scPred        := contextSafeMetaReg(s2_scPred)
+  io.meta.tagePred      := contextSafeMetaReg(s2_providerTakenMask)
+  io.meta.tageCtr       := contextSafeMetaReg(VecInit(s2_providerCtr.map(_.value)))
+  io.meta.tagePredValid := contextSafeMetaReg(s2_providerValid)
+  io.meta.useScPred     := contextSafeMetaReg(s2_useScPred)
+  io.meta.sumAboveThres := contextSafeMetaReg(s2_sumAboveThres)
 
-  io.meta.debug_predPathIdx.get   := RegEnable(MixedVecInit(s2_pathIdx), s2_fire) // for debug
-  io.meta.debug_predGlobalIdx.get := RegEnable(MixedVecInit(s2_globalIdx), s2_fire)
-  io.meta.debug_predBWIdx.get     := RegEnable(MixedVecInit(s2_bwIdx), s2_fire)
-  io.meta.debug_predImliIdx.get   := RegEnable(s2_imliIdx, s2_fire)
-  io.meta.debug_predBiasIdx.get   := RegEnable(s2_biasIdx, s2_fire)
+  io.meta.debug_scPathTakenVec.get   := VecInit(s2_pathPred.map(x => contextSafeMetaReg(x))) // for performance counter
+  io.meta.debug_scGlobalTakenVec.get := VecInit(s2_globalPred.map(x => contextSafeMetaReg(x)))
+  io.meta.debug_scBWTakenVec.get     := VecInit(s2_bwPred.map(x => contextSafeMetaReg(x)))
+  io.meta.debug_scImliTakenVec.get   := VecInit(s2_imliPred.map(x => contextSafeMetaReg(x)))
+  io.meta.debug_scBiasTakenVec.get   := VecInit(s2_biasPred.map(x => contextSafeMetaReg(x)))
+
+  io.meta.debug_predPathIdx.get   := contextSafeMetaReg(MixedVecInit(s2_pathIdx)) // for debug
+  io.meta.debug_predGlobalIdx.get := contextSafeMetaReg(MixedVecInit(s2_globalIdx))
+  io.meta.debug_predBWIdx.get     := contextSafeMetaReg(MixedVecInit(s2_bwIdx))
+  io.meta.debug_predImliIdx.get   := contextSafeMetaReg(s2_imliIdx)
+  io.meta.debug_predBiasIdx.get   := contextSafeMetaReg(s2_biasIdx)
 
   /*
    *  train pipeline stage 0
    */
-  private val t0_fire     = io.stageCtrl.t0_fire && io.enable
+  private val t0_fire     = io.stageCtrl.t0_fire && io.enable && !io.bpuFlushing
   private val t0_meta     = io.train.meta.sc
   private val t0_commonHR = io.train.meta.commonHR
   private val t0_bankMask = getBankMask(io.train.startPc)
@@ -395,7 +436,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     })
   private val t0_needWrite    = t0_writeValidVec.reduce(_ || _)
   private val t0_bankConflict = t0_needWrite && s0_fire && t0_bankMask === s0_bankMask
-  io.trainReady := !t0_bankConflict
+  io.trainReady := io.bpuFlushing || !t0_bankConflict
   pathTable.zip(t0_pathIdx).foreach { case (table, idx) =>
     table.io.trainReadReq.valid         := t0_fire && t0_needWrite && PathEnable.B
     table.io.trainReadReq.bits.setIdx   := idx
@@ -425,7 +466,8 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   /*
    *  train pipeline stage 1
    */
-  private val t1_fire     = RegNext(t0_fire, false.B)
+  private val t1FireReg   = RegNext(t0_fire, false.B)
+  private val t1_fire     = t1FireReg && !io.bpuFlushing
   private val t1_branches = RegEnable(io.train.branches, t0_fire)
   private val t1_meta     = RegEnable(t0_meta, 0.U.asTypeOf(t0_meta), t0_fire)
   private val t1_commonHR = RegEnable(t0_commonHR, t0_fire)
@@ -602,14 +644,22 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
   dontTouch(writeBiasDirMask)
   dontTouch(t1_writeBiasEntryVec)
 
-  when(t1_writeValid) {
+  when(io.contextFlush) {
+    scThreshold := VecInit.tabulate(NumWays)(_ => ThresholdCounter.Init)
+  }.elsewhen(t1_writeValid) {
     scThreshold := t1_writeThresVec
   }
 
   /*
    *  train pipeline stage 2
    */
-  private val t2_writeValid          = RegNext(t1_writeValid, false.B)
+  private val t2WriteValidReg        = RegNext(t1_writeValid, false.B)
+  private val t2_writeValid          = t2WriteValidReg && !io.bpuFlushing
+
+  when(io.contextFlush) {
+    t1FireReg       := false.B
+    t2WriteValidReg := false.B
+  }
   private val t2_bankMask            = RegEnable(t1_bankMask, t1_fire)
   private val t2_pathSetIdx          = RegEnable(t1_pathSetIdx, t1_fire)
   private val t2_globalSetIdx        = RegEnable(t1_globalSetIdx, t1_fire)
