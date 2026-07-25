@@ -253,6 +253,9 @@ class WriteBuffer[T <: WriteReqBundle](
     val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
     replacerWay(nRows) := replacer.way
     replacer.access(touchWays)
+    when(contextFlush) {
+      replacer.clearState()
+    }
     when(flush || contextFlush) {
       // Reset the write buffer needWrite when flush or contextFlush is true
       for (i <- 0 until numEntries) {
@@ -260,10 +263,11 @@ class WriteBuffer[T <: WriteReqBundle](
       }
     }
     when(contextFlush) {
-      // On context switch, also invalidate all entries so stale data won't suppress future re-writes
+      // On context switch, also invalidate all entries and clear data so stale data won't revive
       for (i <- 0 until numEntries) {
         valids(nRows)(i) := false.B
       }
+      entries(nRows) := 0.U.asTypeOf(entries(nRows))
     }
     XSPerfAccumulate(f"${namePrefix}_port${nRows}_is_full", writePortValid(nRows) && fullVec(nRows))
     XSPerfHistogram(

@@ -244,7 +244,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     p.io.contextFlush := contextFlush && getSubFlushEnable(p)
     p.io.bpuFlushing  := bpuFlushing && getSubFlushEnable(p)
   }
-  io.fromFtq.train.ready := predictors.map(_.io.trainReady).reduce(_ && _)
+  io.fromFtq.train.ready := bpuFlushing || predictors.map(_.io.trainReady).reduce(_ && _)
 
   /* *** predictor specific inputs *** */
   abtb.io.redirectValid  := redirect.valid
