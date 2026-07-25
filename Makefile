@@ -420,11 +420,12 @@ $(FRONTEND_PYLIB): $(FRONTEND_TOP_V) $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND
 	@frontend_waveform_format="$$(cat "$(FRONTEND_WAVEFORM_FORMAT_FILE)" 2>/dev/null || printf '%s' '$(FRONTEND_WAVEFORM_FORMAT)')"; \
 	$(FRONTEND_BUILD_ENV) time $(FRONTEND_PICKER) export $(dir $<)ClockGate.sv --sname Frontend \
 		--filelist $(FRONTEND_PICKER_FILELIST) \
-		--lang python --autobuild true --cp_lib true \
+		--lang python --autobuild false --cp_lib true \
 		--sim $(FRONTEND_SIM) --access-mode $(FRONTEND_ACCESS_MODE) \
 		--tdir $(FRONTEND_PYLIB_DIR) \
 		-w $(FRONTEND_BUILD_DIR)/frontend.$$frontend_waveform_format \
 		--coverage $(FRONTEND_PICKER_SIM_ARGS)
+	@$(FRONTEND_BUILD_ENV) $(MAKE) -C $(FRONTEND_PYLIB_DIR) NPROC=$(FRONTEND_BUILD_JOBS)
 $(FRONTEND_BUILD_MANIFEST): $(FRONTEND_PYLIB) $(FRONTEND_WAVEFORM_FORMAT_FILE) $(FRONTEND_CONFIG_FILE)
 	@frontend_waveform_format="$$(cat "$(FRONTEND_WAVEFORM_FORMAT_FILE)" 2>/dev/null || printf '%s' '$(FRONTEND_WAVEFORM_FORMAT)')"; \
 	python3 src/test/python/Frontend/tools/write_frontend_build_manifest.py \
