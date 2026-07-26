@@ -656,6 +656,8 @@ trait HasXSParameter {
   def ISAExtensions = coreParams.ISAExtensions
   def XLEN = coreParams.XLEN
   def VLEN = coreParams.VLEN
+  def VLENB = VLEN/8
+  def vOffsetBits = log2Up(VLENB) // bits-width to index offset inside a vector reg
   def ELEN = coreParams.ELEN
   def HSXLEN = coreParams.HSXLEN
   val minFLen = 32

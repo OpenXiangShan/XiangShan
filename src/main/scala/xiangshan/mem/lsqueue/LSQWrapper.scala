@@ -90,8 +90,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     val hartId = Input(UInt(hartIdLen.W))
     val brqRedirect = Flipped(ValidIO(new Redirect))
-    val stvecFeedback = Vec(VecStorePipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
-    val ldvecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val enq = new LsqEnqIO
     val ldu = new Bundle() {
       val rawNukeQuery = Vec(LoadPipelineWidth, Flipped(new LoadRAWNukeQuery()))
@@ -202,7 +200,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
 
   // store queue wiring
   storeQueue.io.redirect                      <> io.brqRedirect
-  storeQueue.io.fromVMergeBuffer              <> io.stvecFeedback
   storeQueue.io.fromStoreUnit.unalignQueueReq <> io.sta.unalignQueueReq
   storeQueue.io.fromStoreUnit.storeAddrIn     <> io.sta.storeAddrIn // from store_s1
   storeQueue.io.fromStoreUnit.storeAddrInRe   <> io.sta.storeAddrInRe // from store_s2
@@ -232,7 +229,6 @@ class LsqWrapper(implicit p: Parameters) extends XSModule
 
   //  load queue wiring
   loadQueue.io.redirect            <> io.brqRedirect
-  loadQueue.io.vecFeedback         <> io.ldvecFeedback
   loadQueue.io.ldu                 <> io.ldu
   loadQueue.io.rob.pendingPtr      := io.rob.pendingPtr
   loadQueue.io.rob.pendingPtrNext  := io.rob.pendingPtrNext

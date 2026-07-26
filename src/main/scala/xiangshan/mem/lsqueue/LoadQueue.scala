@@ -171,7 +171,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 {
   val io = IO(new Bundle() {
     val redirect = Flipped(Valid(new Redirect))
-    val vecFeedback = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     val enq = new LqEnqIO
     val ldu = new Bundle() {
       val rawNukeQuery = Vec(LoadPipelineWidth, Flipped(new LoadRAWNukeQuery()))
@@ -252,7 +251,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
    * VirtualLoadQueue
    */
   virtualLoadQueue.io.redirect      <> io.redirect
-  virtualLoadQueue.io.vecCommit     <> io.vecFeedback
   virtualLoadQueue.io.enq           <> io.enq
   virtualLoadQueue.io.ldin          <> io.ldu.ldin // from load_s3
   virtualLoadQueue.io.lqFull        <> io.lqFull
@@ -314,8 +312,6 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   loadQueueReplay.io.mmioWakeup := uncacheBuffer.io.mmioWakeup
   loadQueueReplay.io.ncWakeup := uncacheBuffer.io.ncWakeup
-  // TODO: implement it!
-  loadQueueReplay.io.vecFeedback := io.vecFeedback
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
 

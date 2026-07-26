@@ -328,11 +328,6 @@ object Bundles {
     })
   }
 
-  class StoreMaBufToVecStoreMergeBufferIO(implicit p: Parameters)  extends VLSUBundle{
-    val mbIndex = Output(UInt(vsmBindexBits.W))
-    val flush   = Output(Bool())
-  }
-
   // Store byte valid mask write bundle
   //
   // Store byte valid mask write to SQ takes 2 cycles

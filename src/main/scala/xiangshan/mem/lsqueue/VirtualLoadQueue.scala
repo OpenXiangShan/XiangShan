@@ -40,7 +40,6 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   val io = IO(new Bundle() {
     // control
     val redirect    = Flipped(Valid(new Redirect))
-    val vecCommit   = Vec(VecLoadPipelineWidth, Flipped(ValidIO(new FeedbackToLsqIO)))
     // from dispatch
     val enq         = new LqEnqIO
     // from ldu s3

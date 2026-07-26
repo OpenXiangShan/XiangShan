@@ -1152,8 +1152,6 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     }
   }
 
-  lsq.io.ldvecFeedback.foreach(x => x := 0.U.asTypeOf(x))
-  lsq.io.stvecFeedback.foreach(x => x := 0.U.asTypeOf(x))
   issueVldu.foreach(_.ready := false.B)
   vstdIssue.foreach(_.ready := false.B)
   io.mem_to_ooo.vlduIqFeedback.foreach { fb =>
