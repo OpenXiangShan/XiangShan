@@ -822,7 +822,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
   val l1xbar1to2 = l1xbar1to2LMs.map(_.node)
 
   // l0 <- l1 <- l2 <- l3
-  l1xbar1to2(3) := pbus_xbar
+  val pbusXbarBuf = connectThroughBuffer(l1xbar1to2(3), pbus_xbar, "pbus_xbar_buf")
   val l1x3ToL1x2Buf = connectThroughBuffer(l1xbar1to2(2), l1xbar1to2(3), "imsic_l1x3_to_l1x2_buf")
   val l1x2ToL1x1Buf = connectThroughBuffer(l1xbar1to2(1), l1xbar1to2(2), "imsic_l1x2_to_l1x1_buf")
   val l1x1ToL1x0Buf = connectThroughBuffer(l1xbar1to2(0), l1xbar1to2(1), "imsic_l1x1_to_l1x0_buf")
@@ -896,6 +896,7 @@ class imsicPbusTop(params: Pbus2Params)(implicit p: Parameters) extends LazyModu
     u_crsdie_DataBridge.module.reset := pbusRouteReset
 
     val l1x3RouteReset = ResetUtils.stageResetOut(l1xbar1to2LMs(3).module, pbusRouteReset)
+    pbusXbarBuf.module.reset := pbusRouteReset
     l1x3ToL1x2Buf.module.reset := pbusRouteReset
     val l1x2RouteReset = ResetUtils.stageResetOut(l1xbar1to2LMs(2).module, l1x3RouteReset)
     l1x2ToL1x1Buf.module.reset := l1x3RouteReset
