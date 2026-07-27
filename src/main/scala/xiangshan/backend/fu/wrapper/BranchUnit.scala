@@ -14,7 +14,7 @@ import xiangshan.frontend.bpu.BranchAttribute
 
 class AddrAddModule(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle {
-    val pcExtend = Input(UInt((VAddrBits + 1).W))
+    val pcExtend = Input(UInt((VAddrBits + 2).W))
     val taken = Input(Bool())
     val isRVC = Input(Bool())
     val imm = Input(UInt(32.W)) // branch inst only support 12 bits immediate num
@@ -24,7 +24,7 @@ class AddrAddModule(implicit p: Parameters) extends XSModule {
   val immMinWidth = FuConfig.BrhCfg.immType.map(x => x.len).max
   print(s"[Branch]: immMinWidth = $immMinWidth\n")
   io.target := SignExt(Mux(io.taken,
-    io.pcExtend + SignExt(io.imm(immMinWidth + 2, 0), VAddrBits + 1),
+    io.pcExtend + SignExt(io.imm(immMinWidth + 2, 0), VAddrBits + 2),
     io.pcExtend + io.nextPcOffset
   ), XLEN)
 }
@@ -38,8 +38,8 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   dataModule.io.fixedTaken := io.in.bits.ctrl.predictInfo.get.fixedTaken
 
   val pcExtend = Mux(io.instrAddrTransType.get.shouldBeSext,
-    SignExt(io.in.bits.data.pc.get, VAddrBits + 1),
-    ZeroExt(io.in.bits.data.pc.get, VAddrBits + 1)
+    SignExt(io.in.bits.data.pc.get, VAddrBits + 2),
+    ZeroExt(io.in.bits.data.pc.get, VAddrBits + 2)
   )
   addModule.io.pcExtend := pcExtend
   addModule.io.imm := io.in.bits.data.imm // imm
@@ -57,7 +57,7 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
   io.out.bits.res.data := 0.U
   io.out.bits.res.redirect.get match {
     case redirect =>
-      redirect.valid := io.out.valid && (isMisPred || redirect.bits.hasBackendFault)
+      redirect.valid := io.out.valid && isMisPred
       redirect.bits := 0.U.asTypeOf(io.out.bits.res.redirect.get.bits)
       redirect.bits.level := RedirectLevel.flushAfter
       redirect.bits.robIdx := io.in.bits.ctrl.robIdx
@@ -68,9 +68,9 @@ class BranchUnit(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg) {
       redirect.bits.taken := dataModule.io.taken
       redirect.bits.target := addModule.io.target
       redirect.bits.pc := io.in.bits.data.pc.get
-      redirect.bits.backendIAF := io.instrAddrTransType.get.checkAccessFault(addModule.io.target)
-      redirect.bits.backendIPF := io.instrAddrTransType.get.checkPageFault(addModule.io.target)
-      redirect.bits.backendIGPF := io.instrAddrTransType.get.checkGuestPageFault(addModule.io.target)
+      redirect.bits.backendIAF := false.B
+      redirect.bits.backendIPF := false.B
+      redirect.bits.backendIGPF := false.B
       redirect.bits.attribute := io.toFrontendBJUResolve.get.bits.attribute
   }
   io.toFrontendBJUResolve.get.valid := io.out.valid
