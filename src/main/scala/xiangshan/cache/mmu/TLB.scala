@@ -107,9 +107,15 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   )))
   val need_gpa = RegInit(false.B)
   val need_gpa_wire = WireInit(false.B)
+  private val NeedGpaRespCountLimit = 512
+  val need_gpa_count = RegInit(0.U(log2Ceil(NeedGpaRespCountLimit).W))
+  val need_gpa_ptw_resp = need_gpa && ptw.resp.fire && ptw.resp.bits.getGpa
+  val need_gpa_count_full = need_gpa_count.andR
   val maybe_need_gpa_not_allow_refill = WireInit(false.B)
   val need_clear_need_gpa = RegInit(false.B)
   val need_clear_need_gpa_vec = WireInit(VecInit.fill(Width)(false.B))
+  val need_gpa_state_clear_vec = WireInit(VecInit.fill(Width)(false.B))
+  val need_gpa_state_clear = need_gpa_state_clear_vec.asUInt.orR
   need_clear_need_gpa := need_clear_need_gpa_vec.asUInt.orR
 
   val need_gpa_robidx = Reg(new RobPtr)
@@ -123,6 +129,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
   val resp_s1_isFakePte = RegInit(false.B)
   val hasGpf = Wire(Vec(Width, Bool()))
   val need_replay = WireInit(VecInit.fill(Width) {false.B})
+
+  when (need_gpa_wire || need_gpa_state_clear || need_gpa_count_full) {
+    need_gpa_count := 0.U
+  } .elsewhen (need_gpa_ptw_resp) {
+    need_gpa_count := need_gpa_count + 1.U
+  }
 
   val Sv39Enable = csr.satp.mode === 8.U
   val Sv48Enable = csr.satp.mode === 9.U
@@ -296,8 +308,12 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     val currentRedirect = req_out(i).debug.robIdx.needFlush(redirect)
     val lastCycleRedirect = req_out(i).debug.robIdx.needFlush(RegNext(redirect))
 
-    when (!isitlb && need_gpa_robidx_valid && need_gpa_robidx.needFlush(redirect) || isitlb && flush_pipe(i) || need_clear_need_gpa){
+    when (
+      (!isitlb && need_gpa_robidx_valid && need_gpa_robidx.needFlush(redirect)) ||
+      (isitlb && flush_pipe(i)) || need_clear_need_gpa || need_gpa_count_full
+    ) {
       need_gpa := false.B
+      need_gpa_state_clear_vec(i) := true.B
       resp_gpa_refill := false.B
       need_gpa_vpn := 0.U
       need_gpa_robidx_valid := false.B
@@ -334,6 +350,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
     when (req_out_v(i) && hasGpf(i) && resp_gpa_refill && need_gpa_req_match){
       need_gpa := false.B
+      need_gpa_state_clear_vec(i) := true.B
     }
 
     val hit = e_hit || p_hit
