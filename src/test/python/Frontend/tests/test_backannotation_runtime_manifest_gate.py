@@ -17,8 +17,8 @@ from tools import backannotate_funcov
 _SOURCE_SHA = "1" * 40
 
 
-def _write_build(build_root: Path) -> tuple[Path, dict]:
-    pylib = build_root / "pylib" / "Frontend"
+def _write_build(build_root: Path, simulator: str = "verilator") -> tuple[Path, dict]:
+    pylib = build_root / f"pylib-{simulator}" / "Frontend"
     rtl = build_root / "rtl"
     pylib.mkdir(parents=True)
     rtl.mkdir(parents=True)
@@ -27,7 +27,7 @@ def _write_build(build_root: Path) -> tuple[Path, dict]:
     (pylib / "Frontend_offset.yaml").write_text("signal: 1\n", encoding="utf-8")
     (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
 
-    manifest_path = (build_root / "frontend_build_manifest.json").resolve()
+    manifest_path = (build_root / f"frontend_build_manifest.{simulator}.json").resolve()
     write_frontend_build_manifest(
         manifest_path,
         build_root=build_root,
@@ -35,8 +35,9 @@ def _write_build(build_root: Path) -> tuple[Path, dict]:
         source_tree_dirty=False,
         build_config="DefaultConfig:E.b:1:systemverilog:fst",
         build_command="make frontend",
+        simulator=simulator,
     )
-    runtime = load_frontend_build_manifest(build_root, manifest_path)
+    runtime = load_frontend_build_manifest(build_root, manifest_path, simulator=simulator)
     assert runtime["build_manifest_status"] == "valid", runtime["build_manifest_reasons"]
     return manifest_path, runtime
 
@@ -50,9 +51,9 @@ def _resign(provenance: dict) -> None:
     )
 
 
-def _eligible_artifact(tmp_path: Path) -> tuple[dict, Path, Path]:
+def _eligible_artifact(tmp_path: Path, simulator: str = "verilator") -> tuple[dict, Path, Path]:
     build_root = tmp_path / "build-frontend"
-    manifest_path, runtime = _write_build(build_root)
+    manifest_path, runtime = _write_build(build_root, simulator)
     run_root = (tmp_path / "run").resolve()
     (run_root / "logs").mkdir(parents=True)
     (run_root / "funcov").mkdir()
@@ -71,6 +72,7 @@ def _eligible_artifact(tmp_path: Path) -> tuple[dict, Path, Path]:
 
     definitions = [{"bin_id": "BIN-501", "bin_name": "runtime_manifest"}]
     provenance = {
+        "simulator": runtime["simulator"],
         "dut_source_sha": runtime["dut_source_sha"],
         "implementation_sha": runtime["implementation_sha"],
         "design_baseline_sha": runtime["design_baseline_sha"],
@@ -132,7 +134,7 @@ def test_funcov_artifact_records_absolute_manifest_path(tmp_path, monkeypatch):
     seen: dict[str, Path] = {}
     empty_delta_sha = hashlib.sha256(b"").hexdigest()
 
-    def fake_load(build_root: Path, manifest_path: Path) -> dict:
+    def fake_load(build_root: Path, manifest_path: Path, **_kwargs) -> dict:
         seen["manifest_path"] = manifest_path
         return {
             "dut_source_sha": _SOURCE_SHA,
@@ -185,6 +187,14 @@ def test_funcov_artifact_records_absolute_manifest_path(tmp_path, monkeypatch):
 
 def test_backannotation_runtime_manifest_gate_accepts_unchanged_build(tmp_path):
     raw, _manifest_path, _build_root = _eligible_artifact(tmp_path)
+
+    gate = backannotate_funcov.evaluate_artifact(raw)
+
+    assert gate == {"kind": "dut", "eligible": True, "reasons": []}
+
+
+def test_backannotation_runtime_manifest_gate_accepts_vcs_build(tmp_path):
+    raw, _manifest_path, _build_root = _eligible_artifact(tmp_path, "vcs")
 
     gate = backannotate_funcov.evaluate_artifact(raw)
 
@@ -259,7 +269,7 @@ def test_backannotation_runtime_manifest_gate_rejects_deleted_manifest(tmp_path)
 
 def test_backannotation_runtime_manifest_gate_rejects_build_artifact_tamper(tmp_path):
     raw, _manifest_path, build_root = _eligible_artifact(tmp_path)
-    (build_root / "pylib" / "Frontend" / "libUTFrontend.so").write_bytes(
+    (build_root / "pylib-verilator" / "Frontend" / "libUTFrontend.so").write_bytes(
         b"tampered-dut-model"
     )
 
@@ -269,3 +279,27 @@ def test_backannotation_runtime_manifest_gate_rejects_build_artifact_tamper(tmp_
     assert "build_manifest_runtime:invalid" in gate["reasons"]
     assert "build_manifest_runtime:build_hash_mismatch:dut_build_sha256" in gate["reasons"]
     assert "build_manifest_runtime_mismatch:dut_build_sha256" in gate["reasons"]
+
+
+@pytest.mark.parametrize("simulator", ("verilator", "vcs"))
+def test_build_manifest_binds_the_selected_simulator(tmp_path, simulator):
+    build_root = tmp_path / "build-frontend"
+    manifest_path, runtime = _write_build(build_root, simulator)
+
+    assert manifest_path.name == f"frontend_build_manifest.{simulator}.json"
+    assert runtime["build_manifest_status"] == "valid"
+
+
+def test_build_manifest_rejects_simulator_mismatch(tmp_path):
+    build_root = tmp_path / "build-frontend"
+    manifest_path, _runtime = _write_build(build_root, "vcs")
+
+    mismatched = load_frontend_build_manifest(
+        build_root,
+        manifest_path,
+        simulator="verilator",
+        pylib_dir=build_root / "pylib-vcs" / "Frontend",
+    )
+
+    assert mismatched["build_manifest_status"] == "invalid"
+    assert "manifest_simulator_mismatch" in mismatched["build_manifest_reasons"]

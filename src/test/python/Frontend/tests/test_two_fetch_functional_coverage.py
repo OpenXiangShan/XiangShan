@@ -165,9 +165,9 @@ def _eligible_provenance():
         ).encode("utf-8")
     ).hexdigest()
     build_root = Path("/tmp/frontend-funcov-unit") / f"manifest-{os.getpid()}" / "build-frontend"
-    manifest_path = build_root / "frontend_build_manifest.json"
+    manifest_path = build_root / "frontend_build_manifest.verilator.json"
     if not manifest_path.is_file():
-        pylib = build_root / "pylib" / "Frontend"
+        pylib = build_root / "pylib-verilator" / "Frontend"
         rtl = build_root / "rtl"
         pylib.mkdir(parents=True, exist_ok=True)
         rtl.mkdir(parents=True, exist_ok=True)
@@ -202,6 +202,7 @@ def _eligible_provenance():
     values["definitions_sha256"] = definitions_sha256
     values["sampler_sha256"] = sampler_sha256
     values["dut_source_sha"] = manifest["dut_source_sha"]
+    values["simulator"] = manifest["simulator"]
     values["implementation_sha"] = manifest["implementation_sha"]
     values["design_baseline_sha"] = manifest["design_baseline_sha"]
     values["source_sha_override"] = manifest["source_sha_override"]
@@ -217,6 +218,7 @@ def _eligible_provenance():
 
 def _resign_provenance(values):
     compatibility_fields = (
+        "simulator",
         "dut_source_sha",
         "implementation_sha",
         "design_baseline_sha",
@@ -1459,7 +1461,7 @@ def _write_codecov_provenance_fixture(
     source_root: Path,
     run_id: str = "unit-codecov-case",
 ) -> Path:
-    pylib = source_root / "pylib" / "Frontend"
+    pylib = source_root / "pylib-verilator" / "Frontend"
     rtl = source_root / "rtl"
     pylib.mkdir(parents=True, exist_ok=True)
     rtl.mkdir(parents=True, exist_ok=True)
@@ -1467,7 +1469,7 @@ def _write_codecov_provenance_fixture(
     (pylib / "_UT_Frontend.so").write_bytes(b"unit-python-extension")
     (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
     (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
-    manifest_path = source_root / "frontend_build_manifest.json"
+    manifest_path = source_root / "frontend_build_manifest.verilator.json"
     manifest = write_frontend_build_manifest(
         manifest_path,
         build_root=source_root,
@@ -1478,6 +1480,7 @@ def _write_codecov_provenance_fixture(
     )
     build_hashes = manifest["artifacts"]
     provenance = {
+        "simulator": "verilator",
         "dut_source_sha": "a" * 40,
         "implementation_sha": "a" * 40,
         "design_baseline_sha": "a" * 40,
@@ -1630,7 +1633,7 @@ def test_raw_code_coverage_report_rejects_unproven_dat(
     elif mutation == "empty_dat":
         dat_path.write_bytes(b"")
     elif mutation == "runtime_dut":
-        (source_root / "pylib" / "Frontend" / "libUTFrontend.so").write_bytes(
+        (source_root / "pylib-verilator" / "Frontend" / "libUTFrontend.so").write_bytes(
             b"tampered-after-manifest"
         )
     else:
@@ -1882,7 +1885,7 @@ def test_explicit_unknown_testcase_cannot_hide_behind_a_known_target(tmp_path, m
 
 def test_build_manifest_binds_source_sha_to_compiled_artifacts(tmp_path):
     build_root = tmp_path / "build-frontend"
-    pylib = build_root / "pylib" / "Frontend"
+    pylib = build_root / "pylib-verilator" / "Frontend"
     rtl = build_root / "rtl"
     pylib.mkdir(parents=True)
     rtl.mkdir(parents=True)
@@ -1890,7 +1893,7 @@ def test_build_manifest_binds_source_sha_to_compiled_artifacts(tmp_path):
     (pylib / "_UT_Frontend.so").write_bytes(b"python-extension")
     (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
     (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
-    manifest_path = build_root / "frontend_build_manifest.json"
+    manifest_path = build_root / "frontend_build_manifest.verilator.json"
 
     write_frontend_build_manifest(
         manifest_path,
@@ -1956,7 +1959,7 @@ def test_build_manifest_runtime_rechecks_allowlisted_source_delta(tmp_path):
     implementation = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
 
     build_root = repo / "build-frontend"
-    pylib = build_root / "pylib" / "Frontend"
+    pylib = build_root / "pylib-verilator" / "Frontend"
     rtl = build_root / "rtl"
     pylib.mkdir(parents=True)
     rtl.mkdir(parents=True)
@@ -1974,7 +1977,9 @@ def test_build_manifest_runtime_rechecks_allowlisted_source_delta(tmp_path):
             "--build-root",
             str(build_root),
             "--output",
-            str(build_root / "frontend_build_manifest.json"),
+            str(build_root / "frontend_build_manifest.verilator.json"),
+            "--sim",
+            "verilator",
             "--build-config",
             "unit",
             "--dut-source-sha",
@@ -1993,7 +1998,7 @@ def test_build_manifest_runtime_rechecks_allowlisted_source_delta(tmp_path):
     assert loaded["dut_source_sha"] == baseline
     assert loaded["implementation_sha"] == implementation
 
-    manifest_path = build_root / "frontend_build_manifest.json"
+    manifest_path = build_root / "frontend_build_manifest.verilator.json"
     tampered = json.loads(manifest_path.read_text(encoding="utf-8"))
     tampered["source_delta_sha256"] = "f" * 64
     manifest_path.write_text(json.dumps(tampered), encoding="utf-8")
@@ -2012,7 +2017,7 @@ def test_build_manifest_runtime_rechecks_allowlisted_source_delta(tmp_path):
 )
 def test_build_manifest_rejects_malformed_provenance(tmp_path, mutation, reason):
     build_root = tmp_path / "build-frontend"
-    pylib = build_root / "pylib" / "Frontend"
+    pylib = build_root / "pylib-verilator" / "Frontend"
     rtl = build_root / "rtl"
     pylib.mkdir(parents=True)
     rtl.mkdir(parents=True)
@@ -2020,7 +2025,7 @@ def test_build_manifest_rejects_malformed_provenance(tmp_path, mutation, reason)
     (pylib / "_UT_Frontend.so").write_bytes(b"python-extension")
     (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
     (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
-    manifest_path = build_root / "frontend_build_manifest.json"
+    manifest_path = build_root / "frontend_build_manifest.verilator.json"
     manifest = write_frontend_build_manifest(
         manifest_path,
         build_root=build_root,
@@ -2041,7 +2046,7 @@ def test_build_manifest_rejects_malformed_provenance(tmp_path, mutation, reason)
 
 def test_build_manifest_rejects_unchecked_source_sha_override(tmp_path):
     build_root = tmp_path / "build-frontend"
-    pylib = build_root / "pylib" / "Frontend"
+    pylib = build_root / "pylib-verilator" / "Frontend"
     rtl = build_root / "rtl"
     pylib.mkdir(parents=True)
     rtl.mkdir(parents=True)
@@ -2049,7 +2054,7 @@ def test_build_manifest_rejects_unchecked_source_sha_override(tmp_path):
     (pylib / "_UT_Frontend.so").write_bytes(b"python-extension")
     (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
     (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
-    manifest_path = build_root / "frontend_build_manifest.json"
+    manifest_path = build_root / "frontend_build_manifest.verilator.json"
     manifest = write_frontend_build_manifest(
         manifest_path,
         build_root=build_root,

@@ -29,6 +29,7 @@ SHA256_RE = re.compile(r"[0-9a-fA-F]{64}\Z")
 # that binds it to one clean DUT build.
 BUILD_HASH_FIELDS = tuple(MANIFEST_BUILD_HASH_FIELDS)
 COMPATIBILITY_FIELDS = (
+    "simulator",
     "dut_source_sha",
     "implementation_sha",
     "design_baseline_sha",
@@ -183,9 +184,17 @@ def file_sha256(path: Path) -> str:
 def _manifest_path(source_root: Path) -> Path:
     """Resolve the build manifest for either a build root or its rtl child."""
     source_root = source_root.resolve()
-    candidates = [source_root / "frontend_build_manifest.json"]
+    candidates = [
+        source_root / "frontend_build_manifest.verilator.json",
+        source_root / "frontend_build_manifest.vcs.json",
+    ]
     if source_root.name == "rtl":
-        candidates.append(source_root.parent / "frontend_build_manifest.json")
+        candidates.extend(
+            [
+                source_root.parent / "frontend_build_manifest.verilator.json",
+                source_root.parent / "frontend_build_manifest.vcs.json",
+            ]
+        )
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -237,6 +246,9 @@ def _load_manifest(manifest_path: Path) -> tuple[dict, str]:
         raise CoverageProvenanceError(f"build manifest unreadable: {manifest_path}") from exc
     if not isinstance(manifest, dict):
         raise CoverageProvenanceError(f"build manifest is not an object: {manifest_path}")
+    simulator = str(manifest.get("simulator") or "").strip().lower()
+    if simulator not in {"verilator", "vcs"}:
+        raise CoverageProvenanceError("build manifest has invalid simulator")
     if manifest.get("source_tree_dirty") is not False:
         raise CoverageProvenanceError("build manifest source_tree_dirty is not false")
     artifacts = manifest.get("artifacts")
@@ -246,7 +258,11 @@ def _load_manifest(manifest_path: Path) -> tuple[dict, str]:
         value = str(artifacts.get(field) or "").strip()
         if SHA256_RE.fullmatch(value) is None:
             raise CoverageProvenanceError(f"build manifest has invalid artifact hash: {field}")
-    runtime = load_frontend_build_manifest(manifest_path.parent, manifest_path)
+    runtime = load_frontend_build_manifest(
+        manifest_path.parent,
+        manifest_path,
+        simulator=simulator,
+    )
     if str(runtime.get("build_manifest_status") or "").strip().lower() != "valid":
         reasons = runtime.get("build_manifest_reasons") or ["unknown"]
         raise CoverageProvenanceError(

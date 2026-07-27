@@ -34,6 +34,7 @@ BIN_ID_RE = re.compile(r"^BIN-\d+$")
 
 _PASS_OUTCOMES = {"pass", "passed", "ok", "success", "successful"}
 _REQUIRED_PROVENANCE = (
+    "simulator",
     "dut_source_sha",
     "implementation_sha",
     "design_baseline_sha",
@@ -67,6 +68,7 @@ _SHA256_PROVENANCE = {
     "compatibility_signature",
 }
 _COMPATIBILITY_FIELDS = (
+    "simulator",
     "dut_source_sha",
     "implementation_sha",
     "design_baseline_sha",
@@ -85,6 +87,7 @@ _COMPATIBILITY_FIELDS = (
 )
 _REQUIRED_SEED_FIELDS = ("test", "backend", "icache", "ptw")
 _RUNTIME_MANIFEST_FIELDS = (
+    "simulator",
     "build_manifest_sha256",
     "dut_build_sha256",
     "dut_python_extension_sha256",
@@ -339,7 +342,14 @@ def _runtime_manifest_gate(provenance: dict) -> list[str]:
     if not manifest_path.is_absolute():
         return ["invalid_provenance:build_manifest_path"]
 
-    runtime = load_frontend_build_manifest(manifest_path.parent, manifest_path)
+    simulator = str(provenance.get("simulator") or "").strip().lower()
+    if simulator not in {"verilator", "vcs"}:
+        return ["invalid_provenance:simulator"]
+    runtime = load_frontend_build_manifest(
+        manifest_path.parent,
+        manifest_path,
+        simulator=simulator,
+    )
     reasons: list[str] = []
     runtime_status = str(runtime.get("build_manifest_status") or "").strip().lower()
     if runtime_status != "valid":
@@ -477,6 +487,8 @@ def evaluate_artifact(raw: Any) -> dict:
         elif key in _SHA256_PROVENANCE and re.fullmatch(r"[0-9a-fA-F]{64}", str(value).strip()) is None:
             reasons.append(f"invalid_provenance:{key}")
     source_sha = str(provenance.get("dut_source_sha") or "").strip()
+    if str(provenance.get("simulator") or "").strip().lower() not in {"verilator", "vcs"}:
+        reasons.append("invalid_provenance:simulator")
     if source_sha not in {"", "unavailable", "unknown"} and re.fullmatch(
         r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", source_sha
     ) is None:

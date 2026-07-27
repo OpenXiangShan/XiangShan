@@ -11,7 +11,12 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .artifact_provenance import file_sha256, load_frontend_build_manifest
+from .artifact_provenance import (
+    file_sha256,
+    frontend_build_manifest_path,
+    frontend_simulator,
+    load_frontend_build_manifest,
+)
 from .funcov import (
     CFVEC_SAMPLER_BIN_KEYS,
     TWO_FETCH_SAMPLER_BIN_KEYS,
@@ -19,6 +24,7 @@ from .funcov import (
     sample_two_fetch_coverage,
 )
 from .rvc_decoder import expand_rvc
+from .pylib import frontend_pylib_path
 
 
 def _frontend_root() -> Path:
@@ -52,6 +58,7 @@ def _json_sha256(value: Any) -> str:
 
 
 COMPATIBILITY_FIELDS = (
+    "simulator",
     "dut_source_sha",
     "implementation_sha",
     "design_baseline_sha",
@@ -314,14 +321,17 @@ class FunctionalCoverageRecorder:
         repo_root = frontend_root.parents[3]
         build_root = repo_root / "build-frontend"
         manifest_override = os.getenv("TB_DUT_BUILD_MANIFEST", "").strip()
+        simulator = frontend_simulator(os.getenv("TB_FRONTEND_SIM", "verilator"))
         manifest_path = (
             Path(manifest_override).expanduser()
             if manifest_override
-            else build_root / "frontend_build_manifest.json"
+            else frontend_build_manifest_path(build_root, simulator)
         ).resolve(strict=False)
         build = load_frontend_build_manifest(
             build_root,
             manifest_path,
+            simulator=simulator,
+            pylib_dir=frontend_pylib_path() / "Frontend",
         )
         source_override = os.getenv("TB_DUT_SOURCE_SHA", "").strip()
         build_config_override = os.getenv("TB_DUT_BUILD_CONFIG", "").strip()
@@ -363,6 +373,7 @@ class FunctionalCoverageRecorder:
             }
         )
         provenance = {
+            "simulator": simulator,
             "dut_source_sha": dut_source_sha,
             "dut_source_origin": dut_source_origin,
             "design_baseline_sha": build.get("design_baseline_sha", "unavailable"),
@@ -630,7 +641,7 @@ class FunctionalCoverageRecorder:
 
     @cached_property
     def _registered_internal_signals(self) -> Optional[set[str]]:
-        offset_yaml = _frontend_root().parents[3] / "build-frontend" / "pylib" / "Frontend" / "Frontend_offset.yaml"
+        offset_yaml = frontend_pylib_path() / "Frontend" / "Frontend_offset.yaml"
         if not offset_yaml.exists():
             return None
 
