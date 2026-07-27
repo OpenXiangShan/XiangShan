@@ -827,6 +827,7 @@ trait HasXSParameter {
   def LFSTSize = 64
   def SSIDWidth = log2Up(LFSTSize)
   def LFSTWidth = 2
+  def strictResetPeriod = 8192
   def StoreSetEnable = true // LWT will be disabled if SS is enabled
   def LFSTEnable = true
 

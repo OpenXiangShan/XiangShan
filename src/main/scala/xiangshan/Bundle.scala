@@ -602,6 +602,53 @@ class MemPredUpdateReq(implicit p: Parameters) extends XSBundle  {
   val stpc = UInt(MemPredPCWidth.W)
 }
 
+class StoreSetPredDBEntry(implicit p: Parameters) extends XSBundle {
+  val timeCnt = UInt(64.W)
+  val robIdx = UInt(log2Ceil(RobSize).W)
+  val foldPc = UInt(MemPredPCWidth.W)
+  val isStore = Bool()
+  val ssid = UInt(SSIDWidth.W)
+  val ssitStrict = Bool()
+  val lfstShouldWait = Bool()
+  val lfstNotIssuedStoreGt1 = Bool()
+  val finalLoadWaitBit = Bool()
+  val finalLoadWaitStrict = Bool()
+}
+
+class StoreSetTrainDBEntry(implicit p: Parameters) extends XSBundle {
+  val timeCnt = UInt(64.W)
+  val ldFoldPc = UInt(MemPredPCWidth.W)
+  val stFoldPc = UInt(MemPredPCWidth.W)
+}
+
+class StoreSetUpdateDBEntry(implicit p: Parameters) extends XSBundle {
+  val timeCnt = UInt(64.W)
+  val ldFoldPc = UInt(MemPredPCWidth.W)
+  val stFoldPc = UInt(MemPredPCWidth.W)
+  val loadOldSSID = UInt(SSIDWidth.W)
+  val storeOldSSID = UInt(SSIDWidth.W)
+  val loadOldStrict = Bool()
+  val winnerSSID = UInt(SSIDWidth.W)
+  val newLoadSSID = UInt(SSIDWidth.W)
+  val newLoadStrict = Bool()
+  val updateType = UInt(3.W)
+}
+
+class StoreSetLoadUnitCheckDBEntry(implicit p: Parameters) extends XSBundle {
+  val timeCnt = UInt(64.W)
+  val robIdx = UInt(log2Ceil(RobSize).W)
+  val foldPc = UInt(MemPredPCWidth.W)
+  val ssid = UInt(SSIDWidth.W)
+  val loadSqIdx = UInt(log2Ceil(StoreQueueSize).W)
+  val storeSqIdx = UInt(log2Ceil(StoreQueueSize).W)
+  val loadWaitBit = Bool()
+  val loadWaitStrict = Bool()
+  val mdpAddrValid = Bool()
+  val mdpAddrStrict = Bool()
+  val mdpAddrHit = Bool()
+  val storeSqIdxValid = Bool()
+}
+
 class CustomCSRCtrlIO(implicit p: Parameters) extends XSBundle {
   // Prefetcher
   val pf_ctrl = Output(new PrefetchCtrl)
