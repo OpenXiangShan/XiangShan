@@ -587,7 +587,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val deqCanFlushPipe = deqHasFlushPipe && (!deqIsVlsFlushPipe || deqVlsCanCommit)
   // delay 2 cycle wait exceptionGen out
   // vls exception can be committed only when RAB commit all its reg pairs
-  deqVlsCanCommit := RegNext(RegNext(deqPtrEntry.commit_w)) && rab.io.status.commitEnd
+  deqVlsCanCommit := RegNext(RegNext((deqIsVlsException || deqIsVlsFlushPipe) && deqPtrEntry.commit_w)) && rab.io.status.commitEnd
 
   // lock at assertion of deqVlsExceptionNeedCommit until condition not assert
   val deqVlsExcpLock = RegInit(false.B)
@@ -641,6 +641,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.flushOut.bits.level := Mux(deqHasReplayInst || intrEnable || deqHasException || needModifyFtqIdxOffset, RedirectLevel.flush, RedirectLevel.flushAfter) // TODO use this to implement "exception next"
   io.flushOut.bits.interrupt := true.B
   io.flushOut.bits.satpFlush := isFlushPipe && exceptionDataRead.bits.satpFlushPipe
+  io.flushOut.bits.isVlsException := deqHasException && deqIsVlsException
   XSPerfAccumulate("flush_num", io.flushOut.valid)
   XSPerfAccumulate("interrupt_num", io.flushOut.valid && intrEnable)
   XSPerfAccumulate("exception_num", io.flushOut.valid && deqHasException)

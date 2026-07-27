@@ -398,7 +398,9 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   dontTouch(io.inner_hc_perfEvents)
   dontTouch(io.outer_hc_perfEvents)
 
-  val redirect = RegNextWithEnable(io.redirect)
+  val redirectModifyLevel = WireInit(io.redirect)
+  redirectModifyLevel.bits.level := Mux(io.redirect.bits.isVlsException, RedirectLevel.flushAfter, io.redirect.bits.level)
+  val redirect = RegNextWithEnable(redirectModifyLevel)
 
   private val dcache = outer.dcache.module
   val uncache = outer.uncache.module
