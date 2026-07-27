@@ -274,7 +274,6 @@ git diff --check
 在仓库根目录执行：
 
 ```bash
-source /nfs/share/unitychip/activate
 source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
 
 python - <<'PY'
@@ -304,7 +303,6 @@ PY
 ## 验证
 
 ```bash
-source /nfs/share/unitychip/activate
 source /nfs/home/zhaoxinran/.venv/mcpgateway/bin/activate
 python -m pytest -p no:rerunfailures src/test/python/Frontend/tests/test_funcov_models.py -q
 ```
