@@ -33,7 +33,8 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 - mismatch 之后仍需继续接收并入队后续 `cfVec`，这些指令在语义上全部属于同一段 wrong-path，直到被 `redirect` 清除
 - `redirect` 生效后，必须从这段 active wrong-path 的起点开始清除 `cfVec_queue`；更老正确路径前缀必须保留
 - wrong-path 的清除边界必须由“恢复后重新建立 correct-path 对齐”的语义决定，而不是由中途某个临时 `target_pc`、`ftqidx`、等待态命中或类似局部现象决定
-- `redirect` 发出后必须立即清除当前 queue 中已知的 active wrong-path；redirect valid 当拍 `T` 和下一拍 `T+1` 观测到的 `cfVec` 不得采样入队，之后进入 recovery 状态，第一条采样到的 recovery `cfVec` 必须是该 redirect 的 target
+- 模型在周期 `T` 计划 redirect 时，`T` 的 `cfVec` 已经是 DUT 在 redirect 输入生效前的输出，必须按正常语义采样；不得因为本周期稍后会 drive redirect 而提前丢弃它
+- 令 `M` 为 DUT 首次看到 `redirect_valid=1` 的上升沿。`M` 和 `M+1` 观测到的 `cfVec` 不得采样入队；从 `M+2` 起进入 recovery，出现的第一条有效 recovery `cfVec` 必须是该 redirect 的 target
 
 ### `commit_queue` 语义
 
@@ -161,13 +162,13 @@ Backend Agent 的行为语义应等价于两个逻辑队列：
 ### 必须项（违反即语义错误）
 
 - `cfVec_queue` 入队严格按 DUT 观测顺序，不因等待目标 PC 而暂停或跳过包。
-- 除非该指令位于 redirect valid 当拍 `T` 或下一拍 `T+1` 的 skip 窗口，或在语义上被某次 `redirect` 作为 wrong-path flush 清除，否则任何已观测到的 `cfVec` 包都不得被丢弃、跳过采样或绕过入队。
+- 除非该指令位于 DUT 首次看到 redirect valid 的周期 `M` 或下一拍 `M+1` 的 skip 窗口，或在语义上被某次 `redirect` 作为 wrong-path flush 清除，否则任何已观测到的 `cfVec` 包都不得被丢弃、跳过采样或绕过入队。
 - 首次 mismatch 只定义一个 wrong-path 起点，并沿该起点向后标记同一段 wrong-path。
 - 任意时刻只允许存在一个 active wrong-path episode；在该 episode 被 `redirect` 清除之前，不得重新开第二个 wrong-path episode。
 - mismatch 后继续接收 `cfVec`，不得进入“暂停构队列”等待模式。
 - `redirect` 必须从 active wrong-path 起点开始清除 `cfVec_queue`，并保留更老 correct-path 前缀。
 - `redirect` 的 flush 范围不得因为临时 `target_pc` 可见、waiting-target 命中、`ftqidx` 数值变化或类似局部条件而被拆成多段。
-- `redirect` 发出本身必须清除已知 wrong-path queue 后缀；redirect valid 当拍 `T` 和下一拍 `T+1` 的 `cfVec` 必须被丢弃，之后进入 recovery-wait 状态，第一条采样到的 recovery `cfVec` 必须是 redirect target。
+- `redirect` drive 后必须清除已知 wrong-path queue 后缀；DUT 首次看到 redirect valid 的周期 `M` 和下一拍 `M+1` 的 `cfVec` 必须被丢弃，之后进入 recovery-wait 状态，第一条采样到的 recovery `cfVec` 必须是 redirect target。
 - exception-marked `cfVec` entry 必须保留异常标记，但不能按普通指令参与 CFI 分类、resolve 生成、golden replay 或 instruction commit frontier 推进。
 - 某条 CFI 一旦已经与 golden 的某个动态实例匹配，其后续用于 `redirect` 的恢复目标必须绑定到该动态实例自身的 golden 语义，不得从一个可能已经漂移的全局 golden cursor 临时推导。
 - 某条 `redirect` 的 `target`、`pc`、FTQ 上下文必须来自同一个动态实例；不得把 `target` 绑定到当前实例、却把 FTQ idx / offset 绑定到另一条更老或已失效的实例。
@@ -329,14 +330,14 @@ queue 中的每条指令至少需要具备以下语义信息：
 对于这种场景，当前环境的语义处理应当是：
 
 - redirect drive 时立即 flush 当前 queue 中已知的 wrong-path 后缀
-- redirect valid 当拍 `T` 和下一拍 `T+1` 的 cfVec 处于 skip 窗口，不采样入队，也不推动 golden trace
-- `T+2` 起进入 recovery 状态，第一条被采样的 recovery cfVec 必须是该 redirect 的 target
+- DUT 首次看到 redirect valid 的周期 `M` 和下一拍 `M+1` 的 cfVec 处于 skip 窗口，不采样入队，也不推动 golden trace
+- `M+2` 起进入 recovery 状态；从该周期起出现的第一条有效 recovery cfVec 必须是该 redirect 的 target
 - 如果窗口后的第一条采样 cfVec 仍不是 target，应视为 recovery failure，而不是重新开启一轮新的错误路径
 
-进一步地，`redirect` 的 wrong-path 清除边界是语义边界，但当前实现不再把 redirect pin 当拍或 skip 窗口内的残留 cfVec 先入队再裁剪。因此：
+进一步地，`redirect` 的 wrong-path 清除边界是语义边界，但当前实现不再把 DUT 首次看到 redirect pin 的 `M` 当拍或 skip 窗口内的残留 cfVec 先入队再裁剪。因此：
 
-- `redirect` 发出当拍仍然观测到的旧 wrong-path `cfVec`
-- `redirect` 发出后到下一拍 `T+1` 之间继续观测到的旧 wrong-path residual `cfVec`
+- DUT 在 `M` 首次看到 redirect valid 当拍仍然观测到的旧 wrong-path `cfVec`
+- `M+1` 继续观测到的旧 wrong-path residual `cfVec`
 
 都必须继续归属于这一次 active wrong-path episode，但在实现上通过 skip 窗口直接丢弃，不进入 `_cfvec_queue`。
 

@@ -18,7 +18,7 @@ def test_run_until_golden_complete_passes_target_cursor_env_var(monkeypatch) -> 
         captured.update(kwargs)
         return SimpleNamespace(
             ok=True,
-            completed=True,
+            completed=False,
             status="cursor_target",
             cycles_run=5,
             cursor=12,

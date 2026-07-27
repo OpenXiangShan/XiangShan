@@ -199,12 +199,13 @@ def test_run_until_golden_trace_complete_ignores_post_trace_tail_work():
     assert result.pending_work == 0
 
 
-def test_run_until_golden_trace_complete_passes_at_target_cursor() -> None:
+def test_run_until_golden_trace_complete_stops_at_target_cursor_without_completion() -> None:
     env = _GoldenTraceTargetCursorEnv()
 
     result = RunUntilGoldenTraceCompleteSequence(max_cycles=10, target_cursor=2).run(env)
 
-    assert result.completed is True
+    assert result.ok is True
+    assert result.completed is False
     assert result.status == "cursor_target"
     assert result.cursor >= 2
 

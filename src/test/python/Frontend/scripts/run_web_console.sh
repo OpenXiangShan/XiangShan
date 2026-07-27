@@ -4,6 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
+source "${SCRIPT_DIR}/frontend_pylib.sh"
+FRONTEND_PYLIB="$(frontend_pylib_path "${REPO_DIR}")"
 
 HOST="${TB_WEB_HOST:-172.19.20.29}"
 PORT="${TB_WEB_PORT:-9900}"
@@ -14,6 +16,6 @@ cd "${FRONTEND_DIR}"
 echo "[frontend] starting web console on http://${HOST}:${PORT}"
 echo "[frontend] TB_ENV_LOG_LEVEL=${LOG_LEVEL}"
 export TB_ENV_LOG_LEVEL="${LOG_LEVEL}"
-export PYTHONPATH="${FRONTEND_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-}"
+export PYTHONPATH="${FRONTEND_DIR}:${FRONTEND_PYLIB}:${PYTHONPATH:-}"
 
 python3 -m uvicorn webui.server:app --host "${HOST}" --port "${PORT}"

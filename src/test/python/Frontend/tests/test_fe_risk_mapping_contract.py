@@ -36,8 +36,8 @@ def _frontend_root() -> Path:
 def _canonical_paths() -> tuple[Path, Path, Path]:
     root = _frontend_root()
     return (
-        root / "docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv",
-        root / "docs/02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv",
+        root / "docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv",
+        root / "docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv",
         root / "data",
     )
 
