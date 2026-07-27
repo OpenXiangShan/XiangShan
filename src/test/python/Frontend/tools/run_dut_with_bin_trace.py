@@ -8,15 +8,10 @@ import sys
 
 _TOOLS_ROOT = Path(__file__).resolve().parent
 _FRONTEND_ROOT = _TOOLS_ROOT.parent
+_REPO_ROOT = _FRONTEND_ROOT.parents[3]
+_PYLIB = _REPO_ROOT / "build-frontend" / "pylib"
 
-if str(_FRONTEND_ROOT) not in sys.path:
-    sys.path.insert(0, str(_FRONTEND_ROOT))
-
-from env.pylib import frontend_pylib_path
-
-_PYLIB = frontend_pylib_path()
-
-for _path in (str(_PYLIB),):
+for _path in (str(_FRONTEND_ROOT), str(_PYLIB)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 

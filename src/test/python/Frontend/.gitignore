@@ -6,4 +6,3 @@ __pycache__/
 data/
 logs/
 output/
-tests/*.lst

@@ -391,7 +391,7 @@ A channel request handshake；释放为 `0` 后应能观察到新的 request。
 ### Functional Coverage
 
 uncache 通路的 functional coverage 定义在
-`src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv`，由
+`src/test/python/Frontend/docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv`，由
 `FunctionalCoverageRecorder` 从 env event 和 DUT-visible 端口采样。
 
 当前 active uncache 模型只有 `BIN-416..BIN-423`：

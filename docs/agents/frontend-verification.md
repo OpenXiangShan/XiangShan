@@ -32,14 +32,9 @@ tree. Start here unless the task explicitly says otherwise.
 - `src/test/python/Frontend/env/funcov.py`: module-level predicates in the only
   active recorder/sampler chain. Keep each group/point/bin aligned with the
   canonical registry.
-- `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh`: standard
-  single-case bin-trace entry that now auto-creates `TB_RUN_ID` /
-  `TB_ARTIFACT_DIR` and routes waveform, coverage, funcov, and case-log
-  outputs into that run layout.
-- `src/test/python/Frontend/scripts/run_bin_trace_suite.sh`: curated
-  ready-to-run bin-trace regression wrapper. Pass selected bins as arguments or
-  with `--list-file <path>`; it runs the single-case pipeline for each selected
-  bin.
+- `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh`: standard bin-trace
+  entry that now auto-creates `TB_RUN_ID` / `TB_ARTIFACT_DIR` and routes
+  waveform, coverage, funcov, and case-log outputs into that run layout.
 - `src/test/python/Frontend/env/agents/`: DUT-facing side agents such as
   ICache, PTW, uncache, and backend drive logic.
 - `src/test/python/Frontend/env/model/`: semantic model helpers, golden trace
@@ -58,15 +53,12 @@ tree. Start here unless the task explicitly says otherwise.
 - `src/test/python/Frontend/scripts/fst_to_fsdb.sh`: convert a frontend `.fst`
   waveform to `.fsdb` through a temporary `.vcd`.
 - `src/test/python/Frontend/tests/`: active frontend regressions. Put new tests here.
-- `build-frontend/pylib-verilator/Frontend/`: generated Verilator Python
-  bindings, shared objects, signal map, and `Frontend_top.sv`.
-- `build-frontend/pylib-vcs/Frontend/`: generated VCS Python bindings, shared
-  objects, signal map, and `Frontend_top.sv`.
+- `build-frontend/pylib/Frontend/`: generated Python bindings, shared objects,
+  signal map, and `Frontend_top.sv`.
 - `build-frontend/rtl/`: generated RTL artifacts useful for cross-checking DUT behavior.
-- `build-frontend/frontend_build_manifest.<sim>.json`: generated with the
-  corresponding `pylib-<sim>` package; binds that package, generated RTL tree,
-  build configuration, and signal-contract hashes. `<sim>` is `verilator` or
-  `vcs`.
+- `build-frontend/frontend_build_manifest.json`: written only after a successful
+  `make frontend`; binds the design SHA and build configuration to the compiled
+  DUT, generated RTL tree, and signal-contract hashes.
 - `ready-to-run/`: example DUT binaries used by frontend bin-trace investigations.
 - `NEMU/logs/`: legacy/imported trace inputs used to reconstruct old failing
   windows; new runner-generated trace and raw NEMU logs belong under the run's
@@ -77,7 +69,7 @@ tree. Start here unless the task explicitly says otherwise.
 Use the most direct artifact that reflects real DUT behavior:
 
 1. Observed DUT-facing IO in the Python environment and tests.
-2. Generated artifacts under the selected frontend pylib directory, especially
+2. Generated artifacts under `build-frontend/pylib/Frontend/`, especially
    `Frontend_top.sv` and `signals.json`.
 3. Generated RTL under `build-frontend/rtl/` when signal-level confirmation is needed.
 4. Reference docs under `docs/testbench/Guide_Doc/`.
@@ -114,13 +106,6 @@ that boundary stable.
 
 - If the requested path is not minimal, prefer the shorter path and explain the change in direction.
 - When splitting batched commits, prefer `git add -p` first. Do not make direct documentation edits as part of the commit-splitting phase. If `git add -p` cannot express the desired split, stop and ask the user before changing files further.
-- When the user says a file or change should not be uploaded, committed, staged,
-  or included in a diff, treat that strictly as a version-control boundary. Do
-  not delete, move, truncate, or rewrite the local file unless the user
-  explicitly asks for local deletion or cleanup.
-- When adding a contract test for a script, wrapper, or runner, place it in a
-  dedicated test file named after that entrypoint. Do not hide runner contracts
-  inside an unrelated feature test file.
 - Never use `git push -f` under any circumstances.
 - Every log printed by the verification environment must help debug a real
   failure and be as short as practical. Do not add noisy, redundant, or
@@ -212,20 +197,6 @@ that boundary stable.
   every signal name against the current DUT object and generated artifacts
   first. Required signals should fail fast when absent; signals not present on
   the DUT should not remain in the active contract.
-- For SystemVerilog funcov, choose the number of `bins` from the distinct
-  observable scenarios that need separate coverage accounting. A coverpoint may
-  legitimately have one bin; do not add complement or placeholder bins merely
-  to make every coverpoint multi-bin. Multiple testpoints may instead map to
-  distinct bins of one coverpoint when they share the same sampled dimension.
-- Use event encoding only when its categories are inherently mutually
-  exclusive. Do not collapse independently concurrent conditions into an
-  `if`/`else if` event selector, because lower-priority observations are then
-  silently lost. Sample such conditions with separate coverpoints, including
-  single-bin coverpoints when each condition has one meaningful hit.
-- Prefer direct, readable coverpoint predicates over derived event encodings.
-  Do not introduce an `always_comb` event selector merely to reduce the number
-  of coverpoints; compactness is not a goal when it obscures the sampled
-  condition.
 - After changing code, rerun the relevant tests before giving a conclusion. If
   you have not rerun the relevant tests yet, say that explicitly and do not
   present the result as a validated conclusion.
@@ -263,8 +234,7 @@ intention. Therefore:
 
 ## Build And Test
 
-Activate the current UnityChip environment before running Frontend Verilator
-build or Python DUT commands:
+Activate the environments before running frontend commands:
 
 ```bash
 if declare -F deactivate >/dev/null 2>&1; then
@@ -274,33 +244,6 @@ source /nfs/share/unitychip/activate
 cd "$NOOP_HOME"
 ```
 
-The UnityChip activation provides the required `mill`, `picker`, CMake, SWIG,
-and Verilator tools for this host.
-
-Build the default Verilator frontend DUT package from the repo root:
-
-```bash
-make frontend
-```
-
-Build the VCS frontend DUT package on a host with VCS and Verdi available; the
-target uses FSDB waveforms and requires explicit VCS/Verdi roots if the module
-environment does not export them:
-
-```bash
-make frontend-vcs \
-  FRONTEND_VCS_HOME=/path/to/vcs \
-  FRONTEND_VERDI_HOME=/path/to/verdi
-```
-
-`make frontend` defaults to Verilator. `make frontend-verilator` is an
-equivalent explicit alias and writes
-`build-frontend/pylib-verilator/Frontend/`; `make frontend-vcs` writes
-`build-frontend/pylib-vcs/Frontend/`. The two DUT packages can coexist. Select
-the package for a test process with `TB_FRONTEND_SIM=verilator` or
-`TB_FRONTEND_SIM=vcs`; use `TB_FRONTEND_PYLIB=/path/to/pylib-root` only for an
-explicit override.
-
 In sandboxed runs, disable the environment-level `pytest_rerunfailures` plugin
 by default. It opens a local socket during `pytest_configure` and otherwise
 fails before the testcase starts. Frontend helper scripts in this tree already
@@ -308,16 +251,10 @@ do this by passing `-p no:rerunfailures`. If you invoke `pytest` directly,
 include the same flag unless you intentionally need that plugin outside the
 sandbox.
 
-Run the default non-DUT frontend regression flow from the repo root:
+Run the default frontend regression flow from the repo root:
 
 ```bash
 src/test/python/Frontend/scripts/run_pytest_with_log.sh
-```
-
-Run the DUT-enabled frontend regression flow explicitly:
-
-```bash
-TB_ENABLE_DUT_TESTS=1 src/test/python/Frontend/scripts/run_pytest_with_log.sh
 ```
 
 Run a narrower frontend test:
@@ -338,13 +275,10 @@ Common direct-`pytest` arguments worth keeping consistent:
   the exact run.
 - `TB_ENABLE_DUT_TESTS=1`: required for DUT integration cases guarded by the
   existing `_RUN_DUT` pattern.
-- A DUT batch regression is complete only if pytest reaches the final summary
-  and the selected/completed case count matches the intended target.
 
 `src/test/python/Frontend/scripts/run_pytest_with_log.sh` already sets the
 logging-related pytest arguments above and disables `rerunfailures` by default.
-It does not enable DUT integration by itself. Use direct `pytest` mainly when
-you need a narrower target or explicit env vars.
+Use direct `pytest` mainly when you need a narrower target or explicit env vars.
 
 `src/test/python/Frontend/scripts/run_pytest_with_log.sh` also accepts these
 script-level env vars:
@@ -353,8 +287,6 @@ script-level env vars:
   `TB_ENV_LOG_LEVEL`, then `INFO`.
 - `TB_PYTEST_DISABLE_RERUNFAILURES=0|1`: keep or disable
   `-p no:rerunfailures`; default is `1` in this tree.
-- `TB_SKIP_DUT_FINISH=1`: suppress fixture teardown `dut.Finish()` for an
-  explicit DUT batch-run strategy. It is not pass evidence by itself.
 - `TB_TRACE_START_INDEX=...`: start golden comparison from the given jsonl
   index when loading a bin trace.
 - `TB_RESET_VECTOR=...`: start DUT fetch from the given PC instead of the
@@ -377,10 +309,8 @@ git config core.hooksPath .githooks
 
 ## Bin-Trace Workflow
 
-Treat `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh` as the
-supported single-case bin-trace entrypoint for ready-to-run cases.
-`run_bin_trace_suite.sh` is the supported curated regression wrapper and should
-delegate each selected bin to the single-case pipeline.
+Treat `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh` as the only
+supported bin-trace entrypoint for ready-to-run cases.
 
 When preparing binaries for the frontend_bt NEMU configuration whose memory
 image starts at `0x10000000` while the frontend reset vector is `0x10001000`,
@@ -407,32 +337,6 @@ BIN_TRACE_ENV=(
 timeout --foreground 1200 env "${BIN_TRACE_ENV[@]}" \
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
 ```
-
-### Regression List
-
-Use `run_bin_trace_suite.sh` for an explicitly selected ready-to-run bin-trace
-regression:
-
-```bash
-timeout --foreground 2400 env "${BIN_TRACE_ENV[@]}" \
-src/test/python/Frontend/scripts/run_bin_trace_suite.sh \
-  ready-to-run/cfi_mix_case.bin \
-  ready-to-run/cfi_random_5inst_case.bin
-```
-
-Do not add a tracked default active-bin list. Keep the selected bin set explicit
-in the command line or in a user-provided `--list-file <path>` outside the
-commit unless the list itself is intentionally under review. Leave long-running
-workloads out unless they are explicitly requested for that run.
-
-Useful suite controls:
-
-- `src/test/python/Frontend/scripts/run_bin_trace_suite.sh --list <bin ...>`:
-  print the selected bins without running them.
-- `src/test/python/Frontend/scripts/run_bin_trace_suite.sh --list-file <path>`:
-  run a different list file.
-- `TB_BIN_TRACE_SUITE_CONTINUE_ON_FAIL=1`: continue later bins after a case
-  failure.
 
 `run_bin_trace_pipeline.sh` defaults both env logging and pytest CLI logging to
 `INFO`, and defaults `PYTEST_ADDOPTS` to
@@ -483,10 +387,9 @@ Other `run_bin_trace_pipeline.sh` knobs worth recording:
   `tests/test_bin_trace_dut.py::test_bin_trace` nodeid.
 - `TB_TRACE_MAX_CYCLES=...`: bound DUT execution cycles for a debug run; `0`
   keeps the run-to-completion behavior.
-- `TB_TRACE_TARGET_CURSOR=...`: stop once this golden-trace cursor is reached.
-  Use `0` to disable (default). A positive value is bounded debug/window
-  evidence only: reaching the cursor means no enabled checker failed in that
-  prefix, not that the full bin-trace regression completed.
+- `TB_TRACE_TARGET_CURSOR=...`: treat reaching this golden-trace cursor as pass.
+  Use `0` to disable (default). When set to a positive integer, run stops with
+  pass as soon as `cursor >= target`.
 - `TB_PYTEST_TIMEOUT_SECS=...`: set the DUT-stage wall-clock timeout used by
   the pipeline script; default is `6400`.
 - `TB_TRACE_STALL_SNAPSHOT_INTERVAL=...`: print stall snapshots every N
@@ -519,8 +422,8 @@ For this direct-`pytest` path, keep the required environment variables explicit:
 - `TB_BIN_PATH=...`: point the testcase at the exact ready-to-run binary.
 - `TB_TRACE_PATH=...`: point the testcase at the prepared golden trace file.
 - `TB_BASE_ADDR=...`: keep the DUT load base consistent with the binary image.
-- `TB_TRACE_TARGET_CURSOR=...`: optional cursor target for a bounded debug
-  window; `0` disables it.
+- `TB_TRACE_TARGET_CURSOR=...`: optional cursor target for early pass; `0`
+  disables it.
 - `TB_TRACE_STAGNANT_CYCLES_LIMIT=...`: keep stagnant-cycle early-stop enabled
   so the run fails on real forward-progress stalls instead of hanging silently.
 
@@ -564,11 +467,9 @@ run-to-completion entrypoint. Do not use it as a load-only or partial-step
 smoke path. By default it runs until golden completion; set
 `TB_TRACE_MAX_CYCLES` to a positive integer only when you intentionally want a
 bounded debug run, or set `TB_TRACE_TARGET_CURSOR` to stop at a specific
-golden cursor. In bounded mode, exhausting the explicit cycle budget or reaching
-the target cursor is only bounded-window evidence; only `status=completed`
-with the full trace consumed is full bin-trace regression pass evidence.
-Observed DUT/env misbehavior such as monitor errors or stagnant-cycle early-stop
-must still fail the run.
+golden cursor and treat it as pass. In bounded mode, exhausting the explicit
+cycle budget is not itself a failure; only observed DUT/env misbehavior such as
+monitor errors or stagnant-cycle early-stop should fail the run.
 
 For direct `pytest`, use an outer `timeout` guard explicitly. The
 `TB_PYTEST_TIMEOUT_SECS` knob is consumed by `scripts/run_bin_trace_pipeline.sh`; it
@@ -655,22 +556,6 @@ Convert a frontend FST waveform to FSDB:
 src/test/python/Frontend/scripts/fst_to_fsdb.sh path/to/wave.fst [path/to/wave.fsdb]
 ```
 
-Open a VCS-generated frontend FSDB with RTL in Verdi:
-
-```bash
-verdi -sv \
-  "$NOOP_HOME/build-frontend/pylib-vcs/Frontend/Frontend_top.sv" \
-  -F "$NOOP_HOME/build-frontend/rtl/filelist.funcov.f" \
-  -top Frontend_top \
-  -ssf "$NOOP_HOME/src/test/python/Frontend/data/<date>/<case>.fsdb"
-```
-
-Use `-F`, not `-f`, so relative RTL paths inside the generated filelist are
-resolved from the filelist directory. Include the picker/VCS wrapper
-`build-frontend/pylib-vcs/Frontend/Frontend_top.sv` explicitly and use
-`-top Frontend_top`; the generated RTL module `FrontendTop` is the DUT under
-that wrapper, not the FSDB top.
-
 Rebuild the frontend Python DUT artifacts from the repo root:
 
 ```bash
@@ -740,9 +625,6 @@ than host-side test scaffolding.
   make the cases write into one shared live directory.
 - Historical date directories are read-only evidence and must not be reused as
   current run destinations.
-- Keep wrapper or pipeline logs for a DUT run in the same run root as the
-  waveform and case log. Do not create a separate ad-hoc log directory for a
-  run whose artifacts already live under that run root.
 
 Current default implementation details in `env/fixtures.py`:
 
@@ -766,5 +648,5 @@ Current default implementation details in `env/fixtures.py`:
 
 - `docs/testbench/Guide_Doc/dut_fixture.md`
 - `docs/testbench/Guide_Doc/dut_api_instruction.md`
-- `src/test/python/Frontend/docs/03_funcov_model/skills.md`
+- `src/test/python/Frontend/docs/03_功能覆盖率建模/skills.md`
 - `docs/testbench/testbench_stages.yaml`

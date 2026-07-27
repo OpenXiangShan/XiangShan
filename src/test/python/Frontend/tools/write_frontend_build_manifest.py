@@ -43,7 +43,6 @@ def main() -> int:
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--build-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--sim", default="verilator", choices=("verilator", "vcs"))
     parser.add_argument("--build-config", required=True)
     parser.add_argument("--build-command", default="")
     parser.add_argument(
@@ -99,7 +98,6 @@ def main() -> int:
         source_tree_dirty=source_tree_dirty,
         build_config=args.build_config,
         build_command=args.build_command,
-        simulator=args.sim,
         metadata={
             "implementation_sha": implementation_sha,
             "design_baseline_sha": baseline_sha,
@@ -111,8 +109,7 @@ def main() -> int:
     )
     print(
         "[frontend] build manifest: "
-        f"{args.output} sim={manifest['simulator']} source_sha={manifest['dut_source_sha']} "
-        f"dirty={manifest['source_tree_dirty']}"
+        f"{args.output} source_sha={manifest['dut_source_sha']} dirty={manifest['source_tree_dirty']}"
     )
     return 0
 

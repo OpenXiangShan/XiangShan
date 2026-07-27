@@ -14,10 +14,8 @@ Use this order:
    frontend environment.
 3. Align that window with the trace input under `NEMU/logs/` and the test
    binary under `ready-to-run/`.
-4. Verify the payload semantics in generated artifacts under the selected
-   pylib directory, such as
-   `build-frontend/pylib-verilator/Frontend/Frontend_top.sv` or
-   `build-frontend/pylib-vcs/Frontend/Frontend_top.sv`.
+4. Verify the payload semantics in generated artifacts such as
+   `build-frontend/pylib/Frontend/Frontend_top.sv`.
 5. Only then decide whether the issue is in the DUT, the monitor, the
    environment model, or the test expectation.
 
@@ -49,12 +47,12 @@ For every DUT bin-trace failure, treat the following as mandatory:
    waveform and log come from the same run.
 8. If the local case log lacks the needed `INFO`-level events, stop and say so
    before switching to another log file.
-9. The redirect decision cycle must still sample the cfVec already observed
-   before the environment drives redirect. Let `M` be the rising edge where the
-   DUT first sees `redirect_valid=1`: flush the known wrong-path cfVec entries,
-   do not sample cfVec at `M` or `M+1`. From `M+2` onward, the first valid
-   sampled cfVec must be the redirect target. A different first sampled cfVec
-   is a recovery failure.
+9. After a redirect is issued, the environment must flush the known wrong-path
+   cfVec entries immediately. The cfVec observed on the redirect valid cycle
+   `T` and the following cycle `T+1` must not be sampled into the verification
+   queues. Starting at `T+2`, the environment is in recovery state; the first
+   sampled cfVec for that recovery must be the redirect target. A different
+   first sampled cfVec is a recovery failure.
 10. Any env-side fail-fast assertion used for DUT/bin-trace debugging must log
     the same failure text at `ERROR` level before raising, and the message must
     include both the exact `cycle` and the golden-trace `cursor`.
@@ -63,8 +61,8 @@ For every DUT bin-trace failure, treat the following as mandatory:
 
 - If you claim a timing or delay issue, show cycle-accurate evidence that the
   payload is already correct and only arrives late.
-- For runtime truth, prefer DUT-observed signals, generated artifacts under the
-  selected frontend pylib directory, and trace inputs used by the failing case.
+- For runtime truth, prefer DUT-observed signals, generated artifacts under
+  `build-frontend/pylib/Frontend/`, and trace inputs used by the failing case.
 - Do not infer runtime DUT behavior from host-side implementation files unless
   you have independently proven that the built DUT artifacts include that path.
 - If a mismatch is attributed to a CFI that has already been committed, prove
@@ -128,8 +126,8 @@ waveforms or monitor output, then consult:
 - Confirm the exact binary and trace input in use.
 - Check whether the failing expectation is in the DUT, the backend model, or
   the test monitor.
-- Cross-check signal names and units against the selected
-  `build-frontend/pylib-<sim>/Frontend/signals.json`.
+- Cross-check signal names and units against
+  `build-frontend/pylib/Frontend/signals.json`.
 - Confirm that the waveform, trace, and generated DUT artifacts all come from
   the same current reproduction.
 - Confirm that the paired case log has enough verbosity for the question being
@@ -142,5 +140,5 @@ waveforms or monitor output, then consult:
 - `docs/agents/frontend-backend-model-review.md`
 - `docs/agents/frontend-backend-controlflow/README.md`
 - `docs/testbench/Guide_Doc/dut_bug_analysis.md`
-- `build-frontend/pylib-<sim>/Frontend/Frontend_top.sv`
-- `build-frontend/pylib-<sim>/Frontend/signals.json`
+- `build-frontend/pylib/Frontend/Frontend_top.sv`
+- `build-frontend/pylib/Frontend/signals.json`

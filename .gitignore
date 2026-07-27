@@ -383,7 +383,6 @@ bug-report.tar.gz
 .venv/
 venv/
 
-.local/
 build*/
 
 # Codex

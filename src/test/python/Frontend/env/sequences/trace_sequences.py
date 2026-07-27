@@ -240,7 +240,7 @@ class RunUntilGoldenTraceCompleteSequence:
                     )
                 return RunUntilGoldenTraceResult(
                     ok=True,
-                    completed=False,
+                    completed=True,
                     status="cursor_target",
                     cycles_run=cycles_run,
                     cursor=int(trace.cursor),

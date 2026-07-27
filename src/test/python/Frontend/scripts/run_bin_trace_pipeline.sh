@@ -4,8 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
-source "${SCRIPT_DIR}/frontend_pylib.sh"
-FRONTEND_PYLIB="$(frontend_pylib_path "${REPO_DIR}")"
 PIPELINE_STAGE="init"
 PIPELINE_REASON="not_started"
 
@@ -41,7 +39,7 @@ Environment variables:
   TB_FUNCOV_TARGET_TP_IDS
                       Optional comma/space-separated target TP_ID values
   TB_DUT_BUILD_MANIFEST
-                      Build manifest path; defaults to the TB_FRONTEND_SIM-specific manifest
+                      Build manifest path; defaults to build-frontend/frontend_build_manifest.json
   TB_SKIP_NEMU        Skip NEMU trace generation and use the existing trace_jsonl_path directly (default: 0)
   TB_NEMU_EXEC         NEMU executable path (default: <repo>/ready-to-run/riscv64-nemu-interpreter)
   TB_NEMU_MAX_INSTR    Pass -I to NEMU when > 0 (default: 0)
@@ -53,8 +51,7 @@ Environment variables:
   TB_TRACE_STALL_SNAPSHOT_INTERVAL
                        Print stall snapshots every N stagnant cycles when > 0 (default: 5000)
   TB_TRACE_TARGET_CURSOR
-                       Stop at this cursor for bounded debug/window evidence
-                       (default: 0, disabled)
+                       Treat reaching this trace cursor as pass (default: 0, disabled)
   TB_TRACE_MAX_CYCLES  Optional DUT cycle budget for test_bin_trace; 0 means run until
                        golden completion (default: 0)
   TB_PYTEST_TIMEOUT_SECS
@@ -246,7 +243,7 @@ mkdir -p "$(dirname "${TRACE_PATH}")"
 if [[ "${SKIP_NEMU}" == "0" ]]; then
   mkdir -p "$(dirname "${NEMU_LOG_PATH}")"
 fi
-export PYTHONPATH="${FRONTEND_DIR}:${FRONTEND_PYLIB}:${PYTHONPATH:-}"
+export PYTHONPATH="${FRONTEND_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-}"
 
 if [[ "${SKIP_NEMU}" == "0" ]]; then
   PIPELINE_STAGE="trace_generation"

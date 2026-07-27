@@ -2867,13 +2867,6 @@ class BackendModel:
         self._cycle_start_golden_pc = self.current_golden_pc()
         self._planned_commit_apply = None
 
-    def note_dut_redirect_observed(self, cycle: int) -> None:
-        skip_until = int(cycle) + 1
-        if self._skip_cfvec_until_cycle is None:
-            self._skip_cfvec_until_cycle = skip_until
-            return
-        self._skip_cfvec_until_cycle = max(int(self._skip_cfvec_until_cycle), skip_until)
-
     def consume_backend_observation(self, observation: BackendObservationSnapshot) -> None:
         self._last_observation = observation
 
@@ -4420,6 +4413,8 @@ class BackendModel:
         self._update_ftq_start_pc_cache(observation)
         self._watchdog(observation)
         redirect_payload = self._ready_redirect_for_cycle()
+        if redirect_payload is not None:
+            self._skip_cfvec_until_cycle = int(self.current_cycle) + 1
         if self.observe_if is not None:
             self._sample_cfvec()
         resolve_entries = self._ready_resolves_for_cycle()

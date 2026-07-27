@@ -3,7 +3,6 @@
 import argparse
 import hashlib
 import json
-import os
 import re
 import sys
 from collections import defaultdict
@@ -18,7 +17,6 @@ if str(PROVENANCE_ROOT) not in sys.path:
 
 from artifact_provenance import (  # noqa: E402
     BUILD_HASH_FIELDS as MANIFEST_BUILD_HASH_FIELDS,
-    frontend_build_manifest_path,
     load_frontend_build_manifest,
 )
 
@@ -185,9 +183,14 @@ def file_sha256(path: Path) -> str:
 def _manifest_path(source_root: Path) -> Path:
     """Resolve the build manifest for either a build root or its rtl child."""
     source_root = source_root.resolve()
-    build_root = source_root.parent if source_root.name == "rtl" else source_root
-    simulator = os.getenv("TB_FRONTEND_SIM", "verilator").strip().lower()
-    return frontend_build_manifest_path(build_root, simulator)
+    candidates = [source_root / "frontend_build_manifest.json"]
+    if source_root.name == "rtl":
+        candidates.append(source_root.parent / "frontend_build_manifest.json")
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    # Return the canonical location so the error names the expected file.
+    return candidates[0]
 
 
 def _run_roots_for_dat(dat_path: Path) -> list[Path]:
@@ -243,12 +246,7 @@ def _load_manifest(manifest_path: Path) -> tuple[dict, str]:
         value = str(artifacts.get(field) or "").strip()
         if SHA256_RE.fullmatch(value) is None:
             raise CoverageProvenanceError(f"build manifest has invalid artifact hash: {field}")
-    simulator = str(manifest.get("simulator") or "").strip().lower()
-    runtime = load_frontend_build_manifest(
-        manifest_path.parent,
-        manifest_path,
-        simulator=simulator,
-    )
+    runtime = load_frontend_build_manifest(manifest_path.parent, manifest_path)
     if str(runtime.get("build_manifest_status") or "").strip().lower() != "valid":
         reasons = runtime.get("build_manifest_reasons") or ["unknown"]
         raise CoverageProvenanceError(

@@ -33,7 +33,7 @@
 - `scripts/`
   - Frontend 目录下的 shell 脚本入口。
   - 包含 `run_pytest_with_log.sh`、`run_web_console.sh`、
-    `run_bin_trace_pipeline.sh`、`run_bin_trace_suite.sh`、`fst_to_fsdb.sh`、
+    `run_bin_trace_pipeline.sh`、`fst_to_fsdb.sh`、
     `gen_coverage_html.sh` 和 `report_raw_code_coverage.py`。
 - `tools/`
   - Frontend 目录下的 Python 工具入口。
@@ -51,8 +51,7 @@
 - `env/dut_factory.py` 负责真实 DUT 构造。
 - `env/nemu_trace_pipeline.py` 负责从 bin 驱动 NEMU trace 生成。
 - `env/functional_coverage.py` 负责功能覆盖率事件记录与产物输出。
-- `env/funcov.py` 负责通用 canonical group/coverpoint/bin 的 DUT 周期级采样，
-  `env/icache_funcov.py` 专门负责 ICache 功能覆盖率模型；
+- `env/funcov.py` 负责 canonical group/coverpoint/bin 的 DUT 周期级采样；
   不再维护平行的 toffee 功能覆盖率定义。
 - `env/monitor.py` 与 `env/monitors/` 共同承担 monitor 侧数据结构和 DUT 观测逻辑。
 - `env/bundles/`、coverage 和启动控制里出现的信号名，必须以当前生成出来的 DUT 接口为准。
@@ -87,7 +86,6 @@
   - 单个 `.dat` 默认输出到同目录下的 `<stem>.genhtml/`
   - 多个 `.dat` 或目录输入默认输出到 `coverage.genhtml/`
   - 会自动生成 `merged.info` 并调用 `genhtml --ignore-errors range --filter missing`
-  - HTML 行号左侧的 `[ + ]` / `[ - ]` 来自 `merged.info` 里的 `BRDA` 记录，但不一定都是 RTL `if/else` branch。`verilator_coverage -write-info` 会把部分 raw coverage point 转成 lcov `BRDA`；例如端口声明行 `output io_phr_444` 左侧两个 `+`，原始 `.dat` 中对应的是 `t=toggle` 的 `io_phr_444:0->1` 和 `io_phr_444:1->0`。遇到端口、wire、reg 声明行出现 `[ + + ]` 时，应回查 raw `.dat` 的 `t=` 和 `o=` 字段，不要直接解释成代码分支。
   - 若要把指定 `.dat` 合并到已有 `coverage.genhtml/`，可直接执行：
     `source /nfs/share/unitychip/activate && PATH=/nfs/share/unitychip/bin:$PATH src/test/python/Frontend/scripts/gen_coverage_html.sh src/test/python/Frontend/data/runs/<run_id>/coverage`
 - `Frontend.ignore`
@@ -134,60 +132,20 @@
 
 ## 运行入口
 
-- 构建 Verilator 版 Frontend Python DUT：
-
-```bash
-make frontend-verilator
-```
-
-- 构建 VCS 版 Frontend Python DUT：
-
-```bash
-make frontend-vcs \
-  FRONTEND_VCS_HOME=/path/to/vcs \
-  FRONTEND_VERDI_HOME=/path/to/verdi
-```
-
-`make frontend` 默认构建 Verilator 版；`make frontend-vcs` 固定使用 VCS
-和 FSDB 波形。两套产物分别保留在
-`build-frontend/pylib-verilator/Frontend/` 和
-`build-frontend/pylib-vcs/Frontend/`。跑测试时用 `TB_FRONTEND_SIM=verilator`
-或 `TB_FRONTEND_SIM=vcs` 选择；只有需要显式指定非默认目录时才使用
-`TB_FRONTEND_PYLIB=/path/to/pylib-root`。
-
-- non-DUT 默认回归入口：
+- 默认回归入口：
 
 ```bash
 src/test/python/Frontend/scripts/run_pytest_with_log.sh
 ```
 
-- DUT 集成回归入口：
-
-```bash
-TB_ENABLE_DUT_TESTS=1 src/test/python/Frontend/scripts/run_pytest_with_log.sh
-```
-
-DUT 批量回归必须看到 pytest final summary 和预期用例数量，不能只看退出码。
-
-- bin trace 列表回归入口：
-
-```bash
-src/test/python/Frontend/scripts/run_bin_trace_suite.sh \
-  ready-to-run/cfi_mix_case.bin \
-  ready-to-run/cfi_random_5inst_case.bin
-```
-
-bin 列表必须通过命令行参数或 `--list-file <path>` 显式提供；不要上传默认
-active list。长时间运行的大 case 只在需要时手动加入本次命令或本地 list file。
-
-- bin trace 单 case 入口：
+- bin trace 标准入口：
 
 ```bash
 src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.bin
 ```
 
-- 如果需要限定调试窗口，可额外设置 `TB_TRACE_TARGET_CURSOR=<index>`。
-  到达该 cursor 只表示该窗口内未发现错误，不是完整 bin-trace 回归通过证据。
+- 如果需要在指定 `cursor` 达到时提前通过，可额外设置
+  `TB_TRACE_TARGET_CURSOR=<index>`。
 
 - 详细测试参数、bin-trace 环境变量、runtime bound、artifact 规则和
   direct `pytest` 约束，统一见 `docs/agents/frontend-verification.md`。
@@ -197,15 +155,15 @@ src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.b
 Frontend BT 只保留两条职责不同的覆盖率链：
 
 1. 功能覆盖率：
-   `测试点主表 -> 03_funcov_model/frontend_bt_functional_coverage_pilot.csv -> env/funcov.py + env/icache_funcov.py -> env/functional_coverage.py -> data/runs/<run_id>/funcov/*.funcov.json -> tools/backannotate_funcov.py`。
-   registry 当前共 295 行，其中 `Coverpoint` 完整并与 sampler 一一对应的 137 行会装入 runtime；其余 158 行均为 `UNMAPPED` 历史规划。ICache MainPipe 的 49 个覆盖点和 PrefetchPipe 的 24 个覆盖点单独维护在 `env/icache_funcov.py`。带 `旧BPU_FTQ` 路径的历史行全部保持 `Coverpoint` 为空，不能进入采样或自动反标。
+   `测试点主表 -> 03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv -> env/funcov.py -> env/functional_coverage.py -> data/runs/<run_id>/funcov/*.funcov.json -> tools/backannotate_funcov.py`。
+   registry 当前共 222 行，其中只有 `Coverpoint` 完整并与 sampler 一一对应的 64 行会装入 runtime；其余 158 行均为 `UNMAPPED` 历史规划。带 `旧BPU_FTQ` 路径的历史行全部保持 `Coverpoint` 为空，不能进入采样或自动反标。
    标准 bin-trace 脚本会自动生成 `TB_RUN_ID` / `TB_ARTIFACT_DIR`；fixture 会将 pytest `funcov_bins` 标记或与汇编 case stem 精确匹配的 registry 行写入 `coverage_targets`。
-   `make frontend` 在对应 package 构建成功后生成 `build-frontend/frontend_build_manifest.<sim>.json`。funcov 按 `TB_FRONTEND_SIM` 选择 manifest，且只在其源码状态干净、`simulator` 与已选 package 一致、DUT/RTL/signal-contract 哈希与当前编译产物一致时接受其中的 `dut_source_sha`。
+   `make frontend` 在编译成功后生成 `build-frontend/frontend_build_manifest.json`。funcov 只在 manifest 的源码状态干净且其中的 DUT/RTL/signal-contract 哈希与当前编译产物一致时接受其中的 `dut_source_sha`。
 2. 代码覆盖率：
    `dut.SetCoverage() -> Verilator .dat -> toffee set_line_coverage() -> report_raw_code_coverage.py/gen_coverage_html.sh`。
 
 功能覆盖率证明目标场景被激励；checker、assertion、monitor 或 trace 对比证明 DUT 行为正确。代码覆盖率用于发现 RTL 空洞，三者不能互相替代。完整建模、真实 DUT 证据、版本隔离、自动反标和人工 `CLOSED` 规则见
-`docs/03_funcov_model/skills.md`。
+`docs/03_功能覆盖率建模/skills.md`。
 
 ## 文档分工
 
@@ -213,6 +171,6 @@ Frontend BT 只保留两条职责不同的覆盖率链：
 - frontend 验证流程、bin-trace 运行要求、artifact 规则和提交约束，统一见
   `docs/agents/frontend-verification.md`。
 - 测试点驱动的功能覆盖率建模、回归、版本门禁和反标规范，统一见
-  `docs/03_funcov_model/skills.md`。
+  `docs/03_功能覆盖率建模/skills.md`。
 - DUT / monitor / env mismatch 的分析方法，统一见
   `docs/agents/frontend-debugging.md`。

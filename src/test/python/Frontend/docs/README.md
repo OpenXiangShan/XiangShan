@@ -4,21 +4,21 @@
 
 ## 当前事实源
 
-1. `03_funcov_model/skills.md`
+1. `03_功能覆盖率建模/skills.md`
    - 测试点驱动验证、功能覆盖率、真实 DUT artifact、反标和人工验收规范。
-2. `02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv`
+2. `02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv`
    - 唯一测试点、状态、testcase 和 evidence 主表。
-3. `03_funcov_model/frontend_bt_functional_coverage_pilot.csv`
+3. `03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv`
    - 唯一 active coverage registry；`pilot` 仅为兼容保留的历史文件名。
 
 ## 保留目录
 
-- `01_testplan/`
+- `01_验证策略及方案/`
   - Frontend BT 验证策略基线。
-- `02_testpoint/`
+- `02_测试点分解/`
   - `Frontend_testpoint_0525.xlsx`：原始 Excel 测试点基线，只作来源追溯。
   - `Frontend_testpoint_0525_coverage_backannotated.csv`：当前唯一可维护测试点主表。
-- `03_funcov_model/`
+- `03_功能覆盖率建模/`
   - `skills.md`：当前闭环规范。
   - `frontend_bt_functional_coverage_pilot.csv`：当前唯一 coverage registry。
 

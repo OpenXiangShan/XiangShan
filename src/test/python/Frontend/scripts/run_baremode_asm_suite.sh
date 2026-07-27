@@ -163,8 +163,8 @@ if [[ "${TB_RUN_DUT}" != "0" ]]; then
 
   echo "[frontend-suite] functional coverage gate audit:"
   "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/backannotate_funcov.py" \
-    --pilot "${FRONTEND_DIR}/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv" \
-    --testpoints "${FRONTEND_DIR}/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv" \
+    --pilot "${FRONTEND_DIR}/docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv" \
+    --testpoints "${FRONTEND_DIR}/docs/02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv" \
     --check \
     --audit-json "${suite_report_dir}/funcov/backannotation_audit.json" \
     "${backannotate_args[@]}"

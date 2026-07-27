@@ -14,16 +14,11 @@ import sys
 import pytest
 
 _TEST_ROOT = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(os.path.join(_TEST_ROOT, "..", "..", "..", ".."))
+_PYLIB_PATH = os.path.join(_REPO_ROOT, "build-frontend", "pylib")
 _DATA_DIR = os.path.join(_TEST_ROOT, 'data')
 
-if _TEST_ROOT not in sys.path:
-    sys.path.insert(0, _TEST_ROOT)
-
-from env.pylib import frontend_pylib_path
-
-_PYLIB_PATH = str(frontend_pylib_path())
-
-for _path in (_PYLIB_PATH,):
+for _path in (_PYLIB_PATH, _TEST_ROOT):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 

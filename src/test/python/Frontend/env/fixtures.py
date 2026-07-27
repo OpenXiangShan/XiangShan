@@ -13,17 +13,9 @@ from pathlib import Path
 import pytest
 from toffee_test.reporter import set_line_coverage
 
-from .pylib import frontend_pylib_path
-
 _HERE = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _HERE.parents[3]
-
-
-def _frontend_pylib_path() -> Path:
-    return frontend_pylib_path()
-
-
-_PYLIB_PATH = _frontend_pylib_path()
+_PYLIB_PATH = _REPO_ROOT / 'build-frontend' / 'pylib'
 
 for _path in (str(_PYLIB_PATH), str(_HERE)):
     if _path not in sys.path:
@@ -175,7 +167,7 @@ def _artifact_tag(request) -> str:
 
 def _normalize_waveform_format(value: str | None) -> str:
     normalized = "" if value is None else str(value).strip().lower()
-    return normalized if normalized in {"fst", "vcd", "fsdb"} else "fst"
+    return normalized if normalized in {"fst", "vcd"} else "fst"
 
 
 def _waveform_format_from_dut(dut) -> str:
@@ -375,10 +367,8 @@ def create_dut(request):
         and is_fake_frontend_dut(dut)
     ):
         pytest.skip(
-            "compiled Frontend DUT not found; run `make frontend-verilator` "
-            "or `make frontend-vcs` to build the selected "
-            "build-frontend/pylib-<sim>/Frontend package before enabling "
-            "TB_ENABLE_DUT_TESTS=1"
+            "compiled Frontend DUT not found; run `make frontend` to build "
+            "build-frontend/pylib/Frontend before enabling TB_ENABLE_DUT_TESTS=1"
         )
     waveform_format = _waveform_format_from_dut(dut)
 
@@ -407,23 +397,9 @@ def create_dut(request):
     return dut
 
 
-def _suppress_dut_finalizer_for_batch_run(dut) -> None:
-    """Keep VCS from calling $finish when pytest releases a function-scoped DUT."""
-    if not _is_enabled("TB_SKIP_DUT_FINISH", default="0"):
-        return
-    dut_type = type(dut)
-    if getattr(dut_type, "_frontend_batch_finalizer_suppressed", False):
-        return
-    if "__del__" not in vars(dut_type):
-        return
-    dut_type.__del__ = lambda _dut: None
-    dut_type._frontend_batch_finalizer_suppressed = True
-
-
 @pytest.fixture(scope="function")
 def dut(request):
     dut = create_dut(request)
-    _suppress_dut_finalizer_for_batch_run(dut)
     coverage = _coverage_path(request, _data_dir())
     dut.InitClock("clock")
     yield dut
@@ -443,8 +419,7 @@ def dut(request):
             handler.close()
         except Exception:
             logger.exception("dut case log handler teardown failed")
-    if not _is_enabled("TB_SKIP_DUT_FINISH", default="0"):
-        dut.Finish()
+    dut.Finish()
 
 
 @pytest.fixture(scope="function")

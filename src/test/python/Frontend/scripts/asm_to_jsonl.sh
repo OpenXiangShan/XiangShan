@@ -4,8 +4,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
-source "${SCRIPT_DIR}/frontend_pylib.sh"
-FRONTEND_PYLIB="$(frontend_pylib_path "${REPO_DIR}")"
 
 usage() {
   cat <<'EOF'
@@ -209,7 +207,7 @@ if [[ "${KEEP_ELF}" == "1" ]]; then
   echo "[asm-to-jsonl] kept debug artifacts under ready-to-run/"
 fi
 
-PYTHONPATH="${FRONTEND_DIR}:${FRONTEND_PYLIB}:${PYTHONPATH:-}" \
+PYTHONPATH="${FRONTEND_DIR}:${REPO_DIR}/build-frontend/pylib:${PYTHONPATH:-}" \
 "${PYTHON_BIN}" "${FRONTEND_DIR}/tools/nemu_bin_to_golden_trace.py" \
   "${BIN_PATH}" "${TRACE_JSONL_PATH}" \
   --nemu-exec "${NEMU_EXEC}" \

@@ -2,11 +2,9 @@
 
 import Frontend_api
 import Frontend_env
-import pytest
 from env import api as env_api
 from env import fixtures
 from env.frontend_env import FrontendEnv
-from env.pylib import frontend_offset_path, frontend_pylib_path
 
 
 def test_frontend_api_re_exports_env_api_and_fixtures():
@@ -51,36 +49,3 @@ def test_frontend_env_re_exports_env_objects():
     assert Frontend_env.env is fixtures.env
     assert Frontend_env.full_env is fixtures.full_env
     assert sorted(Frontend_env.__all__) == ["FrontendEnv", "env", "full_env"]
-
-
-def test_frontend_pylib_path_selects_sim_package(monkeypatch):
-    monkeypatch.delenv("TB_FRONTEND_PYLIB", raising=False)
-    monkeypatch.setenv("TB_FRONTEND_SIM", "vcs")
-
-    assert frontend_pylib_path().as_posix().endswith("build-frontend/pylib-vcs")
-    assert fixtures._frontend_pylib_path() == frontend_pylib_path()
-
-
-def test_frontend_pylib_path_allows_explicit_override(monkeypatch):
-    monkeypatch.setenv("TB_FRONTEND_SIM", "vcs")
-    monkeypatch.setenv("TB_FRONTEND_PYLIB", "/custom/frontend/pylib")
-
-    assert frontend_pylib_path().as_posix() == "/custom/frontend/pylib"
-    assert fixtures._frontend_pylib_path() == frontend_pylib_path()
-
-
-def test_frontend_offset_path_uses_selected_sim_package(monkeypatch):
-    monkeypatch.delenv("TB_FRONTEND_PYLIB", raising=False)
-    monkeypatch.setenv("TB_FRONTEND_SIM", "vcs")
-
-    assert frontend_offset_path().as_posix().endswith(
-        "build-frontend/pylib-vcs/Frontend/Frontend_offset.yaml"
-    )
-
-
-def test_frontend_pylib_path_rejects_unknown_sim(monkeypatch):
-    monkeypatch.delenv("TB_FRONTEND_PYLIB", raising=False)
-    monkeypatch.setenv("TB_FRONTEND_SIM", "unknown")
-
-    with pytest.raises(RuntimeError, match="TB_FRONTEND_SIM"):
-        frontend_pylib_path()

@@ -11,26 +11,13 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .artifact_provenance import (
-    file_sha256,
-    frontend_build_manifest_path,
-    load_frontend_build_manifest,
-)
+from .artifact_provenance import file_sha256, load_frontend_build_manifest
 from .funcov import (
     CFVEC_SAMPLER_BIN_KEYS,
     TWO_FETCH_SAMPLER_BIN_KEYS,
     sample_cfvec_coverage,
     sample_two_fetch_coverage,
 )
-from .icache_funcov import (
-    ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
-    ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
-    reset_icache_mainpipe_coverage_state,
-    reset_icache_prefetchpipe_coverage_state,
-    sample_icache_mainpipe_coverage,
-    sample_icache_prefetchpipe_coverage,
-)
-from .pylib import frontend_pylib_path
 from .rvc_decoder import expand_rvc
 
 
@@ -39,7 +26,7 @@ def _frontend_root() -> Path:
 
 
 def default_pilot_csv_path() -> Path:
-    return _frontend_root() / "docs" / "03_funcov_model" / "frontend_bt_functional_coverage_pilot.csv"
+    return _frontend_root() / "docs" / "03_功能覆盖率建模" / "frontend_bt_functional_coverage_pilot.csv"
 
 
 def _sanitize(value: Any) -> Any:
@@ -112,8 +99,6 @@ FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
     set(CFVEC_SAMPLER_BIN_KEYS)
     | set(TWO_FETCH_SAMPLER_BIN_KEYS)
     | set(UNCACHE_EVENT_SAMPLER_BIN_KEYS)
-    | set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)
-    | set(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS)
 )
 
 
@@ -329,17 +314,14 @@ class FunctionalCoverageRecorder:
         repo_root = frontend_root.parents[3]
         build_root = repo_root / "build-frontend"
         manifest_override = os.getenv("TB_DUT_BUILD_MANIFEST", "").strip()
-        simulator = os.getenv("TB_FRONTEND_SIM", "verilator")
         manifest_path = (
             Path(manifest_override).expanduser()
             if manifest_override
-            else frontend_build_manifest_path(build_root, simulator)
+            else build_root / "frontend_build_manifest.json"
         ).resolve(strict=False)
         build = load_frontend_build_manifest(
             build_root,
             manifest_path,
-            simulator=simulator,
-            pylib_dir=frontend_pylib_path() / "Frontend",
         )
         source_override = os.getenv("TB_DUT_SOURCE_SHA", "").strip()
         build_config_override = os.getenv("TB_DUT_BUILD_CONFIG", "").strip()
@@ -378,9 +360,6 @@ class FunctionalCoverageRecorder:
             {
                 "functional_coverage.py": _file_sha256(str(Path(__file__).resolve())),
                 "funcov.py": _file_sha256(str((Path(__file__).resolve().parent / "funcov.py"))),
-                "icache_funcov.py": _file_sha256(
-                    str((Path(__file__).resolve().parent / "icache_funcov.py"))
-                ),
             }
         )
         provenance = {
@@ -609,8 +588,6 @@ class FunctionalCoverageRecorder:
         self._two_fetch_expected_cfvec = None
         self._two_fetch_redirect_pending = None
         self._two_fetch_recent_inflight_tags = None
-        reset_icache_mainpipe_coverage_state(self)
-        reset_icache_prefetchpipe_coverage_state(self)
 
     def on_cycle(self, cycle: int, env) -> None:
         dut = env.dut
@@ -625,8 +602,6 @@ class FunctionalCoverageRecorder:
 
         sample_two_fetch_coverage(self, env, cycle)
         sample_cfvec_coverage(self, env, cycle)
-        sample_icache_mainpipe_coverage(self, env, cycle)
-        sample_icache_prefetchpipe_coverage(self, env, cycle)
 
         self._sample_ibuffer_contract(dut, cycle)
         self._sample_uncache_cycle_state(dut, cycle, env)

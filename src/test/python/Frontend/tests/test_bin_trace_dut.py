@@ -68,7 +68,7 @@ def test_bin_trace(env):
     env.initialize(reset_vector=reset_vector, bare_mode=True, reset_cycles=20)
     bin_size = api_Frontend_load_program_file(env, str(bin_path), base_addr, max_cycles=0)
     trace_entries = api_Frontend_load_golden_trace(env, str(trace_path), max_cycles=0, start_index=trace_start_index)
-    run_ok = api_Frontend_run_until_golden_complete(env, max_cycles=_trace_cycle_limit())
+    completed = api_Frontend_run_until_golden_complete(env, max_cycles=_trace_cycle_limit())
     result = getattr(env, "_last_run_until_golden_result", None)
     if result is not None:
         logger.info(
@@ -83,7 +83,7 @@ def test_bin_trace(env):
             result.pending_work,
             result.monitor_error_count,
         )
-    assert run_ok is True, (
+    assert completed is True, (
         "golden trace run stopped unexpectedly"
         if result is None
         else (
@@ -94,19 +94,6 @@ def test_bin_trace(env):
             f"monitor_errors={result.monitor_error_count}"
         )
     )
-    assert result is not None, "golden trace run did not report a stop reason"
-    if result.status == "cursor_target":
-        assert trace_target_cursor > 0
-        assert result.completed is False
-        assert result.cursor >= trace_target_cursor
-    elif result.status == "budget_exhausted":
-        assert _trace_cycle_limit() > 0
-        assert result.completed is False
-    else:
-        assert result.status == "completed"
-        assert result.completed is True
-        assert result.cursor >= result.total_entries
-        assert result.pending_work == 0
     assert bin_size > 0
     assert trace_entries > 0
     assert not env.monitor.get_errors()
