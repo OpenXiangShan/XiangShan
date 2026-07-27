@@ -4,11 +4,7 @@ import chisel3._
 import chisel3.util._
 import org.chipsalliance.cde.config.Parameters
 import xiangshan.backend.decode.opcode.Opcode.VCryptoOpcodes
-import xiangshan.backend.fu.vector.utils.VecDataSplitModule
-import xiangshan.backend.vector.fu.Func._
-import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.vector.fu.{VecFixLatFunc, VecFuConfig}
-import yunsuan.vector.Common.VSew
 import yunsuan.vector.VectorALU.VCrypto
 
 class VectorCryptoWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFunc(cfg) {
@@ -16,23 +12,18 @@ class VectorCryptoWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecF
 
   private val vicrypto = Module(new VCrypto)
 
+  private val cryptoOpcode = MuxLookup(
+    fuOpType,
+    VCrypto.Opcode.vclmul
+  )(Seq(
+    VCryptoOpcodes.vclmulh.encode.value.U -> VCrypto.Opcode.vclmulh
+  ))
+
   vicrypto.io.in.valid             := in.ex.head.valid
-  vicrypto.io.in.bits.opcode.op    := fuOpType
+  vicrypto.io.in.bits.opcode.op    := cryptoOpcode
   vicrypto.io.in.bits.vs1          := ex0vs1
   vicrypto.io.in.bits.vs2          := ex0vs2
   vicrypto.io.in.bits.old_vd       := ex0oldVd
-  vicrypto.io.in.bits.mask         := srcMask
-  vicrypto.io.in.bits.info.vm      := ex0vm
-  vicrypto.io.in.bits.info.ma      := ex0vma
-  vicrypto.io.in.bits.info.ta      := ex0vta
-  vicrypto.io.in.bits.info.vl      := ex0vl
-  vicrypto.io.in.bits.info.vstart  := 0.U
-  vicrypto.io.in.bits.info.uopIdx  := ex0uopIdx
-  vicrypto.io.in.bits.info.vxrm    := 0.U
-  vicrypto.io.in.bits.info.vlmul   := 0.U
-  vicrypto.io.in.bits.srcType(0)   := 0.U
-  vicrypto.io.in.bits.srcType(1)   := 0.U
-  vicrypto.io.in.bits.vdType       := 0.U
 
   out.ex.zipWithIndex.foreach { case (outStage, stage) =>
     outStage.bits.data.vec.foreach { vecData =>
