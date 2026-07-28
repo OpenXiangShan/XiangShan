@@ -114,6 +114,26 @@ trait CrossPageHelper extends HasBpuParameters {
     ))
 }
 
+trait CrossCacheLineHelper extends HasBpuParameters {
+  private def cacheLineBytes:       Int = frontendParameters.icacheParameters.blockBytes
+  private def cacheLineOffsetWidth: Int = log2Ceil(cacheLineBytes)
+
+  require(isPow2(cacheLineBytes))
+  require(FetchBlockSize <= cacheLineBytes, "Fetch block cannot be larger than an ICache line")
+  require(cacheLineBytes         % FetchBlockAlignSize == 0, "Fetch block alignment must divide the ICache line size")
+  require((1 << PageOffsetWidth) % cacheLineBytes == 0, "ICache line size must divide the page size")
+
+  def isCrossCacheLine(addr1: PrunedAddr, addr2: PrunedAddr): Bool =
+    addr1(addr1.length - 1, cacheLineOffsetWidth) =/=
+      addr2(addr2.length - 1, cacheLineOffsetWidth)
+
+  def getNextCacheLineAlignedAddr(addr: PrunedAddr): PrunedAddr =
+    PrunedAddrInit(Cat(
+      addr(addr.length - 1, cacheLineOffsetWidth) + 1.U,
+      0.U(cacheLineOffsetWidth.W)
+    ))
+}
+
 trait TargetFixHelper extends HasBpuParameters {
   // abstract getTargetUpper function, to be implemented by sub-predictors.
   // basically, it should be `vAddr(VAddrBits - 1, TargetLowerBitsWidth + instOffsetBits)`,

@@ -595,6 +595,20 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
   when(io.toFtq.prediction.fire && abtb.io.prediction.map(_.valid).reduce(_ || _)) {
     assert(abtb.io.debug_startPc === s1_startPc.head)
   }
+  when(s1_fire && ubtb.io.prediction.valid) {
+    assert(
+      ubtb.io.prediction.bits.cfiPosition <= fallThrough.io.prediction.cfiPosition,
+      "uBTB prediction exceeds the cacheline-limited fetch block"
+    )
+  }
+  abtb.io.prediction.foreach { pred =>
+    when(s1_fire && pred.valid) {
+      assert(
+        pred.bits.cfiPosition <= fallThrough.io.prediction.cfiPosition,
+        "aBTB prediction exceeds the cacheline-limited fetch block"
+      )
+    }
+  }
 
   /* *** Debug Meta *** */
   // used for performance counters

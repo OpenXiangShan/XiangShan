@@ -20,12 +20,17 @@ import chisel3.util._
 import utils.AddrField
 import xiangshan.HasXSParameter
 import xiangshan.frontend.PrunedAddr
+import xiangshan.frontend.bpu.CrossCacheLineHelper
 import xiangshan.frontend.bpu.CrossPageHelper
 import xiangshan.frontend.bpu.HalfAlignHelper
 import xiangshan.frontend.bpu.TargetFixHelper
 
 trait Helpers extends HasMainBtbParameters
-    with HasXSParameter with TargetFixHelper with HalfAlignHelper with CrossPageHelper {
+    with HasXSParameter
+    with TargetFixHelper
+    with HalfAlignHelper
+    with CrossPageHelper
+    with CrossCacheLineHelper {
 
   val addrFields = AddrField(
     Seq(

@@ -87,9 +87,10 @@ class MainBtb(implicit p: Parameters) extends BasePredictor with HasMainBtbParam
   private val s0_posHigherBitsVec = s0_rotator.rotate(VecInit.tabulate(NumAlignBanks)(_.U(AlignBankIdxLen.W)))
 
   alignBanks.zipWithIndex.foreach { case (b, i) =>
-    b.io.read.req.startPc       := s0_startPcVec(i)
-    b.io.read.req.posHigherBits := s0_posHigherBitsVec(i)
-    b.io.read.req.crossPage     := isCrossPage(s0_startPcVec(i), s0_startPc)
+    b.io.read.req.startPc        := s0_startPcVec(i)
+    b.io.read.req.posHigherBits  := s0_posHigherBitsVec(i)
+    b.io.read.req.crossPage      := isCrossPage(s0_startPcVec(i), s0_startPc)
+    b.io.read.req.crossCacheLine := isCrossCacheLine(s0_startPcVec(i), s0_startPc)
   }
 
   /* *** s1 ***

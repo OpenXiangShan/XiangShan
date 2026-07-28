@@ -34,9 +34,10 @@ class MainBtbAlignBank(
       class Req extends Bundle {
         // NOTE: this startPc is not from Bpu top, it's calculated in MainBtb top
         // i.e. (VecInit.tabulate(NumAlignBanks)(startPc + _ * alignSize))(alignIdx) rotated right by startAlignIdx
-        val startPc:       PrunedAddr = new PrunedAddr(VAddrBits)
-        val posHigherBits: UInt       = UInt(AlignBankIdxLen.W)
-        val crossPage:     Bool       = Bool()
+        val startPc:        PrunedAddr = new PrunedAddr(VAddrBits)
+        val posHigherBits:  UInt       = UInt(AlignBankIdxLen.W)
+        val crossPage:      Bool       = Bool()
+        val crossCacheLine: Bool       = Bool()
       }
 
       class Resp extends Bundle {
@@ -102,6 +103,7 @@ class MainBtbAlignBank(
   private val s0_startPc          = r.req.startPc
   private val s0_posHigherBits    = r.req.posHigherBits
   private val s0_crossPage        = r.req.crossPage
+  private val s0_crossCacheLine   = r.req.crossCacheLine
   private val s0_setIdx           = getSetIndex(s0_startPc)
   private val s0_internalBankIdx  = getInternalBankIndex(s0_startPc)
   private val s0_internalBankMask = UIntToOH(s0_internalBankIdx, NumInternalBanks)
@@ -124,6 +126,7 @@ class MainBtbAlignBank(
   private val s1_startPc          = RegEnable(s0_startPc, s0_fire)
   private val s1_posHigherBits    = RegEnable(s0_posHigherBits, s0_fire)
   private val s1_crossPage        = RegEnable(s0_crossPage, s0_fire)
+  private val s1_crossCacheLine   = RegEnable(s0_crossCacheLine, s0_fire)
   private val s1_internalBankMask = RegEnable(s0_internalBankMask, s0_fire)
 
   private val s1_rawEntries = Mux1H(
@@ -146,6 +149,7 @@ class MainBtbAlignBank(
   private val s2_startPc          = RegEnable(s1_startPc, s1_fire)
   private val s2_posHigherBits    = RegEnable(s1_posHigherBits, s1_fire)
   private val s2_crossPage        = RegEnable(s1_crossPage, s1_fire)
+  private val s2_crossCacheLine   = RegEnable(s1_crossCacheLine, s1_fire)
   private val s2_internalBankMask = RegEnable(s1_internalBankMask, s1_fire)
   private val s2_rawEntries       = RegEnable(s1_rawEntries, s1_fire)
   private val s2_rawCounters      = RegEnable(s1_rawCounters, s1_fire)
@@ -164,8 +168,8 @@ class MainBtbAlignBank(
     // send rawHit for training
     val rawHit = e.valid && e.tag === s2_tag
     // filter out branches before alignedInstOffset
-    // also filter out all entries if crossPage to satisfy Ifu/ICache's requirement
-    val hit = rawHit && e.position >= s2_alignedInstOffset && !s2_crossPage
+    // Filter entries from align banks beyond the current page or ICache line.
+    val hit = rawHit && e.position >= s2_alignedInstOffset && !s2_crossPage && !s2_crossCacheLine
     pred.valid            := hit
     pred.bits.cfiPosition := Cat(s2_posHigherBits, e.position)
     pred.bits.target      := getFullTarget(s2_startPc, e.targetLowerBits, e.targetCarry)

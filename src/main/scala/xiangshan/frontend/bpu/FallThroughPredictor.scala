@@ -22,7 +22,8 @@ import utility.XSPerfAccumulate
 
 class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
     with HalfAlignHelper
-    with CrossPageHelper {
+    with CrossPageHelper
+    with CrossCacheLineHelper {
   class FallThroughPredictorIO extends BasePredictorIO {
     val prediction: Prediction = Output(new Prediction)
   }
@@ -41,55 +42,31 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
   private val s1_fire    = io.stageCtrl.s1_fire
   private val s1_startPc = RegEnable(s0_startPc, s0_fire)
 
-  // e.g. FetchBlockSize = 64B, FetchBlockAlignSize = 32B, we have CfiPositionWidth = 5
-  // start | nextBlock | crossPage | nextPage | cfiPc | cfiPosition
-  // 0x000 |   0x0040  |   false   |  0x0000  | 0x03e | 0x1f // (0x03e-0x000) >> 1
-  // 0x010 |   0x0040  |   false   |  0x0000  | 0x03e | 0x1f // (0x03e-0x000) >> 1
-  // 0x020 |   0x0060  |   false   |  0x0000  | 0x05e | 0x1f // (0x05e-0x020) >> 1
-  // 0xfc0 |   0x1000  |    true   |  0x1000  | 0xffe | 0x1f // (0xffe-0xfc0) >> 1
-  // 0xfd0 |   0x1000  |    true   |  0x1000  | 0xffe | 0x1f // (0xffe-0xfc0) >> 1
-  // 0xfe0 |   0x1020  |    true   |  0x1000  | 0xffe | 0x0f // (0xffe-0xfe0) >> 1
-  // 0xff0 |   0x1020  |    true   |  0x1000  | 0xffe | 0x0f // (0xffe-0xfe0) >> 1
-
-  // e.g. FetchBlockSize = 64B, FetchBlockAlignSize = 16B, we have CfiPositionWidth = 5
-  // start | nextBlock | crossPage | nextPage | cfiPc | cfiPosition
-  // 0x000 |   0x0040  |   false   |  0x0000  | 0x03e | 0x1f // (0x03e-0x000) >> 1
-  // 0x010 |   0x0050  |   false   |  0x0000  | 0x04e | 0x1f // (0x04e-0x010) >> 1
-  // 0x020 |   0x0060  |   false   |  0x0000  | 0x05e | 0x1f // (0x05e-0x020) >> 1
-  // 0xfc0 |   0x1000  |    true   |  0x1000  | 0xffe | 0x1f // (0xffe-0xfc0) >> 1
-  // 0xfd0 |   0x1010  |    true   |  0x1000  | 0xffe | 0x17 // (0xffe-0xfd0) >> 1
-  // 0xfe0 |   0x1020  |    true   |  0x1000  | 0xffe | 0x0f // (0xffe-0xfe0) >> 1
-  // 0xff0 |   0x1030  |    true   |  0x1000  | 0xffe | 0x07 // (0xffe-0xff0) >> 1
-
-  // fall-through pc = startPc + FetchBlockSize(64B), aligned to FetchBlockAlign(32B)
+  // Limit the fall-through PC to the first ICache line. With the default 64B fetch block and
+  // 32B alignment, a block starting at 0x20 ends at 0x40 instead of 0x60.
   private val s1_nextBlockAlignedPc = getAlignedPc(s1_startPc + FetchBlockSize.U)
+  private val s1_nextCacheLinePc    = getNextCacheLineAlignedAddr(s1_startPc)
+  private val s1_crossCacheLine     = isCrossCacheLine(s1_startPc, s1_nextBlockAlignedPc)
+  private val s1_cacheLineLimitedPc = Mux(
+    s1_crossCacheLine,
+    s1_nextCacheLinePc,
+    s1_nextBlockAlignedPc
+  )
 
   // if cross page, we need to align fallThroughPc to the next page
-  private val s1_crossPage         = isCrossPage(s1_startPc, s1_nextBlockAlignedPc) // compare LSB of Vpn
-  private val s1_nextPageAlignedPc = getPageAlignedAddr(s1_nextBlockAlignedPc)      // clear page offset
-
-  // cfiPosition is the offset between alignedStart and last 2B before nextStart (nextBlock or nextPage), in instr
-  // i.e. if not crossPage:
-  //    cfiPosition = ((nextBlock - alignedStart) >> instOffsetBits) - 1
-  //                = (FetchBlockSize >> instOffsetBits) - 1
-  //                = FetchBlockInstNum - 1 // constant
-  // otherwise:
-  //    cfiPosition = ((nextPage - alignedStart) >> instOffsetBits) - 1
-  //                = ((-(alignedStart - nextPage)) >> instOffsetBits) - 1
-  //                // ignore the higher bits, alignedStart(CfiPositionWidth, 1) === nextBlock(CfiPositionWidth, 1)
-  //                = ((-(nextBlock - nextPage)) >> instOffsetBits) - 1
-  //                = (~(nextBlock - nextPage)) >> instOffsetBits
-  private val s1_cfiPosition = Mux(
-    s1_crossPage,
-    ~(s1_nextBlockAlignedPc - s1_nextPageAlignedPc)(CfiPositionWidth + instOffsetBits - 1, instOffsetBits),
-    (FetchBlockInstNum - 1).U
-  )
+  private val s1_crossPage         = isCrossPage(s1_startPc, s1_cacheLineLimitedPc) // compare LSB of Vpn
+  private val s1_nextPageAlignedPc = getPageAlignedAddr(s1_cacheLineLimitedPc)      // clear page offset
 
   private val s1_fallThroughPc = Mux(
     s1_crossPage,
     s1_nextPageAlignedPc,
-    s1_nextBlockAlignedPc
+    s1_cacheLineLimitedPc
   )
+
+  // cfiPosition is relative to the aligned fetch-block start and points to the final 2B slot.
+  private val s1_alignedStartPc  = getAlignedPc(s1_startPc)
+  private val s1_fallThroughSize = (s1_fallThroughPc - s1_alignedStartPc) >> instOffsetBits
+  private val s1_cfiPosition     = (s1_fallThroughSize - 1.U)(CfiPositionWidth - 1, 0)
 
   io.prediction.taken       := false.B
   io.prediction.cfiPosition := s1_cfiPosition
@@ -97,5 +74,9 @@ class FallThroughPredictor(implicit p: Parameters) extends BasePredictor
   io.prediction.attribute   := BranchAttribute.None
 
   XSPerfAccumulate("crossPage", s1_fire && s1_crossPage)
-  XSPerfAccumulate("crossPageFixed", s1_fire && s1_crossPage && s1_nextBlockAlignedPc =/= s1_nextPageAlignedPc)
+  XSPerfAccumulate("crossPageFixed", s1_fire && s1_crossPage && s1_cacheLineLimitedPc =/= s1_nextPageAlignedPc)
+  XSPerfAccumulate(
+    "crossCacheLineFixed",
+    s1_fire && s1_crossCacheLine && s1_nextBlockAlignedPc =/= s1_nextCacheLinePc
+  )
 }
