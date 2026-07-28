@@ -108,7 +108,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
     abtb.io.enable   := ctrl.abtbEnable
     mbtb.io.enable   := ctrl.mbtbEnable
     tage.io.enable   := ctrl.tageEnable
-    sc.io.enable     := ctrl.scEnable
+    sc.io.enable     := false.B
     ittage.io.enable := ctrl.ittageEnable
     ras.io.enable    := ctrl.rasEnable
     // utage.io.enable  := ctrl.utageEnable
@@ -391,7 +391,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       MuxCase(
         entry.bits.taken, // default: base table
         Seq(
-          useSc                -> scTaken,
+          // useSc                -> scTaken,
           tagePred.useProvider -> tagePred.providerPred,
           tagePred.hasAlt      -> tagePred.altPred
         )

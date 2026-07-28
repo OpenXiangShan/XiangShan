@@ -394,7 +394,7 @@ class Sc(implicit p: Parameters) extends BasePredictor with HasScParameters with
     })
   private val t0_needWrite    = t0_writeValidVec.reduce(_ || _)
   private val t0_bankConflict = t0_needWrite && s0_fire && t0_bankMask === s0_bankMask
-  io.trainReady := !t0_bankConflict
+  io.trainReady := true.B
   pathTable.zip(t0_pathIdx).foreach { case (table, idx) =>
     table.io.trainReadReq.valid         := t0_fire && t0_needWrite && PathEnable.B
     table.io.trainReadReq.bits.setIdx   := idx

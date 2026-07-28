@@ -120,7 +120,8 @@ class ResolveQueue(implicit p: Parameters) extends FtqModule with HalfAlignHelpe
   private val resolve = filteredResolve.map { filteredResolve =>
     val hasMispredict = filteredResolve.bits.mispredict
     val isDirect      = filteredResolve.bits.attribute.isDirect
-    val shouldDrop    = !hasMispredict && (dropResolveCounter.isSaturatePositive || isDirect)
+    // val shouldDrop    = !hasMispredict && (dropResolveCounter.isSaturatePositive || isDirect)
+    val shouldDrop = false.B
 
     val resolve = Wire(Valid(new ResolveWithSource))
     resolve.valid := filteredResolve.valid && !shouldDrop
