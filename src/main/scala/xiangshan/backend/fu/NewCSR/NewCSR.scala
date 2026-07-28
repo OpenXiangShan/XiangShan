@@ -151,6 +151,7 @@ class NewCSR(implicit val p: Parameters) extends Module
         val isFetchMalAddr = Bool()
         val isForVSnonLeafPTE = Bool()
         val satpFlushFirstFetchFault = Bool()
+        val isFormer = Bool()
       })
       val commit = Input(new RobCommitCSR)
       val robDeqPtr = Input(new RobPtr)
@@ -283,6 +284,7 @@ class NewCSR(implicit val p: Parameters) extends Module
   val oldSatpMode  = io.oldSatpMode
   val oldVsatpMode = io.oldVsatpMode
   val oldPrivState = io.oldPrivState
+  val trapIsFormer = io.fromRob.trap.bits.isFormer
 
   // debug_intrrupt
   val debugIntrEnable = RegInit(true.B) // debug interrupt will be handle only when debugIntrEnable
@@ -1681,6 +1683,7 @@ class NewCSR(implicit val p: Parameters) extends Module
     diffArchEvent.interrupt := RegEnable(interruptNO, hasTrap)
     diffArchEvent.exception := RegEnable(exceptionNO, hasTrap)
     diffArchEvent.exceptionPC := RegEnable(exceptionPC, hasTrap)
+    diffArchEvent.isFormer := RegEnable(trapIsFormer, hasTrap)
     diffArchEvent.hasNMI := RegEnable(hasNMI, hasTrap)
     diffArchEvent.virtualInterruptIsHvictlInject := RegNext(virtualInterruptIsHvictlInject && interrupt)
     diffArchEvent.irToHS := RegEnable(irToHS, hasTrap)
