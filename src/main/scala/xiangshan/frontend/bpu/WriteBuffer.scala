@@ -31,7 +31,7 @@ import xiangshan.XSModule
  * 3. Written SRAM entries undergo write comparison - only differing data triggers re-write
  * 4. Entries with saturation counters support counter updates
  * 5. Single-write-multiple-read (SWMR) port configuration
- * 6. Bypass write data to read port when empty
+ * Write requests are non-backpressured. A miss on a full row overwrites a dirty victim.
  * @param gen The type of the write request bundle
  * @param numEntries The number of entries in the write buffer
  * @param numPorts The number of write ports
@@ -56,10 +56,13 @@ class WriteBuffer[T <: WriteReqBundle](
   require(numPorts >= 1)
   require(numPorts <= numEntries)
   class WriteBufferIO extends Bundle {
-    val write:     Vec[DecoupledIO[T]] = Vec(numPorts, Flipped(DecoupledIO(gen)))
-    val read:      Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
-    val takenMask: Option[Vec[Bool]]   = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
-    val flush:     Option[Bool]        = Option.when(hasFlush)(Input(Bool()))
+    val write: Vec[ValidIO[T]]     = Vec(numPorts, Flipped(Valid(gen)))
+    val read:  Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
+    val full:  Vec[Bool]           = Output(Vec(numPorts, Bool()))
+    // A full miss overwrites a pending dirty entry.
+    val overwrite: Vec[Bool]         = Output(Vec(numPorts, Bool()))
+    val takenMask: Option[Vec[Bool]] = Option.when(hasCnt)(Vec(numPorts, Input(Bool())))
+    val flush:     Option[Bool]      = Option.when(hasFlush)(Input(Bool()))
   }
   val io: WriteBufferIO = IO(new WriteBufferIO)
 
@@ -97,7 +100,6 @@ class WriteBuffer[T <: WriteReqBundle](
   private val readReadyVec = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
   private val emptyVec     = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
   private val fullVec      = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
-  private val writeFlowVec = WireInit(VecInit(Seq.fill(numPorts)(false.B)))
   // Replace is to prioritize replacing the entry of the same port as setIdx
   private val victimSameSetIdx = WireInit(VecInit.fill(numPorts)(0.U.asTypeOf(Valid(UInt(log2Ceil(numEntries).W)))))
 
@@ -226,6 +228,7 @@ class WriteBuffer[T <: WriteReqBundle](
     XSPerfAccumulate(f"${namePrefix}_port${portIdx}_hit_written", writeValid && hitWritten)
     XSPerfAccumulate(f"${namePrefix}_port${portIdx}_hit", writeValid && hit)
     XSPerfAccumulate(f"${namePrefix}_port${portIdx}_not_hit", writeValid && !hit)
+    io.overwrite(portIdx) := writeValid && fullVec(portIdx) && !hit
 
   }
 
@@ -236,11 +239,11 @@ class WriteBuffer[T <: WriteReqBundle](
     readValidVec(nRows) := dirty(nRows)
     emptyVec(nRows)     := !readValidVec(nRows).reduce(_ || _)
     fullVec(nRows)      := readValidVec(nRows).reduce(_ && _)
+    io.full(nRows)      := fullVec(nRows)
     val readIdx = PriorityEncoder(readValidVec(nRows))
 
-    io.write(nRows).ready := !fullVec(nRows)
-    io.read(nRows).valid  := !emptyVec(nRows)
-    io.read(nRows).bits   := DontCare
+    io.read(nRows).valid := !emptyVec(nRows)
+    io.read(nRows).bits  := DontCare
 
     when(readReadyVec(nRows) && !emptyVec(nRows)) {
       io.read(nRows).bits   := entries(nRows)(readIdx)
