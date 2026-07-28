@@ -86,7 +86,10 @@ class WriteBuffer[T <: WriteReqBundle](
 
   private val dirty   = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
   private val entries = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(0.U.asTypeOf(gen.cloneType))))))
-  private val shadowValid = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
+  private val shadowValid     = RegInit(VecInit(Seq.fill(numPorts)(VecInit(Seq.fill(numEntries)(false.B)))))
+  private val nextDirty       = WireInit(dirty)
+  private val nextEntries     = WireInit(entries)
+  private val nextShadowValid = WireInit(shadowValid)
 
   private val writePortValid = VecInit(Seq.fill(numPorts)(false.B))
   private val writePortBits  = VecInit(Seq.fill(numPorts)(0.U.asTypeOf(gen.cloneType)))
@@ -108,6 +111,15 @@ class WriteBuffer[T <: WriteReqBundle](
   dontTouch(readValidVec)
   dontTouch(replacerWay)
   dontTouch(emptyVec)
+
+  // Apply drain first. Write requests below override it when they update the same slot,
+  // and flush overrides both at the end of the next-state calculation.
+  for (rowIdx <- 0 until numPorts) {
+    val drainIdx = PriorityEncoder(dirty(rowIdx))
+    when(io.read(rowIdx).ready && dirty(rowIdx).reduce(_ || _)) {
+      nextDirty(rowIdx)(drainIdx) := false.B
+    }
+  }
 
   writePortValid.zipWithIndex.foreach { case (writeValid, portIdx) =>
     val setIdxHitVec = entries(portIdx).zip(shadowValid(portIdx)).map { case (entry, valid) =>
@@ -181,11 +193,11 @@ class WriteBuffer[T <: WriteReqBundle](
       )
       // if this write port !hit need to write a new entry
       when(!hit) {
-        entries(portIdx)(victim)     := io.write(portIdx).bits
-        shadowValid(portIdx)(victim) := true.B
-        dirty(portIdx)(victim)       := true.B
-        writeTouchVec(portIdx).valid := true.B
-        writeTouchVec(portIdx).bits  := victim
+        nextEntries(portIdx)(victim)     := io.write(portIdx).bits
+        nextShadowValid(portIdx)(victim) := true.B
+        nextDirty(portIdx)(victim)       := true.B
+        writeTouchVec(portIdx).valid     := true.B
+        writeTouchVec(portIdx).bits      := victim
       }
 
       // if hit need to update the entry
@@ -195,14 +207,15 @@ class WriteBuffer[T <: WriteReqBundle](
         val mergedEntry =
           if (hasWayMask) mergeSameWay(entries(rowIdx)(hitIdx), io.write(portIdx).bits) else io.write(portIdx).bits
         when(hitNotWritten) {
-          entries(rowIdx)(hitIdx)     := mergedEntry
-          shadowValid(rowIdx)(hitIdx) := true.B
+          nextEntries(rowIdx)(hitIdx)     := mergedEntry
+          nextShadowValid(rowIdx)(hitIdx) := true.B
+          nextDirty(rowIdx)(hitIdx)       := true.B
         }.elsewhen(hitWritten) {
           val entryChange = entries(rowIdx)(hitIdx).asUInt =/= mergedEntry.asUInt
           when(entryChange) {
-            dirty(rowIdx)(hitIdx)       := true.B
-            entries(rowIdx)(hitIdx)     := mergedEntry
-            shadowValid(rowIdx)(hitIdx) := true.B
+            nextDirty(rowIdx)(hitIdx)       := true.B
+            nextEntries(rowIdx)(hitIdx)     := mergedEntry
+            nextShadowValid(rowIdx)(hitIdx) := true.B
           }
         }
       }
@@ -216,11 +229,11 @@ class WriteBuffer[T <: WriteReqBundle](
           // and write other entry information
           val writePortTaken = takenMask(portIdx)
           val updateCnt      = entries(rowIdx)(hitIdx).cnt.get.getUpdate(writePortTaken)
-          temporarily.cnt.get         := updateCnt.asTypeOf(temporarily.cnt.get)
-          entries(rowIdx)(hitIdx)     := temporarily
-          shadowValid(rowIdx)(hitIdx) := true.B
+          temporarily.cnt.get             := updateCnt.asTypeOf(temporarily.cnt.get)
+          nextEntries(rowIdx)(hitIdx)     := temporarily
+          nextShadowValid(rowIdx)(hitIdx) := true.B
           // Counter updates make the shadow entry differ from SRAM again.
-          dirty(rowIdx)(hitIdx) := true.B
+          nextDirty(rowIdx)(hitIdx) := true.B
         }
       }
     }
@@ -246,8 +259,7 @@ class WriteBuffer[T <: WriteReqBundle](
     io.read(nRows).bits  := DontCare
 
     when(readReadyVec(nRows) && !emptyVec(nRows)) {
-      io.read(nRows).bits   := entries(nRows)(readIdx)
-      dirty(nRows)(readIdx) := false.B
+      io.read(nRows).bits := entries(nRows)(readIdx)
     }
     val touchWays = Seq(writeTouchVec(nRows)) ++ hitTouchVec(nRows).filter(_.valid == true.B).take(numPorts)
     replacerWay(nRows) := replacer.way
@@ -255,7 +267,7 @@ class WriteBuffer[T <: WriteReqBundle](
     when(flush) {
       // Discard all pending SRAM writes while retaining the shadow entries.
       for (i <- 0 until numEntries) {
-        dirty(nRows)(i) := false.B
+        nextDirty(nRows)(i) := false.B
       }
     }
     XSPerfAccumulate(f"${namePrefix}_port${nRows}_is_full", writePortValid(nRows) && fullVec(nRows))
@@ -267,4 +279,8 @@ class WriteBuffer[T <: WriteReqBundle](
       numEntries
     )
   }
+
+  dirty       := nextDirty
+  entries     := nextEntries
+  shadowValid := nextShadowValid
 }
