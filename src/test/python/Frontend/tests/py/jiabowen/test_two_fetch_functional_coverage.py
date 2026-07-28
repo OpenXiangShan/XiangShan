@@ -23,6 +23,10 @@ from env.funcov import (
     sample_cfvec_coverage,
     sample_two_fetch_coverage,
 )
+from env.funcov.py.icache.sampler import (
+    ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
+    ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
+)
 from env.artifact_provenance import load_frontend_build_manifest, write_frontend_build_manifest
 from env.functional_coverage import (
     FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS,
@@ -147,7 +151,7 @@ def _set_mainpipe_waylookup_inputs(
 
 
 def _eligible_provenance():
-    frontend_root = Path(__file__).resolve().parents[1]
+    frontend_root = Path(__file__).resolve().parents[3]
 
     def file_sha256(path):
         return hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -156,8 +160,34 @@ def _eligible_provenance():
     sampler_sha256 = hashlib.sha256(
         json.dumps(
             {
-                "functional_coverage.py": file_sha256(frontend_root / "env/functional_coverage.py"),
-                "funcov.py": file_sha256(frontend_root / "env/funcov.py"),
+                "env/functional_coverage.py": file_sha256(
+                    frontend_root / "env/functional_coverage.py"
+                ),
+                "env/rvc_decoder.py": file_sha256(frontend_root / "env/rvc_decoder.py"),
+                "env/funcov/py/ftq/sampler.py": file_sha256(
+                    frontend_root / "env/funcov/py/ftq/sampler.py"
+                ),
+                "env/funcov/py/ifu/sampler.py": file_sha256(
+                    frontend_root / "env/funcov/py/ifu/sampler.py"
+                ),
+                "env/funcov/py/common/dut.py": file_sha256(
+                    frontend_root / "env/funcov/py/common/dut.py"
+                ),
+                "env/funcov/py/common/fetch_memory.py": file_sha256(
+                    frontend_root / "env/funcov/py/common/fetch_memory.py"
+                ),
+                "env/funcov/py/common/utils.py": file_sha256(
+                    frontend_root / "env/funcov/py/common/utils.py"
+                ),
+                "env/funcov/py/fetch_path/sampler.py": file_sha256(
+                    frontend_root / "env/funcov/py/fetch_path/sampler.py"
+                ),
+                "env/funcov/py/ibuffer/sampler.py": file_sha256(
+                    frontend_root / "env/funcov/py/ibuffer/sampler.py"
+                ),
+                "env/funcov/py/icache/sampler.py": file_sha256(
+                    frontend_root / "env/funcov/py/icache/sampler.py"
+                ),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -861,7 +891,7 @@ def test_two_fetch_ibuffer_backpressure_requires_stable_full_payload(tmp_path):
     dut.set_key("ifu_s2_valid", 1)
     dut.set_key("to_ibuffer_valid", 1)
     dut.set_key("to_ibuffer_ready", 0)
-    offset = Path(__file__).resolve().parents[5] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
+    offset = Path(__file__).resolve().parents[7] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
     prefix = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
     names = sorted(
         line[len("  - name: ") :].strip()
@@ -895,7 +925,7 @@ def test_two_fetch_ibuffer_fire_ends_the_payload_hold_window(tmp_path):
     dut.set_key("ifu_second_valid", 1)
     dut.set_key("ifu_s2_valid", 1)
     dut.set_key("to_ibuffer_valid", 1)
-    offset = Path(__file__).resolve().parents[5] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
+    offset = Path(__file__).resolve().parents[7] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
     prefix = "Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_"
     names = sorted(
         line[len("  - name: ") :].strip()
@@ -1166,10 +1196,10 @@ def test_backend_redirect_old_tag_delivery_is_a_protocol_risk_not_a_hit(tmp_path
 
 
 def test_canonical_registry_matches_the_single_sampler_contract():
-    repo_root = Path(__file__).resolve().parents[5]
+    repo_root = Path(__file__).resolve().parents[7]
     pilot_path = (
         repo_root
-        / "src/test/python/Frontend/docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv"
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
     )
     with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
         active = {
@@ -1177,10 +1207,12 @@ def test_canonical_registry_matches_the_single_sampler_contract():
             for row in csv.DictReader(handle)
             if row["Coverpoint"].strip()
         }
-    assert len(active) == 64
+    assert len(active) == 137
     assert active == set(FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS)
     assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
     assert len(TWO_FETCH_SAMPLER_BIN_KEYS) == 41
+    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 49
+    assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 24
 
 
 def test_cfvec_mixed_bins_are_window_scoped_and_do_not_hit_on_rvi_only(tmp_path):
@@ -1245,7 +1277,7 @@ def test_sampler_cannot_silently_mark_an_unmodeled_bin(tmp_path):
 
 
 def test_two_fetch_signal_map_matches_current_frontend_offset():
-    offset = Path(__file__).resolve().parents[5] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
+    offset = Path(__file__).resolve().parents[7] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
     assert offset.exists(), "DUT signal inventory is required before signal-contract tests"
 
     registered = {
@@ -1313,10 +1345,10 @@ def test_funcov_and_backannotation_compatibility_fields_stay_identical():
 
 
 def test_two_fetch_backannotation_matches_registry_and_sampler():
-    repo_root = Path(__file__).resolve().parents[5]
+    repo_root = Path(__file__).resolve().parents[7]
     pilot_path = (
         repo_root
-        / "src/test/python/Frontend/docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv"
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
     )
     with pilot_path.open(encoding="utf-8-sig", newline="") as f:
         pilot_rows = [row for row in csv.DictReader(f) if row["Bin_ID"].startswith("BIN-5")]
@@ -1340,7 +1372,7 @@ def test_two_fetch_backannotation_matches_registry_and_sampler():
 
     testpoint_path = (
         repo_root
-        / "src/test/python/Frontend/docs/02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv"
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
     )
     mapping = validate_mapping(
         testpoint_path,
@@ -1351,10 +1383,18 @@ def test_two_fetch_backannotation_matches_registry_and_sampler():
 
 
 def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
-    repo_root = Path(__file__).resolve().parents[5]
+    repo_root = Path(__file__).resolve().parents[7]
     frontend_root = repo_root / "src/test/python/Frontend"
     fixture_source = (frontend_root / "env/fixtures.py").read_text(encoding="utf-8")
-    sampler_source = (frontend_root / "env/funcov.py").read_text(encoding="utf-8")
+    sampler_source = "\n".join(
+        (
+            (frontend_root / "env/funcov/py/ftq/sampler.py").read_text(encoding="utf-8"),
+            (frontend_root / "env/funcov/py/ifu/sampler.py").read_text(encoding="utf-8"),
+        )
+    )
+    fetch_path_source = (
+        frontend_root / "env/funcov/py/fetch_path/sampler.py"
+    ).read_text(encoding="utf-8")
     recorder_source = (frontend_root / "env/functional_coverage.py").read_text(encoding="utf-8")
     recorder = FunctionalCoverageRecorder.from_pilot_csv(
         default_pilot_csv_path(),
@@ -1370,9 +1410,12 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "bpu_basic_pred_type" not in recorder_source
     assert "s1_icacheMeta_0_itlbPbmt" not in recorder_source
     assert "s1_icacheMeta_0_pmpMmio" not in recorder_source
-    assert "s1_icacheMetaIn_0_itlbPbmt" in recorder_source
-    assert "s1_icacheMetaIn_0_pmpMmio" in recorder_source
-    assert len(recorder.definitions) == 64
+    assert "s1_icacheMetaIn_0_itlbPbmt" not in recorder_source
+    assert "s1_icacheMetaIn_0_pmpMmio" not in recorder_source
+    assert "s1_icacheMetaIn_0_itlbPbmt" in fetch_path_source
+    assert "s1_icacheMetaIn_0_pmpMmio" in fetch_path_source
+    assert not (frontend_root / "env/icache_funcov.py").exists()
+    assert len(recorder.definitions) == 137
     assert all(item.coverpoint for item in recorder.definitions)
     assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source
@@ -1381,7 +1424,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
 
 
 def test_frontend_runners_keep_artifacts_scoped_to_one_run(tmp_path):
-    frontend_root = Path(__file__).resolve().parents[1]
+    frontend_root = Path(__file__).resolve().parents[3]
     pipeline_source = (frontend_root / "scripts/run_bin_trace_pipeline.sh").read_text(
         encoding="utf-8"
     )
@@ -1435,7 +1478,7 @@ def test_frontend_runners_keep_artifacts_scoped_to_one_run(tmp_path):
     assert "--check" in suite_source
     assert 'raw coverage summary skipped: TB_RUN_DUT=0' in suite_source
     assert "DATE_STAMP" not in suite_source
-    suite_cases = set(re.findall(r"asm_cases/([A-Za-z0-9_]+)\.S", suite_source))
+    suite_cases = set(re.findall(r"asm_cases/(?:[a-z0-9_]+/)?([A-Za-z0-9_]+)\.S", suite_source))
     active_testcases = {
         item.suggested_testcase
         for item in FunctionalCoverageRecorder.from_pilot_csv(
@@ -1557,7 +1600,7 @@ def test_raw_code_coverage_report_writes_run_scoped_json(tmp_path):
         dat_path=data_dir / "case.dat",
         source_root=source_root,
     )
-    frontend_root = Path(__file__).resolve().parents[1]
+    frontend_root = Path(__file__).resolve().parents[3]
 
     result = subprocess.run(
         [
@@ -1667,7 +1710,7 @@ def test_raw_code_coverage_report_rejects_unproven_dat(
             Path(sidecar["waveform_path"]).unlink()
         sidecar_path.write_text(json.dumps(sidecar) + "\n", encoding="utf-8")
 
-    frontend_root = Path(__file__).resolve().parents[1]
+    frontend_root = Path(__file__).resolve().parents[3]
     result = subprocess.run(
         [
             sys.executable,
@@ -1707,7 +1750,7 @@ def test_raw_code_coverage_report_rejects_duplicate_run_ids(tmp_path):
     second["line_coverage_path"] = str(second_dat.resolve())
     second_sidecar.write_text(json.dumps(second) + "\n", encoding="utf-8")
 
-    frontend_root = Path(__file__).resolve().parents[1]
+    frontend_root = Path(__file__).resolve().parents[3]
     result = subprocess.run(
         [
             sys.executable,
@@ -1920,7 +1963,7 @@ def test_build_manifest_binds_source_sha_to_compiled_artifacts(tmp_path):
 
 
 def test_build_manifest_cli_import_does_not_initialize_testbench_packages():
-    repo_root = Path(__file__).resolve().parents[5]
+    repo_root = Path(__file__).resolve().parents[7]
     tool_path = repo_root / "src/test/python/Frontend/tools/write_frontend_build_manifest.py"
 
     result = subprocess.run(
@@ -1967,7 +2010,7 @@ def test_build_manifest_runtime_rechecks_allowlisted_source_delta(tmp_path):
     (pylib / "_UT_Frontend.so").write_bytes(b"python-extension")
     (pylib / "Frontend_offset.yaml").write_text("signals: []\n", encoding="utf-8")
     (rtl / "Frontend.sv").write_text("module Frontend; endmodule\n", encoding="utf-8")
-    tool_path = Path(__file__).resolve().parents[1] / "tools/write_frontend_build_manifest.py"
+    tool_path = Path(__file__).resolve().parents[3] / "tools/write_frontend_build_manifest.py"
     result = subprocess.run(
         [
             sys.executable,

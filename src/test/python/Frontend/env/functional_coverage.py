@@ -17,13 +17,35 @@ from .artifact_provenance import (
     frontend_simulator,
     load_frontend_build_manifest,
 )
-from .funcov import (
-    CFVEC_SAMPLER_BIN_KEYS,
+from .funcov.py.fetch_path.sampler import (
+    UNCACHE_EVENT_SAMPLER_BIN_KEYS,
+    handle_fetch_path_event,
+    initialize_fetch_path_coverage_state,
+    reset_fetch_path_coverage_state,
+    sample_uncache_cycle_state,
+)
+from .funcov.py.ibuffer.sampler import sample_ibuffer_contract
+from .funcov.py.ftq.sampler import (
     TWO_FETCH_SAMPLER_BIN_KEYS,
-    sample_cfvec_coverage,
+    initialize_ftq_coverage_state,
+    reset_ftq_coverage_state,
     sample_two_fetch_coverage,
 )
-from .rvc_decoder import expand_rvc
+from .funcov.py.ifu.sampler import (
+    CFVEC_SAMPLER_BIN_KEYS,
+    handle_ifu_event,
+    initialize_ifu_coverage_state,
+    reset_ifu_coverage_state,
+    sample_cfvec_coverage,
+)
+from .funcov.py.icache.sampler import (
+    ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
+    ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
+    reset_icache_mainpipe_coverage_state,
+    reset_icache_prefetchpipe_coverage_state,
+    sample_icache_mainpipe_coverage,
+    sample_icache_prefetchpipe_coverage,
+)
 from .pylib import frontend_pylib_path
 
 
@@ -32,7 +54,7 @@ def _frontend_root() -> Path:
 
 
 def default_pilot_csv_path() -> Path:
-    return _frontend_root() / "docs" / "03_功能覆盖率建模" / "frontend_bt_functional_coverage_pilot.csv"
+    return _frontend_root() / "docs" / "03_funcov_model" / "frontend_bt_functional_coverage_pilot.csv"
 
 
 def _sanitize(value: Any) -> Any:
@@ -91,21 +113,12 @@ def _normalize_string_list(values: Optional[Iterable[Any]]) -> List[str]:
     return result
 
 
-UNCACHE_EVENT_SAMPLER_BIN_KEYS = frozenset(
-    {
-        ("uncache_ordering", "pbmt_nc_pmp_mmio_wait_commit"),
-        ("uncache_ordering", "pbmt_nc_non_mmio_no_commit_gate"),
-        ("uncache_path_switch", "uncache_to_icache_clean"),
-        ("fetch_path_switch", "icache_to_mmio_clean"),
-        ("uncache_ordering", "pbmt_io_wait_commit"),
-        ("uncache_path_switch", "icache_to_nc_clean"),
-    }
-)
-
 FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
     set(CFVEC_SAMPLER_BIN_KEYS)
     | set(TWO_FETCH_SAMPLER_BIN_KEYS)
     | set(UNCACHE_EVENT_SAMPLER_BIN_KEYS)
+    | set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)
+    | set(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS)
 )
 
 
@@ -202,25 +215,9 @@ class FunctionalCoverageRecorder:
         self.env = None
         self._reset_seen_high = False
         self._reset_release_cycle: Optional[int] = None
-        self._last_fetch_path = "icache_seq"
-        self._last_fetch_cycle = -1
-        self._redirected_fetch_path: Optional[dict] = None
-        self._uncache_page_tail_requests: Dict[int, dict] = {}
-        self._uncache_active_nc = False
-        self._last_uncache_was_nc = False
-        self._ifu_last_cfvec: Optional[dict] = None
-        self._ifu_redirect_skip_until_cycle: Optional[int] = None
-        self._two_fetch_last_fetch_ptr: Optional[tuple[int, int]] = None
-        self._two_fetch_expected_ptr_step: Optional[int] = None
-        self._two_fetch_refill_pending: Optional[dict] = None
-        self._two_fetch_last_main_s1_tag: Optional[tuple] = None
-        self._two_fetch_ftq_pending = False
-        self._two_fetch_last_dual_cycle: Optional[int] = None
-        self._two_fetch_last_waylookup_write_state = None
-        self._two_fetch_stalled_payload: Optional[tuple[int, ...]] = None
-        self._two_fetch_expected_cfvec: Optional[dict] = None
-        self._two_fetch_redirect_pending: Optional[dict] = None
-        self._two_fetch_recent_inflight_tags: Optional[dict] = None
+        initialize_fetch_path_coverage_state(self)
+        initialize_ftq_coverage_state(self)
+        initialize_ifu_coverage_state(self)
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
 
@@ -368,8 +365,70 @@ class FunctionalCoverageRecorder:
             effective_source_override = True
         sampler_sha256 = _json_sha256(
             {
-                "functional_coverage.py": _file_sha256(str(Path(__file__).resolve())),
-                "funcov.py": _file_sha256(str((Path(__file__).resolve().parent / "funcov.py"))),
+                "env/functional_coverage.py": _file_sha256(str(Path(__file__).resolve())),
+                "env/rvc_decoder.py": _file_sha256(
+                    str((Path(__file__).resolve().parent / "rvc_decoder.py"))
+                ),
+                "env/funcov/py/ftq/sampler.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "ftq"
+                        / "sampler.py"
+                    )
+                ),
+                "env/funcov/py/ifu/sampler.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "ifu"
+                        / "sampler.py"
+                    )
+                ),
+                "env/funcov/py/common/dut.py": _file_sha256(
+                    str((Path(__file__).resolve().parent / "funcov" / "py" / "common" / "dut.py"))
+                ),
+                "env/funcov/py/common/fetch_memory.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "common"
+                        / "fetch_memory.py"
+                    )
+                ),
+                "env/funcov/py/common/utils.py": _file_sha256(
+                    str((Path(__file__).resolve().parent / "funcov" / "py" / "common" / "utils.py"))
+                ),
+                "env/funcov/py/fetch_path/sampler.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "fetch_path"
+                        / "sampler.py"
+                    )
+                ),
+                "env/funcov/py/ibuffer/sampler.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "ibuffer"
+                        / "sampler.py"
+                    )
+                ),
+                "env/funcov/py/icache/sampler.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "icache"
+                        / "sampler.py"
+                    )
+                ),
             }
         )
         provenance = {
@@ -514,91 +573,15 @@ class FunctionalCoverageRecorder:
     def handle_event(self, event: Dict[str, Any]) -> None:
         evt = _sanitize(event)
         self.events_tail.append(evt)
-
-        event_type = str(evt.get("type", ""))
-        cycle = int(evt.get("cycle", 0))
-        payload = evt.get("payload", {}) or {}
-
-        if event_type == "handshake.icache_a":
-            if (
-                self._redirected_fetch_path is not None
-                and self._redirected_fetch_path.get("path") == "mmio_uncache"
-                and self._redirected_fetch_path.get("pbmt_nc") is True
-            ):
-                self.mark(
-                    "uncache_path_switch",
-                    "uncache_to_icache_clean",
-                    cycle,
-                    {"event": event_type, **self._redirected_fetch_path},
-                )
-                self._redirected_fetch_path = None
-            if self._redirected_fetch_path is None or self._redirected_fetch_path.get("path") != "icache_seq":
-                self._redirected_fetch_path = None
-            self._last_fetch_path = "icache_seq"
-            self._last_fetch_cycle = cycle
-        elif event_type == "handshake.uncache_a":
-            address = int(payload.get("address", 0))
-            if (
-                self._redirected_fetch_path is not None
-                and self._redirected_fetch_path.get("path") == "icache_seq"
-                and self._uncache_active_nc
-            ):
-                self.mark(
-                    "uncache_path_switch",
-                    "icache_to_nc_clean",
-                    cycle,
-                    {
-                        "event": event_type,
-                        "address": address,
-                        "new_pbmt_nc": True,
-                        **self._redirected_fetch_path,
-                    },
-                )
-            if (
-                self._redirected_fetch_path is not None
-                and self._redirected_fetch_path.get("path") == "icache_seq"
-                and self.env is not None
-                and self.env.memory.is_mmio(address)
-            ):
-                self.mark(
-                    "fetch_path_switch",
-                    "icache_to_mmio_clean",
-                    cycle,
-                    {"event": event_type, "address": address, **self._redirected_fetch_path},
-                )
-            self._redirected_fetch_path = None
-            self._last_fetch_path = "mmio_uncache"
-            self._last_fetch_cycle = cycle
-            self._sample_uncache_a_event(cycle, payload)
-        elif event_type == "backend.redirect":
-            self._redirected_fetch_path = {
-                "path": self._last_fetch_path,
-                "pbmt_nc": bool(self._last_uncache_was_nc),
-            }
-            self._ifu_last_cfvec = None
-            self._ifu_redirect_skip_until_cycle = cycle + 1
-            self._uncache_page_tail_requests.clear()
+        handle_fetch_path_event(self, evt)
+        handle_ifu_event(self, evt)
 
     def _clear_transient_sampling_state(self) -> None:
-        self._last_fetch_path = "icache_seq"
-        self._last_fetch_cycle = -1
-        self._redirected_fetch_path = None
-        self._uncache_page_tail_requests.clear()
-        self._uncache_active_nc = False
-        self._last_uncache_was_nc = False
-        self._ifu_last_cfvec = None
-        self._ifu_redirect_skip_until_cycle = None
-        self._two_fetch_last_fetch_ptr = None
-        self._two_fetch_expected_ptr_step = None
-        self._two_fetch_refill_pending = None
-        self._two_fetch_last_main_s1_tag = None
-        self._two_fetch_ftq_pending = False
-        self._two_fetch_last_dual_cycle = None
-        self._two_fetch_last_waylookup_write_state = None
-        self._two_fetch_stalled_payload = None
-        self._two_fetch_expected_cfvec = None
-        self._two_fetch_redirect_pending = None
-        self._two_fetch_recent_inflight_tags = None
+        reset_fetch_path_coverage_state(self)
+        reset_ftq_coverage_state(self)
+        reset_ifu_coverage_state(self)
+        reset_icache_mainpipe_coverage_state(self)
+        reset_icache_prefetchpipe_coverage_state(self)
 
     def on_cycle(self, cycle: int, env) -> None:
         dut = env.dut
@@ -613,9 +596,11 @@ class FunctionalCoverageRecorder:
 
         sample_two_fetch_coverage(self, env, cycle)
         sample_cfvec_coverage(self, env, cycle)
+        sample_icache_mainpipe_coverage(self, env, cycle)
+        sample_icache_prefetchpipe_coverage(self, env, cycle)
 
-        self._sample_ibuffer_contract(dut, cycle)
-        self._sample_uncache_cycle_state(dut, cycle, env)
+        sample_ibuffer_contract(self, dut, cycle)
+        sample_uncache_cycle_state(self, dut, cycle)
 
     def _lookup_dut_signal(self, dut, name: str):
         name = str(name)
@@ -687,46 +672,6 @@ class FunctionalCoverageRecorder:
             if value is not None:
                 return int(value)
         return None
-
-    def _translate_fetch_addr(self, env, va: int) -> tuple[Optional[int], dict]:
-        if env is None or getattr(env, "page_table", None) is None:
-            return int(va), {"mode": "bare", "va": int(va), "pa": int(va), "ok": True}
-        pa, ok, info = env.page_table.translate(int(va))
-        meta = dict(info or {})
-        meta["va"] = int(va)
-        meta["ok"] = bool(ok)
-        if ok:
-            meta["pa"] = int(pa)
-            return int(pa), meta
-        return None, meta
-
-    def _read_expected_fetch_raw(self, env, pc: int, size: int) -> tuple[Optional[int], dict]:
-        if env is None or getattr(env, "memory", None) is None:
-            return None, {"ok": False, "reason": "no_memory"}
-        value = 0
-        last_meta: dict = {"ok": True, "mode": "bare", "va": int(pc), "pa": int(pc)}
-        for off in range(int(size)):
-            pa, meta = self._translate_fetch_addr(env, int(pc) + int(off))
-            last_meta = meta
-            if pa is None:
-                return None, meta
-            value |= (int(env.memory.read_u8(int(pa))) & 0xFF) << (8 * int(off))
-        return int(value), last_meta
-
-    def _recover_unavailable_instr(self, env, pc: int, instr: int, is_rvc: bool, ex_sum: int) -> int:
-        if int(instr) != 0:
-            return int(instr)
-        fetch_size = 2 if bool(is_rvc) else 4
-        raw_fetch, fetch_meta = self._read_expected_fetch_raw(env, int(pc), fetch_size)
-        if raw_fetch is None or not bool(fetch_meta.get("ok", False)):
-            return int(instr)
-        if bool(is_rvc):
-            raw16 = int(raw_fetch) & 0xFFFF
-            try:
-                return int(expand_rvc(raw16)) & 0xFFFFFFFF
-            except ValueError:
-                return int(instr)
-        return int(raw_fetch) & 0xFFFFFFFF
 
     def write_artifacts(self) -> dict:
         raw = self._raw_dict()
@@ -925,106 +870,6 @@ class FunctionalCoverageRecorder:
                         break
                     target.evidence.append(item)
         return merged
-
-    def _sample_uncache_a_event(self, cycle: int, payload: Dict[str, Any]) -> None:
-        addr = int(payload.get("address", 0))
-        self._last_uncache_was_nc = bool(self._uncache_active_nc)
-        self._uncache_active_nc = False
-
-        for page, tail in self._uncache_page_tail_requests.items():
-            if addr == int(page) + 0x1000:
-                tail["next_page_requested"] = True
-        if addr & 0xFFF == 0xFF8:
-            self._uncache_page_tail_requests[addr & ~0xFFF] = {
-                "request_addr": addr,
-                "request_cycle": cycle,
-                "next_page_requested": False,
-            }
-
-    def _sample_uncache_cycle_state(self, dut, cycle: int, env) -> None:
-        pbmt = self._try_read_dut_signal(
-            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_itlbPbmt"
-        )
-        pmp_mmio = self._try_read_dut_signal(
-            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_pmpMmio"
-        )
-        state = self._try_read_dut_signal(
-            dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheState"
-        )
-        latched_pbmt = self._try_read_dut_signal(
-            dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.itlbPbmt"
-        )
-        active_pbmt = latched_pbmt if state in {1, 2, 3} and latched_pbmt is not None else pbmt
-        can_accept = self._try_read_dut_signal(dut, "Frontend_top.io_backend_canAccept")
-        if active_pbmt == 1 and pmp_mmio == 0 and state in {2, 3}:
-            self._uncache_active_nc = True
-        if active_pbmt == 1 and pmp_mmio == 1 and state == 1:
-            self.mark(
-                "uncache_ordering",
-                "pbmt_nc_pmp_mmio_wait_commit",
-                cycle,
-                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
-            )
-        if active_pbmt == 2 and pmp_mmio == 0 and state == 1:
-            self.mark(
-                "uncache_ordering",
-                "pbmt_io_wait_commit",
-                cycle,
-                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
-            )
-        if active_pbmt == 1 and pmp_mmio == 0 and state == 2 and can_accept == 0:
-            self.mark(
-                "uncache_ordering",
-                "pbmt_nc_non_mmio_no_commit_gate",
-                cycle,
-                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state, "can_accept": can_accept},
-            )
-
-    def _sample_ibuffer_contract(self, dut, cycle: int) -> None:
-        """Capture alignment/ownership facts without turning them into hits."""
-        valid = self._try_read_dut_signal(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid")
-        enq = self._try_read_dut_signal(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0")
-        if valid is None or enq is None:
-            return
-
-        masks: list[int] = []
-        for index in range(35):
-            value = self._read_first_dut_signal(
-                dut,
-                (
-                    f"Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_exceptionMask_{index}",
-                    f"Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_exceptionMask_{index}",
-                    f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionMask_{index}",
-                ),
-            )
-            if value is None:
-                break
-            masks.append(int(value) & 1)
-        if not masks:
-            return
-
-        enq_bits = int(enq)
-        mask_bits = sum(bit << index for index, bit in enumerate(masks))
-        invalid_mask = mask_bits & ~enq_bits
-        self.risk_observations.append(
-            {
-                "cycle": int(cycle),
-                "risk": "ibuffer_exception_mask_enq_alignment",
-                "valid": int(valid),
-                "enq_enable": enq_bits,
-                "exception_mask": mask_bits,
-                "mask_without_enq": int(invalid_mask),
-                "aligned": invalid_mask == 0,
-            }
-        )
-
-    @staticmethod
-    def _circular_distance(newer_flag: int, newer_value: int, older_flag: int, older_value: int, size: int) -> int:
-        size = max(1, int(size))
-        modulo = size * 2
-        newer = (int(newer_flag) & 1) * size + (int(newer_value) % size)
-        older = (int(older_flag) & 1) * size + (int(older_value) % size)
-        return (newer - older) % modulo
 
     def _raw_dict(self) -> dict:
         stats = {}

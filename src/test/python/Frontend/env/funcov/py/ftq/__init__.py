@@ -1,0 +1,1 @@
+"""FTQ functional coverage sampler."""

@@ -419,7 +419,7 @@ def _icache_response_records(env) -> list[dict]:
 
 
 def test_two_fetch_directed_flow_signal_contract_matches_dut_inventory():
-    offset = Path(__file__).resolve().parents[5] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
+    offset = Path(__file__).resolve().parents[7] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
     assert offset.is_file(), "compile Frontend before running directed signal-contract tests"
     registered = {
         line[len("  - name: ") :].strip()

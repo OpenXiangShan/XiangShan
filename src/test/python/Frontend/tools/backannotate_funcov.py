@@ -106,12 +106,44 @@ _FRONTEND_ROOT = Path(__file__).resolve().parents[1]
 _CANONICAL_REGISTRY = (
     _FRONTEND_ROOT
     / "docs"
-    / "03_功能覆盖率建模"
+    / "03_funcov_model"
     / "frontend_bt_functional_coverage_pilot.csv"
 )
 _SAMPLER_FILES = (
-    _FRONTEND_ROOT / "env" / "functional_coverage.py",
-    _FRONTEND_ROOT / "env" / "funcov.py",
+    ("env/functional_coverage.py", _FRONTEND_ROOT / "env" / "functional_coverage.py"),
+    ("env/rvc_decoder.py", _FRONTEND_ROOT / "env" / "rvc_decoder.py"),
+    (
+        "env/funcov/py/ftq/sampler.py",
+        _FRONTEND_ROOT / "env" / "funcov" / "py" / "ftq" / "sampler.py",
+    ),
+    (
+        "env/funcov/py/ifu/sampler.py",
+        _FRONTEND_ROOT / "env" / "funcov" / "py" / "ifu" / "sampler.py",
+    ),
+    (
+        "env/funcov/py/common/dut.py",
+        _FRONTEND_ROOT / "env" / "funcov" / "py" / "common" / "dut.py",
+    ),
+    (
+        "env/funcov/py/common/fetch_memory.py",
+        _FRONTEND_ROOT / "env" / "funcov" / "py" / "common" / "fetch_memory.py",
+    ),
+    (
+        "env/funcov/py/common/utils.py",
+        _FRONTEND_ROOT / "env" / "funcov" / "py" / "common" / "utils.py",
+    ),
+    (
+        "env/funcov/py/fetch_path/sampler.py",
+        _FRONTEND_ROOT / "env" / "funcov" / "py" / "fetch_path" / "sampler.py",
+    ),
+    (
+        "env/funcov/py/ibuffer/sampler.py",
+        _FRONTEND_ROOT / "env" / "funcov" / "py" / "ibuffer" / "sampler.py",
+    ),
+    (
+        "env/funcov/py/icache/sampler.py",
+        _FRONTEND_ROOT / "env" / "funcov" / "py" / "icache" / "sampler.py",
+    ),
 )
 
 
@@ -299,7 +331,7 @@ def _json_sha256(value: Any) -> str:
 
 
 def _current_sampler_sha256() -> str | None:
-    hashes = {path.name: _file_sha256(path) for path in _SAMPLER_FILES}
+    hashes = {label: _file_sha256(path) for label, path in _SAMPLER_FILES}
     if any(value is None for value in hashes.values()):
         return None
     return _json_sha256(hashes)

@@ -5,7 +5,7 @@
 > toffee `CovGroup`/`watch_point` API and is retained only for DUTs that still
 > use that contract. The Frontend verification environment no longer uses this
 > implementation. For Frontend, follow
-> `src/test/python/Frontend/docs/03_功能覆盖率建模/skills.md` and keep one
+> `src/test/python/Frontend/docs/03_funcov_model/skills.md` and keep one
 > `FunctionalCoverageRecorder`/`funcov.py` chain; do not create
 > `env/coverage_def.py`, `get_coverage_groups`, or a parallel CovGroup model.
 

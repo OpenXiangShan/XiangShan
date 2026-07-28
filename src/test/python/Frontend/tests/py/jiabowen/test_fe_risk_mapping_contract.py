@@ -30,7 +30,7 @@ _WAVEFORM_TOKEN_RE = re.compile(r"(?:waveform|(?:^|[\s=/])[^;\s]+\.(?:fst|vcd|fs
 
 
 def _frontend_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return Path(__file__).resolve().parents[3]
 
 
 def _canonical_paths() -> tuple[Path, Path, Path]:

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from env.icache_funcov import (
+from env.funcov.py.icache.sampler import (
     ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
     ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
     _MAIN,

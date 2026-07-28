@@ -106,7 +106,7 @@ TRACE_LIMIT="${TB_TRACE_LIMIT:-0}"
 TRACE_START_INDEX="${TB_TRACE_START_INDEX:-0}"
 SKIP_NEMU="${TB_SKIP_NEMU:-0}"
 RUN_DUT="${TB_RUN_DUT:-1}"
-PYTEST_TARGET_DEFAULT="${FRONTEND_DIR}/tests/test_bin_trace_dut.py::test_bin_trace"
+PYTEST_TARGET_DEFAULT="${FRONTEND_DIR}/tests/py/zhaoxinran/test_bin_trace_dut.py::test_bin_trace"
 PYTEST_TARGET="${4:-${TB_PYTEST_TARGET:-${PYTEST_TARGET_DEFAULT}}}"
 BASE_ADDR="${TB_BASE_ADDR:-0x80000000}"
 RESET_VECTOR="${TB_RESET_VECTOR:-${BASE_ADDR}}"
@@ -273,10 +273,10 @@ else
 fi
 
 if [[ "${RUN_DUT}" != "0" ]]; then
-  if [[ ! -f "${FRONTEND_DIR}/tests/test_bin_trace_dut.py" ]]; then
+  if [[ ! -f "${FRONTEND_DIR}/tests/py/zhaoxinran/test_bin_trace_dut.py" ]]; then
     PIPELINE_STAGE="validate_inputs"
     PIPELINE_REASON="missing_pytest_entry"
-    echo "[frontend][error] missing pytest entry test file: ${FRONTEND_DIR}/tests/test_bin_trace_dut.py" >&2
+    echo "[frontend][error] missing pytest entry test file: ${FRONTEND_DIR}/tests/py/zhaoxinran/test_bin_trace_dut.py" >&2
     exit 2
   fi
   PYTEST_CMD=("${PYTHON_BIN}" -m pytest -v)

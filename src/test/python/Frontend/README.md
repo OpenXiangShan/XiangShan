@@ -26,6 +26,9 @@
   - 包含 bundles、agents、monitors、model、sequences、fixtures 和 API。
 - `tests/`
   - 当前可见的 Frontend pytest 用例集合。
+  - Python 用例按原始功能作者放在 `tests/py/<author>/`；汇编用例放在
+    `tests/asm_cases/<author>/`。`tests/conftest.py`、
+    `tests/asm_cases/generate_cases.py` 和 `tests/asm_cases/generated/` 保持共享。
 - `webui/`
   - Web UI 服务端与静态资源。
 - `data/`
@@ -50,10 +53,11 @@
 - `env/frontend_env.py` 是 `FrontendEnv` 的真实实现位置。
 - `env/dut_factory.py` 负责真实 DUT 构造。
 - `env/nemu_trace_pipeline.py` 负责从 bin 驱动 NEMU trace 生成。
-- `env/functional_coverage.py` 负责功能覆盖率事件记录与产物输出。
-- `env/funcov.py` 负责通用 canonical group/coverpoint/bin 的 DUT 周期级采样，
-  `env/icache_funcov.py` 专门负责 ICache 功能覆盖率模型；
-  不再维护平行的 toffee 功能覆盖率定义。
+- `env/functional_coverage.py` 是功能覆盖率的唯一顶层 recorder 与 dispatcher，
+  负责 registry、provenance、artifact 和统一的事件/周期分发。
+- `env/funcov/` 存放按功能域拆分的 Python/SV 覆盖率实现和采样器；当前包含
+  fetch path、IFU、FTQ、IBuffer、ICache 与共用工具。具体 feature 的采样逻辑
+  不放在 `env/` 根目录，也不维护平行的 toffee 覆盖率定义。
 - `env/monitor.py` 与 `env/monitors/` 共同承担 monitor 侧数据结构和 DUT 观测逻辑。
 - `env/bundles/`、coverage 和启动控制里出现的信号名，必须以当前生成出来的 DUT 接口为准。
   不允许长期保留已经不在 DUT 中出现的历史信号；缺失信号要么从 bundle/coverage 中删除，要么被明确建模为可选信号。
@@ -68,9 +72,9 @@
 4. `env/frontend_env.py`
 5. `env/api.py`
 6. `env/fixtures.py`
-7. `tests/test_layout_import_compat.py`
-8. `tests/test_bin_trace_dut.py`
-9. `tests/test_multi_branch.py`
+7. `tests/py/zhaoxinran/test_layout_import_compat.py`
+8. `tests/py/zhaoxinran/test_bin_trace_dut.py`
+9. `tests/py/zhaoxinran/test_multi_branch.py`
 
 ## 常用脚本
 
@@ -197,10 +201,10 @@ src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh ready-to-run/<case>.b
 Frontend BT 只保留两条职责不同的覆盖率链：
 
 1. 功能覆盖率：
-   `测试点主表 -> 03_funcov_model/frontend_bt_functional_coverage_pilot.csv -> env/funcov.py + env/icache_funcov.py -> env/functional_coverage.py -> data/runs/<run_id>/funcov/*.funcov.json -> tools/backannotate_funcov.py`。
-   registry 当前共 295 行，其中 `Coverpoint` 完整并与 sampler 一一对应的 137 行会装入 runtime；其余 158 行均为 `UNMAPPED` 历史规划。ICache MainPipe 的 49 个覆盖点和 PrefetchPipe 的 24 个覆盖点单独维护在 `env/icache_funcov.py`。带 `旧BPU_FTQ` 路径的历史行全部保持 `Coverpoint` 为空，不能进入采样或自动反标。
+   `测试点主表 -> 03_funcov_model/frontend_bt_functional_coverage_pilot.csv -> env/functional_coverage.py -> env/funcov/py/<feature>/ -> data/runs/<run_id>/funcov/*.funcov.json -> tools/backannotate_funcov.py`。
+   registry 当前共 295 行，其中 `Coverpoint` 完整并与 sampler 一一对应的 137 行会装入 runtime；其余 158 行均为 `UNMAPPED` 历史规划。ICache MainPipe 的 49 个覆盖点和 PrefetchPipe 的 24 个覆盖点由 `env/funcov/py/icache/sampler.py` 维护。带 `旧BPU_FTQ` 路径的历史行全部保持 `Coverpoint` 为空，不能进入采样或自动反标。
    标准 bin-trace 脚本会自动生成 `TB_RUN_ID` / `TB_ARTIFACT_DIR`；fixture 会将 pytest `funcov_bins` 标记或与汇编 case stem 精确匹配的 registry 行写入 `coverage_targets`。
-   `make frontend` 在对应 package 构建成功后生成 `build-frontend/frontend_build_manifest.<sim>.json`。funcov 按 `TB_FRONTEND_SIM` 选择 manifest，且只在其源码状态干净、`simulator` 与已选 package 一致、DUT/RTL/signal-contract 哈希与当前编译产物一致时接受其中的 `dut_source_sha`。
+   `make frontend` 在对应 package 构建成功后生成 `build-frontend/frontend_build_manifest.<sim>.json`。funcov 按 `TB_FRONTEND_SIM` 选择 manifest，且只在其源码状态干净、`simulator` 与已选 package 一致、DUT/RTL/signal-contract 哈希与当前编译产物一致，并且 recorder/sampler 源码清单匹配时接受其中的 `dut_source_sha`。
 2. 代码覆盖率：
    `dut.SetCoverage() -> Verilator .dat -> toffee set_line_coverage() -> report_raw_code_coverage.py/gen_coverage_html.sh`。
 

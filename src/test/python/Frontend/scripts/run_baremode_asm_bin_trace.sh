@@ -16,7 +16,7 @@ Purpose:
   waveform/log/.dat/funcov artifacts in the normal Frontend data directories.
 
 Defaults:
-  case.S       src/test/python/Frontend/tests/asm_cases/fe_ifu_mixed_rvc_rvi_boundary.S
+  case.S       src/test/python/Frontend/tests/asm_cases/jiabowen/fe_ifu_mixed_rvc_rvi_boundary.S
   LINK_ADDR    0x80000000
   NEMU_MEM_BASE 0x80000000
   TB_BASE_ADDR 0x80000000
@@ -50,7 +50,7 @@ if [[ $# -gt 1 ]]; then
   exit 1
 fi
 
-DEFAULT_ASM="${FRONTEND_DIR}/tests/asm_cases/fe_ifu_mixed_rvc_rvi_boundary.S"
+DEFAULT_ASM="${FRONTEND_DIR}/tests/asm_cases/jiabowen/fe_ifu_mixed_rvc_rvi_boundary.S"
 ASM_PATH="${1:-${DEFAULT_ASM}}"
 if [[ ! -f "${ASM_PATH}" ]]; then
   echo "[frontend][error] asm not found: ${ASM_PATH}" >&2

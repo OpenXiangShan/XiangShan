@@ -1,24 +1,29 @@
 from __future__ import annotations
 
 import hashlib
+from typing import Optional
+
+from ..common.dut import _dut, _read_first
+from ..common.fetch_memory import _read_expected_fetch_raw
+from ..common.utils import circular_distance
 
 
-def _dut(recorder):
-    return getattr(getattr(recorder, "env", None), "dut", None)
+def initialize_ftq_coverage_state(recorder) -> None:
+    recorder._two_fetch_last_fetch_ptr = None
+    recorder._two_fetch_expected_ptr_step = None
+    recorder._two_fetch_refill_pending = None
+    recorder._two_fetch_last_main_s1_tag = None
+    recorder._two_fetch_ftq_pending = False
+    recorder._two_fetch_last_dual_cycle = None
+    recorder._two_fetch_last_waylookup_write_state = None
+    recorder._two_fetch_stalled_payload = None
+    recorder._two_fetch_expected_cfvec = None
+    recorder._two_fetch_redirect_pending = None
+    recorder._two_fetch_recent_inflight_tags = None
 
 
-def _read(recorder, name: str, default: int = 0) -> int:
-    dut = _dut(recorder)
-    if dut is None:
-        return int(default)
-    return recorder._read_dut_signal(dut, name, default)
-
-
-def _read_first(recorder, names) -> int | None:
-    dut = _dut(recorder)
-    if dut is None:
-        return None
-    return recorder._read_first_dut_signal(dut, names)
+def reset_ftq_coverage_state(recorder) -> None:
+    initialize_ftq_coverage_state(recorder)
 
 
 def _count_truthy(values) -> int:
@@ -376,29 +381,6 @@ TWO_FETCH_SAMPLER_BIN_KEYS = frozenset(
 )
 
 
-CFVEC_SAMPLER_BIN_KEYS = frozenset(
-    {
-        ("ifu_instr_size_type", "rvi_seen"),
-        ("ifu_instr_size_type", "rvc_seen"),
-        ("ifu_instr_size_type", "mixed_rvi_rvc_seen"),
-        ("ifu_pc_step_type", "step_4b_rvi"),
-        ("ifu_pc_step_type", "step_2b_rvc"),
-        ("ifu_pc_step_type", "mixed_no_gap_no_dup"),
-        ("ifu_boundary_event", "rvc_start"),
-        ("ifu_boundary_event", "rvi_start"),
-        ("ifu_boundary_event", "rvi_high_half_suppressed"),
-        ("ifu_fetch_block_position", "head"),
-        ("ifu_fetch_block_position", "mid"),
-        ("ifu_fetch_block_position", "tail"),
-        ("ifu_cfi_decode_type", "non_cfi"),
-        ("ifu_cfi_decode_type", "branch"),
-        ("ifu_cfi_decode_type", "jal"),
-        ("uncache_page_boundary", "rvc_tail_no_resend_before_delivery"),
-        ("uncache_page_boundary", "rvi_tail_resend_next_page"),
-    }
-)
-
-
 def _tf_read(recorder, key: str) -> int | None:
     return _read_first(recorder, _TWO_FETCH_SIGNALS[key])
 
@@ -719,7 +701,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
             and _tf_ptr_at_or_after(tuple(pending_ptr), tuple(flush_ptr))
         )
         if rollback_match:
-            rollback_distance = recorder._circular_distance(
+            rollback_distance = circular_distance(
                 int(pending_ptr[0]), int(pending_ptr[1]), int(flush_ptr[0]), int(flush_ptr[1]), ftq_size
             )
             recorder.mark(
@@ -787,7 +769,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         fetch_value = _tf_read(recorder, "fetch_ptr_value")
         runahead_distance = None
         if None not in (bpu_flag, bpu_value, fetch_flag, fetch_value):
-            runahead_distance = recorder._circular_distance(
+            runahead_distance = circular_distance(
                 int(bpu_flag), int(bpu_value), int(fetch_flag), int(fetch_value), ftq_size
             )
         # PrunedAddr.addr is halfword-addressed, so its bit 11 is virtual-address bit 12.
@@ -839,7 +821,7 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         current_ptr = (int(fetch_flag), int(fetch_value))
         last_ptr = recorder._two_fetch_last_fetch_ptr
         if last_ptr is not None:
-            delta = recorder._circular_distance(
+            delta = circular_distance(
                 current_ptr[0], current_ptr[1], last_ptr[0], last_ptr[1], ftq_size
             )
             evidence = _tf_evidence("fetch_ptr_advance", before=list(last_ptr), after=list(current_ptr), delta=delta)
@@ -1104,10 +1086,10 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
                 cross_pc = None if start0 is None else int(start0) + cross_index
                 low_half = high_half = None
                 if cross_pc is not None:
-                    low_raw, _ = recorder._read_expected_fetch_raw(env, int(cross_pc) << 1, 2)
+                    low_raw, _ = _read_expected_fetch_raw(env, int(cross_pc) << 1, 2)
                     low_half = None if low_raw is None else int(low_raw) & 0xFFFF
                 if start1 is not None:
-                    high_raw, _ = recorder._read_expected_fetch_raw(env, int(start1) << 1, 2)
+                    high_raw, _ = _read_expected_fetch_raw(env, int(start1) << 1, 2)
                     high_half = None if high_raw is None else int(high_raw) & 0xFFFF
                 expected_data = (
                     None
@@ -1423,210 +1405,3 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         recorder._two_fetch_stalled_since = None
         recorder._two_fetch_expected_cfvec = None
         recorder._two_fetch_recent_inflight_tags = None
-
-
-def _classify_block_pos(pc: int) -> str:
-    halfword = (int(pc) & 0x3F) >> 1
-    if halfword <= 1:
-        return "head"
-    if halfword >= 30:
-        return "tail"
-    return "mid"
-
-
-def _classify_cfi_kind(instr: int, is_rvc: bool) -> str:
-    instr = int(instr) & 0xFFFFFFFF
-    # Frontend cfVec/IBuffer carries the expanded 32-bit instruction even
-    # when bits_isRvc is set.  Decode the expanded opcode; only the width
-    # flag remains compressed metadata.
-    opcode = instr & 0x7F
-    if opcode == 0x63:
-        return "branch"
-    if opcode == 0x6F:
-        return "jal"
-    if opcode == 0x67:
-        return "jalr"
-    return "non_cfi"
-
-
-def _sample_ifu_cfvec_coverage(recorder, cycle: int, slot: int, pc: int, instr: int, is_rvc: bool) -> None:
-    size_bin = "rvc_seen" if bool(is_rvc) else "rvi_seen"
-    pos_bin = _classify_block_pos(int(pc))
-    cfi_bin = _classify_cfi_kind(int(instr), bool(is_rvc))
-    evidence = {
-        "event": "cfvec",
-        "slot": int(slot),
-        "pc": int(pc),
-        "instr": int(instr) & 0xFFFFFFFF,
-        "is_rvc": int(bool(is_rvc)),
-        "block_pos": pos_bin,
-        "cfi_kind": cfi_bin,
-    }
-
-    recorder.mark("ifu_instr_size_type", size_bin, cycle, evidence)
-    recorder.mark("ifu_fetch_block_position", pos_bin, cycle, evidence)
-    if cfi_bin != "jalr":
-        recorder.mark("ifu_cfi_decode_type", cfi_bin, cycle, evidence)
-
-    page = int(pc) & ~0xFFF
-    page_tail = recorder._uncache_page_tail_requests.get(page)
-    if bool(is_rvc) and (int(pc) & 0xFFF) == 0xFFE and page_tail is not None:
-        if not bool(page_tail.get("next_page_requested", False)):
-            recorder.mark(
-                "uncache_page_boundary",
-                "rvc_tail_no_resend_before_delivery",
-                cycle,
-                {**evidence, **page_tail},
-            )
-    if not bool(is_rvc) and (int(pc) & 0xFFF) == 0xFFE and page_tail is not None:
-        if bool(page_tail.get("next_page_requested", False)):
-            recorder.mark(
-                "uncache_page_boundary",
-                "rvi_tail_resend_next_page",
-                cycle,
-                {**evidence, **page_tail},
-            )
-
-    if bool(is_rvc):
-        recorder.mark("ifu_boundary_event", "rvc_start", cycle, evidence)
-    else:
-        recorder.mark("ifu_boundary_event", "rvi_start", cycle, evidence)
-
-    last = getattr(recorder, "_ifu_last_cfvec", None)
-    if last is not None:
-        last_pc = int(last.get("pc", 0))
-        last_is_rvc = bool(last.get("is_rvc", 0))
-        expected_step = 2 if last_is_rvc else 4
-        actual_step = int(pc) - last_pc
-        if 0 < actual_step <= 4:
-            if actual_step == expected_step:
-                recorder.mark(
-                    "ifu_pc_step_type",
-                    "step_2b_rvc" if last_is_rvc else "step_4b_rvi",
-                    cycle,
-                    {**evidence, "last_pc": last_pc, "actual_step": actual_step},
-                )
-                if last_is_rvc != bool(is_rvc) and (last_pc & ~0x3F) == (int(pc) & ~0x3F):
-                    recorder.mark(
-                        "ifu_pc_step_type",
-                        "mixed_no_gap_no_dup",
-                        cycle,
-                        {**evidence, "last_pc": last_pc, "actual_step": actual_step},
-                    )
-            if not last_is_rvc and actual_step == 4:
-                recorder.mark(
-                    "ifu_boundary_event",
-                    "rvi_high_half_suppressed",
-                    cycle,
-                    {**evidence, "last_pc": last_pc},
-                )
-    recorder._ifu_last_cfvec = {"pc": int(pc), "is_rvc": int(bool(is_rvc)), "slot": int(slot)}
-
-
-def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
-    dut = getattr(env, "dut", None)
-    if dut is None:
-        return
-
-    cycle = int(cycle)
-    skip_until = getattr(recorder, "_ifu_redirect_skip_until_cycle", None)
-    if _read(recorder, "io_backend_toFtq_redirect_valid", 0) == 1:
-        skip_until = max(int(skip_until or cycle), cycle + 1)
-        recorder._ifu_redirect_skip_until_cycle = skip_until
-    if skip_until is not None and cycle <= int(skip_until):
-        recorder._ifu_last_cfvec = None
-        return
-    recorder._ifu_redirect_skip_until_cycle = None
-
-    valid_slots: list[int] = []
-    cf_entries: list[dict] = []
-    for slot in range(8):
-        base = f"io_backend_cfVec_{slot}_"
-        if recorder._read_dut_signal(dut, base + "valid", 0) != 1:
-            continue
-
-        valid_slots.append(slot)
-        pc = int(recorder._read_dut_signal(dut, base + "bits_pc", 0))
-        instr = int(recorder._read_dut_signal(dut, base + "bits_instr", 0)) & 0xFFFFFFFF
-        is_rvc = bool(recorder._read_dut_signal(dut, base + "bits_isRvc", 0))
-        ftq_flag = recorder._read_dut_signal(dut, base + "bits_ftqPtr_flag", 0)
-        ftq_value = recorder._read_dut_signal(dut, base + "bits_ftqPtr_value", 0)
-        ex_sum = (
-            recorder._read_dut_signal(dut, base + "bits_exceptionVec_1", 0)
-            + recorder._read_dut_signal(dut, base + "bits_exceptionVec_2", 0)
-            + recorder._read_dut_signal(dut, base + "bits_exceptionVec_12", 0)
-            + recorder._read_dut_signal(dut, base + "bits_exceptionVec_19", 0)
-            + recorder._read_dut_signal(dut, base + "bits_exceptionVec_20", 0)
-        )
-        instr = recorder._recover_unavailable_instr(env, int(pc), int(instr), bool(is_rvc), int(ex_sum))
-        cf_entries.append(
-            {
-                "slot": int(slot),
-                "pc": int(pc),
-                "is_rvc": int(bool(is_rvc)),
-                "ftq_ptr": (int(ftq_flag), int(ftq_value)),
-            }
-        )
-        _sample_ifu_cfvec_coverage(recorder, cycle, slot, pc, instr, is_rvc)
-
-    if {entry["is_rvc"] for entry in cf_entries} == {0, 1}:
-        recorder.mark(
-            "ifu_instr_size_type",
-            "mixed_rvi_rvc_seen",
-            cycle,
-            {"event": "cfvec_mixed_width_window", "entries": cf_entries},
-        )
-
-    unique_ftq_ptrs = []
-    for entry in cf_entries:
-        if entry["ftq_ptr"] not in unique_ftq_ptrs:
-            unique_ftq_ptrs.append(entry["ftq_ptr"])
-
-    redirect_pending = getattr(recorder, "_two_fetch_redirect_pending", None)
-    if redirect_pending is not None:
-        old_tags = set(redirect_pending.get("old_tags") or ())
-        delivered_old = [entry for entry in cf_entries if entry["ftq_ptr"] in old_tags]
-        if delivered_old:
-            recorder.risk_observations.append(
-                {
-                    "event": "two_fetch_redirect_old_tag_cfvec_delivery",
-                    "cycle": cycle,
-                    "old_tags": [list(tag) for tag in sorted(old_tags)],
-                    "entries": delivered_old,
-                }
-            )
-
-    expected_cfvec = getattr(recorder, "_two_fetch_expected_cfvec", None)
-    expected_tags = None
-    if expected_cfvec is not None:
-        expected_cycle = int(expected_cfvec.get("cycle", cycle))
-        if cycle - expected_cycle > 64:
-            recorder._two_fetch_expected_cfvec = None
-        else:
-            expected_tags = tuple(expected_cfvec.get("tags") or ())
-    exact_two_source_delivery = (
-        len(expected_tags or ()) == 2
-        and unique_ftq_ptrs == [expected_tags[0], expected_tags[1]]
-    )
-    if exact_two_source_delivery:
-        evidence = {
-            "event": "backend_cfvec_exact_two_ftq_sources",
-            "expected_ftq_ptrs": [list(ptr) for ptr in expected_tags],
-            "ftq_ptrs": [list(ptr) for ptr in unique_ftq_ptrs],
-            "entries": cf_entries,
-        }
-        recorder.mark("two_fetch_ifu_source", "two_ftq_sources", cycle, evidence)
-        recorder.mark("two_fetch_delivery", "two_ftq_entries_same_cycle", cycle, evidence)
-        if {entry["is_rvc"] for entry in cf_entries} == {0, 1}:
-            recorder.mark("two_fetch_cross_block", "mixed_rvc_rvi", cycle, evidence)
-
-        for before, after in zip(cf_entries, cf_entries[1:]):
-            if before["ftq_ptr"] != after["ftq_ptr"] and before["is_rvc"] == 1:
-                recorder.mark(
-                    "two_fetch_cross_block",
-                    "rvc_independent",
-                    cycle,
-                    {**evidence, "boundary_slots": [before["slot"], after["slot"]]},
-                )
-                break
-        recorder._two_fetch_expected_cfvec = None

@@ -6,15 +6,15 @@ FRONTEND_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 REPO_DIR="$(cd "${FRONTEND_DIR}/../../../.." && pwd)"
 
 DEFAULT_CASES=(
-  "${FRONTEND_DIR}/tests/asm_cases/fe_2fetch_cross_page_blocked.S"
-  "${FRONTEND_DIR}/tests/asm_cases/fe_2fetch_mixed_rvc_rvi.S"
-  "${FRONTEND_DIR}/tests/asm_cases/fe_2fetch_rvi_cross_block.S"
-  "${FRONTEND_DIR}/tests/asm_cases/fe_2fetch_size_blocked.S"
-  "${FRONTEND_DIR}/tests/asm_cases/fe_2fetch_trained_short_blocks.S"
-  "${FRONTEND_DIR}/tests/asm_cases/fe_ifu_cfi_decode_basic.S"
-  "${FRONTEND_DIR}/tests/asm_cases/fe_ifu_mixed_rvc_rvi_boundary.S"
-  "${FRONTEND_DIR}/tests/asm_cases/fe_ifu_rvc_seq_boundary.S"
-  "${FRONTEND_DIR}/tests/asm_cases/fe_ifu_rvi_seq_boundary.S"
+  "${FRONTEND_DIR}/tests/asm_cases/jiabowen/fe_2fetch_cross_page_blocked.S"
+  "${FRONTEND_DIR}/tests/asm_cases/jiabowen/fe_2fetch_mixed_rvc_rvi.S"
+  "${FRONTEND_DIR}/tests/asm_cases/jiabowen/fe_2fetch_rvi_cross_block.S"
+  "${FRONTEND_DIR}/tests/asm_cases/jiabowen/fe_2fetch_size_blocked.S"
+  "${FRONTEND_DIR}/tests/asm_cases/jiabowen/fe_2fetch_trained_short_blocks.S"
+  "${FRONTEND_DIR}/tests/asm_cases/jiabowen/fe_ifu_cfi_decode_basic.S"
+  "${FRONTEND_DIR}/tests/asm_cases/jiabowen/fe_ifu_mixed_rvc_rvi_boundary.S"
+  "${FRONTEND_DIR}/tests/asm_cases/jiabowen/fe_ifu_rvc_seq_boundary.S"
+  "${FRONTEND_DIR}/tests/asm_cases/jiabowen/fe_ifu_rvi_seq_boundary.S"
 )
 
 usage() {
@@ -163,8 +163,8 @@ if [[ "${TB_RUN_DUT}" != "0" ]]; then
 
   echo "[frontend-suite] functional coverage gate audit:"
   "${PYTHON:-python3}" "${FRONTEND_DIR}/tools/backannotate_funcov.py" \
-    --pilot "${FRONTEND_DIR}/docs/03_功能覆盖率建模/frontend_bt_functional_coverage_pilot.csv" \
-    --testpoints "${FRONTEND_DIR}/docs/02_测试点分解/Frontend_testpoint_0525_coverage_backannotated.csv" \
+    --pilot "${FRONTEND_DIR}/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv" \
+    --testpoints "${FRONTEND_DIR}/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv" \
     --check \
     --audit-json "${suite_report_dir}/funcov/backannotation_audit.json" \
     "${backannotate_args[@]}"
