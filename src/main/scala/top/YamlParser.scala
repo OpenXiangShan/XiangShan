@@ -61,6 +61,7 @@ case class YamlConfig(
   WFIClockGate: Option[Boolean],
   EnablePowerDown: Option[Boolean],
   EnableColdReset: Option[Boolean],
+  CHIAsyncFromDSU: Option[Boolean],
   XSTopPrefix: Option[String],
   EnableDFX: Option[Boolean],
   EnableSramCtl: Option[Boolean],
@@ -223,6 +224,11 @@ object YamlParser {
     yamlConfig.EnableColdReset.foreach { enable =>
       newConfig = newConfig.alter((site, here, up) => {
         case SoCParamsKey => up(SoCParamsKey).copy(EnableColdReset = enable)
+      })
+    }
+    yamlConfig.CHIAsyncFromDSU.foreach { enable =>
+      newConfig = newConfig.alter((site, here, up) => {
+        case SoCParamsKey => up(SoCParamsKey).copy(CHIAsyncFromDSU = enable)
       })
     }
     yamlConfig.XSTopPrefix.foreach { prefix =>

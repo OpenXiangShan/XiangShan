@@ -151,7 +151,8 @@ case class SoCParameters
   // the writes complete; otherwise interrupts remain asserted or reassert after reset.
   // To retain diagnostics, clear only accrued, leaving cause/value intact. New cause/value
   // are recorded only when cause == 0.
-  EnableColdReset: Boolean = false
+  EnableColdReset: Boolean = false,
+  CHIAsyncFromDSU: Boolean = false // CHI Async bridge is from DSU
 ){
   require(
     !IMSICParams.HasTEEIMSIC || (IMSICParams.HasTEEIMSIC && IMSICBusType == device.IMSICBusType.AXI),
@@ -227,6 +228,7 @@ trait HasSoCParameter {
   val WFIClockGate = soc.WFIClockGate
   val EnablePowerDown = soc.EnablePowerDown
   val EnableColdReset = soc.EnableColdReset
+  val CHIAsyncFromDSU = soc.CHIAsyncFromDSU
 
   def HasMEMencryption = cvm.HasMEMencryption
   require((cvm.HasMEMencryption && (cvm.KeyIDBits > 0)) || (!cvm.HasMEMencryption),
