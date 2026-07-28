@@ -227,13 +227,16 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
   }
 
-  def effectiveVpn(currentVaddr: UInt, maskedFullva: UInt): UInt = {
+  def effectiveVaddr(currentVaddr: UInt, maskedFullva: UInt): UInt = {
     if (VAddrBits > 48) {
-      Cat(maskedFullva(VAddrBits - 1, 48), currentVaddr(47, offLen))
+      Cat(maskedFullva(VAddrBits - 1, 48), currentVaddr(47, 0))
     } else {
-      get_pn(currentVaddr)
+      currentVaddr
     }
   }
+
+  def effectiveVpn(currentVaddr: UInt, maskedFullva: UInt): UInt =
+    get_pn(effectiveVaddr(currentVaddr, maskedFullva))
 
   val rawInVpn = req_in.map(req => get_pn(req.bits.vaddr))
   val effectiveInVpn = (0 until Width).map(i => effectiveVpn(req_in(i).bits.vaddr, EffectiveVa(i)))
@@ -251,6 +254,9 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
     }
   }
   val outVpn = (0 until Width).map(i => Mux(useEffectiveVpnOut(i), effectiveOutVpn(i), rawOutVpn(i)))
+
+  def onlyStage2Gpaddr(idx: Int, currentVaddr: UInt): UInt =
+    Mux(useEffectiveVpnOut(idx), effectiveVaddr(currentVaddr, req_out(idx).fullva), currentVaddr)
 
   val refill = ptw.resp.fire && !(ptw.resp.bits.getGpa) && !need_gpa && !maybe_need_gpa_not_allow_refill && !flush_mmu
   // prevent ptw refill when: 1) it's a getGpa request; 2) l1tlb is in need_gpa state; 3) mmu is being flushed.
@@ -404,10 +410,11 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
       // By the way, frontend handles the cross page instruction fetch by itself, so TLB doesn't need to do anything extra.
       // Also, the fullva of iTLB is not used and always zero. crossPageVaddr should never use fullva in iTLB.
       val crossPageVaddr = Mux(isitlb || req_out(i).fullva(12) =/= vaddr(12), req_out(i).vaddr, req_out(i).fullva)
+      val onlyStage2Gpa = onlyStage2Gpaddr(i, crossPageVaddr)
       val gpaddr_offset = Mux(isLeaf(d), get_off(crossPageVaddr), Cat(getVpnn(get_pn(crossPageVaddr), vpn_idx), 0.U(log2Up(XLEN/8).W)))
       val gpaddr = Cat(gvpn(d), gpaddr_offset)
       resp(i).bits.paddr(d) := Mux(enable, paddr, notTranslatePaddr)
-      resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, crossPageVaddr, gpaddr)
+      resp(i).bits.gpaddr(d) := Mux(r_s2xlate(d) === onlyStage2, onlyStage2Gpa, gpaddr)
     }
 
     XSDebug(req_out_v(i), p"(${i.U}) hit:${hit} miss:${miss} ppn:${Hexadecimal(ppn(0))} perm:${perm(0)}\n")
@@ -644,7 +651,7 @@ class TLB(Width: Int, nRespDups: Int = 1, Block: Seq[Boolean], q: TLBParameters)
 
       for (d <- 0 until nRespDups) {
         resp(idx).bits.paddr(d) := Mux(s2xlate === onlyStage2 || s2xlate === allStage, s2_paddr, s1_paddr)
-        resp(idx).bits.gpaddr(d) := Mux(s2xlate === onlyStage2, req_out(idx).vaddr, s1_gpaddr)
+        resp(idx).bits.gpaddr(d) := Mux(s2xlate === onlyStage2, onlyStage2Gpaddr(idx, req_out(idx).vaddr), s1_gpaddr)
         pbmt_check(idx, d, io.ptw.resp.bits.s1.entry.pbmt, io.ptw.resp.bits.s2.entry.pbmt, s2xlate)
         perm_check(stage1, req_out(idx).cmd, idx, d, stage2, req_out(idx).hlvx, s2xlate)
       }
