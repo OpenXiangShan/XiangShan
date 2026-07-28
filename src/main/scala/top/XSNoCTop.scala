@@ -284,8 +284,17 @@ trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
 
   require(socParams.enableCHI)
 
-  socParams.EnableCHIAsyncBridge match {
-    case Some(param) =>
+  (socParams.EnableCHIAsyncBridge, socParams.CHIAsyncFromDSU) match {
+    case (Some(param), true) => // chiasync bridge can be provided by customer J co.
+      withClockAndReset(noc_clock.get, noc_reset_sync.get) {
+        val time_sink = Module(new CHIAsyncICNDSU(CDBParams()))
+        time_sink.io.cdb <> core_with_l2.module.io.chi
+        io_chi <> time_sink.io.chi
+        io_power.QACTIVE := true.B // time_sink.io.powerAck.QACTIVE TBD
+        io_power.QACCEPTn := true.B // time_sink.io.powerAck.QACCEPTn TBD
+        // time_sink.io.powerAck.QREQ := withClockAndReset(noc_clock.get, noc_reset_sync.get) { AsyncResetSynchronizerShiftReg(io_power.QREQ, 3, 0) }
+      }
+    case (Some(param), false) =>
       withClockAndReset(noc_clock.get, noc_reset_sync.get) {
         val time_sink = Module(new CHIAsyncBridgeSink(param))
         time_sink.io.async <> core_with_l2.module.io.chi
@@ -294,7 +303,7 @@ trait HasXSTileCHIImp[+L <: HasXSTile] extends HasXSTileImp[L] {
         io_power.QACCEPTn := time_sink.io.powerAck.QACCEPTn
         time_sink.io.powerAck.QREQ := withClockAndReset(noc_clock.get, noc_reset_sync.get) { AsyncResetSynchronizerShiftReg(io_power.QREQ, 3, 0) }
       }
-    case None =>
+    case (None, _) =>
       io_chi <> core_with_l2.module.io.chi
       io_power.QACTIVE := false.B
       io_power.QACCEPTn := false.B

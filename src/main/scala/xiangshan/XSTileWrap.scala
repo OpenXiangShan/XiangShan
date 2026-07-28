@@ -18,7 +18,7 @@ package xiangshan
 
 import chisel3._
 import chisel3.util._
-import device.{TIMER, TIMERParams, TimeAsync}
+import device.{CHIAsyncIODSU, CHIAsyncDEVDSU, CDBParams, TIMER, TIMERParams, TimeAsync}
 import org.chipsalliance.cde.config._
 import freechips.rocketchip.diplomacy._
 import freechips.rocketchip.interrupts._
@@ -88,9 +88,10 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
         val l3MissMatch = Input(Bool())
       }
       val l3Miss = Input(Bool())
-      val chi = EnableCHIAsyncBridge match {
-        case Some(param) => new AsyncPortIO(param)
-        case None => new PortIO
+      val chi = (EnableCHIAsyncBridge, CHIAsyncFromDSU) match {
+        case (Some(param), true) => Flipped(new CHIAsyncIODSU(CDBParams()))
+        case (Some(param), false) => new AsyncPortIO(param)
+        case _ => new PortIO
       }
       val nodeID = if (enableCHI) Some(Input(UInt(NodeIDWidth.W))) else None
       val clintTime = EnableClintAsyncBridge match {
@@ -185,15 +186,26 @@ class XSTileWrap()(implicit p: Parameters) extends LazyModule
     }
 
     // CHI Async Queue Source
-    EnableCHIAsyncBridge match {
-      case Some(param) =>
+
+    (EnableCHIAsyncBridge, CHIAsyncFromDSU) match {
+      case (Some(param), true) => // chiasync bridge can be provided by customer J.
+        val source = withClockAndReset(clock, reset_sync)(Module(new CHIAsyncDEVDSU(CDBParams())))
+        source.io.chi <> tile.module.io.chi.get
+        io.chi <> source.io.cdb
+        tile.module.io.lcrdy.foreach { lcrdy =>
+          lcrdy.req.rdy := true.B
+          lcrdy.dat.rdy := true.B
+          lcrdy.rsp.rdy := true.B
+          lcrdy.empty := true.B
+        }
+      case (Some(param), false) =>
         val source = withClockAndReset(clock, reset_sync)(Module(new CHIAsyncBridgeSource(param)))
         source.io.enq <> tile.module.io.chi.get
         tile.module.io.lcrdy.foreach { out =>
           out <> source.io.lcrdy
         }
          io.chi <> source.io.async
-      case None =>
+      case _ =>
         require(enableCHI)
         io.chi <> tile.module.io.chi.get
         tile.module.io.lcrdy.foreach { lcrdy =>
