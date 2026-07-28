@@ -26,7 +26,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
-import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
+import xiangshan.{L1CacheErrorInfo, NtlType, XSCoreParamsKey}
 import xiangshan.mem.L1PrefetchReq
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
@@ -100,6 +100,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.error := false.B
     req.id := store.id
     req.miss_fail_cause_evict_btot := false.B
+    req.isNtl := NtlType.isDcacheNtl(store.ntl)
     req
   }
 
@@ -915,7 +916,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
   miss_req := DontCare
   miss_req.source := s2_req.source
   miss_req.pf_source := s2_req.pf_source
-  miss_req.isNtl := false.B
+  miss_req.isNtl := s2_req.isNtl
   miss_req.cmd := s2_req.cmd
   miss_req.addr := s2_req.addr
   miss_req.vaddr := s2_req.vaddr
@@ -1117,7 +1118,7 @@ class MainPipe(implicit p: Parameters) extends DCacheModule with HasPerfEvents w
     (s3_req.miss || ((s3_req.isAMO || s3_req.isStore) && s3_hit)) && !(s3_req.miss && s3_req.isNtl)
   io.replace_access.bits.set := s3_idx
   io.replace_access.bits.way := OHToUInt(s3_way_en)
-  io.replace_access.bits.ntl := false.B
+  io.replace_access.bits.ntl := s3_req.isStore && s3_req.isNtl
 
   io.replace_way.set.valid := GatedValidRegNext(s0_fire)
   io.replace_way.set.bits := s1_idx
