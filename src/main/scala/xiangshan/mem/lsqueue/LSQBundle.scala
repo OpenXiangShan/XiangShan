@@ -47,6 +47,7 @@ class StoreQueueEnqIO(implicit p: Parameters) extends MemBlockBundle {
     val loadWaitStrict  = Bool()
     val ssid            = UInt(SSIDWidth.W)
     val storeSetHit     = Bool() // inst has been allocated an store set
+    val ntl             = Valid(NtlType())
     // debug signal
     val pc              = Option.when(debugEn)(UInt(VAddrBits.W))
   }

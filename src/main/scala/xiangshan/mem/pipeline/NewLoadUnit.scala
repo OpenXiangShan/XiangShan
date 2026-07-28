@@ -449,7 +449,8 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.replacementUpdated := DontCare
   io.pfSource := Mux(isHwPrefetch, io.prefetchReq.bits.pf_source.value, L1_HW_PREFETCH_NULL)
   val dcacheNtl = Wire(Valid(NtlType()))
-  dcacheNtl.valid := NtlType.isDcacheNtl(uop.ntl)
+  val ntlIgnored = NtlType.isNtlIgnored(uop.fuType, uop.fuOpType)
+  dcacheNtl.valid := NtlType.isDcacheNtl(uop.ntl) && !ntlIgnored
   dcacheNtl.bits := uop.ntl.bits
   io.ntlSource := dcacheNtl
 

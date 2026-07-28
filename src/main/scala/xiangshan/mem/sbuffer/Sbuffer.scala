@@ -214,6 +214,7 @@ class Sbuffer(implicit p: Parameters)
 
   val ptag = Reg(Vec(StoreBufferSize, UInt(PTagWidth.W)))
   val vtag = Reg(Vec(StoreBufferSize, UInt(VTagWidth.W)))
+  val ntl = Reg(Vec(StoreBufferSize, Valid(NtlType())))
   val debug_mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
   val waitInflightMask = Reg(Vec(StoreBufferSize, UInt(StoreBufferSize.W)))
   val data = dataModule.io.dataOut
@@ -423,6 +424,7 @@ class Sbuffer(implicit p: Parameters)
 
   def wordReqToBufLine( // allocate a new line in sbuffer
     req: DCacheWordReq,
+    reqNtl: Valid[UInt],
     reqptag: UInt,
     reqvtag: UInt,
     insertIdx: UInt,
@@ -442,12 +444,14 @@ class Sbuffer(implicit p: Parameters)
         // missqReplayCount(insertIdx) := 0.U
         ptag(entryIdx) := reqptag
         vtag(entryIdx) := reqvtag // update vtag if a new sbuffer line is allocated
+        ntl(entryIdx) := reqNtl
       }
     })
   }
 
   def mergeWordReq( // merge write req into an existing line
     req: DCacheWordReq,
+    reqNtl: Valid[UInt],
     reqptag: UInt,
     reqvtag: UInt,
     mergeIdx: UInt,
@@ -458,6 +462,8 @@ class Sbuffer(implicit p: Parameters)
     (0 until StoreBufferSize).map(entryIdx => {
       when(mergeVec(entryIdx)) {
         cohCount(entryIdx) := 0.U
+        // merge updates ntl from the newly merged store (non-ntl clears the flag)
+        ntl(entryIdx) := reqNtl
         // missqReplayCount(entryIdx) := 0.U
         // check if vtag is the same, if not, trigger sbuffer flush
         when(reqvtag =/= vtag(entryIdx)) {
@@ -486,10 +492,10 @@ class Sbuffer(implicit p: Parameters)
     when(accessValid){
       when(canMerge(i)){
         writeReq(i).bits.wvec := mergeVec(i)
-        mergeWordReq(in.bits, inptags(i), invtags(i), mergeIdx(i), mergeVec(i), vwordOffset)
+        mergeWordReq(in.bits, in.bits.ntl, inptags(i), invtags(i), mergeIdx(i), mergeVec(i), vwordOffset)
       }.otherwise({
         writeReq(i).bits.wvec := insertVec
-        wordReqToBufLine(in.bits, inptags(i), invtags(i), insertIdx, insertVec, vwordOffset)
+        wordReqToBufLine(in.bits, in.bits.ntl, inptags(i), invtags(i), insertIdx, insertVec, vwordOffset)
         assert(debug_insertIdx === insertIdx)
       })
     }
@@ -697,6 +703,7 @@ class Sbuffer(implicit p: Parameters)
   io.dcache.req.bits.data  := data(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.mask  := mask(sbuffer_out_s1_evictionIdx).asUInt
   io.dcache.req.bits.id := sbuffer_out_s1_evictionIdx
+  io.dcache.req.bits.ntl := ntl(sbuffer_out_s1_evictionIdx)
 
   XSDebug(sbuffer_out_s1_fire,
     p"send buf [$sbuffer_out_s1_evictionIdx] to Dcache, req fire\n"
