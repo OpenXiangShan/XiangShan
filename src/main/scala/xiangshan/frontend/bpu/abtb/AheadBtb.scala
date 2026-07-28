@@ -250,7 +250,7 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
 
   private val t0_train = io.fastTrain.get.bits
 
-  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.finalPrediction.taken && t0_train.abtbMeta.valid
+  private val t0_fire = io.enable && io.fastTrain.get.valid && t0_train.abtbMeta.valid
 
   /* --------------------------------------------------------------------------------------------------------------
      train pipeline stage 1
@@ -267,7 +267,8 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val t1_setMask  = UIntToOH(t1_setIdx)
   private val t1_bankMask = t1_meta.bankMask
 
-  // use taken branch of s3 prediction to train abtb
+  // A taken final prediction can allocate/correct an entry. A not-taken
+  // prediction only updates counters of the conditional entries that hit.
   private val t1_trainTaken           = t1_train.finalPrediction.taken
   private val t1_trainPosition        = t1_train.finalPrediction.cfiPosition
   private val t1_trainAttribute       = t1_train.finalPrediction.attribute
@@ -328,13 +329,13 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   private val victimWayIdx = replacers.map(_.io.victimWayIdx)
 
   banks.zipWithIndex.foreach { case (b, i) =>
-    when(t1_fire && t1_needWriteNewEntry && t1_bankMask(i)) {
+    when(t1_fire && t1_trainTaken && t1_needWriteNewEntry && t1_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := true.B
       b.io.writeReq.bits.setIdx       := t1_setIdx
       b.io.writeReq.bits.wayIdx       := victimWayIdx(i)
       b.io.writeReq.bits.entry        := t1_writeEntry
-    }.elsewhen(t1_fire && t1_needCorrectTarget && t1_bankMask(i)) {
+    }.elsewhen(t1_fire && t1_trainTaken && t1_needCorrectTarget && t1_bankMask(i)) {
       b.io.writeReq.valid             := true.B
       b.io.writeReq.bits.needResetCtr := false.B
       b.io.writeReq.bits.setIdx       := t1_setIdx
@@ -374,11 +375,11 @@ class AheadBtb(implicit p: Parameters) extends BasePredictor with Helpers {
   XSPerfAccumulate("train_actual_taken", t1_fire && t1_trainTaken)
   XSPerfAccumulate("train_actual_not_taken", t1_fire && !t1_trainTaken)
 
-  XSPerfAccumulate("total_write", t1_fire && (t1_needWriteNewEntry || t1_needCorrectTarget) || s2_valid && s2_multiHit)
-  XSPerfAccumulate("train_write_new_entry", t1_fire && t1_needWriteNewEntry)
-  XSPerfAccumulate("train_correct_target", t1_fire && t1_needCorrectTarget)
+  XSPerfAccumulate("total_write", t1_fire && t1_trainTaken && (t1_needWriteNewEntry || t1_needCorrectTarget) || s2_valid && s2_multiHit)
+  XSPerfAccumulate("train_write_new_entry", t1_fire && t1_trainTaken && t1_needWriteNewEntry)
+  XSPerfAccumulate("train_correct_target", t1_fire && t1_trainTaken && t1_needCorrectTarget)
   XSPerfAccumulate(
     "train_write_conflict",
-    t1_fire && (t1_needWriteNewEntry || t1_needCorrectTarget) && s2_valid && s2_multiHit
+    t1_fire && t1_trainTaken && (t1_needWriteNewEntry || t1_needCorrectTarget) && s2_valid && s2_multiHit
   )
 }
