@@ -1207,9 +1207,9 @@ def test_canonical_registry_matches_the_single_sampler_contract():
             for row in csv.DictReader(handle)
             if row["Coverpoint"].strip()
         }
-    assert len(active) == 137
+    assert len(active) == 146
     assert active == set(FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS)
-    assert len(CFVEC_SAMPLER_BIN_KEYS) == 17
+    assert len(CFVEC_SAMPLER_BIN_KEYS) == 26
     assert len(TWO_FETCH_SAMPLER_BIN_KEYS) == 41
     assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 49
     assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 24
@@ -1415,7 +1415,7 @@ def test_frontend_fixture_has_one_funcov_path_and_keeps_code_coverage(tmp_path):
     assert "s1_icacheMetaIn_0_itlbPbmt" in fetch_path_source
     assert "s1_icacheMetaIn_0_pmpMmio" in fetch_path_source
     assert not (frontend_root / "env/icache_funcov.py").exists()
-    assert len(recorder.definitions) == 137
+    assert len(recorder.definitions) == 146
     assert all(item.coverpoint for item in recorder.definitions)
     assert "FunctionalCoverageRecorder.from_pilot_csv" in fixture_source
     assert "set_line_coverage" in fixture_source

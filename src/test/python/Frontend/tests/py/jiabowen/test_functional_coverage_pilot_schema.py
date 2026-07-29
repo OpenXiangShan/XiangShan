@@ -9,6 +9,7 @@ from tools.backannotate_funcov import validate_pilot_schema
 
 IFU_FUNCOV_BIN_IDS = {
     *(f"BIN-{index:03d}" for index in range(401, 416)),
+    *(f"BIN-{index:03d}" for index in range(424, 433)),
     *(f"BIN-{index:03d}" for index in range(501, 542)),
 }
 
@@ -26,7 +27,7 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
 
     summary = validate_pilot_schema(pilot_path)
 
-    assert summary == {"rows": 295, "bin_ids": 295, "mapping_keys": 295, "legacy_ids": 4}
+    assert summary == {"rows": 304, "bin_ids": 304, "mapping_keys": 304, "legacy_ids": 4}
 
 
 def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
@@ -42,9 +43,9 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     active = [row for row in rows if row["Coverpoint"].strip()]
     legacy_bpu_ftq = [row for row in rows if "旧BPU_FTQ" in row["映射测试点路径"]]
 
-    assert len(active) == 137
+    assert len(active) == 146
     assert {row["Bin_ID"] for row in active} == {
-        *(f"BIN-{index:03d}" for index in range(401, 424)),
+        *(f"BIN-{index:03d}" for index in range(401, 433)),
         *(f"BIN-{index:03d}" for index in range(501, 542)),
         *(f"BIN-{index:03d}" for index in range(601, 674)),
     }

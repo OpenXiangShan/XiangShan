@@ -49,7 +49,7 @@ def _read_rows(path: Path) -> list[dict[str, str]]:
 
 def _active_bin_ids() -> set[str]:
     return {
-        *(f"BIN-{index:03d}" for index in range(401, 424)),
+        *(f"BIN-{index:03d}" for index in range(401, 433)),
         *(f"BIN-{index:03d}" for index in range(501, 542)),
     }
 
