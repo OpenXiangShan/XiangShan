@@ -147,9 +147,9 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val exuWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback
   val vldWBs: Seq[ValidIO[WriteBackRobBundle]] = io.exuWriteback.filter(_.bits.params.hasVLoadFu).toSeq
   val fflagsWBs = io.exuWriteback.filter(_.bits.fflags.nonEmpty).toSeq
+  val vxsatWBs = io.exuWriteback.filter(_.bits.vxsat.nonEmpty).toSeq
   val exceptionWBs = io.writeback.filter(x => x.bits.exceptionVec.nonEmpty).toSeq
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
-  val vxsatWBs = io.exuWriteback.filter(_.bits.vxsat.nonEmpty).toSeq
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
   val isBrhOrJmpWBs = io.exuWriteback.filter(x => (x.bits.params.hasBrhFu || x.bits.params.hasJmpFu)).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
@@ -364,8 +364,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val exceptionGen = Module(new ExceptionGen(params))
   val exceptionDataRead = exceptionGen.io.state
-  val fflagsDataRead = Wire(Vec(CommitWidth, UInt(5.W)))
-  val vxsatDataRead = Wire(Vec(CommitWidth, Bool()))
   io.robDeqPtr := deqPtr
 
   // topdown
@@ -728,25 +726,26 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   // wiring to csr
   // enq stage update
   val dirty_fs, dirty_vs = Wire(Bool())
-  val dirtyTracker = Module(new RobSetFlagTracker(2, RenameWidth, CommitWidth))
-  for ((update, req) <- dirtyTracker.io.update.zip(io.enq.req)) {
+  val enqFlagTracker = Module(new RobSetFlagTracker(2, io.enq.req.size, CommitWidth))
+  for ((update, req) <- enqFlagTracker.io.update.zip(io.enq.req)) {
     update.valid := req.valid && io.enq.canAccept && !io.redirect.valid
     update.bits.robIdx := req.bits.robIdx
     update.bits.setMask := Cat(req.bits.dirtyVs, req.bits.dirtyFs || req.bits.wfflags)
   }
-  dirtyTracker.io.redirect := io.redirect
-  dirtyTracker.io.commit.zip(io.commits.commitValid).foreach { case (commit, valid) =>
-    commit.valid := io.commits.isCommit && valid
-    commit.bits := io.commits.robIdx(valid)
+  enqFlagTracker.io.redirect := io.redirect
+  enqFlagTracker.io.commit.zip(io.commits.commitValid).zip(io.commits.robIdx).foreach {
+    case ((commit, valid), robIdx) =>
+      commit.valid := io.commits.isCommit && valid
+      commit.bits := robIdx
   }
-  dirty_fs := dirtyTracker.io.commitSetMask(0)
-  dirty_vs := dirtyTracker.io.commitSetMask(1)
+  dirty_fs := enqFlagTracker.io.commitSetMask(0)
+  dirty_vs := enqFlagTracker.io.commitSetMask(1)
 
   // writeback stage update
   val fflags = Wire(Valid(UInt(5.W)))
   val vxsat = Wire(Valid(Bool()))
-  val writebackTracker = Module(new RobSetFlagTracker(6, io.writeback.size, CommitWidth))
-  for ((update, wb) <- writebackTracker.io.update.zip(io.writeback)) {
+  val writebackFlagTracker = Module(new RobSetFlagTracker(6, io.writeback.size, CommitWidth))
+  for ((update, wb) <- writebackFlagTracker.io.update.zip(io.writeback)) {
     val fflags = wb.bits.fflags.map { bits =>
       Mux(wb.bits.wflags.getOrElse(false.B), bits, 0.U(5.W))
     }.getOrElse(0.U(5.W))
@@ -754,15 +753,16 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     update.bits.robIdx := wb.bits.robIdx
     update.bits.setMask := Cat(wb.bits.vxsat.getOrElse(false.B), fflags)
   }
-  writebackTracker.io.redirect := io.redirect
-  writebackTracker.io.commit.zip(io.commits.commitValid).foreach { case (commit, valid) =>
-    commit.valid := io.commits.isCommit && valid
-    commit.bits := io.commits.robIdx(valid)
+  writebackFlagTracker.io.redirect := io.redirect
+  writebackFlagTracker.io.commit.zip(io.commits.commitValid).zip(io.commits.robIdx).foreach {
+    case ((commit, valid), robIdx) =>
+      commit.valid := io.commits.isCommit && valid
+      commit.bits := robIdx
   }
-  fflags.valid := writebackTracker.io.commitSetMask(4, 0).orR
-  fflags.bits := writebackTracker.io.commitSetMask(4, 0)
-  vxsat.valid := writebackTracker.io.commitSetMask(5)
-  vxsat.bits := writebackTracker.io.commitSetMask(5)
+  fflags.valid := writebackFlagTracker.io.commitSetMask(4, 0).orR
+  fflags.bits := writebackFlagTracker.io.commitSetMask(4, 0)
+  vxsat.valid := writebackFlagTracker.io.commitSetMask(5)
+  vxsat.bits := writebackFlagTracker.io.commitSetMask(5)
 
   val resetVstart = dirty_vs && !io.vstartIsZero
 
@@ -847,16 +847,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       !walk_v(i),
       s"The walking entry($i) should be valid\n")
 
-    XSInfo(io.commits.isCommit && io.commits.commitValid(i),
-      "retired pc %x wen %d ldest %d pdest %x data %x fflags: %b vxsat: %b\n",
-      robEntries(deqPtrVec(i).value).debug_pc.getOrElse(0.U),
-      io.commits.info(i).rfWen,
-      io.commits.info(i).debug_ldest.getOrElse(0.U),
-      io.commits.info(i).debug_pdest.getOrElse(0.U),
-      debug_exuData(deqPtrVec(i).value),
-      fflagsDataRead(i),
-      vxsatDataRead(i)
-    )
     XSInfo(state === s_walk && io.commits.walkValid(i), "walked pc %x wen %d ldst %d data %x\n",
       robEntries(walkPtrVec(i).value).debug_pc.getOrElse(0.U),
       io.commits.info(i).rfWen,
@@ -1036,8 +1026,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqWBNumVec = VecInit(io.enq.req.map(req => req.bits.numWB))
   private val enqWriteStdVec = VecInit(io.enq.req.map(req => req.bits.stdwriteNeed))
 
-  val fflags_wb = fflagsWBs
-  val vxsat_wb = vxsatWBs
   for (i <- 0 until RobSize) {
 
     val robIdxMatchSeq = io.enq.req.map(_.bits.robIdx.value === i.U)
@@ -1078,22 +1066,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // update by writing back
       robEntries(i).uopNum := robEntries(i).uopNum - wbCnt
       assert(!(robEntries(i).uopNum - wbCnt > robEntries(i).uopNum), s"robEntries $i uopNum is overflow!")
-    }
-
-    val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U && writeback.bits.wflags.getOrElse(false.B))
-    val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags.get, 0.U) }.fold(false.B)(_ | _)
-    when(isFirstEnq) {
-      robEntries(i).fflags := 0.U
-    }.elsewhen(fflagsRes.orR) {
-      robEntries(i).fflags := robEntries(i).fflags | fflagsRes
-    }
-
-    val vxsatCanWbSeq = vxsat_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === i.U)
-    val vxsatRes = vxsatCanWbSeq.zip(vxsat_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat.get, 0.U) }.fold(false.B)(_ | _)
-    when(isFirstEnq) {
-      robEntries(i).vxsat := 0.U
-    }.elsewhen(vxsatRes.orR) {
-      robEntries(i).vxsat := robEntries(i).vxsat | vxsatRes
     }
 
     // trace
@@ -1145,14 +1117,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // update by writing back
       needUpdate(i).uopNum := robBanksRdata(i).uopNum - wbCnt
     }
-
-    val fflagsCanWbSeq = fflags_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.wflags.getOrElse(false.B))
-    val fflagsRes = fflagsCanWbSeq.zip(fflags_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.fflags.get, 0.U) }.fold(false.B)(_ | _)
-    needUpdate(i).fflags := Mux(!robBanksRdata(i).valid && instCanEnqFlag, 0.U, robBanksRdata(i).fflags | fflagsRes)
-
-    val vxsatCanWbSeq = vxsat_wb.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i))
-    val vxsatRes = vxsatCanWbSeq.zip(vxsat_wb).map { case (canWb, wb) => Mux(canWb, wb.bits.vxsat.get, 0.U) }.fold(false.B)(_ | _)
-    needUpdate(i).vxsat := Mux(!robBanksRdata(i).valid && instCanEnqFlag, 0.U, robBanksRdata(i).vxsat | vxsatRes)
 
     // trace
     val taken = branchWBs.map(writeback => writeback.valid && writeback.bits.robIdx.value === needUpdateRobIdx(i) && writeback.bits.redirect.get.bits.taken).reduce(_ || _)
@@ -1260,9 +1224,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.veew := wb.bits.vls.map(_.vpu.veew).getOrElse(0.U)
     exc_wb.bits.vlmul := wb.bits.vls.map(_.vpu.vlmul).getOrElse(0.U)
   }
-
-  fflagsDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).fflags)
-  vxsatDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).vxsat)
 
   val isCommit = io.commits.isCommit
   val isCommitReg = GatedValidRegNext(io.commits.isCommit)
