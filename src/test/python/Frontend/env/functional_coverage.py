@@ -274,21 +274,18 @@ class FunctionalCoverageRecorder:
         bin_ids = _normalize_string_list(target_bin_ids)
         testcases = _normalize_string_list(target_testcases)
         explicit_testcases = _normalize_string_list(
-            [
-                *str(os.getenv("TB_FUNCOV_TARGET_TESTCASES", ""))
-                .replace(",", " ")
-                .replace(";", " ")
-                .split(),
-                Path(os.getenv("TB_BIN_PATH", "").strip()).stem
-                if os.getenv("TB_BIN_PATH", "").strip()
-                else "",
-            ]
+            str(os.getenv("TB_FUNCOV_TARGET_TESTCASES", ""))
+            .replace(",", " ")
+            .replace(";", " ")
+            .split()
         )
         if explicit_testcases:
             unresolved = sorted(
                 testcase
                 for testcase in explicit_testcases
-                if not any(item.suggested_testcase == testcase for item in self.definitions)
+                if not any(
+                    testcase == item.suggested_testcase for item in self.definitions
+                )
             )
             if unresolved:
                 raise ValueError(
@@ -303,8 +300,7 @@ class FunctionalCoverageRecorder:
                 if item.suggested_testcase in testcase_set
             ]
             explicit_testcase_scope = bool(
-                os.getenv("TB_BIN_PATH", "").strip()
-                or os.getenv("TB_FUNCOV_TARGET_TESTCASES", "").strip()
+                os.getenv("TB_FUNCOV_TARGET_TESTCASES", "").strip()
             )
             if explicit_testcase_scope and not bin_ids:
                 raise ValueError(

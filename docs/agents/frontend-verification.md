@@ -99,8 +99,10 @@ run is being generated for a known Bin_ID/TP_ID scope. Back-annotation should
 prefer those targets over artifact-tag substring matching, which remains only
 for historical compatibility.
 Python directed tests declare targets with `funcov_bins` / `funcov_tps`
-markers. Assembly bin-trace runs resolve exact registry testcase names from the
-bin stem.
+markers. Generic bin-trace runs do not infer coverage ownership from the bin
+filename. Registry validation applies only when coverage targets are declared
+explicitly through those markers or `TB_FUNCOV_TARGET_BINS`,
+`TB_FUNCOV_TARGET_TP_IDS`, or `TB_FUNCOV_TARGET_TESTCASES`.
 
 The current Frontend package intentionally has two layers:
 
@@ -545,8 +547,11 @@ stem and pytest case name, for example `<case>_test_bin_trace.fst` and
 Do not write new evidence to the old date directories or the global
 `data/funcov/` directory. Those locations contain historical artifacts only.
 
-Each DUT run must carry explicit `coverage_targets`; a bin stem that does not
-resolve to an active registry row is an input error and must stop the run.
+Each DUT run records `coverage_targets`, but `bin_ids` may be empty for a generic
+bin-trace run. A bin filename does not need to resolve to an active registry
+row. Explicit coverage targets remain strict: unknown Bin_IDs or testcase names
+must stop the run. Binary and trace paths and hashes remain in run provenance,
+independent of registry ownership.
 Monitor/checker redirect-recovery errors are real failures and must not be
 filtered out by a legacy helper. Positive bin hits from a failed run, an old
 schema, or a build without a valid manifest remain diagnostic evidence only.
@@ -709,6 +714,11 @@ make frontend -j
   artifacts unless they are intentional fixtures.
 
 ### Frontend Testcase Design
+
+Functional coverage must follow meaningful functional scenarios; do not
+construct a directed testcase solely to hit a coverpoint. Declare targets only
+when a run intentionally owns that registry scope. Generic binaries may still
+produce diagnostic coverage hits without claiming registry ownership.
 
 Keep frontend testcase design centered on controllable instruction flow rather
 than host-side test scaffolding.

@@ -130,9 +130,6 @@ def _funcov_targets(request) -> dict[str, list[str]]:
         for marker in node.iter_markers("funcov_tps"):
             tp_ids.extend(_flatten_marker_values(marker.args))
             tp_ids.extend(_flatten_marker_values(marker.kwargs.get("tps", [])))
-    raw_bin = os.getenv("TB_BIN_PATH", "").strip()
-    if raw_bin:
-        testcases.append(Path(raw_bin).stem)
     return {
         "bin_ids": _split_env_list(" ".join(bin_ids)),
         "tp_ids": _split_env_list(" ".join(tp_ids)),

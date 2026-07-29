@@ -745,6 +745,14 @@ def test_frontend_runners_keep_artifacts_scoped_to_one_run(tmp_path):
         in wrapper_source
     )
     assert 'TB_RUN_COMMAND="${TB_RUN_COMMAND% }"' in wrapper_source
+    assert (
+        'TB_FUNCOV_TARGET_TESTCASES="${TB_FUNCOV_TARGET_TESTCASES:-${CASE_STEM}}"'
+        in wrapper_source
+    )
+    assert (
+        'TB_FUNCOV_TARGET_TESTCASES="${TB_FUNCOV_TARGET_TESTCASES}"'
+        in wrapper_source
+    )
     assert '${ARTIFACT_ROOT}/inputs/${BIN_STEM}.trace.jsonl' in pipeline_source
     assert '${ARTIFACT_ROOT}/inputs/${BIN_STEM}.nemu.log' in pipeline_source
     assert 'PIPELINE_REASON="artifact_output_not_empty"' in pipeline_source
@@ -1089,16 +1097,61 @@ def test_funcov_targets_resolve_from_exact_registry_testcase(tmp_path):
     ]
 
 
-def test_explicit_unknown_bin_stem_fails_target_resolution(tmp_path, monkeypatch):
+def test_unmapped_bin_path_does_not_claim_registry_targets(tmp_path, monkeypatch):
     monkeypatch.setenv("TB_BIN_PATH", "/tmp/unknown_frontend_case.bin")
+
+    recorder, _env, _dut = _make_recorder(
+        tmp_path, target_testcases=["test_bin_trace"]
+    )
+
+    assert recorder.coverage_targets["testcases"] == ["test_bin_trace"]
+    assert recorder.coverage_targets["bin_ids"] == []
+
+
+def test_fixture_does_not_infer_funcov_testcase_from_bin_path(monkeypatch):
+    monkeypatch.setenv("TB_BIN_PATH", "/tmp/cfi_mix_case.bin")
+    monkeypatch.delenv("TB_FUNCOV_TARGET_TESTCASES", raising=False)
+    node = SimpleNamespace(
+        originalname="test_bin_trace",
+        name="test_bin_trace",
+        iter_markers=lambda _name: (),
+    )
+
+    targets = fixtures_module._funcov_targets(SimpleNamespace(node=node))
+
+    assert targets == {
+        "bin_ids": [],
+        "tp_ids": [],
+        "testcases": ["test_bin_trace"],
+    }
+
+
+def test_explicit_known_testcase_resolves_registry_targets(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "TB_FUNCOV_TARGET_TESTCASES", "fe_2fetch_trained_short_blocks"
+    )
+
+    recorder, _env, _dut = _make_recorder(
+        tmp_path, target_testcases=["fe_2fetch_trained_short_blocks"]
+    )
+
+    assert recorder.coverage_targets["bin_ids"]
+
+
+def test_explicit_unknown_testcase_fails_target_resolution(tmp_path, monkeypatch):
+    monkeypatch.setenv("TB_FUNCOV_TARGET_TESTCASES", "unknown_frontend_case")
     with pytest.raises(ValueError, match="does not resolve to an active registry bin"):
         _make_recorder(tmp_path, target_testcases=["unknown_frontend_case"])
 
 
 def test_explicit_unknown_testcase_cannot_hide_behind_a_known_target(tmp_path, monkeypatch):
-    monkeypatch.setenv("TB_BIN_PATH", "/tmp/unknown_frontend_case.bin")
+    monkeypatch.setenv("TB_FUNCOV_TARGET_TESTCASES", "unknown_frontend_case")
     with pytest.raises(ValueError, match="explicit testcase does not resolve"):
-        _make_recorder(tmp_path, target_bin_ids=["BIN-501"], target_testcases=["fe_2fetch_trained_short_blocks"])
+        _make_recorder(
+            tmp_path,
+            target_bin_ids=["BIN-501"],
+            target_testcases=["fe_2fetch_trained_short_blocks"],
+        )
 
 
 def test_build_manifest_binds_source_sha_to_compiled_artifacts(tmp_path):
