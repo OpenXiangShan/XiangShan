@@ -760,12 +760,14 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     io.lfst.req(i).bits.isstore := isStore(i)
     io.lfst.req(i).bits.ssid := updatedUop(i).ssid
     io.lfst.req(i).bits.robIdx := updatedUop(i).robIdx // speculatively assigned in rename
+    io.lfst.req(i).bits.perfStrictPred := fromRename(i).bits.loadWaitStrict
 
     // override load delay ctrl signal with store set result
     if(StoreSetEnable) {
       fromRenameUpdate(i).bits.loadWaitBit := io.lfst.resp(i).bits.shouldWait
       fromRenameUpdate(i).bits.waitForRobIdx := io.lfst.resp(i).bits.robIdx
-      fromRenameUpdate(i).bits.loadWaitStrict := fromRename(i).bits.loadWaitStrict && io.lfst.resp(i).bits.shouldWait
+      fromRenameUpdate(i).bits.loadWaitStrict := fromRename(i).bits.loadWaitStrict && // filter strict pprediction
+        io.lfst.resp(i).bits.shouldWait && io.lfst.resp(i).bits.strictShouldWait
     } else {
       fromRenameUpdate(i).bits.loadWaitBit := isLs(i) && !isStore(i) && fromRename(i).bits.loadWaitBit
     }
@@ -788,6 +790,33 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     }
   }
 
+  // StoreSet ChiselDB trace
+  val storeSetPredHartId = p(XSCoreParamsKey).HartId
+  val storeSetPredTable = ChiselDB.createTable(s"StoreSetPredDB$storeSetPredHartId", new StoreSetPredDBEntry, basicDB = false)
+  for (i <- 0 until RenameWidth) {
+    val storeSetPredEntry = Wire(new StoreSetPredDBEntry)
+    storeSetPredEntry.timeCnt := GTimer()
+    storeSetPredEntry.robIdx := updatedUop(i).robIdx.value
+    storeSetPredEntry.foldPc := updatedUop(i).debug
+      .map(debug => XORFold(debug.pc(VAddrBits - 1, 1), MemPredPCWidth))
+      .getOrElse(0.U(MemPredPCWidth.W))
+    storeSetPredEntry.isStore := isStore(i)
+    storeSetPredEntry.ssid := updatedUop(i).ssid
+    storeSetPredEntry.ssitStrict := fromRename(i).bits.loadWaitStrict
+    storeSetPredEntry.lfstShouldWait := io.lfst.resp(i).bits.shouldWait
+    storeSetPredEntry.lfstNotIssuedStoreGt1 := io.lfst.resp(i).bits.perfNotIssuedStoreGt1
+    storeSetPredEntry.finalLoadWaitBit := fromRenameUpdate(i).bits.loadWaitBit
+    storeSetPredEntry.finalLoadWaitStrict := fromRenameUpdate(i).bits.loadWaitStrict
+
+    storeSetPredTable.log(
+      data = storeSetPredEntry,
+      en = fromRename(i).fire && updatedUop(i).storeSetHit,
+      site = s"Dispatch$storeSetPredHartId",
+      clock = clock,
+      reset = reset
+    )
+  }
+
   // store set perf count
   XSPerfAccumulate("waittable_load_wait", PopCount((0 until RenameWidth).map(i =>
     fromRename(i).fire && fromRename(i).bits.loadWaitBit && !isStore(i) && isLs(i)
@@ -796,7 +825,8 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     fromRename(i).fire && fromRenameUpdate(i).bits.loadWaitBit && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_load_strict_wait", PopCount((0 until RenameWidth).map(i =>
-    fromRename(i).fire && fromRenameUpdate(i).bits.loadWaitBit && updatedUop(i).loadWaitStrict && !isStore(i) && isLs(i)
+    fromRename(i).fire && fromRenameUpdate(i).bits.loadWaitBit &&
+      fromRenameUpdate(i).bits.loadWaitStrict && !isStore(i) && isLs(i)
   )))
   XSPerfAccumulate("storeset_store_wait", PopCount((0 until RenameWidth).map(i =>
     fromRename(i).fire && fromRenameUpdate(i).bits.loadWaitBit && isStore(i)

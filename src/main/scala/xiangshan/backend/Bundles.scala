@@ -1191,7 +1191,7 @@ object Bundles {
       uop.v0Wen          := this.v0Wen.getOrElse(false.B)
       uop.vlWen          := this.vlWen.getOrElse(false.B)
       uop.flushPipe      := this.flushPipe.getOrElse(false.B)
-      uop.pc             := this.pc.getOrElse(0.U) + (this.ftqOffset.getOrElse(0.U) << instOffsetBits)
+      uop.pc             := this.pc.getOrElse(0.U)
       uop.loadWaitBit    := this.loadWaitBit.getOrElse(false.B)
       uop.waitForRobIdx  := this.waitForRobIdx.getOrElse(0.U.asTypeOf(new RobPtr))
       uop.storeSetHit    := this.storeSetHit.getOrElse(false.B)

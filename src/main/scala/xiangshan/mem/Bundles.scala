@@ -125,6 +125,25 @@ object Bundles {
     val matchInvalid = Bool()
     val addrInvalid = Valid(new SqPtr)
     val dataInvalid = Valid(new SqPtr)
+    val perfMdpAddrValid = Bool()
+    val perfMdpAddrStrict = Bool()
+    val perfMdpAddrHit = Bool()
+    val perfWaitStoreRetired = Bool()
+  }
+
+  class PerfMdpAddr(implicit p: Parameters) extends XSBundle {
+    val loadUnitNonStrictHit = Bool()
+    val loadUnitNonStrictMiss = Bool()
+    val loadUnitStrictHit = Bool()
+    val loadUnitStrictMiss = Bool()
+    val replayNonStrictHit = Bool()
+    val replayNonStrictMiss = Bool()
+    val replayStrictHit = Bool()
+    val replayStrictMiss = Bool()
+    val waitStoreRetired = Bool()
+    val perfAtRobHead = Bool()
+    val perfAtLqHead = Bool()
+    val perfLqFull = Bool()
   }
 
   class UncacheForwardResp(implicit p: Parameters) extends SbufferForwardResp // ?

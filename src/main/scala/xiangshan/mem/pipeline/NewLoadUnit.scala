@@ -30,6 +30,7 @@ import xiangshan.backend.fu.fpu.FPU
 import xiangshan.backend.ctrlblock.{DebugLsInfoBundle, LsTopdownInfo}
 import xiangshan.backend.fu.NewCSR._
 import xiangshan.backend.exu.ExeUnitParams
+import xiangshan.backend.rob.RobPtr
 import xiangshan.mem.Bundles._
 import xiangshan.mem.LoadReplayCauses._
 import xiangshan.mem.LoadStage._
@@ -601,11 +602,11 @@ class LoadUnitS1(param: ExeUnitParams)(
   val redirectNextNext = Wire(redirect.cloneType)
   redirectNextNext.valid := GatedValidRegNext(redirectNext.valid)
   redirectNextNext.bits := RegEnable(redirectNext.bits, redirectNext.valid)
-  
+
   val isUnalignTail = LoadEntrance.isUnalignTail(entrance)
 
   val kill = !pipeIn.valid || io.kill || isSwInstrPrefetch ||
-             robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) || 
+             robIdx.needFlush(redirect) || robIdx.needFlush(redirectNext) ||
              (robIdx.needFlush(redirectNextNext) && isUnalignTail)
 
   /**
@@ -733,6 +734,7 @@ class LoadUnitS1(param: ExeUnitParams)(
   stageInfo.cause.get := 0.U.asTypeOf(stageInfo.cause.get)
   stageInfo.cause.get(LoadReplayCauses.C_NK) := nuke
   stageInfo.fastReplayNukeFirst.get := fastReplayNukeFirst
+  stageInfo.perfIsCmaReplay.get := LoadEntrance.isReplay(entrance) && in.cause.get(LoadReplayCauses.C_MA)
   // update trigger info
   stageInfo.vecVaddrOffset.get := vecVaddrOffset
   stageInfo.vecTriggerMask.get := vecTriggerMask
@@ -884,6 +886,7 @@ class LoadUnitS2(param: ExeUnitParams)(
   val isMMIOReplay = in.isMMIOReplay()
   val isNCReplay = in.isNCReplay()
   val isUncacheReplay = in.isUncacheReplay()
+  val perfIsCmaReplay = in.perfIsCmaReplay.get
   val isPrefetch = accessType.isPrefetch()
   val isHwPrefetch = accessType.isHwPrefetch()
   val isSwPrefetch = accessType.isSwPrefetch()
@@ -1138,6 +1141,11 @@ class LoadUnitS2(param: ExeUnitParams)(
   stageInfo.addrInvalidSqIdx.get := sqAddrInvalidSqIdx
   stageInfo.tlbId.get := io.tlbHint.id
   stageInfo.tlbFull.get := io.tlbHint.full
+  stageInfo.perfMdpAddrValid.get := io.sqForwardResp.valid && io.sqForwardResp.bits.perfMdpAddrValid
+  stageInfo.perfMdpAddrStrict.get := io.sqForwardResp.bits.perfMdpAddrStrict
+  stageInfo.perfMdpAddrHit.get := io.sqForwardResp.bits.perfMdpAddrHit
+  stageInfo.perfWaitStoreRetired.get := io.sqForwardResp.valid && io.sqForwardResp.bits.perfWaitStoreRetired
+  stageInfo.perfIsCmaReplay.get := perfIsCmaReplay
   // Pre-process for s3
   stageInfo.troubleMaker.get := troubleMaker
   stageInfo.shouldFastReplay.get := in.shouldFastReplay.get || fastReplay && !exception
@@ -1268,6 +1276,11 @@ class LoadUnitS3(param: ExeUnitParams)(
 
     // Load cancel
     val cancel = Output(Bool())
+
+    val perfRobHeadPtr = Input(new RobPtr)
+    val perfLqHeadPtr = Input(new LqPtr)
+    val perfLqFull = Input(Bool())
+    val perfMdpAddr = Output(new PerfMdpAddr)
 
     // CSR control signals
     val csrCtrl = Flipped(new CustomCSRCtrlIO)
@@ -1505,6 +1518,68 @@ class LoadUnitS3(param: ExeUnitParams)(
   lqWrite.rep_info.tlb_id := in.tlbId.get
   lqWrite.rep_info.tlb_full := in.tlbFull.get
 
+  val perfIsReplayExec = LoadEntrance.isReplay(entrance) || s4HeadIsReplay && s4HeadValid
+  val perfMdpAddrValid = Mux(s4HeadValid, s4Head.perfMdpAddrValid.get, in.perfMdpAddrValid.get)
+  val perfMdpAddrStrict = Mux(s4HeadValid, s4Head.perfMdpAddrStrict.get, in.perfMdpAddrStrict.get)
+  val perfMdpAddrHit = Mux(s4HeadValid, s4Head.perfMdpAddrHit.get, in.perfMdpAddrHit.get)
+  val perfWaitStoreRetired = Mux(s4HeadValid, s4Head.perfWaitStoreRetired.get, in.perfWaitStoreRetired.get)
+  val perfIsCmaReplay = Mux(s4HeadValid, s4Head.perfIsCmaReplay.get, in.perfIsCmaReplay.get)
+  val perfMdpUop = Mux(s4HeadValid, s4Head.uop, uop)
+  val perfMdpAddrCanCount = lqWriteValid && !lqWriteNeedReplay
+  val perfMdpAddrNonStrict = !perfMdpAddrStrict
+  val perfMdpAddrMiss = !perfMdpAddrHit
+  val perfLoadUnitMdpAddrCanCount = perfMdpAddrCanCount && !perfIsReplayExec && perfMdpAddrValid
+  val perfReplayMdpAddrCanCount = perfMdpAddrCanCount && perfIsReplayExec && perfIsCmaReplay
+  val perfWaitStoreRetiredCanCount = perfMdpAddrCanCount && perfWaitStoreRetired &&
+    (!perfIsReplayExec || perfIsCmaReplay)
+  val perfMdpAddr = Wire(new PerfMdpAddr)
+  perfMdpAddr.loadUnitNonStrictHit := perfLoadUnitMdpAddrCanCount && perfMdpAddrNonStrict && perfMdpAddrHit
+  perfMdpAddr.loadUnitNonStrictMiss := perfLoadUnitMdpAddrCanCount && perfMdpAddrNonStrict && perfMdpAddrMiss
+  perfMdpAddr.loadUnitStrictHit := perfLoadUnitMdpAddrCanCount && perfMdpAddrStrict && perfMdpAddrHit
+  perfMdpAddr.loadUnitStrictMiss := perfLoadUnitMdpAddrCanCount && perfMdpAddrStrict && perfMdpAddrMiss
+  perfMdpAddr.replayNonStrictHit := perfReplayMdpAddrCanCount && perfMdpAddrNonStrict && perfMdpAddrHit
+  perfMdpAddr.replayNonStrictMiss := perfReplayMdpAddrCanCount && perfMdpAddrNonStrict && perfMdpAddrMiss
+  perfMdpAddr.replayStrictHit := perfReplayMdpAddrCanCount && perfMdpAddrStrict && perfMdpAddrHit
+  perfMdpAddr.replayStrictMiss := perfReplayMdpAddrCanCount && perfMdpAddrStrict && perfMdpAddrMiss
+  perfMdpAddr.waitStoreRetired := perfWaitStoreRetiredCanCount
+  perfMdpAddr.perfAtRobHead := perfMdpUop.robIdx === io.perfRobHeadPtr
+  perfMdpAddr.perfAtLqHead := perfMdpUop.lqIdx === io.perfLqHeadPtr
+  perfMdpAddr.perfLqFull := io.perfLqFull
+
+  // StoreSet ChiselDB trace
+  val storeSetLoadUnitCheckHartId = p(XSCoreParamsKey).HartId
+  val storeSetLoadUnitCheckTable = ChiselDB.createTable(
+    s"StoreSetLoadUnitCheckDB$storeSetLoadUnitCheckHartId",
+    new StoreSetLoadUnitCheckDBEntry,
+    basicDB = false
+  )
+  val storeSetLoadUnitCheckEntry = Wire(new StoreSetLoadUnitCheckDBEntry)
+  val storeSetLoadUnitCheckUop = Mux(s4HeadValid, s4Head.uop, uop)
+  val storeSetLoadUnitCheckAddrInvalidSqIdx = Mux(s4HeadValid, s4Head.addrInvalidSqIdx.get, in.addrInvalidSqIdx.get)
+  val storeSetLoadUnitCheckStoreSqIdxValid = lqWriteCause(LoadReplayCauses.C_MA)
+  val storeSetLoadUnitCheckFoldPc =
+    XORFold(storeSetLoadUnitCheckUop.pc(VAddrBits - 1, 1), MemPredPCWidth)
+  storeSetLoadUnitCheckEntry.timeCnt := GTimer()
+  storeSetLoadUnitCheckEntry.robIdx := storeSetLoadUnitCheckUop.robIdx.value
+  storeSetLoadUnitCheckEntry.foldPc := storeSetLoadUnitCheckFoldPc
+  storeSetLoadUnitCheckEntry.ssid := storeSetLoadUnitCheckUop.ssid
+  storeSetLoadUnitCheckEntry.loadSqIdx := storeSetLoadUnitCheckUop.sqIdx.value
+  storeSetLoadUnitCheckEntry.storeSqIdx := storeSetLoadUnitCheckAddrInvalidSqIdx.value
+  storeSetLoadUnitCheckEntry.loadWaitBit := storeSetLoadUnitCheckUop.loadWaitBit
+  storeSetLoadUnitCheckEntry.loadWaitStrict := storeSetLoadUnitCheckUop.loadWaitStrict
+  storeSetLoadUnitCheckEntry.mdpAddrValid := perfMdpAddrValid
+  storeSetLoadUnitCheckEntry.mdpAddrStrict := perfMdpAddrStrict
+  storeSetLoadUnitCheckEntry.mdpAddrHit := perfMdpAddrHit
+  storeSetLoadUnitCheckEntry.storeSqIdxValid := storeSetLoadUnitCheckStoreSqIdxValid
+  storeSetLoadUnitCheckTable.log(
+    data = storeSetLoadUnitCheckEntry,
+    en = lqWriteValid &&
+      storeSetLoadUnitCheckUop.storeSetHit && storeSetLoadUnitCheckUop.loadWaitBit,
+    site = s"${param.name}_StoreSetLoadUnitCheck$storeSetLoadUnitCheckHartId",
+    clock = clock,
+    reset = reset
+  )
+
   // Writeback to VLMergeBuffer
   val vecldoutValid = pipeIn.valid && !kill && shouldWriteback && isVector && endPipe
   val vecldout = Wire(new VecPipelineFeedbackIO(isVStore = false))
@@ -1603,6 +1678,7 @@ class LoadUnitS3(param: ExeUnitParams)(
   io.exceptionInfo.bits := exceptionInfo
 
   io.cancel := cancel
+  io.perfMdpAddr := perfMdpAddr
 
   io.debugInfo.isReplayFast := pipeIn.valid && !kill && doFastReplay
   io.debugInfo.isReplaySlow := lqWriteValid && cause.asUInt.orR
@@ -1825,6 +1901,10 @@ class LoadUnitIO(val param: ExeUnitParams)(implicit p: Parameters) extends XSBun
   // IQ wakeup and load cancel
   val wakeup = ValidIO(new MemWakeUpBundle)
   val cancel = Output(Bool())
+  val perfRobHeadPtr = Input(new RobPtr)
+  val perfLqHeadPtr = Input(new LqPtr)
+  val perfLqFull = Input(Bool())
+  val perfMdpAddr = Output(new PerfMdpAddr)
   // Exception info
   val exceptionInfo = ValidIO(new MemExceptionInfo)
   // Data forwarding and bypass
@@ -1968,6 +2048,10 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   io.rawNukeQuery.revokeLastLastCycle := s3.io.revokeLastLastCycle
   io.rollback := s3.io.rollback
   io.cancel := s3.io.cancel
+  s3.io.perfRobHeadPtr := io.perfRobHeadPtr
+  s3.io.perfLqHeadPtr := io.perfLqHeadPtr
+  s3.io.perfLqFull := io.perfLqFull
+  io.perfMdpAddr := s3.io.perfMdpAddr
   io.exceptionInfo := s3.io.exceptionInfo
   s3.io.csrCtrl := io.csrCtrl
 
