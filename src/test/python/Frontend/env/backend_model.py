@@ -4419,9 +4419,9 @@ class BackendModel:
         self._clear_stale_auxiliary_states()
         self._update_ftq_start_pc_cache(observation)
         self._watchdog(observation)
-        redirect_payload = self._ready_redirect_for_cycle()
         if self.observe_if is not None:
             self._sample_cfvec()
+        redirect_payload = self._ready_redirect_for_cycle()
         resolve_entries = self._ready_resolves_for_cycle()
         self._plan_instruction_commits_for_cycle()
         commit_entry = self._plan_commit_entry_for_cycle(apply=False)

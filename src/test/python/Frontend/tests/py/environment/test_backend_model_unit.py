@@ -167,6 +167,37 @@ def test_model_redirect_samples_t_then_skips_cfvec_from_observed_dut_redirect() 
     assert [entry.pc for entry in model._cfvec_queue] == [0x1004, 0x2000]
 
 
+def test_redirect_flush_samples_current_cfvec_before_arming_recovery() -> None:
+    model = BackendModel()
+    interface = _ObserveIf()
+    model.observe_if = interface
+    model.current_cycle = 10
+    model.pending_events.append(
+        BackendEvent(
+            kind="redirect",
+            ready_cycle=10,
+            payload={
+                "target_pc": 0x2000,
+                "reason": "unit_redirect",
+                "pc": 0x1000,
+                "taken": 1,
+                "ftq_flag": 0,
+                "ftq_value": 0,
+                "ftq_offset": 0,
+                "is_rvc": 0,
+                "flush_on_drive": True,
+            },
+        )
+    )
+    _set_first_cfvec(interface, 0x1004)
+
+    actions = model.plan_cycle_actions()
+
+    assert actions.redirect_payload is not None
+    assert [entry.pc for entry in model._cfvec_queue] == [0x1004]
+    assert model._current_recovery_target_pc() == 0x2000
+
+
 def test_observed_dut_redirect_extends_cfvec_skip_from_observed_cycle() -> None:
     model = BackendModel()
     model._skip_cfvec_until_cycle = 11
