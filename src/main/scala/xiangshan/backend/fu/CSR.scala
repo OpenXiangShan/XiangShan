@@ -39,7 +39,7 @@ import system.HasSoCParameter
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 
 class FpuCsrIO extends Bundle {
-  val fflags = Output(Vec(5, Valid(Bool())))
+  val fflags = Output(Valid(UInt(5.W)))
   val isIllegal = Output(Bool())
   val dirty_fs = Output(Bool())
   val frm = Input(UInt(3.W))
