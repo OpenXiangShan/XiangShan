@@ -41,6 +41,7 @@ import xiangshan.frontend.icache.ICacheParameters
 import xiangshan.frontend.ibuffer.IBufferParameters
 import freechips.rocketchip.devices.debug._
 import xscache.openLLC.OpenLLCParam
+import zhujiang.ZJParameters
 import freechips.rocketchip.diplomacy._
 import xiangshan.backend.regfile._
 import xiangshan.cache.DCacheParameters
@@ -49,6 +50,19 @@ import device.EnableJtag
 import xscache.coupledL2._
 import xscache.coupledL2.prefetch._
 import xscache.common.DirtyField
+
+object LLCType extends Enumeration {
+  val OpenLLC, ZhuJiang = Value
+}
+
+private[top] object CacheSizeParser {
+  def toBytes(size: String): Int = size.toUpperCase.replace(" ", "") match {
+    case s"${k}KB" => k.trim.toInt * 1024
+    case s"${m}MB" => (m.trim.toDouble * 1024 * 1024).toInt
+    case s"${g}GB" => (g.trim.toDouble * 1024 * 1024 * 1024).toInt
+    case bytes => bytes.trim.toInt
+  }
+}
 
 class BaseConfig(n: Int) extends Config((site, here, up) => {
   case XLen => 64
@@ -353,11 +367,8 @@ case class L2CacheConfig
 
 case class OpenLLCConfig(size: String, ways: Int = 8, banks: Int = 1) extends Config((site, here, up) => {
   case SoCParamsKey =>
-    val nKB = size.toUpperCase() match {
-      case s"${k}KB" => k.trim().toInt
-      case s"${m}MB" => (m.trim().toDouble * 1024).toInt
-    }
-    val sets = nKB * 1024 / banks / ways / 64
+    val sizeInBytes = CacheSizeParser.toBytes(size)
+    val sets = sizeInBytes / banks / ways / 64
     val tiles = site(XSTileKey)
     val clientDirBytes = tiles.map { t =>
       t.L2NBanks * t.L2CacheParamsOpt.map(_.toCacheParams.capacity).getOrElse(0)
@@ -381,6 +392,33 @@ case class OpenLLCConfig(size: String, ways: Int = 8, banks: Int = 1) extends Co
         elaboratedTopDown = !site(DebugOptionsKey).FPGAPlatform
       ))
     )
+})
+
+case class LLCConfig(llc: String) extends Config((site, here, up) => {
+  case SoCParamsKey =>
+    val llcType = LLCType.withName(llc)
+    val soc = up(SoCParamsKey).copy(LLC = llcType)
+    if (llcType == LLCType.ZhuJiang) {
+      soc.copy(EnableCHIAsyncBridge = None)
+    } else {
+      soc
+    }
+  case XSTileKey if LLCType.withName(llc) == LLCType.ZhuJiang =>
+    up(XSTileKey).map { tile =>
+      tile.copy(L2CacheParamsOpt = tile.L2CacheParamsOpt.map(_.copy(
+        dataCheck = None,
+        enablePoison = false
+      )))
+    }
+})
+
+case class ZhuJiangConfig(size: String, ways: Int = 16) extends Config((site, here, up) => {
+  case SoCParamsKey =>
+    val soc = up(SoCParamsKey)
+    soc.copy(ZhuJiangParams = soc.ZhuJiangParams.copy(
+      cacheSizeInB = CacheSizeParser.toBytes(size),
+      cacheWays = ways
+    ))
 })
 
 class WithL3DebugConfig extends Config(
@@ -533,6 +571,7 @@ class FuzzConfig(dummy: Int = 0) extends Config(
 
 class DefaultConfig(n: Int = 1) extends Config(
   OpenLLCConfig("16MB", ways = 16, banks = 4)
+    ++ ZhuJiangConfig("16MB", ways = 16)
     ++ L2CacheConfig("2MB", inclusive = true, banks = 4, tp = false)
     ++ WithNKBL1D(64, ways = 4, numMemChannels = 2)
     ++ new BaseConfig(n)
