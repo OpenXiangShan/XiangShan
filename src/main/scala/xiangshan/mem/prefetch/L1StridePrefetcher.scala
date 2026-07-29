@@ -144,7 +144,7 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     val confidence = Input(UInt(1.W))
     val train_req = Flipped(DecoupledIO(new TrainReqBundle))
     val l1_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
-    val l2_l3_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
+    val l2_prefetch_req = ValidIO(new StreamPrefetchReqBundle)
     // query Stream component to see if a stream pattern has already been detected
     val stream_lookup_req  = ValidIO(UInt(VAddrBits.W))
     val stream_lookup_resp = Input(Bool())
@@ -240,7 +240,6 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     vaddr = s2_l1_pf_vaddr,
     width = STRIDE_WIDTH_BLOCKS,
     decr_mode = s2_decr_mode,
-    sink = SINK_L1,
     source = L1_HW_PREFETCH_STRIDE,
     confidence = io.confidence,
     // TODO: add stride debug db, not useful for now
@@ -252,7 +251,6 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
     vaddr = s2_l2_pf_vaddr,
     width = STRIDE_WIDTH_BLOCKS,
     decr_mode = s2_decr_mode,
-    sink = SINK_L2,
     source = L1_HW_PREFETCH_STRIDE,
     confidence = io.confidence,
     // TODO: add stride debug db, not useful for now
@@ -271,10 +269,10 @@ class StrideMetaArray(implicit p: Parameters) extends XSModule with HasStridePre
 
   io.l1_prefetch_req.valid := s3_valid && io.enable
   io.l1_prefetch_req.bits := s3_l1_pf_req_bits
-  io.l2_l3_prefetch_req.valid := s4_valid && io.enable
-  io.l2_l3_prefetch_req.bits := s4_l2_pf_req_bits
+  io.l2_prefetch_req.valid := s4_valid && io.enable
+  io.l2_prefetch_req.bits := s4_l2_pf_req_bits
 
-  XSPerfAccumulate("pf_valid", PopCount(Seq(io.l1_prefetch_req.valid, io.l2_l3_prefetch_req.valid)))
+  XSPerfAccumulate("pf_valid", PopCount(Seq(io.l1_prefetch_req.valid, io.l2_prefetch_req.valid)))
   XSPerfAccumulate("l1_pf_valid", s3_valid)
   XSPerfAccumulate("l2_pf_valid", s4_valid)
   XSPerfAccumulate("detect_stream", io.stream_lookup_resp)

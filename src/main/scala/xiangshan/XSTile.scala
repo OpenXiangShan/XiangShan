@@ -79,6 +79,10 @@ class XSTile()(implicit p: Parameters) extends LazyModule
         println("Connecting L1 prefetcher to L2!")
         recv := memBlock.l2_pf_sender_opt.get
       })
+      l2.l3_pf_recv_node.foreach(recv => {
+        println("Connecting L1 prefetcher L3 requests to L2!")
+        recv := memBlock.l3_pf_sender_opt.get
+      })
     case None =>
   }
 
