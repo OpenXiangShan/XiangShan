@@ -82,7 +82,7 @@ case class SoCParameters
   EnableICacheCtrl: Boolean = true,
   ICacheCtrlRange: AddressSet = AddressSet(0x38022080L, 0x7f),
   PLICRange: AddressSet = AddressSet(0x3c000000L, PLICConsts.size(PLICConsts.maxMaxHarts) - 1),
-  APLICRange: AddressSet = AddressSet(0x31100000L, 0xffff),
+  APLICRange: AddressSet = AddressSet(0x31100000L, 0x3ffff),
   PLLRange: AddressSet = AddressSet(0x3a000000L, 0xfff),
   UARTLiteForDTS: Boolean = true, // should be false in SimMMIO
   extIntrs: Int = 64,
@@ -112,7 +112,7 @@ case class SoCParameters
   SeperateBusRanges: Seq[AddressSet] = Seq(),
   IMSICBusType: device.IMSICBusType.Value = device.IMSICBusType.AXI,
   IMSICParams: aia.IMSICParams = aia.IMSICParams(
-    imsicIntSrcWidth = 9,
+    imsicIntSrcWidth = 8,
     mAddr = 0x3A800000,
     sgAddr = 0x3B000000,
     geilen = 7,
@@ -123,8 +123,11 @@ case class SoCParameters
   ),
   APLICParams: APLICParams = aia.APLICParams(
     aplicIntSrcWidth = 6,
-    imsicIntSrcWidth = 9,
-    baseAddr = 0x31100000L,
+    imsicIntSrcWidth = 8,
+    mDomainBaseAddr = 0x31100000L,
+    sDomainBaseAddr = 0x31120000L,
+    mDomainMemWidth = 15,
+    sDomainMemWidth = 15,
     mBaseAddr = 0x3A800000L,
     sgBaseAddr = 0x3B000000L,
     membersNum = 64,
