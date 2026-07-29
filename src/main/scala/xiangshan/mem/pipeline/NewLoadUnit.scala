@@ -67,7 +67,7 @@ class LoadUnitS0(param: ExeUnitParams)(
     val is128Req = Bool()
     val replacementUpdated = Bool()
     val pfSource = Output(UInt(L1PfSourceBits.W))
-    val ntlSource = Output(Valid(NtlType()))
+    val ntlSource = Output(Bool())
 
     /**
       * Data forward request, including:
@@ -457,11 +457,7 @@ class LoadUnitS0(param: ExeUnitParams)(
   io.is128Req := readWholeBank
   io.replacementUpdated := DontCare
   io.pfSource := Mux(isHwPrefetch, io.prefetchReq.bits.pf_source.value, L1_HW_PREFETCH_NULL)
-  val dcacheNtl = Wire(Valid(NtlType()))
-  val ntlIgnored = NtlType.isNtlIgnored(uop.fuType, uop.fuOpType)
-  dcacheNtl.valid := NtlType.isDcacheNtl(uop.ntl) && !ntlIgnored
-  dcacheNtl.bits := uop.ntl.bits
-  io.ntlSource := dcacheNtl
+  io.ntlSource := uop.ntl
 
   io.sqSbForwardReq.valid := sink.valid
   io.sqSbForwardReq.bits := storeForwardReq

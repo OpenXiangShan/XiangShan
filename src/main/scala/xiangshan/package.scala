@@ -728,12 +728,17 @@ package object xiangshan {
     def apply(rs2: UInt): UInt = Mux(rs2(2, 0) === 5.U, all,
                                  Mux(rs2(2, 0) === 4.U, s1,
                                  Mux(rs2(2, 0) === 3.U, pall, p1)))
+
     def isDcacheNtl(ntl: Valid[UInt]): Bool =
       ntl.valid && (ntl.bits === p1 || ntl.bits === pall || ntl.bits === all)
 
     // Currently, CMO and atomics ignore NTL for simplicity.
     def isNtlIgnored(fuType: UInt, fuOpType: UInt): Bool =
       FuType.isAMO(fuType) || LSUOpType.isCboAll(fuOpType)
+
+    // Compress to 1-bit DCache NTL; currently only DCache NTL is supported.
+    def toDcacheNtl(ntl: Valid[UInt], fuType: UInt, fuOpType: UInt): Bool =
+      isDcacheNtl(ntl) && !isNtlIgnored(fuType, fuOpType)
   }
 
   object LSUOpType {

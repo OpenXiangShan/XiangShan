@@ -452,7 +452,7 @@ class DCacheLineReq(implicit p: Parameters) extends DCacheBundle
   val data   = UInt((cfg.blockBytes * 8).W)
   val mask   = UInt(cfg.blockBytes.W)
   val id     = UInt(reqIdWidth.W)
-  val ntl    = Valid(NtlType())
+  val ntl    = Bool()
   def dump(cond: Bool) = {
     XSDebug(cond, "DCacheLineReq: cmd: %x addr: %x data: %x mask: %x id: %d\n",
       cmd, addr, data, mask, id)
@@ -469,7 +469,7 @@ class DCacheWordReqWithVaddrAndPfFlag(implicit p: Parameters) extends DCacheWord
   val prefetch = Bool()
   val vecValid = Bool()
   val sqNeedDeq = Bool()
-  val ntl = Valid(NtlType())
+  val ntl = Bool()
 
   def toDCacheWordReqWithVaddr() = {
     val res = Wire(new DCacheWordReqWithVaddr)
@@ -691,7 +691,7 @@ class DCacheLoadIO(implicit p: Parameters) extends DCacheWordIO
   // cycle 0: prefetch source bits
   val pf_source = Output(UInt(L1PfSourceBits.W))
   // cycle 0: ntl indicator
-  val ntl = Output(Valid(NtlType()))
+  val ntl = Output(Bool())
   // cycle0: load microop
  // val s0_uop = Output(new MicroOp)
   // cycle 0: virtual address: req.addr

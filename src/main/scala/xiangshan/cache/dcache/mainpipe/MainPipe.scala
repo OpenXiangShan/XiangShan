@@ -26,7 +26,7 @@ import org.chipsalliance.cde.config.Parameters
 import utility._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
-import xiangshan.{L1CacheErrorInfo, NtlType, XSCoreParamsKey}
+import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 import xiangshan.mem.L1PrefetchReq
 
 class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
@@ -100,7 +100,7 @@ class MainPipeReq(implicit p: Parameters) extends DCacheBundle {
     req.error := false.B
     req.id := store.id
     req.miss_fail_cause_evict_btot := false.B
-    req.isNtl := NtlType.isDcacheNtl(store.ntl)
+    req.isNtl := store.ntl
     req
   }
 

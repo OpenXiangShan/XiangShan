@@ -125,7 +125,7 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val cboType                  = CboType()
   val prefetch                 = Bool() //TODO: need it ?
   val isHyper                  = Bool()
-  val ntl                      = Valid(NtlType())
+  val ntl                      = Bool()
 
   // debug signal
   val debugPaddr               = Option.when(debugEn)(UInt((PAddrBits).W))
@@ -175,7 +175,7 @@ class WriteToSbufferReqEntry(implicit p: Parameters) extends MemBlockBundle {
   val vaddr        = UInt(VAddrBits.W)
   val data         = UInt(VLEN.W)
   val mask         = UInt((VLEN/8).W)
-  val ntl          = Valid(NtlType())
+  val ntl          = Bool()
   val deqPtrMove   = Bool()
 }
 
