@@ -1134,7 +1134,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   loadTrigger.io.fromCsrTrigger.tEnableVec           := io.fromCsrTrigger.tEnableVec
   loadTrigger.io.fromCsrTrigger.triggerCanRaiseBpExp := io.fromCsrTrigger.triggerCanRaiseBpExp
   loadTrigger.io.fromCsrTrigger.debugMode            := io.fromCsrTrigger.debugMode
-  loadTrigger.io.fromLoadStore.vaddr                 := s1_vaddr
+  loadTrigger.io.fromLoadStore.vaddr                 := s1_out.fullva
   loadTrigger.io.fromLoadStore.isVectorUnitStride    := s1_in.isvec && s1_in.is128bit
   loadTrigger.io.fromLoadStore.mask                  := s1_in.mask
   loadTrigger.io.isPrf.get                           := s1_prf
