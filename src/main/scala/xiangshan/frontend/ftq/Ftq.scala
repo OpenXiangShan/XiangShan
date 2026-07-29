@@ -57,7 +57,7 @@ import xiangshan.frontend.bpu.BpuTrain
 import xiangshan.frontend.bpu.BranchAttribute
 import xiangshan.frontend.bpu.BranchInfo
 import xiangshan.frontend.bpu.HalfAlignHelper
-import xiangshan.frontend.icache.ICacheCacheLineHelper
+import xiangshan.frontend.icache.ICacheDataHelper
 import xiangshan.frontend.icache.ICacheToFtqIO
 import xiangshan.frontend.icache.TwoFetchFailReason
 
@@ -67,7 +67,7 @@ class Ftq(implicit p: Parameters) extends FtqModule
     with HasCircularQueuePtrHelper
     with IfuRedirectReceiver
     with BackendRedirectReceiver
-    with ICacheCacheLineHelper {
+    with ICacheDataHelper {
 
   class FtqIO extends FtqBundle {
     val fromBpu: BpuToFtqIO = Flipped(new BpuToFtqIO)
@@ -192,8 +192,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
   }
 
   when((prediction.fire || bpuS3Redirect) && !redirect.valid) {
-    entryQueue(predictionPtr.value).startPc        := prediction.bits.startPc
-    entryQueue(predictionPtr.value).takenCfiOffset := prediction.bits.takenCfiOffset
+    entryQueue(predictionPtr.value).startPc     := prediction.bits.startPc
+    entryQueue(predictionPtr.value).taken       := prediction.bits.taken
+    entryQueue(predictionPtr.value).endPosition := prediction.bits.endPosition
   }
 
   private val s3PerfQueue = WireInit(perfQueue)
@@ -277,9 +278,8 @@ class Ftq(implicit p: Parameters) extends FtqModule
   io.toICache.toPrefetch.valid := bpuPtr(0) > pfPtr(0) && !redirect.valid
   io.toICache.toPrefetch.bits.req.zipWithIndex.foreach { case (req, i) =>
     req.startVAddr       := prefetchReq(i).startVAddr
-    req.nextLineVAddr    := req.startVAddr + blockBytes.U
+    req.nextLineVAddr    := prefetchReq(i).nextLineVAddr
     req.isCrossLine      := prefetchReq(i).isCrossLine
-    req.takenCfiOffset   := prefetchReq(i).takenCfiOffset
     req.ftqIdx           := pfPtr(i)
     req.backendException := Mux(backendExceptionPtr === pfPtr(i), backendException, ExceptionType.None)
     req.isSoftPrefetch   := false.B
@@ -308,7 +308,9 @@ class Ftq(implicit p: Parameters) extends FtqModule
     req.valid               := (if (i == 0) true.B else rawTwoFetchValid)
     req.startVAddr          := fetchReq(i).startVAddr
     req.nextLineVAddr       := fetchReq(i).nextLineVAddr
-    req.takenCfiOffset      := fetchReq(i).takenCfiOffset
+    req.taken               := fetchReq(i).taken
+    req.endPosition         := fetchReq(i).endPosition
+    req.bankSel             := fetchReq(i).bankSel
     req.ftqIdx              := fetchPtr(i)
     req.vSetIdx             := fetchReq(i).vSetIdx
     req.hasBackendException := backendException.hasException && backendExceptionPtr === fetchPtr(i)

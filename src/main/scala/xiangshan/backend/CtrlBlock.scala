@@ -237,6 +237,21 @@ class CtrlBlockImp(
   }
   memCtrl.io.memPredUpdate.valid := RegNext(mdpTrainValid) // pc is ready, 1 cycle later
 
+  // StoreSet ChiselDB trace
+  val storeSetTrainHartId = p(XSCoreParamsKey).HartId
+  val storeSetTrainTable = ChiselDB.createTable(s"StoreSetTrainDB$storeSetTrainHartId", new StoreSetTrainDBEntry, basicDB = false)
+  val storeSetTrainEntry = Wire(new StoreSetTrainDBEntry)
+  storeSetTrainEntry.timeCnt := GTimer()
+  storeSetTrainEntry.ldFoldPc := memCtrl.io.memPredUpdate.ldpc
+  storeSetTrainEntry.stFoldPc := memCtrl.io.memPredUpdate.stpc
+  storeSetTrainTable.log(
+    data = storeSetTrainEntry,
+    en = memCtrl.io.memPredUpdate.valid,
+    site = s"CtrlBlock$storeSetTrainHartId",
+    clock = clock,
+    reset = reset
+  )
+
   for ((pcMemIdx, i) <- pcMemRdIndexes("bjuPc").zipWithIndex) {
     val ren = io.toDataPath.pcToDataPathIO.fromDataPathValid(i)
     val raddr = io.toDataPath.pcToDataPathIO.fromDataPathFtqPtr(i).value

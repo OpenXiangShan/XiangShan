@@ -103,7 +103,9 @@ class FtqFetchRequest(implicit p: Parameters) extends FrontendBundle with HasICa
   val vAddr:               Vec[PrunedAddr] = Vec(PortNumber, PrunedAddr(VAddrBits))
   def startVAddr:          PrunedAddr      = vAddr(0)
   def nextLineVAddr:       PrunedAddr      = vAddr(1)
-  val takenCfiOffset:      Valid[UInt]     = Valid(UInt(CfiPositionWidth.W))
+  val taken:               Bool            = Bool()
+  val endPosition:         UInt            = UInt(CfiPositionWidth.W)
+  val bankSel:             Vec[UInt]       = Vec(PortNumber, UInt(DataBanks.W))
   val ftqIdx:              FtqPtr          = new FtqPtr
   val vSetIdx:             Vec[UInt]       = Vec(PortNumber, UInt(idxBits.W))
   val hasBackendException: Bool            = Bool()
