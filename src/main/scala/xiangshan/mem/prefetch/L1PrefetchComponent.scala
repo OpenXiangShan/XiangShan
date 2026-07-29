@@ -704,7 +704,12 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   val s3_tlb_resp_valid = RegNext(s2_tlb_resp_valid)
   val s3_tlb_resp = RegEnable(s2_tlb_resp, s2_tlb_resp_valid)
   val s3_tlb_update_index = RegEnable(s2_tlb_update_index, s2_tlb_resp_valid)
-  val s3_tlb_evict = RegNext(s2_tlb_evict)
+  val s3_tlb_resp_evict = RegNext(s2_tlb_evict)
+  val s3_l1_tlb_evict = s1_l1_alloc && (s1_l1_index === s3_tlb_update_index)
+  val s3_l2_tlb_evict = s1_l2_alloc && ((s1_l2_index + MLP_L2_OFFSET.U) === s3_tlb_update_index)
+  val s3_l3_tlb_evict = s1_l3_alloc && ((s1_l3_index + MLP_L3_OFFSET.U) === s3_tlb_update_index)
+  val s3_alloc_evict = s3_l1_tlb_evict || s3_l2_tlb_evict || s3_l3_tlb_evict
+  val s3_tlb_evict = s3_tlb_resp_evict || s3_alloc_evict
   val s3_pmp_resp = io.pmp_resp
   val s3_update_valid = s3_tlb_resp_valid && !s3_tlb_evict && !s3_tlb_resp.miss
   val s3_drop = s3_update_valid && (
@@ -760,6 +765,7 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
 
   XSPerfAccumulate("s3_tlb_resp_valid", s3_tlb_resp_valid)
   XSPerfAccumulate("s3_tlb_resp_evict", s3_tlb_resp_valid && s3_tlb_evict)
+  XSPerfAccumulate("s3_tlb_resp_alloc_evict", s3_tlb_resp_valid && s3_alloc_evict)
   XSPerfAccumulate("s3_tlb_resp_miss", s3_tlb_resp_valid && !s3_tlb_evict && s3_tlb_resp.miss)
   XSPerfAccumulate("s3_tlb_resp_updated", s3_update_valid)
   XSPerfAccumulate("s3_tlb_resp_page_fault", s3_update_valid && s3_tlb_resp.excp.head.pf.ld)
@@ -819,6 +825,10 @@ class MutiLevelPrefetchFilter(implicit p: Parameters) extends XSModule with HasL
   val in_pmem = PmemRanges.map(_.cover(s1_pf_bits.req.paddr)).reduce(_ || _)
   io.l1_req.valid := s1_pf_valid && in_pmem && io.enable
   io.l1_req.bits := s1_pf_bits.req
+  assert(
+    !io.l1_req.valid || io.l1_req.bits.paddr(PAGE_OFFSET - 1, 0) === io.l1_req.bits.vaddr(PAGE_OFFSET - 1, 0),
+    "L1 prefetch request paddr/vaddr page offset mismatch"
+  )
 
   l1_pf_req_arb.io.out.ready := s1_pf_can_go || !s1_pf_valid
 
