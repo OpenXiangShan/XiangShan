@@ -920,7 +920,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
   // Each queryMQ request gets independent judgment
   for (i <- 0 until reqNum) {
     val _signals = computeMatchSignals(req, io.queryME(i).req.bits)
-    io.secondary_ready(i) := should_merge(_signals, io.queryME(i).req.bits) && !io.miss_req_pipe_reg.cancel
+    io.secondary_ready(i) := should_merge(_signals, io.queryME(i).req.bits) && !io.miss_req_pipe_reg.cancel && req_valid
     io.secondary_reject(i) := should_reject(_signals, io.queryME(i).req.bits)
   }
 
