@@ -106,7 +106,7 @@ class SQDataEntryBundle(implicit p: Parameters) extends MemBlockBundle {
   val cboType                  = CboType()
   val prefetch                 = Bool() //TODO: need it ?
   val isHyper                  = Bool()
-  val ntl                      = Valid(NtlType())
+  val ntl                      = Bool()
 
   // debug signal
   val debugPaddr               = Option.when(debugEn)(UInt((PAddrBits).W))
@@ -158,7 +158,7 @@ class WriteToSbufferReqEntry(implicit p: Parameters) extends MemBlockBundle {
   val vaddr        = UInt(VAddrBits.W)
   val data         = UInt(VLEN.W)
   val mask         = UInt((VLEN/8).W)
-  val ntl          = Valid(NtlType())
+  val ntl          = Bool()
   val deqPtrMove   = Bool()
 }
 
@@ -1587,9 +1587,7 @@ class NewStoreQueue(implicit p: Parameters) extends NewStoreQueueBase with HasPe
 
     when (entryCanEnq) {
       connectSamePort(dataEntries(i).uop, selectBits.uop) //TODO: will be remove in the future.
-      dataEntries(i).ntl := Mux(NtlType.isNtlIgnored(selectBits.uop.fuType, selectBits.uop.fuOpType),
-                                0.U.asTypeOf(Valid(NtlType())),
-                                selectBits.uop.ntl)
+      dataEntries(i).ntl := selectBits.uop.ntl
     }.elsewhen(deqCancel || needCancel(i)) {
 
     }

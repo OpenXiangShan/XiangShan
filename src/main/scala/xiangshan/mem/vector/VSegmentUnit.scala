@@ -721,8 +721,7 @@ class VSegmentUnit(val param: ExeUnitParams)(implicit p: Parameters) extends VLS
   }
   io.rdcache.replacementUpdated     := false.B
   io.rdcache.is128Req               := notCross16ByteReg
-  io.rdcache.ntl.valid              := false.B
-  io.rdcache.ntl.bits               := DontCare
+  io.rdcache.ntl                    := false.B
 
 
   /**

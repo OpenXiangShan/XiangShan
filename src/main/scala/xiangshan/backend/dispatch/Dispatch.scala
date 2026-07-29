@@ -179,6 +179,9 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     fromRenameUpdate(i).bits.srcState := 0.U.asTypeOf(fromRenameUpdate(i).bits.srcState)
     fromRenameUpdate(i).bits.srcStateVl := 0.U // dontCare this
     connectSamePort(fromRenameUpdate(i).bits, fromRename(i).bits)
+    // Currently only DCache NTL is supported. So only 1 bit is needed.
+    fromRenameUpdate(i).bits.ntl := NtlType.toDcacheNtl(
+      fromRename(i).bits.ntl, fromRename(i).bits.fuType, fromRename(i).bits.fuOpType)
     fromRenameUpdate(i).bits.debug.foreach(connectSamePort(_, fromRename(i).bits.debug.get))
     fromRenameUpdate(i).bits.ftqOffset := fromRename(i).bits.ftqLastOffset
     fromRenameUpdate(i).bits.ftqPtr := fromRename(i).bits.ftqPtr + fromRename(i).bits.crossFtq

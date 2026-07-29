@@ -361,7 +361,7 @@ object Bundles {
     val uopIdx = UopIdx()
     val lastUop = Bool()
     val isNtlHint = Bool()
-    val ntl = Valid(NtlType())
+    val ntl = Bool() // Currently only DCache NTL is supported. So only 1 bit is needed.
     // from rename
     val psrc = Vec(numSrc, UInt(PhyRegIdxWidth.W))
     val psrcVl = UInt(VlPhyRegIdxWidth.W)
@@ -422,7 +422,7 @@ object Bundles {
     val wfflags  = Option.when(params.writeFflags)(Bool())
     val uopIdx   = Option.when(params.inVfSchd)(UopIdx())
     val lastUop  = Option.when(params.inVfSchd)(Bool())
-    val ntl      = Option.when(params.isMemBlockIQ)(Valid(NtlType()))
+    val ntl      = Option.when(params.isMemBlockIQ)(Bool())
     // from rename
     val robIdx    = new RobPtr
     val psrc      = Vec(numSrc, UInt(PhyRegIdxWidth.W))
@@ -466,7 +466,7 @@ object Bundles {
     val wfflags  = Option.when(params.writeFflags)(Bool())
     val uopIdx   = Option.when(params.inVfSchd)(UopIdx())
     val lastUop  = Option.when(params.inVfSchd)(Bool())
-    val ntl      = Option.when(params.isMemBlockIQ)(Valid(NtlType()))
+    val ntl      = Option.when(params.isMemBlockIQ)(Bool())
     // from rename
     val numLsElem = Option.when(params.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
@@ -496,7 +496,7 @@ object Bundles {
     val wfflags  = Option.when(params.writeFflags)(Bool())
     val uopIdx   = Option.when(params.issueBlockParam.inVfSchd)(UopIdx())
     val lastUop  = Option.when(params.issueBlockParam.inVfSchd)(Bool())
-    val ntl      = Option.when(params.hasMemAddrFu)(Valid(NtlType()))
+    val ntl      = Option.when(params.hasMemAddrFu)(Bool())
     // from rename
     val numLsElem = Option.when(params.issueBlockParam.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(params.needRasAction)(BranchAttribute.RasAction())
@@ -591,7 +591,7 @@ object Bundles {
     val vlsInstr        = Bool()
     val wfflags         = Bool()
     val isMove          = Bool()
-    val ntl             = Valid(NtlType())
+    val ntl             = Bool() // Currently only DCache NTL is supported. So only 1 bit is needed.
     val isDropAmocasSta = Bool()
     val uopIdx          = UopIdx()
     val isVset          = Bool()
@@ -672,6 +672,8 @@ object Bundles {
     def connectRenameOutUop(source: RenameOutUop): Unit = {
       this := 0.U.asTypeOf(this)
       connectSamePort(this, source)
+      // Currently only DCache NTL is supported.
+      this.ntl := NtlType.toDcacheNtl(source.ntl, source.fuType, source.fuOpType)
       source.debug.foreach(x => {
         this.pc := x.pc
         this.debug_seqNum := x.debug_seqNum
@@ -994,7 +996,7 @@ object Bundles {
     val fpu      = Option.when(exuParams.writeFflags)(new FPUCtrlSignals)
     val vpu      = Option.when(iqParams.inVfSchd)(new VPUCtrlSignals)
     val wfflags  = Option.when(exuParams.writeFflags)(Bool())
-    val ntl        = Option.when(exuParams.hasMemAddrFu)(Valid(NtlType()))
+    val ntl        = Option.when(exuParams.hasMemAddrFu)(Bool())
     val numLsElem = Option.when(iqParams.isVecMemIQ)(NumLsElem())
     val rasAction = Option.when(exuParams.needRasAction)(BranchAttribute.RasAction())
     val storeSetHit    = Option.when(exuParams.hasLoadExu || exuParams.hasStoreAddrExu)(Bool())
@@ -1129,7 +1131,7 @@ object Bundles {
     val numLsElem      = OptionWrapper(params.hasVecLsFu, NumLsElem())
     val lqIdx = OptionWrapper(params.hasLoadFu || params.hasVecLsFu, new LqPtr)
     val sqIdx = OptionWrapper(params.hasLoadFu || params.hasStoreAddrFu || params.hasStdFu || params.hasVecLsFu, new SqPtr)
-    val ntl   = OptionWrapper(params.hasMemAddrFu, Valid(NtlType()))
+    val ntl   = OptionWrapper(params.hasMemAddrFu, Bool())
     val dataSources = Vec(params.numRegSrc, DataSource())
     val exuSources = OptionWrapper(params.isIQWakeUpSink, Vec(params.numRegSrc, ExuSource(params)))
     val loadDependency = OptionWrapper(params.needLoadDependency, Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
@@ -1211,7 +1213,7 @@ object Bundles {
       uop.isRVC          := this.isRVC.getOrElse(false.B)
       uop.rasAction      := this.rasAction.getOrElse(0.U)
       uop.numLsElem      := this.numLsElem.getOrElse(0.U)
-      uop.ntl            := this.ntl.getOrElse(0.U.asTypeOf(Valid(NtlType())))
+      uop.ntl            := this.ntl.getOrElse(false.B)
       uop
     }
   }
@@ -1286,7 +1288,7 @@ object Bundles {
     val numLsElem      = Option.when(params.hasVecLsFu)(NumLsElem())
     val lqIdx          = Option.when(params.hasLoadExu || params.hasVecLsFu)(new LqPtr)
     val sqIdx          = Option.when(params.hasLoadExu || params.hasStoreAddrFu || params.hasStdFu || params.hasVecLsFu)(new SqPtr)
-    val ntl            = Option.when(params.hasMemAddrFu)(Valid(NtlType()))
+    val ntl            = Option.when(params.hasMemAddrFu)(Bool())
     val perfDebugInfo  = Option.when(backendParams.debugEn)(new PerfDebugInfo())
     val debug_seqNum   = Option.when(backendParams.debugEn)(InstSeqNum())
   }

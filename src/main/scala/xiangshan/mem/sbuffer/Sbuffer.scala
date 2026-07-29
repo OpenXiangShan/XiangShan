@@ -214,7 +214,7 @@ class Sbuffer(implicit p: Parameters)
 
   val ptag = Reg(Vec(StoreBufferSize, UInt(PTagWidth.W)))
   val vtag = Reg(Vec(StoreBufferSize, UInt(VTagWidth.W)))
-  val ntl = Reg(Vec(StoreBufferSize, Valid(NtlType())))
+  val ntl = Reg(Vec(StoreBufferSize, Bool()))
   val debug_mask = Reg(Vec(StoreBufferSize, Vec(CacheLineWords, Vec(DataBytes, Bool()))))
   val waitInflightMask = Reg(Vec(StoreBufferSize, UInt(StoreBufferSize.W)))
   val data = dataModule.io.dataOut
@@ -424,7 +424,7 @@ class Sbuffer(implicit p: Parameters)
 
   def wordReqToBufLine( // allocate a new line in sbuffer
     req: DCacheWordReq,
-    reqNtl: Valid[UInt],
+    reqNtl: Bool,
     reqptag: UInt,
     reqvtag: UInt,
     insertIdx: UInt,
@@ -451,7 +451,7 @@ class Sbuffer(implicit p: Parameters)
 
   def mergeWordReq( // merge write req into an existing line
     req: DCacheWordReq,
-    reqNtl: Valid[UInt],
+    reqNtl: Bool,
     reqptag: UInt,
     reqvtag: UInt,
     mergeIdx: UInt,

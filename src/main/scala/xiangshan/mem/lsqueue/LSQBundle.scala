@@ -47,7 +47,7 @@ class StoreQueueEnqIO(implicit p: Parameters) extends MemBlockBundle {
     val loadWaitStrict  = Bool()
     val ssid            = UInt(SSIDWidth.W)
     val storeSetHit     = Bool() // inst has been allocated an store set
-    val ntl             = Valid(NtlType())
+    val ntl             = Bool() // Currently only DCache NTL is supported. So only 1 bit is needed.
     // debug signal
     val pc              = Option.when(debugEn)(UInt(VAddrBits.W))
   }

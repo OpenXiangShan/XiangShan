@@ -24,7 +24,7 @@ import utility._
 import xiangshan.cache.wpu._
 import xiangshan.mem.HasL1PrefetchSourceParameter
 import xiangshan.mem.prefetch._
-import xiangshan.{L1CacheErrorInfo, NtlType, XSCoreParamsKey}
+import xiangshan.{L1CacheErrorInfo, XSCoreParamsKey}
 
 class LoadPfDbBundle(implicit p: Parameters) extends DCacheBundle {
   val paddr = UInt(PAddrBits.W)
@@ -427,7 +427,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   io.miss_req.bits := DontCare
   io.miss_req.bits.source := s2_instrtype
   io.miss_req.bits.pf_source := RegNext(RegNext(io.lsu.pf_source))  // TODO: clock gate
-  io.miss_req.bits.isNtl := NtlType.isDcacheNtl(s2_ntl)
+  io.miss_req.bits.isNtl := s2_ntl
   io.miss_req.bits.cmd := s2_req.cmd
   io.miss_req.bits.addr := get_block_addr(s2_paddr)
   io.miss_req.bits.vaddr := s2_vaddr
@@ -547,7 +547,7 @@ class LoadPipe(id: Int)(implicit p: Parameters) extends DCacheModule with HasPer
   val s3_flag_error = s3_tl_error.asUInt.orR
   val s3_hit_prefetch = RegEnable(s2_hit_prefetch, s2_fire)
   val s3_ntl = RegEnable(s2_ntl, s2_fire)
-  val s3_is_dcache_ntl = NtlType.isDcacheNtl(s3_ntl)
+  val s3_is_dcache_ntl = s3_ntl
   val s3_error = s3_tag_error || s3_flag_error || s3_data_error
 
   // error_delayed signal will be used to update uop.exception 1 cycle after load writeback
