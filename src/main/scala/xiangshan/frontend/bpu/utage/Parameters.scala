@@ -48,6 +48,8 @@ trait HasMicroTageParameters extends HasBpuParameters {
   def UsefulWidth:     Int                 = utageParameters.UsefulWidth
   def BaseTableSize:   Int                 = utageParameters.BaseTableSize
   def PCHighTagStart:  Int                 = utageParameters.PCHighTagStart
+  // uTAGE receives all ABTB candidates plus the single uBTB candidate.
+  def NumUtagePredictionEntries: Int = NumAheadBtbPredictionEntries + 1
   def NumWays:         Int                 = 1
   def WayIdWidth:      Int                 = 1 max log2Ceil(NumWays)
 

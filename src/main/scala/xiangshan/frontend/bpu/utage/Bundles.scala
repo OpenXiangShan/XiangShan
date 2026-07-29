@@ -36,13 +36,13 @@ object UsefulCounter extends SaturateCounterFactory {
 class MicroTagePrediction(implicit p: Parameters) extends MicroTageBundle {
   // val ubtbHit:   Bool = Bool()
   // val ubtbTaken: Bool = Bool()
-  val takenVec: Vec[Bool] = Vec(NumAheadBtbPredictionEntries, Bool())
-  val hitVec:   Vec[Bool] = Vec(NumAheadBtbPredictionEntries, Bool())
+  val takenVec: Vec[Bool] = Vec(NumUtagePredictionEntries, Bool())
+  val hitVec:   Vec[Bool] = Vec(NumUtagePredictionEntries, Bool())
 }
 
 class MicroTageMeta(implicit p: Parameters) extends MicroTageBundle {
   val readIndex:  Vec[UInt]       = Vec(NumTables, UInt(log2Ceil(MaxNumSets).W))
-  val abtbResult: Vec[AbtbResult] = Vec(NumAheadBtbPredictionEntries, new AbtbResult)
+  val abtbResult: Vec[AbtbResult] = Vec(NumUtagePredictionEntries, new AbtbResult)
   // Separate backup for MicroTage history to help with timing.
   // We'll evaluate redundancy after the timing issue is resolved.
   val foldedPathHistForTrain: PhrAllFoldedHistories = new PhrAllFoldedHistories(AllFoldedHistoryInfo)
@@ -108,7 +108,7 @@ class MicroTageTrace(implicit p: Parameters) extends MicroTageBundle {
   val hasHitMisPredBr:  MicroTageTrainResult      = new MicroTageTrainResult
   val missHitMisPredBr: MicroTageTrainResult      = new MicroTageTrainResult
   val setIdx:           Vec[UInt]                 = Vec(NumTables, UInt(log2Ceil(MaxNumSets).W))
-  val branches:         Vec[MicroTageTrainResult] = Vec(NumAheadBtbPredictionEntries, new MicroTageTrainResult)
+  val branches:         Vec[MicroTageTrainResult] = Vec(NumUtagePredictionEntries, new MicroTageTrainResult)
 }
 
 class MicroTageEntry(implicit p: Parameters) extends MicroTageBundle {
