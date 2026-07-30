@@ -89,6 +89,7 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
   val mptOutDataReg = Reg(new MptTlbRespBundle())
   val mptOutMptOnly = RegInit(false.B)
   val mptOutReqPA   = Reg(UInt(ppnLen.W))
+  val mptEn = io.csr.mmpt.mode =/= 0.U
 
   val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed || io.csr.hgatp.changed ||
     io.csr.priv.virt_changed || (if (HasMptCheck) io.csr.mmpt.changed else false.B)
@@ -135,7 +136,7 @@ class MptOutputSwitchBox(implicit p: Parameters) extends XSModule with MPTCacheP
           nextState := s_send_l1_tlb
         }
       }.elsewhen(io.mergeArb.valid) { // normal mode, two modes are mutually exclusive
-        when(io.mergeArb.bits.fault) {
+        when(io.mergeArb.bits.fault || !mptEn) {
           io.l1TLB.valid := true.B
           when(io.l1TLB.ready) {
             io.mergeArb.ready := true.B
