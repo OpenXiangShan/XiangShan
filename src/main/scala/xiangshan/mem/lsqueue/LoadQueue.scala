@@ -205,7 +205,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
     val lqDeqPtr = Output(new LqPtr)
 
     val debugTopDown = new LoadQueueTopDownIO
-    val noUopsIssed = Input(Bool())
+    val replayAllocate = Output(Bool())
 
     val lqDeqRobIdx = Output(new RobPtr)
     val lqDeqUopIdx = Output(UopIdx())
@@ -341,7 +341,7 @@ class LoadQueue(implicit p: Parameters) extends XSModule
 
   loadQueueReplay.io.debugTopDown <> io.debugTopDown
 
-  virtualLoadQueue.io.noUopsIssued := io.noUopsIssed
+  io.replayAllocate := loadQueueReplay.io.replayAllocate
 
   val full_mask = Cat(loadQueueRAR.io.lqFull, loadQueueRAW.io.lqFull, loadQueueReplay.io.lqFull)
   XSPerfAccumulate("full_mask_000", full_mask === 0.U)

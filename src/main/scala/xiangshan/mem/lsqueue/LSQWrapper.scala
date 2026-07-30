@@ -134,7 +134,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
     val wfi = Flipped(new WfiReqBundle)
     // top-down
     val debugTopDown = new LoadQueueTopDownIO
-    val noUopsIssued = Input(Bool())
+    val replayAllocate = Output(Bool())
 
     val diffStore = Flipped(new DiffStoreIO)
   })
@@ -321,7 +321,7 @@ class LsqWrapper(implicit p: Parameters) extends XSModule with HasDCacheParamete
   }
 
   loadQueue.io.debugTopDown <> io.debugTopDown
-  loadQueue.io.noUopsIssed := io.noUopsIssued
+  io.replayAllocate := loadQueue.io.replayAllocate
 
   assert(!(loadQueue.io.uncache.resp.valid && storeQueue.io.uncache.resp.valid))
   assert(!(loadQueue.io.uncache.idResp.valid && storeQueue.io.uncache.idResp.valid))

@@ -372,6 +372,11 @@ case class XSCoreParameters
 
   def vlWidth = log2Up(VLEN) + 1
 
+  /*
+    Top-Down, ExecutionStall used
+  */
+  def fewUops = 4
+
   /**
    * the minimum element length of vector elements
    */

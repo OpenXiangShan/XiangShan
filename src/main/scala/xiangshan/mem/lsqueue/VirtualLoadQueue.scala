@@ -53,8 +53,6 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
     // to dispatch
     val lqDeq       = Output(UInt(log2Up(CommitWidth + 1).W))
     val lqCancelCnt = Output(UInt(log2Up(VirtualLoadQueueSize+1).W))
-    // for topdown
-    val noUopsIssued = Input(Bool())
 
     val lqDeqRobIdx = Output(new RobPtr)
     val lqDeqUopIdx = Output(UopIdx())
@@ -283,17 +281,7 @@ class VirtualLoadQueue(implicit p: Parameters) extends XSModule
   QueuePerf(VirtualLoadQueueSize, PopCount(vecValidVec), !allowEnqueue)
   io.lqFull := !allowEnqueue
 
-  def NLoadNotCompleted = 1
-  val validCountReg = RegNext(validCount)
-  val noUopsIssued = io.noUopsIssued
-  val stallLoad = io.noUopsIssued && (validCountReg >= NLoadNotCompleted.U)
-  val memStallAnyLoad = RegNext(stallLoad)
-
-  XSPerfAccumulate("mem_stall_anyload", memStallAnyLoad)
-
-  val perfEvents: Seq[(String, UInt)] = Seq(
-    ("MEMSTALL_ANY_LOAD", memStallAnyLoad),
-  )
+  val perfEvents: Seq[(String, UInt)] = Seq()
   generatePerfEvent()
 
   // debug info

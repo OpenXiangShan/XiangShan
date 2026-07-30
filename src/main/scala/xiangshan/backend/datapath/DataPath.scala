@@ -284,10 +284,10 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   private val vlDiffReadData: Option[UInt] =
     OptionWrapper(backendParams.basicDebugEn, Wire(UInt(VlData().dataWidth.W)))
 
-  vecDiffReadData.foreach(_ := 
+  vecDiffReadData.foreach(_ :=
     v0DiffReadData
     .get
-    .map(x => Seq(x(63, 0), x(127, 64))).flatten ++ 
+    .map(x => Seq(x(63, 0), x(127, 64))).flatten ++
     vfDiffReadData
     .get
     .map(x => Seq(x(63, 0), x(127, 64))).flatten
@@ -454,14 +454,14 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
     readPorts
   }
 
-  private val regCacheReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_)) ++ 
+  private val regCacheReadReq = fromIntIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_)) ++
                                 fromMemIQ.flatten.filter(_.bits.exuParams.numIntSrc > 0).flatMap(IssueBundle2RCReadPort(_))
   private val regCacheReadData = regCache.io.readPorts.map(_.data)
 
   println(s"[DataPath] regCache readPorts size: ${regCache.io.readPorts.size}, regCacheReadReq size: ${regCacheReadReq.size}")
   require(regCache.io.readPorts.size == regCacheReadReq.size, "reg cache's readPorts size should be equal to regCacheReadReq")
 
-  regCache.io.readPorts.zip(regCacheReadReq).foreach{ case (r, req) => 
+  regCache.io.readPorts.zip(regCacheReadReq).foreach{ case (r, req) =>
     r.ren := req.ren
     r.addr := req.addr
   }
@@ -469,11 +469,11 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   val s1_RCReadData: MixedVec[MixedVec[Vec[UInt]]] = Wire(MixedVec(toExu.map(x => MixedVec(x.map(_.bits.src.cloneType).toSeq))))
   s1_RCReadData.foreach(_.foreach(_.foreach(_ := 0.U)))
   s1_RCReadData.zip(toExu).filter(_._2.map(_.bits.params.isIntExeUnit).reduce(_ || _)).flatMap(_._1).flatten
-    .zip(regCacheReadData.take(params.getIntExuRCReadSize)).foreach{ case (s1_data, rdata) => 
+    .zip(regCacheReadData.take(params.getIntExuRCReadSize)).foreach{ case (s1_data, rdata) =>
       s1_data := rdata
     }
   s1_RCReadData.zip(toExu).filter(_._2.map(x => x.bits.params.isMemExeUnit && x.bits.params.readIntRf).reduce(_ || _)).flatMap(_._1).flatten
-    .zip(regCacheReadData.takeRight(params.getMemExuRCReadSize)).foreach{ case (s1_data, rdata) => 
+    .zip(regCacheReadData.takeRight(params.getMemExuRCReadSize)).foreach{ case (s1_data, rdata) =>
       s1_data := rdata
     }
 
@@ -655,7 +655,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
       }
   }
 
-  io.og0Cancel := og0FailedVec2.flatten.zip(params.allExuParams).map{ case (cancel, params) => 
+  io.og0Cancel := og0FailedVec2.flatten.zip(params.allExuParams).map{ case (cancel, params) =>
                     if (params.isIQWakeUpSource && params.latencyCertain && params.wakeUpFuLatancySet.contains(0)) cancel else false.B
                   }.toSeq
   io.og1Cancel := toFlattenExu.map(x => x.valid && !x.fire)
@@ -685,25 +685,25 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
           if (k == 3) {(
             Seq(None)
             :+
-            OptionWrapper(s1_v0PregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(V0RegSrcDataSet).nonEmpty, 
+            OptionWrapper(s1_v0PregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(V0RegSrcDataSet).nonEmpty,
               (SrcType.isV0(s1_srcType(i)(j)(k)) -> s1_v0PregRData(i)(j)(k)))
           )}
           else if (k == 4) {(
             Seq(None)
             :+
-            OptionWrapper(s1_vlPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(VlRegSrcDataSet).nonEmpty, 
+            OptionWrapper(s1_vlPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(VlRegSrcDataSet).nonEmpty,
               (SrcType.isVp(s1_srcType(i)(j)(k)) -> s1_vlPregRData(i)(j)(k)))
           )}
           else {(
             Seq(None)
             :+
-            OptionWrapper(s1_intPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(IntRegSrcDataSet).nonEmpty, 
+            OptionWrapper(s1_intPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(IntRegSrcDataSet).nonEmpty,
               (SrcType.isXp(s1_srcType(i)(j)(k)) -> s1_intPregRData(i)(j)(k)))
             :+
             OptionWrapper(s1_vfPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(VecRegSrcDataSet).nonEmpty,
               (SrcType.isVp(s1_srcType(i)(j)(k)) -> s1_vfPregRData(i)(j)(k)))
             :+
-            OptionWrapper(s1_fpPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(FpRegSrcDataSet).nonEmpty, 
+            OptionWrapper(s1_fpPregRData(i)(j).isDefinedAt(k) && srcDataTypeSet.intersect(FpRegSrcDataSet).nonEmpty,
               (SrcType.isFp(s1_srcType(i)(j)(k)) -> s1_fpPregRData(i)(j)(k)))
           )}
         ).filter(_.nonEmpty).map(_.get)
@@ -803,7 +803,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   XSPerfHistogram(s"VfUopAfterArb_hist", PopCount(fromVfIQ.flatten.map(_.fire)), true.B, 0, 8, 2)
 
   // datasource perf counter (after arbiter)
-  fromIQ.foreach(iq => iq.foreach{exu => 
+  fromIQ.foreach(iq => iq.foreach{exu =>
     val exuParams = exu.bits.exuParams
     if (exuParams.isIntExeUnit) {
       for (i <- 0 until 2) {
@@ -824,37 +824,41 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
   })
 
   // Top-Down
-  def FewUops = 4
-
-  val lqEmpty = io.topDownInfo.lqEmpty
-  val sqEmpty = io.topDownInfo.sqEmpty
-  val l1Miss = io.topDownInfo.l1Miss
-  val l2Miss = io.topDownInfo.l2TopMiss.l2Miss
-  val l3Miss = io.topDownInfo.l2TopMiss.l3Miss
-
-  val uopsIssued = fromIQ.flatten.map(_.fire).reduce(_ || _)
-  val uopsIssuedCnt = PopCount(fromIQ.flatten.map(_.fire))
-  val fewUopsIssued = (0 until FewUops).map(_.U === uopsIssuedCnt).reduce(_ || _)
-
-  val stallLoad = !uopsIssued
+  val IQsFireDelay = fromFlattenIQ.map { case x =>
+    val delayed = Wire(Bool())
+    delayed := RegNext(x.fire)
+    delayed
+  }
+  val uopsIssued = IQsFireDelay.reduce(_ || _)
+  val uopsIssuedCnt = PopCount(IQsFireDelay)
 
   val noStoreIssued = !fromMemIQ.flatten.filter(memIq => memIq.bits.exuParams.fuConfigs.contains(FuConfig.StaCfg) ||
                                                          memIq.bits.exuParams.fuConfigs.contains(FuConfig.StdCfg)
   ).map(_.fire).reduce(_ || _)
-  val stallStore = uopsIssued && noStoreIssued
 
-  val stallLoadReg = DelayN(stallLoad, 2)
-  val stallStoreReg = DelayN(stallStore, 2)
+  val fewUopsIssued = (0 until p(XSCoreParamsKey).fewUops).map(_.U === uopsIssuedCnt).reduce(_ || _)
 
-  val memStallAnyLoad = stallLoadReg && !lqEmpty
-  val memStallStore = stallStoreReg && !sqEmpty
+  val stallLoad  = fewUopsIssued && !uopsIssued
+  val stallStore = fewUopsIssued && uopsIssued && RegNext(noStoreIssued)
+
+  val stallLoadDly = RegNext(stallLoad)
+  val stallStoreDly = RegNext(stallStore)
+
+  val replayAllocate = io.topDownInfo.replayAllocate
+  val sqFull = io.topDownInfo.sqFull
+  val sbFull = io.topDownInfo.sbFull
+  val l1Miss = io.topDownInfo.l1Miss
+  val l2Miss = io.topDownInfo.l2TopMiss.l2Miss
+  val l3Miss = io.topDownInfo.l2TopMiss.l3Miss
+
+  val memStallAnyLoad = stallLoadDly && replayAllocate
+  val memStallStore = stallStoreDly && (sqFull || sbFull)
   val memStallL1Miss = memStallAnyLoad && l1Miss
   val memStallL2Miss = memStallL1Miss && l2Miss
   val memStallL3Miss = memStallL2Miss && l3Miss
 
-  io.topDownInfo.noUopsIssued := stallLoad
-
   XSPerfAccumulate("exec_stall_cycle",   fewUopsIssued)
+  XSPerfAccumulate("mem_stall_anyload",  memStallAnyLoad)
   XSPerfAccumulate("mem_stall_store",    memStallStore)
   XSPerfAccumulate("mem_stall_l1miss",   memStallL1Miss)
   XSPerfAccumulate("mem_stall_l2miss",   memStallL2Miss)
@@ -862,6 +866,7 @@ class DataPathImp(override val wrapper: DataPath)(implicit p: Parameters, params
 
   val perfEvents = Seq(
     ("EXEC_STALL_CYCLE",  fewUopsIssued),
+    ("MEMSTALL_ANY_LOAD", memStallAnyLoad),
     ("MEMSTALL_STORE",    memStallStore),
     ("MEMSTALL_L1MISS",   memStallL1Miss),
     ("MEMSTALL_L2MISS",   memStallL2Miss),
@@ -934,17 +939,17 @@ class DataPathIO()(implicit p: Parameters, params: BackendParams) extends XSBund
 
   val fromPcTargetMem = Flipped(new PcToDataPathIO(params))
 
-  val fromBypassNetwork: Vec[RCWritePort] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize, 
+  val fromBypassNetwork: Vec[RCWritePort] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize,
     new RCWritePort(params.intSchdParams.get.rfDataWidth, RegCacheIdxWidth, params.intSchdParams.get.pregIdxWidth, params.debugEn)
   )
 
   val toBypassNetworkRCData: MixedVec[MixedVec[Vec[UInt]]] = MixedVec(
-    Seq(intSchdParams, fpSchdParams, vfSchdParams, memSchdParams).map(schd => schd.issueBlockParams.map(iq => 
+    Seq(intSchdParams, fpSchdParams, vfSchdParams, memSchdParams).map(schd => schd.issueBlockParams.map(iq =>
       MixedVec(iq.exuBlockParams.map(exu => Output(Vec(exu.numRegSrc, UInt(exu.srcDataBitsMax.W)))))
     )).flatten
   )
 
-  val toWakeupQueueRCIdx: Vec[UInt] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize, 
+  val toWakeupQueueRCIdx: Vec[UInt] = Vec(params.getIntExuRCWriteSize + params.getMemExuRCWriteSize,
     Output(UInt(RegCacheIdxWidth.W))
   )
 
