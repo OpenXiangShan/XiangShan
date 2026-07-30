@@ -59,7 +59,8 @@ tree. Start here unless the task explicitly says otherwise.
   golden trace into the frontend DUT environment for bring-up/debug.
 - `src/test/python/Frontend/scripts/fst_to_fsdb.sh`: convert a frontend `.fst`
   waveform to `.fsdb` through a temporary `.vcd`.
-- `src/test/python/Frontend/tests/`: active frontend regressions. Put new tests here.
+- `src/test/python/Frontend/tests/`: active frontend regressions. Keep shared
+  `conftest.py` here.
 - `build-frontend/pylib-verilator/Frontend/`: generated Verilator Python
   bindings, shared objects, signal map, and `Frontend_top.sv`.
 - `build-frontend/pylib-vcs/Frontend/`: generated VCS Python bindings, shared
@@ -109,7 +110,7 @@ The current Frontend package intentionally has two layers:
 Treat the root-level facade as part of the supported import contract unless the
 task is explicitly about changing that contract. Do not silently bypass or
 remove it as “just compatibility glue”;
-`src/test/python/Frontend/tests/test_layout_import_compat.py` exists to keep
+`src/test/python/Frontend/tests/py/environment/test_layout_import_compat.py` exists to keep
 that boundary stable.
 
 ## Working Rules
@@ -193,7 +194,7 @@ that boundary stable.
   only when they assert DUT-visible exception behavior and, when relevant, that
   an illegal resend or follow-up request does not occur.
 - Do not frequently add low-signal or redundant cases to
-  `src/test/python/Frontend/tests/test_backend_model_sync.py`; only add a test
+  `src/test/python/Frontend/tests/py/environment/test_backend_model_unit.py`; only add a test
   there when it captures a distinct semantic contract, blocks a proven
   regression, or is the smallest meaningful reproducer for the root cause being
   fixed.
@@ -680,7 +681,11 @@ make frontend -j
 
 ## Test Authoring Rules
 
-- Add new regressions under `src/test/python/Frontend/tests/`.
+- Add DUT-behavior Python regressions under
+  `src/test/python/Frontend/tests/py/<author>/`; add environment-only tests
+  that do not exercise DUT behavior under
+  `src/test/python/Frontend/tests/py/environment/`; add assembly regressions
+  under `src/test/python/Frontend/tests/asm_cases/<author>/`.
 - Name tests `test_*.py`.
 - Gate DUT-only cases with `TB_ENABLE_DUT_TESTS=1` and existing `_RUN_DUT` patterns.
 - Reuse fixtures from `src/test/python/Frontend/env/fixtures.py`.

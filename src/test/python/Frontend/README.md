@@ -26,6 +26,8 @@
   - 包含 bundles、agents、monitors、model、sequences、fixtures 和 API。
 - `tests/`
   - 当前可见的 Frontend pytest 用例集合。
+  - `tests/conftest.py`、`tests/asm_cases/generate_cases.py` 和
+    `tests/asm_cases/generated/` 保持共享。
 - `webui/`
   - Web UI 服务端与静态资源。
 - `data/`
@@ -72,9 +74,9 @@
 4. `env/frontend_env.py`
 5. `env/api.py`
 6. `env/fixtures.py`
-7. `tests/test_layout_import_compat.py`
-8. `tests/test_bin_trace_dut.py`
-9. `tests/test_multi_branch.py`
+7. `tests/py/environment/test_layout_import_compat.py`
+8. `tests/py/zhaoxinran/test_bin_trace_dut.py`
+9. `tests/py/zhaoxinran/test_multi_branch.py`
 
 ## 常用脚本
 

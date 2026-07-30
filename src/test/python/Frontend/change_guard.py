@@ -11,9 +11,9 @@ _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[3]
 _PYLIB_PATH = _REPO_ROOT / "build-frontend" / "pylib"
 _DEFAULT_TESTS = (
-    "src/test/python/Frontend/tests/py/zhaoxinran/test_backend_model_unit.py",
-    "src/test/python/Frontend/tests/py/zhaoxinran/test_layout_import_compat.py",
-    "src/test/python/Frontend/tests/py/zhaoxinran/test_sequence_unit.py",
+    "src/test/python/Frontend/tests/py/environment/test_backend_model_unit.py",
+    "src/test/python/Frontend/tests/py/environment/test_layout_import_compat.py",
+    "src/test/python/Frontend/tests/py/environment/test_sequence_unit.py",
 )
 
 
