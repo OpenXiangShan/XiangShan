@@ -83,6 +83,7 @@ object EntryBundles extends HasCircularQueuePtrHelper {
     val finalSuccess          = Bool()
     // TODO: change fuType
     val fuType                = FuType()
+    val isFmac                = Bool()
     val sqIdx                 = Option.when(params.needFeedBackSqIdx)(new SqPtr())
     val lqIdx                 = Option.when(params.needFeedBackLqIdx)(new LqPtr())
   }

@@ -29,6 +29,7 @@ import xiangshan.backend.issue._
 import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.decode.{Imm, ImmUnion}
 import xiangshan.backend.vector.util.BString.BinaryStringHelper
+import _root_.utils.NamedUInt
 
 package object xiangshan {
   object SrcType {

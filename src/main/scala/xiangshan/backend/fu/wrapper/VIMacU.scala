@@ -9,10 +9,7 @@ import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, Utils, VecPipedFuncUnit, VecSrcTypeModule}
 import xiangshan.ExceptionNO
-import yunsuan.VialuFixType
 import yunsuan.encoding.Opcode.Opcodes.VIMacOpcode
-import yunsuan.encoding.{VdType, Vs1IntType, Vs2IntType}
-import yunsuan.{OpType}
 import yunsuan.vector.mac.VIMac64b
 
 class VIMacSrcTypeModule extends VecSrcTypeModule {

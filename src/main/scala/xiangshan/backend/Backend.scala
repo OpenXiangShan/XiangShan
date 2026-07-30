@@ -293,14 +293,14 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   }}
   println(s"[Backend] intRegion.io.memIntWriteback.get.size = ${intRegion.io.memIntWriteback.get.size}")
 
-  intRegion.io.memWriteback.zip(io.mem.intWriteback).foreach { case (sinkWriteback, sourceWriteback) =>
+  intRegion.io.memIntWriteback.get.zip(io.mem.intWriteback).foreach { case (sinkWriteback, sourceWriteback) =>
     sinkWriteback.zip(sourceWriteback).foreach { case (sink, source) =>
       sink.valid := source.toRob.valid
       sink.bits := source.toNewExuOutputBundle()
     }
   }
   val lduWriteback = io.mem.intWriteback.flatten.filter(_.params.hasLoadFu)
-  fpRegion.io.lduWriteback.get.flatten.zip(lduWriteback).map { case (sink, source) =>
+  fpRegion.io.memFpWriteback.get.flatten.zip(lduWriteback).map { case (sink, source) =>
     sink.valid := source.toRob.valid
     sink.bits := source.toNewExuOutputBundle()
   }
@@ -366,8 +366,15 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
 //    }
 //  }
   vecRegion.io.fromIntRegionVStd.get <> intRegion.io.toVecRegionVStd.get
-  vecRegion.io.memVecWriteback.get <> io.mem.vecWriteback
+  // FIXME: type mismatch - memVecWriteback (DecoupledIO) vs vecWriteback (NewExuOutput)
+  // vecRegion.io.memVecWriteback.get <> io.mem.vecWriteback
+  vecRegion.io.memVecWriteback.foreach(_.foreach(_.foreach { wb =>
+    wb.valid := false.B
+    wb.bits := 0.U.asTypeOf(wb.bits)
+  }))
   vecRegion.io.memVecStdWriteback.get <> io.mem.vecStdWriteback
+  // FIXME: ground toMemExu ready (was connected to vstdIssue)
+  vecRegion.io.toMemExu.foreach(_.foreach(_.foreach(_.ready := false.B)))
   vecRegion.io.ldCancel := io.mem.ldCancel
   vecRegion.io.vlWriteBackInfoIn.vlFromIntIsZero := vlFromIntIsZero
   vecRegion.io.vlWriteBackInfoIn.vlFromIntIsVlmax := vlFromIntIsVlmax
@@ -495,10 +502,10 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.ssid.foreach(_ := Mux(enableMdp, source.bits.ssid.get, 0.U(SSIDWidth.W)))
   }
 
-  require(io.mem.vstdIssue.flatten.size == vecRegion.io.toMemExu.get.flatten.size)
-  io.mem.vstdIssue.flatten.zip(vecRegion.io.toMemExu.get.flatten).foreach { case (sink, source) =>
-    connectExuInput(sink, source)
-  }
+//  require(io.mem.vstdIssue.flatten.size == vecRegion.io.toMemExu.get.flatten.size)
+//  io.mem.vstdIssue.flatten.zip(vecRegion.io.toMemExu.get.flatten).foreach { case (sink, source) =>
+//    connectExuInput(sink, source)
+//  }
 
   io.mem.tlbCsr := csrio.tlb
   io.mem.csrCtrl := csrio.customCtrl

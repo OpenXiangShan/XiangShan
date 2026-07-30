@@ -491,6 +491,10 @@ class CtrlBlockImp(
     dontTouch(decodeFromFrontendAcceptNum)
   }
 
+  /** no valid instr in decode buffer && no valid instr from frontend --> can accept new instr from frontend */
+  val frontendDecodeCanAccept = !decodeBufValid(0) || !decodeFromFrontend(0).valid
+  io.frontend.canAccept := frontendDecodeCanAccept
+
   /**
    * State machine of "decodeBufValid(i)":
    *   redirect || decodeBufValid(i) is the last accepted instr in decodeBuf:

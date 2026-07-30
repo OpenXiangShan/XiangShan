@@ -36,7 +36,7 @@ import xiangshan.mem.{EewLog2, GenRealFlowNum, GenUSWholeEmul, LsqPtrPreCalculat
 import xiangshan.backend.trace._
 import xiangshan.backend.decode.isa.bitfield.{OPCODE5Bit, XSInstBitFields}
 import xiangshan.backend.fu.NewCSR.CSROoORead
-import yunsuan.{VfaluType, VipuType, VMoveOpcode}
+import yunsuan.{VipuType, VMoveOpcode}
 import xiangshan.backend.RatToVecExcpMod
 
 class Rename(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper with HasPerfEvents {

@@ -603,6 +603,7 @@ class IssueQueueImp(implicit p: Parameters, params: IssueBlockParams) extends XS
     deqResp.bits.fuType := deqBeforeDly(i).bits.fuType
     deqResp.bits.sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
     deqResp.bits.lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
+    deqResp.bits.isFmac := false.B
   }
 
   //fuBusyTable

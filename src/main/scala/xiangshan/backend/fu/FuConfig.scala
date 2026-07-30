@@ -554,7 +554,7 @@ object FuConfig {
   val VialuCfg = FuConfig (
     name = "vialuFix",
     fuType = FuType.vialuF,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIAluFix(cfg)(p).suggestName("VialuFix")),
+    fuGen = null, // FIXME: VIAluFix removed - needs VecFuConfig migration
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
     ),
@@ -576,7 +576,7 @@ object FuConfig {
   val VimacCfg = FuConfig (
     name = "vimac",
     fuType = FuType.vimac,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIMacU(cfg)(p).suggestName("Vimac")),
+    fuGen = null, // FIXME: VIMacU removed - needs VecFuConfig migration
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -598,7 +598,7 @@ object FuConfig {
   val VidivCfg = FuConfig (
     name = "vidiv",
     fuType = FuType.vidiv,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIDiv(cfg)(p).suggestName("Vidiv")),
+    fuGen = null, // FIXME: VIDiv removed - needs VecFuConfig migration
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -638,7 +638,7 @@ object FuConfig {
   val VipuCfg: FuConfig = FuConfig (
     name = "vipu",
     fuType = FuType.vipu,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VIPU(cfg)(p).suggestName("Vipu")),
+    fuGen = null, // FIXME: VIPU removed - needs VecFuConfig migration
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
     ),
@@ -743,7 +743,7 @@ object FuConfig {
   val VfcvtCfg = FuConfig(
     name = "vfcvt",
     fuType = FuType.vfcvt,
-    fuGen = (p: Parameters, cfg: FuConfig) => Module(new VCVT(cfg)(p).suggestName("Vfcvt")),
+    fuGen = null, // FIXME: VCVT removed - needs VecFuConfig migration
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -924,17 +924,17 @@ object FuConfig {
 
   def allConfigs = Seq(
     JmpCfg, BrhCfg, I2fCfg, I2vCfg, F2vCfg, CsrCfg, AluCfg, MulCfg, DivCfg, FenceCfg, BkuCfg, VSetCfg,
-    LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, VialuCfg, VipuCfg, VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg,
+    LduCfg, StaCfg, StdCfg, MouCfg, MoudCfg, /*VialuCfg,*/ /*VipuCfg,*/ VlduCfg, VstuCfg, VseglduCfg, VsegstuCfg,
     FaluCfg, FmacCfg, FcvtCfg, FdivCfg,
-    VfaluCfg, VmoveCfg, VfmaCfg, VfcvtCfg, HyldaCfg, HystaCfg
+    VfaluCfg, VmoveCfg, VfmaCfg, /*VfcvtCfg,*/ HyldaCfg, HystaCfg
   )
 
   def VecArithFuConfigs = Seq(
-    VialuCfg, VimacCfg, VppuCfg, VipuCfg, VfaluCfg, VmoveCfg, VfmaCfg, VfcvtCfg, VfdivCfg
+    /*VialuCfg,*/ /*VimacCfg,*/ VppuCfg, /*VipuCfg,*/ VfaluCfg, VmoveCfg, VfmaCfg, /*VfcvtCfg,*/ VfdivCfg
   )
 
   def needUncertainWakeupFuConfigs = Seq(
-    CsrCfg, DivCfg, FdivCfg, VfdivCfg, VidivCfg
+    CsrCfg, DivCfg, FdivCfg, VfdivCfg/*, VidivCfg*/
   )
 }
 

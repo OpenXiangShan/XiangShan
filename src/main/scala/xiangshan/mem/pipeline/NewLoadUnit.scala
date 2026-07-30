@@ -1923,8 +1923,9 @@ class NewLoadUnit(val param: ExeUnitParams)(implicit p: Parameters) extends XSMo
   dataPath.io.s2DCacheResp.bits := io.dcache.resp.bits
   io.ldout.toFpRf.foreach(_.bits.data := dataPath.io.s3ShiftAndExtData(io.ldout.toFpRf.get.bits.data.getWidth - 1, 0))
   io.ldout.toIntRf.foreach(_.bits.data := dataPath.io.s3ShiftAndExtData(io.ldout.toIntRf.get.bits.data.getWidth - 1, 0))
-  io.vldout.toVecRf.foreach(_.bits := dataPath.io.s3ShiftData)
-  io.vldout.toV0Rf.foreach(_.bits := dataPath.io.s3ShiftData)
+  // FIXME: vldout removed
+  // io.vldout.toVecRf.foreach(_.bits := dataPath.io.s3ShiftData)
+  // io.vldout.toV0Rf.foreach(_.bits := dataPath.io.s3ShiftData)
 
   // Debug info
   io.debugInfo.s1_isTlbFirstMiss := s1.io.debugInfo.isTlbFirstMiss

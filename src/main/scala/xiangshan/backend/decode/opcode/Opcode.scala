@@ -900,6 +900,7 @@ object Opcode {
   object FenceOpcodes extends Opcodes {
     val fence  = Value(bb"10000")
     val sfence = Value(bb"10001")
+    val mfence = IntBSType(bb"10111") + NoSpec + BlockBack + FlushPipe // HasMptCheck self defined instruction
     val fencei = Value(bb"10010")
     val hfence_v = Value(bb"10011")
     val hfence_g = Value(bb"10100")

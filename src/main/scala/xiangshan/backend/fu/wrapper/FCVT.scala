@@ -9,14 +9,13 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.FuOpType
-import yunsuan.{VfpuType}
 import yunsuan.scalar.FPCVT
 import yunsuan.util._
-import yunsuan.encoding.Opcode.Opcodes.FCvtOpcode
+import yunsuan.encoding.Opcode.Opcodes._
+import yunsuan.vector.Common._
 
 
 class FCVT(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfcvt OpType not supported")
 
   // io alias
   private val opcode = fuOpType

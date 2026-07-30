@@ -9,12 +9,10 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.fpu.FpPipedFuncUnit
 import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.FuOpType
-import yunsuan.{VfpuType}
 import yunsuan.scalar.FPCVT
 import yunsuan.util._
 
 class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfcvt OpType not supported")
 
   // io alias
   private val opcode = fuOpType
@@ -53,7 +51,7 @@ class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   if(backendParams.debugEn) {
     dontTouch(output1H)
   }
-  
+
   val outIsMvInst = outCtrl.fuOpType(8).asBool
   val outSew      = outCtrl.fpu.get.fmt
 
@@ -70,7 +68,7 @@ class I2F(cfg: FuConfig)(implicit p: Parameters) extends FpPipedFuncUnit(cfg) {
   io.out.bits.res.fflags.get := Mux(outIsMvInst, 0.U, fcvt.io.fflags)
 
   val result = Mux(
-    outIsMvInst, 
+    outIsMvInst,
     RegEnable(RegEnable(src0, fire), fireReg),
     fcvt.io.result
   )

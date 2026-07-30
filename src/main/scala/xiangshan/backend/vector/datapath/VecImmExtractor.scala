@@ -23,7 +23,10 @@ class VecImmExtractor(vlen: Int, immTypeSeq: Set[Imm]) extends Module {
       (vsew ## immType.typEncode) -> Fill(vlen / sew, immType.extract(sew)(in.imm))
     }
 
-  out.data := LookupTree(in.vsew ## in.immType, extractMap)
+  out.data := {
+    if (extractMap.isEmpty) 0.U(vlen.W)
+    else LookupTree(in.vsew ## in.immType, extractMap)
+  }
 }
 
 object VecImmExtractor {

@@ -561,7 +561,8 @@ object DecodeChannelOutput {
 
 class MopCtrlBundle(implicit p: Parameters) extends XSBundle {
   val foldpc           = UInt(MemPredPCWidth.W)
-  val exceptionVec     = ExceptionVec()
+  // FIXME: ExceptionVec removed - needs ExceptSparseVec migration
+  // val exceptionVec     = ExceptionVec()
   val isFetchMalAddr   = Bool()
   val trigger          = TriggerAction()
   val isRVC            = Bool()

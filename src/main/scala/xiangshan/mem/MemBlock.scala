@@ -252,7 +252,8 @@ class mem_to_ooo(implicit p: Parameters) extends MemBlockBundle {
     exu => exu.hasVStdFu,
     Seq(),
   )
-  println(s"[tmp-mem_to_ooo] ${vecWriteback.flatten.map(_.bits.params.name)}")
+  // FIXME: .bits.params API removed
+  // println(s"[tmp-mem_to_ooo] ${vecWriteback.flatten.map(_.bits.params.name)}")
 
   val staIqFeedback = Vec(StaCnt, new MemRSFeedbackIO)
   val stdIqFeedback = Vec(StdCnt, new MemRSFeedbackIO)
@@ -468,7 +469,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val issueLda = intIssue.filter(_.bits.params.hasLoadFu)
   val issueSta = intIssue.filter(_.bits.params.hasStoreAddrFu)
   val issueStd = intIssue.filter(_.bits.params.hasStdFu)
-  val issueVStd = vstdIssue
+  // FIXME: vstd pipeline removed - needs migration
+  // val issueVStd = vstdIssue
   val issueVldu = intIssue.filter(_.bits.params.hasVLoadFu)
 
   val intWriteback: Seq[MemWriteBack] = io.mem_to_ooo.intWriteback.flatten
@@ -558,17 +560,21 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     }
   }
 
-  writebackVldu.zipWithIndex.foreach { case (wb, i) =>
-    connectMemDecoupledNewExuOutput(wb, newLoadUnits(i).io.ldout)
-  }
+  // FIXME: connectMemDecoupledNewExuOutput removed
+  // writebackVldu.zipWithIndex.foreach { case (wb, i) =>
+  //   connectMemDecoupledNewExuOutput(wb, newLoadUnits(i).io.ldout)
+  // }
 
   writebackStd.zipWithIndex.foreach { case (wb, i) =>
     wb := stdExeUnits(i).io.out
   }
 
-  vecStdWriteback.zipWithIndex.foreach { case (wb, i) =>
-    connectMemDecoupledNewExuOutput(wb, vstdExeUnits(i).out.wbToBackend)
+  // FIXME: vstdExeUnits removed - ground vecStdWriteback and vecWriteback
+  vecStdWriteback.foreach { wb =>
+    wb.valid := false.B
+    wb.bits := 0.U.asTypeOf(wb.bits)
   }
+  vecWriteback.foreach { wb => wb := 0.U.asTypeOf(wb) }
 
   val lsq     = Module(new LsqWrapper)
   val sbuffer = Module(new Sbuffer)
@@ -959,7 +965,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   for (i <- 0 until StdCnt) {
     stdExeUnits(i).io.flush <> redirect
     stdExeUnits(i).io.in <> issueStd(i)
-    stdExeUnits(i).io.vstdIn := vstdExeUnits(i).out.wbToSQ
+    // FIXME: vstdExeUnits removed - tie vstdIn to 0
+    stdExeUnits(i).io.vstdIn := 0.U.asTypeOf(stdExeUnits(i).io.vstdIn)
     lsq.io.std.storeDataIn(i) := stdExeUnits(i).io.sqData
     stdExeUnits(i).io.sqDeqPtr := lsq.io.sqDeqPtr
 
@@ -969,9 +976,11 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     io.mem_to_ooo.stdIqFeedback(i).feedbackFast := DontCare
   }
 
-  for ((vstd, i) <- vstdExeUnits.zipWithIndex) {
-    vstd.in.uop <> issueVStd(i)
-  }
+  // FIXME: vstdExeUnits removed
+  // for ((vstd, i) <- vstdExeUnits.zipWithIndex) {
+  //   // FIXME: issueVStd removed
+  //   // vstd.in.uop <> issueVStd(i)
+  // }
 
   for (i <- 0 until StaCnt) {
     val stu = storeUnits(i)
@@ -1153,7 +1162,8 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   }
 
   issueVldu.foreach(_.ready := false.B)
-  vstdIssue.foreach(_.ready := false.B)
+  // FIXME: vstdIssue removed
+  // vstdIssue.foreach(_.ready := false.B)
   io.mem_to_ooo.vlduIqFeedback.foreach { fb =>
     fb.feedbackSlow.valid := false.B
     fb.feedbackSlow.bits := DontCare

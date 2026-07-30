@@ -9,13 +9,13 @@ import xiangshan.backend.fu.FuConfig
 import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
 import xiangshan.ExceptionNO
 import xiangshan.FuOpType
-import yunsuan.VfpuType
 import yunsuan.vector.VectorConvert.VectorCvt
 import yunsuan.util._
+import yunsuan.encoding.Opcode.Opcodes._
+import yunsuan.vector.Common._
 
 
 class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfcvt OpType not supported")
 
   // params alias
   private val dataWidth = cfg.destDataBits
@@ -70,7 +70,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
   val outputWidth1H = output1H
   val outIs32bits = RegNext(RegNext(outputWidth1H(2)))
   val outIsInt = !outCtrl.fuOpType(6)
-  
+
   // May be useful in the future.
   // val outIsMvInst = outCtrl.fuOpType === FuOpType.FMVXF
   val outIsMvInst = false.B
@@ -147,7 +147,7 @@ class VCVT(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) 
 
   private val narrow = RegEnable(RegEnable(isNarrowCvt, fire), fireReg)
   private val narrowNeedCat = outVecCtrl.vuopIdx(0).asBool && narrow
-  private val outNarrowVd = Mux(narrowNeedCat, Cat(resultDataUInt(dataWidth / 2 - 1, 0), outOldVd(dataWidth / 2 - 1, 0)), 
+  private val outNarrowVd = Mux(narrowNeedCat, Cat(resultDataUInt(dataWidth / 2 - 1, 0), outOldVd(dataWidth / 2 - 1, 0)),
                                                Cat(outOldVd(dataWidth - 1, dataWidth / 2), resultDataUInt(dataWidth / 2 - 1, 0)))
 
   // mgu.io.in.vd := resultDataUInt
@@ -217,29 +217,40 @@ class VectorCvtTop(vlen: Int, xlen: Int) extends Module{
   )
 
   val vectorCvt0 = Module(new VectorCvt(xlen))
-  vectorCvt0.fire := fire
-  vectorCvt0.src := in0
-  vectorCvt0.opType := opType
-  vectorCvt0.rm := rm
-  // Todo: remove these
-  vectorCvt0.inSew1H := 0.U
-  vectorCvt0.outSew1H := 0.U
+  vectorCvt0.io.fire := fire
+  vectorCvt0.io.src2 := in0
+  vectorCvt0.io.widenSrc2 := 0.U
+  vectorCvt0.io.narrowSrc2 := 0.U
+  vectorCvt0.io.narrowSrc1 := 0.U
+  vectorCvt0.io.opType := opType
+  vectorCvt0.io.rm := rm
+  vectorCvt0.io.inSew1H := 0.U
+  vectorCvt0.io.outSew1H := 0.U
+  vectorCvt0.io.cvt64UseWidenSrc2 := false.B
+  vectorCvt0.io.cvt32UseWidenSrc2 := false.B
+  vectorCvt0.io.cvt16UseWidenSrc2 := false.B
 
   val vectorCvt1 = Module(new VectorCvt(xlen))
-  vectorCvt1.fire := fire
-  vectorCvt1.src := in1
-  vectorCvt1.opType := opType
-  vectorCvt1.rm := rm
-  vectorCvt1.inSew1H := 0.U
-  vectorCvt1.outSew1H := 0.U
+  vectorCvt1.io.fire := fire
+  vectorCvt1.io.src2 := in1
+  vectorCvt1.io.widenSrc2 := 0.U
+  vectorCvt1.io.narrowSrc2 := 0.U
+  vectorCvt1.io.narrowSrc1 := 0.U
+  vectorCvt1.io.opType := opType
+  vectorCvt1.io.rm := rm
+  vectorCvt1.io.inSew1H := 0.U
+  vectorCvt1.io.outSew1H := 0.U
+  vectorCvt1.io.cvt64UseWidenSrc2 := false.B
+  vectorCvt1.io.cvt32UseWidenSrc2 := false.B
+  vectorCvt1.io.cvt16UseWidenSrc2 := false.B
 
   val isNarrowCycle2 = RegEnable(RegEnable(isNarrow, fire), fireReg)
   val outputWidth1HCycle2 = RegEnable(RegEnable(outputWidth1H, fire), fireReg)
 
   //cycle2
   io.result := Mux(isNarrowCycle2,
-    vectorCvt1.io.result.tail(32) ## vectorCvt0.io.result.tail(32),
-    vectorCvt1.io.result ## vectorCvt0.io.result)
+    vectorCvt1.io.resEx1.tail(32) ## vectorCvt0.io.resEx1.tail(32),
+    vectorCvt1.io.resEx1 ## vectorCvt0.io.resEx1)
 
   io.fflags := 0.U
 }

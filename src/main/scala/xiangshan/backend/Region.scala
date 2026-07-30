@@ -179,6 +179,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     imp.io.s2Resp.get.head.fuType := 0.U
     imp.io.s2Resp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
     imp.io.s2Resp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
+    imp.io.s2Resp.get.head.isFmac := false.B
   }
   val stDataIQs = issueQueues.filter(iq => iq.param.StdCnt > 0)
   if (params.isIntSchd) {
@@ -208,6 +209,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
     imp.io.snResp.get.head.fuType := 0.U
     imp.io.snResp.get.head.lqIdx.foreach(_ := feedBack.bits.lqIdx)
     imp.io.snResp.get.head.sqIdx.foreach(_ := feedBack.bits.sqIdx)
+    imp.io.snResp.get.head.isFmac := false.B
   }
   // other wakeup, int vec need WB wakeup
   def connectWakeupWB(sink: ValidIO[IssueQueueWBWakeUpBundle], source: RfWritePortBundle): Unit = {
@@ -556,6 +558,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           thisIQ.io.s0Resp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
           thisIQ.io.s0Resp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           thisIQ.io.s0Resp.get(j).lqIdx.foreach(_ := 0.U.asTypeOf(new LqPtr))
+          thisIQ.io.s0Resp.get(j).isFmac := false.B
         }
         // for intRegion's loadUnit
         if (thisIQ.io.snResp.nonEmpty) {
@@ -564,6 +567,7 @@ class Region(val params: SchdBlockParams)(implicit p: Parameters) extends XSModu
           thisIQ.io.snResp.get(j).fuType := toMem(i)(j).bits.ctrl.fuType
           thisIQ.io.snResp.get(j).sqIdx.foreach(_ := 0.U.asTypeOf(new SqPtr))
           thisIQ.io.snResp.get(j).lqIdx.foreach(_ := toMem(i)(j).bits.lqIdx.get)
+          thisIQ.io.snResp.get(j).isFmac := false.B
         }
       }
     }

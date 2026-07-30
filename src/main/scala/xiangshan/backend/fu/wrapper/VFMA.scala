@@ -9,12 +9,10 @@ import xiangshan.backend.fu.vector.Bundles.VSew
 import xiangshan.backend.fu.vector.utils.VecDataSplitModule
 import xiangshan.backend.fu.vector.{Mgu, VecPipedFuncUnit}
 import xiangshan.ExceptionNO
-import yunsuan.VfpuType
 import yunsuan.VfmaType
 import yunsuan.vector.VectorFloatFMA
 
 class VFMA(cfg: FuConfig)(implicit p: Parameters) extends VecPipedFuncUnit(cfg) {
-  XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VfpuType.dummy, "Vfalu OpType not supported")
 
   // params alias
   private val dataWidth = cfg.destDataBits
