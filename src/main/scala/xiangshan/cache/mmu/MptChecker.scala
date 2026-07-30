@@ -1209,11 +1209,13 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
   mptMissQueueInst.csr <> io.csr
   mptMissQueueInst.sfence <> io.sfence
 
+  val mptEn = io.csr.mmpt.mode =/= 0.U
+
   mptCacheInst.req.bits.mptOnly := io.req.bits.mptOnly // need some fix
   mptCacheInst.req.bits.reqPA   := io.req.bits.reqPA
   mptCacheInst.req.bits.source  := io.req.bits.id
-  mptCacheInst.req.valid        := io.req.valid
-  io.req.ready                  := mptCacheInst.req.ready
+  mptCacheInst.req.valid        := io.req.valid && mptEn
+  io.req.ready                  := mptEn && mptCacheInst.req.ready
 
   val mptReturn = Wire(new MptRespBundle())
   mptReturn.mptPerm := Mux(mptMissQueueInst.resp.valid, mptMissQueueInst.resp.bits.perm, mptCacheInst.respHit.bits.perm)
@@ -1245,7 +1247,7 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
     mptCacheInst.respHit.bits.permIsNAPOT
   )
 
-  io.resp.valid := mptMissQueueInst.resp.valid || mptCacheInst.respHit.valid
+  io.resp.valid := mptEn && (mptMissQueueInst.resp.valid || mptCacheInst.respHit.valid)
   io.resp.bits <> mptReturn
 
   mptMissQueueInst.refill <> mptTWInst.refill
@@ -1255,8 +1257,8 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
   mptMissQueueInst.missCache.bits.hitAddr  := mptCacheInst.respMiss.bits.ppn
   mptMissQueueInst.missCache.bits.source   := mptCacheInst.respMiss.bits.source
   mptMissQueueInst.missCache.bits.pa       := mptCacheInst.respMiss.bits.pa
-  mptMissQueueInst.missCache.valid         := mptCacheInst.respMiss.valid
-  mptCacheInst.respMiss.ready              := mptMissQueueInst.missCache.ready
+  mptMissQueueInst.missCache.valid         := mptCacheInst.respMiss.valid && mptEn
+  mptCacheInst.respMiss.ready              := Mux(mptEn, mptMissQueueInst.missCache.ready, true.B)
   // cache refill io
   mptCacheInst.refill <> mptTWInst.refill
   // MptMissQueue-twio
@@ -1274,21 +1276,4 @@ class MptChecker(implicit p: Parameters) extends XSModule with HasPtwConst {
   mptTWInst.pmp.resp <> io.pmp.resp
   io.pmp.req <> mptTWInst.pmp.req
 
-  val mptDiabledFakedRespValid = RegInit(false.B)
-  val mptDiabledFakedMptOnly   = RegInit(false.B)
-  when(io.csr.mmpt.mode === 0.U) {
-    mptCacheInst.req.valid := false.B // mptmode  return 111
-
-    io.req.ready := true.B
-    when(io.req.fire) {
-      mptDiabledFakedRespValid := true.B
-      mptDiabledFakedMptOnly   := io.req.bits.mptOnly
-    }
-    io.resp.valid        := mptDiabledFakedRespValid
-    io.resp.bits.mptOnly := mptDiabledFakedMptOnly
-    when(io.resp.fire) {
-      mptDiabledFakedRespValid := false.B
-      mptDiabledFakedMptOnly   := false.B
-    }
-  }
 }
