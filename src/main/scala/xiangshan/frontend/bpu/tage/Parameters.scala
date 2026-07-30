@@ -23,19 +23,19 @@ import xiangshan.frontend.bpu.TageTableInfo
 case class TageParameters(
     TableInfos: Seq[TageTableInfo] = Seq(
       // (NumSetsLog2, NumWays, HistoryLength); NumSets is the number of sets in each bank.
-      new TageTableInfo(9, 2, 4),
-      new TageTableInfo(9, 2, 9),
-      new TageTableInfo(9, 2, 17),
-      new TageTableInfo(9, 2, 29),
+      new TageTableInfo(7, 3, 4),
+      new TageTableInfo(7, 5, 9),
+      new TageTableInfo(7, 6, 17),
+      new TageTableInfo(10, 3, 29),
       new TageTableInfo(9, 2, 56),
-      new TageTableInfo(9, 2, 109),
-      new TageTableInfo(9, 2, 211),
-      new TageTableInfo(9, 2, 397)
+      new TageTableInfo(7, 5, 109),
+      new TageTableInfo(8, 4, 211),
+      new TageTableInfo(8, 3, 397)
     ),
     NumBanks:              Int = 4, // to alleviate read-write conflicts in single-port SRAM
-    TagWidth:              Int = 13,
+    TagWidth:              Int = 10,
     TakenCtrWidth:         Int = 3,
-    UsefulCtrWidth:        Int = 2,
+    UsefulCtrWidth:        Int = 1,
     UsefulCtrInitValue:    Int = 0,
     NumUsefulCtrSramFolds: Int = 8,
     WriteBufferSize:       Int = 4,
