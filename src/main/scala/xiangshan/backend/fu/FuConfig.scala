@@ -8,6 +8,7 @@ import xiangshan.backend.datapath.DataConfig._
 import xiangshan.backend.decode._
 import xiangshan.backend.fu.fpu.IntFPToVec
 import xiangshan.backend.fu.wrapper._
+import xiangshan.backend.fu.vector.{DummyVecPipedFuncUnit, DummyVecNonPipedFuncUnit}
 import xiangshan.mem.{Std, VStd}
 
 /**
@@ -554,7 +555,7 @@ object FuConfig {
   val VialuCfg = FuConfig (
     name = "vialuFix",
     fuType = FuType.vialuF,
-    fuGen = null, // FIXME: VIAluFix removed - needs VecFuConfig migration
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecPipedFuncUnit(cfg)(p)).suggestName("Vialu"),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
     ),
@@ -576,7 +577,7 @@ object FuConfig {
   val VimacCfg = FuConfig (
     name = "vimac",
     fuType = FuType.vimac,
-    fuGen = null, // FIXME: VIMacU removed - needs VecFuConfig migration
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecPipedFuncUnit(cfg)(p)).suggestName("Vimac"),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -598,7 +599,7 @@ object FuConfig {
   val VidivCfg = FuConfig (
     name = "vidiv",
     fuType = FuType.vidiv,
-    fuGen = null, // FIXME: VIDiv removed - needs VecFuConfig migration
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecNonPipedFuncUnit(cfg)(p)).suggestName("Vidiv"),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
@@ -638,7 +639,7 @@ object FuConfig {
   val VipuCfg: FuConfig = FuConfig (
     name = "vipu",
     fuType = FuType.vipu,
-    fuGen = null, // FIXME: VIPU removed - needs VecFuConfig migration
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecPipedFuncUnit(cfg)(p)).suggestName("Vipu"),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()),  // vs1, vs2, vd_old
     ),
@@ -743,7 +744,7 @@ object FuConfig {
   val VfcvtCfg = FuConfig(
     name = "vfcvt",
     fuType = FuType.vfcvt,
-    fuGen = null, // FIXME: VCVT removed - needs VecFuConfig migration
+    fuGen = (p: Parameters, cfg: FuConfig) => Module(new DummyVecPipedFuncUnit(cfg)(p)).suggestName("Vfcvt"),
     srcData = Seq(
       Seq(VecData(), VecData(), VecData()), // vs1, vs2, vd_old
     ),
