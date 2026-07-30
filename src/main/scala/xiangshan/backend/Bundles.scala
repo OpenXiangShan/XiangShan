@@ -117,12 +117,15 @@ object Bundles {
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
     val isLastInFtqEntry = Bool()
     val instr = UInt(32.W)
+    // Zicfilp
+    val ZicfilpPCAligned = OptionWrapper(HasZicfilp, Bool())
     val debug = OptionWrapper(backendParams.debugEn, new DecodeInUopDebug())
 
     def connectCtrlFlow(source: CtrlFlow): Unit = {
       connectSamePort(this, source)
       this.isRVC := source.isRvc
       this.isFetchMalAddr := source.backendException
+      this.ZicfilpPCAligned.foreach(_ := source.pc(1, 0) === 0.U)
       this.debug.foreach(_.pc := source.pc)
       this.debug.foreach(_.debug_seqNum := source.debug_seqNum)
     }
@@ -135,7 +138,7 @@ object Bundles {
   // DecodeInUop --[Decode]--> DecodeOutUop
   class DecodeOutUop(implicit p: Parameters) extends XSBundle {
     val foldpc = UInt(MemPredPCWidth.W) // for mdp
-    val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
+    val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet(HasZicfilp))
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
@@ -179,6 +182,9 @@ object Bundles {
     val lastUop = Bool()
     val numWB = UInt(log2Up(MaxUopSize).W) // rob need this
     val needFrm = new NeedFrmBundle
+    // Zicfilp
+    val ZicfilpInfos = OptionWrapper(HasZicfilp, new ZicfilpInfo)
+    val ZicfilpLPAD = OptionWrapper(HasZicfilp, Bool())
     val debug = OptionWrapper(backendParams.debugEn, new DecodeOutUopDebug())
 
     private def allSignals = srcType.take(3) ++ Seq(fuType, fuOpType, rfWen, fpWen, vecWen,
@@ -230,7 +236,7 @@ object Bundles {
 
   class RenameOutUop(implicit p: Parameters) extends XSBundle {
     def numSrc = backendParams.numSrc
-    val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet)
+    val exceptionVec = ExceptSparseVec(ExceptionNO.decodeSet(HasZicfilp))
     val isFetchMalAddr = Bool()
     val trigger = TriggerAction()
     val isRVC = Bool()
@@ -293,6 +299,9 @@ object Bundles {
     val hasException = Bool()
     val ftqLastOffset = UInt(FetchBlockInstOffsetWidth.W) // store ftqoffset before change in rename
     val lastIsRVC = Bool() // store isrvc before change in rename
+    // Zicfilp
+    val ZicfilpInfos = OptionWrapper(HasZicfilp, new ZicfilpInfo)
+    val ZicfilpLPAD = OptionWrapper(HasZicfilp, Bool())
     val debug = OptionWrapper(backendParams.debugEn, new RenameOutUopDebug())
     val crossFtqCommit = UInt(2.W) // use to caculate the ftq idx of ftqentry when commit
     val crossFtq = Bool() // use to caculate the ftq idx of brh instructions when pass to exu
@@ -375,6 +384,8 @@ object Bundles {
     val regCacheIdx = Vec(backendParams.numIntRegSrc, UInt(RegCacheIdxWidth.W))
     val lqIdx = new LqPtr
     val sqIdx = new SqPtr
+    // Zicfilp
+    val ZicfilpInfos = OptionWrapper(HasZicfilp, new ZicfilpInfo)
     val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
   class IssueQueueInDebug(implicit p: Parameters) extends XSBundle {
@@ -438,6 +449,8 @@ object Bundles {
     val sqIdx             = Option.when(params.needSqIdx)(new SqPtr) // load unit need sqIdx
     // cas ctrl
     val isDropAmocasSta = Bool()
+    // Zicfilp
+    val ZicfilpInfos = OptionWrapper(HasZicfilp && params.JmpCnt > 0, new ZicfilpInfo)
     val debug = OptionWrapper(backendParams.debugEn, new IssueQueueInDebug)
   }
 
@@ -469,6 +482,8 @@ object Bundles {
     // from dispatch
     val lqIdx = Option.when(params.needLqIdx)(new LqPtr)
     val sqIdx = Option.when(params.needSqIdx)(new SqPtr) // load unit need sqIdx
+    // Zicfilp
+    val ZicfilpInfos = OptionWrapper(HasZicfilp && params.JmpCnt > 0, new ZicfilpInfo)
   }
 
   class IssueQueueDeqOg1Payload(val params: ExeUnitParams)(implicit p: Parameters) extends XSBundle {
@@ -501,6 +516,8 @@ object Bundles {
     // from dispatch
     val lqIdx = Option.when(params.issueBlockParam.needLqIdx)(new LqPtr)
     val sqIdx = Option.when(params.issueBlockParam.needSqIdx)(new SqPtr) // load unit need sqIdx
+    // Zicfilp
+    val ZicfilpInfos = OptionWrapper(HasZicfilp && params.hasJmpFu, new ZicfilpInfo)
   }
 
   class IssueQueuePayload(val params: IssueBlockParams)(implicit p: Parameters) extends XSBundle {
@@ -630,7 +647,6 @@ object Bundles {
     val debug_sim_trig  = Option.when(backendParams.debugEn)(Bool())
 
     val numLsElem       = NumLsElem()
-
     def getDebugFuType: UInt = debug_fuType.getOrElse(fuType)
 
     def isLUI: Bool = this.fuType === FuType.alu.U && (this.selImm === SelImm.IMM_U || this.selImm === SelImm.IMM_LUI32)
@@ -991,6 +1007,8 @@ object Bundles {
     val ssid           = Option.when(iqParams.isLdAddrIQ || iqParams.isStAddrIQ)(UInt(SSIDWidth.W))
     val lqIdx          = Option.when(iqParams.needLqIdx)(new LqPtr)
     val sqIdx          = Option.when(iqParams.needSqIdx)(new SqPtr)
+    // Zicfilp
+    val ZicfilpInfos   = OptionWrapper(HasZicfilp && exuParams.hasJmpFu, new ZicfilpInfo)
 
     val src = Vec(exuParams.numRegSrc, UInt(exuParams.srcDataBitsMax.W))
     val vl  = Option.when(exuParams.readVlRf)(Vl())
@@ -1107,6 +1125,8 @@ object Bundles {
     val ftqIdx        = if (params.needFtqPtr)    Some(new FtqPtr)                    else None
     val ftqOffset     = if (params.needFtqPtrOffset) Some(UInt(FetchBlockInstOffsetWidth.W))  else None
     val predictInfo   = if (params.needPdInfo)  Some(new PredictInfo) else None
+    // Zicfilp
+    val ZicfilpInfos   = OptionWrapper(HasZicfilp && params.hasJmpFu, new ZicfilpInfo)
     val loadWaitBit    = OptionWrapper(params.hasLoadExu, Bool())
     val waitForRobIdx  = OptionWrapper(params.hasLoadExu, new RobPtr) // store set predicted previous store robIdx
     val storeSetHit    = OptionWrapper(params.hasLoadExu || params.hasStoreAddrExu, Bool()) // inst has been allocated an store set
@@ -1224,6 +1244,8 @@ object Bundles {
     val ftqIdx         = Option.when(params.needFtqPtr)(new FtqPtr)
     val ftqOffset      = Option.when(params.needFtqPtrOffset)(UInt(FetchBlockInstOffsetWidth.W))
     val predictInfo    = Option.when(params.needPdInfo)(new PredictInfo)
+    // Zicfilp
+    val ZicfilpInfos   = OptionWrapper(HasZicfilp && params.hasJmpFu, new ZicfilpInfo)
     val dataSources    = Vec(params.numRegSrc, DataSource())
     val exuSources     = Option.when(params.isIQWakeUpSink)(Vec(params.numRegSrc, ExuSource(params)))
     val loadDependency = Option.when(params.needLoadDependency)(Vec(LoadPipelineWidth, UInt(LoadDependencyWidth.W)))
@@ -1303,7 +1325,7 @@ object Bundles {
     val fflags       = if (params.writeFflags)  Some(UInt(5.W))               else None
     val wflags       = if (params.writeFflags)  Some(Bool())                  else None
     val vxsat        = if (params.writeVxsat)   Some(Bool())                  else None
-    val exceptionVec = ExceptSparseVec(params.exceptionOut)
+    val exceptionVec = ExceptSparseVec(params.effectiveExceptionOut(HasZicfilp))
     val flushPipe    = if (params.flushPipe)    Some(Bool())                  else None
     val replay       = if (params.replayInst)   Some(Bool())                  else None
     val lqIdx        = if (params.hasLoadFu)    Some(new LqPtr())             else None
@@ -1350,7 +1372,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val fflags       = Option.when(params.writeFflags)(UInt(5.W))
     val wflags       = Option.when(params.writeFflags)(Bool())
     val vxsat        = Option.when(params.writeVxsat)(Bool())
-    val exceptionVec = ExceptSparseVec(params.exceptionOut)
+    val exceptionVec = ExceptSparseVec(params.effectiveExceptionOut(p(XSCoreParamsKey).HasZicfilp))
     val flushPipe    = Option.when(params.flushPipe)(Bool())
     val trigger      = Option.when(params.trigger)(TriggerAction())
     val isRVC        = Option.when(params.needIsRVC)(Bool())
@@ -1631,7 +1653,7 @@ class ExuOutputVLoad(val params: ExeUnitParams)(implicit val p: Parameters) exte
     val fflags        = Option.when(params.writeFflags)(UInt(5.W))
     val wflags        = Option.when(params.writeFflags)(Bool())
     val vxsat         = Option.when(params.writeVxsat)(Bool())
-    val exceptionVec  = ExceptSparseVec(params.exceptionOut)
+    val exceptionVec  = ExceptSparseVec(params.effectiveExceptionOut(p(XSCoreParamsKey).HasZicfilp))
     val lqIdx         = Option.when(params.hasLoadFu)(new LqPtr())
     val sqIdx         = Option.when(params.hasStoreAddrFu || params.hasStdFu)(new SqPtr())
     val trigger       = Option.when(params.trigger)(TriggerAction())

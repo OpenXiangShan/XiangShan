@@ -32,19 +32,19 @@ import xiangshan.backend.fu.vector.Bundles.VType
 import xiangshan.backend.rename.SnapshotGenerator
 
 class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModule with HasCircularQueuePtrHelper {
-  val allExceptions = ExceptionNO.exceptionGenSet(params)
+  val allExceptions = ExceptionNO.exceptionGenSet(params, HasZicfilp)
 
   val io = IO(new Bundle {
     val redirect = Input(Valid(new Redirect))
     val flush = Input(Bool())
-    val enq = Vec(RenameWidth, Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.decodeSet))))
-    // csr + load + store + varith + vload + vstore
-    val wb = MixedVec(params.getExceptionOutList.map { x => Flipped(ValidIO(new RobExceptionInfo(x))) } )
+    val enq = Vec(RenameWidth, Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.decodeSet(HasZicfilp)))))
+    // csr + load + store + varith + vload + vstore + jump
+    val wb = MixedVec(params.getExceptionOutList(HasZicfilp).map { x => Flipped(ValidIO(new RobExceptionInfo(x))) } )
     val out = ValidIO(new RobExceptionInfo(allExceptions))
     val state = ValidIO(new RobExceptionInfo(allExceptions))
   })
 
-  val wbExuParams = params.allExuParams.filter(_.exceptionOut.nonEmpty)
+  val wbExuParams = params.allExuParams.filter(_.effectiveExceptionOut(HasZicfilp).nonEmpty)
 
   def getOldest(valid: Seq[Bool], bits: Seq[RobExceptionInfo]): RobExceptionInfo = {
     def getOldest_recursion(valid: Seq[Bool], bits: Seq[RobExceptionInfo]): (Seq[Bool], Seq[RobExceptionInfo]) = {
@@ -77,7 +77,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val current = Reg(new RobExceptionInfo(allExceptions))
 
   val enqAllExcept = Wire(Vec(RenameWidth, Valid(new RobExceptionInfo(allExceptions))))
-  val wbAllExcept = Wire(Vec(params.numException, Valid(new RobExceptionInfo(allExceptions))))
+  val wbAllExcept = Wire(Vec(params.numException(HasZicfilp), Valid(new RobExceptionInfo(allExceptions))))
 
   enqAllExcept.zip(io.enq) foreach { case (sink, source) =>
     (sink: Data).waiveAll :<= (source: Data).waiveAll
@@ -101,7 +101,10 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val varith_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.filter(_.isVecArith).nonEmpty).map(_._1)
   val vls_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.exists(x => FuType.FuTypeOrR(x.fuType, FuType.vecMem))).map(_._1)
 
-  val writebacks = Seq(csr_wb, load_wb, store_wb, varith_wb, vls_wb)
+  // Zicfilp: JumpUnit software-check exception writeback.
+  val jmp_wb = wbAllExcept.zip(wbExuParams).filter(_._2.fuConfigs.exists(_.isJmp)).map(_._1)
+  val writebacks = Seq(csr_wb, load_wb, store_wb, varith_wb, vls_wb) ++
+    (if (HasZicfilp && jmp_wb.nonEmpty) Seq(jmp_wb) else Seq.empty)
   val in_wb_valids = writebacks.map(_.map(w => w.valid && w.bits.has_exception && !lastCycleFlush))
   val wb_valid = in_wb_valids.zip(writebacks).map { case (valid, wb) =>
     valid.zip(wb.map(_.bits)).map { case (v, bits) => v && !(bits.robIdx.needFlush(io.redirect) || io.flush) }.reduce(_ || _)

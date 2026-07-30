@@ -64,7 +64,7 @@ trait DebugLevel { self: NewCSR =>
   val tinfo = Module(new CSRModule("Tinfo", new TinfoBundle))
     .setAddr(CSRs.tinfo)
 
-  val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle) with TrapEntryDEventSinkBundle with DretEventSinkBundle with HasNmipBundle {
+  val dcsr = Module(new CSRModule("Dcsr", new DcsrBundle(HasZicfilp)) with TrapEntryDEventSinkBundle with DretEventSinkBundle with HasNmipBundle {
     regOut.NMIP := nmip
   })
     .setAddr(CSRs.dcsr)
@@ -349,11 +349,12 @@ object TriggerVer extends CSREnum with ROApply {
 class DscratchBundle extends OneFieldBundle(Some("Debug scratch register."))
 
 
-class DcsrBundle extends CSRBundle {
+class DcsrBundle(hasZicfilp: Boolean = false) extends CSRBundle {
   override val len: Int = 32
   val DEBUGVER  = DcsrDebugVer(31, 28).withReset(DcsrDebugVer.Spec).withDescription("Debug specification version implemented by this hart.")
   val EXTCAUSE  =           RO(26, 24).withReset(0.U).withDescription("Additional cause detail for debug entry.")
   val CETRIG    =           RW(    19).withReset(0.U).withDescription("Trigger re-entry control for critical-error debug entry.")
+  val PELP      =           RO(    18).withReset(0.U).withDescription("Saved landing-pad state from before Debug Mode entry.")
   val EBREAKVS  =           RW(    17).withReset(0.U).withDescription("Enter Debug Mode on VS-mode EBREAK.")
   val EBREAKVU  =           RW(    16).withReset(0.U).withDescription("Enter Debug Mode on VU-mode EBREAK.")
   val EBREAKM   =           RW(    15).withReset(0.U).withDescription("Enter Debug Mode on M-mode EBREAK.")
@@ -368,6 +369,10 @@ class DcsrBundle extends CSRBundle {
   val NMIP      =           RO(     3).withReset(0.U).withDescription("Indicates pending non-maskable interrupt state while in Debug Mode.")
   val STEP      =           RW(     2).withReset(0.U).withDescription("Enable single-step execution.")
   val PRV       =     PrivMode( 1,  0).withReset(PrivMode.M).withDescription("Privilege mode active before entering Debug Mode.")
+
+  if (hasZicfilp) {
+    PELP.setRW()
+  }
 }
 
 object DcsrDebugVer extends CSREnum with ROApply {

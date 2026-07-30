@@ -90,6 +90,12 @@ object RSFeedbackType {
   }
 }
 
+// Zicfilp
+class ZicfilpInfo(implicit p: Parameters) extends XSBundle {
+  val ZicfilpJalr = Bool()
+  val ZicfilpLPADValid = Bool()
+}
+
 // Dequeue DecodeWidth insts from Ibuffer
 class CtrlFlow(implicit p: Parameters) extends XSBundle {
   val instr = UInt(32.W)
@@ -231,6 +237,11 @@ class Redirect(implicit p: Parameters) extends FrontendRedirect {
   val debug_runahead_checkpoint_id = UInt(64.W)
   val debugIsCtrl = Bool()
   val debugIsMemVio = Bool()
+
+  // Zicfilp
+  val ZicfilpJalr = OptionWrapper(HasZicfilp, Bool())
+  val ZicfilpXRetValid = OptionWrapper(HasZicfilp, Bool())
+  val ZicfilpRetELP = OptionWrapper(HasZicfilp, Bool())
 
   def flushItself() = RedirectLevel.flushItself(level)
 

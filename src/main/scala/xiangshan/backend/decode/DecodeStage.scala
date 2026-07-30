@@ -32,6 +32,44 @@ import xiangshan.backend.fu.wrapper.CSRToDecode
 import yunsuan.VpermType
 import xiangshan.frontend.ftq.FtqPtr
 
+// Zicfilp
+class SpecZicfilpIO(implicit p: Parameters) extends XSBundle {
+  val enable = Input(Bool())
+  val redirect = Flipped(ValidIO(Bool()))
+  val valid = Input(Vec(DecodeWidth, Bool()))
+  val fire = Input(Vec(DecodeWidth, Bool()))
+  val isJalr = Input(Vec(DecodeWidth, Bool()))
+  val isLPAD = Input(Vec(DecodeWidth, Bool()))
+  val exception = Output(Vec(DecodeWidth, Bool()))
+  val lpadValid = Output(Vec(DecodeWidth, Bool()))
+}
+
+class SpecZicfilp(implicit p: Parameters) extends XSModule {
+  val io = IO(new SpecZicfilpIO)
+
+  val speculativeELP = RegInit(false.B)
+  val outputELP = Wire(Vec(DecodeWidth + 1, Bool()))
+  val nextELP = Wire(Vec(DecodeWidth + 1, Bool()))
+  outputELP.head := speculativeELP
+  nextELP.head := speculativeELP
+
+  for (i <- 0 until DecodeWidth) {
+    val checkLandingPad = io.valid(i) && outputELP(i)
+    io.exception(i) := io.enable && checkLandingPad && !io.isLPAD(i)
+    io.lpadValid(i) := io.enable && checkLandingPad && io.isLPAD(i)
+    outputELP(i + 1) := Mux(io.valid(i), io.isJalr(i), outputELP(i))
+    nextELP(i + 1) := Mux(io.fire(i), io.isJalr(i), nextELP(i))
+  }
+
+  when(io.redirect.valid) {
+    speculativeELP := io.redirect.bits
+  }.elsewhen(!io.enable) {
+    speculativeELP := false.B
+  }.otherwise {
+    speculativeELP := nextELP.last
+  }
+}
+
 class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   // params alias
   private val numIntRegSrc = backendParams.numIntRegSrc
@@ -42,6 +80,8 @@ class DecodeStageIO(implicit p: Parameters) extends XSBundle {
   private val numVecRatPorts = numVecRegSrc
 
   val redirect = Flipped(ValidIO(new Redirect))
+  // Zicfilp
+  val ZicfilpRedirect = OptionWrapper(HasZicfilp, Flipped(ValidIO(Bool())))
   val canAccept = Output(Bool())
   // from Ibuffer
   val in = Vec(DecodeWidth, Flipped(DecoupledIO(new DecodeInUop)))
@@ -236,6 +276,21 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     finalDecodedInstValid(i) := Mux(complexNum > i.U, complexDecodedInstValid(i), simplePrefixVec(i.U - complexNum))
   }
 
+  // Zicfilp
+  val specZicfilp = Option.when(HasZicfilp)(Module(new SpecZicfilp))
+  specZicfilp.foreach { spec =>
+    spec.io.enable := io.fromCSR.enableZicfilp.get
+    spec.io.redirect := io.ZicfilpRedirect.get
+    for (i <- 0 until DecodeWidth) {
+      spec.io.valid(i) :=
+        finalDecodedInstValid(i) &&
+        !io.fromRob.isResumeVType && !io.redirect.valid
+      spec.io.fire(i) := spec.io.valid(i) && io.out(i).ready
+      spec.io.isJalr(i) := finalDecodedInst(i).ZicfilpInfos.get.ZicfilpJalr
+      spec.io.isLPAD(i) := finalDecodedInst(i).ZicfilpLPAD.get
+    }
+  }
+
   /**
    * Generate output of DecodeStage. Pass finalDecodedInst to output as decoded instructions.
    * Note that finalDecodedInst is generated in order.
@@ -255,6 +310,15 @@ class DecodeStage(implicit p: Parameters) extends XSModule
     }.reduce(_ || _)
     inst.bits.srcType(3) := Mux(srcType0123HasV0, SrcType.v0, finalDecodedInst(i).srcType(3))
     inst.bits.debug.foreach(_.debug_seqNum.uopIdx := inst.bits.uopIdx)
+    // Zicfilp
+    specZicfilp.foreach { spec =>
+      inst.bits.ZicfilpInfos.get.ZicfilpLPADValid := spec.io.lpadValid(i)
+      when(spec.io.lpadValid(i)) {
+        inst.bits.lsrc(0) := 7.U
+        inst.bits.srcType(0) := SrcType.reg
+      }
+      inst.bits.exceptionVec(ExceptionNO.EX_SWC) := spec.io.exception(i)
+    }
   }
 
   io.out.map(x =>

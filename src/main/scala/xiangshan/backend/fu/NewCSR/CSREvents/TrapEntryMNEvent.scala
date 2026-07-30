@@ -10,7 +10,7 @@ import xiangshan.backend.fu.NewCSR._
 import xiangshan.AddrTransType
 
 class TrapEntryMNEventOutput extends Bundle with EventUpdatePrivStateOutput with EventOutputBase  {
-  val mnstatus = ValidIO((new MnstatusBundle ).addInEvent(_.MNPP, _.MNPV, _.NMIE))
+  val mnstatus = ValidIO((new MnstatusBundle ).addInEvent(_.MNPP, _.MNPV, _.NMIE, _.MNPELP))
   val mnepc    = ValidIO((new Epc           ).addInEvent(_.epc))
   val mncause  = ValidIO((new CauseBundle   ).addInEvent(_.Interrupt, _.ExceptionCode))
 }
@@ -48,6 +48,7 @@ class TrapEntryMNEventModule(implicit val p: Parameters) extends Module with CSR
   out.mnstatus.bits.MNPP         := current.privState.PRVM
   out.mnstatus.bits.MNPV         := current.privState.V
   out.mnstatus.bits.NMIE         := 0.U
+  out.mnstatus.bits.MNPELP       := current.ZicfilpELP.getOrElse(false.B)
   out.mnepc.bits.epc             := Mux(isFetchMalAddr, in.fetchMalTval(63, 1), trapPC(63, 1))
   out.mncause.bits.Interrupt     := isInterrupt
   out.mncause.bits.ExceptionCode := highPrioTrapNO

@@ -67,7 +67,7 @@ trait MachineLevel { self: NewCSR =>
   })
     .setAddr(Mmpt)) else None
 
-  val mstatus = Module(new MstatusModule)
+  val mstatus = Module(new MstatusModule(HasZicfilp))
     .setAddr(CSRs.mstatus)
 
   val misa = Module(new CSRModule("Misa", new MisaBundle))
@@ -210,7 +210,7 @@ trait MachineLevel { self: NewCSR =>
     }
   }).setAddr(CSRs.mvip)
 
-  val menvcfg = Module(new CSRModule("Menvcfg", new MEnvCfg))
+  val menvcfg = Module(new CSRModule("Menvcfg", new MEnvCfg(HasZicfilp)))
     .setAddr(CSRs.menvcfg)
 
   val mcountinhibit = Module(new CSRModule("Mcountinhibit", new McountinhibitBundle){
@@ -359,7 +359,10 @@ trait MachineLevel { self: NewCSR =>
 
   val mseccfg = Module(new CSRModule("Mseccfg", new CSRBundle {
     val PMM   = EnvPMM(33, 32, wNoEffect).withReset(EnvPMM.Disable).withDescription("Machine security memory protection mode from the Smmpm extension.")
-    val MLPE  = RO(10).withDescription("Machine landing-pad enable from the Zicfilp extension.")
+    val MLPE  = RO(10).withReset(0.U).withDescription("Machine landing-pad enable from the Zicfilp extension.")
+    if (HasZicfilp) {
+      MLPE.setRW()
+    }
     val SSEED = RO( 9).withDescription("Seed CSR enable from the Zkr extension.")
     val USEED = RO( 8).withDescription("User seed CSR enable from the Zkr extension.")
     val RLB   = RO( 2).withDescription("Rule-locking bypass control from the Smepmp extension.")
@@ -479,7 +482,7 @@ trait MachineLevel { self: NewCSR =>
 
   val mncause = Module(new CSRModule("Mncause", new CauseBundle) with TrapEntryMNEventSinkBundle)
     .setAddr(CSRs.mncause)
-  val mnstatus = Module(new CSRModule("Mnstatus", new MnstatusBundle)
+  val mnstatus = Module(new CSRModule("Mnstatus", new MnstatusBundle(HasZicfilp))
     with TrapEntryMNEventSinkBundle
     with MNretEventSinkBundle{
     // NMIE write 0 with no effect
@@ -571,7 +574,7 @@ class MmptBundle extends CSRBundle { //HasMptCheck
   val PPN = RW(PPNLengthMpt-1, 0).withReset(0.U).withDescription("Mpt level3 talble adress.")
 }
 
-class MstatusBundle extends CSRBundle {
+class MstatusBundle(hasZicfilp: Boolean = false) extends CSRBundle {
 
   val SIE  = CSRRWField     (1).withReset(0.U).withDescription("Global interrupt enable for S-mode.")
   val MIE  = CSRRWField     (3).withReset(0.U).withDescription("Global interrupt enable for M-mode.")
@@ -589,6 +592,7 @@ class MstatusBundle extends CSRBundle {
   val TVM  = CSRRWField     (20).withReset(0.U).withDescription("Trap virtual-memory management operations in S-mode when set.")
   val TW   = CSRRWField     (21).withReset(0.U).withDescription("Trap WFI in lower privilege modes when set.")
   val TSR  = CSRRWField     (22).withReset(0.U).withDescription("Trap SRET when set.")
+  val SPELP = CSRROField    (23).withReset(0.U).withDescription("Saved landing-pad state for traps into S-mode.")
   val SDT  = CSRRWField     (24).withReset(0.U).withDescription("S-mode disable-trap bit used by the Ssdbltrp extension.")
   val UXL  = XLENField      (33, 32).withReset(XLENField.XLEN64).withDescription("Effective XLEN for U-mode.")
   val SXL  = XLENField      (35, 34).withReset(XLENField.XLEN64).withDescription("Effective XLEN for S-mode.")
@@ -596,13 +600,20 @@ class MstatusBundle extends CSRBundle {
   val MBE  = CSRROField     (37).withReset(0.U).withDescription("M-mode endianness selector.")
   val GVA  = CSRRWField     (38).withReset(0.U).withDescription("Indicates that trap information was derived from a guest virtual address.")
   val MPV  = VirtMode       (39).withReset(0.U).withDescription("Saved virtualization mode from before trap entry to M-mode.")
+  val MPELP = CSRROField    (41).withReset(0.U).withDescription("Saved landing-pad state for traps into M-mode.")
   val MDT  = CSRRWField     (42).withReset(mdtInit.U).withDescription("M-mode disable-trap bit used by the Smdbltrp extension.")
   val SD   = CSRROField     (63,
     (_, _) => FS === ContextStatus.Dirty || VS === ContextStatus.Dirty
   ).withDescription("Dirty summary bit for the floating-point or vector context.")
+
+  if (hasZicfilp) {
+    SPELP.setRW()
+    MPELP.setRW()
+  }
 }
 
-class MstatusModule(implicit override val p: Parameters) extends CSRModule("MStatus", new MstatusBundle)
+class MstatusModule(hasZicfilp: Boolean)(implicit override val p: Parameters)
+  extends CSRModule("MStatus", new MstatusBundle(hasZicfilp))
   with TrapEntryMEventSinkBundle
   with TrapEntryHSEventSinkBundle
   with DretEventSinkBundle
@@ -613,10 +624,10 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   with HasMachineEnvBundle
 {
   val mstatus = IO(Output(bundle))
-  val sstatus = IO(Output(new SstatusBundle))
+  val sstatus = IO(Output(new SstatusBundle(hasZicfilp)))
   val sstatusRdata = IO(Output(UInt(64.W)))
 
-  val wAliasSstatus = IO(Input(new CSRAddrWriteBundle(new SstatusBundle)))
+  val wAliasSstatus = IO(Input(new CSRAddrWriteBundle(new SstatusBundle(hasZicfilp))))
   for ((name, field) <- wAliasSstatus.wdataFields.elements) {
     reg.elements(name).asInstanceOf[CSREnumType].addOtherUpdate(
       wAliasSstatus.wen && field.asInstanceOf[CSREnumType].isLegal,
@@ -667,12 +678,16 @@ class MstatusModule(implicit override val p: Parameters) extends CSRModule("MSta
   sstatusRdata := sstatus.asUInt
 }
 
-class MnstatusBundle extends CSRBundle {
+class MnstatusBundle(hasZicfilp: Boolean = false) extends CSRBundle {
   // OpenSBI does not support Smrnmi yet, so NMIE resets enabled for bring-up.
   val NMIE   = CSRRWField  (3).withReset(1.U).withDescription("Enable non-maskable interrupt handling.")
   val MNPV   = VirtMode    (7).withReset(0.U).withDescription("Saved virtualization mode for resumable NMI handling.")
   val MNPELP = RO          (9).withReset(0.U).withDescription("Saved landing-pad state for resumable NMI handling.")
   val MNPP   = PrivMode    (12, 11).withReset(PrivMode.U).withDescription("Saved privilege level for resumable NMI handling.")
+
+  if (hasZicfilp) {
+    MNPELP.setRW()
+  }
 }
 
 class MisaBundle extends CSRBundle {
@@ -781,7 +796,10 @@ class Mtval2Bundle extends FieldInitBundle(Some("Guest physical address or addit
 
 class MhpmcounterBundle extends FieldInitBundle(Some("Hardware performance-monitoring counter value."))
 
-class MEnvCfg extends EnvCfg {
+class MEnvCfg(hasZicfilp: Boolean = false) extends EnvCfg {
+  if (hasZicfilp) {
+    this.LPE.setRW()
+  }
   if (CSRConfig.EXT_SSTC) {
     this.STCE.setRW().withReset(1.U)
   }

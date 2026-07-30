@@ -51,11 +51,24 @@ class CompressUnit(implicit p: Parameters) extends XSModule{
 
   val noExc = io.in.map(in => !in.bits.exceptionVec.orR && !TriggerAction.isDmode(in.bits.trigger))
   val uopCanCompress = io.in.map(_.bits.canRobCompress)
-  val canCompress = io.in.zip(noExc).zip(uopCanCompress).map { case ((in, noExc), canComp) =>
-    in.valid && in.bits.lastUop && noExc && canComp
+  // Zicfilp: ELP-changing instructions must keep a dedicated ROB entry.
+  val zicfilpCanCompress = io.in.map { in =>
+    if (HasZicfilp) {
+      !in.bits.ZicfilpInfos.get.ZicfilpJalr && !in.bits.ZicfilpLPAD.get
+    } else {
+      true.B
+    }
   }
-  val extendedCanCompress = canCompress.zip(io.in).zip(io.oddFtqVec).flatMap { case ((canComp, in), oddFtq) =>
-    Seq((FuType.isBlockBackCompress(in.bits.fuType) && in.valid && backendParams.robCompressEn.B) || canComp ,canComp && !oddFtq)
+  val canCompress = io.in.zip(noExc).zip(uopCanCompress).zip(zicfilpCanCompress).map {
+    case (((in, noExc), canComp), zicfilpCanComp) =>
+      in.valid && in.bits.lastUop && noExc && canComp && zicfilpCanComp
+  }
+  val extendedCanCompress = canCompress.zip(io.in).zip(io.oddFtqVec).zip(zicfilpCanCompress).flatMap {
+    case (((canComp, in), oddFtq), zicfilpCanComp) =>
+      Seq(
+        ((FuType.isBlockBackCompress(in.bits.fuType) && in.valid && backendParams.robCompressEn.B) || canComp) && zicfilpCanComp,
+        canComp && !oddFtq
+      )
   }
 
   val compressTable = (0 until 1 << (2 * RenameWidth)).filter { baseCandidate =>

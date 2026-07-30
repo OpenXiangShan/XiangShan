@@ -184,6 +184,12 @@ case class FuConfig (
 
   def isJmp: Boolean = fuType == FuType.jmp
 
+  // Zicfilp
+  def effectiveExceptionOut(hasZicfilp: Boolean): Seq[Int] = {
+    val zicfilpExceptions = if (hasZicfilp && isJmp) Seq(softwareCheck) else Seq.empty
+    (exceptionOut ++ zicfilpExceptions).distinct.sorted
+  }
+
   def isFence: Boolean = fuType == FuType.fence
 
   def isVecArith: Boolean = fuType == FuType.vialuF || fuType == FuType.vimac ||

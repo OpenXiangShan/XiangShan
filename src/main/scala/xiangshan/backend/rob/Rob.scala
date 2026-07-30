@@ -73,7 +73,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
     val exuWriteback: MixedVec[ValidIO[WriteBackRobBundle]] = Flipped(params.genWrite2RobBundles)
     val writebackNums = Flipped(Vec(writeback.size, ValidIO(UInt(writeback.size.U.getWidth.W))))
-    val writebackNeedFlush = Input(Vec(params.allExuParams.filter(_.needExceptionGen).length, Bool()))
+    val writebackNeedFlush = Input(Vec(params.allExuParams.filter(_.needExceptionGen(HasZicfilp)).length, Bool()))
     val commits = Output(new RobCommitIO)
     val trace = new Bundle {
       val blockCommit = Input(Bool())
@@ -1212,7 +1212,7 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   }
 
   println(s"ExceptionGen:")
-  println(s"num of exceptions: ${params.numException}")
+  println(s"num of exceptions: ${params.numException(HasZicfilp)}")
   require(exceptionWBs.length == exceptionGen.io.wb.length,
     f"exceptionWBs.length: ${exceptionWBs.length}, " +
       f"exceptionGen.io.wb.length: ${exceptionGen.io.wb.length}")

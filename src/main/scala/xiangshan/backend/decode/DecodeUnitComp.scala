@@ -196,6 +196,12 @@ class DecodeUnitComp()(implicit p : Parameters) extends XSModule with DecodeUnit
     dst.firstUop := false.B
     dst.lastUop := false.B
     dst.vlsInstr := false.B
+    // Zicfilp
+    if (HasZicfilp) {
+      dst.ZicfilpInfos.get.ZicfilpJalr := false.B
+      dst.ZicfilpInfos.get.ZicfilpLPADValid := false.B
+      dst.ZicfilpLPAD.get := false.B
+    }
   }
 
   csBundle(0).firstUop := true.B
