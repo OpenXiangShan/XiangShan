@@ -22,16 +22,15 @@ import xiangshan.frontend.bpu.TageTableInfo
 
 case class TageParameters(
     TableInfos: Seq[TageTableInfo] = Seq(
-      // TageTableInfo(default active size, default active ways, static history length)
-      // default active size = default active sets * default active ways * NumBanks
-      new TageTableInfo(4096, 2, 4),
-      new TageTableInfo(4096, 2, 9),
-      new TageTableInfo(4096, 2, 17),
-      new TageTableInfo(4096, 2, 29),
-      new TageTableInfo(4096, 2, 56),
-      new TageTableInfo(4096, 2, 109),
-      new TageTableInfo(4096, 2, 211),
-      new TageTableInfo(4096, 2, 397)
+      // (NumSetsLog2, NumWays, HistoryLength); NumSets is the number of sets in each bank.
+      new TageTableInfo(9, 2, 4),
+      new TageTableInfo(9, 2, 9),
+      new TageTableInfo(9, 2, 17),
+      new TageTableInfo(9, 2, 29),
+      new TageTableInfo(9, 2, 56),
+      new TageTableInfo(9, 2, 109),
+      new TageTableInfo(9, 2, 211),
+      new TageTableInfo(9, 2, 397)
     ),
     NumBanks:              Int = 4,  // to alleviate read-write conflicts in single-port SRAM
     TagWidth:              Int = 13, // default active tag width
@@ -53,9 +52,9 @@ case class TageParameters(
     MaxUsefulCtrWidth:     Int = 2,
     EnableTageTrace:       Boolean = false
 ) {
-  require(TableInfos.forall(info => info.getNumSets(NumBanks) >= MinNumSets))
-  require(TableInfos.forall(info => info.getNumSets(NumBanks) <= MaxNumSets))
-  require(TableInfos.forall(info => isPow2(info.getNumSets(NumBanks))))
+  require(TableInfos.forall(info => info.NumSets >= MinNumSets))
+  require(TableInfos.forall(info => info.NumSets <= MaxNumSets))
+  require(TableInfos.forall(info => isPow2(info.NumSets)))
   require(TableInfos.forall(info => info.NumWays >= MinNumWays && info.NumWays <= MaxNumWays))
   require(TagWidth >= MinTagWidth && TagWidth <= MaxTagWidth)
   require(UsefulCtrWidth >= MinUsefulCtrWidth && UsefulCtrWidth <= MaxUsefulCtrWidth)

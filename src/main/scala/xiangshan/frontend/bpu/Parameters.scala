@@ -86,8 +86,8 @@ trait HasBpuParameters extends HasFrontendParameters {
       val tage = bpuParameters.tageParameters
       Iterator.iterate(tage.MinNumSets)(_ * 2).takeWhile(_ <= tage.MaxNumSets).flatMap { numSets =>
         (tage.MinTagWidth to tage.MaxTagWidth).flatMap { tagWidth =>
-          new TageTableInfo(numSets * info.NumWays * tage.NumBanks, info.NumWays, info.HistoryLength)
-            .getFoldedHistoryInfoSet(tage.NumBanks, tagWidth)
+          new TageTableInfo(log2Ceil(numSets), info.NumWays, info.HistoryLength)
+            .getFoldedHistoryInfoSet(tagWidth)
         }
       }
     }.toSet ++

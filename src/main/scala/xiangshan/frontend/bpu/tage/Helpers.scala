@@ -29,12 +29,12 @@ trait TopHelper extends HasTageParameters {
       allFoldedPathHist: PhrAllFoldedHistories,
       tableConfigs:      Seq[TageTableConfig],
       runtimeConfig:     TageRuntimeConfig
-  ): Vec[TageFoldedHist] = {
+  ): Seq[TageFoldedHist] = {
     require(tableConfigs.length == NumTables)
-    VecInit(TableInfos.zip(tableConfigs).map { case (tableInfo, tableConfig) =>
+    TableInfos.zip(tableConfigs).map { case (tableInfo, tableConfig) =>
       val physicalTableInfo = new TageTableInfo(
-        MaxNumSets * tableInfo.NumWays * NumBanks,
-        tableInfo.NumWays,
+        MaxNumSetsLog2,
+        MaxNumWays,
         tableInfo.HistoryLength
       )
       val candidates = for {
@@ -42,8 +42,8 @@ trait TopHelper extends HasTageParameters {
         tagWidth <- SupportedTagWidths
       } yield {
         val candidateInfo =
-          new TageTableInfo(numSets * tableInfo.NumWays * NumBanks, tableInfo.NumWays, tableInfo.HistoryLength)
-        val tageFoldedHist = candidateInfo.getTageFoldedHistoryInfo(NumBanks, tagWidth).map { histInfo =>
+          new TageTableInfo(log2Ceil(numSets), tableInfo.NumWays, tableInfo.HistoryLength)
+        val tageFoldedHist = candidateInfo.getTageFoldedHistoryInfo(tagWidth).map { histInfo =>
           allFoldedPathHist.getHistWithInfo(histInfo).foldedHist
         }
         val foldedHist = Wire(new TageFoldedHist()(p, physicalTableInfo))
@@ -53,7 +53,7 @@ trait TopHelper extends HasTageParameters {
         (tableConfig.numSetsLog2 === log2Ceil(numSets).U && runtimeConfig.tagWidth === tagWidth.U) -> foldedHist
       }
       MuxCase(candidates.head._2, candidates)
-    })
+    }
   }
 
   def getLongestHistTableOH(hitTableMask: Seq[Bool]): Seq[Bool] =

@@ -44,7 +44,9 @@ class TageTable(
 
   println(f"TageTable[$tableIdx]:")
   println(f"  Physical size(set, bank, way): $NumSets * $NumBanks * $NumWays = ${NumSets * NumBanks * NumWays}")
-  println(f"  Default active size: ${info.Size}")
+  println(
+    f"  Default active size(set, bank, way): ${info.NumSets} * $NumBanks * ${info.NumWays} = ${info.NumSets * NumBanks * info.NumWays}"
+  )
   println(f"  History length: ${info.HistoryLength}")
   println(f"  Address fields:")
   addrFields.show(indent = 4)

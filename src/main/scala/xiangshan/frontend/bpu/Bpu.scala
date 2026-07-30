@@ -253,7 +253,7 @@ class Bpu(implicit p: Parameters) extends BpuModule with HalfAlignHelper {
       config.numSetsLog2 := Constantin
         .createRecord(
           s"tageTableNumSetsLog2_${hartId}_${tableIdx}",
-          initValue = log2Ceil(info.getNumSets(bpuParameters.tageParameters.NumBanks))
+          initValue = info.NumSetsLog2
         )(config.numSetsLog2.getWidth - 1, 0)
       config.numWays := Constantin
         .createRecord(s"tageTableNumWays_${hartId}_${tableIdx}", initValue = info.NumWays)(
