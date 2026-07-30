@@ -378,7 +378,7 @@ jobs:
       - name: Check XSCache
         run: cd XSCache && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/master
       - name: Check ChiselAIA
-        run: cd ChiselAIA && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/kunminghu-v3
+        run: cd ChiselAIA && git fetch --all && git merge-base --is-ancestor `git rev-parse HEAD` origin/main
 
   # Check format
   check-format:
