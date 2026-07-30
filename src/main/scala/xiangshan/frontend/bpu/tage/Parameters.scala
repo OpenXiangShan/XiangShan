@@ -22,16 +22,15 @@ import xiangshan.frontend.bpu.TageTableInfo
 
 case class TageParameters(
     TableInfos: Seq[TageTableInfo] = Seq(
-      // TageTableInfo(Size, NumWays, HistoryLength)
-      // Size = NumSets * NumWays * NumBanks
-      new TageTableInfo(4096, 2, 4),
-      new TageTableInfo(4096, 2, 9),
-      new TageTableInfo(4096, 2, 17),
-      new TageTableInfo(4096, 2, 29),
-      new TageTableInfo(4096, 2, 56),
-      new TageTableInfo(4096, 2, 109),
-      new TageTableInfo(4096, 2, 211),
-      new TageTableInfo(4096, 2, 397)
+      // (NumSetsLog2, NumWays, HistoryLength); NumSets is the number of sets in each bank.
+      new TageTableInfo(9, 2, 4),
+      new TageTableInfo(9, 2, 9),
+      new TageTableInfo(9, 2, 17),
+      new TageTableInfo(9, 2, 29),
+      new TageTableInfo(9, 2, 56),
+      new TageTableInfo(9, 2, 109),
+      new TageTableInfo(9, 2, 211),
+      new TageTableInfo(9, 2, 397)
     ),
     NumBanks:              Int = 4, // to alleviate read-write conflicts in single-port SRAM
     TagWidth:              Int = 13,
@@ -66,14 +65,14 @@ trait HasTageParameters extends HasBpuParameters {
   def NumTables:     Int = TableInfos.length
   def TableIdxWidth: Int = log2Ceil(NumTables)
 
-  def MaxNumSets:     Int = TableInfos.map(_.getNumSets(NumBanks)).max
+  def MaxNumSets:     Int = TableInfos.map(_.NumSets).max
   def MaxSetIdxWidth: Int = log2Ceil(MaxNumSets)
 
   def MaxNumWays:     Int = TableInfos.map(_.NumWays).max
   def MaxWayIdxWidth: Int = log2Ceil(MaxNumWays)
 
   // per table parameters
-  def NumSets(implicit info:     TageTableInfo): Int = info.getNumSets(NumBanks)
+  def NumSets(implicit info:     TageTableInfo): Int = info.NumSets
   def SetIdxWidth(implicit info: TageTableInfo): Int = log2Ceil(NumSets)
   def NumWays(implicit info:     TageTableInfo): Int = info.NumWays
   def WayIdxWidth(implicit info: TageTableInfo): Int = log2Ceil(NumWays)

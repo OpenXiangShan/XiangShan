@@ -83,7 +83,7 @@ trait HasBpuParameters extends HasFrontendParameters {
   // phr history
   def AllFoldedHistoryInfo: Set[FoldedHistoryInfo] =
     bpuParameters.tageParameters.TableInfos.map {
-      _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.NumBanks, bpuParameters.tageParameters.TagWidth)
+      _.getFoldedHistoryInfoSet(bpuParameters.tageParameters.TagWidth)
     }.reduce(_ ++ _) ++
       bpuParameters.ittageParameters.TableInfos.map {
         _.getFoldedHistoryInfoSet(bpuParameters.ittageParameters.TagWidth, bpuParameters.ittageParameters.NumBanks)

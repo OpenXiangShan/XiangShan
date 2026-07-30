@@ -111,11 +111,11 @@ class MinimalConfig(n: Int = 1) extends Config(
               ),
               tageParameters = TageParameters(
                 TableInfos = Seq(
-                  // Size, NumWays, HistoryLength
-                  new TageTableInfo(1024, 2, 6),
-                  new TageTableInfo(1024, 2, 9),
-                  new TageTableInfo(1024, 2, 17),
-                  new TageTableInfo(1024, 2, 31)
+                  // (NumSetsLog2, NumWays, HistoryLength); NumSets is the number of sets in each bank.
+                  new TageTableInfo(7, 2, 6),
+                  new TageTableInfo(7, 2, 9),
+                  new TageTableInfo(7, 2, 17),
+                  new TageTableInfo(7, 2, 31)
                 ),
               ),
               utageParameters = MicroTageParameters(

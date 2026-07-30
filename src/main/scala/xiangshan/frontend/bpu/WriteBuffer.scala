@@ -54,7 +54,6 @@ class WriteBuffer[T <: WriteReqBundle](
 )(implicit p: Parameters) extends XSModule {
   require(numEntries >= 0)
   require(numPorts >= 1)
-  require(numPorts <= numEntries)
   class WriteBufferIO extends Bundle {
     val write:     Vec[DecoupledIO[T]] = Vec(numPorts, Flipped(DecoupledIO(gen)))
     val read:      Vec[DecoupledIO[T]] = Vec(numPorts, DecoupledIO(gen))
