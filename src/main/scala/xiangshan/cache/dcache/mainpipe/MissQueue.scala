@@ -937,7 +937,7 @@ class MissEntry(edge: TLEdgeOut, reqNum: Int)(implicit p: Parameters) extends DC
                                     (!io.queryME(i).req.bits.isFromPrefetch || io.memSetPattenDetected)
     }
     val _signals = computeMatchSignals(req, io.queryME(i).req.bits)
-    io.queryME(i).secondary_ready  := should_merge(_signals, io.queryME(i).req.bits)
+    io.queryME(i).secondary_ready  := should_merge(_signals, io.queryME(i).req.bits) && req_valid
     io.queryME(i).secondary_reject := should_reject(_signals, io.queryME(i).req.bits)
     io.queryME(i).block_match := _signals.block_match && req_valid
   }
