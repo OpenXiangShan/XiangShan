@@ -79,10 +79,6 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     // assert(!(RegNext(io.read(rport_index).fire && PopCount(io.read(rport_index).bits.way_en) > 1.U)))
     way_en_htag(rport_index) := io.read(rport_index).bits.way_en
   })
-
-  val load_req_valid = io.read.map(_.valid)
-  val load_req_lqIdx = io.read.map(_.bits.lqIdx)
-
   
   // Age matrix of lqIdx: if i < j and matrix(i, j) == true, then i is older than j
   val lqIdx_age_matrix = Seq.tabulate(LoadPipelineWidth)(i => Seq.tabulate(LoadPipelineWidth)(j => {
@@ -123,15 +119,18 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
     if (i == j) false.B else (way_en_htag(i) & way_en_htag(j)) =/= 0.U
   }))
   val rr_conflict_evict = (0 until LoadPipelineWidth).map(i => {
-    (0 until LoadPipelineWidth).map(j => {
-      if (i > j) {
-        lqIdx_age_matrix(j)(i) && rr_bank_overlap(j)(i) && rr_way_overlap(j)(i)
-      } else if (i < j) {
-        !lqIdx_age_matrix(i)(j) && rr_bank_overlap(i)(j) && rr_way_overlap(i)(j)
-      } else {
-        false.B
-      }
-    }).reduce(_ || _)
+    if (i == 0) false.B else {
+      (0 until i).map(j => rr_bank_overlap(j)(i) && rr_way_overlap(j)(i)).reduce(_ || _)
+    }  // To save timing (of loadpipe_en), give up below age matrix check.
+    // (0 until LoadPipelineWidth).map(j => {
+    //   if (i > j) {
+    //     lqIdx_age_matrix(j)(i) && rr_bank_overlap(j)(i) && rr_way_overlap(j)(i)
+    //   } else if (i < j) {
+    //     !lqIdx_age_matrix(i)(j) && rr_bank_overlap(i)(j) && rr_way_overlap(i)(j)
+    //   } else {
+    //     false.B
+    //   }
+    // }).reduce(_ || _)
   })
 
   // rr_bank_conflict_oldest --> rr_conflict_evict
@@ -195,9 +194,7 @@ class HTADataArray(implicit p: Parameters) extends AbstractBankedDataArray {
         //     +-----------------+
         val loadpipe_en = VecInit(Seq.tabulate(LoadPipelineWidth)(i => {
           io.read(i).valid && div_addrs(i) === div_index.U && (bank_addrs(i)(0) === bank_index.U || bank_addrs(i)(1) === bank_index.U && io.is128Req(i)) &&
-        //   way_en(i)(way_index) &&
-        //   !rr_bank_conflict_oldest(i)
-          !rr_conflict_evict(i) &&
+          // !rr_conflict_evict(i) &&    // To save timing (of sram_set_addr), remove this check.
           way_en_htag(i)(way_index)
         }))
         val readline_en = io.readline.valid && div_index.U === line_div_addr && line_way_en_htag(way_index)
