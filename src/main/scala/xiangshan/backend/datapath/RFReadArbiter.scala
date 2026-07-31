@@ -69,7 +69,8 @@ class OldestArbiter(pregWidth: Int, n: Int)(implicit p: Parameters) extends Modu
       val otherChanelIdxVec = chanelIdxVecReg.zipWithIndex.filter(_._2 != i).map(_._1)
       val indexLowerInvalidVec = validVecReg.zipWithIndex.filter(_._2 < i).map(!_._1)
       val olderThanOtherNum = PopCount(otherRobIdxVec.zip(otherChanelIdxVec).map {
-        case (thatRobidx, thatChanelIdx) => robIdxVecReg(i).isBefore(thatRobidx, chanelIdxVecReg(i), thatChanelIdx)
+        case (thatRobidx, thatChanelIdx) =>
+          robIdxVecReg(i).isBeforeWithChannel(thatRobidx, chanelIdxVecReg(i), thatChanelIdx)
       }.zip(otherValidVec).map(x => x._1 || !x._2))
       val otherValidNum = PopCount(otherValidVec)
       dontTouch(olderThanOtherNum)
