@@ -127,6 +127,8 @@ that boundary stable.
   dedicated test file named after that entrypoint. Do not hide runner contracts
   inside an unrelated feature test file.
 - Never use `git push -f` under any circumstances.
+- Never use `git merge` to incorporate remote code. When remote updates must
+  be integrated, use `git rebase` only.
 - Every log printed by the verification environment must help debug a real
   failure and be as short as practical. Do not add noisy, redundant, or
   narrative logging.
@@ -209,7 +211,8 @@ that boundary stable.
   judges the new model complete enough for validation; do not use intermediate
   failing runs as a substitute for finishing the rewrite.
 - Before pushing frontend work, run `proxychains git fetch origin <current-branch>` and then
-  `git rebase origin/<current-branch>`.
+  `git rebase origin/<current-branch>`. Do not replace this flow with
+  `git merge`.
 - Before changing backend-agent semantics or related logic, run
   `docs/agents/frontend-backend-agent.md` section `实现一致性最小检查项`
   in order: `必须项` first, then `建议项`.

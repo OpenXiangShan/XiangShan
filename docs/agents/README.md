@@ -40,6 +40,7 @@ Repository-wide background lives outside this directory:
   IFU design intent, migration context, and test-point provenance. Never use
   it as the current RTL or verification source of truth.
 - Never use `git push -f` under any circumstances.
+- Never use `git merge` to incorporate remote code; use `git rebase` only.
 
 Keep this file as a doc map rather than a second copy of detailed workflow or
 semantic rules.
