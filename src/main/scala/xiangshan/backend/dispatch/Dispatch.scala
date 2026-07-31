@@ -582,7 +582,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
     // check is drop amocas sta
     fromRenameUpdate(i).bits.isDropAmocasSta := fromRename(i).bits.isAMOCAS && fromRename(i).bits.uopIdx(0) === 0.U
     // update singleStep
-    fromRenameUpdate(i).bits.singleStep := io.singleStep && (fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
+    fromRenameUpdate(i).bits.singleStep := io.singleStep && !fromRename(i).bits.robIdx.isSameEntry(robidxCanCommitStepping)
   }
   var temp = 0
   allIssueParams.zipWithIndex.map{ case(issue, iqidx) => {
@@ -770,7 +770,7 @@ class Dispatch(implicit p: Parameters) extends XSModule with HasPerfEvents with 
       fromRenameUpdate(i).bits.loadWaitBit := isLs(i) && !isStore(i) && fromRename(i).bits.loadWaitBit
     }
     // // update singleStep, singleStep exception only enable in next machine instruction.
-    updatedUop(i).singleStep := io.singleStep && (fromRename(i).bits.robIdx =/= robidxCanCommitStepping)
+    updatedUop(i).singleStep := io.singleStep && !fromRename(i).bits.robIdx.isSameEntry(robidxCanCommitStepping)
     XSDebug(
       fromRename(i).fire &&
         (TriggerAction.isDmode(updatedUop(i).trigger) || updatedUop(i).exceptionVec(breakPoint)), s"Debug Mode: inst ${i} has frontend trigger exception\n")

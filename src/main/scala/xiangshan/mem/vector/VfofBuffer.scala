@@ -88,7 +88,7 @@ class VfofBuffer(val param: ExeUnitParams)(implicit p: Parameters) extends VLSUM
 
 
   //Gather writeback information
-  val wbIsfof = io.mergeUopWriteback.map{ x => x.valid && x.bits.robIdx === entries.uop.robIdx }
+  val wbIsfof = io.mergeUopWriteback.map{ x => x.valid && x.bits.robIdx.isSameEntry(entries.uop.robIdx) }
 
   //Update uop vl
   io.mergeUopWriteback.map{_.ready := true.B}
