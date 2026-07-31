@@ -14,18 +14,21 @@ Use these documents in order for frontend verification work:
    analysis.
 3. `docs/agents/frontend-uncache-boundaries.md` for instruction uncache
    boundary cases around MMIO/non-cacheable frontend fetch.
-4. `docs/agents/frontend-mmio-nonmmio-switch-risks.md` for Chisel-level risk
+4. `docs/agents/frontend-icache-rtl-update-b7e4c56fa-0053df46b.md` for the
+   ICache RTL delta and verification impact between the two named frontend
+   branch synchronization points.
+5. `docs/agents/frontend-mmio-nonmmio-switch-risks.md` for Chisel-level risk
    points when frontend fetch switches between MMIO and non-MMIO regions.
-5. `docs/agents/frontend-backend-agent.md` for normative backend-agent
+6. `docs/agents/frontend-backend-agent.md` for normative backend-agent
    semantics.
    Before changing backend-agent semantics or related code, run section
    `实现一致性最小检查项` in order: `必须项` first, then `建议项`.
-6. `docs/agents/frontend-backend-model-review.md` for code-level reading
+7. `docs/agents/frontend-backend-model-review.md` for code-level reading
    guidance and current hotspots in
    `src/test/python/Frontend/env/backend_model.py`.
-7. `docs/agents/frontend-backend-controlflow/README.md` for RTL/control-flow
+8. `docs/agents/frontend-backend-controlflow/README.md` for RTL/control-flow
    background around `resolve`, `redirect`, `commit`, and `callRetCommit`.
-8. `docs/testbench/Guide_Doc/` for broader testbench reference on fixtures,
+9. `docs/testbench/Guide_Doc/` for broader testbench reference on fixtures,
    APIs, coverage, and test authoring.
 
 Repository-wide background lives outside this directory:

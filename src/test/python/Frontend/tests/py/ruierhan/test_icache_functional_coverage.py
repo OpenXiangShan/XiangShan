@@ -1,13 +1,28 @@
 from types import SimpleNamespace
 
-from env.funcov.py.icache.sampler import (
+from env.funcov.py.icache import (
+    ICACHE_MISSUNIT_SAMPLER_BIN_KEYS,
     ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
     ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
-    _MAIN,
-    _PREFETCH_SIGNALS,
-    _SIGNALS,
+    ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS,
+    ICACHE_HITMISS_SAMPLER_BIN_KEYS,
+    sample_icache_missunit_coverage,
     sample_icache_mainpipe_coverage,
     sample_icache_prefetchpipe_coverage,
+    sample_icache_waylookup_coverage,
+    sample_icache_hitmiss_coverage,
+)
+from env.funcov.py.icache.icache_mainpipe_funcov import (
+    _MAIN,
+    _SIGNALS,
+)
+from env.funcov.py.icache.icache_prefetchpipe_funcov import _PREFETCH_SIGNALS
+from env.funcov.py.icache.icache_waylookup_funcov import _SIGNALS as _WAYLOOKUP_SIGNALS
+from env.funcov.py.icache.icache_missunit_funcov import _ICACHE, _MISS, _TOP
+from env.funcov.py.icache.icache_hitmiss_funcov import (
+    _MAIN as _HITMISS_MAIN,
+    _MISS as _HITMISS_MISS,
+    _SIGNALS as _HITMISS_SIGNALS,
 )
 
 
@@ -44,19 +59,418 @@ class _Recorder:
     def set_prefetch_key(self, key, value):
         self.env.dut.set(_PREFETCH_SIGNALS[key][0], value)
 
+    def set_waylookup_key(self, key, value):
+        self.env.dut.set(_WAYLOOKUP_SIGNALS[key][0], value)
+
+    def set_waylookup_signal(self, key, value, index=0):
+        self.env.dut.set(_WAYLOOKUP_SIGNALS[key][index], value)
+
+    def set_missunit_signal(self, name, value):
+        self.env.dut.set(name, value)
+
+    def set_hitmiss_key(self, key, value):
+        self.env.dut.set(_HITMISS_SIGNALS[key][0], value)
+
 
 def _hit(recorder, group, bin_name):
     return any(hit[0] == group and hit[2] == bin_name for hit in recorder.hits)
 
 
 def test_icache_mainpipe_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 49
-    assert len(set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)) == 49
+    assert len(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS) == 42
+    assert len(set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)) == 42
 
 
 def test_icache_prefetchpipe_sampler_contract_has_one_key_per_leaf():
-    assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 24
-    assert len(set(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS)) == 24
+    assert len(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS) == 33
+    assert len(set(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS)) == 33
+
+
+def test_icache_missunit_sampler_contract_has_one_key_per_leaf():
+    assert len(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS) == 31
+    assert len(set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)) == 31
+
+
+def test_icache_waylookup_sampler_contract_has_one_key_per_leaf():
+    assert len(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS) == 42
+    assert len(set(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS)) == 42
+
+
+def test_icache_hitmiss_sampler_contract_has_one_key_per_leaf():
+    assert len(ICACHE_HITMISS_SAMPLER_BIN_KEYS) == 10
+    assert len(set(ICACHE_HITMISS_SAMPLER_BIN_KEYS)) == 10
+
+
+def _set_single_hit(recorder):
+    recorder.set_hitmiss_key("s1_valid", 1)
+    recorder.set_hitmiss_key("cross0", 0)
+    recorder.env.dut.set(_HITMISS_MAIN + "s1_hits_0_0", 1)
+    recorder.env.dut.set(_HITMISS_MAIN + "s1_wayLookupEntry_0_waymask_0", 1)
+
+
+def test_hitmiss_hit_path_leaves_use_dut_hit_and_protection_conditions():
+    recorder = _Recorder()
+    _set_single_hit(recorder)
+    recorder.set_hitmiss_key("req0_start", 0x1000)
+    recorder.set_hitmiss_key("req1_start", 0x2000)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 40)
+    assert _hit(recorder, "icache_hit_path", "continuous_same_line_sram_hit")
+
+    recorder = _Recorder()
+    recorder.set_hitmiss_key("s1_valid", 1)
+    recorder.set_hitmiss_key("cross0", 1)
+    recorder.env.dut.set(_HITMISS_MAIN + "s1_hits_0_0", 1)
+    recorder.env.dut.set(_HITMISS_MAIN + "s1_hits_0_1", 1)
+    recorder.env.dut.set(_HITMISS_MAIN + "s1_wayLookupEntry_0_waymask_0", 1)
+    recorder.env.dut.set(_HITMISS_MAIN + "s1_wayLookupEntry_0_waymask_1", 1)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 41)
+    assert _hit(recorder, "icache_hit_path", "continuous_cross_line_sram_hit")
+
+    recorder = _Recorder()
+    _set_single_hit(recorder)
+    recorder.set_hitmiss_key("req1_valid", 1)
+    recorder.set_hitmiss_key("req0_start", 0x1000)
+    recorder.set_hitmiss_key("req1_start", 0x2000)
+    recorder.env.dut.set(_HITMISS_MAIN + "s1_hits_1_0", 1)
+    recorder.env.dut.set(_HITMISS_MAIN + "s1_wayLookupEntry_1_waymask_0", 1)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 42)
+    assert _hit(recorder, "icache_hit_path", "dual_request_independent_hit")
+
+    recorder = _Recorder()
+    _set_single_hit(recorder)
+    recorder.set_hitmiss_key("itlb_exception", 1)
+    recorder.set_hitmiss_key("pmp_instr", 1)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 43)
+    assert _hit(recorder, "icache_hit_path", "hit_itlb_exception")
+    assert _hit(recorder, "icache_hit_path", "hit_pmp_exception")
+
+
+def test_hitmiss_concurrent_fetch_hit_and_prefetch_miss_requires_different_key():
+    recorder = _Recorder()
+    for key, value in {
+        "fetch_valid": 1,
+        "fetch_hit": 1,
+        "fetch_paddr": 0x100,
+        "fetch_vset": 2,
+        "prefetch_valid": 1,
+        "prefetch_hit": 0,
+        "prefetch_paddr": 0x200,
+        "prefetch_vset": 3,
+    }.items():
+        recorder.set_hitmiss_key(key, value)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 44)
+    assert _hit(recorder, "icache_miss_path", "fetch_hit_prefetch_miss_concurrent")
+
+
+def _set_clean_fetch_refill(recorder, paddr=0x300, vset=4):
+    for key, value in {
+        "last_fire_next": 1,
+        "id_next": 0,
+        "corrupt_reg": 0,
+        "denied_reg": 0,
+    }.items():
+        recorder.set_hitmiss_key(key, value)
+    recorder.env.dut.set(_HITMISS_MISS + "allMshr_0.valid", 1)
+    recorder.env.dut.set(_HITMISS_MISS + "allMshr_0.flush", 0)
+    recorder.env.dut.set(_HITMISS_MISS + "allMshr_0.fencei", 0)
+    recorder.env.dut.set(_HITMISS_MISS + "allMshr_0.blkPAddr", paddr)
+    recorder.env.dut.set(_HITMISS_MISS + "allMshr_0.vSetIdx", vset)
+
+
+def test_hitmiss_refill_associations_cover_prefetch_and_later_fetch_hit():
+    recorder = _Recorder()
+    _set_clean_fetch_refill(recorder)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 45)
+
+    recorder.set_hitmiss_key("last_fire_next", 0)
+    recorder.set_hitmiss_key("prefetch_valid", 1)
+    recorder.set_hitmiss_key("prefetch_hit", 1)
+    recorder.set_hitmiss_key("prefetch_paddr", 0x300)
+    recorder.set_hitmiss_key("prefetch_vset", 4)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 46)
+    assert _hit(recorder, "icache_miss_path", "fetch_refill_prefetch_hit")
+
+    recorder.set_hitmiss_key("prefetch_valid", 0)
+    recorder.set_hitmiss_key("fetch_valid", 1)
+    recorder.set_hitmiss_key("fetch_hit", 1)
+    recorder.set_hitmiss_key("fetch_paddr", 0x300)
+    recorder.set_hitmiss_key("fetch_vset", 4)
+    recorder.env.dut.set(_HITMISS_MISS + "allMshr_0.valid", 0)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 47)
+    assert _hit(recorder, "icache_miss_path", "refill_then_fetch_hit")
+
+
+def test_hitmiss_merge_and_plru_bins_use_current_missunit_state():
+    recorder = _Recorder()
+    for key, value in {
+        "fetch_valid": 1,
+        "fetch_hit": 1,
+        "fetch_paddr": 0x500,
+        "fetch_vset": 5,
+    }.items():
+        recorder.set_hitmiss_key(key, value)
+    recorder.env.dut.set(_HITMISS_MISS + "allMshr_0.valid", 1)
+    recorder.env.dut.set(_HITMISS_MISS + "allMshr_0.blkPAddr", 0x500)
+    recorder.env.dut.set(_HITMISS_MISS + "allMshr_0.vSetIdx", 5)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 48)
+    assert _hit(recorder, "icache_miss_path", "continuous_fetch_miss_merge")
+
+    recorder = _Recorder()
+    recorder.set_hitmiss_key("fetch_valid", 1)
+    recorder.set_hitmiss_key("fetch_hit", 0)
+    recorder.set_hitmiss_key("victim_req", 1)
+    recorder.set_hitmiss_key("victim_way", 2)
+    sample_icache_hitmiss_coverage(recorder, recorder.env, 49)
+    assert _hit(recorder, "icache_miss_path", "plru_victim_on_miss")
+
+
+def test_missunit_same_key_merge_accepts_rtl_prefetch_hit():
+    recorder = _Recorder()
+    for name, value in {
+        _MAIN + "__Vtogcov__io_missReq_valid": 1,
+        _MAIN + "__Vtogcov__io_missReq_bits_blkPAddr": 0x100,
+        _MAIN + "__Vtogcov__io_missReq_bits_vSetIdx": 3,
+        _MISS + "io_prefetchReq_valid": 1,
+        _MISS + "__Vtogcov__io_prefetchReq_bits_blkPAddr": 0x100,
+        _MISS + "__Vtogcov__io_prefetchReq_bits_vSetIdx": 3,
+        _MISS + "fetchHit": 0,
+        # RTL sets this for the same-cycle fetch/prefetch merge.
+        _MISS + "prefetchHit": 1,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+
+    sample_icache_missunit_coverage(recorder, recorder.env, 1)
+
+    assert _hit(recorder, "icache_missunit_request", "same_key_fetch_prefetch_merge")
+
+
+def test_missunit_refill_counts_grant_data_opcode_5():
+    recorder = _Recorder()
+    base = _TOP + "auto_inner_icache_client_out_d_bits_"
+    recorder.set_missunit_signal(_TOP + "auto_inner_icache_client_out_d_valid", 1)
+    recorder.set_missunit_signal(base + "opcode", 5)
+    recorder.set_missunit_signal(base + "corrupt", 0)
+    recorder.set_missunit_signal(base + "denied", 0)
+
+    sample_icache_missunit_coverage(recorder, recorder.env, 2)
+    sample_icache_missunit_coverage(recorder, recorder.env, 3)
+
+    recorder.set_missunit_signal(_TOP + "auto_inner_icache_client_out_d_valid", 0)
+    recorder.set_missunit_signal(_MISS + "lastFireNext", 1)
+    recorder.set_missunit_signal(_MISS + "idNext", 0)
+    recorder.set_missunit_signal(_MISS + "allMshr_0.valid", 1)
+    recorder.set_missunit_signal(_MISS + "allMshr_0.flush", 0)
+    recorder.set_missunit_signal(_MISS + "allMshr_0.fencei", 0)
+    recorder.set_missunit_signal(_MISS + "corruptReg", 0)
+    recorder.set_missunit_signal(_MISS + "deniedReg", 0)
+    sample_icache_missunit_coverage(recorder, recorder.env, 4)
+
+    assert _hit(recorder, "icache_missunit_refill", "clean_doublebeat_refill_write")
+
+
+def test_missunit_fifo_issue_order_requires_source_to_match_fifo_head():
+    recorder = _Recorder()
+    for name, value in {
+        _TOP + "auto_inner_icache_client_out_a_valid": 1,
+        _TOP + "auto_inner_icache_client_out_a_ready": 1,
+        _TOP + "auto_inner_icache_client_out_a_bits_source": 4,
+        _MISS + "priorityFIFO.io_deq_ready": 1,
+        _MISS + "priorityFIFO.deqPtr_value": 0,
+        _MISS + "priorityFIFO.regFiles_0": 1,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+
+    sample_icache_missunit_coverage(recorder, recorder.env, 5)
+    assert not _hit(recorder, "icache_missunit_acquire", "prefetch_fifo_issue_order")
+
+    recorder = _Recorder()
+    for name, value in {
+        _TOP + "auto_inner_icache_client_out_a_valid": 1,
+        _TOP + "auto_inner_icache_client_out_a_ready": 1,
+        _TOP + "auto_inner_icache_client_out_a_bits_source": 5,
+        _MISS + "priorityFIFO.io_deq_ready": 1,
+        _MISS + "priorityFIFO.deqPtr_value": 0,
+        _MISS + "priorityFIFO.regFiles_0": 1,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+
+    sample_icache_missunit_coverage(recorder, recorder.env, 6)
+    assert _hit(recorder, "icache_missunit_acquire", "prefetch_fifo_issue_order")
+
+
+def test_missunit_sram_suppression_requires_valid_response():
+    recorder = _Recorder()
+    for name, value in {
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush": 1,
+        _MISS + "lastFireNext": 1,
+        _MISS + "idNext": 0,
+        _MISS + "allMshr_0.flush": 0,
+        _MISS + "allMshr_0.fencei": 0,
+    }.items():
+        recorder.set_missunit_signal(name, value)
+
+    sample_icache_missunit_coverage(recorder, recorder.env, 7)
+    assert not _hit(recorder, "icache_missunit_flush", "redirect_suppresses_sram_write")
+
+    recorder.set_missunit_signal(_MISS + "allMshr_0.valid", 1)
+    sample_icache_missunit_coverage(recorder, recorder.env, 8)
+    assert _hit(recorder, "icache_missunit_flush", "redirect_suppresses_sram_write")
+
+
+def test_missunit_source_route_uses_final_beat_context():
+    recorder = _Recorder()
+    for index in (0, 1):
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.valid", 1)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.issue", 1)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.flush", 0)
+        recorder.set_missunit_signal(_MISS + f"allMshr_{index}.fencei", 0)
+    recorder.set_missunit_signal(_MISS + "lastFire", 1)
+    recorder.set_missunit_signal(_TOP + "auto_inner_icache_client_out_d_bits_source", 1)
+    sample_icache_missunit_coverage(recorder, recorder.env, 9)
+
+    recorder.set_missunit_signal(_MISS + "lastFire", 0)
+    recorder.set_missunit_signal(_MISS + "lastFireNext", 1)
+    recorder.set_missunit_signal(_MISS + "idNext", 1)
+    sample_icache_missunit_coverage(recorder, recorder.env, 10)
+
+    assert _hit(recorder, "icache_missunit_refill", "source_routes_refill")
+
+
+def test_waylookup_empty_state_samples_reset_empty():
+    recorder = _Recorder()
+    for key, value in {
+        "empty": 1,
+        "read_flag": 0,
+        "read_value": 0,
+        "write_flag": 0,
+        "write_value": 0,
+        "exception_valid": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 1)
+
+    assert _hit(recorder, "icache_waylookup_queue", "reset_empty")
+
+
+def test_waylookup_dual_dequeue_uses_real_two_fetch_observation():
+    recorder = _Recorder()
+    for key, value in {
+        "to_valid": 1,
+        "to_ready": 1,
+        "info1_valid": 1,
+        "real_two": 1,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 2)
+
+    assert _hit(recorder, "icache_waylookup_read", "dual_entry_dequeue")
+
+
+def test_waylookup_capacity_samples_full_queue_without_checkpoint_signal():
+    recorder = _Recorder()
+    for key, value in {
+        "num_valid": 32,
+        "write0_valid": 1,
+        "write0_ready": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 3)
+
+    assert _hit(recorder, "icache_waylookup_capacity", "full_blocks_write")
+
+
+def test_waylookup_update_uses_mainpipe_response_and_readptr_relative_entry():
+    recorder = _Recorder()
+    for key, value in {
+        "read_value": 3,
+        "num_valid": 2,
+        "update_valid": 1,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+
+    recorder.set_waylookup_signal("update_updated", 1, index=3 * 2)
+    recorder.set_waylookup_signal("update_same_tag", 1, index=3 * 2)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 4)
+
+    assert _hit(recorder, "icache_waylookup_update", "update_head")
+    assert _hit(recorder, "icache_waylookup_update", "update_same_tag")
+
+
+def test_waylookup_corrupt_update_requires_no_metadata_update():
+    recorder = _Recorder()
+    recorder.set_waylookup_key("read_value", 0)
+    recorder.set_waylookup_key("num_valid", 1)
+    recorder.set_waylookup_key("update_valid", 1)
+    recorder.set_waylookup_key("update_corrupt", 1)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 5)
+
+    assert _hit(recorder, "icache_waylookup_update", "update_corrupt_ignored")
+
+
+def test_waylookup_exception_dequeue_requires_exception_pointer_at_readptr():
+    recorder = _Recorder()
+    for key, value in {
+        "to_valid": 1,
+        "to_ready": 1,
+        "num_valid": 3,
+        "read_flag": 0,
+        "read_value": 0,
+        "exception_valid": 1,
+        "exception_ptr_flag": 0,
+        "exception_ptr_value": 2,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 6)
+    assert not _hit(recorder, "icache_waylookup_exception", "exception_dequeue")
+
+    recorder.set_waylookup_key("exception_ptr_value", 0)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 7)
+    assert _hit(recorder, "icache_waylookup_exception", "exception_dequeue")
+
+
+def test_waylookup_exception_written_into_empty_queue_is_not_bypassed():
+    recorder = _Recorder()
+    for key, value in {
+        "empty": 1,
+        "write0_valid": 1,
+        "write0_ready": 1,
+        "write0_exception": 1,
+        "exception_valid": 0,
+        "to_valid": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 8)
+
+    for key, value in {
+        "empty": 1,
+        "write0_valid": 0,
+        "write0_exception": 0,
+        "exception_valid": 1,
+        "to_valid": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+    sample_icache_waylookup_coverage(recorder, recorder.env, 9)
+
+    assert _hit(recorder, "icache_waylookup_exception", "exception_no_bypass")
+
+
+def test_waylookup_flush_suppresses_nonempty_read_output():
+    recorder = _Recorder()
+    for key, value in {
+        "flush": 1,
+        "num_valid": 1,
+        "to_valid": 0,
+    }.items():
+        recorder.set_waylookup_key(key, value)
+
+    sample_icache_waylookup_coverage(recorder, recorder.env, 8)
+
+    assert _hit(recorder, "icache_waylookup_flush", "flush_wins_read")
 
 
 def test_prefetch_ftq_accept_samples_entry_condition():
@@ -162,6 +576,43 @@ def test_prefetch_corrupt_refill_matches_s2_not_new_s1_set():
     )
 
 
+def test_prefetch_miss_backpressure_then_recovery_samples_state_transition():
+    recorder = _Recorder()
+    for key, value in {
+        "miss_valid": 1,
+        "miss_ready": 0,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 23)
+
+    recorder.set_prefetch_key("miss_ready", 1)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 24)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "missunit_backpressure_recovery",
+    )
+
+
+def test_prefetch_nonmatching_clean_refill_is_scoped_to_s2_sets():
+    recorder = _Recorder()
+    for key, value in {
+        "s2_valid": 1,
+        "s2_set0": 3,
+        "s2_set1": 4,
+        "refill_valid": 1,
+        "refill_corrupt": 0,
+        "refill_vset": 9,
+    }.items():
+        recorder.set_prefetch_key(key, value)
+    sample_icache_prefetchpipe_coverage(recorder, recorder.env, 25)
+    assert _hit(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "nonmatching_clean_refill_ignored",
+    )
+
+
 def test_single_request_entry_bin():
     recorder = _Recorder()
     for key, value in {
@@ -228,6 +679,17 @@ def test_global_s1_flush_does_not_require_checkpoint_outputs():
     assert _hit(recorder, "icache_mainpipe_s1_flush", "global_flush_clears_s1")
 
 
+def test_ftq_and_waylookup_skew_is_sampled_without_single_side_fire():
+    recorder = _Recorder()
+    recorder.set_key("ftq_valid", 1)
+    recorder.set_key("from_valid", 0)
+    recorder.set_key("io_flush", 0)
+
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 15)
+
+    assert _hit(recorder, "icache_mainpipe_s0_entry", "ftq_waylookup_skew")
+
+
 def test_four_line_arbiter_samples_request_condition_before_priority_checkpoint():
     recorder = _Recorder()
     recorder.set_key("s1_valid", 1)
@@ -242,26 +704,51 @@ def test_four_line_arbiter_samples_request_condition_before_priority_checkpoint(
     assert _hit(recorder, "icache_mainpipe_s1_miss", "four_line_fixed_priority")
 
 
-def test_meta_error_condition_does_not_require_flush_waymask_checkpoint():
+def test_registered_refill_is_cancelled_by_next_cycle_flush():
     recorder = _Recorder()
-    recorder.set_key("s1_fire", 1)
-    sample_icache_mainpipe_coverage(recorder, recorder.env, 30)
-
     for key, value in {
-        "s1_fire": 0,
-        "ecc_enable": 1,
-        "error_valid": 1,
-        "error_meta": 1,
-        # Deliberately violate the expected MetaFlush checkpoint.
-        "meta_flush0_valid": 0,
-        "meta_flush1_valid": 0,
-        "meta_flush0_waymask": 0,
-        "meta_flush1_waymask": 0,
+        "s1_valid": 1,
+        "miss_resp_valid": 1,
+        "s1_flush": 0,
     }.items():
         recorder.set_key(key, value)
+    recorder.env.dut.set(_MAIN + "s1_mshrValid_0_0", 1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 30)
+
+    recorder.set_key("miss_resp_valid", 0)
+    recorder.set_key("s1_flush", 1)
     sample_icache_mainpipe_coverage(recorder, recorder.env, 31)
 
-    assert _hit(recorder, "icache_mainpipe_s2_meta_flush", "meta_error_flush_all_ways")
+    assert _hit(
+        recorder,
+        "icache_mainpipe_s1_flush",
+        "flush_cancels_registered_refill",
+    )
+
+
+def test_error_refill_state_is_scoped_to_the_next_new_request():
+    recorder = _Recorder()
+    for key, value in {
+        "s1_valid": 1,
+        "miss_resp_valid": 1,
+        "miss_resp_corrupt": 1,
+        "s1_flush": 0,
+        "io_flush": 0,
+    }.items():
+        recorder.set_key(key, value)
+    recorder.env.dut.set(_MAIN + "s1_mshrValid_0_0", 1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 32)
+
+    recorder.set_key("miss_resp_valid", 0)
+    recorder.set_key("miss_resp_corrupt", 0)
+    recorder.set_key("s1_fire", 1)
+    sample_icache_mainpipe_coverage(recorder, recorder.env, 33)
+
+    assert _hit(
+        recorder,
+        "icache_mainpipe_s1_refill",
+        "error_state_cleared_on_new_request",
+    )
 
 
 def test_late_refill_is_counted_only_after_flushed_sent_miss():

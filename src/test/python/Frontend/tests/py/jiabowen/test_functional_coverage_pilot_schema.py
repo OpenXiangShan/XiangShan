@@ -15,7 +15,22 @@ IFU_FUNCOV_BIN_IDS = {
 
 ICACHE_PREFETCH_FUNCOV_BIN_IDS = {
     *(f"BIN-{index:03d}" for index in range(650, 674)),
+    *(f"BIN-{index:03d}" for index in range(677, 686)),
 }
+
+ICACHE_MISSUNIT_FUNCOV_BIN_IDS = {
+    *(f"BIN-{index:03d}" for index in range(686, 717)),
+}
+
+ICACHE_WAYLOOKUP_FUNCOV_BIN_IDS = {
+    *(f"BIN-{index:03d}" for index in range(717, 759)),
+}
+
+ICACHE_HITMISS_FUNCOV_BIN_IDS = {
+    *(f"BIN-{index:03d}" for index in range(759, 769)),
+}
+
+ICACHE_MAPPED_STATUSES = {"MODELED", "PARTIAL", "HIT"}
 
 
 def test_active_pilot_has_global_unique_identifiers_and_mappings():
@@ -27,7 +42,7 @@ def test_active_pilot_has_global_unique_identifiers_and_mappings():
 
     summary = validate_pilot_schema(pilot_path)
 
-    assert summary == {"rows": 304, "bin_ids": 304, "mapping_keys": 304, "legacy_ids": 4}
+    assert summary == {"rows": 389, "bin_ids": 389, "mapping_keys": 389, "legacy_ids": 4}
 
 
 def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
@@ -43,11 +58,22 @@ def test_legacy_bpu_ftq_rows_are_unmapped_and_cannot_enter_runtime_model():
     active = [row for row in rows if row["Coverpoint"].strip()]
     legacy_bpu_ftq = [row for row in rows if "旧BPU_FTQ" in row["映射测试点路径"]]
 
-    assert len(active) == 146
+    assert len(active) == 231
     assert {row["Bin_ID"] for row in active} == {
-        *(f"BIN-{index:03d}" for index in range(401, 433)),
+        *(f"BIN-{index:03d}" for index in range(401, 424)),
+        *(f"BIN-{index:03d}" for index in range(424, 433)),
         *(f"BIN-{index:03d}" for index in range(501, 542)),
-        *(f"BIN-{index:03d}" for index in range(601, 674)),
+        *(f"BIN-{index:03d}" for index in range(601, 619)),
+        *(f"BIN-{index:03d}" for index in range(620, 627)),
+        *(f"BIN-{index:03d}" for index in range(628, 632)),
+        *(f"BIN-{index:03d}" for index in range(633, 638)),
+        *(f"BIN-{index:03d}" for index in range(641, 646)),
+        *(f"BIN-{index:03d}" for index in range(674, 677)),
+        *(f"BIN-{index:03d}" for index in range(650, 674)),
+        *(f"BIN-{index:03d}" for index in range(677, 686)),
+        *(f"BIN-{index:03d}" for index in range(686, 717)),
+        *(f"BIN-{index:03d}" for index in range(717, 759)),
+        *(f"BIN-{index:03d}" for index in range(759, 769)),
     }
     assert legacy_bpu_ftq
     assert all(not row["Coverpoint"].strip() for row in legacy_bpu_ftq)
@@ -148,7 +174,130 @@ def test_icache_prefetch_leaves_are_single_bin_and_match_registry():
                 f"bins {pilot['Bin_Name']} ({bin_id})"
             )
             assert row["coverage"] == expected_coverage
-            assert row["status"] == "MODELED"
+            assert row["status"] in ICACHE_MAPPED_STATUSES
             mapped_rows[bin_id] = row
 
     assert set(mapped_rows) == ICACHE_PREFETCH_FUNCOV_BIN_IDS
+
+
+def test_icache_missunit_leaves_are_single_bin_and_match_registry():
+    repo_root = Path(__file__).resolve().parents[7]
+    pilot_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
+    )
+    testpoint_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    )
+
+    with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
+        pilot_rows = {
+            row["Bin_ID"]: row
+            for row in csv.DictReader(handle)
+            if row["Bin_ID"] in ICACHE_MISSUNIT_FUNCOV_BIN_IDS
+        }
+    assert set(pilot_rows) == ICACHE_MISSUNIT_FUNCOV_BIN_IDS
+
+    mapped_rows = {}
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            bin_ids = set(re.findall(r"BIN-\d{3}", row["coverage"])) & ICACHE_MISSUNIT_FUNCOV_BIN_IDS
+            if not bin_ids:
+                continue
+            assert len(bin_ids) == 1, row["coverage"]
+            bin_id = bin_ids.pop()
+            assert bin_id not in mapped_rows, bin_id
+            assert all(row[column].strip() for column in ("Condition", "Checkpoint", "Object"))
+            pilot = pilot_rows[bin_id]
+            expected_coverage = (
+                f"covergroup {pilot['Coverage_Group']}, coverpoint {pilot['Coverpoint']}, "
+                f"bins {pilot['Bin_Name']} ({bin_id})"
+            )
+            assert row["coverage"] == expected_coverage
+            assert row["status"] in ICACHE_MAPPED_STATUSES
+            mapped_rows[bin_id] = row
+
+    assert set(mapped_rows) == ICACHE_MISSUNIT_FUNCOV_BIN_IDS
+
+
+def test_icache_waylookup_leaves_are_single_bin_and_match_registry():
+    repo_root = Path(__file__).resolve().parents[7]
+    pilot_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
+    )
+    testpoint_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    )
+
+    with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
+        pilot_rows = {
+            row["Bin_ID"]: row
+            for row in csv.DictReader(handle)
+            if row["Bin_ID"] in ICACHE_WAYLOOKUP_FUNCOV_BIN_IDS
+        }
+    assert set(pilot_rows) == ICACHE_WAYLOOKUP_FUNCOV_BIN_IDS
+
+    mapped_rows = {}
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            bin_ids = set(re.findall(r"BIN-\d{3}", row["coverage"])) & ICACHE_WAYLOOKUP_FUNCOV_BIN_IDS
+            if not bin_ids:
+                continue
+            assert len(bin_ids) == 1, row["coverage"]
+            bin_id = bin_ids.pop()
+            assert bin_id not in mapped_rows, bin_id
+            assert all(row[column].strip() for column in ("Condition", "Checkpoint", "Object"))
+            pilot = pilot_rows[bin_id]
+            expected_coverage = (
+                f"covergroup {pilot['Coverage_Group']}, coverpoint {pilot['Coverpoint']}, "
+                f"bins {pilot['Bin_Name']} ({bin_id})"
+            )
+            assert row["coverage"] == expected_coverage
+            assert row["status"] in ICACHE_MAPPED_STATUSES
+            mapped_rows[bin_id] = row
+
+    assert set(mapped_rows) == ICACHE_WAYLOOKUP_FUNCOV_BIN_IDS
+
+
+def test_icache_hitmiss_leaves_are_single_bin_and_match_registry():
+    repo_root = Path(__file__).resolve().parents[7]
+    pilot_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/03_funcov_model/frontend_bt_functional_coverage_pilot.csv"
+    )
+    testpoint_path = (
+        repo_root
+        / "src/test/python/Frontend/docs/02_testpoint/Frontend_testpoint_0525_coverage_backannotated.csv"
+    )
+
+    with pilot_path.open(encoding="utf-8-sig", newline="") as handle:
+        pilot_rows = {
+            row["Bin_ID"]: row
+            for row in csv.DictReader(handle)
+            if row["Bin_ID"] in ICACHE_HITMISS_FUNCOV_BIN_IDS
+        }
+    assert set(pilot_rows) == ICACHE_HITMISS_FUNCOV_BIN_IDS
+
+    mapped_rows = {}
+    with testpoint_path.open(encoding="utf-8-sig", newline="") as handle:
+        for row in csv.DictReader(handle):
+            bin_ids = set(re.findall(r"BIN-\d{3}", row["coverage"])) & ICACHE_HITMISS_FUNCOV_BIN_IDS
+            if not bin_ids:
+                continue
+            assert len(bin_ids) == 1, row["coverage"]
+            bin_id = bin_ids.pop()
+            assert bin_id not in mapped_rows, bin_id
+            assert all(row[column].strip() for column in ("Condition", "Checkpoint", "Object"))
+            pilot = pilot_rows[bin_id]
+            expected_coverage = (
+                f"covergroup {pilot['Coverage_Group']}, coverpoint {pilot['Coverpoint']}, "
+                f"bins {pilot['Bin_Name']} ({bin_id})"
+            )
+            assert row["coverage"] == expected_coverage
+            assert row["status"] in ICACHE_MAPPED_STATUSES
+            mapped_rows[bin_id] = row
+
+    assert set(mapped_rows) == ICACHE_HITMISS_FUNCOV_BIN_IDS

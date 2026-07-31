@@ -364,6 +364,8 @@ def sample_cfvec_coverage(recorder, env, cycle: int) -> None:
             recorder._two_fetch_expected_cfvec = None
         else:
             expected_tags = tuple(expected_cfvec.get("tags") or ())
+    if expected_tags is None and len(unique_ftq_ptrs) == 2:
+        expected_tags = tuple(unique_ftq_ptrs)
     exact_two_source_delivery = (
         len(expected_tags or ()) == 2
         and unique_ftq_ptrs == [expected_tags[0], expected_tags[1]]

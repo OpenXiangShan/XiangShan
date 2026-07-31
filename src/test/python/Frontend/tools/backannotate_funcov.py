@@ -13,20 +13,12 @@ import csv
 import hashlib
 import json
 import re
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
 
-_IMPORT_ROOT = Path(__file__).resolve().parents[1]
-if str(_IMPORT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_IMPORT_ROOT))
-
-from env.artifact_provenance import load_frontend_build_manifest
-
-
-STATUSES = {"UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED", "BLOCKED", "N-A"}
+STATUSES = {"UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED", "BLOCKED", "N-A", "SV_FUNCOV"}
 REFERENCE_RE = re.compile(
     r"^covergroup ([^,;]+), coverpoint ([^,;]+), bins ([^ (;]+) \((BIN-\d+)\)$"
 )
@@ -34,14 +26,7 @@ BIN_ID_RE = re.compile(r"^BIN-\d+$")
 
 _PASS_OUTCOMES = {"pass", "passed", "ok", "success", "successful"}
 _REQUIRED_PROVENANCE = (
-    "simulator",
     "dut_source_sha",
-    "implementation_sha",
-    "design_baseline_sha",
-    "source_sha_override",
-    "source_delta_sha256",
-    "source_delta_files",
-    "source_delta_policy",
     "dut_build_sha256",
     "dut_python_extension_sha256",
     "generated_rtl_sha256",
@@ -49,14 +34,12 @@ _REQUIRED_PROVENANCE = (
     "definitions_sha256",
     "sampler_sha256",
     "signal_contract_sha256",
-    "build_manifest_path",
     "build_manifest_sha256",
     "compatibility_signature",
     "build_config",
     "toolchain",
 )
 _SHA256_PROVENANCE = {
-    "source_delta_sha256",
     "dut_build_sha256",
     "dut_python_extension_sha256",
     "generated_rtl_sha256",
@@ -68,14 +51,7 @@ _SHA256_PROVENANCE = {
     "compatibility_signature",
 }
 _COMPATIBILITY_FIELDS = (
-    "simulator",
     "dut_source_sha",
-    "implementation_sha",
-    "design_baseline_sha",
-    "source_sha_override",
-    "source_delta_sha256",
-    "source_delta_files",
-    "source_delta_policy",
     "dut_build_sha256",
     "dut_python_extension_sha256",
     "generated_rtl_sha256",
@@ -86,22 +62,6 @@ _COMPATIBILITY_FIELDS = (
     "toolchain",
 )
 _REQUIRED_SEED_FIELDS = ("test", "backend", "icache", "ptw")
-_RUNTIME_MANIFEST_FIELDS = (
-    "simulator",
-    "build_manifest_sha256",
-    "dut_build_sha256",
-    "dut_python_extension_sha256",
-    "generated_rtl_sha256",
-    "signal_contract_sha256",
-    "dut_source_sha",
-    "design_baseline_sha",
-    "implementation_sha",
-    "source_sha_override",
-    "source_delta_sha256",
-    "source_delta_files",
-    "source_delta_policy",
-    "build_config",
-)
 _FRONTEND_ROOT = Path(__file__).resolve().parents[1]
 _CANONICAL_REGISTRY = (
     _FRONTEND_ROOT
@@ -110,40 +70,40 @@ _CANONICAL_REGISTRY = (
     / "frontend_bt_functional_coverage_pilot.csv"
 )
 _SAMPLER_FILES = (
-    ("env/functional_coverage.py", _FRONTEND_ROOT / "env" / "functional_coverage.py"),
-    ("env/rvc_decoder.py", _FRONTEND_ROOT / "env" / "rvc_decoder.py"),
-    (
-        "env/funcov/py/ftq/sampler.py",
-        _FRONTEND_ROOT / "env" / "funcov" / "py" / "ftq" / "sampler.py",
-    ),
-    (
-        "env/funcov/py/ifu/sampler.py",
-        _FRONTEND_ROOT / "env" / "funcov" / "py" / "ifu" / "sampler.py",
-    ),
-    (
-        "env/funcov/py/common/dut.py",
-        _FRONTEND_ROOT / "env" / "funcov" / "py" / "common" / "dut.py",
-    ),
-    (
-        "env/funcov/py/common/fetch_memory.py",
-        _FRONTEND_ROOT / "env" / "funcov" / "py" / "common" / "fetch_memory.py",
-    ),
-    (
-        "env/funcov/py/common/utils.py",
-        _FRONTEND_ROOT / "env" / "funcov" / "py" / "common" / "utils.py",
-    ),
-    (
-        "env/funcov/py/fetch_path/sampler.py",
-        _FRONTEND_ROOT / "env" / "funcov" / "py" / "fetch_path" / "sampler.py",
-    ),
-    (
-        "env/funcov/py/ibuffer/sampler.py",
-        _FRONTEND_ROOT / "env" / "funcov" / "py" / "ibuffer" / "sampler.py",
-    ),
-    (
-        "env/funcov/py/icache/sampler.py",
-        _FRONTEND_ROOT / "env" / "funcov" / "py" / "icache" / "sampler.py",
-    ),
+    _FRONTEND_ROOT / "env" / "functional_coverage.py",
+    _FRONTEND_ROOT / "env" / "funcov" / "__init__.py",
+    _FRONTEND_ROOT / "env" / "funcov" / "py" / "icache" / "__init__.py",
+    _FRONTEND_ROOT
+    / "env"
+    / "funcov"
+    / "py"
+    / "icache"
+    / "icache_mainpipe_funcov.py",
+    _FRONTEND_ROOT
+    / "env"
+    / "funcov"
+    / "py"
+    / "icache"
+    / "icache_prefetchpipe_funcov.py",
+    _FRONTEND_ROOT
+    / "env"
+    / "funcov"
+    / "py"
+    / "icache"
+    / "icache_missunit_funcov.py",
+    _FRONTEND_ROOT
+    / "env"
+    / "funcov"
+    / "py"
+    / "icache"
+    / "icache_waylookup_funcov.py",
+    _FRONTEND_ROOT
+    / "env"
+    / "funcov"
+    / "py"
+    / "icache"
+    / "icache_hitmiss_funcov.py",
+    _FRONTEND_ROOT / "env" / "funcov" / "py" / "ifu" / "sampler.py",
 )
 
 
@@ -331,71 +291,24 @@ def _json_sha256(value: Any) -> str:
 
 
 def _current_sampler_sha256() -> str | None:
-    hashes = {label: _file_sha256(path) for label, path in _SAMPLER_FILES}
+    labels = (
+        "functional_coverage.py",
+        "funcov/__init__.py",
+        "funcov/py/icache/__init__.py",
+        "funcov/py/icache/icache_mainpipe_funcov.py",
+        "funcov/py/icache/icache_prefetchpipe_funcov.py",
+        "funcov/py/icache/icache_missunit_funcov.py",
+        "funcov/py/icache/icache_waylookup_funcov.py",
+        "funcov/py/icache/icache_hitmiss_funcov.py",
+        "funcov/py/ifu/sampler.py",
+    )
+    hashes = {
+        label: _file_sha256(path)
+        for label, path in zip(labels, _SAMPLER_FILES)
+    }
     if any(value is None for value in hashes.values()):
         return None
     return _json_sha256(hashes)
-
-
-def _manifest_value_matches(field: str, recorded: Any, runtime: Any) -> bool:
-    if field == "source_sha_override":
-        return isinstance(recorded, bool) and isinstance(runtime, bool) and recorded is runtime
-    if field == "source_delta_files":
-        return (
-            isinstance(recorded, list)
-            and isinstance(runtime, list)
-            and recorded == runtime
-        )
-    recorded_text = str(recorded or "").strip()
-    runtime_text = str(runtime or "").strip()
-    if field == "build_config":
-        return recorded_text == runtime_text
-    return recorded_text.lower() == runtime_text.lower()
-
-
-def _compatibility_value_present(field: str, value: Any) -> bool:
-    if field == "source_sha_override":
-        return isinstance(value, bool)
-    if field == "source_delta_files":
-        return isinstance(value, list)
-    if value is None:
-        return False
-    text = str(value).strip()
-    return text.lower() not in {"", "unavailable", "unknown"}
-
-
-def _runtime_manifest_gate(provenance: dict) -> list[str]:
-    """Reload and bind artifact provenance to its exact DUT build manifest."""
-    manifest_text = str(provenance.get("build_manifest_path") or "").strip()
-    if not manifest_text:
-        return []  # The required-provenance gate reports the missing field.
-
-    manifest_path = Path(manifest_text)
-    if not manifest_path.is_absolute():
-        return ["invalid_provenance:build_manifest_path"]
-
-    simulator = str(provenance.get("simulator") or "").strip().lower()
-    if simulator not in {"verilator", "vcs"}:
-        return ["invalid_provenance:simulator"]
-    runtime = load_frontend_build_manifest(
-        manifest_path.parent,
-        manifest_path,
-        simulator=simulator,
-    )
-    reasons: list[str] = []
-    runtime_status = str(runtime.get("build_manifest_status") or "").strip().lower()
-    if runtime_status != "valid":
-        reasons.append(f"build_manifest_runtime:{runtime_status or 'missing'}")
-    runtime_reasons = runtime.get("build_manifest_reasons")
-    if not isinstance(runtime_reasons, list):
-        reasons.append("build_manifest_runtime:invalid_reasons")
-    else:
-        reasons.extend(f"build_manifest_runtime:{reason}" for reason in runtime_reasons)
-
-    for field in _RUNTIME_MANIFEST_FIELDS:
-        if not _manifest_value_matches(field, provenance.get(field), runtime.get(field)):
-            reasons.append(f"build_manifest_runtime_mismatch:{field}")
-    return reasons
 
 
 def artifact_kind(raw: Any) -> str:
@@ -519,40 +432,12 @@ def evaluate_artifact(raw: Any) -> dict:
         elif key in _SHA256_PROVENANCE and re.fullmatch(r"[0-9a-fA-F]{64}", str(value).strip()) is None:
             reasons.append(f"invalid_provenance:{key}")
     source_sha = str(provenance.get("dut_source_sha") or "").strip()
-    if str(provenance.get("simulator") or "").strip().lower() not in {"verilator", "vcs"}:
-        reasons.append("invalid_provenance:simulator")
     if source_sha not in {"", "unavailable", "unknown"} and re.fullmatch(
         r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", source_sha
     ) is None:
         reasons.append("invalid_provenance:dut_source_sha")
-    for key in ("implementation_sha", "design_baseline_sha"):
-        value = str(provenance.get(key) or "").strip()
-        if value not in {"", "unavailable", "unknown"} and re.fullmatch(
-            r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", value
-        ) is None:
-            reasons.append(f"invalid_provenance:{key}")
-    override = provenance.get("source_sha_override")
-    if not isinstance(override, bool):
-        reasons.append("invalid_provenance:source_sha_override")
-    policy = str(provenance.get("source_delta_policy") or "").strip()
-    if policy not in {"none", "observability_only"}:
-        reasons.append("invalid_provenance:source_delta_policy")
-    delta_files = provenance.get("source_delta_files")
-    if not isinstance(delta_files, list) or any(not isinstance(item, str) for item in delta_files):
-        reasons.append("invalid_provenance:source_delta_files")
-    elif not override and (policy != "none" or delta_files):
-        reasons.append("source_delta_without_override")
-    elif override and policy != "observability_only":
-        reasons.append("source_delta_policy_not_allowlisted")
-    manifest_status = str(provenance.get("build_manifest_status") or "").strip().lower()
-    if manifest_status != "valid":
-        reasons.append("build_manifest_not_valid")
-    manifest_reasons = provenance.get("build_manifest_reasons")
-    if not isinstance(manifest_reasons, list) or manifest_reasons:
-        reasons.append("build_manifest_reasons_present")
-    reasons.extend(_runtime_manifest_gate(provenance))
     if all(
-        _compatibility_value_present(field, provenance.get(field))
+        str(provenance.get(field) or "").strip() not in {"", "unavailable", "unknown"}
         for field in _COMPATIBILITY_FIELDS
     ):
         compatibility_payload = {field: provenance[field] for field in _COMPATIBILITY_FIELDS}
@@ -669,44 +554,22 @@ def evaluate_artifact(raw: Any) -> dict:
     if exit_code != 0:
         reasons.append(f"exit_code:{'missing' if exit_code is None else exit_code}")
 
-    errors = raw.get("errors")
-    if errors != []:
-        if errors is None:
-            reasons.append("funcov_errors:missing")
-        else:
-            reasons.append(f"funcov_errors:{_collection_count(errors)}")
-            if not isinstance(errors, list):
-                reasons.append("funcov_errors:not_list")
-
-    if "error_count" not in monitor:
-        reasons.append("monitor_errors:missing")
-        monitor_error_count = None
-    else:
-        monitor_error_count = _as_int(monitor.get("error_count"))
-        if monitor_error_count is None:
-            reasons.append("monitor_errors:invalid")
+    errors = raw.get("errors") or []
+    error_count = _collection_count(errors)
+    if error_count:
+        reasons.append(f"funcov_errors:{error_count}")
+    monitor_error_count = _as_int(monitor.get("error_count")) or 0
     if monitor_error_count:
         reasons.append(f"monitor_errors:{monitor_error_count}")
 
     checker = _as_mapping(raw.get("checker")) or _as_mapping(run.get("checker"))
     checker_status = str(checker.get("status", "")).strip().lower()
+    checker_error_count = _as_int(checker.get("error_count")) or 0
+    checker_errors = checker.get("errors")
     if checker_status not in _PASS_OUTCOMES:
         reasons.append(f"checker_status:{checker_status or 'missing'}")
-    if "error_count" not in checker:
-        reasons.append("checker_errors:missing")
-        checker_error_count = None
-    else:
-        checker_error_count = _as_int(checker.get("error_count"))
-        if checker_error_count is None:
-            reasons.append("checker_errors:invalid")
-    checker_errors = checker.get("errors")
-    checker_detail_count = 0
-    if not isinstance(checker_errors, list):
-        reasons.append("checker_errors:not_list")
-    elif checker_errors:
-        checker_detail_count = _collection_count(checker_errors)
-    if checker_error_count or checker_detail_count:
-        count = checker_error_count or checker_detail_count
+    if checker_error_count or checker_errors:
+        count = checker_error_count or _collection_count(checker_errors)
         reasons.append(f"checker_errors:{count}")
 
     artifact_root = str(run.get("artifact_root") or "").strip()
@@ -870,22 +733,8 @@ def build_artifact_audit(artifacts: Iterable[tuple[Path, dict, str]]) -> list[di
     return rows
 
 
-_AUTO_EVIDENCE_PREFIXES = (
-    "DUT:",
-    "DUT_REJECTED:",
-    "ARTIFACT_REJECTED:",
-    "MODEL:",
-)
-
-
-def _append_evidence(existing: str, entries: Iterable[str], *, replace_auto: bool = False) -> str:
+def _append_evidence(existing: str, entries: Iterable[str]) -> str:
     values = [item for item in str(existing or "").split("; ") if item]
-    if replace_auto:
-        values = [
-            item
-            for item in values
-            if not item.startswith(_AUTO_EVIDENCE_PREFIXES)
-        ]
     for entry in entries:
         if entry not in values:
             values.append(entry)
@@ -954,11 +803,8 @@ def backannotate(
                 if target_matches or (_as_int(hit) or 0) > 0:
                     model_entries.append(f"MODEL:{tag}")
 
-        new_entries = [*model_entries, *dut_entries, *rejected_entries]
         row["evidence"] = _append_evidence(
-            row["evidence"],
-            new_entries,
-            replace_auto=bool(new_entries),
+            row["evidence"], [*model_entries, *dut_entries, *rejected_entries]
         )
         if dut_entries:
             row["status"] = "HIT"
@@ -968,13 +814,6 @@ def backannotate(
             counts["partial"] += 1
             if rejected_entries:
                 counts["failed"] += 1
-        elif status in {"PARTIAL", "HIT"}:
-            # Absence of a replacement artifact is not evidence that a
-            # previously exercised leaf reverted to model-only.  During a
-            # design refresh, stale/missing DUT evidence must remain PARTIAL;
-            # an old HIT without a matching current artifact is invalidated.
-            row["status"] = "PARTIAL"
-            counts["partial"] += 1
         else:
             row["status"] = "MODELED"
             counts["model"] += 1

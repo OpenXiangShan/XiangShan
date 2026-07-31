@@ -29,10 +29,11 @@ tree. Start here unless the task explicitly says otherwise.
   helpers used by the API layer.
 - `src/test/python/Frontend/env/functional_coverage.py`: functional coverage
   recorder and pilot-csv integration.
-- `src/test/python/Frontend/env/funcov/`: feature-scoped Python and SystemVerilog
-  coverage models in the only active recorder/sampler chain. Keep each
-  group/point/bin aligned with the canonical registry; `functional_coverage.py`
-  remains the sole top-level recorder and dispatcher.
+- `src/test/python/Frontend/env/funcov/__init__.py`,
+  `src/test/python/Frontend/env/funcov/icache_funcov/__init__.py`, and
+  `src/test/python/Frontend/env/funcov/icache_funcov/icache_*_funcov.py`:
+  module-level predicates in the only active recorder/sampler chain. Keep
+  each group/point/bin aligned with the canonical registry.
 - `src/test/python/Frontend/scripts/run_bin_trace_pipeline.sh`: standard
   single-case bin-trace entry that now auto-creates `TB_RUN_ID` /
   `TB_ARTIFACT_DIR` and routes waveform, coverage, funcov, and case-log
@@ -58,9 +59,7 @@ tree. Start here unless the task explicitly says otherwise.
   golden trace into the frontend DUT environment for bring-up/debug.
 - `src/test/python/Frontend/scripts/fst_to_fsdb.sh`: convert a frontend `.fst`
   waveform to `.fsdb` through a temporary `.vcd`.
-- `src/test/python/Frontend/tests/`: active frontend regressions. Keep shared
-  `conftest.py` here; place Python tests in `tests/py/<author>/` and assembly
-  cases in `tests/asm_cases/<author>/` using the original feature author.
+- `src/test/python/Frontend/tests/`: active frontend regressions. Put new tests here.
 - `build-frontend/pylib-verilator/Frontend/`: generated Verilator Python
   bindings, shared objects, signal map, and `Frontend_top.sv`.
 - `build-frontend/pylib-vcs/Frontend/`: generated VCS Python bindings, shared
@@ -110,7 +109,7 @@ The current Frontend package intentionally has two layers:
 Treat the root-level facade as part of the supported import contract unless the
 task is explicitly about changing that contract. Do not silently bypass or
 remove it as “just compatibility glue”;
-`src/test/python/Frontend/tests/py/zhaoxinran/test_layout_import_compat.py` exists to keep
+`src/test/python/Frontend/tests/test_layout_import_compat.py` exists to keep
 that boundary stable.
 
 ## Working Rules
@@ -194,7 +193,7 @@ that boundary stable.
   only when they assert DUT-visible exception behavior and, when relevant, that
   an illegal resend or follow-up request does not occur.
 - Do not frequently add low-signal or redundant cases to
-  `src/test/python/Frontend/tests/py/zhaoxinran/test_backend_model_unit.py`; only add a test
+  `src/test/python/Frontend/tests/test_backend_model_sync.py`; only add a test
   there when it captures a distinct semantic contract, blocks a proven
   regression, or is the smallest meaningful reproducer for the root cause being
   fixed.
@@ -327,7 +326,7 @@ Run a narrower frontend test:
 
 ```bash
 TB_ENABLE_DUT_TESTS=1 python -m pytest -p no:rerunfailures \
-  src/test/python/Frontend/tests/py/zhaoxinran/test_multi_branch.py -v
+  src/test/python/Frontend/tests/test_multi_branch.py -v
 ```
 
 Common direct-`pytest` arguments worth keeping consistent:
@@ -394,7 +393,7 @@ filename. Keep ELF/map artifacts only for address inspection and disassembly.
 ### Standard Entry
 
 The script generates the NEMU golden trace first, then runs
-`tests/py/zhaoxinran/test_bin_trace_dut.py::test_bin_trace` with the pipeline-only
+`tests/test_bin_trace_dut.py::test_bin_trace` with the pipeline-only
 environment variables set consistently.
 
 ```bash
@@ -480,7 +479,7 @@ Other `run_bin_trace_pipeline.sh` knobs worth recording:
 - `TB_ENV_LOG_LEVEL=...`: override only the environment logger level.
 - `TB_LOG_CLI_LEVEL=...`: override only pytest CLI log level.
 - `TB_PYTEST_TARGET=...`: replace the default
-  `tests/py/zhaoxinran/test_bin_trace_dut.py::test_bin_trace` nodeid.
+  `tests/test_bin_trace_dut.py::test_bin_trace` nodeid.
 - `TB_TRACE_MAX_CYCLES=...`: bound DUT execution cycles for a debug run; `0`
   keeps the run-to-completion behavior.
 - `TB_TRACE_TARGET_CURSOR=...`: stop once this golden-trace cursor is reached.
@@ -508,7 +507,7 @@ TB_TRACE_PATH=NEMU/logs/<case>.trace.jsonl \
 TB_BASE_ADDR=0x80000000 \
 TB_TRACE_TARGET_CURSOR=0 \
 python -m pytest -p no:rerunfailures -v \
-  src/test/python/Frontend/tests/py/zhaoxinran/test_bin_trace_dut.py::test_bin_trace
+  src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace
 ```
 
 For this direct-`pytest` path, keep the required environment variables explicit:
@@ -559,7 +558,7 @@ cannot be promoted against the current test-point table. Recorded testcase,
 assembly (when present), binary, and golden-trace hashes are also recomputed
 from their declared files; missing or changed inputs invalidate the evidence.
 
-`src/test/python/Frontend/tests/py/zhaoxinran/test_bin_trace_dut.py::test_bin_trace` is a
+`src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace` is a
 run-to-completion entrypoint. Do not use it as a load-only or partial-step
 smoke path. By default it runs until golden completion; set
 `TB_TRACE_MAX_CYCLES` to a positive integer only when you intentionally want a
@@ -577,7 +576,7 @@ does not add a wall-clock bound by itself when you bypass the pipeline script.
 ## Bin-Trace Requirements
 
 Any DUT bin-trace case, especially
-`src/test/python/Frontend/tests/py/zhaoxinran/test_bin_trace_dut.py::test_bin_trace`, must
+`src/test/python/Frontend/tests/test_bin_trace_dut.py::test_bin_trace`, must
 meet the following operational requirements:
 
 - every run must have a hard runtime upper bound; unbounded bin runs are not
@@ -681,8 +680,7 @@ make frontend -j
 
 ## Test Authoring Rules
 
-- Add new Python regressions under `src/test/python/Frontend/tests/py/<author>/`
-  and assembly regressions under `src/test/python/Frontend/tests/asm_cases/<author>/`.
+- Add new regressions under `src/test/python/Frontend/tests/`.
 - Name tests `test_*.py`.
 - Gate DUT-only cases with `TB_ENABLE_DUT_TESTS=1` and existing `_RUN_DUT` patterns.
 - Reuse fixtures from `src/test/python/Frontend/env/fixtures.py`.
@@ -696,9 +694,12 @@ make frontend -j
   Do not waive SRAM files by default. Override with `TB_LINE_COVERAGE_IGNORE=...`
   or `TB_LINE_COVERAGE_OMIT=...`; disable reporter registration with
   `TB_ENABLE_TOFFEE_LINE_COVERAGE=0` for debugging.
-- Update the canonical coverage registry and its matching model under
-  `src/test/python/Frontend/env/funcov/` together when introducing functional
-  coverage. Do not add a parallel toffee or SV functional coverage sampler.
+- Update the canonical coverage registry,
+  `src/test/python/Frontend/env/funcov/__init__.py`, the relevant
+  `src/test/python/Frontend/env/funcov/icache_funcov/__init__.py`, and the
+  relevant `src/test/python/Frontend/env/funcov/icache_funcov/*_funcov.py`
+  module together when introducing functional coverage. Do not add a
+  parallel toffee or SV functional coverage sampler.
 - Do not commit transient logs, generated waveforms, or other temporary
   artifacts unless they are intentional fixtures.
 

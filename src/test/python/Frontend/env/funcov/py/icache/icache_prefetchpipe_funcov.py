@@ -1,0 +1,672 @@
+from __future__ import annotations
+
+from typing import Any, Optional
+
+
+_MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
+_ICACHE = "Frontend_top.Frontend.inner_icache."
+
+
+def _on(value: Optional[int]) -> bool:
+    return value is not None and int(value) != 0
+
+
+def _off(value: Optional[int]) -> bool:
+    return value is not None and int(value) == 0
+
+
+_PREFETCH = "Frontend_top.Frontend.inner_icache.prefetcher."
+_TOP = "Frontend_top."
+
+
+ICACHE_PREFETCHPIPE_COVERPOINTS = {
+    "icache_prefetchpipe_s0_entry": "entry_arbitration_flush",
+    "icache_prefetchpipe_s1_meta": "itlb_meta_state",
+    "icache_prefetchpipe_s1_completion": "completion_mode",
+    "icache_prefetchpipe_s2_miss": "miss_behavior",
+}
+
+
+ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS = frozenset(
+    {
+        ("icache_prefetchpipe_s0_entry", "ftq_accept_all_ready"),
+        ("icache_prefetchpipe_s0_entry", "itlb_or_meta_backpressure"),
+        ("icache_prefetchpipe_s0_entry", "s1_busy_backpressure"),
+        ("icache_prefetchpipe_s0_entry", "redirect_flush_blocks_hw"),
+        ("icache_prefetchpipe_s0_entry", "bpu_flush_match_only"),
+        ("icache_prefetchpipe_s0_entry", "soft_ignores_bpu_flush"),
+        ("icache_prefetchpipe_s0_entry", "soft_priority_over_ftq"),
+        ("icache_prefetchpipe_s0_entry", "multi_soft_single_accept"),
+        ("icache_prefetchpipe_s0_entry", "soft_ftq_same_cycle_capture"),
+        ("icache_prefetchpipe_s1_meta", "flush_cancels_itlb_wait"),
+        ("icache_prefetchpipe_s1_meta", "itlb_miss_resend_meta_retry"),
+        ("icache_prefetchpipe_s1_meta", "meta_resend_backpressure_recovery"),
+        ("icache_prefetchpipe_s1_meta", "waylookup_backpressure_recovery"),
+        ("icache_prefetchpipe_s1_meta", "clean_refill_updates_meta"),
+        ("icache_prefetchpipe_s1_meta", "same_way_new_tag_invalidates_old"),
+        ("icache_prefetchpipe_s1_meta", "four_dual_layouts"),
+        ("icache_prefetchpipe_s1_meta", "conflict_first_request_only"),
+        ("icache_prefetchpipe_s1_meta", "soft_probe_no_waylookup_ftq"),
+        ("icache_prefetchpipe_s1_completion", "prefetch_disabled_no_s2"),
+        ("icache_prefetchpipe_s1_completion", "prefetch_enabled_enters_s2"),
+        ("icache_prefetchpipe_s1_completion", "s2_busy_enters_s2_recovery"),
+        ("icache_prefetchpipe_s1_completion", "flush_blocks_s1_completion"),
+        ("icache_prefetchpipe_s2_miss", "sram_or_clean_mshr_hit"),
+        ("icache_prefetchpipe_s2_miss", "clean_mshr_cancels_backpressured_miss"),
+        ("icache_prefetchpipe_s2_miss", "corrupt_refill_reprefetch"),
+        ("icache_prefetchpipe_s2_miss", "nonmatching_clean_refill_ignored"),
+        ("icache_prefetchpipe_s2_miss", "exception_or_mmio_suppresses"),
+        ("icache_prefetchpipe_s2_miss", "single_line_miss_request"),
+        ("icache_prefetchpipe_s2_miss", "dual_line_miss_requests"),
+        ("icache_prefetchpipe_s2_miss", "missunit_backpressure_recovery"),
+        ("icache_prefetchpipe_s2_miss", "single_line_masks_second_port"),
+        ("icache_prefetchpipe_s2_miss", "redirect_flush_ready_boundary"),
+        ("icache_prefetchpipe_s2_miss", "bpu_flush_keeps_s2"),
+    }
+)
+
+
+_PREFETCH_SIGNALS = {
+    "from_valid": (_PREFETCH + "io_fromFtq_valid",),
+    "from_ready": (
+        _PREFETCH + "io_fromFtq_ready",
+        _PREFETCH + "__Vtogcov__io_fromFtq_ready",
+    ),
+    "from_soft": (
+        _PREFETCH + "io_fromFtq_bits_req_0_isSoftPrefetch",
+        _PREFETCH + "__Vtogcov__io_fromFtq_bits_req_0_isSoftPrefetch",
+    ),
+    "s0_fire": (_PREFETCH + "s0_fire", _PREFETCH + "__Vtogcov__s0_fire"),
+    "s1_ready": (_PREFETCH + "__Vtogcov__s1_ready",),
+    "s2_ready": (_PREFETCH + "s2_ready", _PREFETCH + "__Vtogcov__s2_ready"),
+    "s1_valid": (_PREFETCH + "s1_valid", _PREFETCH + "__Vtogcov__s1_valid"),
+    "s1_soft": (
+        _PREFETCH + "s1_isSoftPrefetch",
+        _PREFETCH + "__Vtogcov__s1_isSoftPrefetch",
+    ),
+    "s1_state": (_PREFETCH + "s1_state", _PREFETCH + "__Vtogcov__s1_state"),
+    "s1_wait_itlb": (
+        _PREFETCH + "s1_waitItlb",
+        _PREFETCH + "__Vtogcov__s1_waitItlb",
+    ),
+    "s1_tlb_finish": (
+        _PREFETCH + "tlbValidLatch",
+        _PREFETCH + "__Vtogcov__tlbValidLatch",
+    ),
+    "s1_two_case": (
+        _PREFETCH + "s1_twoPrefetchCase_value",
+        _PREFETCH + "__Vtogcov__s1_twoPrefetchCase_value",
+    ),
+    "s1_fire": (_PREFETCH + "s1_fire", _PREFETCH + "__Vtogcov__s1_fire"),
+    "s1_real_fire": (
+        _PREFETCH + "s1_realFire",
+        _PREFETCH + "__Vtogcov__s1_realFire",
+    ),
+    "s1_flush": (_PREFETCH + "io_itlbFlushPipe",),
+    "s1_next_state": (_PREFETCH + "s1_nextState", _PREFETCH + "__Vtogcov__s1_nextState"),
+    "itlb_flush": (_PREFETCH + "io_itlbFlushPipe",),
+    "itlb_req_valid": (_PREFETCH + "io_itlb_req_valid",),
+    "itlb_resp_miss": (_PREFETCH + "io_itlb_resp_bits_miss",),
+    "meta_req_valid": (
+        _PREFETCH + "io_metaRead_req_valid",
+        _PREFETCH + "__Vtogcov__io_metaRead_req_valid",
+    ),
+    "meta_ready": (
+        _PREFETCH + "io_metaRead_req_ready",
+        _PREFETCH + "__Vtogcov__io_metaRead_req_ready",
+    ),
+    "way0_ready": (
+        _PREFETCH + "io_wayLookupWrite_0_ready",
+        _PREFETCH + "__Vtogcov__io_wayLookupWrite_0_ready",
+    ),
+    "way0_valid": (
+        _PREFETCH + "io_wayLookupWrite_0_valid",
+        _PREFETCH + "__Vtogcov__io_wayLookupWrite_0_valid",
+    ),
+    "way1_valid": (
+        _PREFETCH + "io_wayLookupWrite_1_valid",
+        _PREFETCH + "__Vtogcov__io_wayLookupWrite_1_valid",
+    ),
+    "global_flush": (_ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",),
+    "bpu_valid": (_ICACHE + "__Vtogcov__io_fromFtq_flushFromBpu_s3_valid",),
+    "ftq_prefetch_valid": (_ICACHE + "io_fromFtq_toPrefetch_valid",),
+    "soft_pending": (
+        _ICACHE + "softPrefetchValid",
+        _ICACHE + "__Vtogcov__softPrefetchValid",
+    ),
+    "soft0_valid": (_TOP + "io_softPrefetch_0_valid",),
+    "soft1_valid": (_TOP + "io_softPrefetch_1_valid",),
+    "soft2_valid": (_TOP + "io_softPrefetch_2_valid",),
+    "pf_enable": (
+        "Frontend_top.Frontend.inner_icache_io_csrPfEnable_REG",
+        "Frontend_top.Frontend.__Vtogcov__inner_icache_io_csrPfEnable_REG",
+    ),
+    "refill_valid": (
+        _MAIN + "io_missResp_valid",
+        _MAIN + "__Vtogcov__io_missResp_valid",
+    ),
+    "refill_vset": (_MAIN + "__Vtogcov__io_missResp_bits_vSetIdx",),
+    "refill_corrupt": (_MAIN + "__Vtogcov__io_missResp_bits_corrupt",),
+    "refill_waymask": (_ICACHE + "missUnit.__Vtogcov__io_resp_bits_waymask",),
+    "s1_mshr_valid": (
+        _PREFETCH + "s1_mshrValid",
+        _PREFETCH + "__Vtogcov__s1_mshrValid",
+    ),
+    "s1_ptag_same": (
+        _PREFETCH + "newInfo_pTagSame",
+        _PREFETCH + "__Vtogcov__newInfo_pTagSame",
+    ),
+    "s1_set0": (
+        _PREFETCH + "s1_readMetaSetIdx_0",
+        _PREFETCH + "__Vtogcov__s1_readMetaSetIdx_0",
+    ),
+    "s1_set1": (
+        _PREFETCH + "s1_readMetaSetIdx_1",
+        _PREFETCH + "__Vtogcov__s1_readMetaSetIdx_1",
+    ),
+    "s1_old_way0": (
+        _PREFETCH + "s1_metaInfoReg_r_waymask",
+        _PREFETCH + "__Vtogcov__s1_metaInfoReg_r_waymask",
+    ),
+    "s1_old_way1": (
+        _PREFETCH + "s1_metaInfoReg_r_1_waymask",
+        _PREFETCH + "__Vtogcov__s1_metaInfoReg_r_1_waymask",
+    ),
+    "s2_valid": (_PREFETCH + "s2_valid", _PREFETCH + "__Vtogcov__s2_valid"),
+    "s2_double": (
+        _PREFETCH + "s2_doubleline",
+        _PREFETCH + "__Vtogcov__s2_doubleline",
+    ),
+    "s2_exception": (
+        _PREFETCH + "s2_exception_value",
+        _PREFETCH + "__Vtogcov__s2_exception_value",
+    ),
+    "s2_mmio": (_PREFETCH + "s2_isMmio", _PREFETCH + "__Vtogcov__s2_isMmio"),
+    "s2_sram0": (
+        _PREFETCH + "s2_sramHits_0",
+        _PREFETCH + "__Vtogcov__s2_sramHits_0",
+    ),
+    "s2_sram1": (
+        _PREFETCH + "s2_sramHits_1",
+        _PREFETCH + "__Vtogcov__s2_sramHits_1",
+    ),
+    "s2_set0": (
+        _PREFETCH + "s2_readMetaSetIdx_0",
+        _PREFETCH + "__Vtogcov__s2_readMetaSetIdx_0",
+    ),
+    "s2_set1": (
+        _PREFETCH + "s2_readMetaSetIdx_1",
+        _PREFETCH + "__Vtogcov__s2_readMetaSetIdx_1",
+    ),
+    "s2_mshr0": (
+        _PREFETCH + "s2_mshrHits_valid",
+        _PREFETCH + "__Vtogcov__s2_mshrHits_valid",
+    ),
+    "s2_mshr1": (
+        _PREFETCH + "s2_mshrHits_valid_1",
+        _PREFETCH + "__Vtogcov__s2_mshrHits_valid_1",
+    ),
+    "s2_miss0": (_PREFETCH + "s2_miss_0", _PREFETCH + "__Vtogcov__s2_miss_0"),
+    "s2_miss1": (_PREFETCH + "s2_miss_1", _PREFETCH + "__Vtogcov__s2_miss_1"),
+    "s2_has_send0": (
+        _PREFETCH + "s2_hasSend_0",
+        _PREFETCH + "__Vtogcov__s2_hasSend_0",
+    ),
+    "s2_has_send1": (
+        _PREFETCH + "s2_hasSend_1",
+        _PREFETCH + "__Vtogcov__s2_hasSend_1",
+    ),
+    "miss_ready": (
+        _ICACHE + "missUnit.io_prefetchReq_ready",
+        _ICACHE + "missUnit.__Vtogcov__io_prefetchReq_ready",
+    ),
+    "miss_valid": (
+        _ICACHE + "missUnit.io_prefetchReq_valid",
+        _ICACHE + "missUnit.__Vtogcov__io_prefetchReq_valid",
+    ),
+}
+
+
+def _read_prefetch(recorder, key: str) -> Optional[int]:
+    dut = getattr(getattr(recorder, "env", None), "dut", None)
+    if dut is None:
+        return None
+    return recorder._read_first_dut_signal(dut, _PREFETCH_SIGNALS[key])
+
+
+def reset_icache_prefetchpipe_coverage_state(recorder) -> None:
+    recorder._icache_prefetchpipe_cov_state = {
+        "bpu_match_seen": False,
+        "bpu_miss_seen": False,
+        "itlb_wait_seen": False,
+        "meta_resend_blocked": False,
+        "waylookup_blocked": False,
+        "s2_blocked": False,
+        "clean_mshr_pending": False,
+        "missunit_backpressure": False,
+        "dual_layouts": set(),
+        "redirect_ready": set(),
+    }
+
+
+def _mark_prefetch(
+    recorder,
+    group: str,
+    bin_name: str,
+    cycle: int,
+    condition: bool,
+    evidence: dict[str, Any],
+) -> None:
+    if condition:
+        recorder.mark(
+            group,
+            bin_name,
+            cycle,
+            evidence,
+            coverpoint=ICACHE_PREFETCHPIPE_COVERPOINTS[group],
+        )
+
+
+def sample_icache_prefetchpipe_coverage(recorder, env, cycle: int) -> None:
+    del env
+    state = getattr(recorder, "_icache_prefetchpipe_cov_state", None)
+    if state is None:
+        reset_icache_prefetchpipe_coverage_state(recorder)
+        state = recorder._icache_prefetchpipe_cov_state
+
+    s = {key: _read_prefetch(recorder, key) for key in _PREFETCH_SIGNALS}
+    evidence = {key: value for key, value in s.items() if value is not None}
+    s2_set_values = {
+        value for value in (s["s2_set0"], s["s2_set1"]) if value is not None
+    }
+    hw_request = _on(s["from_valid"]) and _off(s["from_soft"])
+    soft_request = _on(s["from_valid"]) and _on(s["from_soft"])
+    entry_resources_ready = _on(s["s1_ready"]) and _on(s["meta_ready"])
+
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "ftq_accept_all_ready",
+        cycle,
+        hw_request and _on(s["s0_fire"]),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "soft_ftq_same_cycle_capture",
+        cycle,
+        _off(s["soft_pending"])
+        and _on(s["ftq_prefetch_valid"])
+        and any(_on(s[key]) for key in ("soft0_valid", "soft1_valid", "soft2_valid")),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "itlb_or_meta_backpressure",
+        cycle,
+        hw_request
+        and _on(s["s1_ready"])
+        and _off(s["meta_ready"])
+        and _off(s["global_flush"]),
+        evidence,
+    )
+    s1_state = s["s1_state"]
+    if _on(s["s1_valid"]) and _on(s["s1_wait_itlb"]):
+        state["itlb_wait_seen"] = True
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "itlb_miss_resend_meta_retry",
+        cycle,
+        state["itlb_wait_seen"]
+        and _on(s["s1_valid"])
+        and _off(s["s1_wait_itlb"])
+        and _on(s["s1_tlb_finish"])
+        and s1_state == 1
+        and _on(s["meta_req_valid"]),
+        evidence,
+    )
+    if s1_state == 2 and _off(s["meta_ready"]):
+        state["meta_resend_blocked"] = True
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "meta_resend_backpressure_recovery",
+        cycle,
+        state["meta_resend_blocked"]
+        and ((s1_state == 2 and _on(s["meta_ready"])) or s1_state == 3),
+        evidence,
+    )
+    if s1_state == 3 and _on(s["way0_valid"]) and _off(s["way0_ready"]):
+        state["waylookup_blocked"] = True
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "waylookup_backpressure_recovery",
+        cycle,
+        state["waylookup_blocked"]
+        and _on(s["way0_valid"])
+        and _on(s["way0_ready"]),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "s1_busy_backpressure",
+        cycle,
+        hw_request
+        and _on(s["s1_valid"])
+        and _off(s["s1_ready"])
+        and _off(s["global_flush"]),
+        evidence,
+    )
+    if s1_state == 4 and _off(s["s2_ready"]):
+        state["s2_blocked"] = True
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_completion",
+        "s2_busy_enters_s2_recovery",
+        cycle,
+        state["s2_blocked"] and s1_state == 4 and _on(s["s2_ready"]),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_completion",
+        "flush_blocks_s1_completion",
+        cycle,
+        _on(s["s1_valid"]) and _on(s["s1_flush"]) and _on(s["pf_enable"]),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "redirect_flush_blocks_hw",
+        cycle,
+        hw_request and _on(s["global_flush"]) and entry_resources_ready,
+        evidence,
+    )
+    pending_miss = _on(s["s2_valid"]) and _on(s["miss_valid"]) and _off(s["miss_ready"])
+    if pending_miss:
+        state["clean_mshr_pending"] = True
+    clean_mshr_cancels = any(
+        (
+            _on(s[mshr_key])
+            and _off(s[miss_key])
+        )
+        for mshr_key, miss_key in (("s2_mshr0", "s2_miss0"), ("s2_mshr1", "s2_miss1"))
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "clean_mshr_cancels_backpressured_miss",
+        cycle,
+        state["clean_mshr_pending"]
+        and _on(s["s2_valid"])
+        and clean_mshr_cancels,
+        evidence,
+    )
+
+    bpu_comparison = (
+        hw_request
+        and _on(s["bpu_valid"])
+        and _off(s["global_flush"])
+        and entry_resources_ready
+    )
+    if bpu_comparison and _on(s["from_ready"]):
+        state["bpu_miss_seen"] = True
+    if bpu_comparison and _off(s["from_ready"]):
+        state["bpu_match_seen"] = True
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "bpu_flush_match_only",
+        cycle,
+        state["bpu_match_seen"] and state["bpu_miss_seen"],
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "nonmatching_clean_refill_ignored",
+        cycle,
+        _on(s["s2_valid"])
+        and _on(s["refill_valid"])
+        and _off(s["refill_corrupt"])
+        and s["refill_vset"] is not None
+        and s["refill_vset"] not in s2_set_values,
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "soft_ignores_bpu_flush",
+        cycle,
+        soft_request
+        and _on(s["bpu_valid"])
+        and _off(s["global_flush"])
+        and _on(s["s0_fire"]),
+        evidence,
+    )
+    if _on(s["miss_valid"]) and _off(s["miss_ready"]):
+        state["missunit_backpressure"] = True
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "missunit_backpressure_recovery",
+        cycle,
+        state["missunit_backpressure"]
+        and _on(s["miss_valid"])
+        and _on(s["miss_ready"]),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "soft_priority_over_ftq",
+        cycle,
+        _on(s["soft_pending"])
+        and _on(s["ftq_prefetch_valid"])
+        and soft_request
+        and _on(s["s0_fire"]),
+        evidence,
+    )
+    soft_input_count = sum(
+        _on(s[key]) for key in ("soft0_valid", "soft1_valid", "soft2_valid")
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s0_entry",
+        "multi_soft_single_accept",
+        cycle,
+        soft_input_count >= 2 and _off(s["soft_pending"]),
+        evidence,
+    )
+
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "flush_cancels_itlb_wait",
+        cycle,
+        _on(s["s1_valid"])
+        and _on(s["s1_wait_itlb"])
+        and _on(s["itlb_flush"]),
+        evidence,
+    )
+    set_values = {value for value in (s["s1_set0"], s["s1_set1"]) if value is not None}
+    refill_set_match = s["refill_vset"] is not None and s["refill_vset"] in set_values
+    clean_refill = (
+        _on(s["s1_valid"])
+        and _on(s["refill_valid"])
+        and _off(s["refill_corrupt"])
+        and _on(s["s1_mshr_valid"])
+        and refill_set_match
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "clean_refill_updates_meta",
+        cycle,
+        clean_refill and _on(s["s1_ptag_same"]),
+        evidence,
+    )
+    old_waymask = 0
+    for key in ("s1_old_way0", "s1_old_way1"):
+        if s[key] is not None:
+            old_waymask |= int(s[key])
+    same_way_new_tag = (
+        clean_refill
+        and _off(s["s1_ptag_same"])
+        and s["refill_waymask"] is not None
+        and (old_waymask & int(s["refill_waymask"])) != 0
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "same_way_new_tag_invalidates_old",
+        cycle,
+        same_way_new_tag,
+        evidence,
+    )
+    if _on(s["s1_valid"]) and s["s1_two_case"] in (1, 2, 4, 8):
+        state["dual_layouts"].add(int(s["s1_two_case"]))
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "four_dual_layouts",
+        cycle,
+        state["dual_layouts"] == {1, 2, 4, 8},
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "conflict_first_request_only",
+        cycle,
+        _on(s["s1_valid"])
+        and _off(s["s1_soft"])
+        and s["s1_two_case"] == 0
+        and _on(s["s1_tlb_finish"]),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_meta",
+        "soft_probe_no_waylookup_ftq",
+        cycle,
+        _on(s["s1_valid"])
+        and _on(s["s1_soft"])
+        and _on(s["s1_tlb_finish"]),
+        evidence,
+    )
+
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_completion",
+        "prefetch_disabled_no_s2",
+        cycle,
+        _on(s["s1_fire"]) and _off(s["pf_enable"]),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s1_completion",
+        "prefetch_enabled_enters_s2",
+        cycle,
+        _on(s["s1_real_fire"]) and _on(s["pf_enable"]),
+        evidence,
+    )
+
+    any_s2_hit = any(
+        _on(s[key]) for key in ("s2_sram0", "s2_sram1", "s2_mshr0", "s2_mshr1")
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "sram_or_clean_mshr_hit",
+        cycle,
+        _on(s["s2_valid"]) and any_s2_hit,
+        evidence,
+    )
+    s2_set_values = {
+        value for value in (s["s2_set0"], s["s2_set1"]) if value is not None
+    }
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "corrupt_refill_reprefetch",
+        cycle,
+        _on(s["s2_valid"])
+        and _on(s["refill_valid"])
+        and _on(s["refill_corrupt"])
+        and s["refill_vset"] in s2_set_values
+        and (_on(s["s2_miss0"]) or _on(s["s2_miss1"])),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "exception_or_mmio_suppresses",
+        cycle,
+        _on(s["s2_valid"])
+        and (_on(s["s2_exception"]) or _on(s["s2_mmio"])),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "single_line_miss_request",
+        cycle,
+        _on(s["s2_valid"])
+        and _off(s["s2_double"])
+        and _on(s["s2_miss0"])
+        and _on(s["miss_ready"]),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "dual_line_miss_requests",
+        cycle,
+        _on(s["s2_valid"])
+        and _on(s["s2_double"])
+        and _on(s["s2_miss0"])
+        and _on(s["s2_miss1"])
+        and _on(s["miss_ready"]),
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "single_line_masks_second_port",
+        cycle,
+        _on(s["s2_valid"]) and _off(s["s2_double"]),
+        evidence,
+    )
+    if (
+        _on(s["s2_valid"])
+        and _on(s["global_flush"])
+        and (_on(s["s2_miss0"]) or _on(s["s2_miss1"]))
+        and s["miss_ready"] is not None
+    ):
+        state["redirect_ready"].add(int(_on(s["miss_ready"])))
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "redirect_flush_ready_boundary",
+        cycle,
+        state["redirect_ready"] == {0, 1},
+        evidence,
+    )
+    _mark_prefetch(
+        recorder,
+        "icache_prefetchpipe_s2_miss",
+        "bpu_flush_keeps_s2",
+        cycle,
+        _on(s["s2_valid"])
+        and _on(s["bpu_valid"])
+        and _off(s["global_flush"]),
+        evidence,
+    )

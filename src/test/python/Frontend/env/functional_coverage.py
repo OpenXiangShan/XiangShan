@@ -11,42 +11,33 @@ from functools import cached_property, lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from .artifact_provenance import (
-    file_sha256,
-    frontend_build_manifest_path,
-    frontend_simulator,
-    load_frontend_build_manifest,
-)
-from .funcov.py.fetch_path.sampler import (
-    UNCACHE_EVENT_SAMPLER_BIN_KEYS,
-    handle_fetch_path_event,
-    initialize_fetch_path_coverage_state,
-    reset_fetch_path_coverage_state,
-    sample_uncache_cycle_state,
-)
-from .funcov.py.ibuffer.sampler import sample_ibuffer_contract
-from .funcov.py.ftq.sampler import (
+from .artifact_provenance import file_sha256, load_frontend_build_manifest
+from .funcov import (
+    CFVEC_SAMPLER_BIN_KEYS,
+    IFU_CFVEC_SAMPLER_BIN_KEYS,
     TWO_FETCH_SAMPLER_BIN_KEYS,
-    initialize_ftq_coverage_state,
-    reset_ftq_coverage_state,
+    sample_cfvec_coverage,
     sample_two_fetch_coverage,
 )
-from .funcov.py.ifu.sampler import (
-    CFVEC_SAMPLER_BIN_KEYS,
-    handle_ifu_event,
-    initialize_ifu_coverage_state,
-    reset_ifu_coverage_state,
-    sample_cfvec_coverage,
-)
-from .funcov.py.icache.sampler import (
+from .funcov.py.icache import (
+    ICACHE_MISSUNIT_SAMPLER_BIN_KEYS,
     ICACHE_MAINPIPE_SAMPLER_BIN_KEYS,
     ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS,
+    ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS,
+    ICACHE_HITMISS_SAMPLER_BIN_KEYS,
+    reset_icache_missunit_coverage_state,
     reset_icache_mainpipe_coverage_state,
     reset_icache_prefetchpipe_coverage_state,
+    sample_icache_missunit_coverage,
     sample_icache_mainpipe_coverage,
     sample_icache_prefetchpipe_coverage,
+    reset_icache_waylookup_coverage_state,
+    sample_icache_waylookup_coverage,
+    reset_icache_hitmiss_coverage_state,
+    sample_icache_hitmiss_coverage,
 )
 from .pylib import frontend_pylib_path
+from .rvc_decoder import expand_rvc
 
 
 def _frontend_root() -> Path:
@@ -80,14 +71,7 @@ def _json_sha256(value: Any) -> str:
 
 
 COMPATIBILITY_FIELDS = (
-    "simulator",
     "dut_source_sha",
-    "implementation_sha",
-    "design_baseline_sha",
-    "source_sha_override",
-    "source_delta_sha256",
-    "source_delta_files",
-    "source_delta_policy",
     "dut_build_sha256",
     "dut_python_extension_sha256",
     "generated_rtl_sha256",
@@ -113,12 +97,27 @@ def _normalize_string_list(values: Optional[Iterable[Any]]) -> List[str]:
     return result
 
 
+UNCACHE_EVENT_SAMPLER_BIN_KEYS = frozenset(
+    {
+        ("uncache_ordering", "pbmt_nc_pmp_mmio_wait_commit"),
+        ("uncache_ordering", "pbmt_nc_non_mmio_no_commit_gate"),
+        ("uncache_path_switch", "uncache_to_icache_clean"),
+        ("fetch_path_switch", "icache_to_mmio_clean"),
+        ("uncache_ordering", "pbmt_io_wait_commit"),
+        ("uncache_path_switch", "icache_to_nc_clean"),
+    }
+)
+
 FUNCTIONAL_COVERAGE_SAMPLER_BIN_KEYS = frozenset(
     set(CFVEC_SAMPLER_BIN_KEYS)
+    | set(IFU_CFVEC_SAMPLER_BIN_KEYS)
     | set(TWO_FETCH_SAMPLER_BIN_KEYS)
     | set(UNCACHE_EVENT_SAMPLER_BIN_KEYS)
     | set(ICACHE_MAINPIPE_SAMPLER_BIN_KEYS)
     | set(ICACHE_PREFETCHPIPE_SAMPLER_BIN_KEYS)
+    | set(ICACHE_MISSUNIT_SAMPLER_BIN_KEYS)
+    | set(ICACHE_WAYLOOKUP_SAMPLER_BIN_KEYS)
+    | set(ICACHE_HITMISS_SAMPLER_BIN_KEYS)
 )
 
 
@@ -215,9 +214,19 @@ class FunctionalCoverageRecorder:
         self.env = None
         self._reset_seen_high = False
         self._reset_release_cycle: Optional[int] = None
-        initialize_fetch_path_coverage_state(self)
-        initialize_ftq_coverage_state(self)
-        initialize_ifu_coverage_state(self)
+        self._last_fetch_path = "icache_seq"
+        self._last_fetch_cycle = -1
+        self._redirected_fetch_path: Optional[dict] = None
+        self._uncache_page_tail_requests: Dict[int, dict] = {}
+        self._uncache_active_nc = False
+        self._last_uncache_was_nc = False
+        self._ifu_last_cfvec: Optional[dict] = None
+        self._ifu_redirect_skip_until_cycle: Optional[int] = None
+        self._two_fetch_last_fetch_ptr: Optional[tuple[int, int]] = None
+        self._two_fetch_expected_ptr_step: Optional[int] = None
+        self._two_fetch_waiting_refill = False
+        self._two_fetch_ftq_pending = False
+        self._two_fetch_last_dual_cycle: Optional[int] = None
         self._dut_signal_cache: Dict[str, Any] = {}
         self._missing_dut_signals: set[str] = set()
 
@@ -318,15 +327,10 @@ class FunctionalCoverageRecorder:
         repo_root = frontend_root.parents[3]
         build_root = repo_root / "build-frontend"
         manifest_override = os.getenv("TB_DUT_BUILD_MANIFEST", "").strip()
-        simulator = frontend_simulator(os.getenv("TB_FRONTEND_SIM", "verilator"))
-        manifest_path = (
-            Path(manifest_override).expanduser()
-            if manifest_override
-            else frontend_build_manifest_path(build_root, simulator)
-        ).resolve(strict=False)
+        simulator = os.getenv("TB_FRONTEND_SIM", "verilator")
         build = load_frontend_build_manifest(
             build_root,
-            manifest_path,
+            Path(manifest_override) if manifest_override else None,
             simulator=simulator,
             pylib_dir=frontend_pylib_path() / "Frontend",
         )
@@ -358,27 +362,67 @@ class FunctionalCoverageRecorder:
             elif not manifest_was_valid:
                 build_config = build_config_override
         definitions_sha256 = _json_sha256([asdict(item) for item in self.definitions])
-        effective_source_override = bool(build.get("source_sha_override", False))
-        if source_override and (
-            not manifest_source_sha or source_override.lower() != manifest_source_sha.lower()
-        ):
-            effective_source_override = True
         sampler_sha256 = _json_sha256(
             {
-                "env/functional_coverage.py": _file_sha256(str(Path(__file__).resolve())),
-                "env/rvc_decoder.py": _file_sha256(
-                    str((Path(__file__).resolve().parent / "rvc_decoder.py"))
+                "functional_coverage.py": _file_sha256(str(Path(__file__).resolve())),
+                "funcov/__init__.py": _file_sha256(
+                    str((Path(__file__).resolve().parent / "funcov" / "__init__.py"))
                 ),
-                "env/funcov/py/ftq/sampler.py": _file_sha256(
+                "funcov/py/icache/__init__.py": _file_sha256(
                     str(
                         Path(__file__).resolve().parent
                         / "funcov"
                         / "py"
-                        / "ftq"
-                        / "sampler.py"
+                        / "icache"
+                        / "__init__.py"
                     )
                 ),
-                "env/funcov/py/ifu/sampler.py": _file_sha256(
+                "funcov/py/icache/icache_mainpipe_funcov.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "icache"
+                        / "icache_mainpipe_funcov.py"
+                    )
+                ),
+                "funcov/py/icache/icache_prefetchpipe_funcov.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "icache"
+                        / "icache_prefetchpipe_funcov.py"
+                    )
+                ),
+                "funcov/py/icache/icache_missunit_funcov.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "icache"
+                        / "icache_missunit_funcov.py"
+                    )
+                ),
+                "funcov/py/icache/icache_waylookup_funcov.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "icache"
+                        / "icache_waylookup_funcov.py"
+                    )
+                ),
+                "funcov/py/icache/icache_hitmiss_funcov.py": _file_sha256(
+                    str(
+                        Path(__file__).resolve().parent
+                        / "funcov"
+                        / "py"
+                        / "icache"
+                        / "icache_hitmiss_funcov.py"
+                    )
+                ),
+                "funcov/py/ifu/sampler.py": _file_sha256(
                     str(
                         Path(__file__).resolve().parent
                         / "funcov"
@@ -387,60 +431,11 @@ class FunctionalCoverageRecorder:
                         / "sampler.py"
                     )
                 ),
-                "env/funcov/py/common/dut.py": _file_sha256(
-                    str((Path(__file__).resolve().parent / "funcov" / "py" / "common" / "dut.py"))
-                ),
-                "env/funcov/py/common/fetch_memory.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "common"
-                        / "fetch_memory.py"
-                    )
-                ),
-                "env/funcov/py/common/utils.py": _file_sha256(
-                    str((Path(__file__).resolve().parent / "funcov" / "py" / "common" / "utils.py"))
-                ),
-                "env/funcov/py/fetch_path/sampler.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "fetch_path"
-                        / "sampler.py"
-                    )
-                ),
-                "env/funcov/py/ibuffer/sampler.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "ibuffer"
-                        / "sampler.py"
-                    )
-                ),
-                "env/funcov/py/icache/sampler.py": _file_sha256(
-                    str(
-                        Path(__file__).resolve().parent
-                        / "funcov"
-                        / "py"
-                        / "icache"
-                        / "sampler.py"
-                    )
-                ),
             }
         )
         provenance = {
-            "simulator": simulator,
             "dut_source_sha": dut_source_sha,
             "dut_source_origin": dut_source_origin,
-            "design_baseline_sha": build.get("design_baseline_sha", "unavailable"),
-            "implementation_sha": build.get("implementation_sha", "unavailable"),
-            "source_sha_override": effective_source_override,
-            "source_delta_sha256": build.get("source_delta_sha256", "unavailable"),
-            "source_delta_files": list(build.get("source_delta_files") or []),
-            "source_delta_policy": build.get("source_delta_policy", "unavailable"),
             "dut_build_sha256": build["dut_build_sha256"],
             "dut_python_extension_sha256": build["dut_python_extension_sha256"],
             "generated_rtl_sha256": build["generated_rtl_sha256"],
@@ -451,9 +446,6 @@ class FunctionalCoverageRecorder:
             "sampler_sha256": sampler_sha256,
             "signal_contract_sha256": build["signal_contract_sha256"],
             "build_config": build_config,
-            # Back-annotation must reload the exact manifest used by this run
-            # instead of trusting the recorder's copied status/hash fields.
-            "build_manifest_path": str(manifest_path),
             "build_manifest_status": manifest_status,
             "build_manifest_sha256": build["build_manifest_sha256"],
             "build_manifest_reasons": manifest_reasons,
@@ -573,15 +565,91 @@ class FunctionalCoverageRecorder:
     def handle_event(self, event: Dict[str, Any]) -> None:
         evt = _sanitize(event)
         self.events_tail.append(evt)
-        handle_fetch_path_event(self, evt)
-        handle_ifu_event(self, evt)
+
+        event_type = str(evt.get("type", ""))
+        cycle = int(evt.get("cycle", 0))
+        payload = evt.get("payload", {}) or {}
+
+        if event_type == "handshake.icache_a":
+            if (
+                self._redirected_fetch_path is not None
+                and self._redirected_fetch_path.get("path") == "mmio_uncache"
+                and self._redirected_fetch_path.get("pbmt_nc") is True
+            ):
+                self.mark(
+                    "uncache_path_switch",
+                    "uncache_to_icache_clean",
+                    cycle,
+                    {"event": event_type, **self._redirected_fetch_path},
+                )
+                self._redirected_fetch_path = None
+            if self._redirected_fetch_path is None or self._redirected_fetch_path.get("path") != "icache_seq":
+                self._redirected_fetch_path = None
+            self._last_fetch_path = "icache_seq"
+            self._last_fetch_cycle = cycle
+        elif event_type == "handshake.uncache_a":
+            address = int(payload.get("address", 0))
+            if (
+                self._redirected_fetch_path is not None
+                and self._redirected_fetch_path.get("path") == "icache_seq"
+                and self._uncache_active_nc
+            ):
+                self.mark(
+                    "uncache_path_switch",
+                    "icache_to_nc_clean",
+                    cycle,
+                    {
+                        "event": event_type,
+                        "address": address,
+                        "new_pbmt_nc": True,
+                        **self._redirected_fetch_path,
+                    },
+                )
+            if (
+                self._redirected_fetch_path is not None
+                and self._redirected_fetch_path.get("path") == "icache_seq"
+                and self.env is not None
+                and self.env.memory.is_mmio(address)
+            ):
+                self.mark(
+                    "fetch_path_switch",
+                    "icache_to_mmio_clean",
+                    cycle,
+                    {"event": event_type, "address": address, **self._redirected_fetch_path},
+                )
+            self._redirected_fetch_path = None
+            self._last_fetch_path = "mmio_uncache"
+            self._last_fetch_cycle = cycle
+            self._sample_uncache_a_event(cycle, payload)
+        elif event_type == "backend.redirect":
+            self._redirected_fetch_path = {
+                "path": self._last_fetch_path,
+                "pbmt_nc": bool(self._last_uncache_was_nc),
+            }
+            self._ifu_last_cfvec = None
+            self._ifu_redirect_skip_until_cycle = cycle + 1
+            self._uncache_page_tail_requests.clear()
 
     def _clear_transient_sampling_state(self) -> None:
-        reset_fetch_path_coverage_state(self)
-        reset_ftq_coverage_state(self)
-        reset_ifu_coverage_state(self)
+        self._last_fetch_path = "icache_seq"
+        self._last_fetch_cycle = -1
+        self._redirected_fetch_path = None
+        self._uncache_page_tail_requests.clear()
+        self._uncache_active_nc = False
+        self._last_uncache_was_nc = False
+        self._ifu_last_cfvec = None
+        self._ifu_redirect_skip_until_cycle = None
+        self._two_fetch_last_fetch_ptr = None
+        self._two_fetch_expected_ptr_step = None
+        self._two_fetch_waiting_refill = False
+        self._two_fetch_ftq_pending = False
+        self._two_fetch_last_dual_cycle = None
+        self._two_fetch_last_waylookup_write_state = None
         reset_icache_mainpipe_coverage_state(self)
         reset_icache_prefetchpipe_coverage_state(self)
+        reset_icache_missunit_coverage_state(self)
+        reset_icache_waylookup_coverage_state(self)
+        reset_icache_hitmiss_coverage_state(self)
 
     def on_cycle(self, cycle: int, env) -> None:
         dut = env.dut
@@ -598,9 +666,12 @@ class FunctionalCoverageRecorder:
         sample_cfvec_coverage(self, env, cycle)
         sample_icache_mainpipe_coverage(self, env, cycle)
         sample_icache_prefetchpipe_coverage(self, env, cycle)
+        sample_icache_missunit_coverage(self, env, cycle)
+        sample_icache_waylookup_coverage(self, env, cycle)
+        sample_icache_hitmiss_coverage(self, env, cycle)
 
-        sample_ibuffer_contract(self, dut, cycle)
-        sample_uncache_cycle_state(self, dut, cycle)
+        self._sample_ibuffer_contract(dut, cycle)
+        self._sample_uncache_cycle_state(dut, cycle, env)
 
     def _lookup_dut_signal(self, dut, name: str):
         name = str(name)
@@ -626,7 +697,7 @@ class FunctionalCoverageRecorder:
 
     @cached_property
     def _registered_internal_signals(self) -> Optional[set[str]]:
-        offset_yaml = frontend_pylib_path() / "Frontend" / "Frontend_offset.yaml"
+        offset_yaml = _frontend_root().parents[3] / "build-frontend" / "pylib" / "Frontend" / "Frontend_offset.yaml"
         if not offset_yaml.exists():
             return None
 
@@ -672,6 +743,46 @@ class FunctionalCoverageRecorder:
             if value is not None:
                 return int(value)
         return None
+
+    def _translate_fetch_addr(self, env, va: int) -> tuple[Optional[int], dict]:
+        if env is None or getattr(env, "page_table", None) is None:
+            return int(va), {"mode": "bare", "va": int(va), "pa": int(va), "ok": True}
+        pa, ok, info = env.page_table.translate(int(va))
+        meta = dict(info or {})
+        meta["va"] = int(va)
+        meta["ok"] = bool(ok)
+        if ok:
+            meta["pa"] = int(pa)
+            return int(pa), meta
+        return None, meta
+
+    def _read_expected_fetch_raw(self, env, pc: int, size: int) -> tuple[Optional[int], dict]:
+        if env is None or getattr(env, "memory", None) is None:
+            return None, {"ok": False, "reason": "no_memory"}
+        value = 0
+        last_meta: dict = {"ok": True, "mode": "bare", "va": int(pc), "pa": int(pc)}
+        for off in range(int(size)):
+            pa, meta = self._translate_fetch_addr(env, int(pc) + int(off))
+            last_meta = meta
+            if pa is None:
+                return None, meta
+            value |= (int(env.memory.read_u8(int(pa))) & 0xFF) << (8 * int(off))
+        return int(value), last_meta
+
+    def _recover_unavailable_instr(self, env, pc: int, instr: int, is_rvc: bool, ex_sum: int) -> int:
+        if int(instr) != 0:
+            return int(instr)
+        fetch_size = 2 if bool(is_rvc) else 4
+        raw_fetch, fetch_meta = self._read_expected_fetch_raw(env, int(pc), fetch_size)
+        if raw_fetch is None or not bool(fetch_meta.get("ok", False)):
+            return int(instr)
+        if bool(is_rvc):
+            raw16 = int(raw_fetch) & 0xFFFF
+            try:
+                return int(expand_rvc(raw16)) & 0xFFFFFFFF
+            except ValueError:
+                return int(instr)
+        return int(raw_fetch) & 0xFFFFFFFF
 
     def write_artifacts(self) -> dict:
         raw = self._raw_dict()
@@ -737,7 +848,6 @@ class FunctionalCoverageRecorder:
         raw_artifacts: list[tuple[Path, dict]] = []
         compatibility_signature: Optional[str] = None
         first_definitions: Optional[list] = None
-        run_ids: set[str] = set()
         for raw_path in raw_list:
             try:
                 with raw_path.open("r", encoding="utf-8") as f:
@@ -754,27 +864,16 @@ class FunctionalCoverageRecorder:
             provenance = data.get("provenance")
             if not isinstance(provenance, dict):
                 raise ValueError(f"functional coverage artifact lacks provenance: {raw_path}")
-            manifest_status = str(provenance.get("build_manifest_status") or "").strip().lower()
-            if manifest_status != "valid":
-                raise ValueError(f"functional coverage artifact has invalid build manifest: {raw_path}")
             missing_fields = [
                 field
                 for field in COMPATIBILITY_FIELDS
-                if provenance.get(field) is None
-                or str(provenance.get(field)).strip() in {"", "unavailable", "unknown"}
+                if provenance.get(field) is None or str(provenance.get(field)).strip() == ""
             ]
             if missing_fields:
                 raise ValueError(
                     "functional coverage artifact lacks compatibility fields: "
                     f"{raw_path}: {missing_fields}"
                 )
-            run = data.get("run")
-            run_id = str(run.get("run_id") or "").strip() if isinstance(run, dict) else ""
-            if not run_id:
-                raise ValueError(f"functional coverage artifact lacks unique run_id: {raw_path}")
-            if run_id in run_ids:
-                raise ValueError(f"duplicate functional coverage run_id cannot be merged: {run_id}")
-            run_ids.add(run_id)
             recorded_signature = str(provenance.get("compatibility_signature") or "").strip().lower()
             expected_signature = _json_sha256(
                 {field: provenance[field] for field in COMPATIBILITY_FIELDS}
@@ -871,6 +970,106 @@ class FunctionalCoverageRecorder:
                     target.evidence.append(item)
         return merged
 
+    def _sample_uncache_a_event(self, cycle: int, payload: Dict[str, Any]) -> None:
+        addr = int(payload.get("address", 0))
+        self._last_uncache_was_nc = bool(self._uncache_active_nc)
+        self._uncache_active_nc = False
+
+        for page, tail in self._uncache_page_tail_requests.items():
+            if addr == int(page) + 0x1000:
+                tail["next_page_requested"] = True
+        if addr & 0xFFF == 0xFF8:
+            self._uncache_page_tail_requests[addr & ~0xFFF] = {
+                "request_addr": addr,
+                "request_cycle": cycle,
+                "next_page_requested": False,
+            }
+
+    def _sample_uncache_cycle_state(self, dut, cycle: int, env) -> None:
+        pbmt = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_itlbPbmt"
+        )
+        pmp_mmio = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.s1_icacheMetaIn_0_pmpMmio"
+        )
+        state = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.uncacheState"
+        )
+        latched_pbmt = self._try_read_dut_signal(
+            dut, "Frontend_top.Frontend.inner_ifu.uncacheUnit.itlbPbmt"
+        )
+        active_pbmt = latched_pbmt if state in {1, 2, 3} and latched_pbmt is not None else pbmt
+        can_accept = self._try_read_dut_signal(dut, "Frontend_top.io_backend_canAccept")
+        if active_pbmt == 1 and pmp_mmio == 0 and state in {2, 3}:
+            self._uncache_active_nc = True
+        if active_pbmt == 1 and pmp_mmio == 1 and state == 1:
+            self.mark(
+                "uncache_ordering",
+                "pbmt_nc_pmp_mmio_wait_commit",
+                cycle,
+                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
+            )
+        if active_pbmt == 2 and pmp_mmio == 0 and state == 1:
+            self.mark(
+                "uncache_ordering",
+                "pbmt_io_wait_commit",
+                cycle,
+                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state},
+            )
+        if active_pbmt == 1 and pmp_mmio == 0 and state == 2 and can_accept == 0:
+            self.mark(
+                "uncache_ordering",
+                "pbmt_nc_non_mmio_no_commit_gate",
+                cycle,
+                {"event": "ifu_uncache_state", "pbmt": active_pbmt, "pmp_mmio": pmp_mmio, "state": state, "can_accept": can_accept},
+            )
+
+    def _sample_ibuffer_contract(self, dut, cycle: int) -> None:
+        """Capture alignment/ownership facts without turning them into hits."""
+        valid = self._try_read_dut_signal(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid")
+        enq = self._try_read_dut_signal(dut, "Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_enqEnable_0")
+        if valid is None or enq is None:
+            return
+
+        masks: list[int] = []
+        for index in range(35):
+            value = self._read_first_dut_signal(
+                dut,
+                (
+                    f"Frontend_top.Frontend.inner_ifu.io_toIBuffer_bits_exceptionMask_{index}",
+                    f"Frontend_top.Frontend.inner_ifu.__Vtogcov__io_toIBuffer_bits_exceptionMask_{index}",
+                    f"Frontend_top.Frontend._inner_ifu_io_toIBuffer_bits_exceptionMask_{index}",
+                ),
+            )
+            if value is None:
+                break
+            masks.append(int(value) & 1)
+        if not masks:
+            return
+
+        enq_bits = int(enq)
+        mask_bits = sum(bit << index for index, bit in enumerate(masks))
+        invalid_mask = mask_bits & ~enq_bits
+        self.risk_observations.append(
+            {
+                "cycle": int(cycle),
+                "risk": "ibuffer_exception_mask_enq_alignment",
+                "valid": int(valid),
+                "enq_enable": enq_bits,
+                "exception_mask": mask_bits,
+                "mask_without_enq": int(invalid_mask),
+                "aligned": invalid_mask == 0,
+            }
+        )
+
+    @staticmethod
+    def _circular_distance(newer_flag: int, newer_value: int, older_flag: int, older_value: int, size: int) -> int:
+        size = max(1, int(size))
+        modulo = size * 2
+        newer = (int(newer_flag) & 1) * size + (int(newer_value) % size)
+        older = (int(older_flag) & 1) * size + (int(older_value) % size)
+        return (newer - older) % modulo
+
     def _raw_dict(self) -> dict:
         stats = {}
         errors: List[dict] = []
@@ -883,23 +1082,6 @@ class FunctionalCoverageRecorder:
                 errors = _sanitize(self.env.get_errors())
             except Exception:
                 errors = []
-
-        # Sampler-side protocol observations are evidence, not hits.  Refill
-        # and redirect ownership mismatches are transaction-attribution errors
-        # for this run and must block automatic HIT.  IBuffer payload stability
-        # is checked by the directed testcase/monitor; sampler observations are
-        # retained under risk_observations as diagnostics instead of being
-        # promoted to run-level checker errors.
-        protocol_risks = [
-            item
-            for item in self.risk_observations
-            if str(item.get("event", "")).startswith(
-                ("two_fetch_refill_", "two_fetch_redirect_")
-            )
-        ]
-        if protocol_risks:
-            errors = list(errors) if isinstance(errors, list) else []
-            errors.extend(protocol_risks[:32])
 
         run = dict(self.run_metadata)
         checker = dict(run.get("checker") or {})

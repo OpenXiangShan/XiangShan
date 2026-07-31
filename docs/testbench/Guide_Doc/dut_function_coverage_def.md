@@ -6,7 +6,7 @@
 > use that contract. The Frontend verification environment no longer uses this
 > implementation. For Frontend, follow
 > `src/test/python/Frontend/docs/03_funcov_model/skills.md` and keep one
-> `FunctionalCoverageRecorder`/`funcov.py` chain; do not create
+> `FunctionalCoverageRecorder`/`env/funcov/` chain; do not create
 > `env/coverage_def.py`, `get_coverage_groups`, or a parallel CovGroup model.
 
 ## 概述
