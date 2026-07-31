@@ -36,9 +36,6 @@ Repository-wide background lives outside this directory:
 - `README.md` for top-level XiangShan orientation.
 - `docs/testbench/testbench_stages.yaml` for staged testbench guidance and
   generated workflow templates.
-- `docs/legacy/frontend-bt/README.md` for non-canonical historical issues,
-  IFU design intent, migration context, and test-point provenance. Never use
-  it as the current RTL or verification source of truth.
 - Never use `git push -f` under any circumstances.
 - Never use `git merge` to incorporate remote code; use `git rebase` only.
 
