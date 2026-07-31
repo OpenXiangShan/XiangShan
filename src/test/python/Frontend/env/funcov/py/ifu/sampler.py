@@ -27,6 +27,16 @@ def _read_ifu_output_slot(recorder, dut, field: str, slot: int, suffix: str = ""
     return _read_ifu_internal(recorder, dut, f"io_toIBuffer_bits_{field}_{int(slot)}{suffix}")
 
 
+def _decode_pruned_pc(encoded_pc: Optional[int]) -> Optional[int]:
+    """Restore the byte address carried by the IFU PrunedAddr bundle.
+
+    ``PrunedAddr.addr`` omits the instruction-alignment bit, so the generated
+    DUT signal is a halfword address rather than a byte address.
+    """
+
+    return None if encoded_pc is None else int(encoded_pc) << 1
+
+
 def _active_ifu_output_slots(enq_enable: int, valid_mask: int) -> list[int]:
     active_mask = int(enq_enable) & int(valid_mask)
     return [slot for slot in range(_IFU_OUTPUT_SLOT_COUNT) if active_mask & (1 << slot)]
@@ -64,7 +74,7 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
     exception_type = _read_ifu_internal(recorder, dut, "io_toIBuffer_bits_exceptionType_value")
     records: list[dict[str, Any]] = []
     for slot in slots:
-        pc = _read_ifu_output_slot(recorder, dut, "pc", slot, "_addr")
+        pc = _decode_pruned_pc(_read_ifu_output_slot(recorder, dut, "pc", slot, "_addr"))
         instr = _read_ifu_output_slot(recorder, dut, "instrs", slot)
         is_rvc = _read_ifu_output_slot(recorder, dut, "isRvc", slot)
         end_offset = _read_ifu_output_slot(recorder, dut, "instrEndOffset", slot, "_offset")
@@ -105,8 +115,15 @@ def _sample_instr_compact_coverage(recorder, env, cycle: int) -> None:
             recorder.mark("ifu_instr_compact", "rvc_multi_slot", cycle, evidence)
             break
 
-    has_rvc_end = any(record["is_rvc"] == 1 and record["end_offset"] == 0 for record in records)
-    has_rvi_end = any(record["is_rvc"] == 0 and record["end_offset"] == 1 for record in records)
+    has_rvc_end = False
+    has_rvi_end = False
+    for before, after in zip(records, records[1:]):
+        if any(value is None for value in (before["pc"], after["pc"], before["end_offset"], after["end_offset"])):
+            continue
+        pc_step = int(after["pc"]) - int(before["pc"])
+        end_step = int(after["end_offset"]) - int(before["end_offset"])
+        has_rvc_end |= before["is_rvc"] == 1 and pc_step == 2 and end_step == 1
+        has_rvi_end |= before["is_rvc"] == 0 and pc_step == 4 and end_step == 2
     if has_rvc_end and has_rvi_end:
         recorder.mark("ifu_instr_end_offset", "rvc_rvi_end_offset", cycle, evidence)
 

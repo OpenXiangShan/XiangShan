@@ -69,7 +69,8 @@ def _set_ifu_output(dut, entries, *, exception_type=0):
         slot = int(slot)
         enq_enable |= 1 << slot
         valid_mask |= 1 << slot
-        dut.set(_PREFIX + f"io_toIBuffer_bits_pc_{slot}_addr", pc)
+        # IFU's PrunedAddr omits bit 0, matching the generated DUT signal.
+        dut.set(_PREFIX + f"io_toIBuffer_bits_pc_{slot}_addr", int(pc) >> 1)
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrs_{slot}", instr)
         dut.set(_PREFIX + f"io_toIBuffer_bits_isRvc_{slot}", is_rvc)
         dut.set(_PREFIX + f"io_toIBuffer_bits_instrEndOffset_{slot}_offset", end_offset)
@@ -87,13 +88,15 @@ def test_ifu_compact_and_expander_bins_use_to_ibuffer_fire(tmp_path):
     memory.write16(base, compressed)
     memory.write16(base + 2, compressed)
     memory.write32(base + 4, 0x00000013)
+    memory.write32(base + 8, 0x00000013)
     expanded = expand_rvc(compressed)
     _set_ifu_output(
         dut,
         [
             (0, base, expanded, 1, 0, 0, 1, 0),
-            (1, base + 2, expanded, 1, 0, 0, 1, 0),
-            (2, base + 4, 0x00000013, 0, 1, 0, 1, 0),
+            (1, base + 2, expanded, 1, 1, 0, 1, 0),
+            (2, base + 4, 0x00000013, 0, 3, 0, 1, 0),
+            (3, base + 8, 0x00000013, 0, 5, 0, 1, 0),
         ],
     )
 
@@ -114,7 +117,7 @@ def test_ifu_compact_two_fetch_source_requires_expected_ftq_order(tmp_path):
         dut,
         [
             (0, 0x80000000, 0x00000013, 0, 1, 0, 3, 0),
-            (1, 0x80000004, 0x00000013, 0, 1, 0, 4, 0),
+            (1, 0x80000004, 0x00000013, 0, 3, 0, 4, 0),
         ],
     )
 
