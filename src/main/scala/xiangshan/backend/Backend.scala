@@ -533,20 +533,19 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
     sink.bits.ssid.foreach(_ := Mux(enableMdp, source.bits.ssid.get, 0.U(SSIDWidth.W)))
   }
 
-//  require(false, "fix rebase error")
 //  require(io.mem.vstdIssue.flatten.size == vecRegion.io.toMemExu.get.flatten.size)
 //  io.mem.vstdIssue.flatten.zip(vecRegion.io.toMemExu.get.flatten).foreach { case (sink, source) =>
 //    connectExuInput(sink, source)
 //  }
-  require(
-    io.mem.vstdIssue.flatten.size == vecRegion.out.toMem.ex0.flatten.size,
-    s"sizes are not equal, io.mem.vstdIssue.flatten.size = ${io.mem.vstdIssue.flatten.size}, " +
-      s"vecRegion.out.toMem.ex0.flatten.size = ${vecRegion.out.toMem.ex0.flatten.size}",
-  )
-  io.mem.vstdIssue.flatten.zip(vecRegion.out.toMem.ex0.flatten).foreach { case (sink: DecoupledIO[ExuInput], source: ValidIO[Exu.InUop]) =>
-    sink.valid := source.valid
-    sink.bits := source.bits.toOldExuInput
-  }
+//  require(
+//    io.mem.vstdIssue.flatten.size == vecRegion.out.toMem.ex0.flatten.size,
+//    s"sizes are not equal, io.mem.vstdIssue.flatten.size = ${io.mem.vstdIssue.flatten.size}, " +
+//      s"vecRegion.out.toMem.ex0.flatten.size = ${vecRegion.out.toMem.ex0.flatten.size}",
+//  )
+//  io.mem.vstdIssue.flatten.zip(vecRegion.out.toMem.ex0.flatten).foreach { case (sink: DecoupledIO[ExuInput], source: ValidIO[Exu.InUop]) =>
+//    sink.valid := source.valid
+//    sink.bits := source.bits.toOldExuInput
+//  }
 
   io.mem.tlbCsr := csrio.tlb
   io.mem.csrCtrl := csrio.customCtrl
@@ -574,8 +573,12 @@ class BackendInlinedImp(override val wrapper: BackendInlined)(implicit p: Parame
   ctrlBlock.io.robio.robHeadLsIssue := io.mem.intIssue.flatten.map(deq =>
     deq.fire && deq.bits.robIdx === ctrlBlock.io.robio.robDeqPtr
   ).reduce(_ || _)
-  ctrlBlock.io.robio.debugIQDeqRobIdxVec.foreach(_ := intRegion.io.debugIQDeqRobIdxVec.get ++
-    fpRegion.io.debugIQDeqRobIdxVec.get ++ vecRegion.io.debugIQDeqRobIdxVec.get)
+  ctrlBlock.io.robio.debugIQDeqRobIdxVec.foreach { sink =>
+    sink.foreach(_ := 0.U.asTypeOf(sink.head))
+    sink.zip(intRegion.io.debugIQDeqRobIdxVec.get ++ fpRegion.io.debugIQDeqRobIdxVec.get).foreach {
+      case (s, source) => s := source
+    }
+  }
 
   // mem io
   io.mem.robLsqIO <> ctrlBlock.io.robio.lsq

@@ -984,7 +984,7 @@ object Opcode {
 
   object FDivOpcodes extends FDivOpcodes
 
-  object FAluOpcodes extends opcodes.FMiscOpcode
+  object FAluOpcodes extends Opcodes.FMacOpcode
 
   trait VSetOpcodes extends Opcodes {
     // vtype is from imm

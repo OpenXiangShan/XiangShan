@@ -30,7 +30,8 @@ import xiangshan.backend.decode.isa.CSRs
 import xiangshan.backend.decode.isa.Instructions._
 import xiangshan.backend.decode.isa.PseudoInstructions._
 import xiangshan.backend.decode.isa.bitfield.{InstVType, OPCODE5Bit, XSInstBitFields}
-import yunsuan.{MULOpType, VfaluType, VfmaOpCode}
+import yunsuan.MULOpType
+import yunsuan.VfmaOpCode
 import xiangshan.backend.fu.FuType
 import xiangshan.backend.fu.vector.Bundles.{VSew, Vl}
 import xiangshan.backend.fu.wrapper.CSRToDecode
