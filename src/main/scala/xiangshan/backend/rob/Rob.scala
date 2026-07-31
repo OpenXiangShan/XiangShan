@@ -952,10 +952,19 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val dirty_fs = enqFlagTracker.io.commitSetMask(0)
   val dirty_vs = enqFlagTracker.io.commitSetMask(1)
 
+  val deqPtrCmp = Wire(new RobPtr)
+  val enqPtrCmp = Wire(new RobPtr)
+  deqPtrCmp := deqPtr
+  enqPtrCmp := enqPtr
+  deqPtrCmp.isFormer := true.B
+  enqPtrCmp.isFormer := true.B
+  private def wbSlotStillValid(robIdx: RobPtr): Bool = {
+    val wbEntry = robEntries(robIdx.value) // TODO: this may cause timing issue
+    wbEntry.valid && (robIdx.isFormer || CompressType.isNotNORMAL(wbEntry.compressType))
+  }
+
   // update when writeback
   val fflagsWidth = 5
-  val fflags = Wire(Vec(fflagsWidth, Valid(Bool())))
-  val vxsat = Wire(Valid(Bool()))
 
   val writebackFlagTracker = Module(new RobSetFlagTracker(fflagsWidth + 1, io.writeback.size, CommitWidth))
   writebackFlagTracker.io.update.zip(io.writeback).foreach { case (update, wb) =>
@@ -976,13 +985,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       commit.bits := robIdx
   }
 
-  for (i <- 0 until fflagsWidth) {
-    fflags(i).valid := writebackFlagTracker.io.commitSetMask(i)
-    fflags(i).bits := writebackFlagTracker.io.commitSetMask(i)
-  }
-  vxsat.valid := writebackFlagTracker.io.commitSetMask(fflagsWidth)
-  vxsat.bits := writebackFlagTracker.io.commitSetMask(fflagsWidth)
-
   val resetVstart = dirty_vs && !io.vstartIsZero
 
   vecExcpInfo.valid := exceptionHappen && !intrEnable && exceptionDataRead.bits.vstartEn && exceptionDataRead.bits.isVecLoad && !exceptionDataRead.bits.isEnqExcp
@@ -1000,18 +1002,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   io.csr.vstart.valid := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstartEn, resetVstart))
   io.csr.vstart.bits := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstart, 0.U))
-
-  val deqPtrCmp = Wire(new RobPtr)
-  val enqPtrCmp = Wire(new RobPtr)
-  deqPtrCmp := deqPtr
-  enqPtrCmp := enqPtr
-  deqPtrCmp.isFormer := true.B
-  enqPtrCmp.isFormer := true.B
-  private def wbSlotStillValid(robIdx: RobPtr): Bool = {
-    val wbEntry = robEntries(robIdx.value) // TODO: this may cause timing issue
-    wbEntry.valid && (robIdx.isFormer || CompressType.isNotNORMAL(wbEntry.compressType))
-  }
-
 
   // when mispredict branches writeback, stop commit in the next 2 cycles
   // TODO: don't check all exu write back
@@ -1104,11 +1094,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // sync fflags/dirty_fs/vxsat to csr
   for(i <- 0 until fflagsWidth) {
-    io.csr.fflags(i) := RegNextWithEnable(fflags(i))
+    io.csr.fflags(i) := RegNext(writebackFlagTracker.io.commitSetMask(i), false.B)
   }
   io.csr.dirty_fs := GatedValidRegNext(dirty_fs)
   io.csr.dirty_vs := GatedValidRegNext(dirty_vs)
-  io.csr.vxsat    := RegNextWithEnable(vxsat)
+  io.csr.vxsat    := RegNext(writebackFlagTracker.io.commitSetMask(fflagsWidth), false.B)
 
   // commit load/store to lsq
   val ldCommitVec = VecInit((0 until CommitWidth).flatMap { i =>

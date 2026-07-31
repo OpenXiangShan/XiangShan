@@ -43,8 +43,8 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     reconnectReg()
 
     for (i <- 0 until 5) {
-      when (robCommit.fflags(i).valid) {
-        reg(i) := reg(i) || robCommit.fflags(i).bits
+      when (robCommit.fflags(i)) {
+        reg(i) := true.B
       }
     }
 
@@ -101,8 +101,8 @@ trait Unprivileged { self: NewCSR with MachineLevel with SupervisorLevel =>
     // write connection
     reconnectReg()
 
-    when(robCommit.vxsat.valid) {
-      reg.VXSAT := reg.VXSAT.asBool || robCommit.vxsat.bits.asBool
+    when(robCommit.vxsat) {
+      reg.VXSAT := true.B
     }
 
     // read connection

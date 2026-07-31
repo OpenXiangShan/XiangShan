@@ -636,11 +636,11 @@ class NewCSR(implicit val p: Parameters) extends Module
         // Todo: move RegNext from ROB to CSR
         m.robCommit.instNum := io.fromRob.commit.instNum
         for (i <- 0 until 5) {
-          m.robCommit.fflags(i)  := RegNextWithEnable(io.fromRob.commit.fflags(i))
+          m.robCommit.fflags(i)  := RegNext(io.fromRob.commit.fflags(i), false.B)
         }
         m.robCommit.fsDirty := GatedValidRegNext(io.fromRob.commit.fsDirty)
         m.robCommit.vsDirty := GatedValidRegNext(io.fromRob.commit.vsDirty)
-        m.robCommit.vxsat   := RegNextWithEnable(io.fromRob.commit.vxsat)
+        m.robCommit.vxsat   := RegNext(io.fromRob.commit.vxsat, false.B)
         m.robCommit.vtype   := RegNextWithEnable(io.fromRob.commit.vtype)
         m.robCommit.vl      := DelayN           (io.fromRob.commit.vl, 2) // not used yet
         m.robCommit.vstart  := RegNextWithEnable(io.fromRob.commit.vstart)
