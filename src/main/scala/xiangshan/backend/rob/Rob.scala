@@ -996,18 +996,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.csr.vstart.valid := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstartEn, resetVstart))
   io.csr.vstart.bits := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstart, 0.U))
 
-  val deqPtrCmp = Wire(new RobPtr)
-  val enqPtrCmp = Wire(new RobPtr)
-  deqPtrCmp := deqPtr
-  enqPtrCmp := enqPtr
-  deqPtrCmp.isFormer := true.B
-  enqPtrCmp.isFormer := true.B
-  private def wbSlotStillValid(robIdx: RobPtr): Bool = {
-    val wbEntry = robEntries(robIdx.value) // TODO: this may cause timing issue
-    wbEntry.valid && (robIdx.isFormer || CompressType.isNotNORMAL(wbEntry.compressType))
-  }
-
-
   // when mispredict branches writeback, stop commit in the next 2 cycles
   // TODO: don't check all exu write back
   val misPredWb = Cat(VecInit(redirectWBs.map(wb =>
@@ -1109,11 +1097,11 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   // sync fflags/dirty_fs/vxsat to csr
   for(i <- 0 until fflagsWidth) {
-    io.csr.fflags(i) := RegNextWithEnable(fflags(i))
+    io.csr.fflags(i) := RegNext(writebackFlagTracker.io.commitSetMask(i), false.B)
   }
   io.csr.dirty_fs := GatedValidRegNext(dirty_fs)
   io.csr.dirty_vs := GatedValidRegNext(dirty_vs)
-  io.csr.vxsat    := RegNextWithEnable(vxsat)
+  io.csr.vxsat    := RegNext(writebackFlagTracker.io.commitSetMask(fflagsWidth), false.B)
 
   // commit load/store to lsq
   val ldCommitVec = VecInit((0 until CommitWidth).flatMap { i =>
