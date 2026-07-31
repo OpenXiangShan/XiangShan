@@ -39,7 +39,7 @@ import system.HasSoCParameter
 import xiangshan.backend.fu.vector.Bundles.{Vl, Vstart}
 
 class FpuCsrIO extends Bundle {
-  val fflags = Output(Vec(5, Valid(Bool())))
+  val fflags = Output(Vec(5, Bool()))
   val isIllegal = Output(Bool())
   val dirty_fs = Output(Bool())
   val frm = Input(UInt(3.W))
@@ -53,7 +53,7 @@ class VpuCsrIO(implicit p: Parameters) extends XSBundle {
 
   val set_vstart = Output(Valid(UInt(XLEN.W)))
   val set_vtype = Output(Valid(UInt(XLEN.W)))
-  val set_vxsat = Output(Valid(UInt(1.W)))
+  val set_vxsat = Output(Bool())
 
   val dirty_vs = Output(Bool())
 }
@@ -1020,11 +1020,13 @@ class CSR(cfg: FuConfig)(implicit p: Parameters) extends FuncUnit(cfg)
   csrio.customCtrl.distribute_csr.w.bits.data := wdata
   csrio.customCtrl.distribute_csr.w.bits.addr := addr
 
-  when (RegNext(csrio.fpu.fflags.valid)) {
-    fcsr := fflags_wfn(update = true)(RegEnable(csrio.fpu.fflags.bits, csrio.fpu.fflags.valid))
+  val robFflags = RegNext(csrio.fpu.fflags.asUInt, 0.U)
+  when (robFflags.orR) {
+    fcsr := fflags_wfn(update = true)(robFflags)
   }
-  when(RegNext(csrio.vpu.set_vxsat.valid)) {
-    vcsr := vxsat_wfn(update = true)(RegEnable(csrio.vpu.set_vxsat.bits, csrio.vpu.set_vxsat.valid))
+  val robVxsat = RegNext(csrio.vpu.set_vxsat, false.B)
+  when(robVxsat) {
+    vcsr := vxsat_wfn(update = true)(robVxsat)
   }
 
   // set fs and sd in mstatus
