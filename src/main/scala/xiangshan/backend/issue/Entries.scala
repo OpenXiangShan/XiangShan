@@ -338,10 +338,10 @@ class Entries(implicit p: Parameters, params: IssueBlockParams) extends XSModule
     }
 
     when (subDeqPolicyValidVec(0)) {
-      assert(Mux1H(io.subDeqSelOH.get(0), entries).bits.status.robIdx === subDeqPolicyEntryVec(0).bits.status.robIdx, "subDeqSelOH(0) is not the same\n")
+      assert(Mux1H(io.subDeqSelOH.get(0), entries).bits.status.robIdx.isSameEntry(subDeqPolicyEntryVec(0).bits.status.robIdx), "subDeqSelOH(0) is not the same\n")
     }
     when (subDeqPolicyValidVec(1)) {
-      assert(Mux1H(io.subDeqSelOH.get(1), entries).bits.status.robIdx === subDeqPolicyEntryVec(1).bits.status.robIdx, "subDeqSelOH(1) is not the same\n")
+      assert(Mux1H(io.subDeqSelOH.get(1), entries).bits.status.robIdx.isSameEntry(subDeqPolicyEntryVec(1).bits.status.robIdx), "subDeqSelOH(1) is not the same\n")
     }
   }
   else {

@@ -336,8 +336,8 @@ class RobPtr(entries: Int) extends CircularQueuePtr[RobPtr](
     out
   }
 
-  def isBefore(that: RobPtr, thisChanelIdx: UInt, thatChanelIdx: UInt): Bool = {
-    isBeforeSlot(that) || isSameSlot(that) && (thisChanelIdx < thatChanelIdx)
+  def isBeforeWithChannel(that: RobPtr, thisChannelIdx: UInt, thatChannelIdx: UInt): Bool = {
+    isBeforeSlot(that) || isSameSlot(that) && (thisChannelIdx < thatChannelIdx)
   }
 
 }
