@@ -73,7 +73,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val interrupt_safe = Bool()
     val fpWen = Bool()
     val rfWen = Bool()
-    val dirtyVs = Bool()
+
     val commitType = CommitType()
     val ftqIdx = new FtqPtr
     val ftqOffset = UInt(FetchBlockInstOffsetWidth.W)
@@ -88,10 +88,8 @@ object RobBundles extends HasCircularQueuePtrHelper {
     // Preserve the former slot's exact trace classification so a latter-slot
     // squash can rebuild the surviving physical entry without stale metadata.
     val formerTraceBlockInPipe = new TracePipe(IretireWidthEncoded)
-    val fflagsWen = Bool()
-    val fflags = UInt(5.W)
+
     val mmio = Bool()
-    val vxsat = Bool()
     val needFlush = UInt(2.W)
 
     // Entry-level fields continue to describe the former slot. Rob.scala keeps
@@ -137,9 +135,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val latterUopNum = UInt(log2Up(MaxUopSize * 2 + 1).W)
     val realDestSize = UInt(log2Up(MaxUopSize + 1).W)
     val interrupt_safe = Bool()
-    val fflagsWen = Bool()
-    val fflags = UInt(5.W)
-    val vxsat = Bool()
+
     val RVC = UInt(2.W)
     val predTaken = Bool()
     val isRVC = Bool()
@@ -172,8 +168,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth + 1).W))
     // debug_end
-    val dirtyFs = Bool()
-    val dirtyVs = Bool()
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop): Unit = {
@@ -190,7 +184,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.crossFtqCommit := robEnq.crossFtqCommit
     robEntry.hasLastInFtqEntry := robEnq.hasLastInFtqEntry
 
-    robEntry.fflagsWen := robEnq.fflagsWen
+
     robEntry.commitType := robEnq.commitType
     robEntry.ftqIdx := robEnq.ftqPtr
     robEntry.ftqOffset := robEnq.ftqOffset
@@ -204,7 +198,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.mmio := false.B
     robEntry.rfWen := robEnq.rfWen
     robEntry.fpWen := robEnq.dirtyFs
-    robEntry.dirtyVs := robEnq.dirtyVs
     robEntry.interrupt_safe := robEnq.interrupt_safe
     robEntry.needFlush := robEnq.needFlush
     // trace
@@ -259,9 +252,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.interrupt_safe := robEntry.interrupt_safe
     robCommitEntry.rfWen := robEntry.rfWen
     robCommitEntry.fpWen := robEntry.fpWen
-    robCommitEntry.fflags := robEntry.fflags
-    robCommitEntry.fflagsWen := robEntry.fflagsWen
-    robCommitEntry.vxsat := robEntry.vxsat
+
     robCommitEntry.isRVC := robEntry.isRVC
     robCommitEntry.needVTB := robEntry.needVTB
     robCommitEntry.RVC := robEntry.RVC
@@ -280,8 +271,7 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robCommitEntry.formerInstrCnt := robEntry.formerInstrCnt
     robCommitEntry.latterInstrCnt := robEntry.latterInstrCnt
     robCommitEntry.formerLen := robEntry.formerLen
-    robCommitEntry.dirtyFs := robEntry.fpWen || robEntry.fflagsWen
-    robCommitEntry.dirtyVs := robEntry.dirtyVs
+
     robCommitEntry.needFlush := robEntry.needFlush
     robCommitEntry.traceBlockInPipe := robEntry.traceBlockInPipe
     robCommitEntry.debug_pc.foreach(_ := robEntry.debug_pc.get)
