@@ -48,6 +48,20 @@ sealed trait HasLoadPipeBundleParam {
 }
 case class DefaultLoadPipeBundleParam() extends HasLoadPipeBundleParam
 
+class RRBankConflictFastReplayPerfStatus extends Bundle {
+  val s3Candidate = Bool()
+  val s3Grant = Bool()
+  val s0Ready = Bool()
+  val s3Fire = Bool()
+  val s3Denied = Bool()
+}
+
+class RRBankConflictFastReplayIO extends Bundle {
+  val candidate = Output(Bool())
+  val grant = Input(Bool())
+  val perfStatus = Output(new RRBankConflictFastReplayPerfStatus)
+}
+
 class LoadPipeBundle(
   param: HasLoadPipeBundleParam = DefaultLoadPipeBundleParam()
 )(
@@ -124,6 +138,8 @@ class LoadPipeBundle(
   val shouldFastReplay = Option.when(param.hasS2PreProcess)(Bool())
   // S2 -> S3
   val troubleMaker = Option.when(param.hasS3PreProcess)(Bool())
+  val rrBankConflictFastReplay = Option.when(param.hasS3PreProcess)(Bool())
+  val rrBankConflictFastReplayGrant = Option.when(param.hasS3PreProcess)(Bool())
   val matchInvalid = Option.when(param.hasS3PreProcess)(Bool())
   val shouldWakeup = Option.when(param.hasS3PreProcess)(Bool())
   val shouldWriteback = Option.when(param.hasS3PreProcess)(Bool())

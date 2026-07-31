@@ -857,9 +857,22 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
     vSegmentFlag := false.B
   }
 
+  val rrBankConflictFastReplay = newLoadUnits.map(_.io.rrBankConflictFastReplay)
+  val rrBankConflictFastReplayCandidates = rrBankConflictFastReplay.map(_.candidate)
+  val rrBankConflictFastReplayArb = Module(new RRArbiterInit(Bool(), LduCnt))
+  rrBankConflictFastReplayArb.suggestName("rr_bank_conflict_fast_replay_arb")
+  rrBankConflictFastReplayArb.io.out.ready := true.B
+  rrBankConflictFastReplayArb.io.in.zip(rrBankConflictFastReplayCandidates).foreach { case (in, candidate) =>
+    in.valid := candidate
+    in.bits := true.B
+  }
+  val rrBankConflictFastReplayGrant = rrBankConflictFastReplayArb.io.in.map(in => in.valid && in.ready)
+  XSError(PopCount(rrBankConflictFastReplayGrant) > 1.U, "only one rr bank conflict fast replay grant is allowed")
+
   // LoadUnit
   for (i <- 0 until LduCnt) {
     newLoadUnits(i).io.redirect <> redirect
+    rrBankConflictFastReplay(i).grant := rrBankConflictFastReplayGrant(i)
 
     // get input form dispatch
     newLoadUnits(i).io.ldin <> issueLda(i)
@@ -1582,11 +1595,42 @@ class MemBlockInlinedImp(outer: MemBlockInlined) extends LazyModuleImp(outer)
   val ldDeqCount = PopCount(issueLda.map(_.valid))
   val stDeqCount = PopCount(issueSta.take(StaCnt).map(_.valid))
   val iqDeqCount = ldDeqCount +& stDeqCount
+  val s2LoadRRBankConflictCount = PopCount(dcache.io.lsu.load.map(_.s2_rr_bank_conflict))
+  val rrBankConflictFastReplayPerfStatus = rrBankConflictFastReplay.map(_.perfStatus)
+  val rrBankConflictFastReplayS3Denied =
+    rrBankConflictFastReplayPerfStatus.map(s => s.s3Candidate && !s.s3Grant)
+  val rrBankConflictFastReplayS3GrantedNotFire =
+    rrBankConflictFastReplayPerfStatus.map(s => s.s3Candidate && s.s3Grant && !s.s3Fire)
+  val rrBankConflictFastReplayS3DeniedS0Ready =
+    rrBankConflictFastReplayS3Denied.zip(rrBankConflictFastReplayPerfStatus).map {
+      case (denied, s) => denied && s.s0Ready
+    }
+
+  val rrBankConflictFastReplayPerfEvents = Seq(
+    ("s2_candidate", rrBankConflictFastReplayPerfStatus.map(_.s3Candidate), true), // s2 generate, s3 use
+    ("s2_arbiter_grant", rrBankConflictFastReplayPerfStatus.map(_.s3Grant), true), // s2 generate, s3 use
+    ("s2_arbiter_denied", rrBankConflictFastReplayS3Denied, false), // s2 generate, s3 use
+    ("s3_fire", rrBankConflictFastReplayPerfStatus.map(_.s3Fire), true),
+    ("s3_granted_not_fire", rrBankConflictFastReplayS3GrantedNotFire, true),
+    ("s3_arbiter_denied_s0_ready", rrBankConflictFastReplayS3DeniedS0Ready, false)
+  )
   XSPerfAccumulate("load_iq_deq_count", ldDeqCount)
   XSPerfHistogram("load_iq_deq_count", ldDeqCount, true.B, 0, LdExuCnt + 1)
   XSPerfAccumulate("store_iq_deq_count", stDeqCount)
   XSPerfHistogram("store_iq_deq_count", stDeqCount, true.B, 0, StAddrCnt + 1)
   XSPerfAccumulate("ls_iq_deq_count", iqDeqCount)
+  XSPerfAccumulate("s2_load_rr_bank_conflict_ge2", s2LoadRRBankConflictCount > 1.U)
+  XSPerfAccumulate("s2_load_rr_bank_conflict_eq2", s2LoadRRBankConflictCount === 2.U)
+  XSPerfAccumulate("s2_load_rr_bank_conflict_eq3", s2LoadRRBankConflictCount === 3.U)
+
+  rrBankConflictFastReplayPerfEvents.foreach { case (name, events, hasTotal) =>
+    if (hasTotal) {
+      XSPerfAccumulate(s"rr_bank_conflict_fast_replay_$name", PopCount(events))
+    }
+    events.zipWithIndex.foreach { case (event, i) =>
+      XSPerfAccumulate(s"rr_bank_conflict_fast_replay_${name}_$i", event)
+    }
+  }
 
   val perfMdpAddr = newLoadUnits.map(_.io.perfMdpAddr)
   val perfLoadUnitMdpNonStrictAddrHit = PopCount(perfMdpAddr.map(_.loadUnitNonStrictHit))
