@@ -174,8 +174,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     val debug_fuType = OptionWrapper(backendParams.debugEn, FuType())
     val debug_fusionNum = OptionWrapper(backendParams.debugEn, UInt(log2Ceil(RenameWidth + 1).W))
     // debug_end
-    val dirtyFs = Bool()
-    val dirtyVs = Bool()
   }
 
   def connectEnq(robEntry: RobEntryBundle, robEnq: EnqRobUop): Unit = {
@@ -193,7 +191,6 @@ object RobBundles extends HasCircularQueuePtrHelper {
     robEntry.mmio := false.B
     robEntry.rfWen := robEnq.rfWen
     robEntry.fpWen := robEnq.dirtyFs
-    robEntry.dirtyVs := robEnq.dirtyVs
     robEntry.interrupt_safe := robEnq.interrupt_safe
     robEntry.needFlush := robEnq.needFlush
     // trace

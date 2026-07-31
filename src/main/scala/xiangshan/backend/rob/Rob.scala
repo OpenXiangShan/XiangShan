@@ -151,7 +151,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val fflagsWBs = io.exuWriteback.filter(x => x.bits.fflags.nonEmpty).toSeq
   val exceptionWBs = io.writeback.filter(x => x.bits.params.needExceptionGen).toSeq
   val redirectWBs = io.writeback.filter(x => x.bits.redirect.nonEmpty).toSeq
-  val vxsatWBs = io.writeback.filter(x => x.bits.vxsat.nonEmpty).toSeq
   val branchWBs = io.exuWriteback.filter(_.bits.params.hasBrhFu).toSeq
   val isBrhOrJmpWBs = io.exuWriteback.filter(x => (x.bits.params.hasBrhFu || x.bits.params.hasJmpFu)).toSeq
   val csrWBs = io.exuWriteback.filter(x => x.bits.params.hasCSR).toSeq
@@ -235,14 +234,8 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
       // Rename carries slot-exact metadata.  Aggregate only the fields that are
       // physically stored once per ROB entry, while retaining exact RobPtrs for
       // the CSR dirty-state trackers below.
-      robEntries(i).wflags := VecInit(entryEnqValid.zip(io.enq.req).map {
-        case (valid, req) => valid && req.bits.wfflags
-      }).asUInt.orR
       robEntries(i).fpWen := VecInit(entryEnqValid.zip(io.enq.req).map {
         case (valid, req) => valid && req.bits.dirtyFs
-      }).asUInt.orR
-      robEntries(i).dirtyVs := VecInit(entryEnqValid.zip(io.enq.req).map {
-        case (valid, req) => valid && req.bits.dirtyVs
       }).asUInt.orR
       val youngestEnqUop = PriorityMux(entryEnqValid.reverse, io.enq.req.map(_.bits).reverse)
       robEntries(i).traceBlockInPipe.itype := youngestEnqUop.traceBlockInPipe.itype
@@ -452,8 +445,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
 
   val exceptionGen = Module(new ExceptionGen(params))
   val exceptionDataRead = exceptionGen.io.state
-  val fflagsDataRead = Wire(Vec(CommitWidth, UInt(5.W)))
-  val vxsatDataRead = Wire(Vec(CommitWidth, Bool()))
   io.robDeqPtr := deqPtr
 
 
@@ -1005,9 +996,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   io.csr.vstart.valid := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstartEn, resetVstart))
   io.csr.vstart.bits := RegNext(Mux(exceptionHappen && deqHasException, exceptionDataRead.bits.vstart, 0.U))
 
-  val vxsat = Wire(Valid(Bool()))
-  val updateVxsat = RegInit(false.B)
-  val oldestRobidxUpdateVxsat = RegInit(RobPtr(false.B, 0.U))
   val deqPtrCmp = Wire(new RobPtr)
   val enqPtrCmp = Wire(new RobPtr)
   deqPtrCmp := deqPtr
@@ -1017,128 +1005,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   private def wbSlotStillValid(robIdx: RobPtr): Bool = {
     val wbEntry = robEntries(robIdx.value) // TODO: this may cause timing issue
     wbEntry.valid && (robIdx.isFormer || CompressType.isNotNORMAL(wbEntry.compressType))
-  }
-
-  vxsat.valid := io.commits.isCommit && vxsat.bits && updateVxsat
-  vxsat.bits := io.commits.commitValid.zip(io.commits.robIdx).map {
-    case (valid, idx) => valid & idx.isSameEntry(oldestRobidxUpdateVxsat)
-  }.reduce(_ | _)
-
-  val wbUpdateVxsat = vxsatWBs.map(wb =>
-    {
-      val wbInRobWindow = wb.bits.robIdx.isNotBeforeSlot(deqPtrCmp) && wb.bits.robIdx.isBeforeSlot(enqPtrCmp)
-      val wbEntryValid = wbInRobWindow && wbSlotStillValid(wb.bits.robIdx)
-      wb.valid && wbEntryValid && wb.bits.vxsat.get
-    }
-  ).reduce(_ | _)
-
-  class WbSel extends Bundle{
-    val validvxsat = Bool()
-    val robIdx = new RobPtr
-  }
-  val wbUpdateVxsatSeq = vxsatWBs.map(wb =>
-    {
-      val s = Wire(new WbSel())
-      val wbInRobWindow = wb.bits.robIdx.isNotBeforeSlot(deqPtrCmp) && wb.bits.robIdx.isBeforeSlot(enqPtrCmp)
-      val wbEntryValid = wbInRobWindow && wbSlotStillValid(wb.bits.robIdx)
-      s.validvxsat := wb.valid && wbEntryValid && wb.bits.vxsat.get
-      s.robIdx := wb.bits.robIdx
-      s
-    }
-  )
-  val oldestWbUpdateVxsat = wbUpdateVxsatSeq.reduce{
-    (wb1, wb2) => Mux(
-      wb1.validvxsat && wb2.validvxsat,
-      Mux(wb1.robIdx.isBeforeSlot(wb2.robIdx), wb1, wb2),
-      Mux(wb1.validvxsat, wb1, wb2)
-    )
-  }
-
-  val pendingNeedFlush = oldestRobidxUpdateVxsat.needFlush(io.redirect)
-  val wbNeedFlush      = oldestWbUpdateVxsat.robIdx.needFlush(io.redirect)
-
-  when(io.redirect.valid){
-    when(updateVxsat && wbUpdateVxsat){
-      updateVxsat := !(pendingNeedFlush && wbNeedFlush)
-    }.elsewhen(updateVxsat && !wbUpdateVxsat){
-      updateVxsat := !pendingNeedFlush
-    }.elsewhen(!updateVxsat && wbUpdateVxsat){
-      updateVxsat := !wbNeedFlush
-    }
-  }.elsewhen(!updateVxsat || vxsat.valid) {
-    updateVxsat := wbUpdateVxsat
-  }
-
-  when((!updateVxsat || vxsat.valid) && wbUpdateVxsat){
-    oldestRobidxUpdateVxsat := oldestWbUpdateVxsat.robIdx
-  }.elsewhen(updateVxsat && wbUpdateVxsat && oldestWbUpdateVxsat.robIdx.isBeforeSlot(oldestRobidxUpdateVxsat)){
-    oldestRobidxUpdateVxsat := oldestWbUpdateVxsat.robIdx
-  }
-
-  // fflags
-  val fflagsWidth = 5
-  val fflags = Wire(Vec(fflagsWidth, Valid(Bool())))
-  val updateFflags = RegInit(VecInit(Seq.fill(fflagsWidth)(false.B)))
-  val oldestRobidxUpdateFflags = RegInit(VecInit(Seq.fill(fflagsWidth)(RobPtr(false.B, 0.U))))
-
-  class WbFflags extends Bundle{
-    val set = Bool()
-    val robIdx = new RobPtr
-  }
-
-  for (i <- 0 until fflagsWidth) {
-
-    fflags(i).valid := io.commits.isCommit && fflags(i).bits && updateFflags(i)
-    fflags(i).bits := io.commits.commitValid.zip(io.commits.robIdx).map {
-      case (valid, idx) => valid & idx.isSameEntry(oldestRobidxUpdateFflags(i))
-    }.reduce(_ | _)
-
-    val wbUpdateFflags = fflagsWBs.map(wb =>
-      {
-        val wbInRobWindow = wb.bits.robIdx.isNotBeforeSlot(deqPtrCmp) && wb.bits.robIdx.isBeforeSlot(enqPtrCmp)
-        val wbEntryValid = wbInRobWindow && wbSlotStillValid(wb.bits.robIdx)
-        wb.valid && wbEntryValid && wb.bits.wflags.get && wb.bits.fflags.get(i)
-      }
-    ).reduce(_ | _)
-
-    val wbUpdateFflagsSeq = fflagsWBs.map(wb =>
-      {
-        val s = Wire(new WbFflags)
-        val wbInRobWindow = wb.bits.robIdx.isNotBeforeSlot(deqPtrCmp) && wb.bits.robIdx.isBeforeSlot(enqPtrCmp)
-        val wbEntryValid = wbInRobWindow && wbSlotStillValid(wb.bits.robIdx)
-        s.set := wb.valid && wbEntryValid && wb.bits.wflags.get && wb.bits.fflags.get(i)
-        s.robIdx := wb.bits.robIdx
-        s
-      }
-    )
-    val oldestWbUpdateFflags = wbUpdateFflagsSeq.reduce{
-      (wb1, wb2) => Mux(
-        wb1.set && wb2.set,
-        Mux(wb1.robIdx.isBeforeSlot(wb2.robIdx), wb1, wb2),
-        Mux(wb1.set, wb1, wb2)
-      )
-    }
-
-    val pendingNeedFlush = oldestRobidxUpdateFflags(i).needFlush(io.redirect)
-    val wbNeedFlush      = oldestWbUpdateFflags.robIdx.needFlush(io.redirect)
-
-    when(io.redirect.valid){
-      when(updateFflags(i) && wbUpdateFflags){
-        updateFflags(i) := !(pendingNeedFlush && wbNeedFlush)
-      }.elsewhen(updateFflags(i) && !wbUpdateFflags){
-         updateFflags(i) := !pendingNeedFlush
-      }.elsewhen(!updateFflags(i) && wbUpdateFflags){
-        updateFflags(i) := !wbNeedFlush
-      }
-    }.elsewhen(!updateFflags(i) || fflags(i).valid) {
-      updateFflags(i) := wbUpdateFflags
-    }
-
-    when((!updateFflags(i) || fflags(i).valid) && wbUpdateFflags){
-      oldestRobidxUpdateFflags(i) := oldestWbUpdateFflags.robIdx
-    }.elsewhen(updateFflags(i) && wbUpdateFflags && oldestWbUpdateFflags.robIdx.isBeforeSlot(oldestRobidxUpdateFflags(i))){
-      oldestRobidxUpdateFflags(i) := oldestWbUpdateFflags.robIdx
-    }
   }
 
 
@@ -1478,8 +1344,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
   val enqWBNumVec = VecInit(io.enq.req.map(req => req.bits.numWB))
   private val enqWriteStdVec = VecInit(io.enq.req.map(req => req.bits.stdwriteNeed))
 
-  val fflags_wb = fflagsWBs
-  val vxsat_wb = vxsatWBs
   private def saturatingDec(value: UInt, decRaw: UInt): UInt = {
     val dec = Wire(UInt(value.getWidth.W))
     dec := decRaw
@@ -1903,9 +1767,6 @@ class RobImp(override val wrapper: Rob)(implicit p: Parameters, params: BackendP
     exc_wb.bits.veew := 0.U // Todo[Vector]: support vector ls exception
     exc_wb.bits.vlmul := 0.U // Todo[Vector]: support vector ls exception
   }
-
-  fflagsDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).fflags)
-  vxsatDataRead := (0 until CommitWidth).map(i => robEntries(deqPtrVec(i).value).vxsat)
 
   val isCommit = io.commits.isCommit
   val isCommitReg = GatedValidRegNext(io.commits.isCommit)
