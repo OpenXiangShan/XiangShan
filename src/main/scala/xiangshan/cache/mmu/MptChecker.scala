@@ -1087,13 +1087,20 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
   io.pmp.req.bits.size := 3.U
   io.pmp.req.bits.cmd  := TlbCmd.read
 
-  val flush = io.sfence.valid || io.csr.mmpt.changed
+  // Keep the same flush conditions as the regular PTW.  An MPT walk is also
+  // an in-flight translation transaction, so a change of any translation
+  // context must invalidate its local FSM state.
+  val flush = io.sfence.valid || io.csr.satp.changed || io.csr.vsatp.changed ||
+    io.csr.hgatp.changed || io.csr.priv.virt_changed || io.csr.mmpt.changed
 
-  // The MPT walker shares one fixed memory source ID.  Keep the response
-  // qualified locally, while L2TLB's mask prevents that ID from being reused
-  // until a flushed request's late response has drained.
-  val waitingMemResp = RegInit(false.B)
-  val memRespAccepted = io.mem.resp.valid && waitingMemResp && !flush
+  // PTW convention: true means that no response is currently expected.  The
+  // L2TLB source ownership (io.mem.mask) remains asserted until the old
+  // response drains, so a new request cannot reuse this fixed source ID while
+  // the flushed transaction is still in flight.  Clearing this local latch on
+  // flush makes the late response a drain-only response; it cannot be parsed
+  // as the response to a post-flush request.
+  val w_mem_resp = RegInit(true.B)
+  val memRespAccepted = io.mem.resp.valid && !w_mem_resp && !flush
 
   val pa = RegEnable(io.req.bits.reqPA, 0.U, io.req.fire)
   // Store the received request PA in a register, used to generate the PN1/2/3 offsets for synthesizing the table walk address.
@@ -1188,7 +1195,9 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
       }
     }
     is(s_mem_req) {
-      mem.req.valid := !mem.mask // do not reuse the fixed source ID while an old response is outstanding
+      // Do not issue during flush or reuse the fixed source ID while an old
+      // response is outstanding.
+      mem.req.valid := !mem.mask && !flush
 
       when(io.mem.req.fire) { // just waiting, timing safe
         nextState := s_mem_resp // to wait resp
@@ -1215,12 +1224,12 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
 
   }
   when(io.mem.req.fire) {
-    assert(!waitingMemResp, "MPT walker reused its memory source ID with a response outstanding")
-    waitingMemResp := true.B
+    assert(w_mem_resp, "MPT walker reused its memory source ID with a response outstanding")
+    w_mem_resp := false.B
   }
   when(memRespAccepted) {
     assert(curState === s_mem_resp, "MPT walker accepted a memory response outside the wait state")
-    waitingMemResp := false.B
+    w_mem_resp := true.B
   }
   when(flush){
     pa := 0.U
@@ -1230,7 +1239,9 @@ class MPTTableWalker(implicit p: Parameters) extends XSModule with MPTCacheParam
     mpteInvalid := false.B
     rsvZeroError0 := false.B
     rsvZeroError1 := false.B
-    waitingMemResp := false.B
+    // Match PTW: invalidate the local transaction immediately, but leave the
+    // L2TLB source occupied until its late response is drained.
+    w_mem_resp := true.B
     curState := s_idle
   }
   // fsm end
