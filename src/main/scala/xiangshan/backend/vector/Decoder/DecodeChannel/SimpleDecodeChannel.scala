@@ -86,7 +86,7 @@ class SimpleDecodeChannel(instSeq: Seq[InstPattern])(implicit val p: Parameters)
 
   dontTouch(privCause)
 
-  val frmExceptionII = out.bits.frmRen && (out.bits.frmIll || (out.bits.frm === Frm.DYN && in.fromCSR.illegalInst.frm))
+  val frmExceptionII = out.uop(0).bits.frmRen && (out.uop(0).bits.frmIll || (out.uop(0).bits.frm === Frm.DYN && in.fromCSR.illegalInst.frm))
 
   val fsOffExceptionII = in.fromCSR.illegalInst.fsIsOff && needFs
 
