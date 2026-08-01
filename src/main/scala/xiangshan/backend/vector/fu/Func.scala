@@ -1,4 +1,4 @@
-package xiangshan.backend.vector.fu.util
+package xiangshan.backend.vector.fu
 
 import chisel3._
 import chisel3.util._

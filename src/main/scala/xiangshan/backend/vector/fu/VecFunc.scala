@@ -1,4 +1,4 @@
-package xiangshan.backend.vector.fu.util
+package xiangshan.backend.vector.fu
 
 import org.chipsalliance.cde.config.Parameters
 import chisel3._
@@ -7,7 +7,7 @@ import xiangshan._
 import xiangshan.backend.Bundles.VPUCtrlSignals
 import xiangshan.backend.datapath.DataConfig.V0Data
 import xiangshan.backend.decode.opcode.Opcode.VIAluOpcodes
-import xiangshan.backend.vector.fu.util.VecFuConfig.VialuCfg
+import xiangshan.backend.vector.fu.VecFuConfig.VialuCfg
 
 
 trait VecFuncAlias { this: Func =>

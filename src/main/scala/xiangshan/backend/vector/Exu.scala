@@ -17,7 +17,7 @@ import xiangshan.backend.fu.vector.Bundles.{V0, VType, Vl, Vxrm, Vxsat}
 import xiangshan.backend.regfile.PregParams
 import xiangshan.backend.rob.RobPtr
 import xiangshan.backend.vector.VecRegionModule.DebugBundle
-import xiangshan.backend.vector.fu.util._
+import xiangshan.backend.vector.fu._
 import xiangshan.mem.SqPtr
 import xiangshan._
 import yunsuan.vector.Common._

@@ -11,8 +11,8 @@ import xiangshan.backend.rob.RobPtr
 import xiangshan.ExceptionNO
 import yunsuan.vector.VectorIdiv
 import xiangshan.backend.decode.opcode.Opcode.VIDivOpcodes
-import xiangshan.backend.vector.fu.util.VecNoFixLatFunc
-import xiangshan.backend.vector.fu.util.VecFuConfig
+import xiangshan.backend.vector.fu.VecNoFixLatFunc
+import xiangshan.backend.vector.fu.VecFuConfig
 
 class VIDiv(cfg: VecFuConfig)(implicit p: Parameters) extends VecNoFixLatFunc(cfg) {
   // XSError(io.in.valid && io.in.bits.ctrl.fuOpType === VidivType.dummy, "Vfdiv OpType not supported")
