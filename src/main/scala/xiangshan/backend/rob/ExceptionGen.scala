@@ -39,12 +39,12 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
     val flush = Input(Bool())
     val enq = Vec(RenameWidth, Flipped(ValidIO(new RobExceptionInfo(ExceptionNO.decodeSet))))
     // csr + load + store + varith + vload + vstore
-    val wb = MixedVec(params.getExceptionOutList.map { x => Flipped(ValidIO(new RobExceptionInfo(x))) } )
+    val wb = MixedVec(params.getWrite2RobParams().filter(_.needExceptionGen).map { x => Flipped(ValidIO(new RobExceptionInfo(x.exceptionOut))) } )
     val out = ValidIO(new RobExceptionInfo(allExceptions))
     val state = ValidIO(new RobExceptionInfo(allExceptions))
   })
 
-  val wbExuParams = params.allExuParams.filter(_.exceptionOut.nonEmpty)
+  val wbExuParams = params.getWrite2RobParams().filter(_.needExceptionGen)
 
   def getOldest(valid: Seq[Bool], bits: Seq[RobExceptionInfo]): RobExceptionInfo = {
     def getOldest_recursion(valid: Seq[Bool], bits: Seq[RobExceptionInfo]): (Seq[Bool], Seq[RobExceptionInfo]) = {
@@ -77,7 +77,7 @@ class ExceptionGen(params: BackendParams)(implicit p: Parameters) extends XSModu
   val current = Reg(new RobExceptionInfo(allExceptions))
 
   val enqAllExcept = Wire(Vec(RenameWidth, Valid(new RobExceptionInfo(allExceptions))))
-  val wbAllExcept = Wire(Vec(params.numException, Valid(new RobExceptionInfo(allExceptions))))
+  val wbAllExcept = Wire(Vec(io.wb.size, Valid(new RobExceptionInfo(allExceptions))))
 
   enqAllExcept.zip(io.enq) foreach { case (sink, source) =>
     (sink: Data).waiveAll :<= (source: Data).waiveAll

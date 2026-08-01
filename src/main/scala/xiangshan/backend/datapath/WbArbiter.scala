@@ -121,7 +121,7 @@ class WbDataPathIO()(implicit p: Parameters, params: BackendParams, schdParams: 
 
   val toCtrlBlock = new Bundle {
     // Todo: fix rebase
-    val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = MixedVec(schdParams.genWriteBackRobValidBundle.flatten)
+    val writeback: MixedVec[ValidIO[WriteBackRobBundle]] = MixedVec(schdParams.genWriteBackRobValidBundle(needExtraVld = false).flatten)
   }
 }
 
