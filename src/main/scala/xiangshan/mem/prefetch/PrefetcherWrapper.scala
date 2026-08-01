@@ -271,11 +271,6 @@ class PrefetcherWrapper(implicit p: Parameters) extends PrefetchModule {
         source.bits.miss || isFromBerti(source.bits.metaSource)
       ) && !source.bits.isHwPrefetch // && isLoadAccess(source.bits.uop)
       pf.io.ld_in(i).bits := source.bits
-      pf.io.ld_in(i).bits.pc := Mux(
-        io.trainSource.s3_ptrChasing(i),
-        s2_loadPcVec(i),
-        s3_loadPcVec(i)
-      )
     }
 
     for (i <- 0 until ST_TRAIN_WIDTH) {
