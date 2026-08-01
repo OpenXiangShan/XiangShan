@@ -44,10 +44,16 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
     case (mod, i) =>
       mod.fire := ex0.valid
       mod.src2 := vs2Vec(i)
+      mod.widenSrc2 := 0.U
+      mod.narrowSrc2 := 0.U
+      mod.narrowSrc1 := 0.U
       mod.opType := ex0opcode
       mod.rm := in.frm.get
       mod.inSew1H := inSew1H
       mod.outSew1H := outSew1H
+      mod.cvt64UseWidenSrc2 := false.B
+      mod.cvt32UseWidenSrc2 := false.B
+      mod.cvt16UseWidenSrc2 := false.B
   }
 
   out.ex(0).bits.data.vec.foreach {
