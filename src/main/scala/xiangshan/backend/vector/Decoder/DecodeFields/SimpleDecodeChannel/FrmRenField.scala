@@ -34,15 +34,14 @@ object FrmRenField extends BoolDecodeField[InstPattern] {
     FCVT_L_S, FCVT_LU_S, FCVT_W_S, FCVT_WU_S,
     FCVT_L_H, FCVT_LU_H, FCVT_W_H, FCVT_WU_H,
     // i2f
-    FCVT_D_L, FCVT_D_LU,                     // FCVT_D_W and FCVT_D_WU need not frm
+    FCVT_D_L, FCVT_D_LU, FCVT_D_W, FCVT_D_WU,
     FCVT_S_L, FCVT_S_LU, FCVT_S_W, FCVT_S_WU,
     FCVT_H_L, FCVT_H_LU, FCVT_H_W, FCVT_H_WU,
-    FCVT_S_D,
-    FCVT_H_D,
-    FCVT_H_S,
+    FCVT_S_D, FCVT_D_S,
+    FCVT_H_D, FCVT_D_H,
+    FCVT_H_S, FCVT_S_H,
     FROUND_D, FROUNDNX_D,
     FROUND_S, FROUNDNX_S,
     FROUND_H, FROUNDNX_H,
-    FCVT_D_S, FCVT_D_H, FCVT_S_H,
   ).toSet
 }
