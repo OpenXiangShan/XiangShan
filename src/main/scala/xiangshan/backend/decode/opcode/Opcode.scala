@@ -379,6 +379,24 @@ object Opcode {
     def jumpOpisAuipc(op: UInt) = op(1)
   }
 
+  object LinkOpcodes extends Opcodes {
+    // The link uop does not need Src1Gp, but this flag will be used in rename to get right dest to src bypass pdest.
+    // When uop leaving rename, srcType should set to SrcType.no
+    val link  = Value(bb"001") + GpWen + Src1Gp
+    val auipc = IntUJType(bb"010")
+
+    def linkUopisLink(op: UInt) = op(0)
+    def linkUopisAuipc(op: UInt) = op(1)
+  }
+
+  object NewJmpOpcodes extends Opcodes {
+    val j  = Value(bb"111_1100")          + Src2Imm(DecodeSelImm.UJ) + CannotRobCompress
+    val jr = Value(bb"111_1101") + Src1Gp + Src2Imm(DecodeSelImm.I)  + CannotRobCompress
+
+    def jumpUopisj(op: UInt) = !op(0)
+    def jumpUopisjr(op: UInt) = op(0)
+  }
+
   object MulOpcodes extends Opcodes {
     // mul
     // bit encoding: | type (2bit) | isWord(1bit) | opcode(2bit) |
