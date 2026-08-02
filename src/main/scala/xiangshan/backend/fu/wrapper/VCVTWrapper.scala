@@ -41,6 +41,7 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
   private val cvtOutSew1H = Seq.fill(numVecModule)(makePipeReg(ex0NextOutSew1H, pipeRegValids))
   private val cvt64UseWidenSrc2 = Seq.fill(numVecModule)(makePipeReg(ex0NextIsWiden, pipeRegValids))
   private val cvt32UseWidenSrc2 = Seq.fill(numVecModule)(makePipeReg(ex0NextInSew1H(1) && ex0NextOutSew1H(2), pipeRegValids))
+  private val cvt16UseWidenSrc2 = Seq.fill(numVecModule)(makePipeReg(ex0NextInSew1H(0) && ex0NextOutSew1H(1), pipeRegValids))
   private val widenSrcUpperSel = Seq.fill(numVecModule)(makePipeReg(ex0Next.bits.ctrl.uopIdx(0), pipeRegValids))
   private val isWiden     = makePipeReg(ex0NextIsWiden, pipeRegValids)
   private val isNarrow    = makePipeReg(ex0NextIsNarrow, pipeRegValids)
@@ -78,6 +79,7 @@ class VCVTWrapper(cfg: VecFuConfig)(implicit p: Parameters) extends VecFixLatFun
       mod.outSew1H := cvtOutSew1H(i).ex0
       mod.cvt64UseWidenSrc2 := cvt64UseWidenSrc2(i).ex0
       mod.cvt32UseWidenSrc2 := cvt32UseWidenSrc2(i).ex0
+      mod.cvt16UseWidenSrc2 := cvt16UseWidenSrc2(i).ex0
   }
 
   out.ex(0).bits.data.vec.foreach {
