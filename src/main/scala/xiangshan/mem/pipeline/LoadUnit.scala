@@ -779,12 +779,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
   s0_out.vaddr         := Mux(s0_nc_with_data, s0_sel_src.vaddr, s0_dcache_vaddr)
   // A split load may advance to the next page. Keep that fragment's low bits while
   // preserving the PMM-normalized high bits returned by the TLB.
-  val s0_mabuf_fullva = if (VAddrBits > 48) {
-    Cat(s0_tlb_fullva(XLEN - 1, 48), s0_out.vaddr(47, 0))
-  } else {
-    s0_tlb_fullva
-  }
-  s0_out.fullva        := Mux(s0_sel_src.frm_mabuf, s0_mabuf_fullva, s0_tlb_fullva)
+  s0_out.fullva        := s0_tlb_fullva
   s0_out.mask          := s0_sel_src.mask
   s0_out.uop           := s0_sel_src.uop
   s0_out.isFirstIssue  := s0_sel_src.isFirstIssue
@@ -1015,7 +1010,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule
 
   s1_out                   := s1_in
   s1_out.vaddr             := s1_vaddr
-  s1_out.fullva            := Mux(s1_in.isFrmMisAlignBuf, s1_in.fullva, io.tlb.resp.bits.fullva)
+  s1_out.fullva            := io.tlb.resp.bits.fullva
   s1_out.vaNeedExt         := io.tlb.resp.bits.excp(0).vaNeedExt
   s1_out.isHyper           := io.tlb.resp.bits.excp(0).isHyper
   s1_out.paddr             := s1_paddr_dup_lsu
