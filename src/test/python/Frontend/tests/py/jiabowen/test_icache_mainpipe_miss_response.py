@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable, Sequence
 
@@ -9,6 +8,7 @@ import pytest
 
 from env.agents.icache_agent import ICacheAgent
 from env.memory_model import MemoryModel
+from env.pylib import frontend_offset_path
 
 
 _RUN_DUT = os.getenv("TB_ENABLE_DUT_TESTS") == "1"
@@ -273,7 +273,7 @@ def _find_registered_refill(samples: Sequence[dict]) -> tuple[int, int]:
 
 
 def test_icache_miss_response_signal_contract_matches_dut_inventory() -> None:
-    offset = Path(__file__).resolve().parents[7] / "build-frontend/pylib/Frontend/Frontend_offset.yaml"
+    offset = frontend_offset_path()
     assert offset.is_file(), "DUT signal inventory is required before signal-contract tests"
     registered = {
         line[len("  - name: ") :].strip()

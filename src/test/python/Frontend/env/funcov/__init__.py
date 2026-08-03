@@ -65,10 +65,17 @@ _TWO_FETCH_SIGNALS = {
         "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_valid",
     ),
     "ftq_req0_start": (
+        "Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_bits_req_0_vAddr_0_addr",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toMainPipe_bits_req_0_vAddr_0_addr",
         "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toWayLookup_bits_req_0_startVAddr_addr",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toPrefetch_bits_req_0_startVAddr_addr",
+        "Frontend_top.Frontend.inner_icache.io_fromFtq_toPrefetch_bits_req_0_startVAddr_addr",
     ),
     "ftq_req1_start": (
+        "Frontend_top.Frontend.inner_icache.mainPipe.io_fromFtq_bits_req_1_vAddr_0_addr",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toMainPipe_bits_req_1_vAddr_0_addr",
         "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toWayLookup_bits_req_1_startVAddr_addr",
+        "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toPrefetch_bits_req_1_startVAddr_addr",
     ),
     "ftq_req0_end": (
         "Frontend_top.Frontend.inner_icache.__Vtogcov__io_fromFtq_toWayLookup_bits_req_0_takenCfiOffset_bits",
@@ -156,6 +163,14 @@ _TWO_FETCH_SIGNALS = {
     "main_s1_valid": (
         "Frontend_top.Frontend.inner_icache.mainPipe.s1_valid",
     ),
+    "main_s0_fire": (
+        "Frontend_top.Frontend.inner_icache.mainPipe.s0_fire",
+        "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__s0_fire",
+    ),
+    "main_s1_fire": (
+        "Frontend_top.Frontend.inner_icache.mainPipe.s1_fire",
+        "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__s1_fire",
+    ),
     "main_req1_valid": (
         "Frontend_top.Frontend.inner_icache.mainPipe.s1_req_1_valid",
     ),
@@ -183,6 +198,10 @@ _TWO_FETCH_SIGNALS = {
     "ifu_second_valid": (
         "Frontend_top.Frontend.inner_ifu.s2_fetchBlock_1_valid",
     ),
+    "ifu_s2_valid": (
+        "Frontend_top.Frontend.inner_ifu.s2_valid_valid",
+        "Frontend_top.Frontend.inner_ifu.__Vtogcov__s2_valid_valid",
+    ),
     "to_ibuffer_valid": (
         "Frontend_top.Frontend.inner_ifu.io_toIBuffer_valid",
     ),
@@ -191,6 +210,17 @@ _TWO_FETCH_SIGNALS = {
     ),
     "ifu_flush": (
         "Frontend_top.Frontend.inner_ifu.s1_flush",
+    ),
+    "main_s1_flush": (
+        "Frontend_top.Frontend.inner_icache.mainPipe.s1_flush",
+        "Frontend_top.Frontend.inner_icache.mainPipe.__Vtogcov__s1_flush",
+    ),
+    "backend_redirect": (
+        "Frontend_top.Frontend.inner_ftq.backendRedirect_valid",
+        "Frontend_top.io_backend_toFtq_redirect_valid",
+    ),
+    "backend_redirect_target": (
+        "Frontend_top.io_backend_toFtq_redirect_bits_target",
     ),
     "checker_valid": (
         "Frontend_top.Frontend.inner_ifu.predChecker.io_resp_stage2Out_checkerRedirect_valid",
@@ -739,14 +769,31 @@ def sample_two_fetch_coverage(recorder, env, cycle: int) -> None:
         elif to_ibuffer_ready == 0:
             recorder.mark("two_fetch_delivery", "dual_stall", cycle, _tf_evidence("to_ibuffer_dual_stall"))
 
-    backend_redirect = _read(recorder, "io_backend_toFtq_redirect_valid", 0)
+    backend_redirect = _tf_read(recorder, "backend_redirect")
     if backend_redirect == 1:
-        if recent_dual and _tf_read(recorder, "ifu_flush") == 1:
+        pending_refill = getattr(recorder, "_two_fetch_refill_pending", None)
+        recent_inflight = getattr(recorder, "_two_fetch_recent_inflight_tags", None)
+        has_pending_miss = bool(
+            pending_refill is not None and pending_refill.get("has_miss")
+        )
+        has_recent_miss = bool(
+            recent_inflight is not None and recent_inflight.get("has_miss")
+        )
+        redirect_drops_inflight = bool(
+            (recent_dual and _tf_read(recorder, "ifu_flush") == 1)
+            or has_pending_miss
+            or has_recent_miss
+        )
+        if redirect_drops_inflight:
             recorder.mark(
                 "two_fetch_flush_flow",
                 "backend_redirect_drops_inflight",
                 cycle,
-                _tf_evidence("backend_redirect_dual_inflight"),
+                _tf_evidence(
+                    "backend_redirect_dual_inflight",
+                    pending_miss=int(has_pending_miss),
+                    recent_miss=int(has_recent_miss),
+                ),
             )
         recorder._two_fetch_last_fetch_ptr = None
         recorder._two_fetch_waiting_refill = False

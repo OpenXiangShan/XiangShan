@@ -10,6 +10,19 @@ _ICACHE = _TOP + "Frontend.inner_icache."
 _MAIN = _ICACHE + "mainPipe."
 _MISS = _ICACHE + "missUnit."
 
+_S1_CROSS = (
+    (_MAIN + "s1_req_0_isCrossLine", _MAIN + "accessTrace_crossLine"),
+    (_MAIN + "s1_req_1_isCrossLine", _MAIN + "s1_isCrossLine_1"),
+)
+_S1_HITS = tuple(
+    (
+        _MAIN + f"s1_hits_{req}_{line}",
+        _MAIN + "s1_hits_r" + (f"_{req * 2 + line}" if req * 2 + line else ""),
+    )
+    for req in range(2)
+    for line in range(2)
+)
+
 
 ICACHE_HITMISS_COVERPOINTS = {
     "icache_hit_path": "hit_behavior",
@@ -35,8 +48,8 @@ ICACHE_HITMISS_SAMPLER_BIN_KEYS = frozenset(
 
 _SIGNALS = {
     "s1_valid": (_MAIN + "s1_valid", _MAIN + "__Vtogcov__s1_valid"),
-    "cross0": (_MAIN + "s1_req_0_isCrossLine",),
-    "cross1": (_MAIN + "s1_req_1_isCrossLine",),
+    "cross0": _S1_CROSS[0],
+    "cross1": _S1_CROSS[1],
     "req1_valid": (_MAIN + "s1_req_1_valid",),
     "req0_start": (_MAIN + "s1_req_0_vAddr_0_addr",),
     "req1_start": (_MAIN + "s1_req_1_vAddr_0_addr",),
@@ -107,6 +120,13 @@ def _read_names(recorder, names: Iterable[str]) -> tuple[Optional[int], ...]:
     return tuple(recorder._read_first_dut_signal(dut, (name,)) for name in names)
 
 
+def _read_candidates(recorder, candidates: Iterable[Iterable[str]]) -> tuple[Optional[int], ...]:
+    dut = getattr(getattr(recorder, "env", None), "dut", None)
+    if dut is None:
+        return tuple(None for _ in candidates)
+    return tuple(recorder._read_first_dut_signal(dut, tuple(names)) for names in candidates)
+
+
 def _mshr_snapshot(recorder) -> list[dict[str, Optional[int]]]:
     result = []
     for index in range(14):
@@ -172,10 +192,7 @@ def reset_icache_hitmiss_coverage_state(recorder) -> None:
 
 def _snapshot(recorder) -> dict[str, Any]:
     scalar = {key: _read(recorder, key) for key in _SIGNALS}
-    scalar["hits"] = _read_names(
-        recorder,
-        tuple(_MAIN + f"s1_hits_{req}_{line}" for req in range(2) for line in range(2)),
-    )
+    scalar["hits"] = _read_candidates(recorder, _S1_HITS)
     scalar["waymask"] = _read_names(
         recorder,
         tuple(

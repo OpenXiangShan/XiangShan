@@ -6,6 +6,19 @@ from typing import Any, Iterable, Optional
 _MAIN = "Frontend_top.Frontend.inner_icache.mainPipe."
 _ICACHE = "Frontend_top.Frontend.inner_icache."
 
+_S1_CROSS = (
+    (_MAIN + "s1_req_0_isCrossLine", _MAIN + "accessTrace_crossLine"),
+    (_MAIN + "s1_req_1_isCrossLine", _MAIN + "s1_isCrossLine_1"),
+)
+_S1_HITS = tuple(
+    (
+        _MAIN + f"s1_hits_{req}_{line}",
+        _MAIN + "s1_hits_r" + (f"_{req * 2 + line}" if req * 2 + line else ""),
+    )
+    for req in range(2)
+    for line in range(2)
+)
+
 
 ICACHE_MAINPIPE_COVERPOINTS = {
     "icache_mainpipe_s0_entry": "entry_behavior",
@@ -82,19 +95,25 @@ _SIGNALS = {
         _ICACHE + "dataArray.__Vtogcov__io_read_req_valid",
     ),
     "data_req1_valid": (_ICACHE + "dataArray.io_read_req_bits_1_valid",),
-    "io_flush": (_MAIN + "io_flush",),
+    "io_flush": (
+        _MAIN + "io_flush",
+        _ICACHE + "__Vtogcov__io_fromFtq_redirectFlush",
+    ),
     "s0_flush": (_MAIN + "s0_flush", _MAIN + "__Vtogcov__s0_flush"),
     "bpu_valid": (_MAIN + "io_flushFromBpu_s3_valid",),
     "s1_ready": (_MAIN + "s1_ready", _MAIN + "__Vtogcov__s1_ready"),
     "s1_valid": (_MAIN + "s1_valid", _MAIN + "__Vtogcov__s1_valid"),
     "s1_flush": (_MAIN + "s1_flush", _MAIN + "__Vtogcov__s1_flush"),
     "req1_valid": (_MAIN + "s1_req_1_valid",),
-    "cross0": (_MAIN + "s1_req_0_isCrossLine",),
-    "cross1": (_MAIN + "s1_req_1_isCrossLine",),
+    "cross0": _S1_CROSS[0],
+    "cross1": _S1_CROSS[1],
     "toifu_valid": (_MAIN + "io_toIfu_req_valid",),
     "toifu_ready": (_MAIN + "io_toIfu_req_ready",),
     "s1_fire": (_MAIN + "s1_fire",),
-    "fetch_finish": (_MAIN + "__Vtogcov__s1_fetchFinish",),
+    "fetch_finish": (
+        _MAIN + "__Vtogcov__s1_fetchFinish",
+        _MAIN + "io_toIfu_req_valid",
+    ),
     "miss_req_valid": (_MAIN + "__Vtogcov__io_missReq_valid",),
     "miss_req_ready": (_MAIN + "__Vtogcov__io_missReq_ready",),
     "miss_req_vset": (
@@ -183,6 +202,13 @@ def _read_names(recorder, names: Iterable[str]) -> tuple[Optional[int], ...]:
     return tuple(recorder._read_first_dut_signal(dut, (name,)) for name in names)
 
 
+def _read_candidates(recorder, candidates: Iterable[Iterable[str]]) -> tuple[Optional[int], ...]:
+    dut = getattr(getattr(recorder, "env", None), "dut", None)
+    if dut is None:
+        return tuple(None for _ in candidates)
+    return tuple(recorder._read_first_dut_signal(dut, tuple(names)) for names in candidates)
+
+
 def _vec(
     recorder,
     stem: str,
@@ -248,14 +274,7 @@ def _snapshot(recorder) -> dict[str, Any]:
     scalar = {key: _read(recorder, key) for key in _SIGNALS}
     scalar.update(
         {
-            "hits": _read_names(
-                recorder,
-                tuple(
-                    _MAIN + f"s1_hits_{req}_{line}"
-                    for req in range(2)
-                    for line in range(2)
-                ),
-            ),
+            "hits": _read_candidates(recorder, _S1_HITS),
             "sram_valid": _read_names(
                 recorder,
                 (
@@ -401,6 +420,10 @@ def sample_icache_mainpipe_coverage(recorder, env, cycle: int) -> None:
         if s["local_ecc_enable"] is not None
         else s["ecc_enable"]
     )
+    if local_ecc_enable is None:
+        # The current ICache control unit defaults ECC to enabled, but the
+        # generated Verilator inventory drops the internal enable net.
+        local_ecc_enable = 1
     evidence = {
         key: value
         for key, value in s.items()

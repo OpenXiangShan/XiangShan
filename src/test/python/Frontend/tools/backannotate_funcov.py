@@ -13,9 +13,17 @@ import csv
 import hashlib
 import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
+
+
+_IMPORT_ROOT = Path(__file__).resolve().parents[1]
+if str(_IMPORT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_IMPORT_ROOT))
+
+from env.artifact_provenance import load_frontend_build_manifest
 
 
 STATUSES = {"UNMAPPED", "MODELED", "PARTIAL", "HIT", "CLOSED", "BLOCKED", "N-A", "SV_FUNCOV"}
@@ -62,6 +70,32 @@ _COMPATIBILITY_FIELDS = (
     "toolchain",
 )
 _REQUIRED_SEED_FIELDS = ("test", "backend", "icache", "ptw")
+_RUNTIME_MANIFEST_FIELDS = (
+    "simulator",
+    "build_manifest_sha256",
+    "dut_build_sha256",
+    "dut_python_extension_sha256",
+    "generated_rtl_sha256",
+    "signal_contract_sha256",
+    "dut_source_sha",
+    "design_baseline_sha",
+    "implementation_sha",
+    "source_sha_override",
+    "source_delta_sha256",
+    "source_delta_files",
+    "source_delta_policy",
+    "build_config",
+)
+_RUNTIME_PROVENANCE_FIELDS = (
+    "simulator",
+    "implementation_sha",
+    "design_baseline_sha",
+    "source_sha_override",
+    "source_delta_sha256",
+    "source_delta_files",
+    "source_delta_policy",
+    "build_manifest_path",
+)
 _FRONTEND_ROOT = Path(__file__).resolve().parents[1]
 _CANONICAL_REGISTRY = (
     _FRONTEND_ROOT
@@ -311,6 +345,57 @@ def _current_sampler_sha256() -> str | None:
     return _json_sha256(hashes)
 
 
+def _manifest_value_matches(field: str, recorded: Any, runtime: Any) -> bool:
+    if field == "source_sha_override":
+        return isinstance(recorded, bool) and isinstance(runtime, bool) and recorded is runtime
+    if field == "source_delta_files":
+        return isinstance(recorded, list) and isinstance(runtime, list) and recorded == runtime
+    recorded_text = str(recorded or "").strip()
+    runtime_text = str(runtime or "").strip()
+    return recorded_text == runtime_text if field == "build_config" else recorded_text.lower() == runtime_text.lower()
+
+
+def _compatibility_value_present(field: str, value: Any) -> bool:
+    if field == "source_sha_override":
+        return isinstance(value, bool)
+    if field == "source_delta_files":
+        return isinstance(value, list)
+    if value is None:
+        return False
+    return str(value).strip().lower() not in {"", "unavailable", "unknown"}
+
+
+def _runtime_manifest_gate(provenance: dict) -> list[str]:
+    """Reload and bind evidence to the exact DUT build manifest it records."""
+    manifest_text = str(provenance.get("build_manifest_path") or "").strip()
+    if not manifest_text:
+        return []
+    manifest_path = Path(manifest_text)
+    if not manifest_path.is_absolute():
+        return ["invalid_provenance:build_manifest_path"]
+    simulator = str(provenance.get("simulator") or "").strip().lower()
+    if simulator not in {"verilator", "vcs"}:
+        return ["invalid_provenance:simulator"]
+    runtime = load_frontend_build_manifest(
+        manifest_path.parent,
+        manifest_path,
+        simulator=simulator,
+    )
+    reasons: list[str] = []
+    status = str(runtime.get("build_manifest_status") or "").strip().lower()
+    if status != "valid":
+        reasons.append(f"build_manifest_runtime:{status or 'missing'}")
+    runtime_reasons = runtime.get("build_manifest_reasons")
+    if not isinstance(runtime_reasons, list):
+        reasons.append("build_manifest_runtime:invalid_reasons")
+    else:
+        reasons.extend(f"build_manifest_runtime:{reason}" for reason in runtime_reasons)
+    for field in _RUNTIME_MANIFEST_FIELDS:
+        if not _manifest_value_matches(field, provenance.get(field), runtime.get(field)):
+            reasons.append(f"build_manifest_runtime_mismatch:{field}")
+    return reasons
+
+
 def artifact_kind(raw: Any) -> str:
     if not isinstance(raw, dict):
         return "invalid"
@@ -425,17 +510,40 @@ def evaluate_artifact(raw: Any) -> dict:
                 )
 
     provenance = _as_mapping(raw.get("provenance"))
-    for key in _REQUIRED_PROVENANCE:
+    runtime_contract = any(field in provenance for field in _RUNTIME_PROVENANCE_FIELDS)
+    required_provenance = (*_REQUIRED_PROVENANCE, *_RUNTIME_PROVENANCE_FIELDS) if runtime_contract else _REQUIRED_PROVENANCE
+    for key in required_provenance:
         value = provenance.get(key)
         if value is None or str(value).strip() in {"", "unavailable", "unknown"}:
             reasons.append(f"missing_provenance:{key}")
         elif key in _SHA256_PROVENANCE and re.fullmatch(r"[0-9a-fA-F]{64}", str(value).strip()) is None:
             reasons.append(f"invalid_provenance:{key}")
     source_sha = str(provenance.get("dut_source_sha") or "").strip()
+    if runtime_contract and str(provenance.get("simulator") or "").strip().lower() not in {"verilator", "vcs"}:
+        reasons.append("invalid_provenance:simulator")
     if source_sha not in {"", "unavailable", "unknown"} and re.fullmatch(
         r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", source_sha
     ) is None:
         reasons.append("invalid_provenance:dut_source_sha")
+    for key in ("implementation_sha", "design_baseline_sha") if runtime_contract else ():
+        value = str(provenance.get(key) or "").strip()
+        if value not in {"", "unavailable", "unknown"} and re.fullmatch(
+            r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", value
+        ) is None:
+            reasons.append(f"invalid_provenance:{key}")
+    override = provenance.get("source_sha_override")
+    if runtime_contract and not isinstance(override, bool):
+        reasons.append("invalid_provenance:source_sha_override")
+    policy = str(provenance.get("source_delta_policy") or "").strip()
+    if runtime_contract and policy not in {"none", "observability_only"}:
+        reasons.append("invalid_provenance:source_delta_policy")
+    delta_files = provenance.get("source_delta_files")
+    if runtime_contract and (not isinstance(delta_files, list) or any(not isinstance(item, str) for item in delta_files)):
+        reasons.append("invalid_provenance:source_delta_files")
+    elif runtime_contract and not override and (policy != "none" or delta_files):
+        reasons.append("source_delta_without_override")
+    elif runtime_contract and override and policy != "observability_only":
+        reasons.append("source_delta_policy_not_allowlisted")
     if all(
         str(provenance.get(field) or "").strip() not in {"", "unavailable", "unknown"}
         for field in _COMPATIBILITY_FIELDS
@@ -475,6 +583,11 @@ def evaluate_artifact(raw: Any) -> dict:
     manifest_status = str(provenance.get("build_manifest_status") or "").strip().lower()
     if manifest_status != "valid":
         reasons.append(f"build_manifest:{manifest_status or 'missing'}")
+    manifest_reasons = provenance.get("build_manifest_reasons")
+    if runtime_contract and (not isinstance(manifest_reasons, list) or manifest_reasons):
+        reasons.append("build_manifest_reasons_present")
+    if runtime_contract:
+        reasons.extend(_runtime_manifest_gate(provenance))
 
     run = _as_mapping(raw.get("run"))
     run_id = str(run.get("run_id") or "").strip()
