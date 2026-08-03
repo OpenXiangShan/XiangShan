@@ -122,6 +122,10 @@ module frontend_ibuffer_funcov (
     IBUF_multi_cycle_backpressure_cp: coverpoint (backend_can_accept && backpressure_cycles >= 3'd2) iff (!reset) {
       bins recovered = {1'b1};
     }
+    IBUF_backpressure_recovery_multi_delivery_cp: coverpoint (backend_can_accept &&
+      backpressure_cycles >= 3'd1 && tail_delivery_count >= 4'd2) iff (!reset) {
+      bins observed = {1'b1};
+    }
     IBUF_backpressure_with_cfvec_cp: coverpoint (!backend_can_accept && cfvec_valid != '0) iff (!reset) {
       bins cfvec_present = {1'b1};
     }
